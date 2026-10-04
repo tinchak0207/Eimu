@@ -1,8 +1,8 @@
-// `/openai/v1/chat/completions` 的訊息解析與回覆拼裝。
+// `/openai/v1/chat/completions` 的讯息解析与回覆拼装。
 //
-// 生圖模型以對話形式被調用（SillyTavern / Cherry Studio / LobeChat 走這條），prompt 只能
-// 從 messages 裡取——這裡負責把它取乾淨，並在客戶端送來**我們不支援的輸入**時誠實失敗，
-// 而不是靜默丟掉後生一張不像的圖（同 `/v1/images/generations` 對參考圖的 fail-closed 慣例）。
+// 生图模型以对话形式被调用（SillyTavern / Cherry Studio / LobeChat 走这条），prompt 只能
+// 从 messages 里取——这里负责把它取干净，并在客户端送来**我们不支援的输入**时诚实失败，
+// 而不是静默丢掉后生一张不像的图（同 `/v1/images/generations` 对参考图的 fail-closed 惯例）。
 
 export interface ChatTextPart {
   type?: unknown;
@@ -40,10 +40,10 @@ function textFromContent(content: unknown): { text: string; hasImageInput: boole
 }
 
 /**
- * 取最後一條 `role:"user"` 訊息的文字當 prompt。
+ * 取最后一条 `role:"user"` 讯息的文字当 prompt。
  *
- * 沒有 user 訊息 / 內容為空 → `invalid_request`；帶了圖片輸入 → `image_input_not_supported`
- * （本層只做文生圖；送圖是要做圖生圖／編輯，silently 忽略等於欺騙）。
+ * 没有 user 讯息 / 内容为空 → `invalid_request`；带了图片输入 → `image_input_not_supported`
+ * （本层只做文生图；送图是要做图生图／编辑，silently 忽略等于欺骗）。
  */
 export function extractLastUserPrompt(messages: unknown): ExtractPromptResult {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -71,7 +71,7 @@ export function extractLastUserPrompt(messages: unknown): ExtractPromptResult {
   return { ok: false, code: "invalid_request", message: "messages 里没有 user 角色的消息。" };
 }
 
-/** 對話形式的生圖回覆：標準 markdown 圖片（客戶端直接渲染）。 */
+/** 对话形式的生图回覆：标准 markdown 图片（客户端直接渲染）。 */
 export function imageMarkdown(url: string): string {
   return `![image](${url})`;
 }

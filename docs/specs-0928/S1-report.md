@@ -1,26 +1,26 @@
-# S1 報告：B 端 API 拒絕遙測 ＋ 23 把 key 首調審計
+# S1 报告：B 端 API 拒绝遥测 ＋ 23 把 key 首调审计
 
-日期：2026-09-28｜資料口徑：VPS 唯讀查詢（Postgres `image-control`、new-api `one-api.db`）
-commit：`af6c6a49`（S1 遙測程式碼）｜報告 `0f9e2962`
-口徑更新（2026-09-28 裁定）：**87、90 判定為內部帳號並剔除**，外部持有者 23 → **21 位**，下表已按 21 位重算。剔除的兩帳號在 `logs` 零行、`used_quota=0`、admin 供給型巨額額度，不屬真實用戶。
+日期：2026-09-28｜资料口径：VPS 唯读查询（Postgres `image-control`、new-api `one-api.db`）
+commit：`af6c6a49`（S1 遥测程式码）｜报告 `0f9e2962`
+口径更新（2026-09-28 裁定）：**87、90 判定为内部帐号并剔除**，外部持有者 23 → **21 位**，下表已按 21 位重算。剔除的两帐号在 `logs` 零行、`used_quota=0`、admin 供给型巨额额度，不属真实用户。
 
-## 結論（先講）
+## 结论（先讲）
 
-1. **21 把外部 key 裡，14 人從未發起過任何一次生成**（`generation_job` source=biz 零行）。他們不是「被拒」，是**沒按按鈕** —— 建 key 與最後一次登入往往同一分鐘之內（12/14 在 5 分鐘內），屬於註冊會話當下順手簽一把 key 就再也沒回來。
-2. 剩下 7 人首單結果：**4 人首單成功**（116/246/255/256）、**3 人首單就退款或拒單**（22 model_unsupported、102 billing zombie、258 deadline_exceeded）。
-3. **本輪無法回答「有沒有人打了卻被 401」** —— 被拒請求不進 `generation_job`，改動前的任何日誌都不含 key 身分。這正是 S1 新增 `api_rejection` 要填的洞（本報告只能用「沒有 job」推測「沒發起」，兩者不可區分）。
-4. 佐證性事實：21 人 **new-api 消費記錄（type=2）為 0 行**，`top_ups` 全空表 —— 沒有任何一人真正付過錢；4 人的「充值」是兌換碼（ID 209/409/410/412）。
-5. 14 個未發起者中 **5 人的 new-api 額度是 0**（245/250/251/252/254），即使他們按了按鈕也會撞 402；另 **9 人額度充足卻沒發起**（其中 124 靠兌換碼有 $1500 等值額度）。
+1. **21 把外部 key 里，14 人从未发起过任何一次生成**（`generation_job` source=biz 零行）。他们不是「被拒」，是**没按按钮** —— 建 key 与最后一次登入往往同一分钟之内（12/14 在 5 分钟内），属于注册会话当下顺手签一把 key 就再也没回来。
+2. 剩下 7 人首单结果：**4 人首单成功**（116/246/255/256）、**3 人首单就退款或拒单**（22 model_unsupported、102 billing zombie、258 deadline_exceeded）。
+3. **本轮无法回答「有没有人打了却被 401」** —— 被拒请求不进 `generation_job`，改动前的任何日志都不含 key 身分。这正是 S1 新增 `api_rejection` 要填的洞（本报告只能用「没有 job」推测「没发起」，两者不可区分）。
+4. 佐证性事实：21 人 **new-api 消费记录（type=2）为 0 行**，`top_ups` 全空表 —— 没有任何一人真正付过钱；4 人的「充值」是兑换码（ID 209/409/410/412）。
+5. 14 个未发起者中 **5 人的 new-api 额度是 0**（245/250/251/252/254），即使他们按了按钮也会撞 402；另 **9 人额度充足却没发起**（其中 124 靠兑换码有 $1500 等值额度）。
 
-## 口徑
+## 口径
 
-- 排除名單：user 117、82、253、4（內部流量），**加上 2026-09-28 裁定的 87、90**（見衝突第 3 條）。`biz_api_key` 現場 **26 位持有者 / 38 把 key**，扣掉名單中實際存在的 4、82、117 → 原 23 位，再扣 87、90 → **21 位外部持有者**（本報告全部數字已按 21 位重算）。
-- 「發起」＝ `generation_job` 中存在 `source='biz' AND billing_user_id=<uid>` 的行。任務擁有者取 `billing_user_id`（不按計費身分，見記憶 product-reality-funnel）。
-- 額度換算：new-api 500000 quota = $1（用 115 的簽到日誌「＄1.102468」對 551234 quota 反推驗證）。
+- 排除名单：user 117、82、253、4（内部流量），**加上 2026-09-28 裁定的 87、90**（见冲突第 3 条）。`biz_api_key` 现场 **26 位持有者 / 38 把 key**，扣掉名单中实际存在的 4、82、117 → 原 23 位，再扣 87、90 → **21 位外部持有者**（本报告全部数字已按 21 位重算）。
+- 「发起」＝ `generation_job` 中存在 `source='biz' AND billing_user_id=<uid>` 的行。任务拥有者取 `billing_user_id`（不按计费身分，见记忆 product-reality-funnel）。
+- 额度换算：new-api 500000 quota = $1（用 115 的签到日志「＄1.102468」对 551234 quota 反推验证）。
 
-## A. 有發起記錄的 7 人（首單明細，87、90 已剔除見表末）
+## A. 有发起记录的 7 人（首单明细，87、90 已剔除见表末）
 
-| uid | 建 key（UTC） | 首單（UTC） | 首單模型 | 首單狀態 / 失敗原因 | 該人合計（成功/失敗） | 最後活動 |
+| uid | 建 key（UTC） | 首单（UTC） | 首单模型 | 首单状态 / 失败原因 | 该人合计（成功/失败） | 最后活动 |
 |---|---|---|---|---|---|---|
 | 22 | 2026-08-10 04:36 | 08-10 07:10 | sensenova-u1-fast | failed｜model_unsupported（No enabled supplier capability matches…） | 165 / 137 | 08-26 |
 | 102 | 2026-08-13 15:02 | 08-13 15:15 | seedance-2.0 | refunded｜unknown（billing zombie：reserve unknown: fetch failed） | 16 / 48 | 08-27 |
@@ -30,16 +30,16 @@ commit：`af6c6a49`（S1 遙測程式碼）｜報告 `0f9e2962`
 | 256 | 2026-09-27 13:38 | 09-27 13:39 | pixai-tsubaki2 | succeeded | 1 / 0 | 09-27 |
 | 258 | 2026-09-27 15:03 | 09-27 15:55 | pixai-reference-pro | failed｜deadline_exceeded | 18 / 1 | 09-27 |
 
-**被剔除的兩帳號（job 級實查，`failure_class`）**：87 = 24 筆（succeeded 11／deadline_exceeded 8／model_unsupported 4／user_input 1）、90 = 1 筆（succeeded 1）。共 25 筆自 21 位外部口徑中扣除。
+**被剔除的两帐号（job 级实查，`failure_class`）**：87 = 24 笔（succeeded 11／deadline_exceeded 8／model_unsupported 4／user_input 1）、90 = 1 笔（succeeded 1）。共 25 笔自 21 位外部口径中扣除。
 
-## B. 從未發起生成的 14 人（建 key 時間＋當時財力）
+## B. 从未发起生成的 14 人（建 key 时间＋当时财力）
 
-| uid | 建 key（UTC） | 最後登入 new-api | 當前 new-api 額度（≈USD） | 簽到次數 |
+| uid | 建 key（UTC） | 最后登入 new-api | 当前 new-api 额度（≈USD） | 签到次数 |
 |---|---|---|---|---|
 | 75 | 2026-09-09 21:06 | 09-11 01:55 | ≈$1.79 | 2 |
 | 95 | 2026-08-29 06:44 | 09-09 13:47 | ≈$4.09 | 2 |
 | 115 | 2026-08-26 19:07 | 08-26 19:05 | ≈$1.10 | 1 |
-| 124 | 2026-08-29 10:13 | 08-29 10:13 | ≈$1500（兌換碼 ID 412） | 1 |
+| 124 | 2026-08-29 10:13 | 08-29 10:13 | ≈$1500（兑换码 ID 412） | 1 |
 | 132 | 2026-09-02 16:59 | 09-02 16:54 | ≈$0.62 | 1 |
 | 221 | 2026-09-11 01:38 | 09-11 01:37 | ≈$1.92 | 1 |
 | 245 | 2026-09-20 14:18 | 09-20 14:17 | **$0** | 0 |
@@ -51,45 +51,45 @@ commit：`af6c6a49`（S1 遙測程式碼）｜報告 `0f9e2962`
 | 259 | 2026-09-27 15:46 | 09-27 15:46 | ≈$5.00 | 0 |
 | 260 | 2026-09-27 16:14 | 09-27 16:13 | ≈$5.00 | 0 |
 
-建 key 與最後登入的時間差：12/14 在 5 分鐘內（115/124/132/221/245/250/251/252/254/257/259/260 幾乎同分鐘），75 與 95 例外（建 key 後 1–11 天還登入過一次，仍零調用）。
+建 key 与最后登入的时间差：12/14 在 5 分钟内（115/124/132/221/245/250/251/252/254/257/259/260 几乎同分钟），75 与 95 例外（建 key 后 1–11 天还登入过一次，仍零调用）。
 
-## 失敗原因分組（job 級，21 人全部 biz 單 401 筆）
+## 失败原因分组（job 级，21 人全部 biz 单 401 笔）
 
-| 原因 | 狀態 | 筆數 | 涉及人數 |
+| 原因 | 状态 | 笔数 | 涉及人数 |
 |---|---|---|---|
-| 從未發起生成（無 job） | — | — | **14** |
-| deadline_exceeded（生成超時，退款） | refunded / failed | 170 | 3（22、102、258） |
-| unknown（billing zombie：reserve 結果不明，自動回收） | refunded | 14 | 1（102） |
-| model_unsupported（無匹配供應能力） | failed | 2 | 1（22） |
-| （對照）succeeded | succeeded | 215 | 7 |
+| 从未发起生成（无 job） | — | — | **14** |
+| deadline_exceeded（生成超时，退款） | refunded / failed | 170 | 3（22、102、258） |
+| unknown（billing zombie：reserve 结果不明，自动回收） | refunded | 14 | 1（102） |
+| model_unsupported（无匹配供应能力） | failed | 2 | 1（22） |
+| （对照）succeeded | succeeded | 215 | 7 |
 
-（扣除 87 的 24 筆與 90 的 1 筆後：426 → 401；原表 deadline 178／model_unsupported 6／user_input 1／succeeded 227 已按 `failure_class` 實查扣除。）
+（扣除 87 的 24 笔与 90 的 1 笔后：426 → 401；原表 deadline 178／model_unsupported 6／user_input 1／succeeded 227 已按 `failure_class` 实查扣除。）
 
-首單結果分組（人）：**未發起 14 人｜首單成功 4 人｜首單失敗 3 人**。
+首单结果分组（人）：**未发起 14 人｜首单成功 4 人｜首单失败 3 人**。
 
-## new-api 交叉核對
+## new-api 交叉核对
 
-- `logs` 表：21 人共 198 行，全部是 **type=7 登入（160 行 / 21 人）**、**type=4 簽到（31 行 / 11 人）**、**type=1 兌換碼充值（4 行 / 4 人）**、type=3 管理（3 行 / 2 人）。
-- **type=2（消費）0 行、`sum(quota)=0`**：沒有任何一人透過 new-api 的中轉通道消耗過額度。
-- `top_ups`：這 21 人 **0 行**（歷史真實營收 0 再獲一次獨立確認）。
-- 已剔除的 87、90 在 `logs` 有 0 行，但 `users` 額度分別是 49999994015 / 4999999500 且 `used_quota=0`（admin 供給型帳號 —— 判為內部的主要依據）。
-- VPS nginx 近 168h 的 `/v1/*` 非 2xx（401 /v1/models 4 筆、503 /v1/responses 78 筆）屬於其他服務的 relay，**無法歸因到本 21 人**，不列入結論。
+- `logs` 表：21 人共 198 行，全部是 **type=7 登入（160 行 / 21 人）**、**type=4 签到（31 行 / 11 人）**、**type=1 兑换码充值（4 行 / 4 人）**、type=3 管理（3 行 / 2 人）。
+- **type=2（消费）0 行、`sum(quota)=0`**：没有任何一人透过 new-api 的中转通道消耗过额度。
+- `top_ups`：这 21 人 **0 行**（历史真实营收 0 再获一次独立确认）。
+- 已剔除的 87、90 在 `logs` 有 0 行，但 `users` 额度分别是 49999994015 / 4999999500 且 `used_quota=0`（admin 供给型帐号 —— 判为内部的主要依据）。
+- VPS nginx 近 168h 的 `/v1/*` 非 2xx（401 /v1/models 4 笔、503 /v1/responses 78 笔）属于其他服务的 relay，**无法归因到本 21 人**，不列入结论。
 
-## 與規格／記憶的衝突（現場為準）
+## 与规格／记忆的冲突（现场为准）
 
-1. **`authenticateBizKey` 不存在**。真正的驗證函數是 `authenticateBizApiKey`（`src/lib/biz-api-key-store.ts:461`）；`src/lib/biz-openai-error.ts` 的 `guardBizApiKey` 只服務 `/api/biz/*`，本次未動。spec 用 grep `authenticateBizKey` 找入口會落空。
-2. **「16 人一次調用都沒成功過」不精確**。現場：14 人**完全沒發起**；9 人首單成功者 5 人，另 4 人首單失敗。`biz_api_key.total_requests` 亦只有 22、116 兩人不為 0（此計數僅在成功交付時累加）。
-3. **87、90 判定為內部帳號並剔除**（2026-09-28 裁定；不在 `INTERNAL_USER_IDS=117,82,253` 名單內）：admin 供給型巨額額度（49999994015 / 4999999500，`used_quota=0`）、零登入零簽到、建號當下即簽 key 並立刻出圖、此後消失。本報告**已按 21 位重算**全部數字：原「23 人」→ 21、「首單成功 5 人」→ 4（116、246、255、256）、「首單失敗 4 人」→ 3（22、102、258）、job 級 426 → 401（扣除 87 的 24 筆與 90 的 1 筆）。common 規則的剔除名單已同步為 117/82/253/87/90。
-4. `biz_api_key` 現有 26 位持有者 / 38 把 key（含 4、82、117）；spec 的「23」是扣掉名單後的數，一致。
-5. 記憶 price-no-change-0928 未被觸碰：本次未改任何定價，只新增遙測。
+1. **`authenticateBizKey` 不存在**。真正的验证函数是 `authenticateBizApiKey`（`src/lib/biz-api-key-store.ts:461`）；`src/lib/biz-openai-error.ts` 的 `guardBizApiKey` 只服务 `/api/biz/*`，本次未动。spec 用 grep `authenticateBizKey` 找入口会落空。
+2. **「16 人一次调用都没成功过」不精确**。现场：14 人**完全没发起**；9 人首单成功者 5 人，另 4 人首单失败。`biz_api_key.total_requests` 亦只有 22、116 两人不为 0（此计数仅在成功交付时累加）。
+3. **87、90 判定为内部帐号并剔除**（2026-09-28 裁定；不在 `INTERNAL_USER_IDS=117,82,253` 名单内）：admin 供给型巨额额度（49999994015 / 4999999500，`used_quota=0`）、零登入零签到、建号当下即签 key 并立刻出图、此后消失。本报告**已按 21 位重算**全部数字：原「23 人」→ 21、「首单成功 5 人」→ 4（116、246、255、256）、「首单失败 4 人」→ 3（22、102、258）、job 级 426 → 401（扣除 87 的 24 笔与 90 的 1 笔）。common 规则的剔除名单已同步为 117/82/253/87/90。
+4. `biz_api_key` 现有 26 位持有者 / 38 把 key（含 4、82、117）；spec 的「23」是扣掉名单后的数，一致。
+5. 记忆 price-no-change-0928 未被触碰：本次未改任何定价，只新增遥测。
 
-## 對後續的意義（一句話）
+## 对后续的意义（一句话）
 
-真正的瓶頸是**「建了 key 卻從沒發起第一次調用」**（14/21，且 9 人額度充足、5 人額度 $0），不是鑑權失敗。S1 的 `api_rejection` 從下一筆請求起才能把「未發起」與「發起被拒」分開；在此之前，任何 401/402 佔比都是猜測。
+真正的瓶颈是**「建了 key 却从没发起第一次调用」**（14/21，且 9 人额度充足、5 人额度 $0），不是鉴权失败。S1 的 `api_rejection` 从下一笔请求起才能把「未发起」与「发起被拒」分开；在此之前，任何 401/402 占比都是猜测。
 
-## 附：本次落地內容
+## 附：本次落地内容
 
-- `db/migrations/029_api_rejection.sql`（表 + 2 索引）、`src/lib/api-rejection.ts`（ensureSchema 首用即建、只記 key 前 8 位、fire-and-forget、錯誤靜默）。
-- 出口攔截 `withApiRejectionTelemetry`：只記 `status>=300`，`reason` 取回應體的穩定 code（非 JSON → `http_<status>`）。**寫成邊界包裝而非逐出口插一行**：漏記出口沒有任何測試能事後發現。
-- 接線 4 個 B 端入口：`/v1/images/generations`、`/v1/images/edits`、`/v1/images/[id]`、`/v1/models`。其餘 `/v1/*`（videos/tts/upscale/team/skus/batches…共 31 個路由）**尚未接線**，若暴君要全覆蓋屬另一刀。
-- 測試 14 條（`src/lib/api-rejection.test.ts`）：401/402/400 各一行、不含完整 key、成功與 202 不記、非 JSON 兜底、儲存層故障不 throw、慢儲存不佔 RTT。
+- `db/migrations/029_api_rejection.sql`（表 + 2 索引）、`src/lib/api-rejection.ts`（ensureSchema 首用即建、只记 key 前 8 位、fire-and-forget、错误静默）。
+- 出口拦截 `withApiRejectionTelemetry`：只记 `status>=300`，`reason` 取回应体的稳定 code（非 JSON → `http_<status>`）。**写成边界包装而非逐出口插一行**：漏记出口没有任何测试能事后发现。
+- 接线 4 个 B 端入口：`/v1/images/generations`、`/v1/images/edits`、`/v1/images/[id]`、`/v1/models`。其余 `/v1/*`（videos/tts/upscale/team/skus/batches…共 31 个路由）**尚未接线**，若暴君要全覆盖属另一刀。
+- 测试 14 条（`src/lib/api-rejection.test.ts`）：401/402/400 各一行、不含完整 key、成功与 202 不记、非 JSON 兜底、储存层故障不 throw、慢储存不占 RTT。

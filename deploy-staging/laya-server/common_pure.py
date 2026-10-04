@@ -1,9 +1,9 @@
-"""從 laya 套件 common.py 抽出的純函數（無 torch 依賴）。
+"""从 laya 套件 common.py 抽出的纯函数（无 torch 依赖）。
 
 逐字保留 build_sequence/render_options/serialize_state/confidence_from_probs
 （源：laya 0.3.4 site-packages/laya/common.py）；DecisionModel 等 torch 部分
-不帶——ONNX 版不需要。改動僅：刪 torch import 與 amp_dtype。
-版本釘死：laya==0.3.4。升級 laya 後此檔必頲重新抽取比對。
+不带——ONNX 版不需要。改动仅：删 torch import 与 amp_dtype。
+版本钉死：laya==0.3.4。升级 laya 后此档必颋重新抽取比对。
 """
 
 import json

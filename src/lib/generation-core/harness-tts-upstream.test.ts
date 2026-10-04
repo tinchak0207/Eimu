@@ -1,12 +1,12 @@
-// TTS 公開端點缺口（2026-10-01）的零成本行為斷言。
+// TTS 公开端点缺口（2026-10-01）的零成本行为断言。
 //
-// 缺口層級（本檔守住的部分）：
-//   ① **adapter 執行路徑**：supply-registry 新增 `harness_tts` 協議，指向 harness 閘道
-//      既有 TTS 端點 `POST {base}/v1/tts`（router.ts:531 → media-internal-routes.ts handleTts）。
-//   ② **capability 宣告**：registry 渠道 `harness-tts` 認領 catalog 真源 id `tts-1`（kind=tts）。
+// 缺口层级（本档守住的部分）：
+//   ① **adapter 执行路径**：supply-registry 新增 `harness_tts` 协议，指向 harness 闸道
+//      既有 TTS 端点 `POST {base}/v1/tts`（router.ts:531 → media-internal-routes.ts handleTts）。
+//   ② **capability 宣告**：registry 渠道 `harness-tts` 认领 catalog 真源 id `tts-1`（kind=tts）。
 //
-// 本檔不打任何真上游：fetch 一律 mock；DB 用 in-memory fake（見下「capability 解析」節的
-// 誠實邊界註記）。
+// 本档不打任何真上游：fetch 一律 mock；DB 用 in-memory fake（见下「capability 解析」节的
+// 诚实边界注记）。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -85,7 +85,7 @@ function input(overrides: Partial<SupplierGenerationInput> = {}): SupplierGenera
   };
 }
 
-/** mock fetch：記下請求，回一個可控 Response。 */
+/** mock fetch：记下请求，回一个可控 Response。 */
 function captureFetch(response: Response): { calls: Array<{ url: string; init: RequestInit }>; restore: () => void } {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const original = globalThis.fetch;
@@ -96,9 +96,9 @@ function captureFetch(response: Response): { calls: Array<{ url: string; init: R
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-// ─────────────────────────── ① adapter 執行路徑
+// ─────────────────────────── ① adapter 执行路径
 
-test("harness_tts adapter：POST {base}/v1/tts，Bearer 憑證，回 mp3 URL", async () => {
+test("harness_tts adapter：POST {base}/v1/tts，Bearer 凭证，回 mp3 URL", async () => {
   process.env.HARNESS_TTS_API_KEY = "sk-biz-test-key";
   const capture = captureFetch(
     Response.json({ ok: true, url: "https://store.tinchak0207.xyz/agent/v1/audio/tts_abc.mp3", chars: 6, cost_coins: 0.006 }),
@@ -109,7 +109,7 @@ test("harness_tts adapter：POST {base}/v1/tts，Bearer 憑證，回 mp3 URL", a
     assert.equal(capture.calls[0].url, `https://store.tinchak0207.xyz/agent${HARNESS_TTS_PATH}`);
     const headers = capture.calls[0].init.headers as Record<string, string>;
     assert.equal(headers.Authorization, "Bearer sk-biz-test-key");
-    // 哨兵 "default" ⇒ 不送 voice，讓閘道用它自己的預設（route.ts 檔頭語義）。
+    // 哨兵 "default" ⇒ 不送 voice，让闸道用它自己的预设（route.ts 档头语义）。
     assert.deepEqual(JSON.parse(String(capture.calls[0].init.body)), { text: "你好，世界。" });
     assert.equal(output.url, "https://store.tinchak0207.xyz/agent/v1/audio/tts_abc.mp3");
     assert.equal(output.base64, null);
@@ -120,7 +120,7 @@ test("harness_tts adapter：POST {base}/v1/tts，Bearer 憑證，回 mp3 URL", a
   }
 });
 
-test("harness_tts adapter：顯式音色逐字透傳", async () => {
+test("harness_tts adapter：显式音色逐字透传", async () => {
   process.env.HARNESS_TTS_API_KEY = "sk-biz-test-key";
   const capture = captureFetch(Response.json({ ok: true, url: "https://x/audio.mp3" }));
   try {
@@ -134,16 +134,16 @@ test("harness_tts adapter：顯式音色逐字透傳", async () => {
   }
 });
 
-test("harness_tts adapter：上游 503 tts_unavailable 原文透傳且分類成 SupplierRequestError", async () => {
+test("harness_tts adapter：上游 503 tts_unavailable 原文透传且分类成 SupplierRequestError", async () => {
   process.env.HARNESS_TTS_API_KEY = "sk-biz-test-key";
   const capture = captureFetch(
-    Response.json({ error: { message: "配音（TTS）上游暂不可用：上游不可達" } }, { status: 503 }),
+    Response.json({ error: { message: "配音（TTS）上游暂不可用：上游不可达" } }, { status: 503 }),
   );
   try {
     await assert.rejects(
       () => generateWithHarnessTts(supplier(), input()),
       (error: unknown) => {
-        assert.ok(error instanceof SupplierRequestError, "應為 SupplierRequestError");
+        assert.ok(error instanceof SupplierRequestError, "应为 SupplierRequestError");
         if (!(error instanceof SupplierRequestError)) return false;
         assert.equal(error.status, 503);
         assert.match(error.message, /tts|不可用|TTS/);
@@ -155,7 +155,7 @@ test("harness_tts adapter：上游 503 tts_unavailable 原文透傳且分類成 
   }
 });
 
-test("harness_tts adapter：kind 非 tts 或回 200 但無 url ⇒ 確定性失敗（不假成功）", async () => {
+test("harness_tts adapter：kind 非 tts 或回 200 但无 url ⇒ 确定性失败（不假成功）", async () => {
   process.env.HARNESS_TTS_API_KEY = "sk-biz-test-key";
   await assert.rejects(
     () => generateWithHarnessTts(supplier(), input({ kind: "image_generate" })),
@@ -172,8 +172,8 @@ test("harness_tts adapter：kind 非 tts 或回 200 但無 url ⇒ 確定性失�
   }
 });
 
-test("harness_tts 協議已註冊且分派正確；sync 協議有對帳兜底映射", () => {
-  assert.ok(listSupplyProtocols().includes("harness_tts"), "harness_tts 應已註冊進 supply-registry");
+test("harness_tts 协议已注册且分派正确；sync 协议有对帐兜底映射", () => {
+  assert.ok(listSupplyProtocols().includes("harness_tts"), "harness_tts 应已注册进 supply-registry");
   const adapter = resolveSupplyAdapter(supplier(), input());
   assert.equal(adapter.protocol, "harness_tts");
   assert.equal(reconcileProtocolOf("harness_tts"), "newapi_video");
@@ -181,9 +181,9 @@ test("harness_tts 協議已註冊且分派正確；sync 協議有對帳兜底映
 
 // ─────────────────────────── ② capability 宣告
 
-test("registry 渠道 harness-tts 認領 catalog 真源 id tts-1（kind=tts）", () => {
+test("registry 渠道 harness-tts 认领 catalog 真源 id tts-1（kind=tts）", () => {
   const channel = REGISTRY_CHANNELS.find((c) => c.label === HARNESS_CHANNEL);
-  assert.ok(channel, "REGISTRY_CHANNELS 應有 harness-tts 條目");
+  assert.ok(channel, "REGISTRY_CHANNELS 应有 harness-tts 条目");
   assert.equal(channel.adapterType, "harness_tts");
   assert.deepEqual(
     channel.claims.map((claim) => ({ modelId: claim.modelId, kinds: claim.kinds })),
@@ -191,7 +191,7 @@ test("registry 渠道 harness-tts 認領 catalog 真源 id tts-1（kind=tts）",
   );
 });
 
-test("harness-tts 描述子：env 齊備才算 configured，supportedModels=[tts-1]", () => {
+test("harness-tts 描述子：env 齐备才算 configured，supportedModels=[tts-1]", () => {
   const channel = REGISTRY_CHANNELS.find((c) => c.label === HARNESS_CHANNEL)!;
   const env = {
     HARNESS_TTS_BASE_URL: "https://store.tinchak0207.xyz/agent",
@@ -202,13 +202,13 @@ test("harness-tts 描述子：env 齊備才算 configured，supportedModels=[tts
   assert.equal(descriptor.id, `env:${HARNESS_CHANNEL}`);
   assert.equal(descriptor.defaultEnabled, true);
   assert.deepEqual(descriptor.endpoint!.supportedModels, [TTS_MODEL]);
-  // 缺 key ⇒ 不 configured（不會被 seed）。
+  // 缺 key ⇒ 不 configured（不会被 seed）。
   assert.equal(registryChannelToDescriptor(channel, { HARNESS_TTS_BASE_URL: env.HARNESS_TTS_BASE_URL }).configured, false);
-  // describeEnvChannels 是 seed 的真源入口：env 齊備時應含該渠道。
+  // describeEnvChannels 是 seed 的真源入口：env 齐备时应含该渠道。
   assert.ok(describeEnvChannels(env).some((entry) => entry.label === HARNESS_CHANNEL && entry.configured));
-  // 未設 env ⇒ configured=false、endpoint=null（seed 的 configured 過濾會跳過，不假裝有供給）。
+  // 未设 env ⇒ configured=false、endpoint=null（seed 的 configured 过滤会跳过，不假装有供给）。
   const unset = describeEnvChannels({}).find((entry) => entry.label === HARNESS_CHANNEL);
-  assert.ok(unset, "registry 條目無 env 時仍應是 configured=false 的描述子（不是消失）");
+  assert.ok(unset, "registry 条目无 env 时仍应是 configured=false 的描述子（不是消失）");
   assert.equal(unset.configured, false);
   assert.equal(unset.endpoint, null);
 });
@@ -216,10 +216,10 @@ test("harness-tts 描述子：env 齊備才算 configured，supportedModels=[tts
 // ─────────────────────────── ③ capability 解析（miss → hit）
 
 /**
- * 誠實邊界：本機沒有生產 Postgres（PGlite 未安裝，見 master-ingest-service.test.ts 的
- * skip 慣例）。此 fake 依真函式插值出的 (public_model_id, kind) 判定 EXISTS，capability
- * 清單**由 REGISTRY_CHANNELS 真源推導**（非測試硬編）。它守的是「宣告 → 閘門接受」這條
- * 參數鏈；真正的 DB 佈署級 oracle 是收尾指引裡的 supplier_capability 唯讀查詢。
+ * 诚实边界：本机没有生产 Postgres（PGlite 未安装，见 master-ingest-service.test.ts 的
+ * skip 惯例）。此 fake 依真函式插值出的 (public_model_id, kind) 判定 EXISTS，capability
+ * 清单**由 REGISTRY_CHANNELS 真源推导**（非测试硬编）。它守的是「宣告 → 闸门接受」这条
+ * 参数链；真正的 DB 布署级 oracle 是收尾指引里的 supplier_capability 唯读查询。
  */
 function capabilityRowsFromRegistry(): Array<{ public_model_id: string; kind: string }> {
   return REGISTRY_CHANNELS.flatMap((channel) =>
@@ -239,11 +239,11 @@ function fakeCapabilitySql(rows: Array<{ public_model_id: string; kind: string }
   }) as unknown as GenerationSql;
 }
 
-test("capability 解析：無宣告時 miss，harness-tts 宣告後 hit（{model:'tts-1', kind:'tts'}）", async () => {
+test("capability 解析：无宣告时 miss，harness-tts 宣告后 hit（{model:'tts-1', kind:'tts'}）", async () => {
   const probe = { modelId: TTS_MODEL, kind: "tts" as const, ratio: null, resolution: null, routingClass: "generic" as const };
-  // miss：宣告前的狀態（seed 尚未含 tts capability）。
+  // miss：宣告前的状态（seed 尚未含 tts capability）。
   assert.equal(await hasGenerationCapability(probe, fakeCapabilitySql([])), false);
-  // hit：以 REGISTRY_CHANNELS 真源推導出的 capability 集（＝seed 會落庫的集合）。
+  // hit：以 REGISTRY_CHANNELS 真源推导出的 capability 集（＝seed 会落库的集合）。
   assert.equal(await hasGenerationCapability(probe, fakeCapabilitySql(capabilityRowsFromRegistry())), true);
   // 反例（不假 hit）：未宣告的 model／kind 仍 miss。
   assert.equal(

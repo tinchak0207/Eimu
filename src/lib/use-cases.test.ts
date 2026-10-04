@@ -9,7 +9,7 @@ import {
 } from "./use-cases";
 import { USE_CASE_CATEGORIES } from "./use-case-categories";
 
-// 與 src/lib/use-case-categories/index.ts 的 17 個行業樞紐 slug 一致。
+// 与 src/lib/use-case-categories/index.ts 的 17 个行业枢纽 slug 一致。
 const CATEGORY_SLUGS = [
   "ecommerce",
   "content",

@@ -1,10 +1,10 @@
-// /v1/team/settings —— 團隊級設定（面 2：建畫布權限開關）。
+// /v1/team/settings —— 团队级设定（面 2：建画布权限开关）。
 //
 //   GET  → { member_create_canvas } ＋ 容量/席位快照
 //   POST → { member_create_canvas: boolean }（owner/admin 可改）
 //
-// 開關只決定「非 owner/admin 的成員能否建共享畫布」；owner/admin 恆可建。
-// 只寫意圖（布林），不碰任何點數。成員側閘見 canMemberCreateSharedCanvas()。
+// 开关只决定「非 owner/admin 的成员能否建共享画布」；owner/admin 恒可建。
+// 只写意图（布林），不碰任何点数。成员侧闸见 canMemberCreateSharedCanvas()。
 
 import { NextRequest, NextResponse } from "next/server";
 

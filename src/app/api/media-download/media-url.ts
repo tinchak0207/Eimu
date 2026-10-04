@@ -1,16 +1,16 @@
 import { AGENT_GATEWAY_DEFAULT_ORIGIN } from "@/lib/agent-gateway";
 
-/** 白名單主機：agent 媒體真源（store.tinchak0207.xyz）由 gateway origin 推導，不硬編第二份。 */
+/** 白名单主机：agent 媒体真源（store.tinchak0207.xyz）由 gateway origin 推导，不硬编第二份。 */
 const ALLOWED_MEDIA_HOST = new URL(AGENT_GATEWAY_DEFAULT_ORIGIN).hostname;
 
 /**
- * 白名單判定（純函式，可直測）：只收 agent 媒體真源主機的 https URL。
- *  - 相對路徑／畸形字串／非 http(s) → 拒（`new URL` 無 base 會拋）；
+ * 白名单判定（纯函式，可直测）：只收 agent 媒体真源主机的 https URL。
+ *  - 相对路径／畸形字串／非 http(s) → 拒（`new URL` 无 base 会抛）；
  *  - `http://` → 拒（明文）；
- *  - 帶 userinfo（`u:p@host`）→ 拒（會把真實主機藏在 @ 前，是 SSRF/混淆常見手法）；
- *  - 非預設埠 → 拒（hostname 相同但連到別的服務）；
- *  - 主機不在白名單 → 拒。
- * 值域獨立於本路由的 fetch 實作——測試對每一類輸入獨立斷言。
+ *  - 带 userinfo（`u:p@host`）→ 拒（会把真实主机藏在 @ 前，是 SSRF/混淆常见手法）；
+ *  - 非预设埠 → 拒（hostname 相同但连到别的服务）；
+ *  - 主机不在白名单 → 拒。
+ * 值域独立于本路由的 fetch 实作——测试对每一类输入独立断言。
  */
 export function isAllowedMediaUrl(raw: string): boolean {
   if (typeof raw !== "string") return false;

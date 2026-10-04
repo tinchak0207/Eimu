@@ -50,7 +50,7 @@ async function handle(req: Request) {
     return NextResponse.json({ success: false, message: auth.message }, { status: auth.status });
   }
 
-  // 錢走生產平面門面（V-08）：有帳本的實例留 billing_operation 列；失敗一律 402 同形。
+  // 钱走生产平面门面（V-08）：有帐本的实例留 billing_operation 列；失败一律 402 同形。
   const charged = await reserveSyncCharge({
     userId: auth.user.id,
     quota: requiredQuota,
@@ -70,7 +70,7 @@ async function handle(req: Request) {
   try {
     raw = await req.arrayBuffer();
   } catch (error) {
-    // 已預扣：讀體失敗也必須退（舊碼漏退；帳本化後不退會卡成 submit_unknown 凍結錢）。
+    // 已预扣：读体失败也必须退（旧码漏退；帐本化后不退会卡成 submit_unknown 冻结钱）。
     after(await refundSyncCharge(charged.charge, { status: 400, detail: "Failed to read request body." }));
     return NextResponse.json(
       { success: false, message: `Failed to read request body: ${error instanceof Error ? error.message : String(error)}` },

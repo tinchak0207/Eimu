@@ -1,108 +1,108 @@
 /**
- * YuE2（Modal 服務）音樂生成 client（片 B：music_gen 第三通路，2026-09-18）。
+ * YuE2（Modal 服务）音乐生成 client（片 B：music_gen 第三通路，2026-09-18）。
  *
- * 上游事實（凍結合約，另一片 2026-09-18 查證，照它寫、不自行更名）：
- *   端點  POST {YUE2_MODAL_ENDPOINT}/generate
- *   鑑權  header `X-Yue2-Signature: <hex hmac_sha256(secret, raw_request_body_bytes)>`
+ * 上游事实（冻结合约，另一片 2026-09-18 查证，照它写、不自行更名）：
+ *   端点  POST {YUE2_MODAL_ENDPOINT}/generate
+ *   鉴权  header `X-Yue2-Signature: <hex hmac_sha256(secret, raw_request_body_bytes)>`
  *   body  {"id": str, "style": str, "lyrics": str, "cot": "full"|"melody"|"off", "seed"?: int, "abc"?: str}
  *   200   {"ok":true, "audio_b64", "audio_bytes", "audio_sha256", "mime_type":"audio/flac",
  *          "sample_rate":48000, "channels":2, "duration_s":float, "score_abc":str|null,
  *          "truncated":{...}, "artifacts":[{"name","bytes","sha256","b64"}],
  *          "timing":{"model_load_ms","generate_ms","rtf"}, "model":"m-a-p/YuE2-3B",
  *          "vae":"m-a-p/YuE2-Vae", "gpu":str}
- *   失敗  非 2xx／缺音檔／下載失敗 → 帶原文拋出 {"ok":false,"error","detail"}
+ *   失败  非 2xx／缺音档／下载失败 → 带原文抛出 {"ok":false,"error","detail"}
  *
- * 能力邊界（決定工具文案與 director 規則，勿美化）：
- *   支援 48kHz 立體聲、白盒 ABC 樂譜（可編輯、可二次精修）、cot 三模式、
- *   cover（自備 abc ＋ cot=melody）、自訂歌詞需 [Verse]/[Chorus] 段落標籤；
- *   不支援 image-to-music、不支援時間戳結構控制（`[0:00 - 0:10]` 只有 Lyria 認）、
- *   無 30 秒短檔模式、一次一請求、生成較慢（分鐘級）。
+ * 能力边界（决定工具文案与 director 规则，勿美化）：
+ *   支援 48kHz 立体声、白盒 ABC 乐谱（可编辑、可二次精修）、cot 三模式、
+ *   cover（自备 abc ＋ cot=melody）、自订歌词需 [Verse]/[Chorus] 段落标签；
+ *   不支援 image-to-music、不支援时间戳结构控制（`[0:00 - 0:10]` 只有 Lyria 认）、
+ *   无 30 秒短档模式、一次一请求、生成较慢（分钟级）。
  *
- * 設計（逐段同構 src/lib/music-flowmusic.ts，白名單差異只有四處：端點、鑑權、
- * request/response 欄位、env 名；其餘結構照抄：零依賴、requireXxx fail-fast 人話報錯、
- * 錯誤必帶原文摘錄、繁體註釋＋簡體文案）：
+ * 设计（逐段同构 src/lib/music-flowmusic.ts，白名单差异只有四处：端点、鉴权、
+ * request/response 栏位、env 名；其余结构照抄：零依赖、requireXxx fail-fast 人话报错、
+ * 错误必带原文摘录、繁体注释＋简体文案）：
  *   - env：YUE2_MODAL_ENDPOINT（缺省→本通路停用，工具回落 FlowMusic2API／Gemini Lyria）、
- *     YUE2_HMAC_SECRET（簽名密鑰，缺缺失 fail-fast 人話報錯）。
- *   - 錯誤鐵律（誠實鐵律）：非 2xx／ok 非 true／缺 audio_b64／JSON 非法一律帶原文摘錄拋出，
- *     絕不吞錯、絕不靜默降級、絕不偽造音頻。
- *   - 工具文案一律簡體（記憶 agent-gateway-copy-rules）。
+ *     YUE2_HMAC_SECRET（签名密钥，缺缺失 fail-fast 人话报错）。
+ *   - 错误铁律（诚实铁律）：非 2xx／ok 非 true／缺 audio_b64／JSON 非法一律带原文摘录抛出，
+ *     绝不吞错、绝不静默降级、绝不伪造音频。
+ *   - 工具文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
 import { createHmac, randomUUID } from "node:crypto"
 
-/** YuE2 Modal 服務地址 env 名（缺省＝本通路停用）。 */
+/** YuE2 Modal 服务地址 env 名（缺省＝本通路停用）。 */
 export const YUE2_MODAL_ENDPOINT_ENV = "YUE2_MODAL_ENDPOINT"
 
-/** 簽名密鑰 env 名（與 Modal 服務側共用的 HMAC secret；只在簽名時讀取，永不入錯誤訊息／log）。 */
+/** 签名密钥 env 名（与 Modal 服务侧共用的 HMAC secret；只在签名时读取，永不入错误讯息／log）。 */
 export const YUE2_HMAC_SECRET_ENV = "YUE2_HMAC_SECRET"
 
-/** 凍結合約的生成路徑（相對 YUE2_MODAL_ENDPOINT）。 */
+/** 冻结合约的生成路径（相对 YUE2_MODAL_ENDPOINT）。 */
 const YUE2_GENERATE_PATH = "/generate"
 
-/** 扒譜路徑（相對 YUE2_MODAL_ENDPOINT；2026-09-19 片 L 筆電 local_service.py /transcribe）。 */
+/** 扒谱路径（相对 YUE2_MODAL_ENDPOINT；2026-09-19 片 L 笔电 local_service.py /transcribe）。 */
 const YUE2_TRANSCRIBE_PATH = "/transcribe"
 
-/** 凍結合約的上游模型 id（響應 model 欄位；工具回執 model 用它，勿改）。 */
+/** 冻结合约的上游模型 id（响应 model 栏位；工具回执 model 用它，勿改）。 */
 export const YUE2_MODEL_ID = "m-a-p/YuE2-3B"
 
 /**
- * cot 三模式（凍結合約）：
- *   full   = 完整思維鏈，**唯一**會回白盒樂譜 score_abc 的模式（本片交付契約的接點）；
- *   melody = 以自備 abc 當旋律骨幹（cover 改編）；
- *   off    = 關閉思維鏈（最快，不回樂譜）。
+ * cot 三模式（冻结合约）：
+ *   full   = 完整思维链，**唯一**会回白盒乐谱 score_abc 的模式（本片交付契约的接点）；
+ *   melody = 以自备 abc 当旋律骨干（cover 改编）；
+ *   off    = 关闭思维链（最快，不回乐谱）。
  */
 export const YUE2_COT_MODES = ["full", "melody", "off"] as const
 export type Yue2CotMode = (typeof YUE2_COT_MODES)[number]
 
 /**
- * 非流式生成超時。YuE2-3B 在 Modal 上生成較慢（分鐘級）＋冷啟需載模型
- * （響應 timing.model_load_ms 自報此段），600s 硬頂；FlowMusic2API 的 300s 對本通路不夠。
+ * 非流式生成超时。YuE2-3B 在 Modal 上生成较慢（分钟级）＋冷启需载模型
+ * （响应 timing.model_load_ms 自报此段），600s 硬顶；FlowMusic2API 的 300s 对本通路不够。
  */
 export const YUE2_TIMEOUT_MS = 600_000
 
 /**
- * 扒譜超時（2026-09-19 片 O）。SheetSage2 實測：載入 4.5s＋54s 歌 14–18s（片 L），
- * 但首請求含 HF 權重載入與慢速音頻時餘量要留足；服務端 worker 超時 900s（env
- * YUE2_LOCAL_TRANSCRIBE_TIMEOUT 缺省），client 120s 是任務書指定的最小值，
- * 取 120s 對齊 spec（超時 ≥120s）。
+ * 扒谱超时（2026-09-19 片 O）。SheetSage2 实测：载入 4.5s＋54s 歌 14–18s（片 L），
+ * 但首请求含 HF 权重载入与慢速音频时余量要留足；服务端 worker 超时 900s（env
+ * YUE2_LOCAL_TRANSCRIBE_TIMEOUT 缺省），client 120s 是任务书指定的最小值，
+ * 取 120s 对齐 spec（超时 ≥120s）。
  */
 export const YUE2_TRANSCRIBE_TIMEOUT_MS = 120_000
 
-/** 錯誤訊息裡攜帶的原文 body 上限（同 music-flowmusic.ts 口徑）。 */
+/** 错误讯息里携带的原文 body 上限（同 music-flowmusic.ts 口径）。 */
 const ERROR_BODY_MAX_CHARS = 8000
 
-/** 讀 YuE2 Modal 服務地址（未配置 → null，調用方回落 FlowMusic2API／Lyria）。 */
+/** 读 YuE2 Modal 服务地址（未配置 → null，调用方回落 FlowMusic2API／Lyria）。 */
 export function yue2ModalUrl(): string | null {
   const raw = (process.env[YUE2_MODAL_ENDPOINT_ENV] ?? "").trim()
   if (!raw) return null
   return raw.replace(/\/+$/, "")
 }
 
-/** 本通路是否啟用（env YUE2_MODAL_ENDPOINT 非空即啟用；僅判斷端點，不驗密鑰）。 */
+/** 本通路是否启用（env YUE2_MODAL_ENDPOINT 非空即启用；仅判断端点，不验密钥）。 */
 export function isYue2ModalEnabled(): boolean {
   return yue2ModalUrl() !== null
 }
 
 export interface GenerateYue2TrackOptions {
-  /** 風格散文描述（本通路的 style 欄；允許換行，上游無公開字數上限）。 */
+  /** 风格散文描述（本通路的 style 栏；允许换行，上游无公开字数上限）。 */
   style: string
   /**
-   * 歌詞（凍結合約必填欄位）。空字串＝無歌詞：契約**無** is_instrumental 開關，
-   * 器樂只能靠 style 描述（推斷，非臆造欄位）。
+   * 歌词（冻结合约必填栏位）。空字串＝无歌词：契约**无** is_instrumental 开关，
+   * 器乐只能靠 style 描述（推断，非臆造栏位）。
    */
   lyrics: string
   cot: Yue2CotMode
-  /** 隨機種子（整數；契約選填）。 */
+  /** 随机种子（整数；契约选填）。 */
   seed?: number
-  /** 白盒 ABC 樂譜（契約選填；cover＝自備 abc ＋ cot="melody"；cot="off" 時不接受）。 */
+  /** 白盒 ABC 乐谱（契约选填；cover＝自备 abc ＋ cot="melody"；cot="off" 时不接受）。 */
   abc?: string
 }
 
 /**
- * 工件元信息。上游 artifacts[].b64 的位元組**刻意不進本結構**：下游 tool 回執是
- * LLM 可見的 JSON 字串，百 MB 級 base64 會直接炸上下文；本片交付契約的白盒產物
- * ＝ scoreAbc（專用欄位），其餘工件的位元組留待後續片按需取用（契約形狀已凍結，
- * 取用時不必改上游）。
+ * 工件元信息。上游 artifacts[].b64 的位元组**刻意不进本结构**：下游 tool 回执是
+ * LLM 可见的 JSON 字串，百 MB 级 base64 会直接炸上下文；本片交付契约的白盒产物
+ * ＝ scoreAbc（专用栏位），其余工件的位元组留待后续片按需取用（契约形状已冻结，
+ * 取用时不必改上游）。
  */
 export interface Yue2Artifact {
   name: string
@@ -110,23 +110,23 @@ export interface Yue2Artifact {
   sha256: string
 }
 
-/** 與 generateFlowMusicTrack 返回形狀同構（audioBase64/mimeType），另帶白盒樂譜與工件。 */
+/** 与 generateFlowMusicTrack 返回形状同构（audioBase64/mimeType），另带白盒乐谱与工件。 */
 export interface GenerateYue2TrackResult {
   audioBase64: string
-  /** 上游回報 MIME（契約為 audio/flac；缺失時按契約預設值，不猜格式）。 */
+  /** 上游回报 MIME（契约为 audio/flac；缺失时按契约预设值，不猜格式）。 */
   mimeType: string
-  /** 白盒 ABC 樂譜（可編輯、可二次精修）；上游回 null 表示本次未產出。 */
+  /** 白盒 ABC 乐谱（可编辑、可二次精修）；上游回 null 表示本次未产出。 */
   scoreAbc: string | null
-  /** 上游截斷資訊（{...}）；null＝未回報。如實透傳，不粉飾。 */
+  /** 上游截断资讯（{...}）；null＝未回报。如实透传，不粉饰。 */
   truncated: Record<string, unknown> | null
-  /** 上游自報成品時長（秒）；0＝上游未回 duration_s（契約保證有，0 不得當成 0 秒檔）。 */
+  /** 上游自报成品时长（秒）；0＝上游未回 duration_s（契约保证有，0 不得当成 0 秒档）。 */
   durationSeconds: number
-  /** 本通路無公網音頻 URL（音頻以 base64 回傳），固定 null（形狀與他路對齊用）。 */
+  /** 本通路无公网音频 URL（音频以 base64 回传），固定 null（形状与他路对齐用）。 */
   upstreamUrl: null
   artifacts: Yue2Artifact[]
-  /** 上游自報的音頻 sha256（交付校驗用；缺失則 undefined）。 */
+  /** 上游自报的音频 sha256（交付校验用；缺失则 undefined）。 */
   audioSha256?: string
-  /** 上游自報模型 id（缺失則 undefined）。 */
+  /** 上游自报模型 id（缺失则 undefined）。 */
   model?: string
 }
 
@@ -140,7 +140,7 @@ function requireYue2Secret(): string {
   return secret
 }
 
-/** 凍結合約 request body 形狀（純函數，可單測；欄位名一個字都不許改）。 */
+/** 冻结合约 request body 形状（纯函数，可单测；栏位名一个字都不许改）。 */
 export interface Yue2RequestBody {
   id: string
   style: string
@@ -151,8 +151,8 @@ export interface Yue2RequestBody {
 }
 
 /**
- * 組 request body 並做契約級校驗（純函數）。
- * 校驗失敗一律帶人話拋出，不讓非法 cot／abc 組合出門（契約 enum 只有三值）。
+ * 组 request body 并做契约级校验（纯函数）。
+ * 校验失败一律带人话抛出，不让非法 cot／abc 组合出门（契约 enum 只有三值）。
  */
 export function buildYue2RequestBody(opts: GenerateYue2TrackOptions): Yue2RequestBody {
   const style = opts.style?.trim()
@@ -180,9 +180,9 @@ export function buildYue2RequestBody(opts: GenerateYue2TrackOptions): Yue2Reques
 }
 
 /**
- * 凍結合約簽名：hex hmac_sha256(secret, **原始 request body bytes**)。
- * 呼叫方必須簽「即將送出的那一串位元組」（本檔用同一個 rawBody 字串簽名與發送），
- * 重新序列化後簽名會對不上。
+ * 冻结合约签名：hex hmac_sha256(secret, **原始 request body bytes**)。
+ * 呼叫方必须签「即将送出的那一串位元组」（本档用同一个 rawBody 字串签名与发送），
+ * 重新序列化后签名会对不上。
  */
 export function signYue2Body(secret: string, rawBody: string): string {
   return createHmac("sha256", secret).update(Buffer.from(rawBody, "utf8")).digest("hex")
@@ -202,7 +202,7 @@ function parseJsonOrNull(text: string): unknown {
   }
 }
 
-/** 失敗訊息：HTTP 狀態＋上游 error/detail（若有）＋原文摘錄（永遠帶，誠實鐵律）。 */
+/** 失败讯息：HTTP 状态＋上游 error/detail（若有）＋原文摘录（永远带，诚实铁律）。 */
 function upstreamFailureText(status: number, bodyText: string): string {
   const failure = asRecord(parseJsonOrNull(bodyText))
   const parts = [failure?.error, failure?.detail].filter((v): v is string => typeof v === "string" && v !== "")
@@ -210,7 +210,7 @@ function upstreamFailureText(status: number, bodyText: string): string {
   return `YuE2 Modal 返回 HTTP ${status}${parts.length > 0 ? `（${parts.join("；")}）` : ""}。原文 body：${shown || "(空)"}`
 }
 
-/** artifacts → 元信息（形狀不符的條目整條丟棄；工件是輔助產物，不為它猜欄位）。 */
+/** artifacts → 元信息（形状不符的条目整条丢弃；工件是辅助产物，不为它猜栏位）。 */
 function pickArtifacts(raw: unknown): Yue2Artifact[] {
   if (!Array.isArray(raw)) return []
   const out: Yue2Artifact[] = []
@@ -227,8 +227,8 @@ function pickArtifacts(raw: unknown): Yue2Artifact[] {
 }
 
 /**
- * 調 YuE2 Modal 生成整曲（音頻以 base64 直接回傳，無公網 URL 可下載）；
- * 工具層拿到 base64 後走既有上傳／ffprobe 實測通路。
+ * 调 YuE2 Modal 生成整曲（音频以 base64 直接回传，无公网 URL 可下载）；
+ * 工具层拿到 base64 后走既有上传／ffprobe 实测通路。
  */
 export async function generateYue2Track(
   opts: GenerateYue2TrackOptions,
@@ -300,40 +300,40 @@ export async function generateYue2Track(
   }
 }
 
-// ── 扒譜（SheetSage2 → ABC，2026-09-19 片 O：翻唱工作流前半段）────────────────
+// ── 扒谱（SheetSage2 → ABC，2026-09-19 片 O：翻唱工作流前半段）────────────────
 
 /**
- * 扒譜請求選項。audioBase64＝原始音頻位元組的 base64（**不**帶 data: 前綴——
- * 前綴剝除是 music-tools 工具層職責，client 只吃純 base64，與服務端 b64decode 對齊）。
+ * 扒谱请求选项。audioBase64＝原始音频位元组的 base64（**不**带 data: 前缀——
+ * 前缀剥除是 music-tools 工具层职责，client 只吃纯 base64，与服务端 b64decode 对齐）。
  */
 export interface TranscribeYue2ScoreOptions {
   audioBase64: string
   /**
-   * 只扒旋律骨幹（剝和弦）。服務端缺省 true；cover 工作流（cot=melody）正是
-   * melody-only 語義，故工具層帶 source_audio 時固定傳 true。
+   * 只扒旋律骨干（剥和弦）。服务端缺省 true；cover 工作流（cot=melody）正是
+   * melody-only 语义，故工具层带 source_audio 时固定传 true。
    */
   melodyOnly?: boolean
 }
 
-/** 扒譜結果（服務端 200 回應的白名單欄位；timing 為輔助診斷資訊不入工具回執）。 */
+/** 扒谱结果（服务端 200 回应的白名单栏位；timing 为辅助诊断资讯不入工具回执）。 */
 export interface TranscribeYue2ScoreResult {
   abc: string
-  /** 服務端 warnings（如音頻截斷提示）；空陣列＝無警告，如實透傳不粉飾。 */
+  /** 服务端 warnings（如音频截断提示）；空阵列＝无警告，如实透传不粉饰。 */
   warnings: string[]
-  /** 源音頻時長（秒）；0＝服務端未回 source_duration_s。 */
+  /** 源音频时长（秒）；0＝服务端未回 source_duration_s。 */
   sourceDurationSeconds: number
 }
 
 /**
- * 錯誤碼映射：服務端 422 `abc_missing`（音頻裡找不到可扒的旋律素材）是**確定性失敗**
- * ——重試同一份音頻不會變好，映射為專屬錯誤碼 `yue2_transcribe_abc_missing`，
- * 讓上層（工具／agent）勿盲目重試（片 L 給並行片的契約：422 abc_missing 勿重試）。
- * 其餘 4xx/5xx 一律 `yue2_transcribe_failed` 帶原文（誠實鐵律）。
+ * 错误码映射：服务端 422 `abc_missing`（音频里找不到可扒的旋律素材）是**确定性失败**
+ * ——重试同一份音频不会变好，映射为专属错误码 `yue2_transcribe_abc_missing`，
+ * 让上层（工具／agent）勿盲目重试（片 L 给并行片的契约：422 abc_missing 勿重试）。
+ * 其余 4xx/5xx 一律 `yue2_transcribe_failed` 带原文（诚实铁律）。
  */
 export const YUE2_TRANSCRIBE_ABC_MISSING_CODE = "yue2_transcribe_abc_missing"
 export const YUE2_TRANSCRIBE_FAILED_CODE = "yue2_transcribe_failed"
 
-/** 扒譜專用錯誤：帶專屬 code（422 abc_missing／其餘失敗），工具層以 code 決定重試語義。 */
+/** 扒谱专用错误：带专属 code（422 abc_missing／其余失败），工具层以 code 决定重试语义。 */
 export class Yue2TranscribeError extends Error {
   code: string
   status: number
@@ -345,7 +345,7 @@ export class Yue2TranscribeError extends Error {
   }
 }
 
-/** 組扒譜 request body（純函數；服務端只認 audio_b64／melody_only 兩鍵，多鍵會被忽略但禁加）。 */
+/** 组扒谱 request body（纯函数；服务端只认 audio_b64／melody_only 两键，多键会被忽略但禁加）。 */
 export function buildYue2TranscribeBody(opts: TranscribeYue2ScoreOptions): string {
   const audioBase64 = opts.audioBase64?.trim()
   if (!audioBase64) {
@@ -357,16 +357,16 @@ export function buildYue2TranscribeBody(opts: TranscribeYue2ScoreOptions): strin
 }
 
 /**
- * 調 YuE2 服務 /transcribe 把音頻扒成 chord-free ABC 樂譜（SheetSage2）。
+ * 调 YuE2 服务 /transcribe 把音频扒成 chord-free ABC 乐谱（SheetSage2）。
  * 同款 HMAC（X-Yue2-Signature = hex hmac_sha256(secret, raw body bytes)）。
- * 失敗一律帶原文拋 Yue2TranscribeError：422 abc_missing → 專屬錯誤碼（勿重試）；
- * 其餘非 2xx／ok 非 true／缺 abc → yue2_transcribe_failed。
+ * 失败一律带原文抛 Yue2TranscribeError：422 abc_missing → 专属错误码（勿重试）；
+ * 其余非 2xx／ok 非 true／缺 abc → yue2_transcribe_failed。
  */
 export async function transcribeYue2Score(
   opts: TranscribeYue2ScoreOptions,
 ): Promise<TranscribeYue2ScoreResult> {
   const baseUrl = yue2ModalUrl()
-  if (!baseUrl) throw new Error("YUE2_MODAL_ENDPOINT 未配置，YuE2 Modal 通路未启用（扒譜與生成共用同一端點）。")
+  if (!baseUrl) throw new Error("YUE2_MODAL_ENDPOINT 未配置，YuE2 Modal 通路未启用（扒谱与生成共用同一端点）。")
   const rawBody = buildYue2TranscribeBody(opts)
   const secret = requireYue2Secret()
   const signature = signYue2Body(secret, rawBody)
@@ -380,7 +380,7 @@ export async function transcribeYue2Score(
       signal: AbortSignal.timeout(YUE2_TRANSCRIBE_TIMEOUT_MS),
     })
   } catch (e) {
-    // 網路層／超時：與生成共用端點與隧道，帶人話拋出（仍歸 yue2_transcribe_failed）。
+    // 网路层／超时：与生成共用端点与隧道，带人话抛出（仍归 yue2_transcribe_failed）。
     throw new Yue2TranscribeError(
       YUE2_TRANSCRIBE_FAILED_CODE,
       0,
@@ -389,7 +389,7 @@ export async function transcribeYue2Score(
   }
   const bodyText = await response.text().catch(() => "")
   if (!response.ok) {
-    // 422 abc_missing＝確定性失敗（這份音頻扒不出旋律），映射專屬錯誤碼讓上層勿重試。
+    // 422 abc_missing＝确定性失败（这份音频扒不出旋律），映射专属错误码让上层勿重试。
     const code = response.status === 422 ? YUE2_TRANSCRIBE_ABC_MISSING_CODE : YUE2_TRANSCRIBE_FAILED_CODE
     throw new Yue2TranscribeError(code, response.status, upstreamFailureText(response.status, bodyText))
   }
@@ -414,7 +414,7 @@ export async function transcribeYue2Score(
   }
   const abc = typeof payload.abc === "string" ? payload.abc : ""
   if (!abc) {
-    // 200 但無 abc＝服務端違反契約，與 422 同樣是「扒不出樂譜」的確定性失敗面。
+    // 200 但无 abc＝服务端违反契约，与 422 同样是「扒不出乐谱」的确定性失败面。
     throw new Yue2TranscribeError(
       YUE2_TRANSCRIBE_ABC_MISSING_CODE,
       response.status,

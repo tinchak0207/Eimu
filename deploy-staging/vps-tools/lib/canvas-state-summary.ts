@@ -1,7 +1,7 @@
-// canvas_get_state 摘要回執（H10 殘餘）：342 節點/1213 連線全量回執會被 opencode 截斷器截掉。
-// 預設摘要：節點計數 + 按類型/狀態彙總 + 逐節點精簡行 + 連線只回數量；node_id 取單點；view=full 取全量。
-// 失敗/錯誤資訊（metadata 內 error/fail/reason/status 類鍵）永遠完整保留，不被截短。
-// 放在 lib/ 而非 tools/（tools/ 下具名 export 會被註冊成工具）。純函式，不依賴 canvas-flow。
+// canvas_get_state 摘要回执（H10 残余）：342 节点/1213 连线全量回执会被 opencode 截断器截掉。
+// 预设摘要：节点计数 + 按类型/状态汇总 + 逐节点精简行 + 连线只回数量；node_id 取单点；view=full 取全量。
+// 失败/错误资讯（metadata 内 error/fail/reason/status 类键）永远完整保留，不被截短。
+// 放在 lib/ 而非 tools/（tools/ 下具名 export 会被注册成工具）。纯函式，不依赖 canvas-flow。
 
 import { compactCanvasState } from "./canvas-flow"
 
@@ -44,7 +44,7 @@ export function summarizeCanvasNode(n: any): Record<string, unknown> {
   const m = n?.metadata && typeof n.metadata === "object" && !Array.isArray(n.metadata) ? n.metadata : {}
   const meta: Record<string, unknown> = {}
   for (const k of KEEP_KEYS) if (m[k] !== undefined) meta[k] = val(m[k], VAL_MAX)
-  for (const [k, v] of Object.entries(m)) if (k !== "status" && ERR_KEY.test(k) && v !== undefined) meta[k] = val(v, ERR_MAX) // 失敗真因不截
+  for (const [k, v] of Object.entries(m)) if (k !== "status" && ERR_KEY.test(k) && v !== undefined) meta[k] = val(v, ERR_MAX) // 失败真因不截
   const row: Record<string, unknown> = { id: n?.id, type: n?.type }
   const st = nodeStatus(n)
   if (st) {
@@ -67,7 +67,7 @@ export function buildCanvasReceipt(
   if (opts.view === "full") return { state: compactCanvasState(state) }
   if (opts.nodeId) {
     const node = nodes.find((n) => n?.id === opts.nodeId)
-    if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不帶 node_id 的 canvas_get_state 看節點清單" }
+    if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不带 node_id 的 canvas_get_state 看节点清单" }
     const compact = compactCanvasState({ nodes: [node] }).nodes[0]
     return {
       node: compact,
@@ -101,6 +101,6 @@ export function buildCanvasReceipt(
     viewport: s.viewport ?? null,
     ...(Number.isFinite(x0) ? { bounds: { min_x: Math.round(x0), min_y: Math.round(y0), max_x: Math.round(x1), max_y: Math.round(y1) } } : {}),
     nodes: nodes.map(summarizeCanvasNode),
-    hint: "摘要視圖：連線只回數量、content/metadata 已截短（失敗資訊完整）。單點完整資料（含位置/尺寸）+上下游用 node_id；bounds 為全部節點包圍盒，擺放新節點用；全量用 view=full（很大會被截斷，落盤檔請用 read 按 offset/limit 讀）。",
+    hint: "摘要视图：连线只回数量、content/metadata 已截短（失败资讯完整）。单点完整资料（含位置/尺寸）+上下游用 node_id；bounds 为全部节点包围盒，摆放新节点用；全量用 view=full（很大会被截断，落盘档请用 read 按 offset/limit 读）。",
   }
 }

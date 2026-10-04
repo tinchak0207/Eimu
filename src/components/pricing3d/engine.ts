@@ -1,14 +1,14 @@
-/* ╁━ /pricing 3D 卡堆引擎（手寫 three，無 R3F、無物理引擎）╁━
-   只被 PricingStage3D 以 import() 動態載入 —— three 不進首屏包；首屏是 SSR 夢境底圖 + 價格玻璃層。
+/* ╁━ /pricing 3D 卡堆引擎（手写 three，无 R3F、无物理引擎）╁━
+   只被 PricingStage3D 以 import() 动态载入 —— three 不进首屏包；首屏是 SSR 梦境底图 + 价格玻璃层。
 
-   構成：
-   - 一個 WebGLRenderer = 全頁唯一 WebGL context（離屏/分頁隱藏暫停，卸載 dispose 全部）；
-   - 一個 InstancedMesh 畫所有作品卡（一次 draw call）：每張卡從一張 4×4 貼圖圖集裡
+   构成：
+   - 一个 WebGLRenderer = 全页唯一 WebGL context（离屏/分页隐藏暂停，卸载 dispose 全部）；
+   - 一个 InstancedMesh 画所有作品卡（一次 draw call）：每张卡从一张 4×4 贴图图集里
      取自己的裁切窗（aUvRect），所以卡卡不同；
-   - 玻璃只在邊緣與光掠過處：卡體是實的（MeshPhysical + clearcoat），側面換成淡玻璃色，
-     再在 shader 裡疊 fresnel 邊緣高光與一條可觸發的掠光帶（aGlint）；
-   - 動態全是手寫：落下（拋物線 → 指數衰減彈跳）、撥散（慣性 + 摩擦 + 回收彈簧）、
-     翻面（角速度 + 就近平躺吸附）、拾起轉一圈（導演曲線）、點擊彈跳（重力 + 反彈）。 */
+   - 玻璃只在边缘与光掠过处：卡体是实的（MeshPhysical + clearcoat），侧面换成淡玻璃色，
+     再在 shader 里叠 fresnel 边缘高光与一条可触发的掠光带（aGlint）；
+   - 动态全是手写：落下（抛物线 → 指数衰减弹跳）、拨散（惯性 + 摩擦 + 回收弹簧）、
+     翻面（角速度 + 就近平躺吸附）、拾起转一圈（导演曲线）、点击弹跳（重力 + 反弹）。 */
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -19,20 +19,20 @@ import { SHOWCASE_POOL, WORLD_IDS, cardCountForCoins, thumbOf, type WorldId } fr
 
 export interface Pricing3DEngine {
   setWorld(id: WorldId, coins: number): void;
-  /** 自訂滑桿拖動中：卡堆原地平滑伸縮，不落。 */
+  /** 自订滑杆拖动中：卡堆原地平滑伸缩，不落。 */
   setCoinsLive(coins: number): void;
-  /** 鬆手 / 切档：重落一輪。 */
+  /** 松手 / 切档：重落一轮。 */
   redrop(): void;
-  /** 拖曳撥動：px/ms，正 = 向右。 */
+  /** 拖曳拨动：px/ms，正 = 向右。 */
   swipe(velocity: number): void;
-  /** 懸停：NDC 座標，null = 離開。 */
+  /** 悬停：NDC 座标，null = 离开。 */
   hover(x: number | null, y: number): void;
-  /** 點擊：NDC 座標。 */
+  /** 点击：NDC 座标。 */
   tap(x: number, y: number): void;
   resize(width: number, height: number): void;
   setActive(active: boolean): void;
   setReducedMotion(reduced: boolean): void;
-  /** 以靜止解析度畫一幀並回傳畫面（產低端機靜態圖用；透明底）。 */
+  /** 以静止解析度画一帧并回传画面（产低端机静态图用；透明底）。 */
   snapshot(type?: string, quality?: number): string;
   dispose(): void;
 }
@@ -46,22 +46,22 @@ export interface EngineInit {
   sound: PricingSound | null;
   onFirstFrame(): void;
   onFailure(): void;
-  /** 解析度已降到地板仍 < 24fps：宿主可改走靜態圖（不給就照舊減卡數）。 */
+  /** 解析度已降到地板仍 < 24fps：宿主可改走静态图（不给就照旧减卡数）。 */
   onSlow?(): void;
 }
 
-/* ── 導演參數（快慢在這裡調，不在物理裡）── */
-const FALL_S = 0.42; // 單張從出場到觸桌
-const DROP_SPAN_S = 1.9; // 整堆出場時間上限（加上落下與沉降 ≈ 2–4 秒；溢出卡最後才滑落）
-const SPILL_FALL = 1.7; // 溢出卡從台沿滑落到地面比直落多花的時間倍率
+/* ── 导演参数（快慢在这里调，不在物理里）── */
+const FALL_S = 0.42; // 单张从出场到触桌
+const DROP_SPAN_S = 1.9; // 整堆出场时间上限（加上落下与沉降 ≈ 2–4 秒；溢出卡最后才滑落）
+const SPILL_FALL = 1.7; // 溢出卡从台沿滑落到地面比直落多花的时间倍率
 const DROP_STAGGER_MAX = 0.16;
 const DROP_STAGGER_MIN = 0.006;
 const SETTLE_S = 0.9;
-const PICK_S = 1.55; // 懸停拾起：升起 → 在光下轉一圈 → 放回
-const GATHER_AFTER_S = 1.6; // 撥散後多久開始自己收回
-const FRICTION = 3.6; // 滑動摩擦（1/s）
+const PICK_S = 1.55; // 悬停拾起：升起 → 在光下转一圈 → 放回
+const GATHER_AFTER_S = 1.6; // 拨散后多久开始自己收回
+const FRICTION = 3.6; // 滑动摩擦（1/s）
 const GRAVITY = 9.8;
-/** 卡面本地 uv（與 BoxGeometry 上表面的 uv 同向），邊緣內縮半個像素避免取到鄰格。 */
+/** 卡面本地 uv（与 BoxGeometry 上表面的 uv 同向），边缘内缩半个像素避免取到邻格。 */
 const LOCAL_UV_GLSL = `clamp(vec2(position.x / ${CARD_W.toFixed(3)} + 0.5, 0.5 - position.z / ${CARD_D.toFixed(3)}), 0.004, 0.996)`;
 const ATLAS_COLS = 5;
 const ATLAS_ROWS = 4;
@@ -87,7 +87,7 @@ const nearest = (angle: number, period: number) => Math.round(angle / period) * 
 export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   const { canvas, compact, sound } = init;
   let reduced = init.reducedMotion;
-  let quality = 0; // 0 全效 / 1 減卡數（解析度走動態解析度，陰影不再降）
+  let quality = 0; // 0 全效 / 1 减卡数（解析度走动态解析度，阴影不再降）
   const CAP = compact ? 140 : 420;
   let cap = CAP;
 
@@ -99,18 +99,18 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     preserveDrawingBuffer: false,
   });
   renderer.setClearColor(0x000000, 0);
-  /* 生產不查 shader 編譯日誌（2026-10-01 效能）：three 預設在 program 首次使用時呼叫 getShaderInfoLog／
-     getProgramInfoLog，Intel/Mesa 這類不支援平行編譯的驅動會在這裡同步等編譯完——實測滾動切档時主線程卡
-     1.2s。開發環境保留檢查，著色器寫錯照樣看得到報錯。 */
+  /* 生产不查 shader 编译日志（2026-10-01 效能）：three 预设在 program 首次使用时呼叫 getShaderInfoLog／
+     getProgramInfoLog，Intel/Mesa 这类不支援平行编译的驱动会在这里同步等编译完——实测滚动切档时主线程卡
+     1.2s。开发环境保留检查，著色器写错照样看得到报错。 */
   renderer.debug.checkShaderErrors = process.env.NODE_ENV !== "production";
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  /* Neutral（Khronos PBR Neutral）：不像 ACES 那樣把飽和色壓灰——作品要鮮，不要老照片。 */
+  /* Neutral（Khronos PBR Neutral）：不像 ACES 那样把饱和色压灰——作品要鲜，不要老照片。 */
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  /* 精度（2026-09-27 暴君「不要渲染成 GTA3 級古董貼圖」）：
-     dpr=1 的機器原本 ratio 1.0 = 零超取樣，邊緣全是階梯；這裡給一個超取樣地板，
-     弱機也至少 1.75 倍渲染再降採樣；dpr 高的機器最多 2（再上去是白燒 fill rate）。 */
+  /* 精度（2026-09-27 暴君「不要渲染成 GTA3 级古董贴图」）：
+     dpr=1 的机器原本 ratio 1.0 = 零超取样，边缘全是阶梯；这里给一个超取样地板，
+     弱机也至少 1.75 倍渲染再降采样；dpr 高的机器最多 2（再上去是白烧 fill rate）。 */
   const ratioFloor = compact ? 1.25 : 1.75;
   const basePixelRatio = Math.min(2, Math.max(window.devicePixelRatio || 1, ratioFloor));
   let pixelRatio = basePixelRatio;
@@ -130,7 +130,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   let viewW = 2;
   let viewH = 1;
 
-  /* ── 作品卡圖集：每格一張底片（片基 + 鏤空齒孔 + 邊碼 + 鮮豔作品），見 film-atlas.ts ── */
+  /* ── 作品卡图集：每格一张底片（片基 + 镂空齿孔 + 边码 + 鲜艳作品），见 film-atlas.ts ── */
   let atlasTimer = 0;
   const film = createFilmAtlas({
     cols: ATLAS_COLS,
@@ -152,9 +152,9 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   atlas.colorSpace = THREE.SRGBColorSpace;
   atlas.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  /* ── 作品卡：一個 InstancedMesh ── */
+  /* ── 作品卡：一个 InstancedMesh ── */
   const cardGeo = new THREE.BoxGeometry(CARD_W, CARD_T, CARD_D);
-  /* BoxGeometry 面序：+x −x +y −y +z −z，各 4 頂點 → ±y（正反面）是 8..15。 */
+  /* BoxGeometry 面序：+x −x +y −y +z −z，各 4 顶点 → ±y（正反面）是 8..15。 */
   const faceAttr = new Float32Array(24);
   for (let i = 8; i < 16; i += 1) faceAttr[i] = 1;
   cardGeo.setAttribute("aFace", new THREE.BufferAttribute(faceAttr, 1));
@@ -171,11 +171,11 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     metalness: 0,
     clearcoat: 0.3,
     clearcoatRoughness: 0.26,
-    /* 2026-09-27：逆光（台後的天光）掠過近水平的卡面，粗糙度 0.42 的鏡面瓣會把整片卡洗成一團白霧
-       （逐物件隱藏實測：關掉逆光，霧消失）。卡面基底鏡面壓到三成，只留 clearcoat 那道窄高光。 */
+    /* 2026-09-27：逆光（台后的天光）掠过近水平的卡面，粗糙度 0.42 的镜面瓣会把整片卡洗成一团白雾
+       （逐物件隐藏实测：关掉逆光，雾消失）。卡面基底镜面压到三成，只留 clearcoat 那道窄高光。 */
     specularIntensity: 0.3,
     ior: 1.5,
-    alphaTest: 0.5, // 底片齒孔真鏤空
+    alphaTest: 0.5, // 底片齿孔真镂空
   });
   cardMat.onBeforeCompile = (shader) => {
     shader.uniforms.uRim = rimUniform;
@@ -186,22 +186,22 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       )
       .replace(
         "#include <uv_vertex>",
-        /* 貼圖座標一律由本地位置算（上下面與四個側面同一套）：側面取到的是載體邊緣的顏色與 alpha，
-           拍立得的白邊、底片的黑邊自然延伸成厚度；載體輪廓外（alpha 0）側面一起被裁掉。 */
+        /* 贴图座标一律由本地位置算（上下面与四个侧面同一套）：侧面取到的是载体边缘的颜色与 alpha，
+           拍立得的白边、底片的黑边自然延伸成厚度；载体轮廓外（alpha 0）侧面一起被裁掉。 */
         `#include <uv_vertex>\nvFace = aFace;\nvLocalUv = ${LOCAL_UV_GLSL};\nvGlint = aGlint;\n#ifdef USE_MAP\nvMapUv = aUvRect.xy + vLocalUv * aUvRect.zw;\n#endif`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", "#include <common>\nuniform vec3 uRim;\nvarying float vFace;\nvarying vec2 vLocalUv;\nvarying vec2 vGlint;")
       .replace(
         "#include <map_fragment>",
-        /* 側面 = 玻璃邊：圖色壓暗再混一口冷白，讀起來是「一塊有厚度的玻璃的切邊」。 */
+        /* 侧面 = 玻璃边：图色压暗再混一口冷白，读起来是「一块有厚度的玻璃的切边」。 */
         "#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb * 0.72, diffuseColor.rgb, vFace);",
       )
       .replace(
         "#include <opaque_fragment>",
         [
-          /* 卡面像燈箱上的正片：62% 直接取作品原色（不被打光壓暗、不被環境反射洗白），
-             38% 保留受光明暗，堆裡的層次還在。 */
+          /* 卡面像灯箱上的正片：62% 直接取作品原色（不被打光压暗、不被环境反射洗白），
+             38% 保留受光明暗，堆里的层次还在。 */
           "outgoingLight = mix(outgoingLight, diffuseColor.rgb * 1.08, vFace * 0.62);",
           "float pFres = pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 3.0);",
           "float pEdge = max((1.0 - vFace) * 0.3, smoothstep(0.44, 0.5, max(abs(vLocalUv.x - 0.5), abs(vLocalUv.y - 0.5))));",
@@ -214,7 +214,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   };
   cardMat.customProgramCacheKey = () => "pricing3d-card-v3";
 
-  /* 陰影也照載體輪廓投（拍立得、幻燈片的影子不是一整塊長方形）。 */
+  /* 阴影也照载体轮廓投（拍立得、幻灯片的影子不是一整块长方形）。 */
   const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: atlas, alphaTest: 0.5 });
   depthMat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
@@ -231,12 +231,12 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   cards.frustumCulled = false;
   scene.add(cards);
 
-  /* ── 每張卡的狀態（定長陣列，零 GC）── */
+  /* ── 每张卡的状态（定长阵列，零 GC）── */
   const slotX = new Float32Array(CAP);
   const slotY = new Float32Array(CAP);
   const slotFloor = new Float32Array(CAP);
   const slotPitch = new Float32Array(CAP);
-  /* 溢出卡：台子裝不下，從台沿滑落、掉到地上（起點 = 台沿最近點）。 */
+  /* 溢出卡：台子装不下，从台沿滑落、掉到地上（起点 = 台沿最近点）。 */
   const spillFrom = new Float32Array(CAP * 3);
   let spillPile = -1;
   const slotZ = new Float32Array(CAP);
@@ -267,10 +267,10 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   const rand = new Float32Array(CAP);
   const pileTopLevel: number[] = [];
 
-  /* 額度超出設備卡數上限時，塔不再加卡、改為拉高（2 萬 → 100 萬金幣仍一眼更滿，
-     一路衝出鏡頭上緣）；滑桿拖動時平滑伸縮。 */
+  /* 额度超出设备卡数上限时，塔不再加卡、改为拉高（2 万 → 100 万金币仍一眼更满，
+     一路冲出镜头上缘）；滑杆拖动时平滑伸缩。 */
   let stretch = 1;
-  /* 進場運鏡：落卡時鏡頭從高處遠處緩緩推進（電影開場的 push-in），落定時剛好到位。 */
+  /* 进场运镜：落卡时镜头从高处远处缓缓推进（电影开场的 push-in），落定时刚好到位。 */
   let introStart = -10;
   const INTRO_S = 3.2;
   let stretchTarget = 1;
@@ -308,7 +308,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     return r;
   }
 
-  /** 卡位：按「(層 + 0.5) / 堆權重」排序填位 —— 張數變化時每一堆都在長，塔高錯落。 */
+  /** 卡位：按「(层 + 0.5) / 堆权重」排序填位 —— 张数变化时每一堆都在长，塔高错落。 */
   function layoutSlots(r: WorldRig, worldIndex: number) {
     const onPiles = Math.min(CAP, r.capacity);
     spillPile = r.piles.length;
@@ -328,8 +328,8 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       uvRect.setXYZW(i, u0, v0, uw, vh);
       slotPitch[i] = 0;
       if (i >= onPiles && i < onPiles + r.spill.max) {
-        /* ── 溢出：台面滿了，多出來的作品從台沿掉到地上，越多鋪得越遠（前方為主，鏡頭看得到）──
-           地上重疊處往上疊（粗網格計數），少數斜倚著台邊。 */
+        /* ── 溢出：台面满了，多出来的作品从台沿掉到地上，越多铺得越远（前方为主，镜头看得到）──
+           地上重叠处往上叠（粗网格计数），少数斜倚著台边。 */
         const k = i - onPiles;
         const sp = r.spill;
         const theta = (rnd() * 2 - 1) * sp.arc * (0.55 + 0.45 * rnd());
@@ -354,16 +354,16 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         spillFrom[i * 3 + 2] = sp.z + Math.cos(theta) * sp.edge;
         continue;
       }
-      /* 溢出名額用完之後的卡回到台上繼續長高（溢出是點睛，不是山洪）。 */
+      /* 溢出名额用完之后的卡回到台上继续长高（溢出是点睛，不是山洪）。 */
       const { p, level } = entries[i < onPiles ? i : i - r.spill.max];
       const pile = r.piles[p];
       const fan = pile.fan ?? 0;
-      /* 亂堆而不是一疊雜誌：逐張錯位 + 轉角，邊緣露出底下每一張作品。 */
+      /* 乱堆而不是一叠杂志：逐张错位 + 转角，边缘露出底下每一张作品。 */
       let x = pile.x + (rnd() - 0.5) * 0.2;
       let z = pile.z + (rnd() - 0.5) * 0.2;
       let yaw = pile.yaw + (rnd() - 0.5) * 0.9;
       if (level < fan) {
-        /* 堆底攤成扇形：讓底下幾張作品也露臉。 */
+        /* 堆底摊成扇形：让底下几张作品也露脸。 */
         const side = level % 2 === 0 ? 1 : -1;
         const reach = 0.26 + 0.12 * level;
         x += side * reach * Math.cos(pile.yaw);
@@ -413,15 +413,15 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     const aspect = viewW / Math.max(1, viewH);
     camera.aspect = aspect;
     camera.fov = rig.camera.fov;
-    /* 窄畫面（手機竪屏）把機位沿視線往後拉，讓主角整堆入鏡。 */
+    /* 窄画面（手机竖屏）把机位沿视线往后拉，让主角整堆入镜。 */
     const pull = aspect < 1.7 ? Math.pow(1.7 / aspect, 0.42) : 1;
     camTarget.copy(rig.camera.target);
     camBase.copy(rig.camera.pos).sub(camTarget).multiplyScalar(pull).add(camTarget);
-    /* 竪屏：價格玻璃層佔了卡面下半，卡堆再往上讓（不被價格層蓋住）。 */
+    /* 竖屏：价格玻璃层占了卡面下半，卡堆再往上让（不被价格层盖住）。 */
     const shift = Math.round(viewH * (aspect < 1 ? 0.26 : 0.05));
-    /* 寬屏構圖：卡堆再往左讓，票面（DOM 玻璃層）往右推後兩者不重疊（與 pricing-plan-carousel.css
-       的 .ppc-glass translateX 0.46 配對）。位移按卡寬算（--case-card-w 由環寫在舞台上）。
-       竪屏置中、卡堆上移讓出下半給票面。 */
+    /* 宽屏构图：卡堆再往左让，票面（DOM 玻璃层）往右推后两者不重叠（与 pricing-plan-carousel.css
+       的 .ppc-glass translateX 0.46 配对）。位移按卡宽算（--case-card-w 由环写在舞台上）。
+       竖屏置中、卡堆上移让出下半给票面。 */
     const cardW = Number.parseFloat(getComputedStyle(canvas).getPropertyValue("--case-card-w")) || 520;
     const shiftX = aspect > 1.3 ? Math.round(cardW * 0.42) : 0;
     camera.setViewOffset(viewW, viewH, shiftX, shift, viewW, viewH);
@@ -447,7 +447,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     }
     introStart = t;
     const stagger = Math.min(DROP_STAGGER_MAX, Math.max(DROP_STAGGER_MIN, DROP_SPAN_S / Math.max(1, count)));
-    /* 由下往上落：先按層、同層按堆輪流 —— 每一堆都在同時長高。 */
+    /* 由下往上落：先按层、同层按堆轮流 —— 每一堆都在同时长高。 */
     const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => slotLevel[a] - slotLevel[b] || slotPile[a] - slotPile[b]);
     order.forEach((i, rank) => {
       dropStart[i] = t + 0.08 + rank * stagger;
@@ -484,7 +484,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     kick();
   }
 
-  /* ── 每幀 ── */
+  /* ── 每帧 ── */
   function update(dt: number) {
     const t = now();
     let busy = t < dropEnd;
@@ -499,7 +499,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     sway.x += (sway.tx - sway.x) * Math.min(1, dt * 4);
     sway.y += (sway.ty - sway.y) * Math.min(1, dt * 4);
     if (Math.abs(sway.tx - sway.x) + Math.abs(sway.ty - sway.y) > 0.0005) busy = true;
-    /* 額度越過卡數上限：鏡頭往卡堆推近（塔更大、前景卡蓋掉一部分視線 = 溢出鏡頭）。 */
+    /* 额度越过卡数上限：镜头往卡堆推近（塔更大、前景卡盖掉一部分视线 = 溢出镜头）。 */
     const introK = reduced ? 1 : Math.min(1, (t - introStart) / INTRO_S);
     if (introK < 1) busy = true;
     const push = 1 - (1 - introK) * (1 - introK) * (1 - introK);
@@ -528,7 +528,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         continue;
       }
 
-      /* 撥散：慣性 + 摩擦；閒下來後回收彈簧把卡收回原位、翻回正面。 */
+      /* 拨散：惯性 + 摩擦；闲下来后回收弹簧把卡收回原位、翻回正面。 */
       if (!reduced) {
         if (gathering) {
           const k = 12;
@@ -552,7 +552,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         const fallTarget = smooth(0.42, 0.85, r / CARD_W);
         fallMix[i] += (fallTarget - fallMix[i]) * Math.min(1, dt * 7);
 
-        /* 翻面：角速度 + 就近平躺吸附（撥動中可停在背面；回收時翻回正面）。 */
+        /* 翻面：角速度 + 就近平躺吸附（拨动中可停在背面；回收时翻回正面）。 */
         const airborne = hop[i] > 0.002 || vhop[i] > 0;
         if (!airborne) {
           const period = gathering ? Math.PI * 2 : Math.PI;
@@ -567,7 +567,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         if (gathering) vspin[i] += -spin[i] * 8 * dt;
         spin[i] += vspin[i] * dt;
 
-        /* 點擊彈跳：重力 + 小反彈（第二下觸桌給一聲輕叮）。 */
+        /* 点击弹跳：重力 + 小反弹（第二下触桌给一声轻叮）。 */
         if (hop[i] > 0 || vhop[i] !== 0) {
           vhop[i] -= GRAVITY * dt;
           hop[i] += vhop[i] * dt;
@@ -607,7 +607,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         glintAttr.needsUpdate = true;
       }
 
-      /* 落下：拋物線觸桌 → 指數衰減彈跳沉降。 */
+      /* 落下：抛物线触桌 → 指数衰减弹跳沉降。 */
       let dy = 0;
       let dYaw = 0;
       let dRoll = 0;
@@ -622,7 +622,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       }
       const spilled = slotPile[i] === spillPile;
       const fallS = spilled ? FALL_S * SPILL_FALL : FALL_S;
-      /* 溢出卡的滑落軌跡：從台沿（稍高）出發，先被擠出去、再拋物線掉到地上。 */
+      /* 溢出卡的滑落轨迹：从台沿（稍高）出发，先被挤出去、再抛物线掉到地上。 */
       let sx = 0;
       let sy = 0;
       let sz = 0;
@@ -654,7 +654,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         dYaw = dropYaw[i] * 0.05 * Math.exp(-6 * a) * Math.cos(10 * a);
       }
 
-      /* 懸停拾起：升起、朝鏡頭靠一點、繞長軸在光下轉一整圈、放回。 */
+      /* 悬停拾起：升起、朝镜头靠一点、绕长轴在光下转一整圈、放回。 */
       let lift = 0;
       let toward = 0;
       let pickRoll = 0;
@@ -688,7 +688,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     }
     cards.instanceMatrix.needsUpdate = true;
 
-    /* 懸停命中測試（每幀最多一次）。 */
+    /* 悬停命中测试（每帧最多一次）。 */
     if (hoverNdc && !reduced) {
       cards.boundingSphere = null;
       raycaster.setFromCamera(hoverNdc, camera);
@@ -709,8 +709,8 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     return busy;
   }
 
-  /* 品質階梯（2026-10-01 改）：不再關陰影——實測對核顯幾乎沒幫助，卻會讓全場 shader 在互動中途重編（核顯上
-     最大的一次卡頓）。解析度交給下方「動態解析度」；只有降到地板仍 < 24fps 才砍卡數。 */
+  /* 品质阶梯（2026-10-01 改）：不再关阴影——实测对核显几乎没帮助，却会让全场 shader 在互动中途重编（核显上
+     最大的一次卡顿）。解析度交给下方「动态解析度」；只有降到地板仍 < 24fps 才砍卡数。 */
   function applyQuality(level: number) {
     quality = level;
     if (level >= 1) {
@@ -719,9 +719,9 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     }
   }
 
-  /* 動態解析度（2026-10-01）：超取樣地板只在「動」的時候讓步——動畫中按實測幀時一格 0.25 往下降（最低到裝置
-     dpr，不低於 1），快了再升回去；一靜下來最後一幀補回滿解析度，靜止畫面永遠是 1.75× 超取樣的清晰度。
-     改 pixelRatio 只是換畫布尺寸，不觸發 shader 重編。 */
+  /* 动态解析度（2026-10-01）：超取样地板只在「动」的时候让步——动画中按实测帧时一格 0.25 往下降（最低到装置
+     dpr，不低于 1），快了再升回去；一静下来最后一帧补回满解析度，静止画面永远是 1.75× 超取样的清晰度。
+     改 pixelRatio 只是换画布尺寸，不触发 shader 重编。 */
   const motionFloor = Math.max(1, Math.min(basePixelRatio, window.devicePixelRatio || 1));
   let motionRatio = basePixelRatio;
   let motionAcc = 0;
@@ -756,7 +756,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       init.onFirstFrame();
       prebuildOthers();
     }
-    /* fps 偵測：只量連續動畫幀（切档那一幀的建場景成本不算），連續偏慢就降一級。 */
+    /* fps 侦测：只量连续动画帧（切档那一帧的建场景成本不算），连续偏慢就降一级。 */
     if (raw > 0 && raw < 0.25 && busy) {
       tuneMotionRatio(raw);
       frameAcc += raw;
@@ -765,8 +765,8 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         const avg = frameAcc / frameN;
         frameAcc = 0;
         frameN = 0;
-        /* 先讓動態解析度降到地板，仍然真的卡（< 24fps）才砍量——量就是額度，砍到比梦虹還少 =
-           把「越大越失控」畫反。 */
+        /* 先让动态解析度降到地板，仍然真的卡（< 24fps）才砍量——量就是额度，砍到比梦虹还少 =
+           把「越大越失控」画反。 */
         if (quality === 0 && motionRatio <= motionFloor && avg > 1 / 24) {
           if (init.onSlow) {
             quality = 1;
@@ -786,10 +786,10 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
 
 
   /**
-   * 預熱一個世界（2026-10-01 效能）：只預建物件不夠——shader 在「第一次被畫」時才在主線程編譯
-   * （實測滾動切档時 getProgramInfoLog 卡住主線程、單幀 733ms），貼圖也是第一次畫才上傳。
-   * 這裡把它暫時掛進場景、以切過去後的同一組燈光呼叫 compileAsync：program 的建立是同步的，
-   * 驅動端編譯走 KHR_parallel_shader_compile 在背景完成，不再阻塞；隨即摘下，下一幀照舊只畫當前世界。
+   * 预热一个世界（2026-10-01 效能）：只预建物件不够——shader 在「第一次被画」时才在主线程编译
+   * （实测滚动切档时 getProgramInfoLog 卡住主线程、单帧 733ms），贴图也是第一次画才上传。
+   * 这里把它暂时挂进场景、以切过去后的同一组灯光呼叫 compileAsync：program 的建立是同步的，
+   * 驱动端编译走 KHR_parallel_shader_compile 在背景完成，不再阻塞；随即摘下，下一帧照旧只画当前世界。
    */
   function warmRig(r: WorldRig) {
     if (r === rig || disposed) return;
@@ -797,10 +797,10 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     const prevFog = scene.fog;
     if (prev) scene.remove(prev.group);
     scene.add(r.group);
-    /* 霧也決定 shader 變體（USE_FOG／霧型）：用該世界的霧編，否則預熱的是錯的變體、切過去照樣現編。 */
+    /* 雾也决定 shader 变体（USE_FOG／雾型）：用该世界的雾编，否则预热的是错的变体、切过去照样现编。 */
     scene.fog = r.fog;
     renderer.compileAsync(scene, camera).catch(() => {
-      /* 預熱失敗＝退回「第一次畫時編譯」，不影響正確性。 */
+      /* 预热失败＝退回「第一次画时编译」，不影响正确性。 */
     });
     scene.fog = prevFog;
     scene.remove(r.group);
@@ -817,7 +817,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     });
   }
 
-  /** 其餘世界在閒時預建＋預熱（shader／貼圖），切档硬剪接時不卡那一下（手機不預建，省記憶體）。 */
+  /** 其余世界在闲时预建＋预热（shader／贴图），切档硬剪接时不卡那一下（手机不预建，省记忆体）。 */
   function prebuildOthers() {
     if (compact) return;
     const queue = WORLD_IDS.filter((id) => !rigs.has(id));
@@ -851,7 +851,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         kick();
         return;
       }
-      /* 新增的卡原地長出（不落），減少的卡原地縮掉；位置表不變，所以是「伸縮」不是「重排」。 */
+      /* 新增的卡原地长出（不落），减少的卡原地缩掉；位置表不变，所以是「伸缩」不是「重排」。 */
       for (let i = count; i < n; i += 1) {
         dropStart[i] = -1e6;
         landed[i] = 1;

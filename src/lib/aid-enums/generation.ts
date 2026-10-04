@@ -1,10 +1,10 @@
 /**
- * AID 生成能力 enums（生成模式／抽卡類型／模型與媒體分類／畫面比例／任務驅動）。
+ * AID 生成能力 enums（生成模式／抽卡类型／模型与媒体分类／画面比例／任务驱动）。
  *
- * 輪子來源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
+ * 轮子来源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
  * 上游 commit：bbd2a58faffd6a0315af8f6a71902ca8adb5a308
- * 取得日：2026-09-15（GitHub raw；本次共抓取 AID 目錄樹列出的全部 51 個 enum 檔，0 失敗；本檔收錄其中 11 個）
- * 來源檔（11 個，路徑相對 repo 根）：
+ * 取得日：2026-09-15（GitHub raw；本次共抓取 AID 目录树列出的全部 51 个 enum 档，0 失败；本档收录其中 11 个）
+ * 来源档（11 个，路径相对 repo 根）：
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/GenModeEnum.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/GenerateModeEnum.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/GenTypeEnum.java
@@ -16,23 +16,23 @@
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/AspectRatioEnum.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/media/enums/DispatchMode.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/media/enums/MediaTaskStatus.java
- * 逐字保留：每個 enum 的成員名（→ TS 物件鍵）、成員欄位值（value/desc/code/label/sortOrder 等
- *   一律按 AID 欄位名原樣輸出）、以及成員上方的 Javadoc 或 `//` 註解原文。中文 desc **一字未改、
- *   未翻譯、未做簡繁轉換、未「優化」**。鍵序＝AID 宣告序。
- * 白名單改寫（僅此三處，其餘逐行等價）：
- *   1. Java `enum` → TS `as const` 常數物件（＋由常數物件推導的值集合型別 `Aid<X>Value`）。
- *   2. 命名空間加前綴 `AID_`（`CreationModeEnum` → `AID_CREATION_MODE_ENUM`），避免與本站常數撞名。
- *   3. 無欄位的純名稱 enum（如 `MediaTaskStatus`）在 TS 以 `{ value: "<成員名>" }` 表示，
- *      以維持與其他 enum 一致的取值面（Java 側其值即 `name()`）。
- * 不搬入（如實聲明，非靜默省略）：
+ * 逐字保留：每个 enum 的成员名（→ TS 物件键）、成员栏位值（value/desc/code/label/sortOrder 等
+ *   一律按 AID 栏位名原样输出）、以及成员上方的 Javadoc 或 `//` 注解原文。中文 desc **一字未改、
+ *   未翻译、未做简繁转换、未「优化」**。键序＝AID 宣告序。
+ * 白名单改写（仅此三处，其余逐行等价）：
+ *   1. Java `enum` → TS `as const` 常数物件（＋由常数物件推导的值集合型别 `Aid<X>Value`）。
+ *   2. 命名空间加前缀 `AID_`（`CreationModeEnum` → `AID_CREATION_MODE_ENUM`），避免与本站常数撞名。
+ *   3. 无栏位的纯名称 enum（如 `MediaTaskStatus`）在 TS 以 `{ value: "<成员名>" }` 表示，
+ *      以维持与其他 enum 一致的取值面（Java 侧其值即 `name()`）。
+ * 不搬入（如实声明，非静默省略）：
  *   - AID 的 static 查表／工具方法（`getByValue` / `of` / `fromCode` / `isCrossGroupSwitch` 等）
- *     與 `isValid*`——本站此目錄只放純資料常數，無邏輯；查表由消費端自建或後續另案。
- *   - `BillingConstants` 的查表方法與 private 比例集合（邏輯，本站另有估算器）；
- *     其 public static final 純量常數逐字保留。
+ *     与 `isValid*`——本站此目录只放纯资料常数，无逻辑；查表由消费端自建或后续另案。
+ *   - `BillingConstants` 的查表方法与 private 比例集合（逻辑，本站另有估算器）；
+ *     其 public static final 纯量常数逐字保留。
  *
- * 本檔為純資料常數，無函式、無副作用。
+ * 本档为纯资料常数，无函式、无副作用。
  *
- * 收錄取捨（全 51 檔的處置表）見同目錄 `index.ts` 檔頭。
+ * 收录取舍（全 51 档的处置表）见同目录 `index.ts` 档头。
  */
 
 /** 生成模式枚举 对应数据库字段：default_gen_mode（AID `GenModeEnum`） */
@@ -43,7 +43,7 @@ export const AID_GEN_MODE_ENUM = {
   PERFORMANCE: { value: "performance", desc: "性能模式" },
 } as const;
 
-/** `GenModeEnum` 的值集合（由常數物件推導）。 */
+/** `GenModeEnum` 的值集合（由常数物件推导）。 */
 export type AidGenModeEnumValue = (typeof AID_GEN_MODE_ENUM)[keyof typeof AID_GEN_MODE_ENUM]["value"];
 
 /** AI模型生成模式枚举。（AID `GenerateModeEnum`） */
@@ -68,7 +68,7 @@ export const AID_GENERATE_MODE_ENUM = {
   AUDIO: { value: "audio", desc: "音频" },
 } as const;
 
-/** `GenerateModeEnum` 的值集合（由常數物件推導）。 */
+/** `GenerateModeEnum` 的值集合（由常数物件推导）。 */
 export type AidGenerateModeEnumValue = (typeof AID_GENERATE_MODE_ENUM)[keyof typeof AID_GENERATE_MODE_ENUM]["value"];
 
 /** 生成抽卡记录类型枚举 对应数据库字段：gen_type（AID `GenTypeEnum`） */
@@ -89,7 +89,7 @@ export const AID_GEN_TYPE_ENUM = {
   COMPOSE: { value: "compose", desc: "配音合成视频" },
 } as const;
 
-/** `GenTypeEnum` 的值集合（由常數物件推導）。 */
+/** `GenTypeEnum` 的值集合（由常数物件推导）。 */
 export type AidGenTypeEnumValue = (typeof AID_GEN_TYPE_ENUM)[keyof typeof AID_GEN_TYPE_ENUM]["value"];
 
 /** 生成结果存储目标枚举 用于区分回调结果写入哪张表（AID `GenResultTargetEnum`） */
@@ -100,7 +100,7 @@ export const AID_GEN_RESULT_TARGET_ENUM = {
   GEN_RECORD: { value: "gen_record", desc: "抽卡记录表" },
 } as const;
 
-/** `GenResultTargetEnum` 的值集合（由常數物件推導）。 */
+/** `GenResultTargetEnum` 的值集合（由常数物件推导）。 */
 export type AidGenResultTargetEnumValue = (typeof AID_GEN_RESULT_TARGET_ENUM)[keyof typeof AID_GEN_RESULT_TARGET_ENUM]["value"];
 
 /** AI模型分类枚举 对应数据库字段：model_type（AID `ModelTypeEnum`） */
@@ -113,7 +113,7 @@ export const AID_MODEL_TYPE_ENUM = {
   AUDIO: { value: "audio", desc: "配音" },
 } as const;
 
-/** `ModelTypeEnum` 的值集合（由常數物件推導）。 */
+/** `ModelTypeEnum` 的值集合（由常数物件推导）。 */
 export type AidModelTypeEnumValue = (typeof AID_MODEL_TYPE_ENUM)[keyof typeof AID_MODEL_TYPE_ENUM]["value"];
 
 /** 媒体文件类型枚举 用于区分生成产物是图片还是视频（AID `MediaTypeEnum`） */
@@ -124,7 +124,7 @@ export const AID_MEDIA_TYPE_ENUM = {
   VIDEO: { value: "video", desc: "视频" },
 } as const;
 
-/** `MediaTypeEnum` 的值集合（由常數物件推導）。 */
+/** `MediaTypeEnum` 的值集合（由常数物件推导）。 */
 export type AidMediaTypeEnumValue = (typeof AID_MEDIA_TYPE_ENUM)[keyof typeof AID_MEDIA_TYPE_ENUM]["value"];
 
 export const AID_MEDIA_TYPE = {
@@ -138,7 +138,7 @@ export const AID_MEDIA_TYPE = {
   AUDIO: { value: "AUDIO" },
 } as const;
 
-/** `MediaType` 的值集合（由常數物件推導）。 */
+/** `MediaType` 的值集合（由常数物件推导）。 */
 export type AidMediaTypeValue = (typeof AID_MEDIA_TYPE)[keyof typeof AID_MEDIA_TYPE]["value"];
 
 /** 产物类型枚举 用于区分生成的产物属于哪种业务类型（AID `ProductTypeEnum`） */
@@ -151,7 +151,7 @@ export const AID_PRODUCT_TYPE_ENUM = {
   VIDEO: { value: "video", desc: "视频" },
 } as const;
 
-/** `ProductTypeEnum` 的值集合（由常數物件推導）。 */
+/** `ProductTypeEnum` 的值集合（由常数物件推导）。 */
 export type AidProductTypeEnumValue = (typeof AID_PRODUCT_TYPE_ENUM)[keyof typeof AID_PRODUCT_TYPE_ENUM]["value"];
 
 /** 画面比例枚举 对应数据库字段：aspect_ratio（AID `AspectRatioEnum`） */
@@ -184,7 +184,7 @@ export const AID_ASPECT_RATIO_ENUM = {
   RATIO_5_4: { value: "5:4", desc: "社交媒体横版" },
 } as const;
 
-/** `AspectRatioEnum` 的值集合（由常數物件推導）。 */
+/** `AspectRatioEnum` 的值集合（由常数物件推导）。 */
 export type AidAspectRatioEnumValue = (typeof AID_ASPECT_RATIO_ENUM)[keyof typeof AID_ASPECT_RATIO_ENUM]["value"];
 
 /** 任务调度模式：决定任务提交后由哪种机制驱动到终态。（AID `DispatchMode`） */
@@ -197,7 +197,7 @@ export const AID_DISPATCH_MODE = {
   POLL_ONLY: { value: "POLL_ONLY" },
 } as const;
 
-/** `DispatchMode` 的值集合（由常數物件推導）。 */
+/** `DispatchMode` 的值集合（由常数物件推导）。 */
 export type AidDispatchModeValue = (typeof AID_DISPATCH_MODE)[keyof typeof AID_DISPATCH_MODE]["value"];
 
 export const AID_MEDIA_TASK_STATUS = {
@@ -218,5 +218,5 @@ export const AID_MEDIA_TASK_STATUS = {
   CANCELLED: { value: "CANCELLED" },
 } as const;
 
-/** `MediaTaskStatus` 的值集合（由常數物件推導）。 */
+/** `MediaTaskStatus` 的值集合（由常数物件推导）。 */
 export type AidMediaTaskStatusValue = (typeof AID_MEDIA_TASK_STATUS)[keyof typeof AID_MEDIA_TASK_STATUS]["value"];

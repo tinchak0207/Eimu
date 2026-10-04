@@ -48,7 +48,7 @@ export default tool({
       const projectSec = projectFrameToSec(activePlan, args.project_frame)
       const timeSec = projectSec - shot.startSec - action.startSec
       if (timeSec < -1 / 24 || timeSec > action.durationSec + 1 / 24) {
-        // 2026-09-03 驗屍修復 R1-#5：錯誤 hint 帶範圍（該動作的工程幀區間 + 鏡頭內幀區間）
+        // 2026-09-03 验尸修复 R1-#5：错误 hint 带范围（该动作的工程帧区间 + 镜头内帧区间）
         return fail("director_invalid_args", actionFrameRangeHint(Number(args.project_frame), shot.startSec, action.startSec, action.durationSec))
       }
       const frames = [...(action.keyframes ?? [])]
@@ -83,11 +83,11 @@ export default tool({
         source: "agent",
         note: args.note !== undefined ? String(args.note) : existing?.note,
       }
-      // 2026-09-03 驗屍修復 R1-#4：同幀去重窗從半幀（1/48）放寬到一幀（1/24）——
-      // 真實會話彈跳實錘（fd22bd6e rev49/55）：用戶 K 幀 t=1.0 與模板填充 K 幀 t=1.025
-      // （0.6 幀間隔）共存，回放位置 15,-2→11.4,-1.64→15,-2 來回彈跳；
-      // 24fps 口徑下一幀槽內的兩幀不可分辨，保留用戶幀（next）、丟棄近鄰模板殘留。
-      // 人工鎖定幀永不在此丟棄（鎖定幀保留，與工具「默認不覆蓋鎖定 K 幀」契約一致）。
+      // 2026-09-03 验尸修复 R1-#4：同帧去重窗从半帧（1/48）放宽到一帧（1/24）——
+      // 真实会话弹跳实锤（fd22bd6e rev49/55）：用户 K 帧 t=1.0 与模板填充 K 帧 t=1.025
+      // （0.6 帧间隔）共存，回放位置 15,-2→11.4,-1.64→15,-2 来回弹跳；
+      // 24fps 口径下一帧槽内的两帧不可分辨，保留用户帧（next）、丢弃近邻模板残留。
+      // 人工锁定帧永不在此丢弃（锁定帧保留，与工具「默认不覆盖锁定 K 帧」契约一致）。
       let updated: DirectorMotionKeyframe[] = [
         ...frames.filter((item) => item.id !== next.id && (item.locked || Math.abs(item.timeSec - next.timeSec) >= 1 / 24)),
         next,
@@ -96,10 +96,10 @@ export default tool({
         updated = smoothPathFrame(updated, next.id)
       }
       if (args.path_mode === "corner") updated = cornerPathFrame(updated, next.id)
-      // 2026-09-03 驗屍修復 R2：首/末 K 幀 from/to 同步。真實會話 rev57-68 實錘：打錨點 K 幀更新了
-      // keyframes 但 action.from/to 元數據滯留（gateway updateAction 只合併 patch 不重錨），
-      // 播放用 keyframes 不受損、元數據說謊。若本次寫入的 K 幀是動作首/末 K 幀（timeSec 最小/最大），
-      // 同一把 updateAction patch 順帶把 from/to 對齊該 K 幀 position（不另發請求）。
+      // 2026-09-03 验尸修复 R2：首/末 K 帧 from/to 同步。真实会话 rev57-68 实锤：打锚点 K 帧更新了
+      // keyframes 但 action.from/to 元数据滞留（gateway updateAction 只合并 patch 不重锚），
+      // 播放用 keyframes 不受损、元数据说谎。若本次写入的 K 帧是动作首/末 K 帧（timeSec 最小/最大），
+      // 同一把 updateAction patch 顺带把 from/to 对齐该 K 帧 position（不另发请求）。
       const syncedFields: string[] = []
       if (updated[0]?.id === next.id) syncedFields.push("from")
       if (updated[updated.length - 1]?.id === next.id) syncedFields.push("to")

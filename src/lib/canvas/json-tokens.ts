@@ -1,7 +1,7 @@
-// 工程透析面板的 JSON 語法高亮（純函式，零依賴）：
-// 把 JSON.stringify(…, null, 2) 的文字切成帶類別的片段，渲染端按類別著色
-// （鍵＝青、字串＝琥珀、數字/布林/null＝紫、其餘標點空白＝plain）。
-// 片段依序拼回＝原文（無損），測試鎖死。
+// 工程透析面板的 JSON 语法高亮（纯函式，零依赖）：
+// 把 JSON.stringify(…, null, 2) 的文字切成带类别的片段，渲染端按类别著色
+// （键＝青、字串＝琥珀、数字/布林/null＝紫、其余标点空白＝plain）。
+// 片段依序拼回＝原文（无损），测试锁死。
 
 export type JsonTokenKind = "key" | "string" | "number" | "literal" | "plain";
 

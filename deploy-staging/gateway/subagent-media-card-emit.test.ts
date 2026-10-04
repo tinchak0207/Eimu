@@ -1,10 +1,10 @@
-// 2026-10-02 FIX-A／FIX-B：子代理媒體成品出卡 ＋ 子會話→父會話映射耐久化的真行為驗收。
-//   FIX-A：野獸模式下音樂/影片只能在 Expert 子代理裡產生，而其 tool part 此前整類被丟棄
-//          → 子代理做出的影片/音樂永遠不出卡。此處餵真 message.part.updated 事件，斷言
-//          **父會話** 的 SSE 收到恰好 1 條 media 幀；running／無媒體 URL → 0 條。
-//   FIX-B：byChildOc 收尾刪除後，poller 用子會話 id 晚到取件仍須解析到父會話；超過 TTL 則解析不到。
-// harness 複製既有 subagent.test.ts（mock fetch 建子會話／prompt_async）＋
-// video-audio-media-card-emit.test.ts（makeState 收父會話 SSE 幀），不自創框架。
+// 2026-10-02 FIX-A／FIX-B：子代理媒体成品出卡 ＋ 子会话→父会话映射耐久化的真行为验收。
+//   FIX-A：野兽模式下音乐/影片只能在 Expert 子代理里产生，而其 tool part 此前整类被丢弃
+//          → 子代理做出的影片/音乐永远不出卡。此处喂真 message.part.updated 事件，断言
+//          **父会话** 的 SSE 收到恰好 1 条 media 帧；running／无媒体 URL → 0 条。
+//   FIX-B：byChildOc 收尾删除后，poller 用子会话 id 晚到取件仍须解析到父会话；超过 TTL 则解析不到。
+// harness 复制既有 subagent.test.ts（mock fetch 建子会话／prompt_async）＋
+// video-audio-media-card-emit.test.ts（makeState 收父会话 SSE 帧），不自创框架。
 // 跑法：cd deploy-staging/gateway && bun test subagent-media-card-emit.test.ts
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test"
 import {
@@ -20,8 +20,8 @@ import { collectToolOutputMediaUrls, parseToolOutput } from "./events-translate.
 import { sessions, dirtySessions } from "./sessions-core.ts"
 import type { SessionState } from "./types-gateway.ts"
 
-// ── mock fetch（複製 subagent.test.ts 骨架：建會話／prompt_async／abort／DELETE／message）──
-// 未知 URL（含 jev LLM 呼叫）一律回空物件 → jev 側 fail-open，dispatch 不觸網。
+// ── mock fetch（复制 subagent.test.ts 骨架：建会话／prompt_async／abort／DELETE／message）──
+// 未知 URL（含 jev LLM 呼叫）一律回空物件 → jev 侧 fail-open，dispatch 不触网。
 const realFetch = globalThis.fetch
 const createdChildren: string[] = []
 let sessionSeq = 0
@@ -46,7 +46,7 @@ globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: stri
   return json({})
 }) as typeof fetch
 
-// ── 父會話 state（複製 video-audio-media-card-emit.test.ts 的 makeState／frames）──────────
+// ── 父会话 state（复制 video-audio-media-card-emit.test.ts 的 makeState／frames）──────────
 function makeState(id: string, captured: string[]): SessionState {
   const client = {
     controller: { enqueue: (f: Uint8Array) => captured.push(new TextDecoder().decode(f)) },
@@ -78,7 +78,7 @@ function makeState(id: string, captured: string[]): SessionState {
   } as unknown as SessionState
 }
 
-// 從收集到的原始 SSE 幀字串（id:/event:/data:）取指定事件名的 payload。
+// 从收集到的原始 SSE 帧字串（id:/event:/data:）取指定事件名的 payload。
 function frames(captured: string[], name: string): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = []
   for (const f of captured) {
@@ -92,10 +92,10 @@ function frames(captured: string[], name: string): Array<Record<string, unknown>
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
-// ── 父會話登錄（deps.resolveSession 由此解析；state 帶真的 clients → 收到媒體幀）──────────
+// ── 父会话登录（deps.resolveSession 由此解析；state 带真的 clients → 收到媒体帧）──────────
 type Parent = { sessionId: string; opencodeSessionId: string; turnGen: number; captured: string[]; state: SessionState }
 const parents = new Map<string, Parent>()
-// deps.emitToSession（subagent.delta/done）的捕獲槽——媒體幀不走這裡，走 sse-core。
+// deps.emitToSession（subagent.delta/done）的捕获槽——媒体帧不走这里，走 sse-core。
 const subagentFrames: Array<{ name: string; data: any }> = []
 let parentSeq = 0
 
@@ -139,7 +139,7 @@ async function dispatchSub(p: Parent, label: string): Promise<string> {
     new Request("http://gw.test/internal/subagent/dispatch", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: p.sessionId, label, prompt: "【任務】产出交付物（预期 5 分钟）。", async: true }),
+      body: JSON.stringify({ sessionId: p.sessionId, label, prompt: "【任务】产出交付物（预期 5 分钟）。", async: true }),
     }),
   )
   expect(res.status).toBe(200)
@@ -153,7 +153,7 @@ async function feedTool(childId: string, part: Record<string, unknown>): Promise
   await tick()
 }
 
-// ── 1. 純函式：巢狀成品形狀識別 ───────────────────────────────────────────────
+// ── 1. 纯函式：巢状成品形状识别 ───────────────────────────────────────────────
 test("collectToolOutputMediaUrls：{jobs:[{video_url,cost_coins}]} → video 恰 1 且 cost 13", () => {
   const parsed = parseToolOutput(
     JSON.stringify({
@@ -182,7 +182,7 @@ test("collectToolOutputMediaUrls：{audios:[{url:.m4a}]} → audio 恰 1", () =>
   expect(r.video.length).toBe(0)
 })
 
-test("collectToolOutputMediaUrls：未完成 {jobs:[{status:queued}]} → 0（負向防偽陽性）", () => {
+test("collectToolOutputMediaUrls：未完成 {jobs:[{status:queued}]} → 0（负向防伪阳性）", () => {
   const r = collectToolOutputMediaUrls({ ok: true, jobs: [{ task_id: "j3", status: "queued" }] })
   expect(r.video.length).toBe(0)
   expect(r.audio.length).toBe(0)
@@ -195,8 +195,8 @@ test("collectToolOutputMediaUrls：'not json' → parseToolOutput null → 0", (
   expect(r.audio.length).toBe(0)
 })
 
-// ── 2. FIX-A：子代理 tool completed 的媒體成品 → 父會話出卡（恰 1 條）─────────
-test("FIX-A：子代理 tool part completed 含影片 URL → 父會話恰 1 條 video.done（帶 cost）", async () => {
+// ── 2. FIX-A：子代理 tool completed 的媒体成品 → 父会话出卡（恰 1 条）─────────
+test("FIX-A：子代理 tool part completed 含影片 URL → 父会话恰 1 条 video.done（带 cost）", async () => {
   const p = makeParent("fixa-video")
   const childId = await dispatchSub(p, "影片专家")
   await feedTool(childId, {
@@ -221,7 +221,7 @@ test("FIX-A：子代理 tool part completed 含影片 URL → 父會話恰 1 條
   expect(frames(p.captured, "audio.done").length).toBe(0)
 })
 
-test("FIX-A：子代理 tool part completed 含音頻 URL → 父會話恰 1 條 audio.done", async () => {
+test("FIX-A：子代理 tool part completed 含音频 URL → 父会话恰 1 条 audio.done", async () => {
   const p = makeParent("fixa-audio")
   const childId = await dispatchSub(p, "音乐专家")
   await feedTool(childId, {
@@ -238,7 +238,7 @@ test("FIX-A：子代理 tool part completed 含音頻 URL → 父會話恰 1 條
   expect(frames(p.captured, "video.done").length).toBe(0)
 })
 
-test("FIX-A 去重：同一 part completed 重複 updated → 仍只恰 1 條 video.done", async () => {
+test("FIX-A 去重：同一 part completed 重复 updated → 仍只恰 1 条 video.done", async () => {
   const p = makeParent("fixa-dedup")
   const childId = await dispatchSub(p, "去重专家")
   const part = {
@@ -257,8 +257,8 @@ test("FIX-A 去重：同一 part completed 重複 updated → 仍只恰 1 條 vi
   expect(frames(p.captured, "video.done").length).toBe(1)
 })
 
-// ── 3. FIX-A 負向：running／無媒體 URL → 0 條 ────────────────────────────────
-test("FIX-A 負向：tool running → 父會話 0 條 media 幀", async () => {
+// ── 3. FIX-A 负向：running／无媒体 URL → 0 条 ────────────────────────────────
+test("FIX-A 负向：tool running → 父会话 0 条 media 帧", async () => {
   const p = makeParent("fixa-running")
   const childId = await dispatchSub(p, "在跑专家")
   await feedTool(childId, {
@@ -276,9 +276,9 @@ test("FIX-A 負向：tool running → 父會話 0 條 media 幀", async () => {
   expect(frames(p.captured, "audio.done").length).toBe(0)
 })
 
-test("FIX-A 負向：completed 但無媒體 URL → 父會話 0 條 media 幀", async () => {
+test("FIX-A 负向：completed 但无媒体 URL → 父会话 0 条 media 帧", async () => {
   const p = makeParent("fixa-nomedia")
-  const childId = await dispatchSub(p, "無媒體专家")
+  const childId = await dispatchSub(p, "无媒体专家")
   await feedTool(childId, {
     type: "tool",
     id: "pt-n",
@@ -290,10 +290,10 @@ test("FIX-A 負向：completed 但無媒體 URL → 父會話 0 條 media 幀", 
   expect(frames(p.captured, "audio.done").length).toBe(0)
 })
 
-// ── 4. 回歸：子代理的 tool part 仍不被轉發成 tool.invoke/tool.result，delta 仍被 suppress ──
-test("回歸：tool part 仍不轉發（無 tool.invoke/tool.result），其 delta 仍被 suppress", async () => {
+// ── 4. 回归：子代理的 tool part 仍不被转发成 tool.invoke/tool.result，delta 仍被 suppress ──
+test("回归：tool part 仍不转发（无 tool.invoke/tool.result），其 delta 仍被 suppress", async () => {
   const p = makeParent("reg-suppress")
-  const childId = await dispatchSub(p, "回歸专家")
+  const childId = await dispatchSub(p, "回归专家")
   await handleSubagentEvent({ type: "message.updated", properties: { info: { id: "m1", role: "assistant" } } }, childId)
   await feedTool(childId, {
     type: "tool",
@@ -303,11 +303,11 @@ test("回歸：tool part 仍不轉發（無 tool.invoke/tool.result），其 del
     messageID: "m1",
     state: { status: "running", input: { command: "ls" } },
   })
-  // tool part 未上屏（既有 suppress 語義）
+  // tool part 未上屏（既有 suppress 语义）
   expect(frames(p.captured, "tool.invoke").length).toBe(0)
   expect(frames(p.captured, "tool.result").length).toBe(0)
   expect(subagentFrames.some((f) => f.name === "tool.invoke" || f.name === "tool.result")).toBe(false)
-  // 其 delta 也一併丟棄（delta 事件自身不帶類型，靠 suppressedParts 判定）
+  // 其 delta 也一并丢弃（delta 事件自身不带类型，靠 suppressedParts 判定）
   const before = subagentFrames.length
   await handleSubagentEvent(
     { type: "message.part.delta", properties: { field: "text", messageID: "m1", partID: "pt-reg", delta: "不该上屏" } },
@@ -317,26 +317,26 @@ test("回歸：tool part 仍不轉發（無 tool.invoke/tool.result），其 del
   expect(subagentFrames.slice(before).some((f) => f.name === "subagent.delta")).toBe(false)
 })
 
-// ── 5. FIX-B：子會話→父會話映射耐久性 ───────────────────────────────────────
-test("FIX-B：run 收尾 unbind 後，subagentParentState(childId) 仍解析得到父 state", async () => {
+// ── 5. FIX-B：子会话→父会话映射耐久性 ───────────────────────────────────────
+test("FIX-B：run 收尾 unbind 后，subagentParentState(childId) 仍解析得到父 state", async () => {
   const p = makeParent("fixb-live")
   const childId = await dispatchSub(p, "耐久甲")
   const run = findRunningRun(p.sessionId, "耐久甲")
   expect(run).toBeTruthy()
-  // 模擬 run 收尾（既有 unbind 路徑：removeFromRegistries → byChildOc.delete）
-  stopSubagentRun(run!, "orchestrator", "測試收尾")
-  // 先證 byChildOc 已 miss（subagentHandlesSession 直讀 byChildOc.has），排除「其實還綁著」的假通過
+  // 模拟 run 收尾（既有 unbind 路径：removeFromRegistries → byChildOc.delete）
+  stopSubagentRun(run!, "orchestrator", "测试收尾")
+  // 先证 byChildOc 已 miss（subagentHandlesSession 直读 byChildOc.has），排除「其实还绑著」的假通过
   expect(subagentHandlesSession(childId)).toBe(false)
-  // 仍能經耐久回退表解析到父 state（poller 晚到取件不再 404）
+  // 仍能经耐久回退表解析到父 state（poller 晚到取件不再 404）
   expect(subagentParentState(childId)).toBe(p.state)
 })
 
-test("FIX-B：映射超過 TTL（2h）後解析不到（lazy prune）", async () => {
+test("FIX-B：映射超过 TTL（2h）后解析不到（lazy prune）", async () => {
   const p = makeParent("fixb-ttl")
   const childId = await dispatchSub(p, "耐久乙")
   const run = findRunningRun(p.sessionId, "耐久乙")
   expect(run).toBeTruthy()
-  stopSubagentRun(run!, "orchestrator", "測試收尾")
+  stopSubagentRun(run!, "orchestrator", "测试收尾")
   const realNow = Date.now()
   expect(subagentHandlesSession(childId)).toBe(false)
   expect(subagentParentState(childId)).toBe(p.state)

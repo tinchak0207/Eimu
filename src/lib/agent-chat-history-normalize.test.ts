@@ -1,6 +1,6 @@
-// 全量歷史歸一化的單測：fixture 直接用 opencode 的原始 messages shape
-// （[{info:{id,role,...},parts:[...]}]），斷言重建出的 transcript 與
-// reducer 構造規則同構，且全數能過持久化白名單。
+// 全量历史归一化的单测：fixture 直接用 opencode 的原始 messages shape
+// （[{info:{id,role,...},parts:[...]}]），断言重建出的 transcript 与
+// reducer 构造规则同构，且全数能过持久化白名单。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -14,9 +14,9 @@ import type { OpenCodeMessage } from "./agent-chat-types";
 const userMsg: OpenCodeMessage = {
   info: { id: "msg_u1", role: "user", time: { created: 1 }, tokens: undefined },
   parts: [
-    { type: "text", text: "幫我畫一隻貓" },
+    { type: "text", text: "帮我画一只猫" },
     { type: "file", url: "https://cdn.example.com/uploads/ref.png", mime: "image/png", filename: "ref.png", size: 12345 },
-    // 無公網 URL（data: base64）必須被丟棄計數，嚴禁進存檔。
+    // 无公网 URL（data: base64）必须被丢弃计数，严禁进存档。
     { type: "file", url: "data:image/png;base64,AAAA", mime: "image/png" },
   ],
 };
@@ -24,87 +24,87 @@ const userMsg: OpenCodeMessage = {
 const assistantMsg: OpenCodeMessage = {
   info: { id: "msg_a1", role: "assistant", time: { created: 2, completed: 3 } },
   parts: [
-    { type: "step-start" }, // 內部片段：跳過計數
-    { type: "reasoning", text: "先想構圖" },
+    { type: "step-start" }, // 内部片段：跳过计数
+    { type: "reasoning", text: "先想构图" },
     { type: "text", text: "好的，" },
     {
       type: "tool",
       tool: "generate_image",
       state: { status: "completed", input: { prompt: "cat" }, output: "ok", time: { start: 1, end: 2 } },
     },
-    { type: "text", text: "貓出來了" },
+    { type: "text", text: "猫出来了" },
     {
       type: "tool",
       tool: "upscale",
       state: { status: "error", input: "x", error: "quota exceeded" },
     },
     { type: "file", url: "https://cdn.example.com/out/cat.png", mime: "image/png" },
-    { type: "mystery-part", whatever: true }, // 未知 part：跳過計數
+    { type: "mystery-part", whatever: true }, // 未知 part：跳过计数
   ],
 };
 
-// ─────────────────────────── 測試
+// ─────────────────────────── 测试
 
-test("全量重建：kind 與時序忠實映射", () => {
+test("全量重建：kind 与时序忠实映射", () => {
   const { items } = normalizeOpenCodeMessages([userMsg, assistantMsg]);
   assert.deepEqual(
     items.map((it) => it.kind),
-    // 附件掛在 user item 上（鏡像 live 上傳語義），assistant 內部按
-    // text→tool→text→tool→media 的原始時序切段。
+    // 附件挂在 user item 上（镜像 live 上传语义），assistant 内部按
+    // text→tool→text→tool→media 的原始时序切段。
     ["user", "assistant", "tool", "assistant", "tool", "image"],
   );
 
   assert.equal(items[0].kind, "user");
-  assert.equal((items[0] as { text: string }).text, "幫我畫一隻貓");
+  assert.equal((items[0] as { text: string }).text, "帮我画一只猫");
   const att = (items[0] as { attachments?: { kind: string; url?: string }[] }).attachments;
   assert.equal(att?.length, 1);
   assert.equal(att?.[0].kind, "image");
   assert.equal(att?.[0].url, "https://cdn.example.com/uploads/ref.png");
 
-  // reasoning 有承載欄位（AgentAssistantTextItem.reasoning）→ 帶上不丟。
+  // reasoning 有承载栏位（AgentAssistantTextItem.reasoning）→ 带上不丢。
   assert.equal((items[1] as { text: string; reasoning?: string }).text, "好的，");
-  assert.equal((items[1] as { reasoning?: string }).reasoning, "先想構圖");
+  assert.equal((items[1] as { reasoning?: string }).reasoning, "先想构图");
   assert.equal((items[1] as { streaming: boolean }).streaming, false);
 
-  // tool 狀態映射：completed→ok / error→failed（error 帶人類可讀原因）。
+  // tool 状态映射：completed→ok / error→failed（error 带人类可读原因）。
   assert.equal((items[2] as { status: string; tool: string }).status, "ok");
   assert.equal((items[2] as { tool: string }).tool, "generate_image");
   assert.ok((items[2] as { argsSummary?: string }).argsSummary?.includes("cat"));
   assert.equal((items[4] as { status: string }).status, "failed");
   assert.equal((items[4] as { error?: string }).error, "quota exceeded");
 
-  // 媒體 item：公網 URL 直入。
+  // 媒体 item：公网 URL 直入。
   assert.equal((items[5] as { url: string }).url, "https://cdn.example.com/out/cat.png");
 });
 
-test("seq：非媒體條目嚴格遞增；媒體 seq 是 kind 內展示序號（鏡像 reducer）", () => {
+test("seq：非媒体条目严格递增；媒体 seq 是 kind 内展示序号（镜像 reducer）", () => {
   const { items } = normalizeOpenCodeMessages([userMsg, assistantMsg]);
   const nonMedia = items.filter((it) => it.kind !== "image" && it.kind !== "video" && it.kind !== "audio");
   for (let i = 1; i < nonMedia.length; i += 1) {
-    assert.ok(nonMedia[i].seq > nonMedia[i - 1].seq, `seq 嚴格遞增被破壞：${nonMedia[i - 1].seq} → ${nonMedia[i].seq}`);
+    assert.ok(nonMedia[i].seq > nonMedia[i - 1].seq, `seq 严格递增被破坏：${nonMedia[i - 1].seq} → ${nonMedia[i].seq}`);
   }
-  // 第一張圖展示序號 = 1（錨定文案「第 N 張」讀的就是它）。
+  // 第一张图展示序号 = 1（锚定文案「第 N 张」读的就是它）。
   assert.equal((items[5] as { seq: number }).seq, 1);
 });
 
-test("id 全陣列唯一，user id 續接 optimistic 計數語義", () => {
+test("id 全阵列唯一，user id 续接 optimistic 计数语义", () => {
   const { items } = normalizeOpenCodeMessages([userMsg, assistantMsg, userMsg]);
   const ids = new Set(items.map((it) => it.id));
-  assert.equal(ids.size, items.length, "id 撞車：React key 會重複");
+  assert.equal(ids.size, items.length, "id 撞车：React key 会重复");
   assert.equal(items[0].id, "user-0");
-  assert.equal(items[6].id, "user-1"); // 第二則 user 沿計數續號
+  assert.equal(items[6].id, "user-1"); // 第二则 user 沿计数续号
 });
 
-test("droppedParts 統計：step-start/未知 part/data: URI 各計一筆", () => {
+test("droppedParts 统计：step-start/未知 part/data: URI 各计一笔", () => {
   const { droppedParts, droppedByType } = normalizeOpenCodeMessages([userMsg, assistantMsg]);
-  // user: data: file 1 筆；assistant: step-start + mystery-part 2 筆。
+  // user: data: file 1 笔；assistant: step-start + mystery-part 2 笔。
   assert.equal(droppedParts, 3);
   assert.equal(droppedByType["file-no-public-url"], 1);
   assert.equal(droppedByType["step-start"], 1);
   assert.equal(droppedByType["mystery-part"], 1);
 });
 
-test("媒體判不出型別（無 mime 無後綴）→ 丟棄計數；同 URL 重複 → 去重", () => {
+test("媒体判不出型别（无 mime 无后缀）→ 丢弃计数；同 URL 重复 → 去重", () => {
   const msgs: OpenCodeMessage[] = [
     {
       info: { role: "assistant" },
@@ -120,12 +120,12 @@ test("媒體判不出型別（無 mime 無後綴）→ 丟棄計數；同 URL �
   assert.deepEqual(items.map((it) => it.kind), ["video", "audio"]);
   assert.equal(droppedParts, 1);
   assert.equal(droppedByType["media-unknown-kind"], 1);
-  // 展示序號按 kind 獨立計數。
+  // 展示序号按 kind 独立计数。
   assert.equal((items[0] as { seq: number }).seq, 1);
   assert.equal((items[1] as { seq: number }).seq, 1);
 });
 
-test("髒資料不炸：空數組 / 非物件訊息 / 缺 parts / 未知角色 / 缺 state 的 tool", () => {
+test("脏资料不炸：空数组 / 非物件讯息 / 缺 parts / 未知角色 / 缺 state 的 tool", () => {
   const { items, droppedParts } = normalizeOpenCodeMessages([]);
   assert.equal(items.length, 0);
   assert.equal(droppedParts, 0);
@@ -136,29 +136,29 @@ test("髒資料不炸：空數組 / 非物件訊息 / 缺 parts / 未知角色 /
     { parts: [{ type: "text", text: "x" }] }, // 缺 info/role
     { info: { role: "wizard" }, parts: [{ type: "text", text: "abracadabra" }] }, // 未知角色
     { info: { role: "assistant" }, parts: [{ type: "tool", tool: "no_state_tool" }] }, // 缺 state
-    { info: { role: "user" }, parts: [{ type: "text", text: "   " }] }, // 空白文字：不產條目不計丟棄
+    { info: { role: "user" }, parts: [{ type: "text", text: "   " }] }, // 空白文字：不产条目不计丢弃
   ] as unknown as OpenCodeMessage[];
   const r = normalizeOpenCodeMessages(dirty);
   assert.equal(r.items.length, 0);
-  assert.ok(r.droppedParts >= 4, `髒 part 應全數計數，實際 ${r.droppedParts}`);
+  assert.ok(r.droppedParts >= 4, `脏 part 应全数计数，实际 ${r.droppedParts}`);
 } );
 
-test("產出全數過 sanitizeItemsForStorage 白名單（無 item 被殺）", () => {
+test("产出全数过 sanitizeItemsForStorage 白名单（无 item 被杀）", () => {
   const { items } = normalizeOpenCodeMessages([userMsg, assistantMsg]);
   assert.ok(items.length > 0);
   const sanitized = sanitizeItemsForStorage(items);
-  assert.equal(sanitized.length, items.length, "有 item 被持久化白名單殺掉");
-  // 過存檔校驗的三個硬條件：id/kind 字串、kind 在 ITEM_KINDS、seq 是數字。
+  assert.equal(sanitized.length, items.length, "有 item 被持久化白名单杀掉");
+  // 过存档校验的三个硬条件：id/kind 字串、kind 在 ITEM_KINDS、seq 是数字。
   const KINDS = new Set(["user", "assistant", "tool", "image", "video", "audio", "notice", "subagent_result"]);
   for (const it of sanitized) {
     assert.equal(typeof it.id, "string");
-    assert.ok(KINDS.has(it.kind), `kind 不在白名單：${it.kind}`);
+    assert.ok(KINDS.has(it.kind), `kind 不在白名单：${it.kind}`);
     assert.equal(typeof it.seq, "number");
     assert.ok(Number.isFinite(it.seq));
   }
 });
 
-test("進行中 turn 的尾巴：running tool 保留 running 態（等 >counter 增量結算）", () => {
+test("进行中 turn 的尾巴：running tool 保留 running 态（等 >counter 增量结算）", () => {
   const msgs: OpenCodeMessage[] = [
     {
       info: { role: "assistant" },
@@ -169,9 +169,9 @@ test("進行中 turn 的尾巴：running tool 保留 running 態（等 >counter 
   assert.equal((items[0] as { status: string }).status, "running");
 });
 
-// ─────────────────────────── 系統注入訊息歸一化（歸因錯覺病灶）
+// ─────────────────────────── 系统注入讯息归一化（归因错觉病灶）
 
-/** 逐字對齊 gateway/index.ts wakeSessionForSubagent 的注入格式（成功態）。 */
+/** 逐字对齐 gateway/index.ts wakeSessionForSubagent 的注入格式（成功态）。 */
 const wakeOkMsg: OpenCodeMessage = {
   info: { role: "user" },
   parts: [
@@ -184,7 +184,7 @@ const wakeOkMsg: OpenCodeMessage = {
   ],
 };
 
-/** 失敗態（同真源，verdict=失败 走「失败原因」前綴）。 */
+/** 失败态（同真源，verdict=失败 走「失败原因」前缀）。 */
 const wakeErrMsg: OpenCodeMessage = {
   info: { role: "user" },
   parts: [
@@ -197,7 +197,7 @@ const wakeErrMsg: OpenCodeMessage = {
   ],
 };
 
-test("子代理喚醒（成功態）→ subagent_result 卡，不冒充用戶氣泡", () => {
+test("子代理唤醒（成功态）→ subagent_result 卡，不冒充用户气泡", () => {
   const { items, droppedByType } = normalizeOpenCodeMessages([wakeOkMsg]);
   assert.equal(items.length, 1);
   assert.equal(droppedByType["system-hint"], undefined);
@@ -210,11 +210,11 @@ test("子代理喚醒（成功態）→ subagent_result 卡，不冒充用戶氣
   assert.equal(it.subagentId, "a4e7dae6");
   assert.equal(it.label, "搜索竞品定价");
   assert.equal(it.status, "ok");
-  // 摘要正文 = 结果摘要內容，尾部的續跑指令行（給模型的）必須剝掉。
+  // 摘要正文 = 结果摘要内容，尾部的续跑指令行（给模型的）必须剥掉。
   assert.equal(it.text, "已完成 3 家竞品定价抓取，均值 ¥29/月，明细见表格。");
 });
 
-test("子代理喚醒（失敗態）→ status error，text = 失敗原因", () => {
+test("子代理唤醒（失败态）→ status error，text = 失败原因", () => {
   const { items } = normalizeOpenCodeMessages([wakeErrMsg]);
   const it = items[0] as { kind: string; subagentId: string; label: string; status: string; text: string };
   assert.equal(it.kind, "subagent_result");
@@ -224,7 +224,7 @@ test("子代理喚醒（失敗態）→ status error，text = 失敗原因", () 
   assert.equal(it.text, "上游 429 限流，3 次重试后放弃。");
 });
 
-test("喚醒條目佔 order seq 保時序，不佔 userCount（user id 續號不受污染）", () => {
+test("唤醒条目占 order seq 保时序，不占 userCount（user id 续号不受污染）", () => {
   const { items } = normalizeOpenCodeMessages([
     { info: { role: "user" }, parts: [{ type: "text", text: "第一句" }] },
     wakeOkMsg,
@@ -232,12 +232,12 @@ test("喚醒條目佔 order seq 保時序，不佔 userCount（user id 續號不
   ]);
   assert.deepEqual(items.map((it) => it.kind), ["user", "subagent_result", "user"]);
   assert.equal(items[0].id, "user-0");
-  assert.equal(items[2].id, "user-1"); // 喚醒不計用戶輪，第二句仍是 user-1
-  // seq 嚴格遞增（喚醒卡佔 2 號位）。
+  assert.equal(items[2].id, "user-1"); // 唤醒不计用户轮，第二句仍是 user-1
+  // seq 严格递增（唤醒卡占 2 号位）。
   assert.ok(items[1].seq > items[0].seq && items[2].seq > items[1].seq);
 });
 
-test("子代理喚醒骨架漂移（label 帶引號）→ 兜底解析，仍不冒充用戶氣泡", () => {
+test("子代理唤醒骨架漂移（label 带引号）→ 兜底解析，仍不冒充用户气泡", () => {
   const msgs: OpenCodeMessage[] = [
     {
       info: { role: "user" },
@@ -252,29 +252,29 @@ test("子代理喚醒骨架漂移（label 帶引號）→ 兜底解析，仍不�
   assert.equal(it.status, "ok");
 });
 
-test("系統重試提示 → 整條不顯示，計 droppedByType.system-hint", () => {
+test("系统重试提示 → 整条不显示，计 droppedByType.system-hint", () => {
   const hint =
     "（系统提示：上一轮回复因上游模型错误中断，请从中断处继续完成任务，不要重复已完成的步骤或工具调用）";
   const { items, droppedParts, droppedByType } = normalizeOpenCodeMessages([
     { info: { role: "user" }, parts: [{ type: "text", text: hint }] },
-    { info: { role: "user" }, parts: [{ type: "text", text: "真實用戶訊息" }] },
+    { info: { role: "user" }, parts: [{ type: "text", text: "真实用户讯息" }] },
   ]);
   assert.equal(items.length, 1);
-  assert.equal((items[0] as { text: string }).text, "真實用戶訊息");
+  assert.equal((items[0] as { text: string }).text, "真实用户讯息");
   assert.equal(droppedParts, 1);
   assert.equal(droppedByType["system-hint"], 1);
 });
 
-// 現場實錘（messages-gw.ts:195）：召回前綴實際是「頭部注入」——
-// `prefix + "\n\n" + 用戶正文`（舊規格描述的尾部追加也一併覆蓋）。
+// 现场实锤（messages-gw.ts:195）：召回前缀实际是「头部注入」——
+// `prefix + "\n\n" + 用户正文`（旧规格描述的尾部追加也一并覆盖）。
 const recallBlock =
-  "[相關領域知識（供參考，衝突以現場為準）]\n" +
+  "[相关领域知识（供参考，冲突以现场为准）]\n" +
   "- [product] pricing-rules\n" +
   "  套餐定价以 PRODUCT.md 为准。\n" +
   "- [infra] vercel-deploy\n" +
   "  部署走干净 worktree。\n";
 
-test("記憶召回知識塊（頭部注入，live 實際格式）→ 從用戶氣泡剝離，剩餘文本正常顯示", () => {
+test("记忆召回知识块（头部注入，live 实际格式）→ 从用户气泡剥离，剩余文本正常显示", () => {
   const msgs: OpenCodeMessage[] = [
     { info: { role: "user" }, parts: [{ type: "text", text: `${recallBlock}\n\n帮我画一只猫` }] },
   ];
@@ -282,10 +282,10 @@ test("記憶召回知識塊（頭部注入，live 實際格式）→ 從用戶�
   assert.equal(items.length, 1);
   assert.equal(items[0].kind, "user");
   assert.equal((items[0] as { text: string }).text, "帮我画一只猫");
-  assert.equal(droppedByType["recall-block"], undefined); // 有剩餘文本：不是丟棄是剝離
+  assert.equal(droppedByType["recall-block"], undefined); // 有剩余文本：不是丢弃是剥离
 });
 
-test("記憶召回知識塊（尾部追加格式）→ 同樣剝離", () => {
+test("记忆召回知识块（尾部追加格式）→ 同样剥离", () => {
   const msgs: OpenCodeMessage[] = [
     { info: { role: "user" }, parts: [{ type: "text", text: `帮我画一只猫\n\n${recallBlock}` }] },
   ];
@@ -294,7 +294,7 @@ test("記憶召回知識塊（尾部追加格式）→ 同樣剝離", () => {
   assert.equal((items[0] as { text: string }).text, "帮我画一只猫");
 });
 
-test("純知識塊（剝後無剩餘文本）→ 不生成 user item，計 droppedByType.recall-block", () => {
+test("纯知识块（剥后无剩余文本）→ 不生成 user item，计 droppedByType.recall-block", () => {
   const { items, droppedByType, droppedParts } = normalizeOpenCodeMessages([
     { info: { role: "user" }, parts: [{ type: "text", text: recallBlock }] },
   ]);
@@ -303,7 +303,7 @@ test("純知識塊（剝後無剩餘文本）→ 不生成 user item，計 dropp
   assert.equal(droppedParts, 1);
 });
 
-test("assistant 內部框架段（歷史路徑）→ 剝離，正文與正常標題保留", () => {
+test("assistant 内部框架段（历史路径）→ 剥离，正文与正常标题保留", () => {
   const text =
     "这是给用户的正文。\n" +
     "## Objective\n完成定价调研\n" +
@@ -317,17 +317,17 @@ test("assistant 內部框架段（歷史路徑）→ 剝離，正文與正常標
   assert.equal((items[0] as { text: string }).text, "这是给用户的正文。\n## 真正的下一节\n后续正文");
 });
 
-test("stripInternalSections：代碼柵欄內的內部段標題直通不剝", () => {
+test("stripInternalSections：代码栅栏内的内部段标题直通不剥", () => {
   const text = "前言\n```text\n## Objective\nfenced ## Objective stays\n```\n后记";
   assert.equal(stripInternalSections(text), text);
 });
 
-test("stripInternalSections：無內部段標題 → 原樣返回（零改動）", () => {
+test("stripInternalSections：无内部段标题 → 原样返回（零改动）", () => {
   const text = "## Objectives（复数不命中）\n## 目标\n正文保留  ";
   assert.equal(stripInternalSections(text), text);
 });
 
-test("喚醒產出的 subagent_result 過 sanitizeItemsForStorage 白名單", () => {
+test("唤醒产出的 subagent_result 过 sanitizeItemsForStorage 白名单", () => {
   const { items } = normalizeOpenCodeMessages([wakeOkMsg]);
   const sanitized = sanitizeItemsForStorage(items);
   assert.equal(sanitized.length, 1);

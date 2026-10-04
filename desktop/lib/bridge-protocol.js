@@ -1,54 +1,54 @@
 // desktop/lib/bridge-protocol.js
 //
-// W6b：device bridge「本機側」的**純函式**層（零 I/O、零狀態、electron 無關）。
+// W6b：device bridge「本机侧」的**纯函式**层（零 I/O、零状态、electron 无关）。
 //
-// 這一層與雲端閘道 deploy-staging/gateway/device-bridge.ts /
-// device-bridge-policy.ts 逐欄對齊（同一組工具白名單、同樣的欄位夾制、
-// 同樣的 256KB 上限與 `…[truncated N bytes]` 標記）。客戶端與閘道是同一份
-// 契約的兩半：閘道那份是雲端縱深防禦的第二道，本檔是本機端執行前的第一道。
+// 这一层与云端闸道 deploy-staging/gateway/device-bridge.ts /
+// device-bridge-policy.ts 逐栏对齐（同一组工具白名单、同样的栏位夹制、
+// 同样的 256KB 上限与 `…[truncated N bytes]` 标记）。客户端与闸道是同一份
+// 契约的两半：闸道那份是云端纵深防御的第二道，本档是本机端执行前的第一道。
 //
-// denylist **不自造第二份清單**：直接 require ./policy.js 的 isSensitivePath
-// （來源＝desktop/lib/policy.js，W3 殼層安全層）。本機實作與閘道
-// `device-bridge-policy.ts:isSensitivePath` **同一語義**：掃描所有路徑段
-// （不限家目錄之下）、一律轉小寫、fail-closed（純空白/非字串/無法解析 → 敏感）。
-// 兩者跨 runtime 無法共用模組，故以**雲端向量表**
-// `deploy-staging/gateway/device-bridge-policy.vectors.json` 為唯一真源；
-// 本機 `policy.test.js` 用 fs.readFileSync 載入該檔逐條斷言（見 Gap2）。
+// denylist **不自造第二份清单**：直接 require ./policy.js 的 isSensitivePath
+// （来源＝desktop/lib/policy.js，W3 壳层安全层）。本机实作与闸道
+// `device-bridge-policy.ts:isSensitivePath` **同一语义**：扫描所有路径段
+// （不限家目录之下）、一律转小写、fail-closed（纯空白/非字串/无法解析 → 敏感）。
+// 两者跨 runtime 无法共用模组，故以**云端向量表**
+// `deploy-staging/gateway/device-bridge-policy.vectors.json` 为唯一真源；
+// 本机 `policy.test.js` 用 fs.readFileSync 载入该档逐条断言（见 Gap2）。
 
 "use strict";
 
 const policy = require("./policy.js");
 
-// ── 與雲端側一致的常數（device-bridge-policy.ts / device-bridge.ts）──────────
+// ── 与云端侧一致的常数（device-bridge-policy.ts / device-bridge.ts）──────────
 
-/** 允許經裝置橋執行的工具**最小集合**。無任何寫入／刪除／執行命令工具。 */
+/** 允许经装置桥执行的工具**最小集合**。无任何写入／删除／执行命令工具。 */
 const TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat"]);
 
-/** 單次回傳內容硬上限（與雲端 MAX_READ_BYTES 相同）。 */
+/** 单次回传内容硬上限（与云端 MAX_READ_BYTES 相同）。 */
 const MAX_READ_BYTES = 256 * 1024;
-/** 未指定 limit 時的預設讀取量。 */
+/** 未指定 limit 时的预设读取量。 */
 const DEFAULT_READ_BYTES = 64 * 1024;
-/** 回傳 payload 硬上限（同雲端 finalizeDeviceResult 的 256KB）。 */
+/** 回传 payload 硬上限（同云端 finalizeDeviceResult 的 256KB）。 */
 const MAX_RESULT_BYTES = MAX_READ_BYTES;
 
 const MAX_LIST_ENTRIES = 2000;
 const MAX_GREP_MATCHES = 500;
 
 /**
- * grep 逐檔讀入硬上限（與雲端 `device-bridge-policy.ts:MAX_FILE_READ_BYTES` 同值）。
- * 雲端隨 `grep` 參數下發 `max_file_bytes`；本機 `sanitizeToolArgs` 保留並夾制它，
- * 且**本機上限不得比雲端契約寬鬆**——effective = min(雲端下發值, 本值)。
+ * grep 逐档读入硬上限（与云端 `device-bridge-policy.ts:MAX_FILE_READ_BYTES` 同值）。
+ * 云端随 `grep` 参数下发 `max_file_bytes`；本机 `sanitizeToolArgs` 保留并夹制它，
+ * 且**本机上限不得比云端契约宽松**——effective = min(云端下发值, 本值)。
  */
 const MAX_FILE_READ_BYTES = 1024 * 1024;
 
-// ── 工具白名單 ─────────────────────────────────────────────────────────
+// ── 工具白名单 ─────────────────────────────────────────────────────────
 
-/** 非字串／不在白名單 → false（呼叫端一律拒收）。 */
+/** 非字串／不在白名单 → false（呼叫端一律拒收）。 */
 function isToolAllowed(tool) {
   return typeof tool === "string" && TOOLS.includes(tool);
 }
 
-// ── 大小夾制（與 device-bridge-policy.ts 同語義）──────────────────────────
+// ── 大小夹制（与 device-bridge-policy.ts 同语义）──────────────────────────
 
 function clampReadSize(requested) {
   const n = typeof requested === "number" ? requested : Number.NaN;
@@ -63,9 +63,9 @@ function clampResultBytes(requested) {
 }
 
 /**
- * grep 單檔讀入上限夾制（逐欄對齊 device-bridge-policy.ts:clampFileBytes）。
- * 非有限／<=0 → 上限（此處即契約上限）；其餘向下取整並夾到
- * `min(請求值, MAX_FILE_READ_BYTES)`——本機只能更嚴、不得更鬆。
+ * grep 单档读入上限夹制（逐栏对齐 device-bridge-policy.ts:clampFileBytes）。
+ * 非有限／<=0 → 上限（此处即契约上限）；其余向下取整并夹到
+ * `min(请求值, MAX_FILE_READ_BYTES)`——本机只能更严、不得更松。
  */
 function clampFileBytes(requested) {
   const n = typeof requested === "number" ? requested : Number.NaN;
@@ -77,9 +77,9 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /**
- * 以位元組截斷並附標記（逐字對齊 device-bridge-policy.ts:truncateWithMarker）。
- * UTF-8 邊界安全：切到多位元組字元中間時退位元組直到尾端不再是 U+FFFD。
- * 保證 keptBytes <= cap；標記是內容外的後設資訊。
+ * 以位元组截断并附标记（逐字对齐 device-bridge-policy.ts:truncateWithMarker）。
+ * UTF-8 边界安全：切到多位元组字元中间时退位元组直到尾端不再是 U+FFFD。
+ * 保证 keptBytes <= cap；标记是内容外的后设资讯。
  */
 function truncateWithMarker(text, max) {
   const input = typeof text === "string" ? text : String(text ?? "");
@@ -100,10 +100,10 @@ function truncateWithMarker(text, max) {
 }
 
 /**
- * 把本機工具結果套上大小硬上限與截斷標記（與閘道 finalizeDeviceResult 同形）。
- *  - payload 是字串 → 視為 text 欄位。
- *  - payload 物件含 string `text` → 只夾 text，保留其餘後設欄位。
- *  - 其餘 → JSON 序列化後夾制；超限時以 { truncated, truncated_bytes, text } 取代。
+ * 把本机工具结果套上大小硬上限与截断标记（与闸道 finalizeDeviceResult 同形）。
+ *  - payload 是字串 → 视为 text 栏位。
+ *  - payload 物件含 string `text` → 只夹 text，保留其余后设栏位。
+ *  - 其余 → JSON 序列化后夹制；超限时以 { truncated, truncated_bytes, text } 取代。
  * @returns {{ result: object, truncated: boolean, bytes: number, original_bytes: number }}
  */
 function clampResult(payload, maxBytes) {
@@ -130,7 +130,7 @@ function clampResult(payload, maxBytes) {
   };
 }
 
-// ── 參數淨化（逐欄對齊 device-bridge.ts:sanitizeToolArgs）───────────────
+// ── 参数净化（逐栏对齐 device-bridge.ts:sanitizeToolArgs）───────────────
 
 function asString(v) {
   return typeof v === "string" && v.trim().length > 0 ? v : null;
@@ -145,11 +145,11 @@ function asIntInRange(v, min, max) {
 }
 
 /**
- * denylist 判定：複用 policy.js 的 isSensitivePath（唯一真源語義＝雲端
- * device-bridge-policy.vectors.json），不放行任何自造清單。
+ * denylist 判定：复用 policy.js 的 isSensitivePath（唯一真源语义＝云端
+ * device-bridge-policy.vectors.json），不放行任何自造清单。
  * @param {unknown} p
- * @param {{home?: string, platform?: string}} [ctx] 測試可注入（預設真實家目錄/平台）
- * @returns {string|null} 拒收原因碼；null＝放行。
+ * @param {{home?: string, platform?: string}} [ctx] 测试可注入（预设真实家目录/平台）
+ * @returns {string|null} 拒收原因码；null＝放行。
  */
 function denyReason(p, ctx) {
   if (typeof p !== "string" || p.trim().length === 0) return "bad_path";
@@ -160,8 +160,8 @@ function denyReason(p, ctx) {
 }
 
 /**
- * 只放行工具需要的欄位，未知欄位一律剝除；敏感路徑在此就被擋下。
- * 與 device-bridge.ts:sanitizeToolArgs 逐欄等價（同夾制界、同錯誤碼）。
+ * 只放行工具需要的栏位，未知栏位一律剥除；敏感路径在此就被挡下。
+ * 与 device-bridge.ts:sanitizeToolArgs 逐栏等价（同夹制界、同错误码）。
  * @returns {{ok:true,args:object}|{ok:false,code:string,message:string}}
  */
 function sanitizeToolArgs(tool, raw, ctx) {
@@ -196,8 +196,8 @@ function sanitizeToolArgs(tool, raw, ctx) {
     case "grep": {
       const pattern = asString(r.pattern);
       if (!pattern) return { ok: false, code: "bad_request", message: "args.pattern is required" };
-      // max_file_bytes：H2 輸入側契約。雲端下發此值；本機保留並夾制到本機上限
-      // （effective = min(雲端值, MAX_FILE_READ_BYTES)），執行器逐檔讀取真的用它。
+      // max_file_bytes：H2 输入侧契约。云端下发此值；本机保留并夹制到本机上限
+      // （effective = min(云端值, MAX_FILE_READ_BYTES)），执行器逐档读取真的用它。
       const args = { path: p, pattern, max_matches: 100, max_file_bytes: clampFileBytes(r.max_file_bytes) };
       if (r.max_matches !== undefined) {
         const n = asIntInRange(r.max_matches, 1, MAX_GREP_MATCHES);
@@ -213,14 +213,14 @@ function sanitizeToolArgs(tool, raw, ctx) {
   }
 }
 
-// ── 輪詢／重連退避 ─────────────────────────────────────────────────────
+// ── 轮询／重连退避 ─────────────────────────────────────────────────────
 
 const DEFAULT_BACKOFF = Object.freeze({ baseMs: 1000, factor: 2, maxMs: 30000 });
 
 /**
- * 指數退避。attempt 為「已連續失敗次數」（0 起算）。
- * 保證回傳值 ∈ [0, maxMs]，且非有限輸入一律視為 0。
- * jitterRatio > 0 時只在延遲上「加」隨機量（不降到 0，避免忙輪）。
+ * 指数退避。attempt 为「已连续失败次数」（0 起算）。
+ * 保证回传值 ∈ [0, maxMs]，且非有限输入一律视为 0。
+ * jitterRatio > 0 时只在延迟上「加」随机量（不降到 0，避免忙轮）。
  */
 function nextBackoff(attempt, opts = {}) {
   const baseMs = Number.isFinite(opts.baseMs) && opts.baseMs > 0 ? opts.baseMs : DEFAULT_BACKOFF.baseMs;

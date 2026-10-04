@@ -7,7 +7,7 @@ import { authenticateImageUser } from "@/lib/image-billing";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function POST(req: Request) {
   const controlPlaneOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN;

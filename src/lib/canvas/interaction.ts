@@ -1,16 +1,16 @@
-// 畫布交互純函式層：框選幾何、複製貼上克隆、對齊 / 均分 / 網格整理。
+// 画布交互纯函式层：框选几何、复制贴上克隆、对齐 / 均分 / 网格整理。
 //
-// 為什麼獨立成層：InfiniteCanvas 只負責手勢（DOM 事件流），CanvasEmbed 只負責
-// 編排；「矩形掃到誰」「克隆出什麼」「對齊後誰動到哪」是可以脫離 DOM 回答的
-// 決策。測試 runner 是 node:test（無 jsdom），只有純函式測得動 —— 這一層因此
-// 禁止任何 DOM / React 依賴。
+// 为什么独立成层：InfiniteCanvas 只负责手势（DOM 事件流），CanvasEmbed 只负责
+// 编排；「矩形扫到谁」「克隆出什么」「对齐后谁动到哪」是可以脱离 DOM 回答的
+// 决策。测试 runner 是 node:test（无 jsdom），只有纯函式测得动 —— 这一层因此
+// 禁止任何 DOM / React 依赖。
 //
-// 契約：所有函式不改動輸入（含傳入的 existingIds）；排列類函式只回傳「位置
-// 真的變了」的節點，呼叫端可直接餵給移動流程，不產生無意義的 no-op 更新。
+// 契约：所有函式不改动输入（含传入的 existingIds）；排列类函式只回传「位置
+// 真的变了」的节点，呼叫端可直接喂给移动流程，不产生无意义的 no-op 更新。
 
 import type { CanvasConnection, CanvasNode, CanvasPosition, CanvasViewport } from "./types";
 
-/** 世界座標矩形（已歸一化：width/height 恆非負）。 */
+/** 世界座标矩形（已归一化：width/height 恒非负）。 */
 export interface WorldRect {
   x: number;
   y: number;
@@ -18,16 +18,16 @@ export interface WorldRect {
   height: number;
 }
 
-/** 排列類函式的輸出單位：把 nodeId 移到 position。 */
+/** 排列类函式的输出单位：把 nodeId 移到 position。 */
 export interface NodeMove {
   nodeId: string;
   position: CanvasPosition;
 }
 
 /**
- * 螢幕座標矩形（兩個角點，順序不拘）→ 世界座標矩形。
- * 與 layout.ts 的 zoomAtPoint 同一套換算：world = (screen - translate) / k。
- * 反向拖動（b 在 a 的左上方）也歸一化成非負寬高。
+ * 萤幕座标矩形（两个角点，顺序不拘）→ 世界座标矩形。
+ * 与 layout.ts 的 zoomAtPoint 同一套换算：world = (screen - translate) / k。
+ * 反向拖动（b 在 a 的左上方）也归一化成非负宽高。
  */
 export function screenRectToWorld(
   a: { x: number; y: number },
@@ -46,7 +46,7 @@ export function screenRectToWorld(
   };
 }
 
-/** 節點與世界矩形是否相交（含觸邊：框到邊緣也算命中，寧可多選不漏選）。 */
+/** 节点与世界矩形是否相交（含触边：框到边缘也算命中，宁可多选不漏选）。 */
 export function nodeIntersectsRect(node: CanvasNode, rect: WorldRect): boolean {
   return (
     node.position.x <= rect.x + rect.width &&
@@ -56,7 +56,7 @@ export function nodeIntersectsRect(node: CanvasNode, rect: WorldRect): boolean {
   );
 }
 
-/** 框選命中：回傳與矩形相交的節點 id（維持 nodes 原順序，結果穩定可預期）。 */
+/** 框选命中：回传与矩形相交的节点 id（维持 nodes 原顺序，结果稳定可预期）。 */
 export function nodesInRect(nodes: CanvasNode[], rect: WorldRect): string[] {
   const hit: string[] = [];
   for (const node of nodes) {
@@ -65,14 +65,14 @@ export function nodesInRect(nodes: CanvasNode[], rect: WorldRect): string[] {
   return hit;
 }
 
-// ─────────────────────────────────────────── 複製貼上
+// ─────────────────────────────────────────── 复制贴上
 
-/** 預設貼上偏移：副本錯開一步，不完全蓋住原件。 */
+/** 预设贴上偏移：副本错开一步，不完全盖住原件。 */
 const PASTE_OFFSET: { x: number; y: number } = { x: 32, y: 32 };
 
 /**
- * 分配不撞號的克隆 id：`${base}-c${序號}`，序號從 1 遞增直到避開 used。
- * used 同時涵蓋畫布既有 id 與本批已分配的 id（連貼多次自然得到 -c2、-c3…）。
+ * 分配不撞号的克隆 id：`${base}-c${序号}`，序号从 1 递增直到避开 used。
+ * used 同时涵盖画布既有 id 与本批已分配的 id（连贴多次自然得到 -c2、-c3…）。
  */
 function allocCloneId(base: string, used: Set<string>): string {
   let seq = 1;
@@ -86,14 +86,14 @@ function allocCloneId(base: string, used: Set<string>): string {
 }
 
 /**
- * 複製貼上：把選中節點（含彼此之間的內部連線）克隆為新 id 的副本。
+ * 复制贴上：把选中节点（含彼此之间的内部连线）克隆为新 id 的副本。
  *
- * - moved: true —— 副本是用戶明確擺放的，不再參與 reducer 自動排版。
- * - 只克隆內部連線（from/to 都在選中集合內）：跨出選區的連線語義屬於原件，
- *   複製它會讓副本平白掛到不相干的節點上。連線 id 同樣走防撞分配。
- * - 剝掉 batchChildren / batchExpanded / batchPrimaryImageId 與
- *   metadata.imageTaskId —— 副本不是批次父節點，也不繼承生成任務的身份
- *   （否則任務回報會同時落到原件與副本上）。
+ * - moved: true —— 副本是用户明确摆放的，不再参与 reducer 自动排版。
+ * - 只克隆内部连线（from/to 都在选中集合内）：跨出选区的连线语义属于原件，
+ *   复制它会让副本平白挂到不相干的节点上。连线 id 同样走防撞分配。
+ * - 剥掉 batchChildren / batchExpanded / batchPrimaryImageId 与
+ *   metadata.imageTaskId —— 副本不是批次父节点，也不继承生成任务的身份
+ *   （否则任务回报会同时落到原件与副本上）。
  */
 export function cloneForPaste(
   nodes: CanvasNode[],
@@ -103,7 +103,7 @@ export function cloneForPaste(
   offset: { x: number; y: number } = PASTE_OFFSET,
 ): { nodes: CanvasNode[]; connections: CanvasConnection[] } {
   const selected = new Set(selectedIds);
-  const used = new Set(existingIds); // 複本：不改動呼叫端的集合
+  const used = new Set(existingIds); // 复本：不改动呼叫端的集合
   const idMap = new Map<string, string>(); // 原 id → 克隆 id
   const clonedNodes: CanvasNode[] = [];
 
@@ -130,14 +130,14 @@ export function cloneForPaste(
   for (const connection of connections) {
     const from = idMap.get(connection.fromNodeId);
     const to = idMap.get(connection.toNodeId);
-    if (!from || !to) continue; // 外部連線：任一端不在選中集合 → 不克隆
+    if (!from || !to) continue; // 外部连线：任一端不在选中集合 → 不克隆
     clonedConnections.push({ id: allocCloneId(connection.id, used), fromNodeId: from, toNodeId: to });
   }
 
   return { nodes: clonedNodes, connections: clonedConnections };
 }
 
-// ─────────────────────────────────────────── 對齊 / 均分 / 整理
+// ─────────────────────────────────────────── 对齐 / 均分 / 整理
 
 export type AlignMode = "left" | "right" | "top" | "bottom" | "center-h" | "center-v";
 
@@ -146,7 +146,7 @@ function pickSelected(nodes: CanvasNode[], selectedIds: string[]): CanvasNode[] 
   return nodes.filter((n) => selected.has(n.id));
 }
 
-/** 選中節點的包圍盒（呼叫端保證至少一個節點）。 */
+/** 选中节点的包围盒（呼叫端保证至少一个节点）。 */
 function selectionBounds(selected: CanvasNode[]): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity;
   let minY = Infinity;
@@ -162,9 +162,9 @@ function selectionBounds(selected: CanvasNode[]): { minX: number; minY: number; 
 }
 
 /**
- * 對齊：以「選中節點的包圍盒」為基準（不是畫布原點、也不是某個主節點）。
- * center-h = 各節點中心對齊包圍盒的垂直中線（動 x）；center-v 對齊水平中線（動 y）。
- * 少於 2 個節點沒有對齊語義，回空；位置沒變的節點不回傳。
+ * 对齐：以「选中节点的包围盒」为基准（不是画布原点、也不是某个主节点）。
+ * center-h = 各节点中心对齐包围盒的垂直中线（动 x）；center-v 对齐水平中线（动 y）。
+ * 少于 2 个节点没有对齐语义，回空；位置没变的节点不回传。
  */
 export function alignNodes(nodes: CanvasNode[], selectedIds: string[], mode: AlignMode): NodeMove[] {
   const selected = pickSelected(nodes, selectedIds);
@@ -200,9 +200,9 @@ export function alignNodes(nodes: CanvasNode[], selectedIds: string[], mode: Ali
 }
 
 /**
- * 均分：按軸向座標排序後首尾錨定，中間節點以相等的「盒與盒間距」重排。
- * 間距可為負（總尺寸超過首尾跨距時均勻重疊，與主流設計工具一致）。
- * 少於 3 個沒有「中間」可分，回空；首尾錨定所以永遠不出現在結果裡。
+ * 均分：按轴向座标排序后首尾锚定，中间节点以相等的「盒与盒间距」重排。
+ * 间距可为负（总尺寸超过首尾跨距时均匀重叠，与主流设计工具一致）。
+ * 少于 3 个没有「中间」可分，回空；首尾锚定所以永远不出现在结果里。
  */
 export function distributeNodes(nodes: CanvasNode[], selectedIds: string[], axis: "h" | "v"): NodeMove[] {
   const selected = pickSelected(nodes, selectedIds);
@@ -227,13 +227,13 @@ export function distributeNodes(nodes: CanvasNode[], selectedIds: string[], axis
   return moves;
 }
 
-/** 整理排列的預設間距：與貼上偏移同一步幅，視覺上是同一套節奏。 */
+/** 整理排列的预设间距：与贴上偏移同一步幅，视觉上是同一套节奏。 */
 const GRID_DEFAULT_GAP = 32;
 
 /**
- * 整理排列：按目前視覺順序（先上後下、再左後右）排成網格，錨定於選區包圍盒
- * 左上（整理不把東西搬去遠方，只在原地收拾）。欄寬取該欄最寬、行高取該行
- * 最高 —— 尺寸不一的節點也能對出整齊的格線。cols 預設 ≈ √n（接近方形）。
+ * 整理排列：按目前视觉顺序（先上后下、再左后右）排成网格，锚定于选区包围盒
+ * 左上（整理不把东西搬去远方，只在原地收拾）。栏宽取该栏最宽、行高取该行
+ * 最高 —— 尺寸不一的节点也能对出整齐的格线。cols 预设 ≈ √n（接近方形）。
  */
 export function arrangeGrid(
   nodes: CanvasNode[],
@@ -248,7 +248,7 @@ export function arrangeGrid(
   const { minX, minY } = selectionBounds(selected);
   const sorted = [...selected].sort((m, n) => m.position.y - n.position.y || m.position.x - n.position.x);
 
-  // 兩趟：先量測每欄 / 每行的最大尺寸，再回填座標。
+  // 两趟：先量测每栏 / 每行的最大尺寸，再回填座标。
   const colWidths: number[] = [];
   const rowHeights: number[] = [];
   sorted.forEach((n, i) => {

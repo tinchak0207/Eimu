@@ -1,43 +1,43 @@
 /**
- * web_search harness 工具（beast 軍團 R1 研究軍團搜索彈藥，2026-09-10；2026-10-02 上游 Tavily→Exa）。
+ * web_search harness 工具（beast 军团 R1 研究军团搜索弹药，2026-09-10；2026-10-02 上游 Tavily→Exa）。
  *
- * 定義形狀同構 src/lib/music-tools.ts 的 MusicToolDef（零依賴：
- * { id, description, args, execute } + ok()/fail() 契約，回 { title, output }，
- * output 為 JSON 字串）；ok/fail 與錯誤鐵律逐行同構 src/lib/music-tools.ts
- * （本工具無會話資產落盤，砍上傳/ffprobe/音頻專屬面，plumbing 契約不動）。
+ * 定义形状同构 src/lib/music-tools.ts 的 MusicToolDef（零依赖：
+ * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
+ * output 为 JSON 字串）；ok/fail 与错误铁律逐行同构 src/lib/music-tools.ts
+ * （本工具无会话资产落盘，砍上传/ffprobe/音频专属面，plumbing 契约不动）。
  *
- * 上游通路：Exa REST Search API（技能 build-with-exa 為唯一真源）：
- *   端點  POST https://api.exa.ai/search
- *   鑑權  HTTP header x-api-key（讀 env EXA_API_KEY；key 不入 body）
- *   請求  { query, type: "auto"|"deep", contents: { highlights: true }, numResults? }
- *   響應  { requestId, results: [{ title, url, highlights: string[] }], costDollars, searchTime }
+ * 上游通路：Exa REST Search API（技能 build-with-exa 为唯一真源）：
+ *   端点  POST https://api.exa.ai/search
+ *   鉴权  HTTP header x-api-key（读 env EXA_API_KEY；key 不入 body）
+ *   请求  { query, type: "auto"|"deep", contents: { highlights: true }, numResults? }
+ *   响应  { requestId, results: [{ title, url, highlights: string[] }], costDollars, searchTime }
  *
- * 參數口徑（照技能，不臆造）：默認請求只有 query + type + contents.highlights；
- *   numResults 僅在呼叫方明確傳 max_results 時才送（刻意產品決定，否則用服務器默認）；
- *   search_depth 保留舊名，映射 basic→auto、advanced→deep。
- *   include_answer 為 Tavily 專屬參數，已移除（產品自有聊天 LLM，只給 /search 當工具）。
+ * 参数口径（照技能，不臆造）：默认请求只有 query + type + contents.highlights；
+ *   numResults 仅在呼叫方明确传 max_results 时才送（刻意产品决定，否则用服务器默认）；
+ *   search_depth 保留旧名，映射 basic→auto、advanced→deep。
+ *   include_answer 为 Tavily 专属参数，已移除（产品自有聊天 LLM，只给 /search 当工具）。
  *
- * 錯誤鐵律（同 music-tools 誠實鐵律）：缺 key / 非 2xx / 網絡層失敗一律結構化
- * fail() 帶原文摘錄與人話 hint，絕不 throw 逃逸、絕不吞錯、絕不偽造結果。
- * 超時 20s 硬頂（AbortSignal.timeout）。工具文案一律簡體（記憶 agent-gateway-copy-rules）。
+ * 错误铁律（同 music-tools 诚实铁律）：缺 key / 非 2xx / 网络层失败一律结构化
+ * fail() 带原文摘录与人话 hint，绝不 throw 逃逸、绝不吞错、绝不伪造结果。
+ * 超时 20s 硬顶（AbortSignal.timeout）。工具文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
-/** Exa Search API 端點。 */
+/** Exa Search API 端点。 */
 export const EXA_SEARCH_URL = "https://api.exa.ai/search"
 
-/** 上游響應超時（搜索是輕請求，20s 硬頂）。 */
+/** 上游响应超时（搜索是轻请求，20s 硬顶）。 */
 export const EXA_TIMEOUT_MS = 20_000
 
-/** max_results 默認值。 */
+/** max_results 默认值。 */
 export const WEB_SEARCH_DEFAULT_MAX_RESULTS = 8
 
-/** max_results 上限（Exa numResults 上限 20，超出靜默收斂到帽值）。 */
+/** max_results 上限（Exa numResults 上限 20，超出静默收敛到帽值）。 */
 export const WEB_SEARCH_MAX_RESULTS_CAP = 20
 
-/** 錯誤訊息裡攜帶的原文 body 上限（同 music-lyria.ts 口徑；截斷時顯式標注）。 */
+/** 错误讯息里携带的原文 body 上限（同 music-lyria.ts 口径；截断时显式标注）。 */
 const ERROR_BODY_MAX_CHARS = 8000
 
-// ── plumbing（ok/fail 同構 music-tools.ts） ─────────────────────────────────
+// ── plumbing（ok/fail 同构 music-tools.ts） ─────────────────────────────────
 
 export type WebToolResult = { title: string; output: string }
 
@@ -65,7 +65,7 @@ function toFail(e: unknown): WebToolResult {
   return fail("web_search_tool_error", `web_search 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
-// ── 參數整理助手（同構 music-tools.ts 口徑） ────────────────────────────────
+// ── 参数整理助手（同构 music-tools.ts 口径） ────────────────────────────────
 
 export interface WebToolArgSpec {
   type: "string" | "number" | "boolean"
@@ -76,7 +76,7 @@ export interface WebToolArgSpec {
 
 export interface WebToolContext {
   abort?: AbortSignal
-  /** 會話 id（web_search 暫無會話資產落盤；adapter 機械透傳保留欄位，同 music-tools-adapter 口徑）。 */
+  /** 会话 id（web_search 暂无会话资产落盘；adapter 机械透传保留栏位，同 music-tools-adapter 口径）。 */
   sessionId?: string
 }
 
@@ -91,21 +91,21 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v : undefined
 }
 
-// ── 鑑權與解析（誠實鐵律：不猜不造，缺什麼報什麼） ───────────────────────────
+// ── 鉴权与解析（诚实铁律：不猜不造，缺什么报什么） ───────────────────────────
 
-/** 讀 EXA_API_KEY（缺失/空白 → fail-fast 人話報錯）。 */
+/** 读 EXA_API_KEY（缺失/空白 → fail-fast 人话报错）。 */
 export function requireExaApiKey(): string {
   const key = (process.env.EXA_API_KEY ?? "").trim()
   if (!key) {
     throw new WebSearchToolError(
       "missing_api_key",
-      "缺少 EXA_API_KEY（Exa 搜索上游鑑權）。請在 harness 環境配置該 env 後重試。",
+      "缺少 EXA_API_KEY（Exa 搜索上游鉴权）。请在 harness 环境配置该 env 后重试。",
     )
   }
   return key
 }
 
-/** 從 Exa 響應機械提取 results（title/url/highlights 原樣帶出）；缺 results 陣列一律拋錯（不猜）。 */
+/** 从 Exa 响应机械提取 results（title/url/highlights 原样带出）；缺 results 阵列一律抛错（不猜）。 */
 export function extractExaResults(body: unknown): {
   results: Array<{ title: string; url: string; highlights: string[] }>
 } {
@@ -114,7 +114,7 @@ export function extractExaResults(body: unknown): {
   if (!Array.isArray(raw)) {
     throw new WebSearchToolError(
       "upstream_bad_response",
-      `Exa 响应缺少 results 数组（不猜不造）。原文摘錄：${excerpt}`,
+      `Exa 响应缺少 results 数组（不猜不造）。原文摘录：${excerpt}`,
     )
   }
   const results = raw
@@ -173,12 +173,12 @@ export const webSearchTool: WebToolDef = {
       if (depthRaw !== "basic" && depthRaw !== "advanced") {
         return fail("invalid_args", `search_depth 只接受 "basic" 或 "advanced"，收到 "${depthRaw}"。`)
       }
-      // search_depth 舊契約 → Exa type：basic→auto（默認）、advanced→deep。
+      // search_depth 旧契约 → Exa type：basic→auto（默认）、advanced→deep。
       const exaType = depthRaw === "advanced" ? "deep" : "auto"
       const apiKey = requireExaApiKey()
 
-      // 默認請求 = query + type + contents.highlights（技能推薦形）；其他欄位一律不加。
-      // numResults 只在呼叫方明確傳 max_results 時才加（＝刻意的產品決定），否則用服務器默認。
+      // 默认请求 = query + type + contents.highlights（技能推荐形）；其他栏位一律不加。
+      // numResults 只在呼叫方明确传 max_results 时才加（＝刻意的产品决定），否则用服务器默认。
       const requestBody: Record<string, unknown> = {
         query,
         type: exaType,
@@ -251,8 +251,8 @@ export const webSearchTool: WebToolDef = {
   },
 }
 
-/** harness-tool-registry.ts 登記用 id 元組（同 MUSIC_HARNESS_TOOL_IDS 範式）。
- *  命名域實錘（2026-09-10 VPS）：opencode 1.18.14 保留 websearch/web_search 命名域，
- *  自訂工具檔名撞名即被物理移除（ws_probe HAVE / web_search NOT_HAVE 對照實錘），
- *  故 harness 註冊名=檔名 search_web；id 欄僅 registry 登記用，註冊名以檔名為準。 */
+/** harness-tool-registry.ts 登记用 id 元组（同 MUSIC_HARNESS_TOOL_IDS 范式）。
+ *  命名域实锤（2026-09-10 VPS）：opencode 1.18.14 保留 websearch/web_search 命名域，
+ *  自订工具档名撞名即被物理移除（ws_probe HAVE / web_search NOT_HAVE 对照实锤），
+ *  故 harness 注册名=档名 search_web；id 栏仅 registry 登记用，注册名以档名为准。 */
 export const WEB_SEARCH_HARNESS_TOOL_IDS = ["search_web"] as const

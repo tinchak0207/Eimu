@@ -1,22 +1,22 @@
 "use client";
 
-// 分鏡審查面板（2026-09-24，能力建設／加法）：與資產審查面板**同構**（決策 24：不沿用文字確認卡）。
+// 分镜审查面板（2026-09-24，能力建设／加法）：与资产审查面板**同构**（决策 24：不沿用文字确认卡）。
 //
-// 輪子來源（逐行 cp 自 `src/components/assets/AssetReviewPanel.tsx`，**白名單只差資料形狀與欄位**）：
-//   面板殼／彈層語彙、狀態機（凍結 approval 契約消費）、檔位判據、摘要、導出骨架、
-//   縮圖＋燈箱、導出 footer 的按鈕語彙——交互邏輯與生命週期 hooks 一行未改。
-//   白名單差異（全部列在此，無其他差異）：
-//     1. 資料源＝`ReviewShot`（由畫布分鏡節點投影，見 `reviewShotsFromNodes`），不是 CharacterCard
-//     2. 逐張動作只有「批准／駁回」（決策 24 的逐鏡粒度）；重生成／替換／上傳屬步驟條與資產面
-//     3. CSV 表頭／列白名單＝分鏡欄位（鏡號／場景／畫面描述／台詞／狀態／理由／圖片）
-//     4. 外部開啟介面沿用 `AssetReviewPanel` 那份（同一顆畫布入口；不另立第二套事件名）
-//   縮圖判定 `imageUrlOf` 直接用輪子 `src/components/canvas/embed/embed-helpers.ts`（不自造第二套 URL 判定）。
+// 轮子来源（逐行 cp 自 `src/components/assets/AssetReviewPanel.tsx`，**白名单只差资料形状与栏位**）：
+//   面板壳／弹层语汇、状态机（冻结 approval 契约消费）、档位判据、摘要、导出骨架、
+//   缩图＋灯箱、导出 footer 的按钮语汇——交互逻辑与生命周期 hooks 一行未改。
+//   白名单差异（全部列在此，无其他差异）：
+//     1. 资料源＝`ReviewShot`（由画布分镜节点投影，见 `reviewShotsFromNodes`），不是 CharacterCard
+//     2. 逐张动作只有「批准／驳回」（决策 24 的逐镜粒度）；重生成／替换／上传属步骤条与资产面
+//     3. CSV 表头／列白名单＝分镜栏位（镜号／场景／画面描述／台词／状态／理由／图片）
+//     4. 外部开启介面沿用 `AssetReviewPanel` 那份（同一颗画布入口；不另立第二套事件名）
+//   缩图判定 `imageUrlOf` 直接用轮子 `src/components/canvas/embed/embed-helpers.ts`（不自造第二套 URL 判定）。
 //
-// 依據（決策定稿）：3 逐鏡可改、批准整批一次；4 駁回＝填理由後停下；9 導出 CSV＋圖片包；
-// 2 全自動檔可看可改、不阻塞流程，協作檔才是停點。
+// 依据（决策定稿）：3 逐镜可改、批准整批一次；4 驳回＝填理由后停下；9 导出 CSV＋图片包；
+// 2 全自动档可看可改、不阻塞流程，协作档才是停点。
 //
-// 批准狀態真源＝`src/lib/character-cards.ts`（`ApprovalState` / `isAssetApproved` / `normalizeApprovalState`，
-// 分鏡側 storyboard-contract.ts 明文「禁止另建第二套」）——本檔只 import 消費，不重寫 shape 或門檻尺。
+// 批准状态真源＝`src/lib/character-cards.ts`（`ApprovalState` / `isAssetApproved` / `normalizeApprovalState`，
+// 分镜侧 storyboard-contract.ts 明文「禁止另建第二套」）——本档只 import 消费，不重写 shape 或门槛尺。
 
 import { useCallback, useMemo, useState } from "react";
 import { Check, Download, Loader2, X } from "lucide-react";
@@ -32,14 +32,14 @@ import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/image-helpers";
 import { csvCell, triggerDownload } from "@/lib/history-export";
 import { cn } from "@/lib/utils";
 
-// ─────────────────────────────────────────── 凍結契約（只消費，不定義；與資產面同形）
+// ─────────────────────────────────────────── 冻结契约（只消费，不定义；与资产面同形）
 
-/** 批准狀態真源＝`@/lib/character-cards`（`ApprovalState`）；本檔 import，不另建 shape。 */
+/** 批准状态真源＝`@/lib/character-cards`（`ApprovalState`）；本档 import，不另建 shape。 */
 export type { ApprovalState } from "@/lib/character-cards";
 
 /**
- * 顯示用讀取投影（不是判定）：缺省＝已批准（決策 23）、讀不懂落回已批准（與真源同向）。
- * 門檻判定一律問真源 `isAssetApproved`（見 `reviewStopBehavior`）。
+ * 显示用读取投影（不是判定）：缺省＝已批准（决策 23）、读不懂落回已批准（与真源同向）。
+ * 门槛判定一律问真源 `isAssetApproved`（见 `reviewStopBehavior`）。
  */
 export function approvalStatusOf(record: { approval?: ApprovalState } | null | undefined): ApprovalState["status"] {
   const approval = record?.approval;
@@ -47,16 +47,16 @@ export function approvalStatusOf(record: { approval?: ApprovalState } | null | u
   if (approval.status === "approved" || approval.status === "pending" || approval.status === "rejected") {
     return approval.status;
   }
-  // 契約外的值（理論上到不了這裡：真源 `normalizeApprovalState` 在寫入/讀取端就把鍵丟掉）。
-  // 萬一漏進來，**與門檻同向**顯示「待批准」——`isAssetApproved` 對認不得的值回 false（會擋），
-  // 面板若顯示「已批准」就是對用戶說謊。這不是第二把尺：門檻仍然只由 `isAssetApproved` 決定。
+  // 契约外的值（理论上到不了这里：真源 `normalizeApprovalState` 在写入/读取端就把键丢掉）。
+  // 万一漏进来，**与门槛同向**显示「待批准」——`isAssetApproved` 对认不得的值回 false（会挡），
+  // 面板若显示「已批准」就是对用户说谎。这不是第二把尺：门槛仍然只由 `isAssetApproved` 决定。
   return "pending";
 }
 
 /**
- * 分鏡批准狀態的寫入值（純函式）：**清洗一律走真源** `normalizeApprovalState`
- * （唯一收口，本檔不重寫第二套三值域/長度規則）。`status` 不合法 → `null`（不寫半套狀態）。
- * 載體是節點 metadata 的那一個 `approval` 鍵（寫入由父層 `patchNodeMetadata` 執行）。
+ * 分镜批准状态的写入值（纯函式）：**清洗一律走真源** `normalizeApprovalState`
+ * （唯一收口，本档不重写第二套三值域/长度规则）。`status` 不合法 → `null`（不写半套状态）。
+ * 载体是节点 metadata 的那一个 `approval` 键（写入由父层 `patchNodeMetadata` 执行）。
  */
 export function shotApprovalFor(
   status: ApprovalState["status"],
@@ -66,11 +66,11 @@ export function shotApprovalFor(
   return normalizeApprovalState({ status, decidedAt: at, reason });
 }
 
-// ─────────────────────────────────────────── 檔位（決策 1/2）
+// ─────────────────────────────────────────── 档位（决策 1/2）
 
 /**
- * 檔位語義（與資產面同一把尺）：停點只在協作檔生效。
- * `stops` 直接問真源 `isAssetApproved`（拿一張顯式 `pending` 的卡試），不重寫第二套判定。
+ * 档位语义（与资产面同一把尺）：停点只在协作档生效。
+ * `stops` 直接问真源 `isAssetApproved`（拿一张显式 `pending` 的卡试），不重写第二套判定。
  */
 export function reviewStopBehavior(mode: AgentInteractionMode): { stops: boolean; note: string } {
   const wouldBlock = !isAssetApproved({ status: "pending" }, mode);
@@ -85,7 +85,7 @@ export function reviewStopBehavior(mode: AgentInteractionMode): { stops: boolean
       };
 }
 
-/** 審查摘要（面板頁首計數）。 */
+/** 审查摘要（面板页首计数）。 */
 export function reviewSummary(records: readonly { approval?: ApprovalState }[]): {
   total: number;
   approved: number;
@@ -97,33 +97,33 @@ export function reviewSummary(records: readonly { approval?: ApprovalState }[]):
   return out;
 }
 
-// ─────────────────────────────────────────── 分鏡投影（畫布節點 → 審查列）
+// ─────────────────────────────────────────── 分镜投影（画布节点 → 审查列）
 
-/** 一鏡的審查形狀（唯讀投影；寫回由父層負責）。 */
+/** 一镜的审查形状（唯读投影；写回由父层负责）。 */
 export interface ReviewShot {
-  /** 節點 id（唯一鍵；批准狀態寫回該節點 metadata）。 */
+  /** 节点 id（唯一键；批准状态写回该节点 metadata）。 */
   id: string;
-  /** 鏡號（AID `storyboardShot.shotNumber`，本實體唯一鍵）。 */
+  /** 镜号（AID `storyboardShot.shotNumber`，本实体唯一键）。 */
   shotNumber: string;
-  /** 場景名（外層場景 Group 節點；取不到＝空字串，UI 不編造）。 */
+  /** 场景名（外层场景 Group 节点；取不到＝空字串，UI 不编造）。 */
   sceneName: string;
-  /** 畫面描述（AID `visualDescription`）。 */
+  /** 画面描述（AID `visualDescription`）。 */
   visualDescription: string;
-  /** 台詞（AID `dialogue`）。 */
+  /** 台词（AID `dialogue`）。 */
   dialogue: string;
-  /** 該鏡生成用提示詞（節點 metadata.prompt；空＝尚未有生成參數）。 */
+  /** 该镜生成用提示词（节点 metadata.prompt；空＝尚未有生成参数）。 */
   prompt: string;
-  /** 縮圖：節點本體圖片，或連入的第一顆圖片節點；null＝這鏡還沒有圖。 */
+  /** 缩图：节点本体图片，或连入的第一颗图片节点；null＝这镜还没有图。 */
   imageUrl: string | null;
   approval?: ApprovalState;
 }
 
 /**
- * 畫布節點 → 分鏡審查列（純函式）。
- *   - 只認真的分鏡實體：`metadata.storyboardShot` 過 `normalizeStoryboardShot` 清洗後非 null
- *     （shotNumber 空即整包丟——與契約同一把尺，不自造第二套判準）
- *   - 縮圖：節點本體（`imageUrlOf` 輪子）→ 連入的圖片節點（倒序連線取首個有圖者）→ null
- *   - 場景名：由呼叫端以 `sceneNameOf` 解析（畫布側用 childToParent 找 Group 的 `storyboardScene`）；
+ * 画布节点 → 分镜审查列（纯函式）。
+ *   - 只认真的分镜实体：`metadata.storyboardShot` 过 `normalizeStoryboardShot` 清洗后非 null
+ *     （shotNumber 空即整包丢——与契约同一把尺，不自造第二套判准）
+ *   - 缩图：节点本体（`imageUrlOf` 轮子）→ 连入的图片节点（倒序连线取首个有图者）→ null
+ *   - 场景名：由呼叫端以 `sceneNameOf` 解析（画布侧用 childToParent 找 Group 的 `storyboardScene`）；
  *     缺省＝空字串（不猜）
  */
 export function reviewShotsFromNodes(
@@ -139,8 +139,8 @@ export function reviewShotsFromNodes(
   for (const node of nodes) {
     const shot = normalizeStoryboardShot(node.metadata?.storyboardShot);
     if (!shot) continue;
-    // 批准狀態（路 1 的凍結欄位）掛在節點 metadata 上；型別寬化只為讀這一個鍵
-    // （`CanvasNodeMetadata` 是 interface 無 index signature，路 1 落地後即為直讀）。
+    // 批准状态（路 1 的冻结栏位）挂在节点 metadata 上；型别宽化只为读这一个键
+    // （`CanvasNodeMetadata` 是 interface 无 index signature，路 1 落地后即为直读）。
     const meta = (node.metadata ?? {}) as Record<string, unknown>;
     const approval = meta.approval as ApprovalState | undefined;
     const own = imageUrlOf(node);
@@ -162,16 +162,16 @@ export function reviewShotsFromNodes(
   return out;
 }
 
-// ─────────────────────────────────────────── 導出（決策 9）
+// ─────────────────────────────────────────── 导出（决策 9）
 
-/** 匯出日期戳（本地日）。 */
+/** 汇出日期戳（本地日）。 */
 function stamp(at: Date = new Date()): string {
   return at.toISOString().slice(0, 10);
 }
 
 const SHOT_CSV_HEADER = ["镜号", "场景", "审核状态", "驳回理由", "画面描述", "台词", "图片链接"] as const;
 
-/** 分鏡清單 CSV 字串（純函式）：header/rows 走本面白名單，轉義與下載一律走輪子。 */
+/** 分镜清单 CSV 字串（纯函式）：header/rows 走本面白名单，转义与下载一律走轮子。 */
 export function buildShotReviewCsv(shots: readonly ReviewShot[]): string {
   const rows = shots.map((shot) =>
     [
@@ -187,13 +187,13 @@ export function buildShotReviewCsv(shots: readonly ReviewShot[]): string {
   return `\ufeff${[SHOT_CSV_HEADER.join(","), ...rows].join("\r\n")}`;
 }
 
-/** 下載分鏡清單 CSV（空清單＝不產生檔案）。 */
+/** 下载分镜清单 CSV（空清单＝不产生档案）。 */
 export function exportShotReviewCsv(shots: readonly ReviewShot[], at: Date = new Date()): void {
   if (!shots.length) return;
   triggerDownload(buildShotReviewCsv(shots), `分镜清单-${stamp(at)}.csv`, "text/csv;charset=utf-8");
 }
 
-/** 圖片壓縮包清單（純函式）：一鏡一項，名稱＝`镜号-鏡號` 可讀；無圖的鏡次不進清單。 */
+/** 图片压缩包清单（纯函式）：一镜一项，名称＝`镜号-镜号` 可读；无图的镜次不进清单。 */
 export function shotZipPlan(shots: readonly ReviewShot[]): { fileName: string; url: string }[] {
   return shots.flatMap((shot) =>
     shot.imageUrl ? [{ fileName: `镜${shot.shotNumber}`, url: shot.imageUrl }] : [],
@@ -218,7 +218,7 @@ async function shotBlob(url: string, timeoutMs: number): Promise<Blob | null> {
   }
 }
 
-/** 導出分鏡圖片壓縮包：直接用輪子 `exportShotsZip()`。 */
+/** 导出分镜图片压缩包：直接用轮子 `exportShotsZip()`。 */
 export async function exportShotReviewZip(
   shots: readonly ReviewShot[],
   at: Date = new Date(),
@@ -245,15 +245,15 @@ export async function exportShotReviewZip(
 export interface ShotReviewPanelProps {
   open: boolean;
   onClose: () => void;
-  /** 待審查的分鏡（畫布投影；見 `reviewShotsFromNodes`）。 */
+  /** 待审查的分镜（画布投影；见 `reviewShotsFromNodes`）。 */
   shots: readonly ReviewShot[];
-  /** 當前互動檔位（決策 1/2）。 */
+  /** 当前互动档位（决策 1/2）。 */
   interactionMode: AgentInteractionMode;
-  /** 駁回（決策 4）：帶理由；不觸發任何生成。 */
+  /** 驳回（决策 4）：带理由；不触发任何生成。 */
   onReject: (shotId: string, reason: string) => Promise<void> | void;
-  /** 整批一鍵批准（決策 3）。 */
+  /** 整批一键批准（决策 3）。 */
   onApproveAll: (shotIds: readonly string[]) => Promise<void> | void;
-  /** 切回資產審查（同一顆畫布入口底下的另一面；缺省＝不顯示）。 */
+  /** 切回资产审查（同一颗画布入口底下的另一面；缺省＝不显示）。 */
   onSwitchToAssets?: () => void;
 }
 
@@ -350,7 +350,7 @@ export function ShotReviewPanel({
         </button>
       </div>
 
-      {/* 檔位橫幅（決策 1/2）：全自動檔只是說明，不新增任何阻塞 */}
+      {/* 档位横幅（决策 1/2）：全自动档只是说明，不新增任何阻塞 */}
       <p
         className={cn(
           "border-b px-3 py-1.5 text-ios-footnote leading-snug",

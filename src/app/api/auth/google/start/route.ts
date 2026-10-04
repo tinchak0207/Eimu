@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   // PWA 跨浏览器交接：?handoff=<ticket> 时把 ticket 嵌进 state（callback 侧
   // 经 extractTicketFromState 取回；该分支靠 ticket 的 128-bit 随机 +
-  // 一次性消费防護）。无参数时行为不变。
+  // 一次性消费防护）。无参数时行为不变。
   const handoffTicket = req.nextUrl.searchParams.get("handoff")?.trim() || "";
   if (!clientId) {
     // handoff 入口由 PWA 面板消费 JSON，保持原契约；一般入口是登录按钮，

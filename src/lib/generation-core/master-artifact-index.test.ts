@@ -16,9 +16,9 @@ import {
 type Call = { sql: string; values: unknown[] };
 
 /**
- * 刀 4 成片產物索引契約針：形狀（metadata 命名空間）、容錯（非成片列一律丟棄）、
- * 邊界（分頁 clamp / 空值不落鍵 / 指紋不合法不偽造）與查詢口徑（role、jsonb 存在性、
- * tenant/session/project 過濾）逐條鎖住。mock 依查詢內容分流，範式同
+ * 刀 4 成片产物索引契约针：形状（metadata 命名空间）、容错（非成片列一律丢弃）、
+ * 边界（分页 clamp / 空值不落键 / 指纹不合法不伪造）与查询口径（role、jsonb 存在性、
+ * tenant/session/project 过滤）逐条锁住。mock 依查询内容分流，范式同
  * provider-reconciliation.test.ts 的 mockSql。
  */
 function mockSql(routes: Array<{ match: string; rows: Record<string, unknown>[] }> = []) {
@@ -34,7 +34,7 @@ function mockSql(routes: Array<{ match: string; rows: Record<string, unknown>[] 
   return { sql: tagged, calls };
 }
 
-/** 一條完整的成片 artifact 列（JOIN generation_job 後的形狀）。 */
+/** 一条完整的成片 artifact 列（JOIN generation_job 后的形状）。 */
 function filmRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: "art-film-1",
@@ -67,9 +67,9 @@ function filmRow(overrides: Record<string, unknown> = {}): Record<string, unknow
   };
 }
 
-// ───────────────────────── 寫入端契約：metadata 形狀
+// ───────────────────────── 写入端契约：metadata 形状
 
-test("buildMasterArtifactMetadata：包成命名空間鍵，不與既有 metadata 頂層（endpointLabel/voice_code）搶鍵空間", () => {
+test("buildMasterArtifactMetadata：包成命名空间键，不与既有 metadata 顶层（endpointLabel/voice_code）抢键空间", () => {
   const metadata = buildMasterArtifactMetadata({
     exportFingerprint: "c".repeat(64),
     preset: "portrait_916",
@@ -91,11 +91,11 @@ test("buildMasterArtifactMetadata：包成命名空間鍵，不與既有 metadat
   assert.equal(film.timelineVersion, 3);
   assert.equal(film.sessionId, "sess-x");
   assert.equal(film.projectId, "proj-y");
-  // endpointLabel 不在此物件內（由 artifact-service 另併），成片鍵不吞它。
+  // endpointLabel 不在此物件内（由 artifact-service 另并），成片键不吞它。
   assert.equal("endpointLabel" in metadata, false);
 });
 
-test("buildMasterArtifactMetadata：空值欄位不落鍵（不寫 null），缺欄與「本來沒有」不可混淆", () => {
+test("buildMasterArtifactMetadata：空值栏位不落键（不写 null），缺栏与「本来没有」不可混淆", () => {
   const metadata = buildMasterArtifactMetadata({
     exportFingerprint: "d".repeat(64),
     preset: "cinema_239",
@@ -108,7 +108,7 @@ test("buildMasterArtifactMetadata：空值欄位不落鍵（不寫 null），缺
   assert.deepEqual(Object.keys(film).sort(), ["exportFingerprint", "preset"]);
 });
 
-test("buildMasterArtifactMetadata：probe 摘要用導出側欄位名（duration_sec/size/probe_error）直譯，verified 由 error 推斷", () => {
+test("buildMasterArtifactMetadata：probe 摘要用导出侧栏位名（duration_sec/size/probe_error）直译，verified 由 error 推断", () => {
   const ok = buildMasterArtifactMetadata({
     exportFingerprint: "e".repeat(64),
     preset: "landscape_169",
@@ -130,14 +130,14 @@ test("buildMasterArtifactMetadata：probe 摘要用導出側欄位名（duration
   assert.match(String(badProbe.error), /outside/);
 });
 
-test("buildMasterArtifactMetadata：缺 exportFingerprint 或 preset 直接拋（不落半形索引行）", () => {
+test("buildMasterArtifactMetadata：缺 exportFingerprint 或 preset 直接抛（不落半形索引行）", () => {
   assert.throws(() => buildMasterArtifactMetadata({ exportFingerprint: "", preset: "landscape_169" }), TypeError);
   assert.throws(() => buildMasterArtifactMetadata({ exportFingerprint: "a".repeat(64), preset: "  " }), TypeError);
 });
 
-// ───────────────────────── 讀取端契約：容錯解析
+// ───────────────────────── 读取端契约：容错解析
 
-test("readMasterArtifactMetadata：合法記錄往返一致（指紋正規化為小寫）", () => {
+test("readMasterArtifactMetadata：合法记录往返一致（指纹正规化为小写）", () => {
   const parsed = readMasterArtifactMetadata({
     [MASTER_ARTIFACT_METADATA_KEY]: {
       exportFingerprint: "ABCDEF".repeat(8),
@@ -156,19 +156,19 @@ test("readMasterArtifactMetadata：合法記錄往返一致（指紋正規化為
   assert.equal(parsed.probe?.verified, true);
 });
 
-test("readMasterArtifactMetadata：非成片記錄（缺鍵／缺指紋／缺 preset／型別不對）一律回 null", () => {
+test("readMasterArtifactMetadata：非成片记录（缺键／缺指纹／缺 preset／型别不对）一律回 null", () => {
   assert.equal(readMasterArtifactMetadata(null), null);
   assert.equal(readMasterArtifactMetadata("not-json"), null);
   assert.equal(readMasterArtifactMetadata([]), null);
-  // 一般 TTS/圖片產物：只有 endpointLabel/voice_code → 不是成片
+  // 一般 TTS/图片产物：只有 endpointLabel/voice_code → 不是成片
   assert.equal(readMasterArtifactMetadata({ endpointLabel: "newapi", voice_code: "zh-CN-X" }), null);
-  // 有鍵但缺必要欄位
+  // 有键但缺必要栏位
   assert.equal(readMasterArtifactMetadata({ [MASTER_ARTIFACT_METADATA_KEY]: { preset: "landscape_169" } }), null);
   assert.equal(readMasterArtifactMetadata({ [MASTER_ARTIFACT_METADATA_KEY]: { exportFingerprint: "a".repeat(64) } }), null);
   assert.equal(readMasterArtifactMetadata({ [MASTER_ARTIFACT_METADATA_KEY]: "string" }), null);
 });
 
-test("mapMasterArtifactRow：成片列 → 索引列；非成片列回 null（drop 不整份作廢）", () => {
+test("mapMasterArtifactRow：成片列 → 索引列；非成片列回 null（drop 不整份作废）", () => {
   const mapped = mapMasterArtifactRow(filmRow());
   assert.ok(mapped);
   assert.equal(mapped.artifactId, "art-film-1");
@@ -185,12 +185,12 @@ test("mapMasterArtifactRow：成片列 → 索引列；非成片列回 null（dr
   assert.equal(mapped.probe?.verified, true);
   assert.equal(mapped.createdAt.toISOString(), "2026-09-15T10:00:00.000Z");
 
-  // 一般產物（TTS 音頻）在同一查詢結果裡 → 丟棄該列，不影響其餘列
+  // 一般产物（TTS 音频）在同一查询结果里 → 丢弃该列，不影响其余列
   const tts = mapMasterArtifactRow({ ...filmRow({ id: "art-tts" }), metadata_json: { endpointLabel: "tts", voice_code: "zh-CN-X" } });
   assert.equal(tts, null);
 });
 
-test("mapMasterArtifactRow：metadata_json 為字串（驅動回吐 jsonb 為 text）仍能解析", () => {
+test("mapMasterArtifactRow：metadata_json 为字串（驱动回吐 jsonb 为 text）仍能解析", () => {
   const row = filmRow();
   const stringified = { ...row, metadata_json: JSON.stringify(row.metadata_json) };
   const mapped = mapMasterArtifactRow(stringified);
@@ -198,7 +198,7 @@ test("mapMasterArtifactRow：metadata_json 為字串（驅動回吐 jsonb 為 te
   assert.equal(mapped.preset, "landscape_169");
 });
 
-test("mapMasterArtifactRow：probe 未過（有 error）仍留紀錄，verified=false——不把未過 probe 的成片冒充合格", () => {
+test("mapMasterArtifactRow：probe 未过（有 error）仍留纪录，verified=false——不把未过 probe 的成片冒充合格", () => {
   const row = filmRow();
   (row.metadata_json as Record<string, Record<string, unknown>>)[MASTER_ARTIFACT_METADATA_KEY].probe = {
     codec: "h264",
@@ -215,32 +215,32 @@ test("mapMasterArtifactRow：probe 未過（有 error）仍留紀錄，verified=
   assert.equal(mapped.probe?.error, "container mismatch");
 });
 
-// ───────────────────────── 查詢層：口徑與邊界
+// ───────────────────────── 查询层：口径与边界
 
-test("listMasterArtifacts：只認 role='output' + metadata 帶成片鍵（jsonb_exists），tenant 過濾走 generation_job", async () => {
+test("listMasterArtifacts：只认 role='output' + metadata 带成片键（jsonb_exists），tenant 过滤走 generation_job", async () => {
   const { sql, calls } = mockSql([{ match: "FROM artifact", rows: [filmRow()] }]);
   const records = await listMasterArtifacts({ tenantId: "biz:key-1" }, sql);
   assert.equal(records.length, 1);
   const call = calls[0];
   assert.ok(call.sql.includes("FROM artifact"));
   assert.ok(call.sql.includes("JOIN generation_job ON generation_job.id = artifact.job_id"));
-  assert.ok(call.sql.includes("jsonb_exists(artifact.metadata_json"), "成片存在性判準必須是 jsonb 鍵存在");
+  assert.ok(call.sql.includes("jsonb_exists(artifact.metadata_json"), "成片存在性判准必须是 jsonb 键存在");
   assert.ok(call.sql.includes("ORDER BY artifact.created_at DESC"));
-  // 佔位符按模板出現順序落參：role / metadata 鍵 / tenant / 分頁。逐個查證而非鎖死陣列長度
-  // （同一鍵在 WHERE 中重複出現會多佔位，屬實作細節）。
+  // 占位符按模板出现顺序落参：role / metadata 键 / tenant / 分页。逐个查证而非锁死阵列长度
+  // （同一键在 WHERE 中重复出现会多占位，属实作细节）。
   assert.equal(call.values[0], "output");
   assert.ok(call.values.includes(MASTER_ARTIFACT_METADATA_KEY));
   assert.ok(call.values.includes("biz:key-1"));
   assert.deepEqual(call.values.slice(-2), [MASTER_ARTIFACT_DEFAULT_LIMIT, 0]);
 });
 
-test("listMasterArtifacts：session_id / project_id 走產物自身 metadata，不是 job.workflow_json", async () => {
+test("listMasterArtifacts：session_id / project_id 走产物自身 metadata，不是 job.workflow_json", async () => {
   const { sql, calls } = mockSql([{ match: "FROM artifact", rows: [] }]);
   await listMasterArtifacts({ tenantId: "biz:key-1", sessionId: "session-a", projectId: "project-1" }, sql);
   const call = calls[0];
   assert.ok(call.sql.includes("->> 'sessionId' = "));
   assert.ok(call.sql.includes("->> 'projectId' = "));
-  assert.equal(call.sql.includes("workflow_json"), false, "不得靠 workflow_json 過濾（該欄對成片無契約保證）");
+  assert.equal(call.sql.includes("workflow_json"), false, "不得靠 workflow_json 过滤（该栏对成片无契约保证）");
   assert.equal(call.values[0], "output");
   assert.ok(call.values.includes(MASTER_ARTIFACT_METADATA_KEY));
   assert.ok(call.values.includes("biz:key-1"));
@@ -248,7 +248,7 @@ test("listMasterArtifacts：session_id / project_id 走產物自身 metadata，�
   assert.ok(call.values.includes("project-1"));
 });
 
-test("listMasterArtifacts：分頁 clamp——超上限截到 100、非法值回預設、offset 不得為負", async () => {
+test("listMasterArtifacts：分页 clamp——超上限截到 100、非法值回预设、offset 不得为负", async () => {
   const { sql, calls } = mockSql([{ match: "FROM artifact", rows: [] }]);
   await listMasterArtifacts({ limit: 9999, offset: -5 }, sql);
   assert.deepEqual(calls[0].values.slice(-2), [MASTER_ARTIFACT_MAX_LIMIT, 0]);
@@ -258,14 +258,14 @@ test("listMasterArtifacts：分頁 clamp——超上限截到 100、非法值回
   assert.deepEqual(second.calls[0].values.slice(-2), [MASTER_ARTIFACT_DEFAULT_LIMIT, 0]);
 });
 
-test("listMasterArtifacts：查詢命中但 metadata 形狀不合法的列被丟棄（回傳數可少於列數）", async () => {
+test("listMasterArtifacts：查询命中但 metadata 形状不合法的列被丢弃（回传数可少于列数）", async () => {
   const rows = [filmRow(), { ...filmRow({ id: "art-img" }), metadata_json: { endpointLabel: "newapi" } }];
   const { sql } = mockSql([{ match: "FROM artifact", rows }]);
   const records = await listMasterArtifacts({}, sql);
   assert.deepEqual(records.map((r) => r.artifactId), ["art-film-1"]);
 });
 
-test("countMasterArtifacts：與 listMasterArtifacts 同一套 WHERE 口徑", async () => {
+test("countMasterArtifacts：与 listMasterArtifacts 同一套 WHERE 口径", async () => {
   const { sql, calls } = mockSql([{ match: "count(*) AS count", rows: [{ count: "3" }] }]);
   const count = await countMasterArtifacts({ tenantId: "biz:key-1", sessionId: "session-a" }, sql);
   assert.equal(count, 3);
@@ -279,7 +279,7 @@ test("countMasterArtifacts：與 listMasterArtifacts 同一套 WHERE 口徑", as
   assert.ok(call.values.includes("session-a"));
 });
 
-test("countMasterArtifacts：驅動回傳髒值（null/非數）視為 0，不偽造數字", async () => {
+test("countMasterArtifacts：驱动回传脏值（null/非数）视为 0，不伪造数字", async () => {
   const { sql } = mockSql([{ match: "count(*) AS count", rows: [{ count: null }] }]);
   assert.equal(await countMasterArtifacts({}, sql), 0);
 });

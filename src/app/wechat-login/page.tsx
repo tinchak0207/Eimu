@@ -7,12 +7,12 @@ import { WechatScanQr } from "@/components/WechatScanQr";
 import { clearPendingTrial } from "@/components/promo/promo-gate";
 
 /**
- * 微信掃碼登入頁（Navbar 以 popup 開；popup 被擋或手機同窗口時整頁進來）。
+ * 微信扫码登入页（Navbar 以 popup 开；popup 被挡或手机同窗口时整页进来）。
  *
- * 2026-09-30：取消驗證碼——掃到帶參數二維碼就直接登入。
- * 收尾兩條路都要有回應（舊版同窗口進來時停在「正在返回…」永遠不返回）：
- * - popup：通知 opener（它會 refresh 登入態並補送待送的那句話）後自己關；
- * - 同窗口：直接回首頁，首頁的「登入態翻真 → 補送」接手。
+ * 2026-09-30：取消验证码——扫到带参数二维码就直接登入。
+ * 收尾两条路都要有回应（旧版同窗口进来时停在「正在返回…」永远不返回）：
+ * - popup：通知 opener（它会 refresh 登入态并补送待送的那句话）后自己关；
+ * - 同窗口：直接回首页，首页的「登入态翻真 → 补送」接手。
  */
 export default function WechatLoginPage() {
   const handleDone = useCallback(() => {
@@ -21,12 +21,12 @@ export default function WechatLoginPage() {
       try {
         opener.postMessage({ type: "wechat-auth-complete" }, window.location.origin);
       } catch {
-        // opener 不可達：token 已在共享 localStorage，opener 的輪詢兜底會接住。
+        // opener 不可达：token 已在共享 localStorage，opener 的轮询兜底会接住。
       }
       window.setTimeout(() => window.close(), 400);
-      // 有些手機瀏覽器不讓腳本關分頁：關不掉就自己回首頁，不留在成功畫面發呆。
-      // 這個分頁的 sessionStorage 是開窗時從 opener 複製來的，待送那句話也在裡面：
-      // 先清掉，否則 opener 與這裡各補送一次＝同一句話送兩遍。
+      // 有些手机浏览器不让脚本关分页：关不掉就自己回首页，不留在成功画面发呆。
+      // 这个分页的 sessionStorage 是开窗时从 opener 复制来的，待送那句话也在里面：
+      // 先清掉，否则 opener 与这里各补送一次＝同一句话送两遍。
       window.setTimeout(() => {
         if (window.closed) return;
         clearPendingTrial(window.sessionStorage);

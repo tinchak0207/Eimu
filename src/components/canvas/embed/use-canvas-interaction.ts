@@ -1,8 +1,8 @@
 /**
- * use-canvas-interaction —— CanvasEmbed 交互域（自 CanvasEmbed.tsx 機械搬遷，符號/依賴陣列不變）：
- *   L227-237 交互 state + 最新值鏡像 refs、L378-620 選取/框選/複製貼上/對齊/連線/下載、
- *   L884-951 建節點/導入、L954-1077 埠拖拽/建節點選單/右鍵選單定位/存為卡。
- * 鏡像 refs 由本 hook 持有並回傳，鍵盤 effect（use-canvas-shortcuts）依賴其「最新值」語義。
+ * use-canvas-interaction —— CanvasEmbed 交互域（自 CanvasEmbed.tsx 机械搬迁，符号/依赖阵列不变）：
+ *   L227-237 交互 state + 最新值镜像 refs、L378-620 选取/框选/复制贴上/对齐/连线/下载、
+ *   L884-951 建节点/导入、L954-1077 埠拖拽/建节点选单/右键选单定位/存为卡。
+ * 镜像 refs 由本 hook 持有并回传，键盘 effect（use-canvas-shortcuts）依赖其「最新值」语义。
  */
 import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
@@ -51,34 +51,34 @@ import {
 } from "./embed-helpers";
 
 export interface UseCanvasInteractionInput {
-  /** canvas 最新值鏡像 ref（由組件殼持有並傳入）。 */
+  /** canvas 最新值镜像 ref（由组件壳持有并传入）。 */
   canvasStateRef: RefObject<UseCanvasChatReturn>;
-  /** 畫布容器（座標換算用）。 */
+  /** 画布容器（座标换算用）。 */
   containerRef: RefObject<HTMLDivElement | null>;
-  /** 視口裁剪後的可見節點（框選命中計算）。 */
+  /** 视口裁剪后的可见节点（框选命中计算）。 */
   visibleNodes: CanvasNode[];
-  /** 批次子節點 → 父節點索引（刪除轉發）。 */
+  /** 批次子节点 → 父节点索引（删除转发）。 */
   childToParent: Map<string, string>;
-  /** 生成面板節點 id setter（乾淨點擊開面板，A2）。 */
+  /** 生成面板节点 id setter（干净点击开面板，A2）。 */
   setPromptPanelNodeId: Dispatch<SetStateAction<string | null>>;
 }
 
-/** 建卡結果：要寫入的卡 + 存卡成功的提示文案。 */
+/** 建卡结果：要写入的卡 + 存卡成功的提示文案。 */
 export interface BuiltNodeCard {
   card: CharacterCard;
-  /** 提示文案（變體卡帶母卡名，使用者看得出這是變體）。 */
+  /** 提示文案（变体卡带母卡名，使用者看得出这是变体）。 */
   message: string;
 }
 
 /**
- * 建卡純邏輯（P2 存為卡）：無 React / 無 DOM，可直接單測。
+ * 建卡纯逻辑（P2 存为卡）：无 React / 无 DOM，可直接单测。
  *
- * - 預設名與 toast 標籤一律查 CHARACTER_CARD_KIND_LABEL（五種 kind 一致，不再手寫三元式）。
- * - variantOf 的三態（唯一生產者語義）：只在 `kind === "character"` **且**該 id 在既有卡清單裡
- *   真的存在（trim 後非空）時才寫入；kind 非 character / id 不存在 / 空字串一律不寫該欄位
- *   ——在建卡處就擋，不靠 normalize 事後丟。新卡 id 是當場生成的，必然不在既有卡清單裡，
- *   故「等於自身 id」也被同一條 find 擋住。
- * - 節點無可用圖（imageUrlOf 為空）→ 回 null（呼叫端原樣早退，與抽函式前行為一致）。
+ * - 预设名与 toast 标签一律查 CHARACTER_CARD_KIND_LABEL（五种 kind 一致，不再手写三元式）。
+ * - variantOf 的三态（唯一生产者语义）：只在 `kind === "character"` **且**该 id 在既有卡清单里
+ *   真的存在（trim 后非空）时才写入；kind 非 character / id 不存在 / 空字串一律不写该栏位
+ *   ——在建卡处就挡，不靠 normalize 事后丢。新卡 id 是当场生成的，必然不在既有卡清单里，
+ *   故「等于自身 id」也被同一条 find 挡住。
+ * - 节点无可用图（imageUrlOf 为空）→ 回 null（呼叫端原样早退，与抽函式前行为一致）。
  */
 export function buildNodeCard(
   node: CanvasNode,
@@ -99,7 +99,7 @@ export function buildNodeCard(
     id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name: node.title || `${label}卡`,
     kind,
-    // 純參考圖卡：locked 片段為空，鎖定的是參考圖與角色（可日後補描述）。
+    // 纯参考图卡：locked 片段为空，锁定的是参考图与角色（可日后补描述）。
     prompt: "",
     references: [
       {
@@ -118,9 +118,9 @@ export function buildNodeCard(
   return { card, message };
 }
 
-/** 交互域回傳：state + 鏡像 refs + handlers（消費端：組件殼 / 生成 hook / 快捷鍵 hook / menuItems 工廠）。 */
+/** 交互域回传：state + 镜像 refs + handlers（消费端：组件壳 / 生成 hook / 快捷键 hook / menuItems 工厂）。 */
 export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNodes, childToParent, setPromptPanelNodeId }: UseCanvasInteractionInput) {
-  // ── 交互狀態
+  // ── 交互状态
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -156,7 +156,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     window.setTimeout(() => setActionError((prev) => (prev === message ? null : prev)), 6000);
   }, []);
 
-  // ── 座標工具
+  // ── 座标工具
   const screenToWorld = useCallback((clientX: number, clientY: number): CanvasPosition | null => {
     const el = containerRef.current;
     if (!el) return null;
@@ -171,14 +171,14 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     return { x: clientX - (rect?.left ?? 0), y: clientY - (rect?.top ?? 0) };
   }, [containerRef]);
 
-  // ── 選取
+  // ── 选取
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
     setSelectedConnectionId(null);
     canvasStateRef.current.selectNode(null);
   }, [canvasStateRef]);
 
-  /** 手動建線（環路阻止 + 去重提示）。 */
+  /** 手动建线（环路阻止 + 去重提示）。 */
   const tryConnect = useCallback(
     (fromId: string, toId: string) => {
       if (fromId === toId) return;
@@ -225,8 +225,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     canvasStateRef.current.selectNode(nodeId);
   }, [canvasStateRef]);
 
-  /** A2：乾淨點擊 → 開節點面板（修飾鍵/連線模式/Group/Prompt 除外——
-   *  prompt 節點是備忘卡不是生成落地位，雙擊正文直編即可，不開生成面板）。 */
+  /** A2：干净点击 → 开节点面板（修饰键/连线模式/Group/Prompt 除外——
+   *  prompt 节点是备忘卡不是生成落地位，双击正文直编即可，不开生成面板）。 */
   const handleNodeClick = useCallback((nodeId: string) => {
     if (modifiersRef.current.ctrl || modifiersRef.current.shift) return;
     if (connectingRef.current || portDragRef.current) return;
@@ -237,7 +237,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       node.type === CanvasNodeType.Video ||
       node.type === CanvasNodeType.Audio ||
       node.type === CanvasNodeType.Prompt ||
-      node.type === CanvasNodeType.Scene3d // 3D 場景卡 P1 只讀+播放，無生成面板語義
+      node.type === CanvasNodeType.Scene3d // 3D 场景卡 P1 只读+播放，无生成面板语义
     ) return;
     setPromptPanelNodeId(nodeId);
   }, [canvasStateRef, setPromptPanelNodeId]);
@@ -297,7 +297,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     setSelectedIds(new Set());
   }, [canvasStateRef]);
 
-  // ── 複製 / 貼上 / 複本
+  // ── 复制 / 贴上 / 复本
   const copySelection = useCallback(() => {
     const state = canvasStateRef.current;
     const sel = selectedIdsRef.current;
@@ -334,7 +334,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     pasteClipboard();
   }, [copySelection, pasteClipboard]);
 
-  // ── 對齊 / 均分 / 整理
+  // ── 对齐 / 均分 / 整理
   const applyMoves = useCallback((moves: { nodeId: string; position: CanvasPosition }[]) => {
     if (moves.length === 0) return;
     const state = canvasStateRef.current;
@@ -355,7 +355,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     [applyMoves, canvasStateRef],
   );
 
-  // ── 下載
+  // ── 下载
   const downloadNode = useCallback(
     async (nodeId: string) => {
       const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
@@ -397,7 +397,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     [showError, canvasStateRef],
   );
 
-  // ── 建節點（雙擊/連線拖放/庫插入/導入共用）
+  // ── 建节点（双击/连线拖放/库插入/导入共用）
   const createNodeAt = useCallback(
     (
       type: "text" | "image" | "prompt" | "reference" | "scene3d",
@@ -408,7 +408,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
         width?: number;
         height?: number;
         referenceRole?: ReferenceImageRole;
-        /** scene3d：本機導入卡（source:"import"，只帶 glb_path）的 metadata。 */
+        /** scene3d：本机导入卡（source:"import"，只带 glb_path）的 metadata。 */
         sceneCard?: Scene3dCardMetadata;
       },
     ) => {
@@ -441,15 +441,15 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
         type: nodeType,
         title: extras?.title ?? defaultTitle,
         position: world,
-        // 四個既有型別的尺寸逐字不變（reference 300×240、prompt 340×200、其餘 340×240）；
-        // 只有新增的 scene3d 取契約預設 420×360。
+        // 四个既有型别的尺寸逐字不变（reference 300×240、prompt 340×200、其余 340×240）；
+        // 只有新增的 scene3d 取契约预设 420×360。
         width: extras?.width ?? (type === "reference" ? 300 : type === "scene3d" ? size.width : 340),
         height: extras?.height ?? (type === "prompt" ? 200 : type === "scene3d" ? size.height : 240),
         moved: true,
         metadata:
           type === "scene3d"
-            ? // 導入卡：glb_path 落地即完成（status:success 讓卡不顯示生成中骨架）；
-              // 其餘五欄缺席就是缺席，卡面走減法（Scene3dCardBody）。
+            ? // 导入卡：glb_path 落地即完成（status:success 让卡不显示生成中骨架）；
+              // 其余五栏缺席就是缺席，卡面走减法（Scene3dCardBody）。
               { ...(extras?.sceneCard ? { sceneCard: extras.sceneCard } : {}), status: "success" }
             : type === "text" || type === "prompt"
               ? { content: extras?.content ?? "", status: "idle" }
@@ -465,8 +465,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     [canvasStateRef],
   );
 
-  /** 本地圖片檔 → 畫布節點（壓縮後 dataURL；多檔階梯錯位）。
-   *  kind="reference" → 建成帶角色的 reference 節點（默認 general，節點上可切換）。 */
+  /** 本地图片档 → 画布节点（压缩后 dataURL；多档阶梯错位）。
+   *  kind="reference" → 建成带角色的 reference 节点（默认 general，节点上可切换）。 */
   const importImageFiles = useCallback(
     async (files: File[], world: CanvasPosition, kind: "image" | "reference" = "image") => {
       let index = 0;
@@ -494,21 +494,21 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
   );
 
   /**
-   * 本機 3D 模型（.glb/.gltf）→ 3D 場景卡節點（2026-09-27 本機導入刀）。
+   * 本机 3D 模型（.glb/.gltf）→ 3D 场景卡节点（2026-09-27 本机导入刀）。
    *
-   * 前後端同一把尺（`scene-3d-import.validateScene3dUpload`）：這裡先擋副檔名/體積/魔數，
-   * 服務端 `/api/canvas/scene-3d` 再驗一次（不信任客戶端）。成功才建卡：
-   * 標題＝檔名去副檔名、`scene_summary`＝真實來源文字、`source:"import"`；
-   * **不編造場景描述**（沒人看過這個模型）。
+   * 前后端同一把尺（`scene-3d-import.validateScene3dUpload`）：这里先挡副档名/体积/魔数，
+   * 服务端 `/api/canvas/scene-3d` 再验一次（不信任客户端）。成功才建卡：
+   * 标题＝档名去副档名、`scene_summary`＝真实来源文字、`source:"import"`；
+   * **不编造场景描述**（没人看过这个模型）。
    */
   const importScene3dFile = useCallback(
     async (file: File, world: CanvasPosition) => {
       try {
         const head = new Uint8Array(await file.slice(0, SCENE_3D_MAGIC_BYTES).arrayBuffer());
-        // 形狀（副檔名／魔數）一律先用同一支契約函式驗；體積不在此定死：
-        //  ≤ MAX_SCENE_3D_BYTES → 既有站內代理路（原狀不變）；
-        //  > MAX_SCENE_3D_BYTES → 兩段式直傳（瀏覽器直傳物件存儲），
-        //    真實上限取直傳憑證回應的 maxBytes（不是常數）。
+        // 形状（副档名／魔数）一律先用同一支契约函式验；体积不在此定死：
+        //  ≤ MAX_SCENE_3D_BYTES → 既有站内代理路（原状不变）；
+        //  > MAX_SCENE_3D_BYTES → 两段式直传（浏览器直传物件存储），
+        //    真实上限取直传凭证回应的 maxBytes（不是常数）。
         const checked = validateScene3dUpload({
           name: file.name,
           size: file.size,
@@ -525,8 +525,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
           return;
         }
         if (file.size > MAX_SCENE_3D_BYTES) {
-          // 大檔：站內代理路受平台 ~4.5MB 請求體硬頂，改走兩段式直傳；
-          // 拿回 downloadUrl 餵給下面同一條建卡流程（下游只吃 URL，不變）。
+          // 大档：站内代理路受平台 ~4.5MB 请求体硬顶，改走两段式直传；
+          // 拿回 downloadUrl 喂给下面同一条建卡流程（下游只吃 URL，不变）。
           try {
             const uploaded = await uploadDirect(file, { title: scene3dImportTitle(file.name), headers });
             createNodeAt("scene3d", world, {
@@ -534,8 +534,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
               sceneCard: scene3dImportCardMetadata({ url: uploaded.downloadUrl, fileName: file.name }),
             });
           } catch (error) {
-            // DirectUploadError 的 message 已是給用戶看的人話（超限/後端不支援/網路失敗）；
-            // 其餘（例如瀏覽器原生的 TypeError）不外洩原文，統一給人話。
+            // DirectUploadError 的 message 已是给用户看的人话（超限/后端不支援/网路失败）；
+            // 其余（例如浏览器原生的 TypeError）不外泄原文，统一给人话。
             showError(error instanceof DirectUploadError ? error.message : "模型导入失败：请检查网络后重试");
           }
           return;
@@ -558,7 +558,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
               message = SCENE_3D_SIZE_HINT;
             }
           } catch {
-            // 非 JSON 錯誤體：保留狀態碼訊息，不讓 parse 異常蓋掉真正原因。
+            // 非 JSON 错误体：保留状态码讯息，不让 parse 异常盖掉真正原因。
           }
           showError(message);
           return;
@@ -579,7 +579,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     [createNodeAt, showError],
   );
 
-  // ── A1：port 拖線（window 級 move/up，capture 保證不被節點吃掉）
+  // ── A1：port 拖线（window 级 move/up，capture 保证不被节点吃掉）
   const startPortDrag = useCallback((nodeId: string, side: "left" | "right", clientX: number, clientY: number) => {
     setMenu(null);
     setConnecting(null);
@@ -599,13 +599,13 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       const nodeEl = el?.closest<HTMLElement>("[data-canvas-node]");
       const targetId = nodeEl?.getAttribute("data-canvas-node");
       if (targetId && targetId !== drag.sourceId) {
-        // 右 port = 出邊（source→target）、左 port = 入邊（target→source）
+        // 右 port = 出边（source→target）、左 port = 入边（target→source）
         if (drag.side === "right") tryConnect(drag.sourceId, targetId);
         else tryConnect(targetId, drag.sourceId);
         return;
       }
       if (!targetId) {
-        // 鬆手在空白 → 就地建節點選單，建完自動連線（藤蔓式生長）。
+        // 松手在空白 → 就地建节点选单，建完自动连线（藤蔓式生长）。
         const world = screenToWorld(e.clientX, e.clientY);
         if (world) {
           setCreateMenu({
@@ -629,7 +629,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     };
   }, [portDrag, screenToWorld, screenInContainer, tryConnect]);
 
-  /** 建節點選單確認（雙擊空白 / 連線拖放共用）。 */
+  /** 建节点选单确认（双击空白 / 连线拖放共用）。 */
   const handleCreateFromMenu = useCallback(
     (type: "text" | "image" | "prompt") => {
       const cm = createMenuRef.current;
@@ -650,14 +650,14 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       setCreateMenu(null);
       if (!cm) return;
       void importImageFiles(files, cm.world, kind).then(() => {
-        // 連線拖放上傳：與第一個導入節點連線（importImageFiles 已選中最後一個，
-        // 簡化：不強行連線，交用戶手動——多檔語義不明確時不猜）。
+        // 连线拖放上传：与第一个导入节点连线（importImageFiles 已选中最后一个，
+        // 简化：不强行连线，交用户手动——多档语义不明确时不猜）。
       });
     },
     [importImageFiles],
   );
 
-  /** 建節點選單的「導入 3D 模型…」入口：落點取選單開出時的 world 座標（同上傳圖片形）。 */
+  /** 建节点选单的「导入 3D 模型…」入口：落点取选单开出时的 world 座标（同上传图片形）。 */
   const handleImportScene3d = useCallback(
     (file: File) => {
       const cm = createMenuRef.current;
@@ -668,7 +668,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     [importScene3dFile],
   );
 
-  // ── 右鍵選單（沿用 v4 + 連線右鍵 + 字號）
+  // ── 右键选单（沿用 v4 + 连线右键 + 字号）
   const openNodeMenu = useCallback((nodeId: string, clientX: number, clientY: number) => {
     const vpPos = screenInContainer(clientX, clientY);
     const world = screenToWorld(clientX, clientY) ?? { x: 0, y: 0 };
@@ -683,8 +683,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     setMenu({ position: screen, world, targetNodeId: null });
   }, []);
 
-  /** P2：從 reference 節點「存為卡」——取節點圖 + 角色建卡，存檔並鎖定到本畫布。
-   *  options.variantOf（C）：指到存在的角色母卡時寫入卡物件的 variantOf（變體母卡）。 */
+  /** P2：从 reference 节点「存为卡」——取节点图 + 角色建卡，存档并锁定到本画布。
+   *  options.variantOf（C）：指到存在的角色母卡时写入卡物件的 variantOf（变体母卡）。 */
   const saveNodeAsCard = useCallback(
     async (node: CanvasNode, kind: CharacterCardKind, options?: { variantOf?: string }) => {
       const built = buildNodeCard(node, kind, options, canvasStateRef.current.characterCards);
@@ -695,7 +695,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
         showError("存卡失败，请稍后再试");
         return;
       }
-      canvasStateRef.current.toggleCharacterCard(card.id); // 存為卡即鎖定（生成自動攜帶）
+      canvasStateRef.current.toggleCharacterCard(card.id); // 存为卡即锁定（生成自动携带）
       showError(message);
     },
     [showError, canvasStateRef],
@@ -724,7 +724,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     actionError,
     setActionError,
     showError,
-    // 最新值鏡像 refs（鍵盤 effect 依賴）
+    // 最新值镜像 refs（键盘 effect 依赖）
     selectedIdsRef,
     connectingRef,
     portDragRef,
@@ -734,7 +734,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     createMenuRef,
     clipboardRef,
     modifiersRef,
-    // 座標工具
+    // 座标工具
     screenToWorld,
     screenInContainer,
     // handlers

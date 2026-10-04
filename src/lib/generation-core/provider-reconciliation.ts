@@ -22,16 +22,16 @@ const POLL_BACKOFF_ERROR_MS = 120_000;
 const POLL_BACKOFF_MAX_MS = 15 * 60_000;
 
 /**
- * INC-0831 對帳迴圈（架構級整改核心）：上游已提交的 provider task 必須有唯一可證明的
- * 結局 —— 交付（單次結算）、上游確認失敗才退款、或窗口耗盡凍結人工對帳。
- * 真相未明前永不退款、永不重投、永不宣判失敗。
+ * INC-0831 对帐回圈（架构级整改核心）：上游已提交的 provider task 必须有唯一可证明的
+ * 结局 —— 交付（单次结算）、上游确认失败才退款、或窗口耗尽冻结人工对帐。
+ * 真相未明前永不退款、永不重投、永不宣判失败。
  *
- * 每輪：
- *  1. 退休已過對帳窗口的 attempt（凍結人工，不退款、不改寫真相）。
- *  2. SKIP LOCKED 認領到期 attempt（reconcile lease，防多實例重複輪詢）。
- *  3. 按協議向上游只讀查詢真相；查詢本身失敗 = 退避重試，不是任務失敗。
- *  4. succeeded → artifact 落庫（canonical 冪等），非活躍 job CAS 復活交付。
- *  5. failed → 確認 job 再無其他未決真相後，才 fail + refund（冪等）。
+ * 每轮：
+ *  1. 退休已过对帐窗口的 attempt（冻结人工，不退款、不改写真相）。
+ *  2. SKIP LOCKED 认领到期 attempt（reconcile lease，防多实例重复轮询）。
+ *  3. 按协议向上游只读查询真相；查询本身失败 = 退避重试，不是任务失败。
+ *  4. succeeded → artifact 落库（canonical 幂等），非活跃 job CAS 复活交付。
+ *  5. failed → 确认 job 再无其他未决真相后，才 fail + refund（幂等）。
  */
 export async function runProviderReconciliation(input: {
   executorId: string;
@@ -44,12 +44,12 @@ export async function runProviderReconciliation(input: {
   pollErrors: number;
 }> {
   const sql = input.sql ?? getGenerationSql();
-  // 每輪認領的 attempt 數（吞吐參數，**不是**重試預算——重試預算唯一來源是
-  // operation registry 的 provider.reconcile_poll 政策；此參數不接受呼叫方傳入）。
+  // 每轮认领的 attempt 数（吞吐参数，**不是**重试预算——重试预算唯一来源是
+  // operation registry 的 provider.reconcile_poll 政策；此参数不接受呼叫方传入）。
   const claimBatchSize = 10;
   const summary = { claimed: 0, delivered: 0, confirmedFailed: 0, exhausted: 0, pollErrors: 0 };
 
-  // ① 對帳窗口耗盡：永久退出輪詢（truth unknown → 凍結人工對帳，禁退款）。
+  // ① 对帐窗口耗尽：永久退出轮询（truth unknown → 冻结人工对帐，禁退款）。
   const expired = await sql<Row[]>`
     UPDATE generation_attempt
     SET provider_next_poll_at = NULL,
@@ -72,7 +72,7 @@ export async function runProviderReconciliation(input: {
     }, sql);
   }
 
-  // ② SKIP LOCKED 認領到期 attempt。
+  // ② SKIP LOCKED 认领到期 attempt。
   const claimed = await sql<Row[]>`
     UPDATE generation_attempt
     SET reconcile_lease_owner = ${input.executorId},
@@ -94,7 +94,7 @@ export async function runProviderReconciliation(input: {
   `;
   if (!claimed.length) return summary;
 
-  // ③ 每個 attempt 的完整上下文（job kind/status + supplier 憑證）。
+  // ③ 每个 attempt 的完整上下文（job kind/status + supplier 凭证）。
   const attemptIds = claimed.map((row) => String(row.id));
   const contexts = await sql<Row[]>`
     SELECT job.id AS job_id, job.kind, job.status AS job_status,
@@ -139,7 +139,7 @@ export async function runProviderReconciliation(input: {
       const supplier = mapSupplierRecord(ctx);
       const pollCount = Number(claim.provider_poll_count ?? 0);
 
-      // 認領到退休之間窗口可能已過：退休優先於輪詢。
+      // 认领到退休之间窗口可能已过：退休优先于轮询。
       const deadlineAt = claim.provider_reconcile_deadline_at
         ? new Date(claim.provider_reconcile_deadline_at as string | Date).getTime()
         : null;
@@ -164,7 +164,7 @@ export async function runProviderReconciliation(input: {
       try {
         result = await pollProviderTask(protocol, providerTaskId, supplier);
       } catch (error) {
-        // 查詢通道失敗 ≠ 任務失敗：真相未變，退避重試（重放許可問 registry）。
+        // 查询通道失败 ≠ 任务失败：真相未变，退避重试（重放许可问 registry）。
         summary.pollErrors += 1;
         const outcome = await backoffAttempt(sql, {
           attemptId,
@@ -216,7 +216,7 @@ export async function runProviderReconciliation(input: {
         continue;
       }
 
-      // 上游確認失敗：這是唯一允許走向退款的路徑。
+      // 上游确认失败：这是唯一允许走向退款的路径。
       const failed = await confirmReconciledFailure(sql, {
         executorId: input.executorId,
         jobId,
@@ -226,9 +226,9 @@ export async function runProviderReconciliation(input: {
       });
       if (failed) summary.confirmedFailed += 1;
     } catch (error) {
-      // 單 attempt 異常不炸整輪；釋放租約讓下一輪重試。
+      // 单 attempt 异常不炸整轮；释放租约让下一轮重试。
       summary.pollErrors += 1;
-      console.error("[provider-reconciliation] attempt 處理異常（下一輪重試）", attemptId, error);
+      console.error("[provider-reconciliation] attempt 处理异常（下一轮重试）", attemptId, error);
       await sql`
         UPDATE generation_attempt
         SET reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
@@ -241,9 +241,9 @@ export async function runProviderReconciliation(input: {
 }
 
 /**
- * 對帳輪詢分派（V-06）：按協議查 supply-registry，由 adapter 自帶的 poll 執行；
- * 同步協議走其顯式 `reconcileVia`。未知協議拋錯 → 上層記 poll_error 並退避（不再
- * 靜默當成 newapi_video 去查）。
+ * 对帐轮询分派（V-06）：按协议查 supply-registry，由 adapter 自带的 poll 执行；
+ * 同步协议走其显式 `reconcileVia`。未知协议抛错 → 上层记 poll_error 并退避（不再
+ * 静默当成 newapi_video 去查）。
  */
 async function pollProviderTask(
   protocol: ProviderProtocol,
@@ -254,32 +254,32 @@ async function pollProviderTask(
 }
 
 /**
- * 輪詢退避：指數拉長（60s→…→15min 上限），錯誤通道起點翻倍。
- * 重放許可與預算由封閉 operation registry 的 `provider.reconcile_poll` 政策決定
- * （FG-02/03），呼叫方不得自帶重試次數。
+ * 轮询退避：指数拉长（60s→…→15min 上限），错误通道起点翻倍。
+ * 重放许可与预算由封闭 operation registry 的 `provider.reconcile_poll` 政策决定
+ * （FG-02/03），呼叫方不得自带重试次数。
  */
 function pollBackoffMs(pollCount: number, isError: boolean): number {
   const base = isError ? POLL_BACKOFF_ERROR_MS : POLL_BACKOFF_BASE_MS;
   return Math.min(base * Math.pow(2, pollCount), POLL_BACKOFF_MAX_MS);
 }
 
-/** 下一輪對帳輪詢是否允許重放（registry 裁決；未宣告＝禁）。 */
+/** 下一轮对帐轮询是否允许重放（registry 裁决；未宣告＝禁）。 */
 export function planReconcilePollReplay(nextPollNo: number): ReplayPlan {
   return planReplay({ operation: "provider.reconcile_poll", nextAttemptNo: nextPollNo });
 }
 
 /**
- * 排下一輪輪詢 / 或按 registry 預算退休。
- * 預算是防禦性天花板（128），正常情況下 24h 對帳窗口先綁定；預算耗盡 =
- * 凍結人工對帳（不退款、不宣判失敗），語義與窗口耗盡一致。
+ * 排下一轮轮询 / 或按 registry 预算退休。
+ * 预算是防御性天花板（128），正常情况下 24h 对帐窗口先绑定；预算耗尽 =
+ * 冻结人工对帐（不退款、不宣判失败），语义与窗口耗尽一致。
  */
 async function backoffAttempt(
   sql: GenerationSql,
   input: { attemptId: string; jobId: string; executorId: string; pollCount: number; errorDetail: string | null },
 ): Promise<"scheduled" | "retired"> {
   const { attemptId, pollCount, errorDetail } = input;
-  // 剛完成的是第 pollCount+1 次輪詢；下一次是第 pollCount+2 次（FG-03：序號由
-  // registry 政策換算，呼叫方不得給預算）。
+  // 刚完成的是第 pollCount+1 次轮询；下一次是第 pollCount+2 次（FG-03：序号由
+  // registry 政策换算，呼叫方不得给预算）。
   const replay = planReconcilePollReplay(pollCount + 2);
   if (!replay.allowed) {
     await sql`
@@ -321,9 +321,9 @@ async function backoffAttempt(
 }
 
 /**
- * 對帳確認成功：artifact 落庫（canonical 冪等）→ 非活躍 job CAS 復活交付。
- * 活躍 job 的交付由 worker 正常路徑收口（冪等鍵保證不重複計數/不重複落列）；
- * 計費結算走 reconcileGenerationBilling 的 terminalReservedJobs 通道（冪等 commit）。
+ * 对帐确认成功：artifact 落库（canonical 幂等）→ 非活跃 job CAS 复活交付。
+ * 活跃 job 的交付由 worker 正常路径收口（幂等键保证不重复计数/不重复落列）；
+ * 计费结算走 reconcileGenerationBilling 的 terminalReservedJobs 通道（幂等 commit）。
  */
 async function landReconciledArtifact(
   sql: GenerationSql,
@@ -393,9 +393,9 @@ async function landReconciledArtifact(
 }
 
 /**
- * 對帳確認上游失敗：只有 job 已凍結（submit_unknown）且再無其他未決真相時，
- * 才終結為 failed 並退款（refundGenerationBilling 冪等）。
- * 活躍 job 不動刀（它自己的 deadline/failure 路徑會查 jobHasUnresolvedProviderTask）。
+ * 对帐确认上游失败：只有 job 已冻结（submit_unknown）且再无其他未决真相时，
+ * 才终结为 failed 并退款（refundGenerationBilling 幂等）。
+ * 活跃 job 不动刀（它自己的 deadline/failure 路径会查 jobHasUnresolvedProviderTask）。
  */
 async function confirmReconciledFailure(
   sql: GenerationSql,

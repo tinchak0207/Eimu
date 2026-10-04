@@ -5,7 +5,7 @@ const PAGE_DESCRIPTION = "团队席位、成员角色、建画布权限、加入
 
 export const metadata = {
   title: { absolute: PAGE_TITLE },
-  // 個人頁（需登入 + B 端密钥）：不進索引，別浪費爬取預算。
+  // 个人页（需登入 + B 端密钥）：不进索引，别浪费爬取预算。
   robots: { index: false, follow: false },
   description: PAGE_DESCRIPTION,
   openGraph: {

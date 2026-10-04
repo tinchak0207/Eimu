@@ -1,11 +1,11 @@
-// 控制面側的 mPay 回調落地存證端點（履约副作用之前先写一笔，见 src/lib/mapay-intake.ts）。
+// 控制面侧的 mPay 回调落地存证端点（履约副作用之前先写一笔，见 src/lib/mapay-intake.ts）。
 //
 // 呼叫方：Vercel 上 /api/payments/mapay/notify
 //   op=record    upsert 一条 intake（state='received'）
 //   op=fulfilled 履约成功后回标 fulfilled + delivery
 //
-// 鑑權復用 biz-key-sync 的 HMAC 通道（signatureDomain "mapay-intake"），
-// 與 mapay-credit / welcome-gift / user-attribution 同一骨架；不回顯任何內部錯誤細節。
+// 鉴权复用 biz-key-sync 的 HMAC 通道（signatureDomain "mapay-intake"），
+// 与 mapay-credit / welcome-gift / user-attribution 同一骨架；不回显任何内部错误细节。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -22,7 +22,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function asNullableString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;

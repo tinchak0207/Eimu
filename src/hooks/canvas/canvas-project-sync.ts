@@ -1,8 +1,8 @@
-// 畫布專案持久化（自 use-canvas-chat.ts 外圍搬遷）。
-// 三個持久化 effect：進頁初始化（歷史清單）、儲存 debounce 400ms、壓縮快照上行。
-// 擁有 refs：createdAt / saveTimer / hydrated / everHadNodes ——
-// projectId 例外：**由主 hook 建立並注入**（REQ-B2b：卡域的讀取端作用域閘也要讀同一個
-// 項目 id 讀取器；兩處各自 useRef 就是兩份真相＝閘讀到舊項目而漏判）。
+// 画布专案持久化（自 use-canvas-chat.ts 外围搬迁）。
+// 三个持久化 effect：进页初始化（历史清单）、储存 debounce 400ms、压缩快照上行。
+// 拥有 refs：createdAt / saveTimer / hydrated / everHadNodes ——
+// projectId 例外：**由主 hook 建立并注入**（REQ-B2b：卡域的读取端作用域闸也要读同一个
+// 项目 id 读取器；两处各自 useRef 就是两份真相＝闸读到旧项目而漏判）。
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
@@ -22,12 +22,12 @@ import {
 } from "./canvas-chat-types";
 import { buildAgentCanvasSnapshot } from "./canvas-agent-snapshot";
 
-/** 純視口變動的靜默存檔防抖（比內容存檔長：連續平移/縮放只落最後一筆）。 */
+/** 纯视口变动的静默存档防抖（比内容存档长：连续平移/缩放只落最后一笔）。 */
 const VIEWPORT_SAVE_DEBOUNCE_MS = 1500;
 
-/** useCanvasProjectSync 需要的共享 refs / 當前值 / setters（皆由主 hook 提供）。 */
+/** useCanvasProjectSync 需要的共享 refs / 当前值 / setters（皆由主 hook 提供）。 */
 export interface UseCanvasProjectSyncParams {
-  // ── 主 hook 維護的「最新值鏈像 ref」（render 期間同步賦值）
+  // ── 主 hook 维护的「最新值链像 ref」（render 期间同步赋值）
   canvasRef: { current: CanvasReducerState };
   viewportRef: { current: CanvasViewport };
   backgroundRef: { current: CanvasBackgroundMode };
@@ -35,22 +35,22 @@ export interface UseCanvasProjectSyncParams {
   budgetRef: { current: CanvasBudget | null };
   activeCardIdsRef: { current: string[] };
   /**
-   * 當前項目 id ref：**由主 hook 建立並注入**（本函式不自建）。
-   * REQ-B2b：卡域（use-canvas-cards）的讀取端作用域閘要讀同一個讀取器——
-   * 兩處各自 useRef＝兩份真相（閘讀到舊項目 id 就會漏判跨項目卡）。
+   * 当前项目 id ref：**由主 hook 建立并注入**（本函式不自建）。
+   * REQ-B2b：卡域（use-canvas-cards）的读取端作用域闸要读同一个读取器——
+   * 两处各自 useRef＝两份真相（闸读到旧项目 id 就会漏判跨项目卡）。
    */
   projectIdRef: { current: string | null };
-  // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：照 activeCardIdsRef 同款「最新值鏈像 ref」。
+  // 作品/剧集三级状态机（2026-09-15 刀 1 前端接线）：照 activeCardIdsRef 同款「最新值链像 ref」。
   projectTypeRef: { current: CanvasProjectType | undefined };
   currentStepRef: { current: number | undefined };
   episodesRef: { current: CanvasEpisode[] };
-  /** 專案級風格綁定（P1-8／D34）：同款最新值 ref，供 buildProject 落盤。 */
+  /** 专案级风格绑定（P1-8／D34）：同款最新值 ref，供 buildProject 落盘。 */
   styleIdRef: { current: string | undefined };
-  /** 解說劇設定（P1-5／D7）：劇本型別與旁白音色，同樣走「最新值鏈像 ref」。 */
+  /** 解说剧设定（P1-5／D7）：剧本型别与旁白音色，同样走「最新值链像 ref」。 */
   scriptTypeRef: { current: CanvasScriptType | undefined };
   narrationVoiceRef: { current: string | undefined };
   mountedRef: { current: boolean };
-  // ── 當前 render 的值（effect 依賴）
+  // ── 当前 render 的值（effect 依赖）
   canvas: CanvasReducerState;
   viewport: CanvasViewport;
   backgroundMode: CanvasBackgroundMode;
@@ -59,25 +59,25 @@ export interface UseCanvasProjectSyncParams {
   projectType: CanvasProjectType | undefined;
   currentStep: number | undefined;
   episodes: CanvasEpisode[];
-  /** 專案級風格綁定（P1-8／D34）；在 save effect 依賴裡，變更即觸發落盤。 */
+  /** 专案级风格绑定（P1-8／D34）；在 save effect 依赖里，变更即触发落盘。 */
   styleId: string | undefined;
-  /** 解說劇設定（P1-5／D7）；同在 save effect 依賴裡。 */
+  /** 解说剧设定（P1-5／D7）；同在 save effect 依赖里。 */
   scriptType: CanvasScriptType | undefined;
   narrationVoice: string | undefined;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
   sessionId?: string | null;
   selectedNodeId: string | null;
   activeCharacterCards: CharacterCard[];
-  // ── 主 hook 的 state setters（持久化結果寫回）
+  // ── 主 hook 的 state setters（持久化结果写回）
   setSavedProjects: Dispatch<SetStateAction<CanvasProjectSummary[]>>;
   setSaveState: Dispatch<SetStateAction<"idle" | "saving" | "saved" | "error" | "offline">>;
   setLoading: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
- * 專案持久化域：進頁初始化（只抓歷史清單，不自動還原畫布）、
- * 專案儲存（debounce 400ms）、Wave C1 壓縮快照上行（agent 的眼睛）。
- * effect 註冊順序與原 use-canvas-chat 內聯版一致（init → debounce → snapshot）。
+ * 专案持久化域：进页初始化（只抓历史清单，不自动还原画布）、
+ * 专案储存（debounce 400ms）、Wave C1 压缩快照上行（agent 的眼睛）。
+ * effect 注册顺序与原 use-canvas-chat 内联版一致（init → debounce → snapshot）。
  */
 export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   const {
@@ -91,12 +91,12 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
 
   const createdAtRef = useRef<string | null>(null);
   const saveTimerRef = useRef<number | null>(null);
-  // 載入完成前不要存：初始空畫布會把雲端那份覆蓋成空的。
+  // 载入完成前不要存：初始空画布会把云端那份覆盖成空的。
   const hydratedRef = useRef(false);
-  // 畫布是否曾有節點：空專案不存，避免歷史清單塞滿剛開又關的空殼。
+  // 画布是否曾有节点：空专案不存，避免历史清单塞满刚开又关的空壳。
   const everHadNodesRef = useRef(false);
 
-  // ─────────────────────── 進頁初始化（只抓歷史清單，不自動還原畫布）
+  // ─────────────────────── 进页初始化（只抓历史清单，不自动还原画布）
 
   useEffect(() => {
     let cancelled = false;
@@ -106,10 +106,10 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       if (res.ok && res.data) {
         setSavedProjects(toProjectSummaries(res.data));
       } else if (res.reason === "not_authenticated") {
-        // 沒登入：畫布照常能用，只是不存雲端。不擋路、也不假裝存了。
+        // 没登入：画布照常能用，只是不存云端。不挡路、也不假装存了。
         setSaveState("offline");
       }
-      // 進頁永遠開一張全新畫布：不還原最近一份 —— 那正是新舊 session 混淆的根源。
+      // 进页永远开一张全新画布：不还原最近一份 —— 那正是新旧 session 混淆的根源。
       projectIdRef.current = `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       createdAtRef.current = new Date().toISOString();
       hydratedRef.current = true;
@@ -120,7 +120,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     };
   }, [mountedRef, projectIdRef, setLoading, setSaveState, setSavedProjects]);
 
-  // ─────────────────────── 專案儲存（debounce 400ms）
+  // ─────────────────────── 专案储存（debounce 400ms）
 
   const buildProject = useCallback((): CanvasProject => {
     const id = projectIdRef.current ?? `canvas-${Date.now()}`;
@@ -135,9 +135,9 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       projectTypeRef.current,
       currentStepRef.current,
       episodesRef.current,
-      // 專案級風格綁定（P1-8／D34）：第 10 個位置參數（照三欄先例往後追加）。
+      // 专案级风格绑定（P1-8／D34）：第 10 个位置参数（照三栏先例往后追加）。
       styleIdRef.current,
-      // 解說劇設定（P1-5／D7）：第 11、12 個位置參數。
+      // 解说剧设定（P1-5／D7）：第 11、12 个位置参数。
       scriptTypeRef.current,
       narrationVoiceRef.current,
     );
@@ -146,7 +146,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   useEffect(() => {
     if (!hydratedRef.current) return;
     if (saveState === "offline") return;
-    // 有節點才記住「曾經有過」；空畫布從不寫入歷史（避免塞滿剛開又關的空殼）。
+    // 有节点才记住「曾经有过」；空画布从不写入历史（避免塞满刚开又关的空壳）。
     if (canvas.nodes.length > 0) everHadNodesRef.current = true;
     if (canvas.nodes.length === 0 && !everHadNodesRef.current) return;
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
@@ -160,13 +160,13 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
         else setSaveState(res.reason === "not_authenticated" ? "offline" : "error");
       });
     }, SAVE_DEBOUNCE_MS);
-    // 依賴畫布本體與背景/標題/卡鎖定/作品劇集欄位 + 風格綁定：任何一項變化都該落盤（視口另走下方靜默存檔）。
-    // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
+    // 依赖画布本体与背景/标题/卡锁定/作品剧集栏位 + 风格绑定：任何一项变化都该落盘（视口另走下方静默存档）。
+    // saveState 刻意不进依赖 —— 它由这个 effect 自己写，进去会变成自触发循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvas, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, styleId, scriptType, narrationVoice, buildProject]);
 
-  // 只動了視口（平移/縮放）：效能審計 P1-4（2026-10-01）——原本每次停手 400ms 就整份存檔＋兩次 setSaveState
-  // （＝宿主所在的整頁重渲染兩次）。視口只是「回來時停在哪」，靜默、拉長防抖；內容存檔照常帶最新視口（viewportRef）。
+  // 只动了视口（平移/缩放）：效能审计 P1-4（2026-10-01）——原本每次停手 400ms 就整份存档＋两次 setSaveState
+  // （＝宿主所在的整页重渲染两次）。视口只是「回来时停在哪」，静默、拉长防抖；内容存档照常带最新视口（viewportRef）。
   const viewportSaveTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!hydratedRef.current) return;
@@ -175,27 +175,27 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     if (viewportSaveTimerRef.current !== null) window.clearTimeout(viewportSaveTimerRef.current);
     viewportSaveTimerRef.current = window.setTimeout(() => {
       viewportSaveTimerRef.current = null;
-      // 內容存檔排隊中就不重複送（它會帶上同一份視口）。
+      // 内容存档排队中就不重复送（它会带上同一份视口）。
       if (saveTimerRef.current !== null) return;
       void saveCanvasProject(buildProject());
     }, VIEWPORT_SAVE_DEBOUNCE_MS);
-    // 不在 cleanup 清計時器：關掉畫布前的最後一次停手也要落盤（下一輪 effect 開頭會自行清舊計時器）。
+    // 不在 cleanup 清计时器：关掉画布前的最后一次停手也要落盘（下一轮 effect 开头会自行清旧计时器）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
 
-  // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
-  // 3s 尾隨防抖（第二輪就緒優化刀C，原 300ms）：sessionId 落地（AI 助理開場）
-  // 觸發的第一幀快照會與空態渲染爭搶瀏覽器連接/網路，實測拖過 emptyAt
-  // （s=1086, e=1740 vs emptyAt=1411）。快照是盡力而為——agent 只在用戶發
-  // 第一條消息時才讀 canvas_state（send 隨 message 上送 canvasState），晚
-  // 3 秒上送零影響；持續平移/拖動期間同樣不上報，停手才推最新一幀。失敗靜默。
+  // ─────────────────────── Wave C1：压缩快照上行（agent 的眼睛）
+  // 3s 尾随防抖（第二轮就绪优化刀C，原 300ms）：sessionId 落地（AI 助理开场）
+  // 触发的第一帧快照会与空态渲染争抢浏览器连接/网路，实测拖过 emptyAt
+  // （s=1086, e=1740 vs emptyAt=1411）。快照是尽力而为——agent 只在用户发
+  // 第一条消息时才读 canvas_state（send 随 message 上送 canvasState），晚
+  // 3 秒上送零影响；持续平移/拖动期间同样不上报，停手才推最新一帧。失败静默。
   useEffect(() => {
     if (!sessionId) return;
     const t = window.setTimeout(() => {
-      // 上行載荷唯一建構子（canvas-agent-snapshot）：節點壓縮白名單 ＋ `dsl`（全量 state
-      // 反推的可逆聲明）＋ `node_versions`（版本索引）。作品/劇集三欄只帶純量指針、
-      // **不帶 episodes**：劇集上限 200、script 長文會頂爆 512KB（route 413），且截斷版
-      // 回寫 Blob 會靜默吃掉劇本原文——episodes 走 saveCanvasProject 正規路徑。
+      // 上行载荷唯一建构子（canvas-agent-snapshot）：节点压缩白名单 ＋ `dsl`（全量 state
+      // 反推的可逆声明）＋ `node_versions`（版本索引）。作品/剧集三栏只带纯量指针、
+      // **不带 episodes**：剧集上限 200、script 长文会顶爆 512KB（route 413），且截断版
+      // 回写 Blob 会静默吃掉剧本原文——episodes 走 saveCanvasProject 正规路径。
       void postCanvasSnapshot(
         sessionId,
         buildAgentCanvasSnapshot({

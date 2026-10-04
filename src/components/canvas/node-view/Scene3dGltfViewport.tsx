@@ -1,32 +1,32 @@
 "use client";
 
-// Scene3dGltfViewport —— 3D 場景卡「3D 预览」資產模式視口（2026-09-06 片P）。
+// Scene3dGltfViewport —— 3D 场景卡「3D 预览」资产模式视口（2026-09-06 片P）。
 //
-// 輪子 = @/lib/director-engine/engine（DirectorMiniViewport.tsx 同款掛載形：
-// 動態 import（three 不入 SSR 主 bundle）→ new DirectorEngine → ResizeObserver
-// → engine.resize()；unmount → engine.dispose()）。與導演台視口的差異只有數據
-// 源一件：本視口不拉 director state/plan（白模預演數據），改走片E資產模式
-// engine.setGltfAsset(url) 顯示 Blender 真資產；白模 mannequin 共存為引擎默認，
-// 本組件不做任何元素可見性切換（P1 只讀範圍，無切換開關）。
+// 轮子 = @/lib/director-engine/engine（DirectorMiniViewport.tsx 同款挂载形：
+// 动态 import（three 不入 SSR 主 bundle）→ new DirectorEngine → ResizeObserver
+// → engine.resize()；unmount → engine.dispose()）。与导演台视口的差异只有数据
+// 源一件：本视口不拉 director state/plan（白模预演数据），改走片E资产模式
+// engine.setGltfAsset(url) 显示 Blender 真资产；白模 mannequin 共存为引擎默认，
+// 本组件不做任何元素可见性切换（P1 只读范围，无切换开关）。
 //
-// glb 通路：GLTFLoader 內建 fetch 帶不了站內 Bearer 頭（token 在 localStorage，
-// 不在 cookie），故本組件先 fetch(blenderArtifactUrl, { headers: authHeaders() })
-// 拉 bytes → blob URL → engine.setGltfAsset(blobUrl)。鑑權與 canvas client 同款
-// （authHeaders：LOCAL_TEST_MODE 假頭 / 真用戶 Bearer+x-user-id）。
+// glb 通路：GLTFLoader 内建 fetch 带不了站内 Bearer 头（token 在 localStorage，
+// 不在 cookie），故本组件先 fetch(blenderArtifactUrl, { headers: authHeaders() })
+// 拉 bytes → blob URL → engine.setGltfAsset(blobUrl)。鉴权与 canvas client 同款
+// （authHeaders：LOCAL_TEST_MODE 假头 / 真用户 Bearer+x-user-id）。
 //
-// 畫布手勢隔離：data-canvas-interactive 放行 + wheel stopPropagation，
-// 與 DirectorMiniViewport 同款（防 InfiniteCanvas 容器級 wheel 縮放連動）。
+// 画布手势隔离：data-canvas-interactive 放行 + wheel stopPropagation，
+// 与 DirectorMiniViewport 同款（防 InfiniteCanvas 容器级 wheel 缩放连动）。
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { authHeaders } from "@/lib/canvas/client";
 import { cn } from "@/lib/utils";
 
 /**
- * 拉 glb bytes → blob URL。兩條來源：
- *   - 站內橋產物（導演卡）：走 `/api/blender-artifact?name=` 代讀，**必帶 authHeaders**
- *     （歷史坑：裸 fetch 401 靜默 → 視口永遠空）。
- *   - 公網物件存儲（本機導入卡，2026-09-27）：glb_path 本身是 http(s) URL，直連拉取。
- *     **不帶 Authorization**——token 只送本站 origin，禁止外洩到第三方主機。
+ * 拉 glb bytes → blob URL。两条来源：
+ *   - 站内桥产物（导演卡）：走 `/api/blender-artifact?name=` 代读，**必带 authHeaders**
+ *     （历史坑：裸 fetch 401 静默 → 视口永远空）。
+ *   - 公网物件存储（本机导入卡，2026-09-27）：glb_path 本身是 http(s) URL，直连拉取。
+ *     **不带 Authorization**——token 只送本站 origin，禁止外泄到第三方主机。
  */
 async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
   const headers = authHeaders();
@@ -42,7 +42,7 @@ async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
       const json = (await resp.json()) as { error?: string; code?: string };
       detail = json?.error ? `（${json.error}）` : "";
     } catch {
-      // 非 JSON 錯誤體（如 401 HTML）保持空 detail，不讓 parse 異常蓋掉狀態碼
+      // 非 JSON 错误体（如 401 HTML）保持空 detail，不让 parse 异常盖掉状态码
     }
     throw new Error(`模型文件获取失败 ${resp.status}${detail}`);
   }
@@ -54,7 +54,7 @@ async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
 type GltfViewportPhase = "loading" | "ready" | "fallback";
 
 export interface Scene3dGltfViewportProps {
-  /** sceneCard.glb_path：站內橋產物路徑（取純檔名走 /api/blender-artifact 代理）或 http(s) 公網 URL（直連）。 */
+  /** sceneCard.glb_path：站内桥产物路径（取纯档名走 /api/blender-artifact 代理）或 http(s) 公网 URL（直连）。 */
   glbPath: string;
   className?: string;
 }
@@ -84,7 +84,7 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
 
     void (async () => {
       try {
-        // three.js 只在這裡進動態 chunk（DirectorMiniViewport 同款）。
+        // three.js 只在这里进动态 chunk（DirectorMiniViewport 同款）。
         const mod = await import("@/lib/director-engine/engine");
         if (disposed) return;
         const blobUrl = await fetchGltfAsBlobUrl(glbPath);
@@ -96,7 +96,7 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
         const engine = new mod.DirectorEngine(container);
         engineRef.current = engine;
         engine.onGltfAssetError = (message, stage) => {
-          // 片E 結構化錯誤 → 人話提示（含 glb 路徑，方便定位是哪個資產）
+          // 片E 结构化错误 → 人话提示（含 glb 路径，方便定位是哪个资产）
           console.warn("[sgv] gltf asset error:", stage, message);
           if (!disposed) {
             setErrorText(`3D 资产加载失败：${message}（模型：${glbPath}）`);
@@ -111,11 +111,11 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
           loaded = true;
           setPhase("ready");
         } else if (!outcome) {
-          // url=null（理論上不會發生：blobUrl 非空）防禦分支
+          // url=null（理论上不会发生：blobUrl 非空）防御分支
           setErrorText(`3D 资产加载失败：模型地址无效（模型：${glbPath}）`);
           setPhase("fallback");
         }
-        // outcome 非 ok 時 setGltfAsset 內部已觸發 onGltfAssetError → fallback
+        // outcome 非 ok 时 setGltfAsset 内部已触发 onGltfAssetError → fallback
       } catch (err) {
         console.warn("[sgv] gltf preview failed:", String(err).slice(0, 300));
         if (!disposed) {
@@ -125,7 +125,7 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
       }
     })();
 
-    // wheel 隔離：InfiniteCanvas 容器級 wheel 縮放不連動（DirectorMiniViewport 同款）。
+    // wheel 隔离：InfiniteCanvas 容器级 wheel 缩放不连动（DirectorMiniViewport 同款）。
     const stopWheel = (event: WheelEvent) => event.stopPropagation();
     container.addEventListener("wheel", stopWheel);
 
@@ -134,7 +134,7 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
       container.removeEventListener("wheel", stopWheel);
       observer?.disconnect();
       disposeEngine();
-      // 卸載時清錯誤態；loaded 標記留給除錯（避免 lint 未使用告警）
+      // 卸载时清错误态；loaded 标记留给除错（避免 lint 未使用告警）
       void loaded;
       setPhase("loading");
       setErrorText(null);
@@ -153,7 +153,7 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
       onDoubleClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       className={cn("relative touch-none select-none overflow-hidden rounded-[12px] bg-[#0b0f14]", className)}
     >
-      {/* engine 掛載點：renderer canvas 由 DirectorEngine appendChild 進來 */}
+      {/* engine 挂载点：renderer canvas 由 DirectorEngine appendChild 进来 */}
       <div ref={containerRef} className="absolute inset-0" />
 
       {phase === "loading" && (

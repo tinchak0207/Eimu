@@ -9,7 +9,7 @@ function read(relPath: string) {
 
 /**
  * Task 6+9：JSX 面板（GenerateControls / EditPanel / UpscalePanel / ActionRow）与
- * rail 類常量抽到 prompt-input/ 底下——断言按「旧档＋新档」拼接读取，语义不变。
+ * rail 类常量抽到 prompt-input/ 底下——断言按「旧档＋新档」拼接读取，语义不变。
  */
 const PROMPT_INPUT_SURFACE = [
   "src/components/PromptInput.tsx",
@@ -21,8 +21,8 @@ const PROMPT_INPUT_SURFACE = [
 ].map(read).join("\n\n");
 
 test("prompt input appends example snippets and replaces the previous one on repeat clicks", () => {
-  // 2026-09-05 暴君裁定：連點模板不疊加——新模板替換上一次插入的模板，
-  // 用戶手打文字照舊保留（replacePromptSnippet 內部先摘掉舊模板再插入新模板）。
+  // 2026-09-05 暴君裁定：连点模板不叠加——新模板替换上一次插入的模板，
+  // 用户手打文字照旧保留（replacePromptSnippet 内部先摘掉旧模板再插入新模板）。
   const source = PROMPT_INPUT_SURFACE;
   assert.match(source, /replacePromptSnippet/);
   assert.match(source, /handleSuggestionSelect/);
@@ -65,8 +65,8 @@ test("prompt input renders one control set for every breakpoint", () => {
 
 test("no settings row can widen the card, so phones never scroll sideways", () => {
   const source = PROMPT_INPUT_SURFACE;
-// Task 10：聊天卡捲動容器隨面板殼搬到 canvas-workstation/，playground
-// 讀取改為「舊檔＋新檔」拼接，語義不變。
+// Task 10：聊天卡卷动容器随面板壳搬到 canvas-workstation/，playground
+// 读取改为「旧档＋新档」拼接，语义不变。
   const playground =
     read("src/components/ImagePlayground.tsx") +
     read("src/components/canvas-workstation/CanvasChatWorkstation.tsx");

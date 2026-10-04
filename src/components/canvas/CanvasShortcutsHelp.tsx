@@ -1,12 +1,12 @@
 "use client";
 
-// CanvasShortcutsHelp —— 畫布快捷鍵幫助 modal。
+// CanvasShortcutsHelp —— 画布快捷键帮助 modal。
 //
-// 置中白卡 + 半透明幕布，Escape / 點卡片外關閉（window capture，
-// 先於畫布手勢與其他面板收到事件，關閉行為與 CanvasContextMenu 同款）。
-// 內容為四組靜態表格（视图 / 选择 / 编辑 / 节点），按鍵與手勢一律以
-// kbd 膠囊呈現；同一操作的多組按鍵以「或」相連。
-// 根節點帶 data-canvas-interactive，畫布手勢層不會把 modal 內操作當平移。
+// 置中白卡 + 半透明幕布，Escape / 点卡片外关闭（window capture，
+// 先于画布手势与其他面板收到事件，关闭行为与 CanvasContextMenu 同款）。
+// 内容为四组静态表格（视图 / 选择 / 编辑 / 节点），按键与手势一律以
+// kbd 胶囊呈现；同一操作的多组按键以「或」相连。
+// 根节点带 data-canvas-interactive，画布手势层不会把 modal 内操作当平移。
 
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
@@ -16,7 +16,7 @@ export interface CanvasShortcutsHelpProps {
   onClose: () => void;
 }
 
-/** 一列快捷鍵：desc 操作說明；combos 一或多組按鍵（組內以 + 相連，組間以「或」相連）。 */
+/** 一列快捷键：desc 操作说明；combos 一或多组按键（组内以 + 相连，组间以「或」相连）。 */
 interface ShortcutRow {
   desc: string;
   combos: string[][];
@@ -27,7 +27,7 @@ interface ShortcutGroup {
   rows: ShortcutRow[];
 }
 
-/** 靜態內容表：與畫布實際手勢 / 快捷鍵實作對齊，UI 文案簡體。 */
+/** 静态内容表：与画布实际手势 / 快捷键实作对齐，UI 文案简体。 */
 const GROUPS: ShortcutGroup[] = [
   {
     title: "视图",
@@ -70,7 +70,7 @@ const GROUPS: ShortcutGroup[] = [
   },
 ];
 
-/** kbd 膠囊：按鍵與手勢共用一套皮膚。 */
+/** kbd 胶囊：按键与手势共用一套皮肤。 */
 function Kbd({ children }: { children: string }) {
   return (
     <kbd className="whitespace-nowrap rounded-md border border-black/10 bg-black/5 px-1.5 py-[3px] font-sans text-ios-caption2 font-medium leading-none text-muted-foreground">
@@ -82,7 +82,7 @@ function Kbd({ children }: { children: string }) {
 function CanvasShortcutsHelp({ open, onClose }: CanvasShortcutsHelpProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
 
-  // Escape / 點卡片外關閉。capture 讓關閉先於畫布手勢收到事件。
+  // Escape / 点卡片外关闭。capture 让关闭先于画布手势收到事件。
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -111,7 +111,7 @@ function CanvasShortcutsHelp({ open, onClose }: CanvasShortcutsHelpProps) {
       role="presentation"
       className="fixed inset-0 z-[110] flex items-center justify-center p-4"
     >
-      {/* 半透明幕布（點擊由 window capture 統一處理關閉） */}
+      {/* 半透明幕布（点击由 window capture 统一处理关闭） */}
       <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" aria-hidden />
 
       <div
@@ -121,7 +121,7 @@ function CanvasShortcutsHelp({ open, onClose }: CanvasShortcutsHelpProps) {
         aria-label="键盘快捷键"
         className="relative flex max-h-[80vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl lg-sheet"
       >
-        {/* 標題列 */}
+        {/* 标题列 */}
         <div className="flex shrink-0 items-center justify-between border-b px-5 pb-3 pt-4">
           <h2 className="text-[15px] font-semibold text-foreground">键盘快捷键</h2>
           <button
@@ -135,7 +135,7 @@ function CanvasShortcutsHelp({ open, onClose }: CanvasShortcutsHelpProps) {
           </button>
         </div>
 
-        {/* 四組表格（可捲動；寬螢幕兩欄） */}
+        {/* 四组表格（可卷动；宽萤幕两栏） */}
         <div className="grid gap-x-8 gap-y-5 overflow-y-auto px-5 pb-5 pt-4 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title}>

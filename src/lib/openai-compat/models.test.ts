@@ -1,7 +1,7 @@
-// `src/lib/openai-compat/models.ts` 的**閘位斷言**。
+// `src/lib/openai-compat/models.ts` 的**闸位断言**。
 //
-// 清單必須與提交入口同一組閘（白名單 + 目錄 kind + 真實生成結果驅動的熔斷/斷供）。
-// 這裡注入替身驗「閘真的會把東西擋掉」——不是空跑一次看它沒拋錯（那只能證明函數存在）。
+// 清单必须与提交入口同一组闸（白名单 + 目录 kind + 真实生成结果驱动的熔断/断供）。
+// 这里注入替身验「闸真的会把东西挡掉」——不是空跑一次看它没抛错（那只能证明函数存在）。
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -37,7 +37,7 @@ test("无熔断 + 不限模型 → 全部图片模型在列，且没有视频模
   assert.ok(!ids.includes("minimax-h3"));
 });
 
-test("金鑰白名单：只列白名单内的图片模型（与提交入口同一支 isModelAllowedForKey）", async () => {
+test("金钥白名单：只列白名单内的图片模型（与提交入口同一支 isModelAllowedForKey）", async () => {
   const ids = await listCompatibleImageModelIds(keyWith(["pixai-tsubaki2", "gpt-4o"]), {
     ...NO_SYNC,
     readUnavailable: async () => new Map<string, string>(),

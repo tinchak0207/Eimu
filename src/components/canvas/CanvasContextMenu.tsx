@@ -1,15 +1,15 @@
 "use client";
 
-// CanvasContextMenu —— 畫布通用右鍵選單殼（空白處與節點右鍵共用）。
+// CanvasContextMenu —— 画布通用右键选单壳（空白处与节点右键共用）。
 //
-// 誰負責什麼：選單只管「開在哪、怎麼關、長什麼樣」；items 的語義（複製 / 對齊 /
-// 刪除…）由呼叫端組裝。根節點帶 data-canvas-interactive，InfiniteCanvas 的手勢層
-// 才會放行選單內的指針事件（否則點選單 = 平移畫布）。
+// 谁负责什么：选单只管「开在哪、怎么关、长什么样」；items 的语义（复制 / 对齐 /
+// 删除…）由呼叫端组装。根节点带 data-canvas-interactive，InfiniteCanvas 的手势层
+// 才会放行选单内的指针事件（否则点选单 = 平移画布）。
 //
-// 定位：position = 相對畫布容器左上的座標；useLayoutEffect 量測實際尺寸後，
-// 超出容器右 / 下緣就翻轉到游標另一側 —— 在 paint 前完成，首幀即最終位置不閃跳。
-// 關閉：Escape / 點選單外（window pointerdown capture，比畫布手勢更早收到）。
-// 子選單：hover 展開、僅一層；離開後延遲收合，游標斜切過縫隙不會誤關。
+// 定位：position = 相对画布容器左上的座标；useLayoutEffect 量测实际尺寸后，
+// 超出容器右 / 下缘就翻转到游标另一侧 —— 在 paint 前完成，首帧即最终位置不闪跳。
+// 关闭：Escape / 点选单外（window pointerdown capture，比画布手势更早收到）。
+// 子选单：hover 展开、仅一层；离开后延迟收合，游标斜切过缝隙不会误关。
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -19,28 +19,28 @@ export interface CanvasMenuItem {
   id: string;
   label: string;
   icon?: ReactNode;
-  /** 紅字（刪除類破壞性操作） */
+  /** 红字（删除类破坏性操作） */
   danger?: boolean;
   disabled?: boolean;
-  /** 右側灰字快捷鍵提示，如 "Ctrl+C" */
+  /** 右侧灰字快捷键提示，如 "Ctrl+C" */
   shortcut?: string;
-  /** 二級子選單（hover 展開，僅一層） */
+  /** 二级子选单（hover 展开，仅一层） */
   children?: CanvasMenuItem[];
   onSelect?: () => void;
 }
 
 export interface CanvasContextMenuProps {
   open: boolean;
-  /** 相對定位容器（畫布容器）的座標 */
+  /** 相对定位容器（画布容器）的座标 */
   position: { x: number; y: number };
   items: (CanvasMenuItem | "separator")[];
   onClose: () => void;
 }
 
-/** 子選單收合延遲：游標離開後在此時間內移回（跨過父項與子選單的縫隙）不收合。 */
+/** 子选单收合延迟：游标离开后在此时间内移回（跨过父项与子选单的缝隙）不收合。 */
 const SUBMENU_CLOSE_DELAY_MS = 200;
 
-/** 主選單與子選單同一套面板皮膚（iOS 質感：lg-sheet 白玻璃 + 大圓角）。 */
+/** 主选单与子选单同一套面板皮肤（iOS 质感：lg-sheet 白玻璃 + 大圆角）。 */
 const PANEL_CLASS = "rounded-2xl lg-sheet p-1";
 
 function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenuProps) {
@@ -63,14 +63,14 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
     }, SUBMENU_CLOSE_DELAY_MS);
   };
 
-  // 重新打開 / 換位置 = 全新一次選單：子選單狀態歸零。
+  // 重新打开 / 换位置 = 全新一次选单：子选单状态归零。
   useEffect(() => {
     setOpenSubId(null);
     cancelSubClose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, position.x, position.y]);
 
-  // 卸載時清掉延遲收合計時器，避免對已卸載元件 setState。
+  // 卸载时清掉延迟收合计时器，避免对已卸载元件 setState。
   useEffect(
     () => () => {
       if (subCloseTimerRef.current !== null) window.clearTimeout(subCloseTimerRef.current);
@@ -78,7 +78,7 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
     [],
   );
 
-  // 翻轉定位：量測實際尺寸（items 變動也重量），超出容器右 / 下緣就翻到另一側。
+  // 翻转定位：量测实际尺寸（items 变动也重量），超出容器右 / 下缘就翻到另一侧。
   useLayoutEffect(() => {
     if (!open) return;
     const el = menuRef.current;
@@ -93,7 +93,7 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
     setAdjusted((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
   }, [open, position.x, position.y, items]);
 
-  // Escape / 點選單外關閉。capture 讓關閉先於畫布手勢與其他面板收到事件。
+  // Escape / 点选单外关闭。capture 让关闭先于画布手势与其他面板收到事件。
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -123,7 +123,7 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
       onClose();
       return;
     }
-    // 沒有 onSelect 但有子選單：點擊也能展開（無 hover 環境如觸控筆的後路）。
+    // 没有 onSelect 但有子选单：点击也能展开（无 hover 环境如触控笔的后路）。
     if (item.children?.length) {
       cancelSubClose();
       setOpenSubId((prev) => (prev === item.id ? null : item.id));
@@ -174,7 +174,7 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
             onPointerEnter={() => {
               cancelSubClose();
               if (hasChildren && !item.disabled) setOpenSubId(item.id);
-              else scheduleSubClose(); // 滑到別的項目：延遲收掉已開的子選單
+              else scheduleSubClose(); // 滑到别的项目：延迟收掉已开的子选单
             }}
             onPointerLeave={() => {
               if (hasChildren) scheduleSubClose();

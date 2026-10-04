@@ -1,23 +1,23 @@
 /**
- * GET  /api/skills/mine — 列出**當前身份**的私有自建 skill。
- * POST /api/skills/mine — 建立或更新當前身份的一條私有自建 skill。
+ * GET  /api/skills/mine — 列出**当前身份**的私有自建 skill。
+ * POST /api/skills/mine — 建立或更新当前身份的一条私有自建 skill。
  *
- * 定性（2026-09-27 修正）：使用者自建 skill 是**私有庫 CRUD**，**沒有**「發布到
- * 公開市集」這個語義——公開列舉（`GET /api/skills`）永不包含任何人的 user skill。
- * 故本端點取代了原本語義錯誤的 `publish` 端點（同日刪除）。
+ * 定性（2026-09-27 修正）：使用者自建 skill 是**私有库 CRUD**，**没有**「发布到
+ * 公开市集」这个语义——公开列举（`GET /api/skills`）永不包含任何人的 user skill。
+ * 故本端点取代了原本语义错误的 `publish` 端点（同日删除）。
  *
- * 本 route 只是薄殼：身份 → `resolveSkillOwner`（不是第二套鑑權）；業務本體
- * （歸屬判定／驗證／憑證閘／store 互動）在 `@/lib/agent-skills/user-skill` 的
- * `saveMySkill`，故同一段行為可被單元測試直接驅動（真行為斷言，非源碼掃描）。
+ * 本 route 只是薄壳：身份 → `resolveSkillOwner`（不是第二套鉴权）；业务本体
+ * （归属判定／验证／凭证闸／store 互动）在 `@/lib/agent-skills/user-skill` 的
+ * `saveMySkill`，故同一段行为可被单元测试直接驱动（真行为断言，非源码扫描）。
  *
- * POST body（草稿，全部由 validateUserSkill 正規化）：
+ * POST body（草稿，全部由 validateUserSkill 正规化）：
  *   { name, oneLiner, family, useScenario, inputType, outputContent,
  *     outputKind, toolIds, expertId?, tags, aesthetic?, id? }
- *   `id` 存在且屬於自己＝更新；否則建立（外來／未知 id 被丟棄，改由驗證器派生）。
- * 響應：GET `{ skills }`；POST 成功 `{ skill, created }`；
- *   400 `{ error: "invalid_skill", reason }`（含憑證閘的 `sensitive_content:<kind>`）；
+ *   `id` 存在且属于自己＝更新；否则建立（外来／未知 id 被丢弃，改由验证器派生）。
+ * 响应：GET `{ skills }`；POST 成功 `{ skill, created }`；
+ *   400 `{ error: "invalid_skill", reason }`（含凭证闸的 `sensitive_content:<kind>`）；
  *   409 `{ error: "duplicate", reason }`；429 `{ error: "quota_exceeded", reason }`。
- * **永不**把 reason／body／命中片段寫進 log——憑證閘命中的原文不經此處外洩。
+ * **永不**把 reason／body／命中片段写进 log——凭证闸命中的原文不经此处外泄。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -27,11 +27,11 @@ import { noStore, resolveSkillOwner } from "./owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-// 把 user-skill 的載入器接上 registry 的 ownerKey 插槽：registry 的私有列舉
-// （`listMySkills` 等）與本端點因此走同一份讀取邏輯，不會有兩條會分叉的路。
-// 公開列舉不讀這個插槽，故此註冊不影響公開面。
+// 把 user-skill 的载入器接上 registry 的 ownerKey 插槽：registry 的私有列举
+// （`listMySkills` 等）与本端点因此走同一份读取逻辑，不会有两条会分叉的路。
+// 公开列举不读这个插槽，故此注册不影响公开面。
 registerUserSkillSource(userSkillLoader);
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const skills = await listMySkills(owner.ownerKey);
     return NextResponse.json({ skills }, { headers: noStore });
   } catch {
-    // 不對外帶內部訊息（可能含路徑細節）。
+    // 不对外带内部讯息（可能含路径细节）。
     return NextResponse.json({ error: "internal_error", success: false }, { status: 500, headers: noStore });
   }
 }

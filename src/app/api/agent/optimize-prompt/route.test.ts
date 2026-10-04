@@ -12,7 +12,7 @@ const source = readFileSync(
   "utf8",
 );
 
-/** 去掉註解後再斷言，避免註解裡引用的反例把測試帶跑。 */
+/** 去掉注解后再断言，避免注解里引用的反例把测试带跑。 */
 function code(): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -86,7 +86,7 @@ test("media_type=image：Agent 请求前置静帧指令，fallback 走 directIma
   assert.match(c, /mediaType === "image" \? `\$\{STILL_IMAGE_AGENT_DIRECTIVE\}\\n\$\{prompt\}` : prompt/);
   assert.match(c, /mediaType === "video" \? directVideoPrompt\(prompt\) : directImagePrompt\(prompt\)/);
   assert.match(c, /import \{ directImagePrompt, directVideoPrompt \}/);
-  // 2026-09-02 收緊：響應不再帶 slots，避免把六槽公式結構指紋交出去。
+  // 2026-09-02 收紧：响应不再带 slots，避免把六槽公式结构指纹交出去。
   assert.doesNotMatch(c, /extractSixSlots/);
   assert.doesNotMatch(c, /slots:/);
 });

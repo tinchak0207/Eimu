@@ -1,11 +1,11 @@
-// 模型定價的 admin 面：GET 回報「每個模型此刻的基準價與有效價」，PATCH 在版本閘
-// （expectedVersion 樂觀併發）下全量替換定價覆寫。骨架完全照 channels/route.ts：
+// 模型定价的 admin 面：GET 回报「每个模型此刻的基准价与有效价」，PATCH 在版本闸
+// （expectedVersion 乐观并发）下全量替换定价覆写。骨架完全照 channels/route.ts：
 // requireAdminSession + errorResponse(UNAUTHORIZED→401) + 共用 buildPricingPayload +
-// 稽核記錄（diffJson），PATCH 成功後用剛寫入的值建 payload，不重 list Blob。
+// 稽核记录（diffJson），PATCH 成功后用刚写入的值建 payload，不重 list Blob。
 //
-// 業務不變量（評審 blocker）：合併後任何模型的有效價不得為 0。normalizeModelPricingOverrides
-// 會靜默丟棄 < PRICING_COIN_STEP 的 fixedCoins（等於把「想設 0 幣」悄悄還原成基準價），所以這裡在
-// normalize 之後、寫入之前，檢查原始 body 與合併後 effective，違規就回 400 並列出 modelId。
+// 业务不变量（评审 blocker）：合并后任何模型的有效价不得为 0。normalizeModelPricingOverrides
+// 会静默丢弃 < PRICING_COIN_STEP 的 fixedCoins（等于把「想设 0 币」悄悄还原成基准价），所以这里在
+// normalize 之后、写入之前，检查原始 body 与合并后 effective，违规就回 400 并列出 modelId。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -27,9 +27,9 @@ import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** base / effective 共同的定價形狀：只回四個定價欄位，能力面不屬於定價 payload。 */
+/** base / effective 共同的定价形状：只回四个定价栏位，能力面不属于定价 payload。 */
 interface PricingFields {
   imageCredits?: Record<string, number>;
   videoCreditsPerSecond?: Record<string, number>;
@@ -48,7 +48,7 @@ interface PricingModelPayload {
   base: PricingFields;
   effective: PricingFields;
   override: ModelPricingOverride | null;
-  /** 每個解析度的有效幣價：圖片= 幣/張，影片= 幣/秒（支援音訊另附含音訊價）。 */
+  /** 每个解析度的有效币价：图片= 币/张，影片= 币/秒（支援音讯另附含音讯价）。 */
   priceLabels: Array<{ resolution: string; coins: number; withAudioCoins?: number }>;
   modified: boolean;
 }
@@ -94,13 +94,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * GET 與 PATCH（成功、409）共用的完整 payload。overrides 用 fresh 讀：admin 要看的是
- * 最新版本；`known`（PATCH 成功後傳入剛寫入的值）跳過重讀——Blob list() 不保證寫後
- * 讀一致，重新 list 可能拿回舊世代。
+ * GET 与 PATCH（成功、409）共用的完整 payload。overrides 用 fresh 读：admin 要看的是
+ * 最新版本；`known`（PATCH 成功后传入刚写入的值）跳过重读——Blob list() 不保证写后
+ * 读一致，重新 list 可能拿回旧世代。
  *
- * 拿到 overrides 後先 applyModelPricingOverrides 灌進 catalog，確保本 payload 的
- * effective/priceLabels 與扣費路徑（generationCoins）看到的是同一份定價——「顯示新價、
- * 扣費還舊價」正是要消滅的分裂。
+ * 拿到 overrides 后先 applyModelPricingOverrides 灌进 catalog，确保本 payload 的
+ * effective/priceLabels 与扣费路径（generationCoins）看到的是同一份定价——「显示新价、
+ * 扣费还旧价」正是要消灭的分裂。
  */
 async function buildPricingPayload(known?: { overrides: ModelPricingOverrides; version: string | null }) {
   const { overrides, version } = known
@@ -110,8 +110,8 @@ async function buildPricingPayload(known?: { overrides: ModelPricingOverrides; v
   applyModelPricingOverrides(overrides);
 
   const models: PricingModelPayload[] = [];
-  // 遍歷 catalog 全部條目（含非生成模型的服務定價鍵，如 adobe-firefly-fill /
-  // pixai-upscale）；用戶端模型選單仍以 SUPPORTED_GENERATION_MODEL_IDS 為準，不受影響。
+  // 遍历 catalog 全部条目（含非生成模型的服务定价键，如 adobe-firefly-fill /
+  // pixai-upscale）；用户端模型选单仍以 SUPPORTED_GENERATION_MODEL_IDS 为准，不受影响。
   for (const modelId of Object.keys(GENERATION_MODEL_CATALOG)) {
     const base = baseGenerationModel(modelId);
     const effective = generationModel(modelId);
@@ -157,7 +157,7 @@ function errorResponse(error: unknown) {
 export async function GET() {
   try {
     await requireAdminSession();
-    // 把最新覆寫從 Blob/記憶體灌進 catalog 的 effective 狀態，再讀 fresh 版本給 payload。
+    // 把最新覆写从 Blob/记忆体灌进 catalog 的 effective 状态，再读 fresh 版本给 payload。
     await syncModelPricing();
     return NextResponse.json(await buildPricingPayload());
   } catch (error) {
@@ -166,11 +166,11 @@ export async function GET() {
 }
 
 /**
- * 業務不變量：合併後任何模型的有效價不得為 0。
- * 1) 原始 fixedCoins 覆寫 < 0.1（含 0 / 負數）→ 違規。normalize 會靜默丟棄它，
- *    必須對 raw body 檢查，否則「設 0 幣」被無聲還原成基準價。
- * 2) credit 表覆寫把所有解析度都合併成 0 → generationCoins 為 0，違規。
- *    此檢查在 applyModelPricingOverrides(overrides) 之後呼叫，反映合併後狀態。
+ * 业务不变量：合并后任何模型的有效价不得为 0。
+ * 1) 原始 fixedCoins 覆写 < 0.1（含 0 / 负数）→ 违规。normalize 会静默丢弃它，
+ *    必须对 raw body 检查，否则「设 0 币」被无声还原成基准价。
+ * 2) credit 表覆写把所有解析度都合并成 0 → generationCoins 为 0，违规。
+ *    此检查在 applyModelPricingOverrides(overrides) 之后呼叫，反映合并后状态。
  */
 function findInvalidPricingOverrides(raw: unknown, overrides: ModelPricingOverrides): string[] {
   if (!isRecord(raw)) return [];
@@ -206,7 +206,7 @@ export async function PATCH(req: NextRequest) {
     if (!body || typeof body !== "object") {
       return NextResponse.json({ success: false, message: "请求体必须是 JSON 对象。" }, { status: 400 });
     }
-    // 全量替換語意下，漏送 overrides 等於清空全部定價——必須是顯式的物件。
+    // 全量替换语意下，漏送 overrides 等于清空全部定价——必须是显式的物件。
     if (typeof body.overrides !== "object" || body.overrides === null || Array.isArray(body.overrides)) {
       return NextResponse.json({ success: false, message: "overrides 必须是对象。" }, { status: 400 });
     }
@@ -219,7 +219,7 @@ export async function PATCH(req: NextRequest) {
 
     const overrides = normalizeModelPricingOverrides(body.overrides);
 
-    // 丟更新防護：fresh 讀最新版本，不符即 409 並附最新完整 payload 讓 UI 重載。
+    // 丢更新防护：fresh 读最新版本，不符即 409 并附最新完整 payload 让 UI 重载。
     const { overrides: previousOverrides, version: currentVersion } = await readModelPricingOverrides({ fresh: true });
     if (body.expectedVersion !== currentVersion) {
       return NextResponse.json(
@@ -232,7 +232,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 不變量檢查需要看到「合併後」的有效價：先 apply 進 catalog，違規就還原成上一版再回 400。
+    // 不变量检查需要看到「合并后」的有效价：先 apply 进 catalog，违规就还原成上一版再回 400。
     applyModelPricingOverrides(overrides);
     const violations = findInvalidPricingOverrides(body.overrides, overrides);
     if (violations.length > 0) {
@@ -246,7 +246,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 寫入失敗時把 catalog 還原成上一版，避免「記憶體已是新價、存檔卻失敗」的狀態分裂。
+    // 写入失败时把 catalog 还原成上一版，避免「记忆体已是新价、存档却失败」的状态分裂。
     let writtenVersion: string;
     try {
       const result = await writeModelPricingOverrides(overrides);
@@ -256,7 +256,7 @@ export async function PATCH(req: NextRequest) {
       throw error;
     }
 
-    // 稽核紀錄：獨立整數序列只活在稽核表（見 admin-audit.ts 檔頭註解）。失敗不拋錯。
+    // 稽核纪录：独立整数序列只活在稽核表（见 admin-audit.ts 档头注解）。失败不抛错。
     const auditVersion = await nextConfigVersion("model-pricing-overrides");
     await recordConfigChange({
       configKey: "model-pricing-overrides",

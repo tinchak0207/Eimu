@@ -1,43 +1,43 @@
-// device-bridge.ts — W6a：裝置橋**雲端側**（閘道端）。
+// device-bridge.ts — W6a：装置桥**云端侧**（闸道端）。
 //
-// 目的：讓**雲端 agent** 經由使用者機器的**出站連線**讀本機檔案——雲端永不 inbound
-// 打使用者機器；方向永遠是「本機 daemon 主動對外註冊／心跳／輪詢，取回雲端下發的
-// 工作，執行後把**必要片段**回傳」。本檔實作閘道這半邊：把「本機檔案工具」呼叫
-// 轉下去、驗同意票、夾大小、逾時取消。
+// 目的：让**云端 agent** 经由使用者机器的**出站连线**读本机档案——云端永不 inbound
+// 打使用者机器；方向永远是「本机 daemon 主动对外注册／心跳／轮询，取回云端下发的
+// 工作，执行后把**必要片段**回传」。本档实作闸道这半边：把「本机档案工具」呼叫
+// 转下去、验同意票、夹大小、逾时取消。
 //
-// 為什麼要這一層（第一性原理）：agent 的推理在雲端，檔案在使用者機器；主流解法是
-// 「檔案 I/O 留在本機、只把 agent 實際打開的那一小片內容回填」——companion daemon
-// ＋出站通道正是這條。這與「把整個 repo 搬上雲」是兩個極端。
+// 为什么要这一层（第一性原理）：agent 的推理在云端，档案在使用者机器；主流解法是
+// 「档案 I/O 留在本机、只把 agent 实际打开的那一小片内容回填」——companion daemon
+// ＋出站通道正是这条。这与「把整个 repo 搬上云」是两个极端。
 //
-// ── 預設 OFF（硬性）─────────────────────────────────────────────────────
-// 總開關＝env `EIMU_DEVICE_BRIDGE`。未設／非 truthy（1/true/yes/on）＝整個能力不掛載：
-// router 連路由前綴都不進（見 router.ts 的 `deviceBridgeEnabled()` 閘），對既有生產
-// 行為零影響。開啟方式：`EIMU_DEVICE_BRIDGE=1`（通常寫進 VPS systemd 的 gateway env）。
+// ── 预设 OFF（硬性）─────────────────────────────────────────────────────
+// 总开关＝env `EIMU_DEVICE_BRIDGE`。未设／非 truthy（1/true/yes/on）＝整个能力不挂载：
+// router 连路由前缀都不进（见 router.ts 的 `deviceBridgeEnabled()` 闸），对既有生产
+// 行为零影响。开启方式：`EIMU_DEVICE_BRIDGE=1`（通常写进 VPS systemd 的 gateway env）。
 //
-// ── 鑑權（複用，不造第二套）─────────────────────────────────────────────
-// 裝置端與雲端 agent 都走**既有** Bearer sk-biz-* 閘門：router 已完成
-// validateApiKey + resolveCanonicalKey；本檔再用 auth-gw 的 resolveCanonicalIdentity
-// 取 userId（正典化緩存命中，幾乎零成本），綁定 userId ↔ deviceId ↔ connection。
+// ── 鉴权（复用，不造第二套）─────────────────────────────────────────────
+// 装置端与云端 agent 都走**既有** Bearer sk-biz-* 闸门：router 已完成
+// validateApiKey + resolveCanonicalKey；本档再用 auth-gw 的 resolveCanonicalIdentity
+// 取 userId（正典化缓存命中，几乎零成本），绑定 userId ↔ deviceId ↔ connection。
 //
 // ── 安全模型 ────────────────────────────────────────────────────────────
-//   1. 工具面收斂成最小集合 list_dir/read_file/grep/stat（無寫/刪/執行）。
-//   2. 伺服器側 denylist（device-bridge-policy.isSensitivePath）：路徑敏感一律拒，
-//      不倚賴本機端自報（縱深防禦）。
-//   3. 逐次同意票（consent token）：每次下發一票，單次可用、綁
-//      deviceId+tool+requestId、短 TTL；本機端**執行前驗票**，閘道端在回傳時再驗
-//      （過期／不匹配／重放各回明確錯誤碼）。
-//   4. 回傳內容大小硬上限 MAX_READ_BYTES（256KB）＋截斷標記。
-//   5. 請求逾時可取消，回 `device_request_timeout`。
-//   6. H2（2026-10-04）遞迴根夾制：`grep`/`list_dir` 會由裝置**遞迴**收集檔案，
-//      雲端看不到收集結果，故要求裝置在 register 回報使用者已授權根（`roots`），
-//      遞迴根必須落在授權根之下；檔案系統根（`/`、Windows 磁碟根、UNC share）一律拒。
-//      未授權任何根 ⇒ 遞迴型工具全拒（fail-closed）。
-//   7. H2 輸入側契約：`grep` 隨參數下發 `max_file_bytes`（單檔讀入上限
-//      MAX_FILE_READ_BYTES=1MB，裝置端遵守）；裝置若自報遞迴觸碰敏感段
+//   1. 工具面收敛成最小集合 list_dir/read_file/grep/stat（无写/删/执行）。
+//   2. 伺服器侧 denylist（device-bridge-policy.isSensitivePath）：路径敏感一律拒，
+//      不倚赖本机端自报（纵深防御）。
+//   3. 逐次同意票（consent token）：每次下发一票，单次可用、绑
+//      deviceId+tool+requestId、短 TTL；本机端**执行前验票**，闸道端在回传时再验
+//      （过期／不匹配／重放各回明确错误码）。
+//   4. 回传内容大小硬上限 MAX_READ_BYTES（256KB）＋截断标记。
+//   5. 请求逾时可取消，回 `device_request_timeout`。
+//   6. H2（2026-10-04）递回根夹制：`grep`/`list_dir` 会由装置**递回**收集档案，
+//      云端看不到收集结果，故要求装置在 register 回报使用者已授权根（`roots`），
+//      递回根必须落在授权根之下；档案系统根（`/`、Windows 磁碟根、UNC share）一律拒。
+//      未授权任何根 ⇒ 递回型工具全拒（fail-closed）。
+//   7. H2 输入侧契约：`grep` 随参数下发 `max_file_bytes`（单档读入上限
+//      MAX_FILE_READ_BYTES=1MB，装置端遵守）；装置若自报递回触碰敏感段
 //      （`sensitive_path_touched`／`excluded_sensitive_count`／`sensitive_paths`），
-//      雲端整筆拒絕、結果不落地。
+//      云端整笔拒绝、结果不落地。
 //
-// 本檔只准動 deploy-staging/gateway/ 之下；未部署、未接 VPS。
+// 本档只准动 deploy-staging/gateway/ 之下；未部署、未接 VPS。
 
 import { memoryEnvBool } from "./constants-gateway.ts"
 import { hashKey, resolveCanonicalIdentity } from "./auth-gw.ts"
@@ -68,22 +68,22 @@ import {
 } from "./device-bridge-policy.ts"
 import { SessionConsentStore } from "./device-bridge-session-consent.ts"
 
-// ── 開關／時序常數 ──────────────────────────────────────────────────────
+// ── 开关／时序常数 ──────────────────────────────────────────────────────
 
-/** 總開關：預設 OFF。任何非空呼叫都會經過這條，未開啟時能力不存在。 */
+/** 总开关：预设 OFF。任何非空呼叫都会经过这条，未开启时能力不存在。 */
 export function deviceBridgeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return memoryEnvBool(env.EIMU_DEVICE_BRIDGE, false)
 }
 
-/** 裝置心跳有效期；超過視為離線，invoke 直接回 device_offline。 */
+/** 装置心跳有效期；超过视为离线，invoke 直接回 device_offline。 */
 export const DEVICE_HEARTBEAT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_HEARTBEAT_TTL_MS || "90000", 10) || 90_000
-/** 單次呼叫等待裝置回傳的上限；到點取消並回 device_request_timeout。 */
+/** 单次呼叫等待装置回传的上限；到点取消并回 device_request_timeout。 */
 export const DEVICE_REQUEST_TIMEOUT_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_REQUEST_TIMEOUT_MS || "30000", 10) || 30_000
-/** 同意票 TTL（>= 請求逾時，否則票比請求先死）。 */
+/** 同意票 TTL（>= 请求逾时，否则票比请求先死）。 */
 export const DEVICE_CONSENT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_CONSENT_TTL_MS || "45000", 10) || 45_000
-/** 一次性授權許可（scope=once）TTL。 */
+/** 一次性授权许可（scope=once）TTL。 */
 export const DEVICE_ONCE_GRANT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_ONCE_GRANT_TTL_MS || "120000", 10) || 120_000
-/** 輪詢長連線上界（<= 閘道 idleTimeout 255s）。 */
+/** 轮询长连线上界（<= 闸道 idleTimeout 255s）。 */
 export const DEVICE_POLL_MAX_WAIT_MS = 25_000
 
 export type DeviceBridgeErrorCode =
@@ -117,8 +117,8 @@ function randomId(prefix: string): string {
 
 /**
  * 把 evaluatePermission 的 ask 成因映射成 needs_authorization 的 reason。
- * 凍結四值為 safety_check／outside_roots／mode_ask（＋ denylist 不進此路徑）；
- * 規則明確 ask 另用 `rule_ask`（擴充值，消費端遇到未知值應走預設）。
+ * 冻结四值为 safety_check／outside_roots／mode_ask（＋ denylist 不进此路径）；
+ * 规则明确 ask 另用 `rule_ask`（扩充值，消费端遇到未知值应走预设）。
  */
 function mapAskReason(reason: string): string {
   switch (reason) {
@@ -139,7 +139,7 @@ function isAuthorizationScope(v: unknown): v is AuthorizationScope {
   return typeof v === "string" && (AUTHORIZATION_SCOPES as readonly string[]).includes(v)
 }
 
-// ── 同意票（逐次、單用、綁定）──────────────────────────────────────────
+// ── 同意票（逐次、单用、绑定）──────────────────────────────────────────
 
 export interface ConsentTokenRecord {
   token: string
@@ -157,10 +157,10 @@ export interface ConsentTokenBinding {
 }
 
 /**
- * 逐次同意票存放區。純記憶體（與 gateway 其餘會話狀態同款）。
- * mint 產生票；consume 原子地驗證並標記已用（單次）。
- * 驗證順序：找不到 → 過期 → 綁定不匹配 → 已用（重放）。
- * `now` 可注入，測試免睡。
+ * 逐次同意票存放区。纯记忆体（与 gateway 其余会话状态同款）。
+ * mint 产生票；consume 原子地验证并标记已用（单次）。
+ * 验证顺序：找不到 → 过期 → 绑定不匹配 → 已用（重放）。
+ * `now` 可注入，测试免睡。
  */
 export class ConsentTokenStore {
   private readonly tokens = new Map<string, ConsentTokenRecord>()
@@ -209,11 +209,11 @@ export class ConsentTokenStore {
   }
 }
 
-// ── 一次性授權許可（scope=once）──────────────────────────────────────────
+// ── 一次性授权许可（scope=once）──────────────────────────────────────────
 //
-// 為什麼獨立於同意票：同意票管「一次下發的工作」，授權許可管「一次路徑授權」。
-// authorize(scope=once) 產生一枚許可；下一次 invoke 帶 `authorization_token` 使用它，
-// 用一次即失效（重放被拒）。綁定 tenant＋（可選 tool）＋root（路徑必須落在 root 之下）。
+// 为什么独立于同意票：同意票管「一次下发的工作」，授权许可管「一次路径授权」。
+// authorize(scope=once) 产生一枚许可；下一次 invoke 带 `authorization_token` 使用它，
+// 用一次即失效（重放被拒）。绑定 tenant＋（可选 tool）＋root（路径必须落在 root 之下）。
 
 export interface OnceGrantRecord {
   token: string
@@ -266,10 +266,10 @@ export class OnceGrantStore {
   }
 
   /**
-   * 自動核銷：呼叫端（opencode 的 local_files）**從不下發** authorization_token，故在規則
-   * 未放行時主動找一筆相符的一次性許可並核銷——`root` 含 `path`、`tool` 相符（或未綁定）、
-   * 未過期、未使用。命中即標記已用並回該許可的根；找不到回 `{ ok:false }`（呼叫端維持
-   * needs_authorization）。語義與 `consume` 一致：**用一次即失效**，不得重複放行。
+   * 自动核销：呼叫端（opencode 的 local_files）**从不下发** authorization_token，故在规则
+   * 未放行时主动找一笔相符的一次性许可并核销——`root` 含 `path`、`tool` 相符（或未绑定）、
+   * 未过期、未使用。命中即标记已用并回该许可的根；找不到回 `{ ok:false }`（呼叫端维持
+   * needs_authorization）。语义与 `consume` 一致：**用一次即失效**，不得重复放行。
    */
   consumeMatching(expected: OnceGrantBinding, now: number = Date.now()): { ok: true; root: string } | { ok: false } {
     const path = expandToAbsolute(expected.path, null) ?? expected.path
@@ -294,7 +294,7 @@ export class OnceGrantStore {
   }
 }
 
-/** 路徑是否落在 root 之內（含相等）；兩者皆先歸一化，相對路徑一律 false。 */
+/** 路径是否落在 root 之内（含相等）；两者皆先归一化，相对路径一律 false。 */
 function pathWithin(root: string, path: string): boolean {
   const r = expandToAbsolute(root, null)
   const p = expandToAbsolute(path, null)
@@ -306,7 +306,7 @@ function pathWithin(root: string, path: string): boolean {
   return true
 }
 
-// ── 裝置註冊表 ─────────────────────────────────────────────────────────
+// ── 装置注册表 ─────────────────────────────────────────────────────────
 
 export interface DeviceRecord {
   deviceId: string
@@ -315,29 +315,29 @@ export interface DeviceRecord {
   apiKeyHash: string
   connectionId: string
   /**
-   * H2：使用者在本機端「逐次挑選／授權」的根（絕對路徑）。`grep`/`list_dir` 是遞迴型
-   * 工具，雲端無法列舉裝置上遞迴會收到哪些檔，故把遞迴根夾在這些根之下（見
-   * device-bridge-policy.recursiveRootProblem）。空陣列＝未授權任何根 ⇒ 遞迴型工具一律拒
-   * （fail-closed；裝置需在 register 帶 `roots` 才啟用）。
+   * H2：使用者在本机端「逐次挑选／授权」的根（绝对路径）。`grep`/`list_dir` 是递回型
+   * 工具，云端无法列举装置上递回会收到哪些档，故把递回根夹在这些根之下（见
+   * device-bridge-policy.recursiveRootProblem）。空阵列＝未授权任何根 ⇒ 递回型工具一律拒
+   * （fail-closed；装置需在 register 带 `roots` 才启用）。
    */
   authorizedRoots: string[]
   /**
-   * W6b：本機檔案權限模式（per-device，隨 register 上報；預設 `ask`）。
-   * 只有 `permissionsEnabled===true`（呼叫端**明確**送了 mode 或 rules）時，新的決策
-   * 引擎才生效；未送時維持升級前行為（denylist ＋ 遞迴根夾制），保證既有呼叫端不受影響。
+   * W6b：本机档案权限模式（per-device，随 register 上报；预设 `ask`）。
+   * 只有 `permissionsEnabled===true`（呼叫端**明确**送了 mode 或 rules）时，新的决策
+   * 引擎才生效；未送时维持升级前行为（denylist ＋ 递回根夹制），保证既有呼叫端不受影响。
    */
   mode: DeviceBridgeMode
-  /** 是否啟用新決策引擎（呼叫端明確送了 mode／rules）。false＝沿用升級前行為。 */
+  /** 是否启用新决策引擎（呼叫端明确送了 mode／rules）。false＝沿用升级前行为。 */
   permissionsEnabled: boolean
-  /** register 帶入的裝置級規則（session 級規則另存 `sessionRules`）。 */
+  /** register 带入的装置级规则（session 级规则另存 `sessionRules`）。 */
   rules: PermissionRule[]
-  /** 裝置自報的家目錄（full 模式的放行範圍、`~` 展開用）；未上報＝null。 */
+  /** 装置自报的家目录（full 模式的放行范围、`~` 展开用）；未上报＝null。 */
   home: string | null
   registeredAt: number
   lastSeenAt: number
 }
 
-/** needs_authorization 的附帶資訊（供 HTTP 邊界組 body）。 */
+/** needs_authorization 的附带资讯（供 HTTP 边界组 body）。 */
 export interface NeedsAuthorizationInfo {
   root: string
   reason: string
@@ -357,8 +357,8 @@ export interface DeviceRequestMessage {
   consent_token: string
   issued_at: number
   expires_at: number
-  /** 使用者在對話中授權（authorize 端點）產生的同意記錄，供裝置端落地。
-   *  session/permanent 會隨其後每次 invoke 重送（冪等）；once 只出現在核銷成功的那一則。 */
+  /** 使用者在对话中授权（authorize 端点）产生的同意记录，供装置端落地。
+   *  session/permanent 会随其后每次 invoke 重送（幂等）；once 只出现在核销成功的那一则。 */
   consent?: { scope: "once" | "session" | "permanent"; roots: string[] }
 }
 
@@ -367,17 +367,17 @@ export type InvokeResult =
   | { ok: false; code: DeviceBridgeErrorCode; message: string; requestId?: string; needsAuthorization?: NeedsAuthorizationInfo }
 
 /**
- * 依租戶挑一台裝置（內部路由的**尋址**步驟）。語義刻意保守、**不猜**：
- *   - 該租戶 0 台已註冊裝置 → `no_device_registered`
- *   - 恰好 1 台：在線 → 回它；離線 → `device_offline`
- *   - 多台：恰 1 台在線 → 回那台；0 台或 >1 台在線（含全部離線）→ `device_ambiguous`
- * 在線判定沿用既有心跳 TTL（`DEVICE_HEARTBEAT_TTL_MS`／建構子覆寫）。
+ * 依租户挑一台装置（内部路由的**寻址**步骤）。语义刻意保守、**不猜**：
+ *   - 该租户 0 台已注册装置 → `no_device_registered`
+ *   - 恰好 1 台：在线 → 回它；离线 → `device_offline`
+ *   - 多台：恰 1 台在线 → 回那台；0 台或 >1 台在线（含全部离线）→ `device_ambiguous`
+ * 在线判定沿用既有心跳 TTL（`DEVICE_HEARTBEAT_TTL_MS`／建构子覆写）。
  */
 export type PickDeviceResult =
   | { ok: true; deviceId: string }
   | { ok: false; code: "no_device_registered" | "device_offline" | "device_ambiguous"; message: string }
 
-/** 唯讀裝置概況（/internal/device/status 用）。 */
+/** 唯读装置概况（/internal/device/status 用）。 */
 export interface TenantDeviceDescription {
   online: boolean
   roots: string[]
@@ -395,10 +395,10 @@ interface PendingRequest {
 }
 
 /**
- * 長輪詢 waiter。**必須綁 connectionId**：同 deviceKey 重連（換連線）時舊 waiter 仍留在
- * `pollWaiters` 內，若只在進入等待前驗一次 connectionId，它醒後會把新連線的請求 shift 走、
- * 回給已 abort 的舊 HTTP（幽靈 waiter 吞第一發）。喚醒後一律重驗連線，不符者不得取件
- * （已取則 re-queue），並以 `device_connection_stale` 收場。
+ * 长轮询 waiter。**必须绑 connectionId**：同 deviceKey 重连（换连线）时旧 waiter 仍留在
+ * `pollWaiters` 内，若只在进入等待前验一次 connectionId，它醒后会把新连线的请求 shift 走、
+ * 回给已 abort 的旧 HTTP（幽灵 waiter 吞第一发）。唤醒后一律重验连线，不符者不得取件
+ * （已取则 re-queue），并以 `device_connection_stale` 收场。
  */
 interface PollWaiter {
   tenant: string
@@ -408,7 +408,7 @@ interface PollWaiter {
   wake: () => void
 }
 
-// ── 參數淨化（每個工具的最小白名單欄位 + 夾制）─────────────────────────
+// ── 参数净化（每个工具的最小白名单栏位 + 夹制）─────────────────────────
 
 export interface SanitizeOk { ok: true; args: Record<string, unknown> }
 export interface SanitizeErr { ok: false; code: DeviceBridgeErrorCode; message: string }
@@ -426,12 +426,12 @@ function asIntInRange(v: unknown, min: number, max: number): number | null {
 }
 
 /**
- * 只放行該工具需要的欄位，其餘丟棄；敏感路徑在此就被擋下。
+ * 只放行该工具需要的栏位，其余丢弃；敏感路径在此就被挡下。
  *
- * H2（2026-10-04）：`grep`/`list_dir` 是**遞迴型**工具，除了請求路徑本身的 denylist，
- * 還必須把遞迴根夾在裝置回報的 `authorizedRoots` 之下（`opts.authorizedRoots`）；
- * 無授權根 ⇒ 遞迴型工具一律拒（fail-closed）。`read_file`/`stat` 是單檔操作，不受此限
- * （單檔 denylist 已足）。
+ * H2（2026-10-04）：`grep`/`list_dir` 是**递回型**工具，除了请求路径本身的 denylist，
+ * 还必须把递回根夹在装置回报的 `authorizedRoots` 之下（`opts.authorizedRoots`）；
+ * 无授权根 ⇒ 递回型工具一律拒（fail-closed）。`read_file`/`stat` 是单档操作，不受此限
+ * （单档 denylist 已足）。
  */
 export function sanitizeToolArgs(
   tool: DeviceBridgeTool,
@@ -444,7 +444,7 @@ export function sanitizeToolArgs(
   const r = raw as Record<string, unknown>
   const p = asString(r.path)
   if (!p) return { ok: false, code: "bad_request", message: "args.path is required" }
-  // W6b：硬 denylist（全域不可繞；只加嚴既有敏感判定）。任何模式／規則都不得放行。
+  // W6b：硬 denylist（全域不可绕；只加严既有敏感判定）。任何模式／规则都不得放行。
   if (isHardDeniedPath(p) || isSensitivePath(p)) return { ok: false, code: "sensitive_path", message: "path is denied by policy" }
 
   switch (tool) {
@@ -477,7 +477,7 @@ export function sanitizeToolArgs(
         const problem = recursiveRootProblem(p, opts?.authorizedRoots)
         if (problem) return { ok: false, code: "path_not_authorized", message: `grep root denied: ${problem}` }
       }
-      // max_file_bytes：H2 輸入側契約——逐檔讀入上限（裝置端遵守）。
+      // max_file_bytes：H2 输入侧契约——逐档读入上限（装置端遵守）。
       const args: Record<string, unknown> = { path: p, pattern, max_matches: 100, max_file_bytes: clampFileBytes(r.max_file_bytes) }
       if (r.max_matches !== undefined) {
         const n = asIntInRange(r.max_matches, 1, 500)
@@ -487,22 +487,22 @@ export function sanitizeToolArgs(
       return { ok: true, args }
     }
     case "stat":
-      // stat 僅需 path（無額外凍結欄位）；denylist 已於函式開頭套用。
+      // stat 仅需 path（无额外冻结栏位）；denylist 已于函式开头套用。
       return { ok: true, args: { path: p } }
     default:
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(tool)}` }
   }
 }
 
-/** U+FFFD（替換字元）佔比門檻：與前端 detectBinaryText 同值（0.5%）。 */
+/** U+FFFD（替换字元）占比门槛：与前端 detectBinaryText 同值（0.5%）。 */
 const BINARY_FFFD_RATIO = 0.005
-/** 二進位讀取的人話指引（裝置回的是位元組被 utf8 解碼後的結果，閘道據此判定）。 */
+/** 二进位读取的人话指引（装置回的是位元组被 utf8 解码后的结果，闸道据此判定）。 */
 const BINARY_READ_NOTE =
   "这是二进制文件（图片/压缩/可执行等），无法当文字读取；请改用附件/下载路径获取原始内容。"
 
 /**
- * 二進位判定（可證標準）：文字含 NUL 位元組（`\u0000`，純文字不可能有）＝二進位；
- * 或 U+FFFD 佔比 ≥ 0.5%（二進位被 utf8 解碼的典型指紋；真殼實測 64KB 有 21,386 個）。
+ * 二进位判定（可证标准）：文字含 NUL 位元组（`\u0000`，纯文字不可能有）＝二进位；
+ * 或 U+FFFD 占比 ≥ 0.5%（二进位被 utf8 解码的典型指纹；真壳实测 64KB 有 21,386 个）。
  */
 export function isBinaryTextPayload(text: unknown): boolean {
   if (typeof text !== "string" || text.length === 0) return false
@@ -513,17 +513,17 @@ export function isBinaryTextPayload(text: unknown): boolean {
 }
 
 /**
- * 把裝置回傳的結構化結果套上 256KB 硬上限與截斷標記。
+ * 把装置回传的结构化结果套上 256KB 硬上限与截断标记。
  *
- * read_file 家族另做兩件事（2026-10-04 缺陷 B，只動閘道）：
- *  1. 二進位偵測：命中即清空 text、標 `binary:true` 並附人話指引，**不得**把 21k 個
- *     U+FFFD 的亂碼當成功文字回。
- *  2. `truncated` 改由「實際讀到的 bytes（offset+bytes_read）對比檔案 size」決定，
- *     不再只看 256KB 容量截斷（真殼實錘 64KB/4.4MB 卻回 truncated=false）。
+ * read_file 家族另做两件事（2026-10-04 缺陷 B，只动闸道）：
+ *  1. 二进位侦测：命中即清空 text、标 `binary:true` 并附人话指引，**不得**把 21k 个
+ *     U+FFFD 的乱码当成功文字回。
+ *  2. `truncated` 改由「实际读到的 bytes（offset+bytes_read）对比档案 size」决定，
+ *     不再只看 256KB 容量截断（真壳实锤 64KB/4.4MB 却回 truncated=false）。
  */
 export function finalizeDeviceResult(raw: unknown): { result: Record<string, unknown>; truncated: boolean; bytes: number } {
   const obj = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : { value: raw }
-  // read_file 家族：直接夾其中的 text 欄位，保留 offset 等後設欄位。
+  // read_file 家族：直接夹其中的 text 栏位，保留 offset 等后设栏位。
   if (typeof obj.text === "string") {
     const offset = typeof obj.offset === "number" && Number.isFinite(obj.offset) && obj.offset >= 0 ? obj.offset : 0
     const size = typeof obj.size === "number" && Number.isFinite(obj.size) ? obj.size : null
@@ -531,7 +531,7 @@ export function finalizeDeviceResult(raw: unknown): { result: Record<string, unk
     const sizeTruncated = size !== null && bytesRead !== null ? offset + bytesRead < size : false
     if (isBinaryTextPayload(obj.text)) {
       const result: Record<string, unknown> = { ...obj, binary: true, text: "", note: BINARY_READ_NOTE }
-      // 拿不到 size 時保守視為「還有後續」（不得宣稱讀完整份二進位檔）。
+      // 拿不到 size 时保守视为「还有后续」（不得宣称读完整份二进位档）。
       const truncated = size !== null && bytesRead !== null ? sizeTruncated : true
       if (truncated) {
         result.truncated = true
@@ -554,7 +554,7 @@ export function finalizeDeviceResult(raw: unknown): { result: Record<string, unk
   return { result: { truncated: true, truncated_bytes: t.originalBytes - t.keptBytes, text: t.text }, truncated: true, bytes: t.keptBytes }
 }
 
-// ── 橋本體 ─────────────────────────────────────────────────────────────
+// ── 桥本体 ─────────────────────────────────────────────────────────────
 
 export class DeviceBridge {
   private readonly devices = new Map<string, DeviceRecord>()
@@ -565,20 +565,20 @@ export class DeviceBridge {
   readonly tokens = new ConsentTokenStore()
   readonly grants = new OnceGrantStore()
   /**
-   * session 級規則（記憶體，key＝tenant；**不持久化到共享庫**）。gateway 重啟後由落盤的
-   * 會話同意（`consentStore`）重建，見 `hydratePersistedConsent`。
+   * session 级规则（记忆体，key＝tenant；**不持久化到共享库**）。gateway 重启后由落盘的
+   * 会话同意（`consentStore`）重建，见 `hydratePersistedConsent`。
    */
   private readonly sessionRules = new Map<string, PermissionRule[]>()
   /**
-   * 對話內授權的**同意記錄**（key＝tenant）：session/permanent 各記一筆，供 invoke 隨訊息
-   * 送到裝置落地（裝置端只認自己的 mode/rules/roots，不知道雲端對話發生了什麼）。
-   * 去重、上限 64。`once` **不進此表**（走 OnceGrantStore 的一次性核銷）。
+   * 对话内授权的**同意记录**（key＝tenant）：session/permanent 各记一笔，供 invoke 随讯息
+   * 送到装置落地（装置端只认自己的 mode/rules/roots，不知道云端对话发生了什么）。
+   * 去重、上限 64。`once` **不进此表**（走 OnceGrantStore 的一次性核销）。
    */
   private readonly sessionConsent = new Map<string, { scope: "session" | "permanent"; root: string }[]>()
   /**
-   * 會話同意的**行程外**落點（session 同意跨 gateway 重啟續存；見
-   * device-bridge-session-consent.ts）。production singleton 注入；未注入（測試／嵌入）
-   * ＝純行程內語義（舊行為）。
+   * 会话同意的**行程外**落点（session 同意跨 gateway 重启续存；见
+   * device-bridge-session-consent.ts）。production singleton 注入；未注入（测试／嵌入）
+   * ＝纯行程内语义（旧行为）。
    */
   private readonly consentStore: SessionConsentStore | null
 
@@ -610,26 +610,26 @@ export class DeviceBridge {
     return this.devices.get(this.deviceKey(tenant, deviceId))
   }
 
-  // ── W6b：session 規則與權限狀態 ──────────────────────────────────────
+  // ── W6b：session 规则与权限状态 ──────────────────────────────────────
   private tenantRules(tenant: string): PermissionRule[] {
     return this.sessionRules.get(tenant) ?? []
   }
-  /** 裝置級規則 ＋ 該 tenant 的 session 規則（順序：裝置在前，session 在後）。 */
+  /** 装置级规则 ＋ 该 tenant 的 session 规则（顺序：装置在前，session 在后）。 */
   private allRulesFor(rec: DeviceRecord): PermissionRule[] {
     return [...rec.rules, ...this.tenantRules(rec.tenant)]
   }
-  /** 加一條 session 規則（authorize scope=session/permanent 用）。 */
+  /** 加一条 session 规则（authorize scope=session/permanent 用）。 */
   addSessionRule(tenant: string, rule: PermissionRule): void {
     const list = this.sessionRules.get(tenant) ?? []
     if (list.length >= 64) return
     list.push(rule)
     this.sessionRules.set(tenant, list)
   }
-  /** 清掉某 tenant 的 session 規則（測試／會話結束用）。 */
+  /** 清掉某 tenant 的 session 规则（测试／会话结束用）。 */
   clearSessionRules(tenant: string): void {
     this.sessionRules.delete(tenant)
   }
-  /** 記憶體內記一筆同意（同 {scope,root} 去重，上限 64）；不做任何落盤。 */
+  /** 记忆体内记一笔同意（同 {scope,root} 去重，上限 64）；不做任何落盘。 */
   private applyConsent(tenant: string, scope: "session" | "permanent", root: string): void {
     const list = this.sessionConsent.get(tenant) ?? []
     if (list.some((e) => e.scope === scope && e.root === root)) return
@@ -638,9 +638,9 @@ export class DeviceBridge {
     this.sessionConsent.set(tenant, list)
   }
   /**
-   * 記錄一筆對話內授權同意（session/permanent）；同 {scope,root} 去重，上限 64。
-   * session/permanent 另**落 gateway 本地單檔**（跨重啟續存）；`once` 不走本函式。
-   * `tool` 供重啟後精確重建規則（缺省＝`*`，與 authorize 端點未指定 tool 的語義一致）。
+   * 记录一笔对话内授权同意（session/permanent）；同 {scope,root} 去重，上限 64。
+   * session/permanent 另**落 gateway 本地单档**（跨重启续存）；`once` 不走本函式。
+   * `tool` 供重启后精确重建规则（缺省＝`*`，与 authorize 端点未指定 tool 的语义一致）。
    */
   addSessionConsent(
     tenant: string,
@@ -650,9 +650,9 @@ export class DeviceBridge {
     this.consentStore?.record({ tenant, root: entry.root, scope: entry.scope, tool: entry.tool ?? "*" })
   }
   /**
-   * 啟動時載入落盤的會話同意並**重建規則與同意記錄**：gateway 重啟（部署）後，已
-   * session 授權的目錄不再回 needs_authorization。載入項已在 store 內經安全複核
-   * （denylist／檔案系統根／敏感一律丟棄）。
+   * 启动时载入落盘的会话同意并**重建规则与同意记录**：gateway 重启（部署）后，已
+   * session 授权的目录不再回 needs_authorization。载入项已在 store 内经安全复核
+   * （denylist／档案系统根／敏感一律丢弃）。
    */
   private hydratePersistedConsent(): void {
     const store = this.consentStore
@@ -660,22 +660,22 @@ export class DeviceBridge {
     for (const entry of store.load()) {
       const specifier = authorizationRuleSpecifier(entry.root)
       const rules = this.sessionRules.get(entry.tenant) ?? []
-      // 同 specifier 只重建一條（session 與 permanent 同根時避免重複規則）。
+      // 同 specifier 只重建一条（session 与 permanent 同根时避免重复规则）。
       if (!rules.some((r) => r.specifier === specifier && r.tool === entry.tool)) {
         this.addSessionRule(entry.tenant, { effect: "allow", tool: entry.tool, specifier })
       }
       this.applyConsent(entry.tenant, entry.scope, entry.root)
     }
   }
-  /** 該 tenant 目前的同意記錄（唯讀快照）。 */
+  /** 该 tenant 目前的同意记录（唯读快照）。 */
   private tenantConsent(tenant: string): { scope: "session" | "permanent"; root: string }[] {
     return this.sessionConsent.get(tenant) ?? []
   }
-  /** 清掉某 tenant 的同意記錄（測試／會話結束用）。 */
+  /** 清掉某 tenant 的同意记录（测试／会话结束用）。 */
   clearSessionConsent(tenant: string): void {
     this.sessionConsent.delete(tenant)
   }
-  /** 挑代表裝置（唯讀；與 describeTenantDevices 同一語義）。 */
+  /** 挑代表装置（唯读；与 describeTenantDevices 同一语义）。 */
   private representativeDevice(tenant: string, now: number): DeviceRecord | undefined {
     const mine = [...this.devices.values()].filter((r) => r.tenant === tenant)
     if (mine.length === 0) return undefined
@@ -683,20 +683,20 @@ export class DeviceBridge {
     if (picked.ok) return mine.find((r) => r.deviceId === picked.deviceId) ?? mine[0]
     return mine.slice().sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.deviceId.localeCompare(b.deviceId))[0]
   }
-  /** 某租戶目前的權限狀態（mode ＋ 合併規則）；無裝置時回預設 ask 與該 tenant session 規則。 */
+  /** 某租户目前的权限状态（mode ＋ 合并规则）；无装置时回预设 ask 与该 tenant session 规则。 */
   permissionStateForTenant(tenant: string, now: number = Date.now()): { mode: DeviceBridgeMode; rules: PermissionRule[] } {
     const rep = this.representativeDevice(tenant, now)
     if (!rep) return { mode: "ask", rules: [...this.tenantRules(tenant)] }
     return { mode: rep.mode, rules: this.allRulesFor(rep) }
   }
-  /** 某租戶代表裝置自報的家目錄（authorize 的 too_broad 判定用）；無＝null。 */
+  /** 某租户代表装置自报的家目录（authorize 的 too_broad 判定用）；无＝null。 */
   homeForTenant(tenant: string, now: number = Date.now()): string | null {
     return this.representativeDevice(tenant, now)?.home ?? null
   }
 
   /**
-   * 註冊：綁定 tenant(userId) ↔ deviceId ↔ connectionId。同裝置重註冊＝換連線（舊連線作廢）。
-   * `roots`＝使用者已授權的絕對路徑根（H2 遞迴夾制用）；未帶／全非法＝空集 ⇒ grep/list_dir 全拒。
+   * 注册：绑定 tenant(userId) ↔ deviceId ↔ connectionId。同装置重注册＝换连线（旧连线作废）。
+   * `roots`＝使用者已授权的绝对路径根（H2 递回夹制用）；未带／全非法＝空集 ⇒ grep/list_dir 全拒。
    */
   register(input: {
     tenant: string
@@ -723,13 +723,13 @@ export class DeviceBridge {
     const prev = this.devices.get(key)
     if (prev) {
       this.byConnection.delete(prev.connectionId)
-      // 換連線＝舊連線關閉：喚醒並清掉它殘留的長輪詢 waiter。它醒後重驗 connectionId 會回
-      // stale，不會取走新連線的請求（否則幽靈 waiter 會吞掉重連後的第一發 invoke）。
+      // 换连线＝旧连线关闭：唤醒并清掉它残留的长轮询 waiter。它醒后重验 connectionId 会回
+      // stale，不会取走新连线的请求（否则幽灵 waiter 会吞掉重连后的第一发 invoke）。
       this.dropWaitersForConnection(prev.connectionId)
     }
     const connectionId = randomId("conn")
-    // 相容策略：只有呼叫端**明確**給了 mode 或 rules 才啟用新決策引擎；否則維持升級前
-    // 行為（denylist ＋ 遞迴根夾制）。缺省 mode 的「語義預設」仍為 `ask`（status 回報）。
+    // 相容策略：只有呼叫端**明确**给了 mode 或 rules 才启用新决策引擎；否则维持升级前
+    // 行为（denylist ＋ 递回根夹制）。缺省 mode 的「语义预设」仍为 `ask`（status 回报）。
     const modeRaw = input.mode
     const rules = sanitizePermissionRules(input.rules)
     const permissionsEnabled = isDeviceBridgeMode(modeRaw) || rules.length > 0
@@ -761,7 +761,7 @@ export class DeviceBridge {
     }
   }
 
-  /** 心跳：刷新 lastSeenAt；回待辦數。connectionId 不符＝換連線後舊連線不再有效。 */
+  /** 心跳：刷新 lastSeenAt；回待办数。connectionId 不符＝换连线后旧连线不再有效。 */
   heartbeat(input: { tenant: string; deviceId: string; connectionId: string; now?: number }): {
     ok: boolean
     code?: DeviceBridgeErrorCode
@@ -781,8 +781,8 @@ export class DeviceBridge {
   }
 
   /**
-   * 輪詢（出站長連線的本機端主動來取件）：有待辦立刻回；否則若 waitMs>0，
-   * 等到有件或逾時（回 request:null）。本機端執行前必須驗 consent_token。
+   * 轮询（出站长连线的本机端主动来取件）：有待办立刻回；否则若 waitMs>0，
+   * 等到有件或逾时（回 request:null）。本机端执行前必须验 consent_token。
    */
   async poll(input: { tenant: string; deviceId: string; connectionId: string; waitMs?: number; now?: number }): Promise<
     { ok: true; request: DeviceRequestMessage | null } | { ok: false; code: DeviceBridgeErrorCode }
@@ -803,7 +803,7 @@ export class DeviceBridge {
       }
       return null
     }
-    // 本條長輪詢此刻是否仍綁在有效連線上；重連＝換 connectionId ⇒ false。
+    // 本条长轮询此刻是否仍绑在有效连线上；重连＝换 connectionId ⇒ false。
     const connectionValid = (): boolean => {
       const r = this.getDevice(input.tenant, input.deviceId)
       return !!r && r.connectionId === input.connectionId
@@ -835,8 +835,8 @@ export class DeviceBridge {
       this.pollWaiters.add(waiter)
     })
 
-    // 喚醒後**重驗連線**：被重連取代的舊 waiter 不得把新連線剛下發的請求 shift 走、回給已
-    // abort 的舊 HTTP。已取到件但連線已失效＝放回佇列頭（re-queue，不吞件），回 stale。
+    // 唤醒后**重验连线**：被重连取代的旧 waiter 不得把新连线刚下发的请求 shift 走、回给已
+    // abort 的旧 HTTP。已取到件但连线已失效＝放回伫列头（re-queue，不吞件），回 stale。
     const taken = take()
     if (!connectionValid()) {
       if (taken) this.requeueRequest(input.tenant, input.deviceId, taken.request_id)
@@ -845,14 +845,14 @@ export class DeviceBridge {
     return { ok: true, request: taken }
   }
 
-  /** 喚醒並清掉某連線殘留的長輪詢 waiter（連線關閉／被取代時呼叫；醒後重驗會回 stale）。 */
+  /** 唤醒并清掉某连线残留的长轮询 waiter（连线关闭／被取代时呼叫；醒后重验会回 stale）。 */
   private dropWaitersForConnection(connectionId: string): void {
     for (const w of [...this.pollWaiters]) {
       if (w.connectionId === connectionId) w.wake()
     }
   }
 
-  /** 把已取出的請求放回該 deviceKey 佇列頭（waiter 醒後連線已失效時不得吞件）。 */
+  /** 把已取出的请求放回该 deviceKey 伫列头（waiter 醒后连线已失效时不得吞件）。 */
   private requeueRequest(tenant: string, deviceId: string, requestId: string): void {
     const key = this.deviceKey(tenant, deviceId)
     const q = this.queue.get(key) ?? []
@@ -864,7 +864,7 @@ export class DeviceBridge {
     for (const w of [...this.pollWaiters]) w.wake()
   }
 
-  /** 逾時取消：清待辦與票，回明確錯誤碼。 */
+  /** 逾时取消：清待办与票，回明确错误码。 */
   private cancelPending(requestId: string): void {
     const p = this.pending.get(requestId)
     if (!p) return
@@ -880,8 +880,8 @@ export class DeviceBridge {
   }
 
   /**
-   * 雲端 agent 發起一次本機檔案操作：驗工具白名單與路徑 denylist → 檢查裝置在線 →
-   * 下發請求（帶逐次同意票）→ 等裝置回傳或逾時。
+   * 云端 agent 发起一次本机档案操作：验工具白名单与路径 denylist → 检查装置在线 →
+   * 下发请求（带逐次同意票）→ 等装置回传或逾时。
    */
   async invoke(input: {
     tenant: string
@@ -889,25 +889,25 @@ export class DeviceBridge {
     tool: unknown
     args?: unknown
     timeoutMs?: number
-    /** scope=once 的一次性授權許可（authorize 端點簽發）。 */
+    /** scope=once 的一次性授权许可（authorize 端点签发）。 */
     authorizationToken?: unknown
   }): Promise<InvokeResult> {
     if (!isToolAllowed(input.tool)) {
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(input.tool)}` }
     }
     const tool = input.tool
-    // H2：遞迴型工具（grep/list_dir）的根夾制需要裝置的授權根，故先取記錄讀授權集
-    // （這一步只讀授權集，不是「裝置在線」判定；denylist 仍先於在線檢查）。
+    // H2：递回型工具（grep/list_dir）的根夹制需要装置的授权根，故先取记录读授权集
+    // （这一步只读授权集，不是「装置在线」判定；denylist 仍先于在线检查）。
     const rec = this.getDevice(input.tenant, input.deviceId)
     const configured = rec?.permissionsEnabled === true
     const cleaned = sanitizeToolArgs(tool, input.args, {
       authorizedRoots: rec?.authorizedRoots,
-      // 啟用決策引擎時，遞迴根的授權判斷交給 evaluatePermission（模式語義）；
-      // 未啟用＝沿用升級前的遞迴根夾制。
+      // 启用决策引擎时，递回根的授权判断交给 evaluatePermission（模式语义）；
+      // 未启用＝沿用升级前的递回根夹制。
       deferRecursiveRootCheck: configured,
     })
     if (!cleaned.ok) {
-      // gateway tsconfig 為 strict:false（boolean 字面量判別式不窄化），顯式轉型。
+      // gateway tsconfig 为 strict:false（boolean 字面量判别式不窄化），显式转型。
       const err = cleaned as SanitizeErr
       return { ok: false, code: err.code, message: err.message }
     }
@@ -916,14 +916,14 @@ export class DeviceBridge {
     if (!rec) return { ok: false, code: "device_offline", message: "device not registered" }
     if (!this.isOnline(rec, now)) return { ok: false, code: "device_offline", message: "device heartbeat expired" }
 
-    // W6b：決策引擎（硬 denylist → safety → 規則 → 模式）。只有明確配置的裝置才啟用；
-    // 未配置＝沿用升級前行為（此處不介入）。denylist 已在 sanitizeToolArgs 內先擋。
+    // W6b：决策引擎（硬 denylist → safety → 规则 → 模式）。只有明确配置的装置才启用；
+    // 未配置＝沿用升级前行为（此处不介入）。denylist 已在 sanitizeToolArgs 内先挡。
     let consent: DeviceRequestMessage["consent"] | undefined
     if (rec.permissionsEnabled) {
       const path = typeof cleaned.args.path === "string" ? cleaned.args.path : ""
       const explicitToken = input.authorizationToken !== undefined && input.authorizationToken !== null
       let granted = false
-      /** once 自動核銷成功的許可根（僅在無顯式 token 且規則未放行時產生）。 */
+      /** once 自动核销成功的许可根（仅在无显式 token 且规则未放行时产生）。 */
       let onceRoot: string | null = null
       if (explicitToken) {
         granted = this.grants.consume(input.authorizationToken, { tenant: input.tenant, tool, path }, now).ok
@@ -942,10 +942,10 @@ export class DeviceBridge {
           return { ok: false, code, message: `path denied by policy (${verdict.reason})` }
         }
         if (verdict.decision === "ask") {
-          // once 自動核銷：opencode 的 local_files 從不下發 authorization_token ⇒ once 結構性
-          // 死路。顯式 token 已在上方優先處理；此處只處理「完全沒帶 token」的情形：主動找一筆
-          // {tenant, tool, path} 相符、未使用的一次性許可核銷，成功即本次放行。找不到仍維持
-          // needs_authorization（且 denylist／safety 的 deny 已先返回，不放寬）。
+          // once 自动核销：opencode 的 local_files 从不下发 authorization_token ⇒ once 结构性
+          // 死路。显式 token 已在上方优先处理；此处只处理「完全没带 token」的情形：主动找一笔
+          // {tenant, tool, path} 相符、未使用的一次性许可核销，成功即本次放行。找不到仍维持
+          // needs_authorization（且 denylist／safety 的 deny 已先返回，不放宽）。
           if (!explicitToken) {
             const match = this.grants.consumeMatching({ tenant: input.tenant, tool, path }, now)
             if (match.ok) {
@@ -965,10 +965,10 @@ export class DeviceBridge {
           }
         }
       }
-      // 組同意記錄（隨本則 message 送到裝置落地）：once 核銷優先；否則送 session/permanent
-      // 的累積同意。**依本請求路徑落在哪種 scope 的根決定下發 scope**，且 roots 只取該
-      // scope 的：絕不把 session 同意以 permanent 名義送到裝置（否則裝置會把 session 根
-      // 永久落盤＝把同意升級；spec 硬禁）。沒有任何記錄＝不帶此欄位（裝置端不得無條件落盤）。
+      // 组同意记录（随本则 message 送到装置落地）：once 核销优先；否则送 session/permanent
+      // 的累积同意。**依本请求路径落在哪种 scope 的根决定下发 scope**，且 roots 只取该
+      // scope 的：绝不把 session 同意以 permanent 名义送到装置（否则装置会把 session 根
+      // 永久落盘＝把同意升级；spec 硬禁）。没有任何记录＝不带此栏位（装置端不得无条件落盘）。
       if (onceRoot !== null) {
         consent = { scope: "once", roots: [onceRoot] }
       } else {
@@ -1015,7 +1015,7 @@ export class DeviceBridge {
     })
   }
 
-  /** 本機端執行完（或失敗）後回傳；閘道在此**再驗一次同意票**（過期/不匹配/重放）。 */
+  /** 本机端执行完（或失败）后回传；闸道在此**再验一次同意票**（过期/不匹配/重放）。 */
   submitResult(input: {
     tenant: string
     deviceId: string
@@ -1042,7 +1042,7 @@ export class DeviceBridge {
       now,
     )
     if (!verdict.ok) {
-      // 驗票失敗不落地：票留給原請求（可能只是本機端送錯票），請求照舊等／逾時。
+      // 验票失败不落地：票留给原请求（可能只是本机端送错票），请求照旧等／逾时。
       const err = verdict as { ok: false; code: ConsentTokenError }
       return { ok: false, code: err.code, message: `consent ${err.code}` }
     }
@@ -1054,7 +1054,7 @@ export class DeviceBridge {
       p.resolve({ ok: false, code: "device_op_failed", message: input.error.trim().slice(0, 500), requestId: p.requestId })
       return { ok: true }
     }
-    // H2 契約面第二層：裝置自報遞迴時觸碰敏感段 → 整筆拒絕、結果不落地。
+    // H2 契约面第二层：装置自报递回时触碰敏感段 → 整笔拒绝、结果不落地。
     const reported = sensitiveResultProblem(input.result)
     if (reported) {
       p.resolve({ ok: false, code: "sensitive_path", message: reported, requestId: p.requestId })
@@ -1073,8 +1073,8 @@ export class DeviceBridge {
   }
 
   /**
-   * 唯讀快照：某 userId 的裝置在線概況。**不改動任何狀態**（不刷 lastSeenAt、不動
-   * 待辦／票），供環境事實層回答「本回合的裝置橋是否可用」。`now` 可注入以便測試逾時。
+   * 唯读快照：某 userId 的装置在线概况。**不改动任何状态**（不刷 lastSeenAt、不动
+   * 待办／票），供环境事实层回答「本回合的装置桥是否可用」。`now` 可注入以便测试逾时。
    */
   runtimeStateFor(userId: number | null, now: number = Date.now()): {
     online: boolean
@@ -1096,8 +1096,8 @@ export class DeviceBridge {
   }
 
   /**
-   * W6b：某 userId 目前在線（最近心跳）裝置的權限模式與授權根（環境事實層用）。
-   * 無在線裝置 → null（呼叫端不得猜）。**唯讀、零副作用**。
+   * W6b：某 userId 目前在线（最近心跳）装置的权限模式与授权根（环境事实层用）。
+   * 无在线装置 → null（呼叫端不得猜）。**唯读、零副作用**。
    */
   policyStateFor(userId: number | null, now: number = Date.now()): { mode: DeviceBridgeMode; authorizedRoots: string[] } | null {
     let best: DeviceRecord | undefined
@@ -1111,8 +1111,8 @@ export class DeviceBridge {
   }
 
   /**
-   * 依租戶挑一台裝置（內部路由尋址）。**不做任何動作、不改狀態**。
-   * 見 `PickDeviceResult` 的五態語義。
+   * 依租户挑一台装置（内部路由寻址）。**不做任何动作、不改状态**。
+   * 见 `PickDeviceResult` 的五态语义。
    */
   pickDeviceForTenant(tenant: string, now: number = Date.now()): PickDeviceResult {
     const mine = [...this.devices.values()].filter((r) => r.tenant === tenant)
@@ -1135,9 +1135,9 @@ export class DeviceBridge {
   }
 
   /**
-   * 唯讀裝置概況：該租戶的代表裝置（見下）的 online／roots／lastHeartbeat。
-   * 0 台已註冊 → null。代表裝置＝`pickDeviceForTenant` 可判斷時取之，否則取最近心跳者
-   * （唯讀查詢，不涉及動作選擇，故可回報「最近看到的那台」；**不**用於 invoke 尋址）。
+   * 唯读装置概况：该租户的代表装置（见下）的 online／roots／lastHeartbeat。
+   * 0 台已注册 → null。代表装置＝`pickDeviceForTenant` 可判断时取之，否则取最近心跳者
+   * （唯读查询，不涉及动作选择，故可回报「最近看到的那台」；**不**用于 invoke 寻址）。
    */
   describeTenantDevices(tenant: string, now: number = Date.now()): TenantDeviceDescription | null {
     const mine = [...this.devices.values()].filter((r) => r.tenant === tenant)
@@ -1149,21 +1149,21 @@ export class DeviceBridge {
     return { online: this.isOnline(rep, now), roots: [...rep.authorizedRoots], lastHeartbeatMs: rep.lastSeenAt }
   }
 
-  /** 測試/運維用：裝置數、待辦數。 */
+  /** 测试/运维用：装置数、待办数。 */
   stats(): { devices: number; pending: number; consentTokens: number } {
     return { devices: this.devices.size, pending: this.pending.size, consentTokens: this.tokens.size() }
   }
 }
 
-/** 閘道進程單例（記憶體狀態；session 同意另落本地單檔以跨重啟續存）。 */
+/** 闸道进程单例（记忆体状态；session 同意另落本地单档以跨重启续存）。 */
 export const deviceBridge = new DeviceBridge({ sessionConsentStore: new SessionConsentStore() })
 
-// ── 唯讀查詢（環境事實層用）──────────────────────────────────────────────
+// ── 唯读查询（环境事实层用）──────────────────────────────────────────────
 
 /**
- * 本機檔案通道的執行期狀態快照（環境事實層 localBridge 的來源）。
- * `enabled`＝總開關（env）；`online`＝該使用者此刻有在線裝置；`deviceCount`＝該使用者
- * 已註冊裝置數（含離線）；`authorizedRootCount`＝在線裝置合計已授權根數（0＝在線但未授權）。
+ * 本机档案通道的执行期状态快照（环境事实层 localBridge 的来源）。
+ * `enabled`＝总开关（env）；`online`＝该使用者此刻有在线装置；`deviceCount`＝该使用者
+ * 已注册装置数（含离线）；`authorizedRootCount`＝在线装置合计已授权根数（0＝在线但未授权）。
  */
 export interface DeviceBridgeRuntimeState {
   enabled: boolean
@@ -1173,14 +1173,14 @@ export interface DeviceBridgeRuntimeState {
 }
 
 /**
- * 回答「某個 userId 目前是否有在線裝置、該裝置是否已授權根」。純讀、零副作用、零網路。
+ * 回答「某个 userId 目前是否有在线装置、该装置是否已授权根」。纯读、零副作用、零网路。
  *
- * 契約：
- *   - 總開關未開 → `{ enabled:false, ... }`（呼叫端據此判 `off`）。
- *   - `userId === null` ＝取不到使用者身分；本函式仍會回報（只匹配 null-tenant 裝置），
- *     但環境事實層對 null 一律維持 `unknown`（不得猜），不採用本回報判定通道狀態。
- *   - 查詢本身不會拋（記憶體 map 遍歷）；呼叫端仍應 try/catch 以求 fail-safe（→ unknown）。
- * 絕不改動註冊／心跳／invoke／同意票的任何行為。
+ * 契约：
+ *   - 总开关未开 → `{ enabled:false, ... }`（呼叫端据此判 `off`）。
+ *   - `userId === null` ＝取不到使用者身分；本函式仍会回报（只匹配 null-tenant 装置），
+ *     但环境事实层对 null 一律维持 `unknown`（不得猜），不采用本回报判定通道状态。
+ *   - 查询本身不会抛（记忆体 map 遍历）；呼叫端仍应 try/catch 以求 fail-safe（→ unknown）。
+ * 绝不改动注册／心跳／invoke／同意票的任何行为。
  */
 export function deviceBridgeRuntimeState(
   userId: number | null,
@@ -1193,15 +1193,15 @@ export function deviceBridgeRuntimeState(
   return { enabled: true, ...snapshot }
 }
 
-/** W6b：本機檔案權限模式與授權根的執行期快照（環境事實層用）。 */
+/** W6b：本机档案权限模式与授权根的执行期快照（环境事实层用）。 */
 export interface DeviceBridgePolicyState {
   mode: DeviceBridgeMode
   authorizedRoots: string[]
 }
 
 /**
- * 回答「某個 userId 目前在線裝置的本機檔案權限模式與授權根清單」。純讀、零副作用。
- * 總開關未開／userId 未知／無在線裝置 → null（呼叫端不得猜）。
+ * 回答「某个 userId 目前在线装置的本机档案权限模式与授权根清单」。纯读、零副作用。
+ * 总开关未开／userId 未知／无在线装置 → null（呼叫端不得猜）。
  */
 export function deviceBridgePolicyState(
   userId: number | null,
@@ -1213,7 +1213,7 @@ export function deviceBridgePolicyState(
   return bridge.policyStateFor(userId, opts.now)
 }
 
-// ── HTTP 路由（僅在 deviceBridgeEnabled() 為真時由 router 呼叫）──────────
+// ── HTTP 路由（仅在 deviceBridgeEnabled() 为真时由 router 呼叫）──────────
 
 interface DeviceBridgeRouteCtx {
   rawKey: string
@@ -1233,7 +1233,7 @@ function errorResponse(status: number, code: DeviceBridgeErrorCode | string, mes
   return Response.json({ ok: false, error: { code, message } }, { status })
 }
 
-/** needs_authorization：**HTTP 200**（授權發生在對話裡，不是錯誤頁；見凍結契約）。 */
+/** needs_authorization：**HTTP 200**（授权发生在对话里，不是错误页；见冻结契约）。 */
 function needsAuthorizationResponse(info: NeedsAuthorizationInfo): Response {
   return Response.json(
     {
@@ -1251,16 +1251,16 @@ function needsAuthorizationResponse(info: NeedsAuthorizationInfo): Response {
 }
 
 /**
- * 裝置橋 HTTP 路由。掛載點：`/agent/v1/device-bridge/*`，經既有 Bearer sk-biz-* 閘門。
- *  - POST /register  ← 本機 daemon 啟動時註冊（出站）
+ * 装置桥 HTTP 路由。挂载点：`/agent/v1/device-bridge/*`，经既有 Bearer sk-biz-* 闸门。
+ *  - POST /register  ← 本机 daemon 启动时注册（出站）
  *  - POST /heartbeat ← 心跳
- *  - POST /poll      ← 取件（可長輪詢）
- *  - POST /result    ← 執行後回傳（帶同意票）
- *  - POST /invoke    ← 雲端 agent 發起本機檔案操作
+ *  - POST /poll      ← 取件（可长轮询）
+ *  - POST /result    ← 执行后回传（带同意票）
+ *  - POST /invoke    ← 云端 agent 发起本机档案操作
  */
 export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRouteCtx): Promise<Response> {
   if (!deviceBridgeEnabled()) {
-    // 第二道保險：即使 router 誤掛，開關關閉時端點不存在。
+    // 第二道保险：即使 router 误挂，开关关闭时端点不存在。
     return errorResponse(404, "not_found", "device bridge is disabled")
   }
   if (req.method !== "POST") return errorResponse(405, "method_not_allowed", "POST only")
@@ -1355,31 +1355,31 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
   }
 }
 
-// ── 內部路由（/internal/device/*）──────────────────────────────────────
+// ── 内部路由（/internal/device/*）──────────────────────────────────────
 //
-// 為什麼需要（第一性原理）：agent 工具跑在 **opencode-server 服務內**（同一台 VPS、
-// loopback），它只知道 `session_id`，不知道裝置憑證／`device_id`；也不該拿到裝置憑證。
-// 既有 `/agent/v1/device-bridge/invoke` 需要呼叫方帶 `device_id` 且經 Bearer 閘門，
-// 工具端拿不到。此處補一條**只做尋址與轉發**的內部入口：由 `session_id` 解析出租戶
-// （`u:<userId>`），挑該租戶唯一在線裝置，再交給既有 `DeviceBridge.invoke`。
+// 为什么需要（第一性原理）：agent 工具跑在 **opencode-server 服务内**（同一台 VPS、
+// loopback），它只知道 `session_id`，不知道装置凭证／`device_id`；也不该拿到装置凭证。
+// 既有 `/agent/v1/device-bridge/invoke` 需要呼叫方带 `device_id` 且经 Bearer 闸门，
+// 工具端拿不到。此处补一条**只做寻址与转发**的内部入口：由 `session_id` 解析出租户
+// （`u:<userId>`），挑该租户唯一在线装置，再交给既有 `DeviceBridge.invoke`。
 //
-// 三道防線（denylist `isSensitivePath`／授權根 `path_not_authorized`／工具白名單）
-// 全在既有 `invoke` → `sanitizeToolArgs` 內，本路由**不新增、不放寬**任何檢查。
-// 保護層＝router 的 `/internal/` loopback 門（與 `/internal/media/upload` 同一層）。
+// 三道防线（denylist `isSensitivePath`／授权根 `path_not_authorized`／工具白名单）
+// 全在既有 `invoke` → `sanitizeToolArgs` 内，本路由**不新增、不放宽**任何检查。
+// 保护层＝router 的 `/internal/` loopback 门（与 `/internal/media/upload` 同一层）。
 
-/** 內部裝置路由的依賴注入（測試免真會話/真網路；生產由 router 提供真 resolver）。 */
+/** 内部装置路由的依赖注入（测试免真会话/真网路；生产由 router 提供真 resolver）。 */
 export interface InternalDeviceRouteDeps {
   /**
-   * `session_id` → 租戶（`u:<userId>`）。解析不到回 `null` ⇒ `session_unknown`。
-   * 生產實作＝與 `/internal/media/upload` 同源的 session 解析（`resolveSession` →
+   * `session_id` → 租户（`u:<userId>`）。解析不到回 `null` ⇒ `session_unknown`。
+   * 生产实作＝与 `/internal/media/upload` 同源的 session 解析（`resolveSession` →
    * `subagentParentState`）＋既有正典化 `resolveCanonicalIdentity(session.apiKey)`。
    */
   resolveTenant: (sessionId: string) => Promise<string | null>
-  /** 裝置橋實例（測試注入）；預設製程單例 `deviceBridge`。 */
+  /** 装置桥实例（测试注入）；预设制程单例 `deviceBridge`。 */
   bridge?: DeviceBridge
 }
 
-/** op → 既有 `DeviceBridgeTool` 的**一對一**映射（不得新增／改名工具）。 */
+/** op → 既有 `DeviceBridgeTool` 的**一对一**映射（不得新增／改名工具）。 */
 const INTERNAL_DEVICE_OPS: readonly DeviceBridgeTool[] = ["list_dir", "read_file", "grep", "stat"]
 
 function isInternalDeviceOp(v: string): v is DeviceBridgeTool {
@@ -1391,9 +1391,9 @@ function internalDeviceError(status: number, code: string, message: string): Res
 }
 
 /**
- * 內部契約錯誤碼（凍結）：把既有 `DeviceBridgeErrorCode` 收斂到凍結清單。
+ * 内部契约错误码（冻结）：把既有 `DeviceBridgeErrorCode` 收敛到冻结清单。
  * `device_request_timeout` → `device_timeout`；`bad_request` 保留；
- * 其餘（含 device_op_failed／consent_token_*／device_request_not_found）→ `internal_error`。
+ * 其余（含 device_op_failed／consent_token_*／device_request_not_found）→ `internal_error`。
  */
 function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; code: string } {
   switch (code) {
@@ -1412,7 +1412,7 @@ function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; 
     case "mode_off":
       return { status: 403, code: "mode_off" }
     case "needs_authorization":
-      // 一般由此前的專屬分支處理（HTTP 200）；保留在此作型別閉合（不應走到）。
+      // 一般由此前的专属分支处理（HTTP 200）；保留在此作型别闭合（不应走到）。
       return { status: 200, code: "needs_authorization" }
     case "device_offline":
     case "device_connection_stale":
@@ -1423,31 +1423,31 @@ function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; 
 }
 
 /**
- * 凍結 body → 既有 `sanitizeToolArgs` 的 args 白名單（欄位名映射，語義沿用既有淨化）。
- * 只放行凍結契約列出的欄位：path / pattern / max_bytes / limit / offset（+ list_dir 的 max_entries）。
- * 夾制全在 sanitizeToolArgs。
+ * 冻结 body → 既有 `sanitizeToolArgs` 的 args 白名单（栏位名映射，语义沿用既有净化）。
+ * 只放行冻结契约列出的栏位：path / pattern / max_bytes / limit / offset（+ list_dir 的 max_entries）。
+ * 夹制全在 sanitizeToolArgs。
  */
 function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, unknown>): Record<string, unknown> {
   const path = typeof body.path === "string" ? body.path : ""
   switch (tool) {
     case "list_dir": {
       const args: Record<string, unknown> = { path }
-      // 凍結欄位名 max_entries：裝置端既有參數（bridge-executor 已讀 args.max_entries），
-      // 1..2000 夾制仍在 sanitizeToolArgs；缺省時不下發，裝置沿用既有 MAX_LIST_DEFAULT。
+      // 冻结栏位名 max_entries：装置端既有参数（bridge-executor 已读 args.max_entries），
+      // 1..2000 夹制仍在 sanitizeToolArgs；缺省时不下发，装置沿用既有 MAX_LIST_DEFAULT。
       if (body.max_entries !== undefined) args.max_entries = body.max_entries
       return args
     }
     case "read_file": {
       const args: Record<string, unknown> = { path }
       if (body.limit !== undefined) args.limit = body.limit
-      // 凍結欄位名 offset：裝置端既有參數（bridge-executor 已讀 args.offset），
-      // ≥0 整數夾制仍在 sanitizeToolArgs（唯一夾制點）；缺省時不下發，裝置沿用既有預設 0。
+      // 冻结栏位名 offset：装置端既有参数（bridge-executor 已读 args.offset），
+      // ≥0 整数夹制仍在 sanitizeToolArgs（唯一夹制点）；缺省时不下发，装置沿用既有预设 0。
       if (body.offset !== undefined) args.offset = body.offset
       return args
     }
     case "grep": {
       const args: Record<string, unknown> = { path, pattern: typeof body.pattern === "string" ? body.pattern : "" }
-      // 凍結欄位名 `max_bytes` → 既有淨化欄位 `max_file_bytes`（不改語義）。
+      // 冻结栏位名 `max_bytes` → 既有净化栏位 `max_file_bytes`（不改语义）。
       if (body.max_bytes !== undefined) args.max_file_bytes = body.max_bytes
       return args
     }
@@ -1457,8 +1457,8 @@ function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, un
 }
 
 /**
- * POST /internal/device/invoke?session_id=… — 雲端 agent 工具讀本機檔的**內部**入口。
- * 只尋址＋轉發；逾時由既有 `invoke` 的 `DEVICE_REQUEST_TIMEOUT_MS` 保證（不永久 pending）。
+ * POST /internal/device/invoke?session_id=… — 云端 agent 工具读本机档的**内部**入口。
+ * 只寻址＋转发；逾时由既有 `invoke` 的 `DEVICE_REQUEST_TIMEOUT_MS` 保证（不永久 pending）。
  */
 export async function handleInternalDeviceInvoke(req: Request, deps: InternalDeviceRouteDeps): Promise<Response> {
   const bridge = deps.bridge ?? deviceBridge
@@ -1483,7 +1483,7 @@ export async function handleInternalDeviceInvoke(req: Request, deps: InternalDev
 
   const pick = bridge.pickDeviceForTenant(tenant)
   if (!pick.ok) {
-    // gateway tsconfig strict:false ⇒ boolean 字面量判別式不窄化，顯式轉型（本檔既有同款）。
+    // gateway tsconfig strict:false ⇒ boolean 字面量判别式不窄化，显式转型（本档既有同款）。
     const perr = pick as { ok: false; code: "no_device_registered" | "device_offline" | "device_ambiguous"; message: string }
     return internalDeviceError(perr.code === "device_ambiguous" ? 409 : 404, perr.code, perr.message)
   }
@@ -1491,7 +1491,7 @@ export async function handleInternalDeviceInvoke(req: Request, deps: InternalDev
   const out = await bridge.invoke({ tenant, deviceId: (pick as { ok: true; deviceId: string }).deviceId, tool, args, authorizationToken: body.authorization_token })
   if (!out.ok) {
     const oerr = out as { ok: false; code: DeviceBridgeErrorCode; message: string; needsAuthorization?: NeedsAuthorizationInfo }
-    // needs_authorization：HTTP 200（授權發生在對話裡），body 形狀照凍結契約。
+    // needs_authorization：HTTP 200（授权发生在对话里），body 形状照冻结契约。
     if (oerr.code === "needs_authorization" && oerr.needsAuthorization) return needsAuthorizationResponse(oerr.needsAuthorization)
     const mapped = mapInternalDeviceError(oerr.code)
     return internalDeviceError(mapped.status, mapped.code, oerr.message)
@@ -1508,8 +1508,8 @@ export async function handleInternalDeviceInvoke(req: Request, deps: InternalDev
 }
 
 /**
- * GET /internal/device/status?session_id=… — 本會話租戶的裝置概況（唯讀）。
- * 無已註冊裝置 → `device: null`（不是錯誤）。
+ * GET /internal/device/status?session_id=… — 本会话租户的装置概况（唯读）。
+ * 无已注册装置 → `device: null`（不是错误）。
  */
 export async function handleInternalDeviceStatus(req: Request, deps: InternalDeviceRouteDeps): Promise<Response> {
   const bridge = deps.bridge ?? deviceBridge
@@ -1533,17 +1533,17 @@ export async function handleInternalDeviceStatus(req: Request, deps: InternalDev
 }
 
 /**
- * POST /internal/device/authorize?session_id=… — 對話中授權本機路徑（loopback-only）。
+ * POST /internal/device/authorize?session_id=… — 对话中授权本机路径（loopback-only）。
  *
  * scope：
- *   - `once`：不落規則，簽一枚一次性許可（帶 TTL）並回 `token`；
- *     下一次 invoke 帶 `authorization_token` 使用，用一次即失效。
- *   - `session`：加進該 session 的規則集（記憶體，隨 session 生命週期；本進程內）。
- *   - `permanent`：gateway **不持久化**，回 `persist_on_device:true`，由裝置端落地；
- *     gateway 只把它加進當前 session 規則集。
- * **一律不在 gateway 端持久化規則到共享庫**（避免跨租戶洩漏）。
+ *   - `once`：不落规则，签一枚一次性许可（带 TTL）并回 `token`；
+ *     下一次 invoke 带 `authorization_token` 使用，用一次即失效。
+ *   - `session`：加进该 session 的规则集（记忆体，随 session 生命周期；本进程内）。
+ *   - `permanent`：gateway **不持久化**，回 `persist_on_device:true`，由装置端落地；
+ *     gateway 只把它加进当前 session 规则集。
+ * **一律不在 gateway 端持久化规则到共享库**（避免跨租户泄漏）。
  *
- * 錯誤碼：bad_request／session_unknown／root_not_absolute／root_too_broad／denylisted_root。
+ * 错误码：bad_request／session_unknown／root_not_absolute／root_too_broad／denylisted_root。
  */
 export async function handleInternalDeviceAuthorize(req: Request, deps: InternalDeviceRouteDeps): Promise<Response> {
   const bridge = deps.bridge ?? deviceBridge
@@ -1581,8 +1581,8 @@ export async function handleInternalDeviceAuthorize(req: Request, deps: Internal
   const rule: PermissionRule = { effect: "allow", tool: ruleTool, specifier: authorizationRuleSpecifier(absRoot) }
   if (scope === "session" || scope === "permanent") {
     bridge.addSessionRule(tenant, rule)
-    // 另存同意記錄：invoke 會把它隨 DeviceRequestMessage.consent 送到裝置端落地。
-    // 帶 tool 以便 gateway 重啟後從落盤檔精確重建規則；session/permanent 會落 gateway 本地檔。
+    // 另存同意记录：invoke 会把它随 DeviceRequestMessage.consent 送到装置端落地。
+    // 带 tool 以便 gateway 重启后从落盘档精确重建规则；session/permanent 会落 gateway 本地档。
     bridge.addSessionConsent(tenant, { scope, root: absRoot, tool: ruleTool })
   }
 

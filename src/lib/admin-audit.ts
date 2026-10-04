@@ -1,18 +1,18 @@
-// 管理面配置變更的稽核紀錄：channel-overrides / admin-pools 等每次寫入都是一次
-// 「全量替換」，Blob 世代雖然保留了舊內容物理檔案，但沒人能回答「誰、何時、改了
-// 什麼」，也沒有讀取/還原舊世代的入口。這裡補上稽核表的讀寫，掛在既有的
-// Postgres control-plane 連線（generation-core/database.ts）上——不新開一條連線。
+// 管理面配置变更的稽核纪录：channel-overrides / admin-pools 等每次写入都是一次
+// 「全量替换」，Blob 世代虽然保留了旧内容物理档案，但没人能回答「谁、何时、改了
+// 什么」，也没有读取/还原旧世代的入口。这里补上稽核表的读写，挂在既有的
+// Postgres control-plane 连线（generation-core/database.ts）上——不新开一条连线。
 //
-// 版本號設計：channel-overrides.ts 的 version 是 Blob pathname（字串，例如
-// "admin/channel-overrides.v1-<ts>-<rand>.json"），不是整數；但稽核表 schema
-// （db/migrations/002_admin_config_audit.sql）要求 version 是 integer，方便排序與
-// 「回滾到第 N 版」這種人類可讀的操作。因此稽核表維護一條獨立於 Blob pathname 的
-// 單調遞增整數序列（每個 config_key 各自從 1 起算），resolveNextConfigVersion 算出
-// 下一個號碼。這條序列只活在稽核表裡，不影響 channel-overrides.ts 既有的並發控制
-// （expectedVersion 仍然比對 Blob pathname，不受這裡影響）。
+// 版本号设计：channel-overrides.ts 的 version 是 Blob pathname（字串，例如
+// "admin/channel-overrides.v1-<ts>-<rand>.json"），不是整数；但稽核表 schema
+// （db/migrations/002_admin_config_audit.sql）要求 version 是 integer，方便排序与
+// 「回滚到第 N 版」这种人类可读的操作。因此稽核表维护一条独立于 Blob pathname 的
+// 单调递增整数序列（每个 config_key 各自从 1 起算），resolveNextConfigVersion 算出
+// 下一个号码。这条序列只活在稽核表里，不影响 channel-overrides.ts 既有的并发控制
+// （expectedVersion 仍然比对 Blob pathname，不受这里影响）。
 //
-// 鐵則：稽核寫入絕不能擋住 admin 的正常配置保存。Postgres 未配置，或查詢失敗，
-// 都只記警告、直接放行——寧可漏記一筆稽核，不能讓管理員連配置都存不進去。
+// 铁则：稽核写入绝不能挡住 admin 的正常配置保存。Postgres 未配置，或查询失败，
+// 都只记警告、直接放行——宁可漏记一笔稽核，不能让管理员连配置都存不进去。
 
 import { randomUUID } from "node:crypto";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./generation-core/database";
@@ -22,7 +22,7 @@ export type ConfigChangeAction = "update" | "rollback";
 export interface RecordConfigChangeInput {
   configKey: string;
   version: number;
-  /** 呼叫端目前可取得的管理員身分；沒有就傳 null，落庫時存成 'unknown'。 */
+  /** 呼叫端目前可取得的管理员身分；没有就传 null，落库时存成 'unknown'。 */
   actor: string | null;
   action: ConfigChangeAction;
   previousVersion: number | null;
@@ -47,9 +47,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 淺層（僅頂層 key）diff：這些配置形狀（channel-overrides / admin-pools）本身就是
- * 「id -> 小物件」的扁平字典，頂層 key 級別的 before/after 已足夠讓人看懂改了哪個
- * 渠道；不需要遞迴深比對。非物件輸入視為空物件（不拋錯）。
+ * 浅层（仅顶层 key）diff：这些配置形状（channel-overrides / admin-pools）本身就是
+ * 「id -> 小物件」的扁平字典，顶层 key 级别的 before/after 已足够让人看懂改了哪个
+ * 渠道；不需要递回深比对。非物件输入视为空物件（不抛错）。
  */
 export function diffJson(before: unknown, after: unknown): Record<string, { before: unknown; after: unknown }> {
   const beforeObj = isPlainObject(before) ? before : {};
@@ -67,7 +67,7 @@ export function diffJson(before: unknown, after: unknown): Record<string, { befo
   return diff;
 }
 
-/** 解析要用的連線：測試/呼叫端可注入 sql；否則照 database.ts 的規則判斷是否已配置。 */
+/** 解析要用的连线：测试/呼叫端可注入 sql；否则照 database.ts 的规则判断是否已配置。 */
 function resolveSql(sql?: GenerationSql): GenerationSql | null {
   if (sql) return sql;
   if (!generationDatabaseConfigured()) return null;
@@ -90,9 +90,9 @@ function mapRow(row: Record<string, unknown>): ConfigChangeRecord {
 }
 
 /**
- * 這個 config_key 目前稽核表裡最大的整數版本號，沒有任何紀錄則回 0（下一版就是 1）。
- * 呼叫端（route.ts）決定自己要用哪個號碼；這裡只負責「查詢+遞增」的慣用組合，
- * 供呼叫端在不想自己管序列時使用。
+ * 这个 config_key 目前稽核表里最大的整数版本号，没有任何纪录则回 0（下一版就是 1）。
+ * 呼叫端（route.ts）决定自己要用哪个号码；这里只负责「查询+递增」的惯用组合，
+ * 供呼叫端在不想自己管序列时使用。
  */
 export async function nextConfigVersion(configKey: string, sql?: GenerationSql): Promise<number> {
   const client = resolveSql(sql);
@@ -110,8 +110,8 @@ export async function nextConfigVersion(configKey: string, sql?: GenerationSql):
 }
 
 /**
- * 記一筆配置變更。絕不拋錯：Postgres 未配置或查詢失敗都只記警告後直接返回——
- * 稽核紀錄漏一筆，遠比讓管理員的配置保存失敗要輕。
+ * 记一笔配置变更。绝不抛错：Postgres 未配置或查询失败都只记警告后直接返回——
+ * 稽核纪录漏一笔，远比让管理员的配置保存失败要轻。
  */
 export async function recordConfigChange(input: RecordConfigChangeInput, sql?: GenerationSql): Promise<void> {
   const client = resolveSql(sql);
@@ -147,7 +147,7 @@ export async function recordConfigChange(input: RecordConfigChangeInput, sql?: G
   }
 }
 
-/** 某個 config_key 最近的變更紀錄，新到舊排序。查詢失敗回空陣列（不拋錯，稽核讀取非關鍵路徑）。 */
+/** 某个 config_key 最近的变更纪录，新到旧排序。查询失败回空阵列（不抛错，稽核读取非关键路径）。 */
 export async function listConfigChanges(
   configKey: string,
   limit: number,
@@ -170,7 +170,7 @@ export async function listConfigChanges(
   }
 }
 
-/** 某個 config_key 在特定版本號的完整快照；找不到（Postgres 未配置、版本不存在）回 null。 */
+/** 某个 config_key 在特定版本号的完整快照；找不到（Postgres 未配置、版本不存在）回 null。 */
 export async function getConfigChangeSnapshot(
   configKey: string,
   version: number,

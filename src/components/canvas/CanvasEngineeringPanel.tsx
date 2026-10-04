@@ -1,18 +1,18 @@
 "use client";
 
-// CanvasEngineeringPanel —— 語義縮放 LOD 3「工程透析」面板（2026-09-30 打磨版：X 光透析）。
+// CanvasEngineeringPanel —— 语义缩放 LOD 3「工程透析」面板（2026-09-30 打磨版：X 光透析）。
 //
-// 視角轉換（宿主同步把卡片飛到視口左 1/3、進 focus 模式）：
-//   - 面板以 FLIP 從卡片螢幕矩形展開到右側面板矩形（320ms，cubic-bezier(.2,.9,.2,1)）；
-//   - 一條青色「光束」SVG 從卡片右緣連到面板左緣並常駐（跟隨卡片位置，飛行途中也跟）；
-//   - Esc／關閉：反向 FLIP 收回卡片、光束收縮，再交宿主解除 focus。
-// 內容＝「管線剖面」：左側垂直軌道串起 请求体 → 执行 → 结果 → LoRA → Critic（→ 版本/门禁）。
+// 视角转换（宿主同步把卡片飞到视口左 1/3、进 focus 模式）：
+//   - 面板以 FLIP 从卡片萤幕矩形展开到右侧面板矩形（320ms，cubic-bezier(.2,.9,.2,1)）；
+//   - 一条青色「光束」SVG 从卡片右缘连到面板左缘并常驻（跟随卡片位置，飞行途中也跟）；
+//   - Esc／关闭：反向 FLIP 收回卡片、光束收缩，再交宿主解除 focus。
+// 内容＝「管线剖面」：左侧垂直轨道串起 请求体 → 执行 → 结果 → LoRA → Critic（→ 版本/门禁）。
 //
-// 資料只有兩個來源，缺什麼就如實寫缺什麼，不編造：
-//   - 本地 metadata：model/size/quality/kind/status、toolInput/toolOutput、taskVersions、gateConfirm、錯誤文字。
-//   - 有 imageTaskId 時 lazy fetch `GET /api/generation-jobs/{id}`（任務真源）：
-//     submittedConfig（含 LoRA 版本 id）、prompt、時間線、張數、產出、錯誤碼。404/失敗 →「任务记录不可用」。
-// Critic 日志與 LoRA 权重目前沒有按節點落庫 → 固定顯示「未记录」。
+// 资料只有两个来源，缺什么就如实写缺什么，不编造：
+//   - 本地 metadata：model/size/quality/kind/status、toolInput/toolOutput、taskVersions、gateConfirm、错误文字。
+//   - 有 imageTaskId 时 lazy fetch `GET /api/generation-jobs/{id}`（任务真源）：
+//     submittedConfig（含 LoRA 版本 id）、prompt、时间线、张数、产出、错误码。404/失败 →「任务记录不可用」。
+// Critic 日志与 LoRA 权重目前没有按节点落库 → 固定显示「未记录」。
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ScanLine, X } from "lucide-react";
@@ -22,7 +22,7 @@ import type { GenerationTaskProjection } from "@/lib/generation-task-types";
 import { tokenizeJson, type JsonTokenKind } from "@/lib/canvas/json-tokens";
 import { buildAuthHeaders } from "./embed/embed-helpers";
 
-/** 卡片在螢幕上的矩形（client 座標）。 */
+/** 卡片在萤幕上的矩形（client 座标）。 */
 export interface EngineeringAnchorRect {
   left: number;
   top: number;
@@ -33,7 +33,7 @@ export interface EngineeringAnchorRect {
 export interface CanvasEngineeringPanelProps {
   node: CanvasNode | null;
   onClose: () => void;
-  /** 被透析卡片的即時螢幕矩形（每幀更新）；null＝不做 FLIP／光束。 */
+  /** 被透析卡片的即时萤幕矩形（每帧更新）；null＝不做 FLIP／光束。 */
   anchor?: EngineeringAnchorRect | null;
   reduceMotion?: boolean;
 }
@@ -92,7 +92,7 @@ function JsonView({ value }: { value: unknown }) {
   );
 }
 
-/** 工具輸入輸出：能解析成 JSON 就高亮，否則原文。 */
+/** 工具输入输出：能解析成 JSON 就高亮，否则原文。 */
 function MaybeJson({ text }: { text: string }) {
   try {
     return <JsonView value={JSON.parse(text)} />;
@@ -126,7 +126,7 @@ function KV({ label, value, mono = false }: { label: string; value: React.ReactN
   );
 }
 
-/** 管線剖面的一段：左側軌道節點（序號）＋標題＋來源標記；stagger 淡入上移。 */
+/** 管线剖面的一段：左侧轨道节点（序号）＋标题＋来源标记；stagger 淡入上移。 */
 function Segment({
   index,
   title,
@@ -159,7 +159,7 @@ function Segment({
   );
 }
 
-/** 執行 mini Gantt：排队（created→started）＋运行（started→finished）兩段色條。 */
+/** 执行 mini Gantt：排队（created→started）＋运行（started→finished）两段色条。 */
 function ExecutionGantt({ job }: { job: GenerationTaskProjection }) {
   const created = toMs(job.createdAt);
   const started = toMs(job.startedAt);
@@ -248,11 +248,11 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
     return () => controller.abort();
   }, [taskId]);
 
-  /** 目前面板 → 某螢幕矩形的 FLIP 變換（origin 左上）。 */
+  /** 目前面板 → 某萤幕矩形的 FLIP 变换（origin 左上）。 */
   const transformTo = (rect: EngineeringAnchorRect, panel: DOMRect) =>
     `translate(${rect.left - panel.left}px, ${rect.top - panel.top}px) scale(${Math.max(0.05, rect.width / panel.width)}, ${Math.max(0.05, rect.height / panel.height)})`;
 
-  // 開場 FLIP：先量終態矩形（光束終點），再把面板瞬移到卡片矩形，下一幀放手讓它彈開。
+  // 开场 FLIP：先量终态矩形（光束终点），再把面板瞬移到卡片矩形，下一帧放手让它弹开。
   useLayoutEffect(() => {
     const el = panelRef.current;
     if (!el) return;
@@ -275,7 +275,7 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
       setBeamOn(true);
     });
     return () => cancelAnimationFrame(raf);
-    // 只在掛載時做一次（宿主以節點 id 作 key，換節點＝重新掛載＝重新展開）。
+    // 只在挂载时做一次（宿主以节点 id 作 key，换节点＝重新挂载＝重新展开）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -287,7 +287,7 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // 收場：反向 FLIP 收回卡片、光束收縮，動畫結束才交宿主（解除 focus）。
+  // 收场：反向 FLIP 收回卡片、光束收缩，动画结束才交宿主（解除 focus）。
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
@@ -336,7 +336,7 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
   const resultUrls = okJob ? okJob.results.map((r) => r.url).filter(isImageUrl).slice(0, 4) : isImageUrl(m.content) ? [m.content] : [];
   const status = okJob?.status ?? m.status ?? "idle";
 
-  // 段落（序號連續；版本/门禁有才出）。
+  // 段落（序号连续；版本/门禁有才出）。
   const segments: { title: string; source?: React.ReactNode; muted?: boolean; body: React.ReactNode }[] = [];
   segments.push({
     title: "请求体",
@@ -463,7 +463,7 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
     });
   }
 
-  // 光束：卡片右緣中點 → 面板左緣（y 夾在面板內）。
+  // 光束：卡片右缘中点 → 面板左缘（y 夹在面板内）。
   const beam = (() => {
     if (!anchor || !panelRect) return null;
     const sx = anchor.left + anchor.width;
@@ -512,7 +512,7 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
           maxHeight: "min(80dvh, 720px)",
         }}
       >
-        {/* 頭部：圖示＋標題（lg-sheet 語彙） */}
+        {/* 头部：图示＋标题（lg-sheet 语汇） */}
         <div
           className="relative flex items-start gap-2.5 border-b border-black/[0.06] px-4 py-3"
         >
@@ -533,7 +533,7 @@ export function CanvasEngineeringPanel({ node, onClose, anchor = null, reduceMot
           </button>
         </div>
 
-        {/* 管線剖面：左側垂直軌道 */}
+        {/* 管线剖面：左侧垂直轨道 */}
         <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
           <div
             className="pointer-events-none absolute bottom-6 left-[26px] top-6 w-px bg-gradient-to-b from-ios-blue/35 via-ios-blue/10 to-transparent"

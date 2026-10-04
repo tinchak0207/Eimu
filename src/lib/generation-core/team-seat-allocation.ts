@@ -1,23 +1,23 @@
-// 席位 → 成員額度分配（刀 3）：席位語義與既有配額轉移通路的唯一接點。
+// 席位 → 成员额度分配（刀 3）：席位语义与既有配额转移通路的唯一接点。
 //
-// 語義：該成員獲配 seats 個席位、每席位 perSeatCoins 幣 ⇒ **目標額度上限** =
-// seats × perSeatCoins（幣）→ round(× QUOTA_PER_COIN) quota。目標是**絕對值**，
-// 不是增量：這正是 member-quota.ts 既有 allocateMemberQuota 的模型（重放天然冪等）。
+// 语义：该成员获配 seats 个席位、每席位 perSeatCoins 币 ⇒ **目标额度上限** =
+// seats × perSeatCoins（币）→ round(× QUOTA_PER_COIN) quota。目标是**绝对值**，
+// 不是增量：这正是 member-quota.ts 既有 allocateMemberQuota 的模型（重放天然幂等）。
 //
-// 唯一通路（禁另開第二條分配路徑）：本檔不自己動任何帳號額度，全部委派
-// allocateMemberQuota；主帳扣 Δ／成員加 Δ、「先扣後加」＋失敗回滾、團隊
-// advisory lock 串行化、已消耗不可回收、禁影子帳本（不寫本地點數）都是它的既有行為，
-// 本檔**一行不改**（禁碰其不變量語義）。member_user_id → member_key_id 的解析走
-// 既有 findMemberByUserId（019 的歸屬表本就只存身份與意圖）。
+// 唯一通路（禁另开第二条分配路径）：本档不自己动任何帐号额度，全部委派
+// allocateMemberQuota；主帐扣 Δ／成员加 Δ、「先扣后加」＋失败回滚、团队
+// advisory lock 串行化、已消耗不可回收、禁影子帐本（不写本地点数）都是它的既有行为，
+// 本档**一行不改**（禁碰其不变量语义）。member_user_id → member_key_id 的解析走
+// 既有 findMemberByUserId（019 的归属表本就只存身份与意图）。
 //
-// 與 /v1/team/quota 的差別只在「目標怎麼來」：那條路由吃呼叫方給的 target_coins；
-// 本檔吃「席位数 × 每席位幣數」。兩者最終都落到同一個 allocateMemberQuota。
+// 与 /v1/team/quota 的差别只在「目标怎么来」：那条路由吃呼叫方给的 target_coins；
+// 本档吃「席位数 × 每席位币数」。两者最终都落到同一个 allocateMemberQuota。
 //
-// 不變量（由 allocateMemberQuota 保證，本檔測試逐條斷言）：
-//   ① 分配 = 轉移（主帳扣 Δ、成員加 Δ），全團隊總額守恆；
-//   ② 重放同請求不重複扣（目標與現值相同 = 幂等 no-op，不寫上游）；
-//   ③ 目標不得低於該成員已消耗（已消耗不可回收）；
-//   ④ 失敗回滾不留半邊（先扣後加；第二條腿失敗即回滾，不憑空印額度、不登記歸屬）。
+// 不变量（由 allocateMemberQuota 保证，本档测试逐条断言）：
+//   ① 分配 = 转移（主帐扣 Δ、成员加 Δ），全团队总额守恒；
+//   ② 重放同请求不重复扣（目标与现值相同 = 幂等 no-op，不写上游）；
+//   ③ 目标不得低于该成员已消耗（已消耗不可回收）；
+//   ④ 失败回滚不留半边（先扣后加；第二条腿失败即回滚，不凭空印额度、不登记归属）。
 
 import {
   allocateMemberQuota,
@@ -41,18 +41,18 @@ export type SeatAllocationFailureCode =
   | "allocation_unavailable";
 
 export interface ApplySeatAllocationInput {
-  /** 出資方 = 團隊主帳（new-api user）。 */
+  /** 出资方 = 团队主帐（new-api user）。 */
   teamUserId: number;
-  /** 成員 new-api user（配額桶所在，019 的 user 層模型）。 */
+  /** 成员 new-api user（配额桶所在，019 的 user 层模型）。 */
   memberUserId: number;
-  /** 分配給該成員的席位数（正整數）。 */
+  /** 分配给该成员的席位数（正整数）。 */
   seats: number;
-  /** 每席位幣數（正數；與團隊席位單價同口徑的「幣」）。 */
+  /** 每席位币数（正数；与团队席位单价同口径的「币」）。 */
   perSeatCoins: number;
 }
 
 export interface ApplySeatAllocationDeps extends AllocateDeps {
-  /** 測試注入：席位成員查表（默認 member-quota.ts 的 findMemberByUserId）。 */
+  /** 测试注入：席位成员查表（默认 member-quota.ts 的 findMemberByUserId）。 */
   findMember?: (memberUserId: number, sql?: GenerationSql) => Promise<TeamMemberRecord | null>;
 }
 
@@ -63,14 +63,14 @@ export type SeatAllocationResult =
       memberUserId: number;
       seats: number;
       perSeatCoins: number;
-      /** 本次目標 = seats × perSeatCoins（幣）。 */
+      /** 本次目标 = seats × perSeatCoins（币）。 */
       targetCoins: number;
-      /** 同一目標的 quota 表示（絕對目標值）。 */
+      /** 同一目标的 quota 表示（绝对目标值）。 */
       targetQuota: number;
       granted: number;
       used: number;
       remaining: number;
-      /** 本次實際轉移 quota（正 = 劃出，負 = 回收，0 = 幂等 no-op）。 */
+      /** 本次实际转移 quota（正 = 划出，负 = 回收，0 = 幂等 no-op）。 */
       transferred: number;
       transferredCoins: number;
       unchanged: boolean;
@@ -91,13 +91,13 @@ function fail(
 }
 
 /**
- * 按席位把額度分配給成員（目標絕對值 ⇒ 冪等）。全部校驗先於任何上游寫入。
+ * 按席位把额度分配给成员（目标绝对值 ⇒ 幂等）。全部校验先于任何上游写入。
  */
 export async function applySeatAllocation(
   input: ApplySeatAllocationInput,
   deps: ApplySeatAllocationDeps = {},
 ): Promise<SeatAllocationResult> {
-  // 嚴格判型（錢路不做隱式轉換）。
+  // 严格判型（钱路不做隐式转换）。
   if (typeof input.seats !== "number" || !Number.isInteger(input.seats) || input.seats <= 0) {
     return fail(400, "invalid_seats", "席位数必须是不小于 1 的整数。");
   }
@@ -114,7 +114,7 @@ export async function applySeatAllocation(
   if (!Number.isInteger(input.memberUserId) || input.memberUserId <= 0) {
     return fail(400, "member_not_registered", "member_user_id 必须是有效的成员账号 id。");
   }
-  // 成員是另一個 user（019 的 CHECK 同一語義）：主帳不能給自己劃席位額度。
+  // 成员是另一个 user（019 的 CHECK 同一语义）：主帐不能给自己划席位额度。
   if (input.memberUserId === input.teamUserId) {
     return fail(403, "team_mismatch", "团队主账号本身不是成员席位，不能给自己分配席位额度。");
   }
@@ -136,7 +136,7 @@ export async function applySeatAllocation(
       `成员账号 ${input.memberUserId} 不在团队名册中（请先让该成员用其密钥加入团队）。`,
     );
   }
-  // 一個成員 user 只屬一個團隊：歸屬不符即拒（與 allocateMemberQuota 的跨團隊 403 同語義）。
+  // 一个成员 user 只属一个团队：归属不符即拒（与 allocateMemberQuota 的跨团队 403 同语义）。
   if (member.teamUserId !== input.teamUserId) {
     return fail(
       403,

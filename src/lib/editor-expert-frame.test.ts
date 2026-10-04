@@ -9,8 +9,8 @@
  *      L91/timeline_mix L92/timeline_ops L93/timeline_query L94/timeline_restore
  *      L95/timeline_rhythm L96/timeline_style L97/editing_manifest L70/
  *      audio_first_timeline L150/video_upload L100）+ 回复 token 帽
- *      ※ 2026-09-28：本组行号只为考古记录（本檔只做 id 白名单断言，不断言行号）；
- *        当天 registry 档头註記 +10 行、新增 4 支影片工具，现场行号以
+ *      ※ 2026-09-28：本组行号只为考古记录（本档只做 id 白名单断言，不断言行号）；
+ *        当天 registry 档头注记 +10 行、新增 4 支影片工具，现场行号以
  *        harness-tool-registry.ts 为准（timeline_* →100~107 / editing_manifest 80 /
  *        video_upload 117 / audio_first_timeline 167）。
  *   2. composeEditorDelegation：白名单收敛/未知键丢弃/时长秒取整/边界结构化报错
@@ -216,9 +216,9 @@ test("OFF：readBeastMode({})=false，委派 prompt 不含宪法文本", () => {
   assert.ok(r.prompt.includes("交付规格：1080p H.264 + AAC"));
   // 宪法特征句一个字不多（繁体宪法原文不出现在 OFF 输出）
   assert.equal(r.prompt.includes("诚实铁律"), false);
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("ON：readBeastMode({beast_mode:true})=true，宪法经 loadConstitution DI 注入头部（样本串，不读真档）", () => {

@@ -10,7 +10,7 @@ import {
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(status: number, message: string, code: string, traceId: string, key?: BizApiKey) {
   let response: Response = NextResponse.json(
@@ -22,12 +22,12 @@ function errorResponse(status: number, message: string, code: string, traceId: s
 }
 
 /**
- * GET /v1/system_stats — 平台層聚合統計，給 API 聚合平台在轉售時診斷供應鏈健康。
+ * GET /v1/system_stats — 平台层聚合统计，给 API 聚合平台在转售时诊断供应链健康。
  *
- * 回傳面**只有聚合數字**：SQL 層只做 GROUP BY model 的計數，
- * 不帶任何 tenant/apiKey 欄位，任何一個 cell 都無法反推出單一客戶的行為。
- * 統計範圍限定 `source = 'biz'`——這是對外轉售軌道的視角，C 端用量不算進來。
- * 成功率語義與 SLO 一致：只算成功/失敗，**不含排隊中的**，不灌水。
+ * 回传面**只有聚合数字**：SQL 层只做 GROUP BY model 的计数，
+ * 不带任何 tenant/apiKey 栏位，任何一个 cell 都无法反推出单一客户的行为。
+ * 统计范围限定 `source = 'biz'`——这是对外转售轨道的视角，C 端用量不算进来。
+ * 成功率语义与 SLO 一致：只算成功/失败，**不含排队中的**，不灌水。
  */
 export async function GET(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);

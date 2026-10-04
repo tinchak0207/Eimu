@@ -1,7 +1,7 @@
-// 逐鏡配音服務層行為測試。
+// 逐镜配音服务层行为测试。
 //
-// 全部是**真函式行為斷言**：真投影、真組行、真分批、真逐行序列、真停手、真回寫、真漂移。
-// **零上游**：TTS 由注入的假 client 提供，測試裡沒有任何網路/DB 呼叫。
+// 全部是**真函式行为断言**：真投影、真组行、真分批、真逐行序列、真停手、真回写、真漂移。
+// **零上游**：TTS 由注入的假 client 提供，测试里没有任何网路/DB 呼叫。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeStoryboardShot } from "@/lib/storyboard-contract";
@@ -50,7 +50,7 @@ function shotNode(
   };
 }
 
-/** 六鏡各有一段旁白（P2 病灶的長相：旁白貫穿鏡 1-6，必須得到 6 行而非 1 行）。 */
+/** 六镜各有一段旁白（P2 病灶的长相：旁白贯穿镜 1-6，必须得到 6 行而非 1 行）。 */
 function sixNarrationNodes(): CanvasNode[] {
   return [1, 2, 3, 4, 5, 6].map((n) => shotNode(`00${n}`, { narration: `第 ${n} 镜的旁白台词` }));
 }
@@ -71,9 +71,9 @@ function fakeClient(
   return client;
 }
 
-// ─────────────────────────────────────────── dryRun（付費前報備）
+// ─────────────────────────────────────────── dryRun（付费前报备）
 
-test("dryRun：6 镜旁白 → 6 行（不摺成 1 行），estimatedCoins = totalChars × 0.001", async () => {
+test("dryRun：6 镜旁白 → 6 行（不折成 1 行），estimatedCoins = totalChars × 0.001", async () => {
   const outcome = await storyboardVoiceover(project(sixNarrationNodes()), { dryRun: true, client: fakeClient() });
   assert.equal(outcome.kind, "dryRun");
   if (outcome.kind !== "dryRun") return;
@@ -88,11 +88,11 @@ test("dryRun：6 镜旁白 → 6 行（不摺成 1 行），estimatedCoins = tot
   assert.ok(plan.totalChars > 0);
   assert.equal(plan.estimatedCoins, plan.totalChars * 0.001);
   assert.equal(plan.estimatedCoins, estimateVoiceoverCoins(plan.totalChars));
-  // 字數＝逐行字數和（不重複計、不漏行）。
+  // 字数＝逐行字数和（不重复计、不漏行）。
   assert.equal(plan.totalChars, plan.lines.reduce((sum, line) => sum + line.chars, 0));
 });
 
-test("dryRun 零呼叫：tripwire client 一次都不被呼叫（真跑前不花錢）", async () => {
+test("dryRun 零呼叫：tripwire client 一次都不被呼叫（真跑前不花钱）", async () => {
   let calls = 0;
   const tripwire: StoryboardVoiceoverTtsClient = async () => {
     calls += 1;
@@ -118,19 +118,19 @@ test("dryRun：51 行 → 具名拒 too_many_lines（不截断、不静默少做
   assert.equal(calls, 0);
 });
 
-test("max_lines 陷阱：25 行不被默認值 20 靜默截斷，逐行顯式帶 maxLines ≥ 21", async () => {
+test("max_lines 陷阱：25 行不被默认值 20 静默截断，逐行显式带 maxLines ≥ 21", async () => {
   const nodes = Array.from({ length: 25 }, (_, i) => shotNode(String(i + 1).padStart(3, "0"), { narration: `第 ${i + 1} 句` }));
   const client = fakeClient();
   const execution = await runStoryboardVoiceover(project(nodes), { client });
   assert.equal(execution.result.applied, true);
   assert.equal(execution.result.lines.length, 25);
   assert.equal(client.calls.length, 25);
-  // 每一行請求都顯式覆蓋了上游默認值 20（≥21），且 ≥ 本批行數。
+  // 每一行请求都显式覆盖了上游默认值 20（≥21），且 ≥ 本批行数。
   assert.ok(client.calls.every((call) => call.maxLines >= 21 && call.maxLines >= execution.result.lines.length));
   assert.ok(client.calls.every((call) => call.batchCount >= 1));
 });
 
-test("分批計畫具名：maxLinesPerBatch 超硬上限 50 → 具名拒；指定 10 → 25 行切 3 批", () => {
+test("分批计画具名：maxLinesPerBatch 超硬上限 50 → 具名拒；指定 10 → 25 行切 3 批", () => {
   const overLimit = planVoiceoverBatches(25, 51);
   assert.ok("refused" in overLimit);
   if ("refused" in overLimit) assert.equal(overLimit.refused.code, "batch_size_over_tool_max_lines");
@@ -159,7 +159,7 @@ test("真跑：6 行全成 → 每镜 narrationAudioId／audioAnchorId 生效，
   assert.equal(execution.result.applied, true);
   assert.equal(execution.result.refused, undefined);
   assert.equal(client.calls.length, 6);
-  // 序列呼叫（禁並發）：每次呼叫 index 依序 0..5。
+  // 序列呼叫（禁并发）：每次呼叫 index 依序 0..5。
   assert.deepEqual(client.calls.map((call) => call.index), [0, 1, 2, 3, 4, 5]);
 
   const merged = applyVoiceoverShotsToNodes(nodes, execution.entries, execution.shots);
@@ -167,15 +167,15 @@ test("真跑：6 行全成 → 每镜 narrationAudioId／audioAnchorId 生效，
   for (let i = 0; i < 6; i++) {
     const node = merged.nodes[i];
     assert.equal(node.metadata?.narrationAudioId, MP3(i + 1));
-    // 無对白轨 ⇒ 锚 = narrationAudioId。
+    // 无对白轨 ⇒ 锚 = narrationAudioId。
     assert.equal(node.metadata?.audioAnchorId, MP3(i + 1));
-    // 旁白文本不被覆蓋。
+    // 旁白文本不被覆盖。
     assert.equal(node.metadata?.narration, `第 ${i + 1} 镜的旁白台词`);
   }
   // 输入不被就地改写。
   assert.equal(nodes[0].metadata?.narrationAudioId, undefined);
 
-  // 時長漂移逐鏡可查（站點無計畫秒數 ⇒ plannedSec null，仍逐鏡回報實測值）。
+  // 时长漂移逐镜可查（站点无计画秒数 ⇒ plannedSec null，仍逐镜回报实测值）。
   assert.equal(execution.result.drift.length, 6);
   assert.deepEqual(
     execution.result.drift.map((entry) => entry.shotNumber),
@@ -219,7 +219,7 @@ test("真跑：任务成功但回不可用音频 URL（图 URL）→ 整批拒�
   assert.equal(execution.result.refused?.code, "tts_line_failed");
 });
 
-test("真跑：duration_ms 站點無真源（null）→ 不阻擋寫入，但逐鏡進 unmeasuredDurations", async () => {
+test("真跑：duration_ms 站点无真源（null）→ 不阻挡写入，但逐镜进 unmeasuredDurations", async () => {
   const nodes = sixNarrationNodes();
   const client = fakeClient((request) => ({ audioUrl: MP3(request.index + 1), durationMs: null, costCoins: null }));
   const execution = await runStoryboardVoiceover(project(nodes), { client });
@@ -240,7 +240,7 @@ test("真跑：专案无任何台词 → 具名拒 no_lines（不假装写入空
   assert.equal(client.calls.length, 0);
 });
 
-// ─────────────────────────────────────────── 投影與回寫細節
+// ─────────────────────────────────────────── 投影与回写细节
 
 test("投影：对白＋旁白各一行；既有对白轨一起投影，缺对白文本时锚仍对白优先", async () => {
   const nodes = [

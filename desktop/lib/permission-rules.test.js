@@ -1,10 +1,10 @@
 // desktop/lib/permission-rules.test.js
 //
-// 第二道防線純函式測試。跑法：
+// 第二道防线纯函式测试。跑法：
 //   node --test desktop/lib/*.test.js
 //
-// 全部用 node:test + node:assert，無外部依賴。
-// 每條斷言都描述「正確語義」，不得把任何繞過/弱點寫成預期行為。
+// 全部用 node:test + node:assert，无外部依赖。
+// 每条断言都描述「正确语义」，不得把任何绕过/弱点写成预期行为。
 
 "use strict";
 
@@ -29,7 +29,7 @@ const {
 const HOME = "/home/u";
 const SETTINGS_ROOT = "/home/u/work";
 
-/** 補預設值的 evaluatePermission 呼叫。 */
+/** 补预设值的 evaluatePermission 呼叫。 */
 function evalP(o = {}) {
   return evaluatePermission({
     tool: "Read",
@@ -44,14 +44,14 @@ function evalP(o = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 常數（單一真源）
+// 常数（单一真源）
 // ---------------------------------------------------------------------------
-test("常數：RULE_EFFECTS 順序即優先序 deny→ask→allow；PERMISSION_MODES 為四模式", () => {
+test("常数：RULE_EFFECTS 顺序即优先序 deny→ask→allow；PERMISSION_MODES 为四模式", () => {
   assert.deepEqual(RULE_EFFECTS, ["deny", "ask", "allow"]);
   assert.deepEqual(PERMISSION_MODES, ["off", "ask", "auto", "full"]);
 });
 
-test("safety-check 清單逐條照 Claude Code（檔案 10、目錄 4）", () => {
+test("safety-check 清单逐条照 Claude Code（档案 10、目录 4）", () => {
   assert.deepEqual(SAFETY_CHECK_FILES, [
     ".gitconfig",
     ".gitmodules",
@@ -70,12 +70,12 @@ test("safety-check 清單逐條照 Claude Code（檔案 10、目錄 4）", () =>
 // ---------------------------------------------------------------------------
 // parseRule
 // ---------------------------------------------------------------------------
-test("parseRule：無 effect 的工具級規則 effect=null，由呼叫端依桶指派", () => {
+test("parseRule：无 effect 的工具级规则 effect=null，由呼叫端依桶指派", () => {
   assert.deepEqual(parseRule("Read"), { effect: null, tool: "Read", specifier: null });
   assert.deepEqual(parseRule("  Read  "), { effect: null, tool: "Read", specifier: null });
 });
 
-test("parseRule：Tool(specifier) 帶出 specifier", () => {
+test("parseRule：Tool(specifier) 带出 specifier", () => {
   assert.deepEqual(parseRule("Read(//etc/**)"), {
     effect: null,
     tool: "Read",
@@ -88,7 +88,7 @@ test("parseRule：Tool(specifier) 帶出 specifier", () => {
   });
 });
 
-test("parseRule：effect 前綴（大小寫不敏感）", () => {
+test("parseRule：effect 前缀（大小写不敏感）", () => {
   assert.deepEqual(parseRule("deny:Read(~/x)"), {
     effect: "deny",
     tool: "Read",
@@ -102,7 +102,7 @@ test("parseRule：effect 前綴（大小寫不敏感）", () => {
   });
 });
 
-test("parseRule：Tool()/Tool(*) 等價工具級（照 Claude）；轉義括號還原", () => {
+test("parseRule：Tool()/Tool(*) 等价工具级（照 Claude）；转义括号还原", () => {
   assert.deepEqual(parseRule("Bash()"), { effect: null, tool: "Bash", specifier: null });
   assert.deepEqual(parseRule("Bash(*)"), { effect: null, tool: "Bash", specifier: null });
   assert.deepEqual(parseRule("Bash(foo\\(bar\\))"), {
@@ -112,33 +112,33 @@ test("parseRule：Tool()/Tool(*) 等價工具級（照 Claude）；轉義括號�
   });
 });
 
-test("parseRule：壞形式一律回 null（不得猜測）", () => {
+test("parseRule：坏形式一律回 null（不得猜测）", () => {
   assert.equal(parseRule(""), null);
   assert.equal(parseRule("   "), null);
-  assert.equal(parseRule("()"), null); // 只有括號、無 tool
-  assert.equal(parseRule("(foo)"), null); // 無 tool
-  assert.equal(parseRule("bogus:Read"), null); // 非白名單 effect
+  assert.equal(parseRule("()"), null); // 只有括号、无 tool
+  assert.equal(parseRule("(foo)"), null); // 无 tool
+  assert.equal(parseRule("bogus:Read"), null); // 非白名单 effect
   assert.equal(parseRule("delete:Read"), null);
-  assert.equal(parseRule("Read("), null); // 無收尾括號
-  assert.equal(parseRule("Read(a)b"), null); // 收尾後有殘字
-  assert.equal(parseRule("Read)"), null); // 孤立右括號
-  assert.equal(parseRule("deny:"), null); // effect 後無規則
+  assert.equal(parseRule("Read("), null); // 无收尾括号
+  assert.equal(parseRule("Read(a)b"), null); // 收尾后有残字
+  assert.equal(parseRule("Read)"), null); // 孤立右括号
+  assert.equal(parseRule("deny:"), null); // effect 后无规则
   assert.equal(parseRule(null), null);
   assert.equal(parseRule(123), null);
 });
 
 // ---------------------------------------------------------------------------
-// 硬 denylist：逐條樣式斷言
+// 硬 denylist：逐条样式断言
 // ---------------------------------------------------------------------------
-test("isHardDenied：每個硬 denylist 樣式都拒（含大小寫折疊）", () => {
+test("isHardDenied：每个硬 denylist 样式都拒（含大小写折叠）", () => {
   const cases = [
-    [`${HOME}/.ssh/id_rsa`, "~/.ssh 目錄"],
-    [`${HOME}/.aws/credentials`, "~/.aws 目錄"],
-    [`${HOME}/.gnupg/secring.gpg`, "~/.gnupg 目錄"],
-    [`${HOME}/.kube/config`, "~/.kube 目錄"],
-    [`${HOME}/.docker/config.json`, "~/.docker 目錄"],
-    [`${HOME}/.config/gh/hosts.yml`, "~/.config 目錄"],
-    [`${HOME}/.local/share/keyrings/login.keyring`, "~/.local/share/keyrings 目錄"],
+    [`${HOME}/.ssh/id_rsa`, "~/.ssh 目录"],
+    [`${HOME}/.aws/credentials`, "~/.aws 目录"],
+    [`${HOME}/.gnupg/secring.gpg`, "~/.gnupg 目录"],
+    [`${HOME}/.kube/config`, "~/.kube 目录"],
+    [`${HOME}/.docker/config.json`, "~/.docker 目录"],
+    [`${HOME}/.config/gh/hosts.yml`, "~/.config 目录"],
+    [`${HOME}/.local/share/keyrings/login.keyring`, "~/.local/share/keyrings 目录"],
     [`${HOME}/.git-credentials`, "~/.git-credentials"],
     [`${HOME}/.netrc`, "~/.netrc"],
     [`${HOME}/.pgpass`, "~/.pgpass"],
@@ -157,8 +157,8 @@ test("isHardDenied：每個硬 denylist 樣式都拒（含大小寫折疊）", (
     ["/data/gcp-service-account-prod.json", "*service-account*.json"],
     ["/data/.env", ".env"],
     ["/data/.env.local", ".env.*"],
-    [`${HOME}/.SSH/id_rsa`, "大小寫折疊：.SSH"],
-    ["/data/CERT.PEM", "大小寫折疊：.PEM"],
+    [`${HOME}/.SSH/id_rsa`, "大小写折叠：.SSH"],
+    ["/data/CERT.PEM", "大小写折叠：.PEM"],
   ];
   for (const [p, why] of cases) {
     assert.equal(isHardDenied({ raw: p, home: HOME }), true, `${p} — ${why}`);
@@ -168,12 +168,12 @@ test("isHardDenied：每個硬 denylist 樣式都拒（含大小寫折疊）", (
   assert.equal(isHardDenied({ raw: "~/.config/x/y", home: HOME }), true);
 });
 
-test("isHardDenied：一般檔案不誤殺；每個 pattern 皆有人斷言", () => {
+test("isHardDenied：一般档案不误杀；每个 pattern 皆有人断言", () => {
   for (const p of ["/tmp/a.txt", `${HOME}/Movies/clip.mp4`, "/data/project/main.ts", "/proc/self/cmdline", "/data/app.env", "/data/notes.txt"]) {
     assert.equal(isHardDenied({ raw: p, home: HOME }), false, p);
   }
-  // 每個 pattern 都能被至少一條斷言覆蓋（防止清單縮水而測試仍綠）
-  assert.ok(HARD_DENY_PATTERNS.length >= 24, "硬 denylist 樣式數不得少於 spec 條數");
+  // 每个 pattern 都能被至少一条断言覆盖（防止清单缩水而测试仍绿）
+  assert.ok(HARD_DENY_PATTERNS.length >= 24, "硬 denylist 样式数不得少于 spec 条数");
   const patterns = HARD_DENY_PATTERNS.map((p) => p.pattern);
   for (const must of [
     "~/.ssh", "~/.aws", "~/.gnupg", "~/.kube", "~/.docker", "~/.config",
@@ -182,46 +182,46 @@ test("isHardDenied：一般檔案不誤殺；每個 pattern 皆有人斷言", ()
     "*.pem", "*.key", "*.p12", "id_rsa*", "id_ed25519*", "*credential*",
     "*secret*", "*service-account*.json", ".env", ".env.*",
   ]) {
-    assert.ok(patterns.includes(must), `硬 denylist 缺少樣式 ${must}`);
+    assert.ok(patterns.includes(must), `硬 denylist 缺少样式 ${must}`);
   }
 });
 
-test("isHardDenied：家目錄外的敏感檔名仍拒（H3 語義，不把繞過當正確）", () => {
+test("isHardDenied：家目录外的敏感档名仍拒（H3 语义，不把绕过当正确）", () => {
   assert.equal(isHardDenied({ raw: "/tmp/x/.ssh/id_rsa", home: HOME }), true);
   assert.equal(isHardDenied({ raw: "/mnt/data/.aws/credentials", home: HOME }), true);
   assert.equal(isHardDenied({ raw: "/var/data/service-account-x.json", home: HOME }), true);
 });
 
-test("isHardDenied：同時比對原始與 symlink 解析後路徑（任一命中即拒）", () => {
-  // raw 乾淨、resolved 是敏感檔 → 拒（純字串判定跟不了 symlink 的補位）
+test("isHardDenied：同时比对原始与 symlink 解析后路径（任一命中即拒）", () => {
+  // raw 干净、resolved 是敏感档 → 拒（纯字串判定跟不了 symlink 的补位）
   assert.equal(
     isHardDenied({ raw: `${HOME}/Movies/link.txt`, resolved: `${HOME}/.ssh/id_rsa`, home: HOME }),
     true,
   );
-  // raw 敏感、resolved 乾淨 → 仍拒（不得因解析後乾淨就放行）
+  // raw 敏感、resolved 干净 → 仍拒（不得因解析后干净就放行）
   assert.equal(
     isHardDenied({ raw: `${HOME}/.ssh/id_rsa`, resolved: `${HOME}/Movies/link.txt`, home: HOME }),
     true,
   );
 });
 
-test("isHardDenied：fail-closed（非字串/空/~無法展開）", () => {
+test("isHardDenied：fail-closed（非字串/空/~无法展开）", () => {
   assert.equal(isHardDenied({ raw: "", home: HOME }), true);
   assert.equal(isHardDenied({ raw: "   ", home: HOME }), true);
   assert.equal(isHardDenied({ raw: null, home: HOME }), true);
   assert.equal(isHardDenied({ raw: 123, home: HOME }), true);
   assert.equal(isHardDenied(null, HOME), true);
-  assert.equal(isHardDenied({ raw: "~/x", home: null }, null), true); // ~ 無 home → fail-closed
-  assert.equal(isHardDenied({ raw: "/tmp/ok.txt", resolved: "", home: HOME }), true); // resolved 有給但不合法
+  assert.equal(isHardDenied({ raw: "~/x", home: null }, null), true); // ~ 无 home → fail-closed
+  assert.equal(isHardDenied({ raw: "/tmp/ok.txt", resolved: "", home: HOME }), true); // resolved 有给但不合法
 });
 
 // ---------------------------------------------------------------------------
 // safety-check
 // ---------------------------------------------------------------------------
-test("isSafetyCheckPath：危險檔名/目錄逐條命中、一般路徑不命中", () => {
+test("isSafetyCheckPath：危险档名/目录逐条命中、一般路径不命中", () => {
   assert.equal(isSafetyCheckPath(`${HOME}/.bashrc`), true);
   assert.equal(isSafetyCheckPath(`${HOME}/.gitconfig`), true);
-  assert.equal(isSafetyCheckPath("/etc/.Profile"), true); // 大小寫折疊（.profile）
+  assert.equal(isSafetyCheckPath("/etc/.Profile"), true); // 大小写折叠（.profile）
   assert.equal(isSafetyCheckPath(`${HOME}/.ripgreprc`), true);
   assert.equal(isSafetyCheckPath(`${HOME}/proj/.git/config`), true);
   assert.equal(isSafetyCheckPath(`${HOME}/proj/.vscode/settings.json`), true);
@@ -231,17 +231,17 @@ test("isSafetyCheckPath：危險檔名/目錄逐條命中、一般路徑不命�
   assert.equal(isSafetyCheckPath("/tmp/a.txt"), false);
   // 物件形式：任一命中即命中
   assert.equal(isSafetyCheckPath({ raw: `/tmp/a.txt`, resolved: `${HOME}/.bashrc` }), true);
-  // fail-closed（非法輸入 → ask）
+  // fail-closed（非法输入 → ask）
   assert.equal(isSafetyCheckPath(""), true);
   assert.equal(isSafetyCheckPath(null), true);
 });
 
 // ---------------------------------------------------------------------------
-// 判定序：逐序各一條
+// 判定序：逐序各一条
 // ---------------------------------------------------------------------------
-test("判定序 1：硬 denylist 壓過 safety-check 與 allow 規則與 full 模式 → deny/hard_deny", () => {
+test("判定序 1：硬 denylist 压过 safety-check 与 allow 规则与 full 模式 → deny/hard_deny", () => {
   const r = evalP({
-    rawPath: `${HOME}/.config/.bashrc`, // 同時命中 ~/.config（硬）與 .bashrc（safety）
+    rawPath: `${HOME}/.config/.bashrc`, // 同时命中 ~/.config（硬）与 .bashrc（safety）
     mode: "full",
     rules: { allow: ["Read"] },
   });
@@ -249,18 +249,18 @@ test("判定序 1：硬 denylist 壓過 safety-check 與 allow 規則與 full �
   assert.equal(r.reason, REASONS.HARD_DENY);
 });
 
-test("判定序 2：safety-check 壓過規則 deny → ask/safety_check", () => {
+test("判定序 2：safety-check 压过规则 deny → ask/safety_check", () => {
   const r = evalP({
     rawPath: `${HOME}/proj/.git/config`,
     mode: "auto",
-    rules: { deny: ["Read"] }, // 工具級 deny
+    rules: { deny: ["Read"] }, // 工具级 deny
     authorizedRoots: [`${HOME}/proj`],
   });
   assert.equal(r.decision, "ask");
   assert.equal(r.reason, REASONS.SAFETY_CHECK);
 });
 
-test("判定序 3：規則 deny 壓過 ask 與 allow → deny/rule_deny", () => {
+test("判定序 3：规则 deny 压过 ask 与 allow → deny/rule_deny", () => {
   const r = evalP({
     rawPath: "/tmp/pic.png",
     mode: "auto",
@@ -271,7 +271,7 @@ test("判定序 3：規則 deny 壓過 ask 與 allow → deny/rule_deny", () => 
   assert.equal(r.rule.specifier, "//tmp/**");
 });
 
-test("判定序 4：規則 ask 壓過 allow → ask/rule_ask", () => {
+test("判定序 4：规则 ask 压过 allow → ask/rule_ask", () => {
   const r = evalP({
     rawPath: "/tmp/pic.png",
     mode: "auto",
@@ -281,17 +281,17 @@ test("判定序 4：規則 ask 壓過 allow → ask/rule_ask", () => {
   assert.equal(r.reason, REASONS.RULE_ASK);
 });
 
-test("判定序 5：規則 allow 壓過模式 → allow/rule_allow", () => {
+test("判定序 5：规则 allow 压过模式 → allow/rule_allow", () => {
   const r = evalP({
     rawPath: "/data/pic.png",
-    mode: "off", // 模式一律拒，但 allow 規則先命中
+    mode: "off", // 模式一律拒，但 allow 规则先命中
     rules: { allow: ["Read(//data/**)"] },
   });
   assert.equal(r.decision, "allow");
   assert.equal(r.reason, REASONS.RULE_ALLOW);
 });
 
-test("判定序 6：模式語義放行（auto 根內）→ allow/mode_auto", () => {
+test("判定序 6：模式语义放行（auto 根内）→ allow/mode_auto", () => {
   const r = evalP({
     rawPath: `${HOME}/proj/a.txt`,
     mode: "auto",
@@ -302,7 +302,7 @@ test("判定序 6：模式語義放行（auto 根內）→ allow/mode_auto", () 
   assert.equal(r.reason, REASONS.MODE_AUTO);
 });
 
-test("判定序 7：模式不涵蓋 → 預設 ask/default_ask", () => {
+test("判定序 7：模式不涵盖 → 预设 ask/default_ask", () => {
   const r = evalP({
     rawPath: "/data/b.txt",
     mode: "auto",
@@ -314,9 +314,9 @@ test("判定序 7：模式不涵蓋 → 預設 ask/default_ask", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 三桶：deny 壓 allow、ask 壓 allow
+// 三桶：deny 压 allow、ask 压 allow
 // ---------------------------------------------------------------------------
-test("三桶：deny 壓過 allow（物件桶）", () => {
+test("三桶：deny 压过 allow（物件桶）", () => {
   const r = evalP({
     rawPath: "/data/x.txt",
     rules: { deny: ["Read(//data/**)"], allow: ["Read(//data/**)"] },
@@ -325,7 +325,7 @@ test("三桶：deny 壓過 allow（物件桶）", () => {
   assert.equal(r.reason, REASONS.RULE_DENY);
 });
 
-test("三桶：ask 壓過 allow（物件桶）", () => {
+test("三桶：ask 压过 allow（物件桶）", () => {
   const r = evalP({
     rawPath: "/data/x.txt",
     rules: { ask: ["Read(//data/**)"], allow: ["Read(//data/**)"] },
@@ -334,7 +334,7 @@ test("三桶：ask 壓過 allow（物件桶）", () => {
   assert.equal(r.reason, REASONS.RULE_ASK);
 });
 
-test("三桶：扁平陣列以自帶 effect 分桶；無 effect 者不套用（不意外放行）", () => {
+test("三桶：扁平阵列以自带 effect 分桶；无 effect 者不套用（不意外放行）", () => {
   const deny = evalP({
     rawPath: "/data/x.txt",
     rules: ["deny:Read(//data/**)", "allow:Read(//data/**)"],
@@ -346,21 +346,21 @@ test("三桶：扁平陣列以自帶 effect 分桶；無 effect 者不套用（�
 });
 
 // ---------------------------------------------------------------------------
-// 路徑前綴四語義 + /** + symlink 兩態
+// 路径前缀四语义 + /** + symlink 两态
 // ---------------------------------------------------------------------------
-test("前綴：//path 為檔案系統根絕對", () => {
+test("前缀：//path 为档案系统根绝对", () => {
   assert.equal(
     evalP({ rawPath: "/etc/passwd", mode: "ask", rules: { deny: ["Read(//etc/**)"] } }).decision,
     "deny",
   );
-  // 不得命中家目錄下的同名相對結構
+  // 不得命中家目录下的同名相对结构
   assert.equal(
     evalP({ rawPath: `${HOME}/etc/passwd`, mode: "ask", rules: { deny: ["Read(//etc/**)"] } }).decision,
     "ask",
   );
 });
 
-test("前綴：~/path 為家目錄", () => {
+test("前缀：~/path 为家目录", () => {
   assert.equal(
     evalP({ rawPath: `${HOME}/secret/a`, mode: "ask", rules: { deny: ["Read(~/secret/**)"] } }).decision,
     "deny",
@@ -371,7 +371,7 @@ test("前綴：~/path 為家目錄", () => {
   );
 });
 
-test("前綴：/path 相對設定來源（settingsRoot）", () => {
+test("前缀：/path 相对设定来源（settingsRoot）", () => {
   assert.equal(
     evalP({ rawPath: `${SETTINGS_ROOT}/proj/a`, mode: "ask", rules: { deny: ["Read(/proj/**)"] } }).decision,
     "deny",
@@ -382,7 +382,7 @@ test("前綴：/path 相對設定來源（settingsRoot）", () => {
   );
 });
 
-test("前綴：無前綴 / ./x 為任意位置", () => {
+test("前缀：无前缀 / ./x 为任意位置", () => {
   assert.equal(
     evalP({ rawPath: "/var/log/a.log", mode: "ask", rules: { deny: ["Read(*.log)"] } }).decision,
     "deny",
@@ -397,7 +397,7 @@ test("前綴：無前綴 / ./x 為任意位置", () => {
   );
 });
 
-test("/**：目錄本身與其下皆命中；裸目錄樣式亦然", () => {
+test("/**：目录本身与其下皆命中；裸目录样式亦然", () => {
   assert.equal(
     evalP({ rawPath: `${HOME}/Movies`, mode: "ask", rules: { deny: ["Read(~/Movies/**)"] } }).decision,
     "deny",
@@ -412,8 +412,8 @@ test("/**：目錄本身與其下皆命中；裸目錄樣式亦然", () => {
   );
 });
 
-test("symlink 兩態：deny 規則對 raw/resolved 任一命中即拒", () => {
-  // raw 命中、resolved 乾淨
+test("symlink 两态：deny 规则对 raw/resolved 任一命中即拒", () => {
+  // raw 命中、resolved 干净
   assert.equal(
     evalP({
       rawPath: `${HOME}/sshTarget/x`,
@@ -423,7 +423,7 @@ test("symlink 兩態：deny 規則對 raw/resolved 任一命中即拒", () => {
     }).decision,
     "deny",
   );
-  // raw 乾淨、resolved 命中
+  // raw 干净、resolved 命中
   assert.equal(
     evalP({
       rawPath: `${HOME}/Movies/link`,
@@ -435,10 +435,10 @@ test("symlink 兩態：deny 規則對 raw/resolved 任一命中即拒", () => {
   );
 });
 
-test("symlink 兩態：allow 規則要求所有路徑皆命中，防走私出根", () => {
+test("symlink 两态：allow 规则要求所有路径皆命中，防走私出根", () => {
   const r = evalP({
     rawPath: `${HOME}/Movies/link`,
-    resolvedPath: "/etc/hosts", // 解析後落在授權根外
+    resolvedPath: "/etc/hosts", // 解析后落在授权根外
     mode: "auto",
     rules: { allow: ["Read(~/Movies/**)"] },
     authorizedRoots: [`${HOME}/Movies`],
@@ -449,13 +449,13 @@ test("symlink 兩態：allow 規則要求所有路徑皆命中，防走私出根
 });
 
 // ---------------------------------------------------------------------------
-// 四模式 ×（根內／根外／家目錄）矩陣
+// 四模式 ×（根内／根外／家目录）矩阵
 // ---------------------------------------------------------------------------
-test("四模式決策矩陣（無規則）：根內／根外／家目錄", () => {
+test("四模式决策矩阵（无规则）：根内／根外／家目录", () => {
   const roots = [`${HOME}/proj`];
-  const inside = `${HOME}/proj/a.txt`; // 授權根內（且在家目錄內）
+  const inside = `${HOME}/proj/a.txt`; // 授权根内（且在家目录内）
   const outside = "/data/b.txt"; // 根外且家外
-  const inHome = `${HOME}/notes.txt`; // 家目錄內、授權根外
+  const inHome = `${HOME}/notes.txt`; // 家目录内、授权根外
 
   const matrix = [
     // mode, path, expectedDecision, expectedReason
@@ -482,7 +482,7 @@ test("四模式決策矩陣（無規則）：根內／根外／家目錄", () =>
   }
 });
 
-test("模式：auto 空授權根＝不外放（fail-closed），full 家目錄外問", () => {
+test("模式：auto 空授权根＝不外放（fail-closed），full 家目录外问", () => {
   const r1 = evalP({ rawPath: `${HOME}/proj/a.txt`, mode: "auto", authorizedRoots: [] });
   assert.equal(r1.decision, "ask");
   assert.equal(r1.reason, REASONS.DEFAULT_ASK);
@@ -498,9 +498,9 @@ test("模式：非法 mode 一律拒（fail-closed）", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 硬 denylist 於 full 模式 + allow 規則下仍拒（每個樣式）
+// 硬 denylist 于 full 模式 + allow 规则下仍拒（每个样式）
 // ---------------------------------------------------------------------------
-test("硬 denylist 不可被 full 模式或 allow 規則繞過（逐樣式）", () => {
+test("硬 denylist 不可被 full 模式或 allow 规则绕过（逐样式）", () => {
   const samples = [
     `${HOME}/.ssh/id_rsa`,
     `${HOME}/.aws/credentials`,
@@ -534,7 +534,7 @@ test("硬 denylist 不可被 full 模式或 allow 規則繞過（逐樣式）", 
       rules: { allow: ["Read"] },
       authorizedRoots: [HOME],
     });
-    assert.equal(r.decision, "deny", `${p} 必須被硬 denylist 拒`);
+    assert.equal(r.decision, "deny", `${p} 必须被硬 denylist 拒`);
     assert.equal(r.reason, REASONS.HARD_DENY, `${p} reason`);
   }
 });
@@ -542,26 +542,26 @@ test("硬 denylist 不可被 full 模式或 allow 規則繞過（逐樣式）", 
 // ---------------------------------------------------------------------------
 // suggestRoot
 // ---------------------------------------------------------------------------
-test("suggestRoot：回最接近目錄；過寬根回 null", () => {
+test("suggestRoot：回最接近目录；过宽根回 null", () => {
   assert.equal(suggestRoot(`${HOME}/Movies/a.mp4`, { home: HOME }), `${HOME}/Movies`);
   assert.equal(suggestRoot("/data/proj/x.txt", { home: HOME }), "/data/proj");
   assert.equal(suggestRoot(`${HOME}/Movies/Docs/x.mp4`, { home: HOME }), `${HOME}/Movies/Docs`);
 
-  // 過寬根：一律 null（由呼叫端改要求單檔授權）
+  // 过宽根：一律 null（由呼叫端改要求单档授权）
   assert.equal(suggestRoot("/", { home: HOME }), null);
-  assert.equal(suggestRoot(`${HOME}/x.mp4`, { home: HOME }), null); // 家目錄本身
-  assert.equal(suggestRoot("/home", { home: HOME }), null); // 家目錄祖先
-  assert.equal(suggestRoot("/tmp", { home: HOME }), null); // 單層目錄
-  assert.equal(suggestRoot("relative/x.txt", { home: HOME }), null); // 非絕對
-  // 敏感目錄不建議授權
+  assert.equal(suggestRoot(`${HOME}/x.mp4`, { home: HOME }), null); // 家目录本身
+  assert.equal(suggestRoot("/home", { home: HOME }), null); // 家目录祖先
+  assert.equal(suggestRoot("/tmp", { home: HOME }), null); // 单层目录
+  assert.equal(suggestRoot("relative/x.txt", { home: HOME }), null); // 非绝对
+  // 敏感目录不建议授权
   assert.equal(suggestRoot(`${HOME}/.config/x.txt`, { home: HOME }), null);
   assert.equal(suggestRoot(`${HOME}/proj/.git/x`, { home: HOME }), null);
 });
 
 // ---------------------------------------------------------------------------
-// 硬 denylist 與 safety-check 清單不可為空（防清單被砍而測試沉默通過）
+// 硬 denylist 与 safety-check 清单不可为空（防清单被砍而测试沉默通过）
 // ---------------------------------------------------------------------------
-test("sanity：清單非空且決策必為三值之一", () => {
+test("sanity：清单非空且决策必为三值之一", () => {
   assert.ok(HARD_DENY_PATTERNS.length > 0);
   assert.ok(SAFETY_CHECK_FILES.length > 0);
   assert.ok(SAFETY_CHECK_DIRS.length > 0);
@@ -569,9 +569,9 @@ test("sanity：清單非空且決策必為三值之一", () => {
   assert.ok(["allow", "deny", "ask"].includes(r.decision));
 });
 // ---------------------------------------------------------------------------
-// allowRuleForRoot（對話內就地授權）：產生與閘道 authorizationRuleSpecifier 同形的規則
+// allowRuleForRoot（对话内就地授权）：产生与闸道 authorizationRuleSpecifier 同形的规则
 // ---------------------------------------------------------------------------
-test("allowRuleForRoot：與閘道 authorizationRuleSpecifier 同形（//<root>/**）", () => {
+test("allowRuleForRoot：与闸道 authorizationRuleSpecifier 同形（//<root>/**）", () => {
   assert.deepEqual(pr.allowRuleForRoot("/home/u/Downloads/"), {
     effect: "allow",
     tool: "*",
@@ -584,7 +584,7 @@ test("allowRuleForRoot：與閘道 authorizationRuleSpecifier 同形（//<root>/
   });
 });
 
-test("allowRuleForRoot：規則以既有 matchSpecifier 語義命中該根及其下（不及其外）", () => {
+test("allowRuleForRoot：规则以既有 matchSpecifier 语义命中该根及其下（不及其外）", () => {
   const rule = pr.allowRuleForRoot("/home/u/Downloads");
   const ctx = { home: HOME, settingsRoot: SETTINGS_ROOT };
   const hit = (p) => pr._internals.matchSpecifier(rule.specifier, pr._internals.toMatchPath(p, HOME), ctx);
@@ -594,7 +594,7 @@ test("allowRuleForRoot：規則以既有 matchSpecifier 語義命中該根及其
   assert.equal(hit("/home/u/Downloadsevil/a"), false);
 });
 
-test("allowRuleForRoot：fail-closed（非字串／相對／過寬根 → null，不得變 //** 全放行）", () => {
+test("allowRuleForRoot：fail-closed（非字串／相对／过宽根 → null，不得变 //** 全放行）", () => {
   assert.equal(pr.allowRuleForRoot(123), null);
   assert.equal(pr.allowRuleForRoot(""), null);
   assert.equal(pr.allowRuleForRoot("relative/path"), null);
@@ -602,7 +602,7 @@ test("allowRuleForRoot：fail-closed（非字串／相對／過寬根 → null�
   assert.equal(pr.allowRuleForRoot("//"), null);
 });
 
-test("規則 tool 為 * 時對所有工具生效（與閘道 toolMatches 同語義）", () => {
+test("规则 tool 为 * 时对所有工具生效（与闸道 toolMatches 同语义）", () => {
   const r = evalP({
     tool: "list_dir",
     rawPath: "/data/x",
@@ -611,7 +611,7 @@ test("規則 tool 為 * 時對所有工具生效（與閘道 toolMatches 同語�
   });
   assert.equal(r.decision, "allow");
   assert.equal(r.reason, REASONS.RULE_ALLOW);
-  // 非萬用工具名仍只對同名工具生效
+  // 非万用工具名仍只对同名工具生效
   const r2 = evalP({ tool: "list_dir", rawPath: "/data/x", rules: { allow: [{ effect: "allow", tool: "Read", specifier: "//data/**" }] } });
   assert.equal(r2.decision, "ask");
 });

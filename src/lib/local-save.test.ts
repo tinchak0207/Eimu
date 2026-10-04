@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { hasLocalFileSave, saveBlobLocally, saveManyLocally } from "./local-save.ts";
 
-// 假 picker / handle：不碰真瀏覽器，只在 globalThis 上注入結構型別物件。
-// 每個測試自己裝、finally 還原，避免互相污染。
+// 假 picker / handle：不碰真浏览器，只在 globalThis 上注入结构型别物件。
+// 每个测试自己装、finally 还原，避免互相污染。
 
 type AnyRecord = Record<string, unknown>;
 
@@ -23,7 +23,7 @@ function setGlobals(values: AnyRecord): () => void {
   };
 }
 
-/** 移除兩種端點，模擬 Firefox/Safari/手機等無 File System Access API 環境。 */
+/** 移除两种端点，模拟 Firefox/Safari/手机等无 File System Access API 环境。 */
 function withoutPickers(): () => void {
   return setGlobals({ showSaveFilePicker: undefined, showDirectoryPicker: undefined });
 }
@@ -34,7 +34,7 @@ function abortError(): Error {
   return error;
 }
 
-test("unsupported：端點不存在時 hasLocalFileSave 為 false，兩個存檔函式回 unsupported", async () => {
+test("unsupported：端点不存在时 hasLocalFileSave 为 false，两个存档函式回 unsupported", async () => {
   const restore = withoutPickers();
   try {
     assert.equal(hasLocalFileSave(), false);
@@ -50,7 +50,7 @@ test("unsupported：端點不存在時 hasLocalFileSave 為 false，兩個存檔
   }
 });
 
-test("saved：showSaveFilePicker 存在 → 走 picker 並把 blob 寫進 writable", async () => {
+test("saved：showSaveFilePicker 存在 → 走 picker 并把 blob 写进 writable", async () => {
   const written: { blob: Blob | null; closed: boolean } = { blob: null, closed: false };
   const handle = {
     async createWritable() {
@@ -106,7 +106,7 @@ test("cancelled：使用者取消（AbortError）→ 回 cancelled，不 throw",
   }
 });
 
-test("saveManyLocally：一次目錄授權後把多檔逐一寫入（含去重前的原始名稱）", async () => {
+test("saveManyLocally：一次目录授权后把多档逐一写入（含去重前的原始名称）", async () => {
   const created: string[] = [];
   const written = new Map<string, string>();
   const directory = {
@@ -151,7 +151,7 @@ test("saveManyLocally：一次目錄授權後把多檔逐一寫入（含去重�
   }
 });
 
-test("回落路徑：只有 showSaveFilePicker 時 saveManyLocally 回 unsupported（不 throw）", async () => {
+test("回落路径：只有 showSaveFilePicker 时 saveManyLocally 回 unsupported（不 throw）", async () => {
   const restore = setGlobals({
     showSaveFilePicker: async () => ({
       async createWritable() {
@@ -163,18 +163,18 @@ test("回落路徑：只有 showSaveFilePicker 時 saveManyLocally 回 unsupport
   try {
     const blob = new Blob(["x"]);
     assert.equal(await saveManyLocally([{ name: "a.png", blob }]), "unsupported");
-    // 單檔路徑仍可用（漸進增強逐端點判定）
+    // 单档路径仍可用（渐进增强逐端点判定）
     assert.equal(await saveBlobLocally(blob, "a.png"), "saved");
   } finally {
     restore();
   }
 });
 
-// 既有斷言原本是「非取消的寫入錯誤必須往外丟」；orchestrator 已拍板：漸進增強的
-// 增強路徑失敗不得弄壞基礎流程——非取消的失敗一律降級成 "unsupported"，讓呼叫端
-// 回落今天的 <a download>，不得把錯誤外拋給使用者。失敗原因仍以 console.warn 記錄
-// 供除錯。故本條測試改為新語義（同時覆蓋單檔與多檔兩條路徑）。
-test("非取消的寫入錯誤降級為 unsupported（可回落），不外拋且記 console.warn", async () => {
+// 既有断言原本是「非取消的写入错误必须往外丢」；orchestrator 已拍板：渐进增强的
+// 增强路径失败不得弄坏基础流程——非取消的失败一律降级成 "unsupported"，让呼叫端
+// 回落今天的 <a download>，不得把错误外抛给使用者。失败原因仍以 console.warn 记录
+// 供除错。故本条测试改为新语义（同时覆盖单档与多档两条路径）。
+test("非取消的写入错误降级为 unsupported（可回落），不外抛且记 console.warn", async () => {
   const boom = new Error("disk full");
   const restore = setGlobals({
     showSaveFilePicker: async () => ({
@@ -194,7 +194,7 @@ test("非取消的寫入錯誤降級為 unsupported（可回落），不外拋�
   try {
     assert.equal(await saveBlobLocally(new Blob(["x"]), "a.png"), "unsupported");
     assert.equal(await saveManyLocally([{ name: "a.png", blob: new Blob(["x"]) }]), "unsupported");
-    assert.equal(warned.length, 2, "兩條失敗路徑都必須留下除錯紀錄");
+    assert.equal(warned.length, 2, "两条失败路径都必须留下除错纪录");
   } finally {
     console.warn = originalWarn;
     restore();

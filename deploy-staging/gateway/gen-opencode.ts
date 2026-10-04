@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-// gen-opencode.ts — 從 agent model registry（單一真源）生成 opencode.json 的
-// provider/model/small_model 三個鍵，其餘鍵（permission/instructions 等）原樣保留。
+// gen-opencode.ts — 从 agent model registry（单一真源）生成 opencode.json 的
+// provider/model/small_model 三个键，其余键（permission/instructions 等）原样保留。
 // 用法：
-//   bun gen-opencode.ts            # 寫入（原子：tmp + rename）
-//   bun gen-opencode.ts --check    # 只比對不寫；有漂移印差異 exit 1，無漂移 "in sync" exit 0
-// 2026-09-18：加 fail-closed 閘——binding 的 providerID 必須在 registry.providers
-// 內聲明，否則拒寫（見下方 GUARD 段落）。
+//   bun gen-opencode.ts            # 写入（原子：tmp + rename）
+//   bun gen-opencode.ts --check    # 只比对不写；有漂移印差异 exit 1，无漂移 "in sync" exit 0
+// 2026-09-18：加 fail-closed 闸——binding 的 providerID 必须在 registry.providers
+// 内声明，否则拒写（见下方 GUARD 段落）。
 import { readFileSync, writeFileSync, renameSync } from "node:fs"
 
 const REGISTRY_PATH = process.env.AGENT_MODEL_REGISTRY || "/opt/agent-harness/agent-models.json"
@@ -37,15 +37,15 @@ if (typeof defaultBinding !== "string" || typeof smallModelBinding !== "string")
   process.exit(1)
 }
 
-// ── GUARD（2026-09-18 事故）：binding 的 providerID 必須在 registry.providers 內聲明 ──
-// 實錘：09-18 zen 免費層實驗把 bindings 寫成 `opencode/muse-spark-1.3-contributor-free`
-// 與 `opencode/union-alpha`。`opencode` 是 opencode binary **內建**的 zen provider，
-// 不在 registry.providers 裡也照樣解析得到，所以 gen 靜默照抄進 opencode.json 的
-// model/small_model；gateway 又把 persona binding 當 per-message `model` 下發
+// ── GUARD（2026-09-18 事故）：binding 的 providerID 必须在 registry.providers 内声明 ──
+// 实锤：09-18 zen 免费层实验把 bindings 写成 `opencode/muse-spark-1.3-contributor-free`
+// 与 `opencode/union-alpha`。`opencode` 是 opencode binary **内建**的 zen provider，
+// 不在 registry.providers 里也照样解析得到，所以 gen 静默照抄进 opencode.json 的
+// model/small_model；gateway 又把 persona binding 当 per-message `model` 下发
 // （index.ts personaModel→promptBody.model），opencode native `/summarize` 拿它做
-// 壓縮 → 撞 zen 免費層門禁 403 FreeTierError（`opencode/union-alpha`）與地區門禁
+// 压缩 → 撞 zen 免费层门禁 403 FreeTierError（`opencode/union-alpha`）与地区门禁
 // `This model is not available in your country`（`muse-spark-1.2-contributor-free`）
-// → 整條 compaction 全滅。此閘把「型別合法但渠道不存在」這一類靜默災難擋在生成前。
+// → 整条 compaction 全灭。此闸把「型别合法但渠道不存在」这一类静默灾难挡在生成前。
 const declaredProviders = new Set(Object.keys((registry.providers ?? {}) as Record<string, unknown>))
 
 /** 收集所有 binding 字串：default / small_model / persona.* / fallbacks.*[]。 */
@@ -68,10 +68,10 @@ function collectBindings(bindings: NonNullable<typeof registry.bindings>): { lab
 const violations: string[] = []
 const deadRefs: string[] = []
 for (const { label, ref } of collectBindings(registry.bindings)) {
-  // 形狀規則與 gateway index.ts 的 bindingRef 對齊：單一 "/"，兩側非空。
+  // 形状规则与 gateway index.ts 的 bindingRef 对齐：单一 "/"，两侧非空。
   const idx = ref.indexOf("/")
   if (idx <= 0 || idx === ref.length - 1 || ref.slice(idx + 1).includes("/")) {
-    // 含第二個 "/" 的項 gateway 會靜默丟棄（既不生效也不報錯）= 死配置。只警告不擋。
+    // 含第二个 "/" 的项 gateway 会静默丢弃（既不生效也不报错）= 死配置。只警告不挡。
     deadRefs.push(`${label} = ${JSON.stringify(ref)}`)
     continue
   }
@@ -81,14 +81,14 @@ for (const { label, ref } of collectBindings(registry.bindings)) {
   }
 }
 if (deadRefs.length > 0) {
-  console.warn(`[gen-opencode] WARN: ${deadRefs.length} binding(s) 形狀不合法，gateway bindingRef 會靜默丟棄（死配置）：`)
+  console.warn(`[gen-opencode] WARN: ${deadRefs.length} binding(s) 形状不合法，gateway bindingRef 会静默丢弃（死配置）：`)
   for (const d of deadRefs) console.warn(`  - ${d}`)
 }
 if (violations.length > 0) {
-  console.error(`[gen-opencode] refusing to write: ${violations.length} binding(s) 指向 registry 未聲明的 provider — not touching target`)
+  console.error(`[gen-opencode] refusing to write: ${violations.length} binding(s) 指向 registry 未声明的 provider — not touching target`)
   for (const v of violations) console.error(`  - ${v}`)
   console.error(`[gen-opencode] registry.providers = [${[...declaredProviders].join(", ")}]`)
-  console.error("[gen-opencode] 提醒：`opencode/*` 是 binary 內建 zen 免費層（非本 registry 渠道），本部署走它必撞 403 FreeTierError／地區門禁，會讓 session compaction 全滅。")
+  console.error("[gen-opencode] 提醒：`opencode/*` 是 binary 内建 zen 免费层（非本 registry 渠道），本部署走它必撞 403 FreeTierError／地区门禁，会让 session compaction 全灭。")
   process.exit(1)
 }
 
@@ -100,14 +100,14 @@ try {
   process.exit(1)
 }
 
-// ── registry 的產品真相 → opencode 認得的能力欄位（2026-10-02 實錘）──
-// registry 每個 model 可以寫 `"vision": true`（產品負責人確認這顆模型看得到圖）。
-// opencode 本身不認這個鍵，它認 `attachment` 與 `modalities.input`；圖能不能活著送到上游
-// 完全由 opencode 這一關決定——模型物件留空 `{}` ＝ opencode 當它是純文字模型，image part
-// 在送上游前被靜默丟掉：工具回「原圖已附上」、模型卻說自己看不到圖（生產實錘，逃過所有既有驗證，
-// 因為 gateway 側 isVisionModel 讀的是 registry 旗標、兩邊不同步）。
-// 故：有 `vision: true` 就補 attachment/modalities，並把 registry 專用的 vision 鍵剝掉
-// （不把自家欄位塞進 opencode 設定）。
+// ── registry 的产品真相 → opencode 认得的能力栏位（2026-10-02 实锤）──
+// registry 每个 model 可以写 `"vision": true`（产品负责人确认这颗模型看得到图）。
+// opencode 本身不认这个键，它认 `attachment` 与 `modalities.input`；图能不能活著送到上游
+// 完全由 opencode 这一关决定——模型物件留空 `{}` ＝ opencode 当它是纯文字模型，image part
+// 在送上游前被静默丢掉：工具回「原图已附上」、模型却说自己看不到图（生产实锤，逃过所有既有验证，
+// 因为 gateway 侧 isVisionModel 读的是 registry 旗标、两边不同步）。
+// 故：有 `vision: true` 就补 attachment/modalities，并把 registry 专用的 vision 键剥掉
+// （不把自家栏位塞进 opencode 设定）。
 const VISION_MODALITIES_INPUT = ["text", "image"]
 
 function withVisionCapabilities(providers: unknown): unknown {
@@ -137,7 +137,7 @@ function withVisionCapabilities(providers: unknown): unknown {
   return out
 }
 
-// 只替換三個鍵，其餘原樣保留；鍵順序跟隨原檔。
+// 只替换三个键，其余原样保留；键顺序跟随原档。
 const next: Record<string, unknown> = { ...target }
 next.provider = withVisionCapabilities(registry.providers)
 next.model = defaultBinding
@@ -146,8 +146,8 @@ next.small_model = smallModelBinding
 const serialized = JSON.stringify(next, null, 2) + "\n"
 const current = readFileSync(TARGET_PATH, "utf8")
 
-// 2026-09-18 衛生修：drift 輸出逐行印 opencode.json（provider 段含明文 apiKey），
-// 直印等於把 11 把上游 key 灌進 journal／CI log（本次實錘）。只遮輸出，不動比對邏輯。
+// 2026-09-18 卫生修：drift 输出逐行印 opencode.json（provider 段含明文 apiKey），
+// 直印等于把 11 把上游 key 灌进 journal／CI log（本次实锤）。只遮输出，不动比对逻辑。
 const maskSecrets = (line: string): string => line.replace(/("apiKey"\s*:\s*")[^"]*(")/g, "$1***MASKED***$2")
 
 if (process.argv.includes("--check")) {
@@ -155,7 +155,7 @@ if (process.argv.includes("--check")) {
     console.log("in sync")
     process.exit(0)
   }
-  // 有漂移：印出逐行差異（前綴/後綴公共行剝除，中間標 <current> / <generated>）。
+  // 有漂移：印出逐行差异（前缀/后缀公共行剥除，中间标 <current> / <generated>）。
   const a = current.split("\n")
   const b = serialized.split("\n")
   let s = 0
@@ -172,7 +172,7 @@ if (process.argv.includes("--check")) {
   process.exit(1)
 }
 
-// 原子寫回：tmp 檔 + rename。
+// 原子写回：tmp 档 + rename。
 const tmp = TARGET_PATH + ".tmp-gen"
 writeFileSync(tmp, serialized)
 renameSync(tmp, TARGET_PATH)

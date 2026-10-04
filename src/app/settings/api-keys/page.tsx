@@ -5,7 +5,7 @@ const PAGE_DESCRIPTION = "管理你的 Eimu API 密钥：创建、查看与吊�
 
 export const metadata = {
   title: { absolute: PAGE_TITLE },
-  // 個人頁（需登入）：不進索引，別浪費爬取預算。
+  // 个人页（需登入）：不进索引，别浪费爬取预算。
   robots: { index: false, follow: false },
   description: PAGE_DESCRIPTION,
   openGraph: {

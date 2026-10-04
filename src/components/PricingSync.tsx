@@ -7,8 +7,8 @@ const STORAGE_KEY = "model-pricing-overrides.v1";
 const POLL_INTERVAL_MS = 60_000;
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-// 覆寫結構由核心層定價模組定義，這裡只取 applyModelPricingOverrides 的參數型別，
-// 不重複宣告，核心層改簽名時此處自動跟隨。
+// 覆写结构由核心层定价模组定义，这里只取 applyModelPricingOverrides 的参数型别，
+// 不重复宣告，核心层改签名时此处自动跟随。
 type PricingOverrides = Parameters<typeof applyModelPricingOverrides>[0];
 
 interface PricingSyncPayload {
@@ -21,8 +21,8 @@ interface CachedPricing extends PricingSyncPayload {
   savedAt: number;
 }
 
-// 模組級 guard：同一頁若被掛載多次（HMR、多入口），只跑一份輪詢與事件監聽，
-// 避免疊出多個 interval 對同一端點重複打。
+// 模组级 guard：同一页若被挂载多次（HMR、多入口），只跑一份轮询与事件监听，
+// 避免叠出多个 interval 对同一端点重复打。
 let activeSyncCount = 0;
 let pollingTimer: number | null = null;
 let listenersAttached = false;
@@ -33,7 +33,7 @@ function writeCache(payload: PricingSyncPayload): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cached));
   } catch {
-    // 隱私模式或磁碟已滿時寫入失敗可忽略。
+    // 隐私模式或磁碟已满时写入失败可忽略。
   }
 }
 
@@ -47,10 +47,10 @@ function hydrateFromCache(): void {
       window.localStorage.removeItem(STORAGE_KEY);
       return;
     }
-    // 回訪用戶第一幀就用快取價格套上，避免先閃基準價再跳到覆寫價。
+    // 回访用户第一帧就用快取价格套上，避免先闪基准价再跳到覆写价。
     applyModelPricingOverrides(cached.overrides as PricingOverrides);
   } catch {
-    // 快取 JSON 損毀就靜默清掉，讓它走完整同步。
+    // 快取 JSON 损毁就静默清掉，让它走完整同步。
     try {
       window.localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -68,9 +68,9 @@ async function syncNow(): Promise<void> {
     applyModelPricingOverrides(payload.overrides);
     writeCache(payload);
   } catch (error) {
-    // 卸載時 abort 造成的 rejection 不是錯誤；其餘失敗一律靜默降級，絕不影響頁面。
+    // 卸载时 abort 造成的 rejection 不是错误；其余失败一律静默降级，绝不影响页面。
     if (controller?.signal.aborted) return;
-    console.warn("[PricingSync] 同步定價覆寫失敗", error);
+    console.warn("[PricingSync] 同步定价覆写失败", error);
   }
 }
 
@@ -83,8 +83,8 @@ function onWindowFocus(): void {
 }
 
 /**
- * 掛在 root layout 的純副作用元件：拉取管理員最新模型定價覆寫並套進目錄，
- * 讓展示端的 usePricingRevision 訂閱觸發報價重算。回 null，不渲染任何節點。
+ * 挂在 root layout 的纯副作用元件：拉取管理员最新模型定价覆写并套进目录，
+ * 让展示端的 usePricingRevision 订阅触发报价重算。回 null，不渲染任何节点。
  */
 export function PricingSync() {
   useEffect(() => {
@@ -105,7 +105,7 @@ export function PricingSync() {
 
     return () => {
       activeSyncCount -= 1;
-      // 最後一個實例卸載時才清共享資源。
+      // 最后一个实例卸载时才清共享资源。
       if (activeSyncCount === 0) {
         if (pollingTimer !== null) {
           window.clearInterval(pollingTimer);

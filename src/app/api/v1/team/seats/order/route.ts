@@ -1,18 +1,18 @@
-// POST /v1/team/seats/order —— 席位下單（報價 + 待支付訂單 + 收銀台入口）。
+// POST /v1/team/seats/order —— 席位下单（报价 + 待支付订单 + 收银台入口）。
 //
-//   入參：{ tier, cycle, seats }
-//   出參：報價（quote）＋ 待支付訂單（pending_order，決定性 out_trade_no ⇒ 重放同一張）
-//        ＋ payment: { payable: true } ＋ checkout 入口 ＋ todo（餘下接線清單）。
+//   入参：{ tier, cycle, seats }
+//   出参：报价（quote）＋ 待支付订单（pending_order，决定性 out_trade_no ⇒ 重放同一张）
+//        ＋ payment: { payable: true } ＋ checkout 入口 ＋ todo（余下接线清单）。
 //
-// 全鏈已接線（2026-10-01）：本路由只算價、出決定性訂單 id、給收銀台入口；收款由
-// GET /api/payments/mapay/checkout?plan=seat:... 發起，回調由 notify 的席位履約分支
-// （src/lib/team-seat-fulfillment.ts）同源覆核金額後把配額加到團隊主帳。
-// **本路由與本檔不真收款、不寫任何已支付狀態、不落本地訂單表**（禁影子帳本）。
-// 價格未配置 → 409 seat_price_not_configured；參數不合法 → 400（各自的碼）。
+// 全链已接线（2026-10-01）：本路由只算价、出决定性订单 id、给收银台入口；收款由
+// GET /api/payments/mapay/checkout?plan=seat:... 发起，回调由 notify 的席位履约分支
+// （src/lib/team-seat-fulfillment.ts）同源覆核金额后把配额加到团队主帐。
+// **本路由与本档不真收款、不写任何已支付状态、不落本地订单表**（禁影子帐本）。
+// 价格未配置 → 409 seat_price_not_configured；参数不合法 → 400（各自的码）。
 //
-// 鑑權與回執形狀逐行沿用同群組的 /v1/team/seats 與 /v1/team/quota：身份只來自
-// Authorization 的 B 端密鑰；團隊主帳由 resolveActorTeam 解析（成員呼叫時解析到其團隊，
-// 但席位訂單是出資方的動作 ⇒ 只有 owner 可下單）。
+// 鉴权与回执形状逐行沿用同群组的 /v1/team/seats 与 /v1/team/quota：身份只来自
+// Authorization 的 B 端密钥；团队主帐由 resolveActorTeam 解析（成员呼叫时解析到其团队，
+// 但席位订单是出资方的动作 ⇒ 只有 owner 可下单）。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const payload = (body ?? {}) as Record<string, unknown>;
 
-  // 席位訂單是出資方（團隊）的動作：只有 owner 可以下單（與 023 的席位調整同權限語義）。
+  // 席位订单是出资方（团队）的动作：只有 owner 可以下单（与 023 的席位调整同权限语义）。
   const actorTeam = await resolveActorTeam(auth.key.userId);
   const roster = await listTeamRoster(actorTeam.teamUserId);
   const actor = resolveTeamActor({ userId: auth.key.userId, teamUserId: actorTeam.teamUserId, roster });
@@ -79,8 +79,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   if (decision.ok) {
-    // 報價合法 → 可支付：回待支付訂單 + 收銀台入口（全鏈已接線：收銀台 checkout
-    // 與 notify 席位履約分支與本判定同源同一個 out_trade_no）。
+    // 报价合法 → 可支付：回待支付订单 + 收银台入口（全链已接线：收银台 checkout
+    // 与 notify 席位履约分支与本判定同源同一个 out_trade_no）。
     return NextResponse.json(
       {
         success: true,

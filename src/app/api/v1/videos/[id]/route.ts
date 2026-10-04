@@ -6,7 +6,7 @@ import { generationTaskResponse, resolveTaskCostCoins, taskStatus } from "@/lib/
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function error(status: number, message: string, code: string, traceId: string) {
   const response = NextResponse.json(
@@ -23,10 +23,10 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const job = await getGenerationJobForTenant(id, `biz:${auth.key.id}`);
   if (!job) return error(404, "Video generation task was not found.", "task_not_found", traceId);
-  // INC-0830-VIDEO：響應帶 attempts 摘要（plain array，禁 Map 序列化），供網關
-  // rerun 防重消費——同一上游 task 不重複提交。
-  // contract-lock 鐵律③：cost_coins 必須是 `=== "succeeded" ? await resolveTaskCostCoins(...) : null`
-  // 字面形狀（與 images/tts 狀態路由同構），不得改寫為 Promise.all。
+  // INC-0830-VIDEO：响应带 attempts 摘要（plain array，禁 Map 序列化），供网关
+  // rerun 防重消费——同一上游 task 不重复提交。
+  // contract-lock 铁律③：cost_coins 必须是 `=== "succeeded" ? await resolveTaskCostCoins(...) : null`
+  // 字面形状（与 images/tts 状态路由同构），不得改写为 Promise.all。
   const costCoins = taskStatus(job) === "succeeded" ? await resolveTaskCostCoins(job.id) : null;
   const attempts = await listVideoAttemptSummariesForJob(job.id);
   return withTraceId(

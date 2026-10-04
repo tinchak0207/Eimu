@@ -26,18 +26,18 @@ import { canHistoryEntryRerun } from "@/lib/history-rerun";
 
 export interface AgentImageCardProps {
   item: AgentImageItem;
-  /** 存图库：true＝已存入／本來就在；false＝失敗（卡片顯示短暫「未存入」）。尚未接线时 undefined → disabled。 */
+  /** 存图库：true＝已存入／本来就在；false＝失败（卡片显示短暂「未存入」）。尚未接线时 undefined → disabled。 */
   onSaveToLibrary?: (item: AgentImageItem) => Promise<boolean>;
-  /** 改图：把圖抓回並加進輸入框附件（true＝已交付附件）。false/拋錯＝顯示短暫「失败」。 */
+  /** 改图：把图抓回并加进输入框附件（true＝已交付附件）。false/抛错＝显示短暂「失败」。 */
   onEdit?: (item: AgentImageItem) => Promise<boolean>;
-  /** 下载：true＝已觸發下載；false/拋錯＝按鈕短暫「失败」。 */
+  /** 下载：true＝已触发下载；false/抛错＝按钮短暂「失败」。 */
   onDownload?: (item: AgentImageItem) => Promise<boolean>;
   /**
-   * 「再来 N 组」：开 payload 級重跑對話框（RerunDialog 走 /api/generation-jobs，
-   * 每個任務獨立帳本預檢，明碼計價）。圖有完整配方（prompt/model/size）才放行。
+   * 「再来 N 组」：开 payload 级重跑对话框（RerunDialog 走 /api/generation-jobs，
+   * 每个任务独立帐本预检，明码计价）。图有完整配方（prompt/model/size）才放行。
    */
   onRerun?: (item: AgentImageItem) => void;
-  /** 「微调变体」：同一條 payload 級路徑，可改提示詞/模型/尺寸。 */
+  /** 「微调变体」：同一条 payload 级路径，可改提示词/模型/尺寸。 */
   onRerunVariant?: (item: AgentImageItem) => void;
 }
 
@@ -61,7 +61,7 @@ function ImageAction({
   disabled: boolean;
   onClick: () => void;
   children: ReactNode;
-  /** "danger"：失敗瞬時態（未存入／失败）走紅字，與常態灰字分開。 */
+  /** "danger"：失败瞬时态（未存入／失败）走红字，与常态灰字分开。 */
   tone?: "danger";
 }) {
   return (
@@ -370,7 +370,7 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
           轻点关闭 · 双指缩放
         </div>
       </div>
-      {/* eslint-disable-next-line @next/next/no-img-element -- 燈箱原圖雙指縮放（blob:/proxy 來源），next/image 無法優化且固定寬高推導會綁死縮放自由度 */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- 灯箱原图双指缩放（blob:/proxy 来源），next/image 无法优化且固定宽高推导会绑死缩放自由度 */}
       <img
         ref={imgRef}
         src={src}
@@ -403,8 +403,8 @@ function AgentImageCardComponent({
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
-  // 每顆動作鈕各自的瞬時態：idle → loading →（成功定案／失敗短暫閃字後回 idle）。
-  // 「已存」本次會話內持續（不自動回落）；失敗態由 2s 計時器收回 idle。
+  // 每颗动作钮各自的瞬时态：idle → loading →（成功定案／失败短暂闪字后回 idle）。
+  // 「已存」本次会话内持续（不自动回落）；失败态由 2s 计时器收回 idle。
   const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">("idle");
   const [editState, setEditState] = useState<"idle" | "loading" | "failed">("idle");
   const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
@@ -414,7 +414,7 @@ function AgentImageCardComponent({
   // 上一次按压的时长（毫秒）。click 由它判定是否「长按唤菜单后松手」。
   const pressRef = useRef<{ dt: number; t: number } | null>(null);
   // 「再来 N 组／微调变体」只在配方完整（有 prompt + 可计价图像模型）时渲染：
-  // payload 級重跑需要真實模型才推得出單價，推不出價格就不擺一顆按了會開空對話框的鈕。
+  // payload 级重跑需要真实模型才推得出单价，推不出价格就不摆一颗按了会开空对话框的钮。
   const rerunnable = canHistoryEntryRerun(agentHistoryEntryForMedia(item));
 
   const closeViewer = useCallback(() => {
@@ -422,7 +422,7 @@ function AgentImageCardComponent({
     triggerRef.current?.focus();
   }, []);
 
-  // 失敗閃字計時器：卸載時清掉，別讓 setTimeout 攥著已卸載元件。
+  // 失败闪字计时器：卸载时清掉，别让 setTimeout 攥著已卸载元件。
   const flash = useCallback((apply: () => void, revert: () => void, delayMs: number) => {
     apply();
     timersRef.current.push(setTimeout(revert, delayMs));
@@ -462,7 +462,7 @@ function AgentImageCardComponent({
     flash(() => setSaveState("failed"), () => setSaveState((s) => (s === "failed" ? "idle" : s)), 2000);
   }, [item, onSaveToLibrary, saveState, flash]);
 
-  // 改图＝把圖抓回加進輸入框附件（不發任何訊息）；輸入框出現 chip 就是回饋。
+  // 改图＝把图抓回加进输入框附件（不发任何讯息）；输入框出现 chip 就是回馈。
   const handleEdit = useCallback(async () => {
     if (!onEdit || editState === "loading") return;
     setEditState("loading");
@@ -495,12 +495,12 @@ function AgentImageCardComponent({
     flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
   }, [item, onDownload, downState, flash]);
 
-  // 分享＝建立／取回歷史 entry 的公開連結並複製；不彈任何遮擋層。
+  // 分享＝建立／取回历史 entry 的公开连结并复制；不弹任何遮挡层。
   const handleShare = useCallback(async () => {
     if (shareState === "loading") return;
     setShareState("loading");
     const entry = agentHistoryEntryForMedia(item);
-    // 分享只認歷史 entry：先補寫（未登入＝false，下面的 createShareLink 會給人話原因）。
+    // 分享只认历史 entry：先补写（未登入＝false，下面的 createShareLink 会给人话原因）。
     await saveAgentMediaToHistory(entry);
     const result = await createShareLink(entry, { resultIndex: firstShareableIndex(entry) });
     if (result.ok) {
@@ -603,8 +603,8 @@ function AgentImageCardComponent({
         </figcaption>
       )}
       <div className="mt-1 flex flex-wrap gap-1 px-3.5 pb-3">
-        {/* 存图库三態：idle「存图库」／loading 轉圈／已存（Check＋「已存」，本次會話持續）／
-            失敗（2s 紅字「未存入」）。回調缺席＝disabled，絕不偽造行為。 */}
+        {/* 存图库三态：idle「存图库」／loading 转圈／已存（Check＋「已存」，本次会话持续）／
+            失败（2s 红字「未存入」）。回调缺席＝disabled，绝不伪造行为。 */}
         <ImageAction
           label={saveState === "saved" ? "已存" : saveState === "failed" ? "未存入" : "存图库"}
           disabled={!onSaveToLibrary || saveState === "loading" || saveState === "saved"}
@@ -619,7 +619,7 @@ function AgentImageCardComponent({
             <Library className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </ImageAction>
-        {/* 改图＝加進輸入框附件（不送 prompt）；抓取中轉圈、失敗短暫「失败」。 */}
+        {/* 改图＝加进输入框附件（不送 prompt）；抓取中转圈、失败短暂「失败」。 */}
         <ImageAction
           label={editState === "failed" ? "失败" : "改图"}
           disabled={!onEdit || editState === "loading"}
@@ -632,11 +632,11 @@ function AgentImageCardComponent({
             <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </ImageAction>
-        {/* 放大＝開卡片內既有的全屏查看器（不是 AI 放大語義）。 */}
+        {/* 放大＝开卡片内既有的全屏查看器（不是 AI 放大语义）。 */}
         <ImageAction label="放大" disabled={failed} onClick={() => !failed && setViewerOpen(true)}>
           <Expand className="h-3.5 w-3.5" aria-hidden="true" />
         </ImageAction>
-        {/* 下載＝真下載（同源代理 → blob → <a download>）；失敗短暫「失败」。 */}
+        {/* 下载＝真下载（同源代理 → blob → <a download>）；失败短暂「失败」。 */}
         <ImageAction
           label={downState === "failed" ? "失败" : "下载"}
           disabled={!onDownload || downState === "loading"}
@@ -649,7 +649,7 @@ function AgentImageCardComponent({
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </ImageAction>
-        {/* 分享＝建立／取回公開連結並複製（不彈遮擋層）；成功「已复制」1.6s。 */}
+        {/* 分享＝建立／取回公开连结并复制（不弹遮挡层）；成功「已复制」1.6s。 */}
         <ImageAction
           label={
             shareState === "copied"
@@ -672,9 +672,9 @@ function AgentImageCardComponent({
             <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </ImageAction>
-        {/* 圖走 payload 級重跑（RerunDialog → /api/generation-jobs，逐任務帳本預檢、
-            明碼計價）；影片／音頻按秒計費、payload 級不開放，改走會話級（見兩張卡的註釋）。
-            配方可重跑才渲染；回調缺席＝disabled，絕不偽造行為。 */}
+        {/* 图走 payload 级重跑（RerunDialog → /api/generation-jobs，逐任务帐本预检、
+            明码计价）；影片／音频按秒计费、payload 级不开放，改走会话级（见两张卡的注释）。
+            配方可重跑才渲染；回调缺席＝disabled，绝不伪造行为。 */}
         {rerunnable && (
           <>
             <ImageAction label="再来 N 组" disabled={!onRerun} onClick={() => onRerun?.(item)}>

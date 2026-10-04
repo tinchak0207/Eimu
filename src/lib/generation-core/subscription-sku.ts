@@ -1,25 +1,25 @@
-// REQ-D3 訂閱 SKU：**純函式層**（無 I/O、無 DB、無上游呼叫）。
+// REQ-D3 订阅 SKU：**纯函式层**（无 I/O、无 DB、无上游呼叫）。
 //
-// 本檔是「池 / 期次 / 過期 / 出資歸還」四件事的單一權威。寫入器在 subscription.ts，
-// 帳本 schema 在 account-ledger.ts，本檔只做算術與判定，故可在任何地方被獨立斷言。
+// 本档是「池 / 期次 / 过期 / 出资归还」四件事的单一权威。写入器在 subscription.ts，
+// 帐本 schema 在 account-ledger.ts，本档只做算术与判定，故可在任何地方被独立断言。
 //
-// 借來的機制不變量（waoowaoo BA-15/16，機制借用、代碼禁抄）：
-//   ① 雙池：永久池（充值／開帳基線）與訂閱池（期末過期）分離；
-//      可用餘額 = 永久池 + 未過期訂閱池。
-//   ② 按原出資歸還：退款回它原本的池，不跨池搬。
-//   ③ (訂閱 id, 期次序號) 發放冪等；下一期替換而非累加（預設，見 RENEWAL_MODE）。
-//   ④ 過期只在讀取時 lazy 判定——本檔的 computePoolBalances(entries, nowMs) 就是那個
-//      判定點：不改寫任何歷史、不依賴定時任務，任何時刻任何進程算出的答案都一樣。
+// 借来的机制不变量（waoowaoo BA-15/16，机制借用、代码禁抄）：
+//   ① 双池：永久池（充值／开帐基线）与订阅池（期末过期）分离；
+//      可用余额 = 永久池 + 未过期订阅池。
+//   ② 按原出资归还：退款回它原本的池，不跨池搬。
+//   ③ (订阅 id, 期次序号) 发放幂等；下一期替换而非累加（预设，见 RENEWAL_MODE）。
+//   ④ 过期只在读取时 lazy 判定——本档的 computePoolBalances(entries, nowMs) 就是那个
+//      判定点：不改写任何历史、不依赖定时任务，任何时刻任何进程算出的答案都一样。
 //
-// ─────────────────────────────────────────────── 參數化旋鈕（暴君一句話可翻轉）
-// 全檔所有「暫用預設」都集中在下面這個區塊：改常數值即可翻轉語義，不動其他代碼。
-// 回報中列出的翻轉點＝本區塊的行號。
+// ─────────────────────────────────────────────── 参数化旋钮（暴君一句话可翻转）
+// 全档所有「暂用预设」都集中在下面这个区块：改常数值即可翻转语义，不动其他代码。
+// 回报中列出的翻转点＝本区块的行号。
 
-/** 帳本池：'permanent' 永久池（充值／開帳基線）｜'subscription' 訂閱池（期末過期）。 */
+/** 帐本池：'permanent' 永久池（充值／开帐基线）｜'subscription' 订阅池（期末过期）。 */
 export const LEDGER_POOLS = ["permanent", "subscription"] as const;
 export type LedgerPool = (typeof LEDGER_POOLS)[number];
 
-/** 默認池（沒有標 pool 的帳本行一律視為永久池——020 既有列與所有舊呼叫端的語義）。 */
+/** 默认池（没有标 pool 的帐本行一律视为永久池——020 既有列与所有旧呼叫端的语义）。 */
 export const LEDGER_POOL_DEFAULT: LedgerPool = "permanent";
 
 export function isLedgerPool(value: unknown): value is LedgerPool {
@@ -27,50 +27,50 @@ export function isLedgerPool(value: unknown): value is LedgerPool {
 }
 
 /**
- * 【預設 1】續期語義。
- *   'replace'    到期未用完＝按期替換：新期額度取代舊期餘額，不累積（**當前預設**）
- *   'accumulate' 累積：新期額度＋舊期未用完餘額，舊期餘額仍按舊期到期時刻失效
- * 只影響「續期發放時是否要把舊期未用完餘額作廢（expire 帳本行）」。
- * 反向只需把本常數改成 "accumulate"，其餘零改動。
+ * 【预设 1】续期语义。
+ *   'replace'    到期未用完＝按期替换：新期额度取代旧期余额，不累积（**当前预设**）
+ *   'accumulate' 累积：新期额度＋旧期未用完余额，旧期余额仍按旧期到期时刻失效
+ * 只影响「续期发放时是否要把旧期未用完余额作废（expire 帐本行）」。
+ * 反向只需把本常数改成 "accumulate"，其余零改动。
  */
 export const SUBSCRIPTION_RENEWAL_MODE: "replace" | "accumulate" = "replace";
 
 /**
- * 【預設 2】訂閱的兌現通道。
- *   'redemption' 沿用兌換碼通道：訂閱＝一張帶 SKU 標記的兌換碼，用戶在 new-api 端兌換，
- *                我方由「上游兌換記錄」回讀入帳（與 E1a 充值入帳同一條可觀測真相）（**當前預設**）
- *   'direct'     直落通道（未實作）：我方直接寫庫入帳，不經兌換碼
- * 這不是「要不要有訂閱」，而是「兌現事實從哪裡讀回來」。切 'direct' 需另派一刀。
+ * 【预设 2】订阅的兑现通道。
+ *   'redemption' 沿用兑换码通道：订阅＝一张带 SKU 标记的兑换码，用户在 new-api 端兑换，
+ *                我方由「上游兑换记录」回读入帐（与 E1a 充值入帐同一条可观测真相）（**当前预设**）
+ *   'direct'     直落通道（未实作）：我方直接写库入帐，不经兑换码
+ * 这不是「要不要有订阅」，而是「兑现事实从哪里读回来」。切 'direct' 需另派一刀。
  */
 export const SUBSCRIPTION_FULFILLMENT_CHANNEL: "redemption" | "direct" = "redemption";
 
 /**
- * 扣費時的扣款池次序（先扣哪個池）。
- * 預設先扣訂閱池再扣永久池：訂閱餘額會過期，永久餘額不會——先用會過期的錢。
+ * 扣费时的扣款池次序（先扣哪个池）。
+ * 预设先扣订阅池再扣永久池：订阅余额会过期，永久余额不会——先用会过期的钱。
  */
 export const CONSUMPTION_POOL_ORDER: LedgerPool[] = ["subscription", "permanent"];
 
 /**
- * 退款在多條出資腿之間的分攤次序。
- *   'lifo' 先退最後出資的那條腿（**當前預設**）｜'fifo' 按出資次序退
+ * 退款在多条出资腿之间的分摊次序。
+ *   'lifo' 先退最后出资的那条腿（**当前预设**）｜'fifo' 按出资次序退
  */
 export const REFUND_ALLOCATION_ORDER: "lifo" | "fifo" = "lifo";
 
 /**
- * 退款回到「已過期」的原訂閱期時怎麼辦。
- *   true  照 ② 按原出資歸還：回原期（原到期時刻）——該期已過期 ⇒ 這筆退款同樣不可用（**當前預設**）
- *   false 改掛當前未過期期（無當前期則仍回原期）
- * true 是「不跨池、不搬期」的忠實實作；false 對用戶更寬，但語義上已不是「按原出資歸還」。
+ * 退款回到「已过期」的原订阅期时怎么办。
+ *   true  照 ② 按原出资归还：回原期（原到期时刻）——该期已过期 ⇒ 这笔退款同样不可用（**当前预设**）
+ *   false 改挂当前未过期期（无当前期则仍回原期）
+ * true 是「不跨池、不搬期」的忠实实作；false 对用户更宽，但语义上已不是「按原出资归还」。
  */
 export const SUBSCRIPTION_REFUND_EXPIRED_TO_ORIGINAL_TERM = true;
 
-/** 兌換碼 name 的訂閱標記前綴與分隔符（name 是我方在建碼時自己寫進去的那個欄位）。 */
+/** 兑换码 name 的订阅标记前缀与分隔符（name 是我方在建码时自己写进去的那个栏位）。 */
 export const SUBSCRIPTION_CODE_NAME_PREFIX = "SUB-";
 export const SUBSCRIPTION_CODE_NAME_SEPARATOR = "@";
 
 /**
- * SKU 註冊表：只定義**期長**與顯示名。每期額度不在此表——額度由用戶實際購買的兌換碼
- * 金額決定（不讓代碼發明定價；定價權威在 pricing/兌換碼本身）。
+ * SKU 注册表：只定义**期长**与显示名。每期额度不在此表——额度由用户实际购买的兑换码
+ * 金额决定（不让代码发明定价；定价权威在 pricing/兑换码本身）。
  */
 export const SUBSCRIPTION_SKUS: Record<string, { label: string; termSeconds: number }> = {
   "pro-monthly": { label: "专业月费", termSeconds: 30 * 24 * 60 * 60 },
@@ -78,9 +78,9 @@ export const SUBSCRIPTION_SKUS: Record<string, { label: string; termSeconds: num
 };
 
 /**
- * 標記認得、但 SKU 不在註冊表時的兜底期長（30 天）。
- * 為什麼要兜底而不是失敗：**充值必兌現**（暴君 09-20 鐵律）——碼是真的、錢是真的，
- * 認不出 SKU 只該影響「期長取默認＋留審計訊息」，不該讓用戶拿不到額度。
+ * 标记认得、但 SKU 不在注册表时的兜底期长（30 天）。
+ * 为什么要兜底而不是失败：**充值必兑现**（暴君 09-20 铁律）——码是真的、钱是真的，
+ * 认不出 SKU 只该影响「期长取默认＋留审计讯息」，不该让用户拿不到额度。
  */
 export const SUBSCRIPTION_UNKNOWN_SKU_TERM_SECONDS = 30 * 24 * 60 * 60;
 
@@ -93,36 +93,36 @@ export function isKnownSubscriptionSku(sku: string): boolean {
   return Boolean(SUBSCRIPTION_SKUS[sku]);
 }
 
-// ─────────────────────────────────────────────── 兌換碼標記（SKU 載體）
+// ─────────────────────────────────────────────── 兑换码标记（SKU 载体）
 
 export interface SubscriptionCodeMarker {
-  /** SKU 識別。 */
+  /** SKU 识别。 */
   sku: string;
-  /** 我方自己的業務參照（訂單號等），只作審計。 */
+  /** 我方自己的业务参照（订单号等），只作审计。 */
   ref: string;
 }
 
 /**
- * 現場事實（決定「SKU 標記放哪裡」）：
- *   new-api 兌換碼有三個欄位：`key`（碼本體）／`name`（名）／`quota`（額度）。
- *   ・`key`：API 建碼路徑由 new-api 生成（32 hex，我方拿不到控制權）；
- *     直寫庫路徑（見記憶 new-api-redemption-code-create-recipe）由我方生成，但兩種路徑
- *     的 key 都是**不透明隨機串**，塞標記＝改碼格式（脆弱、且對用戶可見）。
- *   ・`name`：**兩條路徑都由我方寫入**（mPay 走 `MP<orderId>`；人工碼走 `eimu1500` 這種名），
- *     且可由 `/api/redemption/` 只讀列出（gateway-admin.listGatewayRedemptions）。
- * 結論：SKU 標記放 **name**（`SUB-<sku>@<ref>`），碼本體一字不動。故此路徑不需映射表。
- * 若日後上游改成我方無法控制 name，fallback 方案＝碼→SKU 映射表（見回報）。
+ * 现场事实（决定「SKU 标记放哪里」）：
+ *   new-api 兑换码有三个栏位：`key`（码本体）／`name`（名）／`quota`（额度）。
+ *   ・`key`：API 建码路径由 new-api 生成（32 hex，我方拿不到控制权）；
+ *     直写库路径（见记忆 new-api-redemption-code-create-recipe）由我方生成，但两种路径
+ *     的 key 都是**不透明随机串**，塞标记＝改码格式（脆弱、且对用户可见）。
+ *   ・`name`：**两条路径都由我方写入**（mPay 走 `MP<orderId>`；人工码走 `eimu1500` 这种名），
+ *     且可由 `/api/redemption/` 只读列出（gateway-admin.listGatewayRedemptions）。
+ * 结论：SKU 标记放 **name**（`SUB-<sku>@<ref>`），码本体一字不动。故此路径不需映射表。
+ * 若日后上游改成我方无法控制 name，fallback 方案＝码→SKU 映射表（见回报）。
  */
 export const SUBSCRIPTION_CODE_NAME_PATTERN = /^SUB-([a-z0-9][a-z0-9-]{1,31})@([A-Za-z0-9._:-]{1,64})$/;
 
-/** 產生訂閱兌換碼的 name（建碼端唯一入口，避免各處自拼字串）。 */
+/** 产生订阅兑换码的 name（建码端唯一入口，避免各处自拼字串）。 */
 export function subscriptionCodeName(sku: string, ref: string): string {
   return `${SUBSCRIPTION_CODE_NAME_PREFIX}${sku}${SUBSCRIPTION_CODE_NAME_SEPARATOR}${ref}`;
 }
 
 /**
- * 認出訂閱碼：只有**嚴格符合**標記格式才算訂閱（不回退寬鬆匹配）。
- * 回 null ＝ 不是訂閱碼 ⇒ 走 E1a 的永久充值入帳（既有行為一字不變）。
+ * 认出订阅码：只有**严格符合**标记格式才算订阅（不回退宽松匹配）。
+ * 回 null ＝ 不是订阅码 ⇒ 走 E1a 的永久充值入帐（既有行为一字不变）。
  */
 export function parseSubscriptionCodeMarker(name: string | null | undefined): SubscriptionCodeMarker | null {
   if (typeof name !== "string") return null;
@@ -131,17 +131,17 @@ export function parseSubscriptionCodeMarker(name: string | null | undefined): Su
   return { sku: matched[1], ref: matched[2] };
 }
 
-// ─────────────────────────────────────────────── 期次（時間窗與冪等鍵）
+// ─────────────────────────────────────────────── 期次（时间窗与幂等键）
 
-/** 期次序號從 1 起算（第 1 期＝開通那一期）。 */
+/** 期次序号从 1 起算（第 1 期＝开通那一期）。 */
 export const SUBSCRIPTION_FIRST_TERM_INDEX = 1;
 
-/** 期次在帳本上的身份：'sub:<訂閱 id>:term:<期次序號>'。 */
+/** 期次在帐本上的身份：'sub:<订阅 id>:term:<期次序号>'。 */
 export function subscriptionTermRef(subscriptionId: string, termIndex: number): string {
   return `sub:${subscriptionId}:term:${termIndex}`;
 }
 
-/** 從 term_ref 反解期次序號（帳本是唯一權威，期次一律由帳本行推導）。 */
+/** 从 term_ref 反解期次序号（帐本是唯一权威，期次一律由帐本行推导）。 */
 export function termIndexFromRef(termRef: string | null | undefined): number | null {
   if (typeof termRef !== "string") return null;
   const matched = /^sub:.+:term:(\d+)$/.exec(termRef);
@@ -154,7 +154,7 @@ export function subscriptionIdFor(billingUserId: number, sku: string): string {
   return `sub-${billingUserId}-${sku}`;
 }
 
-/** 一期 = 連續的 [start, end)：本期到期時刻 = 發放時刻 + 期長。 */
+/** 一期 = 连续的 [start, end)：本期到期时刻 = 发放时刻 + 期长。 */
 export function subscriptionTermWindow(
   grantedAtMs: number,
   termSeconds: number,
@@ -164,9 +164,9 @@ export function subscriptionTermWindow(
   return { startMs: grantedAtMs, endMs, expiresAt: new Date(endMs).toISOString() };
 }
 
-// ─────────────────────────────────────────────── 池餘額（lazy 過期判定點）
+// ─────────────────────────────────────────────── 池余额（lazy 过期判定点）
 
-/** 池餘額計算只需要帳本的這幾個欄位（讓純函式不依賴 DB 行型別）。 */
+/** 池余额计算只需要帐本的这几个栏位（让纯函式不依赖 DB 行型别）。 */
 export interface PoolLedgerRow {
   amount: number;
   pool?: LedgerPool | null;
@@ -177,25 +177,25 @@ export interface PoolLedgerRow {
 export interface SubscriptionTermBalance {
   termRef: string;
   quota: number;
-  /** 該期到期時刻（ISO）；null＝沒有到期資訊的行（異常，見 undatedRows）。 */
+  /** 该期到期时刻（ISO）；null＝没有到期资讯的行（异常，见 undatedRows）。 */
   expiresAt: string | null;
   expired: boolean;
 }
 
 export interface PoolBalances {
-  /** 永久池 Σ（充值、開帳基線、轉移、永久池的消費與退款）。 */
+  /** 永久池 Σ（充值、开帐基线、转移、永久池的消费与退款）。 */
   permanentQuota: number;
-  /** 未過期訂閱池 Σ（不變量 ① 的訂閱池部分）。 */
+  /** 未过期订阅池 Σ（不变量 ① 的订阅池部分）。 */
   subscriptionQuota: number;
-  /** 已過期訂閱池 Σ（**不計入可用**，但如實回報——過期的錢看得見）。 */
+  /** 已过期订阅池 Σ（**不计入可用**，但如实回报——过期的钱看得见）。 */
   expiredSubscriptionQuota: number;
-  /** 可用餘額 = permanentQuota + subscriptionQuota（不變量 ①）。 */
+  /** 可用余额 = permanentQuota + subscriptionQuota（不变量 ①）。 */
   availableQuota: number;
-  /** 帳面淨額 Σ 全部（含已過期訂閱池）——與 E1a 的 computeAccountBalance 同一口徑。 */
+  /** 帐面净额 Σ 全部（含已过期订阅池）——与 E1a 的 computeAccountBalance 同一口径。 */
   bookQuota: number;
-  /** 各期餘額（未過期的在前，按到期時刻升序＝先到期先扣）。 */
+  /** 各期余额（未过期的在前，按到期时刻升序＝先到期先扣）。 */
   terms: SubscriptionTermBalance[];
-  /** 訂閱池裡沒有到期時刻的行數（不該存在；出現＝寫入端 bug，計入可用並回報）。 */
+  /** 订阅池里没有到期时刻的行数（不该存在；出现＝写入端 bug，计入可用并回报）。 */
   undatedSubscriptionRows: number;
 }
 
@@ -210,12 +210,12 @@ function expiresAtMs(row: PoolLedgerRow): number | null {
 }
 
 /**
- * **lazy 過期判定**（不變量 ④）：以「當下時刻」把帳本行分成可用／已過期兩堆。
- * 純函式 ⇒ 同一份記錄集＋同一個 nowMs 在任何進程、任何時刻都算出同一個答案；
- * 不需要任何定時任務先把餘額改掉（cron 只可能是加速器，不可能是正確性前提）。
+ * **lazy 过期判定**（不变量 ④）：以「当下时刻」把帐本行分成可用／已过期两堆。
+ * 纯函式 ⇒ 同一份记录集＋同一个 nowMs 在任何进程、任何时刻都算出同一个答案；
+ * 不需要任何定时任务先把余额改掉（cron 只可能是加速器，不可能是正确性前提）。
  *
- * 到期邊界：`expires_at <= now` 即過期（到期那一刻起不可用）。
- * 缺到期時刻的訂閱行：計入可用（不讓缺欄位變成「靜默沒收用戶的錢」）並回報行數。
+ * 到期边界：`expires_at <= now` 即过期（到期那一刻起不可用）。
+ * 缺到期时刻的订阅行：计入可用（不让缺栏位变成「静默没收用户的钱」）并回报行数。
  */
 export function computePoolBalances(rows: PoolLedgerRow[], nowMs: number): PoolBalances {
   let permanentQuota = 0;
@@ -231,7 +231,7 @@ export function computePoolBalances(rows: PoolLedgerRow[], nowMs: number): PoolB
       continue;
     }
     const ms = expiresAtMs(row);
-    if (ms === null) undatedSubscriptionRows += 1; // 具體歸屬在下面按 term 統計
+    if (ms === null) undatedSubscriptionRows += 1; // 具体归属在下面按 term 统计
     const expired = ms !== null && ms <= nowMs;
     if (expired) expiredSubscriptionQuota += amount;
     else subscriptionQuota += amount;
@@ -261,25 +261,25 @@ export function computePoolBalances(rows: PoolLedgerRow[], nowMs: number): PoolB
   };
 }
 
-/** 可用餘額的單一讀法（給 /v1/quota 與預檢共用，不許各自再算一份）。 */
+/** 可用余额的单一读法（给 /v1/quota 与预检共用，不许各自再算一份）。 */
 export function availableQuotaOf(rows: PoolLedgerRow[], nowMs: number): number {
   return computePoolBalances(rows, nowMs).availableQuota;
 }
 
-// ─────────────────────────────────────────────── 出資腿（扣款先扣誰、退款回誰）
+// ─────────────────────────────────────────────── 出资腿（扣款先扣谁、退款回谁）
 
 export interface PoolLeg {
   pool: LedgerPool;
   termRef: string | null;
   expiresAt: string | null;
-  /** 正數＝該腿的金額（quota）。 */
+  /** 正数＝该腿的金额（quota）。 */
   amountQuota: number;
 }
 
 /**
- * 把一筆消費拆成出資腿（不變量 ①＋② 的源頭）：按 CONSUMPTION_POOL_ORDER 逐池取錢，
- * 訂閱池內按「先到期先扣」。**不截斷**：可用不足時，剩下的全記在最後一個池（永久池）
- * ——帳本必須如實記下真實發生的事（餘額可為負），不足與否是預檢/402 的職責，不是帳本的。
+ * 把一笔消费拆成出资腿（不变量 ①＋② 的源头）：按 CONSUMPTION_POOL_ORDER 逐池取钱，
+ * 订阅池内按「先到期先扣」。**不截断**：可用不足时，剩下的全记在最后一个池（永久池）
+ * ——帐本必须如实记下真实发生的事（余额可为负），不足与否是预检/402 的职责，不是帐本的。
  */
 export function planConsumptionLegs(amountQuota: number, balances: PoolBalances): PoolLeg[] {
   const amount = Math.abs(Math.round(amountQuota));
@@ -298,7 +298,7 @@ export function planConsumptionLegs(amountQuota: number, balances: PoolBalances)
         legs.push({ pool, termRef: term.termRef === "(no-term)" ? null : term.termRef, expiresAt: term.expiresAt, amountQuota: take });
         remaining -= take;
       }
-      // 無到期資訊的訂閱行（異常）：不指定期次，只記池——不讓它變成扣款黑洞。
+      // 无到期资讯的订阅行（异常）：不指定期次，只记池——不让它变成扣款黑洞。
       if (remaining > 0 && balances.undatedSubscriptionRows > 0) break;
       continue;
     }
@@ -311,7 +311,7 @@ export function planConsumptionLegs(amountQuota: number, balances: PoolBalances)
   }
 
   if (remaining > 0) {
-    // 可用不足：超出部分記在最後一個池（預設＝永久池）。餘額可為負是真實狀態。
+    // 可用不足：超出部分记在最后一个池（预设＝永久池）。余额可为负是真实状态。
     const lastPool = CONSUMPTION_POOL_ORDER[CONSUMPTION_POOL_ORDER.length - 1] ?? LEDGER_POOL_DEFAULT;
     const tail = legs.find((leg) => leg.pool === lastPool && leg.termRef === null);
     if (tail) tail.amountQuota += remaining;
@@ -320,21 +320,21 @@ export function planConsumptionLegs(amountQuota: number, balances: PoolBalances)
   return legs;
 }
 
-/** 已入帳的消費腿（退款分攤的輸入）。 */
+/** 已入帐的消费腿（退款分摊的输入）。 */
 export interface ConsumedPoolLeg {
   pool: LedgerPool;
   termRef?: string | null;
   expiresAt?: string | null;
-  /** 該腿消耗掉的量（正數）。 */
+  /** 该腿消耗掉的量（正数）。 */
   consumedQuota: number;
 }
 
 /**
- * 退款分攤（不變量 ② 按原出資歸還）：把退款額按 REFUND_ALLOCATION_ORDER 攤回各出資腿，
- * **不跨池**——訂閱消耗退訂閱池、永久消耗退永久池；多腿時一腿一筆帳。
+ * 退款分摊（不变量 ② 按原出资归还）：把退款额按 REFUND_ALLOCATION_ORDER 摊回各出资腿，
+ * **不跨池**——订阅消耗退订阅池、永久消耗退永久池；多腿时一腿一笔帐。
  *
- * 退回已過期期的處理見 SUBSCRIPTION_REFUND_EXPIRED_TO_ORIGINAL_TERM
- * （預設 true：原期原到期時刻，該筆退款同樣不可用——不假裝它還有價值）。
+ * 退回已过期期的处理见 SUBSCRIPTION_REFUND_EXPIRED_TO_ORIGINAL_TERM
+ * （预设 true：原期原到期时刻，该笔退款同样不可用——不假装它还有价值）。
  */
 export function planRefundLegs(
   refundQuota: number,
@@ -358,8 +358,8 @@ export function planRefundLegs(
   }
 
   if (remaining > 0) {
-    // 退款額大於已記錄的消耗（不該發生；上游補償/人工退款會走到這裡）：
-    // 記在最後一條出資腿的池——仍然不跨池搬；同池同期就併進該腿（不多開一條帳本行）。
+    // 退款额大于已记录的消耗（不该发生；上游补偿/人工退款会走到这里）：
+    // 记在最后一条出资腿的池——仍然不跨池搬；同池同期就并进该腿（不多开一条帐本行）。
     const last = ordered[ordered.length - 1];
     const extra = refundLegFor(last, remaining, nowMs, opts.currentTerm);
     const sameLeg = legs.find(
@@ -388,11 +388,11 @@ function refundLegFor(
   return { pool, termRef, expiresAt, amountQuota };
 }
 
-// ─────────────────────────────────────────────── 續期替換（不變量 ③）
+// ─────────────────────────────────────────────── 续期替换（不变量 ③）
 
 /**
- * 續期時該作廢多少舊期餘額（不變量 ③「下一期替換而非累加」）。
- * 回 0 ＝ 無需作廢（累積語義、舊期已清零、或沒有舊期）。
+ * 续期时该作废多少旧期余额（不变量 ③「下一期替换而非累加」）。
+ * 回 0 ＝ 无需作废（累积语义、旧期已清零、或没有旧期）。
  */
 export function replacedQuotaForRenewal(
   previousTermQuota: number,

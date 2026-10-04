@@ -13,7 +13,7 @@ import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-reje
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
 
-/** 拒絕遙測用的路徑。聚合平台的模型探測 401 也記——這是它拿不到模型清單的證據。 */
+/** 拒绝遥测用的路径。聚合平台的模型探测 401 也记——这是它拿不到模型清单的证据。 */
 const REJECTION_PATH = "/v1/models";
 
 /**
@@ -67,8 +67,8 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
 
   rejection.userId = auth.key.userId;
   await syncModelPricing();
-  // 真實結果閘（2026-09-27）：近期真實生成全失敗的模型提交會被拒，列表不再宣稱它可用
-  // （agent / MCP list_models 讀的就是這張表）。讀取失敗 → 空 map，全量照列。
+  // 真实结果闸（2026-09-27）：近期真实生成全失败的模型提交会被拒，列表不再宣称它可用
+  // （agent / MCP list_models 读的就是这张表）。读取失败 → 空 map，全量照列。
   const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
 
   const siteUrl = getSiteUrlFromRequest(req);
@@ -89,7 +89,7 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
         // 同一张表混了两种介质，必须明确投递端点，否则聚合平台会把视频模型 POST 到
         // /v1/images/generations，然后收到 400 unsupported_model。
         x_endpoint: isVideo ? "/v1/videos/generations" : "/v1/images/generations",
-        // 能力面投影：聚合平台可用它決定是否把模型上架；目錄查不到的模型省略。
+        // 能力面投影：聚合平台可用它决定是否把模型上架；目录查不到的模型省略。
         ...(capabilities ? { x_capabilities: capabilities } : {}),
         x_docs_url: `${siteUrl}/docs`,
         x_openapi_url: `${siteUrl}/v1/openapi.json`,
@@ -101,7 +101,7 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
         return {
           ...base,
           // 非标准扩展：便于聚合平台直接算单价。fast 与 quality 的消耗可能不同。
-          // 若 fast 與 quality 同價（hd 沒比較貴），就不輸出 hd，避免誤導成「更貴」。
+          // 若 fast 与 quality 同价（hd 没比较贵），就不输出 hd，避免误导成「更贵」。
           x_coins_per_image: {
             standard: fastCoins,
             ...(qualityCoins === fastCoins ? {} : { hd: qualityCoins }),

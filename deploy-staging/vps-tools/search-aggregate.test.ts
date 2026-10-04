@@ -267,7 +267,7 @@ describe("脚本路径由模块自身位置推导且真的可跑", () => {
   })
 })
 
-// ── 8. coverage_notice（输出内在场提示，本輪分流培訓的验收点）────────────────
+// ── 8. coverage_notice（输出内在场提示，本轮分流培训的验收点）────────────────
 describe("coverage_notice 使用当下纠错提示", () => {
   test("成功路径恒带 coverage_notice，含实际 platforms 与 search_web", async () => {
     const res = await runAggregateTool(

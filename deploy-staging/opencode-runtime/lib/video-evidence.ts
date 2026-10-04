@@ -1,11 +1,11 @@
-// 影片證據面共用 lib（2026-09-28）。
+// 影片证据面共用 lib（2026-09-28）。
 //
-// 職責：把「以影片為輸入、取得結構化證據」這一格做成本機、零付費、零上游的能力面——
-//   probe（時長/串流/解析度/fps）、cut（單段或有序多段拼接）、frames（逐格 JPEG，附來源真實時間）、
-//   tile/tiles（拼板，含分頁）、boundaries（機械式相鄰幀變化候選）、transcript 疊詞。
+// 职责：把「以影片为输入、取得结构化证据」这一格做成本机、零付费、零上游的能力面——
+//   probe（时长/串流/解析度/fps）、cut（单段或有序多段拼接）、frames（逐格 JPEG，附来源真实时间）、
+//   tile/tiles（拼板，含分页）、boundaries（机械式相邻帧变化候选）、transcript 叠词。
 //
-// 形態來源（逐條照抄，非自由設計）：競品 hypit 的
-//   packages/video-cli/src/process.ts      → 本檔「外部程序」層
+// 形态来源（逐条照抄，非自由设计）：竞品 hypit 的
+//   packages/video-cli/src/process.ts      → 本档「外部程序」层
 //   packages/video-cli/src/media.ts        → probeMedia / openAt / JPEG / GLYPHS / rasterLabel /
 //                                            timecode / cutClip / cutProduction / writeCut / cutFrame /
 //                                            tileFrameCount / tileSampleTimes / frameLabel / tileFrames /
@@ -13,11 +13,11 @@
 //   packages/video-cli/src/media-frames.ts → decodeMediaFrames
 //   packages/video-cli/src/frame-grid.ts   → writeFrameGrid
 //   packages/video-cli/src/transcript.ts   → readTranscript / wordsAt / phraseRanges
-// 參數名、預設值、錯誤語義、ffmpeg 參數順序一律照它；本輪偏離處逐條列在交付回報 §5。
+// 参数名、预设值、错误语义、ffmpeg 参数顺序一律照它；本轮偏离处逐条列在交付回报 §5。
 //
-// 我方輪子複用：ffmpeg/ffprobe 絕對路徑慣例抄 lib/asr.ts:61-62；公網 blob 用 lib/img-composite.ts
-// 的 uploadBlob/blobPath（本檔不自行上傳，由 tools/video_evidence.ts 呼叫）。
-// 本檔不是 tool，不得 export tool 定義。
+// 我方轮子复用：ffmpeg/ffprobe 绝对路径惯例抄 lib/asr.ts:61-62；公网 blob 用 lib/img-composite.ts
+// 的 uploadBlob/blobPath（本档不自行上传，由 tools/video_evidence.ts 呼叫）。
+// 本档不是 tool，不得 export tool 定义。
 
 import { spawn } from "node:child_process"
 import { once } from "node:events"
@@ -27,7 +27,7 @@ import { tmpdir } from "node:os"
 import { dirname, extname, join, resolve } from "node:path"
 
 // ---------------------------------------------------------------------------
-// 執行檔位置（VPS 現場：ffmpeg/ffprobe 不在 PATH；慣例同 lib/asr.ts:61-62）
+// 执行档位置（VPS 现场：ffmpeg/ffprobe 不在 PATH；惯例同 lib/asr.ts:61-62）
 
 const BIN_DIR = "/opt/agent-harness/bin"
 const FFMPEG = process.env.FFMPEG_PATH || (existsSync(join(BIN_DIR, "ffmpeg")) ? join(BIN_DIR, "ffmpeg") : "ffmpeg")
@@ -53,8 +53,8 @@ async function exists(path: string): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// 外部程序層（移植 hypit process.ts：成功時 stderr 仍可攜帶工具 metadata，
-// 例如被抽出的影格時間戳，故 runProcessOutput 必須把 stderr 交回呼叫端）
+// 外部程序层（移植 hypit process.ts：成功时 stderr 仍可携带工具 metadata，
+// 例如被抽出的影格时间戳，故 runProcessOutput 必须把 stderr 交回呼叫端）
 
 type ProcessInput = Uint8Array | Iterable<Uint8Array> | AsyncIterable<Uint8Array>
 export type ProcessOutput = { readonly stdout: Buffer; readonly stderr: string }
@@ -118,12 +118,12 @@ function run(
   })
 }
 
-/** 跑完一支外部程序並回傳 stdout；stderr 進錯誤訊息。 */
+/** 跑完一支外部程序并回传 stdout；stderr 进错误讯息。 */
 export async function runProcess(executable: string, args: readonly string[], timeoutMs = 300_000): Promise<Buffer> {
   return (await run(executable, args, undefined, timeoutMs)).stdout
 }
 
-/** 成功時 stderr 仍可攜帶工具 metadata，例如被抽出的影格時間戳。 */
+/** 成功时 stderr 仍可携带工具 metadata，例如被抽出的影格时间戳。 */
 export function runProcessOutput(
   executable: string,
   args: readonly string[],
@@ -133,7 +133,7 @@ export function runProcessOutput(
   return run(executable, args, undefined, timeoutMs, onStderrLine)
 }
 
-/** 同一個程序邊界，當確定性位元流是程式的輸入之一時使用（位圖字型疊字）。 */
+/** 同一个程序边界，当确定性位元流是程式的输入之一时使用（位图字型叠字）。 */
 export async function runProcessWithInput(
   executable: string,
   args: readonly string[],
@@ -144,13 +144,13 @@ export async function runProcessWithInput(
 }
 
 // ---------------------------------------------------------------------------
-// sharp 探測（拼板文字標籤；現場 vips 8.18.7 可用，text/pango 實測可渲染）
+// sharp 探测（拼板文字标签；现场 vips 8.18.7 可用，text/pango 实测可渲染）
 
 type SharpFactory = ((input: unknown, options?: unknown) => any) & { versions?: { vips?: string } }
 
 let sharpPromise: Promise<SharpFactory | null> | null = null
 
-/** 探測 sharp 是否可用；不可用回 null（呼叫端決定是明示失敗還是退化）。 */
+/** 探测 sharp 是否可用；不可用回 null（呼叫端决定是明示失败还是退化）。 */
 export function loadSharp(): Promise<SharpFactory | null> {
   if (sharpPromise === null) {
     sharpPromise = (async (): Promise<SharpFactory | null> => {
@@ -203,7 +203,7 @@ export async function probeMedia(path: string): Promise<MediaProbe> {
   assert(video !== undefined || hasAudio, `${path}: no audio or video stream`)
   if (video === undefined) return { duration: round(duration), hasVideo: false, hasAudio }
   assert(video.width !== undefined && video.height !== undefined, `${path}: video dimensions are unavailable`)
-  // ffprobe 以比例回報幀率；靜態圖沒有比例。
+  // ffprobe 以比例回报帧率；静态图没有比例。
   const ratio = (video.r_frame_rate ?? "").split("/")
   const rate = Number(ratio[0]) / Number(ratio[1] ?? 1)
   return {
@@ -220,11 +220,11 @@ export async function probeMedia(path: string): Promise<MediaProbe> {
 // ffmpeg 配方
 
 /**
- * 在 `at` 秒的那一格開啟 `source`。
+ * 在 `at` 秒的那一格开启 `source`。
  *
- * 單獨把 `-ss` 放在 `-i` 之後會解碼到該標記之前的每一格；單獨放在 `-i` 之前只會落在它前面的
- * 關鍵幀。提早兩秒跳入再解碼這一小段 run-up 才會落在精確的那一格：實測於一段 1080p、九分鐘
- * 處的來源，同樣的 JPEG 逐位元相同，11.6 秒降到 0.2 秒。
+ * 单独把 `-ss` 放在 `-i` 之后会解码到该标记之前的每一格；单独放在 `-i` 之前只会落在它前面的
+ * 关键帧。提早两秒跳入再解码这一小段 run-up 才会落在精确的那一格：实测于一段 1080p、九分钟
+ * 处的来源，同样的 JPEG 逐位元相同，11.6 秒降到 0.2 秒。
  */
 const SEEK_RUN_UP = 2
 function openAt(source: string, at: number): readonly string[] {
@@ -233,7 +233,7 @@ function openAt(source: string, at: number): readonly string[] {
   return [...(jump > 0 ? ["-ss", String(round(jump))] : []), "-i", source, ...(runUp > 0 ? ["-ss", String(round(runUp))] : [])]
 }
 
-// JPEG 是全範圍格式；網路影片的 YUV 慣例也是全範圍，編碼器除非被明確告知否則拒收
+// JPEG 是全范围格式；网路影片的 YUV 惯例也是全范围，编码器除非被明确告知否则拒收
 // （`Non full-range YUV is non-standard`）。
 const JPEG = ["-pix_fmt", "yuvj420p", "-q:v", "3"] as const
 
@@ -267,7 +267,7 @@ type RasterLabel = {
   readonly bytes: Buffer
 }
 
-/** 一支內建的小型數字字面，讓證據標籤在 ffmpeg 缺少 drawtext 時仍然可用（現場實測無 drawtext）。 */
+/** 一支内建的小型数字字面，让证据标签在 ffmpeg 缺少 drawtext 时仍然可用（现场实测无 drawtext）。 */
 function rasterLabel(text: string, requestedWidth?: number): RasterLabel {
   const scale = requestedWidth === undefined
     ? 3
@@ -307,7 +307,7 @@ function rawVideoInput(label: RasterLabel, frameRate: number): readonly string[]
   ]
 }
 
-/** 影格抽取：回傳實際解到的來源時間（不是請求時間）。 */
+/** 影格抽取：回传实际解到的来源时间（不是请求时间）。 */
 export async function cutFrame(source: string, at: number, target: string, labelTime = false): Promise<number> {
   if (!labelTime) {
     const jump = Math.max(0, at - SEEK_RUN_UP)
@@ -375,7 +375,7 @@ async function cutClip(
 
 export type CutSpan = { readonly start: number; readonly end: number }
 
-/** 解碼被選中的段落一次，把它們接到一個新的本地時鐘上，只保留真的存在的串流。 */
+/** 解码被选中的段落一次，把它们接到一个新的本地时钟上，只保留真的存在的串流。 */
 async function cutProduction(source: string, spans: readonly CutSpan[], target: string, info: MediaProbe): Promise<void> {
   const seek = Math.max(0, spans[0]!.start - SEEK_RUN_UP)
   const labels: string[] = []
@@ -405,7 +405,7 @@ async function cutProduction(source: string, spans: readonly CutSpan[], target: 
   ])
 }
 
-/** 原子發佈完成的剪輯，不覆蓋另一個程序期間可能已建立的檔案。 */
+/** 原子发布完成的剪辑，不覆盖另一个程序期间可能已建立的档案。 */
 async function writeCut(
   source: string, spans: readonly CutSpan[], target: string, info: MediaProbe, labeled: boolean,
 ): Promise<void> {
@@ -423,8 +423,8 @@ async function writeCut(
 }
 
 /**
- * cut 命令本體（單段或有序多段）：驗證 → 原子寫出 → 回量測到的實際秒數與串流。
- * 回傳 actualSeconds 是**重新 probe 輸出檔**的時長（不是請求值）。
+ * cut 命令本体（单段或有序多段）：验证 → 原子写出 → 回量测到的实际秒数与串流。
+ * 回传 actualSeconds 是**重新 probe 输出档**的时长（不是请求值）。
  */
 export async function cutSpans(
   source: string,
@@ -450,9 +450,9 @@ export async function cutSpans(
 }
 
 // ---------------------------------------------------------------------------
-// tile 命令本體（單張拼板；目的地不得已存在）
+// tile 命令本体（单张拼板；目的地不得已存在）
 
-/** 單張拼板：`--every` 從 start 起不含 end；`--frames` 取等距中點。 */
+/** 单张拼板：`--every` 从 start 起不含 end；`--frames` 取等距中点。 */
 export async function writeTile(
   source: string,
   times: readonly number[],
@@ -467,11 +467,11 @@ export async function writeTile(
 }
 
 // ---------------------------------------------------------------------------
-// 逐格解碼（media-frames.ts）
+// 逐格解码（media-frames.ts）
 
 export type DecodedFrame = { readonly at: number; readonly path: string }
 
-/** 解碼一次來源區間，保留每一格的實際來源時間戳。 */
+/** 解码一次来源区间，保留每一格的实际来源时间戳。 */
 export async function decodeMediaFrames(source: string, start: number, end: number, directory: string): Promise<readonly DecodedFrame[]> {
   if (!Number.isFinite(start) || start < 0 || !Number.isFinite(end) || end <= start) throw new Error("Native frames need 0 <= start < end")
   await mkdir(directory, { recursive: true })
@@ -495,8 +495,8 @@ export async function decodeMediaFrames(source: string, start: number, end: numb
 // 拼板（frame-grid.ts）
 
 /**
- * 排列已抓到的證據。解碼與時間選擇屬於呼叫端。
- * 標籤是 Pre-rendered 的 PNG Buffer（由 frameLabel 產生）；未給標籤時該列不留標籤條。
+ * 排列已抓到的证据。解码与时间选择属于呼叫端。
+ * 标签是 Pre-rendered 的 PNG Buffer（由 frameLabel 产生）；未给标签时该列不留标签条。
  */
 export async function writeFrameGrid(
   frames: readonly { readonly path: string; readonly label?: Buffer }[],
@@ -527,23 +527,23 @@ export async function writeFrameGrid(
 }
 
 // ---------------------------------------------------------------------------
-// 拼板排數/取樣（排數語義照它）
+// 拼板排数/取样（排数语义照它）
 
 const TILE_COLUMNS = 3
 const TILE_CELL_WIDTH = 480
-/** 緊湊總覽的預設值。變化快時呼叫端自己指定更密的取樣。 */
+/** 紧凑总览的预设值。变化快时呼叫端自己指定更密的取样。 */
 export function tileFrameCount(seconds: number): number {
   return clamp(Math.round(seconds * 1.5), 4, 9)
 }
 
-/** 等距中點取樣（--frames 語義）。 */
+/** 等距中点取样（--frames 语义）。 */
 export function tileSampleTimes(start: number, end: number, frameCount: number): number[] {
   assert(end > start, `the stretch must end after it starts (${start} to ${end})`)
   assert(Number.isSafeInteger(frameCount) && frameCount >= 2, "a grid needs at least two frames")
   return Array.from({ length: frameCount }, (_, index) => round(start + (index + 0.5) * (end - start) / frameCount))
 }
 
-/** 從 start 起、不含 end（--every 語義）；every 下限 0.001 秒。 */
+/** 从 start 起、不含 end（--every 语义）；every 下限 0.001 秒。 */
 export function intervalSamples(start: number, end: number, every: number): number[] {
   assert(Number.isFinite(start) && start >= 0 && Number.isFinite(end) && end > start, "a sample range needs 0 <= start < end")
   assert(Number.isFinite(every) && every >= 0.001, "--every must be at least 0.001 seconds")
@@ -555,7 +555,7 @@ function escapeMarkup(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 }
 
-/** 標籤條：第一行時間碼，第二行活動詞（或明示沒有），第三行上下文（活動詞高亮）。 */
+/** 标签条：第一行时间码，第二行活动词（或明示没有），第三行上下文（活动词高亮）。 */
 async function frameLabel(at: number, width: number, words?: FrameWords): Promise<Buffer> {
   const sharp = await loadSharp()
   if (sharp === null) throw new Error("sharp is unavailable: transcript frame labels need the sharp module")
@@ -576,7 +576,7 @@ async function frameLabel(at: number, width: number, words?: FrameWords): Promis
 
 export type SampledFrame = { readonly requestedAt: number; readonly at: number; readonly words?: FrameWords }
 
-/** 抽 N 格 + 疊標籤 → 一張拼板。回傳每格實際解到的來源時間。 */
+/** 抽 N 格 + 叠标签 → 一张拼板。回传每格实际解到的来源时间。 */
 export async function tileFrames(
   source: string,
   times: readonly number[],
@@ -606,10 +606,10 @@ export async function tileFrames(
 }
 
 // ---------------------------------------------------------------------------
-// 相鄰幀變化候選（boundaries）
+// 相邻帧变化候选（boundaries）
 
 /**
- * 機械式的相鄰幀視覺變化候選。分數是機械證據，不是剪輯判讀的鏡頭標籤。
+ * 机械式的相邻帧视觉变化候选。分数是机械证据，不是剪辑判读的镜头标签。
  */
 const DEFAULT_BOUNDARY_RATE = 12
 const DEFAULT_BOUNDARY_THRESHOLD = 0.1
@@ -639,11 +639,11 @@ export async function visualBoundaries(
 }
 
 // ---------------------------------------------------------------------------
-// 區間/取樣選擇（sampleRange / sampleTimes，照它）
+// 区间/取样选择（sampleRange / sampleTimes，照它）
 
 const SAMPLE_OPTIONS = ["--start", "--end", "--at", "--every", "--transcript", "--around", "--occurrence", "--padding"] as const
 
-/** 已解析的取樣請求（tool 層把 args 正規化成這個形狀；語義與 hypit CLI 選項一一對應）。 */
+/** 已解析的取样请求（tool 层把 args 正规化成这个形状；语义与 hypit CLI 选项一一对应）。 */
 export interface SampleRequest {
   readonly start?: number
   readonly end?: number
@@ -715,9 +715,9 @@ export function sampleTimes(request: SampleRequest, duration: number, requireEve
 export { SAMPLE_OPTIONS, TILE_COLUMNS, TILE_CELL_WIDTH }
 
 // ---------------------------------------------------------------------------
-// frames 命令本體
+// frames 命令本体
 
-/** 逐格 JPEG（--at / --every），檔名帶來源時間；目錄不得已存在，寫入以 rename 原子發佈。 */
+/** 逐格 JPEG（--at / --every），档名带来源时间；目录不得已存在，写入以 rename 原子发布。 */
 export async function writeFrames(
   source: string,
   times: readonly number[],
@@ -761,7 +761,7 @@ export interface NativeFrameOptions {
   readonly width?: number
 }
 
-/** 原生逐格觀察：每個請求區間只解碼一次，再分頁；每格寫入其實際來源時間戳。 */
+/** 原生逐格观察：每个请求区间只解码一次，再分页；每格写入其实际来源时间戳。 */
 export async function nativeFrames(
   source: string,
   ranges: readonly SampleRangeInput[],
@@ -817,7 +817,7 @@ export async function nativeFrames(
   return { frames: written, grids }
 }
 
-/** --every-frame 的預設路徑：不解標籤，只把原生幀連續解碼後落地。 */
+/** --every-frame 的预设路径：不解标签，只把原生帧连续解码后落地。 */
 export async function writeEveryFrame(
   source: string, start: number, end: number, dir: string,
 ): Promise<{ at: number; path: string }[]> {
@@ -826,7 +826,7 @@ export async function writeEveryFrame(
 }
 
 // ---------------------------------------------------------------------------
-// tiles 命令本體
+// tiles 命令本体
 
 export interface SampleRangeInput {
   readonly id?: string
@@ -836,7 +836,7 @@ export interface SampleRangeInput {
   readonly every?: number
 }
 
-/** 一個 range 物件（ranges JSON 的元素）的驗證，逐條照它。 */
+/** 一个 range 物件（ranges JSON 的元素）的验证，逐条照它。 */
 export function parseTileRange(value: unknown, index: number, duration: number): SampleRangeInput {
   assert(typeof value === "object" && value !== null && !Array.isArray(value), `range ${index + 1} must be an object`)
   const raw = value as Record<string, unknown>
@@ -855,7 +855,7 @@ export interface TileRangeSpec extends SampleRangeInput {
   readonly times: readonly number[]
 }
 
-/** 分頁拼板（預設 3 列）。目錄不得已存在，寫入以 rename 原子發佈。 */
+/** 分页拼板（预设 3 列）。目录不得已存在，写入以 rename 原子发布。 */
 export async function writeTiles(
   source: string,
   ranges: readonly TileRangeSpec[],
@@ -896,9 +896,9 @@ export async function writeTiles(
 }
 
 // ---------------------------------------------------------------------------
-// transcript（transcript.ts）：每詞必須有 text；缺時間的詞保持缺，不編造。
+// transcript（transcript.ts）：每词必须有 text；缺时间的词保持缺，不编造。
 
-/** 我方格式名（欄位名照 hypit：passages[].words[].{text,start_seconds,end_seconds}）。 */
+/** 我方格式名（栏位名照 hypit：passages[].words[].{text,start_seconds,end_seconds}）。 */
 export const TRANSCRIPT_FORMAT = "eimu.transcript@1"
 
 export type TranscriptWord = {
@@ -912,7 +912,7 @@ export type FrameWords = {
   readonly context: TranscriptWord[]
 }
 
-/** 驗證一份已解析的 transcript 物件（inline JSON 與檔案共用同一套驗證）。 */
+/** 验证一份已解析的 transcript 物件（inline JSON 与档案共用同一套验证）。 */
 export function parseTranscript(rawIn: unknown, label: string): TranscriptWord[] {
   const raw = rawIn as { format?: unknown; passages?: unknown }
   assert(raw?.format === TRANSCRIPT_FORMAT, `${label}: expected ${TRANSCRIPT_FORMAT}`)
@@ -953,7 +953,7 @@ function searchable(text: string): string {
   return text.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{Z}\s]/gu, "")
 }
 
-/** 找出整段連續的轉寫詞；標點與大小寫不影響比對。 */
+/** 找出整段连续的转写词；标点与大小写不影响比对。 */
 export function phraseRanges(words: readonly TranscriptWord[], text: string): { start: number; end: number }[] {
   const query = searchable(text)
   assert(query.length > 0, "--around needs a word or phrase")
@@ -974,17 +974,17 @@ export function phraseRanges(words: readonly TranscriptWord[], text: string): { 
 }
 
 // ---------------------------------------------------------------------------
-// fetch 的 yt-dlp 政策（§D：釘版＋獨立環境＋顯式 prepare＋版本斷言；
-// 本輪只實作「未就緒就誠實失敗」，不在 fetch 時自動安裝）
+// fetch 的 yt-dlp 政策（§D：钉版＋独立环境＋显式 prepare＋版本断言；
+// 本轮只实作「未就绪就诚实失败」，不在 fetch 时自动安装）
 //
-// `yt-dlp` 因為在追持續改動的站點而頻繁發版，未釘版的一份會讓同一個連結在兩台機器上抓出不同的結果。
+// `yt-dlp` 因为在追持续改动的站点而频繁发版，未钉版的一份会让同一个连结在两台机器上抓出不同的结果。
 
-/** 釘版 Python 環境的落點（尚未建立；prepare 由外部顯式執行）。 */
+/** 钉版 Python 环境的落点（尚未建立；prepare 由外部显式执行）。 */
 export const YTDLP_HOME = "/opt/agent-harness/workspace/.opencode/ytdlp"
 export const YTDLP_PIN_FILE = join(YTDLP_HOME, "PINNED_VERSION")
 export const YTDLP_BIN = join(YTDLP_HOME, "venv", "bin", "yt-dlp")
 
-/** 建議的 prepare 指令（顯式、可複核；本輪不代為執行）。 */
+/** 建议的 prepare 指令（显式、可复核；本轮不代为执行）。 */
 export function ytDlpPrepareCommand(pin = "<版本>", python = "python3"): string {
   return [
     `mkdir -p ${YTDLP_HOME}`,
@@ -1011,8 +1011,8 @@ export function isVideoUrl(value: string): boolean {
 }
 
 /**
- * 把一個網址變成檔案（影片＋音訊一起）。政策：只使用釘版的獨立環境，
- * 使用前斷言 `--version` **完全相符**，絕不在 fetch 時自動安裝。
+ * 把一个网址变成档案（影片＋音讯一起）。政策：只使用钉版的独立环境，
+ * 使用前断言 `--version` **完全相符**，绝不在 fetch 时自动安装。
  */
 export async function fetchVideo(url: string, target: string): Promise<void> {
   const prepare = ytDlpPrepareCommand()

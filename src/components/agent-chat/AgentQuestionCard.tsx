@@ -8,7 +8,7 @@ import { INPUT_CLASS } from "./MySkillsDialog";
 
 export interface AgentQuestionCardProps {
   question: AgentPendingQuestion;
-  /** 選中的標籤，依題目順序組成 string[][]，對齊 opencode /question/{que_*}/reply。 */
+  /** 选中的标签，依题目顺序组成 string[][]，对齐 opencode /question/{que_*}/reply。 */
   onAnswer: (requestId: string, answers: string[][]) => Promise<boolean | void>;
 }
 
@@ -33,9 +33,9 @@ export async function submitQuestionAnswer(
 }
 
 /**
- * 清單列語彙（AgentToolCard / AgentSubagentBar 家族，2026-10-03 對版）：
- * 無底色、hover 只換白玻璃底、`rounded-[12px]`、`min-h-12` 保 44px 觸摸靶；
- * hover 只換色不位移（transition-colors）。選中態另加 `bg-ios-blue/[0.10]` + ring。
+ * 清单列语汇（AgentToolCard / AgentSubagentBar 家族，2026-10-03 对版）：
+ * 无底色、hover 只换白玻璃底、`rounded-[12px]`、`min-h-12` 保 44px 触摸靶；
+ * hover 只换色不位移（transition-colors）。选中态另加 `bg-ios-blue/[0.10]` + ring。
  */
 const OPTION_ROW_CLASS = cn(
   "flex min-h-12 w-full items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left",
@@ -46,8 +46,8 @@ const OPTION_ROW_CLASS = cn(
 );
 
 /**
- * 主鈕 / 幽靈次鈕：逐字對齊 AgentConfirmCard 已定案語彙（2026-09-20），
- * 不各寫一份——問答卡的「明白，继续」「提交」＝主鈕，「重新说明」「取消」＝幽靈次鈕。
+ * 主钮 / 幽灵次钮：逐字对齐 AgentConfirmCard 已定案语汇（2026-09-20），
+ * 不各写一份——问答卡的「明白，继续」「提交」＝主钮，「重新说明」「取消」＝幽灵次钮。
  */
 const PRIMARY_BUTTON_CLASS = cn(
   "flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-[#2d3142] px-5 text-ios-footnote font-medium text-white",
@@ -71,8 +71,8 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
   const [busy, setBusy] = useState(false);
   // 被点中的选项：那颗按钮转圈 + 高亮，不是无声消失，也不让连点送两次。
   const [pickedLabel, setPickedLabel] = useState<string | null>(null);
-  // 每題已選的答案（本地暫存）：最後一題點完才一次提交完整 answers。
-  // 一次只顯示一題——不再把多個問題疊在同一張卡裡（用戶 2026-08-15 指正）。
+  // 每题已选的答案（本地暂存）：最后一题点完才一次提交完整 answers。
+  // 一次只显示一题——不再把多个问题叠在同一张卡里（用户 2026-08-15 指正）。
   const picksRef = useRef<string[]>([]);
   // 罪状 5：正常分支也要有可自由输入的「其他…」口——选项清单锁死时，
   // 想说的话说不出去，用户只能硬选一个不想要的答案。
@@ -154,7 +154,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
     setPickedLabel(label);
     setBusy(true);
     if (current < questions.length - 1) {
-      // 還有下一題：短暫回饋後切到下一題
+      // 还有下一题：短暂回馈后切到下一题
       window.setTimeout(() => {
         setCurrent((c) => c + 1);
         setPickedLabel(null);
@@ -165,7 +165,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
       }, 250);
       return;
     }
-    // 最後一題：提交全部題目的答案（對齊 opencode answers 契約）
+    // 最后一题：提交全部题目的答案（对齐 opencode answers 契约）
     const answers = questions.map((_, i) =>
       picksRef.current[i] ? [picksRef.current[i]] : [],
     );
@@ -202,10 +202,10 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
           </div>
         </div>
         {/* 选项是整行可点的清单项，不是一排无声的小胶囊：点下去有高亮 + 转圈回馈。
-            2026-09-20 截斷修復：label/description 都要 break-words——模型吐出的
-            選項文字可能是長英文串，白名單式 truncate 在問答卡語義裡是「藏答案」。
-            2026-10-03 語彙對版：改用站內清單列（白玻璃 hover、rounded-[12px]），
-            不再讓每一列都鋪一層藍底。 */}
+            2026-09-20 截断修复：label/description 都要 break-words——模型吐出的
+            选项文字可能是长英文串，白名单式 truncate 在问答卡语义里是「藏答案」。
+            2026-10-03 语汇对版：改用站内清单列（白玻璃 hover、rounded-[12px]），
+            不再让每一列都铺一层蓝底。 */}
         <div className="mt-3 flex flex-col gap-2">
           {item.options.map((opt) => {
             const isPicked = pickedLabel === opt.label;

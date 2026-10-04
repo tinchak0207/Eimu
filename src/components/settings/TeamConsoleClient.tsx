@@ -1,17 +1,17 @@
 "use client";
 
-// 團隊治理控制台（片F 六面 API 的前端入口）：成員/角色、建畫布開關、加入審批、
-// 席位、解散冷靜期、用量。
+// 团队治理控制台（片F 六面 API 的前端入口）：成员/角色、建画布开关、加入审批、
+// 席位、解散冷静期、用量。
 //
-// 認證：六面 API 是 B 端密鑰端點（`/api/v1/team/*`，生產由 next.config 的 beforeFiles
-// 改寫到控制面）。**站內 session token 不是 B 端密鑰**，瀏覽器無法用它換，故本面板
-// 要求粘貼團隊主帳號的 B 端密鑰（在 /settings/api-keys 建立）。
-// 密鑰只存 sessionStorage（關分頁即清）＋記憶體，不進 localStorage、不進 log、不落任何後端。
+// 认证：六面 API 是 B 端密钥端点（`/api/v1/team/*`，生产由 next.config 的 beforeFiles
+// 改写到控制面）。**站内 session token 不是 B 端密钥**，浏览器无法用它换，故本面板
+// 要求粘贴团队主帐号的 B 端密钥（在 /settings/api-keys 建立）。
+// 密钥只存 sessionStorage（关分页即清）＋记忆体，不进 localStorage、不进 log、不落任何后端。
 //
-// 樣式逐項照抄既有面板 `src/components/settings/ApiKeysClient.tsx`（lg-card / lg-tint /
-// rounded-ios-* / text-ios-* / 主色 #007AFF），不另立一套設計語言。
-// 本檔無浮層（確認一律走 window.confirm，與 ApiKeysClient 同款）——
-// 因此不觸發「祖先 overflow-hidden / backdrop-filter 必須 portal」的裁切規律。
+// 样式逐项照抄既有面板 `src/components/settings/ApiKeysClient.tsx`（lg-card / lg-tint /
+// rounded-ios-* / text-ios-* / 主色 #007AFF），不另立一套设计语言。
+// 本档无浮层（确认一律走 window.confirm，与 ApiKeysClient 同款）——
+// 因此不触发「祖先 overflow-hidden / backdrop-filter 必须 portal」的裁切规律。
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -73,7 +73,7 @@ interface SeatsPayload {
   member_count: number;
   capacity: { min_members: number; default_max_members: number; max_members: number };
   can_admit_more: boolean;
-  /** 誠實標註：席位目前只是意圖整數，未接計費（不支援按席位購買/續費）。 */
+  /** 诚实标注：席位目前只是意图整数，未接计费（不支援按席位购买/续费）。 */
   billing_connected?: boolean;
 }
 
@@ -234,7 +234,7 @@ export function TeamConsoleClient() {
       ]);
       setLoading(false);
       if (!m.ok) {
-        setNotice({ tone: "bad", text: `密鑰校驗失敗：${m.message}` });
+        setNotice({ tone: "bad", text: `密钥校验失败：${m.message}` });
         return;
       }
       setMembers(m.data);

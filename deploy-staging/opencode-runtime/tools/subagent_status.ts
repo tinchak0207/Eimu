@@ -39,8 +39,8 @@ export default tool({
           data?.error || `HTTP ${res.status}`,
           {
             http_status: res.status,
-            // D4：網關的 not_found 會附最近 3 筆 run（含 id/狀態/label）。結構化透傳，
-            // 讓模型不必從句子裡撈 id 就能改用正確的一筆（或改傳 latest）。
+            // D4：网关的 not_found 会附最近 3 笔 run（含 id/状态/label）。结构化透传，
+            // 让模型不必从句子里捞 id 就能改用正确的一笔（或改传 latest）。
             ...(Array.isArray(data?.recent_runs) ? { recent_runs: data.recent_runs } : {}),
           },
         )

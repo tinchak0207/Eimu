@@ -61,7 +61,7 @@ interface PromptInputProps {
   onUpscaleResult?: (url: string) => void;
   /**
    * 改图/放大未登入送出时的登录入口。上层传 standalone-aware 的实现
-   * （Electron 殼 / PWA 走跨浏览器交接）；不传时退回 hook 内的同窗口跳转。
+   * （Electron 壳 / PWA 走跨浏览器交接）；不传时退回 hook 内的同窗口跳转。
    */
   onNeedLogin?: () => void;
   /**
@@ -81,45 +81,45 @@ interface PromptInputProps {
   initialAgentSessionId?: string;
   /** agent 产出新图时回调，把 URL 推进右侧 ImageDisplay。 */
   onImageResult?: (url: string) => void;
-  /** 畫布 SSE 事件分流（v3 embed），轉交 AgentChatSurface → useAgentChat。 */
+  /** 画布 SSE 事件分流（v3 embed），转交 AgentChatSurface → useAgentChat。 */
   onCanvasEvent?: (event: AgentSseEvent) => void;
-  /** 發送前提供畫布摘要（v3 embed）。 */
+  /** 发送前提供画布摘要（v3 embed）。 */
   canvasStateProvider?: () => unknown;
   /**
-   * agent session 切換時回調（畫布 session 隔離）：
-   * 新 session 開起來時舊畫布必須清掉，否則新 agent session 的節點會
-   * 疊在上一次 canvas session 的節點上，用戶分不清哪些是這次做的。
+   * agent session 切换时回调（画布 session 隔离）：
+   * 新 session 开起来时旧画布必须清掉，否则新 agent session 的节点会
+   * 叠在上一次 canvas session 的节点上，用户分不清哪些是这次做的。
    */
   onSessionChange?: (sessionId: string | null) => void;
   /**
-   * 2026-08-25 模板注入：要自動發出的第一條用戶消息（模板 initialPrompt）。
-   * 點模板卡本身就是發送動作，這條直送 agent，不預填讓用戶再點發送。
+   * 2026-08-25 模板注入：要自动发出的第一条用户消息（模板 initialPrompt）。
+   * 点模板卡本身就是发送动作，这条直送 agent，不预填让用户再点发送。
    */
   agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
-  /** 用戶發出第一條消息時回調（上層收起右側模板庫）。 */
+  /** 用户发出第一条消息时回调（上层收起右侧模板库）。 */
   onUserMessage?: () => void;
   /**
-   * 「預填但不送出」通路（AgentChatSurface 的 prefillRequest）：輸入框有字、
-   * 光標在末尾、焦點在框上，人再按送出。新人禮首登彈窗的主按鈕走這條。
+   * 「预填但不送出」通路（AgentChatSurface 的 prefillRequest）：输入框有字、
+   * 光标在末尾、焦点在框上，人再按送出。新人礼首登弹窗的主按钮走这条。
    */
   prefillRequest?: { text: string; nonce: number } | null;
-  /** 一句話因未登入送不出去時上拋（上層留住，登入後補送）。 */
+  /** 一句话因未登入送不出去时上抛（上层留住，登入后补送）。 */
   onSendBlockedByAuth?: (text: string) => void;
   /**
-   * 畫布工作站浮動面板態：面板自己有確定高度（桌面全高 / 手機 46dvh 抽屜），
-   * 聊天區改為填滿面板剩餘空間，由 transcript 內部滾動。仍然用
-   * --agent-surface-height 固定高的話，60dvh 的聊天區塞進 46dvh 的抽屜，
-   * 輸入區和最新一條訊息會被面板底邊裁掉。
+   * 画布工作站浮动面板态：面板自己有确定高度（桌面全高 / 手机 46dvh 抽屉），
+   * 聊天区改为填满面板剩余空间，由 transcript 内部滚动。仍然用
+   * --agent-surface-height 固定高的话，60dvh 的聊天区塞进 46dvh 的抽屉，
+   * 输入区和最新一条讯息会被面板底边裁掉。
    */
   fillAvailableHeight?: boolean;
   /**
-   * 工作站態把「收合面板」等面板級按鈕併入聊天 header（觸發前後同一個 UI，
-   * 面板不再自長頂欄）。主頁態不傳。
+   * 工作站态把「收合面板」等面板级按钮并入聊天 header（触发前后同一个 UI，
+   * 面板不再自长顶栏）。主页态不传。
    */
   chatHeaderExtra?: import("react").ReactNode;
-  /** 雙向同步：把 AgentChatSurface 的 switchSession 能力上拋（畫布選中節點 → 切會話）。 */
+  /** 双向同步：把 AgentChatSurface 的 switchSession 能力上抛（画布选中节点 → 切会话）。 */
   switchSessionRef?: MutableRefObject<((sessionId: string) => Promise<boolean>) | null>;
-  /** 暴君裁定 2026-09-01：套模板「留舊開新」，同款上拋 startNewSession。 */
+  /** 暴君裁定 2026-09-01：套模板「留旧开新」，同款上抛 startNewSession。 */
   startNewSessionRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }
 
@@ -164,8 +164,8 @@ const AgentChatSurface = dynamic(
 const AGENT_SURFACE_HEIGHT = "var(--agent-surface-height)";
 
 /**
- * 首頁掛載即預載聊天面 chunk：點「AI 助理」時 dynamic() 直接命中瀏覽器快取，
- * 零網路等待。generate 模式也會拉——這是刻意的（首頁預載換點擊零等待）。
+ * 首页挂载即预载聊天面 chunk：点「AI 助理」时 dynamic() 直接命中浏览器快取，
+ * 零网路等待。generate 模式也会拉——这是刻意的（首页预载换点击零等待）。
  */
 export function preloadAgentChatSurface(): void {
   void import("@/components/agent-chat/AgentChatSurface");
@@ -233,18 +233,18 @@ export function PromptInput({
   }, [displayMode]);
 
   // ── 全模式共用外框高度（Task 3 抽成 use-height-lock.ts）──
-  // generate/edit 實測自然高鎖為全模式外框高；測量根仍是本組件 JSX 裡
-  // 綁定 contentRef 的那個 section（包含所有模式面的同一 DOM 節點）。
+  // generate/edit 实测自然高锁为全模式外框高；测量根仍是本组件 JSX 里
+  // 绑定 contentRef 的那个 section（包含所有模式面的同一 DOM 节点）。
   const { contentRef, contentHeight } = useHeightLock({ displayMode, modelId, fillAvailableHeight });
 
-  // 2026-09-22 首屏翻面：高度鎖只在 generate/edit 量測（見 use-height-lock.ts），
-  // 首屏直接落在 agent 面時從未量過，contentHeight 恆為 null——agent 內層的
-  // flex-1 沒有定高父容器可以分配，transcript 會把卡片撐到無限長、
-  // composer 被推出螢幕。兜底用設計系統本來就為這個面保留的
-  // --agent-surface-height（globals.css 已含桌面與手機兩組 clamp），
-  // 等使用者第一次進 generate 面量到真實高度後自動讓位。
-  // 常量 AGENT_SURFACE_HEIGHT 原本只是申明給 dynamic() 佔位符註解用、
-  // JSX 零引用（死碼），這次讓它真的被用上。
+  // 2026-09-22 首屏翻面：高度锁只在 generate/edit 量测（见 use-height-lock.ts），
+  // 首屏直接落在 agent 面时从未量过，contentHeight 恒为 null——agent 内层的
+  // flex-1 没有定高父容器可以分配，transcript 会把卡片撑到无限长、
+  // composer 被推出萤幕。兜底用设计系统本来就为这个面保留的
+  // --agent-surface-height（globals.css 已含桌面与手机两组 clamp），
+  // 等使用者第一次进 generate 面量到真实高度后自动让位。
+  // 常量 AGENT_SURFACE_HEIGHT 原本只是申明给 dynamic() 占位符注解用、
+  // JSX 零引用（死码），这次让它真的被用上。
   const surfaceHeight: number | string | null =
     contentHeight !== null ? contentHeight : displayMode === "agent" ? AGENT_SURFACE_HEIGHT : null;
 
@@ -260,7 +260,7 @@ export function PromptInput({
 
   // ── D-24 状态A：渐进披露第一层（Task 3 抽成 use-agent-hint.ts）──
   // 提示开关 / sessionStorage 记号 / 5 秒计时 / 送出抑制全在 hook 里；
-  // suppress 由 hook 回傳，generate / edit / upscale 三条送出路径闭包共享同一下发。
+  // suppress 由 hook 回传，generate / edit / upscale 三条送出路径闭包共享同一下发。
   const { agentHintOpen, spendAgentHint, suppress } = useAgentHint({ displayMode, input, isLoading });
 
   // 改图 / 放大各自维护来源图、阶段与结果；模式切换只换控件区，状态保留。
@@ -500,7 +500,7 @@ export function PromptInput({
       ref={contentRef}
       className={cn(
         "lg-card relative overflow-x-clip rounded-ios-3xl p-5 pb-6 sm:p-6 sm:pb-7",
-        // 工作站面板態：卡片成為 flex 鏈的一環（高度由面板分配，不由內容撐）。
+        // 工作站面板态：卡片成为 flex 链的一环（高度由面板分配，不由内容撑）。
         fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
       )}
       style={
@@ -512,9 +512,9 @@ export function PromptInput({
       {/* Specular top edge */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" aria-hidden="true" />
 
-      {/* 2026-08-22：高度鎖升級到 section 級——generate/edit 實測整卡自然高，
-          所有模式共用。內容區 flex-1 吸收底行高度差（agent 面底行換成極簡
-          返回條也不影響外框），底部行 shrink-0。切換零跳動、零溢出。 */}
+      {/* 2026-08-22：高度锁升级到 section 级——generate/edit 实测整卡自然高，
+          所有模式共用。内容区 flex-1 吸收底行高度差（agent 面底行换成极简
+          返回条也不影响外框），底部行 shrink-0。切换零跳动、零溢出。 */}
       <div
         className={cn(
           "relative space-y-4 min-h-0",
@@ -630,9 +630,9 @@ export function PromptInput({
         )}
 
         {/* ── 模式控件区：只有这里参与模式切换动画 ──
-            2026-08-22：高度改由外層 contentRef 容器統一鎖定（實測自然高），
-            這層只負責在鎖定態用 flex-1 拉滿外框（agent/upscale 內容少也填滿），
-            內容超出外框時內部滾動，不推高卡片。工作站態走 flex 鏈。 */}
+            2026-08-22：高度改由外层 contentRef 容器统一锁定（实测自然高），
+            这层只负责在锁定态用 flex-1 拉满外框（agent/upscale 内容少也填满），
+            内容超出外框时内部滚动，不推高卡片。工作站态走 flex 链。 */}
         <div
           className={cn(
             "dust-transition",
@@ -640,9 +640,9 @@ export function PromptInput({
             // 否则 agent 聊天区的 flex-1 没有 flex 父容器会失效，
             // transcript 被内容撑高、composer 被推出面板外裁掉。
             fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
-            // 非工作站態：外層已定高（flex-col），這裡 flex-1 拉滿。
-            // agent 面**不加** overflow-y-auto：聊天面自己管滾動（transcript 內滾），
-            // 外層再滾一根只會在卡片右上角卡出一小段尷尬滾動條（2026-08-22 裁定）。
+            // 非工作站态：外层已定高（flex-col），这里 flex-1 拉满。
+            // agent 面**不加** overflow-y-auto：聊天面自己管滚动（transcript 内滚），
+            // 外层再滚一根只会在卡片右上角卡出一小段尴尬滚动条（2026-08-22 裁定）。
             !fillAvailableHeight && displayMode !== "agent" && "flex min-h-0 flex-1 flex-col overflow-y-auto",
             !fillAvailableHeight && displayMode === "agent" && "flex min-h-0 flex-1 flex-col",
             animState === "exit" && "dust-exit",
@@ -711,15 +711,15 @@ export function PromptInput({
               按钮、右边结果画布、底下案例区全部原地不动。不跳 /agent 独立页。
               高度写死在这里而不是靠内容撑：聊天区内部靠 flex-1 + min-h-0 自己滚，
               外层不给定高度的话 transcript 会把卡片撑到无限长，输入区被推出屏幕。
-              例外：工作站浮動面板態（fillAvailableHeight）外層已有確定高度，
-              改為 flex-1 填滿——固定 60dvh 塞進窄手機抽屜會裁掉輸入區。
+              例外：工作站浮动面板态（fillAvailableHeight）外层已有确定高度，
+              改为 flex-1 填满——固定 60dvh 塞进窄手机抽屉会裁掉输入区。
               agent 面的「改图/放大/开始创作」列本来就不需要：
               agent 面只有输入区自己送出，摆一排模式切换会跟 composer 抢底部空间。 */}
           {displayMode === "agent" && (
             <div
               className="flex min-h-0 flex-1 flex-col pt-1"
-              // 2026-08-22：父容器（模式控件區）非工作站態已寫死同一高度，
-              // 這裡 flex-1 填滿即可；不再自己設 height（雙重定高無益）。
+              // 2026-08-22：父容器（模式控件区）非工作站态已写死同一高度，
+              // 这里 flex-1 填满即可；不再自己设 height（双重定高无益）。
               style={fillAvailableHeight ? { flex: "1 1 0%", minHeight: 0 } : { flex: "1 1 0%", minHeight: 0 }}
             >
               <AgentChatSurface

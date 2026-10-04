@@ -1,11 +1,11 @@
 "use client";
 
-// Agent 導演台小卡：director.done 的聊天呈現（spec §5 片5）。
-// 殼內不疊卡（agent-chat-liquid-glass-inset-surface）：iOS 內嵌面
-// rounded-[18px] + bg-[rgba(120,120,128,0.06)]，無邊框無陰影，骨架照抄
-// AgentToolCard/AgentImageCard 既有語彙。SVG 走 data:image/svg+xml;base64 img
+// Agent 导演台小卡：director.done 的聊天呈现（spec §5 片5）。
+// 壳内不叠卡（agent-chat-liquid-glass-inset-surface）：iOS 内嵌面
+// rounded-[18px] + bg-[rgba(120,120,128,0.06)]，无边框无阴影，骨架照抄
+// AgentToolCard/AgentImageCard 既有语汇。SVG 走 data:image/svg+xml;base64 img
 //（src/lib/svg-data-url.ts），禁 dangerouslySetInnerHTML。
-// 「全屏開啟」二期 C6 才開通：disabled + 「即将上线」标注，绝不伪造行为。
+// 「全屏开启」二期 C6 才开通：disabled + 「即将上线」标注，绝不伪造行为。
 
 import { memo, type ComponentType } from "react";
 import { Clapperboard, MonitorPlay, TriangleAlert, CircleCheck } from "lucide-react";
@@ -30,7 +30,7 @@ const HEALTH_META: Record<"ok" | "issues", HealthMeta> = {
   issues: { label: "待修正", Icon: TriangleAlert, badge: "", tone: "text-[rgba(120,90,20,0.9)]" },
 };
 
-/** 幀數 → 秒展示（24fps 對齊 gateway duration_frames 口徑）：48 → "2s"。 */
+/** 帧数 → 秒展示（24fps 对齐 gateway duration_frames 口径）：48 → "2s"。 */
 function formatDuration(frames: number): string {
   if (!Number.isFinite(frames) || frames <= 0) return "0s";
   const seconds = frames / 24;
@@ -93,7 +93,7 @@ function AgentDirectorCardComponent({ item }: AgentDirectorCardProps) {
         </ul>
       )}
 
-      {/* 3D 白模即時視口（片B）：WebGL 失敗才降級顯示 SVG 示意（topView/cameraView） */}
+      {/* 3D 白模即时视口（片B）：WebGL 失败才降级显示 SVG 示意（topView/cameraView） */}
       <DirectorMiniViewport
         sessionId={item.directorSessionId}
         revision={item.revision}

@@ -1,9 +1,9 @@
-// 建 key 成功後的開發者快速上手（S2）：把「簽發成功 → 首調成功」之間的摩擦壓到零。
+// 建 key 成功后的开发者快速上手（S2）：把「签发成功 → 首调成功」之间的摩擦压到零。
 //
-// 兩段 curl 的 model 與 size 一律由 catalog 真源推導，不在元件裡寫死猜測——
-// catalog 換模型/換預設比例時，範例自動跟隨；範例引用的 id 必須同時存在於
-// GENERATION_MODEL_CATALOG 與使用者可見白名單 IMAGE_MODEL_IDS，否則整段不顯示
-// （寧可不給範例，也不給一顆打不通的 model）。
+// 两段 curl 的 model 与 size 一律由 catalog 真源推导，不在元件里写死猜测——
+// catalog 换模型/换预设比例时，范例自动跟随；范例引用的 id 必须同时存在于
+// GENERATION_MODEL_CATALOG 与使用者可见白名单 IMAGE_MODEL_IDS，否则整段不显示
+// （宁可不给范例，也不给一颗打不通的 model）。
 import { DEFAULT_IMAGE_MODEL_ID } from "./image-model-ids.js";
 import {
   GENERATION_MODEL_CATALOG,
@@ -12,24 +12,24 @@ import {
   imageSizeForAspectRatio,
 } from "./generation-model-catalog";
 
-/** /v1 對外 Base URL（與站內接入文檔、DSH 插件同一真源）。 */
+/** /v1 对外 Base URL（与站内接入文档、DSH 插件同一真源）。 */
 export const DEV_QUICKSTART_BASE_URL = "https://eimu.dev/v1";
 
 /**
- * OpenAI 標準同步兼容 Base URL（/openai/v1：images/generations、chat/completions、models）。
- * 給 new-api／Cherry Studio／OpenAI SDK 這類只認標準協議的工具直接填，不用學 /v1 異步任務。
+ * OpenAI 标准同步兼容 Base URL（/openai/v1：images/generations、chat/completions、models）。
+ * 给 new-api／Cherry Studio／OpenAI SDK 这类只认标准协议的工具直接填，不用学 /v1 异步任务。
  */
 export const DEV_QUICKSTART_OPENAI_BASE_URL = "https://eimu.dev/openai/v1";
 
-/** 充值入口（餘額不足 402 的落地頁）。 */
+/** 充值入口（余额不足 402 的落地页）。 */
 export const DEV_QUICKSTART_PRICING_URL = "https://eimu.dev/pricing";
 
-/** 範例下方的餘額說明。 */
+/** 范例下方的余额说明。 */
 export const DEV_QUICKSTART_BALANCE_NOTE = "新人礼额度可直接调用；余额用完返回 402，附充值链接。";
 
 /**
- * 二次元（PixAI）展示模型偏好序：首位為 catalog 內 promotionTag「推荐」的
- * Tsubaki.2，其後按人氣排；實際回傳值仍要通過 catalog + 白名單雙重存在性檢查。
+ * 二次元（PixAI）展示模型偏好序：首位为 catalog 内 promotionTag「推荐」的
+ * Tsubaki.2，其后按人气排；实际回传值仍要通过 catalog + 白名单双重存在性检查。
  */
 const PIXAI_SHOWCASE_PREFERENCE: readonly string[] = [
   "pixai-tsubaki2",
@@ -40,11 +40,11 @@ const PIXAI_SHOWCASE_PREFERENCE: readonly string[] = [
 ];
 
 /**
- * 取一個二次元（PixAI）展示 model id。
+ * 取一个二次元（PixAI）展示 model id。
  *
- * 只認「catalog 實際存在 ∧ 使用者可見白名單內」的條目：先走偏好序，全落空時
- * 取 catalog 內第一個 pixai-* 條目；一個都沒有回 null（呼叫端據此隱藏該段範例）。
- * 純函數、零副作用，catalog/白名單可注入以便測試。
+ * 只认「catalog 实际存在 ∧ 使用者可见白名单内」的条目：先走偏好序，全落空时
+ * 取 catalog 内第一个 pixai-* 条目；一个都没有回 null（呼叫端据此隐藏该段范例）。
+ * 纯函数、零副作用，catalog/白名单可注入以便测试。
  */
 export function pixaiShowcaseModelId(
   catalog: Record<string, unknown> = GENERATION_MODEL_CATALOG,
@@ -59,7 +59,7 @@ export function pixaiShowcaseModelId(
   return visibleIds.find((id) => id.startsWith("pixai-") && Boolean(catalog[id])) ?? null;
 }
 
-/** 範例用的 size：由該 model 的預設比例推導（1:1 → 1024x1024），非手寫常數。 */
+/** 范例用的 size：由该 model 的预设比例推导（1:1 → 1024x1024），非手写常数。 */
 export function quickstartExampleSize(modelId: string): string | null {
   const model = generationModel(modelId);
   if (!model) return null;
@@ -67,19 +67,19 @@ export function quickstartExampleSize(modelId: string): string | null {
 }
 
 export interface QuickstartCurlExample {
-  /** 範例標題。 */
+  /** 范例标题。 */
   title: string;
-  /** 一行說明。 */
+  /** 一行说明。 */
   subtitle: string;
-  /** 對外 model id（catalog 真源推導）。 */
+  /** 对外 model id（catalog 真源推导）。 */
   modelId: string;
-  /** 已代入金鑰明文的完整 curl，可一鍵複製。 */
+  /** 已代入金钥明文的完整 curl，可一键复制。 */
   curl: string;
 }
 
 /**
- * 組一段 images/generations 的 curl。
- * 端點字面量只在此處出現一次，其餘呼叫端一律吃回傳值。
+ * 组一段 images/generations 的 curl。
+ * 端点字面量只在此处出现一次，其余呼叫端一律吃回传值。
  */
 export function buildGenerationCurl(input: {
   modelId: string;
@@ -96,8 +96,8 @@ export function buildGenerationCurl(input: {
 }
 
 /**
- * 建 key 成功後顯示的兩段範例（通用 + 二次元）。
- * 任一 model 在 catalog/白名單裡不存在時，該段直接不出現——不編造 id。
+ * 建 key 成功后显示的两段范例（通用 + 二次元）。
+ * 任一 model 在 catalog/白名单里不存在时，该段直接不出现——不编造 id。
  */
 export function quickstartCurlExamples(apiKey: string): QuickstartCurlExample[] {
   const examples: QuickstartCurlExample[] = [];

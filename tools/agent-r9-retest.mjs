@@ -1,4 +1,4 @@
-// R9 復測 v2：捕獲所有原始幀（含 ping）與連線終止原因，等待 75s 蓋兩個心跳週期
+// R9 复测 v2：捕获所有原始帧（含 ping）与连线终止原因，等待 75s 盖两个心跳周期
 import fs from "node:fs";
 
 const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
@@ -51,7 +51,7 @@ try {
   while (Date.now() - t0 < WATCH_MS) {
     await sleep(2000);
     const qReq = frames.find((f) => /^event:\s*question\.request/m.test(f.raw));
-    if (qReq && Date.now() - qReq.ts > 35_000) break; // 出卡後看滿 35s 蓋一個心跳
+    if (qReq && Date.now() - qReq.ts > 35_000) break; // 出卡后看满 35s 盖一个心跳
     if (conn.ended) break;
     if (frames.some((f) => /^event:\s*session\.error/m.test(f.raw))) break;
   }
@@ -70,14 +70,14 @@ try {
   const qReq = parsed.find((p) => p.ev === "question.request");
   const frozenTurnDone = qReq ? parsed.filter((p) => p.ev === "turn.done" && p.ts > qReq.ts) : [];
 
-  console.log(`  連線：ended=${conn.ended} reason=${conn.reason}`);
-  console.log(`  幀數=${frames.length} 事件序列：[${names.join(", ")}]`);
-  console.log(`  question.request=${!!qReq} heartbeat×${hb.length} 復讀message.delta×${replays.length} 掛起後turn.done×${frozenTurnDone.length}`);
-  if (hb.length > 0) console.log(`  心跳樣本：${JSON.stringify(hb[0].obj).slice(0, 120)}`);
-  if (replays.length > 0) console.log(`  復讀樣本：${JSON.stringify(replays[0].obj).slice(0, 120)}`);
+  console.log(`  连线：ended=${conn.ended} reason=${conn.reason}`);
+  console.log(`  帧数=${frames.length} 事件序列：[${names.join(", ")}]`);
+  console.log(`  question.request=${!!qReq} heartbeat×${hb.length} 复读message.delta×${replays.length} 挂起后turn.done×${frozenTurnDone.length}`);
+  if (hb.length > 0) console.log(`  心跳样本：${JSON.stringify(hb[0].obj).slice(0, 120)}`);
+  if (replays.length > 0) console.log(`  复读样本：${JSON.stringify(replays[0].obj).slice(0, 120)}`);
 
   const ok = !!qReq && hb.length >= 1 && replays.length === 0 && frozenTurnDone.length === 0;
-  record(1, ok, `出卡=${!!qReq} 心跳=${hb.length} 復讀=${replays.length} 掛起turn.done=${frozenTurnDone.length} 連線${conn.ended ? `斷:${conn.reason}` : "存活"}`);
+  record(1, ok, `出卡=${!!qReq} 心跳=${hb.length} 复读=${replays.length} 挂起turn.done=${frozenTurnDone.length} 连线${conn.ended ? `断:${conn.reason}` : "存活"}`);
 } catch (e) { record(1, false, String(e.message || e)); }
 
 console.log("\n===== RESULTS =====");

@@ -1,32 +1,32 @@
 // POST /v1/upscale — B 端高清放大。
 //
-// 2026-08-05：原先只在 VPS 上，且扣費空轉（見 pixai-proxy.ts 頭部說明）。
-// 定價跟**後端**走（見下方「錢的邊界」）；價表唯一來源仍是 generation-model-catalog，
-// 與 admin 覆寫層同源。
-// 錯誤體與 trace id 與 /v1/images/generations 對齊。
+// 2026-08-05：原先只在 VPS 上，且扣费空转（见 pixai-proxy.ts 头部说明）。
+// 定价跟**后端**走（见下方「钱的边界」）；价表唯一来源仍是 generation-model-catalog，
+// 与 admin 覆写层同源。
+// 错误体与 trace id 与 /v1/images/generations 对齐。
 //
-// ── 後端（2026-09-30 暴君指令「4k超分可以走 gpt image 2 執行超分」）────────────
-// 事實：① PixAI 渠道已死（當日裁定，站點風控），legacy 後端只會回 502；
-//      ② 4K 檔位在 legacy 後端上本來就卡 `factor=4` 未校準（fail-closed）。
-// 新後端＝**gpt-image-2 生成式重繪**：把原圖當參考圖、走 durable `image_edit` 任務，
-// 檔位挑 `resolution`（1k／2k／4k）、原圖比例挑 `ratio`——上游變體名即
+// ── 后端（2026-09-30 暴君指令「4k超分可以走 gpt image 2 执行超分」）────────────
+// 事实：① PixAI 渠道已死（当日裁定，站点风控），legacy 后端只会回 502；
+//      ② 4K 档位在 legacy 后端上本来就卡 `factor=4` 未校准（fail-closed）。
+// 新后端＝**gpt-image-2 生成式重绘**：把原图当参考图、走 durable `image_edit` 任务，
+// 档位挑 `resolution`（1k／2k／4k）、原图比例挑 `ratio`——上游变体名即
 // `firefly-gpt-image-{resolution}-{ratio}`（`generation-core/adobe2api-upstream.ts:82`），
-// 由**檔位×比例**決定輸出變體，不看像素 `size`。
+// 由**档位×比例**决定输出变体，不看像素 `size`。
 //
-// **語義變了，必須說清楚**：這不是保真的像素放大（不是原圖 ×N），是**重新繪製**——
-// 內容會被模型重畫一遍，細節可能與原圖不同。文件（`/v1/openapi.json`）同步改成這個口徑。
+// **语义变了，必须说清楚**：这不是保真的像素放大（不是原图 ×N），是**重新绘制**——
+// 内容会被模型重画一遍，细节可能与原图不同。文件（`/v1/openapi.json`）同步改成这个口径。
 //
-// **默認仍是 legacy（PixAI bridge）**；切換＝控面設 `UPSCALE_BACKEND=gpt-image-2`。
+// **默认仍是 legacy（PixAI bridge）**；切换＝控面设 `UPSCALE_BACKEND=gpt-image-2`。
 //
-// ── 錢的邊界（違反＝事故；2026-10-01 暴君授權「4K放大后端你自己决定 做好就行」）────
-// **收費跟後端、檔位走**：後端從 legacy 的一口價換成 gpt-image-2 的一次生成式重繪
-// （有真實上游成本），收費就按 gpt-image-2 在該檔位的 **catalog 價**（`imageCredits`
+// ── 钱的边界（违反＝事故；2026-10-01 暴君授权「4K放大后端你自己决定 做好就行」）────
+// **收费跟后端、档位走**：后端从 legacy 的一口价换成 gpt-image-2 的一次生成式重绘
+// （有真实上游成本），收费就按 gpt-image-2 在该档位的 **catalog 价**（`imageCredits`
 // 1k=10／2k=20／4k=80 credits ⇒ `generationCoins` 1／2／8 币）；`pixai-bridge`（legacy）
-// 仍維持 `pixai-upscale` 的 0.001 币不動。
-// **價表不另寫**：唯一來源仍是 `generation-model-catalog`，本路由只做「後端 → 定價鍵 →
-// 檔位價」的選擇（`generation-core/upscale-backend.ts` 的 `upscaleChargeQuota`／
-// `upscaleChargeModelId`）。錢只在**這一層**收一次：durable 上游提交一律帶
-// `billingAmount: 0`（`UPSCALE_UPSTREAM_BILLING_AMOUNT`），再記一次＝雙扣。
+// 仍维持 `pixai-upscale` 的 0.001 币不动。
+// **价表不另写**：唯一来源仍是 `generation-model-catalog`，本路由只做「后端 → 定价键 →
+// 档位价」的选择（`generation-core/upscale-backend.ts` 的 `upscaleChargeQuota`／
+// `upscaleChargeModelId`）。钱只在**这一层**收一次：durable 上游提交一律带
+// `billingAmount: 0`（`UPSCALE_UPSTREAM_BILLING_AMOUNT`），再记一次＝双扣。
 
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -75,7 +75,7 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function POST(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 認證成功後的所有回應（成功 + 錯誤）都帶限流預測頭；401/403/429 不走這裡。
+  // 认证成功后的所有回应（成功 + 错误）都带限流预测头；401/403/429 不走这里。
   const respond = (data: unknown, status: number, headers?: Record<string, string>) =>
     addRateLimitHeaders(jsonWithTrace(data, status, traceId, headers), auth.key);
 
@@ -106,9 +106,9 @@ export async function POST(req: NextRequest) {
     return respond(pixaiRequestError("image is required.", "missing_image", traceId), 400);
   }
 
-  // 超分檔位（P1-4）：`size` 在此入口是**檔位**語義（1k／2k／4k）；像素尺寸寫法
-  // （"1024x1024"）只作計費提示。舊碼 `body.size === "2k" ? "2k" : "1k"` 讓
-  // `size:"4k"` 靜默降級成 1k——本刀改成具名拒絕／具名檔位契約。
+  // 超分档位（P1-4）：`size` 在此入口是**档位**语义（1k／2k／4k）；像素尺寸写法
+  // （"1024x1024"）只作计费提示。旧码 `body.size === "2k" ? "2k" : "1k"` 让
+  // `size:"4k"` 静默降级成 1k——本刀改成具名拒绝／具名档位契约。
   let submission: ReturnType<typeof resolveUpscaleSubmission>;
   try {
     submission = resolveUpscaleSubmission({
@@ -124,16 +124,16 @@ export async function POST(req: NextRequest) {
   }
   const size = submission.tier;
 
-  // ── 後端（預設 legacy PixAI bridge；切 gpt-image-2 需控面設 env）──────────────
+  // ── 后端（预设 legacy PixAI bridge；切 gpt-image-2 需控面设 env）──────────────
   const backend = resolveUpscaleBackend();
   let plan: GptImageUpscalePlan | null = null;
   let reference: GenerationReference | null = null;
   if (backend === "gpt-image-2") {
     if (!generationControlPlaneEnabled()) {
-      // 沒有控制面（＝沒有 durable 任務與 DB）就沒有這條後端：具名拒，不假裝成功。
+      // 没有控制面（＝没有 durable 任务与 DB）就没有这条后端：具名拒，不假装成功。
       return respond(
         pixaiRequestError(
-          `超分後端 gpt-image-2 需要生成控制面（GENERATION_CONTROL_PLANE_ENABLED=true 且 GENERATION_DATABASE_URL 已配置）。`,
+          `超分后端 gpt-image-2 需要生成控制面（GENERATION_CONTROL_PLANE_ENABLED=true 且 GENERATION_DATABASE_URL 已配置）。`,
           "upscale_backend_unavailable",
           traceId,
         ),
@@ -146,12 +146,12 @@ export async function POST(req: NextRequest) {
       sourcePixels: submission.requestedPixelSize,
     });
     if (!planned.ok) {
-      // 未驗證的 檔位×比例 組合：具名拒（不靜默降級成較低檔位、不拿客戶的錢賭上游收得下）。
+      // 未验证的 档位×比例 组合：具名拒（不静默降级成较低档位、不拿客户的钱赌上游收得下）。
       return respond(pixaiRequestError(planned.message, planned.code, traceId), 400);
     }
     plan = planned.plan;
-    // 誠實預檢（碰額度之前）：跑完 job 才發現沒有該 比例×檔位 的 image_edit 渠道，
-    // 就是「先扣費、進場才失敗退款」的殭屍往返。與提交同參數（ratio×resolution）。
+    // 诚实预检（碰额度之前）：跑完 job 才发现没有该 比例×档位 的 image_edit 渠道，
+    // 就是「先扣费、进场才失败退款」的僵尸往返。与提交同参数（ratio×resolution）。
     const capable = await hasGenerationCapability({
       modelId: plan.modelId,
       kind: "image_edit",
@@ -162,15 +162,15 @@ export async function POST(req: NextRequest) {
     if (!capable) {
       return respond(
         pixaiRequestError(
-          `超分後端 ${plan.modelId} 沒有 ${plan.ratio}×${plan.resolution} 的改圖渠道`
-            + `（image_edit capability 不存在或已停用）——不販售沒有供給的檔位。`,
+          `超分后端 ${plan.modelId} 没有 ${plan.ratio}×${plan.resolution} 的改图渠道`
+            + `（image_edit capability 不存在或已停用）——不贩售没有供给的档位。`,
           "upscale_backend_capability_missing",
           traceId,
         ),
         400,
       );
     }
-    // 參考圖解析同樣放在扣費之前：非法 image（400／413）不該先動錢再退錢。
+    // 参考图解析同样放在扣费之前：非法 image（400／413）不该先动钱再退钱。
     try {
       reference = await resolveEditReference(image, `biz:${auth.key.id}`, `biz-upscale-${randomUUID()}`);
     } catch (error) {
@@ -182,12 +182,12 @@ export async function POST(req: NextRequest) {
   }
 
   await syncModelPricing();
-  // 收費跟後端走（價表唯一來源＝generation-model-catalog）：gpt-image-2 後端按該模型的
-  // 檔位價（1k／2k／4k），legacy pixai-bridge 仍是一口價 0.001 币（同源價，禁另寫價目）。
+  // 收费跟后端走（价表唯一来源＝generation-model-catalog）：gpt-image-2 后端按该模型的
+  // 档位价（1k／2k／4k），legacy pixai-bridge 仍是一口价 0.001 币（同源价，禁另写价目）。
   const pricingModelId = upscaleChargeModelId(backend);
   const quota = upscaleChargeQuota(backend, size, QUOTA_PER_COIN);
 
-  // ── 冪等（reserveSyncCharge 之前）：同 key 重試不重複扣費 ──────
+  // ── 幂等（reserveSyncCharge 之前）：同 key 重试不重复扣费 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
   let reservedIdempotency: { tenantId: string; key: string } | null = null;
   if (idempotencyKey) {
@@ -219,13 +219,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 錢走生產平面帳本（V-07）：同步 job 列 + billing_operation，失敗退款可被 reconcile 撈回。
+  // 钱走生产平面帐本（V-07）：同步 job 列 + billing_operation，失败退款可被 reconcile 捞回。
   const charged = await reserveSyncCharge({
     userId: auth.key.userId,
     quota,
     keyId: auth.key.id,
     action: "upscale",
-    // 帳本定價鍵跟後端走（顯示＝實際）：gpt-image-2 後端記 gpt-image-2，legacy 記 pixai-upscale。
+    // 帐本定价键跟后端走（显示＝实际）：gpt-image-2 后端记 gpt-image-2，legacy 记 pixai-upscale。
     modelId: pricingModelId,
     kind: "image_edit",
     source: "biz",
@@ -252,11 +252,11 @@ export async function POST(req: NextRequest) {
 
   const { status, data } = await proxyPixai("upscale", {
     image,
-    // factor 由檔位契約決定（1k／2k⇒2、4k⇒4），不再吃呼叫端任意倍率。
+    // factor 由档位契约决定（1k／2k⇒2、4k⇒4），不再吃呼叫端任意倍率。
     factor: submission.factor,
     ratio: typeof body.ratio === "string" ? body.ratio : undefined,
-    // 只送 bridge 白名單內的 size；4K 靠 (size="2k", factor=4) 表達——
-    // 送 "4k" 會被上游靜默回退 1k（見 upscale-tier.ts 檔頭）。
+    // 只送 bridge 白名单内的 size；4K 靠 (size="2k", factor=4) 表达——
+    // 送 "4k" 会被上游静默回退 1k（见 upscale-tier.ts 档头）。
     size: submission.bridgeSize,
   });
 
@@ -278,7 +278,7 @@ export async function POST(req: NextRequest) {
   return respond(pixaiError(data, "Upscale failed.", traceId), status >= 400 ? status : 502);
 }
 
-// ── 後端二：gpt-image-2 生成式重繪（durable image_edit 任務，同步等待）─────────
+// ── 后端二：gpt-image-2 生成式重绘（durable image_edit 任务，同步等待）─────────
 
 type UpscaleCharge = SyncCharge;
 
@@ -294,15 +294,15 @@ interface UpscaleDeliverContext {
 }
 
 /**
- * 交付（2026-09-30）：把原圖當參考圖提交 durable `image_edit`，同步等到終態再回
- * `{ created, data: [...] }`（＝對外文件 `SyncImageResponse`；呼叫端契約不變）。
+ * 交付（2026-09-30）：把原图当参考图提交 durable `image_edit`，同步等到终态再回
+ * `{ created, data: [...] }`（＝对外文件 `SyncImageResponse`；呼叫端契约不变）。
  *
- * 為什麼用 `billingAmount: UPSCALE_UPSTREAM_BILLING_AMOUNT`（＝0）提交：**錢已經在這一層收過了**
- * （`reserveSyncCharge` 的同步 job 列＋billing_operation，價見 `upscaleChargeQuota`）。
- * 讓 job 再記一次金額＝同一筆請求扣兩次。
- * 交付後由本層 commit、失敗由本層 refund，帳仍然只有一本（同 quota-precheck 的 0 額提交手法）。
+ * 为什么用 `billingAmount: UPSCALE_UPSTREAM_BILLING_AMOUNT`（＝0）提交：**钱已经在这一层收过了**
+ * （`reserveSyncCharge` 的同步 job 列＋billing_operation，价见 `upscaleChargeQuota`）。
+ * 让 job 再记一次金额＝同一笔请求扣两次。
+ * 交付后由本层 commit、失败由本层 refund，帐仍然只有一本（同 quota-precheck 的 0 额提交手法）。
  *
- * 任務不取消：超時只是本層放棄等待，任務仍在控面後台跑（與 openai-compat 同政策）。
+ * 任务不取消：超时只是本层放弃等待，任务仍在控面后台跑（与 openai-compat 同政策）。
  */
 async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Response> {
   const tenantId = `biz:${ctx.key.id}`;
@@ -331,12 +331,12 @@ async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Respo
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[upscale] gpt-image-2 submit failed key=${ctx.key.id}`, error);
     await refundUpscaleDelivery(ctx.charged.charge, 502, `submit failed: ${message}`);
-    return ctx.respond(pixaiRequestError(`超分任務提交失敗：${message}`, "upscale_backend_submit_failed", ctx.traceId), 502);
+    return ctx.respond(pixaiRequestError(`超分任务提交失败：${message}`, "upscale_backend_submit_failed", ctx.traceId), 502);
   }
 
   const settled = await awaitUpscaleJob(jobId, tenantId);
   if (settled.kind === "succeeded") {
-    // `data` 逐項帶 width/height：檔位是不是真的交付到（4K＝長邊 ≥3840）由呼叫端可自證，不必信文案。
+    // `data` 逐项带 width/height：档位是不是真的交付到（4K＝长边 ≥3840）由呼叫端可自证，不必信文案。
     const data = {
       created: Math.floor(Date.now() / 1000),
       data: settled.artifacts.map((artifact) => ({
@@ -368,7 +368,7 @@ async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Respo
     await refundUpscaleDelivery(ctx.charged.charge, 504, `await timeout, task ${jobId}`);
     return ctx.respond(
       pixaiRequestError(
-        `超分超時：任務 ${jobId} 仍在後台執行，可稍後以 GET /v1/images/${jobId} 查詢；本次未交付，已提交退款。`,
+        `超分超时：任务 ${jobId} 仍在后台执行，可稍后以 GET /v1/images/${jobId} 查询；本次未交付，已提交退款。`,
         "upscale_backend_timeout",
         ctx.traceId,
       ),
@@ -379,7 +379,7 @@ async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Respo
   await refundUpscaleDelivery(ctx.charged.charge, 502, `task ${jobId} ${settled.status}: ${settled.message}`);
   return ctx.respond(
     pixaiRequestError(
-      `超分任務 ${jobId} 未交付（${settled.status}）：${settled.message}；已提交退款。`,
+      `超分任务 ${jobId} 未交付（${settled.status}）：${settled.message}；已提交退款。`,
       settled.code || "upscale_backend_failed",
       ctx.traceId,
     ),
@@ -393,9 +393,9 @@ type UpscaleJobOutcome =
   | { kind: "failed"; status: string; code: string; message: string };
 
 /**
- * 本地輪詢 durable 任務到終態（直讀 DB，不繞 HTTP）：控面自己承載這條路由，
- * 沒有理由再對自己做一次帶鑑權的 HTTP 往返。終態判定用既有 `taskStatus`
- * （唯一狀態映射真源），查詢本身失敗只拉長間隔、不當終態（同 openai-compat 政策）。
+ * 本地轮询 durable 任务到终态（直读 DB，不绕 HTTP）：控面自己承载这条路由，
+ * 没有理由再对自己做一次带鉴权的 HTTP 往返。终态判定用既有 `taskStatus`
+ * （唯一状态映射真源），查询本身失败只拉长间隔、不当终态（同 openai-compat 政策）。
  */
 async function awaitUpscaleJob(jobId: string, tenantId: string): Promise<UpscaleJobOutcome> {
   const deadlineAt = Date.now() + UPSCALE_AWAIT_MS;
@@ -418,7 +418,7 @@ async function awaitUpscaleJob(jobId: string, tenantId: string): Promise<Upscale
           kind: "failed",
           status,
           code: "",
-          message: job.failureDetail?.trim() || "生成失敗，未出圖。",
+          message: job.failureDetail?.trim() || "生成失败，未出图。",
         };
       }
       interval = UPSCALE_POLL_INTERVAL_MS;
@@ -431,7 +431,7 @@ async function awaitUpscaleJob(jobId: string, tenantId: string): Promise<Upscale
   }
 }
 
-/** 同步超分交付成功：commit 實耗 + 用量記帳 + 冪等快取（兩條後端共用同一結算）。 */
+/** 同步超分交付成功：commit 实耗 + 用量记帐 + 幂等快取（两条后端共用同一结算）。 */
 async function commitUpscaleDelivery(input: {
   charge: UpscaleCharge;
   keyId: string;
@@ -453,7 +453,7 @@ async function commitUpscaleDelivery(input: {
   }
 }
 
-/** 同步超分交付失敗：先落 pending refund op、job → failed，再嘗試外部退款（reconcile 可補退）。 */
+/** 同步超分交付失败：先落 pending refund op、job → failed，再尝试外部退款（reconcile 可补退）。 */
 async function refundUpscaleDelivery(charge: UpscaleCharge, status: number, detail?: string): Promise<void> {
   after(await refundSyncCharge(charge, { status, ...(detail ? { detail } : {}) }));
 }

@@ -1,6 +1,6 @@
-// `/api/biz/character-cards` 掛載點的斷言 = **同一份**共用套件（與 `/v1/character-cards`
-// 逐條相同），外加一條跨掛載點等價斷言：同一份操作經兩條 route 必須得到逐欄相同的結果
-// ——證明「兩條 route 真的代理到同一行為」，而不是各自長了一套。
+// `/api/biz/character-cards` 挂载点的断言 = **同一份**共用套件（与 `/v1/character-cards`
+// 逐条相同），外加一条跨挂载点等价断言：同一份操作经两条 route 必须得到逐栏相同的结果
+// ——证明「两条 route 真的代理到同一行为」，而不是各自长了一套。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -20,7 +20,7 @@ interface WireCard {
   updated_at: string;
 }
 
-/** 卡的業務欄（`updated_at` 是寫入時間戳，兩次寫入必然不同，不參與等價比較）。 */
+/** 卡的业务栏（`updated_at` 是写入时间戳，两次写入必然不同，不参与等价比较）。 */
 function businessFields(card: WireCard) {
   return {
     id: card.id,
@@ -45,7 +45,7 @@ function req(url: string, init: { method?: string; body?: unknown; headers?: Rec
   });
 }
 
-test("跨掛載點等價：同 body 經 /api/biz 與 /api/v1 → 存回/讀回的業務欄逐欄相同；非法 payload 錯誤體同形", async () => {
+test("跨挂载点等价：同 body 经 /api/biz 与 /api/v1 → 存回/读回的业务栏逐栏相同；非法 payload 错误体同形", async () => {
   const body = {
     name: "等价对照卡",
     kind: "prop",
@@ -59,17 +59,17 @@ test("跨掛載點等價：同 body 經 /api/biz 與 /api/v1 → 存回/讀回�
 
   const bizCard = ((await bizSaved.json()) as { data: WireCard }).data;
   const v1Card = ((await v1Saved.json()) as { data: WireCard }).data;
-  assert.deepEqual(businessFields(bizCard), businessFields(v1Card), "两条 route 必须铸出逐欄相同的卡");
+  assert.deepEqual(businessFields(bizCard), businessFields(v1Card), "两条 route 必须铸出逐栏相同的卡");
   assert.ok(!Number.isNaN(Date.parse(bizCard.updated_at)) && !Number.isNaN(Date.parse(v1Card.updated_at)));
 
-  // 讀回路徑也等價（同一份 store，同一份清洗/投影）
+  // 读回路径也等价（同一份 store，同一份清洗/投影）
   const bizList = (await (await bizGet(req("/api/biz/character-cards"))).json()) as { object: string; data: WireCard[] };
   const v1List = (await (await v1Get(req("/v1/character-cards"))).json()) as { object: string; data: WireCard[] };
   assert.equal(bizList.object, v1List.object);
   assert.deepEqual(bizList.data.map(businessFields), v1List.data.map(businessFields));
   assert.equal(bizList.data.length, 1, "同 id upsert：两条 route 写的是同一张卡");
 
-  // 負對照：非法 payload 的錯誤體必須同形（code/type/鍵集合），否則 agent 側 classifyError 會分叉
+  // 负对照：非法 payload 的错误体必须同形（code/type/键集合），否则 agent 侧 classifyError 会分叉
   const bad = { name: "坏卡", reference_urls: ["ftp://x"] };
   const bizBad = await bizPost(req("/api/biz/character-cards", { method: "POST", body: bad }));
   const v1Bad = await v1Post(req("/v1/character-cards", { method: "POST", body: bad }));

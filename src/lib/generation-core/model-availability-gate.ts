@@ -1,48 +1,48 @@
-// 模型可用性閘（circuit breaker，2026-09-27）：由「真實生成結果」驅動。
+// 模型可用性闸（circuit breaker，2026-09-27）：由「真实生成结果」驱动。
 //
-// 病根：gemini-3.1-flash-image 14 天 103 單 0% 成功、seedance-2.0 系列 0%——用戶選到
-// 死模型要白等到 deadline（數分鐘）才失敗，UI 宣稱與真實能力不符。既有活性信號
-// （model-status-probe 的 GET /models 探測 + supplier-health-signal 的供應商/帳戶
-// 健康）都是「前置條件」，不是「結果」：渠道 /models 200、帳戶未冷卻，照樣可以單單
-// deadline_exceeded。這裡補上最後一把尺——控制面 generation_job 的終態本身。
+// 病根：gemini-3.1-flash-image 14 天 103 单 0% 成功、seedance-2.0 系列 0%——用户选到
+// 死模型要白等到 deadline（数分钟）才失败，UI 宣称与真实能力不符。既有活性信号
+// （model-status-probe 的 GET /models 探测 + supplier-health-signal 的供应商/帐户
+// 健康）都是「前置条件」，不是「结果」：渠道 /models 200、帐户未冷却，照样可以单单
+// deadline_exceeded。这里补上最后一把尺——控制面 generation_job 的终态本身。
 //
-// 跑在哪一層：VPS 控制面（image-control-api）。generation_job 只在控制面 Postgres，
-// 所有提交路由（/v1/*、/api/generation-jobs）在生產都經 next.config rewrites 代理到
-// 控制面；Vercel 側（模型選單）經 HMAC 內部端點 /api/internal/model-status 讀同一份
-// 判定，不在邊緣另算。
+// 跑在哪一层：VPS 控制面（image-control-api）。generation_job 只在控制面 Postgres，
+// 所有提交路由（/v1/*、/api/generation-jobs）在生产都经 next.config rewrites 代理到
+// 控制面；Vercel 侧（模型选单）经 HMAC 内部端点 /api/internal/model-status 读同一份
+// 判定，不在边缘另算。
 //
-// 規則（具名常數，見下）：
-//   某 model_id 在最近 72h 內、最近 20 個「計入」的終態 job 中（排除用戶側原因
+// 规则（具名常数，见下）：
+//   某 model_id 在最近 72h 内、最近 20 个「计入」的终态 job 中（排除用户侧原因
 //   user_input / cancelled，以及 status=cancelled），
-//     樣本 ≥5 且成功 0，或 樣本 ≥10 且成功率 <20% → open（unavailable）。
-//   半開：open 狀態下每 30 分鐘放行 1 單試探（以該模型最後一次建單時間 + 本進程
-//   放行記錄為準）；最近一個計入終態是成功 → 立即 closed（成功即恢復）。
+//     样本 ≥5 且成功 0，或 样本 ≥10 且成功率 <20% → open（unavailable）。
+//   半开：open 状态下每 30 分钟放行 1 单试探（以该模型最后一次建单时间 + 本进程
+//   放行记录为准）；最近一个计入终态是成功 → 立即 closed（成功即恢复）。
 //
-// fail-open 紀律：DB 讀失敗 → 空快照 → 全部 closed，絕不因為統計讀不到把好模型標死。
+// fail-open 纪律：DB 读失败 → 空快照 → 全部 closed，绝不因为统计读不到把好模型标死。
 
 import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
 import type { GenerationKind } from "./types";
 
-/** 統計窗口：只看最近 72h 建立的 job。 */
+/** 统计窗口：只看最近 72h 建立的 job。 */
 export const MODEL_BREAKER_WINDOW_MS = 72 * 60 * 60_000;
-/** 每模型只取最近 N 個計入的終態 job。 */
+/** 每模型只取最近 N 个计入的终态 job。 */
 export const MODEL_BREAKER_SAMPLE_LIMIT = 20;
-/** 規則 A：樣本 ≥ 此值且 0 成功 → open。 */
+/** 规则 A：样本 ≥ 此值且 0 成功 → open。 */
 export const MODEL_BREAKER_ZERO_SUCCESS_MIN_SAMPLES = 5;
-/** 規則 B：樣本 ≥ 此值且成功率 < MODEL_BREAKER_LOW_SUCCESS_RATE → open。 */
+/** 规则 B：样本 ≥ 此值且成功率 < MODEL_BREAKER_LOW_SUCCESS_RATE → open。 */
 export const MODEL_BREAKER_LOW_RATE_MIN_SAMPLES = 10;
 export const MODEL_BREAKER_LOW_SUCCESS_RATE = 0.2;
-/** 半開：open 狀態下每隔多久放行 1 單試探。 */
+/** 半开：open 状态下每隔多久放行 1 单试探。 */
 export const MODEL_BREAKER_HALF_OPEN_INTERVAL_MS = 30 * 60_000;
-/** 統計快照記憶體快取 TTL。 */
+/** 统计快照记忆体快取 TTL。 */
 export const MODEL_BREAKER_CACHE_TTL_MS = 60_000;
-/** 用戶側失敗原因：不代表模型壞，不計入樣本。 */
+/** 用户侧失败原因：不代表模型坏，不计入样本。 */
 export const MODEL_BREAKER_EXCLUDED_FAILURE_CLASSES: readonly string[] = ["user_input", "cancelled"];
-/** 計入的終態（cancelled 是用戶主動取消，不計入）。 */
+/** 计入的终态（cancelled 是用户主动取消，不计入）。 */
 export const MODEL_BREAKER_TERMINAL_STATUSES: readonly string[] = ["succeeded", "failed", "refunded"];
-/** 回滾開關：設為 1/true 則閘門整體停用（列表與提交都不攔）。 */
+/** 回滚开关：设为 1/true 则闸门整体停用（列表与提交都不拦）。 */
 export const MODEL_BREAKER_DISABLED_ENV = "GENERATION_MODEL_BREAKER_DISABLED";
-/** 單次讀取的行數上限（72h 內全平台 job 量級為數百，上限只防異常膨脹）。 */
+/** 单次读取的行数上限（72h 内全平台 job 量级为数百，上限只防异常膨胀）。 */
 const MODEL_BREAKER_ROW_LIMIT = 5_000;
 
 export type ModelMediaFamily = "image" | "video" | "audio" | "other";
@@ -60,12 +60,12 @@ export interface ModelOutcomeRow {
 export interface ModelBreakerStats {
   modelId: string;
   family: ModelMediaFamily;
-  /** 計入的終態樣本數（≤ MODEL_BREAKER_SAMPLE_LIMIT）。 */
+  /** 计入的终态样本数（≤ MODEL_BREAKER_SAMPLE_LIMIT）。 */
   samples: number;
   successes: number;
-  /** 最近一個計入終態是否成功（半開恢復依據）。無樣本 → null。 */
+  /** 最近一个计入终态是否成功（半开恢复依据）。无样本 → null。 */
   lastOutcomeSucceeded: boolean | null;
-  /** 窗口內該模型最後一次建單時間（任何狀態，含進行中）——半開放行的時間錨。 */
+  /** 窗口内该模型最后一次建单时间（任何状态，含进行中）——半开放行的时间锚。 */
   lastAttemptAt: number | null;
 }
 
@@ -74,7 +74,7 @@ export type ModelBreakerState = "closed" | "open";
 export interface ModelBreakerVerdict extends ModelBreakerStats {
   state: ModelBreakerState;
   successRate: number | null;
-  /** open 時的中文原因（誠實陳述樣本）。 */
+  /** open 时的中文原因（诚实陈述样本）。 */
   reason?: string;
 }
 
@@ -82,10 +82,10 @@ export interface ModelBreakerSnapshot {
   generatedAt: number;
   verdicts: Map<string, ModelBreakerVerdict>;
   /**
-   * 供給面斷供：有 capability 合約、但沒有任何「供應商＋合約＋帳號」三者皆 enabled 且
-   * 非 disabled 的組合（與 scheduler acquire 同條件，cooldown 屬暫時態不計）。
-   * 這種模型提交了也只會排隊空轉到 deadline（INC-VIDEO-0927b），且試探單不可能成功，
-   * 所以直接判不可用、不放半開試探；供應恢復（管理員重新啟用）即自動解除。
+   * 供给面断供：有 capability 合约、但没有任何「供应商＋合约＋帐号」三者皆 enabled 且
+   * 非 disabled 的组合（与 scheduler acquire 同条件，cooldown 属暂时态不计）。
+   * 这种模型提交了也只会排队空转到 deadline（INC-VIDEO-0927b），且试探单不可能成功，
+   * 所以直接判不可用、不放半开试探；供应恢复（管理员重新启用）即自动解除。
    */
   unsupplied?: Set<string>;
 }
@@ -132,7 +132,7 @@ function countsAsSample(row: ModelOutcomeRow): boolean {
   return true;
 }
 
-/** 純函數：把窗口內的 job 行彙總成每模型統計（最近 N 個計入終態 + 最後建單時間）。 */
+/** 纯函数：把窗口内的 job 行汇总成每模型统计（最近 N 个计入终态 + 最后建单时间）。 */
 export function summarizeModelOutcomes(
   rows: readonly ModelOutcomeRow[],
   options: { now?: number; windowMs?: number; sampleLimit?: number } = {},
@@ -173,11 +173,11 @@ export function summarizeModelOutcomes(
   return stats;
 }
 
-/** 純函數：單模型判定（規則見檔頭）。 */
+/** 纯函数：单模型判定（规则见档头）。 */
 export function evaluateModelBreaker(stats: ModelBreakerStats): ModelBreakerVerdict {
   const successRate = stats.samples > 0 ? stats.successes / stats.samples : null;
   const base = { ...stats, successRate };
-  // 半開恢復：最近一個計入終態是成功 → 立即 closed（試探單成功即恢復）。
+  // 半开恢复：最近一个计入终态是成功 → 立即 closed（试探单成功即恢复）。
   if (stats.lastOutcomeSucceeded === true) return { ...base, state: "closed" };
   const zeroSuccess = stats.samples >= MODEL_BREAKER_ZERO_SUCCESS_MIN_SAMPLES && stats.successes === 0;
   const lowRate = stats.samples >= MODEL_BREAKER_LOW_RATE_MIN_SAMPLES
@@ -203,7 +203,7 @@ export function buildModelBreakerSnapshot(
   return { generatedAt: now, verdicts };
 }
 
-/** 同介質中成功率最高的可用模型（有真實成功樣本才推薦，不推薦沒證據的模型）。 */
+/** 同介质中成功率最高的可用模型（有真实成功样本才推荐，不推荐没证据的模型）。 */
 export function suggestAlternativeModels(
   snapshot: ModelBreakerSnapshot,
   modelId: string,
@@ -223,10 +223,10 @@ export function suggestAlternativeModels(
     .map((verdict) => ({ modelId: verdict.modelId, successRate: verdict.successRate!, samples: verdict.samples }));
 }
 
-// ── DB 讀取 + 60s 快取 ─────────────────────────────────────────────
+// ── DB 读取 + 60s 快取 ─────────────────────────────────────────────
 
 let snapshotCache: { expiresAt: number; snapshot: ModelBreakerSnapshot } | null = null;
-/** 本進程已放行的試探單時間（跨快取週期防同進程連放；跨進程以 DB 最後建單時間為錨）。 */
+/** 本进程已放行的试探单时间（跨快取周期防同进程连放；跨进程以 DB 最后建单时间为锚）。 */
 const probeReleasedAt = new Map<string, number>();
 
 export function __resetModelBreakerStateForTests(): void {
@@ -235,8 +235,8 @@ export function __resetModelBreakerStateForTests(): void {
 }
 
 /**
- * 讀控制面 generation_job 窗口內的 job（只讀、走 created_at 索引，實測 72h 窗 ~2ms），
- * 彙總成判定快照。60s 記憶體快取；DB 失敗 → 空快照（fail-open）。
+ * 读控制面 generation_job 窗口内的 job（只读、走 created_at 索引，实测 72h 窗 ~2ms），
+ * 汇总成判定快照。60s 记忆体快取；DB 失败 → 空快照（fail-open）。
  */
 export async function readModelBreakerSnapshot(
   sql?: GenerationSql,
@@ -244,7 +244,7 @@ export async function readModelBreakerSnapshot(
 ): Promise<ModelBreakerSnapshot> {
   const now = (options.now ?? Date.now)();
   if (snapshotCache && snapshotCache.expiresAt > now) return snapshotCache.snapshot;
-  // 無 DB 的實例（Vercel 邊緣）不另算：空快照 = 全部可用，真判定只在控制面。
+  // 无 DB 的实例（Vercel 边缘）不另算：空快照 = 全部可用，真判定只在控制面。
   if (!sql && !generationControlPlaneEnabled()) return { generatedAt: now, verdicts: new Map() };
   try {
     const db = sql ?? getGenerationSql();
@@ -274,7 +274,7 @@ export async function readModelBreakerSnapshot(
     snapshotCache = { expiresAt: now + MODEL_BREAKER_CACHE_TTL_MS, snapshot };
     return snapshot;
   } catch (error) {
-    console.error("[model-availability-gate] generation_job 讀取失敗（fail-open，不攔任何模型）", error);
+    console.error("[model-availability-gate] generation_job 读取失败（fail-open，不拦任何模型）", error);
     return { generatedAt: now, verdicts: new Map() };
   }
 }
@@ -303,9 +303,9 @@ function formatAlternatives(alternatives: readonly ModelAlternative[]): string {
 }
 
 /**
- * 提交面用：在建單 / 預扣費之前判斷該模型能否提交。
- *   closed → 放行；open 且距最後一次建單已超過半開間隔 → 放行 1 單試探；
- *   其餘 → 拒絕（誠實中文訊息 + 同介質替代建議）。
+ * 提交面用：在建单 / 预扣费之前判断该模型能否提交。
+ *   closed → 放行；open 且距最后一次建单已超过半开间隔 → 放行 1 单试探；
+ *   其余 → 拒绝（诚实中文讯息 + 同介质替代建议）。
  */
 export async function checkModelAvailability(
   modelId: string,
@@ -345,7 +345,7 @@ export async function checkModelAvailability(
   return { allowed: false, modelId, message, alternatives, retryAfterSeconds };
 }
 
-/** 提交閘拒單：由 submitGenerationCommand 在建單/預扣費之前拋出，路由層映射為 503。 */
+/** 提交闸拒单：由 submitGenerationCommand 在建单/预扣费之前抛出，路由层映射为 503。 */
 export class GenerationModelUnavailableError extends Error {
   readonly modelId: string;
   readonly alternatives: ModelAlternative[];
@@ -360,5 +360,5 @@ export class GenerationModelUnavailableError extends Error {
   }
 }
 
-/** 提交閘函數型別（submitGenerationCommand 可注入，測試不碰 DB）。 */
+/** 提交闸函数型别（submitGenerationCommand 可注入，测试不碰 DB）。 */
 export type ModelAvailabilityGate = (input: { modelId: string; kind: GenerationKind | string }) => Promise<ModelGateDecision>;

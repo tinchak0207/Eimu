@@ -14,12 +14,12 @@ export interface ChannelOverride {
 
 export type ChannelOverrides = Record<string, ChannelOverride>;
 
-// @vercel/blob 預設重試 10 次、指數退避可達 ~17 分鐘——熱路徑上的 overrides 讀取
-// 若無硬超時，Blob 故障會把「每一個」生成請求 wedge 到 maxDuration 硬殺，比它要
-// 防的問題更糟。超時即走 last-known-good 兜底。
+// @vercel/blob 预设重试 10 次、指数退避可达 ~17 分钟——热路径上的 overrides 读取
+// 若无硬超时，Blob 故障会把「每一个」生成请求 wedge 到 maxDuration 硬杀，比它要
+// 防的问题更糟。超时即走 last-known-good 兜底。
 const OVERRIDES_BLOB_TIMEOUT_MS = 3_000;
-// 故障期間的負向快取：讀取失敗後短暫直接服務 last-known-good，避免故障風暴中
-// 每個請求都重撞一次 Blob。
+// 故障期间的负向快取：读取失败后短暂直接服务 last-known-good，避免故障风暴中
+// 每个请求都重撞一次 Blob。
 const FAILURE_BACKOFF_MS = 5_000;
 let lastReadFailureAt = 0;
 

@@ -1,17 +1,17 @@
-// `/api/canvas/generate` 路徑測試（真跑路由函式，非源碼掃描）——V-09：畫布生成改走 durable job。
+// `/api/canvas/generate` 路径测试（真跑路由函式，非源码扫描）——V-09：画布生成改走 durable job。
 //
-// 釘住的不變量：
-//   ① 預設走 durable：每張圖 POST /api/generation-jobs（各自 Idempotency-Key、原樣轉發
-//      Authorization + x-user-id）→ 輪詢 GET /api/generation-jobs/{id} → 取件；零次打 /api/generate-images；
-//   ② 對前端回應形狀只加鍵不改義：{ ok, task_id, images: [{ url, cost_coins, natural_width, natural_height, task_id }] }；
-//      images[i].task_id＝產出該圖的 durable job id（LOD3 工程透析指針；legacy 無 job＝null），頂層 task_id＝首張的 id；
-//   ③ 負面詞/參考圖角色不靜默丟：預組進 prompt（Avoid:/Reference images:）且角色進 referenceMetadata；
-//   ④ 只有 durable 不支援的情境（LoRA、模型不收參考圖、參考圖格式/體積超 durable 限制）仍走 legacy；
-//   ⑤ 超時回 504 generation_timeout，且**不**發出任何 DELETE（不取消任務）；
-//   ⑥ 輪詢遇 5xx 視為瞬時、繼續問；任務失敗回既有錯誤形狀；部分成功回部分結果。
+// 钉住的不变量：
+//   ① 预设走 durable：每张图 POST /api/generation-jobs（各自 Idempotency-Key、原样转发
+//      Authorization + x-user-id）→ 轮询 GET /api/generation-jobs/{id} → 取件；零次打 /api/generate-images；
+//   ② 对前端回应形状只加键不改义：{ ok, task_id, images: [{ url, cost_coins, natural_width, natural_height, task_id }] }；
+//      images[i].task_id＝产出该图的 durable job id（LOD3 工程透析指针；legacy 无 job＝null），顶层 task_id＝首张的 id；
+//   ③ 负面词/参考图角色不静默丢：预组进 prompt（Avoid:/Reference images:）且角色进 referenceMetadata；
+//   ④ 只有 durable 不支援的情境（LoRA、模型不收参考图、参考图格式/体积超 durable 限制）仍走 legacy；
+//   ⑤ 超时回 504 generation_timeout，且**不**发出任何 DELETE（不取消任务）；
+//   ⑥ 轮询遇 5xx 视为瞬时、继续问；任务失败回既有错误形状；部分成功回部分结果。
 //
-// 離線：global fetch 全量替身（零付費上游呼叫）；時間用 node:test mock timers 推進（不真等 280s）。
-// 真執行器：`npx tsx --test src/app/api/canvas/generate/route.test.ts`
+// 离线：global fetch 全量替身（零付费上游呼叫）；时间用 node:test mock timers 推进（不真等 280s）。
+// 真执行器：`npx tsx --test src/app/api/canvas/generate/route.test.ts`
 
 import test, { afterEach, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
@@ -19,7 +19,7 @@ import { NextRequest } from "next/server";
 import { POST } from "./route";
 import { getStyleById, STYLE_LIBRARY } from "@/lib/style-library";
 
-/** 真實註冊表 id（不造假風格）。 */
+/** 真实注册表 id（不造假风格）。 */
 const STYLE_ID = STYLE_LIBRARY[0].id;
 
 const PNG_1X1 =
@@ -79,7 +79,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** 推進 mock 時鐘直到路由回應（每輪先讓出微任務/IO，再跳 5s）。 */
+/** 推进 mock 时钟直到路由回应（每轮先让出微任务/IO，再跳 5s）。 */
 async function drive(promise: Promise<Response>): Promise<Response> {
   let done = false;
   void promise.then(() => { done = true; }, () => { done = true; });
@@ -107,7 +107,7 @@ const isSubmit = (c: Recorded) => c.method === "POST" && c.url === "http://canva
 const isPoll = (c: Recorded) => c.method === "GET" && c.url.startsWith("http://canvas.test/api/generation-jobs/");
 const isLegacy = (c: Recorded) => c.url.includes("/api/generate-images");
 
-test("預設走 durable：count=2 → 兩次提交（各自冪等鍵、轉發身分）→ 輪詢取件，回應形狀不變", async () => {
+test("预设走 durable：count=2 → 两次提交（各自幂等键、转发身分）→ 轮询取件，回应形状不变", async () => {
   let n = 0;
   const polls = new Map<string, number>();
   handler = (call) => {
@@ -124,7 +124,7 @@ test("預設走 durable：count=2 → 兩次提交（各自冪等鍵、轉發身
     return json({ error: "unexpected" }, 404);
   };
 
-  const res = await drive(POST(canvasRequest({ prompt: "  一隻貓  ", model: "gpt-image-2", size: "16:9", quality: "high", count: 2 })));
+  const res = await drive(POST(canvasRequest({ prompt: "  一只猫  ", model: "gpt-image-2", size: "16:9", quality: "high", count: 2 })));
   assert.equal(res.status, 200);
   const payload = await res.json();
   assert.deepEqual(Object.keys(payload).sort(), ["images", "ok", "task_id"]);
@@ -134,7 +134,7 @@ test("預設走 durable：count=2 → 兩次提交（各自冪等鍵、轉發身
     assert.deepEqual(Object.keys(image).sort(), ["cost_coins", "natural_height", "natural_width", "task_id", "url"]);
     assert.match(image.url, /^https:\/\/cdn\.test\/job-\d\.png$/);
     assert.equal(image.natural_width, null);
-    // 每張圖的 task_id 就是產出它的 job（url 由 job id 派生，兩者必須一致）。
+    // 每张图的 task_id 就是产出它的 job（url 由 job id 派生，两者必须一致）。
     assert.equal(image.url, `https://cdn.test/${image.task_id}.png`);
   }
   assert.equal(payload.task_id, payload.images[0].task_id);
@@ -143,12 +143,12 @@ test("預設走 durable：count=2 → 兩次提交（各自冪等鍵、轉發身
   const submits = calls.filter(isSubmit);
   assert.equal(submits.length, 2);
   const keys = new Set(submits.map((c) => c.headers.get("idempotency-key")));
-  assert.equal(keys.size, 2, "每張圖一把獨立冪等鍵");
+  assert.equal(keys.size, 2, "每张图一把独立幂等键");
   for (const submit of submits) {
     assert.equal(submit.headers.get("authorization"), "Bearer session-token-test");
     assert.equal(submit.headers.get("x-user-id"), "42");
     assert.deepEqual(submit.body, {
-      prompt: "一隻貓",
+      prompt: "一只猫",
       modelId: "gpt-image-2",
       qualityMode: "quality",
       aspectRatio: "16:9",
@@ -163,13 +163,13 @@ test("預設走 durable：count=2 → 兩次提交（各自冪等鍵、轉發身
   }
 });
 
-test("負面詞＋角色參考圖：durable multipart，prompt 預組 Avoid/Reference images，角色進 referenceMetadata", async () => {
+test("负面词＋角色参考图：durable multipart，prompt 预组 Avoid/Reference images，角色进 referenceMetadata", async () => {
   handler = (call) => (isSubmit(call) ? json({ success: true, data: projection("job-ref", "succeeded") }, 202) : json({}, 404));
 
   const res = await drive(
     POST(
       canvasRequest({
-        prompt: "海邊的女孩",
+        prompt: "海边的女孩",
         model: "gpt-image-2",
         negative_prompt: "多手指",
         reference_images: [{ url: PNG_1X1, role: "character", name: "小美" }],
@@ -185,7 +185,7 @@ test("負面詞＋角色參考圖：durable multipart，prompt 預組 Avoid/Refe
   assert.ok(submit.body instanceof FormData);
   const form = submit.body as FormData;
   const prompt = String(form.get("prompt"));
-  assert.match(prompt, /Prompt:\n海邊的女孩/);
+  assert.match(prompt, /Prompt:\n海边的女孩/);
   assert.match(prompt, /Reference images:\n- 小美 as character/);
   assert.match(prompt, /Avoid:\n多手指/);
   assert.deepEqual(JSON.parse(String(form.get("referenceMetadata"))), [{ name: "小美", role: "character" }]);
@@ -194,13 +194,13 @@ test("負面詞＋角色參考圖：durable multipart，prompt 預組 Avoid/Refe
   assert.equal(form.get("modelId"), "gpt-image-2");
 });
 
-test("LoRA → 仍走 legacy（durable 無 adapter 消費 LoRA），不打 generation-jobs", async () => {
+test("LoRA → 仍走 legacy（durable 无 adapter 消费 LoRA），不打 generation-jobs", async () => {
   handler = (call) => (isLegacy(call) ? json({ imageUrl: "https://cdn.test/legacy.png" }) : json({}, 404));
-  const res = await drive(POST(canvasRequest({ prompt: "貓", model: "pixai-tsubaki2", loraModelVersionIds: ["lora-1"] })));
+  const res = await drive(POST(canvasRequest({ prompt: "猫", model: "pixai-tsubaki2", loraModelVersionIds: ["lora-1"] })));
   assert.equal(res.status, 200);
   const payload = await res.json();
   assert.equal(payload.images[0].url, "https://cdn.test/legacy.png");
-  // legacy 沒有 durable job：不編造指針（逐張與頂層都是 null）。
+  // legacy 没有 durable job：不编造指针（逐张与顶层都是 null）。
   assert.equal(payload.images[0].task_id, null);
   assert.equal(payload.task_id, null);
   assert.equal(calls.filter(isSubmit).length, 0);
@@ -208,23 +208,23 @@ test("LoRA → 仍走 legacy（durable 無 adapter 消費 LoRA），不打 gener
   assert.deepEqual((legacy.body as { loraModelVersionIds: string[] }).loraModelVersionIds, ["lora-1"]);
 });
 
-test("模型不收參考圖（adobe-firefly）＋帶參考圖 → 仍走 legacy", async () => {
+test("模型不收参考图（adobe-firefly）＋带参考图 → 仍走 legacy", async () => {
   handler = (call) => (isLegacy(call) ? json({ imageUrl: "https://cdn.test/legacy.png" }) : json({}, 404));
-  const res = await drive(POST(canvasRequest({ prompt: "貓", model: "adobe-firefly", source_image: PNG_1X1 })));
+  const res = await drive(POST(canvasRequest({ prompt: "猫", model: "adobe-firefly", source_image: PNG_1X1 })));
   assert.equal(res.status, 200);
   assert.equal(calls.filter(isSubmit).length, 0);
   assert.equal(calls.filter(isLegacy).length, 1);
 });
 
-test("參考圖格式 durable 不收（GIF）→ 仍走 legacy", async () => {
+test("参考图格式 durable 不收（GIF）→ 仍走 legacy", async () => {
   handler = (call) => (isLegacy(call) ? json({ imageUrl: "https://cdn.test/legacy.png" }) : json({}, 404));
-  const res = await drive(POST(canvasRequest({ prompt: "貓", model: "gpt-image-2", source_image: GIF_1X1 })));
+  const res = await drive(POST(canvasRequest({ prompt: "猫", model: "gpt-image-2", source_image: GIF_1X1 })));
   assert.equal(res.status, 200);
   assert.equal(calls.filter(isSubmit).length, 0);
   assert.equal(calls.filter(isLegacy).length, 1);
 });
 
-test("超時：任務一直 running → 504 generation_timeout，且不發 DELETE（不取消任務）", async () => {
+test("超时：任务一直 running → 504 generation_timeout，且不发 DELETE（不取消任务）", async () => {
   handler = (call) => {
     if (isSubmit(call)) return json({ success: true, data: projection("job-slow", "queued") }, 202);
     if (isPoll(call)) return json(projection("job-slow", "running"));
@@ -240,14 +240,14 @@ test("超時：任務一直 running → 504 generation_timeout，且不發 DELET
   assert.equal(calls.filter(isLegacy).length, 0);
 });
 
-test("輪詢 502 視為瞬時繼續問；任務失敗回 502 generation_failed 帶任務錯誤訊息", async () => {
+test("轮询 502 视为瞬时继续问；任务失败回 502 generation_failed 带任务错误讯息", async () => {
   let pollCount = 0;
   handler = (call) => {
     if (isSubmit(call)) return json({ success: true, data: projection("job-x", "queued") }, 202);
     if (isPoll(call)) {
       pollCount += 1;
       if (pollCount === 1) return new Response("<html>bad gateway</html>", { status: 502 });
-      return json(projection("job-x", "failed", { errorCode: "upstream_error", errorMessage: "上游拒絕此提示詞" }));
+      return json(projection("job-x", "failed", { errorCode: "upstream_error", errorMessage: "上游拒绝此提示词" }));
     }
     return json({}, 404);
   };
@@ -255,11 +255,11 @@ test("輪詢 502 視為瞬時繼續問；任務失敗回 502 generation_failed �
   assert.equal(res.status, 502);
   const payload = await res.json();
   assert.equal(payload.code, "generation_failed");
-  assert.equal(payload.error, "上游拒絕此提示詞");
+  assert.equal(payload.error, "上游拒绝此提示词");
   assert.equal(pollCount, 2);
 });
 
-test("部分成功：一張成功一張提交被拒 → 回部分結果", async () => {
+test("部分成功：一张成功一张提交被拒 → 回部分结果", async () => {
   let n = 0;
   handler = (call) => {
     if (isSubmit(call)) {
@@ -283,9 +283,9 @@ test("缺身分 header → 401，不打任何下游", async () => {
   assert.equal(calls.filter((c) => isSubmit(c) || isLegacy(c)).length, 0);
 });
 
-// ───────────────────────── 風格一等 id（P1-8／對稱差 D34）
+// ───────────────────────── 风格一等 id（P1-8／对称差 D34）
 
-test("風格：合法 style_id → 送上游的 prompt 已素材化（含風格實文、無 {prompt}），回應明示 style_id/source", async () => {
+test("风格：合法 style_id → 送上游的 prompt 已素材化（含风格实文、无 {prompt}），回应明示 style_id/source", async () => {
   handler = (call) => {
     if (isSubmit(call)) return json({ success: true, data: projection("job-s", "queued") }, 202);
     if (isPoll(call)) return json(projection(call.url.split("/").pop()!, "succeeded"));
@@ -302,24 +302,24 @@ test("風格：合法 style_id → 送上游的 prompt 已素材化（含風格�
   assert.equal(payload.style_source, "request");
 
   const submit = calls.find(isSubmit);
-  assert.ok(submit, "應有一次 durable 提交");
+  assert.ok(submit, "应有一次 durable 提交");
   const sentPrompt = (submit!.body as { prompt: string }).prompt;
-  assert.equal(sentPrompt.includes("{prompt}"), false, "佔位符不得漏到上游");
-  assert.equal(sentPrompt.includes(styleText), true, "風格的固定實文必須進 prompt");
-  assert.equal(sentPrompt.includes("一台跑车"), true, "用戶提示詞仍必須在");
-  // 風格 negative 與用戶 "noisy"（風格 negative 的子字串）⇒ 依輪子語義收斂，不重複堆疊。
-  assert.equal(sentPrompt.split("noisy").length - 1, 1, "重複堆疊會讓同一片段出現兩次");
+  assert.equal(sentPrompt.includes("{prompt}"), false, "占位符不得漏到上游");
+  assert.equal(sentPrompt.includes(styleText), true, "风格的固定实文必须进 prompt");
+  assert.equal(sentPrompt.includes("一台跑车"), true, "用户提示词仍必须在");
+  // 风格 negative 与用户 "noisy"（风格 negative 的子字串）⇒ 依轮子语义收敛，不重复堆叠。
+  assert.equal(sentPrompt.split("noisy").length - 1, 1, "重复堆叠会让同一片段出现两次");
 });
 
-test("風格：未知 style_id → 400 style_id_unknown，且完全不碰下游（不燒錢）", async () => {
-  const res = await drive(POST(canvasRequest({ prompt: "x", style_id: "不存在的風格" })));
+test("风格：未知 style_id → 400 style_id_unknown，且完全不碰下游（不烧钱）", async () => {
+  const res = await drive(POST(canvasRequest({ prompt: "x", style_id: "不存在的风格" })));
   assert.equal(res.status, 400);
   const payload = await res.json();
   assert.equal(payload.code, "style_id_unknown");
-  assert.equal(calls.length, 0, "值域把關必須發生在任何下游請求之前");
+  assert.equal(calls.length, 0, "值域把关必须发生在任何下游请求之前");
 });
 
-test("風格：不帶 style_id → 不吐風格鍵（回應形狀與舊版逐位一致）", async () => {
+test("风格：不带 style_id → 不吐风格键（回应形状与旧版逐位一致）", async () => {
   handler = (call) => {
     if (isSubmit(call)) return json({ success: true, data: projection("job-n", "queued") }, 202);
     if (isPoll(call)) return json(projection(call.url.split("/").pop()!, "succeeded"));
@@ -330,5 +330,5 @@ test("風格：不帶 style_id → 不吐風格鍵（回應形狀與舊版逐位
   assert.equal("style_id" in payload, false);
   assert.equal("style_source" in payload, false);
   const submit = calls.find(isSubmit)!;
-  assert.equal((submit.body as { prompt: string }).prompt, "一台跑车", "無風格 ⇒ prompt 逐位不變");
+  assert.equal((submit.body as { prompt: string }).prompt, "一台跑车", "无风格 ⇒ prompt 逐位不变");
 });

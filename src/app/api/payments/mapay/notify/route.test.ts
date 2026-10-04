@@ -1,18 +1,18 @@
-// 運行時（不是源碼字串檢查）測 /api/payments/mapay/notify 的發放通道選擇：
+// 运行时（不是源码字串检查）测 /api/payments/mapay/notify 的发放通道选择：
 //
-// 做法：起一個本地假伺服器同時扮三個角色（全程 127.0.0.1，無外網、無真實支付）：
-//   ① 控面 /image-control/api/internal/mapay-credit —— 用真 HMAC 域驗簽（證明簽名契約），
-//      再跑真實入帳核心 runMapayCreditOnce（佔位表＋上游調額＋帳本都在假依賴上），
-//      並套用真實的首充額度裁決 resolveFirstChargeGrant（見 src/lib/first-charge.ts）。
-//   ② 控面 /image-control/api/internal/first-charge —— 只讀資格（首充發碼兜底用）。
-//   ③ new-api 網關 /api/redemption/* —— 舊流程發碼（fallback）用，記錄有沒有被呼叫。
+// 做法：起一个本地假伺服器同时扮三个角色（全程 127.0.0.1，无外网、无真实支付）：
+//   ① 控面 /image-control/api/internal/mapay-credit —— 用真 HMAC 域验签（证明签名契约），
+//      再跑真实入帐核心 runMapayCreditOnce（占位表＋上游调额＋帐本都在假依赖上），
+//      并套用真实的首充额度裁决 resolveFirstChargeGrant（见 src/lib/first-charge.ts）。
+//   ② 控面 /image-control/api/internal/first-charge —— 只读资格（首充发码兜底用）。
+//   ③ new-api 网关 /api/redemption/* —— 旧流程发码（fallback）用，记录有没有被呼叫。
 //
-// 判據（一一對應驗收條目）：
-//   - 已綁定的單直接入帳、**不發兌換碼**；同一單重放只入帳一次。
-//   - 上游調額失敗（quota 未變）→ 退回舊流程發碼。
-//   - 舊格式 param（未登入下單）→ 完全不碰入帳通道，行為與從前一致。
-//   - 首充专享档：有資格入 300 幣；資格不符（已有充值記錄）入約 70 幣且 detail 寫進占位表；
-//     並發第二單同樣只拿約 70 幣。
+// 判据（一一对应验收条目）：
+//   - 已绑定的单直接入帐、**不发兑换码**；同一单重放只入帐一次。
+//   - 上游调额失败（quota 未变）→ 退回旧流程发码。
+//   - 旧格式 param（未登入下单）→ 完全不碰入帐通道，行为与从前一致。
+//   - 首充专享档：有资格入 300 币；资格不符（已有充值记录）入约 70 币且 detail 写进占位表；
+//     并发第二单同样只拿约 70 币。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -54,18 +54,18 @@ type FakeState = {
   eligibilityRequests: number;
   redemptionCreates: string[];
   rows: Map<string, MapayCreditRecord>;
-  /** 首充資格的事實：假帳本有沒有 recharge 行。 */
+  /** 首充资格的事实：假帐本有没有 recharge 行。 */
   hasRechargeRow: boolean;
-  /** 首充名額（user_id → out_trade_no），與 first_charge_claim 主鍵同語義。 */
+  /** 首充名额（user_id → out_trade_no），与 first_charge_claim 主键同语义。 */
   firstChargeClaims: Map<number, string>;
-  /** A1 落地存證（假 mapay_order_intake）：out_trade_no → {state, delivery, userId}。 */
+  /** A1 落地存证（假 mapay_order_intake）：out_trade_no → {state, delivery, userId}。 */
   intakeRows: Map<string, { state: string; delivery: string | null; userId: number | null }>;
 };
 
 let server: Server | null = null;
 let origin = "";
 let state: FakeState = freshState();
-/** 假網關收到的兑换码额度（quota 单位），按调用顺序——发码兜底的额度口径断言用。 */
+/** 假网关收到的兑换码额度（quota 单位），按调用顺序——发码兜底的额度口径断言用。 */
 const REDEMPTION_QUOTA_SEEN: number[] = [];
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -149,7 +149,7 @@ test.before(async () => {
     "GENERATION_BILLING_RELAY_SECRET",
     "GENERATION_CONTROL_PLANE_PROXY_ORIGIN",
     "GATEWAY_BASE_URL",
-    // 舊流程發碼要用的網關管理憑證（假值，不打外網）
+    // 旧流程发码要用的网关管理凭证（假值，不打外网）
     "GATEWAY_ADMIN_ACCESS_TOKEN",
     "GATEWAY_ADMIN_USER_ID",
   ]) {
@@ -252,7 +252,7 @@ test.before(async () => {
             reply = json({ ok: true, eligible, status: eligible ? "eligible" : "ineligible_recharged" });
           }
         } else if (url.pathname === "/api/redemption/search") {
-          // 舊流程發碼前的查重：本測試一律當作沒發過。
+          // 旧流程发码前的查重：本测试一律当作没发过。
           reply = json({ success: true, data: { items: [] } });
         } else if (url.pathname === "/api/redemption/") {
           const body = JSON.parse(rawBody) as { name: string; quota: number };
@@ -288,7 +288,7 @@ test.after(async () => {
   }
 });
 
-/** 造一個 mPay 回調（簽名用真 signMapayParams，等同網關發來的合法回調）。 */
+/** 造一个 mPay 回调（签名用真 signMapayParams，等同网关发来的合法回调）。 */
 function callbackRequest(input: {
   orderId: string;
   param: string;
@@ -316,7 +316,7 @@ function callbackRequest(input: {
 }
 
 const BOUND_PARAM = buildMapayOrderParam("popular", 253, RELAY_SECRET);
-/** popular 档的额度（quota 单位）：入帳應加的數量，取自 plans.ts 同源口徑。 */
+/** popular 档的额度（quota 单位）：入帐应加的数量，取自 plans.ts 同源口径。 */
 const POPULAR_QUOTA = mapayPlanQuota(resolvePricingPlan("popular")!);
 const BASE_QUOTA = 1_000;
 
@@ -331,7 +331,7 @@ test("bound order is credited directly and no redemption code is created", async
   assert.equal(state.ledgerCalls, 1, "帐本记一笔");
   assert.deepEqual(state.redemptionCreates, [], "不再生成兑换码");
   assert.equal(state.rows.get("IMG-BOUND-1")?.status, "applied");
-  // A1 存證：驗簽成功後先落地，履約成功後回標 fulfilled + delivery。
+  // A1 存证：验签成功后先落地，履约成功后回标 fulfilled + delivery。
   assert.equal(state.intakeRows.get("IMG-BOUND-1")?.state, "fulfilled");
   assert.equal(state.intakeRows.get("IMG-BOUND-1")?.delivery, "direct_credit");
   assert.equal(state.intakeRows.get("IMG-BOUND-1")?.userId, 253);
@@ -370,7 +370,7 @@ test("legacy param (not logged in) never touches the credit channel", async () =
   assert.equal(state.creditRequests, 0, "旧格式不走直达入帐");
   assert.deepEqual(state.redemptionCreates, ["MPIMG-LEGACY"], "行为与从前一致：只发码");
   assert.equal(state.quota, BASE_QUOTA);
-  // 未登入舊格式也存證（userId=null、通道＝兌換碼）。
+  // 未登入旧格式也存证（userId=null、通道＝兑换码）。
   assert.equal(state.intakeRows.get("IMG-LEGACY")?.state, "fulfilled");
   assert.equal(state.intakeRows.get("IMG-LEGACY")?.delivery, "redemption_code");
   assert.equal(state.intakeRows.get("IMG-LEGACY")?.userId, null);
@@ -381,8 +381,8 @@ test("tampered userId never reaches the credit channel (rejected like any unreso
   const tampered = BOUND_PARAM.replace(".253.", ".254.");
   const res = await notify(callbackRequest({ orderId: "IMG-TAMPER", param: tampered }));
 
-  // 篡改 userId 後簽名不成立：param 既不是合法三段值、也不是任何套餐 id
-  // → 走舊流程的同一條判斷（resolvePricingPlan 失敗）＝拒收，絕不把額度記到錯的人頭上。
+  // 篡改 userId 后签名不成立：param 既不是合法三段值、也不是任何套餐 id
+  // → 走旧流程的同一条判断（resolvePricingPlan 失败）＝拒收，绝不把额度记到错的人头上。
   assert.equal(res.status, 400);
   assert.equal(await res.text(), "fail");
   assert.equal(state.creditRequests, 0, "验签失败＝绝不碰直达入帐通道");
@@ -393,7 +393,7 @@ test("tampered userId never reaches the credit channel (rejected like any unreso
 test("channel unavailable (relay down) falls back to the legacy redemption flow", async () => {
   state = freshState();
   const previousOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN;
-  // 指向一個沒人監聽的埠：等於控面通道不可用（HMAC 中繼失敗）。
+  // 指向一个没人监听的埠：等于控面通道不可用（HMAC 中继失败）。
   process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "http://127.0.0.1:1";
   try {
     const res = await notify(callbackRequest({ orderId: "IMG-CHANNEL-DOWN", param: BOUND_PARAM }));

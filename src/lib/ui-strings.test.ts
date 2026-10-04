@@ -1,12 +1,12 @@
-// 禁硬編碼基座具名驗收測試（源碼層；本倉 runner 是 node:test，無 jsdom 故不渲染 DOM）。
+// 禁硬编码基座具名验收测试（源码层；本仓 runner 是 node:test，无 jsdom 故不渲染 DOM）。
 //
-// 釘住三件事：
-// 1. 範圍內三個面（C2 AdminStatistics／B2 ProjectAssetLibraryPanel／D1 LineageDrawer）去註解後
-//    **零 CJK**＝元件內沒有殘留的用戶可見硬編文案（解釋規則的註解不算違規，同 readCode 慣例）；
-// 2. **ui-strings.ts 是唯一來源**：抽樣具名文案在 src 下只出現在該檔，且元件引用的每個鍵都存在；
-// 3. 中文內容＝改造前逐字原文（UI 視覺零變化），插值行為如約。
+// 钉住三件事：
+// 1. 范围内三个面（C2 AdminStatistics／B2 ProjectAssetLibraryPanel／D1 LineageDrawer）去注解后
+//    **零 CJK**＝元件内没有残留的用户可见硬编文案（解释规则的注解不算违规，同 readCode 惯例）；
+// 2. **ui-strings.ts 是唯一来源**：抽样具名文案在 src 下只出现在该档，且元件引用的每个键都存在；
+// 3. 中文内容＝改造前逐字原文（UI 视觉零变化），插值行为如约。
 //
-// 未來上 i18n 時：本檔的斷言不必改——元件照樣零硬編，接縫在 ui-strings.ts 的 `text()`。
+// 未来上 i18n 时：本档的断言不必改——元件照样零硬编，接缝在 ui-strings.ts 的 `text()`。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -26,14 +26,14 @@ function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
 }
 
-/** 去註解後才做斷言（與 statistics-projection.test.ts 的 readCode 同款）。 */
+/** 去注解后才做断言（与 statistics-projection.test.ts 的 readCode 同款）。 */
 function readCode(relPath: string) {
   return read(relPath)
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-/** 掃活程式碼（來源＝repo 掃描地圖的活路徑；測試檔不列入「來源」）。 */
+/** 扫活程式码（来源＝repo 扫描地图的活路径；测试档不列入「来源」）。 */
 function sourceFiles(): string[] {
   const roots = ["src/lib", "src/components", "src/app", "src/hooks"];
   const out: string[] = [];
@@ -50,41 +50,41 @@ function sourceFiles(): string[] {
 
 const CJK = /[\u4e00-\u9fff]/;
 
-test("範圍內三元件去註解後零 CJK（無硬編用戶可見文案）", () => {
+test("范围内三元件去注解后零 CJK（无硬编用户可见文案）", () => {
   for (const file of SCOPE_COMPONENTS) {
     const offenders = readCode(file)
       .split("\n")
       .map((line, index) => ({ line, index: index + 1 }))
       .filter(({ line }) => CJK.test(line))
       .map(({ line, index }) => `${index}: ${line.trim()}`);
-    assert.deepEqual(offenders, [], `${file} 殘留硬編文案（含 CJK）：\n${offenders.join("\n")}`);
+    assert.deepEqual(offenders, [], `${file} 残留硬编文案（含 CJK）：\n${offenders.join("\n")}`);
   }
 });
 
-test("三元件都經唯一取用口 text() 取文案（禁自造第二條取用路徑）", () => {
+test("三元件都经唯一取用口 text() 取文案（禁自造第二条取用路径）", () => {
   for (const file of SCOPE_COMPONENTS) {
     const code = readCode(file);
-    assert.match(code, /from "@\/lib\/ui-strings"/, `${file} 未從文案單一來源 import`);
+    assert.match(code, /from "@\/lib\/ui-strings"/, `${file} 未从文案单一来源 import`);
     assert.match(code, /\btext\("/, `${file} 未使用 text() 取文案`);
   }
 });
 
-test("元件引用的每個 x.y.z 型字面量都必須是文案表既有鍵（表外詞不許上屏）", () => {
+test("元件引用的每个 x.y.z 型字面量都必须是文案表既有键（表外词不许上屏）", () => {
   const known = new Set(Object.keys(UI_STRINGS));
   for (const file of SCOPE_COMPONENTS) {
     const code = readCode(file);
     const tokens = new Set<string>();
     for (const match of code.matchAll(/"([a-z][a-z0-9]*(?:\.[a-zA-Z0-9]+)+)"/g)) tokens.add(match[1]);
-    assert.ok(tokens.size > 0, `${file} 找不到任何文案鍵（疑未接基座）`);
+    assert.ok(tokens.size > 0, `${file} 找不到任何文案键（疑未接基座）`);
     for (const token of tokens) {
-      assert.ok(known.has(token), `${file} 引用了文案表沒有的鍵：${token}`);
+      assert.ok(known.has(token), `${file} 引用了文案表没有的键：${token}`);
     }
   }
 });
 
-test("唯一來源：抽樣具名文案在 src 下只出現在 ui-strings.ts", () => {
+test("唯一来源：抽样具名文案在 src 下只出现在 ui-strings.ts", () => {
   const samples = [
-    // REQ-B2b 起副標題改述 copy-on-use 語義（掛用＝建本地副本），抽樣跟著現行文案走。
+    // REQ-B2b 起副标题改述 copy-on-use 语义（挂用＝建本地副本），抽样跟著现行文案走。
     "挂用＝在本项目建本地副本（改来源不影响副本，删来源副本仍可用）；跨项目复用需先显式分享",
     "已挂用：已在本项目建本地副本并锁定（生成用的是副本）",
     "窗口内没有任何已落账的扣费记录——不做 0 曲线，这里是「无记录」。",
@@ -100,14 +100,14 @@ test("唯一來源：抽樣具名文案在 src 下只出現在 ui-strings.ts", (
     "未读到任何渠道记录（supplier 表为空或不可达）。",
   ];
   const files = sourceFiles();
-  assert.ok(files.length > 500, `掃描檔案數異常（${files.length}），疑路徑漂移`);
+  assert.ok(files.length > 500, `扫描档案数异常（${files.length}），疑路径漂移`);
   for (const sample of samples) {
     const hits = files.filter((file) => readFileSync(file, "utf8").includes(sample));
-    assert.deepEqual(hits, [join(process.cwd(), COPY_MODULE)], `「${sample}」不是單一來源，命中：${hits.join(", ")}`);
+    assert.deepEqual(hits, [join(process.cwd(), COPY_MODULE)], `「${sample}」不是单一来源，命中：${hits.join(", ")}`);
   }
 });
 
-test("插值：已知佔位符替換，缺參數保留佔位符（可診斷，不吐 undefined）", () => {
+test("插值：已知占位符替换，缺参数保留占位符（可诊断，不吐 undefined）", () => {
   assert.equal(text("stats.window.days", { days: 7 }), "近 7 天");
   assert.equal(text("stats.rate.percent", { value: "12.3" }), "12.3%");
   assert.equal(text("lineage.expandMore", { depth: 3 }), "继续向上（当前展开 3 层）");
@@ -116,25 +116,25 @@ test("插值：已知佔位符替換，缺參數保留佔位符（可診斷，�
   assert.equal(text("stats.refresh", { unused: 1 }), "刷新");
 });
 
-test("文案表本身：每條非空、不含 key 原文、不含未填佔位符殘渣", () => {
+test("文案表本身：每条非空、不含 key 原文、不含未填占位符残渣", () => {
   const keys = Object.keys(UI_STRINGS) as UiStringKey[];
-  assert.ok(keys.length >= 70, `文案條數過少（${keys.length}），疑覆蓋不全`);
+  assert.ok(keys.length >= 70, `文案条数过少（${keys.length}），疑覆盖不全`);
   for (const key of keys) {
     const value = UI_STRINGS[key];
-    assert.ok(value.trim().length > 0, `${key} 為空`);
+    assert.ok(value.trim().length > 0, `${key} 为空`);
     assert.ok(!value.includes(key), `${key} 的值含 key 原文`);
-    assert.doesNotMatch(value, /undefined|\bNaN\b/, `${key} 含未填殘渣`);
+    assert.doesNotMatch(value, /undefined|\bNaN\b/, `${key} 含未填残渣`);
   }
-  // 期數格式化的語言標籤與文案同層（未來上 i18n 時一起切）。
+  // 期数格式化的语言标签与文案同层（未来上 i18n 时一起切）。
   assert.equal(NUMBER_LOCALE, "zh-CN");
 });
 
-test("中文內容＝改造前逐字原文（UI 視覺零變化）", () => {
-  // D1 兩態 + 溯源文案。
+test("中文内容＝改造前逐字原文（UI 视觉零变化）", () => {
+  // D1 两态 + 溯源文案。
   assert.equal(text("lineage.status.deleted"), "已删除 · 曾有引用，记录已不在");
   assert.equal(text("lineage.status.unscanned"), "查无 · 本范围扫描不完整");
   assert.equal(text("lineage.status.unknownOrigin"), "来源不明 · 未登记血统");
-  // C2 三態與樣本不足。
+  // C2 三态与样本不足。
   assert.equal(text("stats.liveness.available"), "可用");
   assert.equal(text("stats.liveness.unavailable"), "不可用");
   assert.equal(text("stats.liveness.unknown"), "无法判定");

@@ -1,24 +1,24 @@
-// POST /api/canvas/format-crops — 一稿多版位：一次生成，自動出滿 13 個版位。
+// POST /api/canvas/format-crops — 一稿多版位：一次生成，自动出满 13 个版位。
 //
-// 契約：
-//   入參 { sourceImageUrl?, sourceWidth?, sourceHeight?, sizes?, execute? }
-//     - sourceWidth/sourceHeight 給定時只需 plan，不抓圖（零成本、零 IO）。
-//     - sourceImageUrl（https 或 data:image）用於：入參沒給尺寸時讀真實尺寸；
-//       execute:true 時取像素做實際裁切。
-//     - sizes = 版位 id 清單（AD_SIZE_OPTIONS 的 id），走 normalizeSizeSelection
-//       收斂；不給 = 全部 13 版位。
-//     - execute = 是否真的出圖。只有 crop 版位會在伺服器端裁出來（sharp）；
-//       outpaint 版位沒有專屬上游模型（見下方「擴圖上游」註），一律回
-//       skipped，不假裝出了圖。
-//   出參 { ok, source, summary, plans, executed? }
+// 契约：
+//   入参 { sourceImageUrl?, sourceWidth?, sourceHeight?, sizes?, execute? }
+//     - sourceWidth/sourceHeight 给定时只需 plan，不抓图（零成本、零 IO）。
+//     - sourceImageUrl（https 或 data:image）用于：入参没给尺寸时读真实尺寸；
+//       execute:true 时取像素做实际裁切。
+//     - sizes = 版位 id 清单（AD_SIZE_OPTIONS 的 id），走 normalizeSizeSelection
+//       收敛；不给 = 全部 13 版位。
+//     - execute = 是否真的出图。只有 crop 版位会在伺服器端裁出来（sharp）；
+//       outpaint 版位没有专属上游模型（见下方「扩图上游」注），一律回
+//       skipped，不假装出了图。
+//   出参 { ok, source, summary, plans, executed? }
 //
-// 擴圖上游（2026-09-27 現場核查）：catalog 有 "adobe-firefly-fill"（智能扩图）
-// 條目，但 image-model-ids.js 明寫它是「服務類定價條目，不加入 SUPPORTED_*」
-// 且沒有任何 route/adapter 消費它（grep ADOBE_FIREFLY_FILL_MODEL_ID → 只有
-// catalog 與 admin 定價面板）。所以 outpaint 執行層**缺上游**：本 route 只出
-// 幾何 plan（outpaintEdges / outputWidth / outputHeight），不代呼叫生成。
+// 扩图上游（2026-09-27 现场核查）：catalog 有 "adobe-firefly-fill"（智能扩图）
+// 条目，但 image-model-ids.js 明写它是「服务类定价条目，不加入 SUPPORTED_*」
+// 且没有任何 route/adapter 消费它（grep ADOBE_FIREFLY_FILL_MODEL_ID → 只有
+// catalog 与 admin 定价面板）。所以 outpaint 执行层**缺上游**：本 route 只出
+// 几何 plan（outpaintEdges / outputWidth / outputHeight），不代呼叫生成。
 //
-// 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
+// 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
@@ -28,7 +28,7 @@ import { cropImage, readSourceImageInfo } from "@/lib/canvas/format-crops-exec";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -49,7 +49,7 @@ interface ExecutedItem {
   width?: number;
   height?: number;
   reason?: string;
-  /** outpaint 專用：建議送給既有生成入口的比例（既有入口吃 ratio 不吃像素）。 */
+  /** outpaint 专用：建议送给既有生成入口的比例（既有入口吃 ratio 不吃像素）。 */
   suggestedSize?: string;
 }
 
@@ -57,7 +57,7 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ ok: false, error: message, code }, { status });
 }
 
-/** 主機黑名單：IP 字面量（v4/v6）、localhost、內網尾綴。同 /api/canvas/image-proxy 的守衛。 */
+/** 主机黑名单：IP 字面量（v4/v6）、localhost、内网尾缀。同 /api/canvas/image-proxy 的守卫。 */
 function isForbiddenHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return true;
@@ -66,7 +66,7 @@ function isForbiddenHost(hostname: string): boolean {
   return false;
 }
 
-/** sourceImageUrl → Buffer。data:image 直解；https 限公網主機、限時限量、只認 image/*。 */
+/** sourceImageUrl → Buffer。data:image 直解；https 限公网主机、限时限量、只认 image/*。 */
 async function fetchSourceBuffer(url: string): Promise<Buffer> {
   if (url.startsWith("data:image/")) {
     const comma = url.indexOf(",");
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
 
-  // 版位清單：走 ad-formats 的 normalizeSizeSelection（不另造一套版位表）。
+  // 版位清单：走 ad-formats 的 normalizeSizeSelection（不另造一套版位表）。
   const rawSizes = Array.isArray(body.sizes) ? body.sizes.filter((s): s is string => typeof s === "string") : [];
   const selectedIds = rawSizes.length > 0 ? normalizeSizeSelection(rawSizes) : AD_SIZE_OPTIONS.map((o) => o.id);
   const targets: AdSizeOption[] = AD_SIZE_OPTIONS.filter((option) => selectedIds.includes(option.id));
@@ -168,9 +168,9 @@ export async function POST(req: NextRequest) {
         continue;
       }
       if (plan.mode === "outpaint") {
-        // 不缺不騙：沒有專屬擴圖上游就不謊稱已出圖。suggestedSize 是版位比例
-        // （既有生成入口吃 ratio：/api/canvas/generate 的 size 欄位、
-        // /v1/images/edits 的 size→aspectRatioFromImageSize），由呼叫端決定何時付費生成。
+        // 不缺不骗：没有专属扩图上游就不谎称已出图。suggestedSize 是版位比例
+        // （既有生成入口吃 ratio：/api/canvas/generate 的 size 栏位、
+        // /v1/images/edits 的 size→aspectRatioFromImageSize），由呼叫端决定何时付费生成。
         executed.push({
           id: plan.id,
           mode: "outpaint",

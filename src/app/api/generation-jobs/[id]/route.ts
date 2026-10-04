@@ -26,7 +26,7 @@ import { generationTaskProjection } from "@/lib/generation-core/task-projection"
 import { displayGenerationPrompt } from "@/lib/web-task-prompt";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 type TenantResolution =
   | { ok: true; tenantId: string }
@@ -97,7 +97,7 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     );
   }
 
-  // 取消 + 條件退款收在生產平面門面（V-01）；路由不觸發帳本動作。
+  // 取消 + 条件退款收在生产平面门面（V-01）；路由不触发帐本动作。
   const result = await cancelGenerationJobWithRefund(id, tenant.tenantId, existing);
   if (!result.cancelled) {
     // 读取后与 CAS 更新之间的竞态：job 已被并发终结（worker 完成/失败/退款）。

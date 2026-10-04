@@ -1,8 +1,8 @@
-// 圖像編排共用 lib（2026-08-31 片3）。
-// 職責：確定性排版/風格工具的基礎設施——公網 blob 上傳（image-data-api）、
-// 圖片下載、PIL 沙箱執行（spawn python3 + imgops.py）、VLM 主體框（復用片2 img-orchestrate）。
-// 零生圖扣費：本檔絕不觸碰 /images/generations；僅 VLM chat（內部通道）與本地 PIL。
-// 此檔不是 tool，不得 export tool 定義，必須放在 tools/ 之外。
+// 图像编排共用 lib（2026-08-31 片3）。
+// 职责：确定性排版/风格工具的基础设施——公网 blob 上传（image-data-api）、
+// 图片下载、PIL 沙箱执行（spawn python3 + imgops.py）、VLM 主体框（复用片2 img-orchestrate）。
+// 零生图扣费：本档绝不触碰 /images/generations；仅 VLM chat（内部通道）与本地 PIL。
+// 此档不是 tool，不得 export tool 定义，必须放在 tools/ 之外。
 
 import { readFileSync } from "node:fs"
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises"
@@ -14,13 +14,13 @@ const CP_ENV = "/opt/image-control-plane/.env.control-plane"
 const WORKSPACE = "/opt/agent-harness/workspace"
 const RUN_DIR = WORKSPACE + "/.run"
 const LIB_DIR = WORKSPACE + "/.opencode/lib"
-// 中英混排標題（例「drama-visual-2 镜头拆解」）：Droid Fallback 無拉丁字形→豆腐塊；文泉驛微米黑兩者皆含。
+// 中英混排标题（例「drama-visual-2 镜头拆解」）：Droid Fallback 无拉丁字形→豆腐块；文泉驿微米黑两者皆含。
 const CJK_FONT = "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
 const LATIN_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 // ---------------------------------------------------------------------------
-// 公網 blob（image-data-api）：PUT /api/blob/<path> → 公網 GET <base>/files/<path>
-// key 僅進程內使用，嚴禁入返回值/日誌。
+// 公网 blob（image-data-api）：PUT /api/blob/<path> → 公网 GET <base>/files/<path>
+// key 仅进程内使用，严禁入返回值/日志。
 // ---------------------------------------------------------------------------
 let blobCfg: { base: string; key: string } | null = null
 
@@ -43,17 +43,17 @@ export function resolveBlob(): { base: string; key: string } | null {
   }
 }
 
-/** 下載圖片為 Buffer（公網/站點 URL 皆可）。失敗拋錯，呼叫端轉 ok:false。 */
+/** 下载图片为 Buffer（公网/站点 URL 皆可）。失败抛错，呼叫端转 ok:false。 */
 export async function downloadImage(url: string, signal?: AbortSignal): Promise<Buffer> {
   const res = await fetch(url, { signal: signal ?? AbortSignal.timeout(60_000) })
-  if (!res.ok) throw new Error(`下載原圖失敗 HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`下载原图失败 HTTP ${res.status}`)
   const buf = Buffer.from(await res.arrayBuffer())
-  if (buf.length === 0) throw new Error("下載原圖為空")
-  if (buf.length > 25 * 1024 * 1024) throw new Error("原圖超過 25MB")
+  if (buf.length === 0) throw new Error("下载原图为空")
+  if (buf.length > 25 * 1024 * 1024) throw new Error("原图超过 25MB")
   return buf
 }
 
-/** 上傳 PNG Buffer 到公網 blob，回傳可 GET 的公網 URL。 */
+/** 上传 PNG Buffer 到公网 blob，回传可 GET 的公网 URL。 */
 export async function uploadBlob(
   pathname: string,
   buf: Buffer,
@@ -76,14 +76,14 @@ export async function uploadBlob(
     body: buf as unknown as BodyInit,
     signal: signal ?? AbortSignal.timeout(60_000),
   })
-  if (!res.ok) throw new Error(`上傳公網失敗 HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`上传公网失败 HTTP ${res.status}`)
   const j = (await res.json().catch(() => ({}))) as { url?: string }
-  if (!j.url) throw new Error("上傳未返回 url")
+  if (!j.url) throw new Error("上传未返回 url")
   return j.url
 }
 
 // ---------------------------------------------------------------------------
-// PIL 沙箱：spawn python3，注入 imgops 模組，讀寫本機檔，回傳輸出 Buffer + JSON。
+// PIL 沙箱：spawn python3，注入 imgops 模组，读写本机档，回传输出 Buffer + JSON。
 // ---------------------------------------------------------------------------
 export interface PilJob {
   inputs?: Record<string, Buffer>
@@ -153,7 +153,7 @@ export async function runPIL(job: PilJob): Promise<PilResult> {
       try {
         files[name] = await readFile(outPaths[name])
       } catch {
-        /* 輸出缺失由呼叫端判定 */
+        /* 输出缺失由呼叫端判定 */
       }
     }
     return { ok: true, result, files, stderr: run.stderr, exitCode: run.code, timedOut: false }
@@ -211,11 +211,11 @@ function spawnPython(
 }
 
 // ---------------------------------------------------------------------------
-// VLM 主體框（復用片2 vlmAskJson）。回傳像素 bbox 或 null（失敗誠實標 null，置中退化）。
+// VLM 主体框（复用片2 vlmAskJson）。回传像素 bbox 或 null（失败诚实标 null，置中退化）。
 // ---------------------------------------------------------------------------
 const BBOX_Q =
-  "這是單張圖像。請框出畫面主體（最主要的單一物件/人物/產品）的邊界框。" +
-  '輸出 JSON：{"bbox":[x1,y1,x2,y2]}，座標為相對寬高的千分比（0-1000，左上為原點，x1<x2, y1<y2）。只輸出 JSON。'
+  "这是单张图像。请框出画面主体（最主要的单一物件/人物/产品）的边界框。" +
+  '输出 JSON：{"bbox":[x1,y1,x2,y2]}，座标为相对宽高的千分比（0-1000，左上为原点，x1<x2, y1<y2）。只输出 JSON。'
 
 export interface SubjectBox {
   ok: boolean
@@ -223,7 +223,7 @@ export interface SubjectBox {
   reason?: string
 }
 
-/** 取主體框並換算為像素（依 w×h）。VLM 失敗回 ok:false,bbox:null（呼叫端置中退化）。 */
+/** 取主体框并换算为像素（依 w×h）。VLM 失败回 ok:false,bbox:null（呼叫端置中退化）。 */
 export async function subjectBox(
   imageUrl: string,
   w: number,
@@ -236,13 +236,13 @@ export async function subjectBox(
     return { ok: false, bbox: null, reason: "VLM bbox 格式非法" }
   }
   let [rx1, ry1, rx2, ry2] = raw as number[]
-  // 千分比 → 像素，先規範化順序再換算，最後夾到邊界
+  // 千分比 → 像素，先规范化顺序再换算，最后夹到边界
   const px = (v: number, dim: number) => clamp(Math.round((v / 1000) * dim), 0, dim)
   const x1 = px(Math.min(rx1, rx2), w)
   const x2 = px(Math.max(rx1, rx2), w)
   const y1 = px(Math.min(ry1, ry2), h)
   const y2 = px(Math.max(ry1, ry2), h)
-  if (x2 - x1 < 8 || y2 - y1 < 8) return { ok: false, bbox: null, reason: "VLM bbox 退化（過小）" }
+  if (x2 - x1 < 8 || y2 - y1 < 8) return { ok: false, bbox: null, reason: "VLM bbox 退化（过小）" }
   return { ok: true, bbox: [x1, y1, x2, y2] }
 }
 
@@ -251,13 +251,13 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 export function pickFont(text: string): string {
-  // 含 CJK（中日韓統一/拡張A/標點/全形）用 Droid Fallback，否則 DejaVu
+  // 含 CJK（中日韩统一/拡张A/标点/全形）用 Droid Fallback，否则 DejaVu
   for (const ch of text) {
     const c = ch.codePointAt(0) ?? 0
     if (
-      (c >= 0x3000 && c <= 0x303f) || // CJK 標點
-      (c >= 0x3400 && c <= 0x4dbf) || // 拡張 A
-      (c >= 0x4e00 && c <= 0x9fff) || // 統一表意
+      (c >= 0x3000 && c <= 0x303f) || // CJK 标点
+      (c >= 0x3400 && c <= 0x4dbf) || // 拡张 A
+      (c >= 0x4e00 && c <= 0x9fff) || // 统一表意
       (c >= 0xf900 && c <= 0xfaff) || // 兼容
       (c >= 0xff00 && c <= 0xffef) // 全形
     )
@@ -266,7 +266,7 @@ export function pickFont(text: string): string {
   return LATIN_FONT
 }
 
-/** 生成唯一 blob 路徑前綴，避免覆蓋。 */
+/** 生成唯一 blob 路径前缀，避免覆盖。 */
 export function blobPath(prefix: string, ext = "png"): string {
   return `agent-batch3/${prefix}-${Date.now()}-${randomBytes(3).toString("hex")}.${ext}`
 }

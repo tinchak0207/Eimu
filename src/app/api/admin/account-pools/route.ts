@@ -7,7 +7,7 @@ import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function GET() {
   try {
@@ -40,11 +40,11 @@ export async function GET() {
       accounts.items = accounts.items.filter((account) => !deletedAccountIds.has(account.id));
       accounts.total = Math.max(0, accounts.total - deletedAccountIds.size);
     }
-    // 診斷用與生產隊列完全相同的生效判定：describeEnvChannels 給出 sub2api 的配置
-    // 與預設狀態，override.enabled ?? defaultEnabled 就是 buildModelQueue 的取捨——
-    // 兩個方向都要如實：admin 停用後這裡不得宣稱生效（舊病），admin 在
-    // SUB2API_ENABLED 非 true 時強制啟用後，這裡也不得宣稱未配置（強制啟用時
-    // 生產真的在燒這批賬號）。
+    // 诊断用与生产队列完全相同的生效判定：describeEnvChannels 给出 sub2api 的配置
+    // 与预设状态，override.enabled ?? defaultEnabled 就是 buildModelQueue 的取舍——
+    // 两个方向都要如实：admin 停用后这里不得宣称生效（旧病），admin 在
+    // SUB2API_ENABLED 非 true 时强制启用后，这里也不得宣称未配置（强制启用时
+    // 生产真的在烧这批账号）。
     const overrides = await getRuntimeChannelOverrides();
     const sub2apiChannel = describeEnvChannels(process.env).find((channel) => channel.label === "sub2api");
     const sub2apiOverride = overrides["env:sub2api"] ?? {};

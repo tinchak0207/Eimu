@@ -1,9 +1,9 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail } from "../lib/client"
 
-// 電商詳情頁排版清單（2026-08-31 片1 實裝）：產品鎖 + 賣點清單 → 模塊化排版 manifest。
-// 純代碼規則引擎（零 LLM 零扣費）：內置詳情頁模塊庫 + 賣點關鍵詞→模塊映射 + 品類調整。
-// 輸出每模塊的素材需求（類型/數量/畫幅），供後續 image_generate 逐模塊排產。
+// 电商详情页排版清单（2026-08-31 片1 实装）：产品锁 + 卖点清单 → 模块化排版 manifest。
+// 纯代码规则引擎（零 LLM 零扣费）：内置详情页模块库 + 卖点关键词→模块映射 + 品类调整。
+// 输出每模块的素材需求（类型/数量/画幅），供后续 image_generate 逐模块排产。
 
 interface ModuleDef {
   key: string
@@ -15,54 +15,54 @@ interface ModuleDef {
 
 const MODULE_LIBRARY: Record<string, ModuleDef> = {
   hero_kv: {
-    key: "hero_kv", title: "首屏 KV", purpose: "3 秒內講清「這是什麼、憑什麼買」",
-    copy_slots: ["主標題（≤12字）", "副標題（≤20字）", "核心利益點角標"],
-    assets: [{ type: "image", count: 1, aspect: "3:4", note: "產品主體+背景氛圍，750px 寬移動端首屏" }],
+    key: "hero_kv", title: "首屏 KV", purpose: "3 秒内讲清「这是什么、凭什么买」",
+    copy_slots: ["主标题（≤12字）", "副标题（≤20字）", "核心利益点角标"],
+    assets: [{ type: "image", count: 1, aspect: "3:4", note: "产品主体+背景氛围，750px 宽移动端首屏" }],
   },
   selling_point_grid: {
-    key: "selling_point_grid", title: "賣點圖組", purpose: "逐條賣點可視化，支撐首屏主張",
-    copy_slots: ["賣點標題", "賣點一句話說明"],
-    assets: [{ type: "image", count: 3, aspect: "1:1", note: "每張對應一個賣點，風格統一" }],
+    key: "selling_point_grid", title: "卖点图组", purpose: "逐条卖点可视化，支撑首屏主张",
+    copy_slots: ["卖点标题", "卖点一句话说明"],
+    assets: [{ type: "image", count: 3, aspect: "1:1", note: "每张对应一个卖点，风格统一" }],
   },
   detail_closeup: {
-    key: "detail_closeup", title: "細節特寫", purpose: "材質/工藝/做工近距離證據",
-    copy_slots: ["細節標題", "材質/工藝說明"],
-    assets: [{ type: "image", count: 3, aspect: "1:1", note: "微距/局部特寫，突出質感" }],
+    key: "detail_closeup", title: "细节特写", purpose: "材质/工艺/做工近距离证据",
+    copy_slots: ["细节标题", "材质/工艺说明"],
+    assets: [{ type: "image", count: 3, aspect: "1:1", note: "微距/局部特写，突出质感" }],
   },
   scene_lifestyle: {
-    key: "scene_lifestyle", title: "場景圖", purpose: "使用情境代入，讓買家看見自己",
-    copy_slots: ["場景標題", "適用人群/情境說明"],
-    assets: [{ type: "image", count: 2, aspect: "4:3", note: "真實使用場景，人物+產品同框" }],
+    key: "scene_lifestyle", title: "场景图", purpose: "使用情境代入，让买家看见自己",
+    copy_slots: ["场景标题", "适用人群/情境说明"],
+    assets: [{ type: "image", count: 2, aspect: "4:3", note: "真实使用场景，人物+产品同框" }],
   },
   spec_table: {
-    key: "spec_table", title: "參數表", purpose: "規格透明，降低決策成本",
-    copy_slots: ["參數名", "參數值"],
-    assets: [{ type: "image", count: 1, aspect: "3:4", note: "參數排版圖或純文字表，可不用生圖" }],
+    key: "spec_table", title: "参数表", purpose: "规格透明，降低决策成本",
+    copy_slots: ["参数名", "参数值"],
+    assets: [{ type: "image", count: 1, aspect: "3:4", note: "参数排版图或纯文字表，可不用生图" }],
   },
   size_chart: {
-    key: "size_chart", title: "尺碼圖", purpose: "尺碼/尺寸指引，退換貨預防",
-    copy_slots: ["尺碼表頭", "測量說明"],
-    assets: [{ type: "image", count: 1, aspect: "3:4", note: "平鋪尺寸標註圖或尺碼表" }],
+    key: "size_chart", title: "尺码图", purpose: "尺码/尺寸指引，退换货预防",
+    copy_slots: ["尺码表头", "测量说明"],
+    assets: [{ type: "image", count: 1, aspect: "3:4", note: "平铺尺寸标注图或尺码表" }],
   },
   trust_badges: {
-    key: "trust_badges", title: "信任狀", purpose: "資質/銷量/口碑背書",
-    copy_slots: ["認證名稱", "保修承諾", "口碑數據"],
-    assets: [{ type: "image", count: 2, aspect: "1:1", note: "認證證書/檢測報告/榮譽牆版式圖" }],
+    key: "trust_badges", title: "信任状", purpose: "资质/销量/口碑背书",
+    copy_slots: ["认证名称", "保修承诺", "口碑数据"],
+    assets: [{ type: "image", count: 2, aspect: "1:1", note: "认证证书/检测报告/荣誉墙版式图" }],
   },
   usage_guide: {
-    key: "usage_guide", title: "使用方法", purpose: "用法步驟可視化，降低上手門檻",
-    copy_slots: ["步驟標題", "步驟說明"],
-    assets: [{ type: "image", count: 3, aspect: "1:1", note: "步驟圖（step 1-3）" }],
+    key: "usage_guide", title: "使用方法", purpose: "用法步骤可视化，降低上手门槛",
+    copy_slots: ["步骤标题", "步骤说明"],
+    assets: [{ type: "image", count: 3, aspect: "1:1", note: "步骤图（step 1-3）" }],
   },
   package_contents: {
-    key: "package_contents", title: "包裝清單", purpose: "到貨所見即所得，防糾紛",
-    copy_slots: ["清單條目"],
-    assets: [{ type: "image", count: 1, aspect: "1:1", note: "全家福擺拍圖" }],
+    key: "package_contents", title: "包装清单", purpose: "到货所见即所得，防纠纷",
+    copy_slots: ["清单条目"],
+    assets: [{ type: "image", count: 1, aspect: "1:1", note: "全家福摆拍图" }],
   },
   faq: {
-    key: "faq", title: "常見問題", purpose: "售前疑慮前置消解",
-    copy_slots: ["問題", "回答"],
-    assets: [{ type: "text_only", count: 0, aspect: "-", note: "純文字模塊，無需素材" }],
+    key: "faq", title: "常见问题", purpose: "售前疑虑前置消解",
+    copy_slots: ["问题", "回答"],
+    assets: [{ type: "text_only", count: 0, aspect: "-", note: "纯文字模块，无需素材" }],
   },
 }
 
@@ -109,16 +109,16 @@ function parseList(v: string): string[] {
 
 export default tool({
   description:
-    "詳情頁排版清單生成器（純代碼規則引擎，零扣費）。product_lock 填產品鎖 JSON 字串（{name,category?,price?}，name 必填），selling_points 填賣點清單（JSON 陣列字串或換行/逗號分隔）。輸出電商詳情頁 manifest：模塊庫（首屏KV/賣點圖/細節特寫/場景圖/參數表/尺碼圖/信任狀/使用方法/包裝清單/FAQ）按賣點關鍵詞與品類規則映射排序，每模塊給文案槽位與素材需求（類型/數量/畫幅），可直接餵給 image_generate 逐模塊排產。只產排版清單，不產文案不產圖。",
+    "详情页排版清单生成器（纯代码规则引擎，零扣费）。product_lock 填产品锁 JSON 字串（{name,category?,price?}，name 必填），selling_points 填卖点清单（JSON 阵列字串或换行/逗号分隔）。输出电商详情页 manifest：模块库（首屏KV/卖点图/细节特写/场景图/参数表/尺码图/信任状/使用方法/包装清单/FAQ）按卖点关键词与品类规则映射排序，每模块给文案槽位与素材需求（类型/数量/画幅），可直接喂给 image_generate 逐模块排产。只产排版清单，不产文案不产图。",
   args: {
-    product_lock: tool.schema.string().describe("產品鎖 JSON 字串：{\"name\":\"...\",\"category\":\"...\",\"price\":...}"),
-    selling_points: tool.schema.string().describe("賣點清單：JSON 陣列字串或換行/逗號分隔文本"),
+    product_lock: tool.schema.string().describe("产品锁 JSON 字串：{\"name\":\"...\",\"category\":\"...\",\"price\":...}"),
+    selling_points: tool.schema.string().describe("卖点清单：JSON 阵列字串或换行/逗号分隔文本"),
   },
   async execute(args) {
     const lockRaw = String(args.product_lock ?? "").trim()
     const pointsRaw = String(args.selling_points ?? "").trim()
-    if (!lockRaw) return fail("missing_product_lock", "product_lock 為空：需給 {name,category?,price?} JSON", { title: "輸入缺失" })
-    if (!pointsRaw) return fail("missing_selling_points", "selling_points 為空：至少給一條賣點", { title: "輸入缺失" })
+    if (!lockRaw) return fail("missing_product_lock", "product_lock 为空：需给 {name,category?,price?} JSON", { title: "输入缺失" })
+    if (!pointsRaw) return fail("missing_selling_points", "selling_points 为空：至少给一条卖点", { title: "输入缺失" })
 
     let lock: Record<string, unknown> = {}
     try {
@@ -129,10 +129,10 @@ export default tool({
       lock = { name: lockRaw.slice(0, 60) }
     }
     const name = typeof lock.name === "string" && lock.name.trim() ? lock.name.trim() : ""
-    if (!name) return fail("invalid_product_lock", "product_lock 缺 name 欄位（產品名）", { title: "輸入非法" })
+    if (!name) return fail("invalid_product_lock", "product_lock 缺 name 栏位（产品名）", { title: "输入非法" })
     const category = typeof lock.category === "string" ? lock.category : ""
     const points = parseList(pointsRaw)
-    if (!points.length) return fail("invalid_selling_points", "selling_points 解析後為空", { title: "輸入非法" })
+    if (!points.length) return fail("invalid_selling_points", "selling_points 解析后为空", { title: "输入非法" })
 
     const used = new Set<string>(["hero_kv", "faq"])
     const pointMapping: { point: string; module: string }[] = []
@@ -165,7 +165,7 @@ export default tool({
     const unmapped = pointMapping.filter((m) => m.module === "selling_point_grid").length
 
     return ok({
-      title: `詳情頁清單：${modules.length} 模塊/${totalImages} 張圖`,
+      title: `详情页清单：${modules.length} 模块/${totalImages} 张图`,
       product: { name, category: category || null, price: lock.price ?? null },
       manifest: modules,
       faq_questions: FAQ_TEMPLATES.map((f) => f(name)),
@@ -175,7 +175,7 @@ export default tool({
         selling_points_total: points.length,
         selling_points_generic_grid: unmapped,
       },
-      note: "文案槽位為佔位指引非成稿；素材需經 image_generate 逐模塊產出後回填。",
+      note: "文案槽位为占位指引非成稿；素材需经 image_generate 逐模块产出后回填。",
     })
   },
 })

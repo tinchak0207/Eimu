@@ -99,7 +99,7 @@ test("pollTaskUntilDone times out on a never-terminating task", async () => {
   const fetchImpl: FetchLike = async () => jsonResponse({ id: "job_t", status: "queued" });
   await assert.rejects(
     pollTaskUntilDone("https://x.example", "k", "job_t", "images", 1, 50, fetchImpl),
-    /仍未終結/,
+    /仍未终结/,
   );
 });
 

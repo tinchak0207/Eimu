@@ -1,27 +1,27 @@
-// 團隊治理六面（席位／角色／建畫布權限／加入審批／生命週期／用量）。
+// 团队治理六面（席位／角色／建画布权限／加入审批／生命周期／用量）。
 //
-// 定性：**在既有團隊真源上長**，不新建第二套團隊模型（見 db/migrations/023）。
-//   團隊身份 = team_user_id（= 團隊主 B key 的 biz_api_key.user_id = new-api users.id）
-//   成員名冊 = team_member_quota（019）＋ role 欄（023）
-//   配額真源 = new-api（users.quota）；本模組**不碰任何點數數字**，
-//   也**不呼叫任何上游額度調整**——分配/回收唯一通路是 member-quota.ts（禁影子帳本）。
+// 定性：**在既有团队真源上长**，不新建第二套团队模型（见 db/migrations/023）。
+//   团队身份 = team_user_id（= 团队主 B key 的 biz_api_key.user_id = new-api users.id）
+//   成员名册 = team_member_quota（019）＋ role 栏（023）
+//   配额真源 = new-api（users.quota）；本模组**不碰任何点数数字**，
+//   也**不呼叫任何上游额度调整**——分配/回收唯一通路是 member-quota.ts（禁影子帐本）。
 //
 // 分工：
-//   - member-quota.ts：配額映射與轉移（唯一權威）。本模組不重寫它，只讀名冊與配額可視面。
-//   - account-ledger.ts：用量統計的逐筆來源（讀既有帳本，不新建統計帳本）。
-//   - 本模組：身份與意圖（role / member_create_canvas / seats / 申請四態 / 解散冷靜期）。
+//   - member-quota.ts：配额映射与转移（唯一权威）。本模组不重写它，只读名册与配额可视面。
+//   - account-ledger.ts：用量统计的逐笔来源（读既有帐本，不新建统计帐本）。
+//   - 本模组：身份与意图（role / member_create_canvas / seats / 申请四态 / 解散冷静期）。
 //
-// 角色模型（與 member-quota 的 user 層模型一致）：
-//   ★ 團隊主帳 team_user_id 恆為 owner，且不入名冊（019 CHECK 禁止 member 名冊含主帳）。
-//   ★ 名冊 role = owner（共同所有者）/ admin / member；owner 集合恆非空
-//     ⇒ 「移除/降級團隊主帳」被 409 last_owner 拒（最後一個 owner 保護）。
+// 角色模型（与 member-quota 的 user 层模型一致）：
+//   ★ 团队主帐 team_user_id 恒为 owner，且不入名册（019 CHECK 禁止 member 名册含主帐）。
+//   ★ 名册 role = owner（共同所有者）/ admin / member；owner 集合恒非空
+//     ⇒ 「移除/降级团队主帐」被 409 last_owner 拒（最后一个 owner 保护）。
 //
-// 不變量：
-//   ① 不可移除/降級最後一個 owner（團隊主帳不可被移除、不可 leave）。
-//   ② min_members ≤ 名冊成員數 ≤ seats ≤ max_members(硬上限)；滿員時申請不得通過。
-//   ③ 48h 解散冷靜期內可撤回；冷靜期過後不可撤回，執行才生效且幂等。
-//   ④ 所有寫入幂等：重放同請求不產生第二次副作用、不重複登記、不重複扣費。
-//   ⑤ 審批/角色/席位/解散全路徑不觸碰點數（無上游調整呼叫）⇒ 無影子帳本、無重複扣費。
+// 不变量：
+//   ① 不可移除/降级最后一个 owner（团队主帐不可被移除、不可 leave）。
+//   ② min_members ≤ 名册成员数 ≤ seats ≤ max_members(硬上限)；满员时申请不得通过。
+//   ③ 48h 解散冷静期内可撤回；冷静期过后不可撤回，执行才生效且幂等。
+//   ④ 所有写入幂等：重放同请求不产生第二次副作用、不重复登记、不重复扣费。
+//   ⑤ 审批/角色/席位/解散全路径不触碰点数（无上游调整呼叫）⇒ 无影子帐本、无重复扣费。
 
 import { randomUUID } from "node:crypto";
 
@@ -31,7 +31,7 @@ import { readAccountLedger, type LedgerEntry } from "./account-ledger";
 import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
 import { readTeamQuotaView, toCoins, upsertTeamMember, type TeamLock } from "./member-quota";
 
-// ─────────────────────────────────────────── 配置（常量可調，不硬編）
+// ─────────────────────────────────────────── 配置（常量可调，不硬编）
 
 export const TEAM_CAPACITY_ENV = {
   minMembers: "TEAM_MIN_MEMBERS",
@@ -42,7 +42,7 @@ export const TEAM_CAPACITY_ENV = {
   dissolveCooloffHours: "TEAM_DISSOLVE_COOLOFF_HOURS",
 } as const;
 
-/** 與競品可對標的默認容量語義（常量放 config 可調，見 teamCapacity()）。 */
+/** 与竞品可对标的默认容量语义（常量放 config 可调，见 teamCapacity()）。 */
 export const TEAM_MIN_MEMBERS_DEFAULT = 2;
 export const TEAM_DEFAULT_MAX_MEMBERS_DEFAULT = 10;
 export const TEAM_MAX_MEMBERS_DEFAULT = 200;
@@ -99,7 +99,7 @@ function governanceStoreEnabled(): boolean {
   return generationControlPlaneEnabled();
 }
 
-// ─────────────────────────────────────────── 角色與權限
+// ─────────────────────────────────────────── 角色与权限
 
 export type TeamRole = "owner" | "admin" | "member";
 export const TEAM_ROLES: readonly TeamRole[] = ["owner", "admin", "member"];
@@ -136,18 +136,18 @@ function mapRosterRow(row: RosterRow): TeamRosterEntry {
     memberKeyId: row.member_key_id,
     displayName: row.display_name ?? "",
     enabled: row.enabled !== false,
-    // 023 之前的列沒有 role ⇒ 默認 member（不把缺欄位讀成 owner）。
+    // 023 之前的列没有 role ⇒ 默认 member（不把缺栏位读成 owner）。
     role: isTeamRole(row.role) ? row.role : "member",
   };
 }
 
-/** 團隊 actor 的有效角色。null = 與此團隊無治理關係（外人）。 */
+/** 团队 actor 的有效角色。null = 与此团队无治理关系（外人）。 */
 export interface TeamActor {
   userId: number;
   teamUserId: number;
   role: TeamRole;
   isOwner: boolean;
-  /** true = 名冊成員；false = 團隊主帳（owner，不在名冊）。 */
+  /** true = 名册成员；false = 团队主帐（owner，不在名册）。 */
   isMember: boolean;
 }
 
@@ -175,8 +175,8 @@ export function isTeamManager(role: TeamRole): boolean {
 }
 
 /**
- * 角色變更授權（純函式）：
- *   owner → 可改他人（任何角色）；admin → 只能改「現角色為 member」的人，且不得指派 owner；
+ * 角色变更授权（纯函式）：
+ *   owner → 可改他人（任何角色）；admin → 只能改「现角色为 member」的人，且不得指派 owner；
  *   member → 不可改任何人。
  */
 export function canManageRole(
@@ -184,27 +184,27 @@ export function canManageRole(
   target: { role: TeamRole; memberUserId: number },
   nextRole: TeamRole,
 ): boolean {
-  if (target.memberUserId === actor.teamUserId) return false; // 團隊主帳恆 owner，不可被改
+  if (target.memberUserId === actor.teamUserId) return false; // 团队主帐恒 owner，不可被改
   if (actor.role === "owner") return true;
   if (actor.role === "admin") return target.role === "member" && nextRole !== "owner";
   return false;
 }
 
-/** 名冊角色可寫入性：owner 可指派任何角色；admin 不得製造新 owner（同上）。 */
+/** 名册角色可写入性：owner 可指派任何角色；admin 不得制造新 owner（同上）。 */
 export function assignableRoles(actor: TeamActor): TeamRole[] {
   if (actor.role === "owner") return [...TEAM_ROLES];
   if (actor.role === "admin") return ["admin", "member"];
   return [];
 }
 
-/** owner 集合大小 = 團隊主帳(必為 owner) + 名冊 owner。恆 ≥ 1。 */
+/** owner 集合大小 = 团队主帐(必为 owner) + 名册 owner。恒 ≥ 1。 */
 export function ownerCount(teamUserId: number, roster: Pick<TeamRosterEntry, "role">[]): number {
   return 1 + roster.filter((entry) => entry.role === "owner").length;
 }
 
-// ── 建畫布權限（團隊級開關）
+// ── 建画布权限（团队级开关）
 
-/** 成員不可建共享畫布的文案（語義對齊競品，風格用我方）。 */
+/** 成员不可建共享画布的文案（语义对齐竞品，风格用我方）。 */
 export const TEAM_CANVAS_FORBIDDEN_MESSAGE =
   "只有团队创建者或管理员可以创建共享画布，请联系团队管理员开启「成员创建画布」权限。";
 export const TEAM_CANVAS_FORBIDDEN_CODE = "member_canvas_forbidden";
@@ -213,13 +213,13 @@ export interface CanvasPermission {
   allowed: boolean;
   code?: string;
   message: string;
-  /** 命中的團隊（null = 呼叫方不是任何團隊的受管成員，不受此閘）。 */
+  /** 命中的团队（null = 呼叫方不是任何团队的受管成员，不受此闸）。 */
   teamUserId: number | null;
   role: TeamRole | null;
 }
 
 /**
- * 純函式判定：owner/admin 一律可建；member 需團隊開關開啟；非成員不受此閘。
+ * 纯函式判定：owner/admin 一律可建；member 需团队开关开启；非成员不受此闸。
  */
 export function canCreateSharedCanvas(input: {
   actor: Pick<TeamActor, "role"> | null;
@@ -231,39 +231,39 @@ export function canCreateSharedCanvas(input: {
   return { allowed: false, code: TEAM_CANVAS_FORBIDDEN_CODE, message: TEAM_CANVAS_FORBIDDEN_MESSAGE };
 }
 
-// ── 資產面 RBAC（三級權限矩陣；與 canCreateSharedCanvas **並列**，不覆蓋）
+// ── 资产面 RBAC（三级权限矩阵；与 canCreateSharedCanvas **并列**，不覆盖）
 
 /**
- * 資產面權限矩陣（逐字對照 Dramagic Team/Asset 頁；語義照做，命名用我方）。
+ * 资产面权限矩阵（逐字对照 Dramagic Team/Asset 页；语义照做，命名用我方）。
  *
- * | 層級                     | view                | manage                              |
+ * | 层级                     | view                | manage                              |
  * |--------------------------|---------------------|-------------------------------------|
- * | Main（Super Admin）      | 全帳號              | 全帳號（all global assets）          |
- * | Sub（Team Admin）        | 隊內全部            | 隊內全部（含他人建的）               |
- * | Sub（Member）            | 隊內全部            | **只可管自己建的**                   |
+ * | Main（Super Admin）      | 全帐号              | 全帐号（all global assets）          |
+ * | Sub（Team Admin）        | 队内全部            | 队内全部（含他人建的）               |
+ * | Sub（Member）            | 队内全部            | **只可管自己建的**                   |
  *
- * 帳號級（= 非團隊資產 / 個人資產）維度：
- *   - 自己建的 → 可管（任何人管自己的資產恆真）。
- *   - 他人建的個人資產 → 任何人都不可管（跨帳號是硬邊界，見 asset-scope
- *     resolveAssetVisibility 的「跨帳號：一律不可見（跨帳號是 RBAC 那一刀）」）。
+ * 帐号级（= 非团队资产 / 个人资产）维度：
+ *   - 自己建的 → 可管（任何人管自己的资产恒真）。
+ *   - 他人建的个人资产 → 任何人都不可管（跨帐号是硬边界，见 asset-scope
+ *     resolveAssetVisibility 的「跨帐号：一律不可见（跨帐号是 RBAC 那一刀）」）。
  *
- * **fail-closed**：actor 為 null（查不到身份）或 actorUserId 不合法 → 拒。
- * 這與建畫布閘的 fail-open **刻意不同**：建畫布閘的 null 語義是「relay 掛了」，
- * 放行只是不擋創作；資產管理是**寫別人的資料**，證明不了身份就不得放行。
+ * **fail-closed**：actor 为 null（查不到身份）或 actorUserId 不合法 → 拒。
+ * 这与建画布闸的 fail-open **刻意不同**：建画布闸的 null 语义是「relay 挂了」，
+ * 放行只是不挡创作；资产管理是**写别人的资料**，证明不了身份就不得放行。
  */
 export const TEAM_ASSET_FORBIDDEN_CODE = "team_asset_forbidden";
 export const TEAM_ASSET_FORBIDDEN_MESSAGE = "无权管理该资产：只有资产创建者或团队管理员可以修改团队资产。";
 
-/** 資產面總開關：Main / Team Admin 恆真，Member 需資產屬主。 */
+/** 资产面总开关：Main / Team Admin 恒真，Member 需资产属主。 */
 export function canManageTeamAsset(input: {
-  /** 判定主體的有效角色；null = 查不到身份（fail-closed → 拒）。 */
+  /** 判定主体的有效角色；null = 查不到身份（fail-closed → 拒）。 */
   actor: Pick<TeamActor, "role"> | null;
-  /** 資產屬主 user id（= 建該資產的帳號）。 */
+  /** 资产属主 user id（= 建该资产的帐号）。 */
   assetOwnerUserId: number | null;
-  /** 當前操作者 user id。 */
+  /** 当前操作者 user id。 */
   actorUserId: number | null;
 }): { allowed: boolean; code?: string; message: string } {
-  // fail-closed ①：身份不明 → 不得管任何資產。
+  // fail-closed ①：身份不明 → 不得管任何资产。
   if (!input.actor) return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
   if (
     typeof input.actorUserId !== "number" ||
@@ -272,12 +272,12 @@ export function canManageTeamAsset(input: {
   ) {
     return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
   }
-  // 自己的資產恆可管（含匿名資產：assetOwnerUserId 為 null 時**只有**自己建的視角成立；
-  // 查不出屬主的資產不得被當成「人人可管」——見 fail-closed ③）。
+  // 自己的资产恒可管（含匿名资产：assetOwnerUserId 为 null 时**只有**自己建的视角成立；
+  // 查不出属主的资产不得被当成「人人可管」——见 fail-closed ③）。
   if (input.assetOwnerUserId === input.actorUserId) return { allowed: true, message: "" };
-  // owner（= Main，含團隊主帳與共同所有者）與 admin（= Team Admin）：隊內/全帳號全部資產。
+  // owner（= Main，含团队主帐与共同所有者）与 admin（= Team Admin）：队内/全帐号全部资产。
   if (isTeamManager(input.actor.role)) return { allowed: true, message: "" };
-  // fail-closed ③：member 且屬主不明 → 拒（不把「查不出屬主」讀成「自己的」）。
+  // fail-closed ③：member 且属主不明 → 拒（不把「查不出属主」读成「自己的」）。
   if (
     input.assetOwnerUserId === null ||
     typeof input.assetOwnerUserId !== "number" ||
@@ -286,23 +286,23 @@ export function canManageTeamAsset(input: {
   ) {
     return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
   }
-  // member：只可管自己建的（上面已排除相等情形）⇒ 他人資產一律拒。
+  // member：只可管自己建的（上面已排除相等情形）⇒ 他人资产一律拒。
   return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
 }
 
-/** 資產面**讀取**權：Main / Team Admin / Member 皆可讀隊內全部；非成員只可讀自己的。 */
+/** 资产面**读取**权：Main / Team Admin / Member 皆可读队内全部；非成员只可读自己的。 */
 export function canViewTeamAsset(input: {
   actor: Pick<TeamActor, "role"> | null;
   assetOwnerUserId: number | null;
   actorUserId: number | null;
 }): boolean {
   if (input.assetOwnerUserId === input.actorUserId && typeof input.actorUserId === "number") return true;
-  if (!input.actor) return false; // fail-closed：身份不明 → 不可讀他人資產
-  // 隊內任何角色皆可讀隊內資產（Dramagic：Member「Team assets view」）。
+  if (!input.actor) return false; // fail-closed：身份不明 → 不可读他人资产
+  // 队内任何角色皆可读队内资产（Dramagic：Member「Team assets view」）。
   return true;
 }
 
-// ─────────────────────────────────────────── 映射層存取（唯讀名冊/設定）
+// ─────────────────────────────────────────── 映射层存取（唯读名册/设定）
 
 export async function listTeamRoster(teamUserId: number, sql?: GenerationSql): Promise<TeamRosterEntry[]> {
   if (!governanceStoreEnabled()) return [];
@@ -316,7 +316,7 @@ export async function listTeamRoster(teamUserId: number, sql?: GenerationSql): P
   return rows.map(mapRosterRow);
 }
 
-/** 成員側查自己的團隊與角色（治理閘的入口）。 */
+/** 成员侧查自己的团队与角色（治理闸的入口）。 */
 export async function findRosterEntryByUserId(
   memberUserId: number,
   sql?: GenerationSql,
@@ -332,7 +332,7 @@ export async function findRosterEntryByUserId(
   return rows[0] ? mapRosterRow(rows[0]) : null;
 }
 
-/** 呼叫方的治理歸屬：名冊成員 → 其團隊；主帳（無名冊列）→ 自己（owner）。 */
+/** 呼叫方的治理归属：名册成员 → 其团队；主帐（无名册列）→ 自己（owner）。 */
 export async function resolveActorTeam(
   actorUserId: number,
   sql?: GenerationSql,
@@ -349,7 +349,7 @@ async function countRoster(teamUserId: number, sql: GenerationSql): Promise<numb
   return Number(rows[0]?.count ?? 0);
 }
 
-/** 該 user 已加入的團隊數（019 的 UNIQUE(member_user_id) 使其結構上 ≤ 1）。 */
+/** 该 user 已加入的团队数（019 的 UNIQUE(member_user_id) 使其结构上 ≤ 1）。 */
 export async function countJoinedTeams(memberUserId: number, sql?: GenerationSql): Promise<number> {
   if (!governanceStoreEnabled()) return 0;
   const db = sql ?? getGenerationSql();
@@ -359,7 +359,7 @@ export async function countJoinedTeams(memberUserId: number, sql?: GenerationSql
   return Number(rows[0]?.count ?? 0);
 }
 
-/** 該 user 已擁有的團隊數 = 自己的主帳團隊(1) + 名冊 owner 列。 */
+/** 该 user 已拥有的团队数 = 自己的主帐团队(1) + 名册 owner 列。 */
 export async function countOwnedTeams(userId: number, sql?: GenerationSql): Promise<number> {
   if (!governanceStoreEnabled()) return 0;
   const db = sql ?? getGenerationSql();
@@ -370,7 +370,7 @@ export async function countOwnedTeams(userId: number, sql?: GenerationSql): Prom
   return 1 + Number(rows[0]?.count ?? 0);
 }
 
-// ── 團隊設定（意圖層）
+// ── 团队设定（意图层）
 
 export interface TeamSettingsRecord {
   teamUserId: number;
@@ -404,7 +404,7 @@ function mapSettingsRow(row: SettingsRow): TeamSettingsRecord {
   };
 }
 
-/** 未寫過設定的團隊拿到「默認意圖」（不落庫、不產生副作用）。 */
+/** 未写过设定的团队拿到「默认意图」（不落库、不产生副作用）。 */
 export function defaultTeamSettings(teamUserId: number): TeamSettingsRecord {
   return {
     teamUserId,
@@ -427,7 +427,7 @@ export async function readTeamSettings(teamUserId: number, sql?: GenerationSql):
   return rows[0] ? mapSettingsRow(rows[0]) : defaultTeamSettings(teamUserId);
 }
 
-// ─────────────────────────────────────────── 結果型
+// ─────────────────────────────────────────── 结果型
 
 export type GovernanceCode =
   | "store_unavailable"
@@ -472,7 +472,7 @@ function reasonOf(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 300);
 }
 
-/** 與 member-quota 同一把團隊鎖：治理寫入與配額分配互相串行化。 */
+/** 与 member-quota 同一把团队锁：治理写入与配额分配互相串行化。 */
 async function defaultGovernanceLock<T>(
   sql: GenerationSql,
   teamUserId: number,
@@ -521,7 +521,7 @@ export async function setMemberRole(
       if (!target) {
         return fail<{ memberUserId: number; role: TeamRole; unchanged: boolean }>(404, "member_not_found", `未找到成员密钥 ${input.memberKeyId} 对应的团队成员。`);
       }
-      // 最後一個 owner：團隊主帳恆為 owner，任何針對它的降級/移除一律拒。
+      // 最后一个 owner：团队主帐恒为 owner，任何针对它的降级/移除一律拒。
       if (target.memberUserId === input.teamUserId) {
         return fail<{ memberUserId: number; role: TeamRole; unchanged: boolean }>(409, "last_owner", "团队主账号是所有者的最后一位，不能降级或移除。");
       }
@@ -546,7 +546,7 @@ export async function setMemberRole(
   }
 }
 
-// ─────────────────────────────────────────── 面 2：建畫布權限開關
+// ─────────────────────────────────────────── 面 2：建画布权限开关
 
 export async function updateTeamSettings(
   input: { teamUserId: number; actorUserId: number; memberCreateCanvas?: boolean },
@@ -634,7 +634,7 @@ export async function setTeamSeats(
   }
 }
 
-// ─────────────────────────────────────────── 面 3：加入審批
+// ─────────────────────────────────────────── 面 3：加入审批
 
 export type JoinRequestStatus = "pending" | "approved" | "rejected" | "ignored";
 export const JOIN_REQUEST_STATUSES: readonly JoinRequestStatus[] = ["pending", "approved", "rejected", "ignored"];
@@ -695,8 +695,8 @@ async function findJoinRequest(input: {
 }
 
 /**
- * 申請加入團隊（申請人身份來自身份驗證，不從 body 取 user）。
- * 幂等：已有 pending 申請 → 回同一條（created=false）；已駁回/忽略 → 重開為 pending。
+ * 申请加入团队（申请人身份来自身份验证，不从 body 取 user）。
+ * 幂等：已有 pending 申请 → 回同一条（created=false）；已驳回/忽略 → 重开为 pending。
  */
 export async function applyToJoinTeam(
   input: { teamUserId: number; applicantUserId: number; applicantMemberKeyId: string; displayName?: string },
@@ -708,7 +708,7 @@ export async function applyToJoinTeam(
   if (!Number.isInteger(input.teamUserId) || input.teamUserId <= 0) {
     return fail(400, "cannot_join_own_team", "team_user_id 必须是有效的团队主账号。");
   }
-  // 主帳恆為 owner，不是成員；申請自己的團隊無意義。
+  // 主帐恒为 owner，不是成员；申请自己的团队无意义。
   if (input.applicantUserId === input.teamUserId) {
     return fail(409, "cannot_join_own_team", "你是该团队的创建者，无需申请加入。");
   }
@@ -743,7 +743,7 @@ export async function applyToJoinTeam(
   }
 }
 
-/** 審批台列表：owner/admin 可看；可按狀態過濾（默認 pending）。 */
+/** 审批台列表：owner/admin 可看；可按状态过滤（默认 pending）。 */
 export async function listJoinRequests(
   input: { teamUserId: number; actorUserId: number; status?: JoinRequestStatus },
   deps: TeamGovernanceDeps = {},
@@ -774,11 +774,11 @@ export async function listJoinRequests(
 }
 
 /**
- * 審批（approve/reject/ignore）。不變量：
- *   ① 只有 owner/admin 可審批；
- *   ② 滿員（名冊成員數 ≥ seats 或 ≥ max_members 硬上限）時不得通過；
- *   ③ 申請人已在別的團隊時不得通過（成員同時只能屬一個團隊，019 UNIQUE 為結構約束）；
- *   ④ 幂等：重放同一審批不產生第二次名冊登記、不重複扣費（本路徑完全不碰點數）。
+ * 审批（approve/reject/ignore）。不变量：
+ *   ① 只有 owner/admin 可审批；
+ *   ② 满员（名册成员数 ≥ seats 或 ≥ max_members 硬上限）时不得通过；
+ *   ③ 申请人已在别的团队时不得通过（成员同时只能属一个团队，019 UNIQUE 为结构约束）；
+ *   ④ 幂等：重放同一审批不产生第二次名册登记、不重复扣费（本路径完全不碰点数）。
  */
 export async function decideJoinRequest(
   input: {
@@ -813,7 +813,7 @@ export async function decideJoinRequest(
       if (!request) {
         return fail<{ requestId: string; status: JoinRequestStatus; memberUserId: number | null; unchanged: boolean }>(404, "request_not_found", "未找到该加入申请。");
       }
-      // 幂等：重放同一決定 = no-op（不再登記名冊、不再改狀態）。
+      // 幂等：重放同一决定 = no-op（不再登记名册、不再改状态）。
       if (request.status === nextStatus) {
         return { ok: true, requestId: request.id, status: nextStatus, memberUserId: request.applicantUserId, unchanged: true };
       }
@@ -831,11 +831,11 @@ export async function decideJoinRequest(
         if (roster.some((entry) => entry.memberUserId === request.applicantUserId)) {
           return fail<{ requestId: string; status: JoinRequestStatus; memberUserId: number | null; unchanged: boolean }>(409, "already_member", "该申请人已是团队成员。");
         }
-        // ② 滿員不得通過（席位閘 + 硬上限雙閘）。
+        // ② 满员不得通过（席位闸 + 硬上限双闸）。
         if (memberCount + 1 > settings.seats || memberCount + 1 > capacity.maxMembers) {
           return fail<{ requestId: string; status: JoinRequestStatus; memberUserId: number | null; unchanged: boolean }>(409, "team_full", `团队席位已满（当前 ${memberCount} 人，席位数 ${settings.seats}），请先扩容或腾出席位。`);
         }
-        // ③ 成員同時只能屬一個團隊（配額桶模型 + 019 UNIQUE）。
+        // ③ 成员同时只能属一个团队（配额桶模型 + 019 UNIQUE）。
         const joined = await countJoinedTeams(request.applicantUserId, tx);
         const limits = teamJoinLimits();
         if (joined >= limits.maxJoinedTeams) {
@@ -844,7 +844,7 @@ export async function decideJoinRequest(
         if (joined > 0) {
           return fail<{ requestId: string; status: JoinRequestStatus; memberUserId: number | null; unchanged: boolean }>(409, "member_already_in_team", "该成员已归属其他团队，不可跨团队加入。");
         }
-        // 名冊登記走既有 upsertTeamMember（member-quota 的唯一登記通路），role 由 DDL 默認 member。
+        // 名册登记走既有 upsertTeamMember（member-quota 的唯一登记通路），role 由 DDL 默认 member。
         await upsertTeamMember(
           {
             id: (deps.newId ?? randomUUID)(),
@@ -877,7 +877,7 @@ export async function decideJoinRequest(
   }
 }
 
-// ─────────────────────────────────────────── 面 4：生命週期
+// ─────────────────────────────────────────── 面 4：生命周期
 
 export interface TeamLifecycle {
   teamUserId: number;
@@ -886,9 +886,9 @@ export interface TeamLifecycle {
   dissolvedAt: string | null;
   dissolveScheduledAt: string | null;
   cooloffMs: number;
-  /** 冷靜期是否已過（到期即為「應執行」）。 */
+  /** 冷静期是否已过（到期即为「应执行」）。 */
   due: boolean;
-  /** 距離可執行還剩多少毫秒（未排程 = null）。 */
+  /** 距离可执行还剩多少毫秒（未排程 = null）。 */
   remainingMs: number | null;
 }
 
@@ -919,7 +919,7 @@ export async function getTeamLifecycle(
   };
 }
 
-/** 排程解散（owner）。重放同一請求 = 幂等（不重置冷靜期起點）。 */
+/** 排程解散（owner）。重放同一请求 = 幂等（不重置冷静期起点）。 */
 export async function scheduleTeamDissolution(
   input: { teamUserId: number; actorUserId: number },
   deps: TeamGovernanceDeps = {},
@@ -957,7 +957,7 @@ export async function scheduleTeamDissolution(
   }
 }
 
-/** 冷靜期內撤回解散（owner）。 */
+/** 冷静期内撤回解散（owner）。 */
 export async function withdrawTeamDissolution(
   input: { teamUserId: number; actorUserId: number },
   deps: TeamGovernanceDeps = {},
@@ -997,9 +997,9 @@ export async function withdrawTeamDissolution(
 }
 
 /**
- * 執行解散（冷靜期到期才生效，幂等）。意圖層動作：名冊成員一併停用
- * （令其單被既有預檢按「成員已停用」拒），**不動任何點數**——成員桶裡已轉出的
- * 額度留在該 user，不自動回收（回收要走 member-quota 的 allocate，不在本函式）。
+ * 执行解散（冷静期到期才生效，幂等）。意图层动作：名册成员一并停用
+ * （令其单被既有预检按「成员已停用」拒），**不动任何点数**——成员桶里已转出的
+ * 额度留在该 user，不自动回收（回收要走 member-quota 的 allocate，不在本函式）。
  */
 export async function executeTeamDissolution(
   input: { teamUserId: number },
@@ -1039,7 +1039,7 @@ export async function executeTeamDissolution(
   }
 }
 
-/** 退出團隊（成員側）。最後一個 owner（= 團隊主帳）不可直接退出。 */
+/** 退出团队（成员侧）。最后一个 owner（= 团队主帐）不可直接退出。 */
 export async function leaveTeam(
   input: { actorUserId: number },
   deps: TeamGovernanceDeps = {},
@@ -1051,7 +1051,7 @@ export async function leaveTeam(
   try {
     const self = await findRosterEntryByUserId(input.actorUserId, sql);
     if (!self) {
-      // 名冊裡沒有這個 user：可能是團隊主帳（owner）——主帳不可「退出」，須先轉移或解散。
+      // 名册里没有这个 user：可能是团队主帐（owner）——主帐不可「退出」，须先转移或解散。
       const owns = await countRoster(input.actorUserId, sql);
       if (owns > 0) {
         return fail<{ teamUserId: number; memberUserId: number; left: boolean }>(409, "last_owner", "团队主账号是最后一位所有者，不能直接退出；请先转移所有权或解散团队。");
@@ -1078,7 +1078,7 @@ export async function leaveTeam(
   }
 }
 
-/** 移除成員（管理側）。不變量同角色變更：不可移除最後一個 owner（團隊主帳）。 */
+/** 移除成员（管理侧）。不变量同角色变更：不可移除最后一个 owner（团队主帐）。 */
 export async function removeTeamMember(
   input: { teamUserId: number; actorUserId: number; memberKeyId: string },
   deps: TeamGovernanceDeps = {},
@@ -1118,11 +1118,11 @@ export async function removeTeamMember(
   }
 }
 
-// ─────────────────────────────────────────── 面 2（續）：成員建畫布閘
+// ─────────────────────────────────────────── 面 2（续）：成员建画布闸
 
 /**
- * 成員側建共享畫布閘：呼叫方（billingUserId）若不是受管成員 → 放行（不受此閘）；
- * 是成員 → owner/admin 放行，member 依團隊開關。控制面未配置時放行（無治理層）。
+ * 成员侧建共享画布闸：呼叫方（billingUserId）若不是受管成员 → 放行（不受此闸）；
+ * 是成员 → owner/admin 放行，member 依团队开关。控制面未配置时放行（无治理层）。
  */
 export async function canMemberCreateSharedCanvas(
   billingUserId: number,
@@ -1141,13 +1141,13 @@ export async function canMemberCreateSharedCanvas(
     });
     return { ...decision, teamUserId: entry.teamUserId, role: entry.role };
   } catch (error) {
-    // 讀不到治理層不擋創作（與既有降級一致；點數閘仍由預檢 fail-closed 執法）。
+    // 读不到治理层不挡创作（与既有降级一致；点数闸仍由预检 fail-closed 执法）。
     console.error(`[team-governance] canMemberCreateSharedCanvas 降级放行 user=${billingUserId}: ${reasonOf(error)}`);
     return { allowed: true, message: "", teamUserId: null, role: null };
   }
 }
 
-// ─────────────────────────────────────────── 面 6：用量統計
+// ─────────────────────────────────────────── 面 6：用量统计
 
 export interface TeamUsageRecord {
   id: string;
@@ -1183,8 +1183,8 @@ export interface TeamUsageSummary {
   capacity: TeamCapacity;
   totals: { granted: number; used: number; remaining: number; coins: { granted: number; used: number; remaining: number } };
   /**
-   * 守恆檢驗（沿用 member-quota 已宣告的不變量）：
-   *   主帳手上餘額 + Σ 成員桶剩餘 = 團隊未消耗總額；consumed = Σ成員已用。
+   * 守恒检验（沿用 member-quota 已宣告的不变量）：
+   *   主帐手上余额 + Σ 成员桶剩余 = 团队未消耗总额；consumed = Σ成员已用。
    */
   conservation: {
     masterRemaining: number;
@@ -1216,8 +1216,8 @@ function mapLedgerRecord(entry: LedgerEntry): TeamUsageRecord {
 export type TeamLedgerReader = (billingUserId: number, sql?: GenerationSql) => Promise<LedgerEntry[]>;
 
 /**
- * 團隊／成員維度用量彙總：數字一律讀既有權威面（new-api 經 member-quota 的可視面；
- * 逐筆明細讀既有 account_ledger），**不新建統計帳本**。
+ * 团队／成员维度用量汇总：数字一律读既有权威面（new-api 经 member-quota 的可视面；
+ * 逐笔明细读既有 account_ledger），**不新建统计帐本**。
  */
 export async function readTeamUsage(
   input: { teamUserId: number; memberKeyId?: string },
@@ -1280,7 +1280,7 @@ export async function readTeamUsage(
       teamRemaining,
       consumed: view.used,
       balanced: view.master.remaining + membersRemaining === teamRemaining,
-      formula: "主帳手上余额 + Σ成员桶剩余 = 团队未消耗总额",
+      formula: "主帐手上余额 + Σ成员桶剩余 = 团队未消耗总额",
     },
     members,
     records: allRecords,

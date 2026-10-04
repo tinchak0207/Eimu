@@ -1,20 +1,20 @@
-/* ╁━ 作品卡圖集：每一格是一件「裝著作品的影像載體」，六種混裝 ╁━
-   2026-09-26 暴君：「圖片像掉色的老照片」「容器缺乏膠片感」→ 第二輪：「單一膠片太單調，缺乏多樣性」。
-   六種載體（輪流排，任何一段連續的卡都是混裝）：
-   - film     35mm 負片：黑片基 + 兩側鏤空齒孔 + 琥珀邊碼；
-   - polaroid 拍立得：奶白相框、下緣加寬、手寫編號；
-   - slide    幻燈片：方形塑膠片框 + 橫幅窗口 + 片框小字；
-   - instax   迷你拍立得：窄長白框；
-   - print    光面相片：細白邊、圓角；
-   - glass    玻璃相片：滿版、圓角、一圈虹彩邊。
-   輪廓不同靠 alpha（格內載體以外全透明，卡面 shader 的 alphaTest 打穿，側面也跟著輪廓裁）。
-   鮮：畫進圖集時加飽和與對比（canvas filter），3D 端卡面再以近乎自發光呈現。
-   先畫縮圖（~9KB/張）、原圖到了再覆蓋；rank 防止慢到的縮圖蓋掉原圖。純 canvas，不依賴 three。 */
+/* ╁━ 作品卡图集：每一格是一件「装著作品的影像载体」，六种混装 ╁━
+   2026-09-26 暴君：「图片像掉色的老照片」「容器缺乏胶片感」→ 第二轮：「单一胶片太单调，缺乏多样性」。
+   六种载体（轮流排，任何一段连续的卡都是混装）：
+   - film     35mm 负片：黑片基 + 两侧镂空齿孔 + 琥珀边码；
+   - polaroid 拍立得：奶白相框、下缘加宽、手写编号；
+   - slide    幻灯片：方形塑胶片框 + 横幅窗口 + 片框小字；
+   - instax   迷你拍立得：窄长白框；
+   - print    光面相片：细白边、圆角；
+   - glass    玻璃相片：满版、圆角、一圈虹彩边。
+   轮廓不同靠 alpha（格内载体以外全透明，卡面 shader 的 alphaTest 打穿，侧面也跟著轮廓裁）。
+   鲜：画进图集时加饱和与对比（canvas filter），3D 端卡面再以近乎自发光呈现。
+   先画缩图（~9KB/张）、原图到了再覆盖；rank 防止慢到的缩图盖掉原图。纯 canvas，不依赖 three。 */
 
 export interface FilmAtlas {
   canvas: HTMLCanvasElement;
   slots: number;
-  /** 某格在紋理上的 uv 窗（x, y, w, h；flipY 後 v 向上）。 */
+  /** 某格在纹理上的 uv 窗（x, y, w, h；flipY 后 v 向上）。 */
   uv(slot: number): [number, number, number, number];
   dispose(): void;
 }
@@ -23,10 +23,10 @@ interface FilmAtlasInit {
   cols: number;
   rows: number;
   slotW: number;
-  /** 格高 / 格寬（= 卡片深 / 寬）。 */
+  /** 格高 / 格宽（= 卡片深 / 宽）。 */
   aspect: number;
   sources: Array<{ thumb: string; full: string }>;
-  /** 有新圖畫進圖集（呼叫端節流後上傳紋理）。 */
+  /** 有新图画进图集（呼叫端节流后上传纹理）。 */
   onPaint(): void;
 }
 
@@ -80,7 +80,7 @@ export function createFilmAtlas(init: FilmAtlasInit): FilmAtlas {
     c.restore();
   }
 
-  /** 畫載體（相框 / 片基 / 片框），回傳作品該放的窗口。 */
+  /** 画载体（相框 / 片基 / 片框），回传作品该放的窗口。 */
   function drawCarrier(slot: number): Rect {
     const c = ctx as CanvasRenderingContext2D;
     const [ox, oy] = origin(slot);
@@ -162,7 +162,7 @@ export function createFilmAtlas(init: FilmAtlasInit): FilmAtlas {
       return { x: frame.x + b, y: frame.y + b, w: frame.w - 2 * b, h: frame.h - 2 * b, r: W * 0.008 };
     }
 
-    /* glass：滿版圓角作品 + 一圈虹彩邊（邊在 drawPhoto 後補畫）。 */
+    /* glass：满版圆角作品 + 一圈虹彩边（边在 drawPhoto 后补画）。 */
     c.restore();
     return { x: ox + W * 0.02, y: oy + H * 0.015, w: W * 0.96, h: H * 0.97, r: W * 0.06 };
   }

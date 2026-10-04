@@ -8,7 +8,7 @@
 // **执行器限定 tsx --test**（`npm test` 走它）：createRequire 拿到的是 next/headers
 // 的 Node CJS 副本，vitest 会把 route 的 next/headers 经 Vite 图解析成另一个实例，
 // patch 打不中 → session 永远缺席。repo 既有同款限制：model-pricing/route.test.ts
-// 用同一招，同样只能在 node:test 下跑。其余两檔（notification-store / notifications
+// 用同一招，同样只能在 node:test 下跑。其余两档（notification-store / notifications
 // route）都是双执行器可跑。
 
 import test, { after, beforeEach } from "node:test";

@@ -1,13 +1,13 @@
 "use client";
 
-// CanvasZoomControls —— 畫布縮放控制膠囊（垂直，iOS 白玻璃質感）。
+// CanvasZoomControls —— 画布缩放控制胶囊（垂直，iOS 白玻璃质感）。
 //
-// 純受控元件：只負責把使用者意圖翻譯成 onZoomTo(k) / onFit / onHelp，
-// 縮放錨點（視口中心）與實際套用由宿主實作。由上到下：放大（×1.25）、
-// 縱向滑桿（log 刻度 5%–500%，等距 = 等倍率）、縮小（÷1.25）、
-// 當前百分比（點擊重置 100%）、適應視圖、快捷鍵幫助、縮略圖開關、審查入口。
-// 根節點帶 data-canvas-interactive，InfiniteCanvas 手勢層才會放行膠囊內
-// 的指針事件（否則拖滑桿 = 平移畫布）。
+// 纯受控元件：只负责把使用者意图翻译成 onZoomTo(k) / onFit / onHelp，
+// 缩放锚点（视口中心）与实际套用由宿主实作。由上到下：放大（×1.25）、
+// 纵向滑杆（log 刻度 5%–500%，等距 = 等倍率）、缩小（÷1.25）、
+// 当前百分比（点击重置 100%）、适应视图、快捷键帮助、缩略图开关、审查入口。
+// 根节点带 data-canvas-interactive，InfiniteCanvas 手势层才会放行胶囊内
+// 的指针事件（否则拖滑杆 = 平移画布）。
 
 import { useCallback, useRef, useState } from "react";
 import { ClipboardCheck, Keyboard, LayoutGrid, Map as MapIcon, Maximize, Minus, Plus, ScanLine, Square, type LucideIcon } from "lucide-react";
@@ -15,50 +15,50 @@ import { cn } from "@/lib/utils";
 import { LOD_LABEL, LOD_TARGET_SCALE, type CanvasLod } from "@/lib/canvas/lod";
 
 export interface CanvasZoomControlsProps {
-  /** 當前縮放 k（0.05–5） */
+  /** 当前缩放 k（0.05–5） */
   scale: number;
-  /** 設定縮放（以視口中心為錨，由宿主實作） */
+  /** 设定缩放（以视口中心为锚，由宿主实作） */
   onZoomTo: (k: number) => void;
-  /** 適應視圖 */
+  /** 适应视图 */
   onFit: () => void;
-  /** 打開快捷鍵幫助 */
+  /** 打开快捷键帮助 */
   onHelp: () => void;
-  /** 縮略圖開關（2026-09-27：縮略圖預設收合，入口併進本膠囊） */
+  /** 缩略图开关（2026-09-27：缩略图预设收合，入口并进本胶囊） */
   minimapOpen?: boolean;
   onToggleMinimap?: () => void;
-  /** 資產與分鏡審查入口（2026-09-27：左下孤兒按鈕併進本膠囊） */
+  /** 资产与分镜审查入口（2026-09-27：左下孤儿按钮并进本胶囊） */
   reviewActive?: boolean;
   reviewPendingCount?: number;
   onToggleReview?: () => void;
-  /** 語義縮放（2026-09-30）：當前層級；有值才渲染「鸟瞰/协作/工程」三段按鈕。 */
+  /** 语义缩放（2026-09-30）：当前层级；有值才渲染「鸟瞰/协作/工程」三段按钮。 */
   lod?: CanvasLod;
-  /** 是否提供工程層（窄螢幕 false → 不出「工程」鈕）。 */
+  /** 是否提供工程层（窄萤幕 false → 不出「工程」钮）。 */
   allowEngineering?: boolean;
-  /** 三段按鈕的宿主接管（相機飛行轉場）；缺省＝onZoomTo(目標倍率) 瞬切。 */
+  /** 三段按钮的宿主接管（相机飞行转场）；缺省＝onZoomTo(目标倍率) 瞬切。 */
   onSelectLod?: (lod: CanvasLod) => void;
   className?: string;
 }
 
-/** 縮放上下限（5%–500%，與 props 契約一致）。 */
+/** 缩放上下限（5%–500%，与 props 契约一致）。 */
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 5;
-/** 加減按鈕的倍率步進。 */
+/** 加减按钮的倍率步进。 */
 const BUTTON_STEP = 1.25;
-/** 滑桿聚焦時方向鍵的倍率步進。 */
+/** 滑杆聚焦时方向键的倍率步进。 */
 const KEY_STEP = 1.1;
 
 const clampScale = (k: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, k));
 
-/** k → 滑桿位置 t ∈ [0,1]（log 刻度：滑桿等距 = 縮放等倍率）。 */
+/** k → 滑杆位置 t ∈ [0,1]（log 刻度：滑杆等距 = 缩放等倍率）。 */
 const scaleToT = (k: number) =>
   Math.log(clampScale(k) / MIN_SCALE) / Math.log(MAX_SCALE / MIN_SCALE);
 
-/** 滑桿位置 t ∈ [0,1] → k（log 刻度反函數）。 */
+/** 滑杆位置 t ∈ [0,1] → k（log 刻度反函数）。 */
 const tToScale = (t: number) =>
   MIN_SCALE * Math.pow(MAX_SCALE / MIN_SCALE, Math.min(1, Math.max(0, t)));
 
-/** 圓形小按鈕統一皮膚（28px 熱區 + hover 態）。 */
-/** 語義縮放三層的圖示（鳥瞰＝階段牌組、協作＝單卡、工程＝掃描透析）；文字進 title/aria。 */
+/** 圆形小按钮统一皮肤（28px 热区 + hover 态）。 */
+/** 语义缩放三层的图示（鸟瞰＝阶段牌组、协作＝单卡、工程＝扫描透析）；文字进 title/aria。 */
 const LOD_ICON: Record<1 | 2 | 3, LucideIcon> = { 1: LayoutGrid, 2: Square, 3: ScanLine };
 
 const BUTTON_CLASS =
@@ -85,7 +85,7 @@ function CanvasZoomControls({
   const t = scaleToT(scale);
   const percent = Math.round(scale * 100);
 
-  // 由指針縱座標反推縮放（滑桿頂部 = 500%，底部 = 5%）。
+  // 由指针纵座标反推缩放（滑杆顶部 = 500%，底部 = 5%）。
   const zoomFromClientY = useCallback(
     (clientY: number) => {
       const track = trackRef.current;
@@ -117,8 +117,8 @@ function CanvasZoomControls({
         <Plus className="h-4 w-4" />
       </button>
 
-      {/* 縱向滑桿（自繪，免去 input[type=range] 豎排的跨瀏覽器差異）：
-          28px 寬熱區，pointer capture 讓拖出滑桿後仍持續跟手。 */}
+      {/* 纵向滑杆（自绘，免去 input[type=range] 竖排的跨浏览器差异）：
+          28px 宽热区，pointer capture 让拖出滑杆后仍持续跟手。 */}
       <div
         role="slider"
         aria-label="缩放"
@@ -150,7 +150,7 @@ function CanvasZoomControls({
           }
         }}
       >
-        {/* 軌道上下各內縮 7px（半個 thumb），thumb 到極值也不溢出熱區 */}
+        {/* 轨道上下各内缩 7px（半个 thumb），thumb 到极值也不溢出热区 */}
         <div ref={trackRef} className="absolute inset-x-0 bottom-[7px] top-[7px]">
           <div className="absolute left-1/2 top-0 h-full w-[3px] -translate-x-1/2 rounded-full bg-black/10" />
           <div
@@ -180,7 +180,7 @@ function CanvasZoomControls({
 
       <div className="my-0.5 h-px w-4 bg-black/10" />
 
-      {/* 當前百分比（四捨五入整數；點擊重置 100%） */}
+      {/* 当前百分比（四舍五入整数；点击重置 100%） */}
       <button
         type="button"
         className="flex h-7 w-full items-center justify-center rounded-full text-ios-caption2 font-medium tabular-nums text-foreground transition-colors hover:bg-black/5"
@@ -192,7 +192,7 @@ function CanvasZoomControls({
 
       <div className="my-0.5 h-px w-4 bg-black/10" />
 
-      {/* 語義縮放三段：點擊以中心為錨縮到該層目標倍率；高亮當前層。 */}
+      {/* 语义缩放三段：点击以中心为锚缩到该层目标倍率；高亮当前层。 */}
       {lod !== undefined && (
         <>
           {([1, 2, 3] as const)

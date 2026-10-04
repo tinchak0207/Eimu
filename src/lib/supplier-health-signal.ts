@@ -29,18 +29,18 @@ export interface SupplierHealthSignal {
   /** modelId -> 不可用原因（供 note 拼装） */
   reasonByModel: Record<string, string>;
   /**
-   * key -> 成功證據（H4，向後相容：舊控制面/代理可能不帶，缺省 = 未知，調用方不得據此降級）。
-   * available=true 只代表「前置條件過」，是否有真實成功證據看這裡。
+   * key -> 成功证据（H4，向后相容：旧控制面/代理可能不带，缺省 = 未知，调用方不得据此降级）。
+   * available=true 只代表「前置条件过」，是否有真实成功证据看这里。
    */
   evidenceByModel?: Record<string, SupplierEvidence>;
 }
 
 export interface SupplierEvidence {
-  /** 該 key 下健康供應商的累計成功數。 */
+  /** 该 key 下健康供应商的累计成功数。 */
   successCount: number;
-  /** 最近一次成功（ISO），無則 null。 */
+  /** 最近一次成功（ISO），无则 null。 */
   lastSuccessAt: string | null;
-  /** 供應商配置顯示餘額 <= 0。 */
+  /** 供应商配置显示余额 <= 0。 */
   zeroBalance: boolean;
 }
 
@@ -48,7 +48,7 @@ export type AvailabilityConfidence = "high" | "low" | "probe_only";
 
 export const SUPPLIER_EVIDENCE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-/** 有近期成功 = high；只有陳舊成功 = low；零樣本 = probe_only。 */
+/** 有近期成功 = high；只有陈旧成功 = low；零样本 = probe_only。 */
 export function classifyEvidence(
   evidence: Pick<SupplierEvidence, "successCount" | "lastSuccessAt"> | undefined,
   nowMs: number = Date.now(),
@@ -139,7 +139,7 @@ export async function readSupplierHealthSignal(
         lastSuccessAt: [prev?.lastSuccessAt ?? null, lastSuccess].filter(Boolean).sort().pop() ?? null,
         zeroBalance: prev ? prev.zeroBalance && Boolean(row.zero_balance) : Boolean(row.zero_balance),
       };
-      // 餘額為 0 = 不可用（與渠道欠費同判），不論前置條件。
+      // 余额为 0 = 不可用（与渠道欠费同判），不论前置条件。
       if (row.zero_balance && row.has_healthy) {
         row = { ...row, has_healthy: false, reason: "渠道余额为 0，充值前不可用" };
       }
@@ -163,7 +163,7 @@ export async function readSupplierHealthSignal(
 
 /**
  * 按渠道分组的判活读法（REQ-C2 统计视图用）。**与上面 readSupplierHealthSignal
- * 的判据逐字同源**（同一檔、同一组条件 = scheduler withHealthyAccount 的同一把尺），
+ * 的判据逐字同源**（同一档、同一组条件 = scheduler withHealthyAccount 的同一把尺），
  * 差别只有两点：
  *   1) 分组键是渠道（supplier.id）而不是模型；
  *   2) 保留诚实第三态——当前生效能力记录为 0 的渠道回 capabilities=0，

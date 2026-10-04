@@ -1,16 +1,16 @@
-// 去字幕（Dramagic `clear_video_subtitle`，D27）——本機、零付費、零上游。
+// 去字幕（Dramagic `clear_video_subtitle`，D27）——本机、零付费、零上游。
 //
-// 形態來源（不另造程序層）：程序層／探測／抽格／檔案慣例逐條複用我方既有輪子
+// 形态来源（不另造程序层）：程序层／探测／抽格／档案惯例逐条复用我方既有轮子
 //   lib/video-evidence.ts 的 runProcess / probeMedia / requireVideo / cutFrame
-//   ＋ ffmpeg 絕對路徑慣例（同 lib/asr.ts:61-62）。
-// 本檔新增的只有「字幕帶」這一格的量測與移除：
-//   ① detectSubtitleBand：對畫面下緣 region 抽樣，逐列算**水平梯度能量**，
-//      以跨幀 p80 取樣判定「持續存在文字筆畫」的連續列區段 ⇒ 有/無字幕帶；
-//   ② removeSubtitleBand：delogo（保留解析度的空間內插）或 crop（下裁）；
-//   ③ measureBandChange / re-detect：前後同秒抽格的帶內外像素差 + 移除後重偵測。
+//   ＋ ffmpeg 绝对路径惯例（同 lib/asr.ts:61-62）。
+// 本档新增的只有「字幕带」这一格的量测与移除：
+//   ① detectSubtitleBand：对画面下缘 region 抽样，逐列算**水平梯度能量**，
+//      以跨帧 p80 取样判定「持续存在文字笔画」的连续列区段 ⇒ 有/无字幕带；
+//   ② removeSubtitleBand：delogo（保留解析度的空间内插）或 crop（下裁）；
+//   ③ measureBandChange / re-detect：前后同秒抽格的带内外像素差 + 移除后重侦测。
 //
-// 鐵律：本檔所有數字都是**量測事實**（像素能量、秒、雜湊），不是主觀判斷；
-// 偵測不到字幕帶一律回報 found:false（呼叫端轉成具名錯誤碼），不得靜默回成功。
+// 铁律：本档所有数字都是**量测事实**（像素能量、秒、杂凑），不是主观判断；
+// 侦测不到字幕带一律回报 found:false（呼叫端转成具名错误码），不得静默回成功。
 
 import { existsSync } from "node:fs"
 import { createHash } from "node:crypto"
@@ -19,7 +19,7 @@ import { join } from "node:path"
 
 import { cutFrame, probeMedia, requireVideo, runProcess, type MediaProbe } from "./video-evidence"
 
-// ─────────────────────────────────────────── 執行檔（慣例同 lib/asr.ts / lib/video-evidence.ts）
+// ─────────────────────────────────────────── 执行档（惯例同 lib/asr.ts / lib/video-evidence.ts）
 
 const BIN_DIR = "/opt/agent-harness/bin"
 const FFMPEG = process.env.FFMPEG_PATH || (existsSync(join(BIN_DIR, "ffmpeg")) ? join(BIN_DIR, "ffmpeg") : "ffmpeg")
@@ -42,39 +42,39 @@ export function sha256(buffer: Uint8Array): string {
   return createHash("sha256").update(buffer).digest("hex")
 }
 
-// ─────────────────────────────────────────── 偵測
+// ─────────────────────────────────────────── 侦测
 
-/** 偵測參數（預設值＝本輪對 1280x720／24fps 素材實測可用的值）。 */
+/** 侦测参数（预设值＝本轮对 1280x720／24fps 素材实测可用的值）。 */
 export interface DetectOptions {
-  /** 只看畫面下緣這個比例（0.05..0.6）；字幕慣例在下緣。 */
+  /** 只看画面下缘这个比例（0.05..0.6）；字幕惯例在下缘。 */
   region?: number
-  /** 抽樣率（樣本/秒）。 */
+  /** 抽样率（样本/秒）。 */
   sample_rate?: number
-  /** 抽樣上限（幀）。 */
+  /** 抽样上限（帧）。 */
   max_samples?: number
-  /** 相對門檻：列的 p80 梯度能量須 ≥ max(sensitivity × 參考中位數, floor)。 */
+  /** 相对门槛：列的 p80 梯度能量须 ≥ max(sensitivity × 参考中位数, floor)。 */
   sensitivity?: number
-  /** 絕對門檻（灰階梯度單位 0..255 的平均值）。 */
+  /** 绝对门槛（灰阶梯度单位 0..255 的平均值）。 */
   floor?: number
-  /** 最小字幕帶高度（像素）。 */
+  /** 最小字幕带高度（像素）。 */
   min_band_height?: number
-  /** 只量測前 N 秒（預設整支）。 */
+  /** 只量测前 N 秒（预设整支）。 */
   max_seconds?: number
 }
 
 export interface SubtitleBand {
-  /** 帶的左上角 y（整幅畫面座標，像素）。 */
+  /** 带的左上角 y（整幅画面座标，像素）。 */
   y: number
-  /** 帶高（像素）。 */
+  /** 带高（像素）。 */
   height: number
   width: number
-  /** 帶內列的 p80 梯度能量平均。 */
+  /** 带内列的 p80 梯度能量平均。 */
   band_energy: number
-  /** 同 region 的參考中位數梯度能量（穩健底噪）。 */
+  /** 同 region 的参考中位数梯度能量（稳健底噪）。 */
   reference_energy: number
   /** band_energy / reference_energy。 */
   ratio: number
-  /** 抽樣幾幀、樣本率、region 像素範圍。 */
+  /** 抽样几帧、样本率、region 像素范围。 */
   samples: number
   sample_rate: number
   region_top: number
@@ -84,7 +84,7 @@ export interface SubtitleBand {
 export interface DetectResult {
   found: boolean
   band?: SubtitleBand
-  /** 量測事實（無論 found 與否都回，供人核對與調參）。 */
+  /** 量测事实（无论 found 与否都回，供人核对与调参）。 */
   measured: {
     width: number
     height: number
@@ -96,7 +96,7 @@ export interface DetectResult {
     region_height: number
     reference_energy: number
     floor_energy: number
-    /** 每個 region 列的 p80 能量（由 region_top 起算），供人工檢視。 */
+    /** 每个 region 列的 p80 能量（由 region_top 起算），供人工检视。 */
     row_profile: number[]
     best_run_height: number
     best_run_ratio: number
@@ -105,8 +105,8 @@ export interface DetectResult {
 }
 
 /**
- * 機械式字幕帶偵測。回傳的是**量測事實**：每個下緣列在抽樣幀上的 p80 水平梯度能量，
- * 以及符合門檻的最長連續列區段。不是「看起來像字幕」的主觀描述。
+ * 机械式字幕带侦测。回传的是**量测事实**：每个下缘列在抽样帧上的 p80 水平梯度能量，
+ * 以及符合门槛的最长连续列区段。不是「看起来像字幕」的主观描述。
  */
 export async function detectSubtitleBand(source: string, opts: DetectOptions = {}): Promise<DetectResult> {
   const info = await probeMedia(source)
@@ -144,9 +144,9 @@ export async function detectSubtitleBand(source: string, opts: DetectOptions = {
   for (let index = 0; index + frameBytes <= bytes.byteLength; index += frameBytes) {
     frames.push(bytes.subarray(index, index + frameBytes))
   }
-  assert(frames.length >= 2, `${source}: 抽樣幀不足（拿到 ${frames.length} 幀），無法做跨幀判定`)
+  assert(frames.length >= 2, `${source}: 抽样帧不足（拿到 ${frames.length} 帧），无法做跨帧判定`)
 
-  // 逐列、逐幀的水平梯度能量 → 每列取 p80（文字存在時的典型能量，容忍字幕間歇出現）。
+  // 逐列、逐帧的水平梯度能量 → 每列取 p80（文字存在时的典型能量，容忍字幕间歇出现）。
   const rowProfile: number[] = []
   for (let row = 0; row < usableHeight; row += 1) {
     const energies: number[] = []
@@ -166,7 +166,7 @@ export async function detectSubtitleBand(source: string, opts: DetectOptions = {
   const reference = sorted[Math.floor(sorted.length / 2)] ?? 0
   const threshold = Math.max(sensitivity * reference, floor)
 
-  // 最長連續候選列區段（且不得吃掉整個 region：那不是「帶」而是整片高頻質感）。
+  // 最长连续候选列区段（且不得吃掉整个 region：那不是「带」而是整片高频质感）。
   let bestStart = -1
   let bestLength = 0
   let start = -1
@@ -202,14 +202,14 @@ export async function detectSubtitleBand(source: string, opts: DetectOptions = {
   if (bestStart < 0 || bestLength < minHeight) {
     return {
       found: false, measured,
-      reason: `下緣 ${Math.round(region * 100)}% 抽 ${frames.length} 幀未找到 ≥${minHeight}px 的持續文字列區段`
-        + `（最長 ${bestLength}px，p80 中位數能量 ${round(reference)}，門檻 ${round(threshold)}）`,
+      reason: `下缘 ${Math.round(region * 100)}% 抽 ${frames.length} 帧未找到 ≥${minHeight}px 的持续文字列区段`
+        + `（最长 ${bestLength}px，p80 中位数能量 ${round(reference)}，门槛 ${round(threshold)}）`,
     }
   }
   if (coverage > 0.8) {
     return {
       found: false, measured,
-      reason: `候選區段覆蓋 region ${(coverage * 100).toFixed(1)}%（>80%）⇒ 判為整片高頻質感而非字幕帶`,
+      reason: `候选区段覆盖 region ${(coverage * 100).toFixed(1)}%（>80%）⇒ 判为整片高频质感而非字幕带`,
     }
   }
 
@@ -234,7 +234,7 @@ export type RemoveMethod = "delogo" | "crop"
 
 export interface RemoveOptions {
   method?: RemoveMethod
-  /** delogo 的外擴像素（預設 6）；字幕筆畫常貼著偵測邊界。 */
+  /** delogo 的外扩像素（预设 6）；字幕笔画常贴著侦测边界。 */
   pad?: number
   keep_audio?: boolean
 }
@@ -242,7 +242,7 @@ export interface RemoveOptions {
 export interface RemoveResult {
   method: RemoveMethod
   filter: string
-  /** delogo 實際使用的矩形（clamp 到畫面內且留 1px 邊界）。 */
+  /** delogo 实际使用的矩形（clamp 到画面内且留 1px 边界）。 */
   rect: { x: number; y: number; width: number; height: number }
   output_duration: number
   output_width: number
@@ -250,8 +250,8 @@ export interface RemoveResult {
 }
 
 /**
- * 移除偵測到的字幕帶。`delogo` 對該矩形做空間內插（解析度不變、矩形外逐位元不動）；
- * `crop` 直接下裁（解析度變小，但完全不動其他像素的內容分佈）。
+ * 移除侦测到的字幕带。`delogo` 对该矩形做空间内插（解析度不变、矩形外逐位元不动）；
+ * `crop` 直接下裁（解析度变小，但完全不动其他像素的内容分布）。
  */
 export async function removeSubtitleBand(
   source: string,
@@ -266,13 +266,13 @@ export async function removeSubtitleBand(
   const keepAudio = opts.keep_audio !== false
 
   assert(band.height >= 1 && band.y >= 0 && band.y + band.height <= video.height,
-    `字幕帶 [${band.y}, ${band.y + band.height}) 超出畫面高 ${video.height}`)
+    `字幕带 [${band.y}, ${band.y + band.height}) 超出画面高 ${video.height}`)
 
   if (method === "crop") {
-    // 帶貼下緣 ⇒ 裁掉下緣；否則裁掉帶以上的部分（保留帶以下）。
+    // 带贴下缘 ⇒ 裁掉下缘；否则裁掉带以上的部分（保留带以下）。
     const keepTop = band.y >= video.height - (band.y + band.height)
     const cropHeight = even(keepTop ? band.y : video.height - band.y - band.height)
-    assert(cropHeight >= 16, `crop 後高度 ${cropHeight}px 過小，拒絕執行`)
+    assert(cropHeight >= 16, `crop 后高度 ${cropHeight}px 过小，拒绝执行`)
     const cropY = even(keepTop ? 0 : band.y + band.height)
     const filter = `crop=${even(video.width)}:${cropHeight}:0:${cropY}`
     await runProcess(FFMPEG, [
@@ -290,7 +290,7 @@ export async function removeSubtitleBand(
     }
   }
 
-  // delogo：外擴 pad 後 clamp，並確保四周各留 1px（delogo 要求矩形在畫面內）。
+  // delogo：外扩 pad 后 clamp，并确保四周各留 1px（delogo 要求矩形在画面内）。
   const pad = opts.pad ?? 6
   assert(Number.isFinite(pad) && pad >= 0 && pad <= 64, `pad must be between 0 and 64, got ${pad}`)
   const x = 1
@@ -313,7 +313,7 @@ export async function removeSubtitleBand(
   }
 }
 
-// ─────────────────────────────────────────── 前後量測（證據）
+// ─────────────────────────────────────────── 前后量测（证据）
 
 async function grayFrameAt(path: string, at: number, width: number, height: number): Promise<Uint8Array> {
   const jump = Math.max(0, at - 2)
@@ -331,20 +331,20 @@ export interface BandChangeEvidence {
   at: number
   before: { path: string; sha256: string }
   after: { path: string; sha256: string }
-  /** 帶內（y..y+h）每像素灰階平均絕對差。 */
+  /** 带内（y..y+h）每像素灰阶平均绝对差。 */
   inside_band_mean_abs_diff: number
-  /** 帶外每像素灰階平均絕對差。 */
+  /** 带外每像素灰阶平均绝对差。 */
   outside_band_mean_abs_diff: number
-  /** 與帶外相比的倍數（delogo 應該遠大於 1；愈大＝改動愈集中在帶內）。 */
+  /** 与带外相比的倍数（delogo 应该远大于 1；愈大＝改动愈集中在带内）。 */
   localization_ratio: number
   compared_rows: { inside: number; outside: number }
   note: string
 }
 
 /**
- * 同秒抽格前後對照：回傳兩張 JPEG 的本機路徑與 SHA-256，以及帶內／帶外像素差。
- * 這是量測事實：`inside_band_mean_abs_diff >> outside_band_mean_abs_diff` 才證明
- * 「改動集中在字幕帶」，不是「我看起來乾淨了」。
+ * 同秒抽格前后对照：回传两张 JPEG 的本机路径与 SHA-256，以及带内／带外像素差。
+ * 这是量测事实：`inside_band_mean_abs_diff >> outside_band_mean_abs_diff` 才证明
+ * 「改动集中在字幕带」，不是「我看起来干净了」。
  */
 export async function measureBandChange(
   source: string,
@@ -360,7 +360,7 @@ export async function measureBandChange(
   requireVideo(outInfo, output)
   const outVideo = outInfo as MediaProbe & { width: number; height: number; frameRate: number }
   assert(outVideo.width === video.width && outVideo.height === video.height,
-    `前後解析度不同（${video.width}x${video.height} → ${outVideo.width}x${outVideo.height}）：逐像素差只在同解析度下有意義`)
+    `前后解析度不同（${video.width}x${video.height} → ${outVideo.width}x${outVideo.height}）：逐像素差只在同解析度下有意义`)
 
   const beforePath = join(dir, `band-before-${round(at)}s.jpg`)
   const afterPath = join(dir, `band-after-${round(at)}s.jpg`)
@@ -400,7 +400,7 @@ export async function measureBandChange(
     outside_band_mean_abs_diff: round(outside),
     localization_ratio: outside > 0 ? round(inside / outside) : Infinity,
     compared_rows: { inside: bottom - top, outside: video.height - (bottom - top) },
-    note: "量測事實：同一時間點的灰階逐像素平均絕對差；帶內遠大於帶外即證明改動集中在字幕帶",
+    note: "量测事实：同一时间点的灰阶逐像素平均绝对差；带内远大于带外即证明改动集中在字幕带",
   }
 }
 
@@ -412,18 +412,18 @@ export interface CropChangeEvidence {
   after: { path: string; sha256: string; height: number }
   removed_rows: number
   band_height: number
-  /** 保留區（輸出前 `output_height` 列）每像素灰階平均絕對差：只該有重新編碼雜訊。 */
+  /** 保留区（输出前 `output_height` 列）每像素灰阶平均绝对差：只该有重新编码杂讯。 */
   kept_region_mean_abs_diff: number
   compared_rows: number
-  /** 字幕帶是否落在被裁掉的列範圍內。 */
+  /** 字幕带是否落在被裁掉的列范围内。 */
   band_removed: boolean
   note: string
 }
 
 /**
- * `crop` 法的證據：解析度變小，逐像素差只在「保留區」有意義。
- * 把來源抽格裁到輸出的同尺寸再比對 ⇒ kept_region_mean_abs_diff 只該有重新編碼雜訊
- * （證明裁切沒有動到保留內容），並明示 band 是否落在被裁掉的列範圍。
+ * `crop` 法的证据：解析度变小，逐像素差只在「保留区」有意义。
+ * 把来源抽格裁到输出的同尺寸再比对 ⇒ kept_region_mean_abs_diff 只该有重新编码杂讯
+ * （证明裁切没有动到保留内容），并明示 band 是否落在被裁掉的列范围。
  */
 export async function measureCropChange(
   source: string,
@@ -438,8 +438,8 @@ export async function measureCropChange(
   const outInfo = await probeMedia(output)
   requireVideo(outInfo, output)
   const outVideo = outInfo as MediaProbe & { width: number; height: number; frameRate: number }
-  assert(outVideo.width === video.width, `crop 法的寬度不該改變（${video.width} → ${outVideo.width}）`)
-  assert(outVideo.height < video.height, `crop 法輸出高度必須小於來源（${outVideo.height} vs ${video.height}）`)
+  assert(outVideo.width === video.width, `crop 法的宽度不该改变（${video.width} → ${outVideo.width}）`)
+  assert(outVideo.height < video.height, `crop 法输出高度必须小于来源（${outVideo.height} vs ${video.height}）`)
 
   const beforePath = join(dir, `crop-before-${round(at)}s.jpg`)
   const afterPath = join(dir, `crop-after-${round(at)}s.jpg`)
@@ -468,8 +468,8 @@ export async function measureCropChange(
     compared_rows: outVideo.height,
     band_removed: removedRows >= video.height - band.y,
     note:
-      "量測事實：crop 法輸出高度小於來源；保留區逐像素差只該有重新編碼雜訊（證明裁切未動保留內容）；"
-      + "band_removed 表示字幕帶列是否落在被裁掉的範圍內。",
+      "量测事实：crop 法输出高度小于来源；保留区逐像素差只该有重新编码杂讯（证明裁切未动保留内容）；"
+      + "band_removed 表示字幕带列是否落在被裁掉的范围内。",
   }
 }
 

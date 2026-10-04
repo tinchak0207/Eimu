@@ -1,17 +1,17 @@
-// 畫布專案雲端持久化（Blob）。
+// 画布专案云端持久化（Blob）。
 //
-// 沿用 server-history-store.ts 的模式：每次寫入落到新路徑 + 修剪舊世代，
-// 避免 Blob cacheControlMaxAge 60s 下限造成的「剛存讀不到」。單用戶寫入串行。
+// 沿用 server-history-store.ts 的模式：每次写入落到新路径 + 修剪旧世代，
+// 避免 Blob cacheControlMaxAge 60s 下限造成的「刚存读不到」。单用户写入串行。
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import { isCanvasProjectType, type CanvasEpisode, type CanvasProject } from "./types";
-// 版本清單清洗與讀取端 layout.fromCanvasProject 共用同一份（不製造第二個漂移點）。
+// 版本清单清洗与读取端 layout.fromCanvasProject 共用同一份（不制造第二个漂移点）。
 import { normalizeNodeVersions } from "./node-versions";
-// 風格 id 值域的唯一判據（＝STYLE_LIBRARY 註冊面）；讀取端與生成端共用同一份。
+// 风格 id 值域的唯一判据（＝STYLE_LIBRARY 注册面）；读取端与生成端共用同一份。
 import { normalizeProjectStyleId } from "./project-style";
-// 解說劇設定（P1-5／D7）的逐欄白名單（型別值域＋旁白音色值域，一處收口）。
+// 解说剧设定（P1-5／D7）的逐栏白名单（型别值域＋旁白音色值域，一处收口）。
 import { normalizeProjectNarration } from "./project-narration";
 
 const PROJECT_SCHEMA_VERSION = 1;
@@ -23,16 +23,16 @@ const memoryStore = new Map<number, CanvasProject[]>();
 const indexCache = new Map<number, { projects: CanvasProject[]; expiresAt: number }>();
 const writeQueues = new Map<number, Promise<unknown>>();
 
-// ── 團隊畫布命名空間（2026-09-27 片P 刀 1）──────────────────────────────
-// 選型：**照個人畫布的同一套輪子**（每命名空間一份 index 文件 + 保留 2 代），
-// 只把前綴由 `canvas/<userId>` 換成 `canvas/team/<teamId>`。個人路徑逐字不變
-//（`userPrefix` 未動；userId 是數字，永不可能是字面 "team"，命名空間不撞）。
-// 不採「每專案一檔」的另一套模式——那會另造第二個讀寫/修剪輪子。
+// ── 团队画布命名空间（2026-09-27 片P 刀 1）──────────────────────────────
+// 选型：**照个人画布的同一套轮子**（每命名空间一份 index 文件 + 保留 2 代），
+// 只把前缀由 `canvas/<userId>` 换成 `canvas/team/<teamId>`。个人路径逐字不变
+//（`userPrefix` 未动；userId 是数字，永不可能是字面 "team"，命名空间不撞）。
+// 不采「每专案一档」的另一套模式——那会另造第二个读写/修剪轮子。
 const teamMemoryStore = new Map<string, CanvasProject[]>();
 const teamIndexCache = new Map<string, { projects: CanvasProject[]; expiresAt: number }>();
 const teamWriteQueues = new Map<string, Promise<unknown>>();
 
-/** 團隊畫布的儲存命名空間前綴（`canvas/team/<teamId>`）。 */
+/** 团队画布的储存命名空间前缀（`canvas/team/<teamId>`）。 */
 export function teamCanvasNamespace(teamId: string): string {
   return `canvas/team/${sanitizeBlobSegment(teamId, "_")}`;
 }
@@ -80,8 +80,8 @@ async function listIndexBlobs(userId: number): Promise<BlobRef[]> {
 }
 
 /**
- * 劇集逐項清洗（照 `normalizeProject` 的逐欄白名單範式）。
- * 非法項回 null（由呼叫端 flatMap 丟棄），不整份作廢。
+ * 剧集逐项清洗（照 `normalizeProject` 的逐栏白名单范式）。
+ * 非法项回 null（由呼叫端 flatMap 丢弃），不整份作废。
  */
 function normalizeEpisode(payload: unknown): CanvasEpisode | null {
   if (!payload || typeof payload !== "object") return null;
@@ -101,7 +101,7 @@ function normalizeEpisode(payload: unknown): CanvasEpisode | null {
   };
 }
 
-/** 劇集清單清洗：逐項白名單 → episodeNo 去重（保留首見）→ 上限 200 集。 */
+/** 剧集清单清洗：逐项白名单 → episodeNo 去重（保留首见）→ 上限 200 集。 */
 function normalizeEpisodes(payload: unknown): CanvasEpisode[] | undefined {
   if (!Array.isArray(payload)) return undefined;
   const seen = new Set<number>();
@@ -109,7 +109,7 @@ function normalizeEpisodes(payload: unknown): CanvasEpisode[] | undefined {
   for (const item of payload) {
     const episode = normalizeEpisode(item);
     if (!episode) continue;
-    if (seen.has(episode.episodeNo)) continue; // episodeNo 去重，保留首見
+    if (seen.has(episode.episodeNo)) continue; // episodeNo 去重，保留首见
     seen.add(episode.episodeNo);
     out.push(episode);
     if (out.length >= MAX_EPISODES_PER_PROJECT) break;
@@ -117,17 +117,17 @@ function normalizeEpisodes(payload: unknown): CanvasEpisode[] | undefined {
   return out;
 }
 
-/** 逐欄白名單清洗畫布專案（外部 payload 一律走此函數才落盤）。 */
+/** 逐栏白名单清洗画布专案（外部 payload 一律走此函数才落盘）。 */
 export function normalizeProject(payload: unknown): CanvasProject | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Partial<CanvasProject>;
   if (typeof p.id !== "string" || typeof p.title !== "string" || !Array.isArray(p.nodes)) return null;
   const episodes = normalizeEpisodes(p.episodes);
-  // 節點版本歷史（2026-09-27）：逐項白名單＋逐節點裁剪（上限見 node-versions.ts）。
+  // 节点版本历史（2026-09-27）：逐项白名单＋逐节点裁剪（上限见 node-versions.ts）。
   const nodeVersions = normalizeNodeVersions(p.nodeVersions);
-  // 專案級風格綁定（P1-8／D34）：唯一註冊面＝STYLE_LIBRARY，查不到即省略鍵。
+  // 专案级风格绑定（P1-8／D34）：唯一注册面＝STYLE_LIBRARY，查不到即省略键。
   const styleId = normalizeProjectStyleId(p.styleId);
-  // 解說劇設定（P1-5／D7）：型別與旁白音色走同一個清洗入口（逐欄獨立、非法省略該鍵）。
+  // 解说剧设定（P1-5／D7）：型别与旁白音色走同一个清洗入口（逐栏独立、非法省略该键）。
   const narration = normalizeProjectNarration({ scriptType: p.scriptType, narrationVoice: p.narrationVoice });
   return {
     id: p.id,
@@ -139,24 +139,24 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
     viewport: p.viewport ?? { x: 0, y: 0, k: 1 },
     backgroundMode: p.backgroundMode === "blank" || p.backgroundMode === "lines" ? p.backgroundMode : "dots",
     ...(p.budget ? { budget: p.budget } : {}),
-    // P2：鎖定的角色/場景卡 id（清洗 + 去重 + 上限 100）。
+    // P2：锁定的角色/场景卡 id（清洗 + 去重 + 上限 100）。
     ...(Array.isArray(p.cardIds)
       ? { cardIds: [...new Set(p.cardIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 100) }
       : {}),
-    // 作品/劇集（2026-09-15 刀 1）：非法值一律省略欄位，不寫預設值冒充用戶設定。
+    // 作品/剧集（2026-09-15 刀 1）：非法值一律省略栏位，不写预设值冒充用户设定。
     ...(isCanvasProjectType(p.projectType) ? { projectType: p.projectType } : {}),
     ...(isValidCreationStep(p.currentStep) ? { currentStep: p.currentStep } : {}),
     ...(episodes ? { episodes } : {}),
     ...(nodeVersions ? { nodeVersions } : {}),
-    // 專案級風格綁定（P1-8／對稱差 D34）：非法／未註冊 id 一律**省略欄位**
-    // （不寫預設值冒充用戶設定，與 projectType 同範式）；缺欄＝無綁定，舊專案零改動。
+    // 专案级风格绑定（P1-8／对称差 D34）：非法／未注册 id 一律**省略栏位**
+    // （不写预设值冒充用户设定，与 projectType 同范式）；缺栏＝无绑定，旧专案零改动。
     ...(styleId ? { styleId } : {}),
-    // 解說劇設定：有值才落鍵（缺欄＝未宣告，舊專案形狀不變）。
+    // 解说剧设定：有值才落键（缺栏＝未宣告，旧专案形状不变）。
     ...(narration.scriptType ? { scriptType: narration.scriptType } : {}),
     ...(narration.narrationVoice ? { narrationVoice: narration.narrationVoice } : {}),
-    // 作用域（2026-09-27 片P 刀 1）：**只認 team**——personal 與缺欄一律省略欄位
-    //（讀取端語義即「缺省＝personal」），不寫 "personal" 冒充用戶設定（照 projectType 同範式）。
-    // teamId 只在 scope=team 且為非空字串時保留（去空白、上限 128）。
+    // 作用域（2026-09-27 片P 刀 1）：**只认 team**——personal 与缺栏一律省略栏位
+    //（读取端语义即「缺省＝personal」），不写 "personal" 冒充用户设定（照 projectType 同范式）。
+    // teamId 只在 scope=team 且为非空字串时保留（去空白、上限 128）。
     ...(p.scope === "team" ? { scope: "team" as const } : {}),
     ...(p.scope === "team" && typeof p.teamId === "string" && p.teamId.trim().length > 0
       ? { teamId: p.teamId.trim().slice(0, 128) }
@@ -223,12 +223,12 @@ async function writeProjects(userId: number, projects: CanvasProject[]): Promise
   const stale = previous.slice(INDEX_GENERATIONS_KEPT - 1);
   if (stale.length) {
     await del(stale.map((b) => b.url)).catch((error) => {
-      console.error("[canvas] 清理舊索引失敗。", error);
+      console.error("[canvas] 清理旧索引失败。", error);
     });
   }
 }
 
-// ─────────────────────────────────────────── 團隊命名空間（與個人同輪子）
+// ─────────────────────────────────────────── 团队命名空间（与个人同轮子）
 
 async function listTeamIndexBlobs(teamId: string): Promise<BlobRef[]> {
   const blobs: BlobRef[] = [];
@@ -279,19 +279,19 @@ async function writeTeamProjects(teamId: string, projects: CanvasProject[]): Pro
   const stale = previous.slice(INDEX_GENERATIONS_KEPT - 1);
   if (stale.length) {
     await del(stale.map((b) => b.url)).catch((error) => {
-      console.error("[canvas] 清理舊團隊索引失敗。", error);
+      console.error("[canvas] 清理旧团队索引失败。", error);
     });
   }
 }
 
-// ─────────────────────────────────────────── 對外接口
+// ─────────────────────────────────────────── 对外接口
 
-/** 讀全部畫布專案（newest 優先）。 */
+/** 读全部画布专案（newest 优先）。 */
 export async function listCanvasProjects(userId: number): Promise<CanvasProject[]> {
   return readProjects(userId);
 }
 
-/** 儲存/覆蓋一整個畫布專案（upsert by id）。 */
+/** 储存/覆盖一整个画布专案（upsert by id）。 */
 export async function saveCanvasProject(userId: number, project: CanvasProject): Promise<void> {
   const normalized = normalizeProject(project);
   if (!normalized) return;
@@ -301,18 +301,18 @@ export async function saveCanvasProject(userId: number, project: CanvasProject):
   });
 }
 
-/** 讀單一畫布專案（找不到回 null）。 */
+/** 读单一画布专案（找不到回 null）。 */
 export async function readCanvasProject(userId: number, id: string): Promise<CanvasProject | null> {
   const projects = await readProjects(userId);
   return projects.find((p) => p.id === id) ?? null;
 }
 
 /**
- * 對單一專案做**讀-改-寫**（在 per-user 寫入佇列 `enqueue` 內執行，避免與 debounce 存檔競態。
+ * 对单一专案做**读-改-写**（在 per-user 写入伫列 `enqueue` 内执行，避免与 debounce 存档竞态。
  *
- * 版本回退/軟刪還原都走這裡：不新增第二套儲存、不繞過既有落盤白名單。
- * mutator 回 `null`＝放棄寫入（例如找不到目標節點）；找不到專案同樣回 null。
- * 回傳實際落盤的（已清洗）專案，供路由原樣回給端點。
+ * 版本回退/软删还原都走这里：不新增第二套储存、不绕过既有落盘白名单。
+ * mutator 回 `null`＝放弃写入（例如找不到目标节点）；找不到专案同样回 null。
+ * 回传实际落盘的（已清洗）专案，供路由原样回给端点。
  */
 export async function mutateCanvasProject(
   userId: number,
@@ -329,7 +329,7 @@ export async function mutateCanvasProject(
       ...(existing.nodeVersions ? { nodeVersions: [...existing.nodeVersions] } : {}),
     });
     if (!next) return null;
-    // 走同一條落盤白名單（normalizeProject）；updatedAt 由 store 蓋章。
+    // 走同一条落盘白名单（normalizeProject）；updatedAt 由 store 盖章。
     const normalized = normalizeProject({ ...next, updatedAt: new Date().toISOString() });
     if (!normalized) return null;
     await writeProjects(userId, [normalized, ...current.filter((p) => p.id !== id)]);
@@ -337,7 +337,7 @@ export async function mutateCanvasProject(
   });
 }
 
-/** 刪除若干畫布專案。返回實際刪除數。 */
+/** 删除若干画布专案。返回实际删除数。 */
 export async function deleteCanvasProjects(userId: number, ids: string[]): Promise<number> {
   const targets = new Set(ids.filter(Boolean));
   if (!targets.size) return 0;
@@ -350,7 +350,7 @@ export async function deleteCanvasProjects(userId: number, ids: string[]): Promi
   });
 }
 
-/** 僅測試：重置進程內狀態。 */
+/** 仅测试：重置进程内状态。 */
 export function __resetCanvasStoreForTests(): void {
   memoryStore.clear();
   indexCache.clear();
@@ -360,26 +360,26 @@ export function __resetCanvasStoreForTests(): void {
   teamWriteQueues.clear();
 }
 
-// ─────────────────────────────────────────── 團隊畫布（刀 2 讀寫）
+// ─────────────────────────────────────────── 团队画布（刀 2 读写）
 
 /**
- * 讀某團隊的全部共享畫布（newest 優先）。teamId 不存在／無資料 → 空陣列（不得 500）。
- * **不在此做成員判定**：呼叫端必須先以權威成員身份取得 teamId
- *（見 team-canvas-gate.ts 的 caller 讀取閘），本函式只是儲存層。
+ * 读某团队的全部共享画布（newest 优先）。teamId 不存在／无资料 → 空阵列（不得 500）。
+ * **不在此做成员判定**：呼叫端必须先以权威成员身份取得 teamId
+ *（见 team-canvas-gate.ts 的 caller 读取闸），本函式只是储存层。
  */
 export async function listTeamCanvasProjects(teamId: string): Promise<CanvasProject[]> {
   if (!teamId || typeof teamId !== "string") return [];
   return readTeamProjects(teamId);
 }
 
-/** 讀某團隊的單一畫布（找不到回 null）。 */
+/** 读某团队的单一画布（找不到回 null）。 */
 export async function readTeamCanvasProject(teamId: string, id: string): Promise<CanvasProject | null> {
   if (!teamId || typeof teamId !== "string") return null;
   const projects = await readTeamProjects(teamId);
   return projects.find((p) => p.id === id) ?? null;
 }
 
-/** 儲存/覆蓋一整個團隊畫布（upsert by id；單寫，後寫覆蓋）。 */
+/** 储存/覆盖一整个团队画布（upsert by id；单写，后写覆盖）。 */
 export async function saveTeamCanvasProject(teamId: string, project: CanvasProject): Promise<void> {
   if (!teamId || typeof teamId !== "string") return;
   const normalized = normalizeProject(project);

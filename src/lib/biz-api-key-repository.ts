@@ -1,11 +1,11 @@
-// B 端密鑰的 Postgres 存取層。
+// B 端密钥的 Postgres 存取层。
 //
-// 這一層存在的理由見 db/migrations/007_biz_api_key.sql：Blob 被 block 時
-// 認證整條癱瘓，且簽發與認證兩側數據源分叉。Postgres 成為權威源後，
-// Blob 退為鏡像、env 退為最後兜底。
+// 这一层存在的理由见 db/migrations/007_biz_api_key.sql：Blob 被 block 时
+// 认证整条瘫痪，且签发与认证两侧数据源分叉。Postgres 成为权威源后，
+// Blob 退为镜像、env 退为最后兜底。
 //
-// 所有函數在 GENERATION_DATABASE_URL 未配置時返回 null/false，讓調用方
-// 走原有的 Blob 路徑 —— C 端 Vercel 部署沒有這個庫，不能因此炸掉。
+// 所有函数在 GENERATION_DATABASE_URL 未配置时返回 null/false，让调用方
+// 走原有的 Blob 路径 —— C 端 Vercel 部署没有这个库，不能因此炸掉。
 
 import { generationControlPlaneEnabled, getGenerationSql } from "./generation-core/database";
 import type { BizApiKey } from "./biz-api-keys";
@@ -25,7 +25,7 @@ type Row = {
   total_images: string | number;
 };
 
-/** Postgres 可用作權威源嗎。 */
+/** Postgres 可用作权威源吗。 */
 export function bizKeyDatabaseEnabled(): boolean {
   return generationControlPlaneEnabled();
 }
@@ -59,10 +59,10 @@ export async function listBizKeysFromDatabase(): Promise<BizApiKey[] | null> {
 }
 
 /**
- * 按 hash 查單把 key。
+ * 按 hash 查单把 key。
  *
- * 認證熱路徑專用：只取一行，不把整張表拉進內存。停用的 key 也要返回 ——
- * 調用方需要區分「不存在」（401）與「已停用」（403）。
+ * 认证热路径专用：只取一行，不把整张表拉进内存。停用的 key 也要返回 ——
+ * 调用方需要区分「不存在」（401）与「已停用」（403）。
  */
 export async function findBizKeyByHash(keyHash: string): Promise<BizApiKey | null> {
   if (!bizKeyDatabaseEnabled()) return null;
@@ -125,8 +125,8 @@ export async function deleteBizKeyFromDatabase(id: string): Promise<boolean> {
 /**
  * 用量累加。
  *
- * 用 SQL 自增而不是讀改寫：多個 control plane 實例同時 flush 時，
- * 讀改寫會互相蓋掉計數。
+ * 用 SQL 自增而不是读改写：多个 control plane 实例同时 flush 时，
+ * 读改写会互相盖掉计数。
  */
 export async function accumulateBizKeyUsageInDatabase(
   usage: Map<string, { requests: number; images: number; lastUsedAt: number }>,
@@ -147,15 +147,15 @@ export async function accumulateBizKeyUsageInDatabase(
 }
 
 /**
- * 把外部來源的 key 收進 Postgres（env 兜底行、Blob 舊索引）。
+ * 把外部来源的 key 收进 Postgres（env 兜底行、Blob 旧索引）。
  *
- * 應急流程原本是「手動加 env hash + 重啟容器」，加完就永久停在 env 裡：
- * 之後 admin 面板看不到它、改不了它、也不知道它還在生效。開機時同步一次，
- * env 與 Blob 就退化成「一次性導入通道」，而不是永久的第二、第三份數據源。
+ * 应急流程原本是「手动加 env hash + 重启容器」，加完就永久停在 env 里：
+ * 之后 admin 面板看不到它、改不了它、也不知道它还在生效。开机时同步一次，
+ * env 与 Blob 就退化成「一次性导入通道」，而不是永久的第二、第三份数据源。
  *
- * 衝突一律 DO NOTHING：Postgres 裡的記錄是權威的，且它比 env 那行更完整
- * （有 label、rpm、allowedModels、用量計數）。不帶 conflict target 是故意的 ——
- * id 與 key_hash 兩個唯一約束都要覆蓋，否則 id 撞車會直接拋錯中斷導入。
+ * 冲突一律 DO NOTHING：Postgres 里的记录是权威的，且它比 env 那行更完整
+ * （有 label、rpm、allowedModels、用量计数）。不带 conflict target 是故意的 ——
+ * id 与 key_hash 两个唯一约束都要覆盖，否则 id 撞车会直接抛错中断导入。
  */
 export async function importBizKeysIntoDatabase(keys: BizApiKey[]): Promise<number> {
   if (!bizKeyDatabaseEnabled() || !keys.length) return 0;

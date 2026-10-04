@@ -1,5 +1,5 @@
-// assetLoader 單元測試：歸一化數學（縮放/落地對齊）、結構化錯誤路徑、mock loader 注入。
-// 風格對齊 director-wheel.test.ts（node:test + assert/strict），node 環境可跑（不觸 WebGL）。
+// assetLoader 单元测试：归一化数学（缩放/落地对齐）、结构化错误路径、mock loader 注入。
+// 风格对齐 director-wheel.test.ts（node:test + assert/strict），node 环境可跑（不触 WebGL）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -22,7 +22,7 @@ function makeBoxMesh(size: { x: number; y: number; z: number }): THREE.Mesh {
   );
 }
 
-/** 建立未歸一化資產：7 高長方體，重心懸在 (10, 100, -5) */
+/** 建立未归一化资产：7 高长方体，重心悬在 (10, 100, -5) */
 function makeFloatingAsset(): THREE.Group {
   const group = new THREE.Group();
   const mesh = makeBoxMesh({ x: 2, y: 7, z: 2 });

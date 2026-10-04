@@ -1,7 +1,7 @@
-// persistence-schema.test.ts — 需求 2（schema 版本化遷移）＋需求 3（新增欄位同步集合檢查）的真值驗收。
+// persistence-schema.test.ts — 需求 2（schema 版本化迁移）＋需求 3（新增栏位同步集合检查）的真值验收。
 //
-// 全部使用暫存檔（mkdtemp），**絕不碰生產 sessions.db**（那在 VPS）。DB 路徑在 persistence
-// 模組載入時固定，故先造好「舊庫」再動態 import persistence。
+// 全部使用暂存档（mkdtemp），**绝不碰生产 sessions.db**（那在 VPS）。DB 路径在 persistence
+// 模组载入时固定，故先造好「旧库」再动态 import persistence。
 import { Database } from "bun:sqlite"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -12,7 +12,7 @@ const dir = mkdtempSync(join(tmpdir(), "schema-mig-"))
 const dbPath = join(dir, "sessions.db")
 process.env.SESSIONS_DB_PATH = dbPath
 
-// ── 造「舊庫」：只有舊欄位的 sessions 表 ＋ 一筆真實資料（user_version=0）──
+// ── 造「旧库」：只有旧栏位的 sessions 表 ＋ 一笔真实资料（user_version=0）──
 const legacy = new Database(dbPath, { create: true })
 legacy.exec(`
   CREATE TABLE sessions (
@@ -64,32 +64,32 @@ function minimalState(): Record<string, unknown> {
     canvasSummaryAt: 111,
     vettingInjected: true,
     lastTurnActiveAt: 999,
-    sessionTitle: "測試標題",
+    sessionTitle: "测试标题",
     tplDeviateToken: { token: "tpl-fake", at: 222 },
   }
 }
 
-describe("schema 版本化遷移（需求 2）", () => {
-  test("initPersistence 對舊庫跑完遷移：(a) user_version==SCHEMA_VERSION、(b) 舊資料無損", () => {
+describe("schema 版本化迁移（需求 2）", () => {
+  test("initPersistence 对旧库跑完迁移：(a) user_version==SCHEMA_VERSION、(b) 旧资料无损", () => {
     persistence.initPersistence()
 
     const probe = new Database(dbPath)
     const v = (probe.query("PRAGMA user_version").get() as { user_version: number }).user_version
     expect(v).toBe(persistence.SCHEMA_VERSION)
 
-    // 審計表記了清單裡每一版（真副作用，非源碼斷言）
+    // 审计表记了清单里每一版（真副作用，非源码断言）
     const audits = probe.query("SELECT version FROM schema_migrations ORDER BY version").all() as { version: number }[]
     expect(audits.map((a) => a.version)).toEqual(persistence.MIGRATIONS.map((m) => m.version))
 
-    // v2 產物（索引）確實存在
+    // v2 产物（索引）确实存在
     const idx = probe.query("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sessions_owner_updated'").get()
     expect(idx).not.toBeNull()
-    // v1 baseline 產物（新表）存在
+    // v1 baseline 产物（新表）存在
     const t = probe.query("SELECT name FROM sqlite_master WHERE type='table' AND name='critic_verdicts'").get()
     expect(t).not.toBeNull()
     probe.close()
 
-    // (b) 舊資料讀回、未遺失
+    // (b) 旧资料读回、未遗失
     const row = persistence.loadSessionById("sess-legacy")
     expect(row).not.toBeNull()
     expect(row!.data.eventCounter).toBe(7)
@@ -97,7 +97,7 @@ describe("schema 版本化遷移（需求 2）", () => {
     expect(row!.apiKey).toBe("sk-FAKE-OWNER")
   })
 
-  test("(c) 重複跑 runMigrations 不再變更（idempotent）", () => {
+  test("(c) 重复跑 runMigrations 不再变更（idempotent）", () => {
     const probe = new Database(dbPath)
     const before = (probe.query("PRAGMA user_version").get() as { user_version: number }).user_version
     const report = persistence.runMigrations(probe)
@@ -107,20 +107,20 @@ describe("schema 版本化遷移（需求 2）", () => {
     expect(report.to).toBe(persistence.SCHEMA_VERSION)
     const after = (probe.query("PRAGMA user_version").get() as { user_version: number }).user_version
     expect(after).toBe(before)
-    // 審計表不因重跑長出新列
+    // 审计表不因重跑长出新列
     const n = (probe.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n
     expect(n).toBe(persistence.MIGRATIONS.length)
     probe.close()
   })
 })
 
-describe("新增欄位同步集合檢查（需求 3）", () => {
-  test("serialize() 輸出鍵集 == PERSISTED_DATA_KEYS", () => {
+describe("新增栏位同步集合检查（需求 3）", () => {
+  test("serialize() 输出键集 == PERSISTED_DATA_KEYS", () => {
     const keys = Object.keys(persistence.serialize(minimalState() as never)).sort()
     expect(keys).toEqual([...persistence.PERSISTED_DATA_KEYS].sort())
   })
 
-  test("每個落盤鍵在 hydrateRow() 輸出都能找到（含別名 title→sessionTitle）", () => {
+  test("每个落盘键在 hydrateRow() 输出都能找到（含别名 title→sessionTitle）", () => {
     const state = minimalState()
     persistence.saveSession(state as never)
     const row = persistence.loadSessionById(state.sessionId as string)!
@@ -131,39 +131,39 @@ describe("新增欄位同步集合檢查（需求 3）", () => {
     expect(missing).toEqual([])
   })
 
-  test("round-trip 真值：旗標/別名/形狀不丟（曾踩的 replay strippable 與 lastTurnActiveAt）", () => {
+  test("round-trip 真值：旗标/别名/形状不丢（曾踩的 replay strippable 与 lastTurnActiveAt）", () => {
     const state = minimalState()
     persistence.saveSession(state as never)
     const row = persistence.loadSessionById(state.sessionId as string)!
     const h = persistence.hydrateRow(row)
     expect(h.lastTurnActiveAt).toBe(999)
-    expect(h.sessionTitle).toBe("測試標題")
+    expect(h.sessionTitle).toBe("测试标题")
     expect((h.tplDeviateToken as { token: string }).token).toBe("tpl-fake")
     const replay = h.replayBuffer as { id: number; strippable?: boolean; frame: Uint8Array }[]
     expect(replay.length).toBe(1)
     expect(replay[0].strippable).toBe(false)
-    // 長度幀必須是 bytes（round-trip 後還能解出原文字）
+    // 长度帧必须是 bytes（round-trip 后还能解出原文字）
     expect(new TextDecoder().decode(replay[0].frame)).toBe("data: {}\n\n")
   })
 })
 
-// ── v2 → v3 增量升級：真實的舊生產庫（2026-10-03）──────────────────────────────
-// 為何另造一個庫：上面那個 fixture 是 user_version=0 的最舊庫，一路 0→3；本節專門覆蓋
-// 「已上線的 v2 生產庫（user_version=2）升到 v3」這條真實路徑，v3 產物（human_labels 表、
-// critic_verdicts.score_source 欄）在此才有專屬斷言。
+// ── v2 → v3 增量升级：真实的旧生产库（2026-10-03）──────────────────────────────
+// 为何另造一个库：上面那个 fixture 是 user_version=0 的最旧库，一路 0→3；本节专门覆盖
+// 「已上线的 v2 生产库（user_version=2）升到 v3」这条真实路径，v3 产物（human_labels 表、
+// critic_verdicts.score_source 栏）在此才有专属断言。
 //
-// 造庫方式＝真實：直接呼叫本模組既有的 migration 函式（MIGRATIONS[0]/[1].up）把 v1/v2 的
-// schema 逐步建出來，再把 user_version 設成 2——不手抄一份可能與實作漂移的假 DDL。
-// 註：DB_PATH 在模組載入時固定（persistence.ts:106），同進程無法對第二個路徑再跑
-// initPersistence()；此處改用 initPersistence 內部**唯一實際執行遷移的入口** runMigrations()，
-// 與 initPersistence 走的是同一段遷移代碼（initPersistence = open db + runMigrations）。
+// 造库方式＝真实：直接呼叫本模组既有的 migration 函式（MIGRATIONS[0]/[1].up）把 v1/v2 的
+// schema 逐步建出来，再把 user_version 设成 2——不手抄一份可能与实作漂移的假 DDL。
+// 注：DB_PATH 在模组载入时固定（persistence.ts:106），同进程无法对第二个路径再跑
+// initPersistence()；此处改用 initPersistence 内部**唯一实际执行迁移的入口** runMigrations()，
+// 与 initPersistence 走的是同一段迁移代码（initPersistence = open db + runMigrations）。
 const v2Dir = mkdtempSync(join(tmpdir(), "schema-v2-"))
 const v2Path = join(v2Dir, "sessions.db")
 const v2Build = new Database(v2Path, { create: true })
 const v2Migrations = persistence.MIGRATIONS.filter((m) => m.version <= 2)
 for (const m of v2Migrations) m.up(v2Build)
-// 真實 v2 庫的審計表：runMigrations 套用 v1/v2 時會寫入這兩列（照抄同一段語句，讓 fixture
-// 與真庫等價——否則升級後 schema_migrations 只有 v3，與生產庫狀態不符）
+// 真实 v2 库的审计表：runMigrations 套用 v1/v2 时会写入这两列（照抄同一段语句，让 fixture
+// 与真库等价——否则升级后 schema_migrations 只有 v3，与生产库状态不符）
 v2Build.exec(`
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INTEGER PRIMARY KEY,
@@ -177,24 +177,24 @@ for (const m of v2Migrations) {
     .run(m.version, m.name, Date.now())
 }
 v2Build.exec("PRAGMA user_version = 2")
-// 前置事實：v2 庫的 critic_verdicts 尚無 score_source，也還沒有 human_labels 表
+// 前置事实：v2 库的 critic_verdicts 尚无 score_source，也还没有 human_labels 表
 const v2ColsBefore = (v2Build.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]).map((c) => c.name)
-if (v2ColsBefore.includes("score_source")) throw new Error("fixture 不真實：v2 庫不該已有 score_source")
+if (v2ColsBefore.includes("score_source")) throw new Error("fixture 不真实：v2 库不该已有 score_source")
 if (v2Build.query("SELECT name FROM sqlite_master WHERE type='table' AND name='human_labels'").get()) {
-  throw new Error("fixture 不真實：v2 庫不該已有 human_labels")
+  throw new Error("fixture 不真实：v2 库不该已有 human_labels")
 }
-// 塞一筆真實的 v2 時代審核判決（升級後必須仍在、且 score_source 維持 null）
+// 塞一笔真实的 v2 时代审核判决（升级后必须仍在、且 score_source 维持 null）
 v2Build
   .query(
     "INSERT INTO critic_verdicts (id, session_id, run_id, agent, label, verdict, score, judge_model, verdict_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   )
-  .run("cv-legacy", "sess-legacy", "run-legacy", "expert", "cut-1", "pass", 4.25, "judge-x", "舊庫判詞", 111)
+  .run("cv-legacy", "sess-legacy", "run-legacy", "expert", "cut-1", "pass", 4.25, "judge-x", "旧库判词", 111)
 v2Build.close()
 
 const v2db = new Database(v2Path)
 const v2Report = persistence.runMigrations(v2db)
 
-describe("v2 → v3 增量升級（真實舊庫）", () => {
+describe("v2 → v3 增量升级（真实旧库）", () => {
   test("runMigrations 把 v2 升到 v3：只套用 v3、user_version==3", () => {
     expect(v2Report.from).toBe(2)
     expect(v2Report.to).toBe(3)
@@ -205,14 +205,14 @@ describe("v2 → v3 增量升級（真實舊庫）", () => {
     expect(v).toBe(3)
   })
 
-  test("v3 產物齊備：human_labels 表存在、critic_verdicts 有 score_source 欄", () => {
+  test("v3 产物齐备：human_labels 表存在、critic_verdicts 有 score_source 栏", () => {
     const hl = v2db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='human_labels'").get()
     expect(hl).not.toBeNull()
     const cols = (v2db.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]).map((c) => c.name)
     expect(cols).toContain("score_source")
   })
 
-  test("舊資料無損：該筆 critic_verdicts 仍在、score 保留、score_source 為 null（未偽造成 measured）", () => {
+  test("旧资料无损：该笔 critic_verdicts 仍在、score 保留、score_source 为 null（未伪造成 measured）", () => {
     const row = v2db
       .query("SELECT score, score_source, verdict, judge_model FROM critic_verdicts WHERE id = 'cv-legacy'")
       .get() as { score: number; score_source: string | null; verdict: string; judge_model: string } | null
@@ -223,7 +223,7 @@ describe("v2 → v3 增量升級（真實舊庫）", () => {
     expect(row!.judge_model).toBe("judge-x")
   })
 
-  test("v3 對「欄已存在」的庫冪等：可重跑、不重複 ALTER、審計表不長新列", () => {
+  test("v3 对「栏已存在」的库幂等：可重跑、不重复 ALTER、审计表不长新列", () => {
     const report = persistence.runMigrations(v2db)
     expect(report.from).toBe(3)
     expect(report.applied).toEqual([])

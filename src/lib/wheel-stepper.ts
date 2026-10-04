@@ -1,17 +1,17 @@
-/* 滾輪分檔狀態機（/pricing 方案環，2026-10-01 第二版）。
+/* 滚轮分档状态机（/pricing 方案环，2026-10-01 第二版）。
  *
- * 暴君實機（Linux 觸控板、高靈敏）回報：第一版「事件間隔 > 180ms 才算新手勢」——
- *   1. 滑幾次就失效：觸控板 delta 抖動，單一尖峰被當成新手勢，一滑換兩檔；
- *   2. 往回滑完全無效：頁面滾回頂端時用戶還在連續滑，事件流永遠沒有 180ms 空檔，
- *      於是「從未接管」，而頁面已在頂端滾不動 → 什麼都不發生。
+ * 暴君实机（Linux 触控板、高灵敏）回报：第一版「事件间隔 > 180ms 才算新手势」——
+ *   1. 滑几次就失效：触控板 delta 抖动，单一尖峰被当成新手势，一滑换两档；
+ *   2. 往回滑完全无效：页面滚回顶端时用户还在连续滑，事件流永远没有 180ms 空档，
+ *      于是「从未接管」，而页面已在顶端滚不动 → 什么都不发生。
  *
- * 第二版規則（純函式，可單測）：
- *   - 換檔後鎖 LOCK_MS，期間同方向的慣性尾巴全吃掉；
- *   - 下一檔需要「重新武裝」：靜默 GAP_MS、反向、或明確再加速（近 3 筆中位數 > 前 3 筆中位數 × ACCEL_RATIO
- *     且 ≥ ACCEL_MIN，單筆尖峰推不動中位數）；按著不放只換一檔（「按著自動連換」實測與抖動的慣性尾巴無法區分，
- *     兩版都誤判再跳檔，已移除——要再換就停一下或再滑一次）；
- *   - 能不能接管由呼叫端每個事件判斷（舞台在視野內＋這方向還有下一檔），不再只看手勢開頭；
- *   - 到頭（沒有下一檔）：剛換完那一手勢的同向尾巴照樣吃掉，不讓它把頁面捲走；之後才放行。
+ * 第二版规则（纯函式，可单测）：
+ *   - 换档后锁 LOCK_MS，期间同方向的惯性尾巴全吃掉；
+ *   - 下一档需要「重新武装」：静默 GAP_MS、反向、或明确再加速（近 3 笔中位数 > 前 3 笔中位数 × ACCEL_RATIO
+ *     且 ≥ ACCEL_MIN，单笔尖峰推不动中位数）；按著不放只换一档（「按著自动连换」实测与抖动的惯性尾巴无法区分，
+ *     两版都误判再跳档，已移除——要再换就停一下或再滑一次）；
+ *   - 能不能接管由呼叫端每个事件判断（舞台在视野内＋这方向还有下一档），不再只看手势开头；
+ *   - 到头（没有下一档）：刚换完那一手势的同向尾巴照样吃掉，不让它把页面卷走；之后才放行。
  */
 
 export interface WheelStepperOptions {
@@ -25,9 +25,9 @@ export interface WheelStepperOptions {
 export type WheelDecision = "pass" | "consume" | { step: 1 | -1 };
 
 export interface WheelSample {
-  /** 事件時間戳（ms）。 */
+  /** 事件时间戳（ms）。 */
   t: number;
-  /** 已換算成像素的縱向位移（正＝往下）。 */
+  /** 已换算成像素的纵向位移（正＝往下）。 */
   delta: number;
 }
 
@@ -36,10 +36,10 @@ export function createWheelStepper(options: WheelStepperOptions = {}) {
   const LOCK_MS = options.lockMs ?? 700;
   const STEP_PX = options.stepPx ?? 36;
   const ACCEL_RATIO = options.accelRatio ?? 1.8;
-  /** 再加速的絕對下限：新的一滑頭幾筆中位數輕易過 25px；抖動的慣性尾巴（多在 20 以下）過不了。 */
+  /** 再加速的绝对下限：新的一滑头几笔中位数轻易过 25px；抖动的惯性尾巴（多在 20 以下）过不了。 */
   const ACCEL_MIN = 25;
-  /** 重新武裝後要「真的又滑了一下」：至少一筆 ≥ STROKE_MIN。主線程忙（3D 渲染）時慣性尾巴裡會冒出 > GAP_MS 的空檔，
-   *  只靠「靜默」會把尾巴的小 delta 當成新手勢再跳一檔（實測）。 */
+  /** 重新武装后要「真的又滑了一下」：至少一笔 ≥ STROKE_MIN。主线程忙（3D 渲染）时惯性尾巴里会冒出 > GAP_MS 的空档，
+   *  只靠「静默」会把尾巴的小 delta 当成新手势再跳一档（实测）。 */
   const STROKE_MIN = options.strokeMin ?? 20;
 
   let lastEventAt = -Infinity;
@@ -47,14 +47,14 @@ export function createWheelStepper(options: WheelStepperOptions = {}) {
   let lastStepDir = 0;
   let armed = true;
   let sawQuiet = false;
-  /** 這一手勢是在捲頁面（曾放行過）：滑進舞台後只停住、吃掉尾巴，不在同一手勢裡換檔。 */
+  /** 这一手势是在卷页面（曾放行过）：滑进舞台后只停住、吃掉尾巴，不在同一手势里换档。 */
   let pageGesture = false;
   let acc = 0;
   let armPeak = 0;
   let lastDir = 0;
   let recent: number[] = [];
 
-  /** 三筆中位數：單筆尖峰（觸控板抖動）推不動它，持續的再加速才推得動。 */
+  /** 三笔中位数：单笔尖峰（触控板抖动）推不动它，持续的再加速才推得动。 */
   const median3 = (xs: number[]) => [...xs].sort((a, b) => a - b)[1] ?? 0;
 
   function feed(sample: WheelSample, canStep: (dir: 1 | -1) => boolean): WheelDecision {
@@ -68,7 +68,7 @@ export function createWheelStepper(options: WheelStepperOptions = {}) {
     if (quiet || (lastDir !== 0 && dir !== lastDir)) pageGesture = false;
     lastDir = dir;
 
-    /* 只看「上次換檔之後」的樣本（換檔時清空），反向前的舊尾巴不會被誤讀成再加速。 */
+    /* 只看「上次换档之后」的样本（换档时清空），反向前的旧尾巴不会被误读成再加速。 */
     recent = quiet ? [magnitude] : [...recent.slice(-5), magnitude];
     const locked = t - lastStepAt < LOCK_MS;
     if (!armed && !locked) {
@@ -83,7 +83,7 @@ export function createWheelStepper(options: WheelStepperOptions = {}) {
     }
 
     if (!canStep(dir)) {
-      /* 到頭：換檔那一手勢的同向尾巴（還沒重新武裝）吃掉；其餘放行給頁面。 */
+      /* 到头：换档那一手势的同向尾巴（还没重新武装）吃掉；其余放行给页面。 */
       if (!armed && dir === lastStepDir) return "consume";
       acc = 0;
       pageGesture = true;
@@ -91,7 +91,7 @@ export function createWheelStepper(options: WheelStepperOptions = {}) {
       return "pass";
     }
 
-    /* 從頁面滾進舞台的那一滑：頁面停在這裡、尾巴吃掉；明確再加速（用戶又滑了一次）才解除。 */
+    /* 从页面滚进舞台的那一滑：页面停在这里、尾巴吃掉；明确再加速（用户又滑了一次）才解除。 */
     if (pageGesture) {
       const now3 = recent.length >= 6 ? median3(recent.slice(3)) : 0;
       const before3 = recent.length >= 6 ? median3(recent.slice(0, 3)) : 0;

@@ -1,19 +1,19 @@
-# S6 補發開發者漏掉的新人禮＋修正回溯排除口徑（預期 30 分鐘）
+# S6 补发开发者漏掉的新人礼＋修正回溯排除口径（预期 30 分钟）
 
-先讀 `_common.md`（同目錄）。另外必讀：`/home/lenovo/.claude/memory/product-reality-funnel-0927.md`（新人禮上線、回溯細節）。
+先读 `_common.md`（同目录）。另外必读：`/home/lenovo/.claude/memory/product-reality-funnel-0927.md`（新人礼上线、回溯细节）。
 
-## 事實（S1 報告）
-- 245、250、251、252、254 建了 biz key，但 new-api 額度是 **$0**。他們按下按鈕只會撞 402。
-- 根因（推論，先驗證）：`src/lib/welcome-gift.ts` 的回溯用 `listBizBillingUserIds()`，把**所有 biz key 持有者**都排除掉了。原意只是排除內部的 B 端計費帳戶。
-- 登入時補發要靠 `/api/auth/me`，但開發者用的是 API，不會再登入網頁，所以永遠補不到。
+## 事实（S1 报告）
+- 245、250、251、252、254 建了 biz key，但 new-api 额度是 **$0**。他们按下按钮只会撞 402。
+- 根因（推论，先验证）：`src/lib/welcome-gift.ts` 的回溯用 `listBizBillingUserIds()`，把**所有 biz key 持有者**都排除掉了。原意只是排除内部的 B 端计费帐户。
+- 登入时补发要靠 `/api/auth/me`，但开发者用的是 API，不会再登入网页，所以永远补不到。
 
-## 做什麼
-1. 回溯排除口徑改為只排除 `INTERNAL_USER_IDS`（env），加上現有的 probe/test/canary 規則，**不再**按「持有 biz key」排除。
-   - 把 `welcomeGiftBackfillCandidates` 的測試改成新口徑：持有 biz key 的外部用戶要進候選。
-2. 在 worker 維護輪（`src/lib/generation-core/worker-service.ts` 的 `runAccountMaintenanceOnce`）加一步：外部用戶一旦建了 biz key、又還沒領過新人禮、也沒成功出過圖，就自動發。
-   - 直接複用 `grantWelcomeGift`，不另寫發放邏輯
-   - 每輪最多 20 人
-3. 不做一次性手工補發，交給第 2 步在部署後自動補齊。回報時說明預期會補到哪些 user id（只讀查詢得出）。
+## 做什么
+1. 回溯排除口径改为只排除 `INTERNAL_USER_IDS`（env），加上现有的 probe/test/canary 规则，**不再**按「持有 biz key」排除。
+   - 把 `welcomeGiftBackfillCandidates` 的测试改成新口径：持有 biz key 的外部用户要进候选。
+2. 在 worker 维护轮（`src/lib/generation-core/worker-service.ts` 的 `runAccountMaintenanceOnce`）加一步：外部用户一旦建了 biz key、又还没领过新人礼、也没成功出过图，就自动发。
+   - 直接复用 `grantWelcomeGift`，不另写发放逻辑
+   - 每轮最多 20 人
+3. 不做一次性手工补发，交给第 2 步在部署后自动补齐。回报时说明预期会补到哪些 user id（只读查询得出）。
 
-## 驗收
-- 單元測試：biz key 持有者、無 gift、無成功單 → 發；內部 id → 不發；已領 → 不發
+## 验收
+- 单元测试：biz key 持有者、无 gift、无成功单 → 发；内部 id → 不发；已领 → 不发

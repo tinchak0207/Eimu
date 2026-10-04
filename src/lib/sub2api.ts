@@ -50,10 +50,10 @@ export function sub2APIImageGroupId(env: EnvLike): number | null {
 }
 
 /**
- * 生成開關的唯一判定。舊實作是未清洗的 `env.SUB2API_ENABLED === "true"`：
- * 經 stdin 添加的 env 常帶結尾換行（"true\n"），BOM/大小寫變體同理——開關
- * 靜默失效，sub2api 整條退出隊列，賬號池全部 "never used" 而各層面板照樣
- * 全綠。與 base URL/key 相同標準清洗後再比對；"1"/"yes" 等值仍視為關閉。
+ * 生成开关的唯一判定。旧实作是未清洗的 `env.SUB2API_ENABLED === "true"`：
+ * 经 stdin 添加的 env 常带结尾换行（"true\n"），BOM/大小写变体同理——开关
+ * 静默失效，sub2api 整条退出队列，账号池全部 "never used" 而各层面板照样
+ * 全绿。与 base URL/key 相同标准清洗后再比对；"1"/"yes" 等值仍视为关闭。
  */
 export function sub2apiSwitchedOn(env: EnvLike): boolean {
   return cleanEnvValue(env.SUB2API_ENABLED ?? "").toLowerCase() === "true";
@@ -72,8 +72,8 @@ export async function probeSub2APIGateway(endpoint: GatewayEndpoint): Promise<bo
   }
 }
 
-// 舊六個 label 保留智能提示；registry 渠道的 label 是任意字串（由
-// supplier-channels.config 登記），`(string & {})` 讓兩者同時成立。
+// 旧六个 label 保留智能提示；registry 渠道的 label 是任意字串（由
+// supplier-channels.config 登记），`(string & {})` 让两者同时成立。
 export type EnvChannelLabel = "adobe2api" | "sub2api" | "primary" | "fallback" | "pixai" | "filmera" | (string & {});
 
 export interface EnvChannelDescriptor {
@@ -107,9 +107,9 @@ function pickEnvSource(env: EnvLike, names: string[]): { value: string; source: 
 }
 
 /**
- * registry 條目 → EnvChannelDescriptor 的純映射（export 供單測）。
- * enabledEnv 有值時比照 sub2apiSwitchedOn 的清洗標準：只有清洗後的 "true"
- * 才 defaultEnabled（"1"/"yes" 不猜語意）。
+ * registry 条目 → EnvChannelDescriptor 的纯映射（export 供单测）。
+ * enabledEnv 有值时比照 sub2apiSwitchedOn 的清洗标准：只有清洗后的 "true"
+ * 才 defaultEnabled（"1"/"yes" 不猜语意）。
  */
 export function registryChannelToDescriptor(channel: RegistryChannel, env: EnvLike): EnvChannelDescriptor {
   const base = normalizeBaseURL(env[channel.baseUrlEnv] ?? "");

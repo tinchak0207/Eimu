@@ -1,10 +1,10 @@
-// GET/POST /api/agent/sessions/[id]/director —— 導演台工程代理（二期全屏導演台用）。
+// GET/POST /api/agent/sessions/[id]/director —— 导演台工程代理（二期全屏导演台用）。
 //
-// 照 canvas-state/route.ts 慣例：驗人（resolveAgentCaller）→ 換服務端 B 端 key
-// → callAgentGateway 轉發 gateway /agent/v1/director/<sid>/... 六路由（spec §3）。
-// 體積上限 512KB：director project.json 含 SVG 示意，超限屬異常（正常 ≤百 KB）。
-// 支援子路徑：state / op / proposals / apply_proposal / schematic / reset——
-// GET 只透傳 state 與 schematic；POST 其餘按子路徑白名單轉發，非白名單 404。
+// 照 canvas-state/route.ts 惯例：验人（resolveAgentCaller）→ 换服务端 B 端 key
+// → callAgentGateway 转发 gateway /agent/v1/director/<sid>/... 六路由（spec §3）。
+// 体积上限 512KB：director project.json 含 SVG 示意，超限属异常（正常 ≤百 KB）。
+// 支援子路径：state / op / proposals / apply_proposal / schematic / reset——
+// GET 只透传 state 与 schematic；POST 其余按子路径白名单转发，非白名单 404。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -12,15 +12,15 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-/** 請求體體積上限：op/proposals 載荷含 SVG 對照也不該超 512KB。 */
+/** 请求体体积上限：op/proposals 载荷含 SVG 对照也不该超 512KB。 */
 const MAX_BODY_BYTES = 512 * 1024;
 
-/** POST 子路徑白名單：與 gateway director.ts 六路由對齊（reset 無 body 也走 POST）。 */
+/** POST 子路径白名单：与 gateway director.ts 六路由对齐（reset 无 body 也走 POST）。 */
 const POST_SUBPATHS = new Set(["op", "proposals", "apply_proposal", "reset"]);
-/** GET 子路徑白名單：state（工程全文）與 schematic（示意圖查詢）。 */
+/** GET 子路径白名单：state（工程全文）与 schematic（示意图查询）。 */
 const GET_SUBPATHS = new Set(["state", "schematic"]);
 
 function fail(status: number, message: string, code: string): NextResponse {
@@ -36,7 +36,7 @@ function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
     : new NextResponse(resp.text || "", { status: resp.status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
 
-/** 解析 URL 中的子路徑：/director、/director/state、/director/schematic… */
+/** 解析 URL 中的子路径：/director、/director/state、/director/schematic… */
 function subPath(req: NextRequest): string {
   const path = req.nextUrl.pathname.replace(/\/+$/, "");
   const tail = path.split("/").pop() ?? "";

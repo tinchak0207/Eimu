@@ -9,31 +9,31 @@ import { WechatScanQr } from "@/components/WechatScanQr";
 import { PromoHandoffNotice } from "@/components/promo/PromoHandoffNotice";
 
 /**
- * 宣傳片結尾送出時，從送出鈕上方長出來的登入小對話框（2026-09-27 暴君裁定）。
+ * 宣传片结尾送出时，从送出钮上方长出来的登入小对话框（2026-09-27 暴君裁定）。
  *
- * 為什麼不是全屏彈窗：全屏遮罩把剛播完的結尾畫面蓋掉＝把人的注意力從「這部片」
- * 挪到「一個登入牆」，還沒登入就先把興致打斷（暴君原話：「不要遮盖……不然用户
- * 会丧失兴趣」）。所以改成：送出鈕先轉圈 0.2 秒（＝正在開跑的反饋），然後在鈕的
- * 正上方長出這一小格，只遮住牠上面那一小塊，畫面其餘部分（封面、輸入框、那句話）
- * 都還在原地。
+ * 为什么不是全屏弹窗：全屏遮罩把刚播完的结尾画面盖掉＝把人的注意力从「这部片」
+ * 挪到「一个登入墙」，还没登入就先把兴致打断（暴君原话：「不要遮盖……不然用户
+ * 会丧失兴趣」）。所以改成：送出钮先转圈 0.2 秒（＝正在开跑的反馈），然后在钮的
+ * 正上方长出这一小格，只遮住牠上面那一小块，画面其余部分（封面、输入框、那句话）
+ * 都还在原地。
  *
- * 兩條登入鏈路都是站上現成的（不重寫）：
- * ①GitHub＝同窗口跳轉 `/api/auth/github/start`；但在 standalone PWA / Electron
- *   桌面殼裡登入態帶不進來（2026-10-04），改走跨瀏覽器交接：取得 handoff 連結後
- *   原地換成 PromoHandoffNotice，授權在系統瀏覽器完成、這裡輪詢領回會話。跳走前
- *   那句話已寫進 sessionStorage，回來落 / 自動補送。
- * ②微信＝小框原地換成掃碼二維碼（2026-09-30：取消驗證碼、掃到即登入；不再開
- *   `/wechat-login` 新分頁——手機上新分頁＝人切去微信掃完回來找不到原頁、那句話
- *   也就沒人補送）。輪詢拿到 token → refresh → 補送。
- * 登入態一翻真，ImagePlayground 的補送 effect 就把那句話送進真會話（這裡不重複做）。
+ * 两条登入链路都是站上现成的（不重写）：
+ * ①GitHub＝同窗口跳转 `/api/auth/github/start`；但在 standalone PWA / Electron
+ *   桌面壳里登入态带不进来（2026-10-04），改走跨浏览器交接：取得 handoff 连结后
+ *   原地换成 PromoHandoffNotice，授权在系统浏览器完成、这里轮询领回会话。跳走前
+ *   那句话已写进 sessionStorage，回来落 / 自动补送。
+ * ②微信＝小框原地换成扫码二维码（2026-09-30：取消验证码、扫到即登入；不再开
+ *   `/wechat-login` 新分页——手机上新分页＝人切去微信扫完回来找不到原页、那句话
+ *   也就没人补送）。轮询拿到 token → refresh → 补送。
+ * 登入态一翻真，ImagePlayground 的补送 effect 就把那句话送进真会话（这里不重复做）。
  */
 
 interface PromoLoginPopoverProps {
-  /** 使用者放棄登入（關掉這格）：上層要清掉待送的那句話。 */
+  /** 使用者放弃登入（关掉这格）：上层要清掉待送的那句话。 */
   onDismiss: () => void;
 }
 
-/** 微信官方白綠雙對話框 + 眼睛圓點 + 尾巴（逐字取自 SplitLoginButton，勿改）。 */
+/** 微信官方白绿双对话框 + 眼睛圆点 + 尾巴（逐字取自 SplitLoginButton，勿改）。 */
 function WechatLogo({ className }: { className?: string }) {
   return (
     <svg
@@ -61,12 +61,12 @@ function WechatLogo({ className }: { className?: string }) {
 
 export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
   const { refresh } = useAuth();
-  /** 小框的兩頁：選登入方式／微信二維碼（原地換頁，不開新分頁）。 */
+  /** 小框的两页：选登入方式／微信二维码（原地换页，不开新分页）。 */
   const [view, setView] = useState<"choose" | "wechat">("choose");
 
   /**
-   * 登入態落地：刷新即可——待送的那句話由 ImagePlayground 的補送 effect 接手
-   * （登入態一翻真就關浮層、開新會話、把那句話送進去）。
+   * 登入态落地：刷新即可——待送的那句话由 ImagePlayground 的补送 effect 接手
+   * （登入态一翻真就关浮层、开新会话、把那句话送进去）。
    */
   const finish = useCallback(async () => {
     await refresh();
@@ -76,9 +76,9 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
 
   const { handoffUrl, startLogin, closeHandoff } = useGithubLoginHandoff();
 
-  // 穩定引用：交接面的輪詢 effect 以 onSuccess 為依賴，若每次 re-render 都給新
-  // 函式，effect 會被反覆重建、2 秒輪詢永遠等不到第一槍（宿主高頻 re-render 時
-  // 登入就永遠續不上）。
+  // 稳定引用：交接面的轮询 effect 以 onSuccess 为依赖，若每次 re-render 都给新
+  // 函式，effect 会被反覆重建、2 秒轮询永远等不到第一枪（宿主高频 re-render 时
+  // 登入就永远续不上）。
   const handleHandoffDone = useCallback(() => {
     void finish();
   }, [finish]);
@@ -90,7 +90,7 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
       onClick={(event) => event.stopPropagation()}
       className="lg-float relative w-[min(336px,calc(100vw-2rem))] rounded-ios-2xl p-4 shadow-[0_18px_44px_rgba(45,49,66,0.22)] animate-in fade-in slide-in-from-bottom-1 duration-150"
     >
-      {/* 指向下方送出鈕的小尖角：位置＝對話框水平中心，鈕在畫面正中間那條線上。 */}
+      {/* 指向下方送出钮的小尖角：位置＝对话框水平中心，钮在画面正中间那条线上。 */}
       <div className="pointer-events-none absolute -bottom-[6px] left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] bg-[inherit] shadow-[3px_3px_8px_rgba(45,49,66,0.10)]" />
 
       {handoffUrl ? (

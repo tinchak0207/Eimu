@@ -1,8 +1,8 @@
-// search_web 工具 coverage_notice 真行为测试（本輪分流培訓的反向提示）。
+// search_web 工具 coverage_notice 真行为测试（本轮分流培训的反向提示）。
 //
 // 真行为断言（mock fetch，不真连）：成功回执**恒带** coverage_notice，内容指向
 // search_aggregate（平台站内），且既有字段（result_count/results）语义不变。
-// description 断言只是守門件（源碼字符串掃描），不算验收——验收在 loopback 真回合。
+// description 断言只是守门件（源码字符串扫描），不算验收——验收在 loopback 真回合。
 //
 // 跑法：bash deploy-staging/vps-tools/run-tests.sh ../vps-tools/web-search.test.ts
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -58,7 +58,7 @@ describe("search_web coverage_notice", () => {
     expect(parsed.coverage_notice as string).toContain("search_aggregate")
   })
 
-  test("description 开门见山是预设通用网页搜索（守門件，不算验收）", () => {
+  test("description 开门见山是预设通用网页搜索（守门件，不算验收）", () => {
     expect(webSearchTool.description).toContain("预设通用网页搜索工具")
     expect(webSearchTool.description).toContain("不要优先挑平台工具")
   })

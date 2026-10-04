@@ -1,22 +1,22 @@
-// /pricing 舞台的裝置分級（2026-10-01）：低端機不跑 WebGL，改顯示預渲染的靜態場景圖。
+// /pricing 舞台的装置分级（2026-10-01）：低端机不跑 WebGL，改显示预渲染的静态场景图。
 //
-// 實測（Intel UHD 核顯）：3D 舞台滾動 6–9fps、單幀卡 1.3s；即使預熱 shader＋動態解析度，滑鼠一動仍只有
-// ~13fps。暴君裁定：低端機寧可沒有靈動感，也不能卡——直接換成同構圖的靜態圖（由真引擎離線渲染，
-// 見 public/showcase/pricing3d/）。這裡只做「判斷」，純函式可測；讀瀏覽器資訊在 detectPricingStageMode。
+// 实测（Intel UHD 核显）：3D 舞台滚动 6–9fps、单帧卡 1.3s；即使预热 shader＋动态解析度，滑鼠一动仍只有
+// ~13fps。暴君裁定：低端机宁可没有灵动感，也不能卡——直接换成同构图的静态图（由真引擎离线渲染，
+// 见 public/showcase/pricing3d/）。这里只做「判断」，纯函式可测；读浏览器资讯在 detectPricingStageMode。
 
 export type PricingStageMode = "3d" | "lite" | "off";
 
 export interface DeviceSignals {
-  /** WebGL UNMASKED_RENDERER_WEBGL；拿不到為空字串。null＝WebGL 不可用。 */
+  /** WebGL UNMASKED_RENDERER_WEBGL；拿不到为空字串。null＝WebGL 不可用。 */
   renderer: string | null;
   cores?: number;
   memoryGb?: number;
   saveData?: boolean;
-  /** URL 覆寫：?p3d=lite|full（測試與客服排障用）。 */
+  /** URL 覆写：?p3d=lite|full（测试与客服排障用）。 */
   override?: string | null;
 }
 
-/** 已知跑不動 3D 舞台的 GPU：軟體渲染、Intel 核顯（Arc 獨顯除外）、舊款手機 GPU。 */
+/** 已知跑不动 3D 舞台的 GPU：软体渲染、Intel 核显（Arc 独显除外）、旧款手机 GPU。 */
 const LOW_END_GPU = /swiftshader|llvmpipe|softpipe|software|basic render|mali-(?:[2-7]\d\d|t\d+|g[1-5]\d)\b|adreno(?: \(tm\))? [2-5]\d\d\b|powervr|videocore/i;
 const isIntelIntegrated = (renderer: string) => /intel/i.test(renderer) && !/\barc\b/i.test(renderer);
 
@@ -33,7 +33,7 @@ export function classifyPricingStage(signals: DeviceSignals): PricingStageMode {
 
 let cached: PricingStageMode | null = null;
 
-/** 讀瀏覽器訊號做一次判斷（模組級快取；建一個用完即棄的 WebGL context 取 GPU 名）。 */
+/** 读浏览器讯号做一次判断（模组级快取；建一个用完即弃的 WebGL context 取 GPU 名）。 */
 export function detectPricingStageMode(): PricingStageMode {
   if (cached) return cached;
   if (typeof window === "undefined") return "3d";
@@ -62,9 +62,9 @@ export function detectPricingStageMode(): PricingStageMode {
 }
 
 /**
- * 低端機靜態場景圖：由 3D 引擎離線渲染的透明底 webp（減少動態＝卡堆落定的那一幀）。
- * wide＝桌面構圖（1440×725 舞台；1x／2x），tall＝手機竪屏構圖（390×646 舞台的 2x）。
- * 場景改了要重產：dev server 開 `/pricing?p3d=capture`，逐档呼叫 `window.__p3dSnapshot()`。
+ * 低端机静态场景图：由 3D 引擎离线渲染的透明底 webp（减少动态＝卡堆落定的那一帧）。
+ * wide＝桌面构图（1440×725 舞台；1x／2x），tall＝手机竖屏构图（390×646 舞台的 2x）。
+ * 场景改了要重产：dev server 开 `/pricing?p3d=capture`，逐档呼叫 `window.__p3dSnapshot()`。
  */
 const still = (world: string) => ({
   wide: `/showcase/pricing3d/${world}-wide.webp`,

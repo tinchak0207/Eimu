@@ -1,60 +1,60 @@
 /**
- * Orchestrator 派工協議注入（MOE 改革 Wave1-C 後半，2026-09-08）。
+ * Orchestrator 派工协议注入（MOE 改革 Wave1-C 后半，2026-09-08）。
  *
- * 職能：野獸模式（beast_mode）ON 時，把「Orchestrator 派遣手冊」＋ Expert
- * 註冊表摘要組裝成主 agent（Orchestrator / 導演）的 system prompt 附加幀；
- * OFF 時返回原文一個字不多（零回歸）。Orchestrator 從「全能工匠」變「導演」：
- * 定位目標、寫 spec、派遣、收結果、驗收，本體不內聯動手。
+ * 职能：野兽模式（beast_mode）ON 时，把「Orchestrator 派遣手册」＋ Expert
+ * 注册表摘要组装成主 agent（Orchestrator / 导演）的 system prompt 附加帧；
+ * OFF 时返回原文一个字不多（零回归）。Orchestrator 从「全能工匠」变「导演」：
+ * 定位目标、写 spec、派遣、收结果、验收，本体不内联动手。
  *
- * 注入範式（跟隨現場，不發明）：與 Wave1-A 憲法注入同構——
+ * 注入范式（跟随现场，不发明）：与 Wave1-A 宪法注入同构——
  * src/lib/blender-director-persona.ts composeDirectorDelegationPrompt 的
- * node:fs readFileSync + import.meta.url 相對定位 + readBeastMode 閘門 +
- * 檔不可讀時結構化報錯（拒絕裸奔注入，誠實鐵律）。本倉 prompt 注入的唯一
- * 既有範式就是它（DIRECTOR_EXPERT_CONSTITUTION_PATH 註釋明言「內容由
- * readFileSync 在組裝 prompt 時讀取」），故 playbook 走同款 fs 讀取而非
- * inline 常量，單一真源 =
+ * node:fs readFileSync + import.meta.url 相对定位 + readBeastMode 闸门 +
+ * 档不可读时结构化报错（拒绝裸奔注入，诚实铁律）。本仓 prompt 注入的唯一
+ * 既有范式就是它（DIRECTOR_EXPERT_CONSTITUTION_PATH 注释明言「内容由
+ * readFileSync 在组装 prompt 时读取」），故 playbook 走同款 fs 读取而非
+ * inline 常量，单一真源 =
  * deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md。
- * 與 persona 的唯一差異：fs 改靜態 import（本檔經 expert-registry →
- * blender-tools 鏈本就 server-only，動態 import 在 tsx CJS 本地測試運行時
- * 解構不穩；VPS bun ESM 兩態皆通）。
+ * 与 persona 的唯一差异：fs 改静态 import（本档经 expert-registry →
+ * blender-tools 链本就 server-only，动态 import 在 tsx CJS 本地测试运行时
+ * 解构不稳；VPS bun ESM 两态皆通）。
  *
- * 消費方：VPS /opt/agent-harness/gateway（Orchestrator 主 prompt 組裝真源，
- * 本地 repo 無活碼，記憶片J）在組裝 system prompt 時調 buildOrchestratorFrame；
- * 本檔先在本地交付契約 + 測試釘死形狀，VPS 落位走後續部署片。
+ * 消费方：VPS /opt/agent-harness/gateway（Orchestrator 主 prompt 组装真源，
+ * 本地 repo 无活码，记忆片J）在组装 system prompt 时调 buildOrchestratorFrame；
+ * 本档先在本地交付契约 + 测试钉死形状，VPS 落位走后续部署片。
  */
 
 import { loadBundledOrchestratorPlaybook } from "./expert-gateway-assets";
 import { EXPERT_REGISTRY, readBeastMode, type ExpertDef } from "./expert-registry";
 import { estimateTokens } from "./blender-delegate";
 
-/** playbook 單一真源（repo 相對路徑，聲明部署來源位置；內容經静态 import 的
- *  src/lib/expert-gateway-assets.json 鏡像讀取——Vercel 拿不到 deploy-staging/）。 */
+/** playbook 单一真源（repo 相对路径，声明部署来源位置；内容经静态 import 的
+ *  src/lib/expert-gateway-assets.json 镜像读取——Vercel 拿不到 deploy-staging/）。 */
 export const ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH =
   "deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md" as const;
 
 /**
- * 配方庫欄空值如實標記（R4 修復片，2026-09-11）：skillPaths 為空 = 該域尚無
- * 配方庫可載。禁止填任何猜測/近似路徑（引用不存在檔案 = 幻影檔事故鐵律）。
+ * 配方库栏空值如实标记（R4 修复片，2026-09-11）：skillPaths 为空 = 该域尚无
+ * 配方库可载。禁止填任何猜测/近似路径（引用不存在档案 = 幻影档事故铁律）。
  */
 export const EXPERT_LINE_SKILL_PATHS_UNCONFIGURED = "未配置" as const;
 
-/** 交付契約 qcSignature 欄文案（布林 → 人話；true 才視為已交付）。 */
+/** 交付契约 qcSignature 栏文案（布林 → 人话；true 才视为已交付）。 */
 export const EXPERT_LINE_QC_REQUIRED = "必需" as const;
 export const EXPERT_LINE_QC_OPTIONAL = "可选" as const;
 
-/** requiredFields 為空時如實標記（禁止編造欄位名）。 */
+/** requiredFields 为空时如实标记（禁止编造栏位名）。 */
 export const EXPERT_LINE_NO_REQUIRED_FIELDS = "无" as const;
 
 /**
- * Expert 註冊表摘要：每個 Expert 一行 id/label/taskTypes/toolIds +
- * 配方庫（skillPaths）+ 交付契約（requiredFields + qcSignatureRequired），
- * provisioned 行標「未启用」（野獸模式 ON 也不可路由，routeExpert 不返回）。
- * 由 EXPERT_REGISTRY 動態生成，零手抄——registry 加行摘要自動跟進。
+ * Expert 注册表摘要：每个 Expert 一行 id/label/taskTypes/toolIds +
+ * 配方库（skillPaths）+ 交付契约（requiredFields + qcSignatureRequired），
+ * provisioned 行标「未启用」（野兽模式 ON 也不可路由，routeExpert 不返回）。
+ * 由 EXPERT_REGISTRY 动态生成，零手抄——registry 加行摘要自动跟进。
  *
- * R4（2026-09-11）擴充理由：Orchestrator 寫派遣 spec 時手冊第一節要求它寫
- * 「驗收標準」，但驗收標準的唯一來源（deliverableContract）與「進 Expert 即載
- * 配方庫」（skillPaths）先前都不進 prompt → 無從得知。兩欄照 registry 現值逐字
- * 輸出，skillPaths 空數組照實寫「未配置」（零編造）。
+ * R4（2026-09-11）扩充理由：Orchestrator 写派遣 spec 时手册第一节要求它写
+ * 「验收标准」，但验收标准的唯一来源（deliverableContract）与「进 Expert 即载
+ * 配方库」（skillPaths）先前都不进 prompt → 无从得知。两栏照 registry 现值逐字
+ * 输出，skillPaths 空数组照实写「未配置」（零编造）。
  */
 export function buildExpertLine(expert: ExpertDef): string {
   const provisioned = expert.provisioned ? "（未启用）" : "";
@@ -77,19 +77,19 @@ export function buildExpertLine(expert: ExpertDef): string {
 }
 
 /**
- * 剝離檔頭開發者元數據（R7，2026-09-10）：playbook 頂部 HTML 註釋（version/
- * source/gate 聲明）是給維護者看的，原樣進 prompt 是毒——實錘模型思維鏈
+ * 剥离档头开发者元数据（R7，2026-09-10）：playbook 顶部 HTML 注释（version/
+ * source/gate 声明）是给维护者看的，原样进 prompt 是毒——实锤模型思维链
  * 「That's gated on BEAST_MODE=ON. There's no explicit indication BEAST_MODE=ON」
- * → 合理懷疑 gate 未滿足 → 走保守路徑。注入前剝離，當前狀態聲明由本函數
- * 動態生成（不進檔案）。VPS gateway index.ts/subagent.ts 注入點同款邏輯。
+ * → 合理怀疑 gate 未满足 → 走保守路径。注入前剥离，当前状态声明由本函数
+ * 动态生成（不进档案）。VPS gateway index.ts/subagent.ts 注入点同款逻辑。
  */
 export function stripProvenanceHeader(text: string): string {
   return text.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trimStart();
 }
 
-/** 野獸模式當前狀態聲明（R7）：告知模型 gate 已滿足，堵死保守路徑藉口。 */
+/** 野兽模式当前状态声明（R7）：告知模型 gate 已满足，堵死保守路径藉口。 */
 export const BEAST_MODE_STATE_LINE =
-  "【野獸模式：已啟用】以下派遣手冊與 Expert 註冊表由系統注入，這是當前系統的真實狀態：BEAST_MODE 現在就是 ON，以下全部條款立即生效，無需質疑、無需再確認任何 gate 條件。";
+  "【野兽模式：已启用】以下派遣手册与 Expert 注册表由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，以下全部条款立即生效，无需质疑、无需再确认任何 gate 条件。";
 
 export function buildExpertRegistryDigest(): string {
   const lines = Object.values(EXPERT_REGISTRY).map(buildExpertLine);
@@ -97,15 +97,15 @@ export function buildExpertRegistryDigest(): string {
 }
 
 /**
- * 組裝 Orchestrator 主 prompt 幀。
+ * 组装 Orchestrator 主 prompt 帧。
  *
- * - OFF / settings 髒數據（readBeastMode === false）：返回 { frame: basePrompt,
- *   injected: false }——basePrompt 原樣透傳，一個字不多（零回歸斷言錨）。
- * - ON 且 playbook 可讀：返回 { frame: playbook + 註冊表摘要 + basePrompt,
- *   injected: true }（派工協議在主 prompt 頭部，其後接原文，格式同憲法注入
- *   `head\n\n---\n\nbody` 範式）。
- * - ON 但 playbook 檔不可讀/空檔：返回 ok:false 結構化報錯（拒絕裸奔——
- *   派工協議缺席時把全能工匠 prompt 原樣放行 = 假 ON，誠實鐵律禁止）。
+ * - OFF / settings 脏数据（readBeastMode === false）：返回 { frame: basePrompt,
+ *   injected: false }——basePrompt 原样透传，一个字不多（零回归断言锚）。
+ * - ON 且 playbook 可读：返回 { frame: playbook + 注册表摘要 + basePrompt,
+ *   injected: true }（派工协议在主 prompt 头部，其后接原文，格式同宪法注入
+ *   `head\n\n---\n\nbody` 范式）。
+ * - ON 但 playbook 档不可读/空档：返回 ok:false 结构化报错（拒绝裸奔——
+ *   派工协议缺席时把全能工匠 prompt 原样放行 = 假 ON，诚实铁律禁止）。
  */
 export async function buildOrchestratorFrame(
   basePrompt: string,
@@ -118,9 +118,9 @@ export async function buildOrchestratorFrame(
     return { ok: true, frame: basePrompt, injected: false, estimated_tokens: estimateTokens(basePrompt) };
   }
 
-  // 野獸模式 ON：读静态 import 的 bundle 镜像（Vercel 拿不到 deploy-staging/，
-  // 见 src/lib/expert-gateway-assets.ts 檔頭；死因留痕進 hint，不進 log——secret
-  // 衛生鐵律）。空资产抛错由下 catch 转 playbook_unavailable。
+  // 野兽模式 ON：读静态 import 的 bundle 镜像（Vercel 拿不到 deploy-staging/，
+  // 见 src/lib/expert-gateway-assets.ts 档头；死因留痕进 hint，不进 log——secret
+  // 卫生铁律）。空资产抛错由下 catch 转 playbook_unavailable。
   let playbook: string | undefined;
   let playbookError: string | undefined;
   try {
@@ -133,7 +133,7 @@ export async function buildOrchestratorFrame(
     return {
       ok: false,
       code: "playbook_unavailable",
-      hint: `野獸模式已開但派遣手冊不可讀（${ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH}${playbookError ? `：${playbookError}` : "：檔案為空"}）：拒绝裸奔主 prompt，請修復 playbook 部署或暫時關閉 beast_mode。`,
+      hint: `野兽模式已开但派遣手册不可读（${ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH}${playbookError ? `：${playbookError}` : "：档案为空"}）：拒绝裸奔主 prompt，请修复 playbook 部署或暂时关闭 beast_mode。`,
     };
   }
 

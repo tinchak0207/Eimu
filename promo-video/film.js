@@ -13,7 +13,7 @@ const $ = id => document.getElementById(id);
 const W_ = 1920, H_ = 1080, ASPECT = W_ / H_;
 
 /* =====================================================================================
- * 時間軸（秒）
+ * 时间轴（秒）
  * ===================================================================================== */
 export const DUR = 49.2;
 const T = {
@@ -33,17 +33,17 @@ const T = {
 
 const CUES = {
   duration: DUR,
-  // [起, 迄, 低音, 和聲, 琶音力度]
+  // [起, 迄, 低音, 和声, 琶音力度]
   chords: [
-    [0, 6.4, 38, [50, 53, 57, 60, 64], 0],        // Dm9：影院冷開
-    [6.4, 9.3, 34, [50, 53, 57, 60, 62], 0.3],     // Bbmaj9：光湧入
-    [9.3, 11.75, 31, [46, 50, 53, 57], 0.55],      // Gm9：倒帶
-    [11.75, 14.65, 41, [57, 60, 64, 67], 0.25],    // Fmaj9：一句話
-    [14.65, 20.45, 36, [52, 55, 57, 62], 1.0],     // C6/9：展開
+    [0, 6.4, 38, [50, 53, 57, 60, 64], 0],        // Dm9：影院冷开
+    [6.4, 9.3, 34, [50, 53, 57, 60, 62], 0.3],     // Bbmaj9：光涌入
+    [9.3, 11.75, 31, [46, 50, 53, 57], 0.55],      // Gm9：倒带
+    [11.75, 14.65, 41, [57, 60, 64, 67], 0.25],    // Fmaj9：一句话
+    [14.65, 20.45, 36, [52, 55, 57, 62], 1.0],     // C6/9：展开
     [20.45, 25.85, 33, [48, 52, 55, 59], 0.85],    // Am9：角色
-    [25.85, 31.45, 34, [50, 53, 57, 62], 0],       // Bbmaj9：成片（留給畫面）
+    [25.85, 31.45, 34, [50, 53, 57, 62], 0],       // Bbmaj9：成片（留给画面）
     [31.45, 36.45, 38, [53, 57, 60, 64], 0.7],     // Dm9：舞台
-    [36.45, 41.65, 36, [52, 55, 59, 62], 0.95],    // Cmaj9：作品牆
+    [36.45, 41.65, 36, [52, 55, 59, 62], 0.95],    // Cmaj9：作品墙
     [41.65, 49.2, 29, [48, 57, 64, 67, 72], 0],    // Fmaj9：收
   ],
   pulse: [[14.65, 20.45], [31.45, 41.65]],
@@ -51,7 +51,7 @@ const CUES = {
 };
 
 /* =====================================================================================
- * 渲染器 / 後處理
+ * 渲染器 / 后处理
  * ===================================================================================== */
 const renderer = new THREE.WebGLRenderer({ canvas: $("gl"), antialias: false, preserveDrawingBuffer: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(1); renderer.setSize(W_, H_, false);
@@ -64,7 +64,7 @@ const scene = new THREE.Scene();
 const PEARL = new THREE.Color("#eef1f6"), BLACK = new THREE.Color("#000000"), STAGE_BG = new THREE.Color("#0b0d11");
 scene.background = PEARL.clone();
 const pmrem = new THREE.PMREMGenerator(renderer);
-// 自建影棚環境：頂部白色柔光箱 + 左藍右粉燈條，讓玻璃斜邊映出藍粉邊光（Liquid Glass）
+// 自建影棚环境：顶部白色柔光箱 + 左蓝右粉灯条，让玻璃斜边映出蓝粉边光（Liquid Glass）
 function studioEnv() {
   const es = new THREE.Scene();
   const sky = new THREE.Mesh(new THREE.SphereGeometry(30, 64, 32), new THREE.ShaderMaterial({
@@ -99,7 +99,7 @@ composer.addPass(new OutputPass());
 const film = new ShaderPass(FilmShader);
 composer.addPass(film);
 
-/* 燈光 */
+/* 灯光 */
 const hemi = new THREE.HemisphereLight(0xffffff, 0xdde4f0, 0.55); scene.add(hemi);
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(-8, 16, 10); key.castShadow = true;
@@ -107,13 +107,13 @@ key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004; key.shadow.normal
 Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 50 });
 scene.add(key, key.target);
 
-/* 無限畫布 */
+/* 无限画布 */
 const surf = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), surfaceMaterial());
 surf.rotation.x = -Math.PI / 2; scene.add(surf);
 const SU = surf.material.uniforms;
 
 /* =====================================================================================
- * 資產
+ * 资产
  * ===================================================================================== */
 const texLoader = new THREE.TextureLoader();
 const TEX = {};
@@ -125,7 +125,7 @@ function canvasTex(c, premul = true) {
   t.premultiplyAlpha = premul; t.userData.aspect = c.width / c.height; return t;
 }
 const VID = {};
-// 影片經 2D 畫布中轉上傳（獨顯 PRIME 下 WebGL 直接吃 <video> 會得到黑幀）
+// 影片经 2D 画布中转上传（独显 PRIME 下 WebGL 直接吃 <video> 会得到黑帧）
 function makeVideo(key, src, fps) {
   const v = document.createElement("video"); v.src = src; v.muted = true; v.preload = "auto"; v.playsInline = true;
   const cv = document.createElement("canvas"); const cx = cv.getContext("2d", { alpha: false });
@@ -145,7 +145,7 @@ async function seek(key, time) {
 }
 
 /* =====================================================================================
- * 玻璃磚（圓角擠出 + 斜角）+ 貼花 + 影像槽 + 接觸陰影
+ * 玻璃砖（圆角挤出 + 斜角）+ 贴花 + 影像槽 + 接触阴影
  * ===================================================================================== */
 const geoCache = new Map();
 function slabGeo(w, d, r, thick, bev = 0.022) {
@@ -212,7 +212,7 @@ class Tile {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), m); mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(s.x, this.thick + 0.005, s.z); mesh.renderOrder = 4; this.pivot.add(mesh); this.overlay = { mesh, m };
   }
-  // b：建構量 0→1；reveal：影像揭示；o：整體不透明度；lift/quat 由外部設定
+  // b：建构量 0→1；reveal：影像揭示；o：整体不透明度；lift/quat 由外部设定
   set({ b = 1, reveal = 1, o = 1, t = 0, sweep = -1, dim = 1, shimSeed = 0 } = {}) {
     const vis = b * o > 0.002; this.root.visible = vis;
     const eb = ease.out(clamp(b));
@@ -230,7 +230,7 @@ class Tile {
       u.uShim.value = reveal < 0.999 ? 0.8 : 0; u.uShimPos.value = ((t * 0.9 + shimSeed) % 1.6) - 0.3;
     }
     if (this.overlay) this.overlay.m.uniforms.uOpacity.value = o * clamp((reveal - 0.6) / 0.4);
-    // 接觸陰影跟隨世界位置，隨高度變淡變大
+    // 接触阴影跟随世界位置，随高度变淡变大
     const wp = this.pivot.getWorldPosition(new THREE.Vector3());
     const h = Math.max(0, wp.y - this.root.position.y * 0 - 0);
     const spread = 1 + h * 0.35;
@@ -242,7 +242,7 @@ class Tile {
   }
 }
 
-/* 發光連線 */
+/* 发光连线 */
 const THREADS = [];
 function thread(p0, p1, color, { c0, c1, radius = 0.0062 } = {}) {
   const a = new THREE.Vector3(...p0), b = new THREE.Vector3(...p1);
@@ -256,7 +256,7 @@ function thread(p0, p1, color, { c0, c1, radius = 0.0062 } = {}) {
 const BLUE = new THREE.Color("#3b82ff"), PINK = new THREE.Color("#ec4d92");
 
 /* =====================================================================================
- * 秦始皇專案：一句話 → 21 個生成節點
+ * 秦始皇专案：一句话 → 21 个生成节点
  * ===================================================================================== */
 const QIN = {};
 const QSHOTS = [["片头", "q-1.5", "金光雪原"], ["出城", "q-6.8", "熊骑破门"], ["大军", "q-12.0", "冰原列阵"], ["冲锋", "q-17.6", "雪原驰骋"], ["并立", "q-22.6", "与熊同行"], ["夜探", "q-27.6", "火把熊影"], ["凯旋", "q-32.6", "金门归来"]];
@@ -264,7 +264,7 @@ const LENS = ["航拍", "推镜", "大全景", "跟拍", "仰拍", "特写", "�
 const PROMPT = "生成秦始皇骑北极熊的电影";
 
 function buildQin() {
-  // 提示輸入框（藥丸形玻璃 + 動態貼花 + 3D 發送鍵）
+  // 提示输入框（药丸形玻璃 + 动态贴花 + 3D 发送键）
   const pw = 4.7, pd = 0.74;
   const pad = UI.makePromptPad(pw, pd, 720);
   const pt = new Tile({ x: -13.6, z: 0, w: pw, d: pd, r: pd / 2, thick: 0.08, drawn: { canvas: pad.c, slots: [] }, name: "prompt" });
@@ -296,7 +296,7 @@ function buildQin() {
   const fin = new Tile({ x: 0.95, z: -0.52, w: 2.62, d: 1.96, drawn: UI.drawFinal(2.62, 1.96, 560, { title: "成片", right: "0:36", done: true, aspect: 1.75, caption: "始皇帝的北境征途", meta: "1344×768 · 36s" }), images: [VID.qinA.tex], name: "final" });
   Object.assign(QIN, { script: scr, ent, kf, vid, music, voice, final: fin });
 
-  // 連線
+  // 连线
   const L = (t, side) => [t.x + (side > 0 ? t.w / 2 : -t.w / 2) - side * 0.01, 0.035, t.z];
   const TH = [];
   const add = (a, b, col, opt) => { const th = thread(L(a, 1), L(b, -1), col, opt); TH.push({ th, a, b }); return th; };
@@ -306,7 +306,7 @@ function buildQin() {
   Object.entries(links).forEach(([ei, ks]) => ks.forEach(k => add(ent[ei], kf[k], PINK)));
   kf.forEach((k, i) => add(k, vid[i], BLUE));
   vid.forEach(v => add(v, fin, BLUE));
-  // 劇本 → 配樂/旁白：沿底部繞行
+  // 剧本 → 配乐/旁白：沿底部绕行
   for (const [n, zOff] of [[music, 0], [voice, 0]]) {
     const a = [scr.x, 0.035, scr.z + scr.d / 2 - 0.01], b = [n.x - n.w / 2 + 0.01, 0.035, n.z + zOff];
     const th = thread(a, b, PINK, { c0: [scr.x, 0.035, 4.35], c1: [n.x - n.w / 2 - 1.6, 0.035, n.z + 0.05 + (n === voice ? 2.4 : 2.0)] });
@@ -317,7 +317,7 @@ function buildQin() {
   QIN.nodes = [pt, scr, ...ent, ...kf, ...vid, music, voice, fin];
 }
 
-/* 前進建構 / 倒帶拆解時間表 */
+/* 前进建构 / 倒带拆解时间表 */
 function qinSchedule() {
   const s = T.send;
   const tb = new Map();
@@ -334,7 +334,7 @@ function qinSchedule() {
   QIN.kf.forEach((k, i) => QIN.fill.set(k, s + 1.55 + i * 0.13));
   QIN.vid.forEach((k, i) => QIN.fill.set(k, s + 2.25 + i * 0.13));
   QIN.fill.set(QIN.final, s + 3.2);
-  // 倒帶：相機經過節點時拆解（x 由右至左）
+  // 倒带：相机经过节点时拆解（x 由右至左）
   QIN.tun = new Map();
   const cx = x => { for (let t = T.rewind[0]; t <= T.rewind[1]; t += 0.01) { const st = camState(t); if (st.pos[0] < x + 0.6) return t; } return T.rewind[1]; };
   for (const n of QIN.nodes) if (n !== QIN.prompt) QIN.tun.set(n, cx(n.x));
@@ -343,7 +343,7 @@ function qinSchedule() {
 }
 
 /* =====================================================================================
- * 大明專案（另一個已完成的專案）：角色卡升空 + 三鏡同臉 → 提燈一鏡活過來
+ * 大明专案（另一个已完成的专案）：角色卡升空 + 三镜同脸 → 提灯一镜活过来
  * ===================================================================================== */
 const MING = {};
 function buildMing() {
@@ -361,12 +361,12 @@ function buildMing() {
   vids.forEach(v => TH.push(thread(L(v, 1), L(fin, -1), BLUE)));
   { const th = thread(L(ch, 1), L(art, -1), PINK); th.lifted = true; TH.push(th); }
   { const th = thread([proj.x, 0.035, proj.z + proj.d / 2 - 0.01], [ch.x, 0.035, ch.z - ch.d / 2 + 0.01], PINK, { c0: [proj.x, 0.035, proj.z + 1.2], c1: [ch.x, 0.035, ch.z - 1.2] }); th.lifted = true; TH.push(th); }
-  // 空中連線（角色卡 → 三鏡），每幀依位置重建曲線
+  // 空中连线（角色卡 → 三镜），每帧依位置重建曲线
   const air = [0, 1, 2].map(() => {
     const geo = new THREE.TubeGeometry(new THREE.LineCurve3(new THREE.Vector3(), new THREE.Vector3(0, 0, 1)), 60, 0.012, 8, false);
     const m = threadMaterial(PINK, 3); const mesh = new THREE.Mesh(geo, m); mesh.renderOrder = 5; scene.add(mesh); mesh.visible = false; return { mesh, u: m.uniforms };
   });
-  // 實體膠囊
+  // 实体胶囊
   const capC = UI.drawCapsule(TEX["char-chongzhen"].image, "崇祯", 140);
   const capTex = canvasTex(capC);
   const caps = kf.map(k => {
@@ -379,7 +379,7 @@ function buildMing() {
   Object.assign(MING, { proj, ch, art, kf, vids, fin, TH, air, caps, nodes: [proj, ch, art, ...kf, ...vids, fin] });
 }
 
-/* 升空隊形：角色卡在左，三鏡斜排在右，全部直立面向鏡頭 */
+/* 升空队形：角色卡在左，三镜斜排在右，全部直立面向镜头 */
 const CL = { look: new THREE.Vector3(12.1, 2.6, 0.6), camA: new THREE.Vector3(10.4, 2.75, 8.6), camB: new THREE.Vector3(12.9, 2.55, 8.2) };
 const FORM = {
   ch: { p: new THREE.Vector3(9.95, 2.2, 0.75), s: 1.26 },
@@ -392,7 +392,7 @@ function uprightQuat(p, towards) {
 }
 
 /* =====================================================================================
- * 三維導演台（暗場白模）
+ * 三维导演台（暗场白模）
  * ===================================================================================== */
 const STG = { c: new THREE.Vector3(28, 0, 0), items: [] };
 function buildStage() {
@@ -432,7 +432,7 @@ function buildStage() {
   const rim = new THREE.DirectionalLight(0x9fb8ff, 0); rim.position.set(c.x - 4, 6, c.z - 8); rim.target.position.copy(c); g.add(rim, rim.target); STG.rim = rim;
   const catcher = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.55, color: 0x000000 }));
   catcher.rotation.x = -Math.PI / 2; catcher.position.set(c.x, 0.003, c.z); catcher.receiveShadow = true; g.add(catcher); STG.catcher = catcher;
-  // 機位路徑 + 關鍵幀點 + 虛擬攝影機（視錐）
+  // 机位路径 + 关键帧点 + 虚拟摄影机（视锥）
   const pts = [new THREE.Vector3(c.x + 3.4, 2.7, c.z + 5.2), new THREE.Vector3(c.x + 2.3, 2.0, c.z + 4.3), new THREE.Vector3(c.x + 1.1, 1.55, c.z + 3.7), new THREE.Vector3(c.x + 0.25, 1.28, c.z + 3.55)];
   STG.curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const pathGeo = new THREE.TubeGeometry(STG.curve, 200, 0.012, 8, false);
@@ -451,7 +451,7 @@ function buildStage() {
 }
 
 /* =====================================================================================
- * 作品牆（全部 Eimu 自家產出）
+ * 作品墙（全部 Eimu 自家产出）
  * ===================================================================================== */
 const WALL = { tiles: [], labels: [] };
 function buildWall() {
@@ -474,13 +474,13 @@ function buildWall() {
     const lab = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.34), lm); lab.rotation.x = -Math.PI / 2; lab.position.set(x - tw / 2 + 1.3 + 0.02, 0.004, z + td / 2 + 0.24); lab.renderOrder = 2; scene.add(lab);
     WALL.tiles.push(t); WALL.labels.push({ lab, lm, t });
   });
-  // 片尾字標 + 玻璃透鏡
+  // 片尾字标 + 玻璃透镜
   const wc = UI.drawWordmark("Eimu", 700);
   const wt = canvasTex(wc, true);
   const hh = 1.95, ww = hh * wt.userData.aspect;
   const wm = imageMaterial({ map: wt, w: ww, h: hh, transparent: true, opaque: true }); wm.uniforms.uPremul.value = 1;
   WALL.word = new THREE.Mesh(new THREE.PlaneGeometry(ww, hh), wm); WALL.word.position.set(c.x, 3.55, c.z - 13.5); scene.add(WALL.word); WALL.wm = wm;
-  // 背板柔光（不透明，讓透鏡折射到顏色）
+  // 背板柔光（不透明，让透镜折射到颜色）
   const gc = document.createElement("canvas"); gc.width = 1024; gc.height = 512; const gx = gc.getContext("2d");
   gx.fillStyle = "#eef1f6"; gx.fillRect(0, 0, 1024, 512);
   const blob = (x, y, r, col) => { const g = gx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col); g.addColorStop(1, "rgba(238,241,246,0)"); gx.fillStyle = g; gx.fillRect(0, 0, 1024, 512); };
@@ -499,7 +499,7 @@ function buildWall() {
 }
 
 /* =====================================================================================
- * 相機：分段 Hermite 軌道
+ * 相机：分段 Hermite 轨道
  * ===================================================================================== */
 const SEG = [];
 function keysToTrack(keys) {
@@ -527,7 +527,7 @@ function setupCamera() {
   const fc = [fin.x + sl.x, fin.thick + 0.003, fin.z + sl.z];
   const fov0 = 30, dFill = fillDist(sl.w / ASPECT, fov0) * 0.995;
   QIN.fc = fc;
-  // 影院冷開：正上方俯視成片磚，逐鏡緩推
+  // 影院冷开：正上方俯视成片砖，逐镜缓推
   T.qinClips.forEach(([a, b], i) => {
     const b2 = i === 3 ? T.pull[0] : b;
     seg(a === 0.5 && i === 0 ? 0 : a, b2, t => {
@@ -559,13 +559,13 @@ function setupCamera() {
     { t: 25.0, pos: CL.camB.toArray(), look: [12.9, 2.35, 0.75], fov: 33, fp: FORM.kf[1].p.toArray(), ap: 0.003, mb: 0.011 },
   ]);
   seg(T.pull[0], T.film[0], t => unpack(trA.at(t)));
-  // 推進提燈一鏡：直到畫面填滿（之後維持正視 + 緩推）
+  // 推进提灯一镜：直到画面填满（之后维持正视 + 缓推）
   const f1 = FORM.kf[1], yawF = Math.atan2(CL.camB.x - f1.p.x, CL.camB.z - f1.p.z);
   const kfSl = MING.kf[1].imgs[0].sl;
   const n = new THREE.Vector3(Math.sin(yawF), 0, Math.cos(yawF));
   const slotH = kfSl.h * f1.s, slotW = kfSl.w * f1.s;
   const dF = Math.min(fillDist(slotH, 30), fillDist(slotW / ASPECT, 30)) * 0.995;
-  // 影像槽中心的世界座標（直立後：局部 z → 世界 -y）
+  // 影像槽中心的世界座标（直立后：局部 z → 世界 -y）
   const slotCenter = f1.p.clone().add(new THREE.Vector3(kfSl.x * f1.s * Math.cos(yawF), -kfSl.z * f1.s + MING.kf[1].thick * 0, -kfSl.x * f1.s * Math.sin(yawF))).add(n.clone().multiplyScalar(MING.kf[1].thick * f1.s + 0.004));
   MING.slotCenter = slotCenter; MING.yawF = yawF; MING.n = n;
   const posFill = k => slotCenter.clone().add(n.clone().multiplyScalar(dF * k)).toArray();
@@ -575,7 +575,7 @@ function setupCamera() {
     { t: T.film[1], pos: posFill(0.9), yaw: yawF, pitch: 0, fov: 30, fp: slotCenter.toArray(), ap: 0, mb: 0, stop: true },
   ]);
   seg(T.film[0], T.stage[0], t => unpack(trB.at(t)));
-  // 舞台 → 作品牆 → 片尾（連續）
+  // 舞台 → 作品墙 → 片尾（连续）
   const c = STG.c; const vEnd = STG.curve.getPointAt(1);
   const trC = keysToTrack([
     { t: T.stage[0], pos: [c.x + 6.8, 3.5, c.z + 8.4], look: [c.x + 0.2, 1.0, c.z - 0.6], fov: 32, fp: [c.x, 1, c.z + 0.5], ap: 0.0022, mb: 0.01 },
@@ -598,7 +598,7 @@ function setupCamera() {
 }
 
 /* =====================================================================================
- * DOM 疊字
+ * DOM 叠字
  * ===================================================================================== */
 function lines(el, t, tin, tout, { step = 0.09, dur = 0.9, out = 0.45, dy = 110 } = {}) {
   const spans = el.querySelectorAll(".ln > span");
@@ -628,11 +628,11 @@ function cine(el, t, tin, tout) {
 }
 
 /* =====================================================================================
- * 每幀狀態
+ * 每帧状态
  * ===================================================================================== */
 const tmpV = new THREE.Vector3();
 function worldLight(t) {
-  // 0=影院黑，1=珍珠白；舞台另計
+  // 0=影院黑，1=珍珠白；舞台另计
   if (t < T.pull[0]) return 0;
   if (t < T.light[1]) return ease.inOutSoft(P(t, T.light[0], T.light[1]));
   return 1;
@@ -662,9 +662,9 @@ function updateQin(t, light, visible) {
     const sweep = t > T.prompt[0] && tb > 0 ? lerp(-0.3, 1.5, P(t, tb + 0.1, tb + 0.8)) : -1;
     n.set({ b, reveal: qinReveal(n, t), t, sweep: sweep > 1.45 ? -1 : sweep, dim: light, shimSeed: hash(n.x * 3 + n.z) });
   }
-  // 成片磚：影院段落保持全亮（不受世界光影響）
+  // 成片砖：影院段落保持全亮（不受世界光影响）
   const fu = QIN.final.imgs[0].m.uniforms; fu.uBright.value = 1;
-  // 連線
+  // 连线
   for (const { th, a, b } of QIN.threads) {
     const u = th.u; let draw = 1, back = 0;
     if (!visible) { th.mesh.visible = false; continue; }
@@ -680,7 +680,7 @@ function updateQin(t, light, visible) {
     u.uPulse.value.set(flowing ? (rev ? 1 - run : run) : -9, flowing ? (rev ? 1 - run2 : run2) : -9, -9);
     u.uPulseAmt.value = (rev ? 9 : 5) * light;
   }
-  // 提示框：打字 + 游標 + 發送
+  // 提示框：打字 + 游标 + 发送
   const pt = QIN.prompt, L = [...PROMPT].length;
   let n;
   if (t < 11.0) n = L;
@@ -709,7 +709,7 @@ function updateMing(t, light, visible) {
   }
   const cut = 1 - P(t, 21.2, 21.6);
   M.TH.forEach(th => { const k = th.lifted ? cut : 1; th.mesh.visible = k > 0.001; th.u.uDraw.value = 1.001; th.u.uCore.value = 1.0 * light * others; th.u.uOpacity.value = 0.85 * others * k; const r = (t * 0.4 + th.seed) % 1; th.u.uPulse.value.set(r, -9, -9); th.u.uPulseAmt.value = 4 * others * k; });
-  // 角色卡與三鏡升空
+  // 角色卡与三镜升空
   const lifts = [[M.ch, FORM.ch, 0], ...M.kf.map((k, i) => [k, FORM.kf[i], i + 1])];
   for (const [tile, f, i] of lifts) {
     const u = liftU(i);
@@ -717,7 +717,7 @@ function updateMing(t, light, visible) {
     const to = f.p.clone().sub(new THREE.Vector3(0, 0, 0));
     const mid = from.clone().lerp(to, 0.5); mid.y += 0.9;
     const p = new THREE.Vector3().copy(from).multiplyScalar((1 - u) * (1 - u)).add(mid.clone().multiplyScalar(2 * u * (1 - u))).add(to.clone().multiplyScalar(u * u));
-    // 懸停微擺
+    // 悬停微摆
     p.y += Math.sin(t * 1.2 + i * 1.7) * 0.03 * u * (1 - P(t, 25.3, 25.85));
     tile.root.position.copy(p);
     const q = Q_FLAT.clone().slerp(uprightQuat(f.p, CL.camB.clone().lerp(CL.camA, 0.5)), ease.inOutSoft(P(t, 21.45 + i * 0.2, 22.85 + i * 0.2)));
@@ -726,7 +726,7 @@ function updateMing(t, light, visible) {
     tile.root.scale.setScalar(lerp(1, f.s, u));
     tile.upright = u;
   }
-  // 空中連線：角色卡右緣 → 各鏡左緣
+  // 空中连线：角色卡右缘 → 各镜左缘
   const chR = new THREE.Vector3(M.ch.w / 2 - 0.03, M.ch.thick, 0).applyQuaternion(M.ch.root.quaternion).multiplyScalar(M.ch.root.scale.x).add(M.ch.root.position);
   M.air.forEach((a, i) => {
     const k = M.kf[i]; const kl = new THREE.Vector3(-k.w / 2 + 0.03, k.thick, 0).applyQuaternion(k.root.quaternion).multiplyScalar(k.root.scale.x).add(k.root.position);
@@ -739,9 +739,9 @@ function updateMing(t, light, visible) {
     a.u.uLen.value = curve.getLength(); a.u.uDraw.value = drawU * 1.001;
     const r = (t * 0.5 + i * 0.33) % 1; a.u.uPulse.value.set(drawU >= 1 ? r : -9, -9, -9); a.u.uPulseAmt.value = 6; a.u.uCore.value = 1.3; a.u.uOpacity.value = 1 - P(t, T.film[0], T.film[0] + 0.5);
   });
-  // 膠囊
+  // 胶囊
   M.caps.forEach((c, i) => { const a = ease.out(P(t, 23.05 + i * 0.14, 23.5 + i * 0.14)) * (1 - P(t, 25.75, 26.1)); c.m.uniforms.uOpacity.value = a; c.mesh.visible = a > 0.002; c.mesh.scale.setScalar(lerp(0.6, 1, spring(t, 23.05 + i * 0.14, 260, 15))); });
-  // 提燈一鏡：靜幀 → 活過來（切換為影片紋理）
+  // 提灯一镜：静帧 → 活过来（切换为影片纹理）
   const lanternImg = M.kf[1].imgs[0];
   const alive = t >= T.alive;
   const want = alive ? VID.mingA.tex : TEX["m-5.6"];
@@ -765,7 +765,7 @@ function updateStage(t) {
   STG.doorM.color.setRGB(1.3 * (1 - sink), 0.8 * (1 - sink), 0.42 * (1 - sink));
   STG.door.visible = sink < 0.99;
   STG.rug.visible = sink < 0.99;
-  // 路徑繪製 + 虛擬攝影機
+  // 路径绘制 + 虚拟摄影机
   const pu = ease.inOutSoft(P(t, t0 + 0.9, t0 + 1.9));
   STG.path.visible = pu > 0.001 && sink < 0.999;
   const pm = STG.path.material.uniforms; pm.uDraw.value = pu * 1.001; pm.uOpacity.value = (1 - sink) * (1 - P(t, 35.3, 35.75));
@@ -792,7 +792,7 @@ function updateWall(t, light) {
   WALL.labels.forEach(({ lm, t: tile }, i) => { const col = i % 3, row = Math.floor(i / 3); const dly = (Math.abs(col - 1) + Math.abs(row - 1)) * 0.12; lm.uniforms.uOpacity.value = on ? ease.out(P(t, T.wall[0] + 0.6 + dly, T.wall[0] + 1.2 + dly)) : 0; lm.uniforms.uReveal.value = 1.2; });
   WALL.word.visible = t > 41.0; WALL.lens.visible = t > 41.0; WALL.glow.visible = t > 41.0;
   WALL.gm.uniforms.uOpacity.value = 1; WALL.gm.uniforms.uBright.value = 1;
-  // 玻璃膠囊滑入，微彈停在字標正中 → 最終品牌鎖定
+  // 玻璃胶囊滑入，微弹停在字标正中 → 最终品牌锁定
   const lu = spring(t, 44.1, 9, 4.5);
   WALL.lens.position.x = STG.c.x - 10 * (1 - lu);
   WALL.lens.rotation.y = -0.3 * (1 - lu); WALL.lens.rotation.z = 0.06 * (1 - lu);
@@ -802,7 +802,7 @@ function updateWall(t, light) {
 /* =====================================================================================
  * renderFrame
  * ===================================================================================== */
-// opts（封面模式）：cam={pos, look|yaw/pitch, fov, fp, ap, mb} 覆蓋機位；qinVid 指定成片磚畫面；noOverlay 隱藏疊字；grain/vig 覆蓋調色
+// opts（封面模式）：cam={pos, look|yaw/pitch, fov, fp, ap, mb} 覆盖机位；qinVid 指定成片砖画面；noOverlay 隐藏叠字；grain/vig 覆盖调色
 async function renderFrame(t, opts = {}) {
   let cs = camState(t);
   if (opts.cam) {
@@ -816,7 +816,7 @@ async function renderFrame(t, opts = {}) {
   camera.fov = cs.fov; camera.updateProjectionMatrix();
   const light = worldLight(t), sm = stageMix(t);
 
-  // 世界氛圍
+  // 世界氛围
   const cinemaQin = t < T.pull[0] + 0.02;
   const cinemaMing = t >= T.alive + 0.2 && t < T.stage[0];
   scene.background.copy(BLACK).lerp(PEARL, light).lerp(STAGE_BG, sm);
@@ -837,7 +837,7 @@ async function renderFrame(t, opts = {}) {
   updateStage(t);
   updateWall(t, light);
 
-  // 影片取幀
+  // 影片取帧
   const jobs = [];
   if (t < T.rewind[1]) {
     let cl = T.qinClips[0]; for (const c of T.qinClips) if (t >= c[0]) cl = c;
@@ -861,7 +861,7 @@ async function renderFrame(t, opts = {}) {
   bloom.strength = cinemaQin || cinemaMing ? 0.28 : lerp(0.5, 0.32, sm);
   bloom.threshold = cinemaQin || cinemaMing ? 0.92 : lerp(1.0, 0.95, sm);
 
-  // 調色
+  // 调色
   const fu = film.uniforms;
   fu.uSeed.value = Math.round(t * 30);
   const cineAmt = cinemaQin || cinemaMing ? 1 : 0;
@@ -906,7 +906,7 @@ function overlays(t) {
 }
 
 /* =====================================================================================
- * 啟動
+ * 启动
  * ===================================================================================== */
 function cues() {
   CUES.boom.push(0.5, 1.72, 2.86, 3.92, T.alive, 27.9, 28.8, 29.62, 30.5, T.stage[0], T.wall[0]);
@@ -936,7 +936,7 @@ window.ready = (async () => {
   buildQin(); buildMing(); buildStage(); buildWall();
   setupCamera(); qinSchedule(); cues();
   window.__dbg = { scene, camera, renderer, QIN, MING, STG, WALL, T };
-  // 硬切點：動態模糊子幀不得跨越
+  // 硬切点：动态模糊子帧不得跨越
   CUES.cuts = [0.5, 1.72, 2.86, 3.92, ...T.mingClips.slice(1).map(c => c[0]), T.stage[0], T.wall[0]];
   window.__camTrace = (dt = 0.01) => { const out = []; let prev = null; for (let t = 0; t <= DUR; t += dt) { const c = camState(t); if (prev) { const v = Math.hypot(c.pos[0] - prev.pos[0], c.pos[1] - prev.pos[1], c.pos[2] - prev.pos[2]) / dt; const w = Math.hypot(c.yaw - prev.yaw, c.pitch - prev.pitch) / dt; out.push([+t.toFixed(2), +v.toFixed(3), +w.toFixed(3), +c.fov.toFixed(2)]); } prev = c; } return out; };
   await renderFrame(0);

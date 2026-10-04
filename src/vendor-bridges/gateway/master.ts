@@ -1,11 +1,11 @@
-// B6（2026-08-31）母帶檢查+導出閘 — REQ-EDIT-07 聚合收尾。
-// check = 時長/解析度/畫幅 + B4 lint must + B5 mix sync_errors 聚合；blockers 非空拒導。
-// 導出 = concat（trim→變速→scale/pad 畫幅→clip.filter 調色）+ mix.wav 音軌 + 字幕 ASS 燒錄（失敗自動降級重試）
-//   + 封面幀 + probeRenderedVideo 強校驗（輪子：composeEngine probeRenderedVideo；解析度口徑 EXPORT_RESOLUTIONS）。
-// 2026-09-15 補三項（AID 產品層對稱差，見 ./material-fingerprint.ts 檔頭）：
-//   check 加素材 URL 結構守衛（blocker source="url"）；export 回填素材集合 fingerprint。
-//   複用邏輯待接持久層（本片只算指紋，不跨次調用複用）。
-// 妥協（誠實 notes）：xfade 轉場 v1 不燒錄（transitionAfter 留給前端 composeEngine 渲染）；mix 響度不達標不是 blocker（POST /timeline/mix loudnorm 可矯正）。
+// B6（2026-08-31）母带检查+导出闸 — REQ-EDIT-07 聚合收尾。
+// check = 时长/解析度/画幅 + B4 lint must + B5 mix sync_errors 聚合；blockers 非空拒导。
+// 导出 = concat（trim→变速→scale/pad 画幅→clip.filter 调色）+ mix.wav 音轨 + 字幕 ASS 烧录（失败自动降级重试）
+//   + 封面帧 + probeRenderedVideo 强校验（轮子：composeEngine probeRenderedVideo；解析度口径 EXPORT_RESOLUTIONS）。
+// 2026-09-15 补三项（AID 产品层对称差，见 ./material-fingerprint.ts 档头）：
+//   check 加素材 URL 结构守卫（blocker source="url"）；export 回填素材集合 fingerprint。
+//   复用逻辑待接持久层（本片只算指纹，不跨次调用复用）。
+// 妥协（诚实 notes）：xfade 转场 v1 不烧录（transitionAfter 留给前端 composeEngine 渲染）；mix 响度不达标不是 blocker（POST /timeline/mix loudnorm 可矫正）。
 import { mkdir, rm, writeFile, access } from "node:fs/promises"
 import path from "node:path"
 import { getTimeline, totalDurationSec, clipLength, TimelineValidationError, type Timeline, type TimelineClip } from "./timeline"
@@ -30,7 +30,7 @@ async function run(cmd: string, timeoutMs = 600_000): Promise<CommandResult> {
   return invoke<CommandResult>("execute_command", { command: cmd, timeoutMs }).catch(() => ({ stdout: "", stderr: "", exit_code: 1 }) as CommandResult)
 }
 
-/** 導出預設（解析度口徑對齊 EXPORT_RESOLUTIONS 1080p；影院 2.39:1 = 1920x804 偶數近似 2.388:1） */
+/** 导出预设（解析度口径对齐 EXPORT_RESOLUTIONS 1080p；影院 2.39:1 = 1920x804 偶数近似 2.388:1） */
 export const MASTER_PRESETS = {
   portrait_916: { label: "竖版 9:16", aspect: "9:16", w: 1080, h: 1920 },
   landscape_169: { label: "横版 16:9", aspect: "16:9", w: 1920, h: 1080 },
@@ -63,7 +63,7 @@ async function probeVideoSize(ffmpeg: string, p: string): Promise<{ width: numbe
   return m ? { width: Number(m[1]), height: Number(m[2]) } : null
 }
 
-/** GET /agent/v1/timeline/master：母帶檢查報告（只檢查不導出）。 */
+/** GET /agent/v1/timeline/master：母带检查报告（只检查不导出）。 */
 export async function masterCheck(sessionId: string): Promise<MasterCheck> {
   const tl = await getTimeline(sessionId)
   const total = totalDurationSec(tl)
@@ -73,20 +73,20 @@ export async function masterCheck(sessionId: string): Promise<MasterCheck> {
   const lint = await lintTimeline(sessionId)
   const lintMust = lint.issues.filter((i) => i.severity === "must")
   for (const i of lintMust) blockers.push({ source: "lint", detail: `must ${i.type} @ ${i.clip_id}（${i.evidence.slice(0, 120)}）→ ${i.fix_hint}` })
-  if (lint.issues.some((i) => i.severity === "should")) notes.push(`should 級 ${lint.issues.filter((i) => i.severity === "should").length} 條不擋導出，明細見 /timeline/lint`)
+  if (lint.issues.some((i) => i.severity === "should")) notes.push(`should 级 ${lint.issues.filter((i) => i.severity === "should").length} 条不挡导出，明细见 /timeline/lint`)
 
   const mix = await analyzeMix(sessionId)
   for (const e of mix.sync_errors) blockers.push({ source: "mix", detail: `sync_errors: ${e.clip_id} ${e.type} ${e.detail}` })
-  if (mix.sync_errors.length) notes.push("mix sync_errors 會同樣攔下導出；先按 clip_id 修時間線")
+  if (mix.sync_errors.length) notes.push("mix sync_errors 会同样拦下导出；先按 clip_id 修时间线")
   if (!mix.compliant && !mix.sync_errors.length && mix.measured.integrated_lufs !== null) {
-    notes.push(`raw 響度未達 -16 LUFS（實測 ${mix.measured.integrated_lufs}）：不是 blocker，POST /timeline/mix loudnorm 兩遍法可矯正`)
+    notes.push(`raw 响度未达 -16 LUFS（实测 ${mix.measured.integrated_lufs}）：不是 blocker，POST /timeline/mix loudnorm 两遍法可矫正`)
   }
 
-  if (!tl.clips.length) blockers.push({ source: "timeline", detail: "時間線無視頻 clip，無母帶可導出" })
-  if (total <= 0) blockers.push({ source: "timeline", detail: "時間線總長為 0" })
+  if (!tl.clips.length) blockers.push({ source: "timeline", detail: "时间线无视频 clip，无母带可导出" })
+  if (total <= 0) blockers.push({ source: "timeline", detail: "时间线总长为 0" })
 
-  // 素材 URL 結構守衛（AID MaterialUrlGuard 口徑）：blob:/data:/嵌套協議/非 http(s) 一律拒導。
-  // 零 I/O 快檢，不觸網；本地相對路徑合法（可達性由導出級 resolveSource 決定）。
+  // 素材 URL 结构守卫（AID MaterialUrlGuard 口径）：blob:/data:/嵌套协议/非 http(s) 一律拒导。
+  // 零 I/O 快检，不触网；本地相对路径合法（可达性由导出级 resolveSource 决定）。
   const urlTargets: { label: string; url: string | undefined | null }[] = [
     ...tl.clips.map((c) => ({ label: `clip ${c.id}`, url: c.path })),
     ...tl.audioClips.map((a) => ({ label: `audioClip ${a.id}`, url: a.path })),
@@ -94,22 +94,22 @@ export async function masterCheck(sessionId: string): Promise<MasterCheck> {
   ]
   for (const t of urlTargets) {
     if (isForbiddenMaterialUrl(t.url ?? "")) {
-      blockers.push({ source: "url", detail: `${t.label} 素材地址結構非法：${String(t.url).slice(0, 160)}（blob:/data:/嵌套協議/非 http(s) 服務端無法訪問，請改用已上傳的素材地址）` })
+      blockers.push({ source: "url", detail: `${t.label} 素材地址结构非法：${String(t.url).slice(0, 160)}（blob:/data:/嵌套协议/非 http(s) 服务端无法访问，请改用已上传的素材地址）` })
     }
   }
 
-  // 首個可達視頻源解析度（檢查級不強制下載；http 素材在導出級才解析）
+  // 首个可达视频源解析度（检查级不强制下载；http 素材在导出级才解析）
   let video_resolution: { width: number; height: number } | null = null
   const ffmpeg = await detectFfmpeg()
   if (ffmpeg) {
     for (const c of tl.clips) {
-      if (/^https?:\/\//.test(c.path)) { notes.push(`clip ${c.id} 為 http 素材，檢查級不下載；導出級解析`); continue }
+      if (/^https?:\/\//.test(c.path)) { notes.push(`clip ${c.id} 为 http 素材，检查级不下载；导出级解析`); continue }
       video_resolution = await probeVideoSize(ffmpeg, c.path).catch(() => null)
       if (video_resolution) break
-      notes.push(`clip ${c.id} 源不可讀（${c.path.slice(0, 80)}）`)
+      notes.push(`clip ${c.id} 源不可读（${c.path.slice(0, 80)}）`)
     }
   } else {
-    notes.push("ffmpeg 不可用，解析度探測跳過")
+    notes.push("ffmpeg 不可用，解析度探测跳过")
   }
 
   return {
@@ -133,10 +133,10 @@ export interface MasterExportResult {
   exported: boolean
   out_path: string | null
   cover_path: string | null
-  /** G4（2026-09-17）：導出檔的公網 URL（/agent/v1/masters/<sid>/master_<preset>.mp4）。
-   *  由 index.ts 的 registerMasterExport 回填——檔案落盤即存在，與索引登記成敗無關。 */
+  /** G4（2026-09-17）：导出档的公网 URL（/agent/v1/masters/<sid>/master_<preset>.mp4）。
+   *  由 index.ts 的 registerMasterExport 回填——档案落盘即存在，与索引登记成败无关。 */
   public_url: string | null
-  /** G4：控制面索引行 id（/v1/internal/masters/ingest 回傳 artifact_id）；登記失敗/重放命中時 null。 */
+  /** G4：控制面索引行 id（/v1/internal/masters/ingest 回传 artifact_id）；登记失败/重放命中时 null。 */
   master_artifact_id: string | null
   preset: { id: string; label: string; aspect: string; width: number; height: number }
   probe: { codec: string; width: number; height: number; duration_sec: number; size: number } | null
@@ -144,9 +144,9 @@ export interface MasterExportResult {
   expected_duration_sec: number
   probe_error: string | null
   notes: string[]
-  /** 素材集合指紋（sha256 hex）：素材沒變則指紋不變。複用判定待接持久層，見 masterExport 檔頭。 */
+  /** 素材集合指纹（sha256 hex）：素材没变则指纹不变。复用判定待接持久层，见 masterExport 档头。 */
   fingerprint?: string
-  /** 跨次調用複用標記：本片恆 undefined（無持久層，只算指紋不回填）。 */
+  /** 跨次调用复用标记：本片恒 undefined（无持久层，只算指纹不回填）。 */
   reused?: boolean
 }
 
@@ -163,26 +163,26 @@ function clipChain(c: TimelineClip, idx: number, w: number, h: number): string {
 }
 
 /**
- * POST /agent/v1/timeline/master：導出閘（blockers 非空拋 TimelineValidationError → 400）。
+ * POST /agent/v1/timeline/master：导出闸（blockers 非空抛 TimelineValidationError → 400）。
  *
- * 導出指紋（2026-09-15，AID `computeExportFingerprint` 口徑）：本函式計算並回填 `fingerprint`。
- * **複用邏輯待接持久層**——跨次調用「指紋相同且上次成功 → 直接複用不再合成不再扣費」需要一個
- * 持久化的 fingerprint→成功產物 映射（AID 落在 `aid_episode_editor.export_fingerprint`），
- * 本片不實作；`reused` 恆為 undefined。
+ * 导出指纹（2026-09-15，AID `computeExportFingerprint` 口径）：本函式计算并回填 `fingerprint`。
+ * **复用逻辑待接持久层**——跨次调用「指纹相同且上次成功 → 直接复用不再合成不再扣费」需要一个
+ * 持久化的 fingerprint→成功产物 映射（AID 落在 `aid_episode_editor.export_fingerprint`），
+ * 本片不实作；`reused` 恒为 undefined。
  */
 export async function masterExport(sessionId: string, presetId: MasterPresetId = "landscape_169", withCover = true): Promise<MasterExportResult> {
   const check = await masterCheck(sessionId)
   if (!check.ok) {
-    throw new TimelineValidationError(`導出被閘門攔下（blockers ${check.blockers.length} 條，先修再導）：` + JSON.stringify(check.blockers))
+    throw new TimelineValidationError(`导出被闸门拦下（blockers ${check.blockers.length} 条，先修再导）：` + JSON.stringify(check.blockers))
   }
   const notes = [...check.notes]
   const tl: Timeline = await getTimeline(sessionId)
   const preset = MASTER_PRESETS[presetId]
   const ffmpeg = await detectFfmpeg()
-  if (!ffmpeg) throw new TimelineValidationError("ffmpeg 不可用，無法導出")
+  if (!ffmpeg) throw new TimelineValidationError("ffmpeg 不可用，无法导出")
 
-  // 素材集合指紋（純計算，零 I/O）：clips 保序（拼接順序即語義）；durationSec 取時間線有效時長
-  // clipLength（含 trim/變速），比源檔總長更貼近實際入片素材。
+  // 素材集合指纹（纯计算，零 I/O）：clips 保序（拼接顺序即语义）；durationSec 取时间线有效时长
+  // clipLength（含 trim/变速），比源档总长更贴近实际入片素材。
   const fingerprint = computeExportFingerprint({
     clips: tl.clips.map((c) => ({ path: c.path, durationSec: clipLength(c) })),
     audioClips: (tl.audioClips ?? []).map((a) => ({ path: a.path, durationSec: a.duration, startSec: a.startSec })),
@@ -192,7 +192,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     presetId,
   })
 
-  // 素材解析（複用 mix.resolveSource：本地直用、http 下載到 tmp），失敗=誠實拒導
+  // 素材解析（复用 mix.resolveSource：本地直用、http 下载到 tmp），失败=诚实拒导
   const workDir = path.join(TMP_DIR, `master-${Date.now()}`)
   await mkdir(workDir, { recursive: true })
   try {
@@ -203,7 +203,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     for (const c of tl.clips) {
       const ext = (c.path.split("?")[0].split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "") || "mp4"
       const s = await resolveSource(c.path, idx, ext)
-      if (!s) throw new TimelineValidationError(`clip ${c.id} 素材不可達：${c.path.slice(0, 120)}`)
+      if (!s) throw new TimelineValidationError(`clip ${c.id} 素材不可达：${c.path.slice(0, 120)}`)
       inputs.push(`-i ${shq(s.path)}`)
       chains.push(clipChain(c, idx, preset.w, preset.h))
       srcByClip.push({ clip: c, path: s.path })
@@ -212,15 +212,15 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     const expectedDur = tl.clips.reduce((acc, c) => acc + clipLength(c), 0)
     const outDur = Math.max(0.1, expectedDur).toFixed(3)
 
-    // 視頻側：concat（v1 妥協：xfade 不燒錄）
+    // 视频侧：concat（v1 妥协：xfade 不烧录）
     const transitions = tl.clips.filter((c) => c.transitionAfter && c.transitionAfter.type !== "cut" && c.transitionAfter.type !== "fade").length
-    if (transitions) notes.push(`${transitions} 處轉場 v1 未燒錄（transitionAfter 留給前端 composeEngine 渲染，母帶為硬切拼接）`)
+    if (transitions) notes.push(`${transitions} 处转场 v1 未烧录（transitionAfter 留给前端 composeEngine 渲染，母带为硬切拼接）`)
     let fc = chains.join(";") + ";"
     fc += tl.clips.map((_, i) => `[v${i}]`).join("") + `concat=n=${tl.clips.length}:v=1:a=0[vcat]`
-    // 視頻側不能用 apad（純音頻濾鏡，接到視頻 pad 上=media type mismatch）；時長帽用 trim=duration
+    // 视频侧不能用 apad（纯音频滤镜，接到视频 pad 上=media type mismatch）；时长帽用 trim=duration
     fc += `;[vcat]trim=duration=${outDur},setpts=PTS-STARTPTS[vmain]`
 
-    // 字幕燒錄（ASS 落檔；濾鏡失敗自動降級重試不燒錄）
+    // 字幕烧录（ASS 落档；滤镜失败自动降级重试不烧录）
     const ass = subtitlesAss(tl)
     let burnSub = false
     let assFile: string | null = null
@@ -230,7 +230,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       burnSub = true
     }
 
-    // 音頻側：mix.wav 若存在則掛音軌
+    // 音频侧：mix.wav 若存在则挂音轨
     const mixPath = path.join(WORKSPACE_DIR, "timelines", sessionId, "mix.wav")
     let hasAudio = false
     if (await access(mixPath).then(() => true).catch(() => false)) {
@@ -238,7 +238,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       fc += `;[${idx}:a]apad,atrim=0:${outDur},asetpts=PTS-STARTPTS[amain]`
       hasAudio = true
     } else {
-      notes.push("mix.wav 不存在：母帶無音軌（先跑 timeline_mix apply=true 再導出可帶混音）")
+      notes.push("mix.wav 不存在：母带无音轨（先跑 timeline_mix apply=true 再导出可带混音）")
     }
 
     const outPath = path.join(WORKSPACE_DIR, "timelines", sessionId, `master_${presetId}.mp4`)
@@ -248,28 +248,28 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
         : fc + ";[vmain]null[vout]"
       const fcFile = path.join(workDir, "filtergraph.txt")
       await writeFile(fcFile, fcFinal)
-      // 單輸出檔：兩個 -map（視頻+音頻）都歸它，無 B5 雙輸出的逐檔 map 問題；fc 一律 -filter_complex_script 落檔傳遞
+      // 单输出档：两个 -map（视频+音频）都归它，无 B5 双输出的逐档 map 问题；fc 一律 -filter_complex_script 落档传递
       const cmd = `${ffmpeg} -y -hide_banner -loglevel error ${inputs.join(" ")} -filter_complex_script ${shq(fcFile)} -map "[vout]"${hasAudio ? ` -map "[amain]"` : ""} -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -movflags +faststart${hasAudio ? " -c:a aac -b:a 192k" : ""} ${shq(outPath)}`
       return run(cmd, 600_000)
     }
     let r = await doRender(burnSub)
     if (r.exit_code !== 0 && burnSub) {
-      notes.push(`字幕燒錄失敗（${(r.stderr || "").slice(-160).trim()}），自動降級為不燒錄重渲`)
+      notes.push(`字幕烧录失败（${(r.stderr || "").slice(-160).trim()}），自动降级为不烧录重渲`)
       r = await doRender(false)
     }
     if (r.exit_code !== 0) {
-      throw new TimelineValidationError(`母帶渲染失敗：${(r.stderr || "unknown").slice(-400)}`)
+      throw new TimelineValidationError(`母带渲染失败：${(r.stderr || "unknown").slice(-400)}`)
     }
 
-    // 封面幀
+    // 封面帧
     let coverPath: string | null = null
     if (withCover) {
       coverPath = path.join(WORKSPACE_DIR, "timelines", sessionId, `master_${presetId}_cover.jpg`)
       const rc = await run(`${ffmpeg} -y -hide_banner -loglevel error -i ${shq(outPath)} -map 0:v:0 -frames:v 1 -q:v 3 ${shq(coverPath)}`, 60_000)
-      if (rc.exit_code !== 0) { notes.push("封面幀提取失敗（不擋交付）"); coverPath = null }
+      if (rc.exit_code !== 0) { notes.push("封面帧提取失败（不挡交付）"); coverPath = null }
     }
 
-    // probeRenderedVideo 強校驗（輪子）：容器/解析度/時長/首幀解碼全門
+    // probeRenderedVideo 强校验（轮子）：容器/解析度/时长/首帧解码全门
     let probe: MasterExportResult["probe"] = null
     let probe_error: string | null = null
     try {
@@ -283,7 +283,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       probe = { codec: p.codecName, width: p.width, height: p.height, duration_sec: r3(p.durationSec), size: p.size }
     } catch (e) {
       probe_error = (e as Error).message
-      notes.push(`probeRenderedVideo 校驗未過：${probe_error}`)
+      notes.push(`probeRenderedVideo 校验未过：${probe_error}`)
     }
 
     return {

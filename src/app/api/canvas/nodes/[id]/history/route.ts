@@ -1,7 +1,7 @@
-// 節點版本歷史：GET /api/canvas/nodes/[id]/history?projectId=...
+// 节点版本历史：GET /api/canvas/nodes/[id]/history?projectId=...
 //
-// 認證：requireVerifiedUser（同 /api/canvas/projects；只讀自己的專案）。
-// 回傳該節點的版本清單（升序）＋當前快照指標（含軟刪狀態），供版本面板/回退確認用。
+// 认证：requireVerifiedUser（同 /api/canvas/projects；只读自己的专案）。
+// 回传该节点的版本清单（升序）＋当前快照指标（含软删状态），供版本面板/回退确认用。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { readCanvasProject } from "@/lib/canvas/project-store";
@@ -9,9 +9,9 @@ import { listNodeVersions } from "@/lib/canvas/node-versions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** Next 15 的動態段是異步的，params 必須 await。 */
+/** Next 15 的动态段是异步的，params 必须 await。 */
 type RouteContext = { params: Promise<{ id: string }> };
 
 function fail(status: number, message: string, code: string): NextResponse {
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
         success: true,
         nodeId: id,
         projectId,
-        // 軟刪狀態（deletedAt 有值＝在垃圾桶裡，可 restore 後再回退）。
+        // 软删状态（deletedAt 有值＝在垃圾桶里，可 restore 后再回退）。
         deletedAt: node.deletedAt ?? null,
         current: { title: node.title, metadata: node.metadata ?? {} },
         versions,

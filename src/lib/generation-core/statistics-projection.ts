@@ -1,27 +1,27 @@
-// 管理側統計視圖的只讀投影層（PRD REQ-C2「Statistics 統計視圖」）。
+// 管理侧统计视图的只读投影层（PRD REQ-C2「Statistics 统计视图」）。
 //
-// 斷頭台紀律（本檔存在的理由）：這裡的每一個數字都必須能指回一條真實記錄——
-// 消費/用量指回 `billing_operation` 的**淨額**（operation='commit' 的 applied 行
-// 減 operation='refund' 的 applied 行，同窗口逐 job 相抵——退款是另一筆 operation，
-// 只看 commit 就是把已退的錢算成消耗）；
-// 渠道歸因指回 `generation_attempt`（delivered 的那次嘗試）→ `supplier`；
-// 渠道判活指回 `supplier_capability` / `supplier` / `supplier_account`（與
-// `supplier-health-signal.ts` 同一把尺）；剩餘額度指回 new-api `users.quota`
-// （`fetchGatewayUser`，與 quota-precheck 的生產讀法同源）。
+// 断头台纪律（本档存在的理由）：这里的每一个数字都必须能指回一条真实记录——
+// 消费/用量指回 `billing_operation` 的**净额**（operation='commit' 的 applied 行
+// 减 operation='refund' 的 applied 行，同窗口逐 job 相抵——退款是另一笔 operation，
+// 只看 commit 就是把已退的钱算成消耗）；
+// 渠道归因指回 `generation_attempt`（delivered 的那次尝试）→ `supplier`；
+// 渠道判活指回 `supplier_capability` / `supplier` / `supplier_account`（与
+// `supplier-health-signal.ts` 同一把尺）；剩余额度指回 new-api `users.quota`
+// （`fetchGatewayUser`，与 quota-precheck 的生产读法同源）。
 //
-// 四條禁令（違反 = 假報表）：
-// 1. 無事件源的數字不畫：沒有帳本行的日子就是「沒有記錄」，不補 0 曲線；
-//    沒有 capability 行的渠道就是 unknown，不猜測健康。
-// 2. 樣本不足不畫 0：比率樣本 < MIN_RATE_SAMPLES 時回 `insufficient`，
-//    展示層畫「資料不足」而不是 0%——0% 是一句假話。
-// 3. 只讀：本檔一條 INSERT / UPDATE / DELETE 都沒有（有具名測試守門）。
-// 4. **截斷必須可見**（本刀新增）：帳本掃描、身份讀取、金額解析三處都有上限／
-//    異常值——取滿、超上限、金額非有限值一律如實標記（partial / truncated /
-//    skipped），不許把「部分之和」畫成全量，也不許把非有限值靜默當 0 再算一筆。
+// 四条禁令（违反 = 假报表）：
+// 1. 无事件源的数字不画：没有帐本行的日子就是「没有记录」，不补 0 曲线；
+//    没有 capability 行的渠道就是 unknown，不猜测健康。
+// 2. 样本不足不画 0：比率样本 < MIN_RATE_SAMPLES 时回 `insufficient`，
+//    展示层画「资料不足」而不是 0%——0% 是一句假话。
+// 3. 只读：本档一条 INSERT / UPDATE / DELETE 都没有（有具名测试守门）。
+// 4. **截断必须可见**（本刀新增）：帐本扫描、身份读取、金额解析三处都有上限／
+//    异常值——取满、超上限、金额非有限值一律如实标记（partial / truncated /
+//    skipped），不许把「部分之和」画成全量，也不许把非有限值静默当 0 再算一笔。
 //
-// 順帶說明為何不重算「健康分」：scheduler 判活的尺只有「能不能調度」
-// （enabled + health_status <> disabled + 未冷卻），沒有任何連續評分。
-// 自己造一個 0-100 健康分就是自造健康度，故只回三態 + 真實計數器原值。
+// 顺带说明为何不重算「健康分」：scheduler 判活的尺只有「能不能调度」
+// （enabled + health_status <> disabled + 未冷却），没有任何连续评分。
+// 自己造一个 0-100 健康分就是自造健康度，故只回三态 + 真实计数器原值。
 
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import {
@@ -33,60 +33,60 @@ import { readFunnelAttribution } from "@/lib/user-attribution";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./database";
 import { USAGE_ASSET_KIND_LABELS, usageAssetKindForJobKind, type UsageAssetKind } from "./usage-asset-kind";
 
-/** 比率的最小樣本門檻：與 routing-telemetry 的 latencyP80（<3 樣本回 null）同一把尺。 */
+/** 比率的最小样本门槛：与 routing-telemetry 的 latencyP80（<3 样本回 null）同一把尺。 */
 export const MIN_RATE_SAMPLES = 3;
-/** 每個聚合桶最多帶回幾條帳本行 id（供「數字→記錄」對照，不是全量）。 */
+/** 每个聚合桶最多带回几条帐本行 id（供「数字→记录」对照，不是全量）。 */
 export const RECORD_SAMPLE_LIMIT = 5;
-/** 「每日」的日界時區：業務在 CST，UTC 日界會把晚間消耗切到前一天。 */
+/** 「每日」的日界时区：业务在 CST，UTC 日界会把晚间消耗切到前一天。 */
 export const STATISTICS_DAY_TIMEZONE = "Asia/Shanghai";
 export const DEFAULT_WINDOW_DAYS = 7;
 export const MAX_WINDOW_DAYS = 30;
-/** 帳本掃描上限；取滿即標 partial（總數變下界，必須如實說）。 */
+/** 帐本扫描上限；取满即标 partial（总数变下界，必须如实说）。 */
 export const LEDGER_ROW_LIMIT = 5_000;
-/** 剩餘額度讀取上限（每個用戶一次上游 GET，避免統計頁打爆 new-api）；超上限必須標 truncated。 */
+/** 剩余额度读取上限（每个用户一次上游 GET，避免统计页打爆 new-api）；超上限必须标 truncated。 */
 export const MAX_QUOTA_USERS = 25;
-/** 激活漏斗時間窗（天）。 */
+/** 激活漏斗时间窗（天）。 */
 export const FUNNEL_WINDOW_OPTIONS = [7, 30] as const;
 export const DEFAULT_FUNNEL_DAYS = 30;
-/** 回訪判定：首次生成日之後 1..RETURN_WINDOW_DAYS 個自然日內另有一天有生成。 */
+/** 回访判定：首次生成日之后 1..RETURN_WINDOW_DAYS 个自然日内另有一天有生成。 */
 export const RETURN_WINDOW_DAYS = 7;
-/** 漏斗取任務行的上限；取滿即標 truncated（後續步驟變下界）。 */
+/** 漏斗取任务行的上限；取满即标 truncated（后续步骤变下界）。 */
 export const FUNNEL_JOB_ROW_LIMIT = 20_000;
 
-/** 帳本 operation：commit＝扣費（正向），refund＝退款（同一 job 的負向，用來抵消費）。 */
+/** 帐本 operation：commit＝扣费（正向），refund＝退款（同一 job 的负向，用来抵消费）。 */
 export type LedgerOperationKind = "commit" | "refund";
 
-/** quota 單位 → 幣（與 task-response.resolveTaskCostCoins 同一匯率與精度）。 */
+/** quota 单位 → 币（与 task-response.resolveTaskCostCoins 同一汇率与精度）。 */
 export function quotaToCoins(quota: number): number {
   return Math.round((quota / QUOTA_PER_COIN) * 1e6) / 1e6;
 }
 
-/** 一條帳本消費行（billing_operation commit/refund applied，已 join 完模型與渠道）。 */
+/** 一条帐本消费行（billing_operation commit/refund applied，已 join 完模型与渠道）。 */
 export interface LedgerConsumptionRow {
   operationId: string;
   jobId: string;
   modelId: string;
   billingUserId: number | null;
-  /** delivered 那次嘗試的供應商 id；無成功嘗試 → null（未歸因，不猜）。 */
+  /** delivered 那次尝试的供应商 id；无成功尝试 → null（未归因，不猜）。 */
   channelId: string | null;
   channelLabel: string | null;
-  /** 帳本行原值（一律 >= 0）；方向由 `kind` 決定，refund 是負向。 */
+  /** 帐本行原值（一律 >= 0）；方向由 `kind` 决定，refund 是负向。 */
   amountQuota: number;
-  /** 帳本 operation：commit＝扣費，refund＝退款（同窗口同 job 相減）。 */
+  /** 帐本 operation：commit＝扣费，refund＝退款（同窗口同 job 相减）。 */
   kind: LedgerOperationKind;
   appliedAt: string;
   /** 已按 STATISTICS_DAY_TIMEZONE 切好的日界（YYYY-MM-DD）。 */
   day: string;
-  /** `generation_job.kind` 原值（`image_generate`／`image_edit`／`video_generate`）；缺欄＝null。 */
+  /** `generation_job.kind` 原值（`image_generate`／`image_edit`／`video_generate`）；缺栏＝null。 */
   jobKind?: string | null;
   /**
-   * 生成物類別（P2-2／D8b）：由 `jobKind` 判得，**不猜**（判不出來＝`unclassified`）。
-   * 真源與判準見 `usage-asset-kind.ts` 的檔頭（含「D8b 的角色/場景/道具目前無落盤事實」的誠實邊界）。
+   * 生成物类别（P2-2／D8b）：由 `jobKind` 判得，**不猜**（判不出来＝`unclassified`）。
+   * 真源与判准见 `usage-asset-kind.ts` 的档头（含「D8b 的角色/场景/道具目前无落盘事实」的诚实边界）。
    */
   assetKind?: UsageAssetKind;
 }
 
-/** 樣本是否足夠撐起一個比率。不足時 `value` 缺席——不許拿 0 冒充。 */
+/** 样本是否足够撑起一个比率。不足时 `value` 缺席——不许拿 0 冒充。 */
 export type SampleRate =
   | { state: "ok"; samples: number; value: number }
   | { state: "insufficient"; samples: number; minimum: number };
@@ -104,26 +104,26 @@ export interface UsageBucket {
   quota: number;
   coins: number;
   operations: number;
-  /** 該桶前 RECORD_SAMPLE_LIMIT 條帳本行 id（數字→記錄對照）。 */
+  /** 该桶前 RECORD_SAMPLE_LIMIT 条帐本行 id（数字→记录对照）。 */
   recordIds: string[];
   /**
-   * 只有「按日」桶會用到：true = 這一天的窗口起點落在該日中間（半天桶，
-   * 只統計起點之後的記錄），不是一個完整日的量。標註而非對齊：見 windowStartDay。
+   * 只有「按日」桶会用到：true = 这一天的窗口起点落在该日中间（半天桶，
+   * 只统计起点之后的记录），不是一个完整日的量。标注而非对齐：见 windowStartDay。
    */
   partial?: boolean;
 }
 
 export interface ConsumptionProjection {
-  /** 淨消耗 = Σ(commit.applied) − Σ(refund.applied)（同窗口逐 job 相抵，可為負）。 */
+  /** 净消耗 = Σ(commit.applied) − Σ(refund.applied)（同窗口逐 job 相抵，可为负）。 */
   totalQuota: number;
   totalCoins: number;
-  /** 計入的帳本行數（commit + refund；金額非有限值的行已跳過、不計）。 */
+  /** 计入的帐本行数（commit + refund；金额非有限值的行已跳过、不计）。 */
   operations: number;
-  /** 扣費總額（Σ commit.applied）——淨額的減項來源，單列供對帳。 */
+  /** 扣费总额（Σ commit.applied）——净额的减项来源，单列供对帐。 */
   chargedQuota: number;
   chargedCoins: number;
   chargedOperations: number;
-  /** 已退款總額（Σ refund.applied，正數）。 */
+  /** 已退款总额（Σ refund.applied，正数）。 */
   refundedQuota: number;
   refundedCoins: number;
   refundedOperations: number;
@@ -131,35 +131,35 @@ export interface ConsumptionProjection {
   byModel: UsageBucket[];
   byChannel: UsageBucket[];
   /**
-   * 生成物類別切面（P2-2／D8b）：分鏡影片／一般圖片／未歸類。
-   * **誠實邊界**：D8b 的角色／場景／道具在提交端尚無落盤事實（見 usage-asset-kind.ts 檔頭），
-   * 因此目前不會出現這三桶——不是漏算，是還沒有可判的資料；補法是提交端把類別蓋章落盤。
-   * 零記錄的類別不出現（與其他切面同語義）。
+   * 生成物类别切面（P2-2／D8b）：分镜影片／一般图片／未归类。
+   * **诚实边界**：D8b 的角色／场景／道具在提交端尚无落盘事实（见 usage-asset-kind.ts 档头），
+   * 因此目前不会出现这三桶——不是漏算，是还没有可判的资料；补法是提交端把类别盖章落盘。
+   * 零记录的类别不出现（与其他切面同语义）。
    */
   byAssetKind: UsageBucket[];
-  /** 帳本有行但找不到 delivered 嘗試的淨消耗——如實單列，不攤進任何渠道。 */
+  /** 帐本有行但找不到 delivered 尝试的净消耗——如实单列，不摊进任何渠道。 */
   unattributed: { quota: number; coins: number; operations: number; recordIds: string[] };
-  /** 退款單列（不攤進任何消耗桶、不落「未歸因」）：口徑變了，數字才能對上帳本。 */
+  /** 退款单列（不摊进任何消耗桶、不落「未归因」）：口径变了，数字才能对上帐本。 */
   refunded: RefundedBucket;
-  /** 金額非有限值而被跳過的帳本行數（不當 0 計、不冒充一筆 operation）。 */
+  /** 金额非有限值而被跳过的帐本行数（不当 0 计、不冒充一笔 operation）。 */
   skippedNonFiniteRows: number;
 }
 
 /**
- * 已退款單列桶：退款是**另一筆** operation，不是消耗的一部分。
- * 全額退款的 job（同窗口扣費與退款相抵為 0）整個從消耗桶移出，只在這裡留痕＋帳本行 id。
+ * 已退款单列桶：退款是**另一笔** operation，不是消耗的一部分。
+ * 全额退款的 job（同窗口扣费与退款相抵为 0）整个从消耗桶移出，只在这里留痕＋帐本行 id。
  */
 export interface RefundedBucket {
-  /** Σ refund.applied（正數，單位 quota）。 */
+  /** Σ refund.applied（正数，单位 quota）。 */
   quota: number;
   coins: number;
-  /** 退款帳本行數。 */
+  /** 退款帐本行数。 */
   operations: number;
-  /** 涉及的 job 數。 */
+  /** 涉及的 job 数。 */
   jobs: number;
-  /** 同窗口扣費與退款相抵為 0 的 job 數（全額退款）。 */
+  /** 同窗口扣费与退款相抵为 0 的 job 数（全额退款）。 */
   fullyRefundedJobs: number;
-  /** 這些相抵為 0 的 job 的帳本行數（不進任何消耗桶，計在已退款桶）。 */
+  /** 这些相抵为 0 的 job 的帐本行数（不进任何消耗桶，计在已退款桶）。 */
   netZeroRows: number;
   recordIds: string[];
 }
@@ -170,7 +170,7 @@ interface BucketAccumulator {
   recordIds: string[];
 }
 
-/** 同一個 job 的帳本行歸一組：淨額＝組內 commit 之和 − refund 之和。 */
+/** 同一个 job 的帐本行归一组：净额＝组内 commit 之和 − refund 之和。 */
 interface JobLedgerGroup {
   rows: LedgerConsumptionRow[];
   chargedQuota: number;
@@ -178,8 +178,8 @@ interface JobLedgerGroup {
 }
 
 /**
- * 把一組（一個 job）的淨額記進桶子：quota 只加淨額一次，帳本行數與記錄 id 逐行累加
- * （行數是「帳本有幾行」的事實，不會因為淨額為負或相抵而消失）。
+ * 把一组（一个 job）的净额记进桶子：quota 只加净额一次，帐本行数与记录 id 逐行累加
+ * （行数是「帐本有几行」的事实，不会因为净额为负或相抵而消失）。
  */
 function addGroupToBucket(
   buckets: Map<string, BucketAccumulator>,
@@ -202,8 +202,8 @@ function addGroupToBucket(
 function toBuckets(
   buckets: Map<string, BucketAccumulator>,
   /**
-   * 標籤來源：`Map`（模型/渠道，key 是動態 id）或**唯讀字面表**（類別切面，key 是封閉值域）。
-   * 只讀 `get`，兩種形狀都滿足——不必為了共用一個函式把類別表包成 Map。
+   * 标签来源：`Map`（模型/渠道，key 是动态 id）或**唯读字面表**（类别切面，key 是封闭值域）。
+   * 只读 `get`，两种形状都满足——不必为了共用一个函式把类别表包成 Map。
    */
   labels: { get(key: string): string | undefined },
 ): UsageBucket[] {
@@ -220,14 +220,14 @@ function toBuckets(
 }
 
 /**
- * 帳本行的純聚合：按日 / 按模型 / 按渠道三個切面 + 未歸因 + 已退款單列。
+ * 帐本行的纯聚合：按日 / 按模型 / 按渠道三个切面 + 未归因 + 已退款单列。
  *
- * 口徑（本刀修正 C2-1）：消耗＝**淨額**。帳本上一個 job 可能有兩筆 operation
- * （commit 扣費、refund 退款），只取 commit 會把已退的錢算成消耗。故先按 job 相抵成淨額，
- * 淨額為 0（全額退款）的 job 不進任何消耗桶、不進「未歸因」，帳本行單列進 `refunded`。
+ * 口径（本刀修正 C2-1）：消耗＝**净额**。帐本上一个 job 可能有两笔 operation
+ * （commit 扣费、refund 退款），只取 commit 会把已退的钱算成消耗。故先按 job 相抵成净额，
+ * 净额为 0（全额退款）的 job 不进任何消耗桶、不进「未归因」，帐本行单列进 `refunded`。
  *
- * 三切面的 quota 合計、以及 byChannel + unattributed，必須逐分毫不差地等於 totalQuota
- * （有具名測試逐桶驗算）。零記錄的維度不出現在結果裡——沒記錄就是沒記錄。
+ * 三切面的 quota 合计、以及 byChannel + unattributed，必须逐分毫不差地等于 totalQuota
+ * （有具名测试逐桶验算）。零记录的维度不出现在结果里——没记录就是没记录。
  */
 export function projectConsumption(
   rows: LedgerConsumptionRow[],
@@ -236,7 +236,7 @@ export function projectConsumption(
   const byDay = new Map<string, BucketAccumulator>();
   const byModel = new Map<string, BucketAccumulator>();
   const byChannel = new Map<string, BucketAccumulator>();
-  // 生成物類別（P2-2／D8b）：第三個切面，判準只在 usage-asset-kind.ts 一處。
+  // 生成物类别（P2-2／D8b）：第三个切面，判准只在 usage-asset-kind.ts 一处。
   const byAssetKind = new Map<string, BucketAccumulator>();
   const modelLabels = new Map<string, string>();
   const channelLabels = new Map<string, string>();
@@ -254,7 +254,7 @@ export function projectConsumption(
 
   const groups = new Map<string, JobLedgerGroup>();
   for (const row of rows) {
-    // 非有限金額（NaN/Infinity/DB 髒值）：跳過並記帳，不當 0 計、也不冒充一筆 operation。
+    // 非有限金额（NaN/Infinity/DB 脏值）：跳过并记帐，不当 0 计、也不冒充一笔 operation。
     if (!Number.isFinite(row.amountQuota)) {
       skippedNonFiniteRows += 1;
       continue;
@@ -281,18 +281,18 @@ export function projectConsumption(
   for (const [jobId, group] of groups) {
     const netQuota = group.chargedQuota - group.refundedQuota;
     if (netQuota === 0) {
-      // 全額退款（或兩邊相抵）：不畫成消耗、不落「未歸因」，單列已退款桶並留下帳本行 id。
+      // 全额退款（或两边相抵）：不画成消耗、不落「未归因」，单列已退款桶并留下帐本行 id。
       netZeroRows += group.rows.length;
       if (group.refundedQuota > 0) netZeroRefundedJobs.add(jobId);
       continue;
     }
-    // 歸因錨點取該 job 的扣費行（有則優先），否則退款行——日／模型切面因此仍可回溯帳本。
-    // 淨額掛在扣費行的日：退款不另佔一天（退款沒有自己的「消耗日」），只有純退款組才用退款行的日。
+    // 归因锚点取该 job 的扣费行（有则优先），否则退款行——日／模型切面因此仍可回溯帐本。
+    // 净额挂在扣费行的日：退款不另占一天（退款没有自己的「消耗日」），只有纯退款组才用退款行的日。
     const anchor = group.rows.find((row) => row.kind === "commit") ?? group.rows[0];
     addGroupToBucket(byDay, anchor.day, netQuota, group);
     addGroupToBucket(byModel, anchor.modelId, netQuota, group);
     modelLabels.set(anchor.modelId, anchor.modelId);
-    // 類別切面的錨點與日／模型同一個 job（同一組帳本行），所以三切面合計可逐桶對帳。
+    // 类别切面的锚点与日／模型同一个 job（同一组帐本行），所以三切面合计可逐桶对帐。
     const assetKind = usageAssetKindForJobKind(anchor.jobKind);
     addGroupToBucket(byAssetKind, assetKind, netQuota, group);
     if (anchor.channelId) {
@@ -326,13 +326,13 @@ export function projectConsumption(
         coins: quotaToCoins(bucket.quota),
         operations: bucket.operations,
         recordIds: bucket.recordIds,
-        // 窗口起點落在這一天中間 → 半天桶，必須標記（不許畫成完整日）。
+        // 窗口起点落在这一天中间 → 半天桶，必须标记（不许画成完整日）。
         partial: options.partialFromDay === key,
       }))
       .sort((a, b) => a.key.localeCompare(b.key)),
     byModel: toBuckets(byModel, modelLabels),
     byChannel: toBuckets(byChannel, channelLabels),
-    // 標籤走共用詞表（USAGE_ASSET_KIND_LABELS）——桶鍵即類別值域，呼叫端不必再映射。
+    // 标签走共用词表（USAGE_ASSET_KIND_LABELS）——桶键即类别值域，呼叫端不必再映射。
     byAssetKind: toBuckets(byAssetKind, { get: (key: string) => USAGE_ASSET_KIND_LABELS[key as UsageAssetKind] }),
     unattributed: {
       quota: unattributed.quota,
@@ -354,12 +354,12 @@ export function projectConsumption(
 }
 
 /**
- * 窗口起點（now − days）在業務日界下所落的日（YYYY-MM-DD）。
+ * 窗口起点（now − days）在业务日界下所落的日（YYYY-MM-DD）。
  *
- * 為什麼需要它：日界是 Asia/Shanghai 的自然日，窗口卻是滾動的 `now() - N days`，
- * 兩者唯一必然錯位的地方就是最舊那一天——它只涵蓋「起點之後」的半截。
- * 標註（byDay bucket 的 partial + notes）比強行對齊誠實：對齊會憑空砍掉半天的帳。
- * 註：這裡用應用時鐘，與 SQL 的 now() 最多差秒級；只有當兩者跨過午夜才會標錯一格。
+ * 为什么需要它：日界是 Asia/Shanghai 的自然日，窗口却是滚动的 `now() - N days`，
+ * 两者唯一必然错位的地方就是最旧那一天——它只涵盖「起点之后」的半截。
+ * 标注（byDay bucket 的 partial + notes）比强行对齐诚实：对齐会凭空砍掉半天的帐。
+ * 注：这里用应用时钟，与 SQL 的 now() 最多差秒级；只有当两者跨过午夜才会标错一格。
  */
 export function windowStartDay(input: { days: number; now: Date; dayTimezone?: string }): string {
   const timeZone = input.dayTimezone ?? STATISTICS_DAY_TIMEZONE;
@@ -374,10 +374,10 @@ export function windowStartDay(input: { days: number; now: Date; dayTimezone?: s
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
-// ── 渠道判活（三態） ─────────────────────────────────────────────────────────
-// 與 /v1/model-status 的最終裁決層同源：`readSupplierChannelHealth` 用的條件與
+// ── 渠道判活（三态） ─────────────────────────────────────────────────────────
+// 与 /v1/model-status 的最终裁决层同源：`readSupplierChannelHealth` 用的条件与
 // readSupplierHealthSignal（scheduler withHealthyAccount 的同一把尺）逐字相同，
-// 差別只在按渠道分組、且保留誠實第三態。
+// 差别只在按渠道分组、且保留诚实第三态。
 
 export type ChannelLiveness = "available" | "unavailable" | "unknown";
 
@@ -388,7 +388,7 @@ export interface ChannelHealthEntry {
   reason: string;
   capabilities: number;
   schedulableCapabilities: number;
-  /** supplier 表上的真實計數器（非推算）。 */
+  /** supplier 表上的真实计数器（非推算）。 */
   successCount: number;
   failureCount: number;
   successRate: SampleRate;
@@ -399,14 +399,14 @@ export interface ChannelHealthEntry {
 export const CHANNEL_LIVENESS_LABEL: Record<ChannelLiveness, string> = {
   available: "可用",
   unavailable: "不可用",
-  unknown: "無法判定",
+  unknown: "无法判定",
 };
 
 /**
- * 三態判定只看兩件事：有沒有能力記錄、能不能調度。
- * - 沒有任何當前生效能力 → unknown（帳本無據可判，絕不折疊成「不可用」或「健康」）；
- * - 有能力但一個都調度不了 → unavailable；
- * - 至少一條可調度 → available。
+ * 三态判定只看两件事：有没有能力记录、能不能调度。
+ * - 没有任何当前生效能力 → unknown（帐本无据可判，绝不折叠成「不可用」或「健康」）；
+ * - 有能力但一个都调度不了 → unavailable；
+ * - 至少一条可调度 → available。
  */
 export function channelLivenessOf(row: {
   capabilities: number;
@@ -445,7 +445,7 @@ export function projectChannelHealth(rows: SupplierChannelHealthRow[]): ChannelH
     });
 }
 
-// ── 剩餘額度 ────────────────────────────────────────────────────────────────
+// ── 剩余额度 ────────────────────────────────────────────────────────────────
 
 export type QuotaState = "known" | "unknown";
 
@@ -458,17 +458,17 @@ export interface RemainingQuotaEntry {
 }
 
 /**
- * 覆蓋率：剩餘額度合計**只是被讀到的那幾個身份之和**（每個身份一次上游 GET，有硬上限）。
- * 身份數超過上限時 truncated=true，展示層必須標出來——把部分之和畫成全量就是假數字。
+ * 覆盖率：剩余额度合计**只是被读到的那几个身份之和**（每个身份一次上游 GET，有硬上限）。
+ * 身份数超过上限时 truncated=true，展示层必须标出来——把部分之和画成全量就是假数字。
  */
 export interface QuotaCoverage {
-  /** 讀取上限（MAX_QUOTA_USERS）。 */
+  /** 读取上限（MAX_QUOTA_USERS）。 */
   limit: number;
-  /** 實際嘗試讀取的身份數（= entries.length，含 unknown）。 */
+  /** 实际尝试读取的身份数（= entries.length，含 unknown）。 */
   coveredCount: number;
-  /** 窗口內全部付費身份數（帳本 count，不是樣本）。 */
+  /** 窗口内全部付费身份数（帐本 count，不是样本）。 */
   totalIdentities: number;
-  /** true = 身份數超過上限，合計只覆蓋前 coveredCount 個。 */
+  /** true = 身份数超过上限，合计只覆盖前 coveredCount 个。 */
   truncated: boolean;
 }
 
@@ -481,7 +481,7 @@ export interface RemainingQuotaProjection {
   coverage: QuotaCoverage;
 }
 
-/** 未知額度絕不當 0 加總；未知的用戶單列計數。 */
+/** 未知额度绝不当 0 加总；未知的用户单列计数。 */
 export function projectRemainingQuota(
   entries: RemainingQuotaEntry[],
   coverage?: Partial<QuotaCoverage>,
@@ -500,7 +500,7 @@ export function projectRemainingQuota(
       limit: coverage?.limit ?? MAX_QUOTA_USERS,
       coveredCount,
       totalIdentities,
-      // 呼叫方說截斷，或帳本裡的身份數多於實際讀取的數量——兩種都算截斷。
+      // 呼叫方说截断，或帐本里的身份数多于实际读取的数量——两种都算截断。
       truncated: coverage?.truncated === true || totalIdentities > coveredCount,
     },
   };
@@ -512,51 +512,51 @@ export interface StatisticsSourceRow {
   note: string;
 }
 
-/** 每個數字指回哪張表——回報與 UI 共用同一份簽名。 */
+/** 每个数字指回哪张表——回报与 UI 共用同一份签名。 */
 export const STATISTICS_SOURCES: StatisticsSourceRow[] = [
   {
-    metric: "用量 / 每日消耗 / 模型分佈 / 渠道用量",
+    metric: "用量 / 每日消耗 / 模型分布 / 渠道用量",
     source: "billing_operation (operation IN ('commit','refund') AND status='applied') ⋈ generation_job",
-    note: "淨額口徑：同一 job 同窗口內 Σcommit − Σrefund；全額退款不計入消耗、單列「已退款」。amount 為 quota 原值（1 幣 = 500000）。",
+    note: "净额口径：同一 job 同窗口内 Σcommit − Σrefund；全额退款不计入消耗、单列「已退款」。amount 为 quota 原值（1 币 = 500000）。",
   },
   {
-    metric: "渠道歸因",
+    metric: "渠道归因",
     source: "generation_attempt (status='succeeded') → supplier",
-    note: "取該任務實際交付的那次嘗試；找不到成功嘗試的行單列「未歸因」，不攤派。",
+    note: "取该任务实际交付的那次尝试；找不到成功尝试的行单列「未归因」，不摊派。",
   },
   {
-    metric: "渠道判活（三態）",
+    metric: "渠道判活（三态）",
     source: "supplier_capability / supplier / supplier_account",
-    note: "與 scheduler 及 /v1/model-status 執行側裁決同一把尺；無能力記錄者為 unknown。",
+    note: "与 scheduler 及 /v1/model-status 执行侧裁决同一把尺；无能力记录者为 unknown。",
   },
   {
-    metric: "剩餘額度",
+    metric: "剩余额度",
     source: "new-api users.quota（GET /api/user/{id}）",
-    note: `與 quota-precheck 同通路；讀不到即 unknown，不以 0 代替。每個身份一次上游 GET，上限 ${MAX_QUOTA_USERS} 個——超過即標 truncated 並如實給出覆蓋數。`,
+    note: `与 quota-precheck 同通路；读不到即 unknown，不以 0 代替。每个身份一次上游 GET，上限 ${MAX_QUOTA_USERS} 个——超过即标 truncated 并如实给出覆盖数。`,
   },
   {
-    metric: "激活漏斗：註冊",
-    source: "new-api users.created_at（GET /api/user/ 管理分頁）",
-    note: "滾動窗口 now − 7/30 天內註冊；預設剔除 INTERNAL_USER_IDS。",
+    metric: "激活漏斗：注册",
+    source: "new-api users.created_at（GET /api/user/ 管理分页）",
+    note: "滚动窗口 now − 7/30 天内注册；预设剔除 INTERNAL_USER_IDS。",
   },
   {
-    metric: "激活漏斗：生成 / 成功 / 回訪 / 首圖耗時",
-    source: "generation_job（擁有者 = web:<uid> 或 biz_api_key.user_id）",
-    note: `回訪 = 首次生成自然日（${STATISTICS_DAY_TIMEZONE}）後 1..${RETURN_WINDOW_DAYS} 日內另有一天有生成；首圖耗時取 succeeded 任務 finished_at，分位數為最近秩（同 percentile_disc）。`,
+    metric: "激活漏斗：生成 / 成功 / 回访 / 首图耗时",
+    source: "generation_job（拥有者 = web:<uid> 或 biz_api_key.user_id）",
+    note: `回访 = 首次生成自然日（${STATISTICS_DAY_TIMEZONE}）后 1..${RETURN_WINDOW_DAYS} 日内另有一天有生成；首图耗时取 succeeded 任务 finished_at，分位数为最近秩（同 percentile_disc）。`,
   },
   {
-    metric: "激活漏斗：付費",
+    metric: "激活漏斗：付费",
     source: "account_ledger (entry_type='recharge', amount > 0)",
-    note: "排除 seed/簽到/新人禮/贈送類來源；只計註冊之後的現金入帳。漏斗付費步要求已走完回訪步，未回訪即付費的人數單列。",
+    note: "排除 seed/签到/新人礼/赠送类来源；只计注册之后的现金入帐。漏斗付费步要求已走完回访步，未回访即付费的人数单列。",
   },
   {
-    metric: "模型三態",
-    source: "GET /api/user/model-status（與 /v1/model-status 同一份判活）",
-    note: "由管理頁直接消費既有端點，不在此層重算。",
+    metric: "模型三态",
+    source: "GET /api/user/model-status（与 /v1/model-status 同一份判活）",
+    note: "由管理页直接消费既有端点，不在此层重算。",
   },
 ];
 
-// ── 查詢層（只讀） ──────────────────────────────────────────────────────────
+// ── 查询层（只读） ──────────────────────────────────────────────────────────
 
 function mapConsumptionRow(row: Record<string, unknown>): LedgerConsumptionRow {
   return {
@@ -567,22 +567,22 @@ function mapConsumptionRow(row: Record<string, unknown>): LedgerConsumptionRow {
     channelId: row.channel_id === null || row.channel_id === undefined ? null : String(row.channel_id),
     channelLabel: row.channel_label === null || row.channel_label === undefined ? null : String(row.channel_label),
     amountQuota: Number(row.amount ?? 0),
-    // 只有明確的 refund 才是負向；其餘（含舊查詢缺欄位的情況）按扣費處理。
+    // 只有明确的 refund 才是负向；其余（含旧查询缺栏位的情况）按扣费处理。
     kind: String(row.operation_kind) === "refund" ? "refund" : "commit",
     appliedAt: new Date(String(row.applied_at)).toISOString(),
     day: String(row.day),
-    // 生成物類別（P2-2／D8b）：唯一的落盤事實是 `generation_job.kind`——
-    // 影片 ⇒ 分鏡影片，圖片 ⇒ 一般靜態圖，其餘 unclassified。判準集中在
-    // usage-asset-kind.ts（本檔不自己再寫一份映射，避免兩處漂移）。
+    // 生成物类别（P2-2／D8b）：唯一的落盘事实是 `generation_job.kind`——
+    // 影片 ⇒ 分镜影片，图片 ⇒ 一般静态图，其余 unclassified。判准集中在
+    // usage-asset-kind.ts（本档不自己再写一份映射，避免两处漂移）。
     jobKind: row.job_kind === null || row.job_kind === undefined ? null : String(row.job_kind),
     assetKind: usageAssetKindForJobKind(row.job_kind),
   };
 }
 
 /**
- * 窗口內的帳本行（只讀 SELECT）：commit（扣費）與 refund（退款）都在內——
- * 只取 commit 就是把已退的錢算成消耗（C2-1）。寫入類 operation（writeoff 平台損失、
- * release 解除預留、reserve 預留）不是用戶消耗，刻意排除。
+ * 窗口内的帐本行（只读 SELECT）：commit（扣费）与 refund（退款）都在内——
+ * 只取 commit 就是把已退的钱算成消耗（C2-1）。写入类 operation（writeoff 平台损失、
+ * release 解除预留、reserve 预留）不是用户消耗，刻意排除。
  */
 export async function readLedgerConsumption(
   input: { days: number; sql?: GenerationSql; excludeUserIds?: number[] } = { days: DEFAULT_WINDOW_DAYS },
@@ -631,22 +631,22 @@ export async function readLedgerConsumption(
   return rows.map(mapConsumptionRow);
 }
 
-/** 窗口內有帳本行的付費身份讀取結果：ids 只是樣本，覆蓋事實一起回。 */
+/** 窗口内有帐本行的付费身份读取结果：ids 只是样本，覆盖事实一起回。 */
 export interface BillingIdentityCoverage {
   ids: number[];
-  /** 讀取上限（每個身份一次上游 GET）。 */
+  /** 读取上限（每个身份一次上游 GET）。 */
   limit: number;
-  /** 窗口內全部付費身份數（DB count(*) OVER ()，不是樣本長度）。 */
+  /** 窗口内全部付费身份数（DB count(*) OVER ()，不是样本长度）。 */
   totalIdentities: number;
-  /** true = 身份數超過上限，ids 只是前 limit 個。 */
+  /** true = 身份数超过上限，ids 只是前 limit 个。 */
   truncated: boolean;
 }
 
 /**
- * 窗口內有帳本行（commit/refund applied）的付費身份（billing_user_id），供剩餘額度讀取。
+ * 窗口内有帐本行（commit/refund applied）的付费身份（billing_user_id），供剩余额度读取。
  *
- * 截斷必須可見：用 `count(*) OVER ()` 一次拿到全量身份數，超過上限時 truncated=true——
- * 以前只回一組被 LIMIT 砍過的 id，展示層無從知道「合計只是前 25 個之和」。
+ * 截断必须可见：用 `count(*) OVER ()` 一次拿到全量身份数，超过上限时 truncated=true——
+ * 以前只回一组被 LIMIT 砍过的 id，展示层无从知道「合计只是前 25 个之和」。
  */
 export async function readBillingIdentityCoverage(
   input: { days: number; sql?: GenerationSql; excludeUserIds?: number[] } = { days: DEFAULT_WINDOW_DAYS },
@@ -685,7 +685,7 @@ export async function readBillingIdentityCoverage(
   return { ids, limit: MAX_QUOTA_USERS, totalIdentities, truncated: totalIdentities > ids.length };
 }
 
-/** 渠道判活（只讀），走 supplier-health-signal 的同一把尺。 */
+/** 渠道判活（只读），走 supplier-health-signal 的同一把尺。 */
 export async function readChannelHealth(sql?: GenerationSql): Promise<ChannelHealthEntry[]> {
   return projectChannelHealth(await readSupplierChannelHealth(sql));
 }
@@ -698,9 +698,9 @@ export interface ChannelUsageNote {
 }
 
 /**
- * 窗口備註（每一條都是「這個數字有邊界」的如實聲明，不是裝飾）：
- * 帳本掃描取滿、金額非有限值被跳過、有退款相減、首日半天桶、身份讀取截斷——
- * 五種邊界都在這裡明說，展示層原樣列出。
+ * 窗口备注（每一条都是「这个数字有边界」的如实声明，不是装饰）：
+ * 帐本扫描取满、金额非有限值被跳过、有退款相减、首日半天桶、身份读取截断——
+ * 五种边界都在这里明说，展示层原样列出。
  */
 export function buildUsageNotes(input: {
   days: number;
@@ -715,32 +715,32 @@ export function buildUsageNotes(input: {
   const notes: string[] = [];
   const partial = input.rowCount >= LEDGER_ROW_LIMIT;
   if (partial) {
-    notes.push(`帳本掃描達上限 ${LEDGER_ROW_LIMIT} 行，總數為下界，請縮小窗口。`);
+    notes.push(`帐本扫描达上限 ${LEDGER_ROW_LIMIT} 行，总数为下界，请缩小窗口。`);
   }
   if (input.rowCount === 0) {
     notes.push(
-      "窗口內沒有任何已落帳的扣費記錄（billing_operation commit/refund applied 為 0 行）——不是 0 消耗曲線，是還沒有記錄。",
+      "窗口内没有任何已落帐的扣费记录（billing_operation commit/refund applied 为 0 行）——不是 0 消耗曲线，是还没有记录。",
     );
   }
   if (input.refundedOperations) {
     notes.push(
-      `窗口內另有 ${input.refundedOperations} 筆退款帳本行（billing_operation refund/applied，quota ${input.refundedQuota ?? 0}），已按同 job 淨額相減並單列「已退款」。`,
+      `窗口内另有 ${input.refundedOperations} 笔退款帐本行（billing_operation refund/applied，quota ${input.refundedQuota ?? 0}），已按同 job 净额相减并单列「已退款」。`,
     );
   }
   if (input.partialFromDay) {
     notes.push(
-      `窗口起點落在 ${input.partialFromDay}（${STATISTICS_DAY_TIMEZONE}）日中，該日是半天桶（只含起點之後的記錄），已在每日消耗標記為「部分」。`,
+      `窗口起点落在 ${input.partialFromDay}（${STATISTICS_DAY_TIMEZONE}）日中，该日是半天桶（只含起点之后的记录），已在每日消耗标记为「部分」。`,
     );
   }
   if (input.skippedNonFiniteRows) {
     notes.push(
-      `帳本有 ${input.skippedNonFiniteRows} 行金額非有限值，已整行跳過（不當 0 計、也不冒充一筆 operation）——請人工查這幾行帳。`,
+      `帐本有 ${input.skippedNonFiniteRows} 行金额非有限值，已整行跳过（不当 0 计、也不冒充一笔 operation）——请人工查这几行帐。`,
     );
   }
   const coverage = input.quotaCoverage;
   if (coverage?.truncated) {
     notes.push(
-      `窗口內付費身份共 ${coverage.totalIdentities} 個，超過單次讀取上限 ${coverage.limit} 個：「剩餘額度」合計只覆蓋前 ${coverage.coveredCount} 個身份，不是全部身份的合計。`,
+      `窗口内付费身份共 ${coverage.totalIdentities} 个，超过单次读取上限 ${coverage.limit} 个：「剩余额度」合计只覆盖前 ${coverage.coveredCount} 个身份，不是全部身份的合计。`,
     );
   }
   return {
@@ -757,14 +757,14 @@ export interface StatisticsProjection {
     generatedAt: string;
     dayTimezone: string;
     partial: boolean;
-    /** 窗口起點所落的日界（YYYY-MM-DD）——該日為半天桶，與 byDay 的 partial 標記同源。 */
+    /** 窗口起点所落的日界（YYYY-MM-DD）——该日为半天桶，与 byDay 的 partial 标记同源。 */
     windowStartDay: string;
   };
   configured: boolean;
   consumption: ConsumptionProjection | null;
   channelHealth: ChannelHealthEntry[];
   remainingQuota: RemainingQuotaProjection;
-  /** 內部流量口徑：消耗/剩餘額度/漏斗三處共用同一份名單與開關。 */
+  /** 内部流量口径：消耗/剩余额度/漏斗三处共用同一份名单与开关。 */
   traffic: { includeInternal: boolean; internalUserIds: number[] };
   activationFunnel: ActivationFunnelResult;
   sources: StatisticsSourceRow[];
@@ -772,20 +772,20 @@ export interface StatisticsProjection {
 }
 
 /**
- * 統計頁的唯一組裝入口（只讀）。控制面 DB 未配置時如實回 configured:false，
- * 不吐一個看起來正常的空報表（空報表比報錯更會騙人）。
+ * 统计页的唯一组装入口（只读）。控制面 DB 未配置时如实回 configured:false，
+ * 不吐一个看起来正常的空报表（空报表比报错更会骗人）。
  */
 export async function buildStatisticsProjection(input: {
   days?: number;
   sql?: GenerationSql;
   loadRemainingQuota?: (userIds: number[]) => Promise<RemainingQuotaEntry[]>;
-  /** 注入時鐘供測試（半天桶標記依賴「窗口起點落在哪一天」）。 */
+  /** 注入时钟供测试（半天桶标记依赖「窗口起点落在哪一天」）。 */
   now?: Date;
-  /** 是否計入內部流量（預設不計）。 */
+  /** 是否计入内部流量（预设不计）。 */
   includeInternal?: boolean;
-  /** 內部用戶名單（預設讀 env INTERNAL_USER_IDS）。 */
+  /** 内部用户名单（预设读 env INTERNAL_USER_IDS）。 */
   internalUserIds?: number[];
-  /** 激活漏斗時間窗（7 / 30，預設 30）。 */
+  /** 激活漏斗时间窗（7 / 30，预设 30）。 */
   funnelDays?: number;
   loadRegistrations?: RegistrationLoader;
 } = {}): Promise<StatisticsProjection> {
@@ -806,9 +806,9 @@ export async function buildStatisticsProjection(input: {
       channelHealth: [],
       remainingQuota: projectRemainingQuota([]),
       traffic,
-      activationFunnel: { state: "unavailable", days: funnelDays, reason: "控制面資料庫未配置" },
+      activationFunnel: { state: "unavailable", days: funnelDays, reason: "控制面资料库未配置" },
       sources: STATISTICS_SOURCES,
-      notes: ["本實例沒有控制面資料庫連線（GENERATION_DATABASE_URL），統計不可用。"],
+      notes: ["本实例没有控制面资料库连线（GENERATION_DATABASE_URL），统计不可用。"],
     };
   }
 
@@ -816,7 +816,7 @@ export async function buildStatisticsProjection(input: {
   const [rows, channelHealth, identityCoverage, activationFunnel] = await Promise.all([
     readLedgerConsumption({ days, sql, excludeUserIds }),
     readChannelHealth(sql).catch((error) => {
-      console.error("[statistics] channel health read failed (回空清單，不猜健康)", error);
+      console.error("[statistics] channel health read failed (回空清单，不猜健康)", error);
       return [] as ChannelHealthEntry[];
     }),
     readBillingIdentityCoverage({ days, sql, excludeUserIds }).catch((error) => {
@@ -840,7 +840,7 @@ export async function buildStatisticsProjection(input: {
     days,
     rowCount: rows.length,
     generatedAt,
-    // 邊界一律申報：跳過的非有限值行、退款相減、半天桶、身份截斷。
+    // 边界一律申报：跳过的非有限值行、退款相减、半天桶、身份截断。
     skippedNonFiniteRows: rows.filter((row) => !Number.isFinite(row.amountQuota)).length,
     refundedOperations: rows.filter((row) => row.kind === "refund" && Number.isFinite(row.amountQuota)).length,
     refundedQuota: rows
@@ -851,7 +851,7 @@ export async function buildStatisticsProjection(input: {
   });
   if (!includeInternal && internalUserIds.length > 0) {
     usageNotes.notes.push(
-      `已剔除內部流量（用戶 ${internalUserIds.join(", ")}，env INTERNAL_USER_IDS）：消耗、剩餘額度、激活漏斗均不含其任務；渠道判活計數器是供應商級累計值，無法按用戶拆分，不受此開關影響。`,
+      `已剔除内部流量（用户 ${internalUserIds.join(", ")}，env INTERNAL_USER_IDS）：消耗、剩余额度、激活漏斗均不含其任务；渠道判活计数器是供应商级累计值，无法按用户拆分，不受此开关影响。`,
     );
   }
   return {
@@ -874,17 +874,17 @@ export async function buildStatisticsProjection(input: {
 }
 
 /**
- * 剩餘額度預設讀法：new-api users.quota（與 quota-precheck 同通路、同真源）。
- * 讀不到就是 unknown——憑證未配置、上游 5xx、帳號被刪都如實標因，不以 0 充數。
- * 上限只在這裡節流（每個身份一次上游 GET）；截斷事實由 readBillingIdentityCoverage 的
- * totalIdentities/truncated 對外申報，不在這裡靜默吞掉。
+ * 剩余额度预设读法：new-api users.quota（与 quota-precheck 同通路、同真源）。
+ * 读不到就是 unknown——凭证未配置、上游 5xx、帐号被删都如实标因，不以 0 充数。
+ * 上限只在这里节流（每个身份一次上游 GET）；截断事实由 readBillingIdentityCoverage 的
+ * totalIdentities/truncated 对外申报，不在这里静默吞掉。
  */
 async function defaultLoadRemainingQuota(userIds: number[]): Promise<RemainingQuotaEntry[]> {
   if (userIds.length === 0) return [];
   const targets = userIds.slice(0, MAX_QUOTA_USERS);
   if (targets.length < userIds.length) {
     console.warn(
-      `[statistics] remaining quota read capped at ${MAX_QUOTA_USERS} identities (given ${userIds.length}); 覆蓋數已隨 truncated 申報`,
+      `[statistics] remaining quota read capped at ${MAX_QUOTA_USERS} identities (given ${userIds.length}); 覆盖数已随 truncated 申报`,
     );
   }
   const { fetchGatewayUser } = await import("@/lib/gateway-admin");
@@ -893,7 +893,7 @@ async function defaultLoadRemainingQuota(userIds: number[]): Promise<RemainingQu
       try {
         const user = await fetchGatewayUser(billingUserId);
         if (!user || !Number.isFinite(user.quota)) {
-          return { billingUserId, state: "unknown", quota: null, coins: null, reason: "new-api 未回該用戶額度" };
+          return { billingUserId, state: "unknown", quota: null, coins: null, reason: "new-api 未回该用户额度" };
         }
         return {
           billingUserId,
@@ -907,18 +907,18 @@ async function defaultLoadRemainingQuota(userIds: number[]): Promise<RemainingQu
           state: "unknown",
           quota: null,
           coins: null,
-          reason: error instanceof Error ? error.message : "new-api 讀取失敗",
+          reason: error instanceof Error ? error.message : "new-api 读取失败",
         };
       }
     }),
   );
 }
 
-// ── 內部流量剔除 ─────────────────────────────────────────────────────────────
-// 站長自測（117）與測試 key（82）佔近 30 天絕大多數生成——混進統計就是「看起來有量」的假象。
-// 內部名單唯一來源：env INTERNAL_USER_IDS（逗號分隔 new-api 用戶 id）；未設置用預設名單，
-// 明確設為空字串 = 沒有內部用戶（不剔除）。「用戶」一律指任務擁有者：web:<uid> 直接取 uid，
-// biz:<keyid> 取 biz_api_key.user_id（站長的 key 有記到別的計費身份上，只看 billing_user_id 會漏剔）。
+// ── 内部流量剔除 ─────────────────────────────────────────────────────────────
+// 站长自测（117）与测试 key（82）占近 30 天绝大多数生成——混进统计就是「看起来有量」的假象。
+// 内部名单唯一来源：env INTERNAL_USER_IDS（逗号分隔 new-api 用户 id）；未设置用预设名单，
+// 明确设为空字串 = 没有内部用户（不剔除）。「用户」一律指任务拥有者：web:<uid> 直接取 uid，
+// biz:<keyid> 取 biz_api_key.user_id（站长的 key 有记到别的计费身份上，只看 billing_user_id 会漏剔）。
 
 export const DEFAULT_INTERNAL_USER_IDS: readonly number[] = [117, 82];
 
@@ -936,28 +936,28 @@ function isPositiveUserId(id: number): boolean {
 }
 
 /**
- * DB 時間 → ISO。postgres.js 回的是 Date：`String(date)` 會丟掉毫秒，同秒內建立的批次任務
- * 因此排不出先後（首單會被 id 字典序決定）——必須直接取 Date 的毫秒值。
+ * DB 时间 → ISO。postgres.js 回的是 Date：`String(date)` 会丢掉毫秒，同秒内建立的批次任务
+ * 因此排不出先后（首单会被 id 字典序决定）——必须直接取 Date 的毫秒值。
  */
 function dbTimeToIso(value: unknown): string {
   return (value instanceof Date ? value : new Date(String(value))).toISOString();
 }
 
-/** 整數 id → postgres 陣列字面量（只收正整數，作為綁定參數傳入，不拼 SQL）。 */
+/** 整数 id → postgres 阵列字面量（只收正整数，作为绑定参数传入，不拼 SQL）。 */
 function userIdArrayLiteral(ids: readonly number[]): string {
   return `{${ids.filter(isPositiveUserId).join(",")}}`;
 }
 
 // ── 激活漏斗 ────────────────────────────────────────────────────────────────
-// 註冊（new-api users.created_at）→ 發起過生成 → 至少一單成功 → 7 日內回訪 → 現金充值。
-// 每一步都是上一步的子集（嚴格漏斗，人數單調不增）；不在漏斗鏈上的事實（沒回訪就付費的人、
-// D1 回訪數）單列，不塞進漏斗改變語義。
+// 注册（new-api users.created_at）→ 发起过生成 → 至少一单成功 → 7 日内回访 → 现金充值。
+// 每一步都是上一步的子集（严格漏斗，人数单调不增）；不在漏斗链上的事实（没回访就付费的人、
+// D1 回访数）单列，不塞进漏斗改变语义。
 
 
 /**
- * 非現金入帳來源：開戶基線、簽到、新人禮、贈送類一律不是「付費」。
- * 帳本現有來源：seed（開戶基線，entry_type=opening）、redemption-sync（兌換碼充值）、
- * subscription-redemption（訂閱兌換）。新增贈送類來源時名稱帶以下任一詞即自動排除。
+ * 非现金入帐来源：开户基线、签到、新人礼、赠送类一律不是「付费」。
+ * 帐本现有来源：seed（开户基线，entry_type=opening）、redemption-sync（兑换码充值）、
+ * subscription-redemption（订阅兑换）。新增赠送类来源时名称带以下任一词即自动排除。
  */
 export const NON_CASH_RECHARGE_SOURCE = /seed|opening|checkin|check-in|welcome|gift|bonus|grant|promo|trial|newbie|signup|reward/i;
 
@@ -967,7 +967,7 @@ export function isCashRechargeSource(source: string): boolean {
 
 export interface FunnelRegistration {
   userId: number;
-  /** ISO 時間（new-api users.created_at 秒 → ISO）。 */
+  /** ISO 时间（new-api users.created_at 秒 → ISO）。 */
   registeredAt: string;
 }
 
@@ -990,16 +990,16 @@ export type FunnelStepKey = "registered" | "generated" | "succeeded" | "returned
 export const FUNNEL_STEP_ORDER: readonly FunnelStepKey[] = ["registered", "generated", "succeeded", "returned", "paid"];
 
 /**
- * 註冊來源事實（first-touch）：userId → 分組鍵（`user_attribution.signup_source`）。
- * 沒有列的用戶（存量用戶、cookie 被清掉的）歸入 `UNATTRIBUTED_SOURCE`——
- * 不猜成 'direct'（direct 是一句真話：首觸當下確實沒帶任何來源）。
+ * 注册来源事实（first-touch）：userId → 分组键（`user_attribution.signup_source`）。
+ * 没有列的用户（存量用户、cookie 被清掉的）归入 `UNATTRIBUTED_SOURCE`——
+ * 不猜成 'direct'（direct 是一句真话：首触当下确实没带任何来源）。
  */
 export interface FunnelAttribution {
   userId: number;
   source: string | null;
 }
 
-/** 按來源拆分的漏斗（每一格都是總漏斗對應步驟的子集，加總 = 總數）。 */
+/** 按来源拆分的漏斗（每一格都是总漏斗对应步骤的子集，加总 = 总数）。 */
 export interface FunnelSourceRow {
   source: string;
   registered: number;
@@ -1008,7 +1008,7 @@ export interface FunnelSourceRow {
   paid: number;
 }
 
-/** 一個來源桶：分組鍵 + 該來源在各步驟的人數。 */
+/** 一个来源桶：分组键 + 该来源在各步骤的人数。 */
 export function buildFunnelSourceRows(input: {
   registered: readonly number[];
   generated: readonly number[];
@@ -1032,8 +1032,8 @@ export function buildFunnelSourceRows(input: {
     return created;
   };
 
-  // 只以 registered 開桶（後續步驟都是 registered 的子集 ⇒ 每一格必定落在既有桶裡，
-  // 加總恆等於總數；不在 cohort 內的歸因列不會憑空造出一個來源）。
+  // 只以 registered 开桶（后续步骤都是 registered 的子集 ⇒ 每一格必定落在既有桶里，
+  // 加总恒等于总数；不在 cohort 内的归因列不会凭空造出一个来源）。
   for (const userId of input.registered) bucketFor(sourceFor(userId)).registered += 1;
   for (const userId of input.generated) bucketFor(sourceFor(userId)).generated += 1;
   for (const userId of input.succeeded) bucketFor(sourceFor(userId)).succeeded += 1;
@@ -1048,9 +1048,9 @@ export interface FunnelStep {
   key: FunnelStepKey;
   count: number;
   userIds: number[];
-  /** 相對上一步的轉化率（第一步為 null）；分母 < MIN_RATE_SAMPLES 為 insufficient。 */
+  /** 相对上一步的转化率（第一步为 null）；分母 < MIN_RATE_SAMPLES 为 insufficient。 */
   fromPrevious: SampleRate | null;
-  /** 相對註冊數的轉化率（第一步為 null）。 */
+  /** 相对注册数的转化率（第一步为 null）。 */
   fromRegistered: SampleRate | null;
 }
 
@@ -1066,32 +1066,32 @@ export interface ActivationFunnelProjection {
   windowStart: string;
   includeInternal: boolean;
   internalUserIds: number[];
-  /** 窗口內註冊、但因內部名單被剔除的人數。 */
+  /** 窗口内注册、但因内部名单被剔除的人数。 */
   excludedInternalRegistrations: number;
   steps: FunnelStep[];
-  /** 成功用戶中，首次生成日的下一個自然日（D1）有生成的人數。 */
+  /** 成功用户中，首次生成日的下一个自然日（D1）有生成的人数。 */
   d1Returned: number;
-  /** 成功用戶中，首次生成日 + RETURN_WINDOW_DAYS 尚未走完（回訪窗口未成熟）的人數。 */
+  /** 成功用户中，首次生成日 + RETURN_WINDOW_DAYS 尚未走完（回访窗口未成熟）的人数。 */
   returnWindowImmature: number;
-  /** 窗口內註冊且有現金充值的人數（不論是否走完前面步驟）。 */
+  /** 窗口内注册且有现金充值的人数（不论是否走完前面步骤）。 */
   paidAnyStage: number;
   /**
-   * 按註冊來源（first-touch）拆分的漏斗：每來源的註冊 / 發起 / 成功 / 付費人數。
-   * 各來源的每一格加總恆等於總漏斗對應步驟的人數（有具名測試）；沒有歸因事實的用戶
-   * 歸入 `UNATTRIBUTED_SOURCE` 桶（展示層本地化為「未標記」）。
+   * 按注册来源（first-touch）拆分的漏斗：每来源的注册 / 发起 / 成功 / 付费人数。
+   * 各来源的每一格加总恒等于总漏斗对应步骤的人数（有具名测试）；没有归因事实的用户
+   * 归入 `UNATTRIBUTED_SOURCE` 桶（展示层本地化为「未标记」）。
    */
   sources: FunnelSourceRow[];
-  /** 歸因讀取失敗（例如 025 遷移未套用）：`sources` 只剩未標記桶，必須在 UI 說出來。 */
+  /** 归因读取失败（例如 025 迁移未套用）：`sources` 只剩未标记桶，必须在 UI 说出来。 */
   sourceBreakdownUnavailable: boolean;
-  /** 被判為非現金而排除的 recharge 帳本行數。 */
+  /** 被判为非现金而排除的 recharge 帐本行数。 */
   nonCashRechargesSkipped: number;
   timeToFirstImage: {
-    /** 註冊 → 首個 succeeded 任務的 finished_at。 */
+    /** 注册 → 首个 succeeded 任务的 finished_at。 */
     registerToFirstSuccess: DurationSummary;
-    /** 首單（最早建立的任務）created_at → finished_at；未結束的首單不計入樣本，單列。 */
+    /** 首单（最早建立的任务）created_at → finished_at；未结束的首单不计入样本，单列。 */
     firstJobCreatedToFinished: DurationSummary & { unfinished: number; firstJobNotSucceeded: number };
   };
-  /** 註冊讀取或任務讀取觸頂：人數為下界。 */
+  /** 注册读取或任务读取触顶：人数为下界。 */
   truncated: boolean;
   dayTimezone: string;
 }
@@ -1104,7 +1104,7 @@ export interface ActivationFunnelUnavailable {
 
 export type ActivationFunnelResult = ActivationFunnelProjection | ActivationFunnelUnavailable;
 
-/** 按業務日界切自然日（YYYY-MM-DD）。 */
+/** 按业务日界切自然日（YYYY-MM-DD）。 */
 export function calendarDayOf(iso: string, timeZone: string = STATISTICS_DAY_TIMEZONE): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -1121,8 +1121,8 @@ function dayNumber(day: string): number {
 }
 
 /**
- * 回訪判定（D1 / 7 日內）：以首次生成的自然日為 D0，D0+1..D0+withinDays 任一天有生成即回訪。
- * 同一天生成多次不算回訪；超過窗口才再來也不算。
+ * 回访判定（D1 / 7 日内）：以首次生成的自然日为 D0，D0+1..D0+withinDays 任一天有生成即回访。
+ * 同一天生成多次不算回访；超过窗口才再来也不算。
  */
 export function returnedWithin(
   jobDays: readonly string[],
@@ -1140,7 +1140,7 @@ export function returnedWithin(
   };
 }
 
-/** 最近秩分位數（與 postgres percentile_disc 同口徑）：排序後取第 ceil(p·n) 個。 */
+/** 最近秩分位数（与 postgres percentile_disc 同口径）：排序后取第 ceil(p·n) 个。 */
 export function nearestRankPercentile(values: readonly number[], p: number): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -1157,8 +1157,8 @@ function summarizeDurations(values: number[]): DurationSummary {
 }
 
 /**
- * 激活漏斗的純投影。輸入是三份原始事實（註冊、任務、充值帳本行），
- * 內部剔除、時間窗、回訪判定、現金判定都在這裡一次做完——SQL 對照即對照這裡的口徑。
+ * 激活漏斗的纯投影。输入是三份原始事实（注册、任务、充值帐本行），
+ * 内部剔除、时间窗、回访判定、现金判定都在这里一次做完——SQL 对照即对照这里的口径。
  */
 export function projectActivationFunnel(input: {
   days: number;
@@ -1170,9 +1170,9 @@ export function projectActivationFunnel(input: {
   includeInternal: boolean;
   truncated?: boolean;
   dayTimezone?: string;
-  /** 首次觸達歸因（可缺；缺＝全部歸入未標記桶，加總仍等於總數）。 */
+  /** 首次触达归因（可缺；缺＝全部归入未标记桶，加总仍等于总数）。 */
   attribution?: readonly FunnelAttribution[];
-  /** 歸因讀取失敗旗標（由組裝層傳入，投影本身不做 I/O 判斷）。 */
+  /** 归因读取失败旗标（由组装层传入，投影本身不做 I/O 判断）。 */
   sourceBreakdownUnavailable?: boolean;
 }): ActivationFunnelProjection {
   const timeZone = input.dayTimezone ?? STATISTICS_DAY_TIMEZONE;
@@ -1193,7 +1193,7 @@ export function projectActivationFunnel(input: {
     cohort.set(registration.userId, Date.parse(registration.registeredAt));
   }
 
-  // 每個用戶的任務（只計註冊之後的——註冊前不可能有自己的任務，防髒資料）。
+  // 每个用户的任务（只计注册之后的——注册前不可能有自己的任务，防脏资料）。
   const jobsByUser = new Map<number, FunnelJob[]>();
   for (const job of input.jobs) {
     const registeredAt = cohort.get(job.userId);
@@ -1309,8 +1309,8 @@ export function projectActivationFunnel(input: {
 }
 
 /**
- * 漏斗的任務事實（只讀）：擁有者 = web:<uid> 的 uid，或 biz key 的 user_id。
- * 只讀給定用戶、給定起點之後的任務。
+ * 漏斗的任务事实（只读）：拥有者 = web:<uid> 的 uid，或 biz key 的 user_id。
+ * 只读给定用户、给定起点之后的任务。
  */
 export async function readFunnelJobs(input: {
   userIds: number[];
@@ -1355,7 +1355,7 @@ export async function readFunnelJobs(input: {
   };
 }
 
-/** 漏斗的充值事實（只讀）：account_ledger entry_type='recharge'，現金判定在投影層做。 */
+/** 漏斗的充值事实（只读）：account_ledger entry_type='recharge'，现金判定在投影层做。 */
 export async function readFunnelRecharges(input: {
   userIds: number[];
   since: Date;
@@ -1385,7 +1385,7 @@ export async function readFunnelRecharges(input: {
 
 export type RegistrationLoader = (since: Date) => Promise<{ registrations: FunnelRegistration[]; truncated: boolean }>;
 
-/** 註冊預設讀法：new-api 管理 API（不直連 sqlite）。 */
+/** 注册预设读法：new-api 管理 API（不直连 sqlite）。 */
 async function defaultLoadRegistrations(since: Date): Promise<{ registrations: FunnelRegistration[]; truncated: boolean }> {
   const { listGatewayUsersRegisteredSince } = await import("@/lib/gateway-admin");
   const { users, truncated } = await listGatewayUsersRegisteredSince(Math.floor(since.getTime() / 1000));
@@ -1398,7 +1398,7 @@ async function defaultLoadRegistrations(since: Date): Promise<{ registrations: F
   };
 }
 
-/** 漏斗組裝：任何一段讀不到就整卡 unavailable 並說原因——不畫半截漏斗。 */
+/** 漏斗组装：任何一段读不到就整卡 unavailable 并说原因——不画半截漏斗。 */
 export async function buildActivationFunnel(input: {
   days: number;
   now: Date;

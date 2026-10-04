@@ -1,8 +1,8 @@
-// quota-ledger.ts —— 自 index.ts 第二階段 Wave3 無損抽取（2026-09-19）：額度——
+// quota-ledger.ts —— 自 index.ts 第二阶段 Wave3 无损抽取（2026-09-19）：额度——
 // extractBalance/quotaUnavailableLogged/fetchBalance/quotaPayload/handleQuota/emitQuotaChanged（原 index.ts 5602–5669 行；
-// spec 原寫 5602–5676，現場 emitQuotaChanged 收於 5669，5670–5677 為 opencodeErrorMessage 的文檔註釋，未帶）
-// ＋記帳——internal handlers banner/LedgerEntry/appendLedger/appendLedgerFor（原 index.ts 6370–6405 行；
-// 6407 起的 isLoopback 已歸 auth-gw.ts，未帶）。逐行原樣搬運。
+// spec 原写 5602–5676，现场 emitQuotaChanged 收于 5669，5670–5677 为 opencodeErrorMessage 的文档注释，未带）
+// ＋记帐——internal handlers banner/LedgerEntry/appendLedger/appendLedgerFor（原 index.ts 6370–6405 行；
+// 6407 起的 isLoopback 已归 auth-gw.ts，未带）。逐行原样搬运。
 import { appendFile } from "node:fs/promises"
 import type { SessionState } from "./types-gateway.ts"
 import { LEDGER_PATH, QUOTA_URL } from "./constants-gateway.ts"
@@ -55,9 +55,9 @@ export async function fetchBalance(key: string): Promise<number | null> {
   }
 }
 
-// R9-A（2026-09-30）：available 語義＝「餘額數據可得」（前端據此顯示/隱藏餘額 chip，
-// agent-chat-types.ts / agent-chat-client.ts 只讀 available===true），不是「可消費」。
-// spendable＝餘額 >0 才可發起付費生成；負債 -3.01 幣時 available:true 但 spendable:false。
+// R9-A（2026-09-30）：available 语义＝「余额数据可得」（前端据此显示/隐藏余额 chip，
+// agent-chat-types.ts / agent-chat-client.ts 只读 available===true），不是「可消费」。
+// spendable＝余额 >0 才可发起付费生成；负债 -3.01 币时 available:true 但 spendable:false。
 export function quotaPayload(balance: number | null): Record<string, unknown> {
   return balance === null
     ? { balance_coins: null, currency: "coins", available: false, spendable: null, reason: "platform_balance_endpoint_missing" }

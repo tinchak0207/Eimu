@@ -1,8 +1,8 @@
 "use client";
 
-// 登入入口的統一 hook：standalone PWA / Electron 桌面殼走跨瀏覽器交接（handoff），
-// 其餘環境維持站內既有的同窗口跳轉。交接連結與輪詢狀態由 useState 持有，交給
-// 呼叫方決定在哪裡畫交接面。
+// 登入入口的统一 hook：standalone PWA / Electron 桌面壳走跨浏览器交接（handoff），
+// 其余环境维持站内既有的同窗口跳转。交接连结与轮询状态由 useState 持有，交给
+// 呼叫方决定在哪里画交接面。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -18,16 +18,16 @@ export function useGithubLoginHandoff(): {
   closeHandoff: () => void;
 } {
   const [handoffUrl, setHandoffUrl] = useState<string | null>(null);
-  // 進行中的 startLogin：連點去重（按鈕在 create 的 async 窗口內可被再點一次，
-  // 不去重會發第二次 create，留下永遠無人認領的孤兒交接票）。
+  // 进行中的 startLogin：连点去重（按钮在 create 的 async 窗口内可被再点一次，
+  // 不去重会发第二次 create，留下永远无人认领的孤儿交接票）。
   const startInFlightRef = useRef<Promise<void> | null>(null);
-  // 卸載後不動作（同 MySkillsDialog 的 aliveRef 慣例）：使用者在 create 飛行途中
-  // 按「先不登录」／Esc／點外面／重播都會卸載本 hook，此時 async 閉包不得再
-  // setHandoffUrl、更不得替「已經說不登入」的人開系統瀏覽器。
+  // 卸载后不动作（同 MySkillsDialog 的 aliveRef 惯例）：使用者在 create 飞行途中
+  // 按「先不登录」／Esc／点外面／重播都会卸载本 hook，此时 async 闭包不得再
+  // setHandoffUrl、更不得替「已经说不登入」的人开系统浏览器。
   const mountedRef = useRef(true);
   useEffect(() => {
-    // 掛載即為真（不能在 setup 裡只寫一次 false 的清理：StrictMode 會 mount→cleanup→mount，
-    // 只清理不復位會讓守衛永久卡在「已卸載」，正常登入也一併被吃掉）。
+    // 挂载即为真（不能在 setup 里只写一次 false 的清理：StrictMode 会 mount→cleanup→mount，
+    // 只清理不复位会让守卫永久卡在「已卸载」，正常登入也一并被吃掉）。
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -39,15 +39,15 @@ export function useGithubLoginHandoff(): {
     if (inFlight) return inFlight;
 
     const run = (async () => {
-      // PWA standalone / Electron 殼：GitHub 登入态带不进来，改走跨浏览器交接面板。
+      // PWA standalone / Electron 壳：GitHub 登入态带不进来，改走跨浏览器交接面板。
       if (isStandalonePwa()) {
         const handoff = await createHandoffLogin(provider);
-        // await 之後的分支動作（setHandoffUrl／殼導航／null fallback 導航）一律先過
-        // 這道守衛：元件已卸載（使用者取消登入）就整個作廢。
+        // await 之后的分支动作（setHandoffUrl／壳导航／null fallback 导航）一律先过
+        // 这道守卫：元件已卸载（使用者取消登入）就整个作废。
         if (!mountedRef.current) return;
         if (handoff) {
           setHandoffUrl(handoff.loginUrl);
-          // Electron 殼的导航政策会把 /api/auth/* 转去系统浏览器 ⇒ 壳体里点一下
+          // Electron 壳的导航政策会把 /api/auth/* 转去系统浏览器 ⇒ 壳体里点一下
           // 就同时开好授权页（交接面仍留在原地轮询）。
           if (isElectronShell()) {
             window.location.href = handoff.loginUrl;
@@ -61,7 +61,7 @@ export function useGithubLoginHandoff(): {
     })();
 
     startInFlightRef.current = run;
-    // 本次跑完即清（settle 的 microtask 先於下一次點擊的 task），下一擊可再發。
+    // 本次跑完即清（settle 的 microtask 先于下一次点击的 task），下一击可再发。
     run
       .finally(() => {
         startInFlightRef.current = null;

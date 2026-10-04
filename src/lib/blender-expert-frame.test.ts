@@ -1,14 +1,14 @@
-// MOE Wave1-A 框架接線測試：3D 導演（proto-Expert）掛 Expert 框架。
-// 覆蓋三條驗收線：
-//   ① OFF 零回歸：assembleDirectorReply（settings 缺省/false/非布林）回覆
-//      鍵集合與 scene_op/scene_summary 與現狀逐欄位一致；委託單 prompt =
-//      composeDelegation serialized 原文一個字不多。
-//   ② ON 憲法注入 + 交付物契約：prompt 頭部 = expert-constitution.md 全文；
-//      deliverable 過 validateExpertDeliverable；篡改簽名被拒；
-//      契約摘要行（expertId/kind/簽名前 8 位）附在 scene_summary 且不超帽。
-//   ③ readBeastMode 三態（缺/false/true）經 settings 入口驅動野獸分支；
-//      未 prime → 內聯後備判準、prime 後 → registry 真源，兩路行為一致。
-// 跑法（package.json 既有 node:test 範式；主 tsconfig exclude *.test.ts）：
+// MOE Wave1-A 框架接线测试：3D 导演（proto-Expert）挂 Expert 框架。
+// 覆盖三条验收线：
+//   ① OFF 零回归：assembleDirectorReply（settings 缺省/false/非布林）回覆
+//      键集合与 scene_op/scene_summary 与现状逐栏位一致；委托单 prompt =
+//      composeDelegation serialized 原文一个字不多。
+//   ② ON 宪法注入 + 交付物契约：prompt 头部 = expert-constitution.md 全文；
+//      deliverable 过 validateExpertDeliverable；篡改签名被拒；
+//      契约摘要行（expertId/kind/签名前 8 位）附在 scene_summary 且不超帽。
+//   ③ readBeastMode 三态（缺/false/true）经 settings 入口驱动野兽分支；
+//      未 prime → 内联后备判准、prime 后 → registry 真源，两路行为一致。
+// 跑法（package.json 既有 node:test 范式；主 tsconfig exclude *.test.ts）：
 //   npx tsx --test src/lib/blender-expert-frame.test.ts
 
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ function executeResult(): BlenderExecuteSuccess {
       { path: "scene.blend", bytes: 4_096, kind: "blend" },
       { path: "scene.glb", bytes: 8_192, kind: "glb" },
     ],
-    scene_summary: "低多邊形山丘場景，三點打光",
+    scene_summary: "低多边形山丘场景，三点打光",
     stdout_tail: "RENDER_DONE: turntable",
     duration_ms: 3_700,
   };
@@ -50,7 +50,7 @@ function executeResult(): BlenderExecuteSuccess {
 
 function delegationInput() {
   return {
-    effect_description: "主角站在懸崖邊，風吹披風",
+    effect_description: "主角站在悬崖边，风吹披风",
     shot_count: 2,
     deliverables: ["turntable", "blend", "glb"] as const,
   };
@@ -65,22 +65,22 @@ function readConstitution(): string {
   return readFileSync(abs, "utf8");
 }
 
-// ── ① OFF 零回歸（回覆形與現狀逐欄位一致） ───────────────────────────────────
+// ── ① OFF 零回归（回覆形与现状逐栏位一致） ───────────────────────────────────
 
-test("OFF（settings 缺省）：回覆鍵集合 = ok/scene_op/scene_summary，無 deliverable", () => {
-  const reply = assembleDirectorReply(executeResult(), { title: "懸崖場景" });
+test("OFF（settings 缺省）：回覆键集合 = ok/scene_op/scene_summary，无 deliverable", () => {
+  const reply = assembleDirectorReply(executeResult(), { title: "悬崖场景" });
   assert.equal(reply.ok, true);
   if (!reply.ok) return;
   assert.deepEqual(Object.keys(reply).sort(), ["ok", "scene_op", "scene_summary"]);
   assert.equal(reply.deliverable, undefined);
   assert.equal(reply.scene_op.type, "add_node");
   assert.equal(reply.scene_op.node.type, "scene_3d");
-  assert.equal(reply.scene_op.node.title, "懸崖場景");
+  assert.equal(reply.scene_op.node.title, "悬崖场景");
   assert.ok(reply.scene_op.node.metadata.sceneCard.turntable_url.endsWith("turntable.mp4"));
-  assert.equal(reply.scene_summary, "低多邊形山丘場景，三點打光");
+  assert.equal(reply.scene_summary, "低多边形山丘场景，三点打光");
 });
 
-test("OFF（beast_mode=false / 非布林 / settings 非物件）：同現狀形", () => {
+test("OFF（beast_mode=false / 非布林 / settings 非物件）：同现状形", () => {
   const settingsCases: unknown[] = [
     { beast_mode: false },
     { beast_mode: "yes" },
@@ -90,16 +90,16 @@ test("OFF（beast_mode=false / 非布林 / settings 非物件）：同現狀形"
     "on",
   ];
   for (const settings of settingsCases) {
-    const reply = assembleDirectorReply(executeResult(), { title: "懸崖場景" }, { settings });
+    const reply = assembleDirectorReply(executeResult(), { title: "悬崖场景" }, { settings });
     assert.equal(reply.ok, true);
     if (!reply.ok) return;
     assert.deepEqual(Object.keys(reply).sort(), ["ok", "scene_op", "scene_summary"]);
     assert.equal(reply.deliverable, undefined);
-    assert.equal(reply.scene_summary, "低多邊形山丘場景，三點打光");
+    assert.equal(reply.scene_summary, "低多边形山丘场景，三点打光");
   }
 });
 
-test("OFF：委託單 prompt = composeDelegation serialized 原文（一個字不多）", async () => {
+test("OFF：委托单 prompt = composeDelegation serialized 原文（一个字不多）", async () => {
   const base = composeDirectorDelegation(delegationInput());
   assert.equal(base.ok, true);
   if (!base.ok) return;
@@ -113,7 +113,7 @@ test("OFF：委託單 prompt = composeDelegation serialized 原文（一個字�
   }
 });
 
-test("OFF：摘要過長也不截斷（截斷只屬於 ON 契約路徑，現狀零回歸）", () => {
+test("OFF：摘要过长也不截断（截断只属于 ON 契约路径，现状零回归）", () => {
   const huge = "山".repeat(3000);
   const reply = assembleDirectorReply(
     { ...executeResult(), scene_summary: huge },
@@ -125,11 +125,11 @@ test("OFF：摘要過長也不截斷（截斷只屬於 ON 契約路徑，現狀�
   assert.equal(reply.scene_summary, huge);
 });
 
-// ── ② ON：憲法注入 + 交付物契約 + 摘要行 ────────────────────────────────────
+// ── ② ON：宪法注入 + 交付物契约 + 摘要行 ────────────────────────────────────
 
-test("ON：prompt 頭部 = 憲法全文（trimEnd 後逐字前綴），原委託單 JSON 尾隨", async () => {
+test("ON：prompt 头部 = 宪法全文（trimEnd 后逐字前缀），原委托单 JSON 尾随", async () => {
   const constitution = readConstitution();
-  assert.ok(constitution.includes("Expert 憲法"), "憲法檔真源在位");
+  assert.ok(constitution.includes("Expert 宪法"), "宪法档真源在位");
   const base = composeDirectorDelegation(delegationInput());
   assert.equal(base.ok, true);
   if (!base.ok) return;
@@ -137,21 +137,21 @@ test("ON：prompt 頭部 = 憲法全文（trimEnd 後逐字前綴），原委託
   assert.equal(on.ok, true);
   if (!on.ok) return;
   assert.equal(on.constitutionInjected, true);
-  assert.ok(on.prompt.startsWith(constitution.trimEnd()), "prompt 必須以憲法全文開頭");
+  assert.ok(on.prompt.startsWith(constitution.trimEnd()), "prompt 必须以宪法全文开头");
   const tail = on.prompt.slice(on.prompt.lastIndexOf("\n") + 1);
   assert.equal(tail, base.serialized);
   assert.ok(on.prompt.includes("---"));
 });
 
-test("ON：組裝回覆附 deliverable，validateExpertDeliverable 通過、payload=sceneCard 六欄", () => {
+test("ON：组装回覆附 deliverable，validateExpertDeliverable 通过、payload=sceneCard 六栏", () => {
   const reply = assembleDirectorReply(
     executeResult(),
-    { title: "懸崖場景" },
+    { title: "悬崖场景" },
     { settings: { beast_mode: true } },
   );
   assert.equal(reply.ok, true);
   if (!reply.ok) return;
-  assert.ok(reply.deliverable, "ON 時必附 deliverable");
+  assert.ok(reply.deliverable, "ON 时必附 deliverable");
   const d = reply.deliverable;
   assert.equal(d.expertId, "director3d");
   assert.equal(d.kind, DIRECTOR_DELIVERABLE_KIND);
@@ -168,30 +168,30 @@ test("ON：組裝回覆附 deliverable，validateExpertDeliverable 通過、payl
   assert.equal(d.evidence.artifactPath, "turntable.mp4");
   assert.equal(d.evidence.bytes, 1_024);
   assert.equal(d.contract.expertId, "director3d");
-  assert.equal(d.contract.intent, "懸崖場景");
+  assert.equal(d.contract.intent, "悬崖场景");
   const gate = validateExpertDeliverable(d);
-  assert.equal(gate.ok, true, `閘門必過：${gate.errors.join("；")}`);
+  assert.equal(gate.ok, true, `闸门必过：${gate.errors.join("；")}`);
 });
 
-test("ON：scene_summary 附契約摘要行（expertId/kind/簽名前 8 位）且總長不超帽", () => {
+test("ON：scene_summary 附契约摘要行（expertId/kind/签名前 8 位）且总长不超帽", () => {
   const reply = assembleDirectorReply(
     executeResult(),
-    { title: "懸崖場景" },
+    { title: "悬崖场景" },
     { settings: { beast_mode: true } },
   );
   assert.equal(reply.ok, true);
   if (!reply.ok || !reply.deliverable) return;
-  assert.ok(reply.scene_summary.startsWith("低多邊形山丘場景，三點打光"));
+  assert.ok(reply.scene_summary.startsWith("低多边形山丘场景，三点打光"));
   const line = reply.scene_summary.split("\n")[1];
   assert.match(line, /^deliverable expertId=director3d kind=scene_3d qc=[0-9a-f]{8}$/);
   assert.ok(
     line.includes(reply.deliverable.qcSignature.slice(0, 8)),
-    "摘要行攜帶簽名前 8 位",
+    "摘要行携带签名前 8 位",
   );
   assert.ok(estimateTokens(reply.scene_summary) <= DIRECTOR_REPLY_SUMMARY_TOKEN_CAP);
 });
 
-test("ON：摘要過長時契約行保留、總長壓回帽內（帽強制只在 ON 生效）", () => {
+test("ON：摘要过长时契约行保留、总长压回帽内（帽强制只在 ON 生效）", () => {
   const huge = "山".repeat(3000);
   const reply = assembleDirectorReply(
     { ...executeResult(), scene_summary: huge },
@@ -203,15 +203,15 @@ test("ON：摘要過長時契約行保留、總長壓回帽內（帽強制只在
   assert.match(
     reply.scene_summary,
     /deliverable expertId=director3d kind=scene_3d qc=[0-9a-f]{8}$/,
-    "契約行完整保留在尾部",
+    "契约行完整保留在尾部",
   );
   assert.ok(estimateTokens(reply.scene_summary) <= DIRECTOR_REPLY_SUMMARY_TOKEN_CAP);
 });
 
-test("ON：篡改簽名被 validateExpertDeliverable 拒（閘門可檢篡改）", () => {
+test("ON：篡改签名被 validateExpertDeliverable 拒（闸门可检篡改）", () => {
   const reply = assembleDirectorReply(
     executeResult(),
-    { title: "懸崖場景" },
+    { title: "悬崖场景" },
     { settings: { beast_mode: true } },
   );
   assert.equal(reply.ok, true);
@@ -223,25 +223,25 @@ test("ON：篡改簽名被 validateExpertDeliverable 拒（閘門可檢篡改）
   const gate = validateExpertDeliverable(tampered);
   assert.equal(gate.ok, false);
   assert.ok(gate.errors.some((e) => e.includes("篡改")));
-  // 另案：payload 被改 → 重算簽名不一致
+  // 另案：payload 被改 → 重算签名不一致
   const tamperedPayload = {
     ...reply.deliverable,
     payload: { ...reply.deliverable.payload, evil: true },
   };
   assert.equal(validateExpertDeliverable(tamperedPayload).ok, false);
-  // 另案：computeQcSignature 重算 = 原簽名（簽名口徑閉環）
+  // 另案：computeQcSignature 重算 = 原签名（签名口径闭环）
   const { qcSignature, ...rest } = reply.deliverable;
   assert.equal(qcSignature, computeQcSignature(rest));
 });
 
-test("ON：delegation.materials 回指（reference_refs 進契約 materials）", () => {
+test("ON：delegation.materials 回指（reference_refs 进契约 materials）", () => {
   const reply = assembleDirectorReply(
     executeResult(),
-    { title: "懸崖場景" },
+    { title: "悬崖场景" },
     {
       settings: { beast_mode: true },
       delegation: {
-        effect_description: "主角站在懸崖邊，風吹披風",
+        effect_description: "主角站在悬崖边，风吹披风",
         shot_count: 2,
         reference_refs: ["node-1", "/uploads/ref.png"],
         deliverables: ["turntable", "blend", "glb"],
@@ -253,16 +253,16 @@ test("ON：delegation.materials 回指（reference_refs 進契約 materials）",
   assert.deepEqual(reply.deliverable.contract.materials, ["node-1", "/uploads/ref.png"]);
 });
 
-test("ON：無 title 時 contract.intent 退回 scene_summary", () => {
+test("ON：无 title 时 contract.intent 退回 scene_summary", () => {
   const reply = assembleDirectorReply(executeResult(), {}, { settings: { beast_mode: true } });
   assert.equal(reply.ok, true);
   if (!reply.ok || !reply.deliverable) return;
-  assert.equal(reply.deliverable.contract.intent, "低多邊形山丘場景，三點打光");
+  assert.equal(reply.deliverable.contract.intent, "低多边形山丘场景，三点打光");
 });
 
-test("ON：委託單校驗不過 = 結構化錯誤透傳（不走注入路徑）", async () => {
+test("ON：委托单校验不过 = 结构化错误透传（不走注入路径）", async () => {
   const r = await composeDirectorDelegationPrompt(
-    { effect_description: "缺 deliverables 與 shot_count" },
+    { effect_description: "缺 deliverables 与 shot_count" },
     { beast_mode: true },
   );
   assert.equal(r.ok, false);
@@ -271,7 +271,7 @@ test("ON：委託單校驗不過 = 結構化錯誤透傳（不走注入路徑）
   assert.ok(r.hint.includes("必填"));
 });
 
-test("ON + 憲法檔缺失：constitution_unavailable 結構化報錯（不靜默裸奔派單）", async () => {
+test("ON + 宪法档缺失：constitution_unavailable 结构化报错（不静默裸奔派单）", async () => {
   const r = await composeDirectorDelegationPrompt(
     delegationInput(),
     { beast_mode: true },
@@ -284,21 +284,21 @@ test("ON + 憲法檔缺失：constitution_unavailable 結構化報錯（不靜�
   assert.ok(r.hint.includes("ENOENT"));
 });
 
-// ── ③ readBeastMode 三態 + registry 讀取路徑（內聯後備 ↔ 動態 import 真源） ──
+// ── ③ readBeastMode 三态 + registry 读取路径（内联后备 ↔ 动态 import 真源） ──
 
-test("讀取路徑：未 prime → 內聯後備判準；prime 後 → registry 真源，注入結果逐字一致", async () => {
+test("读取路径：未 prime → 内联后备判准；prime 后 → registry 真源，注入结果逐字一致", async () => {
   __resetExpertRegistryForTest();
   const base = composeDirectorDelegation(delegationInput());
   assert.equal(base.ok, true);
   if (!base.ok) return;
 
-  // 未 prime：readBeastModeSync 走內聯後備（判準 = beast_mode === true 嚴格）。
+  // 未 prime：readBeastModeSync 走内联后备（判准 = beast_mode === true 严格）。
   const onFallback = await composeDirectorDelegationPrompt(delegationInput(), { beast_mode: true });
   assert.equal(onFallback.ok, true);
   if (!onFallback.ok) return;
   assert.equal(onFallback.constitutionInjected, true);
 
-  // ON 分支已自 prime：之後走 registry 真源，三態行為與後備一致。
+  // ON 分支已自 prime：之后走 registry 真源，三态行为与后备一致。
   assert.equal(await primeExpertRegistry(), true);
   const onPrimed = await composeDirectorDelegationPrompt(delegationInput(), { beast_mode: true });
   assert.equal(onPrimed.ok, true);
@@ -314,10 +314,10 @@ test("讀取路徑：未 prime → 內聯後備判準；prime 後 → registry �
   }
 });
 
-test("載入失敗留痕：inject 拋錯 loader → prime false＋死因出口＋決策現場 additive 透傳", async () => {
+test("载入失败留痕：inject 抛错 loader → prime false＋死因出口＋决策现场 additive 透传", async () => {
   __resetExpertRegistryForTest();
   try {
-    // 注入會拋錯的 loader：prime 如實回 false，死因可讀（誠實鐵律：禁靜默降級）。
+    // 注入会抛错的 loader：prime 如实回 false，死因可读（诚实铁律：禁静默降级）。
     const ok = await primeExpertRegistry(async () => {
       throw new Error("boom");
     });
@@ -326,14 +326,14 @@ test("載入失敗留痕：inject 拋錯 loader → prime false＋死因出口�
     assert.equal(typeof failure, "string");
     assert.ok(failure?.includes("boom"));
 
-    // 決策現場（野獸 ON）接住 prime 結果：失敗時回傳物件帶 registry_load_failure 且含死因。
+    // 决策现场（野兽 ON）接住 prime 结果：失败时回传物件带 registry_load_failure 且含死因。
     const onFailed = await composeDirectorDelegationPrompt(delegationInput(), { beast_mode: true });
     assert.equal(onFailed.ok, true);
     if (!onFailed.ok) return;
     assert.ok("registry_load_failure" in onFailed);
     assert.ok(onFailed.registry_load_failure?.includes("boom"));
 
-    // 再注入成功 loader：prime true、死因出口清空、決策現場欄位缺席（成功時不寫 undefined）。
+    // 再注入成功 loader：prime true、死因出口清空、决策现场栏位缺席（成功时不写 undefined）。
     const okLoad = await primeExpertRegistry(async () => ({
       readBeastMode: (s: unknown) =>
         typeof s === "object" && s !== null && (s as { beast_mode?: unknown }).beast_mode === true,

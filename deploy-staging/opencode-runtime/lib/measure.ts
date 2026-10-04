@@ -1,18 +1,18 @@
-// 台詞量測（寫作期）——純計算、零外部呼叫、零 IO、零網路。
+// 台词量测（写作期）——纯计算、零外部呼叫、零 IO、零网路。
 //
-// 逐條照抄競品 hypit 的實作；配方＝
+// 逐条照抄竞品 hypit 的实作；配方＝
 //   packages/estimate/src/program.ts  ＋  packages/estimate/src/policy.ts
-// 以下段落逐字移植（含註解）：
+// 以下段落逐字移植（含注解）：
 //   - PACE_RATE 表（program.ts:13-23）
 //   - words / looksSpanish / detectSpeechEstimateLanguage（program.ts:25-45）
 //   - normalizedEnglishWord / dictionarySyllables / heuristicEnglishSyllables / englishSyllables（:47-84）
 //   - spanishVowelNuclei / spanishSyllables（:86-113）
 //   - countSpeechEstimateUnits（:115-128）
-//   - rounded（:167-171）與 estimateSpeechDuration 主公式（:173-188）
-//   - policyFrom 的三條逐字訊息（policy.ts:22/24/43）與 assertSpeechEstimatePolicy 的驗證條件（:136-149）
+//   - rounded（:167-171）与 estimateSpeechDuration 主公式（:173-188）
+//   - policyFrom 的三条逐字讯息（policy.ts:22/24/43）与 assertSpeechEstimatePolicy 的验证条件（:136-149）
 //
-// 唯一外部前置（可缺席）：CMU 發音詞典 `cmu-pronouncing-dictionary`。
-// 缺席時英/西語音節退化為啟發式，並在回傳 note 與 code 對應欄位誠實標明。
+// 唯一外部前置（可缺席）：CMU 发音词典 `cmu-pronouncing-dictionary`。
+// 缺席时英/西语音节退化为启发式，并在回传 note 与 code 对应栏位诚实标明。
 
 import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -23,7 +23,7 @@ export type ResolvedSpeechEstimateLanguage = "en" | "zh" | "ja" | "es"
 export type SpeechEstimatePace = "slow" | "normal" | "fast"
 export type SpeechEstimateRounding = "none" | "round" | "ceil"
 
-/** 量測政策（policy 的落地形狀；pace/rate 恰有其一）。 */
+/** 量测政策（policy 的落地形状；pace/rate 恰有其一）。 */
 export interface MeasurePolicy {
   language: string
   pace?: string
@@ -50,13 +50,13 @@ export interface MeasureOptions {
   rate?: number
   rounding?: "none" | "round" | "ceil"
   padding?: number
-  /** 驗證訊息的主體名稱（對應 hypit policyFrom 的 subject）；預設 "measure policy"。 */
+  /** 验证讯息的主体名称（对应 hypit policyFrom 的 subject）；预设 "measure policy"。 */
   subject?: string
 }
 
 const DEFAULT_SUBJECT = "measure policy"
 
-// ─────────────────────────────────────────── PACE_RATE（program.ts:13-23，逐字含註解）
+// ─────────────────────────────────────────── PACE_RATE（program.ts:13-23，逐字含注解）
 
 const PACE_RATE: Readonly<
   Record<ResolvedSpeechEstimateLanguage, Readonly<Record<SpeechEstimatePace, number>>>
@@ -69,7 +69,7 @@ const PACE_RATE: Readonly<
   es: { slow: 4.72, normal: 5.9, fast: 7.375 },
 }
 
-// ─────────────────────────────────────────── 分詞與語言偵測（program.ts:25-45，逐字）
+// ─────────────────────────────────────────── 分词与语言侦测（program.ts:25-45，逐字）
 
 function words(text: string): string[] {
   return text.match(/[\p{L}\p{N}]+(?:['’\-‐‑–][\p{L}\p{N}]+)*/gu) ?? []
@@ -97,11 +97,11 @@ export function detectSpeechEstimateLanguage(text: string): ResolvedSpeechEstima
   return "en"
 }
 
-// ─────────────────────────────────────────── CMU 發音詞典（可選；缺席退化為啟發式）
+// ─────────────────────────────────────────── CMU 发音词典（可选；缺席退化为启发式）
 
 const CMU_PACKAGE = "cmu-pronouncing-dictionary"
 
-/** 解析候選根：先 tools 自己的 node_modules，再 ~/.opencode，再裸 require（相對鏈／NODE_PATH）。 */
+/** 解析候选根：先 tools 自己的 node_modules，再 ~/.opencode，再裸 require（相对链／NODE_PATH）。 */
 const CMU_ROOTS = [
   "/opt/agent-harness/workspace/.opencode/node_modules",
   "/home/ubuntu/.opencode/node_modules",
@@ -115,7 +115,7 @@ interface CmuLoad {
   source: string
 }
 
-/** 詞典載入（init 時一次）。取 module 上的 `dictionary`（hypit 用法）或其 default／模組本體。 */
+/** 词典载入（init 时一次）。取 module 上的 `dictionary`（hypit 用法）或其 default／模组本体。 */
 function readCmuDictionary(): CmuLoad {
   const requireFrom = createRequire(import.meta.url)
   const pick = (mod: unknown): Record<string, string> | null => {
@@ -136,14 +136,14 @@ function readCmuDictionary(): CmuLoad {
       const dict = pick(requireFrom(join(pkgDir, entry)))
       if (dict) return { dictionary: dict, source: pkgDir }
     } catch {
-      /* 換下一個候選根 */
+      /* 换下一个候选根 */
     }
   }
   try {
     const dict = pick(requireFrom(CMU_PACKAGE))
     if (dict) return { dictionary: dict, source: CMU_PACKAGE }
   } catch {
-    /* 詞典缺席：走啟發式 */
+    /* 词典缺席：走启发式 */
   }
   return { dictionary: null, source: "" }
 }
@@ -151,10 +151,10 @@ function readCmuDictionary(): CmuLoad {
 const CMU = readCmuDictionary()
 const HAS_CMU = CMU.dictionary !== null
 
-/** 詞典實際來源（除錯／回報用；缺席為空字串）。 */
+/** 词典实际来源（除错／回报用；缺席为空字串）。 */
 export const cmuDictionarySource = CMU.source
 
-// ─────────────────────────────────────────── 英文音節（program.ts:47-84，逐字）
+// ─────────────────────────────────────────── 英文音节（program.ts:47-84，逐字）
 
 function normalizedEnglishWord(word: string): string {
   return word
@@ -194,7 +194,7 @@ export function englishSyllables(word: string): number {
   return heuristicEnglishSyllables(normalized)
 }
 
-// ─────────────────────────────────────────── 西語音節（program.ts:86-113，逐字）
+// ─────────────────────────────────────────── 西语音节（program.ts:86-113，逐字）
 
 function spanishVowelNuclei(run: string): number {
   let nuclei = 0
@@ -228,7 +228,7 @@ export function spanishSyllables(word: string): number {
   return Math.max(1, runs.reduce((sum, run) => sum + spanishVowelNuclei(run), 0))
 }
 
-// ─────────────────────────────────────────── 單位計數（program.ts:115-128，逐字）
+// ─────────────────────────────────────────── 单位计数（program.ts:115-128，逐字）
 
 export function countSpeechEstimateUnits(text: string, language: string): number {
   if (language === "zh" || language === "ja") {
@@ -258,27 +258,27 @@ function buildNote(args: {
   durationSec: number
 }): string {
   const dictLine = HAS_CMU
-    ? `音節判定：英/西語音節先查 CMU 發音詞典（命中為詞典值，未命中為啟發式估算）；詞典來源 ${cmuDictionarySource}`
-    : "音節判定：CMU 發音詞典缺席，英/西語音節一律走啟發式估算（非詞典值）；如需詞典值請安裝 cmu-pronouncing-dictionary"
+    ? `音节判定：英/西语音节先查 CMU 发音词典（命中为词典值，未命中为启发式估算）；词典来源 ${cmuDictionarySource}`
+    : "音节判定：CMU 发音词典缺席，英/西语音节一律走启发式估算（非词典值）；如需词典值请安装 cmu-pronouncing-dictionary"
   return [
     `${args.units} units ÷ ${args.rate} per sec` +
       (args.padding ? ` + ${args.padding}s padding` : "") +
       ` = ${args.raw}s → rounding=${args.rounding} → ${args.durationSec}s`,
     dictLine,
-    "中/日：逐字（Han＋假名，即 Script=Han 與 U+3040-U+30FF 碼點），夾雜英文按逐詞音節加計",
-    "PACE_RATE 為作者交付密度（含一般停頓），非模型保證值、非無停頓咬字速率（hypit README：Neither table is a calibration of a particular video or voice model）",
-    "預設照抄 hypit 表（zh normal 5.25 字/秒）；要對齊我方短劇散文口徑（4.5 字/秒，src/lib/workflow-pages/shortdrama-visual-assets.ts:29）請傳 rate: 4.5",
+    "中/日：逐字（Han＋假名，即 Script=Han 与 U+3040-U+30FF 码点），夹杂英文按逐词音节加计",
+    "PACE_RATE 为作者交付密度（含一般停顿），非模型保证值、非无停顿咬字速率（hypit README：Neither table is a calibration of a particular video or voice model）",
+    "预设照抄 hypit 表（zh normal 5.25 字/秒）；要对齐我方短剧散文口径（4.5 字/秒，src/lib/workflow-pages/shortdrama-visual-assets.ts:29）请传 rate: 4.5",
   ].join("｜")
 }
 
 // ─────────────────────────────────────────── 主函式
-// 對應 hypit estimateSpeechDuration（program.ts:173-188）＋ policyFrom（policy.ts:16-53）。
-// 所有驗證失敗一律回 ok:false ＋ 誠實 code/reason，不靜默回 0、不臆造速率。
+// 对应 hypit estimateSpeechDuration（program.ts:173-188）＋ policyFrom（policy.ts:16-53）。
+// 所有验证失败一律回 ok:false ＋ 诚实 code/reason，不静默回 0、不臆造速率。
 
 export function measureScript(text: string, opts: MeasureOptions = {}): MeasureResult {
   const subject = opts.subject ?? DEFAULT_SUBJECT
-  // 逐字照抄 hypit policyFrom：屬性整包進來，未知鍵必須被看見（否則 unknown 檢查形同虛設）。
-  // `subject` 是本檔內部欄位，不屬 policy 屬性。
+  // 逐字照抄 hypit policyFrom：属性整包进来，未知键必须被看见（否则 unknown 检查形同虚设）。
+  // `subject` 是本档内部栏位，不属 policy 属性。
   const properties: Record<string, unknown> = {}
   for (const [name, value] of Object.entries(opts)) {
     if (name === "subject" || value === undefined) continue
@@ -294,7 +294,7 @@ export function measureScript(text: string, opts: MeasureOptions = {}): MeasureR
     ...(unitsPerSec !== undefined ? { units_per_sec: unitsPerSec } : {}),
   })
 
-  // policyFrom（policy.ts:20-24）：unknown property → requires language, rounding（逐字訊息）
+  // policyFrom（policy.ts:20-24）：unknown property → requires language, rounding（逐字讯息）
   const allowed = new Set(["language", "pace", "rate", "rounding", "padding"])
   const unknown = Object.keys(properties).filter((name) => !allowed.has(name))
   if (unknown.length > 0) {
@@ -316,14 +316,14 @@ export function measureScript(text: string, opts: MeasureOptions = {}): MeasureR
   const language = languageRaw.trim()
   const rounding = roundingRaw.trim()
 
-  // policyFrom（policy.ts:40-44）：pace 與 rate 恰有其一（逐字訊息）
+  // policyFrom（policy.ts:40-44）：pace 与 rate 恰有其一（逐字讯息）
   const hasPace = properties.pace !== undefined
   const hasRate = properties.rate !== undefined
   if (hasPace === hasRate) {
     return reject("measure_invalid_policy", `${subject} requires exactly one of pace or rate`)
   }
 
-  // assertSpeechEstimatePolicy（program.ts:136-149）的值域條件
+  // assertSpeechEstimatePolicy（program.ts:136-149）的值域条件
   if (!["auto", "en", "zh", "ja", "es"].includes(language)) {
     return reject("measure_invalid_policy", `${subject}.language must be one of auto, en, zh, ja, es`)
   }
@@ -354,7 +354,7 @@ export function measureScript(text: string, opts: MeasureOptions = {}): MeasureR
     ...(properties.padding !== undefined ? { padding: properties.padding as number } : {}),
   }
 
-  // assertSpeechText（program.ts:159-165，逐字訊息）
+  // assertSpeechText（program.ts:159-165，逐字讯息）
   const value = typeof text === "string" ? text : ""
   if (value.trim().length === 0) {
     return reject("measure_empty_text", "Speech Text is invalid", policy)
@@ -365,7 +365,7 @@ export function measureScript(text: string, opts: MeasureOptions = {}): MeasureR
       ? detectSpeechEstimateLanguage(value)
       : (language as ResolvedSpeechEstimateLanguage)
 
-  // countSpeechEstimateUnits ＋ 主公式（program.ts:180-184，逐字訊息）
+  // countSpeechEstimateUnits ＋ 主公式（program.ts:180-184，逐字讯息）
   const units = countSpeechEstimateUnits(value, resolved)
   if (units < 1) {
     return reject("measure_no_units", "Speech Text contains no countable speech units", policy)

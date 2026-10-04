@@ -1,6 +1,6 @@
 /**
- * context-menu-items —— CanvasEmbed 右鍵選單工廠（自 CanvasEmbed.tsx L1079-1228 機械搬遷，項目 id/label/shortcut 不變）。
- * 原 useMemo 閉包捕獲 20+ handlers；工廠化後顯式傳參，組件殼仍以原依賴陣列 memo 呼叫。
+ * context-menu-items —— CanvasEmbed 右键选单工厂（自 CanvasEmbed.tsx L1079-1228 机械搬迁，项目 id/label/shortcut 不变）。
+ * 原 useMemo 闭包捕获 20+ handlers；工厂化后显式传参，组件壳仍以原依赖阵列 memo 呼叫。
  */
 import { previousNodeVersion } from "@/lib/canvas/node-versions";
 import { fetchFormatCrops } from "@/lib/canvas/client";
@@ -47,11 +47,11 @@ export interface CanvasEmbedMenuItemsInput {
   downloadBatch: (parentId: string) => Promise<void>;
   handleDeleteNode: (nodeId: string) => void;
   deleteSelected: () => void;
-  /** 語義縮放 LOD 3（2026-09-30）：打開工程透析面板；缺省 = 不出該項。 */
+  /** 语义缩放 LOD 3（2026-09-30）：打开工程透析面板；缺省 = 不出该项。 */
   openEngineering?: (nodeId: string) => void;
 }
 
-/** 變體母卡上限：超過即整個「存为角色变体卡」子選單不渲染（不造死按鈕、不靜默截斷）。 */
+/** 变体母卡上限：超过即整个「存为角色变体卡」子选单不渲染（不造死按钮、不静默截断）。 */
 export const MAX_VARIANT_MOTHER_CARDS = 8;
 
 export function buildCanvasEmbedMenuItems({
@@ -149,8 +149,8 @@ export function buildCanvasEmbedMenuItems({
       : []),
     { id: "connect", label: "连线到其他节点", onSelect: () => setConnecting({ sourceId: node.id, cursor: null }) },
     { id: "rename", label: "重命名", onSelect: () => {
-      // 觸發節點內編輯：直接改 title 為當前值走 NodeView 雙擊路徑成本更高，
-      // 這裡用 prompt() 太醜——選單觸發交給 NodeView 的雙擊；此項用瀏覽器原生輸入。
+      // 触发节点内编辑：直接改 title 为当前值走 NodeView 双击路径成本更高，
+      // 这里用 prompt() 太丑——选单触发交给 NodeView 的双击；此项用浏览器原生输入。
       const next = window.prompt("重命名节点", node.title);
       if (next && next.trim() && next.trim() !== node.title) state.renameNode(node.id, next.trim());
     } },
@@ -165,8 +165,8 @@ export function buildCanvasEmbedMenuItems({
     items.push({ id: "font-down", label: "缩小字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.max(10, (node.metadata?.fontSize ?? 14.5) - 2) }) });
     items.push({ id: "save-asset-text", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
   }
-  // P2：reference 節點 → 存為角色/場景卡（鎖定到本畫布，所有生成自動攜帶）。
-  // B：五值化——子項由 CHARACTER_CARD_KIND_VALUES 驅動（前三個 id 與舊字面值逐字相同）。
+  // P2：reference 节点 → 存为角色/场景卡（锁定到本画布，所有生成自动携带）。
+  // B：五值化——子项由 CHARACTER_CARD_KIND_VALUES 驱动（前三个 id 与旧字面值逐字相同）。
   if (node.type === CanvasNodeType.Reference && url) {
     items.push("separator");
     items.push({
@@ -178,8 +178,8 @@ export function buildCanvasEmbedMenuItems({
         onSelect: () => void saveNodeAsCard(node, kind),
       })),
     });
-    // C：變體入口——母卡清單＝畫布上既有的角色卡。零母卡不渲染（不留死路徑）；
-    // 母卡超過上限時整個子選單不渲染（不做「更多母卡」死按鈕、不靜默截斷）。
+    // C：变体入口——母卡清单＝画布上既有的角色卡。零母卡不渲染（不留死路径）；
+    // 母卡超过上限时整个子选单不渲染（不做「更多母卡」死按钮、不静默截断）。
     const motherCards = state.characterCards.filter((card) => card.kind === "character");
     if (motherCards.length > 0 && motherCards.length <= MAX_VARIANT_MOTHER_CARDS) {
       items.push({
@@ -193,7 +193,7 @@ export function buildCanvasEmbedMenuItems({
       });
     }
   }
-  // 圖片節點 → 帶角色的參考圖節點（保留位置/尺寸/圖片，補默認角色）。
+  // 图片节点 → 带角色的参考图节点（保留位置/尺寸/图片，补默认角色）。
   if (node.type === CanvasNodeType.Image && url) {
     items.push("separator");
     items.push({
@@ -266,8 +266,8 @@ export function buildCanvasEmbedMenuItems({
 }
 
 /**
- * 一稿多版位：伺服器按 AD_SIZE_OPTIONS 裁出能裁的版位（擴圖版位無上游，照實跳過），
- * 產物落成源圖右側的子圖節點＋連線——形狀與「编辑图片 → 裁剪」產出（CanvasEmbed
+ * 一稿多版位：伺服器按 AD_SIZE_OPTIONS 裁出能裁的版位（扩图版位无上游，照实跳过），
+ * 产物落成源图右侧的子图节点＋连线——形状与「编辑图片 → 裁剪」产出（CanvasEmbed
  * handleEditorProduce）一致。
  */
 async function produceFormatCrops(state: UseCanvasChatReturn, source: CanvasNode, url: string): Promise<void> {

@@ -8,39 +8,39 @@ import { cn } from "@/lib/utils";
 import { resolveDesktopDownload, type DesktopDownload } from "@/lib/desktop-releases";
 
 /**
- * 桌面版下載鈕（單一元件，兩個變體）。
+ * 桌面版下载钮（单一元件，两个变体）。
  *
- * 暴君原話「搞弹窗就有点蠢了，点击按钮直接识别浏览器环境然后下载就行了」——
- * 所以沒有選單：單擊即由 UA 判定平台並動作。
- * - `icon`：header 用（極簡圖標態、`hidden xl:flex`、aria/title「下载桌面版」）。
- * - `hero`：宣傳片結尾那顆大的；文字隨平台自動變（Linux/Windows 各自副檔名）。
+ * 暴君原话「搞弹窗就有点蠢了，点击按钮直接识别浏览器环境然后下载就行了」——
+ * 所以没有选单：单击即由 UA 判定平台并动作。
+ * - `icon`：header 用（极简图标态、`hidden xl:flex`、aria/title「下载桌面版」）。
+ * - `hero`：宣传片结尾那颗大的；文字随平台自动变（Linux/Windows 各自副档名）。
  *
- * 判定邏輯一律走 `resolveDesktopDownload`（`@/lib/desktop-releases`），此檔不另寫一份。
- * 平台判定放 useEffect：SSR 沒有 navigator，先渲染中性文字，避免 hydration 不一致。
+ * 判定逻辑一律走 `resolveDesktopDownload`（`@/lib/desktop-releases`），此档不另写一份。
+ * 平台判定放 useEffect：SSR 没有 navigator，先渲染中性文字，避免 hydration 不一致。
  *
- * 殼內一律不渲染（單一真源）：跑在 Eimu 桌面殼內（`window.eimuShell` 存在）時，使用者
- * 已在桌面 App 裡，任何「下載桌面版」入口都是冗餘；而 0.3.2+ 殼已內建 electron-updater
- * 背景靜默更新（退出時自動安裝），站內不該再有任何「叫使用者去下載」的 UI。
- * `useEimuShell()` 的值在 effect 後才有，故用 `checked` 閘門讓「判定尚未完成」的
- * 首幀也回 null——瀏覽器端 mount 後照常渲染，殼內永遠不渲染，避免第一幀閃現。
+ * 壳内一律不渲染（单一真源）：跑在 Eimu 桌面壳内（`window.eimuShell` 存在）时，使用者
+ * 已在桌面 App 里，任何「下载桌面版」入口都是冗余；而 0.3.2+ 壳已内建 electron-updater
+ * 背景静默更新（退出时自动安装），站内不该再有任何「叫使用者去下载」的 UI。
+ * `useEimuShell()` 的值在 effect 后才有，故用 `checked` 闸门让「判定尚未完成」的
+ * 首帧也回 null——浏览器端 mount 后照常渲染，壳内永远不渲染，避免第一帧闪现。
  */
 
 export interface DesktopDownloadButtonProps {
   variant: "icon" | "hero";
-  /** 給 header icon 態併入頁內極簡 chrome（FLAT_CHROME）用。 */
+  /** 给 header icon 态并入页内极简 chrome（FLAT_CHROME）用。 */
   className?: string;
 }
 
-/** 封面畫布 1920×1080——與 `PromoIntroOverlay`／`promo-video/cover.html` 同一份真源。 */
+/** 封面画布 1920×1080——与 `PromoIntroOverlay`／`promo-video/cover.html` 同一份真源。 */
 const COVER_W = 1920;
 const COVER_H = 1080;
 const pct = (value: number, total: number): string => `${((value / total) * 100).toFixed(4)}%`;
 const cqh = (px: number): string => `${((px / COVER_H) * 100).toFixed(4)}cqh`;
 
 /**
- * hero 鈕在封面畫布上的矩形：左緣與 `.prompt`（left 294）／`.cap`（left 306）對齊。
- * `.prompt` 佔 y 690–802、`.cap` 佔 y 832–861，故 top 890 起、高 92 —— 兩者皆不重疊。
- * 尺寸全走 cqh()／pct()，任何視窗與直式放大態都與封面等比。
+ * hero 钮在封面画布上的矩形：左缘与 `.prompt`（left 294）／`.cap`（left 306）对齐。
+ * `.prompt` 占 y 690–802、`.cap` 占 y 832–861，故 top 890 起、高 92 —— 两者皆不重叠。
+ * 尺寸全走 cqh()／pct()，任何视窗与直式放大态都与封面等比。
  */
 const HERO = { left: 294, top: 890, height: 92 } as const;
 
@@ -49,7 +49,7 @@ const MAC_UNAVAILABLE = {
   description: "请在浏览器直接访问 eimu.dev 使用网页版，桌面客户端目前只提供 Windows 与 Linux。",
 };
 
-/** 觸發下載：臨時 <a>。回應帶 `content-disposition: attachment`，不會離開頁面。 */
+/** 触发下载：临时 <a>。回应带 `content-disposition: attachment`，不会离开页面。 */
 function triggerDownload(url: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -63,8 +63,8 @@ export function DesktopDownloadButton({ variant, className }: DesktopDownloadBut
   const { toast } = useToast();
   const shell = useEimuShell();
   const [download, setDownload] = useState<DesktopDownload | null>(null);
-  // `useEimuShell()` 在 effect 後才有值：用 checked 閘門讓判定完成前也回 null，
-  // 殼內首幀不閃現下載鈕（瀏覽器端 mount 後照常渲染）。
+  // `useEimuShell()` 在 effect 后才有值：用 checked 闸门让判定完成前也回 null，
+  // 壳内首帧不闪现下载钮（浏览器端 mount 后照常渲染）。
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -72,11 +72,11 @@ export function DesktopDownloadButton({ variant, className }: DesktopDownloadBut
     setChecked(true);
   }, []);
 
-  // 殼內不渲染任何 variant（單一真源）；判定尚未完成也不渲染，避免首幀閃現。
+  // 壳内不渲染任何 variant（单一真源）；判定尚未完成也不渲染，避免首帧闪现。
   if (!checked || shell) return null;
 
   const handleActivate = (event?: React.MouseEvent) => {
-    // 結尾封面父層 onClick 會關登入小框；下載鈕不是那個意思，擋掉冒泡。
+    // 结尾封面父层 onClick 会关登入小框；下载钮不是那个意思，挡掉冒泡。
     event?.stopPropagation();
     if (!download) return;
     if (download.ok) {
@@ -103,10 +103,10 @@ export function DesktopDownloadButton({ variant, className }: DesktopDownloadBut
     );
   }
 
-  // hero：unknown（Android／手機）不渲染——那台裝置裝不了桌面版，擺顆按不到結果的鈕只是噪音。
+  // hero：unknown（Android／手机）不渲染——那台装置装不了桌面版，摆颗按不到结果的钮只是噪音。
   if (download && !download.ok && download.reason === "unknown") return null;
 
-  // 平台判定前（SSR ＋ 首幀）與 mac 一律中性文字；iOS/Android 上不會出現上下字串不一致。
+  // 平台判定前（SSR ＋ 首帧）与 mac 一律中性文字；iOS/Android 上不会出现上下字串不一致。
   const info = download?.ok ? download : null;
   const label = info ? `下载 ${info.label} 客户端` : "下载桌面客户端";
   const ext = info ? info.ext : null;

@@ -1,10 +1,10 @@
-// 付款對帳器測試：真輸入 → 真輸出（注入 fake sql / fake 支付商逐筆查 / fake 兌換碼，零外網）。
+// 付款对帐器测试：真输入 → 真输出（注入 fake sql / fake 支付商逐笔查 / fake 兑换码，零外网）。
 //
-// 核心驗收：09-19 真單（IMGMU7UH9SFF9A21D，實付 ¥9.93、夢芽 100 金币、我方零履約痕跡）
-// 必須被判為 paid_unfulfilled，且偵測到疑似人工補償碼時 manualReview=true（不得自動補交付）。
+// 核心验收：09-19 真单（IMGMU7UH9SFF9A21D，实付 ¥9.93、梦芽 100 金币、我方零履约痕迹）
+// 必须被判为 paid_unfulfilled，且侦测到疑似人工补偿码时 manualReview=true（不得自动补交付）。
 //
-// 2026-10-04 契約修正：上游 `act=order` 是「按單號單查」不是列表端點，成功碼是 1
-// （code=0 是失敗）。對帳改為「由我方已知單號逐筆查支付商」，故本測試注入 fetchOrder。
+// 2026-10-04 契约修正：上游 `act=order` 是「按单号单查」不是列表端点，成功码是 1
+// （code=0 是失败）。对帐改为「由我方已知单号逐笔查支付商」，故本测试注入 fetchOrder。
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -49,21 +49,21 @@ function redemption(overrides: Partial<GatewayRedemption>): GatewayRedemption {
 
 // ── 套餐解析 ────────────────────────────────────────────────────────────
 
-test("resolveOrderPlan：name 內金币數優先（夢芽 100 金币 → 50,000,000 quota）", () => {
+test("resolveOrderPlan：name 内金币数优先（梦芽 100 金币 → 50,000,000 quota）", () => {
   const plan = resolveOrderPlan(order());
   assert.equal(plan?.coins, 100);
   assert.equal(plan?.quota, 100 * QUOTA_PER_COIN);
 });
 
-test("resolveOrderPlan：name 認不出時用 money 對檔位（容忍手續費 9.93→starter / 7.00→first-charge）", () => {
+test("resolveOrderPlan：name 认不出时用 money 对档位（容忍手续费 9.93→starter / 7.00→first-charge）", () => {
   const starter = resolveOrderPlan(order({ name: "eimu.dev 套餐", money: 9.93 }));
   assert.equal(starter?.planId, "starter");
   const firstCharge = resolveOrderPlan(order({ name: "eimu.dev 套餐", money: 7 }));
   assert.equal(firstCharge?.planId, "first-charge");
 });
 
-test("resolveOrderPlan：param 自簽可精確還原 planId；認不出回 null", () => {
-  // planId=popular, userId=253 的自簽 param（取自已登入下單形狀 popular.253.<hmac8>）。
+test("resolveOrderPlan：param 自签可精确还原 planId；认不出回 null", () => {
+  // planId=popular, userId=253 的自签 param（取自已登入下单形状 popular.253.<hmac8>）。
   const param = buildMapayOrderParam("popular", 253, RELAY_SECRET);
   const saved = process.env.GENERATION_BILLING_RELAY_SECRET;
   process.env.GENERATION_BILLING_RELAY_SECRET = RELAY_SECRET;
@@ -78,7 +78,7 @@ test("resolveOrderPlan：param 自簽可精確還原 planId；認不出回 null"
   assert.equal(resolveOrderPlan(order({ name: "eimu.dev 套餐", money: 12345 })), null);
 });
 
-// ── 判定（純函式） ──────────────────────────────────────────────────────
+// ── 判定（纯函式） ──────────────────────────────────────────────────────
 
 test("判定：mapay_credit=applied → fulfilled", () => {
   const finding = classifyMapayPaidOrder({
@@ -93,7 +93,7 @@ test("判定：mapay_credit=applied → fulfilled", () => {
   assert.equal(finding.evidence.mapayCreditApplied, true);
 });
 
-test("判定：account_ledger recharge(redemption:<單號>) → fulfilled（獨立於 mapay_credit 的第二證據）", () => {
+test("判定：account_ledger recharge(redemption:<单号>) → fulfilled（独立于 mapay_credit 的第二证据）", () => {
   const finding = classifyMapayPaidOrder({
     order: order(),
     evidence: { creditStatus: null, redemption: null, ledgerRecharge: { amountQuota: 50_000_000, createdAt: "2026-09-19T06:00:00.000Z" } },
@@ -106,7 +106,7 @@ test("判定：account_ledger recharge(redemption:<單號>) → fulfilled（獨�
   assert.equal(finding.evidence.ledgerRecharge, true);
 });
 
-test("判定：兌換碼 MP<後18位> 且 quota 相符 → fulfilled；quota 不符 → unknown（凍結不誤發）", () => {
+test("判定：兑换码 MP<后18位> 且 quota 相符 → fulfilled；quota 不符 → unknown（冻结不误发）", () => {
   const matched = classifyMapayPaidOrder({
     order: order(),
     evidence: { creditStatus: null, redemption: { name: "MPIMGORDER1", quota: 50_000_000, used: true, createdAt: null }, ledgerRecharge: null },
@@ -129,7 +129,7 @@ test("判定：兌換碼 MP<後18位> 且 quota 相符 → fulfilled；quota 不
   assert.equal(mismatch.manualReview, true);
 });
 
-test("判定：mapay_credit 占位但結果未定（pending/unknown）→ unknown（不開第二條發放通道）", () => {
+test("判定：mapay_credit 占位但结果未定（pending/unknown）→ unknown（不开第二条发放通道）", () => {
   for (const status of ["pending", "unknown"] as const) {
     const finding = classifyMapayPaidOrder({
       order: order(),
@@ -144,7 +144,7 @@ test("判定：mapay_credit 占位但結果未定（pending/unknown）→ unknow
   }
 });
 
-test("判定：三條證據皆無 → paid_unfulfilled（09-19 那筆落此桶）", () => {
+test("判定：三条证据皆无 → paid_unfulfilled（09-19 那笔落此桶）", () => {
   const finding = classifyMapayPaidOrder({
     order: order(),
     evidence: { creditStatus: null, redemption: null, ledgerRecharge: null },
@@ -157,7 +157,7 @@ test("判定：三條證據皆無 → paid_unfulfilled（09-19 那筆落此桶�
   assert.equal(finding.manualReview, false);
 });
 
-test("判定：證據來源讀不到時不誤判未履約 → unknown（禁同源斷言的空集合陷阱）", () => {
+test("判定：证据来源读不到时不误判未履约 → unknown（禁同源断言的空集合陷阱）", () => {
   const finding = classifyMapayPaidOrder({
     order: order(),
     evidence: { creditStatus: null, redemption: null, ledgerRecharge: null },
@@ -167,42 +167,42 @@ test("判定：證據來源讀不到時不誤判未履約 → unknown（禁同�
     evidenceUnreadable: true,
   });
   assert.equal(finding.verdict, "unknown");
-  assert.match(finding.reason, /證據來源讀取失敗/);
+  assert.match(finding.reason, /证据来源读取失败/);
 });
 
-test("人工補償碼候選：只列非系統碼、且只作候選不當證據", () => {
+test("人工补偿码候选：只列非系统码、且只作候选不当证据", () => {
   const candidates = manualCompensationCandidatesFor(
     order({ paidAt: "2026-09-19T06:08:00.000Z", money: 9.93 }),
     [
       redemption({ id: 1, name: "MANUAL-1500C-0919", quota: 750_000_000 }),
       redemption({ id: 2, name: "MPFIX993-0919", quota: 50_000_000 }),
-      redemption({ id: 3, name: "MPIMGMQN87UBEB0DBDD", quota: 50_000_000 }), // 系統碼，不得入候選
-      redemption({ id: 4, name: "eimu1500", quota: 750_000_000 }), // 無日期無金額，不入
+      redemption({ id: 3, name: "MPIMGMQN87UBEB0DBDD", quota: 50_000_000 }), // 系统码，不得入候选
+      redemption({ id: 4, name: "eimu1500", quota: 750_000_000 }), // 无日期无金额，不入
     ],
   );
   assert.deepEqual(candidates.sort(), ["MANUAL-1500C-0919", "MPFIX993-0919"]);
 });
 
-// ── 候選單號推導（取代無法列舉的窗口清單） ──────────────────────────────
+// ── 候选单号推导（取代无法列举的窗口清单） ──────────────────────────────
 
-test("候選單號反推與正規化：MP<後18位> 可反推、逾 18 位截斷不猜、非法字元丟棄", () => {
+test("候选单号反推与正规化：MP<后18位> 可反推、逾 18 位截断不猜、非法字元丢弃", () => {
   const eighteen = "ABCDEFGHIJKLMNOPQR"; // 18 位
   assert.deepEqual(
     mapayCandidateOrderNumbersFromRedemptionNames([
       "MPIMGMU7UH9SFF9A21D",
       `MP${eighteen}`,
-      `MP${eighteen}X`, // 19 位＝已截斷，不可反推
-      "MANUAL-0919", // 非系統碼
-      "mp-lower", // 小寫＋連字號，不符系統碼格式
+      `MP${eighteen}X`, // 19 位＝已截断，不可反推
+      "MANUAL-0919", // 非系统码
+      "mp-lower", // 小写＋连字号，不符系统码格式
     ]).sort(),
     ["IMGMU7UH9SFF9A21D", eighteen].sort(),
   );
   assert.deepEqual(normalizeMapayOrderCandidates([" IMG1 ", "IMG1", "bad name", ""]), ["IMG1"]);
 });
 
-// ── 主入口（真輸入真輸出） ───────────────────────────────────────────────
+// ── 主入口（真输入真输出） ───────────────────────────────────────────────
 
-test("09-19 真單實證（顯式探針 orders=[]）：支付商回報已付款、我方零履約痕跡、只有人工補償碼 → paid_unfulfilled + manualReview", async () => {
+test("09-19 真单实证（显式探针 orders=[]）：支付商回报已付款、我方零履约痕迹、只有人工补偿码 → paid_unfulfilled + manualReview", async () => {
   const alerts: string[] = [];
   const report = await reconcileMapayOrders(
     {},
@@ -244,7 +244,7 @@ test("09-19 真單實證（顯式探針 orders=[]）：支付商回報已付款�
   assert.match(formatMapayOrderReconciliationReport(report), /paid_unfulfilled.*IMGMU7UH9SFF9A21D/);
 });
 
-test("默認取數：候選單號由 intake／credit／ledger(redemption:)／兌換碼名(MP<後18位>) 推導，逐筆查支付商", async () => {
+test("默认取数：候选单号由 intake／credit／ledger(redemption:)／兑换码名(MP<后18位>) 推导，逐笔查支付商", async () => {
   const queried: string[] = [];
   const report = await reconcileMapayOrders(
     {},
@@ -268,12 +268,12 @@ test("默認取數：候選單號由 intake／credit／ledger(redemption:)／兌
   assert.equal(report.residue.candidates, 4);
   assert.equal(report.residue.found, 4);
   assert.equal(report.checked, 4);
-  assert.equal(report.fulfilled, 2); // ledger redemption 證據 + 兌換碼 MPIMGCODE
+  assert.equal(report.fulfilled, 2); // ledger redemption 证据 + 兑换码 MPIMGCODE
   assert.equal(report.paidUnfulfilled.length, 2);
   assert.equal(report.residue.upstreamEmpty, false);
 });
 
-test("候選單號全部查無（found=0）→ upstream_empty=true，不得當健康", async () => {
+test("候选单号全部查无（found=0）→ upstream_empty=true，不得当健康", async () => {
   const report = await reconcileMapayOrders(
     {},
     {
@@ -289,10 +289,10 @@ test("候選單號全部查無（found=0）→ upstream_empty=true，不得當�
   assert.equal(report.residue.notFound, 2);
   assert.equal(report.residue.upstreamEmpty, true);
   assert.equal(report.checked, 0);
-  assert.match(report.notes.join("\n"), /查無訂單實體/);
+  assert.match(report.notes.join("\n"), /查无订单实体/);
 });
 
-test("逐筆查詢拋錯 → query_errors 記單號（與證據不可讀分開），且不當健康", async () => {
+test("逐笔查询抛错 → query_errors 记单号（与证据不可读分开），且不当健康", async () => {
   const report = await reconcileMapayOrders(
     {},
     {
@@ -311,7 +311,7 @@ test("逐筆查詢拋錯 → query_errors 記單號（與證據不可讀分開�
   assert.equal(report.checked, 0);
 });
 
-test("已履約單（mapay_credit=applied，候選由 credit 表推導）記 fulfilled", async () => {
+test("已履约单（mapay_credit=applied，候选由 credit 表推导）记 fulfilled", async () => {
   const report = await reconcileMapayOrders(
     {},
     {
@@ -326,7 +326,7 @@ test("已履約單（mapay_credit=applied，候選由 credit 表推導）記 ful
   assert.equal(report.paidUnfulfilled.length, 0);
 });
 
-test("兌換碼證據命中 → fulfilled；未付款單不進 checked（殘差如實計數）", async () => {
+test("兑换码证据命中 → fulfilled；未付款单不进 checked（残差如实计数）", async () => {
   const report = await reconcileMapayOrders(
     {},
     {
@@ -344,7 +344,7 @@ test("兌換碼證據命中 → fulfilled；未付款單不進 checked（殘差�
   assert.equal(report.residue.notPaid, 1);
 });
 
-test("證據來源讀取失敗（mapay_credit 查詢拋錯）→ 該單凍結 unknown，不誤判未履約", async () => {
+test("证据来源读取失败（mapay_credit 查询抛错）→ 该单冻结 unknown，不误判未履约", async () => {
   const report = await reconcileMapayOrders(
     {},
     {
@@ -360,21 +360,21 @@ test("證據來源讀取失敗（mapay_credit 查詢拋錯）→ 該單凍結 un
   assert.deepEqual(report.residue.evidenceUnreadable, ["mapay_credit"]);
 });
 
-test("未配置控制面資料庫：configured=false、清楚說明不可用（不假裝健康）", async () => {
+test("未配置控制面资料库：configured=false、清楚说明不可用（不假装健康）", async () => {
   const saved = process.env.GENERATION_DATABASE_URL;
   delete process.env.GENERATION_DATABASE_URL;
   try {
     const report = await reconcileMapayOrders({}, { now: new Date("2026-10-04T00:00:00.000Z") });
     assert.equal(report.configured, false);
-    assert.match(report.notes.join("\n"), /沒有控制面資料庫連線/);
+    assert.match(report.notes.join("\n"), /没有控制面资料库连线/);
   } finally {
     if (saved !== undefined) process.env.GENERATION_DATABASE_URL = saved;
   }
 });
 
-// ── 只讀守門（變更探針） ────────────────────────────────────────────────
+// ── 只读守门（变更探针） ────────────────────────────────────────────────
 
-test("變更探針：對帳模組對我方帳本／額度／支付商都只有讀（無 INSERT/UPDATE/DELETE）", () => {
+test("变更探针：对帐模组对我方帐本／额度／支付商都只有读（无 INSERT/UPDATE/DELETE）", () => {
   const source = readFileSync(join(process.cwd(), "src/lib/generation-core/mapay-order-reconciliation.ts"), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
@@ -383,7 +383,7 @@ test("變更探針：對帳模組對我方帳本／額度／支付商都只有�
   assert.doesNotMatch(source, /\bDELETE FROM\b/i);
 });
 
-// ── 假控制面 SQL（對帳只用到 SELECT） ───────────────────────────────────
+// ── 假控制面 SQL（对帐只用到 SELECT） ───────────────────────────────────
 
 function fakeSql(seed: {
   intake?: Record<string, unknown>[];
@@ -399,7 +399,7 @@ function fakeSql(seed: {
       return seed.credit;
     }
     if (query.includes("FROM account_ledger")) return seed.ledger;
-    throw new Error(`fakeSql: 未預期的查詢：${query}`);
+    throw new Error(`fakeSql: 未预期的查询：${query}`);
   }) as unknown as GenerationSql;
   return tagged;
 }

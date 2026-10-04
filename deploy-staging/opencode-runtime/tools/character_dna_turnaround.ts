@@ -10,39 +10,39 @@ import {
   runGenBatch,
 } from "../lib/img-orchestrate"
 
-// 角色 DNA 三視圖（2026-08-31 片2）：8 維 DNA（髮型/臉型/體型/膚色/服裝/色板/年齡感/標誌物）
-// 由輸入解析或 LLM 補全 → 拼固定後綴模板 → 生三視圖。誠實：DNA 是結構化一致性錨點
-// （把特徵寫進每個 prompt），非魔法編碼；seed 平台不可控標 null。
+// 角色 DNA 三视图（2026-08-31 片2）：8 维 DNA（发型/脸型/体型/肤色/服装/色板/年龄感/标志物）
+// 由输入解析或 LLM 补全 → 拼固定后缀模板 → 生三视图。诚实：DNA 是结构化一致性锚点
+// （把特征写进每个 prompt），非魔法编码；seed 平台不可控标 null。
 
 const DNA_KEYS = ["hair", "face_shape", "body_type", "skin_tone", "outfit", "palette", "age_vibe", "signature"] as const
 
 const DNA_SYSTEM =
-  "你是角色設計助手。從角色設定提煉 8 維 DNA，只輸出一個 JSON 物件，鍵固定為：hair（髮型髮色）、face_shape（臉型）、body_type（體型）、skin_tone（膚色）、outfit（服裝）、palette（主色板，寫具體顏色詞）、age_vibe（年齡感）、signature（標誌性物件/特徵）。設定未提及的維度給與設定一致的合理值。值為簡短英文短語（生圖模型對英文響應最好）。"
+  "你是角色设计助手。从角色设定提炼 8 维 DNA，只输出一个 JSON 物件，键固定为：hair（发型发色）、face_shape（脸型）、body_type（体型）、skin_tone（肤色）、outfit（服装）、palette（主色板，写具体颜色词）、age_vibe（年龄感）、signature（标志性物件/特征）。设定未提及的维度给与设定一致的合理值。值为简短英文短语（生图模型对英文响应最好）。"
 
 export default tool({
   description:
-    "角色 DNA 三視圖：character_setting 填角色設定文字，輸出三視圖（正面/側面/背面）+ 8 維 DNA 簽名（髮型/臉型/體型/膚色/服裝/色板/年齡感/標誌物）。DNA 可由 dna 參數（JSON 物件字串）直給，否則用 LLM 從設定補全；DNA 表與後綴進 metadata 供後續步驟引用。誠實聲明：DNA 是結構化一致性錨點（把 8 維特徵固定寫入每個 prompt 後綴），不是魔法編碼；平台不支持 seed，seed 標 null。dry_run=true 只返回請求清單與報價，不提交生圖（LLM 補全 DNA 為內部通道不扣費，仍會執行以給完整 prompt）。",
+    "角色 DNA 三视图：character_setting 填角色设定文字，输出三视图（正面/侧面/背面）+ 8 维 DNA 签名（发型/脸型/体型/肤色/服装/色板/年龄感/标志物）。DNA 可由 dna 参数（JSON 物件字串）直给，否则用 LLM 从设定补全；DNA 表与后缀进 metadata 供后续步骤引用。诚实声明：DNA 是结构化一致性锚点（把 8 维特征固定写入每个 prompt 后缀），不是魔法编码；平台不支持 seed，seed 标 null。dry_run=true 只返回请求清单与报价，不提交生图（LLM 补全 DNA 为内部通道不扣费，仍会执行以给完整 prompt）。",
   args: {
-    character_setting: tool.schema.string().describe("角色設定文字（外貌/服裝/氣質等）"),
+    character_setting: tool.schema.string().describe("角色设定文字（外貌/服装/气质等）"),
     dna: tool.schema
       .string()
       .optional()
-      .describe(`可選：直給 8 維 DNA JSON 物件字串，鍵 ${DNA_KEYS.join("/")}`),
-    model: tool.schema.string().optional().describe(`生成模型，默認 ${ORCH_DEFAULT_MODEL}`),
+      .describe(`可选：直给 8 维 DNA JSON 物件字串，键 ${DNA_KEYS.join("/")}`),
+    model: tool.schema.string().optional().describe(`生成模型，默认 ${ORCH_DEFAULT_MODEL}`),
     size: tool.schema.string().optional().describe("尺寸：1024x1024 / 1536x1024 / 1024x1536 / 2048x2048"),
-    dry_run: tool.schema.boolean().optional().describe("true=只返回請求清單與報價，不提交生圖"),
+    dry_run: tool.schema.boolean().optional().describe("true=只返回请求清单与报价，不提交生图"),
   },
   async execute(args, context) {
     const setting = args.character_setting.trim()
-    if (!setting) return fail("missing_setting", "character_setting 不能為空", { title: "輸入非法" })
+    if (!setting) return fail("missing_setting", "character_setting 不能为空", { title: "输入非法" })
     let dna: Record<string, unknown> | null = null
     let dnaSource: "user" | "llm" | "unavailable" = "user"
     if (args.dna) {
       const p = parseJsonObject(args.dna, "dna")
-      if (!p.ok) return fail("invalid_dna", p.hint, { title: "輸入非法" })
+      if (!p.ok) return fail("invalid_dna", p.hint, { title: "输入非法" })
       dna = p.value
     } else {
-      const r = await llmChatJson(DNA_SYSTEM, `角色設定：${setting}`, 3000)
+      const r = await llmChatJson(DNA_SYSTEM, `角色设定：${setting}`, 3000)
       if (r.ok) {
         dna = {}
         for (const k of DNA_KEYS) dna[k] = String(r.data?.[k] ?? "")
@@ -55,7 +55,7 @@ export default tool({
       : ""
     const model = args.model ?? ORCH_DEFAULT_MODEL
     const size = normalizeSize(args.size)
-    const prompt = `character turnaround sheet, "${setting}", shown in front view, side view and back view on one sheet, full body, neutral pose, plain white background, character DNA lock — ${dnaSuffix || "(DNA 補全不可用，僅憑設定)"}`
+    const prompt = `character turnaround sheet, "${setting}", shown in front view, side view and back view on one sheet, full body, neutral pose, plain white background, character DNA lock — ${dnaSuffix || "(DNA 补全不可用，仅凭设定)"}`
     const reqs = [{ tag: "turnaround", prompt, model, size, n: 1 }]
     if (args.dry_run) {
       return ok({
@@ -65,12 +65,12 @@ export default tool({
         ...(await planRequests(reqs, context.sessionID, context.abort)),
       })
     }
-    const batch = await runGenBatch(reqs, context.sessionID, context.abort, `角色 DNA 三視圖（${model}）`)
-    if (!batch.ok) return fail(batch.code, batch.hint, { title: "生圖失敗", ...batch.detail })
+    const batch = await runGenBatch(reqs, context.sessionID, context.abort, `角色 DNA 三视图（${model}）`)
+    if (!batch.ok) return fail(batch.code, batch.hint, { title: "生图失败", ...batch.detail })
     const r0 = batch.results[0]
     return ok(
       {
-        title: r0.status === "succeeded" ? "DNA 三視圖完成" : "DNA 三視圖失敗",
+        title: r0.status === "succeeded" ? "DNA 三视图完成" : "DNA 三视图失败",
         dna,
         dna_source: dnaSource,
         dna_suffix: dnaSuffix || null,
@@ -82,7 +82,7 @@ export default tool({
         cost_coins: r0.cost_coins,
         ...(r0.error ? { error: r0.error } : {}),
         seed_policy: SEED_NOTE,
-        note: "dna/dna_suffix 即一致性錨點：後續任何步驟把 dna_suffix 原樣附加到 prompt 尾部即可複用本角色。",
+        note: "dna/dna_suffix 即一致性锚点：后续任何步骤把 dna_suffix 原样附加到 prompt 尾部即可复用本角色。",
       },
       { dna, dna_suffix: dnaSuffix || null, url: r0.url, seed: null },
     )

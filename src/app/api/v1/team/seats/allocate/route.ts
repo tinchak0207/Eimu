@@ -1,16 +1,16 @@
-// POST /v1/team/seats/allocate —— 席位 ↔ 配額分配（刀 3）。
+// POST /v1/team/seats/allocate —— 席位 ↔ 配额分配（刀 3）。
 //
-//   入參：{ member_user_id, seats, per_seat_coins }
-//   出參：目標額度（seats × per_seat_coins 幣）＋ 成員桶的權威讀數（new-api）＋
-//        本次實際轉移（正 = 劃出、負 = 回收、0 = 幂等 no-op）。
+//   入参：{ member_user_id, seats, per_seat_coins }
+//   出参：目标额度（seats × per_seat_coins 币）＋ 成员桶的权威读数（new-api）＋
+//        本次实际转移（正 = 划出、负 = 回收、0 = 幂等 no-op）。
 //
 // 唯一通路：src/lib/generation-core/team-seat-allocation.ts → member-quota.ts 的
-// allocateMemberQuota（主帳扣、成員加、先扣後加失敗回滾、團隊鎖串行化）。
-// **本路由不寫任何本地點數**（禁影子帳本）：配額真相只在 new-api users.quota。
+// allocateMemberQuota（主帐扣、成员加、先扣后加失败回滚、团队锁串行化）。
+// **本路由不写任何本地点数**（禁影子帐本）：配额真相只在 new-api users.quota。
 //
-// 成員身份按 user（member_user_id，019 的 user 層模型：配額桶在成員 user 身上），
-// 不走 key——同一 user 的多把密鑰共用同一桶。鑑權與回執形狀逐行沿用同群組的
-// /v1/team/quota：團隊主帳 = 呼叫方密鑰的 user_id（不從 body 取）。
+// 成员身份按 user（member_user_id，019 的 user 层模型：配额桶在成员 user 身上），
+// 不走 key——同一 user 的多把密钥共用同一桶。鉴权与回执形状逐行沿用同群组的
+// /v1/team/quota：团队主帐 = 呼叫方密钥的 user_id（不从 body 取）。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 成員不得自行分配額度（同 /v1/team/quota：成員 user 已在名冊裡 ⇒ 403）。
+  // 成员不得自行分配额度（同 /v1/team/quota：成员 user 已在名册里 ⇒ 403）。
   const callerIsMember = await findMemberByUserId(auth.key.userId);
   if (callerIsMember) {
     return fail(403, "member_cannot_allocate", "成员密钥不得自行分配额度，请用团队主账号密钥操作。");

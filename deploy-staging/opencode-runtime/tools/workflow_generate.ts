@@ -32,9 +32,9 @@ export default tool({
       }
       return fail("workflow_generate_failed", [data?.reason, data?.error, data?.note, data?.status].filter(Boolean).join(" | ") || `HTTP ${res.status}`)
     } catch (e) {
-      // 誠實語義（2026-08-29 事故整改）：這裡的 timeout 只代表「工具層 30s 內
-      // 沒等到網關應答」（網關重啟/網絡抖動/負載高都可能），不能證明後端宕機，
-      // 更不能證明工作流已死。先 workflow_status 复核實際狀態，再決定重試。
+      // 诚实语义（2026-08-29 事故整改）：这里的 timeout 只代表「工具层 30s 内
+      // 没等到网关应答」（网关重启/网络抖动/负载高都可能），不能证明后端宕机，
+      // 更不能证明工作流已死。先 workflow_status 复核实际状态，再决定重试。
       return fail(
         "workflow_no_response",
         `30 秒内网关未应答（${(e as Error).message}）。这只说明工具层超时，不代表后端宕机或工作流死亡。先用 workflow_status 查该工作流的实际状态：仍在跑/部分完成就继续等或 rerun 失败节点；确认不存在才考虑重建。`,

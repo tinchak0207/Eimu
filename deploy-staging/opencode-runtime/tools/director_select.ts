@@ -1,8 +1,8 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, directorFetch, directorFail } from "../lib/director-common"
 
-// 3D 导演台焦点切换（片4，2026-09-02）。schema 照搬 kunpeng selectTool；文檔操作 =
-// setActivePlan/setActiveShot 兩 op（選中對象是 UI 層概念，gateway 文檔無 selectedIds 欄位）。
+// 3D 导演台焦点切换（片4，2026-09-02）。schema 照搬 kunpeng selectTool；文档操作 =
+// setActivePlan/setActiveShot 两 op（选中对象是 UI 层概念，gateway 文档无 selectedIds 栏位）。
 
 export default tool({
   description:

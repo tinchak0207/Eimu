@@ -3,7 +3,7 @@
  *
  * 顺序跟随 AGENT_TEMPLATES（小说 → 电商 → 短剧 → 艺术）。每页的卡面资料
  * （名称/环节/展示媒体）由 getWorkflowCard 从 agent-templates 取，
- * 本目录只放落地页文案。模组载入时校验环节数与 slug，漂移直接拋错。
+ * 本目录只放落地页文案。模组载入时校验环节数与 slug，漂移直接抛错。
  */
 
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";

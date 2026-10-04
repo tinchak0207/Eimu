@@ -1,19 +1,19 @@
 // desktop/scripts/e2e/session-cases-2.mjs
 //
-// 第二批「複雜會話」E2E（B3/B8/B9/B10/DROP/PASTE）。
+// 第二批「复杂会话」E2E（B3/B8/B9/B10/DROP/PASTE）。
 //
-// 紅線遵守：
-//   · 只讀複製 ~/.config/Eimu（seedProfileFrom），絕不修改原始 profile。
-//   · 不部署/不 SSH/不連 DB/不呼叫付費上游。只打生產站內附件端點（免費）。
-//   · 送給 agent 的訊息總數 ≤ 10，且一律只要求「分析/描述」；若觀察到生成型請求
-//     立即記錄並停止後續送訊息。
-//   · 輸出到 /tmp（不寫 repo）。
+// 红线遵守：
+//   · 只读复制 ~/.config/Eimu（seedProfileFrom），绝不修改原始 profile。
+//   · 不部署/不 SSH/不连 DB/不呼叫付费上游。只打生产站内附件端点（免费）。
+//   · 送给 agent 的讯息总数 ≤ 10，且一律只要求「分析/描述」；若观察到生成型请求
+//     立即记录并停止后续送讯息。
+//   · 输出到 /tmp（不写 repo）。
 //
 // 用法：
 //   node desktop/scripts/e2e/session-cases-2.mjs --out /tmp/eimu-e2e2-XXX --assets /tmp/eimu-e2e2-assets \
 //        [--only B3,B8,B9,B10,DROP,PASTE]
 //
-// 產物：outDir/<case>.json、outDir/shell/<case>.png、outDir/summary.json
+// 产物：outDir/<case>.json、outDir/shell/<case>.png、outDir/summary.json
 
 import fs from "node:fs";
 import os from "node:os";
@@ -37,7 +37,7 @@ function parseArgs(argv) {
   return out;
 }
 
-// ─────────────────────── 網路錄製（copy 自 session-cases.mjs，不得改既有檔）
+// ─────────────────────── 网路录制（copy 自 session-cases.mjs，不得改既有档）
 async function attachRecorder(shell) {
   const list = [];
   const byReq = new Map();
@@ -57,7 +57,7 @@ async function attachRecorder(shell) {
         const r = await cdp.send("Network.getRequestPostData", { requestId: p.requestId });
         if (r && r.postData) postByUrl.set(info.url, r.postData);
       } catch {
-        /* body 已釋放 */
+        /* body 已释放 */
       }
     });
   } catch {
@@ -150,7 +150,7 @@ async function attachRecorder(shell) {
   return { all: () => list.slice(), since: (ts) => list.filter((e) => e.ts >= ts), mark: () => Date.now() };
 }
 
-// ─────────────────────── 頁面探針
+// ─────────────────────── 页面探针
 async function probeComposer(shell) {
   return await shell.evaluate(() => {
     const ta = document.querySelector("#agent-composer-input");
@@ -243,7 +243,7 @@ async function attachFiles(shell, files) {
     const cdp = shell._e2eCdp;
     const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
     const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: FILE_SEL });
-    if (!nodeId) throw new Error("file input nodeId 為空");
+    if (!nodeId) throw new Error("file input nodeId 为空");
     await cdp.send("DOM.setFileInputFiles", { files: list, nodeId });
     return "cdp";
   } catch (e) {
@@ -291,7 +291,7 @@ const storedParts = (e) => {
 
 const GEN_HINT = /generate|batch|upscale|generation-jobs|storyboard-voiceover|run-service|canary-service|\/mcp\b|\/media\/|imageedit|video\/generate|music/i;
 
-/** 觀察一段時間內是否出現疑似生成型請求（非 GET，且 URL 命中 GEN_HINT）。 */
+/** 观察一段时间内是否出现疑似生成型请求（非 GET，且 URL 命中 GEN_HINT）。 */
 function scanGeneration(rec, t0) {
   return rec
     .since(t0)
@@ -299,7 +299,7 @@ function scanGeneration(rec, t0) {
     .map(netLine);
 }
 
-/** 送出一則純文字訊息；回 {sent, idle, elapsedMs}。 */
+/** 送出一则纯文字讯息；回 {sent, idle, elapsedMs}。 */
 async function sendText(shell, text) {
   await setText(shell, text);
   const clicked = await shell.evaluate(() => {
@@ -311,7 +311,7 @@ async function sendText(shell, text) {
   return clicked;
 }
 
-/** 等 agent 回合結束：先給在途窗口，再要求「連續 idle」。 */
+/** 等 agent 回合结束：先给在途窗口，再要求「连续 idle」。 */
 async function waitAgentIdle(shell, timeout = 150000) {
   const t0 = Date.now();
   await sleep(1800); // sending 窗口
@@ -335,7 +335,7 @@ async function waitAgentIdle(shell, timeout = 150000) {
   return { idle: false, elapsedMs: Date.now() - t0 };
 }
 
-/** 送一則訊息並等回合結束（最多 timeout）。 */
+/** 送一则讯息并等回合结束（最多 timeout）。 */
 async function sendAndWait(shell, text, timeout = 150000) {
   const t0 = Date.now();
   const sent = await sendText(shell, text);
@@ -381,7 +381,7 @@ const only = args.only;
 const want = (n) => !only || only.includes(n);
 
 async function main() {
-  log(`Eimu 第二批複雜會話 E2E`);
+  log(`Eimu 第二批复杂会话 E2E`);
   log(`out=${outDir}`);
   log(`assets: goodA=${sizeOf(A.goodA)}B goodB=${sizeOf(A.goodB)}B goodC=${sizeOf(A.goodC)}B small=${sizeOf(A.small)}B bad=${sizeOf(A.bad)}B`);
 
@@ -416,7 +416,7 @@ async function main() {
     fs.writeFileSync(path.join(outDir, "boot-probe.json"), JSON.stringify(bootProbe, null, 2));
     await shell.screenshot("boot");
 
-    // ───────────── B3：長對話多輪後才上傳 ─────────────
+    // ───────────── B3：长对话多轮后才上传 ─────────────
     if (want("B3")) {
       await clearChips(shell);
       await setText(shell, "");
@@ -473,7 +473,7 @@ async function main() {
         genSeen.length === 0;
       saveCase("B3", {
         status: pass ? "pass" : "fail",
-        title: "長對話多輪（純文字）後才上傳大檔：附件照常、無殘留、ticket 未過期",
+        title: "长对话多轮（纯文字）后才上传大档：附件照常、无残留、ticket 未过期",
         observations: {
           turns,
           messagesSentThisCase: turns.filter((t) => t.sent).length,
@@ -487,16 +487,16 @@ async function main() {
           ticketRequests: ticket.map((e) => ({ status: e.status, url: e.url })),
           ticketOk,
           videoUploadRequests: videoUpload.length,
-          whyComplex: "多輪對話累積上下文/訊息列表，附件管線與會話狀態的交互只在長會話暴露；空會話測不出殘留與 ticket 時序",
+          whyComplex: "多轮对话累积上下文/讯息列表，附件管线与会话状态的交互只在长会话暴露；空会话测不出残留与 ticket 时序",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine), ticket: ticket.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "B3 判準未全達（見 observations）",
+        error: pass ? undefined : "B3 判准未全达（见 observations）",
       });
       await clearChips(shell);
     }
 
-    // ───────────── B8：斷網/逾時降級（鏈式降級到明確終態） ─────────────
+    // ───────────── B8：断网/逾时降级（链式降级到明确终态） ─────────────
     if (want("B8")) {
       const cdp = await shell.context.newCDPSession(shell.page);
       await cdp.send("Network.enable");
@@ -515,7 +515,7 @@ async function main() {
         }
       };
 
-      // Phase A0（診斷）：只擋衍生檔上行 /attachments，用「小檔」→ 驗降級鏈本身是否通
+      // Phase A0（诊断）：只挡衍生档上行 /attachments，用「小档」→ 验降级链本身是否通
       await cdp.send("Network.setBlockedURLs", { urls: ["*/agent/sessions/*/attachments*"] });
       await clearChips(shell);
       await setText(shell, "");
@@ -529,7 +529,7 @@ async function main() {
       const shotA0 = await shell.screenshot("B8-A0-block-attachments-small");
       phases.push({
         phase: "A0-block-attachments-only-small",
-        expect: "衍生檔上行被擋 → 降級原檔直傳 video-upload（小檔）→ chip ready",
+        expect: "衍生档上行被挡 → 降级原档直传 video-upload（小档）→ chip ready",
         settled: settleA0,
         chip: afterA0.chips,
         attachments: cA0.attachments.map(netLine),
@@ -540,7 +540,7 @@ async function main() {
       flushB8();
       await clearChips(shell);
 
-      // Phase A：只擋衍生檔上行 /attachments → 期望降級到原檔直傳 video-upload（大檔 38MB）
+      // Phase A：只挡衍生档上行 /attachments → 期望降级到原档直传 video-upload（大档 38MB）
       await cdp.send("Network.setBlockedURLs", { urls: ["*/agent/sessions/*/attachments*"] });
       await clearChips(shell);
       await setText(shell, "");
@@ -554,7 +554,7 @@ async function main() {
       const shotA = await shell.screenshot("B8-A-block-attachments");
       phases.push({
         phase: "A-block-attachments-only",
-        expect: "衍生檔上行被擋 → 降級原檔直傳 video-upload → chip ready",
+        expect: "衍生档上行被挡 → 降级原档直传 video-upload → chip ready",
         settled: settleA,
         chip: afterA.chips,
         attachments: cA.attachments.map(netLine),
@@ -565,7 +565,7 @@ async function main() {
       flushB8();
       await clearChips(shell);
 
-      // Phase B：同時擋 /attachments 與 video-upload → 期望落抽幀，最後因 /attachments 仍被擋進明確終態（error，不得永卡）
+      // Phase B：同时挡 /attachments 与 video-upload → 期望落抽帧，最后因 /attachments 仍被挡进明确终态（error，不得永卡）
       await cdp.send("Network.setBlockedURLs", { urls: ["*/agent/sessions/*/attachments*", "*/video-upload*"] });
       await setText(shell, "");
       let tc = rec.mark();
@@ -579,7 +579,7 @@ async function main() {
       const bPending = cB.evs.filter((e) => ["POST", "PUT"].includes(e.method) && e.status == null && !e.failed).map(netLine);
       phases.push({
         phase: "B-block-attachments-and-video-upload",
-        expect: "兩條都擋 → 落抽幀 → 抽幀上行也走 /attachments 仍被擋 → chip 進明確終態",
+        expect: "两条都挡 → 落抽帧 → 抽帧上行也走 /attachments 仍被挡 → chip 进明确终态",
         settled: settleB,
         chip: afterB.chips,
         uploadingChips: afterB.uploadingChips,
@@ -592,7 +592,7 @@ async function main() {
       flushB8();
       await clearChips(shell);
 
-      // Phase C：解除封鎖 → composer 恢復可用（無殘留封鎖）
+      // Phase C：解除封锁 → composer 恢复可用（无残留封锁）
       await cdp.send("Network.setBlockedURLs", { urls: [] });
       await setText(shell, "");
       let te = rec.mark();
@@ -605,7 +605,7 @@ async function main() {
       const shotC = await shell.screenshot("B8-C-recovered");
       phases.push({
         phase: "C-unblock-recovery",
-        expect: "解除封鎖後附件恢復 ready",
+        expect: "解除封锁后附件恢复 ready",
         settled: settleC,
         chip: afterC.chips,
         attachments: cC.attachments.map(netLine),
@@ -634,30 +634,30 @@ async function main() {
         phaseC.outcome === "ready";
       saveCase("B8", {
         status: pass ? "pass" : "fail",
-        title: "鏈式降級：衍生檔上行失敗→原檔直傳→抽幀；全失敗仍進明確終態（不永卡）",
+        title: "链式降级：衍生档上行失败→原档直传→抽帧；全失败仍进明确终态（不永卡）",
         observations: {
           phases,
           blockedEvents,
           largeOriginalUploadOutcome: phaseA.outcome,
           largeOriginalUploadNote:
             phaseA.outcome === "ready"
-              ? "38MB 原檔直傳在時限內完成（降級鏈在大檔也通）"
-              : "38MB 原檔直傳在時限內未完成→chip 停在 uploading（無逾時/無終態）；小檔對照見 A0",
-          whyComplex: "降級鏈只在特定請求同時失敗時整條走完；簡單會話正常路徑永遠停在第一階",
+              ? "38MB 原档直传在时限内完成（降级链在大档也通）"
+              : "38MB 原档直传在时限内未完成→chip 停在 uploading（无逾时/无终态）；小档对照见 A0",
+          whyComplex: "降级链只在特定请求同时失败时整条走完；简单会话正常路径永远停在第一阶",
         },
         networkEvidence: { phases },
         artifacts: { screenshot: shotB.path, A0: shotA0.path, A: shotA.path, C: shotC.path },
-        error: pass ? undefined : "B8 鏈式降級或終態判準未達（見 observations.phases）",
+        error: pass ? undefined : "B8 链式降级或终态判准未达（见 observations.phases）",
       });
     }
 
-    // ───────────── B10：會話中途切換設定（思考級別）再上傳 ─────────────
+    // ───────────── B10：会话中途切换设定（思考级别）再上传 ─────────────
     if (want("B10")) {
       await clearChips(shell);
       await setText(shell, "");
       const before = await probeComposer(shell);
       const t0 = rec.mark();
-      // 先開始上傳（大檔，ingest 有明顯窗口），立刻切換思考級別，觀察是否打斷進行中的 ingest / 元件樹重建
+      // 先开始上传（大档，ingest 有明显窗口），立刻切换思考级别，观察是否打断进行中的 ingest / 元件树重建
       await attachFiles(shell, A.goodC);
       await shell.page.waitForTimeout(120);
       const midDuringUpload = await probeComposer(shell);
@@ -669,7 +669,7 @@ async function main() {
         const n = await opts.count();
         const labels = [];
         for (let i = 0; i < n; i++) labels.push((await opts.nth(i).innerText()).trim());
-        // 選「高」= persona thoughtful / cost balanced
+        // 选「高」= persona thoughtful / cost balanced
         await shell.page.locator('[role="option"]', { hasText: "高" }).first().click({ timeout: 8000 });
         await shell.page.waitForTimeout(400);
         const afterSwitch = await probeComposer(shell);
@@ -694,7 +694,7 @@ async function main() {
         levelChanged;
       saveCase("B10", {
         status: pass ? "pass" : "fail",
-        title: "上傳途中切換思考級別（設定變更）：不打斷 ingest、附件照常、級別真的變了",
+        title: "上传途中切换思考级别（设定变更）：不打断 ingest、附件照常、级别真的变了",
         observations: {
           levelBefore: before.thinkingLevel,
           levelAfter: levelSwitch.levelAfter,
@@ -707,14 +707,14 @@ async function main() {
           uploadingChips: after.uploadingChips,
           attachmentsRequests: attachments.length,
           videoUploadRequests: videoUpload.length,
-          whyComplex: "設定變更觸發 Provider/元件樹重渲染；只在「上傳進行中」同時切換才暴露——靜態上傳完再切測不到競態",
+          whyComplex: "设定变更触发 Provider/元件树重渲染；只在「上传进行中」同时切换才暴露——静态上传完再切测不到竞态",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "B10 判準未全達（見 observations）",
+        error: pass ? undefined : "B10 判准未全达（见 observations）",
       });
       await clearChips(shell);
-      // 還原級別為「中」避免殘留設定
+      // 还原级别为「中」避免残留设定
       try {
         await shell.page.click('[aria-label^="思考级别"]', { timeout: 6000 });
         await shell.page.waitForTimeout(200);
@@ -733,7 +733,7 @@ async function main() {
       let mechanism = null;
       let t0 = rec.mark();
 
-      // 入口 1：CDP Input.dispatchDragEvent（帶真檔路徑）
+      // 入口 1：CDP Input.dispatchDragEvent（带真档路径）
       if (box) {
         try {
           const cdpIn = await shell.context.newCDPSession(shell.page);
@@ -787,7 +787,7 @@ async function main() {
       const pass = appeared && settled && after.chipCount >= 1 && after.errorChips === 0 && attachments.length >= 1;
       saveCase("DROP", {
         status: pass ? "pass" : "fail",
-        title: "真拖放（drop）入口：與選檔路徑等價，附件照常",
+        title: "真拖放（drop）入口：与选档路径等价，附件照常",
         observations: {
           mechanism,
           appeared,
@@ -796,23 +796,23 @@ async function main() {
           chipStatuses: after.chips,
           attachmentsRequests: attachments.length,
           videoUploadRequests: videoUpload.length,
-          whyComplex: "拖放是獨立事件入口（onDragEnter/Over/Leave/Drop）；之前只測 input 選檔，drop 的 dataTransfer.files 讀取與 depth 計數從未被覆蓋",
+          whyComplex: "拖放是独立事件入口（onDragEnter/Over/Leave/Drop）；之前只测 input 选档，drop 的 dataTransfer.files 读取与 depth 计数从未被覆盖",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "DROP 判準未全達（見 observations.mechanism）",
+        error: pass ? undefined : "DROP 判准未全达（见 observations.mechanism）",
       });
     }
 
-    // ───────────── PASTE：貼上入口 ─────────────
+    // ───────────── PASTE：贴上入口 ─────────────
     if (want("PASTE")) {
       await clearChips(shell);
       await setText(shell, "");
       const t0 = rec.mark();
-      // 真 Ctrl+V 貼上假檔：OS 剪貼簿無法用 CDP 放入「檔案」項目（只能文字/圖片），
-      // 故用合成的 ClipboardEvent（真 DataTransfer + 真 File）驅動 React onPaste 入口。
-      // 先嘗試 CDP Input.dispatchKeyEvent 的 paste（無檔案的剪貼簿 → clipboardData.files 為空 → 入口早退），
-      // 再以合成事件驗檔案路徑；兩者結果一併記錄。
+      // 真 Ctrl+V 贴上假档：OS 剪贴簿无法用 CDP 放入「档案」项目（只能文字/图片），
+      // 故用合成的 ClipboardEvent（真 DataTransfer + 真 File）驱动 React onPaste 入口。
+      // 先尝试 CDP Input.dispatchKeyEvent 的 paste（无档案的剪贴簿 → clipboardData.files 为空 → 入口早退），
+      // 再以合成事件验档案路径；两者结果一并记录。
       let cdpPaste = null;
       try {
         await shell.page.focus("#agent-composer-input");
@@ -821,7 +821,7 @@ async function main() {
         await cdpIn.send("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", modifiers: 2, windowsVirtualKeyCode: 86, nativeVirtualKeyCode: 86 });
         await shell.page.waitForTimeout(600);
         const afterCdp = await probeComposer(shell);
-        cdpPaste = { attempted: true, chipCountAfter: afterCdp.chipCount, note: "OS 剪貼簿無檔案項目 → 預期無 chip" };
+        cdpPaste = { attempted: true, chipCountAfter: afterCdp.chipCount, note: "OS 剪贴簿无档案项目 → 预期无 chip" };
       } catch (e) {
         cdpPaste = { attempted: false, error: String(e && e.message) };
       }
@@ -875,7 +875,7 @@ async function main() {
       const pass = appeared && settled && after.chipCount >= 1 && after.errorChips === 0 && attachments.length >= 1;
       saveCase("PASTE", {
         status: pass ? "pass" : "fail",
-        title: "Ctrl+V 貼上入口：帶檔案時走附件管道、與選檔等價",
+        title: "Ctrl+V 贴上入口：带档案时走附件管道、与选档等价",
         observations: {
           cdpPaste,
           syntheticClipboardEvent: synthetic,
@@ -885,17 +885,17 @@ async function main() {
           chipStatuses: after.chips,
           attachmentsRequests: attachments.length,
           videoUploadRequests: videoUpload.length,
-          whyComplex: "貼上是獨立事件入口（onPaste + clipboardData.files）；input 選檔測不到此入口",
+          whyComplex: "贴上是独立事件入口（onPaste + clipboardData.files）；input 选档测不到此入口",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "PASTE 判準未全達（見 observations）",
+        error: pass ? undefined : "PASTE 判准未全达（见 observations）",
       });
     }
 
-    // ───────────── B9：單實例鎖（同 profile vs 不同 profile） ─────────────
+    // ───────────── B9：单实例锁（同 profile vs 不同 profile） ─────────────
     if (want("B9")) {
-      const sameProfileDir = shell.userDataDir; // 第一個殼現用的 user-data-dir
+      const sameProfileDir = shell.userDataDir; // 第一个壳现用的 user-data-dir
       const secondLog = path.join(shellOut, "second-same-profile.log");
       const p2 = await freePort();
       const child2 = spawn(
@@ -919,12 +919,12 @@ async function main() {
       const log2 = fs.createWriteStream(secondLog);
       child2.stdout.pipe(log2);
       child2.stderr.pipe(log2);
-      // 等最多 15s：預期第二實例自行退出（gotLock=false → app.quit()）
+      // 等最多 15s：预期第二实例自行退出（gotLock=false → app.quit()）
       const sameWaitStart = Date.now();
       while (child2.exitCode === null && Date.now() - sameWaitStart < 15000) await sleep(300);
       const sameExited = child2.exitCode !== null;
       const sameExit = { exitCode: child2.exitCode, signal: child2.signalCode, waitedMs: Date.now() - sameWaitStart };
-      // 第一個殼是否仍活著 & 頁數不變
+      // 第一个壳是否仍活著 & 页数不变
       const firstAlive = await shell.evaluate(() => true).then(() => true).catch(() => false);
       const pagesAfter = shell.context.pages().length;
       await stopChild(child2).catch(() => {});
@@ -936,7 +936,7 @@ async function main() {
         /* ignore */
       }
 
-      // 不同 profile：應能並存
+      // 不同 profile：应能并存
       const home2 = path.join(outDir, "home-b9b");
       fs.mkdirSync(home2, { recursive: true });
       const ud2 = path.join(home2, ".config", "Eimu");
@@ -993,14 +993,14 @@ async function main() {
       const pass = sameExited && firstAlive && firstStillAlive && pagesAfter === shell.context.pages().length && diffCdpUp && firstStillAlive;
       saveCase("B9", {
         status: pass ? "pass" : "fail",
-        title: "單實例鎖：同 profile 第二實例退出並聚焦既有；不同 profile 可並存",
+        title: "单实例锁：同 profile 第二实例退出并聚焦既有；不同 profile 可并存",
         observations: {
           sameProfile: { exited: sameExited, exit: sameExit, firstAlive, pagesAfter, logTail: sameLogTail },
           diffProfile: { cdpUp: diffCdpUp, listCount: Array.isArray(diffList) ? diffList.length : null, firstStillAlive },
-          whyComplex: "單實例鎖的行為只在「第二次啟動」暴露；單次啟動/單視窗測不到第二實例的處置",
+          whyComplex: "单实例锁的行为只在「第二次启动」暴露；单次启动/单视窗测不到第二实例的处置",
         },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "B9 判準未全達（見 observations）",
+        error: pass ? undefined : "B9 判准未全达（见 observations）",
       });
     }
 

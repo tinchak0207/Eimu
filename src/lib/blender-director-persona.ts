@@ -1,35 +1,35 @@
 /**
- * 3D 導演 persona 契約真源（Astra 3D 導演工作站 P1-4，片 J，2026-09-06）。
+ * 3D 导演 persona 契约真源（Astra 3D 导演工作站 P1-4，片 J，2026-09-06）。
  *
- * 本檔是「3D 導演（文案簡體「3D 导演」）」persona 的單一契約定義檔：
- *   ① 名稱/文案（簡體，記憶 agent-gateway-copy-rules）
- *   ② 工具白名單（blender_exec / blender_render / blender_export_gltf / image_quote）
- *   ③ SKILL 掛載引用（repo 內 skills/blender-director/SKILL.md 的語義定位；
- *      VPS 側經 opencode.json agent 條目的 prompt 段引用該路徑，見
+ * 本档是「3D 导演（文案简体「3D 导演」）」persona 的单一契约定义档：
+ *   ① 名称/文案（简体，记忆 agent-gateway-copy-rules）
+ *   ② 工具白名单（blender_exec / blender_render / blender_export_gltf / image_quote）
+ *   ③ SKILL 挂载引用（repo 内 skills/blender-director/SKILL.md 的语义定位；
+ *      VPS 侧经 opencode.json agent 条目的 prompt 段引用该路径，见
  *      deploy-staging/blender-director-persona/ 三落位稿）
- *   ④ 委託單入參契約（composeDelegation schema）+ 回傳契約
+ *   ④ 委托单入参契约（composeDelegation schema）+ 回传契约
  *      （bridge ExecuteResult → collectSceneCardFromArtifacts →
- *      buildScene3dCanvasOp）——全部 import 型別，零重定義。
- *   ⑤ MOE Wave1-A Expert 框架接線：野獸模式（expert-registry.readBeastMode）
- *      ON 時委託單 prompt 注入 Expert 憲法頭部（deploy-staging/expert-gateway/
- *      expert-constitution.md 路徑常量，同 SKILL_PATH 單一真源範式）、回覆走
- *      交付物契約（blenderArtifactToEvidence → ExpertDeliverable →
- *      computeQcSignature → validateExpertDeliverable 閘門）並附契約摘要一行；
- *      OFF 時所有組裝與現狀逐欄位一致（零回歸）。registry 反向 import 有
- *      TDZ 模組環，readBeastMode 一律 call-time 動態 import。
+ *      buildScene3dCanvasOp）——全部 import 型别，零重定义。
+ *   ⑤ MOE Wave1-A Expert 框架接线：野兽模式（expert-registry.readBeastMode）
+ *      ON 时委托单 prompt 注入 Expert 宪法头部（deploy-staging/expert-gateway/
+ *      expert-constitution.md 路径常量，同 SKILL_PATH 单一真源范式）、回覆走
+ *      交付物契约（blenderArtifactToEvidence → ExpertDeliverable →
+ *      computeQcSignature → validateExpertDeliverable 闸门）并附契约摘要一行；
+ *      OFF 时所有组装与现状逐栏位一致（零回归）。registry 反向 import 有
+ *      TDZ 模组环，readBeastMode 一律 call-time 动态 import。
  *
- * 為什麼是「契約檔」而非運行時：persona 的運行時真源（模型綁定
+ * 为什么是「契约档」而非运行时：persona 的运行时真源（模型绑定
  * agent-models.json bindings、subagent 派遣 gateway/subagent.ts、agent prompt
- * / AGENTS.md）都在 VPS /opt/agent-harness（記憶 agent-persona-bound-model-
- * reasoning、subagent-ui-menu-gateway-reasoning-filter），本地 repo 無 gateway
- * 真源可改（.tmp-home/subagent.ts 是 08-31 派遣用鏡像非活碼）。本檔釘死契約
- * 四要素並被委託單/回傳兩端 import，Astra 真模型上線日只換
- * VPS agent-models.json 的 bindings.persona.director 一個 id。
+ * / AGENTS.md）都在 VPS /opt/agent-harness（记忆 agent-persona-bound-model-
+ * reasoning、subagent-ui-menu-gateway-reasoning-filter），本地 repo 无 gateway
+ * 真源可改（.tmp-home/subagent.ts 是 08-31 派遣用镜像非活码）。本档钉死契约
+ * 四要素并被委托单/回传两端 import，Astra 真模型上线日只换
+ * VPS agent-models.json 的 bindings.persona.director 一个 id。
  *
- * 隔離鐵律：3D 導演回傳只含資產引用 + 場景樹摘要（sceneCard 六欄 +
- * scene_summary ≤500 token），過程（stdout/腳本/多輪痕跡）不出 subagent——
- * 對應 gateway subagent.ts 既有隔離語義（subagent.delta 只透 text、
- * summary 截 600 字、子會話用後即刪），本檔不新增通道。
+ * 隔离铁律：3D 导演回传只含资产引用 + 场景树摘要（sceneCard 六栏 +
+ * scene_summary ≤500 token），过程（stdout/脚本/多轮痕迹）不出 subagent——
+ * 对应 gateway subagent.ts 既有隔离语义（subagent.delta 只透 text、
+ * summary 截 600 字、子会话用后即删），本档不新增通道。
  */
 
 import {
@@ -53,27 +53,27 @@ import {
   type ExpertDeliverable,
 } from "./expert-contract";
 
-// ─────────────────────────────────────────── ① persona 身份與文案
+// ─────────────────────────────────────────── ① persona 身份与文案
 
-/** persona 鍵名（gateway bindings / 設定 UI / 日誌統一用此 id）。 */
+/** persona 键名（gateway bindings / 设定 UI / 日志统一用此 id）。 */
 export const DIRECTOR_PERSONA_ID = "director" as const;
 
-/** 展示名（簡體文案；選單/卡片/日誌統一取此值）。 */
+/** 展示名（简体文案；选单/卡片/日志统一取此值）。 */
 export const DIRECTOR_PERSONA_LABEL = "3D 导演" as const;
 
-/** persona 一句話定位（設定頁/選單描述用）。 */
+/** persona 一句话定位（设定页/选单描述用）。 */
 export const DIRECTOR_PERSONA_DESCRIPTION =
   "专属 3D 导演：接委托单自主驱动 Blender 产出骨架动画与场景资产，只回资产引用与场景摘要，过程不出子代理。" as const;
 
-// ─────────────────────────────────────────── ② 工具白名單
+// ─────────────────────────────────────────── ② 工具白名单
 
 /**
- * 3D 導演可調用的工具白名單（PRD P1-4 釘死；禁給全工具面——3D 導演
- * 不需要畫視頻/寫 workflow）。
+ * 3D 导演可调用的工具白名单（PRD P1-4 钉死；禁给全工具面——3D 导演
+ * 不需要画视频/写 workflow）。
  *
  * - blender_exec / blender_render / blender_export_gltf：直接取
  *   blender-tools.ts 的 BLENDER_HARNESS_TOOL_IDS（禁止手抄 id 字串面）。
- * - image_quote：報價查詢（harness 既有 id，harness-tool-registry 登記在案）。
+ * - image_quote：报价查询（harness 既有 id，harness-tool-registry 登记在案）。
  */
 export const DIRECTOR_PERSONA_TOOL_IDS = [
   ...BLENDER_HARNESS_TOOL_IDS, // blender_exec / blender_render / blender_export_gltf
@@ -82,64 +82,64 @@ export const DIRECTOR_PERSONA_TOOL_IDS = [
 
 export type DirectorPersonaToolId = (typeof DIRECTOR_PERSONA_TOOL_IDS)[number];
 
-// ─────────────────────────────────────────── ③ SKILL 掛載引用
+// ─────────────────────────────────────────── ③ SKILL 挂载引用
 
 /**
- * SKILL 掛載點：repo 內 3D 導演配方庫（片B 交付，五階段管線 + 12 份上游配方）。
- * VPS 側 opencode.json 的 director agent 條目 prompt 段引用同內容路徑
- * （AGENTS.md 路由：Blender/bpy 委託一律先讀該 SKILL 再動手）。
- * 本地只持有路徑與用途聲明，不複製內容（單一真源防漂移）。
+ * SKILL 挂载点：repo 内 3D 导演配方库（片B 交付，五阶段管线 + 12 份上游配方）。
+ * VPS 侧 opencode.json 的 director agent 条目 prompt 段引用同内容路径
+ * （AGENTS.md 路由：Blender/bpy 委托一律先读该 SKILL 再动手）。
+ * 本地只持有路径与用途声明，不复制内容（单一真源防漂移）。
  */
 export const DIRECTOR_PERSONA_SKILL_PATH = "skills/blender-director/SKILL.md" as const;
 
-// ─────────────────────────────────────────── ④ 委託單 + 回傳契約（import，零重定義）
+// ─────────────────────────────────────────── ④ 委托单 + 回传契约（import，零重定义）
 
 /**
- * 委託單入參契約 = blender-delegate.ts composeDelegation 的 schema。
- * 型別全 import（BlenderDelegation / DelegationResult），此處零重定義。
+ * 委托单入参契约 = blender-delegate.ts composeDelegation 的 schema。
+ * 型别全 import（BlenderDelegation / DelegationResult），此处零重定义。
  */
 export type { BlenderDelegation, DelegationResult };
 
-/** bridge 成功體回傳契約（blender-tools.ts 原型 import）。 */
+/** bridge 成功体回传契约（blender-tools.ts 原型 import）。 */
 export type { BlenderExecuteSuccess };
 
-/** 委託單回傳（隔離鐵律形）：資產引用 + 場景摘要，≤500 token。 */
+/** 委托单回传（隔离铁律形）：资产引用 + 场景摘要，≤500 token。 */
 export type DirectorDelegationReply =
   | {
       ok: true;
-      /** 畫布節點寫入 op（scene_3d add_node；gateway 經 canvas.ops SSE 下發）。 */
+      /** 画布节点写入 op（scene_3d add_node；gateway 经 canvas.ops SSE 下发）。 */
       scene_op: ReturnType<typeof buildScene3dCanvasOp>;
-      /** 場景樹摘要（≤500 token，隔離鐵律：過程不出 subagent）。 */
+      /** 场景树摘要（≤500 token，隔离铁律：过程不出 subagent）。 */
       scene_summary: string;
       /**
-       * MOE Wave1-A：野獸模式 ON 時附的契約交付物（已過
-       * validateExpertDeliverable 閘門）；OFF 時缺席 = 回覆鍵集合與現狀一致。
+       * MOE Wave1-A：野兽模式 ON 时附的契约交付物（已过
+       * validateExpertDeliverable 闸门）；OFF 时缺席 = 回覆键集合与现状一致。
        */
       deliverable?: ExpertDeliverable;
     }
   | { ok: false; code: string; hint: string };
 
-/** 回傳摘要 token 帽（隔離鐵律釘死值）。 */
+/** 回传摘要 token 帽（隔离铁律钉死值）。 */
 export const DIRECTOR_REPLY_SUMMARY_TOKEN_CAP = 500 as const;
 
 /**
- * 3D 導演回傳組裝（唯一出口）：bridge ExecuteResult → sceneCard →
- * canvas add_node op。兩端函數均 import 自 blender-delegate.ts，本檔只做
- * 序列（不新增校驗、不改 op 形狀）。
+ * 3D 导演回传组装（唯一出口）：bridge ExecuteResult → sceneCard →
+ * canvas add_node op。两端函数均 import 自 blender-delegate.ts，本档只做
+ * 序列（不新增校验、不改 op 形状）。
  *
- * MOE Wave1-A 野獸模式分支（assembleDirectorReplyOptions.settings 提供時生效）：
- *   ON（readBeastMode === true）→ 交付物契約路徑：sceneCard 六欄 payload 經
- *   blenderArtifactToEvidence 組 evidence、computeQcSignature 簽名、
- *   validateExpertDeliverable 校驗，不過 = 結構化報錯如實透傳（誠實鐵律，
- *   禁靜默回退現狀形）；回覆附契約摘要一行（expertId/kind/簽名前 8 位）。
- *   OFF / settings 缺省 → 現狀逐欄位一致（零回歸，reply 不帶 deliverable）。
- *   readBeastMode 經 readBeastModeSync（registry 動態 import 快取 + 同義
- *   內聯後備，見 primeExpertRegistry）讀取。
+ * MOE Wave1-A 野兽模式分支（assembleDirectorReplyOptions.settings 提供时生效）：
+ *   ON（readBeastMode === true）→ 交付物契约路径：sceneCard 六栏 payload 经
+ *   blenderArtifactToEvidence 组 evidence、computeQcSignature 签名、
+ *   validateExpertDeliverable 校验，不过 = 结构化报错如实透传（诚实铁律，
+ *   禁静默回退现状形）；回覆附契约摘要一行（expertId/kind/签名前 8 位）。
+ *   OFF / settings 缺省 → 现状逐栏位一致（零回归，reply 不带 deliverable）。
+ *   readBeastMode 经 readBeastModeSync（registry 动态 import 快取 + 同义
+ *   内联后备，见 primeExpertRegistry）读取。
  */
 export interface AssembleDirectorReplyOptions {
-  /** 設定記錄（readBeastMode 消費 beast_mode 欄位；提供即啟用野獸分支）。 */
+  /** 设定记录（readBeastMode 消费 beast_mode 栏位；提供即启用野兽分支）。 */
   settings?: unknown;
-  /** 野獸模式 ON 時回填契約的原始委託單（materials 回指用，可缺省）。 */
+  /** 野兽模式 ON 时回填契约的原始委托单（materials 回指用，可缺省）。 */
   delegation?: BlenderDelegation;
 }
 
@@ -165,7 +165,7 @@ export function assembleDirectorReply(
     };
   }
 
-  // ── 野獸模式 ON：交付物契約路徑（Wave1-A）──
+  // ── 野兽模式 ON：交付物契约路径（Wave1-A）──
   const delegationRefs = options?.delegation?.reference_refs;
   const deliverable: ExpertDeliverable = {
     expertId: "director3d",
@@ -196,27 +196,27 @@ export function assembleDirectorReply(
   };
 }
 
-/** 交付物種類（scene_3d 節點域，與 buildScene3dCanvasOp 的 node.type 對齊）。 */
+/** 交付物种类（scene_3d 节点域，与 buildScene3dCanvasOp 的 node.type 对齐）。 */
 export const DIRECTOR_DELIVERABLE_KIND = "scene_3d" as const;
 
 /**
- * 交付物主指針：優先 mp4（turntable 真身）、其次 png、否則首個產物
- * （collectSceneCardFromArtifacts 的 turntable 選取同序）。
+ * 交付物主指针：优先 mp4（turntable 真身）、其次 png、否则首个产物
+ * （collectSceneCardFromArtifacts 的 turntable 选取同序）。
  */
 function pickPrimaryArtifact(artifacts: BlenderExecuteSuccess["artifacts"]): BlenderExecuteSuccess["artifacts"][number] {
   const list = Array.isArray(artifacts) ? artifacts : [];
   return list.find((a) => a.kind === "mp4") ?? list.find((a) => a.kind === "png") ?? list[0] ?? { path: "", bytes: 0, kind: "" };
 }
 
-/** 契約摘要一行（不超 DIRECTOR_REPLY_SUMMARY_TOKEN_CAP）：expertId/kind/簽名前 8 位。 */
+/** 契约摘要一行（不超 DIRECTOR_REPLY_SUMMARY_TOKEN_CAP）：expertId/kind/签名前 8 位。 */
 export function buildDeliverableSummaryLine(d: ExpertDeliverable): string {
   const line = `deliverable expertId=${d.expertId} kind=${d.kind} qc=${d.qcSignature.slice(0, 8)}`;
   return estimateTokens(line) > DIRECTOR_REPLY_SUMMARY_TOKEN_CAP ? line.slice(0, DIRECTOR_REPLY_SUMMARY_TOKEN_CAP) : line;
 }
 
 /**
- * ON 模式摘要帽（僅野獸分支用；OFF 路徑零回歸不截斷）：契約行永不截除，
- * base 摘要從尾部對半收縮至 總長 ≤ DIRECTOR_REPLY_SUMMARY_TOKEN_CAP。
+ * ON 模式摘要帽（仅野兽分支用；OFF 路径零回归不截断）：契约行永不截除，
+ * base 摘要从尾部对半收缩至 总长 ≤ DIRECTOR_REPLY_SUMMARY_TOKEN_CAP。
  */
 function capSceneSummaryWithLine(base: string, line: string): string {
   let head = base;
@@ -229,47 +229,47 @@ function capSceneSummaryWithLine(base: string, line: string): string {
 }
 
 /**
- * 主腦 → 3D 導演委託單構造（唯一入口）：直接透傳 composeDelegation
- * （import 輪子，零包裝邏輯）。persona 層不做第二套校驗。
+ * 主脑 → 3D 导演委托单构造（唯一入口）：直接透传 composeDelegation
+ * （import 轮子，零包装逻辑）。persona 层不做第二套校验。
  */
 export const composeDirectorDelegation = composeDelegation;
 
-/** 交付物白名單 re-export（契約釘死：與 Scene3dCardMetadata 六欄一一對應）。 */
+/** 交付物白名单 re-export（契约钉死：与 Scene3dCardMetadata 六栏一一对应）。 */
 export { BLENDER_DELIVERABLES };
 
-// ─────────────────────────────────────────── ⑤ MOE Wave1-A：憲法注入 + settings 入口
+// ─────────────────────────────────────────── ⑤ MOE Wave1-A：宪法注入 + settings 入口
 
 /**
- * Expert 憲法檔路徑（repo 內相對路徑，單一真源 = deploy-staging/expert-gateway/
- * expert-constitution.md）。注入範式同 ③ 的 DIRECTOR_PERSONA_SKILL_PATH：
- * 本地只持有路徑與用途聲明，內容由 readFileSync 在組裝 prompt 時讀取
- * （測試端同款讀法，見 blender-director-persona.test.ts ③；服務端 runtime
- * 讀取走 composeDirectorDelegationForSettings 的 try/catch 後備 inline）。
+ * Expert 宪法档路径（repo 内相对路径，单一真源 = deploy-staging/expert-gateway/
+ * expert-constitution.md）。注入范式同 ③ 的 DIRECTOR_PERSONA_SKILL_PATH：
+ * 本地只持有路径与用途声明，内容由 readFileSync 在组装 prompt 时读取
+ * （测试端同款读法，见 blender-director-persona.test.ts ③；服务端 runtime
+ * 读取走 composeDirectorDelegationForSettings 的 try/catch 后备 inline）。
  */
 export const DIRECTOR_EXPERT_CONSTITUTION_PATH =
   "deploy-staging/expert-gateway/expert-constitution.md" as const;
 
 /**
- * 交付前自檢節（誠實門禁，2026-09-08）：渲染後必須抽幀親眼看、逐項對照
- * 委託單、不符如實報、「全部完成」只在自檢全過後才許出現。憲法級行為——
- * 隨憲法注入走（ON 分支 prompt 憲法與委託單 JSON 之間），OFF 裸單契約
- * （serialized 原文一個字不多，blender-expert-frame.test.ts 釘死）不動。
- * 導出為單一真源常量：VPS persona 層（OFF 模式的提示面）日後引用同源文本。
+ * 交付前自检节（诚实门禁，2026-09-08）：渲染后必须抽帧亲眼看、逐项对照
+ * 委托单、不符如实报、「全部完成」只在自检全过后才许出现。宪法级行为——
+ * 随宪法注入走（ON 分支 prompt 宪法与委托单 JSON 之间），OFF 裸单契约
+ * （serialized 原文一个字不多，blender-expert-frame.test.ts 钉死）不动。
+ * 导出为单一真源常量：VPS persona 层（OFF 模式的提示面）日后引用同源文本。
  */
-export const DIRECTOR_SELF_CHECK_SECTION = `## 交付前自檢（硬流程，跳過=事故）
+export const DIRECTOR_SELF_CHECK_SECTION = `## 交付前自检（硬流程，跳过=事故）
 
-渲染完成 ≠ 交付完成。以下四步一步不許跳，違反任何一步即為事故，不是建議。（鏡面立方體事故：宣稱「metallic 1.0 鏡面反光掃過、全部完成」，實際抽幀是啞光深灰＋構圖裁頂——話術編出的細節救不了畫面。）
+渲染完成 ≠ 交付完成。以下四步一步不许跳，违反任何一步即为事故，不是建议。（镜面立方体事故：宣称「metallic 1.0 镜面反光扫过、全部完成」，实际抽帧是哑光深灰＋构图裁顶——话术编出的细节救不了画面。）
 
-1. **親眼看，才許開口。** 渲染完成後必須抽 ≥2 幀或讀 stills 逐張親眼看（用現場可用的讀圖通路）。沒有讀圖通路時必須明說「無法自檢，需暴君終驗」，禁止假裝看過，禁止拿 stdout／日誌腦補畫面。
-2. **逐項對照委託單。** 材質關鍵詞（鏡面／金屬／啞光／透明…）在幀裡真的可見嗎？主體完整入框嗎（無裁頂裁邊）？機位構圖與委託一致嗎？
-3. **不符就如實報。** 回覆寫「自檢未過：X 項不符（逐項列出）」：可修 → 修後重渲、重過自檢；不可修 → 明說未達委託單，禁止包裝。「全部完成」只在自檢全過後才許出現。
-4. **自檢結果寫進回覆。** 末行附「自檢：材質✓ 構圖✓ 機位✓」（不符項標 ✗ 並寫死因），與交付物摘要行的 qc 簽名並列——只有 qc 沒有自檢行 = 視同未自檢 = 未交付。` as const;
+1. **亲眼看，才许开口。** 渲染完成后必须抽 ≥2 帧或读 stills 逐张亲眼看（用现场可用的读图通路）。没有读图通路时必须明说「无法自检，需暴君终验」，禁止假装看过，禁止拿 stdout／日志脑补画面。
+2. **逐项对照委托单。** 材质关键词（镜面／金属／哑光／透明…）在帧里真的可见吗？主体完整入框吗（无裁顶裁边）？机位构图与委托一致吗？
+3. **不符就如实报。** 回覆写「自检未过：X 项不符（逐项列出）」：可修 → 修后重渲、重过自检；不可修 → 明说未达委托单，禁止包装。「全部完成」只在自检全过后才许出现。
+4. **自检结果写进回覆。** 末行附「自检：材质✓ 构图✓ 机位✓」（不符项标 ✗ 并写死因），与交付物摘要行的 qc 签名并列——只有 qc 没有自检行 = 视同未自检 = 未交付。` as const;
 
 /**
- * readBeastMode 的同域同步封裝：registry 為避 TDZ 模組環（registry 頂層
- * 解引用本檔常量）走 call-time 動態 import。primeExpertRegistry 先行預載
- * 失敗時，按 registry 同一判準（beast_mode 欄 === true）內聯後備，語義
- * 逐位元組一致；兩態皆記檔待查（誠實鐵律：靜默降級必留痕）。
+ * readBeastMode 的同域同步封装：registry 为避 TDZ 模组环（registry 顶层
+ * 解引用本档常量）走 call-time 动态 import。primeExpertRegistry 先行预载
+ * 失败时，按 registry 同一判准（beast_mode 栏 === true）内联后备，语义
+ * 逐位元组一致；两态皆记档待查（诚实铁律：静默降级必留痕）。
  */
 export type ExpertRegistryModule = {
   readBeastMode(settings: unknown): boolean;
@@ -278,9 +278,9 @@ export type ExpertRegistryModule = {
 let expertRegistryModule: ExpertRegistryModule | undefined;
 let expertRegistryLoadFailureState: string | undefined;
 /**
- * 測試注入的 loader（僅經 primeExpertRegistry 的可選參數設定）。生產呼叫端
- * 一律不傳參 → 恆走動態 import 真源；注入值在本模組生命週期內生效，使不傳
- * 參的生產呼叫端（如 composeDirectorDelegationPrompt）亦能覆現載入失敗路徑。
+ * 测试注入的 loader（仅经 primeExpertRegistry 的可选参数设定）。生产呼叫端
+ * 一律不传参 → 恒走动态 import 真源；注入值在本模组生命周期内生效，使不传
+ * 参的生产呼叫端（如 composeDirectorDelegationPrompt）亦能覆现载入失败路径。
  */
 let expertRegistryLoaderOverride: (() => Promise<unknown>) | undefined;
 
@@ -300,12 +300,12 @@ export async function primeExpertRegistry(
   }
 }
 
-/** 動態 import expert-registry 失敗的死因（成功／未 prime 時為 undefined）。誠實鐵律：兩態皆記檔待查，此為唯一出口。 */
+/** 动态 import expert-registry 失败的死因（成功／未 prime 时为 undefined）。诚实铁律：两态皆记档待查，此为唯一出口。 */
 export function getExpertRegistryLoadFailure(): string | undefined {
   return expertRegistryLoadFailureState;
 }
 
-/** 測試專用：清空 registry 動態 import 快取（野獸分支讀取路徑回退測試用）。 */
+/** 测试专用：清空 registry 动态 import 快取（野兽分支读取路径回退测试用）。 */
 export function __resetExpertRegistryForTest(): void {
   expertRegistryModule = undefined;
   expertRegistryLoadFailureState = undefined;
@@ -314,16 +314,16 @@ export function __resetExpertRegistryForTest(): void {
 
 function readBeastModeSync(settings: unknown): boolean {
   if (expertRegistryModule) return expertRegistryModule.readBeastMode(settings);
-  // 後備路徑：判準與 expert-registry.readBeastMode 逐位元組同義（缺欄/非布林/false 一律 OFF）。
+  // 后备路径：判准与 expert-registry.readBeastMode 逐位元组同义（缺栏/非布林/false 一律 OFF）。
   if (typeof settings !== "object" || settings === null) return false;
   return (settings as Record<string, unknown>).beast_mode === true;
 }
 
 /**
- * 委託單 prompt 頭部組裝：OFF / 憲法檔讀取失敗（異常或空檔）時返回
- * serialized 原文（一個字都不多）；ON 時把憲法全文注入頭部，其後緊接
- * 交付前自檢節（DIRECTOR_SELF_CHECK_SECTION，誠實門禁 2026-09-08），再以
- * 分隔線接原委託單 JSON。ON 且憲法文本缺席 = 結構化報錯（不靜默裸奔，誠實鐵律）。
+ * 委托单 prompt 头部组装：OFF / 宪法档读取失败（异常或空档）时返回
+ * serialized 原文（一个字都不多）；ON 时把宪法全文注入头部，其后紧接
+ * 交付前自检节（DIRECTOR_SELF_CHECK_SECTION，诚实门禁 2026-09-08），再以
+ * 分隔线接原委托单 JSON。ON 且宪法文本缺席 = 结构化报错（不静默裸奔，诚实铁律）。
  */
 export async function composeDirectorDelegationPrompt(
   input: unknown,
@@ -335,7 +335,7 @@ export async function composeDirectorDelegationPrompt(
       prompt: string;
       constitutionInjected: boolean;
       estimated_tokens: number;
-      /** 野獸分支 registry 動態 import 失敗死因（成功時缺席）；誠實鐵律唯一出口。 */
+      /** 野兽分支 registry 动态 import 失败死因（成功时缺席）；诚实铁律唯一出口。 */
       registry_load_failure?: string;
     }
   | { ok: false; code: string; hint: string; fields?: string[] }
@@ -351,14 +351,14 @@ export async function composeDirectorDelegationPrompt(
       estimated_tokens: composed.estimated_tokens,
     };
   }
-  // 決策現場留痕（誠實鐵律）：接住 prime 結果，失敗時 additive 補死因出口。
+  // 决策现场留痕（诚实铁律）：接住 prime 结果，失败时 additive 补死因出口。
   const primed = await primeExpertRegistry();
   let constitution: string | undefined;
   let constitutionError: string | undefined;
   try {
-    // 顯式 override（opts.constitutionPath）仍走 fs 讀該檔（保留既有注入 seam 與
-    // 測試：指向不存在／空檔時結構化拒絕）；未給才走靜態 import 的 bundle 鏡像
-    // （Vercel 拿不到 deploy-staging/，見 src/lib/expert-gateway-assets.ts 檔頭）。
+    // 显式 override（opts.constitutionPath）仍走 fs 读该档（保留既有注入 seam 与
+    // 测试：指向不存在／空档时结构化拒绝）；未给才走静态 import 的 bundle 镜像
+    // （Vercel 拿不到 deploy-staging/，见 src/lib/expert-gateway-assets.ts 档头）。
     const raw = opts.constitutionPath
       ? readFileSync(
           path.resolve(fileURLToPath(import.meta.url), "../../..", opts.constitutionPath),
@@ -367,17 +367,17 @@ export async function composeDirectorDelegationPrompt(
       : loadBundledExpertConstitution();
     if (raw.trim() !== "") constitution = raw;
   } catch (err) {
-    // 死因留痕（誠實鐵律）：讀取異常進結構化 hint，不進 log（secret 衛生鐵律）。
+    // 死因留痕（诚实铁律）：读取异常进结构化 hint，不进 log（secret 卫生铁律）。
     constitutionError = err instanceof Error ? err.message : String(err);
   }
   if (constitution === undefined) {
     return {
       ok: false,
       code: "constitution_unavailable",
-      hint: `野獸模式已開但 Expert 憲法檔不可讀（${DIRECTOR_EXPERT_CONSTITUTION_PATH}${constitutionError ? `：${constitutionError}` : "：檔案為空"}）：拒绝裸奔派單，請修復憲法檔部署或暫時關閉 beast_mode。`,
+      hint: `野兽模式已开但 Expert 宪法档不可读（${DIRECTOR_EXPERT_CONSTITUTION_PATH}${constitutionError ? `：${constitutionError}` : "：档案为空"}）：拒绝裸奔派单，请修复宪法档部署或暂时关闭 beast_mode。`,
     };
   }
-  // 自檢節隨憲法注入（憲法級：ON 必有；順序=憲法 → 自檢 → 分隔線 → 委託單 JSON）。
+  // 自检节随宪法注入（宪法级：ON 必有；顺序=宪法 → 自检 → 分隔线 → 委托单 JSON）。
   const prompt = `${constitution.trimEnd()}\n\n${DIRECTOR_SELF_CHECK_SECTION}\n\n---\n\n${composed.serialized}`;
   return {
     ok: true,
@@ -389,10 +389,10 @@ export async function composeDirectorDelegationPrompt(
 }
 
 /**
- * settings 入口（Wave1-A 接線面）：主腦調用方把 settings 記錄傳進來即可——
- * OFF 時返回值與 composeDirectorDelegation 逐欄位一致（ok/delegation/
- * serialized/estimated_tokens 四欄原樣），ON 時多出 prompt 頭部注入憲法。
- * （composeDelegation 為純函數，本包裝與 prompt 組裝各調一次，冪等零副作用。）
+ * settings 入口（Wave1-A 接线面）：主脑调用方把 settings 记录传进来即可——
+ * OFF 时返回值与 composeDirectorDelegation 逐栏位一致（ok/delegation/
+ * serialized/estimated_tokens 四栏原样），ON 时多出 prompt 头部注入宪法。
+ * （composeDelegation 为纯函数，本包装与 prompt 组装各调一次，幂等零副作用。）
  */
 export async function composeDirectorDelegationForSettings(
   input: unknown,
@@ -401,7 +401,7 @@ export async function composeDirectorDelegationForSettings(
   | (Extract<DelegationResult, { ok: true }> & {
       constitutionInjected: boolean;
       prompt: string;
-      /** 野獸分支 registry 動態 import 失敗死因（成功時缺席）；透傳自 prompt 組裝。 */
+      /** 野兽分支 registry 动态 import 失败死因（成功时缺席）；透传自 prompt 组装。 */
       registry_load_failure?: string;
     })
   | Extract<DelegationResult, { ok: false }>

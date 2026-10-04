@@ -1,8 +1,8 @@
-// 從 index.ts 無損抽取（2026-09-19 第二階段 Wave2）：session 生命週期 handlers。
-// 原行區間：499–508（能力斷路 beastAgentField）、4139–4242（public handlers banner＋
-// handleCreateSession，含尾部雙空行使區間與 model-registry.ts 4243–4376 無縫銜接）、
-// 5145–5179（handleEventStream＋handleConfirm）。逐行機械抽取（python），僅加 export
-// 前綴＋本檔頭＋單行 import，其餘一字未動。
+// 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave2）：session 生命周期 handlers。
+// 原行区间：499–508（能力断路 beastAgentField）、4139–4242（public handlers banner＋
+// handleCreateSession，含尾部双空行使区间与 model-registry.ts 4243–4376 无缝衔接）、
+// 5145–5179（handleEventStream＋handleConfirm）。逐行机械抽取（python），仅加 export
+// 前缀＋本档头＋单行 import，其余一字未动。
 import type { MemoryDocLite, SessionState } from "./types-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession, sessions } from "./sessions-core.ts"
@@ -12,12 +12,12 @@ import { loadUserSettings, saveSession } from "./persistence.ts"
 import { openEventStream } from "./sse-core.ts"
 import { settleConfirm } from "./media-internal-routes.ts"
 import { MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
-// TODO(整合 Wave2): MEMORY_PRIVATE_DOCS_MAX 仍住 index.ts:6883（const 未 export，補 export 後改真 import）。
+// TODO(整合 Wave2): MEMORY_PRIVATE_DOCS_MAX 仍住 index.ts:6883（const 未 export，补 export 后改真 import）。
 
-// ── 能力斷路（MOE 評測死線1，2026-09-08）：野獸模式 ON 時主會話跑 orchestrator
+// ── 能力断路（MOE 评测死线1，2026-09-08）：野兽模式 ON 时主会话跑 orchestrator
 // agent（opencode.json agent.orchestrator.tools 把 blender_exec/blender_render/
-// blender_export_gltf/music_gen 從工具表物理移除）→ 主會話無法直調域工具，只能
-// subagent_dispatch 派發 Expert。OFF 不帶 agent 欄＝default build agent＝零變化。
+// blender_export_gltf/music_gen 从工具表物理移除）→ 主会话无法直调域工具，只能
+// subagent_dispatch 派发 Expert。OFF 不带 agent 栏＝default build agent＝零变化。
 export function beastAgentField(state: SessionState): Record<string, string> {
   try {
     if (loadUserSettings(state.apiKey)?.beast_mode === true) return { agent: "orchestrator" }
@@ -30,8 +30,8 @@ export function beastAgentField(state: SessionState): Record<string, string> {
 export async function handleCreateSession(key: string, req: Request): Promise<Response> {
   // L0 账户级记忆：编辑层在本站读取 user_profiles/agent_lessons 后随创建上送，
   // 网关只负责暂存，首条消息时注入 system。
-  // 契約 §4（2026-09-15 PRD P0-4）：payload 追加 memory_docs（私有 active docs ≤8）
-  // 與 memory_index_md（共享索引行）兩欄，駝峰原樣入 state.userMemory。
+  // 契约 §4（2026-09-15 PRD P0-4）：payload 追加 memory_docs（私有 active docs ≤8）
+  // 与 memory_index_md（共享索引行）两栏，驼峰原样入 state.userMemory。
   let memoryBody: {
     user_profile?: Record<string, unknown>
     lessons?: string[]
@@ -110,7 +110,7 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
     workflowSnapshot: undefined,
     vettingInjected: false,
     userMemory: memoryIncoming,
-    // memoryInjected 死旗標已刪（D1，2026-09-15 PRD P0-4）：真閘是 vettingInjected。
+    // memoryInjected 死旗标已删（D1，2026-09-15 PRD P0-4）：真闸是 vettingInjected。
     profileOnboardingPending: memoryBody.memory_empty === true,
     lastPromptBody: null,
     turnGen: 0,
@@ -121,7 +121,7 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
     retryQueued: false,
   }
   sessions.set(sessionId, state)
-  saveSession(state) // 建立即同步落盤：重啟後 getOwnedSession 可恢復
+  saveSession(state) // 建立即同步落盘：重启后 getOwnedSession 可恢复
   const user_id = await hashKey(key)
   console.log(`[gateway] session created: ${sessionId} (opencode ${body.id})`)
   return Response.json({ session_id: sessionId, user_id })

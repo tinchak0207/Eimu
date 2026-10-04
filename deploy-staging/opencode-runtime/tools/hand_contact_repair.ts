@@ -2,43 +2,43 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail } from "../lib/client"
 import { ORCH_DEFAULT_MODEL, SEED_NOTE, runEdit, vlmAskJson } from "../lib/img-orchestrate"
 
-// 手部接觸修復（2026-08-31 片6）：試穿/人像圖 → VLM 定位手部問題（描述+千分 bbox 證據）→
-// 構造局部修復中文編輯指令 → 站點編輯鏈 /v1/images/edits（同片2 runEdit 計費鏈）→ VLM 前後複驗。
-// 誠實：無問題時回 no_repair_needed 不硬改、不扣費；修復=指令式局部編輯，非手部專用修復模型。
+// 手部接触修复（2026-08-31 片6）：试穿/人像图 → VLM 定位手部问题（描述+千分 bbox 证据）→
+// 构造局部修复中文编辑指令 → 站点编辑链 /v1/images/edits（同片2 runEdit 计费链）→ VLM 前后复验。
+// 诚实：无问题时回 no_repair_needed 不硬改、不扣费；修复=指令式局部编辑，非手部专用修复模型。
 
 const HAND_INSPECT_Q =
-  "仔細檢查這張圖（多為試穿/人像圖）中所有手部與手指：" +
-  "手指數量是否正確（每手五指）、形態與關節是否自然、與衣物/配件/身體的接觸關係是否合理（有無穿透、懸空、粘連、畸形）。" +
-  "輸出 JSON：{\"hands_ok\":true|false," +
-  '"issues":[{"location":"哪隻手/位置（如左手、右手握包處）","description":"具體問題","bbox_permille":[x1,y1,x2,y2]}],' +
-  '"summary":"一句話總結"}。' +
-  "hands_ok=true 僅當所有手部無可見畸變；bbox_permille 為千分座標 [0-1000]（x1,y1 左上、x2,y2 右下）。只輸出 JSON。"
+  "仔细检查这张图（多为试穿/人像图）中所有手部与手指：" +
+  "手指数量是否正确（每手五指）、形态与关节是否自然、与衣物/配件/身体的接触关系是否合理（有无穿透、悬空、粘连、畸形）。" +
+  "输出 JSON：{\"hands_ok\":true|false," +
+  '"issues":[{"location":"哪只手/位置（如左手、右手握包处）","description":"具体问题","bbox_permille":[x1,y1,x2,y2]}],' +
+  '"summary":"一句话总结"}。' +
+  "hands_ok=true 仅当所有手部无可见畸变；bbox_permille 为千分座标 [0-1000]（x1,y1 左上、x2,y2 右下）。只输出 JSON。"
 
 const HAND_COMPARE_Q =
-  "圖1 是修復前，圖2 是 AI 手部修復後。只對比手部區域：修復後手指數量/形態/接觸關係是否改善？" +
-  "同時檢查人物臉部、服裝、構圖與背景是否保持未被誤改。輸出 JSON：" +
-  '{"hand_verdict":"improved|unchanged|worse","identity_kept":"pass|warn","notes":"簡短理由"}。只輸出 JSON。'
+  "图1 是修复前，图2 是 AI 手部修复后。只对比手部区域：修复后手指数量/形态/接触关系是否改善？" +
+  "同时检查人物脸部、服装、构图与背景是否保持未被误改。输出 JSON：" +
+  '{"hand_verdict":"improved|unchanged|worse","identity_kept":"pass|warn","notes":"简短理由"}。只输出 JSON。'
 
 export default tool({
   description:
-    "手部接觸修復（try-on 後處理環）：image_url（試穿/人像圖公網 URL）+ 可選 issue（問題描述，如「左手六指」）→ ① VLM（gemini-2.5-flash-image）定位手部問題（每問題給 location/description/bbox 千分座標證據）；② 有問題（或用戶聲稱問題）時構造局部修復中文編輯指令走站點 /v1/images/edits（同 image_edit 計費鏈）；③ VLM 前後對比複驗（hand_verdict improved/unchanged/worse + identity_kept）。誠實：VLM 判定手部無問題且未給 issue 時回 status=no_repair_needed，不硬改、不扣費；修復是指令式局部編輯，非手部專用修復模型，worse 時建議回退原圖。dry_run=true 只返回審計+修復請求構造，不提交生圖。",
+    "手部接触修复（try-on 后处理环）：image_url（试穿/人像图公网 URL）+ 可选 issue（问题描述，如「左手六指」）→ ① VLM（gemini-2.5-flash-image）定位手部问题（每问题给 location/description/bbox 千分座标证据）；② 有问题（或用户声称问题）时构造局部修复中文编辑指令走站点 /v1/images/edits（同 image_edit 计费链）；③ VLM 前后对比复验（hand_verdict improved/unchanged/worse + identity_kept）。诚实：VLM 判定手部无问题且未给 issue 时回 status=no_repair_needed，不硬改、不扣费；修复是指令式局部编辑，非手部专用修复模型，worse 时建议回退原图。dry_run=true 只返回审计+修复请求构造，不提交生图。",
   args: {
-    image_url: tool.schema.string().describe("待審計/修復的圖公網 URL（通常為 virtual_tryon 產物）"),
-    issue: tool.schema.string().optional().describe("可選：用戶聲稱的手部問題描述（給了則即使 VLM 判 ok 也執行修復）"),
-    model: tool.schema.string().optional().describe(`編輯模型，默認 ${ORCH_DEFAULT_MODEL}`),
-    size: tool.schema.enum(["1k", "2k"]).optional().describe("尺寸等級 1k/2k（編輯鏈契約），默認 1k"),
-    dry_run: tool.schema.boolean().optional().describe("true=只做 VLM 審計構造展示，不提交編輯生圖"),
+    image_url: tool.schema.string().describe("待审计/修复的图公网 URL（通常为 virtual_tryon 产物）"),
+    issue: tool.schema.string().optional().describe("可选：用户声称的手部问题描述（给了则即使 VLM 判 ok 也执行修复）"),
+    model: tool.schema.string().optional().describe(`编辑模型，默认 ${ORCH_DEFAULT_MODEL}`),
+    size: tool.schema.enum(["1k", "2k"]).optional().describe("尺寸等级 1k/2k（编辑链契约），默认 1k"),
+    dry_run: tool.schema.boolean().optional().describe("true=只做 VLM 审计构造展示，不提交编辑生图"),
   },
   async execute(args, context) {
     const imageUrl = args.image_url.trim()
-    if (!/^https?:\/\//.test(imageUrl)) return fail("invalid_image_url", "image_url 必須是 http(s) URL", { title: "輸入非法" })
+    if (!/^https?:\/\//.test(imageUrl)) return fail("invalid_image_url", "image_url 必须是 http(s) URL", { title: "输入非法" })
     const model = args.model ?? ORCH_DEFAULT_MODEL
     const size = args.size ?? "1k"
     const userIssue = args.issue?.trim() || ""
 
-    // ① VLM 手部審計（免費，零生圖扣費）
+    // ① VLM 手部审计（免费，零生图扣费）
     const inspect = await vlmAskJson([imageUrl], HAND_INSPECT_Q, 1500)
-    if (!inspect.ok) return fail("vlm_unavailable", `VLM 手部審計失敗：${inspect.reason}（未編造判定、未扣費）`, { title: "手部審計失敗" })
+    if (!inspect.ok) return fail("vlm_unavailable", `VLM 手部审计失败：${inspect.reason}（未编造判定、未扣费）`, { title: "手部审计失败" })
     const d = inspect.data as Record<string, unknown>
     const handsOk = d.hands_ok === true
     const rawIssues = Array.isArray(d.issues) ? (d.issues as Record<string, unknown>[]) : []
@@ -54,9 +54,9 @@ export default tool({
     const needRepair = !handsOk || issues.length > 0 || !!userIssue
 
     const repairPrompt =
-      `修復圖中手部：${issues.map((i) => `${i.location || "手部"}${i.description ? "：" + i.description : ""}`).join("；") || userIssue || "手部畸變"}。` +
-      `要求：每隻手五指、關節與比例自然，與衣物/配件/身體的接觸關係合理，無穿透無懸空無粘連；` +
-      `嚴禁改變模特的臉型、體態、服裝、構圖與背景（只修手部區域）。`
+      `修复图中手部：${issues.map((i) => `${i.location || "手部"}${i.description ? "：" + i.description : ""}`).join("；") || userIssue || "手部畸变"}。` +
+      `要求：每只手五指、关节与比例自然，与衣物/配件/身体的接触关系合理，无穿透无悬空无粘连；` +
+      `严禁改变模特的脸型、体态、服装、构图与背景（只修手部区域）。`
 
     if (args.dry_run) {
       return ok({
@@ -66,32 +66,32 @@ export default tool({
         need_repair: needRepair,
         requests: needRepair ? [{ tag: "hand-repair", endpoint: "/v1/images/edits", image_url: imageUrl, prompt: repairPrompt, model, size }] : [],
         expected_images: needRepair ? 1 : 0,
-        mechanism: "VLM 定位 + instruction-based edit（站點 /v1/images/edits，同 image_edit 計費鏈）；非手部專用修復模型。",
-        note: "dry_run：未提交編輯、未扣費。",
+        mechanism: "VLM 定位 + instruction-based edit（站点 /v1/images/edits，同 image_edit 计费链）；非手部专用修复模型。",
+        note: "dry_run：未提交编辑、未扣费。",
       })
     }
 
-    // 無問題 → 誠實 no_repair_needed，不硬改、零扣費
+    // 无问题 → 诚实 no_repair_needed，不硬改、零扣费
     if (!needRepair) {
       return ok(
         {
-          title: "手部審計通過：無需修復",
+          title: "手部审计通过：无需修复",
           status: "no_repair_needed",
           url: imageUrl,
-          audit: { hands_ok: true, issues: [], summary: summary || "VLM 未見手部畸變" },
+          audit: { hands_ok: true, issues: [], summary: summary || "VLM 未见手部畸变" },
           cost_coins: 0,
-          mechanism: "僅 VLM 審計（零生圖扣費）；判定手部無問題，未執行編輯。",
-          note: "誠實：VLM 目測 hands_ok 且用戶未聲稱問題，不硬改。若你仍看到問題，帶 issue 參數重調可強制修復。",
+          mechanism: "仅 VLM 审计（零生图扣费）；判定手部无问题，未执行编辑。",
+          note: "诚实：VLM 目测 hands_ok 且用户未声称问题，不硬改。若你仍看到问题，带 issue 参数重调可强制修复。",
         },
         { status: "no_repair_needed", cost_coins: 0 },
       )
     }
 
-    // ② 局部修復編輯（站點計費鏈）
+    // ② 局部修复编辑（站点计费链）
     const edit = await runEdit(imageUrl, repairPrompt, model, size, context.sessionID, context.abort)
-    if (!edit.ok) return fail(edit.code, `手部修復編輯鏈失敗：${edit.hint}`, { title: "手部修復失敗" })
+    if (!edit.ok) return fail(edit.code, `手部修复编辑链失败：${edit.hint}`, { title: "手部修复失败" })
 
-    // ③ VLM 前後複驗
+    // ③ VLM 前后复验
     const cmp = await vlmAskJson([imageUrl, edit.url], HAND_COMPARE_Q, 1500)
     const after = cmp.ok
       ? {
@@ -103,7 +103,7 @@ export default tool({
 
     return ok(
       {
-        title: `手部修復完成（複驗：${after.hand_verdict}）`,
+        title: `手部修复完成（复验：${after.hand_verdict}）`,
         status: "repaired",
         url: edit.url,
         before_url: imageUrl,
@@ -114,9 +114,9 @@ export default tool({
         audit_after: after,
         seed: null,
         consistency_mechanism:
-          `VLM 定位 + instruction-based edit：站點 /v1/images/edits 局部修復（image_mode=${edit.image_mode}，計費同 image_edit，reserve/commit 在站點端）；非手部專用修復模型。`,
+          `VLM 定位 + instruction-based edit：站点 /v1/images/edits 局部修复（image_mode=${edit.image_mode}，计费同 image_edit，reserve/commit 在站点端）；非手部专用修复模型。`,
         seed_policy: SEED_NOTE,
-        note: "誠實：before/after 證據均為 VLM 目測；hand_verdict=worse 時建議回退原圖（before_url）並重試或簡化 issue 描述。",
+        note: "诚实：before/after 证据均为 VLM 目测；hand_verdict=worse 时建议回退原图（before_url）并重试或简化 issue 描述。",
       },
       { url: edit.url, hand_verdict: after.hand_verdict, cost_coins: edit.cost_coins },
     )

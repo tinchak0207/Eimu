@@ -39,8 +39,8 @@ export const AGENT_TASK_STATUS_TABLE: Record<AgentTaskStatus, AgentTaskStatusMet
   failed: { label: "失败", tone: "failure", isFailure: true },
   interrupted: { label: "已中止", tone: "neutral", isFailure: false },
   stopped: { label: "已停止", tone: "neutral", isFailure: false },
-  // 需要授權（2026-10-04 缺陷 C）：action 態，不是成功也不是失敗——等使用者在
-  // 卡片上選授權範圍。tone=pending（進行中語義，不標紅、不轉圈由元件自理）。
+  // 需要授权（2026-10-04 缺陷 C）：action 态，不是成功也不是失败——等使用者在
+  // 卡片上选授权范围。tone=pending（进行中语义，不标红、不转圈由元件自理）。
   needs_auth: { label: "需要授权", tone: "pending", isFailure: false },
 };
 

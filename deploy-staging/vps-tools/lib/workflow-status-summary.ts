@@ -1,6 +1,6 @@
-// workflow_status 精簡回執（H10）：全量回執 143–154KB 會被 opencode 截斷器截成 ~291 字，
-// agent 實際拿不到任何資訊。摘要模式只留決策必需欄位，90 節點約 25KB，低於截斷線。
-// 注意：放在 lib/ 而非 tools/——tools/ 下檔案的具名 export 會被當成額外工具註冊。
+// workflow_status 精简回执（H10）：全量回执 143–154KB 会被 opencode 截断器截成 ~291 字，
+// agent 实际拿不到任何资讯。摘要模式只留决策必需栏位，90 节点约 25KB，低于截断线。
+// 注意：放在 lib/ 而非 tools/——tools/ 下档案的具名 export 会被当成额外工具注册。
 
 const CONTENT_MAX = 100
 const TITLE_MAX = 40
@@ -46,9 +46,9 @@ export function summarizeNode(n: any): Record<string, unknown> {
 }
 
 /**
- * 摘要：status 計數 + 逐節點精簡行 + delivery/billing 原樣；connections 只回數量。
- * nodeId 給定時回該節點完整資料（含 metadata、完整 content）與其上下游 id，供深挖單點。
- * 失敗/error 節點永遠保留完整 content（真因不能被截）。
+ * 摘要：status 计数 + 逐节点精简行 + delivery/billing 原样；connections 只回数量。
+ * nodeId 给定时回该节点完整资料（含 metadata、完整 content）与其上下游 id，供深挖单点。
+ * 失败/error 节点永远保留完整 content（真因不能被截）。
  */
 export function buildStatusReceipt(
   workflow: any,
@@ -59,7 +59,7 @@ export function buildStatusReceipt(
   if (opts.view === "full") return { workflow, ...(opts.billing ? { billing: opts.billing } : {}) }
   if (opts.nodeId) {
     const node = nodes.find((n) => n?.id === opts.nodeId)
-    if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不帶 node_id 的 workflow_status 看節點清單" }
+    if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不带 node_id 的 workflow_status 看节点清单" }
     return {
       workflow_id: workflow?.workflowId,
       status: workflow?.status,
@@ -72,7 +72,7 @@ export function buildStatusReceipt(
   for (const n of nodes) counts[String(n?.status)] = (counts[String(n?.status)] ?? 0) + 1
   const rows = nodes.map((n) => {
     const row = summarizeNode(n)
-    if (n?.status === "error" && n?.content !== undefined) row.content = n.content // 失敗真因不截
+    if (n?.status === "error" && n?.content !== undefined) row.content = n.content // 失败真因不截
     return row
   })
   return {
@@ -86,6 +86,6 @@ export function buildStatusReceipt(
     connection_count: conns.length,
     ...(workflow?.delivery ? { delivery: workflow.delivery } : {}),
     ...(opts.billing ? { billing: opts.billing } : {}),
-    hint: "摘要視圖：content/metadata 已截短、connections 省略。單節點完整資料用 node_id；全量用 view=full（回執很大會被截斷，落盤檔請用 read 工具按 offset/limit 讀）。",
+    hint: "摘要视图：content/metadata 已截短、connections 省略。单节点完整资料用 node_id；全量用 view=full（回执很大会被截断，落盘档请用 read 工具按 offset/limit 读）。",
   }
 }

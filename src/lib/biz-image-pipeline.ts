@@ -114,8 +114,8 @@ async function requestOnce(
       size: imageSize,
       quality: qualityMode === "quality" ? "high" : "medium",
     };
-    // ControlNet 只對 pixai 渠道有意義；pixai 模型在 buildModelQueue 的 supportedModels
-    // 白名單裡只會落進 pixai 端點，所以 controlNets 不會被餵給不認識它的上游。
+    // ControlNet 只对 pixai 渠道有意义；pixai 模型在 buildModelQueue 的 supportedModels
+    // 白名单里只会落进 pixai 端点，所以 controlNets 不会被喂给不认识它的上游。
     if (controlNets && controlNets.length > 0) payload.controlNets = controlNets;
     body = JSON.stringify(payload);
   }
@@ -135,7 +135,7 @@ async function requestOnce(
         response.status,
       );
     }
-    // 202 Accepted 不是成功：任務已收、成品未回，本管線不輪詢。記失敗讓下一個端點接手。
+    // 202 Accepted 不是成功：任务已收、成品未回，本管线不轮询。记失败让下一个端点接手。
     if (response.status === 202) {
       throw new BizUpstreamError(
         `上游 ${endpoint.label} 回 HTTP 202（已接受）但未返回图片；本管线不轮询。`,

@@ -1,5 +1,5 @@
-// ts-loader.mjs — node ESM resolve hook：為 bun 風格的 extensionless import 補上 .ts / /index.ts。
-// 用於在沒有 bun/tsx 的機器上以 node --experimental-transform-types 跑 gateway 的 .ts。
+// ts-loader.mjs — node ESM resolve hook：为 bun 风格的 extensionless import 补上 .ts / /index.ts。
+// 用于在没有 bun/tsx 的机器上以 node --experimental-transform-types 跑 gateway 的 .ts。
 import { existsSync, statSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 

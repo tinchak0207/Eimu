@@ -11,10 +11,10 @@ metadata:
   related-skills: lighting, materials, realistic-style, stylized-style
 ---
 <!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/rendering/SKILL.md
+来源（轮子）: https://github.com/arjun988/blender-skills — .claude/skills/rendering/SKILL.md
 License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「via MCP」與「## MCP Integration」節（外部 IDE 整合）
-③Blender 5.2 API 校正兩處（原文以「上游原文」註釋保留，僅 API 名/術語變更，邏輯不動） ④文案譯為簡體
+白名单改动: ①输出路径→$BLENDER_WORK/out/ ②移除「via MCP」与「## MCP Integration」节（外部 IDE 整合）
+③Blender 5.2 API 校正两处（原文以「上游原文」注释保留，仅 API 名/术语变更，逻辑不动） ④文案译为简体
 -->
 
 
@@ -38,7 +38,7 @@ License: MIT · 原作者: arjun988 (https://github.com/arjun988)
 | Eevee | 实时预览、风格化、游戏 lookdev |
 
 <!-- 上游原文: "| Eevee Next | Improved real-time quality (Blender 4+) |"
-③Blender 5.2 校正：4.2 起 Eevee Next 已合併為唯一的 Eevee，5.x 無獨立「Eevee Next」條目，刪除該行 -->
+③Blender 5.2 校正：4.2 起 Eevee Next 已合并为唯一的 Eevee，5.x 无独立「Eevee Next」条目，删除该行 -->
 
 ## 工作流
 
@@ -91,8 +91,8 @@ License: MIT · 原作者: arjun988 (https://github.com/arjun988)
 
 ```
 <!-- 上游原文: "View Transform: AgX (Blender 4+) or Filmic"
-③Blender 5.2 校正：Blender 4.0 起移除 Filmic，AgX 為默認 view transform；5.x 僅 AgX / Standard。 -->
-View Transform: AgX（Blender 4.0+ 默認；Filmic 已移除）
+③Blender 5.2 校正：Blender 4.0 起移除 Filmic，AgX 为默认 view transform；5.x 仅 AgX / Standard。 -->
+View Transform: AgX（Blender 4.0+ 默认；Filmic 已移除）
 Look: Medium Contrast（默认）或 High Contrast（戏剧感）
 曝光：在合成器里调，不靠灯硬轰
 ```
@@ -112,7 +112,7 @@ Look: Medium Contrast（默认）或 High Contrast（戏剧感）
 2. 资产原点放空物体 → 旋转动画 0–360°（120 帧）
 3. 三点布光灯架
 4. 渲染 1280×1280 或项目指定分辨率
-5. 输出 PNG 序列或 MP4，寫入 $BLENDER_WORK/out/
+5. 输出 PNG 序列或 MP4，写入 $BLENDER_WORK/out/
 ```
 
 ## 参考图验证
@@ -126,7 +126,7 @@ Look: Medium Contrast（默认）或 High Contrast（戏剧感）
 | 曝光 | 常见 0.15–0.45；外壳要读得出，不要爆白 |
 | 预览回放 | EEVEE，关运动模糊，`taa_samples` 1–8 |
 | 最终静帧 | 用主角 `CAM_*` 渲染 — 与参考对比 |
-| 对比工具 | 视口截图或 bpy 渲染静帧（產物寫 `$BLENDER_WORK/out/`） |
+| 对比工具 | 视口截图或 bpy 渲染静帧（产物写 `$BLENDER_WORK/out/`） |
 
 交付前跑 `../references/visual-match-checklist.md`。
 

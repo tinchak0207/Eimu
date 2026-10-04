@@ -1,59 +1,59 @@
-// OpenAI 兼容層（`/openai/v1/*`）的 **durable 生成橋**：提交 → 輪詢 → 取件。
+// OpenAI 兼容层（`/openai/v1/*`）的 **durable 生成桥**：提交 → 轮询 → 取件。
 //
-// 為什麼不直接 import `@/lib/generation-core/*`（submitGenerationCommand /
-// getGenerationJobForTenant）：`/openai/v1/*` 是站點 repo 的路由，生產跑在 Vercel，而
-// Vercel 按設計**不持有 GENERATION_DATABASE_URL**——任何直連 job-repository 的調用首次
-// 觸庫就拋錯（2026-08-21 實測：成功任務與不存在任務一併 500）。所以提交與輪詢一律走
+// 为什么不直接 import `@/lib/generation-core/*`（submitGenerationCommand /
+// getGenerationJobForTenant）：`/openai/v1/*` 是站点 repo 的路由，生产跑在 Vercel，而
+// Vercel 按设计**不持有 GENERATION_DATABASE_URL**——任何直连 job-repository 的调用首次
+// 触库就抛错（2026-08-21 实测：成功任务与不存在任务一并 500）。所以提交与轮询一律走
 // **既有被代理的 HTTP 入口**（`next.config.mjs` beforeFiles 把 `/api/v1/*` 代理到控制面
 // `/image-control/api/v1/*`）：
 //
 //   POST /api/v1/images/generations  → 202 { id, status:"queued", … }
 //   GET  /api/v1/images/{id}         → { status, data:[{url,mimeType,…}] }（succeeded 才有 data）
 //
-// b64_json 也複用同一條交付 URL：先問既有取件後端（`src/lib/blob-backend.ts` 的
-// `get()`，Vercel Blob 或 VPS blob adapter），取不到再直接 HTTP 取——不另造第二套儲存。
+// b64_json 也复用同一条交付 URL：先问既有取件后端（`src/lib/blob-backend.ts` 的
+// `get()`，Vercel Blob 或 VPS blob adapter），取不到再直接 HTTP 取——不另造第二套储存。
 //
-// 等待上限：見 `MAX_WAIT_MS`。超時不取消任務（任務仍在控制面後台跑），由呼叫端回 504
-// 並把 task id 交給客戶。
+// 等待上限：见 `MAX_WAIT_MS`。超时不取消任务（任务仍在控制面后台跑），由呼叫端回 504
+// 并把 task id 交给客户。
 import { get as blobGet } from "@/lib/blob-backend";
 import { type OpenAICompatErrorType, type OpenAIErrorFields, readUpstreamError } from "./errors";
 
-/** 站內 durable 提交入口（控制面代理路徑）。 */
+/** 站内 durable 提交入口（控制面代理路径）。 */
 export const SUBMIT_PATH = "/api/v1/images/generations";
 
-/** 任務查詢入口；`id` 由上游產生（uuid），仍做編碼避免路徑注入。 */
+/** 任务查询入口；`id` 由上游产生（uuid），仍做编码避免路径注入。 */
 export function taskPath(taskId: string): string {
   return `/api/v1/images/${encodeURIComponent(taskId)}`;
 }
 
 /**
- * 服務端等待上限（ms）。
+ * 服务端等待上限（ms）。
  *
- * 事實依據：`vercel.json` 沒有任何 `functions.maxDuration` 覆寫；站內 B 端/生圖路由
- * 一律自帶 `export const maxDuration = 300`（`src/app/api/v1/images/generations/route.ts:39`
- * 等 8 處）。因此本層也取 300s 函數預算，並留 60s 給響應落盤與退款結算
- * （同 `src/app/api/generate-images/route.ts` 的「UPSTREAM_BUDGET + 結算餘裕」慣例），
- * 得 240s 等待上限。超過＝回 504，任務繼續在後台跑。
+ * 事实依据：`vercel.json` 没有任何 `functions.maxDuration` 覆写；站内 B 端/生图路由
+ * 一律自带 `export const maxDuration = 300`（`src/app/api/v1/images/generations/route.ts:39`
+ * 等 8 处）。因此本层也取 300s 函数预算，并留 60s 给响应落盘与退款结算
+ * （同 `src/app/api/generate-images/route.ts` 的「UPSTREAM_BUDGET + 结算余裕」惯例），
+ * 得 240s 等待上限。超过＝回 504，任务继续在后台跑。
  *
- * **這條路由跑在哪裡決定了 240s 是否真的可用**：本專案的 Vercel 是 Hobby
- * （`docs/ARCHITECTURE.md` 記「Hobby 限每日一次」），Hobby 的函數硬上限是 60s——
- * `maxDuration=300` 會被平台夾到 60s，等待中的函數直接硬殺（連 504 都送不出去）。
- * 因此 `/openai/v1/*` 的目標承載是**控制面**（VPS 上的 standalone node server，無函數
- * 時長概念，且持有 GENERATION_DATABASE_URL 讓熔斷閘真的生效）：加一條
- * `beforeFiles` 代理 + 搬檔即可。若暫時留在 Vercel，必須設
- * `OPENAI_COMPAT_MAX_WAIT_MS=45000`，用乾淨的 504（訊息帶 task id）取代硬殺。
+ * **这条路由跑在哪里决定了 240s 是否真的可用**：本专案的 Vercel 是 Hobby
+ * （`docs/ARCHITECTURE.md` 记「Hobby 限每日一次」），Hobby 的函数硬上限是 60s——
+ * `maxDuration=300` 会被平台夹到 60s，等待中的函数直接硬杀（连 504 都送不出去）。
+ * 因此 `/openai/v1/*` 的目标承载是**控制面**（VPS 上的 standalone node server，无函数
+ * 时长概念，且持有 GENERATION_DATABASE_URL 让熔断闸真的生效）：加一条
+ * `beforeFiles` 代理 + 搬档即可。若暂时留在 Vercel，必须设
+ * `OPENAI_COMPAT_MAX_WAIT_MS=45000`，用干净的 504（讯息带 task id）取代硬杀。
  */
 export const MAX_WAIT_MS = 240_000;
 
-/** Vercel 硬殺函數的預算（與站內 B 端路由同值），僅作為常數與 maxDuration 對齊用。 */
+/** Vercel 硬杀函数的预算（与站内 B 端路由同值），仅作为常数与 maxDuration 对齐用。 */
 export const FUNCTION_MAX_DURATION_SECONDS = 300;
 
 /**
  * 等待上限的有效值。
  *
- * `OPENAI_COMPAT_MAX_WAIT_MS` 是給「函數預算小於 300s 的承載」用的旋鈕：同一份代碼搬到
- * 只給 60s 的函數方案時，把上限設成 45_000 就不會被平台硬殺（硬殺會連 504 都送不出去）。
- * 未設＝240s。非法值（0/負/NaN）一律忽略，不讓環境變數把等待變成 0。
+ * `OPENAI_COMPAT_MAX_WAIT_MS` 是给「函数预算小于 300s 的承载」用的旋钮：同一份代码搬到
+ * 只给 60s 的函数方案时，把上限设成 45_000 就不会被平台硬杀（硬杀会连 504 都送不出去）。
+ * 未设＝240s。非法值（0/负/NaN）一律忽略，不让环境变数把等待变成 0。
  */
 export function resolveMaxWaitMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.OPENAI_COMPAT_MAX_WAIT_MS);
@@ -79,11 +79,11 @@ export type TaskOutcome =
   | { status: "failed" | "cancelled" | "refunded" | "unknown"; message: string; code: string };
 
 /**
- * 提交/輪詢打哪個 origin。
+ * 提交/轮询打哪个 origin。
  *
- * 預設＝當前請求自己的 origin：在 Vercel 上請求 origin 就是公開域，`/api/v1/*` 命中
- * beforeFiles 代理 → 控制面（與客戶直打 /v1 走同一條路）。控制面自己承載這幾條路由時，
- * 用 `OPENAI_COMPAT_GENERATION_ORIGIN=http://127.0.0.1:3000` 直連本機，免繞回 Vercel。
+ * 预设＝当前请求自己的 origin：在 Vercel 上请求 origin 就是公开域，`/api/v1/*` 命中
+ * beforeFiles 代理 → 控制面（与客户直打 /v1 走同一条路）。控制面自己承载这几条路由时，
+ * 用 `OPENAI_COMPAT_GENERATION_ORIGIN=http://127.0.0.1:3000` 直连本机，免绕回 Vercel。
  */
 export function resolveGenerationOrigin(requestUrl: string): string {
   const override = process.env.OPENAI_COMPAT_GENERATION_ORIGIN?.trim();
@@ -106,7 +106,7 @@ export interface SubmitImageInput {
   prompt: string;
   n: number;
   size: string;
-  /** OpenAI 的 quality（`hd`/`high` 走 quality，其餘 fast），原樣透傳給站內入口。 */
+  /** OpenAI 的 quality（`hd`/`high` 走 quality，其余 fast），原样透传给站内入口。 */
   quality?: string;
   idempotencyKey?: string | null;
   fetchImpl?: typeof fetch;
@@ -134,8 +134,8 @@ export async function submitImageTask(input: SubmitImageInput): Promise<SubmitIm
         prompt: input.prompt,
         n: input.n,
         size: input.size,
-        // 交付形式在這一層才決定（b64 由本層取件編碼）；durable 任務的產物一律是 URL，
-        // 所以送 url 才是誠實的 request_config（與 /api/generation-jobs 的 web 入口同值）。
+        // 交付形式在这一层才决定（b64 由本层取件编码）；durable 任务的产物一律是 URL，
+        // 所以送 url 才是诚实的 request_config（与 /api/generation-jobs 的 web 入口同值）。
         response_format: "url",
         ...(input.quality ? { quality: input.quality } : {}),
       }),
@@ -184,7 +184,7 @@ interface TaskSnapshot {
   code: string;
 }
 
-/** 單次任務讀取；網路抖動/非 2xx/形狀異常 → null（呼叫端據此重試，不當終態）。 */
+/** 单次任务读取；网路抖动/非 2xx/形状异常 → null（呼叫端据此重试，不当终态）。 */
 async function readTaskSnapshot(
   fetcher: typeof fetch,
   input: { origin: string; authorization: string | null; taskId: string },
@@ -232,7 +232,7 @@ export interface AwaitImageTaskInput {
   origin: string;
   authorization: string | null;
   taskId: string;
-  /** 絕對截止時間（`now()` 同一基準）。 */
+  /** 绝对截止时间（`now()` 同一基准）。 */
   deadlineAt: number;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -248,10 +248,10 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 /**
- * 輪詢到終態或截止時間。
+ * 轮询到终态或截止时间。
  *
- * 首次讀取立即發生（快任務不必等一個間隔）；之後間隔 2.5s 起、每次 1.5 倍、封頂 5s。
- * 單次讀取失敗（控制面瞬斷 / 5xx）只拉長間隔，不終結——終結只能來自 job 終態或截止。
+ * 首次读取立即发生（快任务不必等一个间隔）；之后间隔 2.5s 起、每次 1.5 倍、封顶 5s。
+ * 单次读取失败（控制面瞬断 / 5xx）只拉长间隔，不终结——终结只能来自 job 终态或截止。
  */
 export async function awaitImageTask(input: AwaitImageTaskInput): Promise<AwaitImageTaskResult> {
   const fetcher = input.fetchImpl ?? fetch;
@@ -290,10 +290,10 @@ export async function awaitImageTask(input: AwaitImageTaskInput): Promise<AwaitI
 }
 
 /**
- * 任務終態 → OpenAI 錯誤欄位。
+ * 任务终态 → OpenAI 错误栏位。
  *
- * 未出圖＝未扣費（durable 管線對未完成張數自動退款，compat 層不碰帳本，只把真實原因
- * 與 task id 交出去，客戶能在網頁歷史裡找到該任務）。
+ * 未出图＝未扣费（durable 管线对未完成张数自动退款，compat 层不碰帐本，只把真实原因
+ * 与 task id 交出去，客户能在网页历史里找到该任务）。
  */
 export function taskFailureToError(
   outcome: Extract<TaskOutcome, { status: "failed" | "cancelled" | "refunded" | "unknown" }>,
@@ -305,13 +305,13 @@ export function taskFailureToError(
   return {
     status,
     type,
-    // 上游的穩定碼（job.failureClass，如 overloaded）優先透傳：客戶要能分辨失敗原因。
+    // 上游的稳定码（job.failureClass，如 overloaded）优先透传：客户要能分辨失败原因。
     code: outcome.code || (outcome.status === "failed" ? "generation_failed" : `generation_${outcome.status}`),
     message: `${outcome.message}（任务 ${taskId} 未出图，未扣费）`,
   };
 }
 
-/** 超時（504）：任務仍在後台跑，把 task id 與查詢入口交給客戶。 */
+/** 超时（504）：任务仍在后台跑，把 task id 与查询入口交给客户。 */
 export function taskTimeoutError(taskId: string): OpenAIErrorFields {
   return {
     status: 504,
@@ -321,7 +321,7 @@ export function taskTimeoutError(taskId: string): OpenAIErrorFields {
   };
 }
 
-/** 既有取件後端的最小介面（`blob-backend.get` 的子集），測試可注入替身。 */
+/** 既有取件后端的最小介面（`blob-backend.get` 的子集），测试可注入替身。 */
 export interface ArtifactBlobGet {
   (url: string, options: { access: "public" }): Promise<{
     statusCode: number;
@@ -335,12 +335,12 @@ export interface ArtifactFetchDeps {
 }
 
 /**
- * 取回交付產物的位元組。
+ * 取回交付产物的位元组。
  *
- * ① 既有取件後端：交付 URL 多數是 `blob-backend.put()` 存進去的物件（Vercel Blob 或
- *    VPS blob adapter），走同一條 `get()` 拿 stream；
- * ② 非 blob URL（上游直鏈交付）或後端未配置/未授權 → 直接 HTTP 取。
- * 兩條路都只讀，不寫任何儲存。
+ * ① 既有取件后端：交付 URL 多数是 `blob-backend.put()` 存进去的物件（Vercel Blob 或
+ *    VPS blob adapter），走同一条 `get()` 拿 stream；
+ * ② 非 blob URL（上游直链交付）或后端未配置/未授权 → 直接 HTTP 取。
+ * 两条路都只读，不写任何储存。
  */
 export async function readArtifactBytes(url: string, deps: ArtifactFetchDeps = {}): Promise<Uint8Array> {
   const blobGetImpl = deps.blobGetImpl ?? ((target: string, options: { access: "public" }) => blobGet(target, options));
@@ -361,7 +361,7 @@ export async function readArtifactBytes(url: string, deps: ArtifactFetchDeps = {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-/** `b64_json` 的實際編碼點：交付 URL → base64（不帶 data: 前綴，OpenAI 語義）。 */
+/** `b64_json` 的实际编码点：交付 URL → base64（不带 data: 前缀，OpenAI 语义）。 */
 export async function artifactToBase64(url: string, deps: ArtifactFetchDeps = {}): Promise<string> {
   return Buffer.from(await readArtifactBytes(url, deps)).toString("base64");
 }

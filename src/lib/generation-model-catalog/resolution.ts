@@ -77,9 +77,9 @@ export function aspectRatioDeviation(target: number, ratio: AspectRatio): number
 }
 
 /**
- * 把 "WxH" 尺寸歸類到 1k/2k/4k（改圖/放大等按解析度浮動定價用，前後端共用）：
- * 最大邊 ≤ 1536 → 1k（含 1024x1024、1536x1024、768x1365 等 1K 級輸出），
- * ≤ 3072 → 2k，其餘 4k。非法/缺省回 1k。
+ * 把 "WxH" 尺寸归类到 1k/2k/4k（改图/放大等按解析度浮动定价用，前后端共用）：
+ * 最大边 ≤ 1536 → 1k（含 1024x1024、1536x1024、768x1365 等 1K 级输出），
+ * ≤ 3072 → 2k，其余 4k。非法/缺省回 1k。
  */
 export function resolutionFromImageSize(size?: string): ImageResolution {
   const [width, height] = String(size ?? "").split("x").map(Number);
@@ -123,33 +123,33 @@ export function imageSizeForAspectRatio(ratio: AspectRatio): string {
   return IMAGE_SIZE_BY_ASPECT_RATIO[ratio] ?? "1024x1024";
 }
 
-// ── 提交端解析度（嚴格版；2026-09-30 打開 4K 這一格）─────────────────────────
+// ── 提交端解析度（严格版；2026-09-30 打开 4K 这一格）─────────────────────────
 
-/** 呼叫端是用哪一種說法指出檔位的（診斷/回報用，不影響語義）。 */
+/** 呼叫端是用哪一种说法指出档位的（诊断/回报用，不影响语义）。 */
 export type SubmitResolutionSource = "explicit" | "size_tier" | "size_pixels" | "quality" | "default";
 
 export type SubmitResolutionResult =
   | { ok: true; resolution: ImageResolution; source: SubmitResolutionSource }
   | { ok: false; code: string; message: string };
 
-/** 像素長邊超過這個值才按像素折算成 4k（≤3072 沿用舊品質規則，保持既有行為逐位元不變）。 */
+/** 像素长边超过这个值才按像素折算成 4k（≤3072 沿用旧品质规则，保持既有行为逐位元不变）。 */
 const PIXEL_4K_LONG_EDGE = 3072;
 
 /**
- * 請求 → **提交**解析度（嚴格，禁靜默降級）。
+ * 请求 → **提交**解析度（严格，禁静默降级）。
  *
- * 為什麼要嚴格版：同檔的 `resolveSupportedResolution` 對未宣告的檔位**回退模型預設**
- * （給 UI 挑選用，友善）；但提交端一旦回退，就是「賣一個上游不認的檔位」或靜默降級
- * ——P1-4 在 PixAI 橋的 size 白名單上吃過同一顆雷（`size:"4k"` 被靜默回退成 1k）。
- * 所以這裡不合法就具名拒，讓呼叫端在付費之前看到 `unsupported_resolution`。
+ * 为什么要严格版：同档的 `resolveSupportedResolution` 对未宣告的档位**回退模型预设**
+ * （给 UI 挑选用，友善）；但提交端一旦回退，就是「卖一个上游不认的档位」或静默降级
+ * ——P1-4 在 PixAI 桥的 size 白名单上吃过同一颗雷（`size:"4k"` 被静默回退成 1k）。
+ * 所以这里不合法就具名拒，让呼叫端在付费之前看到 `unsupported_resolution`。
  *
- * 語義優先序：
- *   ① 顯式 `resolution`／`output_resolution`＝它說話（須是 1k/2k/4k，否則具名拒）；
- *   ② `size` 本身是檔位字串（`"4k"`）＝該檔位；
- *   ③ `size` 是像素寫法且長邊 > 3072（如 4096x4096）＝按長邊折算（新開的 4K 通道）；
- *   ④ 其餘（含 1024x1024／2048x2048 等既有尺寸）＝沿用舊品質規則：`quality`⇒2k、其餘⇒1k；
- *   ⑤ 什麼都沒給＝1k。
- * 最後仍要過「該模型宣告的 `resolutions`」這一關（宣告了才准提交）。
+ * 语义优先序：
+ *   ① 显式 `resolution`／`output_resolution`＝它说话（须是 1k/2k/4k，否则具名拒）；
+ *   ② `size` 本身是档位字串（`"4k"`）＝该档位；
+ *   ③ `size` 是像素写法且长边 > 3072（如 4096x4096）＝按长边折算（新开的 4K 通道）；
+ *   ④ 其余（含 1024x1024／2048x2048 等既有尺寸）＝沿用旧品质规则：`quality`⇒2k、其余⇒1k；
+ *   ⑤ 什么都没给＝1k。
+ * 最后仍要过「该模型宣告的 `resolutions`」这一关（宣告了才准提交）。
  */
 export function resolveSubmitResolution(
   modelId: string,
@@ -199,7 +199,7 @@ export function resolveSubmitResolution(
     return {
       ok: false,
       code: "resolution_not_declared_by_model",
-      message: `模型 ${modelId} 未宣告解析度 ${resolution}（已宣告：${declared.join("／")}）——未宣告即不許提交，避免上游靜默降級。`,
+      message: `模型 ${modelId} 未宣告解析度 ${resolution}（已宣告：${declared.join("／")}）——未宣告即不许提交，避免上游静默降级。`,
     };
   }
   return { ok: true, resolution, source };

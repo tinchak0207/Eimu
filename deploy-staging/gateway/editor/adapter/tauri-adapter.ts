@@ -25,8 +25,8 @@
  * 未替身命令一律诚实抛错（对齐 fxRenderStub 的诚实边界风格）。
  */
 import { mkdir, access, rm, appendFile } from 'node:fs/promises';
-// ffmpeg/ffprobe 全域限流（VPS OOM 治本，2026-10-02）：所有經 invoke("execute_command")
-// 的 ffmpeg 執行共用一个進程級訊號量，滿載/記憶體不足時排隊而非全開。
+// ffmpeg/ffprobe 全域限流（VPS OOM 治本，2026-10-02）：所有经 invoke("execute_command")
+// 的 ffmpeg 执行共用一个进程级讯号量，满载/记忆体不足时排队而非全开。
 import { shouldThrottleFfmpeg, acquireFfmpegSlot, releaseFfmpegSlot } from '../../ffmpeg-limiter';
 
 interface CommandResult { stdout: string; stderr: string; exit_code: number }
@@ -77,7 +77,7 @@ async function executeCommand(args: {
   cwd?: string;
 }): Promise<CommandResult> {
   const timeoutMs = args.timeoutMs ?? 120_000;
-  // ffmpeg 限流：取得執行槽後才 spawn（非 ffmpeg 指令不受影響）。
+  // ffmpeg 限流：取得执行槽后才 spawn（非 ffmpeg 指令不受影响）。
   const throttled = shouldThrottleFfmpeg(args.command);
   if (throttled) await acquireFfmpegSlot();
   try {

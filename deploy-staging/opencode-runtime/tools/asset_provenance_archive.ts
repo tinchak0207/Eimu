@@ -2,10 +2,10 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, platformFetch, ok, fail } from "../lib/client"
 import { gatewayReadSnapshot } from "../lib/canvas-flow"
 
-// 證物鏈歸檔（2026-08-31 片1 實裝）：物料清單 → 每資產來源 prompt/模型/seed/時間/
-// 版本/關聯 job 的歸檔 JSON。聚合兩路：畫布快照 metadata（經 gateway internal 端點，
-// 輪子 canvas_get_state 同通道）+ 站點 job 記錄（platformFetch GET /images/{task_id}，
-// 輪子 image_get_result 同調法）。缺欄位誠實標 "missing"，不編造。
+// 证物链归档（2026-08-31 片1 实装）：物料清单 → 每资产来源 prompt/模型/seed/时间/
+// 版本/关联 job 的归档 JSON。聚合两路：画布快照 metadata（经 gateway internal 端点，
+// 轮子 canvas_get_state 同通道）+ 站点 job 记录（platformFetch GET /images/{task_id}，
+// 轮子 image_get_result 同调法）。缺栏位诚实标 "missing"，不编造。
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
@@ -26,11 +26,11 @@ function firstNum(obj: Record<string, unknown>, keys: string[]): number | null {
 
 export default tool({
   description:
-    "證物鏈歸檔（純讀取聚合，零扣費）。node_ids 填畫布物料節點 id JSON 陣列字串（從畫布快照 metadata 聚合 prompt/model/seed/時間/版本/task_id），或 urls 填資產 URL JSON 陣列字串。metadata 帶 task_id 時順帶查站點 job 記錄（GET /images/{id}：status/花費/結果 URL）補全證物。輸出歸檔 JSON：每資產 provenance{prompt,model,seed,created_at,version,related_job}，缺的欄位標 \"missing\"——查不到就說查不到，絕不編造來源。合規存證/交付覆核/版本追溯用它。",
+    "证物链归档（纯读取聚合，零扣费）。node_ids 填画布物料节点 id JSON 阵列字串（从画布快照 metadata 聚合 prompt/model/seed/时间/版本/task_id），或 urls 填资产 URL JSON 阵列字串。metadata 带 task_id 时顺带查站点 job 记录（GET /images/{id}：status/花费/结果 URL）补全证物。输出归档 JSON：每资产 provenance{prompt,model,seed,created_at,version,related_job}，缺的栏位标 \"missing\"——查不到就说查不到，绝不编造来源。合规存证/交付覆核/版本追溯用它。",
   args: {
-    node_ids: tool.schema.string().optional().describe("畫布節點 id 清單：JSON 陣列字串"),
-    urls: tool.schema.string().optional().describe("資產 URL 清單：JSON 陣列字串"),
-    include_job_records: tool.schema.boolean().optional().describe("是否查站點 job 記錄補全（默認 true）"),
+    node_ids: tool.schema.string().optional().describe("画布节点 id 清单：JSON 阵列字串"),
+    urls: tool.schema.string().optional().describe("资产 URL 清单：JSON 阵列字串"),
+    include_job_records: tool.schema.boolean().optional().describe("是否查站点 job 记录补全（默认 true）"),
   },
   async execute(args, context) {
     const nodeIds: string[] = []
@@ -40,7 +40,7 @@ export default tool({
         const j = JSON.parse(args.node_ids)
         if (Array.isArray(j)) nodeIds.push(...j.filter((x): x is string => typeof x === "string" && x.trim()))
       } catch {
-        return fail("invalid_node_ids", "node_ids 必須是 JSON 陣列字串", { title: "輸入非法" })
+        return fail("invalid_node_ids", "node_ids 必须是 JSON 阵列字串", { title: "输入非法" })
       }
     }
     if (args.urls) {
@@ -48,11 +48,11 @@ export default tool({
         const j = JSON.parse(args.urls)
         if (Array.isArray(j)) urls.push(...j.filter((x): x is string => typeof x === "string" && x.trim()))
       } catch {
-        return fail("invalid_urls", "urls 必須是 JSON 陣列字串", { title: "輸入非法" })
+        return fail("invalid_urls", "urls 必须是 JSON 阵列字串", { title: "输入非法" })
       }
     }
     if (!nodeIds.length && !urls.length) {
-      return fail("empty_input", "node_ids 與 urls 至少填一個", { title: "輸入缺失" })
+      return fail("empty_input", "node_ids 与 urls 至少填一个", { title: "输入缺失" })
     }
 
     const entries: Record<string, unknown>[] = []
@@ -61,7 +61,7 @@ export default tool({
     if (nodeIds.length) {
       const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
       if (!snap.has_state || snap.state === null) {
-        warnings.push("畫布快照不可用（未上報/斷線），node_ids 項全部降為 urls 級證物或標 missing")
+        warnings.push("画布快照不可用（未上报/断线），node_ids 项全部降为 urls 级证物或标 missing")
       }
       const state = snap.state as Record<string, unknown> | null
       const nodes = (state && Array.isArray(state.nodes) ? state.nodes : []) as Record<string, unknown>[]
@@ -129,17 +129,17 @@ export default tool({
           related_job: "missing",
         },
         missing_fields: ["prompt", "model", "seed", "created_at", "version", "related_job"],
-        note: "直給 URL 無畫布 metadata 可聚合；如需證物請用 node_ids 或帶 task_id 的資產",
+        note: "直给 URL 无画布 metadata 可聚合；如需证物请用 node_ids 或带 task_id 的资产",
       })
     }
 
     const complete = entries.filter((e) => e.provenance && (e.missing_fields as string[]).length === 0).length
 
     return ok({
-      title: `證物鏈歸檔：${entries.length} 項（完整 ${complete}）`,
+      title: `证物链归档：${entries.length} 项（完整 ${complete}）`,
       archived_at: new Date().toISOString(),
       entries,
-      integrity_note: "missing=來源不可考，非本工具遺漏；job_record.query_failed 原因已逐項標註。",
+      integrity_note: "missing=来源不可考，非本工具遗漏；job_record.query_failed 原因已逐项标注。",
       warnings,
     })
   },

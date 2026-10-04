@@ -1,5 +1,5 @@
 /**
- * outbound-sanitize.test.ts — 內部路徑／規則代號出站剝離（node:test 純邏輯）。
+ * outbound-sanitize.test.ts — 内部路径／规则代号出站剥离（node:test 纯逻辑）。
  * 跑法：npx --yes tsx --test gateway/outbound-sanitize.test.ts
  */
 import assert from "node:assert/strict"
@@ -19,7 +19,7 @@ import {
   type PartStripState,
 } from "./outbound-sanitize.ts"
 
-test("工作區路徑與 R 系列代號被剝離（評測實錄原句）", () => {
+test("工作区路径与 R 系列代号被剥离（评测实录原句）", () => {
   assert.equal(
     scrubInternalRefs("spec 已落盘 `runs/txj-ep01/audio/BGM-spec-and-failure-report.md`（稍后重投）"),
     "spec 已落盘 （内部存档）（稍后重投）",
@@ -33,87 +33,87 @@ test("工作區路徑與 R 系列代號被剝離（評測實錄原句）", () =>
   assert.equal(scrubInternalRefs("清单已落盘 `tixia_ep1/audio/tts_manifest.json`，"), "清单已落盘 （内部存档），")
 })
 
-test("交付物 URL 原樣保留（含路徑段與副檔名）", () => {
+test("交付物 URL 原样保留（含路径段与副档名）", () => {
   const line = "成片：https://store.tinchak0207.xyz/agent/v1/audio/tts_mukadd47_ugkpykpi.mp3 ，字幕 https://x.example/runs/a.srt"
   assert.equal(scrubInternalRefs(line), line)
 })
 
-test("正常中文句與數字比例不誤傷", () => {
+test("正常中文句与数字比例不误伤", () => {
   for (const line of ["分镜 10 镜，60 秒，9:16 竖屏", "预算 500 币 / 10 镜", "R 级片不做", "林晚/林柔/顾沉三人同框"]) {
     assert.equal(scrubInternalRefs(line), line)
   }
 })
 
-test("出站狀態機接線：feed/flush 都走剝離", () => {
+test("出站状态机接线：feed/flush 都走剥离", () => {
   const st = { pending: "", suppress: false, fence: false, sawEnglish: false }
   const out = stripOutboundFeed(st, "已落盘 `runs/a/b.md`\n尾行 R7 铁律") + stripOutboundFlush(st)
   assert.equal(out, "已落盘 （内部存档）\n尾行 铁律")
 })
 
-// ── R9-B（2026-09-30）：R5-C 跟隨用戶書寫體 + 日文行不轉 ──
+// ── R9-B（2026-09-30）：R5-C 跟随用户书写体 + 日文行不转 ──
 const newSt = (t2s?: boolean): PartStripState => ({ pending: "", suppress: false, fence: false, sawEnglish: false, t2s })
-const TRAD_USER = "幫我做一支日系百合番的片頭曲 MV，要 2026 年的最新風格，歌和畫面都要，直接給我成片。" // eval-yuri-op-mv-0930 原句
+const TRAD_USER = "帮我做一支日系百合番的片头曲 MV，要 2026 年的最新风格，歌和画面都要，直接给我成片。" // eval-yuri-op-mv-0930 原句
 const SIMP_USER = "帮我做一支日系百合番的片头曲 MV，要 2026 年的最新风格，歌和画面都要，直接给我成片。"
 
-test("R9-B 日文行（含假名）一律不轉：評測實錄歌詞", () => {
-  for (const line of ["> この距離が　いまは宝物", "> ねえ　放課後の空を　君と見ていたい", "放課後のチャイムが　空に溶けてゆく"]) {
+test("R9-B 日文行（含假名）一律不转：评测实录歌词", () => {
+  for (const line of ["> この距离が　いまは宝物", "> ねえ　放课后の空を　君と见ていたい", "放课后のチャイムが　空に溶けてゆく"]) {
     assert.equal(t2sLine(line), line)
   }
-  // 簡體會話（t2s 開）同樣不碰日文行，中文行照轉
+  // 简体会话（t2s 开）同样不碰日文行，中文行照转
   const st = newSt(true)
-  const out = stripOutboundFeed(st, "> この距離が　いまは宝物\n這個時間\n") + stripOutboundFlush(st)
-  assert.equal(out, "> この距離が　いまは宝物\n这个时间\n")
+  const out = stripOutboundFeed(st, "> この距离が　いまは宝物\n这个时间\n") + stripOutboundFlush(st)
+  assert.equal(out, "> この距离が　いまは宝物\n这个时间\n")
   // 中文排版的 ・ 不算假名
-  assert.equal(t2sLine("阻塞 1・帳號餘額不足"), "阻塞 1・帐号余额不足")
+  assert.equal(t2sLine("阻塞 1・帐号余额不足"), "阻塞 1・帐号余额不足")
 })
 
-test("R9-B 繁體用戶：出口改做簡→繁矯正（已為繁體者逐字不變，評測原句）", () => {
+test("R9-B 繁体用户：出口改做简→繁矫正（已为繁体者逐字不变，评测原句）", () => {
   assert.equal(detectUserScript(TRAD_USER), "hant")
   assert.equal(shouldT2sForUserScript(detectUserScript(TRAD_USER)), false)
   const st = newSt(false)
-  const body = "**阻塞 1・帳號餘額不足**\n我分別試了最便宜的通路，**兩邊都被擋**。\n音樂通路若那時還沒恢復"
-  assert.equal(stripOutboundFeed(st, body) + stripOutboundFlush(st), body) // 全繁體：S2T 無命中，逐字不變
-  // 無判定力的短回覆沿用上次書寫體
+  const body = "**阻塞 1・帐号余额不足**\n我分别试了最便宜的通路，**两边都被挡**。\n音乐通路若那时还没恢复"
+  assert.equal(stripOutboundFeed(st, body) + stripOutboundFlush(st), body) // 全繁体：S2T 无命中，逐字不变
+  // 无判定力的短回覆沿用上次书写体
   assert.equal(resolveUserScript("hant", "A"), "hant")
   assert.equal(resolveUserScript("hant", SIMP_USER), "hans")
-  // 繁體共用字（皇后/台北/只）不被誤判成簡體
+  // 繁体共用字（皇后/台北/只）不被误判成简体
   assert.equal(detectUserScript("皇后在台北只待一天"), "unknown")
 })
 
-test("R9-B 簡體用戶：R5-C 行為不變", () => {
+test("R9-B 简体用户：R5-C 行为不变", () => {
   assert.equal(detectUserScript(SIMP_USER), "hans")
   assert.equal(shouldT2sForUserScript("hans"), true)
-  assert.equal(shouldT2sForUserScript("unknown"), true) // 未判定＝保 R5-C 舊行為
-  const legacy = newSt() // t2s 未設＝舊行為
+  assert.equal(shouldT2sForUserScript("unknown"), true) // 未判定＝保 R5-C 旧行为
+  const legacy = newSt() // t2s 未设＝旧行为
   const on = newSt(true)
-  const text = "這裡的時間會來\n## 標題說明\n尾行還沒換行"
+  const text = "这里的时间会来\n## 标题说明\n尾行还没换行"
   const a = stripOutboundFeed(legacy, text) + stripOutboundFlush(legacy)
   const b = stripOutboundFeed(on, text) + stripOutboundFlush(on)
-  assert.equal(a, "这里的时间会来\n## 标题说明\n尾行还没换行") // 2026-10-02 補表後 沒/換 已覆蓋（原鎖定的半轉換正是繁簡混雜根因）
+  assert.equal(a, "这里的时间会来\n## 标题说明\n尾行还没换行") // 2026-10-02 补表后 没/换 已覆盖（原锁定的半转换正是繁简混杂根因）
   assert.equal(b, a)
 })
 
-// ── R9-B：旁白重播路徑重放（eval-yuri-op-mv-0930 SSE 9861–9895）──
-// 事件序列取自 evidence/messages.json 的 assistant part 真實順序（text/tool 交錯），
-// text part 按 5 字一塊切成 delta 餵入；接線與 opencode-event-handler.ts 相同：
-// delta 前 flushOtherPartTails(map, pid)、tool pending 時 flushOtherPartTails(map)、
-// idle 時 takeTurnEndTail(map)。修前（idle 全量 flush）會把 7 句尾行接在最終答覆後。
+// ── R9-B：旁白重播路径重放（eval-yuri-op-mv-0930 SSE 9861–9895）──
+// 事件序列取自 evidence/messages.json 的 assistant part 真实顺序（text/tool 交错），
+// text part 按 5 字一块切成 delta 喂入；接线与 opencode-event-handler.ts 相同：
+// delta 前 flushOtherPartTails(map, pid)、tool pending 时 flushOtherPartTails(map)、
+// idle 时 takeTurnEndTail(map)。修前（idle 全量 flush）会把 7 句尾行接在最终答覆后。
 const FINAL_PART =
-  "**結論先講：現在交不出成片——兩個硬阻塞，我照實報，不糊弄。**\n\n**阻塞 1・帳號餘額不足**\n" +
-  "   - **C 省錢運鏡版**：純關鍵幀＋運鏡快切 → 約 0.02 幣\n\n" +
-  "音樂通路若那時還沒恢復，我就**先把畫面＋剪輯做到成片**，歌一恢復補軌重合成，同一支片不用重做。"
+  "**结论先讲：现在交不出成片——两个硬阻塞，我照实报，不糊弄。**\n\n**阻塞 1・帐号余额不足**\n" +
+  "   - **C 省钱运镜版**：纯关键帧＋运镜快切 → 约 0.02 币\n\n" +
+  "音乐通路若那时还没恢复，我就**先把画面＋剪辑做到成片**，歌一恢复补轨重合成，同一支片不用重做。"
 const TURN: Array<["text", string, string] | ["tool", string]> = [
   ["text", "CsaoEg", "我先掌握行情与视频工作流规则，再给你一份完整方案和预算。"],
   ["tool", "read"], ["tool", "image_quote"], ["tool", "video_quote"], ["tool", "read"], ["tool", "asset_search"], ["tool", "quote_bundle"],
-  ["text", "5VVsep", "方向我先定好，歌同步開始做。\n\n- **C 省錢運鏡版**：純關鍵幀 ＋ 運鏡快切 → 約 0.02 幣\n\n先讓歌跑起來："],
+  ["text", "5VVsep", "方向我先定好，歌同步开始做。\n\n- **C 省钱运镜版**：纯关键帧 ＋ 运镜快切 → 约 0.02 币\n\n先让歌跑起来："],
   ["tool", "music_gen"],
-  ["text", "fsorom", "音樂通路第一輪三條全掛了，我換個節奏再試一次："],
+  ["text", "fsorom", "音乐通路第一轮三条全挂了，我换个节奏再试一次："],
   ["tool", "music_gen"],
-  ["text", "fkUPQ3", "**現況先講清楚**：音樂生成的三條上游通路目前全部不可用。\n\n不空等，畫面先開工。我已經把兩位女主的定妝鎖定卡送去生成（成本≈0.002 幣），先把 2026 作畫調性定下來："],
+  ["text", "fkUPQ3", "**现况先讲清楚**：音乐生成的三条上游通路目前全部不可用。\n\n不空等，画面先开工。我已经把两位女主的定妆锁定卡送去生成（成本≈0.002 币），先把 2026 作画调性定下来："],
   ["tool", "cast_asset_lock"],
-  ["text", "4Cte63", "圖片通路也回報「餘額不足」。我用付費通路測一張確認是不是整帳號的問題："],
+  ["text", "4Cte63", "图片通路也回报「余额不足」。我用付费通路测一张确认是不是整帐号的问题："],
   ["tool", "image_generate"], ["tool", "image_generate"], ["tool", "image_generate"],
-  ["text", "Jg2AFU", "付費通路是活的（剛才是尺寸參數不對）。用正確尺寸再打一張，確認整條鏈能跑："],
+  ["text", "Jg2AFU", "付费通路是活的（刚才是尺寸参数不对）。用正确尺寸再打一张，确认整条链能跑："],
   ["tool", "image_generate"], ["tool", "skill"],
   ["text", "nmKooU", FINAL_PART],
 ]
@@ -153,54 +153,54 @@ function replayTurn(t2s: boolean, fixed: boolean): string[] {
   frames.push("<turn.done>")
   return frames
 }
-const NARRATION = ["我先掌握行情", "先讓歌跑起來：", "我換個節奏再試一次：", "不空等，畫面先開工", "我用付費通路測一張", "付費通路是活的"]
+const NARRATION = ["我先掌握行情", "先让歌跑起来：", "我换个节奏再试一次：", "不空等，画面先开工", "我用付费通路测一张", "付费通路是活的"]
 
-test("R9-B 重放 SSE 9861–9895：修前重現過期旁白接在最終答覆之後", () => {
+test("R9-B 重放 SSE 9861–9895：修前重现过期旁白接在最终答覆之后", () => {
   const out = replayTurn(false, false).join("")
-  const finalAt = out.indexOf("**結論先講")
-  for (const n of NARRATION) assert.ok(out.indexOf(n) > finalAt, `修前應重現：${n} 在最終答覆後`)
+  const finalAt = out.indexOf("**结论先讲")
+  for (const n of NARRATION) assert.ok(out.indexOf(n) > finalAt, `修前应重现：${n} 在最终答覆后`)
 })
 
-test("R9-B 重放 SSE 9861–9895：修後旁白按時序出現、最終答覆後零過期旁白", () => {
+test("R9-B 重放 SSE 9861–9895：修后旁白按时序出现、最终答覆后零过期旁白", () => {
   const frames = replayTurn(false, true)
   const out = frames.join("")
-  const finalAt = out.indexOf("**結論先講")
+  const finalAt = out.indexOf("**结论先讲")
   assert.ok(finalAt > 0)
   for (const n of NARRATION) {
-    assert.equal(out.split(n).length - 1, 1, `只出現一次：${n}`)
-    assert.ok(out.indexOf(n) < finalAt, `應在最終答覆前：${n}`)
+    assert.equal(out.split(n).length - 1, 1, `只出现一次：${n}`)
+    assert.ok(out.indexOf(n) < finalAt, `应在最终答覆前：${n}`)
   }
-  // 時序：旁白緊貼在其後的工具之前
-  assert.ok(out.indexOf("先讓歌跑起來：") < out.indexOf("<tool.invoke music_gen>"))
-  assert.ok(out.indexOf("付費通路是活的") < out.indexOf("<tool.invoke skill>"))
-  // 最終答覆之後只有它自己的最後一行，然後 turn.done
+  // 时序：旁白紧贴在其后的工具之前
+  assert.ok(out.indexOf("先让歌跑起来：") < out.indexOf("<tool.invoke music_gen>"))
+  assert.ok(out.indexOf("付费通路是活的") < out.indexOf("<tool.invoke skill>"))
+  // 最终答覆之后只有它自己的最后一行，然后 turn.done
   assert.ok(out.endsWith("同一支片不用重做。<turn.done>"))
   assert.equal(out.slice(finalAt), FINAL_PART + "<turn.done>")
-  // 繁體用戶：全程無繁→簡（「帳號」「現在」原樣）
-  assert.ok(out.includes("**阻塞 1・帳號餘額不足**"))
+  // 繁体用户：全程无繁→简（「帐号」「现在」原样）
+  assert.ok(out.includes("**阻塞 1・帐号余额不足**"))
 })
 
-// ── 2026-10-02 e2e 成片評測：UTF-8 邊界亂碼（「未��用」）──
+// ── 2026-10-02 e2e 成片评测：UTF-8 边界乱码（「未��用」）──
 import { cleanUtf16Chunk } from "./outbound-sanitize.ts"
 
 function freshSt(): PartStripState {
   return { pending: "", suppress: false, fence: false, sawEnglish: false, t2s: true }
 }
 
-test("多位元組字被切斷：每塊獨立解碼產生 U+FFFD → 出口剔除，不外發亂碼", () => {
+test("多位元组字被切断：每块独立解码产生 U+FFFD → 出口剔除，不外发乱码", () => {
   const bytes = Buffer.from("该模型未启用，请换一个。\n", "utf8")
-  // 在「启」(3 bytes) 中間切斷，並且丟失中間位元組＝上游/傳輸層切斷後各塊獨立解碼的典型後果
+  // 在「启」(3 bytes) 中间切断，并且丢失中间位元组＝上游/传输层切断后各块独立解码的典型后果
   const cut = bytes.indexOf(Buffer.from("启")) + 1
   const a = bytes.subarray(0, cut).toString("utf8") // 「…未」+ �
   const b = bytes.subarray(cut).toString("utf8") // � + 「用，…」
-  assert.ok((a + b).includes("�"), "重現：切斷確實產生 U+FFFD")
+  assert.ok((a + b).includes("�"), "重现：切断确实产生 U+FFFD")
   const st = freshSt()
   const out = stripOutboundFeed(st, a) + stripOutboundFeed(st, b) + stripOutboundFlush(st)
-  assert.ok(!out.includes("�"), `出口不得含 U+FFFD，實際：${JSON.stringify(out)}`)
-  assert.ok(out.includes("未") && out.includes("用"), "其餘正文不丟")
+  assert.ok(!out.includes("�"), `出口不得含 U+FFFD，实际：${JSON.stringify(out)}`)
+  assert.ok(out.includes("未") && out.includes("用"), "其余正文不丢")
 })
 
-test("emoji 代理對跨 chunk：高代理項扣留到下一塊，拼回完整字元；孤立代理項被剔除", () => {
+test("emoji 代理对跨 chunk：高代理项扣留到下一块，拼回完整字元；孤立代理项被剔除", () => {
   const st = freshSt()
   const e = "😀"
   const out = stripOutboundFeed(st, "好" + e[0]) + stripOutboundFeed(st, e[1] + "的\n") + stripOutboundFlush(st)
@@ -209,47 +209,47 @@ test("emoji 代理對跨 chunk：高代理項扣留到下一塊，拼回完整�
   assert.equal(cleanUtf16Chunk({}, "a\uDE00b", true), "ab")
 })
 
-test("繁簡：「未啟用」「沒有」「確認」「現在」在簡體會話出口統一轉簡（原表缺 啟/沒/確/現/測 等）", () => {
-  assert.equal(t2sLine("該模型未啟用，沒有結果，請確認現在測試"), "该模型未启用，没有结果，请确认现在测试")
-  assert.notEqual(detectUserScript("皇后在台北并占布"), "hans") // 新增共用字不誤判簡體
+test("繁简：「未启用」「没有」「确认」「现在」在简体会话出口统一转简（原表缺 启/没/确/现/测 等）", () => {
+  assert.equal(t2sLine("该模型未启用，没有结果，请确认现在测试"), "该模型未启用，没有结果，请确认现在测试")
+  assert.notEqual(detectUserScript("皇后在台北并占布"), "hans") // 新增共用字不误判简体
 })
 
-// ── 2026-10-02 S2T：繁體會話出口「簡→繁」矯正（繁簡混雜兜底）──
-test("S2T 矯正：歧義同形字不回轉（不把合法繁體改壞），非歧義簡體字正常回正", () => {
-  const keep = "公里 只有 面對 回來 干涉 志願 并行" // 里/只/面/回/干/志/并 皆為合法繁體字
+// ── 2026-10-02 S2T：繁体会话出口「简→繁」矫正（繁简混杂兜底）──
+test("S2T 矫正：歧义同形字不回转（不把合法繁体改坏），非歧义简体字正常回正", () => {
+  const keep = "公里 只有 面对 回来 干涉 志愿 并行" // 里/只/面/回/干/志/并 皆为合法繁体字
   assert.equal(s2tLine(keep), keep)
-  assert.equal(s2tLine("这个时间会来对开关门说请谢应该当处动静"), "這個時間會來對開關門說請謝應該當處動靜")
-  assert.equal(s2tLine("> この距離が　いまは宝物"), "> この距離が　いまは宝物") // 日文行不轉
+  assert.equal(s2tLine("这个时间会来对开关门说请谢应该当处动静"), "这个时间会来对开关门说请谢应该当处动静")
+  assert.equal(s2tLine("> この距离が　いまは宝物"), "> この距离が　いまは宝物") // 日文行不转
 })
 
-// 真實 SSE 片段：eval-2026-op-theme/round2/session.sse 的 message.delta 原文
-//（event_id 2675 / 2676 / 8953 / 14117），原文即「繁簡混雜」的典型：既有繁體字亦有漏出簡體字。
+// 真实 SSE 片段：eval-2026-op-theme/round2/session.sse 的 message.delta 原文
+//（event_id 2675 / 2676 / 8953 / 14117），原文即「繁简混杂」的典型：既有繁体字亦有漏出简体字。
 const S2T_REAL_FRAMES = [
-  "派三路研究先行，回来整合成原創番劇概念＋信息量片头曲。",
-  "已派出 3 路研究（番劇世界觀趨勢／信息密度 OP 歌曲手法／病毒化 OP 视觉鉤子），约 15 分钟内回来后，我会整合成一部 2026 原創番劇概念＋帶信息量的片头曲方案。期间你可随时喊停或指定方向（如「要校園/要科幻/要懸疑」），我会把偏好併入后续设计。",
-  "首路研究已回（2026 番劇趨勢＋3 个原創题材方向，附真实出处）。另两路（OP 歌曲手法、病毒化视觉）还在跑，齊了再整合成完整方案，先收着不打擾。",
-  "二路研究已回（病毒化 OP 视觉鉤子＋8 个分镜级对位方案），还差 OP 歌曲手法那路，齊了马上整合。",
+  "派三路研究先行，回来整合成原创番剧概念＋信息量片头曲。",
+  "已派出 3 路研究（番剧世界观趋势／信息密度 OP 歌曲手法／病毒化 OP 视觉钩子），约 15 分钟内回来后，我会整合成一部 2026 原创番剧概念＋带信息量的片头曲方案。期间你可随时喊停或指定方向（如「要校园/要科幻/要悬疑」），我会把偏好并入后续设计。",
+  "首路研究已回（2026 番剧趋势＋3 个原创题材方向，附真实出处）。另两路（OP 歌曲手法、病毒化视觉）还在跑，齐了再整合成完整方案，先收着不打扰。",
+  "二路研究已回（病毒化 OP 视觉钩子＋8 个分镜级对位方案），还差 OP 歌曲手法那路，齐了马上整合。",
 ]
 const S2T_REAL_CODE = '```json\n{"model":"gpt-image-2","size":"1024x1024","status":"ok"}\n```'
 const S2T_REAL_URL = "成片：https://x.example/视频/出片.mp3"
 
-test("S2T 矯正（真 SSE 驗收）：繁體會話下簡體字全數回正，英文／JSON／URL 零改動", () => {
-  // 逐幀：回轉後不得再殘留任何可回轉的簡體字
+test("S2T 矫正（真 SSE 验收）：繁体会话下简体字全数回正，英文／JSON／URL 零改动", () => {
+  // 逐帧：回转后不得再残留任何可回转的简体字
   for (const fr of S2T_REAL_FRAMES) {
     const converted = s2tLine(fr)
     const leftover = Array.from(converted).filter((c) => S2T_MAP.has(c))
-    assert.deepEqual(leftover, [], `幀仍殘留簡體字：${converted}`)
+    assert.deepEqual(leftover, [], `帧仍残留简体字：${converted}`)
   }
   const input = S2T_REAL_FRAMES.join("\n") + "\n" + S2T_REAL_CODE + "\n" + S2T_REAL_URL + "\n"
   const st = newSt(false)
   const out = stripOutboundFeed(st, input) + stripOutboundFlush(st)
-  // 真正經出口管線的重點樣句已全部繁化
-  assert.ok(out.includes("回來整合成原創番劇概念＋信息量片頭曲"), "第 1 幀已全繁")
-  assert.ok(out.includes("約 15 分鐘內回來後，我會整合"), "第 2 幀已全繁（含簡體『后』回正為『後』）")
-  assert.ok(out.includes("3 個原創題材方向") && out.includes("附真實出處"), "第 3 幀已全繁")
-  assert.ok(out.includes("馬上整合"), "第 4 幀已全繁")
-  // 英文代碼／JSON 柵欄與 URL 段零改動（URL 內 CJK 亦不動）
-  assert.ok(out.includes(S2T_REAL_CODE), "JSON 代碼柵欄原樣")
-  assert.ok(out.includes(S2T_REAL_URL), "URL 段原樣（含 CJK）")
+  // 真正经出口管线的重点样句已全部繁化
+  assert.ok(out.includes("回来整合成原创番剧概念＋信息量片头曲"), "第 1 帧已全繁")
+  assert.ok(out.includes("约 15 分钟内回来后，我会整合"), "第 2 帧已全繁（含简体『后』回正为『后』）")
+  assert.ok(out.includes("3 个原创题材方向") && out.includes("附真实出处"), "第 3 帧已全繁")
+  assert.ok(out.includes("马上整合"), "第 4 帧已全繁")
+  // 英文代码／JSON 栅栏与 URL 段零改动（URL 内 CJK 亦不动）
+  assert.ok(out.includes(S2T_REAL_CODE), "JSON 代码栅栏原样")
+  assert.ok(out.includes(S2T_REAL_URL), "URL 段原样（含 CJK）")
 })
 

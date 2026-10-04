@@ -1,8 +1,8 @@
-// local-media-ingest 單元測試（runner：npx --yes tsx --test）。
+// local-media-ingest 单元测试（runner：npx --yes tsx --test）。
 //
-// 環境無 DOM：只測純邏輯（計劃幀數／時間點／邊長／位元組加總／音軌判定），
-// 加上用可注入的假 LocalMediaSession 覆蓋執行層的成功與各條降級路徑。
-// 真正的 <video>/<canvas> 解碼不在這裡（見回報的待 E2E 清單）。
+// 环境无 DOM：只测纯逻辑（计划帧数／时间点／边长／位元组加总／音轨判定），
+// 加上用可注入的假 LocalMediaSession 覆盖执行层的成功与各条降级路径。
+// 真正的 <video>/<canvas> 解码不在这里（见回报的待 E2E 清单）。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,7 +28,7 @@ import {
   type LocalMediaSession,
 } from "./local-media-ingest.ts";
 
-// ─────────────────────────── 測試輔助
+// ─────────────────────────── 测试辅助
 
 function makeFile(bytes: number): File {
   return new File([new Uint8Array(bytes)], "clip.mp4", { type: "video/mp4" });
@@ -100,25 +100,25 @@ class FakeSession implements LocalMediaSession {
 
 // ─────────────────────────── planKeyframeCount
 
-test("planKeyframeCount：非法／非正時長回下限", () => {
+test("planKeyframeCount：非法／非正时长回下限", () => {
   assert.equal(planKeyframeCount(0), MIN_LOCAL_KEYFRAMES);
   assert.equal(planKeyframeCount(-5), MIN_LOCAL_KEYFRAMES);
   assert.equal(planKeyframeCount(Number.NaN), MIN_LOCAL_KEYFRAMES);
   assert.equal(planKeyframeCount(Number.POSITIVE_INFINITY), MIN_LOCAL_KEYFRAMES);
 });
 
-test("planKeyframeCount：隨時長增加、夾在下限與上限之間", () => {
-  assert.equal(planKeyframeCount(1), MIN_LOCAL_KEYFRAMES); // 短於一單位仍取下限
+test("planKeyframeCount：随时长增加、夹在下限与上限之间", () => {
+  assert.equal(planKeyframeCount(1), MIN_LOCAL_KEYFRAMES); // 短于一单位仍取下限
   assert.equal(planKeyframeCount(60), 4);
   assert.equal(planKeyframeCount(75), 5);
   assert.equal(planKeyframeCount(150), 10);
   assert.equal(planKeyframeCount(180), MAX_LOCAL_KEYFRAMES);
-  assert.equal(planKeyframeCount(600), MAX_LOCAL_KEYFRAMES); // 40 → 封頂 12
+  assert.equal(planKeyframeCount(600), MAX_LOCAL_KEYFRAMES); // 40 → 封顶 12
 });
 
-// ─────────────────────────── planKeyframeTimes（複用 planFrameExtraction）
+// ─────────────────────────── planKeyframeTimes（复用 planFrameExtraction）
 
-test("planKeyframeTimes：60 秒 → 4 個等距中點，落在 (0, duration) 且嚴格遞增", () => {
+test("planKeyframeTimes：60 秒 → 4 个等距中点，落在 (0, duration) 且严格递增", () => {
   const plan = planKeyframeTimes(60);
   assert.equal(plan.ok, true);
   if (!plan.ok) return;
@@ -126,24 +126,24 @@ test("planKeyframeTimes：60 秒 → 4 個等距中點，落在 (0, duration) �
   assert.deepEqual(plan.timesSec, [7.5, 22.5, 37.5, 52.5]);
   for (let i = 0; i < plan.timesSec.length; i++) {
     const t = plan.timesSec[i];
-    assert.ok(t > 0 && t < 60, `time ${t} 應在 (0,60)`);
-    if (i > 0) assert.ok(t > plan.timesSec[i - 1], "應嚴格遞增");
+    assert.ok(t > 0 && t < 60, `time ${t} 应在 (0,60)`);
+    if (i > 0) assert.ok(t > plan.timesSec[i - 1], "应严格递增");
   }
 });
 
-test("planKeyframeTimes：時長 0 → ok:false（不產生非法時間點）", () => {
+test("planKeyframeTimes：时长 0 → ok:false（不产生非法时间点）", () => {
   const plan = planKeyframeTimes(0);
   assert.equal(plan.ok, false);
 });
 
-test("planKeyframeTimes：超過 600 秒上限 → ok:false（沿用 video-frames 的閘門）", () => {
+test("planKeyframeTimes：超过 600 秒上限 → ok:false（沿用 video-frames 的闸门）", () => {
   const plan = planKeyframeTimes(601);
   assert.equal(plan.ok, false);
 });
 
 // ─────────────────────────── frameEdgePx
 
-test("frameEdgePx：大於上限縮到 512，小於上限維持原長邊", () => {
+test("frameEdgePx：大于上限缩到 512，小于上限维持原长边", () => {
   assert.equal(frameEdgePx(1920, 1080), 512);
   assert.equal(frameEdgePx(512, 288), 512);
   assert.equal(frameEdgePx(400, 300), 400);
@@ -153,7 +153,7 @@ test("frameEdgePx：大於上限縮到 512，小於上限維持原長邊", () =>
 
 // ─────────────────────────── computeDerivedBytes
 
-test("computeDerivedBytes：只加有效位元組，忽略 NaN／負值／0", () => {
+test("computeDerivedBytes：只加有效位元组，忽略 NaN／负值／0", () => {
   assert.equal(computeDerivedBytes([10, 20, Number.NaN, -5, 0]), 30);
   assert.equal(computeDerivedBytes([]), 0);
   assert.equal(computeDerivedBytes([Number.POSITIVE_INFINITY]), 0);
@@ -161,7 +161,7 @@ test("computeDerivedBytes：只加有效位元組，忽略 NaN／負值／0", ()
 
 // ─────────────────────────── estimateProbeJsonBytes
 
-test("estimateProbeJsonBytes：等於實際 JSON 的 UTF-8 位元組數", () => {
+test("estimateProbeJsonBytes：等于实际 JSON 的 UTF-8 位元组数", () => {
   const probe: LocalMediaProbe = {
     durationSec: 60,
     width: 1920,
@@ -176,7 +176,7 @@ test("estimateProbeJsonBytes：等於實際 JSON 的 UTF-8 位元組數", () => 
 
 // ─────────────────────────── isIngestUsable
 
-test("isIngestUsable：null／降級／零關鍵幀皆不可用，正常結果可用", () => {
+test("isIngestUsable：null／降级／零关键帧皆不可用，正常结果可用", () => {
   const base: LocalMediaIngest = {
     probe: {
       durationSec: 60,
@@ -199,7 +199,7 @@ test("isIngestUsable：null／降級／零關鍵幀皆不可用，正常結果�
 
 // ─────────────────────────── toDerivedFiles
 
-test("toDerivedFiles：關鍵幀 → poster → probe，命名與 mime 正確，空 poster 不送", async () => {
+test("toDerivedFiles：关键帧 → poster → probe，命名与 mime 正确，空 poster 不送", async () => {
   const result: LocalMediaIngest = {
     probe: {
       durationSec: 60,
@@ -232,7 +232,7 @@ test("toDerivedFiles：關鍵幀 → poster → probe，命名與 mime 正確，
 
 // ─────────────────────────── detectHasAudio
 
-test("detectHasAudio：Firefox mozHasAudio 為權威；0 解碼位元組回 null 不冒充", () => {
+test("detectHasAudio：Firefox mozHasAudio 为权威；0 解码位元组回 null 不冒充", () => {
   assert.equal(detectHasAudio({ mozHasAudio: true } as unknown as HTMLVideoElement), true);
   assert.equal(detectHasAudio({ mozHasAudio: false } as unknown as HTMLVideoElement), false);
   assert.equal(
@@ -243,7 +243,7 @@ test("detectHasAudio：Firefox mozHasAudio 為權威；0 解碼位元組回 null
     detectHasAudio({ audioTracks: { length: 0 } } as unknown as HTMLVideoElement),
     false,
   );
-  // Chromium 未解碼時 webkitAudioDecodedByteCount 恆為 0：未知，不可當「無音軌」。
+  // Chromium 未解码时 webkitAudioDecodedByteCount 恒为 0：未知，不可当「无音轨」。
   assert.equal(
     detectHasAudio({ webkitAudioDecodedByteCount: 0 } as unknown as HTMLVideoElement),
     null,
@@ -255,9 +255,9 @@ test("detectHasAudio：Firefox mozHasAudio 為權威；0 解碼位元組回 null
   assert.equal(detectHasAudio({} as unknown as HTMLVideoElement), null);
 });
 
-// ─────────────────────────── runLocalMediaIngest：成功路徑
+// ─────────────────────────── runLocalMediaIngest：成功路径
 
-test("runLocalMediaIngest：成功 → probe 齊全、位元率＝size*8/duration、derivedBytes 正確、無 degraded", async () => {
+test("runLocalMediaIngest：成功 → probe 齐全、位元率＝size*8/duration、derivedBytes 正确、无 degraded", async () => {
   const file = makeFile(1_200_000);
   const session = new FakeSession();
   const stages: string[] = [];
@@ -285,26 +285,26 @@ test("runLocalMediaIngest：成功 → probe 齊全、位元率＝size*8/duratio
   assert.ok(stages.includes("frames"));
   assert.ok(stages.includes("poster"));
   assert.ok(stages.includes("done"));
-  // run 不負責 dispose（由外層 ingestMediaLocally 收尾）。
+  // run 不负责 dispose（由外层 ingestMediaLocally 收尾）。
   assert.equal(session.disposed, false);
 });
 
-// ─────────────────────────── runLocalMediaIngest：降級路徑
+// ─────────────────────────── runLocalMediaIngest：降级路径
 
-test("runLocalMediaIngest：metadata 失敗 → 不拋出，degraded 記因，無關鍵幀", async () => {
+test("runLocalMediaIngest：metadata 失败 → 不抛出，degraded 记因，无关键帧", async () => {
   const session = new FakeSession({ metadata: "throw" });
   const result = await runLocalMediaIngest(makeFile(1000), session);
 
   assert.ok(result.degraded?.includes("metadata"));
   assert.equal(result.keyframes.length, 0);
   assert.equal(result.probe.durationSec, null);
-  assert.equal(session.extractCalls, 0); // 沒時長就不抽幀
-  // 設計：單步失敗不中斷整條流程，海報仍會嘗試（真瀏覽器多半也在此步失敗 → 一併記因）。
+  assert.equal(session.extractCalls, 0); // 没时长就不抽帧
+  // 设计：单步失败不中断整条流程，海报仍会尝试（真浏览器多半也在此步失败 → 一并记因）。
   assert.equal(session.posterCalls, 1);
   assert.equal(result.poster.size, 50);
 });
 
-test("runLocalMediaIngest：抽幀失敗但海報成功 → 記 frames、保留海報、不拋出", async () => {
+test("runLocalMediaIngest：抽帧失败但海报成功 → 记 frames、保留海报、不抛出", async () => {
   const session = new FakeSession({ onExtract: () => "throw" });
   const result = await runLocalMediaIngest(makeFile(1000), session);
 
@@ -314,7 +314,7 @@ test("runLocalMediaIngest：抽幀失敗但海報成功 → 記 frames、保留�
   assert.equal(session.posterCalls, 1);
 });
 
-test("runLocalMediaIngest：海報失敗 → 退回第一張關鍵幀當海報，記 poster", async () => {
+test("runLocalMediaIngest：海报失败 → 退回第一张关键帧当海报，记 poster", async () => {
   const session = new FakeSession({ poster: "throw" });
   const result = await runLocalMediaIngest(makeFile(1000), session);
 
@@ -323,7 +323,7 @@ test("runLocalMediaIngest：海報失敗 → 退回第一張關鍵幀當海報�
   assert.equal(result.poster, result.keyframes[0].blob);
 });
 
-test("runLocalMediaIngest：時長未知（null）→ 記 plan，不抽幀也不拋出", async () => {
+test("runLocalMediaIngest：时长未知（null）→ 记 plan，不抽帧也不抛出", async () => {
   const session = new FakeSession({
     metadata: { durationSec: null, width: 100, height: 100, hasAudio: null },
   });
@@ -333,8 +333,8 @@ test("runLocalMediaIngest：時長未知（null）→ 記 plan，不抽幀也不
   assert.equal(session.extractCalls, 0);
 });
 
-test("runLocalMediaIngest：衍生檔超過上行閘門 → 記 derived_too_large", async () => {
-  const perFrame = Math.ceil(MAX_DERIVED_UPLOAD_BYTES / 2); // 4 幀遠超閘門
+test("runLocalMediaIngest：衍生档超过上行闸门 → 记 derived_too_large", async () => {
+  const perFrame = Math.ceil(MAX_DERIVED_UPLOAD_BYTES / 2); // 4 帧远超闸门
   const session = new FakeSession({
     onExtract: (times) => times.map((t, i) => keyframe(t, perFrame + i)),
     poster: makeBlob(10),
@@ -345,7 +345,7 @@ test("runLocalMediaIngest：衍生檔超過上行閘門 → 記 derived_too_larg
   assert.equal(result.keyframes.length, 4);
 });
 
-test("runLocalMediaIngest：signal 已 abort → 記 aborted，完全不碰 session", async () => {
+test("runLocalMediaIngest：signal 已 abort → 记 aborted，完全不碰 session", async () => {
   const controller = new AbortController();
   controller.abort();
   const session = new FakeSession();
@@ -357,7 +357,7 @@ test("runLocalMediaIngest：signal 已 abort → 記 aborted，完全不碰 sess
   assert.equal(session.posterCalls, 0);
 });
 
-test("runLocalMediaIngest：onProgress 拋錯不弄壞管線", async () => {
+test("runLocalMediaIngest：onProgress 抛错不弄坏管线", async () => {
   const session = new FakeSession();
   const result = await runLocalMediaIngest(makeFile(1000), session, {
     onProgress: () => {
@@ -368,10 +368,10 @@ test("runLocalMediaIngest：onProgress 拋錯不弄壞管線", async () => {
   assert.equal(result.keyframes.length, 4);
 });
 
-// ─────────────────────── BUG-1 端到端（假 DOM）：ingestMediaLocally 絕不永久 pending
+// ─────────────────────── BUG-1 端到端（假 DOM）：ingestMediaLocally 绝不永久 pending
 //
-// 這裡用最小假 <video>/<canvas> 與假 document/URL 走真正的 createBrowserMediaSession，
-// 精確重現「error 只發一次、第二次等待」的原始卡死情境。
+// 这里用最小假 <video>/<canvas> 与假 document/URL 走真正的 createBrowserMediaSession，
+// 精确重现「error 只发一次、第二次等待」的原始卡死情境。
 
 type VideoDomMode = "error-once" | "seek-hang";
 
@@ -433,13 +433,13 @@ function makeFakeVideo(mode: VideoDomMode): FakeDomVideo {
     set(val: string): void {
       v._src = val;
       if (mode === "error-once") {
-        // 真實瀏覽器：error 只發一次，且發前先設 video.error（readyState 停在 0）。
+        // 真实浏览器：error 只发一次，且发前先设 video.error（readyState 停在 0）。
         queueMicrotask(() => {
           v.error = { code: 4 };
           v.fire("error");
         });
       } else {
-        // seek-hang：metadata 正常（readyState=HAVE_METADATA），但不發 seeked。
+        // seek-hang：metadata 正常（readyState=HAVE_METADATA），但不发 seeked。
         v.readyState = 1;
         v.duration = 10;
         v.videoWidth = 640;
@@ -473,7 +473,7 @@ function installFakeVideoDom(mode: VideoDomMode): () => void {
 }
 
 test(
-  "BUG-1：不可解碼檔（error 只發一次）→ ingestMediaLocally 立即回 degraded，絕不永久 pending",
+  "BUG-1：不可解码档（error 只发一次）→ ingestMediaLocally 立即回 degraded，绝不永久 pending",
   { timeout: 5000 },
   async () => {
     const restore = installFakeVideoDom("error-once");
@@ -481,12 +481,12 @@ test(
       const started = Date.now();
       const result = await ingestMediaLocally(makeFile(1500));
       const elapsed = Date.now() - started;
-      assert.ok(result.degraded, "壞檔必須帶 degraded，呼叫端才知道退回原檔路徑");
+      assert.ok(result.degraded, "坏档必须带 degraded，呼叫端才知道退回原档路径");
       assert.match(result.degraded!, /metadata/);
       assert.equal(result.keyframes.length, 0);
       assert.ok(
         elapsed < 1000,
-        `必須立即回（實測 ${elapsed}ms）；不得靠 10s timeout 才 settle，更不能無限 pending`,
+        `必须立即回（实测 ${elapsed}ms）；不得靠 10s timeout 才 settle，更不能无限 pending`,
       );
     } finally {
       restore();
@@ -495,7 +495,7 @@ test(
 );
 
 test(
-  "BUG-1：某一階段卡死（永不 seeked）→ 總 timeout 兜底回 degraded，不永久 pending",
+  "BUG-1：某一阶段卡死（永不 seeked）→ 总 timeout 兜底回 degraded，不永久 pending",
   { timeout: 5000 },
   async () => {
     const restore = installFakeVideoDom("seek-hang");
@@ -503,9 +503,9 @@ test(
       const started = Date.now();
       const result = await ingestMediaLocally(makeFile(1500), { timeoutMs: 40 });
       const elapsed = Date.now() - started;
-      assert.ok(result.degraded, "逾時必須帶 degraded");
+      assert.ok(result.degraded, "逾时必须带 degraded");
       assert.match(result.degraded!, /timeout/);
-      assert.ok(elapsed >= 30 && elapsed < 2000, `應在 timeout 附近回（實測 ${elapsed}ms）`);
+      assert.ok(elapsed >= 30 && elapsed < 2000, `应在 timeout 附近回（实测 ${elapsed}ms）`);
     } finally {
       restore();
     }

@@ -6,7 +6,7 @@ import { ensureGatewayUserForOAuth, listGatewayRedemptions } from "./gateway-adm
 /**
  * 站点 OAuth 建号改走上游管理员建号 API（为关闭自助注册做准备）。
  *
- * 这里用真桩 fetch 跑真分支，不做源碼字串断言：决定行为的是「先查后建、
+ * 这里用真桩 fetch 跑真分支，不做源码字串断言：决定行为的是「先查后建、
  * 已存在算复用、其他失败才抛」这条分流，只有真呼叫才能证。
  */
 

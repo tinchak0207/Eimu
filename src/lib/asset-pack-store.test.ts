@@ -29,7 +29,7 @@ function makePack(overrides: Partial<AssetPack> = {}): AssetPack {
   const now = new Date().toISOString();
   return {
     id: "pack-1",
-    title: "測試包",
+    title: "测试包",
     items: [makeItem()],
     tags: [],
     createdAt: now,
@@ -38,11 +38,11 @@ function makePack(overrides: Partial<AssetPack> = {}): AssetPack {
   };
 }
 
-// ── normalize 白名單 ─────────────────────────────────────────
+// ── normalize 白名单 ─────────────────────────────────────────
 
-test("normalizeAssetPack：video/audio 已進白名單，但缺 mediaUrl 仍被拒（drop）", () => {
-  // 舊契約：video 是「非法 kind」被 drop；新契約：video/audio 是合法交付物媒體，
-  // 缺 mediaUrl 才 drop（無產物 URL 的媒體 item 無意義）。此條反映新契約。
+test("normalizeAssetPack：video/audio 已进白名单，但缺 mediaUrl 仍被拒（drop）", () => {
+  // 旧契约：video 是「非法 kind」被 drop；新契约：video/audio 是合法交付物媒体，
+  // 缺 mediaUrl 才 drop（无产物 URL 的媒体 item 无意义）。此条反映新契约。
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -57,15 +57,15 @@ test("normalizeAssetPack：video/audio 已進白名單，但缺 mediaUrl 仍被�
   assert.equal(pack.items[0].title, "good");
 });
 
-test("normalizeAssetPack：未知 / 近義 asset kind 一律被拒（item 被 drop，不靜默放行）", () => {
-  // 未知 kind（"garbage"）與近義詞（"movie" 而非 "video"）都不是註冊表白名單值，
-  // normalizeItem 回 null → 該 item 被 drop，不得因新增媒體種類而被放行。
+test("normalizeAssetPack：未知 / 近义 asset kind 一律被拒（item 被 drop，不静默放行）", () => {
+  // 未知 kind（"garbage"）与近义词（"movie" 而非 "video"）都不是注册表白名单值，
+  // normalizeItem 回 null → 该 item 被 drop，不得因新增媒体种类而被放行。
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
     items: [
       { kind: "garbage", title: "x" },
-      { kind: "movie", title: "近義詞" },
+      { kind: "movie", title: "近义词" },
       { kind: "prompt", title: "good" },
     ],
   });
@@ -74,7 +74,7 @@ test("normalizeAssetPack：未知 / 近義 asset kind 一律被拒（item 被 dr
   assert.equal(pack.items[0].kind, "prompt");
   assert.equal(pack.items[0].title, "good");
 
-  // 全部為未知 kind 時，item 層全被 drop（pack 本體仍成立、items 為空）。
+  // 全部为未知 kind 时，item 层全被 drop（pack 本体仍成立、items 为空）。
   const allBogus = normalizeAssetPack({
     id: "p2",
     title: "t",
@@ -87,7 +87,7 @@ test("normalizeAssetPack：未知 / 近義 asset kind 一律被拒（item 被 dr
   assert.equal(allBogus.items.length, 0);
 });
 
-test("normalizeAssetPack：video 帶 mediaUrl → 收，kind/mediaUrl 保留", () => {
+test("normalizeAssetPack：video 带 mediaUrl → 收，kind/mediaUrl 保留", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -102,7 +102,7 @@ test("normalizeAssetPack：video 帶 mediaUrl → 收，kind/mediaUrl 保留", (
   assert.equal(pack.items[0].imageUrl, undefined);
 });
 
-test("normalizeAssetPack：audio 帶 mediaUrl → 收；缺 mediaUrl → drop", () => {
+test("normalizeAssetPack：audio 带 mediaUrl → 收；缺 mediaUrl → drop", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -117,7 +117,7 @@ test("normalizeAssetPack：audio 帶 mediaUrl → 收；缺 mediaUrl → drop", 
   assert.equal(pack.items[0].mediaUrl, "https://x/a.mp3");
 });
 
-test("normalizeAssetPack：image 既有行為不變（有 imageUrl 收、缺 URL 仍保留 item）", () => {
+test("normalizeAssetPack：image 既有行为不变（有 imageUrl 收、缺 URL 仍保留 item）", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -134,7 +134,7 @@ test("normalizeAssetPack：image 既有行為不變（有 imageUrl 收、缺 URL
   assert.equal(pack.items[1].imageUrl, undefined);
 });
 
-test("normalizeAssetPack：reference 既有行為不變（收 imageUrl，不收 mediaUrl）", () => {
+test("normalizeAssetPack：reference 既有行为不变（收 imageUrl，不收 mediaUrl）", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -145,14 +145,14 @@ test("normalizeAssetPack：reference 既有行為不變（收 imageUrl，不收 
   assert.equal(pack.items[0].mediaUrl, undefined);
 });
 
-test("normalizeAssetPack：無 title 的 pack 拒絕", () => {
+test("normalizeAssetPack：无 title 的 pack 拒绝", () => {
   assert.equal(normalizeAssetPack({ id: "p1", title: "" }), null);
   assert.equal(normalizeAssetPack({ id: "p1" }), null);
   assert.equal(normalizeAssetPack({ title: "t" }), null);
   assert.equal(normalizeAssetPack(null), null);
 });
 
-test("normalizeAssetPack：無 title 的 item 被拒絕（drop）", () => {
+test("normalizeAssetPack：无 title 的 item 被拒绝（drop）", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -162,20 +162,20 @@ test("normalizeAssetPack：無 title 的 item 被拒絕（drop）", () => {
   assert.equal(pack.items.length, 1);
 });
 
-test("normalizeAssetPack：digest 截斷至 500", () => {
+test("normalizeAssetPack：digest 截断至 500", () => {
   const pack = normalizeAssetPack({ id: "p1", title: "t", digest: "x".repeat(600) });
   assert.ok(pack);
   assert.equal(pack.digest!.length, MAX_DIGEST_LENGTH);
 });
 
-test("normalizeAssetPack：items 超過上限截斷", () => {
+test("normalizeAssetPack：items 超过上限截断", () => {
   const items = Array.from({ length: MAX_ITEMS_PER_PACK + 10 }, (_, i) => makeItem({ title: `item-${i}` }));
   const pack = normalizeAssetPack({ id: "p1", title: "t", items });
   assert.ok(pack);
   assert.equal(pack.items.length, MAX_ITEMS_PER_PACK);
 });
 
-test("normalizeAssetPack：tags 去重 + 截斷；欄位按 kind 才收；lora 專屬欄位", () => {
+test("normalizeAssetPack：tags 去重 + 截断；栏位按 kind 才收；lora 专属栏位", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -210,9 +210,9 @@ test("normalizeAssetPack：active 只收 boolean true", () => {
   assert.equal(pack2.active, undefined);
 });
 
-// ── store 行為 ───────────────────────────────────────────────
+// ── store 行为 ───────────────────────────────────────────────
 
-test("saveAssetPack：upsert by id 覆蓋", async () => {
+test("saveAssetPack：upsert by id 覆盖", async () => {
   await saveAssetPack(USER_ID, makePack({ id: "pack-1", title: "A" }));
   await saveAssetPack(USER_ID, makePack({ id: "pack-1", title: "B" }));
   const packs = await listAssetPacks(USER_ID);
@@ -220,7 +220,7 @@ test("saveAssetPack：upsert by id 覆蓋", async () => {
   assert.equal(packs[0].title, "B");
 });
 
-test("saveAssetPack：超過 MAX_PACKS_PER_USER 拋 AssetPackLimitError", async () => {
+test("saveAssetPack：超过 MAX_PACKS_PER_USER 抛 AssetPackLimitError", async () => {
   for (let i = 0; i < MAX_PACKS_PER_USER; i++) {
     await saveAssetPack(USER_ID, makePack({ id: `pack-${i}` }));
   }
@@ -230,7 +230,7 @@ test("saveAssetPack：超過 MAX_PACKS_PER_USER 拋 AssetPackLimitError", async 
   );
 });
 
-test("saveAssetPack：upsert 既有 id 不佔上限（仍可更新）", async () => {
+test("saveAssetPack：upsert 既有 id 不占上限（仍可更新）", async () => {
   for (let i = 0; i < MAX_PACKS_PER_USER; i++) {
     await saveAssetPack(USER_ID, makePack({ id: `pack-${i}` }));
   }
@@ -240,7 +240,7 @@ test("saveAssetPack：upsert 既有 id 不佔上限（仍可更新）", async ()
   assert.equal(packs.find((p) => p.id === "pack-0")?.title, "updated");
 });
 
-test("saveAssetPack：active 單一（存 A.active 再存 B.active → A 被清掉）", async () => {
+test("saveAssetPack：active 单一（存 A.active 再存 B.active → A 被清掉）", async () => {
   await saveAssetPack(USER_ID, makePack({ id: "A", active: true }));
   await saveAssetPack(USER_ID, makePack({ id: "B", active: true }));
   const packs = await listAssetPacks(USER_ID);
@@ -253,7 +253,7 @@ test("saveAssetPack：active 單一（存 A.active 再存 B.active → A 被清�
   assert.equal(packs.filter((p) => p.active === true).length, 1);
 });
 
-test("getActiveAssetPack：無 active 包 → null；有則回該包", async () => {
+test("getActiveAssetPack：无 active 包 → null；有则回该包", async () => {
   assert.equal(await getActiveAssetPack(USER_ID), null);
   await saveAssetPack(USER_ID, makePack({ id: "A", active: true }));
   const active = await getActiveAssetPack(USER_ID);
@@ -261,7 +261,7 @@ test("getActiveAssetPack：無 active 包 → null；有則回該包", async () 
   assert.equal(active.id, "A");
 });
 
-test("deleteAssetPacks：刪除指定 id，不存在的忽略", async () => {
+test("deleteAssetPacks：删除指定 id，不存在的忽略", async () => {
   await saveAssetPack(USER_ID, makePack({ id: "A" }));
   await saveAssetPack(USER_ID, makePack({ id: "B" }));
   await deleteAssetPacks(USER_ID, ["A", "missing"]);
@@ -269,22 +269,22 @@ test("deleteAssetPacks：刪除指定 id，不存在的忽略", async () => {
   assert.deepEqual(packs.map((p) => p.id), ["B"]);
 });
 
-test("saveAssetPack：不合法 pack 拋錯", async () => {
+test("saveAssetPack：不合法 pack 抛错", async () => {
   await assert.rejects(
     () => saveAssetPack(USER_ID, { id: "", title: "" } as AssetPack),
     /invalid asset pack/,
   );
 });
 
-// ─────────────────────────────────────────── REQ-B2-4 pack id 邊界
+// ─────────────────────────────────────────── REQ-B2-4 pack id 边界
 
-test("B2-4 pack id：長度上限與分隔符邊界（拒絕而非截斷，避免『可建不可分享』與撞鍵別名）", () => {
-  // 邊界內：200 字可用（與 share/mount 的 200 同一個界）。
+test("B2-4 pack id：长度上限与分隔符边界（拒绝而非截断，避免『可建不可分享』与撞键别名）", () => {
+  // 边界内：200 字可用（与 share/mount 的 200 同一个界）。
   const atLimit = "a".repeat(MAX_PACK_ID_LENGTH);
   assert.ok(normalizeAssetPack({ id: atLimit, title: "边界内的包", items: [], tags: [] }));
-  // 超長：拒收（過去 str 無上限 → 能建但不能分享/掛用）。
+  // 超长：拒收（过去 str 无上限 → 能建但不能分享/挂用）。
   assert.equal(normalizeAssetPack({ id: "a".repeat(MAX_PACK_ID_LENGTH + 1), title: "超长", items: [], tags: [] }), null);
-  // 含保留分隔符 `:`：拒收（作用域層確定性鍵的段分隔符，含它會撞鍵）。
+  // 含保留分隔符 `:`：拒收（作用域层确定性键的段分隔符，含它会撞键）。
   assert.equal(normalizeAssetPack({ id: "pack:x:card:y", title: "撞键", items: [], tags: [] }), null);
   assert.equal(normalizeAssetPack({ id: "  pack-ok  ", title: "空白", items: [], tags: [] })?.id, "pack-ok");
 }); 

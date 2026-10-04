@@ -1,10 +1,10 @@
-// 渠道統一調度的 admin 面：GET 回報「生產此刻會怎麼路由」，PATCH 在版本閘下
-// 全量替換 overrides（last-write-wins，但 expectedVersion 不符即 409 拒收，
-// 附上最新完整 payload 讓 UI 重載——這是丟更新防護的評審 blocker）。
+// 渠道统一调度的 admin 面：GET 回报「生产此刻会怎么路由」，PATCH 在版本闸下
+// 全量替换 overrides（last-write-wins，但 expectedVersion 不符即 409 拒收，
+// 附上最新完整 payload 让 UI 重载——这是丢更新防护的评审 blocker）。
 //
-// 安全鐵則：queues 的映射只允許輸出 label / host / priority 三個欄位。
-// buildModelQueue 回傳的端點物件帶著渠道密鑰，把整個端點序列化出去，
-// 等於把密鑰交給任何拿到 admin session 的人。host 一律過 safeEndpointHost。
+// 安全铁则：queues 的映射只允许输出 label / host / priority 三个栏位。
+// buildModelQueue 回传的端点物件带著渠道密钥，把整个端点序列化出去，
+// 等于把密钥交给任何拿到 admin session 的人。host 一律过 safeEndpointHost。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -27,9 +27,9 @@ import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** 只回「是否存在（去空白後非空）」的布林，絕不回值。 */
+/** 只回「是否存在（去空白后非空）」的布林，绝不回值。 */
 const ENV_PRESENCE_KEYS = [
   "SUB2API_ENABLED",
   "SUB2API_BASE_URL",
@@ -57,10 +57,10 @@ interface QueueEntry {
 }
 
 /**
- * SUB2API_ENABLED 三態。歷史事故：這個開關曾要求原始字串精確等於 "true"，
- * 帶換行/BOM/大小寫的值會靜默切走 sub2api。判定必須與生產隊列同源
- * （sub2apiSwitchedOn）：清洗後不分大小寫的 true 即生效；"1"、"yes" 之類
- * 仍屬「設了但沒生效」——admin 必須能一眼看出。
+ * SUB2API_ENABLED 三态。历史事故：这个开关曾要求原始字串精确等于 "true"，
+ * 带换行/BOM/大小写的值会静默切走 sub2api。判定必须与生产队列同源
+ * （sub2apiSwitchedOn）：清洗后不分大小写的 true 即生效；"1"、"yes" 之类
+ * 仍属「设了但没生效」——admin 必须能一眼看出。
  */
 function sub2apiEnabledState(): "true" | "set-but-not-true" | "missing" {
   if (process.env.SUB2API_ENABLED === undefined) return "missing";
@@ -68,14 +68,14 @@ function sub2apiEnabledState(): "true" | "set-but-not-true" | "missing" {
 }
 
 /**
- * GET 與 PATCH（成功、409）共用的完整 payload。pools 與 overrides 各讀一次，
- * channels 與 queues 用同一份輸入——兩邊各讀一次就可能各說各話，正是渠道
- * 註冊表要消滅的病。overrides 用 fresh 讀：admin 要看的是最新版本。
+ * GET 与 PATCH（成功、409）共用的完整 payload。pools 与 overrides 各读一次，
+ * channels 与 queues 用同一份输入——两边各读一次就可能各说各话，正是渠道
+ * 注册表要消灭的病。overrides 用 fresh 读：admin 要看的是最新版本。
  */
 async function buildChannelsPayload(
   /**
-   * PATCH 成功後傳入剛寫入的值：Blob list() 不保證寫後讀一致，重新 list 可能拿回
-   * 舊世代，把 admin 剛保存的開關在回應裡靜默還原、且讓下次保存拿舊 version 撞 409。
+   * PATCH 成功后传入刚写入的值：Blob list() 不保证写后读一致，重新 list 可能拿回
+   * 旧世代，把 admin 刚保存的开关在回应里静默还原、且让下次保存拿旧 version 撞 409。
    */
   known?: { overrides: ChannelOverrides; version: string | null },
 ) {
@@ -85,10 +85,10 @@ async function buildChannelsPayload(
   ]);
 
   const channels = describeChannels(process.env, pools, overrides);
-  // 隊列端點的生效優先級以 label 對回描述表。
-  // 池名是自由文本，可與 env 渠道 label 撞名。Map 後寫者
-  // 勝，若池在後寫入，env 條目會顯示池的優先級——所以 env 條目最後寫入，
-  // 保證同名衝突時以 env 渠道的生效值為準（隊列裡的 env 條目數量遠多於撞名池）。
+  // 队列端点的生效优先级以 label 对回描述表。
+  // 池名是自由文本，可与 env 渠道 label 撞名。Map 后写者
+  // 胜，若池在后写入，env 条目会显示池的优先级——所以 env 条目最后写入，
+  // 保证同名冲突时以 env 渠道的生效值为准（队列里的 env 条目数量远多于撞名池）。
   const priorityByLabel = new Map<string, number>();
   for (const channel of channels.filter((item) => item.kind === "pool")) {
     priorityByLabel.set(channel.label, channel.priority);
@@ -159,7 +159,7 @@ export async function PATCH(req: NextRequest) {
     if (!body || typeof body !== "object") {
       return NextResponse.json({ success: false, message: "请求体必须是 JSON 对象。" }, { status: 400 });
     }
-    // 全量替換語意下，漏送 overrides 等於清空全部配置——必須是顯式的物件。
+    // 全量替换语意下，漏送 overrides 等于清空全部配置——必须是显式的物件。
     if (typeof body.overrides !== "object" || body.overrides === null || Array.isArray(body.overrides)) {
       return NextResponse.json({ success: false, message: "overrides 必须是对象。" }, { status: 400 });
     }
@@ -170,14 +170,14 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 白名單校驗在路由層做（store 只管形狀）：先 normalize 收斂形狀，再剔除
-    // 不在 overridableChannelIds 的 key——池渠道有自己的 CRUD，垃圾 key 直接丟。
+    // 白名单校验在路由层做（store 只管形状）：先 normalize 收敛形状，再剔除
+    // 不在 overridableChannelIds 的 key——池渠道有自己的 CRUD，垃圾 key 直接丢。
     const allowed = new Set(overridableChannelIds());
     const overrides: ChannelOverrides = Object.fromEntries(
       Object.entries(normalizeChannelOverrides(body.overrides)).filter(([id]) => allowed.has(id)),
     );
 
-    // 丟更新防護：fresh 讀最新版本，不符即 409 並附最新完整 payload 讓 UI 重載。
+    // 丢更新防护：fresh 读最新版本，不符即 409 并附最新完整 payload 让 UI 重载。
     const { overrides: previousOverrides, version: currentVersion } = await readChannelOverrides({ fresh: true });
     if (body.expectedVersion !== currentVersion) {
       return NextResponse.json(
@@ -192,8 +192,8 @@ export async function PATCH(req: NextRequest) {
 
     const { version: writtenVersion } = await writeChannelOverrides(overrides);
 
-    // 稽核紀錄：整數版本序列獨立於 Blob pathname，只活在稽核表裡（見 admin-audit.ts
-    // 檔頭註解）。失敗不拋錯，寫入本身已成功，不能因為稽核記不上而回錯給前端。
+    // 稽核纪录：整数版本序列独立于 Blob pathname，只活在稽核表里（见 admin-audit.ts
+    // 档头注解）。失败不抛错，写入本身已成功，不能因为稽核记不上而回错给前端。
     const auditVersion = await nextConfigVersion("channel-overrides");
     await recordConfigChange({
       configKey: "channel-overrides",

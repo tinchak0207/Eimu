@@ -299,10 +299,10 @@ export function assembleEditorPrompt(
   let constitution: string;
   try {
     const raw = (context.loadConstitution ?? defaultLoadConstitution)();
-    // 空值視為不可用（跟隨 blender-director-persona 同款範式）：空字串／全空白
-    // 不得視為「已注入憲法」，否則產出無憲法派遣（裸奔，誠實鐵律禁止）。
+    // 空值视为不可用（跟随 blender-director-persona 同款范式）：空字串／全空白
+    // 不得视为「已注入宪法」，否则产出无宪法派遣（裸奔，诚实铁律禁止）。
     if (raw.trim() === "") {
-      throw new Error("载入器回傳空內容（空或全空白）");
+      throw new Error("载入器回传空内容（空或全空白）");
     }
     constitution = raw;
   } catch (e) {

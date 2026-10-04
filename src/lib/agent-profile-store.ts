@@ -352,7 +352,7 @@ export async function listAgentLessons(userId: number, limit = AGENT_LESSONS_INJ
 
 /**
  * 用户确认/否认一条教训（确认后才保证进注入集合）。
- * 未啟用：全倉零調用點（2026-09-15 盤點，PRD D3），隨 P2 記憶 UI 決定去留。
+ * 未启用：全仓零调用点（2026-09-15 盘点，PRD D3），随 P2 记忆 UI 决定去留。
  */
 export async function confirmAgentLesson(userId: number, lessonId: string, confirmed: boolean): Promise<void> {
   if (dbAvailable()) {

@@ -92,9 +92,9 @@ test("non-array and oversized controlNets are fully rejected", () => {
 });
 
 test("toPixaiControlNets emits a pixai-shaped array that is never a placeholder empty list", () => {
-  // 路由的標準順序是 normalize → toPixai：toPixai 吃的是已歸一成 canonical 名、
-  // 已 clamp 過、而且 image 已通過白名單的 specs。呼叫方不該把 raw input 直接
-  // 塞給 toPixai（那會把 alias 原樣當 preprocessor 餵出去）。
+  // 路由的标准顺序是 normalize → toPixai：toPixai 吃的是已归一成 canonical 名、
+  // 已 clamp 过、而且 image 已通过白名单的 specs。呼叫方不该把 raw input 直接
+  // 塞给 toPixai（那会把 alias 原样当 preprocessor 喂出去）。
   const specs: ControlNetSpec[] = [
     normalizeControlNetSpec({ image: "https://a.example/1.png", type: "softedge" })!,
     normalizeControlNetSpec({ image: "https://a.example/2.png", type: "depth", weight: 0.5 })!,
@@ -106,7 +106,7 @@ test("toPixaiControlNets emits a pixai-shaped array that is never a placeholder 
     ["SoftEdge", "Depth"],
   );
   assert.ok(pixai.every((entry) => typeof entry.imageUrl === "string" && entry.imageUrl.length > 0));
-  // 空 specs 產出空陣列 = 舊行為（無控制網），而不是塞一個假 entry。
+  // 空 specs 产出空阵列 = 旧行为（无控制网），而不是塞一个假 entry。
   assert.deepEqual(toPixaiControlNets([]), []);
 });
 

@@ -269,7 +269,7 @@ export function AttachmentThumb({
       title={`打开原图：${attRef.name ?? "附件"}`}
       className={cn("block overflow-hidden", wrapperClassName, chromeClassName)}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- 網關簽票 URL（帶 ticket，必要時經本站 proxy），next/image 無法優化且 fill／寬高推導會綁死附件自適應版面 */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- 网关签票 URL（带 ticket，必要时经本站 proxy），next/image 无法优化且 fill／宽高推导会绑死附件自适应版面 */}
       <img
         src={url}
         alt={attRef.name ?? "附件图片"}

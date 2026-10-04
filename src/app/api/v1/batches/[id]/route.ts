@@ -12,7 +12,7 @@ import {
 } from "@/lib/generation-core/batch-service";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(status: number, message: string, code: string, traceId: string, key?: BizApiKey) {
   let response: Response = NextResponse.json(
@@ -24,12 +24,12 @@ function errorResponse(status: number, message: string, code: string, traceId: s
 }
 
 /**
- * GET /v1/batches/:id — 批量聚合視圖。
+ * GET /v1/batches/:id — 批量聚合视图。
  *
  * counts 按 OpenAI 相容投影（pending/running/succeeded/failed/cancelled/refunded）
- * 分桶；批終結判定 = 全部已提交項終結（部分成功語義：任何時刻 succeeded 的項
- * 都可經既有 /v1/images/:id/result（或 videos）取件，不必等整批）。輪詢端點
- * 不消耗限流額度，與 /v1/images/:id 一致。
+ * 分桶；批终结判定 = 全部已提交项终结（部分成功语义：任何时刻 succeeded 的项
+ * 都可经既有 /v1/images/:id/result（或 videos）取件，不必等整批）。轮询端点
+ * 不消耗限流额度，与 /v1/images/:id 一致。
  */
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const traceId = getOrCreateTraceId(req);
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   if (!batch) return errorResponse(404, "Generation batch was not found.", "batch_not_found", traceId, auth.key);
 
   const jobs = await listGenerationBatchJobs(batch.id);
-  // 讀取時惰性收斂：全部終結 → completed（編排層唯一狀態寫入，best-effort）。
+  // 读取时惰性收敛：全部终结 → completed（编排层唯一状态写入，best-effort）。
   const finalized = await finalizeGenerationBatchIfTerminal(batch, jobs);
   const aggregate = computeBatchAggregate(finalized, jobs);
   const items = buildBatchItems(finalized, jobs);

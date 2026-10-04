@@ -6,12 +6,12 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// 與 agent-chat-ui.test.ts 同一個坑：tsconfig jsx=preserve 讓 tsx 對 .tsx 退回
-// classic runtime（React.createElement），元件源碼不 import React。SSR 渲染前
-// 補全局 React 樁，否則一渲染就 ReferenceError: React is not defined。
+// 与 agent-chat-ui.test.ts 同一个坑：tsconfig jsx=preserve 让 tsx 对 .tsx 退回
+// classic runtime（React.createElement），元件源码不 import React。SSR 渲染前
+// 补全局 React 桩，否则一渲染就 ReferenceError: React is not defined。
 (globalThis as unknown as Record<string, unknown>).React ??= React;
 
-// 觸控 placeholder 的真行為斷言（決策純函數）＋ SSR 真渲染斷言用的元件本體。
+// 触控 placeholder 的真行为断言（决策纯函数）＋ SSR 真渲染断言用的元件本体。
 import {
   AgentComposer,
   LocalFileModeMenuView,
@@ -204,7 +204,7 @@ test("思考级别菜单：工具行同排、「+」右边、收起态 iconX、�
   assert.match(code, /w-max/);
   assert.match(code, /<ThinkingLevelMenu disabled=\{!canAttach\} \/>/);
   // 收起态＝lucide Brain + 级别字 + 尾端 ChevronDown：emoji 与自绘 SVG 都彻底移除
-  // （PRODUCT.md「UI 禁用 emoji 圖示」；图标家族统一走 lucide）。
+  // （PRODUCT.md「UI 禁用 emoji 图示」；图标家族统一走 lucide）。
   // 用码点的转义写死（而非字面 emoji），让整个 src/ 不再出现该字元。
   assert.doesNotMatch(code, /\u{1F9E0}/u);
   assert.match(code, /<Brain /);
@@ -219,61 +219,61 @@ test("思考级别菜单：工具行同排、「+」右边、收起态 iconX、�
   // 收起态锚点仍在工具行流内，「+」右边（缩小范围到已被 <button> 收尾截断的开标签）。
   assert.match(badgeButtonTag, /flex w-max/);
   assert.match(code, /AGENT_THINKING_LEVEL_LABELS\[level\]/);
-  // 可 Tab 到、Enter/Space 可開（真 button）＋ Esc 可關 ＋ 點擊外部收起。
+  // 可 Tab 到、Enter/Space 可开（真 button）＋ Esc 可关 ＋ 点击外部收起。
   assert.match(code, /aria-haspopup="listbox"/);
   assert.match(code, /aria-expanded=\{open\}/);
   assert.match(code, /aria-label=\{`思考级别：\$\{label\}（低\/中\/高\/极限）`\}/);
   assert.match(code, /event\.key === "Escape"/);
   assert.match(code, /addEventListener\("pointerdown"/);
-  // 焦點環走 --ring 主題 token。
+  // 焦点环走 --ring 主题 token。
   assert.match(code, /focus-visible:ring-2 focus-visible:ring-ring\/40/);
-  // 展開後四檔：說明行已刪，說明字串改掛每列 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。
+  // 展开后四档：说明行已删，说明字串改挂每列 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。
   assert.match(code, /title=\{AGENT_THINKING_LEVEL_HINTS\[lv\]\}/);
-  // 當前檔右端一顆勾。
+  // 当前档右端一颗勾。
   assert.match(code, /<Check /);
-  // 寫入：顯式級別 localStorage ＋ 既有唯一寫入者 saveAgentSettings（三欄 patch）。
+  // 写入：显式级别 localStorage ＋ 既有唯一写入者 saveAgentSettings（三栏 patch）。
   assert.match(code, /writeCachedAgentThinkingLevel\(next\)/);
   assert.match(code, /saveAgentSettings\(agentThinkingLevelPatch\(next\)\)/);
-  // 面板不得再用會帶 translateX(-50%) 的 agent-pop-in（配 left-0 會左移半個寬度、
-  // 內容滑出面板外＝生產上「級別名跑到面板左緣之外」的根因）。
+  // 面板不得再用会带 translateX(-50%) 的 agent-pop-in（配 left-0 会左移半个宽度、
+  // 内容滑出面板外＝生产上「级别名跑到面板左缘之外」的根因）。
   assert.doesNotMatch(code, /agent-pop/);
 });
 
-test("attachFilesRef：可選介面把既有附件入口註冊出去（不傳＝不變）", () => {
-  // prop 存在且型別正確（可選）。
+test("attachFilesRef：可选介面把既有附件入口注册出去（不传＝不变）", () => {
+  // prop 存在且型别正确（可选）。
   assert.match(
     composer,
     /attachFilesRef\?: MutableRefObject<\(\(files: File\[\]\) => void\) \| null>;/,
   );
-  // effect 只在傳了 ref 時註冊；註冊的是既有 enqueueFiles（不另寫一份入隊邏輯）。
+  // effect 只在传了 ref 时注册；注册的是既有 enqueueFiles（不另写一份入队逻辑）。
   assert.match(composer, /if \(!attachFilesRef\) return;/);
   assert.match(composer, /attachFilesRef\.current = \(files: File\[\]\) => \{/);
   assert.match(composer, /void enqueueFiles\(files\);/);
-  // 卸載歸 null。
+  // 卸载归 null。
   assert.match(composer, /attachFilesRef\.current = null;/);
 });
 
-test("觸控裝置 placeholder：coarse 換「传上来」版，fine/桌面保留「拖进来」（決策函數真行為斷言）", () => {
-  // 獨立 oracle：期望字串由本測試自帶，不從實作模組取（禁同源斷言）。
+test("触控装置 placeholder：coarse 换「传上来」版，fine/桌面保留「拖进来」（决策函数真行为断言）", () => {
+  // 独立 oracle：期望字串由本测试自带，不从实作模组取（禁同源断言）。
   const DESKTOP_LONG = "描述你想做的，或把剧本／资产图拖进来";
-  // coarse pointer（手機/平板）→ 上傳語彙；手機拖不了檔，「拖进来」是做不到的動作。
+  // coarse pointer（手机/平板）→ 上传语汇；手机拖不了档，「拖进来」是做不到的动作。
   const touch = resolveBasePlaceholder(DESKTOP_LONG, true);
-  assert.ok(touch.includes("传上来"), "coarse pointer 必須換「传上来」版");
-  assert.ok(!touch.includes("拖进来"), "觸控裝置不得再說「拖进来」");
-  // fine pointer（桌面）→ 原值一字不動。
+  assert.ok(touch.includes("传上来"), "coarse pointer 必须换「传上来」版");
+  assert.ok(!touch.includes("拖进来"), "触控装置不得再说「拖进来」");
+  // fine pointer（桌面）→ 原值一字不动。
   assert.equal(resolveBasePlaceholder(DESKTOP_LONG, false), DESKTOP_LONG);
-  // 呼叫端自訂 placeholder 永不被換——coarse 只作用內建長句。
-  assert.equal(resolveBasePlaceholder("自訂提示", true), "自訂提示");
+  // 呼叫端自订 placeholder 永不被换——coarse 只作用内建长句。
+  assert.equal(resolveBasePlaceholder("自订提示", true), "自订提示");
 });
 
-test("placeholder SSR/首幀＝桌面長句（hydration 安全），掛載後 effect 才按 matchMedia 切觸控版", () => {
-  // 真渲染斷言：SSR 與首幀同路徑（effect 未跑，coarse=false）→ textarea 帶「拖进来」。
+test("placeholder SSR/首帧＝桌面长句（hydration 安全），挂载后 effect 才按 matchMedia 切触控版", () => {
+  // 真渲染断言：SSR 与首帧同路径（effect 未跑，coarse=false）→ textarea 带「拖进来」。
   const markup = renderToStaticMarkup(
     createElement(AgentComposer, { disabled: false, onSend: () => {} }),
   );
   assert.match(markup, /placeholder="[^"]*拖进来[^"]*"/);
-  // 切換點探針（變更探針，非行為斷言）：掛載後一次性 matchMedia("(pointer: coarse)") 判定，
-  // 選中的基礎句走 resolveBasePlaceholder，DEFAULT_PLACEHOLDER 原值保留（桌面/源碼釘不動）。
+  // 切换点探针（变更探针，非行为断言）：挂载后一次性 matchMedia("(pointer: coarse)") 判定，
+  // 选中的基础句走 resolveBasePlaceholder，DEFAULT_PLACEHOLDER 原值保留（桌面/源码钉不动）。
   assert.match(code, /matchMedia\("\(pointer: coarse\)"\)/);
   assert.match(code, /resolveBasePlaceholder\(placeholder, coarsePointer\)/);
   assert.match(code, /const DEFAULT_PLACEHOLDER = "描述你想做的，或把剧本／资产图拖进来"/);
@@ -291,14 +291,14 @@ test("placeholderFits 边界：measured == clientWidth 与 clientWidth-4 都回�
     false,
     "measured == clientWidth - 4 必须回落 compact",
   );
-  // 加了 8px 安全边際后刚好塞得下 → 才显示长句；有余量当然显示。
+  // 加了 8px 安全边际后刚好塞得下 → 才显示长句；有余量当然显示。
   assert.equal(placeholderFitsWidth(clientWidth - PLACEHOLDER_SAFETY_PX, clientWidth), true);
   assert.equal(placeholderFitsWidth(200, clientWidth), true);
   // 量不到内容宽（availableWidth ≤ 0）时不误切短句（沿用原行为）。
   assert.equal(placeholderFitsWidth(999, 0), true);
   assert.equal(placeholderFitsWidth(999, -1), true);
-  // 安全边際必须是 ≥8 的正值：改回 0px 边界就是回到「临界值赌命」的老坑。
-  assert.ok(PLACEHOLDER_SAFETY_PX >= 8, "安全边際须 ≥8px");
+  // 安全边际必须是 ≥8 的正值：改回 0px 边界就是回到「临界值赌命」的老坑。
+  assert.ok(PLACEHOLDER_SAFETY_PX >= 8, "安全边际须 ≥8px");
   // 变更探针：量字用的 font 不再直接取 style.font（textarea 上会回空串，ctx.font
   // 落回 10px sans-serif 量成 180px → 永远「放得下」）。
   assert.match(code, /function resolveMeasureFont\(/);
@@ -335,7 +335,7 @@ test("VIDEO_UPLOAD_TIMEOUT_MS 是数分钟级（不短于数十 MB 的正常上�
   assert.ok(VIDEO_UPLOAD_TIMEOUT_MS >= 120_000, "原片直传上限不得短于 2 分钟");
 });
 
-// 2026-10-04「永久 pending」族残餘：uploadPlainFile（非影片附件）原本裸 await
+// 2026-10-04「永久 pending」族残余：uploadPlainFile（非影片附件）原本裸 await
 // uploadAgentAttachments，站内代理卡死时 chip 永久停在 uploading、连 job.catch 都不落。
 test("uploadPlainFile：经 withUploadDeadline + PLAIN_UPLOAD_TIMEOUT_MS 收口（逾时必落明确失败）", async () => {
   // 行为：非影片附件上限必须比原片 180s 短（几 MB 档，站内代理直传）。
@@ -379,14 +379,14 @@ test("uploadPlainFile 组合探针：deadline 包住 uploadAgentAttachments，�
   );
 });
 
-// ═══════════════════════════ 本機檔案權限模式控件（2026-10-04）═══════════════════════════
+// ═══════════════════════════ 本机档案权限模式控件（2026-10-04）═══════════════════════════
 //
-// 分兩層驗：
-//   1. 展示層（LocalFileModeMenuView）以真 SSR 渲染釘四檔文案／選中態／舊產物 disabled。
-//   2. 薄殼的資料路徑：注入假 window.eimuLocal，用 shell 實際走的預設讀法
+// 分两层验：
+//   1. 展示层（LocalFileModeMenuView）以真 SSR 渲染钉四档文案／选中态／旧产物 disabled。
+//   2. 薄壳的资料路径：注入假 window.eimuLocal，用 shell 实际走的预设读法
 //      （createDeviceBridgeController() → getDeviceBridgeApi → globalThis.eimuLocal）
-//      驗 init 讀 status／切檔叫 setMode／舊產物 disable 降級／卸載取消訂閱。
-// oracle：期望字串由本測試自備（獨立於實作模組），不從 LOCAL_FILE_MODES 取。
+//      验 init 读 status／切档叫 setMode／旧产物 disable 降级／卸载取消订阅。
+// oracle：期望字串由本测试自备（独立于实作模组），不从 LOCAL_FILE_MODES 取。
 
 type GlobalWithLocal = typeof globalThis & { eimuLocal?: unknown };
 
@@ -446,7 +446,7 @@ function makeModeApi(hasSetMode: boolean): ModeFake {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-test("本機檔案權限控件（展示層）：四檔標題／副標逐字可見＋當前檔右端一勾", () => {
+test("本机档案权限控件（展示层）：四档标题／副标逐字可见＋当前档右端一勾", () => {
   const markup = renderToStaticMarkup(
     createElement(LocalFileModeMenuView, {
       open: true,
@@ -459,29 +459,29 @@ test("本機檔案權限控件（展示層）：四檔標題／副標逐字可�
       busy: false,
     }),
   );
-  // 四檔標題逐字（oracle 由測試自備）。
-  for (const title of ["關閉", "每次詢問", "授權範圍內自動", "完全訪問"]) {
-    assert.ok(markup.includes(title), `四檔必須含標題「${title}」`);
+  // 四档标题逐字（oracle 由测试自备）。
+  for (const title of ["关闭", "每次询问", "授权范围内自动", "完全访问"]) {
+    assert.ok(markup.includes(title), `四档必须含标题「${title}」`);
   }
-  // 四檔副標逐字（含 full 的敏感路徑警告）。
+  // 四档副标逐字（含 full 的敏感路径警告）。
   for (const sub of [
-    "agent 不能讀取本機檔案。",
-    "每次讀取前先問你。",
-    "已授權資料夾內自動讀取，範圍外會先問你。",
-    "整個家目錄可讀；敏感位置（~/.ssh、~/.aws、私鑰等）一律不讀。",
+    "agent 不能读取本机档案。",
+    "每次读取前先问你。",
+    "已授权资料夹内自动读取，范围外会先问你。",
+    "整个家目录可读；敏感位置（~/.ssh、~/.aws、私钥等）一律不读。",
   ]) {
-    assert.ok(markup.includes(sub), `四檔必須含副標「${sub}」`);
+    assert.ok(markup.includes(sub), `四档必须含副标「${sub}」`);
   }
-  // 恰好一列被標記為選中（ask），且帶勾圖示。
-  assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1, "只能有一列選中");
-  assert.match(markup, /lucide-check/, "選中列右端一顆勾");
-  // 已授權數量（檢視用，非授權入口）。
-  assert.ok(markup.includes("已授權 2 個資料夾"), "應顯示已授權資料夾數量");
-  // 不得出現「選擇資料夾」之類的授權入口按鈕。
-  assert.ok(!markup.includes("選擇資料夾") && !markup.includes("选择文件夹"), "控件不得內建授權入口");
+  // 恰好一列被标记为选中（ask），且带勾图示。
+  assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1, "只能有一列选中");
+  assert.match(markup, /lucide-check/, "选中列右端一颗勾");
+  // 已授权数量（检视用，非授权入口）。
+  assert.ok(markup.includes("已授权 2 个资料夹"), "应显示已授权资料夹数量");
+  // 不得出现「选择资料夹」之类的授权入口按钮。
+  assert.ok(!markup.includes("选择资料夹") && !markup.includes("选择文件夹"), "控件不得内建授权入口");
 });
 
-test("本機檔案權限控件（展示層）：roots 空顯示『尚未授權任何資料夾』", () => {
+test("本机档案权限控件（展示层）：roots 空显示『尚未授权任何资料夹』", () => {
   const markup = renderToStaticMarkup(
     createElement(LocalFileModeMenuView, {
       open: true,
@@ -494,13 +494,13 @@ test("本機檔案權限控件（展示層）：roots 空顯示『尚未授權�
       busy: false,
     }),
   );
-  assert.ok(markup.includes("尚未授權任何資料夾"), "空 roots 必須明說尚未授權");
+  assert.ok(markup.includes("尚未授权任何资料夹"), "空 roots 必须明说尚未授权");
 });
 
-test("本機檔案權限控件（展示層）：舊產物 supported=false ⇒ disabled＋『需更新桌面版』，不崩", () => {
+test("本机档案权限控件（展示层）：旧产物 supported=false ⇒ disabled＋『需更新桌面版』，不崩", () => {
   const markup = renderToStaticMarkup(
     createElement(LocalFileModeMenuView, {
-      open: true, // 即便被要求開，disabled 態也不得長出清單
+      open: true, // 即便被要求开，disabled 态也不得长出清单
       onToggleOpen: () => {},
       onPick: () => {},
       supported: false,
@@ -510,39 +510,39 @@ test("本機檔案權限控件（展示層）：舊產物 supported=false ⇒ di
       busy: false,
     }),
   );
-  assert.match(markup, /disabled=""/, "舊產物時控件必須 disabled");
-  assert.ok(markup.includes("需更新桌面版"), "舊產物時必須提示需更新桌面版");
-  assert.ok(!markup.includes('role="option"'), "disabled 態不得展開四檔清單");
+  assert.match(markup, /disabled=""/, "旧产物时控件必须 disabled");
+  assert.ok(markup.includes("需更新桌面版"), "旧产物时必须提示需更新桌面版");
+  assert.ok(!markup.includes('role="option"'), "disabled 态不得展开四档清单");
 });
 
-test("純瀏覽器（無 eimuLocal）：AgentComposer SSR 不渲染本機檔案權限控件（漸進增強、非報錯）", () => {
+test("纯浏览器（无 eimuLocal）：AgentComposer SSR 不渲染本机档案权限控件（渐进增强、非报错）", () => {
   setEimuLocal(undefined);
   const markup = renderToStaticMarkup(createElement(AgentComposer, { disabled: false, onSend: () => {} }));
-  assert.ok(!markup.includes("本機檔案權限"), "無 eimuLocal 時控件不得渲染");
-  assert.ok(markup.includes("思考级别"), "既有思考級別控件仍在（沒被建壞）");
+  assert.ok(!markup.includes("本机档案权限"), "无 eimuLocal 时控件不得渲染");
+  assert.ok(markup.includes("思考级别"), "既有思考级别控件仍在（没被建坏）");
 });
 
-test("薄殼資料路徑：注入假 eimuLocal ⇒ init 讀 status、切檔呼叫 setMode、卸載取消訂閱", async () => {
+test("薄壳资料路径：注入假 eimuLocal ⇒ init 读 status、切档呼叫 setMode、卸载取消订阅", async () => {
   const { api, calls } = makeModeApi(true);
   setEimuLocal(api);
   try {
     assert.equal(supportsSetMode(api), true);
-    const ctl = createDeviceBridgeController(); // 預設讀法＝globalThis.eimuLocal（與 shell 一致）
+    const ctl = createDeviceBridgeController(); // 预设读法＝globalThis.eimuLocal（与 shell 一致）
     ctl.init();
     await tick();
     assert.equal(ctl.getSnapshot().available, true);
     assert.equal(ctl.getSnapshot().status?.mode, "ask");
     await ctl.setMode("full");
-    assert.deepEqual(calls.setMode, ["full"], "切檔必須呼叫 bridge.setMode");
+    assert.deepEqual(calls.setMode, ["full"], "切档必须呼叫 bridge.setMode");
     assert.equal(ctl.getSnapshot().status?.mode, "full");
     ctl.dispose();
-    assert.equal(calls.unsub, 1, "卸載必須取消 onBridgeStatus 訂閱");
+    assert.equal(calls.unsub, 1, "卸载必须取消 onBridgeStatus 订阅");
   } finally {
     setEimuLocal(undefined);
   }
 });
 
-test("薄殼資料路徑：舊產物（無 setMode）⇒ supportsSetMode false，off 走 disable 降級", async () => {
+test("薄壳资料路径：旧产物（无 setMode）⇒ supportsSetMode false，off 走 disable 降级", async () => {
   const { api, calls } = makeModeApi(false);
   setEimuLocal(api);
   try {
@@ -551,10 +551,10 @@ test("薄殼資料路徑：舊產物（無 setMode）⇒ supportsSetMode false�
     ctl.init();
     await tick();
     await ctl.setMode("off");
-    assert.equal(calls.disable, 1, "舊產物 off 必須降級走 disable()");
+    assert.equal(calls.disable, 1, "旧产物 off 必须降级走 disable()");
     assert.deepEqual(calls.setMode, []);
     await ctl.setMode("auto");
-    assert.equal(calls.enable, 1, "舊產物非 off 必須降級走 enable()");
+    assert.equal(calls.enable, 1, "旧产物非 off 必须降级走 enable()");
     ctl.dispose();
   } finally {
     setEimuLocal(undefined);

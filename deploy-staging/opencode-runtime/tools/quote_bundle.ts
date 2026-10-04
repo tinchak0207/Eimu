@@ -1,12 +1,12 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { loadCatalog, estimateVideoCoins, platformFetch, ok, fail } from "../lib/client"
 
-// 批量預算單：多筆生成任務一次性估價（明細 + 總價）＋錢包對帳。
-// 圖片單價：loadCatalog（GET /v1/models 的 x_coins_per_image，10 分鐘快取），與 image_generate 同源。
-// 影片單價（R9-A 2026-09-30）：GET /v1/models 的 x_coins_per_second[解析度] × 時長，與 gateway
-// catalogVideoPerSecondCoins（扣費同源）同口徑；目錄查不到才退回 estimateVideoCoins 並標
-// price_source:"estimate_unverified"。舊版影片一律 720P 5 幣/秒，seedance-2.0 15s 報 75 實為 195。
-// 餘額：GET /v1/quota（與 gateway fetchBalance 同源），回應帶 balance/shortfall/affordable。
+// 批量预算单：多笔生成任务一次性估价（明细 + 总价）＋钱包对帐。
+// 图片单价：loadCatalog（GET /v1/models 的 x_coins_per_image，10 分钟快取），与 image_generate 同源。
+// 影片单价（R9-A 2026-09-30）：GET /v1/models 的 x_coins_per_second[解析度] × 时长，与 gateway
+// catalogVideoPerSecondCoins（扣费同源）同口径；目录查不到才退回 estimateVideoCoins 并标
+// price_source:"estimate_unverified"。旧版影片一律 720P 5 币/秒，seedance-2.0 15s 报 75 实为 195。
+// 余额：GET /v1/quota（与 gateway fetchBalance 同源），回应带 balance/shortfall/affordable。
 
 type VideoEntry = { cps: Record<string, number>; defaultResolution: string | null; defaultDuration: number | null }
 
@@ -55,37 +55,37 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6
 
 export default tool({
   description:
-    "錢包預檢＋批量預算單工具（免費不扣費）。不帶 items 呼叫＝只查當前餘額（開局預檢用）。輸入多筆 [{model, count, kind, duration_seconds, resolution, quality}]，輸出每筆明細（單價 × 數量 = 小計）、總幣數、當前餘額 balance_coins、差額 shortfall_coins 與 affordable 布林。圖片單價取自平台目錄；影片單價=目錄 x_coins_per_second[解析度]×時長（與實扣同源），目錄查不到才標 price_source:\"estimate_unverified\"，圖片查不到標 \"unknown\"，禁止拍腦袋。可選 max_unit_coins / max_coins_per_second 單價上限，超限項標 over_cap:true。批量開工前必須先用本工具出預算單給用戶過目；affordable:false 時第一句就講餘額與差額。",
+    "钱包预检＋批量预算单工具（免费不扣费）。不带 items 呼叫＝只查当前余额（开局预检用）。输入多笔 [{model, count, kind, duration_seconds, resolution, quality}]，输出每笔明细（单价 × 数量 = 小计）、总币数、当前余额 balance_coins、差额 shortfall_coins 与 affordable 布林。图片单价取自平台目录；影片单价=目录 x_coins_per_second[解析度]×时长（与实扣同源），目录查不到才标 price_source:\"estimate_unverified\"，图片查不到标 \"unknown\"，禁止拍脑袋。可选 max_unit_coins / max_coins_per_second 单价上限，超限项标 over_cap:true。批量开工前必须先用本工具出预算单给用户过目；affordable:false 时第一句就讲余额与差额。",
   args: {
     items: tool.schema
       .array(
         tool.schema.object({
           model: tool.schema.string().describe("模型 id，如 gpt-image-2、seedance-2.0"),
-          count: tool.schema.number().int().min(1).max(200).describe("該項生成數量（張數或鏡數）"),
-          kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，預設 image"),
-          duration_seconds: tool.schema.number().optional().describe("每支影片時長（秒），僅 video 用，預設取模型默認時長"),
-          resolution: tool.schema.string().optional().describe("影片解析度，如 480p/720p/1080p，僅 video 用，預設取模型默認解析度（quality=hd 時 1080p）"),
-          quality: tool.schema.enum(["standard", "hd"]).optional().describe("standard 或 hd，預設 standard"),
-          label: tool.schema.string().optional().describe("明細顯示名（如「S03-鏡1 定場鏡頭」）"),
+          count: tool.schema.number().int().min(1).max(200).describe("该项生成数量（张数或镜数）"),
+          kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，预设 image"),
+          duration_seconds: tool.schema.number().optional().describe("每支影片时长（秒），仅 video 用，预设取模型默认时长"),
+          resolution: tool.schema.string().optional().describe("影片解析度，如 480p/720p/1080p，仅 video 用，预设取模型默认解析度（quality=hd 时 1080p）"),
+          quality: tool.schema.enum(["standard", "hd"]).optional().describe("standard 或 hd，预设 standard"),
+          label: tool.schema.string().optional().describe("明细显示名（如「S03-镜1 定场镜头」）"),
         }),
       )
       .max(50)
       .optional()
-      .describe("預算單明細項列表；省略＝只查餘額"),
-    balance_only: tool.schema.boolean().optional().describe("true＝明確只查餘額（不報價）。不帶 items 又不帶 balance_only 會被拒（防止空參數被誤讀成「合計 0 幣」）"),
-    max_unit_coins: tool.schema.number().optional().describe("可選：單價上限（每張圖/每支影片的幣數），超限項標 over_cap:true"),
-    max_coins_per_second: tool.schema.number().optional().describe("可選：影片秒價上限（幣/秒），超限項標 over_cap:true"),
+      .describe("预算单明细项列表；省略＝只查余额"),
+    balance_only: tool.schema.boolean().optional().describe("true＝明确只查余额（不报价）。不带 items 又不带 balance_only 会被拒（防止空参数被误读成「合计 0 币」）"),
+    max_unit_coins: tool.schema.number().optional().describe("可选：单价上限（每张图/每支影片的币数），超限项标 over_cap:true"),
+    max_coins_per_second: tool.schema.number().optional().describe("可选：影片秒价上限（币/秒），超限项标 over_cap:true"),
   },
   async execute(args, context) {
     try {
       const items = args.items ?? []
-      // 2026-10-02：空參數守門——e2e 評測首個 quote_bundle 空參數回「合計 0 幣」，模型把它當報價。
-      // 查餘額須顯式 balance_only:true；否則拒絕並提示，不給任何可誤讀成報價的數字。
+      // 2026-10-02：空参数守门——e2e 评测首个 quote_bundle 空参数回「合计 0 币」，模型把它当报价。
+      // 查余额须显式 balance_only:true；否则拒绝并提示，不给任何可误读成报价的数字。
       if (items.length === 0 && args.balance_only !== true) {
         return fail(
           "quote_bundle_empty_items",
-          "quote_bundle 未帶 items：這不是有效報價請求（不會回「合計 0 幣」）。要報價請傳 items=[{model,count,kind,duration_seconds,resolution}]；只想查餘額請傳 balance_only:true。",
-          { title: "預算單參數缺失" },
+          "quote_bundle 未带 items：这不是有效报价请求（不会回「合计 0 币」）。要报价请传 items=[{model,count,kind,duration_seconds,resolution}]；只想查余额请传 balance_only:true。",
+          { title: "预算单参数缺失" },
         )
       }
       const hasVideo = items.some((i) => i.kind === "video")
@@ -119,8 +119,8 @@ export default tool({
             unit = estimateVideoCoins(secs, item.quality)
             priceSource = "estimate_unverified"
             extra.note = v
-              ? `目錄無此解析度 ${res} 的秒價（可用：${Object.keys(v.cps).join("/")}），此價為粗估，實扣可能更高`
-              : "目錄查無此影片模型秒價，此價為粗估，實扣可能更高；對用戶標「待確認」"
+              ? `目录无此解析度 ${res} 的秒价（可用：${Object.keys(v.cps).join("/")}），此价为粗估，实扣可能更高`
+              : "目录查无此影片模型秒价，此价为粗估，实扣可能更高；对用户标「待确认」"
           }
           if (typeof args.max_coins_per_second === "number" && typeof cps === "number" && cps > args.max_coins_per_second) {
             extra.over_cap = true
@@ -142,7 +142,7 @@ export default tool({
             unit_coins: null,
             subtotal_coins: null,
             price_source: "unknown",
-            note: "目錄查無此模型單價，此項價格待確認（預算單不含此項）",
+            note: "目录查无此模型单价，此项价格待确认（预算单不含此项）",
           })
           continue
         }
@@ -168,21 +168,21 @@ export default tool({
       const affordable = balance === null ? null : balance > 0 && balance >= total
       const walletNote =
         balance === null
-          ? "餘額查詢失敗（未知），不可假設充足。"
+          ? "余额查询失败（未知），不可假设充足。"
           : balance <= 0
-            ? `餘額 ${balance} 幣（≤0，不可消費），任何付費生成都會失敗；第一句就告訴用戶餘額與差額 ${shortfall} 幣。`
+            ? `余额 ${balance} 币（≤0，不可消费），任何付费生成都会失败；第一句就告诉用户余额与差额 ${shortfall} 币。`
             : affordable
-              ? `餘額 ${balance} 幣，足夠支付合計 ${total} 幣。`
-              : `餘額 ${balance} 幣不足以支付合計 ${total} 幣，差額 ${shortfall} 幣；第一句就講餘額與差額。`
+              ? `余额 ${balance} 币，足够支付合计 ${total} 币。`
+              : `余额 ${balance} 币不足以支付合计 ${total} 币，差额 ${shortfall} 币；第一句就讲余额与差额。`
 
       return ok({
-        title: items.length ? "預算單" : "錢包餘額",
+        title: items.length ? "预算单" : "钱包余额",
         mode: items.length ? "quote" : "balance_only",
         currency: "coins",
         balance_coins: balance,
         spendable: balance === null ? null : balance > 0,
         items: lines,
-        total_coins: items.length === 0 || hasUnknown ? null : total, // 餘額查詢無「合計」，回 null 而非 0
+        total_coins: items.length === 0 || hasUnknown ? null : total, // 余额查询无「合计」，回 null 而非 0
         confirmed_subtotal_coins: total,
         shortfall_coins: shortfall,
         affordable,
@@ -192,19 +192,19 @@ export default tool({
         note: [
           walletNote,
           hasUnknown
-            ? "部分項目單價待確認（見 unknown 項），總價僅統計已定價項。對用戶如實標示待確認項，禁止編造單價。"
+            ? "部分项目单价待确认（见 unknown 项），总价仅统计已定价项。对用户如实标示待确认项，禁止编造单价。"
             : unverified
-              ? "含 estimate_unverified 粗估項（目錄查無秒價），對用戶標「待確認」。"
+              ? "含 estimate_unverified 粗估项（目录查无秒价），对用户标「待确认」。"
               : items.length
-                ? "全部項目均已按平台目錄定價（影片=秒價×時長）。本預算單為事前告知，不取代逐筆扣費確認（confirm）。"
-                : "本次僅查餘額，未報價；total_coins=null 表示不適用（不是 0 幣）。",
-          overCap.length ? `超出單價上限：${overCap.join("、")}。` : "",
+                ? "全部项目均已按平台目录定价（影片=秒价×时长）。本预算单为事前告知，不取代逐笔扣费确认（confirm）。"
+                : "本次仅查余额，未报价；total_coins=null 表示不适用（不是 0 币）。",
+          overCap.length ? `超出单价上限：${overCap.join("、")}。` : "",
         ]
           .filter(Boolean)
           .join(" "),
       })
     } catch (e: any) {
-      return fail("quote_bundle_failed", `預算單計算失敗：${e?.message ?? e}`, { title: "預算單失敗" })
+      return fail("quote_bundle_failed", `预算单计算失败：${e?.message ?? e}`, { title: "预算单失败" })
     }
   },
 })

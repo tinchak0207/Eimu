@@ -1,8 +1,8 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, directorFetch, directorFail, bool } from "../lib/director-common"
 
-// 3D 导演台锁定面（片4，2026-09-02）。kunpeng lockTool → gateway op set_lock 原生形狀
-// （op 聯合中唯一 snake_case 的 op 名，欄位 target/shot_id/action_id/keyframe_id/locked 原樣透傳）。
+// 3D 导演台锁定面（片4，2026-09-02）。kunpeng lockTool → gateway op set_lock 原生形状
+// （op 联合中唯一 snake_case 的 op 名，栏位 target/shot_id/action_id/keyframe_id/locked 原样透传）。
 
 export default tool({
   description:

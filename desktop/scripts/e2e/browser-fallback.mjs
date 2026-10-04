@@ -1,14 +1,14 @@
 // desktop/scripts/e2e/browser-fallback.mjs
 //
-// 瀏覽器回落 E2E（A25 漸進增強：無殼仍走衍生檔 / A21 無 File System Access API 回落）。
-// 用一般 Playwright Chromium（**無** window.eimuLocal、**無** Electron preload）打生產
+// 浏览器回落 E2E（A25 渐进增强：无壳仍走衍生档 / A21 无 File System Access API 回落）。
+// 用一般 Playwright Chromium（**无** window.eimuLocal、**无** Electron preload）打生产
 // https://eimu.dev。
 //
-// 紅線遵守：
-//   · 只打生產唯讀頁與免費附件端點；不部署/不 SSH/不連 DB/不呼叫付費上游。
-//   · 為取得「已登入」的瀏覽器上下文，僅在**記憶體內**把真殼 localStorage 的
-//     napi_token / napi_user 複製到本 Chromium context；**絕不**寫入 log/檔案/報告。
-//   · 輸出到 /tmp。
+// 红线遵守：
+//   · 只打生产唯读页与免费附件端点；不部署/不 SSH/不连 DB/不呼叫付费上游。
+//   · 为取得「已登入」的浏览器上下文，仅在**记忆体内**把真壳 localStorage 的
+//     napi_token / napi_user 复制到本 Chromium context；**绝不**写入 log/档案/报告。
+//   · 输出到 /tmp。
 //
 // 用法：node desktop/scripts/e2e/browser-fallback.mjs --out /tmp/eimu-bf-XXX --assets /tmp/eimu-e2e2-assets [--only A25,A21]
 
@@ -49,7 +49,7 @@ const saveCase = (name, obj) => {
 };
 const netLine = (e) => ({ method: e.method, url: e.url, status: e.status, failed: e.failed, failure: e.failure, parts: e.parts || null, responseJson: e.responseJson ?? null });
 
-// 記錄網路（只留附件/直傳/票；不外洩響應）
+// 记录网路（只留附件/直传/票；不外泄响应）
 function attachNet(page) {
   const list = [];
   const byReq = new Map();
@@ -104,7 +104,7 @@ async function attachFiles(page, files) {
   await cdp.send("DOM.enable");
   const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
   const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: FILE_SEL });
-  if (!nodeId) throw new Error("file input nodeId 為空");
+  if (!nodeId) throw new Error("file input nodeId 为空");
   await cdp.send("DOM.setFileInputFiles", { files: list, nodeId });
 }
 
@@ -148,10 +148,10 @@ async function waitChipsSettledSafe(page, timeout = 180000) {
 }
 
 async function main() {
-  log(`Eimu 瀏覽器回落 E2E（一般 Chromium，無 eimuLocal）`);
+  log(`Eimu 浏览器回落 E2E（一般 Chromium，无 eimuLocal）`);
   log(`out=${outDir}`);
 
-  // ── 取已登入 localStorage（僅記憶體，不落盤、不列印） ──
+  // ── 取已登入 localStorage（仅记忆体，不落盘、不列印） ──
   let authJson = null;
   try {
     const shell = await launchShell({ outDir: path.join(outDir, "auth-shell"), seedProfileFrom: REAL_PROFILE });
@@ -168,7 +168,7 @@ async function main() {
       await shell.close().catch(() => {});
     }
   } catch (e) {
-    log(`取 auth 失敗：${e && e.message}`);
+    log(`取 auth 失败：${e && e.message}`);
   }
   let hasAuth = false;
   try {
@@ -181,8 +181,8 @@ async function main() {
   }
   log(`auth available=${hasAuth}`);
 
-  // playwright-core 1.62 期望 chromium rev 1234，但本機只裝了 1223（repo 的 connectOverCDP
-  // 不需要本地瀏覽器，故一直沒觸發）。顯式指到已安裝的 chrome 二進位。
+  // playwright-core 1.62 期望 chromium rev 1234，但本机只装了 1223（repo 的 connectOverCDP
+  // 不需要本地浏览器，故一直没触发）。显式指到已安装的 chrome 二进位。
   const CHROME = path.join(os.homedir(), ".cache", "ms-playwright", "chromium-1223", "chrome-linux64", "chrome");
   const browser = await chromium.launch({
     headless: true,
@@ -203,7 +203,7 @@ async function main() {
   };
 
   try {
-    // ───────────── A25：漸進增強全回落 ─────────────
+    // ───────────── A25：渐进增强全回落 ─────────────
     if (want("A25")) {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
       const consoleErrors = [];
@@ -256,16 +256,16 @@ async function main() {
 
         const noExceptions = consoleErrors.length === 0 && pageErrors.length === 0;
         const eimuLocalUndefined = boot.eimuLocal === "undefined";
-        // 正確口徑（2026-10-04 修正）：一般瀏覽器沒有 window.eimuLocal，仍**刻意**走
-        // canvas 抽幀的衍生檔路徑（漸進增強：有殼才用殼、沒殼仍在本機抽幀，不上傳原檔），
-        // 這不是「回落舊行為」。判準＝可用、無錯誤、不上傳原檔，而非要求「不出現衍生檔」。
+        // 正确口径（2026-10-04 修正）：一般浏览器没有 window.eimuLocal，仍**刻意**走
+        // canvas 抽帧的衍生档路径（渐进增强：有壳才用壳、没壳仍在本机抽帧，不上传原档），
+        // 这不是「回落旧行为」。判准＝可用、无错误、不上传原档，而非要求「不出现衍生档」。
         const derivedPathUsable =
           derivedSeen && attachments.length > 0 && attachments.every((e) => !e.failed);
         const originalNotUploaded = !originalSeen;
         const pass = eimuLocalUndefined && noExceptions && derivedPathUsable && originalNotUploaded;
         saveCase("A25", {
           status: pass ? "pass" : "fail",
-          title: "一般 Chromium（無 window.eimuLocal）打生產：走 canvas 抽幀衍生檔（刻意設計）、無 JS 例外、不上傳原檔",
+          title: "一般 Chromium（无 window.eimuLocal）打生产：走 canvas 抽帧衍生档（刻意设计）、无 JS 例外、不上传原档",
           observations: {
             eimuLocalType: boot.eimuLocal,
             composerPresent: boot.hasComposer,
@@ -285,19 +285,19 @@ async function main() {
             consoleErrors,
             pageErrors,
             note:
-              "瀏覽器走衍生檔＝刻意設計（漸進增強），非回落舊行為：window.eimuLocal 缺席時仍本機抽幀、以衍生檔上傳、原檔不上傳。",
-            whyComplex: "此路徑（非桌面殼）與殼內共用同一 production bundle；差異只在 preload 注入與否，簡單本地案例不會走這條",
+              "浏览器走衍生档＝刻意设计（渐进增强），非回落旧行为：window.eimuLocal 缺席时仍本机抽帧、以衍生档上传、原档不上传。",
+            whyComplex: "此路径（非桌面壳）与壳内共用同一 production bundle；差异只在 preload 注入与否，简单本地案例不会走这条",
           },
           networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
           artifacts: { screenshot: shot, afterUpload: uploadShot },
-          error: pass ? undefined : "A25 判準未達（見 observations：derivedPathUsable / originalNotUploaded / consoleErrors）",
+          error: pass ? undefined : "A25 判准未达（见 observations：derivedPathUsable / originalNotUploaded / consoleErrors）",
         });
       } finally {
         await ctx.close().catch(() => {});
       }
     }
 
-    // ───────────── A21：無 File System Access API 回落 ─────────────
+    // ───────────── A21：无 File System Access API 回落 ─────────────
     if (want("A21")) {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
       const consoleErrors = [];
@@ -305,7 +305,7 @@ async function main() {
       await ctx.addInitScript(() => {
         try {
           localStorage.setItem("eimu-promo-seen-v1", "1");
-          // 刪掉 File System Access API，逼 local-save 回 <a download>
+          // 删掉 File System Access API，逼 local-save 回 <a download>
           delete globalThis.showSaveFilePicker;
           delete globalThis.showDirectoryPicker;
           Object.defineProperty(globalThis, "showSaveFilePicker", { value: undefined, configurable: true, writable: true });
@@ -328,7 +328,7 @@ async function main() {
           showSaveFilePicker: typeof globalThis.showSaveFilePicker,
           showDirectoryPicker: typeof globalThis.showDirectoryPicker,
         }));
-        // 找下載鈕
+        // 找下载钮
         const dl = page.locator('[aria-label="下载"]');
         const dlCount = await dl.count();
         let downloadResult = null;
@@ -364,7 +364,7 @@ async function main() {
           downloadResult.extension.length >= 2;
         saveCase("A21", {
           status: pass ? "pass" : "fail",
-          title: "刪除 File System Access API 後：下載走 <a download> blob 回退、副檔名正確",
+          title: "删除 File System Access API 后：下载走 <a download> blob 回退、副档名正确",
           observations: {
             apiCheck,
             fsApiGone,
@@ -375,14 +375,14 @@ async function main() {
             pageErrors,
             note:
               dlCount === 0
-                ? "歷史頁無可下載卡片（可能未登入或無記錄）→ 無法觸發 local-save 回退，此項未測"
+                ? "历史页无可下载卡片（可能未登入或无记录）→ 无法触发 local-save 回退，此项未测"
                 : downloadResult && downloadResult.fired
-                  ? "Playwright download 事件＝<a download>/blob 回退實際觸發"
-                  : "已找到下載鈕但未觸發 download 事件（可能 fetch 圖片失敗或走了其他路徑）",
-            whyComplex: "FS Access API 有無只在『非桌面殼』或『瀏覽器不支援』時才走回退；殼內與支援的 Chrome 都走 direct-write，測不到回退分支",
+                  ? "Playwright download 事件＝<a download>/blob 回退实际触发"
+                  : "已找到下载钮但未触发 download 事件（可能 fetch 图片失败或走了其他路径）",
+            whyComplex: "FS Access API 有无只在『非桌面壳』或『浏览器不支援』时才走回退；壳内与支援的 Chrome 都走 direct-write，测不到回退分支",
           },
           artifacts: { screenshot: shot },
-          error: pass ? undefined : "A21 判準未達（見 observations）",
+          error: pass ? undefined : "A21 判准未达（见 observations）",
         });
       } finally {
         await ctx.close().catch(() => {});

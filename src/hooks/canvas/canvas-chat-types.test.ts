@@ -1,7 +1,7 @@
-// compactMetadataForAgent 回歸測試（2026-09-03 導演台「示意图未同步」事故）。
-// 事故鏈：上行壓縮白名單不含 director 欄位 → gateway 快照裡導演台節點是空殼 →
-// 刷新/恢復後還原出的節點缺 directorSessionId/SVG → NodeBody 落到兜底文案。
-// 本測試釘死往復合同：壓縮輸出經 toNodeMetadata（還原端）後指針欄位原樣存活。
+// compactMetadataForAgent 回归测试（2026-09-03 导演台「示意图未同步」事故）。
+// 事故链：上行压缩白名单不含 director 栏位 → gateway 快照里导演台节点是空壳 →
+// 刷新/恢复后还原出的节点缺 directorSessionId/SVG → NodeBody 落到兜底文案。
+// 本测试钉死往复合同：压缩输出经 toNodeMetadata（还原端）后指针栏位原样存活。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compactMetadataForAgent } from "./canvas-chat-types";
@@ -11,11 +11,11 @@ import type { StoryboardScriptShot } from "@/lib/storyboard-contract";
 
 const BIG_SVG = `<svg>${"x".repeat(60 * 1024)}</svg>`;
 
-test("director 節點壓縮保留指針欄位、剔除 SVG", () => {
+test("director 节点压缩保留指针栏位、剔除 SVG", () => {
   const meta: CanvasNodeMetadata = {
     pipelineCard: "director",
     directorSessionId: "sess_abc123",
-    planName: "分鏡方案 A",
+    planName: "分镜方案 A",
     shotCount: 6,
     healthOk: true,
     revision: 12,
@@ -26,7 +26,7 @@ test("director 節點壓縮保留指針欄位、剔除 SVG", () => {
   assert.ok(compacted);
   assert.equal(compacted.pipelineCard, "director");
   assert.equal(compacted.directorSessionId, "sess_abc123");
-  assert.equal(compacted.planName, "分鏡方案 A");
+  assert.equal(compacted.planName, "分镜方案 A");
   assert.equal(compacted.shotCount, 6);
   assert.equal(compacted.healthOk, true);
   assert.equal(compacted.revision, 12);
@@ -34,7 +34,7 @@ test("director 節點壓縮保留指針欄位、剔除 SVG", () => {
   assert.equal(compacted.cameraViewSvg, undefined);
 });
 
-test("壓縮輸出經還原端 toNodeMetadata 後 director 指針不丟（往復合同）", () => {
+test("压缩输出经还原端 toNodeMetadata 后 director 指针不丢（往复合同）", () => {
   const meta: CanvasNodeMetadata = {
     pipelineCard: "director",
     directorSessionId: "sess_abc123",
@@ -52,12 +52,12 @@ test("壓縮輸出經還原端 toNodeMetadata 後 director 指針不丟（往復
   assert.equal(restored.revision, 3);
 });
 
-test("非 director 節點不受影響：SVG 欄位從不外傳", () => {
+test("非 director 节点不受影响：SVG 栏位从不外传", () => {
   const compacted = compactMetadataForAgent({ content: "hello", topViewSvg: BIG_SVG });
   assert.deepEqual(compacted, { content: "hello" });
 });
 
-// ── 3D 場景卡（2026-09-06 Astra PRD P1-3）：sceneCard 欄位族往復合同 ──
+// ── 3D 场景卡（2026-09-06 Astra PRD P1-3）：sceneCard 栏位族往复合同 ──
 
 const SCENE_CARD = {
   turntable_url: "https://cdn.example.com/turntable.mp4",
@@ -68,40 +68,40 @@ const SCENE_CARD = {
   duration_ms: 8000,
 };
 
-test("scene_3d 節點壓縮保留 sceneCard 六欄", () => {
+test("scene_3d 节点压缩保留 sceneCard 六栏", () => {
   const compacted = compactMetadataForAgent({ sceneCard: SCENE_CARD });
   assert.ok(compacted);
   assert.deepEqual(compacted.sceneCard, SCENE_CARD);
 });
 
-test("壓縮輸出經還原端 toNodeMetadata 後 sceneCard 不丟（往復合同）", () => {
+test("压缩输出经还原端 toNodeMetadata 后 sceneCard 不丢（往复合同）", () => {
   const meta: CanvasNodeMetadata = { sceneCard: SCENE_CARD };
   const restored = toNodeMetadata(compactMetadataForAgent(meta));
   assert.deepEqual(restored.sceneCard, SCENE_CARD);
 });
 
-test("sceneCard 非契約形狀在還原端整包丟棄（缺 turntable_url）", () => {
-  const restored = toNodeMetadata({ sceneCard: { stills_urls: ["x.png"], scene_summary: "殘形" } });
+test("sceneCard 非契约形状在还原端整包丢弃（缺 turntable_url）", () => {
+  const restored = toNodeMetadata({ sceneCard: { stills_urls: ["x.png"], scene_summary: "残形" } });
   assert.equal(restored.sceneCard, undefined);
 });
 
-test("非 scene_3d 節點不受影響：無 sceneCard 不外傳空欄位", () => {
+test("非 scene_3d 节点不受影响：无 sceneCard 不外传空栏位", () => {
   const compacted = compactMetadataForAgent({ content: "hello" });
   assert.deepEqual(compacted, { content: "hello" });
 });
 
-// ── 分鏡實體（2026-09-15 刀 2）：storyboardShot/storyboardScene 欄位族往復合同 ──
-// 完整契約測試在 src/lib/storyboard-contract.test.ts；此處只釘「壓縮器這一端有接上」，
-// 即雙白名單第二處（本檔）不漏欄——漏了就刷新/換裝置後 21 欄空殼。
+// ── 分镜实体（2026-09-15 刀 2）：storyboardShot/storyboardScene 栏位族往复合同 ──
+// 完整契约测试在 src/lib/storyboard-contract.test.ts；此处只钉「压缩器这一端有接上」，
+// 即双白名单第二处（本档）不漏栏——漏了就刷新/换装置后 21 栏空壳。
 
-test("分鏡節點壓縮保留 storyboardShot 21 欄與 storyboardScene", () => {
+test("分镜节点压缩保留 storyboardShot 21 栏与 storyboardScene", () => {
   const shot: StoryboardScriptShot = {
     shotNumber: "001",
     scriptContent: "正文片段",
-    visualDescription: "中景，推門而入",
-    dialogue: "[林昭]：「有人嗎」",
-    actionState: "推門、環視",
-    narrativeFunction: "建立懸念",
+    visualDescription: "中景，推门而入",
+    dialogue: "[林昭]：「有人吗」",
+    actionState: "推门、环视",
+    narrativeFunction: "建立悬念",
     timeOfDay: "清晨",
     eraCoordinate: "当代",
     dateCoordinate: "第三天",
@@ -124,7 +124,7 @@ test("分鏡節點壓縮保留 storyboardShot 21 欄與 storyboardScene", () => 
   assert.deepEqual(compacted.storyboardScene, { sceneName: "旧宅", shotCount: 1 });
 });
 
-test("壓縮輸出經還原端 toNodeMetadata 後分鏡欄位不丟（往復合同）", () => {
+test("压缩输出经还原端 toNodeMetadata 后分镜栏位不丢（往复合同）", () => {
   const shot: StoryboardScriptShot = {
     shotNumber: "001",
     scriptContent: "正文",
@@ -153,11 +153,11 @@ test("壓縮輸出經還原端 toNodeMetadata 後分鏡欄位不丟（往復合�
   assert.equal(restored.storyboardShot?.scriptContent, "正文");
   assert.equal(restored.storyboardShot?.dialogue, "");
 });
-// ── 分鏡實體卡引用＋落卡標記（WS7 收口，2026-09-24）：雙白名單第二處的往復合同 ──
-// 病灶同構：漏這一端 = 回舊會話/換裝置還原（fromCanvasProject → toNodeMetadata）後
-// 分鏡節點失去卡引用、落卡標記消失 → 自動落卡的回填與冪等只在 session 內有效。
+// ── 分镜实体卡引用＋落卡标记（WS7 收口，2026-09-24）：双白名单第二处的往复合同 ──
+// 病灶同构：漏这一端 = 回旧会话/换装置还原（fromCanvasProject → toNodeMetadata）后
+// 分镜节点失去卡引用、落卡标记消失 → 自动落卡的回填与幂等只在 session 内有效。
 
-test("分鏡卡引用＋落卡標記壓縮保留（四欄逐位元）", () => {
+test("分镜卡引用＋落卡标记压缩保留（四栏逐位元）", () => {
   const compacted = compactMetadataForAgent({
     characterCardIds: ["card-node-char-1", "card-hand-made"],
     sceneCardIds: ["card-node-scene-1"],
@@ -172,7 +172,7 @@ test("分鏡卡引用＋落卡標記壓縮保留（四欄逐位元）", () => {
   });
 });
 
-test("壓縮輸出經還原端 toNodeMetadata 後四欄逐位元還在（往復合同）", () => {
+test("压缩输出经还原端 toNodeMetadata 后四栏逐位元还在（往复合同）", () => {
   const meta: CanvasNodeMetadata = {
     characterCardIds: ["card-node-char-1", "card-hand-made"],
     sceneCardIds: ["card-node-scene-1"],
@@ -180,59 +180,59 @@ test("壓縮輸出經還原端 toNodeMetadata 後四欄逐位元還在（往復�
     entityCardId: "card-node-char-1",
   };
   const restored = toNodeMetadata(compactMetadataForAgent(meta));
-  assert.deepEqual(restored.characterCardIds, ["card-node-char-1", "card-hand-made"], "卡 id 順序原樣（順序是語義）");
+  assert.deepEqual(restored.characterCardIds, ["card-node-char-1", "card-hand-made"], "卡 id 顺序原样（顺序是语义）");
   assert.deepEqual(restored.sceneCardIds, ["card-node-scene-1"]);
   assert.deepEqual(restored.propCardIds, ["card-node-prop-1"]);
-  assert.equal(restored.entityCardId, "card-node-char-1", "落卡標記不丟（否則重載後冪等判定失去依據）");
+  assert.equal(restored.entityCardId, "card-node-char-1", "落卡标记不丢（否则重载后幂等判定失去依据）");
 });
 
-test("卡引用欄清洗：空/空白 → 鍵不存在；['a','','a'] → ['a']（壓縮端與還原端同一把尺）", () => {
-  // 壓縮端
+test("卡引用栏清洗：空/空白 → 键不存在；['a','','a'] → ['a']（压缩端与还原端同一把尺）", () => {
+  // 压缩端
   const compacted = compactMetadataForAgent({
     characterCardIds: ["a", "", "a"],
     sceneCardIds: [],
     propCardIds: ["   "],
   });
-  assert.deepEqual(compacted, { characterCardIds: ["a"] }, "去重＋剔空；空陣列/純空白欄不寫進快照");
-  // 還原端（同一批髒值）
+  assert.deepEqual(compacted, { characterCardIds: ["a"] }, "去重＋剔空；空阵列/纯空白栏不写进快照");
+  // 还原端（同一批脏值）
   const restored = toNodeMetadata({
     characterCardIds: ["a", "", "a"],
     sceneCardIds: [],
     propCardIds: ["   "],
     entityCardId: "   ",
   });
-  assert.deepEqual(restored, { characterCardIds: ["a"] }, "還原端逐欄收斂：空欄省略、標記純空白＝沒有標記");
+  assert.deepEqual(restored, { characterCardIds: ["a"] }, "还原端逐栏收敛：空栏省略、标记纯空白＝没有标记");
 });
 
-test("卡引用欄非陣列/髒元素不落地（不偽造 id、不炸）", () => {
+test("卡引用栏非阵列/脏元素不落地（不伪造 id、不炸）", () => {
   const restored = toNodeMetadata({
     characterCardIds: "card-node-char-1",
     sceneCardIds: [7, null, { id: "x" }, "card-node-scene-1"],
     propCardIds: undefined,
     entityCardId: 42,
   });
-  assert.deepEqual(restored, { sceneCardIds: ["card-node-scene-1"] }, "只留真字串 id，其餘丟棄");
+  assert.deepEqual(restored, { sceneCardIds: ["card-node-scene-1"] }, "只留真字串 id，其余丢弃");
 });
 
-test("安全邊界：通道只放行這四欄，其餘 metadata 鍵照舊不外傳", () => {
+test("安全边界：通道只放行这四栏，其余 metadata 键照旧不外传", () => {
   const compacted = compactMetadataForAgent({
     characterCardIds: ["card-node-char-1"],
-    // 任何其他欄位（含未列白名單的既有欄位）都不得因此被放行
+    // 任何其他栏位（含未列白名单的既有栏位）都不得因此被放行
     someNewKey: "leak",
     referenceNodeIds: ["n1"],
     topViewSvg: BIG_SVG,
   } as CanvasNodeMetadata);
-  assert.deepEqual(compacted, { characterCardIds: ["card-node-char-1"] }, "四欄以外零放行");
+  assert.deepEqual(compacted, { characterCardIds: ["card-node-char-1"] }, "四栏以外零放行");
 });
 
-// ── 模板實體宣告＋卡名來源（WS10，2026-09-24）：雙白名單第二處的往復合同 ──
-// 病灶（已實錘的斷點）：閘道 `expandTemplate` 把模板 `defaults.emitsEntity` spread 進
-// 節點 metadata，前端落地時被白名單剝掉 → `agent-output-cards.emittedEntityOf` 回 null
-// → 整條「agent 交付自動落卡」在真畫布上不可能觸發（0 卡）。本節釘死這一端不漏欄。
+// ── 模板实体宣告＋卡名来源（WS10，2026-09-24）：双白名单第二处的往复合同 ──
+// 病灶（已实锤的断点）：闸道 `expandTemplate` 把模板 `defaults.emitsEntity` spread 进
+// 节点 metadata，前端落地时被白名单剥掉 → `agent-output-cards.emittedEntityOf` 回 null
+// → 整条「agent 交付自动落卡」在真画布上不可能触发（0 卡）。本节钉死这一端不漏栏。
 
 const ENTITY_DECL = { kind: "character" as const, nameFrom: "input" as const };
 
-test("壓縮端保留 emitsEntity 與卡名三鍵（逐位元），且回傳新物件（不與輸入同參考）", () => {
+test("压缩端保留 emitsEntity 与卡名三键（逐位元），且回传新物件（不与输入同参考）", () => {
   const rawDeclaration = { kind: "character", nameFrom: "input" };
   const compacted = compactMetadataForAgent({
     emitsEntity: rawDeclaration,
@@ -241,38 +241,38 @@ test("壓縮端保留 emitsEntity 與卡名三鍵（逐位元），且回傳新�
     sceneName: "旧宅",
   } as unknown as CanvasNodeMetadata);
   assert.deepEqual(compacted, { emitsEntity: ENTITY_DECL, input: "霍辞渊", characterName: "备选名", sceneName: "旧宅" });
-  assert.notEqual(compacted!.emitsEntity, rawDeclaration, "必須是新物件（gateway 淺 spread 讓宣告與模板模組層同參考，沿用會跨會話污染）");
+  assert.notEqual(compacted!.emitsEntity, rawDeclaration, "必须是新物件（gateway 浅 spread 让宣告与模板模组层同参考，沿用会跨会话污染）");
 });
 
-test("往復合同：壓縮 → 還原端 toNodeMetadata 後 emitsEntity 與卡名逐位元還在", () => {
+test("往复合同：压缩 → 还原端 toNodeMetadata 后 emitsEntity 与卡名逐位元还在", () => {
   const meta = {
     emitsEntity: { kind: "scene", nameFrom: "input" },
-    input: "客廳-黃昏",
-    characterName: "不該當場景名用",
-    sceneName: "客廳",
+    input: "客厅-黄昏",
+    characterName: "不该当场景名用",
+    sceneName: "客厅",
   } as unknown as CanvasNodeMetadata;
   const restored = toNodeMetadata(compactMetadataForAgent(meta));
-  // nameFrom:"input" 的候選鍵順序由 agent-output-cards 決定（input → characterName → sceneName）：
-  // 通道端只負責「三個鍵都活著過去」，不重排、不改值。
+  // nameFrom:"input" 的候选键顺序由 agent-output-cards 决定（input → characterName → sceneName）：
+  // 通道端只负责「三个键都活著过去」，不重排、不改值。
   assert.deepEqual((restored as { emitsEntity?: unknown }).emitsEntity, { kind: "scene", nameFrom: "input" });
-  assert.equal((restored as { input?: string }).input, "客廳-黃昏");
-  assert.equal((restored as { characterName?: string }).characterName, "不該當場景名用");
-  assert.equal((restored as { sceneName?: string }).sceneName, "客廳");
+  assert.equal((restored as { input?: string }).input, "客厅-黄昏");
+  assert.equal((restored as { characterName?: string }).characterName, "不该当场景名用");
+  assert.equal((restored as { sceneName?: string }).sceneName, "客厅");
 });
 
-test("emitsEntity 清洗：kind 不在五值域 → 兩端都整包丟（不降格成 character）", () => {
+test("emitsEntity 清洗：kind 不在五值域 → 两端都整包丢（不降格成 character）", () => {
   for (const kind of ["banana", "", 7, null, "CHARACTER", undefined]) {
     const meta = { emitsEntity: { kind } } as unknown as CanvasNodeMetadata;
-    assert.equal(compactMetadataForAgent(meta), undefined, `壓縮端：kind=${String(kind)} 整包丟`);
-    assert.deepEqual(toNodeMetadata({ emitsEntity: { kind } }), {}, `還原端：kind=${String(kind)} 整包丟`);
+    assert.equal(compactMetadataForAgent(meta), undefined, `压缩端：kind=${String(kind)} 整包丢`);
+    assert.deepEqual(toNodeMetadata({ emitsEntity: { kind } }), {}, `还原端：kind=${String(kind)} 整包丢`);
   }
-  // 非物件形態（字串/陣列/數字）同樣不進通道
+  // 非物件形态（字串/阵列/数字）同样不进通道
   for (const raw of ["character", ["character"], 3, true]) {
-    assert.deepEqual(toNodeMetadata({ emitsEntity: raw }), {}, `還原端：非物件 ${JSON.stringify(raw)} 丟棄`);
+    assert.deepEqual(toNodeMetadata({ emitsEntity: raw }), {}, `还原端：非物件 ${JSON.stringify(raw)} 丢弃`);
   }
 });
 
-test("emitsEntity 清洗：nameFrom 非兩值 → 省略該欄（kind 仍有效）；五值域全收", () => {
+test("emitsEntity 清洗：nameFrom 非两值 → 省略该栏（kind 仍有效）；五值域全收", () => {
   for (const kind of ["character", "scene", "style", "prop", "audio"]) {
     assert.deepEqual(toNodeMetadata({ emitsEntity: { kind } }), { emitsEntity: { kind } }, `kind=${kind} 必收`);
   }
@@ -280,7 +280,7 @@ test("emitsEntity 清洗：nameFrom 非兩值 → 省略該欄（kind 仍有效�
     assert.deepEqual(
       toNodeMetadata({ emitsEntity: { kind: "prop", nameFrom } }),
       { emitsEntity: { kind: "prop" } },
-      `nameFrom=${String(nameFrom)} 只省該欄`,
+      `nameFrom=${String(nameFrom)} 只省该栏`,
     );
   }
   assert.deepEqual(toNodeMetadata({ emitsEntity: { kind: "prop", nameFrom: "nodeTitle" } }), {
@@ -288,31 +288,31 @@ test("emitsEntity 清洗：nameFrom 非兩值 → 省略該欄（kind 仍有效�
   });
 });
 
-test("卡名三鍵清洗：空白/非字串 → 省略鍵；超長截 100（兩端同一把尺）", () => {
+test("卡名三键清洗：空白/非字串 → 省略键；超长截 100（两端同一把尺）", () => {
   const dirty = {
     input: "   ",
     characterName: 42,
     sceneName: "场".repeat(200),
   } as unknown as CanvasNodeMetadata;
   const restored = toNodeMetadata(dirty);
-  assert.deepEqual(restored, { sceneName: "场".repeat(100) }, "只留真字串且非空，長度截到 100（卡名上限）");
+  assert.deepEqual(restored, { sceneName: "场".repeat(100) }, "只留真字串且非空，长度截到 100（卡名上限）");
   const compacted = compactMetadataForAgent(dirty);
-  assert.deepEqual(compacted, { sceneName: "场".repeat(100) }, "壓縮端同一把尺（不留空欄進快照）");
+  assert.deepEqual(compacted, { sceneName: "场".repeat(100) }, "压缩端同一把尺（不留空栏进快照）");
 });
 
-test("安全邊界：卡名三鍵不放行同名的其他 metadata 鍵（輸入不因此外洩）", () => {
+test("安全边界：卡名三键不放行同名的其他 metadata 键（输入不因此外泄）", () => {
   const compacted = compactMetadataForAgent({
     input: "角色名",
-    description: "不該外傳",
-    key_features: ["不該外傳"],
+    description: "不该外传",
+    key_features: ["不该外传"],
   } as unknown as CanvasNodeMetadata);
-  assert.deepEqual(compacted, { input: "角色名" }, "只放行三鍵本身");
+  assert.deepEqual(compacted, { input: "角色名" }, "只放行三键本身");
 });
 
-// ── 四視圖聚合的參考圖鍵（2026-09-24）：雙白名單的第二刀 ──
-// 病灶同族（WS10 實錘）：`emitsEntity` 內新增的鍵若漏放行，**當下就被剝**（不是重載才消失）
-// → `referenceNodeIds` 永遠 undefined → 整條聚合功能不可能觸發（症狀＝完全沒反應）。
-// 本節用**真** compactMetadataForAgent → **真** toNodeMetadata 往返（不寫替代品當 oracle）。
+// ── 四视图聚合的参考图键（2026-09-24）：双白名单的第二刀 ──
+// 病灶同族（WS10 实锤）：`emitsEntity` 内新增的键若漏放行，**当下就被剥**（不是重载才消失）
+// → `referenceNodeIds` 永远 undefined → 整条聚合功能不可能触发（症状＝完全没反应）。
+// 本节用**真** compactMetadataForAgent → **真** toNodeMetadata 往返（不写替代品当 oracle）。
 
 const ENTITY_WITH_REFS = {
   kind: "character" as const,
@@ -321,7 +321,7 @@ const ENTITY_WITH_REFS = {
   referenceNodeIds: ["tpl-view2-9", "tpl-view3-9", "tpl-view4-9"],
 };
 
-test("聚合鍵往復合同：經壓縮端 → 還原端後 referenceRoles/referenceNodeIds 逐位元還在", () => {
+test("聚合键往复合同：经压缩端 → 还原端后 referenceRoles/referenceNodeIds 逐位元还在", () => {
   const raw = {
     emitsEntity: {
       kind: "character",
@@ -332,19 +332,19 @@ test("聚合鍵往復合同：經壓縮端 → 還原端後 referenceRoles/refer
     input: "霍辞渊",
   } as unknown as CanvasNodeMetadata;
   const compacted = compactMetadataForAgent(raw);
-  assert.deepEqual(compacted?.emitsEntity, ENTITY_WITH_REFS, "壓縮端（上行/快照）逐鍵放行");
+  assert.deepEqual(compacted?.emitsEntity, ENTITY_WITH_REFS, "压缩端（上行/快照）逐键放行");
   const restored = toNodeMetadata(compacted);
-  assert.deepEqual(restored.emitsEntity, ENTITY_WITH_REFS, "還原端（Blob/快照落地）逐位元存活");
-  // 兩端各自獨立斷言：只活過一端（漏一端）＝功能當下被剝
-  assert.deepEqual(toNodeMetadata({ emitsEntity: ENTITY_WITH_REFS }).emitsEntity, ENTITY_WITH_REFS, "還原端單獨吃原始 metadata 也放行");
+  assert.deepEqual(restored.emitsEntity, ENTITY_WITH_REFS, "还原端（Blob/快照落地）逐位元存活");
+  // 两端各自独立断言：只活过一端（漏一端）＝功能当下被剥
+  assert.deepEqual(toNodeMetadata({ emitsEntity: ENTITY_WITH_REFS }).emitsEntity, ENTITY_WITH_REFS, "还原端单独吃原始 metadata 也放行");
   assert.deepEqual(
     (compactMetadataForAgent({ emitsEntity: ENTITY_WITH_REFS } as unknown as CanvasNodeMetadata) ?? {}).emitsEntity,
     ENTITY_WITH_REFS,
-    "壓縮端單獨吃原始 metadata 也放行",
+    "压缩端单独吃原始 metadata 也放行",
   );
 });
 
-test("聚合鍵清洗：只收非空字串、去重、trim；空集合省略鍵（兩端同一把尺）", () => {
+test("聚合键清洗：只收非空字串、去重、trim；空集合省略键（两端同一把尺）", () => {
   const dirty = {
     kind: "scene",
     referenceNodeIds: ["a", "", "  a  ", 123, null, "b"],
@@ -359,16 +359,16 @@ test("聚合鍵清洗：只收非空字串、去重、trim；空集合省略鍵�
   assert.deepEqual(
     (compactMetadataForAgent({ emitsEntity: dirty } as unknown as CanvasNodeMetadata) ?? {}).emitsEntity,
     { kind: "scene", referenceNodeIds: ["a", "b"], referenceRoles: ["view2"] },
-    "壓縮端同一把尺",
+    "压缩端同一把尺",
   );
-  // 空集合 / 非陣列 → 省略該鍵（不是寫 []）
+  // 空集合 / 非阵列 → 省略该键（不是写 []）
   for (const empty of [[], ["  "], "view2", 7, null, {}]) {
     const cleaned = toNodeMetadata({ emitsEntity: { kind: "prop", referenceNodeIds: empty, referenceRoles: empty } });
-    assert.deepEqual(cleaned.emitsEntity, { kind: "prop" }, `referenceNodeIds=${JSON.stringify(empty)} 省略鍵`);
+    assert.deepEqual(cleaned.emitsEntity, { kind: "prop" }, `referenceNodeIds=${JSON.stringify(empty)} 省略键`);
   }
 });
 
-test("聚合鍵清洗：單項截 100、項數上限 8（與卡參考圖上限同尺）", () => {
+test("聚合键清洗：单项截 100、项数上限 8（与卡参考图上限同尺）", () => {
   const cleaned = toNodeMetadata({
     emitsEntity: {
       kind: "character",
@@ -376,93 +376,93 @@ test("聚合鍵清洗：單項截 100、項數上限 8（與卡參考圖上限�
     },
   });
   const ids = cleaned.emitsEntity?.referenceNodeIds ?? [];
-  assert.equal(ids.length, 8, "項數截到 8");
+  assert.equal(ids.length, 8, "项数截到 8");
   assert.deepEqual(ids, ["n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7"]);
   assert.equal(
     (toNodeMetadata({ emitsEntity: { kind: "character", referenceNodeIds: ["x".repeat(200)] } }).emitsEntity
       ?.referenceNodeIds ?? [])[0]?.length,
     100,
-    "單項截 100",
+    "单项截 100",
   );
 });
 
-test("聚合鍵不合法時：kind 非法仍整包丟（聚合鍵救不回一個壞宣告）", () => {
+test("聚合键不合法时：kind 非法仍整包丢（聚合键救不回一个坏宣告）", () => {
   assert.deepEqual(toNodeMetadata({ emitsEntity: { kind: "banana", referenceNodeIds: ["a"] } }), {});
 });
 
-// ── 文本節點字號（2026-09-25）：白名單放行前它「session 內可見、重載即消失」 ──
-// 寫入端＝context-menu-items.ts:155/156（Math.min(28,…)/Math.max(10,…)，缺省 14.5）
-// 讀取端＝NodeBody.tsx:431；耐久化唯一路徑＝toNodeMetadata。本節釘死往復＋清洗界。
+// ── 文本节点字号（2026-09-25）：白名单放行前它「session 内可见、重载即消失」 ──
+// 写入端＝context-menu-items.ts:155/156（Math.min(28,…)/Math.max(10,…)，缺省 14.5）
+// 读取端＝NodeBody.tsx:431；耐久化唯一路径＝toNodeMetadata。本节钉死往复＋清洗界。
 
-test("fontSize 往復合同：toNodeMetadata(compactMetadataForAgent({fontSize:22})).fontSize === 22", () => {
+test("fontSize 往复合同：toNodeMetadata(compactMetadataForAgent({fontSize:22})).fontSize === 22", () => {
   const roundTrip = toNodeMetadata(compactMetadataForAgent({ fontSize: 22 } as CanvasNodeMetadata));
-  assert.equal(roundTrip.fontSize, 22, "兩端都放行（漏一端＝重載/回舊會話掉字號）");
-  assert.equal(compactMetadataForAgent({ fontSize: 22 } as CanvasNodeMetadata)?.fontSize, 22, "壓縮端單獨放行");
-  assert.equal(toNodeMetadata({ fontSize: 22 }).fontSize, 22, "還原端單獨放行");
+  assert.equal(roundTrip.fontSize, 22, "两端都放行（漏一端＝重载/回旧会话掉字号）");
+  assert.equal(compactMetadataForAgent({ fontSize: 22 } as CanvasNodeMetadata)?.fontSize, 22, "压缩端单独放行");
+  assert.equal(toNodeMetadata({ fontSize: 22 }).fontSize, 22, "还原端单独放行");
 });
 
-test("fontSize 清洗：夾在 10..28、四捨五入成整數；非有限數字省略該鍵（兩端同一把尺）", () => {
-  assert.equal(toNodeMetadata({ fontSize: 100 }).fontSize, 28, "超上界收斂到 28");
-  assert.equal(toNodeMetadata({ fontSize: -100 }).fontSize, 10, "超下界收斂到 10");
-  assert.equal(toNodeMetadata({ fontSize: 14.5 }).fontSize, 15, "四捨五入（面板只寫整數）");
+test("fontSize 清洗：夹在 10..28、四舍五入成整数；非有限数字省略该键（两端同一把尺）", () => {
+  assert.equal(toNodeMetadata({ fontSize: 100 }).fontSize, 28, "超上界收敛到 28");
+  assert.equal(toNodeMetadata({ fontSize: -100 }).fontSize, 10, "超下界收敛到 10");
+  assert.equal(toNodeMetadata({ fontSize: 14.5 }).fontSize, 15, "四舍五入（面板只写整数）");
   assert.equal(toNodeMetadata({ fontSize: 14.4 }).fontSize, 14);
   for (const bad of ["22", NaN, Infinity, -Infinity, null, undefined, true, {}, []]) {
     const restored = toNodeMetadata({ fontSize: bad });
-    assert.equal("fontSize" in restored, false, `fontSize=${String(bad)} 省略該鍵（不轉型、不代填 14.5）`);
-    assert.deepEqual(compactMetadataForAgent({ fontSize: bad } as unknown as CanvasNodeMetadata), undefined, `壓縮端同一把尺：${String(bad)}`);
+    assert.equal("fontSize" in restored, false, `fontSize=${String(bad)} 省略该键（不转型、不代填 14.5）`);
+    assert.deepEqual(compactMetadataForAgent({ fontSize: bad } as unknown as CanvasNodeMetadata), undefined, `压缩端同一把尺：${String(bad)}`);
   }
 });
 
-test("fontSize 缺席＝零回歸：輸出物件逐位元不含該鍵（既有鍵集不變）", () => {
+test("fontSize 缺席＝零回归：输出物件逐位元不含该键（既有键集不变）", () => {
   const withoutFontSize = toNodeMetadata({ content: "正文", prompt: "p", model: "m", count: 2, status: "success" });
   assert.deepEqual(withoutFontSize, { content: "正文", prompt: "p", model: "m", count: 2, status: "success" });
-  assert.equal(Object.keys(withoutFontSize).includes("fontSize"), false, "缺席時不新增恆存在鍵（不是 `fontSize: undefined`）");
+  assert.equal(Object.keys(withoutFontSize).includes("fontSize"), false, "缺席时不新增恒存在键（不是 `fontSize: undefined`）");
   assert.deepEqual(
     (compactMetadataForAgent({ content: "正文" } as unknown as CanvasNodeMetadata) ?? {}).fontSize,
     undefined,
-    "壓縮端缺席時同樣不多寫鍵",
+    "压缩端缺席时同样不多写键",
   );
 });
 
-// ── 雙白名單收口（2026-09-24）：門禁裁決 gateConfirm ＋ 分鏡批准 approval ──
-// 兩鍵同族同寫法（結構化物件、走與還原端同一份清洗、殘形整包丟棄）。
-// 病灶：兩端任一漏放行＝「同會話內看起來正常、刷新/回舊會話後憑空消失」——
-// 門禁卡退回純文字（按不下批准）、分鏡審查面板退回「未批准」。屬最重的一類靜默失敗。
+// ── 双白名单收口（2026-09-24）：门禁裁决 gateConfirm ＋ 分镜批准 approval ──
+// 两键同族同写法（结构化物件、走与还原端同一份清洗、残形整包丢弃）。
+// 病灶：两端任一漏放行＝「同会话内看起来正常、刷新/回旧会话后凭空消失」——
+// 门禁卡退回纯文字（按不下批准）、分镜审查面板退回「未批准」。属最重的一类静默失败。
 
 const GATE_CONFIRM = { request_id: "wfgate_wf1_cast_card_abc", session_id: "sess_1", status: "pending" } as const;
 const APPROVAL = { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z", reason: "第 3 镜服装不一致" } as const;
 
-test("往復不丟：真 metadata（approval ＋ gateConfirm）→ 壓縮 → fromCanvasProject 還原後兩鍵逐位相同", () => {
+test("往复不丢：真 metadata（approval ＋ gateConfirm）→ 压缩 → fromCanvasProject 还原后两键逐位相同", () => {
   const meta: CanvasNodeMetadata = {
     prompt: "第 3 镜 少年推门",
     gateConfirm: { ...GATE_CONFIRM },
     approval: { ...APPROVAL },
   };
-  // 上行：真壓縮端（canvas-project-sync 上行的就是這個函式的輸出）
+  // 上行：真压缩端（canvas-project-sync 上行的就是这个函式的输出）
   const compacted = compactMetadataForAgent(meta);
-  assert.deepEqual(compacted?.gateConfirm, GATE_CONFIRM, "壓縮端放行 gateConfirm");
-  assert.deepEqual(compacted?.approval, APPROVAL, "壓縮端放行 approval（含 decidedAt/reason 逐欄）");
+  assert.deepEqual(compacted?.gateConfirm, GATE_CONFIRM, "压缩端放行 gateConfirm");
+  assert.deepEqual(compacted?.approval, APPROVAL, "压缩端放行 approval（含 decidedAt/reason 逐栏）");
 
-  // 下行：真還原入口（use-canvas-chat.restoreAgentSnapshot → fromCanvasProject → toNodeMetadata），
-  // 不是直接餵 toNodeMetadata——中間的節點形狀校驗也必須讓兩鍵活著。
+  // 下行：真还原入口（use-canvas-chat.restoreAgentSnapshot → fromCanvasProject → toNodeMetadata），
+  // 不是直接喂 toNodeMetadata——中间的节点形状校验也必须让两键活著。
   const restored = fromCanvasProject({ nodes: [{ id: "shot-1", type: "text", title: "第 3 镜", metadata: compacted }] });
   assert.equal(restored.nodes.length, 1);
-  assert.deepEqual(restored.nodes[0]?.metadata?.gateConfirm, GATE_CONFIRM, "還原後 gateConfirm 逐位相同");
-  assert.deepEqual(restored.nodes[0]?.metadata?.approval, APPROVAL, "還原後 approval 逐位相同");
-  assert.deepEqual(toNodeMetadata(compacted), meta, "兩鍵與其他 metadata 同存時互不干擾（整包等價）");
+  assert.deepEqual(restored.nodes[0]?.metadata?.gateConfirm, GATE_CONFIRM, "还原后 gateConfirm 逐位相同");
+  assert.deepEqual(restored.nodes[0]?.metadata?.approval, APPROVAL, "还原后 approval 逐位相同");
+  assert.deepEqual(toNodeMetadata(compacted), meta, "两键与其他 metadata 同存时互不干扰（整包等价）");
 });
 
-test("兩鍵是獨立鍵：只帶 approval 不偽造 gateConfirm（反之亦然），不合併不互推", () => {
+test("两键是独立键：只带 approval 不伪造 gateConfirm（反之亦然），不合并不互推", () => {
   const onlyApproval = compactMetadataForAgent({ approval: { ...APPROVAL } });
   assert.deepEqual(onlyApproval, { approval: APPROVAL });
   const onlyGate = compactMetadataForAgent({ gateConfirm: { ...GATE_CONFIRM } });
   assert.deepEqual(onlyGate, { gateConfirm: GATE_CONFIRM });
-  assert.equal("gateConfirm" in (onlyApproval ?? {}), false, "沒有裁決憑據就不寫該鍵");
-  assert.equal("approval" in (onlyGate ?? {}), false, "沒有批准狀態就不寫該鍵");
+  assert.equal("gateConfirm" in (onlyApproval ?? {}), false, "没有裁决凭据就不写该键");
+  assert.equal("approval" in (onlyGate ?? {}), false, "没有批准状态就不写该键");
 });
 
-test("負對照：殘形/缺欄的輸入整包丟棄，不得半形半套（兩端同一把尺）", () => {
-  // gateConfirm：三欄缺一不可（缺 request_id 的卡按不下批准）
+test("负对照：残形/缺栏的输入整包丢弃，不得半形半套（两端同一把尺）", () => {
+  // gateConfirm：三栏缺一不可（缺 request_id 的卡按不下批准）
   const badGate = [
     { session_id: "s", status: "pending" },
     { request_id: "r", status: "pending" },
@@ -475,11 +475,11 @@ test("負對照：殘形/缺欄的輸入整包丟棄，不得半形半套（兩�
     assert.deepEqual(
       compactMetadataForAgent({ gateConfirm: bad } as unknown as CanvasNodeMetadata),
       undefined,
-      `壓縮端丟棄殘形 gateConfirm：${JSON.stringify(bad)}`,
+      `压缩端丢弃残形 gateConfirm：${JSON.stringify(bad)}`,
     );
-    assert.equal("gateConfirm" in toNodeMetadata({ gateConfirm: bad }), false, `還原端同一把尺：${JSON.stringify(bad)}`);
+    assert.equal("gateConfirm" in toNodeMetadata({ gateConfirm: bad }), false, `还原端同一把尺：${JSON.stringify(bad)}`);
   }
-  // approval：status 三值域之外＝整包丟棄（讀不懂的值不猜成 pending 也不猜成 approved）
+  // approval：status 三值域之外＝整包丢弃（读不懂的值不猜成 pending 也不猜成 approved）
   const badApproval = [
     { status: "maybe" },
     { reason: "只给理由不给结论" },
@@ -491,22 +491,22 @@ test("負對照：殘形/缺欄的輸入整包丟棄，不得半形半套（兩�
   for (const bad of badApproval) {
     const compacted = compactMetadataForAgent({ approval: bad } as unknown as CanvasNodeMetadata);
     if (bad && typeof bad === "object" && (bad as { status?: string }).status === "approved") {
-      // decidedAt 非字串＝該欄省略，但 status 合法 → 鍵照留（批准結論可信）
-      assert.deepEqual(compacted, { approval: { status: "approved" } }, "非字串 decidedAt 只丟該欄，不丟整個結論");
+      // decidedAt 非字串＝该栏省略，但 status 合法 → 键照留（批准结论可信）
+      assert.deepEqual(compacted, { approval: { status: "approved" } }, "非字串 decidedAt 只丢该栏，不丢整个结论");
       continue;
     }
-    assert.deepEqual(compacted, undefined, `壓縮端丟棄殘形 approval：${JSON.stringify(bad)}`);
+    assert.deepEqual(compacted, undefined, `压缩端丢弃残形 approval：${JSON.stringify(bad)}`);
   }
 });
 
-test("髒 approval 走卡側同一收口：reason 裁剪/空白省略（不在節點側另立判據）", () => {
+test("脏 approval 走卡侧同一收口：reason 裁剪/空白省略（不在节点侧另立判据）", () => {
   const compacted = compactMetadataForAgent({
     approval: { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z", reason: "   " },
   } as unknown as CanvasNodeMetadata);
-  assert.deepEqual(compacted, { approval: { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z" } }, "純空白理由＝沒有理由（欄位省略）");
+  assert.deepEqual(compacted, { approval: { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z" } }, "纯空白理由＝没有理由（栏位省略）");
 });
 
-test("缺席＝零回歸：既有鍵集逐位元不變（不多寫恆存在的空鍵）", () => {
+test("缺席＝零回归：既有键集逐位元不变（不多写恒存在的空键）", () => {
   const baseline = toNodeMetadata({ content: "正文", gate: "剧本人工批准", count: 2 });
   assert.deepEqual(baseline, { content: "正文", gate: "剧本人工批准", count: 2 });
   assert.deepEqual(compactMetadataForAgent({ content: "正文", gate: "剧本人工批准" } as unknown as CanvasNodeMetadata), {
@@ -515,9 +515,9 @@ test("缺席＝零回歸：既有鍵集逐位元不變（不多寫恆存在的�
   });
 });
 
-test("全自動檔不受影響：兩鍵的存續與 interaction_mode 無關（純資料傳輸，不帶檔位判斷）", () => {
-  // 門禁/批准是「資料在不在」，不是「擋不擋」——檔位語義只活在 isAssetApproved/網關閘，
-  // 白名單端兩個檔位走同一條路（否則 auto 檔的門禁卡刷新後也會退回純文字）。
+test("全自动档不受影响：两键的存续与 interaction_mode 无关（纯资料传输，不带档位判断）", () => {
+  // 门禁/批准是「资料在不在」，不是「挡不挡」——档位语义只活在 isAssetApproved/网关闸，
+  // 白名单端两个档位走同一条路（否则 auto 档的门禁卡刷新后也会退回纯文字）。
   const meta = { gateConfirm: { ...GATE_CONFIRM }, approval: { status: "approved" } } as CanvasNodeMetadata;
   const roundTrip = fromCanvasProject({ nodes: [{ id: "n", type: "text", title: "t", metadata: compactMetadataForAgent(meta) }] });
   assert.deepEqual(roundTrip.nodes[0]?.metadata?.gateConfirm, GATE_CONFIRM);

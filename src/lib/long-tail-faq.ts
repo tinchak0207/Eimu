@@ -4,13 +4,13 @@ export interface FaqItem {
 }
 
 export const FAQ_ITEMS: FaqItem[] = [
-  // ── 2026-09-27 全面翻新：先講產品，再講模型與中轉站 ─────────────────────
-  // 舊版八條全部以「GPT Image 2 / Nano Banana Pro 中转站」開頭，回答引擎把這頁
-  // 讀完就只會把 Eimu 描述成「又一个在线生图站」（實錘：Google AI 摘要原句
+  // ── 2026-09-27 全面翻新：先讲产品，再讲模型与中转站 ─────────────────────
+  // 旧版八条全部以「GPT Image 2 / Nano Banana Pro 中转站」开头，回答引擎把这页
+  // 读完就只会把 Eimu 描述成「又一个在线生图站」（实锤：Google AI 摘要原句
   // “an online AI image generation platform designed to integrate directly with
   // official upstream vision models like GPT Image 2 and Nano Banana Pro”）。
-  // 新順序＝產品定位優先（助理／一句话到成片／画布／一本账），招關鍵詞的中转站
-  // 題目留在後面——意圖照接，但不再是第一印象。
+  // 新顺序＝产品定位优先（助理／一句话到成片／画布／一本账），招关键词的中转站
+  // 题目留在后面——意图照接，但不再是第一印象。
   {
     question: "Eimu 是什么？",
     answer:

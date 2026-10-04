@@ -1,55 +1,55 @@
 /**
  * memory_recall harness 工具 VPS staging 稿（P0-5，2026-09-15）。
  *
- * 行為真源＝本檔；部署落點＝VPS `/opt/agent-harness/workspace/.opencode/lib/memory_recall_impl.ts`。
- * 結構逐行同構 R1 search_web 輪子（VPS `.opencode/lib/web_search_impl.ts`，2026-09-10 機械導出）：
- * 純零依賴、無 import、同 ok/fail plumbing 契約、同錯誤鐵律（缺參數/非 2xx/網絡層失敗一律
- * 結構化 fail() 帶原文摘錄與人話 hint，絕不 throw 逃逸、絕不吞錯、絕不偽造結果）、同 20s 超時帽。
- * 白名單偏離（僅此處）：上游通路從「Tavily 外網 + body api_key」改為「gateway loopback + Bearer」，
- * 故删除 TAVILY_* 常量與 requireTavilyApiKey，改為 GATEWAY/HARNESS_API_KEY 讀取與
- * POST `${GATEWAY}/agent/v1/memory/recall`；回應解析從 extractTavilyResults 改為 extractRecalledDocs。
+ * 行为真源＝本档；部署落点＝VPS `/opt/agent-harness/workspace/.opencode/lib/memory_recall_impl.ts`。
+ * 结构逐行同构 R1 search_web 轮子（VPS `.opencode/lib/web_search_impl.ts`，2026-09-10 机械导出）：
+ * 纯零依赖、无 import、同 ok/fail plumbing 契约、同错误铁律（缺参数/非 2xx/网络层失败一律
+ * 结构化 fail() 带原文摘录与人话 hint，绝不 throw 逃逸、绝不吞错、绝不伪造结果）、同 20s 超时帽。
+ * 白名单偏离（仅此处）：上游通路从「Tavily 外网 + body api_key」改为「gateway loopback + Bearer」，
+ * 故删除 TAVILY_* 常量与 requireTavilyApiKey，改为 GATEWAY/HARNESS_API_KEY 读取与
+ * POST `${GATEWAY}/agent/v1/memory/recall`；回应解析从 extractTavilyResults 改为 extractRecalledDocs。
  *
- * ⚠ 與 spec 的現場衝突（如實回報）：spec 說「認證頭比照 search_web_impl 打中控的同一形狀」，
- *   但輪子原文 web_search_impl.ts 打的並非中控（是 https://api.tavily.com/search，鑑權走 body
- *   api_key，無任何 gateway Bearer 頭）。倉內真正「打中控 loopback」的形狀在 client.ts /
+ * ⚠ 与 spec 的现场冲突（如实回报）：spec 说「认证头比照 search_web_impl 打中控的同一形状」，
+ *   但轮子原文 web_search_impl.ts 打的并非中控（是 https://api.tavily.com/search，鉴权走 body
+ *   api_key，无任何 gateway Bearer 头）。仓内真正「打中控 loopback」的形状在 client.ts /
  *   music-tools-impl.ts / director-common.ts：`Authorization: Bearer ${HARNESS_API_KEY}`，
- *   GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"。本片照該同族形狀實裝
- *   （端點族 /agent/v1/* 走 sk-biz Bearer 閘門，見 gateway 快照 L52/L7882；HARNESS_API_KEY
- *   ＝.env.biz-key，見記憶 2026-09-11-P2b：agent API = Authorization Bearer HARNESS_API_KEY）。
+ *   GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"。本片照该同族形状实装
+ *   （端点族 /agent/v1/* 走 sk-biz Bearer 闸门，见 gateway 快照 L52/L7882；HARNESS_API_KEY
+ *   ＝.env.biz-key，见记忆 2026-09-11-P2b：agent API = Authorization Bearer HARNESS_API_KEY）。
  *
- * 上游通路：中控 gateway loopback（VPS 內）：
- *   端點  POST ${GATEWAY_URL}/agent/v1/memory/recall（由接線片新增，同族 /agent/v1 Bearer 鑑權）
- *   鑑權  Header Authorization: Bearer ${HARNESS_API_KEY}（讀 env，缺失 fail-fast 人話報錯）
- *   請求  { query, domain?, limit? }（limit 1-5，默認 3，超出收斂到帽值 5）
- *   響應  { results: [{domain, slug, description, body, score?}], count }（契約 §7 top-3 召回形狀；
- *          實際欄位以接線片為準，解析層對缺欄宽容、對無 results 陣列拋錯不猜）
+ * 上游通路：中控 gateway loopback（VPS 内）：
+ *   端点  POST ${GATEWAY_URL}/agent/v1/memory/recall（由接线片新增，同族 /agent/v1 Bearer 鉴权）
+ *   鉴权  Header Authorization: Bearer ${HARNESS_API_KEY}（读 env，缺失 fail-fast 人话报错）
+ *   请求  { query, domain?, limit? }（limit 1-5，默认 3，超出收敛到帽值 5）
+ *   响应  { results: [{domain, slug, description, body, score?}], count }（契约 §7 top-3 召回形状；
+ *          实际栏位以接线片为准，解析层对缺栏宽容、对无 results 阵列抛错不猜）
  *
- * 輸出：格式化回「[domain] slug — description\n   body」逐條串接（人與模型都可讀），
- *      同時保留原始 docs 供上層需要時取結構。工具文案一律簡體（記憶 agent-gateway-copy-rules）。
+ * 输出：格式化回「[domain] slug — description\n   body」逐条串接（人与模型都可读），
+ *      同时保留原始 docs 供上层需要时取结构。工具文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
-/** 中控 gateway loopback 基址（默認 http://127.0.0.1:8081，同 music-tools-impl / director-common）。 */
+/** 中控 gateway loopback 基址（默认 http://127.0.0.1:8081，同 music-tools-impl / director-common）。 */
 export const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
-/** memory_recall 端點路徑（同族 /agent/v1 Bearer 閘門）。 */
+/** memory_recall 端点路径（同族 /agent/v1 Bearer 闸门）。 */
 export const MEMORY_RECALL_PATH = "/agent/v1/memory/recall"
 
-/** 上游響應超時（召回是輕請求，20s 硬頂，同 search_web 口徑）。 */
+/** 上游响应超时（召回是轻请求，20s 硬顶，同 search_web 口径）。 */
 export const MEMORY_RECALL_TIMEOUT_MS = 20_000
 
-/** limit 默認值（對齊契約 §7 召回 top-3）。 */
+/** limit 默认值（对齐契约 §7 召回 top-3）。 */
 export const MEMORY_RECALL_DEFAULT_LIMIT = 3
 
-/** limit 上限（PRD §6.2 工具規格：limit?≤5，超出靜默收斂到帽值）。 */
+/** limit 上限（PRD §6.2 工具规格：limit?≤5，超出静默收敛到帽值）。 */
 export const MEMORY_RECALL_LIMIT_CAP = 5
 
-/** 錯誤訊息裡攜帶的原文 body 上限（同 search_web_impl 口徑；截斷時顯式標注）。 */
+/** 错误讯息里携带的原文 body 上限（同 search_web_impl 口径；截断时显式标注）。 */
 const ERROR_BODY_MAX_CHARS = 8000
 
-/** HARNESS_API_KEY fallback（讀不到 .env.opencode 時的兜底來源，同 music-tools-impl）。 */
+/** HARNESS_API_KEY fallback（读不到 .env.opencode 时的兜底来源，同 music-tools-impl）。 */
 const HARNESS_API_KEY_FALLBACK = process.env.HARNESS_API_KEY || ""
 
-// ── plumbing（ok/fail 逐行同構 web_search_impl.ts） ──────────────────────────
+// ── plumbing（ok/fail 逐行同构 web_search_impl.ts） ──────────────────────────
 
 export type MemoryToolResult = { title: string; output: string }
 
@@ -77,7 +77,7 @@ function toFail(e: unknown): MemoryToolResult {
   return fail("memory_recall_tool_error", `memory_recall 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
-// ── 參數整理助手（同構 web_search_impl 口徑） ────────────────────────────────
+// ── 参数整理助手（同构 web_search_impl 口径） ────────────────────────────────
 
 export interface MemoryToolArgSpec {
   type: "string" | "number" | "boolean"
@@ -88,7 +88,7 @@ export interface MemoryToolArgSpec {
 
 export interface MemoryToolContext {
   abort?: AbortSignal
-  /** 會話 id（memory_recall 無需會話資產落盤；adapter 機械透傳保留欄位，同 web_search_impl 口徑）。 */
+  /** 会话 id（memory_recall 无需会话资产落盘；adapter 机械透传保留栏位，同 web_search_impl 口径）。 */
   sessionId?: string
 }
 
@@ -103,21 +103,21 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v : undefined
 }
 
-// ── 鑑權與解析（誠實鐵律：不猜不造，缺什麼報什麼） ───────────────────────────
+// ── 鉴权与解析（诚实铁律：不猜不造，缺什么报什么） ───────────────────────────
 
-/** 讀 HARNESS_API_KEY（缺失/空白 → fail-fast 人話報錯，鏡像 requireTavilyApiKey）。 */
+/** 读 HARNESS_API_KEY（缺失/空白 → fail-fast 人话报错，镜像 requireTavilyApiKey）。 */
 export function requireHarnessApiKey(): string {
   const key = (HARNESS_API_KEY_FALLBACK || process.env.HARNESS_API_KEY || "").trim()
   if (!key) {
     throw new MemoryRecallToolError(
       "missing_api_key",
-      "缺少 HARNESS_API_KEY（memory_recall 走中控 /agent/v1 Bearer 閘門）。請在 harness 環境配置該 env 後重試。",
+      "缺少 HARNESS_API_KEY（memory_recall 走中控 /agent/v1 Bearer 闸门）。请在 harness 环境配置该 env 后重试。",
     )
   }
   return key
 }
 
-/** 召回條目（對齊契約 §1 AgentMemoryDoc 的注入子集；缺欄宽容為空字串，不猜）。 */
+/** 召回条目（对齐契约 §1 AgentMemoryDoc 的注入子集；缺栏宽容为空字串，不猜）。 */
 export interface RecalledDoc {
   domain: string
   slug: string
@@ -126,7 +126,7 @@ export interface RecalledDoc {
   score?: number
 }
 
-/** 從中控召回響應機械提取 results 陣列；缺 results 一律拋錯（不猜不造）。 */
+/** 从中控召回响应机械提取 results 阵列；缺 results 一律抛错（不猜不造）。 */
 export function extractRecalledDocs(body: unknown): { docs: RecalledDoc[]; count: number } {
   const excerpt = JSON.stringify(body)?.slice(0, 2000) ?? ""
   const raw = (body as { results?: unknown; docs?: unknown })?.results
@@ -134,7 +134,7 @@ export function extractRecalledDocs(body: unknown): { docs: RecalledDoc[]; count
   if (!Array.isArray(raw)) {
     throw new MemoryRecallToolError(
       "upstream_bad_response",
-      `中控召回响应缺少 results 数组（不猜不造）。原文摘錄：${excerpt}`,
+      `中控召回响应缺少 results 数组（不猜不造）。原文摘录：${excerpt}`,
     )
   }
   const docs: RecalledDoc[] = raw
@@ -151,7 +151,7 @@ export function extractRecalledDocs(body: unknown): { docs: RecalledDoc[]; count
   return { docs, count }
 }
 
-/** 格式化召回條目為「[domain] slug — description\n   body」（PRD §6.2 工具回傳形狀）。 */
+/** 格式化召回条目为「[domain] slug — description\n   body」（PRD §6.2 工具回传形状）。 */
 export function formatRecalledDocs(docs: RecalledDoc[]): string {
   if (docs.length === 0) return ""
   return docs
@@ -255,8 +255,8 @@ export const memoryRecallTool: MemoryToolDef = {
   },
 }
 
-/** harness-tool-registry.ts 登記用 id 元組（同 WEB_SEARCH_HARNESS_TOOL_IDS 範式）。
- *  命名域教訓（2026-09-10 VPS 實錘）：opencode 1.18.14 保留 websearch/web_search 命名域，
- *  自訂工具檔名撞名即被物理移除。memory_recall 非保留名（保留名域無此詞），OK；
- *  註冊名=tools/ 檔名（memory_recall），id 欄僅 registry 登記用。 */
+/** harness-tool-registry.ts 登记用 id 元组（同 WEB_SEARCH_HARNESS_TOOL_IDS 范式）。
+ *  命名域教训（2026-09-10 VPS 实锤）：opencode 1.18.14 保留 websearch/web_search 命名域，
+ *  自订工具档名撞名即被物理移除。memory_recall 非保留名（保留名域无此词），OK；
+ *  注册名=tools/ 档名（memory_recall），id 栏仅 registry 登记用。 */
 export const MEMORY_RECALL_HARNESS_TOOL_IDS = ["memory_recall"] as const

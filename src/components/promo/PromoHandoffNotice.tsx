@@ -1,27 +1,27 @@
 "use client";
 
-// 宣傳片結尾登入小框裡的交接面（2026-10-04）：Electron 桌面殼 / standalone PWA
-// 裡點「使用 GitHub 登錄」後，在同一個 popover 內原地顯示這一格——授權在系統
-// 瀏覽器完成，這裡輪詢一次性 ticket 自動續接。刻意不是全屏遮罩（沿用 popover
-// 語彙，只佔小框那一格，結尾畫面其餘部分仍在原地）。
+// 宣传片结尾登入小框里的交接面（2026-10-04）：Electron 桌面壳 / standalone PWA
+// 里点「使用 GitHub 登录」后，在同一个 popover 内原地显示这一格——授权在系统
+// 浏览器完成，这里轮询一次性 ticket 自动续接。刻意不是全屏遮罩（沿用 popover
+// 语汇，只占小框那一格，结尾画面其余部分仍在原地）。
 
 import { isElectronShell } from "@/lib/github-login";
 import { useToast } from "@/hooks/use-toast";
 import { usePwaHandoffClaim } from "@/hooks/use-pwa-handoff-claim";
 
 interface PromoHandoffNoticeProps {
-  /** 交接授權連結（含 handoff ticket）。 */
+  /** 交接授权连结（含 handoff ticket）。 */
   loginUrl: string;
-  /** claim 成功後呼叫一次（呼叫方刷新登入態 → 補送那句話）。 */
+  /** claim 成功后呼叫一次（呼叫方刷新登入态 → 补送那句话）。 */
   onSuccess: () => void;
-  /** 退回登入方式選擇頁。 */
+  /** 退回登入方式选择页。 */
   onBack: () => void;
 }
 
 export function PromoHandoffNotice({ loginUrl, onSuccess, onBack }: PromoHandoffNoticeProps) {
   const { toast } = useToast();
   const { timedOut, claiming } = usePwaHandoffClaim(loginUrl, onSuccess);
-  // 殼的導航政策會替我們把授權頁開去系統瀏覽器；standalone PWA 不會，文案不能說謊。
+  // 壳的导航政策会替我们把授权页开去系统浏览器；standalone PWA 不会，文案不能说谎。
   const shellOpenedBrowser = isElectronShell();
 
   const handleCopy = async () => {

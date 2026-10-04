@@ -1,14 +1,14 @@
 "use client";
 
-// 歷史卡的「分享」對話框：把自己的作品變成一條公開連結 /p/<shareId>。
+// 历史卡的「分享」对话框：把自己的作品变成一条公开连结 /p/<shareId>。
 //
-// 三條產品規矩（對應純函式層的斷言，見 src/lib/share-remix.test.ts）：
-//   ①預設不公開——打開這個框＝按下分享才建立記錄；沒建立過就沒有公開讀取路徑。
-//   ②shareId 不可枚舉（128-bit 隨機，由 /api/share 產生），不能從作品 id 推得。
-//   ③可撤銷——撤銷即刪記錄，同一條連結當場 404。
+// 三条产品规矩（对应纯函式层的断言，见 src/lib/share-remix.test.ts）：
+//   ①预设不公开——打开这个框＝按下分享才建立记录；没建立过就没有公开读取路径。
+//   ②shareId 不可枚举（128-bit 随机，由 /api/share 产生），不能从作品 id 推得。
+//   ③可撤销——撤销即删记录，同一条连结当场 404。
 //
-// 面板骨架複用歷史頁既有語法（RerunDialog / SaveCardDialog 同款：portal + lg-sheet
-// 玻璃面板 + iOS 字級）；建立是冪等的，所以重複打開只會回到同一條連結。
+// 面板骨架复用历史页既有语法（RerunDialog / SaveCardDialog 同款：portal + lg-sheet
+// 玻璃面板 + iOS 字级）；建立是幂等的，所以重复打开只会回到同一条连结。
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
@@ -51,8 +51,8 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
   const resultIndex = firstShareableIndex(entry);
 
   /**
-   * 建立（或取回）。POST /api/share 是冪等的——同一件作品再點一次回同一條連結，
-   * 使用者貼出去的舊連結不會被悄悄換掉。請求與文案真源都在 createShareLink（媒體卡共用）。
+   * 建立（或取回）。POST /api/share 是幂等的——同一件作品再点一次回同一条连结，
+   * 使用者贴出去的旧连结不会被悄悄换掉。请求与文案真源都在 createShareLink（媒体卡共用）。
    */
   const create = useCallback(async () => {
     setBusy(true);

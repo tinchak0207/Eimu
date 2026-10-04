@@ -1,4 +1,4 @@
-import nanoid from './nanoid'; // 白名單改動：opencode 工具 runtime 無 nanoid 依賴（gateway 側真源仍是 nanoid）
+import nanoid from './nanoid'; // 白名单改动：opencode 工具 runtime 无 nanoid 依赖（gateway 侧真源仍是 nanoid）
 import { animatedJoints } from './playback';
 import type { DirectorActionId, DirectorMotionKeyframe, Vec3 } from './types';
 

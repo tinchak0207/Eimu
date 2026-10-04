@@ -24,7 +24,7 @@ export interface AgentParamDisclosureProps {
   /** 抽屉标题里的工具名，让人知道这张参数属于哪次调用。 */
   toolName?: string;
   /**
-   * 该工具已结算的花费（2026-09-20 對版預覽：币数从行内移进展开面板）。
+   * 该工具已结算的花费（2026-09-20 对版预览：币数从行内移进展开面板）。
    * 未结算时不显示，绝不猜；缺席时面板少这最后一行。
    */
   costCoins?: number;
@@ -204,13 +204,13 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName, costCoin
         )
       ) : (
         <div id={`${idPrefix}-params`} className={cn("agent-args", open && "is-open")}>
-          {/* 全聊天流只許有一層滾動（最外側訊息流）。展開內容超過 60dvh
-              直接截斷（.agent-args-inner 的 overflow:hidden），不設內部捲軸——
-              卡內滾動手勢一律冒泡給外層，否則巨型參數卡會吞掉整屏滾動。 */}
+          {/* 全聊天流只许有一层滚动（最外侧讯息流）。展开内容超过 60dvh
+              直接截断（.agent-args-inner 的 overflow:hidden），不设内部卷轴——
+              卡内滚动手势一律冒泡给外层，否则巨型参数卡会吞掉整屏滚动。 */}
           <div className="agent-args-inner max-h-[60dvh]" style={{ overflow: "clip" }}>
             {/* 展开块＝lg-float（Emu Liquid Glass 保留在展开态，2026-09-20 裁定：
                 收起时是无底色细行，展开才浮出玻璃面）。缩排 ml-[22px] 对齐行内
-                标题起始，收合動畫（agent-args 網格）照旧。 */}
+                标题起始，收合动画（agent-args 网格）照旧。 */}
             {everOpened && (
               <div className="lg-float mb-1 ml-[22px] space-y-1 rounded-[10px] px-2.5 py-2">
                 {/* F2：原始函数名与完整参数只在展开后挂载（默认渲染不含 raw JSON）。 */}

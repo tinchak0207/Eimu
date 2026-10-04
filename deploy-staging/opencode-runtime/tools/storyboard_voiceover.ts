@@ -13,29 +13,29 @@ import {
   type VoiceoverTimelineEntry,
 } from "../lib/storyboard-voiceover"
 
-// 分鏡逐鏡配音 tool（2026-09-30）：薄 wrapper，邏輯全在 lib/storyboard-voiceover.ts。
-// 病歷 `tts-multiline-narration-p2-bug`：旁白貫穿多鏡卻只合成一條音軌。本工具補兩跳——
-// ① 從分鏡「確定性」推出逐鏡台詞表（每鏡每欄位恰好一行，不摺成一句）
-// ② 逐行真 TTS + ffprobe 實測後，把 `dialogueAudioId`/`narrationAudioId`/`audioAnchorId` 寫回分鏡節點。
-// 引擎（TTS 呼叫／下載／ffprobe／offset／誠實失敗）逐行複製自 tools/audio_first_timeline.ts。
+// 分镜逐镜配音 tool（2026-09-30）：薄 wrapper，逻辑全在 lib/storyboard-voiceover.ts。
+// 病历 `tts-multiline-narration-p2-bug`：旁白贯穿多镜却只合成一条音轨。本工具补两跳——
+// ① 从分镜「确定性」推出逐镜台词表（每镜每栏位恰好一行，不折成一句）
+// ② 逐行真 TTS + ffprobe 实测后，把 `dialogueAudioId`/`narrationAudioId`/`audioAnchorId` 写回分镜节点。
+// 引擎（TTS 呼叫／下载／ffprobe／offset／诚实失败）逐行复制自 tools/audio_first_timeline.ts。
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
 export default tool({
   description:
-    "分鏡逐鏡配音：读画布分镜节点 -> 确定性地按「每镜每字段恰好一行」组台词表（对白 dialogue + 旁白 narration）-> 逐行真 TTS 合成 + ffprobe 实测时长 -> 把 dialogueAudioId/narrationAudioId/audioAnchorId 写回分镜节点。用于「先配音后配画」的长片：旁白贯穿多镜时**必须**走本工具，不要自己拼一句长台词送 tts_speak（那只会生成一条音轨，成片后半段无声——病历时 P2 bug）。\n\n【诚实】时长一律 ffprobe 实测；TTS 上游不可用时整批 fail 回 tts_unavailable，不编造音频 URL；写回失败（画布未打开，前端 30 秒未回执）如實回 writeback_ok:false 与原因，不假装成功。\n\n【成本】逐行按字符计价（以每行返回的 cost_coins 为准，单价见 VPS pricing 'tts-zh': 0.001 币/字）。传 dry_run:true 只报行数与预估字数、零上游呼叫零扣费。\n\n【上限】台词表硬上限 50 行，超过具名拒（不截断）；分批次逐行序列生成，禁并发。speed 上游未接入语速控制，传入不生效（如實标注）。",
+    "分镜逐镜配音：读画布分镜节点 -> 确定性地按「每镜每字段恰好一行」组台词表（对白 dialogue + 旁白 narration）-> 逐行真 TTS 合成 + ffprobe 实测时长 -> 把 dialogueAudioId/narrationAudioId/audioAnchorId 写回分镜节点。用于「先配音后配画」的长片：旁白贯穿多镜时**必须**走本工具，不要自己拼一句长台词送 tts_speak（那只会生成一条音轨，成片后半段无声——病历时 P2 bug）。\n\n【诚实】时长一律 ffprobe 实测；TTS 上游不可用时整批 fail 回 tts_unavailable，不编造音频 URL；写回失败（画布未打开，前端 30 秒未回执）如实回 writeback_ok:false 与原因，不假装成功。\n\n【成本】逐行按字符计价（以每行返回的 cost_coins 为准，单价见 VPS pricing 'tts-zh': 0.001 币/字）。传 dry_run:true 只报行数与预估字数、零上游呼叫零扣费。\n\n【上限】台词表硬上限 50 行，超过具名拒（不截断）；分批次逐行序列生成，禁并发。speed 上游未接入语速控制，传入不生效（如实标注）。",
   args: {
     dry_run: tool.schema
       .boolean()
       .optional()
       .describe("true＝只从分镜组台词表并回报行数/字数，零 TTS 呼叫零扣费（默认 false）"),
     voice: tool.schema.string().optional().describe("音色名（可选，透传上游）"),
-    speed: tool.schema.number().min(0.5).max(2).optional().describe("语速（可选；当前上游未支持，传入不生效，如實标注）"),
+    speed: tool.schema.number().min(0.5).max(2).optional().describe("语速（可选；当前上游未支持，传入不生效，如实标注）"),
     gap_ms: tool.schema.number().int().min(0).max(5000).optional().describe("行间静默毫秒，默认 0（offset 纯累加）"),
     label: tool.schema.string().optional().describe("给用户看的一句话操作意图，如「逐镜配音」"),
   },
   async execute(args, context) {
-    // 1) 讀 raw 快照（切記：分鏡文本必須走 raw state，不可用 compactCanvasState——它會截斷長文本）
+    // 1) 读 raw 快照（切记：分镜文本必须走 raw state，不可用 compactCanvasState——它会截断长文本）
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
     if (!snap.has_state || snap.state === null) {
       return fail("no_canvas_state", "画布尚未上报状态，请让用户打开画布", {
@@ -49,7 +49,7 @@ export default tool({
       })
     }
 
-    // 2) 確定性組台詞表（每鏡每欄位恰好一行；>50 具名拒）
+    // 2) 确定性组台词表（每镜每栏位恰好一行；>50 具名拒）
     const plan = shotsToVoiceoverLines(shots)
     if (plan.refused) {
       return fail(plan.refused.code, plan.refused.note, {
@@ -85,7 +85,7 @@ export default tool({
       return fail("key_unresolved", e?.message || "无法解析 API key", { title: "钥匙解析失败" })
     }
 
-    // 4) 分批逐行真 TTS（每批**顯式帶** maxLines＝該批實際行數），批間序接禁併發
+    // 4) 分批逐行真 TTS（每批**显式带** maxLines＝该批实际行数），批间序接禁并发
     const timeline: VoiceoverTimelineEntry[] = []
     let totalCost = 0
     for (const batch of planBatches(plan.lines)) {
@@ -100,7 +100,7 @@ export default tool({
       if (!result.ok) {
         return fail(result.code, result.hint, {
           title: "配音上游暂缺",
-          note: "台詞已收到，但當前無法真實生成音軌；請如實告知用戶，勿編造音頻鏈接。",
+          note: "台词已收到，但当前无法真实生成音轨；请如实告知用户，勿编造音频链接。",
           lines_processed: timeline.length,
         })
       }
@@ -110,12 +110,12 @@ export default tool({
       totalCost += result.total_cost_coins
     }
 
-    // 5) 逐鏡時長漂移（只回報不修正）＋ 回寫（任一不符＝整批拒寫）
+    // 5) 逐镜时长漂移（只回报不修正）＋ 回写（任一不符＝整批拒写）
     const drift = audioDurationDrift(shots, timeline, plan.source)
     const apply = applyTimelineToShots(shots, timeline, plan.source)
     const appliedTimeline = timeline
     if (!apply.applied) {
-      return fail(apply.refused?.code ?? "apply_refused", apply.refused?.note ?? "回寫被拒", {
+      return fail(apply.refused?.code ?? "apply_refused", apply.refused?.note ?? "回写被拒", {
         title: "回写被拒",
         lines: appliedTimeline.length,
         total_chars: totalChars,
@@ -124,7 +124,7 @@ export default tool({
       })
     }
 
-    // 6) 寫回畫布（patch 只含三個鍵）；失敗如實回報，不假裝成功
+    // 6) 写回画布（patch 只含三个键）；失败如实回报，不假装成功
     const ops = buildVoiceoverOps(shots, apply.shots)
     let writebackOk = true
     let writebackError: string | undefined
@@ -156,7 +156,7 @@ export default tool({
         drift_over_threshold: drifted,
         unmeasured: apply.unmeasuredDurations,
         audio_urls: appliedTimeline.map((e) => e.audio_url),
-        speed_note: args.speed !== undefined ? "speed 已傳入但当前上游未支持语速控制，不生效" : null,
+        speed_note: args.speed !== undefined ? "speed 已传入但当前上游未支持语速控制，不生效" : null,
         writeback_ok: writebackOk,
         writeback_ops: ops.length,
         ...(writebackOk ? {} : { writeback_code: writebackCode, writeback_error: writebackError }),

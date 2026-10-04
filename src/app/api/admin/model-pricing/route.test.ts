@@ -4,11 +4,11 @@ import { createRequire } from "node:module";
 
 // 运行时（不是源码字串检查）测 admin model-pricing 路由：
 // - 鉴权不 mock requireAdminSession，而是 patch next/headers 的 cookies()——admin-session
-//   在呼叫時才讀 require("next/headers").cookies()，所以 patch exports 物件即穿透（同
-//   方式在本倉庫其他 runtime 測試的靜態 import 下驗證過）。接著 mint 一顆真 session token。
-// - 定價模組走記憶體模式：刪 BLOB_READ_WRITE_TOKEN 讓 read/write 落在 module 記憶體，
-//   版本為 null / "memory"，可重現、不碰外部儲存。
-// 測試結束用 applyModelPricingOverrides({}) 復原 catalog 的 effective 狀態。
+//   在呼叫时才读 require("next/headers").cookies()，所以 patch exports 物件即穿透（同
+//   方式在本仓库其他 runtime 测试的静态 import 下验证过）。接著 mint 一颗真 session token。
+// - 定价模组走记忆体模式：删 BLOB_READ_WRITE_TOKEN 让 read/write 落在 module 记忆体，
+//   版本为 null / "memory"，可重现、不碰外部储存。
+// 测试结束用 applyModelPricingOverrides({}) 复原 catalog 的 effective 状态。
 
 import {
   applyModelPricingOverrides,
@@ -30,8 +30,8 @@ let sessionToken: string | null = null;
 function installCookieMock() {
   const store = new Map<string, string>();
   if (sessionToken) store.set(ADMIN_SESSION_COOKIE, sessionToken);
-  // Next 的 cookie store .get() 回傳 { name, value } | undefined，必須照抄這個形狀，
-  // 否則 getAdminSession 的 `?.value` 拿到 undefined，永遠當成未登入。
+  // Next 的 cookie store .get() 回传 { name, value } | undefined，必须照抄这个形状，
+  // 否则 getAdminSession 的 `?.value` 拿到 undefined，永远当成未登入。
   nextHeaders.cookies = async () => ({
     get: (name: string) => {
       const value = store.get(name);
@@ -117,7 +117,7 @@ test("PATCH expectedVersion 不符返回 409 并附最新完整 payload", async 
   const body = await json(response);
   assert.equal(body.success, false);
   assert.ok((body.message as string).includes("更新"));
-  // 409 回应本身就是最新完整 payload，UI 可直接用它覆蓋本地。
+  // 409 回应本身就是最新完整 payload，UI 可直接用它覆盖本地。
   assert.ok(Array.isArray(body.models));
   assert.ok(typeof body.overridesVersion === "string" || body.overridesVersion === null);
 });

@@ -1,10 +1,10 @@
-// 邀請碼（我方自簽，不依賴 new-api aff_code）。
+// 邀请码（我方自签，不依赖 new-api aff_code）。
 //
-// 形狀：`<userId 的 36 進位>-<HMAC 前 8 hex>`，如 `3f-1a2b3c4d`。
-// 為什麼自簽：①OAuth 註冊不經 new-api 的 aff 參數，上游 aff 綁定在我們的登入鏈路上
-// 從來沒生效過；②解碼不需要任何查表（控面拿到碼就能還原邀請人）；③簽名防
-// 偽造——亂填別人的 id 只會被拒，不會把獎勵記到錯的人頭上。
-// 密鑰復用兩側（Vercel／控面）都有的 GENERATION_BILLING_RELAY_SECRET，以域前綴分隔。
+// 形状：`<userId 的 36 进位>-<HMAC 前 8 hex>`，如 `3f-1a2b3c4d`。
+// 为什么自签：①OAuth 注册不经 new-api 的 aff 参数，上游 aff 绑定在我们的登入链路上
+// 从来没生效过；②解码不需要任何查表（控面拿到码就能还原邀请人）；③签名防
+// 伪造——乱填别人的 id 只会被拒，不会把奖励记到错的人头上。
+// 密钥复用两侧（Vercel／控面）都有的 GENERATION_BILLING_RELAY_SECRET，以域前缀分隔。
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { INVITE_PARAM } from "@/lib/first-touch-attribution";
@@ -25,7 +25,7 @@ export function inviteCodeFor(userId: number, secret: string): string {
   return `${userId.toString(36)}-${sign(userId, secret)}`;
 }
 
-/** 驗簽並還原邀請人 id；任何不合法（畸形／簽名錯）一律 null。 */
+/** 验签并还原邀请人 id；任何不合法（畸形／签名错）一律 null。 */
 export function parseInviteCode(code: string | null | undefined, secret: string): number | null {
   const match = /^([0-9a-z]{1,10})-([0-9a-f]{8})$/.exec((code ?? "").trim().toLowerCase());
   if (!match) return null;

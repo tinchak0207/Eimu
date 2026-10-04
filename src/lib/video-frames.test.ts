@@ -390,10 +390,10 @@ test("未知 mode 一律拒绝（含旧拼法 current/sequence 之外的值）",
   assert.match(plan.reason, /未知的抽帧模式/);
 });
 
-// ─────────────────────────── waitForMetadata：BUG-1「error 只發一次 → 第二次等待永久卡死」
+// ─────────────────────────── waitForMetadata：BUG-1「error 只发一次 → 第二次等待永久卡死」
 
-/** 假 <video>：精確重現瀏覽器語義——`error` 事件整個生命週期只發一次，
- *  `video.error` 一旦設了就保持（readyState 停在 0，不再有事件）。 */
+/** 假 <video>：精确重现浏览器语义——`error` 事件整个生命周期只发一次，
+ *  `video.error` 一旦设了就保持（readyState 停在 0，不再有事件）。 */
 class FakeVideo {
   readyState = 0;
   error: { code: number } | null = null;
@@ -426,7 +426,7 @@ class FakeVideo {
   removeAttribute(): void {}
   load(): void {}
 
-  /** 只在此處派發事件；呼叫端只會呼叫一次 `fire("error")`（模擬真實瀏覽器）。 */
+  /** 只在此处派发事件；呼叫端只会呼叫一次 `fire("error")`（模拟真实浏览器）。 */
   fire(type: string): void {
     for (const cb of [...(this.listeners.get(type) ?? [])]) cb();
   }
@@ -436,38 +436,38 @@ class FakeVideo {
   }
 }
 
-test("BUG-1：error 只發一次，第二次 waitForMetadata 立即 reject（不靠等到 timeout）", async () => {
+test("BUG-1：error 只发一次，第二次 waitForMetadata 立即 reject（不靠等到 timeout）", async () => {
   const v = new FakeVideo();
-  // 第一次等待：監聽掛上後瀏覽器才發 error（真實時序）。
+  // 第一次等待：监听挂上后浏览器才发 error（真实时序）。
   const first = waitForMetadata(v.asVideo());
-  v.error = { code: 4 }; // 瀏覽器在發 error 前會先設 video.error
+  v.error = { code: 4 }; // 浏览器在发 error 前会先设 video.error
   v.fire("error");
   await assert.rejects(first, /解码失败/);
-  assert.equal(v.listenerCount("error"), 0, "第一次失敗後不得殘留監聽");
+  assert.equal(v.listenerCount("error"), 0, "第一次失败后不得残留监听");
 
-  // 第二次等待：該 <video> 的 error 已消費、不會再發，readyState 仍為 0。
+  // 第二次等待：该 <video> 的 error 已消费、不会再发，readyState 仍为 0。
   const started = Date.now();
   await assert.rejects(waitForMetadata(v.asVideo()), /解码失败/);
   const elapsed = Date.now() - started;
   assert.ok(
     elapsed < 500,
-    `第二次必須立即 reject（實測 ${elapsed}ms，timeout=${METADATA_WAIT_TIMEOUT_MS}ms）`,
+    `第二次必须立即 reject（实测 ${elapsed}ms，timeout=${METADATA_WAIT_TIMEOUT_MS}ms）`,
   );
-  assert.equal(v.listenerCount("error"), 0, "終態快查必須在掛監聽前就擋掉，不得重掛");
-  assert.equal(v.listenerCount("loadedmetadata"), 0, "第二次不得重掛 loadedmetadata");
+  assert.equal(v.listenerCount("error"), 0, "终态快查必须在挂监听前就挡掉，不得重挂");
+  assert.equal(v.listenerCount("loadedmetadata"), 0, "第二次不得重挂 loadedmetadata");
 });
 
-test("BUG-1：元素已 error（事件早已被前次消費）→ 一進入就 reject，不掛任何監聽", async () => {
+test("BUG-1：元素已 error（事件早已被前次消费）→ 一进入就 reject，不挂任何监听", async () => {
   const v = new FakeVideo();
   v.error = { code: 4 };
   const started = Date.now();
   await assert.rejects(waitForMetadata(v.asVideo()), /解码失败/);
-  assert.ok(Date.now() - started < 200, "已死元素必須立刻失敗");
+  assert.ok(Date.now() - started < 200, "已死元素必须立刻失败");
   assert.equal(v.listenerCount("error"), 0);
   assert.equal(v.listenerCount("loadedmetadata"), 0);
 });
 
-test("waitForMetadata：readyState 已 HAVE_METADATA → 立即 resolve，不掛監聽", async () => {
+test("waitForMetadata：readyState 已 HAVE_METADATA → 立即 resolve，不挂监听", async () => {
   const v = new FakeVideo();
   v.readyState = 1;
   await waitForMetadata(v.asVideo());
@@ -475,13 +475,13 @@ test("waitForMetadata：readyState 已 HAVE_METADATA → 立即 resolve，不掛
   assert.equal(v.listenerCount("error"), 0);
 });
 
-test("waitForMetadata：元素永不反映終態時，timeout 兜底 reject", async () => {
+test("waitForMetadata：元素永不反映终态时，timeout 兜底 reject", async () => {
   const v = new FakeVideo();
   const started = Date.now();
   await assert.rejects(waitForMetadata(v.asVideo(), 40), /超时/);
   const elapsed = Date.now() - started;
-  assert.ok(elapsed >= 30 && elapsed < 1000, `timeout 兜底應在 ~40ms 生效（實測 ${elapsed}ms）`);
-  assert.equal(v.listenerCount("error"), 0, "timeout 後必須清理監聽");
+  assert.ok(elapsed >= 30 && elapsed < 1000, `timeout 兜底应在 ~40ms 生效（实测 ${elapsed}ms）`);
+  assert.equal(v.listenerCount("error"), 0, "timeout 后必须清理监听");
   assert.equal(v.listenerCount("loadedmetadata"), 0);
 });
 
@@ -489,33 +489,33 @@ test("waitForMetadata：元素永不反映終態時，timeout 兜底 reject", as
 //
 // 画布节点动作（use-canvas-generation.ts）直接调用 extractFramesAtTimes → seekTo，
 // 没有 local-media-ingest 的总 timeout 兜底；seekTo 一旦永久 pending，节点会永远停在
-// 「取帧中…」。以下用假元素重現兩種情境，并注入缩短的 timeout（不靠等真实 15s）。
+// 「取帧中…」。以下用假元素重现两种情境，并注入缩短的 timeout（不靠等真实 15s）。
 
-test("seekTo：元素永不 seeked（readyState<2、無 error）→ timeout 兜底具名 reject，不永久 pending", async () => {
+test("seekTo：元素永不 seeked（readyState<2、无 error）→ timeout 兜底具名 reject，不永久 pending", async () => {
   const v = new FakeVideo();
-  v.readyState = 1; // HAVE_METADATA：metadata 到了，但沒有當前幀可解碼
+  v.readyState = 1; // HAVE_METADATA：metadata 到了，但没有当前帧可解码
   const started = Date.now();
   await assert.rejects(seekTo(v.asVideo(), 5, 40), /定位超时/);
   const elapsed = Date.now() - started;
   assert.ok(
     elapsed >= 30 && elapsed < 1000,
-    `timeout 應在 ~40ms 生效（實測 ${elapsed}ms，預設 ${SEEK_TIMEOUT_MS}ms）`,
+    `timeout 应在 ~40ms 生效（实测 ${elapsed}ms，预设 ${SEEK_TIMEOUT_MS}ms）`,
   );
-  assert.equal(v.listenerCount("seeked"), 0, "timeout 後必須清 seeked 監聽");
-  assert.equal(v.listenerCount("error"), 0, "timeout 後必須清 error 監聽");
+  assert.equal(v.listenerCount("seeked"), 0, "timeout 后必须清 seeked 监听");
+  assert.equal(v.listenerCount("error"), 0, "timeout 后必须清 error 监听");
 });
 
-test("seekTo：error 事件早已發過（video.error 已設）→ 一進入即具名 reject，不掛任何監聽", async () => {
+test("seekTo：error 事件早已发过（video.error 已设）→ 一进入即具名 reject，不挂任何监听", async () => {
   const v = new FakeVideo();
   v.error = { code: 4 };
   const started = Date.now();
   await assert.rejects(seekTo(v.asVideo(), 5, 40), /解码失败/);
-  assert.ok(Date.now() - started < 200, "已死元素必須立刻失敗，不靠 timeout");
+  assert.ok(Date.now() - started < 200, "已死元素必须立刻失败，不靠 timeout");
   assert.equal(v.listenerCount("seeked"), 0);
   assert.equal(v.listenerCount("error"), 0);
 });
 
-test("seekTo：等待中發 error → reject 且清監聽（不再靜默 resolve 導致交付空幀）", async () => {
+test("seekTo：等待中发 error → reject 且清监听（不再静默 resolve 导致交付空帧）", async () => {
   const v = new FakeVideo();
   v.readyState = 1;
   const p = seekTo(v.asVideo(), 5, 40);
@@ -526,7 +526,7 @@ test("seekTo：等待中發 error → reject 且清監聽（不再靜默 resolve
   assert.equal(v.listenerCount("error"), 0);
 });
 
-test("seekTo：正常 seeked → resolve 且清監聽；已在目標點且有幀 → 不掛監聽直接 resolve", async () => {
+test("seekTo：正常 seeked → resolve 且清监听；已在目标点且有帧 → 不挂监听直接 resolve", async () => {
   const v = new FakeVideo();
   v.readyState = 1;
   const p = seekTo(v.asVideo(), 5, 40);
@@ -539,7 +539,7 @@ test("seekTo：正常 seeked → resolve 且清監聽；已在目標點且有幀
   const w = new FakeVideo();
   w.readyState = 2;
   w.currentTime = 5;
-  await seekTo(w.asVideo(), 5, 40); // 終態快查：已在目标点
+  await seekTo(w.asVideo(), 5, 40); // 终态快查：已在目标点
   assert.equal(w.listenerCount("seeked"), 0);
   assert.equal(w.listenerCount("error"), 0);
 });
@@ -575,7 +575,7 @@ function videoWithFrame(): HTMLVideoElement {
   return v.asVideo();
 }
 
-/** 保证 promise 在观察窗内 settle；未 settle 即以失败收场（红：修復前永久 pending）。 */
+/** 保证 promise 在观察窗内 settle；未 settle 即以失败收场（红：修复前永久 pending）。 */
 async function settlesWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const gate = new Promise<never>((_, reject) => {

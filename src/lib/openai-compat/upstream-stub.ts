@@ -1,21 +1,21 @@
-// `/openai/v1/*` 測試共用的**上游替身**（只有 *.test.ts 會 import，生產代碼不引用）。
+// `/openai/v1/*` 测试共用的**上游替身**（只有 *.test.ts 会 import，生产代码不引用）。
 //
-// 替身的東西就是被 beforeFiles 代理的那兩個站內入口 + 產物交付 URL：
+// 替身的东西就是被 beforeFiles 代理的那两个站内入口 + 产物交付 URL：
 //   POST {origin}/api/v1/images/generations  → 202 { id }
-//   GET  {origin}/api/v1/images/{id}         → 任務快照（依腳本逐次回）
-//   GET  {artifactUrl}                       → 產物位元組
-// 全程零外網、零花錢（付費上游一次都不碰）。
+//   GET  {origin}/api/v1/images/{id}         → 任务快照（依脚本逐次回）
+//   GET  {artifactUrl}                       → 产物位元组
+// 全程零外网、零花钱（付费上游一次都不碰）。
 import { hashBizApiKey } from "@/lib/biz-api-keys";
 import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
 
 let originalFetch: typeof fetch | null = null;
 
-/** 測試一律用佔位 key，嚴禁真 key 進測試檔。 */
+/** 测试一律用占位 key，严禁真 key 进测试档。 */
 export const PLACEHOLDER_BIZ_KEY = `sk-biz-${"0123456789abcdef".repeat(2)}`;
 export const PLACEHOLDER_USER_ID = 777;
 export const AUTH_HEADER = `Bearer ${PLACEHOLDER_BIZ_KEY}`;
 
-/** 最小合法 PNG 檔頭 + 幾個位元組：b64 往返可逐位元比對。 */
+/** 最小合法 PNG 档头 + 几个位元组：b64 往返可逐位元比对。 */
 export const PNG_BYTES: Uint8Array<ArrayBuffer> = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02, 0x03,
 ]);
@@ -23,10 +23,10 @@ export const ARTIFACT_URL = "https://cdn.example/openai-compat/art-1.png";
 export const TASK_ID = "task-openai-compat-1";
 
 export interface UpstreamScript {
-  /** 提交回應狀態（>=400 時回 `submitError` 信封）。 */
+  /** 提交回应状态（>=400 时回 `submitError` 信封）。 */
   submitStatus?: number;
   submitError?: unknown;
-  /** 任務快照序列；用盡後重複最後一項。 */
+  /** 任务快照序列；用尽后重复最后一项。 */
   taskSnapshots: unknown[];
   artifactBytes?: Uint8Array<ArrayBuffer>;
 }
@@ -57,7 +57,7 @@ function methodOf(input: RequestInfo | URL, init: RequestInit | undefined): stri
   return (method ?? "GET").toUpperCase();
 }
 
-/** 裝上替身並回傳呼叫紀錄。呼叫端負責在 afterEach 用 `restoreFetch()` 還原。 */
+/** 装上替身并回传呼叫纪录。呼叫端负责在 afterEach 用 `restoreFetch()` 还原。 */
 export function installUpstreamStub(script: UpstreamScript): StubCalls {
   if (!originalFetch) originalFetch = globalThis.fetch;
   const calls: StubCalls = { submits: [], polls: 0, artifactFetches: 0 };
@@ -108,15 +108,15 @@ export function installUpstreamStub(script: UpstreamScript): StubCalls {
 
     if (url === ARTIFACT_URL) {
       calls.artifactFetches += 1;
-      // 包成 Blob：TS 的 BodyInit 不接受 Uint8Array<ArrayBufferLike>，位元組不變。
+      // 包成 Blob：TS 的 BodyInit 不接受 Uint8Array<ArrayBufferLike>，位元组不变。
       return new Response(new Blob([script.artifactBytes ?? PNG_BYTES]), {
         status: 200,
         headers: { "content-type": "image/png" },
       });
     }
 
-    // 未預期 URL（blob 後端的內部探測、定價覆寫讀取…）：回 404 當作取不到，
-    // 讓被測代碼走既有降級路徑（fail-open / fallback），不讓替身假裝成功。
+    // 未预期 URL（blob 后端的内部探测、定价覆写读取…）：回 404 当作取不到，
+    // 让被测代码走既有降级路径（fail-open / fallback），不让替身假装成功。
     return new Response("not found", { status: 404 });
   };
 
@@ -131,7 +131,7 @@ export function restoreFetch(): void {
   }
 }
 
-/** 每個測試前重置環境：佔位 key 生效，控制面 DB/代理 origin 一律不設。 */
+/** 每个测试前重置环境：占位 key 生效，控制面 DB/代理 origin 一律不设。 */
 export function resetCompatEnv(): void {
   delete process.env.GENERATION_DATABASE_URL;
   delete process.env.DATABASE_URL;

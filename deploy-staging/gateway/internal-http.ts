@@ -1,6 +1,6 @@
-// index.ts 行區 6412–6869 機械抽取（Wave3，2026-09-19）：畫布摘要讀取、時間線端點族、
-// confirm 輪詢/resume/session-key/session-tasks、optimize-prompt 與 extract-lessons 內部端點。
-// 逐行搬運自 /home/lenovo/Desktop/image-app/deploy-staging/gateway/index.ts，僅加 export 前綴＋本檔頭＋單行 import。
+// index.ts 行区 6412–6869 机械抽取（Wave3，2026-09-19）：画布摘要读取、时间线端点族、
+// confirm 轮询/resume/session-key/session-tasks、optimize-prompt 与 extract-lessons 内部端点。
+// 逐行搬运自 /home/lenovo/Desktop/image-app/deploy-staging/gateway/index.ts，仅加 export 前缀＋本档头＋单行 import。
 import { getTimeline, applyOps, listVersions, diffVersions, restoreVersion, getLog, totalDurationSec, TimelineBlockedError, TimelineValidationError, TimelineNotFoundError, type TimelineOp } from "./timeline"
 import { analyzeRhythm } from "./rhythm"
 import { lintTimeline } from "./lint"
@@ -15,12 +15,12 @@ import { opencodeFetch } from "./opencode-client"
 import { jsonError } from "./gw-lib"
 import { hashKey } from "./auth-gw"
 import { armWatchdogTimer } from "./timers-gw.ts"
-// TODO(整合 Wave3): timers-gw 同波在建，armWatchdogTimer 尚未可 import，declare 佔位（bun build 不查名可過）。
+// TODO(整合 Wave3): timers-gw 同波在建，armWatchdogTimer 尚未可 import，declare 占位（bun build 不查名可过）。
 
-// 畫布摘要讀取：opencode 的 canvas_summary 工具用 session_id（opencode 或
-// gateway 任一 id 皆可）查當前畫布狀態。GET only、loopback only。
-// 摘要 = 前端最後一次發訊息時附帶的 canvas_state（節點/連線/預算），
-// 純透傳不加工；前端在每輪訊息都會更新，所以這裡永遠是最新。
+// 画布摘要读取：opencode 的 canvas_summary 工具用 session_id（opencode 或
+// gateway 任一 id 皆可）查当前画布状态。GET only、loopback only。
+// 摘要 = 前端最后一次发讯息时附带的 canvas_state（节点/连线/预算），
+// 纯透传不加工；前端在每轮讯息都会更新，所以这里永远是最新。
 export async function handleCanvasStateRead(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const sessionId = url.searchParams.get("session_id")
@@ -37,28 +37,28 @@ export async function handleCanvasStateRead(req: Request): Promise<Response> {
 
 
 /**
- * 時間線端點族（B1，2026-08-31）：REQ-EDIT-01 可計算時間線 + REQ-EDIT-05 版本/決策日誌。
- * session_id 一律走 query——Bun Request body 只能讀一次（workflow 家族同款模式）。
- * 鑑權 = 過上方 Bearer sk-biz 閘門 + getOwnedSession 防跨 key 越權（與 workflow rerun 同款）。
- * 錯誤映射：locked→409 {blocked, reason:"locked"}；非法 op→400；版本不存在→404。
+ * 时间线端点族（B1，2026-08-31）：REQ-EDIT-01 可计算时间线 + REQ-EDIT-05 版本/决策日志。
+ * session_id 一律走 query——Bun Request body 只能读一次（workflow 家族同款模式）。
+ * 鉴权 = 过上方 Bearer sk-biz 闸门 + getOwnedSession 防跨 key 越权（与 workflow rerun 同款）。
+ * 错误映射：locked→409 {blocked, reason:"locked"}；非法 op→400；版本不存在→404。
  */
 export async function handleTimelineRoutes(key: string, req: Request, pathname: string): Promise<Response> {
   const url = new URL(req.url)
   let sid = url.searchParams.get("session_id") || ""
   if (!sid) return jsonError(400, "session_id (query) is required", "bad_request", "bad_request")
-  // B2 修復（08-31）：opencode 工具傳的是 opencode session id，getOwnedSession 只認 gateway UUID。
-  // 收斂到 canvasKeyFor 同款三段解析（resolveSession），並收攏 canonical id 防雙目錄。
-  // 0927 身份傳遞修復：Expert 子代理（editor）跑在獨立 opencode 子會話，該 id 不在主
-  // sessions 表 → resolveSession 查無 → 整族 timeline 端點一律 404，剪輯域工具在生產
-  // 路徑上物理不可用（子代理只能 bash 手搓繞過）。縫用既有同款（handleSessionKey 244 /
-  // canvas 讀取 28 / media 39）：命中活躍子會話時回溯其父 gateway 會話（byChildOc 註冊表，
-  // 只由可信的 internal dispatch 寫入）。下面那道 apiKey 比對照舊——回溯出的父會話必須
-  // 與呼叫者同一把 key，跨租戶隔離不變，驗證未放鬆。
+  // B2 修复（08-31）：opencode 工具传的是 opencode session id，getOwnedSession 只认 gateway UUID。
+  // 收敛到 canvasKeyFor 同款三段解析（resolveSession），并收拢 canonical id 防双目录。
+  // 0927 身份传递修复：Expert 子代理（editor）跑在独立 opencode 子会话，该 id 不在主
+  // sessions 表 → resolveSession 查无 → 整族 timeline 端点一律 404，剪辑域工具在生产
+  // 路径上物理不可用（子代理只能 bash 手搓绕过）。缝用既有同款（handleSessionKey 244 /
+  // canvas 读取 28 / media 39）：命中活跃子会话时回溯其父 gateway 会话（byChildOc 注册表，
+  // 只由可信的 internal dispatch 写入）。下面那道 apiKey 比对照旧——回溯出的父会话必须
+  // 与呼叫者同一把 key，跨租户隔离不变，验证未放松。
   const tlDirect = resolveSession(sid)
   const tlParent = tlDirect ? undefined : subagentParentState(sid)
   const tlState = tlDirect ?? tlParent
-  // 身份診斷（每呼叫一行，只記 id 與是否同一把 key，不落 key 本身）：日後再遇
-  // timeline 404，一次 journal 就能分清「查無會話」與「會話非本 key」。
+  // 身份诊断（每呼叫一行，只记 id 与是否同一把 key，不落 key 本身）：日后再遇
+  // timeline 404，一次 journal 就能分清「查无会话」与「会话非本 key」。
   console.log(
     `[gateway] timeline auth: sid=${sid} direct=${tlDirect ? "yes" : "no"} parentFallback=${tlParent ? "yes" : "no"} owner=${tlState?.sessionId ?? "-"} keyMatch=${tlState ? (tlState.apiKey === key ? "yes" : "no") : "n/a"}`,
   )
@@ -101,14 +101,14 @@ export async function handleTimelineRoutes(key: string, req: Request, pathname: 
     if (req.method === "GET" && pathname === "/agent/v1/timeline/lint") {
       return Response.json(await lintTimeline(sid))
     }
-    // B5 音畫混合（REQ-EDIT-06）：GET 只量測不落盤；POST 渲染落盤 mix.wav
+    // B5 音画混合（REQ-EDIT-06）：GET 只量测不落盘；POST 渲染落盘 mix.wav
     if (req.method === "GET" && pathname === "/agent/v1/timeline/mix") {
       return Response.json(await analyzeMix(sid))
     }
     if (req.method === "POST" && pathname === "/agent/v1/timeline/mix") {
       return Response.json(await applyMix(sid))
     }
-    // B7 風格貨架（REQ-EDIT-08）：目錄 / 套用（presetId→四滑桿翻譯成 set_style；transition 翻譯成既有 set_transition op）/ 字卡 ASS
+    // B7 风格货架（REQ-EDIT-08）：目录 / 套用（presetId→四滑杆翻译成 set_style；transition 翻译成既有 set_transition op）/ 字卡 ASS
     if (req.method === "GET" && pathname === "/agent/v1/timeline/style") {
       const tl = await getTimeline(sid)
       return Response.json(styleCatalog(tl))
@@ -125,7 +125,7 @@ export async function handleTimelineRoutes(key: string, req: Request, pathname: 
       const ops: TimelineOp[] = []
       if (body.presetId !== undefined) {
         const p = findStylePreset(body.presetId)
-        if (!p) return jsonError(400, `unknown presetId: ${body.presetId}（可選：${STYLE_PRESETS.map((x) => x.id).join("/")}）`, "bad_request", "bad_request")
+        if (!p) return jsonError(400, `unknown presetId: ${body.presetId}（可选：${STYLE_PRESETS.map((x) => x.id).join("/")}）`, "bad_request", "bad_request")
         ops.push({ type: "set_style", clipId: body.clipId, filter: { preset: p.id, ...p.values } })
       } else if (body.filter) {
         ops.push({
@@ -152,17 +152,17 @@ export async function handleTimelineRoutes(key: string, req: Request, pathname: 
       const tl = await getTimeline(sid)
       return new Response(subtitlesAss(tl), { headers: { "content-type": "text/plain; charset=utf-8" } })
     }
-    // B6 母帶檢查+導出閘（REQ-EDIT-07）：GET 聚合報告；POST blockers 非空拒導（TimelineValidationError→400）
+    // B6 母带检查+导出闸（REQ-EDIT-07）：GET 聚合报告；POST blockers 非空拒导（TimelineValidationError→400）
     if (req.method === "GET" && pathname === "/agent/v1/timeline/master") {
       return Response.json(await masterCheck(sid))
     }
     if (req.method === "POST" && pathname === "/agent/v1/timeline/master") {
       const body = (await req.json().catch(() => null)) as { preset?: string; with_cover?: boolean } | null
       const presetId = (body?.preset ?? "landscape_169") as MasterPresetId
-      if (!(presetId in MASTER_PRESETS)) return jsonError(400, `unknown preset: ${body?.preset}（可選：${Object.keys(MASTER_PRESETS).join("/")}）`, "bad_request", "bad_request")
+      if (!(presetId in MASTER_PRESETS)) return jsonError(400, `unknown preset: ${body?.preset}（可选：${Object.keys(MASTER_PRESETS).join("/")}）`, "bad_request", "bad_request")
       const result = await masterExport(sid, presetId, body?.with_cover !== false)
-      // G4（2026-09-17）：導出成功 → 回填公網 URL + 控制面索引登記（冪等）。
-      // 登記失敗不反悔導出（檔案已在盤上、靜態路由已可服務），只誠實記 note。
+      // G4（2026-09-17）：导出成功 → 回填公网 URL + 控制面索引登记（幂等）。
+      // 登记失败不反悔导出（档案已在盘上、静态路由已可服务），只诚实记 note。
       await registerMasterExport(key, sid, presetId, result)
       return Response.json(result)
     }
@@ -189,7 +189,7 @@ export async function handleConfirmStatus(req: Request): Promise<Response> {
   if (!session_id || !request_id) {
     return jsonError(400, "session_id and request_id are required", "bad_request", "bad_request")
   }
-  // 0920：Expert 子會話兜底（見 canvas 讀取同款註釋）——扣費確認卡必須落在用戶會話。
+  // 0920：Expert 子会话兜底（见 canvas 读取同款注释）——扣费确认卡必须落在用户会话。
   const state = resolveSession(session_id) ?? subagentParentState(session_id)
   // A vanished session means the session was deleted or reaped out from under
   // the tool. That is a denial, not an unknown: nothing may be spent for a
@@ -233,26 +233,26 @@ export async function handleResumeSession(req: Request): Promise<Response> {
   } catch {
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   }
-  // 抖動重試記賬（與 handleSendMessage 同款）：resume 輪同樣可能抖動早死。
+  // 抖动重试记账（与 handleSendMessage 同款）：resume 轮同样可能抖动早死。
   state.lastPromptBody = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
   state.turnGen = (state.turnGen ?? 0) + 1
   state.turnTextChars = 0
   state.turnReasoningChars = 0
   state.turnRetries = 0
   state.turnAborted = false
-  state.turnAbortSource = undefined // D2-1b：新輪起點清中止來源（與 turnAborted 同點）
+  state.turnAbortSource = undefined // D2-1b：新轮起点清中止来源（与 turnAborted 同点）
   state.retryQueued = false
   state.turnUpstreamError = null
-  // R2-A 看門狗：resume 輪同樣要兜 turn 未啟動。
+  // R2-A 看门狗：resume 轮同样要兜 turn 未启动。
   state.turnToolStarted = false
   state.watchdogRetried = false
-  // 修 1：resume 開新輪，舊死亡宣告作廢（撤回幀不嫁接到新輪）。
+  // 修 1：resume 开新轮，旧死亡宣告作废（撤回帧不嫁接到新轮）。
   state.deathDeclared = false
-  // R8-B 工單 #4：resume 輪同樣重置 question 答覆標記。
+  // R8-B 工单 #4：resume 轮同样重置 question 答覆标记。
   state.questionAnsweredThisTurn = false
-  // 2026-10-02 steer 誤判修復：resume 輪同樣要打 lastTurnActiveAt（steer 受理閘
-  // 唯一依據；三條「從 idle 起輪」路徑——子代理喚醒／workflow 喚醒／本端點——
-  // 原本全漏，喚醒驅動會話的 steer 因此全被 409 no_active_turn 誤判失敗）。
+  // 2026-10-02 steer 误判修复：resume 轮同样要打 lastTurnActiveAt（steer 受理闸
+  // 唯一依据；三条「从 idle 起轮」路径——子代理唤醒／workflow 唤醒／本端点——
+  // 原本全漏，唤醒驱动会话的 steer 因此全被 409 no_active_turn 误判失败）。
   state.lastTurnActiveAt = Date.now()
   markDirty(state)
   armWatchdogTimer(state)
@@ -273,8 +273,8 @@ export async function handleSessionKey(req: Request): Promise<Response> {
   const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (state) {
     const user_id = await hashKey(state.apiKey)
-    // 2026-09-29 審計（H5）：回傳可信的上傳歸屬＝該會話的 gateway sessionId（uploads/<id>/）。
-    // plugin 以此為唯一允許的 upload 目錄，取代「用戶提到即授權」的舊機制。
+    // 2026-09-29 审计（H5）：回传可信的上传归属＝该会话的 gateway sessionId（uploads/<id>/）。
+    // plugin 以此为唯一允许的 upload 目录，取代「用户提到即授权」的旧机制。
     return Response.json({ ok: true, api_key: state.apiKey, user_id, upload_owner: state.sessionId })
   }
   // 死线③（片 AN，评测 REPORT S2）：子代理 opencode session 只在 subagent 运行时
@@ -288,8 +288,8 @@ export async function handleSessionKey(req: Request): Promise<Response> {
   return jsonError(404, "session not found", "not_found", "not_found")
 }
 
-// 0831：本輪任務登記表端點（給工具讀的權威 ID 來源）。鑑權/防呆逐字對齊 /internal/session-key：
-// 同處 /internal/ loopback 門內、同一 resolveSession 查找、同 jsonError 防呆；僅回應換成 tasks 契約。
+// 0831：本轮任务登记表端点（给工具读的权威 ID 来源）。鉴权/防呆逐字对齐 /internal/session-key：
+// 同处 /internal/ loopback 门内、同一 resolveSession 查找、同 jsonError 防呆；仅回应换成 tasks 契约。
 export async function handleSessionTasks(req: Request): Promise<Response> {
   let body: { session_id?: string }
   try {
@@ -302,32 +302,32 @@ export async function handleSessionTasks(req: Request): Promise<Response> {
     return jsonError(400, "session_id is required", "bad_request", "bad_request")
   }
   const state = resolveSession(session_id) ?? subagentParentState(session_id)
-  // H11：查無會話不再回 404——工具側（image_get_result.listTasks）以 resp.ok 判斷，404 會被吞成
-  // 「迴環未回應」。改回 200 + tasks:[] + session_found:false，如實區分「無會話」與「無任務」。
+  // H11：查无会话不再回 404——工具侧（image_get_result.listTasks）以 resp.ok 判断，404 会被吞成
+  // 「回环未回应」。改回 200 + tasks:[] + session_found:false，如实区分「无会话」与「无任务」。
   if (!state) return Response.json({ ok: true, session_found: false, tasks: [] })
-  // hydrate 重啟恢復的 session 該欄可能 undefined（sessions-core 已補，這裡再兜底防 500）。
+  // hydrate 重启恢复的 session 该栏可能 undefined（sessions-core 已补，这里再兜底防 500）。
   return Response.json({ ok: true, session_found: true, tasks: [...(state.sessionTasks?.values() ?? [])] })
 }
 
 
 /**
- * POST /agent/v1/optimize-prompt — 同步影片 prompt 優化。
+ * POST /agent/v1/optimize-prompt — 同步影片 prompt 优化。
  *
- * 這是 Image Studio 的「隱形提示詞導演」後端：generate-videos 進上游前，
- * 把用戶短 prompt + 金礦工業級導演規則送給 opencode（deepseek）大腦，
- * 同步拿回優化稿。與 agent 對話 session 完全隔離：每次請求建一個臨時
- * opencode session，用完即刪，不進 sessions 池、不開 SSE 流。
+ * 这是 Image Studio 的「隐形提示词导演」后端：generate-videos 进上游前，
+ * 把用户短 prompt + 金矿工业级导演规则送给 opencode（deepseek）大脑，
+ * 同步拿回优化稿。与 agent 对话 session 完全隔离：每次请求建一个临时
+ * opencode session，用完即删，不进 sessions 池、不开 SSE 流。
  *
  * body: { prompt: string, duration_seconds?: number, generate_audio?: boolean }
- * 回應: 200 { ok, prompt, model } / 502 { ok:false, ... }（上游不可用）
+ * 回应: 200 { ok, prompt, model } / 502 { ok:false, ... }（上游不可用）
  *
- * 規則來源：Higgsfield Hell Grind 95 分鐘長片 pipeline + Seedance 2.0 官方
- * prompt 架構（OSideMedia/higgsfield-ai-prompt-skill，MIT）——31 子 skill 的
- * 共通核心全文編譯進 system prompt，一次讀完，不需 agent 多步思考。
+ * 规则来源：Higgsfield Hell Grind 95 分钟长片 pipeline + Seedance 2.0 官方
+ * prompt 架构（OSideMedia/higgsfield-ai-prompt-skill，MIT）——31 子 skill 的
+ * 共通核心全文编译进 system prompt，一次读完，不需 agent 多步思考。
  */
 
-// 金礦工業級規則全文。用戶輸入可能只是「幫我生成浩克對戰蜘蛛俠的電影」這種
-// 一句話抽象請求——規則負責把它變成可用 production prompt。
+// 金矿工业级规则全文。用户输入可能只是「帮我生成浩克对战蜘蛛侠的电影」这种
+// 一句话抽象请求——规则负责把它变成可用 production prompt。
 export const OPTIMIZE_DIRECTOR_PREFIX = `You are a professional video and image prompt director trained on the Higgsfield Hell Grind 95-minute feature film pipeline and Seedance 2.0 production prompt rules.
 
 Turn the user's request into ONE production-ready generation prompt. The user may be a non-expert writing one vague sentence — you must still produce a complete, usable prompt. Output ONLY the generated prompt, no preamble, no commentary, no markdown.
@@ -373,7 +373,7 @@ export async function handleOptimizePrompt(key: string, req: Request): Promise<R
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : ""
   if (!prompt) return jsonError(400, "prompt is required", "bad_request", "bad_request")
 
-  // 開一個一次性 opencode session（與對話 pool 無關）。
+  // 开一个一次性 opencode session（与对话 pool 无关）。
   let session: { id?: string }
   try {
     const res = await opencodeFetch(`/session`, {
@@ -402,8 +402,8 @@ export async function handleOptimizePrompt(key: string, req: Request): Promise<R
     }
 
     const payload = (await res.json()) as { info?: { modelID?: string }; parts?: Array<{ type?: string; text?: string }> }
-    // 最後一個 text part = 最終答案。opencode 同步 message 的 parts 順序是
-    // step-start → text → step-finish，通常只有一個 text。
+    // 最后一个 text part = 最终答案。opencode 同步 message 的 parts 顺序是
+    // step-start → text → step-finish，通常只有一个 text。
     const texts = (payload.parts ?? []).filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text ?? "")
     const optimized = texts.length > 0 ? texts[texts.length - 1].trim() : ""
     if (!optimized) {
@@ -413,7 +413,7 @@ export async function handleOptimizePrompt(key: string, req: Request): Promise<R
   } catch {
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   } finally {
-    // 一次性 session，事後必刪。
+    // 一次性 session，事后必删。
     await opencodeFetch(`/session/${sessionId}`, {
       method: "DELETE",
       timeoutMs: 10000,

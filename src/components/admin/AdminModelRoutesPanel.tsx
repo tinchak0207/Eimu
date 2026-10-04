@@ -1,8 +1,8 @@
 "use client";
 
-// /admin「路由调度」→「模型路由」：控面調度器的真實嘗試順序（2026-10-01 路由收口）。
-// 資料＝/api/admin/model-routes（控面，與 acquireSupplierLease 同一份 resolveModelRoute）。
-// 調序／增刪渠道＝寫熱覆寫，立即生效不需部署；「恢复默认」＝回到 model-routes.config.ts。
+// /admin「路由调度」→「模型路由」：控面调度器的真实尝试顺序（2026-10-01 路由收口）。
+// 资料＝/api/admin/model-routes（控面，与 acquireSupplierLease 同一份 resolveModelRoute）。
+// 调序／增删渠道＝写热覆写，立即生效不需部署；「恢复默认」＝回到 model-routes.config.ts。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, CircleAlert, Loader2, Plus, RefreshCw, RotateCcw, Save, X } from "lucide-react";

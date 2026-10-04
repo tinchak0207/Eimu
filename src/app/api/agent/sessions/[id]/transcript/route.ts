@@ -1,9 +1,9 @@
 // GET /api/agent/sessions/[id]/transcript —— 拉取会话转录（纯代理）。
 //
-// 真源是 opencode（gateway 不另存 messages）：這裡不做本地組裝，把 gateway
-// 的回應原樣透傳。query 的 limit（可選）若存在則原樣帶上，缺省不帶。
-// 結構逐行複製自同目錄 memory/route.ts（resolveAgentCaller 認證 + callAgentGateway
-// 代理 + fail/gatewayResponse helper），唯獨方法為 GET、不組 body。
+// 真源是 opencode（gateway 不另存 messages）：这里不做本地组装，把 gateway
+// 的回应原样透传。query 的 limit（可选）若存在则原样带上，缺省不带。
+// 结构逐行复制自同目录 memory/route.ts（resolveAgentCaller 认证 + callAgentGateway
+// 代理 + fail/gatewayResponse helper），唯独方法为 GET、不组 body。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -11,7 +11,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 

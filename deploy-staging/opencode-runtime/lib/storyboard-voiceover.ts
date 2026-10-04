@@ -1,59 +1,59 @@
-// 分鏡逐鏡配音（harness 側 lib；2026-09-30）。
+// 分镜逐镜配音（harness 侧 lib；2026-09-30）。
 //
-// 病歷 `tts-multiline-narration-p2-bug`：60s 片「旁白貫穿鏡 1-6」，agent 只送單段台詞生成
-// 一條 25s 音軌 → 成片後 35s 無聲。**真根因不是 TTS**：逐行真 TTS 的生產者早就存在＝
-// `tools/audio_first_timeline.ts`（逐行呼叫 gateway `/agent/v1/tts` → 下載 mp3 → ffprobe
-// **實測**時長 → 累計 `offset_ms` 錨點 → 回報 `cost_coins`；上游不可用整批 fail 不編造）。
-// 缺的是**兩跳**：① 台詞表不是從分鏡確定性推出來的（由 LLM 自由產 → 摺成一句）；
-// ② 回傳從不寫回分鏡（`narrationAudioId`/`dialogueAudioId`/`audioAnchorId` 全庫無生產者）。
+// 病历 `tts-multiline-narration-p2-bug`：60s 片「旁白贯穿镜 1-6」，agent 只送单段台词生成
+// 一条 25s 音轨 → 成片后 35s 无声。**真根因不是 TTS**：逐行真 TTS 的生产者早就存在＝
+// `tools/audio_first_timeline.ts`（逐行呼叫 gateway `/agent/v1/tts` → 下载 mp3 → ffprobe
+// **实测**时长 → 累计 `offset_ms` 锚点 → 回报 `cost_coins`；上游不可用整批 fail 不编造）。
+// 缺的是**两跳**：① 台词表不是从分镜确定性推出来的（由 LLM 自由产 → 折成一句）；
+// ② 回传从不写回分镜（`narrationAudioId`/`dialogueAudioId`/`audioAnchorId` 全库无生产者）。
 //
-// 本檔＝那兩跳。形狀照本專案「禁造輪子」：**引擎逐行複製** `audio_first_timeline.ts`
-// （TTS 呼叫／下載／ffprobe／offset 累加／誠實失敗語義**一行不動**），只換兩處白名單：
-//   ① **輸入源**：從「tool 的 `script` 字串」→「從畫布快照的分鏡節點導出（每鏡每欄位恰好一行）」
-//   ② **出口**：從「只回 timeline JSON」→「回 timeline ＋ 寫回分鏡節點音軌」
+// 本档＝那两跳。形状照本专案「禁造轮子」：**引擎逐行复制** `audio_first_timeline.ts`
+// （TTS 呼叫／下载／ffprobe／offset 累加／诚实失败语义**一行不动**），只换两处白名单：
+//   ① **输入源**：从「tool 的 `script` 字串」→「从画布快照的分镜节点导出（每镜每栏位恰好一行）」
+//   ② **出口**：从「只回 timeline JSON」→「回 timeline ＋ 写回分镜节点音轨」
 //
-// 此檔不是 tool，不得 export tool 定義，故放 tools/ 之外（同 lib/canvas-flow.ts 慣例）。
+// 此档不是 tool，不得 export tool 定义，故放 tools/ 之外（同 lib/canvas-flow.ts 惯例）。
 //
-// ── 上游工具（被複製的輪子）的真實契約，逐字讀完照抄，不猜 ──
+// ── 上游工具（被复制的轮子）的真实契约，逐字读完照抄，不猜 ──
 //   · 每行回 `{index, role, text, offset_ms, audio_url, duration_ms, cost_coins?, error?,
-//     duration_note?}`；`duration_ms` 由 ffprobe **實測**，單行探測失敗回 `null`（不冒充）；
+//     duration_note?}`；`duration_ms` 由 ffprobe **实测**，单行探测失败回 `null`（不冒充）；
 //     `tts_unavailable` 整批 fail（不返半成品）。
-//   · `max_lines`：**默認 20、硬上限 50**，超出**截斷**並回 `truncated`。⇒ 本層每一批都
-//     **顯式帶** `maxLines = 該批實際行數`（見 `planBatches`），否則 21..50 行會被默認 20
-//     靜默截斷＝後半段沒聲而工具回成功。>50 行本層**具名拒**，不代為截斷（截斷＝假成功）。
-//   · `speed` 上游未支持語速控制、傳入不生效 ⇒ 本層**不在 `speed` 上做任何文章**。
+//   · `max_lines`：**默认 20、硬上限 50**，超出**截断**并回 `truncated`。⇒ 本层每一批都
+//     **显式带** `maxLines = 该批实际行数`（见 `planBatches`），否则 21..50 行会被默认 20
+//     静默截断＝后半段没声而工具回成功。>50 行本层**具名拒**，不代为截断（截断＝假成功）。
+//   · `speed` 上游未支持语速控制、传入不生效 ⇒ 本层**不在 `speed` 上做任何文章**。
 //
-// ── 為何用「本地平行 `source`」而不把鏡號塞進 `role`/`text` ──
-//   `text` 是**送去合成**的內容（會真的被唸出來）；把鏡號塞進 `text` ＝ 配音真的把鏡號唸出來。
-//   且上游只保證「回傳陣列與送入行序一一對應」，不保證把 role 逐字回傳。故鏡號只留在本地
-//   `source`（與 timeline 同索引的平行陣列），回寫／比對一律 `timeline[i]` ↔ `source[i]`。
-//   `role` 只填欄位名（`dialogue`/`narration`），與站點側 `storyboard-audio-bridge.ts` 同口徑。
+// ── 为何用「本地平行 `source`」而不把镜号塞进 `role`/`text` ──
+//   `text` 是**送去合成**的内容（会真的被念出来）；把镜号塞进 `text` ＝ 配音真的把镜号念出来。
+//   且上游只保证「回传阵列与送入行序一一对应」，不保证把 role 逐字回传。故镜号只留在本地
+//   `source`（与 timeline 同索引的平行阵列），回写／比对一律 `timeline[i]` ↔ `source[i]`。
+//   `role` 只填栏位名（`dialogue`/`narration`），与站点侧 `storyboard-audio-bridge.ts` 同口径。
 //
-// ── 不做的加工（附理由，避免下游誤以為漏做）──
-//   · **不切分 `dialogue` 的 `[角色]：「…」` 標記**（`storyboard-contract.ts` 已裁定該格式
-//     **無契約文件**，硬套＝自造轉換）→ text **逐字照送**。
-//   · **不從 `dialogue` 猜旁白**（同檔裁定逐字）：旁白只有 `narration` 欄，沒有就沒有。
-//   · **不自造音頻 URL 判準**：`usableAudioUrl` 逐字照抄站點側 `agent-output-cards.ts`
-//     （harness 不能 import 站點模組，語義必須同口徑：`http(s)` + 副檔名白名單，或 `data:audio/`）；
-//     `audioAnchorId` 的規則照 `storyboard-shots.bindShotAudioTrack`＝`dialogueAudioId || narrationAudioId`。
+// ── 不做的加工（附理由，避免下游误以为漏做）──
+//   · **不切分 `dialogue` 的 `[角色]：「…」` 标记**（`storyboard-contract.ts` 已裁定该格式
+//     **无契约文件**，硬套＝自造转换）→ text **逐字照送**。
+//   · **不从 `dialogue` 猜旁白**（同档裁定逐字）：旁白只有 `narration` 栏，没有就没有。
+//   · **不自造音频 URL 判准**：`usableAudioUrl` 逐字照抄站点侧 `agent-output-cards.ts`
+//     （harness 不能 import 站点模组，语义必须同口径：`http(s)` + 副档名白名单，或 `data:audio/`）；
+//     `audioAnchorId` 的规则照 `storyboard-shots.bindShotAudioTrack`＝`dialogueAudioId || narrationAudioId`。
 
 import { spawn } from "node:child_process"
 import { mkdir, writeFile, rm } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
-// 靜態 ffprobe（johnvansickle build）：URL 直讀會段錯誤，必須先下載到本地檔再探。
+// 静态 ffprobe（johnvansickle build）：URL 直读会段错误，必须先下载到本地档再探。
 const FFPROBE = "/opt/agent-harness/bin/ffprobe"
 const RUN_DIR = "/opt/agent-harness/workspace/.run"
 
-// ─────────────────────────────────────────── 引擎（逐行複製 audio_first_timeline.ts）
+// ─────────────────────────────────────────── 引擎（逐行复制 audio_first_timeline.ts）
 
 export interface VoiceoverLine {
   role: string
   text: string
 }
 
-/** timeline 的一項（欄位名與上游逐字相同）。 */
+/** timeline 的一项（栏位名与上游逐字相同）。 */
 export interface VoiceoverTimelineEntry {
   index: number
   role: string | null
@@ -67,12 +67,12 @@ export interface VoiceoverTimelineEntry {
 }
 
 export interface SynthesizeOptions {
-  /** 逐行呼叫 gateway `/agent/v1/tts` 的 Bearer（＝呼叫端解析出的 sk-biz-*，本檔不碰解析）。 */
+  /** 逐行呼叫 gateway `/agent/v1/tts` 的 Bearer（＝呼叫端解析出的 sk-biz-*，本档不碰解析）。 */
   key: string
   voice?: string
   speed?: number
   gapMs?: number
-  /** 本批行數上限（**必須顯式帶＝本批實際行數**，否則默認 20 靜默截斷）。 */
+  /** 本批行数上限（**必须显式带＝本批实际行数**，否则默认 20 静默截断）。 */
   maxLines?: number
   signal?: AbortSignal
 }
@@ -91,14 +91,14 @@ export type SynthesizeResult =
     }
   | {
       ok: false
-      /** 誠實失敗碼（當前唯一＝`tts_unavailable`）。 */
+      /** 诚实失败码（当前唯一＝`tts_unavailable`）。 */
       code: string
       hint: string
       timeline: VoiceoverTimelineEntry[]
       probed_count: number
     }
 
-/** ffprobe 實測本地音頻檔時長（秒）。失敗回 null，不編造。（逐行複製自 audio_first_timeline.ts） */
+/** ffprobe 实测本地音频档时长（秒）。失败回 null，不编造。（逐行复制自 audio_first_timeline.ts） */
 function probeDurationSec(file: string, signal?: AbortSignal): Promise<number | null> {
   return new Promise((resolve) => {
     let settled = false
@@ -139,13 +139,13 @@ function probeDurationSec(file: string, signal?: AbortSignal): Promise<number | 
 }
 
 /**
- * 逐行真 TTS → ffprobe 實測 → 累計 offset 錨點。
+ * 逐行真 TTS → ffprobe 实测 → 累计 offset 锚点。
  *
- * **引擎逐行複製 `tools/audio_first_timeline.ts` 的 execute 主體**，唯一差異：
- * 輸入從「tool `args.script` 解析出的 lines」變成「呼叫端已確定性導出的 lines」，
- * 以及回傳改成可再包一層的結構（tool 薄 wrapper / e2e 直調共用同一支）。
- * TTS 呼叫形狀、下載、ffprobe、offset 累加、`speed_note`、`tts_unavailable` 整批 fail
- * 語義全部逐字等價，一行不動。
+ * **引擎逐行复制 `tools/audio_first_timeline.ts` 的 execute 主体**，唯一差异：
+ * 输入从「tool `args.script` 解析出的 lines」变成「呼叫端已确定性导出的 lines」，
+ * 以及回传改成可再包一层的结构（tool 薄 wrapper / e2e 直调共用同一支）。
+ * TTS 呼叫形状、下载、ffprobe、offset 累加、`speed_note`、`tts_unavailable` 整批 fail
+ * 语义全部逐字等价，一行不动。
  */
 export async function synthesizeTimeline(
   lines: readonly VoiceoverLine[],
@@ -176,7 +176,7 @@ export async function synthesizeTimeline(
         audio_url: null,
         duration_ms: null,
       }
-      // 1) 調 TTS（復用 tts_speak 上游調法）
+      // 1) 调 TTS（复用 tts_speak 上游调法）
       let ttsResp: Response
       try {
         ttsResp = await fetch(`${GATEWAY}/agent/v1/tts`, {
@@ -205,10 +205,10 @@ export async function synthesizeTimeline(
       }
       if (!ttsResp.ok || !data?.ok || !data.url) {
         const code = data?.error?.code || `http_${ttsResp.status}`
-        const hint = data?.error?.message || `TTS 請求失敗（HTTP ${ttsResp.status}）`
+        const hint = data?.error?.message || `TTS 请求失败（HTTP ${ttsResp.status}）`
         if (code === "tts_unavailable") {
           anyUnavailable = { code, hint }
-          // 上游整體不可用：後續行不再逐行撞牆，如實中斷
+          // 上游整体不可用：后续行不再逐行撞墙，如实中断
           entry.audio_url = null
           entry.duration_ms = null
           entry.error = code
@@ -225,7 +225,7 @@ export async function synthesizeTimeline(
       entry.cost_coins = data.cost_coins ?? 0
       totalCost += data.cost_coins ?? 0
 
-      // 2) 下載 mp3 到本地檔 → ffprobe 實測（URL 直探會段錯誤）
+      // 2) 下载 mp3 到本地档 → ffprobe 实测（URL 直探会段错误）
       let durationMs: number | null = null
       try {
         const audio = await fetch(data.url, { signal: opts.signal ?? AbortSignal.timeout(30_000) })
@@ -242,10 +242,10 @@ export async function synthesizeTimeline(
           }
         }
       } catch {
-        /* durationMs 保持 null，誠實標注 */
+        /* durationMs 保持 null，诚实标注 */
       }
       entry.duration_ms = durationMs
-      if (durationMs === null) entry.duration_note = "ffprobe 探測失敗，未編造時長"
+      if (durationMs === null) entry.duration_note = "ffprobe 探测失败，未编造时长"
       else offsetMs += durationMs + gapMs
       timeline.push(entry)
     }
@@ -253,12 +253,12 @@ export async function synthesizeTimeline(
     rm(dir, { recursive: true, force: true }).catch(() => {})
   }
 
-  // 上游整體不可用：誠實失敗，不返回半成品時間軸冒充成功
+  // 上游整体不可用：诚实失败，不返回半成品时间轴冒充成功
   if (anyUnavailable && probedCount === 0) {
     return { ok: false, code: anyUnavailable.code, hint: anyUnavailable.hint, timeline, probed_count: probedCount }
   }
 
-  const totalDurationMs = offsetMs - (timeline.length ? gapMs : 0)// 末行不補尾間隔
+  const totalDurationMs = offsetMs - (timeline.length ? gapMs : 0)// 末行不补尾间隔
   return {
     ok: true,
     timeline,
@@ -268,34 +268,34 @@ export async function synthesizeTimeline(
     lines_processed: timeline.length,
     probed_count: probedCount,
     truncated,
-    speed_note: opts.speed !== undefined ? "speed 已傳入但當前上游未支持語速控制，不生效" : null,
+    speed_note: opts.speed !== undefined ? "speed 已传入但当前上游未支持语速控制，不生效" : null,
   }
 }
 
-// ─────────────────────────────────────────── 上限與門檻（站點側 storyboard-audio-bridge.ts 同值）
+// ─────────────────────────────────────────── 上限与门槛（站点侧 storyboard-audio-bridge.ts 同值）
 
-/** 上游工具硬上限（行）。超過＝具名拒，**不代為截斷**（截斷＝後半段沒聲且使用者看不出來）。 */
+/** 上游工具硬上限（行）。超过＝具名拒，**不代为截断**（截断＝后半段没声且使用者看不出来）。 */
 export const VOICEOVER_TOOL_MAX_LINES = 50
-/** 上游工具默認 `max_lines`。不顯式覆蓋就會被截到 20 ⇒ 每批都必須顯式帶 `maxLines`。 */
+/** 上游工具默认 `max_lines`。不显式覆盖就会被截到 20 ⇒ 每批都必须显式带 `maxLines`。 */
 export const VOICEOVER_TOOL_DEFAULT_MAX_LINES = 20
-/** 逐鏡時長漂移門檻（秒）；理由見站點側同檔（0.5s 足以分開「整段沒合成」與「逐句正常抖動」）。 */
+/** 逐镜时长漂移门槛（秒）；理由见站点侧同档（0.5s 足以分开「整段没合成」与「逐句正常抖动」）。 */
 export const DURATION_DRIFT_THRESHOLD_SEC = 0.5
 
-/** 每鏡輪詢兩欄位的固定順序（決定行序＝偏移序）。對白先於旁白，對齊錨優先序。 */
+/** 每镜轮询两栏位的固定顺序（决定行序＝偏移序）。对白先于旁白，对齐锚优先序。 */
 const AUDIO_FIELD_ORDER = ["dialogue", "narration"] as const
 
 export type ShotAudioField = "dialogue" | "narration"
 
-// ─────────────────────────────────────────── 音頻可用性（逐字照抄站點側 usableAudioUrl）
+// ─────────────────────────────────────────── 音频可用性（逐字照抄站点侧 usableAudioUrl）
 
 const AUDIO_URL_EXTENSIONS = [".mp3", ".m4a", ".wav", ".aac", ".ogg", ".opus", ".flac", ".webm"] as const
 
 /**
- * 音頻交付物判定（逐字複製站點側 `@/lib/agent-output-cards` 的 `usableAudioUrl`；
- * harness 無法 import 站點模組，語義必須同口徑，否則回寫會與站點側判準分叉）：
+ * 音频交付物判定（逐字复制站点侧 `@/lib/agent-output-cards` 的 `usableAudioUrl`；
+ * harness 无法 import 站点模组，语义必须同口径，否则回写会与站点侧判准分叉）：
  *   - `data:audio/…` → 收；其他 `data:` → null
- *   - `http(s)://` 且**路徑**（先剝 `?query`/`#fragment`）落在音頻副檔名白名單 → 收
- *   - 其餘（`.png` 圖 URL、無副檔名裸 URL、本地路徑）→ null
+ *   - `http(s)://` 且**路径**（先剥 `?query`/`#fragment`）落在音频副档名白名单 → 收
+ *   - 其余（`.png` 图 URL、无副档名裸 URL、本地路径）→ null
  */
 export function usableAudioUrl(value: unknown): string | null {
   if (typeof value !== "string") return null
@@ -307,17 +307,17 @@ export function usableAudioUrl(value: unknown): string | null {
   return AUDIO_URL_EXTENSIONS.some((ext) => path.endsWith(ext)) ? clean : null
 }
 
-// ─────────────────────────────────────────── 資料形狀
+// ─────────────────────────────────────────── 资料形状
 
 /**
- * 分鏡（本層輸入投影；不綁 CanvasNode 形狀，另帶回寫需要的 `nodeId`）：
- *   · `nodeId`        ← `node.id`（回寫 `update_node` 的落點；harness 獨有，站點側不需要）
- *   · `shotNumber`    ← `node.metadata.storyboardShot.shotNumber`（鏡唯一鍵，契約保證非空）
- *   · `dialogue`      ← `node.metadata.storyboardShot.dialogue`（單一字串，逐字照送）
- *   · `narration`     ← `node.metadata.narration`（旁白文本；**不從 dialogue 猜**）
+ * 分镜（本层输入投影；不绑 CanvasNode 形状，另带回写需要的 `nodeId`）：
+ *   · `nodeId`        ← `node.id`（回写 `update_node` 的落点；harness 独有，站点侧不需要）
+ *   · `shotNumber`    ← `node.metadata.storyboardShot.shotNumber`（镜唯一键，契约保证非空）
+ *   · `dialogue`      ← `node.metadata.storyboardShot.dialogue`（单一字串，逐字照送）
+ *   · `narration`     ← `node.metadata.narration`（旁白文本；**不从 dialogue 猜**）
  *   · `durationSeconds` ← `metadata.durationSeconds` 或 `metadata.storyboardShot.durationSeconds`
- *                        （計畫秒數；兩處皆無＝誠實缺＝null，**不推算**）
- *   · 三個音軌鍵      ← 同名 metadata 鍵（回寫落點；錨＝`dialogueAudioId || narrationAudioId`）
+ *                        （计画秒数；两处皆无＝诚实缺＝null，**不推算**）
+ *   · 三个音轨键      ← 同名 metadata 键（回写落点；锚＝`dialogueAudioId || narrationAudioId`）
  */
 export interface StoryboardVoiceoverShot {
   nodeId: string
@@ -330,7 +330,7 @@ export interface StoryboardVoiceoverShot {
   audioAnchorId?: string
 }
 
-/** 台詞表的本地平行陣列一項：第 i 行屬於哪一鏡的哪一欄位（鏡號不進 `role`/`text`）。 */
+/** 台词表的本地平行阵列一项：第 i 行属于哪一镜的哪一栏位（镜号不进 `role`/`text`）。 */
 export interface VoiceoverSourceRef {
   shotNumber: string
   field: ShotAudioField
@@ -348,19 +348,19 @@ function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }
 
-/** 鏡號的自然序比較（`鏡2` < `鏡10`）；非數字時退回字串比較。確定性用。 */
+/** 镜号的自然序比较（`镜2` < `镜10`）；非数字时退回字串比较。确定性用。 */
 function compareShotNumber(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
 }
 
 /**
- * 從 gateway 快照的 **raw `state`** 導出分鏡陣列。
+ * 从 gateway 快照的 **raw `state`** 导出分镜阵列。
  *
- * ⚠️ 呼叫端**必須傳 raw `state`，不准先過 `compactCanvasState`**——後者會把超長文本截斷
- * （`truncateText` 240→120），截斷＝台詞被腰斬，是本工具的命門。
+ * ⚠️ 呼叫端**必须传 raw `state`，不准先过 `compactCanvasState`**——后者会把超长文本截断
+ * （`truncateText` 240→120），截断＝台词被腰斩，是本工具的命门。
  *
- * 判準＝`metadata.storyboardShot.shotNumber` 非空（與站點側 `isStoryboardShotNode` 同口徑）；
- * 缺 `node.id` 的項略過（沒有回寫落點，不臆造 id）。回傳按鏡號自然序排序＝**確定性行序**。
+ * 判准＝`metadata.storyboardShot.shotNumber` 非空（与站点侧 `isStoryboardShotNode` 同口径）；
+ * 缺 `node.id` 的项略过（没有回写落点，不臆造 id）。回传按镜号自然序排序＝**确定性行序**。
  */
 export function readStoryboardShots(state: unknown): StoryboardVoiceoverShot[] {
   const s = asRecord(state)
@@ -392,25 +392,25 @@ export function readStoryboardShots(state: unknown): StoryboardVoiceoverShot[] {
   return shots
 }
 
-// ─────────────────────────────────────────── ① 分鏡 → 台詞表（純函式）
+// ─────────────────────────────────────────── ① 分镜 → 台词表（纯函式）
 
 export interface VoiceoverLinePlan {
   lines: VoiceoverLine[]
-  /** 與 `lines` **同索引**的溯源陣列（回寫／比對時逐行對回鏡號）。 */
+  /** 与 `lines` **同索引**的溯源阵列（回写／比对时逐行对回镜号）。 */
   source: VoiceoverSourceRef[]
   refused?: { code: "too_many_lines"; note: string }
 }
 
 /**
- * 分鏡 → 逐行台詞表（**病歷本體的那一跳**）。
+ * 分镜 → 逐行台词表（**病历本体的那一跳**）。
  *
- * 契約：
- *   · **每鏡每欄位恰好一行**：6 鏡各有旁白 → 6 行，**不摺成 1 行**（病灶本體）。
- *   · 空白／純空白的 `dialogue`/`narration` **不產生行**（不送空行燒錢）。
- *   · 行序＝分鏡陣列序 × 欄位序（`dialogue` → `narration`）；`source[i]` 與 `lines[i]` 同索引。
- *   · 行數 **> 50 → 具名拒**，`note` 寫明「硬上限 50，請縮集數或分批」，**不默默截斷**。
- *   · 無鏡號的項**略過**（不是鏡，不臆造鏡號）。text **逐字照送**（不切 `[角色]：「…」`）。
- *   · `role` 只填欄位名（`dialogue`/`narration`），**鏡號不進 `role`/`text`**（會被唸出來）。
+ * 契约：
+ *   · **每镜每栏位恰好一行**：6 镜各有旁白 → 6 行，**不折成 1 行**（病灶本体）。
+ *   · 空白／纯空白的 `dialogue`/`narration` **不产生行**（不送空行烧钱）。
+ *   · 行序＝分镜阵列序 × 栏位序（`dialogue` → `narration`）；`source[i]` 与 `lines[i]` 同索引。
+ *   · 行数 **> 50 → 具名拒**，`note` 写明「硬上限 50，请缩集数或分批」，**不默默截断**。
+ *   · 无镜号的项**略过**（不是镜，不臆造镜号）。text **逐字照送**（不切 `[角色]：「…」`）。
+ *   · `role` 只填栏位名（`dialogue`/`narration`），**镜号不进 `role`/`text`**（会被念出来）。
  */
 export function shotsToVoiceoverLines(shots: readonly StoryboardVoiceoverShot[]): VoiceoverLinePlan {
   const lines: VoiceoverLine[] = []
@@ -432,26 +432,26 @@ export function shotsToVoiceoverLines(shots: readonly StoryboardVoiceoverShot[])
       source,
       refused: {
         code: "too_many_lines",
-        note: `共 ${source.length} 行，超過 TTS 工具硬上限 ${VOICEOVER_TOOL_MAX_LINES}（工具默認 ${VOICEOVER_TOOL_DEFAULT_MAX_LINES}、超出即截斷）→ 具名拒，請縮集數或分批，本層不代為截斷。`,
+        note: `共 ${source.length} 行，超过 TTS 工具硬上限 ${VOICEOVER_TOOL_MAX_LINES}（工具默认 ${VOICEOVER_TOOL_DEFAULT_MAX_LINES}、超出即截断）→ 具名拒，请缩集数或分批，本层不代为截断。`,
       },
     }
   }
   return { lines, source }
 }
 
-// ─────────────────────────────────────────── ② 分批（每批顯式帶 maxLines）
+// ─────────────────────────────────────────── ② 分批（每批显式带 maxLines）
 
 export interface VoiceoverBatch {
   lines: VoiceoverLine[]
-  /** **顯式**傳給上游的 `max_lines`＝本批實際行數（不帶就被默認 20 靜默截斷）。 */
+  /** **显式**传给上游的 `max_lines`＝本批实际行数（不带就被默认 20 静默截断）。 */
   maxLines: number
-  /** 本批第一行在全表中的索引（合併 timeline 時回填 `index` 用）。 */
+  /** 本批第一行在全表中的索引（合并 timeline 时回填 `index` 用）。 */
   startIndex: number
 }
 
 /**
- * 把台詞表切批，**每一批顯式帶 `maxLines = 該批實際行數`**（`<= VOICEOVER_TOOL_DEFAULT_MAX_LINES`）。
- * 批內序接、批間序接，禁併發（上游逐行計價且無並發保證）。
+ * 把台词表切批，**每一批显式带 `maxLines = 该批实际行数`**（`<= VOICEOVER_TOOL_DEFAULT_MAX_LINES`）。
+ * 批内序接、批间序接，禁并发（上游逐行计价且无并发保证）。
  */
 export function planBatches(
   lines: readonly VoiceoverLine[],
@@ -466,7 +466,7 @@ export function planBatches(
   return batches
 }
 
-// ─────────────────────────────────────────── ③ timeline → 回寫分鏡（整批或全不寫）
+// ─────────────────────────────────────────── ③ timeline → 回写分镜（整批或全不写）
 
 export type VoiceoverApplyRefusalCode =
   | "length_mismatch"
@@ -476,15 +476,15 @@ export type VoiceoverApplyRefusalCode =
   | "invalid_source"
 
 export interface VoiceoverApplyResult {
-  /** 回寫後的新陣列（拒絕時＝輸入的**等值新物件**，分鏡原樣、呼叫端拿不到突變舊參考）。 */
+  /** 回写后的新阵列（拒绝时＝输入的**等值新物件**，分镜原样、呼叫端拿不到突变旧参考）。 */
   shots: StoryboardVoiceoverShot[]
   applied: boolean
   refused?: { code: VoiceoverApplyRefusalCode; note: string }
-  /** 已寫回但**時長未實測**（`duration_ms` 非有限數）的鏡號（回報用，不阻擋寫入）。 */
+  /** 已写回但**时长未实测**（`duration_ms` 非有限数）的镜号（回报用，不阻挡写入）。 */
   unmeasuredDurations: string[]
 }
 
-/** 讀出既有兩軌的**可用**音檔（判準＝`usableAudioUrl`，不另立第二套）。 */
+/** 读出既有两轨的**可用**音档（判准＝`usableAudioUrl`，不另立第二套）。 */
 function readAudioTracks(shot: StoryboardVoiceoverShot): { dialogueAudioId?: string; narrationAudioId?: string } {
   const dialogueAudioId = usableAudioUrl(shot.dialogueAudioId)
   const narrationAudioId = usableAudioUrl(shot.narrationAudioId)
@@ -494,25 +494,25 @@ function readAudioTracks(shot: StoryboardVoiceoverShot): { dialogueAudioId?: str
   }
 }
 
-/** 兩軌 → patch，並依規則重算錨（對白軌優先；兩軌皆空＝不寫 `audioAnchorId` 空殼鍵）。 */
+/** 两轨 → patch，并依规则重算锚（对白轨优先；两轨皆空＝不写 `audioAnchorId` 空壳键）。 */
 function audioPatchWithAnchor(tracks: { dialogueAudioId?: string; narrationAudioId?: string }): Partial<StoryboardVoiceoverShot> {
   const anchor = tracks.dialogueAudioId || tracks.narrationAudioId
   return { ...tracks, ...(anchor ? { audioAnchorId: anchor } : {}) }
 }
 
 /**
- * 把 TTS timeline 依 `source` 回寫到分鏡音軌。
+ * 把 TTS timeline 依 `source` 回写到分镜音轨。
  *
- * 落點（鍵名逐字照用）：`field === "dialogue"` → `dialogueAudioId`；`"narration"` → `narrationAudioId`；
- * `audioAnchorId` 由規則 `dialogueAudioId || narrationAudioId` 重算（既有另一軌不動）。
+ * 落点（键名逐字照用）：`field === "dialogue"` → `dialogueAudioId`；`"narration"` → `narrationAudioId`；
+ * `audioAnchorId` 由规则 `dialogueAudioId || narrationAudioId` 重算（既有另一轨不动）。
  *
- * **多重失敗閘（任一即整批拒寫，回 `{applied:false, refused}`，分鏡原樣）**：
- *   `timeline.length !== source.length`（含上游截斷）／`source[i].field` 非兩值／
- *   `source[i].shotNumber` 不在輸入分鏡內／`timeline[i].audio_url` **空**（missing）或
- *   不是**可用音頻**（unusable）。**不准部分寫入**——部分寫入＝分鏡半數有聲、使用者以為完成。
+ * **多重失败闸（任一即整批拒写，回 `{applied:false, refused}`，分镜原样）**：
+ *   `timeline.length !== source.length`（含上游截断）／`source[i].field` 非两值／
+ *   `source[i].shotNumber` 不在输入分镜内／`timeline[i].audio_url` **空**（missing）或
+ *   不是**可用音频**（unusable）。**不准部分写入**——部分写入＝分镜半数有声、使用者以为完成。
  *
- * `duration_ms` 為 `null`（單行 ffprobe 失敗，上游誠實語義）**不阻擋寫入**（URL 仍有效），
- * 但該鏡號被收進 `unmeasuredDurations` 回報，避免「已綁定」被誤讀成「時長已驗」。
+ * `duration_ms` 为 `null`（单行 ffprobe 失败，上游诚实语义）**不阻挡写入**（URL 仍有效），
+ * 但该镜号被收进 `unmeasuredDurations` 回报，避免「已绑定」被误读成「时长已验」。
  */
 export function applyTimelineToShots(
   shots: readonly StoryboardVoiceoverShot[],
@@ -530,7 +530,7 @@ export function applyTimelineToShots(
   if (timeline.length !== source.length) {
     return refuse(
       "length_mismatch",
-      `timeline ${timeline.length} 行、source ${source.length} 行（含上游截斷）→ 整批拒寫，不部分寫入。`,
+      `timeline ${timeline.length} 行、source ${source.length} 行（含上游截断）→ 整批拒写，不部分写入。`,
     )
   }
 
@@ -540,28 +540,28 @@ export function applyTimelineToShots(
     if (shotNumber) indexByShotNumber.set(shotNumber, index)
   })
 
-  // 先全量驗證（純檢查，**不動 copy**）——全部合規才落盤，杜絕部分寫入。
-  // patch **不在這裡算**：同一鏡的對白＋旁白兩行必須**序接**地以「上一行寫入後的狀態」為基底
-  // 重算錨（先算好再合併會讓後一行的錨蓋掉前一行的對白優先序）。
+  // 先全量验证（纯检查，**不动 copy**）——全部合规才落盘，杜绝部分写入。
+  // patch **不在这里算**：同一镜的对白＋旁白两行必须**序接**地以「上一行写入后的状态」为基底
+  // 重算锚（先算好再合并会让后一行的锚盖掉前一行的对白优先序）。
   const planned: { index: number; role: ShotAudioField; url: string; shotNumber: string; measured: boolean }[] = []
   const unmeasuredDurations: string[] = []
   for (let i = 0; i < timeline.length; i++) {
     const ref = source[i]
     const field = ref?.field
     if (field !== "dialogue" && field !== "narration") {
-      return refuse("invalid_source", `source[${i}].field 不是 dialogue/narration → 整批拒寫。`)
+      return refuse("invalid_source", `source[${i}].field 不是 dialogue/narration → 整批拒写。`)
     }
     const shotNumber = typeof ref?.shotNumber === "string" ? ref.shotNumber.trim() : ""
     const index = indexByShotNumber.get(shotNumber)
     if (index === undefined) {
-      return refuse("unknown_shot", `source[${i}] 的鏡號「${shotNumber || "(空)"}」不在輸入分鏡內 → 整批拒寫。`)
+      return refuse("unknown_shot", `source[${i}] 的镜号「${shotNumber || "(空)"}」不在输入分镜内 → 整批拒写。`)
     }
     const rawUrl = timeline[i]?.audio_url
     const url = usableAudioUrl(rawUrl)
     if (!url) {
       return refuse(
         rawUrl ? "unusable_audio_url" : "missing_audio_url",
-        `timeline[${i}]（鏡 ${shotNumber}）${rawUrl ? "的 audio_url 不是可用音頻" : "缺 audio_url"} → 整批拒寫。`,
+        `timeline[${i}]（镜 ${shotNumber}）${rawUrl ? "的 audio_url 不是可用音频" : "缺 audio_url"} → 整批拒写。`,
       )
     }
     const measured = typeof timeline[i]?.duration_ms === "number" && Number.isFinite(timeline[i]!.duration_ms)
@@ -569,7 +569,7 @@ export function applyTimelineToShots(
     planned.push({ index, role: field as ShotAudioField, url, shotNumber, measured })
   }
 
-  // 驗證全過才落盤；逐行以「當前 copy 狀態」重算錨，故同鏡兩行序接後錨仍為 `dialogueAudioId || narrationAudioId`。
+  // 验证全过才落盘；逐行以「当前 copy 状态」重算锚，故同镜两行序接后锚仍为 `dialogueAudioId || narrationAudioId`。
   for (const row of planned) {
     const target = copy[row.index]
     const tracks = readAudioTracks(target as StoryboardVoiceoverShot)
@@ -579,36 +579,36 @@ export function applyTimelineToShots(
   return { shots: copy, applied: true, unmeasuredDurations }
 }
 
-// ─────────────────────────────────────────── ④ 逐鏡時長漂移（只回報不修正）
+// ─────────────────────────────────────────── ④ 逐镜时长漂移（只回报不修正）
 
 export interface VoiceoverDurationDrift {
   shotNumber: string
-  /** 分鏡計畫秒數；缺席／非有限數＝`null`（無從比對，不編造）。 */
+  /** 分镜计画秒数；缺席／非有限数＝`null`（无从比对，不编造）。 */
   plannedSec: number | null
-  /** 本批實測配音秒數（該鏡各行 `duration_ms` 之和）；無法實測＝`null`；本批無行＝`0`。 */
+  /** 本批实测配音秒数（该镜各行 `duration_ms` 之和）；无法实测＝`null`；本批无行＝`0`。 */
   actualSec: number | null
-  /** `actualSec - plannedSec`（兩者皆非 null 才給值）。 */
+  /** `actualSec - plannedSec`（两者皆非 null 才给值）。 */
   deltaSec: number | null
-  /** `|deltaSec| > DURATION_DRIFT_THRESHOLD_SEC`（無法比對時恆 `false`）。 */
+  /** `|deltaSec| > DURATION_DRIFT_THRESHOLD_SEC`（无法比对时恒 `false`）。 */
   overThreshold: boolean
   note?: string
 }
 
-/** 秒值收斂到毫秒精度（避免浮點尾數噪音）。 */
+/** 秒值收敛到毫秒精度（避免浮点尾数噪音）。 */
 function roundSec(value: number): number {
   return Math.round(value * 1000) / 1000
 }
 
 /**
- * 逐鏡比「實測配音時長」與「分鏡計畫秒數（`durationSeconds`）」。**只回報不修正**。
+ * 逐镜比「实测配音时长」与「分镜计画秒数（`durationSeconds`）」。**只回报不修正**。
  *
- * 語義（照抄站點側，勿改）：
- *   · 某鏡實際秒數＝本批 `source` 中屬於該鏡的所有行 `duration_ms` **之和** ÷ 1000
- *     （同一鏡的對白＋旁白視為**序接**、不假設重疊；本層明示假設，非上游保證）。
- *   · 該鏡在本批**沒有行** → `actualSec = 0`（＝本批完全沒有它的配音，正是 P2 病灶的長相）。
- *   · 該鏡**有行但任一行 `duration_ms` 未實測** → `actualSec = null`（不冒充）。
- *   · `plannedSec` 缺席／非有限數 → `null`。
- *   · 回傳**輸入分鏡的每一鏡**（順序照輸入）。
+ * 语义（照抄站点侧，勿改）：
+ *   · 某镜实际秒数＝本批 `source` 中属于该镜的所有行 `duration_ms` **之和** ÷ 1000
+ *     （同一镜的对白＋旁白视为**序接**、不假设重叠；本层明示假设，非上游保证）。
+ *   · 该镜在本批**没有行** → `actualSec = 0`（＝本批完全没有它的配音，正是 P2 病灶的长相）。
+ *   · 该镜**有行但任一行 `duration_ms` 未实测** → `actualSec = null`（不冒充）。
+ *   · `plannedSec` 缺席／非有限数 → `null`。
+ *   · 回传**输入分镜的每一镜**（顺序照输入）。
  */
 export function audioDurationDrift(
   shots: readonly StoryboardVoiceoverShot[],
@@ -639,15 +639,15 @@ export function audioDurationDrift(
     let note: string | undefined
     if (!bucket || bucket.lines === 0) {
       actualSec = 0
-      note = "本批 timeline 無此鏡的配音行（可能無聲；準確性只到本批輸入）"
+      note = "本批 timeline 无此镜的配音行（可能无声；准确性只到本批输入）"
     } else if (bucket.unmeasured) {
       actualSec = null
-      note = "此鏡有 duration_ms 未實測的行，無法比對時長"
+      note = "此镜有 duration_ms 未实测的行，无法比对时长"
     } else {
       actualSec = bucket.totalMs / 1000
     }
     if (plannedSec === null) {
-      note = note ? `${note}；且分鏡無 durationSeconds 計畫值可比` : "分鏡無 durationSeconds 計畫值可比"
+      note = note ? `${note}；且分镜无 durationSeconds 计画值可比` : "分镜无 durationSeconds 计画值可比"
     }
 
     const deltaSec = plannedSec !== null && actualSec !== null ? roundSec(actualSec - plannedSec) : null
@@ -663,16 +663,16 @@ export function audioDurationDrift(
   })
 }
 
-// ─────────────────────────────────────────── ⑤ 回寫 ops（pad 只含三個鍵）
+// ─────────────────────────────────────────── ⑤ 回写 ops（pad 只含三个键）
 
-/** 回寫允許出現的**唯一**三個 metadata 鍵（其餘鍵一律不進 patch）。 */
+/** 回写允许出现的**唯一**三个 metadata 键（其余键一律不进 patch）。 */
 export const VOICEOVER_PATCH_KEYS = ["dialogueAudioId", "narrationAudioId", "audioAnchorId"] as const
 
 /**
- * 產生 `update_node` ops（`{type:"update_node", id, patch}`）。
+ * 产生 `update_node` ops（`{type:"update_node", id, patch}`）。
  *
- * `patch` **只含三個鍵**：`dialogueAudioId`/`narrationAudioId`/`audioAnchorId`（值非空者才帶）。
- * 只對「音軌真的變了」的節點下發（避免無意義寫入觸發前端失效/重渲染）。
+ * `patch` **只含三个键**：`dialogueAudioId`/`narrationAudioId`/`audioAnchorId`（值非空者才带）。
+ * 只对「音轨真的变了」的节点下发（避免无意义写入触发前端失效/重渲染）。
  */
 export function buildVoiceoverOps(
   shots: readonly StoryboardVoiceoverShot[],

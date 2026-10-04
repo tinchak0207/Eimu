@@ -25,11 +25,11 @@ function key(code: string): string {
 }
 
 /**
- * 登入碼狀態：模組級記憶體 Map 為主，blob 為 best-effort 跨 instance 同步。
- * - 本地 dev / 無 blob token：記憶體零依賴可用，blob 失敗靜默忽略。
- * - 生產多 instance：單個 state 由任一 instance 寫入記憶體並同步 blob，
- *   callback/poll 落在同 instance 時讀記憶體，跨 instance 時讀 blob fallback。
- * - TTL 僅 10 分鐘且一次性，記憶體不會長存洩漏。
+ * 登入码状态：模组级记忆体 Map 为主，blob 为 best-effort 跨 instance 同步。
+ * - 本地 dev / 无 blob token：记忆体零依赖可用，blob 失败静默忽略。
+ * - 生产多 instance：单个 state 由任一 instance 写入记忆体并同步 blob，
+ *   callback/poll 落在同 instance 时读记忆体，跨 instance 时读 blob fallback。
+ * - TTL 仅 10 分钟且一次性，记忆体不会长存泄漏。
  */
 const memoryStore = new Map<string, WechatLoginState>();
 const stateIndex = new Map<string, string>();
@@ -51,7 +51,7 @@ async function blobPut(state: WechatLoginState): Promise<void> {
       addRandomSuffix: false,
       access: "public",
     });
-    // state 索引：掃碼事件（EventKey=state）跨 instance 也能反查登入碼
+    // state 索引：扫码事件（EventKey=state）跨 instance 也能反查登入码
     await put(stateKey(state.state), JSON.stringify({ code: state.code }), {
       cacheControlMaxAge: TTL_SEC,
       allowOverwrite: true,
@@ -74,7 +74,7 @@ async function blobGet(code: string): Promise<WechatLoginState | null> {
   }
 }
 
-/** 從真實常用詞庫（現代漢語常用詞表 → 簡體）隨機抽兩個雙字詞組合。 */
+/** 从真实常用词库（现代汉语常用词表 → 简体）随机抽两个双字词组合。 */
 export function generateLoginCode(): string {
   const pool = WECHAT_WORDPOOL;
   const a = pool[Math.floor(Math.random() * pool.length)];
@@ -94,9 +94,9 @@ export async function createWechatLoginState(): Promise<WechatLoginState> {
   };
   memoryStore.set(memoryKey(state.code), state);
   stateIndex.set(state.state, state.code);
-  // 必須 await（2026-09-30）：掃碼事件 /msg 與這裡多半落在不同 instance，只能靠
-  // blob 的 state 索引反查。fire-and-forget 時 serverless 回完響應就可能凍結，
-  // 索引沒寫上 → 掃碼事件查無此碼 → 使用者掃了卻永遠等不到登入。
+  // 必须 await（2026-09-30）：扫码事件 /msg 与这里多半落在不同 instance，只能靠
+  // blob 的 state 索引反查。fire-and-forget 时 serverless 回完响应就可能冻结，
+  // 索引没写上 → 扫码事件查无此码 → 使用者扫了却永远等不到登入。
   await blobPut(state);
   return state;
 }
@@ -112,8 +112,8 @@ export async function getWechatLoginState(code: string): Promise<WechatLoginStat
 }
 
 /**
- * 由 state（掃碼二維碼 scene 值）反查登入記錄。
- * 事件推送只帶 EventKey=scene=state，不帶驗證碼，需經 state 索引找 code。
+ * 由 state（扫码二维码 scene 值）反查登入记录。
+ * 事件推送只带 EventKey=scene=state，不带验证码，需经 state 索引找 code。
  */
 export async function getWechatLoginStateByState(state: string): Promise<WechatLoginState | null> {
   if (!state) return null;
@@ -135,7 +135,7 @@ export async function getWechatLoginStateByState(state: string): Promise<WechatL
   return null;
 }
 
-/** 兌換（一次性）：把登入碼標記為已綁定，並寫入頒發的 session。 */
+/** 兑换（一次性）：把登入码标记为已绑定，并写入颁发的 session。 */
 export async function completeWechatLogin(code: string, peerId: string, token: string, user: unknown): Promise<boolean> {
   const clean = code.replace(/[\s，。、]/g, "");
   const existing = await getWechatLoginState(clean);
@@ -145,8 +145,8 @@ export async function completeWechatLogin(code: string, peerId: string, token: s
   existing.token = token;
   existing.user = user;
   memoryStore.set(memoryKey(clean), existing);
-  // 必須 await：Vercel serverless 多 instance，poll 可能打到不同 instance，
-  // 只能靠 blob 共享 completed 狀態。fire-and-forget 會讓 poll 讀不到而一直 pending。
+  // 必须 await：Vercel serverless 多 instance，poll 可能打到不同 instance，
+  // 只能靠 blob 共享 completed 状态。fire-and-forget 会让 poll 读不到而一直 pending。
   await blobPut(existing);
   return true;
 }
@@ -172,15 +172,15 @@ export interface WechatPeerLoginResult {
 }
 
 /**
- * 由 peerId 建立/登入 new-api 帳號。
- * username 由 peerId 穩定推導（wx_<hash>），同一個微信號永遠對應同一個帳號，
- * 天然 1:1，滿足「一 peerId 一生只能綁一號」。
+ * 由 peerId 建立/登入 new-api 帐号。
+ * username 由 peerId 稳定推导（wx_<hash>），同一个微信号永远对应同一个帐号，
+ * 天然 1:1，满足「一 peerId 一生只能绑一号」。
  *
  * 分流：
- * - 上游账号不存在（管理员 API 建号成功）→ 新用戶（isNewUser=true）→ login 拿 session
- * - 上游账号已存在（复用它）→ 老用戶（isNewUser=false）→ login
+ * - 上游账号不存在（管理员 API 建号成功）→ 新用户（isNewUser=true）→ login 拿 session
+ * - 上游账号已存在（复用它）→ 老用户（isNewUser=false）→ login
  * - 建号其他失败 → throw
- * - login 失敗 → throw（帳戶狀態異常、停用、密碼失配等）
+ * - login 失败 → throw（帐户状态异常、停用、密码失配等）
  *
  * 建号走管理员 API（ensureGatewayUserForOAuth），不再打公开注册端点
  * `/api/user/register` —— 关闭自助注册后那个端点会被上游拒绝。
@@ -204,7 +204,7 @@ export async function loginWechatPeer(peerId: string, passwordSeed: string): Pro
   return { ok: true, token: result.token, user: result.user, isNewUser };
 }
 
-/** bot 端回呼的 shared secret 校驗（常數時間比較，防 timing attack）。 */
+/** bot 端回呼的 shared secret 校验（常数时间比较，防 timing attack）。 */
 export function verifyWechatCallbackSecret(secret: string | null): boolean {
   const expected = process.env.WECHAT_CALLBACK_SECRET?.trim();
   if (!expected || !secret) return false;

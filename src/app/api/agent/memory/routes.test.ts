@@ -1,8 +1,8 @@
-// 記憶庫端點的 HTTP 行為測試（PRD §9 R6「無簽名請求被拒」＋契約 §3 響應形狀）。
+// 记忆库端点的 HTTP 行为测试（PRD §9 R6「无签名请求被拒」＋契约 §3 响应形状）。
 //
-// 行為尺，不是源碼字串尺：直接構造 NextRequest 呼叫 route handler。
-// 2xx 路徑本機 blob 不可達（實測無憑證即刻拋）→ 走 store 的進程內 Map 兜底，
-// 照样能端到端驗「驗簽＋snake_case 映射＋響應形狀」。密鑰逐案設定與還原。
+// 行为尺，不是源码字串尺：直接构造 NextRequest 呼叫 route handler。
+// 2xx 路径本机 blob 不可达（实测无凭证即刻抛）→ 走 store 的进程内 Map 兜底，
+// 照样能端到端验「验签＋snake_case 映射＋响应形状」。密钥逐案设定与还原。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -51,7 +51,7 @@ function getRequest(url: string, signature?: string): NextRequest {
   return new NextRequest(url, { method: "GET", headers });
 }
 
-/** GET 無 body →  gateway 對空 bytes 簽；測試同算法。 */
+/** GET 无 body →  gateway 对空 bytes 签；测试同算法。 */
 function signEmpty(): string {
   return signMemoryBody(new ArrayBuffer(0), SECRET);
 }
@@ -63,11 +63,11 @@ const INGEST_BODY = JSON.stringify({
     {
       scope: "private",
       owner_key: "owner-hash-1",
-      domain: "電商美妝",
+      domain: "电商美妆",
       slug: "route-probe",
       description: "route level snake case mapping probe",
       type: "feedback",
-      body: "**Why:** 測試端點\n**How to apply:** 讀回欄位",
+      body: "**Why:** 测试端点\n**How to apply:** 读回栏位",
       links: ["other-note"],
       evidence: "user confirmed in chat",
       evidence_kind: "user_confirmed",
@@ -76,7 +76,7 @@ const INGEST_BODY = JSON.stringify({
   ],
 });
 
-test("ingest：無簽名 → 401 {error:unauthorized}", async () => {
+test("ingest：无签名 → 401 {error:unauthorized}", async () => {
   await withSecret(SECRET, async () => {
     const res = await ingestPOST(
       postRequest("http://localhost/api/agent/memory/ingest", INGEST_BODY),
@@ -86,7 +86,7 @@ test("ingest：無簽名 → 401 {error:unauthorized}", async () => {
   });
 });
 
-test("ingest：錯簽 → 401", async () => {
+test("ingest：错签 → 401", async () => {
   await withSecret(SECRET, async () => {
     const forged = signMemoryBody(bytes(INGEST_BODY + "tampered"), SECRET);
     const res = await ingestPOST(
@@ -97,7 +97,7 @@ test("ingest：錯簽 → 401", async () => {
   });
 });
 
-test("ingest：有簽但密鑰未配置 → 401（不放行不崩潰）", async () => {
+test("ingest：有签但密钥未配置 → 401（不放行不崩溃）", async () => {
   const signature = signMemoryBody(bytes(INGEST_BODY), SECRET);
   await withSecret(undefined, async () => {
     const res = await ingestPOST(
@@ -108,7 +108,7 @@ test("ingest：有簽但密鑰未配置 → 401（不放行不崩潰）", async 
   });
 });
 
-test("ingest 2xx：有簽＋snake_case 映射＋契約 §3.1 響應形狀", async () => {
+test("ingest 2xx：有签＋snake_case 映射＋契约 §3.1 响应形状", async () => {
   __resetAgentMemoryStoreForTests();
   await withSecret(SECRET, async () => {
     const res = await ingestPOST(
@@ -128,7 +128,7 @@ test("ingest 2xx：有簽＋snake_case 映射＋契約 §3.1 響應形狀", asyn
     assert.deepEqual(data.rejected, []);
     assert.deepEqual(data.stats, { received: 1, accepted: 1, index_lines: 1 });
 
-    // 欄位映射落地檢查：owner_key→ownerKey、evidence_kind→evidenceKind、self_score→selfScore。
+    // 栏位映射落地检查：owner_key→ownerKey、evidence_kind→evidenceKind、self_score→selfScore。
     const docs = await listMemoryDocs({ scope: "private", ownerKey: "owner-hash-1" });
     assert.equal(docs.length, 1);
     assert.equal(docs[0].evidenceKind, "user_confirmed");
@@ -139,7 +139,7 @@ test("ingest 2xx：有簽＋snake_case 映射＋契約 §3.1 響應形狀", asyn
   });
 });
 
-test("ingest：簽名正確但 body 非 JSON → 400 invalid_json", async () => {
+test("ingest：签名正确但 body 非 JSON → 400 invalid_json", async () => {
   const raw = "not-json{{{";
   await withSecret(SECRET, async () => {
     const res = await ingestPOST(
@@ -154,7 +154,7 @@ test("ingest：簽名正確但 body 非 JSON → 400 invalid_json", async () => 
   });
 });
 
-test("retract：無簽 401；有簽 → {retracted:[id]}（契約 §3.2）", async () => {
+test("retract：无签 401；有签 → {retracted:[id]}（契约 §3.2）", async () => {
   __resetAgentMemoryStoreForTests();
   await withSecret(SECRET, async () => {
     const unsigned = await retractPOST(
@@ -163,13 +163,13 @@ test("retract：無簽 401；有簽 → {retracted:[id]}（契約 §3.2）", asy
     assert.equal(unsigned.status, 401);
     assert.deepEqual(await unsigned.json(), { error: "unauthorized" });
 
-    // 先經 ingest 端點寫一筆，再按 batch_id 撤回。
+    // 先经 ingest 端点写一笔，再按 batch_id 撤回。
     const body = JSON.stringify({
       batch_id: "r-2",
       docs: [
         {
           scope: "shared",
-          domain: "測試",
+          domain: "测试",
           slug: "to-retract",
           description: "a doc to retract via endpoint",
           type: "domain",
@@ -200,10 +200,10 @@ test("retract：無簽 401；有簽 → {retracted:[id]}（契約 §3.2）", asy
   });
 });
 
-test("review：無簽 401；action 非法 400；有簽 → {reviewed:[ids],action}（PRD §5.6）", async () => {
+test("review：无签 401；action 非法 400；有签 → {reviewed:[ids],action}（PRD §5.6）", async () => {
   __resetAgentMemoryStoreForTests();
   await withSecret(SECRET, async () => {
-    // 防線同 retract：無簽一律 401，先於一切入參校驗。
+    // 防线同 retract：无签一律 401，先于一切入参校验。
     const unsigned = await reviewPOST(
       postRequest(
         "http://localhost/api/agent/memory/review",
@@ -213,7 +213,7 @@ test("review：無簽 401；action 非法 400；有簽 → {reviewed:[ids],actio
     assert.equal(unsigned.status, 401);
     assert.deepEqual(await unsigned.json(), { error: "unauthorized" });
 
-    // 有簽但 action 缺／非法 → 400 invalid_action（不落 store）。
+    // 有签但 action 缺／非法 → 400 invalid_action（不落 store）。
     const badActionRaw = JSON.stringify({ batch_id: "rv-r", action: "delete_everything" });
     const badAction = await reviewPOST(
       postRequest(
@@ -225,13 +225,13 @@ test("review：無簽 401；action 非法 400；有簽 → {reviewed:[ids],actio
     assert.equal(badAction.status, 400);
     assert.deepEqual(await badAction.json(), { error: "invalid_action" });
 
-    // 2xx 端到端：先 ingest 一條 shared，再按 batch_id 轉 pending_review。
+    // 2xx 端到端：先 ingest 一条 shared，再按 batch_id 转 pending_review。
     const body = JSON.stringify({
       batch_id: "rv-r",
       docs: [
         {
           scope: "shared",
-          domain: "測試",
+          domain: "测试",
           slug: "to-review",
           description: "a doc to flip pending_review via endpoint",
           type: "domain",
@@ -262,7 +262,7 @@ test("review：無簽 401；action 非法 400；有簽 → {reviewed:[ids],actio
   });
 });
 
-test("export：GET 對空 bytes 驗簽——無簽 401、非空 bytes 簽 401、空 bytes 簽 200", async () => {
+test("export：GET 对空 bytes 验签——无签 401、非空 bytes 签 401、空 bytes 签 200", async () => {
   __resetAgentMemoryStoreForTests();
   await withSecret(SECRET, async () => {
     const url = "http://localhost/api/agent/memory/export?scope=shared";
@@ -270,7 +270,7 @@ test("export：GET 對空 bytes 驗簽——無簽 401、非空 bytes 簽 401、
     assert.equal(unsigned.status, 401);
     assert.deepEqual(await unsigned.json(), { error: "unauthorized" });
 
-    // 常見錯法：拿「某個 body」的簽來驗 GET（GET 真義是空 bytes）。
+    // 常见错法：拿「某个 body」的签来验 GET（GET 真义是空 bytes）。
     const wrongScope = await exportGET(
       getRequest(url, signMemoryBody(bytes("scope=shared"), SECRET)),
     );
@@ -285,7 +285,7 @@ test("export：GET 對空 bytes 驗簽——無簽 401、非空 bytes 簽 401、
   });
 });
 
-test("export private：owner_key 過濾；缺 owner_key 回空；只含 active", async () => {
+test("export private：owner_key 过滤；缺 owner_key 回空；只含 active", async () => {
   __resetAgentMemoryStoreForTests();
   await withSecret(SECRET, async () => {
     const body = JSON.stringify({
@@ -294,7 +294,7 @@ test("export private：owner_key 過濾；缺 owner_key 回空；只含 active",
         {
           scope: "private",
           owner_key: "owner-x",
-          domain: "日本動漫",
+          domain: "日本动漫",
           slug: "mine",
           description: "private doc for owner x",
           type: "user",
@@ -306,7 +306,7 @@ test("export private：owner_key 過濾；缺 owner_key 回空；只含 active",
         {
           scope: "private",
           owner_key: "owner-y",
-          domain: "日本動漫",
+          domain: "日本动漫",
           slug: "theirs",
           description: "private doc for owner y",
           type: "user",
@@ -332,7 +332,7 @@ test("export private：owner_key 過濾；缺 owner_key 回空；只含 active",
     assert.equal(ok.status, 200);
     const data = (await ok.json()) as { docs: Array<{ slug: string }>; index_md: string };
     assert.deepEqual(data.docs.map((doc) => doc.slug), ["mine"]);
-    assert.match(data.index_md, /- \[日本動漫\] mine — private doc for owner x （v1）/);
+    assert.match(data.index_md, /- \[日本动漫\] mine — private doc for owner x （v1）/);
 
     const noOwner = await exportGET(
       getRequest("http://localhost/api/agent/memory/export?scope=private", signEmpty()),
@@ -343,7 +343,7 @@ test("export private：owner_key 過濾；缺 owner_key 回空；只含 active",
   });
 });
 
-test("memory-trace：未帶 agent 身份 → 401（沿用既有 agent key 認證，非 HMAC 尺）", async () => {
+test("memory-trace：未带 agent 身份 → 401（沿用既有 agent key 认证，非 HMAC 尺）", async () => {
   const res = await memoryTraceGET(
     getRequest("http://localhost/api/agent/sessions/ses_abc/memory-trace"),
     { params: Promise.resolve({ id: "ses_abc" }) },

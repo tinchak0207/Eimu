@@ -1,23 +1,23 @@
-// eimu-guard plugin D1（重複呼叫斷路器）＋ D6（輸出上限／重讀去重）單元測試。
-// 這些是工具層的確定性護欄，不靠提示詞自律：必須有測試鎖住語義（尤其「輪詢豁免」——
-// 2026-10-02 使用者裁定保留輪詢，斷路器不得把輪詢工具禁掉）。
-// 環境變數須在載入 plugin 前設定（常數在模組載入時求值），故用動態 import。
+// eimu-guard plugin D1（重复呼叫断路器）＋ D6（输出上限／重读去重）单元测试。
+// 这些是工具层的确定性护栏，不靠提示词自律：必须有测试锁住语义（尤其「轮询豁免」——
+// 2026-10-02 使用者裁定保留轮询，断路器不得把轮询工具禁掉）。
+// 环境变数须在载入 plugin 前设定（常数在模组载入时求值），故用动态 import。
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 
 process.env.LOOP_BREAKER_N = "3"
-process.env.LOOP_BREAKER_HARD_DELTA = "5" // 第 9 次（>8）觸發強制收尾
+process.env.LOOP_BREAKER_HARD_DELTA = "5" // 第 9 次（>8）触发强制收尾
 process.env.TOOL_OUTPUT_MAX_CHARS = "100"
 process.env.READ_DEDUPE = "1"
 
 const { EimuGuard } = await import("../opencode-runtime/plugin/eimu-guard")
-// 工具側自檢閘（read_image/run_py 在 execute 內自己呼叫的那一支）：真正決定生產症狀的是它。
+// 工具侧自检闸（read_image/run_py 在 execute 内自己呼叫的那一支）：真正决定生产症状的是它。
 const { checkAgentPath } = await import("../opencode-runtime/lib/sandbox")
 
 const loopBreakerCalls: unknown[] = []
-/** 測試要的 gateway 可信歸屬查詢結果：opencode sessionID → upload_owner（未列＝查無）。 */
+/** 测试要的 gateway 可信归属查询结果：opencode sessionID → upload_owner（未列＝查无）。 */
 const ownerByOc: Record<string, string> = {}
 const realFetch = globalThis.fetch
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
@@ -27,7 +27,7 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
     try {
       sid = String((JSON.parse(init?.body ?? "{}") as { session_id?: string }).session_id ?? "")
     } catch {
-      /* 壞 body ＝查無 */
+      /* 坏 body ＝查无 */
     }
     const owner = ownerByOc[sid]
     return new Response(JSON.stringify(owner ? { ok: true, upload_owner: owner } : { ok: true }), { status: 200 })
@@ -42,7 +42,7 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
   }
   return new Response("{}", { status: 200 })
 }) as typeof fetch
-// 還原必須放在 afterAll——檔案頂層最後一行會在測試執行前就跑完，屆時 mock 已被還原。
+// 还原必须放在 afterAll——档案顶层最后一行会在测试执行前就跑完，届时 mock 已被还原。
 afterAll(() => {
   globalThis.fetch = realFetch
 })
@@ -56,12 +56,12 @@ function beforeOut(args: Record<string, unknown>) {
   return { args } as { args: Record<string, unknown> }
 }
 
-describe("D1 迴圈斷路器", () => {
+describe("D1 回圈断路器", () => {
   beforeEach(() => {
     loopBreakerCalls.length = 0
   })
 
-  test("同一參數連續 N 次內放行、第 N+1 次擋下並給可執行文案", async () => {
+  test("同一参数连续 N 次内放行、第 N+1 次挡下并给可执行文案", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     const call = () => before({ tool: "custom_tool", sessionID: "s-loop" }, beforeOut({ x: 1 }))
@@ -71,19 +71,19 @@ describe("D1 迴圈斷路器", () => {
     await expect(call()).rejects.toThrow(/连续调用 4 次/) // 第 4 次 > N
   })
 
-  test("換參數即歸零（連續判定，不誤殺週期性呼叫）", async () => {
+  test("换参数即归零（连续判定，不误杀周期性呼叫）", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     const call = (x: number) => before({ tool: "custom_tool", sessionID: "s-reset" }, beforeOut({ x }))
     await call(1)
     await call(1)
-    await call(2) // 換參數 → 計數歸 1
+    await call(2) // 换参数 → 计数归 1
     await call(2)
     await call(2)
     await expect(call(2)).rejects.toThrow(/连续调用 4 次/)
   })
 
-  test("輪詢工具豁免：subagent_status 同參數 10 次不擋（保留輪詢）", async () => {
+  test("轮询工具豁免：subagent_status 同参数 10 次不挡（保留轮询）", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     for (let i = 0; i < 10; i++) {
@@ -92,7 +92,7 @@ describe("D1 迴圈斷路器", () => {
     expect(loopBreakerCalls.length).toBe(0)
   })
 
-  test("達硬上限（第 9 次）→ 呼叫 gateway 強制收尾端點並拋止", async () => {
+  test("达硬上限（第 9 次）→ 呼叫 gateway 强制收尾端点并抛止", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     const call = () => before({ tool: "custom_tool", sessionID: "s-hard" }, beforeOut({ y: 7 }))
@@ -105,7 +105,7 @@ describe("D1 迴圈斷路器", () => {
         outcomes.push((e as Error).message)
       }
     }
-    // 1..3 放行；4..8 一般斷流；第 9 次達硬上限（強制收尾 + gateway 通知）。
+    // 1..3 放行；4..8 一般断流；第 9 次达硬上限（强制收尾 + gateway 通知）。
     expect(outcomes.slice(0, 3)).toEqual(["ok", "ok", "ok"])
     expect(outcomes[3]).toMatch(/连续调用 4 次/)
     expect(outcomes[8]).toMatch(/强制结束本轮/)
@@ -114,24 +114,24 @@ describe("D1 迴圈斷路器", () => {
   })
 })
 
-describe("上傳歸屬水合（原生自檢閘 read_image/run_py）", () => {
-  // 2026-10-02 生產實錘：read_image 未列在 PATH_TOOLS ⇒ plugin 的惰性水合不跑 ⇒ 工具內的
-  // checkAgentPath 拿到空 owner 集合，對**本會話自己的附件**也回 path_denied。
-  // 這裡用真 plugin 的 before hook ＋真 sandbox 閘驗行為（不是掃源碼字串）。
+describe("上传归属水合（原生自检闸 read_image/run_py）", () => {
+  // 2026-10-02 生产实锤：read_image 未列在 PATH_TOOLS ⇒ plugin 的惰性水合不跑 ⇒ 工具内的
+  // checkAgentPath 拿到空 owner 集合，对**本会话自己的附件**也回 path_denied。
+  // 这里用真 plugin 的 before hook ＋真 sandbox 闸验行为（不是扫源码字串）。
   const OWN = "133630c0-5769-4459-b2cf-d4e90cc26dce"
   const FOREIGN = "00000000-0000-4000-8000-000000000000"
   ownerByOc["s-img"] = OWN
 
-  test("read_image 讀本會話上傳：hook 水合後，工具內自檢閘也放行（生產症狀回歸）", async () => {
+  test("read_image 读本会话上传：hook 水合后，工具内自检闸也放行（生产症状回归）", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     const p = `uploads/${OWN}/my-image.png`
     await expect(before({ tool: "read_image", sessionID: "s-img" }, beforeOut({ image_path: p }))).resolves.toBeUndefined()
-    // 這一行才是生產症狀：hook 不水合時這裡是 { ok:false, reason:"foreign_upload" }。
+    // 这一行才是生产症状：hook 不水合时这里是 { ok:false, reason:"foreign_upload" }。
     expect(checkAgentPath(p, "s-img")).toEqual({ ok: true })
   })
 
-  test("read_image 讀他會話上傳：水合後仍擋（不放寬歸屬）", async () => {
+  test("read_image 读他会话上传：水合后仍挡（不放宽归属）", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     await expect(
@@ -140,7 +140,7 @@ describe("上傳歸屬水合（原生自檢閘 read_image/run_py）", () => {
     expect(checkAgentPath(`uploads/${FOREIGN}/x.png`, "s-img")).toEqual({ ok: false, reason: "foreign_upload" })
   })
 
-  test("run_py 的 stdin_path 同款：本會話放行", async () => {
+  test("run_py 的 stdin_path 同款：本会话放行", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     const p = `uploads/${OWN}/in.txt`
@@ -148,7 +148,7 @@ describe("上傳歸屬水合（原生自檢閘 read_image/run_py）", () => {
     expect(checkAgentPath(p, "s-img")).toEqual({ ok: true })
   })
 
-  test("未水合到歸屬（gateway 查無）＝fail-closed 擋下", async () => {
+  test("未水合到归属（gateway 查无）＝fail-closed 挡下", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     const p = `uploads/${OWN}/my-image.png`
@@ -158,7 +158,7 @@ describe("上傳歸屬水合（原生自檢閘 read_image/run_py）", () => {
     expect(checkAgentPath(p, "s-unknown")).toEqual({ ok: false, reason: "foreign_upload" })
   })
 
-  test("純 URL 讀圖不受 owner 影響（image_path 缺席＝不進路徑閘）", async () => {
+  test("纯 URL 读图不受 owner 影响（image_path 缺席＝不进路径闸）", async () => {
     const h = await hooks()
     const before = h["tool.execute.before"] as (i: { tool: string; sessionID: string }, o: unknown) => Promise<void>
     await expect(
@@ -167,8 +167,8 @@ describe("上傳歸屬水合（原生自檢閘 read_image/run_py）", () => {
   })
 })
 
-describe("D6 上下文經濟", () => {
-  test("輸出超上限 → 截斷並附可執行提示", async () => {
+describe("D6 上下文经济", () => {
+  test("输出超上限 → 截断并附可执行提示", async () => {
     const h = await hooks()
     const after = h["tool.execute.after"] as (i: { tool: string; sessionID: string; args: unknown }, o: { output: string }) => Promise<void>
     const out = { output: "x".repeat(250) }
@@ -177,7 +177,7 @@ describe("D6 上下文經濟", () => {
     expect(out.output).toContain("[已截断")
   })
 
-  test("未超上限不動輸出", async () => {
+  test("未超上限不动输出", async () => {
     const h = await hooks()
     const after = h["tool.execute.after"] as (i: { tool: string; sessionID: string; args: unknown }, o: { output: string }) => Promise<void>
     const out = { output: "short" }
@@ -185,7 +185,7 @@ describe("D6 上下文經濟", () => {
     expect(out.output).toBe("short")
   })
 
-  test("同檔重讀且內容未變更 → 第二次回摘要（顯式 offset/limit 為逃生門）", async () => {
+  test("同档重读且内容未变更 → 第二次回摘要（显式 offset/limit 为逃生门）", async () => {
     const dir = mkdtempSync(join(tmpdir(), "d6-read-"))
     const file = join(dir, "a.txt")
     writeFileSync(file, "hello world")
@@ -197,7 +197,7 @@ describe("D6 上下文經濟", () => {
     const second = { output: "hello world" }
     await after({ tool: "read", sessionID: "s-read", args: { filePath: file } }, second)
     expect(second.output).toContain("已读取过该文件且内容未变更")
-    // 帶 offset 一律放行（逃生門）。
+    // 带 offset 一律放行（逃生门）。
     const ranged = { output: "hello world" }
     await after({ tool: "read", sessionID: "s-read", args: { filePath: file, offset: 1, limit: 5 } }, ranged)
     expect(ranged.output).toBe("hello world")

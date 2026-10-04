@@ -1,29 +1,29 @@
-// 付款對帳器（本任務核心）——用**支付商自己的資料**獨立對帳「支付商回報已付款 vs 我方已履約」。
+// 付款对帐器（本任务核心）——用**支付商自己的资料**独立对帐「支付商回报已付款 vs 我方已履约」。
 //
-// 為什麼需要它：2026-09-19 真單 out_trade_no=IMGMU7UH9SFF9A21D（夢芽 starter 100 金币，實付
-// ¥9.93）支付成功，我方 notify handler 回 500、從未履約，而我方資料庫零痕跡、數月無人發現。
-// 根本缺陷＝**沒有任何機制用支付商的資料獨立對帳已付款 vs 已履約**（我方帳本正是被測物，
-// 拿它斷言「付了多少錢」是同源斷言——見 AGENTS.md 禁同源斷言）。本檔補上這條獨立對帳。
+// 为什么需要它：2026-09-19 真单 out_trade_no=IMGMU7UH9SFF9A21D（梦芽 starter 100 金币，实付
+// ¥9.93）支付成功，我方 notify handler 回 500、从未履约，而我方资料库零痕迹、数月无人发现。
+// 根本缺陷＝**没有任何机制用支付商的资料独立对帐已付款 vs 已履约**（我方帐本正是被测物，
+// 拿它断言「付了多少钱」是同源断言——见 AGENTS.md 禁同源断言）。本档补上这条独立对帐。
 //
-// 形態照抄 account-reconciliation.ts（跨層對帳），沿用同一套三條硬紀律：
-//   1. **只讀**：本檔不得對我方帳本／額度有任何寫入（具名測試守門，測試只作變更探針，不作證明）。
-//      補交付動作（fulfillMapayOrderManually）是**另一個具名匯出**，永不從對帳主入口被呼叫。
-//   2. **歧義凍結**：定位不完的一律 verdict='unknown' 並如實列出；不猜、不自動補帳。
-//      特別節：**人工補償碼（MANUAL-*、MPFIX993-0919 這類未用 `MP<單號>` 命名的碼）無法從
-//      命名反推歸屬**——只當「疑似相關」候選列出，不當履約證據；這類單歸「需人工判定的未履約」，
-//      manualReview=true，**不得自動補交付**（避免與人工已補的 1500 幣疊成雙份）。
-//   3. **告警沿用既有通道**：console.error 的結構化行（與 [account-reconcile] 同一條），不新造通知機制。
+// 形态照抄 account-reconciliation.ts（跨层对帐），沿用同一套三条硬纪律：
+//   1. **只读**：本档不得对我方帐本／额度有任何写入（具名测试守门，测试只作变更探针，不作证明）。
+//      补交付动作（fulfillMapayOrderManually）是**另一个具名汇出**，永不从对帐主入口被呼叫。
+//   2. **歧义冻结**：定位不完的一律 verdict='unknown' 并如实列出；不猜、不自动补帐。
+//      特别节：**人工补偿码（MANUAL-*、MPFIX993-0919 这类未用 `MP<单号>` 命名的码）无法从
+//      命名反推归属**——只当「疑似相关」候选列出，不当履约证据；这类单归「需人工判定的未履约」，
+//      manualReview=true，**不得自动补交付**（避免与人工已补的 1500 币叠成双份）。
+//   3. **告警沿用既有通道**：console.error 的结构化行（与 [account-reconcile] 同一条），不新造通知机制。
 //
-// 判定口徑：對每個「支付商回報已付款」的 out_trade_no，檢查我方是否有任一履約證據——
+// 判定口径：对每个「支付商回报已付款」的 out_trade_no，检查我方是否有任一履约证据——
 //   (a) mapay_credit 存在且 status='applied'，或
-//   (b) 存在兌換碼 `MP<單號後18位>` 且 quota 相符，或
+//   (b) 存在兑换码 `MP<单号后18位>` 且 quota 相符，或
 //   (c) account_ledger 有 `redemption:<out_trade_no>` 的 recharge 行。
-// 三者皆無 → verdict='paid_unfulfilled'（09-19 那筆就落在這個桶）。
+// 三者皆无 → verdict='paid_unfulfilled'（09-19 那笔就落在这个桶）。
 //
-// 取數口徑（2026-10-04 生產實證）：上游 `act=order` 是「按單號單查」**不是列表端點**（不帶
-// 單號回 code:0；成功碼是 1）。故候選單號由我方已知單號推導（mapay_order_intake／mapay_credit／
-// account_ledger 的 `redemption:<單號>`／兌換碼名 `MP<單號後18位>` 可反推者），再逐筆查支付商
-// 真實狀態。「候選 0 或全部查無」＝看不到訂單，**不得**當成健康（見 health 路由）。
+// 取数口径（2026-10-04 生产实证）：上游 `act=order` 是「按单号单查」**不是列表端点**（不带
+// 单号回 code:0；成功码是 1）。故候选单号由我方已知单号推导（mapay_order_intake／mapay_credit／
+// account_ledger 的 `redemption:<单号>`／兑换码名 `MP<单号后18位>` 可反推者），再逐笔查支付商
+// 真实状态。「候选 0 或全部查无」＝看不到订单，**不得**当成健康（见 health 路由）。
 
 import { resolvePricingPlan, PLANS, FIRST_CHARGE_PLAN } from "@/lib/plans";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
@@ -39,11 +39,11 @@ import { quotaToCoins } from "./statistics-projection";
 
 type Row = Record<string, unknown>;
 
-/** 默認滾動窗口：近 30 天（支付商 API 查詢越界沒有意義；真單是 09-19，仍在窗口內可驗）。 */
+/** 默认滚动窗口：近 30 天（支付商 API 查询越界没有意义；真单是 09-19，仍在窗口内可验）。 */
 export const MAPAY_RECONCILE_WINDOW_DAYS_DEFAULT = 30;
-/** cron 呼叫節流：默認 30 分鐘一次（支付商 API 不該被每分鐘打爆）。 */
+/** cron 呼叫节流：默认 30 分钟一次（支付商 API 不该被每分钟打爆）。 */
 export const MAPAY_RECONCILE_INTERVAL_MS_DEFAULT = 30 * 60_000;
-/** 系統自動建的兌換碼命名（`mapayOrderRedemptionName` = MP + 單號後 18 位）。 */
+/** 系统自动建的兑换码命名（`mapayOrderRedemptionName` = MP + 单号后 18 位）。 */
 const SYSTEM_REDEMPTION_NAME = /^MP[A-Z0-9]{6,}$/;
 
 export type MapayOrderVerdict = "fulfilled" | "paid_unfulfilled" | "unknown";
@@ -59,7 +59,7 @@ export interface MapayOrderFinding {
   tradeNo: string | null;
   money: number | null;
   paidAt: string | null;
-  /** 認得出的套餐應發 quota；認不出為 null（此時兌換碼只看存在、不比對額度）。 */
+  /** 认得出的套餐应发 quota；认不出为 null（此时兑换码只看存在、不比对额度）。 */
   expectedQuota: number | null;
   planId: string | null;
   verdict: MapayOrderVerdict;
@@ -68,9 +68,9 @@ export interface MapayOrderFinding {
     redemptionCode: boolean;
     ledgerRecharge: boolean;
   };
-  /** 需人工判定（含人工補償碼痕跡 / 證據讀取失敗 / 額度不符的歧義）——不得自動補交付。 */
+  /** 需人工判定（含人工补偿码痕迹 / 证据读取失败 / 额度不符的歧义）——不得自动补交付。 */
   manualReview: boolean;
-  /** 疑似相關、但無法從命名歸屬的人工補償碼（只列出供人工判斷，不當履約證據）。 */
+  /** 疑似相关、但无法从命名归属的人工补偿码（只列出供人工判断，不当履约证据）。 */
   manualCompensationCandidates: string[];
   reason: string;
 }
@@ -79,27 +79,27 @@ export interface MapayOrderReconciliationReport {
   generatedAt: string;
   configured: boolean;
   window: { since: string; until: string };
-  /** 本輪是否為 `?orders=` 顯式探針（只查指定單號，不從我方表推導候選）。 */
+  /** 本轮是否为 `?orders=` 显式探针（只查指定单号，不从我方表推导候选）。 */
   explicitProbe: boolean;
-  /** 支付商回報已付款的單數（本輪實際判定的集合）。 */
+  /** 支付商回报已付款的单数（本轮实际判定的集合）。 */
   checked: number;
   fulfilled: number;
   paidUnfulfilled: MapayOrderFinding[];
   unknown: MapayOrderFinding[];
   residue: {
-    /** 本輪查詢的候選單號數（我方已知單號：intake／credit／ledger／兌換碼反推）。 */
+    /** 本轮查询的候选单号数（我方已知单号：intake／credit／ledger／兑换码反推）。 */
     candidates: number;
-    /** 支付商實際查到訂單實體的單數。 */
+    /** 支付商实际查到订单实体的单数。 */
     found: number;
     paid: number;
     notPaid: number;
-    /** 候選單號在支付商「查無此單」的數量。 */
+    /** 候选单号在支付商「查无此单」的数量。 */
     notFound: number;
-    /** 逐筆查詢失敗的單號（通道／上游錯誤）——非空時**不得**回報健康。 */
+    /** 逐笔查询失败的单号（通道／上游错误）——非空时**不得**回报健康。 */
     queryErrors: string[];
-    /** **看不到任何訂單實體**（候選 0 或全部查無）＝「看不到」不是健康。 */
+    /** **看不到任何订单实体**（候选 0 或全部查无）＝「看不到」不是健康。 */
     upstreamEmpty: boolean;
-    /** 讀不到的證據來源（card 未列 = 全部可讀）。 */
+    /** 读不到的证据来源（card 未列 = 全部可读）。 */
     evidenceUnreadable: string[];
     notes: string[];
   };
@@ -108,7 +108,7 @@ export interface MapayOrderReconciliationReport {
   notes: string[];
 }
 
-// ─────────────────────────────────────────── 套餐解析（純函式）
+// ─────────────────────────────────────────── 套餐解析（纯函式）
 
 export interface ResolvedOrderPlan {
   planId: string;
@@ -117,11 +117,11 @@ export interface ResolvedOrderPlan {
 }
 
 /**
- * 從訂單認出「買了什麼檔」。優先序（精度由高到低）：
- *   ① `param` 自簽還原 planId（已登入下單的單才有；最精確）
- *   ② `name` 內的金币數（`... 100金币`）
- *   ③ `money` 對檔位價格（容忍渠道手續費）
- * 都認不出 → null（對帳器不猜，兌換碼只按存在判定）。
+ * 从订单认出「买了什么档」。优先序（精度由高到低）：
+ *   ① `param` 自签还原 planId（已登入下单的单才有；最精确）
+ *   ② `name` 内的金币数（`... 100金币`）
+ *   ③ `money` 对档位价格（容忍渠道手续费）
+ * 都认不出 → null（对帐器不猜，兑换码只按存在判定）。
  */
 export function resolveOrderPlan(order: MapayOrder, env: NodeJS.ProcessEnv = process.env): ResolvedOrderPlan | null {
   const param = typeof order.raw.param === "string" ? order.raw.param : null;
@@ -144,7 +144,7 @@ export function resolveOrderPlan(order: MapayOrder, env: NodeJS.ProcessEnv = pro
   return null;
 }
 
-// ─────────────────────────────────────────── 判定（純函式，唯一權威）
+// ─────────────────────────────────────────── 判定（纯函式，唯一权威）
 
 export interface ClassifyInput {
   order: MapayOrder;
@@ -152,13 +152,13 @@ export interface ClassifyInput {
   expectedQuota: number | null;
   planId: string | null;
   manualCompensationCandidates: string[];
-  /** 任一證據來源讀不到 ⇒ true：無法證明「未履約」時一律凍結 unknown，不誤判成 paid_unfulfilled。 */
+  /** 任一证据来源读不到 ⇒ true：无法证明「未履约」时一律冻结 unknown，不误判成 paid_unfulfilled。 */
   evidenceUnreadable: boolean;
 }
 
 /**
- * 單筆已付款訂單的判定。這是「已付款 vs 已履約」判別口徑的唯一權威——
- * 新增履約證據種類必須先改這裡與其測試。
+ * 单笔已付款订单的判定。这是「已付款 vs 已履约」判别口径的唯一权威——
+ * 新增履约证据种类必须先改这里与其测试。
  */
 export function classifyMapayPaidOrder(input: ClassifyInput): MapayOrderFinding {
   const { order, evidence } = input;
@@ -183,18 +183,18 @@ export function classifyMapayPaidOrder(input: ClassifyInput): MapayOrderFinding 
       evidence: { mapayCreditApplied: creditApplied, redemptionCode: redemptionHit, ledgerRecharge: ledgerHit },
       manualReview: false,
       reason:
-        `已履約證據：` +
+        `已履约证据：` +
         [
           creditApplied ? "mapay_credit=applied" : null,
-          redemptionHit ? `兌換碼 ${evidence.redemption?.name}` : null,
-          ledgerHit ? "account_ledger recharge(redemption:<單號>)" : null,
+          redemptionHit ? `兑换码 ${evidence.redemption?.name}` : null,
+          ledgerHit ? "account_ledger recharge(redemption:<单号>)" : null,
         ]
           .filter(Boolean)
           .join("、"),
     };
   }
 
-  // 兌換碼存在但 quota 不符（例：首充兜底只發 70 幣，或碼被重用）＝歧義，不當已履約也不當未履約。
+  // 兑换码存在但 quota 不符（例：首充兜底只发 70 币，或码被重用）＝歧义，不当已履约也不当未履约。
   if (evidence.redemption && input.expectedQuota !== null && evidence.redemption.quota !== input.expectedQuota) {
     return {
       ...base,
@@ -202,19 +202,19 @@ export function classifyMapayPaidOrder(input: ClassifyInput): MapayOrderFinding 
       evidence: { mapayCreditApplied: false, redemptionCode: false, ledgerRecharge: false },
       manualReview: true,
       reason:
-        `兌換碼 ${evidence.redemption.name} 存在但 quota=${evidence.redemption.quota} 與應發 ${input.expectedQuota} 不符——` +
-        `歧義凍結，人工核對（不自動補交付，避免雙份）`,
+        `兑换码 ${evidence.redemption.name} 存在但 quota=${evidence.redemption.quota} 与应发 ${input.expectedQuota} 不符——` +
+        `歧义冻结，人工核对（不自动补交付，避免双份）`,
     };
   }
 
-  // 已占位但結果未定（pending/unknown）：上游調額不冪等，不得再開第二條發放通道。
+  // 已占位但结果未定（pending/unknown）：上游调额不幂等，不得再开第二条发放通道。
   if (evidence.creditStatus === "pending" || evidence.creditStatus === "unknown") {
     return {
       ...base,
       verdict: "unknown",
       evidence: { mapayCreditApplied: false, redemptionCode: false, ledgerRecharge: false },
       manualReview: true,
-      reason: `mapay_credit 已占位（status=${evidence.creditStatus}）但入帳結果未定——人工核對，不得再發放`,
+      reason: `mapay_credit 已占位（status=${evidence.creditStatus}）但入帐结果未定——人工核对，不得再发放`,
     };
   }
 
@@ -224,7 +224,7 @@ export function classifyMapayPaidOrder(input: ClassifyInput): MapayOrderFinding 
       verdict: "unknown",
       evidence: { mapayCreditApplied: false, redemptionCode: false, ledgerRecharge: false },
       manualReview: true,
-      reason: "履約證據來源讀取失敗，無法證明已履約或未履約——歧義凍結，下輪重試或人工核對",
+      reason: "履约证据来源读取失败，无法证明已履约或未履约——歧义冻结，下轮重试或人工核对",
     };
   }
 
@@ -235,13 +235,13 @@ export function classifyMapayPaidOrder(input: ClassifyInput): MapayOrderFinding 
     evidence: { mapayCreditApplied: false, redemptionCode: false, ledgerRecharge: false },
     manualReview: manualHit,
     reason: manualHit
-      ? `支付商回報已付款，三條系統履約證據皆無；偵測到疑似人工補償碼（${input.manualCompensationCandidates.join("、")}）` +
-        `——命名無法反推歸屬，歸「需人工判定的未履約」，**不得自動補交付**`
-      : "支付商回報已付款，但 mapay_credit/兌換碼/account_ledger 三條履約證據皆無——未履約",
+      ? `支付商回报已付款，三条系统履约证据皆无；侦测到疑似人工补偿码（${input.manualCompensationCandidates.join("、")}）` +
+        `——命名无法反推归属，归「需人工判定的未履约」，**不得自动补交付**`
+      : "支付商回报已付款，但 mapay_credit/兑换码/account_ledger 三条履约证据皆无——未履约",
   };
 }
 
-/** 疑似人工補償碼：MMDD（付款日）或金額分數出現在碼名裡。只作候選，不當證據。 */
+/** 疑似人工补偿码：MMDD（付款日）或金额分数出现在码名里。只作候选，不当证据。 */
 export function manualCompensationCandidatesFor(
   order: MapayOrder,
   redemptions: GatewayRedemption[],
@@ -266,7 +266,7 @@ function beijingMmdd(iso: string): string | null {
   return `${pad(beijing.getUTCMonth() + 1)}${pad(beijing.getUTCDate())}`;
 }
 
-// ─────────────────────────────────────────── 證據讀取（只讀 SELECT / 只讀 GET）
+// ─────────────────────────────────────────── 证据读取（只读 SELECT / 只读 GET）
 
 interface CreditEvidence {
   status: MapayCreditStatus;
@@ -326,14 +326,14 @@ async function readLedgerRechargeEvidence(
   return map;
 }
 
-// ─────────────────────────────────────────── 候選單號（我方已知單號；全部只讀 SELECT）
+// ─────────────────────────────────────────── 候选单号（我方已知单号；全部只读 SELECT）
 
-/** 單號字元集（與 tools/inspect-mapay-order.ts 同一保守判準）。 */
+/** 单号字元集（与 tools/inspect-mapay-order.ts 同一保守判准）。 */
 const OUT_TRADE_NO_PATTERN = /^[A-Za-z0-9_-]{3,64}$/;
 
 /**
- * 由系統兌換碼名 `MP<單號後18位>` 反推候選單號：只有後 18 位＝完整單號（單號長度 ≤18）
- * 才可反推；名裡超過 18 位＝已被截斷，丟棄不猜（查無此單自然會落在 notFound）。
+ * 由系统兑换码名 `MP<单号后18位>` 反推候选单号：只有后 18 位＝完整单号（单号长度 ≤18）
+ * 才可反推；名里超过 18 位＝已被截断，丢弃不猜（查无此单自然会落在 notFound）。
  */
 export function mapayCandidateOrderNumbersFromRedemptionNames(names: string[]): string[] {
   const out: string[] = [];
@@ -348,7 +348,7 @@ export function mapayCandidateOrderNumbersFromRedemptionNames(names: string[]): 
   return out;
 }
 
-/** 候選單號正規化：trim、去重、只留合法單號字元集。 */
+/** 候选单号正规化：trim、去重、只留合法单号字元集。 */
 export function normalizeMapayOrderCandidates(raw: string[]): string[] {
   const seen = new Set<string>();
   for (const value of raw) {
@@ -378,22 +378,22 @@ async function readLedgerRedemptionOrderNumbers(sql: GenerationSql): Promise<str
     .filter((order) => OUT_TRADE_NO_PATTERN.test(order));
 }
 
-// ─────────────────────────────────────────── 主入口（只讀）
+// ─────────────────────────────────────────── 主入口（只读）
 
 export interface MapayReconcileDeps {
   sql?: GenerationSql;
   /**
-   * 逐筆向支付商查單（按商戶單號）——對帳的權威取數來源。找不到回 null（查無此單），
-   * 業務／通道錯誤應拋錯（呼叫端如實記進 queryErrors，不當健康）。
+   * 逐笔向支付商查单（按商户单号）——对帐的权威取数来源。找不到回 null（查无此单），
+   * 业务／通道错误应抛错（呼叫端如实记进 queryErrors，不当健康）。
    */
   fetchOrder?: (outTradeNo: string) => Promise<MapayOrder | null>;
   listRedemptions?: () => Promise<GatewayRedemption[]>;
   env?: NodeJS.ProcessEnv;
   now?: Date;
-  /** 告警出口（默認 console.error，沿用既有通道）。 */
+  /** 告警出口（默认 console.error，沿用既有通道）。 */
   alert?: (message: string) => void;
   /**
-   * 顯式探針（只讀）：只查這些單號，**不**從我方表推導候選。給 orchestrator 驗證歷史單用。
+   * 显式探针（只读）：只查这些单号，**不**从我方表推导候选。给 orchestrator 验证历史单用。
    */
   orders?: string[];
 }
@@ -406,9 +406,9 @@ function alertLine(finding: MapayOrderFinding): string {
 }
 
 /**
- * 付款對帳主入口（只讀）。永不寫我方帳本／額度：只 GET 支付商與上游、只 SELECT 我方表，
- * 結果以報表與告警輸出。找不到的未履約單**不會**被自動補交付——補交付是另一個
- * 需人工顯式呼叫的 fulfillMapayOrderManually。
+ * 付款对帐主入口（只读）。永不写我方帐本／额度：只 GET 支付商与上游、只 SELECT 我方表，
+ * 结果以报表与告警输出。找不到的未履约单**不会**被自动补交付——补交付是另一个
+ * 需人工显式呼叫的 fulfillMapayOrderManually。
  */
 export async function reconcileMapayOrders(
   window: { since?: Date | string; until?: Date | string } = {},
@@ -449,52 +449,52 @@ export async function reconcileMapayOrders(
   });
 
   if (!generationDatabaseConfigured() && !deps.sql) {
-    return emptyReport("本實例沒有控制面資料庫連線（GENERATION_DATABASE_URL），付款對帳不可用。");
+    return emptyReport("本实例没有控制面资料库连线（GENERATION_DATABASE_URL），付款对帐不可用。");
   }
   const sql = deps.sql ?? getGenerationSql();
   const env = deps.env ?? process.env;
   const alert = deps.alert ?? ((message: string) => console.error(`[mapay-order-reconcile] ${message}`));
   const evidenceUnreadable: string[] = [];
 
-  // 兌換碼：既作履約證據，也作候選單號來源（`MP<後18位>` 可反推）。讀不到就只剩我方表候選。
+  // 兑换码：既作履约证据，也作候选单号来源（`MP<后18位>` 可反推）。读不到就只剩我方表候选。
   let redemptions: GatewayRedemption[] = [];
   try {
     redemptions = await (deps.listRedemptions ?? (() => listGatewayRedemptions({ pages: 10, pageSize: 100 })))();
   } catch (error) {
     evidenceUnreadable.push("redemptions");
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`[mapay-order-reconcile] 上游兌換碼讀取失敗：${reason}`);
+    console.error(`[mapay-order-reconcile] 上游兑换码读取失败：${reason}`);
   }
 
-  // 候選單號：顯式探針 → 只用指定單號；否則由我方已知單號推導（intake／credit／ledger／兌換碼反推）。
+  // 候选单号：显式探针 → 只用指定单号；否则由我方已知单号推导（intake／credit／ledger／兑换码反推）。
   const candidatePool: string[] = [];
   if (explicitOrders) {
     candidatePool.push(...explicitOrders);
-    notes.push(`顯式探針：只查指定 ${explicitOrders.length} 筆單號（不從我方表推導候選）。`);
+    notes.push(`显式探针：只查指定 ${explicitOrders.length} 笔单号（不从我方表推导候选）。`);
   } else {
     try {
       candidatePool.push(...(await readIntakeOrderNumbers(sql)));
     } catch (error) {
       evidenceUnreadable.push("mapay_order_intake");
-      console.error(`[mapay-order-reconcile] mapay_order_intake 候選讀取失敗：${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[mapay-order-reconcile] mapay_order_intake 候选读取失败：${error instanceof Error ? error.message : String(error)}`);
     }
     try {
       candidatePool.push(...(await readCreditOrderNumbers(sql)));
     } catch (error) {
       evidenceUnreadable.push("mapay_credit");
-      console.error(`[mapay-order-reconcile] mapay_credit 候選讀取失敗：${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[mapay-order-reconcile] mapay_credit 候选读取失败：${error instanceof Error ? error.message : String(error)}`);
     }
     try {
       candidatePool.push(...(await readLedgerRedemptionOrderNumbers(sql)));
     } catch (error) {
       evidenceUnreadable.push("account_ledger");
-      console.error(`[mapay-order-reconcile] account_ledger 候選讀取失敗：${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[mapay-order-reconcile] account_ledger 候选读取失败：${error instanceof Error ? error.message : String(error)}`);
     }
     candidatePool.push(...mapayCandidateOrderNumbersFromRedemptionNames(redemptions.map((item) => item.name ?? "")));
   }
   const candidates = normalizeMapayOrderCandidates(candidatePool);
 
-  // 逐筆向支付商查真實狀態（上游 act=order 無法列舉，只能按我方已知單號單查）。
+  // 逐笔向支付商查真实状态（上游 act=order 无法列举，只能按我方已知单号单查）。
   const fetchOrder = deps.fetchOrder ?? ((outTradeNo: string) => fetchMapayOrder(outTradeNo));
   const foundOrders: MapayOrder[] = [];
   const queryErrors: string[] = [];
@@ -506,7 +506,7 @@ export async function reconcileMapayOrders(
       else notFound += 1;
     } catch (error) {
       queryErrors.push(outTradeNo);
-      console.error(`[mapay-order-reconcile] 單號 ${outTradeNo} 查詢失敗：${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[mapay-order-reconcile] 单号 ${outTradeNo} 查询失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -514,21 +514,21 @@ export async function reconcileMapayOrders(
   const notPaid = foundOrders.length - paidOrders.length;
   const outTradeNos = paidOrders.map((order) => order.outTradeNo);
 
-  // 「看不到訂單」≠健康：候選 0 或全部查無都要如實標示，不得當成「全部已履約」。
+  // 「看不到订单」≠健康：候选 0 或全部查无都要如实标示，不得当成「全部已履约」。
   const upstreamEmpty = foundOrders.length === 0;
   if (upstreamEmpty) {
     notes.push(
       candidates.length === 0
-        ? "我方無任何已知候選單號可查——對帳無從證明健康。"
-        : `候選 ${candidates.length} 筆單號在支付商全部查無訂單實體——「看不到訂單」不等於健康。`,
+        ? "我方无任何已知候选单号可查——对帐无从证明健康。"
+        : `候选 ${candidates.length} 笔单号在支付商全部查无订单实体——「看不到订单」不等于健康。`,
     );
   }
-  if (notFound > 0 && !upstreamEmpty) notes.push(`${notFound} 筆候選單號在支付商查無此單。`);
+  if (notFound > 0 && !upstreamEmpty) notes.push(`${notFound} 笔候选单号在支付商查无此单。`);
   if (queryErrors.length > 0) {
-    notes.push(`${queryErrors.length} 筆候選單號查詢失敗（通道／上游錯誤）——不得視為健康。`);
+    notes.push(`${queryErrors.length} 笔候选单号查询失败（通道／上游错误）——不得视为健康。`);
   }
 
-  // 履約證據各自讀；讀不到如實記錄，並讓「證明不了」的單凍結 unknown。
+  // 履约证据各自读；读不到如实记录，并让「证明不了」的单冻结 unknown。
   let creditMap = new Map<string, CreditEvidence>();
   let ledgerMap = new Map<string, LedgerRechargeEvidence>();
 
@@ -537,14 +537,14 @@ export async function reconcileMapayOrders(
   } catch (error) {
     evidenceUnreadable.push("mapay_credit");
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`[mapay-order-reconcile] mapay_credit 讀取失敗：${reason}`);
+    console.error(`[mapay-order-reconcile] mapay_credit 读取失败：${reason}`);
   }
   try {
     ledgerMap = await readLedgerRechargeEvidence(sql, outTradeNos);
   } catch (error) {
     evidenceUnreadable.push("account_ledger");
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`[mapay-order-reconcile] account_ledger 讀取失敗：${reason}`);
+    console.error(`[mapay-order-reconcile] account_ledger 读取失败：${reason}`);
   }
   const redemptionByName = new Map<string, GatewayRedemption>();
   for (const redemption of redemptions) {
@@ -593,12 +593,12 @@ export async function reconcileMapayOrders(
 
   const paidUnfulfilled = findings.filter((finding) => finding.verdict === "paid_unfulfilled");
   const unknown = findings.filter((finding) => finding.verdict === "unknown");
-  if (unknown.length > 0) notes.push(`${unknown.length} 筆已付款單未能判定（歧義凍結，人工核對；本輪不自動補交付）。`);
+  if (unknown.length > 0) notes.push(`${unknown.length} 笔已付款单未能判定（歧义冻结，人工核对；本轮不自动补交付）。`);
   if (paidUnfulfilled.length > 0) {
-    notes.push(`${paidUnfulfilled.length} 筆已付款未履約——需人工處理；對帳器本身不補交付。`);
+    notes.push(`${paidUnfulfilled.length} 笔已付款未履约——需人工处理；对帐器本身不补交付。`);
   }
   if (evidenceUnreadable.length > 0) {
-    notes.push(`證據來源讀取失敗：${evidenceUnreadable.join("、")}——這些單的「未履約」判定不可信，已凍結為 unknown。`);
+    notes.push(`证据来源读取失败：${evidenceUnreadable.join("、")}——这些单的「未履约」判定不可信，已冻结为 unknown。`);
   }
   return {
     generatedAt,
@@ -626,13 +626,13 @@ export async function reconcileMapayOrders(
   };
 }
 
-// ─────────────────────────────────────────── cron 節流入口
+// ─────────────────────────────────────────── cron 节流入口
 
 let lastMapayReconcileAt = 0;
 
 /**
- * cron 用單次入口：自帶節流（默認 30 分鐘一次；MAPAY_RECONCILE_INTERVAL_MS 可調），
- * 避免每分鐘都打支付商 API。回 null＝本輪被節流或未配置。
+ * cron 用单次入口：自带节流（默认 30 分钟一次；MAPAY_RECONCILE_INTERVAL_MS 可调），
+ * 避免每分钟都打支付商 API。回 null＝本轮被节流或未配置。
  */
 export async function runMapayOrderReconciliationOnce(
   deps: MapayReconcileDeps = {},
@@ -645,19 +645,19 @@ export async function runMapayOrderReconciliationOnce(
   try {
     return await reconcileMapayOrders({}, deps);
   } catch (error) {
-    console.error("[mapay-order-reconcile] 本輪對帳異常（下一輪重試）", error);
+    console.error("[mapay-order-reconcile] 本轮对帐异常（下一轮重试）", error);
     return null;
   }
 }
 
-// ─────────────────────────────────────────── 人工補交付（顯式；永不自動跑）
+// ─────────────────────────────────────────── 人工补交付（显式；永不自动跑）
 
 export interface ManualFulfillInput {
   outTradeNo: string;
   userId: number;
   /** 套餐 id（starter/popular/pro/first-charge/custom:<coins>）。 */
   planId: string;
-  /** 操作人備註（寫進 mapay_credit.detail 供人工追溯）。 */
+  /** 操作人备注（写进 mapay_credit.detail 供人工追溯）。 */
   note?: string;
 }
 
@@ -668,12 +668,12 @@ export interface ManualFulfillResult {
 }
 
 /**
- * **需人工顯式呼叫**的補交付動作（不是對帳器預設行為）。走既有冪等入帳路徑
- * `runMapayCreditWithSql`（mapay_credit 佔位 + 上游調額 + account_ledger recharge，
- * 冪等鍵=out_trade_no），因此對同一張單重複呼叫只入帳一次。
+ * **需人工显式呼叫**的补交付动作（不是对帐器预设行为）。走既有幂等入帐路径
+ * `runMapayCreditWithSql`（mapay_credit 占位 + 上游调额 + account_ledger recharge，
+ * 幂等键=out_trade_no），因此对同一张单重复呼叫只入帐一次。
  *
- * 為什麼不自動：人工補償碼（MANUAL-…／MPFIX…）無法從命名反推歸屬，自動補可能與人工
- * 已補的額度疊成雙份。operator 必須明確給 (outTradeNo, userId, planId)——不猜歸屬。
+ * 为什么不自动：人工补偿码（MANUAL-…／MPFIX…）无法从命名反推归属，自动补可能与人工
+ * 已补的额度叠成双份。operator 必须明确给 (outTradeNo, userId, planId)——不猜归属。
  */
 export async function fulfillMapayOrderManually(
   input: ManualFulfillInput,
@@ -681,7 +681,7 @@ export async function fulfillMapayOrderManually(
 ): Promise<ManualFulfillResult> {
   const plan = resolvePricingPlan(input.planId);
   if (!plan) throw new Error(`未知的套餐 id：${input.planId}`);
-  if (!Number.isInteger(input.userId) || input.userId <= 0) throw new Error(`userId 必須是正整數（收到 ${input.userId}）`);
+  if (!Number.isInteger(input.userId) || input.userId <= 0) throw new Error(`userId 必须是正整数（收到 ${input.userId}）`);
   if (!input.outTradeNo.trim()) throw new Error("outTradeNo 必填");
   const sql = deps.sql ?? getGenerationSql();
   const amountQuota = plan.coins * QUOTA_PER_COIN;
@@ -690,33 +690,33 @@ export async function fulfillMapayOrderManually(
     userId: input.userId,
     planId: plan.id,
     amountQuota,
-    detail: `人工補交付${input.note ? `：${input.note}` : ""}`.slice(0, 500),
+    detail: `人工补交付${input.note ? `：${input.note}` : ""}`.slice(0, 500),
   });
   return { outcome, planId: plan.id, amountQuota };
 }
 
-// ─────────────────────────────────────────── 文字報表
+// ─────────────────────────────────────────── 文字报表
 
 export function formatMapayOrderReconciliationReport(report: MapayOrderReconciliationReport): string {
   const lines: string[] = [];
-  lines.push(`# mPay 付款對帳報告（支付商已付款 vs 我方已履約） ${report.generatedAt}`);
+  lines.push(`# mPay 付款对帐报告（支付商已付款 vs 我方已履约） ${report.generatedAt}`);
   lines.push(
-    `# 窗口 ${report.window.since} ~ ${report.window.until}｜已付款單 ${report.checked}｜` +
-      `已履約 ${report.fulfilled}｜未履約 ${report.paidUnfulfilled.length}｜未定 ${report.unknown.length}`,
+    `# 窗口 ${report.window.since} ~ ${report.window.until}｜已付款单 ${report.checked}｜` +
+      `已履约 ${report.fulfilled}｜未履约 ${report.paidUnfulfilled.length}｜未定 ${report.unknown.length}`,
   );
   const render = (finding: MapayOrderFinding) => {
     const plan = finding.planId ?? "未知套餐";
-    const worst = finding.expectedQuota !== null ? `${quotaToCoins(finding.expectedQuota)} 幣` : "額度未知";
+    const worst = finding.expectedQuota !== null ? `${quotaToCoins(finding.expectedQuota)} 币` : "额度未知";
     lines.push(
-      `[${finding.verdict}] ${finding.outTradeNo} money=${finding.money ?? "?"} plan=${plan} 應發=${worst}` +
+      `[${finding.verdict}] ${finding.outTradeNo} money=${finding.money ?? "?"} plan=${plan} 应发=${worst}` +
         `${finding.manualReview ? " ⚠需人工判定" : ""}`,
     );
     lines.push(`    ${finding.reason}`);
-    for (const name of finding.manualCompensationCandidates) lines.push(`    ? 疑似人工補償碼：${name}`);
+    for (const name of finding.manualCompensationCandidates) lines.push(`    ? 疑似人工补偿码：${name}`);
   };
   for (const finding of report.paidUnfulfilled) render(finding);
   for (const finding of report.unknown) render(finding);
-  lines.push(`~ 最近一次成功履約：${report.lastFulfilledAt ?? "（窗口內無）"}`);
+  lines.push(`~ 最近一次成功履约：${report.lastFulfilledAt ?? "（窗口内无）"}`);
   for (const alert of report.alerts) lines.push(`! 告警：${alert}`);
   for (const note of report.notes) lines.push(`~ ${note}`);
   return lines.join("\n");

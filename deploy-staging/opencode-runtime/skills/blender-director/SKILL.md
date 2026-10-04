@@ -33,7 +33,7 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 ### 阶段 ①：Blockout（灰盒布局）
 
 - **何时做**：接到委托单/分镜表后的第一件事。只关心比例、位置、导航路径，不碰材质细节。
-- **先查资产库**：动手前先 `asset_search` 查 blender-3d-assets 包与用户资产包（免费），同形/同构场景或可复用道具直接 `asset_activate` 取出，查空才自造。（生效条件：agent.director 条目併入 VPS opencode.json 且 persona 白名单放行 asset_search/asset_get 后可用；主指令 AGENTS.md §1 路由行已先上线。）
+- **先查资产库**：动手前先 `asset_search` 查 blender-3d-assets 包与用户资产包（免费），同形/同构场景或可复用道具直接 `asset_activate` 取出，查空才自造。（生效条件：agent.director 条目并入 VPS opencode.json 且 persona 白名单放行 asset_search/asset_get 后可用；主指令 AGENTS.md §1 路由行已先上线。）
 - **配方档**：
   - `recipes/scene-assembly/RECIPE.md` — 集合结构（COL_Layout/COL_Blockout/…）、灰盒规则、性能卫生
   - `recipes/set-dressing/RECIPE.md` — 布局锁定后的叙事道具簇与密度规则
@@ -122,6 +122,6 @@ Blender 侧落地映射表：`seed-mapping.md`。原则：L1 出初值（免费�
 
 ---
 
-## 配方總線索引（2026-09-07 對稱差擴容後）
+## 配方总线索引（2026-09-07 对称差扩容后）
 
-配方庫已從 12 份擴容到 105 個目錄（六批次：工藝資產/風格mood/產品運鏡/擬合管線/特效+首批基礎）。**接委託單後先查 `recipes/INDEX.md` 選配方**：按「工藝→風格→運鏡→擬合→特效」對口取用；每份配方檔頭自帶來源/License/5.2 雷區註釋塊，上游按 3.x/4.x 編寫的 API 命中雷區時以檔頭為準。姐妹域（教育視頻全鏈/動態設計/Astra 廣告/Three.js 網頁 3D/agent 執行合同）見 INDEX.md 尾節。
+配方库已从 12 份扩容到 105 个目录（六批次：工艺资产/风格mood/产品运镜/拟合管线/特效+首批基础）。**接委托单后先查 `recipes/INDEX.md` 选配方**：按「工艺→风格→运镜→拟合→特效」对口取用；每份配方档头自带来源/License/5.2 雷区注释块，上游按 3.x/4.x 编写的 API 命中雷区时以档头为准。姐妹域（教育视频全链/动态设计/Astra 广告/Three.js 网页 3D/agent 执行合同）见 INDEX.md 尾节。

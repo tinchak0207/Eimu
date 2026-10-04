@@ -1,4 +1,4 @@
-<!-- source: sanic732/SunoForge v3.0 files/CORE_00_ENTRY.md | license: MIT | ingested: 2026-09-08 | 不翻譯不修改，下游 Expert must-load -->
+<!-- source: sanic732/SunoForge v3.0 files/CORE_00_ENTRY.md | license: MIT | ingested: 2026-09-08 | 不翻译不修改，下游 Expert must-load -->
 ---
 file_id: CORE_00_ENTRY
 version: "3.0"

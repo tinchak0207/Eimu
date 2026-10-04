@@ -1,9 +1,9 @@
 /**
- * Agent Prompt Optimizer — Vercel 端呼叫 VPS gateway 的同步 prompt 優化。
+ * Agent Prompt Optimizer — Vercel 端呼叫 VPS gateway 的同步 prompt 优化。
  *
- * 優化鏈：Agent 層（deepseek，走 store.tinchak0207.xyz/agent/v1/optimize-prompt）
- * → 失敗 fallback 規則層（invisible-prompt-director）→ 原 prompt。
- * 全程服務端背景執行，用戶無感。
+ * 优化链：Agent 层（deepseek，走 store.tinchak0207.xyz/agent/v1/optimize-prompt）
+ * → 失败 fallback 规则层（invisible-prompt-director）→ 原 prompt。
+ * 全程服务端背景执行，用户无感。
  */
 
 import { directVideoPrompt, type DirectorOptions } from "./invisible-prompt-director";
@@ -11,7 +11,7 @@ import { directVideoPrompt, type DirectorOptions } from "./invisible-prompt-dire
 export interface OptimizeResult {
   ok: boolean;
   prompt: string;
-  /** 走的是 agent 還是規則層 fallback。 */
+  /** 走的是 agent 还是规则层 fallback。 */
   usedAgent: boolean;
   model?: string;
   ms?: number;
@@ -20,8 +20,8 @@ export interface OptimizeResult {
 const OPTIMIZE_TIMEOUT_MS = 30_000;
 
 /**
- * 嘗試用 deepseek agent 優化。失敗（連不上/超時/無結果）不 throw，
- * 回 { ok:false } 由呼叫方決定 fallback。
+ * 尝试用 deepseek agent 优化。失败（连不上/超时/无结果）不 throw，
+ * 回 { ok:false } 由呼叫方决定 fallback。
  */
 export async function optimizeVideoPromptWithAgent(
   rawPrompt: string,
@@ -70,8 +70,8 @@ export async function optimizeVideoPromptWithAgent(
 }
 
 /**
- * 影片 prompt 優化總入口：Agent 優先，規則層兜底，兩者皆敗原樣。
- * 規則層同步零成本，Agent 層失敗不阻塞生成。
+ * 影片 prompt 优化总入口：Agent 优先，规则层兜底，两者皆败原样。
+ * 规则层同步零成本，Agent 层失败不阻塞生成。
  */
 export async function optimizeVideoPrompt(
   rawPrompt: string,

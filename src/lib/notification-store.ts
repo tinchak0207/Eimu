@@ -1,4 +1,4 @@
-// 站內通知／公告／橫幅的持久化。
+// 站内通知／公告／横幅的持久化。
 //
 // 本档以 src/lib/asset-pack-store.ts 为**逐行基底复制**（2026-09-26），只改白名单栏位：
 // blob key 前缀、文档形状（Announcement / UserNotification / UserNotificationState）、

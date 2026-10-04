@@ -1,39 +1,39 @@
 // desktop/device-bridge-client.js
 //
-// W6b：device bridge「本機側」主進程客戶端。方向永遠是**出站**：本機主動向閘道
-// 註冊 → 心跳 → 長輪詢取件 → 在本機執行白名單唯讀工具 → 回傳結果。雲端永不
-// inbound 打使用者機器。
+// W6b：device bridge「本机侧」主进程客户端。方向永远是**出站**：本机主动向闸道
+// 注册 → 心跳 → 长轮询取件 → 在本机执行白名单唯读工具 → 回传结果。云端永不
+// inbound 打使用者机器。
 //
-// 與雲端契約逐欄對齊：deploy-staging/gateway/device-bridge.ts（handleDeviceBridgeRoutes）
+// 与云端契约逐栏对齐：deploy-staging/gateway/device-bridge.ts（handleDeviceBridgeRoutes）
 //   POST /agent/v1/device-bridge/register  → { device_id, connection_id, heartbeat_interval_ms, poll_url }
 //   POST /agent/v1/device-bridge/heartbeat → { device_id, connection_id }            → { pending_count, server_time_ms }
 //   POST /agent/v1/device-bridge/poll      → { device_id, connection_id, wait_ms }   → { request|null }
 //   POST /agent/v1/device-bridge/result    → { device_id, connection_id, request_id, consent_token, result|error }
-//   POST /agent/v1/device-bridge/invoke    → 雲端 agent 發起（本檔不呼叫）
-// 錯誤碼：device_connection_stale / device_offline / device_request_not_found /
-// consent_token_{not_found,expired,mismatch,replayed}（閘道於 result 時再驗票）。
+//   POST /agent/v1/device-bridge/invoke    → 云端 agent 发起（本档不呼叫）
+// 错误码：device_connection_stale / device_offline / device_request_not_found /
+// consent_token_{not_found,expired,mismatch,replayed}（闸道于 result 时再验票）。
 //
-// ── 預設 OFF（硬性）─────────────────────────────────────────────────────
-// 只有 opts.enabled === true 才連；否則停在 "off"，一個位元組都不出網。
+// ── 预设 OFF（硬性）─────────────────────────────────────────────────────
+// 只有 opts.enabled === true 才连；否则停在 "off"，一个位元组都不出网。
 //
-// ── 憑證缺口（誠實處理，不自造鑑權）─────────────────────────────────────
-// 閘道鑑權沿用既有 Bearer sk-biz-*（auth-gw.ts）。桌面殼載入遠端頁面、只有
-// session，**沒有** biz key，也**不**在此硬編任何 key。改以 credentialProvider
-// 注入點接受憑證；回 null/空 → bridge 不啟動並回報 credentials_unavailable。
-// 補法見 desktop/DEVICE-BRIDGE.md。
+// ── 凭证缺口（诚实处理，不自造鉴权）─────────────────────────────────────
+// 闸道鉴权沿用既有 Bearer sk-biz-*（auth-gw.ts）。桌面壳载入远端页面、只有
+// session，**没有** biz key，也**不**在此硬编任何 key。改以 credentialProvider
+// 注入点接受凭证；回 null/空 → bridge 不启动并回报 credentials_unavailable。
+// 补法见 desktop/DEVICE-BRIDGE.md。
 //
-// ── 安全邊界（能力寧可少；執行器抽到 lib/bridge-executor.js，可測）────────
-//  1. 工具白名單＝list_dir/read_file/grep/stat（無寫/刪/執行）。
-//  2. 路徑先 realpath 解 symlink，再過 policy.js isSensitivePath（denylist，掃所有
-//     路徑段，與雲端 device-bridge-policy.ts 同語義）。
-//  3. allowlist **必填**：授權根來自 local-worker.js 的**同一份** authorizedRoots
-//     （使用者由 pickFiles 顯式挑選的根），空集＝全拒並拒絕服務；**不得**退回
-//     「只驗 denylist」。
-//  4. 拒絕檔案系統根路徑（path_is_root）；grep 逐檔大小上限，避免整檔入記憶體。
-//  5. 回傳前 clampResult 夾 256KB＋截斷標記（與雲端側同上限）。
-//  6. consent_token 執行前先驗形狀/有效期（真正的原子驗票在閘道 result 時）；
-//     **錯誤回報同樣帶票**（M4，否則閘道先 consume 一律 not_found 吃滿逾時）。
-//  7. 任何 log 只寫狀態與錯誤碼，**永不**寫憑證或檔案內容。
+// ── 安全边界（能力宁可少；执行器抽到 lib/bridge-executor.js，可测）────────
+//  1. 工具白名单＝list_dir/read_file/grep/stat（无写/删/执行）。
+//  2. 路径先 realpath 解 symlink，再过 policy.js isSensitivePath（denylist，扫所有
+//     路径段，与云端 device-bridge-policy.ts 同语义）。
+//  3. allowlist **必填**：授权根来自 local-worker.js 的**同一份** authorizedRoots
+//     （使用者由 pickFiles 显式挑选的根），空集＝全拒并拒绝服务；**不得**退回
+//     「只验 denylist」。
+//  4. 拒绝档案系统根路径（path_is_root）；grep 逐档大小上限，避免整档入记忆体。
+//  5. 回传前 clampResult 夹 256KB＋截断标记（与云端侧同上限）。
+//  6. consent_token 执行前先验形状/有效期（真正的原子验票在闸道 result 时）；
+//     **错误回报同样带票**（M4，否则闸道先 consume 一律 not_found 吃满逾时）。
+//  7. 任何 log 只写状态与错误码，**永不**写凭证或档案内容。
 
 "use strict";
 
@@ -47,30 +47,30 @@ const localWorker = require("./local-worker.js");
 
 const PREFIX = "/agent/v1/device-bridge";
 const DEFAULT_GATEWAY_BASE_URL = "https://image.tinchak0207.xyz";
-const DEFAULT_POLL_WAIT_MS = 20000; // <= 閘道 DEVICE_POLL_MAX_WAIT_MS(25000)
+const DEFAULT_POLL_WAIT_MS = 20000; // <= 闸道 DEVICE_POLL_MAX_WAIT_MS(25000)
 const DEFAULT_HEARTBEAT_MS = 30000;
 
-// ── 穩定「安裝」裝置識別（缺陷修復；純函式、零 IO）───────────────────────
-// 病因：register 不帶 device_id ⇒ 閘道對每次重連都 randomId("dev") 配一個**新的**
-// deviceId；同一 tenant 的註冊表在 heartbeat TTL 內累積多筆 online ⇒
-// pickDeviceForTenant 回 `device_ambiguous`（閘道「多台不猜」是刻意的安全語義，**不動**），
-// 或把請求送到已死那台 ⇒ 同一殼內第二發 invoke 起吃滿 30s 的 device_request_timeout。
-// 正解在裝置端：同一安裝回報**穩定** deviceId，讓重註冊取代同一筆
-// `deviceKey(tenant, deviceId)` 紀錄（閘道 register 收 body.device_id，見
+// ── 稳定「安装」装置识别（缺陷修复；纯函式、零 IO）───────────────────────
+// 病因：register 不带 device_id ⇒ 闸道对每次重连都 randomId("dev") 配一个**新的**
+// deviceId；同一 tenant 的注册表在 heartbeat TTL 内累积多笔 online ⇒
+// pickDeviceForTenant 回 `device_ambiguous`（闸道「多台不猜」是刻意的安全语义，**不动**），
+// 或把请求送到已死那台 ⇒ 同一壳内第二发 invoke 起吃满 30s 的 device_request_timeout。
+// 正解在装置端：同一安装回报**稳定** deviceId，让重注册取代同一笔
+// `deviceKey(tenant, deviceId)` 纪录（闸道 register 收 body.device_id，见
 // deploy-staging/gateway/device-bridge.ts:1038、:561）。
 //
-// 產生與持久化由 host（main.js）負責：本 helper 只做「讀 store → 有值沿用／無值產生
-// 一次並寫回」的純語義，store 由 main.js 以 <userData>/settings.json 的白名單欄位
-// deviceBridgeDeviceId 適配（比照 deviceBridgeEnabled/deviceBridgeMode 的讀寫慣例）。
-// 形狀對齊閘道 randomId("dev")：`dev_` + 32 hex（36 字元，遠低於閘道 128 上限）。
+// 产生与持久化由 host（main.js）负责：本 helper 只做「读 store → 有值沿用／无值产生
+// 一次并写回」的纯语义，store 由 main.js 以 <userData>/settings.json 的白名单栏位
+// deviceBridgeDeviceId 适配（比照 deviceBridgeEnabled/deviceBridgeMode 的读写惯例）。
+// 形状对齐闸道 randomId("dev")：`dev_` + 32 hex（36 字元，远低于闸道 128 上限）。
 
-/** 產生一枚安裝識別（非機密，可下發閘道）。 */
+/** 产生一枚安装识别（非机密，可下发闸道）。 */
 function generateStableDeviceId() {
   return `dev_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
 /**
- * 讀取持久化的安裝 deviceId；沒有（或非法）才產生一次並寫回 store。
+ * 读取持久化的安装 deviceId；没有（或非法）才产生一次并写回 store。
  * @param {{read?:()=>unknown, write?:(id:string)=>void}} store
  * @returns {string} 非空 deviceId（同一 store 第二次呼叫回同一值、不重生）
  */
@@ -86,21 +86,21 @@ function resolveStableDeviceId(store) {
   try {
     if (store && typeof store.write === "function") store.write(id);
   } catch {
-    /* 寫入失敗仍回本次 id（下次啟動會重生，但不致命、不影響本次連線） */
+    /* 写入失败仍回本次 id（下次启动会重生，但不致命、不影响本次连线） */
   }
   return id;
 }
 
-// ── 對話內就地授權（consent）─────────────────────────────────────────────
-// 協議（凍結欄位名）：DeviceRequestMessage.consent = { scope: "once"|"session"|"permanent",
-// roots: string[] }。三態語義：
-//   once      — 只對**這一則**請求有效，不記憶、不落盤。
-//   session   — 本殼執行期間有效（記憶體累積、去重）。
-//   permanent — 落盤（重啟仍有效；由注入的 persistConsentRoots 併入 settings）。
-// 雲端對 session/permanent 會在其後每次 invoke 冪等重送 ⇒ 裝置端去重。
-// 形狀不合／未知 scope／roots 非陣列 → 當作**沒有 consent**（fail-closed，不拋、不放行）。
+// ── 对话内就地授权（consent）─────────────────────────────────────────────
+// 协议（冻结栏位名）：DeviceRequestMessage.consent = { scope: "once"|"session"|"permanent",
+// roots: string[] }。三态语义：
+//   once      — 只对**这一则**请求有效，不记忆、不落盘。
+//   session   — 本壳执行期间有效（记忆体累积、去重）。
+//   permanent — 落盘（重启仍有效；由注入的 persistConsentRoots 并入 settings）。
+// 云端对 session/permanent 会在其后每次 invoke 幂等重送 ⇒ 装置端去重。
+// 形状不合／未知 scope／roots 非阵列 → 当作**没有 consent**（fail-closed，不抛、不放行）。
 
-/** 正規化根清單：僅非空絕對路徑字串、去重（fail-closed，非絕對一律略過）。 */
+/** 正规化根清单：仅非空绝对路径字串、去重（fail-closed，非绝对一律略过）。 */
 function normalizeConsentRootList(roots) {
   if (!Array.isArray(roots)) return [];
   const out = [];
@@ -113,7 +113,7 @@ function normalizeConsentRootList(roots) {
   return out;
 }
 
-/** 解析 request.consent；形狀不合／未知 scope／roots 空 → null（視為無同意）。 */
+/** 解析 request.consent；形状不合／未知 scope／roots 空 → null（视为无同意）。 */
 function parseConsent(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const scope = raw.scope;
@@ -123,7 +123,7 @@ function parseConsent(raw) {
   return { scope, roots };
 }
 
-/** 聯集（a ∪ b），保留 a 的順序、去重。 */
+/** 联集（a ∪ b），保留 a 的顺序、去重。 */
 function unionRoots(a, b) {
   const out = Array.isArray(a) ? a.slice() : [];
   for (const r of Array.isArray(b) ? b : []) {
@@ -133,8 +133,8 @@ function unionRoots(a, b) {
 }
 
 /**
- * 由同意根推出 allow 規則（與閘道 authorizationRuleSpecifier 同形），併入既有 rules。
- * 既有 rules 可為 undefined／陣列／{deny,ask,allow}；不改變既有規則，只加 allow 桶。
+ * 由同意根推出 allow 规则（与闸道 authorizationRuleSpecifier 同形），并入既有 rules。
+ * 既有 rules 可为 undefined／阵列／{deny,ask,allow}；不改变既有规则，只加 allow 桶。
  */
 function withConsentAllowRules(base, consentRoots) {
   const extra = [];
@@ -153,9 +153,9 @@ function withConsentAllowRules(base, consentRoots) {
 }
 
 
-// 不另造第二套授權機制；空集 ⇒ bridge 拒絕服務（見 startDeviceBridge）。
-// W6c：mode/rules 為第二道防線的輸入，即時讀 runtime（由 startDeviceBridge 注入，
-// 未注入＝null/undefined，執行器回退 "auto" 以維持既有呼叫端行為）。
+// 不另造第二套授权机制；空集 ⇒ bridge 拒绝服务（见 startDeviceBridge）。
+// W6c：mode/rules 为第二道防线的输入，即时读 runtime（由 startDeviceBridge 注入，
+// 未注入＝null/undefined，执行器回退 "auto" 以维持既有呼叫端行为）。
 const executor = createBridgeExecutor({
   roots: () => Array.from(localWorker.authorizedRoots),
   mode: () => (runtime.mode === undefined ? undefined : runtime.mode),
@@ -174,29 +174,29 @@ const runtime = {
   heartbeatIntervalMs: DEFAULT_HEARTBEAT_MS,
   pollUrl: `${PREFIX}/poll`,
   attempt: 0,
-  gen: 0, // 連線世代：重連/停止時遞增，讓舊迴圈自行退場（防重連後雙迴圈）
+  gen: 0, // 连线世代：重连/停止时递增，让旧回圈自行退场（防重连后双回圈）
   controller: null,
   heartbeatTimer: null,
   reconnectTimer: null,
   lastError: null,
   onStatus: null,
-  // W6c 權限模式與規則（register 下發；未提供＝null/undefined，不下發欄位）。
+  // W6c 权限模式与规则（register 下发；未提供＝null/undefined，不下发栏位）。
   mode: null,
   rules: undefined,
-  // H(roots 缺陷)：register 必須下發的已授權根（string[]）。由 startDeviceBridge
-  // 從 rootsProvider/localWorker.authorizedRoots 取值存入；null＝未設定（不下發）。
+  // H(roots 缺陷)：register 必须下发的已授权根（string[]）。由 startDeviceBridge
+  // 从 rootsProvider/localWorker.authorizedRoots 取值存入；null＝未设定（不下发）。
   roots: null,
-  // 穩定安裝識別（缺陷修復）：register body.device_id。由 startDeviceBridge 從
-  // deviceIdProvider 取值存入；null＝未設定（不下發，回退閘道自行配 id）。
+  // 稳定安装识别（缺陷修复）：register body.device_id。由 startDeviceBridge 从
+  // deviceIdProvider 取值存入；null＝未设定（不下发，回退闸道自行配 id）。
   installDeviceId: null,
-  // 對話內就地授權（缺陷修復）：記憶體累積的同意根（session/permanent 收到的根，
-  // 去重）。once 不進此處。register 時與 runtime.roots 聯集下發；handleRequest 時
-  // 作為 grantedRoots 併入 allowlist 與第二道防線。
+  // 对话内就地授权（缺陷修复）：记忆体累积的同意根（session/permanent 收到的根，
+  // 去重）。once 不进此处。register 时与 runtime.roots 联集下发；handleRequest 时
+  // 作为 grantedRoots 并入 allowlist 与第二道防线。
   consentRoots: [],
-  // 注入點（型別錯＝視為未設定，不得把 undefined 當空陣列而清空既有授權）：
-  //   persistConsentRoots — 收到 permanent 時落盤（由 main.js 併入 settings 並寫回）。
-  //   auditConsent        — 每接受一個**新的**同意根追加一行本機稽核（無 token/apiKey）。
-  //   consentRootsProvider— 啟動時讀取已落盤的永久同意根（供 register 與放行）。
+  // 注入点（型别错＝视为未设定，不得把 undefined 当空阵列而清空既有授权）：
+  //   persistConsentRoots — 收到 permanent 时落盘（由 main.js 并入 settings 并写回）。
+  //   auditConsent        — 每接受一个**新的**同意根追加一行本机稽核（无 token/apiKey）。
+  //   consentRootsProvider— 启动时读取已落盘的永久同意根（供 register 与放行）。
   persistConsentRoots: null,
   auditConsent: null,
 };
@@ -219,12 +219,12 @@ function setStatus(status, detail) {
     try {
       runtime.onStatus(snapshot());
     } catch {
-      /* 指示器失敗不得影響 bridge */
+      /* 指示器失败不得影响 bridge */
     }
   }
 }
 
-// ── HTTP（唯一出網點；憑證只進 Authorization 標頭，永不入 log）────────────
+// ── HTTP（唯一出网点；凭证只进 Authorization 标头，永不入 log）────────────
 
 function errorCodeOf(status, json) {
   if (json && json.error && typeof json.error.code === "string") return json.error.code;
@@ -259,11 +259,11 @@ async function postOk(pathname, body) {
   return json;
 }
 
-// ── 路徑閘與四個唯讀工具：已抽到 lib/bridge-executor.js（可測）────────────
-// client 只保留連線與編排；executeTool/requireLocalPath/resolveReal 一律走
-// executor（同一份 policy denylist + 必填 allowlist 語義）。
+// ── 路径闸与四个唯读工具：已抽到 lib/bridge-executor.js（可测）────────────
+// client 只保留连线与编排；executeTool/requireLocalPath/resolveReal 一律走
+// executor（同一份 policy denylist + 必填 allowlist 语义）。
 
-// ── 取件 → 執行 → 回傳 ─────────────────────────────────────────────────
+// ── 取件 → 执行 → 回传 ─────────────────────────────────────────────────
 
 async function submitError(requestId, consentToken, message) {
   if (!requestId) return;
@@ -272,13 +272,13 @@ async function submitError(requestId, consentToken, message) {
       device_id: runtime.deviceId,
       connection_id: runtime.connectionId,
       request_id: requestId,
-      // M4：錯誤回報同樣帶票。閘道 result 一律先 consume 同意票，缺票必得
-      // consent_token_not_found → 請求吃滿逾時。帶票＝路徑正確。
+      // M4：错误回报同样带票。闸道 result 一律先 consume 同意票，缺票必得
+      // consent_token_not_found → 请求吃满逾时。带票＝路径正确。
       consent_token: consentToken || undefined,
       error: String(message).slice(0, 500),
     });
   } catch {
-    /* 回報失敗：記錄狀態，不吞掉連線 */
+    /* 回报失败：记录状态，不吞掉连线 */
   }
 }
 
@@ -286,7 +286,7 @@ async function handleRequest(request) {
   const requestId = request && typeof request.request_id === "string" ? request.request_id : "";
   const consentToken = request && typeof request.consent_token === "string" ? request.consent_token : "";
   if (!requestId) return;
-  // 本機端執行前的同意票檢（形狀/有效期）；真正的單次原子驗票在閘道 result 時。
+  // 本机端执行前的同意票检（形状/有效期）；真正的单次原子验票在闸道 result 时。
   if (!consentToken) return submitError(requestId, consentToken, "consent_token_missing");
   if (Number.isFinite(request.expires_at) && request.expires_at <= Date.now()) {
     return submitError(requestId, consentToken, "consent_token_expired");
@@ -295,9 +295,9 @@ async function handleRequest(request) {
   const clean = proto.sanitizeToolArgs(request.tool, request.args);
   if (!clean.ok) return submitError(requestId, consentToken, `${clean.code}: ${clean.message}`);
 
-  // 對話內就地授權：解析本請求的 consent（形狀不合／未知 scope ＝ 當沒有，不得拋）。
-  // session/permanent 的根累積進記憶體（去重）；permanent 另呼叫 persistConsentRoots 落盤。
-  // once 只對本請求有效（不進記憶體、不落盤）。任一注入缺失＝只影響落盤/稽核，不影響放行。
+  // 对话内就地授权：解析本请求的 consent（形状不合／未知 scope ＝ 当没有，不得抛）。
+  // session/permanent 的根累积进记忆体（去重）；permanent 另呼叫 persistConsentRoots 落盘。
+  // once 只对本请求有效（不进记忆体、不落盘）。任一注入缺失＝只影响落盘/稽核，不影响放行。
   const consent = parseConsent(request.consent);
   if (consent && consent.scope !== "once") {
     for (const root of consent.roots) {
@@ -307,7 +307,7 @@ async function handleRequest(request) {
         try {
           runtime.auditConsent({ scope: consent.scope, root });
         } catch {
-          /* 稽核失敗不得影響執行 */
+          /* 稽核失败不得影响执行 */
         }
       }
     }
@@ -315,7 +315,7 @@ async function handleRequest(request) {
       try {
         runtime.persistConsentRoots(consent.roots.slice());
       } catch {
-        /* 落盤失敗＝永久授權本輪仍有效，不阻塞本次執行 */
+        /* 落盘失败＝永久授权本轮仍有效，不阻塞本次执行 */
       }
     }
   }
@@ -341,7 +341,7 @@ async function handleRequest(request) {
   });
 }
 
-// ── 連線生命週期（註冊 → 心跳 → 長輪詢；失敗指數退避重連）───────────────
+// ── 连线生命周期（注册 → 心跳 → 长轮询；失败指数退避重连）───────────────
 
 function stopHeartbeat() {
   if (runtime.heartbeatTimer) {
@@ -351,25 +351,25 @@ function stopHeartbeat() {
 }
 
 async function registerOnce() {
-  // W6c：register body 帶上權限模式與規則（未設定＝不下發欄位，維持既有呼叫端行為）。
-  // 閘道契約：mode ∈ off/ask/auto/full，缺＝ask；rules 為三桶/扁平規則陣列。
-  // roots（缺陷修復）：閘道以 body.roots 建立 authorizedRoots（device-bridge.ts:1048
+  // W6c：register body 带上权限模式与规则（未设定＝不下发栏位，维持既有呼叫端行为）。
+  // 闸道契约：mode ∈ off/ask/auto/full，缺＝ask；rules 为三桶/扁平规则阵列。
+  // roots（缺陷修复）：闸道以 body.roots 建立 authorizedRoots（device-bridge.ts:1048
   // → register() 的 sanitizeAuthorizedRoots(input.roots)）；缺＝空集 ⇒ list_dir/grep
-  // 恆 403 `no_authorized_root`。務必下發，形狀＝string[]（與閘道契約逐欄一致）。
-  // 空值處理：startDeviceBridge 對空授權根已先拒絕服務（no_authorized_roots、根本不會
-  // 走到 register），故此處正常必為非空陣列；防禦上仍照實下發陣列（閘道對「缺欄位」與
-  // 「空陣列」同視為空集，且裝置身分由 deviceKey(tenant,deviceId) 決定、與 roots 無關，
-  // 不會被誤判成「無裝置」）——明確空陣列比省欄位更能讓閘道端對帳。
+  // 恒 403 `no_authorized_root`。务必下发，形状＝string[]（与闸道契约逐栏一致）。
+  // 空值处理：startDeviceBridge 对空授权根已先拒绝服务（no_authorized_roots、根本不会
+  // 走到 register），故此处正常必为非空阵列；防御上仍照实下发阵列（闸道对「缺栏位」与
+  // 「空阵列」同视为空集，且装置身分由 deviceKey(tenant,deviceId) 决定、与 roots 无关，
+  // 不会被误判成「无装置」）——明确空阵列比省栏位更能让闸道端对帐。
   const body = {};
-  // home（缺陷修復）：register 從不送 home ⇒ 閘道 authorizationRootProblem 的
-  // `root_too_broad`（家目錄本身不可授權）判不出來。下發 os.homedir() 讓它生效。
+  // home（缺陷修复）：register 从不送 home ⇒ 闸道 authorizationRootProblem 的
+  // `root_too_broad`（家目录本身不可授权）判不出来。下发 os.homedir() 让它生效。
   body.home = os.homedir();
-  // 穩定安裝識別（缺陷修復）：帶上即「同裝置重註冊＝換連線、舊連線作廢」，閘道以
-  // deviceKey(tenant,deviceId) 取代同一筆紀錄，不會累積多台 online（見檔頭 helper 註解）。
+  // 稳定安装识别（缺陷修复）：带上即「同装置重注册＝换连线、旧连线作废」，闸道以
+  // deviceKey(tenant,deviceId) 取代同一笔纪录，不会累积多台 online（见档头 helper 注解）。
   if (typeof runtime.installDeviceId === "string" && runtime.installDeviceId) body.device_id = runtime.installDeviceId;
   if (runtime.mode !== null && runtime.mode !== undefined) body.mode = runtime.mode;
-  // roots/rules ＝ 已設定（使用者挑的根／既有規則）∪ 對話內同意根（及其 allow 規則）。
-  // 只做聯集，不改變既有 rootsProvider 來源；無同意時逐值等於既有下發內容。
+  // roots/rules ＝ 已设定（使用者挑的根／既有规则）∪ 对话内同意根（及其 allow 规则）。
+  // 只做联集，不改变既有 rootsProvider 来源；无同意时逐值等于既有下发内容。
   const consentRoots = Array.isArray(runtime.consentRoots) ? runtime.consentRoots : [];
   if (runtime.rules !== undefined || consentRoots.length > 0) {
     body.rules = withConsentAllowRules(runtime.rules, consentRoots);
@@ -429,7 +429,7 @@ function startPoll() {
         try {
           await handleRequest(request);
         } catch (err) {
-          // 單件失敗（含回報網路錯）不停 loop；連線問題會由下一次 poll 觸發重連。
+          // 单件失败（含回报网路错）不停 loop；连线问题会由下一次 poll 触发重连。
           runtime.lastError = err && err.code ? err.code : "request_failed";
         }
       }
@@ -448,7 +448,7 @@ function scheduleReconnect(code) {
   }, delay);
 }
 
-/** 任何心跳/輪詢失敗：停心跳、中止 in-flight 請求、排程退避重連。 */
+/** 任何心跳/轮询失败：停心跳、中止 in-flight 请求、排程退避重连。 */
 function disconnect(code) {
   if (!runtime.running) return;
   runtime.gen += 1;
@@ -478,12 +478,12 @@ async function connect() {
   }
 }
 
-// ── 對外 API ───────────────────────────────────────────────────────────
+// ── 对外 API ───────────────────────────────────────────────────────────
 
 /**
- * 啟動 device bridge（預設不啟動：enabled !== true 即停在 "off"）。
+ * 启动 device bridge（预设不启动：enabled !== true 即停在 "off"）。
  * @param {{gatewayBaseUrl?:string, credentialProvider?:()=>Promise<string|null>|string|null, enabled?:boolean, rootsProvider?:()=>string[], modeProvider?:()=>("off"|"ask"|"auto"|"full"), rulesProvider?:()=>unknown, deviceIdProvider?:()=>string, consentRootsProvider?:()=>string[], persistConsentRoots?:(roots:string[])=>void, auditConsent?:(entry:{scope:string,root:string})=>void, onStatus?:(s:object)=>void}} opts
- * @returns {Promise<object>} 狀態快照
+ * @returns {Promise<object>} 状态快照
  */
 async function startDeviceBridge(opts = {}) {
   if (runtime.running) return snapshot();
@@ -491,8 +491,8 @@ async function startDeviceBridge(opts = {}) {
   if (typeof opts.onStatus === "function") runtime.onStatus = opts.onStatus;
   runtime.enabled = opts.enabled === true;
 
-  // W6c：注入點一律驗型別（教訓：跨界傳錯型別會被下游守衛靜默降級）。
-  // modeProvider 必須是 function 且回白名單值；否則視為未設定（不下發、執行器回退 auto）。
+  // W6c：注入点一律验型别（教训：跨界传错型别会被下游守卫静默降级）。
+  // modeProvider 必须是 function 且回白名单值；否则视为未设定（不下发、执行器回退 auto）。
   runtime.mode = null;
   runtime.rules = undefined;
   runtime.roots = null;
@@ -513,9 +513,9 @@ async function startDeviceBridge(opts = {}) {
     }
   }
 
-  // 穩定安裝識別（缺陷修復）：main.js 以 settings.json 白名單欄位（deviceBridgeDeviceId）
-  // 適配的 provider 注入；型別/值錯一律視為未設定（不下發 device_id，回退閘道自行配 id
-  // 的既有行為，與 modeProvider 注入點同規矩）。
+  // 稳定安装识别（缺陷修复）：main.js 以 settings.json 白名单栏位（deviceBridgeDeviceId）
+  // 适配的 provider 注入；型别/值错一律视为未设定（不下发 device_id，回退闸道自行配 id
+  // 的既有行为，与 modeProvider 注入点同规矩）。
   runtime.installDeviceId = null;
   if (typeof opts.deviceIdProvider === "function") {
     try {
@@ -526,9 +526,9 @@ async function startDeviceBridge(opts = {}) {
     }
   }
 
-  // 對話內就地授權（缺陷修復）：注入點一律驗型別（同 modeProvider 規矩，型別錯＝未設定）。
-  // consentRootsProvider 提供**已落盤**的永久同意根（重啟後 register/放行仍有效）；
-  // persistConsentRoots 於收到 permanent 時落盤；auditConsent 選配（本機稽核，不含機密）。
+  // 对话内就地授权（缺陷修复）：注入点一律验型别（同 modeProvider 规矩，型别错＝未设定）。
+  // consentRootsProvider 提供**已落盘**的永久同意根（重启后 register/放行仍有效）；
+  // persistConsentRoots 于收到 permanent 时落盘；auditConsent 选配（本机稽核，不含机密）。
   runtime.persistConsentRoots = typeof opts.persistConsentRoots === "function" ? opts.persistConsentRoots : null;
   runtime.auditConsent = typeof opts.auditConsent === "function" ? opts.auditConsent : null;
   runtime.consentRoots = [];
@@ -545,9 +545,9 @@ async function startDeviceBridge(opts = {}) {
     return snapshot();
   }
 
-  // H1：allowlist 必填。無授權根（使用者尚未 pickFiles 挑過任何根）⇒ 整條 bridge
-  // 拒絕服務並回明確狀態，**不得**退回「只驗 denylist」。這是正確且刻意的結果。
-  // 有效根 ＝ rootsProvider() ∪ 已落盤的同意根（永久授權在重啟後仍能服務）。
+  // H1：allowlist 必填。无授权根（使用者尚未 pickFiles 挑过任何根）⇒ 整条 bridge
+  // 拒绝服务并回明确状态，**不得**退回「只验 denylist」。这是正确且刻意的结果。
+  // 有效根 ＝ rootsProvider() ∪ 已落盘的同意根（永久授权在重启后仍能服务）。
   const baseRoots = typeof opts.rootsProvider === "function" ? opts.rootsProvider() : Array.from(localWorker.authorizedRoots);
   const roots = unionRoots(Array.isArray(baseRoots) ? baseRoots : [], runtime.consentRoots);
   if (roots.length === 0) {
@@ -555,7 +555,7 @@ async function startDeviceBridge(opts = {}) {
     setStatus("no_authorized_roots", "no_authorized_roots");
     return snapshot();
   }
-  // 存入 runtime 供 registerOnce 下發（H：此前只做本機前置閘，從未上報閘道）。
+  // 存入 runtime 供 registerOnce 下发（H：此前只做本机前置闸，从未上报闸道）。
   runtime.roots = roots;
 
   let credential = null;
@@ -577,7 +577,7 @@ async function startDeviceBridge(opts = {}) {
   return snapshot();
 }
 
-/** 停止並清除所有計時器/請求；冪等。 */
+/** 停止并清除所有计时器/请求；幂等。 */
 function stopDeviceBridge() {
   runtime.running = false;
   runtime.polling = false;
@@ -597,20 +597,20 @@ function stopDeviceBridge() {
   }
   runtime.deviceId = null;
   runtime.connectionId = null;
-  runtime.credential = null; // 不保留憑證
+  runtime.credential = null; // 不保留凭证
   runtime.attempt = 0;
   setStatus("off");
   return snapshot();
 }
 
-/** 觀測用狀態快照。 */
+/** 观测用状态快照。 */
 function getDeviceBridgeState() {
   return snapshot();
 }
 
 /**
- * 程式化登記授權根（與 pickFiles 寫入的是**同一份** authorizedRoots；非第二套機制）。
- * 回傳目前授權根清單（realpath）。正常路徑由 W3 的 pickFiles 在使用者挑選時登記。
+ * 程式化登记授权根（与 pickFiles 写入的是**同一份** authorizedRoots；非第二套机制）。
+ * 回传目前授权根清单（realpath）。正常路径由 W3 的 pickFiles 在使用者挑选时登记。
  */
 function authorizeDeviceBridgeRoots(paths) {
   return localWorker.authorizeRoots(paths).map((entry) => entry.real);

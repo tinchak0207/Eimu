@@ -102,7 +102,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * （src/lib/expert-contract.ts:80）是 **camelCase**（`artifactPath` / `durationSec`）。
  * 若不在这一层映射，外部 agent 照工具说明书只给 `{"duration_sec": 12}` 会**必然失败**——
  * 2026-10-03 生产实测错误原文：
- *   `evidence 至少需要一項可核驗指針：url（可訪問地址）、artifactPath（檔案路徑）、bytes（字節數）或 durationSec（時長秒）任一非空。`
+ *   `evidence 至少需要一项可核验指针：url（可访问地址）、artifactPath（档案路径）、bytes（字节数）或 durationSec（时长秒）任一非空。`
  * （真源只读 evidence.url / evidence.artifactPath / evidence.bytes / evidence.durationSec，
  *  snake_case 键对它是空气。）
  *
@@ -123,7 +123,7 @@ function normalizeEvidenceKeys(v: Record<string, unknown>): Record<string, unkno
   if (normalized.durationSec === undefined && v.duration_sec !== undefined) {
     normalized.durationSec = v.duration_sec;
   }
-  // 移除 snake_case 别名：统一成底层型别的键形，避免同一指針以两个键并存。
+  // 移除 snake_case 别名：统一成底层型别的键形，避免同一指针以两个键并存。
   delete normalized.artifact_path;
   delete normalized.duration_sec;
   return normalized;

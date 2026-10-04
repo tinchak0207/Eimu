@@ -3,25 +3,25 @@ import { reconcileMapayOrders } from "@/lib/generation-core/mapay-order-reconcil
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（支付商／控面 DB／new-api）都在矽谷，同區省一趟橫跨美國
+export const preferredRegion = "sfo1"; // 上游（支付商／控面 DB／new-api）都在矽谷，同区省一趟横跨美国
 
 /**
- * mPay 付款健康探針（**只讀，永不寫入**）。
+ * mPay 付款健康探针（**只读，永不写入**）。
  *
- * 生產實證（2026-10-04）：上游 `act=order` 是「按單號單查」不是列表端點，且成功碼是 1
- * （code=0 是失敗）。舊版把 code=0 當成「成功但 data 空」並回 healthy——那是比沒有探針
- * 更糟的**假陽性**。現行誠實口徑：
+ * 生产实证（2026-10-04）：上游 `act=order` 是「按单号单查」不是列表端点，且成功码是 1
+ * （code=0 是失败）。旧版把 code=0 当成「成功但 data 空」并回 healthy——那是比没有探针
+ * 更糟的**假阳性**。现行诚实口径：
  *
- *   只有「確實查到 ≥1 筆支付商已付款的單，且全部已履約」才算 healthy（HTTP 200）。
+ *   只有「确实查到 ≥1 笔支付商已付款的单，且全部已履约」才算 healthy（HTTP 200）。
  *   以下任一情形一律 **非 200（503）**：
- *     - 控制面 DB 或支付商憑證不可用（configured=false）
- *     - 看不到任何訂單實體（candidates=0 或全部查無 ⇒ upstream_empty）
- *     - 逐筆查詢失敗（query_errors 非空）
- *     - 履約證據讀不到（evidence_unreadable 非空）
+ *     - 控制面 DB 或支付商凭证不可用（configured=false）
+ *     - 看不到任何订单实体（candidates=0 或全部查无 ⇒ upstream_empty）
+ *     - 逐笔查询失败（query_errors 非空）
+ *     - 履约证据读不到（evidence_unreadable 非空）
  *     - 有 paid_unfulfilled > 0 或未定（unknown）> 0
  *
- * 顯式探針（只讀）：`?orders=IMGMU7UH9SFF9A21D`（逗號分隔多筆）→ 只查這些指定單號並回報，
- * 供 orchestrator 驗證歷史單。**不是自動補交付**——本端點沒有任何寫入副作用。
+ * 显式探针（只读）：`?orders=IMGMU7UH9SFF9A21D`（逗号分隔多笔）→ 只查这些指定单号并回报，
+ * 供 orchestrator 验证历史单。**不是自动补交付**——本端点没有任何写入副作用。
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -63,7 +63,7 @@ export async function GET(request: Request) {
       query_errors: report.residue.queryErrors,
       upstream_empty: report.residue.upstreamEmpty,
       evidence_unreadable: report.residue.evidenceUnreadable,
-      // 未履約單號（供人工處理；不含任何 secret／憑證）。
+      // 未履约单号（供人工处理；不含任何 secret／凭证）。
       paid_unfulfilled_orders: report.paidUnfulfilled.map((finding) => finding.outTradeNo),
       notes: report.notes,
     };

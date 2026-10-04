@@ -1,8 +1,8 @@
 "use client";
 
-// /admin 首屏矩形樹狀圖：外層矩形 = 模型佔比，內層矩形 = 該模型內分辨率檔位佔比。
-// 幾何完全來自 squarify（src/lib/treemap.ts）——每個矩形的面積嚴格等於其請求數佔比，
-// 不是視覺近似，可以直接讀色塊大小當百分比。
+// /admin 首屏矩形树状图：外层矩形 = 模型占比，内层矩形 = 该模型内分辨率档位占比。
+// 几何完全来自 squarify（src/lib/treemap.ts）——每个矩形的面积严格等于其请求数占比，
+// 不是视觉近似，可以直接读色块大小当百分比。
 
 import { useMemo } from "react";
 import { squarify } from "@/lib/treemap";
@@ -25,7 +25,7 @@ function resolutionRank(resolution: string): number {
   return index === -1 ? RESOLUTION_ORDER.length - 1 : index;
 }
 
-/** 同一模型內不同分辨率用亮度梯度區分——一眼能看出「這幾塊同屬一個模型」。失败桶固定灰色，不参与梯度。 */
+/** 同一模型内不同分辨率用亮度梯度区分——一眼能看出「这几块同属一个模型」。失败桶固定灰色，不参与梯度。 */
 function shadeForIndex(baseColor: string, index: number, total: number, resolution: string): string {
   if (resolution === FAILED_BUCKET) return FAILED_COLOR;
   const gradientTotal = total - (total > 1 ? 1 : 0);

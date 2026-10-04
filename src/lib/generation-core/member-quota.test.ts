@@ -1,11 +1,11 @@
-// B1 成員點數配額（REQ-B1）測試：映射層 + 分配/回收 + 可視面 + 端到端口徑（user 層模型）。
+// B1 成员点数配额（REQ-B1）测试：映射层 + 分配/回收 + 可视面 + 端到端口径（user 层模型）。
 //
-// 全部走注入的假 new-api（users.quota：主帳帳號 + 成員帳號）與假控制面 SQL：
-// 斷言的是「本地只做映射與分配、數字真源全在 new-api」、「分配 = 主帳 → 成員的
-// 轉移（總額守恆）」以及分配/回收的幂等與不超賣。
+// 全部走注入的假 new-api（users.quota：主帐帐号 + 成员帐号）与假控制面 SQL：
+// 断言的是「本地只做映射与分配、数字真源全在 new-api」、「分配 = 主帐 → 成员的
+// 转移（总额守恒）」以及分配/回收的幂等与不超卖。
 //
-// user 層模型（09-23 重切）：成員 = new-api **另一個 user**，配額桶 = 該 user 的
-// users.quota（token 子額度桶模型已被只讀探針硬否定）。
+// user 层模型（09-23 重切）：成员 = new-api **另一个 user**，配额桶 = 该 user 的
+// users.quota（token 子额度桶模型已被只读探针硬否定）。
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -58,7 +58,7 @@ function withEnv(
 
 const COIN = QUOTA_PER_COIN;
 
-// ── 假 new-api：users.quota（主帳帳號 + 成員帳號） ────────────────────────
+// ── 假 new-api：users.quota（主帐帐号 + 成员帐号） ────────────────────────
 
 interface FakeUserState {
   quota: number;
@@ -73,7 +73,7 @@ function fakeNewApi(seed: {
   for (const [id, state] of Object.entries(seed.users)) {
     users.set(Number(id), { quota: state.quota, used: state.used ?? 0 });
   }
-  /** 每次上游額度調整的逐筆記錄（正 = 加，負 = 扣）。 */
+  /** 每次上游额度调整的逐笔记录（正 = 加，负 = 扣）。 */
   const adjustments: { userId: number; delta: number }[] = [];
   const failedAdjustments: { userId: number; delta: number }[] = [];
 
@@ -96,7 +96,7 @@ function fakeNewApi(seed: {
     adjustments.push({ userId, delta });
   }) as unknown as typeof import("@/lib/gateway-admin").adjustGatewayUserQuotaExact;
 
-  /** new-api 內核的一筆消耗：成員花的是自己 user 的 quota（user 層由內核執法）。 */
+  /** new-api 内核的一笔消耗：成员花的是自己 user 的 quota（user 层由内核执法）。 */
   function consume(userId: number, quota: number): void {
     const current = users.get(userId);
     if (!current) throw new Error(`no user ${userId}`);
@@ -192,7 +192,7 @@ function fakeControlPlane(seed: {
   return { sql: tagged, members, queries };
 }
 
-/** FIFO 互斥鎖：替代 Postgres 事務級 advisory lock 的測試實現。 */
+/** FIFO 互斥锁：替代 Postgres 事务级 advisory lock 的测试实现。 */
 function mutexLock(handle: GenerationSql): TeamLock {
   let tail: Promise<unknown> = Promise.resolve();
   return <T>(_teamUserId: number, fn: (tx: GenerationSql) => Promise<T>): Promise<T> => {
@@ -218,16 +218,16 @@ function memberRow(
   };
 }
 
-/** 去掉註釋後的代碼/DDL：負向斷言只針對「活的」代碼，不被歷史註釋帶跑。 */
+/** 去掉注释后的代码/DDL：负向断言只针对「活的」代码，不被历史注释带跑。 */
 function stripped(relPath: string): string {
   return readFileSync(join(process.cwd(), relPath), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*(--|\/\/).*$/gm, "");
 }
 
-// ── 降級 ────────────────────────────────────────────────────────────────
+// ── 降级 ────────────────────────────────────────────────────────────────
 
-test("控制面未配置時映射層降級為 null/[]/false，不炸 C 端部署", async () => {
+test("控制面未配置时映射层降级为 null/[]/false，不炸 C 端部署", async () => {
   await withEnv({ GENERATION_DATABASE_URL: undefined, GENERATION_CONTROL_PLANE_ENABLED: undefined }, async () => {
     assert.equal(await findMemberByUserId(900), null);
     assert.deepEqual(await listTeamMembers(117), []);
@@ -242,9 +242,9 @@ test("控制面未配置時映射層降級為 null/[]/false，不炸 C 端部署
   });
 });
 
-// ── 映射層（歸屬） ───────────────────────────────────────────────────────
+// ── 映射层（归属） ───────────────────────────────────────────────────────
 
-test("歸屬鏈：成員 key 的 user_id 就是成員 new-api user（007 免新表）", async () => {
+test("归属链：成员 key 的 user_id 就是成员 new-api user（007 免新表）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { sql, queries } = fakeControlPlane({
       keys: [{ id: "key-a", label: "成员A", user_id: 900 }],
@@ -252,38 +252,38 @@ test("歸屬鏈：成員 key 的 user_id 就是成員 new-api user（007 免新�
     const binding = await resolveMemberBinding("key-a", sql);
     assert.deepEqual(binding, { memberKeyId: "key-a", userId: 900, label: "成员A" });
     assert.ok(queries[0].includes("FROM biz_api_key"));
-    // user 層模型不需要 token 映射（012 只管 token 層閘門，不在此路徑）。
-    assert.ok(!queries[0].includes("biz_key_newapi_token"), "成員歸屬不得再依賴 token 映射");
+    // user 层模型不需要 token 映射（012 只管 token 层闸门，不在此路径）。
+    assert.ok(!queries[0].includes("biz_key_newapi_token"), "成员归属不得再依赖 token 映射");
   });
 });
 
-test("映射層只存身份與意圖：本地表沒有點數欄位，成員身份按 user", () => {
+test("映射层只存身份与意图：本地表没有点数栏位，成员身份按 user", () => {
   const source = readFileSync(join(process.cwd(), "db/migrations/019_team_member_quota.sql"), "utf8");
   const createTable = /CREATE TABLE IF NOT EXISTS team_member_quota \(([\s\S]*?)\n\);/.exec(source);
   assert.ok(createTable, "应能定位 team_member_quota 表定义");
   for (const forbidden of [/quota\s+integer/i, /remain/i, /allocated/i, /balance/i]) {
-    assert.doesNotMatch(createTable[1], forbidden, "映射表不得存点数额度（影子帳本）");
+    assert.doesNotMatch(createTable[1], forbidden, "映射表不得存点数额度（影子帐本）");
   }
   assert.match(createTable[1], /member_user_id integer NOT NULL UNIQUE/);
   assert.match(createTable[1], /team_user_id integer NOT NULL/);
-  // 反轉後的不變量：成員必須是「另一個 user」（舊版要求等於 team_user_id）。
-  assert.match(source, /必須\*\*不等於\*\* team_user_id/);
-  assert.match(source, /同一個 user 的多把 biz key 共用同一桶/);
-  // 活的 DDL 裡不得再有 token 桶欄位（只留歷史註釋）。
+  // 反转后的不变量：成员必须是「另一个 user」（旧版要求等于 team_user_id）。
+  assert.match(source, /必须\*\*不等于\*\* team_user_id/);
+  assert.match(source, /同一个 user 的多把 biz key 共用同一桶/);
+  // 活的 DDL 里不得再有 token 桶栏位（只留历史注释）。
   assert.doesNotMatch(stripped("db/migrations/019_team_member_quota.sql"), /member_token_id/);
 });
 
-test("分配/回收必須在團隊級串行化下執行（advisory lock，非本地帳本）", () => {
+test("分配/回收必须在团队级串行化下执行（advisory lock，非本地帐本）", () => {
   const source = stripped("src/lib/generation-core/member-quota.ts");
   assert.match(source, /sql\.begin\(async \(tx\)/, "分配必须在事务内完成");
-  assert.match(source, /pg_advisory_xact_lock\(hashtext\(/, "同一主帳的分配必须串行化，防多成员并发超卖");
-  // 死件：token 子額度桶那兩支（已從 gateway-admin 刪除）不得再出現在本刀檔案。
+  assert.match(source, /pg_advisory_xact_lock\(hashtext\(/, "同一主帐的分配必须串行化，防多成员并发超卖");
+  // 死件：token 子额度桶那两支（已从 gateway-admin 删除）不得再出现在本刀档案。
   assert.doesNotMatch(source, /fetchGatewayToken|setGatewayTokenQuota|memberTokenId|biz_key_newapi_token/);
 });
 
-// ── 分配 / 回收（user 層轉移） ──────────────────────────────────────────
+// ── 分配 / 回收（user 层转移） ──────────────────────────────────────────
 
-test("分配：主劃 500 幣給成員 A —— 主帳扣 500、成員桶加 500（逐筆對稱）", async () => {
+test("分配：主划 500 币给成员 A —— 主帐扣 500、成员桶加 500（逐笔对称）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ keys: [{ id: "key-a", label: "成员A", user_id: 900 }] });
     const api = fakeNewApi({ users: { 117: { quota: 1000 * COIN }, 900: { quota: 0 } } });
@@ -299,7 +299,7 @@ test("分配：主劃 500 幣給成員 A —— 主帳扣 500、成員桶加 500
     assert.equal(result.ok === true ? result.remaining : 0, 500 * COIN);
     assert.equal(result.ok === true ? result.transferred : 0, 500 * COIN);
     assert.equal(result.ok === true ? result.unchanged : true, false);
-    // 配額桶在成員 user 自己身上（內核執法），主帳手上少掉同額。
+    // 配额桶在成员 user 自己身上（内核执法），主帐手上少掉同额。
     assert.equal(api.quotaOf(900), 500 * COIN);
     assert.equal(api.quotaOf(117), 500 * COIN);
     assert.deepEqual(api.adjustments, [
@@ -312,7 +312,7 @@ test("分配：主劃 500 幣給成員 A —— 主帳扣 500、成員桶加 500
   });
 });
 
-test("分配幂等：目標值不變時是 no-op，不再寫上游、不重複登記", async () => {
+test("分配幂等：目标值不变时是 no-op，不再写上游、不重复登记", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [{ id: "key-a", label: "成员A", user_id: 900 }],
@@ -335,7 +335,7 @@ test("分配幂等：目標值不變時是 no-op，不再寫上游、不重複�
   });
 });
 
-test("回收：目標低於現值時差額從成員桶收回主帳（同一操作，重放幂等）", async () => {
+test("回收：目标低于现值时差额从成员桶收回主帐（同一操作，重放幂等）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [{ id: "key-a", label: "成员A", user_id: 900 }],
@@ -350,9 +350,9 @@ test("回收：目標低於現值時差額從成員桶收回主帳（同一操�
     assert.equal(reclaimed.ok === true ? reclaimed.remaining : 0, 200 * COIN);
     assert.equal(reclaimed.ok === true ? reclaimed.transferred : 0, -300 * COIN);
     assert.equal(api.quotaOf(900), 200 * COIN);
-    assert.equal(api.quotaOf(117), 800 * COIN, "回收的钱回到主帳手上");
+    assert.equal(api.quotaOf(117), 800 * COIN, "回收的钱回到主帐手上");
 
-    // 重放同一回收請求 = 幂等（不再寫上游）
+    // 重放同一回收请求 = 幂等（不再写上游）
     const replay = await allocateMemberQuota({ teamUserId: 117, memberKeyId: "key-a", targetGranted: 200 * COIN }, deps);
     assert.equal(replay.ok === true ? replay.unchanged : false, true);
     assert.equal(api.adjustments.length, 2);
@@ -360,7 +360,7 @@ test("回收：目標低於現值時差額從成員桶收回主帳（同一操�
   });
 });
 
-test("已消耗部分不可回收：目標低於已用被拒，且不動上游", async () => {
+test("已消耗部分不可回收：目标低于已用被拒，且不动上游", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [{ id: "key-a", label: "成员A", user_id: 900 }],
@@ -384,7 +384,7 @@ test("已消耗部分不可回收：目標低於已用被拒，且不動上游",
   });
 });
 
-test("主帳不足時拒絕新分配，錯誤可執行（可分配餘額 + 充值/回收指引）", async () => {
+test("主帐不足时拒绝新分配，错误可执行（可分配余额 + 充值/回收指引）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [
@@ -393,7 +393,7 @@ test("主帳不足時拒絕新分配，錯誤可執行（可分配餘額 + 充�
       ],
       members: [memberRow({ member_key_id: "key-a", member_user_id: 900 })],
     });
-    // 主帳手上只剩 300 幣（成員 A 那 500 已經劃出去了），成員 B 要 500 → 差額超額。
+    // 主帐手上只剩 300 币（成员 A 那 500 已经划出去了），成员 B 要 500 → 差额超额。
     const api = fakeNewApi({
       users: { 117: { quota: 300 * COIN }, 900: { quota: 400 * COIN, used: 100 * COIN }, 901: { quota: 0 } },
     });
@@ -410,12 +410,12 @@ test("主帳不足時拒絕新分配，錯誤可執行（可分配餘額 + 充�
     assert.match(message, /主账号额度不足/);
     assert.match(message, /可分配余额 300 币/, "可执行错误必须给出可分配余额");
     assert.match(message, /充值|回收/, "必须给出可执行动作");
-    assert.equal(api.adjustments.length, 0, "主帳不足不得写成员额度");
+    assert.equal(api.adjustments.length, 0, "主帐不足不得写成员额度");
     assert.equal(cp.members.length, 1, "被拒的分配不得登记归属");
   });
 });
 
-test("跨團隊分配被拒：成員 user 已歸屬別家團隊主帳", async () => {
+test("跨团队分配被拒：成员 user 已归属别家团队主帐", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [{ id: "key-x", label: "别家成员", user_id: 900 }],
@@ -435,9 +435,9 @@ test("跨團隊分配被拒：成員 user 已歸屬別家團隊主帳", async ()
   });
 });
 
-test("主帳自己的 key 不能當成員（自己給自己劃額度）", async () => {
+test("主帐自己的 key 不能当成员（自己给自己划额度）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
-    const cp = fakeControlPlane({ keys: [{ id: "key-master", label: "主帳key", user_id: 117 }] });
+    const cp = fakeControlPlane({ keys: [{ id: "key-master", label: "主帐key", user_id: 117 }] });
     const api = fakeNewApi({ users: { 117: { quota: 1000 * COIN } } });
 
     const result = await allocateMemberQuota(
@@ -451,7 +451,7 @@ test("主帳自己的 key 不能當成員（自己給自己劃額度）", async 
   });
 });
 
-test("同一 user 的多把 key 共用同一桶：不重複記帳、不重複登記", async () => {
+test("同一 user 的多把 key 共用同一桶：不重复记帐、不重复登记", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [
@@ -463,7 +463,7 @@ test("同一 user 的多把 key 共用同一桶：不重複記帳、不重複登
     const deps = { sql: cp.sql, withTeamLock: mutexLock(cp.sql), newMemberId: () => "member-1", ...api.deps };
 
     await allocateMemberQuota({ teamUserId: 117, memberKeyId: "key-a", targetGranted: 500 * COIN }, deps);
-    // 換一把 key 要求同一個目標值：同一個桶 ⇒ 幂等 no-op，主帳不再被扣。
+    // 换一把 key 要求同一个目标值：同一个桶 ⇒ 幂等 no-op，主帐不再被扣。
     const viaSecondKey = await allocateMemberQuota(
       { teamUserId: 117, memberKeyId: "key-a2", targetGranted: 500 * COIN },
       deps,
@@ -471,7 +471,7 @@ test("同一 user 的多把 key 共用同一桶：不重複記帳、不重複登
     assert.equal(viaSecondKey.ok === true ? viaSecondKey.unchanged : false, true);
     assert.equal(api.quotaOf(117), 500 * COIN);
 
-    // 目標提高時只補差額（不是再劃一次全額）。
+    // 目标提高时只补差额（不是再划一次全额）。
     const raised = await allocateMemberQuota(
       { teamUserId: 117, memberKeyId: "key-a2", targetGranted: 600 * COIN },
       deps,
@@ -479,19 +479,19 @@ test("同一 user 的多把 key 共用同一桶：不重複記帳、不重複登
     assert.equal(raised.ok === true ? raised.transferred : 0, 100 * COIN);
     assert.equal(api.quotaOf(117), 400 * COIN);
     assert.equal(api.quotaOf(900), 600 * COIN);
-    assert.equal(cp.members.length, 1, "一個 user 一條歸屬記錄");
+    assert.equal(cp.members.length, 1, "一个 user 一条归属记录");
     const registered = await findMemberByUserId(900, cp.sql);
     assert.equal(registered?.memberUserId, 900);
     assert.equal(registered?.teamUserId, 117);
   });
 });
 
-test("上游寫入失敗即回滾（先扣後加）：主帳不被扣走，也不憑空印額度", async () => {
+test("上游写入失败即回滚（先扣后加）：主帐不被扣走，也不凭空印额度", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ keys: [{ id: "key-a", label: "成员A", user_id: 900 }] });
     const api = fakeNewApi({
       users: { 117: { quota: 1000 * COIN }, 900: { quota: 0 } },
-      // 成員那條腿（加額度）失敗 → 主帳那條腿必須回滾。
+      // 成员那条腿（加额度）失败 → 主帐那条腿必须回滚。
       failAdjust: (userId, delta) => userId === 900 && delta > 0,
     });
 
@@ -502,7 +502,7 @@ test("上游寫入失敗即回滾（先扣後加）：主帳不被扣走，也�
 
     assert.equal(result.ok, false);
     assert.equal(result.ok === false ? result.status : 0, 503);
-    assert.equal(api.quotaOf(117), 1000 * COIN, "主帳必须被回滚到原值");
+    assert.equal(api.quotaOf(117), 1000 * COIN, "主帐必须被回滚到原值");
     assert.equal(api.quotaOf(900), 0);
     assert.deepEqual(api.adjustments, [
       { userId: 117, delta: -500 * COIN },
@@ -512,9 +512,9 @@ test("上游寫入失敗即回滾（先扣後加）：主帳不被扣走，也�
   });
 });
 
-// ── 並發 ────────────────────────────────────────────────────────────────
+// ── 并发 ────────────────────────────────────────────────────────────────
 
-test("多成員並發不超賣：團隊鎖把分配串行化，劃出的錢不超過主帳手上餘額", async () => {
+test("多成员并发不超卖：团队锁把分配串行化，划出的钱不超过主帐手上余额", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const memberKeys = ["key-a", "key-b", "key-c", "key-d", "key-e"];
     const cp = fakeControlPlane({
@@ -527,7 +527,7 @@ test("多成員並發不超賣：團隊鎖把分配串行化，劃出的錢不�
     const api = fakeNewApi({ users });
     const deps = { sql: cp.sql, withTeamLock: mutexLock(cp.sql), ...api.deps };
 
-    // 5 個成員同時各要 400 幣（合計 2000 > 主帳 1000）——串行化後只應放行 2 個。
+    // 5 个成员同时各要 400 币（合计 2000 > 主帐 1000）——串行化后只应放行 2 个。
     const results = await Promise.all(
       memberKeys.map((memberKeyId, index) =>
         allocateMemberQuota(
@@ -540,7 +540,7 @@ test("多成員並發不超賣：團隊鎖把分配串行化，劃出的錢不�
     assert.equal(results.filter((result) => result.ok).length, 2, "只有 2 个成员能在主帐兜底内拿到 400 币");
     const granted = cp.members.reduce((sum, row) => sum + api.quotaOf(row.member_user_id), 0);
     assert.equal(granted, 800 * COIN);
-    // 守恆：主帳手上 + Σ成員桶 = 原額（沒有超賣、沒有印錢）。
+    // 守恒：主帐手上 + Σ成员桶 = 原额（没有超卖、没有印钱）。
     assert.equal(api.quotaOf(117) + granted, 1000 * COIN);
     const rejected = results.filter((result) => !result.ok);
     assert.equal(rejected.length, 3);
@@ -551,9 +551,9 @@ test("多成員並發不超賣：團隊鎖把分配串行化，劃出的錢不�
   });
 });
 
-// ── 可視面 ──────────────────────────────────────────────────────────────
+// ── 可视面 ──────────────────────────────────────────────────────────────
 
-test("可視面：主帳剩餘／已分配／未分配／團隊總額／成員各自額度與消耗（即時讀 new-api）", async () => {
+test("可视面：主帐剩余／已分配／未分配／团队总额／成员各自额度与消耗（即时读 new-api）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       keys: [{ id: "key-a", label: "成员A", user_id: 900 }],
@@ -572,21 +572,21 @@ test("可視面：主帳剩餘／已分配／未分配／團隊總額／成員�
     assert.equal(view.allocated, 500 * COIN);
     assert.equal(view.allocatedCoins, 500);
     assert.equal(view.usedCoins, 200);
-    assert.equal(view.unallocated, 700 * COIN, "轉移模型：可再分配 = 主帳手上餘額");
-    assert.equal(view.team.remaining, 1000 * COIN, "團隊未消耗總額 = 主帳 + Σ成員桶");
+    assert.equal(view.unallocated, 700 * COIN, "转移模型：可再分配 = 主帐手上余额");
+    assert.equal(view.team.remaining, 1000 * COIN, "团队未消耗总额 = 主帐 + Σ成员桶");
     assert.equal(view.team.coins, 1000);
     assert.equal(view.members[0].coins.granted, 500);
     assert.equal(view.members[0].coins.used, 200);
     assert.equal(view.members[0].coins.remaining, 300);
     assert.equal(view.members[0].memberUserId, 900);
     assert.equal(view.members[0].unavailable, false);
-    // 讀不到上游的成員畫成誠實第三態，不冒充足額。
+    // 读不到上游的成员画成诚实第三态，不冒充足额。
     assert.equal(view.members[1].unavailable, true);
     assert.equal(view.members[1].coins.remaining, 0);
   });
 });
 
-test("主帳讀不到時可視面返回 null（端點回 503，不畫假數字）", async () => {
+test("主帐读不到时可视面返回 null（端点回 503，不画假数字）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ keys: [] });
     const view = await readTeamQuotaView(
@@ -602,7 +602,7 @@ test("主帳讀不到時可視面返回 null（端點回 503，不畫假數字�
   });
 });
 
-test("成員額度讀不到時 readMemberQuota 回 null（預檢據此 fail-closed）", async () => {
+test("成员额度读不到时 readMemberQuota 回 null（预检据此 fail-closed）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const missing = await readMemberQuota(999, {
       fetchUser: (async () => null) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser,
@@ -614,39 +614,39 @@ test("成員額度讀不到時 readMemberQuota 回 null（預檢據此 fail-clos
       }) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser,
     });
     assert.equal(broken, null);
-    assert.equal(await readMemberQuota(0), null, "user_id=0 是無從計費通道，不發請求");
+    assert.equal(await readMemberQuota(0), null, "user_id=0 是无从计费通道，不发请求");
   });
 });
 
-// ── 端到端口徑（驗收項） ─────────────────────────────────────────────────
+// ── 端到端口径（验收项） ─────────────────────────────────────────────────
 
-test("端到端：主劃 500 給成員 A → 成員扣費／主帳扣減／餘額顯示三處逐筆一致", async () => {
+test("端到端：主划 500 给成员 A → 成员扣费／主帐扣减／余额显示三处逐笔一致", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ keys: [{ id: "key-a", label: "成员A", user_id: 900 }] });
     const api = fakeNewApi({ users: { 117: { quota: 1000 * COIN }, 900: { quota: 0 } } });
     const deps = { sql: cp.sql, withTeamLock: mutexLock(cp.sql), newMemberId: () => "member-1", ...api.deps };
 
-    // ① 主劃 500 幣給成員 A：主帳扣 500、成員桶加 500（逐筆對稱，總額不變）。
+    // ① 主划 500 币给成员 A：主帐扣 500、成员桶加 500（逐笔对称，总额不变）。
     const masterBefore = api.quotaOf(117);
     const allocated = await allocateMemberQuota({ teamUserId: 117, memberKeyId: "key-a", targetGranted: 500 * COIN }, deps);
     assert.equal(allocated.ok, true);
     const masterDebit = masterBefore - api.quotaOf(117);
-    assert.equal(masterDebit, 500 * COIN, "主帳扣減");
-    assert.equal(api.quotaOf(900), 500 * COIN, "成員得到同額（逐筆吻合）");
+    assert.equal(masterDebit, 500 * COIN, "主帐扣减");
+    assert.equal(api.quotaOf(900), 500 * COIN, "成员得到同额（逐笔吻合）");
     assert.equal(masterDebit, allocated.ok === true ? allocated.granted : 0);
 
-    // ② 成員 A 消耗 120 幣：new-api 內核扣成員 user 自己的 quota（成員扣費）。
+    // ② 成员 A 消耗 120 币：new-api 内核扣成员 user 自己的 quota（成员扣费）。
     api.consume(900, 120 * COIN);
 
-    // ③ 三處對帳：成員扣費 / 主帳扣減 / 顯示逐筆一致，且團隊總額守恆。
+    // ③ 三处对帐：成员扣费 / 主帐扣减 / 显示逐笔一致，且团队总额守恒。
     const view = await readTeamQuotaView({ teamUserId: 117 }, { sql: cp.sql, ...api.deps });
     assert.ok(view);
-    assert.equal(view.members[0].used, 120 * COIN, "成員扣費 = 本次消耗");
-    assert.equal(view.members[0].coins.remaining, 380, "成員餘額顯示 = 500 − 120");
-    assert.equal(view.master.coins, 500, "主帳餘額顯示 = 1000 − 500（分配時已轉出）");
-    assert.equal(view.team.coins, 880, "團隊總額顯示 = 主帳 500 + 成員 380 = 1000 − 120");
+    assert.equal(view.members[0].used, 120 * COIN, "成员扣费 = 本次消耗");
+    assert.equal(view.members[0].coins.remaining, 380, "成员余额显示 = 500 − 120");
+    assert.equal(view.master.coins, 500, "主帐余额显示 = 1000 − 500（分配时已转出）");
+    assert.equal(view.team.coins, 880, "团队总额显示 = 主帐 500 + 成员 380 = 1000 − 120");
     assert.equal(view.members[0].coins.granted - view.members[0].coins.used, view.members[0].coins.remaining);
-    assert.equal(view.allocatedCoins, 500, "已分配上限不因消耗漂移（quota + used 恆等於授予值）");
+    assert.equal(view.allocatedCoins, 500, "已分配上限不因消耗漂移（quota + used 恒等于授予值）");
     assert.equal(view.usedCoins, 120);
   });
 });

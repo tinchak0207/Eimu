@@ -1,47 +1,47 @@
 /**
- * 運鏡預設庫（Camera Motion Presets）— 23 條互斥運鏡 / 檢索契約 / 工具綁定。
+ * 运镜预设库（Camera Motion Presets）— 23 条互斥运镜 / 检索契约 / 工具绑定。
  *
- * 定位（與鄰居的邊界，禁造第二份輪子）：
- * - `lens-language-library.ts`（142 條 / 12 類）是**鏡頭語言詞典**：分組詞條、無
- *   toolId 綁定、無互斥切分，消費契約是「選詞後拼片段」（composeLensFragment）。
- *   本檔不是它的子集也不是替代品：這裡每條是**一顆可選的運鏡預設**（唯一 key +
- *   簡體短標籤 + 可執行運鏡指令 + harness 工具 + 檢索 tags），給導演台/Agent 當
- *   picker 與工具建議用；兩者共存，互不引用（避免兩種消費契約混成一團）。
- * - `camera-trajectory-to-prompt.ts` 是**軌跡 → 六槽 Camera 槽**翻譯層，輸入是
- *   moves/keyframes 座標，不是具名預設。本檔**不重寫**該翻譯：最終組裝一律走
- *   `describeCameraTrajectory()`（`cameraMotionPrompt` 內唯一呼叫的組裝函式），
- *   本檔也沒有複製 `CAMERA_MOVE_TO_PROMPT` 任何一條字串（測試有防撞斷言）。
- * - `director-engine/cameraPresets.ts` 的 CAMERA_MOVES 是 3D 導演台內部運鏡 id
- *   （20 個），無中文標籤/提示詞/檢索面；本檔是對外的預設目錄，語義可對齊、
- *   資料不複製。
+ * 定位（与邻居的边界，禁造第二份轮子）：
+ * - `lens-language-library.ts`（142 条 / 12 类）是**镜头语言词典**：分组词条、无
+ *   toolId 绑定、无互斥切分，消费契约是「选词后拼片段」（composeLensFragment）。
+ *   本档不是它的子集也不是替代品：这里每条是**一颗可选的运镜预设**（唯一 key +
+ *   简体短标签 + 可执行运镜指令 + harness 工具 + 检索 tags），给导演台/Agent 当
+ *   picker 与工具建议用；两者共存，互不引用（避免两种消费契约混成一团）。
+ * - `camera-trajectory-to-prompt.ts` 是**轨迹 → 六槽 Camera 槽**翻译层，输入是
+ *   moves/keyframes 座标，不是具名预设。本档**不重写**该翻译：最终组装一律走
+ *   `describeCameraTrajectory()`（`cameraMotionPrompt` 内唯一呼叫的组装函式），
+ *   本档也没有复制 `CAMERA_MOVE_TO_PROMPT` 任何一条字串（测试有防撞断言）。
+ * - `director-engine/cameraPresets.ts` 的 CAMERA_MOVES 是 3D 导演台内部运镜 id
+ *   （20 个），无中文标签/提示词/检索面；本档是对外的预设目录，语义可对齐、
+ *   资料不复制。
  *
- * 文案來源：全部自寫（無競品字串、無具體作品鏡頭描述）。純資料 + 純函式，無 I/O。
+ * 文案来源：全部自写（无竞品字串、无具体作品镜头描述）。纯资料 + 纯函式，无 I/O。
  */
 
 import { describeCameraTrajectory } from "./camera-trajectory-to-prompt";
 
-/** 單條運鏡預設。 */
+/** 单条运镜预设。 */
 export interface CameraMotionPreset {
-  /** 全庫唯一 id：kebab-case + `cm-` 前綴。 */
+  /** 全库唯一 id：kebab-case + `cm-` 前缀。 */
   readonly key: string;
-  /** 簡體中文短名（選擇器主標題）。 */
+  /** 简体中文短名（选择器主标题）。 */
   readonly name: string;
-  /** 膠囊標籤，≤4 字（含中文/表情符號按碼位計）。 */
+  /** 胶囊标签，≤4 字（含中文/表情符号按码位计）。 */
   readonly tagLabel: string;
   /**
-   * 自寫的可執行運鏡指令（英文），描述「相機怎麼動」，不含具體場景/人物，
-   * 可被上游直接用；`cameraMotionPrompt()` 會把它交給既有翻譯層組裝。
+   * 自写的可执行运镜指令（英文），描述「相机怎么动」，不含具体场景/人物，
+   * 可被上游直接用；`cameraMotionPrompt()` 会把它交给既有翻译层组装。
    */
   readonly prompt: string;
-  /** 建議在 harness 上落地此運鏡的 toolId，必須 ∈ HARNESS_TOOL_ID_LIST。 */
+  /** 建议在 harness 上落地此运镜的 toolId，必须 ∈ HARNESS_TOOL_ID_LIST。 */
   readonly toolId: string;
-  /** 檢索詞（3-6 個）：中文同義詞 + 少量英文術語。 */
+  /** 检索词（3-6 个）：中文同义词 + 少量英文术语。 */
   readonly tags: readonly string[];
 }
 
 /**
- * 23 條互斥運鏡預設。互斥判準：任意兩條的運動自由度（機位位移 / 光軸旋轉 /
- * 焦距 / 焦點 / 時間）組合不同，且 tagLabel 兩兩不同（測試有斷言）。
+ * 23 条互斥运镜预设。互斥判准：任意两条的运动自由度（机位位移 / 光轴旋转 /
+ * 焦距 / 焦点 / 时间）组合不同，且 tagLabel 两两不同（测试有断言）。
  */
 export const CAMERA_MOTION_PRESETS: readonly CameraMotionPreset[] = [
   {
@@ -253,16 +253,16 @@ export const CAMERA_MOTION_PRESETS: readonly CameraMotionPreset[] = [
   },
 ];
 
-/** 檢索用文字堆：key / name / tagLabel / prompt / tags 聯集（小寫）。 */
+/** 检索用文字堆：key / name / tagLabel / prompt / tags 联集（小写）。 */
 function haystack(preset: CameraMotionPreset): string {
   return [preset.key, preset.name, preset.tagLabel, preset.prompt, ...preset.tags].join(" \u0001 ").toLowerCase();
 }
 
 /**
- * 列舉/檢索運鏡預設（純函式，零 I/O）。
- * - `query`：子字串命中 key/name/tagLabel/prompt/tags（不分大小寫、去首尾空白）；空 = 不篩。
- * - `tag`：精確命中 tags 其中一個（不分大小寫）；空 = 不篩。
- * - 無參數＝全庫（逐位元等於 `CAMERA_MOTION_PRESETS`，順序保留）。
+ * 列举/检索运镜预设（纯函式，零 I/O）。
+ * - `query`：子字串命中 key/name/tagLabel/prompt/tags（不分大小写、去首尾空白）；空 = 不筛。
+ * - `tag`：精确命中 tags 其中一个（不分大小写）；空 = 不筛。
+ * - 无参数＝全库（逐位元等于 `CAMERA_MOTION_PRESETS`，顺序保留）。
  */
 export function listCameraMotionPresets(
   opts: { query?: string; tag?: string } = {},
@@ -277,7 +277,7 @@ export function listCameraMotionPresets(
   });
 }
 
-/** 全庫 tags 去重排序（API facet 用；與篩選結果無關）。 */
+/** 全库 tags 去重排序（API facet 用；与筛选结果无关）。 */
 export function listCameraMotionPresetTags(): readonly string[] {
   const seen = new Set<string>();
   for (const preset of CAMERA_MOTION_PRESETS) {
@@ -286,7 +286,7 @@ export function listCameraMotionPresetTags(): readonly string[] {
   return [...seen].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 }
 
-/** 依 key 取單條（未知 key 回 `null`，不拋、不猜同義詞）。 */
+/** 依 key 取单条（未知 key 回 `null`，不抛、不猜同义词）。 */
 export function getCameraMotionPreset(key: string): CameraMotionPreset | null {
   if (typeof key !== "string") return null;
   const normalized = key.trim().toLowerCase();
@@ -295,13 +295,13 @@ export function getCameraMotionPreset(key: string): CameraMotionPreset | null {
 }
 
 /**
- * 預設 + 鏡頭情境 → 最終提示詞。
+ * 预设 + 镜头情境 → 最终提示词。
  *
- * 組裝**一律**交給 `camera-trajectory-to-prompt.describeCameraTrajectory()`（本檔
- * 不另寫一套運鏡/軌跡措辭邏輯）：把 preset.prompt 當「軌跡自由文本摘要」餵入，
- * 情境非空時以 `, <情境>` 接在摘要後段——故有/無情境的輸出**差異只落在情境段**。
+ * 组装**一律**交给 `camera-trajectory-to-prompt.describeCameraTrajectory()`（本档
+ * 不另写一套运镜/轨迹措辞逻辑）：把 preset.prompt 当「轨迹自由文本摘要」喂入，
+ * 情境非空时以 `, <情境>` 接在摘要后段——故有/无情境的输出**差异只落在情境段**。
  * - 未知 key → `null`。
- * - 情境缺省/空字串/純空白 → 逐位元等價退化（不注入空段、不加多餘分隔符）。
+ * - 情境缺省/空字串/纯空白 → 逐位元等价退化（不注入空段、不加多余分隔符）。
  */
 export function cameraMotionPrompt(key: string, shotContext?: string): string | null {
   const preset = getCameraMotionPreset(key);

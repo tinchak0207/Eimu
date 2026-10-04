@@ -1,39 +1,39 @@
 /**
- * `/api/mcp` —— Eimu 的 MCP（Model Context Protocol）端點，Streamable HTTP 傳輸。
+ * `/api/mcp` —— Eimu 的 MCP（Model Context Protocol）端点，Streamable HTTP 传输。
  *
- * 定位：這是**第二個入口，不是第二套系統**。外部 coding agent（Codex / Claude Code /
- * OpenClaw…）透過 MCP 驅動 Eimu 的生圖/生視頻/TTS/放大與公開技能庫，但：
- * - 鑑權逐字複用 B 端那把閘（`authenticateBizApiKey` + `readBearerToken`），
- *   沒有第二套驗 key 的路徑；
- * - 業務與計費零重寫——工具把參數轉發給既有 `/api/v1/**`，扣費/配額/冪等/退款
- *   與外部 API 客戶走**同一條**帳本路徑（見 `src/lib/mcp/tools.ts` 的傳輸說明）；
- * - 私有（user）技能永不出現在工具回應裡。
+ * 定位：这是**第二个入口，不是第二套系统**。外部 coding agent（Codex / Claude Code /
+ * OpenClaw…）透过 MCP 驱动 Eimu 的生图/生视频/TTS/放大与公开技能库，但：
+ * - 鉴权逐字复用 B 端那把闸（`authenticateBizApiKey` + `readBearerToken`），
+ *   没有第二套验 key 的路径；
+ * - 业务与计费零重写——工具把参数转发给既有 `/api/v1/**`，扣费/配额/幂等/退款
+ *   与外部 API 客户走**同一条**帐本路径（见 `src/lib/mcp/tools.ts` 的传输说明）；
+ * - 私有（user）技能永不出现在工具回应里。
  *
- * 傳輸語義（本版刻意收窄，先可用再擴）：
- * - `POST`：唯一入口。單發 JSON-RPC 回應，**不開 SSE 串流**（agent 端不需要）。
+ * 传输语义（本版刻意收窄，先可用再扩）：
+ * - `POST`：唯一入口。单发 JSON-RPC 回应，**不开 SSE 串流**（agent 端不需要）。
  *   `initialize` / `tools/list` / `tools/call` / `ping` 走 JSON-RPC；
- *   `notifications/*`（含 `notifications/initialized`）與任何無 `id` 的請求回 HTTP 202、無 body。
- * - `GET`：回 405。MCP 的 SSE 串流通道本版未實作，回靜態 JSON 說明 + `Allow: POST`
- *   比留一個 404 讓客戶端猜要清楚。
+ *   `notifications/*`（含 `notifications/initialized`）与任何无 `id` 的请求回 HTTP 202、无 body。
+ * - `GET`：回 405。MCP 的 SSE 串流通道本版未实作，回静态 JSON 说明 + `Allow: POST`
+ *   比留一个 404 让客户端猜要清楚。
  *
- * 狀態碼約定：認證失敗是 HTTP 401/403/429（帶 JSON-RPC 錯誤體）；
- * 其餘協議層錯誤（parse / invalid request / method not found / invalid params / internal）
- * 一律 HTTP 200 + JSON-RPC `error`（客戶端 SDK 按 `response.ok` 判斷傳輸成敗，
- * 用 4xx 回協議錯誤會讓 SDK 拋「網路錯誤」而看不到真正原因）。
+ * 状态码约定：认证失败是 HTTP 401/403/429（带 JSON-RPC 错误体）；
+ * 其余协议层错误（parse / invalid request / method not found / invalid params / internal）
+ * 一律 HTTP 200 + JSON-RPC `error`（客户端 SDK 按 `response.ok` 判断传输成败，
+ * 用 4xx 回协议错误会让 SDK 抛「网路错误」而看不到真正原因）。
  *
- * 兩個 origin，不是同一個（2026-10-03 實測事故後拆開）：
- * - **公開 origin**（`resolvePublicOrigin`）：使用者看得見的站點域名（生產＝`https://eimu.dev`，
- *   Cloudflare 前置）。只餵 401 的 `WWW-Authenticate: resource_metadata`——發現文件要指向
- *   客戶端實際連的域名。
- * - **轉發 origin**（`resolveDispatchUrl`）：工具把請求轉發到哪裡。**不能**用公開 origin：
- *   MCP 函式跑在 Vercel，Vercel 出口流量被 Cloudflare 判為機器人、發 managed challenge，
- *   所有轉發型 `tools/call` 收到的都是 `Just a moment...` 的 403 挑戰頁而非業務結果
- *   （同 URL 從本機與 VPS curl 都正常，已排除 UA/header 觸發）。故轉發改走**不掛 CF** 的
- *   控制面 origin（`GENERATION_CONTROL_PLANE_PROXY_ORIGIN`，nginx 直出），路徑表沿用
- *   `control-plane-proxy-routes.mjs` 這一份單一真源；未命中者才回落公開 origin（行為回歸保護）。
+ * 两个 origin，不是同一个（2026-10-03 实测事故后拆开）：
+ * - **公开 origin**（`resolvePublicOrigin`）：使用者看得见的站点域名（生产＝`https://eimu.dev`，
+ *   Cloudflare 前置）。只喂 401 的 `WWW-Authenticate: resource_metadata`——发现文件要指向
+ *   客户端实际连的域名。
+ * - **转发 origin**（`resolveDispatchUrl`）：工具把请求转发到哪里。**不能**用公开 origin：
+ *   MCP 函式跑在 Vercel，Vercel 出口流量被 Cloudflare 判为机器人、发 managed challenge，
+ *   所有转发型 `tools/call` 收到的都是 `Just a moment...` 的 403 挑战页而非业务结果
+ *   （同 URL 从本机与 VPS curl 都正常，已排除 UA/header 触发）。故转发改走**不挂 CF** 的
+ *   控制面 origin（`GENERATION_CONTROL_PLANE_PROXY_ORIGIN`，nginx 直出），路径表沿用
+ *   `control-plane-proxy-routes.mjs` 这一份单一真源；未命中者才回落公开 origin（行为回归保护）。
  *
- * 紅線：`Authorization` 的值不得進任何 log、回應或錯誤訊息（本檔只把它交給
- * 認證函式與工具轉發層）。
+ * 红线：`Authorization` 的值不得进任何 log、回应或错误讯息（本档只把它交给
+ * 认证函式与工具转发层）。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -59,7 +59,7 @@ import { controlPlaneRewrites } from "@/lib/control-plane-proxy-routes.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const SERVER_INSTRUCTIONS = [
   "Eimu 提供图像生成/编辑、视频生成、文本转语音、放大，以及公开技能库检索。",
@@ -80,7 +80,7 @@ function noStore(status: number, body: unknown, traceId: string, headers?: Recor
   return withTraceId(response, traceId);
 }
 
-/** JSON-RPC 錯誤一律 HTTP 200（協議錯誤在 body 裡，見檔頭狀態碼約定）。 */
+/** JSON-RPC 错误一律 HTTP 200（协议错误在 body 里，见档头状态码约定）。 */
 function rpcError(traceId: string, id: JsonRpcId, code: number, message: string, data?: unknown) {
   return noStore(200, jsonRpcErr(id, code, message, data), traceId);
 }
@@ -90,13 +90,13 @@ function rpcOk(traceId: string, id: JsonRpcId, result: unknown) {
 }
 
 /**
- * 逆注入防護（安全鐵律）——`prompts/get` 的 `arguments` 是**外部客戶端可控輸入**。
+ * 逆注入防护（安全铁律）——`prompts/get` 的 `arguments` 是**外部客户端可控输入**。
  *
- * 契約：arguments 只能原樣交給 `HarnessPrompt.build()`，由 build **在文案尾端**附加成
- * 「本次任務描述」；本函式與整個 route **不得**拿 arguments 與本 server 提供的契約／規則
- * 文字做任何拼接、替換或模板插值——否則使用者一句「忽略以上所有規則」就能改寫規則區塊。
- * 具體守則：① 未知 argument 名一律丟棄（不進 build、也不回聲到任何文字）；
- * ② 非字串值一律丟棄。確保 build 收到的永遠是「宣告過的名字 + 純字串」。
+ * 契约：arguments 只能原样交给 `HarnessPrompt.build()`，由 build **在文案尾端**附加成
+ * 「本次任务描述」；本函式与整个 route **不得**拿 arguments 与本 server 提供的契约／规则
+ * 文字做任何拼接、替换或模板插值——否则使用者一句「忽略以上所有规则」就能改写规则区块。
+ * 具体守则：① 未知 argument 名一律丢弃（不进 build、也不回声到任何文字）；
+ * ② 非字串值一律丢弃。确保 build 收到的永远是「宣告过的名字 + 纯字串」。
  */
 function sanitizePromptArguments(prompt: HarnessPrompt, raw: unknown): Record<string, string> {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
@@ -110,43 +110,43 @@ function sanitizePromptArguments(prompt: HarnessPrompt, raw: unknown): Record<st
   return result;
 }
 
-/** RFC 9728 的發現文件路徑（resource metadata 住在站根，不在 `/api/mcp` 之下）。 */
+/** RFC 9728 的发现文件路径（resource metadata 住在站根，不在 `/api/mcp` 之下）。 */
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 /**
- * **公開站點 origin**（只餵 401 的 `WWW-Authenticate: resource_metadata`）：
- * 顯式配置優先（反向代理/自訂域名下最穩），否則用本次請求的 origin。
- * 注意：這是「使用者連進來的域名」，生產＝Cloudflare 前置的 `https://eimu.dev`；
- * **不可**拿它當工具轉發目標（Vercel 出口會被 CF 挑戰，見檔頭）。
+ * **公开站点 origin**（只喂 401 的 `WWW-Authenticate: resource_metadata`）：
+ * 显式配置优先（反向代理/自订域名下最稳），否则用本次请求的 origin。
+ * 注意：这是「使用者连进来的域名」，生产＝Cloudflare 前置的 `https://eimu.dev`；
+ * **不可**拿它当工具转发目标（Vercel 出口会被 CF 挑战，见档头）。
  */
 function resolvePublicOrigin(req: NextRequest): string {
   const configured = process.env.MCP_SELF_ORIGIN?.trim().replace(/\/+$/, "");
   return configured || new URL(req.url).origin;
 }
 
-/** 控制面 origin（已 trim、去尾斜線；未配置回空字串）。 */
+/** 控制面 origin（已 trim、去尾斜线；未配置回空字串）。 */
 function controlPlaneOrigin(): string {
   return process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/+$/, "") ?? "";
 }
 
 /**
- * **轉發 origin**：把站內 `path` 解析成工具轉發用的完整絕對 URL。
+ * **转发 origin**：把站内 `path` 解析成工具转发用的完整绝对 URL。
  *
- * 順序（越前面越優先）：
- * 1. `MCP_DISPATCH_ORIGIN` 顯式指定 → `${該值}${path}`。**生產必需，不可移除**：
+ * 顺序（越前面越优先）：
+ * 1. `MCP_DISPATCH_ORIGIN` 显式指定 → `${该值}${path}`。**生产必需，不可移除**：
  *    `/api/agent/biz/**` 族（`canvas_get_state` / `workflow_read` / `workflow_history`，
- *    站內只有 Vercel 有這條 route）在本函式沒有其他順位可救，少了它就落到第 3 點、
- *    被 Cloudflare 發 managed challenge（`Just a moment` 403）。生產值＝
- *    `https://image.tinchak0207.xyz`（同 Vercel 專案、`server: Vercel`、不掛 CF 的自訂域名）；
- *    換值**必須**是不掛 Cloudflare 的 origin——換回公開域名（`eimu.dev`）等於復發。
- * 2. 對 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路徑表（唯一真源＝
- *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不掛 CF 的控制面 origin。
- *    匹配規則：source 形如 `/api/v1/:path*` 者做「前綴 + 捕獲剩餘段」；其餘 source 精確相等。
- * 3. 都未命中 → `${公開 origin}${path}`（維持拆分前的行為，回歸保護）。
+ *    站内只有 Vercel 有这条 route）在本函式没有其他顺位可救，少了它就落到第 3 点、
+ *    被 Cloudflare 发 managed challenge（`Just a moment` 403）。生产值＝
+ *    `https://image.tinchak0207.xyz`（同 Vercel 专案、`server: Vercel`、不挂 CF 的自订域名）；
+ *    换值**必须**是不挂 Cloudflare 的 origin——换回公开域名（`eimu.dev`）等于复发。
+ * 2. 对 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路径表（唯一真源＝
+ *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不挂 CF 的控制面 origin。
+ *    匹配规则：source 形如 `/api/v1/:path*` 者做「前缀 + 捕获剩余段」；其余 source 精确相等。
+ * 3. 都未命中 → `${公开 origin}${path}`（维持拆分前的行为，回归保护）。
  *
- * 為什麼要拆：公開域名經 Cloudflare，Vercel 出口被發 managed challenge；控制面
- * （`GENERATION_CONTROL_PLANE_PROXY_ORIGIN`）是 nginx 直出、不掛 CF，同一條路徑表
- * 在生產被 `next.config.mjs` beforeFiles 改寫過去，帳本/worker 也都在那邊。
+ * 为什么要拆：公开域名经 Cloudflare，Vercel 出口被发 managed challenge；控制面
+ * （`GENERATION_CONTROL_PLANE_PROXY_ORIGIN`）是 nginx 直出、不挂 CF，同一条路径表
+ * 在生产被 `next.config.mjs` beforeFiles 改写过去，帐本/worker 也都在那边。
  */
 function resolveDispatchUrl(req: NextRequest, path: string): string {
   const override = process.env.MCP_DISPATCH_ORIGIN?.trim().replace(/\/+$/, "");
@@ -164,14 +164,14 @@ function resolveDispatchUrl(req: NextRequest, path: string): string {
   return `${resolvePublicOrigin(req)}${path}`;
 }
 
-/** GET：本版沒有 SSE 通道，回 405 + 說明（不是 404，讓客戶端知道端點存在但方法不對）。 */
+/** GET：本版没有 SSE 通道，回 405 + 说明（不是 404，让客户端知道端点存在但方法不对）。 */
 export function GET(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
   return noStore(
     405,
     {
       error: "method_not_allowed",
-      message: "本 MCP 端點只接受 POST（Streamable HTTP，單發 JSON-RPC，暫不提供 SSE 串流）。",
+      message: "本 MCP 端点只接受 POST（Streamable HTTP，单发 JSON-RPC，暂不提供 SSE 串流）。",
       transport: "streamable-http",
       endpoint: "/api/mcp",
       allowed_methods: ["POST"],
@@ -185,18 +185,18 @@ export function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
-  // 公開 origin 只服務 401 挑戰；工具轉發另由 resolveDispatchUrl 逐請求決定（見檔頭）。
+  // 公开 origin 只服务 401 挑战；工具转发另由 resolveDispatchUrl 逐请求决定（见档头）。
   const publicOrigin = resolvePublicOrigin(req);
 
-  // ── 認證：逐字複用 B 端那把閘（不新增第二套驗 key）────────────────
+  // ── 认证：逐字复用 B 端那把闸（不新增第二套验 key）────────────────
   const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
   if (!auth.ok) {
-    // 只回既有的訊息/碼；**絕不**回聲金鑰本身。
+    // 只回既有的讯息/码；**绝不**回声金钥本身。
     const headers: Record<string, string> = {};
     if (auth.status === 401) {
-      // 帶上 `resource_metadata`：發現文件住在站根（`/.well-known/oauth-protected-resource`），
-      // 而本端點在 `/api/mcp` 之下——不分岔指路的話，嚴格客戶端會去拼
-      // `…/oauth-protected-resource/api/mcp` 而 404，整條發現鏈就斷在這裡。
+      // 带上 `resource_metadata`：发现文件住在站根（`/.well-known/oauth-protected-resource`），
+      // 而本端点在 `/api/mcp` 之下——不分岔指路的话，严格客户端会去拼
+      // `…/oauth-protected-resource/api/mcp` 而 404，整条发现链就断在这里。
       headers["WWW-Authenticate"] =
         `Bearer realm="eimu-mcp", resource_metadata="${publicOrigin}${PROTECTED_RESOURCE_METADATA_PATH}"`;
     }
@@ -209,33 +209,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 讀 body：畸型輸入回協議碼，不拋 500 ────────────────────────────
+  // ── 读 body：畸型输入回协议码，不抛 500 ────────────────────────────
   let raw: string;
   try {
     raw = await req.text();
   } catch {
-    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.parseError, "無法讀取請求體。");
+    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.parseError, "无法读取请求体。");
   }
   if (!raw.trim()) {
-    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.invalidRequest, "請求體為空。");
+    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.invalidRequest, "请求体为空。");
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.parseError, "請求體不是合法 JSON。");
+    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.parseError, "请求体不是合法 JSON。");
   }
 
   if (Array.isArray(parsed)) {
-    // 批次請求（JSON-RPC 陣列）本版不支援：明確拒絕，不靜默只取第一條。
-    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.invalidRequest, "本端點不支援 JSON-RPC 批次請求。");
+    // 批次请求（JSON-RPC 阵列）本版不支援：明确拒绝，不静默只取第一条。
+    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.invalidRequest, "本端点不支援 JSON-RPC 批次请求。");
   }
   if (!isJsonRpcRequest(parsed)) {
-    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.invalidRequest, "不是合法的 JSON-RPC 2.0 請求。");
+    return rpcError(traceId, null, JSON_RPC_ERROR_CODES.invalidRequest, "不是合法的 JSON-RPC 2.0 请求。");
   }
 
-  // notification（含 notifications/initialized）：只回 202，無 body。
+  // notification（含 notifications/initialized）：只回 202，无 body。
   if (parsed.id === undefined) return noStore(202, undefined, traceId);
   const id = normalizeJsonRpcId(parsed.id);
 
@@ -246,7 +246,7 @@ export async function POST(req: NextRequest) {
         : {};
       const result: McpInitializeResult = {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
-        // tools 既有能力不動；本版新增宣告 resources / prompts（harness 指南與模板）。
+        // tools 既有能力不动；本版新增宣告 resources / prompts（harness 指南与模板）。
         capabilities: { tools: {}, resources: {}, prompts: {} },
         serverInfo: { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
         instructions: SERVER_INSTRUCTIONS,
@@ -266,10 +266,10 @@ export async function POST(req: NextRequest) {
         : {};
       const toolName = typeof params.name === "string" ? params.name.trim() : "";
       if (!toolName) {
-        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.invalidParams, "tools/call 缺少參數 name。");
+        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.invalidParams, "tools/call 缺少参数 name。");
       }
 
-      // 轉發目標逐請求解析：公開 origin（CF 前置）不能當出口，見 resolveDispatchUrl。
+      // 转发目标逐请求解析：公开 origin（CF 前置）不能当出口，见 resolveDispatchUrl。
       try {
         const result = await callTool(toolName, params.arguments, {
           authorization: req.headers.get("authorization"),
@@ -281,14 +281,14 @@ export async function POST(req: NextRequest) {
         if (error instanceof McpRpcError) {
           return rpcError(traceId, id, error.code, error.message, error.data);
         }
-        // 只記工具名，不記參數、不記 authorization。
-        console.error(`[mcp] tools/call ${toolName} 未預期失敗`, error instanceof Error ? error.message : error);
-        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.internalError, "工具執行發生未預期錯誤。");
+        // 只记工具名，不记参数、不记 authorization。
+        console.error(`[mcp] tools/call ${toolName} 未预期失败`, error instanceof Error ? error.message : error);
+        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.internalError, "工具执行发生未预期错误。");
       }
     }
 
     case "resources/list":
-      // 只露「有什麼」：投影掉 text 全文，全文交給 resources/read 按 uri 取。
+      // 只露「有什么」：投影掉 text 全文，全文交给 resources/read 按 uri 取。
       return rpcOk(traceId, id, {
         resources: HARNESS_RESOURCES.map(({ uri, name, description, mimeType }) => ({
           uri,
@@ -305,7 +305,7 @@ export async function POST(req: NextRequest) {
       const uri = typeof params.uri === "string" ? params.uri : "";
       const resource = HARNESS_RESOURCES.find((candidate) => candidate.uri === uri);
       if (!resource) {
-        // 未知 uri 走 invalidParams，並把可用清單寫進訊息（客戶端可自我修正）。
+        // 未知 uri 走 invalidParams，并把可用清单写进讯息（客户端可自我修正）。
         return rpcError(
           traceId,
           id,
@@ -319,7 +319,7 @@ export async function POST(req: NextRequest) {
     }
 
     case "prompts/list":
-      // 投影掉 build 函式：清單是純資料，必須可 JSON 序列化。
+      // 投影掉 build 函式：清单是纯资料，必须可 JSON 序列化。
       return rpcOk(traceId, id, {
         prompts: HARNESS_PROMPTS.map(({ name, title, description, arguments: args }) => ({
           name,
@@ -335,7 +335,7 @@ export async function POST(req: NextRequest) {
         : {};
       const promptName = typeof params.name === "string" ? params.name.trim() : "";
       if (!promptName) {
-        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.invalidParams, "prompts/get 缺少參數 name。");
+        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.invalidParams, "prompts/get 缺少参数 name。");
       }
       const prompt = HARNESS_PROMPTS.find((candidate) => candidate.name === promptName);
       if (!prompt) {
@@ -346,7 +346,7 @@ export async function POST(req: NextRequest) {
           `prompts/get 未知的 prompt：${promptName}。可用 name：${HARNESS_PROMPTS.map((p) => p.name).join("、")}。`,
         );
       }
-      // 見 sanitizePromptArguments 的逆注入契約：參數只交給 build 附加在尾端，本處零插值。
+      // 见 sanitizePromptArguments 的逆注入契约：参数只交给 build 附加在尾端，本处零插值。
       const text = prompt.build(sanitizePromptArguments(prompt, params.arguments));
       return rpcOk(traceId, id, {
         description: prompt.description,

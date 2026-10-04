@@ -7,45 +7,45 @@ import { PromoLoginPopover } from "./PromoLoginPopover";
 import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 
 /**
- * 未登入新訪客的進站宣傳片浮層（2026-09-27 暴君裁定落地）。
+ * 未登入新访客的进站宣传片浮层（2026-09-27 暴君裁定落地）。
  *
- * 為什麼是浮層而不是首頁 hero 卡：定位之爭在「進網站第一刻」就被裁定——
- * 新訪客看見的第一眼若是參數框＋輸入框＋輸出框，就會拿生圖中轉站的尺來量我們
- * （原始決策見記憶 manju-relay-objection-and-demo-onboarding-0922）。浮層把
+ * 为什么是浮层而不是首页 hero 卡：定位之争在「进网站第一刻」就被裁定——
+ * 新访客看见的第一眼若是参数框＋输入框＋输出框，就会拿生图中转站的尺来量我们
+ * （原始决策见记忆 manju-relay-objection-and-demo-onboarding-0922）。浮层把
  * 那第一秒拿去放一部片。
  *
- * 收尾（2026-09-27 暴君第二輪糾正：「你结尾那个引导好差啊」）：
- * 原本是一塊玻璃面板＋「开始试玩」鈕，浮在近白的片尾畫面上——灰糊成一團、
- * 沒有畫面、還要人多按一次。現在直接拿**宣傳片 A 版封面**當結尾畫面
- * （`public/promo/eimu-promo-cover.jpg`，1920×1080），封面裡那個輸入框
- * **換成真的能打字的輸入框**：打一句、按送出，就開新對話把那句送進產線。
+ * 收尾（2026-09-27 暴君第二轮纠正：「你结尾那个引导好差啊」）：
+ * 原本是一块玻璃面板＋「开始试玩」钮，浮在近白的片尾画面上——灰糊成一团、
+ * 没有画面、还要人多按一次。现在直接拿**宣传片 A 版封面**当结尾画面
+ * （`public/promo/eimu-promo-cover.jpg`，1920×1080），封面里那个输入框
+ * **换成真的能打字的输入框**：打一句、按送出，就开新对话把那句送进产线。
  *
- * 座標逐字取自封面渲染源 `promo-video/cover.html` 的 `.prompt`
- * （left 294 / top 690 / width 700 / height 112，皆在 1920×1080 畫布上），
- * 所以真輸入框會精準蓋住封面裡那個畫上去的框、不會露字。整個封面容器做
- * `container-type: size`，框內尺寸全用 cqh 表達 → 任何視窗尺寸下都與畫面等比。
+ * 座标逐字取自封面渲染源 `promo-video/cover.html` 的 `.prompt`
+ * （left 294 / top 690 / width 700 / height 112，皆在 1920×1080 画布上），
+ * 所以真输入框会精准盖住封面里那个画上去的框、不会露字。整个封面容器做
+ * `container-type: size`，框内尺寸全用 cqh 表达 → 任何视窗尺寸下都与画面等比。
  *
- * 播放政策：瀏覽器一律擋帶聲自動播放，所以本體恆為 muted autoplay，
- * 聲音由右下角按鈕由人開啟；自動播放若整條被擋（省電模式／嚴格站點設定），
- * 退成海報＋播放鈕，不是黑屏。
+ * 播放政策：浏览器一律挡带声自动播放，所以本体恒为 muted autoplay，
+ * 声音由右下角按钮由人开启；自动播放若整条被挡（省电模式／严格站点设定），
+ * 退成海报＋播放钮，不是黑屏。
  *
- * 文案一律簡體（產品語言），圖示一律 lucide（禁 emoji 圖示）。
+ * 文案一律简体（产品语言），图示一律 lucide（禁 emoji 图示）。
  */
 
 export interface PromoIntroOverlayProps {
   /**
-   * 使用者在結尾輸入框送出了那句話：關浮層、開新對話、直接送進產線。
-   * 空字串＝他直接按送出，用片中的原始許願當那句。
+   * 使用者在结尾输入框送出了那句话：关浮层、开新对话、直接送进产线。
+   * 空字串＝他直接按送出，用片中的原始许愿当那句。
    */
   onTrial: (text: string) => void;
-  /** 「重播一遍」以外的退路（跳過 / Esc / 先逛逛）＝只關掉浮層，不送任何話。 */
+  /** 「重播一遍」以外的退路（跳过 / Esc / 先逛逛）＝只关掉浮层，不送任何话。 */
   onDismiss: () => void;
   /**
-   * 未登入（宣傳片觀眾的大多數）：送出時不送訊息，改成在送出鈕上方長出登入小框。
-   * 判定留在上層（那裡才有登入態），這裡只負責表現。
+   * 未登入（宣传片观众的大多数）：送出时不送讯息，改成在送出钮上方长出登入小框。
+   * 判定留在上层（那里才有登入态），这里只负责表现。
    */
   needsLogin?: boolean;
-  /** 使用者放棄登入（關掉小框）：上層清掉待送的那句話——之後無關的登入不該補送。 */
+  /** 使用者放弃登入（关掉小框）：上层清掉待送的那句话——之后无关的登入不该补送。 */
   onLoginDismiss?: () => void;
 }
 
@@ -53,21 +53,21 @@ const VIDEO_SRC = "/promo/eimu-promo.mp4";
 const POSTER_SRC = "/promo/eimu-promo-poster.jpg";
 const COVER_SRC = "/promo/eimu-promo-cover.jpg";
 
-/** 封面畫布：1920×1080（見 promo-video/cover.html）。 */
+/** 封面画布：1920×1080（见 promo-video/cover.html）。 */
 const COVER_W = 1920;
 const COVER_H = 1080;
 /**
- * `.prompt` 框在畫布上的矩形（見 cover.html）。真輸入框照這組數字蓋上去，並
- * **四周各出血 6px**：封面那張框是畫上去的（自帶文字、游標與送出鈕），蓋不乾淨
- * 就會在圓角邊緣露一線雙層。出血只吃掉框外 6px 的背景漸層，肉眼無感。
+ * `.prompt` 框在画布上的矩形（见 cover.html）。真输入框照这组数字盖上去，并
+ * **四周各出血 6px**：封面那张框是画上去的（自带文字、游标与送出钮），盖不干净
+ * 就会在圆角边缘露一线双层。出血只吃掉框外 6px 的背景渐层，肉眼无感。
  */
 const BOX_BLEED = 6;
 const BOX = { left: 294 - BOX_BLEED, top: 690 - BOX_BLEED, width: 700 + BOX_BLEED * 2, height: 112 + BOX_BLEED * 2 };
-/** 框中心（先把畫面中心對到這裡，再看什麼尺寸下最好用）。 */
+/** 框中心（先把画面中心对到这里，再看什么尺寸下最好用）。 */
 const BOX_CX = (BOX.left + BOX.width / 2) / COVER_W;
 const BOX_CY = (BOX.top + BOX.height / 2) / COVER_H;
 
-/** 畫布 px → 容器高度百分比（容器已鎖 16:9，故 cqh 即等比縮放）。 */
+/** 画布 px → 容器高度百分比（容器已锁 16:9，故 cqh 即等比缩放）。 */
 const cqh = (px: number): string => `${((px / COVER_H) * 100).toFixed(4)}cqh`;
 const pct = (value: number, total: number): string => `${((value / total) * 100).toFixed(4)}%`;
 
@@ -81,24 +81,24 @@ export function PromoIntroOverlay({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [muted, setMuted] = useState(true);
   const [progress, setProgress] = useState(0);
-  /** 播放收尾（自然播完，或按了跳過）：換成封面＋可輸入的那一句。 */
+  /** 播放收尾（自然播完，或按了跳过）：换成封面＋可输入的那一句。 */
   const [settled, setSettled] = useState(false);
-  /** 自動播放整條被擋：退成海報＋播放鈕。 */
+  /** 自动播放整条被挡：退成海报＋播放钮。 */
   const [needsTap, setNeedsTap] = useState(false);
-  /** 使用者打的那句話。 */
+  /** 使用者打的那句话。 */
   const [text, setText] = useState("");
-  /** 直式（手機）：封面要放大到框好按的大小。 */
+  /** 直式（手机）：封面要放大到框好按的大小。 */
   const [portrait, setPortrait] = useState(false);
   /**
-   * 送出鈕的 0.2 秒轉圈（2026-09-27 暴君裁定）：按下到「長出登入框」之間要有
-   * 「真的在做事」的反饋，否則人只看到一個小框冒出來＝沒接住他的動作。
+   * 送出钮的 0.2 秒转圈（2026-09-27 暴君裁定）：按下到「长出登入框」之间要有
+   * 「真的在做事」的反馈，否则人只看到一个小框冒出来＝没接住他的动作。
    */
   const [sending, setSending] = useState(false);
-  /** 登入小框（未登入時）：長在送出鈕正上方，不遮蓋結尾畫面。 */
+  /** 登入小框（未登入时）：长在送出钮正上方，不遮盖结尾画面。 */
   const [loginOpen, setLoginOpen] = useState(false);
   const sendTimerRef = useRef<number | null>(null);
 
-  // 浮層開著時鎖住底下的頁面捲動，否則手機上手指會把首頁連同影片一起滑走。
+  // 浮层开著时锁住底下的页面卷动，否则手机上手指会把首页连同影片一起滑走。
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -107,7 +107,7 @@ export function PromoIntroOverlay({
     };
   }, []);
 
-  // 自動播放：瀏覽器政策只保證靜音自動播放，失敗就擺播放鈕，別留黑屏。
+  // 自动播放：浏览器政策只保证静音自动播放，失败就摆播放钮，别留黑屏。
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -117,8 +117,8 @@ export function PromoIntroOverlay({
     }
   }, []);
 
-  // 直式螢幕：封面只佔 56.25vw 的話輸入框只有一百多 px 寬，手指放不下。
-  // 直式改成放大到 250vw 再以框為中心——框寬約佔螢幕七成，字也跟著放大。
+  // 直式萤幕：封面只占 56.25vw 的话输入框只有一百多 px 宽，手指放不下。
+  // 直式改成放大到 250vw 再以框为中心——框宽约占萤幕七成，字也跟著放大。
   useEffect(() => {
     const mq = window.matchMedia("(max-aspect-ratio: 1/1)");
     const apply = (): void => setPortrait(mq.matches);
@@ -127,7 +127,7 @@ export function PromoIntroOverlay({
     return () => mq.removeEventListener("change", apply);
   }, []);
 
-  // 收尾出現時把游標放進輸入框（只有滑鼠裝置；手機自動彈鍵盤會嚇到人）。
+  // 收尾出现时把游标放进输入框（只有滑鼠装置；手机自动弹键盘会吓到人）。
   useEffect(() => {
     if (!settled) return;
     if (!window.matchMedia("(hover: hover)").matches) return;
@@ -138,7 +138,7 @@ export function PromoIntroOverlay({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      // Esc 先收小框（一層一層退），沒有小框才是退出整個浮層。
+      // Esc 先收小框（一层一层退），没有小框才是退出整个浮层。
       if (loginOpen) {
         setLoginOpen(false);
         onLoginDismiss?.();
@@ -150,7 +150,7 @@ export function PromoIntroOverlay({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [loginOpen, onDismiss, onLoginDismiss]);
 
-  // 卸載時把那個 0.2 秒的計時器收乾淨（人可能在轉圈途中就按了先逛逛）。
+  // 卸载时把那个 0.2 秒的计时器收干净（人可能在转圈途中就按了先逛逛）。
   useEffect(
     () => () => {
       if (sendTimerRef.current !== null) window.clearTimeout(sendTimerRef.current);
@@ -172,7 +172,7 @@ export function PromoIntroOverlay({
       const next = !current;
       if (el) {
         el.muted = next;
-        // 由人按下的靜音解除，順手把音量補到滿——不然會停在瀏覽器給的預設值上。
+        // 由人按下的静音解除，顺手把音量补到满——不然会停在浏览器给的预设值上。
         if (!next) el.volume = 1;
       }
       return next;
@@ -194,19 +194,19 @@ export function PromoIntroOverlay({
   }, []);
 
   /**
-   * 送出：空框也走得通——直接按送出就是跑片中那句話。
-   * 未登入走「轉圈 0.2 秒 → 送出鈕上方長出登入小框」（暴君 2026-09-27：
-   * 直接彈全屏登入牆會讓人喪失興趣，先給一個正在開跑的反饋再問他要不要登入）。
+   * 送出：空框也走得通——直接按送出就是跑片中那句话。
+   * 未登入走「转圈 0.2 秒 → 送出钮上方长出登入小框」（暴君 2026-09-27：
+   * 直接弹全屏登入墙会让人丧失兴趣，先给一个正在开跑的反馈再问他要不要登入）。
    */
   const submit = useCallback(
     (event?: React.FormEvent) => {
       event?.preventDefault();
       if (sending) return;
       const payload = text.trim() || PROMO_TRIAL_PROMPT;
-      // 未登入也先交給上層：上層據登入態分流，未登入那條只把這句話存成 pending
-      // （ref ＋ sessionStorage）、不關浮層。以前這裡未登入直接跳過 onTrial ⇒ pending
-      // 從沒寫進去，微信登入成功後補送 effect 無話可送、停在「正在进入…」；GitHub
-      // 跳轉回來那句話也已經丟了（2026-09-30 E2E 實錘）。
+      // 未登入也先交给上层：上层据登入态分流，未登入那条只把这句话存成 pending
+      // （ref ＋ sessionStorage）、不关浮层。以前这里未登入直接跳过 onTrial ⇒ pending
+      // 从没写进去，微信登入成功后补送 effect 无话可送、停在「正在进入…」；GitHub
+      // 跳转回来那句话也已经丢了（2026-09-30 E2E 实锤）。
       onTrial(payload);
       if (!needsLogin) return;
       setSending(true);
@@ -220,7 +220,7 @@ export function PromoIntroOverlay({
     [needsLogin, onTrial, sending, text],
   );
 
-  /** 關掉登入小框（先不登录／點畫面空白處）：留人在結尾畫面上。 */
+  /** 关掉登入小框（先不登录／点画面空白处）：留人在结尾画面上。 */
   const dismissLogin = useCallback(() => {
     setLoginOpen(false);
     onLoginDismiss?.();
@@ -234,24 +234,24 @@ export function PromoIntroOverlay({
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black"
     >
       {settled ? (
-        // ── 結尾：宣傳片封面當畫面，封面裡那個輸入框換成真的 ────────────────
+        // ── 结尾：宣传片封面当画面，封面里那个输入框换成真的 ────────────────
         <div
           className="absolute inset-0 overflow-hidden bg-[#eef1f6]"
-          // 點封面空白處＝關掉登入小框（結尾畫面不遮蓋，隨手點一下就回到原樣）。
+          // 点封面空白处＝关掉登入小框（结尾画面不遮盖，随手点一下就回到原样）。
           onClick={loginOpen ? dismissLogin : undefined}
         >
           <div
             className="absolute left-1/2 top-1/2 aspect-[16/9]"
             style={{
-              // 橫式＝整張封面完整入鏡（contain）：縮到能塞進視窗的最小那組尺寸，
-              // 多出來的邊留給同色底。**曾經寫成 max(100vw, 177.78vh) 想「不留
-              // 黑邊」，結果視窗比例接近 16:9 時封面被放大到高度溢出——品牌標與
-              // 右上「成片」標籤整個被切掉、底下還留一條空帶（2026-09-27 暴君
-              // 截圖實錘「你交给我的什么玩意啊」）。海報式結尾就該完整入鏡。
-              // 直式＝放大到框好按（手機手指放得下），此時刻意只露出框那一段。
+              // 横式＝整张封面完整入镜（contain）：缩到能塞进视窗的最小那组尺寸，
+              // 多出来的边留给同色底。**曾经写成 max(100vw, 177.78vh) 想「不留
+              // 黑边」，结果视窗比例接近 16:9 时封面被放大到高度溢出——品牌标与
+              // 右上「成片」标签整个被切掉、底下还留一条空带（2026-09-27 暴君
+              // 截图实锤「你交给我的什么玩意啊」）。海报式结尾就该完整入镜。
+              // 直式＝放大到框好按（手机手指放得下），此时刻意只露出框那一段。
               width: portrait ? "250vw" : "min(100vw, 177.78vh)",
-              // 對齊點＝畫面中心：橫式對封面中心，直式對輸入框中心。
-              // 百分比是自身尺寸的比例，所以任何縮放都成立。
+              // 对齐点＝画面中心：横式对封面中心，直式对输入框中心。
+              // 百分比是自身尺寸的比例，所以任何缩放都成立。
               transform: portrait
                 ? `translate(${(-BOX_CX * 100).toFixed(4)}%, ${(-BOX_CY * 100).toFixed(4)}%)`
                 : "translate(-50%, -50%)",
@@ -266,8 +266,8 @@ export function PromoIntroOverlay({
               className="pointer-events-none h-full w-full select-none object-cover"
             />
 
-            {/* 真輸入框：pt-2 那組玻璃樣式逐字沿用 promo-video/cover.html 的 .prompt。
-                它會精準蓋住封面裡畫上去的框（座標同源），所以看不到兩層字。 */}
+            {/* 真输入框：pt-2 那组玻璃样式逐字沿用 promo-video/cover.html 的 .prompt。
+                它会精准盖住封面里画上去的框（座标同源），所以看不到两层字。 */}
             <form
               onSubmit={submit}
               onClick={(event) => event.stopPropagation()}
@@ -333,9 +333,9 @@ export function PromoIntroOverlay({
               </button>
             </form>
 
-            {/* 登入小框：釘在送出鈕正上方（同一套容器座標，任何縮放都對得住），
-                自身尺寸用 CSS px——它是要給手指按的 UI，不該跟著封面縮放。
-                點畫面空白處＝關掉它（結尾畫面其餘部分全程可見，不遮蓋）。 */}
+            {/* 登入小框：钉在送出钮正上方（同一套容器座标，任何缩放都对得住），
+                自身尺寸用 CSS px——它是要给手指按的 UI，不该跟著封面缩放。
+                点画面空白处＝关掉它（结尾画面其余部分全程可见，不遮盖）。 */}
             {loginOpen && (
               <div
                 className="absolute z-10"
@@ -349,13 +349,13 @@ export function PromoIntroOverlay({
               </div>
             )}
 
-            {/* 結尾畫面的大下載鈕（暴君：2026.08.29 那行下方放一顆大的、內容自動識別）：
-                座標在 DesktopDownloadButton 內以封面畫布為準（cqh()/pct()），與本容器同一個
-                `container-type: size` 座標系；落在 .prompt 與 .cap 之下、不重疊。 */}
+            {/* 结尾画面的大下载钮（暴君：2026.08.29 那行下方放一颗大的、内容自动识别）：
+                座标在 DesktopDownloadButton 内以封面画布为准（cqh()/pct()），与本容器同一个
+                `container-type: size` 座标系；落在 .prompt 与 .cap 之下、不重叠。 */}
             <DesktopDownloadButton variant="hero" />
           </div>
 
-          {/* 兩個退路固定在螢幕上（不隨封面縮放跑掉）。 */}
+          {/* 两个退路固定在萤幕上（不随封面缩放跑掉）。 */}
           <div className="absolute inset-x-0 bottom-[max(1.25rem,env(safe-area-inset-bottom))] flex items-center justify-center gap-6">
             <button
               type="button"
@@ -385,15 +385,15 @@ export function PromoIntroOverlay({
             playsInline
             preload="auto"
             onTimeUpdate={handleTimeUpdate}
-            // 播放鈕的去留綁真實播放狀態：真的在播了就收掉。以前只在 play() 被擋時
-            // 設 true、從不復位，按下播放後那顆鈕就一直釘在畫面正中間擋片
-            // （2026-09-30 手機實錘）。
+            // 播放钮的去留绑真实播放状态：真的在播了就收掉。以前只在 play() 被挡时
+            // 设 true、从不复位，按下播放后那颗钮就一直钉在画面正中间挡片
+            // （2026-09-30 手机实锤）。
             onPlaying={() => setNeedsTap(false)}
             onEnded={settle}
           />
 
-          {/* 自動播放被擋時唯一出路：整屏都是播放鈕（手機上點哪都能播），
-              中間那顆只是視覺提示；一開始播就消失。 */}
+          {/* 自动播放被挡时唯一出路：整屏都是播放钮（手机上点哪都能播），
+              中间那颗只是视觉提示；一开始播就消失。 */}
           {needsTap && (
             <button
               type="button"
@@ -430,7 +430,7 @@ export function PromoIntroOverlay({
             )}
           </button>
 
-          {/* 真實播放進度（不是裝飾百分比）：影片還有多久由這條線講。 */}
+          {/* 真实播放进度（不是装饰百分比）：影片还有多久由这条线讲。 */}
           <div className="absolute inset-x-0 bottom-0 z-10 h-[3px] bg-white/10">
             <div
               className="h-full bg-white/75 transition-[width] duration-200 ease-out"

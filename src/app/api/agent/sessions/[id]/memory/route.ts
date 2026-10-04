@@ -1,7 +1,7 @@
-// POST /api/agent/sessions/[id]/memory —— 會話記憶補注（resume 老會話時把帳戶畫像補進去）。
+// POST /api/agent/sessions/[id]/memory —— 会话记忆补注（resume 老会话时把帐户画像补进去）。
 //
-// 記憶注入原本只在建新會話時發生；resume/switch 到舊會話的老用戶永遠拿不到記憶。
-// 這裡在 resume 路徑上補一針：讀本站權威的 profile + lessons，推送給 gateway。
+// 记忆注入原本只在建新会话时发生；resume/switch 到旧会话的老用户永远拿不到记忆。
+// 这里在 resume 路径上补一针：读本站权威的 profile + lessons，推送给 gateway。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -17,7 +17,7 @@ import { isAssetUsable, projectIdFromBody } from "@/lib/asset-library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return fail(400, "会话 id 无效。", "invalid_session_id");
   }
 
-  // 記憶數據本站是權威：與建新會話時同一套讀取與組裝。
+  // 记忆数据本站是权威：与建新会话时同一套读取与组装。
   let memoryInjection: { user_profile: Record<string, unknown>; lessons: string[] } | null = null;
   try {
     const [profile, lessons] = await Promise.all([
@@ -56,10 +56,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   } catch {
     memoryInjection = null;
   }
-  // 資產包激活注入（與記憶平行，缺省不阻塞）。
-  // REQ-B2：注入前過作用域裁決（不可見即不可用）——項目歸屬的包只有在請求帶了
-  // 相符的 projectId（或已顯式分享到該項目）時才注入；無項目上下文＝不注入。
-  // 個人包（無 scope，既有預設）逐位不變。
+  // 资产包激活注入（与记忆平行，缺省不阻塞）。
+  // REQ-B2：注入前过作用域裁决（不可见即不可用）——项目归属的包只有在请求带了
+  // 相符的 projectId（或已显式分享到该项目）时才注入；无项目上下文＝不注入。
+  // 个人包（无 scope，既有预设）逐位不变。
   let activeAssets: ReturnType<typeof buildAssetPackInjection> = null;
   try {
     const body = await req.json().catch(() => ({}));
@@ -77,9 +77,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     activeAssets = null;
   }
 
-  // 記憶庫注入（契約 §4）：私有 active docs（≤8，含 body）＋共享索引行，
-  // 與建新會話同一套讀取與組裝；ownerKey = hashKey(resolveCanonicalKey(key))
-  // （B key 正典化為屬主派生 key 後再 hash，與 gateway 注入/批次同空间）。
+  // 记忆库注入（契约 §4）：私有 active docs（≤8，含 body）＋共享索引行，
+  // 与建新会话同一套读取与组装；ownerKey = hashKey(resolveCanonicalKey(key))
+  // （B key 正典化为属主派生 key 后再 hash，与 gateway 注入/批次同空间）。
   const memoryLibrary = await buildMemoryInjectionPayload(await deriveMemoryOwnerKey(caller.key));
 
   if (!memoryInjection && !activeAssets) {

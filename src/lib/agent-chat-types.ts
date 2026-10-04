@@ -14,7 +14,7 @@ import type { CanvasAgentOpsEvent } from "@/lib/canvas/types";
 // ─────────────────────────── 事件名
 
 export interface AgentQuestionRequest {
-  /** opencode 的 que_* id，回覆必須用這個，不能用 tool callID。 */
+  /** opencode 的 que_* id，回覆必须用这个，不能用 tool callID。 */
   request_id: string;
   questions: Array<{
     question: string;
@@ -68,7 +68,7 @@ export const AGENT_EVENT_NAMES = [
   "question.request",
   "question.replied",
   "question.rejected",
-  // REQ-D2（2026-09-22）：steer 回合中引導的狀態幀（排隊中／已注入／已生效／已中止）。
+  // REQ-D2（2026-09-22）：steer 回合中引导的状态帧（排队中／已注入／已生效／已中止）。
   "steer.status",
 ] as const;
 
@@ -106,19 +106,19 @@ export interface AgentToolResult {
   ok: boolean;
   cost_coins?: number;
   /**
-   * gateway（2026-09-18 契约）—— 提交型工具的任務 id。任务已交给上游，
+   * gateway（2026-09-18 契约）—— 提交型工具的任务 id。任务已交给上游，
    * 成品稍后由 image/video/audio.done（或 image.failed）带同一个 id 回来。
    */
   task_id?: string;
   /**
-   * gateway（2026-09-18 契约）—— true = 任務已提交成功、成品還沒到（**中继态**）。
-   * 网關只在 `ok && task_id 有值 && 回包没有成品 url` 时带它；缺席一律当 false
+   * gateway（2026-09-18 契约）—— true = 任务已提交成功、成品还没到（**中继态**）。
+   * 网关只在 `ok && task_id 有值 && 回包没有成品 url` 时带它；缺席一律当 false
    * 处理，行为与旧格式逐位元一致（不带 = 照旧直接结算 ok，不是生成中）。
    */
   artifact_pending?: boolean;
   /**
-   * 本機檔案授權請求（2026-10-04 缺陷 C）。`local_files` 讀取未授權路徑时，
-   * 裝置橋回 `{ok:false,error:{code:"needs_authorization",root,reason,options}}`；
+   * 本机档案授权请求（2026-10-04 缺陷 C）。`local_files` 读取未授权路径时，
+   * 装置桥回 `{ok:false,error:{code:"needs_authorization",root,reason,options}}`；
    * 这份载荷**必须**一路带到前端，否则卡片只能看到 ok 而误报「完成」。
    */
   action_required?: string;
@@ -129,15 +129,15 @@ export interface AgentToolResult {
   /** 授权成因（人话，如「尚未授权」「安全文件受保护」）。 */
   auth_reason?: string;
   /**
-   * 二進位讀取偵測（2026-10-04 缺陷 D）：`read_file` 對二進位檔回 200 + 有損文字
-   * （含大量 U+FFFD）時，上游若帶這些欄位，前端據此**不得把亂碼當成功內容**呈現。
-   * 欄位缺席時前端另用 preview 的 U+FFFD 比例自行判定（見 detectBinaryText）。
+   * 二进位读取侦测（2026-10-04 缺陷 D）：`read_file` 对二进位档回 200 + 有损文字
+   * （含大量 U+FFFD）时，上游若带这些栏位，前端据此**不得把乱码当成功内容**呈现。
+   * 栏位缺席时前端另用 preview 的 U+FFFD 比例自行判定（见 detectBinaryText）。
    */
   binary?: boolean;
   truncated?: boolean;
   bytes_read?: number;
   bytes_total?: number;
-  /** 內容片段（可選；有才拿來做二進位特徵偵測）。 */
+  /** 内容片段（可选；有才拿来做二进位特征侦测）。 */
   preview?: string;
   /** gateway 附带的人类可读错误（G-FE 合同：中文短句优先渲染）。 */
   error?: {
@@ -178,9 +178,9 @@ export interface AgentImageDone {
 }
 
 /**
- * gateway —— 出片完成（影片生成 / 成片剪接匯出）。與 image.done 同構，
- * 網關按 url 在 session 內去重。media_kind："film"=成片（剪接匯出）、
- * "video"=單段影片生成；缺當 "video"。
+ * gateway —— 出片完成（影片生成 / 成片剪接汇出）。与 image.done 同构，
+ * 网关按 url 在 session 内去重。media_kind："film"=成片（剪接汇出）、
+ * "video"=单段影片生成；缺当 "video"。
  */
 export interface AgentVideoDone {
   url: string;
@@ -190,9 +190,9 @@ export interface AgentVideoDone {
 }
 
 /**
- * gateway —— 出音頻完成（音樂生成 / 語音等音頻產物）。與 video.done 同構，
- * 網關按 url 在 session 內去重。media_kind："music"=成曲（音樂產物）、
- * "audio"=單段音頻；缺當 "audio"。
+ * gateway —— 出音频完成（音乐生成 / 语音等音频产物）。与 video.done 同构，
+ * 网关按 url 在 session 内去重。media_kind："music"=成曲（音乐产物）、
+ * "audio"=单段音频；缺当 "audio"。
  */
 export interface AgentAudioDone {
   url: string;
@@ -202,21 +202,21 @@ export interface AgentAudioDone {
 }
 
 /**
- * gateway director.done —— 導演台工程變更快照（2026-09-02 spec §4 釘死，
- * 與 src/vendor-bridges/gateway/director.ts emitDirectorDone 對齊）。
- * 同一會話反復觸發：revision 單調遞增，前端只保留 revision 最大的一張活卡。
- * schematic 兩欄是服務端預渲染的 <svg> 字串（≤32KB/張）；reset 時 plan/active_shot
- * 為 null、SVG 為空串。
+ * gateway director.done —— 导演台工程变更快照（2026-09-02 spec §4 钉死，
+ * 与 src/vendor-bridges/gateway/director.ts emitDirectorDone 对齐）。
+ * 同一会话反复触发：revision 单调递增，前端只保留 revision 最大的一张活卡。
+ * schematic 两栏是服务端预渲染的 <svg> 字串（≤32KB/张）；reset 时 plan/active_shot
+ * 为 null、SVG 为空串。
  */
 export interface AgentDirectorDone {
   session_id: string;
-  /** project.json 版本號，單調遞增（reset 後歸 0）。 */
+  /** project.json 版本号，单调递增（reset 后归 0）。 */
   revision: number;
-  /** 觸發本次變更的操作名（director_upsert_action 等 / "reset"）。 */
+  /** 触发本次变更的操作名（director_upsert_action 等 / "reset"）。 */
   action: string;
-  /** 當前活躍方案；未初始化 / reset 時為 null。 */
+  /** 当前活跃方案；未初始化 / reset 时为 null。 */
   plan: { id: string; name: string; summary: string; shot_count: number } | null;
-  /** 當前活躍鏡頭摘要；無方案或無鏡頭時為 null。 */
+  /** 当前活跃镜头摘要；无方案或无镜头时为 null。 */
   active_shot: {
     no: number;
     name: string;
@@ -224,9 +224,9 @@ export interface AgentDirectorDone {
     camera_move: string;
     shot_scale: string | null;
   } | null;
-  /** 服務端預渲染示意圖（俯視圖 + 鏡頭框圖），<svg …> 原文字串。 */
+  /** 服务端预渲染示意图（俯视图 + 镜头框图），<svg …> 原文字串。 */
   schematic: { top_view_svg: string; camera_view_svg: string };
-  /** 分鏡健康檢查：ok=綠徽章；issues 非空=琥珀徽章帶數量。 */
+  /** 分镜健康检查：ok=绿徽章；issues 非空=琥珀徽章带数量。 */
   health: { ok: boolean; issues: Array<{ code: string; message: string; shot_id?: string }> };
   counts: { shots: number; elements: number; actions: number };
 }
@@ -252,30 +252,30 @@ export interface AgentTurnStatus {
 }
 
 /**
- * gateway（2026-09-18 契約，同事在網關端施工）—— 送訊後 ~1.4–2.0s 先到的
- * 「本輪計畫」幀：由模型現算的真實計畫（不是罐頭），讓使用者在重型回合
- * 首行正文（可能 +100s）之前就知道助手打算做什麼。
+ * gateway（2026-09-18 契约，同事在网关端施工）—— 送讯后 ~1.4–2.0s 先到的
+ * 「本轮计画」帧：由模型现算的真实计画（不是罐头），让使用者在重型回合
+ * 首行正文（可能 +100s）之前就知道助手打算做什么。
  *
- * 為什麼獨立幀型別而**不**併進 message.delta：借用 message.delta 會讓 reducer
- * 把計畫塞進同一條 streaming:true 的 assistant 條目，100 秒後重模型正文會物理
- * 接在計畫後面，變成一條分不清「計畫 vs 答案」的長氣泡——把非交付物混進交付物。
- * 所以計畫有自己的條目型別（AgentPlanItem）與自己的區塊。
+ * 为什么独立帧型别而**不**并进 message.delta：借用 message.delta 会让 reducer
+ * 把计画塞进同一条 streaming:true 的 assistant 条目，100 秒后重模型正文会物理
+ * 接在计画后面，变成一条分不清「计画 vs 答案」的长气泡——把非交付物混进交付物。
+ * 所以计画有自己的条目型别（AgentPlanItem）与自己的区块。
  *
- * `plan` 是**唯一必需欄位**：缺它整幀丟棄（見 parseAgentSseEvent）。
- * 其餘欄位缺席一律當 undefined/false 處理，行為與沒有這幀時逐位元一致。
+ * `plan` 是**唯一必需栏位**：缺它整帧丢弃（见 parseAgentSseEvent）。
+ * 其余栏位缺席一律当 undefined/false 处理，行为与没有这帧时逐位元一致。
  */
 export interface AgentTurnPlan {
-  /** 由模型現算的計畫一句話（≤160 字）。唯一的必需欄位。 */
+  /** 由模型现算的计画一句话（≤160 字）。唯一的必需栏位。 */
   plan: string;
-  /** 命中的專家白名單（≤4）：只在 digest 命中時出現，缺就不畫晶片。 */
+  /** 命中的专家白名单（≤4）：只在 digest 命中时出现，缺就不画晶片。 */
   experts?: string[];
-  /** 預設 true：計畫還在進行中，據此顯示「（进行中）」。 */
+  /** 预设 true：计画还在进行中，据此显示「（进行中）」。 */
   provisional?: boolean;
-  /** 誠實來源標記：模型現算 / 規則兜底。 */
+  /** 诚实来源标记：模型现算 / 规则兜底。 */
   source?: "model" | "rule";
-  /** 產生計畫的模型名。只進 console，不進 UI。 */
+  /** 产生计画的模型名。只进 console，不进 UI。 */
   model?: string;
-  /** 保留欄位：true = 就地換掉既有計畫文字（同一 id），預設不出現。 */
+  /** 保留栏位：true = 就地换掉既有计画文字（同一 id），预设不出现。 */
   superseded?: boolean;
 }
 
@@ -301,8 +301,8 @@ export interface AgentQuotaChanged {
   balance_coins: number | null;
   currency: string;
   available: boolean;
-  /** R9-A（gateway quotaPayload）：balance > 0 才可消費；false＝欠費/零餘額，缺省＝未知。
-   *  available 只表示「餘額資料可取得」，負餘額時 available 仍為 true。 */
+  /** R9-A（gateway quotaPayload）：balance > 0 才可消费；false＝欠费/零余额，缺省＝未知。
+   *  available 只表示「余额资料可取得」，负余额时 available 仍为 true。 */
   spendable?: boolean;
   reason?: string;
 }
@@ -319,11 +319,11 @@ export interface AgentSessionClosed {
   reason?: string;
 }
 
-// ─────────────────────────── 畫布指揮臺事件 payload
-// 由 VPS gateway 攔截 image_* 工具自動產生（autoCreateCanvasUnit 系列），
-// 前端畫布 reducer 消費。與 src/lib/canvas/types.ts 的契約一致（此處只做寬鬆解析）。
+// ─────────────────────────── 画布指挥台事件 payload
+// 由 VPS gateway 拦截 image_* 工具自动产生（autoCreateCanvasUnit 系列），
+// 前端画布 reducer 消费。与 src/lib/canvas/types.ts 的契约一致（此处只做宽松解析）。
 
-/** gateway autoCreateCanvasUnit —— 一次生成請求的計畫卡。 */
+/** gateway autoCreateCanvasUnit —— 一次生成请求的计画卡。 */
 export interface AgentCanvasPlan {
   unit_id: string;
   tool: string;
@@ -419,7 +419,7 @@ export interface AgentSubagentDelta {
 /** 子代理收尾。summary ≤600 字，只在卡内截断显示。 */
 export interface AgentSubagentDone {
   id: string;
-  /** stopped＝人工停止成功（gateway stop 閘送出），中性收尾，不是失败。 */
+  /** stopped＝人工停止成功（gateway stop 闸送出），中性收尾，不是失败。 */
   status: "ok" | "error" | "stopped";
   summary?: string;
 }
@@ -502,10 +502,10 @@ export function parseAuthOptions(v: unknown): AgentToolAuthScope[] {
 }
 
 /**
- * 二進位偵測（2026-10-04 缺陷 D，純函式）：文字樣本中 U+FFFD（替換字元）比例。
- * 二進位檔被當文字解碼 → 大量位元組落成 U+FFFD（實測 64KB 有 21,386 個）。
- * 只要替換字元占比 ≥ 0.5%（且樣本 ≥ 64 字元）即判為二進位，**不得當成功內容呈現**。
- * 這是呈現層的最後一道閘；真正的治本在 read_file（gateway/desktop）側。
+ * 二进位侦测（2026-10-04 缺陷 D，纯函式）：文字样本中 U+FFFD（替换字元）比例。
+ * 二进位档被当文字解码 → 大量位元组落成 U+FFFD（实测 64KB 有 21,386 个）。
+ * 只要替换字元占比 ≥ 0.5%（且样本 ≥ 64 字元）即判为二进位，**不得当成功内容呈现**。
+ * 这是呈现层的最后一道闸；真正的治本在 read_file（gateway/desktop）侧。
  */
 export function detectBinaryText(preview: string | undefined): boolean {
   if (typeof preview !== "string" || preview.length < 64) return false;
@@ -517,8 +517,8 @@ export function detectBinaryText(preview: string | undefined): boolean {
 }
 
 /**
- * 寬鬆解析 string[]（turn.plan.experts）。非陣列 / 過濾後為空 → undefined
- * （呼叫方據此決定「不畫晶片」）；逐項非字串或空字串一律剔除，絕不 throw。
+ * 宽松解析 string[]（turn.plan.experts）。非阵列 / 过滤后为空 → undefined
+ * （呼叫方据此决定「不画晶片」）；逐项非字串或空字串一律剔除，绝不 throw。
  */
 function strArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
@@ -547,8 +547,8 @@ function recipe(v: unknown): AgentImageDone["recipe"] | undefined {
 }
 
 /**
- * 寬鬆解析 director.done 的 plan 欄（白名單四欄位；非物件 / 缺核心欄位一律 null，
- * 絕不 throw —— reset/未初始化時本來就是 null）。
+ * 宽松解析 director.done 的 plan 栏（白名单四栏位；非物件 / 缺核心栏位一律 null，
+ * 绝不 throw —— reset/未初始化时本来就是 null）。
  */
 function directorPlan(v: unknown): AgentDirectorDone["plan"] {
   if (!v || typeof v !== "object") return null;
@@ -560,7 +560,7 @@ function directorPlan(v: unknown): AgentDirectorDone["plan"] {
   return { id, name, summary: str(p.summary) ?? "", shot_count: shotCount };
 }
 
-/** 寬鬆解析 director.done 的 active_shot 欄。缺核心欄位回 null。 */
+/** 宽松解析 director.done 的 active_shot 栏。缺核心栏位回 null。 */
 function directorActiveShot(v: unknown): AgentDirectorDone["active_shot"] {
   if (!v || typeof v !== "object") return null;
   const s = v as Record<string, unknown>;
@@ -576,7 +576,7 @@ function directorActiveShot(v: unknown): AgentDirectorDone["active_shot"] {
   };
 }
 
-/** 寬鬆解析 director.done 的 health.issues（白名單欄位逐項收斂，壞項跳過）。 */
+/** 宽松解析 director.done 的 health.issues（白名单栏位逐项收敛，坏项跳过）。 */
 function directorIssues(v: unknown): AgentDirectorDone["health"]["issues"] {
   if (!Array.isArray(v)) return [];
   const out: AgentDirectorDone["health"]["issues"] = [];
@@ -662,7 +662,7 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
               options: (rawErr as { options?: unknown }).options,
             }
           : undefined;
-      // 授權載荷可能在 error 內，也可能在頂層（不同上游版本）；兩處都收。
+      // 授权载荷可能在 error 内，也可能在顶层（不同上游版本）；两处都收。
       const actionRequired = str(d.action_required) ?? error?.action_required;
       const authRoot = str(d.auth_root) ?? error?.root;
       const authReason = str(d.auth_reason) ?? error?.reason;
@@ -715,9 +715,9 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       };
     }
     case "director.done": {
-      // 契約核心欄位 = session_id + revision（revision 是活卡替換的依據，缺失整幀丟棄）。
-      // schematic/health/counts/plan/active_shot 全部走寬鬆解析：網關少送一律當
-      // undefined/null 處理，壞幀不該讓整條對話白屏。
+      // 契约核心栏位 = session_id + revision（revision 是活卡替换的依据，缺失整帧丢弃）。
+      // schematic/health/counts/plan/active_shot 全部走宽松解析：网关少送一律当
+      // undefined/null 处理，坏帧不该让整条对话白屏。
       const sid = str(d.session_id);
       const revision = num(d.revision);
       if (!sid || revision === undefined) return null;
@@ -757,13 +757,13 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       return { name, event_id: eventId, data: { text } };
     }
     case "turn.plan": {
-      // plan 是唯一必需欄位：空字串／缺欄位／非字串一律整幀丟棄（丟半張計畫卡
-      // 等於畫一張空話卡）。其餘欄位走白名單寬鬆解析，壞值折成 undefined 不 throw。
+      // plan 是唯一必需栏位：空字串／缺栏位／非字串一律整帧丢弃（丢半张计画卡
+      // 等于画一张空话卡）。其余栏位走白名单宽松解析，坏值折成 undefined 不 throw。
       const plan = str(d.plan);
       if (!plan || plan.trim().length === 0) return null;
       const experts = strArray(d.experts);
-      // provisional 預設 true：只有明確 === false 才是 false（缺欄位當「還在進行中」，
-      // 這是保守誠實的一側——計畫剛到時本來就還沒定案）。
+      // provisional 预设 true：只有明确 === false 才是 false（缺栏位当「还在进行中」，
+      // 这是保守诚实的一侧——计画刚到时本来就还没定案）。
       const sup = d.superseded === true;
       const src = d.source === "model" || d.source === "rule" ? (d.source as "model" | "rule") : undefined;
       return {
@@ -924,8 +924,8 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     case "subagent.delta": {
       const id = str(d.id);
       if (!id) return null;
-      // kind 白名單單值：只認 "reasoning"（思維鏈）；其餘（含缺省）一律當正文。
-      // 認不得的值折成 undefined 而不是整幀丟棄——寧可少一個活動字，不少一段交付物。
+      // kind 白名单单值：只认 "reasoning"（思维链）；其余（含缺省）一律当正文。
+      // 认不得的值折成 undefined 而不是整帧丢弃——宁可少一个活动字，不少一段交付物。
       const kind = d.kind === "reasoning" ? ("reasoning" as const) : undefined;
       return { name, event_id: eventId, data: { id, text: str(d.text) ?? "", ...(kind ? { kind } : {}) } };
     }
@@ -963,7 +963,7 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     case "steer.status": {
       const steerId = str(d.steer_id);
       const status = parseSteerStatus(d.status);
-      // 核心欄位（id + 狀態）缺一即整幀丟棄：認不得的狀態寧可不上屏，不猜。
+      // 核心栏位（id + 状态）缺一即整帧丢弃：认不得的状态宁可不上屏，不猜。
       if (!steerId || !status) return null;
       const position = num(d.position);
       return {
@@ -982,28 +982,28 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
 }
 
 /**
- * steer 狀態值域的唯一權威（與網關 steer-core.ts 的 SteerStatus 逐字對齊）。
+ * steer 状态值域的唯一权威（与网关 steer-core.ts 的 SteerStatus 逐字对齐）。
  *
- * uncertain（REQ-D2b，2026-09-23）：**未確認**——網關投遞已發出但沒等到確認
- * （進程中斷於投遞與確認之間／重啟後恢復）。它不是 failed：「不知道送沒送到」與
- * 「確知沒送到」是兩件事，混為一談就是把不確定說成事實。網關契約是**永不自動重發**，
- * 所以徽章顯示「未确认·未重送」，且此態是終態（遲到的幀不得改寫）。
+ * uncertain（REQ-D2b，2026-09-23）：**未确认**——网关投递已发出但没等到确认
+ * （进程中断于投递与确认之间／重启后恢复）。它不是 failed：「不知道送没送到」与
+ * 「确知没送到」是两件事，混为一谈就是把不确定说成事实。网关契约是**永不自动重发**，
+ * 所以徽章显示「未确认·未重送」，且此态是终态（迟到的帧不得改写）。
  */
 export const AGENT_STEER_STATUSES = ["queued", "injected", "applied", "aborted", "failed", "uncertain"] as const;
 export type AgentSteerStatus = (typeof AGENT_STEER_STATUSES)[number];
 
 /**
- * 「排队中」徽章的存活上限（ms）——與網關 steer-core.ts 的 STEER_QUEUE_TTL_MS
- * **必須逐字等值**（有測試釘著兩邊的字面）。
+ * 「排队中」徽章的存活上限（ms）——与网关 steer-core.ts 的 STEER_QUEUE_TTL_MS
+ * **必须逐字等值**（有测试钉著两边的字面）。
  *
- * 為什麼前端也要有這個時限（D2-3）：網關的 pendingSteers 是 volatile 的——重啟／
- * 續期後隊列整個消失。此時前端的「排队中」徽章沒有任何東西會把它推進終態＝永久假話。
- * 所以前端以同一個 TTL 自行兜底：逾時仍未見終態幀 → 翻「未能送達（未生效）」。
- * 兩端都誠實：網關知道的（逾時條目）由網關發 queue_expired，網關不知道的由前端自己收口。
+ * 为什么前端也要有这个时限（D2-3）：网关的 pendingSteers 是 volatile 的——重启／
+ * 续期后队列整个消失。此时前端的「排队中」徽章没有任何东西会把它推进终态＝永久假话。
+ * 所以前端以同一个 TTL 自行兜底：逾时仍未见终态帧 → 翻「未能送达（未生效）」。
+ * 两端都诚实：网关知道的（逾时条目）由网关发 queue_expired，网关不知道的由前端自己收口。
  *
- * D2b（2026-09-23）之後的分工更清楚：重啟後網關**記得**那些命令身份（steer_commands 表），
- * 恢復時會補一張 uncertain 幀（「未确认·未重送」）；TTL 只負責「那張幀也沒送到／沒重連」
- * 這一最後兜底——它是 UI 的時間語義，不是防重複投遞的機制（那是 tombstone 的職責）。
+ * D2b（2026-09-23）之后的分工更清楚：重启后网关**记得**那些命令身份（steer_commands 表），
+ * 恢复时会补一张 uncertain 帧（「未确认·未重送」）；TTL 只负责「那张帧也没送到／没重连」
+ * 这一最后兜底——它是 UI 的时间语义，不是防重复投递的机制（那是 tombstone 的职责）。
  */
 export const AGENT_STEER_QUEUE_TTL_MS = 30 * 60 * 1000;
 
@@ -1120,14 +1120,14 @@ export interface AgentAssistantTextItem extends TranscriptItemBase {
   /** 思维链（reasoning.delta 累积）。streaming 期间可能还在长。UI 可折叠显示。 */
   reasoning?: string;
   /**
-   * 思維鏈起點（epoch ms）：reasoning.delta 首次落到本條目時由 reducer 寫入，
-   * 已有值不覆蓋。只當結算 reasoningMs 的基準，寫完保留、不再參與顯示。
+   * 思维链起点（epoch ms）：reasoning.delta 首次落到本条目时由 reducer 写入，
+   * 已有值不覆盖。只当结算 reasoningMs 的基准，写完保留、不再参与显示。
    */
   reasoningStartedAt?: number;
   /**
-   * 思維鏈總時長（ms）：思考結束時結算一次（正文首個 delta 到達、或串流收尾），
-   * 之後不再變。收合行據此顯示「已思考 · N 秒」；缺席＝沒有可誠實顯示的秒數
-   * （歷史回放重建的條目就沒有計時資料，顯示「已思考」不編秒數）。
+   * 思维链总时长（ms）：思考结束时结算一次（正文首个 delta 到达、或串流收尾），
+   * 之后不再变。收合行据此显示「已思考 · N 秒」；缺席＝没有可诚实显示的秒数
+   * （历史回放重建的条目就没有计时资料，显示「已思考」不编秒数）。
    */
   reasoningMs?: number;
   /** true = 还在收 delta。turn.done 后转 false。 */
@@ -1138,39 +1138,39 @@ export interface AgentAssistantTextItem extends TranscriptItemBase {
 export interface AgentToolCallItem extends TranscriptItemBase {
   kind: "tool";
   tool: string;
-  /** 派遣子代理时，綁定的子代理 id（subagent.started 回填）：狀態與子代理卡同源。 */
+  /** 派遣子代理时，绑定的子代理 id（subagent.started 回填）：状态与子代理卡同源。 */
   subagentId?: string;
   argsSummary?: string;
   /**
-   * 卡片状态。`pending` 是**中继態：已提交、成品未到**（tool.result.artifact_pending）
-   * —— 提交型生圖/生片工具在任務交出去的那一刻不再假報「已完成」，等
+   * 卡片状态。`pending` 是**中继态：已提交、成品未到**（tool.result.artifact_pending）
+   * —— 提交型生图/生片工具在任务交出去的那一刻不再假报「已完成」，等
    * image/video/audio.done 或 image.failed 到了才转终态。
    *
-   * `needs_auth`（2026-10-04 缺陷 C）＝**需要授权**的 action 態：`local_files`
-   * 未授權路徑回 needs_authorization，卡片必須停在「等用户选授权范围」，絕非「完成」。
+   * `needs_auth`（2026-10-04 缺陷 C）＝**需要授权**的 action 态：`local_files`
+   * 未授权路径回 needs_authorization，卡片必须停在「等用户选授权范围」，绝非「完成」。
    */
   status: "running" | "pending" | "ok" | "failed" | "needs_auth";
-  /** 提交型工具的任務 id（tool.result.task_id 回填）：成品/失敗事件用它精確配對 pending 卡。 */
+  /** 提交型工具的任务 id（tool.result.task_id 回填）：成品/失败事件用它精确配对 pending 卡。 */
   taskId?: string;
   costCoins?: number;
   /** 失败时的人类可读错误（gateway tool.result error.human_message 优先）。 */
   error?: string;
   /** 执行中进度（tool.progress 回填）。仅 running 期有意义，终态后忽略。 */
   progress?: { done: number; total: number; label?: string };
-  /** 本機檔案授權請求载荷（status==="needs_auth" 时必填，供卡片渲染三选一）。 */
+  /** 本机档案授权请求载荷（status==="needs_auth" 时必填，供卡片渲染三选一）。 */
   authorization?: AgentToolAuthorization;
   /**
-   * 二進位讀取偵測（缺陷 D）：true 时卡片顯「这是二进制文件，无法当文字读」，
-   * 指向附件下載路徑，**不把乱码当成功内容**。
+   * 二进位读取侦测（缺陷 D）：true 时卡片显「这是二进制文件，无法当文字读」，
+   * 指向附件下载路径，**不把乱码当成功内容**。
    */
   binary?: boolean;
-  /** 截斷資訊（依實際讀到的 bytes 與檔案 size 對比；上游帶才有）。 */
+  /** 截断资讯（依实际读到的 bytes 与档案 size 对比；上游带才有）。 */
   readBytes?: number;
   totalBytes?: number;
   truncated?: boolean;
 }
 
-/** 本機檔案授權請求载荷。 */
+/** 本机档案授权请求载荷。 */
 export interface AgentToolAuthorization {
   root?: string;
   reason?: string;
@@ -1194,28 +1194,28 @@ export interface AgentVideoItem extends TranscriptItemBase {
   url: string;
   costCoins?: number;
   taskId?: string;
-  /** "film"=成片（剪接匯出）、"video"=單段影片生成。缺當 "video" 展示。 */
+  /** "film"=成片（剪接汇出）、"video"=单段影片生成。缺当 "video" 展示。 */
   mediaKind?: "video" | "film";
 }
 
-/** 出音頻結果（音樂 / 語音）。卡上掛「存圖庫／下載」。 */
+/** 出音频结果（音乐 / 语音）。卡上挂「存图库／下载」。 */
 export interface AgentAudioItem extends TranscriptItemBase {
   kind: "audio";
   url: string;
   costCoins?: number;
   taskId?: string;
-  /** "music"=成曲（音樂產物）、"audio"=單段音頻。缺當 "audio" 展示。 */
+  /** "music"=成曲（音乐产物）、"audio"=单段音频。缺当 "audio" 展示。 */
   mediaKind?: "audio" | "music";
 }
 
 /**
- * 導演台分鏡卡（director.done → 前端唯一活卡）。會話內同槽替換不堆積：
- * 新事件 revision 大者勝，小於等於現有 revision 的遲到幀丟棄。
- * SVG 是服務端預渲染的 <svg> 字串，渲染層轉 data:image/svg+xml;base64 img。
+ * 导演台分镜卡（director.done → 前端唯一活卡）。会话内同槽替换不堆积：
+ * 新事件 revision 大者胜，小于等于现有 revision 的迟到帧丢弃。
+ * SVG 是服务端预渲染的 <svg> 字串，渲染层转 data:image/svg+xml;base64 img。
  */
 export interface AgentDirectorItem extends TranscriptItemBase {
   kind: "director";
-  /** 導演工程所屬的會話 id（director.done.session_id）。 */
+  /** 导演工程所属的会话 id（director.done.session_id）。 */
   directorSessionId: string;
   revision: number;
   action: string;
@@ -1264,30 +1264,30 @@ export interface AgentSubagentItem extends TranscriptItemBase {
  */
 export interface AgentSubagentReportItem extends TranscriptItemBase {
   kind: "subagent_result";
-  /** 原 subagent id（同一子代理的产出与它的状态欄可對照）。 */
+  /** 原 subagent id（同一子代理的产出与它的状态栏可对照）。 */
   subagentId: string;
   label: string;
   /** running 中就被收尾（中止）= interrupted；人工停止成功 = stopped，均非失败。 */
   status: "ok" | "error" | "interrupted" | "stopped";
-  /** 全文（summary 或串流全文，取較完整者），模型層不截斷。 */
+  /** 全文（summary 或串流全文，取较完整者），模型层不截断。 */
   text: string;
 }
 
 /**
- * 本輪計畫卡（turn.plan → 獨立的「計划」區塊）。
+ * 本轮计画卡（turn.plan → 独立的「计划」区块）。
  *
- * 刻意不併進 assistant 條目：計畫不是交付物，答案才是。混進同一條 streaming
- * 氣泡後，100 秒後才到的正文會物理接在計畫後面，使用者無從分辨哪段是答案。
- * 第一條 message.delta 到達時本卡自動收合成一行（reducer 負責，見 reduceTurnPlan /
- * reduceMessageDelta），但使用者手動展開過就永不再自動收起（渲染層負責）。
+ * 刻意不并进 assistant 条目：计画不是交付物，答案才是。混进同一条 streaming
+ * 气泡后，100 秒后才到的正文会物理接在计画后面，使用者无从分辨哪段是答案。
+ * 第一条 message.delta 到达时本卡自动收合成一行（reducer 负责，见 reduceTurnPlan /
+ * reduceMessageDelta），但使用者手动展开过就永不再自动收起（渲染层负责）。
  */
 export interface AgentPlanItem extends TranscriptItemBase {
   kind: "plan";
-  /** 計畫全文（模型現算，≤160 字）。 */
+  /** 计画全文（模型现算，≤160 字）。 */
   text: string;
-  /** 命中的專家白名單（≤4）。缺席 = 不畫晶片。 */
+  /** 命中的专家白名单（≤4）。缺席 = 不画晶片。 */
   experts?: string[];
-  /** true = 計畫還在進行中（顯示「（进行中）」）。 */
+  /** true = 计画还在进行中（显示「（进行中）」）。 */
   provisional?: boolean;
   /** true = 收合成一行（正文截 40 字）。初始 false。 */
   collapsed?: boolean;
@@ -1312,7 +1312,7 @@ export interface AgentQuotaState {
   balanceCoins: number | null;
   currency: string;
   available: boolean;
-  /** false＝餘額 ≤ 0（欠費），可取得但不可消費；缺省＝未知（見 AgentQuotaChanged.spendable）。 */
+  /** false＝余额 ≤ 0（欠费），可取得但不可消费；缺省＝未知（见 AgentQuotaChanged.spendable）。 */
   spendable?: boolean;
   reason?: string;
 }
@@ -1344,40 +1344,40 @@ export const EMPTY_AGENT_CHAT_STATE: AgentChatState = {
   closed: false,
 };
 
-// ─────────────────────────── 會話全量歷史（GET /api/agent/sessions/[id]）
+// ─────────────────────────── 会话全量历史（GET /api/agent/sessions/[id]）
 //
-// 網關契約（2026-09-12，另一端並行施工中，本端按此寫代碼）：
-//   { "messages": [<opencode 原始訊息陣列>], "event_counter": <int>,
+// 网关契约（2026-09-12，另一端并行施工中，本端按此写代码）：
+//   { "messages": [<opencode 原始讯息阵列>], "event_counter": <int>,
 //     "replay_first_id": <int|null>, "fallback"?: "replay_only" }
 //
-// opencode 訊息 shape 為 [{info:{id,role,time,tokens},parts:[...]}]，parts
-// 是異質陣列（text/reasoning/tool/file，新舊版本還有 step-start 等內部片段），
-// 欄位不保證存在——傳輸層只守「messages 是陣列、event_counter 是有限數」，
-// 逐 part 的防呆全部交給 normalizeOpenCodeMessages（跳過不炸、丟棄計數）。
+// opencode 讯息 shape 为 [{info:{id,role,time,tokens},parts:[...]}]，parts
+// 是异质阵列（text/reasoning/tool/file，新旧版本还有 step-start 等内部片段），
+// 栏位不保证存在——传输层只守「messages 是阵列、event_counter 是有限数」，
+// 逐 part 的防呆全部交给 normalizeOpenCodeMessages（跳过不炸、丢弃计数）。
 
-/** opencode 單則訊息的 info。只聲明歸一化要用、且語義確定的欄位，其餘容錯。 */
+/** opencode 单则讯息的 info。只声明归一化要用、且语义确定的栏位，其余容错。 */
 export interface OpenCodeMessageInfo {
   id?: string;
-  /** "user" | "assistant"；髒資料可能缺，型別放寬為 string。 */
+  /** "user" | "assistant"；脏资料可能缺，型别放宽为 string。 */
   role?: string;
-  /** epoch 毫秒；time.completed=null 表示這輪還在跑。 */
+  /** epoch 毫秒；time.completed=null 表示这轮还在跑。 */
   time?: { created?: number; completed?: number | null };
   tokens?: Record<string, unknown>;
 }
 
-/** opencode 單則訊息：parts 元素形態不一，交由歸一化逐個判型。 */
+/** opencode 单则讯息：parts 元素形态不一，交由归一化逐个判型。 */
 export interface OpenCodeMessage {
   info?: OpenCodeMessageInfo;
   parts?: unknown[];
 }
 
-/** 全量歷史端點的響應契約（client 已做最小校驗後的形狀）。 */
+/** 全量历史端点的响应契约（client 已做最小校验后的形状）。 */
 export interface AgentSessionHistoryResponse {
   messages: OpenCodeMessage[];
-  /** 網關當前事件計數，等價於 SSE 續傳游標：重建已涵蓋 ≤ counter 的一切。 */
+  /** 网关当前事件计数，等价于 SSE 续传游标：重建已涵盖 ≤ counter 的一切。 */
   event_counter: number;
-  /** ring buffer 首幀 id；null = 緩衝空。僅供排障參考，重建路徑不依賴它。 */
+  /** ring buffer 首帧 id；null = 缓冲空。仅供排障参考，重建路径不依赖它。 */
   replay_first_id: number | null;
-  /** 網關取不到全量歷史、降級為僅 ring 回放時的標記：客戶端應放棄重建走全量回放。 */
+  /** 网关取不到全量历史、降级为仅 ring 回放时的标记：客户端应放弃重建走全量回放。 */
   fallback?: "replay_only";
 }

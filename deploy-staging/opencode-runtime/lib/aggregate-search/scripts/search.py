@@ -7,7 +7,7 @@
   - github   : GitHub 官方 Search API
   - reddit   : Reddit 历史存档 API（arctic-shift，免 key）
   - tavily   : Tavily AI 搜索 API（需 TAVILY_API_KEY 环境变量）
-  - xhs      : 小红书（通过 xhs-cli 或登录態 Cookie 檢索）
+  - xhs      : 小红书（通过 xhs-cli 或登录态 Cookie 检索）
   - telegram : Telegram 全局搜索（Telethon messages.SearchGlobal）
 
 用法：

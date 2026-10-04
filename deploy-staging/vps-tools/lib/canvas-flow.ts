@@ -1,14 +1,14 @@
-// 畫布 Agent 操作的共用輔助（Wave C）：
-// - compactCanvasState：canvas_get_state 回傳前壓縮（截斷長文本，只留骨架欄位）
+// 画布 Agent 操作的共用辅助（Wave C）：
+// - compactCanvasState：canvas_get_state 回传前压缩（截断长文本，只留骨架栏位）
 // - compileGenerationFlow：canvas_create_generation_flow / canvas_generate_image
-//   的 ops 編譯器（文本節點 + 配置節點 + 連線 + 選中 + 可選 run_generation）
-// - gatewayReadSnapshot / gatewayDispatchOps：對 gateway loopback 端點的薄封裝
-// 此檔不是 tool，不得 export tool 定義，必須放在 tools/ 之外（見 client.ts 頂部說明）。
+//   的 ops 编译器（文本节点 + 配置节点 + 连线 + 选中 + 可选 run_generation）
+// - gatewayReadSnapshot / gatewayDispatchOps：对 gateway loopback 端点的薄封装
+// 此档不是 tool，不得 export tool 定义，必须放在 tools/ 之外（见 client.ts 顶部说明）。
 
 const TRUNCATE_AT = 240
 const TRUNCATE_KEEP = 120
 
-/** 超過 240 字的字串截為前 120 字 + …（給模型看的摘要，不動畫布本體）。 */
+/** 超过 240 字的字串截为前 120 字 + …（给模型看的摘要，不动画布本体）。 */
 export function truncateText(text: string): string {
   return text.length > TRUNCATE_AT ? text.slice(0, TRUNCATE_KEEP) + "…" : text
 }
@@ -39,7 +39,7 @@ export interface CompactCanvasState {
   viewport: unknown
 }
 
-/** 壓縮快照：每節點只留 id/type/title/position/width/height/metadata 摘要。 */
+/** 压缩快照：每节点只留 id/type/title/position/width/height/metadata 摘要。 */
 export function compactCanvasState(state: unknown): CompactCanvasState {
   const s = (state ?? {}) as Record<string, unknown>
   const rawNodes = Array.isArray(s.nodes) ? s.nodes : []
@@ -69,7 +69,7 @@ export function compactCanvasState(state: unknown): CompactCanvasState {
 }
 
 // ---------------------------------------------------------------------------
-// 生成流編譯
+// 生成流编译
 // ---------------------------------------------------------------------------
 
 export interface GenerationFlowInput {
@@ -90,7 +90,7 @@ export interface CompiledGenerationFlow {
   count: number
 }
 
-/** 從快照算新節點起點：最右節點右緣 + 120；無快照/無節點 = (40, 40)。 */
+/** 从快照算新节点起点：最右节点右缘 + 120；无快照/无节点 = (40, 40)。 */
 export function nextFlowOrigin(state: unknown): { x: number; y: number } {
   const s = (state ?? {}) as Record<string, unknown>
   const nodes = Array.isArray(s.nodes) ? s.nodes : []
@@ -107,20 +107,20 @@ export function nextFlowOrigin(state: unknown): { x: number; y: number } {
   return { x: rightmost + 120, y: 40 }
 }
 
-/** prompt 摘要當節點標題（量級對齊 gateway summarizeCanvasTitle）。 */
+/** prompt 摘要当节点标题（量级对齐 gateway summarizeCanvasTitle）。 */
 function flowTitle(prompt: string): string {
   const clean = prompt.replace(/\s+/g, " ").trim()
   return clean.length > 18 ? clean.slice(0, 18) + "…" : clean || "提示词"
 }
 
 /**
- * 把生成需求編譯成畫布 ops（節點形狀對齊 gateway autoCreateCanvasUnit 與前端
- * CanvasAgentOp 契約）：
- *   ① add_node 文本節點（content=prompt，位置 = nextFlowOrigin）
- *   ② add_node 配置節點（其右 +460，metadata: prompt/model/size/count）
- *   ③ connect 文本→配置 + 每個 reference→配置
+ * 把生成需求编译成画布 ops（节点形状对齐 gateway autoCreateCanvasUnit 与前端
+ * CanvasAgentOp 契约）：
+ *   ① add_node 文本节点（content=prompt，位置 = nextFlowOrigin）
+ *   ② add_node 配置节点（其右 +460，metadata: prompt/model/size/count）
+ *   ③ connect 文本→配置 + 每个 reference→配置
  *   ④ select_nodes 配置
- *   ⑤ auto_run 時 run_generation{node_id: 配置id, prompt, model, size, count}
+ *   ⑤ auto_run 时 run_generation{node_id: 配置id, prompt, model, size, count}
  */
 export function compileGenerationFlow(input: GenerationFlowInput, snapshotState: unknown): CompiledGenerationFlow {
   const stamp = Date.now().toString(36)
@@ -176,7 +176,7 @@ export function compileGenerationFlow(input: GenerationFlowInput, snapshotState:
 }
 
 // ---------------------------------------------------------------------------
-// gateway loopback 封裝
+// gateway loopback 封装
 // ---------------------------------------------------------------------------
 
 export interface SnapshotReadOutcome {
@@ -185,9 +185,9 @@ export interface SnapshotReadOutcome {
   updated_at: number | null
 }
 
-/** 讀 gateway 暫存的畫布快照。讀不到（斷線/無快照）回 has_state:false，不 throw。 */
+/** 读 gateway 暂存的画布快照。读不到（断线/无快照）回 has_state:false，不 throw。 */
 export async function gatewayReadSnapshot(gateway: string, sessionID: string): Promise<SnapshotReadOutcome> {
-  // 通道 B：前端 300ms 防抖 POST /canvas/state 的完整快照（canvas_get_state 主讀這份）。
+  // 通道 B：前端 300ms 防抖 POST /canvas/state 的完整快照（canvas_get_state 主读这份）。
   try {
     const res = await fetch(`${gateway}/internal/canvas/snapshot?session_id=${encodeURIComponent(sessionID)}`, {
       signal: AbortSignal.timeout(10_000),
@@ -201,12 +201,12 @@ export async function gatewayReadSnapshot(gateway: string, sessionID: string): P
       }
     }
   } catch {
-    // 快照僅用於感知/定位，讀不到就當無快照
+    // 快照仅用于感知/定位，读不到就当无快照
   }
-  // 通道 A 回退：快照未上報（新會話快照推播延遲/失敗）時，讀隨消息體上送的
-  // canvasSummary（GET /internal/canvas/state）。兩通道不同源——只餵了通道 A
-  // 的客戶端不該被當成「畫布尚未上報」。摘要節點無 position/width/height，
-  // 定位用 nextFlowOrigin 的 40,40 兜底，但畫布「有內容」這件事必須讓 agent 看到。
+  // 通道 A 回退：快照未上报（新会话快照推播延迟/失败）时，读随消息体上送的
+  // canvasSummary（GET /internal/canvas/state）。两通道不同源——只喂了通道 A
+  // 的客户端不该被当成「画布尚未上报」。摘要节点无 position/width/height，
+  // 定位用 nextFlowOrigin 的 40,40 兜底，但画布「有内容」这件事必须让 agent 看到。
   try {
     const res = await fetch(`${gateway}/internal/canvas/state?session_id=${encodeURIComponent(sessionID)}`, {
       signal: AbortSignal.timeout(10_000),
@@ -220,7 +220,7 @@ export async function gatewayReadSnapshot(gateway: string, sessionID: string): P
       }
     }
   } catch {
-    // 摘要也讀不到：真正沒有畫布狀態
+    // 摘要也读不到：真正没有画布状态
   }
   return { has_state: false, state: null, updated_at: null }
 }
@@ -234,7 +234,7 @@ export interface DispatchOutcome {
   result?: { ok?: boolean; error?: string; created_node_ids?: string[] }
 }
 
-/** 下發 ops 到 gateway 並等前端回執（gateway 端最長 30s；本地 fetch 35s 兜底）。 */
+/** 下发 ops 到 gateway 并等前端回执（gateway 端最长 30s；本地 fetch 35s 兜底）。 */
 export async function gatewayDispatchOps(
   gateway: string,
   sessionID: string,
@@ -253,7 +253,7 @@ export async function gatewayDispatchOps(
         ...(deviation?.deviate_from_template === true
           ? { deviate_from_template: true, deviate_reason: deviation.deviate_reason ?? "" }
           : {}),
-        // 2026-10-02：網關簽發的偏離 token——模型原樣帶回才放行。
+        // 2026-10-02：网关签发的偏离 token——模型原样带回才放行。
         ...(typeof deviation?.deviate_token === "string" && deviation.deviate_token
           ? { deviate_token: deviation.deviate_token }
           : {}),

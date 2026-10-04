@@ -1,9 +1,9 @@
 /**
  * Runtime-safe site URL detection.
  *
- * 優先級：
- *   1. NEXT_PUBLIC_SITE_URL / SITE_URL 環境變數
- *   2. 硬編碼 fallback https://eimu.dev
+ * 优先级：
+ *   1. NEXT_PUBLIC_SITE_URL / SITE_URL 环境变数
+ *   2. 硬编码 fallback https://eimu.dev
  */
 
 const FALLBACK_URL = "https://eimu.dev";
@@ -19,7 +19,7 @@ export function getSiteUrlFromEnv(): string {
   return candidate;
 }
 
-/** 從 NextRequest 取得 site URL（API Route handler 用）。 */
+/** 从 NextRequest 取得 site URL（API Route handler 用）。 */
 export function getSiteUrlFromRequest(request: Request): string {
   const url = new URL(request.url);
   return `${url.protocol}//${url.host}`;

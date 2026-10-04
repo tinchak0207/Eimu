@@ -1,6 +1,6 @@
-// 音樂歷史記錄（2026-10-03）：行為斷言，不靠源碼字串斷言。
-// 慣例（同 canvas/lens-picker.test.ts）：node:test + SSR 真渲染；tsconfig 排除
-// *.test.tsx，故用 .ts + createElement，並在 SSR 前補全局 React 樁（classic runtime）。
+// 音乐历史记录（2026-10-03）：行为断言，不靠源码字串断言。
+// 惯例（同 canvas/lens-picker.test.ts）：node:test + SSR 真渲染；tsconfig 排除
+// *.test.tsx，故用 .ts + createElement，并在 SSR 前补全局 React 桩（classic runtime）。
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
@@ -79,7 +79,7 @@ test("历史筛选栏的种类 chip 由注册表推导（文字集合与数量�
     }),
   );
 
-  // 期待值由注册表推导：可筛选交付物的 label ＋ 非交付种类（无注册表文案，沿用站内「工作流」字樣）。
+  // 期待值由注册表推导：可筛选交付物的 label ＋ 非交付种类（无注册表文案，沿用站内「工作流」字样）。
   const expectedLabels = [
     ...filterableDeliverableKinds().map((kind) => kind.label),
     "工作流",
@@ -111,7 +111,7 @@ test("历史筛选栏的种类 chip 由注册表推导（文字集合与数量�
   );
 });
 
-test("ENTRY_KIND_VALUES／parseEntryKind 由注册表推导（URL 白名单不硬編）", () => {
+test("ENTRY_KIND_VALUES／parseEntryKind 由注册表推导（URL 白名单不硬编）", () => {
   const derived = [...DELIVERABLE_KIND_IDS, ...NON_DELIVERABLE_ENTRY_KINDS];
   assert.deepEqual([...ENTRY_KIND_VALUES], derived, "URL 种类白名单与注册表推导不一致");
 
@@ -139,7 +139,7 @@ test("音频记录的历史卡真的渲染可播放 <audio>（src 指向 audioUr
 
   assert.ok(html.includes("<audio"), "音频卡没有渲染 <audio> 播放器");
   assert.match(html, new RegExp(`src="${AUDIO_URL.replace(/\./g, "\\.")}"`), "播放器 src 未指向 audioUrl");
-  // ④ 音乐徽章文字＝注册表 label（値來自 deliverable-kind，不是卡內手寫）
+  // ④ 音乐徽章文字＝注册表 label（値来自 deliverable-kind，不是卡内手写）
   const audioLabel = deliverableKindLabel("audio");
   assert.equal(audioLabel, "音乐", "注册表里音频的 UI 文案应为站内既有的「音乐」");
   assert.ok(html.includes(audioLabel), "音频卡没有按注册表 label 渲染音乐徽章");

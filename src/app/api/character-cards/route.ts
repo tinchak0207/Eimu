@@ -1,10 +1,10 @@
-// 角色/場景卡 API（P2 跨鏡頭一致性）：
-//   GET    → 列出當前用戶全部卡
-//   POST   → 建立卡（id 可省略，服務端鑄造）
+// 角色/场景卡 API（P2 跨镜头一致性）：
+//   GET    → 列出当前用户全部卡
+//   POST   → 建立卡（id 可省略，服务端铸造）
 //   PATCH  → 按 id 部分更新（name/kind/prompt/references/negativePrompt/loraIds）
-//   DELETE → 批量刪除（{ ids }）
-// 認證：requireVerifiedUser（與 canvas/projects 同款，不信任 x-user-id）。
-// 存儲：character-card-store（Blob 世代模式，對齊 project-store）。
+//   DELETE → 批量删除（{ ids }）
+// 认证：requireVerifiedUser（与 canvas/projects 同款，不信任 x-user-id）。
+// 存储：character-card-store（Blob 世代模式，对齐 project-store）。
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
@@ -18,7 +18,7 @@ import type { CharacterCard } from "@/lib/character-cards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -82,8 +82,8 @@ export async function PATCH(req: NextRequest) {
     const cards = await listCharacterCards(caller.user.id);
     const current = cards.find((c) => c.id === id);
     if (!current) return fail(404, "卡不存在", "not_found");
-    // 部分更新：未提供的欄位沿用現值；normalizeCharacterCard 統一清洗。
-    // 值一律經 normalizeCharacterCard 收口清洗，這裡的 cast 只過型別關。
+    // 部分更新：未提供的栏位沿用现值；normalizeCharacterCard 统一清洗。
+    // 值一律经 normalizeCharacterCard 收口清洗，这里的 cast 只过型别关。
     const patch = body as Partial<CharacterCard>;
     const merged: CharacterCard = {
       ...current,

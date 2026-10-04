@@ -1,28 +1,28 @@
-// 從 index.ts 無損抽取（2026-09-19 第一階段）：定價區段（原 index.ts 519–726 行，R5-C 註釋起、estimateNodeCoins 止）。
-// 依賴說明：
-//  - PLATFORM_BASE：逐行複製自 index.ts 465 行（constants-gateway.ts 尚未建立，整合時改 import）
-//  - resolveConnectedVideoDuration：仍定義在 index.ts ≈2589 行（畫布工作流引擎區），
-//    本檔以 declare 佔位（bun build 只轉譯不查名，建得過）；整合階段接線時替換為正式 import。
+// 从 index.ts 无损抽取（2026-09-19 第一阶段）：定价区段（原 index.ts 519–726 行，R5-C 注释起、estimateNodeCoins 止）。
+// 依赖说明：
+//  - PLATFORM_BASE：逐行复制自 index.ts 465 行（constants-gateway.ts 尚未建立，整合时改 import）
+//  - resolveConnectedVideoDuration：仍定义在 index.ts ≈2589 行（画布工作流引擎区），
+//    本档以 declare 占位（bun build 只转译不查名，建得过）；整合阶段接线时替换为正式 import。
 import { resolveVideoPerSecond } from "./workflow-service"
 import { PLATFORM_BASE } from "./constants-gateway.ts"
 import { resolveConnectedVideoDuration } from "./workflow-gw.ts"
 
-// R5-C（2026-08-28）影片估價改價目表檔位（暴君欽定：價目表 100% 權威，代碼與
-// 價目表衝突 = 代碼錯）：MiniMax H3 720P = 5 幣/秒、1080P = 10 幣/秒。舊 S4
-// 0.05 幣/秒估算口徑廢除；目錄 /v1/models 的視頻價是 0.25 RMB 混幣髒價，
-// 禁止回落目錄。
-// 2026-08-30 双账本收敛：檔位單價不再在此另立常量——統一由 workflow-service 的
+// R5-C（2026-08-28）影片估价改价目表档位（暴君钦定：价目表 100% 权威，代码与
+// 价目表冲突 = 代码错）：MiniMax H3 720P = 5 币/秒、1080P = 10 币/秒。旧 S4
+// 0.05 币/秒估算口径废除；目录 /v1/models 的视频价是 0.25 RMB 混币脏价，
+// 禁止回落目录。
+// 2026-08-30 双账本收敛：档位单价不再在此另立常量——统一由 workflow-service 的
 // resolveVideoPerSecond（锚点 unit_price_per_second 优先、档位价 5/10 兜底）提供，
-// 與 service 側 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
-// S4 cost_hint 目錄快取：GET /v1/models 的 x_coins_per_image，TTL 10 分鐘
-//（與工具層 loadCatalog 同口徑）。估不出單價的模型回 null（不許編數）。
+// 与 service 侧 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
+// S4 cost_hint 目录快取：GET /v1/models 的 x_coins_per_image，TTL 10 分钟
+//（与工具层 loadCatalog 同口径）。估不出单价的模型回 null（不许编数）。
 export const PRICE_CATALOG_TTL_MS = 10 * 60 * 1000
 export let priceCatalogCache: { at: number; prices: Record<string, number> } | null = null
 
 /**
- * S4：查平台目錄單價（幣/張）。權威來源 = GET /v1/models 的 x_coins_per_image，
- * 與工具層 loadCatalog / quote_bundle 完全同一數據源（不許第二個價格宇宙）。
- * 取不到回 null——cost_hint 與門檻估算都寧缺勿編。
+ * S4：查平台目录单价（币/张）。权威来源 = GET /v1/models 的 x_coins_per_image，
+ * 与工具层 loadCatalog / quote_bundle 完全同一数据源（不许第二个价格宇宙）。
+ * 取不到回 null——cost_hint 与门槛估算都宁缺勿编。
  */
 export async function catalogUnitCoins(model: string, apiKey: string): Promise<number | null> {
   const now = Date.now()
@@ -49,17 +49,17 @@ export async function catalogUnitCoins(model: string, apiKey: string): Promise<n
         if (Object.keys(prices).length > 0) priceCatalogCache = { at: now, prices }
       }
     } catch {
-      // 目錄不可達：沿用舊快取；完全沒有 → 呼叫方拿到 null（不編數）
+      // 目录不可达：沿用旧快取；完全没有 → 呼叫方拿到 null（不编数）
     }
   }
   const v = priceCatalogCache?.prices[model]
   return typeof v === "number" ? v : null
 }
 
-// S4 姊妹快取：查平台目錄視頻秒價（幣/秒）。權威來源 = GET /v1/models 的
-// x_coins_per_second，與 catalogUnitCoins（x_coins_per_image）同一份目錄回應、
-// 同一 10 分鐘 TTL——本次事故修復：seedance-2.0 等無 MiniMax 硬編碼檔位的模型，
-// 從目錄同源取（與扣費同一函式 generationCoins），不再落錯誤兜底檔位。
+// S4 姊妹快取：查平台目录视频秒价（币/秒）。权威来源 = GET /v1/models 的
+// x_coins_per_second，与 catalogUnitCoins（x_coins_per_image）同一份目录回应、
+// 同一 10 分钟 TTL——本次事故修复：seedance-2.0 等无 MiniMax 硬编码档位的模型，
+// 从目录同源取（与扣费同一函式 generationCoins），不再落错误兜底档位。
 export let priceCatalogPerSecondCache: { at: number; table: Record<string, Record<string, number>> } | null = null
 export async function catalogVideoPerSecondCoins(model: string, apiKey: string): Promise<Record<string, number> | null> {
   const now = Date.now()
@@ -87,14 +87,14 @@ export async function catalogVideoPerSecondCoins(model: string, apiKey: string):
         if (Object.keys(table).length > 0) priceCatalogPerSecondCache = { at: now, table }
       }
     } catch {
-      // 目錄不可達：沿用舊快取
+      // 目录不可达：沿用旧快取
     }
   }
   return priceCatalogPerSecondCache?.table[model] ?? null
 }
 
-// 同步變體：estimateGraphCoins（canvas.plan 熱路徑，同步簽名不可 await）專用。
-// 只讀已warm的目錄快取（不發網路請求）；快取未warm時等同舊行為（純錨點/檔位兜底）。
+// 同步变体：estimateGraphCoins（canvas.plan 热路径，同步签名不可 await）专用。
+// 只读已warm的目录快取（不发网路请求）；快取未warm时等同旧行为（纯锚点/档位兜底）。
 export function videoTierPerSecondSync(
   node: { id?: string; kind: string; metadata: Record<string, unknown> },
   graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
@@ -114,10 +114,10 @@ export function videoTierPerSecondSync(
 }
 
 /**
- * S4：沿連線向上游 config 節點解析 image 節點的實際執行參數（model）。
- * 模板結構：text → config(帶 model/size/count) → image*（image 節點
- * metadata 通常為空，model 在上游 config 上——submitWorkflowNode 也是
- * 這樣預設的：image 缺 model 時用 pixai-tsubaki2）。最多回看 2 層。
+ * S4：沿连线向上游 config 节点解析 image 节点的实际执行参数（model）。
+ * 模板结构：text → config(带 model/size/count) → image*（image 节点
+ * metadata 通常为空，model 在上游 config 上——submitWorkflowNode 也是
+ * 这样预设的：image 缺 model 时用 pixai-tsubaki2）。最多回看 2 层。
  */
 export function resolveNodeModel(
   nodeId: string,
@@ -152,10 +152,10 @@ export function resolveNodeModel(
 }
 
 /**
- * R5-C：影片檔位單價（幣/秒）——2026-08-30 双账本收敛：改由 workflow-service 的
+ * R5-C：影片档位单价（币/秒）——2026-08-30 双账本收敛：改由 workflow-service 的
  * 共享 resolveVideoPerSecond 提供（锚点 unit_price_per_second 优先、档位价 5/10
  * 兜底），与 service 侧 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
- * 此處保留薄封装以不改動既有调用点签名。
+ * 此处保留薄封装以不改动既有调用点签名。
  */
 export async function videoTierPerSecond(
   node: { id?: string; kind: string; metadata: Record<string, unknown> },
@@ -168,10 +168,10 @@ export async function videoTierPerSecond(
       : graph
         ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
         : "seedance-2.0"
-  // catalog 快取：先查一次目錄（同一 apiKey 10 分鐘快取，見 catalogVideoPerSecondCoins）——
-  // 本次事故修復：seedance-2.0 等無 MiniMax 硬編碼檔位的模型，從 /v1/models 的
-  // x_coins_per_second 同源取（與扣費同一函式 generationCoins），不再被錯誤套用
-  // MiniMax 5/10 幣/秒檔位價。resolveVideoPerSecond 優先序：錨點價 → catalogLookup → 檔位 5/10 兜底。
+  // catalog 快取：先查一次目录（同一 apiKey 10 分钟快取，见 catalogVideoPerSecondCoins）——
+  // 本次事故修复：seedance-2.0 等无 MiniMax 硬编码档位的模型，从 /v1/models 的
+  // x_coins_per_second 同源取（与扣费同一函式 generationCoins），不再被错误套用
+  // MiniMax 5/10 币/秒档位价。resolveVideoPerSecond 优先序：锚点价 → catalogLookup → 档位 5/10 兜底。
   const catalogTable = await catalogVideoPerSecondCoins(model, apiKey)
   return resolveVideoPerSecond(
     node as never,
@@ -181,10 +181,10 @@ export async function videoTierPerSecond(
 }
 
 /**
- * S4：估算單一可執行節點的幣耗。優先級：節點自帶價 → 平台目錄單價 → null。
- * video 按價目表檔位價（R5-C：720P=5 / 1080P=10 幣/秒）；image 按目錄單價 × 1
- *（submitWorkflowNode 對 workflow 節點固定 n:1，count 在 config 上只是參考標注，
- * 不放大節點張數）。回 null 表示估不出（目錄不可達且模型不在目錄）——上層保持
+ * S4：估算单一可执行节点的币耗。优先级：节点自带价 → 平台目录单价 → null。
+ * video 按价目表档位价（R5-C：720P=5 / 1080P=10 币/秒）；image 按目录单价 × 1
+ *（submitWorkflowNode 对 workflow 节点固定 n:1，count 在 config 上只是参考标注，
+ * 不放大节点张数）。回 null 表示估不出（目录不可达且模型不在目录）——上层保持
  * null / 保守策略。
  */
 export async function estimateNodeCoins(
@@ -199,11 +199,11 @@ export async function estimateNodeCoins(
       typeof node.metadata.duration_seconds === "number" && node.metadata.duration_seconds > 0
         ? node.metadata.duration_seconds
         : cfgDuration
-    if (typeof secs !== "number" || !(secs > 0)) return null // 拒絕編數：與 submitWorkflowNode 的「缺時長拒絕提交」同口徑
+    if (typeof secs !== "number" || !(secs > 0)) return null // 拒绝编数：与 submitWorkflowNode 的「缺时长拒绝提交」同口径
     const perSec = await videoTierPerSecond(node, graph, apiKey)
     return Math.round(secs * perSec * 100) / 100
   }
-  if (node.kind !== "image") return 0 // audio/film 現行 0 幣（TTS 定價 0）
+  if (node.kind !== "image") return 0 // audio/film 现行 0 币（TTS 定价 0）
   const nodeId = (node as { id?: string }).id ?? ""
   const model =
     typeof node.metadata.model === "string" && node.metadata.model

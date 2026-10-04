@@ -89,7 +89,7 @@ export function ParticleSeaWaiting({
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    /* 指針互動：斥力推開 + 彈簧合攏 + 擾動發亮 + 快劃輕水花 */
+    /* 指针互动：斥力推开 + 弹簧合拢 + 扰动发亮 + 快划轻水花 */
     const pointer = { x: -9999, y: -9999, lastX: 0, lastY: 0, speed: 0, has: false };
     const splashes: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
     const onPointerMove = (e: PointerEvent) => {
@@ -151,7 +151,7 @@ export function ParticleSeaWaiting({
         const px = q.x + t * 10 * (q.row % 3 === 0 ? 1 : 0.65);
         const xx = ((px + span) % span) - 50;
         const yy = waveY(xx, q.row, t);
-        // 斥力注入：影響半徑內沿徑向推開，力度隨指針速度
+        // 斥力注入：影响半径内沿径向推开，力度随指针速度
         if (pointer.has) {
           const pdx = xx - pointer.x;
           const pdy = yy - pointer.y;
@@ -165,7 +165,7 @@ export function ParticleSeaWaiting({
             q.ex = Math.min(1, q.ex + f * 0.45);
           }
         }
-        // 彈簧回位 + 擾動衰減：劃過後 ~0.4s 帶微過衝合攏
+        // 弹簧回位 + 扰动衰减：划过后 ~0.4s 带微过冲合拢
         q.ox *= 0.92;
         q.oy *= 0.92;
         q.ex *= 0.955;
@@ -174,7 +174,7 @@ export function ParticleSeaWaiting({
         const breathe = 0.5 + 0.5 * Math.sin(t * 0.9 + q.row * 0.16);
         let alpha = 0.13 + 0.26 * breathe;
         let size = q.r * (0.7 + 1.05 * breathe);
-        // 擾動發亮：被攪動的粒子短暫更亮更大、光暈更強
+        // 扰动发亮：被搅动的粒子短暂更亮更大、光晕更强
         alpha = Math.min(1, alpha * (1 + q.ex * 0.9));
         size *= 1 + q.ex * 0.35;
         ctx.beginPath();
@@ -190,7 +190,7 @@ export function ParticleSeaWaiting({
         ctx.fill();
         ctx.shadowBlur = 0;
       }
-      // 輕水花：上拋微粒受重力落回浪裡，0.5s 內消散
+      // 轻水花：上抛微粒受重力落回浪里，0.5s 内消散
       for (let i = splashes.length - 1; i >= 0; i--) {
         const s = splashes[i];
         s.vy += 0.16;

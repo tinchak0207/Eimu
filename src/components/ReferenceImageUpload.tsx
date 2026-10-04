@@ -20,7 +20,7 @@ interface ReferenceImageUploadProps {
   onChange: (images: ReferenceImage[]) => void;
   compact?: boolean;
   variant?: "panel" | "prompt";
-  /** 拖入的 PNG 內嵌工作流時回傳其中 JSON，讓父層走還原路徑而非當參考圖。 */
+  /** 拖入的 PNG 内嵌工作流时回传其中 JSON，让父层走还原路径而非当参考图。 */
   onWorkflowDetected?: (workflowJson: string) => void;
 }
 
@@ -28,7 +28,7 @@ function createReferenceId(file: File) {
   return `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** 讀取 blob URL 的自然尺寸（為「跟隨參考圖比例」鋪樁）；載入失敗回 null 不阻塞入列。 */
+/** 读取 blob URL 的自然尺寸（为「跟随参考图比例」铺桩）；载入失败回 null 不阻塞入列。 */
 function measureNaturalSize(url: string): Promise<{ naturalWidth: number; naturalHeight: number } | null> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -65,7 +65,7 @@ export const ReferenceImageUpload = memo(
     const selectedFiles = files.slice(0, remainingSlots);
     if (!selectedFiles.length) return;
 
-    // 先探測 PNG 是否內嵌工作流：命中就走還原路徑，該檔不再當參考圖；其餘檔照舊。
+    // 先探测 PNG 是否内嵌工作流：命中就走还原路径，该档不再当参考图；其余档照旧。
     let detectedWorkflow: string | null = null;
     const referenceCandidates: File[] = [];
     for (const file of selectedFiles) {
@@ -78,7 +78,7 @@ export const ReferenceImageUpload = memo(
             continue;
           }
         } catch {
-          // 壞 PNG 就當普通圖處理
+          // 坏 PNG 就当普通图处理
         }
       }
       referenceCandidates.push(file);
@@ -102,7 +102,7 @@ export const ReferenceImageUpload = memo(
           const imageFile = compressed instanceof File
             ? compressed
             : new File([compressed], file.name, { type: file.type || "image/png" });
-          // 先建 blob URL 再異步測量自然尺寸；測量在 pending 骨架期間進行，不阻塞入列。
+          // 先建 blob URL 再异步测量自然尺寸；测量在 pending 骨架期间进行，不阻塞入列。
           const previewUrl = URL.createObjectURL(imageFile);
           const naturalSize = await measureNaturalSize(previewUrl);
           return {
@@ -146,7 +146,7 @@ export const ReferenceImageUpload = memo(
       <div className="absolute bottom-3 left-3 z-20 flex min-w-0 max-w-[calc(100%-64px)] items-center gap-2 overflow-visible">
         <div {...getRootProps()} className="flex shrink-0 items-center justify-center">
           <input {...getInputProps()} />
-          {/* 樣式對齊 AI 助理 composer 的附件鈕（AgentComposer）：同一顆藍底圓鈕語法。 */}
+          {/* 样式对齐 AI 助理 composer 的附件钮（AgentComposer）：同一颗蓝底圆钮语法。 */}
           <button
             type="button"
             disabled={isProcessing || value.length >= MAX_REFERENCE_IMAGES}
@@ -164,16 +164,16 @@ export const ReferenceImageUpload = memo(
           </button>
         </div>
 
-        {/* 內聯縮圖（Gemini 式）：上傳鈕＋縮圖列是唯一語義，點縮圖開全屏燈箱。 */}
+        {/* 内联缩图（Gemini 式）：上传钮＋缩图列是唯一语义，点缩图开全屏灯箱。 */}
         {(value.length > 0 || pendingCount > 0) && (
           <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {/* rounded-ios-md 圓角方＝內容語言（對齊 AgentComposer 附件縮圖
-                h-16 rounded-ios-md），不竄用動作鈕的圓形語言。 */}
+            {/* rounded-ios-md 圆角方＝内容语言（对齐 AgentComposer 附件缩图
+                h-16 rounded-ios-md），不窜用动作钮的圆形语言。 */}
             {value.map((image) => (
               <div key={image.id} className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-ios-md bg-black/5">
                 <button type="button" onClick={() => setLightboxImage(image)} className="h-full w-full" title={`预览 ${image.name}`}>
-                  {/* 單張 object-contain＋淺底保留原比例認知；多張（≥2）object-cover 方格。 */}
-                  {/* eslint-disable-next-line @next/next/no-img-element -- blob: 本地預覽來源（URL.createObjectURL），next/image 無法優化且會綁死縮圖自適應版面 */}
+                  {/* 单张 object-contain＋浅底保留原比例认知；多张（≥2）object-cover 方格。 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element -- blob: 本地预览来源（URL.createObjectURL），next/image 无法优化且会绑死缩图自适应版面 */}
                   <img src={image.previewUrl} alt={image.name} className={cn("h-full w-full", value.length >= 2 ? "object-cover" : "object-contain")} />
                 </button>
                 <button type="button" onClick={() => removeImage(image.id)} aria-label="移除参考图" className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">

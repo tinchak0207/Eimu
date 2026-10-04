@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""agent-pixai 生圖 CLI：呼叫 kotone-bridge 生圖 + media 輪詢補 URL + 下載。
+"""agent-pixai 生图 CLI：呼叫 kotone-bridge 生图 + media 轮询补 URL + 下载。
 
 用法:
-  python pixai_agent.py --content "生成一張雪山的圖" [--model momoka-v1] [--image-gen]
+  python pixai_agent.py --content "生成一张雪山的图" [--model momoka-v1] [--image-gen]
         [--outdir output/] [--api-key KEY] [--timeout 240]
-環境變數 KOTONE_BRIDGE_API_KEY 沒給 --api-key 時自動讀取。
-輸出: stdout 一行 JSON {id, model, text, images:[{mediaId,url,width,height,prompt,file}]}
+环境变数 KOTONE_BRIDGE_API_KEY 没给 --api-key 时自动读取。
+输出: stdout 一行 JSON {id, model, text, images:[{mediaId,url,width,height,prompt,file}]}
 """
 import argparse
 import json
@@ -33,7 +33,7 @@ def http_json(method, path, api_key, payload=None, timeout=240):
 
 
 def wait_media(media_id, api_key, timeout=60):
-    """輪詢 /v1/media/{id} 直到有 public url（未就緒回 404，不是錯誤）。"""
+    """轮询 /v1/media/{id} 直到有 public url（未就绪回 404，不是错误）。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         st, j = http_json('GET', '/v1/media/%s' % media_id, api_key, timeout=20)
@@ -61,11 +61,11 @@ def download(url, outdir):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='PixAI Agent 生圖')
-    ap.add_argument('--content', required=True, help='生圖/聊天內容')
+    ap = argparse.ArgumentParser(description='PixAI Agent 生图')
+    ap.add_argument('--content', required=True, help='生图/聊天内容')
     ap.add_argument('--model', default='momoka-v1')
-    ap.add_argument('--image-gen', action='store_true', help='要求生圖')
-    ap.add_argument('--outdir', default=None, help='下載圖片目錄')
+    ap.add_argument('--image-gen', action='store_true', help='要求生图')
+    ap.add_argument('--outdir', default=None, help='下载图片目录')
     ap.add_argument('--api-key', default=os.environ.get('KOTONE_BRIDGE_API_KEY', ''))
     ap.add_argument('--timeout', type=int, default=240)
     ap.add_argument('--media-timeout', type=int, default=60)

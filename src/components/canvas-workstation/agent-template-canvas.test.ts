@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-// 2026-09-12 首屏減重拆分：畫布鋪法是執行側，完整步驟型別與內建模板都在 payload 檔。
+// 2026-09-12 首屏减重拆分：画布铺法是执行侧，完整步骤型别与内建模板都在 payload 档。
 import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent-templates-payload";
 import { templateToCanvasLayout, applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
 import { AGENT_TEMPLATES_FULL } from "@/lib/agent-templates-payload";
 
-/** 步驟 outputKind → 生成卡節點類型字串（CanvasNodeType 值即小寫名；缺省 image）。 */
+/** 步骤 outputKind → 生成卡节点类型字串（CanvasNodeType 值即小写名；缺省 image）。 */
 const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, string> = {
   image: "image",
   text: "text",
@@ -14,7 +14,7 @@ const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, st
   director: "director",
 };
 
-/** 無 pipeline 模板 fixture（RecipeTemplate 形狀）。 */
+/** 无 pipeline 模板 fixture（RecipeTemplate 形状）。 */
 function plainFixture() {
   return {
     id: "fixture-plain",
@@ -62,7 +62,7 @@ const PIPELINE: AgentPipelineFull = {
   ],
 };
 
-// ── pipeline → 工業級泳道 canvas workflow（2026-08-26 重鋪：工具鏈可見）──
+// ── pipeline → 工业级泳道 canvas workflow（2026-08-26 重铺：工具链可见）──
 
 test("pipeline lane = 步骤头(产出合同) + 工具卡 + 门禁卡 + 生成卡；无提示词凑数卡", () => {
   const { nodes } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
@@ -197,17 +197,17 @@ test("built-in templates all lay out with visible tool chain (>= 1 tool card, ge
   for (const template of AGENT_TEMPLATES_FULL) {
     const { nodes, connections } = templateToCanvasLayout(template);
     const gens = nodes.filter((n) => n.id.endsWith("-gen"));
-    assert.equal(gens.length, template.pipeline.steps.length, `${template.id} 生成卡數 = 步驟數`);
+    assert.equal(gens.length, template.pipeline.steps.length, `${template.id} 生成卡数 = 步骤数`);
     // 八模板都有工具卡（工具链可见是这次铺法的目的）。
     const toolCards = nodes.filter((n) => n.metadata?.pipelineCard === "tool");
-    assert.ok(toolCards.length >= 4, `${template.id} 工具卡過少（${toolCards.length}）——流水线工具链必须可见`);
+    assert.ok(toolCards.length >= 4, `${template.id} 工具卡过少（${toolCards.length}）——流水线工具链必须可见`);
     const nodeIds = new Set(nodes.map((node) => node.id));
     const crossLane = connections.filter((c) => {
       const from = nodes.find((n) => n.id === c.fromNodeId)!;
       const to = nodes.find((n) => n.id === c.toNodeId)!;
       return from.position.y !== to.position.y;
     });
-    assert.ok(crossLane.length >= 1, `${template.id} 缺少跨泳道連線`);
+    assert.ok(crossLane.length >= 1, `${template.id} 缺少跨泳道连线`);
     assert.ok(connections.every((c) => nodeIds.has(c.fromNodeId) && nodeIds.has(c.toNodeId)));
   }
 });
@@ -222,8 +222,8 @@ test("built-in templates: every gen card carries toolIds/deliverable/inputFrom +
     gens.forEach((gen, i) => {
       const step = template.pipeline.steps[i];
       const meta = gen.metadata as Record<string, unknown>;
-      // 生成卡節點類型 = 步驟 outputKind（缺省 image），文本/視頻/配音步不再鋪成圖片卡。
-      assert.equal(gen.type, GEN_NODE_TYPE[step.outputKind ?? "image"], `${template.id} step ${i} 生成卡類型應為 outputKind 映射`);
+      // 生成卡节点类型 = 步骤 outputKind（缺省 image），文本/视频/配音步不再铺成图片卡。
+      assert.equal(gen.type, GEN_NODE_TYPE[step.outputKind ?? "image"], `${template.id} step ${i} 生成卡类型应为 outputKind 映射`);
       assert.deepEqual(
         meta.toolIds,
         (step.requiredTools ?? []).map((t) => t.id),
@@ -271,7 +271,7 @@ test("empty pipeline lane does not create a fabricated cross-lane connection", (
 test("no-pipeline template falls back to legacy two-layer layout", () => {
   const { nodes, connections } = templateToCanvasLayout(plainFixture());
 
-  // 5 個非空槽 Prompt 節點 + 1 顆生成節點，全部連到生成節點。
+  // 5 个非空槽 Prompt 节点 + 1 颗生成节点，全部连到生成节点。
   assert.equal(nodes.length, 6);
   const promptNodes = nodes.filter((n) => n.type === "prompt");
   const imageNodes = nodes.filter((n) => n.type === "image");
@@ -282,7 +282,7 @@ test("no-pipeline template falls back to legacy two-layer layout", () => {
 });
 
 test("pipeline layout with empty steps array falls back; applyTemplateToCanvas routes through addNodes", () => {
-  // steps 空數組視同無 pipeline，走舊兩層。
+  // steps 空数组视同无 pipeline，走旧两层。
   const legacy = templateToCanvasLayout({ ...plainFixture(), pipeline: { summary: "空", steps: [] } });
   assert.equal(legacy.nodes.length, 6);
 
@@ -295,6 +295,6 @@ test("pipeline layout with empty steps array falls back; applyTemplateToCanvas r
   assert.equal(calls[0].nodes.length, 10);
   assert.equal(calls[0].connections?.length, 9);
 
-  // host 尚未就绪不拋錯、不鋪節點。
+  // host 尚未就绪不抛错、不铺节点。
   applyTemplateToCanvas(undefined, { ...plainFixture(), pipeline: PIPELINE });
 });

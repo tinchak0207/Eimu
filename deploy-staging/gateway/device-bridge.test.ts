@@ -1,14 +1,14 @@
 /**
- * device-bridge.test.ts — W6a 裝置橋雲端側的純邏輯真值測試。
+ * device-bridge.test.ts — W6a 装置桥云端侧的纯逻辑真值测试。
  * 跑法：npx --yes tsx --test deploy-staging/gateway/device-bridge.test.ts
  *
- * 不打真服務、不碰真檔案、零上游／零付費。涵蓋：
- *   - denylist（含路徑逃逸 ..、前綴混淆、大小寫、symlink 字面）
- *   - 工具白名單
- *   - 大小夾制與截斷標記
- *   - 同意票驗證（過期／不匹配／重放 各一例）
- *   - 註冊/心跳/輪詢/回傳/逾時的端到端（記憶體內）
- *   - 預設 OFF（env 未設時 handler 直接 404、不觸網）
+ * 不打真服务、不碰真档案、零上游／零付费。涵盖：
+ *   - denylist（含路径逃逸 ..、前缀混淆、大小写、symlink 字面）
+ *   - 工具白名单
+ *   - 大小夹制与截断标记
+ *   - 同意票验证（过期／不匹配／重放 各一例）
+ *   - 注册/心跳/轮询/回传/逾时的端到端（记忆体内）
+ *   - 预设 OFF（env 未设时 handler 直接 404、不触网）
  */
 import test from "node:test"
 import assert from "node:assert/strict"
@@ -49,7 +49,7 @@ import {
 
 // ───────────────────────── denylist ─────────────────────────
 
-test("isSensitivePath: Claude Code 敏感清單逐條命中", () => {
+test("isSensitivePath: Claude Code 敏感清单逐条命中", () => {
   const hits = [
     "~/.ssh/id_rsa",
     "~/.aws/credentials",
@@ -68,7 +68,7 @@ test("isSensitivePath: Claude Code 敏感清單逐條命中", () => {
   for (const p of hits) assert.equal(isSensitivePath(p), true, p)
 })
 
-test("isSensitivePath: 瀏覽器 profile 目錄命中（Linux 與 macOS）", () => {
+test("isSensitivePath: 浏览器 profile 目录命中（Linux 与 macOS）", () => {
   const hits = [
     "~/.config/google-chrome/Default/Cookies",
     "~/.config/chromium/Default/Login Data",
@@ -80,46 +80,46 @@ test("isSensitivePath: 瀏覽器 profile 目錄命中（Linux 與 macOS）", () 
   for (const p of hits) assert.equal(isSensitivePath(p), true, p)
 })
 
-test("isSensitivePath: 路徑逃逸 '..' 仍命中（掃描所有段，不比前綴）", () => {
+test("isSensitivePath: 路径逃逸 '..' 仍命中（扫描所有段，不比前缀）", () => {
   assert.equal(isSensitivePath("~/.ssh/../../etc/passwd"), true)
   assert.equal(isSensitivePath("/tmp/../.ssh/id_rsa"), true)
   assert.equal(isSensitivePath("a/../../.aws/credentials"), true)
   assert.equal(isSensitivePath("./deep/../../x/.netrc"), true)
 })
 
-test("isSensitivePath: 前綴混淆不誤命中（真檔名不是敏感目錄）", () => {
+test("isSensitivePath: 前缀混淆不误命中（真档名不是敏感目录）", () => {
   assert.equal(isSensitivePath("~/.sshfoo/id_rsa"), false)
   assert.equal(isSensitivePath("~/.ssh-backup/keys"), false)
   assert.equal(isSensitivePath("~/.ssh2/id"), false)
   assert.equal(isSensitivePath("/tmp/notes.ssh.md"), false)
-  assert.equal(isSensitivePath("~/.netrc.bak"), false) // basename 不精確相等
+  assert.equal(isSensitivePath("~/.netrc.bak"), false) // basename 不精确相等
 })
 
-test("isSensitivePath: 大小寫一律 fail-closed（.SSH/.Aws 也擋）", () => {
+test("isSensitivePath: 大小写一律 fail-closed（.SSH/.Aws 也挡）", () => {
   assert.equal(isSensitivePath("~/.SSH/id_rsa"), true)
   assert.equal(isSensitivePath("~/.Aws/credentials"), true)
   assert.equal(isSensitivePath("C:\\Users\\me\\.Ssh\\id_rsa"), true)
 })
 
-test("isSensitivePath: Windows 反斜線分隔符照樣正規化", () => {
+test("isSensitivePath: Windows 反斜线分隔符照样正规化", () => {
   assert.equal(isSensitivePath("C:\\Users\\me\\.ssh\\id_rsa"), true)
   assert.equal(isSensitivePath("C:\\Users\\me\\project\\a.ts"), false)
 })
 
-test("isSensitivePath: symlink 字面 — 純字串判定跟不了 symlink（已知限制，daemon 須 realpath）", () => {
+test("isSensitivePath: symlink 字面 — 纯字串判定跟不了 symlink（已知限制，daemon 须 realpath）", () => {
   // `~/link_to_ssh -> ~/.ssh`：字串不含 `.ssh` 段 → 本函式回 false。
   assert.equal(isSensitivePath("~/link_to_ssh/id_rsa"), false)
-  // daemon realpath 後得到真實目標，再跑同一支判定 → 命中。兩層合力才完整。
+  // daemon realpath 后得到真实目标，再跑同一支判定 → 命中。两层合力才完整。
   assert.equal(isSensitivePath("/home/me/.ssh/id_rsa"), true)
 })
 
-test("isSensitivePath: 非敏感一般路徑放行", () => {
+test("isSensitivePath: 非敏感一般路径放行", () => {
   for (const p of ["/tmp/a.txt", "~/projects/app.ts", "~/.config/Code/User/settings.json", "/etc/hosts"]) {
     assert.equal(isSensitivePath(p), false, p)
   }
 })
 
-test("isSensitivePath: 缺值／型別錯／空字串一律 fail-closed 視為敏感", () => {
+test("isSensitivePath: 缺值／型别错／空字串一律 fail-closed 视为敏感", () => {
   assert.equal(isSensitivePath(""), true)
   assert.equal(isSensitivePath("   "), true)
   assert.equal(isSensitivePath(null), true)
@@ -127,9 +127,9 @@ test("isSensitivePath: 缺值／型別錯／空字串一律 fail-closed 視為�
   assert.equal(isSensitivePath(123), true)
 })
 
-// ───────────────────────── 工具白名單 ─────────────────────────
+// ───────────────────────── 工具白名单 ─────────────────────────
 
-test("isToolAllowed: 最小集合四工具放行、其餘全擋", () => {
+test("isToolAllowed: 最小集合四工具放行、其余全挡", () => {
   assert.deepEqual([...DEVICE_BRIDGE_TOOLS], ["list_dir", "read_file", "grep", "stat"])
   for (const t of DEVICE_BRIDGE_TOOLS) assert.equal(isToolAllowed(t), true, t)
   for (const t of ["write_file", "delete_file", "rm", "exec", "bash", "Read", "read_file ", "", null, 1]) {
@@ -137,9 +137,9 @@ test("isToolAllowed: 最小集合四工具放行、其餘全擋", () => {
   }
 })
 
-// ───────────────────────── 大小夾制 ─────────────────────────
+// ───────────────────────── 大小夹制 ─────────────────────────
 
-test("clampReadSize: 缺值/非正數 → 預設，超限 → 上限，其餘取整", () => {
+test("clampReadSize: 缺值/非正数 → 预设，超限 → 上限，其余取整", () => {
   assert.equal(clampReadSize(undefined), DEFAULT_READ_BYTES)
   assert.equal(clampReadSize(0), DEFAULT_READ_BYTES)
   assert.equal(clampReadSize(-5), DEFAULT_READ_BYTES)
@@ -151,9 +151,9 @@ test("clampReadSize: 缺值/非正數 → 預設，超限 → 上限，其餘取
   assert.equal(clampReadSize(MAX_READ_BYTES * 10), MAX_READ_BYTES)
 })
 
-// ───────────────────────── 截斷標記 ─────────────────────────
+// ───────────────────────── 截断标记 ─────────────────────────
 
-test("truncateWithMarker: 未超限原樣、超限附標記且 keptBytes<=max", () => {
+test("truncateWithMarker: 未超限原样、超限附标记且 keptBytes<=max", () => {
   const short = truncateWithMarker("hello", 100)
   assert.equal(short.truncated, false)
   assert.equal(short.text, "hello")
@@ -168,11 +168,11 @@ test("truncateWithMarker: 未超限原樣、超限附標記且 keptBytes<=max", 
   assert.ok(t.text.startsWith("A".repeat(t.keptBytes)))
 })
 
-test("truncateWithMarker: 多位元組 UTF-8 邊界安全（尾端不留替換字元）", () => {
+test("truncateWithMarker: 多位元组 UTF-8 边界安全（尾端不留替换字元）", () => {
   const text = "é".repeat(200) // 每字 2 bytes
-  const t = truncateWithMarker(text, 101) // 101 為奇數，必切在字元中間
+  const t = truncateWithMarker(text, 101) // 101 为奇数，必切在字元中间
   assert.equal(t.truncated, true)
-  assert.ok(t.keptBytes % 2 === 0, `keptBytes=${t.keptBytes} 應落在字元邊界`)
+  assert.ok(t.keptBytes % 2 === 0, `keptBytes=${t.keptBytes} 应落在字元边界`)
   assert.equal(t.text.includes("\uFFFD"), false)
 })
 
@@ -185,7 +185,7 @@ test("finalizeDeviceResult: read_file 的 text 受 256KB 硬上限", () => {
   assert.match(String(out.result.text), /\[truncated \d+ bytes\]$/)
 })
 
-test("finalizeDeviceResult: 結構化結果過大 → 包成截斷文字殼", () => {
+test("finalizeDeviceResult: 结构化结果过大 → 包成截断文字壳", () => {
   const out = finalizeDeviceResult({
     entries: Array.from({ length: 20000 }, (_, i) => `entry-${i}-${"x".repeat(20)}`),
   })
@@ -194,9 +194,9 @@ test("finalizeDeviceResult: 結構化結果過大 → 包成截斷文字殼", ()
   assert.equal(typeof out.result.text, "string")
 })
 
-// ───────────────────────── 同意票驗證 ─────────────────────────
+// ───────────────────────── 同意票验证 ─────────────────────────
 
-test("consent token: happy path — 單次可用，第二次為重放", () => {
+test("consent token: happy path — 单次可用，第二次为重放", () => {
   const store = new ConsentTokenStore()
   const token = store.mint({ deviceId: "dev1", tool: "read_file", requestId: "req1" }, 1000, 100)
   assert.equal(store.size(), 1)
@@ -219,7 +219,7 @@ test("consent token: 找不到的票", () => {
   })
 })
 
-test("consent token: 過期（且順手刪除）", () => {
+test("consent token: 过期（且顺手删除）", () => {
   const store = new ConsentTokenStore()
   const token = store.mint({ deviceId: "dev1", tool: "stat", requestId: "req2" }, 10, 1000)
   assert.deepEqual(store.consume(token, { deviceId: "dev1", tool: "stat", requestId: "req2" }, 1011), {
@@ -229,7 +229,7 @@ test("consent token: 過期（且順手刪除）", () => {
   assert.equal(store.size(), 0)
 })
 
-test("consent token: 綁定不匹配（裝置／工具／請求 id 任一不符）", () => {
+test("consent token: 绑定不匹配（装置／工具／请求 id 任一不符）", () => {
   const store = new ConsentTokenStore()
   const token = store.mint({ deviceId: "dev1", tool: "read_file", requestId: "req3" }, 1000, 0)
   assert.deepEqual(store.consume(token, { deviceId: "dev2", tool: "read_file", requestId: "req3" }, 1), {
@@ -246,15 +246,15 @@ test("consent token: 綁定不匹配（裝置／工具／請求 id 任一不符�
   })
 })
 
-// ───────────────────────── 參數淨化 ─────────────────────────
+// ───────────────────────── 参数净化 ─────────────────────────
 
-test("sanitizeToolArgs: 敏感路徑在閘道側就被擋", () => {
+test("sanitizeToolArgs: 敏感路径在闸道侧就被挡", () => {
   const r = sanitizeToolArgs("read_file", { path: "~/.ssh/id_rsa" })
   assert.equal(r.ok, false)
   if (!r.ok) assert.equal(r.code, "sensitive_path")
 })
 
-test("sanitizeToolArgs: read_file limit 被夾到上限、offset 預設 0", () => {
+test("sanitizeToolArgs: read_file limit 被夹到上限、offset 预设 0", () => {
   const r = sanitizeToolArgs("read_file", { path: "/tmp/a.txt", limit: 10 * MAX_READ_BYTES })
   assert.equal(r.ok, true)
   if (r.ok) {
@@ -269,7 +269,7 @@ test("sanitizeToolArgs: grep 缺 pattern → bad_request", () => {
   if (!r.ok) assert.equal(r.code, "bad_request")
 })
 
-// ───────────────────────── 橋：註冊／心跳／invoke ─────────────────────────
+// ───────────────────────── 桥：注册／心跳／invoke ─────────────────────────
 
 function registeredBridge(opts: ConstructorParameters<typeof DeviceBridge>[0] = {}) {
   const bridge = new DeviceBridge(opts)
@@ -277,28 +277,28 @@ function registeredBridge(opts: ConstructorParameters<typeof DeviceBridge>[0] = 
   return { bridge, reg }
 }
 
-test("invoke: 非白名單工具直接拒（連裝置都不查）", async () => {
+test("invoke: 非白名单工具直接拒（连装置都不查）", async () => {
   const { bridge, reg } = registeredBridge()
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "write_file", args: { path: "/tmp/a" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "tool_not_allowed")
 })
 
-test("invoke: 敏感路徑拒", async () => {
+test("invoke: 敏感路径拒", async () => {
   const { bridge, reg } = registeredBridge()
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "stat", args: { path: "~/.aws/credentials" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "sensitive_path")
 })
 
-test("invoke: 未註冊裝置 → device_offline", async () => {
+test("invoke: 未注册装置 → device_offline", async () => {
   const bridge = new DeviceBridge()
   const out = await bridge.invoke({ tenant: "u:1", deviceId: "dev_nope", tool: "stat", args: { path: "/tmp/a" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "device_offline")
 })
 
-test("invoke: 心跳過期 → device_offline", async () => {
+test("invoke: 心跳过期 → device_offline", async () => {
   const bridge = new DeviceBridge({ heartbeatTtlMs: 1000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", now: Date.now() - 60_000 })
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "stat", args: { path: "/tmp/a" } })
@@ -306,7 +306,7 @@ test("invoke: 心跳過期 → device_offline", async () => {
   if (!out.ok) assert.equal(out.code, "device_offline")
 })
 
-test("invoke → poll → submitResult（帶同意票）→ 收到結果", async () => {
+test("invoke → poll → submitResult（带同意票）→ 收到结果", async () => {
   const { bridge, reg } = registeredBridge({ requestTimeoutMs: 2000 })
   const pending = bridge.invoke({
     tenant: "u:1",
@@ -341,9 +341,9 @@ test("invoke → poll → submitResult（帶同意票）→ 收到結果", async
   }
 })
 
-test("invoke: submitResult 帶錯票（重放另一票）→ 拒絕且請求不落地", async () => {
+test("invoke: submitResult 带错票（重放另一票）→ 拒绝且请求不落地", async () => {
   const { bridge, reg } = registeredBridge({ requestTimeoutMs: 2000 })
-  // 先消耗一張無關票，製造一個「已被用過」的 token。
+  // 先消耗一张无关票，制造一个「已被用过」的 token。
   const stale = bridge.tokens.mint({ deviceId: "other", tool: "stat", requestId: "other" }, 1000)
   bridge.tokens.consume(stale, { deviceId: "other", tool: "stat", requestId: "other" })
 
@@ -355,12 +355,12 @@ test("invoke: submitResult 帶錯票（重放另一票）→ 拒絕且請求不�
     deviceId: reg.deviceId,
     connectionId: reg.connectionId,
     requestId: polled.request.request_id,
-    consentToken: stale, // 綁定不符
+    consentToken: stale, // 绑定不符
     result: { text: "nope" },
   })
   assert.equal(bad.ok, false)
   if (!bad.ok) assert.equal(bad.code, "consent_token_mismatch")
-  // 正確票仍可用 → 請求沒被壞回傳毀掉。
+  // 正确票仍可用 → 请求没被坏回传毁掉。
   const good = bridge.submitResult({
     tenant: "u:1",
     deviceId: reg.deviceId,
@@ -374,7 +374,7 @@ test("invoke: submitResult 帶錯票（重放另一票）→ 拒絕且請求不�
   assert.equal(out.ok, true)
 })
 
-test("invoke: 逾時取消 → device_request_timeout", async () => {
+test("invoke: 逾时取消 → device_request_timeout", async () => {
   const { bridge, reg } = registeredBridge({ requestTimeoutMs: 40 })
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "stat", args: { path: "/tmp/a" } })
   assert.equal(out.ok, false)
@@ -382,39 +382,39 @@ test("invoke: 逾時取消 → device_request_timeout", async () => {
   assert.equal(bridge.stats().pending, 0)
 })
 
-test("心跳：連線不符 → device_connection_stale", () => {
+test("心跳：连线不符 → device_connection_stale", () => {
   const { bridge, reg } = registeredBridge()
   const hb = bridge.heartbeat({ tenant: "u:1", deviceId: reg.deviceId, connectionId: "conn_wrong" })
   assert.equal(hb.ok, false)
   assert.equal(hb.code, "device_connection_stale")
 })
 
-test("poll：waitMs=0 無待辦 → request:null", async () => {
+test("poll：waitMs=0 无待办 → request:null", async () => {
   const { bridge, reg } = registeredBridge()
   const out = await bridge.poll({ tenant: "u:1", deviceId: reg.deviceId, connectionId: reg.connectionId, waitMs: 0 })
   assert.deepEqual(out, { ok: true, request: null })
 })
 
-// 重連幽靈 waiter（2026-10-04）：舊連線的長輪詢 waiter 未清理時，新連線的第一發 invoke
-// 會被它 shift 走、回給已 abort 的舊 HTTP ⇒ 請求憑空消失、吃滿 timeout。waiter 必須綁
-// connectionId 並在喚醒後重驗；不符者不得取件（已取則 re-queue）。
-test("重連幽靈 waiter：舊連線殘留長輪詢不得吞掉新連線的第一發 invoke", async () => {
+// 重连幽灵 waiter（2026-10-04）：旧连线的长轮询 waiter 未清理时，新连线的第一发 invoke
+// 会被它 shift 走、回给已 abort 的旧 HTTP ⇒ 请求凭空消失、吃满 timeout。waiter 必须绑
+// connectionId 并在唤醒后重验；不符者不得取件（已取则 re-queue）。
+test("重连幽灵 waiter：旧连线残留长轮询不得吞掉新连线的第一发 invoke", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 1_500 })
   const reg1 = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", deviceId: "dev_stable", roots: ["/home/u/project"] })
-  // 舊連線掛起一個長輪詢（真實世界其 HTTP 已因重連被 abort，但 waiter 尚未清理）。
+  // 旧连线挂起一个长轮询（真实世界其 HTTP 已因重连被 abort，但 waiter 尚未清理）。
   const oldPoll = bridge.poll({ tenant: "u:1", deviceId: "dev_stable", connectionId: reg1.connectionId, waitMs: 5_000 })
-  // 裝置重連：同 deviceId（同 deviceKey）⇒ 舊連線作廢。
+  // 装置重连：同 deviceId（同 deviceKey）⇒ 旧连线作废。
   const reg2 = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", deviceId: "dev_stable", roots: ["/home/u/project"] })
   assert.notEqual(reg2.connectionId, reg1.connectionId)
 
   const pending = bridge.invoke({ tenant: "u:1", deviceId: "dev_stable", tool: "stat", args: { path: "/home/u/project/a.txt" } })
-  // 讓被 notifyPoll 喚醒的幽靈 waiter（若有）的 microtask 先有機會跑。
+  // 让被 notifyPoll 唤醒的幽灵 waiter（若有）的 microtask 先有机会跑。
   await new Promise((r) => setTimeout(r, 20))
 
   const polled2 = await bridge.poll({ tenant: "u:1", deviceId: "dev_stable", connectionId: reg2.connectionId, waitMs: 0 })
   assert.equal(polled2.ok, true)
   if (!polled2.ok) return
-  assert.ok(polled2.request, "新連線的第一次 poll 必須拿到請求（不可被幽靈 waiter 吞掉）")
+  assert.ok(polled2.request, "新连线的第一次 poll 必须拿到请求（不可被幽灵 waiter 吞掉）")
   const msg = polled2.request!
   const sub = bridge.submitResult({
     tenant: "u:1",
@@ -429,15 +429,15 @@ test("重連幽靈 waiter：舊連線殘留長輪詢不得吞掉新連線的第�
   assert.equal(out.ok, true)
   if (out.ok) assert.equal(out.result.size, 3)
 
-  // 舊連線的長輪詢必須以 stale 收場（不得回出任何請求）。
+  // 旧连线的长轮询必须以 stale 收场（不得回出任何请求）。
   const oldOut = await oldPoll
   assert.equal(oldOut.ok, false)
   if (!oldOut.ok) assert.equal(oldOut.code, "device_connection_stale")
 })
 
-// ───────────────────────── 預設 OFF ─────────────────────────
+// ───────────────────────── 预设 OFF ─────────────────────────
 
-test("deviceBridgeEnabled: 預設 OFF，僅 truthy 開啟", () => {
+test("deviceBridgeEnabled: 预设 OFF，仅 truthy 开启", () => {
   assert.equal(deviceBridgeEnabled({} as NodeJS.ProcessEnv), false)
   assert.equal(deviceBridgeEnabled({ EIMU_DEVICE_BRIDGE: "" } as NodeJS.ProcessEnv), false)
   assert.equal(deviceBridgeEnabled({ EIMU_DEVICE_BRIDGE: "0" } as NodeJS.ProcessEnv), false)
@@ -447,7 +447,7 @@ test("deviceBridgeEnabled: 預設 OFF，僅 truthy 開啟", () => {
   }
 })
 
-test("handler：開關未開時任何 device-bridge 路由一律 404（且不觸網）", async () => {
+test("handler：开关未开时任何 device-bridge 路由一律 404（且不触网）", async () => {
   const saved = process.env.EIMU_DEVICE_BRIDGE
   delete process.env.EIMU_DEVICE_BRIDGE
   try {
@@ -463,11 +463,11 @@ test("handler：開關未開時任何 device-bridge 路由一律 404（且不觸
   }
 })
 
-// ───────────────────────── H2（2026-10-04）：遞迴型工具的根夾制 ─────────────────────────
+// ───────────────────────── H2（2026-10-04）：递回型工具的根夹制 ─────────────────────────
 //
-// 漏洞：雲端只在請求路徑上跑 denylist；`path="/home/u/project"` 放行後，裝置端 grep
-// 遞迴進 `project/.ssh/` 並只回截斷行，雲端看不到。修法＝把遞迴根夾在使用者已授權根
-// 之下（本檔的向量表 + policy.recursiveRootProblem），並以契約要求裝置自報敏感觸碰。
+// 漏洞：云端只在请求路径上跑 denylist；`path="/home/u/project"` 放行后，装置端 grep
+// 递回进 `project/.ssh/` 并只回截断行，云端看不到。修法＝把递回根夹在使用者已授权根
+// 之下（本档的向量表 + policy.recursiveRootProblem），并以契约要求装置自报敏感触碰。
 
 interface PolicyVectors {
   sensitive: { path: unknown; expected: boolean; category: string }[]
@@ -480,51 +480,51 @@ const vectors = JSON.parse(
   readFileSync(new URL("./device-bridge-policy.vectors.json", import.meta.url), "utf8"),
 ) as PolicyVectors
 
-test("vectors: isSensitivePath 逐條符合向量表（家目錄內外/.. 逃逸/前綴混淆/大小寫/Windows/Unicode/空值）", () => {
+test("vectors: isSensitivePath 逐条符合向量表（家目录内外/.. 逃逸/前缀混淆/大小写/Windows/Unicode/空值）", () => {
   assert.ok(vectors.sensitive.length >= 30)
   for (const v of vectors.sensitive) {
     assert.equal(isSensitivePath(v.path), v.expected, `${v.category}: ${JSON.stringify(v.path)}`)
   }
 })
 
-test("vectors: isFilesystemRoot 逐條符合向量表（/ 與 Windows 磁碟根/UNC）", () => {
+test("vectors: isFilesystemRoot 逐条符合向量表（/ 与 Windows 磁碟根/UNC）", () => {
   assert.ok(vectors.filesystemRoot.length >= 10)
   for (const v of vectors.filesystemRoot) {
     assert.equal(isFilesystemRoot(v.path), v.expected, `${v.category}: ${JSON.stringify(v.path)}`)
   }
 })
 
-test("vectors: isPathWithinRoot 逐條符合向量表（父目錄/前綴混淆/.. 逃逸/大小寫/相對路徑）", () => {
+test("vectors: isPathWithinRoot 逐条符合向量表（父目录/前缀混淆/.. 逃逸/大小写/相对路径）", () => {
   assert.ok(vectors.containment.length >= 12)
   for (const v of vectors.containment) {
     assert.equal(isPathWithinRoot(v.path, v.root), v.expected, `${v.category}: ${v.path} vs ${v.root}`)
   }
 })
 
-test("vectors: recursiveRootProblem 逐條符合向量表（根/無授權根/父目錄/敏感根）", () => {
+test("vectors: recursiveRootProblem 逐条符合向量表（根/无授权根/父目录/敏感根）", () => {
   assert.ok(vectors.recursiveRoot.length >= 5)
   for (const v of vectors.recursiveRoot) {
     assert.equal(recursiveRootProblem(v.path, v.roots), v.reason, `${v.category}: ${v.path}`)
   }
 })
 
-test("policy: 非字串 fail-closed（向量表外補 undefined）", () => {
+test("policy: 非字串 fail-closed（向量表外补 undefined）", () => {
   assert.equal(isSensitivePath(undefined), true)
   assert.equal(recursiveRootProblem(undefined, ["/home/u/p"]), "not_within_authorized_root")
   assert.equal(isFilesystemRoot(undefined), false)
 })
 
-test("policy: sanitizeAuthorizedRoots 丟棄敏感/根/相對/~ 授權根並去重", () => {
+test("policy: sanitizeAuthorizedRoots 丢弃敏感/根/相对/~ 授权根并去重", () => {
   const out = sanitizeAuthorizedRoots([
     "/home/u/project",
-    "/home/u/.ssh", // 敏感 → 丟
-    "/", // 檔案系統根 → 丟
-    "\\\\?\\C:\\", // Windows 擴充長度磁碟根 → 丟
-    "//", // 空段 → 丟
-    "~/proj", // tilde/相對 → 丟
-    "relative/x", // 相對 → 丟
-    "", // 空 → 丟
-    "/home/u/project", // 重複 → 去重
+    "/home/u/.ssh", // 敏感 → 丢
+    "/", // 档案系统根 → 丢
+    "\\\\?\\C:\\", // Windows 扩充长度磁碟根 → 丢
+    "//", // 空段 → 丢
+    "~/proj", // tilde/相对 → 丢
+    "relative/x", // 相对 → 丢
+    "", // 空 → 丢
+    "/home/u/project", // 重复 → 去重
     123,
   ])
   assert.deepEqual(out, ["/home/u/project"])
@@ -532,14 +532,14 @@ test("policy: sanitizeAuthorizedRoots 丟棄敏感/根/相對/~ 授權根並去�
   assert.deepEqual(sanitizeAuthorizedRoots("x"), [])
 })
 
-test("policy: clampFileBytes 夾到單檔輸入上限", () => {
+test("policy: clampFileBytes 夹到单档输入上限", () => {
   assert.equal(clampFileBytes(undefined), MAX_FILE_READ_BYTES)
   assert.equal(clampFileBytes(0), MAX_FILE_READ_BYTES)
   assert.equal(clampFileBytes(1024), 1024)
   assert.equal(clampFileBytes(MAX_FILE_READ_BYTES * 10), MAX_FILE_READ_BYTES)
 })
 
-test("policy: sensitiveResultProblem 只認裝置明確自報", () => {
+test("policy: sensitiveResultProblem 只认装置明确自报", () => {
   assert.equal(sensitiveResultProblem({ matches: [] }), null)
   assert.equal(sensitiveResultProblem(null), null)
   assert.equal(sensitiveResultProblem({ sensitive_path_touched: true }), "device reported touching a sensitive path")
@@ -554,7 +554,7 @@ function registeredBridgeWithRoots(roots: unknown, opts: ConstructorParameters<t
   return { bridge, reg }
 }
 
-test("H2: sanitizeToolArgs 帶授權根時，grep 根夾制生效", () => {
+test("H2: sanitizeToolArgs 带授权根时，grep 根夹制生效", () => {
   const ok = sanitizeToolArgs("grep", { path: "/home/u/project/a", pattern: "x" }, { authorizedRoots: ["/home/u/project"] })
   assert.equal(ok.ok, true)
   const bad = sanitizeToolArgs("grep", { path: "/home/u", pattern: "x" }, { authorizedRoots: ["/home/u/project"] })
@@ -562,28 +562,28 @@ test("H2: sanitizeToolArgs 帶授權根時，grep 根夾制生效", () => {
   if (!bad.ok) assert.equal(bad.code, "path_not_authorized")
 })
 
-test("H2: grep 父目錄（授權根之上）→ path_not_authorized", async () => {
+test("H2: grep 父目录（授权根之上）→ path_not_authorized", async () => {
   const { bridge, reg } = registeredBridgeWithRoots(["/home/u/project"])
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "grep", args: { path: "/home/u", pattern: "PRIVATE" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "path_not_authorized")
 })
 
-test("H2: grep 檔案系統根 → path_not_authorized", async () => {
+test("H2: grep 档案系统根 → path_not_authorized", async () => {
   const { bridge, reg } = registeredBridgeWithRoots(["/home/u/project"])
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "grep", args: { path: "/", pattern: "PRIVATE" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "path_not_authorized")
 })
 
-test("H2: grep 未授權任何根 → path_not_authorized（fail-closed）", async () => {
-  const { bridge, reg } = registeredBridge() // 無 roots
+test("H2: grep 未授权任何根 → path_not_authorized（fail-closed）", async () => {
+  const { bridge, reg } = registeredBridge() // 无 roots
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "grep", args: { path: "/home/u/project", pattern: "x" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "path_not_authorized")
 })
 
-test("H2: grep 敏感段祖先（path 含 .ssh）→ sensitive_path（且敏感根不進授權集）", async () => {
+test("H2: grep 敏感段祖先（path 含 .ssh）→ sensitive_path（且敏感根不进授权集）", async () => {
   const { bridge, reg } = registeredBridgeWithRoots(["/home/u/.ssh/project"])
   assert.deepEqual(reg.authorizedRoots, [])
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "grep", args: { path: "/home/u/.ssh/project", pattern: "x" } })
@@ -591,14 +591,14 @@ test("H2: grep 敏感段祖先（path 含 .ssh）→ sensitive_path（且敏感�
   if (!out.ok) assert.equal(out.code, "sensitive_path")
 })
 
-test("H2: list_dir 檔案系統根 → path_not_authorized", async () => {
+test("H2: list_dir 档案系统根 → path_not_authorized", async () => {
   const { bridge, reg } = registeredBridgeWithRoots(["/home/u/project"])
   const out = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "list_dir", args: { path: "/" } })
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "path_not_authorized")
 })
 
-test("H2: grep 在授權根之下的正常流程（poll→submit）成功，且下發 max_file_bytes", async () => {
+test("H2: grep 在授权根之下的正常流程（poll→submit）成功，且下发 max_file_bytes", async () => {
   const { bridge, reg } = registeredBridgeWithRoots(["/home/u/project"], { requestTimeoutMs: 2000 })
   const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "grep", args: { path: "/home/u/project/src", pattern: "TODO" } })
   const polled = await bridge.poll({ tenant: "u:1", deviceId: reg.deviceId, connectionId: reg.connectionId })
@@ -618,7 +618,7 @@ test("H2: grep 在授權根之下的正常流程（poll→submit）成功，且�
   assert.equal(out.ok, true)
 })
 
-test("H2: 裝置自報遞迴觸碰敏感 → 整筆拒絕 sensitive_path，結果不落地", async () => {
+test("H2: 装置自报递回触碰敏感 → 整笔拒绝 sensitive_path，结果不落地", async () => {
   const { bridge, reg } = registeredBridgeWithRoots(["/home/u/project"], { requestTimeoutMs: 2000 })
   const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "grep", args: { path: "/home/u/project", pattern: "KEY" } })
   const polled = await bridge.poll({ tenant: "u:1", deviceId: reg.deviceId, connectionId: reg.connectionId })
@@ -638,34 +638,34 @@ test("H2: 裝置自報遞迴觸碰敏感 → 整筆拒絕 sensitive_path，結�
   if (!out.ok) assert.equal(out.code, "sensitive_path")
 })
 
-// ────────────────── 唯讀查詢（環境事實層 localBridge 來源）──────────────────
+// ────────────────── 唯读查询（环境事实层 localBridge 来源）──────────────────
 
-test("deviceBridgeRuntimeState: 唯讀快照（在線/裝置數/授權根數），總開關 OFF → enabled=false", () => {
+test("deviceBridgeRuntimeState: 唯读快照（在线/装置数/授权根数），总开关 OFF → enabled=false", () => {
   const T = 1_000_000
   const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project", "/home/u/docs"], now: T })
   const before = bridge.stats()
 
-  // env 未開 → enabled=false，且不查註冊表
+  // env 未开 → enabled=false，且不查注册表
   const off = deviceBridgeRuntimeState(1, { bridge, env: {}, now: T })
   assert.deepEqual(off, { enabled: false, online: false, deviceCount: 0, authorizedRootCount: 0 })
 
-  // env 開、心跳未過期 → 在線且已授權根
+  // env 开、心跳未过期 → 在线且已授权根
   const on = deviceBridgeRuntimeState(1, { bridge, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1_000 })
   assert.deepEqual(on, { enabled: true, online: true, deviceCount: 1, authorizedRootCount: 2 })
 
-  // 心跳逾時 → online=false（裝置仍算已註冊）
+  // 心跳逾时 → online=false（装置仍算已注册）
   const stale = deviceBridgeRuntimeState(1, { bridge, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 90_001 })
   assert.deepEqual(stale, { enabled: true, online: false, deviceCount: 1, authorizedRootCount: 0 })
 
-  // 別的使用者看不到這台裝置
+  // 别的使用者看不到这台装置
   const other = deviceBridgeRuntimeState(2, { bridge, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1_000 })
   assert.deepEqual(other, { enabled: true, online: false, deviceCount: 0, authorizedRootCount: 0 })
 
-  // 唯讀：不改動註冊表狀態（裝置數/待辦/票）
+  // 唯读：不改动注册表状态（装置数/待办/票）
   assert.deepEqual(bridge.stats(), before)
 
-  // 在線但未授權任何根 → authorizedRootCount=0（據此判 no_authorized_roots）
+  // 在线但未授权任何根 → authorizedRootCount=0（据此判 no_authorized_roots）
   const noRoots = new DeviceBridge()
   noRoots.register({ tenant: "u:9", userId: 9, apiKeyHash: "h9", roots: [], now: T })
   const nr = deviceBridgeRuntimeState(9, { bridge: noRoots, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1 })
@@ -673,12 +673,12 @@ test("deviceBridgeRuntimeState: 唯讀快照（在線/裝置數/授權根數）�
   assert.equal(nr.authorizedRootCount, 0)
 })
 
-// ───────────── W6a 內部路由：pickDeviceForTenant（尋址）─────────────
+// ───────────── W6a 内部路由：pickDeviceForTenant（寻址）─────────────
 //
-// agent 工具只知道 session_id；/internal/device/invoke 由租戶挑裝置。挑選必須**不猜**：
-// 多台且多台在線（或全部離線且 >1）＝ ambiguous，不得任選一台。
+// agent 工具只知道 session_id；/internal/device/invoke 由租户挑装置。挑选必须**不猜**：
+// 多台且多台在线（或全部离线且 >1）＝ ambiguous，不得任选一台。
 
-test("pickDeviceForTenant: 0 台（從未註冊）→ no_device_registered", () => {
+test("pickDeviceForTenant: 0 台（从未注册）→ no_device_registered", () => {
   const bridge = new DeviceBridge()
   const r = bridge.pickDeviceForTenant("u:1")
   assert.equal(r.ok, false)
@@ -694,7 +694,7 @@ test("pickDeviceForTenant: 1 台 online → 回它", () => {
   if (r.ok) assert.equal(r.deviceId, reg.deviceId)
 })
 
-test("pickDeviceForTenant: 1 台 offline（心跳逾時）→ device_offline", () => {
+test("pickDeviceForTenant: 1 台 offline（心跳逾时）→ device_offline", () => {
   const T = 1_000_000
   const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", now: T })
@@ -733,7 +733,7 @@ test("pickDeviceForTenant: 多台全部 offline（>1）→ device_ambiguous（�
   if (!r.ok) assert.equal(r.code, "device_ambiguous")
 })
 
-test("pickDeviceForTenant: 租戶隔離（別的租戶的裝置不算）", () => {
+test("pickDeviceForTenant: 租户隔离（别的租户的装置不算）", () => {
   const T = 1_000_000
   const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
   bridge.register({ tenant: "u:2", userId: 2, apiKeyHash: "h2", now: T })
@@ -753,13 +753,13 @@ test("describeTenantDevices: 0 台 → null；1 台 → online/roots/lastHeartbe
   assert.equal(stale?.online, false)
 })
 
-// ───────────── W6a 內部路由：/internal/device/invoke 與 /status ─────────────
+// ───────────── W6a 内部路由：/internal/device/invoke 与 /status ─────────────
 
 function internalDeps(bridge: DeviceBridge, tenants: Record<string, string | null> = { sess_ok: "u:1" }): InternalDeviceRouteDeps {
   return { bridge, resolveTenant: async (sid) => (sid in tenants ? tenants[sid] : null) }
 }
 
-test("/internal/device/invoke: happy path（mock 裝置走完 poll→result）回凍結契約形狀", async () => {
+test("/internal/device/invoke: happy path（mock 装置走完 poll→result）回冻结契约形状", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"] })
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
@@ -792,7 +792,7 @@ test("/internal/device/invoke: happy path（mock 裝置走完 poll→result）�
   assert.equal(typeof body.request_id, "string")
   assert.equal(body.truncated, false)
   assert.equal(typeof body.bytes, "number")
-  // finalizeDeviceResult 對含 text 的結果會補 `truncated` 後設欄位（既有語義，非本路由）。
+  // finalizeDeviceResult 对含 text 的结果会补 `truncated` 后设栏位（既有语义，非本路由）。
   const result = body.result as { path: string; text: string }
   assert.equal(result.path, "/home/u/project/a.txt")
   assert.equal(result.text, "hello")
@@ -808,7 +808,7 @@ test("/internal/device/invoke: session 解析不到 → session_unknown", async 
   assert.equal(body.error.code, "session_unknown")
 })
 
-test("/internal/device/invoke: resolver 拋錯 → session_unknown（fail-closed，不外洩）", async () => {
+test("/internal/device/invoke: resolver 抛错 → session_unknown（fail-closed，不外泄）", async () => {
   const bridge = new DeviceBridge()
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
   const res = await handleInternalDeviceInvoke(req, { bridge, resolveTenant: async () => { throw new Error("db down") } })
@@ -817,7 +817,7 @@ test("/internal/device/invoke: resolver 拋錯 → session_unknown（fail-closed
   assert.equal(body.error.code, "session_unknown")
 })
 
-test("/internal/device/invoke: 租戶無裝置 → no_device_registered", async () => {
+test("/internal/device/invoke: 租户无装置 → no_device_registered", async () => {
   const bridge = new DeviceBridge()
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
   const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
@@ -826,7 +826,7 @@ test("/internal/device/invoke: 租戶無裝置 → no_device_registered", async 
   assert.equal(body.error.code, "no_device_registered")
 })
 
-test("/internal/device/invoke: 裝置離線 → device_offline", async () => {
+test("/internal/device/invoke: 装置离线 → device_offline", async () => {
   const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", now: Date.now() - 200_000 })
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
@@ -847,7 +847,7 @@ test("/internal/device/invoke: 多台多 online → device_ambiguous", async () 
   assert.equal(body.error.code, "device_ambiguous")
 })
 
-test("/internal/device/invoke: 非白名單 op → tool_not_allowed", async () => {
+test("/internal/device/invoke: 非白名单 op → tool_not_allowed", async () => {
   const bridge = new DeviceBridge()
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1" })
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "write_file", path: "/tmp/a" }) })
@@ -857,7 +857,7 @@ test("/internal/device/invoke: 非白名單 op → tool_not_allowed", async () =
   assert.equal(body.error.code, "tool_not_allowed")
 })
 
-test("/internal/device/invoke: denylist 仍生效（敏感路徑 → sensitive_path）", async () => {
+test("/internal/device/invoke: denylist 仍生效（敏感路径 → sensitive_path）", async () => {
   const bridge = new DeviceBridge()
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"] })
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
@@ -870,11 +870,11 @@ test("/internal/device/invoke: denylist 仍生效（敏感路徑 → sensitive_p
   assert.equal(body.error.code, "sensitive_path")
 })
 
-test("/internal/device/invoke: 授權根仍生效（授權根外 → path_not_authorized）", async () => {
+test("/internal/device/invoke: 授权根仍生效（授权根外 → path_not_authorized）", async () => {
   const bridge = new DeviceBridge()
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"] })
-  // 註：共享 denylist 不含裸 `/etc/passwd`（見向量表；兩端一致，非缺口）——
-  // 這裡要驗的是**授權根**這道防線，故以授權根外的 grep 遞迴根證明。
+  // 注：共享 denylist 不含裸 `/etc/passwd`（见向量表；两端一致，非缺口）——
+  // 这里要验的是**授权根**这道防线，故以授权根外的 grep 递回根证明。
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
     method: "POST",
     body: JSON.stringify({ op: "grep", path: "/etc", pattern: "root" }),
@@ -885,7 +885,7 @@ test("/internal/device/invoke: 授權根仍生效（授權根外 → path_not_au
   assert.equal(body.error.code, "path_not_authorized")
 })
 
-test("/internal/device/invoke: 缺 session_id / 缺 op / 壞 body → bad_request", async () => {
+test("/internal/device/invoke: 缺 session_id / 缺 op / 坏 body → bad_request", async () => {
   const bridge = new DeviceBridge()
   const noSid = await handleInternalDeviceInvoke(
     new Request("http://gw.internal/internal/device/invoke", { method: "POST", body: "{}" }),
@@ -904,7 +904,7 @@ test("/internal/device/invoke: 缺 session_id / 缺 op / 壞 body → bad_reques
   assert.equal(badBody.status, 400)
 })
 
-test("/internal/device/invoke: 裝置在線但不回 result → device_timeout（不 hang）", async () => {
+test("/internal/device/invoke: 装置在线但不回 result → device_timeout（不 hang）", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 60 })
   bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1" })
   const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
@@ -917,12 +917,12 @@ test("/internal/device/invoke: 裝置在線但不回 result → device_timeout�
   assert.equal(res.status, 504)
   const body = (await res.json()) as { error: { code: string } }
   assert.equal(body.error.code, "device_timeout")
-  // 必須在逾時附近就返回（不永久 pending）；給足餘裕以免 CI 抖動誤判。
+  // 必须在逾时附近就返回（不永久 pending）；给足余裕以免 CI 抖动误判。
   assert.ok(elapsed < 5_000, `elapsed=${elapsed}ms`)
   assert.equal(bridge.stats().pending, 0)
 })
 
-test("/internal/device/status: 無裝置 → device:null；有裝置 → 凍結形狀", async () => {
+test("/internal/device/status: 无装置 → device:null；有装置 → 冻结形状", async () => {
   const T = 1_000_000
   const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
   const none = await handleInternalDeviceStatus(
@@ -956,19 +956,19 @@ test("/internal/device/status: session 解析不到 → session_unknown", async 
   assert.equal(body.error.code, "session_unknown")
 })
 
-test("內部路由不放寬既有 denylist／白名單：op 白名單與 policy 工具集一致", () => {
-  // 一對一映射的守門：內部 op 集合必須恰好等於既有 DeviceBridgeTool 白名單。
+test("内部路由不放宽既有 denylist／白名单：op 白名单与 policy 工具集一致", () => {
+  // 一对一映射的守门：内部 op 集合必须恰好等于既有 DeviceBridgeTool 白名单。
   const tools = ["list_dir", "read_file", "grep", "stat"]
   for (const t of tools) assert.equal(isToolAllowed(t), true, t)
   assert.equal(isToolAllowed("write_file"), false)
   assert.equal(isToolAllowed("delete"), false)
 })
 
-// ───────── 對話內授權送達裝置（consent）＋ once 自動核銷（2026-10-04）─────────
+// ───────── 对话内授权送达装置（consent）＋ once 自动核销（2026-10-04）─────────
 //
-// 真機缺口：對話中 authorize(session/permanent) 只寫進閘道記憶體，裝置完全不知道 ⇒ 授權
-// 永不收斂；once 又因 opencode 的 local_files 從不下發 authorization_token 而結構性死路。
-// 以下用「真 invoke → 真 poll 拿 message」斷言 message.consent 的有無與內容（非原始碼掃描）。
+// 真机缺口：对话中 authorize(session/permanent) 只写进闸道记忆体，装置完全不知道 ⇒ 授权
+// 永不收敛；once 又因 opencode 的 local_files 从不下发 authorization_token 而结构性死路。
+// 以下用「真 invoke → 真 poll 拿 message」断言 message.consent 的有无与内容（非原始码扫描）。
 
 const CONSENT_HOME = "/home/u"
 
@@ -976,14 +976,14 @@ function authorizeReq(body: Record<string, unknown>, sid = "sess_ok") {
   return new Request(`http://gw.internal/internal/device/authorize?session_id=${sid}`, { method: "POST", body: JSON.stringify(body) })
 }
 
-/** 取一發 invoke 下發給裝置的 message；assert 收到請求。 */
+/** 取一发 invoke 下发给装置的 message；assert 收到请求。 */
 async function takeMessage(bridge: DeviceBridge, deviceId: string, connectionId: string) {
   const polled = await bridge.poll({ tenant: "u:1", deviceId, connectionId, waitMs: 2_000 })
   if (!polled.ok || !polled.request) throw new Error("expected a request")
   return polled.request
 }
 
-/** 收尾：回一筆結果讓 invoke 落地，避免 pending 拖尾。 */
+/** 收尾：回一笔结果让 invoke 落地，避免 pending 拖尾。 */
 function finish(bridge: DeviceBridge, deviceId: string, connectionId: string, msg: { request_id: string; consent_token: string }) {
   bridge.submitResult({
     tenant: "u:1",
@@ -995,7 +995,7 @@ function finish(bridge: DeviceBridge, deviceId: string, connectionId: string, ms
   })
 }
 
-test("consent: authorize(session) 後，下一發 invoke 的 message 帶 consent（scope=session、roots 含該根）", async () => {
+test("consent: authorize(session) 后，下一发 invoke 的 message 带 consent（scope=session、roots 含该根）", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
   const ares = await handleInternalDeviceAuthorize(authorizeReq({ scope: "session", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
@@ -1019,7 +1019,7 @@ test("consent: authorize(permanent) 同理（scope=permanent）；session＋perm
   finish(bridge, reg.deviceId, reg.connectionId, m1)
   await p1
 
-  // 追加 session 於另一個根：roots 應含兩根，scope 仍 permanent。
+  // 追加 session 于另一个根：roots 应含两根，scope 仍 permanent。
   await handleInternalDeviceAuthorize(authorizeReq({ scope: "session", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
   const p2 = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/docs/a.txt` } })
   const m2 = await takeMessage(bridge, reg.deviceId, reg.connectionId)
@@ -1030,7 +1030,7 @@ test("consent: authorize(permanent) 同理（scope=permanent）；session＋perm
   await p2
 })
 
-test("consent: 無任何授權記錄時，message 不得出現 consent 欄位（裝置不得無條件落盤）", async () => {
+test("consent: 无任何授权记录时，message 不得出现 consent 栏位（装置不得无条件落盘）", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "full", home: CONSENT_HOME })
   const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
@@ -1040,7 +1040,7 @@ test("consent: 無任何授權記錄時，message 不得出現 consent 欄位（
   await pending
 })
 
-test("once: 無 token 自動核銷（第一發放行、message.consent=once；第二發不再放行）", async () => {
+test("once: 无 token 自动核销（第一发放行、message.consent=once；第二发不再放行）", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
   const ares = await handleInternalDeviceAuthorize(authorizeReq({ scope: "once", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
@@ -1052,41 +1052,41 @@ test("once: 無 token 自動核銷（第一發放行、message.consent=once；�
   assert.deepEqual((msg as { consent?: unknown }).consent, { scope: "once", roots: [`${CONSENT_HOME}/project`] })
   finish(bridge, reg.deviceId, reg.connectionId, msg)
   const first = await pending
-  assert.equal(first.ok, true, "自動核銷＝本次放行")
+  assert.equal(first.ok, true, "自动核销＝本次放行")
 
   const second = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
   assert.equal(second.ok, false)
   assert.equal((second as { code: string }).code, "needs_authorization")
 })
 
-test("suggestAuthorizationRoot: 夾制四案例（家目錄／檔案系統根／root_too_broad／home=null）", () => {
-  // 0) 主修：list_dir 目錄 ⇒ 建議目錄本身（不再建議過寬的家目錄）
+test("suggestAuthorizationRoot: 夹制四案例（家目录／档案系统根／root_too_broad／home=null）", () => {
+  // 0) 主修：list_dir 目录 ⇒ 建议目录本身（不再建议过宽的家目录）
   assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, true), `${CONSENT_HOME}/downloads`)
-  // 不加 isDirectory（read_file/stat 語義）時仍建議父目錄（此處父目錄＝家目錄）
+  // 不加 isDirectory（read_file/stat 语义）时仍建议父目录（此处父目录＝家目录）
   assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, false), CONSENT_HOME)
-  // 1) 建議值等於家目錄 → 回被存取路徑本身，不得 null
+  // 1) 建议值等于家目录 → 回被存取路径本身，不得 null
   assert.equal(suggestAuthorizationRoot(CONSENT_HOME, CONSENT_HOME, true), CONSENT_HOME)
-  // 2) 被存取路徑為檔案系統根 → 回根本身，不得 null
+  // 2) 被存取路径为档案系统根 → 回根本身，不得 null
   assert.equal(suggestAuthorizationRoot("/", CONSENT_HOME, true), "/")
-  // 3) 建議值落在 root_too_broad 範圍（單段 /home）→ 回該路徑本身，不得 null
+  // 3) 建议值落在 root_too_broad 范围（单段 /home）→ 回该路径本身，不得 null
   assert.equal(suggestAuthorizationRoot("/home", CONSENT_HOME, true), "/home")
-  // 4) home=null：仍以路徑語義給建議（目錄→本身；檔案→父目錄）；無法歸一化才 null
+  // 4) home=null：仍以路径语义给建议（目录→本身；档案→父目录）；无法归一化才 null
   assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/downloads`, null, true), `${CONSENT_HOME}/downloads`)
   assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/downloads/a.txt`, null, false), `${CONSENT_HOME}/downloads`)
   assert.equal(suggestAuthorizationRoot("relative/x", null, true), null)
 })
 
-test("authorize: 回執保留原大小寫；該規則仍大小寫不敏感命中（真 invoke 放行）", async () => {
+test("authorize: 回执保留原大小写；该规则仍大小写不敏感命中（真 invoke 放行）", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
   const res = await handleInternalDeviceAuthorize(authorizeReq({ scope: "permanent", root: `${CONSENT_HOME}/Downloads` }), internalDeps(bridge))
   assert.equal(res.status, 200)
   const body = (await res.json()) as { applied: { root: string }; rules: PermissionRule[]; persist_on_device?: boolean }
-  assert.equal(body.applied.root, `${CONSENT_HOME}/Downloads`, "回執須保留原大小寫")
+  assert.equal(body.applied.root, `${CONSENT_HOME}/Downloads`, "回执须保留原大小写")
   assert.equal(body.persist_on_device, true)
   assert.equal(matchRuleSpecifier(body.rules[0].specifier!, `${CONSENT_HOME}/downloads/a.txt`, { home: CONSENT_HOME }), true)
 
-  // 真行為：小寫路徑的 invoke 仍被該規則放行（下發出去＝未被 needs_authorization 攔）。
+  // 真行为：小写路径的 invoke 仍被该规则放行（下发出去＝未被 needs_authorization 拦）。
   const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/downloads/a.txt` } })
   const msg = await takeMessage(bridge, reg.deviceId, reg.connectionId)
   finish(bridge, reg.deviceId, reg.connectionId, msg)

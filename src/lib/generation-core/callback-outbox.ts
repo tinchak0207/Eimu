@@ -38,17 +38,17 @@ export interface CallbackDeliveryRow {
 }
 
 /**
- * 達到此次數仍未成功，直接判死信，不再重試（等運營/客戶介入排查）。
+ * 达到此次数仍未成功，直接判死信，不再重试（等运营/客户介入排查）。
  *
- * FG-03（2026-09-23）：重放預算唯一來源是封閉 operation registry 的
- * `callback.deliver` 政策；呼叫方（含本模組的調用者）不得自帶 retry 次數。
- * 這個常量改為 registry 查詢結果，不再是一個獨立的魔數。
+ * FG-03（2026-09-23）：重放预算唯一来源是封闭 operation registry 的
+ * `callback.deliver` 政策；呼叫方（含本模组的调用者）不得自带 retry 次数。
+ * 这个常量改为 registry 查询结果，不再是一个独立的魔数。
  */
 export const MAX_CALLBACK_DELIVERY_ATTEMPTS = resolveReplayPolicy("callback.deliver").maxReplayAttempts;
 
 /**
- * 投遞重放裁決（FG-02/03）：只有 registry 的 `callback.deliver` 政策說可以，
- * 且下一次投遞序號還在預算內，才排下一次；否則進死信。
+ * 投递重放裁决（FG-02/03）：只有 registry 的 `callback.deliver` 政策说可以，
+ * 且下一次投递序号还在预算内，才排下一次；否则进死信。
  */
 export function planCallbackDeliveryReplay(nextAttemptNo: number): ReturnType<typeof planReplay> {
   return planReplay({ operation: "callback.deliver", nextAttemptNo });
@@ -348,8 +348,8 @@ export async function recordCallbackDeliveryResult(
     `;
     if (!rows[0]) return;
     const nextCount = Number(rows[0].delivery_count) + 1;
-    // FG-02/03：剛失敗的是第 nextCount 次，下一次投遞的許可問 registry——
-    // 不是問本模組的魔數，也不是問呼叫方傳進來的任何預算。
+    // FG-02/03：刚失败的是第 nextCount 次，下一次投递的许可问 registry——
+    // 不是问本模组的魔数，也不是问呼叫方传进来的任何预算。
     const replay = planCallbackDeliveryReplay(nextCount + 1);
     const deadLettered = !replay.allowed;
 

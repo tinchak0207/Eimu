@@ -1,5 +1,5 @@
 /**
- * memory-continuity.test.ts — H17 首回合連續性（資產索引＋同題重下提示）、批次時窗、M6 研究披露。
+ * memory-continuity.test.ts — H17 首回合连续性（资产索引＋同题重下提示）、批次时窗、M6 研究披露。
  * 跑法：npx --yes tsx --test --test-force-exit deploy-staging/gateway/memory-continuity.test.ts
  */
 import assert from "node:assert/strict"
@@ -77,8 +77,8 @@ describe("H17 batch slots", () => {
 describe("M6 research disclosure", () => {
   const tpl = JSON.parse(readFileSync(new URL("./spec-templates.json", import.meta.url), "utf8")) as Record<string, string>
   it("research template carries fixed disclosure and bans [2026 现行] without tool evidence", () => {
-    assert.match(tpl.research, /本域無聯網工具，以下為內部知識，未驗證現行資訊/)
-    assert.match(tpl.research, /禁止標注 \[2026 現行\]/)
-    assert.match(tpl.research, /工具呼叫的結果證據/)
+    assert.match(tpl.research, /本域无联网工具，以下为内部知识，未验证现行资讯/)
+    assert.match(tpl.research, /禁止标注 \[2026 现行\]/)
+    assert.match(tpl.research, /工具呼叫的结果证据/)
   })
 })

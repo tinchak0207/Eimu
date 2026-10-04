@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""modal_worker.py — 本機/VPS 側觸發器（bridge 雲端執行後端替身）。
+"""modal_worker.py — 本机/VPS 侧触发器（bridge 云端执行后端替身）。
 
-職責（spec 交付 #2）：
-  - 調 Modal web endpoint POST /render-frame（HMAC 鑑權），單幀循環 +
-    分塊 + ffmpeg 本地合成備選；
-  - 輸出形狀 = bridge /v1/execute 回應同構（modal_common.bridge_envelope）：
+职责（spec 交付 #2）：
+  - 调 Modal web endpoint POST /render-frame（HMAC 鉴权），单帧循环 +
+    分块 + ffmpeg 本地合成备选；
+  - 输出形状 = bridge /v1/execute 回应同构（modal_common.bridge_envelope）：
     {ok, artifacts:[{path,bytes,kind}], scene_summary, stdout_tail,
-    duration_ms, queued, queue_position} —— 可直接當橋的雲端執行後端替身，
-    工具層（src/lib/blender-tools.ts）只認這個形狀。
-  - 片M/片K/L 存活語義同構：分塊、每塊重試 ≤2、retriable 分類、
-    ffmpeg_unavailable 結構化報錯、PNG 驗真（差異：塊=單幀，片L 實錘
-    單幀 job 才是安全單位；崩潰由 Modal 容器隔離天然自愈）。
+    duration_ms, queued, queue_position} —— 可直接当桥的云端执行后端替身，
+    工具层（src/lib/blender-tools.ts）只认这个形状。
+  - 片M/片K/L 存活语义同构：分块、每块重试 ≤2、retriable 分类、
+    ffmpeg_unavailable 结构化报错、PNG 验真（差异：块=单帧，片L 实锤
+    单帧 job 才是安全单位；崩溃由 Modal 容器隔离天然自愈）。
 
 片 AD（2026-09-06）：
-  - 新增 `blend` 子命令：本機 .blend → base64 上傳（141KB 級輕資產，
-    Volume 是殺雞牛刀）→ 雲端 open_mainfile → 渲染 → PNG 回——bridge
-    真實工作流（本機建場景→雲渲染）的關鍵路徑實彈通道；
-  - 逐幀迴圈抽 `_render_frames_http`（scene_script/blend 兩路共用），
-    每幀提取 warm 證據標籤（scene:cache-hit|rebuild + pid）入 envelope。
+  - 新增 `blend` 子命令：本机 .blend → base64 上传（141KB 级轻资产，
+    Volume 是杀鸡牛刀）→ 云端 open_mainfile → 渲染 → PNG 回——bridge
+    真实工作流（本机建场景→云渲染）的关键路径实弹通道；
+  - 逐帧回圈抽 `_render_frames_http`（scene_script/blend 两路共用），
+    每帧提取 warm 证据标签（scene:cache-hit|rebuild + pid）入 envelope。
 
 CLI:
   python modal_worker.py still   --engine eevee --frame 1
@@ -26,8 +26,8 @@ CLI:
   python modal_worker.py blend   --blend path/to/x.blend [--frames 1|10]
                                  [--start-frame 0] [--fps 30] [--out out/x.mp4]
 
-endpoint/key 解析順序：CLI > env BLENDER_MODAL_ENDPOINT / BLENDER_MODAL_HMAC_KEY
-> ~/.modal.toml 的 endpoint 註冊表（deploy 後手動填，見 README）。
+endpoint/key 解析顺序：CLI > env BLENDER_MODAL_ENDPOINT / BLENDER_MODAL_HMAC_KEY
+> ~/.modal.toml 的 endpoint 注册表（deploy 后手动填，见 README）。
 """
 from __future__ import annotations
 
@@ -76,9 +76,9 @@ def resolve_endpoint(explicit: str | None = None) -> str:
     if toml.exists():
         for line in toml.read_text().splitlines():
             s = line.strip()
-            if s.startswith("endpoint") and "=" in s:  # worker 註冊表（deploy 後手動填）
+            if s.startswith("endpoint") and "=" in s:  # worker 注册表（deploy 后手动填）
                 return s.split("=", 1)[1].strip().strip('"').rstrip("/")
-    raise SystemExit("endpoint 未配置：--endpoint 或 env BLENDER_MODAL_ENDPOINT（見 README 第 3 步）")
+    raise SystemExit("endpoint 未配置：--endpoint 或 env BLENDER_MODAL_ENDPOINT（见 README 第 3 步）")
 
 
 def resolve_key(explicit: str | None = None) -> str:
@@ -87,14 +87,14 @@ def resolve_key(explicit: str | None = None) -> str:
     key = os.environ.get("BLENDER_MODAL_HMAC_KEY", "")
     if key:
         return key
-    raise SystemExit("HMAC key 未配置：--key 或 env BLENDER_MODAL_HMAC_KEY（modal secret 建立時的值）")
+    raise SystemExit("HMAC key 未配置：--key 或 env BLENDER_MODAL_HMAC_KEY（modal secret 建立时的值）")
 
 
 # ---------------------------------------------------------------- HTTP
 
 
 def call_endpoint(endpoint: str, key: str, payload: dict, timeout_s: int = DEFAULT_TIMEOUT_S) -> dict:
-    """簽名（canonical JSON 基底，與 endpoint 端同構）+ POST + 解析回應。"""
+    """签名（canonical JSON 基底，与 endpoint 端同构）+ POST + 解析回应。"""
     import hmac as _hmac
 
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -110,14 +110,14 @@ def call_endpoint(endpoint: str, key: str, payload: dict, timeout_s: int = DEFAU
 
 
 def call_endpoint_signed_payload(endpoint: str, key: str, payload: dict, timeout_s: int) -> dict:
-    """endpoint 端以 body 內 _sig 驗簽（fastapi_endpoint 不透傳自定義 header 時的通道）。"""
+    """endpoint 端以 body 内 _sig 验签（fastapi_endpoint 不透传自定义 header 时的通道）。"""
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     payload = dict(payload)
     payload["_sig"] = sign_hex(key, body)
     return call_endpoint(endpoint, key, payload, timeout_s)
 
 
-# ---------------------------------------------------------------- 合成（本地備選）
+# ---------------------------------------------------------------- 合成（本地备选）
 
 
 def ensure_ffmpeg() -> str:
@@ -127,14 +127,14 @@ def ensure_ffmpeg() -> str:
             subprocess.run([bin_, "-version"], capture_output=True, check=True)
         except Exception:
             raise SystemExit(
-                f"ffmpeg_unavailable: '{bin_}' 不存在。安裝指引：Arch `sudo pacman -S ffmpeg`；"
-                "或 env BLENDER_FFMPEG_BIN 指向現役 ffmpeg。"
+                f"ffmpeg_unavailable: '{bin_}' 不存在。安装指引：Arch `sudo pacman -S ffmpeg`；"
+                "或 env BLENDER_FFMPEG_BIN 指向现役 ffmpeg。"
             )
     return bin_
 
 
 def combine_local(png_frames: list[tuple[str, bytes]], fps: int, out_path: str) -> dict:
-    """片M 同構：本機 ffmpeg image2 合片。回 bridge 形 artifact。"""
+    """片M 同构：本机 ffmpeg image2 合片。回 bridge 形 artifact。"""
     ffmpeg = ensure_ffmpeg()
     tmp = tempfile.mkdtemp(prefix="bmodal-frames-")
     frame_dir = os.path.join(tmp, "frames")
@@ -156,7 +156,7 @@ def combine_local(png_frames: list[tuple[str, bytes]], fps: int, out_path: str) 
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-# ---------------------------------------------------------------- 逐幀迴圈（共用）
+# ---------------------------------------------------------------- 逐帧回圈（共用）
 
 
 _WARM_RE = re.compile(r"scene:(cache-hit|cache-dead|rebuild)")
@@ -165,11 +165,11 @@ _PID_RE = re.compile(r"pid=(\d+)")
 
 def _render_frames_http(endpoint: str, key: str, base_payload: dict,
                         first_frame: int, frames_n: int, timeout_s: int):
-    """逐幀循環（片L：單幀 job 是安全單位）→ 每幀重試 ≤2（片M 語義）。
+    """逐帧循环（片L：单帧 job 是安全单位）→ 每帧重试 ≤2（片M 语义）。
 
-    回 (png_frames, per_frame_ms, fails, warm_tags)；warm_tags=每幀
-    「f{n}:scene狀態/pid」——暖復用證據（同 pid 連續=同容器；cache-hit=場景
-    快取命中，片 AD 契約）。
+    回 (png_frames, per_frame_ms, fails, warm_tags)；warm_tags=每帧
+    「f{n}:scene状态/pid」——暖复用证据（同 pid 连续=同容器；cache-hit=场景
+    快取命中，片 AD 契约）。
     """
     png_frames: list[tuple[str, bytes]] = []
     per_frame_ms: list[int] = []
@@ -179,13 +179,13 @@ def _render_frames_http(endpoint: str, key: str, base_payload: dict,
         frame = first_frame + offset
         payload = dict(base_payload, frame=frame)
         got = None
-        for attempt in (1, 2, 3):  # 初次 + 重試 ≤2（片M 語義）
+        for attempt in (1, 2, 3):  # 初次 + 重试 ≤2（片M 语义）
             try:
                 got = call_endpoint_signed_payload(endpoint, key, payload, timeout_s=timeout_s)
                 if got.get("ok"):
                     break
                 if not any(tag in str(got.get("error", "")) for tag in RETRIABLE):
-                    break  # 非瞬態（如 hmac_rejected）：不重試
+                    break  # 非瞬态（如 hmac_rejected）：不重试
             except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
                 got = {"ok": False, "error": f"URLError: {exc}"}
             time.sleep(2.0)  # 片M cooldown
@@ -200,7 +200,7 @@ def _render_frames_http(endpoint: str, key: str, base_payload: dict,
         if got and got.get("ok") and b64:
             png = base64.b64decode(b64)
             if not looks_like_png(png):
-                fails.append(f"frame {frame}: 非 PNG 回應")
+                fails.append(f"frame {frame}: 非 PNG 回应")
                 continue
             png_frames.append((f"frame_{frame:04d}.png", png))
         else:
@@ -212,7 +212,7 @@ def _render_frames_http(endpoint: str, key: str, base_payload: dict,
 
 
 def run_chain(args) -> dict:
-    """scene_script 路徑 10 幀小鏈 + 合片（local）。輸出=bridge_envelope。"""
+    """scene_script 路径 10 帧小链 + 合片（local）。输出=bridge_envelope。"""
     t0 = time.monotonic()
     endpoint, key = resolve_endpoint(args.endpoint), resolve_key(args.key)
     frames_n = int(args.frames)
@@ -232,11 +232,11 @@ def run_chain(args) -> dict:
         )
 
     if args.combine == "remote":
-        raise SystemExit("remote combine 走 modal run modal_app.py::demo --mode chain（web endpoint 稿僅單幀）")
+        raise SystemExit("remote combine 走 modal run modal_app.py::demo --mode chain（web endpoint 稿仅单帧）")
     out_path = os.path.abspath(args.out)
     try:
         mp4 = combine_local(png_frames, fps, out_path)
-    except SystemExit as exc:  # ffmpeg_unavailable 結構化（片M 同構）
+    except SystemExit as exc:  # ffmpeg_unavailable 结构化（片M 同构）
         return bridge_envelope(
             ok=False, artifacts=[],
             stdout_tail=tail("; ".join(fails)),
@@ -256,10 +256,10 @@ def run_chain(args) -> dict:
 
 
 def run_blend(args) -> dict:
-    """blend_bytes 路徑（片 AD）：本機 .blend → b64 → 雲端 open_mainfile → 渲染。
+    """blend_bytes 路径（片 AD）：本机 .blend → b64 → 云端 open_mainfile → 渲染。
 
-    frames=1 → still（存 PNG 驗真）；>1 → 逐幀鏈 + 本地 ffmpeg 合片。
-    同一 blend 逐幀重發，雲端場景快取連續命中（暖復用主路徑）。
+    frames=1 → still（存 PNG 验真）；>1 → 逐帧链 + 本地 ffmpeg 合片。
+    同一 blend 逐帧重发，云端场景快取连续命中（暖复用主路径）。
     """
     t0 = time.monotonic()
     endpoint, key = resolve_endpoint(args.endpoint), resolve_key(args.key)
@@ -274,7 +274,7 @@ def run_blend(args) -> dict:
     base = {"blend_b64": blend_b64, "engine_hint": args.engine,
             "res": [args.width, args.height]}
 
-    if frames_n == 1:  # still：run_still 同輸出形（存 PNG 驗真）
+    if frames_n == 1:  # still：run_still 同输出形（存 PNG 验真）
         payload = dict(base, frame=start)
         try:
             resp = call_endpoint_signed_payload(endpoint, key, payload, timeout_s=args.timeout)
@@ -329,7 +329,7 @@ def run_blend(args) -> dict:
 
 
 def run_still(args) -> dict:
-    """單幀 Eevee/Cycles——EGL 生死判定步。輸出=bridge_envelope。"""
+    """单帧 Eevee/Cycles——EGL 生死判定步。输出=bridge_envelope。"""
     t0 = time.monotonic()
     endpoint, key = resolve_endpoint(args.endpoint), resolve_key(args.key)
     script = build_turntable_script(1, 10, 30)
@@ -339,7 +339,7 @@ def run_still(args) -> dict:
         resp = call_endpoint_signed_payload(endpoint, key, payload, timeout_s=args.timeout)
     except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
         resp = bridge_envelope(ok=False, artifacts=[], error=f"URLError: {exc}")
-    # artifact 落盤（驗真）
+    # artifact 落盘（验真）
     art = (resp.get("artifacts") or [None])[0]
     if resp.get("ok") and art and art.get("b64"):
         png = base64.b64decode(art["b64"])
@@ -352,7 +352,7 @@ def run_still(args) -> dict:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="blender-modal worker（bridge 同構 client）")
+    p = argparse.ArgumentParser(description="blender-modal worker（bridge 同构 client）")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
@@ -363,12 +363,12 @@ def main() -> int:
         sp.add_argument("--width", type=int, default=1280)
         sp.add_argument("--height", type=int, default=720)
 
-    sp1 = sub.add_parser("still", help="單幀渲染（EGL 生死判定步）")
+    sp1 = sub.add_parser("still", help="单帧渲染（EGL 生死判定步）")
     common(sp1)
     sp1.add_argument("--frame", type=int, default=1)
     sp1.set_defaults(func=run_still)
 
-    sp2 = sub.add_parser("chain", help="10 幀小鏈 + ffmpeg 合片")
+    sp2 = sub.add_parser("chain", help="10 帧小链 + ffmpeg 合片")
     common(sp2)
     sp2.add_argument("--frames", type=int, default=10)
     sp2.add_argument("--fps", type=int, default=30)
@@ -376,7 +376,7 @@ def main() -> int:
     sp2.add_argument("--out", default="out/turntable.mp4")
     sp2.set_defaults(func=run_chain)
 
-    sp3 = sub.add_parser("blend", help="blend_bytes 路徑：本機 .blend 上傳→雲端渲染（--frames 1=still）")
+    sp3 = sub.add_parser("blend", help="blend_bytes 路径：本机 .blend 上传→云端渲染（--frames 1=still）")
     common(sp3)
     sp3.add_argument("--blend", required=True)
     sp3.add_argument("--frames", type=int, default=1)
@@ -387,7 +387,7 @@ def main() -> int:
 
     args = p.parse_args()
     resp = args.func(args)
-    if args.cmd == "chain":  # still/blend 已在函數內打印；chain 統一在此打印
+    if args.cmd == "chain":  # still/blend 已在函数内打印；chain 统一在此打印
         print(json.dumps(resp, ensure_ascii=False))
     return 0 if resp.get("ok") else 1
 

@@ -72,7 +72,7 @@ test("getMapaySubmitUrl accepts base or submit.php gateway urls", () => {
 });
 
 test("mapayMoneyAcceptable tolerates channel fees above the expected amount", () => {
-  // 2026-09-19 漏單實案：下單 9.90、渠道回調 9.93。
+  // 2026-09-19 漏单实案：下单 9.90、渠道回调 9.93。
   assert.equal(mapayMoneyAcceptable("9.93", 9.9), true);
   assert.equal(mapayMoneyAcceptable("9.90", 9.9), true);
 });

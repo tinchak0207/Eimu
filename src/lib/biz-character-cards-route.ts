@@ -81,12 +81,12 @@ function deterministicCardId(userId: number, kind: CharacterCardKind, name: stri
 
 /**
  * 参考物 URL 判定：与 character-cards.ts 的 `isCardImageUrl` **同一把尺**
- * （`http` 前缀或 `data:image/`）。这里只做「非法项回 400」的前置校驗，
+ * （`http` 前缀或 `data:image/`）。这里只做「非法项回 400」的前置校验，
  * 真正落卡的清洗仍在 normalizeCharacterCard。
  *
- * 已知边界（刻意）：`data:audio/` 是音頻卡在卡模型里合法的参考物
+ * 已知边界（刻意）：`data:audio/` 是音频卡在卡模型里合法的参考物
  * （`isUsableCardReferenceUrl` 是 kind-aware 的），但本 B 端入口按已冻结契约只收
- * http(s)/data:image，音頻卡的内嵌参考音頻在此会被**明确 400**（不是静默丢）。
+ * http(s)/data:image，音频卡的内嵌参考音频在此会被**明确 400**（不是静默丢）。
  * 要放开需先改契约，别在这里偷偷放宽。
  */
 function isAllowedReferenceUrl(url: string): boolean {
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
   // kind 先落定（id 指纹要用它，且未知值收敛不报错）。
   const kind = toCharacterCardKind(body?.kind);
 
-  // reference_urls：逐项校驗，非法/超限一律 400——绝不静默丢或截尾
+  // reference_urls：逐项校验，非法/超限一律 400——绝不静默丢或截尾
   //（normalizeCharacterCard 对超限是 slice，直接透传会让 agent 以为 8 张都存下了）。
   let referenceUrls: string[] = [];
   if (body?.reference_urls !== undefined) {

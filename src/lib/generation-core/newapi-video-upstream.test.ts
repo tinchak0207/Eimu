@@ -6,10 +6,10 @@ import { generateWithSupplier } from "./supplier-adapter.ts";
 import { MINIMAX_H3_MODEL_ID } from "../image-model-ids.js";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
-// 覆蓋 P1 視頻語義歸一開關（NEWAPI_VIDEO_KERNEL）：
-//   提交請求形狀（路由 /video/generations、Bearer 鑑權、TaskSubmitReq payload）
-//   輪詢三態映射（running / succeeded / failed+fail_reason）
-//   開關兩態（on → new-api 原生；off → 現行 metaso 直調橋，影子期並存）
+// 覆盖 P1 视频语义归一开关（NEWAPI_VIDEO_KERNEL）：
+//   提交请求形状（路由 /video/generations、Bearer 鉴权、TaskSubmitReq payload）
+//   轮询三态映射（running / succeeded / failed+fail_reason）
+//   开关两态（on → new-api 原生；off → 现行 metaso 直调桥，影子期并存）
 
 const NEWAPI_BASE = "http://newapi.test:3001/v1";
 const NEWAPI_KEY = "sk-newapi-kernel-test";
@@ -151,7 +151,7 @@ function taskDto(status: string, extra: Record<string, unknown> = {}): Response 
   });
 }
 
-test("isNewApiVideoKernelEnabled：未設/0 關，1/true 開", () => {
+test("isNewApiVideoKernelEnabled：未设/0 关，1/true 开", () => {
   return withKernelEnv({}, async () => {
     assert.equal(isNewApiVideoKernelEnabled(), false);
     process.env.NEWAPI_VIDEO_KERNEL = "0";
@@ -165,7 +165,7 @@ test("isNewApiVideoKernelEnabled：未設/0 關，1/true 開", () => {
   });
 });
 
-test("提交請求形狀：/video/generations 路由、Bearer 鑑權、TaskSubmitReq payload", () => {
+test("提交请求形状：/video/generations 路由、Bearer 鉴权、TaskSubmitReq payload", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { calls, restore } = mockFetch((call) => {
       if (call.method === "POST" && call.url === `${NEWAPI_BASE}/video/generations`) return submitOk();
@@ -197,7 +197,7 @@ test("提交請求形狀：/video/generations 路由、Bearer 鑑權、TaskSubmi
   });
 });
 
-test("輪詢三態：IN_PROGRESS（running）→ SUCCESS（succeeded 出 result_url）", () => {
+test("轮询三态：IN_PROGRESS（running）→ SUCCESS（succeeded 出 result_url）", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { calls, restore } = mockFetch((call, index) => {
       if (call.method === "POST") return submitOk();
@@ -216,7 +216,7 @@ test("輪詢三態：IN_PROGRESS（running）→ SUCCESS（succeeded 出 result_
   });
 });
 
-test("輪詢三態：UNKNOWN 保守視為 running 繼續輪詢（總時限兜底）", () => {
+test("轮询三态：UNKNOWN 保守视为 running 继续轮询（总时限兜底）", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { restore } = mockFetch((_call, index) => {
       if (index === 0) return submitOk();
@@ -231,7 +231,7 @@ test("輪詢三態：UNKNOWN 保守視為 running 繼續輪詢（總時限兜底
   });
 });
 
-test("輪詢三態：FAILURE 透傳 fail_reason 原文", () => {
+test("轮询三态：FAILURE 透传 fail_reason 原文", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { restore } = mockFetch((call) => {
       if (call.method === "POST") return submitOk();
@@ -248,7 +248,7 @@ test("輪詢三態：FAILURE 透傳 fail_reason 原文", () => {
   });
 });
 
-test("grace 期內 task_not_exist 視為未就緒繼續輪詢", () => {
+test("grace 期内 task_not_exist 视为未就绪继续轮询", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { calls, restore } = mockFetch((call, index) => {
       if (call.method === "POST") return submitOk();
@@ -265,7 +265,7 @@ test("grace 期內 task_not_exist 視為未就緒繼續輪詢", () => {
   });
 });
 
-test("SUCCESS 但缺 result_url → 誠實報空（502）", () => {
+test("SUCCESS 但缺 result_url → 诚实报空（502）", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { restore } = mockFetch((call) => {
       if (call.method === "POST") return submitOk();
@@ -282,7 +282,7 @@ test("SUCCESS 但缺 result_url → 誠實報空（502）", () => {
   });
 });
 
-test("開關 on 但缺 NEWAPI_BASE_URL → 配置錯誤 500（不靜默回退直調橋）", () => {
+test("开关 on 但缺 NEWAPI_BASE_URL → 配置错误 500（不静默回退直调桥）", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_API_KEY: NEWAPI_KEY }, async () => {
     await assert.rejects(
       () => generateWithNewApiVideo(kernelInput()),
@@ -291,7 +291,7 @@ test("開關 on 但缺 NEWAPI_BASE_URL → 配置錯誤 500（不靜默回退直
   });
 });
 
-test("開關 off：video 任務仍走 metaso 直調橋（影子期並存）", () => {
+test("开关 off：video 任务仍走 metaso 直调桥（影子期并存）", () => {
   return withKernelEnv({ NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, METASO_API_KEY: "mk-test-key", NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { calls, restore } = mockFetch((call) => {
       if (call.url === "https://metaso.cn/api/minimax/v2/video_generation") return jsonResponse(200, { task_id: "2092888943596797952" });
@@ -312,7 +312,7 @@ test("開關 off：video 任務仍走 metaso 直調橋（影子期並存）", ()
   });
 });
 
-test("開關 on：generateWithSupplier 分流到 new-api 原生內核", () => {
+test("开关 on：generateWithSupplier 分流到 new-api 原生内核", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, METASO_API_KEY: "mk-test-key", NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { calls, restore } = mockFetch((call) => {
       if (call.method === "POST" && call.url === `${NEWAPI_BASE}/video/generations`) return submitOk();
@@ -331,7 +331,7 @@ test("開關 on：generateWithSupplier 分流到 new-api 原生內核", () => {
   });
 });
 
-test("開關 on 但非 minimax-h3 視頻：不攔截，維持原 supplier 路徑", () => {
+test("开关 on 但非 minimax-h3 视频：不拦截，维持原 supplier 路径", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, METASO_API_KEY: "mk-test-key", NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     const { calls, restore } = mockFetch((call) => {
       if (call.url === "https://metaso.cn/api/minimax/v2/video_generation") return jsonResponse(200, { task_id: "2092888943596797952" });
@@ -351,7 +351,7 @@ test("開關 on 但非 minimax-h3 視頻：不攔截，維持原 supplier 路徑
   });
 });
 
-test("參考圖透傳：first/last frame 經 metadata，1080p → 2K + 1920x1080", () => {
+test("参考图透传：first/last frame 经 metadata，1080p → 2K + 1920x1080", () => {
   return withKernelEnv({ NEWAPI_VIDEO_KERNEL: "1", NEWAPI_BASE_URL: NEWAPI_BASE, NEWAPI_API_KEY: NEWAPI_KEY, NEWAPI_VIDEO_POLL_INTERVAL_MS: "10" }, async () => {
     let submitBody: Record<string, unknown> = {};
     const { restore } = mockFetch((call) => {

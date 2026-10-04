@@ -1,7 +1,7 @@
 {
   "orchestrator": {
     "mode": "all",
-    "description": "MOE Orchestrator（野獸模式主會話）：域工具已斷路，只能 subagent_dispatch 派發 Expert",
+    "description": "MOE Orchestrator（野兽模式主会话）：域工具已断路，只能 subagent_dispatch 派发 Expert",
     "tools": {
       "blender_exec": false,
       "blender_export_gltf": false,
@@ -41,7 +41,7 @@
   },
   "director3d": {
     "mode": "all",
-    "description": "专属 3D 导演：接委托单自主驱动 Blender 产出骨架动画与场景资产，只回资产引用与场景摘要，过程不出子代理。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "专属 3D 导演：接委托单自主驱动 Blender 产出骨架动画与场景资产，只回资产引用与场景摘要，过程不出子代理。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -138,7 +138,7 @@
   },
   "music": {
     "mode": "all",
-    "description": "专属音乐导演：接委托单自主驱动 Lyria 产出配乐/主题曲/插曲，只回交付物契约与交付摘要，过程不出子代理。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "专属音乐导演：接委托单自主驱动 Lyria 产出配乐/主题曲/插曲，只回交付物契约与交付摘要，过程不出子代理。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -237,7 +237,7 @@
   },
   "video-director": {
     "mode": "all",
-    "description": "专属视频导演：接委托单自主设计分镜/运镜/时长与分辨率并选型 seedance/kling 系模型产出成片，只回交付物契约与交付摘要，过程不出子代理。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "专属视频导演：接委托单自主设计分镜/运镜/时长与分辨率并选型 seedance/kling 系模型产出成片，只回交付物契约与交付摘要，过程不出子代理。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -328,7 +328,7 @@
   },
   "editor": {
     "mode": "all",
-    "description": "专属剪辑师：接委托单自主编排时间线（剪切/转场/节奏卡点/混音）并走 lint/master 质检导出成片，只回交付物契约与交付摘要，过程不出子代理。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "专属剪辑师：接委托单自主编排时间线（剪切/转场/节奏卡点/混音）并走 lint/master 质检导出成片，只回交付物契约与交付摘要，过程不出子代理。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -418,7 +418,7 @@
   },
   "screenwriter": {
     "mode": "all",
-    "description": "剧本与分镜：故事节拍、分镜清单与一致性，输出 beats 与 shotlist。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "剧本与分镜：故事节拍、分镜清单与一致性，输出 beats 与 shotlist。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -512,7 +512,7 @@
   },
   "motion-director": {
     "mode": "all",
-    "description": "动态设计：MG 动画与动态规格，产出 motion_spec 与关键帧预览。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "动态设计：MG 动画与动态规格，产出 motion_spec 与关键帧预览。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -609,7 +609,7 @@
   },
   "web3d-director": {
     "mode": "all",
-    "description": "Web3D 交互场景：three.js 场景规格与 GLB 资产导出，交付可部署的交互体验。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "Web3D 交互场景：three.js 场景规格与 GLB 资产导出，交付可部署的交互体验。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,
@@ -708,7 +708,7 @@
   },
   "critic": {
     "mode": "all",
-    "description": "独立审核与质量闸：不产内容只驳回，逐栏核对交付契约并索要可复算算式证据，输出 verdict/issues/evidence/qc 四区块审核报告。（Expert：僅經 subagent_dispatch expert 欄路由）",
+    "description": "独立审核与质量闸：不产内容只驳回，逐栏核对交付契约并索要可复算算式证据，输出 verdict/issues/evidence/qc 四区块审核报告。（Expert：仅经 subagent_dispatch expert 栏路由）",
     "tools": {
       "aspect_reflow": false,
       "asset_activate": false,

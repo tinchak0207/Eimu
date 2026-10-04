@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Patch /opt/agent-harness/gateway/index.ts: zip 內容安檢（路徑穿越/炸彈/嵌套 zip）。"""
+"""Patch /opt/agent-harness/gateway/index.ts: zip 内容安检（路径穿越/炸弹/嵌套 zip）。"""
 import sys
 
 PATH = "/opt/agent-harness/gateway/index.ts"
 src = open(PATH).read()
 
-HELPER = '''/** zip 內容安檢（紅隊加固 2026-08-22）：路徑穿越／絕對路徑／條目過多／解壓炸彈／嵌套 zip 一律拒。回 null=通過。 */
+HELPER = '''/** zip 内容安检（红队加固 2026-08-22）：路径穿越／绝对路径／条目过多／解压炸弹／嵌套 zip 一律拒。回 null=通过。 */
 function zipProbe(dest: string): string | null {
   const names = Bun.spawnSync(["unzip", "-Z1", dest], { stdout: "pipe", stderr: "ignore" })
   if (names.exitCode !== 0) return "invalid zip archive"

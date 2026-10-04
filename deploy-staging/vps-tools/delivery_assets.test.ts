@@ -1,7 +1,7 @@
-// H11 測試：delivery_assets 零參數自足（不依賴前置 canvas_get_state）。bun test。
+// H11 测试：delivery_assets 零参数自足（不依赖前置 canvas_get_state）。bun test。
 import { test, expect } from "bun:test"
 
-// 沙盒：複製工具到臨時目錄並備好 ../lib 與 plugin 樁（VPS 的 lib 不在鏡像內）。
+// 沙盒：复制工具到临时目录并备好 ../lib 与 plugin 桩（VPS 的 lib 不在镜像内）。
 import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,7 +18,7 @@ const tool: any = (await import(join(root, "tools/delivery_assets.ts"))).default
 const setSnap = (v: any) => { (globalThis as any).__snap = v }
 const run = async (args: any) => JSON.parse((await tool.execute(args, { sessionID: "s1" })).output)
 
-test("零參數 + 畫布有成品 → 自動交付，不回 empty_delivery", async () => {
+test("零参数 + 画布有成品 → 自动交付，不回 empty_delivery", async () => {
   setSnap({ has_state: true, state: { nodes: [{ id: "a", type: "video", metadata: { content: "https://x/a.mp4" } }, { id: "b", type: "video", metadata: {} }] } })
   const r = await run({})
   expect(r.ok).toBe(true)
@@ -27,7 +27,7 @@ test("零參數 + 畫布有成品 → 自動交付，不回 empty_delivery", asy
   expect(r.missing.length).toBe(1)
 })
 
-test("零參數 + 無畫布 → 回退 session-tasks succeeded URL", async () => {
+test("零参数 + 无画布 → 回退 session-tasks succeeded URL", async () => {
   setSnap({ has_state: false, state: null })
   const orig = globalThis.fetch
   globalThis.fetch = (async () => Response.json({ ok: true, tasks: [{ status: "succeeded", url: "https://x/i.png" }, { status: "running" }] })) as any
@@ -38,7 +38,7 @@ test("零參數 + 無畫布 → 回退 session-tasks succeeded URL", async () =>
   } finally { globalThis.fetch = orig }
 })
 
-test("零參數 + 全空 → nothing_to_deliver（非 empty_delivery）", async () => {
+test("零参数 + 全空 → nothing_to_deliver（非 empty_delivery）", async () => {
   setSnap({ has_state: false, state: null })
   const orig = globalThis.fetch
   globalThis.fetch = (async () => Response.json({ ok: true, tasks: [] })) as any

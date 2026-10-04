@@ -1,31 +1,31 @@
 /**
- * Jev (TypeSafe System One) 客戶端 — 語義判定閘的單一出口。
+ * Jev (TypeSafe System One) 客户端 — 语义判定闸的单一出口。
  *
- * 範式：對一個 state 平行求值一批帶型別問題（Choice/Score/Noul），回型別化
- * answers＋機率分佈＋confidence，無文字生成、無事後解析。所有調用方必須
- * 批次提問（平行性是範式核心，禁一題一呼）。
+ * 范式：对一个 state 平行求值一批带型别问题（Choice/Score/Noul），回型别化
+ * answers＋机率分布＋confidence，无文字生成、无事后解析。所有调用方必须
+ * 批次提问（平行性是范式核心，禁一题一呼）。
  *
- * 紀律（PRD docs/plans/2026-09-19-jev-system-one-prd.md）：
- * - Jev 是輔助判定層：任何失敗（網路/逾時/HTTP 非 2xx/回應畸形）靜默回
- *   { ok:false }，調用方各自降級——絕不因判定閘掛掉而阻斷主鏈路（fail-open）。
- * - JEV_ENABLED 默認 off，按刀灰度。
- * - key 走 TYPESAFE_API_KEY env（Vercel/VPS 環境變數注入，非 repo 明文）。
+ * 纪律（PRD docs/plans/2026-09-19-jev-system-one-prd.md）：
+ * - Jev 是辅助判定层：任何失败（网路/逾时/HTTP 非 2xx/回应畸形）静默回
+ *   { ok:false }，调用方各自降级——绝不因判定闸挂掉而阻断主链路（fail-open）。
+ * - JEV_ENABLED 默认 off，按刀灰度。
+ * - key 走 TYPESAFE_API_KEY env（Vercel/VPS 环境变数注入，非 repo 明文）。
  */
 
-/** Noul：是非題，回 0–1 機率（0.5 = 不確定，非「中等」）。 */
+/** Noul：是非题，回 0–1 机率（0.5 = 不确定，非「中等」）。 */
 export interface JevNoulQuestion {
   readonly type: "noul";
   readonly instructions: string;
 }
 
-/** Choice：離散選項選一，回 choice＋跨選項機率分佈＋confidence。 */
+/** Choice：离散选项选一，回 choice＋跨选项机率分布＋confidence。 */
 export interface JevChoiceQuestion {
   readonly type: "choice";
   readonly instructions: string;
   readonly criteria: Readonly<Record<string, string>>;
 }
 
-/** Score：有序等級量表，回 score（可落在兩級之間）＋legend＋confidence。 */
+/** Score：有序等级量表，回 score（可落在两级之间）＋legend＋confidence。 */
 export interface JevScoreQuestion {
   readonly type: "score";
   readonly instructions: string;
@@ -71,7 +71,7 @@ export interface JevResult<Q extends JevQuestions> {
 export interface JevFailure {
   readonly ok: false;
   readonly reason: "disabled" | "no_key" | "network" | "http" | "malformed";
-  /** HTTP 非 2xx 時的狀態碼；其餘 reason 為 undefined。 */
+  /** HTTP 非 2xx 时的状态码；其余 reason 为 undefined。 */
   readonly status?: number;
 }
 
@@ -79,7 +79,7 @@ export type JevOutcome<Q extends JevQuestions> =
   | ({ readonly ok: true } & JevResult<Q>)
   | JevFailure;
 
-/** 實測基線 770ms（2026-09-19，兩題平行含 RTT）；2000ms 留 2.6x 餘量。 */
+/** 实测基线 770ms（2026-09-19，两题平行含 RTT）；2000ms 留 2.6x 余量。 */
 const JEV_TIMEOUT_MS = 2_000;
 const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL = "jev-latest";
@@ -94,7 +94,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** 逐題驗型：答案鎖死在題目型別內才算可用（畸形答案整包降級，不猜）。 */
+/** 逐题验型：答案锁死在题目型别内才算可用（畸形答案整包降级，不猜）。 */
 function validateAnswers<Q extends JevQuestions>(
   questions: Q,
   raw: unknown,
@@ -134,8 +134,8 @@ function validateAnswers<Q extends JevQuestions>(
 }
 
 /**
- * 對 state 批次求值一批問題（單一出口）。失敗靜默回 { ok:false, reason }，
- * 調用方按各自閘的降級策略處置；journal 記量由調用方負責（帶 reason/ms）。
+ * 对 state 批次求值一批问题（单一出口）。失败静默回 { ok:false, reason }，
+ * 调用方按各自闸的降级策略处置；journal 记量由调用方负责（带 reason/ms）。
  */
 export async function jevAsk<Q extends JevQuestions>(
   state: string,

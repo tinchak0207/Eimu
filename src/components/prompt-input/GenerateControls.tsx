@@ -23,7 +23,7 @@ import { LABEL_CLASS, RAIL_CLASS, ROW_CLASS } from "@/components/prompt-input/ra
 
 interface GenerateControlsProps {
   suggestions: Suggestion[];
-  /** 父层 handler 原名下發（契约测试逐名断言，不得改名）。 */
+  /** 父层 handler 原名下发（契约测试逐名断言，不得改名）。 */
   handleSuggestionSelect: (prompt: string) => void;
   updateSuggestions: () => void;
   models: string[];
@@ -54,9 +54,9 @@ interface GenerateControlsProps {
 }
 
 /**
- * generate 面設定 rails（Task 9 自 PromptInput 抽出）：示例／模型／比例／畫質／
- * 時長／音訊／風格七行。純 props 驅動；能力派生值（比例/畫質/時長/音訊）由
- * modelId 就地計算。DOM 結構與原內聯 JSX 完全一致（高度鎖測量不受影響）。
+ * generate 面设定 rails（Task 9 自 PromptInput 抽出）：示例／模型／比例／画质／
+ * 时长／音讯／风格七行。纯 props 驱动；能力派生值（比例/画质/时长/音讯）由
+ * modelId 就地计算。DOM 结构与原内联 JSX 完全一致（高度锁测量不受影响）。
  */
 export function GenerateControls({
   suggestions,

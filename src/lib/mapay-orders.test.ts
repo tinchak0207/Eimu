@@ -1,4 +1,4 @@
-// mPay 訂單查詢客戶端測試：真輸入 → 真輸出（無外網，fake fetch）。
+// mPay 订单查询客户端测试：真输入 → 真输出（无外网，fake fetch）。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -29,24 +29,24 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-// ── URL 與遮蔽 ──────────────────────────────────────────────────────────
+// ── URL 与遮蔽 ──────────────────────────────────────────────────────────
 
-test("mapayApiUrl：基底（含尾斜線/不含）都收斂到同層 api.php，已是 api.php 則原樣", () => {
+test("mapayApiUrl：基底（含尾斜线/不含）都收敛到同层 api.php，已是 api.php 则原样", () => {
   assert.equal(mapayApiUrl("https://mzf.mapay.cc/xpay/epay/"), "https://mzf.mapay.cc/xpay/epay/api.php");
   assert.equal(mapayApiUrl("https://mzf.mapay.cc/xpay/epay"), "https://mzf.mapay.cc/xpay/epay/api.php");
   assert.equal(mapayApiUrl("https://mzf.mapay.cc/xpay/epay/api.php"), "https://mzf.mapay.cc/xpay/epay/api.php");
 });
 
-test("redactMapaySecrets：pid 與 key 的值都不出現在日誌字串裡", () => {
+test("redactMapaySecrets：pid 与 key 的值都不出现在日志字串里", () => {
   const redacted = redactMapaySecrets(`{"pid":"1000","key":"abcSECRETxyz","data":[]}`, CONFIG);
   assert.doesNotMatch(redacted, /abcSECRETxyz/);
   assert.doesNotMatch(redacted, /"pid":"1000"/);
   assert.match(redacted, /\*\*\*/);
 });
 
-// ── 解析容忍度（成功形狀未定 ⇒ 多種別名都要認） ─────────────────────────
+// ── 解析容忍度（成功形状未定 ⇒ 多种别名都要认） ─────────────────────────
 
-test("信封解析：data 陣列 / list 包裝 / 單筆物件 / 欄位別名 / 付款判定", () => {
+test("信封解析：data 阵列 / list 包装 / 单笔物件 / 栏位别名 / 付款判定", () => {
   const fromArray = parseMapayOrdersResponse({
     code: 1,
     data: [
@@ -72,12 +72,12 @@ test("信封解析：data 陣列 / list 包裝 / 單筆物件 / 欄位別名 / �
   assert.equal(empty.orders.length, 0);
 });
 
-// 真實響應契約鎖：2026-10-04 生產 act=order&out_trade_no=IMGMU7UH9SFF9A21D 逐字原始響應
-// （pid 值在取證日誌中已遮蔽為 ***）。訂單欄位平鋪在信封根層 ⇒ 必須被認成 1 筆已付款。
+// 真实响应契约锁：2026-10-04 生产 act=order&out_trade_no=IMGMU7UH9SFF9A21D 逐字原始响应
+// （pid 值在取证日志中已遮蔽为 ***）。订单栏位平铺在信封根层 ⇒ 必须被认成 1 笔已付款。
 const REAL_SINGLE_ORDER_RESPONSE =
   '{"code":1,"msg":"查询订单号成功！","trade_no":"20260919114538891000","out_trade_no":"IMGMU7UH9SFF9A21D","type":"alipay","pid":"***","addtime":"2026-09-19 11:45:38","endtime":"2026-09-19 11:49:00","name":"eimu.dev 梦芽 · 轻度尝鲜包 100金币","money":"9.93","param":"starter","buyer":"","status":1}';
 
-test("真實響應（根層平鋪）：解析器認出 1 筆已付款、out_trade_no/money 正確", () => {
+test("真实响应（根层平铺）：解析器认出 1 笔已付款、out_trade_no/money 正确", () => {
   const parsed = parseMapayOrdersResponse(JSON.parse(REAL_SINGLE_ORDER_RESPONSE));
   assert.equal(parsed.orders.length, 1);
   const order = parsed.orders[0];
@@ -88,7 +88,7 @@ test("真實響應（根層平鋪）：解析器認出 1 筆已付款、out_trad
   assert.equal(order.status, "1");
   assert.equal(parsed.empty, false);
 
-  // 走完整單查路徑（fake fetch 回逐字原始字串）：必須找到該筆，不得判「查無此單」。
+  // 走完整单查路径（fake fetch 回逐字原始字串）：必须找到该笔，不得判「查无此单」。
   return (async () => {
     const found = await fetchMapayOrder("IMGMU7UH9SFF9A21D", {
       config: CONFIG,
@@ -101,7 +101,7 @@ test("真實響應（根層平鋪）：解析器認出 1 筆已付款、out_trad
   })();
 });
 
-test("normalizeMapayOrder：缺 out_trade_no 的列不收（無法指認）；缺可解析時間不回假時間", () => {
+test("normalizeMapayOrder：缺 out_trade_no 的列不收（无法指认）；缺可解析时间不回假时间", () => {
   assert.equal(normalizeMapayOrder({ money: 1 }), null);
   assert.equal(normalizeMapayOrder(null), null);
   const order = normalizeMapayOrder({ out_trade_no: "IMGF", money: 9.9, addtime: "not-a-time" });
@@ -110,9 +110,9 @@ test("normalizeMapayOrder：缺 out_trade_no 的列不收（無法指認）；�
   assert.equal(order?.paidAt, null);
 });
 
-// ── 錯誤型別（逾時 / 非 JSON / 非 0 code 都要分開） ─────────────────────
+// ── 错误型别（逾时 / 非 JSON / 非 0 code 都要分开） ─────────────────────
 
-test("fetchMapayOrders：成功回訂單，且原始響應（遮蔽後）落進日誌", async () => {
+test("fetchMapayOrders：成功回订单，且原始响应（遮蔽后）落进日志", async () => {
   const logs: string[] = [];
   const result = await fetchMapayOrders(
     {},
@@ -135,7 +135,7 @@ test("fetchMapayOrders：成功回訂單，且原始響應（遮蔽後）落進�
   assert.doesNotMatch(logs[0], /abcSECRETxyz/);
 });
 
-test("fetchMapayOrders：code 非 0（502）→ MapayOrdersError(kind=upstream) 且帶 code", async () => {
+test("fetchMapayOrders：code 非 0（502）→ MapayOrdersError(kind=upstream) 且带 code", async () => {
   await assert.rejects(
     () =>
       fetchMapayOrders(
@@ -155,7 +155,7 @@ test("fetchMapayOrders：code 非 0（502）→ MapayOrdersError(kind=upstream) 
   );
 });
 
-test("fetchMapayOrders：code=0 錯誤信封（無訂單實體）→ upstream（不當「成功但 data 空」）", async () => {
+test("fetchMapayOrders：code=0 错误信封（无订单实体）→ upstream（不当「成功但 data 空」）", async () => {
   await assert.rejects(
     () =>
       fetchMapayOrders(
@@ -181,7 +181,7 @@ test("fetchMapayOrders：非 JSON → kind=non_json；HTTP 500 → kind=http", a
   );
 });
 
-test("fetchMapayOrders：逾時（AbortSignal）→ kind=timeout，不吞成空集合", async () => {
+test("fetchMapayOrders：逾时（AbortSignal）→ kind=timeout，不吞成空集合", async () => {
   await assert.rejects(
     () =>
       fetchMapayOrders(
@@ -200,16 +200,16 @@ test("fetchMapayOrders：逾時（AbortSignal）→ kind=timeout，不吞成空�
   );
 });
 
-test("fetchMapayOrders：config 缺失（無 pid/key）→ kind=config_missing", async () => {
+test("fetchMapayOrders：config 缺失（无 pid/key）→ kind=config_missing", async () => {
   await assert.rejects(
     () => fetchMapayOrders({}, { env: { MAPAY_PID: "", MAPAY_KEY: "" }, logger: () => undefined }),
     (error: unknown) => error instanceof MapayOrdersError && error.kind === "config_missing",
   );
 });
 
-// ── 跨實例中繼（本機無憑證 → 問 Vercel；對帳器跑在控制面走這條） ─────────────
+// ── 跨实例中继（本机无凭证 → 问 Vercel；对帐器跑在控制面走这条） ─────────────
 
-test("mapayOrdersRelayConfig：複用 GENERATION_BILLING_RELAY_URL 的 origin，缺件回 null", () => {
+test("mapayOrdersRelayConfig：复用 GENERATION_BILLING_RELAY_URL 的 origin，缺件回 null", () => {
   assert.deepEqual(
     mapayOrdersRelayConfig({
       GENERATION_BILLING_RELAY_URL: "https://image.example/api/internal/generation-billing",
@@ -217,11 +217,11 @@ test("mapayOrdersRelayConfig：複用 GENERATION_BILLING_RELAY_URL 的 origin，
     }),
     { url: "https://image.example/api/internal/mapay-orders", secret: "shared" },
   );
-  // 只給 URL、沒有 secret → 通道不可用
+  // 只给 URL、没有 secret → 通道不可用
   assert.equal(mapayOrdersRelayConfig({ GENERATION_BILLING_RELAY_URL: "https://image.example/x" }), null);
 });
 
-test("fetchMapayOrders：本機無憑證 → 經 HMAC（域 mapay-orders）打 Vercel 中繼並採納其結果", async () => {
+test("fetchMapayOrders：本机无凭证 → 经 HMAC（域 mapay-orders）打 Vercel 中继并采纳其结果", async () => {
   const secret = "shared-relay-secret";
   let seenUrl = "";
   let seenTimestamp = "";
@@ -269,7 +269,7 @@ test("fetchMapayOrders：本機無憑證 → 經 HMAC（域 mapay-orders）打 V
   assert.equal(seenUrl, "https://image.example/api/internal/mapay-orders");
   assert.equal(result.orders[0].outTradeNo, "IMGREL");
   assert.deepEqual(JSON.parse(seenBody), { op: "orders", since: "2026-09-01T00:00:00.000Z" });
-  // 簽名必須以本用途的域分隔前綴簽出（不得沿用 biz-key-sync）
+  // 签名必须以本用途的域分隔前缀签出（不得沿用 biz-key-sync）
   assert.equal(
     verifyBizKeySync({
       secret,
@@ -282,7 +282,7 @@ test("fetchMapayOrders：本機無憑證 → 經 HMAC（域 mapay-orders）打 V
   );
 });
 
-test("fetchMapayOrders：無憑證且中繼未配置 → config_missing（不假裝成功、不吐空集合）", async () => {
+test("fetchMapayOrders：无凭证且中继未配置 → config_missing（不假装成功、不吐空集合）", async () => {
   await assert.rejects(
     () =>
       fetchMapayOrders(
@@ -296,9 +296,9 @@ test("fetchMapayOrders：無憑證且中繼未配置 → config_missing（不假
   );
 });
 
-// ── 窗口過濾與單筆查詢 ──────────────────────────────────────────────────
+// ── 窗口过滤与单笔查询 ──────────────────────────────────────────────────
 
-test("fetchMapayOrders：窗口客戶端過濾（窗口外剔除；時間不可解析的保守保留）", async () => {
+test("fetchMapayOrders：窗口客户端过滤（窗口外剔除；时间不可解析的保守保留）", async () => {
   const orders: Record<string, unknown>[] = [
     { out_trade_no: "OLD", status: "TRADE_SUCCESS", addtime: "2026-01-01 00:00:00" },
     { out_trade_no: "IN", status: "TRADE_SUCCESS", addtime: "2026-09-19 11:45:38" },
@@ -312,7 +312,7 @@ test("fetchMapayOrders：窗口客戶端過濾（窗口外剔除；時間不可�
   assert.deepEqual(ids, ["IN", "NO_TIME"]);
 });
 
-test("fetchMapayOrder：act=order 帶商戶單號，回單筆；成功碼但零訂單回 null（查無此單）", async () => {
+test("fetchMapayOrder：act=order 带商户单号，回单笔；成功码但零订单回 null（查无此单）", async () => {
   let seenUrl = "";
   const found = await fetchMapayOrder("IMGMU7UH9SFF9A21D", {
     config: CONFIG,
@@ -334,9 +334,9 @@ test("fetchMapayOrder：act=order 帶商戶單號，回單筆；成功碼但零�
   assert.equal(missing, null);
 });
 
-test("fetchMapayOrder：code=0 錯誤信封（無訂單實體）→ 拋 upstream，不吞成「查無此單」", async () => {
-  // 生產實證：act=order 不帶單號回 {"code":0,"msg":"系统订单号 和 商户订单号 二选一"}；
-  // 這類回應必須歸錯誤，不得當成「成功但 data 為空」。
+test("fetchMapayOrder：code=0 错误信封（无订单实体）→ 抛 upstream，不吞成「查无此单」", async () => {
+  // 生产实证：act=order 不带单号回 {"code":0,"msg":"系统订单号 和 商户订单号 二选一"}；
+  // 这类回应必须归错误，不得当成「成功但 data 为空」。
   await assert.rejects(
     () =>
       fetchMapayOrder("IMGMU7UH9SFF9A21D", {
@@ -354,7 +354,7 @@ test("fetchMapayOrder：code=0 錯誤信封（無訂單實體）→ 拋 upstream
   );
 });
 
-// 型別探針（變更探針，非行為證明）：正規化訂單形狀不被意外拓寬。
+// 型别探针（变更探针，非行为证明）：正规化订单形状不被意外拓宽。
 const _shape: MapayOrder = {
   outTradeNo: "x",
   tradeNo: null,

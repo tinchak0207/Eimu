@@ -1,26 +1,26 @@
 /**
- * 資產包進貨 seed（片 AG，2026-09-06）。
+ * 资产包进货 seed（片 AG，2026-09-06）。
  *
- * 模式複製真源：tools/seed-generation-suppliers.ts（tsx 工具骨架：src/lib 相對
- * import → main() 幂等 upsert → main().catch 收尾 exitCode=1）。白名單改動僅三處：
- *   ① 數據源：SQL 渠道表 → kunpeng-vendor 素材（src/lib/kunpeng-style-assets.ts
- *      161 條風格 + src/lib/kunpeng-prompt-templates.ts 2 條模板，MIT，commit pin
- *      已在源檔頭註明）+ skills/blender-director/verify/ 兩支實跑驗證過的 bpy 5.2 腳本。
- *   ② 寫入接入點：supplier_capability SQL → saveAssetPack / saveSceneAssets
- *      （asset-pack-store 真源寫路徑，與生產 /api/assets 同一條 merge/upsert 鏈）。
- *   ③ 幂等語義：saveAssetPack 按 pack id upsert、saveSceneAssets 指紋去重，
- *      重跑零新增（同構 seed 的 ON CONFLICT 語義）。
- * 交互邏輯/儲存層/上限鐵律一行不動（MAX_ITEMS_PER_PACK=50 由 store normalize 截斷，
- * 本腳本自行按 ≤40/包切片，不依賴靜默截斷）。
+ * 模式复制真源：tools/seed-generation-suppliers.ts（tsx 工具骨架：src/lib 相对
+ * import → main() 幂等 upsert → main().catch 收尾 exitCode=1）。白名单改动仅三处：
+ *   ① 数据源：SQL 渠道表 → kunpeng-vendor 素材（src/lib/kunpeng-style-assets.ts
+ *      161 条风格 + src/lib/kunpeng-prompt-templates.ts 2 条模板，MIT，commit pin
+ *      已在源档头注明）+ skills/blender-director/verify/ 两支实跑验证过的 bpy 5.2 脚本。
+ *   ② 写入接入点：supplier_capability SQL → saveAssetPack / saveSceneAssets
+ *      （asset-pack-store 真源写路径，与生产 /api/assets 同一条 merge/upsert 链）。
+ *   ③ 幂等语义：saveAssetPack 按 pack id upsert、saveSceneAssets 指纹去重，
+ *      重跑零新增（同构 seed 的 ON CONFLICT 语义）。
+ * 交互逻辑/储存层/上限铁律一行不动（MAX_ITEMS_PER_PACK=50 由 store normalize 截断，
+ * 本脚本自行按 ≤40/包切片，不依赖静默截断）。
  *
- * 用法（repo 根目錄）：
+ * 用法（repo 根目录）：
  *   IMAGE_DATA_BASE_URL=... IMAGE_DATA_API_KEY=... \
  *     npx tsx tools/seed-asset-packs.ts --user-ids 82,4
- *   - 無 IMAGE_DATA_* 時落本地 memory store（僅冒煙，進程退出即丟——真進貨必須帶
- *     VPS image-data-api 憑證或 BLOB_READ_WRITE_TOKEN）。
- *   - 目標用戶：資產包是 per-user 庫（asset_search 按呼叫者 userId 查），進貨必須
- *     指定 userId。830 E2E 殘留在 userId=4（HARNESS_API_KEY 綁定戶）；真實主用戶
- *     走 B key 綁定戶。清單見片 AG 回報。
+ *   - 无 IMAGE_DATA_* 时落本地 memory store（仅冒烟，进程退出即丢——真进货必须带
+ *     VPS image-data-api 凭证或 BLOB_READ_WRITE_TOKEN）。
+ *   - 目标用户：资产包是 per-user 库（asset_search 按呼叫者 userId 查），进货必须
+ *     指定 userId。830 E2E 残留在 userId=4（HARNESS_API_KEY 绑定户）；真实主用户
+ *     走 B key 绑定户。清单见片 AG 回报。
  */
 
 import * as fsp from "node:fs/promises";
@@ -36,7 +36,7 @@ import {
 } from "../src/lib/kunpeng-style-assets";
 import { KUNPENG_PROMPT_TEMPLATES } from "../src/lib/kunpeng-prompt-templates";
 
-// ─────────────────────────────────────────── 參數
+// ─────────────────────────────────────────── 参数
 
 function parseUserIds(): number[] {
   const raw = (process.argv.find((a) => a.startsWith("--user-ids=")) ?? "").split("=")[1]
@@ -48,15 +48,15 @@ function parseUserIds(): number[] {
     .filter((n) => Number.isInteger(n) && n > 0);
   if (!ids.length) {
     throw new Error(
-      "缺少進貨目標：用 --user-ids=82,4（逗號分隔 userId）或 env ASSET_PACK_SEED_USER_IDS 指定。資產包是 per-user 庫，不指定等於沒進貨。",
+      "缺少进货目标：用 --user-ids=82,4（逗号分隔 userId）或 env ASSET_PACK_SEED_USER_IDS 指定。资产包是 per-user 库，不指定等于没进货。",
     );
   }
   return [...new Set(ids)];
 }
 
-// ─────────────────────────────────────────── 進貨單①：kunpeng 風格 prompt 包
+// ─────────────────────────────────────────── 进货单①：kunpeng 风格 prompt 包
 
-/** 每包 item 上限取保守值（store 硬上限 50，切片留餘量，重跑 merge 不頂掉既有）。 */
+/** 每包 item 上限取保守值（store 硬上限 50，切片留余量，重跑 merge 不顶掉既有）。 */
 const MAX_ITEMS_PER_SEED_PACK = 40;
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -130,9 +130,9 @@ function buildPromptTemplatePack(): AssetPack {
   };
 }
 
-// ─────────────────────────────────────────── 進貨單②：3D 資產（blender-3d-assets）
+// ─────────────────────────────────────────── 进货单②：3D 资产（blender-3d-assets）
 
-/** bpy 模板進貨單：skills/blender-director/verify/ 實跑驗證過的腳本（片B verify 實錘）。 */
+/** bpy 模板进货单：skills/blender-director/verify/ 实跑验证过的脚本（片B verify 实锤）。 */
 const BLENDER_TEMPLATE_FILES = [
   {
     file: "verify_blockout.py",

@@ -11,8 +11,8 @@ import {
 } from "./google-auth.ts";
 import { embedTicketInState, extractTicketFromState } from "./github-auth.ts";
 
-// Google OAuth 契約測試：授權 URL / 身份推導是純函數，直接跑；路由側只釘
-// 關鍵接線（源碼字串斷言），避免為單測起 HTTP。
+// Google OAuth 契约测试：授权 URL / 身份推导是纯函数，直接跑；路由侧只钉
+// 关键接线（源码字串断言），避免为单测起 HTTP。
 
 const readSrc = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 

@@ -1,9 +1,9 @@
-// POST /api/agent/memory/review —— G8 抽檢品質翻轉（PRD §5.6；【契約外新增】，P1-1 本片）。
+// POST /api/agent/memory/review —— G8 抽检品质翻转（PRD §5.6；【契约外新增】，P1-1 本片）。
 //
-// 與 retract 同一套紀律：raw bytes 驗簽 → snake_case 映射 → 調 store，route 內零業務閘門。
-// 請求：`{ "batch_id": "..." }` 或 `{ "doc_ids": [...] }`，加 `action`
-// ∈ {pending_review, activate}；可選 `scope`（缺省时 pending_review 僅 shared）。
-// 響應形狀：`{ "reviewed": ["<id>"], "action": "..." }`。
+// 与 retract 同一套纪律：raw bytes 验签 → snake_case 映射 → 调 store，route 内零业务闸门。
+// 请求：`{ "batch_id": "..." }` 或 `{ "doc_ids": [...] }`，加 `action`
+// ∈ {pending_review, activate}；可选 `scope`（缺省时 pending_review 仅 shared）。
+// 响应形状：`{ "reviewed": ["<id>"], "action": "..." }`。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -15,7 +15,7 @@ import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hma
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 interface ReviewRequestBody {
   batch_id?: unknown;

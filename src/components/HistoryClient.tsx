@@ -263,9 +263,9 @@ export function HistoryClient() {
   }, []);
 
   /**
-   * 抽屜逐級跳轉：血統節點的把手能對上當前列表裡的記錄時，直接開那條的燈箱並關抽屜
-   * （返回 true 回絕抽屜自己的就地鉆入）；對不上（例如資產卡在歷史頁沒有落點）
-   * 返回 false，抽屜就地鉆入該級鏈條，誠實且零死鏈。
+   * 抽屉逐级跳转：血统节点的把手能对上当前列表里的记录时，直接开那条的灯箱并关抽屉
+   * （返回 true 回绝抽屉自己的就地钻入）；对不上（例如资产卡在历史页没有落点）
+   * 返回 false，抽屉就地钻入该级链条，诚实且零死链。
    */
   const handleLineageJump = useCallback((view: LineageRecordView) => {
     const jobId = view.selfHandles.jobId;

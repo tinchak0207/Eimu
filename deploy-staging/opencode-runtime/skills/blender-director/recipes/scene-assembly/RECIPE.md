@@ -11,9 +11,9 @@ metadata:
   related-skills: environment-artist, set-dressing, blender-modeler, lighting, qa-review
 ---
 <!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/scene-assembly/SKILL.md
+来源（轮子）: https://github.com/arjun988/blender-skills — .claude/skills/scene-assembly/SKILL.md
 License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①產物路徑→$BLENDER_WORK/out/ ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+白名单改动: ①产物路径→$BLENDER_WORK/out/ ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（无） ④文案译为简体（结构/表格/参数逐项保留）
 -->
 
 

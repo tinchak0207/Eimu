@@ -1,6 +1,6 @@
-// T2 單項重測：複製 tools/verify-idfix-0831.mjs 的 attachSSE/parse/waitTurn 骨架，
-// 白名單改三處：① 複用已登記任務的 session（免再生圖）② waitTurn 補 question.request 自動回覆
-// （首跑實錘：模型出反問卡 → 回合掛死 260s，前綴糾錯路徑從未被觸發）③ 只跑 T2 斷言。
+// T2 单项重测：复制 tools/verify-idfix-0831.mjs 的 attachSSE/parse/waitTurn 骨架，
+// 白名单改三处：① 复用已登记任务的 session（免再生图）② waitTurn 补 question.request 自动回覆
+// （首跑实锤：模型出反问卡 → 回合挂死 260s，前缀纠错路径从未被触发）③ 只跑 T2 断言。
 import fs from "node:fs";
 
 const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
@@ -11,11 +11,11 @@ const TURN_MS = 200_000;
 const SID = process.argv[2];
 const REAL_ID = process.argv[3];
 if (!SID || !REAL_ID) {
-  console.error("用法: node tools/verify-idfix-t2.mjs <session_id> <真實 task_id>");
+  console.error("用法: node tools/verify-idfix-t2.mjs <session_id> <真实 task_id>");
   process.exit(2);
 }
 const prefix8 = REAL_ID.slice(0, 8);
-const fakeTail = `${prefix8}-57b2-4685-9a55-185a99f849b0`; // 事故現場的形狀：真前綴 + 假尾巴
+const fakeTail = `${prefix8}-57b2-4685-9a55-185a99f849b0`; // 事故现场的形状：真前缀 + 假尾巴
 
 async function attachSSE(sid) {
   const t = await (await fetch(`${BASE}/sessions/${sid}/sse-ticket`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" })).json();
@@ -65,7 +65,7 @@ async function waitTurn(sid, frames, baseIdx) {
       }
       if (ev === "question.request" && rid && String(rid).startsWith("que")) {
         frames[i].done = true;
-        // answers 契約 = string[][]（每題一個選中字串）；取第一選項，無選項則回自由文本。
+        // answers 契约 = string[][]（每题一个选中字串）；取第一选项，无选项则回自由文本。
         const questions = Array.isArray(obj?.questions) ? obj.questions : [{}];
         const answers = questions.map((q) => {
           const first = Array.isArray(q?.options) ? (q.options.map((o) => (typeof o === "string" ? o : o?.label ?? o?.text)).find(Boolean)) : null;
@@ -73,7 +73,7 @@ async function waitTurn(sid, frames, baseIdx) {
         });
         const r = await fetch(`${BASE}/sessions/${sid}/question`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, answers }) });
         if (r.ok) answered++;
-        else console.log(`  question 回覆失敗 ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        else console.log(`  question 回覆失败 ${r.status}: ${(await r.text()).slice(0, 200)}`);
       }
     }
     if (frames.slice(baseIdx).some((f) => parse(f.raw).ev === "turn.done")) break;
@@ -93,10 +93,10 @@ try {
   const t2 = norm(frames.slice(mark).map((f) => f.raw).join("\n"));
   const corrected = /id_corrected_from/.test(t2);
   const gotUrl = t2.includes(REAL_ID) || new RegExp(`${prefix8}[0-9a-f-]{27}/[^\\s"')]*\\.(png|jpe?g|webp)`, "i").test(t2);
-  console.log(`[T2] ${corrected && gotUrl ? "PASS" : "FAIL"} — 自動糾錯=${corrected} 回真 URL=${gotUrl} 批confirm=${approved} 應question=${answered}`);
+  console.log(`[T2] ${corrected && gotUrl ? "PASS" : "FAIL"} — 自动纠错=${corrected} 回真 URL=${gotUrl} 批confirm=${approved} 应question=${answered}`);
   console.log(`  事件序列=[${evSeq(frames, mark)}]`);
-  if (!(corrected && gotUrl)) console.log(`  樣本：${t2.slice(-1800)}`);
-  console.log(`連線：ended=${conn.ended} reason=${conn.reason} 幀數=${frames.length}`);
+  if (!(corrected && gotUrl)) console.log(`  样本：${t2.slice(-1800)}`);
+  console.log(`连线：ended=${conn.ended} reason=${conn.reason} 帧数=${frames.length}`);
   ac.abort();
   process.exit(corrected && gotUrl ? 0 : 1);
 } catch (e) {

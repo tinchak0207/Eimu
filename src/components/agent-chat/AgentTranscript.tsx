@@ -38,7 +38,7 @@ export interface AgentTranscriptProps {
   onAuthorizeLocalFiles?: (scope: AgentToolAuthScope, root?: string) => void | Promise<void>;
 }
 
-/** 從某元素往上找最近的滾動容器（overflow-y 可滾且內容超出）。 */
+/** 从某元素往上找最近的滚动容器（overflow-y 可滚且内容超出）。 */
 function findScrollParent(el: HTMLElement): HTMLElement | null {
   let node: HTMLElement | null = el.parentElement;
   while (node) {
@@ -55,12 +55,12 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
 
 function AgentTranscriptComponent({ items, imageActions, videoActions, audioActions, sessionId, turnStatus, onAuthorizeLocalFiles }: AgentTranscriptProps) {
   const listRef = useRef<HTMLOListElement>(null);
-  // 滾動容器緩存：找到後不再每次 getComputedStyle 向上找。
+  // 滚动容器缓存：找到后不再每次 getComputedStyle 向上找。
   const scrollerRef = useRef<HTMLElement | null>(null);
 
-  // 自動滾到底：串流長文、圖片載入、工具卡/参数展开都會撐高列表，若使用者本來
-  // 貼底就維持貼底讓最新內容可見（補上宿主只盯 items.length/lastEventId 的盲區）；
-  // 使用者往上翻歷史時不搶方向盤。
+  // 自动滚到底：串流长文、图片载入、工具卡/参数展开都会撑高列表，若使用者本来
+  // 贴底就维持贴底让最新内容可见（补上宿主只盯 items.length/lastEventId 的盲区）；
+  // 使用者往上翻历史时不抢方向盘。
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -77,8 +77,8 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
   }, []);
 
   return (
-    // 2026-10-03 手機排版刀 2：窄屏輪間距 10px→20px（訊息與卡片貼成一片、
-    // 輪與輪分不清）；桌面 ≥640px 維持 gap-2.5，一字不動。
+    // 2026-10-03 手机排版刀 2：窄屏轮间距 10px→20px（讯息与卡片贴成一片、
+    // 轮与轮分不清）；桌面 ≥640px 维持 gap-2.5，一字不动。
     <ol ref={listRef} className="flex flex-col gap-5 sm:gap-2.5">
       {items.map((item) => {
         switch (item.kind) {
@@ -126,8 +126,8 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
               </li>
             );
           case "plan":
-            // 本輪計畫（turn.plan）的獨立區塊：與工具卡同寬、獨立成條，
-            // 絕不併進任何 assistant 氣泡（計畫不是交付物，答案才是）。
+            // 本轮计画（turn.plan）的独立区块：与工具卡同宽、独立成条，
+            // 绝不并进任何 assistant 气泡（计画不是交付物，答案才是）。
             return (
               <li key={item.id}>
                 <AgentPlanCard item={item} />

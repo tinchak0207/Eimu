@@ -51,17 +51,17 @@ export const preferredRegion = "sfo1";
  * 计费落在密钥绑定的 New API 用户上，复用已有的预留/退款逻辑。
  */
 
-/** 已知可交的上游尺寸白名單（唯一真源：generation-core/durable-image-sizes.ts）。 */
+/** 已知可交的上游尺寸白名单（唯一真源：generation-core/durable-image-sizes.ts）。 */
 const SUPPORTED_SIZES = new Set(DURABLE_IMAGE_SIZES);
 
-/** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
+/** 拒绝遥测用的路径。写死字面量：分组要稳定，不被 rewrite/代理改写影响。 */
 const REJECTION_PATH = "/v1/images/generations";
 const DEFAULT_SIZE = "1024x1024";
 const MAX_PROMPT_LENGTH = 4_000;
 /**
  * 一次请求最多出几张。再多会顶到 maxDuration。
- * 值＝數量上限單點（generation-core/request-limits.ts）——`/v1/models` 的
- * `x_capabilities.maxBatchCount` 揭露的是同一顆常數，不另存第二份（D23）。
+ * 值＝数量上限单点（generation-core/request-limits.ts）——`/v1/models` 的
+ * `x_capabilities.maxBatchCount` 揭露的是同一颗常数，不另存第二份（D23）。
  */
 const MAX_N = MAX_REQUEST_BATCH_COUNT;
 
@@ -96,10 +96,10 @@ function errorResponse(
 }
 
 /**
- * 預算超限（W5b）專用 402：在標準錯誤體上追加 `estimated_coins`/`cap_coins`。
- * 刻意不併進 errorResponse——那個函式的形狀被 v1 contract-lock 釘死
- * （`{message,type,code,param:null,trace_id}` 逐字），不得改寫；本支是新出口，
- * 只在 gate 回 `task_budget_exceeded` 時走。
+ * 预算超限（W5b）专用 402：在标准错误体上追加 `estimated_coins`/`cap_coins`。
+ * 刻意不并进 errorResponse——那个函式的形状被 v1 contract-lock 钉死
+ * （`{message,type,code,param:null,trace_id}` 逐字），不得改写；本支是新出口，
+ * 只在 gate 回 `task_budget_exceeded` 时走。
  */
 function budgetExceededResponse(
   gate: {
@@ -141,28 +141,28 @@ interface ImageRequestBody {
   control_nets?: unknown;
   routing_hint?: unknown;
   /**
-   * 參考圖（2026-09-25）。元素為 http(s)/data:image URL 字符串，或
-   * `{ url, role?, name? }`；`role` 收斂到 `GenerationReference.referenceRole`
-   * 的五值值域，其餘一律 `"general"`。上限 5 張（超過 400，不靜默截斷）。
+   * 参考图（2026-09-25）。元素为 http(s)/data:image URL 字符串，或
+   * `{ url, role?, name? }`；`role` 收敛到 `GenerationReference.referenceRole`
+   * 的五值值域，其余一律 `"general"`。上限 5 张（超过 400，不静默截断）。
    */
   reference_images?: unknown;
   /**
-   * 輸出解析度（2026-09-30）：`"1k"｜"2k"｜"4k"`，顯式檔位優先於 `size`／`quality`。
-   * 未給＝沿用舊語義（quality⇒2k、其餘⇒1k）。這是 4K 唯一的提交入口——舊碼把
-   * resolution 寫死成 1k/2k，能力面宣告的 4k 根本送不到上游（宣告與行為脫節）。
+   * 输出解析度（2026-09-30）：`"1k"｜"2k"｜"4k"`，显式档位优先于 `size`／`quality`。
+   * 未给＝沿用旧语义（quality⇒2k、其余⇒1k）。这是 4K 唯一的提交入口——旧码把
+   * resolution 写死成 1k/2k，能力面宣告的 4k 根本送不到上游（宣告与行为脱节）。
    */
   resolution?: unknown;
   output_resolution?: unknown;
   /**
-   * 單次任務預算上限（**幣**，W5b）：客戶宣告後，本次任務估算幣值超過它即
-   * 402 `task_budget_exceeded`（硬停，不扣費）。未給＝預算閘不啟用，行為不變。
-   * 非有限數（NaN/Infinity）或非 number 一律視為未宣告（不因壞輸入誤擋）。
+   * 单次任务预算上限（**币**，W5b）：客户宣告后，本次任务估算币值超过它即
+   * 402 `task_budget_exceeded`（硬停，不扣费）。未给＝预算闸不启用，行为不变。
+   * 非有限数（NaN/Infinity）或非 number 一律视为未宣告（不因坏输入误挡）。
    */
   cap_coins?: unknown;
 }
 
 export async function POST(req: NextRequest) {
-  // 拒絕遙測：出口統一由包裝層記錄（只記非 2xx；key 只留前 8 位，不記 prompt）。
+  // 拒绝遥测：出口统一由包装层记录（只记非 2xx；key 只留前 8 位，不记 prompt）。
   const rejection: RejectionContext = {
     rawKey: readBearerToken(req.headers.get("authorization")),
     userId: null,
@@ -259,8 +259,8 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
   // OpenAI 用 hd/standard，本站内部用 quality/fast。
   const qualityMode: ModelMode = body.quality === "hd" || body.quality === "high" ? "quality" : "fast";
 
-  // 提交解析度（2026-09-30）：顯式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k；
-  // 未宣告該檔位的模型具名拒（不靜默降級）。≤3072 的既有尺寸沿用舊品質規則，行為不變。
+  // 提交解析度（2026-09-30）：显式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k；
+  // 未宣告该档位的模型具名拒（不静默降级）。≤3072 的既有尺寸沿用旧品质规则，行为不变。
   const resolutionResult = resolveSubmitResolution(modelId, {
     resolution: body.resolution ?? body.output_resolution,
     size: body.size,
@@ -273,9 +273,9 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
 
   const responseFormat = body.response_format === "url" ? "url" : "b64_json";
 
-  // ControlNet 結構控制。只有 pixai 渠道真正消費這個欄位；其他模型/渠道傳了也
-  // 只是多帶一個上游忽略的欄位。清洗規則見 pixai-controlnets.ts——非法形狀直接
-  // 400，不默默截斷用戶請求。
+  // ControlNet 结构控制。只有 pixai 渠道真正消费这个栏位；其他模型/渠道传了也
+  // 只是多带一个上游忽略的栏位。清洗规则见 pixai-controlnets.ts——非法形状直接
+  // 400，不默默截断用户请求。
   const controlNetsInput = body.control_nets;
   let pixaiControlNets: ReturnType<typeof toPixaiControlNets> | undefined;
   if (controlNetsInput !== undefined) {
@@ -292,22 +292,22 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     pixaiControlNets = toPixaiControlNets(normalized.valid);
   }
 
-  // ── 參考圖與行內實體 tag（2026-09-25）─────────────────────────
+  // ── 参考图与行内实体 tag（2026-09-25）─────────────────────────
   //
-  // 兩件事在這裡一次做完，結果直接進 submitGenerationCommand：
-  //   ① body.reference_images（http(s) 直通 / data:image 落地 Blob 換公網 URL）；
-  //   ② prompt 裡的 `@[種類:名稱]`——用呼叫金鑰 owner 的卡庫就地展開成卡的 prompt 片段，
-  //      命中的卡的 references 併進 workflow.references（卡的圖在前、顯式參考圖在後）。
-  // 形狀校驗在任何 I/O 之前（非法輸入 400 不碰額度）；卡庫讀取失敗只降級不擋生成。
-  // 零 token 且零參考圖 → plan 與改動前逐位元等價，`generationWorkflowField` 回空物件，
-  // 提交 payload 完全不加 workflow 鍵。
+  // 两件事在这里一次做完，结果直接进 submitGenerationCommand：
+  //   ① body.reference_images（http(s) 直通 / data:image 落地 Blob 换公网 URL）；
+  //   ② prompt 里的 `@[种类:名称]`——用呼叫金钥 owner 的卡库就地展开成卡的 prompt 片段，
+  //      命中的卡的 references 并进 workflow.references（卡的图在前、显式参考图在后）。
+  // 形状校验在任何 I/O 之前（非法输入 400 不碰额度）；卡库读取失败只降级不挡生成。
+  // 零 token 且零参考图 → plan 与改动前逐位元等价，`generationWorkflowField` 回空物件，
+  // 提交 payload 完全不加 workflow 键。
   const idempotencyKeyHeader = req.headers.get("idempotency-key")?.trim() || null;
   let plan: BizGenerationInputPlan;
   try {
     plan = await planBizGenerationInput({
       prompt,
       rawReferenceImages: body.reference_images,
-      // 只有 prompt 真的帶 token 時才會被呼叫（零 token 請求不讀卡庫、不加延遲）。
+      // 只有 prompt 真的带 token 时才会被呼叫（零 token 请求不读卡库、不加延迟）。
       loadCards: () => listCharacterCards(apiKey.userId),
       tenantId: `biz:${apiKey.id}`,
       idempotencyKey: idempotencyKeyHeader ?? `biz-gen-${randomUUID()}`,
@@ -319,8 +319,8 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     throw error;
   }
 
-  // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
-  // 放在計費共同上游：一次同步同時覆蓋 durable branch 的 billingAmount 與 legacy 的 coinsPerImage。
+  // 管理员改价需立即对扣费生效：算价前先把最新定价覆写同步进目录（核心层内部吞错，失败不挡生成）。
+  // 放在计费共同上游：一次同步同时覆盖 durable branch 的 billingAmount 与 legacy 的 coinsPerImage。
   await syncModelPricing();
 
   // Durable control plane: accepted generation work is always delivered as a task.
@@ -331,13 +331,13 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
       ? body.callback_url.trim()
       : null;
 
-    // 手術 P1 計費閘（詳見 quota-precheck.ts）：SURGERY_QUOTA_PRECHECK=1 時先做
-    // 無狀態配額預檢——通過 → 以 0 額提交，job 直接進 queued，阻塞式 reserve 整段
-    // 跳過（計費交事後投影）；額度不足 → 按現契約 402；上游不可達 → 原樣回落
-    // 下方 reserve 路徑。env 未設 = 金額原樣，路徑一字不變。
+    // 手术 P1 计费闸（详见 quota-precheck.ts）：SURGERY_QUOTA_PRECHECK=1 时先做
+    // 无状态配额预检——通过 → 以 0 额提交，job 直接进 queued，阻塞式 reserve 整段
+    // 跳过（计费交事后投影）；额度不足 → 按现契约 402；上游不可达 → 原样回落
+    // 下方 reserve 路径。env 未设 = 金额原样，路径一字不变。
     const baseBillingAmount = imageGenerationCoins(modelId, qualityMode, submitResolution) * QUOTA_PER_COIN * rawN;
-    // 單次任務預算（幣，W5b）：客戶宣告才啟用；非法/非有限數視為未宣告（不誤擋）。
-    // 判定（估算 vs cap）在 quota-precheck 內走 task-budget 的 exceedsBudget 單一真源。
+    // 单次任务预算（币，W5b）：客户宣告才启用；非法/非有限数视为未宣告（不误挡）。
+    // 判定（估算 vs cap）在 quota-precheck 内走 task-budget 的 exceedsBudget 单一真源。
     const budgetCapCoins =
       typeof body.cap_coins === "number" && Number.isFinite(body.cap_coins) ? body.cap_coins : undefined;
     const gate = await enforceQuotaGate({
@@ -347,7 +347,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
       budgetCapCoins,
     });
     if (!gate.ok) {
-      // 預算超限：帶上估算與上限（其餘錯誤碼走標準錯誤體，行為逐位不變）。
+      // 预算超限：带上估算与上限（其余错误码走标准错误体，行为逐位不变）。
       if (gate.code === "task_budget_exceeded") {
         return budgetExceededResponse(gate, traceId);
       }
@@ -362,7 +362,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
         source: "biz",
         idempotencyKey: req.headers.get("idempotency-key"),
         kind: "image_generate",
-        // routing_hint:"hub" 僅影響調度偏好（probe 探針用），不改變計費與能力校驗。
+        // routing_hint:"hub" 仅影响调度偏好（probe 探针用），不改变计费与能力校验。
         routingClass: modelId === ADOBE_FIREFLY_MODEL_ID
           ? "firefly_only"
           : body.routing_hint === "hub" ? "hub_only" : "generic",
@@ -376,8 +376,8 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
         callbackUrl,
         requestedCount: rawN,
         billingAmount: gate.billingAmount,
-        // references 與既有 metadata.controlNets 合成同一個 workflow（互不覆蓋）；
-        // 兩者皆無時展開零鍵 —— 提交 payload 與改動前逐位元等價。
+        // references 与既有 metadata.controlNets 合成同一个 workflow（互不覆盖）；
+        // 两者皆无时展开零键 —— 提交 payload 与改动前逐位元等价。
         ...generationWorkflowField({ references: plan.references, controlNets: pixaiControlNets }),
       });
       return withTraceId(
@@ -400,7 +400,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
       if (error instanceof IdempotencyConflictError) {
         return errorResponse(409, error.message, "invalid_request_error", "idempotency_key_reused", traceId);
       }
-      // 模型可用性閘（真實生成結果驅動）：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+      // 模型可用性闸（真实生成结果驱动）：建单/扣费前拒单，沿用既有稳定码 no_endpoints。
       if (error instanceof GenerationModelUnavailableError) {
         return errorResponse(503, error.message, "api_error", "no_endpoints", traceId);
       }
@@ -409,8 +409,8 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     }
   }
 
-  // 遺留（非 durable）分支沒有 references 通道：`generateBizImage` 不吃參考圖。
-  // 帶了參考圖就誠實失敗（fail-closed）——絕不靜默丟掉參考圖後生出一張不像的圖。
+  // 遗留（非 durable）分支没有 references 通道：`generateBizImage` 不吃参考图。
+  // 带了参考图就诚实失败（fail-closed）——绝不静默丢掉参考图后生出一张不像的图。
   if (plan.references.length > 0) {
     return errorResponse(
       501,
@@ -429,18 +429,18 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
   // 每个请求若先扣全额再走 no-endpoints → 502 → 异步退款，就是纯粹的网关空转，
   // 退款失败还会静默丢钱。空队列直接 502，不碰余额。
   //
-  // 兩項讀取互不依賴（內部隊列查詢 vs 外部 channel blob 文件；後者永不拋錯、
-  // reserveImageQuota 只用 apiKey.userId），冷啟動無快取時各吃一個往返，
-  // Promise.all 省一次串行 RTT；「先查隊列再動錢」順序由 reserveImageQuota
-  // 保持在匯合點之後不變。
+  // 两项读取互不依赖（内部队列查询 vs 外部 channel blob 文件；后者永不抛错、
+  // reserveImageQuota 只用 apiKey.userId），冷启动无快取时各吃一个往返，
+  // Promise.all 省一次串行 RTT；「先查队列再动钱」顺序由 reserveImageQuota
+  // 保持在汇合点之后不变。
   const [availableEndpoints, externalDoc] = await Promise.all([
     resolveBizEndpoints(modelId),
     getRuntimeExternalChannelDocument(),
   ]);
 
-  // 外部自定義上游：該金鑰綁定外部 channel 時，即使內部隊列為空也允許轉售（客戶
-  // 自帶上游不依賴內部渠道）。resolveExternalChannelForKey 只認 enabled + 白名單命中；
-  // 未命中回 null → 走既有內部隊列，行為不變。
+  // 外部自定义上游：该金钥绑定外部 channel 时，即使内部队列为空也允许转售（客户
+  // 自带上游不依赖内部渠道）。resolveExternalChannelForKey 只认 enabled + 白名单命中；
+  // 未命中回 null → 走既有内部队列，行为不变。
   const externalChannel = resolveExternalChannelForKey(externalDoc, apiKey.id);
 
   if (!availableEndpoints.length && !externalChannel) {
@@ -451,7 +451,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     await reserveImageQuota(apiKey.userId, totalQuota);
   } catch (error) {
     const reserveMessage = error instanceof Error ? error.message : "余额不足。";
-    // 餘額不足類 → 與控制面閘門（quota-precheck）共用同一份 402 統一契約。
+    // 余额不足类 → 与控制面闸门（quota-precheck）共用同一份 402 统一契约。
     if (reserveMessage.includes("余额不足")) {
       return errorResponse(
         INSUFFICIENT_BALANCE_ERROR.status,
@@ -461,8 +461,8 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
         traceId,
       );
     }
-    // 其他預留失敗（網關不可達／回滾不確定）不是餘額問題：走本路由既有的控制面
-    // 不可用契約（與 durable 分支同一組碼），只把真因寫進服務端日誌，不對客戶說謊。
+    // 其他预留失败（网关不可达／回滚不确定）不是余额问题：走本路由既有的控制面
+    // 不可用契约（与 durable 分支同一组码），只把真因写进服务端日志，不对客户说谎。
     console.error(`[biz-api] reserve failed requestId=${requestId}: ${reserveMessage}`);
     return errorResponse(
       503,
@@ -547,7 +547,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
       NextResponse.json({
         created: Math.floor(Date.now() / 1000),
         data: images,
-        // 實體 tag 未命中／卡庫降級等可見性欄位；無事發生時整鍵不出現（零漂移）。
+        // 实体 tag 未命中／卡库降级等可见性栏位；无事发生时整键不出现（零漂移）。
         ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
       }),
       apiKey,

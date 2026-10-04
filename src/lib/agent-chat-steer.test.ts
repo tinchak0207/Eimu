@@ -38,7 +38,7 @@ function steerItem(state: AgentChatState): AgentUserTurnItem {
   return item;
 }
 
-test("steer 徽章：排隊中 → 已注入/已生效，状态逐帧落到同一条目上", () => {
+test("steer 徽章：排队中 → 已注入/已生效，状态逐帧落到同一条目上", () => {
   let state = stateWithSteer("queued");
   assert.equal(steerItem(state).steer?.status, "queued");
   assert.equal(steerItem(state).steer?.id, "steer-1");
@@ -117,20 +117,20 @@ test("steer.status 帧解析：值域白名单，缺 id 或状态不在值域整
     null,
     "缺 steer_id 整帧丢",
   );
-  // 值域与网關 steer-core.ts 逐字对齐：多一个/少一个都会在这里红。
-  // uncertain 是 D2b（2026-09-23）新增的第六態（未確認·未重送）——同一條鐵律：
-  // 兩邊值域必須逐字同步，否則網關送來的 uncertain 幀會被這裡整幀丟掉。
+  // 值域与网关 steer-core.ts 逐字对齐：多一个/少一个都会在这里红。
+  // uncertain 是 D2b（2026-09-23）新增的第六态（未确认·未重送）——同一条铁律：
+  // 两边值域必须逐字同步，否则网关送来的 uncertain 帧会被这里整帧丢掉。
   assert.deepEqual([...AGENT_STEER_STATUSES], ["queued", "injected", "applied", "aborted", "failed", "uncertain"]);
 });
 
-// ─────────────── F-D2（2026-09-23）對抗性驗收缺陷的具名回歸 ───────────────
+// ─────────────── F-D2（2026-09-23）对抗性验收缺陷的具名回归 ───────────────
 
 test("D2-5 injected 是终态：迟到的 queued 帧不得把「已注入本回合」打回「排队中」", () => {
   const injected = stateWithSteer("injected");
   assert.equal(
     steerItem(applySteerStatus(injected, "steer-1", "queued", 2)).steer?.status,
     "injected",
-    "已注入＝已经在本回合生效过的事實，重连回放的 queued 帧不得回退",
+    "已注入＝已经在本回合生效过的事实，重连回放的 queued 帧不得回退",
   );
   // 同一 reference（终态冻结＝零改动，React 可 bail out）。
   assert.equal(applySteerStatus(injected, "steer-1", "injected"), injected);
@@ -147,7 +147,7 @@ test("D2-5 injected 是终态：迟到的 queued 帧不得把「已注入本回�
 
 test("D2-3 排队逾时清扫：TTL 内不动，逾时翻「未能送达（未生效）」，且不留无锚点的永动机徽章", () => {
   const TTL = AGENT_STEER_QUEUE_TTL_MS;
-  assert.equal(TTL, 30 * 60 * 1000, "TTL 是合約值，必须与网關 steer-core.STEER_QUEUE_TTL_MS 等值（见 UI 测试的镜像锁）");
+  assert.equal(TTL, 30 * 60 * 1000, "TTL 是合约值，必须与网关 steer-core.STEER_QUEUE_TTL_MS 等值（见 UI 测试的镜像锁）");
 
   // ① 入队即打锚点（本地 ack 带 queuedAt）：未逾时不动。
   const fresh = applySteerStatus(stateWithSteer("queued"), "steer-1", "queued", 1, 1_000);
@@ -161,7 +161,7 @@ test("D2-3 排队逾时清扫：TTL 内不动，逾时翻「未能送达（未�
   // ③ 翻完之后不再被任何帧（含迟到的 applied）改回来——它已经是终态。
   assert.equal(steerItem(applySteerStatus(expired, "steer-1", "applied")).steer?.status, "failed");
 
-  // ④ 存档还原场景（网關重启后 pendingSteers 消失，永远不会有终态帧）：
+  // ④ 存档还原场景（网关重启后 pendingSteers 消失，永远不会有终态帧）：
   //    以存档时刻为兜底锚点——存档已 40 分钟前的「排队中」必须当场落 failed。
   const restored = appendUserTurn(
     { ...EMPTY_AGENT_CHAT_STATE, turnActive: false },
@@ -175,7 +175,7 @@ test("D2-3 排队逾时清扫：TTL 内不动，逾时翻「未能送达（未�
   // ⑤ 存档很新（刚刷新页面）：先保留排队中，但把锚点写回条目，下一趟才判得动
   //    （绝不留「无锚点 = 永远排队中」的永动机）。
   const freshRestore = expireQueuedSteers(restored, { now: 5_000, ttlMs: TTL, baselineAt: 4_000 });
-  assert.equal(steerItem(freshRestore).steer?.status, "queued", "时窗内允许它还是排队中（网關那边可能真的还握着）");
+  assert.equal(steerItem(freshRestore).steer?.status, "queued", "时窗内允许它还是排队中（网关那边可能真的还握着）");
   assert.equal(steerItem(freshRestore).steer?.queuedAt, 4_000, "锚点必须写回，否则下一趟判不动＝永久排队中");
   assert.equal(
     steerItem(expireQueuedSteers(freshRestore, { now: 4_000 + TTL, ttlMs: TTL })).steer?.status,
@@ -192,10 +192,10 @@ test("D2-3 排队逾时清扫：TTL 内不动，逾时翻「未能送达（未�
 test("D2b 第六态 uncertain：真帧能上屏，且迟到的 queued/applied 不得改写它", () => {
   assert.ok(
     (AGENT_STEER_STATUSES as readonly string[]).includes("uncertain"),
-    "值域必须含 uncertain（否则网關的帧会被整帧丢弃，徽章永远停在旧状态）",
+    "值域必须含 uncertain（否则网关的帧会被整帧丢弃，徽章永远停在旧状态）",
   );
 
-  // 真帧解析（网關 steer.status 帧的形状），值域不一致会在这里整帧被丢。
+  // 真帧解析（网关 steer.status 帧的形状），值域不一致会在这里整帧被丢。
   const parsed = parseAgentSseEvent(
     "steer.status",
     JSON.stringify({ steer_id: "steer-1", status: "uncertain", reason: "restart_unconfirmed", event_id: 9 }),
@@ -205,7 +205,7 @@ test("D2b 第六态 uncertain：真帧能上屏，且迟到的 queued/applied �
   assert.equal(parsed.data.status, "uncertain");
   assert.equal(parsed.data.reason, "restart_unconfirmed");
 
-  // 落地：排队中 → 未确认（网關重啟后永不自动重发）。
+  // 落地：排队中 → 未确认（网关重启后永不自动重发）。
   let state = applySteerStatus(stateWithSteer("queued"), "steer-1", "uncertain");
   assert.equal(steerItem(state).steer?.status, "uncertain");
   // 迟到的 applied（模型其实收到了？不知道——所以不许改写）与迟到的 queued 都动不了它。
@@ -218,8 +218,8 @@ test("D2b 第六态 uncertain：真帧能上屏，且迟到的 queued/applied �
   assert.equal(steerItem(markQueuedSteersAborted(state)).steer?.status, "uncertain");
 });
 
-test("D2b 重放被拒的徽章纠正：本地占位 failed 可被网關事实纠正，网关终态不得被覆盖", () => {
-  // hook 的 catch 先按「未能送达」占位（本地猜测），随后用网關带回的真实状态纠正。
+test("D2b 重放被拒的徽章纠正：本地占位 failed 可被网关事实纠正，网关终态不得被覆盖", () => {
+  // hook 的 catch 先按「未能送达」占位（本地猜测），随后用网关带回的真实状态纠正。
   const failed = applySteerStatus(stateWithSteer("queued"), "steer-1", "failed");
   assert.equal(steerItem(failed).steer?.status, "failed");
 
@@ -230,7 +230,7 @@ test("D2b 重放被拒的徽章纠正：本地占位 failed 可被网關事实�
   // 纠正目标不含 queued（那会回到等不到终态的排队中）。
   assert.equal(steerItem(applySteerRejection(failed, "steer-1", "queued")).steer?.status, "failed");
 
-  // 已是网關-authored 终态：一概不动（终态冻结）。
+  // 已是网关-authored 终态：一概不动（终态冻结）。
   const uncertain = applySteerStatus(stateWithSteer("queued"), "steer-1", "uncertain");
   assert.equal(steerItem(applySteerRejection(uncertain, "steer-1", "applied")).steer?.status, "uncertain");
   const applied = applySteerStatus(stateWithSteer("queued"), "steer-1", "applied");

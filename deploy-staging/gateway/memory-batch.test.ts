@@ -1,10 +1,10 @@
 /**
- * memory-batch.test.ts — P1-1：G8 雙模型一致閘矩陣＋PRD §5.6 抽檢判據＋badcase 落盤＋dryRun。
+ * memory-batch.test.ts — P1-1：G8 双模型一致闸矩阵＋PRD §5.6 抽检判据＋badcase 落盘＋dryRun。
  * 跑法：npx --yes tsx --test deploy-staging/gateway/memory-batch.test.ts
  *
- * 全 fake deps（純記憶體 harness＋每案獨立 tmp 目錄），不打真實 LLM／網路。
- * 抽檢隨機性：n≤3 時全抽（判據本身保證），需精確樣本集的邊界案用 t.mock 固定
- * Math.random 為 0.999（Fisher–Yates 退化為恆等洗牌 → 樣本＝前列）。
+ * 全 fake deps（纯记忆体 harness＋每案独立 tmp 目录），不打真实 LLM／网路。
+ * 抽检随机性：n≤3 时全抽（判据本身保证），需精确样本集的边界案用 t.mock 固定
+ * Math.random 为 0.999（Fisher–Yates 退化为恒等洗牌 → 样本＝前列）。
  */
 import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs"
@@ -149,8 +149,8 @@ async function withHarness<T>(over: HarnessOver, fn: (h: Harness) => Promise<T>)
     .finally(() => rmSync(stateDir, { recursive: true, force: true }))
 }
 
-describe("G8 雙模型一致閘（僅 shared、postIngest 前逐條）", () => {
-  it("三布爾全 true → 入庫；prompt＝VERIFIER_PROMPT_V1＋候選 JSON", async () => {
+describe("G8 双模型一致闸（仅 shared、postIngest 前逐条）", () => {
+  it("三布尔全 true → 入库；prompt＝VERIFIER_PROMPT_V1＋候选 JSON", async () => {
     await withHarness({}, async (h) => {
       assert.equal(h.calls.verifier, 1)
       assert.ok(h.prompts.verifier[0].startsWith(VERIFIER_PROMPT_V1))
@@ -164,9 +164,9 @@ describe("G8 雙模型一致閘（僅 shared、postIngest 前逐條）", () => {
     })
   })
 
-  it("任一布爾 false → 丟棄計 g8_rejected，不入 ingest", async () => {
+  it("任一布尔 false → 丢弃计 g8_rejected，不入 ingest", async () => {
     await withHarness(
-      { verifierText: '{"transferable":true,"evidenced":false,"clean":true,"reason":"無外部證據"}' },
+      { verifierText: '{"transferable":true,"evidenced":false,"clean":true,"reason":"无外部证据"}' },
       async (h) => {
         assert.equal(h.report.passed, 0)
         assert.equal(h.report.rejected.g8_rejected, 1)
@@ -175,7 +175,7 @@ describe("G8 雙模型一致閘（僅 shared、postIngest 前逐條）", () => {
     )
   })
 
-  it("非 JSON 回應 → 丟棄（圍欄可救回：```json 全 true → 入庫）", async () => {
+  it("非 JSON 回应 → 丢弃（围栏可救回：```json 全 true → 入库）", async () => {
     await withHarness({ verifierText: "I think this looks fine to me." }, async (h) => {
       assert.equal(h.report.rejected.g8_rejected, 1)
     })
@@ -187,7 +187,7 @@ describe("G8 雙模型一致閘（僅 shared、postIngest 前逐條）", () => {
     )
   })
 
-  it("MEMORY_VERIFIER_MODEL 未配置 → 跳過並記 g8_skipped（不放過：留痕；不誤殺：入庫）", async () => {
+  it("MEMORY_VERIFIER_MODEL 未配置 → 跳过并记 g8_skipped（不放过：留痕；不误杀：入库）", async () => {
     await withHarness({ env: { MEMORY_VERIFIER_MODEL: "", MEMORY_ORACLE_MODEL: "" } }, async (h) => {
       assert.equal(h.calls.verifier, 0)
       assert.equal(h.report.g8_skipped, 1)
@@ -196,7 +196,7 @@ describe("G8 雙模型一致閘（僅 shared、postIngest 前逐條）", () => {
     })
   })
 
-  it("verifier 呼叫失敗 → skip 記 g8_skipped（基礎設施失敗不判候選有罪）", async () => {
+  it("verifier 呼叫失败 → skip 记 g8_skipped（基础设施失败不判候选有罪）", async () => {
     await withHarness({ verifierThrows: true, env: { MEMORY_ORACLE_MODEL: "" } }, async (h) => {
       assert.equal(h.report.g8_skipped, 1)
       assert.equal(h.report.passed, 1)
@@ -204,8 +204,8 @@ describe("G8 雙模型一致閘（僅 shared、postIngest 前逐條）", () => {
   })
 })
 
-describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
-  it("平均 1.33（<1.5）→ POST /api/agent/memory/review {batch_id,action:pending_review}＋簽名", async () => {
+describe("PRD §5.6 入库后抽检（30%、最少 3、不足全抽）", () => {
+  it("平均 1.33（<1.5）→ POST /api/agent/memory/review {batch_id,action:pending_review}＋签名", async () => {
     const scores: Record<string, number> = { "note-1": 1, "note-2": 1, "note-3": 2 }
     await withHarness(
       {
@@ -223,13 +223,13 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
           private_badged: 0,
         })
         const review = h.posts.find((p) => p.path === "/api/agent/memory/review")
-        assert.ok(review, "必須送翻轉請求")
+        assert.ok(review, "必须送翻转请求")
         assert.deepEqual(JSON.parse(review.rawBody), { batch_id: BATCH_ID, action: "pending_review" })
         assert.equal(
           review.headers[MEMORY_SIGNATURE_HEADER],
           signMemoryBytes(review.rawBody, SECRET),
         )
-        // 抽檢樣本逐條落 badcase 集。
+        // 抽检样本逐条落 badcase 集。
         const files = readdirSync(join(h.stateDir, "memory-badcases"))
         assert.equal(files.length, 3)
         const one = JSON.parse(readFileSync(join(h.stateDir, "memory-badcases", files[0]), "utf8"))
@@ -240,7 +240,7 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
     )
   })
 
-  it("平均恰好 1.5 → 不觸發（嚴格小於判據）", async () => {
+  it("平均恰好 1.5 → 不触发（严格小于判据）", async () => {
     const scores: Record<string, number> = { "note-1": 1, "note-2": 2 }
     await withHarness(
       {
@@ -255,8 +255,8 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
     )
   })
 
-  it("任一 0 分（平均停 1.5）→ 仍觸發翻轉", async (t) => {
-    // 11 條 → 抽 ceil(0.3*11)=4；mock random=0.999 使 Fisher–Yates 恆等 → 樣本＝前 4 條。
+  it("任一 0 分（平均停 1.5）→ 仍触发翻转", async (t) => {
+    // 11 条 → 抽 ceil(0.3*11)=4；mock random=0.999 使 Fisher–Yates 恒等 → 样本＝前 4 条。
     t.mock.method(Math, "random", () => 0.999)
     const cands = Array.from({ length: 11 }, (_, i) => sharedCand(i + 1))
     await withHarness(
@@ -267,8 +267,8 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
       },
       async (h) => {
         assert.equal(h.report.sampling.sampled, 4)
-        assert.equal(h.report.sampling.avg, 1.5) // 平均不觸發
-        assert.equal(h.report.sampling.triggered, true) // 任一 0 分 → 觸發
+        assert.equal(h.report.sampling.avg, 1.5) // 平均不触发
+        assert.equal(h.report.sampling.triggered, true) // 任一 0 分 → 触发
         assert.equal(
           h.posts.some((p) => p.path === "/api/agent/memory/review"),
           true,
@@ -277,7 +277,7 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
     )
   })
 
-  it("oracle 未配置 → 跳過抽檢，sampling.skipped 誠實記數", async () => {
+  it("oracle 未配置 → 跳过抽检，sampling.skipped 诚实记数", async () => {
     await withHarness(
       {
         candidates: [sharedCand(1), sharedCand(2), sharedCand(3)],
@@ -292,7 +292,7 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
     )
   })
 
-  it("畸形 oracle 輸出 → fail-closed 記 0 分並觸發翻轉", async () => {
+  it("畸形 oracle 输出 → fail-closed 记 0 分并触发翻转", async () => {
     await withHarness(
       { candidates: [sharedCand(1), sharedCand(2), sharedCand(3)], oracleText: "solid work, 2/10" },
       async (h) => {
@@ -302,7 +302,7 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
     )
   })
 
-  it("private：同機制判分、只記 badge 不翻轉", async () => {
+  it("private：同机制判分、只记 badge 不翻转", async () => {
     await withHarness(
       {
         candidates: [
@@ -321,8 +321,8 @@ describe("PRD §5.6 入庫後抽檢（30%、最少 3、不足全抽）", () => {
   })
 })
 
-describe("dryRun 與總開關", () => {
-  it("dryRun：curator 照跑（預覽主體），閘 LLM／oracle／ingest 零呼叫", async () => {
+describe("dryRun 与总开关", () => {
+  it("dryRun：curator 照跑（预览主体），闸 LLM／oracle／ingest 零呼叫", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "memory-batch-dry-"))
     try {
       const calls = { curator: 0, verifier: 0, oracle: 0 }
@@ -357,17 +357,17 @@ describe("dryRun 與總開關", () => {
       const report = await batch.runBatch({ dryRun: true })
       assert.equal(report.dry_run, true)
       assert.equal(calls.curator, 1)
-      assert.equal(calls.verifier, 0) // dryRun 零閘 LLM
+      assert.equal(calls.verifier, 0) // dryRun 零闸 LLM
       assert.equal(calls.oracle, 0)
       assert.equal(report.stored, 0)
       assert.equal(report.sampling.sampled, 0)
-      assert.equal(report.g8_skipped, 0) // dryRun 不啟動 G8 屬預覽語義，不計「未配置」旗標
+      assert.equal(report.g8_skipped, 0) // dryRun 不启动 G8 属预览语义，不计「未配置」旗标
     } finally {
       rmSync(stateDir, { recursive: true, force: true })
     }
   })
 
-  it("非 dryRun 且總開關 false → 拒絕（誠實報錯，不假跑）", async () => {
+  it("非 dryRun 且总开关 false → 拒绝（诚实报错，不假跑）", async () => {
     const batch = createMemoryBatch({
       listSessions: async () => [],
       transcriptOf: async () => "",

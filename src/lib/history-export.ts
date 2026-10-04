@@ -25,10 +25,10 @@ export interface HistoryExportResult {
 const DOWNLOAD_CONCURRENCY = 4;
 
 /**
- * 取这条记录里第一个可下载的媒体地址（导出为測試可見：批量 ZIP 的 skipped 判定就靠它）。
+ * 取这条记录里第一个可下载的媒体地址（导出为测试可见：批量 ZIP 的 skipped 判定就靠它）。
  *
- * 影片／音頻記錄的 results 裡只有 videoUrl／audioUrl（無 image/imageUrl），
- * 也要能被打包下載；否則選中的影片／音樂記錄整批被判為「取不到媒體」而跳過。
+ * 影片／音频记录的 results 里只有 videoUrl／audioUrl（无 image/imageUrl），
+ * 也要能被打包下载；否则选中的影片／音乐记录整批被判为「取不到媒体」而跳过。
  */
 export function entrySrc(entry: HistoryEntry): string | null {
   const result = entry.results.find(
@@ -36,7 +36,7 @@ export function entrySrc(entry: HistoryEntry): string | null {
   );
   if (!result) return null;
   if (result.image) return `data:image/png;base64,${result.image}`;
-  // 與單筆下載（HistoryClient.handleDownload）同序：先圖、再影片、最後音頻。
+  // 与单笔下载（HistoryClient.handleDownload）同序：先图、再影片、最后音频。
   return result.imageUrl ?? result.videoUrl ?? result.audioUrl ?? null;
 }
 
@@ -179,8 +179,8 @@ export function buildHistoryArchive(entries: HistoryEntry[]): {
 }
 
 /**
- * 觸發瀏覽器下載（BOM/CRLF 由呼叫端決定）。
- * 2026-09-24：導出化為公開輪子——資產審查面板的 CSV 導出複用它（純加法，函式本體零改動）。
+ * 触发浏览器下载（BOM/CRLF 由呼叫端决定）。
+ * 2026-09-24：导出化为公开轮子——资产审查面板的 CSV 导出复用它（纯加法，函式本体零改动）。
  */
 export function triggerDownload(content: string, fileName: string, mimeType: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
@@ -208,8 +208,8 @@ export function exportHistoryJson(
 
 /**
  * CSV 字段转义：逗号、引号、换行都要包起来，引号内再翻倍。
- * 2026-09-24：導出化為公開輪子——資產審查面板只提供 header/rows 白名單，
- * 轉義一律走這裡（禁止各面自創第二套轉義）。
+ * 2026-09-24：导出化为公开轮子——资产审查面板只提供 header/rows 白名单，
+ * 转义一律走这里（禁止各面自创第二套转义）。
  */
 export function csvCell(value: string | number | boolean | undefined): string {
   const text = value === undefined ? "" : String(value);

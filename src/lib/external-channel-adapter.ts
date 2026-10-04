@@ -1,12 +1,12 @@
-// 外部自定義上游的生成注入：B 端金鑰綁定外部 channel 時，生圖流量改走客戶自帶的
-// OpenAI 相容 v1 端點，計費與追蹤仍掛在平台。
+// 外部自定义上游的生成注入：B 端金钥绑定外部 channel 时，生图流量改走客户自带的
+// OpenAI 相容 v1 端点，计费与追踪仍挂在平台。
 //
-// 合約：外部上游是 OpenAI 相容的 /v1/images/generations（非同步或同步都接受——
-// 這裡只處理「202 帶 task」的非同步形狀會太窄，先支援兩種形狀：
+// 合约：外部上游是 OpenAI 相容的 /v1/images/generations（非同步或同步都接受——
+// 这里只处理「202 带 task」的非同步形状会太窄，先支援两种形状：
 //  1. OpenAI 同步：{ data: [{ url | b64_json }] }
-//  2. 非同步：{ id, status } 202 → 依 result_url 輪詢 { data: [...] }
-// 若上游只回其中一種，adapter 對另一種就報「unsupported response shape」，
-// 讓 route 把失敗記進 failures（誠實，不假裝成功）。
+//  2. 非同步：{ id, status } 202 → 依 result_url 轮询 { data: [...] }
+// 若上游只回其中一种，adapter 对另一种就报「unsupported response shape」，
+// 让 route 把失败记进 failures（诚实，不假装成功）。
 
 import type { ExternalChannel } from "./external-channels";
 import { externalChannelKeyConfigured, mapExternalModel } from "./external-channels";
@@ -77,7 +77,7 @@ async function requestUpstream(
   }
 }
 
-/** 從 OpenAI 同步 response { data: [...] } 抓第一張圖。 */
+/** 从 OpenAI 同步 response { data: [...] } 抓第一张图。 */
 function firstImageFromData(data: unknown): { image: string | null; imageUrl: string | null } | null {
   if (!Array.isArray(data) || data.length === 0) return null;
   const first = data[0];
@@ -88,8 +88,8 @@ function firstImageFromData(data: unknown): { image: string | null; imageUrl: st
 }
 
 /**
- * 依外部 channel 生成一張圖。回傳 OpenAI 相容的失敗 failures（route 直接併入既有
- * failures），或成功結果。**任何無法解讀的上游回傳都記進 failures，不假裝成功。**
+ * 依外部 channel 生成一张图。回传 OpenAI 相容的失败 failures（route 直接并入既有
+ * failures），或成功结果。**任何无法解读的上游回传都记进 failures，不假装成功。**
  */
 export async function generateViaExternalChannel(options: {
   channel: ExternalChannel;
@@ -105,7 +105,7 @@ export async function generateViaExternalChannel(options: {
   if (!externalChannelKeyConfigured(channel)) {
     return {
       ok: false,
-      failures: [`外部上游 ${channel.name} 的憑證 ${channel.credentialRef} 未設定。`],
+      failures: [`外部上游 ${channel.name} 的凭证 ${channel.credentialRef} 未设定。`],
     };
   }
   const apiKey = credential as string;
@@ -149,11 +149,11 @@ export async function generateViaExternalChannel(options: {
     if (submission.status === 202 && task && typeof task.id === "string") {
       return pollExternalTask(channel, task.id as string, upstreamModelId, label, apiKey, startedAt, failures, fetchImpl);
     }
-    failures.push(`${label}: 上游回傳無法解析的資料形狀（HTTP ${submission.status}）。`);
+    failures.push(`${label}: 上游回传无法解析的资料形状（HTTP ${submission.status}）。`);
     return { ok: false, failures };
   }
 
-  failures.push(`${label}: 上游回傳 HTTP ${submission.status}。`);
+  failures.push(`${label}: 上游回传 HTTP ${submission.status}。`);
   return { ok: false, failures };
 }
 

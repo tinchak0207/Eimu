@@ -1,9 +1,9 @@
 import { createHmac } from "node:crypto";
 
 /**
- * 由 peerId 穩定推導 new-api 帳號身份。
- * username = wx_<hash(peerId)>，同一個微信號永遠對應同一個帳號（1:1），
- * 重複登入 = 找到既有帳號登入，不開新號。
+ * 由 peerId 稳定推导 new-api 帐号身份。
+ * username = wx_<hash(peerId)>，同一个微信号永远对应同一个帐号（1:1），
+ * 重复登入 = 找到既有帐号登入，不开新号。
  */
 
 export function buildWechatUsername(peerId: string): string {

@@ -11,8 +11,8 @@ import {
 
 /**
  * 保证 promise 在观察窗内 settle；否则以「未 settle」失败。
- * 用于「先红后绿」：修復前取图等待无界 → 这里必落 did-not-settle（红）；
- * 修復后 timeout 主动 abort → 正常 reject（绿）。绝不靠等真实的 30s 默认值。
+ * 用于「先红后绿」：修复前取图等待无界 → 这里必落 did-not-settle（红）；
+ * 修复后 timeout 主动 abort → 正常 reject（绿）。绝不靠等真实的 30s 默认值。
  */
 async function settlesWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -81,7 +81,7 @@ test("fetchImageResponse 源已有 query 时用 & 追加 dl=1", async () => {
   }
 });
 
-// 2026-10-04「永久 pending」族：取图等待原本无界。以下两条是修復的先把关：
+// 2026-10-04「永久 pending」族：取图等待原本无界。以下两条是修复的先把关：
 // ① 逾时必须在限时内 settle 且为具人话的明确失败（不靠等真实的 30s）；
 // ② 非逾时的网络错误原样透传（不被误报成逾时）。
 test("fetchImageResponse：上游永不回应 → timeout 主动 abort，落人话错误（限时内 settle）", async () => {

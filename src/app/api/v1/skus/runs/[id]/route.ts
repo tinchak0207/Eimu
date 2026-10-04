@@ -1,8 +1,8 @@
-// GET /v1/skus/runs/:id — run 聚合進度（無狀態）。
+// GET /v1/skus/runs/:id — run 聚合进度（无状态）。
 //
-// run 不落新表：run_id 就是冪等鍵根，鏡頭任務帶 skurun:<run_id>:<index>
-// 冪等鍵落在既有 generation_job 上；這裡按前綴撈回任務、按 run 組織聚合視圖。
-// 聚合數學復用 batch 層的 computeBatchAggregate（同源，不抄第二份）。
+// run 不落新表：run_id 就是幂等键根，镜头任务带 skurun:<run_id>:<index>
+// 幂等键落在既有 generation_job 上；这里按前缀捞回任务、按 run 组织聚合视图。
+// 聚合数学复用 batch 层的 computeBatchAggregate（同源，不抄第二份）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
@@ -14,14 +14,14 @@ import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function error(status: number, message: string, code: string, traceId: string, key?: BizApiKey) {
   let response: Response = NextResponse.json(
     { error: { message, type: "invalid_request_error", code, param: null, trace_id: traceId } },
     { status },
   );
-  // 認證成功後的錯誤（此處只會是 400/404）也帶限流預測頭；認證失敗不加。
+  // 认证成功后的错误（此处只会是 400/404）也带限流预测头；认证失败不加。
   if (key) response = addRateLimitHeaders(response, key, { consumed: false });
   return withTraceId(response, traceId);
 }

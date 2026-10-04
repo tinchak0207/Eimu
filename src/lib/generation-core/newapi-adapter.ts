@@ -120,7 +120,7 @@ export async function generateWithNewApi(supplier: SupplierRecord, input: Suppli
   };
 }
 
-/** chat 格式生圖的 new-api 載荷：content 可能是純文字，也可能是多模態 parts（2026-08-29 實測：圖在 image_url part 的 data URL 裡）。 */
+/** chat 格式生图的 new-api 载荷：content 可能是纯文字，也可能是多模态 parts（2026-08-29 实测：图在 image_url part 的 data URL 里）。 */
 type NewApiChatContentPart = { type?: string; text?: string; image_url?: { url?: string } };
 type NewApiChatPayload = {
   choices?: Array<{ message?: { content?: string | NewApiChatContentPart[] } }>;
@@ -176,8 +176,8 @@ async function generateWithNewApiChat(
     );
   }
   const rawContent = payload?.choices?.[0]?.message?.content ?? "";
-  // 兩種返回形狀都吃：純文字（內嵌 markdown/base64）走 chatImageOutput 直解；
-  // 多模態 parts 逐個翻——text part 拼回原文、image_url part 直接當成品候選。
+  // 两种返回形状都吃：纯文字（内嵌 markdown/base64）走 chatImageOutput 直解；
+  // 多模态 parts 逐个翻——text part 拼回原文、image_url part 直接当成品候选。
   let output: { base64: string | null; url: string | null } = { base64: null, url: null };
   if (Array.isArray(rawContent)) {
     const texts: string[] = [];

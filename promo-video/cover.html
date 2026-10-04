@@ -14,17 +14,17 @@ body { font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smooth
     radial-gradient(800px 640px at 42% 96%, rgba(246,190,220,.65), transparent 70%),
     radial-gradient(700px 520px at 60% 8%, rgba(198,236,252,.6), transparent 70%),
     #eef1f6; }
-/* 點陣畫布 */
+/* 点阵画布 */
 .dots { position: absolute; inset: 0; background-image: radial-gradient(rgba(27,32,48,.10) 1.6px, transparent 1.9px); background-size: 34px 34px;
   -webkit-mask-image: linear-gradient(90deg, #000 0, #000 45%, transparent 65%); }
-/* 成片畫面 */
+/* 成片画面 */
 .film { position: absolute; left: 860px; top: 0; width: 1100px; height: 1080px;
   background: url(assets/cover-gate.jpg) center 40% / cover no-repeat;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.55) 120px, #000 300px); }
 .film::after { content: ""; position: absolute; inset: 0;
   background: radial-gradient(120% 90% at 55% 45%, transparent 55%, rgba(0,0,0,.45) 100%), linear-gradient(0deg, rgba(0,0,0,.35), transparent 30%); }
 
-/* 左側文字（全部在 4:3 安全區 x≥250 內） */
+/* 左侧文字（全部在 4:3 安全区 x≥250 内） */
 .brand { position: absolute; left: 294px; top: 132px; display: flex; align-items: center; gap: 18px; height: 70px; padding: 0 30px 0 26px; border-radius: 99px;
   background: rgba(255,255,255,.62); border: 1.5px solid rgba(255,255,255,.95); box-shadow: 0 14px 34px rgba(45,49,66,.10), inset 0 1.5px 0 #fff; backdrop-filter: blur(20px); }
 .brand b { font: 700 38px "Geist"; letter-spacing: -.03em; color: #141824; }
@@ -34,7 +34,7 @@ body { font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smooth
 .h1 { top: 262px; font-size: 168px; color: #111624; }
 .h2 { top: 450px; font-size: 168px; background: linear-gradient(95deg, #2f7bff 0%, #6a6cf5 45%, #ec4d92 100%); -webkit-background-clip: text; color: transparent;
   filter: drop-shadow(0 10px 24px rgba(99,102,241,.18)); }
-/* 真實需求：液態玻璃輸入框 */
+/* 真实需求：液态玻璃输入框 */
 .prompt { position: absolute; left: 294px; top: 690px; width: 700px; height: 112px; border-radius: 99px; display: flex; align-items: center; gap: 18px; padding: 0 22px 0 34px;
   background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.66)); border: 1.5px solid rgba(255,255,255,.98);
   box-shadow: 0 26px 60px rgba(45,49,66,.16), 0 4px 14px rgba(45,49,66,.06), inset 0 2px 0 #fff, inset 0 -1px 0 rgba(0,0,0,.04); backdrop-filter: blur(24px) saturate(180%); }

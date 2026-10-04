@@ -1,15 +1,15 @@
 /**
- * search_aggregate 薄入口（構形逐行同構 tools/search_web.ts）。
+ * search_aggregate 薄入口（构形逐行同构 tools/search_web.ts）。
  */
 
 import { tool } from "@opencode-ai/plugin/tool"
 import { aggregateSearchTool, type WebToolDef, type WebToolContext } from "../lib/search_aggregate_impl"
 
 /**
- * wrap：描述符 WebToolDef → opencode schema 純機械翻譯（逐行同構
- * lib/music-tools-adapter.ts 的 wrapMusicTool，白名單 diff 僅名稱；
- * WebToolContext 契約含 sessionId 透傳欄，與 MusicToolContext 同口徑）。
- * 禁止手改行為——改真源後重導出並重新落位 search_aggregate_impl.ts 與本檔。
+ * wrap：描述符 WebToolDef → opencode schema 纯机械翻译（逐行同构
+ * lib/music-tools-adapter.ts 的 wrapMusicTool，白名单 diff 仅名称；
+ * WebToolContext 契约含 sessionId 透传栏，与 MusicToolContext 同口径）。
+ * 禁止手改行为——改真源后重导出并重新落位 search_aggregate_impl.ts 与本档。
  */
 function wrapWebTool(def: WebToolDef) {
   return tool({

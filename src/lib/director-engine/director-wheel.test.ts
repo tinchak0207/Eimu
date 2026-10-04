@@ -1,6 +1,6 @@
-// director 輪子移植測試：模板清點（28 運鏡/58 動作/12 姿勢）、playback 純函數、
-// planning-core 中文 prompt 推理、describeShot 投影描述、svgSchematic SVG 結構合法性。
-// 風格對齊 src/lib/workflow-dsl/workflow-dsl.test.ts（node:test + assert/strict）。
+// director 轮子移植测试：模板清点（28 运镜/58 动作/12 姿势）、playback 纯函数、
+// planning-core 中文 prompt 推理、describeShot 投影描述、svgSchematic SVG 结构合法性。
+// 风格对齐 src/lib/workflow-dsl/workflow-dsl.test.ts（node:test + assert/strict）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -13,7 +13,7 @@ import { describeShot } from "./shotDescription";
 import { fallbackPlans, inferPromptActions } from "./planning-core";
 import { renderTopViewSvg, renderCameraViewSvg } from "./svgSchematic";
 
-// ─────────────────────────── fixtures（雨夜追逐戲：2 mannequin + 1 box + walk/run + 2 shots）
+// ─────────────────────────── fixtures（雨夜追逐戏：2 mannequin + 1 box + walk/run + 2 shots）
 
 const v = (x = 0, y = 0, z = 0): Vec3 => ({ x, y, z });
 
@@ -97,59 +97,59 @@ function chaseShot2(): DirectorSequenceShot {
 
 function chasePlan(): DirectorPlan {
   return {
-    id: "plan-chase", name: "雨夜追逐戲", summary: "雨巷追逐，街角回望", createdAt: 1_700_000_000_000,
+    id: "plan-chase", name: "雨夜追逐戏", summary: "雨巷追逐，街角回望", createdAt: 1_700_000_000_000,
     shots: [chaseShot1(), chaseShot2()],
   };
 }
 
-// ─────────────────────────── 模板清點
+// ─────────────────────────── 模板清点
 
-test("CAMERA_TEMPLATES 恰 28 條，逐一 createCameraKeyframes 返回非空關鍵幀", () => {
+test("CAMERA_TEMPLATES 恰 28 条，逐一 createCameraKeyframes 返回非空关键帧", () => {
   assert.equal(CAMERA_TEMPLATES.length, 28);
   const shot = chaseShot1();
   for (const template of CAMERA_TEMPLATES) {
     const frames = createCameraKeyframes(shot, template.id);
-    assert.ok(frames.length >= 2, `${template.id} 應產生至少起訖兩幀`);
+    assert.ok(frames.length >= 2, `${template.id} 应产生至少起讫两帧`);
     for (const frame of frames) {
-      assert.ok(Number.isFinite(frame.fov) && Number.isFinite(frame.position.x), `${template.id} 幀數值應有限`);
+      assert.ok(Number.isFinite(frame.fov) && Number.isFinite(frame.position.x), `${template.id} 帧数值应有限`);
     }
   }
 });
 
-test("MOTION_TEMPLATES 恰 58 條，逐一 createMotionKeyframes 返回非空關鍵幀", () => {
+test("MOTION_TEMPLATES 恰 58 条，逐一 createMotionKeyframes 返回非空关键帧", () => {
   assert.equal(MOTION_TEMPLATES.length, 58);
   for (const template of MOTION_TEMPLATES) {
     const frames = createMotionKeyframes(template.id, template.defaultDurationSec, v(), v(2, 0, 0));
-    assert.ok(frames.length >= 1, `${template.id} 應產生關鍵幀`);
+    assert.ok(frames.length >= 1, `${template.id} 应产生关键帧`);
   }
 });
 
-test("POSE_PRESETS 恰 12 條", () => {
+test("POSE_PRESETS 恰 12 条", () => {
   assert.equal(POSE_PRESETS.length, 12);
 });
 
-// ─────────────────────────── playback 純函數
+// ─────────────────────────── playback 纯函数
 
-test("fixture 追逐戲：planDuration>0、shotAtTime 邊界正確", () => {
+test("fixture 追逐戏：planDuration>0、shotAtTime 边界正确", () => {
   const plan = chasePlan();
   assert.equal(planDuration(plan), 5.5);
   assert.equal(shotAtTime(plan, 0).id, "shot-chase-1");
   assert.equal(shotAtTime(plan, 2.999).id, "shot-chase-1");
   assert.equal(shotAtTime(plan, 3).id, "shot-chase-2");
   assert.equal(shotAtTime(plan, 5.499).id, "shot-chase-2");
-  assert.equal(shotAtTime(plan, 100).id, "shot-chase-2"); // 超時 clamp 到最後一鏡
-  assert.equal(shotAtTime(plan, -1).id, "shot-chase-1"); // 負時間 clamp 到第一鏡
+  assert.equal(shotAtTime(plan, 100).id, "shot-chase-2"); // 超时 clamp 到最后一镜
+  assert.equal(shotAtTime(plan, -1).id, "shot-chase-1"); // 负时间 clamp 到第一镜
 });
 
-test("evaluateDirectorFrame t=0/中/末：camera pose 與元素狀態連續演進", () => {
+test("evaluateDirectorFrame t=0/中/末：camera pose 与元素状态连续演进", () => {
   const plan = chasePlan();
   const elements = chaseElements();
 
   const atStart = evaluateDirectorFrame(plan, elements, 0);
-  assert.ok(atStart, "t=0 應有幀狀態");
+  assert.ok(atStart, "t=0 应有帧状态");
   assert.ok(atStart.camera.position && Number.isFinite(atStart.camera.fov));
   const manStart = atStart.elements.find((e) => e.id === "mq-man");
-  assert.ok(manStart && Math.abs(manStart.position.x - -2) < 0.01, "t=0 男人尚在起點 x=-2");
+  assert.ok(manStart && Math.abs(manStart.position.x - -2) < 0.01, "t=0 男人尚在起点 x=-2");
 
   const atMid = evaluateDirectorFrame(plan, elements, 2.75);
   assert.ok(atMid);
@@ -163,10 +163,10 @@ test("evaluateDirectorFrame t=0/中/末：camera pose 與元素狀態連續演�
   const manEnd = atEnd.elements.find((e) => e.id === "mq-man");
   assert.ok(manEnd && Math.abs(manEnd.position.x - 2) < 0.01, "t=5.49 男人已跑到 x=2");
   const poseId = manEnd.kind === "mannequin" ? manEnd.poseId : "";
-  assert.equal(poseId, "run", "跑步動作姿勢應為 run");
+  assert.equal(poseId, "run", "跑步动作姿势应为 run");
 });
 
-test("inspectDirectorPlan 對缺陷 plan（入地/動作跳變/攝影機入地）至少報 1 項 issue", () => {
+test("inspectDirectorPlan 对缺陷 plan（入地/动作跳变/摄影机入地）至少报 1 项 issue", () => {
   const base = chaseShot1();
   const defective: DirectorPlan = {
     id: "plan-bad", name: "缺陷方案", summary: "故意埋雷", createdAt: 1,
@@ -188,42 +188,42 @@ test("inspectDirectorPlan 對缺陷 plan（入地/動作跳變/攝影機入地�
     ],
   };
   const issues = inspectDirectorPlan(defective, chaseElements());
-  assert.ok(issues.length >= 1, "缺陷方案應報至少 1 項 issue");
+  assert.ok(issues.length >= 1, "缺陷方案应报至少 1 项 issue");
   const codes = issues.map((i) => i.id);
   assert.ok(
     codes.some((id) => id.includes("underground") || id.includes("-ground") || id.includes("-jump")),
-    `應含入地/跳變類 issue，實得：${codes.join(", ")}`,
+    `应含入地/跳变类 issue，实得：${codes.join(", ")}`,
   );
 });
 
-// ─────────────────────────── planning-core 純核
+// ─────────────────────────── planning-core 纯核
 
-test("fallbackPlans 對中文 prompt（雨夜追逐戲原文）產出 3 個非空方案", () => {
-  const plans = fallbackPlans(chasePlan(), chaseElements(), "男人走過街角回頭開槍");
+test("fallbackPlans 对中文 prompt（雨夜追逐戏原文）产出 3 个非空方案", () => {
+  const plans = fallbackPlans(chasePlan(), chaseElements(), "男人走过街角回头开枪");
   assert.equal(plans.length, 3);
   for (const plan of plans) {
-    assert.ok(plan.shots.length > 0, `${plan.name} 應有鏡頭`);
-    assert.ok(planDuration(plan) > 0, `${plan.name} 應有正時長`);
+    assert.ok(plan.shots.length > 0, `${plan.name} 应有镜头`);
+    assert.ok(planDuration(plan) > 0, `${plan.name} 应有正时长`);
   }
 });
 
-test("inferPromptActions 對中文動作 prompt 產出非空動作推斷", () => {
-  // 輪子 ACTION_KEYWORDS 詞表為簡體；繁體「走過/回頭」不在詞表，以簡體同義 prompt 驅動
+test("inferPromptActions 对中文动作 prompt 产出非空动作推断", () => {
+  // 轮子 ACTION_KEYWORDS 词表为简体；繁体「走过/回头」不在词表，以简体同义 prompt 驱动
   const actions = inferPromptActions("男人走向街角回头开枪", chaseElements());
-  assert.ok(actions.length >= 1, "應推斷出至少一個動作");
+  assert.ok(actions.length >= 1, "应推断出至少一个动作");
   assert.ok(actions.every((a) => a.elementName && a.action));
 });
 
-test("inferPromptActions 對繁體動作 prompt 產出非空動作推斷（2026-09-03 繁體變體白名單）", () => {
-  // ACTION_KEYWORDS 已補繁體變體：「回頭」命中 look-back；走過/開槍不在簡體原表（白名單禁新詞）
-  const actions = inferPromptActions("男人走過街角回頭開槍", chaseElements());
-  assert.ok(actions.length >= 1, "繁體 prompt 應推斷出至少一個動作");
+test("inferPromptActions 对繁体动作 prompt 产出非空动作推断（2026-09-03 繁体变体白名单）", () => {
+  // ACTION_KEYWORDS 已补繁体变体：「回头」命中 look-back；走过/开枪不在简体原表（白名单禁新词）
+  const actions = inferPromptActions("男人走过街角回头开枪", chaseElements());
+  assert.ok(actions.length >= 1, "繁体 prompt 应推断出至少一个动作");
   assert.ok(actions.every((a) => a.elementName && a.action));
 });
 
 // ─────────────────────────── describeShot
 
-test("describeShot 返回非空機位描述", () => {
+test("describeShot 返回非空机位描述", () => {
   const elements = chaseElements();
   const snapshots = elements.map((e) => ({
     id: e.id, name: e.name, kind: e.kind, worldPos: e.position,
@@ -232,12 +232,12 @@ test("describeShot 返回非空機位描述", () => {
   const text = describeShot(chaseShot1(), snapshots);
   assert.equal(typeof text, "string");
   assert.ok(text.length > 0);
-  assert.ok(text.includes("镜头一·雨巷追出"), `描述應含鏡頭名，實得：${text.split("\n")[0]}`);
+  assert.ok(text.includes("镜头一·雨巷追出"), `描述应含镜头名，实得：${text.split("\n")[0]}`);
 });
 
-// ─────────────────────────── svgSchematic（新膠水）
+// ─────────────────────────── svgSchematic（新胶水）
 
-/** 簡易 XML 檢查：標籤配對閉合 + 自閉合標籤合法。 */
+/** 简易 XML 检查：标签配对闭合 + 自闭合标签合法。 */
 function xmlTagBalanceOk(svg: string): boolean {
   const stack: string[] = [];
   const re = /<(\/?)([a-zA-Z][\w:-]*)((?:"[^"]*"|'[^']*'|[^"'>])*)>/g;
@@ -256,27 +256,27 @@ function xmlTagBalanceOk(svg: string): boolean {
 const SVG_BYTE_LIMIT = 32 * 1024;
 
 function assertValidSvg(svg: string, label: string) {
-  assert.ok(svg.startsWith("<svg") && svg.endsWith("</svg>"), `${label} 應為完整 <svg> 文檔`);
-  assert.ok(Buffer.byteLength(svg, "utf8") <= SVG_BYTE_LIMIT, `${label} 應 ≤32KB`);
-  assert.ok(xmlTagBalanceOk(svg), `${label} 標籤應配對閉合`);
+  assert.ok(svg.startsWith("<svg") && svg.endsWith("</svg>"), `${label} 应为完整 <svg> 文档`);
+  assert.ok(Buffer.byteLength(svg, "utf8") <= SVG_BYTE_LIMIT, `${label} 应 ≤32KB`);
+  assert.ok(xmlTagBalanceOk(svg), `${label} 标签应配对闭合`);
 }
 
-test("renderTopViewSvg：含 <svg>、≤32KB、XML 結構合法", () => {
+test("renderTopViewSvg：含 <svg>、≤32KB、XML 结构合法", () => {
   const plan = chasePlan();
   const svg = renderTopViewSvg(plan, chaseElements(), plan.shots[0]);
   assertValidSvg(svg, "topView");
-  assert.ok(svg.includes(plan.name), "俯視圖應含方案名標注");
-  assert.ok(svg.includes("镜头一·雨巷追出"), "俯視圖應含活動鏡頭名");
+  assert.ok(svg.includes(plan.name), "俯视图应含方案名标注");
+  assert.ok(svg.includes("镜头一·雨巷追出"), "俯视图应含活动镜头名");
 });
 
-test("renderCameraViewSvg：含 <svg>、≤32KB、XML 結構合法", () => {
+test("renderCameraViewSvg：含 <svg>、≤32KB、XML 结构合法", () => {
   const plan = chasePlan();
   const svg = renderCameraViewSvg(plan.shots[0], chaseElements());
   assertValidSvg(svg, "cameraView");
-  assert.ok(svg.includes("木箱") || svg.includes("男人") || svg.includes("逃亡者"), "鏡頭框圖應含元素標注");
+  assert.ok(svg.includes("木箱") || svg.includes("男人") || svg.includes("逃亡者"), "镜头框图应含元素标注");
 });
 
-test("renderTopViewSvg 無活動鏡頭時仍可渲染（全鏡頭起點）", () => {
+test("renderTopViewSvg 无活动镜头时仍可渲染（全镜头起点）", () => {
   const plan = chasePlan();
   const svg = renderTopViewSvg(plan, chaseElements());
   assertValidSvg(svg, "topView-allShots");

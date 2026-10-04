@@ -1,7 +1,7 @@
-// 2026-10-02 e2e 成片評測整改：final_cut 導出前後質檢（響度正規化 + 結尾凍結/黑幀修剪）。
-// 評測實錘：成片整合響度 -38.5 LUFS 未正規化、結尾 ~1.3s 凍結，CAPABILITIES 卻宣稱「質檢把關」。
-// 本模組：分析 → 能修則修（loudnorm 兩遍 + 尾部修剪）→ 複測驗證 → 修不了/修壞了誠實回報（回原片 + 註記）。
-// 零 gateway import（可在 tsx 直跑）；只依賴 ffmpeg/ffprobe 可執行檔路徑。
+// 2026-10-02 e2e 成片评测整改：final_cut 导出前后质检（响度正规化 + 结尾冻结/黑帧修剪）。
+// 评测实锤：成片整合响度 -38.5 LUFS 未正规化、结尾 ~1.3s 冻结，CAPABILITIES 却宣称「质检把关」。
+// 本模组：分析 → 能修则修（loudnorm 两遍 + 尾部修剪）→ 复测验证 → 修不了/修坏了诚实回报（回原片 + 注记）。
+// 零 gateway import（可在 tsx 直跑）；只依赖 ffmpeg/ffprobe 可执行档路径。
 import { execFile } from "node:child_process"
 
 export const QC_TARGET_LUFS = -16
@@ -13,10 +13,10 @@ export type FilmQcReport = {
   hasAudio: boolean
   lufs: number | null
   truePeakDb: number | null
-  /** 尾部凍結/黑幀起點（秒）；無則 null。 */
+  /** 尾部冻结/黑帧起点（秒）；无则 null。 */
   tailFreezeStart: number | null
   tailBlackStart: number | null
-  /** 非尾部的凍結/黑幀段（只報告不修）。 */
+  /** 非尾部的冻结/黑帧段（只报告不修）。 */
   midIssues: string[]
 }
 
@@ -29,7 +29,7 @@ function run(bin: string, args: string[], timeoutMs = 300_000): Promise<{ code: 
   })
 }
 
-/** 純解析：ebur128 summary → { lufs, tp }。 */
+/** 纯解析：ebur128 summary → { lufs, tp }。 */
 export function parseEbur128(stderr: string): { lufs: number | null; truePeakDb: number | null } {
   const sum = stderr.slice(Math.max(0, stderr.lastIndexOf("Summary:")))
   const i = sum.match(/I:\s+(-?\d+(?:\.\d+)?)\s+LUFS/)
@@ -37,7 +37,7 @@ export function parseEbur128(stderr: string): { lufs: number | null; truePeakDb:
   return { lufs: i ? Number(i[1]) : null, truePeakDb: p ? Number(p[1]) : null }
 }
 
-/** 純解析：freezedetect/blackdetect 日誌 → 段落 [{start,end|null}]。 */
+/** 纯解析：freezedetect/blackdetect 日志 → 段落 [{start,end|null}]。 */
 export function parseSegments(stderr: string, kind: "freeze" | "black"): { start: number; end: number | null }[] {
   const segs: { start: number; end: number | null }[] = []
   if (kind === "freeze") {
@@ -54,7 +54,7 @@ export function parseSegments(stderr: string, kind: "freeze" | "black"): { start
   return segs
 }
 
-/** 純決策：段落是否貼尾（延伸到片尾 ±0.15s）且長度可修剪。 */
+/** 纯决策：段落是否贴尾（延伸到片尾 ±0.15s）且长度可修剪。 */
 export function tailSegmentStart(segs: { start: number; end: number | null }[], dur: number): number | null {
   for (const s of segs) {
     const reachesEnd = s.end === null || s.end >= dur - 0.15
@@ -87,33 +87,33 @@ export async function analyzeFilm(ffmpeg: string, file: string, opts: { limitSec
   const tailFreezeStart = tailSegmentStart(freeze, effDur)
   const tailBlackStart = tailSegmentStart(black, effDur)
   const midIssues: string[] = []
-  for (const s of freeze) if (s.start !== tailFreezeStart && (s.end ?? effDur) - s.start >= 1.5) midIssues.push(`中段凍結 ${s.start.toFixed(1)}s–${(s.end ?? effDur).toFixed(1)}s`)
-  for (const s of black) if (s.start !== tailBlackStart) midIssues.push(`中段黑幀 ${s.start.toFixed(1)}s–${(s.end ?? effDur).toFixed(1)}s`)
+  for (const s of freeze) if (s.start !== tailFreezeStart && (s.end ?? effDur) - s.start >= 1.5) midIssues.push(`中段冻结 ${s.start.toFixed(1)}s–${(s.end ?? effDur).toFixed(1)}s`)
+  for (const s of black) if (s.start !== tailBlackStart) midIssues.push(`中段黑帧 ${s.start.toFixed(1)}s–${(s.end ?? effDur).toFixed(1)}s`)
   return { durationSec: effDur, hasAudio, lufs, truePeakDb, tailFreezeStart, tailBlackStart, midIssues }
 }
 
 export type FilmQcResult = {
-  /** 最終應交付的檔案（修好＝outPath；沒動或修壞回退＝inPath）。 */
+  /** 最终应交付的档案（修好＝outPath；没动或修坏回退＝inPath）。 */
   path: string
   changed: boolean
   before: FilmQcReport
   after: FilmQcReport | null
-  /** 給用戶看的誠實註記（空陣列＝全合格無需說明）。 */
+  /** 给用户看的诚实注记（空阵列＝全合格无需说明）。 */
   notes: string[]
 }
 
 const fmt = (n: number | null) => (n === null ? "n/a" : n.toFixed(1))
 
 /**
- * 質檢 + 修復。永不拋錯：任何一步失敗都回原片並註記。
- * 修剪上限：尾部問題 ≤ min(3s, 15% 片長) 才剪（再長視為內容而非尾巴，只告知）。
+ * 质检 + 修复。永不抛错：任何一步失败都回原片并注记。
+ * 修剪上限：尾部问题 ≤ min(3s, 15% 片长) 才剪（再长视为内容而非尾巴，只告知）。
  */
 export async function qcAndFixFilm(ffmpeg: string, inPath: string, outPath: string): Promise<FilmQcResult> {
   let before: FilmQcReport
   try {
     before = await analyzeFilm(ffmpeg, inPath)
   } catch (e) {
-    return { path: inPath, changed: false, before: { durationSec: 0, hasAudio: false, lufs: null, truePeakDb: null, tailFreezeStart: null, tailBlackStart: null, midIssues: [] }, after: null, notes: [`質檢未能執行（${String((e as Error).message ?? e).slice(0, 80)}），成片未經響度/凍結檢查`] }
+    return { path: inPath, changed: false, before: { durationSec: 0, hasAudio: false, lufs: null, truePeakDb: null, tailFreezeStart: null, tailBlackStart: null, midIssues: [] }, after: null, notes: [`质检未能执行（${String((e as Error).message ?? e).slice(0, 80)}），成片未经响度/冻结检查`] }
   }
   const notes: string[] = []
   const dur = before.durationSec
@@ -121,11 +121,11 @@ export async function qcAndFixFilm(ffmpeg: string, inPath: string, outPath: stri
   const tailStart = tailStarts.length ? Math.min(...tailStarts) : null
   const maxTrim = Math.min(3, dur * 0.15)
   const trimTo = tailStart !== null && dur - tailStart <= maxTrim ? Math.max(tailStart + 0.1, 1) : null
-  if (tailStart !== null && trimTo === null) notes.push(`結尾 ${(dur - tailStart).toFixed(1)}s 凍結/黑幀過長，未自動修剪，請人工確認`)
+  if (tailStart !== null && trimTo === null) notes.push(`结尾 ${(dur - tailStart).toFixed(1)}s 冻结/黑帧过长，未自动修剪，请人工确认`)
   const needLoud = before.hasAudio && before.lufs !== null && before.lufs > -70 && Math.abs(before.lufs - QC_TARGET_LUFS) > LOUD_TOLERANCE_LU
-  if (before.hasAudio && (before.lufs === null || before.lufs <= -70)) notes.push("成片音軌近乎靜音，無法正規化")
-  if (!before.hasAudio) notes.push("成片無音軌")
-  for (const m of before.midIssues) notes.push(`${m}（未自動處理）`)
+  if (before.hasAudio && (before.lufs === null || before.lufs <= -70)) notes.push("成片音轨近乎静音，无法正规化")
+  if (!before.hasAudio) notes.push("成片无音轨")
+  for (const m of before.midIssues) notes.push(`${m}（未自动处理）`)
 
   if (!needLoud && trimTo === null) return { path: inPath, changed: false, before, after: null, notes }
 
@@ -142,7 +142,7 @@ export async function qcAndFixFilm(ffmpeg: string, inPath: string, outPath: stri
         : `loudnorm=I=${QC_TARGET_LUFS}:TP=${QC_TARGET_TP}:LRA=11`
       args.push("-af", af)
     }
-    // 修剪必須重編碼視頻（流複製只能切在關鍵幀）；僅響度則視頻流複製、零畫質損失。
+    // 修剪必须重编码视频（流复制只能切在关键帧）；仅响度则视频流复制、零画质损失。
     if (trimTo !== null) args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p")
     else args.push("-c:v", "copy")
     if (before.hasAudio) args.push("-c:a", "aac", "-b:a", "192k", "-ar", "48000")
@@ -150,17 +150,17 @@ export async function qcAndFixFilm(ffmpeg: string, inPath: string, outPath: stri
     const r = await run(ffmpeg, args)
     if (r.code !== 0) throw new Error(`ffmpeg exit ${r.code}: ${r.stderr.slice(-160)}`)
     const after = await analyzeFilm(ffmpeg, outPath)
-    // 複測驗證：不採信「命令成功」。時長不得縮水超過預期，響度須落進容差（放寬到 ±2.5 LU：loudnorm 對極低電平素材可能達不到）。
+    // 复测验证：不采信「命令成功」。时长不得缩水超过预期，响度须落进容差（放宽到 ±2.5 LU：loudnorm 对极低电平素材可能达不到）。
     const expectDur = trimTo ?? dur
-    if (Math.abs(after.durationSec - expectDur) > 0.6 && after.durationSec < expectDur) throw new Error(`修復後時長異常 ${after.durationSec}s`)
+    if (Math.abs(after.durationSec - expectDur) > 0.6 && after.durationSec < expectDur) throw new Error(`修复后时长异常 ${after.durationSec}s`)
     if (needLoud && (after.lufs === null || Math.abs(after.lufs - QC_TARGET_LUFS) > 2.5)) {
-      notes.push(`響度正規化後仍為 ${fmt(after.lufs)} LUFS（目標 ${QC_TARGET_LUFS}），已交付修復版但未完全達標`)
+      notes.push(`响度正规化后仍为 ${fmt(after.lufs)} LUFS（目标 ${QC_TARGET_LUFS}），已交付修复版但未完全达标`)
     }
-    if (needLoud) notes.unshift(`響度已正規化 ${fmt(before.lufs)} → ${fmt(after.lufs)} LUFS`)
-    if (trimTo !== null) notes.unshift(`已修剪結尾 ${(dur - trimTo).toFixed(1)}s 凍結/黑幀（${dur.toFixed(2)}s → ${after.durationSec.toFixed(2)}s）`)
+    if (needLoud) notes.unshift(`响度已正规化 ${fmt(before.lufs)} → ${fmt(after.lufs)} LUFS`)
+    if (trimTo !== null) notes.unshift(`已修剪结尾 ${(dur - trimTo).toFixed(1)}s 冻结/黑帧（${dur.toFixed(2)}s → ${after.durationSec.toFixed(2)}s）`)
     return { path: outPath, changed: true, before, after, notes }
   } catch (e) {
-    notes.unshift(`成片自動修復失敗，已交付未修復原片（響度 ${fmt(before.lufs)} LUFS${tailStart !== null ? `、結尾 ${(dur - tailStart).toFixed(1)}s 凍結` : ""}）：${String((e as Error).message ?? e).slice(0, 100)}`)
+    notes.unshift(`成片自动修复失败，已交付未修复原片（响度 ${fmt(before.lufs)} LUFS${tailStart !== null ? `、结尾 ${(dur - tailStart).toFixed(1)}s 冻结` : ""}）：${String((e as Error).message ?? e).slice(0, 100)}`)
     return { path: inPath, changed: false, before, after: null, notes }
   }
 }

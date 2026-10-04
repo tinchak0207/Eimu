@@ -1,12 +1,12 @@
 ﻿"use client";
 
-// 模型定價：管理員逐模型改有效價，保存後後端扣費（generationCoins）與前端展示立刻
-// 生效。視覺嚴格對齊 AdminRelayChannels：bg-[#f4f5f7] 外框、bg-white 卡片、
-// border-black/10、#2878d0 主按鈕、#20242c 無（本面板無主色塊）。
+// 模型定价：管理员逐模型改有效价，保存后后端扣费（generationCoins）与前端展示立刻
+// 生效。视觉严格对齐 AdminRelayChannels：bg-[#f4f5f7] 外框、bg-white 卡片、
+// border-black/10、#2878d0 主按钮、#20242c 无（本面板无主色块）。
 //
-// 編輯模型：draft（Record<modelId, 覆寫欄位>）是唯一編輯狀態，空輸入 = 不覆寫走基準；
-// 被改動的列顯示「已覆写」+「重置此模型」。保存 PATCH 帶 expectedVersion 樂觀併發：
-// 409 用回應裡的最新完整 payload 覆蓋本地並提示被他人更新。
+// 编辑模型：draft（Record<modelId, 覆写栏位>）是唯一编辑状态，空输入 = 不覆写走基准；
+// 被改动的列显示「已覆写」+「重置此模型」。保存 PATCH 带 expectedVersion 乐观并发：
+// 409 用回应里的最新完整 payload 覆盖本地并提示被他人更新。
 
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, Loader2, RotateCcw } from "lucide-react";
@@ -61,8 +61,8 @@ function cloneOverrides(overrides: Record<string, PricingFields>): PriceDraft {
 }
 
 /**
- * 10 credits = 1 币。幣價顯示精度由 PRICING_DECIMALS 派生、整數不帶尾零。
- * 管理員輸入與 placeholder 一律以「币」為單位；後端持久化仍以 credits 為單位（×10）。
+ * 10 credits = 1 币。币价显示精度由 PRICING_DECIMALS 派生、整数不带尾零。
+ * 管理员输入与 placeholder 一律以「币」为单位；后端持久化仍以 credits 为单位（×10）。
  */
 function formatCoins(value: number): string {
   const rounded = Math.round(value * 10 ** PRICING_DECIMALS) / 10 ** PRICING_DECIMALS;
@@ -149,9 +149,9 @@ export function AdminModelPricing() {
       if (trimmed === "") {
         delete table[resolution];
       } else {
-        // 輸入單位是「币」；後端 credit = 币 × 10，精度 = PRICING_DECIMALS 派生
-        // （credit 小數位 = PRICING_DECIMALS - 1）。允許 0：打字中間態（「0.」「0.0」）
-        // Number() 為 0，需讓它進 draft 才能繼續輸入；0 本身保存時會被後端攔下。
+        // 输入单位是「币」；后端 credit = 币 × 10，精度 = PRICING_DECIMALS 派生
+        // （credit 小数位 = PRICING_DECIMALS - 1）。允许 0：打字中间态（「0.」「0.0」）
+        // Number() 为 0，需让它进 draft 才能继续输入；0 本身保存时会被后端拦下。
         const value = Number(trimmed);
         if (Number.isFinite(value)) {
           const creditScale = 10 ** (PRICING_DECIMALS - 1);
@@ -208,7 +208,7 @@ export function AdminModelPricing() {
         setDraft(cloneOverrides(result.overrides ?? {}));
         setNotice({ tone: "error", text: result.message || "配置已被其他会话更新，已刷新为最新数据，请确认后重新保存。" });
       } else if (!response.ok) {
-        // 400 附 message；保留本地 draft 讓管理員修正。
+        // 400 附 message；保留本地 draft 让管理员修正。
         setNotice({ tone: "error", text: result.message || "保存失败。" });
       } else {
         setPayload(result);
@@ -461,10 +461,10 @@ function ModelRow({
 }
 
 /**
- * 幣價輸入框：本地 raw state、onBlur 才 commit。解決受控 number input 打小數時
- * 中間態（「0.」「0.0」）被 Number() 解析為 0 而瞬間清空、導致「0.01」打不出來的
- * 問題。格式非法（非空且非正小數）時還原為外部值；空輸入 = 不覆寫走基準。
- * 顯示單位為「币」，credits 轉換由 onCommit 側（×10）負責。
+ * 币价输入框：本地 raw state、onBlur 才 commit。解决受控 number input 打小数时
+ * 中间态（「0.」「0.0」）被 Number() 解析为 0 而瞬间清空、导致「0.01」打不出来的
+ * 问题。格式非法（非空且非正小数）时还原为外部值；空输入 = 不覆写走基准。
+ * 显示单位为「币」，credits 转换由 onCommit 侧（×10）负责。
  */
 function CoinInput({
   value,

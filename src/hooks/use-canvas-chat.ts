@@ -1,24 +1,24 @@
 "use client";
 
-// 畫布 + chat 的整合 hook。
+// 画布 + chat 的整合 hook。
 //
-// 一條 SSE、兩個狀態機：useAgentChat 管連線與 transcript，這裡管畫布。
+// 一条 SSE、两个状态机：useAgentChat 管连线与 transcript，这里管画布。
 // 分流在 use-agent-chat.ts 的 handleSseEvent（onCanvasEvent 出口），
-// 所以畫布頁不會另開一個 session —— 開兩個 session 會讓 agent 出的圖
-// 落在另一條流上，畫布永遠等不到事件。
+// 所以画布页不会另开一个 session —— 开两个 session 会让 agent 出的图
+// 落在另一条流上，画布永远等不到事件。
 //
-// 職責邊界：
-//   - 事件 → 畫布狀態：normalizeCanvasEvent + reduceCanvasEvent（純函式，已測）
-//   - 視口/背景/選取：本地 state，不上送
-//   - 專案持久化：debounce 400ms PUT /api/canvas/projects
-//   - undo/redo：節點/連線/視口的快照棧
+// 职责边界：
+//   - 事件 → 画布状态：normalizeCanvasEvent + reduceCanvasEvent（纯函式，已测）
+//   - 视口/背景/选取：本地 state，不上送
+//   - 专案持久化：debounce 400ms PUT /api/canvas/projects
+//   - undo/redo：节点/连线/视口的快照栈
 //
-// 外圍域已拆（2026-08-22 Task 5，符號名不變、本檔仍為唯一匯出點）：
-//   - canvas/canvas-chat-types.ts        展示型事件類型 + UseCanvasChatReturn（39 成員）
-//   - canvas/canvas-reducer-adapter.ts   CanvasAction + canvasReducer（19 種 action）
-//   - canvas/canvas-project-sync.ts      三個持久化 effect + 專案身份 refs
-//   - canvas/use-canvas-cards.ts         角色/場景卡域
-//   - canvas/canvas-event-settler.ts     image.done 對賬收斂
+// 外围域已拆（2026-08-22 Task 5，符号名不变、本档仍为唯一汇出点）：
+//   - canvas/canvas-chat-types.ts        展示型事件类型 + UseCanvasChatReturn（39 成员）
+//   - canvas/canvas-reducer-adapter.ts   CanvasAction + canvasReducer（19 种 action）
+//   - canvas/canvas-project-sync.ts      三个持久化 effect + 专案身份 refs
+//   - canvas/use-canvas-cards.ts         角色/场景卡域
+//   - canvas/canvas-event-settler.ts     image.done 对账收敛
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
@@ -40,9 +40,9 @@ import {
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
 import { fetchCanvasProject, listCanvasProjectSummaries, postCanvasOpsResult } from "@/lib/canvas/client";
-// 風格 id 值域判據（＝STYLE_LIBRARY 註冊面），與落盤/生成端共用同一把尺。
+// 风格 id 值域判据（＝STYLE_LIBRARY 注册面），与落盘/生成端共用同一把尺。
 import { normalizeProjectStyleId } from "@/lib/canvas/project-style";
-// 解說劇設定（P1-5／D7）：型別值域＋旁白音色的判據（與落盤端同一份）。
+// 解说剧设定（P1-5／D7）：型别值域＋旁白音色的判据（与落盘端同一份）。
 import { isCanvasScriptType, type CanvasScriptType } from "@/lib/canvas/project-narration";
 import { normalizeVoiceId } from "@/lib/voice-library";
 import { CanvasNodeType, isCanvasProjectType } from "@/lib/canvas/types";
@@ -85,10 +85,10 @@ import { useCanvasEventSettler } from "./canvas/canvas-event-settler";
 import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef } from "@/lib/agent-output-cards";
 import { toast } from "@/hooks/use-toast";
 
-/** WS4：節點交付→自動落卡的 debounce（串流期間節點內容高頻變動，等安靜再落卡）。 */
+/** WS4：节点交付→自动落卡的 debounce（串流期间节点内容高频变动，等安静再落卡）。 */
 const EMITTED_ANCHOR_DEBOUNCE_MS = 500;
 
-// ─────────────────────────────────────────── 匯出面（barrel：消費端 import 路徑零改動）
+// ─────────────────────────────────────────── 汇出面（barrel：消费端 import 路径零改动）
 export { canvasReducer } from "./canvas/canvas-reducer-adapter";
 export type { CanvasAction } from "./canvas/canvas-reducer-adapter";
 export type {
@@ -101,10 +101,10 @@ export type {
 } from "./canvas/canvas-chat-types";
 
 /**
- * 下游閉包（回跳作廢用，純函式，可直接單測）：沿連線 BFS 取 root 全部下游，
- * 濾掉 text/prompt/config（純資料節點沒有生成結果，無所謂作廢——與網關
- * `workflow-service.updateNode` 的 BFS 規則逐條對齊：它同樣只重置非 text/config）。
- * root 自身不在回傳內（回跳改的是上游，被改的那步由用戶自己重跑）。
+ * 下游闭包（回跳作废用，纯函式，可直接单测）：沿连线 BFS 取 root 全部下游，
+ * 滤掉 text/prompt/config（纯资料节点没有生成结果，无所谓作废——与网关
+ * `workflow-service.updateNode` 的 BFS 规则逐条对齐：它同样只重置非 text/config）。
+ * root 自身不在回传内（回跳改的是上游，被改的那步由用户自己重跑）。
  */
 export function downstreamInvalidationIds(
   nodes: Pick<CanvasNode, "id" | "type">[],
@@ -142,36 +142,36 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [history, setHistory] = useState<CanvasHistory>(CANVAS_EMPTY_HISTORY);
   const [projectTitle, setProjectTitle] = useState("未命名画布");
-  // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：專案級狀態，持久化在 CanvasProject 頂層三欄。
-  // 寫入口＝setProjectMeta（UI 面板與 agent 驅動的畫布操作共用），讀回＝三處還原點 + canvasProjectMeta。
+  // 作品/剧集三级状态机（2026-09-15 刀 1 前端接线）：专案级状态，持久化在 CanvasProject 顶层三栏。
+  // 写入口＝setProjectMeta（UI 面板与 agent 驱动的画布操作共用），读回＝三处还原点 + canvasProjectMeta。
   const [projectType, setProjectType] = useState<CanvasProjectType | undefined>(undefined);
   const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
   const [episodes, setEpisodes] = useState<CanvasEpisode[]>([]);
-  // 專案級風格綁定（P1-8／對稱差 D34）：StyleTemplate.id，與上面三欄同一組檔位/同一寫入口。
-  // 生成時由呼叫端把這個 id 帶進 /api/canvas/generate 的 style_id（本 hook 不改生成請求）。
+  // 专案级风格绑定（P1-8／对称差 D34）：StyleTemplate.id，与上面三栏同一组档位/同一写入口。
+  // 生成时由呼叫端把这个 id 带进 /api/canvas/generate 的 style_id（本 hook 不改生成请求）。
   const [styleId, setStyleId] = useState<string | undefined>(undefined);
-  // 解說劇設定（P1-5／D7）：型別＋旁白音色；與風格綁定同款 state（寫入口＝setProjectMeta）。
+  // 解说剧设定（P1-5／D7）：型别＋旁白音色；与风格绑定同款 state（写入口＝setProjectMeta）。
   const [scriptType, setScriptType] = useState<CanvasScriptType | undefined>(undefined);
   const [narrationVoice, setNarrationVoice] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<UseCanvasChatReturn["saveState"]>("idle");
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
-  // Wave C：agent 下發、即時執行的批量畫布操作（畫布操作自動化，無人工確認閘）。
+  // Wave C：agent 下发、即时执行的批量画布操作（画布操作自动化，无人工确认闸）。
   //
-  // 內部用佇列存（見 canvas-agent-ops-queue.ts）：CanvasAgentOpsEvent 沒有
-  // session_id，原先單一 nullable slot 在第二個 canvas.ops 事件於第一個尚未
-  // resolve 時抵達會直接覆蓋掉它，該 request_id 就再也等不到 postCanvasOpsResult
-  // （gateway 端工具調用卡到超時）。修法：Map<request_id, entry> 保序佇列，
-  // 每筆各自捕獲「事件抵達當下」的 session id（resolve 時用這個，不用
-  // sessionIdRef.current，否則使用者在操作落地前切 session 會報錯 sid）。
-  // 對外仍只暴露佇列頭（一次只處理一批，resolve 後
-  // 自動前進到下一筆）——宿主 CanvasEmbed.tsx 的 effect 一到即自動執行。
+  // 内部用伫列存（见 canvas-agent-ops-queue.ts）：CanvasAgentOpsEvent 没有
+  // session_id，原先单一 nullable slot 在第二个 canvas.ops 事件于第一个尚未
+  // resolve 时抵达会直接覆盖掉它，该 request_id 就再也等不到 postCanvasOpsResult
+  // （gateway 端工具调用卡到超时）。修法：Map<request_id, entry> 保序伫列，
+  // 每笔各自捕获「事件抵达当下」的 session id（resolve 时用这个，不用
+  // sessionIdRef.current，否则使用者在操作落地前切 session 会报错 sid）。
+  // 对外仍只暴露伫列头（一次只处理一批，resolve 后
+  // 自动前进到下一笔）——宿主 CanvasEmbed.tsx 的 effect 一到即自动执行。
   const [agentOpsQueue, setAgentOpsQueue] = useState<AgentOpsQueue>(createAgentOpsQueue);
   const pendingAgentOps = getQueueHeadEvent(agentOpsQueue);
 
-  // ── 角色/場景卡域（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
-  // 項目 id ref 先於卡域建立並注入（REQ-B2b）：卡域的讀取端作用域閘要判「鎖定卡屬不屬於
-  // 當前項目」，讀的就是這一個 ref——卡域在本 hook 之前呼叫，若晚建則閘首幀拿到 null 漏判。
+  // ── 角色/场景卡域（P2 跨镜头一致性）：卡列表 + 项目级锁定
+  // 项目 id ref 先于卡域建立并注入（REQ-B2b）：卡域的读取端作用域闸要判「锁定卡属不属于
+  // 当前项目」，读的就是这一个 ref——卡域在本 hook 之前呼叫，若晚建则闸首帧拿到 null 漏判。
   const projectIdRef = useRef<string | null>(null);
   const {
     characterCards,
@@ -187,7 +187,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     autoAnchorEmittedCards,
   } = useCanvasCards({ getProjectId: () => projectIdRef.current });
 
-  // ── refs：給不參與 render 的路徑讀最新值
+  // ── refs：给不参与 render 的路径读最新值
   const canvasRef = useRef(canvas);
   canvasRef.current = canvas;
   const viewportRef = useRef(viewport);
@@ -205,7 +205,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   currentStepRef.current = currentStep;
   const episodesRef = useRef(episodes);
   episodesRef.current = episodes;
-  // 風格綁定（P1-8／D34）：同款「最新值鏈像 ref」，供 buildProject 取當下值。
+  // 风格绑定（P1-8／D34）：同款「最新值链像 ref」，供 buildProject 取当下值。
   const styleIdRef = useRef(styleId);
   styleIdRef.current = styleId;
   const scriptTypeRef = useRef(scriptType);
@@ -218,24 +218,24 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   agentOpsQueueRef.current = agentOpsQueue;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
-  /** flyTo 動畫的 rAF 句柄（新動畫/卸載時取消）。 */
+  /** flyTo 动画的 rAF 句柄（新动画/卸载时取消）。 */
   const flyRafRef = useRef<number | null>(null);
 
-  // 進度節流用的兩張表：node_id → 計時器 / 最新待送事件。
+  // 进度节流用的两张表：node_id → 计时器 / 最新待送事件。
   const progressTimerRef = useRef<Map<string, number>>(new Map());
   const progressPendingRef = useRef<Map<string, AgentSseEvent>>(new Map());
   const mountedRef = useRef(true);
-  // 撤銷/重做正在還原時不推快照，否則按一下撤銷會先把自己存進 past。
+  // 撤销/重做正在还原时不推快照，否则按一下撤销会先把自己存进 past。
   const restoringRef = useRef(false);
 
-  // ─────────────────────── 換畫布 / 歷史清單
+  // ─────────────────────── 换画布 / 历史清单
 
-  /** 開一張全新畫布（換 session 或使用者手動「新建画布」）。 */
+  /** 开一张全新画布（换 session 或使用者手动「新建画布」）。 */
   const newCanvasSession = useCallback(() => {
-    // 舊的 debounce 存檔若還掛著，會拿新 projectId 存出空畫布、或拿舊 projectId
-    // 覆蓋掉剛開的新畫布 —— 換畫布前先把它作廢。
-    // （saveTimerRef/projectIdRef 等 refs 由下方 useCanvasProjectSync 擁有，
-    //   useRef 跨 render 是同一物件，這裡的閉包讀到的是最新值。）
+    // 旧的 debounce 存档若还挂著，会拿新 projectId 存出空画布、或拿旧 projectId
+    // 覆盖掉刚开的新画布 —— 换画布前先把它作废。
+    // （saveTimerRef/projectIdRef 等 refs 由下方 useCanvasProjectSync 拥有，
+    //   useRef 跨 render 是同一物件，这里的闭包读到的是最新值。）
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -248,39 +248,39 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setHistory(CANVAS_EMPTY_HISTORY);
     setProjectTitle("未命名画布");
     setViewportState({ x: 0, y: 0, k: 1 });
-    // 新畫布 = 新作品：作品類型/流程步/劇集清單都隨舊項目留在歷史裡。
+    // 新画布 = 新作品：作品类型/流程步/剧集清单都随旧项目留在历史里。
     setProjectType(undefined);
     setCurrentStep(undefined);
     setEpisodes([]);
-    // 風格綁定同層清零：新項目不繼承上一張畫布的風格（缺省＝無綁定）。
+    // 风格绑定同层清零：新项目不继承上一张画布的风格（缺省＝无绑定）。
     setStyleId(undefined);
-    // 新畫布 = 新項目：卡鎖定是項目級配置，隨舊項目留在歷史裡。
+    // 新画布 = 新项目：卡锁定是项目级配置，随旧项目留在历史里。
     setActiveCardIds([]);
-    // 新畫布要有新身份：後續存檔才會寫進新的一份，而不是覆寫上一張。
+    // 新画布要有新身份：后续存档才会写进新的一份，而不是覆写上一张。
     projectIdRef.current = `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     createdAtRef.current = new Date().toISOString();
     everHadNodesRef.current = false;
-    // 舊節點的進度幀不能再落地到新畫布（否則 loading 會憑空冒出來）。
+    // 旧节点的进度帧不能再落地到新画布（否则 loading 会凭空冒出来）。
     for (const t of progressTimerRef.current.values()) window.clearTimeout(t);
     progressTimerRef.current.clear();
     progressPendingRef.current.clear();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 createdAtRef/everHadNodesRef/saveTimerRef：三者由下方第 583 行 useCanvasProjectSync 解構取得（在本 callback 之後），列入依賴陣列會在 render 期觸發 TDZ；ref 物件身分恆定，省略安全。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 createdAtRef/everHadNodesRef/saveTimerRef：三者由下方第 583 行 useCanvasProjectSync 解构取得（在本 callback 之后），列入依赖阵列会在 render 期触发 TDZ；ref 物件身分恒定，省略安全。
   }, [setActiveCardIds]);
 
   const refreshSavedProjects = useCallback(async () => {
     const res = await listCanvasProjectSummaries();
     if (!mountedRef.current) return;
     if (res.ok && res.data) setSavedProjects(toProjectSummaries(res.data));
-    // 失敗時靜默保留舊值：清單是「順手看」，不值得為網路抖動清空畫面。
+    // 失败时静默保留旧值：清单是「顺手看」，不值得为网路抖动清空画面。
   }, []);
 
   const openSavedCanvas = useCallback(async (id: string) => {
-    // 只拉這一張（效能審計 P0-B）：原本為了打開一張畫布把全部專案整包下載。
+    // 只拉这一张（效能审计 P0-B）：原本为了打开一张画布把全部专案整包下载。
     const res = await fetchCanvasProject(id);
     if (!mountedRef.current) return;
     const target = res.ok ? res.data : undefined;
     if (!target) return;
-    // 指向舊專案身份：之後的存檔覆寫它，而不是另存一份新畫布。
+    // 指向旧专案身份：之后的存档覆写它，而不是另存一份新画布。
     projectIdRef.current = target.id;
     createdAtRef.current = target.createdAt;
     everHadNodesRef.current = target.nodes && target.nodes.length > 0;
@@ -290,8 +290,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setBackgroundMode(target.backgroundMode ?? "dots");
     setProjectTitle(target.title || "未命名画布");
     setActiveCardIds(Array.isArray(target.cardIds) ? target.cardIds.filter(Boolean) : []);
-    // 作品/劇集三欄（＋風格綁定第四欄）：與 cardIds 同層還原
-    //（缺欄位＝回到未設定，不殘留上一張畫布的值）。
+    // 作品/剧集三栏（＋风格绑定第四栏）：与 cardIds 同层还原
+    //（缺栏位＝回到未设定，不残留上一张画布的值）。
     const meta = canvasProjectMeta(target);
     setProjectType(meta.projectType);
     setCurrentStep(meta.currentStep);
@@ -308,21 +308,21 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     } else {
       setBudget(null);
     }
-    // 換載入的畫布是一條全新時間線：歷史、選取、展示卡都歸零。
+    // 换载入的画布是一条全新时间线：历史、选取、展示卡都归零。
     setHistory(CANVAS_EMPTY_HISTORY);
     setSelectedNodeId(null);
     setPlans([]);
     setDerives([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 createdAtRef/everHadNodesRef：由下方第 583 行 useCanvasProjectSync 解構取得（在本 callback 之後），列入依賴會 TDZ；ref 身分恆定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 createdAtRef/everHadNodesRef：由下方第 583 行 useCanvasProjectSync 解构取得（在本 callback 之后），列入依赖会 TDZ；ref 身分恒定。
   }, [setActiveCardIds]);
 
   /**
-   * Agent 快照下行回填（2026-08-26 Bug1b）：resume 到已有歷史的 session 時，左聊天
-   * 續上但右畫布空白 —— 快照此前只有上行沒有下行。gateway 存的是上行壓縮快照
-   * （content/prompt 已截斷），fromCanvasProject 負責形狀校驗與降級。
-   * 與 openSavedCanvas 同語義：換載入內容 = 全新時間線，不進撤銷棧、選取歸零、
-   * plans/derives 不動。恢復結果在 sessionId 變化 effect（newCanvasSession 清場）
-   * 之後異步到達，load 直接覆蓋空畫布即可；呼叫端保證僅在 nodes>0 且畫布仍空時調用。
+   * Agent 快照下行回填（2026-08-26 Bug1b）：resume 到已有历史的 session 时，左聊天
+   * 续上但右画布空白 —— 快照此前只有上行没有下行。gateway 存的是上行压缩快照
+   * （content/prompt 已截断），fromCanvasProject 负责形状校验与降级。
+   * 与 openSavedCanvas 同语义：换载入内容 = 全新时间线，不进撤销栈、选取归零、
+   * plans/derives 不动。恢复结果在 sessionId 变化 effect（newCanvasSession 清场）
+   * 之后异步到达，load 直接覆盖空画布即可；呼叫端保证仅在 nodes>0 且画布仍空时调用。
    */
   const restoreAgentSnapshot = useCallback(
     (snapshot: {
@@ -340,10 +340,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       const restored = fromCanvasProject(snapshot);
       if (restored.nodes.length === 0) return false;
       everHadNodesRef.current = true;
-      // 上行摘要刻意不帶座標（版面權在前端 reducer，layout.ts 檔頭）：
-      // fromCanvasProject 把缺座標補成 (0,0)，直接 load 會讓所有卡疊在原點
-      // （2026-09-14 回舊會話堆疊事故）。無座標快照跑與 live 同款的 DAG 分層
-      // 排版；快照真帶座標（如 blob 專案形狀）則原樣還原，不重排。
+      // 上行摘要刻意不带座标（版面权在前端 reducer，layout.ts 档头）：
+      // fromCanvasProject 把缺座标补成 (0,0)，直接 load 会让所有卡叠在原点
+      // （2026-09-14 回旧会话堆叠事故）。无座标快照跑与 live 同款的 DAG 分层
+      // 排版；快照真带座标（如 blob 专案形状）则原样还原，不重排。
       const unpositioned = restored.nodes.every((n) => n.position.x === 0 && n.position.y === 0);
       const nodes = unpositioned
         ? layoutGraph({ ...CANVAS_INITIAL_STATE, nodes: restored.nodes, connections: restored.connections }).nodes
@@ -366,11 +366,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
           k: clampScale(snapshot.viewport.k),
         });
       }
-      // 雙向同步方向B：chat 切 session → 畫布選中對應節點
+      // 双向同步方向B：chat 切 session → 画布选中对应节点
       const linked = restored.nodes.find((n) => n.metadata?.session_id === sessionIdRef.current);
       setSelectedNodeId(linked ? linked.id : null);
-      // 作品/劇集三欄＋風格綁定：快照有帶才覆蓋；沒帶＝保留現值
-      //（不可把已存在的作品資訊/風格清成空白）。
+      // 作品/剧集三栏＋风格绑定：快照有带才覆盖；没带＝保留现值
+      //（不可把已存在的作品资讯/风格清成空白）。
       const meta = canvasProjectMeta(snapshot);
       if (meta.projectType !== undefined) setProjectType(meta.projectType);
       if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
@@ -380,26 +380,26 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (meta.narrationVoice !== undefined) setNarrationVoice(meta.narrationVoice);
       return true;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 everHadNodesRef：由下方第 583 行 useCanvasProjectSync 解構取得（在本 callback 之後），列入依賴會 TDZ；ref 身分恆定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 everHadNodesRef：由下方第 583 行 useCanvasProjectSync 解构取得（在本 callback 之后），列入依赖会 TDZ；ref 身分恒定。
     [],
   );
 
-  // 監聽 sessionId 變化：換 agent 會話 = 換一張畫布，避免舊畫布跑進新會話。
+  // 监听 sessionId 变化：换 agent 会话 = 换一张画布，避免旧画布跑进新会话。
   useEffect(() => {
     if (!sessionId) {
-      // 09-12 建號權收歸發送按鈕：null = 「無會話空態」（開新/套模板都經這裡）。
-      // 放手舊會話錨點——之後 lazy 建出的新會話按「首次會話」處理（走下面
-      // isFirst 跳過清場），套模板先鋪好的節點才不會被新會話落地瞬間清掉
-      // （08-29 空快照/09-01 畫布全空血淚路徑）。null 本身不清場：此時畫布
-      // 上可能是用戶正打算隨首條消息帶進新會話的內容。
+      // 09-12 建号权收归发送按钮：null = 「无会话空态」（开新/套模板都经这里）。
+      // 放手旧会话锚点——之后 lazy 建出的新会话按「首次会话」处理（走下面
+      // isFirst 跳过清场），套模板先铺好的节点才不会被新会话落地瞬间清掉
+      // （08-29 空快照/09-01 画布全空血泪路径）。null 本身不清场：此时画布
+      // 上可能是用户正打算随首条消息带进新会话的内容。
       prevSessionIdRef.current = null;
       return;
     }
     if (sessionId === prevSessionIdRef.current) return;
     const isFirst = prevSessionIdRef.current == null;
     prevSessionIdRef.current = sessionId;
-    // 首次拿到 session：畫布本來就是空的（已不再自動還原），不必重置，
-    // 否則會白白丟掉 mount 時 mint 的 projectId。空態鋪好內容後首發建號
+    // 首次拿到 session：画布本来就是空的（已不再自动还原），不必重置，
+    // 否则会白白丢掉 mount 时 mint 的 projectId。空态铺好内容后首发建号
     // 落地也算「首次」——那份内容是用户带来接新会话的，同样不清。
     if (isFirst) return;
     newCanvasSession();
@@ -416,7 +416,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       progressTimers.clear();
       progressPending.clear();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 saveTimerRef：由下方第 583 行 useCanvasProjectSync 解構取得（在本文之後），列入依賴會 TDZ；ref 身分恆定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 saveTimerRef：由下方第 583 行 useCanvasProjectSync 解构取得（在本文之后），列入依赖会 TDZ；ref 身分恒定。
   }, []);
 
   // ─────────────────────── 快照
@@ -427,20 +427,20 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       nodes: current.nodes,
       connections: current.connections,
       viewport: viewportRef.current,
-      // 軟刪節點進快照：否則「刪除→撤銷」後 deletedNodes 殘留已回到 nodes 的重複項。
+      // 软删节点进快照：否则「删除→撤销」后 deletedNodes 残留已回到 nodes 的重复项。
       ...(current.deletedNodes && current.deletedNodes.length > 0 ? { deletedNodes: current.deletedNodes } : {}),
     };
   }, []);
 
-  /** 動作前推一格快照。事件驅動的變更也推，這樣「撤銷」能收回 agent 剛加的節點。 */
+  /** 动作前推一格快照。事件驱动的变更也推，这样「撤销」能收回 agent 刚加的节点。 */
   const pushHistory = useCallback(() => {
     if (restoringRef.current) return;
     setHistory((prev) => pushSnapshot(prev, snapshotNow()));
   }, [snapshotNow]);
 
-  // ─────────────────────── SSE 畫布事件入口
+  // ─────────────────────── SSE 画布事件入口
 
-  // 最終一致性收斂（image.done 對賬）：settle 函數與 URL 佇列由 settler 域提供。
+  // 最终一致性收敛（image.done 对账）：settle 函数与 URL 伫列由 settler 域提供。
   const { imageDoneQueueRef, settleCandidateNode, settleStaleNodes, settleFailedNode } = useCanvasEventSettler({
     canvasRef,
     progressTimerRef,
@@ -450,10 +450,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   const handleCanvasEvent = useCallback(
     (event: AgentSseEvent) => {
-      // Wave C：agent 批量操作入佇列後由宿主自動執行（CanvasEmbed 的 effect 一到即 approveAgentOps）。入隊而非覆蓋——
-      // 不同 request_id 各自排隊，同 request_id 重入視為合法重放（見 queue 模組註解）。
-      // 捕獲當下 session id：事件本身沒有 session_id 欄位，resolve 時要用「抵達
-      // 當下」而非「resolve 當下」的 session，否則使用者切 session 後回報會錯 sid。
+      // Wave C：agent 批量操作入伫列后由宿主自动执行（CanvasEmbed 的 effect 一到即 approveAgentOps）。入队而非覆盖——
+      // 不同 request_id 各自排队，同 request_id 重入视为合法重放（见 queue 模组注解）。
+      // 捕获当下 session id：事件本身没有 session_id 栏位，resolve 时要用「抵达
+      // 当下」而非「resolve 当下」的 session，否则使用者切 session 后回报会错 sid。
       if (event.name === "canvas.ops") {
         if (event.data?.request_id && Array.isArray(event.data?.ops)) {
           setAgentOpsQueue((prev) => enqueueAgentOps(prev, event.data, sessionIdRef.current ?? null));
@@ -467,8 +467,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
             const next = [...prev, { ...event.data, receivedAt: Date.now() }];
             return next.slice(Math.max(0, next.length - PLAN_CARD_LIMIT));
           });
-          // C-FE：計劃幀繼續進 reducer——unit 記下 cost_hint，
-          // node.created 時蓋章到生成卡（「預估 N 幣」角標）。側欄卡片照舊由 plans 渲染。
+          // C-FE：计划帧继续进 reducer——unit 记下 cost_hint，
+          // node.created 时盖章到生成卡（「预估 N 币」角标）。侧栏卡片照旧由 plans 渲染。
           break;
         case "canvas.derive.started":
           setDerives((prev) => {
@@ -493,35 +493,35 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
           });
           return;
         case "image.done": {
-          // 圖完成訊號：入隊並立即嘗試用 task_id 配對落地，卡 loading 的節點
-          // 不依賴 gateway 一定發 canvas.node.updated（上游無 task_id 時 gateway
-          // 只發 image.done，畫布會永遠轉圈 —— 見 2026-08-16 根因分析）。
+          // 图完成讯号：入队并立即尝试用 task_id 配对落地，卡 loading 的节点
+          // 不依赖 gateway 一定发 canvas.node.updated（上游无 task_id 时 gateway
+          // 只发 image.done，画布会永远转圈 —— 见 2026-08-16 根因分析）。
           imageDoneQueueRef.current.push(event.data);
           settleCandidateNode(event.data);
           return;
         }
         case "image.failed": {
-          // 圖失敗訊號（refunded/failed/超時）：與 image.done 對稱。優先 task_id
-          // 配對，沒配上的在 turn.done 收斂時按序兜底——絕不能讓節點永遠轉圈。
+          // 图失败讯号（refunded/failed/超时）：与 image.done 对称。优先 task_id
+          // 配对，没配上的在 turn.done 收敛时按序兜底——绝不能让节点永远转圈。
           settleFailedNode(event.data);
           return;
         }
         case "turn.done":
         case "session.closed":
-          // 回合/會話結束：最後收斂，把仍卡 loading 的節點按序配對落地。
+          // 回合/会话结束：最后收敛，把仍卡 loading 的节点按序配对落地。
           settleStaleNodes();
           return;
         default:
           break;
       }
-      // 結構性事件：進 reducer。節點增刪是可撤銷的動作，所以先存一格。
+      // 结构性事件：进 reducer。节点增删是可撤销的动作，所以先存一格。
       if (event.name === "canvas.node.created" || event.name === "canvas.node.deleted" || event.name === "canvas.node.connected" || event.name === "canvas.node.disconnected") {
         pushHistory();
       }
 
-      // 進度節流（行動端）：canvas.node.generating 是高頻進度流（同節點每秒
-      // 可能多幀）。每節點最多每 PROGRESS_THROTTLE_MS 落地一次 reducer，
-      // 窗內只留最新一筆、窗末補送，最後的 progress 不會遺失。
+      // 进度节流（行动端）：canvas.node.generating 是高频进度流（同节点每秒
+      // 可能多帧）。每节点最多每 PROGRESS_THROTTLE_MS 落地一次 reducer，
+      // 窗内只留最新一笔、窗末补送，最后的 progress 不会遗失。
       if (event.name === "canvas.node.generating") {
         const nodeId = event.data.node_id;
         progressPendingRef.current.set(nodeId, event);
@@ -537,8 +537,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         return;
       }
 
-      // 節點層級的新狀態落地（結果/刪除/新建）＝該節點排隊中的進度幀作廢，
-      // 避免「結果都落地了又被舊進度幀蓋回 loading」。
+      // 节点层级的新状态落地（结果/删除/新建）＝该节点排队中的进度帧作废，
+      // 避免「结果都落地了又被旧进度帧盖回 loading」。
       const supersededNodeId =
         event.name === "canvas.node.updated" || event.name === "canvas.node.deleted"
           ? event.data.node_id
@@ -559,10 +559,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory, imageDoneQueueRef, settleCandidateNode, settleFailedNode, settleStaleNodes],
   );
 
-  // 對外事件入口：外部 chat（AgentChatSurface 的 onCanvasEvent）呼叫。
+  // 对外事件入口：外部 chat（AgentChatSurface 的 onCanvasEvent）呼叫。
   const feedCanvasEvent = handleCanvasEvent;
-  // 對外摘要提供者（外部 chat 的 canvasStateProvider 用）。空畫布回 undefined。
-  // 附帶用戶當前選區與視口縮放：agent 不再是瞎子，能圍繞「用戶正在看的節點」幹活。
+  // 对外摘要提供者（外部 chat 的 canvasStateProvider 用）。空画布回 undefined。
+  // 附带用户当前选区与视口缩放：agent 不再是瞎子，能围绕「用户正在看的节点」干活。
   const summarize = () => {
     const state = canvasRef.current;
     const lockedCards = characterCardsRef.current.filter((c) => activeCardIdsRef.current.includes(c.id));
@@ -571,7 +571,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     const selected = selectedNodeIdRef.current;
     if (selected) base.selected_node_id = selected;
     base.viewport_scale = Math.round(viewportRef.current.k * 100) / 100;
-    // P2：鎖定卡進上行摘要（agent 可見——知道哪些外觀/場景約束已生效）。
+    // P2：锁定卡进上行摘要（agent 可见——知道哪些外观/场景约束已生效）。
     base.character_cards = lockedCards.map((c) => ({
       id: c.id,
       kind: c.kind,
@@ -584,7 +584,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     return base;
   };
 
-  // ─────────────────────── 專案持久化（init → debounce → snapshot，順序同原內聯版）
+  // ─────────────────────── 专案持久化（init → debounce → snapshot，顺序同原内联版）
 
   const { createdAtRef, saveTimerRef, everHadNodesRef, buildProject } = useCanvasProjectSync({
     canvasRef,
@@ -621,7 +621,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setLoading,
   });
 
-  // ─────────────────────── 視口
+  // ─────────────────────── 视口
 
   const setViewport = useCallback((next: CanvasViewport | ((prev: CanvasViewport) => CanvasViewport)) => {
     setViewportState((prev) => (typeof next === "function" ? next(prev) : next));
@@ -647,13 +647,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     }));
   }, []);
 
-  // ─────────────────────── 節點編輯
+  // ─────────────────────── 节点编辑
 
   const selectNode = useCallback((nodeId: string | null) => setSelectedNodeId(nodeId), []);
 
   /**
-   * 拖動/縮放中的每一帧都不推快照 —— 一次拖動會產生上百帧，
-   * 全推進去等於把撤銷棧當成錄影。互動結束時由 commitInteraction 推一格。
+   * 拖动/缩放中的每一帧都不推快照 —— 一次拖动会产生上百帧，
+   * 全推进去等于把撤销栈当成录影。互动结束时由 commitInteraction 推一格。
    */
   const moveNode = useCallback((nodeId: string, position: CanvasPosition) => {
     dispatchCanvas({
@@ -676,14 +676,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
-  /** 互動（拖動/縮放）開始前呼叫：把互動前的狀態存成一格。 */
+  /** 互动（拖动/缩放）开始前呼叫：把互动前的状态存成一格。 */
   const commitInteraction = useCallback(() => {
     pushHistory();
   }, [pushHistory]);
 
-  // ─────────────────────── Phase 3 畫布交互
+  // ─────────────────────── Phase 3 画布交互
 
-  /** 群組拖動：每幀一次 dispatch 移整組。不推 history（由 commitInteraction 收口）。 */
+  /** 群组拖动：每帧一次 dispatch 移整组。不推 history（由 commitInteraction 收口）。 */
   const moveNodes = useCallback((moves: { nodeId: string; position: CanvasPosition }[]) => {
     if (moves.length === 0) return;
     dispatchCanvas({ type: "move_many", moves });
@@ -699,10 +699,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   );
 
   /**
-   * 同一 workflow 的重複套用 = 替換不是疊加（2026-08-26 Bug3）：addNodes 是追加語義，
-   * 同一張模板卡點兩次會平鋪兩份 30+ 節點。這裡先刪掉 metadata.workflow_id 相同的
-   * 全部舊節點（delete_many 連帶清掉懸空連線），再 add_nodes 新的一批；兩個 dispatch
-   * 在同一輪批次裡落地，history 只推一格 —— undo 一鍵回到替換前。
+   * 同一 workflow 的重复套用 = 替换不是叠加（2026-08-26 Bug3）：addNodes 是追加语义，
+   * 同一张模板卡点两次会平铺两份 30+ 节点。这里先删掉 metadata.workflow_id 相同的
+   * 全部旧节点（delete_many 连带清掉悬空连线），再 add_nodes 新的一批；两个 dispatch
+   * 在同一轮批次里落地，history 只推一格 —— undo 一键回到替换前。
    */
   const replaceWorkflowNodes = useCallback(
     (workflowId: string, nodes: CanvasNode[], connections?: CanvasConnection[]) => {
@@ -745,21 +745,21 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
-  // ─────────────────────── 回跳：作廢下游（決策 15，畫布側投影）
+  // ─────────────────────── 回跳：作废下游（决策 15，画布侧投影）
 
   /**
-   * 作廢某節點的全部下游已完成結果（回跳改上游 = 下游成果失效）。
-   * **不新建機制**：作廢的真權威在網關——`workflow-service.updateNode` 的 BFS
-   *（改上游時把下游重置 pending＋刪 nodeContent/nodeCost）與 `rerunFrom`
-   *（root+下游閉包重跑）都已經在跑，且 `generate` 的 R5-B 續跑語義
-   *（"reuse succeeded node results, only failed/pending nodes will run"）保證
-   * 下游只重跑被作廢的那些。本函式是**畫布側的同一條規則的立即投影**（用戶按下
-   * 回跳的那一刻就看見下游變空，不必等網關事件回來），重跑本身仍交宿主既有的
-   * rerun 入口（workflow-node-rerun → rerunFrom），不在此另發請求。
+   * 作废某节点的全部下游已完成结果（回跳改上游 = 下游成果失效）。
+   * **不新建机制**：作废的真权威在网关——`workflow-service.updateNode` 的 BFS
+   *（改上游时把下游重置 pending＋删 nodeContent/nodeCost）与 `rerunFrom`
+   *（root+下游闭包重跑）都已经在跑，且 `generate` 的 R5-B 续跑语义
+   *（"reuse succeeded node results, only failed/pending nodes will run"）保证
+   * 下游只重跑被作废的那些。本函式是**画布侧的同一条规则的立即投影**（用户按下
+   * 回跳的那一刻就看见下游变空，不必等网关事件回来），重跑本身仍交宿主既有的
+   * rerun 入口（workflow-node-rerun → rerunFrom），不在此另发请求。
    *
-   * 規則逐條對齊網關：閉包沿連線 BFS（含 root）；text/config 類（純資料）不參與
-   * 作廢——它們沒有生成結果，重置只會讓卡面無故變空。
-   * 回傳作廢的節點 id（呼叫端據此提示「這些步驟會重跑」，順序＝BFS 序）。
+   * 规则逐条对齐网关：闭包沿连线 BFS（含 root）；text/config 类（纯资料）不参与
+   * 作废——它们没有生成结果，重置只会让卡面无故变空。
+   * 回传作废的节点 id（呼叫端据此提示「这些步骤会重跑」，顺序＝BFS 序）。
    */
   const revokeDownstream = useCallback(
     (nodeId: string): string[] => {
@@ -767,7 +767,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       const connections = canvasRef.current.connections;
       const voidIds = downstreamInvalidationIds(nodes, connections, nodeId);
       if (voidIds.length === 0) return [];
-      pushHistory(); // 一格歷史：回跳作廢可一鍵撤銷
+      pushHistory(); // 一格历史：回跳作废可一键撤销
       for (const id of voidIds) {
         dispatchCanvas({
           type: "patch_metadata",
@@ -780,7 +780,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
-  // ─────────────────────── Wave A：就地編輯
+  // ─────────────────────── Wave A：就地编辑
 
   const renameNode = useCallback(
     (nodeId: string, title: string) => {
@@ -790,7 +790,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
-  /** metadata 補丁（文本直編提交、原地生成回填、字號、重試狀態）。history 預設推一格。 */
+  /** metadata 补丁（文本直编提交、原地生成回填、字号、重试状态）。history 预设推一格。 */
   const patchNodeMetadata = useCallback(
     (nodeId: string, patch: Partial<CanvasNodeMetadata>, opts?: { history?: boolean }) => {
       if (opts?.history !== false) pushHistory();
@@ -799,19 +799,19 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
-  // ─────────────────────── WS4：模板節點交付 → 自動落卡（＋分鏡引用回填）
+  // ─────────────────────── WS4：模板节点交付 → 自动落卡（＋分镜引用回填）
 
   /**
-   * 節點投影：canvas 節點 → 落卡模組的結構子集（只讀 id/title/metadata 三個欄位）。
-   * `metadata` 在落卡模組眼裡是不透明袋子；投影是一次唯讀寬化（見
-   * `toAgentOutputNodeRef` 的註解：CanvasNodeMetadata 是 interface，無 index signature）。
+   * 节点投影：canvas 节点 → 落卡模组的结构子集（只读 id/title/metadata 三个栏位）。
+   * `metadata` 在落卡模组眼里是不透明袋子；投影是一次唯读宽化（见
+   * `toAgentOutputNodeRef` 的注解：CanvasNodeMetadata 是 interface，无 index signature）。
    */
   const emittedNodeRefs = useMemo(() => canvas.nodes.map(toAgentOutputNodeRef), [canvas.nodes]);
 
   /**
-   * 落卡指紋：只裝「會改變落卡判定」的欄位——節點 id、已落卡標記、交付物（長度＋尾段 64 字）。
-   * 刻意**不含整個 metadata**：回填會寫 metadata，指紋若含它就會自己觸發自己（無限迴圈）。
-   * 指紋不變 → 不重跑（同一份交付物重複觸發＝零動作）。
+   * 落卡指纹：只装「会改变落卡判定」的栏位——节点 id、已落卡标记、交付物（长度＋尾段 64 字）。
+   * 刻意**不含整个 metadata**：回填会写 metadata，指纹若含它就会自己触发自己（无限回圈）。
+   * 指纹不变 → 不重跑（同一份交付物重复触发＝零动作）。
    */
   const emittedCardFingerprint = useMemo(
     () =>
@@ -827,13 +827,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   const emittedAnchorDoneRef = useRef("");
   /**
-   * 既有自動落卡簽章：卡清單是**非同步**載入的（listCharacterCards），節點卻可能先到
-   * （回舊會話：專案 Blob 先還原、卡清單後回）。少了這一項，「卡上次已落、分鏡節點缺引用」
-   * 那一輪永遠等不到 → 耐久回填在競態下失效。只認自動落成的前綴卡，人工建卡不動簽章。
+   * 既有自动落卡签章：卡清单是**非同步**载入的（listCharacterCards），节点却可能先到
+   * （回旧会话：专案 Blob 先还原、卡清单后回）。少了这一项，「卡上次已落、分镜节点缺引用」
+   * 那一轮永远等不到 → 耐久回填在竞态下失效。只认自动落成的前缀卡，人工建卡不动签章。
    *
-   * 含**內容**（卡名＋參考圖數）不只 id：漸進聚合把 sibling 晚到的圖併進既存卡時 **id 不變**，
-   * 只認 id 的簽章不會再觸發一輪 → 第二張參考圖永遠補不進去。收斂：下一輪計畫為空
-   * （`updatedCards` 空 ∧ 補名無候選）⇒ 內容不再變 ⇒ 簽章穩定 ⇒ 不再重跑。
+   * 含**内容**（卡名＋参考图数）不只 id：渐进聚合把 sibling 晚到的图并进既存卡时 **id 不变**，
+   * 只认 id 的签章不会再触发一轮 → 第二张参考图永远补不进去。收敛：下一轮计画为空
+   * （`updatedCards` 空 ∧ 补名无候选）⇒ 内容不再变 ⇒ 签章稳定 ⇒ 不再重跑。
    */
   const emittedEntityCardSignature = useMemo(
     () =>
@@ -843,14 +843,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         .join(","),
     [characterCards],
   );
-  /** 落卡觸發串 = 節點指紋 ＋ 既有自動落成卡簽章（兩者任一變化都值得重跑一次計畫）。 */
+  /** 落卡触发串 = 节点指纹 ＋ 既有自动落成卡签章（两者任一变化都值得重跑一次计画）。 */
   const emittedAnchorTrigger = `${emittedCardFingerprint}|${emittedEntityCardSignature}`;
   /**
-   * 節點集合一安靜就自動落卡：模板節點交出角色四視圖/場景圖 → 落成可 @ 引用的卡
-   * （冪等由決定性卡 id + existing 比對保證；`metadata.entityCardId` 標記亦視為已建）。
-   * 用「已完成觸發串」而非逐節點旗標：換模板/換項目（id 全變）自然重跑。
-   * 收斂：建卡那輪會寫 entityCardId 標記 → 節點指紋變一次 → 第二輪計畫為空
-   * （marker 已存在不建卡、分鏡引用已在）→ 不再產生任何 patch。
+   * 节点集合一安静就自动落卡：模板节点交出角色四视图/场景图 → 落成可 @ 引用的卡
+   * （幂等由决定性卡 id + existing 比对保证；`metadata.entityCardId` 标记亦视为已建）。
+   * 用「已完成触发串」而非逐节点旗标：换模板/换项目（id 全变）自然重跑。
+   * 收敛：建卡那轮会写 entityCardId 标记 → 节点指纹变一次 → 第二轮计画为空
+   * （marker 已存在不建卡、分镜引用已在）→ 不再产生任何 patch。
    */
   useEffect(() => {
     if (!emittedAnchorTrigger) return;
@@ -858,24 +858,24 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     const timer = window.setTimeout(() => {
       emittedAnchorDoneRef.current = emittedAnchorTrigger;
       void autoAnchorEmittedCards(canvasRef.current.nodes.map(toAgentOutputNodeRef), {
-        // 落卡標記：寫進**擁有該卡的那顆節點**的 metadata（自動動作不進撤銷棧）。
+        // 落卡标记：写进**拥有该卡的那颗节点**的 metadata（自动动作不进撤销栈）。
         onEntityCardId: (nodeId, cardId) => {
           patchNodeMetadata(nodeId, { entityCardId: cardId }, { history: false });
         },
         onShotBackfill: (items) => {
-          // 分鏡節點的卡引用欄（門禁欄名）寫進 metadata：patch 是 merge，欄位形狀對得上
-          // `CanvasNodeMetadata`（WS7 四欄白名單成員）。自動動作不進撤銷棧
-          //（history:false，同進度/自然尺寸的寫法）。
+          // 分镜节点的卡引用栏（门禁栏名）写进 metadata：patch 是 merge，栏位形状对得上
+          // `CanvasNodeMetadata`（WS7 四栏白名单成员）。自动动作不进撤销栈
+          //（history:false，同进度/自然尺寸的写法）。
           for (const item of items) {
             const { nodeId, ...cardRefs } = item;
             patchNodeMetadata(nodeId, cardRefs, { history: false });
           }
         },
-        // 卡名**第二來源**（C）：`nameFrom:"input"` 的三鍵全空時，往上找第一個有非空文本
-        // 的上游節點取第一行（走 canvas 連線＝真連線欄位 fromNodeId→toNodeId）。
+        // 卡名**第二来源**（C）：`nameFrom:"input"` 的三键全空时，往上找第一个有非空文本
+        // 的上游节点取第一行（走 canvas 连线＝真连线栏位 fromNodeId→toNodeId）。
         resolveName: (ref) => upstreamTextNameFor(ref.id, canvasRef.current.nodes, canvasRef.current.connections),
-        // 退回可見化：真的只能拿節點標題當卡名（「正面」）時給一行提示——不新造通知元件，
-        // 用站內既有 toast（root layout 已掛 <Toaster/>）。真源＝落卡計畫的 nameFallbacks。
+        // 退回可见化：真的只能拿节点标题当卡名（「正面」）时给一行提示——不新造通知元件，
+        // 用站内既有 toast（root layout 已挂 <Toaster/>）。真源＝落卡计画的 nameFallbacks。
         onNameFallback: (fallbacks) => {
           console.warn("[canvas] 实体卡名退回节点标题", fallbacks.length);
           toast({
@@ -890,7 +890,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     return () => window.clearTimeout(timer);
   }, [emittedAnchorTrigger, autoAnchorEmittedCards, patchNodeMetadata]);
 
-  // ─────────────────────── B2：飛行聚焦（450ms easeOutCubic）
+  // ─────────────────────── B2：飞行聚焦（450ms easeOutCubic）
 
   const flyTo = useCallback((world: CanvasPosition, viewportWidth: number, viewportHeight: number, targetK?: number) => {
     const start = viewportRef.current;
@@ -913,13 +913,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     flyRafRef.current = requestAnimationFrame(step);
   }, []);
 
-  // ─────────────────────── Wave C：agent 操作的執行/回報（自動執行；可 undo/redo 撤銷）
+  // ─────────────────────── Wave C：agent 操作的执行/回报（自动执行；可 undo/redo 撤销）
 
   /**
-   * 執行 agent 佇列頭操作（自動執行，無人工確認）。回傳 run_generation 清單交宿主觸發生成。
-   * 用佇列頭自己捕獲的 session id 回報結果（不是 sessionIdRef.current 當下值）——
-   * 這是本次修的 bug 本體：舊版讀當下 session，使用者切過 session 就報錯 sid。
-   * resolve 後從佇列摘除該筆，UI 綁的 pendingAgentOps（佇列頭）自動前進到下一筆。
+   * 执行 agent 伫列头操作（自动执行，无人工确认）。回传 run_generation 清单交宿主触发生成。
+   * 用伫列头自己捕获的 session id 回报结果（不是 sessionIdRef.current 当下值）——
+   * 这是本次修的 bug 本体：旧版读当下 session，使用者切过 session 就报错 sid。
+   * resolve 后从伫列摘除该笔，UI 绑的 pendingAgentOps（伫列头）自动前进到下一笔。
    */
   const applyAgentOps = useCallback((): { runGeneration: { nodeId: string; prompt?: string; model?: string; size?: string; count?: number }[] } => {
     const head = getQueueHead(agentOpsQueueRef.current);
@@ -937,12 +937,12 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       } else if (op.type === "run_generation") {
         result.runGeneration.push({ nodeId: op.node_id, prompt: op.prompt, model: op.model, size: op.size, count: op.count });
       } else if (op.type === "set_project_meta") {
-        // 2026-09-16 G1：專案級欄位（作品類型/流程步/劇集清單）的唯一寫入口。
-        // reducer 只認 nodes/connections，這三欄在 CanvasProject 頂層，故在此執行。
-        // 載荷不可信（agent 產出經 SSE 反序列化，型別不保證）：一律先過
-        // normalizeProjectMetaPatch 逐欄白名單 —— 非法欄位被省略＝不動該欄，
-        // 不讓模型的一個錯 enum 清掉用戶已填的劇集清單。空 patch 直接跳過，
-        // 免得多推一次 state 造成無謂的存檔 debounce 與快照上行。
+        // 2026-09-16 G1：专案级栏位（作品类型/流程步/剧集清单）的唯一写入口。
+        // reducer 只认 nodes/connections，这三栏在 CanvasProject 顶层，故在此执行。
+        // 载荷不可信（agent 产出经 SSE 反序列化，型别不保证）：一律先过
+        // normalizeProjectMetaPatch 逐栏白名单 —— 非法栏位被省略＝不动该栏，
+        // 不让模型的一个错 enum 清掉用户已填的剧集清单。空 patch 直接跳过，
+        // 免得多推一次 state 造成无谓的存档 debounce 与快照上行。
         const patch = normalizeProjectMetaPatch(op.patch);
         if (Object.keys(patch).length > 0) setProjectMeta(patch);
       }
@@ -954,14 +954,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       void postCanvasOpsResult(sid, requestId, { ok: true, ...(createdIds.length ? { created_node_ids: createdIds } : {}) });
     }
     return result;
-    // setProjectMeta 不在依賴陣列：它是 useCallback(..., [])（身分恆定，無過期閉包問題），
-    // 且本 useCallback 宣告在它之前 —— 寫進陣列會在 render 期讀到 TDZ 的 const 而直接炸。
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 setProjectMeta：它是本檔案第 1051 行才宣告的 useCallback（在本 callback 之後），列入依賴陣列會在 render 期觸發 TDZ（Cannot access before initialization）；身分恆定故無閉包過期風險。
+    // setProjectMeta 不在依赖阵列：它是 useCallback(..., [])（身分恒定，无过期闭包问题），
+    // 且本 useCallback 宣告在它之前 —— 写进阵列会在 render 期读到 TDZ 的 const 而直接炸。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 setProjectMeta：它是本档案第 1051 行才宣告的 useCallback（在本 callback 之后），列入依赖阵列会在 render 期触发 TDZ（Cannot access before initialization）；身分恒定故无闭包过期风险。
   }, [pushHistory]);
 
   /**
-   * 拒絕 agent 佇列頭操作（結果回報 gateway，讓工具調用拿到明確拒絕而非超時）。
-   * 同樣用該筆捕獲的 session id，不用 sessionIdRef.current。
+   * 拒绝 agent 伫列头操作（结果回报 gateway，让工具调用拿到明确拒绝而非超时）。
+   * 同样用该笔捕获的 session id，不用 sessionIdRef.current。
    */
   const dismissAgentOps = useCallback((reason?: string) => {
     const head = getQueueHead(agentOpsQueueRef.current);
@@ -985,8 +985,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       ...(snapshot.deletedNodes && snapshot.deletedNodes.length > 0 ? { deletedNodes: snapshot.deletedNodes } : {}),
     });
     setViewportState(snapshot.viewport);
-    // 還原是同步 dispatch，但 React 批次更新到下一帧才落地；
-    // 用 microtask 解鎖，避免同一輪裡的 pushHistory 把還原也記成一步。
+    // 还原是同步 dispatch，但 React 批次更新到下一帧才落地；
+    // 用 microtask 解锁，避免同一轮里的 pushHistory 把还原也记成一步。
     void Promise.resolve().then(() => {
       restoringRef.current = false;
     });
@@ -1006,7 +1006,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     applySnapshot(result.snapshot);
   }, [history, snapshotNow, applySnapshot]);
 
-  // ─────────────────────── 專案匯入/匯出/清空
+  // ─────────────────────── 专案汇入/汇出/清空
 
   const loadProject = useCallback(
     (project: {
@@ -1034,7 +1034,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (project.viewport) setViewportState(project.viewport);
       if (project.backgroundMode) setBackgroundMode(project.backgroundMode);
       if (project.title) setProjectTitle(project.title);
-      // 與 openSavedCanvas 同語義但「不覆蓋沒帶的欄位」：匯入檔可能只含 nodes。
+      // 与 openSavedCanvas 同语义但「不覆盖没带的栏位」：汇入档可能只含 nodes。
       const meta = canvasProjectMeta(project);
       if (meta.projectType !== undefined) setProjectType(meta.projectType);
       if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
@@ -1050,10 +1050,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const exportProject = useCallback((): CanvasProject => buildProject(), [buildProject]);
 
   /**
-   * 專案級欄位寫入口（刀 1 前端接線；P1-8 起多帶風格綁定第四欄）。
-   * UI 面板與 agent 驅動路徑共用這一個出口；傳入 `undefined` = 清除該欄
-   * （例：電影改回未設定、解除風格綁定）。只做型別守門（非法值不進 state，
-   * 免得存檔時被 store 靜默丟掉），完整清洗仍只在 project-store。
+   * 专案级栏位写入口（刀 1 前端接线；P1-8 起多带风格绑定第四栏）。
+   * UI 面板与 agent 驱动路径共用这一个出口；传入 `undefined` = 清除该栏
+   * （例：电影改回未设定、解除风格绑定）。只做型别守门（非法值不进 state，
+   * 免得存档时被 store 静默丢掉），完整清洗仍只在 project-store。
    */
   const setProjectMeta = useCallback(
     (patch: {
@@ -1071,13 +1071,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         setCurrentStep(patch.currentStep);
       }
       if ("episodes" in patch) setEpisodes(patch.episodes ?? []);
-      // 風格綁定：合法＝STYLE_LIBRARY 註冊表查得到（同一把尺：normalizeProjectStyleId）；
-      // `undefined` 依 "k" in patch 慣例＝清除綁定。
+      // 风格绑定：合法＝STYLE_LIBRARY 注册表查得到（同一把尺：normalizeProjectStyleId）；
+      // `undefined` 依 "k" in patch 惯例＝清除绑定。
       if ("styleId" in patch && (patch.styleId === undefined || normalizeProjectStyleId(patch.styleId))) {
         setStyleId(patch.styleId === undefined ? undefined : (normalizeProjectStyleId(patch.styleId) as string));
       }
-      // 解說劇設定（P1-5／D7）：值域判據與落盤端同一份（isCanvasScriptType／normalizeVoiceId）；
-      // `undefined` 依 "k" in patch 慣例＝清除該欄。
+      // 解说剧设定（P1-5／D7）：值域判据与落盘端同一份（isCanvasScriptType／normalizeVoiceId）；
+      // `undefined` 依 "k" in patch 惯例＝清除该栏。
       if ("scriptType" in patch && (patch.scriptType === undefined || isCanvasScriptType(patch.scriptType))) {
         setScriptType(patch.scriptType as CanvasScriptType | undefined);
       }
@@ -1098,7 +1098,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setSelectedNodeId(null);
   }, [pushHistory]);
 
-  // ─────────────────────── 幾何
+  // ─────────────────────── 几何
 
   const nodeIndex = useMemo(() => {
     const map = new Map<string, CanvasNode>();
@@ -1214,7 +1214,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     refreshSavedProjects,
     openSavedCanvas,
     restoreAgentSnapshot,
-    // REQ-B2：項目 id 直讀 ref（ref 由 useCanvasProjectSync 擁有，不另存一份狀態）。
+    // REQ-B2：项目 id 直读 ref（ref 由 useCanvasProjectSync 拥有，不另存一份状态）。
     getProjectId: () => projectIdRef.current,
     pathFor,
     moveNodes,

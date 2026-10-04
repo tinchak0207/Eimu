@@ -1,18 +1,18 @@
 /**
- * memory-batch.ts — VPS gateway 側批次器（契約 §3.1/§6/§8；PRD §5.2）。
+ * memory-batch.ts — VPS gateway 侧批次器（契约 §3.1/§6/§8；PRD §5.2）。
  *
- * 依賴注入、可單測：index.ts 接線（opencode 一次性 session、/internal 路由、
- * 定時器、sk-biz hashKey 適配）由後續片執行，本檔只匯出 `createMemoryBatch(deps)`。
+ * 依赖注入、可单测：index.ts 接线（opencode 一次性 session、/internal 路由、
+ * 定时器、sk-biz hashKey 适配）由后续片执行，本档只汇出 `createMemoryBatch(deps)`。
  *
- * 【本地決定 — 契約 §2 路徑表之外的唯一例外（2026-09-15 本片簽字）】
- * 契約 §2 把 cursor/pending/batches 都列在 blob 路徑（`agent-memory/cursor.json`
- * 等），但契約 §0 實測「VPS .env 沒有 IMAGE_DATA_*，gateway 不能直讀寫 blob」。
- * 故批次狀態一律落 gateway 進程本地檔（stateDir 旁，無憑證、可審計）：
- *   - 游標      `memory-cursor.json`
- *   - 待重試    `memory-pending/{batch_id}.json`
- *   - 死信      `memory-failed/{batch_id}.json`（attempts≥5，記日誌不含正文）
- *   - 批次報告  `memory-batches/{batch_id}.json`（鏡像 §2 batches 路徑語義）
- * 真正的存儲權威寫入仍只經 HMAC 端點（§3），本檔不碰 blob。
+ * 【本地决定 — 契约 §2 路径表之外的唯一例外（2026-09-15 本片签字）】
+ * 契约 §2 把 cursor/pending/batches 都列在 blob 路径（`agent-memory/cursor.json`
+ * 等），但契约 §0 实测「VPS .env 没有 IMAGE_DATA_*，gateway 不能直读写 blob」。
+ * 故批次状态一律落 gateway 进程本地档（stateDir 旁，无凭证、可审计）：
+ *   - 游标      `memory-cursor.json`
+ *   - 待重试    `memory-pending/{batch_id}.json`
+ *   - 死信      `memory-failed/{batch_id}.json`（attempts≥5，记日志不含正文）
+ *   - 批次报告  `memory-batches/{batch_id}.json`（镜像 §2 batches 路径语义）
+ * 真正的存储权威写入仍只经 HMAC 端点（§3），本档不碰 blob。
  */
 import { createHmac } from "node:crypto"
 import {
@@ -33,34 +33,34 @@ import {
   type GateContext,
 } from "./memory-gate.ts"
 
-// ─────────────────────────── HMAC 簽名工具（逐字比照 src/lib/memory-hmac.ts，契約 §3）
-// 為什麼按 raw body bytes 驗簽：gateway 簽的是它送出的那串位元組；repo 端一律
-// `await req.arrayBuffer()` 取原始位元組再算。GET（export）沒有 body → 對「空 bytes」驗簽。
-// 憑據紀律：密鑰與簽名值永不寫進 log／回應／記憶檔。
+// ─────────────────────────── HMAC 签名工具（逐字比照 src/lib/memory-hmac.ts，契约 §3）
+// 为什么按 raw body bytes 验签：gateway 签的是它送出的那串位元组；repo 端一律
+// `await req.arrayBuffer()` 取原始位元组再算。GET（export）没有 body → 对「空 bytes」验签。
+// 凭据纪律：密钥与签名值永不写进 log／回应／记忆档。
 
 export const MEMORY_SIGNATURE_HEADER = "x-memory-signature"
 
 const SIGNATURE_PREFIX = "sha256="
 
-/** 產生 `sha256=<hex>` 簽名（核心演算法逐字等同 repo 版 signMemoryBody）。 */
+/** 产生 `sha256=<hex>` 签名（核心演算法逐字等同 repo 版 signMemoryBody）。 */
 export function signMemoryBody(rawBody: ArrayBuffer, secret: string): string {
   const digest = createHmac("sha256", secret).update(new Uint8Array(rawBody)).digest("hex")
   return `${SIGNATURE_PREFIX}${digest}`
 }
 
-/** gateway 包裝：string/Uint8Array → 將送出的 raw bytes → 簽名頭值。 */
+/** gateway 包装：string/Uint8Array → 将送出的 raw bytes → 签名头值。 */
 export function signMemoryBytes(raw: string | Uint8Array, secret: string): string {
   const bytes = typeof raw === "string" ? new TextEncoder().encode(raw) : raw
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
   return signMemoryBody(buffer, secret)
 }
 
-/** 簽名 GET 用的空 bytes 簽名（§3.3/3.4 召回語料拉取同此演算法）。 */
+/** 签名 GET 用的空 bytes 签名（§3.3/3.4 召回语料拉取同此演算法）。 */
 export function signEmptyMemoryBody(secret: string): string {
   return signMemoryBytes(new Uint8Array(0), secret)
 }
 
-// ─────────────────────────── 契約 §6 prompt（唯一真源，逐字，promptVersion="v1"）
+// ─────────────────────────── 契约 §6 prompt（唯一真源，逐字，promptVersion="v1"）
 
 export const MEMORY_PROMPT_VERSION = "v1"
 
@@ -80,7 +80,7 @@ HARD RULES - a proposal violating any of these is discarded downstream by the sy
 Output schema (JSON only, no markdown fence):
 {"session_id":"<id>","candidates":[{"scope":"private|shared","domain":"<one-level domain>","slug":"<kebab-case>","description":"<one line, <=120 chars>","type":"user|feedback|project|domain|workflow","body":"<=2000 chars; for feedback/project include **Why:** and **How to apply:**","links":["<other-slug>"],"evidence":"<verbatim quote of the tool result or the user's words, <=200 chars>","evidence_kind":"tool_result|user_confirmed|verbatim","self_score":1-5,"self_score_reason":"<one line>"}],"rejected":[{"note":"<what you skipped>","reason":"one_off|greeting|derivable|no_evidence|sensitive"}]}`
 
-/** Verifier prompt（G8，僅 shared、換模型）——契約 §6 逐字；P1-1 本片接線進 runBatch。 */
+/** Verifier prompt（G8，仅 shared、换模型）——契约 §6 逐字；P1-1 本片接线进 runBatch。 */
 export const VERIFIER_PROMPT_V1 = `You are an independent fact-checker for a shared knowledge base used by an AI image/video generation assistant.
 Input: one candidate knowledge item. Answer three questions about it.
 
@@ -92,31 +92,31 @@ Output JSON only: {"transferable":true|false,"evidenced":true|false,"clean":true
 A candidate is admitted only if all three are true.`
 
 /**
- * Oracle prompt（PRD §5.6 抽檢、換模型）——【契約外新增常量】（§6 只有 curator/verifier），
- * 依 PRD 判據逐字面「準確？可遷移？無用戶痕跡？」，每條 0/1/2 分。
+ * Oracle prompt（PRD §5.6 抽检、换模型）——【契约外新增常量】（§6 只有 curator/verifier），
+ * 依 PRD 判据逐字面「准确？可迁移？无用户痕迹？」，每条 0/1/2 分。
  */
 export const ORACLE_PROMPT_V1 = `You are an independent quality oracle auditing one item admitted into a shared knowledge base used by an AI image/video generation assistant.
 Judge the item on three questions: is it accurate, is it transferable to a different user's project, and is it free of any user-identifying trace (names, account ids, session ids, emails, URLs, file paths, prices, keys)?
 Score the item 0, 1, or 2: 2 = passes all three; 1 = minor doubt on one aspect; 0 = fails any aspect decisively.
 Output JSON only: {"score":0|1|2,"reason":"<one line>"}`
 
-// ─────────────────────────── 形狀
+// ─────────────────────────── 形状
 
-/** 入庫 doc：promptVersion 由批次蓋章補上。 */
+/** 入库 doc：promptVersion 由批次盖章补上。 */
 export interface IngestDocInput extends AgentMemoryDocInput {}
 
-/** 篩選用會話元資料（wiring 適配：opencode 目錄行 parentID/time.updated、gateway hashKey(apiKey)、訊息/工具計數）。 */
+/** 筛选用会话元资料（wiring 适配：opencode 目录行 parentID/time.updated、gateway hashKey(apiKey)、讯息/工具计数）。 */
 export interface MemorySessionRecord {
   id: string
-  /** 非空即 subagent 子會話 → 剔除（PRD §5.2 條件⑤）。 */
+  /** 非空即 subagent 子会话 → 剔除（PRD §5.2 条件⑤）。 */
   parentId?: string | null
-  /** ISO 字串或 epoch ms（opencode time.*）；「當日 updated」判定用。 */
+  /** ISO 字串或 epoch ms（opencode time.*）；「当日 updated」判定用。 */
   updatedAt?: string | number
-  /** SHA-256(apiKey) 前 12 bytes hex（契約 §1，與 gateway hashKey 同算法）。 */
+  /** SHA-256(apiKey) 前 12 bytes hex（契约 §1，与 gateway hashKey 同算法）。 */
   ownerKey?: string
   userMessages?: number
   successfulToolCalls?: number
-  /** 知識型工具呼叫數：篩選加權排序用（PRD §5.2 條件③）。 */
+  /** 知识型工具呼叫数：筛选加权排序用（PRD §5.2 条件③）。 */
   knowledgeToolCalls?: number
 }
 
@@ -127,24 +127,24 @@ export interface MemoryBatchEnv {
   MEMORY_BATCH_MAX_SESSIONS?: string
   MEMORY_BATCH_MAX_LLM?: string
   MEMORY_SHARED_ENABLED?: string
-  /** G8 verifier 模型（`provider/model`）；未配置 → G8 跳過並誠實記 g8_skipped（不放過不誤殺）。 */
+  /** G8 verifier 模型（`provider/model`）；未配置 → G8 跳过并诚实记 g8_skipped（不放过不误杀）。 */
   MEMORY_VERIFIER_MODEL?: string
-  /** §5.6 oracle 抽檢模型；未配置 → 抽檢跳過並誠實記 sampling.skipped。 */
+  /** §5.6 oracle 抽检模型；未配置 → 抽检跳过并诚实记 sampling.skipped。 */
   MEMORY_ORACLE_MODEL?: string
-  /** 批次狀態檔目錄（默認 "."，即 gateway 進程 cwd 旁）。 */
+  /** 批次状态档目录（默认 "."，即 gateway 进程 cwd 旁）。 */
   MEMORY_STATE_DIR?: string
 }
 
 export interface MemoryBatchDeps {
   listSessions(): Promise<MemorySessionRecord[]>
   transcriptOf(sessionId: string): Promise<string>
-  /** 一次性 LLM 呼叫（wiring 用 handleExtractLessons 迴環：建 session→POST→取 text→finally DELETE，120s 超時）。 */
+  /** 一次性 LLM 呼叫（wiring 用 handleExtractLessons 回环：建 session→POST→取 text→finally DELETE，120s 超时）。 */
   callLlm(prompt: string): Promise<string>
-  /** G8 verifier（換模型，契約 §5/PRD §5.4）：prompt + `provider/model`；未配置時本檔不呼叫。 */
+  /** G8 verifier（换模型，契约 §5/PRD §5.4）：prompt + `provider/model`；未配置时本档不呼叫。 */
   callVerifierLlm(prompt: string, model: string): Promise<string>
-  /** §5.6 oracle 抽檢（換模型）：同 verifier 通道形態；未配置時本檔不呼叫。 */
+  /** §5.6 oracle 抽检（换模型）：同 verifier 通道形态；未配置时本档不呼叫。 */
   callOracleLlm(prompt: string, model: string): Promise<string>
-  /** 送 ingest：rawBody 是即將送出的精確位元組（本檔已按其簽名，不得在實作端重新序列化）。 */
+  /** 送 ingest：rawBody 是即将送出的精确位元组（本档已按其签名，不得在实作端重新序列化）。 */
   postIngest(
     path: string,
     rawBody: string,
@@ -157,29 +157,29 @@ export interface MemoryBatchDeps {
 export interface MemoryBatchOptions {
   dryRun?: boolean
   sessionIds?: string[]
-  /** YYYY-MM-DD（UTC）；默認取 deps.now() 當日。 */
+  /** YYYY-MM-DD（UTC）；默认取 deps.now() 当日。 */
   date?: string
 }
 
 /**
- * §5.6 抽檢報告段（**零正文**）。shared 堆為判據主體；private 同機制只記 badge。
- * avg 為有效分數均值；全錯時 null（不灌水 0）。
+ * §5.6 抽检报告段（**零正文**）。shared 堆为判据主体；private 同机制只记 badge。
+ * avg 为有效分数均值；全错时 null（不灌水 0）。
  */
 export interface MemorySamplingReport {
-  /** shared 抽檢樣本數（實際拿到 oracle 判分的條數）。 */
+  /** shared 抽检样本数（实际拿到 oracle 判分的条数）。 */
   sampled: number
   avg: number | null
-  /** true = 平均 <1.5 或任一 0 分 → 該批 shared 已全部轉 pending_review。 */
+  /** true = 平均 <1.5 或任一 0 分 → 该批 shared 已全部转 pending_review。 */
   triggered: boolean
-  /** oracle 呼叫失敗數（基礎設施失敗≠候選有罪；不計入 avg，誠實計數）。 */
+  /** oracle 呼叫失败数（基础设施失败≠候选有罪；不计入 avg，诚实计数）。 */
   errors: number
-  /** oracle 未配置／LLM 預算耗盡時「本應抽檢而未抽」的條數（shared＋private）；誠實旗標。 */
+  /** oracle 未配置／LLM 预算耗尽时「本应抽检而未抽」的条数（shared＋private）；诚实旗标。 */
   skipped: number
-  /** private 抽檢中得分 <2 的條數（badge only，PRD §5.6 不自動轉 pending）。 */
+  /** private 抽检中得分 <2 的条数（badge only，PRD §5.6 不自动转 pending）。 */
   private_badged: number
 }
 
-/** 批次報告（契約 §3.5 形狀；**不含任何正文**）。 */
+/** 批次报告（契约 §3.5 形状；**不含任何正文**）。 */
 export interface MemoryBatchReport {
   batch_id: string
   date: string
@@ -189,9 +189,9 @@ export interface MemoryBatchReport {
   stored: number
   rejected: Record<string, number>
   truncations: { sessions: number; llm_budget_hit: boolean }
-  /** G8 誠實旗標：shared 候選因 `MEMORY_VERIFIER_MODEL` 未配置而跳過驗證的條數。 */
+  /** G8 诚实旗标：shared 候选因 `MEMORY_VERIFIER_MODEL` 未配置而跳过验证的条数。 */
   g8_skipped: number
-  /** G8 抽檢段（入庫後）；未送 ingest（dryRun／無候選）時各欄為 0／null。 */
+  /** G8 抽检段（入库后）；未送 ingest（dryRun／无候选）时各栏为 0／null。 */
   sampling: MemorySamplingReport
   report_path?: string
 }
@@ -201,7 +201,7 @@ interface PendingEnvelope {
   created_at: string
   attempts: number
   next_retry_at: number
-  /** 將送出的精確 raw JSON bytes（string），重試時原位元重發——簽名必須對同一串。 */
+  /** 将送出的精确 raw JSON bytes（string），重试时原位元重发——签名必须对同一串。 */
   raw_body: string
 }
 
@@ -214,16 +214,16 @@ interface CursorState {
 const INGEST_PATH = "/api/agent/memory/ingest"
 const REVIEW_PATH = "/api/agent/memory/review"
 const CONCURRENCY = 3
-const MAX_ATTEMPTS = 5 // 指數退避上限（含跨 run 重試），超過落 memory-failed/
+const MAX_ATTEMPTS = 5 // 指数退避上限（含跨 run 重试），超过落 memory-failed/
 const DEFAULT_MAX_SESSIONS = 50
 const DEFAULT_MAX_LLM = 150
 const CURSOR_FILE = "memory-cursor.json"
 const PENDING_DIR = "memory-pending"
 const FAILED_DIR = "memory-failed"
 const REPORTS_DIR = "memory-batches"
-// badcase 集（PRD §5.6）：【本地決定】比照 pending 目錄系（見檔頭），落 `memory-badcases/`。
+// badcase 集（PRD §5.6）：【本地决定】比照 pending 目录系（见档头），落 `memory-badcases/`。
 const BADCASES_DIR = "memory-badcases"
-/** §5.6 抽檢判據常量：30%、最少 3（不足全抽）、平均 <1.5 或任一 0 分觸發。 */
+/** §5.6 抽检判据常量：30%、最少 3（不足全抽）、平均 <1.5 或任一 0 分触发。 */
 const SAMPLING_RATE = 0.3
 const SAMPLING_MIN = 3
 const SAMPLING_AVG_TRIGGER = 1.5
@@ -233,7 +233,7 @@ const DEFAULTS = {
   maxLlm: DEFAULT_MAX_LLM,
 } as const
 
-// ─────────────────────────── 小工具（純函式）
+// ─────────────────────────── 小工具（纯函式）
 
 function envInt(raw: string | undefined, fallback: number): number {
   const n = Number.parseInt(String(raw ?? ""), 10)
@@ -263,7 +263,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 併發池（上限 limit；回呼自行 try/catch，永不拋出中斷池）。 */
+/** 并发池（上限 limit；回呼自行 try/catch，永不抛出中断池）。 */
 async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let cursor = 0
   const workerCount = Math.max(1, Math.min(limit, items.length))
@@ -282,14 +282,14 @@ async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<vo
   await Promise.all(workers)
 }
 
-/** 抽檢量（§5.6）：30%，最少 3；不足 3 條全抽。 */
+/** 抽检量（§5.6）：30%，最少 3；不足 3 条全抽。 */
 function sampleSize(total: number): number {
   if (total <= 0) return 0
   if (total < SAMPLING_MIN) return total
   return Math.min(total, Math.max(SAMPLING_MIN, Math.ceil(total * SAMPLING_RATE)))
 }
 
-/** Fisher–Yates 洗牌取前 k（隨機抽樣，原地不改輸入）。 */
+/** Fisher–Yates 洗牌取前 k（随机抽样，原地不改输入）。 */
 function shuffleSample<T>(items: T[], k: number): T[] {
   const pool = [...items]
   for (let i = pool.length - 1; i > 0; i -= 1) {
@@ -301,17 +301,17 @@ function shuffleSample<T>(items: T[], k: number): T[] {
   return pool.slice(0, k)
 }
 
-/** 檔名安全化（docId 理論上已是 `${batch}-${slug}`，防衛性剝分隔符）。 */
+/** 档名安全化（docId 理论上已是 `${batch}-${slug}`，防卫性剥分隔符）。 */
 function safeFileSegment(value: string): string {
   return String(value ?? "").replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 120)
 }
 
-/** 均值保留 4 位小數（報告可讀；比較用四捨五入後值，觸發邊界與原始判據一致）。 */
+/** 均值保留 4 位小数（报告可读；比较用四舍五入后值，触发边界与原始判据一致）。 */
 function roundAvg(sum: number, count: number): number {
   return Math.round((sum / count) * 1e4) / 1e4
 }
 
-// ─────────────────────────── 工廠
+// ─────────────────────────── 工厂
 
 export function createMemoryBatch(deps: MemoryBatchDeps) {
   const stateDir = String(deps.env.MEMORY_STATE_DIR ?? "").trim() || "."
@@ -321,7 +321,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
   const reportsDir = join(stateDir, REPORTS_DIR)
   const badcasesDir = join(stateDir, BADCASES_DIR)
 
-  // ---- 本地狀態檔 IO（無憑證；見檔頭「本地決定」） ----
+  // ---- 本地状态档 IO（无凭证；见档头「本地决定」） ----
 
   function readJsonFile<T>(path: string): T | null {
     try {
@@ -337,7 +337,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       mkdirSync(dirname(path), { recursive: true })
       writeFileSync(path, JSON.stringify(value, null, 2), "utf8")
     } catch (err) {
-      // 只記檔名層級，不記內容。
+      // 只记档名层级，不记内容。
       console.error(`[memory-batch] state write failed: ${dirname(path)}`, (err as Error)?.name ?? "Error")
     }
   }
@@ -350,17 +350,17 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     return { processed: {} }
   }
 
-  // ---- 端點送出與重試 ----
+  // ---- 端点送出与重试 ----
 
   /**
-   * HMAC 端點通用送出（ingest 與 review 同一簽名通道，契約 §3 頭部紀律）：
-   * 對「將送出的精確 raw bytes」簽名；非 2xx／網路失敗 → ok:false，不落 log 正文。
+   * HMAC 端点通用送出（ingest 与 review 同一签名通道，契约 §3 头部纪律）：
+   * 对「将送出的精确 raw bytes」签名；非 2xx／网路失败 → ok:false，不落 log 正文。
    */
   async function postSigned(path: string, rawBody: string): Promise<{ ok: boolean; json: Record<string, unknown> | null }> {
     const secret = String(deps.env.MEMORY_INGEST_SECRET ?? "").trim()
     if (!secret) {
-      // 憑證紀律：只報缺配置事實，不印任何密鑰派生物。
-      console.error("[memory-batch] MEMORY_INGEST_SECRET 未配置，HMAC 端點拒絕送出。")
+      // 凭证纪律：只报缺配置事实，不印任何密钥派生物。
+      console.error("[memory-batch] MEMORY_INGEST_SECRET 未配置，HMAC 端点拒绝送出。")
       return { ok: false, json: null }
     }
     try {
@@ -397,8 +397,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
   }
 
   /**
-   * 跨 run 重試 pending 檔：指数退避（next_retry_at 由 attempts 推），
-   * attempts ≥ MAX_ATTEMPTS → 移入 memory-failed/ 並記日誌（只記 batch_id，不含正文）。
+   * 跨 run 重试 pending 档：指数退避（next_retry_at 由 attempts 推），
+   * attempts ≥ MAX_ATTEMPTS → 移入 memory-failed/ 并记日志（只记 batch_id，不含正文）。
    */
   async function drainPending(): Promise<void> {
     const nowMs = deps.now().getTime()
@@ -411,7 +411,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
           mkdirSync(failedDir, { recursive: true })
           renameSync(file, join(failedDir, `${env.batch_id}.json`))
         } catch {
-          /* 搬移失敗留待下輪 */
+          /* 搬移失败留待下轮 */
         }
         console.error(`[memory-batch] pending exhausted after ${MAX_ATTEMPTS} attempts → failed/: batch=${env.batch_id}`)
         continue
@@ -421,7 +421,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         try {
           unlinkSync(file)
         } catch {
-          /* 刪除失敗：下輪再試，冪等由端點 G5 兜 */
+          /* 删除失败：下轮再试，幂等由端点 G5 兜 */
         }
         console.log(`[memory-batch] pending replayed: batch=${env.batch_id}`)
         continue
@@ -430,7 +430,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       writePending({
         ...env,
         attempts,
-        // 指數退避：2^attempts 分鐘（32→64→128→256 分鐘級），跨 run/排程自然生效。
+        // 指数退避：2^attempts 分钟（32→64→128→256 分钟级），跨 run/排程自然生效。
         next_retry_at: nowMs + Math.min(2 ** attempts, 240) * 60_000,
       })
       try {
@@ -448,19 +448,19 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     const nowDate = deps.now()
 
     if (!dryRun && !envBool(deps.env.MEMORY_BATCH_ENABLED, false)) {
-      // 總開關（§8 默認 false）：未明確開啟時手動跑要 dryRun 或設 true，避免誤寫生產。
-      throw new Error("MEMORY_BATCH_ENABLED=false（總開關未開啟；先用 dryRun，或設 MEMORY_BATCH_ENABLED=true）")
+      // 总开关（§8 默认 false）：未明确开启时手动跑要 dryRun 或设 true，避免误写生产。
+      throw new Error("MEMORY_BATCH_ENABLED=false（总开关未开启；先用 dryRun，或设 MEMORY_BATCH_ENABLED=true）")
     }
 
     const date =
       typeof options.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(options.date)
         ? options.date
         : nowDate.toISOString().slice(0, 10)
-    const batchId = date // §3.1 例：batch_id 用日期（穩定可追溯；id=${batchId}-${slug} 由服務端拼）
+    const batchId = date // §3.1 例：batch_id 用日期（稳定可追溯；id=${batchId}-${slug} 由服务端拼）
     const maxSessions = envInt(deps.env.MEMORY_BATCH_MAX_SESSIONS, DEFAULTS.maxSessions)
     const maxLlm = envInt(deps.env.MEMORY_BATCH_MAX_LLM, DEFAULTS.maxLlm)
     const sharedEnabled = envBool(deps.env.MEMORY_SHARED_ENABLED, true)
-    // G8/抽檢模型（§8 新增 env）：未配置＝該閘跳過，誠實記數（不放過不誤殺）。
+    // G8/抽检模型（§8 新增 env）：未配置＝该闸跳过，诚实记数（不放过不误杀）。
     const verifierModel = String(deps.env.MEMORY_VERIFIER_MODEL ?? "").trim()
     const oracleModel = String(deps.env.MEMORY_ORACLE_MODEL ?? "").trim()
 
@@ -487,7 +487,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     const cursor = loadCursor()
     const all = await deps.listSessions()
 
-    // 條件⑤：剔除 subagent 子會話（parent_id 非空即剔）——含手動指定 sessionIds 的場合。
+    // 条件⑤：剔除 subagent 子会话（parent_id 非空即剔）——含手动指定 sessionIds 的场合。
     const eligible = all.filter((s) => s && typeof s.id === "string" && !s.parentId)
 
     let candidates: MemorySessionRecord[]
@@ -496,19 +496,19 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       candidates = eligible.filter((s) => wanted.has(s.id))
     } else {
       candidates = eligible.filter(
-        // 條件①當日 updated；條件②用戶消息≥3 或有成功工具呼叫；條件④游標去重（含已處理無產出）。
+        // 条件①当日 updated；条件②用户消息≥3 或有成功工具呼叫；条件④游标去重（含已处理无产出）。
         (s) =>
           isoDateOf(s.updatedAt) === date &&
           ((s.userMessages ?? 0) >= 3 || (s.successfulToolCalls ?? 0) >= 1) &&
           !cursor.processed[s.id],
       )
-      // 條件③：知識型工具加權排序（降序；同權取較新）。
+      // 条件③：知识型工具加权排序（降序；同权取较新）。
       candidates.sort(
         (a, b) =>
           (b.knowledgeToolCalls ?? 0) - (a.knowledgeToolCalls ?? 0) ||
           epochOf(b.updatedAt) - epochOf(a.updatedAt),
       )
-      // 預算：會話數截斷入報告。
+      // 预算：会话数截断入报告。
       if (candidates.length > maxSessions) {
         report.truncations.sessions = candidates.length - maxSessions
         candidates = candidates.slice(0, maxSessions)
@@ -521,11 +521,11 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     const gateCtxBase: Omit<GateContext, "ownerKeyHint"> = { sharedEnabled }
 
     /**
-     * G8 雙模型一致閘（契約 §5、PRD §5.4，僅 shared、postIngest 前逐條）：
-     * 三布爾全 true 才過；收到非 JSON／欄位非 true → 丟棄（g8_rejected）。
-     * 模型未配置／LLM 預算耗盡／verifier 呼叫失敗 → skip（g8_skipped 誠實旗標：
-     * 不靜默放過——報告留痕；不誤殺——基礎設施失敗不判候選有罪）。
-     * dryRun 不啟動閘 LLM（curator 是預覽主體照跑，但抽檢／驗證屬「會等的錢」不花）。
+     * G8 双模型一致闸（契约 §5、PRD §5.4，仅 shared、postIngest 前逐条）：
+     * 三布尔全 true 才过；收到非 JSON／栏位非 true → 丢弃（g8_rejected）。
+     * 模型未配置／LLM 预算耗尽／verifier 呼叫失败 → skip（g8_skipped 诚实旗标：
+     * 不静默放过——报告留痕；不误杀——基础设施失败不判候选有罪）。
+     * dryRun 不启动闸 LLM（curator 是预览主体照跑，但抽检／验证属「会等的钱」不花）。
      */
     async function g8Check(doc: IngestDocInput): Promise<"pass" | "reject" | "skip"> {
       if (!verifierModel) return "skip"
@@ -544,7 +544,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       try {
         parsed = JSON.parse(stripJsonFence(text))
       } catch {
-        return "reject" // 有回應但不可信 → 丟棄（spec：非 JSON→丟棄）。
+        return "reject" // 有回应但不可信 → 丢弃（spec：非 JSON→丢弃）。
       }
       const v = parsed as { transferable?: unknown; evidenced?: unknown; clean?: unknown }
       return v && v.transferable === true && v.evidenced === true && v.clean === true
@@ -558,9 +558,9 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       | { kind: "budget" }
 
     /**
-     * §5.6 oracle 逐條判分（0/1/2）。呼叫失敗＝error（不計入 avg）；預算耗盡＝budget
-     * （sampling.skipped）；收到畸形輸出（非 JSON／score 非 0/1/2）→ fail-closed 記 0
-     * （抽檢的終態是人工可 activate 放行，誤傷可逆，寧可送複核）。
+     * §5.6 oracle 逐条判分（0/1/2）。呼叫失败＝error（不计入 avg）；预算耗尽＝budget
+     * （sampling.skipped）；收到畸形输出（非 JSON／score 非 0/1/2）→ fail-closed 记 0
+     * （抽检的终态是人工可 activate 放行，误伤可逆，宁可送复核）。
      */
     async function oracleOf(doc: IngestDocInput): Promise<OracleOutcome> {
       if (llmUsed >= maxLlm) return { kind: "budget" }
@@ -588,7 +588,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       }
     }
 
-    /** 抽檢樣本逐條落 badcase 集（【本地決定】比照 pending 目錄系 → `memory-badcases/`）。 */
+    /** 抽检样本逐条落 badcase 集（【本地决定】比照 pending 目录系 → `memory-badcases/`）。 */
     function writeBadcase(docId: string, doc: IngestDocInput, score: number, reason: string): void {
       writeJsonFile(join(badcasesDir, `${safeFileSegment(docId)}.json`), {
         doc_id: docId,
@@ -610,18 +610,18 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     }
 
     /**
-     * 入庫後抽檢（只認端點回執 accepted＝「真寫入」權威）：
-     * shared 隨機 30%（最少 3、不足全抽）→ oracle；平均 <1.5 或任一 0 分 →
+     * 入库后抽检（只认端点回执 accepted＝「真写入」权威）：
+     * shared 随机 30%（最少 3、不足全抽）→ oracle；平均 <1.5 或任一 0 分 →
      * POST `/api/agent/memory/review` {batch_id, action:"pending_review"}（同一 HMAC
-     * 簽名通道；repo 端預設只翻 shared，見 store reviewMemoryDocs）。
-     * private 同機制判分但只記 badge 不翻轉（PRD §5.6）。
+     * 签名通道；repo 端预设只翻 shared，见 store reviewMemoryDocs）。
+     * private 同机制判分但只记 badge 不翻转（PRD §5.6）。
      */
     async function runSampling(acceptedIds: string[]): Promise<void> {
       const sampling = report.sampling
       const acceptedSet = new Set(acceptedIds)
       const pairs: Array<{ id: string; doc: IngestDocInput }> = []
       for (const doc of docs) {
-        // 服務端 id = `${batchId}-${slug}`；G5 更新保留舊 id（批次前綴可能不同）→ 後綴比對兜底。
+        // 服务端 id = `${batchId}-${slug}`；G5 更新保留旧 id（批次前缀可能不同）→ 后缀比对兜底。
         const expected = `${batchId}-${doc.slug}`
         const id = acceptedSet.has(expected)
           ? expected
@@ -656,7 +656,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       if (sampling.triggered) {
         const reviewRaw = JSON.stringify({ batch_id: batchId, action: "pending_review" })
         const { ok } = await postSigned(REVIEW_PATH, reviewRaw)
-        if (!ok) bump("review_post_failed") // 翻轉請求送出失敗：留痕，不假裝已轉。
+        if (!ok) bump("review_post_failed") // 翻转请求送出失败：留痕，不假装已转。
       }
       for (const pair of shuffleSample(privatePairs, sampleSize(privatePairs.length))) {
         const outcome = await oracleOf(pair.doc)
@@ -676,7 +676,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     await mapPool(candidates, CONCURRENCY, async (session) => {
       if (llmUsed >= maxLlm) {
         report.truncations.llm_budget_hit = true
-        return // 預算截斷：不標已處理，留給下批。
+        return // 预算截断：不标已处理，留给下批。
       }
       const mark = (produced: boolean) => {
         cursor.processed[session.id] = { at: nowDate.toISOString(), produced }
@@ -695,7 +695,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         return
       }
       llmUsed += 1
-      // 迴環形狀比照輪子 handleExtractLessons：prompt + \n\n<transcript>\n…\n</transcript>。
+      // 回环形状比照轮子 handleExtractLessons：prompt + \n\n<transcript>\n…\n</transcript>。
       const prompt = `${CURATOR_PROMPT_V1}\n\n<transcript>\n${transcript}\n</transcript>`
       let text = ""
       try {
@@ -730,13 +730,13 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         const doc: IngestDocInput = { ...gated.doc, promptVersion: MEMORY_PROMPT_VERSION }
         if (doc.scope === "private") {
           if (!doc.ownerKey && session.ownerKey) doc.ownerKey = session.ownerKey
-          // 無 ownerKey 的 private 無處安放（§2 私有正文路徑需要它）→ 丟棄計數。
+          // 无 ownerKey 的 private 无处安放（§2 私有正文路径需要它）→ 丢弃计数。
           if (!doc.ownerKey) {
             bump("g4_no_owner")
             continue
           }
         }
-        // G8（契約 §5，僅 shared、postIngest 前逐條）；dryRun 不啟動閘 LLM。
+        // G8（契约 §5，仅 shared、postIngest 前逐条）；dryRun 不启动闸 LLM。
         if (doc.scope === "shared" && !dryRun) {
           const verdict = await g8Check(doc)
           if (verdict === "reject") {
@@ -752,14 +752,14 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       mark(produced)
     })
 
-    // 寫入：只認端點回執 accepted（§3.1「真寫入」）；非 dryRun 才發。
+    // 写入：只认端点回执 accepted（§3.1「真写入」）；非 dryRun 才发。
     if (!dryRun && docs.length > 0) {
       const body = {
         batch_id: batchId,
         prompt_version: MEMORY_PROMPT_VERSION,
         docs,
       }
-      const rawBody = JSON.stringify(body) // 簽名與送出共用同一串 raw bytes。
+      const rawBody = JSON.stringify(body) // 签名与送出共用同一串 raw bytes。
       const { ok, json } = await attemptPost(rawBody)
       if (ok) {
         const accepted = Array.isArray(json?.accepted) ? (json?.accepted as unknown[]) : []
@@ -769,12 +769,12 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
           bump(`server_${typeof r?.reason === "string" ? r.reason : "unknown"}`)
         }
         if (accepted.length < docs.length && rejected.length === 0) {
-          bump("server_silent_loss") // 回執不齊：端點沒給逐條原因（G7 截斷除外），記帳不吞。
+          bump("server_silent_loss") // 回执不齐：端点没给逐条原因（G7 截断除外），记帐不吞。
         }
-        // §5.6：端點回執 accepted 之後才抽檢（未寫入的沒有品質可審）。
+        // §5.6：端点回执 accepted 之后才抽检（未写入的没有品质可审）。
         await runSampling(accepted.map((id) => String(id)))
       } else {
-        // 非 2xx／網路失敗 → 寫 pending 檔（指數退避重試由 drainPending 接手）。
+        // 非 2xx／网路失败 → 写 pending 档（指数退避重试由 drainPending 接手）。
         writePending({
           batch_id: batchId,
           created_at: nowDate.toISOString(),

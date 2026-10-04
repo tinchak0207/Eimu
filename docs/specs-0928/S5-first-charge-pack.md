@@ -1,24 +1,24 @@
-# S5 一次性首充套餐：1 刀 300 張（預期 45 分鐘，**依賴 S3 合併**）
+# S5 一次性首充套餐：1 刀 300 张（预期 45 分钟，**依赖 S3 合并**）
 
-先讀 `_common.md`（同目錄）。**正價 PLANS 一行都不許動。**
+先读 `_common.md`（同目录）。**正价 PLANS 一行都不许动。**
 
-## 口徑（暴君拍板）
-- plan id `first-charge`：**¥7（≈$1）→ 300 幣**
-  - 正價 ¥9.9 = 100 幣，這個是它的約 4 倍划算
-  - 成本約 ¥1.5
-- 資格：該帳號在 account_ledger **從未有過 recharge 行**，並且從未購買過 first-charge。每個帳號限一次。
+## 口径（暴君拍板）
+- plan id `first-charge`：**¥7（≈$1）→ 300 币**
+  - 正价 ¥9.9 = 100 币，这个是它的约 4 倍划算
+  - 成本约 ¥1.5
+- 资格：该帐号在 account_ledger **从未有过 recharge 行**，并且从未购买过 first-charge。每个帐号限一次。
 
-## 做什麼
-1. `src/lib/plans.ts`：新增 `FIRST_CHARGE_PLAN`，**不放進** `PLANS` 陣列，免得出現在正價列表、也免得 lifecycle-email 的 `entryPlan()` 誤把它選成最便宜的檔。
-2. 資格判定放在控面：新增內部端點，或併入 S3 的 mapay-credit 通道。**checkout 和 notify 兩端都要校驗**：
-   - 沒資格的人 checkout → 403
-   - notify 時發現已經不符合資格（例如併發下了兩單）→ 按 ¥7 對應的正價幣數（約 70 幣）入帳，不給 300；記 detail
-3. 定價頁 `src/components/PricingClient.tsx`：
-   - 有資格時，在最前面放一張卡：「首充专享 · 限一次｜¥7 得 300 币（约 300 张 GPT Image 2）」
-   - 沒資格或未登入時不顯示；未登入時只顯示文案，點擊後先登入
-4. 餘額不足 toast 的「去充值」（`src/components/ImagePlayground.tsx`）：改為跳轉 `/pricing?plan=first-charge`，定價頁據此滾動到該卡。
-5. API 的 402 訊息（S2）裡的充值鏈接同樣帶上 `?plan=first-charge`。
+## 做什么
+1. `src/lib/plans.ts`：新增 `FIRST_CHARGE_PLAN`，**不放进** `PLANS` 阵列，免得出现在正价列表、也免得 lifecycle-email 的 `entryPlan()` 误把它选成最便宜的档。
+2. 资格判定放在控面：新增内部端点，或并入 S3 的 mapay-credit 通道。**checkout 和 notify 两端都要校验**：
+   - 没资格的人 checkout → 403
+   - notify 时发现已经不符合资格（例如并发下了两单）→ 按 ¥7 对应的正价币数（约 70 币）入帐，不给 300；记 detail
+3. 定价页 `src/components/PricingClient.tsx`：
+   - 有资格时，在最前面放一张卡：「首充专享 · 限一次｜¥7 得 300 币（约 300 张 GPT Image 2）」
+   - 没资格或未登入时不显示；未登入时只显示文案，点击后先登入
+4. 余额不足 toast 的「去充值」（`src/components/ImagePlayground.tsx`）：改为跳转 `/pricing?plan=first-charge`，定价页据此滚动到该卡。
+5. API 的 402 讯息（S2）里的充值链接同样带上 `?plan=first-charge`。
 
-## 驗收
-- 資格判定的單元測試：沒有 recharge → 有資格；有 recharge → 無資格；買過 first-charge → 無資格
-- `PLANS` 陣列與正價數字無 diff（`git diff src/lib/plans.ts` 只能是新增）
+## 验收
+- 资格判定的单元测试：没有 recharge → 有资格；有 recharge → 无资格；买过 first-charge → 无资格
+- `PLANS` 阵列与正价数字无 diff（`git diff src/lib/plans.ts` 只能是新增）

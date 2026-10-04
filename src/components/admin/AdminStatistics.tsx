@@ -1,19 +1,19 @@
 "use client";
 
-// /admin「用量统计」分頁（PRD REQ-C2 Statistics 統計視圖）。
+// /admin「用量统计」分页（PRD REQ-C2 Statistics 统计视图）。
 //
-// 本頁是既有帳本與能力表的**只讀投影**，設計紀律與後端同一條：
-// 1. 展示層只說帳本說過的話——每個數字旁邊給出帳本行 id（滑過可見全部樣本）；
-// 2. 樣本不足畫「資料不足」，不畫 0（0% 是一句假話）；
-// 3. 渠道判活三態原樣畫出，unknown（無法判定）絕不被折疊成「不可用」或「正常」；
-// 4. 空窗口不畫假曲線：沒有帳本行就直接說「窗口內沒有任何已落帳記錄」。
+// 本页是既有帐本与能力表的**只读投影**，设计纪律与后端同一条：
+// 1. 展示层只说帐本说过的话——每个数字旁边给出帐本行 id（滑过可见全部样本）；
+// 2. 样本不足画「资料不足」，不画 0（0% 是一句假话）；
+// 3. 渠道判活三态原样画出，unknown（无法判定）绝不被折叠成「不可用」或「正常」；
+// 4. 空窗口不画假曲线：没有帐本行就直接说「窗口内没有任何已落帐记录」。
 //
-// 樣式跟隨既有 admin 面板（AdminPoolManager / AdminHome 的扁平 token），
-// 不引入 Liquid Glass 材料，避免管理面出現第二套視覺語言。
+// 样式跟随既有 admin 面板（AdminPoolManager / AdminHome 的扁平 token），
+// 不引入 Liquid Glass 材料，避免管理面出现第二套视觉语言。
 //
-// 文案紀律：本元件零硬編用戶可見字串，全部經 `text()` 取自 src/lib/ui-strings.ts
-// （守門件 src/lib/ui-strings.test.ts 去註解後禁 CJK）。帳本／能力表回傳的字串
-// （notes / reason / metric / label）是上游資料，不屬本層文案。
+// 文案纪律：本元件零硬编用户可见字串，全部经 `text()` 取自 src/lib/ui-strings.ts
+// （守门件 src/lib/ui-strings.test.ts 去注解后禁 CJK）。帐本／能力表回传的字串
+// （notes / reason / metric / label）是上游资料，不属本层文案。
 
 import { useEffect, useState } from "react";
 import { BarChart3, CircleAlert, Loader2, RefreshCw } from "lucide-react";
@@ -58,8 +58,8 @@ const FUNNEL_STEP_LABEL: Record<FunnelStepKey, UiStringKey> = {
 };
 
 /**
- * 三態標籤（展示層話術，只在這裡取用）。unknown 是誠實第三態，不併入任何一邊。
- * 渠道判活與模型活性是同一組三態，共用一張表＝話術只有一處。
+ * 三态标签（展示层话术，只在这里取用）。unknown 是诚实第三态，不并入任何一边。
+ * 渠道判活与模型活性是同一组三态，共用一张表＝话术只有一处。
  */
 const STATUS_META: Record<ChannelLiveness, { key: UiStringKey; className: string }> = {
   available: { key: "stats.liveness.available", className: "bg-[#e7f5ec] text-[#1c7a43] border-[#bfe3cd]" },
@@ -81,7 +81,7 @@ function formatNumber(value: number, options?: Intl.NumberFormatOptions): string
   return value.toLocaleString(NUMBER_LOCALE, options);
 }
 
-/** 樣本足夠才給比率；否則明寫「資料不足（n/min）」——不回落成 0。 */
+/** 样本足够才给比率；否则明写「资料不足（n/min）」——不回落成 0。 */
 function RateCell({ rate }: { rate: SampleRate }) {
   if (rate.state === "insufficient") {
     return (
@@ -98,7 +98,7 @@ function RateCell({ rate }: { rate: SampleRate }) {
   );
 }
 
-/** 秒數 → 人讀時長（秒 / 分鐘 / 小時 / 天），單位文案取自文案表。 */
+/** 秒数 → 人读时长（秒 / 分钟 / 小时 / 天），单位文案取自文案表。 */
 function formatDuration(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds)) return text("common.placeholder");
   if (seconds < 120) return text("stats.duration.seconds", { value: Math.round(seconds) });
@@ -129,7 +129,7 @@ function DurationRow({ label, summary, meta }: { label: string; summary: Duratio
   );
 }
 
-/** 激活漏斗卡：每步人數 + 相對上一步 / 相對註冊的轉化率；樣本不足沿用「資料不足」。 */
+/** 激活漏斗卡：每步人数 + 相对上一步 / 相对注册的转化率；样本不足沿用「资料不足」。 */
 function ActivationFunnelCard({
   funnel,
   funnelDays,
@@ -280,7 +280,7 @@ function ActivationFunnelCard({
   );
 }
 
-/** 帳本行 id 對照：顯示首條，滑過可見全部樣本。 */
+/** 帐本行 id 对照：显示首条，滑过可见全部样本。 */
 function RecordsCell({ recordIds, total }: { recordIds: string[]; total: number }) {
   const [first] = recordIds;
   if (!first) return <span className="text-black/35">{text("stats.records.none")}</span>;
@@ -347,7 +347,7 @@ function BucketTable({
 export function AdminStatistics() {
   const [days, setDays] = useState<number>(7);
   const [funnelDays, setFunnelDays] = useState<number>(30);
-  // 內部流量預設不計（站長自測會把「沒有量」畫成「有量」）。
+  // 内部流量预设不计（站长自测会把「没有量」画成「有量」）。
   const [includeInternal, setIncludeInternal] = useState(false);
   const [payload, setPayload] = useState<StatisticsPayload | null>(null);
   const [modelStatus, setModelStatus] = useState<Record<string, ModelAvailability> | null>(null);
@@ -376,7 +376,7 @@ export function AdminStatistics() {
         throw new Error(message);
       }
       setPayload(statsPayload);
-      // 模型三态直接消费既有的公开端點（与 /v1/model-status 同一份判活），本页不重算。
+      // 模型三态直接消费既有的公开端点（与 /v1/model-status 同一份判活），本页不重算。
       const models = (modelsBody as { models?: Record<string, ModelAvailability> } | null)?.models ?? null;
       setModelStatus(models);
     } catch (loadError) {

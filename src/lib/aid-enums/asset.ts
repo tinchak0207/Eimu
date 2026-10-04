@@ -1,31 +1,31 @@
 /**
- * AID 資產中心 enums。
+ * AID 资产中心 enums。
  *
- * 輪子來源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
+ * 轮子来源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
  * 上游 commit：bbd2a58faffd6a0315af8f6a71902ca8adb5a308
- * 取得日：2026-09-15（GitHub raw；本次共抓取 AID 目錄樹列出的全部 51 個 enum 檔，0 失敗；本檔收錄其中 4 個）
- * 來源檔（4 個，路徑相對 repo 根）：
+ * 取得日：2026-09-15（GitHub raw；本次共抓取 AID 目录树列出的全部 51 个 enum 档，0 失败；本档收录其中 4 个）
+ * 来源档（4 个，路径相对 repo 根）：
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/AssetTypeEnum.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/AssetSourceTypeEnum.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/AssetCenterCategoryEnum.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/enums/AudioSourceEnum.java
- * 逐字保留：每個 enum 的成員名（→ TS 物件鍵）、成員欄位值（value/desc/code/label/sortOrder 等
- *   一律按 AID 欄位名原樣輸出）、以及成員上方的 Javadoc 或 `//` 註解原文。中文 desc **一字未改、
- *   未翻譯、未做簡繁轉換、未「優化」**。鍵序＝AID 宣告序。
- * 白名單改寫（僅此三處，其餘逐行等價）：
- *   1. Java `enum` → TS `as const` 常數物件（＋由常數物件推導的值集合型別 `Aid<X>Value`）。
- *   2. 命名空間加前綴 `AID_`（`CreationModeEnum` → `AID_CREATION_MODE_ENUM`），避免與本站常數撞名。
- *   3. 無欄位的純名稱 enum（如 `MediaTaskStatus`）在 TS 以 `{ value: "<成員名>" }` 表示，
- *      以維持與其他 enum 一致的取值面（Java 側其值即 `name()`）。
- * 不搬入（如實聲明，非靜默省略）：
+ * 逐字保留：每个 enum 的成员名（→ TS 物件键）、成员栏位值（value/desc/code/label/sortOrder 等
+ *   一律按 AID 栏位名原样输出）、以及成员上方的 Javadoc 或 `//` 注解原文。中文 desc **一字未改、
+ *   未翻译、未做简繁转换、未「优化」**。键序＝AID 宣告序。
+ * 白名单改写（仅此三处，其余逐行等价）：
+ *   1. Java `enum` → TS `as const` 常数物件（＋由常数物件推导的值集合型别 `Aid<X>Value`）。
+ *   2. 命名空间加前缀 `AID_`（`CreationModeEnum` → `AID_CREATION_MODE_ENUM`），避免与本站常数撞名。
+ *   3. 无栏位的纯名称 enum（如 `MediaTaskStatus`）在 TS 以 `{ value: "<成员名>" }` 表示，
+ *      以维持与其他 enum 一致的取值面（Java 侧其值即 `name()`）。
+ * 不搬入（如实声明，非静默省略）：
  *   - AID 的 static 查表／工具方法（`getByValue` / `of` / `fromCode` / `isCrossGroupSwitch` 等）
- *     與 `isValid*`——本站此目錄只放純資料常數，無邏輯；查表由消費端自建或後續另案。
- *   - `BillingConstants` 的查表方法與 private 比例集合（邏輯，本站另有估算器）；
- *     其 public static final 純量常數逐字保留。
+ *     与 `isValid*`——本站此目录只放纯资料常数，无逻辑；查表由消费端自建或后续另案。
+ *   - `BillingConstants` 的查表方法与 private 比例集合（逻辑，本站另有估算器）；
+ *     其 public static final 纯量常数逐字保留。
  *
- * 本檔為純資料常數，無函式、無副作用。
+ * 本档为纯资料常数，无函式、无副作用。
  *
- * 收錄取捨（全 51 檔的處置表）見同目錄 `index.ts` 檔頭。
+ * 收录取舍（全 51 档的处置表）见同目录 `index.ts` 档头。
  */
 
 /** 资产类型枚举 对应数据库字段：asset_type（AID `AssetTypeEnum`） */
@@ -48,7 +48,7 @@ export const AID_ASSET_TYPE_ENUM = {
   EXPRESSION: { value: "expression", desc: "表情" },
 } as const;
 
-/** `AssetTypeEnum` 的值集合（由常數物件推導）。 */
+/** `AssetTypeEnum` 的值集合（由常数物件推导）。 */
 export type AidAssetTypeEnumValue = (typeof AID_ASSET_TYPE_ENUM)[keyof typeof AID_ASSET_TYPE_ENUM]["value"];
 
 /** 资产来源枚举 对应数据库字段：source_type（AID `AssetSourceTypeEnum`） */
@@ -61,7 +61,7 @@ export const AID_ASSET_SOURCE_TYPE_ENUM = {
   GLOBAL_EXTRACT: { value: 3, desc: "全集全局提取" },
 } as const;
 
-/** `AssetSourceTypeEnum` 的值集合（由常數物件推導）。 */
+/** `AssetSourceTypeEnum` 的值集合（由常数物件推导）。 */
 export type AidAssetSourceTypeEnumValue = (typeof AID_ASSET_SOURCE_TYPE_ENUM)[keyof typeof AID_ASSET_SOURCE_TYPE_ENUM]["value"];
 
 /** 资产中心统一分类编码枚举。 贯穿分类树、个人资产列表、资产明细三个接口，每个分类映射到对应业务表，按 userId 隔离查询。（AID `AssetCenterCategoryEnum`） */
@@ -98,7 +98,7 @@ export const AID_ASSET_CENTER_CATEGORY_ENUM = {
   PREVIEW_VIDEO: { code: "preview_video", name: "预览视频" },
 } as const;
 
-/** `AssetCenterCategoryEnum` 的值集合（由常數物件推導）。 */
+/** `AssetCenterCategoryEnum` 的值集合（由常数物件推导）。 */
 export type AidAssetCenterCategoryEnumValue = (typeof AID_ASSET_CENTER_CATEGORY_ENUM)[keyof typeof AID_ASSET_CENTER_CATEGORY_ENUM]["code"];
 
 /** 配音来源枚举 对应数据库字段：audio_source（AID `AudioSourceEnum`） */
@@ -109,5 +109,5 @@ export const AID_AUDIO_SOURCE_ENUM = {
   USER_UPLOAD: { value: 2, desc: "用户上传" },
 } as const;
 
-/** `AudioSourceEnum` 的值集合（由常數物件推導）。 */
+/** `AudioSourceEnum` 的值集合（由常数物件推导）。 */
 export type AidAudioSourceEnumValue = (typeof AID_AUDIO_SOURCE_ENUM)[keyof typeof AID_AUDIO_SOURCE_ENUM]["value"];

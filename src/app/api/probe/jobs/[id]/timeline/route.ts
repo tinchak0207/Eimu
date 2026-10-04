@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
 import { getJobTimeline } from "@/lib/generation-core/job-events";
 
-// P1.5 probe 偵查面：一條命令 30 秒出死因（含上游錯誤原文），不開 docker exec、不進 VPS。
-// 鑑權沿用 admin 後台門禁（與 /api/admin/* 同源），不造新輪子。
+// P1.5 probe 侦查面：一条命令 30 秒出死因（含上游错误原文），不开 docker exec、不进 VPS。
+// 鉴权沿用 admin 后台门禁（与 /api/admin/* 同源），不造新轮子。
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 type RouteContext = { params: Promise<{ id: string }> };
 

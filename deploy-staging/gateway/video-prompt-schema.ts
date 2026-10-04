@@ -1,35 +1,35 @@
-// 結構化影片 prompt：Shot JSON schema + 驗證 + 按模型族編譯。
+// 结构化影片 prompt：Shot JSON schema + 验证 + 按模型族编译。
 //
-// agent 填 JSON（metadata.shot 或 text 節點 content），gateway 編譯成各模型最愛吃的
+// agent 填 JSON（metadata.shot 或 text 节点 content），gateway 编译成各模型最爱吃的
 // prompt 字串（平台 /v1/videos/generations 只收 prompt ≤4000 字 + duration_seconds +
 // size + model）。
 //
-// Schema（全部可選除 subject/action，一律英文鍵、內容中英皆可）：
-//   subject        主體（必填）
-//   action         按 beat 的動作描述（必填；動作用具體計數，不用模糊形容詞）
-//   appearance     外觀/服裝
+// Schema（全部可选除 subject/action，一律英文键、内容中英皆可）：
+//   subject        主体（必填）
+//   action         按 beat 的动作描述（必填；动作用具体计数，不用模糊形容词）
+//   appearance     外观/服装
 //   environment    { time_of_day, lighting, elements[] }
 //   camera         { shot_type, angle, movement, lens }
 //   style          { look, mood, color_grading }
 //   audio          { dialogue: [{ character, tone, line }], ambience, sfx[] }
 //   output         { duration_seconds, aspect_ratio }
-//   negative       忽略不編譯——平台無 negative_prompt 欄位，否定句反而傷害生成
+//   negative       忽略不编译——平台无 negative_prompt 栏位，否定句反而伤害生成
 //
-// 模型族編譯策略（依 model 字串前綴分族）：
-//   veo*     緊湊單行 JSON（Veo 3.1 官方 JSON prompting，只留非空字段，不加說明文字）
-//   kling*   Cinematic 開頭 + 主體句 + 「Beat 0-Ns: camera + action」時間軸模板
-//            + `Dialogue (角色, 語氣): "台詞"` 對話行 + Audio 行
-//   runway*  首行精確 camera token（Camera dolly in / Truck left / Boom up…），
-//            主體動作句，尾部 shot_type/lens
-//   luma*    攝影機運動自然語言短語打頭（模型有 camera motion 詞表）
-//   其餘     seedance / adobe / 未知模型：SLCT 有序散文
-//            （Style → Shot type → Camera → 主體動作 → 環境 → 光 → 時長 hint）
+// 模型族编译策略（依 model 字串前缀分族）：
+//   veo*     紧凑单行 JSON（Veo 3.1 官方 JSON prompting，只留非空字段，不加说明文字）
+//   kling*   Cinematic 开头 + 主体句 + 「Beat 0-Ns: camera + action」时间轴模板
+//            + `Dialogue (角色, 语气): "台词"` 对话行 + Audio 行
+//   runway*  首行精确 camera token（Camera dolly in / Truck left / Boom up…），
+//            主体动作句，尾部 shot_type/lens
+//   luma*    摄影机运动自然语言短语打头（模型有 camera motion 词表）
+//   其余     seedance / adobe / 未知模型：SLCT 有序散文
+//            （Style → Shot type → Camera → 主体动作 → 环境 → 光 → 时长 hint）
 //
-// 通用規則：一鏡一機位運動 + 一主體動作；各族 front-load（camera+subject 在前）；
-// duration 編進 prompt 尾部 hint；輸出守衛 ≤3800 字——超長先砍 style.color_grading
-// → environment.elements → audio.sfx，再截斷 action。
+// 通用规则：一镜一机位运动 + 一主体动作；各族 front-load（camera+subject 在前）；
+// duration 编进 prompt 尾部 hint；输出守卫 ≤3800 字——超长先砍 style.color_grading
+// → environment.elements → audio.sfx，再截断 action。
 //
-// 純函數、零依賴、可單測。
+// 纯函数、零依赖、可单测。
 
 export interface ShotJson {
   subject: string
@@ -49,20 +49,20 @@ export interface ShotJson {
 
 const MAX_PROMPT_LENGTH = 3800
 
-/** 非空字串規整：去頭尾空白；空/非字串回 undefined。 */
+/** 非空字串规整：去头尾空白；空/非字串回 undefined。 */
 function nonEmpty(s: unknown): string | undefined {
   return typeof s === "string" && s.trim() ? s.trim() : undefined
 }
 
-/** 字串陣列規整：濾掉非字串與空白項。 */
+/** 字串阵列规整：滤掉非字串与空白项。 */
 function cleanList(list: unknown): string[] {
   if (!Array.isArray(list)) return []
   return list.filter((x): x is string => typeof x === "string" && !!x.trim())
 }
 
 /**
- * 從任意候選值解析 shot JSON：接受物件或 JSON 字串。
- * 不是 shot JSON（無法解析、缺 subject 或 action）回 null，不拋錯。
+ * 从任意候选值解析 shot JSON：接受物件或 JSON 字串。
+ * 不是 shot JSON（无法解析、缺 subject 或 action）回 null，不抛错。
  */
 export function parseShotCandidate(raw: unknown): ShotJson | null {
   let obj: unknown = raw
@@ -81,20 +81,20 @@ export function parseShotCandidate(raw: unknown): ShotJson | null {
   return obj as ShotJson
 }
 
-const SHOT_EXAMPLE = '{ "subject": "穿風衣的偵探", "action": "推開門走三步後回頭看向鏡頭", "camera": { "movement": "dolly in" }, "style": { "look": "電影感" }, "output": { "duration_seconds": 15 } }'
+const SHOT_EXAMPLE = '{ "subject": "穿风衣的侦探", "action": "推开门走三步后回头看向镜头", "camera": { "movement": "dolly in" }, "style": { "look": "电影感" }, "output": { "duration_seconds": 15 } }'
 
 /**
- * 驗證 shot JSON：缺 subject/action 給可操作錯誤（中文，指明缺哪個字段 + 一行示例）。
+ * 验证 shot JSON：缺 subject/action 给可操作错误（中文，指明缺哪个字段 + 一行示例）。
  * 接受物件或 JSON 字串（字串先解析）。
  */
 export function validateShotJson(obj: unknown): { ok: true; shot: ShotJson } | { ok: false; error: string } {
   const shot = parseShotCandidate(obj)
   if (shot) {
-    // INC-0830：output.duration_seconds 必填——缺了會落進平台 5 秒靜默兜底，
-    // 而 seedance 上游按條統一計費（5s/15s 同價），短出片=白燒額度（事故根因之二）。
+    // INC-0830：output.duration_seconds 必填——缺了会落进平台 5 秒静默兜底，
+    // 而 seedance 上游按条统一计费（5s/15s 同价），短出片=白烧额度（事故根因之二）。
     const d = shot.output?.duration_seconds
     if (typeof d !== "number" || !Number.isFinite(d) || d < 1) {
-      return { ok: false, error: `缺少 output.duration_seconds（數字，單位秒，≥1）——不填會被按 5 秒短片生成。示例：${SHOT_EXAMPLE}` }
+      return { ok: false, error: `缺少 output.duration_seconds（数字，单位秒，≥1）——不填会被按 5 秒短片生成。示例：${SHOT_EXAMPLE}` }
     }
     return { ok: true, shot }
   }
@@ -103,24 +103,24 @@ export function validateShotJson(obj: unknown): { ok: true; shot: ShotJson } | {
     try {
       parsed = JSON.parse(obj.trim())
     } catch {
-      // fallthrough 到統一錯誤
+      // fallthrough 到统一错误
     }
     if (typeof parsed !== "object" || parsed === null) {
-      return { ok: false, error: `shot 內容不是有效的 JSON 物件（字串必須是完整 JSON 且以 { 開頭）。示例：${SHOT_EXAMPLE}` }
+      return { ok: false, error: `shot 内容不是有效的 JSON 物件（字串必须是完整 JSON 且以 { 开头）。示例：${SHOT_EXAMPLE}` }
     }
     return validateShotJson(parsed)
   }
   if (typeof obj !== "object" || obj === null) {
-    return { ok: false, error: `shot 必須是 JSON 物件。示例：${SHOT_EXAMPLE}` }
+    return { ok: false, error: `shot 必须是 JSON 物件。示例：${SHOT_EXAMPLE}` }
   }
   const o = obj as Record<string, unknown>
   const missing: string[] = []
-  if (!nonEmpty(o.subject)) missing.push("subject（主體）")
-  if (!nonEmpty(o.action)) missing.push("action（按 beat 的動作描述）")
+  if (!nonEmpty(o.subject)) missing.push("subject（主体）")
+  if (!nonEmpty(o.action)) missing.push("action（按 beat 的动作描述）")
   return { ok: false, error: `缺少必要字段：${missing.join("、")}。示例：${SHOT_EXAMPLE}` }
 }
 
-/** shot 的輸出參數：duration clamp 1-60（取整）；aspect_ratio 原樣（去空白）。 */
+/** shot 的输出参数：duration clamp 1-60（取整）；aspect_ratio 原样（去空白）。 */
 export function shotOutputParams(shot: ShotJson): { duration_seconds?: number; aspect_ratio?: string } {
   const out: { duration_seconds?: number; aspect_ratio?: string } = {}
   const d = shot.output?.duration_seconds
@@ -150,9 +150,9 @@ function envPhrase(shot: ShotJson): string {
   return [nonEmpty(e.time_of_day), ...cleanList(e.elements)].filter(Boolean).join(", ")
 }
 
-// ── 各模型族編譯器 ──
+// ── 各模型族编译器 ──
 
-/** veo：緊湊單行 JSON，只留非空字段，前面不加任何說明文字。 */
+/** veo：紧凑单行 JSON，只留非空字段，前面不加任何说明文字。 */
 function compileVeo(shot: ShotJson): string {
   const compact: Record<string, unknown> = {}
   compact.subject = nonEmpty(shot.subject) ?? ""
@@ -197,7 +197,7 @@ function compileVeo(shot: ShotJson): string {
   return JSON.stringify(compact)
 }
 
-/** kling：Cinematic 開頭 + 主體句 + Beat 時間軸 + Dialogue 行 + Audio 行。 */
+/** kling：Cinematic 开头 + 主体句 + Beat 时间轴 + Dialogue 行 + Audio 行。 */
 function compileKling(shot: ShotJson): string {
   const lines: string[] = []
   const ar = shotOutputParams(shot).aspect_ratio ?? "16:9"
@@ -221,7 +221,7 @@ function compileKling(shot: ShotJson): string {
   return lines.filter(Boolean).join("\n")
 }
 
-/** runway：首行精確 camera token，主體動作句，尾部 shot_type/lens + 時長 hint。 */
+/** runway：首行精确 camera token，主体动作句，尾部 shot_type/lens + 时长 hint。 */
 function compileRunway(shot: ShotJson): string {
   const lines: string[] = []
   const movement = nonEmpty(shot.camera?.movement)
@@ -236,7 +236,7 @@ function compileRunway(shot: ShotJson): string {
   return lines.join("\n")
 }
 
-/** luma：攝影機運動自然語言短語打頭，接主體/動作/環境/光線。 */
+/** luma：摄影机运动自然语言短语打头，接主体/动作/环境/光线。 */
 function compileLuma(shot: ShotJson): string {
   const movement = nonEmpty(shot.camera?.movement)
   const subject = subjectPhrase(shot)
@@ -278,7 +278,7 @@ function compileDefault(shot: ShotJson): string {
   return segs.join(". ") + "."
 }
 
-// ── 長度守衛 ──
+// ── 长度守卫 ──
 
 interface CompileDrops {
   grading: boolean
@@ -295,8 +295,8 @@ function dropFields(shot: ShotJson, drops: CompileDrops): ShotJson {
 }
 
 /**
- * 編譯 shot JSON 成指定模型的 prompt 字串。
- * 長度守衛 ≤3800 字：先依序砍 color_grading → elements → sfx，仍超長再截斷 action。
+ * 编译 shot JSON 成指定模型的 prompt 字串。
+ * 长度守卫 ≤3800 字：先依序砍 color_grading → elements → sfx，仍超长再截断 action。
  */
 export function compileShotPrompt(shot: ShotJson, model: string): string {
   const build = (s: ShotJson): string => {

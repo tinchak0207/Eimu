@@ -1,9 +1,9 @@
-// REQ-B2-2 agent 資產包注入閘的接線守門件（**源碼層變更探針，不計入「已驗證」**，口徑見 TG-02）。
+// REQ-B2-2 agent 资产包注入闸的接线守门件（**源码层变更探针，不计入「已验证」**，口径见 TG-02）。
 //
-// 為何只能走源碼層：本路由用 resolveAgentCaller（要打網關驗身分），離線測不起來。
-// 真正的**行為**斷言在 `src/lib/asset-library.test.ts`（isAssetUsable 逐條實測：
-// 跨 project／無項目上下文／跨 owner 一律不可用；個人包零回歸）。本檔只釘住
-// 「getActiveAssetPack 的結果確實先過 isAssetUsable 才注入」——防接線被無聲拆掉。
+// 为何只能走源码层：本路由用 resolveAgentCaller（要打网关验身分），离线测不起来。
+// 真正的**行为**断言在 `src/lib/asset-library.test.ts`（isAssetUsable 逐条实测：
+// 跨 project／无项目上下文／跨 owner 一律不可用；个人包零回归）。本档只钉住
+// 「getActiveAssetPack 的结果确实先过 isAssetUsable 才注入」——防接线被无声拆掉。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

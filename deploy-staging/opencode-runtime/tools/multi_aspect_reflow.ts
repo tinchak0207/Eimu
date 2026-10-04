@@ -2,9 +2,9 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail } from "../lib/client"
 import { downloadImage, uploadBlob, runPIL, subjectBox, blobPath } from "../lib/img-composite"
 
-// 多畫幅重排（2026-08-31 片3）：主視覺 → 橫/豎/方多畫幅切圖。
-// 誠實機制 = VLM 引導重排（vlm_guided_crop）：VLM 框主體 → PIL 以主體為錨裁切（保像素、
-// 不拉伸變形），僅當裁切窗無法容納主體時才補邊。宣稱「重排非縮放」= 主體置中保像素。
+// 多画幅重排（2026-08-31 片3）：主视觉 → 横/竖/方多画幅切图。
+// 诚实机制 = VLM 引导重排（vlm_guided_crop）：VLM 框主体 → PIL 以主体为锚裁切（保像素、
+// 不拉伸变形），仅当裁切窗无法容纳主体时才补边。宣称「重排非缩放」= 主体置中保像素。
 
 const DEFAULT_TARGETS = [
   { name: "landscape", ratio: 16 / 9 },
@@ -16,7 +16,7 @@ function parseTargets(raw?: string): { ok: true; value: { name: string; ratio: n
   if (!raw) return { ok: true, value: DEFAULT_TARGETS }
   try {
     const j = JSON.parse(raw)
-    if (!Array.isArray(j) || !j.length) return { ok: false, hint: "targets 必須是非空 JSON 陣列" }
+    if (!Array.isArray(j) || !j.length) return { ok: false, hint: "targets 必须是非空 JSON 阵列" }
     const value = j.map((t: any, i: number) => {
       let ratio = Number(t?.ratio)
       if (!isFinite(ratio) && t?.w && t?.h) ratio = Number(t.w) / Number(t.h)
@@ -32,24 +32,24 @@ function parseTargets(raw?: string): { ok: true; value: { name: string; ratio: n
 
 export default tool({
   description:
-    "多畫幅重排（零生圖扣費）：image_url 填主視覺 URL，可選 targets（JSON 陣列 [{name,ratio}]，默認橫16:9/豎9:16/方1:1）。機制=VLM 框主體邊界框 → PIL 以主體為錨裁切到各目標畫幅（保像素、不拉伸；主體超出裁切窗時才補模糊邊）。每張輸出標 mechanism=vlm_guided_crop，落公網 URL。誠實：這是裁切/補邊重排，非 AI 重繪擴圖，也非整圖拉伸；VLM 不可達時退化為置中裁切並如實標 vlm_status。",
+    "多画幅重排（零生图扣费）：image_url 填主视觉 URL，可选 targets（JSON 阵列 [{name,ratio}]，默认横16:9/竖9:16/方1:1）。机制=VLM 框主体边界框 → PIL 以主体为锚裁切到各目标画幅（保像素、不拉伸；主体超出裁切窗时才补模糊边）。每张输出标 mechanism=vlm_guided_crop，落公网 URL。诚实：这是裁切/补边重排，非 AI 重绘扩图，也非整图拉伸；VLM 不可达时退化为置中裁切并如实标 vlm_status。",
   args: {
-    image_url: tool.schema.string().describe("主視覺圖片 URL"),
-    targets: tool.schema.string().optional().describe('目標畫幅 JSON 陣列字串，例 [{"name":"landscape","ratio":1.7778},{"name":"square","ratio":1}]'),
-    max_side: tool.schema.number().int().min(256).max(4096).optional().describe("輸出長邊上限像素，默認 1600"),
+    image_url: tool.schema.string().describe("主视觉图片 URL"),
+    targets: tool.schema.string().optional().describe('目标画幅 JSON 阵列字串，例 [{"name":"landscape","ratio":1.7778},{"name":"square","ratio":1}]'),
+    max_side: tool.schema.number().int().min(256).max(4096).optional().describe("输出长边上限像素，默认 1600"),
   },
   async execute(args, context) {
     const url = args.image_url.trim()
-    if (!/^https?:\/\//.test(url)) return fail("invalid_image_url", "image_url 必須是 http(s) URL", { title: "輸入非法" })
+    if (!/^https?:\/\//.test(url)) return fail("invalid_image_url", "image_url 必须是 http(s) URL", { title: "输入非法" })
     const tg = parseTargets(args.targets)
-    if (!tg.ok) return fail("invalid_targets", tg.hint, { title: "輸入非法" })
+    if (!tg.ok) return fail("invalid_targets", tg.hint, { title: "输入非法" })
     const targets = tg.value
 
     let buf: Buffer
     try {
       buf = await downloadImage(url, context.abort)
     } catch (e: any) {
-      return fail("download_failed", `下載主視覺失敗：${e?.message ?? e}`, { title: "下載失敗" })
+      return fail("download_failed", `下载主视觉失败：${e?.message ?? e}`, { title: "下载失败" })
     }
 
     const probe = await runPIL({
@@ -57,7 +57,7 @@ export default tool({
       code: `im=load('img').convert('RGB'); emit(width=im.width, height=im.height)`,
       signal: context.abort,
     })
-    if (!probe.ok || !probe.result) return fail("decode_failed", `圖片解析失敗：${probe.stderr}`, { title: "解析失敗" })
+    if (!probe.ok || !probe.result) return fail("decode_failed", `图片解析失败：${probe.stderr}`, { title: "解析失败" })
     const w = Number(probe.result.width), h = Number(probe.result.height)
 
     const box = await subjectBox(url, w, h)
@@ -80,21 +80,21 @@ emit(sizes=sizes, used_bbox=bool(bbox))
       timeoutMs: 120_000,
       signal: context.abort,
     })
-    if (!job.ok) return fail("reflow_failed", `重排執行失敗：${job.stderr}`, { title: "重排失敗" })
+    if (!job.ok) return fail("reflow_failed", `重排执行失败：${job.stderr}`, { title: "重排失败" })
 
     const outputs: Record<string, unknown>[] = []
     const errors: string[] = []
     for (const t of targets) {
       const b = job.files?.[t.name]
       if (!b) {
-        errors.push(`${t.name}：無輸出檔`)
+        errors.push(`${t.name}：无输出档`)
         continue
       }
       let pubUrl: string
       try {
         pubUrl = await uploadBlob(blobPath(`reflow-${t.name}`), b, "image/png", context.abort)
       } catch (e: any) {
-        errors.push(`${t.name}：上傳失敗 ${e?.message ?? e}`)
+        errors.push(`${t.name}：上传失败 ${e?.message ?? e}`)
         continue
       }
       outputs.push({
@@ -106,17 +106,17 @@ emit(sizes=sizes, used_bbox=bool(bbox))
         mechanism: "vlm_guided_crop",
       })
     }
-    if (!outputs.length) return fail("no_output", `全部畫幅產出失敗：${errors.join("; ")}`, { title: "無產出" })
+    if (!outputs.length) return fail("no_output", `全部画幅产出失败：${errors.join("; ")}`, { title: "无产出" })
 
     return ok(
       {
-        title: `多畫幅重排：${outputs.length} 個畫幅`,
+        title: `多画幅重排：${outputs.length} 个画幅`,
         source: { url, width: w, height: h },
         vlm_status: box.ok ? "ok" : `unavailable: ${box.reason}（退化置中裁切）`,
         used_bbox: (job.result as any)?.used_bbox ?? false,
         outputs,
         errors,
-        note: "mechanism=vlm_guided_crop：以 VLM 主體框為錨裁切保像素，非整圖拉伸；補邊僅在主體超出裁切窗時觸發。",
+        note: "mechanism=vlm_guided_crop：以 VLM 主体框为锚裁切保像素，非整图拉伸；补边仅在主体超出裁切窗时触发。",
       },
       { outputs: outputs.map((o) => o.url) },
     )

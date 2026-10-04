@@ -34,8 +34,8 @@ export const preferredRegion = "sfo1";
 
 const MAX_PROMPT_LENGTH = 4_000;
 /** 一次请求最多几段视频。再多会顶到上游并发的极限。
- *  值＝數量上限單點（generation-core/request-limits.ts），與 `/v1/models` 的
- *  `x_capabilities.maxBatchCount` 同一顆常數（D23）。
+ *  值＝数量上限单点（generation-core/request-limits.ts），与 `/v1/models` 的
+ *  `x_capabilities.maxBatchCount` 同一颗常数（D23）。
  */
 const MAX_N = MAX_REQUEST_BATCH_COUNT;
 
@@ -49,7 +49,7 @@ type OpenAIErrorType =
   | "api_error";
 
 /**
- * OpenAI 風格錯誤體（形狀被 v1 contract-lock 釘死，不得改寫）。
+ * OpenAI 风格错误体（形状被 v1 contract-lock 钉死，不得改写）。
  */
 function errorResponse(
   status: number,
@@ -67,8 +67,8 @@ function errorResponse(
 }
 
 /**
- * 預算超限（W5b）專用 402：標準錯誤體 + `estimated_coins`/`cap_coins`。
- * 獨立於 errorResponse（後者形狀被 contract-lock 逐字鎖死，不得改寫）。
+ * 预算超限（W5b）专用 402：标准错误体 + `estimated_coins`/`cap_coins`。
+ * 独立于 errorResponse（后者形状被 contract-lock 逐字锁死，不得改写）。
  */
 function budgetExceededResponse(
   gate: {
@@ -108,16 +108,16 @@ interface VideoRequestBody {
   response_format?: unknown;
   callback_url?: unknown;
   /**
-   * 生成式後期（P1-3／對稱差 D22）：
+   * 生成式后期（P1-3／对称差 D22）：
    *   { mode: "extend_video", source: {url|object_key, duration_seconds}, continue_seconds, continue_from_seconds? }
    *   { mode: "edit_video",  source: {...}, start_seconds, end_seconds, instruction }
-   * 不帶＝普通生成（零行為變化）。不支援的模型 ⇒ 400 video_generation_type_unsupported。
+   * 不带＝普通生成（零行为变化）。不支援的模型 ⇒ 400 video_generation_type_unsupported。
    */
   video_post_production?: unknown;
   /**
-   * 單次任務預算上限（**幣**，W5b）：客戶宣告後，本次任務估算幣值超過它即
-   * 402 `task_budget_exceeded`（硬停，不扣費）。未給＝預算閘不啟用，行為不變。
-   * 非有限數（NaN/Infinity）或非 number 一律視為未宣告（不因壞輸入誤擋）。
+   * 单次任务预算上限（**币**，W5b）：客户宣告后，本次任务估算币值超过它即
+   * 402 `task_budget_exceeded`（硬停，不扣费）。未给＝预算闸不启用，行为不变。
+   * 非有限数（NaN/Infinity）或非 number 一律视为未宣告（不因坏输入误挡）。
    */
   cap_coins?: unknown;
 }
@@ -175,8 +175,8 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  // 生成式後期（局部改片）允許用「改動描述」當 prompt，故其 prompt 檢查下移到參數解析後；
-  // 普通生成（未帶 video_post_production）的檢查順序一字不變（對外穩定承諾）。
+  // 生成式后期（局部改片）允许用「改动描述」当 prompt，故其 prompt 检查下移到参数解析后；
+  // 普通生成（未带 video_post_production）的检查顺序一字不变（对外稳定承诺）。
   const hasPostProductionRequest = body.video_post_production !== undefined && body.video_post_production !== null;
   if (!hasPostProductionRequest) {
     if (!rawPrompt) {
@@ -218,8 +218,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 生成式後期（續片／局部改片）：契約校驗＋能力閘＋來源影片定位。全部失敗都在
-  // 建單／扣費／呼叫上游之前——不支援的模型具名拒收，絕不靜默降級成普通生成。
+  // 生成式后期（续片／局部改片）：契约校验＋能力闸＋来源影片定位。全部失败都在
+  // 建单／扣费／呼叫上游之前——不支援的模型具名拒收，绝不静默降级成普通生成。
   let postProduction: ReturnType<typeof parseVideoPostProduction> = null;
   try {
     postProduction = parseVideoPostProduction(body.video_post_production, {
@@ -254,10 +254,10 @@ export async function POST(req: NextRequest) {
   // 影片上游只返回 URL（无 b64 通道），强制 url，忽略 b64_json 请求。
   const responseFormat: "url" | "b64_json" = "url";
 
-  // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
+  // 管理员改价需立即对扣费生效：算价前先把最新定价覆写同步进目录（核心层内部吞错，失败不挡生成）。
   await syncModelPricing();
 
-  // Durable control plane 是影片唯一路徑：影片任务无同步回退分支。
+  // Durable control plane 是影片唯一路径：影片任务无同步回退分支。
   // 本地无 DB 直连时（Vercel 站点常态），转发到控制面的同一路由执行——
   // 认证/计费/提交都在控制面完成，站点只透传请求与响应。
   if (!generationControlPlaneEnabled()) {
@@ -294,9 +294,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 時長 / 音訊 / 寬高比 都交给 catalog 归一化：非法值回默认，合法值透传。
-  // 生成式後期：本次生成的秒數由續長／區段長決定（已在契約校驗時確認落在 catalog 檔位），
-  // 直接以它做歸一化輸入——扣費、成本閘、上游拿到的秒數同源。
+  // 时长 / 音讯 / 宽高比 都交给 catalog 归一化：非法值回默认，合法值透传。
+  // 生成式后期：本次生成的秒数由续长／区段长决定（已在契约校验时确认落在 catalog 档位），
+  // 直接以它做归一化输入——扣费、成本闸、上游拿到的秒数同源。
   const generatedSeconds = postProduction ? videoPostProductionGeneratedSeconds(postProduction) : undefined;
   const normalized = normalizeGenerationConfig(modelId, {
     aspectRatio: aspectRatioFromVideoSize(typeof body.size === "string" ? body.size : undefined),
@@ -309,17 +309,17 @@ export async function POST(req: NextRequest) {
     ? body.callback_url.trim()
     : null;
 
-  // 手術 P1 計費閘（詳見 quota-precheck.ts）：SURGERY_QUOTA_PRECHECK=1 時先做
-  // 無狀態配額預檢——通過 → 以 0 額提交，job 直接進 queued，阻塞式 reserve 整段
-  // 跳過（計費交事後投影）；額度不足 → 按現契約 402；上游不可達 → 原樣回落
-  // 下方 reserve 路徑。env 未設 = 金額原樣，路徑一字不變。
+  // 手术 P1 计费闸（详见 quota-precheck.ts）：SURGERY_QUOTA_PRECHECK=1 时先做
+  // 无状态配额预检——通过 → 以 0 额提交，job 直接进 queued，阻塞式 reserve 整段
+  // 跳过（计费交事后投影）；额度不足 → 按现契约 402；上游不可达 → 原样回落
+  // 下方 reserve 路径。env 未设 = 金额原样，路径一字不变。
   const baseBillingAmount = generationCoins(modelId, {
     resolution: normalized.config.outputResolution,
     durationSeconds: normalized.config.durationSeconds,
     generateAudio: normalized.config.generateAudio,
   }) * QUOTA_PER_COIN * rawN;
-  // 單次任務預算（幣，W5b）：客戶宣告才啟用；非法/非有限數視為未宣告（不誤擋）。
-  // 判定（估算 vs cap）在 quota-precheck 內走 task-budget 的 exceedsBudget 單一真源。
+  // 单次任务预算（币，W5b）：客户宣告才启用；非法/非有限数视为未宣告（不误挡）。
+  // 判定（估算 vs cap）在 quota-precheck 内走 task-budget 的 exceedsBudget 单一真源。
   const budgetCapCoins =
     typeof body.cap_coins === "number" && Number.isFinite(body.cap_coins) ? body.cap_coins : undefined;
   const gate = await enforceQuotaGate({
@@ -329,7 +329,7 @@ export async function POST(req: NextRequest) {
     budgetCapCoins,
   });
   if (!gate.ok) {
-    // 預算超限：帶上估算與上限（其餘錯誤碼走標準錯誤體，行為逐位不變）。
+    // 预算超限：带上估算与上限（其余错误码走标准错误体，行为逐位不变）。
     if (gate.code === "task_budget_exceeded") {
       return budgetExceededResponse(gate, traceId);
     }
@@ -370,7 +370,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof IdempotencyConflictError) {
       return errorResponse(409, error.message, "invalid_request_error", "idempotency_key_reused", traceId);
     }
-    // 模型可用性閘（真實生成結果驅動）：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+    // 模型可用性闸（真实生成结果驱动）：建单/扣费前拒单，沿用既有稳定码 no_endpoints。
     if (error instanceof GenerationModelUnavailableError) {
       return errorResponse(503, error.message, "api_error", "no_endpoints", traceId);
     }

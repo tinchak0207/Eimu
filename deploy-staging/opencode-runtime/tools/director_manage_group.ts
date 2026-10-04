@@ -1,10 +1,10 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, directorFetch, guardFail } from "../lib/director-common"
 
-// 3D 导演台群组管理（R3，2026-09-03，評測 P1-6「群組零寫路徑」補口）。gateway 契約：
+// 3D 导演台群组管理（R3，2026-09-03，评测 P1-6「群组零写路径」补口）。gateway 契约：
 // add=op addGroup {op:"addGroup", name, element_ids:[]} → {ok, group:{id,name,element_ids}, revision}；
 // remove=op removeGroup {op:"removeGroup", group_id} → {ok, removed_group_id, revision}。
-// 請求封裝逐行復用 director_manage_plan.ts 範式（directorFetch op 信封 {ops:[...], reason}）。
+// 请求封装逐行复用 director_manage_plan.ts 范式（directorFetch op 信封 {ops:[...], reason}）。
 
 export default tool({
   description:

@@ -137,13 +137,13 @@ export interface VideoChainOutput {
     durationSeconds: number;
   }>;
   /**
-   * 3D 場景卡嵌合（片AC，2026-09-06）：輸入帶 scene_card_ref + camera_trajectory
-   * 兩可選欄且同時合法才出現；缺欄零行為變化（本欄缺席 = 既有行為逐字同）。
-   * references/referenceDirective 真源 = blender-to-video-bridge（previz 檔 compositionOnly）；
-   * cameraDirective 真源 = camera-trajectory-to-prompt（六槽 Camera 槽描述詞）。
-   * VPS handler 消費：cameraDirective 併進視頻生成請求 prompt；references 交通道
-   * （站點 B 端 /v1/videos/generations 無幀欄位——registry 已錘，直調站點 /api/generate-videos
-   * 的 scene_card/camera_trajectory 欄可全生效，見 deploy-staging/blender-gateway/ac-video-scene-stitch.md）。
+   * 3D 场景卡嵌合（片AC，2026-09-06）：输入带 scene_card_ref + camera_trajectory
+   * 两可选栏且同时合法才出现；缺栏零行为变化（本栏缺席 = 既有行为逐字同）。
+   * references/referenceDirective 真源 = blender-to-video-bridge（previz 档 compositionOnly）；
+   * cameraDirective 真源 = camera-trajectory-to-prompt（六槽 Camera 槽描述词）。
+   * VPS handler 消费：cameraDirective 并进视频生成请求 prompt；references 交通道
+   * （站点 B 端 /v1/videos/generations 无帧栏位——registry 已锤，直调站点 /api/generate-videos
+   * 的 scene_card/camera_trajectory 栏可全生效，见 deploy-staging/blender-gateway/ac-video-scene-stitch.md）。
    */
   sceneDirector?: {
     referenceDirective: string;
@@ -188,7 +188,7 @@ const STORYBOARD_GATE_IDS = [
 const DEFINITIONS: ShortDramaToolDefinition[] = [
   {
     id: "script_scene_parse",
-    description: "將劇本拆成場次與動作/台詞節拍。",
+    description: "将剧本拆成场次与动作/台词节拍。",
     input: "{ script: string }",
     output: "{ scenes: Array<{ sceneId, heading, beats }> }",
     gates: ["script_present", "scene_non_empty", "beat_types_valid", "dialogue_speaker_present"],
@@ -197,7 +197,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "cast_asset_lock",
-    description: "將角色與場景資產綁定到本次製作，供跨鏡頭復用。",
+    description: "将角色与场景资产绑定到本次制作，供跨镜头复用。",
     input: "{ assets: Array<{ id, kind, name, appearancePrompt?, referenceUri? }>, requiredIds?: string[] }",
     output: "{ locks: Array<asset & { locked: true }>, missingIds: string[] }",
     gates: ["asset_id_unique", "asset_kind_valid", "appearance_or_reference_present", "required_assets_resolved"],
@@ -206,7 +206,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "storyboard_qc_17",
-    description: "在生成前對分鏡執行 17 道確定性門禁。",
+    description: "在生成前对分镜执行 17 道确定性门禁。",
     input: "{ shots, lockedCharacterCardIds, lockedSceneCardIds, segmentDurationSeconds }",
     output: "{ gates: Array<17>, shotCount, ready }",
     gates: [...STORYBOARD_GATE_IDS],
@@ -215,7 +215,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "keyframe_render",
-    description: "以已通過 QC 的分鏡產生關鍵幀；沒有影像上游時明確降級。",
+    description: "以已通过 QC 的分镜产生关键帧；没有影像上游时明确降级。",
     input: "{ shots: StoryboardShot[] }",
     output: "{ keyframes: Array<{ shotId, artifactId, uri }> }",
     gates: ["storyboard_ready", "image_upstream_available", "rendered_artifacts_present"],
@@ -224,7 +224,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "audio_first_timeline",
-    description: "先建立台詞/音訊錨點，再把時間軸對齊鏡頭。",
+    description: "先建立台词/音讯锚点，再把时间轴对齐镜头。",
     input: "{ dialogue: Array<{ id, text, speaker? }> }",
     output: "{ tracks: Array<{ anchorId, speaker?, text, startSeconds, durationSeconds }> }",
     gates: ["dialogue_present", "audio_anchor_unique", "speech_duration_deterministic"],
@@ -233,7 +233,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "last_frame_video_chain",
-    description: "以每鏡最後一幀作為下一鏡輸入，輸出可追蹤的影片鏈。",
+    description: "以每镜最后一帧作为下一镜输入，输出可追踪的影片链。",
     input: "{ shots: Array<{ shotId, keyframeId, durationSeconds }> }",
     output: "{ chains: Array<{ shotId, inputLastFrameId, nextShotId?, durationSeconds }> }",
     gates: ["shots_ordered", "last_frame_reference_present", "duration_bounds", "video_upstream_available"],
@@ -242,7 +242,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "editing_manifest",
-    description: "輸出 Jianying 或 FFmpeg 可消費的剪輯 manifest，不宣稱已完成渲染。",
+    description: "输出 Jianying 或 FFmpeg 可消费的剪辑 manifest，不宣称已完成渲染。",
     input: "{ clips: Array<{ shotId, uri, durationSeconds }>, engine?: 'ffmpeg'|'jianying' }",
     output: "{ engine, clips, manifestId }",
     gates: ["clips_present", "shot_order_contiguous", "durations_valid", "editing_engine_available"],
@@ -251,7 +251,7 @@ const DEFINITIONS: ShortDramaToolDefinition[] = [
   },
   {
     id: "delivery_assets",
-    description: "檢查並整理成片交付資產清單與格式。",
+    description: "检查并整理成片交付资产清单与格式。",
     input: "{ assets: Array<{ id, kind, uri, required? }>, formats?: string[] }",
     output: "{ manifestId, assets, formats }",
     gates: ["required_assets_present", "uris_present", "format_declared", "delivery_manifest_stable"],
@@ -340,7 +340,7 @@ export const STORYBOARD_MIN_SHOT_SECONDS = 10;
 
 function durationBoundsDetail(offenders: string[]): string {
   if (offenders.length === 0) return `each shot is ${STORYBOARD_MIN_SHOT_SECONDS}-30 seconds (per-clip billing: fill the model's largest slot)`;
-  return `duration_bounds failed: every shot must be ${STORYBOARD_MIN_SHOT_SECONDS}-30 seconds (hard rule: no <${STORYBOARD_MIN_SHOT_SECONDS}s short slots; 單鏡須 ${STORYBOARD_MIN_SHOT_SECONDS}-30 秒，嚴禁 <${STORYBOARD_MIN_SHOT_SECONDS} 秒短檔，不足請併入前一鏡或加長至 ${STORYBOARD_MIN_SHOT_SECONDS}s 以上). offending shots: ${offenders.slice(0, 10).join(", ")}`;
+  return `duration_bounds failed: every shot must be ${STORYBOARD_MIN_SHOT_SECONDS}-30 seconds (hard rule: no <${STORYBOARD_MIN_SHOT_SECONDS}s short slots; 单镜须 ${STORYBOARD_MIN_SHOT_SECONDS}-30 秒，严禁 <${STORYBOARD_MIN_SHOT_SECONDS} 秒短档，不足请并入前一镜或加长至 ${STORYBOARD_MIN_SHOT_SECONDS}s 以上). offending shots: ${offenders.slice(0, 10).join(", ")}`;
 }
 
 function gate(id: string, passed: boolean, detail: string): ShortDramaGate {
@@ -442,9 +442,9 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     gate("scene_binding", every((shot) => Boolean(shot.sceneId)), "each shot is bound to a scene"),
     // 2026-09-20 暴君裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
     // 单镜上限 2→30s（允许打满 seedance-2.5 480p/30s 固定档；2.0 档 10-15s 同样在界内）。
-    // 2026-10-02 H7：AGENTS.md 硬規則「嚴禁 <10 秒短檔」（workflow-video-rules §4b，seedance 2.0/2.5 下限 10s）機器化。
-    // 適用範圍＝本門禁驗的每個分鏡條目（每鏡 = 一條上游視頻計費單位，不分題材/鏡頭類型；§4b 無例外條款，
-    // 餘數不足 10s 須併入前一條或明確說明，故不豁免末鏡）。
+    // 2026-10-02 H7：AGENTS.md 硬规则「严禁 <10 秒短档」（workflow-video-rules §4b，seedance 2.0/2.5 下限 10s）机器化。
+    // 适用范围＝本门禁验的每个分镜条目（每镜 = 一条上游视频计费单位，不分题材/镜头类型；§4b 无例外条款，
+    // 余数不足 10s 须并入前一条或明确说明，故不豁免末镜）。
     gate("duration_bounds", every((shot) => shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30), durationBoundsDetail(shots.filter((shot) => !(shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30)).map((shot) => `${shot.shotId}(${Number.isFinite(shot.durationSeconds) ? shot.durationSeconds : "?"}s)`))),
     // 段长去 15s 上限：总长由创作需求决定，门禁只验「已声明且为正」；拆条打满档位是分镜纪律不是门禁。
     gate("segment_duration", segmentDuration > 0, "segment duration is declared and positive (split into max-slot clips, e.g. 80s -> 30+30+20)"),
@@ -480,13 +480,13 @@ function keyframeRender(input: unknown, capabilities: ShortDramaCapabilities): S
   ];
   if (!capabilities.imageGeneration?.render) {
     gates[2] = gate("rendered_artifacts_present", false, "image renderer callback is unavailable");
-    return unsupported("keyframe_render", input, { keyframes: [] }, gates, "keyframe", "image_generation_upstream_missing", "影像生成上游未接入，未建立關鍵幀。", "imageGeneration.render", shots.map((shot) => shot.shotId));
+    return unsupported("keyframe_render", input, { keyframes: [] }, gates, "keyframe", "image_generation_upstream_missing", "影像生成上游未接入，未建立关键帧。", "imageGeneration.render", shots.map((shot) => shot.shotId));
   }
   const keyframes: KeyframeRenderOutput["keyframes"] = [];
   for (const shot of shots) {
     const rendered = capabilities.imageGeneration.render({ ...shot });
     if (rendered instanceof Promise) {
-      return unsupported("keyframe_render", input, { keyframes: [] }, gates, "keyframe", "async_render_requires_runner", "目前純函式 runner 不會隱式等待非同步影像工作。", "synchronous imageGeneration.render", shots.map((shot) => shot.shotId));
+      return unsupported("keyframe_render", input, { keyframes: [] }, gates, "keyframe", "async_render_requires_runner", "目前纯函式 runner 不会隐式等待非同步影像工作。", "synchronous imageGeneration.render", shots.map((shot) => shot.shotId));
     }
     keyframes.push({ shotId: shot.shotId, ...rendered });
   }
@@ -517,7 +517,7 @@ function audioTimeline(input: unknown, capabilities: ShortDramaCapabilities): Sh
     gate("speech_duration_deterministic", tracks.every((track) => track.durationSeconds >= 1), "speech duration is derived from text length"),
   ];
   if (!capabilities.audioGeneration?.provider) {
-    return unsupported("audio_first_timeline", input, { tracks }, gates, "audio-first-timeline", "audio_generation_upstream_missing", "音訊生成上游未接入；僅保留時間軸不宣稱已出音訊。", "audioGeneration.provider", dialogue.map((item) => item.id));
+    return unsupported("audio_first_timeline", input, { tracks }, gates, "audio-first-timeline", "audio_generation_upstream_missing", "音讯生成上游未接入；仅保留时间轴不宣称已出音讯。", "audioGeneration.provider", dialogue.map((item) => item.id));
   }
   return result("audio_first_timeline", input, { tracks }, gates, gates.every((item) => item.passed) ? "succeeded" : "blocked", "audio-first-timeline", {
     input: dialogue.map((item) => item.id),
@@ -539,8 +539,8 @@ function videoChain(input: unknown, capabilities: ShortDramaCapabilities): Short
     ...(shots[index + 1]?.shotId ? { nextShotId: shots[index + 1]?.shotId } : {}),
     durationSeconds: shot.durationSeconds,
   }));
-  // 3D 場景卡嵌合（片AC）：scene_card_ref + camera_trajectory 兩可選欄，同時合法才出
-  // sceneDirector；缺欄/髒欄 = null = 既有行為逐字同（下遊鏈路對該欄不可見）。
+  // 3D 场景卡嵌合（片AC）：scene_card_ref + camera_trajectory 两可选栏，同时合法才出
+  // sceneDirector；缺栏/脏栏 = null = 既有行为逐字同（下游链路对该栏不可见）。
   const fusion = fuseSceneVideo(record.scene_card_ref, record.camera_trajectory);
   const sceneDirector = fusion
     ? {
@@ -561,7 +561,7 @@ function videoChain(input: unknown, capabilities: ShortDramaCapabilities): Short
     gate("video_upstream_available", Boolean(capabilities.videoGeneration?.provider), "video provider is declared"),
   ];
   if (!capabilities.videoGeneration?.provider) {
-    return unsupported("last_frame_video_chain", input, { chains }, gates, "last-frame-video-chain", "video_generation_upstream_missing", "影片生成上游未接入，未宣稱已生成影片。", "videoGeneration.provider", shots.map((shot) => shot.shotId));
+    return unsupported("last_frame_video_chain", input, { chains }, gates, "last-frame-video-chain", "video_generation_upstream_missing", "影片生成上游未接入，未宣称已生成影片。", "videoGeneration.provider", shots.map((shot) => shot.shotId));
   }
   return result("last_frame_video_chain", input, { chains, ...(sceneDirector ? { sceneDirector } : {}) }, gates, gates.every((item) => item.passed) ? "succeeded" : "blocked", "last-frame-video-chain", {
     input: shots.map((shot) => shot.keyframeId),
@@ -585,7 +585,7 @@ function editingManifest(input: unknown, capabilities: ShortDramaCapabilities): 
     gate("editing_engine_available", engine === "ffmpeg" || engine === "jianying", "editing engine is ffmpeg or jianying"),
   ];
   if (engine !== "ffmpeg" && engine !== "jianying") {
-    return unsupported("editing_manifest", input, { engine: "ffmpeg", clips: [], manifestId: "" }, gates, "editing-manifest", "editing_engine_missing", "未接入 Jianying 或 FFmpeg，未宣稱已完成剪輯。", "editing.engine", clips.map((clip) => clip.shotId));
+    return unsupported("editing_manifest", input, { engine: "ffmpeg", clips: [], manifestId: "" }, gates, "editing-manifest", "editing_engine_missing", "未接入 Jianying 或 FFmpeg，未宣称已完成剪辑。", "editing.engine", clips.map((clip) => clip.shotId));
   }
   const manifestId = artifactId("editing_manifest", { engine, clips });
   return result("editing_manifest", input, { engine, clips, manifestId }, gates, gates.every((item) => item.passed) ? "succeeded" : "blocked", "editing-manifest", {

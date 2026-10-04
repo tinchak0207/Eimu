@@ -1,7 +1,7 @@
 // agent-chat-frame-batch 的单元测试。
 //
 // 运行器：node:test（`npx --yes tsx --test src/lib/agent-chat-frame-batch.test.ts`）。
-// 全程注入假时钟与假排程器，不碰 DOM、不起真计时器 —— 併批是时间敏感逻辑，
+// 全程注入假时钟与假排程器，不碰 DOM、不起真计时器 —— 并批是时间敏感逻辑，
 // 用真 setTimeout 测就会变成 flaky 测试。
 
 import test from "node:test";
@@ -67,7 +67,7 @@ function makeBatcher() {
   return { clock, applied, batcher };
 }
 
-// ─────────────────────────── 帧构造器（只用到併批判准会读的栏位）
+// ─────────────────────────── 帧构造器（只用到并批判准会读的栏位）
 
 function delta(text: string): AgentSseEvent {
   return { name: "message.delta", event_id: 0, data: { text } };
@@ -82,7 +82,7 @@ function turnDone(): AgentSseEvent {
   return { name: "turn.done", event_id: 0, data: {} };
 }
 
-/** 已落地帧的逐帧指纹：併批只该改变「何时渲染」，不该改变内容与顺序。 */
+/** 已落地帧的逐帧指纹：并批只该改变「何时渲染」，不该改变内容与顺序。 */
 function fingerprint(applied: AgentSseEvent[]): string[] {
   return applied.map((evt) => {
     switch (evt.name) {
@@ -97,20 +97,20 @@ function fingerprint(applied: AgentSseEvent[]): string[] {
   });
 }
 
-// ─────────────────────────── 併批判准
+// ─────────────────────────── 并批判准
 
-test("併批判准只认三帧纯文字追加", () => {
+test("并批判准只认三帧纯文字追加", () => {
   assert.equal(shouldCoalesceAgentFrame(delta("a")), true, "message.delta");
   assert.equal(shouldCoalesceAgentFrame(reasoning("a")), true, "reasoning.delta");
   assert.equal(shouldCoalesceAgentFrame(subagentDelta("a")), true, "subagent.delta");
 
-  // 其余帧会改结构 / 带终态 / 要用户立刻看见 —— 一律直通，不進併批。
+  // 其余帧会改结构 / 带终态 / 要用户立刻看见 —— 一律直通，不进并批。
   const passThrough: AgentSseEvent[] = [
     { name: "tool.invoke", event_id: 0, data: { tool: "image_generate" } },
     { name: "tool.result", event_id: 0, data: { tool: "image_generate", ok: true } },
     { name: "image.done", event_id: 0, data: { url: "https://example.test/a.png" } },
     turnDone(),
-    { name: "turn.status", event_id: 0, data: { text: "正在執行工具" } },
+    { name: "turn.status", event_id: 0, data: { text: "正在执行工具" } },
     { name: "confirm.request", event_id: 0, data: { request_id: "cf_1", amount_coins: 3 } },
     { name: "session.closed", event_id: 0, data: { reason: "idle" } },
     { name: "canvas.node.created", event_id: 0, data: { unit_id: "u1", node: { id: "n1", type: "image", title: "t" } } },
@@ -141,9 +141,9 @@ test("leading edge：window 外的帧立即 apply，首字不延迟", () => {
   assert.equal(clock.scheduledCount(), 0);
 });
 
-// ─────────────────────────── 併批 + 字不留失
+// ─────────────────────────── 并批 + 字不留失
 
-test("併批：同 window 内 5 帧只排 1 次 flush，落地总数与顺序逐字完整", () => {
+test("并批：同 window 内 5 帧只排 1 次 flush，落地总数与顺序逐字完整", () => {
   const { clock, applied, batcher } = makeBatcher();
 
   const frames = [delta("A"), delta("B"), delta("C"), delta("D"), delta("E")];
@@ -185,9 +185,9 @@ test("长串流跨多个窗口：帧数、顺序、内容逐字守恒", () => {
   assert.equal(batcher.pendingCount(), 0);
 });
 
-// ─────────────────────────── 非併批帧插队
+// ─────────────────────────── 非并批帧插队
 
-test("非併批帧先 flush 缓冲再 apply 自己：delta 一定排在 turn.done 之前", () => {
+test("非并批帧先 flush 缓冲再 apply 自己：delta 一定排在 turn.done 之前", () => {
   const { clock, applied, batcher } = makeBatcher();
 
   batcher.push(delta("先写的字")); // leading edge 立即落地
@@ -212,7 +212,7 @@ test("非併批帧先 flush 缓冲再 apply 自己：delta 一定排在 turn.don
   assert.equal(applied.length, 3);
 });
 
-test("非併批帧之后的文字帧重新开窗，不与前一窗粘连", () => {
+test("非并批帧之后的文字帧重新开窗，不与前一窗粘连", () => {
   const { clock, applied, batcher } = makeBatcher();
 
   batcher.push(delta("1"));
@@ -221,7 +221,7 @@ test("非併批帧之后的文字帧重新开窗，不与前一窗粘连", () =>
   batcher.push(turnDone());
   assert.deepEqual(fingerprint(applied), ["message.delta:1", "message.delta:2", "turn.done"]);
 
-  // 非併批帧刚落地：紧随其后的文字帧要么立即（若已过窗）要么按剩余窗等，
+  // 非并批帧刚落地：紧随其后的文字帧要么立即（若已过窗）要么按剩余窗等，
   // 但必须在 advance 后完整落地，不能丢在缓冲里。
   batcher.push(reasoning("思考中"));
   clock.advance(DEFAULT_FRAME_BATCH_WINDOW_MS);

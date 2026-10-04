@@ -32,8 +32,8 @@ export const characterSheetTemplate: WorkflowTemplate =
         title: "正面",
         // 实体宣告（2026-09-24）：四视图是**同一张角色卡的多张参考图**，只标 view1——
         // 四颗都标会落四张重复卡。画布侧据 emitsEntity 自动落卡并回填分镜引用。
-        // referenceRoles（2026-09-24 四视图聚合）：view2/3/4 的交付圖是本卡的参考图，
-        // 由 expandTemplate 的參考圖 post-pass 解成 referenceNodeIds（作者不手写后者）。
+        // referenceRoles（2026-09-24 四视图聚合）：view2/3/4 的交付图是本卡的参考图，
+        // 由 expandTemplate 的参考图 post-pass 解成 referenceNodeIds（作者不手写后者）。
         defaults: {
           emitsEntity: { kind: "character", nameFrom: "input", referenceRoles: ["view2", "view3", "view4"] },
         },

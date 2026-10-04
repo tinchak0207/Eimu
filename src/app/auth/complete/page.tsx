@@ -21,16 +21,16 @@ export default function AuthCompletePage() {
     }
     const target = window.location.origin;
     if (window.opener) {
-      // 登入發生在 popup 內：通知開啟它的主頁（已帶 napi cookie），然後自己關閉。
+      // 登入发生在 popup 内：通知开启它的主页（已带 napi cookie），然后自己关闭。
       try {
         window.opener.postMessage({ type: "github-auth-complete" }, target);
       } catch {
-        // opener 已不可達，忽略——主頁會在下一次導航時自然拿到登入態。
+        // opener 已不可达，忽略——主页会在下一次导航时自然拿到登入态。
       }
       window.close();
       return;
     }
-    // 整頁跳轉的登入：先驗證會話真的可用，再回首頁。
+    // 整页跳转的登入：先验证会话真的可用，再回首页。
     (async () => {
       try {
         // 服务端种的 cookie 是 encodeURIComponent 编码值（token 含 +/=），

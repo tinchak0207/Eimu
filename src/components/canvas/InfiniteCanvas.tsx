@@ -1,24 +1,24 @@
 "use client";
 
-// InfiniteCanvas —— 畫布表面手勢層（行動端軌）。
+// InfiniteCanvas —— 画布表面手势层（行动端轨）。
 //
-// 行動端（375–430px、觸控、虛擬鍵盤、notch/home indicator）：
-//   - touch-action:none + Pointer Events 接管單指平移 / 雙指縮放：瀏覽器滾動、
-//     雙擊頁面縮放、pull-to-refresh 全部讓位給畫布（overscroll-behavior 兜底）。
-//   - 雙指以兩指中點為錨縮放（同時支援雙指平移）；雙擊以點為錨放大兩倍。
-//   - 鬆手後慣性滑行（prefers-reduced-motion 時直接停住，不滑）。
-//   - 視口 clamp：有內容時，節點永遠不會被推出可觸及範圍；縮放沿用全域上下限。
-//   - visualViewport resize/scroll（虛擬鍵盤彈出收回、方向轉換）後重測容器，
-//     尺寸變化時把視口拉回 clamp 範圍。
-//   - translate3d + will-change 讓合成器以裝置像素運算，Retina 下不糊。
+// 行动端（375–430px、触控、虚拟键盘、notch/home indicator）：
+//   - touch-action:none + Pointer Events 接管单指平移 / 双指缩放：浏览器滚动、
+//     双击页面缩放、pull-to-refresh 全部让位给画布（overscroll-behavior 兜底）。
+//   - 双指以两指中点为锚缩放（同时支援双指平移）；双击以点为锚放大两倍。
+//   - 松手后惯性滑行（prefers-reduced-motion 时直接停住，不滑）。
+//   - 视口 clamp：有内容时，节点永远不会被推出可触及范围；缩放沿用全域上下限。
+//   - visualViewport resize/scroll（虚拟键盘弹出收回、方向转换）后重测容器，
+//     尺寸变化时把视口拉回 clamp 范围。
+//   - translate3d + will-change 让合成器以装置像素运算，Retina 下不糊。
 //
-// 桌面補充（Phase 3 交互引擎）：
-//   - Shift/Ctrl/⌘ + 空白處拖動 = 框選（觸控不啟用：行動端沒有修飾鍵語境，
-//     維持平移）；位移不足視為點擊，命中判定交給 lib/canvas/interaction 純函式。
-//   - 右鍵一律擋掉瀏覽器選單；空白處右鍵換算世界座標上報，讓上層開自訂選單。
+// 桌面补充（Phase 3 交互引擎）：
+//   - Shift/Ctrl/⌘ + 空白处拖动 = 框选（触控不启用：行动端没有修饰键语境，
+//     维持平移）；位移不足视为点击，命中判定交给 lib/canvas/interaction 纯函式。
+//   - 右键一律挡掉浏览器选单；空白处右键换算世界座标上报，让上层开自订选单。
 //
-// 邊界：data-canvas-node / data-canvas-interactive（節點表單、縮放手柄）由
-// CanvasNodeView（另一軌）負責。這裡只在空白表面接收手勢，互動元素一律放行。
+// 边界：data-canvas-node / data-canvas-interactive（节点表单、缩放手柄）由
+// CanvasNodeView（另一轨）负责。这里只在空白表面接收手势，互动元素一律放行。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasViewport } from "@/lib/canvas/types";
@@ -35,33 +35,33 @@ export interface InfiniteCanvasProps {
   onBackgroundPointerDown?: () => void;
   /** 视口尺寸变化时回报，供 fitView / minimap 用 */
   onSizeChange?: (size: { width: number; height: number }) => void;
-  /** 框選完成（世界座標矩形，additive = 按住 Shift 追加選取）。提供此 prop 才啟用框選。 */
+  /** 框选完成（世界座标矩形，additive = 按住 Shift 追加选取）。提供此 prop 才启用框选。 */
   onMarqueeSelect?: (rect: WorldRect, additive: boolean) => void;
-  /** 空白處右鍵（螢幕座標 = 相對容器左上，世界座標已換算）。 */
+  /** 空白处右键（萤幕座标 = 相对容器左上，世界座标已换算）。 */
   onCanvasContextMenu?: (screen: { x: number; y: number }, world: { x: number; y: number }) => void;
-  /** 桌面雙擊空白：就地建節點（提供此 prop 後桌面雙擊不再放大；觸控不受影響）。 */
+  /** 桌面双击空白：就地建节点（提供此 prop 后桌面双击不再放大；触控不受影响）。 */
   onCanvasDoubleClick?: (screen: { x: number; y: number }, world: { x: number; y: number }) => void;
   className?: string;
   /**
-   * 內容層（世界座標、隨 viewport 變換的那層）的附加樣式／data 屬性。
-   * 語義縮放用它每幀下發 CSS 變數（--lod-g / --lod-xray…）與狀態屬性，節點靠 CSS 反應、不多 render。
+   * 内容层（世界座标、随 viewport 变换的那层）的附加样式／data 属性。
+   * 语义缩放用它每帧下发 CSS 变数（--lod-g / --lod-xray…）与状态属性，节点靠 CSS 反应、不多 render。
    */
   contentStyle?: React.CSSProperties;
   contentData?: Record<`data-${string}`, string | undefined>;
   children: React.ReactNode;
 }
 
-// ── 手勢參數 ──
-const PAN_THRESHOLD = 3; // 移動超過此距離才算平移（px）
-const MARQUEE_THRESHOLD = 4; // 框選位移低於此視為點擊（px），不觸發 onMarqueeSelect
-const DOUBLE_TAP_MS = 300; // 雙擊時間窗（ms）
-const DOUBLE_TAP_SLOP = 44; // 兩次點擊的位置容差（px）
-const DOUBLE_TAP_ZOOM = 2; // 雙擊放大倍率
-const CLAMP_MARGIN = 64; // 內容可被推出視口的最大距離（px）；160 太大，節點被切一半觀感極差
-const EMPTY_WORLD_HALF = 600; // 空畫布的原點可觸及半徑（世界座標）
-const FLING_MIN_VELOCITY = 0.12; // px/ms，低於此不啟動慣性
-const FLING_STOP_VELOCITY = 0.02; // px/ms，低於此停止慣性
-const FLING_FRICTION = 0.92; // 每 16.7ms 的衰減係數
+// ── 手势参数 ──
+const PAN_THRESHOLD = 3; // 移动超过此距离才算平移（px）
+const MARQUEE_THRESHOLD = 4; // 框选位移低于此视为点击（px），不触发 onMarqueeSelect
+const DOUBLE_TAP_MS = 300; // 双击时间窗（ms）
+const DOUBLE_TAP_SLOP = 44; // 两次点击的位置容差（px）
+const DOUBLE_TAP_ZOOM = 2; // 双击放大倍率
+const CLAMP_MARGIN = 64; // 内容可被推出视口的最大距离（px）；160 太大，节点被切一半观感极差
+const EMPTY_WORLD_HALF = 600; // 空画布的原点可触及半径（世界座标）
+const FLING_MIN_VELOCITY = 0.12; // px/ms，低于此不启动惯性
+const FLING_STOP_VELOCITY = 0.02; // px/ms，低于此停止惯性
+const FLING_FRICTION = 0.92; // 每 16.7ms 的衰减系数
 
 interface ContentBounds {
   minX: number;
@@ -71,7 +71,7 @@ interface ContentBounds {
 }
 
 interface BoundsResult {
-  /** 畫布上是否有節點（有內容才做平移 clamp，空畫布維持無限平移 = 桌面現狀）。 */
+  /** 画布上是否有节点（有内容才做平移 clamp，空画布维持无限平移 = 桌面现状）。 */
   hasContent: boolean;
   b: ContentBounds;
 }
@@ -87,12 +87,12 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi);
 }
 
-/** 平移 clamp：內容永遠保持可觸及；zoom 沿用全域上下限（clampScale）。 */
+/** 平移 clamp：内容永远保持可触及；zoom 沿用全域上下限（clampScale）。 */
 function clampViewport(vp: CanvasViewport, size: { width: number; height: number }, r: BoundsResult): CanvasViewport {
   const k = clampScale(vp.k);
   if (!r.hasContent || size.width <= 0 || size.height <= 0) return { ...vp, k };
   const b = r.b;
-  // 內容的右緣最多被推到視口左緣外 CLAMP_MARGIN，左緣同理 → 永遠摸得到。
+  // 内容的右缘最多被推到视口左缘外 CLAMP_MARGIN，左缘同理 → 永远摸得到。
   const loX = -CLAMP_MARGIN - b.maxX * k;
   const hiX = size.width + CLAMP_MARGIN - b.minX * k;
   const loY = -CLAMP_MARGIN - b.maxY * k;
@@ -104,7 +104,7 @@ function clampViewport(vp: CanvasViewport, size: { width: number; height: number
   };
 }
 
-/** 以某螢幕點為錨縮放（與 zoomAtPoint 同一套錨點數學，直接吃倍率）。 */
+/** 以某萤幕点为锚缩放（与 zoomAtPoint 同一套锚点数学，直接吃倍率）。 */
 function zoomByFactor(vp: CanvasViewport, factor: number, px: number, py: number): CanvasViewport {
   const k = clampScale(vp.k * factor);
   if (k === vp.k) return vp;
@@ -130,21 +130,21 @@ function InfiniteCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [isPanning, setIsPanning] = useState(false);
-  // 框選矩形（螢幕座標、相對容器左上）；null = 未在框選。超過門檻才開始渲染。
+  // 框选矩形（萤幕座标、相对容器左上）；null = 未在框选。超过门槛才开始渲染。
   const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // 最新的 viewport / 回呼存在 ref：原生 listener 只註冊一次，
-  // 不因每次 render 重新註冊，也不吃閉包裡的舊值。
+  // 最新的 viewport / 回呼存在 ref：原生 listener 只注册一次，
+  // 不因每次 render 重新注册，也不吃闭包里的旧值。
   const viewportRef = useRef(viewport);
   const onViewportChangeRef = useRef(onViewportChange);
   const onSizeChangeRef = useRef(onSizeChange);
   const onCanvasDoubleClickRef = useRef(onCanvasDoubleClick);
 
-  // 尺寸存 ref + state（ref 給 ResizeObserver / 手勢用，state 留給需要重渲染的場景）。
+  // 尺寸存 ref + state（ref 给 ResizeObserver / 手势用，state 留给需要重渲染的场景）。
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const sizeRef = useRef(size);
 
-  // ── 手勢狀態（全部放 ref，不進 render 路徑）
+  // ── 手势状态（全部放 ref，不进 render 路径）
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef({
     mode: "idle" as "idle" | "pan" | "pinch" | "marquee",
@@ -168,7 +168,7 @@ function InfiniteCanvas({
   const lastTapRef = useRef<{ px: number; py: number; time: number } | null>(null);
   const reduceMotionRef = useRef(false);
 
-  // 內容範圍快取：讀節點 inline style（世界座標），不觸發 layout。
+  // 内容范围快取：读节点 inline style（世界座标），不触发 layout。
   const boundsCacheRef = useRef<BoundsResult | null>(null);
   const boundsDirtyRef = useRef(true);
 
@@ -185,7 +185,7 @@ function InfiniteCanvas({
     onCanvasDoubleClickRef.current = onCanvasDoubleClick;
   });
 
-  // 尊重 prefers-reduced-motion：慣性滑行直接停住。
+  // 尊重 prefers-reduced-motion：惯性滑行直接停住。
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     reduceMotionRef.current = mq.matches;
@@ -196,7 +196,7 @@ function InfiniteCanvas({
     return () => mq.removeEventListener?.("change", onChange);
   }, []);
 
-  /** 世界範圍：data-canvas-node 的 left/top/width/height 就是世界座標，直接讀 inline style。 */
+  /** 世界范围：data-canvas-node 的 left/top/width/height 就是世界座标，直接读 inline style。 */
   const getBounds = useCallback((): BoundsResult => {
     if (!boundsDirtyRef.current && boundsCacheRef.current) return boundsCacheRef.current;
     const el = containerRef.current;
@@ -226,8 +226,8 @@ function InfiniteCanvas({
     return r;
   }, []);
 
-  // 節點增刪／移動（inline style 變更）→ 內容範圍標髒，下次手勢才重算。
-  // 內容層自己的 transform 每幀都在變，callback 裡過濾掉（它不帶 data-canvas-node）。
+  // 节点增删／移动（inline style 变更）→ 内容范围标脏，下次手势才重算。
+  // 内容层自己的 transform 每帧都在变，callback 里过滤掉（它不带 data-canvas-node）。
   useEffect(() => {
     const layer = contentRef.current;
     if (!layer) return;
@@ -266,7 +266,7 @@ function InfiniteCanvas({
     }
   }, []);
 
-  /** 慣性滑行：指數衰減，每幀 clamp，速度低於門檻即停。 */
+  /** 惯性滑行：指数衰减，每帧 clamp，速度低于门槛即停。 */
   const startMomentum = useCallback(() => {
     if (reduceMotionRef.current) return;
     const g = gestureRef.current;
@@ -299,9 +299,9 @@ function InfiniteCanvas({
     momentumRef.current = requestAnimationFrame(step);
   }, [getBounds, stopMomentum]);
 
-  /** 點擊：第一次觸發清空選取，300ms 內同一點再點 = 雙擊。
-   *  桌面（mouse/pen）有 onCanvasDoubleClick 時雙擊 = 就地建節點；
-   *  觸控（或未提供回呼）維持雙擊放大——行動端沒有滾輪，放大手勢不能沒收。 */
+  /** 点击：第一次触发清空选取，300ms 内同一点再点 = 双击。
+   *  桌面（mouse/pen）有 onCanvasDoubleClick 时双击 = 就地建节点；
+   *  触控（或未提供回呼）维持双击放大——行动端没有滚轮，放大手势不能没收。 */
   const handleTap = useCallback(
     (clientX: number, clientY: number, pointerType?: string) => {
       const el = containerRef.current;
@@ -327,17 +327,17 @@ function InfiniteCanvas({
       lastTapRef.current = { px, py, time: now };
       onBackgroundPointerDown?.();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 onBackgroundPointerDown（父層 CanvasEmbed 以 inline arrow 傳入、每次 render 新身分）；硬加會讓 handleTap 每次 render 重建，進而重掛 canvas 手勢監聽。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 onBackgroundPointerDown（父层 CanvasEmbed 以 inline arrow 传入、每次 render 新身分）；硬加会让 handleTap 每次 render 重建，进而重挂 canvas 手势监听。
     [getBounds],
   );
 
-  // ── 平移 / 縮放手勢（Pointer Events + touch-action:none）──
+  // ── 平移 / 缩放手势（Pointer Events + touch-action:none）──
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
-    // 節點本體、節點內的表單/按鈕/縮放手柄：放行給 CanvasNodeView 處理。
+    // 节点本体、节点内的表单/按钮/缩放手柄：放行给 CanvasNodeView 处理。
     if (target.closest("[data-canvas-node], [data-canvas-interactive]")) return;
-    // 框選進行中：忽略後續指針（不切 pinch，框選以第一根指針為準）。
+    // 框选进行中：忽略后续指针（不切 pinch，框选以第一根指针为准）。
     if (gestureRef.current.mode === "marquee") return;
     stopMomentum();
     const now = performance.now();
@@ -345,11 +345,11 @@ function InfiniteCanvas({
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      /* pointer 已結束時 capture 會拋錯，忽略 */
+      /* pointer 已结束时 capture 会抛错，忽略 */
     }
     const g = gestureRef.current;
     if (pointersRef.current.size === 1) {
-      // 修飾鍵 + 非觸控 + 有回呼 → 框選；觸控維持平移（中鍵/右鍵已被 button 檢查擋掉）。
+      // 修饰键 + 非触控 + 有回呼 → 框选；触控维持平移（中键/右键已被 button 检查挡掉）。
       if (onMarqueeSelect && e.pointerType !== "touch" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
         const rect = e.currentTarget.getBoundingClientRect();
         g.mode = "marquee";
@@ -385,7 +385,7 @@ function InfiniteCanvas({
     p.x = e.clientX;
     p.y = e.clientY;
 
-    // 框選：更新螢幕座標矩形；超過門檻才開始渲染（Shift+點擊不閃出 1px 矩形）。
+    // 框选：更新萤幕座标矩形；超过门槛才开始渲染（Shift+点击不闪出 1px 矩形）。
     if (g.mode === "marquee") {
       const el = containerRef.current;
       if (!el) return;
@@ -405,7 +405,7 @@ function InfiniteCanvas({
       return;
     }
 
-    // 雙指：以中點為錨縮放，中點位移 = 雙指平移。
+    // 双指：以中点为锚缩放，中点位移 = 双指平移。
     if (g.mode === "pinch" && pointersRef.current.size >= 2) {
       const pts = [...pointersRef.current.values()];
       const [pa, pb] = pts;
@@ -424,7 +424,7 @@ function InfiniteCanvas({
       return;
     }
 
-    // 單指平移：未超過門檻當作點擊候選；順便記錄速度供慣性使用。
+    // 单指平移：未超过门槛当作点击候选；顺便记录速度供惯性使用。
     if (g.mode === "pan" && pointersRef.current.size === 1) {
       if (!g.panActive) {
         if (Math.hypot(e.clientX - g.panStartX, e.clientY - g.panStartY) <= PAN_THRESHOLD) return;
@@ -466,11 +466,11 @@ function InfiniteCanvas({
         g.mode = "idle";
         g.marqueeActive = false;
         setMarqueeRect(null);
-        // pointercancel（release=false）中止框選：不提交選取也不當點擊。
+        // pointercancel（release=false）中止框选：不提交选取也不当点击。
         if (!release) return;
         const el = containerRef.current;
         if (wasActive && el && onMarqueeSelect) {
-          // 兩個角點（螢幕座標）→ 世界座標矩形；Shift = 追加選取。不啟動慣性。
+          // 两个角点（萤幕座标）→ 世界座标矩形；Shift = 追加选取。不启动惯性。
           const rect = el.getBoundingClientRect();
           onMarqueeSelect(
             screenRectToWorld(
@@ -481,7 +481,7 @@ function InfiniteCanvas({
             e.shiftKey,
           );
         } else if (!wasActive) {
-          // 位移不足視為點擊：沿用點擊語義（清空選取 / 雙擊縮放）。
+          // 位移不足视为点击：沿用点击语义（清空选取 / 双击缩放）。
           handleTap(e.clientX, e.clientY, e.pointerType);
         }
       }
@@ -489,7 +489,7 @@ function InfiniteCanvas({
     }
     if (g.mode === "pinch") {
       if (count === 1) {
-        // 雙指變單指：以剩下的手指繼續平移（不重新過門檻）。
+        // 双指变单指：以剩下的手指继续平移（不重新过门槛）。
         const [p] = [...pointersRef.current.values()];
         g.mode = "pan";
         g.panActive = true;
@@ -516,11 +516,11 @@ function InfiniteCanvas({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => finishPointer(e, true);
   const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => finishPointer(e, false);
-  // releasePointerCapture 之後 lostpointercapture 會到（pointer 已從 map 移除，忽略即可）。
+  // releasePointerCapture 之后 lostpointercapture 会到（pointer 已从 map 移除，忽略即可）。
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLDivElement>) => finishPointer(e, false);
 
-  // 右鍵：容器統一 preventDefault 擋掉瀏覽器選單。節點 / 互動元素內的右鍵由
-  // 節點層自己開自訂選單（這裡不重複上報）；空白處才換算世界座標交給上層。
+  // 右键：容器统一 preventDefault 挡掉浏览器选单。节点 / 互动元素内的右键由
+  // 节点层自己开自订选单（这里不重复上报）；空白处才换算世界座标交给上层。
   const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     const target = e.target as HTMLElement;
@@ -534,8 +534,8 @@ function InfiniteCanvas({
     onCanvasContextMenu(screen, { x: (screen.x - vp.x) / vp.k, y: (screen.y - vp.y) / vp.k });
   };
 
-  // 滾輪縮放：React 19 的 onWheel 是 passive，preventDefault 會靜默失敗，
-  // 必須用原生 listener + { passive: false }。
+  // 滚轮缩放：React 19 的 onWheel 是 passive，preventDefault 会静默失败，
+  // 必须用原生 listener + { passive: false }。
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -553,7 +553,7 @@ function InfiniteCanvas({
     return () => el.removeEventListener("wheel", onWheel);
   }, [getBounds, stopMomentum]);
 
-  // 追蹤容器尺寸，回報給父層（fitView / minimap 用）。
+  // 追踪容器尺寸，回报给父层（fitView / minimap 用）。
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -571,8 +571,8 @@ function InfiniteCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // visualViewport（虛擬鍵盤彈出收回、方向轉換）：重測容器；尺寸真的變了才更新
-  // 並把視口拉回 clamp 範圍。iOS 覆蓋式鍵盤不動佈局視口 → 這裡是 no-op。
+  // visualViewport（虚拟键盘弹出收回、方向转换）：重测容器；尺寸真的变了才更新
+  // 并把视口拉回 clamp 范围。iOS 覆盖式键盘不动布局视口 → 这里是 no-op。
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -602,9 +602,9 @@ function InfiniteCanvas({
     };
   }, [getBounds]);
 
-  // 清晰度：will-change:transform 讓 Chrome 把內容層按「開始動時的倍率」柵格化後只做縮放合成——
-  // 放大後文字/髮絲線是被拉伸的舊點陣（糊）。只在視口變動中保留提示（合成器快），
-  // 停手 160ms 後撤掉並改用 2D transform，讓瀏覽器按當前倍率重新柵格化（清晰）。
+  // 清晰度：will-change:transform 让 Chrome 把内容层按「开始动时的倍率」栅格化后只做缩放合成——
+  // 放大后文字/发丝线是被拉伸的旧点阵（糊）。只在视口变动中保留提示（合成器快），
+  // 停手 160ms 后撤掉并改用 2D transform，让浏览器按当前倍率重新栅格化（清晰）。
   const [settled, setSettled] = useState(true);
   const lastViewportRef = useRef(viewport);
   useEffect(() => {
@@ -616,8 +616,8 @@ function InfiniteCanvas({
     return () => window.clearTimeout(t);
   }, [viewport]);
 
-  // 反向補償變數掛在內容層、會被上千個子元素繼承：每幀改值＝整棵子樹 style recalc（審計 P0-2，佔主線程 28%）。
-  // 移動中按 6% 對數格量化（埠/把手/字級誤差 ≤3%），停手寫回精確值。
+  // 反向补偿变数挂在内容层、会被上千个子元素继承：每帧改值＝整棵子树 style recalc（审计 P0-2，占主线程 28%）。
+  // 移动中按 6% 对数格量化（埠/把手/字级误差 ≤3%），停手写回精确值。
   const varK = settled ? viewport.k : quantizeScale(viewport.k);
   const background = gridBackground(viewport, backgroundMode);
   const contentStyle = {
@@ -627,7 +627,7 @@ function InfiniteCanvas({
       : `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.k})`,
     willChange: settled ? "auto" : "transform",
     "--canvas-inverse-scale": String(1 / varK),
-    // 1/√k：拆機內容字級用——放大時字在螢幕上溫和變大（與卡片標題保持比例），世界字級仍縮小＝裝得下更多行。
+    // 1/√k：拆机内容字级用——放大时字在萤幕上温和变大（与卡片标题保持比例），世界字级仍缩小＝装得下更多行。
     "--canvas-inverse-sqrt": String(1 / Math.sqrt(varK)),
   } as React.CSSProperties;
 
@@ -641,7 +641,7 @@ function InfiniteCanvas({
       )}
       style={{
         ...background,
-        // 關鍵：讓瀏覽器完全不介入畫布上的觸控（滾動 / 縮放 / pull-to-refresh）。
+        // 关键：让浏览器完全不介入画布上的触控（滚动 / 缩放 / pull-to-refresh）。
         touchAction: "none",
         overscrollBehavior: "none",
         WebkitTapHighlightColor: "transparent",
@@ -658,7 +658,7 @@ function InfiniteCanvas({
         {children}
       </div>
       {marqueeRect ? (
-        // 框選矩形：螢幕座標、蓋在內容層之上；pointer-events-none 不干擾手勢。
+        // 框选矩形：萤幕座标、盖在内容层之上；pointer-events-none 不干扰手势。
         <div
           className="pointer-events-none absolute border border-ios-blue/80 bg-ios-blue/10"
           style={{

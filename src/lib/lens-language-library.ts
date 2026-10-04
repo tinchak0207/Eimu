@@ -1,27 +1,27 @@
 /**
- * 鏡頭語言詞庫（Lens Language Thesaurus）— 142 條 / 12 類。
+ * 镜头语言词库（Lens Language Thesaurus）— 142 条 / 12 类。
  *
- * 輪子來源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
- * 源檔：sql/aid-init.sql 的 `aid_prompt_lib` 初始資料（143 筆 INSERT，行 2301 起）
+ * 轮子来源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
+ * 源档：sql/aid-init.sql 的 `aid_prompt_lib` 初始资料（143 笔 INSERT，行 2301 起）
  * 取得日：2026-09-15
  * 逐字保留：prompt_type（→ group）/ prompt_name（→ name）/ prompt_content（→ text）
- * 白名單改寫（僅此三處，其餘逐行等價）：
- *   1. cover_url（AID 自建 OSS 路徑 `/aid/storyboard/img/...`）→ 剔除。該圖片資產屬
- *      「官方資產包」，不在 AID 開源 Release 內，取不到；縮圖走本站同名佔位卡配方另行覆蓋。
- *   2. 同 type 同名去重一筆：exposure_blur 的「深景深」有兩筆（sort_order 不同、文本不同），
- *      保留首見者。原文一字未改，僅去重。
- *   3. 分組 label（構圖/景別/…）為本站新增展示層欄位，不動原文。
- * 本檔為純資料常數，無邏輯。
+ * 白名单改写（仅此三处，其余逐行等价）：
+ *   1. cover_url（AID 自建 OSS 路径 `/aid/storyboard/img/...`）→ 剔除。该图片资产属
+ *      「官方资产包」，不在 AID 开源 Release 内，取不到；缩图走本站同名占位卡配方另行覆盖。
+ *   2. 同 type 同名去重一笔：exposure_blur 的「深景深」有两笔（sort_order 不同、文本不同），
+ *      保留首见者。原文一字未改，仅去重。
+ *   3. 分组 label（构图/景别/…）为本站新增展示层栏位，不动原文。
+ * 本档为纯资料常数，无逻辑。
  *
- * 消費入口：composeLensFragment()（注入用）／lensEntriesByGroup()（UI 選詞用）。
+ * 消费入口：composeLensFragment()（注入用）／lensEntriesByGroup()（UI 选词用）。
  */
 
 export interface LensLanguageEntry {
-  /** AID 原始 prompt_type（分組鍵，逐字保留）。 */
+  /** AID 原始 prompt_type（分组键，逐字保留）。 */
   readonly group: string;
   /** AID 原始 prompt_name（逐字保留）。 */
   readonly name: string;
-  /** AID 原始 prompt_content（逐字保留，含中文詳解）。 */
+  /** AID 原始 prompt_content（逐字保留，含中文详解）。 */
   readonly text: string;
 }
 
@@ -36,22 +36,22 @@ export const LENS_LANGUAGE_SOURCE = {
 
 export const LENS_LANGUAGE_GROUP_LABELS: Readonly<Record<string, string>> = {
 
-  composition: "構圖",
-  shot_size: "景別",
-  camera_angle: "機位/視角",
+  composition: "构图",
+  shot_size: "景别",
+  camera_angle: "机位/视角",
   focal_length: "焦段",
-  lens_type: "鏡頭類型",
-  color_tone: "色調",
-  lighting: "光線",
-  exposure_blur: "曝光/虛化",
-  camera_movement: "運鏡",
-  shooting_technique: "攝法/特殊技法",
-  quality_base: "畫質保底",
-  negative_base: "負向詞保底",
+  lens_type: "镜头类型",
+  color_tone: "色调",
+  lighting: "光线",
+  exposure_blur: "曝光/虚化",
+  camera_movement: "运镜",
+  shooting_technique: "摄法/特殊技法",
+  quality_base: "画质保底",
+  negative_base: "负向词保底",
 };
 
 export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
-  // ── 構圖（composition，16 條）
+  // ── 构图（composition，16 条）
   { group: 'composition', name: '三分构图', text: '三分法构图，主体置于三分线交点，画面均衡，视觉重心自然。' },
   { group: 'composition', name: '对称构图', text: '对称构图，画面以中轴线左右完全对称，两侧元素一一对应，秩序感强。' },
   { group: 'composition', name: '中心构图', text: '中心构图，主体绝对居中位于垂直中轴线上，四周元素向中心收拢。' },
@@ -68,7 +68,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'composition', name: '缝隙窥视', text: '缝隙窥视构图，透过前景狭窄缝隙拍摄，缝隙虚化成暗色边框，主体在框内明亮处。' },
   { group: 'composition', name: '台阶站位', text: '高低差构图，主体位于高处，机位在低处仰角约二十度，前景向下层层延伸。' },
   { group: 'composition', name: '俯仰呼应', text: '多视角呼应构图，前景仰视、中景平视、背景俯视并置于同一画面，用广角压缩空间。' },
-  // ── 景別（shot_size，10 條）
+  // ── 景别（shot_size，10 条）
   { group: 'shot_size', name: '远景', text: '远景，主体全身占画面高度约三分之一，环境占据大部分画面，交代主体与空间的关系。' },
   { group: 'shot_size', name: '全景', text: '全景，主体全身刚好填满画框，头顶与脚下留少量余量，完整呈现主体形态。' },
   { group: 'shot_size', name: '中景', text: '中景，取景至主体腰部以上，兼顾主体动作与局部环境。' },
@@ -79,7 +79,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'shot_size', name: '中全景/膝上景', text: '膝上景，取景至主体膝盖以上，保留大部分肢体动作与部分环境。' },
   { group: 'shot_size', name: '极特写', text: '极特写，单一细部占画面七成以上，超越常规特写的极限放大。' },
   { group: 'shot_size', name: '细节镜头', text: '细节镜头，聚焦于局部细部或微小对象，脱离整体独立成画。' },
-  // ── 機位/視角（camera_angle，13 條）
+  // ── 机位/视角（camera_angle，13 条）
   { group: 'camera_angle', name: '平视', text: '平视机位，相机与主体视平线等高，视角客观中立，无俯仰透视变形。' },
   { group: 'camera_angle', name: '鸟瞰', text: '鸟瞰机位，相机自正上方垂直向下俯拍，主体与环境呈平面化排布，投影被压缩至脚下。' },
   { group: 'camera_angle', name: '虫视角', text: '虫视机位，相机贴近地面极端仰拍，前景元素被极度放大，天空占据画面主体，透视变形强烈。' },
@@ -93,7 +93,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'camera_angle', name: '四分之三正面', text: '四分之三正面机位，主体与相机呈约四十五度，露出四分之三正面，明暗自然分层。' },
   { group: 'camera_angle', name: '四分之三背面', text: '四分之三背面机位，主体背对相机微转，露出约四分之一侧面，留有回望的悬念。' },
   { group: 'camera_angle', name: '背面', text: '背面机位，主体完全背对相机，不呈现正面信息，以背影与环境构成留白。' },
-  // ── 焦段（focal_length，9 條）
+  // ── 焦段（focal_length，9 条）
   { group: 'focal_length', name: '14mm 超广角', text: '十四毫米超广角，视野极宽，透视变形强烈，近大远小被极度夸张。' },
   { group: 'focal_length', name: '24mm 广角', text: '二十四毫米广角，视野开阔，透视有明显夸张，纵深感强。' },
   { group: 'focal_length', name: '35mm 小广角', text: '三十五毫米小广角，视野略宽于人眼，透视自然，纪实感强。' },
@@ -103,13 +103,13 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'focal_length', name: '135mm 长焦', text: '一百三十五毫米长焦，空间压缩明显，背景奶油化。' },
   { group: 'focal_length', name: '200mm 远摄', text: '二百毫米远摄，空间被极度压缩近乎平面，主体与环境彻底剥离。' },
   { group: 'focal_length', name: '鱼眼', text: '十毫米鱼眼，严重桶形畸变，中央凸出四周向角落弯曲，直线全部变为弧线。' },
-  // ── 鏡頭類型（lens_type，5 條）
+  // ── 镜头类型（lens_type，5 条）
   { group: 'lens_type', name: '广角', text: '二十四毫米广角，透视夸张，近处元素被放大远处被压缩，空间显得开阔纵深。' },
   { group: 'lens_type', name: '标准', text: '五十毫米标准，透视与人眼一致，远近比例关系最自然，不加修饰。' },
   { group: 'lens_type', name: '中长焦', text: '八十五毫米中长焦，主体比例最佳，背景明显虚化，主体与背景完全分离。' },
   { group: 'lens_type', name: '长焦', text: '二百毫米长焦，空间极度压缩，前后层次被压到同一平面，背景虚化成纯色。' },
   { group: 'lens_type', name: '裂焦', text: '裂焦，画面左右分别对焦于极近前景与远处主体，中间保留一条焦平面过渡线。' },
-  // ── 色調（color_tone，15 條）
+  // ── 色调（color_tone，15 条）
   { group: 'color_tone', name: '暖色调', text: '暖色调，整体色温偏暖约三千五百开尔文，橙黄金杏为主导色相，冷色被压低。' },
   { group: 'color_tone', name: '冷色调', text: '冷色调，整体色温偏冷约八千开尔文，蓝青紫银为主导色相，暖色被压低。' },
   { group: 'color_tone', name: '高饱和度', text: '高饱和，色彩饱和度整体提升约百分之四十，色相浓烈鲜明，对比强烈。' },
@@ -125,7 +125,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'color_tone', name: '白色调', text: '高调白，整体提亮并去饱和推向白色，高光接近纯白，色彩降至最低。' },
   { group: 'color_tone', name: '黑色调', text: '低调黑，整体压暗并强化暗部，深色占主导，四角暗角极重，仅保留少量亮部。' },
   { group: 'color_tone', name: '粉色调', text: '粉色调，叠加淡粉滤镜，粉与暖白被突显，高光边缘带粉色光晕。' },
-  // ── 光線（lighting，24 條）
+  // ── 光线（lighting，24 条）
   { group: 'lighting', name: '逆光', text: '逆光，主光自主体正后方射入，边缘被勾出一圈轮廓光，正面转入柔和剪影。' },
   { group: 'lighting', name: '侧光', text: '侧光，主光自正侧方九十度射入，明暗被精确分为两半，立体感与戏剧性最强。' },
   { group: 'lighting', name: '顶光', text: '顶光，主光自正上方垂直射下，凹陷处形成阴影，上表面被照亮。' },
@@ -150,7 +150,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'lighting', name: '实用光源', text: '实用光源，光源本身出现在画面内并可见，光照关系由画内光源解释。' },
   { group: 'lighting', name: '窗户光', text: '窗户光，单侧柔光自开口射入形成一束光柱，只照亮局部其余落入阴影。' },
   { group: 'lighting', name: '频闪', text: '频闪，极短促的冷白硬光瞬间照亮，动作被冻结，与环境光形成强烈反差。' },
-  // ── 曝光/虛化（exposure_blur，15 條）
+  // ── 曝光/虚化（exposure_blur，15 条）
   { group: 'exposure_blur', name: '长曝光', text: '长曝光，运动轨迹拖曳成连续光带，流动介质被抹平，静止部分保持清晰。' },
   { group: 'exposure_blur', name: '浅景深虚化', text: '浅景深虚化，背景强烈散景，主体从环境中被干净剥离。' },
   { group: 'exposure_blur', name: '深景深', text: '深景深，前后景全部合焦，由近及远细节一致锐利。' },
@@ -166,7 +166,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'exposure_blur', name: '柔焦', text: '柔焦，镜头前加柔光镜，高光向暗部溢出形成光晕，整体轮廓边缘柔化。' },
   { group: 'exposure_blur', name: '分裂焦点', text: '分裂焦点，前景与远景同时合焦，中间层虚化，形成远近共存的双焦平面。' },
   { group: 'exposure_blur', name: '失焦', text: '完全失焦，画面无任何清晰边缘，全部化为模糊色块，仅靠色彩与明暗关系辨识。' },
-  // ── 運鏡（camera_movement，17 條）
+  // ── 运镜（camera_movement，17 条）
   { group: 'camera_movement', name: '固定机位', text: '固定机位，相机全程静止不动，构图不变，仅主体与环境自身发生变化。' },
   { group: 'camera_movement', name: '跟拍', text: '跟拍，相机保持在主体后方或侧方与主体同速移动，主体在画面中的位置相对稳定。' },
   { group: 'camera_movement', name: '环绕', text: '环绕运镜，相机以主体为圆心做平滑弧线运动，机位与主体的距离全程保持不变。' },
@@ -184,7 +184,7 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'camera_movement', name: '摆臂下降', text: '摇臂下降，相机由高机位平滑降落并转为仰视，视点自高处沉向地面。' },
   { group: 'camera_movement', name: '无人机航拍', text: '航拍运镜，相机在高空大范围移动，兼具升降与横移，展现宏观空间关系。' },
   { group: 'camera_movement', name: '360度环绕', text: '三百六十度旋转，相机绕光轴自转一周，地平线完整翻转后回正，机位与朝向不变。' },
-  // ── 攝法/特殊技法（shooting_technique，13 條）
+  // ── 摄法/特殊技法（shooting_technique，13 条）
   { group: 'shooting_technique', name: '希区柯克变焦', text: '希区柯克变焦，相机后退的同时镜头推近，主体大小不变而背景透视被剧烈压缩，产生眩晕感。' },
   { group: 'shooting_technique', name: '延时摄影', text: '延时摄影，长时间流逝被压缩播放，缓慢变化被加速，主体保持相对静止。' },
   { group: 'shooting_technique', name: '子弹时间', text: '子弹时间，相机绕主体高速环绕而主体动作被极度放慢，形成时间凝滞的环视效果。' },
@@ -198,28 +198,28 @@ export const LENS_LANGUAGE_LIBRARY: readonly LensLanguageEntry[] = [
   { group: 'shooting_technique', name: 'FPV 穿梭', text: 'FPV穿越，相机高速连续穿行并伴随翻滚俯冲，一镜到底，空间关系急速变化。' },
   { group: 'shooting_technique', name: '微距特写', text: '微距推轨，相机贴近微小对象并向前推进，焦点由主体转移到近处细节。' },
   { group: 'shooting_technique', name: '慢镜头', text: '慢镜头，高帧率拍摄后放慢播放，动作细节被延展，运动轨迹清晰可辨。' },
-  // ── 畫質保底（quality_base，3 條）
+  // ── 画质保底（quality_base，3 条）
   { group: 'quality_base', name: '通用极高画质', text: '高清，画面精致，极致细节，大师级构图，杰作' },
   { group: 'quality_base', name: '3D/渲染引擎画质', text: '3D渲染，虚幻引擎渲染，光线追踪，全局光照，极致光影，超精细建模' },
   { group: 'quality_base', name: '电影级光影保底', text: '电影感光影，戏剧性布光，体积光，宏大构图，超高清' },
-  // ── 負向詞保底（negative_base，2 條）
+  // ── 负向词保底（negative_base，2 条）
   { group: 'negative_base', name: '通用防崩坏负面词', text: '低质量，模糊，低分辨率，噪点杂乱，水印，文字，签名，logo，构图残缺，主体畸形' },
   { group: 'negative_base', name: '人体防崩坏负面词', text: '人体结构错误，比例失调，手部畸形，手指缺失，手指多余，肢体多余，关节反折，五官崩坏，脸部扭曲' },
 ];
 
-/** 依分組取詞條（UI 選詞用；空/未知分組回空陣列，不拋）。 */
+/** 依分组取词条（UI 选词用；空/未知分组回空阵列，不抛）。 */
 export function lensEntriesByGroup(group: string): readonly LensLanguageEntry[] {
   return LENS_LANGUAGE_LIBRARY.filter((e) => e.group === group);
 }
 
-/** 依名稱精確取單條（agent 選詞後取原文注入）。同名以首見為準。 */
+/** 依名称精确取单条（agent 选词后取原文注入）。同名以首见为准。 */
 export function lensEntryByName(name: string): LensLanguageEntry | undefined {
   return LENS_LANGUAGE_LIBRARY.find((e) => e.name === name);
 }
 
 /**
- * 把命中詞條的原文拼成 prompt 片段（注入用）。
- * 未命中一律略過（不編造、不猜同義詞）；`limit` 防注入爆炸，預設 6 條。
+ * 把命中词条的原文拼成 prompt 片段（注入用）。
+ * 未命中一律略过（不编造、不猜同义词）；`limit` 防注入爆炸，预设 6 条。
  */
 export function composeLensFragment(names: readonly string[], limit = 6): string {
   const seen = new Set<string>();

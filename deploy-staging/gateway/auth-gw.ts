@@ -1,4 +1,4 @@
-// auth-gw.ts — SSE/附件票據、API key 驗證與正典化身分、loopback 判定、CORS（自 index.ts 四段逐行抽取，2026-09-19 Wave1）
+// auth-gw.ts — SSE/附件票据、API key 验证与正典化身分、loopback 判定、CORS（自 index.ts 四段逐行抽取，2026-09-19 Wave1）
 import { KEY_CACHE_TTL_MS, PLATFORM_BASE } from "./constants-gateway.ts"
 // SSE tickets. The browser EventSource API cannot set an Authorization header
 // (its only option is withCredentials), so a page written the way §7 shows it
@@ -14,9 +14,9 @@ import { KEY_CACHE_TTL_MS, PLATFORM_BASE } from "./constants-gateway.ts"
 export const SSE_TICKET_TTL_MS = Number.parseInt(process.env.SSE_TICKET_TTL_MS || "600000", 10) || 600_000
 export const sseTickets = new Map<string, { sessionId: string; apiKey: string; expiresAt: number }>()
 
-// ── 附件靜態讀票據（2026-08-29，罪狀1 網關側）─────────────────────────────
-// 前端 <img>/<video> 標籤帶不了 Authorization 頭，與 SSE ticket 同構：認證 POST
-// 換一張只讀、單會話、TTL 1 小時的票據，公開 GET 路由憑票直讀 UPLOADS_DIR 下文件。
+// ── 附件静态读票据（2026-08-29，罪状1 网关侧）─────────────────────────────
+// 前端 <img>/<video> 标签带不了 Authorization 头，与 SSE ticket 同构：认证 POST
+// 换一张只读、单会话、TTL 1 小时的票据，公开 GET 路由凭票直读 UPLOADS_DIR 下文件。
 export const UPLOAD_TICKET_TTL_MS = Number.parseInt(process.env.UPLOAD_TICKET_TTL_MS || "3600000", 10) || 3_600_000
 export const uploadTickets = new Map<string, { sessionId: string; expiresAt: number }>()
 
@@ -26,8 +26,8 @@ export function issueUploadTicket(sessionId: string): string {
   return ticket
 }
 
-/** 只驗票據有效（未過期）且與會話匹配，不驗 key（GET 方是瀏覽器標籤）。
- *  過期順手刪條目；無效/過期/會話不匹配回 false，呼叫端一律 404 不泄露存在性。 */
+/** 只验票据有效（未过期）且与会话匹配，不验 key（GET 方是浏览器标签）。
+ *  过期顺手删条目；无效/过期/会话不匹配回 false，呼叫端一律 404 不泄露存在性。 */
 export function redeemUploadTicket(ticket: string, sessionId: string): boolean {
   const rec = uploadTickets.get(ticket)
   if (!rec) return false
@@ -53,7 +53,7 @@ export async function validateApiKey(key: string): Promise<boolean> {
   try {
     const res = await fetch(`${PLATFORM_BASE}/v1/models`, {
       headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 實測 24–125ms，5s 上限收斂為 2s 尾延遲保護
+      signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 实测 24–125ms，5s 上限收敛为 2s 尾延迟保护
     })
     ok = res.ok
   } catch {
@@ -85,7 +85,7 @@ export async function resolveCanonicalIdentity(rawKey: string): Promise<{ key: s
     const res = await fetch(`${PLATFORM_BASE}/api/agent/biz/resolve-owner`, {
       method: "POST",
       headers: { Authorization: `Bearer ${rawKey}` },
-      signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 實測 95–533ms，負緩存 60s 防風暴下 2s 足夠
+      signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 实测 95–533ms，负缓存 60s 防风暴下 2s 足够
     })
     if (res.ok) {
       const data = (await res.json()) as { canonical_key?: unknown; user_id?: unknown }
@@ -107,7 +107,7 @@ export async function resolveCanonicalIdentity(rawKey: string): Promise<{ key: s
   return { key: canonical ?? rawKey, userId }
 }
 
-/** 既有呼叫端（R6 正典化）只吃 key；身份擴充（成片索引 tenant 歸屬）走 resolveCanonicalIdentity。 */
+/** 既有呼叫端（R6 正典化）只吃 key；身份扩充（成片索引 tenant 归属）走 resolveCanonicalIdentity。 */
 export async function resolveCanonicalKey(rawKey: string): Promise<string> {
   return (await resolveCanonicalIdentity(rawKey)).key
 }

@@ -1,39 +1,39 @@
 /**
- * delivery-gate.ts — Expert 交付契約的**機器強制點**（片 C，2026-09-15）。
+ * delivery-gate.ts — Expert 交付契约的**机器强制点**（片 C，2026-09-15）。
  *
- * 病灶（R8 審計實錘，09-10）：7 個 Expert 的 `*_DELIVERABLES` 契約只寫在 prompt/digest 裡，
+ * 病灶（R8 审计实锤，09-10）：7 个 Expert 的 `*_DELIVERABLES` 契约只写在 prompt/digest 里，
  * gateway 全域 grep `requiredFields`/`qcSignatureRequired`/`deliverableContract` **零命中**
- * ——契約無任何執行點。09-15 實案：music 域契約要求 5 欄，`audio_url` 是空的（無 demo），
- * 收尾路徑照樣 `status:"ok"` 放行，Orchestrator 直接標「部分成功」。
+ * ——契约无任何执行点。09-15 实案：music 域契约要求 5 栏，`audio_url` 是空的（无 demo），
+ * 收尾路径照样 `status:"ok"` 放行，Orchestrator 直接标「部分成功」。
  *
  * ─────────────────────────────────────────────────────────────────────────
- * 【本閘門的邊界：這是「欄位存在性」檢查，不是「品質」檢查】
+ * 【本闸门的边界：这是「栏位存在性」检查，不是「品质」检查】
  *
- * 判據 = 契約 requiredFields 的**欄位名**是否在交付文本中出現（大小寫正規化後子字串命中）。
- * 它**不**驗證：
- *   - 值的正確性（`audio_url` 寫了個 404 的連結照樣過閘）；
- *   - 值的完整度/長度（`lyrics: ""` 也算命中）；
- *   - 品質、審美、是否符合 TaskType 意圖。
- * 因此**不得**把本閘門宣稱為「品質閘門」或「驗收通過」。它的作用是：
- * 把「契約欄位整欄缺失」這種**可機械判定**的漏交付變成可見的顯式標記，
- * 讓收尾摘要不再能若無其事地標 ok。品質判定仍屬 critic/Expert 職權。
+ * 判据 = 契约 requiredFields 的**栏位名**是否在交付文本中出现（大小写正规化后子字串命中）。
+ * 它**不**验证：
+ *   - 值的正确性（`audio_url` 写了个 404 的连结照样过闸）；
+ *   - 值的完整度/长度（`lyrics: ""` 也算命中）；
+ *   - 品质、审美、是否符合 TaskType 意图。
+ * 因此**不得**把本闸门宣称为「品质闸门」或「验收通过」。它的作用是：
+ * 把「契约栏位整栏缺失」这种**可机械判定**的漏交付变成可见的显式标记，
+ * 让收尾摘要不再能若无其事地标 ok。品质判定仍属 critic/Expert 职权。
  * ─────────────────────────────────────────────────────────────────────────
  *
- * 【fail-open 取捨】契約檔不存在 → 契約視為空 → 全放行（僅 console.warn 一行）。
- * 理由：本模組在 gateway 啟動時載入，若因部署順序（新代碼先於契約檔落位）或缺檔就
- * 判定「全部 Expert 交付未達標」，等於把整條生產鏈卡死——一個新檔沒部署不該有這種
- * 爆炸半徑。契約檔壞掉同理（JSON 解析失敗 = 空契約），但一律留 warn 證據，不靜默。
+ * 【fail-open 取舍】契约档不存在 → 契约视为空 → 全放行（仅 console.warn 一行）。
+ * 理由：本模组在 gateway 启动时载入，若因部署顺序（新代码先于契约档落位）或缺档就
+ * 判定「全部 Expert 交付未达标」，等于把整条生产链卡死——一个新档没部署不该有这种
+ * 爆炸半径。契约档坏掉同理（JSON 解析失败 = 空契约），但一律留 warn 证据，不静默。
  *
- * 【非 Expert 零回歸】agent 為 undefined 或不在 contracts → 直接 {ok:true}。
- * 通用子代理（label/prompt/async 三欄派工、不帶 expert）完全不受本閘門影響。
+ * 【非 Expert 零回归】agent 为 undefined 或不在 contracts → 直接 {ok:true}。
+ * 通用子代理（label/prompt/async 三栏派工、不带 expert）完全不受本闸门影响。
  */
 
 import { readFileSync } from "node:fs"
-// 「評審可計量」（v3，2026-10-03）：分數來源型別的真源在 persistence.ts（欄位所在）。type-only
-// import 在編譯期即被抹除，不會把 persistence 的執行期模組（bun:sqlite）拉進本純函數模組。
+// 「评审可计量」（v3，2026-10-03）：分数来源型别的真源在 persistence.ts（栏位所在）。type-only
+// import 在编译期即被抹除，不会把 persistence 的执行期模组（bun:sqlite）拉进本纯函数模组。
 import type { CriticScoreSource } from "./persistence.ts"
 
-/** 單一 Expert 的交付契約（與 src/lib/expert-registry.ts deliverableContract 同形）。 */
+/** 单一 Expert 的交付契约（与 src/lib/expert-registry.ts deliverableContract 同形）。 */
 export interface ExpertDeliveryContract {
   requiredFields: string[]
   qcSignatureRequired: boolean
@@ -42,42 +42,42 @@ export interface ExpertDeliveryContract {
 export type DeliveryContracts = Record<string, ExpertDeliveryContract>
 
 export interface DeliveryGateResult {
-  /** true = 無契約可判 / 契約欄位齊；false = 有契約且缺欄位。 */
+  /** true = 无契约可判 / 契约栏位齐；false = 有契约且缺栏位。 */
   ok: boolean
-  /** 合同欄位中「在交付文本裡找不到欄位名」的那些（已去重、保持契約順序）。 */
+  /** 合同栏位中「在交付文本里找不到栏位名」的那些（已去重、保持契约顺序）。 */
   missing: string[]
-  /** 人話理由（僅 ok:false 時給）。 */
+  /** 人话理由（仅 ok:false 时给）。 */
   reason?: string
 }
 
-/** 契約檔座標：與 subagent.ts 讀 expert-ids.json 同目錄（gateway/expert/）。 */
+/** 契约档座标：与 subagent.ts 读 expert-ids.json 同目录（gateway/expert/）。 */
 export const DELIVERY_CONTRACTS_FILE = "expert-delivery-contracts.json"
 
-/** 收尾摘要/事件用的顯式標記（前端與 Orchestrator 靠它肉眼可辨）。 */
-export const DELIVERY_GATE_MARK = "【交付閘門·未達標】"
+/** 收尾摘要/事件用的显式标记（前端与 Orchestrator 靠它肉眼可辨）。 */
+export const DELIVERY_GATE_MARK = "【交付闸门·未达标】"
 
-/** 片 D（2026-09-15）：機器化重派一次後復檢仍 FAIL 的升級標記（區別於首輪未達標）。 */
-export const REWORK_FAIL_MARK = "【交付閘門·重派後仍未達標】"
+/** 片 D（2026-09-15）：机器化重派一次后复检仍 FAIL 的升级标记（区别于首轮未达标）。 */
+export const REWORK_FAIL_MARK = "【交付闸门·重派后仍未达标】"
 
 /**
- * 刀 F（2026-09-15）：gateway 重啟把 in-flight rework run 遺成孤兒時，啟動掃描走誠實路徑
- * （abort+DELETE 孤兒子會話、done 帶 delivery_gate.orphaned、wake 父會話一次），done/wake
- * 前綴掛此標記——讓 orchestrator 拿到「進程中斷未復原」的事實而非永挂，自行決定補派。
+ * 刀 F（2026-09-15）：gateway 重启把 in-flight rework run 遗成孤儿时，启动扫描走诚实路径
+ * （abort+DELETE 孤儿子会话、done 带 delivery_gate.orphaned、wake 父会话一次），done/wake
+ * 前缀挂此标记——让 orchestrator 拿到「进程中断未复原」的事实而非永挂，自行决定补派。
  */
-export const ORPHANED_GATE_MARK = "【交付閘門·進程中斷未復原】"
+export const ORPHANED_GATE_MARK = "【交付闸门·进程中断未复原】"
 
 /**
- * 契約載入（模組載入時一次）。檔不存在/壞掉 → 空契約 + 一行 warn（fail-open，見檔頭）。
- * 用 `import.meta.dir`（Bun）：gateway 進程 WorkingDirectory=/opt/agent-harness/gateway，
- * 本檔與 expert/ 同層 → `${import.meta.dir}/expert/...` 與 subagent.ts 的 expert-ids.json
- * 讀法完全一致（同一個雷：別用 process.cwd()，別用相對 ./expert）。
+ * 契约载入（模组载入时一次）。档不存在/坏掉 → 空契约 + 一行 warn（fail-open，见档头）。
+ * 用 `import.meta.dir`（Bun）：gateway 进程 WorkingDirectory=/opt/agent-harness/gateway，
+ * 本档与 expert/ 同层 → `${import.meta.dir}/expert/...` 与 subagent.ts 的 expert-ids.json
+ * 读法完全一致（同一个雷：别用 process.cwd()，别用相对 ./expert）。
  */
 function loadContractsAtImport(): DeliveryContracts {
   const file = `${import.meta.dir}/expert/${DELIVERY_CONTRACTS_FILE}`
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"))
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      console.warn(`[gateway] delivery gate: 契约档形状错误（非对象），契約视为空，全放行：${file}`)
+      console.warn(`[gateway] delivery gate: 契约档形状错误（非对象），契约视为空，全放行：${file}`)
       return {}
     }
     const out: DeliveryContracts = {}
@@ -93,39 +93,39 @@ function loadContractsAtImport(): DeliveryContracts {
       }
     }
     console.log(
-      `[gateway] delivery gate: 契约已载入 ${Object.keys(out).length} 個 Expert（${file}）`,
+      `[gateway] delivery gate: 契约已载入 ${Object.keys(out).length} 个 Expert（${file}）`,
     )
     return out
   } catch (e) {
     const code = (e as { code?: string })?.code
     const why = code === "ENOENT" ? "档不存在" : e instanceof Error ? e.message : String(e)
-    // 一行 warn，不拋：契約缺檔不得把整條子代理收尾鏈卡死（檔頭 fail-open 取捨）。
-    console.warn(`[gateway] delivery gate: 契约档不可读（${why}），契約视为空，全放行：${file}`)
+    // 一行 warn，不抛：契约缺档不得把整条子代理收尾链卡死（档头 fail-open 取舍）。
+    console.warn(`[gateway] delivery gate: 契约档不可读（${why}），契约视为空，全放行：${file}`)
     return {}
   }
 }
 
-/** 模組載入即讀（module-load 快照；換契約檔須重啟 gateway 才生效，同 expert-ids.json 語義）。 */
+/** 模组载入即读（module-load 快照；换契约档须重启 gateway 才生效，同 expert-ids.json 语义）。 */
 export const DELIVERY_CONTRACTS: DeliveryContracts = loadContractsAtImport()
 
 /**
- * 純函數：判定某次 Expert 交付是否滿足其契約欄位。
+ * 纯函数：判定某次 Expert 交付是否满足其契约栏位。
  * @param agent     run.agent（expert id）；undefined/空字串 = 非 Expert 派工 → 放行。
- * @param text      交付文本（**未截斷全文**，不是 600 字摘要——摘要會把欄位切掉變假陰性）。
- * @param contracts 契約表（注入式，便於單測；生產傳 DELIVERY_CONTRACTS）。
+ * @param text      交付文本（**未截断全文**，不是 600 字摘要——摘要会把栏位切掉变假阴性）。
+ * @param contracts 契约表（注入式，便于单测；生产传 DELIVERY_CONTRACTS）。
  */
 export function checkDelivery(
   agent: string | undefined,
   text: string,
   contracts: DeliveryContracts,
 ): DeliveryGateResult {
-  // 非 Expert / 未登記 → 零回歸放行。
+  // 非 Expert / 未登记 → 零回归放行。
   if (!agent || typeof agent !== "string") return { ok: true, missing: [] }
   const contract = contracts[agent]
   if (!contract) return { ok: true, missing: [] }
 
-  // 欄位名大小寫正規化後子字串命中。toLowerCase 對 CJK 是恆等（中文標籤不受影響），
-  // 故契約欄位若寫中文標籤也照樣子字串可比。
+  // 栏位名大小写正规化后子字串命中。toLowerCase 对 CJK 是恒等（中文标签不受影响），
+  // 故契约栏位若写中文标签也照样子字串可比。
   const haystack = (typeof text === "string" ? text : "").toLowerCase()
   const missing: string[] = []
   const push = (f: string) => {
@@ -134,7 +134,7 @@ export function checkDelivery(
   for (const field of contract.requiredFields) {
     if (!haystack.includes(field.toLowerCase())) push(field)
   }
-  // qcSignatureRequired：簽名要求是獨立條款——即使 requiredFields 沒列 qc，也要求 qc 欄位名在場。
+  // qcSignatureRequired：签名要求是独立条款——即使 requiredFields 没列 qc，也要求 qc 栏位名在场。
   if (contract.qcSignatureRequired && !missing.includes("qc") && !haystack.includes("qc")) {
     push("qc")
   }
@@ -149,8 +149,8 @@ export function checkDelivery(
 }
 
 /**
- * 組收尾前綴（人話、可肉眼辨識、帶 missing 與欄位計數）。
- * 純字串拼裝，不碰 status 語義（status 恒為呼叫端給的 ok/error）。
+ * 组收尾前缀（人话、可肉眼辨识、带 missing 与栏位计数）。
+ * 纯字串拼装，不碰 status 语义（status 恒为呼叫端给的 ok/error）。
  */
 export function formatDeliveryGateNotice(
   agent: string,
@@ -167,12 +167,12 @@ export function formatDeliveryGateNotice(
 }
 
 /**
- * 刀 G（2026-09-15）：契約欄**機器注入**。病灶＝round3 首派 3/3 spec 未抄契約欄
- * （playbook 第 19 條對 orchestrator 零滲透），全靠閘門重派兜底＝每次白燒一倍成本。
- * 修法＝不再「期待」子代理服從 prompt 裡手抄的欄位條款，而是在 dispatch 建立 Expert
- * run 時，把其契約欄清單作為**固定段**追加到子代理 prompt 尾部——真源單一（復用已載入
- * 的 DELIVERY_CONTRACTS，禁手抄第二份）。純函數：非 contracts agent / 空 agent → 回
- * 空字串（調用端據此零注入，非 Expert 零回歸）。
+ * 刀 G（2026-09-15）：契约栏**机器注入**。病灶＝round3 首派 3/3 spec 未抄契约栏
+ * （playbook 第 19 条对 orchestrator 零渗透），全靠闸门重派兜底＝每次白烧一倍成本。
+ * 修法＝不再「期待」子代理服从 prompt 里手抄的栏位条款，而是在 dispatch 建立 Expert
+ * run 时，把其契约栏清单作为**固定段**追加到子代理 prompt 尾部——真源单一（复用已载入
+ * 的 DELIVERY_CONTRACTS，禁手抄第二份）。纯函数：非 contracts agent / 空 agent → 回
+ * 空字串（调用端据此零注入，非 Expert 零回归）。
  */
 export function renderContractDirective(
   agent: string | undefined,
@@ -188,71 +188,71 @@ export function renderContractDirective(
 }
 
 /**
- * 刀 2（2026-09-15，gateway 手術片）：machine critic pass —— 不叫模型派，gateway 自己派。
+ * 刀 2（2026-09-15，gateway 手术片）：machine critic pass —— 不叫模型派，gateway 自己派。
  *
- * 病灶（四輪實錄）：playbook 第 18 條「必須派 critic」四輪均在場，orchestrator 四輪零派遣
- * （r2 軟條款 → r3b「未启用」藉口＋自簽承諾 → r3c 配置已翻正、條款逐請求注入，11 段推理
- * critic/審核/review 零命中，逐字「I won't re-dispatch anything…synthesis is my job」）。
- * 純 prompt 路線已證死 → 在父會話收盤判定點由 gateway 直接派遣。
+ * 病灶（四轮实录）：playbook 第 18 条「必须派 critic」四轮均在场，orchestrator 四轮零派遣
+ * （r2 软条款 → r3b「未启用」藉口＋自签承诺 → r3c 配置已翻正、条款逐请求注入，11 段推理
+ * critic/审核/review 零命中，逐字「I won't re-dispatch anything…synthesis is my job」）。
+ * 纯 prompt 路线已证死 → 在父会话收盘判定点由 gateway 直接派遣。
  *
- * 本段只放**純函數**（觸發判據 + spec 組裝 + verdict 判讀）；派遣 / 旗標 / 喚醒 / 重派
- * 全部復用既有輪子（subagent.ts dispatchAttempt+startRework、wakeSessionForSubagent、
- * persistence.ts bun:sqlite 同款表慣例），禁自造第二套派遣或輪詢。
+ * 本段只放**纯函数**（触发判据 + spec 组装 + verdict 判读）；派遣 / 旗标 / 唤醒 / 重派
+ * 全部复用既有轮子（subagent.ts dispatchAttempt+startRework、wakeSessionForSubagent、
+ * persistence.ts bun:sqlite 同款表惯例），禁自造第二套派遣或轮询。
  */
 
-/** 機器 critic pass 的固定標記（journal/spec 留痕用，不作為前端文案前綴）。 */
+/** 机器 critic pass 的固定标记（journal/spec 留痕用，不作为前端文案前缀）。 */
 export const CRITIC_PASS_MARK = "【独立审核·机器派遣】"
 
-/** critic 判「退回」時喚醒父會話摘要的前綴（orchestrator 一眼辨識判決方向）。 */
+/** critic 判「退回」时唤醒父会话摘要的前缀（orchestrator 一眼辨识判决方向）。 */
 export const CRITIC_REJECT_MARK = "【独立审核·退回】"
 
 /**
- * 逃逸閥字樣：最終文本自行聲明「未經獨立審核」→ 本次不觸發機器 pass。
- * （playbook 第一節末：critic 派遣本身失敗時允許自簽兜底，且回覆須註明此字樣。）
+ * 逃逸阀字样：最终文本自行声明「未经独立审核」→ 本次不触发机器 pass。
+ * （playbook 第一节末：critic 派遣本身失败时允许自签兜底，且回覆须注明此字样。）
  */
-export const CRITIC_UNREVIEWED_DECL = "未經獨立審核"
+export const CRITIC_UNREVIEWED_DECL = "未经独立审核"
 
-/** 逃生閥字樣（簡體鏡像）：模型輸出以簡體為主，兩種寫法都算聲明。 */
+/** 逃生阀字样（简体镜像）：模型输出以简体为主，两种写法都算声明。 */
 export const CRITIC_UNREVIEWED_DECL_SIMP = "未经独立审核"
 
-/** 每會話每次 pass 最多送審份數（有界，防 prompt 爆炸）。 */
+/** 每会话每次 pass 最多送审份数（有界，防 prompt 爆炸）。 */
 export const CRITIC_PASS_MAX_TARGETS = 8
-/** 單份被審交付內嵌進 critic prompt 的字元上限（超出截斷且顯式標記，critic 不得越界下判）。 */
+/** 单份被审交付内嵌进 critic prompt 的字元上限（超出截断且显式标记，critic 不得越界下判）。 */
 export const CRITIC_PASS_PER_TARGET_CHARS = 6000
-/** 全部被審交付內嵌字元總上限。 */
+/** 全部被审交付内嵌字元总上限。 */
 export const CRITIC_PASS_TOTAL_CHARS = 24000
 
-/** 被審交付（由 subagent.ts finishRun 在 Expert 終態時登記）。 */
+/** 被审交付（由 subagent.ts finishRun 在 Expert 终态时登记）。 */
 export interface CriticPassTarget {
-  /** 被審 Expert id（DELIVERY_CONTRACTS 域內；critic 自身永不入列）。 */
+  /** 被审 Expert id（DELIVERY_CONTRACTS 域内；critic 自身永不入列）。 */
   agent: string
   label: string
   runId: string
-  /** 交付正文（finishRun 手上就是未截斷全文）。 */
+  /** 交付正文（finishRun 手上就是未截断全文）。 */
   text: string
 }
 
 /**
- * 觸發判據輸入（全部為真才觸發；純函數便於四態單測）。
- * 語義釘死：任一為假 → 回 false，呼叫端零動作（零回歸）。
+ * 触发判据输入（全部为真才触发；纯函数便于四态单测）。
+ * 语义钉死：任一为假 → 回 false，呼叫端零动作（零回归）。
  */
 export interface CriticPassInput {
-  /** 父會話 beast_mode（MOE Expert 鏈的前提）。 */
+  /** 父会话 beast_mode（MOE Expert 链的前提）。 */
   beastMode: boolean
-  /** 待審份數（本窗口內契約域內已完成、且尚未送審的 Expert 交付）。 */
+  /** 待审份数（本窗口内契约域内已完成、且尚未送审的 Expert 交付）。 */
   expertDeliveries: number
-  /** 本輪是否已有 critic 派遣（含在途）。 */
+  /** 本轮是否已有 critic 派遣（含在途）。 */
   criticDispatched: boolean
-  /** 最終文本是否自行聲明「未經獨立審核」。 */
+  /** 最终文本是否自行声明「未经独立审核」。 */
   unreviewedDeclared: boolean
-  /** 該會話是否已用過本 pass（持久旗標，每會話 ≤1 次）。 */
+  /** 该会话是否已用过本 pass（持久旗标，每会话 ≤1 次）。 */
   alreadyPassed: boolean
 }
 
 /**
- * 純函數：收盤判定點是否該觸發一次機器 critic pass。
- * 五個前置條件全部成立才 true：非 beast / 無 Expert 交付 / 已有 critic 派遣 /
- * 已聲明未經審核 / 已用過 pass —— 任一即 false（零動作，零回歸）。
+ * 纯函数：收盘判定点是否该触发一次机器 critic pass。
+ * 五个前置条件全部成立才 true：非 beast / 无 Expert 交付 / 已有 critic 派遣 /
+ * 已声明未经审核 / 已用过 pass —— 任一即 false（零动作，零回归）。
  */
 export function shouldTriggerCriticPass(input: CriticPassInput): boolean {
   if (input.beastMode !== true) return false
@@ -264,15 +264,15 @@ export function shouldTriggerCriticPass(input: CriticPassInput): boolean {
 }
 
 /**
- * 純函數：文字片段是否出現「未經獨立審核」聲明。
- * 跨 chunk 邊界安全：呼叫端維持尾巴 16 字，本函數吃 (tail + delta)。
+ * 纯函数：文字片段是否出现「未经独立审核」声明。
+ * 跨 chunk 边界安全：呼叫端维持尾巴 16 字，本函数吃 (tail + delta)。
  */
 export function declaresUnreviewed(tailAndDelta: string): boolean {
   if (typeof tailAndDelta !== "string") return false
   return tailAndDelta.includes(CRITIC_UNREVIEWED_DECL) || tailAndDelta.includes(CRITIC_UNREVIEWED_DECL_SIMP)
 }
 
-/** 契約欄清單（含 qcSignatureRequired 補欄）——與 checkDelivery 同口徑，禁第二份清單。 */
+/** 契约栏清单（含 qcSignatureRequired 补栏）——与 checkDelivery 同口径，禁第二份清单。 */
 function contractFieldsOf(agent: string, contracts: DeliveryContracts): string[] {
   const c = contracts[agent]
   if (!c) return []
@@ -282,11 +282,11 @@ function contractFieldsOf(agent: string, contracts: DeliveryContracts): string[]
 }
 
 /**
- * 純函數：組 machine critic pass 的 critic spec。
- * = 固定審核指令（逐欄核驗值是否空殼／跨檔一致性／引用真偽／四欄輸出）
- * + 逐份（Expert id / label / 該 Expert 契約欄清單 / 交付正文）。
- * 契約欄真源 = 傳入 contracts（生產傳 DELIVERY_CONTRACTS，禁手抄第二份）。
- * 空 targets → 回空字串（呼叫端據此零派遣）。
+ * 纯函数：组 machine critic pass 的 critic spec。
+ * = 固定审核指令（逐栏核验值是否空壳／跨档一致性／引用真伪／四栏输出）
+ * + 逐份（Expert id / label / 该 Expert 契约栏清单 / 交付正文）。
+ * 契约栏真源 = 传入 contracts（生产传 DELIVERY_CONTRACTS，禁手抄第二份）。
+ * 空 targets → 回空字串（呼叫端据此零派遣）。
  */
 export function buildCriticPassSpec(
   targets: CriticPassTarget[],
@@ -344,13 +344,13 @@ export function buildCriticPassSpec(
   return `${head}\n${blocks.join("\n")}`
 }
 
-const CRITIC_REJECT_WORDS = ["退回", "驳回", "駁回", "不通过", "不通過", "未通过", "未通過", "reject", "rejected"]
-const CRITIC_PASS_WORDS = ["通过", "通過", "pass", "approve", "accept", "approved"]
+const CRITIC_REJECT_WORDS = ["退回", "驳回", "驳回", "不通过", "不通过", "未通过", "未通过", "reject", "rejected"]
+const CRITIC_PASS_WORDS = ["通过", "通过", "pass", "approve", "accept", "approved"]
 
 /**
- * 純函數：critic 交付正文的 verdict 判讀。
- * 取 `verdict` 欄後緊跟片段（無則取開頭 400 字）找駁回/通過詞。
- * **保守方向**：無正文或判不出 → 視為退回（寧可多一次喚醒，不吞掉問題）。
+ * 纯函数：critic 交付正文的 verdict 判读。
+ * 取 `verdict` 栏后紧跟片段（无则取开头 400 字）找驳回/通过词。
+ * **保守方向**：无正文或判不出 → 视为退回（宁可多一次唤醒，不吞掉问题）。
  */
 export function criticVerdictRejected(text: string): boolean {
   const src = typeof text === "string" ? text : ""
@@ -362,35 +362,35 @@ export function criticVerdictRejected(text: string): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 「評審可計量」數值閾值政策（v3，2026-10-03）
+// 「评审可计量」数值阈值政策（v3，2026-10-03）
 //
-// 病灶：critic 閘門此前只有布林（criticVerdictRejected 詞表判讀）——「verdict<7 必返工」
-// 只住在 messages-gw.ts 的提示詞裡，代碼內零數值強制；critic_verdicts.score 恆 NULL；
-// 與人工接受/拒絕無 join。本節把「閾值」搬進代碼，並釘死它只對**獨立量測**生效。
+// 病灶：critic 闸门此前只有布林（criticVerdictRejected 词表判读）——「verdict<7 必返工」
+// 只住在 messages-gw.ts 的提示词里，代码内零数值强制；critic_verdicts.score 恒 NULL；
+// 与人工接受/拒绝无 join。本节把「阈值」搬进代码，并钉死它只对**独立量测**生效。
 //
-// 紅線（禁同源斷言）：模型自評（model_self）是「同族模型評自己」，不是驗收 oracle；
-// 數值閾值只在 scoreSource==='measured'（存在獨立於被測模型的量測來源）時 enforce。
-// 人工標籤（human）另存 human_labels，是外生 label，不是數值量測，亦不套用本閾值。
-// 沒有分數 → 不 enforce（維持 null 的誠實狀態，不得填 0 假值充數）。
+// 红线（禁同源断言）：模型自评（model_self）是「同族模型评自己」，不是验收 oracle；
+// 数值阈值只在 scoreSource==='measured'（存在独立于被测模型的量测来源）时 enforce。
+// 人工标签（human）另存 human_labels，是外生 label，不是数值量测，亦不套用本阈值。
+// 没有分数 → 不 enforce（维持 null 的诚实状态，不得填 0 假值充数）。
 // ─────────────────────────────────────────────────────────────────────────
 
-/** 集中可調的閾值政策（唯一真源；改口徑只改這裡）。 */
+/** 集中可调的阈值政策（唯一真源；改口径只改这里）。 */
 export interface CriticScoreThresholdPolicy {
-  /** 分數低於此值 → 判定必須返工（條件為 value < reworkBelow，邊界值本身通過）。 */
+  /** 分数低于此值 → 判定必须返工（条件为 value < reworkBelow，边界值本身通过）。 */
   reworkBelow: number
-  /** 唯一可被閾值約束的來源；其餘來源只記錄、不 enforce。 */
+  /** 唯一可被阈值约束的来源；其余来源只记录、不 enforce。 */
   enforcedSource: CriticScoreSource
 }
 
-/** 預設政策：對齊 messages-gw.ts 提示詞「verdict<7 必返工」，且只對 measured 生效。 */
+/** 预设政策：对齐 messages-gw.ts 提示词「verdict<7 必返工」，且只对 measured 生效。 */
 export const CRITIC_SCORE_THRESHOLD_POLICY: CriticScoreThresholdPolicy = {
   reworkBelow: 7,
   enforcedSource: "measured",
 }
 
 /**
- * 一條 critic 分數樣本。值與來源**始終綁定在一個物件**內，避免「拿掉來源後把自評當量測」。
- * 無量測時 value/source 皆為 null（誠實狀態）。
+ * 一条 critic 分数样本。值与来源**始终绑定在一个物件**内，避免「拿掉来源后把自评当量测」。
+ * 无量测时 value/source 皆为 null（诚实状态）。
  */
 export interface CriticScoreSample {
   value: number | null
@@ -398,9 +398,9 @@ export interface CriticScoreSample {
 }
 
 /**
- * 純函數：數值閾值的**代碼強制**判定。回 { enforce, reason }。
- * enforce=true 僅當三個條件同時成立：有有限數值、source===policy.enforcedSource、value<reworkBelow。
- * 其餘一律 false（無分數／來源不符／已達標），並給人話 reason 說明為何未強制（可審計）。
+ * 纯函数：数值阈值的**代码强制**判定。回 { enforce, reason }。
+ * enforce=true 仅当三个条件同时成立：有有限数值、source===policy.enforcedSource、value<reworkBelow。
+ * 其余一律 false（无分数／来源不符／已达标），并给人话 reason 说明为何未强制（可审计）。
  */
 export function evaluateCriticScoreThreshold(
   score: CriticScoreSample,
@@ -424,9 +424,9 @@ export function evaluateCriticScoreThreshold(
 }
 
 /**
- * 片 D（2026-09-15）：閘門 FAIL→重派時注入任務書尾部的系統性修正指令。
- * 純字符串拼裝（便於單測）：逐字點名缺失欄位 + 機器可比對判據；「其餘任務內容
- * 原樣帶過去」由調用端（subagent.ts startRework）保证——本指令是**追加**，不替换原文。
+ * 片 D（2026-09-15）：闸门 FAIL→重派时注入任务书尾部的系统性修正指令。
+ * 纯字符串拼装（便于单测）：逐字点名缺失栏位 + 机器可比对判据；「其余任务内容
+ * 原样带过去」由调用端（subagent.ts startRework）保证——本指令是**追加**，不替换原文。
  */
 export function buildReworkDirective(
   agent: string,

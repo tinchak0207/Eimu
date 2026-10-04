@@ -1,11 +1,11 @@
 "use client";
 
-// node-view/use-node-gestures —— CanvasNodeView 的三套指標手勢：
-//   1. dragRef：節點拖動（5px 死區，輕點=選取，越區才拖）
-//   2. resizeRef：四角縮放（含位置補償，nw/sw 拖動時 x/y 跟著走）
-//   3. scrollDragRef：內容捲動（行動端，InfiniteCanvas 容器 touch-action:none
-//      攔截了原生觸控捲動，這裡用 Pointer Events 自己捲）
-// 邏輯從 CanvasNodeView 原樣搬遷（L233-421），pointer capture 與 JSX 綁定一一對應。
+// node-view/use-node-gestures —— CanvasNodeView 的三套指标手势：
+//   1. dragRef：节点拖动（5px 死区，轻点=选取，越区才拖）
+//   2. resizeRef：四角缩放（含位置补偿，nw/sw 拖动时 x/y 跟著走）
+//   3. scrollDragRef：内容卷动（行动端，InfiniteCanvas 容器 touch-action:none
+//      拦截了原生触控卷动，这里用 Pointer Events 自己卷）
+// 逻辑从 CanvasNodeView 原样搬迁（L233-421），pointer capture 与 JSX 绑定一一对应。
 
 import { useRef } from "react";
 import type { CanvasNode } from "@/lib/canvas/types";
@@ -13,14 +13,14 @@ import { MIN_HEIGHT, MIN_WIDTH, MOVE_THRESHOLD_PX, type ResizeCfg } from "./cons
 
 export interface UseNodeGesturesArgs {
   node: CanvasNode;
-  /** 當前縮放，拖動時要把螢幕位移換算成世界位移 */
+  /** 当前缩放，拖动时要把萤幕位移换算成世界位移 */
   scale: number;
   onSelect: (nodeId: string) => void;
-  /** 拖動真正開始（越過死區）時觸發（供整合層推一格撤銷快照） */
+  /** 拖动真正开始（越过死区）时触发（供整合层推一格撤销快照） */
   onInteractionStart?: () => void;
   onMove: (nodeId: string, position: { x: number; y: number }) => void;
   onResize?: (nodeId: string, width: number, height: number) => void;
-  /** A2：乾淨點擊（選取且未拖動）——宿主用它「點選即開面板」。 */
+  /** A2：干净点击（选取且未拖动）——宿主用它「点选即开面板」。 */
   onNodeClick?: (nodeId: string) => void;
 }
 
@@ -43,8 +43,8 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
     startHeight: number;
     cfg: ResizeCfg;
   } | null>(null);
-  // 內容捲動（行動端）：InfiniteCanvas 在容器上設 touch-action:none，
-  // 瀏覽器原生觸控捲動會被祖先攔截，這裡用 Pointer Events 自己捲。
+  // 内容卷动（行动端）：InfiniteCanvas 在容器上设 touch-action:none，
+  // 浏览器原生触控卷动会被祖先拦截，这里用 Pointer Events 自己卷。
   const scrollDragRef = useRef<{
     pointerId: number;
     startY: number;
@@ -55,7 +55,7 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
   const handleScrollAreaDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const el = e.currentTarget;
-    // 內容沒溢出就不劫持手勢（讓根節點的選取/拖動照常）。
+    // 内容没溢出就不劫持手势（让根节点的选取/拖动照常）。
     if (el.scrollHeight <= el.clientHeight + 1) return;
     scrollDragRef.current = {
       pointerId: e.pointerId,
@@ -66,7 +66,7 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      /* pointer 已結束時 capture 會拋錯，忽略 */
+      /* pointer 已结束时 capture 会抛错，忽略 */
     }
   };
 
@@ -96,8 +96,8 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
     const target = e.target as HTMLElement;
     if (target.closest("[data-canvas-interactive]")) return;
     onSelect(node.id);
-    // 內容捲動區：內容有溢出時只選取、不啟用拖動（交給內容自己的捲動手勢）；
-    // 沒溢出則照常可拖動節點。
+    // 内容卷动区：内容有溢出时只选取、不启用拖动（交给内容自己的卷动手势）；
+    // 没溢出则照常可拖动节点。
     const scroller = target.closest<HTMLElement>(".canvas-node-scroll");
     if (scroller && scroller.scrollHeight > scroller.clientHeight + 1) return;
     const existing = dragRef.current;
@@ -131,7 +131,7 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
   const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (drag?.pointerId === e.pointerId) {
-      // A2：乾淨點擊（未越過拖動死區、非取消）→ 上報 click，宿主用它開節點面板。
+      // A2：干净点击（未越过拖动死区、非取消）→ 上报 click，宿主用它开节点面板。
       const wasCleanClick = !drag.started && e.type === "pointerup";
       dragRef.current = null;
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);

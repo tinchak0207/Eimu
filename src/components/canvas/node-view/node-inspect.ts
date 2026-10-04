@@ -1,9 +1,9 @@
-// 語義縮放 LOD 3「拆機」內容：節點 → 分段參數（純函式，2026-10-01）。
+// 语义缩放 LOD 3「拆机」内容：节点 → 分段参数（纯函式，2026-10-01）。
 //
-// 卡片還是那張卡（標題列、類型色頂線、徽章不變），只是正文區放大後換成這顆節點的內部參數。
-// 內容紀律：每一行都要對調參/排錯有用——中文標籤、完整值（不從左截 id）、按節點類型挑欄位；
-// 不放節點座標/尺寸/內部 id 這類對使用者無意義的欄位，不放任何裝飾性假資訊。
-// 版面由呈現端決定（字級恆定螢幕尺寸，放大＝同一張卡裝得下更多段落）。
+// 卡片还是那张卡（标题列、类型色顶线、徽章不变），只是正文区放大后换成这颗节点的内部参数。
+// 内容纪律：每一行都要对调参/排错有用——中文标签、完整值（不从左截 id）、按节点类型挑栏位；
+// 不放节点座标/尺寸/内部 id 这类对使用者无意义的栏位，不放任何装饰性假资讯。
+// 版面由呈现端决定（字级恒定萤幕尺寸，放大＝同一张卡装得下更多段落）。
 
 import { CanvasNodeType, errorDetailsText, type CanvasNode } from "@/lib/canvas/types";
 import { REFERENCE_IMAGE_ROLES } from "../../../lib/reference-image-roles";
@@ -50,14 +50,14 @@ function isoClock(iso: string | undefined): string | undefined {
   return Number.isNaN(t) ? iso : clock(t);
 }
 
-/** 工具輸入/輸出常是 JSON 字串：能解析就縮排排版，不能就原樣。 */
+/** 工具输入/输出常是 JSON 字串：能解析就缩排排版，不能就原样。 */
 function pretty(raw: string): { value: string; mono: boolean } {
   const s = raw.trim();
   if (s.startsWith("{") || s.startsWith("[")) {
     try {
       return { value: JSON.stringify(JSON.parse(s), null, 2), mono: true };
     } catch {
-      /* 非 JSON：原樣 */
+      /* 非 JSON：原样 */
     }
   }
   return { value: raw, mono: false };
@@ -81,7 +81,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
     if (s.rows.length > 0) sections.push(s);
   };
 
-  // 輸入：連到這顆節點的上游（誰在餵它）。
+  // 输入：连到这颗节点的上游（谁在喂它）。
   add({
     key: "inputs",
     title: "输入",
@@ -93,7 +93,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
     })),
   });
 
-  // 核心：模型／工具／步驟／門禁。
+  // 核心：模型／工具／步骤／门禁。
   const core: InspectRow[] = [];
   push(core, field("模型", m.model, { mono: true, tone: "accent" }));
   if (m.pipelineCard === "step_head") {
@@ -112,7 +112,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   }
   add({ key: "core", title: m.model ? "模型" : m.pipelineCard === "step_head" ? "步骤" : m.toolId ? "工具" : "节点", icon: m.toolId ? "tool" : "core", rows: core });
 
-  // 提示詞（生成類）／正文（文本類）。
+  // 提示词（生成类）／正文（文本类）。
   const prompt: InspectRow[] = [];
   const isText = node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Prompt;
   if (m.prompt) push(prompt, { kind: "text", label: "提示词", value: m.prompt });
@@ -123,7 +123,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   }
   add({ key: "prompt", title: isText && !m.prompt ? "正文" : "提示词", icon: isText && !m.prompt ? "text" : "prompt", rows: prompt });
 
-  // 流水線卡：交付物、輸入來源、工具輸入/輸出。
+  // 流水线卡：交付物、输入来源、工具输入/输出。
   const pipe: InspectRow[] = [];
   if (m.deliverable) push(pipe, { kind: "text", label: "交付物", value: m.deliverable });
   if (m.inputFrom) push(pipe, { kind: "text", label: "输入来源", value: m.inputFrom });
@@ -131,7 +131,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   if (m.toolOutput) push(pipe, { kind: "text", label: "工具输出", ...pretty(m.toolOutput) });
   add({ key: "pipeline", title: "流程", icon: "tool", rows: pipe });
 
-  // 生成參數。
+  // 生成参数。
   const params: InspectRow[] = [];
   push(params, field("尺寸", m.size, { mono: true }));
   push(params, field("画质", m.quality));
@@ -143,7 +143,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   if (m.naturalWidth && m.naturalHeight) push(params, field("原图像素", `${m.naturalWidth}×${m.naturalHeight}`, { mono: true }));
   add({ key: "params", title: "参数", icon: "params", rows: params });
 
-  // 任務與執行。
+  // 任务与执行。
   const task: InspectRow[] = [];
   const status = m.status ?? "idle";
   push(task, field("状态", STATUS_LABEL[status] ?? status, { tone: status === "error" ? "error" : undefined }));
@@ -156,7 +156,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   else if (typeof m.cost_hint === "number") push(task, field("预估花费", `${m.cost_hint} 币`));
   add({ key: "task", title: "执行", icon: "task", rows: task });
 
-  // 版本史與候選。
+  // 版本史与候选。
   const hist: InspectRow[] = [];
   const versions = m.taskVersions?.items ?? [];
   for (const v of [...versions].reverse()) {
@@ -172,7 +172,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   }
   add({ key: "versions", title: "版本", icon: "versions", rows: hist });
 
-  // 分鏡 21 欄（AID 契約順序）。
+  // 分镜 21 栏（AID 契约顺序）。
   const shot = m.storyboardShot as Record<string, string> | undefined;
   if (shot) {
     const rows: InspectRow[] = [];
@@ -186,7 +186,7 @@ export function inspectSections(node: CanvasNode, inputs: readonly InspectInput[
   return sections;
 }
 
-/** 總行數（呈現端算「還有 N 項」用）。 */
+/** 总行数（呈现端算「还有 N 项」用）。 */
 export function inspectRowCount(sections: readonly InspectSection[]): number {
   return sections.reduce((n, s) => n + s.rows.length, 0);
 }

@@ -1,4 +1,4 @@
-// Canvas 2D 繪製的 Liquid Glass UI 貼花（DESIGN.md：lg-card 半透明白、頂緣高光、Lucide 圖示、Geist + 思源黑體）
+// Canvas 2D 绘制的 Liquid Glass UI 贴花（DESIGN.md：lg-card 半透明白、顶缘高光、Lucide 图示、Geist + 思源黑体）
 export const F = {
   sans: '"Geist", "Noto Sans CJK SC", sans-serif',
   cjk: '"Noto Sans CJK SC", "Geist", sans-serif',
@@ -54,7 +54,7 @@ function pill(x, s, px, py, { size, fg, bg, pad = 0.55, h = 1.9, weight = 600, f
   return iw;
 }
 
-// 通用面板：半透明白 + 頂緣亮線 + 底緣暗線（lg-card）
+// 通用面板：半透明白 + 顶缘亮线 + 底缘暗线（lg-card）
 function panel(x, W, H, s) {
   const inset = 0.03 * s, r = 0.1 * s;
   rr(x, inset, inset, W - inset * 2, H - inset * 2, r);
@@ -62,7 +62,7 @@ function panel(x, W, H, s) {
   g.addColorStop(0, "rgba(255,255,255,.80)"); g.addColorStop(1, "rgba(255,255,255,.60)");
   x.fillStyle = g; x.fill();
   x.lineWidth = 0.006 * s; x.strokeStyle = "rgba(255,255,255,.95)"; x.stroke();
-  // 底緣暗線
+  // 底缘暗线
   x.save(); rr(x, inset, inset, W - inset * 2, H - inset * 2, r); x.clip();
   x.fillStyle = "rgba(0,0,0,.035)"; x.fillRect(inset, H - inset - 0.004 * s, W, 0.004 * s); x.restore();
 }
@@ -87,10 +87,10 @@ function makePad(wU, hU, ppu) {
   const c = document.createElement("canvas"); c.width = Math.round(wU * ppu); c.height = Math.round(hU * ppu);
   const x = c.getContext("2d"); return { c, x, W: c.width, H: c.height, s: ppu };
 }
-// 影像槽：回傳 tile 局部座標（單位）供影像平面定位
+// 影像槽：回传 tile 局部座标（单位）供影像平面定位
 const slot = (pad, px, py, w, h, r) => ({ x: (px + w / 2) / pad.s - pad.W / pad.s / 2, z: (py + h / 2) / pad.s - pad.H / pad.s / 2, w: w / pad.s, h: h / pad.s, r: r / pad.s });
 
-// ============ 節點 ============
+// ============ 节点 ============
 export function drawScript(wU, hU, ppu, d) {
   const p = makePad(wU, hU, ppu), { x, W, H, s } = p;
   panel(x, W, H, s);
@@ -186,7 +186,7 @@ export function drawProject(wU, hU, ppu, d) {
   return { canvas: p.c, slots: [] };
 }
 
-// 播放鍵覆蓋層（霧面圓 + 三角）
+// 播放键覆盖层（雾面圆 + 三角）
 export function drawPlay(sizePx = 256) {
   const c = document.createElement("canvas"); c.width = c.height = sizePx; const x = c.getContext("2d");
   const r = sizePx * 0.46;
@@ -196,7 +196,7 @@ export function drawPlay(sizePx = 256) {
   return c;
 }
 
-// 實體膠囊（對齊 50f7e436：左帶微縮圖）：@崇祯
+// 实体胶囊（对齐 50f7e436：左带微缩图）：@崇祯
 export function drawCapsule(img, name, h = 120) {
   const c = document.createElement("canvas"); const x = c.getContext("2d");
   x.font = `700 ${h * 0.42}px ${F.cjk}`; const tw = x.measureText(name).width;
@@ -221,7 +221,7 @@ export function drawRawToken(s, h = 120) {
   return c;
 }
 
-// 提示輸入框（動態重繪：打字 + 游標）
+// 提示输入框（动态重绘：打字 + 游标）
 export function makePromptPad(wU, hU, ppu) {
   const p = makePad(wU, hU, ppu);
   p.draw = (text, caretOn, placeholder, phAlpha) => {
@@ -241,14 +241,14 @@ export function makePromptPad(wU, hU, ppu) {
   return p;
 }
 
-// 發送鍵頂面（深色圓 + 白箭頭）
+// 发送键顶面（深色圆 + 白箭头）
 export function drawSendTop(sizePx = 512) {
   const c = document.createElement("canvas"); c.width = c.height = sizePx; const x = c.getContext("2d");
   icon(x, "arrowUp", sizePx / 2, sizePx / 2, sizePx * 0.46, "#fff", 2.6);
   return c;
 }
 
-// 牆面標籤
+// 墙面标签
 export function drawLabel(title, sub, wU, ppu, dark = false) {
   const p = makePad(wU, 0.34, ppu), { x, W, s } = p;
   txt(x, title, 0.02 * s, 0.14 * s, { size: 0.11 * s, weight: 700, color: dark ? "#fff" : C.ink });
@@ -256,7 +256,7 @@ export function drawLabel(title, sub, wU, ppu, dark = false) {
   return p.c;
 }
 
-// 片名字標（alpha-test 不透明，讓玻璃透鏡折射得到）
+// 片名字标（alpha-test 不透明，让玻璃透镜折射得到）
 export function drawWordmark(text, hPx = 900) {
   const c = document.createElement("canvas"); const x = c.getContext("2d");
   x.font = `650 ${hPx}px ${F.sans}`; x.letterSpacing = `${-hPx * 0.05}px`;
@@ -267,7 +267,7 @@ export function drawWordmark(text, hPx = 900) {
   return c;
 }
 
-// 軟陰影貼圖（圓角矩形高斯模糊）
+// 软阴影贴图（圆角矩形高斯模糊）
 export function drawShadow(wPx, hPx, rPx, blurPx) {
   const pad = blurPx * 2.2;
   const c = document.createElement("canvas"); c.width = Math.ceil(wPx + pad * 2); c.height = Math.ceil(hPx + pad * 2);

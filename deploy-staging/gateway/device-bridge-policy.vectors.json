@@ -1,5 +1,5 @@
 {
-  "$comment": "device-bridge-policy 的輸入→期望判定向量表（H2, 2026-10-04）。雲端側測試逐條斷言實作符合本表；本機側（desktop/，另一包）應載入同一份檔案使兩側 denylist/根夾制語義對齊。載入方式見 device-bridge.test.ts：fs.readFileSync(new URL('./device-bridge-policy.vectors.json', import.meta.url), 'utf8')。",
+  "$comment": "device-bridge-policy 的输入→期望判定向量表（H2, 2026-10-04）。云端侧测试逐条断言实作符合本表；本机侧（desktop/，另一包）应载入同一份档案使两侧 denylist/根夹制语义对齐。载入方式见 device-bridge.test.ts：fs.readFileSync(new URL('./device-bridge-policy.vectors.json', import.meta.url), 'utf8')。",
   "version": 1,
   "sensitive": [
     { "path": "~/.ssh/id_rsa", "expected": true, "category": "home-sensitive" },
@@ -39,8 +39,8 @@
     { "path": "/", "expected": false, "category": "filesystem-root" },
     { "path": "C:\\", "expected": false, "category": "windows-drive-root" },
 
-    { "path": "/home/u/prøject/日本語.txt", "expected": false, "category": "unicode-ok" },
-    { "path": "/home/u/.ssh/秘密鍵", "expected": true, "category": "unicode-sensitive" },
+    { "path": "/home/u/prøject/日本语.txt", "expected": false, "category": "unicode-ok" },
+    { "path": "/home/u/.ssh/秘密键", "expected": true, "category": "unicode-sensitive" },
     { "path": "/home/u/.ssh\u200b/id_rsa", "expected": false, "category": "unicode-zero-width-not-folded" },
     { "path": "/home/u/.ＡＷＳ/credentials", "expected": false, "category": "unicode-fullwidth-not-folded" },
 
@@ -81,8 +81,8 @@
     { "root": "C:\\Users\\me\\project", "path": "C:/Users/me/project/a.txt", "expected": true, "category": "windows" },
     { "root": "C:\\Users\\me\\project", "path": "\\\\?\\C:\\Users\\me\\project\\a.txt", "expected": true, "category": "windows-extended-length-under" },
     { "root": "~/.ssh", "path": "~/.ssh/id_rsa", "expected": false, "category": "sensitive-root-rejected" },
-    { "root": "/home/u/project", "path": "/home/u/項目/檔.txt", "expected": false, "category": "unicode-not-under" },
-    { "root": "/home/u/專案", "path": "/home/u/專案/檔.txt", "expected": true, "category": "unicode-under" }
+    { "root": "/home/u/project", "path": "/home/u/项目/档.txt", "expected": false, "category": "unicode-not-under" },
+    { "root": "/home/u/专案", "path": "/home/u/专案/档.txt", "expected": true, "category": "unicode-under" }
   ],
   "recursiveRoot": [
     { "path": "/", "roots": ["/home/u/project"], "reason": "filesystem_root", "category": "root-rejected" },

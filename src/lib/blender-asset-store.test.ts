@@ -16,9 +16,9 @@ beforeEach(() => {
 
 const USER_ID = 1;
 
-const SCRIPT_A = `# 建一個方塊並轉 90 度
+const SCRIPT_A = `# 建一个方块并转 90 度
 import bpy
-bpy.ops.mesh.primitive_cube_add()   # 方塊
+bpy.ops.mesh.primitive_cube_add()   # 方块
 obj = bpy.context.active_object
 obj.rotation_euler[2] = 1.5708  # 90 度
 `;
@@ -34,56 +34,56 @@ bpy.ops.mesh.primitive_monkey_add()
 bpy.ops.object.shade_smooth()
 `;
 
-// ── 指紋確定性 ──────────────────────────────────────────────
+// ── 指纹确定性 ──────────────────────────────────────────────
 
-test("fingerprintScript：同腳本同指紋（確定性）", () => {
+test("fingerprintScript：同脚本同指纹（确定性）", () => {
   assert.equal(fingerprintScript(SCRIPT_A), fingerprintScript(SCRIPT_A));
   assert.equal(fingerprintScript(SCRIPT_A), fingerprintScript(SCRIPT_A + "\n"));
 });
 
-test("fingerprintScript：去註釋/空白差異後同指紋", () => {
-  // CRLF 行尾 + 空行 + 行尾空白 + 全註釋行，與乾淨版等價。
+test("fingerprintScript：去注释/空白差异后同指纹", () => {
+  // CRLF 行尾 + 空行 + 行尾空白 + 全注释行，与干净版等价。
   const noisy = [
-    "# 頭註釋",
+    "# 头注释",
     "import bpy",
     "",
-    "bpy.ops.mesh.primitive_cube_add()   # 方塊",
+    "bpy.ops.mesh.primitive_cube_add()   # 方块",
     "obj = bpy.context.active_object",
     "   ",
     "obj.rotation_euler[2] = 1.5708   # 90 度",
-    "# 尾註釋",
+    "# 尾注释",
     "",
   ].join("\r\n");
   assert.equal(fingerprintScript(noisy), fingerprintScript(SCRIPT_A));
   assert.equal(fingerprintScript(SCRIPT_A_NORMALIZED_EQUIV), fingerprintScript(SCRIPT_A));
 });
 
-test("fingerprintScript：不同腳本不同指紋", () => {
+test("fingerprintScript：不同脚本不同指纹", () => {
   const fps = new Set([fingerprintScript(SCRIPT_A), fingerprintScript(SCRIPT_B), fingerprintScript(""), fingerprintScript("import bpy")]);
   assert.equal(fps.size, 4);
 });
 
-test("fingerprintScript：字符串內的 # 不當註釋（引號感知）", () => {
-  // 同一文本一個在真註釋（被剝）一個在字符串（被保留）→ 指紋必不同。
+test("fingerprintScript：字符串内的 # 不当注释（引号感知）", () => {
+  // 同一文本一个在真注释（被剥）一个在字符串（被保留）→ 指纹必不同。
   const asComment = 'x = 1\n# msg = "hello"\n';
   const asString = 'x = 1\nmsg = "# hello"\n';
   assert.notEqual(fingerprintScript(asComment), fingerprintScript(asString));
 });
 
-test("fingerprintScript：縮進層級保留（Python 縮進即語義）", () => {
+test("fingerprintScript：缩进层级保留（Python 缩进即语义）", () => {
   const indented = "if x:\n    run()\n";
   const flattened = "if x:\nrun()\n";
   assert.notEqual(fingerprintScript(indented), fingerprintScript(flattened));
 });
 
-test("normalizeScript：引號外去註釋 + 空白摺疊的基礎形", () => {
+test("normalizeScript：引号外去注释 + 空白折叠的基础形", () => {
   assert.equal(normalizeScript("a = 1  # note\n\n  b = 2\n"), "a = 1\n b = 2");
   assert.equal(normalizeScript("s = 'a # b'  # real comment"), "s = 'a # b'");
   assert.equal(normalizeScript('s = "x \\" # y"'), 's = "x \\" # y"');
   assert.equal(normalizeScript("'''doc\nstring'''  # c\nrun()"), "'''doc\nstring'''\nrun()");
 });
 
-// ── 入庫-取出往返 ────────────────────────────────────────────
+// ── 入库-取出往返 ────────────────────────────────────────────
 
 function bridgeArtifacts() {
   return [
@@ -94,10 +94,10 @@ function bridgeArtifacts() {
   ];
 }
 
-test("saveSceneAssets：腳本+blend/glb 入庫，png/mp4 不收，回確定性 id", async () => {
+test("saveSceneAssets：脚本+blend/glb 入库，png/mp4 不收，回确定性 id", async () => {
   const result = await saveSceneAssets(USER_ID, bridgeArtifacts(), {
-    scene_summary: "立方體轉 90 度",
-    delegation: { effect_description: "方塊旋轉展示" },
+    scene_summary: "立方体转 90 度",
+    delegation: { effect_description: "方块旋转展示" },
     script: SCRIPT_A,
   });
   assert.ok(result.ok);
@@ -106,22 +106,22 @@ test("saveSceneAssets：腳本+blend/glb 入庫，png/mp4 不收，回確定性 
   assert.equal(result.deduped, 0);
   const kinds = result.items.map((i) => i.kind).sort();
   assert.deepEqual(kinds, ["bpy_script", "scene_3d", "scene_3d"]);
-  // id 內容位址：同內容重算同 id。
+  // id 内容位址：同内容重算同 id。
   const again = await saveSceneAssets(USER_ID, bridgeArtifacts(), {
-    scene_summary: "立方體轉 90 度",
-    delegation: { effect_description: "方塊旋轉展示" },
+    scene_summary: "立方体转 90 度",
+    delegation: { effect_description: "方块旋转展示" },
     script: SCRIPT_A,
   });
   assert.ok(again.ok);
   assert.deepEqual(again.items.map((i) => i.id), result.items.map((i) => i.id));
-  assert.equal(again.deduped, 3); // 冪等：全部去重
+  assert.equal(again.deduped, 3); // 幂等：全部去重
   const packs = await listAssetPacks(USER_ID);
-  assert.equal(packs.length, 1); // 沒有重複包
+  assert.equal(packs.length, 1); // 没有重复包
 });
 
-test("saveSceneAssets → findTemplateByFingerprint 往返（含元數據+腳本全文）", async () => {
+test("saveSceneAssets → findTemplateByFingerprint 往返（含元数据+脚本全文）", async () => {
   const saved = await saveSceneAssets(USER_ID, bridgeArtifacts(), {
-    scene_summary: "立方體轉 90 度",
+    scene_summary: "立方体转 90 度",
     script: SCRIPT_A,
     script_path: ".blender-work/out/scene.py",
   });
@@ -133,11 +133,11 @@ test("saveSceneAssets → findTemplateByFingerprint 往返（含元數據+腳本
   assert.ok(hit.ok);
   assert.equal(hit.template.script, SCRIPT_A);
   assert.equal(hit.template.artifactPath, ".blender-work/out/scene.py");
-  assert.equal(hit.template.sceneSummary, "立方體轉 90 度");
+  assert.equal(hit.template.sceneSummary, "立方体转 90 度");
   assert.equal(hit.template.packId, BLENDER_ASSET_PACK_ID);
   assert.equal(typeof hit.template.bytes, "number");
 
-  // 大小寫不敏感 + trim。
+  // 大小写不敏感 + trim。
   const hit2 = await findTemplateByFingerprint(USER_ID, `  ${scriptRef.fingerprint!.toUpperCase()} `);
   assert.ok(hit2.ok);
 
@@ -146,7 +146,7 @@ test("saveSceneAssets → findTemplateByFingerprint 往返（含元數據+腳本
   assert.equal(miss.code, "not_found");
 });
 
-test("saveSceneAssets：空產物且無腳本 → 結構化 no_assets", async () => {
+test("saveSceneAssets：空产物且无脚本 → 结构化 no_assets", async () => {
   const r1 = await saveSceneAssets(USER_ID, [], {});
   assert.ok(!r1.ok);
   assert.equal(r1.code, "no_assets");
@@ -155,7 +155,7 @@ test("saveSceneAssets：空產物且無腳本 → 結構化 no_assets", async ()
   assert.equal(r2.code, "no_assets");
 });
 
-test("saveSceneAssets：非法產物（缺 path/bytes）被過濾", async () => {
+test("saveSceneAssets：非法产物（缺 path/bytes）被过滤", async () => {
   const r = await saveSceneAssets(
     USER_ID,
     [
@@ -170,7 +170,7 @@ test("saveSceneAssets：非法產物（缺 path/bytes）被過濾", async () => 
   assert.equal(r.items[0].artifact_path, "good.blend");
 });
 
-test("saveSceneAssets：入庫包符合 MAX_ITEMS_PER_PACK，新資產優先", async () => {
+test("saveSceneAssets：入库包符合 MAX_ITEMS_PER_PACK，新资产优先", async () => {
   const first = await saveSceneAssets(USER_ID, [], { script: SCRIPT_A });
   assert.ok(first.ok);
   for (let i = 0; i < 60; i++) {
@@ -180,15 +180,15 @@ test("saveSceneAssets：入庫包符合 MAX_ITEMS_PER_PACK，新資產優先", a
   const packs = await listAssetPacks(USER_ID);
   const pack = packs.find((p) => p.id === BLENDER_ASSET_PACK_ID) as AssetPack;
   assert.equal(pack.items.length, 50);
-  // 新腳本（60 號）必在；最舊的首個腳本被滾出。
+  // 新脚本（60 号）必在；最旧的首个脚本被滚出。
   const newest = await findTemplateByFingerprint(USER_ID, fingerprintScript(`${SCRIPT_A}\n# v59\nobj.scale[2] = 59`));
   assert.ok(newest.ok);
   assert.equal(await findTemplateByFingerprint(USER_ID, fingerprintScript(SCRIPT_A)).then((r) => r.ok), false);
 });
 
-// ── 類型校驗（normalizeAssetPack 3D 分支）────────────────────
+// ── 类型校验（normalizeAssetPack 3D 分支）────────────────────
 
-test("normalizeAssetPack：scene_3d 收 artifactPath/bytes/sceneSummary/fingerprint，非法值丟棄", () => {
+test("normalizeAssetPack：scene_3d 收 artifactPath/bytes/sceneSummary/fingerprint，非法值丢弃", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -227,7 +227,7 @@ test("normalizeAssetPack：scene_3d 收 artifactPath/bytes/sceneSummary/fingerpr
   assert.equal(bad.fingerprint, undefined);
 });
 
-test("normalizeAssetPack：bpy_script 收 content（腳本全文）+ fingerprint；缺 artifactPath 也可", () => {
+test("normalizeAssetPack：bpy_script 收 content（脚本全文）+ fingerprint；缺 artifactPath 也可", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
@@ -239,7 +239,7 @@ test("normalizeAssetPack：bpy_script 收 content（腳本全文）+ fingerprint
   assert.equal(item.fingerprint, "ab");
 });
 
-test("normalizeAssetPack：3D kind 進白名單（不再 drop）", () => {
+test("normalizeAssetPack：3D kind 进白名单（不再 drop）", () => {
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",

@@ -1,4 +1,4 @@
-// POST /v1/team/seats/allocate 路由契約測試（鑑權 / 控制面未配置時 fail-closed 不印額度）。
+// POST /v1/team/seats/allocate 路由契约测试（鉴权 / 控制面未配置时 fail-closed 不印额度）。
 
 import assert from "node:assert/strict";
 import test from "node:test";

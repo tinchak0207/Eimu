@@ -1,29 +1,29 @@
 import type { DeliverableKind } from "../deliverable-kind";
 
 /**
- * 模型能產出的媒體種類（catalog 側的種類欄位）。
+ * 模型能产出的媒体种类（catalog 侧的种类栏位）。
  *
- * 值域**由交付物種類註冊表推導**（`src/lib/deliverable-kind.ts` 的 DELIVERABLE_KINDS），
- * 不再手寫字串聯集——新增一種交付物只在註冊表加一行，這裡自動跟上，編譯期即保證對齊。
- * 保留 `MediaKind` 這個名字是因為有多個消費者（model-status-probe 等）以它為型別名；
- * 改名只會製造無謂爆炸半徑。
+ * 值域**由交付物种类注册表推导**（`src/lib/deliverable-kind.ts` 的 DELIVERABLE_KINDS），
+ * 不再手写字串联集——新增一种交付物只在注册表加一行，这里自动跟上，编译期即保证对齐。
+ * 保留 `MediaKind` 这个名字是因为有多个消费者（model-status-probe 等）以它为型别名；
+ * 改名只会制造无谓爆炸半径。
  */
 export type MediaKind = DeliverableKind;
 
 /**
- * 影片生成型別（P1-3 生成式後期；值逐字對齊上游 `AvailableGenerationType` 的
- * `extend_video`／`edit_video`，`generate` 為我方代表普通生成的基準值）。
- * 這是「模型能做什麼」的能力宣告欄位真源——缺省＝只支援 `generate`，
- * **不推導不升格**（見 generation-core/video-post-production.ts 檔頭）。
+ * 影片生成型别（P1-3 生成式后期；值逐字对齐上游 `AvailableGenerationType` 的
+ * `extend_video`／`edit_video`，`generate` 为我方代表普通生成的基准值）。
+ * 这是「模型能做什么」的能力宣告栏位真源——缺省＝只支援 `generate`，
+ * **不推导不升格**（见 generation-core/video-post-production.ts 档头）。
  */
 export type VideoGenerationType = "generate" | "extend_video" | "edit_video";
 /**
- * 超分檔位（P1-4／對稱差 D10「一鍵超分到 4K」）。值與 `ImageResolution` 同形，
- * 但語義不同：這是**超分產品線的目標檔位**（長邊門檻 1k=1024／2k=2048／4k=3840）。
- * 真源＝`generation-core/upscale-tier.ts` 的 `UPSCALE_TIER_CONTRACTS`（含每個檔位送
- * bridge 的 `(size, factor)` 與由真實比例表算出的長邊保證）；本欄位只做**能力宣告**，
- * 缺省＝該模型不支援超分。宣告 4K ≠ 一定能出 4K：4K 的上游 factor 語義未校準，
- * 提交端 fail-closed（`upscale_4k_upstream_unverified`），`/v1/models` 只外露可提交檔位。
+ * 超分档位（P1-4／对称差 D10「一键超分到 4K」）。值与 `ImageResolution` 同形，
+ * 但语义不同：这是**超分产品线的目标档位**（长边门槛 1k=1024／2k=2048／4k=3840）。
+ * 真源＝`generation-core/upscale-tier.ts` 的 `UPSCALE_TIER_CONTRACTS`（含每个档位送
+ * bridge 的 `(size, factor)` 与由真实比例表算出的长边保证）；本栏位只做**能力宣告**，
+ * 缺省＝该模型不支援超分。宣告 4K ≠ 一定能出 4K：4K 的上游 factor 语义未校准，
+ * 提交端 fail-closed（`upscale_4k_upstream_unverified`），`/v1/models` 只外露可提交档位。
  */
 export type UpscaleTier = "1k" | "2k" | "4k";
 export type AspectRatio =
@@ -71,9 +71,9 @@ export type ImageCreditTable = Partial<Record<ImageResolution, number>>;
 export type VideoCreditTable = Partial<Record<VideoResolution, number>>;
 
 /**
- * 定價精度單點（幣單位的小數位數）。全站定價的舍入/下限/顯示/輸入 step 都由
- * 以下三個常數派生——改大即支援更細定價（如 5 = 0.00001 幣，限免場景），
- * 不需要改任何其他檔案。credit 是幣 × 10 的內部單位，精度多一位小數。
+ * 定价精度单点（币单位的小数位数）。全站定价的舍入/下限/显示/输入 step 都由
+ * 以下三个常数派生——改大即支援更细定价（如 5 = 0.00001 币，限免场景），
+ * 不需要改任何其他档案。credit 是币 × 10 的内部单位，精度多一位小数。
  */
 export const PRICING_DECIMALS = 5;
 export const PRICING_COIN_STEP = 1 / 10 ** PRICING_DECIMALS;
@@ -94,7 +94,7 @@ export interface ModelUsageTip {
 }
 
 /**
- * 模型卡三字段（吞併決策清單主線四首件）：擅长 / 已知缺陷 / 建议。
+ * 模型卡三字段（吞并决策清单主线四首件）：擅长 / 已知缺陷 / 建议。
  * 全部可选——缺值时模型卡优雅降级，不出现空区块。内容必须可溯源
  * （reddit-use-cases 语料 / 实测指南 / 可靠公开结论），宁缺勿滥。
  */
@@ -109,9 +109,9 @@ export interface GenerationModelDefinition {
   displayName: string;
   kind: MediaKind;
   popularity: number;
-  /** 模型所屬廠商/平台，模型選單的一級目錄按此分組。 */
+  /** 模型所属厂商/平台，模型选单的一级目录按此分组。 */
   vendor: string;
-  /** AV 成片鏈路的提交端點與能力探測路由鍵（tts/avatar/lipsync）；一般模型無此欄位。 */
+  /** AV 成片链路的提交端点与能力探测路由键（tts/avatar/lipsync）；一般模型无此栏位。 */
   pipeline?: "tts" | "avatar" | "lipsync";
   /** 模型卡三字段（擅长/已知缺陷/建议）。可选——无数据的模型不渲染能力卡。 */
   knowledge?: ModelKnowledge;
@@ -128,18 +128,18 @@ export interface GenerationModelDefinition {
   fixedCoins?: number;
   referenceImages: boolean;
   /**
-   * 可用的影片生成型別（P1-3）：只有 Seedance-2.5 族帶 extend_video／edit_video
-   * （對稱差 D22，上游 ListModelCapabilities 實測）。缺省 ⇒ 只支援 `generate`。
-   * 非 video 模型不得宣告本欄位。
+   * 可用的影片生成型别（P1-3）：只有 Seedance-2.5 族带 extend_video／edit_video
+   * （对称差 D22，上游 ListModelCapabilities 实测）。缺省 ⇒ 只支援 `generate`。
+   * 非 video 模型不得宣告本栏位。
    */
   videoGenerationTypes?: readonly VideoGenerationType[];
   /**
-   * 超分檔位**能力宣告面**（P1-4）：產品線上有哪些檔位，含尚未校準者（如 4K）。
-   * 宣告 ≠ 可提交：提交閘門用 `declaredUpscaleTiers` 判「這個檔位是否為本模型所有」，
-   * 再用 `servableUpscaleTiers` 判「此刻能否提交」（4K 在 factor 真單校準前 fail-closed，
+   * 超分档位**能力宣告面**（P1-4）：产品线上有哪些档位，含尚未校准者（如 4K）。
+   * 宣告 ≠ 可提交：提交闸门用 `declaredUpscaleTiers` 判「这个档位是否为本模型所有」，
+   * 再用 `servableUpscaleTiers` 判「此刻能否提交」（4K 在 factor 真单校准前 fail-closed，
    * env `UPSCALE_4K_UPSTREAM`）。`/v1/models`（`generationCapabilities`）只外露可提交者，
-   * 所以對外不會出現一個提交時必被具名拒收的檔位。
-   * 缺省 ⇒ 該模型不支援超分（不輸出空能力宣稱）。
+   * 所以对外不会出现一个提交时必被具名拒收的档位。
+   * 缺省 ⇒ 该模型不支援超分（不输出空能力宣称）。
    */
   upscaleTiers?: readonly UpscaleTier[];
   /** LoRA is currently a PixAI-only single-selection capability. */
@@ -156,34 +156,34 @@ export interface GenerationCapabilityProjection {
   durations: readonly number[];
   referenceImages: boolean;
   /**
-   * 每次請求可帶的參考圖上限（對稱差 D23）。只有 `referenceImages === true` 的模型
-   * 外露本欄位；不收參考圖的模型**省略**（不輸出空能力宣稱）。
-   * 數字真源＝執行端常數（`generation-core/request-limits.ts` 的
+   * 每次请求可带的参考图上限（对称差 D23）。只有 `referenceImages === true` 的模型
+   * 外露本栏位；不收参考图的模型**省略**（不输出空能力宣称）。
+   * 数字真源＝执行端常数（`generation-core/request-limits.ts` 的
    * `MAX_REQUEST_REFERENCE_IMAGES`，即 `/v1/images/generations` 的
-   * `invalid_reference_images` 閘）——宣告值與真的擋人的值同一顆，不另存第二份。
-   * 宣告 ≠ 一定能提交：這是全站共同上限，模型／上游仍可能有更嚴格的限制。
+   * `invalid_reference_images` 闸）——宣告值与真的挡人的值同一颗，不另存第二份。
+   * 宣告 ≠ 一定能提交：这是全站共同上限，模型／上游仍可能有更严格的限制。
    */
   maxReferenceImages?: number;
   /**
-   * 每次請求可出的張數／段數上限（對稱差 D23：對手 `ListModelCapabilities` 逐模型揭露批次數，
-   * 我方舊版 `/v1/models` 完全沒有）。每個模型都有值（圖／視頻同尺）。
-   * 數字真源＝執行端常數（`generation-core/request-limits.ts` 的
-   * `MAX_REQUEST_BATCH_COUNT`，即 `/v1/images|videos/generations` 的 `n` 閘，
+   * 每次请求可出的张数／段数上限（对称差 D23：对手 `ListModelCapabilities` 逐模型揭露批次数，
+   * 我方旧版 `/v1/models` 完全没有）。每个模型都有值（图／视频同尺）。
+   * 数字真源＝执行端常数（`generation-core/request-limits.ts` 的
+   * `MAX_REQUEST_BATCH_COUNT`，即 `/v1/images|videos/generations` 的 `n` 闸，
    * 超限 → 400 `invalid_n`）。宣告 ≠ 一定能提交：它是全站共同上限。
    */
   maxBatchCount: number;
   audio: boolean;
   lora: boolean;
   /**
-   * 影片生成型別（P1-3）：`["generate"]` 為基準；Seedance-2.5 族多出
-   * `extend_video`（續片）／`edit_video`（局部改片）。`/v1/models` 的
-   * `x_capabilities` 直接外露此欄位，聚合平台據此決定是否上架後期能力。
+   * 影片生成型别（P1-3）：`["generate"]` 为基准；Seedance-2.5 族多出
+   * `extend_video`（续片）／`edit_video`（局部改片）。`/v1/models` 的
+   * `x_capabilities` 直接外露此栏位，聚合平台据此决定是否上架后期能力。
    */
   videoGenerationTypes?: readonly VideoGenerationType[];
   /**
-   * 超分檔位（P1-4）：`/v1/models` 的 `x_capabilities` 直接外露此欄位，
-   * 前端／聚合平台據此決定要不要上架「一鍵超分到 4K」的檔位選單。
-   * 內容＝catalog 宣告檔位 ∩ 上游語義已校準（見 capabilities.ts 的 modelUpscaleTiers）。
+   * 超分档位（P1-4）：`/v1/models` 的 `x_capabilities` 直接外露此栏位，
+   * 前端／聚合平台据此决定要不要上架「一键超分到 4K」的档位选单。
+   * 内容＝catalog 宣告档位 ∩ 上游语义已校准（见 capabilities.ts 的 modelUpscaleTiers）。
    */
   upscaleTiers?: readonly UpscaleTier[];
   qualityModes: readonly ("fast" | "quality")[];
@@ -192,8 +192,8 @@ export interface GenerationCapabilityProjection {
   defaultDuration?: number;
   defaultAudio: boolean;
   /**
-   * 提交端 prompt 字元硬上限（POST /v1/videos/generations 的 prompt_too_long 閘，
-   * 全域 4000）。暴露給聚合平台/agent 做提交前預檢，免提交後才 400。
+   * 提交端 prompt 字元硬上限（POST /v1/videos/generations 的 prompt_too_long 闸，
+   * 全域 4000）。暴露给聚合平台/agent 做提交前预检，免提交后才 400。
    */
   promptCharLimit?: number;
 }

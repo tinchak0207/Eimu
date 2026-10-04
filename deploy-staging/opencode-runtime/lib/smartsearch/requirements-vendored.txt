@@ -1,27 +1,27 @@
-# smart_search 執行期第三方依賴（vendored，純 Python wheel）
+# smart_search 执行期第三方依赖（vendored，纯 Python wheel）
 #
-# 這些套件已逐檔解壓到本目錄（與 tenacity/ 同層），靠 PYTHONPATH 生效，
-# **不進任何安裝腳本、不依賴系統 dist-packages 的手工 pip 安裝**。
-# 版本對齊 VPS 服務帳號（agentsvc）實際解析到的版本。
+# 这些套件已逐档解压到本目录（与 tenacity/ 同层），靠 PYTHONPATH 生效，
+# **不进任何安装脚本、不依赖系统 dist-packages 的手工 pip 安装**。
+# 版本对齐 VPS 服务帐号（agentsvc）实际解析到的版本。
 #
-# 重現 vendor（升級上游或換機時照做）：
+# 重现 vendor（升级上游或换机时照做）：
 #   python3 -m pip download --no-deps --only-binary=:all: --require-hashes \
 #     -d /tmp/vendor-wheels -r requirements-vendored.txt
 #   for w in /tmp/vendor-wheels/*.whl; do unzip -qo "$w" -d lib/smartsearch/; done
 #   rm -rf lib/smartsearch/*.dist-info
 #   find lib/smartsearch -type d \( -name __pycache__ -o -name tests \) -prune -exec rm -rf {} +
 #
-# ⚠ 漏檔檢查（曾實際踩到）：certifi 的 cacert.pem 是套件資料檔，會被 repo 根 .gitignore
-#   的 `*.pem` 規則擋掉，導致部署後 `certifi.where()` 指向不存在的檔 → httpx TLS
-#   初始化 FileNotFoundError。已於 .gitignore 加例外
+# ⚠ 漏档检查（曾实际踩到）：certifi 的 cacert.pem 是套件资料档，会被 repo 根 .gitignore
+#   的 `*.pem` 规则挡掉，导致部署后 `certifi.where()` 指向不存在的档 → httpx TLS
+#   初始化 FileNotFoundError。已于 .gitignore 加例外
 #   `!deploy-staging/opencode-runtime/lib/smartsearch/certifi/cacert.pem`。
-#   重現後務必確認底下沒有被忽略的檔：
-#     git status --ignored --porcelain -- lib/smartsearch | grep '^!!'   # 期望：無輸出
+#   重现后务必确认底下没有被忽略的档：
+#     git status --ignored --porcelain -- lib/smartsearch | grep '^!!'   # 期望：无输出
 #
-# 驗證（必須全部落在 lib/smartsearch/ 內，不得是 /usr/lib/python3/dist-packages）：
+# 验证（必须全部落在 lib/smartsearch/ 内，不得是 /usr/lib/python3/dist-packages）：
 #   PYTHONPATH=lib/smartsearch python3 -c \
 #     "import httpx,typing_extensions;print(httpx.__file__);print(typing_extensions.__file__)"
-#   PYTHONPATH=lib/smartsearch python3 -S -c "import smart_search.cli"   # 不靠系統 site-packages
+#   PYTHONPATH=lib/smartsearch python3 -S -c "import smart_search.cli"   # 不靠系统 site-packages
 
 anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
 certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775

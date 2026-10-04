@@ -1,12 +1,12 @@
 /**
- * GET /api/skills/<id> — 站內只讀單條**公開**技能（builtin + recipe + template）。
+ * GET /api/skills/<id> — 站内只读单条**公开**技能（builtin + recipe + template）。
  *
- * **公開面隔離（2026-09-27 立）**：只在公開集合找，**不得**以 id 直接命中他人的
- * 私有自建 skill（`user-…` id 在此天然 404，不查 user 來源）。自己的私有 skill
+ * **公开面隔离（2026-09-27 立）**：只在公开集合找，**不得**以 id 直接命中他人的
+ * 私有自建 skill（`user-…` id 在此天然 404，不查 user 来源）。自己的私有 skill
  * 走 `GET /api/skills/mine`。
  *
- * 回應：`{ skill }`；找不到回 404 `{ error: "not_found" }`。
- * 只讀：不寫入、不計費。
+ * 回应：`{ skill }`；找不到回 404 `{ error: "not_found" }`。
+ * 只读：不写入、不计费。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -14,7 +14,7 @@ import { getSkillByIdPublic } from "@/lib/agent-skills/registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const noStore = { "Cache-Control": "no-store" } as const;
 

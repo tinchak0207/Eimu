@@ -18,7 +18,7 @@ export function generationCredits(
     (model.kind === "image" && model.imageCredits !== undefined) ||
     (model.kind === "video" &&
       (model.videoCreditsPerSecond !== undefined || model.videoCreditsWithAudioPerSecond !== undefined));
-  if (!hasRateTable) return 0; // fixedCoins 簡化定價的模型沒有 credit 表
+  if (!hasRateTable) return 0; // fixedCoins 简化定价的模型没有 credit 表
   const resolution = options.resolution ?? model.defaultResolution;
   if (model.kind === "image") {
     return model.imageCredits?.[resolution as ImageResolution] ?? 0;
@@ -36,8 +36,8 @@ export function generationCoins(
 ): number {
   const model = generationModel(modelId);
   if (!model) return 1;
-  // 有解析度/時長費率表 → 表主導（按解析度/時長浮動）；fixedCoins 只是無表模型的
-  // 簡化定價。避免 admin 曾設的 fixedCoins 覆寫遮蔽改為表定價的模型（如 pixai-upscale）。
+  // 有解析度/时长费率表 → 表主导（按解析度/时长浮动）；fixedCoins 只是无表模型的
+  // 简化定价。避免 admin 曾设的 fixedCoins 覆写遮蔽改为表定价的模型（如 pixai-upscale）。
   const hasRateTable =
     (model.kind === "image" && model.imageCredits !== undefined) ||
     (model.kind === "video" &&

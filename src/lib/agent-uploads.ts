@@ -40,9 +40,9 @@ export function freshTicketValue(t: AgentUploadsTicket | null, now: number = Dat
  * 绝不为一张票阻塞转录渲染，也绝不弹错。
  */
 export async function mintUploadsTicket(sessionId: string): Promise<AgentUploadsTicket> {
-  // LOCAL_TEST_MODE：與 agent-chat-client.ts 的 authHeaders 同款假頭——站內代理的
-  // resolveAgentCaller 在該模式下直接換 B 端 key，不驗證這組頭。缺這支本地重放
-  // （導演台白模上傳 → 鑄票 → 拼公網 URL）會在登入檢查處假性失敗。
+  // LOCAL_TEST_MODE：与 agent-chat-client.ts 的 authHeaders 同款假头——站内代理的
+  // resolveAgentCaller 在该模式下直接换 B 端 key，不验证这组头。缺这支本地重放
+  // （导演台白模上传 → 铸票 → 拼公网 URL）会在登入检查处假性失败。
   if (LOCAL_TEST_MODE) {
     return mintTicketRequest(sessionId, { Authorization: "Bearer local-test-token", "x-user-id": "0" });
   }
@@ -100,42 +100,42 @@ export function buildAssetUrl(sessionId: string, path: string, ticket: string): 
 }
 
 /**
- * 影片原片直傳網關（繞開 Vercel 站內代理的單請求體 4.5MB 硬頂）。
+ * 影片原片直传网关（绕开 Vercel 站内代理的单请求体 4.5MB 硬顶）。
  *
- * 鏈路：瀏覽器 → 網關公網 origin 的 POST /agent/v1/sessions/<id>/video-upload，
- * multipart 單欄位 `file`，票走 query（?t=，讀票 = 寫票同一張）。
- * 成功回 { ok:true, path, name, size, mime }，path 直接進 [附件] 區塊，
- * 渲染端用 buildAssetUrl 拼讀回 URL 播原片。
+ * 链路：浏览器 → 网关公网 origin 的 POST /agent/v1/sessions/<id>/video-upload，
+ * multipart 单栏位 `file`，票走 query（?t=，读票 = 写票同一张）。
+ * 成功回 { ok:true, path, name, size, mime }，path 直接进 [附件] 区块，
+ * 渲染端用 buildAssetUrl 拼读回 URL 播原片。
  *
- * 不設 Content-Type：FormData 要由瀏覽器補 multipart boundary（對齊 uploadAgentAttachments）。
- * 任何失敗（無票 / 401 / 413 / 415 / 網路 / 回應不合契約）一律拋錯帶狀態語義，
- * 由呼叫端決定降級（抽幀上傳），這裡不吞錯也不靜默。
+ * 不设 Content-Type：FormData 要由浏览器补 multipart boundary（对齐 uploadAgentAttachments）。
+ * 任何失败（无票 / 401 / 413 / 415 / 网路 / 回应不合契约）一律抛错带状态语义，
+ * 由呼叫端决定降级（抽帧上传），这里不吞错也不静默。
  */
 interface GatewayDirectUploadSpec {
-  /** 前端 ref 的 kind（音頻無獨立 kind，沿用 document，見 toAgentAttachmentRef 同款映射）。 */
+  /** 前端 ref 的 kind（音频无独立 kind，沿用 document，见 toAgentAttachmentRef 同款映射）。 */
   kind: AgentAttachmentRef["kind"];
-  /** 回應未帶 mime 時的型別兜底。 */
+  /** 回应未带 mime 时的型别兜底。 */
   defaultMime: string;
-  /** 人話錯誤文案的主語（「视频」/「音频」）。 */
+  /** 人话错误文案的主语（「视频」/「音频」）。 */
   noun: string;
 }
 
 /**
- * 上傳進度／取消的共用選項（缺陷 A 修復，2026-10-04）。
+ * 上传进度／取消的共用选项（缺陷 A 修复，2026-10-04）。
  *
- * 底層 fetch 有兩個硬傷：① 拿不到上行進度（4.4MB 音頻 47–50s 期間 UI 全黑，
- * 使用者以為當掉）；② 沒有取消手段（載錯大檔只能等或重新整理）。改用
- * XMLHttpRequest —— `upload.onprogress` 是**真實位元組計數**（非假動畫），
- * `abort()` 是真取消。signal 供呼叫端（chip 的取消鈕／移除鈕）中斷在途請求。
+ * 底层 fetch 有两个硬伤：① 拿不到上行进度（4.4MB 音频 47–50s 期间 UI 全黑，
+ * 使用者以为当掉）；② 没有取消手段（载错大档只能等或重新整理）。改用
+ * XMLHttpRequest —— `upload.onprogress` 是**真实位元组计数**（非假动画），
+ * `abort()` 是真取消。signal 供呼叫端（chip 的取消钮／移除钮）中断在途请求。
  */
 export interface UploadProgressOptions {
-  /** 上行真實進度：loaded/total 皆為位元組；total=0 時不呼叫（無法誠實報百分比）。 */
+  /** 上行真实进度：loaded/total 皆为位元组；total=0 时不呼叫（无法诚实报百分比）。 */
   onProgress?: (loaded: number, total: number) => void;
-  /** 取消信號：abort 時 XHR.abort() → reject(UploadAbortedError)。 */
+  /** 取消信号：abort 时 XHR.abort() → reject(UploadAbortedError)。 */
   signal?: AbortSignal;
 }
 
-/** 使用者主動取消上傳（區別於網路失敗）：呼叫端據此落「已取消」而非「失敗」語義。 */
+/** 使用者主动取消上传（区别于网路失败）：呼叫端据此落「已取消」而非「失败」语义。 */
 export class UploadAbortedError extends Error {
   constructor() {
     super("已取消上传。");
@@ -144,9 +144,9 @@ export class UploadAbortedError extends Error {
 }
 
 /**
- * 用 XMLHttpRequest 送出 multipart，回 { status, text }；**不因 HTTP 狀態 reject**
- * （狀態交由呼叫端判讀，與 fetch 語義一致）。僅網路錯誤／取消 reject。
- * 這是全站唯一一支帶進度的上傳器：原片直傳與站內代理上傳都復用它，不另造第二套。
+ * 用 XMLHttpRequest 送出 multipart，回 { status, text }；**不因 HTTP 状态 reject**
+ * （状态交由呼叫端判读，与 fetch 语义一致）。仅网路错误／取消 reject。
+ * 这是全站唯一一支带进度的上传器：原片直传与站内代理上传都复用它，不另造第二套。
  */
 export function xhrUploadForm(
   url: string,
@@ -254,7 +254,7 @@ async function uploadMediaDirect(
   };
 }
 
-/** 影片原片直傳（大檔，走網關票券路由；見上方 uploadMediaDirect）。 */
+/** 影片原片直传（大档，走网关票券路由；见上方 uploadMediaDirect）。 */
 export function uploadVideoDirect(
   sessionId: string,
   file: File,
@@ -264,9 +264,9 @@ export function uploadVideoDirect(
 }
 
 /**
- * 音頻原片直傳（真歌等本地參考素材）：與影片**同一條**網關票券大檔路徑，非另造
- * 第二套——差別只在 kind（audio/* 依 toAgentAttachmentRef 同款落 "document"）。
- * 繞開 Vercel 4.5MB 體上限，上限同網關 100MB。
+ * 音频原片直传（真歌等本地参考素材）：与影片**同一条**网关票券大档路径，非另造
+ * 第二套——差别只在 kind（audio/* 依 toAgentAttachmentRef 同款落 "document"）。
+ * 绕开 Vercel 4.5MB 体上限，上限同网关 100MB。
  */
 export function uploadAudioDirect(
   sessionId: string,

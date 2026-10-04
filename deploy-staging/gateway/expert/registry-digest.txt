@@ -1,4 +1,4 @@
-<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 現值生成（buildExpertRegistryDigest 逐字輸出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 機械生成）。生成日期 2026-09-11（R4：摘要行擴充配方库 + 交付契约，registry 改行後須重生成上傳）。 -->
+<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 现值生成（buildExpertRegistryDigest 逐字输出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 机械生成）。生成日期 2026-09-11（R4：摘要行扩充配方库 + 交付契约，registry 改行后须重生成上传）。 -->
 Expert 注册表（能力断路真源；域外工具不存在于该 Expert 的工具表）：
 - director3d（3D 导演）：任务类型 3d / blender / scene_3d；工具 blender_exec, blender_export_gltf, blender_render, image_quote；配方库 skills/blender-director/SKILL.md；交付契约 turntable, stills, blend, glb（qcSignature：必需）
 - music（音乐导演）：任务类型 music / song / bgm / mv_theme / theme_song；工具 music_gen, image_quote；配方库 skills/music-director/SKILL.md, skills/music-director/files/；交付契约 emotion_contract, lyrics, melody_notation, audio_url, duration_source, qc（qcSignature：必需）

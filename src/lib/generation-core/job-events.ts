@@ -1,44 +1,44 @@
 import { getGenerationSql, type GenerationSql } from "./database";
 
-// P1.5 事件賬本 + probe 偵查面（2026-08-28 中控外科手術）。
-// 目標：任意一筆失敗 job，probe 一條命令 30 秒內給出死因 + 上游錯誤原文，
-// 全程不開 docker exec、不進 VPS。
+// P1.5 事件账本 + probe 侦查面（2026-08-28 中控外科手术）。
+// 目标：任意一笔失败 job，probe 一条命令 30 秒内给出死因 + 上游错误原文，
+// 全程不开 docker exec、不进 VPS。
 //
-// 遙測兩鐵律：可以晚到，不可以不寫；不擋路。
-// - emitJobEvent 是 fire-and-forget：埋點失敗只 console.error，永不讓主流程失敗。
-// - 上游錯誤原文（upstreamRaw）原樣入庫不改寫；話術只許存在於展示層。
+// 遥测两铁律：可以晚到，不可以不写；不挡路。
+// - emitJobEvent 是 fire-and-forget：埋点失败只 console.error，永不让主流程失败。
+// - 上游错误原文（upstreamRaw）原样入库不改写；话术只许存在于展示层。
 
 type Row = Record<string, unknown>;
 
-/** P1.5 事件詞彙表。寫 generation_job / billing_operation 狀態的地方必須挑一個發出。 */
+/** P1.5 事件词汇表。写 generation_job / billing_operation 状态的地方必须挑一个发出。 */
 export const JOB_EVENT = {
   billingReserved: "billing_reserved", // reserve op 落地（job → queued）
   billingCommitted: "billing_committed", // commit op 落地
-  billingRefunded: "billing_refunded", // refund op 落地（全額時 job → refunded）
-  billingRetryScheduled: "billing_retry_scheduled", // op 退回 pending 等待下次嘗試
-  billingUnknown: "billing_unknown", // op 凍結為 unknown（reserve 時 job → billing_unknown）
-  billingRefundFailed: "billing_refund_failed", // refund op 確定性失敗（4xx）
-  jobFailed: "job_failed", // job → failed（計費拒絕）
-  jobCancelled: "job_cancelled", // job → cancelled（用戶人工終止）
-  jobRequeued: "job_requeued", // job → queued（零金額免計費直通）
-  zombieRequeued: "zombie_requeued", // 殭屍回收：reserve 已落地 → 重回隊列
-  zombieReclaimed: "zombie_reclaimed", // 殭屍回收：終結為 failed
-  strandedRefundRetried: "stranded_refund_retried", // 擱淺退款通道重試
-  billingManuallyReconciled: "billing_manually_reconciled", // 管理員人工對帳
-  // INC-0830-VIDEO：attempt 生命週期事件（worker 前綴 actor）。append-only 只 INSERT。
-  attemptSubmitted: "attempt_submitted", // attempt 已向上游提交（detail 帶 provider_task_id）
-  attemptSucceeded: "attempt_succeeded", // attempt 成功（artifact 已落庫）
-  attemptFailed: "attempt_failed", // attempt 失敗（upstream_raw = 錯誤原文，不改寫）
-  // FG-02/03：自動重放被 registry 拒絕（detail 帶 operation/denial_reason/預算）。
-  // 只發拒絕事件（允許重放不發，量太大且 attempt_failed 已覆蓋）。
+  billingRefunded: "billing_refunded", // refund op 落地（全额时 job → refunded）
+  billingRetryScheduled: "billing_retry_scheduled", // op 退回 pending 等待下次尝试
+  billingUnknown: "billing_unknown", // op 冻结为 unknown（reserve 时 job → billing_unknown）
+  billingRefundFailed: "billing_refund_failed", // refund op 确定性失败（4xx）
+  jobFailed: "job_failed", // job → failed（计费拒绝）
+  jobCancelled: "job_cancelled", // job → cancelled（用户人工终止）
+  jobRequeued: "job_requeued", // job → queued（零金额免计费直通）
+  zombieRequeued: "zombie_requeued", // 僵尸回收：reserve 已落地 → 重回队列
+  zombieReclaimed: "zombie_reclaimed", // 僵尸回收：终结为 failed
+  strandedRefundRetried: "stranded_refund_retried", // 搁浅退款通道重试
+  billingManuallyReconciled: "billing_manually_reconciled", // 管理员人工对帐
+  // INC-0830-VIDEO：attempt 生命周期事件（worker 前缀 actor）。append-only 只 INSERT。
+  attemptSubmitted: "attempt_submitted", // attempt 已向上游提交（detail 带 provider_task_id）
+  attemptSucceeded: "attempt_succeeded", // attempt 成功（artifact 已落库）
+  attemptFailed: "attempt_failed", // attempt 失败（upstream_raw = 错误原文，不改写）
+  // FG-02/03：自动重放被 registry 拒绝（detail 带 operation/denial_reason/预算）。
+  // 只发拒绝事件（允许重放不发，量太大且 attempt_failed 已覆盖）。
   replayDenied: "replay_denied",
-  // INC-0831：provider 對帳事件。deadline/易主不再單方面宣判失敗——上游真相以
-  // 對帳輪詢為準，錢在真相出來前凍結。
-  reconcileFrozen: "reconcile_frozen", // job 進入對帳凍結（deadline 到/易主，但上游任務仍在跑）
-  reconcilePolled: "reconcile_polled", // 對帳輪詢一次（detail 帶 state）
-  reconcileDelivered: "reconcile_delivered", // 對帳確認成功 → artifact 落地 + job succeeded
-  reconcileFailed: "reconcile_failed", // 對帳確認上游失敗 → 才退款
-  reconcileExhausted: "reconcile_exhausted", // 對帳窗口耗盡（默認凍結+人工，不退款）
+  // INC-0831：provider 对帐事件。deadline/易主不再单方面宣判失败——上游真相以
+  // 对帐轮询为准，钱在真相出来前冻结。
+  reconcileFrozen: "reconcile_frozen", // job 进入对帐冻结（deadline 到/易主，但上游任务仍在跑）
+  reconcilePolled: "reconcile_polled", // 对帐轮询一次（detail 带 state）
+  reconcileDelivered: "reconcile_delivered", // 对帐确认成功 → artifact 落地 + job succeeded
+  reconcileFailed: "reconcile_failed", // 对帐确认上游失败 → 才退款
+  reconcileExhausted: "reconcile_exhausted", // 对帐窗口耗尽（默认冻结+人工，不退款）
 } as const;
 
 export type JobEventName = (typeof JOB_EVENT)[keyof typeof JOB_EVENT];
@@ -47,7 +47,7 @@ export interface JobEventInput {
   jobId: string;
   event: string;
   actor?: string | null;
-  /** 上游/底層錯誤原文，不改寫入庫。 */
+  /** 上游/底层错误原文，不改写入库。 */
   upstreamRaw?: string | null;
   detail?: unknown;
 }
@@ -63,8 +63,8 @@ function normalizeDetail(detail: unknown): string | null {
 }
 
 /**
- * Fire-and-forget 追加一行事件。永不 throw、永不 await——遙測不擋主流程；
- * 失敗只 console.error（可以晚到，不可以不寫：由 reconcile 周期性補寫語義兜底）。
+ * Fire-and-forget 追加一行事件。永不 throw、永不 await——遥测不挡主流程；
+ * 失败只 console.error（可以晚到，不可以不写：由 reconcile 周期性补写语义兜底）。
  */
 export function emitJobEvent(input: JobEventInput, sql: GenerationSql = getGenerationSql()): void {
   const detailJson = normalizeDetail(input.detail);
@@ -102,9 +102,9 @@ function toIso(value: unknown): string | null {
 }
 
 /**
- * 一條查詢（UNION ALL）返回 job 建單 → 當前狀態 → 全部事件 → 全部計費操作
- * 的完整時間線，含上游錯誤原文（job_events.upstream_raw / billing_operation.last_error）。
- * job 不存在時返回 null。
+ * 一条查询（UNION ALL）返回 job 建单 → 当前状态 → 全部事件 → 全部计费操作
+ * 的完整时间线，含上游错误原文（job_events.upstream_raw / billing_operation.last_error）。
+ * job 不存在时返回 null。
  */
 export async function getJobTimeline(jobId: string, sql: GenerationSql = getGenerationSql()): Promise<JobTimeline | null> {
   const rows = await sql<Row[]>`
@@ -176,10 +176,10 @@ export async function getJobTimeline(jobId: string, sql: GenerationSql = getGene
 }
 
 export type StuckCause =
-  | "pending_billing" // 未受理：卡在計費閘，reserve op 沒被執行
-  | "billing_unknown" // 計費結果不明，被凍結
-  | "running_stalled" // 提交/執行/輪詢停滯（輪詢斷）
-  | "terminal_unsettled"; // 已終態但帳未結（終態未投影）
+  | "pending_billing" // 未受理：卡在计费闸，reserve op 没被执行
+  | "billing_unknown" // 计费结果不明，被冻结
+  | "running_stalled" // 提交/执行/轮询停滞（轮询断）
+  | "terminal_unsettled"; // 已终态但帐未结（终态未投影）
 
 export interface StuckJob {
   jobId: string;
@@ -218,7 +218,7 @@ function evidenceOf(row: Row): Record<string, unknown> {
 }
 
 /**
- * 死因分類（純函數，便於測試）。輸入必須來自 listStuckJobs 的查詢行。
+ * 死因分类（纯函数，便于测试）。输入必须来自 listStuckJobs 的查询行。
  */
 export function classifyStuckCause(row: Row): StuckCause {
   const status = String(row.status);
@@ -232,8 +232,8 @@ function unsettledReason(row: Row): string {
   if (String(row.status) === "succeeded" && (row.commit_status === null || row.commit_status === undefined)) {
     return "commit_missing";
   }
-  // 已扣款結算失敗（OBS-1）：succeeded 且 commit 行存在但 status='failed'——必須如實標，
-  // 不得掉進退款分支被誤標成 refund_*（語義是「結算失敗」，不是「退款進行中」）。
+  // 已扣款结算失败（OBS-1）：succeeded 且 commit 行存在但 status='failed'——必须如实标，
+  // 不得掉进退款分支被误标成 refund_*（语义是「结算失败」，不是「退款进行中」）。
   if (String(row.status) === "succeeded" && String(row.commit_status ?? "") === "failed") {
     return "commit_failed";
   }
@@ -242,8 +242,8 @@ function unsettledReason(row: Row): string {
 }
 
 /**
- * 滯留名單：非終態停滯超過 minutes，或終態但帳未結。
- * 一條查詢同時取回 reserve/commit/refund op 摘要作為死因證據（含 last_error 原文）。
+ * 滞留名单：非终态停滞超过 minutes，或终态但帐未结。
+ * 一条查询同时取回 reserve/commit/refund op 摘要作为死因证据（含 last_error 原文）。
  */
 export async function listStuckJobs(input: {
   minutes?: number;
@@ -277,8 +277,8 @@ export async function listStuckJobs(input: {
       AND (
         (refund_op.status IN ('pending', 'failed') AND refund_op.amount > 0)
         OR (job.status = 'succeeded' AND job.billing_amount > 0 AND commit_op.status IS NULL)
-        -- OBS-1：已扣款、commit 行存在卻「結算失敗」（status='failed'，非缺行也非 applied）
-        -- 的終態作業先前被漏列——探針必須看得見錢卡死的作業（只加觀測，退款/重放仍歸對賬）。
+        -- OBS-1：已扣款、commit 行存在却「结算失败」（status='failed'，非缺行也非 applied）
+        -- 的终态作业先前被漏列——探针必须看得见钱卡死的作业（只加观测，退款/重放仍归对账）。
         OR (job.status = 'succeeded' AND commit_op.status = 'failed')
       )
     )

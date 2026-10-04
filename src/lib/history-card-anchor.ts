@@ -1,12 +1,12 @@
-// 歷史記錄 → 資產卡錨點（純函式）：把一條歷史記錄的圖錨定成 character-card。
+// 历史记录 → 资产卡锚点（纯函式）：把一条历史记录的图锚定成 character-card。
 //
-// 只做增量：卡的最終清洗仍走 normalizeCharacterCard（character-cards.ts 是唯一
-// 資產 owner，這裡不建第二套資產系統，只負責從 HistoryEntry 構造 payload）。
-// 消費端：src/components/history/SaveCardDialog.tsx（歷史頁「存为角色卡」動作）。
+// 只做增量：卡的最终清洗仍走 normalizeCharacterCard（character-cards.ts 是唯一
+// 资产 owner，这里不建第二套资产系统，只负责从 HistoryEntry 构造 payload）。
+// 消费端：src/components/history/SaveCardDialog.tsx（历史页「存为角色卡」动作）。
 //
-// 同檔另提供 assetPackPayloadFromHistoryEntry：歷史 → 資產包 payload（存为资产），
-// 消費端：src/components/history/HistoryCard.tsx（PUT /api/assets，upsert by
-// 確定性 id `history-${entry.id}`）。
+// 同档另提供 assetPackPayloadFromHistoryEntry：历史 → 资产包 payload（存为资产），
+// 消费端：src/components/history/HistoryCard.tsx（PUT /api/assets，upsert by
+// 确定性 id `history-${entry.id}`）。
 import { toReferenceImageRole } from "./image-types";
 import type { ReferenceImageRole } from "./image-types";
 import { CHARACTER_CARD_KIND_LABEL, toCharacterCardKind } from "./character-cards";
@@ -15,8 +15,8 @@ import type { AssetPackItem, AssetPackItemKind } from "./asset-pack-store";
 import type { HistoryEntry } from "./history-types";
 import { historyEntryHandles, lineageTimestamp } from "./lineage";
 import type { LineageLink } from "./lineage";
-// 交付物種類真源（./deliverable-kind，零依賴，可安全進 client bundle）：
-// 歷史 → 資產庫的代表媒體種類與 URL 欄位全由註冊表推導。
+// 交付物种类真源（./deliverable-kind，零依赖，可安全进 client bundle）：
+// 历史 → 资产库的代表媒体种类与 URL 栏位全由注册表推导。
 import {
   assetItemKindOf,
   assetUrlFieldOf,
@@ -28,25 +28,25 @@ import type { DeliverableKind } from "./deliverable-kind";
 
 const MAX_ANCHOR_NAME_LENGTH = 100;
 /**
- * 資產 item 標題上限：與 asset-pack-store.MAX_TITLE_LENGTH 同界。
- * 該檔含 node 依賴（node:crypto / blob-backend），本檔被 client 元件（SaveCardDialog /
- * HistoryCard）import，不可 runtime import 取常數，故照抄同一數值並由 normalizeAssetPack 兜底。
+ * 资产 item 标题上限：与 asset-pack-store.MAX_TITLE_LENGTH 同界。
+ * 该档含 node 依赖（node:crypto / blob-backend），本档被 client 元件（SaveCardDialog /
+ * HistoryCard）import，不可 runtime import 取常数，故照抄同一数值并由 normalizeAssetPack 兜底。
  */
 const MAX_ITEM_TITLE_LENGTH = 200;
 
-/** 與站內一致的可用圖 URL 判定（http(s) 與 data:image）。 */
+/** 与站内一致的可用图 URL 判定（http(s) 与 data:image）。 */
 function isUsableImageUrl(url: string): boolean {
   return url.startsWith("http") || url.startsWith("data:image/");
 }
 
-/** 可用產物 URL 判定（公網 http(s) 或 data:）——影片/音樂/圖片代表產物共用這把尺。 */
+/** 可用产物 URL 判定（公网 http(s) 或 data:）——影片/音乐/图片代表产物共用这把尺。 */
 function isUsableMediaUrl(url: string): boolean {
   return url.startsWith("http") || url.startsWith("data:");
 }
 
 /**
- * 取歷史記錄的錨定圖 URL：任何結果裡有可用公網 imageUrl 就用它（可持久、體積小），
- * 全都沒有才由 base64 組 data URL 兜底（本地緩存記錄）。
+ * 取历史记录的锚定图 URL：任何结果里有可用公网 imageUrl 就用它（可持久、体积小），
+ * 全都没有才由 base64 组 data URL 兜底（本地缓存记录）。
  */
 export function anchorImageUrlOf(entry: HistoryEntry): string | null {
   for (const result of entry.results) {
@@ -61,21 +61,21 @@ export function anchorImageUrlOf(entry: HistoryEntry): string | null {
   return null;
 }
 
-/** 歷史記錄的代表交付物：種類（交付物註冊表）＋ 該種類的產物 URL。 */
+/** 历史记录的代表交付物：种类（交付物注册表）＋ 该种类的产物 URL。 */
 export interface AnchoredDeliverable {
   kind: DeliverableKind;
   url: string;
 }
 
 /**
- * 取歷史記錄的「代表產物」（種類 + URL）——anchorImageUrlOf 的兄弟函式。
+ * 取历史记录的「代表产物」（种类 + URL）——anchorImageUrlOf 的兄弟函式。
  *
- * 逐 result 由 deliverableKindOfResult 推種類，再按 deliverableKindSpec(kind).resultField
- * 取對應 URL（不再只認 image/imageUrl），因此影片/音樂歷史條目也能取得代表產物。
+ * 逐 result 由 deliverableKindOfResult 推种类，再按 deliverableKindSpec(kind).resultField
+ * 取对应 URL（不再只认 image/imageUrl），因此影片/音乐历史条目也能取得代表产物。
  * 取不到可用 URL 回 null。
  *
- * 為何不直接改 anchorImageUrlOf：後者語義是「錨定圖」（imageUrl 優先、base64 兜底），
- * 仍被 cardFromHistoryEntry（存為角色卡）等既有消費者使用，故保留原語義不動。
+ * 为何不直接改 anchorImageUrlOf：后者语义是「锚定图」（imageUrl 优先、base64 兜底），
+ * 仍被 cardFromHistoryEntry（存为角色卡）等既有消费者使用，故保留原语义不动。
  */
 export function anchorDeliverableOf(entry: HistoryEntry): AnchoredDeliverable | null {
   for (const result of entry.results) {
@@ -89,16 +89,16 @@ export function anchorDeliverableOf(entry: HistoryEntry): AnchoredDeliverable | 
   return null;
 }
 
-/** 卡種類 → 參考圖角色：style/character 有同名的 ReferenceImageRole，scene 無對應角色收斂 general。 */
+/** 卡种类 → 参考图角色：style/character 有同名的 ReferenceImageRole，scene 无对应角色收敛 general。 */
 function anchorRoleOf(kind: CharacterCardKind): ReferenceImageRole {
   return toReferenceImageRole(kind === "scene" ? "general" : kind);
 }
 
 /**
- * 從歷史記錄構造一張「純參考圖卡」：
- *   - 名稱必填（trim 後非空，上限 100 與 normalizeCharacterCard 一致）
- *   - 圖取第一張可用結果（無圖記錄（計費日誌等）返回 null，不建空卡）
- *   - locked prompt 為空（可在卡面板事後補描述），kind 未知值收斂 character
+ * 从历史记录构造一张「纯参考图卡」：
+ *   - 名称必填（trim 后非空，上限 100 与 normalizeCharacterCard 一致）
+ *   - 图取第一张可用结果（无图记录（计费日志等）返回 null，不建空卡）
+ *   - locked prompt 为空（可在卡面板事后补描述），kind 未知值收敛 character
  */
 export function cardFromHistoryEntry(
   entry: HistoryEntry,
@@ -120,9 +120,9 @@ export function cardFromHistoryEntry(
     createdAt: now,
     updatedAt: now,
   };
-  // REQ-D1 掛鉤 b：「存為卡片」把來源歷史記錄登記成卡的 lineage（derivation）。
-  // 只落卡本體（裁決②：不進 canvas、不進 agent 白名單）。缺 taskId 的同步直出
-  // 記錄用歷史把手 `history-${entry.id}` 作 assetId（與「存为资产」慣例同鍵）。
+  // REQ-D1 挂钩 b：「存为卡片」把来源历史记录登记成卡的 lineage（derivation）。
+  // 只落卡本体（裁决②：不进 canvas、不进 agent 白名单）。缺 taskId 的同步直出
+  // 记录用历史把手 `history-${entry.id}` 作 assetId（与「存为资产」惯例同键）。
   const handles = historyEntryHandles(entry);
   const at = lineageTimestamp(entry.generatedAt);
   const link: LineageLink = handles.jobId
@@ -132,14 +132,14 @@ export function cardFromHistoryEntry(
   return card;
 }
 
-/** 統一的結果文案（對話框與 toast 共用）。 */
+/** 统一的结果文案（对话框与 toast 共用）。 */
 export function anchorSuccessMessage(card: CharacterCard): string {
   return `已存为${CHARACTER_CARD_KIND_LABEL[card.kind]}卡：${card.name}`;
 }
 
-// ─────────────────────────────── 歷史 → 資產包（存为资产）───────────────────────────
+// ─────────────────────────────── 历史 → 资产包（存为资产）───────────────────────────
 
-/** 資產包標題後綴的日期格式：YYYY-MM-DD（本地時區，供「历史资产 ${日期}」兜底）。 */
+/** 资产包标题后缀的日期格式：YYYY-MM-DD（本地时区，供「历史资产 ${日期}」兜底）。 */
 function assetTitleDateLabel(generatedAt: number): string {
   const d = new Date(generatedAt);
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -147,13 +147,13 @@ function assetTitleDateLabel(generatedAt: number): string {
   return `${d.getFullYear()}-${month}-${day}`;
 }
 
-/** 歷史條目頂層可能帶的 lora 欄位（HistoryEntry 型別未宣告，採防禦讀取）。 */
+/** 历史条目顶层可能带的 lora 栏位（HistoryEntry 型别未宣告，采防御读取）。 */
 interface HistoryEntryLoraCarrier extends HistoryEntry {
   loraModelVersionIds?: unknown;
   lora?: unknown;
 }
 
-/** 從歷史條目取 loraVersionId：loraModelVersionIds 陣列取第一個字串，或 lora 物件的 versionId。 */
+/** 从历史条目取 loraVersionId：loraModelVersionIds 阵列取第一个字串，或 lora 物件的 versionId。 */
 function loraVersionIdOf(entry: HistoryEntry): string | null {
   const carrier = entry as HistoryEntryLoraCarrier;
   if (Array.isArray(carrier.loraModelVersionIds)) {
@@ -169,14 +169,14 @@ function loraVersionIdOf(entry: HistoryEntry): string | null {
 }
 
 /**
- * 從歷史記錄構造「資產包 payload」（存为资产）：歷史 → /api/assets 的 upsert 主體。
- * 與 cardFromHistoryEntry 用同一套歷史取數，但代表產物改由交付物註冊表推導：
- *  - 有 prompt → 存 prompt item（帶 modelId/size/首圖 URL，既有語義不變）
- *  - 代表交付物（image/video/audio，由 anchorDeliverableOf 推）→ 存對應 kind 的
- *    媒體 item：image 收 imageUrl、video/audio 收 mediaUrl（種類與欄位皆由註冊表推導）
- *  - 條目頂層帶 loraModelVersionIds/lora → 加 lora item（無則省略）
- *  - 無 id、或既無 prompt 又無代表產物 → 回 null（不建空包，計費日誌即此類）
- * 消費端：HistoryCard「存为资产」按鈕，upsert by 確定性 id `history-${entry.id}`。
+ * 从历史记录构造「资产包 payload」（存为资产）：历史 → /api/assets 的 upsert 主体。
+ * 与 cardFromHistoryEntry 用同一套历史取数，但代表产物改由交付物注册表推导：
+ *  - 有 prompt → 存 prompt item（带 modelId/size/首图 URL，既有语义不变）
+ *  - 代表交付物（image/video/audio，由 anchorDeliverableOf 推）→ 存对应 kind 的
+ *    媒体 item：image 收 imageUrl、video/audio 收 mediaUrl（种类与栏位皆由注册表推导）
+ *  - 条目顶层带 loraModelVersionIds/lora → 加 lora item（无则省略）
+ *  - 无 id、或既无 prompt 又无代表产物 → 回 null（不建空包，计费日志即此类）
+ * 消费端：HistoryCard「存为资产」按钮，upsert by 确定性 id `history-${entry.id}`。
  */
 export function assetPackPayloadFromHistoryEntry(
   entry: HistoryEntry,
@@ -203,9 +203,9 @@ export function assetPackPayloadFromHistoryEntry(
       source,
     });
   }
-  // 代表媒體 item：種類與 URL 欄位全由交付物註冊表推導
+  // 代表媒体 item：种类与 URL 栏位全由交付物注册表推导
   // （image → {kind:"image", imageUrl}；video/audio → {kind, mediaUrl}）。
-  // title 用 prompt 截斷；prompt 為空時用「種類文案 + 真實生成時間」，不編造內容。
+  // title 用 prompt 截断；prompt 为空时用「种类文案 + 真实生成时间」，不编造内容。
   if (anchor) {
     const title = prompt
       ? prompt.slice(0, MAX_ITEM_TITLE_LENGTH)

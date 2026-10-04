@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { layaEnabled, layaSystemOne, layaHealth } from "./laya-client";
 
 /**
- * 全部 mock fetch：單測不打真服務（實彈驗證走 env LAYA_ENABLED=true 的手動腳本）。
- * 覆蓋全部 fail-open 分支——這是本檔的契約核心：判定層掛掉永不阻斷主鏈路。
+ * 全部 mock fetch：单测不打真服务（实弹验证走 env LAYA_ENABLED=true 的手动脚本）。
+ * 覆盖全部 fail-open 分支——这是本档的契约核心：判定层挂掉永不阻断主链路。
  */
 
 type FetchArgs = [string, RequestInit?];
@@ -43,37 +43,37 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void | Prom
   }
 }
 
-test("layaEnabled: 未設 LAYA_ENABLED → false", () => {
+test("layaEnabled: 未设 LAYA_ENABLED → false", () => {
   withEnv({ LAYA_ENABLED: undefined, LAYA_ENDPOINT: undefined }, () => {
     assert.equal(layaEnabled(), false);
   });
 });
 
-test("layaEnabled: LAYA_ENABLED=true 但無端點 → false", () => {
+test("layaEnabled: LAYA_ENABLED=true 但无端点 → false", () => {
   withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: undefined }, () => {
     assert.equal(layaEnabled(), false);
   });
 });
 
-test("layaEnabled: 兩者皆設 → true", () => {
+test("layaEnabled: 两者皆设 → true", () => {
   withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, () => {
     assert.equal(layaEnabled(), true);
   });
 });
 
-test("layaSystemOne: 未啟用 → 零動作回 null（不發出請求）", async () => {
+test("layaSystemOne: 未启用 → 零动作回 null（不发出请求）", async () => {
   await withEnv({ LAYA_ENABLED: undefined, LAYA_ENDPOINT: undefined }, async () => {
     const m = mockFetch(async () => ({ ok: true, json: async () => ({}) }));
     try {
       assert.equal(await layaSystemOne({ a: 1 }, { q: { type: "noul" } }), null);
-      assert.equal(m.calls.length, 0, "未配置時不應發出任何請求");
+      assert.equal(m.calls.length, 0, "未配置时不应发出任何请求");
     } finally {
       globalThis.fetch = realFetch;
     }
   });
 });
 
-test("layaSystemOne: HTTP 非 2xx → 靜默 null（fail-open）", async () => {
+test("layaSystemOne: HTTP 非 2xx → 静默 null（fail-open）", async () => {
   await withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, async () => {
     const m = mockFetch(async () => ({ ok: false, status: 503, json: async () => ({}) }));
     try {
@@ -85,7 +85,7 @@ test("layaSystemOne: HTTP 非 2xx → 靜默 null（fail-open）", async () => {
   });
 });
 
-test("layaSystemOne: answers 非物件（畸形）→ 靜默 null", async () => {
+test("layaSystemOne: answers 非物件（畸形）→ 静默 null", async () => {
   await withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, async () => {
     mockFetch(async () => ({ ok: true, json: async () => ({ answers: "bad-type" }) }));
     try {
@@ -96,7 +96,7 @@ test("layaSystemOne: answers 非物件（畸形）→ 靜默 null", async () => 
   });
 });
 
-test("layaSystemOne: answers 缺席 → 靜默 null", async () => {
+test("layaSystemOne: answers 缺席 → 静默 null", async () => {
   await withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, async () => {
     mockFetch(async () => ({ ok: true, json: async () => ({ model: "laya" }) }));
     try {
@@ -107,7 +107,7 @@ test("layaSystemOne: answers 缺席 → 靜默 null", async () => {
   });
 });
 
-test("layaSystemOne: 網路錯誤 → 靜默 null（不 throw）", async () => {
+test("layaSystemOne: 网路错误 → 静默 null（不 throw）", async () => {
   await withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, async () => {
     mockFetch(async () => {
       throw new Error("ECONNREFUSED");
@@ -120,7 +120,7 @@ test("layaSystemOne: 網路錯誤 → 靜默 null（不 throw）", async () => {
   });
 });
 
-test("layaSystemOne: 成功 → 回傳 answers（契約與 Jev 同構）", async () => {
+test("layaSystemOne: 成功 → 回传 answers（契约与 Jev 同构）", async () => {
   await withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, async () => {
     mockFetch(async () => ({
       ok: true,
@@ -135,7 +135,7 @@ test("layaSystemOne: 成功 → 回傳 answers（契約與 Jev 同構）", async
   });
 });
 
-test("layaSystemOne: 請求帶 state 與 questions 兩欄", async () => {
+test("layaSystemOne: 请求带 state 与 questions 两栏", async () => {
   await withEnv({ LAYA_ENABLED: "true", LAYA_ENDPOINT: "http://127.0.0.1:8082/predict" }, async () => {
     const m = mockFetch(async () => ({ ok: true, json: async () => ({ answers: {} }) }));
     try {
@@ -149,7 +149,7 @@ test("layaSystemOne: 請求帶 state 與 questions 兩欄", async () => {
   });
 });
 
-test("layaHealth: 未啟用 → false", async () => {
+test("layaHealth: 未启用 → false", async () => {
   await withEnv({ LAYA_ENABLED: undefined, LAYA_ENDPOINT: undefined }, async () => {
     assert.equal(await layaHealth(), false);
   });

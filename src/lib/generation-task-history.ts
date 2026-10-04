@@ -7,18 +7,18 @@ import { displayGenerationPrompt } from "./web-task-prompt";
 
 export function generationJobHistoryEntry(job: GenerationJob): HistoryEntry {
   const task = generationTaskProjection(job, { includePrompt: true });
-  // REQ-D1 掛鉤 a/c（job 面讀時透傳）：任務本體就帶著血統線索——提交的參考圖元數據
-  // （workflow.references[].sourceGenerationId/sourceResultId）與「再來 N 組」的
-  // retry_of_job_id。job 歷史記錄是讀時投影、沒有落盤環節可寫欄位，所以在這裡組裝；
-  // 存量任務同路徑自動可溯，不需要回補。只進给人看的歷史視圖，agent 零讀權。
+  // REQ-D1 挂钩 a/c（job 面读时透传）：任务本体就带著血统线索——提交的参考图元数据
+  // （workflow.references[].sourceGenerationId/sourceResultId）与「再来 N 组」的
+  // retry_of_job_id。job 历史记录是读时投影、没有落盘环节可写栏位，所以在这里组装；
+  // 存量任务同路径自动可溯，不需要回补。只进给人看的历史视图，agent 零读权。
   const createdAt = job.createdAt.toISOString();
   const parents: LineageLink[] = parentsFromReferences(job.workflow?.references, createdAt);
   if (job.retryOfTaskId) {
-    // 「再來 N 組」提交時源記錄是任務隊列任務：retry_of_job_id 落庫，指回源任務。
+    // 「再来 N 组」提交时源记录是任务队列任务：retry_of_job_id 落库，指回源任务。
     parents.push({ kind: "rerun", jobId: job.retryOfTaskId, at: createdAt });
   } else {
-    // 源記錄沒有 taskId（同步直出/本地補錄）：重跑計劃在配方裡帶了 sourceHistoryId，
-    // 用歷史把手 `history-${id}` 組 rerun——同一事實只登記一次，兩個分支互斥。
+    // 源记录没有 taskId（同步直出/本地补录）：重跑计划在配方里带了 sourceHistoryId，
+    // 用历史把手 `history-${id}` 组 rerun——同一事实只登记一次，两个分支互斥。
     const sourceHistoryId = job.workflow?.sourceHistoryId;
     if (typeof sourceHistoryId === "string" && sourceHistoryId.trim()) {
       parents.push({ kind: "rerun", assetId: `history-${sourceHistoryId.trim()}`, at: createdAt });

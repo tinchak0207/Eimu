@@ -17,7 +17,7 @@ export interface AgentSubagentReportCardProps {
 
 const STATUS_META: Record<AgentSubagentReportItem["status"], { label: string; badge: string }> = {
   // 2026-09-20 色彩纪律：状态徽章一律灰阶文字，ios-green 只作为完成 ✓ 的点缀，
-  // 红色只留给失败（ios-red 僅錯誤），其余状态不再有第二套彩色标签。
+  // 红色只留给失败（ios-red 仅错误），其余状态不再有第二套彩色标签。
   ok: { label: "完成", badge: "bg-black/[0.05] text-muted-foreground" },
   error: { label: "失败", badge: "bg-ios-red/10 text-ios-red" },
   // 中止：诚实标「已中止」，不留 running 假状态，也不谎报失败。

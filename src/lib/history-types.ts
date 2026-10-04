@@ -9,14 +9,14 @@
 // 把服务端的图、本地的工作流参数、计费日志的真实消耗合并成同一条记录。
 //
 // 本模块只用 `import type` 跨文件引用，保证可以在 `node --test` 下直接导入做单元测试。
-// 唯一運行時依賴是 ./lineage（REQ-D1 血統清洗，零依賴純函數檔，不破壞上面這條）。
+// 唯一运行时依赖是 ./lineage（REQ-D1 血统清洗，零依赖纯函数档，不破坏上面这条）。
 
 import type { GenerationWorkflowMetadata } from "./image-types";
 import { QUOTA_PER_COIN } from "./quota-constants";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
-// 交付物種類真源（./deliverable-kind，零依賴純函數檔）：
-// 歷史側的種類型別、mediaType 白名單、結果推斷、hasImage 全由註冊表推導。
+// 交付物种类真源（./deliverable-kind，零依赖纯函数档）：
+// 历史侧的种类型别、mediaType 白名单、结果推断、hasImage 全由注册表推导。
 import {
   DELIVERABLE_KINDS,
   deliverableKindsByDetectPriority,
@@ -54,8 +54,8 @@ export const HISTORY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 export type HistorySource = "local" | "server" | "billing" | "workflow";
 
 /**
- * 非交付物的記錄種類。`"workflow"` 描述的是一次 DAG 跑批，不是某件可交付的媒體，
- * 因此不進交付物註冊表；UI 需要「非交付種類有哪些」時取這份清單，不手寫字串。
+ * 非交付物的记录种类。`"workflow"` 描述的是一次 DAG 跑批，不是某件可交付的媒体，
+ * 因此不进交付物注册表；UI 需要「非交付种类有哪些」时取这份清单，不手写字串。
  */
 export const NON_DELIVERABLE_ENTRY_KINDS = ["workflow"] as const;
 export type NonDeliverableEntryKind = (typeof NON_DELIVERABLE_ENTRY_KINDS)[number];
@@ -68,8 +68,8 @@ export type NonDeliverableEntryKind = (typeof NON_DELIVERABLE_ENTRY_KINDS)[numbe
  * 归并时可能以 server 面为主记录，那时只看 source 会把「有 DAG 的工作流记录」
  * 与「单张图」混为一谈。缺省时用 inferEntryKind 推。
  *
- * 值域＝交付物種類（由 ./deliverable-kind 註冊表推導）∪ 非交付種類（workflow）。
- * 新增一種交付物＝在註冊表加一行，這裡自動跟上，不再手寫字串聯集。
+ * 值域＝交付物种类（由 ./deliverable-kind 注册表推导）∪ 非交付种类（workflow）。
+ * 新增一种交付物＝在注册表加一行，这里自动跟上，不再手写字串联集。
  */
 export type HistoryEntryKind = DeliverableKind | NonDeliverableEntryKind;
 
@@ -114,12 +114,12 @@ export interface HistoryEntry {
   taskStatus?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "refunded" | "unknown";
   errorCode?: string;
   /**
-   * REQ-D1 資產血統：這條記錄的直接來源鏈（生成時帶的參考圖／重跑源／存卡來源）。
-   * 只存在歷史記錄本體，供人看的「溯源」抽屜用——嚴禁補進 compactMetadataForAgent
-   * 或 canvas 節點 metadata（agent 不讀血統是裁決，不是遺漏）。缺省＝來源不明。
+   * REQ-D1 资产血统：这条记录的直接来源链（生成时带的参考图／重跑源／存卡来源）。
+   * 只存在历史记录本体，供人看的「溯源」抽屉用——严禁补进 compactMetadataForAgent
+   * 或 canvas 节点 metadata（agent 不读血统是裁决，不是遗漏）。缺省＝来源不明。
    */
   lineage?: LineageLink[];
-  /** parents 曾超上限被截尾的顯式標記（讀時據此顯示「僅保留最近 N 個」）。 */
+  /** parents 曾超上限被截尾的显式标记（读时据此显示「仅保留最近 N 个」）。 */
   lineageTruncated?: boolean;
 }
 
@@ -227,7 +227,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/** entryKind 白名單判定。写入口（POST /api/history）与推送端点共用同一把尺。 */
+/** entryKind 白名单判定。写入口（POST /api/history）与推送端点共用同一把尺。 */
 function isEntryKind(value: unknown): value is HistoryEntryKind {
   return (
     isDeliverableKind(value) ||
@@ -291,9 +291,9 @@ export function primaryModelId(entry: HistoryEntry): string {
  *   3. workflow 带 dagNodes —— 老工作流记录可能没有 entryKind 也没有
  *      workflow 这个 source（归并后主记录可能是 server 面），但 DAG 结构在，
  *      它就是工作流记录；
- *   4. results 的媒體種類與產物 URL（由註冊表 resultField 驅動）判 media kind，
- *      優先序由註冊表 detectPriority 決定（現況 video > audio > image）；
- *      新增種類自動納入，不再硬編；一条记录同时带影音时，視頻是主產物；
+ *   4. results 的媒体种类与产物 URL（由注册表 resultField 驱动）判 media kind，
+ *      优先序由注册表 detectPriority 决定（现况 video > audio > image）；
+ *      新增种类自动纳入，不再硬编；一条记录同时带影音时，视频是主产物；
  *   5. 其余（含无 results 的空记录）→ "image"。
  *
  * 第 5 条刻意兜底成 "image"：历史页绝大多数记录是图，把无结果记录判成
@@ -306,17 +306,17 @@ export function inferEntryKind(entry: HistoryEntry): HistoryEntryKind {
   if (entry.source === "workflow") return "workflow";
   if (Array.isArray(entry.workflow?.dagNodes) && entry.workflow.dagNodes.length > 0) return "workflow";
 
-  // 媒體分支：逐 result 收集種類（媒體宣告 mediaType ＋ 產物 URL 推斷），再按
-  // **註冊表 detectPriority 升序**取最高者（現況 video > audio > image）——
-  // 注意這與註冊表宣告序（image → video → audio）不同，因為同錄帶影音時視頻
-  // 是主產物（既有語義）；deliverableKindOfResult 只是「單一結果 → 單一 URL
-  // 種類」的投影，這裡跨所有結果取並集，確保 videoUrl 落在任一結果都能勝出。
-  // 沒有任何媒體種類命中時落到第 5 條的 "image" 兜底。
+  // 媒体分支：逐 result 收集种类（媒体宣告 mediaType ＋ 产物 URL 推断），再按
+  // **注册表 detectPriority 升序**取最高者（现况 video > audio > image）——
+  // 注意这与注册表宣告序（image → video → audio）不同，因为同录带影音时视频
+  // 是主产物（既有语义）；deliverableKindOfResult 只是「单一结果 → 单一 URL
+  // 种类」的投影，这里跨所有结果取并集，确保 videoUrl 落在任一结果都能胜出。
+  // 没有任何媒体种类命中时落到第 5 条的 "image" 兜底。
   const mediaKinds = new Set<DeliverableKind>();
   for (const result of entry.results) {
     if (isDeliverableKind(result.mediaType)) mediaKinds.add(result.mediaType);
-    // 逐欄位收集「這個 result 所有命中的種類」，而不是取單一投影
-    // （deliverableKindOfResult 按宣告序 image 先掃，會蓋掉同一 result 的 videoUrl）。
+    // 逐栏位收集「这个 result 所有命中的种类」，而不是取单一投影
+    // （deliverableKindOfResult 按宣告序 image 先扫，会盖掉同一 result 的 videoUrl）。
     for (const kind of deliverableKindsOfResult(result)) mediaKinds.add(kind);
   }
   for (const kind of deliverableKindsByDetectPriority()) {
@@ -328,9 +328,9 @@ export function inferEntryKind(entry: HistoryEntry): HistoryEntryKind {
 /**
  * 是否带「可留存媒体」。计费日志永远没有媒体。
  *
- * 判定：results 里任一结果带了 image 或註冊表任一 resultField（imageUrl /
- * videoUrl / audioUrl）。欄位清單由 ./deliverable-kind 推導，新增交付物種類時
- * 這裡自動納入，不再手寫欄位名。
+ * 判定：results 里任一结果带了 image 或注册表任一 resultField（imageUrl /
+ * videoUrl / audioUrl）。栏位清单由 ./deliverable-kind 推导，新增交付物种类时
+ * 这里自动纳入，不再手写栏位名。
  * 注意它早就不只认「图」——videoUrl 从视频能力上线起就在里面，因此函数名
  * 是历史遗留；实际语义是「有产物可看/可播」（UI 上「有图」chip 的用意也是
  * 「不把无媒体的计费日志混进来」）。audioUrl 与 videoUrl 同级计入，保持同一
@@ -386,8 +386,8 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
   const quota = finiteNumber(raw.quota);
   const modelId = nonEmptyString(raw.modelId) ?? results[0]?.modelId;
 
-  // REQ-D1：血統欄位走純函數白名單清洗（複用 ./lineage 收口），非法條目丟棄、
-  // 超上限截尾並顯式標記。缺欄＝來源不明，不捏造 parents。
+  // REQ-D1：血统栏位走纯函数白名单清洗（复用 ./lineage 收口），非法条目丢弃、
+  // 超上限截尾并显式标记。缺栏＝来源不明，不捏造 parents。
   const lineageRaw = Array.isArray(raw.lineage) ? normalizeLineageLinks(raw.lineage) : null;
 
   return {
@@ -397,12 +397,12 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
     results,
     source,
     ...(isEntryKind(raw.entryKind) ? { entryKind: raw.entryKind } : source === "workflow" ? { entryKind: "workflow" as const } : {}),
-    // workflow 字段维持整体 passthrough（只验是 record，不逐欄白名單）：
-    // 生成路由写的六槽 + 本片新增的 DAG 四欄（dagNodes/dagConnections/
-    // dagThumbnailUrl/totalCostCoins）都挂在这里，白名單化會把未來新增的
-    // 欄位靜默砍掉，而這些欄位只被前端讀來展示、不參與任何寫回。
-    // 反過來，entryKind 必須白名單：它是查詢條件（matchesHistoryQuery），
-    // 放任客戶端塞任意字串會讓「類型」篩選出現無法命中的值。
+    // workflow 字段维持整体 passthrough（只验是 record，不逐栏白名单）：
+    // 生成路由写的六槽 + 本片新增的 DAG 四栏（dagNodes/dagConnections/
+    // dagThumbnailUrl/totalCostCoins）都挂在这里，白名单化会把未来新增的
+    // 栏位静默砍掉，而这些栏位只被前端读来展示、不参与任何写回。
+    // 反过来，entryKind 必须白名单：它是查询条件（matchesHistoryQuery），
+    // 放任客户端塞任意字串会让「类型」筛选出现无法命中的值。
     ...(isRecord(raw.workflow) ? { workflow: raw.workflow as GenerationWorkflowMetadata } : {}),
     ...(quota !== undefined ? { quota } : {}),
     ...(modelId ? { modelId } : {}),
@@ -475,7 +475,7 @@ function enrich(base: HistoryEntry, extra: HistoryEntry): HistoryEntry {
   if (!merged.retryOfTaskId && extra.retryOfTaskId) merged.retryOfTaskId = extra.retryOfTaskId;
   if (!merged.taskStatus && extra.taskStatus) merged.taskStatus = extra.taskStatus;
   if (!merged.errorCode && extra.errorCode) merged.errorCode = extra.errorCode;
-  // REQ-D1：血統欄位兩面取較全的一份（local 面一般為空，server 面帶登記）。
+  // REQ-D1：血统栏位两面取较全的一份（local 面一般为空，server 面带登记）。
   if (!merged.lineage?.length && extra.lineage?.length) {
     merged.lineage = extra.lineage;
     if (extra.lineageTruncated) merged.lineageTruncated = true;

@@ -1,24 +1,24 @@
 "use client";
 
-// DirectorMiniViewport —— 導演台迷你 3D 視口（spec §9 片B 新膠水，非輪子）。
+// DirectorMiniViewport —— 导演台迷你 3D 视口（spec §9 片B 新胶水，非轮子）。
 //
-// 輪子 = @/lib/director-engine/engine（kunpeng DirectorEngine 逐行移植，
-// three.js 白模場景/燈光/OrbitControls 自帶）。本檔只做四件事：
-//   1. 掛載：useEffect 內動態 import（three 不入 SSR 主 bundle）→ new DirectorEngine
+// 轮子 = @/lib/director-engine/engine（kunpeng DirectorEngine 逐行移植，
+// three.js 白模场景/灯光/OrbitControls 自带）。本档只做四件事：
+//   1. 挂载：useEffect 内动态 import（three 不入 SSR 主 bundle）→ new DirectorEngine
 //      → ResizeObserver → engine.resize()；unmount → engine.dispose()。
-//   2. 數據：GET /api/agent/sessions/<sid>/director/state（子路徑形，見 route.ts
+//   2. 数据：GET /api/agent/sessions/<sid>/director/state（子路径形，见 route.ts
 //      GET_SUBPATHS）→ activePlan + elements → evaluateDirectorFrame(plan, elements, 0)
-//      → engine.syncElements + applyCameraPose。revision prop 變化時重拉（後續變更
-//      反映到已掛載視口）；播放中換數據不打斷，idle 重擺 t=0。
-//   3. 播放：▶ rAF 推進（t += dt，末尾 loop），每幀 evaluateDirectorFrame →
-//      syncElements + applyCameraPose——照 vendor export.ts 輪子用法逐句對齊。
-//      applyCameraPose 動的是場景內拍攝機 rig，不搶用戶 OrbitControls 自由視角。
-//   4. 降級：WebGL 初始化失敗 → 顯示 SVG 示意 + 「3D 視口不可用，顯示示意圖」。
+//      → engine.syncElements + applyCameraPose。revision prop 变化时重拉（后续变更
+//      反映到已挂载视口）；播放中换数据不打断，idle 重摆 t=0。
+//   3. 播放：▶ rAF 推进（t += dt，末尾 loop），每帧 evaluateDirectorFrame →
+//      syncElements + applyCameraPose——照 vendor export.ts 轮子用法逐句对齐。
+//      applyCameraPose 动的是场景内拍摄机 rig，不抢用户 OrbitControls 自由视角。
+//   4. 降级：WebGL 初始化失败 → 显示 SVG 示意 + 「3D 视口不可用，显示示意图」。
 //
-// WebGL context 守衛：同屏 ≤2 個引擎，超出在模組級佇列排隊，前者 dispose 後放行。
-// 畫布手勢隔離：根節點帶 data-canvas-interactive（use-node-gestures / InfiniteCanvas
-// 的 pointer 守衛放行給 engine 自帶 OrbitControls），wheel 在本層 stopPropagation
-// 防止 InfiniteCanvas 容器級 wheel 縮放連動。
+// WebGL context 守卫：同屏 ≤2 个引擎，超出在模组级伫列排队，前者 dispose 后放行。
+// 画布手势隔离：根节点带 data-canvas-interactive（use-node-gestures / InfiniteCanvas
+// 的 pointer 守卫放行给 engine 自带 OrbitControls），wheel 在本层 stopPropagation
+// 防止 InfiniteCanvas 容器级 wheel 缩放连动。
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Play, Pause, Sparkles } from "lucide-react";
@@ -38,7 +38,7 @@ import type {
   DirectorShotScale,
 } from "@/lib/director-engine/types";
 
-// ── WebGL context 佇列（同屏 ≤2）─────────────────────────────────────────────
+// ── WebGL context 伫列（同屏 ≤2）─────────────────────────────────────────────
 
 const MAX_ACTIVE_CONTEXTS = 2;
 let activeContexts = 0;
@@ -49,9 +49,9 @@ function pumpContextQueue(): void {
 }
 
 interface ContextSlot {
-  /** resolve 於 slot 到手時（立即可得或前者 dispose 釋出）。 */
+  /** resolve 于 slot 到手时（立即可得或前者 dispose 释出）。 */
   promise: Promise<void>;
-  /** 歸還 slot：等待中被取消則不佔額度；已到手則釋出並放行下一個。 */
+  /** 归还 slot：等待中被取消则不占额度；已到手则释出并放行下一个。 */
   dispose(): void;
 }
 
@@ -69,7 +69,7 @@ function acquireContextSlot(): ContextSlot {
     grant();
   };
   if (state === "waiting") contextWaiters.push(waiter);
-  else grant(); // held：立即到手（不 resolve 的 held = 視口永久 loading，P0）
+  else grant(); // held：立即到手（不 resolve 的 held = 视口永久 loading，P0）
   return {
     promise,
     dispose() {
@@ -87,13 +87,13 @@ function acquireContextSlot(): ContextSlot {
   };
 }
 
-// ── C4 生成閉環：白模截圖 → 上傳 → 注入請求 ─────────────────────────────────
+// ── C4 生成闭环：白模截图 → 上传 → 注入请求 ─────────────────────────────────
 
-/** 導演台「生成真实画面」事件名；ImagePlayground 監聽後轉發給 agent 聊天注入。 */
+/** 导演台「生成真实画面」事件名；ImagePlayground 监听后转发给 agent 聊天注入。 */
 export const DIRECTOR_RENDER_REQUEST_EVENT = "director-render-request";
 
-// 白名單摘入：vendor kunpeng-vendor/src/lib/director/imageAnalysis.ts 的 shotScaleLabel
-// 標籤映射（純字面量，逐字等價；imageAnalysis 本體含 VLM 依賴未移植，故只摘此表）。
+// 白名单摘入：vendor kunpeng-vendor/src/lib/director/imageAnalysis.ts 的 shotScaleLabel
+// 标签映射（纯字面量，逐字等价；imageAnalysis 本体含 VLM 依赖未移植，故只摘此表）。
 const SHOT_SCALE_LABELS: Record<DirectorShotScale, string> = {
   'extreme-wide': '大全景', wide: '全景', medium: '中景', 'medium-close': '中近景', 'close-up': '特写', 'extreme-close-up': '大特写',
 };
@@ -105,13 +105,13 @@ async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
 }
 
 /**
- * 組「导演台镜头渲染请求」注入文本（簡體，給 agent 的指令）。
- * ref 引用形狀現場結論：上傳鏈是 gateway 附件 path（無 mediaId），因此照
- * AgentComposer.buildAttachmentBlock 的 [ATTACHMENTS_BLOCK] 慣例帶 path 行；
- * image_edit 工具（VPS .opencode/tools/image_edit.ts）的 image_url 參數要的是
- * 「可 fetch 的 URL」（resolveMediaId 內部 fetch → /uploads 換 mediaId），所以
- * 另給鑄票後的网关公網直連 URL（TTL 1h，本輪立即生效）。
- * vendor finalRender.ts 的模板段逐字保留，僅「画面描述」槽位交由 agent 撰寫。
+ * 组「导演台镜头渲染请求」注入文本（简体，给 agent 的指令）。
+ * ref 引用形状现场结论：上传链是 gateway 附件 path（无 mediaId），因此照
+ * AgentComposer.buildAttachmentBlock 的 [ATTACHMENTS_BLOCK] 惯例带 path 行；
+ * image_edit 工具（VPS .opencode/tools/image_edit.ts）的 image_url 参数要的是
+ * 「可 fetch 的 URL」（resolveMediaId 内部 fetch → /uploads 换 mediaId），所以
+ * 另给铸票后的网关公网直连 URL（TTL 1h，本轮立即生效）。
+ * vendor finalRender.ts 的模板段逐字保留，仅「画面描述」槽位交由 agent 撰写。
  */
 function buildDirectorRenderText(input: {
   plan: DirectorPlan;
@@ -161,7 +161,7 @@ function buildDirectorRenderText(input: {
   ].join("\n");
 }
 
-// ── 數據與 SVG 降級 ──────────────────────────────────────────────────────────
+// ── 数据与 SVG 降级 ──────────────────────────────────────────────────────────
 
 interface DirectorStatePayload {
   ok?: boolean;
@@ -172,10 +172,10 @@ interface DirectorStatePayload {
   };
 }
 
-/** gateway state → activePlan + elements（activePlanId 優先，退回首個 plan）。 */
+/** gateway state → activePlan + elements（activePlanId 优先，退回首个 plan）。 */
 async function loadDirectorState(sessionId: string): Promise<{ plan: DirectorPlan | null; elements: DirectorElement[] }> {
-  // 鑑權頭必帶（authHeaders 慣例）：裸 fetch 在 LOCAL_TEST_MODE 與真用戶兩態都會 401，
-  // 代理靜默拒絕 → 視口永遠只渲染空網格（2026-09-03 視覺重放實錘）
+  // 鉴权头必带（authHeaders 惯例）：裸 fetch 在 LOCAL_TEST_MODE 与真用户两态都会 401，
+  // 代理静默拒绝 → 视口永远只渲染空网格（2026-09-03 视觉重放实锤）
   const headers = authHeaders();
   if (!headers) throw new Error("not_authenticated");
   const resp = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/director/state`, { cache: "no-store", headers });
@@ -188,7 +188,7 @@ async function loadDirectorState(sessionId: string): Promise<{ plan: DirectorPla
   return { plan, elements: Array.isArray(project.elements) ? project.elements : [] };
 }
 
-/** 降級示意圖源：相容 data URL（聊天卡）與 raw <svg> 字串（畫布 metadata）。 */
+/** 降级示意图源：相容 data URL（聊天卡）与 raw <svg> 字串（画布 metadata）。 */
 function toImgSrc(svg: string | null | undefined): string | null {
   if (!svg) return null;
   if (svg.startsWith("data:")) return svg;
@@ -200,9 +200,9 @@ type ViewportPhase = "loading" | "ready" | "fallback";
 export interface DirectorMiniViewportProps {
   sessionId: string;
   className?: string;
-  /** 導演工程 revision（gateway doc.revision 透傳）：變化時重拉 state 換場景數據。 */
+  /** 导演工程 revision（gateway doc.revision 透传）：变化时重拉 state 换场景数据。 */
   revision?: number;
-  /** WebGL 降級時的示意圖（raw SVG 或 data URL）。 */
+  /** WebGL 降级时的示意图（raw SVG 或 data URL）。 */
   topViewSvg?: string | null;
   cameraViewSvg?: string | null;
 }
@@ -219,12 +219,12 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
   const [phase, setPhase] = useState<ViewportPhase>("loading");
   const [playing, setPlaying] = useState(false);
   const [dataReady, setDataReady] = useState(false);
-  // C4 生成閉環：「生成真实画面」按鈕狀態機。requested 為鎖存態（agent 輪次在跑，
-  // 重複點會堆第二筆計費請求）；失敗回 idle 並在視口內如實報錯。
+  // C4 生成闭环：「生成真实画面」按钮状态机。requested 为锁存态（agent 轮次在跑，
+  // 重复点会堆第二笔计费请求）；失败回 idle 并在视口内如实报错。
   const [renderPhase, setRenderPhase] = useState<"idle" | "uploading" | "requested">("idle");
   const [renderError, setRenderError] = useState<string | null>(null);
 
-  // 播放幀套用：與 vendor export.ts 逐句對齊（evaluate → syncElements → applyCameraPose）。
+  // 播放帧套用：与 vendor export.ts 逐句对齐（evaluate → syncElements → applyCameraPose）。
   const applyFrameAt = useCallback((timeSec: number) => {
     const engine = engineRef.current;
     const plan = planRef.current;
@@ -273,10 +273,10 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
     }
   }, [phase, tick]);
 
-  // C4 生成閉環主流程：capture（輪子，vendor finalRender.ts 同款 captureShot(aspect, 1920)）
-  // → 壓縮（跟隨 ReferenceImageUpload 同一 browser-image-compression 慣例，守 4.5MB 代理上限）
-  // → gateway 附件上傳（uploadAgentAttachments，站內 /attachments 代理）→ 鑄票拼公網 URL
-  // → 組注入文本 → window 派發 director-render-request（ImagePlayground 轉 agent 注入）。
+  // C4 生成闭环主流程：capture（轮子，vendor finalRender.ts 同款 captureShot(aspect, 1920)）
+  // → 压缩（跟随 ReferenceImageUpload 同一 browser-image-compression 惯例，守 4.5MB 代理上限）
+  // → gateway 附件上传（uploadAgentAttachments，站内 /attachments 代理）→ 铸票拼公网 URL
+  // → 组注入文本 → window 派发 director-render-request（ImagePlayground 转 agent 注入）。
   const requestRealRender = useCallback(async () => {
     const engine = engineRef.current;
     const plan = planRef.current;
@@ -294,7 +294,7 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
         const compressed = await imageCompression(file, { maxSizeMB: 1.1, maxWidthOrHeight: 1920, useWebWorker: true });
         file = compressed instanceof File ? compressed : new File([compressed], file.name, { type: file.type || "image/png" });
       } catch {
-        // 壓縮不可用就用原 PNG 直傳（白模場景一般遠小於上限），不阻斷主流程
+        // 压缩不可用就用原 PNG 直传（白模场景一般远小于上限），不阻断主流程
       }
       const [attachment] = await uploadAgentAttachments(sessionId, [file]);
       if (!attachment?.path) throw new Error("上传响应缺少附件路径");
@@ -321,7 +321,7 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
     }
   }, [sessionId, renderPhase]);
 
-  // 錯誤行 6 秒自清（點擊可立即關）；只清提示，不動按鈕狀態。
+  // 错误行 6 秒自清（点击可立即关）；只清提示，不动按钮状态。
   useEffect(() => {
     if (!renderError) return;
     const timer = window.setTimeout(() => setRenderError(null), 6000);
@@ -339,7 +339,7 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
       await slot.promise;
       if (disposed) return;
       try {
-        // three.js 只在這裡進動態 chunk，禁入 SSR 主 bundle。
+        // three.js 只在这里进动态 chunk，禁入 SSR 主 bundle。
         const mod = await import("@/lib/director-engine/engine");
         if (disposed) return;
         const engine = new mod.DirectorEngine(container);
@@ -347,14 +347,14 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
         observer = new ResizeObserver(() => engine.resize());
         observer.observe(container);
         setPhase("ready");
-        // 數據 effect 可能先到（與本 effect 競速）：引擎就緒即補擺當前幀，
-        // 避免數據先到、applyFrameAt 撞 null engine 落空成空白場景。
+        // 数据 effect 可能先到（与本 effect 竞速）：引擎就绪即补摆当前帧，
+        // 避免数据先到、applyFrameAt 撞 null engine 落空成空白场景。
         if (planRef.current && !playingRef.current) {
           timeRef.current = 0;
           applyFrameAt(0);
         }
       } catch (err) {
-        // WebGL 初始化失敗才降級；數據失敗不偽裝成 WebGL 故障。
+        // WebGL 初始化失败才降级；数据失败不伪装成 WebGL 故障。
         console.warn("[dmv] engine init failed:", String(err).slice(0, 300));
         if (!disposed) {
           stopPlayback();
@@ -364,8 +364,8 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
       }
     })();
 
-    // wheel 隔離：InfiniteCanvas 在容器級掛原生 wheel 縮放（passive:false 無目標守衛），
-    // 在此層攔截冒泡；不 preventDefault——OrbitControls 自己的 wheel 處理不受影響。
+    // wheel 隔离：InfiniteCanvas 在容器级挂原生 wheel 缩放（passive:false 无目标守卫），
+    // 在此层拦截冒泡；不 preventDefault——OrbitControls 自己的 wheel 处理不受影响。
     const stopWheel = (event: WheelEvent) => event.stopPropagation();
     container.addEventListener("wheel", stopWheel);
 
@@ -380,10 +380,10 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
     };
   }, [sessionId, applyFrameAt, stopPlayback]);
 
-  // 數據載入/刷新（revision 驅動，修「掛載後不反映後續變更」缺口）：gateway 每次變更
-  // 隨 canvas metadata 帶 revision，變化 → 重拉 state 換 planRef/elementsRef。
-  // 播放中不打斷（tick 每幀讀 refs，新數據自然接入）；idle 時回 t=0 重擺場景。
-  // 引擎佇列 slot 不重複 acquire——這裡只換數據，不重建 engine。
+  // 数据载入/刷新（revision 驱动，修「挂载后不反映后续变更」缺口）：gateway 每次变更
+  // 随 canvas metadata 带 revision，变化 → 重拉 state 换 planRef/elementsRef。
+  // 播放中不打断（tick 每帧读 refs，新数据自然接入）；idle 时回 t=0 重摆场景。
+  // 引擎伫列 slot 不重复 acquire——这里只换数据，不重建 engine。
   useEffect(() => {
     let disposed = false;
     void (async () => {
@@ -400,7 +400,7 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
           setDataReady(true);
         }
       } catch {
-        // 數據載入失敗：保留既有場景（初次載入則為空白白模，可自由環視），播放鈕維持原狀。
+        // 数据载入失败：保留既有场景（初次载入则为空白白模，可自由环视），播放钮维持原状。
       }
     })();
     return () => {
@@ -410,8 +410,8 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
 
   const fallbackSrc = toImgSrc(topViewSvg) ?? toImgSrc(cameraViewSvg);
 
-  // 畫布節點手勢放行：pointer 事件不攔截（data-canvas-interactive 已讓
-  // use-node-gestures / InfiniteCanvas 早期 return），僅擋雙擊選中文字。
+  // 画布节点手势放行：pointer 事件不拦截（data-canvas-interactive 已让
+  // use-node-gestures / InfiniteCanvas 早期 return），仅挡双击选中文字。
   const swallowPointer = (event: ReactPointerEvent<HTMLDivElement>) => event.stopPropagation();
 
   return (
@@ -424,7 +424,7 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
       onDoubleClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       className={cn("relative touch-none select-none overflow-hidden rounded-[12px] bg-[#0b0f14]", className)}
     >
-      {/* engine 掛載點：renderer canvas 由 DirectorEngine appendChild 進來 */}
+      {/* engine 挂载点：renderer canvas 由 DirectorEngine appendChild 进来 */}
       <div ref={containerRef} className="absolute inset-0" />
 
       {phase === "loading" && (
@@ -446,10 +446,10 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
               className="h-full w-full object-contain"
             />
           ) : (
-            <span className="text-ios-caption1 text-white/45">3D 視口不可用</span>
+            <span className="text-ios-caption1 text-white/45">3D 视口不可用</span>
           )}
           <span className="absolute bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/45 px-2 py-0.5 text-ios-caption1 text-white/70">
-            3D 視口不可用，顯示示意圖
+            3D 视口不可用，显示示意图
           </span>
         </div>
       )}
@@ -471,7 +471,7 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
             {playing ? <Pause className="h-3.5 w-3.5" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
             {playing ? "暂停" : "预演"}
           </button>
-          {/* C4 生成閉環入口：右下角，樣式對齊左下「预演」鈕。 */}
+          {/* C4 生成闭环入口：右下角，样式对齐左下「预演」钮。 */}
           <button
             type="button"
             onClick={requestRealRender}

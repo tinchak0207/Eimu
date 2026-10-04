@@ -11,9 +11,9 @@ import type { GenerationJob } from "./generation-core/types";
  * telemetry failure).
  */
 
-// @vercel/blob 預設重試 10 次（指數退避總計可達 ~17 分鐘）。遙測是可觀測性，
-// 不是正確性——絕不允許它把生成請求拖進 maxDuration 硬殺（那會反過來吞掉退款）。
-// 每個 Blob 操作都帶硬超時，超時就放棄這筆遙測。
+// @vercel/blob 预设重试 10 次（指数退避总计可达 ~17 分钟）。遥测是可观测性，
+// 不是正确性——绝不允许它把生成请求拖进 maxDuration 硬杀（那会反过来吞掉退款）。
+// 每个 Blob 操作都带硬超时，超时就放弃这笔遥测。
 const TELEMETRY_BLOB_TIMEOUT_MS = 5_000;
 
 const EVENT_PREFIX = "admin/routing-events/";
@@ -66,7 +66,7 @@ export interface RoutingEvent {
   coins: number;
   refunded: boolean;
   bypassBilling?: boolean;
-  /** 真實產出圖片的 public URL（來自 job.result.artifacts）。只有成功且帶 artifact 的事件才有；無則缺省。 */
+  /** 真实产出图片的 public URL（来自 job.result.artifacts）。只有成功且带 artifact 的事件才有；无则缺省。 */
   imageUrls?: string[];
 }
 
@@ -276,19 +276,19 @@ export function summarizeModelBreakdown(events: RoutingEvent[]): ModelBreakdown[
 
 export interface ModelRecentStats {
   modelId: string;
-  /** 窗口内该模型的总请求数（含失败）。样本量由消費者自行判斷。 */
+  /** 窗口内该模型的总请求数（含失败）。样本量由消费者自行判断。 */
   jobs: number;
   delivered: number;
   failed: number;
-  /** delivered / jobs；jobs 為 0 時為 0。 */
+  /** delivered / jobs；jobs 为 0 时为 0。 */
   success_rate: number;
-  /** 窗口内发生退款的事件数（独立于 delivered/failed 计数，單列不併桶）。 */
+  /** 窗口内发生退款的事件数（独立于 delivered/failed 计数，单列不并桶）。 */
   refunded: number;
   /**
-   * 成功交付事件的耗時 p80（毫秒）——「只有 20% 記錄比它慢」的那條。
-   * 樣本取每次 delivered 事件最後一個成功 attempt 的 ms（生成耗时本身，
-   * 不含排隊與失敗重試的時間）。成功樣本不足 3 條時為 null。
-   * 供進度條 ETA 消費：讓流逝貼近該模型的真實節奏。
+   * 成功交付事件的耗时 p80（毫秒）——「只有 20% 记录比它慢」的那条。
+   * 样本取每次 delivered 事件最后一个成功 attempt 的 ms（生成耗时本身，
+   * 不含排队与失败重试的时间）。成功样本不足 3 条时为 null。
+   * 供进度条 ETA 消费：让流逝贴近该模型的真实节奏。
    */
   p80_latency_ms: number | null;
 }
@@ -296,12 +296,12 @@ export interface ModelRecentStats {
 const DEFAULT_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
- * 按模型統計最近時間窗口（默認 24h）的真實生圖表現——供 /v1/model-status 的
- * last_24h 字段使用，讓 agent 選模型前能看到歷史成功率，而不是只有可用性布爾值。
- * 與 summarizeModelBreakdown 同源同風格的純函數：delivered 視為成功，其餘
- * outcome（exhausted/cancelled/budget-exhausted/no-endpoints）一律歸 failed；
- * refunded 單列。窗口取 events 的 ts >= nowMs - windowMs；事件樣本只覆蓋
- * listRoutingEvents 取回的條數，窗口不足時 jobs 如實反映樣本量。
+ * 按模型统计最近时间窗口（默认 24h）的真实生图表现——供 /v1/model-status 的
+ * last_24h 字段使用，让 agent 选模型前能看到历史成功率，而不是只有可用性布尔值。
+ * 与 summarizeModelBreakdown 同源同风格的纯函数：delivered 视为成功，其余
+ * outcome（exhausted/cancelled/budget-exhausted/no-endpoints）一律归 failed；
+ * refunded 单列。窗口取 events 的 ts >= nowMs - windowMs；事件样本只覆盖
+ * listRoutingEvents 取回的条数，窗口不足时 jobs 如实反映样本量。
  */
 export function summarizeRecentModelStats(
   events: RoutingEvent[],
@@ -329,7 +329,7 @@ export function summarizeRecentModelStats(
     stats.jobs += 1;
     if (event.outcome === "delivered") {
       stats.delivered += 1;
-      // attempts 按 attempt_no 升冪；最後一個成功的 = 實際交付那次的上游耗時。
+      // attempts 按 attempt_no 升幂；最后一个成功的 = 实际交付那次的上游耗时。
       const lastOk = [...event.attempts].reverse().find((attempt) => attempt.ok);
       if (lastOk && lastOk.ms > 0) stats.deliveredLatencies.push(lastOk.ms);
     } else {
@@ -347,9 +347,9 @@ export function summarizeRecentModelStats(
 }
 
 /**
- * 耗時 p80 分位：排序後取 ceil(n*0.8)-1 位置——即「只有 20% 記錄比它慢」的
- * 那條真實記錄。樣本不足 3 條回 null：1-2 條的分位數不穩定，一次偶然慢
- * 會讓 ETA 整體偏慢。
+ * 耗时 p80 分位：排序后取 ceil(n*0.8)-1 位置——即「只有 20% 记录比它慢」的
+ * 那条真实记录。样本不足 3 条回 null：1-2 条的分位数不稳定，一次偶然慢
+ * 会让 ETA 整体偏慢。
  */
 function latencyP80(samples: number[]): number | null {
   if (samples.length < 3) return null;
@@ -359,8 +359,8 @@ function latencyP80(samples: number[]): number | null {
 }
 
 /**
- * URL 解析失敗時退回原始字串：壞 base_url 只會讓 host 顯示成原文，
- * 絕不讓遙測建構崩潰。
+ * URL 解析失败时退回原始字串：坏 base_url 只会让 host 显示成原文，
+ * 绝不让遥测建构崩溃。
  */
 function safeHost(baseUrl: string): string {
   try {
@@ -371,10 +371,10 @@ function safeHost(baseUrl: string): string {
 }
 
 /**
- * 把 durable control plane（generation-jobs）的執行結果轉譯成 /admin 吃的
- * RoutingEvent。attempts 由 generation_attempt 表而來（status/HTTP/latency/
- * failure_class），queue 依同一組嘗試的 supplier label/host 重建。
- * 純函數：不觸碰 Date.now() 以外的外部狀態，方便單元測試。
+ * 把 durable control plane（generation-jobs）的执行结果转译成 /admin 吃的
+ * RoutingEvent。attempts 由 generation_attempt 表而来（status/HTTP/latency/
+ * failure_class），queue 依同一组尝试的 supplier label/host 重建。
+ * 纯函数：不触碰 Date.now() 以外的外部状态，方便单元测试。
  */
 export function buildJobRoutingEvent(
   job: GenerationJob,
@@ -394,7 +394,7 @@ export function buildJobRoutingEvent(
     ...(attempt.providerHttpStatus != null ? { status: attempt.providerHttpStatus } : {}),
     ...(attempt.failureClass ? { reason: attempt.failureClass } : {}),
   }));
-  // deliveredBy = 最後一個成功的嘗試；陣列已是 attempt_no 升冪，反向找第一個 ok。
+  // deliveredBy = 最后一个成功的尝试；阵列已是 attempt_no 升幂，反向找第一个 ok。
   const deliveredBy =
     outcome === "delivered"
       ? [...routingAttempts].reverse().find((attempt) => attempt.ok)?.label
@@ -425,8 +425,8 @@ export function buildJobRoutingEvent(
 }
 
 /**
- * 控制面成功/失敗終態的遙測出口。與 recordRoutingEvent 同一鐵律：遙測絕不 throw，
- * 失敗只 console.error——可以晚到，不可以不寫；不擋路。
+ * 控制面成功/失败终态的遥测出口。与 recordRoutingEvent 同一铁律：遥测绝不 throw，
+ * 失败只 console.error——可以晚到，不可以不写；不挡路。
  */
 export async function emitJobRoutingEvent(input: {
   job: GenerationJob;

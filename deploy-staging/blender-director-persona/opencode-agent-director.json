@@ -1,5 +1,5 @@
 {
-  "$comment": "3D 導演 persona opencode agent 條目稿（Astra P1-4 片J，2026-09-06）。本檔是 VPS /opt/agent-harness/workspace/.opencode/opencode.json 的合併稿：只把 agent.director 條目併入現有 config（python 補丁稿見 patch-opencode-agent.py，禁整檔覆蓋——live 表含 permission.bash deny 真源與 model 等 45+ 鍵）。欄位形狀依 opencode 官方文檔（agent 條目：description/mode/model/prompt/tools/permission；mode: primary|subagent|all；tools 用 *:false 關全部再白名單放行）。模型頂位：agent-models.json bindings.persona.director 為模型真源（gateway dispatch 按此鏈注入，本條目 model 留空 = 不雙寫），Astra 上線日只換 bindings.persona.director 一個 id。",
+  "$comment": "3D 导演 persona opencode agent 条目稿（Astra P1-4 片J，2026-09-06）。本档是 VPS /opt/agent-harness/workspace/.opencode/opencode.json 的合并稿：只把 agent.director 条目并入现有 config（python 补丁稿见 patch-opencode-agent.py，禁整档覆盖——live 表含 permission.bash deny 真源与 model 等 45+ 键）。栏位形状依 opencode 官方文档（agent 条目：description/mode/model/prompt/tools/permission；mode: primary|subagent|all；tools 用 *:false 关全部再白名单放行）。模型顶位：agent-models.json bindings.persona.director 为模型真源（gateway dispatch 按此链注入，本条目 model 留空 = 不双写），Astra 上线日只换 bindings.persona.director 一个 id。",
   "agent": {
     "director": {
       "description": "3D 导演：接委托单自主驱动 Blender 产出骨架动画与场景资产，只回资产引用与场景摘要，过程不出子代理。",

@@ -1,11 +1,11 @@
 /**
- * director-proposals-persistence.test.ts — 2026-09-04 proposals 落盤契約測試（node:test，tsx 運行）。
- * 病灶（R3 複測實錘）：pendingProposals 內存 Map 隨 agent-gateway 重啟清零 → 用戶手裡提案卡全部過期。
- * 覆蓋：①create 落盤 + 正常 apply 往返（回歸）+ 成功後盤上消費刪；
- * ②模擬重啟（__clearPendingProposalsForTest 清內存 Map，盤保留）→ apply 仍成功走盤載入路徑（持久化實錘）；
- * ③盤上條目過期（篡改 createdAt）→ apply 仍 DirectorNotFoundError（R3-③ 文案守衛不破）且過期條目被刪盤；
- * ④多輪 create 合併不互相覆蓋 + 過期條目隨寫清理。
- * 注意：director.ts 在模組載入時讀 DIRECTOR_DATA_ROOT，必須在首次動態 import 前設好 env。
+ * director-proposals-persistence.test.ts — 2026-09-04 proposals 落盘契约测试（node:test，tsx 运行）。
+ * 病灶（R3 复测实锤）：pendingProposals 内存 Map 随 agent-gateway 重启清零 → 用户手里提案卡全部过期。
+ * 覆盖：①create 落盘 + 正常 apply 往返（回归）+ 成功后盘上消费删；
+ * ②模拟重启（__clearPendingProposalsForTest 清内存 Map，盘保留）→ apply 仍成功走盘载入路径（持久化实锤）；
+ * ③盘上条目过期（篡改 createdAt）→ apply 仍 DirectorNotFoundError（R3-③ 文案守卫不破）且过期条目被删盘；
+ * ④多轮 create 合并不互相覆盖 + 过期条目随写清理。
+ * 注意：director.ts 在模组载入时读 DIRECTOR_DATA_ROOT，必须在首次动态 import 前设好 env。
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
@@ -27,47 +27,47 @@ const proposalsFile = (sid: string) => path.join(ROOT, sid, "proposals.json")
 const readDisk = (sid: string): Record<string, { plans: unknown[]; createdAt: number }> =>
   JSON.parse(readFileSync(proposalsFile(sid), "utf-8")) as Record<string, { plans: unknown[]; createdAt: number }>
 
-test("P-① create 即落盤；內存命中 apply 成功且盤上消費刪", async () => {
+test("P-① create 即落盘；内存命中 apply 成功且盘上消费删", async () => {
   const { createDirectorProposals, applyDirectorProposal } = await load()
   const sid = "persist-normal"
   const created = await createDirectorProposals(sid, "沙漠夜逃商队遭遇沙暴", 4)
   assert.equal(created.proposal_ids.length, 3)
-  // 落盤實錘：三個 id 全在盤上，plans 各 1 案
+  // 落盘实锤：三个 id 全在盘上，plans 各 1 案
   const disk = readDisk(sid)
   assert.deepEqual(Object.keys(disk).sort(), [...created.proposal_ids].sort())
   for (const id of created.proposal_ids) assert.equal(disk[id].plans.length, 1)
-  // 內存命中路徑 apply 成功
+  // 内存命中路径 apply 成功
   const applied = await applyDirectorProposal(sid, created.proposal_ids[0])
   assert.equal(applied.ok, true)
   assert.equal((applied.project.plans as unknown[]).length, 1, "replacePlans 只留被批准一案")
-  // 消費後盤上同步清除，其餘兩案保留
+  // 消费后盘上同步清除，其余两案保留
   const after = readDisk(sid)
   assert.ok(!(created.proposal_ids[0] in after))
   assert.equal(Object.keys(after).length, 2)
 })
 
-test("P-② 模擬重啟（清內存 Map）後 apply 仍成功：走盤載入路徑", async () => {
+test("P-② 模拟重启（清内存 Map）后 apply 仍成功：走盘载入路径", async () => {
   const { createDirectorProposals, applyDirectorProposal, __clearPendingProposalsForTest, getDirectorState } = await load()
   const sid = "persist-restart"
   const created = await createDirectorProposals(sid, "雨夜天台对决", 5)
   __clearPendingProposalsForTest()
-  // 重啟語義：內存全空，僅剩盤上檔案
+  // 重启语义：内存全空，仅剩盘上档案
   const applied = await applyDirectorProposal(sid, created.proposal_ids[1])
   assert.equal(applied.ok, true)
   assert.equal((applied.project.plans as unknown[]).length, 1)
   const state = await getDirectorState(sid)
   assert.equal(state.initialized, true)
-  assert.equal((state.project.plans as unknown[]).length, 1, "盤載入路徑的 replacePlans 照常落 current")
-  assert.ok(!(created.proposal_ids[1] in readDisk(sid)), "盤載入消費後條目刪除")
+  assert.equal((state.project.plans as unknown[]).length, 1, "盘载入路径的 replacePlans 照常落 current")
+  assert.ok(!(created.proposal_ids[1] in readDisk(sid)), "盘载入消费后条目删除")
   assert.equal(Object.keys(readDisk(sid)).length, 2)
 })
 
-test("P-③ 盤上條目過期 → apply 仍 404 文案守衛 + 過期條目刪盤", async () => {
+test("P-③ 盘上条目过期 → apply 仍 404 文案守卫 + 过期条目删盘", async () => {
   const { createDirectorProposals, applyDirectorProposal, DirectorNotFoundError, __clearPendingProposalsForTest } = await load()
   const sid = "persist-expired"
   const created = await createDirectorProposals(sid, "雪原护送", 3)
   __clearPendingProposalsForTest()
-  // 篡改盤上 createdAt 至 31 分鐘前（TTL 30 分）
+  // 篡改盘上 createdAt 至 31 分钟前（TTL 30 分）
   const disk = readDisk(sid)
   for (const id of Object.keys(disk)) disk[id].createdAt = Date.now() - 31 * 60_000
   writeFileSync(proposalsFile(sid), JSON.stringify(disk), "utf-8")
@@ -82,21 +82,21 @@ test("P-③ 盤上條目過期 → apply 仍 404 文案守衛 + 過期條目刪�
       return true
     },
   )
-  assert.ok(!(created.proposal_ids[0] in readDisk(sid)), "被校驗的過期條目已刪盤")
-  assert.equal(Object.keys(readDisk(sid)).length, 2, "其餘過期條目留待下次 create 合併時清理（讀路徑不隱式寫）")
+  assert.ok(!(created.proposal_ids[0] in readDisk(sid)), "被校验的过期条目已删盘")
+  assert.equal(Object.keys(readDisk(sid)).length, 2, "其余过期条目留待下次 create 合并时清理（读路径不隐式写）")
 })
 
-test("P-④ 多輪 create 合併共存；寫盤時順手清過期條目", async () => {
+test("P-④ 多轮 create 合并共存；写盘时顺手清过期条目", async () => {
   const { createDirectorProposals, __clearPendingProposalsForTest } = await load()
   const sid = "persist-merge"
   const first = await createDirectorProposals(sid, "港口追逐", 2)
-  // 手工把第一輪盤上條目改過期，模擬「舊提案躺在盤上」
+  // 手工把第一轮盘上条目改过期，模拟「旧提案躺在盘上」
   const disk = readDisk(sid)
   for (const id of Object.keys(disk)) disk[id].createdAt = Date.now() - 31 * 60_000
   writeFileSync(proposalsFile(sid), JSON.stringify(disk), "utf-8")
   const second = await createDirectorProposals(sid, "港口追逐", 2)
   const after = readDisk(sid)
-  assert.equal(Object.keys(after).length, 3, "第二輪 3 案落盤，過期第一輪被順手清理")
+  assert.equal(Object.keys(after).length, 3, "第二轮 3 案落盘，过期第一轮被顺手清理")
   for (const id of second.proposal_ids) assert.ok(id in after)
   for (const id of first.proposal_ids) assert.ok(!(id in after))
   __clearPendingProposalsForTest()

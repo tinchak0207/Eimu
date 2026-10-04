@@ -3,10 +3,10 @@ import QRCode from "qrcode";
 
 export const preferredRegion = "sfo1";
 
-// worker 的動態 QR：每次請求觸發產生全新 QR（掃碼即建立新 bot 實體，必須最新）。
+// worker 的动态 QR：每次请求触发产生全新 QR（扫码即建立新 bot 实体，必须最新）。
 const WORKER_NEW_QR_URL =
   process.env.WECHAT_WORKER_NEW_QR_URL?.trim() || "http://43.172.85.76:8780/new-qr";
-// 無 worker 時的兜底（通常留空，確保 QR 永遠來自 worker）。
+// 无 worker 时的兜底（通常留空，确保 QR 永远来自 worker）。
 const FALLBACK_QR_URL = process.env.WECHAT_BOT_QR_URL?.trim() || "";
 
 async function fetchFreshQrUrl(): Promise<string | null> {
@@ -20,7 +20,7 @@ async function fetchFreshQrUrl(): Promise<string | null> {
     const data = (await res.json()) as { success?: boolean; url?: string | null };
     return data.url || null;
   } catch {
-    // 嘗試 GET 兜底拿目前 QR
+    // 尝试 GET 兜底拿目前 QR
     try {
       const res = await fetch(WORKER_NEW_QR_URL.replace("/new-qr", "/qr"), {
         cache: "no-store",

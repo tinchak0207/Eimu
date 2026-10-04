@@ -1,8 +1,8 @@
-// 生效路由解析：程式碼預設（MODEL_ROUTES）⊕ admin 熱覆寫（model_route_override 表）。
+// 生效路由解析：程式码预设（MODEL_ROUTES）⊕ admin 热覆写（model_route_override 表）。
 //
-// 調度器（acquireSupplierLease）、提交前能力檢查（hasGenerationCapability）、
-// 無供給診斷（diagnoseSupplierUnavailability）與 /admin「模型路由」面板全部經
-// resolveModelRoute 取同一份結果——輸入相同則輸出相同，後台看到的就是調度實際用的。
+// 调度器（acquireSupplierLease）、提交前能力检查（hasGenerationCapability）、
+// 无供给诊断（diagnoseSupplierUnavailability）与 /admin「模型路由」面板全部经
+// resolveModelRoute 取同一份结果——输入相同则输出相同，后台看到的就是调度实际用的。
 
 import { MODEL_ROUTES, modelRoute, routeSupplierId } from "../model-routes.config";
 import { getGenerationSql, type GenerationSql } from "./database";
@@ -14,7 +14,7 @@ export interface EffectiveModelRoute {
   source: ModelRouteSource;
   /** 有序渠道 label。 */
   labels: string[];
-  /** 對應 DB supplier id，順序同 labels。 */
+  /** 对应 DB supplier id，顺序同 labels。 */
   supplierIds: string[];
 }
 
@@ -26,7 +26,7 @@ export interface ModelRouteOverrideRow {
   updatedAt: string;
 }
 
-/** 覆寫是人手速度的變更，熱路徑上只需短快取；寫入路徑會主動清快取。 */
+/** 覆写是人手速度的变更，热路径上只需短快取；写入路径会主动清快取。 */
 const OVERRIDE_CACHE_MS = 5_000;
 let overrideCache: { at: number; rows: Map<string, ModelRouteOverrideRow> } | null = null;
 
@@ -55,10 +55,10 @@ export async function loadModelRouteOverrides(
       SELECT model_id, route, note, updated_by, updated_at FROM model_route_override
     `;
   } catch (error) {
-    // 覆寫表讀不到（遷移未跑／DB 抖動）時退回程式碼預設路由，絕不因覆寫層故障擋住調度。
-    // 面板讀取（fresh）要如實報錯，不吞。
+    // 覆写表读不到（迁移未跑／DB 抖动）时退回程式码预设路由，绝不因覆写层故障挡住调度。
+    // 面板读取（fresh）要如实报错，不吞。
     if (fresh) throw error;
-    console.warn("[model-routing] model_route_override 讀取失敗，退回 MODEL_ROUTES 預設：", error);
+    console.warn("[model-routing] model_route_override 读取失败，退回 MODEL_ROUTES 预设：", error);
     return overrideCache?.rows ?? new Map();
   }
   const map = new Map(rows.map((row) => {
@@ -90,7 +90,7 @@ export async function resolveModelRoute(
   return effectiveRoute(modelId, await loadModelRouteOverrides(sql));
 }
 
-/** 全部有路由（預設或覆寫）的模型，供 admin 面板列出。 */
+/** 全部有路由（预设或覆写）的模型，供 admin 面板列出。 */
 export async function listEffectiveRoutes(sql: GenerationSql = getGenerationSql()): Promise<{
   routes: Array<EffectiveModelRoute & { configLabels: string[]; override: ModelRouteOverrideRow | null }>;
 }> {
@@ -108,12 +108,12 @@ export async function listEffectiveRoutes(sql: GenerationSql = getGenerationSql(
 const LABEL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export function normalizeRouteInput(route: unknown): string[] {
-  if (!Array.isArray(route)) throw new Error("route 必須是渠道 label 陣列。");
+  if (!Array.isArray(route)) throw new Error("route 必须是渠道 label 阵列。");
   const labels = route.map((item) => String(item).trim());
   for (const label of labels) {
     if (!LABEL_PATTERN.test(label)) throw new Error(`非法渠道 label：${label || "(空)"}`);
   }
-  if (new Set(labels).size !== labels.length) throw new Error("route 內有重複渠道。");
+  if (new Set(labels).size !== labels.length) throw new Error("route 内有重复渠道。");
   return labels;
 }
 

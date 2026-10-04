@@ -1,18 +1,18 @@
-// GET /api/canvas/image-proxy?url=<encoded> — 登入用戶的同源圖片代理。
+// GET /api/canvas/image-proxy?url=<encoded> — 登入用户的同源图片代理。
 //
-// 存在理由：畫布像素編輯（裁剪/切图/抠除/旋转）要把生成結果讀進 <canvas>，
-// 上游 CDN（302 出圖域）不一定放 CORS 頭，直接 fetch 會 taint。這裡以同源
-// 身份代讀，只服務登入用戶、只認 https 公網主機、只回 image/*、上限 25MB。
+// 存在理由：画布像素编辑（裁剪/切图/抠除/旋转）要把生成结果读进 <canvas>，
+// 上游 CDN（302 出图域）不一定放 CORS 头，直接 fetch 会 taint。这里以同源
+// 身份代读，只服务登入用户、只认 https 公网主机、只回 image/*、上限 25MB。
 //
-// SSRF 立場：拒 IP 字面量與 localhost/*.local/*.internal——這個代理只為
-// 「把公網圖片變同源」存在，不提供內網探測面。
+// SSRF 立场：拒 IP 字面量与 localhost/*.local/*.internal——这个代理只为
+// 「把公网图片变同源」存在，不提供内网探测面。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -21,13 +21,13 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ ok: false, error: message, code }, { status });
 }
 
-/** 主機黑名單：IP 字面量（v4/v6）、localhost、內網尾綴。 */
+/** 主机黑名单：IP 字面量（v4/v6）、localhost、内网尾缀。 */
 function isForbiddenHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return true;
   // IPv4 字面量
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
-  // IPv6 字面量（URL hostname 形如 [::1] 去掉中括號後含冒號）
+  // IPv6 字面量（URL hostname 形如 [::1] 去掉中括号后含冒号）
   if (host.includes(":")) return true;
   return false;
 }
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
     return fail(413, "图片超过 25MB", "too_large");
   }
 
-  // 邊讀邊計數：上游沒報 Content-Length（chunked）時，實讀超限即中斷。
+  // 边读边计数：上游没报 Content-Length（chunked）时，实读超限即中断。
   if (!upstream.body) return fail(502, "上游未返回内容", "upstream_failed");
   const reader = upstream.body.getReader();
   const chunks: Uint8Array[] = [];

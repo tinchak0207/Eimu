@@ -1,28 +1,28 @@
 /**
- * music-take-entropy.ts 測試（2026-10-03）。
+ * music-take-entropy.ts 测试（2026-10-03）。
  *
  * runner：node:test + node:assert/strict（不是 vitest）。
  *   npx --yes tsx --test src/lib/music-take-entropy.test.ts
  *
- * 覆蓋：
- *   1. 真實雙 take（2026-10-03 安慰劑組實跑《隐秘的折痕》兩個 clips）→ 熵低於閘門、不問
- *   2. 合成高熵雙 take → 問
- *   3. 三個兩兩最大相異 take → maxEntropyBits = log2(3) 且熵不超上限
- *   4. 兩個完全相同 take → 熵 0、不問
- *   5. 單一 take → 不問、suggestedIndex = 0
- *   6. 兩條退路必定出現在 options 尾端
- *   7. 選項總數（take 選項 + 2 條退路）≤ 4
- *   8. selectEntropyOptions 不會挑出那一對近乎相同的
- *   9. isPreferenceSaturated 的飽和判定與樣本數下限（新分母 log2(相異標籤數)）
- *  10. 空陣列邊界不拋錯
- *  11. 偏好飽和時強制不問並沿用主候選
- *  12. 高熵雙 take 問時 suggestedIndex 指向被選中的 take
- *  13. v1/v2 形（metadata 全同、只差人聲演唱窗口）→ 由「逐軸實質差異」這條閘放行
- *  14. 真實雙 take（無 ASR 欄位）→ 仍不問（時長差 2.7% < 5%）
- *  15. isPreferenceSaturated([{A,50},{B,50}]) → false（防回歸；舊分母會誤判 true）
+ * 覆盖：
+ *   1. 真实双 take（2026-10-03 安慰剂组实跑《隐秘的折痕》两个 clips）→ 熵低于闸门、不问
+ *   2. 合成高熵双 take → 问
+ *   3. 三个两两最大相异 take → maxEntropyBits = log2(3) 且熵不超上限
+ *   4. 两个完全相同 take → 熵 0、不问
+ *   5. 单一 take → 不问、suggestedIndex = 0
+ *   6. 两条退路必定出现在 options 尾端
+ *   7. 选项总数（take 选项 + 2 条退路）≤ 4
+ *   8. selectEntropyOptions 不会挑出那一对近乎相同的
+ *   9. isPreferenceSaturated 的饱和判定与样本数下限（新分母 log2(相异标签数)）
+ *  10. 空阵列边界不抛错
+ *  11. 偏好饱和时强制不问并沿用主候选
+ *  12. 高熵双 take 问时 suggestedIndex 指向被选中的 take
+ *  13. v1/v2 形（metadata 全同、只差人声演唱窗口）→ 由「逐轴实质差异」这条闸放行
+ *  14. 真实双 take（无 ASR 栏位）→ 仍不问（时长差 2.7% < 5%）
+ *  15. isPreferenceSaturated([{A,50},{B,50}]) → false（防回归；旧分母会误判 true）
  *  16. isPreferenceSaturated([{A,40},{B,1}]) → true
- *  17. 兩個完全相同的 take → materialAxes 為空陣列
- *  18. 9:1 與 3:2:2 在新分母下的實際正規化熵值
+ *  17. 两个完全相同的 take → materialAxes 为空阵列
+ *  18. 9:1 与 3:2:2 在新分母下的实际正规化熵值
  */
 
 import test from "node:test";
@@ -36,9 +36,9 @@ import {
 } from "./music-take-entropy";
 
 /**
- * 真實 fixture：取自 2026-10-03 實跑的上游 FlowMusic 回包
- * artifacts/ab-flowmusic-placebo-20261003/flowmusic-response.json，同標題《隐秘的折痕》
- * 的兩個 take；標題相同、時長僅差約 5 秒、歌詞相同。
+ * 真实 fixture：取自 2026-10-03 实跑的上游 FlowMusic 回包
+ * artifacts/ab-flowmusic-placebo-20261003/flowmusic-response.json，同标题《隐秘的折痕》
+ * 的两个 take；标题相同、时长仅差约 5 秒、歌词相同。
  */
 const REAL_TAKES: MusicTakeFeature[] = [
   {
@@ -57,7 +57,7 @@ const REAL_TAKES: MusicTakeFeature[] = [
   },
 ];
 
-/** 合成的高熵雙 take：時長、標題、soundPrompt、歌詞全都拉開。 */
+/** 合成的高熵双 take：时长、标题、soundPrompt、歌词全都拉开。 */
 const HIGH_ENTROPY_TAKES: MusicTakeFeature[] = [
   {
     url: "https://example.test/high-a.m4a",
@@ -78,9 +78,9 @@ const HIGH_ENTROPY_TAKES: MusicTakeFeature[] = [
 ];
 
 /**
- * v1/v2 形 fixture：metadata（時長 / 標題 / 歌詞）完全相同，只有人聲演唱窗口
- * 128s vs 113.9s。這是 2026-10-03 實戰真正的岔路口——正規化熵幾乎為 0，
- * 必須靠「逐軸實質差異」這條閘放行。
+ * v1/v2 形 fixture：metadata（时长 / 标题 / 歌词）完全相同，只有人声演唱窗口
+ * 128s vs 113.9s。这是 2026-10-03 实战真正的岔路口——正规化熵几乎为 0，
+ * 必须靠「逐轴实质差异」这条闸放行。
  */
 const V1V2_TAKES: MusicTakeFeature[] = [
   {
@@ -106,8 +106,8 @@ function makeTake(overrides: Partial<MusicTakeFeature> & { url: string }): Music
 }
 
 /**
- * 測試側獨立計算 isPreferenceSaturated 用的正規化熵（僅供印出實際數字對照；
- * 真正的斷言是 isPreferenceSaturated 的布林回傳）。
+ * 测试侧独立计算 isPreferenceSaturated 用的正规化熵（仅供印出实际数字对照；
+ * 真正的断言是 isPreferenceSaturated 的布林回传）。
  */
 function saturationNormalizedEntropy(history: { label: string; count: number }[]): number {
   const samples = history.filter((entry) => Number.isFinite(entry.count) && entry.count > 0);
@@ -123,7 +123,7 @@ function saturationNormalizedEntropy(history: { label: string; count: number }[]
   return entropy / Math.log2(distinct);
 }
 
-test("1. 真實雙 take（同標題、近似時長、同歌詞）→ 熵低於閘門、不問", () => {
+test("1. 真实双 take（同标题、近似时长、同歌词）→ 熵低于闸门、不问", () => {
   const question = buildMusicPreferenceQuestion(REAL_TAKES);
   console.log(
     `[REAL_TAKES] entropyBits=${question.entropy.entropyBits} ` +
@@ -132,11 +132,11 @@ test("1. 真實雙 take（同標題、近似時長、同歌詞）→ 熵低於�
       `maxAxisDistance=${question.entropy.maxAxisDistance} reason=${question.entropy.reason}`,
   );
   assert.equal(question.asked, false);
-  assert.ok(question.entropy.normalizedEntropy < 0.25, "真實雙 take 正規化熵應低於 0.25");
-  assert.deepEqual(question.entropy.materialAxes, [], "真實雙 take 不應有實質差異軸");
+  assert.ok(question.entropy.normalizedEntropy < 0.25, "真实双 take 正规化熵应低于 0.25");
+  assert.deepEqual(question.entropy.materialAxes, [], "真实双 take 不应有实质差异轴");
 });
 
-test("2. 合成高熵雙 take → 問，且正規化熵 ≥ 0.25", () => {
+test("2. 合成高熵双 take → 问，且正规化熵 ≥ 0.25", () => {
   const question = buildMusicPreferenceQuestion(HIGH_ENTROPY_TAKES);
   console.log(
     `[HIGH_ENTROPY_TAKES] entropyBits=${question.entropy.entropyBits} ` +
@@ -144,10 +144,10 @@ test("2. 合成高熵雙 take → 問，且正規化熵 ≥ 0.25", () => {
       `materialAxes=${JSON.stringify(question.entropy.materialAxes)}`,
   );
   assert.equal(question.asked, true);
-  assert.ok(question.entropy.normalizedEntropy >= 0.25, "高熵雙 take 正規化熵應 ≥ 0.25");
+  assert.ok(question.entropy.normalizedEntropy >= 0.25, "高熵双 take 正规化熵应 ≥ 0.25");
 });
 
-test("3. 三個兩兩最大相異 take → maxEntropyBits = log2(3)，且熵不超上限", () => {
+test("3. 三个两两最大相异 take → maxEntropyBits = log2(3)，且熵不超上限", () => {
   const takes: MusicTakeFeature[] = [
     makeTake({
       url: "https://example.test/three-0.m4a",
@@ -175,11 +175,11 @@ test("3. 三個兩兩最大相異 take → maxEntropyBits = log2(3)，且熵不�
     }),
   ];
   const entropy = evaluateTakeSetEntropy(takes);
-  assert.ok(Math.abs(entropy.maxEntropyBits - Math.log2(3)) < 1e-9, "maxEntropyBits 應等於 log2(3)");
-  assert.ok(entropy.entropyBits <= entropy.maxEntropyBits, "熵不得超過理論上限");
+  assert.ok(Math.abs(entropy.maxEntropyBits - Math.log2(3)) < 1e-9, "maxEntropyBits 应等于 log2(3)");
+  assert.ok(entropy.entropyBits <= entropy.maxEntropyBits, "熵不得超过理论上限");
 });
 
-test("4. 兩個完全相同的 take → 熵 0、不問", () => {
+test("4. 两个完全相同的 take → 熵 0、不问", () => {
   const base: MusicTakeFeature = {
     url: "https://example.test/same-0.m4a",
     candidateIndex: 0,
@@ -198,20 +198,20 @@ test("4. 兩個完全相同的 take → 熵 0、不問", () => {
   assert.equal(buildMusicPreferenceQuestion(identical).asked, false);
 });
 
-test("5. 單一 take → 不問、suggestedIndex = 0", () => {
+test("5. 单一 take → 不问、suggestedIndex = 0", () => {
   const question = buildMusicPreferenceQuestion([REAL_TAKES[0]]);
   assert.equal(question.asked, false);
   assert.equal(question.suggestedIndex, 0);
   assert.equal(question.entropy.reason, "只有一个候选，无从比较");
 });
 
-test("6. 兩條退路必定出現在 options 尾端", () => {
+test("6. 两条退路必定出现在 options 尾端", () => {
   const question = buildMusicPreferenceQuestion(REAL_TAKES);
   assert.equal(question.options.at(-2)!.label, question.fallbackLabels.none);
   assert.equal(question.options.at(-1)!.label, question.fallbackLabels.trustModel);
 });
 
-test("7. 選項總數（take 選項 + 2 條退路）≤ 4，且 optionTakeUrls 只含 take 選項", () => {
+test("7. 选项总数（take 选项 + 2 条退路）≤ 4，且 optionTakeUrls 只含 take 选项", () => {
   const takes: MusicTakeFeature[] = Array.from({ length: 6 }, (_, i) =>
     makeTake({
       url: `https://example.test/six-${i}.m4a`,
@@ -223,11 +223,11 @@ test("7. 選項總數（take 選項 + 2 條退路）≤ 4，且 optionTakeUrls �
     }),
   );
   const question = buildMusicPreferenceQuestion(takes);
-  assert.ok(question.options.length <= 4, "選項總數不得超過 4");
+  assert.ok(question.options.length <= 4, "选项总数不得超过 4");
   assert.equal(Object.keys(question.optionTakeUrls).length, question.options.length - 2);
 });
 
-test("8. selectEntropyOptions 不會挑出那對近乎相同的候選", () => {
+test("8. selectEntropyOptions 不会挑出那对近乎相同的候选", () => {
   const similarA = makeTake({
     url: "https://example.test/alike-a.m4a",
     candidateIndex: 0,
@@ -266,11 +266,11 @@ test("8. selectEntropyOptions 不會挑出那對近乎相同的候選", () => {
   assert.equal(
     selected.includes(0) && selected.includes(1),
     false,
-    "選出的應是彼此最相異的，不含那對近乎相同者",
+    "选出的应是彼此最相异的，不含那对近乎相同者",
   );
 });
 
-test("9. isPreferenceSaturated 判定與樣本數下限", () => {
+test("9. isPreferenceSaturated 判定与样本数下限", () => {
   const nineToOne = saturationNormalizedEntropy([
     { label: "A", count: 9 },
     { label: "B", count: 1 },
@@ -284,9 +284,9 @@ test("9. isPreferenceSaturated 判定與樣本數下限", () => {
     `[isPreferenceSaturated] 9:1 normalized=${nineToOne.toFixed(6)} -> true; ` +
       `3:2:2 normalized=${threeTwoTwo.toFixed(6)} -> false`,
   );
-  // 新分母 log2(2)=1、閾值 0.5：0.469 < 0.5 → true。
+  // 新分母 log2(2)=1、阈值 0.5：0.469 < 0.5 → true。
   assert.equal(isPreferenceSaturated([{ label: "A", count: 9 }, { label: "B", count: 1 }]), true);
-  // 3:2:2 的正規化熵 ≈ 0.982（≥ 0.5）→ false。
+  // 3:2:2 的正规化熵 ≈ 0.982（≥ 0.5）→ false。
   assert.equal(
     isPreferenceSaturated([{ label: "A", count: 3 }, { label: "B", count: 2 }, { label: "C", count: 2 }]),
     false,
@@ -295,7 +295,7 @@ test("9. isPreferenceSaturated 判定與樣本數下限", () => {
   assert.equal(isPreferenceSaturated([{ label: "A", count: 1 }]), false);
 });
 
-test("10. 空陣列邊界不拋錯，asked = false", () => {
+test("10. 空阵列边界不抛错，asked = false", () => {
   const question = buildMusicPreferenceQuestion([]);
   assert.equal(question.asked, false);
   assert.equal(question.suggestedIndex, 0);
@@ -305,7 +305,7 @@ test("10. 空陣列邊界不拋錯，asked = false", () => {
   assert.deepEqual(question.entropy.materialAxes, []);
 });
 
-test("11. 偏好飽和時強制不問並沿用主候選", () => {
+test("11. 偏好饱和时强制不问并沿用主候选", () => {
   const question = buildMusicPreferenceQuestion(HIGH_ENTROPY_TAKES, {
     preferenceHistory: [
       { label: "A", count: 9 },
@@ -317,7 +317,7 @@ test("11. 偏好飽和時強制不問並沿用主候選", () => {
   assert.match(question.entropy.reason, /偏好已稳定/);
 });
 
-test("12. 高熵雙 take 問時 suggestedIndex 指向被選中的 take", () => {
+test("12. 高熵双 take 问时 suggestedIndex 指向被选中的 take", () => {
   const question = buildMusicPreferenceQuestion(HIGH_ENTROPY_TAKES);
   assert.equal(question.asked, true);
   assert.ok(question.suggestedIndex >= 0 && question.suggestedIndex < HIGH_ENTROPY_TAKES.length);
@@ -337,7 +337,7 @@ test("13. v1/v2（metadata 全同、只差人声演唱窗口）→ 由逐轴实�
     question.entropy.materialAxes.includes("vocalWindowSeconds"),
     "materialAxes 应含 vocalWindowSeconds",
   );
-  // 證明是「逐軸實質差異」這條閘放行，不是熵這條。
+  // 证明是「逐轴实质差异」这条闸放行，不是熵这条。
   assert.ok(
     question.entropy.normalizedEntropy < 0.25,
     `v1/v2 归一化熵应低于 0.25，实际 ${question.entropy.normalizedEntropy}`,
@@ -351,7 +351,7 @@ test("13. v1/v2（metadata 全同、只差人声演唱窗口）→ 由逐轴实�
   assert.match(question.entropy.reason, /人声演唱窗口/);
 });
 
-test("14. 真實雙 take 維持不問（4.91/179.53 ≈ 2.7% < 5%）", () => {
+test("14. 真实双 take 维持不问（4.91/179.53 ≈ 2.7% < 5%）", () => {
   const question = buildMusicPreferenceQuestion(REAL_TAKES);
   console.log(
     `[REAL_TAKES] asked=${question.asked} normalizedEntropy=${question.entropy.normalizedEntropy} ` +
@@ -359,19 +359,19 @@ test("14. 真實雙 take 維持不問（4.91/179.53 ≈ 2.7% < 5%）", () => {
       `maxAxisDistance=${question.entropy.maxAxisDistance} reason=${question.entropy.reason}`,
   );
   assert.equal(question.asked, false);
-  assert.deepEqual(question.entropy.materialAxes, [], "無 ASR 欄位且時長差 < 5% → 無實質差異軸");
-  assert.ok(question.entropy.maxAxisDistance < 0.05, "最高軸距離應小於 0.05");
+  assert.deepEqual(question.entropy.materialAxes, [], "无 ASR 栏位且时长差 < 5% → 无实质差异轴");
+  assert.ok(question.entropy.maxAxisDistance < 0.05, "最高轴距离应小于 0.05");
   assert.equal(question.entropy.reason, "各版本几乎一致，没有可比较的差异");
 });
 
-test("15. isPreferenceSaturated([{A,50},{B,50}]) → false（防回歸）", () => {
+test("15. isPreferenceSaturated([{A,50},{B,50}]) → false（防回归）", () => {
   const history = [
     { label: "A", count: 50 },
     { label: "B", count: 50 },
   ];
   const normalized = saturationNormalizedEntropy(history);
   console.log(`[isPreferenceSaturated] 50:50 normalized=${normalized.toFixed(6)} -> false`);
-  assert.equal(normalized, 1, "k=2 最大不確定時正規化熵應為 1");
+  assert.equal(normalized, 1, "k=2 最大不确定时正规化熵应为 1");
   assert.equal(isPreferenceSaturated(history), false);
 });
 
@@ -382,11 +382,11 @@ test("16. isPreferenceSaturated([{A,40},{B,1}]) → true", () => {
   ];
   const normalized = saturationNormalizedEntropy(history);
   console.log(`[isPreferenceSaturated] 40:1 normalized=${normalized.toFixed(6)} -> true`);
-  assert.ok(normalized < 0.5, `40:1 正規化熵應 < 0.5，实际 ${normalized}`);
+  assert.ok(normalized < 0.5, `40:1 正规化熵应 < 0.5，实际 ${normalized}`);
   assert.equal(isPreferenceSaturated(history), true);
 });
 
-test("17. 兩個完全相同的 take → materialAxes 為空陣列", () => {
+test("17. 两个完全相同的 take → materialAxes 为空阵列", () => {
   const base: MusicTakeFeature = {
     url: "https://example.test/dup-0.m4a",
     candidateIndex: 0,
@@ -406,7 +406,7 @@ test("17. 兩個完全相同的 take → materialAxes 為空陣列", () => {
   assert.equal(entropy.maxAxisDistance, 0);
 });
 
-test("18. 9:1 與 3:2:2 在新分母下的實際正規化熵值", () => {
+test("18. 9:1 与 3:2:2 在新分母下的实际正规化熵值", () => {
   // 9:1 → H = 0.468996 bit、分母 log2(2) = 1 → 0.468996 < 0.5 → true。
   const nineToOne = saturationNormalizedEntropy([
     { label: "A", count: 9 },

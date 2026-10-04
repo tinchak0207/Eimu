@@ -179,7 +179,7 @@ function strField(v: unknown): string | undefined {
 }
 
 /**
- * 情绪契约收敛（白名单欄位形）：只认 LyriaMusicContract 已知键，style 必填
+ * 情绪契约收敛（白名单栏位形）：只认 LyriaMusicContract 已知键，style 必填
  * 非空字符串，bpm 正数四舍五入；未知键丢弃（防 payload 注入，对齐 deliverables
  * 白名单收敛同哲学）。
  */
@@ -259,14 +259,14 @@ export function assembleMusicDirectorPrompt(
           `真源优先：music_gen 回执的 score_abc 栏带 ABC 乐谱（K: 调号＋Q: 节拍＋V: Vocal 声部音符序列已齐）时，melody_notation 直接引用其 Vocal 声部，勿另行编造音名序列；score_abc 为 null 时仍由你自行标注。`,
         ]
       : []),
-    // 2026-09-19 编辑/翻唱委託指引（additive）：任务性质是「改编/翻唱/二次精修」时
+    // 2026-09-19 编辑/翻唱委托指引（additive）：任务性质是「改编/翻唱/二次精修」时
     // 指向 abc＋cot_mode 重渲染路径（工具参数由并行片接入）；措辞对齐上方
     // 「字段：值（判据）」格式。故意不含 melody_notation 字样（护栏测试断言
     // 无该交付栏时该词零出现）。
     `编辑路径：effect_description 性质为改编/翻唱/二次精修（判据：要求基于既有歌曲改风格/改和声/换语言，而非从零新写）时，music_gen 走 YuE2 通路带 abc＋cot_mode 重渲染（编辑用 cot=full 重渲染，翻唱用 cot=melody＋chord-free abc），编辑不变量与版本对比规约见 skills/music-director/SKILL.md「乐谱编辑与翻唱工作流」节。`,
     `参考素材：${delegation.reference_refs && delegation.reference_refs.length > 0 ? delegation.reference_refs.join("、") : "无"}`,
     // 2026-10-03 多版本偏好闸（additive）：music_gen 回执带 preference_question 时的处置契约。
-    // 音檔已随 audios[] 各自发一张 audio.done 卡，问题卡只指认版本；label→url 对照见 optionTakeUrls。
+    // 音档已随 audios[] 各自发一张 audio.done 卡，问题卡只指认版本；label→url 对照见 optionTakeUrls。
     "多版本偏好闸：music_gen 回执带 preference_question 字段时——asked: true 必须立刻用 question 工具把它抬给用户，question/header/options 逐字照抄回执字段，不得改写、不得增删选项（「都不行，重写」与「你替我定」两条退路已在 options 内）；拿到答复后，用回执里的 optionTakeUrls（label → url）把选中的 label 翻译成对应的音频 URL 作为定版，并在交付说明里写明「用户选定的版本」。asked: false 时不要弹卡，直接采用 suggestedIndex 指向的那一版（索引对齐 audios[]），并在交付说明里用 entropy.reason 的一句话解释为什么不问。",
   ].join("\n");
 
@@ -277,10 +277,10 @@ export function assembleMusicDirectorPrompt(
   let constitution: string;
   try {
     const raw = (context.loadConstitution ?? defaultLoadConstitution)();
-    // 空值視為不可用（跟隨 blender-director-persona 同款範式）：空字串／全空白
-    // 不得視為「已注入憲法」，否則產出無憲法派遣（裸奔，誠實鐵律禁止）。
+    // 空值视为不可用（跟随 blender-director-persona 同款范式）：空字串／全空白
+    // 不得视为「已注入宪法」，否则产出无宪法派遣（裸奔，诚实铁律禁止）。
     if (raw.trim() === "") {
-      throw new Error("载入器回傳空內容（空或全空白）");
+      throw new Error("载入器回传空内容（空或全空白）");
     }
     constitution = raw;
   } catch (e) {
@@ -295,7 +295,7 @@ export function assembleMusicDirectorPrompt(
 
 // ─────────────────────────────────────────── ③ 工具产物 → Expert 交付物（QC 签名 + 组装闸门）
 
-/** collect 的依赖：委託單原件（情绪契约回写 payload）+ 派工契约（回指可追溯）。 */
+/** collect 的依赖：委托单原件（情绪契约回写 payload）+ 派工契约（回指可追溯）。 */
 export interface MusicDeliverableCollectContext {
   /** 委托单原 emotion_contract（回写 payload.emotion_contract）。 */
   emotion_contract: LyriaMusicContract;

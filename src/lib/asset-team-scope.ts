@@ -1,39 +1,39 @@
-// /api/assets 的團隊閘（P0-2 資產團隊維度，寫入端）——自 route.ts 移出：
-// Next.js 的 route 模組只准匯出 HTTP handler 與路由設定，多匯出任何名字 build 即失敗。
+// /api/assets 的团队闸（P0-2 资产团队维度，写入端）——自 route.ts 移出：
+// Next.js 的 route 模组只准汇出 HTTP handler 与路由设定，多汇出任何名字 build 即失败。
 
 import { lookupTeamMembershipViaRelay, type TeamMembership } from "@/lib/team-membership-lookup";
 
-/** 團隊閘的成員查詢簽名（測試可注入；缺省＝真實 relay）。 */
+/** 团队闸的成员查询签名（测试可注入；缺省＝真实 relay）。 */
 export interface AssetsTeamGateDeps {
   membership?: (userId: number) => Promise<TeamMembership | null>;
 }
 
 /**
- * 團隊閘的注入點（**測試用**）：route handler 的簽名由 Next.js 的
- * `.next/types/validator` 釘死，第二參數必須是 `{ params: Promise<{}> }`，
- * 故不能把 deps 塞進簽名。改為模組層可覆寫（測試設、測完還原）。
- * 生產路徑下恆為 undefined → 走真實 relay 查詢。
+ * 团队闸的注入点（**测试用**）：route handler 的签名由 Next.js 的
+ * `.next/types/validator` 钉死，第二参数必须是 `{ params: Promise<{}> }`，
+ * 故不能把 deps 塞进签名。改为模组层可覆写（测试设、测完还原）。
+ * 生产路径下恒为 undefined → 走真实 relay 查询。
  */
 let teamGateDeps: AssetsTeamGateDeps = {};
 
-/** 生產路徑：未注入時走真實 relay 查成員身份。 */
+/** 生产路径：未注入时走真实 relay 查成员身份。 */
 export function lookupAssetsTeamMembership(userId: number): Promise<TeamMembership | null> {
   return teamGateDeps.membership ? teamGateDeps.membership(userId) : lookupTeamMembershipViaRelay(userId);
 }
 
-/** 僅測試：覆寫團隊閘的成員查詢（傳 undefined 還原真實 relay）。 */
+/** 仅测试：覆写团队闸的成员查询（传 undefined 还原真实 relay）。 */
 export function __setAssetsTeamGateDepsForTests(deps?: AssetsTeamGateDeps): void {
   teamGateDeps = deps ?? {};
 }
 
 /**
- * team 作用域的寫入端裁決（純函式，資料源＝relay 的 membership）。
+ * team 作用域的写入端裁决（纯函式，资料源＝relay 的 membership）。
  *
  * 回 `{ ok: true, scope }`：
- *  - 非 team 宣告 → 原樣（personal / project 完全不走這裡的團隊邏輯）
- *  - team 宣告 + relay 權威 teamId 且（客戶端沒送 teamId 或送的與權威值相符）→ team 作用域，teamId ＝ **權威值**
- * 回 `{ ok: false }`：宣告 team 但 teamId 對不上權威值 → 呼叫端**降級個人**（fail-open，
- * 不拒、不寫進別人的團隊；與畫布閘同語義）。
+ *  - 非 team 宣告 → 原样（personal / project 完全不走这里的团队逻辑）
+ *  - team 宣告 + relay 权威 teamId 且（客户端没送 teamId 或送的与权威值相符）→ team 作用域，teamId ＝ **权威值**
+ * 回 `{ ok: false }`：宣告 team 但 teamId 对不上权威值 → 呼叫端**降级个人**（fail-open，
+ * 不拒、不写进别人的团队；与画布闸同语义）。
  */
 export function decideTeamAssetScope(input: {
   declaredTeamId: unknown;

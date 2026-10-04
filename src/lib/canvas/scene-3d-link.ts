@@ -1,58 +1,58 @@
-// 桌面 Blender → 站內畫布的一次性連接碼（stateless signed code）。
+// 桌面 Blender → 站内画布的一次性连接码（stateless signed code）。
 //
-// 為什麼要有這一層：瀏覽器外的 Blender 進程沒有 cookie，但上傳必須以某個登入用戶
-// 的身份落地（`/api/canvas/scene-3d` 的物件鍵含 userId）。做法＝站內（已登入）鑄一段
-// 短命憑證，用戶手動搬進 Blender，上傳路由驗簽換回 userId。
+// 为什么要有这一层：浏览器外的 Blender 进程没有 cookie，但上传必须以某个登入用户
+// 的身份落地（`/api/canvas/scene-3d` 的物件键含 userId）。做法＝站内（已登入）铸一段
+// 短命凭证，用户手动搬进 Blender，上传路由验签换回 userId。
 //
-// 輪子來源（禁造輪子）：本檔逐行照抄 `src/lib/emu-oauth.ts` 的同類實現——同樣是
-// 「瀏覽器外客戶端拿一次性 HMAC 憑證」那條路。白名單差異只有五處，其餘
-// （base64url + "." + HMAC-SHA256 hex、按最後一個 "." 切分、timingSafeEqual、
-// 數字嚴格校驗、任何失敗都不拋）逐字同源：
-//   ① TTL 60 秒 → 15 分鐘（本碼要肉眼複製再粘進 Blender，60 秒不夠）；
-//   ② 密鑰 env：`EMU_OAUTH_SECRET`(+`GITHUB_CLIENT_SECRET` 回退) → `SCENE_3D_LINK_SECRET`
-//      （**故意不回退**：域隔離，見下）；
-//   ③ payload 加域前綴 `scene-3d-link.`；
-//   ④ 驗簽回報失敗原因（invalid / expired / not_configured），讓路由能給人話，
-//      而不是把「過期」和「偽造」混成同一個 null；
-//   ⑤ 驗簽前先擋長度（>512 一律 invalid，不讓超長字串進 base64 解碼）。
+// 轮子来源（禁造轮子）：本档逐行照抄 `src/lib/emu-oauth.ts` 的同类实现——同样是
+// 「浏览器外客户端拿一次性 HMAC 凭证」那条路。白名单差异只有五处，其余
+// （base64url + "." + HMAC-SHA256 hex、按最后一个 "." 切分、timingSafeEqual、
+// 数字严格校验、任何失败都不抛）逐字同源：
+//   ① TTL 60 秒 → 15 分钟（本码要肉眼复制再粘进 Blender，60 秒不够）；
+//   ② 密钥 env：`EMU_OAUTH_SECRET`(+`GITHUB_CLIENT_SECRET` 回退) → `SCENE_3D_LINK_SECRET`
+//      （**故意不回退**：域隔离，见下）；
+//   ③ payload 加域前缀 `scene-3d-link.`；
+//   ④ 验签回报失败原因（invalid / expired / not_configured），让路由能给人话，
+//      而不是把「过期」和「伪造」混成同一个 null；
+//   ⑤ 验签前先挡长度（>512 一律 invalid，不让超长字串进 base64 解码）。
 //
-// **為什麼 payload 必須帶域前綴**：`emu-oauth.ts` 的碼可以到
-// `/api/auth/emu-oauth/exchange` 換一把 B 端密鑰。若兩者同密鑰同格式，畫布上顯示給
-// 用戶複製的那串連碼就等於一把「可鑄 key」的憑證——把「能上傳一個模型」的爆炸半徑
-// 升級成「能鑄 B 端密鑰」。域前綴（＋各自獨立的 env）讓兩種碼互不通用，任一方的
-// 密鑰洩露或輪換都不會波及另一方。
+// **为什么 payload 必须带域前缀**：`emu-oauth.ts` 的码可以到
+// `/api/auth/emu-oauth/exchange` 换一把 B 端密钥。若两者同密钥同格式，画布上显示给
+// 用户复制的那串连码就等于一把「可铸 key」的凭证——把「能上传一个模型」的爆炸半径
+// 升级成「能铸 B 端密钥」。域前缀（＋各自独立的 env）让两种码互不通用，任一方的
+// 密钥泄露或轮换都不会波及另一方。
 //
-// **為什麼不新增存儲**：簽章自證——碼改一個位元組簽章就對不上，驗證只需重算一次
-// HMAC，不必查表、不必寫庫。於是沒有可被重放的長期 token，也沒有過期記錄要清理；
-// 站內不需要為此加一張表或一個 KV。代價＝鑄出的碼在 TTL 內**無法單獨吊銷**（只能等
-// 它自己過期，或輪換 `SCENE_3D_LINK_SECRET` 一次作廢全部未過期的碼）。這是本方案的
-// 誠實上限，寫在這裡而不是假裝有吊銷能力。
+// **为什么不新增存储**：签章自证——码改一个位元组签章就对不上，验证只需重算一次
+// HMAC，不必查表、不必写库。于是没有可被重放的长期 token，也没有过期记录要清理；
+// 站内不需要为此加一张表或一个 KV。代价＝铸出的码在 TTL 内**无法单独吊销**（只能等
+// 它自己过期，或轮换 `SCENE_3D_LINK_SECRET` 一次作废全部未过期的码）。这是本方案的
+// 诚实上限，写在这里而不是假装有吊销能力。
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * 連接碼有效期：15 分鐘。
+ * 连接码有效期：15 分钟。
  *
- * 下限＝用戶複製碼、切到 Blender、粘上、點「导出」的現實時間（跨應用手動操作）。
- * 上限＝這串碼一旦被撿走，在過期前就是該用戶的上傳權；15 分鐘是「來得及用」與
- * 「洩露窗口夠短」的折中。
+ * 下限＝用户复制码、切到 Blender、粘上、点「导出」的现实时间（跨应用手动操作）。
+ * 上限＝这串码一旦被捡走，在过期前就是该用户的上传权；15 分钟是「来得及用」与
+ * 「泄露窗口够短」的折中。
  */
 export const SCENE_3D_LINK_TTL_MS = 15 * 60_000;
 
-/** 域前綴：讓本碼與 emu-oauth 的碼在密碼學上互不通用（見檔頭第 ③ 條）。 */
+/** 域前缀：让本码与 emu-oauth 的码在密码学上互不通用（见档头第 ③ 条）。 */
 export const SCENE_3D_LINK_PURPOSE = "scene-3d-link";
 
-/** 驗簽長度上限：正常碼 ≈ 90 字元，512 已留足餘裕；更長的直接判無效。 */
+/** 验签长度上限：正常码 ≈ 90 字元，512 已留足余裕；更长的直接判无效。 */
 const MAX_LINK_CODE_LENGTH = 512;
 
 /**
- * 簽名密鑰：`SCENE_3D_LINK_SECRET`，**沒有回退、沒有預設值**。
+ * 签名密钥：`SCENE_3D_LINK_SECRET`，**没有回退、没有预设值**。
  *
  * 照抄 `emu-oauth.ts` 的 `emuOauthSecret()` / `admin-session.ts` 的 `sessionSecret()`
- * 讀法（`process.env.X?.trim()` → 缺值即拋），差別只在「不許回退到別的 env」：
- * 回退會讓兩個互不相干的安全域共用一把密鑰，輪換其中一方的密鑰會意外作廢另一方，
- * 洩露一方的密鑰也等於洩露另一方。缺值時**誠實失敗**（鑄碼端點回 503），
- * 不降級成「用某個內建常數簽」——那等同完全沒有簽章。
+ * 读法（`process.env.X?.trim()` → 缺值即抛），差别只在「不许回退到别的 env」：
+ * 回退会让两个互不相干的安全域共用一把密钥，轮换其中一方的密钥会意外作废另一方，
+ * 泄露一方的密钥也等于泄露另一方。缺值时**诚实失败**（铸码端点回 503），
+ * 不降级成「用某个内建常数签」——那等同完全没有签章。
  */
 export function scene3dLinkSecret(): string {
   const secret = process.env.SCENE_3D_LINK_SECRET?.trim();
@@ -60,18 +60,18 @@ export function scene3dLinkSecret(): string {
   return secret;
 }
 
-/** 密鑰是否已配置（給路由決定 503 用，不拋）。 */
+/** 密钥是否已配置（给路由决定 503 用，不抛）。 */
 export function scene3dLinkConfigured(): boolean {
   return Boolean(process.env.SCENE_3D_LINK_SECRET?.trim());
 }
 
 /**
- * 可被連接碼代表的 userId 判據（**簽發與驗證共用同一份**，不寫兩次）。
+ * 可被连接码代表的 userId 判据（**签发与验证共用同一份**，不写两次）。
  *
- * 為什麼要擋 `<= 0`：本地測試模式（`NEXT_PUBLIC_LOCAL_TEST_MODE`）下
- * `authenticateImageUser` 會放行一個 `id: 0` 的假身分。若不擋，站點會鑄出一串
- * 驗簽端必然拒絕的碼——用戶拿著一串看起來正常、上傳必失敗的憑證，比一開始就
- * 被誠實拒絕更糟。
+ * 为什么要挡 `<= 0`：本地测试模式（`NEXT_PUBLIC_LOCAL_TEST_MODE`）下
+ * `authenticateImageUser` 会放行一个 `id: 0` 的假身分。若不挡，站点会铸出一串
+ * 验签端必然拒绝的码——用户拿著一串看起来正常、上传必失败的凭证，比一开始就
+ * 被诚实拒绝更糟。
  */
 export function isLinkableUserId(userId: number): boolean {
   return Number.isSafeInteger(userId) && userId > 0;
@@ -90,10 +90,10 @@ function signHmac(secret: string, payload: string): string {
 }
 
 /**
- * 簽發：payload = `scene-3d-link.{userId}.{expiry}`，code = base64url(payload) + "." + hmacHex。
- * base64url 不含 "."，所以按最後一個 "." 拆分即可還原兩段（與 emu-oauth 同規則）。
+ * 签发：payload = `scene-3d-link.{userId}.{expiry}`，code = base64url(payload) + "." + hmacHex。
+ * base64url 不含 "."，所以按最后一个 "." 拆分即可还原两段（与 emu-oauth 同规则）。
  *
- * `ttlMs` 可注入：測試用負值鑄一張「已過期」的碼，不必改時鐘。
+ * `ttlMs` 可注入：测试用负值铸一张「已过期」的码，不必改时钟。
  */
 export function signScene3dLinkCode(
   userId: number,
@@ -106,13 +106,13 @@ export function signScene3dLinkCode(
 }
 
 /**
- * 驗簽：切兩段 → 驗 HMAC（timingSafeEqual）→ 驗域前綴 → 驗過期 → 回 userId。
+ * 验签：切两段 → 验 HMAC（timingSafeEqual）→ 验域前缀 → 验过期 → 回 userId。
  *
- * 順序是本檔的關鍵：**先驗簽，再看域與時效**。簽章對不上的碼不回報「已過期」，
- * 避免給攻擊者一個「格式對了、只是舊了」的假訊號；也只有簽章有效時，
- * 「過期」這個判定才是可信的。
+ * 顺序是本档的关键：**先验签，再看域与时效**。签章对不上的码不回报「已过期」，
+ * 避免给攻击者一个「格式对了、只是旧了」的假讯号；也只有签章有效时，
+ * 「过期」这个判定才是可信的。
  *
- * 任何一步失敗都不拋，回 `{ ok: false, reason }`，由呼叫端決定狀態碼與文案。
+ * 任何一步失败都不抛，回 `{ ok: false, reason }`，由呼叫端决定状态码与文案。
  */
 export function verifyScene3dLinkCode(code: string): Scene3dLinkVerify {
   if (!scene3dLinkConfigured()) return { ok: false, reason: "not_configured" };
@@ -127,7 +127,7 @@ export function verifyScene3dLinkCode(code: string): Scene3dLinkVerify {
   const payloadEncoded = raw.slice(0, dot);
   const signature = raw.slice(dot + 1);
 
-  // base64url 解碼對非法字元寬容，解碼結果交給下面的嚴格數字校驗兜底（同 emu-oauth）。
+  // base64url 解码对非法字元宽容，解码结果交给下面的严格数字校验兜底（同 emu-oauth）。
   const payload = Buffer.from(payloadEncoded, "base64url").toString("utf8");
   const parts = payload.split(".");
   if (parts.length !== 3) return { ok: false, reason: "invalid" };
@@ -152,7 +152,7 @@ export function verifyScene3dLinkCode(code: string): Scene3dLinkVerify {
     return { ok: false, reason: "not_configured" };
   }
 
-  // 簽章有效 ⇒ 這確實是本服務簽出的碼，域前綴不符才是異常（別的用途的碼）。
+  // 签章有效 ⇒ 这确实是本服务签出的码，域前缀不符才是异常（别的用途的码）。
   if (purpose !== SCENE_3D_LINK_PURPOSE) return { ok: false, reason: "invalid" };
   if (expiresAt <= Date.now()) return { ok: false, reason: "expired" };
 
@@ -160,9 +160,9 @@ export function verifyScene3dLinkCode(code: string): Scene3dLinkVerify {
 }
 
 /**
- * 從 `Authorization` 標頭取出 `Bearer <x>` 的 `<x>`；不是 Bearer 形態回 null。
+ * 从 `Authorization` 标头取出 `Bearer <x>` 的 `<x>`；不是 Bearer 形态回 null。
  *
- * 與上傳路由共用同一份解析（不在路由裡重寫一份 regex）。
+ * 与上传路由共用同一份解析（不在路由里重写一份 regex）。
  */
 export function scene3dLinkBearer(headers: { get(name: string): string | null }): string | null {
   const header = headers.get("authorization");

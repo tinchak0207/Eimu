@@ -11,13 +11,13 @@ export interface CanvasConnectionsProps {
   /** 高亮的连线（例如选中节点的相邻线） */
   activeNodeId?: string | null;
   onSelectConnection?: (connectionId: string) => void;
-  /** A5：選中的連線（點擊選中 → Delete 可刪）。 */
+  /** A5：选中的连线（点击选中 → Delete 可删）。 */
   selectedConnectionId?: string | null;
-  /** A5：連線右鍵（clientX/Y 為 viewport 座標，宿主自行換算）。 */
+  /** A5：连线右键（clientX/Y 为 viewport 座标，宿主自行换算）。 */
   onConnectionContextMenu?: (connectionId: string, clientX: number, clientY: number) => void;
-  /** 連線拖拽中的預覽路徑（世界座標 SVG path d）；null = 沒在拖。 */
+  /** 连线拖拽中的预览路径（世界座标 SVG path d）；null = 没在拖。 */
   pendingPath?: string | null;
-  /** 語義縮放：聚合中不可點（連線淡出時不攔截手勢）。缺省 true。 */
+  /** 语义缩放：聚合中不可点（连线淡出时不拦截手势）。缺省 true。 */
   interactive?: boolean;
 }
 
@@ -83,9 +83,9 @@ function CanvasConnectionsView({
         const d = bezierPath(from, to);
         return (
           <g key={c.id}>
-            {/* 透明命中区：负责接收点击。螢幕上恆約 24px 寬（縮放時用
-                --canvas-inverse-scale 反向補償，手指在任意縮放級別都點得到），
-                觸控點擊用 manipulation 避免任何點擊延遲。 */}
+            {/* 透明命中区：负责接收点击。萤幕上恒约 24px 宽（缩放时用
+                --canvas-inverse-scale 反向补偿，手指在任意缩放级别都点得到），
+                触控点击用 manipulation 避免任何点击延迟。 */}
             <path
               d={d}
               fill="none"
@@ -104,7 +104,7 @@ function CanvasConnectionsView({
                 onConnectionContextMenu(c.id, e.clientX, e.clientY);
               }}
             />
-            {/* 可见连线（選中 = 更粗更藍，Delete 可刪） */}
+            {/* 可见连线（选中 = 更粗更蓝，Delete 可删） */}
             <path
               d={d}
               fill="none"
@@ -116,7 +116,7 @@ function CanvasConnectionsView({
           </g>
         );
       })}
-      {/* 連線拖拽預覽：藍色虛線，不吃指標事件 */}
+      {/* 连线拖拽预览：蓝色虚线，不吃指标事件 */}
       {pendingPath && (
         <path
           d={pendingPath}
@@ -133,7 +133,7 @@ function CanvasConnectionsView({
 
 const MemoCanvasConnections = memo(CanvasConnectionsView);
 
-/** memo＋穩定 on* 代理：平移/縮放每幀不重算所有連線路徑。 */
+/** memo＋稳定 on* 代理：平移/缩放每帧不重算所有连线路径。 */
 function CanvasConnections(props: CanvasConnectionsProps) {
   return <MemoCanvasConnections {...useStableHandlers(props)} />;
 }

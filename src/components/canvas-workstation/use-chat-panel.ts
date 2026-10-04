@@ -2,25 +2,25 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-/** 面板拖寬範圍（與 CSS 默認 clamp 同族，2026-09-24 用戶版面方案上限 560→720）。 */
+/** 面板拖宽范围（与 CSS 默认 clamp 同族，2026-09-24 用户版面方案上限 560→720）。 */
 export const CHAT_PANEL_MIN_WIDTH = 320;
 export const CHAT_PANEL_MAX_WIDTH = 720;
 
 /**
- * 寬度持久化 v2 key（2026-09-24 垃圾值大赦，暴君回報「Ctrl+Shift+R 聊天框先佔
- * 幾乎半屏、秒縮回 30% 以下，非常恐怖」）：只認「用戶真的拖過寬」寫入的值。
- * 舊 key（v1 時代）存的是垃圾——useState(420) 時代 mount effect 無條件落盤 420、
- * 40vw mount effect 落盤舊視口快照——視口變了或從未手動拖過時該值 ≠ CSS 默認，
- * 造成「首幀 clamp（40vw 半屏）→ 水合後被垃圾值縮回」的跳變。v1 一律不讀，
- * 載入即 removeItem 清除。layout.tsx 的 pre-paint 同步腳本與本檔讀同一個 v2、
- * 同一套校驗（320–720 整數；下限取拖寬底 320 而非 clamp 底 360——用戶真的拖到
- * 320 時若腳本拒認，首幀 clamp 水合後跳 320，同款跳變只是換了方向）。
+ * 宽度持久化 v2 key（2026-09-24 垃圾值大赦，暴君回报「Ctrl+Shift+R 聊天框先占
+ * 几乎半屏、秒缩回 30% 以下，非常恐怖」）：只认「用户真的拖过宽」写入的值。
+ * 旧 key（v1 时代）存的是垃圾——useState(420) 时代 mount effect 无条件落盘 420、
+ * 40vw mount effect 落盘旧视口快照——视口变了或从未手动拖过时该值 ≠ CSS 默认，
+ * 造成「首帧 clamp（40vw 半屏）→ 水合后被垃圾值缩回」的跳变。v1 一律不读，
+ * 载入即 removeItem 清除。layout.tsx 的 pre-paint 同步脚本与本档读同一个 v2、
+ * 同一套校验（320–720 整数；下限取拖宽底 320 而非 clamp 底 360——用户真的拖到
+ * 320 时若脚本拒认，首帧 clamp 水合后跳 320，同款跳变只是换了方向）。
  */
 export const CHAT_PANEL_WIDTH_STORAGE_KEY = "canvas-chat-panel-width.v2";
-/** 已作廢的 v1 key：只准 removeItem，禁止任何讀取。 */
+/** 已作废的 v1 key：只准 removeItem，禁止任何读取。 */
 export const CHAT_PANEL_WIDTH_LEGACY_KEY = "canvas-chat-panel-width";
 
-/** v2 存值校驗：320–720 的整數才可信；其餘（null/空字串/浮點/越界）＝無存值。 */
+/** v2 存值校验：320–720 的整数才可信；其余（null/空字串/浮点/越界）＝无存值。 */
 export function parseStoredPanelWidth(raw: string | null): number | null {
   if (raw === null) return null;
   const w = Number(raw);
@@ -29,35 +29,35 @@ export function parseStoredPanelWidth(raw: string | null): number | null {
 }
 
 /**
- * 畫布工作站聊天面板的私有狀態：expanded|rail 兩態 + 右緣拖寬（320–720px），
- * localStorage 記憶。面板殼（樣式/overlay/拖寬手柄）在 CanvasChatWorkstation，
- * 這裡只持有 state 與持久化 effect——呼叫方是面板殼組件本身，對外零 props。
+ * 画布工作站聊天面板的私有状态：expanded|rail 两态 + 右缘拖宽（320–720px），
+ * localStorage 记忆。面板壳（样式/overlay/拖宽手柄）在 CanvasChatWorkstation，
+ * 这里只持有 state 与持久化 effect——呼叫方是面板壳组件本身，对外零 props。
  *
- * 寬度單一真相源（2026-09-24 首秒零回縮 + 同日追殺回填跳變）：面板寬的唯一
- * 表示是 CSS 自訂屬性 --ws-panel-w——面板 width、overlay 的 --ce-dock-left、
- * navbar 的 --ws-navbar-inset 全部讀它。其值有兩源：
- *   - 無存值：CSS :root 默認 clamp(360px,40vw,720px)（宣告在 CanvasChatWorkstation
- *     的 <style>），SSR 首幀即新用戶終態——JS 什麼都不寫；
- *   - 有 v2 存值：由 <head>/body 頂端的 pre-paint 同步腳本（src/app/layout.tsx）
- *     在首個 paint 前把顯式 px 寫進 <html>——「首幀即終態」對冷載入（Ctrl+Shift+R）
- *     同樣成立。useLayoutEffect 對冷載入無能為力：HTML+CSS 早已繪出第一幀，
- *     水合再「paint 前」寫入也已是 paint 之後的第二次變更。本檔初始態經
- *     readStoredPanelWidth() 同步讀同一個 v2，mount 時 useLayoutEffect 重寫
- *     同一值＝零視覺變化；React markup 從不內聯 width，SSR 端不讀 window 也
- *     不產生 hydration mismatch。
- * 舊實裝「初始值 420 + mount effect 改寫視口 40%」與「useLayoutEffect 讀舊
- * localStorage 回填」兩代都是 reload 跳變元凶，已全部拆掉。
+ * 宽度单一真相源（2026-09-24 首秒零回缩 + 同日追杀回填跳变）：面板宽的唯一
+ * 表示是 CSS 自订属性 --ws-panel-w——面板 width、overlay 的 --ce-dock-left、
+ * navbar 的 --ws-navbar-inset 全部读它。其值有两源：
+ *   - 无存值：CSS :root 默认 clamp(360px,40vw,720px)（宣告在 CanvasChatWorkstation
+ *     的 <style>），SSR 首帧即新用户终态——JS 什么都不写；
+ *   - 有 v2 存值：由 <head>/body 顶端的 pre-paint 同步脚本（src/app/layout.tsx）
+ *     在首个 paint 前把显式 px 写进 <html>——「首帧即终态」对冷载入（Ctrl+Shift+R）
+ *     同样成立。useLayoutEffect 对冷载入无能为力：HTML+CSS 早已绘出第一帧，
+ *     水合再「paint 前」写入也已是 paint 之后的第二次变更。本档初始态经
+ *     readStoredPanelWidth() 同步读同一个 v2，mount 时 useLayoutEffect 重写
+ *     同一值＝零视觉变化；React markup 从不内联 width，SSR 端不读 window 也
+ *     不产生 hydration mismatch。
+ * 旧实装「初始值 420 + mount effect 改写视口 40%」与「useLayoutEffect 读旧
+ * localStorage 回填」两代都是 reload 跳变元凶，已全部拆掉。
  *
- * rail 態讀取已大赦（2026-09-24 第二跳變源）：收合鈕 09-05 從 UI 裁掉後，
- * rail 對現行 UI 不可達，任何 state="rail" 持久值都是純舊垃圾；水合後載入它
- * 會讓面板從首幀 expanded 縮成 44px FAB（比寬度跳變更誇張），故一律不讀。
- * state 持久化寫入保留（恒為 expanded，向後相容舊讀取方）。
+ * rail 态读取已大赦（2026-09-24 第二跳变源）：收合钮 09-05 从 UI 裁掉后，
+ * rail 对现行 UI 不可达，任何 state="rail" 持久值都是纯旧垃圾；水合后载入它
+ * 会让面板从首帧 expanded 缩成 44px FAB（比宽度跳变更夸张），故一律不读。
+ * state 持久化写入保留（恒为 expanded，向后相容旧读取方）。
  */
 export function useChatPanel() {
   const [chatPanelState, setChatPanelState] = useState<"expanded" | "rail">("expanded");
-  // 初始態＝同步讀同一個校驗過的 v2（SSR 端 typeof window 守衛回 null）。
-  // 這裡不能留 null 等 useLayoutEffect 回填：null 会让 mount 時的寫入 effect
-  // removeProperty 掉 pre-paint 腳本剛設好的顯式寬——跳變只是換了方向。
+  // 初始态＝同步读同一个校验过的 v2（SSR 端 typeof window 守卫回 null）。
+  // 这里不能留 null 等 useLayoutEffect 回填：null 会让 mount 时的写入 effect
+  // removeProperty 掉 pre-paint 脚本刚设好的显式宽——跳变只是换了方向。
   const [chatPanelWidth, setChatPanelWidth] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
     try {
@@ -67,34 +67,34 @@ export function useChatPanel() {
     }
   });
   const chatPanelDragRef = useRef<{ pointerId: number; startX: number; startW: number } | null>(null);
-  // 面板殼 DOM：拖寬起始值要 getBoundingClientRect().width 實測——
-  // chatPanelWidth 為 null 時寬度活在 CSS 側，JS 從來不知道它是幾。
+  // 面板壳 DOM：拖宽起始值要 getBoundingClientRect().width 实测——
+  // chatPanelWidth 为 null 时宽度活在 CSS 侧，JS 从来不知道它是几。
   const chatPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem("canvas-chat-panel-state", chatPanelState);
   }, [chatPanelState]);
-  // 持久化只收顯式寬度（用戶真的拖過），且只寫 v2；null = CSS 默認跟隨視口，
-  // 禁止固化落盤（舊實裝連默認值都寫進 localStorage，把「40vw 跟視口」的活
-  // 語義釘死成 px，且首個 commit 先落盤初始值——全部不再可能：state 為 null
-  // 時根本不寫）。舊 key 垃圾值順手清除，永絕後患。
+  // 持久化只收显式宽度（用户真的拖过），且只写 v2；null = CSS 默认跟随视口，
+  // 禁止固化落盘（旧实装连默认值都写进 localStorage，把「40vw 跟视口」的活
+  // 语义钉死成 px，且首个 commit 先落盘初始值——全部不再可能：state 为 null
+  // 时根本不写）。旧 key 垃圾值顺手清除，永绝后患。
   useEffect(() => {
     try {
       window.localStorage.removeItem(CHAT_PANEL_WIDTH_LEGACY_KEY);
     } catch {
-      /* 無存儲環境靜默 */
+      /* 无存储环境静默 */
     }
     if (chatPanelWidth === null) return;
     try {
       window.localStorage.setItem(CHAT_PANEL_WIDTH_STORAGE_KEY, String(chatPanelWidth));
     } catch {
-      /* 無存儲環境靜默 */
+      /* 无存储环境静默 */
     }
   }, [chatPanelWidth]);
-  // --ws-panel-w 唯一 JS 寫入端：有顯式值→寫 px；無→移除，讓 CSS :root 默認
-  // （clamp）接管。useLayoutEffect = 首個 effect、paint 前完成；此刻 width
-  // transition 的 settled 閘還未開啟，寫入＝瞬變終值零動畫。冷載入的首幀前
-  // 套用由 layout.tsx pre-paint 腳本完成，本 effect 重寫同一值＝零跳。
+  // --ws-panel-w 唯一 JS 写入端：有显式值→写 px；无→移除，让 CSS :root 默认
+  // （clamp）接管。useLayoutEffect = 首个 effect、paint 前完成；此刻 width
+  // transition 的 settled 闸还未开启，写入＝瞬变终值零动画。冷载入的首帧前
+  // 套用由 layout.tsx pre-paint 脚本完成，本 effect 重写同一值＝零跳。
   useLayoutEffect(() => {
     if (chatPanelWidth === null) {
       document.documentElement.style.removeProperty("--ws-panel-w");

@@ -2,12 +2,12 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, resolveKey } from "../lib/client"
 
 // TTS 走 gateway（loopback /agent/v1/tts），不是平台 API_BASE——
-// 平台 /v1/* 沒有 tts 端點（實測 404）。
+// 平台 /v1/* 没有 tts 端点（实测 404）。
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
 export default tool({
   description:
-    "配音（TTS）：输入一句台词文本（中文），同步生成语音，返回音频 URL。用于剧本台词配音、旁白、单句 voiceover。\n\n【诚实纪律】上游 TTS 供应商当前不可用时，本工具会返回 tts_unavailable 错误——此时必须向用户如实说明「配音上游暂缺，无法生成音轨」，严禁编造音频链接或用文字冒充音频。上游恢复后本工具自动可用，无需换路。\n\n【成本】按字符计价（当前 0 幣/字符，定价权威在 gateway pricing 模块，以工具返回的 cost_coins 为准）。",
+    "配音（TTS）：输入一句台词文本（中文），同步生成语音，返回音频 URL。用于剧本台词配音、旁白、单句 voiceover。\n\n【诚实纪律】上游 TTS 供应商当前不可用时，本工具会返回 tts_unavailable 错误——此时必须向用户如实说明「配音上游暂缺，无法生成音轨」，严禁编造音频链接或用文字冒充音频。上游恢复后本工具自动可用，无需换路。\n\n【成本】按字符计价（当前 0 币/字符，定价权威在 gateway pricing 模块，以工具返回的 cost_coins 为准）。",
   args: {
     text: tool.schema
       .string()

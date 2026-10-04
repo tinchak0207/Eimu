@@ -1,10 +1,10 @@
-// nodeToAssetPackItems 純函式測試：expected-pass。
-// 只斷言已落地的轉換契約（prompt / lora / image / 標題回落 / 去空格）。
+// nodeToAssetPackItems 纯函式测试：expected-pass。
+// 只断言已落地的转换契约（prompt / lora / image / 标题回落 / 去空格）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { nodeToAssetPackItems } from "./node-to-asset-items";
 
-test("有 prompt → 產生 prompt item，含 canvas source", () => {
+test("有 prompt → 产生 prompt item，含 canvas source", () => {
   const items = nodeToAssetPackItems({ id: "n1", title: "主提示", prompt: "一个女孩" });
   assert.equal(items.length, 1);
   assert.equal(items[0].kind, "prompt");
@@ -13,12 +13,12 @@ test("有 prompt → 產生 prompt item，含 canvas source", () => {
   assert.deepEqual(items[0].source, { type: "canvas", id: "n1" });
 });
 
-test("prompt 標題缺失 → 回落「画布提示词」", () => {
+test("prompt 标题缺失 → 回落「画布提示词」", () => {
   const items = nodeToAssetPackItems({ id: "n2", prompt: "x" });
   assert.equal(items[0].title, "画布提示词");
 });
 
-test("有 LoRA → 額外產生 lora item，取第一個 loraVersionId", () => {
+test("有 LoRA → 额外产生 lora item，取第一个 loraVersionId", () => {
   const items = nodeToAssetPackItems({
     id: "n3",
     prompt: "x",
@@ -31,7 +31,7 @@ test("有 LoRA → 額外產生 lora item，取第一個 loraVersionId", () => {
   assert.equal(lora.title, "LoRA");
 });
 
-test("無 prompt 但只有 lora / image → 仍產出對應 item", () => {
+test("无 prompt 但只有 lora / image → 仍产出对应 item", () => {
   const items = nodeToAssetPackItems({
     id: "n4",
     loraModelVersionIds: ["l1"],
@@ -43,12 +43,12 @@ test("無 prompt 但只有 lora / image → 仍產出對應 item", () => {
   assert.ok(!items.some((i) => i.kind === "prompt"));
 });
 
-test("空節點（無 prompt / lora / image）→ 空陣列", () => {
+test("空节点（无 prompt / lora / image）→ 空阵列", () => {
   assert.deepEqual(nodeToAssetPackItems({ id: "n5" }), []);
   assert.deepEqual(nodeToAssetPackItems({ id: "n6", prompt: "   " }), []);
 });
 
-test("prompt 帶 modelId / size → 帶入 item；空白則省略", () => {
+test("prompt 带 modelId / size → 带入 item；空白则省略", () => {
   const withMeta = nodeToAssetPackItems({ id: "n7", prompt: "x", modelId: "m1", size: "1024x1024" });
   assert.equal(withMeta[0].modelId, "m1");
   assert.equal(withMeta[0].size, "1024x1024");

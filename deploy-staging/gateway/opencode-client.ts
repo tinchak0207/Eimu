@@ -1,11 +1,11 @@
-// 從 index.ts 無損抽取（2026-09-19 第二階段 Wave1）：opencode client——opencodeHeaders/會話摘要標題鏈 fetchOpencodeTitle/scheduleTitleFetch（原 index.ts 431–497 行）＋connectOpencode 全局 SSE 讀循環（原 index.ts 4087–4137 行）。
+// 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave1）：opencode client——opencodeHeaders/会话摘要标题链 fetchOpencodeTitle/scheduleTitleFetch（原 index.ts 431–497 行）＋connectOpencode 全局 SSE 读循环（原 index.ts 4087–4137 行）。
 import { OPENCODE_PASSWORD, OPENCODE_URL } from "./constants-gateway.ts"
 import { sleep } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { sessions, markDirty } from "./sessions-core.ts"
 import { handleOpencodeEvent } from "./opencode-event-handler.ts"
-// TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export 的 named import 報錯，已實測 2026-09-19）。
-// 依第一階段 subagent 佔位符法（記憶 gateway-index-refactor-stage1-0919）：declare 佔位可過 bun build；整合 subagent 統一換真 import 或於 index.ts 補 export。
+// TODO(整合)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build 对未 export 的 named import 报错，已实测 2026-09-19）。
+// 依第一阶段 subagent 占位符法（记忆 gateway-index-refactor-stage1-0919）：declare 占位可过 bun build；整合 subagent 统一换真 import 或于 index.ts 补 export。
 // ---- opencode client helpers ----
 
 export function opencodeHeaders(): Record<string, string> {
@@ -15,9 +15,9 @@ export function opencodeHeaders(): Record<string, string> {
   }
 }
 
-// 呼叫層統一入口（2026-09-20 接縫收口）：拼 OPENCODE_URL + opencodeHeaders + 預設
-// 30s timeout（timeoutMs 可逐點覆蓋，各呼叫點原 timeout 值逐點保留）。僅替代
-// 拼URL/headers/timeout 三件事；res.ok 判定與錯誤處理結構仍由呼叫端持有。
+// 呼叫层统一入口（2026-09-20 接缝收口）：拼 OPENCODE_URL + opencodeHeaders + 预设
+// 30s timeout（timeoutMs 可逐点覆盖，各呼叫点原 timeout 值逐点保留）。仅替代
+// 拼URL/headers/timeout 三件事；res.ok 判定与错误处理结构仍由呼叫端持有。
 export async function opencodeFetch(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
   const { timeoutMs = 30000, ...rest } = init ?? {}
   const controller = new AbortController()
@@ -33,23 +33,23 @@ export async function opencodeFetch(path: string, init?: RequestInit & { timeout
   }
 }
 
-// opencodeFetch + res.ok 檢查（!ok 拋錯，訊息帶 status 與 path）+ res.json()。
+// opencodeFetch + res.ok 检查（!ok 抛错，讯息带 status 与 path）+ res.json()。
 export async function opencodeJson<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const res = await opencodeFetch(path, init)
   if (!res.ok) throw new Error(`opencode ${path} failed: HTTP ${res.status}`)
   return (await res.json()) as T
 }
 
-// ── 重試前撤死尾（2026-10-01 重複 user 訊息事故）─────────────────────
-// 重試出口（failover/jitter/watchdog/midturn-stall/idle-step）用 prompt_async 重投時，
-// opencode 會「新增」一條 user 訊息，上一次失敗的那條（及其後零產出的 assistant）仍留在
-// 歷史裡：E2E 實錘續寫提示 2s 內疊兩條、零正文抖動重投 40s 內同一 user 訊息疊 5 條。
-// 修法：重投前找最後一條 user 訊息 U；U 之後的 assistant 全部零產出（無非空 text、
-// 無 tool、無其他未知 part；reasoning/step-start/step-finish/retry 不算產出）→
-// POST /session/{id}/revert {messageID: U}，opencode 於下一次 prompt 時 cleanup 掉
-// U 與其後全部訊息（2026-10-01 一次性會話實測 /message 與 /prompt_async 兩路皆生效）。
-// U 之後已有產出（工具已跑/正文已出）→ 不動（保留部分輸出，續寫提示接在其後）。
-// 全程短 timeout；任何失敗回 false 只記 log，絕不擋重試（失敗＝退回原行為）。
+// ── 重试前撤死尾（2026-10-01 重复 user 讯息事故）─────────────────────
+// 重试出口（failover/jitter/watchdog/midturn-stall/idle-step）用 prompt_async 重投时，
+// opencode 会「新增」一条 user 讯息，上一次失败的那条（及其后零产出的 assistant）仍留在
+// 历史里：E2E 实锤续写提示 2s 内叠两条、零正文抖动重投 40s 内同一 user 讯息叠 5 条。
+// 修法：重投前找最后一条 user 讯息 U；U 之后的 assistant 全部零产出（无非空 text、
+// 无 tool、无其他未知 part；reasoning/step-start/step-finish/retry 不算产出）→
+// POST /session/{id}/revert {messageID: U}，opencode 于下一次 prompt 时 cleanup 掉
+// U 与其后全部讯息（2026-10-01 一次性会话实测 /message 与 /prompt_async 两路皆生效）。
+// U 之后已有产出（工具已跑/正文已出）→ 不动（保留部分输出，续写提示接在其后）。
+// 全程短 timeout；任何失败回 false 只记 log，绝不挡重试（失败＝退回原行为）。
 const DEAD_TAIL_NON_OUTPUT_PARTS = new Set(["reasoning", "step-start", "step-finish", "retry"])
 export async function revertDeadTail(opencodeSessionId: string): Promise<boolean> {
   if (!opencodeSessionId) return false
@@ -71,11 +71,11 @@ export async function revertDeadTail(opencodeSessionId: string): Promise<boolean
         break
       }
     }
-    if (ui < 0) return false // 窗口內無 user（尾部 assistant 過長）＝必有產出，不動
+    if (ui < 0) return false // 窗口内无 user（尾部 assistant 过长）＝必有产出，不动
     const u = msgs[ui]
     const uid = u.info?.id
     if (!uid) return false
-    // compaction 摘要觸發訊息不撤（撤了等於丟壓縮）。
+    // compaction 摘要触发讯息不撤（撤了等于丢压缩）。
     if ((u.parts ?? []).some((p) => p?.type === "compaction")) return false
     for (const m of msgs.slice(ui + 1)) {
       for (const p of m.parts ?? []) {
@@ -85,7 +85,7 @@ export async function revertDeadTail(opencodeSessionId: string): Promise<boolean
           continue
         }
         if (DEAD_TAIL_NON_OUTPUT_PARTS.has(t)) continue
-        return false // tool / patch / file / 未知類型一律視為產出
+        return false // tool / patch / file / 未知类型一律视为产出
       }
     }
     const rv = await opencodeFetch(`/session/${sid}/revert`, {
@@ -107,10 +107,10 @@ export async function revertDeadTail(opencodeSessionId: string): Promise<boolean
   }
 }
 
-// ── 會話摘要標題（2026-09-12）────────────────────────────────────
-// opencode 在首條用戶消息後異步生成 session.title（真會話實測「戴帽橘猫水彩插画」
-// 級別；零消息會話是 "New session - <時間戳>" 佔位）。網關讀輪子不造輪子：
-// 抓取、佔位歸一化、落盤都在這一条鏈，目錄端點透傳 title 供前端歷史清單顯示。
+// ── 会话摘要标题（2026-09-12）────────────────────────────────────
+// opencode 在首条用户消息后异步生成 session.title（真会话实测「戴帽橘猫水彩插画」
+// 级别；零消息会话是 "New session - <时间戳>" 占位）。网关读轮子不造轮子：
+// 抓取、占位归一化、落盘都在这一条链，目录端点透传 title 供前端历史清单显示。
 export async function fetchOpencodeTitle(opencodeSessionId: string): Promise<string | null> {
   if (!opencodeSessionId) return null
   try {
@@ -124,21 +124,21 @@ export async function fetchOpencodeTitle(opencodeSessionId: string): Promise<str
     if (typeof t !== "string") return null
     const trimmed = t.trim()
     if (!trimmed) return null
-    // 佔位標題歸一化的全網關唯一判定點：idle 鉤子與目錄回填共用此函數。
+    // 占位标题归一化的全网关唯一判定点：idle 钩子与目录回填共用此函数。
     if (trimmed.startsWith("New session -")) return null
     return trimmed
   } catch {
-    return null // 404/網路錯/超時一律 null，呼叫端靜默降級
+    return null // 404/网路错/超时一律 null，呼叫端静默降级
   }
 }
 
-// session.idle 正常收尾路徑掛鉤：起一次性重試鏈（2s→8s→20s）抓標題，拿到即停
-// 並 markDirty 隨防抖落盤。question-pending 凍結分支不掛（turn 未結束，標題多半
-// 未生成，下一輪 idle 自然補）。殭屍安全：回調先查 state 仍是 map 中現役物件
-// 才寫標記（flushDirtySessions 對不在 map 的 id 本就靜默跳過，雙保險）。
+// session.idle 正常收尾路径挂钩：起一次性重试链（2s→8s→20s）抓标题，拿到即停
+// 并 markDirty 随防抖落盘。question-pending 冻结分支不挂（turn 未结束，标题多半
+// 未生成，下一轮 idle 自然补）。僵尸安全：回调先查 state 仍是 map 中现役物件
+// 才写标记（flushDirtySessions 对不在 map 的 id 本就静默跳过，双保险）。
 export function scheduleTitleFetch(state: SessionState): void {
   if (state.sessionTitle) return
-  // 冪等重建：每次 idle 重排一條新鏈（先清舊殘留計時器，任何時刻至多 3 個在飛）。
+  // 幂等重建：每次 idle 重排一条新链（先清旧残留计时器，任何时刻至多 3 个在飞）。
   if (state.titleFetchTimers) {
     for (const t of state.titleFetchTimers) clearTimeout(t)
   }
@@ -149,8 +149,8 @@ export function scheduleTitleFetch(state: SessionState): void {
       setTimeout(() => {
         void (async () => {
           try {
-            if (state.sessionTitle) return // 更早結果已填上
-            if (sessions.get(state.sessionId) !== state) return // 會話已拆除/被新狀態替換
+            if (state.sessionTitle) return // 更早结果已填上
+            if (sessions.get(state.sessionId) !== state) return // 会话已拆除/被新状态替换
             const title = await fetchOpencodeTitle(state.opencodeSessionId)
             if (!title) return
             if (state.sessionTitle) return
@@ -158,18 +158,18 @@ export function scheduleTitleFetch(state: SessionState): void {
             state.sessionTitle = title
             markDirty(state)
           } catch {
-            // 靜默：抓不到標題只影響顯示，絕不打扰會話主鏈
+            // 静默：抓不到标题只影响显示，绝不打扰会话主链
           }
         })()
       }, delay),
     )
   }
 }
-// opencode /event 每 ~10s 發一次 server.heartbeat（2026-09-28 實測 75s 內 7 次）。
-// 30s 收不到任何位元組＝連線已死（opencode-server 重啟後的半開 socket），主動 abort 重連。
-// 沒有這道看門狗時要等 Bun fetch 預設逾時：journal 09-28 06:37:26 斷線 → 06:42:28 才
-// TimeoutError 重連，5 分鐘盲窗內所有 delta 全丟——這就是「只重啟 opencode-server
-// 會讓網關 SSE 懸掛數分鐘」的根因，修掉後兩個服務不必再綁在一起重啟。
+// opencode /event 每 ~10s 发一次 server.heartbeat（2026-09-28 实测 75s 内 7 次）。
+// 30s 收不到任何位元组＝连线已死（opencode-server 重启后的半开 socket），主动 abort 重连。
+// 没有这道看门狗时要等 Bun fetch 预设逾时：journal 09-28 06:37:26 断线 → 06:42:28 才
+// TimeoutError 重连，5 分钟盲窗内所有 delta 全丢——这就是「只重启 opencode-server
+// 会让网关 SSE 悬挂数分钟」的根因，修掉后两个服务不必再绑在一起重启。
 const OPENCODE_SSE_IDLE_MS = 30_000
 export function connectOpencode(): void {
   const url = `${OPENCODE_URL}/event`

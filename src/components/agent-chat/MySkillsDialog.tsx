@@ -3,21 +3,21 @@
 /**
  * 「我的技能」管理面（2026-09-27）。
  *
- * 定位：**站內沒有公開發布／市集**，但使用者要能上傳、管理自己的 Skill，且自己的
- * Skill 要能在輸入框用「/」直呼。本檔只做「管理」這一件：列舉／新增／編輯／刪除，
- * 端點沿用凍結契約（GET/POST /api/skills/mine，DELETE /api/skills/mine/<id>）。
+ * 定位：**站内没有公开发布／市集**，但使用者要能上传、管理自己的 Skill，且自己的
+ * Skill 要能在输入框用「/」直呼。本档只做「管理」这一件：列举／新增／编辑／删除，
+ * 端点沿用冻结契约（GET/POST /api/skills/mine，DELETE /api/skills/mine/<id>）。
  *
- * 三條硬要求：
- * 1. **不假裝成功**：未登入（無憑證或 401）只顯示「登录后可以保存自己的技能」，
- *    不顯示任何看起來像成功的空列表或假條目。
- * 2. **錯誤說人話**：後端 400 的 `reason` 是穩定代碼（`name_required`、
- *    `sensitive_content:api_key_sk`…），**不得原文丟給使用者**；一律經
- *    `humanizeSkillError` 翻譯，且翻譯結果不含原始代碼字樣（負向對照在測試裡）。
- * 3. **刪除二次確認**：刪除是不可逆的（agent-memory 落庫），先問一次再送。
+ * 三条硬要求：
+ * 1. **不假装成功**：未登入（无凭证或 401）只显示「登录后可以保存自己的技能」，
+ *    不显示任何看起来像成功的空列表或假条目。
+ * 2. **错误说人话**：后端 400 的 `reason` 是稳定代码（`name_required`、
+ *    `sensitive_content:api_key_sk`…），**不得原文丢给使用者**；一律经
+ *    `humanizeSkillError` 翻译，且翻译结果不含原始代码字样（负向对照在测试里）。
+ * 3. **删除二次确认**：删除是不可逆的（agent-memory 落库），先问一次再送。
  *
- * 外殼沿用站內語彙：fixed 遮罩 + lg-sheet 玻璃卡 + 頂緣 specular 高光線
- * （與 AgentSettingsPopover / 歷史 dropdown 同配方）；行用「無底色細行」，
- * hover 只換底色不動尺寸（零 layout shift）。
+ * 外壳沿用站内语汇：fixed 遮罩 + lg-sheet 玻璃卡 + 顶缘 specular 高光线
+ * （与 AgentSettingsPopover / 历史 dropdown 同配方）；行用「无底色细行」，
+ * hover 只换底色不动尺寸（零 layout shift）。
  */
 
 import { SKILL_OUTPUT_KIND_OPTIONS } from "@/lib/agent-skills/output-kinds";
@@ -32,10 +32,10 @@ import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { parseFamilyLabels, slashMenuUrl } from "./SkillSlashMenu";
 
 /* ------------------------------------------------------------------ */
-/* 型別與純函式層（不碰 DOM / 網路，可直測）                             */
+/* 型别与纯函式层（不碰 DOM / 网路，可直测）                             */
 /* ------------------------------------------------------------------ */
 
-/** 管理面列出的自訂技能（比斜線菜單多幾個編輯用欄位）。 */
+/** 管理面列出的自订技能（比斜线菜单多几个编辑用栏位）。 */
 export interface MySkillRow {
   id: string;
   name: string;
@@ -48,16 +48,16 @@ export interface MySkillRow {
   tags: string[];
 }
 
-/** 輸出類型選項：真源在 `@/lib/agent-skills/output-kinds`（列表頁／詳情頁共用同一組詞）。 */
+/** 输出类型选项：真源在 `@/lib/agent-skills/output-kinds`（列表页／详情页共用同一组词）。 */
 export const SKILL_OUTPUT_KINDS = SKILL_OUTPUT_KIND_OPTIONS;
 
 /**
- * 型別 → 可調用工具。使用者填的是「交付什麼」，工具是機制層的必然推導，
- * 不讓使用者手選一串工具 id（那是內部實作）。
+ * 型别 → 可调用工具。使用者填的是「交付什么」，工具是机制层的必然推导，
+ * 不让使用者手选一串工具 id（那是内部实作）。
  *
- * 為什麼要有這張表：後端發布驗證要求 `toolIds` 非空（`tool_ids_required`），
- * 而表單只問交付形態；由型別推導是唯一不逼使用者背工具名的做法。表裡每個 id
- * 都有測試對 `HARNESS_TOOL_IDS` 做「真實註冊表」斷言（不在表裡的 id 進不去）。
+ * 为什么要有这张表：后端发布验证要求 `toolIds` 非空（`tool_ids_required`），
+ * 而表单只问交付形态；由型别推导是唯一不逼使用者背工具名的做法。表里每个 id
+ * 都有测试对 `HARNESS_TOOL_IDS` 做「真实注册表」断言（不在表里的 id 进不去）。
  */
 const TOOLS_BY_OUTPUT_KIND: Record<string, readonly string[]> = {
   image: ["image_generate"],
@@ -68,12 +68,12 @@ const TOOLS_BY_OUTPUT_KIND: Record<string, readonly string[]> = {
   mixed: ["image_generate", "last_frame_video_chain"],
 };
 
-/** 由輸出類型推導 toolIds；未知型別回空陣列（呼叫端據此擋下送出，不猜）。 */
+/** 由输出类型推导 toolIds；未知型别回空阵列（呼叫端据此挡下送出，不猜）。 */
 export function deriveToolIds(outputKind: string): string[] {
   return [...(TOOLS_BY_OUTPUT_KIND[outputKind] ?? [])];
 }
 
-/** 標籤輸入 → 標籤陣列（逗號/頓號/換行分隔；去空、去重、上限 8）。 */
+/** 标签输入 → 标签阵列（逗号/顿号/换行分隔；去空、去重、上限 8）。 */
 export function splitSkillTags(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -87,7 +87,7 @@ export function splitSkillTags(raw: string): string[] {
   return out;
 }
 
-/** 我的技能端點（單條：DELETE 用）。 */
+/** 我的技能端点（单条：DELETE 用）。 */
 export function mineSkillUrl(id: string): string {
   return `/api/skills/mine/${encodeURIComponent(id)}`;
 }
@@ -95,8 +95,8 @@ export function mineSkillUrl(id: string): string {
 const str = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
 /**
- * 解析 `{ skills }` → 管理面列（畸形條目丟掉，不猜不補）。
- * 與斜線菜單的 `parseSlashSkills` 分開：這裡要多留編輯需要的欄位。
+ * 解析 `{ skills }` → 管理面列（畸形条目丢掉，不猜不补）。
+ * 与斜线菜单的 `parseSlashSkills` 分开：这里要多留编辑需要的栏位。
  */
 export function parseMySkills(payload: unknown): MySkillRow[] {
   const raw = (payload as { skills?: unknown } | null | undefined)?.skills;
@@ -126,12 +126,12 @@ export function parseMySkills(payload: unknown): MySkillRow[] {
 }
 
 /**
- * 錯誤 → 人話（**純函式，不得回傳原始 reason 原文**）。
+ * 错误 → 人话（**纯函式，不得回传原始 reason 原文**）。
  *
- * 後端 reason 是穩定代碼（`invalid_skill` / `sensitive_content:<kind>` / `name_required`…），
- * 直接顯示等於把內部代碼丟給使用者；憑證類更是紅線（AGENTS.md：secret 永不入
- * log／memory，也不該在文案裡二次外洩代碼細節）。所以：認識的代碼逐條翻譯，
- * 不認識的一律回一句通用人話——**任何分支都不得把輸入原樣回傳**。
+ * 后端 reason 是稳定代码（`invalid_skill` / `sensitive_content:<kind>` / `name_required`…），
+ * 直接显示等于把内部代码丢给使用者；凭证类更是红线（AGENTS.md：secret 永不入
+ * log／memory，也不该在文案里二次外泄代码细节）。所以：认识的代码逐条翻译，
+ * 不认识的一律回一句通用人话——**任何分支都不得把输入原样回传**。
  */
 export function humanizeSkillError(reason: unknown, status?: number): string {
   if (status === 401) return "请先登录后再管理自己的技能。";
@@ -142,9 +142,9 @@ export function humanizeSkillError(reason: unknown, status?: number): string {
 
   const code = typeof reason === "string" ? reason.trim() : "";
   if (!code) return "操作没成功，请稍后重试。";
-  // 網路層自己給的哨兵值（不是後端代碼）。
+  // 网路层自己给的哨兵值（不是后端代码）。
   if (code === "network_error") return "网络不给力，请检查连接后重试。";
-  // 憑證／隱私命中：只給「怎麼修」，不重述命中種類。
+  // 凭证／隐私命中：只给「怎么修」，不重述命中种类。
   if (code.startsWith("sensitive_content")) {
     return "内容里像是含有密钥或隐私信息，请移除后再保存。";
   }
@@ -179,7 +179,7 @@ export function humanizeSkillError(reason: unknown, status?: number): string {
     unauthorized: "请先登录后再管理自己的技能。",
   };
   if (MAP[code]) return MAP[code];
-  // 同族代碼（逐欄掃描的 `use_scenario_*` 等）收一句人話，不細分內部判定。
+  // 同族代码（逐栏扫描的 `use_scenario_*` 等）收一句人话，不细分内部判定。
   if (code.startsWith("one_liner_")) return "一句话介绍里有不合适的内容，请修改。";
   if (
     code.startsWith("use_scenario_")
@@ -193,15 +193,15 @@ export function humanizeSkillError(reason: unknown, status?: number): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* 元件層                                                              */
+/* 元件层                                                              */
 /* ------------------------------------------------------------------ */
 
 export interface MySkillsDialogProps {
-  /** 關閉（點右上角 X、點遮罩、按 Esc 都走這裡）。 */
+  /** 关闭（点右上角 X、点遮罩、按 Esc 都走这里）。 */
   onClose: () => void;
 }
 
-/** 表單初值（新增＝空白；編輯＝帶入該條）。 */
+/** 表单初值（新增＝空白；编辑＝带入该条）。 */
 interface SkillFormState {
   id: string;
   name: string;
@@ -229,7 +229,7 @@ const EMPTY_FORM: SkillFormState = {
 export const INPUT_CLASS =
   "w-full rounded-lg border border-input bg-black/5 px-2.5 py-1.5 text-ios-caption1 outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ios-blue";
 
-/** 一行欄位：標籤在上、控件在下（標籤固定占位，hover/focus 不改尺寸）。 */
+/** 一行栏位：标签在上、控件在下（标签固定占位，hover/focus 不改尺寸）。 */
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -240,28 +240,28 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
-  // 清單：null＝載入中，[]＝已載入但為空。
+  // 清单：null＝载入中，[]＝已载入但为空。
   const [skills, setSkills] = useState<MySkillRow[] | null>(null);
-  /** 未登入（無憑證或 401）：只說真話，不擺假成功。 */
+  /** 未登入（无凭证或 401）：只说真话，不摆假成功。 */
   const [loggedOut, setLoggedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  /** 刪除二次確認：記住待確認的那條。 */
+  /** 删除二次确认：记住待确认的那条。 */
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [form, setForm] = useState<SkillFormState | null>(null);
   const [saving, setSaving] = useState(false);
-  /** 家族選項（公開端點列舉，標籤真源在上游，本檔不寫第二份家族表）。 */
+  /** 家族选项（公开端点列举，标签真源在上游，本档不写第二份家族表）。 */
   const [families, setFamilies] = useState<Array<{ id: string; label: string }>>([]);
 
-  // 換代保護：關窗後遲到的響應不得 setState。
+  // 换代保护：关窗后迟到的响应不得 setState。
   const aliveRef = useRef(true);
 
-  // standalone PWA / Electron 桌面殼：GitHub 登入態帶不進來，走跨瀏覽器交接。
+  // standalone PWA / Electron 桌面壳：GitHub 登入态带不进来，走跨浏览器交接。
   const { handoffUrl, startLogin, closeHandoff } = useGithubLoginHandoff();
   const { refresh } = useAuth();
 
-  // 穩定引用：交接面板的輪詢 effect 以 onSuccess 為依賴，inline 箭頭會讓
-  // effect 隨每次 re-render 重建、2 秒輪詢永遠開不出第一槍。
+  // 稳定引用：交接面板的轮询 effect 以 onSuccess 为依赖，inline 箭头会让
+  // effect 随每次 re-render 重建、2 秒轮询永远开不出第一枪。
   const handleHandoffSuccess = useCallback(() => {
     closeHandoff();
     void refresh();
@@ -276,7 +276,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
       if (!aliveRef.current) return;
       setFamilies(Object.entries(labels).map(([id, label]) => ({ id, label })));
     } catch {
-      // 家族表拿不到不擋保存：退回讓使用者自己填 family id。
+      // 家族表拿不到不挡保存：退回让使用者自己填 family id。
     }
   }, []);
 
@@ -321,7 +321,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
     };
   }, [loadFamilies, loadSkills]);
 
-  // Esc 關閉（與站內浮層同一條鍵盤語義）。
+  // Esc 关闭（与站内浮层同一条键盘语义）。
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key === "Escape") onClose();
@@ -332,7 +332,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
 
   const familyOptions = useMemo(() => families, [families]);
 
-  /** 新增：開一張空表；家族預設第一個（家族表還沒回來就先空著，送出前會擋）。 */
+  /** 新增：开一张空表；家族预设第一个（家族表还没回来就先空著，送出前会挡）。 */
   const startCreate = useCallback(() => {
     setError(null);
     setConfirmId(null);
@@ -355,7 +355,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
     });
   }, []);
 
-  /** 本地先擋一輪必填（送出前的真話），通過才打後端。 */
+  /** 本地先挡一轮必填（送出前的真话），通过才打后端。 */
   const localIssue = useCallback((state: SkillFormState): string | null => {
     if (!state.name.trim()) return "请填写技能名称。";
     if (!state.oneLiner.trim()) return "请写一句话介绍。";
@@ -404,7 +404,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
         return;
       }
       if (!res.ok) {
-        // 400 的 reason 是內部代碼 → 一律過人話翻譯，絕不原樣顯示。
+        // 400 的 reason 是内部代码 → 一律过人话翻译，绝不原样显示。
         let reason: string | undefined;
         try {
           const data = (await res.json()) as { reason?: unknown; error?: unknown };
@@ -468,13 +468,13 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
   }, []);
 
   // portal 到 document.body（2026-10-04 FIX-2）：
-  // 本對話框原由 AgentSettingsPopover 直接（非 portal）渲染，因而落在
+  // 本对话框原由 AgentSettingsPopover 直接（非 portal）渲染，因而落在
   // ImagePlayground → CanvasChatWorkstation → .canvas-chat-panel
-  // （fixed z-60; overflow:hidden）這個堆疊脈絡裡 ⇒ z-[90] 在 canvas 態被宿主面板蓋掉、
-  // 且 overflow:hidden 會把 fixed 對話框裁在面板框內（真瀏覽器 elementsFromPoint 已複現）。
-  // 搬出樹後 fixed 滿屏與 z-[90] 才生效。SSR 安全照站內既有 portal 配方
-  // （AgentChatSurface 窄屏歷史抽屜、AgentComposer 思考級別面板）：typeof document 守衛，
-  // server render 階段不執行 createPortal。呼叫端 AgentSettingsPopover:163 維持不動。
+  // （fixed z-60; overflow:hidden）这个堆叠脉络里 ⇒ z-[90] 在 canvas 态被宿主面板盖掉、
+  // 且 overflow:hidden 会把 fixed 对话框裁在面板框内（真浏览器 elementsFromPoint 已复现）。
+  // 搬出树后 fixed 满屏与 z-[90] 才生效。SSR 安全照站内既有 portal 配方
+  // （AgentChatSurface 窄屏历史抽屉、AgentComposer 思考级别面板）：typeof document 守卫，
+  // server render 阶段不执行 createPortal。呼叫端 AgentSettingsPopover:163 维持不动。
   return typeof document !== "undefined" ? createPortal(
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center p-4"
@@ -483,7 +483,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
       aria-label="我的技能"
       data-my-skills-dialog="true"
     >
-      {/* 遮罩：點外面收起（與站內浮層同一條規矩）。 */}
+      {/* 遮罩：点外面收起（与站内浮层同一条规矩）。 */}
       <button
         type="button"
         aria-label="关闭我的技能"
@@ -491,7 +491,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
         className="absolute inset-0 cursor-default bg-black/25 backdrop-blur-[2px]"
       />
       <div className="lg-sheet relative flex max-h-[min(82dvh,42rem)] w-full max-w-md flex-col overflow-hidden rounded-ios-2xl p-1">
-        {/* MASTER.md：每張 sheet 都要有一條頂緣高光線。 */}
+        {/* MASTER.md：每张 sheet 都要有一条顶缘高光线。 */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
@@ -523,7 +523,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
               </button>
             </div>
           ) : form ? (
-            /* ── 表單（新增／編輯）── */
+            /* ── 表单（新增／编辑）── */
             <div className="flex flex-col gap-2.5 py-1">
               <Field label="名称">
                 <input
@@ -638,7 +638,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
               </div>
             </div>
           ) : (
-            /* ── 清單 ── */
+            /* ── 清单 ── */
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2 pb-1">
                 <span className="text-ios-caption2 text-foreground/45">
@@ -748,8 +748,8 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
         </div>
       </div>
 
-      {/* 交接面與卡片同一個 portal / stacking context（本對話框自行 portal，
-          面板再 portal 出去會被卡片蓋住）：成功後關掉交接面並刷新登入態。 */}
+      {/* 交接面与卡片同一个 portal / stacking context（本对话框自行 portal，
+          面板再 portal 出去会被卡片盖住）：成功后关掉交接面并刷新登入态。 */}
       {handoffUrl ? (
         <PwaHandoffPanel
           loginUrl={handoffUrl}

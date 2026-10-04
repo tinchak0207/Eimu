@@ -63,10 +63,10 @@ function boundedNumber(value: unknown): number | null {
 }
 
 /**
- * 分鏡變裝宣告清洗（D8 消費端入口）：兩種形狀 → 一律長成 `{ cardId?, name }`：
- *   - 字符串＝非綁定式具名變裝（`"侠客造型"`）；
- *   - 物件＝`{ cardId, name }`（相容 `card_id`／`characterCardId`／`disguise`／`look` 別名）。
- * 沒有 name 的條目丟；同 (cardId, name) 去重；上限 `MAX_CARD_REFS_PER_SHOT` 截尾。
+ * 分镜变装宣告清洗（D8 消费端入口）：两种形状 → 一律长成 `{ cardId?, name }`：
+ *   - 字符串＝非绑定式具名变装（`"侠客造型"`）；
+ *   - 物件＝`{ cardId, name }`（相容 `card_id`／`characterCardId`／`disguise`／`look` 别名）。
+ * 没有 name 的条目丢；同 (cardId, name) 去重；上限 `MAX_CARD_REFS_PER_SHOT` 截尾。
  */
 function normalizeDisguiseSelections(raw: unknown): DisguiseSelection[] {
   if (!Array.isArray(raw)) return [];
@@ -172,18 +172,18 @@ export interface DramaStoryboardShot {
   sceneCardIds: string[];
   /**
    * 引用道具卡 id（2026-09-24 新增；`kind==="prop"` 的卡，惯例 PR 前缀）。
-   * 可選：舊分鏡 JSON 沒有此欄（缺省＝無道具引用，零回歸）。
+   * 可选：旧分镜 JSON 没有此栏（缺省＝无道具引用，零回归）。
    */
   propCardIds?: string[];
   /**
-   * 本鏡選用的**變裝**（對稱差 D8 的消費端；2026-09-28 新增）：具名造型選擇。
-   * 可選：舊分鏡 JSON 沒有此欄（缺省＝用角色卡主造型，零回歸）。
-   * 兩種形狀都收（清洗後一律長成 `{ cardId?, name }`）：
-   *   - `{ cardId, name }`＝綁定式（只在那張角色卡上找該變裝）：**命中與否都換裝**，
-   *     缺件時該卡參考圖清空（主造型不代打）；
-   *   - `"name"`＝非綁定式（在分鏡引用的角色卡上找同名變裝）：命中才換裝。
-   * 命中＝該角色卡的主造型參考圖**被該變裝的參考圖取代**（不混用）；
-   * 找不到＝該任務 `needsAsset` 且 `missingDisguiseNames` **具名回報**。
+   * 本镜选用的**变装**（对称差 D8 的消费端；2026-09-28 新增）：具名造型选择。
+   * 可选：旧分镜 JSON 没有此栏（缺省＝用角色卡主造型，零回归）。
+   * 两种形状都收（清洗后一律长成 `{ cardId?, name }`）：
+   *   - `{ cardId, name }`＝绑定式（只在那张角色卡上找该变装）：**命中与否都换装**，
+   *     缺件时该卡参考图清空（主造型不代打）；
+   *   - `"name"`＝非绑定式（在分镜引用的角色卡上找同名变装）：命中才换装。
+   * 命中＝该角色卡的主造型参考图**被该变装的参考图取代**（不混用）；
+   * 找不到＝该任务 `needsAsset` 且 `missingDisguiseNames` **具名回报**。
    */
   disguises?: DisguiseSelection[];
   /** 段级负面词（与卡负面词合并）。 */
@@ -203,7 +203,7 @@ export interface NormalizedDramaPipeline {
   art: DramaArtEntry[] | null;
   script: DramaScriptSegment | null;
   storyboard: DramaStoryboardSegment | null;
-  /** 缺失或清洗后为空而被跳过的段（按管線 canonical 顺序，明说跳过）。 */
+  /** 缺失或清洗后为空而被跳过的段（按管线 canonical 顺序，明说跳过）。 */
   skipped: DramaSegmentName[];
 }
 
@@ -441,9 +441,9 @@ export interface DramaBatchTask {
   needsAsset: boolean;
   missingCardIds: string[];
   /**
-   * **具名缺件（變裝）**：本鏡宣告的變裝名在引用角色卡上找不到（D8）。
-   * 非空即任務不可提交（與 missingCardIds 同一道 needsAsset 閘）；
-   * 缺件由呼叫端按名字要求補齊，**不得用主造型頂替**。
+   * **具名缺件（变装）**：本镜宣告的变装名在引用角色卡上找不到（D8）。
+   * 非空即任务不可提交（与 missingCardIds 同一道 needsAsset 闸）；
+   * 缺件由呼叫端按名字要求补齐，**不得用主造型顶替**。
    */
   missingDisguiseNames: string[];
 }
@@ -462,9 +462,9 @@ function mergeNegativePrompts(...parts: Array<string | null | undefined>): strin
 
 /**
  * 解析引用卡 id → 卡实体（`found`）/ 未解析（`missing`，任务不可提交）。
- * `expectedKind` 認三族：`"character"`（角色）/ `"scene"`（場景）/ `"prop"`（道具）。
- * 2026-09-24：`"prop"` 由本參數的聯集加入（道具卡與角色/場景卡走**逐字同一條**解析規則，
- * 不另立第二套）；`CharacterCardKind` 本體由 character-cards.ts 擁有，本檔不越權改它。
+ * `expectedKind` 认三族：`"character"`（角色）/ `"scene"`（场景）/ `"prop"`（道具）。
+ * 2026-09-24：`"prop"` 由本参数的联集加入（道具卡与角色/场景卡走**逐字同一条**解析规则，
+ * 不另立第二套）；`CharacterCardKind` 本体由 character-cards.ts 拥有，本档不越权改它。
  */
 function resolveCardRefs(
   ids: string[],
@@ -491,13 +491,13 @@ function resolveCardRefs(
  *   - prompt = 段提示词 + 被引用卡锁定片段（applyCharacterCards：卡 id 升序前缀、幂等）
  *   - referenceImages = 被引用卡参考图（url 去重、角色保留）
  *   - negativePrompt = 段级负面词 + 卡负面词合并
- *   - 段提示词里的 `@[種類:名]` token 會就地解析：命中**卡庫全量**（不只分鏡宣告的卡）時
- *     併入注入集（mergeTokenReferencedCards）——卡在庫即可被引用，不必先手動鎖定
+ *   - 段提示词里的 `@[种类:名]` token 会就地解析：命中**卡库全量**（不只分镜宣告的卡）时
+ *     并入注入集（mergeTokenReferencedCards）——卡在库即可被引用，不必先手动锁定
  *   - propCardIds 的道具卡与角色/场景卡**同批**进 applyCharacterCards（同一把注入尺，不另开通道）
  *   - `disguises` 宣告（D8）：命中的变装**替换该角色卡在本镜的参考图与 prompt 片段**
  *     （不混用主造型）；找不到＝`needsAsset` + `missingDisguiseNames`（具名），主造型不代打——
- *     缺件時**這一鏡全部角色卡一起去造型**（參考圖與 prompt 片段雙清），
- *     因為 `needsAsset` 沒有生產消費端，缺件的安全必須落在資料面（見 `withCharacterDisguises`）
+ *     缺件时**这一镜全部角色卡一起去造型**（参考图与 prompt 片段双清），
+ *     因为 `needsAsset` 没有生产消费端，缺件的安全必须落在资料面（见 `withCharacterDisguises`）
  *   - 引用卡 id 不存在或种类不符 → 该任务 needsAsset=true + missingCardIds，
  *     已解析卡照常注入（补齐资产后重切结果稳定）
  *   - 输入宽松：直接喂原始 storyboard 段；cards 来自 character-card-store 的当前态
@@ -511,12 +511,12 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
     const sceneRefs = resolveCardRefs(shot.sceneCardIds, byId, "scene");
     const propRefs = resolveCardRefs(shot.propCardIds ?? [], byId, "prop");
     const missingCardIds = [...characterRefs.missing, ...sceneRefs.missing, ...propRefs.missing];
-    // 變裝解析（D8）：命中＝該角色卡在**本鏡**換成變裝造型版本（`withCharacterDisguises`：
-    // 參考圖換成變裝自己的、prompt 片段換成變裝片段）；找不到＝具名缺件（needsAsset），
-    // 該名字不貢獻任何參考（主造型不代打）。無宣告＝原卡直通，零回歸。
+    // 变装解析（D8）：命中＝该角色卡在**本镜**换成变装造型版本（`withCharacterDisguises`：
+    // 参考图换成变装自己的、prompt 片段换成变装片段）；找不到＝具名缺件（needsAsset），
+    // 该名字不贡献任何参考（主造型不代打）。无宣告＝原卡直通，零回归。
     const resolvedDisguises = resolveCharacterDisguises(characterRefs.found, shot.disguises ?? []);
-    // 綁定式宣告（有 cardId）＝那張卡在這一鏡**明確不是主造型**：命中與否都走變裝版本
-    // （缺件時參考圖清空，主造型不代打）；非綁定式命中那張卡時同樣換裝。
+    // 绑定式宣告（有 cardId）＝那张卡在这一镜**明确不是主造型**：命中与否都走变装版本
+    // （缺件时参考图清空，主造型不代打）；非绑定式命中那张卡时同样换装。
     const boundCardIds = new Set(
       (shot.disguises ?? [])
         .map((selection) => selection.cardId)
@@ -527,14 +527,14 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
       ...resolvedDisguises.matched.map((hit) => hit.cardId),
     ]);
     const missingDisguiseNames = resolvedDisguises.missing;
-    // 有未解析的變裝宣告（缺件）時，**本鏡所有角色卡一律當成「不是主造型」**（`withCharacterDisguises(card, [])`：
-    // 參考圖與 prompt 片段都清空）：
-    //   * 綁定式缺件——那張卡已知，本來就該清；
-    //   * 非綁定式缺件——`resolveCharacterDisguises` 是「在所有角色卡按 name 找」，找不到代表沒人穿得上，
-    //     此時無法歸屬到哪張卡；但作者既然宣告了變裝，就不該讓任何角色以主造型出圖。
-    // 為什麼非清不可：`needsAsset`／`missingDisguiseNames` 只是回報欄位，**repo 內沒有任何生產消費端讀它**
-    // （只有測試在讀），所以光靠旗標擋不住「挑 referenceImages 就出圖」的路徑——安全必須落在資料面。
-    // 仍保留卡身分與 loraIds／negativePrompt（`withCharacterDisguises` 是 spread），只清造型資料。
+    // 有未解析的变装宣告（缺件）时，**本镜所有角色卡一律当成「不是主造型」**（`withCharacterDisguises(card, [])`：
+    // 参考图与 prompt 片段都清空）：
+    //   * 绑定式缺件——那张卡已知，本来就该清；
+    //   * 非绑定式缺件——`resolveCharacterDisguises` 是「在所有角色卡按 name 找」，找不到代表没人穿得上，
+    //     此时无法归属到哪张卡；但作者既然宣告了变装，就不该让任何角色以主造型出图。
+    // 为什么非清不可：`needsAsset`／`missingDisguiseNames` 只是回报栏位，**repo 内没有任何生产消费端读它**
+    // （只有测试在读），所以光靠旗标挡不住「挑 referenceImages 就出图」的路径——安全必须落在资料面。
+    // 仍保留卡身分与 loraIds／negativePrompt（`withCharacterDisguises` 是 spread），只清造型资料。
     const hasUnresolvedDisguise = missingDisguiseNames.length > 0;
     const characterCards = characterRefs.found.map((card) =>
       hasUnresolvedDisguise || disguisedCardIds.has(card.id)
@@ -547,9 +547,9 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
     // 卡 id 序稳定拼接：applyCharacterCards 内部按 id 升序注入，与传入顺序无关。
     // 顺序照写 character → scene → prop（只影响可读性：applyCharacterCards 内部本就按 id 升序重排）。
     const appliedCards = [...characterCards, ...sceneRefs.found, ...propRefs.found];
-    // 本段 prompt token 就地解析（2026-09-25）：卡在庫即可被 `@[種類:名]` 引用，不必先手動鎖定。
-    // 判準/聯集全在 mergeTokenReferencedCards（純函式）；零 token／全未命中＝回同一陣列參考，
-    // 故既有「只注入分鏡宣告的卡」行為逐位元不變。
+    // 本段 prompt token 就地解析（2026-09-25）：卡在库即可被 `@[种类:名]` 引用，不必先手动锁定。
+    // 判准/联集全在 mergeTokenReferencedCards（纯函式）；零 token／全未命中＝回同一阵列参考，
+    // 故既有「只注入分镜宣告的卡」行为逐位元不变。
     const injectedCards = mergeTokenReferencedCards(appliedCards, cards, shot.prompt);
     const applied = applyCharacterCards(shot.prompt, injectedCards);
     const loraIds: string[] = [];
@@ -587,23 +587,23 @@ export function deriveRequiredAssets(storyboard: unknown): string[] {
   return [...ids].sort((a, b) => (a === b ? 0 : a < b ? -1 : 1));
 }
 
-// ─────────────────────────────────────────── 變裝強制補齊（D8）
+// ─────────────────────────────────────────── 变装强制补齐（D8）
 
 export interface DramaDisguiseRequirementReport {
-  /** 兩邊都沒有缺件＝true（沒有變裝宣告/要求＝true，零回歸）。 */
+  /** 两边都没有缺件＝true（没有变装宣告/要求＝true，零回归）。 */
   complete: boolean;
-  /** 分鏡宣告但解析不到的**具名**缺件（按分镜序）。 */
+  /** 分镜宣告但解析不到的**具名**缺件（按分镜序）。 */
   missingFromShots: { shotId: string; missingDisguiseNames: string[] }[];
-  /** 角色卡宣告 `requiredDisguises` 但未補齊的卡（具名：卡 id/卡名/缺的變裝名）。 */
+  /** 角色卡宣告 `requiredDisguises` 但未补齐的卡（具名：卡 id/卡名/缺的变装名）。 */
   missingOnCards: { cardId: string; cardName: string; missingDisguises: string[] }[];
 }
 
 /**
- * **設定階段的強制補齊閘**（純函式）：一次回報兩邊的具名缺件——
- *   - 分鏡側：宣告了卻在引用角色卡上找不到的變裝名（走 `storyboardToBatchTasks` 的同一把尺，
+ * **设定阶段的强制补齐闸**（纯函式）：一次回报两边的具名缺件——
+ *   - 分镜侧：宣告了却在引用角色卡上找不到的变装名（走 `storyboardToBatchTasks` 的同一把尺，
  *     不另立第二套解析）；
- *   - 卡側：角色卡自己宣告的必要變裝（`requiredDisguises`）尚未補齊者。
- * `complete === false` 即要求補齊（缺哪些**按名字**回報）；缺件不代表可以用主造型出圖。
+ *   - 卡侧：角色卡自己宣告的必要变装（`requiredDisguises`）尚未补齐者。
+ * `complete === false` 即要求补齐（缺哪些**按名字**回报）；缺件不代表可以用主造型出图。
  */
 export function auditDramaDisguiseRequirements(
   storyboard: unknown,

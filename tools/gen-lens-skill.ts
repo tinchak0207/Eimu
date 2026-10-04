@@ -1,8 +1,8 @@
 /**
- * 生成 lens-language skill 的 SKILL.md（單一真源：src/lib/lens-language-library.ts）。
+ * 生成 lens-language skill 的 SKILL.md（单一真源：src/lib/lens-language-library.ts）。
  *
  * 用途：VPS `/opt/agent-harness/workspace/.opencode/skills/lens-language/SKILL.md`
- * 鐵律：SKILL.md 內詞條逐字等於 library（本腳本為唯一生成路徑，禁止手改兩份）。
+ * 铁律：SKILL.md 内词条逐字等于 library（本脚本为唯一生成路径，禁止手改两份）。
  *
  * 用法：npx tsx tools/gen-lens-skill.ts > /tmp/lens-language-SKILL.md
  */
@@ -55,7 +55,7 @@ function main(): void {
   out.push("2. 用户只说感觉（如「高级感」）→ 你选 2-4 条最贴合的词条，取原文。");
   out.push("3. **未命中一律不取**，不许编造近似词、不许自创镜头术语。");
   out.push("4. 单次注入 ≤6 条（prompt 会爆炸）；光线类与构图类优先。");
-  out.push("5. 原文含中文详解（如「逆光，主光自主體正後方射入…」），**照抄**即可，它本身就是完整描述。");
+  out.push("5. 原文含中文详解（如「逆光，主光自主体正后方射入…」），**照抄**即可，它本身就是完整描述。");
   out.push("");
   out.push("## 与 §2 六槽的对应");
   out.push("");

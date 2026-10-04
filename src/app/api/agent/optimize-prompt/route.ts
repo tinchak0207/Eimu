@@ -16,7 +16,7 @@ type MediaType = (typeof MEDIA_TYPES)[number];
 const STILL_IMAGE_AGENT_DIRECTIVE =
   "Treat this as a STILL IMAGE prompt. No camera movement, no SFX, no cuts, no temporal language.";
 
-/** 免费层限流：每 IP 每 10 分钟最多 10 次（2026-09-02 收緊，降低規則層可蒸餾面）。 */
+/** 免费层限流：每 IP 每 10 分钟最多 10 次（2026-09-02 收紧，降低规则层可蒸馏面）。 */
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT = 10;
 

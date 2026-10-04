@@ -1,8 +1,8 @@
-// POST /api/agent/sessions/[id]/workflow-node-update —— 畫布節點「编辑」的
-// workflow 節點更新代理。此前前端 handleEditWorkflowNode 打的
-// /api/internal/workflow/node/update 在站點不存在（無路由無 rewrite，生產 404），
-// 真路由是網關 loopback-only 的 /internal/workflow/node/update，外部不可達——
-// 站點必須代撥：patch 原樣透傳，session 歸屬校驗用畫面同款 resolveAgentCaller。
+// POST /api/agent/sessions/[id]/workflow-node-update —— 画布节点「编辑」的
+// workflow 节点更新代理。此前前端 handleEditWorkflowNode 打的
+// /api/internal/workflow/node/update 在站点不存在（无路由无 rewrite，生产 404），
+// 真路由是网关 loopback-only 的 /internal/workflow/node/update，外部不可达——
+// 站点必须代拨：patch 原样透传，session 归属校验用画面同款 resolveAgentCaller。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -10,7 +10,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -55,8 +55,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return fail(400, "patch 必填。", "invalid_request");
   }
 
-  // 網關 workflow handler 用 endsWith 匹配；/internal/ 家族 loopback-only，
-  // 站點必須走 Bearer 家族等價路徑；session_id 走 query（Bun body 只能讀一次）。
+  // 网关 workflow handler 用 endsWith 匹配；/internal/ 家族 loopback-only，
+  // 站点必须走 Bearer 家族等价路径；session_id 走 query（Bun body 只能读一次）。
   let resp: AgentGatewayResponse;
   try {
     resp = await callAgentGateway(`/agent/v1/sessions/${id}/workflow/node/update?session_id=${encodeURIComponent(id)}`, {

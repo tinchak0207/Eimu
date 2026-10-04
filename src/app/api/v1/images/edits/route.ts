@@ -1,18 +1,18 @@
-// POST /v1/images/edits — B 端改圖，OpenAI 風格錯誤體。
+// POST /v1/images/edits — B 端改图，OpenAI 风格错误体。
 //
-// 2026-08-05：這個路由原先只在 VPS 上，且 `const coins` 算完從未使用（免費出圖）。
-// 補回 repo 並把扣費接上 billing relay；定價改為走 generationCoins(pixai-edit)，
-// 與 admin /admin 的覆寫層同源，不再用路由內硬編碼的 COINS_BY_SIZE。
+// 2026-08-05：这个路由原先只在 VPS 上，且 `const coins` 算完从未使用（免费出图）。
+// 补回 repo 并把扣费接上 billing relay；定价改为走 generationCoins(pixai-edit)，
+// 与 admin /admin 的覆写层同源，不再用路由内硬编码的 COINS_BY_SIZE。
 //
-// 錯誤體與 trace id 與 /v1/images/generations 對齊：客戶不必按端點分兩套解析。
+// 错误体与 trace id 与 /v1/images/generations 对齐：客户不必按端点分两套解析。
 //
-// 2026-09-13（暴君裁定「gpt-image-2 就應該支援改圖，後端要跟上了」）：
-// 本路由原先只認 pixai bridge 域模型（resolveBridgeModel），非 pixai 一律 400。
-// 現在非 pixai 模型改走 durable 控制面改圖管線：kind:"image_edit" 提交任務、
-// 202 + Location（與 generations 的任務合同一致）。渠道由 registry claims 決定
-// （supplier_capability 表現成實有 gpt-image-2/gemini/flux 系 image_edit enabled 行），
-// worker 端 supplier-adapter 已有 references→edits/chat 分支，核心層原生支援
-// ——本刀只補 B 端路由這個入口。
+// 2026-09-13（暴君裁定「gpt-image-2 就应该支援改图，后端要跟上了」）：
+// 本路由原先只认 pixai bridge 域模型（resolveBridgeModel），非 pixai 一律 400。
+// 现在非 pixai 模型改走 durable 控制面改图管线：kind:"image_edit" 提交任务、
+// 202 + Location（与 generations 的任务合同一致）。渠道由 registry claims 决定
+// （supplier_capability 表现成实有 gpt-image-2/gemini/flux 系 image_edit enabled 行），
+// worker 端 supplier-adapter 已有 references→edits/chat 分支，核心层原生支援
+// ——本刀只补 B 端路由这个入口。
 
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -53,8 +53,8 @@ import { hasGenerationCapability, IdempotencyConflictError } from "@/lib/generat
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
-// 參考圖 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
-// 2026-09-25 整段搬到 lib，generations 路由共用同一份；本路由行為逐位元不變。
+// 参考图 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
+// 2026-09-25 整段搬到 lib，generations 路由共用同一份；本路由行为逐位元不变。
 import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 import type { GenerationReference } from "@/lib/generation-core/types";
@@ -62,9 +62,9 @@ import type { BizApiKey } from "@/lib/biz-api-keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
+/** 拒绝遥测用的路径。写死字面量：分组要稳定，不被 rewrite/代理改写影响。 */
 const REJECTION_PATH = "/v1/images/edits";
 
 export async function POST(req: NextRequest) {
@@ -90,7 +90,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
   }
   rejection.userId = auth.key.userId;
 
-  // 認證成功後的所有回應（成功 + 錯誤）都帶限流預測頭；401/403/429 不走這裡。
+  // 认证成功后的所有回应（成功 + 错误）都带限流预测头；401/403/429 不走这里。
   const respond = (data: unknown, status: number, headers?: Record<string, string>) =>
     addRateLimitHeaders(jsonWithTrace(data, status, traceId, headers), auth.key);
 
@@ -100,7 +100,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
   } catch {
     return respond(pixaiRequestError("Invalid JSON body.", "invalid_json", traceId), 400);
   }
-  // 只記客戶請求的模型名（未歸一）：拒絕遙測裡它只是分組線索。
+  // 只记客户请求的模型名（未归一）：拒绝遥测里它只是分组线索。
   rejection.model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : null;
 
   const image = typeof body.image === "string" ? body.image.trim() : "";
@@ -115,8 +115,8 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
     return respond(pixaiRequestError("prompt too long.", "prompt_too_long", traceId), 400);
   }
 
-  // 模型名歸一：pixai bridge 域（現行 ID、歷史別名與 bridge 名）走原同步鏈；
-  // 其餘模型進 durable 控制面改圖分支（2026-09-13，見檔頭）。
+  // 模型名归一：pixai bridge 域（现行 ID、历史别名与 bridge 名）走原同步链；
+  // 其余模型进 durable 控制面改图分支（2026-09-13，见档头）。
   const bridgeModel = resolveBridgeModel(body.model);
   if (bridgeModel === null) {
     return await durableEditBranch({
@@ -133,11 +133,11 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
   const size = body.size === "2k" ? "2k" : "1k";
   const n = Math.min(4, Math.max(1, Number(body.n) || 1));
 
-  // 算價前先同步 admin 覆寫，與 /v1/images/generations 同序。
+  // 算价前先同步 admin 覆写，与 /v1/images/generations 同序。
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_EDIT_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN) * n;
 
-  // ── 冪等（reserveSyncCharge 之前）：同 key 重試不重複扣費 ──────
+  // ── 幂等（reserveSyncCharge 之前）：同 key 重试不重复扣费 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
   let reservedIdempotency: { tenantId: string; key: string } | null = null;
   if (idempotencyKey) {
@@ -169,7 +169,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
     }
   }
 
-  // 錢走生產平面帳本（V-07）：同步 job 列 + billing_operation，失敗退款可被 reconcile 撈回。
+  // 钱走生产平面帐本（V-07）：同步 job 列 + billing_operation，失败退款可被 reconcile 捞回。
   const charged = await reserveSyncCharge({
     userId: auth.key.userId,
     quota,
@@ -201,7 +201,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
     : 0;
 
   if (status === 200 && delivered > 0) {
-    // 少出的圖按張退：客戶只該為拿到的結果付費（commit 實耗＋未交付部分落 refund op）。
+    // 少出的图按张退：客户只该为拿到的结果付费（commit 实耗＋未交付部分落 refund op）。
     after(await commitSyncCharge(charged.charge, { delivered }));
     recordBizApiKeyUsage(auth.key.id, delivered);
     after(() => flushBizApiKeyUsage().catch(() => undefined));
@@ -225,15 +225,15 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
   );
 }
 
-// ── durable 改圖分支（非 pixai 域，2026-09-13）───────────────────
+// ── durable 改图分支（非 pixai 域，2026-09-13）───────────────────
 //
-// 合同：與 /v1/images/generations 的 durable 分支完全同形——提交任務回 202 +
-// Location，客戶輪詢 /v1/images/<task_id> 取成品；計費走 enforceQuotaGate +
-// submitGenerationCommand 的事後投影。image 參數收 http(s) URL 或 data:image
-// base64（≤4MB，Vercel 請求體限制留餘裕）；渠道可用性以 supplier_capability
-// 為準做誠實預檢，杜絕「probe 說可用、結算才死」。
+// 合同：与 /v1/images/generations 的 durable 分支完全同形——提交任务回 202 +
+// Location，客户轮询 /v1/images/<task_id> 取成品；计费走 enforceQuotaGate +
+// submitGenerationCommand 的事后投影。image 参数收 http(s) URL 或 data:image
+// base64（≤4MB，Vercel 请求体限制留余裕）；渠道可用性以 supplier_capability
+// 为准做诚实预检，杜绝「probe 说可用、结算才死」。
 
-/** 與 generations 同口的上游尺寸白名單（唯一真源）＋舊 edits 合同的 "1k"/"2k" 別寫法。 */
+/** 与 generations 同口的上游尺寸白名单（唯一真源）＋旧 edits 合同的 "1k"/"2k" 别写法。 */
 const DURABLE_EDIT_SIZES = DURABLE_IMAGE_SIZES;
 
 async function durableEditBranch(input: {
@@ -290,11 +290,11 @@ async function durableEditBranch(input: {
   if (!Number.isInteger(rawN) || rawN < 1 || rawN > 4) {
     return respond(pixaiRequestError("n 需为 1 到 4 之间的整数。", "invalid_n", traceId), 400);
   }
-  // OpenAI 用 hd/standard，本站內部用 quality/fast（與 generations 同譯法）。
+  // OpenAI 用 hd/standard，本站内部用 quality/fast（与 generations 同译法）。
   const qualityMode: ModelMode = body.quality === "hd" || body.quality === "high" ? "quality" : "fast";
   const ratio = aspectRatioFromImageSize(size);
-  // 提交解析度（2026-09-30）：顯式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k。
-  // 與 generations 同一顆嚴格解析器：未宣告就 400，不靜默降到 1k 去賣一個不存在的檔位。
+  // 提交解析度（2026-09-30）：显式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k。
+  // 与 generations 同一颗严格解析器：未宣告就 400，不静默降到 1k 去卖一个不存在的档位。
   const resolutionResult = resolveSubmitResolution(modelId, {
     resolution: body.resolution ?? body.output_resolution,
     size,
@@ -317,8 +317,8 @@ async function durableEditBranch(input: {
     throw error;
   }
 
-  // 誠實預檢（碰額度之前）：capability 表是調度器的唯一事實源，預檢與提交同參數，
-  // 不在這裡攔就會變成「先佔額度、job 進場才 model_unsupported 退款」的殭屍往返。
+  // 诚实预检（碰额度之前）：capability 表是调度器的唯一事实源，预检与提交同参数，
+  // 不在这里拦就会变成「先占额度、job 进场才 model_unsupported 退款」的僵尸往返。
   const capable = await hasGenerationCapability({
     modelId,
     kind: "image_edit",
@@ -329,7 +329,7 @@ async function durableEditBranch(input: {
   if (!capable) {
     return respond(
       pixaiRequestError(
-        `模型 ${modelId} 当前没有可用的改圖渠道（image_edit capability 不存在或已停用）。请改用 GET /v1/models 中 edit=true 的模型。`,
+        `模型 ${modelId} 当前没有可用的改图渠道（image_edit capability 不存在或已停用）。请改用 GET /v1/models 中 edit=true 的模型。`,
         "model_edit_unsupported",
         traceId,
       ),
@@ -337,7 +337,7 @@ async function durableEditBranch(input: {
     );
   }
 
-  // 管理員改價立即生效：算價前同步最新覆寫（與 generations 同序）。
+  // 管理员改价立即生效：算价前同步最新覆写（与 generations 同序）。
   await syncModelPricing();
   const baseBillingAmount = imageGenerationCoins(modelId, qualityMode, resolution) * QUOTA_PER_COIN * rawN;
   const gate = await enforceQuotaGate({
@@ -378,7 +378,7 @@ async function durableEditBranch(input: {
     if (error instanceof IdempotencyConflictError) {
       return respond(pixaiRequestError(error.message, "idempotency_key_reused", traceId), 409);
     }
-    // 模型可用性閘：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+    // 模型可用性闸：建单/扣费前拒单，沿用既有稳定码 no_endpoints。
     if (error instanceof GenerationModelUnavailableError) {
       return respond(pixaiRequestError(error.message, "no_endpoints", traceId), 503);
     }

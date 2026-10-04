@@ -1,18 +1,18 @@
 // desktop/local-worker.js
 //
-// W3：主進程側的本機媒體工人。以 ipcMain.handle 實作 preload 暴露的 5 個 API。
+// W3：主进程侧的本机媒体工人。以 ipcMain.handle 实作 preload 暴露的 5 个 API。
 //
-// 安全模型（詳見 LOCAL-CAPABILITIES.md）：
-//   1. 每個 handler 先驗 event.senderFrame 的 host 屬於 APP_HOSTS，否則拒。
-//   2. 路徑一律先 realpath（解 symlink）再過 isPathAllowed：
-//      只有使用者「剛用 pickFiles 主動挑選」過的檔案本身或其授權根之下才放行。
-//   3. 再過 isSensitivePath denylist（~/.ssh、憑證、瀏覽器 profile…）。
+// 安全模型（详见 LOCAL-CAPABILITIES.md）：
+//   1. 每个 handler 先验 event.senderFrame 的 host 属于 APP_HOSTS，否则拒。
+//   2. 路径一律先 realpath（解 symlink）再过 isPathAllowed：
+//      只有使用者「刚用 pickFiles 主动挑选」过的档案本身或其授权根之下才放行。
+//   3. 再过 isSensitivePath denylist（~/.ssh、凭证、浏览器 profile…）。
 //   4. ffmpeg 一律 spawn(bin, argv, {shell:false})，argv 由 policy.buildFfmpegArgs
-//      以白名單／數值校驗生成，逾時 SIGKILL。
-//   5. 輸出檔預設寫入本進程管理的臨時目錄；只有落在授權根內的使用者指定
-//      輸出路徑才接受。
+//      以白名单／数值校验生成，逾时 SIGKILL。
+//   5. 输出档预设写入本进程管理的临时目录；只有落在授权根内的使用者指定
+//      输出路径才接受。
 //
-// 本檔不做任何業務邏輯，只做 IO 與授權閘。
+// 本档不做任何业务逻辑，只做 IO 与授权闸。
 
 "use strict";
 
@@ -33,14 +33,14 @@ const CHANNELS = {
   probe: "eimu-local:probe",
   extractFrames: "eimu-local:extract-frames",
   transcode: "eimu-local:transcode",
-  // W6c：device bridge 的使用者介面（本機檔案授權）。invoke 四個 + 一個 event。
+  // W6c：device bridge 的使用者介面（本机档案授权）。invoke 四个 + 一个 event。
   authorizedRoots: "eimu-local:authorized-roots",
   bridgeStatus: "eimu-local:bridge-status",
   bridgeEnable: "eimu-local:bridge-enable",
   bridgeDisable: "eimu-local:bridge-disable",
-  // W6c：權限模式設定（off/ask/auto/full），持久化並重啟橋讓新 mode 生效。
+  // W6c：权限模式设定（off/ask/auto/full），持久化并重启桥让新 mode 生效。
   bridgeSetMode: "eimu-local:bridge-set-mode",
-  // 主進程 → 頁面的狀態推送（preload 的 onBridgeStatus 訂閱此 channel）。
+  // 主进程 → 页面的状态推送（preload 的 onBridgeStatus 订阅此 channel）。
   bridgeEvent: "eimu-local:bridge-state",
 };
 
@@ -51,15 +51,15 @@ const TRANSCODE_TIMEOUT_MAX_MS = 600000;
 const MAX_STDOUT_BYTES = 1024 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 
-// 使用者逐次挑選後累積的授權集（真實絕對路徑，已解 symlink）。
+// 使用者逐次挑选后累积的授权集（真实绝对路径，已解 symlink）。
 const authorizedRoots = new Set();
 
 let appHosts = new Set();
-// device bridge 生命週期控制器（由 main.js 於 registerLocalWorker 注入；見下方
-// createBridgeController）。null＝尚未接線，bridge.* 的查詢會回 off、啟停會拒絕。
+// device bridge 生命周期控制器（由 main.js 于 registerLocalWorker 注入；见下方
+// createBridgeController）。null＝尚未接线，bridge.* 的查询会回 off、启停会拒绝。
 let bridgeController = null;
 let registered = false;
-let ffmpegBin = null; // 解析結果快取（含 null = 已探測無）
+let ffmpegBin = null; // 解析结果快取（含 null = 已探测无）
 let ffmpegProbed = false;
 let ffprobeBin = null;
 let ffprobeProbed = false;
@@ -72,15 +72,15 @@ const gate = new policy.FfmpegGate();
 const ok = (value) => ({ ok: true, value });
 const fail = (err) => {
   const code = err instanceof LocalError ? err.code : "E_INTERNAL";
-  return { ok: false, code, message: err && err.message ? String(err.message) : "未知錯誤" };
+  return { ok: false, code, message: err && err.message ? String(err.message) : "未知错误" };
 };
 
-/** 設定 APP_HOSTS 白名單（main.js 與測試共用同一入口）。 */
+/** 设定 APP_HOSTS 白名单（main.js 与测试共用同一入口）。 */
 function setAppHosts(hosts) {
   appHosts = hosts instanceof Set ? hosts : new Set(Array.isArray(hosts) ? hosts : []);
 }
 
-/** 只有 APP_HOSTS 的頂層 frame 可呼叫；其餘（含 iframe 外部站）一律拒。 */
+/** 只有 APP_HOSTS 的顶层 frame 可呼叫；其余（含 iframe 外部站）一律拒。 */
 function assertTrustedSender(event) {
   let frame = null;
   let url = "";
@@ -88,21 +88,21 @@ function assertTrustedSender(event) {
     frame = event.senderFrame;
     url = frame && frame.url ? frame.url : "";
   } catch {
-    throw new LocalError("E_UNTRUSTED_ORIGIN", "無法解析來源 frame");
+    throw new LocalError("E_UNTRUSTED_ORIGIN", "无法解析来源 frame");
   }
   if (!policy.isAppHost(url, appHosts)) {
-    throw new LocalError("E_UNTRUSTED_ORIGIN", `來源不在 App 白名單：${String(url).slice(0, 120)}`);
+    throw new LocalError("E_UNTRUSTED_ORIGIN", `来源不在 App 白名单：${String(url).slice(0, 120)}`);
   }
   if (frame && frame.parent) {
-    throw new LocalError("E_UNTRUSTED_ORIGIN", "僅接受頂層 frame 呼叫");
+    throw new LocalError("E_UNTRUSTED_ORIGIN", "仅接受顶层 frame 呼叫");
   }
 }
 
 // ---------------------------------------------------------------------------
-// 路徑授權
+// 路径授权
 // ---------------------------------------------------------------------------
 
-/** 解 symlink；不存在時對父目錄解 symlink 再接回 basename（輸出檔常用）。 */
+/** 解 symlink；不存在时对父目录解 symlink 再接回 basename（输出档常用）。 */
 function resolveReal(p) {
   const realpath = fs.realpathSync.native || fs.realpathSync;
   try {
@@ -116,29 +116,29 @@ function resolveReal(p) {
   }
 }
 
-/** 檢查輸入路徑已授權且非敏感；回傳其 realpath。 */
+/** 检查输入路径已授权且非敏感；回传其 realpath。 */
 function requireAuthorizedInput(rawPath) {
   if (typeof rawPath !== "string" || rawPath.length === 0) {
-    throw new LocalError("E_BAD_ARGS", "路徑必須是非空字串");
+    throw new LocalError("E_BAD_ARGS", "路径必须是非空字串");
   }
   const real = resolveReal(rawPath);
   if (policy.isSensitivePath(real)) {
-    throw new LocalError("E_SENSITIVE_PATH", "該路徑屬於敏感位置，拒絕存取");
+    throw new LocalError("E_SENSITIVE_PATH", "该路径属于敏感位置，拒绝存取");
   }
   if (!policy.isPathAllowed(real, Array.from(authorizedRoots))) {
-    throw new LocalError("E_NOT_AUTHORIZED", "尚未透過 pickFiles 授權此路徑");
+    throw new LocalError("E_NOT_AUTHORIZED", "尚未透过 pickFiles 授权此路径");
   }
   if (!fs.existsSync(real)) {
-    throw new LocalError("E_NOT_FOUND", "檔案不存在");
+    throw new LocalError("E_NOT_FOUND", "档案不存在");
   }
   return real;
 }
 
 /**
- * 登記使用者**顯式授權**的根（pickFiles 挑選後呼叫；device bridge 共用同一份）。
- * 這是唯一的授權來源：不另造第二套授權機制。敏感位置即使被挑選也拒。
- * @param {string[]} paths 使用者挑選的原始路徑
- * @returns {{input:string, real:string}[]} 實際被接受的項目（input=原樣、real=已解 symlink）
+ * 登记使用者**显式授权**的根（pickFiles 挑选后呼叫；device bridge 共用同一份）。
+ * 这是唯一的授权来源：不另造第二套授权机制。敏感位置即使被挑选也拒。
+ * @param {string[]} paths 使用者挑选的原始路径
+ * @returns {{input:string, real:string}[]} 实际被接受的项目（input=原样、real=已解 symlink）
  */
 function authorizeRoots(paths) {
   const accepted = [];
@@ -146,7 +146,7 @@ function authorizeRoots(paths) {
   for (const p of paths) {
     if (typeof p !== "string" || p.length === 0) continue;
     const real = resolveReal(p);
-    if (policy.isSensitivePath(real)) continue; // 敏感位置即使被挑選也拒
+    if (policy.isSensitivePath(real)) continue; // 敏感位置即使被挑选也拒
     authorizedRoots.add(real);
     accepted.push({ input: p, real });
   }
@@ -167,7 +167,7 @@ function defaultOutputPath(inputReal, format) {
 }
 
 // ---------------------------------------------------------------------------
-// ffmpeg 探測與執行
+// ffmpeg 探测与执行
 // ---------------------------------------------------------------------------
 
 async function runProcess(bin, args, timeoutMs) {
@@ -207,7 +207,7 @@ async function runProcess(bin, args, timeoutMs) {
   });
 }
 
-/** ffprobe 候選：由 ffmpeg 候選把 basename 的 ffmpeg 換成 ffprobe，再補 PATH。 */
+/** ffprobe 候选：由 ffmpeg 候选把 basename 的 ffmpeg 换成 ffprobe，再补 PATH。 */
 function ffprobeCandidates() {
   const list = policy.pickFfmpegCandidate(process.env, process.platform);
   const out = list.map((p) => (/ffmpeg(\.exe)?$/i.test(p) ? p.replace(/ffmpeg(\.exe)?$/i, (m) => (m.toLowerCase().endsWith(".exe") ? "ffprobe.exe" : "ffprobe")) : `${p}probe`));
@@ -246,12 +246,12 @@ function ffmpegVersionLine(stdout) {
   return line.slice(0, 200);
 }
 
-/** 執行已驗證的 ffmpeg op，過閘並處理逾時；失敗擲 LocalError。 */
+/** 执行已验证的 ffmpeg op，过闸并处理逾时；失败掷 LocalError。 */
 async function runGatedFfmpeg(args, timeoutMs) {
   const bin = await resolveFfmpeg();
-  if (!bin) throw new LocalError("E_FFMPEG_MISSING", "找不到可用的 ffmpeg 執行檔");
+  if (!bin) throw new LocalError("E_FFMPEG_MISSING", "找不到可用的 ffmpeg 执行档");
   const res = await gate.run(() => runProcess(bin, args, timeoutMs));
-  if (res.timedOut) throw new LocalError("E_TIMEOUT", `ffmpeg 逾時（${timeoutMs}ms）`);
+  if (res.timedOut) throw new LocalError("E_TIMEOUT", `ffmpeg 逾时（${timeoutMs}ms）`);
   if (res.code !== 0) {
     throw new LocalError("E_FFMPEG_FAILED", (res.stderr || res.stdout || "ffmpeg 非零退出").slice(-600));
   }
@@ -271,32 +271,32 @@ async function handleCapabilities(event) {
 }
 
 // ===========================================================================
-// E2E 專用授權閘（**僅測試用；不得用於生產**）
+// E2E 专用授权闸（**仅测试用；不得用于生产**）
 // ---------------------------------------------------------------------------
-// 真桌面殼的 E2E 測試需要走完 pickFiles 之後的整條鏈路（probe / extractFrames /
-// transcode），但 pickFiles 開的是原生對話框，自動化無法驅動（本機無
+// 真桌面壳的 E2E 测试需要走完 pickFiles 之后的整条链路（probe / extractFrames /
+// transcode），但 pickFiles 开的是原生对话框，自动化无法驱动（本机无
 // xdotool/ydotool/wtype 可用）。
 //
-// 因此提供一個**受顯式開關約束的環境變數閘**：只有殼的**啟動環境**（process.env）
-// 同時設了 `EIMU_E2E === "1"`（顯式 opt-in）與 `EIMU_E2E_PICK_FILES` 時才生效。
-// 其值為分號分隔的絕對路徑，命中時直接當成「使用者剛挑選」的結果回傳並授權，
-// 完全不開對話框。**只設 EIMU_E2E_PICK_FILES 而沒有 EIMU_E2E=1 ⇒ 一律忽略**。
+// 因此提供一个**受显式开关约束的环境变数闸**：只有壳的**启动环境**（process.env）
+// 同时设了 `EIMU_E2E === "1"`（显式 opt-in）与 `EIMU_E2E_PICK_FILES` 时才生效。
+// 其值为分号分隔的绝对路径，命中时直接当成「使用者刚挑选」的结果回传并授权，
+// 完全不开对话框。**只设 EIMU_E2E_PICK_FILES 而没有 EIMU_E2E=1 ⇒ 一律忽略**。
 //
-// 為什麼要這個開關（同意機制旁路風險）：pickFiles 的對話框就是「使用者授權哪些
-// 根目錄」的同意動作；授權後 authorizedRoots 才成立，device bridge 的 H1 白名單
-// 才成立。若這個閘門隨正式產物無條件生效，任何能控制本機環境變數的程序都能在不
-// 經使用者同意的情況下預先授權任意根目錄。加上顯式開關後，正式產物**預設關閉**。
+// 为什么要这个开关（同意机制旁路风险）：pickFiles 的对话框就是「使用者授权哪些
+// 根目录」的同意动作；授权后 authorizedRoots 才成立，device bridge 的 H1 白名单
+// 才成立。若这个闸门随正式产物无条件生效，任何能控制本机环境变数的程序都能在不
+// 经使用者同意的情况下预先授权任意根目录。加上显式开关后，正式产物**预设关闭**。
 //
-// 為什麼不用 `!app.isPackaged` 直接鎖死：E2E harness 跑的就是**打包後**的
-// dist-e2e（app.isPackaged === true）；硬門會把 harness 一起鎖死。改以單一顯式
-// opt-in 開關取代，兼顧「正式產物預設關閉」與「harness 可運作」（harness 啟動時
-// 需一併帶 EIMU_E2E=1；harness.mjs 會把 process.env 透傳給子進程）。
+// 为什么不用 `!app.isPackaged` 直接锁死：E2E harness 跑的就是**打包后**的
+// dist-e2e（app.isPackaged === true）；硬门会把 harness 一起锁死。改以单一显式
+// opt-in 开关取代，兼顾「正式产物预设关闭」与「harness 可运作」（harness 启动时
+// 需一并带 EIMU_E2E=1；harness.mjs 会把 process.env 透传给子进程）。
 //
-// 安全性：遠端頁面（renderer / 遠端內容）碰不到 process.env，無法自行開啟這個閘；
-// 只有啟動殼的人（測試 harness）能設定。
+// 安全性：远端页面（renderer / 远端内容）碰不到 process.env，无法自行开启这个闸；
+// 只有启动壳的人（测试 harness）能设定。
 //
-// 行為不變保證：未設此 env（生產預設）時，下方 handlePickFiles 逐位元組走原本的
-// dialog.showOpenDialog 路徑，行為與過往完全相同。
+// 行为不变保证：未设此 env（生产预设）时，下方 handlePickFiles 逐位元组走原本的
+// dialog.showOpenDialog 路径，行为与过往完全相同。
 // ===========================================================================
 const E2E_ENABLED = process.env.EIMU_E2E === "1";
 
@@ -312,20 +312,20 @@ function e2ePickOverride() {
 }
 
 /**
- * 授權使用者挑選的路徑（唯一授權來源 authorizeRoots → authorizedRoots），並在
- * 有新根被接受時通知 bridge 控制器以**當前授權根**重註冊（已啟用才動作）。
- * 回傳實際被接受的項目（input=原樣、real=已解 symlink）。
+ * 授权使用者挑选的路径（唯一授权来源 authorizeRoots → authorizedRoots），并在
+ * 有新根被接受时通知 bridge 控制器以**当前授权根**重注册（已启用才动作）。
+ * 回传实际被接受的项目（input=原样、real=已解 symlink）。
  */
 function applyPickAuthorization(paths) {
   const accepted = authorizeRoots(paths);
-  const restarted = notifyRootsAuthorized(accepted); // promise 供測試等待；生產端忽略
+  const restarted = notifyRootsAuthorized(accepted); // promise 供测试等待；生产端忽略
   return { accepted, restarted };
 }
 
 /**
- * pickFiles 接受新根後通知 bridge（見 createBridgeController.onRootsAuthorized）。
- * 只在已有接受項且控制器已接線時呼叫；重註冊是非同步且**不得**影響 pickFiles
- * 的回傳（不 await、吞錯）。回傳該 promise（供測試等待；生產呼叫端忽略）。
+ * pickFiles 接受新根后通知 bridge（见 createBridgeController.onRootsAuthorized）。
+ * 只在已有接受项且控制器已接线时呼叫；重注册是非同步且**不得**影响 pickFiles
+ * 的回传（不 await、吞错）。回传该 promise（供测试等待；生产呼叫端忽略）。
  */
 function notifyRootsAuthorized(accepted) {
   if (!bridgeController || !Array.isArray(accepted) || accepted.length === 0) return null;
@@ -342,9 +342,9 @@ async function handlePickFiles(event, opts) {
   assertTrustedSender(event);
   const e2ePaths = e2ePickOverride();
   if (e2ePaths) {
-    // E2E 專用（見上方註解）：不開對話框，直接授權並回傳這些路徑。
-    // 留一行可審計的日誌（只在顯式 EIMU_E2E=1 且指定路徑時出現；生產不會有）。
-    console.warn(`[eimu-local] E2E 授權閘生效（EIMU_E2E=1）：略過對話框，直接授權 ${e2ePaths.length} 條路徑`);
+    // E2E 专用（见上方注解）：不开对话框，直接授权并回传这些路径。
+    // 留一行可审计的日志（只在显式 EIMU_E2E=1 且指定路径时出现；生产不会有）。
+    console.warn(`[eimu-local] E2E 授权闸生效（EIMU_E2E=1）：略过对话框，直接授权 ${e2ePaths.length} 条路径`);
     return applyPickAuthorization(e2ePaths).accepted.map((entry) => entry.input);
   }
   const clean = policy.sanitizePickOptions(opts);
@@ -352,27 +352,27 @@ async function handlePickFiles(event, opts) {
   const properties = clean.kind === "directory" ? ["openDirectory"] : ["openFile"];
   if (clean.multiple) properties.push("multiSelections");
   const result = await dialog.showOpenDialog(win, {
-    title: clean.kind === "directory" ? "選擇資料夾" : "選擇檔案",
+    title: clean.kind === "directory" ? "选择资料夹" : "选择档案",
     properties,
     filters: clean.filters.length ? clean.filters : undefined,
   });
   if (result.canceled || !Array.isArray(result.filePaths)) return [];
-  // 同一份授權來源（authorizeRoots → authorizedRoots）；回傳原始挑選路徑以維持既有行為。
+  // 同一份授权来源（authorizeRoots → authorizedRoots）；回传原始挑选路径以维持既有行为。
   return applyPickAuthorization(result.filePaths).accepted.map((entry) => entry.input);
 }
 
 async function ffprobeJson(inputReal) {
   const bin = await resolveFfprobe();
-  if (!bin) throw new LocalError("E_FFPROBE_MISSING", "找不到可用的 ffprobe 執行檔");
+  if (!bin) throw new LocalError("E_FFPROBE_MISSING", "找不到可用的 ffprobe 执行档");
   const args = ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", inputReal];
   const res = await runProcess(bin, args, PROBE_TIMEOUT_MS);
   if (res.spawnError || res.code !== 0) {
-    throw new LocalError("E_FFPROBE_FAILED", (res.stderr || "ffprobe 失敗").slice(-600));
+    throw new LocalError("E_FFPROBE_FAILED", (res.stderr || "ffprobe 失败").slice(-600));
   }
   try {
     return JSON.parse(res.stdout);
   } catch {
-    throw new LocalError("E_FFPROBE_FAILED", "ffprobe 輸出無法解析");
+    throw new LocalError("E_FFPROBE_FAILED", "ffprobe 输出无法解析");
   }
 }
 
@@ -433,9 +433,9 @@ async function handleTranscode(event, filePath, opts) {
   let outputPath;
   if (typeof o.outputPath === "string" && o.outputPath.length > 0) {
     const resolved = resolveReal(o.outputPath);
-    if (policy.isSensitivePath(resolved)) throw new LocalError("E_SENSITIVE_PATH", "輸出位置屬敏感路徑");
+    if (policy.isSensitivePath(resolved)) throw new LocalError("E_SENSITIVE_PATH", "输出位置属敏感路径");
     if (!policy.isPathAllowed(resolved, Array.from(authorizedRoots))) {
-      throw new LocalError("E_NOT_AUTHORIZED", "輸出位置不在已授權目錄內");
+      throw new LocalError("E_NOT_AUTHORIZED", "输出位置不在已授权目录内");
     }
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     outputPath = resolved;
@@ -449,27 +449,27 @@ async function handleTranscode(event, filePath, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// device bridge 生命週期控制器（可重入；依賴注入以便 node --test）
+// device bridge 生命周期控制器（可重入；依赖注入以便 node --test）
 // ---------------------------------------------------------------------------
-// 為什麼把編排放在本檔而不是 main.js：bridge 的四個 API 之 IPC handler 在本檔，
-// 且橋必須與 pickFiles 共用同一份 authorizedRoots。做成「純依賴注入」的工廠後，
-// 可在純 node 下注入間諜 client（startBridge/stopBridge）對「授權根變更→以新
-// roots 重註冊」做真行為斷言，不必啟動 Electron（main.js 頂層呼叫 app API，
-// 無法在 node 下 require）。
+// 为什么把编排放在本档而不是 main.js：bridge 的四个 API 之 IPC handler 在本档，
+// 且桥必须与 pickFiles 共用同一份 authorizedRoots。做成「纯依赖注入」的工厂后，
+// 可在纯 node 下注入间谍 client（startBridge/stopBridge）对「授权根变更→以新
+// roots 重注册」做真行为断言，不必启动 Electron（main.js 顶层呼叫 app API，
+// 无法在 node 下 require）。
 //
-// 授權根**一律即時讀** authorizedRoots（唯一授權來源）；控制器不另存一份。
+// 授权根**一律即时读** authorizedRoots（唯一授权来源）；控制器不另存一份。
 
 /**
  * @param {{
  *   startBridge:(opts:object)=>Promise<object>,   // 通常是 device-bridge-client.startDeviceBridge
  *   stopBridge:()=>object|void,                    // 通常是 device-bridge-client.stopDeviceBridge
- *   getClientState?:()=>object,                    // 客戶端狀態快照（status/deviceId/lastError）
- *   readEnabled?:()=>boolean, writeEnabled?:(v:boolean)=>void,  // 使用者設定的持久化
- *   readMode?:()=>string|undefined, writeMode?:(m:string)=>void, // 權限模式持久化
- *   rulesProvider?:()=>unknown,                     // 規則（下發閘道＋第二道防線共用）
+ *   getClientState?:()=>object,                    // 客户端状态快照（status/deviceId/lastError）
+ *   readEnabled?:()=>boolean, writeEnabled?:(v:boolean)=>void,  // 使用者设定的持久化
+ *   readMode?:()=>string|undefined, writeMode?:(m:string)=>void, // 权限模式持久化
+ *   rulesProvider?:()=>unknown,                     // 规则（下发闸道＋第二道防线共用）
  *   getGatewayBaseUrl?:()=>string|undefined,
  *   credentialProvider?:()=>string|null,
- *   onStatusChange?:(status:object)=>void          // 狀態推送（main 推給所有視窗）
+ *   onStatusChange?:(status:object)=>void          // 状态推送（main 推给所有视窗）
  * }} deps
  */
 function createBridgeController(deps = {}) {
@@ -487,17 +487,17 @@ function createBridgeController(deps = {}) {
   const credentialProvider = typeof deps.credentialProvider === "function" ? deps.credentialProvider : () => null;
   const onStatusChange = typeof deps.onStatusChange === "function" ? deps.onStatusChange : () => {};
 
-  // 使用者「是否已開啟本機檔案授權」的意圖（與客戶端是否真的連上無關）。
+  // 使用者「是否已开启本机档案授权」的意图（与客户端是否真的连上无关）。
   let userEnabled = false;
-  // 權限模式（off/ask/auto/full）。預設 ask（契約預設值）；由持久化設定／env 還原。
+  // 权限模式（off/ask/auto/full）。预设 ask（契约预设值）；由持久化设定／env 还原。
   const normalizeMode = (m) =>
     typeof m === "string" && PERMISSION_MODES.includes(m) ? m : "ask";
   let userMode = normalizeMode(readMode());
 
   const currentRoots = () => Array.from(authorizedRoots);
 
-  // 凍結契約的 state 只有六值（與前端 BridgeState 一致）；客戶端內部的
-  // "reconnecting" 一律正規化為 "connecting"，未知值 fail-closed 成 "error"。
+  // 冻结契约的 state 只有六值（与前端 BridgeState 一致）；客户端内部的
+  // "reconnecting" 一律正规化为 "connecting"，未知值 fail-closed 成 "error"。
   const BRIDGE_STATES = new Set([
     "off",
     "no_authorized_roots",
@@ -511,10 +511,10 @@ function createBridgeController(deps = {}) {
     return BRIDGE_STATES.has(raw) ? raw : "error";
   };
 
-  /** 凍結契約的狀態形狀：{ enabled, state, roots, deviceId, mode, lastError? }。 */
+  /** 冻结契约的状态形状：{ enabled, state, roots, deviceId, mode, lastError? }。 */
   function snapshot() {
     if (!userEnabled) return { enabled: false, state: "off", roots: currentRoots(), deviceId: null, mode: userMode };
-    // 已開啟意圖但尚無授權根：不啟動，狀態一律 no_authorized_roots（不誤報客戶端狀態）。
+    // 已开启意图但尚无授权根：不启动，状态一律 no_authorized_roots（不误报客户端状态）。
     if (currentRoots().length === 0) {
       return { enabled: true, state: "no_authorized_roots", roots: [], deviceId: null, mode: userMode };
     }
@@ -534,7 +534,7 @@ function createBridgeController(deps = {}) {
     try {
       onStatusChange(status);
     } catch {
-      /* 狀態推送失敗不得影響 bridge */
+      /* 状态推送失败不得影响 bridge */
     }
     return status;
   }
@@ -543,22 +543,22 @@ function createBridgeController(deps = {}) {
     return {
       gatewayBaseUrl: getGatewayBaseUrl(),
       enabled: true,
-      // 傳**函式本身**，不傳呼叫結果：client 只在 typeof === "function" 時呼叫它
-      // （device-bridge-client.js startDeviceBridge 的 typeof 檢），且刻意先判
-      // roots 再讀憑證——提早呼叫會讓無授權根時也白讀憑證檔。
+      // 传**函式本身**，不传呼叫结果：client 只在 typeof === "function" 时呼叫它
+      // （device-bridge-client.js startDeviceBridge 的 typeof 检），且刻意先判
+      // roots 再读凭证——提早呼叫会让无授权根时也白读凭证档。
       credentialProvider,
-      // roots 即時讀同一份 authorizedRoots；不另造授權機制。
+      // roots 即时读同一份 authorizedRoots；不另造授权机制。
       rootsProvider: currentRoots,
-      // W6c：權限模式即時讀（setMode 後重啟即生效）；rules 由注入的 provider 決定。
+      // W6c：权限模式即时读（setMode 后重启即生效）；rules 由注入的 provider 决定。
       modeProvider: () => userMode,
       rulesProvider,
-      // 客戶端每次狀態變化（connecting/online/reconnecting…）都以當前快照推送。
+      // 客户端每次状态变化（connecting/online/reconnecting…）都以当前快照推送。
       onStatus: () => emit(snapshot()),
     };
   }
 
-  /** 重入啟停：先停再起。startDeviceBridge 對 running 狀態直接回舊快照（不會換
-   *  roots），且註冊只發生在啟動那一刻，故換 roots 必須 stop→start。 */
+  /** 重入启停：先停再起。startDeviceBridge 对 running 状态直接回旧快照（不会换
+   *  roots），且注册只发生在启动那一刻，故换 roots 必须 stop→start。 */
   async function startNow() {
     try {
       stopBridge();
@@ -569,7 +569,7 @@ function createBridgeController(deps = {}) {
     return snapshot();
   }
 
-  /** 停橋並記住「使用者關閉」（等同 disable 的核心）。mode 不動。 */
+  /** 停桥并记住「使用者关闭」（等同 disable 的核心）。mode 不动。 */
   function applyDisable() {
     userEnabled = false;
     writeEnabled(false);
@@ -582,15 +582,15 @@ function createBridgeController(deps = {}) {
   }
 
   /**
-   * 設定權限模式（off/ask/auto/full）：
-   *   1. 驗值：非法值丟 E_BAD_ARGS（**不打網路、不改狀態**，含不寫入持久化）。
+   * 设定权限模式（off/ask/auto/full）：
+   *   1. 验值：非法值丢 E_BAD_ARGS（**不打网路、不改状态**，含不写入持久化）。
    *   2. 持久化 writeMode（比照 writeEnabled 的注入方式）。
-   *   3. off ＝ 停橋（等同 disable）；其餘＝若未啟用則啟用，並以 stop→start 重註冊
-   *      讓新模式在 register 生效（**複用**既有「授權根變更→重註冊」同一條 startNow）。
+   *   3. off ＝ 停桥（等同 disable）；其余＝若未启用则启用，并以 stop→start 重注册
+   *      让新模式在 register 生效（**复用**既有「授权根变更→重注册」同一条 startNow）。
    */
   async function setMode(mode) {
     if (typeof mode !== "string" || !PERMISSION_MODES.includes(mode)) {
-      throw new LocalError("E_BAD_ARGS", `非法權限模式：${String(mode)}`);
+      throw new LocalError("E_BAD_ARGS", `非法权限模式：${String(mode)}`);
     }
     userMode = mode;
     writeMode(mode);
@@ -600,7 +600,7 @@ function createBridgeController(deps = {}) {
     userEnabled = true;
     writeEnabled(true);
     if (currentRoots().length === 0) {
-      // 無授權根 ⇒ 不啟動；前端引導 pickFiles，授權後 onRootsAuthorized 會自動接上。
+      // 无授权根 ⇒ 不启动；前端引导 pickFiles，授权后 onRootsAuthorized 会自动接上。
       return emit(snapshot());
     }
     return emit(await startNow());
@@ -612,43 +612,43 @@ function createBridgeController(deps = {}) {
     },
 
     async enable() {
-      // 使用者已同意。先記意圖（持久化），無授權根時**不啟動、不自動授權任何路徑**。
+      // 使用者已同意。先记意图（持久化），无授权根时**不启动、不自动授权任何路径**。
       userEnabled = true;
       writeEnabled(true);
       if (currentRoots().length === 0) {
-        // 前端據此引導使用者先去 pickFiles 挑資料夾；授權後 onRootsAuthorized 會自動接上。
+        // 前端据此引导使用者先去 pickFiles 挑资料夹；授权后 onRootsAuthorized 会自动接上。
         return emit(snapshot());
       }
       return emit(await startNow());
     },
 
     async disable() {
-      // 記住「使用者關閉」；停止客戶端並清除其憑證/計時器。
+      // 记住「使用者关闭」；停止客户端并清除其凭证/计时器。
       return applyDisable();
     },
 
-    /** 設定權限模式（見上方 setMode 說明）。 */
+    /** 设定权限模式（见上方 setMode 说明）。 */
     setMode,
 
-    /** 啟動時由持久化設定／env 覆寫還原意圖；不寫回設定檔（避免把 env 覆寫寫死）。 */
+    /** 启动时由持久化设定／env 覆写还原意图；不写回设定档（避免把 env 覆写写死）。 */
     setEnabledSilently(v) {
       userEnabled = v === true;
     },
 
-    /** 啟動時還原權限模式；不寫回設定檔（env 覆寫不落地）。非法值回預設 ask。 */
+    /** 启动时还原权限模式；不写回设定档（env 覆写不落地）。非法值回预设 ask。 */
     setModeSilently(m) {
       userMode = normalizeMode(m);
     },
 
-    /** whenReady 依已還原的意圖啟動/重啟；未啟用＝不動。 */
+    /** whenReady 依已还原的意图启动/重启；未启用＝不动。 */
     async restart() {
       if (!userEnabled || currentRoots().length === 0) return emit(snapshot());
       return emit(await startNow());
     },
 
     /**
-     * pickFiles 接受新根後呼叫：只有「已啟用」才以**當前（新）roots** 重註冊；
-     * 未啟用＝不動作（等使用者按 enable 時自然帶上當時的 roots）。
+     * pickFiles 接受新根后呼叫：只有「已启用」才以**当前（新）roots** 重注册；
+     * 未启用＝不动作（等使用者按 enable 时自然带上当时的 roots）。
      */
     async onRootsAuthorized() {
       if (!userEnabled || currentRoots().length === 0) return snapshot();
@@ -657,17 +657,17 @@ function createBridgeController(deps = {}) {
   };
 }
 
-/** main.js 注入控制器；測試亦以同一入口替換。 */
+/** main.js 注入控制器；测试亦以同一入口替换。 */
 function setBridgeController(controller) {
   bridgeController = controller || null;
 }
 
 function requireBridgeController() {
-  if (!bridgeController) throw new LocalError("E_BRIDGE_UNAVAILABLE", "device bridge 尚未在殼內接線");
+  if (!bridgeController) throw new LocalError("E_BRIDGE_UNAVAILABLE", "device bridge 尚未在壳内接线");
   return bridgeController;
 }
 
-// ── 四個 bridge IPC 的 handler ──────────────────────────────────────────
+// ── 四个 bridge IPC 的 handler ──────────────────────────────────────────
 
 async function handleAuthorizedRoots(event) {
   assertTrustedSender(event);
@@ -676,7 +676,7 @@ async function handleAuthorizedRoots(event) {
 
 async function handleBridgeStatus(event) {
   assertTrustedSender(event);
-  // 未接線時仍回一致的 off 形狀（前端可安全呼叫）。mode 預設 ask（契約預設）。
+  // 未接线时仍回一致的 off 形状（前端可安全呼叫）。mode 预设 ask（契约预设）。
   if (!bridgeController) {
     return { enabled: false, state: "off", roots: Array.from(authorizedRoots), deviceId: null, mode: "ask" };
   }
@@ -699,11 +699,11 @@ async function handleBridgeSetMode(event, mode) {
 }
 
 // ---------------------------------------------------------------------------
-// 註冊
+// 注册
 // ---------------------------------------------------------------------------
 
 /**
- * 註冊 IPC handlers。main.js 於 app.whenReady 呼叫一次。
+ * 注册 IPC handlers。main.js 于 app.whenReady 呼叫一次。
  * @param {{appHosts?: Set<string>|string[], bridgeController?: object}} options
  */
 function registerLocalWorker(options = {}) {
@@ -735,9 +735,9 @@ function registerLocalWorker(options = {}) {
 module.exports = {
   registerLocalWorker,
   CHANNELS,
-  // device bridge 生命週期（main.js 注入；測試注入間諜）。
+  // device bridge 生命周期（main.js 注入；测试注入间谍）。
   createBridgeController,
-  // 共用的授權來源：device-bridge-client.js 直接讀同一份集合（不另造第二套機制）。
+  // 共用的授权来源：device-bridge-client.js 直接读同一份集合（不另造第二套机制）。
   authorizedRoots,
   authorizeRoots,
   __test: {

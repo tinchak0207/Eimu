@@ -1,15 +1,15 @@
-// 每個使用者的 agent 對話 key（可還原加密存儲）。
+// 每个使用者的 agent 对话 key（可还原加密存储）。
 //
-// 為什麼要可還原：agent 閘道要求代理層「每次請求都拿明文 sk-biz- key」去打。
-// 既有 B 端 key 走 sha256 存儲（biz-api-keys.ts 的註解寫得很清楚：Blob 泄露也換不回
-// 明文），那是為「聚合平台自己持 key、站上只做驗證」設計的；這裡恰恰相反，
-// 站上要代管 key 並在每次代理請求時明文出示，所以必須另存一份可還原的密文。
-// 權衡：AES-256-GCM + AGENT_KEY_ENCRYPTION_SECRET 加密後，就算 Blob / DB 整庫泄露，
-// 沒有 secret 也解不開；而 secret 只走環境變量，不在任何存儲裡。
+// 为什么要可还原：agent 闸道要求代理层「每次请求都拿明文 sk-biz- key」去打。
+// 既有 B 端 key 走 sha256 存储（biz-api-keys.ts 的注解写得很清楚：Blob 泄露也换不回
+// 明文），那是为「聚合平台自己持 key、站上只做验证」设计的；这里恰恰相反，
+// 站上要代管 key 并在每次代理请求时明文出示，所以必须另存一份可还原的密文。
+// 权衡：AES-256-GCM + AGENT_KEY_ENCRYPTION_SECRET 加密后，就算 Blob / DB 整库泄露，
+// 没有 secret 也解不开；而 secret 只走环境变量，不在任何存储里。
 //
-// 存儲優先 Postgres（agent_user_keys 表），DB 不可用退回 Blob（沿用
-// biz-api-key-store 的「新路徑 + 修剪舊世代」慣例），再退回進程內存 —— 這條
-// 兜底鏈與 B 端 key 的 biz-api-key-store 一致，只是對象換成「明文可還原」的密文。
+// 存储优先 Postgres（agent_user_keys 表），DB 不可用退回 Blob（沿用
+// biz-api-key-store 的「新路径 + 修剪旧世代」惯例），再退回进程内存 —— 这条
+// 兜底链与 B 端 key 的 biz-api-key-store 一致，只是对象换成「明文可还原」的密文。
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { del, get, list, put } from "@/lib/blob-backend";
@@ -21,10 +21,10 @@ import { getGenerationSql } from "@/lib/generation-core/database";
 export const AGENT_KEY_PAYLOAD_VERSION = "v1";
 
 /**
- * 「環境沒配好」與「臨時故障」是兩件事，用型別分開，不靠比對 message 字串。
+ * 「环境没配好」与「临时故障」是两件事，用型别分开，不靠比对 message 字串。
  *
- * 前者不會自己好（重試一萬次還是缺 env），後者值得重試。共用一個 503
- * 「服务暂不可用，请稍后重试」會讓部署漏配 env 假裝成閘道抖動，查起來很貴。
+ * 前者不会自己好（重试一万次还是缺 env），后者值得重试。共用一个 503
+ * 「服务暂不可用，请稍后重试」会让部署漏配 env 假装成闸道抖动，查起来很贵。
  */
 export class AgentKeyConfigError extends Error {
   constructor(message: string) {
@@ -39,22 +39,22 @@ interface AgentUserKeyRecord {
   encryptedKey: string;
 }
 
-// ─────────────────────────── AES-256-GCM 純函數（可在 node --test 下測）
+// ─────────────────────────── AES-256-GCM 纯函数（可在 node --test 下测）
 
-/** 由 secret 推導 32 字節 AES 金鑰。規範輸入是 64 hex；任意長度用 sha256 歸一化。 */
+/** 由 secret 推导 32 字节 AES 金钥。规范输入是 64 hex；任意长度用 sha256 归一化。 */
 function encryptionKey(secret: string): Buffer {
   if (/^[0-9a-f]{64}$/i.test(secret)) return Buffer.from(secret, "hex");
-  // sha256 歸一化只為開發便利；換歸一化方式會讓舊密文解不開，兩種都固定住。
+  // sha256 归一化只为开发便利；换归一化方式会让旧密文解不开，两种都固定住。
   return createHash("sha256").update(secret, "utf8").digest();
 }
 
 /**
  * 加密明文 key，格式 `v1:<iv_hex>:<authTag_hex>:<ciphertext_hex>`。
- * GCM 同時保證機密性與完整性：篡改任何一段都會在解密時拋錯，不會解出錯誤明文。
+ * GCM 同时保证机密性与完整性：篡改任何一段都会在解密时抛错，不会解出错误明文。
  */
 export function encryptAgentKey(plaintext: string, secret: string): string {
   const key = encryptionKey(secret);
-  const iv = randomBytes(12); // GCM 建議 96-bit nonce。
+  const iv = randomBytes(12); // GCM 建议 96-bit nonce。
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
@@ -62,43 +62,43 @@ export function encryptAgentKey(plaintext: string, secret: string): string {
 }
 
 /**
- * 解密還原明文 key。
- * 所有 throw 訊息都是固定字串，不夾帶明文或任何變量 —— 這個檔案裡絕不能
- * 出現「把明文印進錯誤」的寫法，那等於把 key 送給下一個讀錯誤訊息的人。
+ * 解密还原明文 key。
+ * 所有 throw 讯息都是固定字串，不夹带明文或任何变量 —— 这个档案里绝不能
+ * 出现「把明文印进错误」的写法，那等于把 key 送给下一个读错误讯息的人。
  */
 export function decryptAgentKey(payload: string, secret: string): string {
   const parts = payload.split(":");
   if (parts.length !== 4 || parts[0] !== AGENT_KEY_PAYLOAD_VERSION) {
-    throw new Error("agent key 密文格式無效。");
+    throw new Error("agent key 密文格式无效。");
   }
   const [, ivHex, authTagHex, ciphertextHex] = parts;
   if (
     !ivHex || !authTagHex || !ciphertextHex ||
     !/^[0-9a-f]+$/i.test(ivHex) || !/^[0-9a-f]+$/i.test(authTagHex) || !/^[0-9a-f]+$/i.test(ciphertextHex)
   ) {
-    throw new Error("agent key 密文格式無效。");
+    throw new Error("agent key 密文格式无效。");
   }
   const key = encryptionKey(secret);
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
   if (iv.length !== 12 || authTag.length !== 16) {
-    throw new Error("agent key 密文格式無效。");
+    throw new Error("agent key 密文格式无效。");
   }
   const decipher = createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(authTag);
-  // final() 會驗 auth tag：secret 錯或密文被改都會在此拋錯，發生在返回明文之前。
+  // final() 会验 auth tag：secret 错或密文被改都会在此抛错，发生在返回明文之前。
   const clear = Buffer.concat([decipher.update(Buffer.from(ciphertextHex, "hex")), decipher.final()]);
   return clear.toString("utf8");
 }
 
-// ─────────────────────────── 存儲：Postgres → Blob → 進程內存
+// ─────────────────────────── 存储：Postgres → Blob → 进程内存
 
 const BLOB_STORE_PREFIX = "agent-user-keys/index.v1";
 const BLOB_GENERATIONS_KEPT = 2;
 
 type BlobRef = { url: string; pathname: string; uploadedAt: Date };
 
-/** 進程內快取 / 最後兜底。拿到記錄先落內存，省得每個請求都讀一遍 Blob。 */
+/** 进程内快取 / 最后兜底。拿到记录先落内存，省得每个请求都读一遍 Blob。 */
 const memoryRecords = new Map<number, AgentUserKeyRecord>();
 
 function agentKeyDatabaseEnabled(): boolean {
@@ -110,7 +110,7 @@ function hasBlobStore(): boolean {
 }
 
 let ensureTablePromise: Promise<void> | null = null;
-/** 建表（幂等）。只跑一次，避免每個請求都發一條 DDL。 */
+/** 建表（幂等）。只跑一次，避免每个请求都发一条 DDL。 */
 function ensureAgentKeyTable(): Promise<void> {
   if (!agentKeyDatabaseEnabled()) return Promise.resolve();
   if (!ensureTablePromise) {
@@ -180,7 +180,7 @@ function coerceRecords(payload: unknown): Map<number, AgentUserKeyRecord> {
   return out;
 }
 
-/** 讀最新一檔可解析的索引；壞世代跳過往舊找，不讓一次寫壞抹掉全部。 */
+/** 读最新一档可解析的索引；坏世代跳过往旧找，不让一次写坏抹掉全部。 */
 async function readBlobRecords(): Promise<Map<number, AgentUserKeyRecord>> {
   const refs = await listStoreBlobs();
   for (const ref of refs) {
@@ -191,13 +191,13 @@ async function readBlobRecords(): Promise<Map<number, AgentUserKeyRecord>> {
       const records = coerceRecords(parsed);
       if (records.size > 0) return records;
     } catch {
-      // 讀不動的一代就跳過，往下找舊的。
+      // 读不动的一代就跳过，往下找旧的。
     }
   }
   return new Map();
 }
 
-/** 新增/更新一把記錄。每次寫到新路徑，再修剪舊世代 —— 沿用 biz-api-key-store。 */
+/** 新增/更新一把记录。每次写到新路径，再修剪旧世代 —— 沿用 biz-api-key-store。 */
 async function writeBlobRecord(record: AgentUserKeyRecord): Promise<void> {
   if (!hasBlobStore()) return;
   const records = await readBlobRecords();
@@ -227,7 +227,7 @@ async function findEncryptedKey(userId: number): Promise<string | null> {
         return row.encryptedKey;
       }
     } catch {
-      // DB 瞬時不可用就往下走，不因一次查詢失敗就報錯。
+      // DB 瞬时不可用就往下走，不因一次查询失败就报错。
     }
   }
 
@@ -239,7 +239,7 @@ async function findEncryptedKey(userId: number): Promise<string | null> {
         return record.encryptedKey;
       }
     } catch {
-      // 同上，退回內存。
+      // 同上，退回内存。
     }
   }
 
@@ -249,12 +249,12 @@ async function findEncryptedKey(userId: number): Promise<string | null> {
 async function saveRecord(record: AgentUserKeyRecord): Promise<void> {
   if (agentKeyDatabaseEnabled()) {
     try {
-      await insertAgentKeyIntoDatabase(record); // ON CONFLICT DO NOTHING：併發時後到者自然放棄
+      await insertAgentKeyIntoDatabase(record); // ON CONFLICT DO NOTHING：并发时后到者自然放弃
       memoryRecords.set(record.userId, record);
       return;
     } catch {
-      // DB 剛好壞的瞬間，B 端 key 已登記（issueBizApiKey 有它自己的兜底），
-      // 這裡把加密記錄落 Blob，別讓本次簽發的 key 因為一次 DB 抖動就失憶。
+      // DB 刚好坏的瞬间，B 端 key 已登记（issueBizApiKey 有它自己的兜底），
+      // 这里把加密记录落 Blob，别让本次签发的 key 因为一次 DB 抖动就失忆。
     }
   }
   await writeBlobRecord(record);
@@ -287,15 +287,15 @@ async function createAndStore(userId: number, secret: string): Promise<string> {
 function requireEncryptionSecret(env: NodeJS.ProcessEnv = process.env): string {
   const secret = env.AGENT_KEY_ENCRYPTION_SECRET?.trim();
   if (!secret) {
-    throw new AgentKeyConfigError("AGENT_KEY_ENCRYPTION_SECRET 未配置，無法加解密 agent key。");
+    throw new AgentKeyConfigError("AGENT_KEY_ENCRYPTION_SECRET 未配置，无法加解密 agent key。");
   }
   return secret;
 }
 
-/** 同一使用者的創建併發共享一把 Promise，避免兩邊各簽一把 key。 */
+/** 同一使用者的创建并发共享一把 Promise，避免两边各签一把 key。 */
 const inflightForUser = new Map<number, Promise<string>>();
 
-/** 取（必要時簽發）某使用者的明文 agent key。明文只在服務端內存流轉，絕不回給客戶端。 */
+/** 取（必要时签发）某使用者的明文 agent key。明文只在服务端内存流转，绝不回给客户端。 */
 export async function getOrCreateAgentKeyForUser(userId: number): Promise<string> {
   const inflight = inflightForUser.get(userId);
   if (inflight) return inflight;

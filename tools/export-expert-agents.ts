@@ -1,59 +1,59 @@
 #!/usr/bin/env -S npx tsx
 //
-// Expert Gateway 四產物機械導出器（R8 審計修復片 1，2026-09-10；
-// contracts 第四產物 = 09-15 評測补课片 critic 裁定新增）。
+// Expert Gateway 四产物机械导出器（R8 审计修复片 1，2026-09-10；
+// contracts 第四产物 = 09-15 评测补课片 critic 裁定新增）。
 //
-// 為什麼需要它：R8 架構審計實錘（記憶 beast-harness-architecture-audit-r8-0910）——
-// 能力斷路只落地 4/25（orchestrator 只關 blender×3+music_gen，21 個域工具仍開），
-// 且 Expert 端零工具限制。本腳本把「手工編 opencode.json agent 工具表」換成機械導出：
-// 真源 EXPERT_REGISTRY（src/lib/expert-registry.ts）→ 白名單欄位改寫 → 寫
-// deploy-staging/expert-gateway/ 三產物。registry 改行後重跑即再生，根治手工漂移。
+// 为什么需要它：R8 架构审计实锤（记忆 beast-harness-architecture-audit-r8-0910）——
+// 能力断路只落地 4/25（orchestrator 只关 blender×3+music_gen，21 个域工具仍开），
+// 且 Expert 端零工具限制。本脚本把「手工编 opencode.json agent 工具表」换成机械导出：
+// 真源 EXPERT_REGISTRY（src/lib/expert-registry.ts）→ 白名单栏位改写 → 写
+// deploy-staging/expert-gateway/ 三产物。registry 改行后重跑即再生，根治手工漂移。
 //
-// 產物（opencode 1.18.14 agent 定義語義；tools:false = 該 agent 工具表物理移除，
-// 未列 = 默認開；先例記憶 beast-gateway-tooltable-circuit-break-0908）：
+// 产物（opencode 1.18.14 agent 定义语义；tools:false = 该 agent 工具表物理移除，
+// 未列 = 默认开；先例记忆 beast-gateway-tooltable-circuit-break-0908）：
 //   opencode-agents.json  orchestrator（25 域工具全 false + question:true）
-//                         + 7 個 Expert（全集 − 自己域工具，全部 false）
-//   registry-digest.txt   HTML 註釋頭（R7 provenance 規範，注入端剝離）+
-//                         buildExpertRegistryDigest() 逐字輸出
-//   expert-ids.json       {"experts":[...registry 鍵序...]}（gateway 校驗 expert 欄用）
-//   expert-delivery-contracts.json（09-15 評測补课片新增）
+//                         + 7 个 Expert（全集 − 自己域工具，全部 false）
+//   registry-digest.txt   HTML 注释头（R7 provenance 规范，注入端剥离）+
+//                         buildExpertRegistryDigest() 逐字输出
+//   expert-ids.json       {"experts":[...registry 键序...]}（gateway 校验 expert 栏用）
+//   expert-delivery-contracts.json（09-15 评测补课片新增）
 //                         {"<id>":{"requiredFields":[…],"qcSignatureRequired":bool},…}
-//                         逐個從 EXPERT_REGISTRY 生成、零手抄——playbook 驗收
-//                         對表與 critic 審核官的交付契約清單真源。
+//                         逐个从 EXPERT_REGISTRY 生成、零手抄——playbook 验收
+//                         对表与 critic 审核官的交付契约清单真源。
 //
-// 兩條 tools map 規則的差異與理由（2026-09-11 修補，片4 實彈暴露補集寫窄）：
-//   orchestrator = 只斷「Expert 域工具」（registry toolIds 聯集）。
+// 两条 tools map 规则的差异与理由（2026-09-11 修补，片4 实弹暴露补集写窄）：
+//   orchestrator = 只断「Expert 域工具」（registry toolIds 联集）。
 //     刻意保留 search_web / workflow_* 等「非 Expert 域工具」——AGENTS.md 路由表
-//     對它們仍有效，orchestrator 需要它們直調（野獸 playbook 軍團）；image_generate
-//     雖已併入 video-director 域（art-style 接线），orchestrator 仍經
-//     ORCHESTRATOR_KEPT_DOMAIN_TOOLS 例外保持默認開。
-//   expert = 全集（--tools-file 清單 / fallback）減去「該 expert 自己的 toolIds」→ 全部 false。
-//     舊規則「其他 6 行的 toolIds 聯集 → false」寫窄了：任何不屬於任何 Expert 的工具
-//     （如 image_generate）不會被列進 false，等於 leakage —— 白名單只部分物理化，
-//     editor 子代理仍能直調 image_generate 生成圖片（違反憲法第二條「域外工具不在你工具表」）。
+//     对它们仍有效，orchestrator 需要它们直调（野兽 playbook 军团）；image_generate
+//     虽已并入 video-director 域（art-style 接线），orchestrator 仍经
+//     ORCHESTRATOR_KEPT_DOMAIN_TOOLS 例外保持默认开。
+//   expert = 全集（--tools-file 清单 / fallback）减去「该 expert 自己的 toolIds」→ 全部 false。
+//     旧规则「其他 6 行的 toolIds 联集 → false」写窄了：任何不属于任何 Expert 的工具
+//     （如 image_generate）不会被列进 false，等于 leakage —— 白名单只部分物理化，
+//     editor 子代理仍能直调 image_generate 生成图片（违反宪法第二条「域外工具不在你工具表」）。
 //   builtin（bash/read/glob/grep/edit/write/question/task/webfetch/todowrite/websearch/
-//     skill/apply_patch/invalid）不在工具檔清單內，天然不受影響，不列入 map。
-// 第三條（2026-09-21 e2e 事故修補；2026-10-04 local_files 併入）：workflow_start /
-//   workflow_update_node / workflow_status 是「共享工作流操作工具」＝生產線基礎設施，
-//   不是任何 Expert 的域工具。事故實錘：jev-gate 向被 Jev 判為製作類的 Expert 任務書
-//   注入硬規則「第一個動作＝呼叫 workflow_start」，但本導出器的補集規則把這三個對
-//   全部 Expert 顯式 false（＝物理禁用），screenwriter 子代理回報「工具白名單未提供
-//   workflow_start，任務 FAILED」——系統指令叫子代理調一個被系統物理禁用的工具。
-//   修法＝SHARED_TOOLS 共享工具豁免集：全部 Expert 默認開（不列進 false）。
-//   orchestrator 側只對子集 ORCHESTRATOR_DISABLED_SHARED_TOOLS（workflow_* 三個）顯式
-//   false（野獸幀 beastTemplateFact 聲明「你沒有 workflow_* 工具」必須是物理事實）；
-//   local_files 2026-10-04 併入 SHARED_TOOLS 但不在禁用子集——部署 opencode.json 對
-//   orchestrator/editor/video-director/director3d 皆 local_files:true，兩邊不得矛盾。
+//     skill/apply_patch/invalid）不在工具档清单内，天然不受影响，不列入 map。
+// 第三条（2026-09-21 e2e 事故修补；2026-10-04 local_files 并入）：workflow_start /
+//   workflow_update_node / workflow_status 是「共享工作流操作工具」＝生产线基础设施，
+//   不是任何 Expert 的域工具。事故实锤：jev-gate 向被 Jev 判为制作类的 Expert 任务书
+//   注入硬规则「第一个动作＝呼叫 workflow_start」，但本导出器的补集规则把这三个对
+//   全部 Expert 显式 false（＝物理禁用），screenwriter 子代理回报「工具白名单未提供
+//   workflow_start，任务 FAILED」——系统指令叫子代理调一个被系统物理禁用的工具。
+//   修法＝SHARED_TOOLS 共享工具豁免集：全部 Expert 默认开（不列进 false）。
+//   orchestrator 侧只对子集 ORCHESTRATOR_DISABLED_SHARED_TOOLS（workflow_* 三个）显式
+//   false（野兽帧 beastTemplateFact 声明「你没有 workflow_* 工具」必须是物理事实）；
+//   local_files 2026-10-04 并入 SHARED_TOOLS 但不在禁用子集——部署 opencode.json 对
+//   orchestrator/editor/video-director/director3d 皆 local_files:true，两边不得矛盾。
 //
 // 用法：
 //   npx tsx tools/export-expert-agents.ts                          # fallback 近似全集
-//   npx tsx tools/export-expert-agents.ts --tools-file <path>      # VPS 工具清單（每行一個 id）
-//   npx tsx tools/export-expert-agents.ts --check                  # 只校驗不寫（部署片驗漂移用）
+//   npx tsx tools/export-expert-agents.ts --tools-file <path>      # VPS 工具清单（每行一个 id）
+//   npx tsx tools/export-expert-agents.ts --check                  # 只校验不写（部署片验漂移用）
 //
-// --tools-file 由部署片從 VPS `ls /opt/agent-harness/workspace/.opencode/tools/ | grep -v .bak`
-// 生成；未傳參數時用 src/lib/harness-tool-registry.ts HARNESS_TOOL_ID_LIST + 4 個已知
-// VPS 額外工具作為近似全集（僅用於交叉校驗 registry 引用與覆蓋統計，不進產物形狀），
-// 並在 stdout 明確警告。導出機械可重跑：同輸入同輸出，無時間戳（digest 頭生成日期除外）。
+// --tools-file 由部署片从 VPS `ls /opt/agent-harness/workspace/.opencode/tools/ | grep -v .bak`
+// 生成；未传参数时用 src/lib/harness-tool-registry.ts HARNESS_TOOL_ID_LIST + 4 个已知
+// VPS 额外工具作为近似全集（仅用于交叉校验 registry 引用与覆盖统计，不进产物形状），
+// 并在 stdout 明确警告。导出机械可重跑：同输入同输出，无时间戳（digest 头生成日期除外）。
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -72,9 +72,9 @@ const TARGETS = {
 } as const;
 const CHECK = process.argv.includes("--check");
 
-// ── 工具全集來源（--tools-file > fallback 近似全集）──────────────────────────
+// ── 工具全集来源（--tools-file > fallback 近似全集）──────────────────────────
 
-/** 已知 VPS .opencode/tools/ 有、而本地 HARNESS_TOOL_ID_LIST 未登記的工具（2026-09-10）。 */
+/** 已知 VPS .opencode/tools/ 有、而本地 HARNESS_TOOL_ID_LIST 未登记的工具（2026-09-10）。 */
 const KNOWN_VPS_EXTRA_TOOLS = [
   "search_web",
   "vision_analyze",
@@ -87,7 +87,7 @@ function parseToolsFileArg(): string | undefined {
   if (i === -1) return undefined;
   const value = process.argv[i + 1];
   if (!value || value.startsWith("--")) {
-    console.error("EXPORT_FAIL：--tools-file 需要一個檔案路徑參數。");
+    console.error("EXPORT_FAIL：--tools-file 需要一个档案路径参数。");
     process.exit(1);
   }
   return value;
@@ -106,7 +106,7 @@ function loadUniverse(): { tools: string[]; source: "tools-file" | "fallback" } 
   const fileArg = parseToolsFileArg();
   if (fileArg) {
     if (!existsSync(fileArg)) {
-      console.error(`EXPORT_FAIL：--tools-file 檔案不存在：${fileArg}`);
+      console.error(`EXPORT_FAIL：--tools-file 档案不存在：${fileArg}`);
       process.exit(1);
     }
     const lines = readFileSync(fileArg, "utf8").split(/\r?\n/);
@@ -118,50 +118,50 @@ function loadUniverse(): { tools: string[]; source: "tools-file" | "fallback" } 
   };
 }
 
-// ── 產物組裝（真源常量 import，零手抄）───────────────────────────────────────
+// ── 产物组装（真源常量 import，零手抄）───────────────────────────────────────
 
-/** orchestrator 現行描述原文（VPS opencode.json agent.orchestrator，09-08 斷路先例）。 */
+/** orchestrator 现行描述原文（VPS opencode.json agent.orchestrator，09-08 断路先例）。 */
 const ORCHESTRATOR_DESCRIPTION =
-  "MOE Orchestrator（野獸模式主會話）：域工具已斷路，只能 subagent_dispatch 派發 Expert";
+  "MOE Orchestrator（野兽模式主会话）：域工具已断路，只能 subagent_dispatch 派发 Expert";
 
-/** Expert 描述後綴（R8 修復片 1 裁定文案）。 */
-const EXPERT_DESCRIPTION_SUFFIX = "（Expert：僅經 subagent_dispatch expert 欄路由）";
+/** Expert 描述后缀（R8 修复片 1 裁定文案）。 */
+const EXPERT_DESCRIPTION_SUFFIX = "（Expert：仅经 subagent_dispatch expert 栏路由）";
 
-/** digest 頭（R7 provenance 規範：HTML 註釋，注入端 stripProvenanceHeader 剝離）。 */
+/** digest 头（R7 provenance 规范：HTML 注释，注入端 stripProvenanceHeader 剥离）。 */
 const DIGEST_PROVENANCE_HEADER =
-  "<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 現值生成" +
-  "（buildExpertRegistryDigest 逐字輸出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 機械生成）。" +
-  "生成日期 2026-09-11（R4：摘要行擴充配方库 + 交付契约，registry 改行後須重生成上傳）。 -->";
+  "<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 现值生成" +
+  "（buildExpertRegistryDigest 逐字输出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 机械生成）。" +
+  "生成日期 2026-09-11（R4：摘要行扩充配方库 + 交付契约，registry 改行后须重生成上传）。 -->";
 
-/** 域工具全集 = 全部 Expert toolIds 去重聯集（registry 插入序）。 */
+/** 域工具全集 = 全部 Expert toolIds 去重联集（registry 插入序）。 */
 const DOMAIN_TOOLS: string[] = dedupePreserveOrder(
   Object.values(EXPERT_REGISTRY).flatMap((expert) => [...expert.toolIds]),
 );
 
-/** 共享工具豁免集（2026-09-21 e2e 實錘；2026-10-04 加入 local_files）：不屬任何 Expert
- * 域工具，全部 Expert 默認開（不列進 false）。子集 ORCHESTRATOR_DISABLED_SHARED_TOOLS
- * 才是 orchestrator 側必須物理禁用的（野獸幀聲明「你沒有 workflow_* 工具」必須是物理事實）。
- * local_files 加入的理由：部署 opencode.json 對 orchestrator/editor/video-director/director3d
- * 皆顯式 local_files:true；它不屬任何 Expert 域工具，若落入「域外工具全 false」規則就會被
- * 寫成 false，使 editor/video-director/director3d 的提示詞宣告「local_files 已被移除」，
- * 與同一份部署的 opencode.json 直接矛盾。 */
+/** 共享工具豁免集（2026-09-21 e2e 实锤；2026-10-04 加入 local_files）：不属任何 Expert
+ * 域工具，全部 Expert 默认开（不列进 false）。子集 ORCHESTRATOR_DISABLED_SHARED_TOOLS
+ * 才是 orchestrator 侧必须物理禁用的（野兽帧声明「你没有 workflow_* 工具」必须是物理事实）。
+ * local_files 加入的理由：部署 opencode.json 对 orchestrator/editor/video-director/director3d
+ * 皆显式 local_files:true；它不属任何 Expert 域工具，若落入「域外工具全 false」规则就会被
+ * 写成 false，使 editor/video-director/director3d 的提示词宣告「local_files 已被移除」，
+ * 与同一份部署的 opencode.json 直接矛盾。 */
 const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status", "local_files"])
 
-/** SHARED_TOOLS 中 orchestrator 亦須顯式禁用的子集：野獸幀 beastTemplateFact 聲明
- * 「你沒有 workflow_* 工具」，必須是物理事實。local_files 不在此列——opencode.json 對
- * orchestrator 顯式 local_files:true，必須保持默認開（不得被斷路）。 */
+/** SHARED_TOOLS 中 orchestrator 亦须显式禁用的子集：野兽帧 beastTemplateFact 声明
+ * 「你没有 workflow_* 工具」，必须是物理事实。local_files 不在此列——opencode.json 对
+ * orchestrator 显式 local_files:true，必须保持默认开（不得被断路）。 */
 const ORCHESTRATOR_DISABLED_SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status"])
 
-/** orchestrator 保留的「Expert 域工具」例外（2026-10-01 art-style 接线回归修復）：
- * image_generate 原為無歸屬工具（orchestrator 默認開、設計刻意保留直調生圖）；
- * 併入 video-director 域以接通 art_style 模板後進入 DOMAIN_TOOLS 聯集，orchestrator
- * 的「域工具全 false」規則會連帶把它物理禁用。修法＝顯式豁免（與
- * ORCHESTRATOR_DISABLED_SHARED_TOOLS 反向對偶：那組 Expert 開/orchestrator 關，
- * 這組 Expert 開/orchestrator 也開）。 */
+/** orchestrator 保留的「Expert 域工具」例外（2026-10-01 art-style 接线回归修复）：
+ * image_generate 原为无归属工具（orchestrator 默认开、设计刻意保留直调生图）；
+ * 并入 video-director 域以接通 art_style 模板后进入 DOMAIN_TOOLS 联集，orchestrator
+ * 的「域工具全 false」规则会连带把它物理禁用。修法＝显式豁免（与
+ * ORCHESTRATOR_DISABLED_SHARED_TOOLS 反向对偶：那组 Expert 开/orchestrator 关，
+ * 这组 Expert 开/orchestrator 也开）。 */
 const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set(["image_generate"]);
 
 function buildAgentsJson(universeTools: readonly string[]): string {
-  // tools map 只寫 false 項（opencode 語義：未列 = 默認開）；鍵序 = 來源清單插入序，確定性輸出。
+  // tools map 只写 false 项（opencode 语义：未列 = 默认开）；键序 = 来源清单插入序，确定性输出。
   const toolsFalse = (ids: readonly string[]): Record<string, boolean> => {
     const map: Record<string, boolean> = {};
     for (const id of ids) map[id] = false;
@@ -169,13 +169,13 @@ function buildAgentsJson(universeTools: readonly string[]): string {
   };
 
   const agents: Record<string, unknown> = {};
-  // orchestrator 在前：25 域工具全 false + question true（主會話保留提問內建）。
-  // 注意：orchestrator 只斷 Expert 域工具，非 Expert 域工具（search_web / workflow_* 等）保持默認開；
-  // 例外①＝ORCHESTRATOR_DISABLED_SHARED_TOOLS 顯式 false（2026-09-21：野獸幀 beastTemplateFact
-  // 聲明「你沒有 workflow_* 工具」必須是物理事實，模板骨架由 Expert 建立；local_files 不在
-  // 此列，orchestrator 保持默認開——opencode.json 對它顯式 true）。
-  // 例外②＝ORCHESTRATOR_KEPT_DOMAIN_TOOLS 反向豁免（2026-10-01：image_generate 雖併入
-  // video-director 域，orchestrator 仍刻意保留直調生圖，不得被域工具全 false 規則連帶禁用）。
+  // orchestrator 在前：25 域工具全 false + question true（主会话保留提问内建）。
+  // 注意：orchestrator 只断 Expert 域工具，非 Expert 域工具（search_web / workflow_* 等）保持默认开；
+  // 例外①＝ORCHESTRATOR_DISABLED_SHARED_TOOLS 显式 false（2026-09-21：野兽帧 beastTemplateFact
+  // 声明「你没有 workflow_* 工具」必须是物理事实，模板骨架由 Expert 建立；local_files 不在
+  // 此列，orchestrator 保持默认开——opencode.json 对它显式 true）。
+  // 例外②＝ORCHESTRATOR_KEPT_DOMAIN_TOOLS 反向豁免（2026-10-01：image_generate 虽并入
+  // video-director 域，orchestrator 仍刻意保留直调生图，不得被域工具全 false 规则连带禁用）。
   agents["orchestrator"] = {
     mode: "all",
     description: ORCHESTRATOR_DESCRIPTION,
@@ -185,8 +185,8 @@ function buildAgentsJson(universeTools: readonly string[]): string {
       question: true,
     },
   };
-  // 其後按 registry 插入序：每個 Expert false 掉「全集 − 自己域工具 − 共享工具」
-  // （含不屬於任何 Expert 的工具，如 image_generate）。
+  // 其后按 registry 插入序：每个 Expert false 掉「全集 − 自己域工具 − 共享工具」
+  // （含不属于任何 Expert 的工具，如 image_generate）。
   for (const expert of Object.values(EXPERT_REGISTRY)) {
     const own = new Set(expert.toolIds);
     const foreign = universeTools.filter((id) => !own.has(id) && !SHARED_TOOLS.has(id));
@@ -200,16 +200,16 @@ function buildAgentsJson(universeTools: readonly string[]): string {
 }
 
 /**
- * Harness 路徑映射（2026-10-04 引用修復片）：registry 的 skillPaths 是 **repo 根樹**
- * 相對路徑——EDITOR_PERSONA_SKILL_PATHS 由 editor-timeline-activation.test.ts 對
- * process.cwd() 做 fs 存在性斷言 ⇒ 語義就是 repo 根樹，常量不得改（改了 = 對 repo
- * 根樹的合法引用失真）。但同一份 EXPERT_REGISTRY 亦被烘焙成 VPS harness 執行時讀取的
- * 靜態 digest（gateway plan-gw.ts / messages-gw.ts readFileSync），而 harness 樹
- * `.opencode/skills/**` 已把 nested SKILL.md 收斂改名為 RECIPE.md（一級 20 個 SKILL.md
- * 保留）。因此 digest 生成時把「harness 樹裡已被改名的 nested 路徑」逐條映射成真實
- * harness 路徑；一級 skills/editor/SKILL.md 與其它未改名域路徑不動。
- * 明確表（key = registry 現值，value = harness 真實路徑；非字串模糊替換）——新增
- * harness 改名時同步補一行，勿用 sed/正則自動生成。
+ * Harness 路径映射（2026-10-04 引用修复片）：registry 的 skillPaths 是 **repo 根树**
+ * 相对路径——EDITOR_PERSONA_SKILL_PATHS 由 editor-timeline-activation.test.ts 对
+ * process.cwd() 做 fs 存在性断言 ⇒ 语义就是 repo 根树，常量不得改（改了 = 对 repo
+ * 根树的合法引用失真）。但同一份 EXPERT_REGISTRY 亦被烘焙成 VPS harness 执行时读取的
+ * 静态 digest（gateway plan-gw.ts / messages-gw.ts readFileSync），而 harness 树
+ * `.opencode/skills/**` 已把 nested SKILL.md 收敛改名为 RECIPE.md（一级 20 个 SKILL.md
+ * 保留）。因此 digest 生成时把「harness 树里已被改名的 nested 路径」逐条映射成真实
+ * harness 路径；一级 skills/editor/SKILL.md 与其它未改名域路径不动。
+ * 明确表（key = registry 现值，value = harness 真实路径；非字串模糊替换）——新增
+ * harness 改名时同步补一行，勿用 sed/正则自动生成。
  */
 const HARNESS_SKILL_PATH_MAP: Readonly<Record<string, string>> = {
   "skills/editor/assembly/SKILL.md": ".opencode/skills/editor/assembly/RECIPE.md",
@@ -220,8 +220,8 @@ const HARNESS_SKILL_PATH_MAP: Readonly<Record<string, string>> = {
   "skills/editor/qc-master/SKILL.md": ".opencode/skills/editor/qc-master/RECIPE.md",
 };
 
-/** 把 buildExpertRegistryDigest() 輸出的 repo 路徑逐條換成 harness 真實路徑。
- * 只替換表中的完整路徑 token（精確匹配，不做前綴/正則模糊替換）；表外路徑原樣。 */
+/** 把 buildExpertRegistryDigest() 输出的 repo 路径逐条换成 harness 真实路径。
+ * 只替换表中的完整路径 token（精确匹配，不做前缀/正则模糊替换）；表外路径原样。 */
 function applyHarnessSkillPathMap(digest: string): string {
   let out = digest;
   for (const [repoPath, harnessPath] of Object.entries(HARNESS_SKILL_PATH_MAP)) {
@@ -231,9 +231,9 @@ function applyHarnessSkillPathMap(digest: string): string {
 }
 
 function buildDigestTxt(): string {
-  // 無檔尾換行：剝頭（stripProvenanceHeader 只 trimStart）後與 buildExpertRegistryDigest()
-  // 輸出逐字 byte 相等（唯 nested 已改名路徑經 HARNESS_SKILL_PATH_MAP 映射為 harness 真路徑），
-  // 注入幀零多餘空白。
+  // 无档尾换行：剥头（stripProvenanceHeader 只 trimStart）后与 buildExpertRegistryDigest()
+  // 输出逐字 byte 相等（唯 nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径），
+  // 注入帧零多余空白。
   return `${DIGEST_PROVENANCE_HEADER}\n${applyHarnessSkillPathMap(buildExpertRegistryDigest())}`;
 }
 
@@ -242,10 +242,10 @@ function buildExpertIdsJson(): string {
 }
 
 /**
- * 交付契約清單（09-15 評測补课片新增）：{"<id>":{"requiredFields":[…],
- * "qcSignatureRequired":bool},…}，逐個從 EXPERT_REGISTRY 生成、零手抄，
- * 鍵序 = registry 插入序（確定性輸出）。playbook 第二節驗收對表與
- * critic 審核官逐欄核驗的清單真源。
+ * 交付契约清单（09-15 评测补课片新增）：{"<id>":{"requiredFields":[…],
+ * "qcSignatureRequired":bool},…}，逐个从 EXPERT_REGISTRY 生成、零手抄，
+ * 键序 = registry 插入序（确定性输出）。playbook 第二节验收对表与
+ * critic 审核官逐栏核验的清单真源。
  */
 function buildDeliveryContractsJson(): string {
   const contracts: Record<string, { requiredFields: string[]; qcSignatureRequired: boolean }> = {};
@@ -272,18 +272,18 @@ function main(): void {
 
   if (universe.source === "fallback") {
     console.warn(
-      "EXPORT_WARN：未傳 --tools-file，使用近似工具全集" +
-        `（HARNESS_TOOL_ID_LIST ${HARNESS_TOOL_ID_LIST.length} 個 + 已知 VPS 額外 ${KNOWN_VPS_EXTRA_TOOLS.length} 個）。` +
-        "近似全集，部署時應用 --tools-file 重導（部署片從 VPS ls .opencode/tools/ 生成清單）。",
+      "EXPORT_WARN：未传 --tools-file，使用近似工具全集" +
+        `（HARNESS_TOOL_ID_LIST ${HARNESS_TOOL_ID_LIST.length} 个 + 已知 VPS 额外 ${KNOWN_VPS_EXTRA_TOOLS.length} 个）。` +
+        "近似全集，部署时应用 --tools-file 重导（部署片从 VPS ls .opencode/tools/ 生成清单）。",
     );
   }
 
-  // 交叉校驗：registry 引用的域工具必須存在於工具全集（漂移偵測，僅警告不阻導出）。
+  // 交叉校验：registry 引用的域工具必须存在于工具全集（漂移侦测，仅警告不阻导出）。
   const universeSet = new Set(universe.tools);
   const missing = DOMAIN_TOOLS.filter((id) => !universeSet.has(id));
   if (missing.length > 0) {
     console.warn(
-      `EXPORT_WARN：${universe.source === "fallback" ? "近似全集" : "VPS 工具清單"}中缺少 registry 引用的域工具（registry 與工具面漂移，先對帳再部署）：${missing.join(", ")}`,
+      `EXPORT_WARN：${universe.source === "fallback" ? "近似全集" : "VPS 工具清单"}中缺少 registry 引用的域工具（registry 与工具面漂移，先对帐再部署）：${missing.join(", ")}`,
     );
   }
   const unowned = universe.tools.filter((id) => !DOMAIN_TOOLS.includes(id)).length;
@@ -292,19 +292,19 @@ function main(): void {
     const mismatches: string[] = [];
     for (const [target, build] of PRODUCTS) {
       if (!existsSync(target)) {
-        mismatches.push(`${target}（產物缺失）`);
+        mismatches.push(`${target}（产物缺失）`);
         continue;
       }
       if (readFileSync(target, "utf8") !== build(universe.tools)) mismatches.push(target);
     }
     if (mismatches.length > 0) {
       console.error(
-        `EXPORT_CHECK_FAIL：staging 產物與機械導出產物不一致（手工漂移或真源變動）：\n  ${mismatches.join("\n  ")}\n  重跑不帶 --check 的導出再生。`,
+        `EXPORT_CHECK_FAIL：staging 产物与机械导出产物不一致（手工漂移或真源变动）：\n  ${mismatches.join("\n  ")}\n  重跑不带 --check 的导出再生。`,
       );
       process.exit(1);
     }
       console.log(
-        `EXPORT_CHECK_OK：四產物與機械導出 byte 等價（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未歸屬 Expert 的全集工具 ${unowned} 個保持默認開）`,
+        `EXPORT_CHECK_OK：四产物与机械导出 byte 等价（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未归属 Expert 的全集工具 ${unowned} 个保持默认开）`,
       );
     process.exit(0);
   }
@@ -316,7 +316,7 @@ function main(): void {
     console.log(`EXPORT_OK：${target}（${Buffer.byteLength(output)} bytes）`);
   }
   console.log(
-    `導出依據：域工具 ${DOMAIN_TOOLS.length} 個（registry 聯集）/ 工具全集 ${universe.tools.length} 個（${universe.source}）/ registry ${Object.keys(EXPERT_REGISTRY).length} 行。`,
+    `导出依据：域工具 ${DOMAIN_TOOLS.length} 个（registry 联集）/ 工具全集 ${universe.tools.length} 个（${universe.source}）/ registry ${Object.keys(EXPERT_REGISTRY).length} 行。`,
   );
 }
 

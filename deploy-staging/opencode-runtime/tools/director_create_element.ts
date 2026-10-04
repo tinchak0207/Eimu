@@ -60,7 +60,7 @@ export default tool({
         { ops: [{ op: "addElement", element }], reason: args.reason },
         context.abort,
       )
-      // 2026-09-03 驗屍修復 R2：kind 一致性。真實會話實錘：kind 请求 animal 返回 kind:"mannequin"
+      // 2026-09-03 验尸修复 R2：kind 一致性。真实会话实锤：kind 请求 animal 返回 kind:"mannequin"
       // 无解释，agent 困惑「警犬建成人形」。返回值与请求不一致时补 note 说明内部表示。
       const note =
         rawKind === "animal" && element.kind === "mannequin"

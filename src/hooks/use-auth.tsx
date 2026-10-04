@@ -13,12 +13,12 @@ interface AuthState {
   isLoading: boolean;
   isLoggedIn: boolean;
   /**
-   * 新人禮首登彈窗：非空＝服務端（/api/auth/me 的加法欄位）說「已發放、未展示」。
-   * 只由**本輪新拉的 /api/auth/me** 寫入，不從 localStorage 快照復活——這樣
-   * 「只彈一次」的權威在服務端（modal_seen_at），本機快照髒了也不會舊彈。
+   * 新人礼首登弹窗：非空＝服务端（/api/auth/me 的加法栏位）说「已发放、未展示」。
+   * 只由**本轮新拉的 /api/auth/me** 写入，不从 localStorage 快照复活——这样
+   * 「只弹一次」的权威在服务端（modal_seen_at），本机快照脏了也不会旧弹。
    */
   welcomeGift: WelcomeGiftModal | null;
-  /** 彈窗已處理（展示過／按下任一按鈕）：本機清掉，等服務端回執把狀態一併改掉。 */
+  /** 弹窗已处理（展示过／按下任一按钮）：本机清掉，等服务端回执把状态一并改掉。 */
   clearWelcomeGift: () => void;
   refresh: () => Promise<void>;
   logout: () => void;
@@ -62,12 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setStoredToken(validToken, result.user);
       setUser(result.user);
       setToken(validToken);
-      // 只在服務端說「待展示」時上膛；已經上膛的不因後續 refresh 的 no-pending 而縮回去
-      // （彈窗開著時被背景 refresh 收掉＝話說到一半自己消失）。
+      // 只在服务端说「待展示」时上膛；已经上膛的不因后续 refresh 的 no-pending 而缩回去
+      // （弹窗开著时被背景 refresh 收掉＝话说到一半自己消失）。
       if (result.welcomeGift) setWelcomeGift(result.welcomeGift);
     } else if (!result.transient) {
-      // 只有被明確否定（401/憑證壞）才登出；5xx/網路抖動保留登入態，
-      // 否則閘道一次打嗝就把用戶踢下線（2026-09-05「偶爾跳未登录」根因）。
+      // 只有被明确否定（401/凭证坏）才登出；5xx/网路抖动保留登入态，
+      // 否则闸道一次打嗝就把用户踢下线（2026-09-05「偶尔跳未登录」根因）。
       clearStoredToken();
       setUser(null);
       setToken(null);
@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (result.welcomeGift) setWelcomeGift(result.welcomeGift);
         }
         else if (!result.transient) { clearStoredToken(); setUser(null); setToken(null); setWelcomeGift(null); }
-        // transient：維持 optimistic 登入態，等下一次 refresh/操作再校驗。
+        // transient：维持 optimistic 登入态，等下一次 refresh/操作再校验。
       });
     } else {
       setIsLoading(false);

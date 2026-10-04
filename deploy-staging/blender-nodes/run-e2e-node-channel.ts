@@ -1,20 +1,20 @@
 /**
- * 片AA 實彈 E2E + seed dry-run（2026-09-06）。
+ * 片AA 实弹 E2E + seed dry-run（2026-09-06）。
  * 跑法：npx tsx deploy-staging/blender-nodes/run-e2e-node-channel.ts
  *
- * 誠實驗證層級標注（任務書允許的 fallback）：本機無控制面 Postgres（無
- * GENERATION_DATABASE_URL、無 docker daemon），scheduler 的 acquireSupplierLease
- * / claimNextGenerationJob / persistOutputArtifact 依賴 DB 與 Vercel Blob，無法在
- * 本機起。故本腳本驗證到 **adapter 層級直調**——調用 generateWithSupplier
- * （worker-service.ts L30 import、executeGenerationJob attempt 階段調用的同一
- * 函數），SupplierRecord 按 job-repository.ts mapSupplierRecord 的 seed 行投影
- * 手工構造。DB 認領/租約/入庫層未覆蓋，待片W 隧道＋VPS env 落位後補真鏈路。
+ * 诚实验证层级标注（任务书允许的 fallback）：本机无控制面 Postgres（无
+ * GENERATION_DATABASE_URL、无 docker daemon），scheduler 的 acquireSupplierLease
+ * / claimNextGenerationJob / persistOutputArtifact 依赖 DB 与 Vercel Blob，无法在
+ * 本机起。故本脚本验证到 **adapter 层级直调**——调用 generateWithSupplier
+ * （worker-service.ts L30 import、executeGenerationJob attempt 阶段调用的同一
+ * 函数），SupplierRecord 按 job-repository.ts mapSupplierRecord 的 seed 行投影
+ * 手工构造。DB 认领/租约/入库层未覆盖，待片W 隧道＋VPS env 落位后补真链路。
  *
  * A 段 seed dry-run（零 DB）：env 三件套 → describeEnvChannels 投影＋seed 三表
- * 形狀（adapter_type/supply_tier/priority/credentialRef/healthPath/capabilities）。
- * B 段 實彈 E2E：兩路並發 blender-render-eevee 單幀 job 走 adapter 分派 → 橋
- * /v1/execute → artifacts 出真 PNG（魔數校驗 bytes>0）＋橋側 queue_depth 波動
- * ＋.blender-work/out/ 落盤確認。
+ * 形状（adapter_type/supply_tier/priority/credentialRef/healthPath/capabilities）。
+ * B 段 实弹 E2E：两路并发 blender-render-eevee 单帧 job 走 adapter 分派 → 桥
+ * /v1/execute → artifacts 出真 PNG（魔数校验 bytes>0）＋桥侧 queue_depth 波动
+ * ＋.blender-work/out/ 落盘确认。
  */
 
 import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
@@ -29,14 +29,14 @@ function check(name: string, cond: boolean, detail: string) {
   console.log(`[${mark}] ${name} — ${detail}`);
 }
 
-// ── 載入 .env.local 的 blender 三件套（值不入庫不入 commit）─────────────────
+// ── 载入 .env.local 的 blender 三件套（值不入库不入 commit）─────────────────
 const envLocalPath = path.join(process.cwd(), ".env.local");
 for (const line of existsSync(envLocalPath) ? readFileSync(envLocalPath, "utf8").split("\n") : []) {
   const m = /^(BLENDER_NODE_[A-Z_]+)=(.*)$/.exec(line.trim());
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
 }
 
-// ═══ A 段：seed dry-run（零 DB，投影 seed-generation-suppliers.ts 的消費鏈）═══
+// ═══ A 段：seed dry-run（零 DB，投影 seed-generation-suppliers.ts 的消费链）═══
 console.log("\n== A. seed dry-run（describeEnvChannels → 三表投影）==");
 
 const { describeEnvChannels } = await import("../../src/lib/sub2api.ts");
@@ -44,14 +44,14 @@ const { REGISTRY_CHANNELS } = await import("../../src/lib/supplier-channels.conf
 const { GENERATION_MODEL_CATALOG } = await import("../../src/lib/generation-model-catalog/catalog.ts");
 
 const registry = REGISTRY_CHANNELS.find((c) => c.label === "blender-local");
-check("A1 registry 條目在位", !!registry, registry ? `tier=${registry.tier} priorities=${registry.seedPriority}/${registry.sitePriority} adapterType=${registry.adapterType}` : "REGISTRY_CHANNELS 無 blender-local");
-check("A2 三 env 件套齊", Boolean(process.env.BLENDER_NODE_LOCAL_URL && process.env.BLENDER_NODE_LOCAL_TOKEN && process.env.BLENDER_NODE_LOCAL_ENABLED), `URL=${process.env.BLENDER_NODE_LOCAL_URL} TOKEN=<set:${Boolean(process.env.BLENDER_NODE_LOCAL_TOKEN)}> ENABLED=${process.env.BLENDER_NODE_LOCAL_ENABLED}`);
+check("A1 registry 条目在位", !!registry, registry ? `tier=${registry.tier} priorities=${registry.seedPriority}/${registry.sitePriority} adapterType=${registry.adapterType}` : "REGISTRY_CHANNELS 无 blender-local");
+check("A2 三 env 件套齐", Boolean(process.env.BLENDER_NODE_LOCAL_URL && process.env.BLENDER_NODE_LOCAL_TOKEN && process.env.BLENDER_NODE_LOCAL_ENABLED), `URL=${process.env.BLENDER_NODE_LOCAL_URL} TOKEN=<set:${Boolean(process.env.BLENDER_NODE_LOCAL_TOKEN)}> ENABLED=${process.env.BLENDER_NODE_LOCAL_ENABLED}`);
 
 const descriptor = describeEnvChannels(process.env).find((c) => c.label === "blender-local");
-check("A3 configured＋defaultEnabled", Boolean(descriptor?.configured && descriptor?.defaultEnabled && descriptor?.endpoint), descriptor ? `id=${descriptor.id} baseURL=${descriptor.endpoint?.baseURL}` : "descriptor 缺席（configured=false → seed 靜默跳過，誠實行為）");
-check("A4 supportedModels＝兩能力標籤", JSON.stringify(descriptor?.endpoint?.supportedModels) === JSON.stringify(["blender-render-eevee", "blender-render-cycles"]), `→ ${descriptor?.endpoint?.supportedModels?.join(",")}`);
+check("A3 configured＋defaultEnabled", Boolean(descriptor?.configured && descriptor?.defaultEnabled && descriptor?.endpoint), descriptor ? `id=${descriptor.id} baseURL=${descriptor.endpoint?.baseURL}` : "descriptor 缺席（configured=false → seed 静默跳过，诚实行为）");
+check("A4 supportedModels＝两能力标签", JSON.stringify(descriptor?.endpoint?.supportedModels) === JSON.stringify(["blender-render-eevee", "blender-render-cycles"]), `→ ${descriptor?.endpoint?.supportedModels?.join(",")}`);
 
-// seed 三表投影（seed-generation-suppliers.ts L318/L341/healthPath 分派逐字段同構）
+// seed 三表投影（seed-generation-suppliers.ts L318/L341/healthPath 分派逐字段同构）
 const seedAdapterType = registry?.adapterType ?? "openai_images";
 const seedTier = registry?.tier;
 const seedPriority = registry?.seedPriority;
@@ -61,23 +61,23 @@ const seedHealthPath = registry?.adapterType === "blender_bridge"
   : (process.env.ADOBE2API_HEALTH_PATH ?? "health");
 check("A5 supplier 行投影", seedAdapterType === "blender_bridge" && seedTier === "first_party" && seedPriority === 10 && seedCredentialRef === "BLENDER_NODE_LOCAL_TOKEN", `adapter_type=${seedAdapterType} supply_tier=${seedTier} priority=${seedPriority} credential_ref=${seedCredentialRef}`);
 check("A6 supplier_account healthPath 分派", seedHealthPath === "v1/health", `→ ${seedHealthPath}（blender_bridge+LOCAL；modal 分支待片X）`);
-check("A7 幂等語義（seed 腳本全 ON CONFLICT upsert）", true, "supplier L324 / supplier_account L343 均冪等重跑安全；VPS 實跑待片W env 落位（本機無控制面 DB）");
+check("A7 幂等语义（seed 脚本全 ON CONFLICT upsert）", true, "supplier L324 / supplier_account L343 均幂等重跑安全；VPS 实跑待片W env 落位（本机无控制面 DB）");
 
 const capabilities = (registry?.claims ?? []).flatMap((claim) => {
   const model = GENERATION_MODEL_CATALOG[claim.modelId];
   if (!model) return [];
   return claim.kinds.map((kind) => `${claim.modelId}:${kind}`);
 });
-check("A8 capabilities 認領齊（catalog 前置生效）", capabilities.length === 2, `→ ${capabilities.join("、")}（catalog 缺條目時 channelCapabilities 會 warn+skip）`);
+check("A8 capabilities 认领齐（catalog 前置生效）", capabilities.length === 2, `→ ${capabilities.join("、")}（catalog 缺条目时 channelCapabilities 会 warn+skip）`);
 
-// ═══ B 段：實彈 E2E（adapter 層級直調，兩路並發觀察橋佇列）═════════════════
-console.log("\n== B. 實彈 E2E（adapter 層級，未含 DB 認領/租約層）==");
+// ═══ B 段：实弹 E2E（adapter 层级直调，两路并发观察桥伫列）═════════════════
+console.log("\n== B. 实弹 E2E（adapter 层级，未含 DB 认领/租约层）==");
 
 const { generateWithSupplier } = await import("../../src/lib/generation-core/supplier-adapter.ts");
 const { closeGenerationSql } = await import("../../src/lib/generation-core/database.ts");
 
 const baseUrl = process.env.BLENDER_NODE_LOCAL_URL!;
-// SupplierRecord＝seed 後 mapSupplierRecord(job-repository.ts L874) 對 env:blender-local 行的投影。
+// SupplierRecord＝seed 后 mapSupplierRecord(job-repository.ts L874) 对 env:blender-local 行的投影。
 const supplier = {
   id: "env:blender-local",
   label: "blender-local",
@@ -120,7 +120,7 @@ async function bridgeHealthNow(): Promise<{ queue_depth: number; gpu: string; wo
 }
 
 const before = await bridgeHealthNow();
-console.log(`橋 health 起點：gpu=${before.gpu} queue_depth=${before.queue_depth} workdir=${before.workdir}`);
+console.log(`桥 health 起点：gpu=${before.gpu} queue_depth=${before.queue_depth} workdir=${before.workdir}`);
 
 function makeInput(n: number) {
   const attemptId = `e2e-${Date.now()}-${n}-${Math.random().toString(16).slice(2, 10)}`;
@@ -146,7 +146,7 @@ const poller = (async () => {
     try {
       const h = await bridgeHealthNow();
       maxQueueDepth = Math.max(maxQueueDepth, h.queue_depth);
-    } catch { /* 輪詢失敗不影響主線 */ }
+    } catch { /* 轮询失败不影响主线 */ }
     await new Promise((r) => setTimeout(r, 100));
   }
 })();
@@ -158,44 +158,44 @@ async function runJob(n: number) {
   const ms = Date.now() - t0;
   const bytes = Buffer.from(output.base64 ?? "", "base64");
   const isPng = bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-  // 證據 PNG 落盤（.blender-work 已 gitignore）
+  // 证据 PNG 落盘（.blender-work 已 gitignore）
   const evidenceDir = path.join(before.workdir, "e2e-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const evidencePath = path.join(evidenceDir, `${input.attemptId}.png`);
   writeFileSync(evidencePath, bytes);
-  // 橋側 out/ 落盤確認（evidence.adapterArtifactPath 是橋回的相對路徑）
+  // 桥侧 out/ 落盘确认（evidence.adapterArtifactPath 是桥回的相对路径）
   const rel = (output.evidence?.artifactPath as string) ?? "";
   const artifactAbs = path.join(before.workdir, "out", rel);
   const artifactExists = existsSync(artifactAbs) && statSync(artifactAbs).size > 0;
   return { n, input, output, bytes, isPng, ms, evidencePath, rel, artifactExists, artifactAbs };
 }
 
-// 兩路並發：橋併發 1 → 第二路必入 FIFO 佇列（queue_depth 波動可觀察）。
-// 錯位 150ms：單幀 eevee 實測 ~0.4s，job2 到達時 job1 仍在執行段（job2 入
-// waiters → health queue_depth=1；執行中 job 不計入 queue_depth，server.py L406）。
+// 两路并发：桥并发 1 → 第二路必入 FIFO 伫列（queue_depth 波动可观察）。
+// 错位 150ms：单帧 eevee 实测 ~0.4s，job2 到达时 job1 仍在执行段（job2 入
+// waiters → health queue_depth=1；执行中 job 不计入 queue_depth，server.py L406）。
 const [r1, r2] = await Promise.all([runJob(1), (async () => { await new Promise((r) => setTimeout(r, 150)); return runJob(2); })()]);
 polling = false;
 await poller;
 const after = await bridgeHealthNow();
 
 for (const r of [r1, r2]) {
-  check(`B${r.n} adapter 層直調出真 PNG`, r.output.base64 !== null && r.isPng && r.bytes.length > 0, `kind=png bytes=${r.bytes.length} 耗時=${r.ms}ms endpointLabel=${r.output.endpointLabel} engine=${r.output.evidence?.engine}`);
-  check(`B${r.n} 橋側 artifacts 落 .blender-work/out/`, r.artifactExists, `→ ${r.artifactAbs}`);
-  check(`B${r.n} 證據 PNG 落盤`, existsSync(r.evidencePath) && statSync(r.evidencePath).size === r.bytes.length, `→ ${r.evidencePath}`);
+  check(`B${r.n} adapter 层直调出真 PNG`, r.output.base64 !== null && r.isPng && r.bytes.length > 0, `kind=png bytes=${r.bytes.length} 耗时=${r.ms}ms endpointLabel=${r.output.endpointLabel} engine=${r.output.evidence?.engine}`);
+  check(`B${r.n} 桥侧 artifacts 落 .blender-work/out/`, r.artifactExists, `→ ${r.artifactAbs}`);
+  check(`B${r.n} 证据 PNG 落盘`, existsSync(r.evidencePath) && statSync(r.evidencePath).size === r.bytes.length, `→ ${r.evidencePath}`);
 }
 const queuedEvidence = [r1, r2].map((r) => ({
   queued: r.output.evidence?.queued === true,
   queuePosition: Number(r.output.evidence?.queuePosition ?? 0),
 }));
 check(
-  "B5 橋佇列計入（橋自報 queued/queue_position）",
+  "B5 桥伫列计入（桥自报 queued/queue_position）",
   queuedEvidence.some((q) => q.queued),
-  `→ ${JSON.stringify(queuedEvidence)}（health 輪詢與執行互搶 addon 幫浦採樣不可靠，橋 execute 回應自報欄位為權威證據；health max queue_depth=${maxQueueDepth}）`,
+  `→ ${JSON.stringify(queuedEvidence)}（health 轮询与执行互抢 addon 帮浦采样不可靠，桥 execute 回应自报栏位为权威证据；health max queue_depth=${maxQueueDepth}）`,
 );
-check("B6 收尾 health 恢復", after.queue_depth === 0, `→ queue_depth=${after.queue_depth} gpu=${after.gpu}`);
+check("B6 收尾 health 恢复", after.queue_depth === 0, `→ queue_depth=${after.queue_depth} gpu=${after.gpu}`);
 
 await closeGenerationSql().catch(() => {});
-console.log(failures === 0 ? "\nE2E 全部 PASS" : `\n${failures} 項 FAIL`);
+console.log(failures === 0 ? "\nE2E 全部 PASS" : `\n${failures} 项 FAIL`);
 process.exit(failures === 0 ? 0 : 1);
 }
 

@@ -7,10 +7,10 @@
  *
  * three@0.184 注意：TransformControls 须 scene.add(controls.getHelper())。
  *
- * 【白名單偏離聲明（2026-09-03 片B 移植）】本檔為 kunpeng-vendor/src/lib/director/engine.ts
- * 逐行移植，唯一偏離 = 切除 Tauri：`@tauri-apps/api/tauri` 的 `convertFileSrc`
- * 僅用於 setPanorama 與 billboard 紋理載入（兩處），web 端改為把傳入路徑直接當 URL 使用；
- * 其餘逐行等價（attachMonitor/雙 viewport 邏輯原樣保留）。
+ * 【白名单偏离声明（2026-09-03 片B 移植）】本档为 kunpeng-vendor/src/lib/director/engine.ts
+ * 逐行移植，唯一偏离 = 切除 Tauri：`@tauri-apps/api/tauri` 的 `convertFileSrc`
+ * 仅用于 setPanorama 与 billboard 纹理载入（两处），web 端改为把传入路径直接当 URL 使用；
+ * 其余逐行等价（attachMonitor/双 viewport 逻辑原样保留）。
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -158,7 +158,7 @@ export class DirectorEngine {
   private container: HTMLDivElement;
   private texLoader = new THREE.TextureLoader();
   private pendingTextures = 0;
-  /** 片E 資產模式掛點：已載入的 glTF 資產根（不在 objects diff 集內，元素同步不受影響） */
+  /** 片E 资产模式挂点：已载入的 glTF 资产根（不在 objects diff 集内，元素同步不受影响） */
   private gltfAssetRoot: THREE.Object3D | null = null;
 
   onTransformCommit?: (id: string, t: { position: Vec3; rotationDeg: Vec3; scale: Vec3 }, mode: 'translate' | 'rotate' | 'scale') => void;
@@ -895,9 +895,9 @@ export class DirectorEngine {
   // ── 全景背景 ────────────────────────────────────────────────────────────────
 
   /**
-   * 片E 資產模式掛點：載入 glTF（.glb/.gltf）作為預覽資產，與白模 mannequin 共存
-   * （替換白模由呼叫端把對應元素 visible:false）。單資產槽，重複呼叫替換舊資產。
-   * 不 throw：失敗回傳結構化錯誤並觸發 onGltfAssetError；url=null 卸載現有資產。
+   * 片E 资产模式挂点：载入 glTF（.glb/.gltf）作为预览资产，与白模 mannequin 共存
+   * （替换白模由呼叫端把对应元素 visible:false）。单资产槽，重复呼叫替换旧资产。
+   * 不 throw：失败回传结构化错误并触发 onGltfAssetError；url=null 卸载现有资产。
    */
   async setGltfAsset(url: string | null, opts?: { targetHeightM?: number }): Promise<GltfLoadOutcome | null> {
     if (this.gltfAssetRoot) {
@@ -921,7 +921,7 @@ export class DirectorEngine {
 
   onGltfAssetError?: (message: string, stage: GltfLoadStage) => void;
 
-  /** 當前已掛載的 glTF 資產根（未掛載為 null） */
+  /** 当前已挂载的 glTF 资产根（未挂载为 null） */
   get gltfAsset(): THREE.Object3D | null {
     return this.gltfAssetRoot;
   }

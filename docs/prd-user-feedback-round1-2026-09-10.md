@@ -1,8 +1,8 @@
-# PRD：首輪真實用戶反饋落地（2026-09-10）
+# PRD：首轮真实用户反馈落地（2026-09-10）
 
-**來源**：微信真實用戶（嘗試 AI 助理＋改圖流程）現場反饋＋三張截圖。
-**性質**：修復＋體驗優化混合。P0 為功能性故障（用戶已實際卡死），P1 為高頻操作摩擦，P2 為視覺優化。
-**反饋原聲摘要**：
+**来源**：微信真实用户（尝试 AI 助理＋改图流程）现场反馈＋三张截图。
+**性质**：修复＋体验优化混合。P0 为功能性故障（用户已实际卡死），P1 为高频操作摩擦，P2 为视觉优化。
+**反馈原声摘要**：
 
 > AI 生图效果不错，确实有 image2 的生成水平，没掺水。
 > 1. 图片展示区太小了，网站整体下方留白较多。
@@ -13,157 +13,157 @@
 
 ---
 
-## R1（P0）：新手引導灰屏死鎖——AI 助理被遮罩鎖死
+## R1（P0）：新手引导灰屏死锁——AI 助理被遮罩锁死
 
-### 現場證據
+### 现场证据
 
-截圖①：AI 助理抽屜（空態，三條快捷 prompt）＋「小说影视化」模板卡輪播＋driver.js 引導彈窗「流水线环节 1/3」（上一步／下一步／跳过引导），全屏灰色半透明遮罩。用戶反映：點聊天框沒反應 → 點「下一步」→ 整個界面灰色，任何按鈕都點不到。
+截图①：AI 助理抽屉（空态，三条快捷 prompt）＋「小说影视化」模板卡轮播＋driver.js 引导弹窗「流水线环节 1/3」（上一步／下一步／跳过引导），全屏灰色半透明遮罩。用户反映：点聊天框没反应 → 点「下一步」→ 整个界面灰色，任何按钮都点不到。
 
-### 根因鏈（已定位到源碼）
+### 根因链（已定位到源码）
 
-| # | 環節 | 源碼事實 |
+| # | 环节 | 源码事实 |
 |---|------|---------|
-| 1 | 引導全屏遮罩蓋住 AI 助理 | `src/lib/atc-tour-content.ts:217-231`：driver.js `overlayOpacity: 0.4` 全屏遮罩＋`overlayClickBehavior: () => {}`（點遮罩無任何反應）。AI 助理抽屜在遮罩之下 → 「能看到聊天框，點擊沒反應」 |
-| 2 | 讓位機制失效（死鎖主因） | `atc-tour-content.ts:282-297`（R10-2 讓位觀察器）：MutationObserver 只在 `.agent-panel` transcript **出現新子節點**時 destroy 引導。用戶根本打不了字（被遮罩擋住）→ transcript 永遠空 → 引導永遠不讓位 → 死鎖 |
-| 3 | 點「下一步」後全屏灰 | 步驟②錨點 `frontSelector(' .atc-step-selector [data-step-index="0"]')` 依賴 `data-front="true"` 正面卡。輪播轉卡／佈局變動使錨點 rect 為零時，driver.js 退化為「stage 罩滿全屏＋彈層定位失效」——此退化行為在 `src/components/pro-workstation/workstation-tours.ts:61-67` 註釋中已有記載（手機端 display:none 場景），桌面端同樣會踩 |
-| 4 | 轉卡鎖定不全 | `atc-tour-content.ts:158-161`：`tourLock`（凍結輪播手勢）只在步驟②假鼠標演示的 `onHighlightStarted` 掛上，步驟①→②切換的空檔輪播仍可轉卡（wheel／拖曳），錨點漂移即觸發 #3 |
-| 5 | Esc 出路存在但不可發現 | `allowClose: true`（Esc 可退）＋popover 有「跳过引导」按鈕，但彈層定位失效後兩者皆不可見 |
+| 1 | 引导全屏遮罩盖住 AI 助理 | `src/lib/atc-tour-content.ts:217-231`：driver.js `overlayOpacity: 0.4` 全屏遮罩＋`overlayClickBehavior: () => {}`（点遮罩无任何反应）。AI 助理抽屉在遮罩之下 → 「能看到聊天框，点击没反应」 |
+| 2 | 让位机制失效（死锁主因） | `atc-tour-content.ts:282-297`（R10-2 让位观察器）：MutationObserver 只在 `.agent-panel` transcript **出现新子节点**时 destroy 引导。用户根本打不了字（被遮罩挡住）→ transcript 永远空 → 引导永远不让位 → 死锁 |
+| 3 | 点「下一步」后全屏灰 | 步骤②锚点 `frontSelector(' .atc-step-selector [data-step-index="0"]')` 依赖 `data-front="true"` 正面卡。轮播转卡／布局变动使锚点 rect 为零时，driver.js 退化为「stage 罩满全屏＋弹层定位失效」——此退化行为在 `src/components/pro-workstation/workstation-tours.ts:61-67` 注释中已有记载（手机端 display:none 场景），桌面端同样会踩 |
+| 4 | 转卡锁定不全 | `atc-tour-content.ts:158-161`：`tourLock`（冻结轮播手势）只在步骤②假鼠标演示的 `onHighlightStarted` 挂上，步骤①→②切换的空档轮播仍可转卡（wheel／拖曳），锚点漂移即触发 #3 |
+| 5 | Esc 出路存在但不可发现 | `allowClose: true`（Esc 可退）＋popover 有「跳过引导」按钮，但弹层定位失效后两者皆不可见 |
 
-### 修復需求（驗收標準）
+### 修复需求（验收标准）
 
-**F1-1 引導與 AI 助理互斥讓位**
-- 引導啟動條件追加：`.agent-panel` 處於打開態 → 不自動播（靜默跳過，照樣寫 `ATC_TOUR_STORAGE_KEY`？**否**——不寫，讓下次關閉助理後仍可教學）。
-- 引導播放中用戶打開 AI 助理（點懸浮球／任何進入 agent 面板的路徑）→ 引導立即乾淨收尾（走既有 `onDestroyed` 統一收尾）。實作可複用 R10-2 觀察器思路，但觸發條件從「transcript 有內容」提前到「面板打開」。
-- 驗收：AI 助理打開態下進入模板廊，零引導彈窗；引導播放中點開助理，引導 300ms 內消失、助理可輸入。
+**F1-1 引导与 AI 助理互斥让位**
+- 引导启动条件追加：`.agent-panel` 处于打开态 → 不自动播（静默跳过，照样写 `ATC_TOUR_STORAGE_KEY`？**否**——不写，让下次关闭助理后仍可教学）。
+- 引导播放中用户打开 AI 助理（点悬浮球／任何进入 agent 面板的路径）→ 引导立即干净收尾（走既有 `onDestroyed` 统一收尾）。实作可复用 R10-2 观察器思路，但触发条件从「transcript 有内容」提前到「面板打开」。
+- 验收：AI 助理打开态下进入模板廊，零引导弹窗；引导播放中点开助理，引导 300ms 内消失、助理可输入。
 
-**F1-2 零錨點防退化門禁**
-- 每步 `onHighlightStarted` 前驗證錨點：`getBoundingClientRect()` 寬高 > 0 且與視口有交集；不滿足 → 跳過該步（`tour.moveTo(i+1)`）或安全收尾，**禁止**退化成全屏 stage 無彈層狀態。
-- 輪子：`src/lib/tour-mobile.ts` 的 `firstVisibleAnchor` 已做「多候選錨點解析」，在其基礎上補 rect 校驗（它目前只挑 DOM 存在性，不驗尺寸）。
-- 驗收：手動把步驟②錨點元素藏掉（devtools `display:none`），點下一步 → 該步被跳過或引導收尾，任何時刻螢幕不出現「全灰且無彈層」狀態。
+**F1-2 零锚点防退化门禁**
+- 每步 `onHighlightStarted` 前验证锚点：`getBoundingClientRect()` 宽高 > 0 且与视口有交集；不满足 → 跳过该步（`tour.moveTo(i+1)`）或安全收尾，**禁止**退化成全屏 stage 无弹层状态。
+- 轮子：`src/lib/tour-mobile.ts` 的 `firstVisibleAnchor` 已做「多候选锚点解析」，在其基础上补 rect 校验（它目前只挑 DOM 存在性，不验尺寸）。
+- 验收：手动把步骤②锚点元素藏掉（devtools `display:none`），点下一步 → 该步被跳过或引导收尾，任何时刻萤幕不出现「全灰且无弹层」状态。
 
-**F1-3 輪播全程鎖定**
-- `tourLock.on()` 從步驟②移到 `activeTour.drive()` 之前（引導全程凍結輪播轉卡），`onDestroyed` 已有 `tourLock.off()` 不動。
-- 驗收：引導播放中滾輪／拖曳輪播，正面卡不換。
+**F1-3 轮播全程锁定**
+- `tourLock.on()` 从步骤②移到 `activeTour.drive()` 之前（引导全程冻结轮播转卡），`onDestroyed` 已有 `tourLock.off()` 不动。
+- 验收：引导播放中滚轮／拖曳轮播，正面卡不换。
 
-**F1-4 同類隱患排查（同一修法複用）**
-- driver.js 共三處實例：`atc-tour-content.ts`、`pro-workstation/workstation-tours.ts`、`ModelPicker.tsx`。F1-2 的 rect 驗證做成共用函數進 `tour-mobile.ts`，三處接線。
+**F1-4 同类隐患排查（同一修法复用）**
+- driver.js 共三处实例：`atc-tour-content.ts`、`pro-workstation/workstation-tours.ts`、`ModelPicker.tsx`。F1-2 的 rect 验证做成共用函数进 `tour-mobile.ts`，三处接线。
 
-**改動檔案**：`src/lib/atc-tour-content.ts`、`src/lib/tour-mobile.ts`、`src/components/pro-workstation/workstation-tours.ts`、`src/components/ModelPicker.tsx`、`src/components/canvas-workstation/AgentTemplateCarousel.tsx`（tourLock 若需掛載點配合）。
-**禁區**：`AgentTemplateCarousel.test.ts:197` 斷言 `流水线环节` 文案——教學三步文案不得改動。
+**改动档案**：`src/lib/atc-tour-content.ts`、`src/lib/tour-mobile.ts`、`src/components/pro-workstation/workstation-tours.ts`、`src/components/ModelPicker.tsx`、`src/components/canvas-workstation/AgentTemplateCarousel.tsx`（tourLock 若需挂载点配合）。
+**禁区**：`AgentTemplateCarousel.test.ts:197` 断言 `流水线环节` 文案——教学三步文案不得改动。
 
 ---
 
-## R2（P1）：圖片一鍵複製到剪貼板
+## R2（P1）：图片一键复制到剪贴板
 
-### 現場證據
+### 现场证据
 
-用戶：「图片可以加上一键复制功能，手动下载再打开太麻烦了。」
-現狀：`src/components/ImageDisplay.tsx:176-188` 只有下載鈕（左下角圓鈕，hover 浮現）。
+用户：「图片可以加上一键复制功能，手动下载再打开太麻烦了。」
+现状：`src/components/ImageDisplay.tsx:176-188` 只有下载钮（左下角圆钮，hover 浮现）。
 
 ### 需求
 
-- 圖片結果卡（`ImageDisplay`）新增「複製」按鈕：與下載鈕同一排（左下角），成功後 toast「已复制到剪贴板」（複用現有 toast），失敗（瀏覽器不支援／權限拒絕）fallback 提示「当前浏览器不支持复制，已为你下载」並走下載。
-- **輪子源**：`src/lib/image-helpers.ts` 的 `download()` 內已有完整 blob 取得鏈（http 源 `?dl=1` + `cache: no-store` 破緩存、base64/blob 直轉——這是圖片下載 CORS 中毒事故的修法，必須原樣複用，禁止重寫）。抽 `fetchImageBlob(imageSource): Promise<Blob>` 供 download 與 copy 共用，download 行為零變動。
-- 複製本體：`navigator.clipboard.write([new ClipboardItem({ "image/png": blobPromise })])`。注意：Chrome 標準 `ClipboardItem` 吃 Blob；Safari 需傳 **Promise** 形式（`new ClipboardItem({ "image/png": fetchBlobPromise })`）——直接傳 promise，兩家都相容。
-- 進行中間態：複製需整圖 fetch，與下載鈕同款 `Loader2` 轉圈＋禁點（`isDownloading` 模式照抄為 `isCopying`）。
-- 放大燈箱（`ImageDisplay.tsx:226-249` zoom portal）同步加複製鈕（用戶放大看圖的瞬間正是想拿圖的瞬間）。
-- 改圖結果（`src/components/prompt-input/EditPanel.tsx:111-133`）「改图完成」行的下載鈕旁加複製。
+- 图片结果卡（`ImageDisplay`）新增「复制」按钮：与下载钮同一排（左下角），成功后 toast「已复制到剪贴板」（复用现有 toast），失败（浏览器不支援／权限拒绝）fallback 提示「当前浏览器不支持复制，已为你下载」并走下载。
+- **轮子源**：`src/lib/image-helpers.ts` 的 `download()` 内已有完整 blob 取得链（http 源 `?dl=1` + `cache: no-store` 破缓存、base64/blob 直转——这是图片下载 CORS 中毒事故的修法，必须原样复用，禁止重写）。抽 `fetchImageBlob(imageSource): Promise<Blob>` 供 download 与 copy 共用，download 行为零变动。
+- 复制本体：`navigator.clipboard.write([new ClipboardItem({ "image/png": blobPromise })])`。注意：Chrome 标准 `ClipboardItem` 吃 Blob；Safari 需传 **Promise** 形式（`new ClipboardItem({ "image/png": fetchBlobPromise })`）——直接传 promise，两家都相容。
+- 进行中间态：复制需整图 fetch，与下载钮同款 `Loader2` 转圈＋禁点（`isDownloading` 模式照抄为 `isCopying`）。
+- 放大灯箱（`ImageDisplay.tsx:226-249` zoom portal）同步加复制钮（用户放大看图的瞬间正是想拿图的瞬间）。
+- 改图结果（`src/components/prompt-input/EditPanel.tsx:111-133`）「改图完成」行的下载钮旁加复制。
 
-**改動檔案**：`src/components/ImageDisplay.tsx`、`src/lib/image-helpers.ts`、`src/components/prompt-input/EditPanel.tsx`。
-**驗收**：Chrome 貼進微信/畫布得到原圖 PNG；http 源與 base64 源雙通路；下載功能零回歸。
+**改动档案**：`src/components/ImageDisplay.tsx`、`src/lib/image-helpers.ts`、`src/components/prompt-input/EditPanel.tsx`。
+**验收**：Chrome 贴进微信/画布得到原图 PNG；http 源与 base64 源双通路；下载功能零回归。
 
 ---
 
-## R3（P1）：上傳縮圖內聯顯示（Gemini 式）
+## R3（P1）：上传缩图内联显示（Gemini 式）
 
-### 現場證據
+### 现场证据
 
-用戶：「我上传图片后最好可以像 Gemini 那样看到自己上传的图片，不用划到图片处再显示。」
-截圖②③：generate 模式帶 1 張參考圖，輸入框左下只有上傳鈕＋數字膠囊「1」，看不到圖。
+用户：「我上传图片后最好可以像 Gemini 那样看到自己上传的图片，不用划到图片处再显示。」
+截图②③：generate 模式带 1 张参考图，输入框左下只有上传钮＋数字胶囊「1」，看不到图。
 
 ### 根因
 
-`src/components/ReferenceImageUpload.tsx:143-204`（`variant="prompt"`）：縮圖格 **默認收合**，僅 hover（`hoverOpen`）或手動點膠囊（`isExpanded`）才展開。桌面不 hover 就看不到；手機無 hover 概念，全靠點膠囊。EditPanel（改圖模式）僅 20px 微縮圖。
+`src/components/ReferenceImageUpload.tsx:143-204`（`variant="prompt"`）：缩图格 **默认收合**，仅 hover（`hoverOpen`）或手动点胶囊（`isExpanded`）才展开。桌面不 hover 就看不到；手机无 hover 概念，全靠点胶囊。EditPanel（改图模式）仅 20px 微缩图。
 
 ### 需求
 
-- generate 模式：有參考圖時，縮圖**默認內聯顯示**在輸入框下沿（attachment 列），每張 ~48-64px 圓角縮圖＋右上移除 X，行為對齊 Gemini composer（看得見即為默認態，收合變成可選）。
-- 單張時展示原比例縮圖（`object-cover` 裁切可接受，但單張建議 `object-contain`＋淺底，避免誤導比例——與 R4 原比例認知一致）。
-- 上傳成功即刻出現（pending 態骨架已有，保留）。
-- 保留現有 hover 展開大圖／點擊放大預覽（`activePreview`）能力不刪。
-- 手機端同等生效（點縮圖＝放大預覽，點 X＝移除）。
-- **輪子源**：同檔 `variant="panel"`（素材面板）的縮圖格 `ReferenceImageUpload.tsx:155-171` 就是現成 grid 縮圖實現，複用其卡片結構與移除鈕，白名單改為「prompt 變體默認不收合」。
+- generate 模式：有参考图时，缩图**默认内联显示**在输入框下沿（attachment 列），每张 ~48-64px 圆角缩图＋右上移除 X，行为对齐 Gemini composer（看得见即为默认态，收合变成可选）。
+- 单张时展示原比例缩图（`object-cover` 裁切可接受，但单张建议 `object-contain`＋浅底，避免误导比例——与 R4 原比例认知一致）。
+- 上传成功即刻出现（pending 态骨架已有，保留）。
+- 保留现有 hover 展开大图／点击放大预览（`activePreview`）能力不删。
+- 手机端同等生效（点缩图＝放大预览，点 X＝移除）。
+- **轮子源**：同档 `variant="panel"`（素材面板）的缩图格 `ReferenceImageUpload.tsx:155-171` 就是现成 grid 缩图实现，复用其卡片结构与移除钮，白名单改为「prompt 变体默认不收合」。
 
-**改動檔案**：`src/components/ReferenceImageUpload.tsx`（僅 prompt 變體分支）。
-**驗收**：上傳 1 張圖，不碰滑鼠縮圖已可見；連傳 3 張排列不溢出；移除按鈕可用；手機（375px 寬）不破版。
+**改动档案**：`src/components/ReferenceImageUpload.tsx`（仅 prompt 变体分支）。
+**验收**：上传 1 张图，不碰滑鼠缩图已可见；连传 3 张排列不溢出；移除按钮可用；手机（375px 宽）不破版。
 
 ---
 
-## R4（P1）：跟隨參考圖原比例輸出
+## R4（P1）：跟随参考图原比例输出
 
-### 現場證據
+### 现场证据
 
-用戶：「如果能自动产出原比例就更好了，图片有点压缩了……如果是 p 图的话。」
-截圖②③：獎狀圖（橫向 A4 比例）被放進 generate 模式 1:1 出圖 → 明顯壓縮裁切。
+用户：「如果能自动产出原比例就更好了，图片有点压缩了……如果是 p 图的话。」
+截图②③：奖状图（横向 A4 比例）被放进 generate 模式 1:1 出图 → 明显压缩裁切。
 
 ### 根因
 
-- generate 模式比例為固定 10 檔（1:1 … 21:9，`src/lib/generation-model-catalog/types.ts:2-23`），無「跟隨參考圖」。
-- 改圖模式（pixai edit）**已有**「跟随原图」（`src/components/prompt-input/EditPanel.tsx:97`，`PIXAI_RATIO_CHIPS` 的 `original` 鍵）——功能存在但用戶走的是 generate＋參考圖路徑，享受不到。
-- 展示層二次傷害：`ImageDisplay.tsx:172` 用 `object-cover` + 容器 `aspect-square`，非 1:1 結果在展示區被再裁一次。
+- generate 模式比例为固定 10 档（1:1 … 21:9，`src/lib/generation-model-catalog/types.ts:2-23`），无「跟随参考图」。
+- 改图模式（pixai edit）**已有**「跟随原图」（`src/components/prompt-input/EditPanel.tsx:97`，`PIXAI_RATIO_CHIPS` 的 `original` 键）——功能存在但用户走的是 generate＋参考图路径，享受不到。
+- 展示层二次伤害：`ImageDisplay.tsx:172` 用 `object-cover` + 容器 `aspect-square`，非 1:1 结果在展示区被再裁一次。
 
 ### 需求
 
-- **F4-1 選項**：generate 模式且已上傳 ≥1 張參考圖時，比例列首位動態插入「跟随参考图」檔（有參考圖才出現，移除全部參考圖即消失並回落到普通比例）。
-- **F4-2 解析**：讀第一張參考圖自然尺寸（`ReferenceImage` 已帶 `previewUrl`，`new Image()` 讀 `naturalWidth/Height`），映射到上游**支援**的比例檔：取長寬比與支援清單逐一求差，選最近者；無近似檔（差距 >15%）時若上游支援自訂尺寸則直傳原比例，否則選最近檔並在 chip 上標註實際輸出（如「跟随参考图 · 3:4」）——**不許靜默扭曲**，寧可明示。
-- **F4-3 展示不裁切**：`ImageDisplay` 有結果時容器按結果實際比例呈現（`object-contain` 或動態 aspect style），生成中（粒子海）維持現狀。此項同時服務 R5。
-- 模型不支援參考圖時（`referenceImagesSupported=false`）不出現該檔，零改動。
+- **F4-1 选项**：generate 模式且已上传 ≥1 张参考图时，比例列首位动态插入「跟随参考图」档（有参考图才出现，移除全部参考图即消失并回落到普通比例）。
+- **F4-2 解析**：读第一张参考图自然尺寸（`ReferenceImage` 已带 `previewUrl`，`new Image()` 读 `naturalWidth/Height`），映射到上游**支援**的比例档：取长宽比与支援清单逐一求差，选最近者；无近似档（差距 >15%）时若上游支援自订尺寸则直传原比例，否则选最近档并在 chip 上标注实际输出（如「跟随参考图 · 3:4」）——**不许静默扭曲**，宁可明示。
+- **F4-3 展示不裁切**：`ImageDisplay` 有结果时容器按结果实际比例呈现（`object-contain` 或动态 aspect style），生成中（粒子海）维持现状。此项同时服务 R5。
+- 模型不支援参考图时（`referenceImagesSupported=false`）不出现该档，零改动。
 
-**輪子源**：`EditPanel.tsx:87-101` 的「跟随原图」chip 模式（文案、active 態）；`src/lib/generation-model-catalog` 的 `imageSizeForAspectRatio`（`run-service.ts:16` 在用）為尺寸換算真源。
-**改動檔案**：`src/components/PromptInput.tsx`（比例列）、`src/components/ImagePlayground.tsx`（aspectRatio 狀態與送出參數）、`src/lib/generation-model-catalog/*`（如需擴充 ratio 解析）、`src/components/ImageDisplay.tsx`（F4-3）。
-**驗收**：上傳橫向獎狀圖＋「跟随参考图」→ 出圖比例 = 原圖（或明示最近檔）；無參考圖時比例列零變化；改圖模式零回歸。
+**轮子源**：`EditPanel.tsx:87-101` 的「跟随原图」chip 模式（文案、active 态）；`src/lib/generation-model-catalog` 的 `imageSizeForAspectRatio`（`run-service.ts:16` 在用）为尺寸换算真源。
+**改动档案**：`src/components/PromptInput.tsx`（比例列）、`src/components/ImagePlayground.tsx`（aspectRatio 状态与送出参数）、`src/lib/generation-model-catalog/*`（如需扩充 ratio 解析）、`src/components/ImageDisplay.tsx`（F4-3）。
+**验收**：上传横向奖状图＋「跟随参考图」→ 出图比例 = 原图（或明示最近档）；无参考图时比例列零变化；改图模式零回归。
 
 ---
 
-## R5+R6（P0，暴君 09-10 追加裁定）：首頁總高度動態適應螢幕，禁止下方大面積空白
+## R5+R6（P0，暴君 09-10 追加裁定）：首页总高度动态适应萤幕，禁止下方大面积空白
 
-### 現場證據
+### 现场证据
 
-用戶：「图片展示区太小了，网站整体下方留白较多。」截圖②③：右側結果區下方到視口底一大段空白。
-暴君裁定（2026-09-10）：**整個首頁 UI（header + ImagePlayground + 右邊成片展示）總高度必須根據螢幕高度動態適應，禁止像例子一樣下方大面積空白造成半成品感。**
+用户：「图片展示区太小了，网站整体下方留白较多。」截图②③：右侧结果区下方到视口底一大段空白。
+暴君裁定（2026-09-10）：**整个首页 UI（header + ImagePlayground + 右边成片展示）总高度必须根据萤幕高度动态适应，禁止像例子一样下方大面积空白造成半成品感。**
 
 ### 根因
 
-- `src/components/ImagePlayground.tsx:515`：`min-h-screen pb-28 pt-10 sm:pb-32` —— 內容自然高 + 固定 padding，視口高於內容時底部留白。
-- `ImagePlayground.tsx:517`：grid 兩欄等高於內容自然高；`ImageDisplay.tsx:118` `xl:h-full xl:min-h-[30rem]` 結果卡鎖在與 prompt 面板同高。
-- 頁面是「內容往下長」的文檔流佈局，不是「撐滿視口」的應用佈局。
+- `src/components/ImagePlayground.tsx:515`：`min-h-screen pb-28 pt-10 sm:pb-32` —— 内容自然高 + 固定 padding，视口高于内容时底部留白。
+- `ImagePlayground.tsx:517`：grid 两栏等高于内容自然高；`ImageDisplay.tsx:118` `xl:h-full xl:min-h-[30rem]` 结果卡锁在与 prompt 面板同高。
+- 页面是「内容往下长」的文档流布局，不是「撑满视口」的应用布局。
 
 ### 需求
 
-- **F6-1 應用式滿屏**：首頁殼改為 `h-dvh`（或 `min-h-dvh` + 內部 flex）三段結構——Navbar（自然高）＋主工作區（`flex-1 min-h-0`）＋底部安全邊距。主工作區內 grid 撐滿剩餘高度，兩欄各自 `h-full`／`min-h-0`，右欄結果卡吃滿可用高（`min-h-0` + 內部滾動/contain，不許溢出視口）。
-- **F6-2 短視口退路**：視口過矮（如筆記本橫置 768px）時允許整頁滾動（`min-h-dvh` 而非寫死 `h-dvh` 溢出截斷），但正常桌面視口下「不滾即滿屏、零下方空白」。
-- **F6-3 下方 SEO 區塊不動**：`UseCaseLinks`/`FaqSection` 已是 `hidden`，不受影響；底部浮動 toast 條（fixed）不受影響。
-- **F6-4 對齊 F4-3**：結果卡內圖按實際比例 `object-contain` 呈現（不在 R5 單獨做，與 F4-3 同一改動）。
-- 手機端（<xl 單欄堆疊）維持現狀文檔流，不套滿屏（手機本來就滾動）。
-- 屬視覺改動：改完部署，視覺結果 pending 暴君驗收（禁自我 UI 檢查）。
+- **F6-1 应用式满屏**：首页壳改为 `h-dvh`（或 `min-h-dvh` + 内部 flex）三段结构——Navbar（自然高）＋主工作区（`flex-1 min-h-0`）＋底部安全边距。主工作区内 grid 撑满剩余高度，两栏各自 `h-full`／`min-h-0`，右栏结果卡吃满可用高（`min-h-0` + 内部滚动/contain，不许溢出视口）。
+- **F6-2 短视口退路**：视口过矮（如笔记本横置 768px）时允许整页滚动（`min-h-dvh` 而非写死 `h-dvh` 溢出截断），但正常桌面视口下「不滚即满屏、零下方空白」。
+- **F6-3 下方 SEO 区块不动**：`UseCaseLinks`/`FaqSection` 已是 `hidden`，不受影响；底部浮动 toast 条（fixed）不受影响。
+- **F6-4 对齐 F4-3**：结果卡内图按实际比例 `object-contain` 呈现（不在 R5 单独做，与 F4-3 同一改动）。
+- 手机端（<xl 单栏堆叠）维持现状文档流，不套满屏（手机本来就滚动）。
+- 属视觉改动：改完部署，视觉结果 pending 暴君验收（禁自我 UI 检查）。
 
-**改動檔案**：`src/components/ImagePlayground.tsx`、`src/components/ImageDisplay.tsx`、`src/components/Navbar.tsx`（若 header 需參與 flex 殼）、全域佈局殼（`src/app/page.tsx` / `layout.tsx` 若有外層 padding 需讓位）。
+**改动档案**：`src/components/ImagePlayground.tsx`、`src/components/ImageDisplay.tsx`、`src/components/Navbar.tsx`（若 header 需参与 flex 壳）、全域布局壳（`src/app/page.tsx` / `layout.tsx` 若有外层 padding 需让位）。
 
 ---
 
-## 優先級與交付順序
+## 优先级与交付顺序
 
-| 順位 | 項目 | 理由 |
+| 顺位 | 项目 | 理由 |
 |------|------|------|
-| 1 | R1 灰屏死鎖 | 功能性故障，新用戶第一分鐘即卡死，直接勸退 |
-| 2 | R5+R6 滿屏高度 | 暴君欽點追加，「半成品感」直接傷首屏觀感 |
-| 3 | R2 一鍵複製 | 高頻操作摩擦，改動面小（3 檔） |
-| 4 | R4 原比例 | 用戶明確點名「有點压缩」，涉及計費 SKU 尺寸換算須謹慎 |
-| 5 | R3 縮圖內聯 | 單檔改動，體驗增益明確 |
+| 1 | R1 灰屏死锁 | 功能性故障，新用户第一分钟即卡死，直接劝退 |
+| 2 | R5+R6 满屏高度 | 暴君钦点追加，「半成品感」直接伤首屏观感 |
+| 3 | R2 一键复制 | 高频操作摩擦，改动面小（3 档） |
+| 4 | R4 原比例 | 用户明确点名「有点压缩」，涉及计费 SKU 尺寸换算须谨慎 |
+| 5 | R3 缩图内联 | 单档改动，体验增益明确 |
 
-## 全局禁區
+## 全局禁区
 
-- `AgentTemplateCarousel.test.ts` / `ProfessionalWorkstation.test.ts` 等既有斷言文案不改（R1 涉及教學文案時逐字保留「流水线环节」等）。
-- `imageHelpers.download` 的 CORS 破緩存邏輯（`?dl=1` + `no-store`）是歷史事故修法，抽共用時逐行保留。
-- 計費換算（`generationCoins` / `imageSizeForAspectRatio`）只讀現有真源，不自創價格。
-- UI 文案一律簡體（對齊現有面），遵守 design-system lg-* 體系，正文 ≥13px。
+- `AgentTemplateCarousel.test.ts` / `ProfessionalWorkstation.test.ts` 等既有断言文案不改（R1 涉及教学文案时逐字保留「流水线环节」等）。
+- `imageHelpers.download` 的 CORS 破缓存逻辑（`?dl=1` + `no-store`）是历史事故修法，抽共用时逐行保留。
+- 计费换算（`generationCoins` / `imageSizeForAspectRatio`）只读现有真源，不自创价格。
+- UI 文案一律简体（对齐现有面），遵守 design-system lg-* 体系，正文 ≥13px。

@@ -74,10 +74,10 @@ export type MusicDirectorPersonaToolId = (typeof MUSIC_DIRECTOR_PERSONA_TOOL_IDS
 export const MUSIC_DIRECTOR_PERSONA_SKILL_PATH = "skills/music-director/SKILL.md" as const;
 
 /**
- * 配方庫 files/ 目錄 must-load 路徑（SunoForge 12 檔）。registry skillPaths
- * 帶此聲明（must-load 語義：進 Expert 即載，不是「高興才查」）；委派 prompt
- * 引用配方庫按「目錄樹+SKILL.md 全文+按需讀檔」組裝、不做 YAML 解析
- * （檔案首行是 HTML 註釋塊、原文 frontmatter 從第 2 行起，片05 留觀事項）。
+ * 配方库 files/ 目录 must-load 路径（SunoForge 12 档）。registry skillPaths
+ * 带此声明（must-load 语义：进 Expert 即载，不是「高兴才查」）；委派 prompt
+ * 引用配方库按「目录树+SKILL.md 全文+按需读档」组装、不做 YAML 解析
+ * （档案首行是 HTML 注释块、原文 frontmatter 从第 2 行起，片05 留观事项）。
  */
 export const MUSIC_DIRECTOR_PERSONA_SKILL_FILES_PATH = "skills/music-director/files/" as const;
 

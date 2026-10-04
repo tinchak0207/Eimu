@@ -1,18 +1,18 @@
-// /v1/team/quota/limits —— 團隊與成員配額（速率／上界限制）的讀寫面。
+// /v1/team/quota/limits —— 团队与成员配额（速率／上界限制）的读写面。
 //
-//   GET  → 團隊配額模式（none/fixed）＋ 各成員配額模式與當日用量
+//   GET  → 团队配额模式（none/fixed）＋ 各成员配额模式与当日用量
 //   POST → { scope: "team",  mode: "none"|"fixed", fixed_quota? }
 //          { scope: "member", member_user_id, mode: "unlimited"|"fixed"|"daily",
 //            fixed_quota?, daily_quota? }
 //
-// 鑑權與回執形狀逐行沿用同群組的 /v1/team/quota：團隊主帳 = 呼叫方密鑰的
-// user_id（不從 body 取）。成員密鑰不得改配額（403）。
+// 鉴权与回执形状逐行沿用同群组的 /v1/team/quota：团队主帐 = 呼叫方密钥的
+// user_id（不从 body 取）。成员密钥不得改配额（403）。
 //
-// **禁影子帳本**：本路由只寫「意圖上限」與「速率計數」（team_settings /
-// team_member_quota 的意圖欄位），不寫任何本地餘額、不呼叫上游額度調整。
-// 配額是上界限制，**不預扣**；真實扣費仍走既有五態帳本。
-// 「改回不限 ⇒ 剩餘全數回收」只回報應回收額度（reclaim），實際點數移動須另走
-// /v1/team/quota 或 /v1/team/seats/allocate 的轉移通路。
+// **禁影子帐本**：本路由只写「意图上限」与「速率计数」（team_settings /
+// team_member_quota 的意图栏位），不写任何本地余额、不呼叫上游额度调整。
+// 配额是上界限制，**不预扣**；真实扣费仍走既有五态帐本。
+// 「改回不限 ⇒ 剩余全数回收」只回报应回收额度（reclaim），实际点数移动须另走
+// /v1/team/quota 或 /v1/team/seats/allocate 的转移通路。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       role: member.role,
     })),
   });
-  if (!view) return fail(503, "quota_limits_unavailable", "配額设置查询暂不可用，请稍后重试。");
+  if (!view) return fail(503, "quota_limits_unavailable", "配额设置查询暂不可用，请稍后重试。");
 
   const settings = await readTeamSettings(actorTeam.teamUserId);
   return NextResponse.json(
@@ -112,10 +112,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 成員不得自行改配額（同群組既有口徑）。
+  // 成员不得自行改配额（同群组既有口径）。
   const callerIsMember = await findMemberByUserId(auth.key.userId);
   if (callerIsMember) {
-    return fail(403, "member_cannot_set_quota", "成员密钥不得修改配額，请用团队主账号或管理员密钥操作。");
+    return fail(403, "member_cannot_set_quota", "成员密钥不得修改配额，请用团队主账号或管理员密钥操作。");
   }
 
   let body: unknown;
@@ -151,7 +151,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         team_user_id: teamUserId,
         mode: result.mode,
         fixed_quota: result.fixedQuota,
-        // 改回不限 ⇒ 應回收額度（實際移動須另走轉移通路）。
+        // 改回不限 ⇒ 应回收额度（实际移动须另走转移通路）。
         reclaim_quota: result.reclaim,
         unchanged: result.unchanged,
       },
@@ -162,7 +162,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (scope === "member") {
     const memberUserId = Number(payload.member_user_id);
     if (!Number.isInteger(memberUserId) || memberUserId <= 0) {
-      return fail(400, "missing_member_user_id", "缺少 member_user_id（要设置配額的成员账号）。");
+      return fail(400, "missing_member_user_id", "缺少 member_user_id（要设置配额的成员账号）。");
     }
     const mode = typeof payload.mode === "string" ? payload.mode.trim() : "";
     if (!isMemberQuotaMode(mode)) {

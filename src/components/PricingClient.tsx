@@ -128,7 +128,7 @@ function FirstChargeOffer({
 }
 
 export function PricingClient() {
-  // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
+  // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
   const { token, isLoggedIn, refresh } = useAuth();
   const { toast } = useToast();
@@ -447,7 +447,7 @@ export function PricingClient() {
           />
         </div>
 
-        {/* ═══ 首屏以下：同一座夢境往下沉（深靛夜色），三块只回答三个问题 ═══
+        {/* ═══ 首屏以下：同一座梦境往下沉（深靛夜色），三块只回答三个问题 ═══
             ① 我这档的金币到底能画多少（跟随首屏选中的档位实时换算）；
             ② 还有没有别的方式拿金币（邀请 / 兑换码）；③ 常见疑虑。 */}
 

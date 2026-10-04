@@ -1,33 +1,33 @@
-// Agent 對話代理層的閘道封裝。
+// Agent 对话代理层的闸道封装。
 //
-// 為什麼 gateway 在 store 域名而不是 image 域名：nginx 只在
-// https://store.tinchak0207.xyz 底下掛了 /agent/ 這組 route，
-// https://image.tinchak0207.xyz 的 /agent/ 開頭路徑是 404 —— 打錯域名等於整條對話功能不可用。
+// 为什么 gateway 在 store 域名而不是 image 域名：nginx 只在
+// https://store.tinchak0207.xyz 底下挂了 /agent/ 这组 route，
+// https://image.tinchak0207.xyz 的 /agent/ 开头路径是 404 —— 打错域名等于整条对话功能不可用。
 //
-// 命名：站上的 GATEWAY_* env 已經指 New API 計費閘道（生圖那條鏈），
-// 這裡一律用 AGENT_GATEWAY_* 前綴，避免兩個「閘道」在 config 裡互相污染。
+// 命名：站上的 GATEWAY_* env 已经指 New API 计费闸道（生图那条链），
+// 这里一律用 AGENT_GATEWAY_* 前缀，避免两个「闸道」在 config 里互相污染。
 //
-// 為什麼不用 src/lib/proxy.ts 的 makeProxy：它把使用者傳來的 token 原樣透傳
-// 給上游，而 agent 閘道要的是「驗完人之後，換成服務端持有的 B 端 key」——
-// 兩者方向相反。若復用 makeProxy，使用者可以把任意 key 打到閘道，等於繞過
-// 本站的帳號體系白嫖上游額度。
+// 为什么不用 src/lib/proxy.ts 的 makeProxy：它把使用者传来的 token 原样透传
+// 给上游，而 agent 闸道要的是「验完人之后，换成服务端持有的 B 端 key」——
+// 两者方向相反。若复用 makeProxy，使用者可以把任意 key 打到闸道，等于绕过
+// 本站的帐号体系白嫖上游额度。
 
 export const AGENT_GATEWAY_DEFAULT_ORIGIN = "https://store.tinchak0207.xyz";
 
-/** 10 秒硬超時：對話代理不該把請求掛死。 */
+/** 10 秒硬超时：对话代理不该把请求挂死。 */
 const AGENT_GATEWAY_TIMEOUT_MS = 10_000;
 
-/** 取 agent 閘道 origin，去掉尾部斜線，避免組 URL 時出現雙斜線。 */
+/** 取 agent 闸道 origin，去掉尾部斜线，避免组 URL 时出现双斜线。 */
 export function agentGatewayOrigin(env: NodeJS.ProcessEnv = process.env): string {
   const raw = env.AGENT_GATEWAY_ORIGIN?.trim();
   return (raw || AGENT_GATEWAY_DEFAULT_ORIGIN).replace(/\/+$/, "");
 }
 
 /**
- * 對話功能是否啟用。
+ * 对话功能是否启用。
  *
- * 預設 origin 存在時（永遠有值），主要開關是 AGENT_CHAT_ENABLED !== "false"；
- * 另允許把 AGENT_GATEWAY_ORIGIN 顯式設成空字串來關閉，作為逃生門。
+ * 预设 origin 存在时（永远有值），主要开关是 AGENT_CHAT_ENABLED !== "false"；
+ * 另允许把 AGENT_GATEWAY_ORIGIN 显式设成空字串来关闭，作为逃生门。
  */
 export function agentGatewayEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.AGENT_CHAT_ENABLED?.trim().toLowerCase() === "false") return false;
@@ -37,18 +37,18 @@ export function agentGatewayEnabled(env: NodeJS.ProcessEnv = process.env): boole
 
 export interface AgentGatewayResponse {
   status: number;
-  /** body 可被 JSON.parse 時的值；空 body / 非 JSON（如 nginx 502 頁）時為 null。 */
+  /** body 可被 JSON.parse 时的值；空 body / 非 JSON（如 nginx 502 页）时为 null。 */
   json: unknown;
-  /** 原始 body 字串。gateway 回非 JSON 時也要透傳，不能吞掉真實原因。 */
+  /** 原始 body 字串。gateway 回非 JSON 时也要透传，不能吞掉真实原因。 */
   text: string;
 }
 
 /**
- * 打一次 agent 閘道。
+ * 打一次 agent 闸道。
  *
- * 帶上服務端持有的 `sk-biz-` key 作為 Bearer。key 只出現在請求頭裡，
- * 任何 log / 例外訊息都不准包含它 —— 這裡的 fetch 失敗會向上拋，
- * 由路由層統一轉成不帶 key 的 502，就是為了保證 key 不進任何錯誤輸出。
+ * 带上服务端持有的 `sk-biz-` key 作为 Bearer。key 只出现在请求头里，
+ * 任何 log / 例外讯息都不准包含它 —— 这里的 fetch 失败会向上抛，
+ * 由路由层统一转成不带 key 的 502，就是为了保证 key 不进任何错误输出。
  */
 export async function callAgentGateway(
   path: string,
@@ -62,15 +62,15 @@ export async function callAgentGateway(
   };
   let body: string | FormData | undefined;
   if (options.form) {
-    // multipart：FormData 自帶 boundary，不能蓋 Content-Type。
+    // multipart：FormData 自带 boundary，不能盖 Content-Type。
     body = options.form;
   } else if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
 
-  // 10 秒硬超時。調用方自帶 signal 時兩者都要尊重，用 AbortSignal.any 合併，
-  // 任一方觸發都中止，避免「客戶端已放棄但 fetch 還掛著」。
+  // 10 秒硬超时。调用方自带 signal 时两者都要尊重，用 AbortSignal.any 合并，
+  // 任一方触发都中止，避免「客户端已放弃但 fetch 还挂著」。
   const timeoutSignal = AbortSignal.timeout(AGENT_GATEWAY_TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([timeoutSignal, options.signal]) : timeoutSignal;
 

@@ -101,7 +101,7 @@ function mockFetch(routes: Array<{ match: (url: string) => boolean; body: unknow
   };
 }
 
-/** ensureFilmeraContext 會查 project 與 canvas node；提供「已存在」的最小 mock 路由。 */
+/** ensureFilmeraContext 会查 project 与 canvas node；提供「已存在」的最小 mock 路由。 */
 function workspaceRoutes(user = { id: "user-1", email: "test@example.com" }) {
   return [
     { match: (u) => u.includes("/auth/v1/user"), body: user },
@@ -220,14 +220,14 @@ test("缺 credential → 401", async () => {
   }
 });
 
-test("token 過期 → 自動 refresh → 用新 token 調用", async () => {
+test("token 过期 → 自动 refresh → 用新 token 调用", async () => {
   process.env.FILMERA_AUTH_TOKEN = "stale-token";
   process.env.FILMERA_REFRESH_TOKEN = "refresh-1";
   resetFilmeraUserCache();
   let rotated: { accessToken: string; refreshToken: string } | null = null;
   onFilmeraTokenRotated((next) => { rotated = next; });
   const mock = mockFetch([
-    // refresh 端點：返回輪換後的新 session
+    // refresh 端点：返回轮换后的新 session
     { match: (u) => u.includes("/auth/v1/token"), body: { access_token: "fresh-token", refresh_token: "refresh-2", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: "user-1" } } },
     ...workspaceRoutes({ id: "user-1" }),
     { match: (u) => u.includes("www.filmera.ai/studio"), body: "1:{\"ok\":true,\"async\":true}" },
@@ -237,10 +237,10 @@ test("token 過期 → 自動 refresh → 用新 token 調用", async () => {
   try {
     const result = await generateWithFilmera(CONFIG_SUPPLIER, input(DEFAULT_IMAGE_MODEL_ID));
     assert.equal(result.url, "https://media.filmera.ai/ref/r.png");
-    assert.ok(rotated, "token 輪換回調未被觸發");
+    assert.ok(rotated, "token 轮换回调未被触发");
     assert.equal((rotated as { accessToken: string }).accessToken, "fresh-token");
     assert.equal((rotated as { refreshToken: string }).refreshToken, "refresh-2");
-    // 後續 Supabase 查詢用了新 token
+    // 后续 Supabase 查询用了新 token
     assert.ok(mock.calls.every((u) => !u.includes("Bearer") || true));
   } finally {
     mock.restore();
@@ -249,7 +249,7 @@ test("token 過期 → 自動 refresh → 用新 token 調用", async () => {
   }
 });
 
-test("無 project → createProject + addCanvasNode 自愈初始化", async () => {
+test("无 project → createProject + addCanvasNode 自愈初始化", async () => {
   process.env.FILMERA_AUTH_TOKEN = "token-abc";
   delete process.env.FILMERA_REFRESH_TOKEN;
   resetFilmeraUserCache();
@@ -267,12 +267,12 @@ test("無 project → createProject + addCanvasNode 自愈初始化", async () =
     }
     if (url.includes("studio_canvas_nodes")) {
       nodesQueried += 1;
-      // 第一次查（建節點前）空，第二次查（addCanvasNode 後）有
+      // 第一次查（建节点前）空，第二次查（addCanvasNode 后）有
       const body = nodesQueried === 1 ? [] : [{ id: "node-new", type: "image-ref" }];
       return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body), headers: new Headers() } as Response;
     }
     if (url.includes("www.filmera.ai/studio")) {
-      // createProject 的 RSC 響應含 projectId；addCanvasNode/update/generate 回 ok
+      // createProject 的 RSC 响应含 projectId；addCanvasNode/update/generate 回 ok
       if (calls.filter((c) => c.includes("www.filmera.ai/studio")).length === 1) {
         return { ok: true, status: 200, json: async () => ({}), text: async () => `0:{"a":"$@1"}\nd:[false,{"projectId":"11111111-2222-3333-4444-555555555555"}]`, headers: new Headers() } as Response;
       }
@@ -289,10 +289,10 @@ test("無 project → createProject + addCanvasNode 自愈初始化", async () =
   try {
     const result = await generateWithFilmera(supplier({ configuration: { supabaseUrl: "https://wxoujoeuqbkaniujulag.supabase.co", anonKey: "sb_publishable_test" } } as Partial<SupplierRecord>), input(DEFAULT_IMAGE_MODEL_ID));
     assert.equal(result.url, "https://media.filmera.ai/ref/init.png");
-    // createProject action 被調用（第一次 studio POST）
+    // createProject action 被调用（第一次 studio POST）
     const studioCalls = calls.filter((c) => c.includes("www.filmera.ai/studio"));
-    assert.ok(studioCalls.length >= 3, `server actions 調用次數不足: ${studioCalls.length}`);
-    assert.equal(nodesQueried, 2, "addCanvasNode 後應重查節點");
+    assert.ok(studioCalls.length >= 3, `server actions 调用次数不足: ${studioCalls.length}`);
+    assert.equal(nodesQueried, 2, "addCanvasNode 后应重查节点");
   } finally {
     globalThis.fetch = originalFetch;
   }

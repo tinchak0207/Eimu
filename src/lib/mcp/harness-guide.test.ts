@@ -1,14 +1,14 @@
-// Eimu Harness 指南（MCP 外部適配版）的真行為斷言。
+// Eimu Harness 指南（MCP 外部适配版）的真行为断言。
 //
-//   1. 漂移探針：指南正文中反引號 snake_case 的工具名 ⊆ tools.ts 真名集，
-//      且 HARNESS_GUIDE_TOOL_NAMES 與實際解析結果一致。
-//   2. 脫敏：指南／資源／prompt 輸出不得出現上游供應商名、內部主機路徑、內部工具 id。
-//   3. 契約完整性：HARNESS_DELIVERY_CONTRACTS 與 expert-delivery-contracts.json 逐域逐欄位一致。
-//   4. 逆注入：build({task}) 的規則前綴與 build({}) 逐字相同，惡意字串只出現在尾端。
-//   5. 資源形狀：兩個 uri 齊全，text 與兩個常數一致。
-//   6. 數值 oracle：指南政策表逐 policy id 逐欄位等於 QUALITY_POLICIES（防手抄漂移）。
-//   7. 負向 oracle：指南不再含被刪除的假量測門檻關鍵字（防回退）。
-//   8. 閘門工具：兩支新閘門出現在指南、宣告常數與 tools.ts 真名集。
+//   1. 漂移探针：指南正文中反引号 snake_case 的工具名 ⊆ tools.ts 真名集，
+//      且 HARNESS_GUIDE_TOOL_NAMES 与实际解析结果一致。
+//   2. 脱敏：指南／资源／prompt 输出不得出现上游供应商名、内部主机路径、内部工具 id。
+//   3. 契约完整性：HARNESS_DELIVERY_CONTRACTS 与 expert-delivery-contracts.json 逐域逐栏位一致。
+//   4. 逆注入：build({task}) 的规则前缀与 build({}) 逐字相同，恶意字串只出现在尾端。
+//   5. 资源形状：两个 uri 齐全，text 与两个常数一致。
+//   6. 数值 oracle：指南政策表逐 policy id 逐栏位等于 QUALITY_POLICIES（防手抄漂移）。
+//   7. 负向 oracle：指南不再含被删除的假量测门槛关键字（防回退）。
+//   8. 闸门工具：两支新闸门出现在指南、宣告常数与 tools.ts 真名集。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +25,7 @@ import {
   HARNESS_RESOURCES,
 } from "./harness-guide";
 
-// tools.ts 是工具名的單一真源；與 src/app/mcp/page.test.ts 用同一套正則手法。
+// tools.ts 是工具名的单一真源；与 src/app/mcp/page.test.ts 用同一套正则手法。
 const TOOLS_TS_PATH = join(process.cwd(), "src/lib/mcp/tools.ts");
 const CONTRACTS_JSON_PATH = join(
   process.cwd(),
@@ -37,26 +37,26 @@ function realToolNames(): string[] {
   return [...toolsSrc.matchAll(/^\s{6}name: "([a-z][a-z0-9_]*)",$/gm)].map((match) => match[1]);
 }
 
-/** 解析指南正文中所有反引號包裹的 snake_case 識別名。 */
+/** 解析指南正文中所有反引号包裹的 snake_case 识别名。 */
 function guideToolNames(): string[] {
   return [...HARNESS_GUIDE_TEXT.matchAll(/`([a-z][a-z0-9_]*)`/g)].map((match) => match[1]);
 }
 
 const BANNED = [
-  // 上游模型／供應商名
+  // 上游模型／供应商名
   "lyria",
   "seedance",
   "minimax",
   "deepseek",
   "happycoding",
   "hublinuxdo",
-  // 內部主機與內部路徑
+  // 内部主机与内部路径
   "store.tinchak0207.xyz",
   "image.tinchak0207.xyz",
   "/opt/agent-harness",
   "/internal/",
   "opencode",
-  // 內部工具 id（MCP 面不存在）
+  // 内部工具 id（MCP 面不存在）
   "subagent_dispatch",
   "search_web",
   "canvas_apply_ops",
@@ -77,7 +77,7 @@ const BANNED = [
   "bash",
 ] as const;
 
-test("漂移探針：指南引用的工具名 ⊆ tools.ts 真名，且與 HARNESS_GUIDE_TOOL_NAMES 一致", () => {
+test("漂移探针：指南引用的工具名 ⊆ tools.ts 真名，且与 HARNESS_GUIDE_TOOL_NAMES 一致", () => {
   const real = realToolNames();
   assert.ok(real.length >= 21, `tools.ts 只解析出 ${real.length} 个工具名，预期至少 21`);
 
@@ -100,7 +100,7 @@ test("漂移探針：指南引用的工具名 ⊆ tools.ts 真名，且與 HARNE
     `HARNESS_GUIDE_TOOL_NAMES 与指南实际解析出的工具名不一致（解析出 ${referencedSet.size} 个，常量 ${declaredSet.size} 个）`,
   );
 
-  // 常數本身也不得引用 tools.ts 不存在的工具。
+  // 常数本身也不得引用 tools.ts 不存在的工具。
   for (const name of HARNESS_GUIDE_TOOL_NAMES) {
     assert.ok(realSet.has(name), `HARNESS_GUIDE_TOOL_NAMES 含 tools.ts 不存在的工具名 "${name}"`);
   }
@@ -126,7 +126,7 @@ test("脱敏：指南/资源/prompt 输出不含供应商名、内部主机路�
   }
 });
 
-test("契約完整性：八个域与 expert-delivery-contracts.json 逐域逐栏位一致", () => {
+test("契约完整性：八个域与 expert-delivery-contracts.json 逐域逐栏位一致", () => {
   const single = JSON.parse(readFileSync(CONTRACTS_JSON_PATH, "utf8")) as Record<
     string,
     { requiredFields: string[]; qcSignatureRequired: boolean }
@@ -204,8 +204,8 @@ test("资源形状：两个 uri 齐全，text 与两个常量一致", () => {
   }
 });
 
-test("數值 oracle：指南政策表逐 policy id 逐欄位等於 QUALITY_POLICIES（防手抄漂移）", () => {
-  // 從真源獨立重建期望字串（欄位順序＝物件插入順序；`null` 表不設限）。
+test("数值 oracle：指南政策表逐 policy id 逐栏位等于 QUALITY_POLICIES（防手抄漂移）", () => {
+  // 从真源独立重建期望字串（栏位顺序＝物件插入顺序；`null` 表不设限）。
   const expected = Object.values(QUALITY_POLICIES)
     .map((policy) => {
       const fields = Object.entries(policy)
@@ -226,7 +226,7 @@ test("數值 oracle：指南政策表逐 policy id 逐欄位等於 QUALITY_POLIC
     "指南正文没有内嵌由 QUALITY_POLICIES 生成的政策表",
   );
 
-  // 逐 policy id 逐欄位再点名一次：任一政策缺席或任一数值对不上都要红。
+  // 逐 policy id 逐栏位再点名一次：任一政策缺席或任一数值对不上都要红。
   for (const [id, policy] of Object.entries(QUALITY_POLICIES)) {
     assert.ok(HARNESS_GUIDE_TEXT.includes(`- ${id}：`), `指南缺政策 ${id}`);
     for (const [key, value] of Object.entries(policy)) {
@@ -240,7 +240,7 @@ test("數值 oracle：指南政策表逐 policy id 逐欄位等於 QUALITY_POLIC
   }
 });
 
-test("負向 oracle：指南不再含被刪除的假量測門檻關鍵字（防回退）", () => {
+test("负向 oracle：指南不再含被删除的假量测门槛关键字（防回退）", () => {
   const FAKE_THRESHOLDS = [
     "LUFS",
     "dBTP",
@@ -248,9 +248,9 @@ test("負向 oracle：指南不再含被刪除的假量測門檻關鍵字（防�
     "±0.5",
     "R128",
     "ebur128",
-    "幀率",
+    "帧率",
     "等距窗口",
-    "整合響度",
+    "整合响度",
     "真峰值",
   ] as const;
   for (const token of FAKE_THRESHOLDS) {
@@ -261,7 +261,7 @@ test("負向 oracle：指南不再含被刪除的假量測門檻關鍵字（防�
   }
 });
 
-test("閘門工具：兩支新閘門出現在指南、宣告常數與 tools.ts 真名集", () => {
+test("闸门工具：两支新闸门出现在指南、宣告常数与 tools.ts 真名集", () => {
   assert.equal(HARNESS_GUIDE_VERSION, "2026-10-03.3", "指南版本应升为 2026-10-03.3");
   const real = new Set(realToolNames());
   assert.ok(real.size >= 23, `tools.ts 只解析出 ${real.size} 个工具名，预期至少 23`);

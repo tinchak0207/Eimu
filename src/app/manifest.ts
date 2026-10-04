@@ -3,8 +3,8 @@ import { SITE_SHORT_DESCRIPTION, SITE_TITLE } from "@/lib/site-copy";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    // 安裝對話框顯示的就是這兩個欄位：與分頁標題／OG 卡同一份真源，
-    // 免得這裡還留著「不用註冊中轉站」那套舊介紹（2026-09-27 統一）。
+    // 安装对话框显示的就是这两个栏位：与分页标题／OG 卡同一份真源，
+    // 免得这里还留著「不用注册中转站」那套旧介绍（2026-09-27 统一）。
     name: SITE_TITLE,
     short_name: "Eimu",
     description: SITE_SHORT_DESCRIPTION,

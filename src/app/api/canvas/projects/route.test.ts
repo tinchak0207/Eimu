@@ -1,9 +1,9 @@
-// REQ-B2-2 生成注入閘的接線守門件（**源碼層變更探針，不計入「已驗證」**，口徑見 TG-02）。
+// REQ-B2-2 生成注入闸的接线守门件（**源码层变更探针，不计入「已验证」**，口径见 TG-02）。
 //
-// 為何只能走源碼層：本路由用 requireVerifiedUser（要打上游 /api/user/self 驗身分），離線測不起來。
-// 真正的**行為**斷言在 `src/lib/asset-library.test.ts`（filterCardIdsForProject 逐條實測）
-// 與 `src/lib/storyboard-contract.test.ts`（注入端逐條實測）；本檔只釘住「路由確實把閘接上、
-// 且閘在落庫之前」——防的是接線被無聲拆掉。
+// 为何只能走源码层：本路由用 requireVerifiedUser（要打上游 /api/user/self 验身分），离线测不起来。
+// 真正的**行为**断言在 `src/lib/asset-library.test.ts`（filterCardIdsForProject 逐条实测）
+// 与 `src/lib/storyboard-contract.test.ts`（注入端逐条实测）；本档只钉住「路由确实把闸接上、
+// 且闸在落库之前」——防的是接线被无声拆掉。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,10 +16,10 @@ function code(relPath: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-test("画布项目保存：cardIds 先过作用域閘再落库（跨项目未分享的卡不得锁进本项目）", () => {
+test("画布项目保存：cardIds 先过作用域闸再落库（跨项目未分享的卡不得锁进本项目）", () => {
   const source = code(ROUTE_PATH);
   const gateAt = source.indexOf("filterCardIdsForProject(");
-  // 落庫走帶團隊閘的 saveCanvasProjectWithTeamGate（片F 面 2 接線）；閘內仍是 saveCanvasProject。
+  // 落库走带团队闸的 saveCanvasProjectWithTeamGate（片F 面 2 接线）；闸内仍是 saveCanvasProject。
   const saveAt = source.indexOf("saveCanvasProjectWithTeamGate(");
   assert.ok(gateAt >= 0, "必须调用 filterCardIdsForProject（B2-2 生成卡注入闸）");
   assert.ok(saveAt >= 0, "必须调用 saveCanvasProjectWithTeamGate（团队建画布闸 + 落库）");

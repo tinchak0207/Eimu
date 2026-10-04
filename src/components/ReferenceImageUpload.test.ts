@@ -29,8 +29,8 @@ test("reference image previews are not revoked when upload widget remounts", () 
 });
 
 test("prompt variant uses an AI-assistant-styled upload button with a single thumbnail-row mental model", () => {
-  // 2026-09-10 暴君裁定：上傳區語義統一為「上傳鈕＋內聯縮圖列」單一心智模型；
-  // hover 大面板與數字膠囊刪除，點縮圖開全屏燈箱（與生成圖放大同一組件）。
+  // 2026-09-10 暴君裁定：上传区语义统一为「上传钮＋内联缩图列」单一心智模型；
+  // hover 大面板与数字胶囊删除，点缩图开全屏灯箱（与生成图放大同一组件）。
   const upload = read("src/components/ReferenceImageUpload.tsx");
   const prompt = read("src/components/PromptInput.tsx");
   const playground = read("src/components/ImagePlayground.tsx");
@@ -38,7 +38,7 @@ test("prompt variant uses an AI-assistant-styled upload button with a single thu
   assert.match(upload, /variant\?:\s*"panel"\s*\|\s*"prompt"/);
   assert.match(upload, /aria-label="上传参考图"/);
   assert.match(upload, /<ImagePlus/);
-  // hover 大面板與數字膠囊已連根拔除。
+  // hover 大面板与数字胶囊已连根拔除。
   assert.doesNotMatch(upload, /onMouseEnter|onMouseLeave/);
   assert.doesNotMatch(upload, /hoverOpen|isExpanded/);
   assert.doesNotMatch(upload, /展开参考图预览/);
@@ -55,18 +55,18 @@ test("prompt reference thumbnails open the shared ImageLightbox fullscreen viewe
   const source = read("src/components/ReferenceImageUpload.tsx");
   const lightbox = read("src/components/ImageLightbox.tsx");
 
-  // 縮圖點擊 → ImageLightbox（與 ImageDisplay「点一下放大」同一組件、同一視覺）。
+  // 缩图点击 → ImageLightbox（与 ImageDisplay「点一下放大」同一组件、同一视觉）。
   assert.match(source, /import \{ ImageLightbox \} from "@\/components\/ImageLightbox"/);
   assert.match(source, /setLightboxImage\(image\)/);
   assert.match(source, /<ImageLightbox\s*\n\s*src=\{lightboxImage\.previewUrl\}/);
   assert.doesNotMatch(source, /setActivePreview/);
   assert.doesNotMatch(source, /role="dialog"/);
-  // 舊自製放大層（黑 70 遮罩＋右上關閉鈕）不得殘留。
+  // 旧自制放大层（黑 70 遮罩＋右上关闭钮）不得残留。
   assert.doesNotMatch(source, /bg-black\/70/);
-  // 燈箱組件承載 Esc / 後退 / 點背板三關閉路徑。
+  // 灯箱组件承载 Esc / 后退 / 点背板三关闭路径。
   assert.match(lightbox, /event\.key === "Escape"/);
   assert.match(lightbox, /addEventListener\("popstate"/);
-  // 單張 object-contain＋淺底保留原比例認知；多張（≥2）object-cover 方格。
+  // 单张 object-contain＋浅底保留原比例认知；多张（≥2）object-cover 方格。
   assert.match(source, /value\.length >= 2 \? "object-cover" : "object-contain"/);
 });
 
@@ -80,7 +80,7 @@ test("prompt reference controls expose 44px mobile hit targets", () => {
 test("prompt upload button mirrors the AI-assistant composer pill with a 44px mobile target", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
 
-  // 手機 44px（h-11 w-11）、桌面收小（sm:h-8 sm:w-8）；配色語法與 AgentComposer 附件鈕同源。
+  // 手机 44px（h-11 w-11）、桌面收小（sm:h-8 sm:w-8）；配色语法与 AgentComposer 附件钮同源。
   assert.match(source, /flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full/);
   assert.match(source, /bg-ios-blue\/10 text-ios-blue/);
   assert.match(source, /<ImagePlus className="h-5 w-5"/);
@@ -90,7 +90,7 @@ test("prompt reference preview opens a skeleton immediately and keeps a polished
   const source = read("src/components/ReferenceImageUpload.tsx");
 
   assert.match(source, /const \[pendingCount, setPendingCount\] = useState\(0\)/);
-  // 拖入即出骨架（pendingCount + processing），上傳區不自动弹任何面板。
+  // 拖入即出骨架（pendingCount + processing），上传区不自动弹任何面板。
   assert.match(source, /setPendingCount\(referenceCandidates\.length\);[\s\S]*?setIsProcessing\(true\);/);
   assert.match(source, /Array\.from\(\{ length: pendingCount \}\)/);
   assert.match(source, /\[scrollbar-width:none\] \[&::\-webkit-scrollbar\]:hidden/);
@@ -99,7 +99,7 @@ test("prompt reference preview opens a skeleton immediately and keeps a polished
 test("reference image preview closes on Escape and when its active image is removed", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
 
-  // Esc / 後退關閉由 ImageLightbox 內部生命周期承擔；本檔負責刪圖時聯動收燈箱。
+  // Esc / 后退关闭由 ImageLightbox 内部生命周期承担；本档负责删图时联动收灯箱。
   assert.match(source, /lightboxImage && \(\s*\n\s*<ImageLightbox/);
   assert.match(source, /onClose=\{\(\) => setLightboxImage\(null\)\}/);
   assert.match(source, /if \(lightboxImage\?\.id === id\) setLightboxImage\(null\)/);

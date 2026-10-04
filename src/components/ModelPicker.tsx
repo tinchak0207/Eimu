@@ -84,7 +84,7 @@ interface ModelKnowledgeCardProps {
 }
 
 /**
- * 模型能力卡（吞併決策清單主線四首件）：擅長/已知缺陷/建議三段，玻璃材质、
+ * 模型能力卡（吞并决策清单主线四首件）：擅长/已知缺陷/建议三段，玻璃材质、
  * iOS 圆角，全部字段可选——缺哪段就不渲染哪段。挂在模型选择器行内展开，
  * 不开「百科」第二页。建议里的 params 经 onApplyTipParams 一键带入生成表单。
  */
@@ -159,17 +159,17 @@ function modelPickerName(modelId: string, stripVendor: boolean): string {
 
 /** Desktop keeps the compact two-level chooser; mobile uses one bounded flat list. */
 export function ModelPicker({ models, value, onChange, resolution, durationSeconds, generateAudio, stripVendorPrefix, menuOpen, onMenuOpenChange, onApplyTipParams }: ModelPickerProps) {
-  // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
+  // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
-  // 活性字典（與 AI 助理 /v1/model-status 執行側同源）：unavailable 才算死，
-  // available/unknown/缺省一律當活。載入中/拉取失敗=全活（fail-open）。
+  // 活性字典（与 AI 助理 /v1/model-status 执行侧同源）：unavailable 才算死，
+  // available/unknown/缺省一律当活。载入中/拉取失败=全活（fail-open）。
   const availability = useModelAvailability();
   const modelAlive = (modelId: string) => isModelAlive(modelId, availability);
   const promotionTag = modelPromotionTag(value);
   const loraTourBusyRef = useRef(false);
   // 能力卡展开态：同一时刻只展开一张卡（下拉空间有限，多卡同开会滚丢）。
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
-  // 手機端二級目錄：點擊廠商行才展開該組模型；默認展開當前選中模型所在廠商。
+  // 手机端二级目录：点击厂商行才展开该组模型；默认展开当前选中模型所在厂商。
   const [expandedMobileVendor, setExpandedMobileVendor] = useState<string | null>(
     () => generationModel(value)?.vendor ?? null,
   );
@@ -289,8 +289,8 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
     if (group) group.models.push(model);
     else vendorGroups.push({ vendor, models: [model] });
   }
-  // 活性優先（穩定性排序）：每個廠商內「活的模型在前、死的在後」，各自保持原相對順序。
-  // 廠商活性 = 任一模組活，或包含當前選中值（當前選擇的廠商永遠可達，不能被排到死區）。
+  // 活性优先（稳定性排序）：每个厂商内「活的模型在前、死的在后」，各自保持原相对顺序。
+  // 厂商活性 = 任一模组活，或包含当前选中值（当前选择的厂商永远可达，不能被排到死区）。
   const vendorAlive = (group: VendorGroup) =>
     group.models.some(modelAlive) || group.models.includes(value);
   for (const group of vendorGroups) {
@@ -324,7 +324,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
         <DropdownMenuItem
           disabled={dead}
           onSelect={() => {
-            // 手機端：選中之後保持該廠商為展開組，下次打開菜單直接落在同一層級。
+            // 手机端：选中之后保持该厂商为展开组，下次打开菜单直接落在同一层级。
             if (mobile && vendor) setExpandedMobileVendor(vendor);
             onChange(model);
           }}

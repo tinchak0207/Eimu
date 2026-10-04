@@ -5,13 +5,13 @@ import {
   AGENT_TEMPLATE_DOMAIN_LABELS,
   type AgentTemplateDomain,
 } from "./agent-templates/index.ts";
-// 2026-09-12 首屏減重拆分：執行欄位（initialPrompt/directive/slots/步驟文案）與
-// cropTemplate 在 payload 檔；本檔結構測試以合併後的 FULL 為準。
+// 2026-09-12 首屏减重拆分：执行栏位（initialPrompt/directive/slots/步骤文案）与
+// cropTemplate 在 payload 档；本档结构测试以合并后的 FULL 为准。
 import { AGENT_TEMPLATES_FULL, AGENT_TEMPLATE_PAYLOADS, cropTemplate } from "./agent-templates-payload/index.ts";
 import { recipeTemplateToRecallConfig } from "./recipe-templates.ts";
 import { getStyleById } from "./style-library.ts";
-// 誠實性紅線（2026-09-30）：audio_first_timeline 的 speed 參數上游未支持、傳入不生效，
-// 產線文案不得反過來教 agent「超時就調語速」。本檔一併掃 repo 側鏡像與頁面文案。
+// 诚实性红线（2026-09-30）：audio_first_timeline 的 speed 参数上游未支持、传入不生效，
+// 产线文案不得反过来教 agent「超时就调语速」。本档一并扫 repo 侧镜像与页面文案。
 import { WORKFLOW_TEMPLATES } from "../../deploy-staging/gateway/workflow-templates/index";
 import { novelFilmPipelinePage } from "./workflow-pages/novel-film-pipeline.ts";
 import { shortdramaVisualAssetsPage } from "./workflow-pages/shortdrama-visual-assets.ts";
@@ -71,7 +71,7 @@ test("card copy is present and within reasonable length", () => {
       template.initialPrompt.length >= 30 && template.initialPrompt.length <= 80,
       `${template.id} initialPrompt length ${template.initialPrompt.length}`,
     );
-    // 卡面海報區漸變（2026-08-25 視覺主體）：8 張都必須有 Tailwind 三色類。
+    // 卡面海报区渐变（2026-08-25 视觉主体）：8 张都必须有 Tailwind 三色类。
     assert.match(template.accent, /^from-\[#/, `${template.id} accent gradient class`);
     assert.match(template.accent, /via-\[#/);
     assert.match(template.accent, /to-\[#/);
@@ -132,9 +132,9 @@ test("domain labels cover all domains used by templates", () => {
   );
 });
 
-// ———— 2026-08-25 工具鏈綁定：requiredTools 必須指向真實 registry，不許假裝能力 ————
-// ———— 2026-08-31 產品誠實稽核：判定集真源從「站內 domain registry 自我認證」
-//      換血為「harness 真實工具面」（harness-tool-registry.ts，
+// ———— 2026-08-25 工具链绑定：requiredTools 必须指向真实 registry，不许假装能力 ————
+// ———— 2026-08-31 产品诚实稽核：判定集真源从「站内 domain registry 自我认证」
+//      换血为「harness 真实工具面」（harness-tool-registry.ts，
 //      源 = VPS /opt/agent-harness/workspace/.opencode/tools/）。————
 
 import { HARNESS_TOOL_IDS } from "./harness-tool-registry.ts";
@@ -143,7 +143,7 @@ test("toolchain binding: every step declares >=1 requiredTools (工业级可执�
   for (const template of AGENT_TEMPLATES_FULL) {
     assert.ok(
       template.pipeline.steps.length >= 7,
-      `${template.id} 應為 >=7 步的 SOTA 流水線（實際 ${template.pipeline.steps.length}）`,
+      `${template.id} 应为 >=7 步的 SOTA 流水线（实际 ${template.pipeline.steps.length}）`,
     );
     for (const step of template.pipeline.steps) {
       assert.ok(
@@ -189,10 +189,10 @@ test("toolchain binding: unsupported tools must not fake availability", () => {
     for (const step of template.pipeline.steps) {
       for (const tool of step.requiredTools ?? []) {
         if (tool.unsupported) {
-          // 未接上游的意圖工具必須給出 requiredCapability，讓 harness 知道缺什麼
+          // 未接上游的意图工具必须给出 requiredCapability，让 harness 知道缺什么
           assert.ok(
             tool.requiredCapability !== undefined,
-            `${template.id} / ${step.name} 工具 ${tool.id} 標 unsupported 但沒說明 requiredCapability`,
+            `${template.id} / ${step.name} 工具 ${tool.id} 标 unsupported 但没说明 requiredCapability`,
           );
         }
       }
@@ -200,10 +200,10 @@ test("toolchain binding: unsupported tools must not fake availability", () => {
   }
 });
 
-test("toolchain binding: every template has >=3 gates (门禁是工業級 workflow 的硬性要求)", () => {
+test("toolchain binding: every template has >=3 gates (门禁是工业级 workflow 的硬性要求)", () => {
   for (const template of AGENT_TEMPLATES_FULL) {
     const gated = template.pipeline.steps.filter((step) => Boolean(step.gate)).length;
-    assert.ok(gated >= 3, `${template.id} 門禁數 ${gated} < 3`);
+    assert.ok(gated >= 3, `${template.id} 门禁数 ${gated} < 3`);
   }
 });
 
@@ -215,16 +215,16 @@ test("toolchain binding: expanded canvas cards reach industrial density (>=35)",
       cards += Math.max(1, deliverables.length);
       cards += step.promptNotes.length;
       if (step.gate) cards += 1;
-      cards += 1; // 每步至少一張生成卡
+      cards += 1; // 每步至少一张生成卡
     }
     assert.ok(
       cards >= 35,
-      `${template.id} 展開後約 ${cards} 張卡，未達工業級密度（>=35）`,
+      `${template.id} 展开后约 ${cards} 张卡，未达工业级密度（>=35）`,
     );
   }
 });
 
-// ———— 2026-08-26 環節選擇：shortName 鎖表 + cropTemplate ————
+// ———— 2026-08-26 环节选择：shortName 锁表 + cropTemplate ————
 
 /** 环节短名表（产品裁定，照抄禁止自创）：步骤原名 → 圆环显示短名。 */
 const SHORT_NAME_TABLE: Record<string, string> = {
@@ -287,7 +287,7 @@ test("cropTemplate: empty or full selection returns the original template (zero 
 
 test("cropTemplate: subset keeps only selected steps and appends scope notes", () => {
   const template = AGENT_TEMPLATES_FULL[0];
-  // 2026-09-03 插入「3D 白模预演」（index 4）後，「成片」由 7 移到 8；採樣語義不變（首/中/末步）。
+  // 2026-09-03 插入「3D 白模预演」（index 4）后，「成片」由 7 移到 8；采样语义不变（首/中/末步）。
   const cropped = cropTemplate(template, [0, 3, 8]);
   assert.notEqual(cropped, template);
   assert.deepEqual(cropped.pipeline.steps, [
@@ -355,7 +355,7 @@ test("cropTemplate: every built-in template crops to a valid pipeline for the ca
   }
 });
 
-// ———— 2026-09-03 3D 白模预演接入：兩大影視模板在「锁定分镜」后进导演台预演 ————
+// ———— 2026-09-03 3D 白模预演接入：两大影视模板在「锁定分镜」后进导演台预演 ————
 
 test("director preview step: novel/shortdrama insert 3D 白模预演 between 锁定分镜 and 渲染关键帧 with director toolchain", () => {
   const EXPECTED_TOOLS = [
@@ -386,7 +386,7 @@ test("director preview step: novel/shortdrama insert 3D 白模预演 between 锁
     assert.deepEqual(
       (step.requiredTools ?? []).map((t) => t.id),
       EXPECTED_TOOLS,
-      `${templateId} 预演步 requiredTools 逐字對齊 harness 工具面`,
+      `${templateId} 预演步 requiredTools 逐字对齐 harness 工具面`,
     );
     for (const id of EXPECTED_TOOLS) {
       assert.ok(HARNESS_TOOL_IDS.has(id), `${templateId} 工具 ${id} 须在 harness 真源`);
@@ -396,36 +396,36 @@ test("director preview step: novel/shortdrama insert 3D 白模预演 between 锁
   }
 });
 
-// ———— 2026-09-12 首屏減重拆分：顯示檔必須零執行文案（防再膨脹閘）————
+// ———— 2026-09-12 首屏减重拆分：显示档必须零执行文案（防再膨胀闸）————
 
 const EXEC_STEP_FIELDS = ["deliverable", "inputFrom", "promptNotes", "gate", "requiredTools"] as const;
 const EXEC_TPL_FIELDS = ["initialPrompt", "directive", "slots"] as const;
 
-test("display file carries zero execution payload (首屏消重硬閘)", () => {
+test("display file carries zero execution payload (首屏消重硬闸)", () => {
   for (const card of AGENT_TEMPLATES) {
     for (const f of EXEC_TPL_FIELDS) {
       assert.ok(
         !(f in card),
-        `${card.id} 顯示卡不該有執行欄位「${f}」——會把大段文案鏈進首屏 app/page chunk`,
+        `${card.id} 显示卡不该有执行栏位「${f}」——会把大段文案链进首屏 app/page chunk`,
       );
     }
     for (const step of card.pipeline.steps) {
       for (const f of EXEC_STEP_FIELDS) {
         assert.ok(
           !(f in step),
-          `${card.id} / ${step.name} 顯示步驟不該有執行欄位「${f}」`,
+          `${card.id} / ${step.name} 显示步骤不该有执行栏位「${f}」`,
         );
       }
     }
   }
 });
 
-test("every display card hydrates: payload ids and step counts align (拆分兩檔防漂移)", () => {
+test("every display card hydrates: payload ids and step counts align (拆分两档防漂移)", () => {
   const payloadIds = Object.keys(AGENT_TEMPLATE_PAYLOADS);
   assert.deepEqual(
     [...AGENT_TEMPLATES.map((t) => t.id)].sort(),
     [...payloadIds].sort(),
-    "顯示檔與 payload 檔模板 id 必須一比一",
+    "显示档与 payload 档模板 id 必须一比一",
   );
   for (const card of AGENT_TEMPLATES) {
     const payload = AGENT_TEMPLATE_PAYLOADS[card.id];
@@ -433,24 +433,24 @@ test("every display card hydrates: payload ids and step counts align (拆分兩�
     assert.equal(
       payload.steps.length,
       card.pipeline.steps.length,
-      `${card.id} 步驟數漂移：顯示 ${card.pipeline.steps.length} vs payload ${payload.steps.length}`,
+      `${card.id} 步骤数漂移：显示 ${card.pipeline.steps.length} vs payload ${payload.steps.length}`,
     );
     assert.ok(payload.initialPrompt.length >= 30, `${card.id} payload initialPrompt`);
     assert.ok(payload.directive.length > 10, `${card.id} payload directive`);
     assert.ok(Object.keys(payload.slots).length > 0, `${card.id} payload slots`);
   }
-  // FULL = 顯示 ∪ payload，合併後執行欄位回齊。
+  // FULL = 显示 ∪ payload，合并后执行栏位回齐。
   assert.equal(AGENT_TEMPLATES_FULL.length, AGENT_TEMPLATES.length);
   const full0 = AGENT_TEMPLATES_FULL[0];
   assert.ok(typeof full0.initialPrompt === "string" && full0.initialPrompt.length > 0);
   assert.ok(Array.isArray(full0.pipeline.steps[0].promptNotes));
 });
 
-// 誠實性紅線（2026-09-30）：TTS 時長對齊不得教 agent 調語速。
-// 現場事實：audio_first_timeline 的 speed 參數字面標注「當前上游未支持，傳入不生效」，
-// 而 harness-tool-registry 記載該工具是「gateway /agent/v1/tts 逐行真 TTS + ffprobe 實測」。
-// 所以 agent 真正捏得動的只有兩頭：① 改短台詞文本再逐句重出 ② 調鏡頭計畫秒數（durationSeconds）。
-// 教「微調語速」＝教工具做不到的事，agent 只會幻覺或空轉。此斷言掃全部相關文案本體。
+// 诚实性红线（2026-09-30）：TTS 时长对齐不得教 agent 调语速。
+// 现场事实：audio_first_timeline 的 speed 参数字面标注「当前上游未支持，传入不生效」，
+// 而 harness-tool-registry 记载该工具是「gateway /agent/v1/tts 逐行真 TTS + ffprobe 实测」。
+// 所以 agent 真正捏得动的只有两头：① 改短台词文本再逐句重出 ② 调镜头计画秒数（durationSeconds）。
+// 教「微调语速」＝教工具做不到的事，agent 只会幻觉或空转。此断言扫全部相关文案本体。
 test("配音时长对齐文案不得教 agent 调语速（speed 上游不生效），且必须留下做得到的替代路", () => {
   const corpus: ReadonlyArray<readonly [string, string]> = [
     ["agent-templates-payload（novel/shortdrama 全文）", JSON.stringify(AGENT_TEMPLATES_FULL)],
@@ -458,18 +458,18 @@ test("配音时长对齐文案不得教 agent 调语速（speed 上游不生效�
     ["workflow-pages novel-film-pipeline", JSON.stringify(novelFilmPipelinePage)],
     ["workflow-pages shortdrama-visual-assets", JSON.stringify(shortdramaVisualAssetsPage)],
   ];
-  // 暗示「語速可調」的字眼（簡繁都涵蓋）；出現任一即紅。
+  // 暗示「语速可调」的字眼（简繁都涵盖）；出现任一即红。
   const forbiddenSpeedPhrases = [
     "微调语速",
-    "微調語速",
+    "微调语速",
     "调语速",
-    "調語速",
+    "调语速",
     "调整语速",
-    "調整語速",
+    "调整语速",
     "语速对齐",
-    "語速對齊",
+    "语速对齐",
     "语速锁",
-    "語速鎖",
+    "语速锁",
   ];
   for (const [label, text] of corpus) {
     for (const phrase of forbiddenSpeedPhrases) {
@@ -478,13 +478,13 @@ test("配音时长对齐文案不得教 agent 调语速（speed 上游不生效�
         `${label} 不得出现「${phrase}」：speed 参数上游不生效，调语速是工具做不到的事（教不会的指令 ⇒ 幻觉或空转）`,
       );
     }
-    // 反向：必須真的留下兩條做得到的路 + 明說不生效，而不是刪句子了事。
+    // 反向：必须真的留下两条做得到的路 + 明说不生效，而不是删句子了事。
     assert.ok(text.includes("不生效"), `${label} 必须明说 speed 传入不生效（不得让 agent 误以为可调速）`);
     assert.ok(text.includes("改短"), `${label} 必须保留「改短台词再逐句重出」这条做得到的替代路`);
   }
 });
 
-// ── H15：OP/MV 題材不得落豎屏短劇模板 ──
+// ── H15：OP/MV 题材不得落竖屏短剧模板 ──
 import { resolveHarnessTemplateId, isMvOpTopic } from "./agent-templates/index.ts";
 
 test("H15: OP/MV topics never resolve to vertical shortdrama_visual", () => {

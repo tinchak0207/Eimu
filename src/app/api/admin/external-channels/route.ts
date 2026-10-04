@@ -1,6 +1,6 @@
-// external-channels 的 admin 面：GET 列出所有外部上游（credential 只回「已設定/未設定」
-// 旗標，永不回 raw key），POST/PUT 建立/更新，DELETE 刪除。認證照 tier-pricing/admin
-// route：requireAdminSession + errorResponse(UNAUTHORIZED→401)，寫入後記錄稽核
+// external-channels 的 admin 面：GET 列出所有外部上游（credential 只回「已设定/未设定」
+// 旗标，永不回 raw key），POST/PUT 建立/更新，DELETE 删除。认证照 tier-pricing/admin
+// route：requireAdminSession + errorResponse(UNAUTHORIZED→401)，写入后记录稽核
 // （diffJson + nextConfigVersion + recordConfigChange）。
 
 import { NextRequest, NextResponse } from "next/server";
@@ -21,7 +21,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(error: unknown) {
   if (error instanceof Error && error.message === "UNAUTHORIZED") {
@@ -31,7 +31,7 @@ function errorResponse(error: unknown) {
   return NextResponse.json({ success: false, message }, { status: 500 });
 }
 
-/** credential 是否已設定（env 存在且非空）——絕不回 raw key。 */
+/** credential 是否已设定（env 存在且非空）——绝不回 raw key。 */
 function credentialConfigured(channel: ExternalChannel): boolean {
   const value = process.env[channel.credentialRef];
   return typeof value === "string" && value.trim().length > 0;

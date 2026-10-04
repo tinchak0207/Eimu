@@ -18,8 +18,8 @@ test("tool.progress 是已注册事件名", () => {
 });
 
 test("tool.progress 合法帧解析出 done/total/label", () => {
-  const data = progressData({ tool: "keyframe_render", done: 3, total: 8, label: "渲染關鍵幀", event_id: 42 });
-  assert.deepEqual(data, { tool: "keyframe_render", done: 3, total: 8, label: "渲染關鍵幀" });
+  const data = progressData({ tool: "keyframe_render", done: 3, total: 8, label: "渲染关键帧", event_id: 42 });
+  assert.deepEqual(data, { tool: "keyframe_render", done: 3, total: 8, label: "渲染关键帧" });
 });
 
 test("tool.progress 缺 label 时不带 label 键（不塞 undefined）", () => {
@@ -63,35 +63,35 @@ test("turn.plan 合法帧解析出 plan/experts/provisional/source（model 只�
 });
 
 test("turn.plan 缺 plan（或空字串 / 非字串）→ 整帧丢弃", () => {
-  // plan 是唯一必需欄位：沒有它就只是一張空話卡，寧可不畫。
+  // plan 是唯一必需栏位：没有它就只是一张空话卡，宁可不画。
   assert.equal(planData({ event_id: 1 }), null, "缺 plan");
   assert.equal(planData({ event_id: 1, plan: "" }), null, "空 plan");
   assert.equal(planData({ event_id: 1, plan: "   " }), null, "空白 plan");
   assert.equal(planData({ event_id: 1, plan: 123 }), null, "非字串 plan");
-  assert.equal(parseAgentSseEvent("turn.plan", "not json"), null, "壞 JSON");
+  assert.equal(parseAgentSseEvent("turn.plan", "not json"), null, "坏 JSON");
 });
 
-test("turn.plan experts 非陣列 / 空陣列 → 不帶 experts 鍵（缺席就不畫晶片）", () => {
+test("turn.plan experts 非阵列 / 空阵列 → 不带 experts 键（缺席就不画晶片）", () => {
   const a = planData({ plan: "先出分镜。", experts: "screenwriter" });
-  assert.equal("experts" in (a ?? {}), false, "非陣列不收");
+  assert.equal("experts" in (a ?? {}), false, "非阵列不收");
 
   const b = planData({ plan: "先出分镜。", experts: [] });
-  assert.equal("experts" in (b ?? {}), false, "空陣列等於沒有");
+  assert.equal("experts" in (b ?? {}), false, "空阵列等于没有");
 
   const c = planData({ plan: "先出分镜。", experts: ["screenwriter", 42, "", null, "composer"] });
-  assert.deepEqual(c?.experts, ["screenwriter", "composer"], "逐項收斂：非字串/空字串剔除，不留 undefined");
+  assert.deepEqual(c?.experts, ["screenwriter", "composer"], "逐项收敛：非字串/空字串剔除，不留 undefined");
 });
 
-test("turn.plan provisional 預設 true，只有明確 false 才是 false", () => {
-  assert.equal(planData({ plan: "先出分镜。" })?.provisional, true, "缺欄位 = 還在進行中（保守誠實的一側）");
-  assert.equal(planData({ plan: "先出分镜。", provisional: "no" })?.provisional, true, "非 false 的壞值照預設");
+test("turn.plan provisional 预设 true，只有明确 false 才是 false", () => {
+  assert.equal(planData({ plan: "先出分镜。" })?.provisional, true, "缺栏位 = 还在进行中（保守诚实的一侧）");
+  assert.equal(planData({ plan: "先出分镜。", provisional: "no" })?.provisional, true, "非 false 的坏值照预设");
   assert.equal(planData({ plan: "先出分镜。", provisional: false })?.provisional, false);
 });
 
-test("turn.plan source 白名單單值；superseded 只在明確 true 時帶", () => {
+test("turn.plan source 白名单单值；superseded 只在明确 true 时带", () => {
   assert.equal(planData({ plan: "先出分镜。", source: "rule" })?.source, "rule");
-  assert.equal(planData({ plan: "先出分镜。", source: "guess" })?.source, undefined, "認不得的來源折成 undefined，不假造");
-  assert.equal("superseded" in (planData({ plan: "先出分镜。" }) ?? {}), false, "缺席不出現");
+  assert.equal(planData({ plan: "先出分镜。", source: "guess" })?.source, undefined, "认不得的来源折成 undefined，不假造");
+  assert.equal("superseded" in (planData({ plan: "先出分镜。" }) ?? {}), false, "缺席不出现");
   assert.equal(planData({ plan: "先出分镜。", superseded: true })?.superseded, true);
-  assert.equal("superseded" in (planData({ plan: "先出分镜。", superseded: "yes" }) ?? {}), false, "非布林不帶");
+  assert.equal("superseded" in (planData({ plan: "先出分镜。", superseded: "yes" }) ?? {}), false, "非布林不带");
 });

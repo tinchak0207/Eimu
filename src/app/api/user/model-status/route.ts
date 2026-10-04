@@ -1,17 +1,17 @@
-// GET /api/user/model-status — C 端模型選單的活性字典。
+// GET /api/user/model-status — C 端模型选单的活性字典。
 //
-// 數據源與 AI 助理的 /v1/model-status 完全同源：經 GENERATION_CONTROL_PLANE_PROXY_ORIGIN
-// 走 HMAC 簽名通道（域 "model-status"）調控制面內部端點 /image-control/api/internal/model-status。
-// 判據全在控制面那一側（probeAllModelsStatus + last_24h 真實交付 + balance 欠費覆寫 +
-// supplier 執行側同源最終裁決）——Vercel 邊緣拿不到控制面 Postgres（admin pools /
-// routing-events 都在那一側），本地復刻 probe 只會全 unknown（env 渠道全非 OpenAI 兼容）。
+// 数据源与 AI 助理的 /v1/model-status 完全同源：经 GENERATION_CONTROL_PLANE_PROXY_ORIGIN
+// 走 HMAC 签名通道（域 "model-status"）调控制面内部端点 /image-control/api/internal/model-status。
+// 判据全在控制面那一侧（probeAllModelsStatus + last_24h 真实交付 + balance 欠费覆写 +
+// supplier 执行侧同源最终裁决）——Vercel 边缘拿不到控制面 Postgres（admin pools /
+// routing-events 都在那一侧），本地复刻 probe 只会全 unknown（env 渠道全非 OpenAI 兼容）。
 //
-// 公開無 auth（與 /api/user/model-eta 同例）：只回模型名 + 三態，不含渠道/帳號/憑證等
-// 敏感面。模組級緩存 60 秒；控制面內部端點自身也有 60s 緩存，這裡的緩存是 HTTP 層，
-// 避免每個請求都穿一次簽名通道。
+// 公开无 auth（与 /api/user/model-eta 同例）：只回模型名 + 三态，不含渠道/帐号/凭证等
+// 敏感面。模组级缓存 60 秒；控制面内部端点自身也有 60s 缓存，这里的缓存是 HTTP 层，
+// 避免每个请求都穿一次签名通道。
 //
-// 失敗語義：控制面不可達/簽名失敗 → fail-open 返回空字典（前端全當活），絕不因活性
-// 拉取把選單打掛——與後端 fail-open 紀律一致。
+// 失败语义：控制面不可达/签名失败 → fail-open 返回空字典（前端全当活），绝不因活性
+// 拉取把选单打挂——与后端 fail-open 纪律一致。
 
 import { NextResponse } from "next/server";
 import { signBizKeySync } from "@/lib/biz-key-sync";
@@ -19,7 +19,7 @@ import { SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 type Availability = "available" | "unavailable" | "unknown";
 
@@ -37,7 +37,7 @@ async function fetchControlPlaneModels(): Promise<Record<string, Availability>> 
   const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/+$/, "");
   const secret = process.env.GENERATION_BILLING_RELAY_SECRET?.trim();
   if (!origin || !secret) {
-    console.error("[user/model-status] 代理 origin/secret 未配置，fail-open 全當活");
+    console.error("[user/model-status] 代理 origin/secret 未配置，fail-open 全当活");
     return {};
   }
 
@@ -59,21 +59,21 @@ async function fetchControlPlaneModels(): Promise<Record<string, Availability>> 
       signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
     });
   } catch (error) {
-    console.error("[user/model-status] 控制面代理請求失敗，fail-open 全當活", error);
+    console.error("[user/model-status] 控制面代理请求失败，fail-open 全当活", error);
     return {};
   }
   if (!res.ok) {
-    console.error(`[user/model-status] 控制面代理返回 status=${res.status}，fail-open 全當活`);
+    console.error(`[user/model-status] 控制面代理返回 status=${res.status}，fail-open 全当活`);
     return {};
   }
   const data = (await res.json().catch(() => null)) as InternalModelStatusResponse | null;
   const remote = data?.models;
   if (!remote) {
-    console.error("[user/model-status] 控制面回應缺 models，fail-open 全當活");
+    console.error("[user/model-status] 控制面回应缺 models，fail-open 全当活");
     return {};
   }
 
-  // 收斂到支援的模型清單；控制面缺席的模型當 unknown（死活未知當活）。
+  // 收敛到支援的模型清单；控制面缺席的模型当 unknown（死活未知当活）。
   const models: Record<string, Availability> = {};
   for (const modelId of SUPPORTED_GENERATION_MODEL_IDS) {
     const av = remote[modelId];

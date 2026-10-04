@@ -259,7 +259,7 @@ test("deriveRequiredAssets：引用卡 id 全集升序去重（资产清单由�
   assert.deepEqual(deriveRequiredAssets("garbage"), []);
 });
 
-// ─────────────────────────────────────────── 道具卡（2026-09-24：prop 走完同一條解析鏈）
+// ─────────────────────────────────────────── 道具卡（2026-09-24：prop 走完同一条解析链）
 
 /**
  * 道具卡样本。`CharacterCardKind` 由 character-cards.ts 拥有（另一路正在扩含 `"prop"`），

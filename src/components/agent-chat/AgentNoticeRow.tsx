@@ -9,7 +9,7 @@ export interface AgentNoticeRowProps {
   item: AgentNoticeItem;
 }
 
-/** prefers-reduced-motion：入場位移對暈動敏感者不友好，關掉。 */
+/** prefers-reduced-motion：入场位移对晕动敏感者不友好，关掉。 */
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
@@ -28,7 +28,7 @@ function AgentNoticeRowComponent({ item }: AgentNoticeRowProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [dismissed, setDismissed] = useState(false);
 
-  // 使用者點掉提示：本機隱藏（資料模型不動，下次新 notice 是新 key 的新行）。
+  // 使用者点掉提示：本机隐藏（资料模型不动，下次新 notice 是新 key 的新行）。
   if (dismissed) return null;
 
   return (
@@ -50,7 +50,7 @@ function AgentNoticeRowComponent({ item }: AgentNoticeRowProps) {
       <span className="flex min-h-11 min-w-0 flex-1 items-center break-words py-1 [overflow-wrap:anywhere]">
         {item.text}
       </span>
-      {/* 可關閉：點掉讓提示讓路，不擋閱讀；44×44 觸控目標，按下有 active 反饋。 */}
+      {/* 可关闭：点掉让提示让路，不挡阅读；44×44 触控目标，按下有 active 反馈。 */}
       <button
         type="button"
         aria-label="关闭提示"

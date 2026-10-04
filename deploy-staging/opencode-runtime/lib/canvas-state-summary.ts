@@ -1,7 +1,7 @@
-// canvas_get_state 摘要回執（H10 殘餘）：342 節點/1213 連線全量回執會被 opencode 截斷器截掉。
-// 預設摘要：節點計數 + 按類型/狀態彙總 + 逐節點精簡行 + 連線只回數量；node_id 取單點；view=full 取全量。
-// 失敗/錯誤資訊（metadata 內 error/fail/reason/status 類鍵）永遠完整保留，不被截短。
-// 放在 lib/ 而非 tools/（tools/ 下具名 export 會被註冊成工具）。純函式，不依賴 canvas-flow。
+// canvas_get_state 摘要回执（H10 残余）：342 节点/1213 连线全量回执会被 opencode 截断器截掉。
+// 预设摘要：节点计数 + 按类型/状态汇总 + 逐节点精简行 + 连线只回数量；node_id 取单点；view=full 取全量。
+// 失败/错误资讯（metadata 内 error/fail/reason/status 类键）永远完整保留，不被截短。
+// 放在 lib/ 而非 tools/（tools/ 下具名 export 会被注册成工具）。纯函式，不依赖 canvas-flow。
 
 import { compactCanvasState } from "./canvas-flow"
 
@@ -44,7 +44,7 @@ export function summarizeCanvasNode(n: any): Record<string, unknown> {
   const m = n?.metadata && typeof n.metadata === "object" && !Array.isArray(n.metadata) ? n.metadata : {}
   const meta: Record<string, unknown> = {}
   for (const k of KEEP_KEYS) if (m[k] !== undefined) meta[k] = val(m[k], VAL_MAX)
-  for (const [k, v] of Object.entries(m)) if (k !== "status" && ERR_KEY.test(k) && v !== undefined) meta[k] = val(v, ERR_MAX) // 失敗真因不截
+  for (const [k, v] of Object.entries(m)) if (k !== "status" && ERR_KEY.test(k) && v !== undefined) meta[k] = val(v, ERR_MAX) // 失败真因不截
   const row: Record<string, unknown> = { id: n?.id, type: n?.type }
   const st = nodeStatus(n)
   if (st) {
@@ -67,7 +67,7 @@ export function buildCanvasReceipt(
   if (opts.view === "full") return { state: compactCanvasState(state) }
   if (opts.nodeId) {
     const node = nodes.find((n) => n?.id === opts.nodeId)
-    if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不帶 node_id 的 canvas_get_state 看節點清單" }
+    if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不带 node_id 的 canvas_get_state 看节点清单" }
     const compact = compactCanvasState({ nodes: [node] }).nodes[0]
     const versionsEntry = (Array.isArray(s.node_versions) ? s.node_versions : []).find(
       (e: any) => e?.node_id === opts.nodeId,
@@ -76,8 +76,8 @@ export function buildCanvasReceipt(
       node: compact,
       upstream: conns.filter((c) => c?.to === opts.nodeId || c?.target === opts.nodeId).map((c) => c.from ?? c.source),
       downstream: conns.filter((c) => c?.from === opts.nodeId || c?.source === opts.nodeId).map((c) => c.to ?? c.target),
-      // 版本史（人機共筆回滾面，2026-10-03）：單點查詢時附上該節點的版本清單，agent 可直接
-      // 指定 version 走 workflow_rollback；不帶 metadata（回退由畫布端還原，agent 不必抄）。
+      // 版本史（人机共笔回滚面，2026-10-03）：单点查询时附上该节点的版本清单，agent 可直接
+      // 指定 version 走 workflow_rollback；不带 metadata（回退由画布端还原，agent 不必抄）。
       ...(versionsEntry ? { versions: versionsEntry.versions } : {}),
     }
   }
@@ -106,11 +106,11 @@ export function buildCanvasReceipt(
     selected_node_ids: selected,
     viewport: s.viewport ?? null,
     ...(Number.isFinite(x0) ? { bounds: { min_x: Math.round(x0), min_y: Math.round(y0), max_x: Math.round(x1), max_y: Math.round(y1) } } : {}),
-    // 人機共筆讀面（2026-10-03）：dsl＝agent 讀回的可逆聲明（原樣，是改圖的唯一輸入）；
-    // workflow_versions＝節點版本索引（回退面）。兩者缺席＝畫布上還沒有可編譯的產線/版本。
+    // 人机共笔读面（2026-10-03）：dsl＝agent 读回的可逆声明（原样，是改图的唯一输入）；
+    // workflow_versions＝节点版本索引（回退面）。两者缺席＝画布上还没有可编译的产线/版本。
     ...(Array.isArray(s.dsl) ? { dsl: s.dsl } : {}),
     ...(Array.isArray(s.node_versions) ? { workflow_versions: s.node_versions } : {}),
     nodes: nodes.map(summarizeCanvasNode),
-    hint: "摘要視圖：連線只回數量、content/metadata 已截短（失敗資訊完整）。單點完整資料（含位置/尺寸/版本史）+上下游用 node_id；bounds 為全部節點包圍盒，擺放新節點用；全量用 view=full（很大會被截斷，落盤檔請用 read 按 offset/limit 讀）。dsl＝當前產線的可逆聲明：要改產線就讀它、改它、用 workflow_write 編譯回圖（不要手拼 ops）；workflow_versions 供 workflow_rollback 回退。",
+    hint: "摘要视图：连线只回数量、content/metadata 已截短（失败资讯完整）。单点完整资料（含位置/尺寸/版本史）+上下游用 node_id；bounds 为全部节点包围盒，摆放新节点用；全量用 view=full（很大会被截断，落盘档请用 read 按 offset/limit 读）。dsl＝当前产线的可逆声明：要改产线就读它、改它、用 workflow_write 编译回图（不要手拼 ops）；workflow_versions 供 workflow_rollback 回退。",
   }
 }

@@ -22,9 +22,9 @@ const FILMERA_SERVER_ACTIONS = {
   generateImageRefTake: "70b05ecb88fca7de51fff8609b362f6f0ec96ae4c1",
   generateCanvasVideo: "70fffd9543c70a94e7897809c2c822e5968014be94",
   updateCanvasNode: "60b721a536f4e471e4adeda526d9ab41d5825115ba",
-  // 2026-08-25 實證：新帳號自動初始化工作區用（createProject POST 到 /studio，body ["名稱"]）
+  // 2026-08-25 实证：新帐号自动初始化工作区用（createProject POST 到 /studio，body ["名称"]）
   createProject: "00e97c7cc6cfabf5f9709263412f7086cefc6e6afe",
-  // body [projectId, {type:"image-ref", data:{prompt:"", modelId:"gpt-image-2"}}]；成功時 RSC 無 ok 行，需查 Supabase 驗證
+  // body [projectId, {type:"image-ref", data:{prompt:"", modelId:"gpt-image-2"}}]；成功时 RSC 无 ok 行，需查 Supabase 验证
   addCanvasNode: "608ccb0a69a302ccbd2f02aebdf80aa10707feda0a",
 } as const;
 
@@ -59,15 +59,15 @@ export function resolveFilmeraVideoModelId(modelId: string): string | null {
   return FILMERA_VIDEO_MODEL[modelId] ?? null;
 }
 
-/** 額度耗盡信號：讓 VPS 帳號池守護切換帳號（信號目錄掛載共享，best-effort 不擋出圖流程）。 */
+/** 额度耗尽信号：让 VPS 帐号池守护切换帐号（信号目录挂载共享，best-effort 不挡出图流程）。 */
 function requestFilmeraAccountSwitch(reason: string): void {
   const signalDir = process.env.FILMERA_ACCOUNTS_DIR ?? "/opt/filmera-accounts";
   try {
     mkdirSync(signalDir, { recursive: true });
     appendFileSync(`${signalDir}/switch-requested`, `${Date.now()} ${reason}\n`);
-    console.warn(`[filmera-upstream] 帳號額度耗盡，已發出切換信號: ${reason.slice(0, 100)}`);
+    console.warn(`[filmera-upstream] 帐号额度耗尽，已发出切换信号: ${reason.slice(0, 100)}`);
   } catch (error) {
-    console.warn(`[filmera-upstream] 切換信號寫入失敗: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`[filmera-upstream] 切换信号写入失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -76,7 +76,7 @@ const FILMERA_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, l
 type FilmeraConfig = {
   supabaseUrl: string;
   anonKey: string;
-  /** projectId/nodeId 僅作 cache 起點，可缺省——缺失時由 ensureFilmeraContext 動態解析。 */
+  /** projectId/nodeId 仅作 cache 起点，可缺省——缺失时由 ensureFilmeraContext 动态解析。 */
   projectId?: string;
   nodeId?: string;
   /** video-gen 节点（可选，视频生成用；缺省回退 nodeId）。 */
@@ -106,9 +106,9 @@ function readConfig(supplier: SupplierRecord): FilmeraConfig {
 type FilmeraUser = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
-// Token 生命週期管理（2026-08-25）：access_token 壽命 3600s，過期前 5 分鐘自動
-// 用 refresh_token 輪換（POST /auth/v1/token?grant_type=refresh_token，refresh_token
-// 每次輪換）。輪換成功後回調 onFilmeraTokenRotated 讓控制面持久化新值（本地默認 no-op）。
+// Token 生命周期管理（2026-08-25）：access_token 寿命 3600s，过期前 5 分钟自动
+// 用 refresh_token 轮换（POST /auth/v1/token?grant_type=refresh_token，refresh_token
+// 每次轮换）。轮换成功后回调 onFilmeraTokenRotated 让控制面持久化新值（本地默认 no-op）。
 // ---------------------------------------------------------------------------
 
 interface FilmeraTokenState {
@@ -125,7 +125,7 @@ let tokenState: FilmeraTokenState | null = null;
 let tokenRotatedCallback: TokenRotatedCallback | null = null;
 const TOKEN_EXPIRY_MARGIN_MS = 5 * 60_000;
 
-/** 控制面註冊持久化回調（寫回 .env / DB），保持 token 輪換跨重啟不丟。 */
+/** 控制面注册持久化回调（写回 .env / DB），保持 token 轮换跨重启不丢。 */
 export function onFilmeraTokenRotated(callback: TokenRotatedCallback): void {
   tokenRotatedCallback = callback;
 }
@@ -137,7 +137,7 @@ function loadTokenStateFromEnv(): FilmeraTokenState | null {
   return {
     accessToken,
     refreshToken,
-    // 無獨立過期信息時視為即將過期，首次調用即觸發 refresh（有 refresh_token 才會真正刷）
+    // 无独立过期信息时视为即将过期，首次调用即触发 refresh（有 refresh_token 才会真正刷）
     expiresAt: refreshToken ? 0 : Math.floor(Date.now() / 1000) + 3600,
     user: null,
   };
@@ -182,7 +182,7 @@ async function refreshFilmeraToken(config: FilmeraConfig, state: FilmeraTokenSta
   return next;
 }
 
-/** 取新鮮 access_token：距過期 < 5 分鐘自動輪換；供 health 檢查與生成分流共用。 */
+/** 取新鲜 access_token：距过期 < 5 分钟自动轮换；供 health 检查与生成分流共用。 */
 async function getValidFilmeraToken(config: FilmeraConfig, signal?: AbortSignal): Promise<FilmeraTokenState> {
   if (!tokenState) tokenState = loadTokenStateFromEnv();
   if (!tokenState) {
@@ -195,7 +195,7 @@ async function getValidFilmeraToken(config: FilmeraConfig, signal?: AbortSignal)
   return tokenState;
 }
 
-/** health 探測入口：拿（必要時刷新後的）access token 與 user。 */
+/** health 探测入口：拿（必要时刷新后的）access token 与 user。 */
 export async function getFilmeraAccessToken(config: { supabaseUrl?: string; anonKey?: string } = {}): Promise<{ token: string; user: FilmeraUser | null }> {
   const resolved: FilmeraConfig = {
     supabaseUrl: config.supabaseUrl || process.env.FILMERA_SUPABASE_URL || "https://wxoujoeuqbkaniujulag.supabase.co",
@@ -206,7 +206,7 @@ export async function getFilmeraAccessToken(config: { supabaseUrl?: string; anon
   return { token: state.accessToken, user: state.user };
 }
 
-/** 測試輔助：重置 token 與 context 緩存。 */
+/** 测试辅助：重置 token 与 context 缓存。 */
 export function resetFilmeraUserCache(): void {
   tokenState = null;
   contextCache = null;
@@ -241,7 +241,7 @@ function cookieValue(accessToken: string, refreshToken: string, expiresAt: numbe
 
 type ServerActionResult = { ok: boolean; message?: string; status?: number };
 
-/** 調 server action 並返回原始 RSC 文本（createProject 這類回路由樹的 action 用）。 */
+/** 调 server action 并返回原始 RSC 文本（createProject 这类回路由树的 action 用）。 */
 async function callServerActionText(
   cookie: string,
   actionId: string,
@@ -282,7 +282,7 @@ async function callServerAction(
   signal?: AbortSignal,
   /** false = 该 action 无业务返回值（如 updateCanvasNode 只回 RSC UI 流），HTTP 200 即成功。 */
   expectResult = true,
-  /** action 所在頁面；默認 canvas 頁。createProject 在 /studio。 */
+  /** action 所在页面；默认 canvas 页。createProject 在 /studio。 */
   pagePath = "",
 ): Promise<ServerActionResult> {
   const path = pagePath || (projectId ? `/studio/p/${projectId}/canvas` : "/studio");
@@ -359,9 +359,9 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Project / Node 上下文自愈（2026-08-25）：env 的 PROJECT_ID/NODE_ID 只是 cache
-// 起點。帳號輪換後舊 ID 跨帳號無權限 → server action 500。ensureFilmeraContext
-// 查當前用戶名下最新 project → 無則 createProject → 查 image-ref 節點 → 無則
-// addCanvasNode（成功時 RSC 無 ok 行，需重查 Supabase 拿新節點 id）。
+// 起点。帐号轮换后旧 ID 跨帐号无权限 → server action 500。ensureFilmeraContext
+// 查当前用户名下最新 project → 无则 createProject → 查 image-ref 节点 → 无则
+// addCanvasNode（成功时 RSC 无 ok 行，需重查 Supabase 拿新节点 id）。
 // ---------------------------------------------------------------------------
 
 interface FilmeraContext {
@@ -383,7 +383,7 @@ async function ensureFilmeraContext(
   const userId = String(user.id ?? "");
   if (!userId) throw new SupplierRequestError("Filmera user payload has no id; cannot resolve workspace.", 401);
 
-  // 1) 查用戶名下最新非模板 project；env/config 提供的 projectId 也先驗證歸屬
+  // 1) 查用户名下最新非模板 project；env/config 提供的 projectId 也先验证归属
   const projects = await supabaseSelect(
     config,
     token,
@@ -393,8 +393,8 @@ async function ensureFilmeraContext(
   );
   let projectId = projects.find((p) => String(p.owner_id ?? "") === userId)?.id as string | undefined;
   if (!projectId) {
-    // 2) 無 project → createProject（POST 到 /studio，body ["名稱"]）
-    //    RSC 響應的 ok 行解析不可靠（createProject 回的是路由樹），改為直接讀 text 提取 projectId
+    // 2) 无 project → createProject（POST 到 /studio，body ["名称"]）
+    //    RSC 响应的 ok 行解析不可靠（createProject 回的是路由树），改为直接读 text 提取 projectId
     const createdText = await callServerActionText(
       buildSessionCookie(token, "", 0, user),
       FILMERA_SERVER_ACTIONS.createProject,
@@ -405,7 +405,7 @@ async function ensureFilmeraContext(
     const match = createdText.match(/"projectId":"([0-9a-f-]{36})"/);
     projectId = match?.[1];
     if (!projectId) {
-      // RSC 結構不可解析時退回重查
+      // RSC 结构不可解析时退回重查
       const retry = await supabaseSelect(
         config,
         token,
@@ -418,7 +418,7 @@ async function ensureFilmeraContext(
   }
   if (!projectId) throw new SupplierRequestError("Filmera workspace init failed: no project id.", 502);
 
-  // 3) 查 image-ref 節點
+  // 3) 查 image-ref 节点
   const nodes = await supabaseSelect(
     config,
     token,
@@ -428,7 +428,7 @@ async function ensureFilmeraContext(
   );
   let imageNodeId = nodes.find((n) => String(n.type ?? "") === "image-ref")?.id as string | undefined;
 
-  // 4) 無節點 → addCanvasNode（body 必須是 [projectId, {type, data}] 對象形式；位置參數形式會 500）
+  // 4) 无节点 → addCanvasNode（body 必须是 [projectId, {type, data}] 对象形式；位置参数形式会 500）
   if (!imageNodeId) {
     await callServerAction(
       buildSessionCookie(token, "", 0, user),
@@ -462,7 +462,7 @@ async function pollJob(
   token: string,
   timeoutMs: number,
   signal?: AbortSignal,
-  /** INC-0831：首次見到 job 行即回調（filmera 的 task id 只能從輪詢行取得），讓 worker 盡早 durably 落對帳錨點。 */
+  /** INC-0831：首次见到 job 行即回调（filmera 的 task id 只能从轮询行取得），让 worker 尽早 durably 落对帐锚点。 */
   onTaskId?: (jobId: string) => void,
 ): Promise<{ jobId: string; takeId: string }> {
   const deadline = Date.now() + timeoutMs;
@@ -512,10 +512,10 @@ async function resolveTakeMedia(
 }
 
 /**
- * INC-0831 對帳輪詢：按 filmera job id 直查 studio_generation_jobs 行拿真相
- * （provider-reconciliation 用，只讀不改任何任務狀態）。狀態映射與 pollJob 同源：
- * done→succeeded（經 result_take_id 解析媒體 URL）、failed/error→failed、
- * 其餘（含查無此行）→running 保守等下輪。網絡類錯誤拋出由調用端按退避重排。
+ * INC-0831 对帐轮询：按 filmera job id 直查 studio_generation_jobs 行拿真相
+ * （provider-reconciliation 用，只读不改任何任务状态）。状态映射与 pollJob 同源：
+ * done→succeeded（经 result_take_id 解析媒体 URL）、failed/error→failed、
+ * 其余（含查无此行）→running 保守等下轮。网络类错误抛出由调用端按退避重排。
  */
 export async function pollFilmeraTask(providerTaskId: string): Promise<ProviderTaskPollResult> {
   const config: FilmeraConfig = {
@@ -576,7 +576,7 @@ export async function generateWithFilmera(
   const timeoutMs = isVideo ? 600_000 : 180_000;
   const internalSignal = signal ?? AbortSignal.timeout(timeoutMs);
 
-  // Token 生命週期：距過期 < 5 分鐘自動用 refresh_token 輪換
+  // Token 生命周期：距过期 < 5 分钟自动用 refresh_token 轮换
   const state = await getValidFilmeraToken(config, internalSignal);
   const token = state.accessToken;
   const refreshToken = state.refreshToken;
@@ -585,11 +585,11 @@ export async function generateWithFilmera(
   // 完整 session cookie（含 user）——认证必需
   const user = state.user ?? await fetchFilmeraUser(config, token, internalSignal);
 
-  // 上下文自愈：動態解析 projectId/imageNodeId（env 只是 cache 起點）
+  // 上下文自愈：动态解析 projectId/imageNodeId（env 只是 cache 起点）
   const context = await ensureFilmeraContext(config, token, user, internalSignal);
 
   // 1) 改写节点 prompt + modelId（filmera 生成用的是节点的 data.prompt；图片/视频节点不同）
-  //    500 時（跨帳號節點失效等）強制重建上下文重試一次
+  //    500 时（跨帐号节点失效等）强制重建上下文重试一次
   const runGeneration = async (ctx: FilmeraContext): Promise<SupplierGenerationOutput> => {
     const nodeId = isVideo ? (config.videoNodeId || ctx.imageNodeId) : ctx.imageNodeId;
     const update = await callServerAction(
@@ -615,8 +615,8 @@ export async function generateWithFilmera(
     );
     if (!trigger.ok) {
       if (trigger.status === 402) {
-        // 額度耗盡（實測信號：{ok:false,status:402,message:"Insufficient credits..."}}）。
-        // 觸碰切換信號文件，帳號池守護檢出後自動切下一個帳號。
+        // 额度耗尽（实测信号：{ok:false,status:402,message:"Insufficient credits..."}}）。
+        // 触碰切换信号文件，帐号池守护检出后自动切下一个帐号。
         requestFilmeraAccountSwitch(String(trigger.message ?? "insufficient credits"));
       }
       throw new SupplierRequestError(`Filmera generation rejected: ${trigger.message ?? "unknown"}.`, trigger.status ?? 502);
@@ -630,7 +630,7 @@ export async function generateWithFilmera(
     // 4) 拿媒体 URL
     const url = await resolveTakeMedia(config, token, takeId, internalSignal);
 
-    // 5) filmera 免費層導出帶水印 → 下載清洗後以 base64 交付（清洗失敗安全回退原 URL）
+    // 5) filmera 免费层导出带水印 → 下载清洗后以 base64 交付（清洗失败安全回退原 URL）
     if (!isVideo && isFilmeraMediaUrl(url)) {
       try {
         const cleaned = await cleanFilmeraWatermark(url, internalSignal);
@@ -675,7 +675,7 @@ export async function generateWithFilmera(
   } catch (error) {
     const isServerError = error instanceof SupplierRequestError && (error.status === 500 || error.status === 502);
     if (!isServerError) throw error;
-    // 自愈重試：強制重建 project/node 上下文後再試一次（只重試一次）
+    // 自愈重试：强制重建 project/node 上下文后再试一次（只重试一次）
     contextCache = null;
     const freshContext = await ensureFilmeraContext(config, token, user, internalSignal, true);
     return await runGeneration(freshContext);

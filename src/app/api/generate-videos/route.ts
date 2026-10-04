@@ -47,12 +47,12 @@ interface ParsedVideoRequest {
   durationSeconds?: number;
   generateAudio?: boolean;
   referenceImages: File[];
-  // 3D 場景卡嵌合（片AC，2026-09-06，可選；缺欄零行為變化）。
+  // 3D 场景卡嵌合（片AC，2026-09-06，可选；缺栏零行为变化）。
   sceneCard?: unknown;
   cameraTrajectory?: unknown;
 }
 
-/** JSON body 的 scene_card/camera_trajectory 欄位（object 檢查即可，融合層做深解析）。 */
+/** JSON body 的 scene_card/camera_trajectory 栏位（object 检查即可，融合层做深解析）。 */
 function optionalObject(value: unknown): unknown {
   return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }
@@ -205,10 +205,10 @@ export async function POST(req: NextRequest) {
   const upstreamModelId = resolveAdobe2ApiVideoModelId(modelId, aspectRatio, outputResolution, durationSeconds);
   if (!upstreamModelId) return NextResponse.json({ error: "Unsupported video model variant." }, { status: 400 });
 
-  // 隱形提示詞導演：Agent 層（deepseek）優化 → 失敗規則層兜底 → 原樣。
-  // 用戶無感；優化失敗絕不阻塞生成（回原始 prompt）。
-  // 3D 場景卡嵌合（片AC）：scene_card + camera_trajectory 同時在場且形狀合法才生效，
-  // 缺欄/髒欄 = null = 零行為變化。
+  // 隐形提示词导演：Agent 层（deepseek）优化 → 失败规则层兜底 → 原样。
+  // 用户无感；优化失败绝不阻塞生成（回原始 prompt）。
+  // 3D 场景卡嵌合（片AC）：scene_card + camera_trajectory 同时在场且形状合法才生效，
+  // 缺栏/脏栏 = null = 零行为变化。
   const sceneVideoFusion = fuseSceneVideo(parsed.sceneCard, parsed.cameraTrajectory);
   const optimized = await optimizeVideoPrompt(prompt, {
     modelId,
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
     console.log(`[video-prompt-director] optimized requestId=${requestId} model=${optimized.model ?? "agent"} ms=${optimized.ms ?? 0}`);
   }
 
-  // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
+  // 管理员改价需立即对扣费生效：算价前先把最新定价覆写同步进目录（核心层内部吞错，失败不挡生成）。
   await syncModelPricing();
 
   const requiredCoins = generationCoins(modelId, {
@@ -296,7 +296,7 @@ export async function POST(req: NextRequest) {
       }
       const attemptStartedAt = Date.now();
       try {
-  // 上游只吃 files（multipart 圖位）——非 File 的 JSON 參考卡不進上游（版位契約不動）。
+  // 上游只吃 files（multipart 图位）——非 File 的 JSON 参考卡不进上游（版位契约不动）。
   const referenceFiles = [...parsed.referenceImages];
   if (sceneVideoFusion) {
     const upstreamFiles = sceneVideoFusion.frameCard.references

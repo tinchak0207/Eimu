@@ -1,16 +1,16 @@
-/* ╁━ /pricing 3D 卡堆音效：WebAudio 程序合成（無音檔）╁━
-   - 玻璃輕叮：三個非諧和泛音（1 : 2.76 : 5.40，玻璃/鐘類的經典比）+ 極短起音 + 指數衰減；
-   - 落硬木輕得：帶通噪聲短脈衝（木頭的「喀」）+ 低頻正弦（桌面的「得」）；
-   - 卡落卡：高頻短叮（玻璃邊碰玻璃邊）。
-   紀律：首次用戶手勢後才建 AudioContext（瀏覽器自動播放政策 + 不嚇人）；總音量很小；
-   節流（同類 35ms 內只響一次、同時最多 6 個聲部），一次落 300 張卡不會變成噪音牆。 */
+/* ╁━ /pricing 3D 卡堆音效：WebAudio 程序合成（无音档）╁━
+   - 玻璃轻叮：三个非谐和泛音（1 : 2.76 : 5.40，玻璃/钟类的经典比）+ 极短起音 + 指数衰减；
+   - 落硬木轻得：带通噪声短脉冲（木头的「喀」）+ 低频正弦（桌面的「得」）；
+   - 卡落卡：高频短叮（玻璃边碰玻璃边）。
+   纪律：首次用户手势后才建 AudioContext（浏览器自动播放政策 + 不吓人）；总音量很小；
+   节流（同类 35ms 内只响一次、同时最多 6 个声部），一次落 300 张卡不会变成噪音墙。 */
 
 const STORAGE_KEY = "pricing3d.sound";
 const MIN_GAP_MS = 35;
 const MAX_VOICES = 6;
 
 export interface PricingSound {
-  /** 用戶手勢裡呼叫：建立/喚醒 AudioContext。 */
+  /** 用户手势里呼叫：建立/唤醒 AudioContext。 */
   unlock(): void;
   isEnabled(): boolean;
   setEnabled(on: boolean): void;
@@ -94,7 +94,7 @@ export function createPricingSound(): PricingSound {
       try {
         window.localStorage.setItem(STORAGE_KEY, on ? "on" : "off");
       } catch {
-        /* 隱私模式寫不進去就只在本頁生效 */
+        /* 隐私模式写不进去就只在本页生效 */
       }
       if (on) this.unlock();
     },

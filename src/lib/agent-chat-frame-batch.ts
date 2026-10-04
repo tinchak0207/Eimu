@@ -1,16 +1,16 @@
-// SSE 帧併批器：把「纯文字追加」类高频帧合成一次 React 渲染。
+// SSE 帧并批器：把「纯文字追加」类高频帧合成一次 React 渲染。
 //
 // 为什么需要：EventSource 每条 message 是独立的宏任务，React 的自动批次
 // 跨不过任务边界 —— 串流期每个 message.delta / reasoning.delta 都是一次
-// 完整 dispatch → 助理面板整棵重渲染。长会话 + 高頻 reasoning delta 时主线程
-// 被渲染占满，点击事件要排队，用户感受到的正是「按鈕回應緩慢」。
+// 完整 dispatch → 助理面板整棵重渲染。长会话 + 高频 reasoning delta 时主线程
+// 被渲染占满，点击事件要排队，用户感受到的正是「按钮回应缓慢」。
 //
-// 设计（只併批纯追加文字帧，其余帧语义一字不动）：
+// 设计（只并批纯追加文字帧，其余帧语义一字不动）：
 //   * leading edge 立即 apply —— 距上次渲染已过 window 的帧不延迟，第一个字
-//     立刻出现（併批只该合并「同一波」里的后续帧，不该给首字加延迟）。
+//     立刻出现（并批只该合并「同一波」里的后续帧，不该给首字加延迟）。
 //   * 同 window 内的后续文字帧入列，window 到期一次 apply：同一次任务里连
 //     续 apply 多帧 = React 只渲染一次。
-//   * 非併批帧（tool.result / turn.done / image.done / confirm.request /
+//   * 非并批帧（tool.result / turn.done / image.done / confirm.request /
 //     session.* / canvas.* …）先同步 flush 缓冲再 apply 自己 —— 这些帧带
 //     状态语义（结卡、收尾、裁决），必须看到与它之前所有文字帧相同的顺序，
 //     否则「先收尾后长字」会让回合在视觉上复活。
@@ -19,13 +19,13 @@
 
 import type { AgentSseEvent } from "./agent-chat-types";
 
-/** 併批窗口：50ms ≈ 3 帧 @60Hz，肉眼无感但足以把一串 delta 折成一次渲染。 */
+/** 并批窗口：50ms ≈ 3 帧 @60Hz，肉眼无感但足以把一串 delta 折成一次渲染。 */
 export const DEFAULT_FRAME_BATCH_WINDOW_MS = 50;
 
 export interface FrameBatcherOptions {
   /** 单帧落地出口 —— 通常就是 React 的 dispatch。 */
   apply: (evt: AgentSseEvent) => void;
-  /** 併批判准覆盖口（默认 shouldCoalesceAgentFrame）。 */
+  /** 并批判准覆盖口（默认 shouldCoalesceAgentFrame）。 */
   shouldCoalesce?: (evt: AgentSseEvent) => boolean;
   windowMs?: number;
   now?: () => number;
@@ -41,14 +41,14 @@ export interface FrameBatcher {
 }
 
 /**
- * 只併批「纯文字追加」三帧。
+ * 只并批「纯文字追加」三帧。
  *
  * 为什么只挑这三帧：它们的效果是往同一条目 append 文字，后一帧的效果完全
  * 覆盖前一帧的语义（只增不改结构），合并后 UI 的最终状态逐字相同；而
  * tool.invoke/tool.result 之类的帧会改条目结构（开卡/结卡/改状态），
  * image.done / turn.done / session.closed 是状态收尾，confirm.request 是
  * 用户要立刻看到的裁决卡 —— 任何一帧被推迟或与相邻帧换序，都会产生
- * 「已收尾却还在长字」这类假活。故只有文字帧进併批，其余帧一律直通。
+ * 「已收尾却还在长字」这类假活。故只有文字帧进并批，其余帧一律直通。
  */
 export function shouldCoalesceAgentFrame(evt: AgentSseEvent): boolean {
   return evt.name === "message.delta" || evt.name === "reasoning.delta" || evt.name === "subagent.delta";
@@ -80,14 +80,14 @@ export function createFrameBatcher(options: FrameBatcherOptions): FrameBatcher {
     if (queue.length === 0) return;
     const frames = queue;
     queue = [];
-    // 按入列顺序逐帧 apply：顺序即语义，併批绝不重排。
+    // 按入列顺序逐帧 apply：顺序即语义，并批绝不重排。
     for (const frame of frames) apply(frame);
     lastAppliedAt = now();
   }
 
   function push(evt: AgentSseEvent): void {
     if (!shouldCoalesce(evt)) {
-      // 先让缓冲里的文字帧落地，再放这一帧 —— 非併批帧绝不能插到它们前面。
+      // 先让缓冲里的文字帧落地，再放这一帧 —— 非并批帧绝不能插到它们前面。
       flush();
       applyNow(evt);
       return;

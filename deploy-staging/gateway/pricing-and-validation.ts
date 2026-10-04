@@ -1,4 +1,4 @@
-// pricing-and-validation.ts - 實作 PRD §14.2 的四項確認
+// pricing-and-validation.ts - 实作 PRD §14.2 的四项确认
 interface ModelPricing {
   base_cost: number;
   per_second?: number;
@@ -7,10 +7,10 @@ interface ModelPricing {
 }
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
-  // TTS（配音）計價：按字符計費，base_cost 為每次調用的起步價。
-  // 上游暫不可用（2026-08-27 實測：Groq playai-tts 已下線、Orpheus 需條款接受
-  // 且無中文音色；平台 /v1/models 無任何 TTS 條目），故先定義為 0 幣
-  // （誠實報錯版本不產生費用）；上游接入後在此調整單價。
+  // TTS（配音）计价：按字符计费，base_cost 为每次调用的起步价。
+  // 上游暂不可用（2026-08-27 实测：Groq playai-tts 已下线、Orpheus 需条款接受
+  // 且无中文音色；平台 /v1/models 无任何 TTS 条目），故先定义为 0 币
+  // （诚实报错版本不产生费用）；上游接入后在此调整单价。
   'tts-zh': { base_cost: 0, per_char: 0.001 },
   'flux-1.1-pro': { base_cost: 0.04, per_image: 0.04 },
   'flux-pro': { base_cost: 0.05, per_image: 0.05 },
@@ -157,7 +157,7 @@ export function getWorkflowEvents(workflowId: string, sinceEventId?: string): Wo
   return sinceIndex === -1 ? events : events.slice(sinceIndex + 1);
 }
 
-/** TTS（配音）估價：按字符計，定價權威在此模塊，工具側不得硬編碼。 */
+/** TTS（配音）估价：按字符计，定价权威在此模块，工具侧不得硬编码。 */
 export function estimateTtsCoins(model: string, text: string): number {
   const pricing = MODEL_PRICING[model];
   if (!pricing) return 0.1;

@@ -1,12 +1,12 @@
-// 影片作業提交後自動註冊 poller ＋ emitEvent 白名單（video.done / audio.done）行為測試。
+// 影片作业提交后自动注册 poller ＋ emitEvent 白名单（video.done / audio.done）行为测试。
 //
-// 兩條真實行為斷言：
-//  1. last_frame_video_chain 的 submit_only 分支，每個提交成功的 job 都真發了一筆註冊到 poller
-//     （假 poller = Bun.serve 隨機埠，收 JSON 記錄），且 kind/session_id/task_id 正確、不帶 cost_coins；
-//     輪詢分支（已拿終態）則 0 筆註冊（negative）。
-//  2. emitEvent 對 video.done / audio.done 真發出到 gateway，對白名單外事件（video.bogus）不發。
+// 两条真实行为断言：
+//  1. last_frame_video_chain 的 submit_only 分支，每个提交成功的 job 都真发了一笔注册到 poller
+//     （假 poller = Bun.serve 随机埠，收 JSON 记录），且 kind/session_id/task_id 正确、不带 cost_coins；
+//     轮询分支（已拿终态）则 0 笔注册（negative）。
+//  2. emitEvent 对 video.done / audio.done 真发出到 gateway，对白名单外事件（video.bogus）不发。
 //
-// client.ts 在模組載入時讀 process.env.POLLER_URL / GATEWAY_URL，故兩個假服務埠決定後才動態 import。
+// client.ts 在模组载入时读 process.env.POLLER_URL / GATEWAY_URL，故两个假服务埠决定后才动态 import。
 import { afterAll, describe, expect, test } from "bun:test"
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -41,10 +41,10 @@ const pollerServer = Bun.serve({
 process.env.GATEWAY_URL = `http://127.0.0.1:${gatewayServer.port}`
 process.env.POLLER_URL = `http://127.0.0.1:${pollerServer.port}/`
 
-// 真 client（emitEvent / registerTask 的真行為本體）。
+// 真 client（emitEvent / registerTask 的真行为本体）。
 const client: any = await import("../opencode-runtime/lib/client.ts")
 
-// ── 工具 harness：複製既有 delivery_assets.test.ts 的沙盒法（臨時目錄 + ../lib 樁 + plugin 樁）──
+// ── 工具 harness：复制既有 delivery_assets.test.ts 的沙盒法（临时目录 + ../lib 桩 + plugin 桩）──
 const root = mkdtempSync(join(tmpdir(), "vcp-"))
 mkdirSync(join(root, "tools"))
 mkdirSync(join(root, "lib"))
@@ -53,14 +53,14 @@ writeFileSync(
   join(root, "node_modules/@opencode-ai/plugin/package.json"),
   '{"name":"@opencode-ai/plugin","exports":{"./tool":"./tool.js"}}',
 )
-// schema 樁須支援 min/max/int（last_frame_video_chain 的 args 全用到）。
+// schema 桩须支援 min/max/int（last_frame_video_chain 的 args 全用到）。
 writeFileSync(
   join(root, "node_modules/@opencode-ai/plugin/tool.js"),
   "const c=()=>({optional:()=>c(),describe:()=>c(),min:()=>c(),max:()=>c(),int:()=>c()});const t=(d)=>d;t.schema={string:c,number:c,boolean:c};export const tool=t",
 )
 const REAL_CLIENT = join(import.meta.dir, "..", "opencode-runtime", "lib", "client.ts")
-// 樁只覆寫 platformFetch（生成提交/輪詢走注入替身），registerTask/ok/fail/classifyError 仍是真本體，
-// 所以 poller 註冊與前端事件都是真行為斷言，不是原始碼字串斷言。
+// 桩只覆写 platformFetch（生成提交/轮询走注入替身），registerTask/ok/fail/classifyError 仍是真本体，
+// 所以 poller 注册与前端事件都是真行为断言，不是原始码字串断言。
 writeFileSync(
   join(root, "lib/client.ts"),
   `import { ok, fail, classifyError, registerTask } from ${JSON.stringify(REAL_CLIENT)}\n` +
@@ -73,7 +73,7 @@ copyFileSync(
 )
 const tool: any = (await import(join(root, "tools/last_frame_video_chain.ts"))).default
 
-// ── 生成鏈替身：/models 目錄、/videos/generations 提交、/videos/{id} 輪詢 ──
+// ── 生成链替身：/models 目录、/videos/generations 提交、/videos/{id} 轮询 ──
 let nextJob = 0
 const platformCalls: Array<{ path: string; method: string; sessionID: string; body: any }> = []
 ;(globalThis as any).__platformFetch = async (path: string, init: any, sessionID: string) => {
@@ -113,8 +113,8 @@ afterAll(() => {
   pollerServer.stop(true)
 })
 
-describe("last_frame_video_chain × poller 註冊", () => {
-  test("submit_only：恰好 2 筆註冊，kind=video / session_id / task_id 對得上 / 不帶 cost_coins", async () => {
+describe("last_frame_video_chain × poller 注册", () => {
+  test("submit_only：恰好 2 笔注册，kind=video / session_id / task_id 对得上 / 不带 cost_coins", async () => {
     pollerHits.length = 0
     platformCalls.length = 0
     const res = await tool.execute({ shots: SHOTS, submit_only: true, model: "seedance-test" }, ctx("sess-video-1"))
@@ -122,7 +122,7 @@ describe("last_frame_video_chain × poller 註冊", () => {
     const jobIds: string[] = out.shots.map((s: any) => s.job_id)
     expect(jobIds).toHaveLength(2)
 
-    // registerTask 是 fire-and-forget（void），給它時間把 POST 送到假 poller。
+    // registerTask 是 fire-and-forget（void），给它时间把 POST 送到假 poller。
     expect(await waitFor(() => pollerHits.length >= 2, 3000)).toBe(true)
     expect(pollerHits).toHaveLength(2)
     expect(new Set(pollerHits.map((h) => h.body.task_id))).toEqual(new Set(jobIds))
@@ -135,11 +135,11 @@ describe("last_frame_video_chain × poller 註冊", () => {
     expect(out.shots.every((s: any) => s.status === "submitted")).toBe(true)
   })
 
-  test("負向：輪詢分支（已拿 succeeded 終態）0 筆註冊", async () => {
+  test("负向：轮询分支（已拿 succeeded 终态）0 笔注册", async () => {
     pollerHits.length = 0
     platformCalls.length = 0
     const res = await tool.execute({ shots: SHOTS, submit_only: false, model: "seedance-test" }, ctx("sess-video-2"))
-    // 留一段時間：若輪詢分支誤註冊，這期間就會到假 poller。
+    // 留一段时间：若轮询分支误注册，这期间就会到假 poller。
     await new Promise((r) => setTimeout(r, 300))
     expect(pollerHits).toHaveLength(0)
     const out = JSON.parse(res.output)
@@ -147,8 +147,8 @@ describe("last_frame_video_chain × poller 註冊", () => {
   })
 })
 
-describe("emitEvent 白名單", () => {
-  test("video.done 真發出到 gateway", async () => {
+describe("emitEvent 白名单", () => {
+  test("video.done 真发出到 gateway", async () => {
     gatewayHits.length = 0
     await client.emitEvent("sess-e", "video.done", { url: "https://store.example/v.mp4" })
     expect(gatewayHits).toHaveLength(1)
@@ -157,21 +157,21 @@ describe("emitEvent 白名單", () => {
     expect(gatewayHits[0].body.session_id).toBe("sess-e")
   })
 
-  test("audio.done 真發出到 gateway", async () => {
+  test("audio.done 真发出到 gateway", async () => {
     gatewayHits.length = 0
     await client.emitEvent("sess-e", "audio.done", { url: "https://store.example/a.mp3" })
     expect(gatewayHits).toHaveLength(1)
     expect(gatewayHits[0].body.event).toBe("audio.done")
   })
 
-  test("既有 image.done 仍放行（無回歸）", async () => {
+  test("既有 image.done 仍放行（无回归）", async () => {
     gatewayHits.length = 0
     await client.emitEvent("sess-e", "image.done", { url: "https://store.example/i.png" })
     expect(gatewayHits).toHaveLength(1)
     expect(gatewayHits[0].body.event).toBe("image.done")
   })
 
-  test("負向：白名單外 video.bogus 不發出（白名單沒被放寬）", async () => {
+  test("负向：白名单外 video.bogus 不发出（白名单没被放宽）", async () => {
     gatewayHits.length = 0
     await client.emitEvent("sess-e", "video.bogus", { url: "x" })
     expect(gatewayHits).toHaveLength(0)

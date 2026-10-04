@@ -1,9 +1,9 @@
-// 渠道 overrides 的還原端點：POST { version } 把稽核表裡某個歷史版本的完整快照
-// 寫回去。故意不繞過 channel-overrides.ts 既有的寫入路徑——還原後仍要走同一套
-// Blob 世代管理/快取失效，否則會製造出一個「稽核表以為現在是舊版，但 Blob 側
-// 完全没跑過寫入邏輯」的分裂狀態。
+// 渠道 overrides 的还原端点：POST { version } 把稽核表里某个历史版本的完整快照
+// 写回去。故意不绕过 channel-overrides.ts 既有的写入路径——还原后仍要走同一套
+// Blob 世代管理/快取失效，否则会制造出一个「稽核表以为现在是旧版，但 Blob 侧
+// 完全没跑过写入逻辑」的分裂状态。
 //
-// 認證與 route.ts / audit/route.ts 同一套 requireAdminSession。
+// 认证与 route.ts / audit/route.ts 同一套 requireAdminSession。
 
 import { NextRequest, NextResponse } from "next/server";
 import { overridableChannelIds } from "@/lib/channel-registry";
@@ -18,7 +18,7 @@ import { diffJson, getConfigChangeSnapshot, nextConfigVersion, recordConfigChang
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const CONFIG_KEY = "channel-overrides";
 

@@ -8,11 +8,11 @@
 //   4. 子进程 env 白名单：EXA_API_KEY 透传、SECRET_TOKEN 不传、HOME/PYTHONPATH 已设。
 //   5. 解析路径：合法 JSON 透传 / 非 JSON=bad_output / 非零退出=upstream_exit。
 //   6. web intent 因缺 main-search 凭证回 ok:false 时 → 工具自动免 Key 回落 anysearch-search；
-//      若两條都失败才 fail（hint 含两條错误 + search_web 替代指引）。
+//      若两条都失败才 fail（hint 含两条错误 + search_web 替代指引）。
 //   7. web 免 Key 回落真行为：search ok:false → 确实改跑 anysearch-search（fixture 回显被调用
 //      子命令序列证明）；search ok:true → 只跑一次；剩余预算不足 → 如实回报不静默截断。
 //   8. 真实 CLI 非零退出（config_error → exit 3）但 stdout 为合法 JSON ok:false → 仍据 JSON
-//      判成敗并触发回落（不对 exit code 死板判死）。
+//      判成败并触发回落（不对 exit code 死板判死）。
 //
 // 跑法：bun test deploy-staging/vps-tools/smart-search.test.ts
 //   或：bash deploy-staging/vps-tools/run-tests.sh ../vps-tools/smart-search.test.ts
@@ -136,7 +136,7 @@ writePy(
 
 /**
  * 真实 CLI 行为探针：config_error 时 CLI **非零退出**（cli.py `_exit_code`: config_error→EXIT_CONFIG_ERROR=3），
- * 但仍印合法 JSON ok:false。工具必须据 JSON（而非 exit code）判成敗并触发回落。
+ * 但仍印合法 JSON ok:false。工具必须据 JSON（而非 exit code）判成败并触发回落。
  */
 const WEB_NONZERO = "web_nonzero_probe"
 const REC_NONZERO = join(FIX, "web_nonzero.rec")
@@ -377,7 +377,7 @@ describe("smart_search：web intent 免 Key 回落（search → anysearch-search
     expect(o.served_by).toBe("smartsearch:search")
   })
 
-  test("两條都失败 → fail 且 hint 同时含两條错误与可操作建议", async () => {
+  test("两条都失败 → fail 且 hint 同时含两条错误与可操作建议", async () => {
     resetRec(REC_BOTH)
     const res = await runWithFixture(WEB_BOTH_FAIL, { intent: "web", query: "exa api" }, { envSource: BASE_ENV })
     const o = out<{ ok: boolean; error: { code: string; hint: string }; attempts: Array<{ served_by: string }> }>(res)
@@ -385,7 +385,7 @@ describe("smart_search：web intent 免 Key 回落（search → anysearch-search
     expect(rec.length).toBe(2)
     expect(rec[1][0]).toBe("anysearch-search")
     expect(o.ok).toBe(false)
-    // ① 两條通路各自的 error_type／訊息。
+    // ① 两条通路各自的 error_type／讯息。
     expect(o.error.hint).toContain("config_error")
     expect(o.error.hint).toContain("main_search")
     expect(o.error.hint).toContain("upstream_error")

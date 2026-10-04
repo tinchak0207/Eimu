@@ -1,8 +1,8 @@
-// `GET /openai/v1/models` 的**真行為斷言**。
+// `GET /openai/v1/models` 的**真行为断言**。
 //
-// 中轉站（new-api/one-api）用它做模型發現與上架：形狀必須是標準 OpenAI list，內容必須
-// 只含「當下真的能出圖」的圖片模型。這裡用獨立於本實現的字面量斷言（已知圖片模型在、
-// 影片/服務型條目不在），不是從被測實現裡讀出來的期望值。
+// 中转站（new-api/one-api）用它做模型发现与上架：形状必须是标准 OpenAI list，内容必须
+// 只含「当下真的能出图」的图片模型。这里用独立于本实现的字面量断言（已知图片模型在、
+// 影片/服务型条目不在），不是从被测实现里读出来的期望值。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -17,7 +17,7 @@ import {
 } from "@/lib/openai-compat/upstream-stub";
 import { GET } from "./route";
 
-/** 影片模型與服務型條目：清單裡出現 = 中轉站會把它們 POST 到生图端点再收 400。 */
+/** 影片模型与服务型条目：清单里出现 = 中转站会把它们 POST 到生图端点再收 400。 */
 const MUST_NOT_APPEAR = [
   "seedance-2.0",
   "seedance-2.5-720p",
@@ -29,7 +29,7 @@ const MUST_NOT_APPEAR = [
   "gpt-4o",
 ];
 
-/** 已知圖片模型（字面量，與目錄無關的獨立樣本）。 */
+/** 已知图片模型（字面量，与目录无关的独立样本）。 */
 const MUST_APPEAR = ["gpt-image-2", "pixai-tsubaki2", "flux-2-pro"];
 
 function request(headers: Record<string, string>): NextRequest {

@@ -4,8 +4,8 @@ import { getWechatLoginState, expireWechatLogin } from "@/lib/wechat-login";
 export const preferredRegion = "sfo1";
 
 /**
- * 前端輪詢登入結果。
- * state 需與 httpOnly cookie 一致（防第三方猜 state 竊取登入結果）。
+ * 前端轮询登入结果。
+ * state 需与 httpOnly cookie 一致（防第三方猜 state 窃取登入结果）。
  */
 export async function GET(req: NextRequest) {
   const qState = req.nextUrl.searchParams.get("state");
@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "invalid_state" }, { status: 400 });
   }
 
-  // state → 反查 code：cookie 只存 state，需從 blob 找對應。為避免全表掃，poll 需帶 code。
-  // 前端 start 已拿到 code，這裡以 code + state 雙重驗證。
+  // state → 反查 code：cookie 只存 state，需从 blob 找对应。为避免全表扫，poll 需带 code。
+  // 前端 start 已拿到 code，这里以 code + state 双重验证。
   const code = req.nextUrl.searchParams.get("code");
   if (!code) {
     return NextResponse.json({ success: false, message: "missing_code" }, { status: 400 });
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (record.status === "completed" && record.token && record.user) {
-    // 兌換完成後銷毀 cookie，防止同一 state 被重複消費。
+    // 兑换完成后销毁 cookie，防止同一 state 被重复消费。
     const res = NextResponse.json({
       success: true,
       status: "completed",

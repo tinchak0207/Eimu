@@ -38,7 +38,7 @@ import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const MAX_REFERENCE_IMAGES = 8;
 const MAX_REFERENCE_BYTES = 12 * 1024 * 1024;
@@ -67,7 +67,7 @@ interface ReferenceMetadata {
   sourceGenerationId?: string;
 }
 
-/** 任務投影：job.prompt 是組好給供給的長 prompt，對用戶顯示還原成原文（workflow.originalPrompt）。 */
+/** 任务投影：job.prompt 是组好给供给的长 prompt，对用户显示还原成原文（workflow.originalPrompt）。 */
 function webTaskProjection(job: Parameters<typeof generationTaskProjection>[0]) {
   const projection = generationTaskProjection(job, { includePrompt: true });
   return { ...projection, prompt: displayGenerationPrompt(projection.prompt, job.workflow) };
@@ -214,8 +214,8 @@ export async function POST(req: NextRequest) {
   const prompt = cleanString(parsed.body.prompt) ?? "";
   const modelId = cleanString(parsed.body.modelId) ?? "";
   const requestWorkflow = readRequestWorkflow(parsed.body.workflow);
-  // 局部改片允許用「改動描述」當畫面描述，故帶 videoPostProduction 的請求把這道
-  // 檢查下移到契約解析之後（見下）；其餘請求的檢查順序與錯誤碼一字不變。
+  // 局部改片允许用「改动描述」当画面描述，故带 videoPostProduction 的请求把这道
+  // 检查下移到契约解析之后（见下）；其余请求的检查顺序与错误码一字不变。
   const hasPostProductionRequest =
     requestWorkflow?.videoPostProduction !== undefined && requestWorkflow?.videoPostProduction !== null;
   if (!hasPostProductionRequest && (!prompt || prompt.length > MAX_PROMPT_LENGTH)) {
@@ -225,9 +225,9 @@ export async function POST(req: NextRequest) {
   const dreaminaImageModel = modelId === "image-5-pro" || modelId === "image-5-lite" || modelId === "seedream-2.0";
   if (!capabilities && !dreaminaImageModel) return fail(400, "所选模型不可用。", "model_not_found");
 
-  // 生成式後期（P1-3／對稱差 D22）：B/C 端都用同一份契約與能力閘。
-  // 來源影片：`url` 直用，`objectKey` 走兩段式上傳的公網 URL 推導（P1-10 同一輪子）；
-  // 解不出＝具名拒絕，不猜 URL、不靜默降級成普通生成。
+  // 生成式后期（P1-3／对称差 D22）：B/C 端都用同一份契约与能力闸。
+  // 来源影片：`url` 直用，`objectKey` 走两段式上传的公网 URL 推导（P1-10 同一轮子）；
+  // 解不出＝具名拒绝，不猜 URL、不静默降级成普通生成。
   let postProduction: ReturnType<typeof parseVideoPostProduction> = null;
   try {
     postProduction = parseVideoPostProduction(requestWorkflow?.videoPostProduction, {
@@ -249,8 +249,8 @@ export async function POST(req: NextRequest) {
     ? normalizeGenerationConfig(modelId, {
         aspectRatio: cleanString(parsed.body.aspectRatio),
         outputResolution: cleanString(parsed.body.outputResolution),
-        // 生成式後期：本次生成秒數＝續長／區段長（契約校驗已確認落在 catalog 檔位），
-        // 覆蓋 body 的 durationSeconds——扣費、成本閘、上游同源。
+        // 生成式后期：本次生成秒数＝续长／区段长（契约校验已确认落在 catalog 档位），
+        // 覆盖 body 的 durationSeconds——扣费、成本闸、上游同源。
         durationSeconds: generatedSeconds
           ?? (rawDuration === undefined || rawDuration === null || rawDuration === "" ? undefined : Number(rawDuration)),
         generateAudio: rawAudio === undefined || rawAudio === null || rawAudio === "" ? undefined : rawAudio === true || rawAudio === "true",
@@ -273,7 +273,7 @@ export async function POST(req: NextRequest) {
   if (parsed.files.length && capabilities?.referenceImages === false) return fail(400, "所选模型不支持参考图。", "reference_images_unsupported");
   if (rawLora.length && capabilities?.lora !== true) return fail(400, "所选模型不支持 LoRA。", "lora_unsupported");
 
-  // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
+  // 管理员改价需立即对扣费生效：算价前先把最新定价覆写同步进目录（核心层内部吞错，失败不挡生成）。
   await syncModelPricing();
 
   const requiredCoins = generationCoins(modelId, normalized.config);
@@ -297,13 +297,13 @@ export async function POST(req: NextRequest) {
       idempotencyKey,
     });
     const requestedWorkflow = requestWorkflow ?? {};
-    // 負面詞/參考圖角色：generation-core 不讀 workflow，這裡用 legacy 同一函式組進供給 prompt；
-    // 只看本次 body 的 workflow（canvas 已預組且不送 workflow → 原樣透傳，不重複套用）。
+    // 负面词/参考图角色：generation-core 不读 workflow，这里用 legacy 同一函式组进供给 prompt；
+    // 只看本次 body 的 workflow（canvas 已预组且不送 workflow → 原样透传，不重复套用）。
     const submittedPrompt = composeWebTaskPrompt(requestedPrompt, requestWorkflow);
     const workflow = withOriginalPrompt({
       ...(retryJob?.workflow ?? {}),
       ...requestedWorkflow,
-      // 後期參數一律以本次正規化結果為準（重試時沿用上一單的後期參數＝不靜默降級）。
+      // 后期参数一律以本次正规化结果为准（重试时沿用上一单的后期参数＝不静默降级）。
       ...(postProduction ? { videoPostProduction: postProduction } : {}),
     }, requestedPrompt, submittedPrompt);
     const references = persisted.references.length
@@ -349,7 +349,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    // 模型可用性閘：該模型近期真實生成全失敗 → 建單/扣費前拒單，回誠實原因與替代模型。
+    // 模型可用性闸：该模型近期真实生成全失败 → 建单/扣费前拒单，回诚实原因与替代模型。
     if (error instanceof GenerationModelUnavailableError) {
       return fail(503, error.message, "model_unavailable");
     }

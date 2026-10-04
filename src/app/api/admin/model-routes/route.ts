@@ -1,10 +1,10 @@
-// /admin「模型路由」：控面調度順序的唯一後台入口（2026-10-01 路由收口）。
+// /admin「模型路由」：控面调度顺序的唯一后台入口（2026-10-01 路由收口）。
 //
-// GET    → 每個模型的生效路由（程式碼預設 ⊕ 熱覆寫）＋每一步的即時供給狀態
-// PUT    → { modelId, route: string[], note? } 寫熱覆寫，立即生效、不需部署
-// DELETE → ?modelId=… 清除覆寫，回到 MODEL_ROUTES 預設
+// GET    → 每个模型的生效路由（程式码预设 ⊕ 热覆写）＋每一步的即时供给状态
+// PUT    → { modelId, route: string[], note? } 写热覆写，立即生效、不需部署
+// DELETE → ?modelId=… 清除覆写，回到 MODEL_ROUTES 预设
 //
-// 只在控面執行（control-plane-proxy-routes 代理過去）：要讀寫 model_route_override 與 supplier 表。
+// 只在控面执行（control-plane-proxy-routes 代理过去）：要读写 model_route_override 与 supplier 表。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -108,7 +108,7 @@ export async function PUT(req: NextRequest) {
     } catch (error) {
       return NextResponse.json({ success: false, message: (error as Error).message }, { status: 400 });
     }
-    // 只接受 DB 裡真實存在的渠道——打錯字的 label 會讓那一步永遠選不中，必須當場拒收。
+    // 只接受 DB 里真实存在的渠道——打错字的 label 会让那一步永远选不中，必须当场拒收。
     const { suppliers } = await loadSupplierState();
     const unknown = route.filter((label) => !suppliers.has(routeSupplierId(label)));
     if (unknown.length) {

@@ -26,7 +26,7 @@ export interface UseAgentParamReflectOptions {
 }
 
 /**
- * D-12：助理动过的参数回流到工作台控件（三态復原）。
+ * D-12：助理动过的参数回流到工作台控件（三态复原）。
  *
  * 三态就是这里的 baseline / 现值 两者比对出来的：
  *   原值      = agentBaseline 里存的那份（助理第一次改之前的快照）

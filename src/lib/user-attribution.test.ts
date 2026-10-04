@@ -1,7 +1,7 @@
-// 側車事實服務端層的具名驗收（node:test）：
-//   ① 只有「已驗證 email ＋ 有 provider」才進落庫形狀（未驗證／無來源一律丟）；
-//   ② 兩邊皆空的事實不打庫（hasAttributionFacts 是顯式守衛）；
-//   ③ 歸因讀取失敗必須回 ok:false（呼叫方才能把來源拆分標成不可用，不假裝大家都沒歸因）。
+// 侧车事实服务端层的具名验收（node:test）：
+//   ① 只有「已验证 email ＋ 有 provider」才进落库形状（未验证／无来源一律丢）；
+//   ② 两边皆空的事实不打库（hasAttributionFacts 是显式守卫）；
+//   ③ 归因读取失败必须回 ok:false（呼叫方才能把来源拆分标成不可用，不假装大家都没归因）。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -13,7 +13,7 @@ import {
 } from "./user-attribution";
 import type { GenerationSql } from "./generation-core/database";
 
-test("OAuth 落庫形狀：只有已驗證 email 才帶值，未驗證一律 null（且不帶 provider）", () => {
+test("OAuth 落库形状：只有已验证 email 才带值，未验证一律 null（且不带 provider）", () => {
   const github = buildOAuthAttributionInput({
     userId: 501,
     provider: "github",
@@ -53,7 +53,7 @@ test("OAuth 落庫形狀：只有已驗證 email 才帶值，未驗證一律 nul
   assert.equal(googleUnverified.emailProvider, null);
 });
 
-test("hasAttributionFacts：userId 非法／兩邊皆空 → 不寫庫", () => {
+test("hasAttributionFacts：userId 非法／两边皆空 → 不写库", () => {
   assert.equal(hasAttributionFacts({ userId: 0, email: "a@b.com" }), false);
   assert.equal(hasAttributionFacts({ userId: 1.5, email: "a@b.com" }), false);
   assert.equal(hasAttributionFacts({ userId: 7 }), false);
@@ -62,12 +62,12 @@ test("hasAttributionFacts：userId 非法／兩邊皆空 → 不寫庫", () => {
   assert.equal(hasAttributionFacts({ userId: 7, firstTouch: { utmSource: "x" } }), true);
 });
 
-test("入站請求體校驗：email 必須與 provider 成對（來源不可考＝不存），userId 非法＝拒收", () => {
+test("入站请求体校验：email 必须与 provider 成对（来源不可考＝不存），userId 非法＝拒收", () => {
   assert.equal(
     parseAttributionUpsertBody({ userId: 12, email: "Real@Example.com", emailProvider: "github" })?.email,
     "real@example.com",
   );
-  // 沒 provider 的 email 一律丟（不知道是誰給的，就不是可觸達事實）。
+  // 没 provider 的 email 一律丢（不知道是谁给的，就不是可触达事实）。
   assert.equal(parseAttributionUpsertBody({ userId: 12, email: "real@example.com" })?.email, null);
   assert.equal(parseAttributionUpsertBody({ userId: 12, email: "real@example.com", emailProvider: "wechat" })?.email, null);
   assert.equal(parseAttributionUpsertBody({ userId: 0, email: "a@b.com", emailProvider: "github" }), null);
@@ -81,11 +81,11 @@ test("入站請求體校驗：email 必須與 provider 成對（來源不可考�
   assert.equal(withTouch?.userId, 13);
   assert.equal(withTouch?.firstTouch?.utmSource, "Bili");
   assert.equal(withTouch?.firstTouch?.landingPath, "/");
-  // 無 email 事實時，firstTouch 仍要能單獨落庫（微信路徑）。
+  // 无 email 事实时，firstTouch 仍要能单独落库（微信路径）。
   assert.equal(hasAttributionFacts(withTouch!), true);
 });
 
-test("歸因讀取：空 cohort 不打庫；讀取失敗回 ok:false（不靜默假裝沒歸因）", async () => {
+test("归因读取：空 cohort 不打库；读取失败回 ok:false（不静默假装没归因）", async () => {
   let calls = 0;
   const neverCalled = (() => {
     calls += 1;

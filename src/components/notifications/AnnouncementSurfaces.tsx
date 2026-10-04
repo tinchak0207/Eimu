@@ -1,15 +1,15 @@
 "use client";
 
-// 公告的「橫幅」與「彈窗」兩個投放面（ee89433b 只交了端點與鈴鐺列表，這兩面
-// 沒有任何前端渲染——運營發了 banner/modal 公告，用戶只能在鈴鐺裡翻到）。
+// 公告的「横幅」与「弹窗」两个投放面（ee89433b 只交了端点与铃铛列表，这两面
+// 没有任何前端渲染——运营发了 banner/modal 公告，用户只能在铃铛里翻到）。
 //
-//   - 彈窗：GET /api/notifications/active-modal → 複用 AnnouncementDialog；
-//     關閉即 POST /api/notifications/mark-read（announcementIds），同一條不再彈。
-//   - 橫幅：GET /api/notifications/banners → 取最新一條，底部浮動卡；
-//     關閉走 POST /api/notifications/banners/[id]/dismiss（按用戶記）。
+//   - 弹窗：GET /api/notifications/active-modal → 复用 AnnouncementDialog；
+//     关闭即 POST /api/notifications/mark-read（announcementIds），同一条不再弹。
+//   - 横幅：GET /api/notifications/banners → 取最新一条，底部浮动卡；
+//     关闭走 POST /api/notifications/banners/[id]/dismiss（按用户记）。
 //
-// 浮動而非塞進 header：header 高度牽動 --ws-navbar-inset 全站佈局，橫幅不該動它。
-// 本檔不含任何運營文案，內容全部來自服務端公告。
+// 浮动而非塞进 header：header 高度牵动 --ws-navbar-inset 全站布局，横幅不该动它。
+// 本档不含任何运营文案，内容全部来自服务端公告。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
@@ -43,7 +43,7 @@ export function AnnouncementSurfaces() {
         setModal(modalJson?.data?.modal ?? null);
         setBanner(bannerJson?.data?.banners?.[0] ?? null);
       } catch {
-        // 公告不可用不打擾用戶：兩面都不出現即可。
+        // 公告不可用不打扰用户：两面都不出现即可。
       }
     })();
     return () => {

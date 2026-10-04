@@ -136,7 +136,7 @@ test("首页 xl 满屏高度链完整（body/main/page-shell/grid/左右栏）",
   assert.match(layout, /<main className="flex min-h-0 flex-1 flex-col">/);
   assert.match(source, /page-shell xl:flex xl:min-h-0 xl:flex-1 xl:flex-col/);
   assert.match(source, /grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-rows-1 xl:grid-cols-\[minmax\(0,1fr\)_minmax\(380px,460px\)\]/);
-  // 09-11 高度自適應戰役：該 div 改走 cn()（兩欄態附加 playground-column-fill），斷言跟隨現狀。
+  // 09-11 高度自适应战役：该 div 改走 cn()（两栏态附加 playground-column-fill），断言跟随现状。
   assert.match(source, /cn\("min-w-0 xl:min-h-0 xl:overflow-y-auto"/);
   assert.match(source, /"flex min-w-0 flex-col xl:min-h-0", inCanvasWorkstation && "hidden"/);
   // 工作站态零回归：grid 在工作站态仍是 block（高度链类只在两栏分支）。
@@ -158,10 +158,10 @@ test("pricing copy uses simplified Chinese with a standard close affordance", ()
   // 2026-08-25 弹窗化重构：返回按钮换成右上角标准关闭 X（icon 库 X，非 emoji）。
   assert.match(pricing, /aria-label="关闭"/);
   assert.doesNotMatch(pricing, /返回做图/);
-  assert.doesNotMatch(pricing, /返回做圖/);
+  assert.doesNotMatch(pricing, /返回做图/);
   assert.match(pricing, /兑换码/);
   assert.match(pricing, /兑换成功/);
-  assert.doesNotMatch(pricing, /兌換碼/);
+  assert.doesNotMatch(pricing, /兑换码/);
 });
 
 test("pricing page is a focused compact panel with plan carousel", () => {

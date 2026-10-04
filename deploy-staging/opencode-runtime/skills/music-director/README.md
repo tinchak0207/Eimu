@@ -1,7 +1,7 @@
-# music-director 配方庫
+# music-director 配方库
 
-- 來源：SunoForge v3.0（github.com/sanic732/SunoForge，files/ 目錄 12 檔）
-- 授權：MIT（verbatim 入庫，檔頭註釋塊記錄來源，正文不翻譯不修改）
-- 結構：5 CORE 規則層（entry/style/lyrics/diagnose/why）＋7 DATA 事實層（google/suno/other/legal/recipes/postprod/vocab）
-- 更新方式：只換 DATA 檔（重下對應日期快照替換），CORE 檔一字不動
-- 觸發與使用規則見 SKILL.md；Lyria 3.5 為主線平台
+- 来源：SunoForge v3.0（github.com/sanic732/SunoForge，files/ 目录 12 档）
+- 授权：MIT（verbatim 入库，档头注释块记录来源，正文不翻译不修改）
+- 结构：5 CORE 规则层（entry/style/lyrics/diagnose/why）＋7 DATA 事实层（google/suno/other/legal/recipes/postprod/vocab）
+- 更新方式：只换 DATA 档（重下对应日期快照替换），CORE 档一字不动
+- 触发与使用规则见 SKILL.md；Lyria 3.5 为主线平台

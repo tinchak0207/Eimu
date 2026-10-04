@@ -1,49 +1,49 @@
 #!/usr/bin/env bash
-# gateway-release.sh — VPS agent-gateway 版本化發佈 / 回滾
-#   release dir（commit SHA＋時間戳）＋ md5 清單 manifest ＋ 原子 symlink 切換 ＋ rollback 回上一版
+# gateway-release.sh — VPS agent-gateway 版本化发布 / 回滚
+#   release dir（commit SHA＋时间戳）＋ md5 清单 manifest ＋ 原子 symlink 切换 ＋ rollback 回上一版
 #
 # 用法：
-#   bash deploy/vps/gateway-release.sh status            # 看生產現在跑哪一版（唯讀）
-#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路徑>...] [--skip-recon] [--dry-run]
+#   bash deploy/vps/gateway-release.sh status            # 看生产现在跑哪一版（唯读）
+#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run]
 #   bash deploy/vps/gateway-release.sh rollback [--dry-run]
-#   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把實體目錄改成受管 symlink
+#   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把实体目录改成受管 symlink
 #
-# 為什麼存在：過去「生產跑的是哪一版」只能事後取證（Vercel files API 比 md5、逐 chunk grep），
-#   而 alias 曾 34 小時未更新、跑的是舊部署（memory mapay-fee-rejection-fix-0920），
-#   「HEAD 已修」≠「生產在跑」是常態風險（memory uncommitted-deploy-production-fork-0920）。
-#   本腳本讓每次閘道部署留下不可變的 release 目錄，於是
-#   「哪一版在跑」= `readlink -f /opt/agent-harness/gateway`，回滾 = 切 symlink 回上一版。
+# 为什么存在：过去「生产跑的是哪一版」只能事后取证（Vercel files API 比 md5、逐 chunk grep），
+#   而 alias 曾 34 小时未更新、跑的是旧部署（memory mapay-fee-rejection-fix-0920），
+#   「HEAD 已修」≠「生产在跑」是常态风险（memory uncommitted-deploy-production-fork-0920）。
+#   本脚本让每次闸道部署留下不可变的 release 目录，于是
+#   「哪一版在跑」= `readlink -f /opt/agent-harness/gateway`，回滚 = 切 symlink 回上一版。
 #
-# 設計約束（來自現場，非發明）：
-#   1. 只上已 commit 的檔：release 內容由 `git archive <sha> deploy-staging/gateway` 產生。
-#      工作區未 commit 的改動永遠進不了 release → 正面解掉「未 commit 部署＝生產分叉」。
-#   2. 不做整目錄盲同步：上傳的是「某個 commit 的快照」，不是當前工作區，
-#      因此不會把並行路線的未完成工作推上生產（memory 閘道部署配方的核心教訓）。
-#   3. 順帶結構性消除一個靜默雷：release 目錄 = 該 commit 的完整檔案集，不會有舊檔殘留
-#      掩蔽新目錄（extensionless `workflow-templates.ts` 掩蔽 `workflow-templates/`，
-#      見 memory template-monolith-split-0920）。
-#   4. 權限：gateway/ 為 ubuntu:ubuntu，但其下 workflow-templates/ 為 root:root
-#      → 遠端一律經 /tmp 中轉 + `sudo install -o ubuntu -g ubuntu -m 644 -D` 逐檔落地，
-#      不直接 scp 進目標目錄。
-#   5. 服務閘門重用既有輪子：`sudo /opt/agent-harness/deploy.sh`
-#      （flock 排他鎖 + bun build 語法閘 + restart + healthz）。本腳本不重寫它。
+# 设计约束（来自现场，非发明）：
+#   1. 只上已 commit 的档：release 内容由 `git archive <sha> deploy-staging/gateway` 产生。
+#      工作区未 commit 的改动永远进不了 release → 正面解掉「未 commit 部署＝生产分叉」。
+#   2. 不做整目录盲同步：上传的是「某个 commit 的快照」，不是当前工作区，
+#      因此不会把并行路线的未完成工作推上生产（memory 闸道部署配方的核心教训）。
+#   3. 顺带结构性消除一个静默雷：release 目录 = 该 commit 的完整档案集，不会有旧档残留
+#      掩蔽新目录（extensionless `workflow-templates.ts` 掩蔽 `workflow-templates/`，
+#      见 memory template-monolith-split-0920）。
+#   4. 权限：gateway/ 为 ubuntu:ubuntu，但其下 workflow-templates/ 为 root:root
+#      → 远端一律经 /tmp 中转 + `sudo install -o ubuntu -g ubuntu -m 644 -D` 逐档落地，
+#      不直接 scp 进目标目录。
+#   5. 服务闸门重用既有轮子：`sudo /opt/agent-harness/deploy.sh`
+#      （flock 排他锁 + bun build 语法闸 + restart + healthz）。本脚本不重写它。
 #   6. 部署前必跑既有 recon：deploy-staging/vps-tools/vps-gateway-recon.sh
-#      （memory arch-debt-closeout-0920 鐵律）。本腳本不重寫它，只調用它。
+#      （memory arch-debt-closeout-0920 铁律）。本脚本不重写它，只调用它。
 #
-# ⚠️ 未驗證假設（本腳本只在本機做過 `bash -n` 與 `--dry-run`，從未對生產執行）：
-#   A. /opt/agent-harness/gateway 推測是「實體目錄」而非 symlink
-#      → 首次使用需人工確認後跑 `adopt`（把現況封存成 baseline release 再換成 symlink）。
-#   B. deploy.sh 是否以硬編路徑 /opt/agent-harness/gateway 為工作根。若它 cd 進該路徑或
-#      bun build 該路徑下的 index.ts，symlink 不影響它；若它自行做目錄歸屬/比對檢查則需先讀它。
-#   C. systemd unit（agent-gateway）的 WorkingDirectory / ExecStart 是否走同一路徑。
-#   D. `mv -T` 需與目標同檔案系統；releases 與 gateway 同在 /opt/agent-harness 下，理應成立。
-#   E. 遠端有 GNU coreutils（md5sum / mv -T / ln -sfn / install -D）與 curl。
-#   F. /opt/agent-harness/deploy.sh 需 sudo，且會撞到 /tmp/deploy-gate-*.js 殘檔 EACCES
-#      （memory arch-debt-closeout-0920 的雷）；本腳本不代清，失敗時人工依該記憶處理。
-#   G. `adopt` 的 mv→ln 之間有一個短暫視窗（該路徑不存在）。未對生產驗證。
+# ⚠️ 未验证假设（本脚本只在本机做过 `bash -n` 与 `--dry-run`，从未对生产执行）：
+#   A. /opt/agent-harness/gateway 推测是「实体目录」而非 symlink
+#      → 首次使用需人工确认后跑 `adopt`（把现况封存成 baseline release 再换成 symlink）。
+#   B. deploy.sh 是否以硬编路径 /opt/agent-harness/gateway 为工作根。若它 cd 进该路径或
+#      bun build 该路径下的 index.ts，symlink 不影响它；若它自行做目录归属/比对检查则需先读它。
+#   C. systemd unit（agent-gateway）的 WorkingDirectory / ExecStart 是否走同一路径。
+#   D. `mv -T` 需与目标同档案系统；releases 与 gateway 同在 /opt/agent-harness 下，理应成立。
+#   E. 远端有 GNU coreutils（md5sum / mv -T / ln -sfn / install -D）与 curl。
+#   F. /opt/agent-harness/deploy.sh 需 sudo，且会撞到 /tmp/deploy-gate-*.js 残档 EACCES
+#      （memory arch-debt-closeout-0920 的雷）；本脚本不代清，失败时人工依该记忆处理。
+#   G. `adopt` 的 mv→ln 之间有一个短暂视窗（该路径不存在）。未对生产验证。
 set -euo pipefail
 
-# ── 可覆寫參數（env 前綴 GW_）────────────────────────────────────────────
+# ── 可覆写参数（env 前缀 GW_）────────────────────────────────────────────
 SSH_KEY="${GW_SSH_KEY:-$HOME/.ssh/new.pem}"
 SSH_TARGET="${GW_SSH_TARGET:-ubuntu@43.172.85.76}"
 SSH_PORT="${GW_SSH_PORT:-22443}"
@@ -53,8 +53,8 @@ RELEASES_DIR="${GW_RELEASES_DIR:-$HARNESS_ROOT/releases/gateway}"
 DEPLOY_GATE="${GW_DEPLOY_GATE:-sudo $HARNESS_ROOT/deploy.sh}"
 HEALTH_URL="${GW_HEALTH_URL:-http://127.0.0.1:8081/healthz}"
 OWNER="${GW_OWNER:-ubuntu:ubuntu}"
-# 執行時狀態（SQLite 會話庫、記憶游標/批次）不屬於任何 commit，必須與代碼目錄分離。
-# release 目錄只放 symlink 指向此處，否則每次發佈都會把 41MB 的 sessions.db 換掉。
+# 执行时状态（SQLite 会话库、记忆游标/批次）不属于任何 commit，必须与代码目录分离。
+# release 目录只放 symlink 指向此处，否则每次发布都会把 41MB 的 sessions.db 换掉。
 STATE_DIR="${GW_STATE_DIR:-$HARNESS_ROOT/state}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,8 +70,8 @@ EXPLICIT_FILES=()
 log() { printf '%s\n' "$*" >&2; }
 die() { printf 'ABORT: %s\n' "$*" >&2; exit 1; }
 
-# 遠端腳本一律用「引號 heredoc + 位置參數」傳值（不用無引號 heredoc 內插，
-# 因為遠端變數與本地變數同名時會靜默取到本地值）。順序固定如下：
+# 远端脚本一律用「引号 heredoc + 位置参数」传值（不用无引号 heredoc 内插，
+# 因为远端变数与本地变数同名时会静默取到本地值）。顺序固定如下：
 #   $1 HARNESS_ROOT  $2 GATEWAY_PATH  $3 RELEASES_DIR  $4 OWNER  $5 HEALTH_URL  $6... 各命令附加
 remote_args() { printf '%s\n' "$HARNESS_ROOT" "$GATEWAY_PATH" "$RELEASES_DIR" "$OWNER" "$HEALTH_URL"; }
 
@@ -80,7 +80,7 @@ run_remote() {
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
 }
 
-# 帶 stdin 的遠端執行。--dry-run 時把遠端腳本原樣印出（可另存後 bash -n 檢查），不連線。
+# 带 stdin 的远端执行。--dry-run 时把远端脚本原样印出（可另存后 bash -n 检查），不连线。
 run_remote_stdin() {
   if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY-RUN ssh(stdin): $*"
@@ -97,7 +97,7 @@ run_remote_stdin() {
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
 }
 
-# 二進位 tar 上傳。--dry-run 只吞掉 stdin 並報位元組數（不把 tar 二進位印到終端）。
+# 二进位 tar 上传。--dry-run 只吞掉 stdin 并报位元组数（不把 tar 二进位印到终端）。
 run_remote_binary() {
   if [ "$DRY_RUN" -eq 1 ]; then
     local n
@@ -113,17 +113,17 @@ usage() {
   cat <<'EOF'
 
 子命令：
-  status                  唯讀：印出生產目前指向的 release、meta、manifest 校驗結果、healthz
+  status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
   release [--sha C] [--files F...] [--skip-recon] [--dry-run]
-                          發佈：git archive 該 commit 的 deploy-staging/gateway → release 目錄
-                          → md5 manifest → 原子切 symlink → deploy.sh 閘門 → 驗證
-  rollback [--dry-run]    回滾：切 symlink 回上一個 release → 同一道 deploy.sh 閘門 → 驗證
-  adopt [--dry-run]       一次性：把實體 /opt/agent-harness/gateway 封存成 baseline release
-                          並換成受管 symlink（此後 release/rollback 才可用）
+                          发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
+                          → md5 manifest → 原子切 symlink → deploy.sh 闸门 → 验证
+  rollback [--dry-run]    回滚：切 symlink 回上一个 release → 同一道 deploy.sh 闸门 → 验证
+  adopt [--dry-run]       一次性：把实体 /opt/agent-harness/gateway 封存成 baseline release
+                          并换成受管 symlink（此后 release/rollback 才可用）
 
-環境可覆寫：GW_SSH_KEY GW_SSH_TARGET GW_SSH_PORT GW_HARNESS_ROOT GW_GATEWAY_PATH
+环境可覆写：GW_SSH_KEY GW_SSH_TARGET GW_SSH_PORT GW_HARNESS_ROOT GW_GATEWAY_PATH
             GW_RELEASES_DIR GW_DEPLOY_GATE GW_HEALTH_URL GW_OWNER
-            GW_DRY_REMOTE_LOG（--dry-run 時把遠端腳本另存到該檔，供 bash -n 檢查）
+            GW_DRY_REMOTE_LOG（--dry-run 时把远端脚本另存到该档，供 bash -n 检查）
 EOF
 }
 
@@ -138,7 +138,7 @@ parse_flags() {
         while [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; do EXPLICIT_FILES+=("$1"); shift; done
         continue ;;
       -h|--help) usage; exit 0 ;;
-      *) die "未知參數：$1" ;;
+      *) die "未知参数：$1" ;;
     esac
     shift
   done
@@ -150,19 +150,19 @@ preflight_local() {
     || die "$REPO_ROOT 不是 git repo"
 }
 
-# 根因守門：deploy-staging/gateway 有未 commit 改動時禁止發佈。
-# 這正是「未 commit 部署＝生產分叉」的入口（memory uncommitted-deploy-production-fork-0920）。
+# 根因守门：deploy-staging/gateway 有未 commit 改动时禁止发布。
+# 这正是「未 commit 部署＝生产分叉」的入口（memory uncommitted-deploy-production-fork-0920）。
 assert_gateway_tree_clean() {
   local dirty
   dirty="$(git -C "$REPO_ROOT" status --porcelain -- "$SRC_SUBDIR")"
   if [ -n "$dirty" ]; then
     printf '%s\n' "$dirty" >&2
-    die "$SRC_SUBDIR 有未 commit 改動 → 拒絕發佈（未 commit 部署＝生產分叉的根因）。先 commit。"
+    die "$SRC_SUBDIR 有未 commit 改动 → 拒绝发布（未 commit 部署＝生产分叉的根因）。先 commit。"
   fi
 }
 
-# 既有輪子：部署前 recon 對賬（0=一致 1=漂移 2=故障）
-# 現行 release 的 GIT_SHA（recon 的正確基準：生產是否仍等於上次發出的那一版）
+# 既有轮子：部署前 recon 对账（0=一致 1=漂移 2=故障）
+# 现行 release 的 GIT_SHA（recon 的正确基准：生产是否仍等于上次发出的那一版）
 current_release_sha() {
   [ "$DRY_RUN" -eq 1 ] && return 0
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
@@ -171,14 +171,14 @@ current_release_sha() {
 
 run_recon() {
   [ "$SKIP_RECON" -eq 1 ] && { log "SKIP recon（--skip-recon）"; return 0; }
-  [ -f "$RECON_SCRIPT" ] || die "找不到 recon 腳本：$RECON_SCRIPT"
+  [ -f "$RECON_SCRIPT" ] || die "找不到 recon 脚本：$RECON_SCRIPT"
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN local: bash $RECON_SCRIPT"; return 0; fi
   local base
   base="$(current_release_sha)"
   case "$base" in ""|unknown-baseline) base="HEAD";; esac
-  log "== 既有 recon 對賬（擋漂移；基準 $base）=="
+  log "== 既有 recon 对账（挡漂移；基准 $base）=="
   if ! RECON_BASE="$base" bash "$RECON_SCRIPT"; then
-    die "recon 未通過（生產被手改或連線故障）→ 先 diff 收編再發佈（deploy-staging/vps-tools/vps-gateway-recon.sh）"
+    die "recon 未通过（生产被手改或连线故障）→ 先 diff 收编再发布（deploy-staging/vps-tools/vps-gateway-recon.sh）"
   fi
 }
 
@@ -226,8 +226,8 @@ cmd_adopt() {
   local ts rel
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   rel="baseline-$ts"
-  log "== adopt：$GATEWAY_PATH（實體目錄）→ symlink → $RELEASES_DIR/$rel/files =="
-  log "⚠️ 一次性、對生產有實質影響的操作；本腳本從未對生產驗證過，請人工確認後再跑。"
+  log "== adopt：$GATEWAY_PATH（实体目录）→ symlink → $RELEASES_DIR/$rel/files =="
+  log "⚠️ 一次性、对生产有实质影响的操作；本脚本从未对生产验证过，请人工确认后再跑。"
   local -a RA
   mapfile -t RA < <(remote_args)
   run_remote_stdin bash -s -- "${RA[@]}" "$rel" "$STATE_DIR" <<'REMOTE'
@@ -242,9 +242,9 @@ sudo ln -s "$RELEASES_DIR/$rel/files" "$GATEWAY_PATH"
 sudo chown -h "$OWNER" "$GATEWAY_PATH" 2>/dev/null || true
 sudo chown -R "$OWNER" "$RELEASES_DIR/$rel" 2>/dev/null || true
 
-# 狀態與代碼分離：把執行時狀態集中到 $STATE_DIR，release 目錄只留 symlink。
-# 首次（此處）＝遷移；之後每次 release 只是重建同一組 symlink，資料不隨版本搬移，
-# 因此回滾到 baseline 也仍讀到同一份會話庫，不會回退成空庫。
+# 状态与代码分离：把执行时状态集中到 $STATE_DIR，release 目录只留 symlink。
+# 首次（此处）＝迁移；之后每次 release 只是重建同一组 symlink，资料不随版本搬移，
+# 因此回滚到 baseline 也仍读到同一份会话库，不会回退成空库。
 sudo mkdir -p "$STATE_DIR"
 for it in "${STATE_ITEMS[@]}"; do
   if [ -e "$RELEASES_DIR/$rel/files/$it" ] && [ ! -e "$STATE_DIR/$it" ]; then
@@ -263,13 +263,13 @@ find . -type f -print0 | sort -z | xargs -0 md5sum > "../manifest.md5"
   echo "GIT_SHA=unknown-baseline"
   echo "CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "FILE_COUNT=$(wc -l < ../manifest.md5)"
-  echo "NOTE=adopted-baseline（非 commit 快照；內容為 adopt 當下的生產目錄，可能含漂移）"
+  echo "NOTE=adopted-baseline（非 commit 快照；内容为 adopt 当下的生产目录，可能含漂移）"
 } > "../meta.env"
 echo "$rel unknown-baseline $(date -u +%s) adopt" | sudo tee -a "$RELEASES_DIR/history.log" >/dev/null
 echo "ADOPTED current=$(readlink -f "$GATEWAY_PATH")"
 REMOTE
   if [ "$DRY_RUN" -eq 0 ]; then
-    log "== adopt 後跑既有服務閘門（確認 symlink 路徑仍可服務）=="
+    log "== adopt 后跑既有服务闸门（确认 symlink 路径仍可服务）=="
     run_remote "$DEPLOY_GATE"
     verify_release "$RELEASES_DIR/$rel/files"
   fi
@@ -282,20 +282,20 @@ cmd_release() {
 
   local sha_full sha_short ts rel
   sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" \
-    || die "無法解析 commit：${SHA:-HEAD}"
+    || die "无法解析 commit：${SHA:-HEAD}"
   sha_short="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha_full")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   rel="$sha_short-$ts"
 
   if [ "${#EXPLICIT_FILES[@]}" -gt 0 ]; then
     for f in "${EXPLICIT_FILES[@]}"; do
-      case "$f" in "$SRC_SUBDIR"/*) ;; *) die "--files 必須是 $SRC_SUBDIR/ 下的路徑：$f" ;; esac
-      git -C "$REPO_ROOT" cat-file -e "$sha_full:$f" 2>/dev/null || die "該 commit 不含此檔：$f"
+      case "$f" in "$SRC_SUBDIR"/*) ;; *) die "--files 必须是 $SRC_SUBDIR/ 下的路径：$f" ;; esac
+      git -C "$REPO_ROOT" cat-file -e "$sha_full:$f" 2>/dev/null || die "该 commit 不含此档：$f"
     done
-    log "== 精準發佈（--files，${#EXPLICIT_FILES[@]} 檔）：$sha_short → $rel =="
+    log "== 精准发布（--files，${#EXPLICIT_FILES[@]} 档）：$sha_short → $rel =="
   else
-    log "== 完整快照發佈：$SRC_SUBDIR @ $sha_short → $rel =="
-    log "   （git archive 該 commit 的完整檔案集：不含工作區未 commit 改動，也不會有舊檔殘留）"
+    log "== 完整快照发布：$SRC_SUBDIR @ $sha_short → $rel =="
+    log "   （git archive 该 commit 的完整档案集：不含工作区未 commit 改动，也不会有旧档残留）"
   fi
 
   run_recon
@@ -323,21 +323,21 @@ rel="$6"; sha_full="$7"; sha_short="$8"; stage_tar="$9"; stage_dir="${10}"; STAT
 STATE_ITEMS=(sessions.db sessions.db-shm sessions.db-wal memory-cursor.json memory-batches)
 
 if [ ! -L "$GATEWAY_PATH" ]; then
-  echo "NOT_ADOPTED: $GATEWAY_PATH 不是 symlink → 先跑 adopt（見腳本頭部假設 A）"
+  echo "NOT_ADOPTED: $GATEWAY_PATH 不是 symlink → 先跑 adopt（见脚本头部假设 A）"
   exit 1
 fi
 
 REL_DIR="$RELEASES_DIR/$rel"
 sudo mkdir -p "$REL_DIR/files" "$stage_dir"
-# $REL_DIR 由 sudo mkdir 建立＝root 所有，但 manifest.md5／meta.env 是後續「非 sudo」寫入
-# （adopt 沒踩到，因為它是 mv 進來的目錄、保有原 owner；release 是新建目錄）。
-# 先把 $REL_DIR 交給 ubuntu，寫入與後續 rollback 的讀取都一致。
+# $REL_DIR 由 sudo mkdir 建立＝root 所有，但 manifest.md5／meta.env 是后续「非 sudo」写入
+# （adopt 没踩到，因为它是 mv 进来的目录、保有原 owner；release 是新建目录）。
+# 先把 $REL_DIR 交给 ubuntu，写入与后续 rollback 的读取都一致。
 sudo chown "$OWNER" "$REL_DIR"
-# --strip-components=2：tar 內路徑為 deploy-staging/gateway/<檔>，剝掉兩層後 files/ 即 gateway 根
+# --strip-components=2：tar 内路径为 deploy-staging/gateway/<档>，剥掉两层后 files/ 即 gateway 根
 sudo tar -xf "$stage_tar" -C "$stage_dir" --strip-components=2
 sudo chown -R "$OWNER" "$stage_dir"
 
-# 逐檔 sudo install（-D 建父目錄），owner/mode 與既有檔一致：-rw-r--r-- ubuntu ubuntu
+# 逐档 sudo install（-D 建父目录），owner/mode 与既有档一致：-rw-r--r-- ubuntu ubuntu
 cd "$stage_dir"
 while IFS= read -r -d '' f; do
   sudo install -D -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$f" "$REL_DIR/files/$f"
@@ -345,8 +345,8 @@ done < <(find . -type f -print0)
 cd /
 rm -rf "$stage_dir" "$stage_tar"
 
-# 狀態與代碼分離：新 release 目錄不放真實狀態檔，只放指向 $STATE_DIR 的 symlink。
-# 若 $STATE_DIR 尚無該項（例如 adopt 前就已存在的舊狀態），從當前 release 目錄遷移一次。
+# 状态与代码分离：新 release 目录不放真实状态档，只放指向 $STATE_DIR 的 symlink。
+# 若 $STATE_DIR 尚无该项（例如 adopt 前就已存在的旧状态），从当前 release 目录迁移一次。
 CUR_DIR="$(readlink -f "$GATEWAY_PATH" 2>/dev/null || true)"
 sudo mkdir -p "$STATE_DIR"
 for it in "${STATE_ITEMS[@]}"; do
@@ -373,7 +373,7 @@ MANIFEST_MD5="$(md5sum "$REL_DIR/manifest.md5" | cut -d' ' -f1)"
   echo "SOURCE=git-archive"
 } > "$REL_DIR/meta.env"
 
-# 原子切換：先建 next symlink，再 mv -T 一次性 rename 覆蓋（同檔案系統）
+# 原子切换：先建 next symlink，再 mv -T 一次性 rename 覆盖（同档案系统）
 sudo ln -sfn "$REL_DIR/files" "$HARNESS_ROOT/.gateway-link.next"
 sudo mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH"
 
@@ -382,7 +382,7 @@ echo "SWITCHED current=$(readlink -f "$GATEWAY_PATH") files=$FILE_COUNT"
 REMOTE
 
   if [ "$DRY_RUN" -eq 0 ]; then
-    log "== 既有服務閘門：$DEPLOY_GATE =="
+    log "== 既有服务闸门：$DEPLOY_GATE =="
     run_remote "$DEPLOY_GATE"
     verify_release "$RELEASES_DIR/$rel/files"
   fi
@@ -392,12 +392,12 @@ REMOTE
 # ── rollback ────────────────────────────────────────────────────────────
 cmd_rollback() {
   preflight_local
-  log "== rollback：切回上一個 release =="
+  log "== rollback：切回上一个 release =="
   local -a RA
   mapfile -t RA < <(remote_args)
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "DRY-RUN：略過「解析上一個 release」（需連線讀 releases 目錄）"
+    log "DRY-RUN：略过「解析上一个 release」（需连线读 releases 目录）"
     run_remote_stdin bash -s -- "${RA[@]}" <<'REMOTE'
 set -euo pipefail
 HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"
@@ -418,7 +418,7 @@ sudo mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH"
 echo "${RELS[$next]} rollback $(date -u +%s) rollback" | sudo tee -a "$RELEASES_DIR/history.log" >/dev/null
 echo "ROLLED_BACK current=$(readlink -f "$GATEWAY_PATH")"
 REMOTE
-    log "rollback dry-run 結束（未連線、未切換）"
+    log "rollback dry-run 结束（未连线、未切换）"
     return 0
   fi
 
@@ -437,8 +437,8 @@ next=$((idx+1))
 echo "${RELS[$next]}"
 REMOTE
 )"
-  [ -n "$prev" ] || die "取不到上一個 release（rollback 目標為空）"
-  log "rollback 目標：$prev"
+  [ -n "$prev" ] || die "取不到上一个 release（rollback 目标为空）"
+  log "rollback 目标：$prev"
 
   run_remote_stdin bash -s -- "${RA[@]}" "$prev" <<'REMOTE'
 set -euo pipefail
@@ -453,13 +453,13 @@ echo "$prev rollback $(date -u +%s) rollback" | sudo tee -a "$RELEASES_DIR/histo
 echo "ROLLED_BACK current=$(readlink -f "$GATEWAY_PATH")"
 REMOTE
 
-  log "== 既有服務閘門：$DEPLOY_GATE =="
+  log "== 既有服务闸门：$DEPLOY_GATE =="
   run_remote "$DEPLOY_GATE"
   verify_release "$RELEASES_DIR/$prev/files"
   log "rollback 完成：$prev"
 }
 
-# ── 收尾驗證（symlink 指向 + manifest + healthz）─────────────────────────
+# ── 收尾验证（symlink 指向 + manifest + healthz）─────────────────────────
 verify_release() {
   local expected="$1"
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN verify $expected"; return 0; fi
@@ -473,7 +473,7 @@ CODE="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"
 [ "$CODE" = "200" ] || { echo "HEALTHZ=$CODE"; exit 1; }
 echo "VERIFY_OK current=$CUR manifest=OK healthz=200"
 REMOTE
-  log "⚠️ VERIFY_OK 只證明「切到預期的 release 且服務起來了」，不證明功能可用（要打真端點）。"
+  log "⚠️ VERIFY_OK 只证明「切到预期的 release 且服务起来了」，不证明功能可用（要打真端点）。"
 }
 
 main() {

@@ -1,16 +1,16 @@
 // desktop/local-worker-bridge.test.js
 //
-// W6c：device bridge 使用者面（本機檔案授權）的四個 IPC 之主進程側行為測試。
-// 純 node（node --test），不啟動 Electron：靠在 createBridgeController 注入間諜
-// client（startBridge/stopBridge）做真行為斷言。
+// W6c：device bridge 使用者面（本机档案授权）的四个 IPC 之主进程侧行为测试。
+// 纯 node（node --test），不启动 Electron：靠在 createBridgeController 注入间谍
+// client（startBridge/stopBridge）做真行为断言。
 //
-// 覆蓋：
-//   - status 三態：未啟用 / 已啟用但無授權根 / 已啟用有根。
-//   - enable 無授權根 ⇒ 不啟動、不自動授權。
+// 覆盖：
+//   - status 三态：未启用 / 已启用但无授权根 / 已启用有根。
+//   - enable 无授权根 ⇒ 不启动、不自动授权。
 //   - disable ⇒ enabled:false 且 client 已停。
-//   - **核心**：授權根變更後，已啟用的 bridge 以**新 roots** 再呼叫 startBridge 一次。
-//   - 憑證 fail-closed：無憑證 ⇒ credentials_unavailable（真 client，不連網）。
-//   - 來源非白名單一律拒。
+//   - **核心**：授权根变更后，已启用的 bridge 以**新 roots** 再呼叫 startBridge 一次。
+//   - 凭证 fail-closed：无凭证 ⇒ credentials_unavailable（真 client，不连网）。
+//   - 来源非白名单一律拒。
 //
 // 跑法：node --test desktop/local-worker-bridge.test.js
 
@@ -32,7 +32,7 @@ function mkTmpDir() {
   return nodeFs.realpathSync(nodeFs.mkdtempSync(path.join(os.tmpdir(), "eimu-bridge-cfg-")));
 }
 
-/** 建一個注入間諜 client 的控制器；回傳控制器與呼叫紀錄。 */
+/** 建一个注入间谍 client 的控制器；回传控制器与呼叫纪录。 */
 function freshController(overrides = {}) {
   const calls = { start: [], stop: 0 };
   const controller = localWorker.createBridgeController({
@@ -49,15 +49,15 @@ function freshController(overrides = {}) {
   return { controller, calls };
 }
 
-test("bridge.status(): 未啟用 ⇒ enabled:false, state:off（mode 預設 ask）", async () => {
+test("bridge.status(): 未启用 ⇒ enabled:false, state:off（mode 预设 ask）", async () => {
   localWorker.authorizedRoots.clear();
   localWorker.__test.setBridgeController(null);
   const s = await localWorker.__test.handleBridgeStatus(APP_EVENT);
-  // mode 為 W6c 新增欄位（未接線時預設 ask）。
+  // mode 为 W6c 新增栏位（未接线时预设 ask）。
   assert.deepEqual(s, { enabled: false, state: "off", roots: [], deviceId: null, mode: "ask" });
 });
 
-test("bridge.status(): 已啟用但無授權根 ⇒ enabled:true, state:no_authorized_roots（且不啟動）", async () => {
+test("bridge.status(): 已启用但无授权根 ⇒ enabled:true, state:no_authorized_roots（且不启动）", async () => {
   localWorker.authorizedRoots.clear();
   const { controller, calls } = freshController();
   localWorker.__test.setBridgeController(controller);
@@ -66,24 +66,24 @@ test("bridge.status(): 已啟用但無授權根 ⇒ enabled:true, state:no_autho
   assert.equal(enabled.enabled, true);
   assert.equal(enabled.state, "no_authorized_roots");
   assert.deepEqual(enabled.roots, []);
-  assert.equal(calls.start.length, 0, "無授權根不得啟動 client");
+  assert.equal(calls.start.length, 0, "无授权根不得启动 client");
 
   const s = await localWorker.__test.handleBridgeStatus(APP_EVENT);
   assert.equal(s.enabled, true);
   assert.equal(s.state, "no_authorized_roots");
 });
 
-test("bridge.enable(): 無授權根不啟動且**不自動授權**任何路徑", async () => {
+test("bridge.enable(): 无授权根不启动且**不自动授权**任何路径", async () => {
   localWorker.authorizedRoots.clear();
   const { controller, calls } = freshController({ writeEnabled: () => {} });
   localWorker.__test.setBridgeController(controller);
 
   await localWorker.__test.handleBridgeEnable(APP_EVENT);
-  assert.equal(calls.start.length, 0, "不得啟動");
-  assert.equal(localWorker.authorizedRoots.size, 0, "不得自動授權任何路徑");
+  assert.equal(calls.start.length, 0, "不得启动");
+  assert.equal(localWorker.authorizedRoots.size, 0, "不得自动授权任何路径");
 });
 
-test("bridge.status(): 已啟用有根 ⇒ 反映 client 狀態與 deviceId", async () => {
+test("bridge.status(): 已启用有根 ⇒ 反映 client 状态与 deviceId", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   const { controller } = freshController({ getClientState: () => ({ status: "online", deviceId: "dev-42" }) });
@@ -100,7 +100,7 @@ test("bridge.status(): 已啟用有根 ⇒ 反映 client 狀態與 deviceId", as
   }
 });
 
-test("state 正規化：reconnecting → connecting；未知值 fail-closed → error（契約六值）", async () => {
+test("state 正规化：reconnecting → connecting；未知值 fail-closed → error（契约六值）", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   try {
@@ -133,46 +133,46 @@ test("bridge.disable(): enabled:false 且 client 已停", async () => {
     const s = await localWorker.__test.handleBridgeDisable(APP_EVENT);
     assert.equal(s.enabled, false);
     assert.equal(s.state, "off");
-    assert.ok(calls.stop > stopAfterEnable, "disable 必須停止 client");
+    assert.ok(calls.stop > stopAfterEnable, "disable 必须停止 client");
     assert.equal((await localWorker.__test.handleBridgeStatus(APP_EVENT)).enabled, false);
   } finally {
     nodeFs.rmSync(A, { recursive: true, force: true });
   }
 });
 
-test("核心：授權根變更 → 已啟用的 bridge 以**新 roots** 重註冊（startBridge 再呼叫一次）", async () => {
+test("核心：授权根变更 → 已启用的 bridge 以**新 roots** 重注册（startBridge 再呼叫一次）", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   const B = mkTmpDir();
   const { controller, calls } = freshController();
   localWorker.__test.setBridgeController(controller);
   try {
-    // 1) 授權 A，但尚未啟用 ⇒ 不重註冊（控制器未啟用＝不動作）。
+    // 1) 授权 A，但尚未启用 ⇒ 不重注册（控制器未启用＝不动作）。
     const first = localWorker.__test.applyPickAuthorization([A]);
     await first.restarted;
-    assert.equal(calls.start.length, 0, "未啟用時 pickFiles 不得啟動/重註冊");
+    assert.equal(calls.start.length, 0, "未启用时 pickFiles 不得启动/重注册");
 
-    // 2) 啟用 ⇒ 以 A 啟動。
+    // 2) 启用 ⇒ 以 A 启动。
     await controller.enable();
     assert.equal(calls.start.length, 1);
     assert.deepEqual(calls.start[0].rootsProvider(), [A]);
 
-    // 3) 授權新根 B（已啟用）⇒ 以新 roots 重註冊。
+    // 3) 授权新根 B（已启用）⇒ 以新 roots 重注册。
     const stopBefore = calls.stop;
     const second = localWorker.__test.applyPickAuthorization([B]);
-    assert.ok(second.restarted, "已啟用時 pickFiles 必須觸發重註冊");
+    assert.ok(second.restarted, "已启用时 pickFiles 必须触发重注册");
     await second.restarted;
 
-    assert.equal(calls.start.length, 2, "startBridge 必須被再呼叫一次");
-    assert.deepEqual([...calls.start[1].rootsProvider()].sort(), [A, B].sort(), "第二次必須帶新 roots（A+B）");
-    assert.ok(calls.stop > stopBefore, "重註冊前必須先停止舊連線（stop→start）");
+    assert.equal(calls.start.length, 2, "startBridge 必须被再呼叫一次");
+    assert.deepEqual([...calls.start[1].rootsProvider()].sort(), [A, B].sort(), "第二次必须带新 roots（A+B）");
+    assert.ok(calls.stop > stopBefore, "重注册前必须先停止旧连线（stop→start）");
   } finally {
     nodeFs.rmSync(A, { recursive: true, force: true });
     nodeFs.rmSync(B, { recursive: true, force: true });
   }
 });
 
-test("授權根未變（取消／空）⇒ 不重註冊", async () => {
+test("授权根未变（取消／空）⇒ 不重注册", async () => {
   localWorker.authorizedRoots.clear();
   const { controller, calls } = freshController();
   localWorker.__test.setBridgeController(controller);
@@ -184,13 +184,13 @@ test("授權根未變（取消／空）⇒ 不重註冊", async () => {
 
     const cancelled = localWorker.__test.applyPickAuthorization([]);
     assert.equal(cancelled.restarted, null);
-    assert.equal(calls.start.length, startCount, "取消不得觸發重註冊");
+    assert.equal(calls.start.length, startCount, "取消不得触发重注册");
   } finally {
     nodeFs.rmSync(A, { recursive: true, force: true });
   }
 });
 
-test("憑證 fail-closed：無憑證 ⇒ credentials_unavailable（真 client，不連網）", async () => {
+test("凭证 fail-closed：无凭证 ⇒ credentials_unavailable（真 client，不连网）", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   localWorker.authorizeRoots([A]);
@@ -205,15 +205,15 @@ test("憑證 fail-closed：無憑證 ⇒ credentials_unavailable（真 client，
   }
 });
 
-// ── 型別契約（2026-10-04 補）────────────────────────────────────────────
-// 教訓來源：local-worker 曾在 startOptions() 寫 `credentialProvider: credentialProvider()`
-// ——把**呼叫後的結果（字串）**傳給 client，而 client 只在 `typeof === "function"` 時才
-// 呼叫它 ⇒ 恆為 null ⇒ 恆停 credentials_unavailable、裝置永不註冊。
-// 既有測試只用間諜 startBridge 斷言「被呼叫了」，**斷言不到型別**，所以漏掉（同源斷言
-// 的典型失效）。以下兩條專抓此類：①對注入點的**型別**斷言（非值）②用**真** client 走
-// 一遍，斷言狀態不再卡在 credentials_unavailable。
+// ── 型别契约（2026-10-04 补）────────────────────────────────────────────
+// 教训来源：local-worker 曾在 startOptions() 写 `credentialProvider: credentialProvider()`
+// ——把**呼叫后的结果（字串）**传给 client，而 client 只在 `typeof === "function"` 时才
+// 呼叫它 ⇒ 恒为 null ⇒ 恒停 credentials_unavailable、装置永不注册。
+// 既有测试只用间谍 startBridge 断言「被呼叫了」，**断言不到型别**，所以漏掉（同源断言
+// 的典型失效）。以下两条专抓此类：①对注入点的**型别**断言（非值）②用**真** client 走
+// 一遍，断言状态不再卡在 credentials_unavailable。
 
-test("型別契約：startOptions() 傳給 client 的 credentialProvider/rootsProvider/onStatus 必須是 function", async () => {
+test("型别契约：startOptions() 传给 client 的 credentialProvider/rootsProvider/onStatus 必须是 function", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   const captured = [];
@@ -231,27 +231,27 @@ test("型別契約：startOptions() 傳給 client 的 credentialProvider/rootsPr
   try {
     localWorker.__test.applyPickAuthorization([A]);
     await controller.enable();
-    assert.equal(captured.length, 1, "startBridge 應被呼叫一次");
+    assert.equal(captured.length, 1, "startBridge 应被呼叫一次");
     const opts = captured[0];
 
-    // 三個注入點都必須是**函式**（client 端是 typeof === "function" 才呼叫）——
-    // 傳值＝型別錯，client 一律視為 null/預設。
+    // 三个注入点都必须是**函式**（client 端是 typeof === "function" 才呼叫）——
+    // 传值＝型别错，client 一律视为 null/预设。
     assert.equal(
       typeof opts.credentialProvider,
       "function",
-      `credentialProvider 必須是 function（client 只在 typeof==='function' 時呼叫它），實際收到 ${typeof opts.credentialProvider}`,
+      `credentialProvider 必须是 function（client 只在 typeof==='function' 时呼叫它），实际收到 ${typeof opts.credentialProvider}`,
     );
-    assert.equal(typeof opts.rootsProvider, "function", `rootsProvider 必須是 function，實際 ${typeof opts.rootsProvider}`);
-    assert.equal(typeof opts.onStatus, "function", `onStatus 必須是 function，實際 ${typeof opts.onStatus}`);
-    // gatewayBaseUrl 是**值**注入點：client 期望字串（非函式）。
-    assert.equal(typeof opts.gatewayBaseUrl, "string", `gatewayBaseUrl 必須是 string，實際 ${typeof opts.gatewayBaseUrl}`);
+    assert.equal(typeof opts.rootsProvider, "function", `rootsProvider 必须是 function，实际 ${typeof opts.rootsProvider}`);
+    assert.equal(typeof opts.onStatus, "function", `onStatus 必须是 function，实际 ${typeof opts.onStatus}`);
+    // gatewayBaseUrl 是**值**注入点：client 期望字串（非函式）。
+    assert.equal(typeof opts.gatewayBaseUrl, "string", `gatewayBaseUrl 必须是 string，实际 ${typeof opts.gatewayBaseUrl}`);
 
-    // 函式呼叫後必須得到非空字串（否則 client 仍會判 credentials_unavailable）。
+    // 函式呼叫后必须得到非空字串（否则 client 仍会判 credentials_unavailable）。
     const cred = await opts.credentialProvider();
-    assert.equal(typeof cred, "string", "credentialProvider() 必須回字串");
+    assert.equal(typeof cred, "string", "credentialProvider() 必须回字串");
     assert.ok(cred.length > 0, "credentialProvider() 不得回空字串");
 
-    // rootsProvider() 回當前授權根（供 client 判 allowlist 必填）。
+    // rootsProvider() 回当前授权根（供 client 判 allowlist 必填）。
     assert.deepEqual(opts.rootsProvider(), [A]);
   } finally {
     localWorker.authorizedRoots.clear();
@@ -259,7 +259,7 @@ test("型別契約：startOptions() 傳給 client 的 credentialProvider/rootsPr
   }
 });
 
-test("整合（真 client）：注入 credentialProvider ⇒ 狀態不再 credentials_unavailable（憑證已被接受）", async () => {
+test("整合（真 client）：注入 credentialProvider ⇒ 状态不再 credentials_unavailable（凭证已被接受）", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   const seen = [];
@@ -267,7 +267,7 @@ test("整合（真 client）：注入 credentialProvider ⇒ 狀態不再 creden
     startBridge: (opts) => client.startDeviceBridge(opts),
     stopBridge: () => client.stopDeviceBridge(),
     getClientState: () => client.getDeviceBridgeState(),
-    // 不可達埠（:1）：立即連線失敗 ⇒ reconnecting/network_error，**不觸生產閘道**。
+    // 不可达埠（:1）：立即连线失败 ⇒ reconnecting/network_error，**不触生产闸道**。
     getGatewayBaseUrl: () => "http://127.0.0.1:1",
     credentialProvider: () => "sk-cred-fake-nonempty",
     onStatusChange: (s) => seen.push(s.state),
@@ -278,15 +278,15 @@ test("整合（真 client）：注入 credentialProvider ⇒ 狀態不再 creden
     const snap = await controller.enable();
     const raw = client.getDeviceBridgeState();
 
-    assert.notEqual(snap.state, "credentials_unavailable", `控制器狀態不得為 credentials_unavailable（實際 ${snap.state}）`);
-    assert.notEqual(raw.status, "credentials_unavailable", `client 狀態不得為 credentials_unavailable（實際 ${raw.status}）`);
-    // 憑證被接受 ⇒ 進入連線階段（reconnecting/connecting/online 皆可），不再是憑證錯。
+    assert.notEqual(snap.state, "credentials_unavailable", `控制器状态不得为 credentials_unavailable（实际 ${snap.state}）`);
+    assert.notEqual(raw.status, "credentials_unavailable", `client 状态不得为 credentials_unavailable（实际 ${raw.status}）`);
+    // 凭证被接受 ⇒ 进入连线阶段（reconnecting/connecting/online 皆可），不再是凭证错。
     assert.ok(
       ["reconnecting", "connecting", "online"].includes(raw.status),
-      `憑證被接受後狀態應進入連線階段，實際 ${raw.status}`,
+      `凭证被接受后状态应进入连线阶段，实际 ${raw.status}`,
     );
-    assert.equal(client.__test.runtime.credential, "sk-cred-fake-nonempty", "client 應持有注入的憑證");
-    assert.ok(seen.length > 0, "onStatus 注入點應被 client 呼叫（狀態推送有接上）");
+    assert.equal(client.__test.runtime.credential, "sk-cred-fake-nonempty", "client 应持有注入的凭证");
+    assert.ok(seen.length > 0, "onStatus 注入点应被 client 呼叫（状态推送有接上）");
   } finally {
     client.stopDeviceBridge();
     localWorker.authorizedRoots.clear();
@@ -294,7 +294,7 @@ test("整合（真 client）：注入 credentialProvider ⇒ 狀態不再 creden
   }
 });
 
-test("bridge IPC：非白名單來源一律拒（E_UNTRUSTED_ORIGIN）", async () => {
+test("bridge IPC：非白名单来源一律拒（E_UNTRUSTED_ORIGIN）", async () => {
   localWorker.__test.setBridgeController(freshController().controller);
   const evil = { senderFrame: { url: "https://evil.example/x", parent: null } };
   await assert.rejects(() => localWorker.__test.handleBridgeStatus(evil), /E_UNTRUSTED_ORIGIN/);
@@ -303,7 +303,7 @@ test("bridge IPC：非白名單來源一律拒（E_UNTRUSTED_ORIGIN）", async (
   await assert.rejects(() => localWorker.__test.handleAuthorizedRoots(evil), /E_UNTRUSTED_ORIGIN/);
 });
 
-test("authorizedRoots(): 回已授權根（realpath 絕對路徑）", async () => {
+test("authorizedRoots(): 回已授权根（realpath 绝对路径）", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   try {
@@ -316,11 +316,11 @@ test("authorizedRoots(): 回已授權根（realpath 絕對路徑）", async () =
   }
 });
 
-// ── W6c：權限模式（bridge.setMode）──────────────────────────────────────
-// 契約：四值皆可；非法值 E_BAD_ARGS 且不打網路/不改狀態；off＝停橋；非 off＝
-// 啟用並以 stop→start 重註冊（register 帶新模式）；模式持久化並可還原。
+// ── W6c：权限模式（bridge.setMode）──────────────────────────────────────
+// 契约：四值皆可；非法值 E_BAD_ARGS 且不打网路/不改状态；off＝停桥；非 off＝
+// 启用并以 stop→start 重注册（register 带新模式）；模式持久化并可还原。
 
-/** 帶寫入間諜與可控授權根的控制器。 */
+/** 带写入间谍与可控授权根的控制器。 */
 function modeController(overrides = {}) {
   const calls = { start: [], stop: 0, written: [], enabled: [] };
   const controller = localWorker.createBridgeController({
@@ -339,12 +339,12 @@ function modeController(overrides = {}) {
   return { controller, calls };
 }
 
-test("bridge.status(): 未設定模式 ⇒ 預設 mode=ask", async () => {
+test("bridge.status(): 未设定模式 ⇒ 预设 mode=ask", async () => {
   const { controller } = modeController();
   assert.equal(controller.status().mode, "ask");
 });
 
-test("bridge.setMode(): 四值皆可且狀態反映最新模式", async () => {
+test("bridge.setMode(): 四值皆可且状态反映最新模式", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   try {
@@ -353,7 +353,7 @@ test("bridge.setMode(): 四值皆可且狀態反映最新模式", async () => {
     localWorker.__test.applyPickAuthorization([A]);
     for (const m of ["ask", "auto", "full", "ask"]) {
       const s = await localWorker.__test.handleBridgeSetMode(APP_EVENT, m);
-      assert.equal(s.mode, m, `mode 應為 ${m}`);
+      assert.equal(s.mode, m, `mode 应为 ${m}`);
       assert.equal(controller.status().mode, m);
     }
   } finally {
@@ -362,7 +362,7 @@ test("bridge.setMode(): 四值皆可且狀態反映最新模式", async () => {
   }
 });
 
-test("bridge.setMode(): 非法值 ⇒ E_BAD_ARGS，不打網路、不改狀態、不寫持久化", async () => {
+test("bridge.setMode(): 非法值 ⇒ E_BAD_ARGS，不打网路、不改状态、不写持久化", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   try {
@@ -374,17 +374,17 @@ test("bridge.setMode(): 非法值 ⇒ E_BAD_ARGS，不打網路、不改狀態�
     for (const bad of ["bogus", "", null, undefined, 123, "ASK ", "full2"]) {
       await assert.rejects(() => controller.setMode(bad), (err) => err && err.code === "E_BAD_ARGS", String(bad));
     }
-    assert.equal(calls.start.length, 0, "非法值不得啟動");
-    assert.equal(calls.stop, 0, "非法值不得停橋（不打網路）");
-    assert.equal(calls.written.length, 0, "非法值不得寫持久化");
-    assert.deepEqual(controller.status(), before, "狀態不得改變");
+    assert.equal(calls.start.length, 0, "非法值不得启动");
+    assert.equal(calls.stop, 0, "非法值不得停桥（不打网路）");
+    assert.equal(calls.written.length, 0, "非法值不得写持久化");
+    assert.deepEqual(controller.status(), before, "状态不得改变");
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(A, { recursive: true, force: true });
   }
 });
 
-test("bridge.setMode('off'): 停橋（等同 disable），enabled:false state:off mode:off", async () => {
+test("bridge.setMode('off'): 停桥（等同 disable），enabled:false state:off mode:off", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   try {
@@ -399,16 +399,16 @@ test("bridge.setMode('off'): 停橋（等同 disable），enabled:false state:of
     assert.equal(s.enabled, false);
     assert.equal(s.state, "off");
     assert.equal(s.mode, "off");
-    assert.ok(calls.stop > stopBefore, "off 必須停橋");
-    assert.equal(calls.start.length, startCount, "off 不得再啟動");
-    assert.deepEqual(calls.enabled.at(-1), false, "off 應記為未啟用");
+    assert.ok(calls.stop > stopBefore, "off 必须停桥");
+    assert.equal(calls.start.length, startCount, "off 不得再启动");
+    assert.deepEqual(calls.enabled.at(-1), false, "off 应记为未启用");
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(A, { recursive: true, force: true });
   }
 });
 
-test("bridge.setMode(非 off): 啟用並以 stop→start 重註冊，register 帶新模式", async () => {
+test("bridge.setMode(非 off): 启用并以 stop→start 重注册，register 带新模式", async () => {
   localWorker.authorizedRoots.clear();
   const A = mkTmpDir();
   try {
@@ -419,24 +419,24 @@ test("bridge.setMode(非 off): 啟用並以 stop→start 重註冊，register �
     const s1 = await controller.setMode("auto");
     assert.equal(s1.mode, "auto");
     assert.equal(s1.enabled, true);
-    assert.equal(calls.start.length, 1, "非 off 應啟動");
-    assert.ok(calls.stop >= 1, "啟動前應先停（stop→start）");
-    assert.equal(calls.start[0].modeProvider(), "auto", "register 應帶新模式");
+    assert.equal(calls.start.length, 1, "非 off 应启动");
+    assert.ok(calls.stop >= 1, "启动前应先停（stop→start）");
+    assert.equal(calls.start[0].modeProvider(), "auto", "register 应带新模式");
 
     const stopBefore = calls.stop;
     await controller.setMode("full");
-    assert.equal(calls.start.length, 2, "改模式應重註冊");
-    assert.ok(calls.stop > stopBefore, "重註冊前必須先停舊連線");
-    assert.equal(calls.start[1].modeProvider(), "full", "第二次 register 帶更新後的模式");
+    assert.equal(calls.start.length, 2, "改模式应重注册");
+    assert.ok(calls.stop > stopBefore, "重注册前必须先停旧连线");
+    assert.equal(calls.start[1].modeProvider(), "full", "第二次 register 带更新后的模式");
     assert.deepEqual(calls.written, ["auto", "full"], "每次 setMode 都持久化");
-    assert.equal(calls.enabled.at(-1), true, "非 off 應記為已啟用");
+    assert.equal(calls.enabled.at(-1), true, "非 off 应记为已启用");
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(A, { recursive: true, force: true });
   }
 });
 
-test("bridge.setMode(): 無授權根 ⇒ 記住模式且啟用，但不啟動（不自動授權）", async () => {
+test("bridge.setMode(): 无授权根 ⇒ 记住模式且启用，但不启动（不自动授权）", async () => {
   localWorker.authorizedRoots.clear();
   const { controller, calls } = modeController();
   localWorker.__test.setBridgeController(controller);
@@ -444,23 +444,23 @@ test("bridge.setMode(): 無授權根 ⇒ 記住模式且啟用，但不啟動（
   assert.equal(s.mode, "auto");
   assert.equal(s.enabled, true);
   assert.equal(s.state, "no_authorized_roots");
-  assert.equal(calls.start.length, 0, "無授權根不得啟動");
-  assert.equal(localWorker.authorizedRoots.size, 0, "不得自動授權任何路徑");
+  assert.equal(calls.start.length, 0, "无授权根不得启动");
+  assert.equal(localWorker.authorizedRoots.size, 0, "不得自动授权任何路径");
 });
 
-test("持久化：setMode 寫入後，重啟（新控制器讀同一來源）status().mode 仍是它", async () => {
+test("持久化：setMode 写入后，重启（新控制器读同一来源）status().mode 仍是它", async () => {
   localWorker.authorizedRoots.clear();
   const store = {};
   try {
     const c1 = modeController({ writeMode: (m) => { store.mode = m; } }).controller;
     await c1.setMode("full");
-    assert.equal(store.mode, "full", "setMode 應持久化 mode");
+    assert.equal(store.mode, "full", "setMode 应持久化 mode");
 
-    // 模擬重啟：新控制器以 readMode 還原同一持久化來源。
+    // 模拟重启：新控制器以 readMode 还原同一持久化来源。
     const c2 = modeController({ readMode: () => store.mode }).controller;
-    assert.equal(c2.status().mode, "full", "重啟後 status().mode 應為持久化值");
+    assert.equal(c2.status().mode, "full", "重启后 status().mode 应为持久化值");
 
-    // 非法持久化值 ⇒ 回預設 ask（fail-safe，不沿用壞值）。
+    // 非法持久化值 ⇒ 回预设 ask（fail-safe，不沿用坏值）。
     const c3 = modeController({ readMode: () => "garbage" }).controller;
     assert.equal(c3.status().mode, "ask");
   } finally {
@@ -468,7 +468,7 @@ test("持久化：setMode 寫入後，重啟（新控制器讀同一來源）sta
   }
 });
 
-test("bridge IPC：handleBridgeSetMode 非白名單來源一律拒", async () => {
+test("bridge IPC：handleBridgeSetMode 非白名单来源一律拒", async () => {
   localWorker.__test.setBridgeController(modeController().controller);
   const evil = { senderFrame: { url: "https://evil.example/x", parent: null } };
   await assert.rejects(() => localWorker.__test.handleBridgeSetMode(evil, "auto"), /E_UNTRUSTED_ORIGIN/);

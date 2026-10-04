@@ -1,19 +1,19 @@
 "use client";
 
-// REQ-D1 資產血統「溯源」抽屜：逐級鏈面板（每級＝類型＋時間＋縮圖或一行描述＋可點擊跳轉）。
+// REQ-D1 资产血统「溯源」抽屉：逐级链面板（每级＝类型＋时间＋缩图或一行描述＋可点击跳转）。
 //
-// 界面裁決對齊（09-22 暴君四刀④）：入口在資產卡與生成歷史卡的「溯源」鈕，
-// 展開右側鏈條面板；默認展開 3 層＋「繼續向上」；畫布不畫血統邊。
-// 兩態誠實（③）：「來源不明」＝本體沒有血統登記；「已刪除」＝登記了把手但池查無。
-// 池加載不完整的降級：查無只標「查無（本頁範圍）」，絕把加載失敗誤報成已刪除。
+// 界面裁决对齐（09-22 暴君四刀④）：入口在资产卡与生成历史卡的「溯源」钮，
+// 展开右侧链条面板；默认展开 3 层＋「继续向上」；画布不画血统边。
+// 两态诚实（③）：「来源不明」＝本体没有血统登记；「已删除」＝登记了把手但池查无。
+// 池加载不完整的降级：查无只标「查无（本页范围）」，绝把加载失败误报成已删除。
 //
-// 面板風格復用歷史頁既有語法（SaveCardDialog 同款）：lg-sheet 玻璃面板 + iOS 字級/圓角。
+// 面板风格复用历史页既有语法（SaveCardDialog 同款）：lg-sheet 玻璃面板 + iOS 字级/圆角。
 //
-// 文案紀律：本元件零硬編用戶可見字串，全部經 `text()` 取自 src/lib/ui-strings.ts
-// （守門件 src/lib/ui-strings.test.ts 去註解後禁 CJK）。lineage.ts 的中文類型標籤、
-// history-types.ts 的相對時間、節點 label 都是上游資料，原樣顯示。
+// 文案纪律：本元件零硬编用户可见字串，全部经 `text()` 取自 src/lib/ui-strings.ts
+// （守门件 src/lib/ui-strings.test.ts 去注解后禁 CJK）。lineage.ts 的中文类型标签、
+// history-types.ts 的相对时间、节点 label 都是上游资料，原样显示。
 //
-// 本元件不得殘留硬編用戶可見字串。
+// 本元件不得残留硬编用户可见字串。
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -32,33 +32,33 @@ import {
 import type { LineageRecordView, LineageTreeNode } from "@/lib/lineage";
 
 export interface LineageDrawerProps {
-  /** 正在看的那條記錄（歷史卡或資產卡適配後的視圖）。 */
+  /** 正在看的那条记录（历史卡或资产卡适配后的视图）。 */
   host: LineageRecordView;
-  /** 宿主類型文案（"生成记录" / "资产卡"），標題行顯示。 */
+  /** 宿主类型文案（"生成记录" / "资产卡"），标题行显示。 */
   hostKindLabel: string;
   onClose: () => void;
   /**
-   * 逐級跳轉：宿主能把該記錄打開到自己的視圖（歷史頁開灯箱）時返回 true 並由宿主關閉抽屜。
-   * 返回 false（例如卡記錄在歷史頁沒有落點）時抽屜就地鉆入該級鏈條。
+   * 逐级跳转：宿主能把该记录打开到自己的视图（历史页开灯箱）时返回 true 并由宿主关闭抽屉。
+   * 返回 false（例如卡记录在历史页没有落点）时抽屉就地钻入该级链条。
    */
   onJump?: (view: LineageRecordView) => boolean;
 }
 
-/** 節點行從根到葉的縮進（px）；三層鏈在 320px 面板裡仍可掃讀。 */
+/** 节点行从根到叶的缩进（px）；三层链在 320px 面板里仍可扫读。 */
 const ROW_INDENT_PX = 14;
 
-/** 「繼續向上」的硬頂：12 層之後的病態鏈用「更深鏈條未展開」收口，不給無限按鈕。 */
+/** 「继续向上」的硬顶：12 层之后的病态链用「更深链条未展开」收口，不给无限按钮。 */
 const MAX_VISIBLE_DEPTH = 12;
 
 function nodeKindLabel(node: LineageTreeNode): string {
   return node.link ? LINEAGE_KIND_LABEL[node.link.kind] : text("lineage.kind.root");
 }
 
-/** 狀態徽章：話術鍵（文字只在 ui-strings.ts 一處），池不完整時「查無」不得說成「已刪除」。 */
+/** 状态徽章：话术键（文字只在 ui-strings.ts 一处），池不完整时「查无」不得说成「已删除」。 */
 function statusBadgeOf(node: LineageTreeNode, poolComplete: boolean): { key: UiStringKey; tone: "muted" | "amber" | "neutral" } | null {
   switch (node.status) {
     case "deleted":
-      // 池不完整時不得把「加載失敗／範圍外」說成「已刪除」。
+      // 池不完整时不得把「加载失败／范围外」说成「已删除」。
       return poolComplete
         ? { key: "lineage.status.deleted", tone: "amber" }
         : { key: "lineage.status.unscanned", tone: "muted" };
@@ -155,14 +155,14 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
   const [mounted, setMounted] = useState(false);
   const titleId = useId();
   const [visibleDepth, setVisibleDepth] = useState(LINEAGE_DEFAULT_DEPTH);
-  /** 鉆入棧：末尾為當前鏈條的根（宿主記錄在 index 0）。 */
+  /** 钻入栈：末尾为当前链条的根（宿主记录在 index 0）。 */
   const [rootStack, setRootStack] = useState<LineageRecordView[]>([host]);
   const [poolState, setPoolState] = useState<{ status: "loading" | "ready"; data: LineagePoolLoadResult | null }>({
     status: "loading",
     data: null,
   });
   useEffect(() => setMounted(true), []);
-  // host 變化（換卡重開）重置鉆入與深度。
+  // host 变化（换卡重开）重置钻入与深度。
   useEffect(() => {
     setRootStack([host]);
     setVisibleDepth(LINEAGE_DEFAULT_DEPTH);
@@ -202,7 +202,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
     if (!pool || !node.jumpTo) return;
     const view = pool.find(node.jumpTo.jobId, node.jumpTo.assetId);
     if (!view) return;
-    if (onJump?.(view)) return; // 宿主已把視圖帶到該記錄，抽屜由宿主負責關閉。
+    if (onJump?.(view)) return; // 宿主已把视图带到该记录，抽屉由宿主负责关闭。
     setRootStack((stack) => [...stack, view]);
   }, [pool, onJump]);
 
@@ -301,7 +301,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
   );
 }
 
-/** 前序展平（不插入佔位行——深度限制由 buildLineageTree 的 pruned 節點誠實表達）。 */
+/** 前序展平（不插入占位行——深度限制由 buildLineageTree 的 pruned 节点诚实表达）。 */
 export function collectVisibleRows(tree: LineageTreeNode): LineageTreeNode[] {
   const rows: LineageTreeNode[] = [];
   const walk = (node: LineageTreeNode) => {

@@ -200,8 +200,8 @@ export async function setGatewayUserImageQuota(
 }
 
 /**
- * 按原始 quota 單位精確調整用戶額度（記帳投影用，不做張數取整）。
- * deltaQuota 負數=扣減。上游 /api/user/manage 的 value 以 1 quota 為單位。
+ * 按原始 quota 单位精确调整用户额度（记帐投影用，不做张数取整）。
+ * deltaQuota 负数=扣减。上游 /api/user/manage 的 value 以 1 quota 为单位。
  */
 export async function adjustGatewayUserQuotaExact(userId: number, deltaQuota: number): Promise<void> {
   if (!Number.isFinite(deltaQuota) || deltaQuota === 0) return;

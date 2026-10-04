@@ -11,7 +11,7 @@ import {
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(status: number, message: string, code: string, traceId: string, key?: BizApiKey) {
   let response: Response = NextResponse.json(
@@ -23,11 +23,11 @@ function errorResponse(status: number, message: string, code: string, traceId: s
 }
 
 /**
- * GET /v1/queue — 目前佇列中（pending/running）的任務，限該金鑰自己的 tenant。
+ * GET /v1/queue — 目前伫列中（pending/running）的任务，限该金钥自己的 tenant。
  *
- * 診斷面語義與 ComfyUI 的 /queue 一致：聚合平台轉售時需要知道
- * 「我送出去、但還沒出結果的單子現在卡在哪」。只列未終結的狀態，
- * 已結束（succeeded/failed/cancelled/refunded）的請看 /v1/history。
+ * 诊断面语义与 ComfyUI 的 /queue 一致：聚合平台转售时需要知道
+ * 「我送出去、但还没出结果的单子现在卡在哪」。只列未终结的状态，
+ * 已结束（succeeded/failed/cancelled/refunded）的请看 /v1/history。
  */
 export async function GET(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);

@@ -1,18 +1,18 @@
-// B 端批量生成編排層：POST /v1/batches、GET /v1/batches/:id、
-// GET /v1/batches/:id/reconciliation 的資料源。
+// B 端批量生成编排层：POST /v1/batches、GET /v1/batches/:id、
+// GET /v1/batches/:id/reconciliation 的资料源。
 //
-// 鐵律：batch 不建第二套提交/計費/調度——每個 item 都走同一條
-// submitGenerationCommand（本模組只產出餵給它的 command 欄位）；鑑權/限流
-// 在路由層復用 authenticateBizApiKey / addRateLimitHeaders。
+// 铁律：batch 不建第二套提交/计费/调度——每个 item 都走同一条
+// submitGenerationCommand（本模组只产出喂给它的 command 栏位）；鉴权/限流
+// 在路由层复用 authenticateBizApiKey / addRateLimitHeaders。
 //
-// 刻意沿用 status-query.ts 的「純函式 + 可注入 sql」兩半結構：
-//  - 純函式（validateBatchRequestBody / validateBatchItem / computeBatchAggregate /
+// 刻意沿用 status-query.ts 的「纯函式 + 可注入 sql」两半结构：
+//  - 纯函式（validateBatchRequestBody / validateBatchItem / computeBatchAggregate /
 //    buildBatchItems / computeBatchFailureBreakdown / batchRequestHash）不吃 DB，
-//    可被單測鎖住 shape 與數學；
-//  - 查詢函式接收可注入的 sql，測試只驗證純函式，不留真 DB 依賴。
+//    可被单测锁住 shape 与数学；
+//  - 查询函式接收可注入的 sql，测试只验证纯函式，不留真 DB 依赖。
 //
-// max_in_flight 是聲明性欄位：可承諾併發由平台 supplier_lease / scheduler
-// 的池化併發治理（全量提交 + scheduler 排隊），batch 不自建節流器。
+// max_in_flight 是声明性栏位：可承诺并发由平台 supplier_lease / scheduler
+// 的池化并发治理（全量提交 + scheduler 排队），batch 不自建节流器。
 
 import { randomUUID } from "node:crypto";
 import { isModelAllowedForKey, type BizApiKey } from "@/lib/biz-api-keys";
@@ -34,23 +34,23 @@ import { taskStatus } from "./task-response";
 import { MAX_REQUEST_BATCH_COUNT } from "./request-limits";
 import type { GenerationJob, GenerationJobStatus, GenerationWorkflow } from "./types";
 
-// ─────────────────────────────────────────── 常量（可調）
+// ─────────────────────────────────────────── 常量（可调）
 
-/** 單批上限。日萬級任務 = 多批提交；上限是常量，需要時上調即可。 */
+/** 单批上限。日万级任务 = 多批提交；上限是常量，需要时上调即可。 */
 export const MAX_BATCH_SIZE = 100;
-/** max_in_flight 的合法區間上限（聲明性欄位，實際併發由平台治理）。 */
+/** max_in_flight 的合法区间上限（声明性栏位，实际并发由平台治理）。 */
 export const MAX_IN_FLIGHT_LIMIT = 1_000;
-/** 與 /v1/images/generations、/v1/videos/generations 逐項對齊的約束。 */
+/** 与 /v1/images/generations、/v1/videos/generations 逐项对齐的约束。 */
 export const MAX_BATCH_ITEM_PROMPT_LENGTH = 4_000;
-/** 逐項 `n` 上限＝單點常數（request-limits.ts），與 `/v1/models` 的
- *  `x_capabilities.maxBatchCount` 同一顆（D23：揭露值＝擋人值）。 */
+/** 逐项 `n` 上限＝单点常数（request-limits.ts），与 `/v1/models` 的
+ *  `x_capabilities.maxBatchCount` 同一颗（D23：揭露值＝挡人值）。 */
 export const MAX_BATCH_ITEM_N = MAX_REQUEST_BATCH_COUNT;
-/** 與 /v1/images/generations 的 SUPPORTED_SIZES 對齊（上游只接受這三種）。 */
+/** 与 /v1/images/generations 的 SUPPORTED_SIZES 对齐（上游只接受这三种）。 */
 const BATCH_IMAGE_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536"]);
 
-// ─────────────────────────────────────────── 純邏輯（可單測，不吃 DB）
+// ─────────────────────────────────────────── 纯逻辑（可单测，不吃 DB）
 
-/** 對外錯誤體：與既有 error.type/code/param 形狀對齊（trace_id 由路由補）。 */
+/** 对外错误体：与既有 error.type/code/param 形状对齐（trace_id 由路由补）。 */
 export interface BatchItemErrorBody {
   message: string;
   type: "invalid_request_error" | "permission_error" | "api_error";
@@ -58,7 +58,7 @@ export interface BatchItemErrorBody {
   param: string | null;
 }
 
-/** 通過逐項驗證、可直接餵給 submitGenerationCommand 的 item 計畫。 */
+/** 通过逐项验证、可直接喂给 submitGenerationCommand 的 item 计画。 */
 export interface BatchItemPlan {
   index: number;
   kind: "image_generate" | "video_generate";
@@ -88,7 +88,7 @@ function itemError(
   return { ok: false, error: { message, type, code, param: null } };
 }
 
-/** size 參數：兼容 "16:9" 與 "1920x1080" 兩種寫法（與 /v1/videos/generations 同規則）。 */
+/** size 参数：兼容 "16:9" 与 "1920x1080" 两种写法（与 /v1/videos/generations 同规则）。 */
 function aspectRatioFromVideoSize(size?: string): string | undefined {
   if (!size) return undefined;
   if (/^\d+x\d+$/.test(size)) return aspectRatioFromImageSize(size);
@@ -105,7 +105,7 @@ function optionalBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
-/** kind 判別：顯式 kind 優先；無 kind 時由影片專屬欄位判別，否則視為圖片。 */
+/** kind 判别：显式 kind 优先；无 kind 时由影片专属栏位判别，否则视为图片。 */
 export function inferBatchItemKind(raw: Record<string, unknown>): "image" | "video" | null {
   if (raw.kind !== undefined) {
     if (typeof raw.kind !== "string") return null;
@@ -119,12 +119,12 @@ export function inferBatchItemKind(raw: Record<string, unknown>): "image" | "vid
 }
 
 /**
- * 逐項驗證：對齊 /v1/images/generations 與 /v1/videos/generations 的欄位規則。
- * 單項失敗不炸整批——呼叫方把 error 逐項回給客戶。
+ * 逐项验证：对齐 /v1/images/generations 与 /v1/videos/generations 的栏位规则。
+ * 单项失败不炸整批——呼叫方把 error 逐项回给客户。
  */
 export function validateBatchItem(raw: unknown, index: number, apiKey: Pick<BizApiKey, "allowedModels">): BatchItemValidation {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return itemError("批量項必須是物件。", "invalid_item");
+    return itemError("批量项必须是物件。", "invalid_item");
   }
   const item = raw as Record<string, unknown>;
   const kind = inferBatchItemKind(item);
@@ -138,7 +138,7 @@ export function validateBatchItem(raw: unknown, index: number, apiKey: Pick<BizA
 
   const rawModelId = typeof item.model === "string" && item.model ? item.model : "";
   if (!rawModelId) return itemError("缺少必填参数 model。", "missing_model");
-  // 宽容解析：与單任務端點同一套顯示名歸一（如 "seedream 2.0" → seedance 風格 id）。
+  // 宽容解析：与单任务端点同一套显示名归一（如 "seedream 2.0" → seedance 风格 id）。
   const modelId = resolveGenerationModelId(rawModelId) ?? rawModelId;
 
   if (kind === "image" && !isSupportedImageModel(modelId)) {
@@ -168,7 +168,7 @@ export function validateBatchItem(raw: unknown, index: number, apiKey: Pick<BizA
     const qualityMode = item.quality === "hd" || item.quality === "high" ? "quality" : "fast";
     const responseFormat = item.response_format === "url" ? "url" : "b64_json";
 
-    // ControlNet：與 /v1/images/generations 同一套清洗規則，非法形狀逐項拒絕。
+    // ControlNet：与 /v1/images/generations 同一套清洗规则，非法形状逐项拒绝。
     let workflow: GenerationWorkflow | null = null;
     if (item.control_nets !== undefined) {
       const normalized = normalizeControlNets(item.control_nets);
@@ -202,7 +202,7 @@ export function validateBatchItem(raw: unknown, index: number, apiKey: Pick<BizA
     };
   }
 
-  // video：時長/音訊/寬高比交給 catalog 歸一化（非法值回默認，合法值透傳）。
+  // video：时长/音讯/宽高比交给 catalog 归一化（非法值回默认，合法值透传）。
   const normalized = normalizeGenerationConfig(modelId, {
     aspectRatio: aspectRatioFromVideoSize(typeof item.size === "string" ? item.size : undefined),
     durationSeconds: item.duration_seconds === undefined ? undefined : Number(item.duration_seconds),
@@ -224,7 +224,7 @@ export function validateBatchItem(raw: unknown, index: number, apiKey: Pick<BizA
         durationSeconds: normalized.config.durationSeconds,
         generateAudio: normalized.config.generateAudio,
       },
-      // 影片上游只返回 URL（無 b64 通道），與 /v1/videos/generations 一致強制 url。
+      // 影片上游只返回 URL（无 b64 通道），与 /v1/videos/generations 一致强制 url。
       responseFormat: "url",
       callbackUrl,
       requestedCount: rawN,
@@ -241,7 +241,7 @@ export type BatchRequestBodyValidation =
   | { ok: true; requests: unknown[]; maxInFlight: number | null }
   | { ok: false; message: string; code: string };
 
-/** 批級結構驗證：requests 形狀與批量上限（超限整批 4xx，明確錯誤碼）。 */
+/** 批级结构验证：requests 形状与批量上限（超限整批 4xx，明确错误码）。 */
 export function validateBatchRequestBody(body: unknown): BatchRequestBodyValidation {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, message: "请求体格式不正确。", code: "invalid_request_body" };
@@ -275,17 +275,17 @@ export function validateBatchRequestBody(body: unknown): BatchRequestBodyValidat
   return { ok: true, requests: raw.requests, maxInFlight };
 }
 
-/** 批級請求雜湊：規範化（鍵序無關）後取 sha256，冪等重放比對用。 */
+/** 批级请求杂凑：规范化（键序无关）后取 sha256，幂等重放比对用。 */
 export function batchRequestHash(requests: unknown[]): string {
   return generationRequestHash({ requests });
 }
 
-/** 批內 item 的確定性冪等鍵：崩潰後重放同一批時，已提交項不會重複建任務/扣費。 */
+/** 批内 item 的确定性幂等键：崩溃后重放同一批时，已提交项不会重复建任务/扣费。 */
 export function batchItemIdempotencyKey(batchId: string, index: number): string {
   return "batch:" + batchId + ":item:" + index;
 }
 
-// ─────────────────────────────────────────── 批記錄與聚合（純邏輯）
+// ─────────────────────────────────────────── 批记录与聚合（纯逻辑）
 
 export interface BatchFailedItemRecord {
   index: number;
@@ -343,13 +343,13 @@ export function mapGenerationBatch(row: Row): GenerationBatch {
   };
 }
 
-/** 終結投影（taskStatus 的輸出）：對賬與「批是否做完」的判定基準。 */
+/** 终结投影（taskStatus 的输出）：对账与「批是否做完」的判定基准。 */
 const TERMINAL_TASK_STATES: ReadonlySet<string> = new Set(["succeeded", "failed", "cancelled", "refunded"]);
 
 export interface BatchStatusCounts {
   total: number;
   submitted: number;
-  /** total - submitted：驗證/提交失敗、永遠不會變成任務的項。 */
+  /** total - submitted：验证/提交失败、永远不会变成任务的项。 */
   unsubmitted: number;
   pending: number;
   running: number;
@@ -361,13 +361,13 @@ export interface BatchStatusCounts {
 }
 
 export interface BatchBillingSummary {
-  /** 全部已提交項的預留金額合計。 */
+  /** 全部已提交项的预留金额合计。 */
   reserved_total: number;
-  /** 成功項計費合計（失敗退費=按成功計費，只有 succeeded 真正落賬）。 */
+  /** 成功项计费合计（失败退费=按成功计费，只有 succeeded 真正落账）。 */
   charged_total: number;
-  /** 已終結且未成功項的退回合計。 */
+  /** 已终结且未成功项的退回合计。 */
   refunded_total: number;
-  /** 尚未終結項的預留（在途）合計。 */
+  /** 尚未终结项的预留（在途）合计。 */
   pending_total: number;
 }
 
@@ -375,14 +375,14 @@ export interface BatchAggregate {
   status: "open" | "completed" | "cancelled";
   counts: BatchStatusCounts;
   billing: BatchBillingSummary;
-  /** 全部已提交項都終結（部分成功語義：succeeded 項隨時可經 /v1/images/:id/result 取件）。 */
+  /** 全部已提交项都终结（部分成功语义：succeeded 项随时可经 /v1/images/:id/result 取件）。 */
   all_terminal: boolean;
 }
 
 /**
- * 聚合視圖數學：counts 按 OpenAI 相容投影（task_state）分桶；
- * billing 以 job.billingAmount 為準——reserve 發生在提交時、成功 commit、
- * 失敗 refund，因此 charged = succeeded 項合計，refunded = 非成功終結項合計。
+ * 聚合视图数学：counts 按 OpenAI 相容投影（task_state）分桶；
+ * billing 以 job.billingAmount 为准——reserve 发生在提交时、成功 commit、
+ * 失败 refund，因此 charged = succeeded 项合计，refunded = 非成功终结项合计。
  */
 export function computeBatchAggregate(batch: GenerationBatch, jobs: GenerationJob[]): BatchAggregate {
   const counts: BatchStatusCounts = {
@@ -416,7 +416,7 @@ export function computeBatchAggregate(batch: GenerationBatch, jobs: GenerationJo
     else if (TERMINAL_TASK_STATES.has(state)) refunded += job.billingAmount;
     else pending += job.billingAmount;
   }
-  // 未提交項（驗證失敗）從未預留金額，不進任何金額桶。
+  // 未提交项（验证失败）从未预留金额，不进任何金额桶。
   const allTerminal = jobs.every((job) => TERMINAL_TASK_STATES.has(taskStatus(job)));
   return {
     status: batch.status === "cancelled" ? "cancelled" : allTerminal ? "completed" : "open",
@@ -431,7 +431,7 @@ export function computeBatchAggregate(batch: GenerationBatch, jobs: GenerationJo
   };
 }
 
-/** 批視圖的逐項卡片：已提交項帶任務快照，未提交項帶當時的拒絕原因。 */
+/** 批视图的逐项卡片：已提交项带任务快照，未提交项带当时的拒绝原因。 */
 export interface BatchItemView {
   index: number;
   accepted: boolean;
@@ -441,7 +441,7 @@ export interface BatchItemView {
   task_state: string | null;
   model: string | null;
   kind: string | null;
-  /** 成功才計費：只有 succeeded 為 true。 */
+  /** 成功才计费：只有 succeeded 为 true。 */
   billed: boolean;
   failure_class: string | null;
   failure_detail: string | null;
@@ -495,7 +495,7 @@ function toRejectedBatchItemView(failed: BatchFailedItemRecord): BatchItemView {
   };
 }
 
-/** 批內逐項視圖（按 index 升序）：jobs + 沒有對應 job 的拒絕項快照。 */
+/** 批内逐项视图（按 index 升序）：jobs + 没有对应 job 的拒绝项快照。 */
 export function buildBatchItems(batch: GenerationBatch, jobs: GenerationJob[]): BatchItemView[] {
   const items: BatchItemView[] = jobs.map(toBatchItemView);
   const submittedIndexes = new Set(jobs.map((job) => job.batchIndex));
@@ -506,7 +506,7 @@ export function buildBatchItems(batch: GenerationBatch, jobs: GenerationJob[]): 
   return items.sort((left, right) => left.index - right.index);
 }
 
-/** 對賬的失敗原因分佈：job 的 failure_class + 未提交項的驗證錯誤碼，各計數。 */
+/** 对账的失败原因分布：job 的 failure_class + 未提交项的验证错误码，各计数。 */
 export interface BatchFailureBreakdownItem {
   failure_class: string;
   count: number;
@@ -528,7 +528,7 @@ export function computeBatchFailureBreakdown(batch: GenerationBatch, jobs: Gener
     .sort((left, right) => right.count - left.count || left.failure_class.localeCompare(right.failure_class));
 }
 
-/** 對賬逐項行：含計費金額（對賬端點專用；診斷面仍不帶計費字段）。 */
+/** 对账逐项行：含计费金额（对账端点专用；诊断面仍不带计费字段）。 */
 export interface BatchReconciliationItem {
   index: number;
   task_id: string | null;
@@ -539,7 +539,7 @@ export interface BatchReconciliationItem {
   billed: boolean;
   billing_amount: number;
   failure_class: string | null;
-  /** 截斷到 200 字符：對賬要原因分類，不要整段上游噪聲。 */
+  /** 截断到 200 字符：对账要原因分类，不要整段上游噪声。 */
   failure_detail: string | null;
   error_code: string | null;
   created_at: string | null;
@@ -589,7 +589,7 @@ export function buildBatchReconciliationItems(batch: GenerationBatch, jobs: Gene
   return items.sort((left, right) => left.index - right.index);
 }
 
-// ─────────────────────────────────────────── 查詢層（sql 可注入）
+// ─────────────────────────────────────────── 查询层（sql 可注入）
 
 export class BatchIdempotencyConflictError extends Error {
   constructor(readonly batchId: string) {
@@ -608,8 +608,8 @@ export interface CreateGenerationBatchInput {
 }
 
 /**
- * 冪等建立批記錄：與 createGenerationJob 同一套 ON CONFLICT 模式。
- * 重放（同一 tenant + 同一 Idempotency-Key）回同一批；內容雜湊不同則 409。
+ * 幂等建立批记录：与 createGenerationJob 同一套 ON CONFLICT 模式。
+ * 重放（同一 tenant + 同一 Idempotency-Key）回同一批；内容杂凑不同则 409。
  */
 export async function createGenerationBatch(
   input: CreateGenerationBatchInput,
@@ -659,7 +659,7 @@ export async function listGenerationBatchJobs(
   return rows.map(mapGenerationJob);
 }
 
-/** 逐項驗證/提交失敗快照落盤（冪等重放時以最新一次的驗證結果覆寫）。 */
+/** 逐项验证/提交失败快照落盘（幂等重放时以最新一次的验证结果覆写）。 */
 export async function recordGenerationBatchFailedItems(
   batchId: string,
   failedItems: BatchFailedItemRecord[],
@@ -673,8 +673,8 @@ export async function recordGenerationBatchFailedItems(
 }
 
 /**
- * 讀取時惰性收斂批狀態：全部已提交項終結 → completed（寫入 completed_at）。
- * 批本身不參與任務狀態機，這是編排層唯一的狀態寫入。
+ * 读取时惰性收敛批状态：全部已提交项终结 → completed（写入 completed_at）。
+ * 批本身不参与任务状态机，这是编排层唯一的状态写入。
  */
 export async function finalizeGenerationBatchIfTerminal(
   batch: GenerationBatch,

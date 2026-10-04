@@ -84,7 +84,7 @@ function jsonResponse(status: number, payload: unknown): Response {
   });
 }
 
-test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出片", async () => {
+test("sd4 族成功：create → 轮询 queued → completed → data[0].url 出片", async () => {
   const calls: Array<{ method: string; url: string }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -120,7 +120,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
   }
 });
 
-test("create body：model 按 720p→sd12、resolution/duration/ratio/generate_audio 透傳", async () => {
+test("create body：model 按 720p→sd12、resolution/duration/ratio/generate_audio 透传", async () => {
   let captured: unknown = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -204,7 +204,7 @@ test("seedance-2.5-480p：模型映射 + 30s 时长放行", async () => {
   }
 });
 
-test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片 + 时长範圍", async () => {
+test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片 + 时长范围", async () => {
   let captured: unknown = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -212,7 +212,7 @@ test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片
       captured = init?.body;
       return jsonResponse(200, { id: TASK_ID, object: "video", status: "queued", progress: 0 });
     }
-    // xiaoyxiao 形狀：completed 只有頂層 url（無 video_url / metadata / data[]）
+    // xiaoyxiao 形状：completed 只有顶层 url（无 video_url / metadata / data[]）
     return jsonResponse(200, {
       id: TASK_ID,
       object: "video",
@@ -234,7 +234,7 @@ test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片
       videoInput({ modelId: "minimax-h3", resolution: "720p" }),
     );
     const body = JSON.parse(String(captured)) as Record<string, unknown>;
-    // 上游模型名走 capability 行顯式攜帶，不落靜態分辨率表
+    // 上游模型名走 capability 行显式携带，不落静态分辨率表
     assert.equal(body.model, "minimax-h3-933-2k-支持真人");
     assert.equal(body.resolution, "720p");
     assert.equal(body.duration, 5);
@@ -246,7 +246,7 @@ test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片
   }
 });
 
-test("xiaoyxiao minimax-h3：時長超出範圍（16s）直接 400，不觸發上游", async () => {
+test("xiaoyxiao minimax-h3：时长超出范围（16s）直接 400，不触发上游", async () => {
   let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -282,7 +282,7 @@ test("xiaoyxiao minimax-h3：時長超出範圍（16s）直接 400，不觸發�
 });
 
 test("INC-VIDEO-0927：平台 seedance 不再映射到已下架的 sd4-* 上游名", async () => {
-  // 上游 2026-09-27 實查：sd4-* 整族下架，提交直接回
+  // 上游 2026-09-27 实查：sd4-* 整族下架，提交直接回
   // "model sd4-seedance-2.0 is not a public model name"。
   const cases: Array<{ modelId: string; resolution: string; expect: string }> = [
     { modelId: "seedance-2.0", resolution: "480p", expect: "sd12-seedance-2.0" },
@@ -310,7 +310,7 @@ test("INC-VIDEO-0927：平台 seedance 不再映射到已下架的 sd4-* 上游�
         videoInput({ modelId, resolution, workflow: { references: [], metadata: {}, durationSeconds: 4, generateAudio: false } }),
       );
       const body = JSON.parse(String(captured)) as Record<string, unknown>;
-      assert.equal(body.model, expect, `${modelId}/${resolution} 應映射到 ${expect}`);
+      assert.equal(body.model, expect, `${modelId}/${resolution} 应映射到 ${expect}`);
       assert.ok(!String(body.model).startsWith("sd4-"), `${modelId}/${resolution} 不得再用已下架的 sd4-* 名`);
     } finally {
       delete process.env.CANGYUANSUANLI_API_KEY;
@@ -319,7 +319,7 @@ test("INC-VIDEO-0927：平台 seedance 不再映射到已下架的 sd4-* 上游�
   }
 });
 
-test("參考圖透傳 reference_image_urls（≤4）", async () => {
+test("参考图透传 reference_image_urls（≤4）", async () => {
   let captured: unknown = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -354,7 +354,7 @@ test("參考圖透傳 reference_image_urls（≤4）", async () => {
   }
 });
 
-test("失敗：任務 failed 拋 SupplierRequestError 帶上游錯誤", async () => {
+test("失败：任务 failed 抛 SupplierRequestError 带上游错误", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, _init?: RequestInit) => {
     if (String(url).endsWith("/videos")) {
@@ -375,7 +375,7 @@ test("失敗：任務 failed 拋 SupplierRequestError 帶上游錯誤", async ()
   }
 });
 
-test("輸入校驗：duration 超出模型範圍直接 400（2.0 上限 15）", async () => {
+test("输入校验：duration 超出模型范围直接 400（2.0 上限 15）", async () => {
   process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
   try {
     await assert.rejects(
@@ -387,7 +387,7 @@ test("輸入校驗：duration 超出模型範圍直接 400（2.0 上限 15）", 
   }
 });
 
-test("輸入校驗：未註冊的解析度（如 4k）直接 400", async () => {
+test("输入校验：未注册的解析度（如 4k）直接 400", async () => {
   process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
   try {
     await assert.rejects(
@@ -399,7 +399,7 @@ test("輸入校驗：未註冊的解析度（如 4k）直接 400", async () => {
   }
 });
 
-test("drama sd25-30s：body 帶 seconds:30/duration:30/720p 且禁止 generate_audio", async () => {
+test("drama sd25-30s：body 带 seconds:30/duration:30/720p 且禁止 generate_audio", async () => {
   let captured: Record<string, unknown> | null = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -427,14 +427,14 @@ test("drama sd25-30s：body 帶 seconds:30/duration:30/720p 且禁止 generate_a
     assert.equal(captured.seconds, 30);
     assert.equal(captured.duration, 30);
     assert.equal(captured.resolution, "720p");
-    assert.equal("generate_audio" in captured, false, "drama 上游禁止 generate_audio 欄位");
+    assert.equal("generate_audio" in captured, false, "drama 上游禁止 generate_audio 栏位");
   } finally {
     delete process.env.DRAMA_API_KEY;
     globalThis.fetch = originalFetch;
   }
 });
 
-test("drama sd25-30s：duration ≠ 30 直接 400（30 秒固定檔門禁）", async () => {
+test("drama sd25-30s：duration ≠ 30 直接 400（30 秒固定档门禁）", async () => {
   process.env.DRAMA_API_KEY = "sk-drama-test";
   try {
     await assert.rejects(
@@ -450,7 +450,7 @@ test("drama sd25-30s：duration ≠ 30 直接 400（30 秒固定檔門禁）", a
   }
 });
 
-test("napi seed-2.0：body 帶 ratio/seconds、無 aspect_ratio/resolution/generate_audio、30s 放行", async () => {
+test("napi seed-2.0：body 带 ratio/seconds、无 aspect_ratio/resolution/generate_audio、30s 放行", async () => {
   let captured: Record<string, unknown> | null = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -476,18 +476,18 @@ test("napi seed-2.0：body 帶 ratio/seconds、無 aspect_ratio/resolution/gener
     assert.ok(captured);
     assert.equal(captured.model, "seed-2.0");
     assert.equal(captured.ratio, "16:9");
-    assert.equal(captured.seconds, "30", "napi seconds 必須是字串（上游 Go struct 拒收數字）");
+    assert.equal(captured.seconds, "30", "napi seconds 必须是字串（上游 Go struct 拒收数字）");
     assert.equal(captured.duration, 30);
-    assert.equal("aspect_ratio" in captured, false, "napi 族不帶 aspect_ratio");
-    assert.equal("resolution" in captured, false, "napi 族不帶 resolution");
-    assert.equal("generate_audio" in captured, false, "napi 族不帶 generate_audio");
+    assert.equal("aspect_ratio" in captured, false, "napi 族不带 aspect_ratio");
+    assert.equal("resolution" in captured, false, "napi 族不带 resolution");
+    assert.equal("generate_audio" in captured, false, "napi 族不带 generate_audio");
   } finally {
     delete process.env.NAPI_API_KEY;
     globalThis.fetch = originalFetch;
   }
 });
 
-test("napi seed-2.5：參考圖走 images 陣列、supplierModelId 渠道級短路", async () => {
+test("napi seed-2.5：参考图走 images 阵列、supplierModelId 渠道级短路", async () => {
   let captured: Record<string, unknown> | null = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -523,14 +523,14 @@ test("napi seed-2.5：參考圖走 images 陣列、supplierModelId 渠道級短�
     assert.ok(captured);
     assert.equal(captured.model, "seed-2.5");
     assert.deepEqual(captured.images, ["https://img.example.com/a.png", "https://img.example.com/b.png"]);
-    assert.equal("reference_image_urls" in captured, false, "napi 參考圖欄位是 images");
+    assert.equal("reference_image_urls" in captured, false, "napi 参考图栏位是 images");
   } finally {
     delete process.env.NAPI_API_KEY;
     globalThis.fetch = originalFetch;
   }
 });
 
-test("napi：completed 無公網 URL 時走 /content 鑑權下載回 base64", async () => {
+test("napi：completed 无公网 URL 时走 /content 鉴权下载回 base64", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
@@ -542,7 +542,7 @@ test("napi：completed 無公網 URL 時走 /content 鑑權下載回 base64", as
     }
     if (u.endsWith(`/videos/${TASK_ID}/content`)) {
       const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
-      assert.equal(auth, "Bearer sk-napi-test", "content 下載必須帶 Bearer 鑑權");
+      assert.equal(auth, "Bearer sk-napi-test", "content 下载必须带 Bearer 鉴权");
       return new Response(new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), {
         status: 200,
         headers: { "Content-Type": "video/mp4" },
@@ -558,7 +558,7 @@ test("napi：completed 無公網 URL 時走 /content 鑑權下載回 base64", as
       videoInput({ modelId: "seedance-2.0", workflow: { references: [], metadata: {}, durationSeconds: 15, generateAudio: false } }),
     );
     assert.equal(output.url, null);
-    assert.ok(output.base64 && output.base64.length > 0, "應回傳 base64 成品");
+    assert.ok(output.base64 && output.base64.length > 0, "应回传 base64 成品");
     assert.equal(output.providerTaskId, TASK_ID);
   } finally {
     delete process.env.NAPI_API_KEY;
@@ -566,7 +566,7 @@ test("napi：completed 無公網 URL 時走 /content 鑑權下載回 base64", as
   }
 });
 
-test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64", async () => {
+test("drama sd25-30s：completed 无 URL 时走 /content 鉴权下载回 base64", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
@@ -578,7 +578,7 @@ test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64"
     }
     if (u.endsWith(`/videos/${TASK_ID}/content`)) {
       const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
-      assert.equal(auth, "Bearer sk-drama-test", "content 下載必須帶 Bearer 鑑權");
+      assert.equal(auth, "Bearer sk-drama-test", "content 下载必须带 Bearer 鉴权");
       return new Response(new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), {
         status: 200,
         headers: { "Content-Type": "video/mp4" },
@@ -594,7 +594,7 @@ test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64"
       videoInput({ modelId: "seedance-2.5-30s", workflow: { references: [], metadata: {}, durationSeconds: 30, generateAudio: false } }),
     );
     assert.equal(output.url, null);
-    assert.ok(output.base64 && output.base64.length > 0, "應回傳 base64 成品");
+    assert.ok(output.base64 && output.base64.length > 0, "应回传 base64 成品");
     assert.equal(output.providerTaskId, TASK_ID);
   } finally {
     delete process.env.DRAMA_API_KEY;
@@ -602,9 +602,9 @@ test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64"
   }
 });
 
-test("openaiVideoMaxWaitMs：預設 20 分鐘，可 OPENAI_VIDEO_MAX_WAIT_MS 覆寫（下限 60s）", () => {
-  // INC-VIDEO-0927：舊值 540s 會誤殺慢而健康的影片上游（實錄 timeout after 540s,
-  // last status in_progress；napi 實測單次 attempt 最長 993.9s）。
+test("openaiVideoMaxWaitMs：预设 20 分钟，可 OPENAI_VIDEO_MAX_WAIT_MS 覆写（下限 60s）", () => {
+  // INC-VIDEO-0927：旧值 540s 会误杀慢而健康的影片上游（实录 timeout after 540s,
+  // last status in_progress；napi 实测单次 attempt 最长 993.9s）。
   const original = process.env.OPENAI_VIDEO_MAX_WAIT_MS;
   try {
     delete process.env.OPENAI_VIDEO_MAX_WAIT_MS;
@@ -612,7 +612,7 @@ test("openaiVideoMaxWaitMs：預設 20 分鐘，可 OPENAI_VIDEO_MAX_WAIT_MS 覆
     process.env.OPENAI_VIDEO_MAX_WAIT_MS = "1800000";
     assert.equal(openaiVideoMaxWaitMs(), 1_800_000);
     process.env.OPENAI_VIDEO_MAX_WAIT_MS = "1000";
-    assert.equal(openaiVideoMaxWaitMs(), 1_200_000, "低於 60s 的下限值忽略，回預設");
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000, "低于 60s 的下限值忽略，回预设");
     process.env.OPENAI_VIDEO_MAX_WAIT_MS = "abc";
     assert.equal(openaiVideoMaxWaitMs(), 1_200_000);
   } finally {
@@ -621,8 +621,8 @@ test("openaiVideoMaxWaitMs：預設 20 分鐘，可 OPENAI_VIDEO_MAX_WAIT_MS 覆
   }
 });
 
-test("xiaoyxiao 實彈形狀：completed 響應只有頂層 url（無 video_url/metadata/data）也能出片", async () => {
-  // 2026-09-27 實查 xiaoyxiao /v1/videos/{id} completed 響應：
+test("xiaoyxiao 实弹形状：completed 响应只有顶层 url（无 video_url/metadata/data）也能出片", async () => {
+  // 2026-09-27 实查 xiaoyxiao /v1/videos/{id} completed 响应：
   // {"id":"task_…","object":"video","model":"seedance-2.0-mini-deal","status":"completed",
   //  "progress":100,"url":"https://dream-media.tos-cn-beijing.volces.com/videos/<uuid>/0.mp4"}
   const originalFetch = globalThis.fetch;
@@ -652,7 +652,7 @@ test("xiaoyxiao 實彈形狀：completed 響應只有頂層 url（無 video_url/
   }
 });
 
-test("上游 403 HTML 頁（nginx 封 IP）→ 401 鑑權失敗讓帳號冷卻換道，不洗成 502 overloaded", async () => {
+test("上游 403 HTML 页（nginx 封 IP）→ 401 鉴权失败让帐号冷却换道，不洗成 502 overloaded", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
     new Response("<html><head><title>403 Forbidden</title></head></html>", {
@@ -674,10 +674,10 @@ test("上游 403 HTML 頁（nginx 封 IP）→ 401 鑑權失敗讓帳號冷卻�
 });
 
 for (const [label, resultUrls, expected] of [
-  ["陣列", ["", "ftp://bad", "https://gway.example.com/out/a.mp4", "https://gway.example.com/out/b.mp4"], "https://gway.example.com/out/a.mp4"],
+  ["阵列", ["", "ftp://bad", "https://gway.example.com/out/a.mp4", "https://gway.example.com/out/b.mp4"], "https://gway.example.com/out/a.mp4"],
   ["字串", "https://gway.example.com/out/s.mp4", "https://gway.example.com/out/s.mp4"],
 ] as const) {
-  test(`gway 形狀：completed 只有 result_urls（${label}）也能出片`, async () => {
+  test(`gway 形状：completed 只有 result_urls（${label}）也能出片`, async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).endsWith("/videos") && String(init?.method ?? "") === "POST") {

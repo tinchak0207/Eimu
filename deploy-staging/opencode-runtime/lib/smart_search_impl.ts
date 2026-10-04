@@ -1,26 +1,26 @@
 /**
- * smart_search harness 工具實作（多來源研究工具，smartsearch 免 Key 通路）。
+ * smart_search harness 工具实作（多来源研究工具，smartsearch 免 Key 通路）。
  *
- * 零外部依賴：只用 node 內建模組（child_process spawn 傳 argv 陣列，禁 shell 拼接）。
- * 呼叫端（tools/smart_search.ts）負責 @opencode-ai/plugin 的 import；本檔不得引入。
+ * 零外部依赖：只用 node 内建模组（child_process spawn 传 argv 阵列，禁 shell 拼接）。
+ * 呼叫端（tools/smart_search.ts）负责 @opencode-ai/plugin 的 import；本档不得引入。
  *
- * 上游：konbakuyomu/smartsearch v0.1.25（MIT）之 smart_search package **逐檔複製**到
- * lib/smartsearch/smart_search/（含 providers/ 子包），外加免 Key 最小補丁（見
- * lib/smartsearch/UPSTREAM.md 與 keyless.patch）。本工具只做 argparse 映射 → 呼叫既有
- * `python3 -m smart_search.cli <subcommand> ... --format json`，**不另寫 driver**。
+ * 上游：konbakuyomu/smartsearch v0.1.25（MIT）之 smart_search package **逐档复制**到
+ * lib/smartsearch/smart_search/（含 providers/ 子包），外加免 Key 最小补丁（见
+ * lib/smartsearch/UPSTREAM.md 与 keyless.patch）。本工具只做 argparse 映射 → 呼叫既有
+ * `python3 -m smart_search.cli <subcommand> ... --format json`，**不另写 driver**。
  *
- * 免 Key 通路（實測可通）：fetch=Jina Reader、docs=Context7、vertical=AnySearch、
- * 部分 web_search=fircrawl 匿名。`web` intent 先走 CLI `search`（需 main-search 憑證）；
- * 若回 ok:false（含憑證缺失的 config_error/main_search），**自動免 Key 回落**改跑 vendored
- * smartsearch 自己的 `anysearch-search`（通用網頁搜尋，免 Key），外層以 served_by 標明實際
- * 由哪條通路服務（`smartsearch:search` / `smartsearch:anysearch-search`）。兩條皆失敗才回 fail，
- * hint 同時列出兩條錯誤與可操作替代（search_web / search_aggregate）。
+ * 免 Key 通路（实测可通）：fetch=Jina Reader、docs=Context7、vertical=AnySearch、
+ * 部分 web_search=fircrawl 匿名。`web` intent 先走 CLI `search`（需 main-search 凭证）；
+ * 若回 ok:false（含凭证缺失的 config_error/main_search），**自动免 Key 回落**改跑 vendored
+ * smartsearch 自己的 `anysearch-search`（通用网页搜寻，免 Key），外层以 served_by 标明实际
+ * 由哪条通路服务（`smartsearch:search` / `smartsearch:anysearch-search`）。两条皆失败才回 fail，
+ * hint 同时列出两条错误与可操作替代（search_web / search_aggregate）。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/smart_search_impl.ts
- * env：子進程只帶 PATH/HOME/LANG/LC_ALL/PYTHONPATH（指向 vendored package 父目錄）
- *      ＋**若進程有 EXA_API_KEY 才透傳**（讓 Exa 亦可用）。嚴禁整體 process.env 透傳。
- *      HOME 指向 os.tmpdir() 下的可寫臨時目錄，確保 CLI 的自動 skill maintenance
- *      不嘗試寫入唯讀的 lib/。
+ * env：子进程只带 PATH/HOME/LANG/LC_ALL/PYTHONPATH（指向 vendored package 父目录）
+ *      ＋**若进程有 EXA_API_KEY 才透传**（让 Exa 亦可用）。严禁整体 process.env 透传。
+ *      HOME 指向 os.tmpdir() 下的可写临时目录，确保 CLI 的自动 skill maintenance
+ *      不尝试写入唯读的 lib/。
  */
 
 import { spawn } from "node:child_process"
@@ -31,31 +31,31 @@ import { mkdirSync, mkdtempSync } from "node:fs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-/** vendored `smart_search` package 父目錄（PYTHONPATH 指這裡；同目錄另有 vendored tenacity/）。 */
+/** vendored `smart_search` package 父目录（PYTHONPATH 指这里；同目录另有 vendored tenacity/）。 */
 export const SMART_SEARCH_PACKAGE_DIR = join(HERE, "smartsearch")
 
-/** CLI 以模組方式執行（不依賴 PATH 上的 `smart-search` entrypoint）。 */
+/** CLI 以模组方式执行（不依赖 PATH 上的 `smart-search` entrypoint）。 */
 export const SMART_SEARCH_CLI_MODULE = "smart_search.cli"
 
-/** 逾時：page（抓取已知 URL）。 */
+/** 逾时：page（抓取已知 URL）。 */
 export const SMART_SEARCH_TIMEOUT_PAGE_MS = 60_000
 
-/** 逾時：docs（函式庫/API 文檔）。 */
+/** 逾时：docs（函式库/API 文档）。 */
 export const SMART_SEARCH_TIMEOUT_DOCS_MS = 60_000
 
-/** 逾時：web（通用網頁搜尋，較慢）。 */
+/** 逾时：web（通用网页搜寻，较慢）。 */
 export const SMART_SEARCH_TIMEOUT_WEB_MS = 120_000
 
 /**
- * web 免 Key 回落（anysearch-search）的最低剩餘預算（ms）：主通路失敗後若剩餘預算低於此值，
- * 寧可如實回報（upstream_timeout）也不靜默截斷。
+ * web 免 Key 回落（anysearch-search）的最低剩余预算（ms）：主通路失败后若剩余预算低于此值，
+ * 宁可如实回报（upstream_timeout）也不静默截断。
  */
 export const SMART_SEARCH_MIN_FALLBACK_MS = 10_000
 
-/** 錯誤訊息攜帶原文的上限（同 search_aggregate_impl.ts 口徑）。 */
+/** 错误讯息携带原文的上限（同 search_aggregate_impl.ts 口径）。 */
 const OUTPUT_EXCERPT_MAX_CHARS = 2000
 
-// ── plumbing（ok/fail 同構 search_aggregate_impl.ts / web_search_impl.ts） ────
+// ── plumbing（ok/fail 同构 search_aggregate_impl.ts / web_search_impl.ts） ────
 
 export type WebToolResult = { title: string; output: string }
 
@@ -78,7 +78,7 @@ export interface WebToolArgSpec {
 
 export interface WebToolContext {
   abort?: AbortSignal
-  /** 會話 id（本工具暫無會話資產落盤；adapter 機械透傳保留欄位）。 */
+  /** 会话 id（本工具暂无会话资产落盘；adapter 机械透传保留栏位）。 */
   sessionId?: string
 }
 
@@ -93,15 +93,15 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v : undefined
 }
 
-// ── intent → 子命令 / 逾時 映射 ───────────────────────────────────────────────
+// ── intent → 子命令 / 逾时 映射 ───────────────────────────────────────────────
 
 export const SMART_SEARCH_INTENTS = ["web", "page", "docs"] as const
 export type SmartSearchIntent = (typeof SMART_SEARCH_INTENTS)[number]
 
 /**
- * intent → CLI 子命令 argv（flag 與值亦為獨立 argv 元素，使用者輸入永不經 shell）。
+ * intent → CLI 子命令 argv（flag 与值亦为独立 argv 元素，使用者输入永不经 shell）。
  *   page → fetch <url>
- *   docs → context7-docs <library_id> <query>；無 library_id → context7-library <query>（自動選庫）
+ *   docs → context7-docs <library_id> <query>；无 library_id → context7-library <query>（自动选库）
  *   web  → search <query>
  */
 export function resolveSubcommand(intent: SmartSearchIntent, args: { query?: string; url?: string; library_id?: string }): string[] {
@@ -116,19 +116,19 @@ export function resolveSubcommand(intent: SmartSearchIntent, args: { query?: str
   return ["search", args.query as string]
 }
 
-/** 逾時推導：page 60s、docs 60s、web 120s。 */
+/** 逾时推导：page 60s、docs 60s、web 120s。 */
 export function resolveTimeoutMs(intent: SmartSearchIntent): number {
   if (intent === "page") return SMART_SEARCH_TIMEOUT_PAGE_MS
   if (intent === "docs") return SMART_SEARCH_TIMEOUT_DOCS_MS
   return SMART_SEARCH_TIMEOUT_WEB_MS
 }
 
-// ── 子進程 env 白名單 ────────────────────────────────────────────────────────
+// ── 子进程 env 白名单 ────────────────────────────────────────────────────────
 
 /**
- * 只傳必要 env：PATH/HOME/LANG/LC_ALL/PYTHONPATH。
- * EXA_API_KEY 僅在來源存在時才透傳（讓 Exa 亦可用）；其餘密鑰（JINA/FIRECRAWL/
- * CONTEXT7/ANYSEARCH/XAI/OPENAI_COMPATIBLE 等）一律不透傳。
+ * 只传必要 env：PATH/HOME/LANG/LC_ALL/PYTHONPATH。
+ * EXA_API_KEY 仅在来源存在时才透传（让 Exa 亦可用）；其余密钥（JINA/FIRECRAWL/
+ * CONTEXT7/ANYSEARCH/XAI/OPENAI_COMPATIBLE 等）一律不透传。
  */
 export function buildChildEnv(source: NodeJS.ProcessEnv, homeDir: string, pythonPath: string = SMART_SEARCH_PACKAGE_DIR): Record<string, string> {
   const env: Record<string, string> = {
@@ -143,7 +143,7 @@ export function buildChildEnv(source: NodeJS.ProcessEnv, homeDir: string, python
   return env
 }
 
-// ── 子進程執行（argv 陣列，禁 shell 拼接） ───────────────────────────────────
+// ── 子进程执行（argv 阵列，禁 shell 拼接） ───────────────────────────────────
 
 export interface SmartSearchRunResult {
   code: number | null
@@ -155,16 +155,16 @@ export interface SmartSearchRunResult {
 }
 
 /**
- * spawn argv 陣列執行 `python3 -m smart_search.cli <argv>`。
- * query/url 等使用者輸入一律作為單一 argv 元素傳入，never 經過 shell（無注入面）。
+ * spawn argv 阵列执行 `python3 -m smart_search.cli <argv>`。
+ * query/url 等使用者输入一律作为单一 argv 元素传入，never 经过 shell（无注入面）。
  */
 export function runSmartSearchProcess(input: {
   argv: string[]
   timeoutMs: number
   env: Record<string, string>
-  /** 測試注入：覆寫 python 執行檔（默認 python3）。 */
+  /** 测试注入：覆写 python 执行档（默认 python3）。 */
   pythonBin?: string
-  /** 測試注入：覆寫 PYTHONPATH/模組（默認 smart_search.cli）。 */
+  /** 测试注入：覆写 PYTHONPATH/模组（默认 smart_search.cli）。 */
   cliModule?: string
 }): Promise<SmartSearchRunResult> {
   return new Promise((resolve) => {
@@ -184,7 +184,7 @@ export function runSmartSearchProcess(input: {
       try {
         child.kill("SIGKILL")
       } catch {
-        /* 子進程可能已結束 */
+        /* 子进程可能已结束 */
       }
     }, input.timeoutMs)
     child.stdout?.on("data", (d) => {
@@ -218,30 +218,30 @@ export function runSmartSearchProcess(input: {
 // ── smart_search 工具 ────────────────────────────────────────────────────────
 
 export interface SmartSearchToolDeps {
-  /** 測試注入：覆寫逾時。 */
+  /** 测试注入：覆写逾时。 */
   timeoutMs?: number
-  /** 測試注入：覆寫 env 來源（默認 process.env）。 */
+  /** 测试注入：覆写 env 来源（默认 process.env）。 */
   envSource?: NodeJS.ProcessEnv
-  /** 測試注入：覆寫 python 執行檔。 */
+  /** 测试注入：覆写 python 执行档。 */
   pythonBin?: string
-  /** 測試注入：覆寫 CLI 模組。 */
+  /** 测试注入：覆写 CLI 模组。 */
   cliModule?: string
-  /** 測試注入：覆寫 PYTHONPATH。 */
+  /** 测试注入：覆写 PYTHONPATH。 */
   pythonPath?: string
 }
 
-/** `web` intent 缺 main-search 憑證時的可操作 hint。 */
+/** `web` intent 缺 main-search 凭证时的可操作 hint。 */
 const WEB_MISSING_CREDS_HINT =
   "该 intent 走 CLI `search`（需 main-search 凭证：xAI 或 OpenAI 兼容 relay），当前未配置。" +
   "请改用 search_web（Exa，通用网页搜索）或 search_aggregate（B站/GitHub/Reddit 社群口碑），" +
   "亦可指定 provider 子命令（如 anysearch-search / context7-library）。"
 
-/** 兩條通路皆失敗時的可操作 hint（web intent）。 */
+/** 两条通路皆失败时的可操作 hint（web intent）。 */
 const WEB_BOTH_FAILED_HINT =
   "两条通路均失败，可操作建议：改用 search_web（Exa，通用网页搜索）或 search_aggregate" +
   "（B站/GitHub/Reddit 社群口碑），亦可稍后重试。"
 
-// ── 單次子進程結果歸類（逾時/啟動失敗/非零退出/非 JSON → error；否則 parsed） ──
+// ── 单次子进程结果归类（逾时/启动失败/非零退出/非 JSON → error；否则 parsed） ──
 
 type RunOutcome =
   | { kind: "parsed"; obj: Record<string, unknown>; elapsedMs: number }
@@ -267,11 +267,11 @@ function classifyRunOutcome(run: SmartSearchRunResult, intent: SmartSearchIntent
     }
   }
 
-  // 先嘗試解析 stdout：smartsearch CLI 對 config_error 會回**非零退出**（實測 exit 3，
-  // 見 cli.py `_exit_code`：auth_error/config_error → EXIT_CONFIG_ERROR=3），但仍印出
-  // 合法 JSON `{ok:false, error_type:config_error, ...}`。若死板地「非零退出即失敗」，
-  // web 免 Key 回落永遠不會觸發。因此非零退出時只要 stdout 是合法 JSON 且 ok:false，
-  // 就當作上游 ok:false 交由呼叫端處理（回落/對帳）；否則維持既有 upstream_exit。
+  // 先尝试解析 stdout：smartsearch CLI 对 config_error 会回**非零退出**（实测 exit 3，
+  // 见 cli.py `_exit_code`：auth_error/config_error → EXIT_CONFIG_ERROR=3），但仍印出
+  // 合法 JSON `{ok:false, error_type:config_error, ...}`。若死板地「非零退出即失败」，
+  // web 免 Key 回落永远不会触发。因此非零退出时只要 stdout 是合法 JSON 且 ok:false，
+  // 就当作上游 ok:false 交由呼叫端处理（回落/对帐）；否则维持既有 upstream_exit。
   let parsed: unknown
   let parseOk = true
   try {
@@ -303,7 +303,7 @@ function classifyRunOutcome(run: SmartSearchRunResult, intent: SmartSearchIntent
   return { kind: "parsed", obj: parsedObj, elapsedMs: run.elapsedMs }
 }
 
-/** 把上游 ok:false 物件轉成「error_type + 訊息」的一行描述（供兩條通路對帳）。 */
+/** 把上游 ok:false 物件转成「error_type + 讯息」的一行描述（供两条通路对帐）。 */
 function describeUpstreamError(obj: Record<string, unknown>): string {
   const type = asString(obj.error_type) ?? "upstream_error"
   const msg = asString(obj.error) ?? "上游返回 ok:false"
@@ -311,7 +311,7 @@ function describeUpstreamError(obj: Record<string, unknown>): string {
 }
 
 /**
- * 工具主體（execute 與測試共用）。deps 僅測試注入用，execute 傳空物件。
+ * 工具主体（execute 与测试共用）。deps 仅测试注入用，execute 传空物件。
  */
 export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps: SmartSearchToolDeps = {}): Promise<WebToolResult> {
   const intentRaw = asString(rawArgs.intent)
@@ -344,7 +344,7 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
     runSmartSearchProcess({ argv, timeoutMs, env, pythonBin: deps.pythonBin, cliModule: deps.cliModule })
 
   // ── 主通路：intent 映射出的子命令（web → `search`） ──
-  // 使用者輸入一律單一 argv 元素；flag 與值亦分開成陣列元素。
+  // 使用者输入一律单一 argv 元素；flag 与值亦分开成阵列元素。
   const firstRun = await runOnce([...subcommand, "--format", "json"], totalTimeoutMs)
   const first = classifyRunOutcome(firstRun, intent, totalTimeoutMs)
 
@@ -352,7 +352,7 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
     return fail(first.code, first.message)
   }
   if (first.obj.ok !== false) {
-    // 成功路徑：既有欄位（title/intent/elapsed_ms/result）不變，僅新增 served_by 標明通路。
+    // 成功路径：既有栏位（title/intent/elapsed_ms/result）不变，仅新增 served_by 标明通路。
     return ok({
       title: "检索完成",
       intent,
@@ -363,7 +363,7 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
   }
 
   // ── 主通路 ok:false ──
-  // 非 web：維持原行為（單條 fail，hint = 上游原文）。
+  // 非 web：维持原行为（单条 fail，hint = 上游原文）。
   if (intent !== "web") {
     return fail(asString(first.obj.error_type) ?? "upstream_error", asString(first.obj.error) ?? "上游返回 ok:false", {
       intent,
@@ -371,7 +371,7 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
     })
   }
 
-  // web 免 Key 回落：改跑 vendored smartsearch 自己的 `anysearch-search`（通用網頁搜尋）。
+  // web 免 Key 回落：改跑 vendored smartsearch 自己的 `anysearch-search`（通用网页搜寻）。
   const primaryError = describeUpstreamError(first.obj)
   const remainingMs = totalTimeoutMs - firstRun.elapsedMs
   if (remainingMs < SMART_SEARCH_MIN_FALLBACK_MS) {
@@ -419,16 +419,16 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
 export const smartSearchTool: WebToolDef = {
   id: "smart_search",
   description:
-    "多來源研究工具（smart_search，smartsearch 免 Key 通路）：**適用「讀某一頁的全文內容」與「查某個程式庫／框架的官方文檔」，不是通用網頁搜尋。** " +
-    "抓取網頁、查函式庫文檔、社群/垂直檢索，返回真內容＋真連結。" +
-    "**結論必須帶 URL 出處，禁止只憑內部知識作答。** " +
-    "三種 intent：" +
-    "`page`＝抓取「已知 URL」的正文（免 Key，走 Jina/Firecrawl；參數用 url）；" +
-    "`docs`＝查函式庫/框架/API 文檔（免 Key，走 Context7；參數用 query，可選 library_id 指定庫，不給則自動選庫）；" +
-    "`web`＝通用網頁搜尋（先走 CLI `search`，需 main-search 憑證；憑證缺失或失敗時**自動免 Key 回落**至 vendored `anysearch-search`，回報以 served_by 標明實際通路）。**通用網頁搜尋首選是 `search_web`，不是本工具。**" +
-    "檢索分流：人物／新聞／公司／概念／事實查證／一般資料用 `search_web`（通用網頁，預設）；" +
-    "B站中文影音／GitHub 開源專案／Reddit 英文社群口碑（必須指名平台）用 `search_aggregate`；" +
-    "要某一頁的全文內容用本工具的 `page`；要某個程式庫／框架的官方文檔用本工具的 `docs`。",
+    "多来源研究工具（smart_search，smartsearch 免 Key 通路）：**适用「读某一页的全文内容」与「查某个程式库／框架的官方文档」，不是通用网页搜寻。** " +
+    "抓取网页、查函式库文档、社群/垂直检索，返回真内容＋真连结。" +
+    "**结论必须带 URL 出处，禁止只凭内部知识作答。** " +
+    "三种 intent：" +
+    "`page`＝抓取「已知 URL」的正文（免 Key，走 Jina/Firecrawl；参数用 url）；" +
+    "`docs`＝查函式库/框架/API 文档（免 Key，走 Context7；参数用 query，可选 library_id 指定库，不给则自动选库）；" +
+    "`web`＝通用网页搜寻（先走 CLI `search`，需 main-search 凭证；凭证缺失或失败时**自动免 Key 回落**至 vendored `anysearch-search`，回报以 served_by 标明实际通路）。**通用网页搜寻首选是 `search_web`，不是本工具。**" +
+    "检索分流：人物／新闻／公司／概念／事实查证／一般资料用 `search_web`（通用网页，预设）；" +
+    "B站中文影音／GitHub 开源专案／Reddit 英文社群口碑（必须指名平台）用 `search_aggregate`；" +
+    "要某一页的全文内容用本工具的 `page`；要某个程式库／框架的官方文档用本工具的 `docs`。",
   args: {
     intent: {
       type: "string",
@@ -457,5 +457,5 @@ export const smartSearchTool: WebToolDef = {
   },
 }
 
-/** registry 登記用 id（同 web_search/search_aggregate 範式；註冊名以檔名 smart_search 為準）。 */
+/** registry 登记用 id（同 web_search/search_aggregate 范式；注册名以档名 smart_search 为准）。 */
 export const SMART_SEARCH_HARNESS_TOOL_IDS = ["smart_search"] as const

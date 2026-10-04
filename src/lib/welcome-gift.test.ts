@@ -243,7 +243,7 @@ test("回溯：只发给从未成功出图的普通启用用户；排除管理�
   assert.equal(w.quota.get(13), WELCOME_GIFT_QUOTA);
 });
 
-test("开发者补发：biz key ∧ 未领 ∧ 未出图 → 发；内部 id → 不發；已领/已出图 → 不發", async () => {
+test("开发者补发：biz key ∧ 未领 ∧ 未出图 → 发；内部 id → 不发；已领/已出图 → 不发", async () => {
   const previous = process.env.INTERNAL_USER_IDS;
   process.env.INTERNAL_USER_IDS = "9001";
   try {

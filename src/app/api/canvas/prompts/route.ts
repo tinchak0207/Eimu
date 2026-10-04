@@ -1,16 +1,16 @@
-// 提示詞庫服務端聚合（公共讀，無需登入）。
+// 提示词库服务端聚合（公共读，无需登入）。
 //
-// 內建遠程源清單抄自 infinite-canvas 參考實現（yukkcat/image-prompts 註冊表，
-// dist/sources 下各源已預歸一為同一 JSON 形狀，但 adapter 仍容忍欄位變體與
-// 包裹層差異，解析不了的條目跳過）。並行抓取，每源 8s timeout、失敗跳過不
-// 擋整體；模組級記憶體快取 1 小時，過期 stale-while-revalidate：先回舊資料、
-// 背景刷新（在同一 serverless 實例存活期內生效）。
+// 内建远程源清单抄自 infinite-canvas 参考实现（yukkcat/image-prompts 注册表，
+// dist/sources 下各源已预归一为同一 JSON 形状，但 adapter 仍容忍栏位变体与
+// 包裹层差异，解析不了的条目跳过）。并行抓取，每源 8s timeout、失败跳过不
+// 挡整体；模组级记忆体快取 1 小时，过期 stale-while-revalidate：先回旧资料、
+// 背景刷新（在同一 serverless 实例存活期内生效）。
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const SOURCE_TIMEOUT_MS = 8_000;
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -29,7 +29,7 @@ function registrySource(id: string, label: string): PromptSourceDef {
   return { id, label, url: `${PROMPT_REGISTRY_SOURCE_BASE}/${id}.json` };
 }
 
-/** 內建遠程源（與參考實現 DEFAULT_PROMPT_SOURCES 同一批真實 URL）。 */
+/** 内建远程源（与参考实现 DEFAULT_PROMPT_SOURCES 同一批真实 URL）。 */
 const PROMPT_SOURCES: PromptSourceDef[] = [
   registrySource("banana-prompt-quicker", "Banana Prompt Quicker"),
   registrySource("davidwu-gpt-image2-prompts", "DavidWu GPT Image 2"),
@@ -55,7 +55,7 @@ interface PromptsSnapshot {
   fetchedAt: string;
 }
 
-// ─────────────────────────────────────────── 歸一化 adapter
+// ─────────────────────────────────────────── 归一化 adapter
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -65,7 +65,7 @@ function str(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
-/** 依序取第一個非空字串欄位（容忍各源欄位命名差異）。 */
+/** 依序取第一个非空字串栏位（容忍各源栏位命名差异）。 */
 function pickString(record: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = str(record[key]).trim();
@@ -74,7 +74,7 @@ function pickString(record: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-/** tags 容忍陣列或逗號分隔字串。 */
+/** tags 容忍阵列或逗号分隔字串。 */
 function pickTags(record: Record<string, unknown>): string[] {
   const raw = record.tags ?? record.tag ?? record.categories;
   const values = Array.isArray(raw) ? raw.map(str) : typeof raw === "string" ? raw.split(",") : [];
@@ -90,7 +90,7 @@ function pickTags(record: Record<string, unknown>): string[] {
   return tags;
 }
 
-/** 相對路徑補成絕對 URL（以來源 JSON 的 URL 為基準）；只接受 http(s) 結果。 */
+/** 相对路径补成绝对 URL（以来源 JSON 的 URL 为基准）；只接受 http(s) 结果。 */
 function absoluteHttpUrl(baseUrl: string, path: string): string {
   if (!path) return "";
   try {
@@ -101,7 +101,7 @@ function absoluteHttpUrl(baseUrl: string, path: string): string {
   }
 }
 
-/** 容忍根層是陣列或 { prompts | items | data | list } 包裹。 */
+/** 容忍根层是阵列或 { prompts | items | data | list } 包裹。 */
 function extractItems(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   const record = asRecord(payload);
@@ -111,7 +111,7 @@ function extractItems(payload: unknown): unknown[] {
   return [];
 }
 
-/** 單源歸一化：盡力對齊欄位，缺 prompt 的條目跳過。 */
+/** 单源归一化：尽力对齐栏位，缺 prompt 的条目跳过。 */
 function normalizeSourceItems(source: PromptSourceDef, payload: unknown): LibraryPromptItem[] {
   const seen = new Set<string>();
   const items: LibraryPromptItem[] = [];
@@ -163,7 +163,7 @@ async function fetchSnapshot(): Promise<PromptsSnapshot> {
       try {
         return { source, prompts: await fetchOneSource(source) };
       } catch (error) {
-        // 單源失敗跳過，不擋整體。
+        // 单源失败跳过，不挡整体。
         console.error(
           `[canvas-prompts] 抓取来源 ${source.id} 失败（已跳过）:`,
           error instanceof Error ? error.message : error,
@@ -186,7 +186,7 @@ function refreshSnapshot(): Promise<PromptsSnapshot> {
   if (!inflight) {
     inflight = fetchSnapshot()
       .then((snapshot) => {
-        // 全滅（0 條）不覆蓋快取也不快取空結果——下次請求重試，不騙 1 小時空庫。
+        // 全灭（0 条）不覆盖快取也不快取空结果——下次请求重试，不骗 1 小时空库。
         if (snapshot.prompts.length > 0) cache = { snapshot, fetchedAtMs: Date.now() };
         return snapshot;
       })
@@ -207,7 +207,7 @@ export async function GET(req: NextRequest) {
     if (cache && Date.now() - cache.fetchedAtMs < CACHE_TTL_MS) {
       snapshot = cache.snapshot;
     } else if (cache) {
-      // 過期：先回舊資料，背景刷新。
+      // 过期：先回旧资料，背景刷新。
       snapshot = cache.snapshot;
       void refreshSnapshot().catch(() => undefined);
     } else {

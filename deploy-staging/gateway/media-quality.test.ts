@@ -1,10 +1,10 @@
-// media-quality.test.ts — gateway 側事後產物硬檢（確定性量測）的真行為驗收（2026-10-03）。
+// media-quality.test.ts — gateway 侧事后产物硬检（确定性量测）的真行为验收（2026-10-03）。
 //
-// 定位：量測**只**覆蓋技術正確性（容器/視訊流/寬高/時長/音軌/非靜音/可解析），**不**審美。
-// 驗收要點（照任務）：
-//   ① 量測成功 → 以 score+scoreSource:"measured" 寫進 critic_verdicts；
-//   ② ffprobe 不可用／量測失敗 → 維持 null，且**不 throw**（交付旁路）；
-//   ③ 量測失敗時數值閾值不誤觸（來源非 measured／分數為 null）。
+// 定位：量测**只**覆盖技术正确性（容器/视讯流/宽高/时长/音轨/非静音/可解析），**不**审美。
+// 验收要点（照任务）：
+//   ① 量测成功 → 以 score+scoreSource:"measured" 写进 critic_verdicts；
+//   ② ffprobe 不可用／量测失败 → 维持 null，且**不 throw**（交付旁路）；
+//   ③ 量测失败时数值阈值不误触（来源非 measured／分数为 null）。
 // 跑法：cd deploy-staging/gateway && bun test media-quality.test.ts
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -22,10 +22,10 @@ import {
   type MediaProbe,
 } from "./media-quality.ts"
 
-// persistence 於模組載入時固定 DB 路徑 → 先設 env 再動態 import（不碰生產 sessions.db）。
+// persistence 于模组载入时固定 DB 路径 → 先设 env 再动态 import（不碰生产 sessions.db）。
 process.env.SESSIONS_DB_PATH = join(mkdtempSync(join(tmpdir(), "mq-gate-")), "sessions.db")
-// 預設 OFF：確認我們不靠 env 也能用注入的 prober 測；真實 probe 路徑（ffprobeAvailable）
-// 在本機有 ffprobe，故不在此觸發。
+// 预设 OFF：确认我们不靠 env 也能用注入的 prober 测；真实 probe 路径（ffprobeAvailable）
+// 在本机有 ffprobe，故不在此触发。
 delete process.env.MEDIA_QUALITY_GATE
 const persistence = await import("./persistence")
 const gate = await import("./delivery-gate.ts")
@@ -60,7 +60,7 @@ function okAudioProbe(): MediaProbe {
 
 const unavailableProbe = (): MediaProbe => ({
   status: "probe_unavailable",
-  error: "ffprobe 不存在（系統未安裝）",
+  error: "ffprobe 不存在（系统未安装）",
   container: null,
   durationSec: null,
   sizeBytes: null,
@@ -68,8 +68,8 @@ const unavailableProbe = (): MediaProbe => ({
   audio: null,
 })
 
-describe("media-quality 純函式（政策/failure code/技術分）", () => {
-  test("good 影片通過 video_default；good 音訊通過 audio_default", () => {
+describe("media-quality 纯函式（政策/failure code/技术分）", () => {
+  test("good 影片通过 video_default；good 音讯通过 audio_default", () => {
     const v = evaluateMediaQuality(okVideoProbe(), QUALITY_POLICIES.video_default)
     expect(v.ok).toBe(true)
     expect(v.failures).toEqual([])
@@ -77,13 +77,13 @@ describe("media-quality 純函式（政策/failure code/技術分）", () => {
     expect(a.ok).toBe(true)
   })
 
-  test("缺視覺流：video_default 判 fail（video_stream_missing），非未知→pass", () => {
+  test("缺视觉流：video_default 判 fail（video_stream_missing），非未知→pass", () => {
     const v = evaluateMediaQuality(okAudioProbe(), QUALITY_POLICIES.video_default)
     expect(v.ok).toBe(false)
     expect(v.failures.map((f) => f.code)).toContain("video_stream_missing")
   })
 
-  test("probe 不可用 → 未知≠通過：failures 帶 probe_unavailable，技術分為 null（不是 0）", () => {
+  test("probe 不可用 → 未知≠通过：failures 带 probe_unavailable，技术分为 null（不是 0）", () => {
     const v = evaluateMediaQuality(unavailableProbe(), QUALITY_POLICIES.audio_default)
     expect(v.ok).toBe(false)
     expect(v.failures[0].code).toBe("probe_unavailable")
@@ -91,7 +91,7 @@ describe("media-quality 純函式（政策/failure code/技術分）", () => {
     expect(measuredScoreFromVerdicts([v])).toBeNull()
   })
 
-  test("技術分確定性：全通過=10；缺音軌=5（<7 會觸發閾值）；取多件最低", () => {
+  test("技术分确定性：全通过=10；缺音轨=5（<7 会触发阈值）；取多件最低", () => {
     const ok = evaluateMediaQuality(okAudioProbe(), QUALITY_POLICIES.audio_default)
     expect(scoreFromVerdict(ok)).toBe(10)
     const bad = evaluateMediaQuality({ ...okAudioProbe(), audio: null }, QUALITY_POLICIES.audio_default)
@@ -101,7 +101,7 @@ describe("media-quality 純函式（政策/failure code/技術分）", () => {
     expect(measuredScoreFromVerdicts([ok, bad])).toBe(5)
   })
 
-  test("extractMediaTargets：抽 video/audio，去重、忽略非媒體、封頂 4", () => {
+  test("extractMediaTargets：抽 video/audio，去重、忽略非媒体、封顶 4", () => {
     const text = [
       `audio_url: ${AUDIO_URL}`,
       `video_url: ${VIDEO_URL}`,
@@ -121,7 +121,7 @@ describe("media-quality 純函式（政策/failure code/技術分）", () => {
     expect(got.length).toBeLessThanOrEqual(4)
   })
 
-  test("policyForUrl：依副檔名選政策；未知型別回 null（不猜）", () => {
+  test("policyForUrl：依副档名选政策；未知型别回 null（不猜）", () => {
     expect(policyForUrl(AUDIO_URL)?.id).toBe("audio_default")
     expect(policyForUrl(VIDEO_URL)?.id).toBe("video_default")
     expect(policyForUrl("https://example.com/x.png")?.id).toBe("image_default")
@@ -129,8 +129,8 @@ describe("media-quality 純函式（政策/failure code/技術分）", () => {
   })
 })
 
-describe("measureMediaScore 編排（可注入 prober）", () => {
-  test("量測成功：回技術分與件數", async () => {
+describe("measureMediaScore 编排（可注入 prober）", () => {
+  test("量测成功：回技术分与件数", async () => {
     const r = await measureMediaScore([`audio_url: ${AUDIO_URL}`], { enabled: true, probe: async () => okAudioProbe() })
     expect(r).not.toBeNull()
     expect(r!.score).toBe(10)
@@ -142,7 +142,7 @@ describe("measureMediaScore 編排（可注入 prober）", () => {
     expect(r).toBeNull()
   })
 
-  test("prober 直接拋錯 → 被吞、回 null、不 throw 到呼叫端", async () => {
+  test("prober 直接抛错 → 被吞、回 null、不 throw 到呼叫端", async () => {
     const r = await measureMediaScore([`audio_url: ${AUDIO_URL}`], {
       enabled: true,
       probe: async () => {
@@ -152,7 +152,7 @@ describe("measureMediaScore 編排（可注入 prober）", () => {
     expect(r).toBeNull()
   })
 
-  test("開關 OFF（預設）→ 不量測、回 null（不 spawn、不下載）", async () => {
+  test("开关 OFF（预设）→ 不量测、回 null（不 spawn、不下载）", async () => {
     let called = 0
     const r = await measureMediaScore([`audio_url: ${AUDIO_URL}`], {
       enabled: false,
@@ -165,18 +165,18 @@ describe("measureMediaScore 編排（可注入 prober）", () => {
     expect(called).toBe(0)
   })
 
-  test("正文無媒體 URL → null", async () => {
+  test("正文无媒体 URL → null", async () => {
     const r = await measureMediaScore(["没有任何链接"], { enabled: true, probe: async () => okAudioProbe() })
     expect(r).toBeNull()
   })
 })
 
-describe("measured 落地 critic_verdicts 與閾值語義", () => {
-  test("量測成功 → score_source='measured'，meanScore 反映；閾值對低分強制、達標不強制", async () => {
+describe("measured 落地 critic_verdicts 与阈值语义", () => {
+  test("量测成功 → score_source='measured'，meanScore 反映；阈值对低分强制、达标不强制", async () => {
     const runId = `mq-${Date.now().toString(36)}`
-    // 端到端模擬 subagent.applyMeasuredMediaVerdict 的落地契約：
-    // 先由 measureMediaScore 從交付正文量出技術分（此處注入「缺音軌」的音訊 probe → 5 分），
-    // 再以該分數 + scoreSource:"measured" 寫入 critic_verdicts。
+    // 端到端模拟 subagent.applyMeasuredMediaVerdict 的落地契约：
+    // 先由 measureMediaScore 从交付正文量出技术分（此处注入「缺音轨」的音讯 probe → 5 分），
+    // 再以该分数 + scoreSource:"measured" 写入 critic_verdicts。
     const measured = await measureMediaScore([`audio_url: ${AUDIO_URL}`], {
       enabled: true,
       probe: async () => ({ ...okAudioProbe(), audio: null }),
@@ -201,9 +201,9 @@ describe("measured 落地 critic_verdicts 與閾值語義", () => {
     expect(gate.evaluateCriticScoreThreshold({ value: 9, source: "measured" }).enforce).toBe(false)
   })
 
-  test("量測失敗時維持 null（model_self 分類列）→ 閾值不誤觸", () => {
+  test("量测失败时维持 null（model_self 分类列）→ 阈值不误触", () => {
     const runId = `mq-null-${Date.now().toString(36)}`
-    // subagent 先在 finishRun 同步寫 model_self/null；量測失敗時**不改寫**任何分數。
+    // subagent 先在 finishRun 同步写 model_self/null；量测失败时**不改写**任何分数。
     persistence.saveCriticVerdict({ sessionId: "s-mq2", runId, agent: "critic", verdict: "pass", score: null, scoreSource: "model_self" })
     const got = persistence.getCriticVerdictByRun(runId)!
     expect(got.score).toBeNull()

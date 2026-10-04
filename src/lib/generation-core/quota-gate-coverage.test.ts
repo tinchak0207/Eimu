@@ -4,35 +4,35 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 /**
- * R4（W5）繞過預檢的守門測試 —— **這是變更探針，不是行為 oracle**。
+ * R4（W5）绕过预检的守门测试 —— **这是变更探针，不是行为 oracle**。
  *
- * 本檔用 source-scan 斷言「所有建立 generation job 的入口，要嘛經過 `enforceQuotaGate`，
- * 要嘛走明文允許的清單（有實際收費路徑）」。它能量到的只有「原始碼裡有沒有出現某個
- * 符號/呼叫」，量不到「那個呼叫真的被執行、且真的回 402」。
+ * 本档用 source-scan 断言「所有建立 generation job 的入口，要嘛经过 `enforceQuotaGate`，
+ * 要嘛走明文允许的清单（有实际收费路径）」。它能量到的只有「原始码里有没有出现某个
+ * 符号/呼叫」，量不到「那个呼叫真的被执行、且真的回 402」。
  *
- * ⇒ 依 repo 驗證鐵律（源碼字串斷言只算變更探針），**真正「不花錢」的證明是提交一筆
- * 餘額不足的請求得到 402 `insufficient_balance`**，那條另見帳本 E2E（本輪未跑，屬未驗證）。
- * 本檔的價值只有一個：**新的 job 建立入口一旦沒接閘門又不在白名單，CI 立刻紅燈**。
+ * ⇒ 依 repo 验证铁律（源码字串断言只算变更探针），**真正「不花钱」的证明是提交一笔
+ * 余额不足的请求得到 402 `insufficient_balance`**，那条另见帐本 E2E（本轮未跑，属未验证）。
+ * 本档的价值只有一个：**新的 job 建立入口一旦没接闸门又不在白名单，CI 立刻红灯**。
  *
- * 現況盤點（2026-10-04）：真正接 `enforceQuotaGate` 的只有 4 個對外生成路由；
- * 其餘 6 個入口（`batches`／`upscale`／`generation-jobs`／`storyboard-voiceover`／
- * `sku/run-service`／`canary-service`，即下方 `RESERVE_PATH_ALLOWLIST` 六條）走 legacy
- * reserve / sync-charge（有實際扣費），不是「免錢通道」，
- * 但確實**不經過 precheck**——這條差異記在回報，不在本檔假裝不存在。
+ * 现况盘点（2026-10-04）：真正接 `enforceQuotaGate` 的只有 4 个对外生成路由；
+ * 其余 6 个入口（`batches`／`upscale`／`generation-jobs`／`storyboard-voiceover`／
+ * `sku/run-service`／`canary-service`，即下方 `RESERVE_PATH_ALLOWLIST` 六条）走 legacy
+ * reserve / sync-charge（有实际扣费），不是「免钱通道」，
+ * 但确实**不经过 precheck**——这条差异记在回报，不在本档假装不存在。
  */
 
 const root = process.cwd();
 
-/** 生成 job 建立的兩個函式名：一條是提交漏斗，一條是底層建單。 */
+/** 生成 job 建立的两个函式名：一条是提交漏斗，一条是底层建单。 */
 const CREATE_CALL = /(submitGenerationCommand|createGenerationJob)\s*\(/;
 
-/** 定義/漏斗檔案：不是入口，跳過（它們本身呼叫不算繞過）。 */
+/** 定义/漏斗档案：不是入口，跳过（它们本身呼叫不算绕过）。 */
 const DEFINITION_FILES = new Set([
   "src/lib/generation-core/command-service.ts",
   "src/lib/generation-core/job-repository.ts",
 ]);
 
-/** 真的經過 enforceQuotaGate 的入口（清單由現場掃描得出；少一個就要修閘門，不是修清單）。 */
+/** 真的经过 enforceQuotaGate 的入口（清单由现场扫描得出；少一个就要修闸门，不是修清单）。 */
 const GATED_FILES = [
   "src/app/api/v1/images/generations/route.ts",
   "src/app/api/v1/images/edits/route.ts",
@@ -41,19 +41,19 @@ const GATED_FILES = [
 ];
 
 /**
- * 未接 precheck、但有明文收費路徑的入口。白名單必須同時通過 `CHARGE_INDICATOR`，
- * 否則白名單會腐化成「什麼都不做也能過」的後門。
+ * 未接 precheck、但有明文收费路径的入口。白名单必须同时通过 `CHARGE_INDICATOR`，
+ * 否则白名单会腐化成「什么都不做也能过」的后门。
  */
 const RESERVE_PATH_ALLOWLIST: Record<string, string> = {
-  "src/app/api/v1/batches/route.ts": "batch plan.billingAmount 逐項走 legacy reserve",
-  "src/app/api/v1/upscale/route.ts": "reserveSyncCharge 先收費，submit 用 billingAmount=0 防雙扣",
+  "src/app/api/v1/batches/route.ts": "batch plan.billingAmount 逐项走 legacy reserve",
+  "src/app/api/v1/upscale/route.ts": "reserveSyncCharge 先收费，submit 用 billingAmount=0 防双扣",
   "src/app/api/generation-jobs/route.ts": "authenticateImageUser(requiredQuota) + billingAmount=requiredCoins*QUOTA_PER_COIN",
   "src/app/api/canvas/storyboard-voiceover/route.ts": "billingAmount=ttsQuotaForChars 走 legacy reserve",
-  "src/lib/sku/run-service.ts": "逐鏡 plan.billingAmount 走 legacy reserve",
-  "src/lib/generation-core/canary-service.ts": "canary 內部煙霧（billingAmount=0，非客戶流量）",
+  "src/lib/sku/run-service.ts": "逐镜 plan.billingAmount 走 legacy reserve",
+  "src/lib/generation-core/canary-service.ts": "canary 内部烟雾（billingAmount=0，非客户流量）",
 };
 
-/** 一條入口至少要能指出它的收費依據，白名單才算數。 */
+/** 一条入口至少要能指出它的收费依据，白名单才算数。 */
 const CHARGE_INDICATOR = /billingAmount|reserveSyncCharge|authenticateImageUser|billing_operation|reserve/;
 const GATE_INDICATOR = /enforceQuotaGate\s*\(/;
 

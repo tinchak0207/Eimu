@@ -1,5 +1,5 @@
-// 營銷郵件一鍵退訂（GET＝點連結；POST＝RFC 8058 List-Unsubscribe-Post 一鍵）。
-// 跑在控制面（next.config beforeFiles 代理），因為 email_preference 在控制面 postgres。
+// 营销邮件一键退订（GET＝点连结；POST＝RFC 8058 List-Unsubscribe-Post 一键）。
+// 跑在控制面（next.config beforeFiles 代理），因为 email_preference 在控制面 postgres。
 
 import { NextRequest, NextResponse } from "next/server";
 import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
@@ -7,7 +7,7 @@ import { setMarketingOptOut, unsubscribeSecret, verifyUnsubscribeToken } from "@
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function page(title: string, body: string, status: number): NextResponse {
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head>

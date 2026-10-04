@@ -35,18 +35,18 @@
   --case-card-w: 520px;
   --case-card-h: 390px;
   --case-radius: 812px;
-  /* 玻璃厚度（幾何深度）。側壁投影最寬时就是这个值，跟着卡宽缩放。 */
+  /* 玻璃厚度（几何深度）。侧壁投影最宽时就是这个值，跟着卡宽缩放。 */
   --case-bevel-w: calc(var(--case-card-w) * 0.062);
 
-  /* ── 倒邊寬度：厚度的真正載體 ──
-     必須與 CaseGlassWebGL 的 BEVEL 同值。
+  /* ── 倒边宽度：厚度的真正载体 ──
+     必须与 CaseGlassWebGL 的 BEVEL 同值。
 
-     這一圈顯示的是**同一張照片被玻璃折射擠壓後的樣子**。厚玻璃壓在照片上時，
-     邊緣看到的是被壓縮拉扯的畫面本身，一個像素的白邊都沒有；人腦看到
-     「只有透明厚物體才會這樣壓縮影像」就直接讀出厚度。
+     这一圈显示的是**同一张照片被玻璃折射挤压后的样子**。厚玻璃压在照片上时，
+     边缘看到的是被压缩拉扯的画面本身，一个像素的白边都没有；人脑看到
+     「只有透明厚物体才会这样压缩影像」就直接读出厚度。
 
-     曾經把照片內縮讓出空間、再在裡面塗一圈不透明白 —— 那不是玻璃，那是塑膠
-     相框。方向錯了，不是參數調得不好。 */
+     曾经把照片内缩让出空间、再在里面涂一圈不透明白 —— 那不是玻璃，那是塑胶
+     相框。方向错了，不是参数调得不好。 */
   --case-band-w: calc(var(--case-card-w) * 0.065);
   height: 468px; /* = card-h × 1.2，留出抬升与落影的余量 */
 }
@@ -147,10 +147,10 @@
   z-index: -1;
 }
 
-/* ── 正面那一疊 ──
-   景深模糊掛在這裡，不在 .case-slab 上：filter 會裁掉溢出的子節點，而側壁
-   （厚度的唯一證據）本來就必須伸出卡面之外。所以模糊只作用在正面這一疊，
-   側壁是它的兄弟節點，不進濾鏡。 */
+/* ── 正面那一叠 ──
+   景深模糊挂在这里，不在 .case-slab 上：filter 会裁掉溢出的子节点，而侧壁
+   （厚度的唯一证据）本来就必须伸出卡面之外。所以模糊只作用在正面这一叠，
+   侧壁是它的兄弟节点，不进滤镜。 */
 .case-face {
   position: absolute;
   inset: 0;
@@ -159,12 +159,12 @@
   z-index: 1;
 }
 
-/* ── 图像仓：滿版 ──
-   照片不內縮。厚度由 CaseGlassWebGL 在照片自己的邊緣上折射擠壓畫面表達 ——
-   那才是玻璃；讓照片內縮、在讓出來的空間裡塗一圈不透明白，做出來的是塑膠相框。
+/* ── 图像仓：满版 ──
+   照片不内缩。厚度由 CaseGlassWebGL 在照片自己的边缘上折射挤压画面表达 ——
+   那才是玻璃；让照片内缩、在让出来的空间里涂一圈不透明白，做出来的是塑胶相框。
 
-   曾經掛著 SVG 位移滤镜（#case-liquid-edge），已移除：feMorphology 的結構元素
-   是矩形，侵蝕圓角矩形會得到方角遮罩，那個硬邊直角框就是使用者看到的「分層」。 */
+   曾经挂著 SVG 位移滤镜（#case-liquid-edge），已移除：feMorphology 的结构元素
+   是矩形，侵蚀圆角矩形会得到方角遮罩，那个硬边直角框就是使用者看到的「分层」。 */
 .case-media {
   position: absolute;
   inset: 0;
@@ -179,8 +179,8 @@
 .case-photo {
   position: absolute;
   inset: 0;
-  /* scale 餘量必須大於最大視差錯開量（卡寬的 GLASS×0.25 ≈ 3.1%，每側 → 至少
-     1.062），否則側看時照片邊緣會離開容器、露出底下的白。 */
+  /* scale 余量必须大于最大视差错开量（卡宽的 GLASS×0.25 ≈ 3.1%，每侧 → 至少
+     1.062），否则侧看时照片边缘会离开容器、露出底下的白。 */
   transform: translate3d(var(--case-parallax, 0px), 0, 0) scale(1.075);
 }
 
@@ -189,10 +189,10 @@
 }
 
 
-/* ── 外棱：一條掠射亮線，僅此而已 ──
-   厚玻璃正對鏡頭時，唯一「白」的地方就是最外緣那條掠射高光（Fresnel 接近 1）。
-   其餘全部是被折射擠壓的畫面。所以這一層只有兩條 1px 的線，沒有任何面積 ——
-   上一版給了它 43px 的面積，那就是使用者看到的塑膠相框。 */
+/* ── 外棱：一条掠射亮线，仅此而已 ──
+   厚玻璃正对镜头时，唯一「白」的地方就是最外缘那条掠射高光（Fresnel 接近 1）。
+   其余全部是被折射挤压的画面。所以这一层只有两条 1px 的线，没有任何面积 ——
+   上一版给了它 43px 的面积，那就是使用者看到的塑胶相框。 */
 .case-edge {
   position: absolute;
   inset: 0;
@@ -205,16 +205,16 @@
     inset 0 -1px 0 rgba(188, 222, 244, 0.20);
 }
 
-/* ── 牆體②：WebGL 的真折射（只有正面那張、只畫牆那一圈） ──
-   沒有 mix-blend-mode、沒有容器 opacity：這一層的 alpha 由 shader 決定，牆內
-   是 1、平面是 0。上一版拿 screen 疊一份全幅扭曲影像，那就是「重疊/散光」。 */
-/* 跟 .case-media 同框滿版。shader 讀這個宿主的 computed border-radius，
-   所以圓角永遠和照片的裁切同步，不會在交界處露出月牙。 */
-/* ── GL 宿主：必須比卡框大 ──
-   輪廓要外凸、要起伏、轉開時側壁要伸出去 —— 這些全部落在卡框之外。inset: 0 加
-   overflow: hidden 會把凸出來的部分切成一條直邊，那就又回到「完美圓角矩形」，
-   也就是使用者說的死板。所以往外留 MARGIN，且絕不裁切。
-   border-radius 留著不是為了裁切（沒有 overflow: hidden），是給 JS 讀四角半徑用。 */
+/* ── 墙体②：WebGL 的真折射（只有正面那张、只画墙那一圈） ──
+   没有 mix-blend-mode、没有容器 opacity：这一层的 alpha 由 shader 决定，墙内
+   是 1、平面是 0。上一版拿 screen 叠一份全幅扭曲影像，那就是「重叠/散光」。 */
+/* 跟 .case-media 同框满版。shader 读这个宿主的 computed border-radius，
+   所以圆角永远和照片的裁切同步，不会在交界处露出月牙。 */
+/* ── GL 宿主：必须比卡框大 ──
+   轮廓要外凸、要起伏、转开时侧壁要伸出去 —— 这些全部落在卡框之外。inset: 0 加
+   overflow: hidden 会把凸出来的部分切成一条直边，那就又回到「完美圆角矩形」，
+   也就是使用者说的死板。所以往外留 MARGIN，且绝不裁切。
+   border-radius 留著不是为了裁切（没有 overflow: hidden），是给 JS 读四角半径用。 */
 .case-glass-webgl {
   position: absolute;
   inset: calc(var(--case-card-w, 520px) * -0.10);
@@ -222,7 +222,7 @@
   overflow: visible;
   border-radius: inherit;
   pointer-events: none;
-  /* 景深模糊：GL 就緒後這一層就是卡片本體，模糊得跟著它走。 */
+  /* 景深模糊：GL 就绪后这一层就是卡片本体，模糊得跟著它走。 */
   filter: blur(var(--case-blur, 0px));
 }
 
@@ -234,7 +234,7 @@
   pointer-events: none;
 }
 
-/* 替身仍然貼在卡框上（它只是 CSS 版的邊光，沒有有機輪廓可言）。 */
+/* 替身仍然贴在卡框上（它只是 CSS 版的边光，没有有机轮廓可言）。 */
 .case-glass-webgl-fallback {
   position: absolute;
   inset: calc(var(--case-card-w, 520px) * 0.10);
@@ -251,24 +251,24 @@
   opacity: 1;
 }
 
-/* GL 就緒後撤掉 CSS 版的折射暗示，避免同一圈被算兩次。 */
+/* GL 就绪后撤掉 CSS 版的折射暗示，避免同一圈被算两次。 */
 .case-glass-webgl[data-ready="true"] .case-glass-webgl-fallback {
   opacity: 0;
 }
 
-/* ── GL 就緒 → HTML 那一疊退場 ──
-   shader 現在畫的是整張卡（照片＋玻璃殼＋倒邊）。HTML 的 <img> 是矩形、
-   .case-surface 的 inset box-shadow 是矩形、.case-side 是矩形 —— 任何一個留著，
-   它的硬直邊都會壓在有機輪廓上，於是整張卡又讀成「圓角矩形貼了效果」。
+/* ── GL 就绪 → HTML 那一叠退场 ──
+   shader 现在画的是整张卡（照片＋玻璃壳＋倒边）。HTML 的 <img> 是矩形、
+   .case-surface 的 inset box-shadow 是矩形、.case-side 是矩形 —— 任何一个留著，
+   它的硬直边都会压在有机轮廓上，于是整张卡又读成「圆角矩形贴了效果」。
    用 visibility 不用 display：版面尺寸要留著（GL 靠 slab.offsetWidth 定尺），
-   <img> 也要留在 DOM 裡當貼圖來源與 SEO/無 JS 的內容。 */
+   <img> 也要留在 DOM 里当贴图来源与 SEO/无 JS 的内容。 */
 .case-slab[data-glass="on"] > .case-face,
 .case-slab[data-glass="on"] > .case-side {
   visibility: hidden;
 }
 
-/* WebGL 缺席時的誠實替身：同樣只作用在牆那一圈，只是折射改用漸層近似。
-   它不假裝有折射，只補一點牆面的冷光層次。 */
+/* WebGL 缺席时的诚实替身：同样只作用在墙那一圈，只是折射改用渐层近似。
+   它不假装有折射，只补一点墙面的冷光层次。 */
 .case-glass-webgl-fallback {
   border-radius: inherit;
   opacity: 1;
@@ -322,22 +322,22 @@
   background: radial-gradient(28% 18% at 22% 10%, rgba(255, 255, 255, 0.18), transparent 72%);
 }
 
-/* ── 側壁：厚度的幾何證據 ──
-   關鍵在 right/left: 100% —— 這一條帶子長在卡面**外面**。
+/* ── 侧壁：厚度的几何证据 ──
+   关键在 right/left: 100% —— 这一条带子长在卡面**外面**。
 
-   一塊厚 T 的板轉 θ 之後，投影輪廓寬 = W·cosθ + T·sinθ：側面出現在正面投影
-   之外，輪廓因此變寬。上一版把側面畫在卡面裡（inset + scaleX），輪廓永遠等於
-   正面投影，於是不管漸層怎麼調，側看都是一張紙。這是幾何問題，不是材質問題。
+   一块厚 T 的板转 θ 之后，投影轮廓宽 = W·cosθ + T·sinθ：侧面出现在正面投影
+   之外，轮廓因此变宽。上一版把侧面画在卡面里（inset + scaleX），轮廓永远等于
+   正面投影，于是不管渐层怎么调，侧看都是一张纸。这是几何问题，不是材质问题。
 
-   寬度由 JS 給 T·tanθ（見 computeFrame 的 wall）：這條帶子和卡面一起吃了
-   rotateY 的 cosθ 壓縮，給 tan 才能投影出 sin。tilt=0 時寬度為 0，看不見側面
-   （正確）；越側越寬。 */
+   宽度由 JS 给 T·tanθ（见 computeFrame 的 wall）：这条带子和卡面一起吃了
+   rotateY 的 cosθ 压缩，给 tan 才能投影出 sin。tilt=0 时宽度为 0，看不见侧面
+   （正确）；越侧越宽。 */
 .case-side {
   position: absolute;
-  /* 卡片圓角是卡寬的 ~9%（高的 ~12%），所以右緣「真正是直的」只有中間那段。
-     上一版給 top/bottom: 2%，帶子在圓角處直接伸出輪廓 → 兩端各多出一個突兀的
-     白角，正是使用者看到的「粗製濫造」。收到 9% 讓它落在直邊範圍內，兩端再用
-     mask 淡出，接圓角時不留任何硬邊。 */
+  /* 卡片圆角是卡宽的 ~9%（高的 ~12%），所以右缘「真正是直的」只有中间那段。
+     上一版给 top/bottom: 2%，带子在圆角处直接伸出轮廓 → 两端各多出一个突兀的
+     白角，正是使用者看到的「粗制滥造」。收到 9% 让它落在直边范围内，两端再用
+     mask 淡出，接圆角时不留任何硬边。 */
   top: 9%;
   bottom: 9%;
   pointer-events: none;
@@ -358,13 +358,13 @@
   );
 }
 
-/* rotateY(+θ) 時右緣轉離視線 → 露出的是「左」側面。 */
+/* rotateY(+θ) 时右缘转离视线 → 露出的是「左」侧面。 */
 .case-side-l {
   right: 100%;
   width: var(--case-side-l, 0px);
   border-radius: calc(var(--case-card-w) * 0.03) 0 0 calc(var(--case-card-w) * 0.03);
-  /* 從後緣（左）到前緣（右）：後棱亮 → 壁身半透 → 前棱最亮（迎光側的高光棱）。
-     這條剖面就是厚玻璃側壁在光下的樣子，不是一片實色。 */
+  /* 从后缘（左）到前缘（右）：后棱亮 → 壁身半透 → 前棱最亮（迎光侧的高光棱）。
+     这条剖面就是厚玻璃侧壁在光下的样子，不是一片实色。 */
   background: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0.30) 0%,
@@ -380,7 +380,7 @@
   left: 100%;
   width: var(--case-side-r, 0px);
   border-radius: 0 calc(var(--case-card-w) * 0.03) calc(var(--case-card-w) * 0.03) 0;
-  /* 背光側：同一條剖面，整體壓暗（光源固定在左前方）。 */
+  /* 背光侧：同一条剖面，整体压暗（光源固定在左前方）。 */
   background: linear-gradient(
     270deg,
     rgba(255, 255, 255, 0.22) 0%,
@@ -499,7 +499,7 @@
     --case-card-w: min(calc((100vw - 2rem) * 0.78), 340px);
     --case-card-h: calc(var(--case-card-w) * 0.75);
     --case-radius: calc(var(--case-card-w) * 1.68);
-    /* 折射帶是比例量，窄屏不必改：10.5% 在 265px 卡上是 28px，仍讀得出壓縮。 */
+    /* 折射带是比例量，窄屏不必改：10.5% 在 265px 卡上是 28px，仍读得出压缩。 */
     height: calc(var(--case-card-w) * 0.9);
   }
 }

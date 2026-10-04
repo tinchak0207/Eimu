@@ -9,17 +9,17 @@ import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentVideoCardProps {
   item: AgentVideoItem;
-  /** 存图库：true＝已存入／本來就在；false＝失敗（卡片顯示短暫「未存入」）。回調缺席＝disabled。 */
+  /** 存图库：true＝已存入／本来就在；false＝失败（卡片显示短暂「未存入」）。回调缺席＝disabled。 */
   onSaveToLibrary?: (item: AgentVideoItem) => Promise<boolean>;
-  /** 下载：true＝已觸發下載；false/拋錯＝按鈕短暫「失败」。 */
+  /** 下载：true＝已触发下载；false/抛错＝按钮短暂「失败」。 */
   onDownload?: (item: AgentVideoItem) => Promise<boolean>;
   /**
-   * 「再来 N 组」：會話級——把「再來 N 組」翻成一句話丟回對話，由助理重新決定參數
-   * 並走既有計費鏈。影片按秒計費，payload 級重跑的估價口徑不同
-   * （history-rerun.ts:53 註釋），所以不走 /api/generation-jobs 那條。
+   * 「再来 N 组」：会话级——把「再来 N 组」翻成一句话丢回对话，由助理重新决定参数
+   * 并走既有计费链。影片按秒计费，payload 级重跑的估价口径不同
+   * （history-rerun.ts:53 注释），所以不走 /api/generation-jobs 那条。
    */
   onRerun?: (item: AgentVideoItem, count: number) => void;
-  /** 「微调」：只把半句話預填進輸入框（不自動送出＝不替使用者開一輪扣費）。 */
+  /** 「微调」：只把半句话预填进输入框（不自动送出＝不替使用者开一轮扣费）。 */
   onVariant?: (item: AgentVideoItem) => void;
 }
 
@@ -358,8 +358,8 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </VideoAction>
-        {/* 影片走會話級重跑（見 props 註釋）：N 組檔位與歷史卡同源；回調缺席＝disabled。
-            選單本體是觸發鈕的兄弟（AgentRerunMenu 內部自有 relative 容器），不嵌套 button。 */}
+        {/* 影片走会话级重跑（见 props 注释）：N 组档位与历史卡同源；回调缺席＝disabled。
+            选单本体是触发钮的兄弟（AgentRerunMenu 内部自有 relative 容器），不嵌套 button。 */}
         <AgentRerunMenu
           label="再来 N 组"
           disabled={!onRerun}

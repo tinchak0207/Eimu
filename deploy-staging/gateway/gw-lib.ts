@@ -1,5 +1,5 @@
-// gw-lib.ts — 共享小工具（從 index.ts 逐行抽取，2026-09-19 無損重構第一階段）
-// 內容：sleep / jsonError / getBearer（原 index.ts ≈969–983）
+// gw-lib.ts — 共享小工具（从 index.ts 逐行抽取，2026-09-19 无损重构第一阶段）
+// 内容：sleep / jsonError / getBearer（原 index.ts ≈969–983）
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

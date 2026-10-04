@@ -1,18 +1,18 @@
 "use client";
 
-// 行內實體膠囊（`@[角色:灰羽]` 的視覺化）——「看得見的實體封裝」。
+// 行内实体胶囊（`@[角色:灰羽]` 的视觉化）——「看得见的实体封装」。
 //
-// 為什麼要有這一層：`@[種類:名稱]` 是提示詞裡的**實體引用**，但先前在前端一律渲染成
-// 純文字，使用者看到的是「一串符號」而不是「引用了哪張卡」。這裡把它畫成一顆膠囊：
-// **最左邊永遠有一格微縮圖**（有參考圖就放圖、沒有就放該種類的圖示佔位），
-// 右邊依序是種類字與卡名——一眼看得出「這一段指名的是一個實體」。
+// 为什么要有这一层：`@[种类:名称]` 是提示词里的**实体引用**，但先前在前端一律渲染成
+// 纯文字，使用者看到的是「一串符号」而不是「引用了哪张卡」。这里把它画成一颗胶囊：
+// **最左边永远有一格微缩图**（有参考图就放图、没有就放该种类的图示占位），
+// 右边依序是种类字与卡名——一眼看得出「这一段指名的是一个实体」。
 //
-// 契約（與 src/lib/entity-tokens.ts 同一份語義，禁在此另立第二套解析）：
-//   - 命中卡庫 → 膠囊 + 該卡第一張參考圖的微縮圖
-//   - 未命中   → 膠囊但**虛線紅框**（誠實標示「這張卡不存在」），原文照樣顯示，不吞內容
-//   - 卡庫未載入/未登入 → 種類圖示佔位（**寬度與有圖時相同，零 layout shift**）
+// 契约（与 src/lib/entity-tokens.ts 同一份语义，禁在此另立第二套解析）：
+//   - 命中卡库 → 胶囊 + 该卡第一张参考图的微缩图
+//   - 未命中   → 胶囊但**虚线红框**（诚实标示「这张卡不存在」），原文照样显示，不吞内容
+//   - 卡库未载入/未登入 → 种类图示占位（**宽度与有图时相同，零 layout shift**）
 //
-// 純展示：不改提示詞內容、不寫入任何狀態。
+// 纯展示：不改提示词内容、不写入任何状态。
 
 import { useEffect, useState } from "react";
 import { AudioLines, Box, HelpCircle, Mountain, Palette, UserRound } from "lucide-react";
@@ -22,10 +22,10 @@ import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind }
 import { parseEntityTokens, resolveEntityTokenKind } from "@/lib/entity-tokens";
 import { cn } from "@/lib/utils";
 
-// ─────────────────────────── 卡庫索引（模組級一次載入，跨元件共用）
+// ─────────────────────────── 卡库索引（模组级一次载入，跨元件共用）
 
-// 帶修訂號的快取：號碼與資料層現值不同 = 快取過期，重載。
-// 呼叫端不必記得失效——資料層存/刪成功後自動發號，這裡憑號碼判斷。
+// 带修订号的快取：号码与资料层现值不同 = 快取过期，重载。
+// 呼叫端不必记得失效——资料层存/删成功后自动发号，这里凭号码判断。
 let cardIndexCache: { revision: number; promise: Promise<Map<string, CharacterCard>> } | null = null;
 
 function indexKey(kind: CharacterCardKind, name: string): string {
@@ -33,9 +33,9 @@ function indexKey(kind: CharacterCardKind, name: string): string {
 }
 
 /**
- * 卡庫索引：`kind|name` → 卡。整頁只載一次（promise 去重），失敗靜默降級成空索引——
- * 卡是「順手引用」的增強，載不到不該讓聊天或畫布壞掉。
- * 快取連同當下的修訂號一起記下；號碼變了（資料層存/刪過卡）就重新發請求。
+ * 卡库索引：`kind|name` → 卡。整页只载一次（promise 去重），失败静默降级成空索引——
+ * 卡是「顺手引用」的增强，载不到不该让聊天或画布坏掉。
+ * 快取连同当下的修订号一起记下；号码变了（资料层存/删过卡）就重新发请求。
  */
 function loadCardIndex(): Promise<Map<string, CharacterCard>> {
   const revision = getCharacterCardIndexRevision();
@@ -45,7 +45,7 @@ function loadCardIndex(): Promise<Map<string, CharacterCard>> {
   const attempt = (async () => {
     const res = await listCharacterCards();
     const cards = res.ok ? res.data : undefined;
-    // CanvasClientResult 的 ok 不是 discriminated union：成功分支仍要自證 data 存在。
+    // CanvasClientResult 的 ok 不是 discriminated union：成功分支仍要自证 data 存在。
     if (!cards) throw new Error("card_index_unavailable");
     const map = new Map<string, CharacterCard>();
     for (const card of cards) map.set(indexKey(card.kind, card.name), card);
@@ -53,18 +53,18 @@ function loadCardIndex(): Promise<Map<string, CharacterCard>> {
   })();
 
   const promise = attempt.catch(() => new Map<string, CharacterCard>());
-  // 先同步賦值（在任何 await 之前），保留「同一 tick 多顆膠囊只發一次請求」的同步去重。
+  // 先同步赋值（在任何 await 之前），保留「同一 tick 多颗胶囊只发一次请求」的同步去重。
   cardIndexCache = { revision, promise };
-  // 失敗（未登入／網路／伺服器）不留在快取：留著的話，空索引會連同當前修訂號被鎖死，
-  // 掃碼登入這種「不換頁就換身分」的路徑會一路顯示未找到，直到存/刪卡或整頁重載。
-  // attempt 與 promise 各自掛 handler：attempt 的 rejection 由 promise 消化，故不會 unhandled。
+  // 失败（未登入／网路／伺服器）不留在快取：留著的话，空索引会连同当前修订号被锁死，
+  // 扫码登入这种「不换页就换身分」的路径会一路显示未找到，直到存/删卡或整页重载。
+  // attempt 与 promise 各自挂 handler：attempt 的 rejection 由 promise 消化，故不会 unhandled。
   void attempt.catch(() => {
     if (cardIndexCache?.promise === promise) cardIndexCache = null;
   });
   return promise;
 }
 
-/** 訂閱卡庫索引（首次載入後全樹共用同一份 map）。 */
+/** 订阅卡库索引（首次载入后全树共用同一份 map）。 */
 function useEntityCardIndex(): Map<string, CharacterCard> {
   const [index, setIndex] = useState<Map<string, CharacterCard>>(() => new Map());
   useEffect(() => {
@@ -80,16 +80,16 @@ function useEntityCardIndex(): Map<string, CharacterCard> {
 }
 
 /**
- * 強制下次載入重取卡庫索引（不強制即刻重繪既有膠囊）。
+ * 强制下次载入重取卡库索引（不强制即刻重绘既有胶囊）。
  *
- * 資料層（character-card-client）存/刪成功後已會自動發號，展示層憑號碼判定過期，
- * 一般呼叫端因此不必再手動失效；這個名字只保留給「需要立刻作廢目前快取」的場合。
+ * 资料层（character-card-client）存/删成功后已会自动发号，展示层凭号码判定过期，
+ * 一般呼叫端因此不必再手动失效；这个名字只保留给「需要立刻作废目前快取」的场合。
  */
 export function invalidateEntityCardIndex(): void {
   bumpCharacterCardIndexRevision();
 }
 
-// ─────────────────────────── 種類視覺（左側那一格）
+// ─────────────────────────── 种类视觉（左侧那一格）
 
 const KIND_ICON: Record<CharacterCardKind, typeof UserRound> = {
   character: UserRound,
@@ -99,7 +99,7 @@ const KIND_ICON: Record<CharacterCardKind, typeof UserRound> = {
   audio: AudioLines,
 };
 
-/** 種類色票取自設計系統既有 ios.* token，不引入新色板。 */
+/** 种类色票取自设计系统既有 ios.* token，不引入新色板。 */
 const KIND_TINT: Record<CharacterCardKind, string> = {
   character: "bg-ios-purple/15 text-ios-purple",
   scene: "bg-ios-teal/20 text-[#1F86B8]",
@@ -109,8 +109,8 @@ const KIND_TINT: Record<CharacterCardKind, string> = {
 };
 
 /**
- * 膠囊最左邊的微縮圖格（固定尺寸，永遠佔位）。
- * 有該卡的參考圖 → 縮圖；否則 → 種類圖示（色調玻璃底）。
+ * 胶囊最左边的微缩图格（固定尺寸，永远占位）。
+ * 有该卡的参考图 → 缩图；否则 → 种类图示（色调玻璃底）。
  */
 function EntityThumb({
   kind,
@@ -126,7 +126,7 @@ function EntityThumb({
   const box = "h-[16px] w-[16px] shrink-0 rounded-[5px] ring-1 ring-white/70";
   if (previewUrl) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- 平台直鏈域名不定，next/image 不適用
+      // eslint-disable-next-line @next/next/no-img-element -- 平台直链域名不定，next/image 不适用
       <img src={previewUrl} alt="" aria-hidden="true" className={cn(box, "object-cover")} draggable={false} />
     );
   }
@@ -141,18 +141,18 @@ function EntityThumb({
   );
 }
 
-// ─────────────────────────── 膠囊本體
+// ─────────────────────────── 胶囊本体
 
 export interface EntityChipProps {
-  /** token 裡的種類字（未正規化，如「角色」）。 */
+  /** token 里的种类字（未正规化，如「角色」）。 */
   kindLabel: string;
   name: string;
   className?: string;
 }
 
 /**
- * 一顆實體引用膠囊。種類字不合法或卡庫查無此卡時走「未命中」樣式（虛線紅框）——
- * 與後端 fail-open 契約一致：**原文不吞、狀態不騙**。
+ * 一颗实体引用胶囊。种类字不合法或卡库查无此卡时走「未命中」样式（虚线红框）——
+ * 与后端 fail-open 契约一致：**原文不吞、状态不骗**。
  */
 export function EntityChip({ kindLabel, name, className }: EntityChipProps) {
   const index = useEntityCardIndex();
@@ -183,13 +183,13 @@ export function EntityChip({ kindLabel, name, className }: EntityChipProps) {
   );
 }
 
-// ─────────────────────────── 把一段純文字裡的 token 變成膠囊
+// ─────────────────────────── 把一段纯文字里的 token 变成胶囊
 
 /**
- * 把文字裡的 `@[種類:名稱]` 就地換成膠囊，其餘照原樣輸出。
+ * 把文字里的 `@[种类:名称]` 就地换成胶囊，其余照原样输出。
  *
- * 零 token → **原字串直接回**（不包 span、不改空白，逐位元不變）。
- * 供聊天氣泡與畫布節點正文共用——兩個表面同一套渲染，禁各寫一份。
+ * 零 token → **原字串直接回**（不包 span、不改空白，逐位元不变）。
+ * 供聊天气泡与画布节点正文共用——两个表面同一套渲染，禁各写一份。
  */
 export function EntityText({ text, className }: { text: string; className?: string }) {
   const hits = parseEntityTokens(text);
@@ -208,8 +208,8 @@ export function EntityText({ text, className }: { text: string; className?: stri
 }
 
 /**
- * 一段文字裡引用到的實體（依首次出現序去重）。
- * 供節點卡標題左側的微縮圖堆疊使用——卡面「左邊有微縮圖」的那一格。
+ * 一段文字里引用到的实体（依首次出现序去重）。
+ * 供节点卡标题左侧的微缩图堆叠使用——卡面「左边有微缩图」的那一格。
  */
 export function entitiesInText(text: string): { kindLabel: string; name: string }[] {
   const seen = new Set<string>();
@@ -224,10 +224,10 @@ export function entitiesInText(text: string): { kindLabel: string; name: string 
 }
 
 /**
- * 節點卡標題左側的微縮圖堆疊（最多 3 格，超出以 +N 收尾）。
+ * 节点卡标题左侧的微缩图堆叠（最多 3 格，超出以 +N 收尾）。
  *
- * 這是「別人的卡片最左邊有微縮圖」那一格：卡片一旦引用了實體，卡面左緣就長出
- * 該實體的微縮圖——不必點開提示詞也知道這張卡在講誰。
+ * 这是「别人的卡片最左边有微缩图」那一格：卡片一旦引用了实体，卡面左缘就长出
+ * 该实体的微缩图——不必点开提示词也知道这张卡在讲谁。
  */
 export function EntityThumbStack({ entities, className }: { entities: { kindLabel: string; name: string }[]; className?: string }) {
   const index = useEntityCardIndex();

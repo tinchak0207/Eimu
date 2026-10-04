@@ -1,4 +1,4 @@
-// MODEL-SELECT：minimax-h3（斷路器 open / 0 交付）被排除，seedance 被選中；已存在節點寫死 minimax-h3 在生成前被替換。
+// MODEL-SELECT：minimax-h3（断路器 open / 0 交付）被排除，seedance 被选中；已存在节点写死 minimax-h3 在生成前被替换。
 // 跑法：timeout 120 bun run deploy-staging/gateway/video-model-select.test.ts
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -24,13 +24,13 @@ async function run(): Promise<void> {
   const sel = await import("./video-model-select.ts")
   const gw = await import("./workflow-gw.ts")
 
-  // 1. 純選型：minimax-h3 0 交付被排除；proven 的 seedance 勝；unavailable 的不選
+  // 1. 纯选型：minimax-h3 0 交付被排除；proven 的 seedance 胜；unavailable 的不选
   const ranked = sel.rankVideoModels(MODELS)
   assert.deepEqual(ranked.map((r) => r.id), ["seedance-2.0", "metaso-video"])
   assert.ok(!ranked.some((r) => r.id === "minimax-h3"))
-  console.log("  ✓ rank: seedance-2.0(proven) 優先，minimax-h3/unavailable 排除")
+  console.log("  ✓ rank: seedance-2.0(proven) 优先，minimax-h3/unavailable 排除")
 
-  // 2. 斷路器 open 欄位也排除；無樣本者 seedance 優先
+  // 2. 断路器 open 栏位也排除；无样本者 seedance 优先
   const onlyUnproven = sel.pickVideoModel([
     { id: "minimax-h3", media_type: "video", availability: "available", breaker_state: "open" },
     { id: "metaso-video", media_type: "video", availability: "available" },
@@ -39,9 +39,9 @@ async function run(): Promise<void> {
   assert.equal(onlyUnproven?.id, "seedance-2.0")
   assert.equal(onlyUnproven?.proven, false)
   assert.equal(sel.pickVideoModel([{ id: "minimax-h3", media_type: "video", availability: "available", breaker_state: "open" }]), null)
-  console.log("  ✓ breaker open 排除；無證據者 seedance 優先；無人可選回 null")
+  console.log("  ✓ breaker open 排除；无证据者 seedance 优先；无人可选回 null")
 
-  // 3. 已存在節點寫死 minimax-h3：生成前被替換並留回執
+  // 3. 已存在节点写死 minimax-h3：生成前被替换并留回执
   const realFetch = globalThis.fetch
   globalThis.fetch = (async () => new Response(JSON.stringify({ models: MODELS }), { status: 200 })) as typeof fetch
   try {
@@ -53,18 +53,18 @@ async function run(): Promise<void> {
     const swap = (node as { metadata: Record<string, unknown> }).metadata.model_swap as { from: string; to: string }
     assert.equal(swap.from, "minimax-h3")
     assert.equal(swap.to, "seedance-2.0")
-    console.log("  ✓ resolveActiveModel：minimax-h3(available 但 0 交付) → seedance-2.0，metadata.model_swap 回執")
+    console.log("  ✓ resolveActiveModel：minimax-h3(available 但 0 交付) → seedance-2.0，metadata.model_swap 回执")
 
-    // 4. 默認選型掛點
-    // pickDefaultVideoModel 掛點與 pickVideoModel 同源（stateForWorkflow 由請求入口賦值，隔離測試不構造）
+    // 4. 默认选型挂点
+    // pickDefaultVideoModel 挂点与 pickVideoModel 同源（stateForWorkflow 由请求入口赋值，隔离测试不构造）
     assert.equal(sel.pickVideoModel(MODELS)?.id, "seedance-2.0")
-    console.log("  ✓ 默認選型（pickDefaultVideoModel 同源）→ seedance-2.0")
+    console.log("  ✓ 默认选型（pickDefaultVideoModel 同源）→ seedance-2.0")
 
-    // 5. proven 的 seedance 不被動
+    // 5. proven 的 seedance 不被动
     const n2 = { id: "n2", kind: "video", role: "shot", title: "x", metadata: {} } as never
     const r2 = await gw.resolveActiveModel("seedance-2.0", "video", "sk-test", n2)
     assert.equal(r2.switched, false)
-    console.log("  ✓ 健康模型不被替換")
+    console.log("  ✓ 健康模型不被替换")
   } finally {
     globalThis.fetch = realFetch
   }

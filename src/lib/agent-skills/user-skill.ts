@@ -1,40 +1,40 @@
 /**
- * 使用者自建 Skill ⇄ agent-memory 記憶文件（2026-09-27 立）。
+ * 使用者自建 Skill ⇄ agent-memory 记忆文件（2026-09-27 立）。
  *
  * 定位（**禁造第二套**）：使用者自建 Skill **就是**既有 `agent-memory-store`
- * 的一種記憶文件，不是第二個儲存／審核／配額系統。本檔只做兩件事：
- *   1. `AgentSkillView`（= `AgentSkillSpec` + `source: "user"`）與
- *      `AgentMemoryDocInput` 之間的**純函式**雙向轉換；
- *   2. 發布前的欄位驗證。
- * 配額（G7）、去重（G5）、結構防線（structure）**一律複用 store**：
- * 寫入路徑是 `ingestMemoryDocs`，本檔不碰 blob/Map，不自己計數。
+ * 的一种记忆文件，不是第二个储存／审核／配额系统。本档只做两件事：
+ *   1. `AgentSkillView`（= `AgentSkillSpec` + `source: "user"`）与
+ *      `AgentMemoryDocInput` 之间的**纯函式**双向转换；
+ *   2. 发布前的栏位验证。
+ * 配额（G7）、去重（G5）、结构防线（structure）**一律复用 store**：
+ * 写入路径是 `ingestMemoryDocs`，本档不碰 blob/Map，不自己计数。
  *
- * 欄位落位（不改 store、不新增欄位）：`AgentMemoryDocInput` 可用欄位只有
+ * 栏位落位（不改 store、不新增栏位）：`AgentMemoryDocInput` 可用栏位只有
  * scope / ownerKey / domain / slug / description / type / body / links /
  * evidence / evidenceKind / selfScore / promptVersion。故：
  *   - `slug`        ← `skill.id`（`user-<family>-[<ascii>-]<name hash8>`，符合 store
- *                     的 `^[a-z0-9-]{1,64}$`；`user-` 前綴與內建 id 分家，尾端 hash
- *                     保證不同名不撞同一條＝不會靜默覆蓋）
- *   - `domain`      ← `skill.family`（索引行 `- [family] slug — oneLiner` 可讀；
- *                     同時把 G7 的「單 domain ≤8/日」分攤到各家族，不互相擠壓）
- *   - `description` ← `skill.oneLiner`（≤24 字，遠在 store 的 120 上限內）
- *   - `body`        ← 穩定 markdown（標題＋一句話＋使用場景＋輸入＋交付＋
- *                     美學錨＋標籤＋工具），供召回語料與人眼閱讀
- *   - `links`       ← **機器可讀欄位**（source 標記／name／family／output-kind／
- *                     tool／expert／tag），`user-skill:` 前綴，解析的唯一真源
- *   - `type`        ← `workflow`（使用者自建方法；領域知識類走 `domain`）
- *   - `evidenceKind`← `user_confirmed`（作者自陳，非工具結果）
+ *                     的 `^[a-z0-9-]{1,64}$`；`user-` 前缀与内建 id 分家，尾端 hash
+ *                     保证不同名不撞同一条＝不会静默覆盖）
+ *   - `domain`      ← `skill.family`（索引行 `- [family] slug — oneLiner` 可读；
+ *                     同时把 G7 的「单 domain ≤8/日」分摊到各家族，不互相挤压）
+ *   - `description` ← `skill.oneLiner`（≤24 字，远在 store 的 120 上限内）
+ *   - `body`        ← 稳定 markdown（标题＋一句话＋使用场景＋输入＋交付＋
+ *                     美学锚＋标签＋工具），供召回语料与人眼阅读
+ *   - `links`       ← **机器可读栏位**（source 标记／name／family／output-kind／
+ *                     tool／expert／tag），`user-skill:` 前缀，解析的唯一真源
+ *   - `type`        ← `workflow`（使用者自建方法；领域知识类走 `domain`）
+ *   - `evidenceKind`← `user_confirmed`（作者自陈，非工具结果）
  *
- * 往返契約（硬）：`memoryDocToSkill(skillToMemoryDoc(s))` 等價於 `s`，
- * 其中 `s` 由 `validateUserSkill` 產出（欄位已正規化）。解析不出來一律回
- * `null`（**不得猜**）：`links` 缺 source 標記 / 缺必要欄位、body 缺必要段落、
- * slug 不符形狀、tool/expert 不在真源註冊表，全部視為非使用者 skill 文件。
+ * 往返契约（硬）：`memoryDocToSkill(skillToMemoryDoc(s))` 等价于 `s`，
+ * 其中 `s` 由 `validateUserSkill` 产出（栏位已正规化）。解析不出来一律回
+ * `null`（**不得猜**）：`links` 缺 source 标记 / 缺必要栏位、body 缺必要段落、
+ * slug 不符形状、tool/expert 不在真源注册表，全部视为非使用者 skill 文件。
  *
- * 註冊介面：`registerUserSkillSource(fn)` 的**唯一真源在 `agent-skills/registry.ts`**
- * （2026-09-27 由另一路落地；同日改為 ownerKey 參數化 `(ownerKey) => Promise<AgentSkillView[]>`）。
- * 本檔**不再自建第二個插槽**，只 `export { registerUserSkillSource }` 逐字轉出（讓
- * 呼叫端可從本檔一處拿到「轉換＋驗證＋註冊」三件事），並提供 `userSkillLoader(ownerKey)`
- * 這個與插槽同形的載入器（讀該 ownerKey 的私有庫 → 逐條解析）。
+ * 注册介面：`registerUserSkillSource(fn)` 的**唯一真源在 `agent-skills/registry.ts`**
+ * （2026-09-27 由另一路落地；同日改为 ownerKey 参数化 `(ownerKey) => Promise<AgentSkillView[]>`）。
+ * 本档**不再自建第二个插槽**，只 `export { registerUserSkillSource }` 逐字转出（让
+ * 呼叫端可从本档一处拿到「转换＋验证＋注册」三件事），并提供 `userSkillLoader(ownerKey)`
+ * 这个与插槽同形的载入器（读该 ownerKey 的私有库 → 逐条解析）。
  */
 
 import { createHash } from "node:crypto";
@@ -52,10 +52,10 @@ import { HARNESS_TOOL_IDS } from "@/lib/harness-tool-registry";
 import type { AgentSkillView as RegisteredSkillView } from "./registry";
 import type { AgentSkillFamily, AgentSkillOutputKind } from "./types";
 
-/** 使用者 skill 的視圖：複用 registry 的單一 `AgentSkillView` 定義，收窄來源為 `"user"`。 */
+/** 使用者 skill 的视图：复用 registry 的单一 `AgentSkillView` 定义，收窄来源为 `"user"`。 */
 export type AgentSkillView = RegisteredSkillView & { source: "user" };
 
-/** 發布草稿：使用者在瀏覽器端填的欄位（`id` 可選，供既有 skill 改名以外的更新）。 */
+/** 发布草稿：使用者在浏览器端填的栏位（`id` 可选，供既有 skill 改名以外的更新）。 */
 export interface UserSkillDraft {
   id?: unknown;
   name?: unknown;
@@ -76,10 +76,10 @@ export type UserSkillValidation =
   | { ok: false; reason: string };
 
 export const USER_SKILL_LINK_PREFIX = "user-skill:";
-/** 標記：這份記憶文件確實是一條使用者自建 skill（缺它就回 null）。 */
+/** 标记：这份记忆文件确实是一条使用者自建 skill（缺它就回 null）。 */
 export const USER_SKILL_SOURCE_MARKER = `${USER_SKILL_LINK_PREFIX}source=user`;
 export const USER_SKILL_PROMPT_VERSION = "user-skill-v1";
-/** 作者自陳、未經 gateway G6 評分：中性分，不假裝高分。 */
+/** 作者自陈、未经 gateway G6 评分：中性分，不假装高分。 */
 export const USER_SKILL_SELF_SCORE = 0.5;
 
 export const USER_SKILL_NAME_MAX = 32;
@@ -88,9 +88,9 @@ export const USER_SKILL_TAGS_MIN = 1;
 export const USER_SKILL_TAGS_MAX = 8;
 export const USER_SKILL_TAG_MAX = 24;
 export const USER_SKILL_TOOL_IDS_MAX = 16;
-/** 長文本欄位上界（讓 body 穩定落在 store 的 2000 字元上限內）。 */
+/** 长文本栏位上界（让 body 稳定落在 store 的 2000 字元上限内）。 */
 export const USER_SKILL_TEXT_MAX = 400;
-/** store `isStructurallyValid` 對 body 的上限；此處先一步給明確理由。 */
+/** store `isStructurallyValid` 对 body 的上限；此处先一步给明确理由。 */
 export const USER_SKILL_BODY_MAX = 2000;
 
 const FAMILIES: readonly AgentSkillFamily[] = [
@@ -116,29 +116,29 @@ const OUTPUT_KINDS: readonly AgentSkillOutputKind[] = [
 ];
 
 const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
-/** 控制字元：允許 \n 與 \t，其餘拒絕（\r 也拒，避免 CRLF 破壞段落解析）。 */
+/** 控制字元：允许 \n 与 \t，其余拒绝（\r 也拒，避免 CRLF 破坏段落解析）。 */
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
-const SECTION_SCENARIO = "使用場景";
-const SECTION_INPUT = "輸入";
+const SECTION_SCENARIO = "使用场景";
+const SECTION_INPUT = "输入";
 const SECTION_DELIVERABLE = "交付";
-const SECTION_AESTHETIC = "美學錨";
-const SECTION_TAGS = "標籤";
+const SECTION_AESTHETIC = "美学锚";
+const SECTION_TAGS = "标签";
 const SECTION_TOOLS = "工具";
 
-// ─────────────────────────── 憑證／秘密閘（最小面）
+// ─────────────────────────── 凭证／秘密闸（最小面）
 
 /**
- * 憑證／秘密掃描（2026-09-27 立）：使用者把「使用場景／輸入／交付」等長文本貼進來時，
- * 可能在正文裡夾帶 `sk-…`、Bearer、私鑰、JWT、手機號或 `password=…`。這些內容一旦
- * 寫進 agent-memory 就是**永久落庫**（`AGENTS.md` 紅線：secret／憑證／token／OTP／
- * 私鑰永不入 log／memory／commit），故發布前先掃。
+ * 凭证／秘密扫描（2026-09-27 立）：使用者把「使用场景／输入／交付」等长文本贴进来时，
+ * 可能在正文里夹带 `sk-…`、Bearer、私钥、JWT、手机号或 `password=…`。这些内容一旦
+ * 写进 agent-memory 就是**永久落库**（`AGENTS.md` 红线：secret／凭证／token／OTP／
+ * 私钥永不入 log／memory／commit），故发布前先扫。
  *
- * 界線（**不越權**）：只認「憑證／秘密」這一類的事實；**不做**敏感詞庫、內容審查、
- * 政治審查或計費閘。命中回傳**種類與索引**，永不回傳命中的原文——避免秘密經由
- * reason／log／回應體二次外洩（route 只把 `<kind>` 帶給客戶端）。
+ * 界线（**不越权**）：只认「凭证／秘密」这一类的事实；**不做**敏感词库、内容审查、
+ * 政治审查或计费闸。命中回传**种类与索引**，永不回传命中的原文——避免秘密经由
+ * reason／log／回应体二次外泄（route 只把 `<kind>` 带给客户端）。
  *
- * 純函式、無 I/O、不拋錯（非字串／畸形輸入一律回乾淨）。
+ * 纯函式、无 I/O、不抛错（非字串／畸形输入一律回干净）。
  */
 export type SensitiveContentKind =
   | "api_key_sk"
@@ -151,7 +151,7 @@ export type SensitiveContentKind =
 
 export interface SensitiveHit {
   kind: SensitiveContentKind;
-  /** 命中在輸入字串中的起始索引（只給定位用，不含原文）。 */
+  /** 命中在输入字串中的起始索引（只给定位用，不含原文）。 */
   index: number;
 }
 
@@ -161,17 +161,17 @@ export interface SensitiveScanResult {
 }
 
 /**
- * 樣式表（`source` 以字串保存、每次掃描現場編譯）：全域正則帶 `lastIndex` 狀態，
- * 共用實例會讓第二次掃描漏命中，故不共用。
+ * 样式表（`source` 以字串保存、每次扫描现场编译）：全域正则带 `lastIndex` 状态，
+ * 共用实例会让第二次扫描漏命中，故不共用。
  *
- * - `pem_private_key`：`-----BEGIN [RSA|EC|OPENSSH|…] PRIVATE KEY-----`（私鑰塊開頭）
- * - `api_key_sk`：`sk-` 家族（含 `sk-biz-`／`sk-proj-` 等變體；**要求 ≥8 位後續字元**，
- *   故散文裡單獨出現的 `sk-` 不誤殺）
- * - `aws_access_key_id`：`AKIA` + 16 位大寫英數
- * - `jwt`：三段 base64url 以 `.` 相連且首段以 `eyJ` 開頭
- * - `bearer_token`：`Bearer <token>`（大小寫不敏感）
- * - `cn_mobile`：`1[3-9]` 開頭 11 位數；以字母數字作前後界，避免命中長雜湊中的數字串
- * - `assigned_secret`：`password=`／`passwd=`／`secret=`／`token=` 後接非空白值
+ * - `pem_private_key`：`-----BEGIN [RSA|EC|OPENSSH|…] PRIVATE KEY-----`（私钥块开头）
+ * - `api_key_sk`：`sk-` 家族（含 `sk-biz-`／`sk-proj-` 等变体；**要求 ≥8 位后续字元**，
+ *   故散文里单独出现的 `sk-` 不误杀）
+ * - `aws_access_key_id`：`AKIA` + 16 位大写英数
+ * - `jwt`：三段 base64url 以 `.` 相连且首段以 `eyJ` 开头
+ * - `bearer_token`：`Bearer <token>`（大小写不敏感）
+ * - `cn_mobile`：`1[3-9]` 开头 11 位数；以字母数字作前后界，避免命中长杂凑中的数字串
+ * - `assigned_secret`：`password=`／`passwd=`／`secret=`／`token=` 后接非空白值
  */
 const SENSITIVE_PATTERNS: ReadonlyArray<{
   kind: SensitiveContentKind;
@@ -207,10 +207,10 @@ const SENSITIVE_PATTERNS: ReadonlyArray<{
   },
 ];
 
-/** 穩定理由前綴：`sensitive_content:<kind>`（route 原樣回傳，不含命中原文）。 */
+/** 稳定理由前缀：`sensitive_content:<kind>`（route 原样回传，不含命中原文）。 */
 export const SENSITIVE_REASON_PREFIX = "sensitive_content:";
 
-/** 掃描一段文字：回 `{ clean, hits }`；`hits` 只含種類與索引，**永不回原文**。 */
+/** 扫描一段文字：回 `{ clean, hits }`；`hits` 只含种类与索引，**永不回原文**。 */
 export function scanSensitiveContent(text: string): SensitiveScanResult {
   const input = typeof text === "string" ? text : "";
   if (!input) return { clean: true, hits: [] };
@@ -221,7 +221,7 @@ export function scanSensitiveContent(text: string): SensitiveScanResult {
     try {
       pattern = new RegExp(source, flags);
     } catch {
-      continue; // 樣式表是常數，編譯失敗視為不影響發布（不拋）
+      continue; // 样式表是常数，编译失败视为不影响发布（不抛）
     }
     try {
       for (const match of input.matchAll(pattern)) {
@@ -235,7 +235,7 @@ export function scanSensitiveContent(text: string): SensitiveScanResult {
   return { clean: hits.length === 0, hits };
 }
 
-/** 逐欄掃描，回第一條穩定理由（`sensitive_content:<kind>`）或 null。 */
+/** 逐栏扫描，回第一条稳定理由（`sensitive_content:<kind>`）或 null。 */
 function sensitiveReason(values: readonly string[]): string | null {
   for (const value of values) {
     const scan = scanSensitiveContent(value);
@@ -244,13 +244,13 @@ function sensitiveReason(values: readonly string[]): string | null {
   return null;
 }
 
-// ─────────────────────────── 欄位驗證
+// ─────────────────────────── 栏位验证
 
 function asTrimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** 文字欄位通用防線：控制字元、行首 heading 偽造（會破壞段落往返）。 */
+/** 文字栏位通用防线：控制字元、行首 heading 伪造（会破坏段落往返）。 */
 function textFieldReject(value: string, max: number): string | null {
   if (CONTROL_CHARS.test(value)) return "control_char";
   for (const line of value.split("\n")) {
@@ -274,11 +274,11 @@ function normalizeList(value: unknown): string[] {
 }
 
 /**
- * 使用者 skill 的 id：`user-<family>-<name 派生 ascii 前綴>-<name sha256 前 8 位>`。
- * - `user-` 前綴與內建 id 天然分家；
- * - 尾端 hash 保證「不同名 ≠ 同 id」——只靠 ascii 前綴會讓「AI 口播」「AI 剪輯」
- *   撞成同一條，發布第二條時**靜默覆蓋**第一條（真實事故，故不接受）；
- * - CJK 名 ascii 段為空 → 只留 hash，仍決定性（同名重發布＝更新，非新增）。
+ * 使用者 skill 的 id：`user-<family>-<name 派生 ascii 前缀>-<name sha256 前 8 位>`。
+ * - `user-` 前缀与内建 id 天然分家；
+ * - 尾端 hash 保证「不同名 ≠ 同 id」——只靠 ascii 前缀会让「AI 口播」「AI 剪辑」
+ *   撞成同一条，发布第二条时**静默覆盖**第一条（真实事故，故不接受）；
+ * - CJK 名 ascii 段为空 → 只留 hash，仍决定性（同名重发布＝更新，非新增）。
  */
 export function userSkillId(name: string, family: AgentSkillFamily): string {
   const ascii = name
@@ -293,9 +293,9 @@ export function userSkillId(name: string, family: AgentSkillFamily): string {
 }
 
 /**
- * 草稿驗證（正規化）：trim、去重、長度與註冊表成員檢查。
- * 合法 → `{ ok: true, skill }`；任何一項不合 → `{ ok: false, reason }`（穩定的
- * snake_case 理由字串，route 原樣回給客戶端）。
+ * 草稿验证（正规化）：trim、去重、长度与注册表成员检查。
+ * 合法 → `{ ok: true, skill }`；任何一项不合 → `{ ok: false, reason }`（稳定的
+ * snake_case 理由字串，route 原样回给客户端）。
  */
 export function validateUserSkill(input: UserSkillDraft | null | undefined): UserSkillValidation {
   const draft = (input ?? {}) as UserSkillDraft;
@@ -367,8 +367,8 @@ export function validateUserSkill(input: UserSkillDraft | null | undefined): Use
   const id = requestedId || userSkillId(name, family);
   if (!id) return { ok: false, reason: "id_invalid" };
 
-  // 憑證閘：所有**會落進記憶正文**的欄位（含 links 取用的 name／tags／aesthetic）
-  // 一律先掃；命中即拒。reason 只帶種類代碼，命中原文不進 reason／log／回應。
+  // 凭证闸：所有**会落进记忆正文**的栏位（含 links 取用的 name／tags／aesthetic）
+  // 一律先扫；命中即拒。reason 只带种类代码，命中原文不进 reason／log／回应。
   const sensitive = sensitiveReason([
     useScenario,
     inputType,
@@ -405,7 +405,7 @@ export function validateUserSkill(input: UserSkillDraft | null | undefined): Use
 
 // ─────────────────────────── skill → memory doc
 
-/** 機器可讀欄位（links）：解析的唯一真源，順序固定。 */
+/** 机器可读栏位（links）：解析的唯一真源，顺序固定。 */
 function skillLinks(skill: AgentSkillView): string[] {
   const links = [
     USER_SKILL_SOURCE_MARKER,
@@ -419,7 +419,7 @@ function skillLinks(skill: AgentSkillView): string[] {
   return links;
 }
 
-/** 可讀正文（穩定、可反向解析）：標題＋一句話＋使用場景＋輸入＋交付＋美學錨＋標籤＋工具。 */
+/** 可读正文（稳定、可反向解析）：标题＋一句话＋使用场景＋输入＋交付＋美学锚＋标签＋工具。 */
 export function serializeSkillBody(skill: AgentSkillView): string {
   const parts = [
     `# ${skill.name}`,
@@ -450,9 +450,9 @@ export function serializeSkillBody(skill: AgentSkillView): string {
 }
 
 /**
- * skill → store 輸入。**純函式**，不碰存儲；配額／去重／結構防線交給
- * `ingestMemoryDocs`。scope 固定 `private`（使用者私有庫）；`ownerKey` 空字串
- * 時由 store 的 structure 防線拒收（本檔不代它判、不拋）。
+ * skill → store 输入。**纯函式**，不碰存储；配额／去重／结构防线交给
+ * `ingestMemoryDocs`。scope 固定 `private`（使用者私有库）；`ownerKey` 空字串
+ * 时由 store 的 structure 防线拒收（本档不代它判、不抛）。
  */
 export function skillToMemoryDoc(
   skill: AgentSkillView,
@@ -467,7 +467,7 @@ export function skillToMemoryDoc(
     type: "workflow",
     body: serializeSkillBody(skill),
     links: skillLinks(skill),
-    evidence: "使用者自建並發布的 skill（作者自陳，未經 gateway 評分）。",
+    evidence: "使用者自建并发布的 skill（作者自陈，未经 gateway 评分）。",
     evidenceKind: "user_confirmed",
     selfScore: USER_SKILL_SELF_SCORE,
     promptVersion: USER_SKILL_PROMPT_VERSION,
@@ -476,7 +476,7 @@ export function skillToMemoryDoc(
 
 // ─────────────────────────── memory doc → skill
 
-/** 取 `\n## <header>\n` 到下一個 `\n## ` 之間的段落（值已 trim）；缺段落回 null。 */
+/** 取 `\n## <header>\n` 到下一个 `\n## ` 之间的段落（值已 trim）；缺段落回 null。 */
 function readSection(body: string, header: string): string | null {
   const marker = `\n## ${header}\n`;
   const start = body.indexOf(marker);
@@ -487,7 +487,7 @@ function readSection(body: string, header: string): string | null {
   return text || null;
 }
 
-/** links → 機器欄位；任何缺失／非法回 null（不得猜）。 */
+/** links → 机器栏位；任何缺失／非法回 null（不得猜）。 */
 function readSkillLinks(links: readonly string[]): {
   name: string;
   family: AgentSkillFamily;
@@ -542,8 +542,8 @@ function readSkillLinks(links: readonly string[]): {
 }
 
 /**
- * memory doc → skill view。不是使用者 skill 文件／欄位不全／值域非法 → `null`，
- * 任何情況都不拋（畸形 `links`、非字串 body 等）。
+ * memory doc → skill view。不是使用者 skill 文件／栏位不全／值域非法 → `null`，
+ * 任何情况都不抛（畸形 `links`、非字串 body 等）。
  */
 export function memoryDocToSkill(
   doc: AgentMemoryDoc | null | undefined,
@@ -583,7 +583,7 @@ export function memoryDocToSkill(
   };
 }
 
-/** 把一串記憶文件轉成 skill 視圖（非 skill 文件自動濾掉）。純函式。 */
+/** 把一串记忆文件转成 skill 视图（非 skill 文件自动滤掉）。纯函式。 */
 export function userSkillsFromMemoryDocs(
   docs: readonly AgentMemoryDoc[] | null | undefined,
 ): AgentSkillView[] {
@@ -595,9 +595,9 @@ export function userSkillsFromMemoryDocs(
   return out;
 }
 
-// ─────────────────────────── 私有 CRUD（route 的業務本體，可獨立行為測）
+// ─────────────────────────── 私有 CRUD（route 的业务本体，可独立行为测）
 
-/** store 的拒絕理由 → 本端 HTTP 語義（reason 原樣帶出，不改寫）。 */
+/** store 的拒绝理由 → 本端 HTTP 语义（reason 原样带出，不改写）。 */
 export function skillRejectionStatus(reason: MemoryRejectReason): { status: number; error: string } {
   if (reason === "duplicate") return { status: 409, error: "duplicate" };
   if (reason === "quota_scope" || reason === "quota_domain") {
@@ -611,15 +611,15 @@ export type SaveMySkillResult =
   | { ok: false; status: number; error: string; reason: string };
 
 /**
- * 建立／更新**自己**的私有 skill（`POST /api/skills/mine` 的業務本體）。
+ * 建立／更新**自己**的私有 skill（`POST /api/skills/mine` 的业务本体）。
  *
- * 歸屬判定：`draft.id` 存在 **且該 id 就在自己的私有庫** → 更新（沿用同 id，store
- * 做 revision+1）；否則一律**建立**，且**丟掉 caller 帶來的 id** 改由驗證器派生——
- * 不允許使用者用自帶 id 造殼，也讓「拿別人的 id 來寫」自然落成自己庫裡的新條目
- * （既不改到別人、也不以 403/409 洩漏他人資源存在性）。
+ * 归属判定：`draft.id` 存在 **且该 id 就在自己的私有库** → 更新（沿用同 id，store
+ * 做 revision+1）；否则一律**建立**，且**丢掉 caller 带来的 id** 改由验证器派生——
+ * 不允许使用者用自带 id 造壳，也让「拿别人的 id 来写」自然落成自己库里的新条目
+ * （既不改到别人、也不以 403/409 泄漏他人资源存在性）。
  *
- * 配額（G7）、去重（G5）、結構防線全在 store 的 `ingestMemoryDocs`，本函式
- * **零自造閘門**，只把 store 的拒絕理由映射成 HTTP 語義。
+ * 配额（G7）、去重（G5）、结构防线全在 store 的 `ingestMemoryDocs`，本函式
+ * **零自造闸门**，只把 store 的拒绝理由映射成 HTTP 语义。
  */
 export async function saveMySkill(
   ownerKey: string | null | undefined,
@@ -671,12 +671,12 @@ export type DeleteMySkillResult =
   | { ok: false; status: number; error: string };
 
 /**
- * 刪除**自己**的私有 skill（`DELETE /api/skills/mine/<id>` 的業務本體）。
+ * 删除**自己**的私有 skill（`DELETE /api/skills/mine/<id>` 的业务本体）。
  *
- * 只在呼叫者自己的 private 庫裡按 slug 找，且該 doc 必須仍解析得出 skill
- * （避免拿這個端點誤刪同庫裡的普通記憶文件）；找不到／不是自己的 → **404**，
- * 不用 403，不以狀態碼洩漏他人資源存在性。刪除複用 store 的 `retractMemoryDocs`
- * （status=retracted + 索引移除，檔案留證），**不自造第二套刪除**。
+ * 只在呼叫者自己的 private 库里按 slug 找，且该 doc 必须仍解析得出 skill
+ * （避免拿这个端点误删同库里的普通记忆文件）；找不到／不是自己的 → **404**，
+ * 不用 403，不以状态码泄漏他人资源存在性。删除复用 store 的 `retractMemoryDocs`
+ * （status=retracted + 索引移除，档案留证），**不自造第二套删除**。
  */
 export async function deleteMySkill(
   ownerKey: string | null | undefined,
@@ -705,20 +705,20 @@ export async function deleteMySkill(
   return { ok: true, id: key };
 }
 
-// ─────────────────────────── 註冊（複用 registry 的單一插槽）
+// ─────────────────────────── 注册（复用 registry 的单一插槽）
 
 export { registerUserSkillSource } from "./registry";
 
 /**
- * 載入器：**本身就是 registry 插槽期待的形狀** `(ownerKey) => Promise<AgentSkillView[]>`
- * ——讀該 ownerKey 的私有庫並逐條解析成 skill。
+ * 载入器：**本身就是 registry 插槽期待的形状** `(ownerKey) => Promise<AgentSkillView[]>`
+ * ——读该 ownerKey 的私有库并逐条解析成 skill。
  * 用法：`registerUserSkillSource(userSkillLoader)`。
  *
- * 隔離紀律：ownerKey 空（未登入／無 key）→ 回空集合，**永不回全體**；插槽只認這個
- * 帶 ownerKey 的簽名，沒有「無參數版本」可退回，故不存在「回傳所有人資料」的介面。
+ * 隔离纪律：ownerKey 空（未登入／无 key）→ 回空集合，**永不回全体**；插槽只认这个
+ * 带 ownerKey 的签名，没有「无参数版本」可退回，故不存在「回传所有人资料」的介面。
  *
- * 讀取失敗（blob 不可達等）→ 回空集合不拋：個人 skill 故障不該拖垮全庫列舉
- * （與 registry 對來源拋錯的處理同款，這裡先一步吞掉，錯誤不進使用者視野）。
+ * 读取失败（blob 不可达等）→ 回空集合不抛：个人 skill 故障不该拖垮全库列举
+ * （与 registry 对来源抛错的处理同款，这里先一步吞掉，错误不进使用者视野）。
  */
 export async function userSkillLoader(ownerKey: string | null | undefined): Promise<AgentSkillView[]> {
   const owner = asTrimmedString(ownerKey);

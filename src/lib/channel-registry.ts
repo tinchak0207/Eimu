@@ -1,18 +1,18 @@
-// 渠道註冊表：整個生圖系統的「隊列真相」只能從這裡產生。
+// 渠道注册表：整个生图系统的「队列真相」只能从这里产生。
 //
-// 在此之前，隊列邏輯散在四處各自為戰：generate-images 路由（env 端點 + 池合併 +
-// 專用分支）、biz-image-pipeline（同一套邏輯的手工拷貝，外加自己一份
-// 冷卻記憶）、admin 的 image-upstream-probe（直接調 buildGatewayEndpoints，admin
-// 停用了渠道它照樣打）、account-pools 的 routing 診斷（又一份）。/admin 顯示的
-// 隊列與生產實際使用的隊列因此可以各說各話——這正是本模組要消滅的病。
+// 在此之前，队列逻辑散在四处各自为战：generate-images 路由（env 端点 + 池合并 +
+// 专用分支）、biz-image-pipeline（同一套逻辑的手工拷贝，外加自己一份
+// 冷却记忆）、admin 的 image-upstream-probe（直接调 buildGatewayEndpoints，admin
+// 停用了渠道它照样打）、account-pools 的 routing 诊断（又一份）。/admin 显示的
+// 队列与生产实际使用的队列因此可以各说各话——这正是本模组要消灭的病。
 //
-// 三條硬性質：
-//  1. 單一事實來源：所有消費者（user 管線、biz 管線、admin 預覽、探測）都必須
-//     透過 buildModelQueue 取得隊列，輸入相同則輸出相同。
-//  2. 可控：admin overrides 能啟停/調序 env 渠道（池有自己的 CRUD，
-//     不重複管轄），不需要改 env 重新部署。
-//  3. 誠實：describeChannels 枚舉「全部」渠道——包含未配置的與被停用的——
-//     並標明每一項數值的來源；未配置的渠道顯示為未配置，而不是隱形。
+// 三条硬性质：
+//  1. 单一事实来源：所有消费者（user 管线、biz 管线、admin 预览、探测）都必须
+//     透过 buildModelQueue 取得队列，输入相同则输出相同。
+//  2. 可控：admin overrides 能启停/调序 env 渠道（池有自己的 CRUD，
+//     不重复管辖），不需要改 env 重新部署。
+//  3. 诚实：describeChannels 枚举「全部」渠道——包含未配置的与被停用的——
+//     并标明每一项数值的来源；未配置的渠道显示为未配置，而不是隐形。
 
 import {
   describeEnvChannels,
@@ -25,15 +25,15 @@ import type { ChannelOverrides } from "./channel-overrides";
 import { REGISTRY_CHANNELS } from "./supplier-channels.config";
 
 /**
- * env 渠道的固定基準優先級。
+ * env 渠道的固定基准优先级。
  *
- * 舊實作用「陣列索引 + 50」現場推算，於是過濾掉一個渠道會讓後面每個渠道的
- * 優先級整體漂移——admin 看到的數字與生產生效的數字對不上。固定常數讓數字
- * 可顯示、可覆寫、且與清單順序徹底解耦。
+ * 旧实作用「阵列索引 + 50」现场推算，于是过滤掉一个渠道会让后面每个渠道的
+ * 优先级整体漂移——admin 看到的数字与生产生效的数字对不上。固定常数让数字
+ * 可显示、可覆写、且与清单顺序彻底解耦。
  *
- * 與舊索引推算的唯一已知偏差：firefly 未配置時 primary 舊值是 50（索引 0），
- * 現在恆為 51——只影響「池優先級恰好是 51 且 firefly 未配置」這一個邊角的
- * 平手判定（池因 source 序仍勝出，與池=50 時的行為一致）。
+ * 与旧索引推算的唯一已知偏差：firefly 未配置时 primary 旧值是 50（索引 0），
+ * 现在恒为 51——只影响「池优先级恰好是 51 且 firefly 未配置」这一个边角的
+ * 平手判定（池因 source 序仍胜出，与池=50 时的行为一致）。
  */
 export const ENV_CHANNEL_PRIORITIES: Record<string, number> = {
   sub2api: 0,
@@ -45,7 +45,7 @@ export const ENV_CHANNEL_PRIORITIES: Record<string, number> = {
   pixai: 30,
   primary: 51,
   fallback: 90,
-  // registry 渠道（supplier-channels.config.ts）的站點隊列優先級。
+  // registry 渠道（supplier-channels.config.ts）的站点队列优先级。
   ...Object.fromEntries(REGISTRY_CHANNELS.map((channel) => [channel.label, channel.sitePriority])),
 };
 
@@ -56,19 +56,19 @@ export interface ChannelDescriptor {
   /** host + path，永不含 key。 */
   host: string;
   configured: boolean;
-  /** 零 overrides 時生產的預設行為。 */
+  /** 零 overrides 时生产的预设行为。 */
   defaultEnabled: boolean;
-  /** 套用 overrides 後的生效狀態——這就是 buildModelQueue 實際遵守的值。 */
+  /** 套用 overrides 后的生效状态——这就是 buildModelQueue 实际遵守的值。 */
   enabled: boolean;
   basePriority: number;
   priority: number;
   supportedModels: string[];
-  /** 人話說明配置來源（哪個 env 變數勝出 / admin 池）。 */
+  /** 人话说明配置来源（哪个 env 变数胜出 / admin 池）。 */
   source: string;
-  /** 勝出的 base URL 是計費閘道 GATEWAY_BASE_URL——兼職生圖，值得警示。 */
+  /** 胜出的 base URL 是计费闸道 GATEWAY_BASE_URL——兼职生图，值得警示。 */
   usesBillingGateway: boolean;
   overridden: { enabled: boolean; priority: boolean };
-  /** 本 lambda 實例的冷卻狀態——per-instance，不代表其他實例。 */
+  /** 本 lambda 实例的冷却状态——per-instance，不代表其他实例。 */
   coolingDown: boolean;
 }
 
@@ -82,20 +82,20 @@ export function safeEndpointHost(baseURL: string): string {
 }
 
 /**
- * 對外回應的通道標籤：只透露「是否走了回退通道」，不透露具體供應商名。
- * 內部 label（adobe2api / sub2api / admin 池名等）一律歸一成
- * "primary"，避免客戶端從回應體拼出上游供應鏈。前端只依賴
- * `endpointLabel === "fallback"` 這一個值，因此語義保持不變。
+ * 对外回应的通道标签：只透露「是否走了回退通道」，不透露具体供应商名。
+ * 内部 label（adobe2api / sub2api / admin 池名等）一律归一成
+ * "primary"，避免客户端从回应体拼出上游供应链。前端只依赖
+ * `endpointLabel === "fallback"` 这一个值，因此语义保持不变。
  */
 export function publicEndpointLabel(label: string): string {
   return label === "fallback" ? "fallback" : "primary";
 }
 
-// ─────────────────────────────────────────────────── 端點健康記憶（circuit breaker）
+// ─────────────────────────────────────────────────── 端点健康记忆（circuit breaker）
 //
-// 單一 Map，user 管線與 biz 管線共用：同一個 lambda 裡一條管線觀察到的端點故障,
-// 另一條不必再親自撞一次。狀態是 per-instance 的——admin 介面上任何引用它的地方
-// 都必須如實標註這一點，不得偽裝成全域真相。
+// 单一 Map，user 管线与 biz 管线共用：同一个 lambda 里一条管线观察到的端点故障,
+// 另一条不必再亲自撞一次。状态是 per-instance 的——admin 介面上任何引用它的地方
+// 都必须如实标注这一点，不得伪装成全域真相。
 
 export const ENDPOINT_FAILURE_THRESHOLD = 2;
 export const ENDPOINT_COOLDOWN_MS = 60_000;
@@ -129,7 +129,7 @@ export function recordEndpointSuccess(endpoint: { label: string; baseURL: string
   endpointFailures.delete(endpointKey(endpoint));
 }
 
-/** 冷卻中的端點降到隊尾而非剔除——全都在冷卻時，用戶仍然要有東西可試。 */
+/** 冷却中的端点降到队尾而非剔除——全都在冷却时，用户仍然要有东西可试。 */
 export function prioritizeHealthyEndpoints<T extends { label: string; baseURL: string }>(endpoints: T[]): T[] {
   const healthy: T[] = [];
   const cooling: T[] = [];
@@ -140,23 +140,23 @@ export function prioritizeHealthyEndpoints<T extends { label: string; baseURL: s
   return [...healthy, ...cooling];
 }
 
-/** 僅供測試重置共享冷卻狀態。 */
+/** 仅供测试重置共享冷却状态。 */
 export function __resetChannelHealthForTests(): void {
   endpointFailures.clear();
 }
 
-// ─────────────────────────────────────────────────── 隊列構建（唯一入口）
+// ─────────────────────────────────────────────────── 队列构建（唯一入口）
 
 function envChannelOverride(overrides: ChannelOverrides, channel: EnvChannelDescriptor) {
   return overrides[channel.id] ?? {};
 }
 
 /**
- * 生產與 admin 共用的唯一隊列函式。
+ * 生产与 admin 共用的唯一队列函式。
  *
- * 不在這裡套 prioritizeHealthyEndpoints：冷卻重排是 per-instance 的執行期關注,
- * 由呼叫端在取得隊列後自行套用；admin 預覽因此拿到的是「靜態順序」，並須在
- * UI 上如實標註。
+ * 不在这里套 prioritizeHealthyEndpoints：冷却重排是 per-instance 的执行期关注,
+ * 由呼叫端在取得队列后自行套用；admin 预览因此拿到的是「静态顺序」，并须在
+ * UI 上如实标注。
  */
 export function buildModelQueue(
   modelId: string,
@@ -178,7 +178,7 @@ export function buildModelQueue(
   return buildGatewayEndpointsWithPools(pools, enabledEnvEndpoints, modelId, environmentPriorities);
 }
 
-// ─────────────────────────────────────────────────── 渠道描述（admin 顯示用）
+// ─────────────────────────────────────────────────── 渠道描述（admin 显示用）
 
 export function describeChannels(
   env: EnvLike,
@@ -201,7 +201,7 @@ export function describeChannels(
       enabled: override.enabled ?? channel.defaultEnabled,
       basePriority,
       priority: override.priority ?? basePriority,
-      // 與合併時完全相同的推斷（inferSupportedModels），admin 看到的就是過濾用的。
+      // 与合并时完全相同的推断（inferSupportedModels），admin 看到的就是过滤用的。
       supportedModels: endpoint ? inferSupportedModels(endpoint) : [],
       source: channel.source,
       usesBillingGateway: channel.usesBillingGateway,
@@ -218,8 +218,8 @@ export function describeChannels(
       host: safeEndpointHost(pool.baseURL),
       configured: true,
       defaultEnabled: pool.enabled,
-      // 池的啟停/優先級由自己的 CRUD 管轄，overrides 不重複治理——雙重事實來源
-      // 只會重演混亂。
+      // 池的启停/优先级由自己的 CRUD 管辖，overrides 不重复治理——双重事实来源
+      // 只会重演混乱。
       enabled: pool.enabled,
       basePriority: pool.priority,
       priority: pool.priority,
@@ -234,7 +234,7 @@ export function describeChannels(
   return channels;
 }
 
-/** admin overrides 允許出現的渠道 id 白名單（池不在內——池有自己的 CRUD）。 */
+/** admin overrides 允许出现的渠道 id 白名单（池不在内——池有自己的 CRUD）。 */
 export function overridableChannelIds(): string[] {
   return [
     "env:sub2api",

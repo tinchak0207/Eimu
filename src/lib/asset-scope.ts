@@ -1,100 +1,100 @@
-// REQ-B2 團隊資產空間：作用域層（純邏輯，無 IO）。
+// REQ-B2 团队资产空间：作用域层（纯逻辑，无 IO）。
 //
-// 定位：把**現成**資產包（asset-pack-store）＋資產卡（character-cards）掛到
-// project-scoped library —— 本檔只加「歸屬 / 可見性 / 復用」三件事，
-// **不另造資產格式**：scope 只是既有記錄上的一個可選欄位（見 asset-pack-store
-// 與 character-cards 的清洗收口），資產實體仍是原本那兩套表示。
+// 定位：把**现成**资产包（asset-pack-store）＋资产卡（character-cards）挂到
+// project-scoped library —— 本档只加「归属 / 可见性 / 复用」三件事，
+// **不另造资产格式**：scope 只是既有记录上的一个可选栏位（见 asset-pack-store
+// 与 character-cards 的清洗收口），资产实体仍是原本那两套表示。
 //
-// 三鐵律：
-//   1. **不可見即不可用**：任何跨項目使用都先過 resolveAssetVisibility，
-//      回 null = 不列進列表、掛用直接拒絕（禁默認全網可見）。
-//   2. **跨項目復用需顯式分享**：唯一入口是 AssetShareRecord（grant / revoke 顯式動作），
-//      沒有「同帳號自動可見」「同組織自動可見」這類隱含規則。
-//   3. **冪等鏈復用既有件**：mount / share 的 id 與 idempotencyRef 都是**確定性鍵**
-//      （`{action}:{scope}:{target}` 同形，對齊 generation-core 既有 key 慣例，
+// 三铁律：
+//   1. **不可见即不可用**：任何跨项目使用都先过 resolveAssetVisibility，
+//      回 null = 不列进列表、挂用直接拒绝（禁默认全网可见）。
+//   2. **跨项目复用需显式分享**：唯一入口是 AssetShareRecord（grant / revoke 显式动作），
+//      没有「同帐号自动可见」「同组织自动可见」这类隐含规则。
+//   3. **幂等链复用既有件**：mount / share 的 id 与 idempotencyRef 都是**确定性键**
+//      （`{action}:{scope}:{target}` 同形，对齐 generation-core 既有 key 惯例，
 //      例：master-ingest `film_export:{sessionId}:{fingerprint}`）——
-//      重複掛用 / 重複分享只命中同一件，不產生第二筆（計費冪等不雙扣的地基）。
-//      **鍵段一律長度前綴單射化**（`{len}:{value}`）：裸 `:` 拼接會讓
-//      `pack:"x:card:y"` 與 `projectId:"x", card:"y"` 產出同一個鍵（實測撞鍵），
-//      撞鍵 = 授權跨資產別名 + 靜默成功謊言，故鍵段必須單射；同時在資產 id 的
-//      驗證邊界（isUsableAssetId）拒絕含保留分隔符的 id。
-//   4. **碰撞不得靜默成功**：同鍵但三元組不同 = 真碰撞（別名），一律回
-//      conflict（API 層 409），不得當成冪等重放回 `success:true`。
+//      重复挂用 / 重复分享只命中同一件，不产生第二笔（计费幂等不双扣的地基）。
+//      **键段一律长度前缀单射化**（`{len}:{value}`）：裸 `:` 拼接会让
+//      `pack:"x:card:y"` 与 `projectId:"x", card:"y"` 产出同一个键（实测撞键），
+//      撞键 = 授权跨资产别名 + 静默成功谎言，故键段必须单射；同时在资产 id 的
+//      验证边界（isUsableAssetId）拒绝含保留分隔符的 id。
+//   4. **碰撞不得静默成功**：同键但三元组不同 = 真碰撞（别名），一律回
+//      conflict（API 层 409），不得当成幂等重放回 `success:true`。
 //
-// metadata 紀律（裁決，同 D1 lineage 先例）：scope 只給人看（項目資產庫面板），
-// **不進 canvas 節點 metadata、不進 toNodeMetadata、不進 compactMetadataForAgent**；
-// 反之，資產庫列表本身也不經雙白名單（它不落地成 canvas 節點）。
+// metadata 纪律（裁决，同 D1 lineage 先例）：scope 只给人看（项目资产库面板），
+// **不进 canvas 节点 metadata、不进 toNodeMetadata、不进 compactMetadataForAgent**；
+// 反之，资产库列表本身也不经双白名单（它不落地成 canvas 节点）。
 //
-// 已知邊界（本刀刻意不吞，寫明不裝懂）：
-//   1. 掛用（AssetMountRecord）＝「收入項目資產庫」的成員關係；生成時的卡片注入走
-//      既有 `CanvasProject.cardIds` 鎖定機制。**兩條都查作用域**：注入端走
-//      `resolveAssetVisibility`（storyboard-contract 的 scope 選項），鎖定端走
-//      `/api/canvas/projects` 的 cardIds 閘（都是同一裁決函式的包裝）。
-//   2. 跨項目掛用語義＝**copy-on-use**（暴君 2026-09-23 裁定）：掛用＝在目標項目建
-//      本地副本 + lineage 指向來源（副本**運行時自足**：來源/來源項目日後刪除不影響副本；
-//      lineage 邊**可以**指向別的 project 的來源實體——它只是審計痕跡，不是運行依賴）。
-//      本檔的 mount 記錄仍是「來源→目標」的連接記錄，副本身份＝ `localCopyId`
-//      （確定性推導），副本本體由 asset-library.mountAssetWithCopy 落地。
-//   3. 內部副本（copy-on-use 落地的本地副本）**不是可掛用條目**：不列進資產庫候選、
-//      掛用閘直接拒（見 isAssetLocalCopyId）——否則「副本的副本」會讓卡片無限膨脹（D5）。
+// 已知边界（本刀刻意不吞，写明不装懂）：
+//   1. 挂用（AssetMountRecord）＝「收入项目资产库」的成员关系；生成时的卡片注入走
+//      既有 `CanvasProject.cardIds` 锁定机制。**两条都查作用域**：注入端走
+//      `resolveAssetVisibility`（storyboard-contract 的 scope 选项），锁定端走
+//      `/api/canvas/projects` 的 cardIds 闸（都是同一裁决函式的包装）。
+//   2. 跨项目挂用语义＝**copy-on-use**（暴君 2026-09-23 裁定）：挂用＝在目标项目建
+//      本地副本 + lineage 指向来源（副本**运行时自足**：来源/来源项目日后删除不影响副本；
+//      lineage 边**可以**指向别的 project 的来源实体——它只是审计痕迹，不是运行依赖）。
+//      本档的 mount 记录仍是「来源→目标」的连接记录，副本身份＝ `localCopyId`
+//      （确定性推导），副本本体由 asset-library.mountAssetWithCopy 落地。
+//   3. 内部副本（copy-on-use 落地的本地副本）**不是可挂用条目**：不列进资产库候选、
+//      挂用闸直接拒（见 isAssetLocalCopyId）——否则「副本的副本」会让卡片无限膨胀（D5）。
 //
-// **方向可切換**：作用域裁決走單一入口 `resolveAssetVisibility`（包裝＝
+// **方向可切换**：作用域裁决走单一入口 `resolveAssetVisibility`（包装＝
 // `filterUsableAssets` / asset-library 的 `isAssetUsable` / `resolveMountableAsset`）；
-// copy-on-use ↔ 引用制的唯一分歧點是 `planAssetMountCopy`。若日後改回「引用＋解鏈閘」，
-// 只需改這兩個函式（＋門禁呼叫端），不必動各使用路徑。
+// copy-on-use ↔ 引用制的唯一分歧点是 `planAssetMountCopy`。若日后改回「引用＋解链闸」，
+// 只需改这两个函式（＋门禁呼叫端），不必动各使用路径。
 
-// ─────────────────────────────────────────── 資產種類（既有兩套表示的鍵）
+// ─────────────────────────────────────────── 资产种类（既有两套表示的键）
 
-/** 資產種類＝既有兩種表示：pack（資產包）/ card（角色·場景·風格卡）。 */
+/** 资产种类＝既有两种表示：pack（资产包）/ card（角色·场景·风格卡）。 */
 export type AssetKind = "pack" | "card";
 
-/** 運行期判據：不可信 payload 的值域收斂（非 pack/card 一律 null）。 */
+/** 运行期判据：不可信 payload 的值域收敛（非 pack/card 一律 null）。 */
 export function toAssetKind(value: unknown): AssetKind | null {
   return value === "pack" || value === "card" ? value : null;
 }
 
-// ─────────────────────────────────────────── 歸屬（個人 / 項目 / 團隊）
+// ─────────────────────────────────────────── 归属（个人 / 项目 / 团队）
 
 export type AssetOwnership = "personal" | "project" | "team";
 
 /**
- * 資產歸屬：personal＝個人資產（本帳號所有項目可用）；
- * project＝屬於某個項目；team＝屬於某個團隊（P0-2 資產團隊維度：跟組織走，切隊嚴格隔離）。
+ * 资产归属：personal＝个人资产（本帐号所有项目可用）；
+ * project＝属于某个项目；team＝属于某个团队（P0-2 资产团队维度：跟组织走，切队严格隔离）。
  *
- * **維度只到此為止**：本刀只加歸屬維度與可見性，RBAC／配額／席位由後續刀接手
- *（見 asset-scope-store 的 MAX_*_PER_USER，仍是 per-user 而非 per-team）。
+ * **维度只到此为止**：本刀只加归属维度与可见性，RBAC／配额／席位由后续刀接手
+ *（见 asset-scope-store 的 MAX_*_PER_USER，仍是 per-user 而非 per-team）。
  */
 export interface AssetScope {
   owner: AssetOwnership;
-  /** 僅 owner==="project" 有意義（其餘恆省略，不寫 `projectId: ""` 冒充）。 */
+  /** 仅 owner==="project" 有意义（其余恒省略，不写 `projectId: ""` 冒充）。 */
   projectId?: string;
   /**
-   * 僅 owner==="team" 有意義（其餘恆省略，不寫 `teamId: ""` 冒充）。
-   * 寫入端以 **relay 權威值**蓋章（見 /api/assets 的 PUT），不採信客戶端送來的值。
+   * 仅 owner==="team" 有意义（其余恒省略，不写 `teamId: ""` 冒充）。
+   * 写入端以 **relay 权威值**盖章（见 /api/assets 的 PUT），不采信客户端送来的值。
    */
   teamId?: string;
 }
 
-/** 缺省＝personal，向後相容既有資產（本刀之前存的包/卡都沒有 scope 欄）。 */
+/** 缺省＝personal，向后相容既有资产（本刀之前存的包/卡都没有 scope 栏）。 */
 export const DEFAULT_ASSET_SCOPE: AssetScope = { owner: "personal" };
 
 /**
- * **鬼狀態**的持久化形狀：`owner:"project"` 而**無** projectId。
+ * **鬼状态**的持久化形状：`owner:"project"` 而**无** projectId。
  *
- * 語義（與 resolveAssetScopeVisibility 的「鬼狀態 → null」宣稱對齊，見 D3）：
- * 宣稱屬於某個項目卻說不出是哪個項目 → **任何**上下文都不可見/不可用（fail-closed），
- * 既不降格成人人可用的 personal，也不猜是哪個項目。
- * 代理人（character-cards / asset-pack-store）收到 normalizeAssetScope 回 null 時寫回此形狀，
- * 使「存檔 → 讀檔」兩端都不會漂移成 personal。
+ * 语义（与 resolveAssetScopeVisibility 的「鬼状态 → null」宣称对齐，见 D3）：
+ * 宣称属于某个项目却说不出是哪个项目 → **任何**上下文都不可见/不可用（fail-closed），
+ * 既不降格成人人可用的 personal，也不猜是哪个项目。
+ * 代理人（character-cards / asset-pack-store）收到 normalizeAssetScope 回 null 时写回此形状，
+ * 使「存档 → 读档」两端都不会漂移成 personal。
  *
- * **團隊同理**（P0-2 對稱）：`owner:"team"` 而無 teamId 也是鬼狀態 → 回 null、寫回本形狀
- *（本常數是「project 無 projectId」的形狀；team 鬼狀態若也無 projectId，落盤形狀與它逐字相同）。
+ * **团队同理**（P0-2 对称）：`owner:"team"` 而无 teamId 也是鬼状态 → 回 null、写回本形状
+ *（本常数是「project 无 projectId」的形状；team 鬼状态若也无 projectId，落盘形状与它逐字相同）。
  */
 export const GHOST_ASSET_SCOPE: AssetScope = { owner: "project" };
 
 /**
- * 團隊鬼狀態的持久化形狀：`owner:"team"` 而**無** teamId（正常收口不會產生——
- * 寫入端遇 relay 查不到成員身份時**降級 personal**，此形狀只可能來自外部偽造或舊資料）。
+ * 团队鬼状态的持久化形状：`owner:"team"` 而**无** teamId（正常收口不会产生——
+ * 写入端遇 relay 查不到成员身份时**降级 personal**，此形状只可能来自外部伪造或旧资料）。
  */
 export const GHOST_TEAM_ASSET_SCOPE: AssetScope = { owner: "team" };
 
@@ -102,14 +102,14 @@ const MAX_PROJECT_ID_LENGTH = 120;
 const MAX_TEAM_ID_LENGTH = 120;
 
 /**
- * 收斂作用域欄位（存檔與讀檔共用同一收口）：
- * - 非物件 / 非 "project" / 非 "team" → personal（含舊資料）
- * - owner==="project" 但 projectId 空 → **null**（鬼狀態；呼叫端寫回 GHOST_ASSET_SCOPE，
- *   不得降格成 personal —— 降格＝把「歸屬不明的項目資產」變成所有人都能用的個人資產，
+ * 收敛作用域栏位（存档与读档共用同一收口）：
+ * - 非物件 / 非 "project" / 非 "team" → personal（含旧资料）
+ * - owner==="project" 但 projectId 空 → **null**（鬼状态；呼叫端写回 GHOST_ASSET_SCOPE，
+ *   不得降格成 personal —— 降格＝把「归属不明的项目资产」变成所有人都能用的个人资产，
  *   正是 D3 的 fail-open 病灶）
- * - owner==="team" 但 teamId 空 → **null**（同款鬼狀態，fail-closed；**不**降格 personal）
- * - 每種 owner **只保留自己那一個 id 欄**：`{owner:"project", teamId}` / `{owner:"team", projectId}`
- *   的跨欄殘留一律剝除（否則 scope 內兩個座標並存，讀取端就得多一層「聽誰的」）。
+ * - owner==="team" 但 teamId 空 → **null**（同款鬼状态，fail-closed；**不**降格 personal）
+ * - 每种 owner **只保留自己那一个 id 栏**：`{owner:"project", teamId}` / `{owner:"team", projectId}`
+ *   的跨栏残留一律剥除（否则 scope 内两个座标并存，读取端就得多一层「听谁的」）。
  */
 export function normalizeAssetScope(raw: unknown): AssetScope | null {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_ASSET_SCOPE };
@@ -123,7 +123,7 @@ export function normalizeAssetScope(raw: unknown): AssetScope | null {
   return projectId ? { owner: "project", projectId } : null;
 }
 
-/** 兩份作用域是否等值（掛用/分享去重與測試斷言用）；owner 不同即不等值。 */
+/** 两份作用域是否等值（挂用/分享去重与测试断言用）；owner 不同即不等值。 */
 export function sameAssetScope(a: AssetScope, b: AssetScope): boolean {
   return (
     a.owner === b.owner &&
@@ -132,52 +132,52 @@ export function sameAssetScope(a: AssetScope, b: AssetScope): boolean {
   );
 }
 
-/** 取作用域上的團隊座標（只認 owner==="team"；其餘回 ""，與「缺省＝personal」同精神）。 */
+/** 取作用域上的团队座标（只认 owner==="team"；其余回 ""，与「缺省＝personal」同精神）。 */
 export function teamIdOfScope(scope: AssetScope | undefined): string {
   return scope && scope.owner === "team" ? (scope.teamId ?? "") : "";
 }
 
-// ─────────────────────────────────────────── 顯式分享（跨項目授權）
+// ─────────────────────────────────────────── 显式分享（跨项目授权）
 
-/** 顯式分享授權：把 fromProjectId 名下的一個資產授權給 toProjectId 可見可用。 */
+/** 显式分享授权：把 fromProjectId 名下的一个资产授权给 toProjectId 可见可用。 */
 export interface AssetShareRecord {
   /**
-   * 確定性 id（不隨機）：`share:{kind}:{len(assetId)}:{assetId}:{len(from)}:{from}:{len(to)}:{to}`。
-   * 段長度前綴＝單射（含分隔符的 id 已由 isUsableAssetId 在邊界拒絕）。
-   * 同一次分享重放 = 同一個 id → 幂等，不產生第二筆授權。
+   * 确定性 id（不随机）：`share:{kind}:{len(assetId)}:{assetId}:{len(from)}:{from}:{len(to)}:{to}`。
+   * 段长度前缀＝单射（含分隔符的 id 已由 isUsableAssetId 在边界拒绝）。
+   * 同一次分享重放 = 同一个 id → 幂等，不产生第二笔授权。
    */
   id: string;
   assetKind: AssetKind;
   assetId: string;
-  /** 資產所屬項目（分享的來源）。 */
+  /** 资产所属项目（分享的来源）。 */
   fromProjectId: string;
-  /** 被顯式授權的目標項目。 */
+  /** 被显式授权的目标项目。 */
   toProjectId: string;
   createdAt: string;
-  /** 撤銷時間；有值＝已撤銷（撤銷後不再可見，但記錄留痕）。 */
+  /** 撤销时间；有值＝已撤销（撤销后不再可见，但记录留痕）。 */
   revokedAt?: string;
 }
 
-/** 資產 id 長度上限（share / mount / pack 三處同一個界，避免「可建不可分享」）。 */
+/** 资产 id 长度上限（share / mount / pack 三处同一个界，避免「可建不可分享」）。 */
 export const MAX_ASSET_ID_LENGTH = 200;
 
 /**
- * 確定性鍵的保留段分隔符。資產 id 含它 = 舊版裸拼接鍵會與別的 (kind, id) 組合撞鍵，
- * 故在資產 id 的驗證邊界（isUsableAssetId）直接拒絕，不只靠鍵端單射化兜底。
+ * 确定性键的保留段分隔符。资产 id 含它 = 旧版裸拼接键会与别的 (kind, id) 组合撞键，
+ * 故在资产 id 的验证边界（isUsableAssetId）直接拒绝，不只靠键端单射化兜底。
  */
 export const ASSET_KEY_DELIMITER = ":";
 
 /**
- * 資產 id 的字元/長度邊界（**存檔收口與確定性鍵共用**）：
- * 非字串 / 空 / 超長 / 含保留分隔符 `:` / 含控制字元 → false。
- * 呼叫端不得自行 trim 後放行（否則「長度前綴」就不是唯一真源）。
+ * 资产 id 的字元/长度边界（**存档收口与确定性键共用**）：
+ * 非字串 / 空 / 超长 / 含保留分隔符 `:` / 含控制字元 → false。
+ * 呼叫端不得自行 trim 后放行（否则「长度前缀」就不是唯一真源）。
  */
 export function isUsableAssetId(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const clean = value.trim();
   if (!clean || clean.length > MAX_ASSET_ID_LENGTH) return false;
   if (clean.includes(ASSET_KEY_DELIMITER)) return false;
-  // 控制字元（含 \n \t \0）在日誌/鍵裡都可被用來偽造段邊界。
+  // 控制字元（含 \n \t \0）在日志/键里都可被用来伪造段边界。
   for (const ch of clean) {
     const code = ch.codePointAt(0) ?? 0;
     if (code < 0x20 || code === 0x7f) return false;
@@ -185,12 +185,12 @@ export function isUsableAssetId(value: unknown): value is string {
   return true;
 }
 
-/** 鍵段單射化：長度前綴 `{len}:{value}`——(`"x:card:y"`, `""`) 與 (`"x"`, `"y"`) 不再撞鍵。 */
+/** 键段单射化：长度前缀 `{len}:{value}`——(`"x:card:y"`, `""`) 与 (`"x"`, `"y"`) 不再撞键。 */
 function keySegment(value: string): string {
   return `${value.length}:${value}`;
 }
 
-/** 分享記錄的確定性 id（分享冪等的唯一鍵）。 */
+/** 分享记录的确定性 id（分享幂等的唯一键）。 */
 export function assetShareId(
   assetKind: AssetKind,
   assetId: string,
@@ -202,8 +202,8 @@ export function assetShareId(
 
 /**
  * 段值清洗（id 以外的段）：
- * 非字串 / 空 → ""；**超長一律拒絕（回 ""）而非截斷**——截斷會讓兩個不同值落成同一段
- * （＝另一種撞鍵），fail-closed。
+ * 非字串 / 空 → ""；**超长一律拒绝（回 ""）而非截断**——截断会让两个不同值落成同一段
+ * （＝另一种撞键），fail-closed。
  */
 function boundedSegment(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
@@ -213,9 +213,9 @@ function boundedSegment(value: unknown, max: number): string {
 
 
 /**
- * 清洗分享記錄（存檔/讀檔唯一收口）。
- * id 由三元組**重新推導**（不接受外部傳入的 id：確定性鍵不許被呼叫端改寫）。
- * 三元組任一缺損 → null（呼叫端丟棄）。
+ * 清洗分享记录（存档/读档唯一收口）。
+ * id 由三元组**重新推导**（不接受外部传入的 id：确定性键不许被呼叫端改写）。
+ * 三元组任一缺损 → null（呼叫端丢弃）。
  */
 export function normalizeAssetShare(raw: unknown): AssetShareRecord | null {
   if (!raw || typeof raw !== "object") return null;
@@ -237,12 +237,12 @@ export function normalizeAssetShare(raw: unknown): AssetShareRecord | null {
   };
 }
 
-/** 撤銷後不再可見（記錄留痕，不刪）。 */
+/** 撤销后不再可见（记录留痕，不删）。 */
 export function isAssetShareActive(share: AssetShareRecord): boolean {
   return !share.revokedAt;
 }
 
-/** 命中「把 fromProjectId 的某資產顯式分享給 toProjectId」的有效授權。 */
+/** 命中「把 fromProjectId 的某资产显式分享给 toProjectId」的有效授权。 */
 export function findActiveAssetShare(
   shares: readonly AssetShareRecord[],
   assetKind: AssetKind,
@@ -255,7 +255,7 @@ export function findActiveAssetShare(
   return shares.find((s) => s.id === wanted && isAssetShareActive(s)) ?? null;
 }
 
-/** 分享動作的裁決結果（拒絕理由要能直說，不吞）。 */
+/** 分享动作的裁决结果（拒绝理由要能直说，不吞）。 */
 export type ShareGrantRejectReason =
   | "cross_user"
   | "not_a_project_asset"
@@ -263,7 +263,7 @@ export type ShareGrantRejectReason =
   | "missing_target_project"
   | "same_project";
 
-/** 只有「資產擁有者」能把「屬於 fromProjectId 的項目資產」顯式分享給另一個項目。 */
+/** 只有「资产拥有者」能把「属于 fromProjectId 的项目资产」显式分享给另一个项目。 */
 export function decideAssetShareGrant(input: {
   viewerUserId: number;
   asset: ScopedAssetLike;
@@ -282,10 +282,10 @@ export function decideAssetShareGrant(input: {
 }
 
 /**
- * 冪等授權（純函式）：
- * - 同鍵已生效 → 原樣返回 created:false（**不新增第二筆**，計費/額度鏈不雙扣）
- * - 同鍵存在但已撤銷 → 復活（移除 revokedAt），created:false（仍是同一件）
- * - 同鍵但三元組不同 → **conflict:true**（真碰撞/別名，呼叫端必須回衝突，禁靜默成功）
+ * 幂等授权（纯函式）：
+ * - 同键已生效 → 原样返回 created:false（**不新增第二笔**，计费/额度链不双扣）
+ * - 同键存在但已撤销 → 复活（移除 revokedAt），created:false（仍是同一件）
+ * - 同键但三元组不同 → **conflict:true**（真碰撞/别名，呼叫端必须回冲突，禁静默成功）
  * - 不存在 → 新增，created:true
  */
 export function applyAssetShareGrant(
@@ -302,12 +302,12 @@ export function applyAssetShareGrant(
   if (!normalized) throw new Error("invalid asset share");
   const existing = shares.find((s) => s.id === normalized.id);
   if (!existing) return { shares: [...shares, normalized], share: normalized, created: true, conflict: false };
-  // 同鍵不同三元組 = 鍵碰撞（不可能來自正常呼叫；來自舊鍵/外部偽造時不許冒充冪等重放）。
+  // 同键不同三元组 = 键碰撞（不可能来自正常呼叫；来自旧键/外部伪造时不许冒充幂等重放）。
   if (!sameShareTriple(existing, normalized)) {
     return { shares: [...shares], share: existing, created: false, conflict: true };
   }
   if (isAssetShareActive(existing)) return { shares: [...shares], share: existing, created: false, conflict: false };
-  // 復活：逐欄重建（不用展開運算子，否則 revokedAt 會被一起帶回來＝撤銷失效）。
+  // 复活：逐栏重建（不用展开运算子，否则 revokedAt 会被一起带回来＝撤销失效）。
   const revived: AssetShareRecord = {
     id: existing.id,
     assetKind: existing.assetKind,
@@ -319,7 +319,7 @@ export function applyAssetShareGrant(
   return { shares: shares.map((s) => (s.id === revived.id ? revived : s)), share: revived, created: false, conflict: false };
 }
 
-/** 分享三元組逐欄等值（不用 JSON.stringify：欄位序不是契約）。 */
+/** 分享三元组逐栏等值（不用 JSON.stringify：栏位序不是契约）。 */
 function sameShareTriple(a: AssetShareRecord, b: AssetShareRecord): boolean {
   return (
     a.assetKind === b.assetKind &&
@@ -329,7 +329,7 @@ function sameShareTriple(a: AssetShareRecord, b: AssetShareRecord): boolean {
   );
 }
 
-/** 撤銷授權（按確定性 id）。回是否真的撤銷了（已撤銷/不存在回 false）。 */
+/** 撤销授权（按确定性 id）。回是否真的撤销了（已撤销/不存在回 false）。 */
 export function applyAssetShareRevoke(
   shares: readonly AssetShareRecord[],
   shareId: string,
@@ -344,53 +344,53 @@ export function applyAssetShareRevoke(
   };
 }
 
-// ─────────────────────────────────────────── 可見性（不可見即不可用）
+// ─────────────────────────────────────────── 可见性（不可见即不可用）
 
-/** 資產記錄的最小白名單視圖（pack / card 兩套表示都映射到這裡）。 */
+/** 资产记录的最小白名单视图（pack / card 两套表示都映射到这里）。 */
 export interface ScopedAssetLike {
   id: string;
   kind: AssetKind;
-  /** 資產記錄上的作用域；缺省＝personal（舊資產零改動）。 */
+  /** 资产记录上的作用域；缺省＝personal（旧资产零改动）。 */
   scope?: AssetScope;
-  /** 資產擁有者（= 存儲桶 userId）。 */
+  /** 资产拥有者（= 存储桶 userId）。 */
   ownerUserId: number;
 }
 
 /**
- * 可見性判定結果：owner＝個人資產；in-project＝本項目資產；
- * in-team＝本團隊資產（P0-2：team-scoped 且屬當前團隊）；shared-in＝顯式分享進來。
+ * 可见性判定结果：owner＝个人资产；in-project＝本项目资产；
+ * in-team＝本团队资产（P0-2：team-scoped 且属当前团队）；shared-in＝显式分享进来。
  */
 export type AssetVisibility = "owner" | "in-project" | "in-team" | "shared-in";
 
 export interface AssetUseContext {
   viewerUserId: number;
-  /** 當前項目 id；無項目上下文（如全域資產頁）為 null —— 此時只有 personal 資產可見。 */
+  /** 当前项目 id；无项目上下文（如全域资产页）为 null —— 此时只有 personal 资产可见。 */
   projectId: string | null;
   /**
-   * 當前團隊 id（P0-2 資產團隊維度）。**必須由呼叫端以 relay 權威值注入**
-   *（`lookupTeamMembershipViaRelay` 回傳的 teamId），**不得採信客戶端送來的值**；
-   * 查不到成員身份／未配置 → 省略此欄（＝無團隊上下文）→ team 資產一律不可見（fail-closed）。
+   * 当前团队 id（P0-2 资产团队维度）。**必须由呼叫端以 relay 权威值注入**
+   *（`lookupTeamMembershipViaRelay` 回传的 teamId），**不得采信客户端送来的值**；
+   * 查不到成员身份／未配置 → 省略此栏（＝无团队上下文）→ team 资产一律不可见（fail-closed）。
    */
   teamId?: string | null;
   shares: readonly AssetShareRecord[];
 }
 
 /**
- * **作用域段的唯一裁決**（不含 owner 驗證，裁決順序與本檔既有版逐條同序）：
- * - personal（缺省）→ owner（跨項目恆可用）
- * - project-scoped 且屬於當前項目 → in-project
- * - team-scoped 且屬於當前團隊 → in-team（P0-2；ctx.teamId 由 relay 權威值注入）
+ * **作用域段的唯一裁决**（不含 owner 验证，裁决顺序与本档既有版逐条同序）：
+ * - personal（缺省）→ owner（跨项目恒可用）
+ * - project-scoped 且属于当前项目 → in-project
+ * - team-scoped 且属于当前团队 → in-team（P0-2；ctx.teamId 由 relay 权威值注入）
  * - project-scoped 但有 from→to 有效分享 → shared-in
- * - 其餘（含「owner=project 但 projectId 空」與「owner=team 但 teamId 空」兩種鬼狀態）→ null
+ * - 其余（含「owner=project 但 projectId 空」与「owner=team 但 teamId 空」两种鬼状态）→ null
  *
- * 為何抽出這一層：伺服器端（resolveAssetVisibility）與**客戶端讀取閘**
- * （use-canvas-cards 的鎖定卡清單；客戶端的卡已由按登入用戶隔離的
- * `/api/character-cards` 取得，故無 owner 可比）必須是同一把尺——
- * 兩處各寫一份 scope 分支＝寫入端放行、讀取端丟卡的「畫面說掛用、生成不注入」病灶。
+ * 为何抽出这一层：伺服器端（resolveAssetVisibility）与**客户端读取闸**
+ * （use-canvas-cards 的锁定卡清单；客户端的卡已由按登入用户隔离的
+ * `/api/character-cards` 取得，故无 owner 可比）必须是同一把尺——
+ * 两处各写一份 scope 分支＝写入端放行、读取端丢卡的「画面说挂用、生成不注入」病灶。
  *
- * **team 段為什麼 fail-closed**：team 座標來自 relay（可為 null）與外部載荷——
- * 查不到成員身份（ctx.teamId 缺／空）時 team 資產一律不可見，不降格成「人人可見的 personal」，
- * 也不猜「大概是哪個團隊」。與既有 project 鬼狀態同一把尺。
+ * **team 段为什么 fail-closed**：team 座标来自 relay（可为 null）与外部载荷——
+ * 查不到成员身份（ctx.teamId 缺／空）时 team 资产一律不可见，不降格成「人人可见的 personal」，
+ * 也不猜「大概是哪个团队」。与既有 project 鬼状态同一把尺。
  */
 export function resolveAssetScopeVisibility(
   asset: { id: string; kind: AssetKind; scope?: AssetScope },
@@ -412,32 +412,32 @@ export function resolveAssetScopeVisibility(
 }
 
 /**
- * 可見性判定（唯一入口）。
- * 回 null 的每一條都是**硬邊界**，呼叫端不得再放行：
- * - 跨帳號：一律不可見（跨帳號是 RBAC 那一刀，不在本作用域層內）
- * - project-scoped 且非本項目、且沒有 from→to 的有效分享 → 不可見
+ * 可见性判定（唯一入口）。
+ * 回 null 的每一条都是**硬边界**，呼叫端不得再放行：
+ * - 跨帐号：一律不可见（跨帐号是 RBAC 那一刀，不在本作用域层内）
+ * - project-scoped 且非本项目、且没有 from→to 的有效分享 → 不可见
  */
 export function resolveAssetVisibility(asset: ScopedAssetLike, ctx: AssetUseContext): AssetVisibility | null {
   if (asset.ownerUserId !== ctx.viewerUserId) return null;
   return resolveAssetScopeVisibility(asset, ctx);
 }
 
-/** 可否在當前項目使用該資產（掛用前置檢查；不可見 = 不可用）。 */
+/** 可否在当前项目使用该资产（挂用前置检查；不可见 = 不可用）。 */
 export function canUseAsset(asset: ScopedAssetLike, ctx: AssetUseContext): boolean {
   return resolveAssetVisibility(asset, ctx) !== null;
 }
 
 /**
- * **讀取端作用域閘（客戶端）**：鎖定卡清單裡不可見的卡一律剔除（fail-closed）。
+ * **读取端作用域闸（客户端）**：锁定卡清单里不可见的卡一律剔除（fail-closed）。
  *
- * 為何要這一層：`CanvasProject.cardIds` 是持久化欄位，寫入端閘（
- * `/api/canvas/projects` 的 filterCardIdsForProject）管不住**舊資料**與
- * **客戶端新增的鎖定**（角色卡面板可鎖任何一張自己名下的卡）；生成注入讀的
- * `activeCharacterCards` 若不過閘，就會出現「卡不屬於本項目卻被注入」的真泄漏。
+ * 为何要这一层：`CanvasProject.cardIds` 是持久化栏位，写入端闸（
+ * `/api/canvas/projects` 的 filterCardIdsForProject）管不住**旧资料**与
+ * **客户端新增的锁定**（角色卡面板可锁任何一张自己名下的卡）；生成注入读的
+ * `activeCharacterCards` 若不过闸，就会出现「卡不属于本项目却被注入」的真泄漏。
  *
- * 客戶端沒有 owner 可比（卡清單已由按登入用戶隔離的 `/api/character-cards` 取得），
- * 故只過 scope 段——**與伺服器端同一把尺**（resolveAssetScopeVisibility），
- * 兩端不可能漂移。個人卡（含全部 legacy 卡）缺 scope → 恆可見＝零回歸（b 類）。
+ * 客户端没有 owner 可比（卡清单已由按登入用户隔离的 `/api/character-cards` 取得），
+ * 故只过 scope 段——**与伺服器端同一把尺**（resolveAssetScopeVisibility），
+ * 两端不可能漂移。个人卡（含全部 legacy 卡）缺 scope → 恒可见＝零回归（b 类）。
  */
 export function filterLockedCardsForProjectUse<T extends { id: string; scope?: AssetScope }>(
   cards: readonly T[],
@@ -451,9 +451,9 @@ export function filterLockedCardsForProjectUse<T extends { id: string; scope?: A
 }
 
 /**
- * 把一次「副本變更」（掛用＝鎖定副本 / 解除＝解鎖副本）套進項目鎖定集（純函式）。
- * 這是 copy-on-use 生效的最後一哩：`localCopyId` 不進這個集合＝畫面標「已掛用」而生成不注入。
- * 規則：先移除 unlocked，再依序補進 locked（去重、保序：既有在前、新鎖定在後）。
+ * 把一次「副本变更」（挂用＝锁定副本 / 解除＝解锁副本）套进项目锁定集（纯函式）。
+ * 这是 copy-on-use 生效的最后一哩：`localCopyId` 不进这个集合＝画面标「已挂用」而生成不注入。
+ * 规则：先移除 unlocked，再依序补进 locked（去重、保序：既有在前、新锁定在后）。
  */
 export function applyCopyLockChange(
   prev: readonly string[],
@@ -469,32 +469,32 @@ export function applyCopyLockChange(
 }
 
 /**
- * **使用/注入路徑的唯一包裝**：把一批資產按作用域裁決過一遍，回可用子集。
- * 不可見即不可用——生成注入 / agent 注入 / 鎖定卡注入都必須經過這裡（或等價的
- * asset-library.isAssetUsable），禁在呼叫端另立規則。
- * 方向可切換：跨項目語義（copy-on-use ↔ 引用＋解鏈閘）只改 resolveAssetVisibility。
+ * **使用/注入路径的唯一包装**：把一批资产按作用域裁决过一遍，回可用子集。
+ * 不可见即不可用——生成注入 / agent 注入 / 锁定卡注入都必须经过这里（或等价的
+ * asset-library.isAssetUsable），禁在呼叫端另立规则。
+ * 方向可切换：跨项目语义（copy-on-use ↔ 引用＋解链闸）只改 resolveAssetVisibility。
  */
 export function filterUsableAssets<T extends ScopedAssetLike>(assets: readonly T[], ctx: AssetUseContext): T[] {
   return assets.filter((asset) => resolveAssetVisibility(asset, ctx) !== null);
 }
 
-// ─────────────────────────────────────────── 掛用（項目資產庫成員）
+// ─────────────────────────────────────────── 挂用（项目资产库成员）
 
 /**
- * REQ-B2b：掛用＝**copy-on-use**（暴君 09-23 裁定）——掛用記錄是「來源 → 目標」的連接記錄，
- * 目標項目裡的**本地副本**由 `localCopyId` 指名（副本自足：來源刪除不影響副本）。
- * 本檔只做純推導；副本本體的落地在 asset-library.mountAssetWithCopy。
+ * REQ-B2b：挂用＝**copy-on-use**（暴君 09-23 裁定）——挂用记录是「来源 → 目标」的连接记录，
+ * 目标项目里的**本地副本**由 `localCopyId` 指名（副本自足：来源删除不影响副本）。
+ * 本档只做纯推导；副本本体的落地在 asset-library.mountAssetWithCopy。
  */
 
-// ── 副本鍵（確定性、無分隔符、段內單射語義）
+// ── 副本键（确定性、无分隔符、段内单射语义）
 
 /**
- * 副本鍵雜湊：4 條 32 位元 FNV-1a 車道（不同播種）拼成 32 位十六進位。
- * 為何不用 node:crypto：本檔前端也會載入（character-cards → 角色卡面板 → 畫布），
- * 且 tsconfig target=ES2017（BigInt 字面量不可用）；Math.imul 版可前後端同碼。
- * 128 位元在同帳號資產量級（≤數百）下碰撞機率可忽略，且**碰撞不得靜默**：
- * 建副本前會驗證同 id 卡是否真是這條來源的副本（asset-library 的
- * AssetMountCopyConflictError），不是就 409，不當成冪等重放。
+ * 副本键杂凑：4 条 32 位元 FNV-1a 车道（不同播种）拼成 32 位十六进位。
+ * 为何不用 node:crypto：本档前端也会载入（character-cards → 角色卡面板 → 画布），
+ * 且 tsconfig target=ES2017（BigInt 字面量不可用）；Math.imul 版可前后端同码。
+ * 128 位元在同帐号资产量级（≤数百）下碰撞机率可忽略，且**碰撞不得静默**：
+ * 建副本前会验证同 id 卡是否真是这条来源的副本（asset-library 的
+ * AssetMountCopyConflictError），不是就 409，不当成幂等重放。
  */
 function fnv1aLane(input: string, seed: number): number {
   let h = seed >>> 0;
@@ -516,36 +516,36 @@ function copyKeyHash(input: string, namespace: string): string {
 }
 
 /**
- * 副本鍵的規範編碼：`{namespace}:{len}:{projectId}:{kind}:{len}:{sourceKey}`。
- * 段長度前綴＝單射（`("x:card:y")` 與 `("x","y")` 不撞），namespace 再切開
- * 「資產卡副本」與「包內條目副本」兩族——裸 `:` 拼接正是舊版撞鍵源。
- * **此字串只作雜湊輸入，永不落成資產 id**（落地的 id 是十六進位，不含分隔符）。
+ * 副本键的规范编码：`{namespace}:{len}:{projectId}:{kind}:{len}:{sourceKey}`。
+ * 段长度前缀＝单射（`("x:card:y")` 与 `("x","y")` 不撞），namespace 再切开
+ * 「资产卡副本」与「包内条目副本」两族——裸 `:` 拼接正是旧版撞键源。
+ * **此字串只作杂凑输入，永不落成资产 id**（落地的 id 是十六进位，不含分隔符）。
  */
 function canonicalCopyKey(namespace: string, projectId: string, assetKind: AssetKind, sourceKey: string): string {
   return `${namespace}:${keySegment(projectId)}:${assetKind}:${keySegment(sourceKey)}`;
 }
 
-/** 副本 id 前綴（`copy-` 家族；`cp-` 短前綴給包內條目以免與卡 id 混形）。 */
+/** 副本 id 前缀（`copy-` 家族；`cp-` 短前缀给包内条目以免与卡 id 混形）。 */
 const COPY_ID_PREFIX = "copy-";
 
 /**
- * 資產副本的確定性 id（同 `(projectId, assetKind, sourceAssetId)` → 恆同一個 id）。
- * 性質：**不含分隔符**（純 `[a-z0-9-]`，可直接當資產卡 id）、長度固定 42 字元（卡 id 上限 100 內）、
- * 與 mount/share 鍵**不同形**（後兩者以 `share:` / `mount:` 開頭且含分隔符）。
+ * 资产副本的确定性 id（同 `(projectId, assetKind, sourceAssetId)` → 恒同一个 id）。
+ * 性质：**不含分隔符**（纯 `[a-z0-9-]`，可直接当资产卡 id）、长度固定 42 字元（卡 id 上限 100 内）、
+ * 与 mount/share 键**不同形**（后两者以 `share:` / `mount:` 开头且含分隔符）。
  */
 export function assetLocalCopyId(projectId: string, assetKind: AssetKind, sourceAssetId: string): string {
   const hash = copyKeyHash(canonicalCopyKey("copy", projectId, assetKind, sourceAssetId), "asset-copy");
   return `${COPY_ID_PREFIX}${assetKind}-${hash}`;
 }
 
-/** 包內條目的來源把手（只在雜湊輸入內用：`{len}:{packId}#{index}`——包 id 與序號共同定位條目）。 */
+/** 包内条目的来源把手（只在杂凑输入内用：`{len}:{packId}#{index}`——包 id 与序号共同定位条目）。 */
 export function assetPackItemSourceKey(packId: string, itemIndex: number): string {
   return `${keySegment(packId)}#${itemIndex}`;
 }
 
 /**
- * 包內條目複製成卡時的確定性 id（同 `(projectId, packId, itemIndex)` → 恆同一張卡）。
- * 與 `assetLocalCopyId` 用**不同 namespace**，故「卡的副本」與「包條目的副本」不可能撞鍵。
+ * 包内条目复制成卡时的确定性 id（同 `(projectId, packId, itemIndex)` → 恒同一张卡）。
+ * 与 `assetLocalCopyId` 用**不同 namespace**，故「卡的副本」与「包条目的副本」不可能撞键。
  */
 export function assetPackItemCopyId(projectId: string, packId: string, itemIndex: number): string {
   const hash = copyKeyHash(
@@ -555,70 +555,70 @@ export function assetPackItemCopyId(projectId: string, packId: string, itemIndex
   return `${COPY_ID_PREFIX}card-${hash}`;
 }
 
-/** 資產包本身的本地副本 id（副本單位＝卡，包副本只是讓目標項目有本地包記錄）。 */
+/** 资产包本身的本地副本 id（副本单位＝卡，包副本只是让目标项目有本地包记录）。 */
 export function assetPackLocalCopyId(projectId: string, packId: string): string {
   return assetLocalCopyId(projectId, "pack", packId);
 }
 
 /**
- * 這個 id 是不是 copy-on-use 落地的**內部副本**（`copy-card-<32hex>` / `copy-pack-<32hex>`）。
+ * 这个 id 是不是 copy-on-use 落地的**内部副本**（`copy-card-<32hex>` / `copy-pack-<32hex>`）。
  *
- * 為什麼需要這個判據：副本與使用者資產同住一套 store，若不區分就會被當成可掛用條目列出，
- * 使用者（或 UI）再掛用一次＝在**同一個項目**裡生出「副本的副本」→ 卡片額度無限膨脹（D5）。
- * 判據用**家族前綴 + 固定長度十六進位**（不是「有 lineage 就算是副本」：使用者資產也可能有血統）。
+ * 为什么需要这个判据：副本与使用者资产同住一套 store，若不区分就会被当成可挂用条目列出，
+ * 使用者（或 UI）再挂用一次＝在**同一个项目**里生出「副本的副本」→ 卡片额度无限膨胀（D5）。
+ * 判据用**家族前缀 + 固定长度十六进位**（不是「有 lineage 就算是副本」：使用者资产也可能有血统）。
  */
 export function isAssetLocalCopyId(value: unknown): boolean {
   if (typeof value !== "string") return false;
   return /^copy-(card|pack)-[0-9a-f]{32}$/.test(value.trim());
 }
 
-/** 掛用記錄：資產收入某項目的資產庫（copy-on-use 下＝來源→目標副本的連接記錄）。 */
+/** 挂用记录：资产收入某项目的资产库（copy-on-use 下＝来源→目标副本的连接记录）。 */
 export interface AssetMountRecord {
-  /** 確定性 id：`mount:{len(projectId)}:{projectId}:{kind}:{len(assetId)}:{assetId}`（同鍵重掛 = 同一件）。 */
+  /** 确定性 id：`mount:{len(projectId)}:{projectId}:{kind}:{len(assetId)}:{assetId}`（同键重挂 = 同一件）。 */
   id: string;
   projectId: string;
   assetKind: AssetKind;
   assetId: string;
   /**
-   * copy-on-use：本筆掛用在目標項目裡的**本地副本** id（由 `(projectId, kind, assetId)`
-   * 確定性推導，純 `[a-z0-9-]`，不含分隔符）。同鍵重掛 → 同一個副本 id（冪等一份）。
-   * 引用制（reference）下不落地副本，但此欄仍是同一推導值（切換方向不必改資料形狀）。
+   * copy-on-use：本笔挂用在目标项目里的**本地副本** id（由 `(projectId, kind, assetId)`
+   * 确定性推导，纯 `[a-z0-9-]`，不含分隔符）。同键重挂 → 同一个副本 id（幂等一份）。
+   * 引用制（reference）下不落地副本，但此栏仍是同一推导值（切换方向不必改资料形状）。
    */
   localCopyId: string;
   /**
-   * 卡＝[localCopyId]；包＝逐 item 卡副本 id（D1：**掛用當下實際鎖過的卡副本清單**）。
+   * 卡＝[localCopyId]；包＝逐 item 卡副本 id（D1：**挂用当下实际锁过的卡副本清单**）。
    *
-   * 為什麼要落盤而不是解除時再推導：推導的輸入（來源包當下條目 / 本地包副本當下存在）
-   * 會事後改變，兩者不同源就會出現「解除了記錄裡的 id，實際鎖著的副本沒解到」——
-   * 掛用→來源追加條目→掛用→解除、或掛用→刪掉本地包副本→解除，都會漏解（實測 D1）。
-   * legacy 記錄（本欄之前落的）沒有這張清單 → 呼叫端回退既有推導（向後相容）。
+   * 为什么要落盘而不是解除时再推导：推导的输入（来源包当下条目 / 本地包副本当下存在）
+   * 会事后改变，两者不同源就会出现「解除了记录里的 id，实际锁著的副本没解到」——
+   * 挂用→来源追加条目→挂用→解除、或挂用→删掉本地包副本→解除，都会漏解（实测 D1）。
+   * legacy 记录（本栏之前落的）没有这张清单 → 呼叫端回退既有推导（向后相容）。
    */
   cardCopyIds?: string[];
   /**
-   * 冪等鏈鍵（確定性）：`asset-mount:{len(projectId)}:{projectId}:{kind}:{len(assetId)}:{assetId}`。
-   * 形狀對齊既有 `{action}:{scope}:{target}` 慣例（master-ingest / billing projection），
-   * 任何以它為鍵的計費或冪等記錄，重掛只會命中同一筆 → 不雙扣。
+   * 幂等链键（确定性）：`asset-mount:{len(projectId)}:{projectId}:{kind}:{len(assetId)}:{assetId}`。
+   * 形状对齐既有 `{action}:{scope}:{target}` 惯例（master-ingest / billing projection），
+   * 任何以它为键的计费或幂等记录，重挂只会命中同一笔 → 不双扣。
    */
   idempotencyRef: string;
   mountedAt: string;
 }
 
-/** 掛用記錄的確定性 id（段長度前綴 = 單射，禁裸 `:` 拼接）。 */
+/** 挂用记录的确定性 id（段长度前缀 = 单射，禁裸 `:` 拼接）。 */
 export function assetMountId(projectId: string, assetKind: AssetKind, assetId: string): string {
   return `mount:${keySegment(projectId)}:${assetKind}:${keySegment(assetId)}`;
 }
 
-/** 掛用的冪等鍵（與 id 分開命名：一個是記錄主鍵，一個是計費/冪等鏈的鍵）。 */
+/** 挂用的幂等键（与 id 分开命名：一个是记录主键，一个是计费/幂等链的键）。 */
 export function assetMountIdempotencyRef(projectId: string, assetKind: AssetKind, assetId: string): string {
   return `asset-mount:${keySegment(projectId)}:${assetKind}:${keySegment(assetId)}`;
 }
 
-/** 項目資產庫列表的「已掛用」鍵（kind + id 同一種編碼，禁與 id 拼接混用）。 */
+/** 项目资产库列表的「已挂用」键（kind + id 同一种编码，禁与 id 拼接混用）。 */
 export function mountedAssetKey(assetKind: AssetKind, assetId: string): string {
   return `${assetKind}:${keySegment(assetId)}`;
 }
 
-/** 卡副本清單的清洗收口（去重、保序、逐筆過 id 邊界；非法值丟棄而非截斷）。 */
+/** 卡副本清单的清洗收口（去重、保序、逐笔过 id 边界；非法值丢弃而非截断）。 */
 function normalizeCopyIdList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
@@ -630,7 +630,7 @@ function normalizeCopyIdList(raw: unknown): string[] {
   return out;
 }
 
-/** 清洗掛用記錄（存檔/讀檔唯一收口；id、idempotencyRef、localCopyId 一律重新推導）。 */
+/** 清洗挂用记录（存档/读档唯一收口；id、idempotencyRef、localCopyId 一律重新推导）。 */
 export function normalizeAssetMount(raw: unknown): AssetMountRecord | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Partial<AssetMountRecord>;
@@ -652,13 +652,13 @@ export function normalizeAssetMount(raw: unknown): AssetMountRecord | null {
 }
 
 /**
- * 冪等掛用（純函式）：
- * - 同 `(projectId, assetKind, assetId)` 已存在 → 原樣返回 created:false，**不新增第二筆**，
- *   且 `localCopyId` 逐位相同（同一個來源在同一個項目裡只有一份副本 = 冪等一份）。
- *   `cardCopyIds` 取**聯集**（掛用期間來源追加條目、重放補建了新副本 → 清單必須跟上，
- *   否則解除時解鎖不全 = D1「已解除但仍被注入」）；清單沒變 → `updated:false`（零副作用）。
- * - 同鍵但三元組不同 → **conflict:true**（真碰撞/別名，呼叫端必須回 409，禁靜默成功）。
- * 這是「跨項目復用不雙扣 / 不建第二份副本」在作用域層的落點。
+ * 幂等挂用（纯函式）：
+ * - 同 `(projectId, assetKind, assetId)` 已存在 → 原样返回 created:false，**不新增第二笔**，
+ *   且 `localCopyId` 逐位相同（同一个来源在同一个项目里只有一份副本 = 幂等一份）。
+ *   `cardCopyIds` 取**联集**（挂用期间来源追加条目、重放补建了新副本 → 清单必须跟上，
+ *   否则解除时解锁不全 = D1「已解除但仍被注入」）；清单没变 → `updated:false`（零副作用）。
+ * - 同键但三元组不同 → **conflict:true**（真碰撞/别名，呼叫端必须回 409，禁静默成功）。
+ * 这是「跨项目复用不双扣 / 不建第二份副本」在作用域层的落点。
  */
 export function applyAssetMount(
   mounts: readonly AssetMountRecord[],
@@ -668,7 +668,7 @@ export function applyAssetMount(
   mount: AssetMountRecord;
   created: boolean;
   conflict: boolean;
-  /** 既有記錄的卡副本清單被這次呼叫擴充了（呼叫端據此決定要不要落盤）。 */
+  /** 既有记录的卡副本清单被这次呼叫扩充了（呼叫端据此决定要不要落盘）。 */
   updated: boolean;
 } {
   const normalized = normalizeAssetMount({
@@ -689,7 +689,7 @@ export function applyAssetMount(
   const merged = normalizeCopyIdList([...(existing.cardCopyIds ?? []), ...(normalized.cardCopyIds ?? [])]);
   const updated = merged.length !== (existing.cardCopyIds?.length ?? 0);
   if (!updated) {
-    // 同鍵重放：回**既有**那一筆（其 localCopyId 與推導值逐位相同 → 指向同一份副本）。
+    // 同键重放：回**既有**那一笔（其 localCopyId 与推导值逐位相同 → 指向同一份副本）。
     return { mounts: [...mounts], mount: existing, created: false, conflict: false, updated: false };
   }
   const next: AssetMountRecord = { ...existing, cardCopyIds: merged };
@@ -702,33 +702,33 @@ export function applyAssetMount(
   };
 }
 
-/** 掛用三元組逐欄等值。 */
+/** 挂用三元组逐栏等值。 */
 function sameMountTriple(a: AssetMountRecord, b: AssetMountRecord): boolean {
   return a.projectId === b.projectId && a.assetKind === b.assetKind && a.assetId === b.assetId;
 }
 
-// ─────────────────────────────────────────── copy-on-use 的單一分歧點
+// ─────────────────────────────────────────── copy-on-use 的单一分歧点
 
-/** 跨項目語義：copy-on-use（掛用即建本地副本）｜reference（引用制，不建副本）。 */
+/** 跨项目语义：copy-on-use（挂用即建本地副本）｜reference（引用制，不建副本）。 */
 export type AssetMountCopyMode = "copy-on-use" | "reference";
 
-/** 拒絕理由（呼叫端必須直說，不得靜默降級成「已掛用」）。 */
+/** 拒绝理由（呼叫端必须直说，不得静默降级成「已挂用」）。 */
 export type AssetMountCopyRejectReason =
-  /** 推導出的副本 id 等於來源 id（會產生自引用邊）。 */
+  /** 推导出的副本 id 等于来源 id（会产生自引用边）。 */
   | "self_reference"
-  /** 來源的血統鏈成環（已含自己），或計畫建的副本已在來源的祖先鏈裡（副本會成為自己的祖先）。 */
+  /** 来源的血统链成环（已含自己），或计画建的副本已在来源的祖先链里（副本会成为自己的祖先）。 */
   | "cyclic_lineage"
-  /** 血統圖超出可完整遍歷的節點預算 → 無法證明無環（**超界 fail-closed**，不當成沒環）。 */
+  /** 血统图超出可完整遍历的节点预算 → 无法证明无环（**超界 fail-closed**，不当成没环）。 */
   | "unbounded_lineage";
 
-/** 掛用計畫（copy-on-use 與引用制共用同一筆掛用記錄鍵；差別只在要不要落地副本）。 */
+/** 挂用计画（copy-on-use 与引用制共用同一笔挂用记录键；差别只在要不要落地副本）。 */
 export interface AssetMountCopyPlan {
   mode: AssetMountCopyMode;
-  /** copy-on-use＝要落地的卡/包副本 id；reference＝null（**唯一分歧點**在 planAssetMountCopy）。 */
+  /** copy-on-use＝要落地的卡/包副本 id；reference＝null（**唯一分歧点**在 planAssetMountCopy）。 */
   localCopyId: string | null;
-  /** 目標項目已存在同一來源的副本 → 它的 id（冪等重放不建第二份）。 */
+  /** 目标项目已存在同一来源的副本 → 它的 id（幂等重放不建第二份）。 */
   existingCopyId: string | null;
-  /** 需不需要真的建副本（引用制、或冪等重放且副本已在 → false）。 */
+  /** 需不需要真的建副本（引用制、或幂等重放且副本已在 → false）。 */
   shouldCreateCopy: boolean;
   mountId: string;
   idempotencyRef: string;
@@ -738,32 +738,32 @@ export interface AssetMountCopyPlan {
 }
 
 /**
- * **掛用 copy-on-use 與引用制的唯一分歧點**（純函式、零 IO）：
- * 決定「這次掛用要不要建副本、副本 id 是什麼、是不是冪等重放、是不是環」。
- * 呼叫端（asset-library.mountAssetWithCopy）只照計畫執行，不另立規則。
+ * **挂用 copy-on-use 与引用制的唯一分歧点**（纯函式、零 IO）：
+ * 决定「这次挂用要不要建副本、副本 id 是什么、是不是幂等重放、是不是环」。
+ * 呼叫端（asset-library.mountAssetWithCopy）只照计画执行，不另立规则。
  *
- * 環路守衛（遞歸掛用可回溯、環路必拒）：
- * 1. 副本 id === 來源 id → self_reference（會寫出自引用血統邊）；
- * 2. 來源的祖先鏈已含來源自己 → cyclic_lineage（既有資料成環，拒絕延伸）；
- * 3. 計畫建的副本已在來源的祖先鏈裡 → cyclic_lineage（副本會成為自己的祖先）。
- * 注意：**「把副本再掛回它來源所屬的項目」不是環**（每次掛用產生的是新節點，
- * 其血統邊指向來源鏈），故不在此拒絕——遞歸掛用是被允許且可回溯的。
+ * 环路守卫（递归挂用可回溯、环路必拒）：
+ * 1. 副本 id === 来源 id → self_reference（会写出自引用血统边）；
+ * 2. 来源的祖先链已含来源自己 → cyclic_lineage（既有资料成环，拒绝延伸）；
+ * 3. 计画建的副本已在来源的祖先链里 → cyclic_lineage（副本会成为自己的祖先）。
+ * 注意：**「把副本再挂回它来源所属的项目」不是环**（每次挂用产生的是新节点，
+ * 其血统边指向来源链），故不在此拒绝——递归挂用是被允许且可回溯的。
  *
- * `established`（D4 裁定）：呼叫端**已**由 store 實測出「同鍵掛用記錄存在 + 該次副本已落地」
- * 時設 true → 跳過 2/3 兩條環路守衛。理由：既成事實不得被**事後**的血統編輯（例如把副本 id
- * 寫進來源自己的 lineage）打成 400；這條路徑是冪等重放，不是新的延伸。
- * 首次掛用一律 established=false，守衛一條不少。
+ * `established`（D4 裁定）：呼叫端**已**由 store 实测出「同键挂用记录存在 + 该次副本已落地」
+ * 时设 true → 跳过 2/3 两条环路守卫。理由：既成事实不得被**事后**的血统编辑（例如把副本 id
+ * 写进来源自己的 lineage）打成 400；这条路径是幂等重放，不是新的延伸。
+ * 首次挂用一律 established=false，守卫一条不少。
  */
 export function planAssetMountCopy(input: {
   projectId: string;
   assetKind: AssetKind;
   sourceAssetId: string;
   mode?: AssetMountCopyMode;
-  /** 目標項目既有的副本 id 集（呼叫端由 store 讀；缺省＝空）。 */
+  /** 目标项目既有的副本 id 集（呼叫端由 store 读；缺省＝空）。 */
   existingCopyIds?: readonly string[];
-  /** 來源的血統祖先把手（呼叫端完整解析後填入；缺省＝無祖先）。 */
+  /** 来源的血统祖先把手（呼叫端完整解析后填入；缺省＝无祖先）。 */
   ancestorAssetIds?: readonly string[];
-  /** 已成立的冪等重放（見上）：跳過環路守衛，其餘語義不變。 */
+  /** 已成立的幂等重放（见上）：跳过环路守卫，其余语义不变。 */
   established?: boolean;
 }): { ok: true; plan: AssetMountCopyPlan } | { ok: false; reason: AssetMountCopyRejectReason } {
   const mode = input.mode ?? "copy-on-use";
@@ -801,7 +801,7 @@ export function planAssetMountCopy(input: {
   };
 }
 
-/** 解除掛用（按確定性 id）。回是否真的移除了。 */
+/** 解除挂用（按确定性 id）。回是否真的移除了。 */
 export function applyAssetUnmount(
   mounts: readonly AssetMountRecord[],
   mountId: string,
@@ -810,7 +810,7 @@ export function applyAssetUnmount(
   return { mounts: next, removed: next.length !== mounts.length };
 }
 
-/** 某項目當前掛用的資產鍵集合（列表標記 mounted 用；鍵段與 id 同一種單射編碼）。 */
+/** 某项目当前挂用的资产键集合（列表标记 mounted 用；键段与 id 同一种单射编码）。 */
 export function mountedAssetKeys(mounts: readonly AssetMountRecord[], projectId: string): Set<string> {
   const keys = new Set<string>();
   for (const m of mounts) {
@@ -820,14 +820,14 @@ export function mountedAssetKeys(mounts: readonly AssetMountRecord[], projectId:
   return keys;
 }
 
-// ─────────────────────────────────────────── 項目資產庫（列表 + 檢索 + 掛用入口）
+// ─────────────────────────────────────────── 项目资产库（列表 + 检索 + 挂用入口）
 
 export interface AssetLibraryCandidate {
   assetKind: AssetKind;
   assetId: string;
   title: string;
   tags: string[];
-  /** 人看的種類標籤（資產包 / 角色 / 場景 / 風格）。 */
+  /** 人看的种类标签（资产包 / 角色 / 场景 / 风格）。 */
   kindLabel: string;
   scope?: AssetScope;
   ownerUserId: number;
@@ -836,11 +836,11 @@ export interface AssetLibraryCandidate {
 
 export interface AssetLibraryItem extends AssetLibraryCandidate {
   visibility: AssetVisibility;
-  /** 已在當前項目資產庫中掛用。 */
+  /** 已在当前项目资产库中挂用。 */
   mounted: boolean;
 }
 
-/** 資產包 → 候選項（結構型別，不 import 存儲層，避免循環）。 */
+/** 资产包 → 候选项（结构型别，不 import 存储层，避免循环）。 */
 export function candidatesFromPacks(
   packs: readonly { id: string; title: string; digest?: string; tags?: string[]; scope?: AssetScope; updatedAt: string }[],
   ownerUserId: number,
@@ -859,7 +859,7 @@ export function candidatesFromPacks(
 
 const CARD_KIND_LABELS: Record<string, string> = { character: "角色", scene: "场景", style: "风格" };
 
-/** 資產卡 → 候選項（標籤＝卡名稱 + 種類，卡的檢索面與包同構）。 */
+/** 资产卡 → 候选项（标签＝卡名称 + 种类，卡的检索面与包同构）。 */
 export function candidatesFromCards(
   cards: readonly { id: string; name: string; kind: string; prompt?: string; scope?: AssetScope; updatedAt: string }[],
   ownerUserId: number,
@@ -876,7 +876,7 @@ export function candidatesFromCards(
   }));
 }
 
-/** 檢索：標題/標籤模糊命中（大小寫不敏感；空 query 全收）。 */
+/** 检索：标题/标签模糊命中（大小写不敏感；空 query 全收）。 */
 export function matchesAssetQuery(item: AssetLibraryCandidate, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -887,20 +887,20 @@ export function matchesAssetQuery(item: AssetLibraryCandidate, query: string): b
 
 export interface AssetLibraryQuery {
   q?: string;
-  /** 種類篩選：all（缺省）| pack | card。 */
+  /** 种类筛选：all（缺省）| pack | card。 */
   kind?: AssetKind | "all";
-  /** 只看已掛用。 */
+  /** 只看已挂用。 */
   mountedOnly?: boolean;
 }
 
 /**
- * 項目資產庫列表（唯一組裝口）：
- * 先過可見性（不可見即不列）→ 再過檢索/篩選 → updatedAt 由新到舊。
- * mounted 標記只看當前項目（別的項目的掛用不算）。
+ * 项目资产库列表（唯一组装口）：
+ * 先过可见性（不可见即不列）→ 再过检索/筛选 → updatedAt 由新到旧。
+ * mounted 标记只看当前项目（别的项目的挂用不算）。
  *
- * **內部副本不列**（D5）：copy-on-use 落地的副本是掛用機制的一部分，不是使用者資產；
- * 列出來只會被再掛用一次，在**同一個項目**裡生出「副本的副本」→ 卡片額度無限膨脹。
- * 掛用關係的真相在掛用記錄（來源鍵），來源那筆照樣標「已掛用」，使用者不會因此看不到狀態。
+ * **内部副本不列**（D5）：copy-on-use 落地的副本是挂用机制的一部分，不是使用者资产；
+ * 列出来只会被再挂用一次，在**同一个项目**里生出「副本的副本」→ 卡片额度无限膨胀。
+ * 挂用关系的真相在挂用记录（来源键），来源那笔照样标「已挂用」，使用者不会因此看不到状态。
  */
 export function buildProjectAssetLibrary(input: {
   candidates: readonly AssetLibraryCandidate[];
@@ -915,12 +915,12 @@ export function buildProjectAssetLibrary(input: {
   const keys = mountedAssetKeys(mounts, ctx.projectId ?? "");
   const items: AssetLibraryItem[] = [];
   for (const candidate of candidates) {
-    if (isAssetLocalCopyId(candidate.assetId)) continue; // 內部副本不是可掛用條目
+    if (isAssetLocalCopyId(candidate.assetId)) continue; // 内部副本不是可挂用条目
     const visibility = resolveAssetVisibility(
       { id: candidate.assetId, kind: candidate.assetKind, scope: candidate.scope, ownerUserId: candidate.ownerUserId },
       ctx,
     );
-    if (!visibility) continue; // 不可見即不可用：不列進列表
+    if (!visibility) continue; // 不可见即不可用：不列进列表
     if (kind !== "all" && candidate.assetKind !== kind) continue;
     if (!matchesAssetQuery(candidate, q)) continue;
     const mounted = keys.has(mountedAssetKey(candidate.assetKind, candidate.assetId));
@@ -931,9 +931,9 @@ export function buildProjectAssetLibrary(input: {
 }
 
 /**
- * 掛用前置裁決：把候選項按可見性過一遍再決定能不能掛。
- * 回 null = 不可見/不可用（API 層必須回 403，不得靜默成功）；
- * **內部副本（copy-…）一律回 null**（D5：副本不可再掛用，見 buildProjectAssetLibrary 的說明）。
+ * 挂用前置裁决：把候选项按可见性过一遍再决定能不能挂。
+ * 回 null = 不可见/不可用（API 层必须回 403，不得静默成功）；
+ * **内部副本（copy-…）一律回 null**（D5：副本不可再挂用，见 buildProjectAssetLibrary 的说明）。
  */
 export function resolveMountableAsset(
   candidates: readonly AssetLibraryCandidate[],

@@ -5,7 +5,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
 export default tool({
   description:
-    "Add a node to a workflow. role: node name (character/scene/shot/result...). kind: text/config/image/video. metadata: { prompt, model, size, duration_seconds, count }.\n\n已有素材注入：kind=image|video|audio 且 metadata.content=平台素材URL → 節點直接視為完成，不觸發生成（舊片復用/素材入畫布用此法）。外部素材先 video_upload 入庫。",
+    "Add a node to a workflow. role: node name (character/scene/shot/result...). kind: text/config/image/video. metadata: { prompt, model, size, duration_seconds, count }.\n\n已有素材注入：kind=image|video|audio 且 metadata.content=平台素材URL → 节点直接视为完成，不触发生成（旧片复用/素材入画布用此法）。外部素材先 video_upload 入库。",
   args: {
     workflow_id: tool.schema.string().describe("workflow_id from workflow_start"),
     role: tool.schema.string().describe("node role name"),

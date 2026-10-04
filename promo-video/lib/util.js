@@ -1,4 +1,4 @@
-// 純函數工具：緩動、彈簧、Hermite 相機軌道。所有動畫都由時間 t 決定，任意幀可獨立重算。
+// 纯函数工具：缓动、弹簧、Hermite 相机轨道。所有动画都由时间 t 决定，任意帧可独立重算。
 export const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 export const lerp = (a, b, p) => a + (b - a) * p;
 export const P = (t, a, b) => clamp((t - a) / (b - a));
@@ -15,7 +15,7 @@ export function cubicBezier(x1, y1, x2, y2) {
   };
 }
 export const ease = {
-  inOut: cubicBezier(0.65, 0, 0.35, 1),      // 相機推拉
+  inOut: cubicBezier(0.65, 0, 0.35, 1),      // 相机推拉
   inOutSoft: cubicBezier(0.45, 0, 0.25, 1),
   out: cubicBezier(0.16, 1, 0.3, 1),         // 文字/物件落定
   outQuint: cubicBezier(0.22, 1, 0.36, 1),
@@ -24,7 +24,7 @@ export const ease = {
   ios: cubicBezier(0.4, 0, 0.2, 1),          // DESIGN.md ease
 };
 
-// 阻尼彈簧（僅用於 UI 按壓等小互動）
+// 阻尼弹簧（仅用于 UI 按压等小互动）
 export function spring(t, t0, k = 170, c = 19) {
   const x = t - t0; if (x <= 0) return 0;
   const w = Math.sqrt(k), z = c / (2 * w);
@@ -34,12 +34,12 @@ export function spring(t, t0, k = 170, c = 19) {
 
 export const hash = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 
-// 低頻手持感：不可公度頻率的正弦和，確定性
+// 低频手持感：不可公度频率的正弦和，确定性
 export function wobble(t, seed = 0) {
   return Math.sin(t * 0.71 + seed * 3.1) * 0.5 + Math.sin(t * 1.37 + seed * 1.7) * 0.3 + Math.sin(t * 2.13 + seed * 5.3) * 0.2;
 }
 
-// Hermite 軌道：keys = [{t, v:[...], stop?:bool}]；Catmull-Rom 切線（按時間間隔），stop 關鍵幀切線為 0（緩停）
+// Hermite 轨道：keys = [{t, v:[...], stop?:bool}]；Catmull-Rom 切线（按时间间隔），stop 关键帧切线为 0（缓停）
 export class Track {
   constructor(keys) {
     this.k = keys.slice().sort((a, b) => a.t - b.t);
@@ -62,7 +62,7 @@ export class Track {
   }
 }
 
-// 由 pos/look 求 yaw/pitch（three 相機預設看 -z；YXZ 歐拉）
+// 由 pos/look 求 yaw/pitch（three 相机预设看 -z；YXZ 欧拉）
 export function yawPitch(pos, look) {
   const dx = look[0] - pos[0], dy = look[1] - pos[1], dz = look[2] - pos[2];
   const yaw = Math.atan2(-dx, -dz);

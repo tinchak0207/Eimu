@@ -1,8 +1,8 @@
-// 0831 修復 3 驗證：壓縮在途閘 + 摘要誠實化。
-// 骨架逐行複製 tools/verify-idfix-t2.mjs 的 attachSSE/parse/waitTurn（含 question/confirm 自動回覆），
-// 白名單只改用例：① 21 輪極短回覆把訊息數推過 SESSION_COMPACT_THRESHOLD=40
-// ② 最後一輪提交真實生圖 → turn.done 時任務仍 queued → 應打出 "compact deferred"
-// ③ 等生圖落定後再走一輪 → 壓縮真跑，日誌應出現誠實結果（compacted / FAILED / UNVERIFIED 之一，不得假成功）。
+// 0831 修复 3 验证：压缩在途闸 + 摘要诚实化。
+// 骨架逐行复制 tools/verify-idfix-t2.mjs 的 attachSSE/parse/waitTurn（含 question/confirm 自动回覆），
+// 白名单只改用例：① 21 轮极短回覆把讯息数推过 SESSION_COMPACT_THRESHOLD=40
+// ② 最后一轮提交真实生图 → turn.done 时任务仍 queued → 应打出 "compact deferred"
+// ③ 等生图落定后再走一轮 → 压缩真跑，日志应出现诚实结果（compacted / FAILED / UNVERIFIED 之一，不得假成功）。
 import fs from "node:fs";
 
 const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
@@ -86,28 +86,28 @@ const { frames, ac, conn } = await attachSSE(sid);
 framesGlobal = frames;
 await sleep(1500);
 
-// ① 湊訊息數：21 輪極短回覆（每輪 user+assistant = 2 條 → 42 條 > 40）
+// ① 凑讯息数：21 轮极短回覆（每轮 user+assistant = 2 条 → 42 条 > 40）
 let turns = 0;
 for (let i = 0; i < 21; i++) {
   const ok = await send(sid, "只回复一个字：好");
   turns++;
-  if (!ok) console.log(`  第 ${i + 1} 輪未在 ${TURN_MS / 1000}s 內收斂（繼續）`);
-  if (frames.some((f) => parse(f.raw).ev === "session.error")) { console.log("  出現 session.error，中止"); break; }
+  if (!ok) console.log(`  第 ${i + 1} 轮未在 ${TURN_MS / 1000}s 内收敛（继续）`);
+  if (frames.some((f) => parse(f.raw).ev === "session.error")) { console.log("  出现 session.error，中止"); break; }
 }
-console.log(`已走 ${turns} 輪，準備提交在途任務觸發在途閘`);
+console.log(`已走 ${turns} 轮，准备提交在途任务触发在途闸`);
 
-// ② 提交生圖 → 任務 queued；turn.done 時壓縮應被延後
+// ② 提交生图 → 任务 queued；turn.done 时压缩应被延后
 const imgMark = frames.length;
 await send(sid, "只调用一次 image_generate 生成一张 1024x1024 的纯色蓝色图，不要做任何其他事。提交后立即把 task_id 告诉我，不要等待结果。");
 const t2submit = frames.slice(imgMark).map((f) => f.raw).join("\n").replace(/\\+"/g, '"');
 const submitted = (t2submit.match(/"task_id"\s*:\s*"([0-9a-f-]{36})"/i) || [])[1];
-console.log(`生圖提交=${submitted ?? "未取得 task_id"}`);
-await sleep(20_000); // 留時間給 turn.done 後的 fire-and-forget 壓縮判定
+console.log(`生图提交=${submitted ?? "未取得 task_id"}`);
+await sleep(20_000); // 留时间给 turn.done 后的 fire-and-forget 压缩判定
 
-// ③ 等生圖落定，再走一輪讓壓縮真跑
-console.log("等待生成落定後再走一輪，觸發真實壓縮…");
+// ③ 等生图落定，再走一轮让压缩真跑
+console.log("等待生成落定后再走一轮，触发真实压缩…");
 await send(sid, "只回复一个字：好");
-await sleep(60_000); // summarize 真跑（含誠實回查）
-console.log(`連線：ended=${conn.ended} reason=${conn.reason} 幀數=${frames.length}`);
+await sleep(60_000); // summarize 真跑（含诚实回查）
+console.log(`连线：ended=${conn.ended} reason=${conn.reason} 帧数=${frames.length}`);
 console.log(`SID=${sid}`);
 ac.abort();

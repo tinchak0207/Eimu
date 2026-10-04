@@ -3,9 +3,9 @@
 // 规则：
 //   - 纯函数，不碰 React、不碰 DOM、不碰 Math.random —— 同样输入
 //     永远产出同样输出，node --test 可直接测。
-//     唯一例外（2026-09-20 思維鏈計時）：reasoning.delta / 收尾結算會讀 Date.now()
-//     寫入 reasoningStartedAt / reasoningMs 兩個時間欄位——網關不送時間戳，秒數
-//     只能由本端時鐘得出。除這兩個欄位外，其餘轉換仍與輸入一一對應。
+//     唯一例外（2026-09-20 思维链计时）：reasoning.delta / 收尾结算会读 Date.now()
+//     写入 reasoningStartedAt / reasoningMs 两个时间栏位——网关不送时间戳，秒数
+//     只能由本端时钟得出。除这两个栏位外，其余转换仍与输入一一对应。
 //   - 永不 mutate 输入 state 或其阵列；每个分支都回新物件（重放的帧除外，
 //     直接回同一个 reference，让 React 可以 bail out）。
 //   - 条目 id 一律从 seq + kind 推出：`<kind>-<event_id>`（event_id 由网关
@@ -63,15 +63,15 @@ function userItemId(state: AgentChatState): string {
 // ─────────────────────────── 事件对应分支
 
 /**
- * 思維鏈計時結算（2026-09-20 真功能：把預覽承諾的「已思考 · N 秒」做成真數據）。
+ * 思维链计时结算（2026-09-20 真功能：把预览承诺的「已思考 · N 秒」做成真数据）。
  *
- * 只對「有起點（reasoningStartedAt）且還沒結算（reasoningMs === undefined）」的
- * 條目生效；回 undefined 代表本次一個欄位都不寫——呼叫方據此保持原本的物件形狀，
- * 沒有思維鏈的條目逐位元與舊行為一致（不長出 undefined 鍵）。
+ * 只对「有起点（reasoningStartedAt）且还没结算（reasoningMs === undefined）」的
+ * 条目生效；回 undefined 代表本次一个栏位都不写——呼叫方据此保持原本的物件形状，
+ * 没有思维链的条目逐位元与旧行为一致（不长出 undefined 键）。
  *
- * 為什麼讀 Date.now()：時長無從由事件推得（網關不送時間戳），唯一誠實的來源是
- * 本端拿到 reasoning 的那一刻與思考結束的那一刻之差。reducer 因此在這兩處
- * 破例碰時鐘——除時間欄位外，其餘狀態轉換仍與輸入一一對應。
+ * 为什么读 Date.now()：时长无从由事件推得（网关不送时间戳），唯一诚实的来源是
+ * 本端拿到 reasoning 的那一刻与思考结束的那一刻之差。reducer 因此在这两处
+ * 破例碰时钟——除时间栏位外，其余状态转换仍与输入一一对应。
  */
 function settleReasoningMs(item: AgentAssistantTextItem, now: number): number | undefined {
   if (item.reasoningStartedAt === undefined || item.reasoningMs !== undefined) return undefined;
@@ -84,22 +84,22 @@ function reduceMessageDelta(state: AgentChatState, event: AgentSseEvent & { name
   const last = items[items.length - 1];
   if (last && last.kind === "assistant" && last.streaming) {
     // 只对「正在 streaming 的最后一个助手条目」追加；否则开新条目。
-    // 思維鏈結算時機 a（2026-09-20）：想完開始說話——正文首次落到「已經想過」
-    // 的既有 streaming 條目。結算只發生一次（reasoningMs 已定就不再寫），
-    // 純正文條目（沒有 reasoningStartedAt）不長任何時間欄位。
+    // 思维链结算时机 a（2026-09-20）：想完开始说话——正文首次落到「已经想过」
+    // 的既有 streaming 条目。结算只发生一次（reasoningMs 已定就不再写），
+    // 纯正文条目（没有 reasoningStartedAt）不长任何时间栏位。
     const reasoningMs = settleReasoningMs(last, Date.now());
     items[items.length - 1] =
       reasoningMs === undefined
         ? { ...last, text: last.text + text }
         : { ...last, text: last.text + text, reasoningMs };
   } else {
-    // 計畫退場（2026-09-18 turn.plan 契約）：真實正文開「新」條目的這一刻，
-    // 代表計畫已經讓位——把還開著的計畫卡收合成一行，讓答案佔住版面。
-    // 只在開新條目這條分支做：追加到既有 streaming 條目的分支是同一條交付物的
-    // 續寫（工具卡 pending 契約的既有測試語義也掛在那裡），一行都不動。
-    // 判定用嚴格 === false（reducer 自己建的計畫卡才會有這個值），缺席的
-    // **不**收合——「手動收合優先於任何自動行為」的對偶：沒被自動展開過的
-    // 不該被自動收掉。
+    // 计画退场（2026-09-18 turn.plan 契约）：真实正文开「新」条目的这一刻，
+    // 代表计画已经让位——把还开著的计画卡收合成一行，让答案占住版面。
+    // 只在开新条目这条分支做：追加到既有 streaming 条目的分支是同一条交付物的
+    // 续写（工具卡 pending 契约的既有测试语义也挂在那里），一行都不动。
+    // 判定用严格 === false（reducer 自己建的计画卡才会有这个值），缺席的
+    // **不**收合——「手动收合优先于任何自动行为」的对偶：没被自动展开过的
+    // 不该被自动收掉。
     for (let i = 0; i < items.length; i += 1) {
       const it = items[i];
       if (it.kind === "plan" && it.collapsed === false) {
@@ -122,16 +122,16 @@ function reduceReasoningDelta(state: AgentChatState, event: AgentSseEvent & { na
   const items = state.items.slice();
   const last = items[items.length - 1];
   if (last && last.kind === "assistant" && last.streaming) {
-    // 思維鏈通常先於最終文字到來；若已開 assistant 條目就直接累加。
-    // 計時起點只在條目「首次」拿到 reasoning 時寫（已有值不覆蓋）：後續 frame
-    // 累加文字的行為一字不動，形狀也一字不改（已有起點時不多長任何鍵）。
+    // 思维链通常先于最终文字到来；若已开 assistant 条目就直接累加。
+    // 计时起点只在条目「首次」拿到 reasoning 时写（已有值不覆盖）：后续 frame
+    // 累加文字的行为一字不动，形状也一字不改（已有起点时不多长任何键）。
     items[items.length - 1] = {
       ...last,
       reasoning: (last.reasoning ?? "") + text,
       ...(last.reasoningStartedAt === undefined ? { reasoningStartedAt: Date.now() } : {}),
     };
   } else {
-    // reasoning 先到、text 還沒來：開 streaming 條目，只填 reasoning。
+    // reasoning 先到、text 还没来：开 streaming 条目，只填 reasoning。
     items.push({
       kind: "assistant",
       id: eventItemId("assistant", event.event_id),
@@ -154,9 +154,9 @@ function reduceToolInvoke(state: AgentChatState, event: AgentSseEvent & { name: 
     argsSummary: event.data.args_summary,
     status: "running",
   };
-  // 思維鏈結算時機 c（2026-09-29 e2e 像素實錘）：想完直接調工具、中間沒有正文時，
-  // 原本要等整輪 settleItems 才結算——每段「已思考 · N 秒」都變成「從它開始到整輪
-  // 結束」（實測 117/109/104/94… 秒遞減排列）。工具一開跑＝這段思考已結束。
+  // 思维链结算时机 c（2026-09-29 e2e 像素实锤）：想完直接调工具、中间没有正文时，
+  // 原本要等整轮 settleItems 才结算——每段「已思考 · N 秒」都变成「从它开始到整轮
+  // 结束」（实测 117/109/104/94… 秒递减排列）。工具一开跑＝这段思考已结束。
   const items = state.items.slice();
   const last = items[items.length - 1];
   if (last && last.kind === "assistant") {
@@ -184,9 +184,9 @@ function reduceToolProgress(state: AgentChatState, event: AgentSseEvent & { name
 
 function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
   const { tool, ok, cost_coins, task_id, artifact_pending, error } = event.data;
-  // 缺陷 C（2026-10-04）：本機檔案讀取未授權 ＝ needs_authorization。這**不是**
-  // 成功，也不是一般失敗——是等使用者在卡片上選授權範圍的 action 態。判定同時看
-  // error.code 與 action_required，避免上游只帶其一時語義寫反成「完成」。
+  // 缺陷 C（2026-10-04）：本机档案读取未授权 ＝ needs_authorization。这**不是**
+  // 成功，也不是一般失败——是等使用者在卡片上选授权范围的 action 态。判定同时看
+  // error.code 与 action_required，避免上游只带其一时语义写反成「完成」。
   const needsAuth =
     error?.code === "needs_authorization" ||
     error?.action_required === "authorize_local_files" ||
@@ -200,12 +200,12 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
         options: authOptions,
       }
     : undefined;
-  // 缺陷 D（2026-10-04）：二進位讀取偵測——上游帶 binary 旗標或 preview 的
-  // U+FFFD 比例超標，都不得把乱码当成功内容呈現。
+  // 缺陷 D（2026-10-04）：二进位读取侦测——上游带 binary 旗标或 preview 的
+  // U+FFFD 比例超标，都不得把乱码当成功内容呈现。
   const binary = event.data.binary === true || detectBinaryText(event.data.preview);
   const errText = !ok && !needsAuth ? error?.human_message ?? error?.message ?? undefined : undefined;
-  // 终态映射（2026-09-18 契约）：ok + artifact_pending = 任務已提交、成品未到 →
-  // 中继态 pending，绝不报「已完成」；成品/失敗事件到达时由 settlePendingToolItems
+  // 终态映射（2026-09-18 契约）：ok + artifact_pending = 任务已提交、成品未到 →
+  // 中继态 pending，绝不报「已完成」；成品/失败事件到达时由 settlePendingToolItems
   // 结算成 ok/failed。缺 artifact_pending 的旧格式逐位元照旧走 ok。
   // needs_auth 优先于 ok：授权请求即使被上游标成 ok 也不得显示「完成」。
   const status: AgentToolCallItem["status"] = needsAuth
@@ -266,16 +266,16 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
 }
 
 /**
- * 成品／失敗事件到來 → 把對應的 pending 工具卡結算掉（2026-09-18 契約）。
+ * 成品／失败事件到来 → 把对应的 pending 工具卡结算掉（2026-09-18 契约）。
  *
- * 匹配優先序：
- *   1. `taskId === 事件的 task_id` 的精確匹配 —— 同一次提交的任務號對號入座；
- *   2. 事件沒帶 task_id、或帶了卻找不到對應卡 → 回退結算**最舊的一張** pending 卡
- *      （FIFO 兜底：寧可早一張結算，也不讓成品已經到了、卡片還在轉）。
+ * 匹配优先序：
+ *   1. `taskId === 事件的 task_id` 的精确匹配 —— 同一次提交的任务号对号入座；
+ *   2. 事件没带 task_id、或带了却找不到对应卡 → 回退结算**最旧的一张** pending 卡
+ *      （FIFO 兜底：宁可早一张结算，也不让成品已经到了、卡片还在转）。
  *
- * 只碰 status === "pending" 的卡：running 由 tool.result / turn.done 負責，
- * 已定案的卡絕不被翻案。找不到任何 pending 卡時回傳原陣列（reference 不變，
- * 呼叫端行為與現狀逐位元一致）。就地不 mutate：變更時回新 slice。
+ * 只碰 status === "pending" 的卡：running 由 tool.result / turn.done 负责，
+ * 已定案的卡绝不被翻案。找不到任何 pending 卡时回传原阵列（reference 不变，
+ * 呼叫端行为与现状逐位元一致）。就地不 mutate：变更时回新 slice。
  */
 function settlePendingToolItems(
   items: AgentTranscriptItem[],
@@ -304,8 +304,8 @@ function settlePendingToolItems(
 
 function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "image.done" }): AgentChatState {
   const { url, cost_coins, task_id, recipe } = event.data;
-  // 成品到了 = 對應的 pending 工具卡可以結算成 ok。先結算再建出圖卡：
-  // 兩件事互不干擾，出圖卡照舊建／照舊按 url 去重。
+  // 成品到了 = 对应的 pending 工具卡可以结算成 ok。先结算再建出图卡：
+  // 两件事互不干扰，出图卡照旧建／照旧按 url 去重。
   const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "image" && it.url === url);
   if (!exists) {
@@ -329,7 +329,7 @@ function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "
 
 function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "video.done" }): AgentChatState {
   const { url, cost_coins, task_id, media_kind } = event.data;
-  // 同 image.done：成品到了先結算對應 pending 卡，出片卡照舊建／照舊去重。
+  // 同 image.done：成品到了先结算对应 pending 卡，出片卡照旧建／照旧去重。
   const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "video" && it.url === url);
   if (!exists) {
@@ -352,7 +352,7 @@ function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "
 
 function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "audio.done" }): AgentChatState {
   const { url, cost_coins, task_id, media_kind } = event.data;
-  // 同 image.done：成品到了先結算對應 pending 卡，出音頻卡照舊建／照舊去重。
+  // 同 image.done：成品到了先结算对应 pending 卡，出音频卡照旧建／照旧去重。
   const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "audio" && it.url === url);
   if (!exists) {
@@ -374,11 +374,11 @@ function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "
 }
 
 /**
- * 導演台：會話內唯一活卡。同槽（同一張 director 卡）按 revision 替換，
- * 不堆積歷史卡——director.done 是工程狀態廣播不是成果事件，堆積會把
- * 轉錄刷成版本流水帳。遲到幀（revision <= 現有）原樣 bail out。
- * reset（action="reset"）發 revision 0：小於任何現有 revision，活卡照替換
- * ——工程已被清空，舊卡留著就是謊報。
+ * 导演台：会话内唯一活卡。同槽（同一张 director 卡）按 revision 替换，
+ * 不堆积历史卡——director.done 是工程状态广播不是成果事件，堆积会把
+ * 转录刷成版本流水帐。迟到帧（revision <= 现有）原样 bail out。
+ * reset（action="reset"）发 revision 0：小于任何现有 revision，活卡照替换
+ * ——工程已被清空，旧卡留著就是谎报。
  */
 function reduceDirectorDone(state: AgentChatState, event: AgentSseEvent & { name: "director.done" }): AgentChatState {
   const { session_id, revision, action, plan, active_shot, schematic, health, counts } = event.data;
@@ -447,7 +447,7 @@ function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name:
 
 /**
  * 多行文本的最后一个非空行。subagent 卡片的预览行只取它——置顶跑马灯
- * 永远只滚一行（全文另存在 text 欄，F4：渲染层才截断 + 可展开，模型不丢）。
+ * 永远只滚一行（全文另存在 text 栏，F4：渲染层才截断 + 可展开，模型不丢）。
  */
 export function lastNonEmptyLine(text: string): string {
   const lines = text.split("\n");
@@ -457,7 +457,7 @@ export function lastNonEmptyLine(text: string): string {
   return "";
 }
 
-/** 派遣子代理的工具名（工具卡與子代理欄的狀態必須同源，F1）。 */
+/** 派遣子代理的工具名（工具卡与子代理栏的状态必须同源，F1）。 */
 const SUBAGENT_DISPATCH_TOOL = "subagent_dispatch";
 
 /**
@@ -621,7 +621,7 @@ function reduceSubagentDone(
  * （ok/error/stopped），子代理 lifecycle 的终态由那一帧独占裁决。回合收尾时把
  * running 判死/丢弃，等于在跑的 3D 导演跨回合消失（暴君实测「没看到子代理啊」）。
  * 与 09-18 pending 工具卡同构：turn 结束 ≠ 任务结束。wakeParent 后的回合收到
- * done 幀、条目转为定态，下一次收尾才走上面的转存。
+ * done 帧、条目转为定态，下一次收尾才走上面的转存。
  */
 function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   const out: AgentTranscriptItem[] = [];
@@ -632,7 +632,7 @@ function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[
     }
     const full = (it.text ?? "").trim();
     const summary = it.summary?.trim() ?? "";
-    // 取較完整者：SSE 的 summary 可能被帧长截斷，delta 串流才是全文。
+    // 取较完整者：SSE 的 summary 可能被帧长截断，delta 串流才是全文。
     const text = summary.length > full.length ? summary : full;
     const report: AgentSubagentReportItem = {
       kind: "subagent_result",
@@ -655,8 +655,8 @@ function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[
  * 正确的 context。
  *
  * `pending`（2026-09-18 中继态）**不在这里判死**：turn 结束只代表这一轮助手文本
- * 说完了，不代表成品到了 —— 提交型生图/生片工具的任務此刻仍在上游跑，成品
- * （image/video/audio.done）或失敗（image.failed）事件可能落在下一轮里。判死它
+ * 说完了，不代表成品到了 —— 提交型生图/生片工具的任务此刻仍在上游跑，成品
+ * （image/video/audio.done）或失败（image.failed）事件可能落在下一轮里。判死它
  * 就是谎报失败，所以 pending 必须留着等那两类事件结算。
  */
 function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
@@ -664,9 +664,9 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   for (let i = 0; i < items.length; i += 1) {
     const it = items[i];
     if (it.kind === "assistant" && it.streaming) {
-      // 思維鏈結算時機 b（2026-09-20）：想完就直接結束、沒有正文可等——收尾這一刻
-      // 就是思考的終點。已在時機 a 結算過的條目（reasoningMs 已定）不再覆寫，
-      // 沒有計時起點的條目維持原本形狀。
+      // 思维链结算时机 b（2026-09-20）：想完就直接结束、没有正文可等——收尾这一刻
+      // 就是思考的终点。已在时机 a 结算过的条目（reasoningMs 已定）不再覆写，
+      // 没有计时起点的条目维持原本形状。
       const reasoningMs = settleReasoningMs(it, Date.now());
       next[i] = reasoningMs === undefined ? { ...it, streaming: false } : { ...it, streaming: false, reasoningMs };
     } else if (it.kind === "tool" && it.status === "running") {
@@ -681,8 +681,8 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
 // 2026-09-21 暴君裁定：异步子代理跨回合在跑，回合收尾只转存**已定态**条目，
 // running 卡原样保留（见 retireSubagentItems），wakeParent 后的回合收到
-// subagent.done 幀才把终态裁决定下来——settleItems 判死 running 工具卡，但
-// 子代理 lifecycle 的终态归 gateway 的 done 幀独占，与 pending 工具卡同构。
+// subagent.done 帧才把终态裁决定下来——settleItems 判死 running 工具卡，但
+// 子代理 lifecycle 的终态归 gateway 的 done 帧独占，与 pending 工具卡同构。
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function reduceTurnDone(state: AgentChatState, _event: AgentSseEvent & { name: "turn.done" }): AgentChatState {
   const items = retireSubagentItems(settleItems(state.items));
@@ -695,19 +695,19 @@ function reduceTurnStatus(state: AgentChatState, event: AgentSseEvent & { name: 
 }
 
 /**
- * 本輪計畫（turn.plan，2026-09-18 契約）：建立一張獨立的 `kind:"plan"` 條目。
+ * 本轮计画（turn.plan，2026-09-18 契约）：建立一张独立的 `kind:"plan"` 条目。
  *
- * 為什麼不併進 assistant 條目：計畫是**導航**不是交付物。併進去會讓 100 秒後
- * 才到的重模型正文物理接在計畫後面（同一條 streaming:true 條目），使用者分不清
- * 「計畫 vs 答案」，agent-debug 的「首字延遲」語義也會被污染。所以這裡開新條目。
+ * 为什么不并进 assistant 条目：计画是**导航**不是交付物。并进去会让 100 秒后
+ * 才到的重模型正文物理接在计画后面（同一条 streaming:true 条目），使用者分不清
+ * 「计画 vs 答案」，agent-debug 的「首字延迟」语义也会被污染。所以这里开新条目。
  *
- * 與 message.delta 同款清掉罐頭狀態行（turnStatus: undefined）並設 turnActive:true
- * ——計畫幀到的這一刻回合確實已經開始了（送訊後 ~1.4–2.0s），狀態行/停止鈕
- * 必須立刻反映，不能等到 100 秒後首行正文。
+ * 与 message.delta 同款清掉罐头状态行（turnStatus: undefined）并设 turnActive:true
+ * ——计画帧到的这一刻回合确实已经开始了（送讯后 ~1.4–2.0s），状态行/停止钮
+ * 必须立刻反映，不能等到 100 秒后首行正文。
  *
- * `superseded === true`：就地換掉既有計畫條目的文字（同一 id，React 不重掛），
- * 不新增第二張卡——同一輪只有一份計畫。找不到既有卡時照樣建立（寧可多一張卡，
- * 也不讓網關送來的計畫文字消失）。
+ * `superseded === true`：就地换掉既有计画条目的文字（同一 id，React 不重挂），
+ * 不新增第二张卡——同一轮只有一份计画。找不到既有卡时照样建立（宁可多一张卡，
+ * 也不让网关送来的计画文字消失）。
  */
 function reduceTurnPlan(state: AgentChatState, event: AgentSseEvent & { name: "turn.plan" }): AgentChatState {
   const { plan, experts, provisional, superseded } = event.data;
@@ -733,7 +733,7 @@ function reduceTurnPlan(state: AgentChatState, event: AgentSseEvent & { name: "t
     text: plan,
     ...(experts !== undefined ? { experts } : {}),
     ...(provisional !== undefined ? { provisional } : {}),
-    // 初始展開：計畫剛到、正文還沒來，這張卡此刻是畫面上唯一的資訊。
+    // 初始展开：计画刚到、正文还没来，这张卡此刻是画面上唯一的资讯。
     collapsed: false,
   };
   return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
@@ -971,7 +971,7 @@ export function appendUserTurn(
     item.attachments = attachments;
   }
   // REQ-D2：回合中追加的指引（steer）带着状态徽章入场（queued／injected）。
-  // 不传 steer 时与改动前逐位等價（无 steer 的乐观插队语义不变）。
+  // 不传 steer 时与改动前逐位等价（无 steer 的乐观插队语义不变）。
   if (steer) {
     item.steer = steer;
   }
@@ -1025,8 +1025,8 @@ export function applySteerStatus(
 /**
  * D2-3：把「排队中」的徽章按 TTL 收口成终态。
  *
- * 为什么需要它：网關的 pendingSteers 是 volatile——重启／续期后队列整个消失，而且
- * 网關已经不记得那些 steer_id，永远不会补终态帧。此时前端还原出来的条目会永远停在
+ * 为什么需要它：网关的 pendingSteers 是 volatile——重启／续期后队列整个消失，而且
+ * 网关已经不记得那些 steer_id，永远不会补终态帧。此时前端还原出来的条目会永远停在
  * 「排队中」＝反向假话。所以前端以同一个 TTL 自行兜底：逾时仍未见任何终态帧 →
  * 翻 failed（徽章文案＝「引导未能送达（未生效）」）。
  *
@@ -1058,7 +1058,7 @@ export function expireQueuedSteers(
 /**
  * 用户按了停止：把还在排队中的 steer 全部改判中止（停止优先于 steer）。
  *
- * 为什么本端also改判而不是等网关的 aborted 帧：网關 handleAbortSession 里
+ * 为什么本端also改判而不是等网关的 aborted 帧：网关 handleAbortSession 里
  * dropPendingSteers 与 abort 落地是同一次调用（确定性），本端这次改判与它同义；
  * 已 injected / applied / aborted / failed 的终态条目不回退（见 applySteerStatus）。
  */
@@ -1129,7 +1129,7 @@ export function applyQuotaSnapshot(state: AgentChatState, quota: AgentQuotaState
 }
 
 /**
- * 殭屍还魂自愈：turn.done 已宣告回合收尾，同一条连线却仍有内容帧到达
+ * 僵尸还魂自愈：turn.done 已宣告回合收尾，同一条连线却仍有内容帧到达
  * （watchdog 误判后 retry 的输出继续灌进来）。把回合拉回流式中——发送钮
  * 翻回「中止助理生成」，不再停留在「系统说死亡但内容还在冒」的断点假象。
  * 已终结会话的迟到帧由 agentChatReducer 的 closed 门卫丢弃，但本端合成的

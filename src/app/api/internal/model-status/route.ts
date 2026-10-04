@@ -1,19 +1,19 @@
-// 控制面侧的模型活性内部读取端点（C 端模型選單用）。
+// 控制面侧的模型活性内部读取端点（C 端模型选单用）。
 //
 // 调用方是 Vercel 上的 /api/user/model-status：Vercel 边缘拿不到控制面 Postgres
 // （admin pools / routing-events 都在这一侧），也持有不了 biz key，于是走这条
 // HMAC 签名通道拿真信号。这里跑的判据与对外 /v1/model-status 完全同源：
-// readAdminPools + overrides + last_24h 真實交付統計 + probeAllModelsStatus +
-// 渠道餘額覆寫 + supplier 執行側同源最終裁決 —— 前端選單看到的就是 AI 助理
+// readAdminPools + overrides + last_24h 真实交付统计 + probeAllModelsStatus +
+// 渠道余额覆写 + supplier 执行侧同源最终裁决 —— 前端选单看到的就是 AI 助理
 // 看到的那把尺。
 //
 // 鉴权复用 biz-key-sync 的 HMAC 通道（自定义 signatureDomain="model-status"），
 // 不回显任何密钥。
 //
-// 2026-09-27：追加真實結果閘（model-availability-gate）——與提交面拒單同一判定。
+// 2026-09-27：追加真实结果闸（model-availability-gate）——与提交面拒单同一判定。
 //
-// 2026-08-30：前端「死活」三态 available/unavailable/unknown；Vercel 側經
-// GENERATION_CONTROL_PLANE_PROXY_ORIGIN 調這裡。返回 { ok, models: {modelId: av} }。
+// 2026-08-30：前端「死活」三态 available/unavailable/unknown；Vercel 侧经
+// GENERATION_CONTROL_PLANE_PROXY_ORIGIN 调这里。返回 { ok, models: {modelId: av} }。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -31,7 +31,7 @@ import { readUnavailableModels } from "@/lib/generation-core/model-availability-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const SIGNATURE_DOMAIN = "model-status";
 
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
   });
   if (!verified) return NextResponse.json({ ok: false, message: "签名校验失败。" }, { status: 401 });
 
-  // 隊列輸入與真實生成路由同源：admin 池 + admin overrides + 本實例 env。
+  // 队列输入与真实生成路由同源：admin 池 + admin overrides + 本实例 env。
   const [pools, overrides, recentStats] = await Promise.all([
     readAdminPools().catch(() => []),
     getRuntimeChannelOverrides(),
@@ -91,8 +91,8 @@ export async function POST(req: NextRequest) {
     reasonByModel: {} as Record<string, string>,
   }));
   const signalKindByMedia = (media: string): string => (media === "video" ? "video_generate" : "image_generate");
-  // 真實結果閘（2026-09-27）：近期真實生成全失敗的模型 = 提交面會拒單的模型，
-  // 選單必須同判（UI 宣稱匹配真實能力）。讀取失敗 → 空 map，不攔任何模型。
+  // 真实结果闸（2026-09-27）：近期真实生成全失败的模型 = 提交面会拒单的模型，
+  // 选单必须同判（UI 宣称匹配真实能力）。读取失败 → 空 map，不拦任何模型。
   const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
 
   const models: Record<string, string> = {};
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
     }
     models[model.id] = availability;
     if (availability === "available") {
-      // H4：available 只代表前置條件過；無真實成功證據 → probe_only，不與有證據者同等呈現。
+      // H4：available 只代表前置条件过；无真实成功证据 → probe_only，不与有证据者同等呈现。
       const recent = recentStats.find((stat) => stat.modelId === model.id);
       const supplierConfidence = classifyEvidence(supplierSignal.evidenceByModel?.[key]);
       const hasEvidence = (recent?.delivered ?? 0) > 0;

@@ -8,27 +8,27 @@ import type { HistoryEntry } from "@/lib/history-types";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 
 /**
- * 助理產物（圖／影片／音樂）→ 歷史記錄。
+ * 助理产物（图／影片／音乐）→ 历史记录。
  *
- * 本檔由 `agent-image-share.ts` 逐行複製再擴充（白名單＝新增的型別分支與欄位）：
- * 既有的「分享」路徑只認歷史 entry，而助理單圖走 biz 生成、從不寫歷史 ⇒ 主流量的
- * 作品一直分享不了。原實作只補寫圖片，且只在按下「分享」時才呼叫；這裡把同一套
- * 穩定 id + POST /api/history 的輪子擴到三種媒體，並提供 surface 自動落歷史用的
- * 純函數。
+ * 本档由 `agent-image-share.ts` 逐行复制再扩充（白名单＝新增的型别分支与栏位）：
+ * 既有的「分享」路径只认历史 entry，而助理单图走 biz 生成、从不写历史 ⇒ 主流量的
+ * 作品一直分享不了。原实作只补写图片，且只在按下「分享」时才呼叫；这里把同一套
+ * 稳定 id + POST /api/history 的轮子扩到三种媒体，并提供 surface 自动落历史用的
+ * 纯函数。
  *
- * id 規則沿用既有穩定規則（`agent-<taskId>`，無 taskId 時用 url 雜湊）：同一張圖／
- * 同一段影片重點分享或重跑＝同一條記錄（冪等 upsert），不因重新渲染而長出第二條。
+ * id 规则沿用既有稳定规则（`agent-<taskId>`，无 taskId 时用 url 杂凑）：同一张图／
+ * 同一段影片重点分享或重跑＝同一条记录（幂等 upsert），不因重新渲染而长出第二条。
  */
 
-/** 三種可落歷史的助理媒體條目。 */
+/** 三种可落历史的助理媒体条目。 */
 export type AgentMediaItem = AgentImageItem | AgentVideoItem | AgentAudioItem;
 
-/** 型別守衛：把 transcript 條目收斂到三種媒體（其餘條目一律不是落歷史對象）。 */
+/** 型别守卫：把 transcript 条目收敛到三种媒体（其余条目一律不是落历史对象）。 */
 export function isAgentMediaItem(item: AgentTranscriptItem): item is AgentMediaItem {
   return item.kind === "image" || item.kind === "video" || item.kind === "audio";
 }
 
-/** 穩定 id：`agent-<taskId>`；無 taskId 時以 url 雜湊兜底（同 url ＝ 同一條）。 */
+/** 稳定 id：`agent-<taskId>`；无 taskId 时以 url 杂凑兜底（同 url ＝ 同一条）。 */
 function agentMediaId(taskId: string | undefined, url: string): string {
   let hash = 0;
   for (let i = 0; i < url.length; i += 1) hash = (hash * 31 + url.charCodeAt(i)) | 0;
@@ -36,14 +36,14 @@ function agentMediaId(taskId: string | undefined, url: string): string {
 }
 
 /**
- * 把一筆助理媒體條目合成為可經 POST /api/history 落庫的 HistoryEntry。
+ * 把一笔助理媒体条目合成为可经 POST /api/history 落库的 HistoryEntry。
  *
- * 圖／影片／音頻各自的 url 落在對應欄位（imageUrl / videoUrl / audioUrl），
- * entryKind 與 mediaType 同步分流，歷史頁才能把三類分開顯示。
+ * 图／影片／音频各自的 url 落在对应栏位（imageUrl / videoUrl / audioUrl），
+ * entryKind 与 mediaType 同步分流，历史页才能把三类分开显示。
  *
- * 圖卡另帶 recipe：`workflow.imageSize` 一定要放——RerunDialog 與
- * buildHistoryRerunPlan 靠它推比例與尺寸覆寫，不放會退化成 1:1 / 1k。
- * 影片／音頻沒有配方可帶，prompt 空字串即可（normalizeHistoryEntry 只要求 id + generatedAt）。
+ * 图卡另带 recipe：`workflow.imageSize` 一定要放——RerunDialog 与
+ * buildHistoryRerunPlan 靠它推比例与尺寸覆写，不放会退化成 1:1 / 1k。
+ * 影片／音频没有配方可带，prompt 空字串即可（normalizeHistoryEntry 只要求 id + generatedAt）。
  */
 export function agentHistoryEntryForMedia(item: AgentMediaItem): HistoryEntry {
   const id = agentMediaId(item.taskId, item.url);
@@ -120,8 +120,8 @@ export function agentHistoryEntryForMedia(item: AgentMediaItem): HistoryEntry {
 }
 
 /**
- * 寫入歷史：沿用既有 POST /api/history（含 token / x-user-id 身分標頭）。
- * 抓不到 token 直接回 false——未登入不該送出裸請求，呼叫方靜默處理即可。
+ * 写入历史：沿用既有 POST /api/history（含 token / x-user-id 身分标头）。
+ * 抓不到 token 直接回 false——未登入不该送出裸请求，呼叫方静默处理即可。
  */
 export async function saveAgentMediaToHistory(entry: HistoryEntry): Promise<boolean> {
   const token = getStoredToken();
@@ -140,7 +140,7 @@ export async function saveAgentMediaToHistory(entry: HistoryEntry): Promise<bool
   }
 }
 
-/** 目前 transcript 裡所有媒體條目的 id（surface 拿它在會話基準點灌入已處理集合）。 */
+/** 目前 transcript 里所有媒体条目的 id（surface 拿它在会话基准点灌入已处理集合）。 */
 export function agentMediaItemIds(items: AgentTranscriptItem[]): string[] {
   const ids: string[] = [];
   for (const item of items) {
@@ -150,24 +150,24 @@ export function agentMediaItemIds(items: AgentTranscriptItem[]): string[] {
 }
 
 /**
- * 同一媒體條目在同一 session 內最多補寫次數；用盡即放棄（避免失敗風暴）。
- * 以 transcript 條目 id 為鍵——與 `agentMediaItemIds` / processed 集合同源。
+ * 同一媒体条目在同一 session 内最多补写次数；用尽即放弃（避免失败风暴）。
+ * 以 transcript 条目 id 为键——与 `agentMediaItemIds` / processed 集合同源。
  */
 export const AGENT_MEDIA_HISTORY_MAX_ATTEMPTS = 3;
 
-/** 一筆待補寫的媒體：itemId 是 transcript 條目 id（去重／重試鍵），entry 是落庫內容。 */
+/** 一笔待补写的媒体：itemId 是 transcript 条目 id（去重／重试键），entry 是落库内容。 */
 export type AgentMediaHistoryWrite = {
   itemId: string;
   entry: HistoryEntry;
 };
 
-/** 純函數輸出：本輪要送的條目 + 套用後應併入 processed 的 id 全集。 */
+/** 纯函数输出：本轮要送的条目 + 套用后应并入 processed 的 id 全集。 */
 export type AgentMediaHistoryPlan = {
   writes: AgentMediaHistoryWrite[];
   /**
-   * 套用後應併入 processed 的 id 全集＝
-   * `processedIds` ∪ 本輪送出中的 id（送出前佔位，成功即定案）∪ 重試用盡判為放棄的 id。
-   * effect 把它整包換進 processed ref；失敗且未達上限者再從中撤回（見 surface）。
+   * 套用后应并入 processed 的 id 全集＝
+   * `processedIds` ∪ 本轮送出中的 id（送出前占位，成功即定案）∪ 重试用尽判为放弃的 id。
+   * effect 把它整包换进 processed ref；失败且未达上限者再从中撤回（见 surface）。
    */
   nextProcessedIds: string[];
 };
@@ -176,15 +176,15 @@ const EMPTY_ID_SET: ReadonlySet<string> = new Set();
 const EMPTY_ATTEMPTS: ReadonlyMap<string, number> = new Map();
 
 /**
- * 決定這一輪要補寫哪些媒體（純函數，可直測）。
+ * 决定这一轮要补写哪些媒体（纯函数，可直测）。
  *
- * 逐條掃 items，過三道閘：
- *  - 非媒體、已在 processedIds、同輪同 id 重複 → 跳過；
- *  - 重試次數已達 `AGENT_MEDIA_HISTORY_MAX_ATTEMPTS` → 判為放棄，併入 nextProcessedIds 不再挑；
- *  - 已在 inFlightIds（同 id 已有未回請求）→ 本輪跳過，避免並發重複 POST。
- * 通過者才進 writes，並即時併入 nextProcessedIds（送出前佔位；失敗由呼叫方撤回）。
+ * 逐条扫 items，过三道闸：
+ *  - 非媒体、已在 processedIds、同轮同 id 重复 → 跳过；
+ *  - 重试次数已达 `AGENT_MEDIA_HISTORY_MAX_ATTEMPTS` → 判为放弃，并入 nextProcessedIds 不再挑；
+ *  - 已在 inFlightIds（同 id 已有未回请求）→ 本轮跳过，避免并发重复 POST。
+ * 通过者才进 writes，并即时并入 nextProcessedIds（送出前占位；失败由呼叫方撤回）。
  *
- * 純函數不碰網路、不改入參，effect 只負責呼叫與套用結果。
+ * 纯函数不碰网路、不改入参，effect 只负责呼叫与套用结果。
  */
 export function planAgentMediaHistoryWrites(
   items: AgentTranscriptItem[],
@@ -200,12 +200,12 @@ export function planAgentMediaHistoryWrites(
     const itemId = item.id;
     if (processedIds.has(itemId) || seen.has(itemId)) continue;
     seen.add(itemId);
-    // 重試用盡＝明確不可救的失敗：標記放棄（併入 processed），之後不再挑，也不影響其他條目。
+    // 重试用尽＝明确不可救的失败：标记放弃（并入 processed），之后不再挑，也不影响其他条目。
     if ((attempts.get(itemId) ?? 0) >= AGENT_MEDIA_HISTORY_MAX_ATTEMPTS) {
       nextProcessedIds.add(itemId);
       continue;
     }
-    // 同一 id 已有未回請求 → 本輪不重複挑出。
+    // 同一 id 已有未回请求 → 本轮不重复挑出。
     if (inFlightIds.has(itemId)) continue;
     writes.push({ itemId, entry: agentHistoryEntryForMedia(item) });
     nextProcessedIds.add(itemId);
@@ -214,11 +214,11 @@ export function planAgentMediaHistoryWrites(
 }
 
 /**
- * 給定 items 與「已處理 id 集合」→ 回傳這一輪要補寫歷史的條目（純函數，可直測）。
+ * 给定 items 与「已处理 id 集合」→ 回传这一轮要补写历史的条目（纯函数，可直测）。
  *
- * 同一 id 在同一輪只出一次；已在集合裡的一律跳過（冪等靠穩定 id，表面靠這個集合
- * 去重，避免每次 state.items 更新都對同一條媒體重打一次 POST）。
- * 此為 `planAgentMediaHistoryWrites` 的無 in-flight／無重試預算簡化版（單一輪子，不重複邏輯）。
+ * 同一 id 在同一轮只出一次；已在集合里的一律跳过（幂等靠稳定 id，表面靠这个集合
+ * 去重，避免每次 state.items 更新都对同一条媒体重打一次 POST）。
+ * 此为 `planAgentMediaHistoryWrites` 的无 in-flight／无重试预算简化版（单一轮子，不重复逻辑）。
  */
 export function pendingAgentMediaHistoryEntries(
   items: AgentTranscriptItem[],

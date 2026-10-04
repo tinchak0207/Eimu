@@ -1,30 +1,30 @@
-// local-media-worker.ts — 前端↔桌面殼本機媒體工人薄 adapter（W4，2026-10-04）
+// local-media-worker.ts — 前端↔桌面壳本机媒体工人薄 adapter（W4，2026-10-04）
 //
-// 目的：讓「瀏覽器／桌面殼直接發起」的媒體量測／抽幀／轉碼，在桌面殼內優先走本機 ffmpeg
-// （`window.eimuLocal`，契約見 desktop/LOCAL-CAPABILITIES.md），減少 VPS ffmpeg 負載。
+// 目的：让「浏览器／桌面壳直接发起」的媒体量测／抽帧／转码，在桌面壳内优先走本机 ffmpeg
+// （`window.eimuLocal`，契约见 desktop/LOCAL-CAPABILITIES.md），减少 VPS ffmpeg 负载。
 //
-// 邊界（讀任何修改前先讀）：
-//   · 本檔只做「偵測 → 呼叫 → 收斂成 { ok }」三件事，**不做 fallback 決策**——
-//     回落由呼叫端決定（保持 adapter 單純，呼叫端知道自己的降級路徑）。
-//   · **一律不 throw**：任何失敗（無 worker／ffmpeg 不可用／worker reject／capabilities 失敗／
-//     參數錯）都回 `{ ok:false, reason }`，絕不中斷呼叫端的既有雲端路徑。
-//   · 沒有 `window.eimuLocal`（＝純瀏覽器環境）時，本檔所有函式回 `ok:false`；
-//     這正是「不具備本機能力時完全回落今天的雲端路徑」的判準。
+// 边界（读任何修改前先读）：
+//   · 本档只做「侦测 → 呼叫 → 收敛成 { ok }」三件事，**不做 fallback 决策**——
+//     回落由呼叫端决定（保持 adapter 单纯，呼叫端知道自己的降级路径）。
+//   · **一律不 throw**：任何失败（无 worker／ffmpeg 不可用／worker reject／capabilities 失败／
+//     参数错）都回 `{ ok:false, reason }`，绝不中断呼叫端的既有云端路径。
+//   · 没有 `window.eimuLocal`（＝纯浏览器环境）时，本档所有函式回 `ok:false`；
+//     这正是「不具备本机能力时完全回落今天的云端路径」的判准。
 //
-// 為什麼 `hasLocalMediaWorker()` 是 async：`capabilities()` 是 IPC 呼叫，第一次探測 ffmpeg
-// 要等本機子程序跑完；把能力探測的 promise 依 api 物件身分快取起來，後續呼叫即時命中
-// （同時自然處理「尚未探測完成」——呼叫端 await 的就是同一條 promise）。
+// 为什么 `hasLocalMediaWorker()` 是 async：`capabilities()` 是 IPC 呼叫，第一次探测 ffmpeg
+// 要等本机子程序跑完；把能力探测的 promise 依 api 物件身分快取起来，后续呼叫即时命中
+// （同时自然处理「尚未探测完成」——呼叫端 await 的就是同一条 promise）。
 
-// ─────────────────────────── 失敗原因碼（呼叫端可據此分流，但不強制）
+// ─────────────────────────── 失败原因码（呼叫端可据此分流，但不强制）
 
-/** 沒有 `window.eimuLocal`：非桌面殼／瀏覽器環境。 */
+/** 没有 `window.eimuLocal`：非桌面壳／浏览器环境。 */
 export const LOCAL_WORKER_ABSENT = "no_local_worker";
-/** worker 存在，但本機沒有可用的 ffmpeg。 */
+/** worker 存在，但本机没有可用的 ffmpeg。 */
 export const LOCAL_FFMPEG_UNAVAILABLE = "ffmpeg_unavailable";
-/** 能力探測本身失敗（IPC 錯誤等）；附 worker 回的錯誤訊息。 */
+/** 能力探测本身失败（IPC 错误等）；附 worker 回的错误讯息。 */
 export const LOCAL_CAPABILITIES_FAILED = "capabilities_failed";
 
-// ─────────────────────────── 型別（鏡射桌面殼契約，不 import desktop/——那是另一包的產物）
+// ─────────────────────────── 型别（镜射桌面壳契约，不 import desktop/——那是另一包的产物）
 
 export interface EimuLocalProbeStream {
   index: number;
@@ -46,7 +46,7 @@ export interface EimuLocalProbeResult {
 
 export interface EimuLocalFrame {
   tSec: number;
-  /** 抽出影格在本機臨時目錄的絕對路徑（契約欄位是 `path`，不是 base64）。 */
+  /** 抽出影格在本机临时目录的绝对路径（契约栏位是 `path`，不是 base64）。 */
   path: string;
 }
 
@@ -81,7 +81,7 @@ export interface EimuLocalCapabilities {
   platform: string;
 }
 
-/** preload 注入的 `window.eimuLocal` 之子集（本檔只用這四個）。 */
+/** preload 注入的 `window.eimuLocal` 之子集（本档只用这四个）。 */
 export interface EimuLocalApi {
   capabilities(): Promise<EimuLocalCapabilities>;
   probe(filePath: string): Promise<EimuLocalProbeResult>;
@@ -89,14 +89,14 @@ export interface EimuLocalApi {
   transcode(filePath: string, opts?: EimuLocalTranscodeOpts): Promise<EimuLocalTranscodeResult>;
 }
 
-/** 統一回傳形狀：成功帶 `result`，失敗帶 `reason`（永不 throw）。 */
+/** 统一回传形状：成功带 `result`，失败带 `reason`（永不 throw）。 */
 export type LocalMediaResult<T> = { ok: true; result: T } | { ok: false; reason: string };
 
-// ─────────────────────────── 偵測與能力快取
+// ─────────────────────────── 侦测与能力快取
 
 function getLocalApi(): EimuLocalApi | null {
-  // 桌面殼的 preload 把 eimuLocal 掛在 window 上；在瀏覽器裡 window === globalThis，
-  // 在 node（測試）裡也讀得到 globalThis，故兩邊同一條讀法。
+  // 桌面壳的 preload 把 eimuLocal 挂在 window 上；在浏览器里 window === globalThis，
+  // 在 node（测试）里也读得到 globalThis，故两边同一条读法。
   const g = globalThis as typeof globalThis & { eimuLocal?: unknown };
   const api = g.eimuLocal as EimuLocalApi | undefined;
   if (!api || typeof api.capabilities !== "function") return null;
@@ -105,7 +105,7 @@ function getLocalApi(): EimuLocalApi | null {
 
 type CapabilityState = { available: boolean; reason: string };
 
-// 依 api 物件身分快取能力探測結果：換了 api（頁面重載／測試切換假件）就重探。
+// 依 api 物件身分快取能力探测结果：换了 api（页面重载／测试切换假件）就重探。
 let cachedApi: EimuLocalApi | null = null;
 let cachedCapabilities: Promise<CapabilityState> | null = null;
 
@@ -139,7 +139,7 @@ async function resolveLocalApi(): Promise<Resolved> {
   return { ok: true, api };
 }
 
-/** 本機媒體工人是否可用（桌面殼內 ＋ 本機 ffmpeg 就緒）。非同步：會等能力探測完成。 */
+/** 本机媒体工人是否可用（桌面壳内 ＋ 本机 ffmpeg 就绪）。非同步：会等能力探测完成。 */
 export async function hasLocalMediaWorker(): Promise<boolean> {
   return (await resolveLocalApi()).ok;
 }
@@ -151,9 +151,9 @@ function badPath(filePath: unknown): LocalMediaResult<never> | null {
   return null;
 }
 
-// ─────────────────────────── 對外三個操作（薄封裝，不決定 fallback）
+// ─────────────────────────── 对外三个操作（薄封装，不决定 fallback）
 
-/** 本機 probe（metadata／streams）。失敗或不可用回 `{ ok:false, reason }`，不 throw。 */
+/** 本机 probe（metadata／streams）。失败或不可用回 `{ ok:false, reason }`，不 throw。 */
 export async function probeLocally(filePath: string): Promise<LocalMediaResult<EimuLocalProbeResult>> {
   const bad = badPath(filePath);
   if (bad) return bad;
@@ -167,7 +167,7 @@ export async function probeLocally(filePath: string): Promise<LocalMediaResult<E
   }
 }
 
-/** 本機抽幀（寫入本機臨時目錄，回檔路徑）。失敗或不可用回 `{ ok:false, reason }`，不 throw。 */
+/** 本机抽帧（写入本机临时目录，回档路径）。失败或不可用回 `{ ok:false, reason }`，不 throw。 */
 export async function extractFramesLocally(
   filePath: string,
   plan?: EimuLocalFramePlan,
@@ -184,7 +184,7 @@ export async function extractFramesLocally(
   }
 }
 
-/** 本機轉碼（回輸出檔絕對路徑）。失敗或不可用回 `{ ok:false, reason }`，不 throw。 */
+/** 本机转码（回输出档绝对路径）。失败或不可用回 `{ ok:false, reason }`，不 throw。 */
 export async function transcodeLocally(
   filePath: string,
   opts?: EimuLocalTranscodeOpts,

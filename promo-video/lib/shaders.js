@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-// ---------- 無限畫布表面：珍珠白 + 點陣 + 藍粉光池；可切換到暗色預演舞台 ----------
+// ---------- 无限画布表面：珍珠白 + 点阵 + 蓝粉光池；可切换到暗色预演舞台 ----------
 export function surfaceMaterial() {
   const c = s => new THREE.Color(s);
   return new THREE.ShaderMaterial({
@@ -27,7 +27,7 @@ export function surfaceMaterial() {
       void main(){
         vec2 p = vW.xz;
         float dist = length(vW - uCam);
-        // 珍珠畫布
+        // 珍珠画布
         vec3 col = uPearl;
         vec2 ps = uPoolShift;
         col = mix(col, uBlue, .55 * pool(p, vec2(-12., -5.) + ps, 9.));
@@ -41,7 +41,7 @@ export function surfaceMaterial() {
         float dotA = 1. - smoothstep(.0105, .0105 + aa, d);
         dotA *= 1. - smoothstep(9., 26., dist);
         col = mix(col, uDot, dotA * .7 * uDots);
-        // 預演舞台：深色 + 網格線
+        // 预演舞台：深色 + 网格线
         vec2 q = p;
         vec2 f = fract(q); vec2 fd = min(f, 1. - f); float lm = min(fd.x, fd.y);
         float wm = fwidth(lm) * 1.2 + 1e-4;
@@ -64,7 +64,7 @@ export function surfaceMaterial() {
   });
 }
 
-// ---------- 圖像/貼花材質：圓角遮罩 + 左→右揭示 + 光帶掃過 + 灰度/暗化 ----------
+// ---------- 图像/贴花材质：圆角遮罩 + 左→右揭示 + 光带扫过 + 灰度/暗化 ----------
 export function imageMaterial({ map, w, h, radius = 0, transparent = true, opaque = false } = {}) {
   const m = new THREE.ShaderMaterial({
     uniforms: {
@@ -89,14 +89,14 @@ export function imageMaterial({ map, w, h, radius = 0, transparent = true, opaqu
         vec3 col = uPremul > .5 ? tex.rgb / max(tex.a, 1e-4) : tex.rgb;
         float lum = dot(col, vec3(.2126,.7152,.0722));
         col = mix(col, vec3(lum), uGray) * uBright * uTint;
-        // 揭示：從左到右，軟邊
+        // 揭示：从左到右，软边
         float rv = smoothstep(uReveal - uSoft, uReveal, vUv.x * (1. - uSoft) + uSoft * .5);
         float reveal = 1. - rv;
-        // 骨架 shimmer（未揭示部分顯示淺灰底 + 移動高光）
+        // 骨架 shimmer（未揭示部分显示浅灰底 + 移动高光）
         float sh = exp(-pow((vUv.x - uShimPos) * 4., 2.)) * uShim;
         vec3 base = uBase + sh * .35;
         col = mix(base, col, uClear > .5 ? 1. : reveal);
-        // 光帶
+        // 光带
         float band = exp(-pow((vUv.x + vUv.y * .35 - uSweep) * 9., 2.)) * uSweepAmt;
         col += band;
         float a = mask * uOpacity * (${transparent ? "tex.a" : "1."}) * (uClear > .5 ? reveal : 1.);
@@ -107,7 +107,7 @@ export function imageMaterial({ map, w, h, radius = 0, transparent = true, opaqu
   return m;
 }
 
-// ---------- 發光連線：沿管長繪製 + 脈衝光點（HDR，交給 bloom） ----------
+// ---------- 发光连线：沿管长绘制 + 脉冲光点（HDR，交给 bloom） ----------
 export function threadMaterial(color, len) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -134,7 +134,7 @@ export function threadMaterial(color, len) {
   });
 }
 
-// ---------- 電影調色（OutputPass 之後，顯示空間）：顆粒 / 暗角 / 色散 / 淡入淡出 ----------
+// ---------- 电影调色（OutputPass 之后，显示空间）：颗粒 / 暗角 / 色散 / 淡入淡出 ----------
 export const FilmShader = {
   uniforms: {
     tDiffuse: { value: null }, uSeed: { value: 0 }, uGrain: { value: .035 }, uVig: { value: .35 }, uCA: { value: .6 },

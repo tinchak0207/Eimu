@@ -1,8 +1,8 @@
-// 角色/場景卡 API 的前端封裝：/api/character-cards 的 list / save / delete。
+// 角色/场景卡 API 的前端封装：/api/character-cards 的 list / save / delete。
 //
-// 認證頭復用 canvas/client 的 authHeaders（Bearer token + x-user-id 成對），
-// 行為模式對齊 canvas/client：不 throw 認證錯，回 { ok:false, reason }——
-// 卡是「順手鎖定」的配置，未登入時安靜降級，不擋畫布創作。
+// 认证头复用 canvas/client 的 authHeaders（Bearer token + x-user-id 成对），
+// 行为模式对齐 canvas/client：不 throw 认证错，回 { ok:false, reason }——
+// 卡是「顺手锁定」的配置，未登入时安静降级，不挡画布创作。
 import { authHeaders, type CanvasClientResult } from "@/lib/canvas/client";
 import { bumpCharacterCardIndexRevision } from "@/lib/character-card-index";
 import type { CharacterCard } from "@/lib/character-cards";
@@ -41,7 +41,7 @@ async function request<T>(
   return { ok: true, data };
 }
 
-/** 讀全部卡（服務端已按 updatedAt 由新到舊排序）。 */
+/** 读全部卡（服务端已按 updatedAt 由新到旧排序）。 */
 export function listCharacterCards(): Promise<CanvasClientResult<CharacterCard[]>> {
   return request<CharacterCard[]>("/api/character-cards", { method: "GET" }, (json) => {
     const arr = (json as { cards?: unknown })?.cards;
@@ -49,7 +49,7 @@ export function listCharacterCards(): Promise<CanvasClientResult<CharacterCard[]
   });
 }
 
-/** 存一張卡（upsert by id）。 */
+/** 存一张卡（upsert by id）。 */
 export async function saveCharacterCard(card: CharacterCard): Promise<CanvasClientResult<true>> {
   const res = await request<true>(
     "/api/character-cards",
@@ -60,7 +60,7 @@ export async function saveCharacterCard(card: CharacterCard): Promise<CanvasClie
   return res;
 }
 
-/** 刪若干卡。 */
+/** 删若干卡。 */
 export async function deleteCharacterCards(ids: string[]): Promise<CanvasClientResult<number>> {
   const res = await request<number>(
     "/api/character-cards",

@@ -1,19 +1,19 @@
-// /v1/team/quota —— 團隊成員點數配額（REQ-B1，user 層模型）的分配面與可視面。
+// /v1/team/quota —— 团队成员点数配额（REQ-B1，user 层模型）的分配面与可视面。
 //
-//   GET  → 主帳總額／已分配／各成員額度與消耗（全部當場讀 new-api 權威源）
-//   POST → 團隊主 → 成員劃額度：{ member_key_id, target_coins | target_quota }
-//          target 是**絕對目標值**，大於現值 = 劃額度、小於現值 = 回收、
-//          等於現值 = 幂等 no-op（不寫上游）。
+//   GET  → 主帐总额／已分配／各成员额度与消耗（全部当场读 new-api 权威源）
+//   POST → 团队主 → 成员划额度：{ member_key_id, target_coins | target_quota }
+//          target 是**绝对目标值**，大于现值 = 划额度、小于现值 = 回收、
+//          等于现值 = 幂等 no-op（不写上游）。
 //
-// 鑑權與計費主體只來自 B 端密鑰記錄（authenticateBizApiKey），與 /v1/quota 同一套：
-// 呼叫方 key 的 user_id 就是團隊主帳（出資方）。成員金鑰的 user 若已在成員名冊
-// 裡，即不得自行分配額度（403）——否則「團隊主分配」這條線形同虛設。
+// 鉴权与计费主体只来自 B 端密钥记录（authenticateBizApiKey），与 /v1/quota 同一套：
+// 呼叫方 key 的 user_id 就是团队主帐（出资方）。成员金钥的 user 若已在成员名册
+// 里，即不得自行分配额度（403）——否则「团队主分配」这条线形同虚设。
 //
-// 成員 = new-api 另一個 user（子帳號）：配額桶 = 成員 user 自己的 users.quota，
-// 分配 = 主帳扣、成員加（轉移，兩條腿不成功即回滾，見 member-quota.ts）。
-// 所有金額對外以幣（coins）為準（1 幣 = QUOTA_PER_COIN quota）；需要精確到
-// quota 單位的呼叫方可以傳 target_quota。禁影子帳本：本路由不寫任何本地餘額，
-// 額度真源只有 new-api（users.quota）。
+// 成员 = new-api 另一个 user（子帐号）：配额桶 = 成员 user 自己的 users.quota，
+// 分配 = 主帐扣、成员加（转移，两条腿不成功即回滚，见 member-quota.ts）。
+// 所有金额对外以币（coins）为准（1 币 = QUOTA_PER_COIN quota）；需要精确到
+// quota 单位的呼叫方可以传 target_quota。禁影子帐本：本路由不写任何本地余额，
+// 额度真源只有 new-api（users.quota）。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         granted_coins: member.coins.granted,
         used_coins: member.coins.used,
         remaining_coins: member.coins.remaining,
-        // 讀不到上游時誠實給第三態，不畫 0 冒充足額。
+        // 读不到上游时诚实给第三态，不画 0 冒充足额。
         ...(member.unavailable ? { unavailable: true } : {}),
       })),
     },
@@ -92,9 +92,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 成員不得自行分配額度（否則成員可以自己給自己加額度）。
-  // user 層判據：呼叫方 key 的 user 若已在成員名冊裡，就代表它是「被分配的成員」
-  // （成員 user ≠ 團隊主帳 user，見 019 的 CHECK 約束），不是出資方 ⇒ 403。
+  // 成员不得自行分配额度（否则成员可以自己给自己加额度）。
+  // user 层判据：呼叫方 key 的 user 若已在成员名册里，就代表它是「被分配的成员」
+  // （成员 user ≠ 团队主帐 user，见 019 的 CHECK 约束），不是出资方 ⇒ 403。
   const callerIsMember = await findMemberByUserId(auth.key.userId);
   if (callerIsMember) {
     return fail(403, "member_cannot_allocate", "成员密钥不得自行分配额度，请用团队主账号密钥操作。");
@@ -124,7 +124,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (targetQuota !== null && !Number.isFinite(targetQuota)) {
     return fail(400, "invalid_target", "target_quota 必须是数字。");
   }
-  // 幣優先：呼叫方按點數思考；quota 只是內部的精確單位。
+  // 币优先：呼叫方按点数思考；quota 只是内部的精确单位。
   const targetGranted =
     targetCoins !== null ? Math.round(targetCoins * QUOTA_PER_COIN) : Math.round(targetQuota as number);
 

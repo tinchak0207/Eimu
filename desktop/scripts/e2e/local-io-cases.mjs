@@ -1,16 +1,16 @@
 // desktop/scripts/e2e/local-io-cases.mjs
 //
-// W2 產物直寫本機磁碟 / W0 大檔直傳 / 額度三態 —— 真桌面殼 E2E。
+// W2 产物直写本机磁碟 / W0 大档直传 / 额度三态 —— 真桌面壳 E2E。
 //
-// 紅線：只新增本檔；不動 harness/run/cases/session-cases；不部署/不 SSH/不連 DB/
-//       不呼叫付費上游；真殼用複製 profile（只讀）；截圖輸出 /tmp；不記 token 值。
+// 红线：只新增本档；不动 harness/run/cases/session-cases；不部署/不 SSH/不连 DB/
+//       不呼叫付费上游；真壳用复制 profile（只读）；截图输出 /tmp；不记 token 值。
 //
 // 用法：
 //   node desktop/scripts/e2e/local-io-cases.mjs --recon
 //   node desktop/scripts/e2e/local-io-cases.mjs --probe-sign
 //   node desktop/scripts/e2e/local-io-cases.mjs --only W2a,W2b,... [--out DIR]
 //
-// 產物：outDir/<case>.json、outDir/<case>.png、outDir/summary.json、outDir/*.log
+// 产物：outDir/<case>.json、outDir/<case>.png、outDir/summary.json、outDir/*.log
 
 import fs from "node:fs";
 import os from "node:os";
@@ -71,7 +71,7 @@ function makeEmptyGlb(name = "empty.glb") {
   return p;
 }
 
-// ────────────────────────── 通用探針 ──────────────────────────
+// ────────────────────────── 通用探针 ──────────────────────────
 async function probeBase(shell) {
   return await shell.evaluate(() => ({
     url: location.href,
@@ -109,7 +109,7 @@ async function probeUser(shell) {
   });
 }
 
-// ────────────────────────── 網路錄製 ──────────────────────────
+// ────────────────────────── 网路录制 ──────────────────────────
 function attachNet(shell) {
   const list = [];
   const byReq = new Map();
@@ -150,7 +150,7 @@ function attachNet(shell) {
 }
 
 // ────────────────────────── W2 注入器 ──────────────────────────
-// picker 替身：明確標示為替身（非真對話框）。
+// picker 替身：明确标示为替身（非真对话框）。
 async function installPickerStub(shell, mode = "save-ok") {
   await shell.evaluate((mode) => {
     const lg = { saveCalls: [], dirCalls: [], writes: [], mode };
@@ -200,7 +200,7 @@ async function installAnchorRecorder(shell) {
       HTMLAnchorElement.prototype.click = function () {
         if (this.download) {
           window.__eimuAnchors.push({ download: this.download, hrefHead: String(this.href).slice(0, 48), ts: Date.now() });
-          return; // 抑制真下載（避免 Electron 原生對話框擋住後續自動斷言）
+          return; // 抑制真下载（避免 Electron 原生对话框挡住后续自动断言）
         }
         return orig.call(this);
       };
@@ -221,8 +221,8 @@ async function readPickerLog(shell) {
   }));
 }
 
-// ────────────────────────── 殼啟動 ──────────────────────────
-/** 啟動殼（GPU 進程在記憶體壓力下偶發 fatal，重試至多 3 次）。 */
+// ────────────────────────── 壳启动 ──────────────────────────
+/** 启动壳（GPU 进程在记忆体压力下偶发 fatal，重试至多 3 次）。 */
 async function launchShellRetry(opts, tries = 3) {
   let lastErr = null;
   for (let i = 0; i < tries; i++) {
@@ -250,7 +250,7 @@ async function withShell(fn, { origin } = {}) {
     return await fn(shell);
   } finally {
     await shell.close().catch(() => {});
-    // 回收複製的 profile（137MB/次），避免 /tmp（tmpfs）被塞爆
+    // 回收复制的 profile（137MB/次），避免 /tmp（tmpfs）被塞爆
     try { fs.rmSync(path.join(outDir, "home"), { recursive: true, force: true }); } catch {}
     await sleep(1200);
   }
@@ -258,12 +258,12 @@ async function withShell(fn, { origin } = {}) {
 
 async function gotoHistory(shell) {
   await shell.page.goto(shell.origin + "/history", { waitUntil: "domcontentloaded" }).catch(() => {});
-  // 等卡片與下載鈕出現
+  // 等卡片与下载钮出现
   await shell.page.waitForSelector('button[aria-label="下载"]', { timeout: 30000 }).catch(() => {});
   await sleep(2500);
 }
 
-/** 等「[role=status]」通知訊息出現（HistoryClient 的 setNotice）。 */
+/** 等「[role=status]」通知讯息出现（HistoryClient 的 setNotice）。 */
 async function readHistoryNotice(shell) {
   return await shell.evaluate(() => {
     const els = [...document.querySelectorAll('[role="status"]')].map((e) => e.innerText.trim()).filter(Boolean);
@@ -271,7 +271,7 @@ async function readHistoryNotice(shell) {
   });
 }
 
-// 設定檔案到 file input：優先 Playwright setInputFiles（會正確派發 change），失敗回退 CDP。
+// 设定档案到 file input：优先 Playwright setInputFiles（会正确派发 change），失败回退 CDP。
 async function setFileInput(shell, selector, files) {
   const list = Array.isArray(files) ? files : [files];
   try {
@@ -314,7 +314,7 @@ async function gotoHome(shell) {
   await sleep(2500);
 }
 
-// ────────────────────────── SIGN 探針 ──────────────────────────
+// ────────────────────────── SIGN 探针 ──────────────────────────
 async function probeSign() {
   const r = await withShell(async (shell) => {
     const user = await probeUser(shell);
@@ -352,13 +352,13 @@ async function probeSign() {
   log(JSON.stringify(r, null, 2));
 }
 
-// ────────────────────────── CSS 選擇器 ──────────────────────────
+// ────────────────────────── CSS 选择器 ──────────────────────────
 const SEL = {
   cardDownload: 'button[aria-label="下载"]',
   cardSelect: 'button[aria-label="选中这张"]',
 };
 
-/** 點歷史卡的下載鈕。action bar 只在 hover 顯示；trusted=true 走真實滑鼠手勢
+/** 点历史卡的下载钮。action bar 只在 hover 显示；trusted=true 走真实滑鼠手势
  *  （showSaveFilePicker 需要 transient user activation）。 */
 async function clickHistoryDownload(shell, { trusted = false } = {}) {
   const card = shell.page.locator("article.hist-card").filter({ has: shell.page.locator(SEL.cardDownload) }).first();
@@ -366,8 +366,8 @@ async function clickHistoryDownload(shell, { trusted = false } = {}) {
   await card.hover().catch(() => {});
   await sleep(300);
   if (trusted) {
-    // 測試輔具：把 hover-only 的操作條強制顯示，讓真實滑鼠點擊能命中按鈕
-    // （showSaveFilePicker 需要 transient user activation，程式化 .click() 無效）。
+    // 测试辅具：把 hover-only 的操作条强制显示，让真实滑鼠点击能命中按钮
+    // （showSaveFilePicker 需要 transient user activation，程式化 .click() 无效）。
     await shell.page
       .addStyleTag({
         content:
@@ -378,7 +378,7 @@ async function clickHistoryDownload(shell, { trusted = false } = {}) {
     const btn = card.locator(SEL.cardDownload).first();
     await btn.hover().catch(() => {});
     await sleep(250);
-    // 選一個「完整落在視口內（避開 sticky 導覽列）」的下載鈕，取其中心座標。
+    // 选一个「完整落在视口内（避开 sticky 导览列）」的下载钮，取其中心座标。
     const pick = await shell.page.evaluate((sel) => {
       const btns = [...document.querySelectorAll(sel)];
       const cands = btns
@@ -414,7 +414,7 @@ async function clickHistoryDownload(shell, { trusted = false } = {}) {
   }
 }
 
-/** 用按鈕文字點擊（DOM click，不受 hover/pointer-events 影響）。 */
+/** 用按钮文字点击（DOM click，不受 hover/pointer-events 影响）。 */
 async function domClickText(shell, text) {
   return await shell.page.evaluate((t) => {
     const btns = [...document.querySelectorAll("button")];
@@ -440,7 +440,7 @@ async function readAlerts(shell) {
 
 // ────────────────────────── W2 案例 ──────────────────────────
 
-/** 用 X11 工具列舉視窗（獨立 oracle，佐證原生對話框是否出現）。 */
+/** 用 X11 工具列举视窗（独立 oracle，佐证原生对话框是否出现）。 */
 function xrun(bin, args) {
   return new Promise((resolve) => {
     execFile(bin, args, { env: { ...process.env, DISPLAY: process.env.DISPLAY || ":1" }, timeout: 8000 }, (err, stdout) =>
@@ -462,22 +462,22 @@ async function enumerateWindows() {
 }
 
 
-/** W2a：真對話框（真實 picker，無替身）＋ 整屏截圖。 */
+/** W2a：真对话框（真实 picker，无替身）＋ 整屏截图。 */
 async function W2a() {
-  const evidence = { evidenceStrength: "真對話框（spectacle 整屏截圖）" };
+  const evidence = { evidenceStrength: "真对话框（spectacle 整屏截图）" };
   return await withShell(async (shell) => {
     const base = await probeBase(shell);
     evidence.pickersBefore = base.picker;
     if (base.picker.save !== "function" && base.picker.dir !== "function") {
-      return { status: "fail", observations: { ...evidence, note: "picker 不存在，無法測真對話框" }, error: "no picker" };
+      return { status: "fail", observations: { ...evidence, note: "picker 不存在，无法测真对话框" }, error: "no picker" };
     }
     await gotoHistory(shell);
     const n = await shell.page.locator(SEL.cardDownload).count();
     evidence.downloadButtons = n;
-    if (!n) return { status: "fail", observations: evidence, error: "history 無可下載卡片" };
+    if (!n) return { status: "fail", observations: evidence, error: "history 无可下载卡片" };
     const net = attachNet(shell);
     const t0 = net.mark();
-    // 診斷注入：記錄 picker 是否被呼叫、結果；anchor 是否被點（不抑制，讓真對話框照常開）。
+    // 诊断注入：记录 picker 是否被呼叫、结果；anchor 是否被点（不抑制，让真对话框照常开）。
     await shell.evaluate(() => {
       window.__diag = { pickerCalls: 0, pickerSettled: null, pickerErr: null, anchorClicks: [] };
       const orig = window.showSaveFilePicker;
@@ -515,11 +515,11 @@ async function W2a() {
     });
     const winsBefore = await enumerateWindows();
     await clickHistoryDownload(shell, { trusted: true });
-    // 等 blob fetch + picker 開啟
+    // 等 blob fetch + picker 开启
     await sleep(6000);
     const diag = await shell.evaluate(() => ({ ...(window.__diag || {}) })).catch(() => null);
     const winsAfter = await enumerateWindows();
-    // 整屏截圖（Wayland）——證明原生對話框真的出現
+    // 整屏截图（Wayland）——证明原生对话框真的出现
     const fullPath = path.join(outDir, "W2a-real-dialog-fullscreen.png");
     let spectacle = { ok: false };
     try {
@@ -559,12 +559,12 @@ async function W2a() {
     const triggered = (diag && (diag.pickerCalls > 0 || (diag.anchorClicks || []).length > 0)) || false;
     return {
       status: triggered ? "pass" : "blocked",
-      title: "真殼內觸發卡片下載 → 原生對話框（整屏截圖）",
+      title: "真壳内触发卡片下载 → 原生对话框（整屏截图）",
       observations: {
         ...evidence,
         autoTriggerNote: triggered
-          ? "已觸發下載路徑。"
-          : "自動化無法在此版面觸發：卡片下載鈕為 hover-only 操作條，受控滑鼠點擊落點 elementFromPoint=容器 DIV（非按鈕），picker/anchor 皆未觸發 ⇒ 此子項為自動化限制，非產品缺陷（真 API 對話框見 W2api）。",
+          ? "已触发下载路径。"
+          : "自动化无法在此版面触发：卡片下载钮为 hover-only 操作条，受控滑鼠点击落点 elementFromPoint=容器 DIV（非按钮），picker/anchor 皆未触发 ⇒ 此子项为自动化限制，非产品缺陷（真 API 对话框见 W2api）。",
       },
       artifacts: { pageScreenshot: pageShot, fullscreenScreenshot: evidence.fullscreenPath ? { path: evidence.fullscreenPath, size: evidence.fullscreenBytes } : null },
       _killNow: true,
@@ -572,12 +572,12 @@ async function W2a() {
   }, {});
 }
 
-/** W2b：saveBlobLocally 替身 → saved（單檔下載）。 */
+/** W2b：saveBlobLocally 替身 → saved（单档下载）。 */
 async function W2b() {
   return await withShell(async (shell) => {
     await gotoHistory(shell);
     if (!(await shell.page.locator(SEL.cardDownload).count())) {
-      return { status: "fail", observations: {}, error: "history 無可下載卡片" };
+      return { status: "fail", observations: {}, error: "history 无可下载卡片" };
     }
     await installPickerStub(shell, "save-ok");
     await installAnchorRecorder(shell);
@@ -595,26 +595,26 @@ async function W2b() {
       anchors.length === 0;
     return {
       status: saved ? "pass" : "fail",
-      title: "saveBlobLocally 替身：回 saved（picker 被呼叫、寫入 bytes、無 <a download>）",
+      title: "saveBlobLocally 替身：回 saved（picker 被呼叫、写入 bytes、无 <a download>）",
       observations: {
-        evidenceStrength: "替身（受控 picker，非真對話框）",
+        evidenceStrength: "替身（受控 picker，非真对话框）",
         savePickerCalls: calls,
         writes,
         anchorDownloads: anchors,
         expected: "saveCalls=1, writes=1(size>0), anchors=0",
       },
       artifacts: { screenshot: shot },
-      error: saved ? undefined : "替身鏈路未達預期",
+      error: saved ? undefined : "替身链路未达预期",
     };
   }, {});
 }
 
-/** W2b2：exportHistoryZip + showDirectoryPicker 替身 → 多檔直寫，回報 exported。 */
+/** W2b2：exportHistoryZip + showDirectoryPicker 替身 → 多档直写，回报 exported。 */
 async function W2b2() {
   return await withShell(async (shell) => {
     await gotoHistory(shell);
     const net = attachNet(shell);
-    // 抓每張有媒體卡片的實際 <img> 來源（診斷 bulk fetch 為何取不到）
+    // 抓每张有媒体卡片的实际 <img> 来源（诊断 bulk fetch 为何取不到）
     const cardSrcs = await shell.page.evaluate(() =>
       [...document.querySelectorAll('article.hist-card')]
         .map((c) => ({ hasDl: !!c.querySelector('button[aria-label="下载"]'), img: (c.querySelector("img") || {}).src || null }))
@@ -626,7 +626,7 @@ async function W2b2() {
       const out = { candidates: cards.length };
       return out;
     });
-    if (!selOk.candidates) return { status: "fail", observations: selOk, error: "無有媒體的卡可選" };
+    if (!selOk.candidates) return { status: "fail", observations: selOk, error: "无有媒体的卡可选" };
     await domClickText(shell, "多选");
     await sleep(800);
     const selected = await shell.page.evaluate(() => {
@@ -639,9 +639,9 @@ async function W2b2() {
       return { selected: n };
     });
     await sleep(800);
-    // 媒體取用替身：store.tinchak0207.xyz 對「無 ?dl=1 的跨域 GET」不回 CORS（net::ERR_FAILED），
-    // 單張下載因 fetchImageBlob 加 ?dl=1 才成功。此處以 route 注入帶 ACAO 的 1x1 PNG，
-    // 讓 exportHistoryZip 之後的**真** saveManyLocally 鏈路得以執行（媒體替身、鏈路本尊）。
+    // 媒体取用替身：store.tinchak0207.xyz 对「无 ?dl=1 的跨域 GET」不回 CORS（net::ERR_FAILED），
+    // 单张下载因 fetchImageBlob 加 ?dl=1 才成功。此处以 route 注入带 ACAO 的 1x1 PNG，
+    // 让 exportHistoryZip 之后的**真** saveManyLocally 链路得以执行（媒体替身、链路本尊）。
     const PNG1x1 = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
       "base64",
@@ -653,7 +653,7 @@ async function W2b2() {
     await installAnchorRecorder(shell);
     const tBulk = net.mark();
     await domClickText(shell, "打包下载");
-    // 等下載 blob（CDN fetch）完成 + notice
+    // 等下载 blob（CDN fetch）完成 + notice
     await shell.page.waitForFunction(
       () => [...document.querySelectorAll('[role="status"]')].some((e) => /已打包|取不到|都没有可下载/.test(e.innerText)),
       undefined,
@@ -676,12 +676,12 @@ async function W2b2() {
     const pass = dirCalls.length === 1 && writes.length === selected.selected + 1 && manifestWritten && anchors.length === 0 && exported === selected.selected;
     return {
       status: pass ? "pass" : "fail",
-      title: "exportHistoryZip + showDirectoryPicker 替身：多檔直寫、exported=可下載檔數",
+      title: "exportHistoryZip + showDirectoryPicker 替身：多档直写、exported=可下载档数",
       observations: {
-        evidenceStrength: "替身（受控 directory picker）＋ UI notice（exported 來自回傳值）",
+        evidenceStrength: "替身（受控 directory picker）＋ UI notice（exported 来自回传值）",
         mediaFetchStubbed: true,
         mediaFetchStubNote:
-          "store.tinchak0207.xyz 對無 ?dl=1 的跨域 GET 不回 CORS（單張下載加 ?dl=1 才成功）——此為真環境發現；此處以 route 注入 ACAO 圖檔讓匯出鏈路可跑。",
+          "store.tinchak0207.xyz 对无 ?dl=1 的跨域 GET 不回 CORS（单张下载加 ?dl=1 才成功）——此为真环境发现；此处以 route 注入 ACAO 图档让汇出链路可跑。",
         candidates: selOk.candidates,
         cardImgSrcs: cardSrcs,
         bulkFetchRequests: mediaReqs,
@@ -696,17 +696,17 @@ async function W2b2() {
         expected: `dirCalls=1, writes=${selected.selected + 1}(含 manifest.json), anchors=0, exported=${selected.selected}`,
       },
       artifacts: { screenshot: shot },
-      error: pass ? undefined : "多檔直寫鏈路未達預期",
+      error: pass ? undefined : "多档直写链路未达预期",
     };
   }, {});
 }
 
-/** W2c：刪除 picker → unsupported → 回落 <a download>（正確副檔名）。 */
+/** W2c：删除 picker → unsupported → 回落 <a download>（正确副档名）。 */
 async function W2c() {
   return await withShell(async (shell) => {
     await gotoHistory(shell);
     if (!(await shell.page.locator(SEL.cardDownload).count())) {
-      return { status: "fail", observations: {}, error: "history 無可下載卡片" };
+      return { status: "fail", observations: {}, error: "history 无可下载卡片" };
     }
     await removePickers(shell);
     await installAnchorRecorder(shell);
@@ -720,26 +720,26 @@ async function W2c() {
     const pass = st.savedPickers && st.savedPickers.save === "undefined" && st.savedPickers.dir === "undefined" && anchors.length === 1 && extOk;
     return {
       status: pass ? "pass" : "fail",
-      title: "無 picker → 回 unsupported → 確實走 <a download>（副檔名正確）",
+      title: "无 picker → 回 unsupported → 确实走 <a download>（副档名正确）",
       observations: {
-        evidenceStrength: "DOM 層擷取（anchor click recorder；非 CDP download 事件）",
+        evidenceStrength: "DOM 层撷取（anchor click recorder；非 CDP download 事件）",
         pickersAfterRemoval: st.savedPickers,
         anchorDownloads: anchors,
         resolvedExtensionOk: extOk,
-        expected: "save/dir=undefined, anchors=1, 副檔名為已知媒體型別",
+        expected: "save/dir=undefined, anchors=1, 副档名为已知媒体型别",
       },
       artifacts: { screenshot: shot },
-      error: pass ? undefined : "回落路徑未達預期（見 anchorDownloads）",
+      error: pass ? undefined : "回落路径未达预期（见 anchorDownloads）",
     };
   }, {});
 }
 
-/** W2d：替身拋 AbortError → cancelled，不重複下載。 */
+/** W2d：替身抛 AbortError → cancelled，不重复下载。 */
 async function W2d() {
   return await withShell(async (shell) => {
     await gotoHistory(shell);
     if (!(await shell.page.locator(SEL.cardDownload).count())) {
-      return { status: "fail", observations: {}, error: "history 無可下載卡片" };
+      return { status: "fail", observations: {}, error: "history 无可下载卡片" };
     }
     await installPickerStub(shell, "save-cancel");
     await installAnchorRecorder(shell);
@@ -753,22 +753,22 @@ async function W2d() {
     const pass = calls.length === 1 && writes.length === 0 && anchors.length === 0;
     return {
       status: pass ? "pass" : "fail",
-      title: "取消語義：picker 拋 AbortError → cancelled、不重複觸發下載",
+      title: "取消语义：picker 抛 AbortError → cancelled、不重复触发下载",
       observations: {
-        evidenceStrength: "替身（受控 picker 拋 AbortError）",
+        evidenceStrength: "替身（受控 picker 抛 AbortError）",
         savePickerCalls: calls.length,
         writes: writes.length,
         anchorDownloads: anchors.length,
         expected: "saveCalls=1, writes=0, anchors=0",
       },
       artifacts: { screenshot: shot },
-      error: pass ? undefined : "取消語義未達預期",
+      error: pass ? undefined : "取消语义未达预期",
     };
   }, {});
 }
 
-/** W2api：真實 API 呼叫（測試按鈕，非 app 路徑）——判定 Electron 是否支援
- *  File System Access 對話框，並以 xprop 視窗清單為獨立 oracle。 */
+/** W2api：真实 API 呼叫（测试按钮，非 app 路径）——判定 Electron 是否支援
+ *  File System Access 对话框，并以 xprop 视窗清单为独立 oracle。 */
 async function W2api() {
   return await withShell(async (shell) => {
     await gotoHome(shell);
@@ -804,20 +804,20 @@ async function W2api() {
       }, () => resolve()),
     ).catch(() => {});
     const pageShot = await shell.screenshot("W2api-real-dialog-page").catch(() => null);
-    const pass = !!test; // 有 settle 結果即測得；null = picker 仍 pending（對話框開著）
+    const pass = !!test; // 有 settle 结果即测得；null = picker 仍 pending（对话框开著）
     return {
       status: "pass",
-      title: "真 API 呼叫（測試按鈕）：判定 Electron File System Access 對話框行為",
+      title: "真 API 呼叫（测试按钮）：判定 Electron File System Access 对话框行为",
       observations: {
-        evidenceStrength: "真實 API 呼叫（測試按鈕，非 app 路徑）＋ xprop 視窗清單 oracle",
+        evidenceStrength: "真实 API 呼叫（测试按钮，非 app 路径）＋ xprop 视窗清单 oracle",
         pickerTest: test,
         pickerStillPending: test === null,
         newWindowsWhilePending: newWins,
         verdict: test
           ? test.settled === "resolved"
-            ? "showSaveFilePicker 可用並完成寫入（真對話框）"
-            : `showSaveFilePicker 失敗：${test.name} ${test.msg}`
-          : "呼叫後 4s 仍 pending ⇒ 原生對話框已開啟（等待使用者）",
+            ? "showSaveFilePicker 可用并完成写入（真对话框）"
+            : `showSaveFilePicker 失败：${test.name} ${test.msg}`
+          : "呼叫后 4s 仍 pending ⇒ 原生对话框已开启（等待使用者）",
         fullscreenShot: fs.existsSync(fullPath) ? { path: fullPath, size: fs.statSync(fullPath).size } : null,
       },
       artifacts: { pageScreenshot: pageShot, fullscreenScreenshot: fs.existsSync(fullPath) ? { path: fullPath, size: fs.statSync(fullPath).size } : null },
@@ -828,9 +828,9 @@ async function W2api() {
 
 // ────────────────────────── W0 案例 ──────────────────────────
 
-/** 掛上畫布：攔截 agent 訊息/生成端點（零付費上游），點模板卡鋪畫布。 */
+/** 挂上画布：拦截 agent 讯息/生成端点（零付费上游），点模板卡铺画布。 */
 async function mountCanvas(shell) {
-  // 安全網：即便模板注入真的自動 send，也永遠打在本地（不外呼上游）。
+  // 安全网：即便模板注入真的自动 send，也永远打在本地（不外呼上游）。
   await shell.page.route("**/api/agent/sessions**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: { id: "e2e-blocked" } }) }),
   );
@@ -843,10 +843,10 @@ async function mountCanvas(shell) {
   return true;
 }
 
-/** 在畫布空白處雙擊開「新建節點」選單，回傳是否出現 3D file input。 */
+/** 在画布空白处双击开「新建节点」选单，回传是否出现 3D file input。 */
 async function openCreateMenu(shell) {
   const box = await shell.page.locator(".ce-embed-root").boundingBox();
-  if (!box) throw new Error("無畫布 bounding box");
+  if (!box) throw new Error("无画布 bounding box");
   const points = [
     [box.x + 50, box.y + 50],
     [box.x + Math.min(160, box.width / 4), box.y + 70],
@@ -863,9 +863,9 @@ async function openCreateMenu(shell) {
 }
 
 /**
- * W0b：假 sign/PUT/commit（route 攔截）驗證直傳客戶端機械鏈路。
- * 生產 sign 對 model/gltf-binary 回 415（見 probe-sign），故此處用替身端點，
- * 明確標示為「客戶端鏈路驗證（假後端）」。
+ * W0b：假 sign/PUT/commit（route 拦截）验证直传客户端机械链路。
+ * 生产 sign 对 model/gltf-binary 回 415（见 probe-sign），故此处用替身端点，
+ * 明确标示为「客户端链路验证（假后端）」。
  */
 async function W0b() {
   const big = makeGlb(5 * 1024 * 1024, { name: "e2e-big-model.glb" });
@@ -907,7 +907,7 @@ async function W0b() {
     const mounted = await mountCanvas(shell);
     const menuOpen = await openCreateMenu(shell);
     if (!menuOpen) {
-      return { status: "fail", observations: { mounted, menuOpen, calls }, error: "無法開啟建節點選單（3D input 未出現）" };
+      return { status: "fail", observations: { mounted, menuOpen, calls }, error: "无法开启建节点选单（3D input 未出现）" };
     }
     const t0 = net.mark();
     let firstAlert = null;
@@ -937,9 +937,9 @@ async function W0b() {
       nodeCreated;
     return {
       status: seqOk ? "pass" : "fail",
-      title: "W0 直傳客戶端鏈路（假 sign/PUT/commit 後端）：sign→PUT→commit、不走 scene-3d、建出節點",
+      title: "W0 直传客户端链路（假 sign/PUT/commit 后端）：sign→PUT→commit、不走 scene-3d、建出节点",
       observations: {
-        evidenceStrength: "客戶端鏈路（假後端 route 攔截）——非真後端；真後端對 glb 回 415（見 probe-sign）",
+        evidenceStrength: "客户端链路（假后端 route 拦截）——非真后端；真后端对 glb 回 415（见 probe-sign）",
         mounted,
         menuOpen,
         setFileInputMethod: setHow,
@@ -954,26 +954,26 @@ async function W0b() {
         alerts,
         rootCause:
           firstAlert && /Illegal invocation/i.test(firstAlert)
-            ? "direct-upload-client.ts 以物件屬性呼叫原生 fetch（input.fetchFn(...) 及裸 fetchFn(...)）丟失 this 綁定 → 'Illegal invocation'；在任何上傳請求前即失敗。"
+            ? "direct-upload-client.ts 以物件属性呼叫原生 fetch（input.fetchFn(...) 及裸 fetchFn(...)）丢失 this 绑定 → 'Illegal invocation'；在任何上传请求前即失败。"
             : null,
       },
       artifacts: { screenshot: shot },
-      error: seqOk ? undefined : "直傳客戶端鏈路未達預期",
+      error: seqOk ? undefined : "直传客户端链路未达预期",
       cleanupFiles: [big],
     };
   }, {});
 }
 
-/** W0c：形狀/魔數負向——假 glb（頭非 glTF）、0 byte → 人話錯誤、不發任何上傳請求。 */
+/** W0c：形状/魔数负向——假 glb（头非 glTF）、0 byte → 人话错误、不发任何上传请求。 */
 async function W0c() {
   const bad = makeGlb(5 * 1024 * 1024, { valid: false, name: "e2e-bad-magic.glb" });
   const empty = makeEmptyGlb("e2e-empty.glb");
   return await withShell(async (shell) => {
     const net = attachNet(shell);
     const mounted = await mountCanvas(shell);
-    const out = { mounted, evidenceStrength: "真環境 + 真前端驗證（無任何上傳請求）", cases: [] };
+    const out = { mounted, evidenceStrength: "真环境 + 真前端验证（无任何上传请求）", cases: [] };
 
-    // 假魔數 5MB
+    // 假魔数 5MB
     if (await openCreateMenu(shell)) {
       const t0 = net.mark();
       await setFileInput(shell, 'input[accept=".glb,.gltf"]', bad);
@@ -1002,25 +1002,25 @@ async function W0c() {
     const pass = out.cases.length === 2 && out.cases.every((c) => c.pass);
     return {
       status: pass ? "pass" : "fail",
-      title: "W0 負向：假 GLB 魔數 / 0 byte → 人話錯誤、零上傳請求",
+      title: "W0 负向：假 GLB 魔数 / 0 byte → 人话错误、零上传请求",
       observations: out,
       artifacts: { screenshot: shot },
-      error: pass ? undefined : "負向驗證未達預期",
+      error: pass ? undefined : "负向验证未达预期",
       cleanupFiles: [bad, empty],
     };
   }, {});
 }
 
-/** 真後端 sign 探針（W0 真實可達性的權威證據）。 */
+/** 真后端 sign 探针（W0 真实可达性的权威证据）。 */
 async function W0real() {
   return await withShell(async (shell) => {
     const mounted = await mountCanvas(shell).catch(() => false);
-    if (!mounted) return { status: "fail", observations: {}, error: "畫布未掛起" };
+    if (!mounted) return { status: "fail", observations: {}, error: "画布未挂起" };
     const menuOpen = await openCreateMenu(shell);
-    if (!menuOpen) return { status: "fail", observations: { mounted }, error: "無法開啟建節點選單" };
+    if (!menuOpen) return { status: "fail", observations: { mounted }, error: "无法开启建节点选单" };
     const big = makeGlb(5 * 1024 * 1024, { name: "e2e-real-big.glb" });
     const net = attachNet(shell);
-    // 全 console（含 warn）與 import 路徑診斷
+    // 全 console（含 warn）与 import 路径诊断
     const consoleAll = [];
     shell.page.on("console", (m) => consoleAll.push({ type: m.type(), text: m.text().slice(0, 200) }));
     const inputInfo = await shell.page.evaluate(() => {
@@ -1031,7 +1031,7 @@ async function W0real() {
       };
     });
     const t0 = net.mark();
-    // showError 的提示 6s 後自動消失 → 輪詢捕捉第一個 alert。
+    // showError 的提示 6s 后自动消失 → 轮询捕捉第一个 alert。
     let firstAlert = null;
     const poll = (async () => {
       for (let i = 0; i < 30; i++) {
@@ -1062,10 +1062,10 @@ async function W0real() {
     const shot = await shell.screenshot("W0real-production-sign");
     const signStatus = sign[0] ? sign[0].status : null;
     return {
-      status: "pass", // 這是「如實量測真的後端行為」，不算失敗
-      title: "W0 真實後端：>4MB .glb 走直傳 → 觀測 sign 真實回應",
+      status: "pass", // 这是「如实量测真的后端行为」，不算失败
+      title: "W0 真实后端：>4MB .glb 走直传 → 观测 sign 真实回应",
       observations: {
-        evidenceStrength: "真後端（生產 /api/uploads/sign，真 auth）",
+        evidenceStrength: "真后端（生产 /api/uploads/sign，真 auth）",
         inputInfo,
         setFileInputMethod: setHow,
         firstAlert,
@@ -1078,7 +1078,7 @@ async function W0real() {
         networkCommit: commit,
         networkScene3d: scene3d,
         nodeCreated,
-        verdict: signStatus === 200 ? "直傳可用" : `直傳不可用（sign HTTP ${signStatus}）：大檔 .glb 被後端拒收`,
+        verdict: signStatus === 200 ? "直传可用" : `直传不可用（sign HTTP ${signStatus}）：大档 .glb 被后端拒收`,
       },
       artifacts: { screenshot: shot },
       cleanupFiles: [big],
@@ -1086,9 +1086,9 @@ async function W0real() {
   }, {});
 }
 
-// ────────────────────────── 額度三態 ──────────────────────────
+// ────────────────────────── 额度三态 ──────────────────────────
 
-/** 讀余额 aria-label。 */
+/** 读余额 aria-label。 */
 async function readQuotaAria(shell) {
   return await shell.evaluate(() => {
     const el = document.querySelector('[aria-label^="余额 "]');
@@ -1107,26 +1107,26 @@ async function Qa() {
     const ok = !!aria && /币/.test(aria) && !/暂不可用/.test(aria);
     return {
       status: ok ? "pass" : "fail",
-      title: "額度正常態：显示 N 币（authoritative）",
-      observations: { evidenceStrength: "真環境元件層（WalletBadge 實際渲染）", quotaAria: aria, navHead: body },
+      title: "额度正常态：显示 N 币（authoritative）",
+      observations: { evidenceStrength: "真环境元件层（WalletBadge 实际渲染）", quotaAria: aria, navHead: body },
       artifacts: { screenshot: shot },
-      error: ok ? undefined : "未見 N 币",
+      error: ok ? undefined : "未见 N 币",
     };
   }, {});
 }
 
-/** Qb：攔截真實額度來源 /api/auth/me（quota 非有限）→ 顯示「暂不可用」且無「0 币」。 */
+/** Qb：拦截真实额度来源 /api/auth/me（quota 非有限）→ 显示「暂不可用」且无「0 币」。 */
 async function Qb() {
   return await withShell(async (shell) => {
     let meHits = 0;
     let meShape = null;
-    // 於每次導航前把本地快照的 quota 清成 null，避免 lastGoodQuota 讓它變 estimated。
+    // 于每次导航前把本地快照的 quota 清成 null，避免 lastGoodQuota 让它变 estimated。
     await shell.page.addInitScript(() => {
       try {
         const strip = (u) => { if (u && typeof u === "object") u.quota = null; return u; };
         const u = JSON.parse(localStorage.getItem("napi_user") || "null");
         if (u && typeof u === "object") { strip(u); localStorage.setItem("napi_user", JSON.stringify(u)); }
-        // cookie 是 getStoredUser 的優先來源，必須一起降級（否則會被自愈回寫覆蓋）。
+        // cookie 是 getStoredUser 的优先来源，必须一起降级（否则会被自愈回写覆盖）。
         const m = document.cookie.match(/(?:^|;\s*)napi_user=([^;]+)/);
         if (m) {
           const cu = strip(JSON.parse(decodeURIComponent(m[1])));
@@ -1134,15 +1134,15 @@ async function Qb() {
         }
       } catch {}
     });
-    // 攔截真實額度來源：回應的 user 拿掉有限 quota（明寫 body，避免 response+json 衝突）。
+    // 拦截真实额度来源：回应的 user 拿掉有限 quota（明写 body，避免 response+json 冲突）。
     await shell.page.route("**/api/auth/me", async (route) => {
       meHits += 1;
       try {
         const resp = await route.fetch();
         const j = await resp.json();
-        // 診斷：只記形狀（鍵名），不記任何值。
+        // 诊断：只记形状（键名），不记任何值。
         meShape = { top: Object.keys(j || {}), dataKeys: j && j.data ? Object.keys(j.data) : null, userKeys: j && j.user ? Object.keys(j.user) : null };
-        // 遞迴把所有名為 quota 的欄位清成 null（不限形狀）。
+        // 递回把所有名为 quota 的栏位清成 null（不限形状）。
         const nullify = (o) => {
           if (!o || typeof o !== "object") return;
           if ("quota" in o) o.quota = null;
@@ -1172,10 +1172,10 @@ async function Qb() {
     const ok = !!aria && /暂不可用/.test(aria) && !hasZeroCoin;
     return {
       status: ok ? "pass" : "fail",
-      title: "額度不可用態：显示「暂不可用」、畫面不得出現「0 币」",
+      title: "额度不可用态：显示「暂不可用」、画面不得出现「0 币」",
       observations: {
-        evidenceStrength: "真環境 request interception（攔截真實額度來源 /api/auth/me）＋本地快照降級",
-        note: "WalletBadge 的額度來源是 useAuth 的 /api/auth/me（非 /v1/quota）；故攔截 /api/auth/me 而非 /v1/quota。",
+        evidenceStrength: "真环境 request interception（拦截真实额度来源 /api/auth/me）＋本地快照降级",
+        note: "WalletBadge 的额度来源是 useAuth 的 /api/auth/me（非 /v1/quota）；故拦截 /api/auth/me 而非 /v1/quota。",
         interceptedMeRequests: meHits,
         meShape,
         storedUserQuotaAfter: storedQuota,
@@ -1184,7 +1184,7 @@ async function Qb() {
         navHead: body,
       },
       artifacts: { screenshot: shot },
-      error: ok ? undefined : "未顯示暂不可用或出現 0 币",
+      error: ok ? undefined : "未显示暂不可用或出现 0 币",
     };
   }, {});
 }
@@ -1216,7 +1216,7 @@ async function main() {
   for (const name of names) {
     try {
       const r = await CASES[name]();
-      // 清理該案產生的素材
+      // 清理该案产生的素材
       if (r && r.cleanupFiles) for (const f of r.cleanupFiles) { try { fs.rmSync(f, { force: true }); } catch {} }
       const { cleanupFiles, ...rest } = r || {};
       saveCase(name, rest);

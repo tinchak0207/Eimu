@@ -1,22 +1,22 @@
-// 詞級時間軸（ASR）client——照 Hypit 的 transcribe 鏈形狀落地。
+// 词级时间轴（ASR）client——照 Hypit 的 transcribe 链形状落地。
 //
-// 契約（2026-09-28）：
-//   ① 客戶端只做兩件事：抽出 **16 kHz mono PCM s16 WAV**（canonical 輸入不重抽），
-//      再把那個 staging 路徑交給 **loopback 的本機 ASR 服務**（services/asr/，
-//      protocol eimu.asr-service@1）。客戶端不跑模型、不碰上游、零付費。
-//   ② 服務回應把「秒」降一次到 16 kHz 樣本邊界，這裡再換回秒輸出；
-//      缺時間保持缺（undefined），**不編造 tick**。
-//   ③ `language` 不接受 auto/und：服務只收具體語言碼。呼叫端給 `auto` 時，本檔
-//      先用啟發式（假名 > max(漢字, ASCII/4) → ja；漢字 > ASCII/4 → zh；否則 en）
-//      解析成具體語言並寫進 warnings。這是對 Hypit 的合法擴充（它上層要求呼叫端
-//      自己先把 auto 解析掉），在此明寫。
+// 契约（2026-09-28）：
+//   ① 客户端只做两件事：抽出 **16 kHz mono PCM s16 WAV**（canonical 输入不重抽），
+//      再把那个 staging 路径交给 **loopback 的本机 ASR 服务**（services/asr/，
+//      protocol eimu.asr-service@1）。客户端不跑模型、不碰上游、零付费。
+//   ② 服务回应把「秒」降一次到 16 kHz 样本边界，这里再换回秒输出；
+//      缺时间保持缺（undefined），**不编造 tick**。
+//   ③ `language` 不接受 auto/und：服务只收具体语言码。呼叫端给 `auto` 时，本档
+//      先用启发式（假名 > max(汉字, ASCII/4) → ja；汉字 > ASCII/4 → zh；否则 en）
+//      解析成具体语言并写进 warnings。这是对 Hypit 的合法扩充（它上层要求呼叫端
+//      自己先把 auto 解析掉），在此明写。
 //
-// 失敗一律 ok:false ＋ 誠實 code：
+// 失败一律 ok:false ＋ 诚实 code：
 //   asr_unavailable / asr_failed / no_speech / too_long / invalid_language / not_16k_mono_wav
-//   / no_audio（來源根本沒有音軌——AI 生成片常見；ffprobe 實測，不是 ASR 故障。
-//     與 video-analyze 層 probeMedia 的 no_audio 同名同義，跨層一致）
-// `probed` 放「探測過但不可用」的通道。零付費鐵律：任何付費 ASR 通道都不會被試打
-// （見 repo AGENTS.md「付費上游呼叫硬閘」）。
+//   / no_audio（来源根本没有音轨——AI 生成片常见；ffprobe 实测，不是 ASR 故障。
+//     与 video-analyze 层 probeMedia 的 no_audio 同名同义，跨层一致）
+// `probed` 放「探测过但不可用」的通道。零付费铁律：任何付费 ASR 通道都不会被试打
+// （见 repo AGENTS.md「付费上游呼叫硬闸」）。
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
@@ -26,7 +26,7 @@ import { dirname, join } from "node:path"
 
 import { downloadImage } from "./img-composite"
 
-// ─────────────────────────────────────────── 契約型別
+// ─────────────────────────────────────────── 契约型别
 
 export interface TranscriptWord {
   text: string
@@ -64,7 +64,7 @@ export interface TranscribeOptions {
   signal?: AbortSignal
 }
 
-// ─────────────────────────────────────────── 常數（照抄 Hypit 的口徑）
+// ─────────────────────────────────────────── 常数（照抄 Hypit 的口径）
 
 const BIN_DIR = "/opt/agent-harness/bin"
 const FFMPEG = process.env.FFMPEG_PATH || (existsSync(join(BIN_DIR, "ffmpeg")) ? join(BIN_DIR, "ffmpeg") : "ffmpeg")
@@ -84,8 +84,8 @@ const DEFAULT_SERVICE_URL = process.env.EIMU_ASR_URL || "http://127.0.0.1:8766"
 const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
 const PREPARE_HINT =
-  "本機 ASR 服務未就緒。先跑 services/asr/prepare.sh（建 venv＋下載模型），" +
-  "再啟動 services/asr/venv/bin/eimu-asr-service（預設 http://127.0.0.1:8766）。"
+  "本机 ASR 服务未就绪。先跑 services/asr/prepare.sh（建 venv＋下载模型），" +
+  "再启动 services/asr/venv/bin/eimu-asr-service（预设 http://127.0.0.1:8766）。"
 
 function expectedIdentity(): Record<string, unknown> {
   return {
@@ -109,12 +109,12 @@ function errMsg(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Hypit `round`: 3 位小數。 */
+/** Hypit `round`: 3 位小数。 */
 function round(value: number): number {
   return Number(value.toFixed(3))
 }
 
-/** Hypit `WhisperX language` 驗證：具體小寫 2-3 字母語言碼，不接受 auto/und。 */
+/** Hypit `WhisperX language` 验证：具体小写 2-3 字母语言码，不接受 auto/und。 */
 function parseLanguage(value: unknown, subject = "language"): string {
   if (typeof value !== "string" || !/^[a-z]{2,3}$/u.test(value) || value === "und") {
     throw new Error(
@@ -125,7 +125,7 @@ function parseLanguage(value: unknown, subject = "language"): string {
   return value
 }
 
-/** 對 auto 的合法擴充：依假名/漢字/ASCII 比例判 ja/zh/en（Hypit 上層同款比例法）。 */
+/** 对 auto 的合法扩充：依假名/汉字/ASCII 比例判 ja/zh/en（Hypit 上层同款比例法）。 */
 export function detectLanguageFromText(text: string): "ja" | "zh" | "en" {
   let kana = 0
   let han = 0
@@ -154,7 +154,7 @@ function run(exe: string, args: string[], timeoutMs: number, signal?: AbortSigna
     let stderr = ""
     const timer = setTimeout(() => {
       child.kill("SIGKILL")
-      reject(new Error(`${exe} 逾時 ${timeoutMs}ms`))
+      reject(new Error(`${exe} 逾时 ${timeoutMs}ms`))
     }, timeoutMs)
     child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")))
     child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")))
@@ -212,7 +212,7 @@ function canonicalEvidence(shape: WavShape | undefined): shape is WavShape {
     && shape.sampleRate === EVIDENCE_SAMPLE_RATE && shape.bits === 16
 }
 
-// ─────────────────────────────────────────── 服務回應 → passages（照抄 Hypit whisperx/transcript.ts）
+// ─────────────────────────────────────────── 服务回应 → passages（照抄 Hypit whisperx/transcript.ts）
 
 type RawWord = { readonly text?: unknown; readonly word?: unknown; readonly start?: unknown; readonly end?: unknown; readonly score?: unknown }
 type RawSegment = { readonly start?: unknown; readonly end?: unknown; readonly words?: unknown }
@@ -317,7 +317,7 @@ function passagesInSeconds(passages: SamplePassage[]): TranscriptPassage[] {
   })
 }
 
-// ─────────────────────────────────────────── 本機服務呼叫
+// ─────────────────────────────────────────── 本机服务呼叫
 
 interface ServiceIdentity {
   provider: string
@@ -353,7 +353,7 @@ async function verifyService(baseUrl: URL, probed: string[]): Promise<{ identity
     health = await fetch(`${baseUrl.href.replace(/\/+$/u, "")}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
   } catch (error) {
     probed.push(`local ${baseUrl.origin}/health → ${errMsg(error)}`)
-    return { error: `${PREPARE_HINT}（/health 不可達：${errMsg(error)}）` }
+    return { error: `${PREPARE_HINT}（/health 不可达：${errMsg(error)}）` }
   }
   let value: Record<string, unknown>
   try {
@@ -368,9 +368,9 @@ async function verifyService(baseUrl: URL, probed: string[]): Promise<{ identity
     probed.push(`local ${baseUrl.origin} 身分不符：${mismatch.map((key) => `${key}=${JSON.stringify(value[key])}≠${JSON.stringify(expected[key])}`).join(", ")}`)
     return {
       error:
-        "本機 ASR 服務身分與設定不符：must configure the same model, device, compute, batch size, " +
+        "本机 ASR 服务身分与设定不符：must configure the same model, device, compute, batch size, " +
         "service version and faster-whisper version. A mismatch fails before transcription results are accepted." +
-        `（不符欄位：${mismatch.join(", ")}）`,
+        `（不符栏位：${mismatch.join(", ")}）`,
     }
   }
   return { identity: { provider: `local:${baseUrl.origin}`, model: String(value.model) } }
@@ -429,7 +429,7 @@ async function callService(
 
 function mapServiceError(status: number, code: string | undefined, message: string): { code: string; reason: string } {
   if (status === 503 && code === "RESOURCE_NOT_PREPARED") return { code: "asr_unavailable", reason: `${message}｜${PREPARE_HINT}` }
-  if (status === 503 && code === "BUSY") return { code: "asr_failed", reason: `服務忙線（503 BUSY）：${message}` }
+  if (status === 503 && code === "BUSY") return { code: "asr_failed", reason: `服务忙线（503 BUSY）：${message}` }
   if (message.includes("16 kHz mono PCM s16 WAV")) return { code: "not_16k_mono_wav", reason: message }
   if (status === 503) return { code: "asr_unavailable", reason: `${message}｜${PREPARE_HINT}` }
   return { code: "asr_failed", reason: `${code ?? `http_${status}`}: ${message}` }
@@ -439,22 +439,22 @@ function mapServiceError(status: number, code: string | undefined, message: stri
 
 async function materialize(src: string, workdir: string, signal?: AbortSignal): Promise<Uint8Array> {
   if (/^https?:\/\//iu.test(src)) {
-    // 既有輪子：lib/img-composite.ts 的 downloadImage（單一 25MB 上限、60s 逾時）。
+    // 既有轮子：lib/img-composite.ts 的 downloadImage（单一 25MB 上限、60s 逾时）。
     const buffer = await downloadImage(src, signal)
     await writeFile(join(workdir, "source"), buffer)
     return new Uint8Array(buffer)
   }
-  if (!src.startsWith("/")) throw new Error("src 必須是絕對路徑或 http(s) URL")
-  if (!existsSync(src)) throw new Error(`來源檔案不存在: ${src}`)
+  if (!src.startsWith("/")) throw new Error("src 必须是绝对路径或 http(s) URL")
+  if (!existsSync(src)) throw new Error(`来源档案不存在: ${src}`)
   return new Uint8Array(await readFile(src))
 }
 
 /**
- * 來源有沒有音軌（ffprobe 實測）。回 null＝探不了（ffprobe 缺席／逾時／讀不了檔）；
- * 探不了時不改既有行為（照舊抽音，失敗再回 asr_failed），不把不確定當成「沒有」。
+ * 来源有没有音轨（ffprobe 实测）。回 null＝探不了（ffprobe 缺席／逾时／读不了档）；
+ * 探不了时不改既有行为（照旧抽音，失败再回 asr_failed），不把不确定当成「没有」。
  *
- * 為什麼需要：AI 生成片常整片無音軌，ffmpeg 抽音會以退出碼 234 回「Invalid argument」，
- * 舊行為把這串原始訊息當 asr_failed 往上丟——呼叫端看到的是故障語言，事實是「本片沒有語音」。
+ * 为什么需要：AI 生成片常整片无音轨，ffmpeg 抽音会以退出码 234 回「Invalid argument」，
+ * 旧行为把这串原始讯息当 asr_failed 往上丢——呼叫端看到的是故障语言，事实是「本片没有语音」。
  */
 async function hasAudioTrack(input: string, signal?: AbortSignal): Promise<boolean | null> {
   try {
@@ -475,7 +475,7 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
   const requested = opts.language
 
   if (typeof src !== "string" || src.length === 0) {
-    return { ok: false, code: "asr_failed", reason: "src 必須是本機絕對路徑或 http(s) URL", probed, warnings }
+    return { ok: false, code: "asr_failed", reason: "src 必须是本机绝对路径或 http(s) URL", probed, warnings }
   }
   if (requested !== "auto") {
     try {
@@ -496,7 +496,7 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
 
     workdir = await mkdtemp(join(tmpdir(), "eimu-transcribe-"))
 
-    // ① 取來源 bytes（URL 走既有輪子）。
+    // ① 取来源 bytes（URL 走既有轮子）。
     let sourceBytes: Uint8Array
     try {
       sourceBytes = await materialize(src, workdir, opts.signal)
@@ -504,20 +504,20 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
       return { ok: false, source: src, code: "asr_failed", reason: errMsg(error), probed, warnings }
     }
 
-    // ② canonical 輸入不重抽；否則逐字照 Hypit 的 ffmpeg 口徑抽 16k mono PCM s16。
+    // ② canonical 输入不重抽；否则逐字照 Hypit 的 ffmpeg 口径抽 16k mono PCM s16。
     const shape = wavShape(sourceBytes)
     let evidenceBytes: Uint8Array
     if (canonicalEvidence(shape)) {
       evidenceBytes = sourceBytes
     } else {
       const target = join(workdir, "speech.wav")
-      // 抽音前先探音軌：沒有音軌＝本片沒有可轉寫的語音（具名），不是 ASR 故障。
+      // 抽音前先探音轨：没有音轨＝本片没有可转写的语音（具名），不是 ASR 故障。
       const input = existsSync(src) && !/^https?:\/\//iu.test(src) ? src : join(workdir, "source")
       if ((await hasAudioTrack(input, opts.signal)) === false) {
         return {
           ok: false, source: src, code: "no_audio",
-          reason: "來源沒有任何音軌（AI 生成片常見）：本片沒有可轉寫的語音，不是 ASR 故障。"
-            + "（ffprobe 實測無 audio stream；未呼叫本機 ASR、未跑 ffmpeg 抽音）",
+          reason: "来源没有任何音轨（AI 生成片常见）：本片没有可转写的语音，不是 ASR 故障。"
+            + "（ffprobe 实测无 audio stream；未呼叫本机 ASR、未跑 ffmpeg 抽音）",
           probed, warnings,
         }
       }
@@ -528,12 +528,12 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
           "-map", "0:a:0", "-vn", "-ac", "1", "-ar", String(EVIDENCE_SAMPLE_RATE), "-c:a", "pcm_s16le", "-bitexact", target,
         ], FFMPEG_TIMEOUT_MS, opts.signal)
       } catch (error) {
-        return { ok: false, source: src, code: "asr_failed", reason: `ffmpeg 執行失敗: ${errMsg(error)}`, probed, warnings }
+        return { ok: false, source: src, code: "asr_failed", reason: `ffmpeg 执行失败: ${errMsg(error)}`, probed, warnings }
       }
       if (ffmpeg.code !== 0 || !existsSync(target)) {
         return {
           ok: false, source: src, code: "asr_failed",
-          reason: `ffmpeg 抽音失敗（退出碼 ${ffmpeg.code}）: ${(ffmpeg.stderr.trim().split("\n").pop() ?? "").slice(0, 300)}`,
+          reason: `ffmpeg 抽音失败（退出码 ${ffmpeg.code}）: ${(ffmpeg.stderr.trim().split("\n").pop() ?? "").slice(0, 300)}`,
           probed, warnings,
         }
       }
@@ -546,21 +546,21 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
     const shapeOfEvidence = wavShape(evidenceBytes)
     const sampleFrames = shapeOfEvidence === undefined ? 0 : shapeOfEvidence.dataBytes / 2
     if (sampleFrames <= 0) {
-      return { ok: false, source: src, code: "not_16k_mono_wav", reason: "音訊沒有樣本框（sample frames ≤ 0）", probed, warnings }
+      return { ok: false, source: src, code: "not_16k_mono_wav", reason: "音讯没有样本框（sample frames ≤ 0）", probed, warnings }
     }
     const audioSeconds = round(sampleFrames / EVIDENCE_SAMPLE_RATE)
     if (typeof opts.max_seconds === "number" && Number.isFinite(opts.max_seconds) && audioSeconds > opts.max_seconds) {
       return {
         ok: false, source: src, language: requested === "auto" ? undefined : requested, audio_seconds: audioSeconds,
-        code: "too_long", reason: `音訊長度 ${audioSeconds}s 超過 max_seconds=${opts.max_seconds}s，已拒絕（未截斷）`, probed, warnings,
+        code: "too_long", reason: `音讯长度 ${audioSeconds}s 超过 max_seconds=${opts.max_seconds}s，已拒绝（未截断）`, probed, warnings,
       }
     }
 
-    // ③ 落地進 staging（服務只讀它 INPUT_ROOTS 內的檔案）。
+    // ③ 落地进 staging（服务只读它 INPUT_ROOTS 内的档案）。
     const staged = join(workdir, "audio.wav")
     await writeFile(staged, evidenceBytes)
 
-    // ④ 先驗服務身分，再送請求。
+    // ④ 先验服务身分，再送请求。
     const verified = await verifyService(baseUrl, probed)
     if ("error" in verified) {
       return { ok: false, source: src, language: requested === "auto" ? undefined : requested, audio_seconds: audioSeconds, code: "asr_unavailable", reason: verified.error, probed, warnings }
@@ -573,7 +573,7 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
       if (!probe.ok) {
         if (probe.networkError) {
           probed.push(`local ${baseUrl.origin}/transcribe → ${probe.networkError}`)
-          return { ok: false, source: src, audio_seconds: audioSeconds, code: "asr_unavailable", reason: `${PREPARE_HINT}（/transcribe 不可達：${probe.networkError}）`, probed, warnings }
+          return { ok: false, source: src, audio_seconds: audioSeconds, code: "asr_unavailable", reason: `${PREPARE_HINT}（/transcribe 不可达：${probe.networkError}）`, probed, warnings }
         }
         const mapped = mapServiceError(probe.status, probe.code, probe.message ?? "")
         return { ok: false, source: src, audio_seconds: audioSeconds, code: mapped.code, reason: mapped.reason, probed, warnings }
@@ -583,7 +583,7 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
         .flatMap((segment) => ((segment.words as Array<Record<string, unknown>> | undefined) ?? []))
         .map((word) => String(word.text ?? "")).join(" ")
       const resolved = detectLanguageFromText(text)
-      warnings.push(`auto 已解析為 ${resolved}（啟發式：假名 > max(漢字, ASCII/4) → ja；漢字 > ASCII/4 → zh；否則 en）；服務自檢語言=${detected ?? "?"}`)
+      warnings.push(`auto 已解析为 ${resolved}（启发式：假名 > max(汉字, ASCII/4) → ja；汉字 > ASCII/4 → zh；否则 en）；服务自检语言=${detected ?? "?"}`)
       if (resolved === detected) {
         language = resolved
         call = probe
@@ -599,13 +599,13 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
     if (!call.ok) {
       if (call.networkError) {
         probed.push(`local ${baseUrl.origin}/transcribe → ${call.networkError}`)
-        return { ok: false, source: src, language, audio_seconds: audioSeconds, code: "asr_unavailable", reason: `${PREPARE_HINT}（/transcribe 不可達：${call.networkError}）`, probed, warnings }
+        return { ok: false, source: src, language, audio_seconds: audioSeconds, code: "asr_unavailable", reason: `${PREPARE_HINT}（/transcribe 不可达：${call.networkError}）`, probed, warnings }
       }
       const mapped = mapServiceError(call.status, call.code, call.message ?? "")
       return { ok: false, source: src, language, audio_seconds: audioSeconds, code: mapped.code, reason: mapped.reason, probed, warnings }
     }
 
-    // ⑤ 服務回應 → 秒級 passages（缺時間保持缺）。
+    // ⑤ 服务回应 → 秒级 passages（缺时间保持缺）。
     let passages: TranscriptPassage[]
     try {
       passages = passagesInSeconds(interpretResponse((call.payload ?? {}) as { language?: unknown; segments?: unknown; words?: unknown }, sampleFrames))
@@ -618,7 +618,7 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
       return {
         ok: false, format: TRANSCRIPT_FORMAT, source: src, language: serviceLanguage, audio_seconds: audioSeconds,
         passages, provider: verified.identity.provider, model: verified.identity.model, word_count: 0,
-        code: "no_speech", reason: `音訊 ${audioSeconds}s 未辨識出任何詞（可能無人聲或為純音樂）`, probed, warnings,
+        code: "no_speech", reason: `音讯 ${audioSeconds}s 未辨识出任何词（可能无人声或为纯音乐）`, probed, warnings,
       }
     }
 
@@ -648,7 +648,7 @@ export async function transcribe(src: string, opts: TranscribeOptions): Promise<
 /** Write the seconds-based `eimu.transcript@1` file. Refuses an existing destination. */
 export async function writeTranscriptFile(result: TranscriptResult, target: string): Promise<void> {
   assert(result.ok && result.format === TRANSCRIPT_FORMAT && Array.isArray(result.passages),
-    "writeTranscriptFile 需要一個成功的 eimu.transcript@1 結果")
+    "writeTranscriptFile 需要一个成功的 eimu.transcript@1 结果")
   const file = {
     format: TRANSCRIPT_FORMAT,
     source: result.source,

@@ -1,17 +1,17 @@
 "use client";
 
-// CanvasImageEditorDialog —— 畫布圖片編輯全家桶（裁剪 / 切图 / 抠除 / 旋转 / 角度）。
+// CanvasImageEditorDialog —— 画布图片编辑全家桶（裁剪 / 切图 / 抠除 / 旋转 / 角度）。
 //
-// 立場：非破壞性。像素類操作輸出新圖（PNG dataURL），由宿主決定怎麼落畫布
-// （作為子節點插回並連線），原節點永遠不動。生成類操作（角度重繪、抠除的
-// AI 重绘）不產出像素，改走 onRequestAngleGenerate / onRequestInpaint 回調，
-// 由宿主的生成鏈路接手——UI 誠實標註這是 AI 重繪，不假裝本地變換。
+// 立场：非破坏性。像素类操作输出新图（PNG dataURL），由宿主决定怎么落画布
+// （作为子节点插回并连线），原节点永远不动。生成类操作（角度重绘、抠除的
+// AI 重绘）不产出像素，改走 onRequestAngleGenerate / onRequestInpaint 回调，
+// 由宿主的生成链路接手——UI 诚实标注这是 AI 重绘，不假装本地变换。
 //
-// 座標系：預覽區用 object-contain 置中，displayScale = 顯示寬 / 自然寬；
-// 指標事件的容器座標 × (1/displayScale) 轉回原圖像素座標再進像素操作。
+// 座标系：预览区用 object-contain 置中，displayScale = 显示宽 / 自然宽；
+// 指标事件的容器座标 × (1/displayScale) 转回原图像素座标再进像素操作。
 //
-// 切图：切割線以原圖像素座標存放（splitXs 縱線 / splitYs 橫線），可拖動、
-// 增刪；行列 1-4 快捷鍵 = 重生成均分線。確認時經 computeSplitRectsFromLines
+// 切图：切割线以原图像素座标存放（splitXs 纵线 / splitYs 横线），可拖动、
+// 增删；行列 1-4 快捷键 = 重生成均分线。确认时经 computeSplitRectsFromLines
 // 算矩形再切片。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,16 +47,16 @@ export interface CanvasImageEditorDialogProps {
   nodeTitle: string;
   initialMode?: CanvasImageEditMode;
   onClose: () => void;
-  /** 產出一或多張結果（切图多張，其餘單張）。由宿主決定怎麼落畫布。 */
+  /** 产出一或多张结果（切图多张，其余单张）。由宿主决定怎么落画布。 */
   onProduce: (results: CanvasImageEditResult[], mode: CanvasImageEditMode) => void;
   /**
-   * 「角度」模式確認回調：不輸出像素，由宿主按 anglePrompt（中文生圖指令）
-   * 走 AI 重繪。未提供時「角度」tab 不顯示。
+   * 「角度」模式确认回调：不输出像素，由宿主按 anglePrompt（中文生图指令）
+   * 走 AI 重绘。未提供时「角度」tab 不显示。
    */
   onRequestAngleGenerate?: (params: { yawDeg: number; pitchDeg: number; distance: number; anglePrompt: string }) => void;
   /**
-   * 抠除的「AI 重绘」確認回調：maskDataUrl 為與原圖同尺寸、塗抹區純白不透明、
-   * 其餘透明的 PNG；instruction 為用戶輸入的一行指令。未提供時該選項不顯示。
+   * 抠除的「AI 重绘」确认回调：maskDataUrl 为与原图同尺寸、涂抹区纯白不透明、
+   * 其余透明的 PNG；instruction 为用户输入的一行指令。未提供时该选项不显示。
    */
   onRequestInpaint?: (params: { maskDataUrl: string; instruction: string }) => void;
 }
@@ -86,13 +86,13 @@ const ASPECT_PRESETS: { label: string; ratio: number | null }[] = [
 type CropHandle = "nw" | "ne" | "sw" | "se" | "move";
 type SplitLineAxis = "x" | "y";
 
-/** 均分線位：count 份 → count-1 條線（四捨五入到整數像素）。 */
+/** 均分线位：count 份 → count-1 条线（四舍五入到整数像素）。 */
 function evenLines(size: number, count: number): number[] {
   const n = Math.max(1, Math.floor(count));
   return Array.from({ length: n - 1 }, (_, i) => Math.round((size * (i + 1)) / n));
 }
 
-/** 拖動切割線：clamp 在相鄰線（或圖界）±8px 之間；空間不足時原地不動。 */
+/** 拖动切割线：clamp 在相邻线（或图界）±8px 之间；空间不足时原地不动。 */
 function moveLineWithin(lines: number[], index: number, value: number, size: number): number[] {
   const min = (index > 0 ? lines[index - 1] : 0) + 8;
   const max = (index < lines.length - 1 ? lines[index + 1] : size) - 8;
@@ -118,19 +118,19 @@ export function CanvasImageEditorDialog({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // 裁剪態
+  // 裁剪态
   const [cropRect, setCropRect] = useState<PixelRect | null>(null);
   const [aspect, setAspect] = useState<number | null>(null);
-  // 切图態：自定義切割線（原圖像素座標；縱線 xs 橫拖、橫線 ys 縱拖）
+  // 切图态：自定义切割线（原图像素座标；纵线 xs 横拖、横线 ys 纵拖）
   const [splitXs, setSplitXs] = useState<number[]>([]);
   const [splitYs, setSplitYs] = useState<number[]>([]);
   const [selectedLine, setSelectedLine] = useState<{ axis: SplitLineAxis; index: number } | null>(null);
   const lineDragRef = useRef<{ pointerId: number; axis: SplitLineAxis; index: number } | null>(null);
-  // 旋转態
+  // 旋转态
   const [deg, setDeg] = useState(0);
   const [flipH, setFlipH] = useState(false);
   const [flipV, setFlipV] = useState(false);
-  // 抠除態
+  // 抠除态
   const [brushSize, setBrushSize] = useState(24);
   const [eraserMode, setEraserMode] = useState(false);
   const [maskOutput, setMaskOutput] = useState<"erase" | "inpaint">("erase");
@@ -138,12 +138,12 @@ export function CanvasImageEditorDialog({
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskDisplayRef = useRef<HTMLCanvasElement | null>(null);
   const paintingRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null);
-  // 角度態（純預覽參數，確認時交宿主 AI 重繪）
+  // 角度态（纯预览参数，确认时交宿主 AI 重绘）
   const [yawDeg, setYawDeg] = useState(0);
   const [pitchDeg, setPitchDeg] = useState(0);
   const [distance, setDistance] = useState(1);
 
-  // 預覽量測
+  // 预览量测
   const viewRef = useRef<HTMLDivElement | null>(null);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const cropDragRef = useRef<{
@@ -154,16 +154,16 @@ export function CanvasImageEditorDialog({
     startRect: PixelRect;
   } | null>(null);
 
-  // 未提供角度回調時，「角度」tab 不存在——就算 initialMode 傳了 angle 也回退裁剪。
+  // 未提供角度回调时，「角度」tab 不存在——就算 initialMode 传了 angle 也回退裁剪。
   const activeMode: CanvasImageEditMode = mode === "angle" && !onRequestAngleGenerate ? "crop" : mode;
-  // 未提供 inpaint 回調時，抠除固定走透明輸出。
+  // 未提供 inpaint 回调时，抠除固定走透明输出。
   const effectiveMaskOutput: "erase" | "inpaint" = onRequestInpaint ? maskOutput : "erase";
   const modeTabs = onRequestAngleGenerate ? [...MODE_TABS, ANGLE_TAB] : MODE_TABS;
 
-  // 載圖成功後的統一初始化（開啟載入與失敗重試共用）
+  // 载图成功后的统一初始化（开启载入与失败重试共用）
   const initFromBitmap = useCallback((bitmap: ImageBitmap) => {
     setBmp(bitmap);
-    // 預設裁剪框：置中 80%
+    // 预设裁剪框：置中 80%
     setCropRect(
       clampCropRect(
         {
@@ -176,11 +176,11 @@ export function CanvasImageEditorDialog({
         bitmap.height,
       ),
     );
-    // 切图預設：2x2 均分線
+    // 切图预设：2x2 均分线
     setSplitXs(evenLines(bitmap.width, 2));
     setSplitYs(evenLines(bitmap.height, 2));
     setSelectedLine(null);
-    // 抠除 mask：與原圖同尺寸的離屏 canvas
+    // 抠除 mask：与原图同尺寸的离屏 canvas
     const mask = document.createElement("canvas");
     mask.width = bitmap.width;
     mask.height = bitmap.height;
@@ -188,7 +188,7 @@ export function CanvasImageEditorDialog({
     setLoading(false);
   }, []);
 
-  // 開啟時載圖 + 重置各模式狀態
+  // 开启时载图 + 重置各模式状态
   useEffect(() => {
     if (!open) return;
     setMode(initialMode);
@@ -225,7 +225,7 @@ export function CanvasImageEditorDialog({
     };
   }, [open, imageUrl, initialMode, initFromBitmap]);
 
-  // Escape 關閉
+  // Escape 关闭
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -235,7 +235,7 @@ export function CanvasImageEditorDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // 預覽區尺寸追蹤
+  // 预览区尺寸追踪
   useEffect(() => {
     if (!open) return;
     const el = viewRef.current;
@@ -247,7 +247,7 @@ export function CanvasImageEditorDialog({
     return () => ro.disconnect();
   }, [open, bmp]);
 
-  // object-contain 幾何：圖片在預覽區內的實際顯示矩形
+  // object-contain 几何：图片在预览区内的实际显示矩形
   const display = useMemo(() => {
     if (!bmp || viewSize.width === 0 || viewSize.height === 0) return null;
     const scale = Math.min(viewSize.width / bmp.width, viewSize.height / bmp.height, 1);
@@ -262,7 +262,7 @@ export function CanvasImageEditorDialog({
     };
   }, [bmp, viewSize]);
 
-  // 顯示座標（相對圖片左上）→ 原圖像素
+  // 显示座标（相对图片左上）→ 原图像素
   const toPixel = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } | null => {
       const el = viewRef.current;
@@ -276,7 +276,7 @@ export function CanvasImageEditorDialog({
     [display],
   );
 
-  // ── 裁剪框拖動/調角 ──
+  // ── 裁剪框拖动/调角 ──
   const startCropDrag = (e: React.PointerEvent, handle: CropHandle) => {
     if (!cropRect) return;
     e.stopPropagation();
@@ -327,7 +327,7 @@ export function CanvasImageEditorDialog({
     if (cropDragRef.current?.pointerId === e.pointerId) cropDragRef.current = null;
   };
 
-  // 比例切換：以當前框中心套用新比例
+  // 比例切换：以当前框中心套用新比例
   const applyAspect = (ratio: number | null) => {
     setAspect(ratio);
     if (!ratio || !cropRect || !bmp) return;
@@ -347,8 +347,8 @@ export function CanvasImageEditorDialog({
     }, bmp.width, bmp.height));
   };
 
-  // ── 切图：切割線增刪與拖動 ──
-  // 行/列 1-4 快捷鍵：點擊 = 重生成該方向的均分線（丟棄手動微調）。
+  // ── 切图：切割线增删与拖动 ──
+  // 行/列 1-4 快捷键：点击 = 重生成该方向的均分线（丢弃手动微调）。
   const applySplitQuick = (axis: SplitLineAxis, count: number) => {
     if (!bmp) return;
     setSelectedLine(null);
@@ -356,7 +356,7 @@ export function CanvasImageEditorDialog({
     else setSplitYs(evenLines(bmp.height, count));
   };
 
-  // 在最大空隙中點加一條線並選中；findLineSpot 回 null（無空隙）時按鈕已 disabled。
+  // 在最大空隙中点加一条线并选中；findLineSpot 回 null（无空隙）时按钮已 disabled。
   const addSplitLine = (axis: SplitLineAxis) => {
     if (!bmp) return;
     const size = axis === "x" ? bmp.width : bmp.height;
@@ -376,7 +376,7 @@ export function CanvasImageEditorDialog({
     setSelectedLine(null);
   }, [selectedLine]);
 
-  // Del / Backspace 刪除選中線（避開輸入框焦點場景）
+  // Del / Backspace 删除选中线（避开输入框焦点场景）
   useEffect(() => {
     if (!open || activeMode !== "split" || !selectedLine) return;
     const onKey = (e: KeyboardEvent) => {
@@ -403,7 +403,7 @@ export function CanvasImageEditorDialog({
     if (!d || d.pointerId !== e.pointerId || !bmp) return;
     const p = toPixel(e.clientX, e.clientY);
     if (!p) return;
-    // 拖動期間 clamp 在相鄰線之間，順序不變，index 穩定。
+    // 拖动期间 clamp 在相邻线之间，顺序不变，index 稳定。
     if (d.axis === "x") setSplitXs((prev) => moveLineWithin(prev, d.index, p.x, bmp.width));
     else setSplitYs((prev) => moveLineWithin(prev, d.index, p.y, bmp.height));
   };
@@ -412,7 +412,7 @@ export function CanvasImageEditorDialog({
     if (lineDragRef.current?.pointerId === e.pointerId) lineDragRef.current = null;
   };
 
-  // ── 抠除塗抹 ──
+  // ── 抠除涂抹 ──
   const paintAt = useCallback(
     (px: number, py: number, lastX?: number, lastY?: number) => {
       const mask = maskCanvasRef.current;
@@ -473,8 +473,8 @@ export function CanvasImageEditorDialog({
     }
   };
 
-  // 顯示層 mask canvas 尺寸同步（顯示尺寸變化時重置顯示層——已塗內容仍在離屏 mask 上，
-  // 但顯示層會清空；簡化處理：把離屏 mask 重繪到顯示層）。
+  // 显示层 mask canvas 尺寸同步（显示尺寸变化时重置显示层——已涂内容仍在离屏 mask 上，
+  // 但显示层会清空；简化处理：把离屏 mask 重绘到显示层）。
   useEffect(() => {
     if (activeMode !== "mask" || !display || !bmp) return;
     const displayMask = maskDisplayRef.current;
@@ -489,7 +489,7 @@ export function CanvasImageEditorDialog({
     }
   }, [activeMode, display, bmp]);
 
-  // ── 確認產出 ──
+  // ── 确认产出 ──
   const handleConfirm = () => {
     if (!bmp || busy) return;
     setBusy(true);
@@ -534,16 +534,16 @@ export function CanvasImageEditorDialog({
 
   const splitRects = bmp && activeMode === "split" ? computeSplitRectsFromLines(bmp.width, bmp.height, splitXs, splitYs) : [];
   const splitCount = (splitXs.length + 1) * (splitYs.length + 1);
-  // 加線按鈕可用性：無 >=16px 的空隙時 disabled
+  // 加线按钮可用性：无 >=16px 的空隙时 disabled
   const vSpot = bmp ? findLineSpot(bmp.width, splitXs) : null;
   const hSpot = bmp ? findLineSpot(bmp.height, splitYs) : null;
-  // 角度預覽：純 CSS 示意（阻尼係數讓滿角不至於翻爛畫面），真正產圖走 AI 重繪。
+  // 角度预览：纯 CSS 示意（阻尼系数让满角不至于翻烂画面），真正产图走 AI 重绘。
   const anglePreviewTransform = `perspective(900px) rotateY(${yawDeg * -0.45}deg) rotateX(${pitchDeg * 0.35}deg) scale(${Math.max(0.5, Math.min(1.7, 1 / distance)).toFixed(3)})`;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4" data-canvas-interactive>
       <div className="flex h-[min(88vh,720px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-2xl lg-sheet">
-        {/* 頂欄：標題 + tab + 關閉 */}
+        {/* 顶栏：标题 + tab + 关闭 */}
         <div className="flex items-center gap-3 border-b px-4 py-2.5">
           <span className="min-w-0 flex-1 truncate text-ios-subhead font-semibold text-foreground">
             编辑图片 · {nodeTitle}
@@ -574,7 +574,7 @@ export function CanvasImageEditorDialog({
           </button>
         </div>
 
-        {/* 預覽區 */}
+        {/* 预览区 */}
         <div ref={viewRef} className="relative min-h-0 flex-1 overflow-hidden bg-[#111]">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -604,7 +604,7 @@ export function CanvasImageEditorDialog({
           )}
           {bmp && display && (
             <>
-              {/* eslint-disable-next-line @next/next/no-img-element -- 畫布編輯器中的 blob:/data:/本站 proxy 影像，next/image 無法優化且寬高推導會綁死節點自適應版面 */}
+              {/* eslint-disable-next-line @next/next/no-img-element -- 画布编辑器中的 blob:/data:/本站 proxy 影像，next/image 无法优化且宽高推导会绑死节点自适应版面 */}
               <img
                 src={imageUrl}
                 alt={nodeTitle}
@@ -624,13 +624,13 @@ export function CanvasImageEditorDialog({
                 }}
               />
 
-              {/* 裁剪覆蓋層 */}
+              {/* 裁剪覆盖层 */}
               {activeMode === "crop" && cropRect && (
                 <div
                   className="absolute"
                   style={{ left: display.left, top: display.top, width: display.width, height: display.height }}
                 >
-                  {/* 半透明遮罩四塊（上/下/左/右） */}
+                  {/* 半透明遮罩四块（上/下/左/右） */}
                   {(() => {
                     const s = display.scale;
                     const rx = cropRect.x * s;
@@ -644,7 +644,7 @@ export function CanvasImageEditorDialog({
                         <div className={shade} style={{ left: 0, top: ry + rh, width: "100%", height: Math.max(0, display.height - ry - rh) }} />
                         <div className={shade} style={{ left: 0, top: ry, width: rx, height: rh }} />
                         <div className={shade} style={{ left: rx + rw, top: ry, width: Math.max(0, display.width - rx - rw), height: rh }} />
-                        {/* 裁剪框本體：可拖動 */}
+                        {/* 裁剪框本体：可拖动 */}
                         <div
                           className="absolute cursor-move border-2 border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
                           style={{ left: rx, top: ry, width: rw, height: rh, touchAction: "none" }}
@@ -680,7 +680,7 @@ export function CanvasImageEditorDialog({
                 </div>
               )}
 
-              {/* 切图：編號標籤 + 可拖動切割線 */}
+              {/* 切图：编号标签 + 可拖动切割线 */}
               {activeMode === "split" && (
                 <div
                   className="absolute"
@@ -696,7 +696,7 @@ export function CanvasImageEditorDialog({
                       {i + 1}
                     </span>
                   ))}
-                  {/* 縱線：橫向拖動（12px 寬命中區，中央 2px 實線） */}
+                  {/* 纵线：横向拖动（12px 宽命中区，中央 2px 实线） */}
                   {splitXs.map((x, i) => {
                     const isSelected = selectedLine?.axis === "x" && selectedLine.index === i;
                     return (
@@ -720,7 +720,7 @@ export function CanvasImageEditorDialog({
                       </div>
                     );
                   })}
-                  {/* 橫線：縱向拖動 */}
+                  {/* 横线：纵向拖动 */}
                   {splitYs.map((y, i) => {
                     const isSelected = selectedLine?.axis === "y" && selectedLine.index === i;
                     return (
@@ -747,7 +747,7 @@ export function CanvasImageEditorDialog({
                 </div>
               )}
 
-              {/* 抠除塗抹層 */}
+              {/* 抠除涂抹层 */}
               {activeMode === "mask" && (
                 <canvas
                   ref={maskDisplayRef}
@@ -763,7 +763,7 @@ export function CanvasImageEditorDialog({
           )}
         </div>
 
-        {/* 模式參數列 */}
+        {/* 模式参数列 */}
         <div className="border-t px-4 py-2.5">
           {activeMode === "crop" && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -974,7 +974,7 @@ export function CanvasImageEditorDialog({
           )}
         </div>
 
-        {/* 底部按鈕 */}
+        {/* 底部按钮 */}
         <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
           <button
             type="button"

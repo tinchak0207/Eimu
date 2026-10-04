@@ -10,8 +10,8 @@ import type { UseCase, UseCaseAuthor } from "./use-cases/types";
 export * from "./use-cases/types";
 
 /**
- * 只收 Reddit 深度指南。舊的 102 個 `<行業>-<n>` 模板門頁已併入行業樞紐頁
- * （src/lib/use-case-categories），舊 URL 由 next.config.mjs 301 過去。
+ * 只收 Reddit 深度指南。旧的 102 个 `<行业>-<n>` 模板门页已并入行业枢纽页
+ * （src/lib/use-case-categories），旧 URL 由 next.config.mjs 301 过去。
  */
 export const USE_CASES: UseCase[] = [
   ...REDDIT_USE_CASES,
@@ -34,10 +34,10 @@ export function relatedUseCases(useCase: UseCase): UseCase[] {
 }
 
 /**
- * 替換 author.url 的域名為 runtime 域名。
- * 保留原始硬編碼作為 fallback（不傳 runtimeUrl 或傳空字串時不替換）。
+ * 替换 author.url 的域名为 runtime 域名。
+ * 保留原始硬编码作为 fallback（不传 runtimeUrl 或传空字串时不替换）。
  *
- * 用法：在 Server Component 中 await getSiteUrl() 後傳入。
+ * 用法：在 Server Component 中 await getSiteUrl() 后传入。
  */
 export function replaceAuthorUrl(author: UseCaseAuthor, runtimeUrl: string): UseCaseAuthor {
   if (!runtimeUrl) return author;

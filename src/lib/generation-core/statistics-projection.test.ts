@@ -1,10 +1,10 @@
-// REQ-C2「Statistics 統計視圖」具名驗收測試。
+// REQ-C2「Statistics 统计视图」具名验收测试。
 //
-// 驗的是本刀的三條紀律，不是覆蓋率：
-// 1. 聚合口徑與帳本逐條吻合——每個桶的分幣數必須等於它所引用的帳本行加總（逐桶重算）；
-// 2. 樣本不足畫「資料不足」而不是 0——比率、剩餘額度、空窗口三處都驗；
-// 3. unknown 不被折疊——渠道判活第三態、模型活性第三態都驗。
-// 外加兩條守門件：統計層只讀（原始碼層面沒有寫語句）、渠道判活與 scheduler 同源。
+// 验的是本刀的三条纪律，不是覆盖率：
+// 1. 聚合口径与帐本逐条吻合——每个桶的分币数必须等于它所引用的帐本行加总（逐桶重算）；
+// 2. 样本不足画「资料不足」而不是 0——比率、剩余额度、空窗口三处都验；
+// 3. unknown 不被折叠——渠道判活第三态、模型活性第三态都验。
+// 外加两条守门件：统计层只读（原始码层面没有写语句）、渠道判活与 scheduler 同源。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
 }
 
-/** 去註解後才做負向斷言：解釋禁令的註解不該誤觸守門件。 */
+/** 去注解后才做负向断言：解释禁令的注解不该误触守门件。 */
 function readCode(relPath: string) {
   return read(relPath)
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -52,9 +52,9 @@ function readCode(relPath: string) {
 }
 
 /**
- * 帳本樣本（每行都是「production 會拿到的一條 billing_operation 投影」）。
- * 刻意留一行沒有成功嘗試（op-3）——它必須進「未歸因」，不許攤派給任何渠道。
- * 本組全是 commit（扣費）；退款的淨額口徑另有三組專門樣本（見下方 REFUND_* 常數）。
+ * 帐本样本（每行都是「production 会拿到的一条 billing_operation 投影」）。
+ * 刻意留一行没有成功尝试（op-3）——它必须进「未归因」，不许摊派给任何渠道。
+ * 本组全是 commit（扣费）；退款的净额口径另有三组专门样本（见下方 REFUND_* 常数）。
  */
 const LEDGER: LedgerConsumptionRow[] = [
   {
@@ -109,7 +109,7 @@ const LEDGER: LedgerConsumptionRow[] = [
 
 const LEDGER_TOTAL_QUOTA = 1_625_000;
 
-/** 全額退款：同一 job 一筆 commit 一筆 refund，兩筆都是帳本上真實存在的行。 */
+/** 全额退款：同一 job 一笔 commit 一笔 refund，两笔都是帐本上真实存在的行。 */
 const FULL_REFUND_LEDGER: LedgerConsumptionRow[] = [
   {
     operationId: "op-charge-full",
@@ -144,18 +144,18 @@ test("聚合口径与账本逐条吻合：每个桶的 quota 重新加总后与�
   assert.equal(projection.operations, LEDGER.length);
   assert.equal(projection.totalCoins, quotaToCoins(LEDGER_TOTAL_QUOTA));
 
-  // 逐桶重算：桶內的 recordIds 只是樣本，所以按 key 重新從帳本行過濾加總。
+  // 逐桶重算：桶内的 recordIds 只是样本，所以按 key 重新从帐本行过滤加总。
   const quotaOf = (predicate: (row: LedgerConsumptionRow) => boolean) =>
     LEDGER.filter(predicate).reduce((sum, row) => sum + row.amountQuota, 0);
 
   for (const bucket of projection.byDay) {
-    assert.equal(bucket.quota, quotaOf((row) => row.day === bucket.key), `day ${bucket.key} 分币数不等於账本行加总`);
+    assert.equal(bucket.quota, quotaOf((row) => row.day === bucket.key), `day ${bucket.key} 分币数不等于账本行加总`);
   }
   for (const bucket of projection.byModel) {
-    assert.equal(bucket.quota, quotaOf((row) => row.modelId === bucket.key), `model ${bucket.key} 分币数不等於账本行加总`);
+    assert.equal(bucket.quota, quotaOf((row) => row.modelId === bucket.key), `model ${bucket.key} 分币数不等于账本行加总`);
   }
   for (const bucket of projection.byChannel) {
-    assert.equal(bucket.quota, quotaOf((row) => row.channelId === bucket.key), `channel ${bucket.key} 分币数不等於账本行加总`);
+    assert.equal(bucket.quota, quotaOf((row) => row.channelId === bucket.key), `channel ${bucket.key} 分币数不等于账本行加总`);
   }
 
   // 三个切面 + 未归因必须与总数三方闭合（少一分钱就是报表在撒谎）。
@@ -223,11 +223,11 @@ test("样本不足显示「资料不足」而不是 0：比率、剩余额度、
   assert.equal(quota.entries[1].quota, null, "未知额度不得回落成 0");
   assert.equal(quota.entries[1].coins, null);
 
-  // ③ 空窗口：不画 0 曲线，明写「没有任何已落帳记录」
+  // ③ 空窗口：不画 0 曲线，明写「没有任何已落帐记录」
   const emptyNotes = buildUsageNotes({ days: 7, rowCount: 0, generatedAt: "2026-09-22T00:00:00.000Z" });
   assert.equal(emptyNotes.partial, false);
   assert.ok(
-    emptyNotes.notes.some((note) => note.includes("沒有任何已落帳的扣費記錄")),
+    emptyNotes.notes.some((note) => note.includes("没有任何已落帐的扣费记录")),
     "空窗口必须明写没有记录，而不是给 0",
   );
   const empty = projectConsumption([]);
@@ -332,8 +332,8 @@ test("统计层只读：投影层/路由/管理组件三层都没有任何写语
   assert.match(route, /no-store/);
   assert.doesNotMatch(route, /getGenerationSql|postgres/, "路由不得自己持有 SQL 客户端");
 
-  // 判活三类文案都在展示层（话术只许存在于展示层）；文案收進展示層單一來源後，
-  // 元件只引用鍵——投影層照樣不得出現這幾句話術。
+  // 判活三类文案都在展示层（话术只许存在于展示层）；文案收进展示层单一来源后，
+  // 元件只引用键——投影层照样不得出现这几句话术。
   const ui = read("src/components/admin/AdminStatistics.tsx");
   const copy = read("src/lib/ui-strings.ts");
   assert.match(copy, /资料不足/);
@@ -375,7 +375,7 @@ test("端到端组装：buildStatisticsProjection 从账本行到投影的链路
     channel_label: row.channelLabel,
   }));
 
-  // 只讀 stub：依 SQL 文字分流回傳既有表內容，證明組裝層逐欄映射正確。
+  // 只读 stub：依 SQL 文字分流回传既有表内容，证明组装层逐栏映射正确。
   const stub = ((strings: TemplateStringsArray) => {
     const text = strings.join("?");
     if (text.includes("DISTINCT job.billing_user_id")) {
@@ -421,10 +421,10 @@ test("端到端组装：buildStatisticsProjection 从账本行到投影的链路
   assert.equal(projection.channelHealth[0].liveness, "available");
   assert.equal(projection.remainingQuota.knownQuota, 2_500_000);
   assert.equal(projection.remainingQuota.unknownCount, 1);
-  // 沒被截斷就要說沒被截斷（截斷標記不能是恆真）
+  // 没被截断就要说没被截断（截断标记不能是恒真）
   assert.equal(projection.remainingQuota.coverage.truncated, false);
   assert.equal(projection.remainingQuota.coverage.totalIdentities, 2);
-  // 半天桶標記與 windowStartDay 同源（同一顆時鐘算出，不可能是兩個數字）
+  // 半天桶标记与 windowStartDay 同源（同一颗时钟算出，不可能是两个数字）
   assert.equal(projection.window.windowStartDay, windowStartDay({ days: 7, now: new Date(projection.window.generatedAt) }));
   // 每个指标都签名了自己的数据源（页面「数据来源对照」直接渲染它）
   assert.ok(projection.sources.some((source) => source.source.includes("billing_operation")));
@@ -443,7 +443,7 @@ test("控制面 DB 未配置时不吐正常空报表，如实标 configured:fals
   assert.ok(projection.notes.some((note) => note.includes("GENERATION_DATABASE_URL")));
 });
 
-// ── C2-1 淨額口徑：退款必須相減（全額／部分／純退款三個邊界） ─────────────────
+// ── C2-1 净额口径：退款必须相减（全额／部分／纯退款三个边界） ─────────────────
 
 test("C2-1 全额退款：消耗净额归零、不落「未归因」，退款单列「已退款」桶且逐笔可回溯", () => {
   const projection = projectConsumption(FULL_REFUND_LEDGER);
@@ -453,7 +453,7 @@ test("C2-1 全额退款：消耗净额归零、不落「未归因」，退款单
   assert.equal(projection.refundedQuota, 1_000_000);
   assert.equal(projection.totalQuota, 0, "全额退款后消耗必须归零——把已退的钱算成消耗就是假报表");
   assert.equal(projection.totalCoins, 0);
-  // 帳本行照樣存在（operations 是「帳本有幾行」的事實，不因相抵而消失）
+  // 帐本行照样存在（operations 是「帐本有几行」的事实，不因相抵而消失）
   assert.equal(projection.operations, 2);
   assert.equal(projection.chargedOperations, 1);
   assert.equal(projection.refundedOperations, 1);
@@ -571,7 +571,7 @@ test("C2-1 取数面覆盖退款行：净额口径的 SQL 必须同时读 commit
   const code = readCode("src/lib/generation-core/statistics-projection.ts");
   assert.match(code, /operation\.operation IN \('commit', 'refund'\)/, "读法漏 refund = 退款仍算消耗");
   assert.match(code, /operation_kind/, "没有 operation 栏位就无从区分扣费与退款");
-  // 未歸因桶不得再接退款（全额退款必须离开未归因）：锚点仍只在非零净额组里选
+  // 未归因桶不得再接退款（全额退款必须离开未归因）：锚点仍只在非零净额组里选
   assert.match(code, /netQuota === 0/);
 });
 
@@ -642,7 +642,7 @@ test("C2-3 非有限金额：整行跳过、不当 0 计、不冒充一笔 opera
   assert.ok(!recordIds.includes("op-infinity"));
 
   const notes = buildUsageNotes({ days: 7, rowCount: withBadRow.length, skippedNonFiniteRows: 2 });
-  assert.ok(notes.notes.some((note) => note.includes("金額非有限值")), "跳过的行必须在 notes 里留痕");
+  assert.ok(notes.notes.some((note) => note.includes("金额非有限值")), "跳过的行必须在 notes 里留痕");
 });
 
 // ── C2-2 截断必须可见 ──────────────────────────────────────────────────────
@@ -653,7 +653,7 @@ test("C2-2 剩余额度截断可见：>MAX_QUOTA_USERS 个付费身份时标 tru
     billing_user_id: String(100 + index),
     total_identities: totalIdentities,
   }));
-  // 只讀 stub：照 SQL 的 LIMIT 語義切樣本，並回 count(*) OVER () 的全量數
+  // 只读 stub：照 SQL 的 LIMIT 语义切样本，并回 count(*) OVER () 的全量数
   const stub = ((strings: TemplateStringsArray) => {
     const text = strings.join("?");
     if (text.includes("DISTINCT job.billing_user_id")) {
@@ -683,7 +683,7 @@ test("C2-2 剩余额度截断可见：>MAX_QUOTA_USERS 个付费身份时标 tru
 
   const notes = buildUsageNotes({ days: 7, rowCount: 3, quotaCoverage: quota.coverage });
   assert.ok(
-    notes.notes.some((note) => note.includes(`只覆蓋前 ${MAX_QUOTA_USERS} 個身份`)),
+    notes.notes.some((note) => note.includes(`只覆盖前 ${MAX_QUOTA_USERS} 个身份`)),
     "截断必须在 notes 里明说覆盖了多少个身份",
   );
 
@@ -728,7 +728,7 @@ test("C2-2 组装层：身份数超上限时 remainingQuota 标 truncated 且 no
   assert.equal(projection.remainingQuota.coverage.coveredCount, MAX_QUOTA_USERS);
   assert.ok(
     projection.notes.some(
-      (note) => note.includes(`共 ${totalIdentities} 個`) && note.includes(`上限 ${MAX_QUOTA_USERS} 個`),
+      (note) => note.includes(`共 ${totalIdentities} 个`) && note.includes(`上限 ${MAX_QUOTA_USERS} 个`),
     ),
     "notes 必须同时给出全量与上限，不能只给一个被截断的和",
   );
@@ -737,7 +737,7 @@ test("C2-2 组装层：身份数超上限时 remainingQuota 标 truncated 且 no
   assert.equal(projection.consumption!.refunded.operations, 0);
 });
 
-// ── 激活漏斗 + 內部流量剔除 ──────────────────────────────────────────────────
+// ── 激活漏斗 + 内部流量剔除 ──────────────────────────────────────────────────
 
 const FUNNEL_NOW = new Date("2026-09-27T12:00:00.000Z");
 
@@ -747,14 +747,14 @@ function funnelFixture(): {
   recharges: FunnelRecharge[];
 } {
   const registrations: FunnelRegistration[] = [
-    { userId: 117, registeredAt: "2026-09-20T00:00:00.000Z" }, // 內部（假設窗口內註冊，驗證剔除）
-    { userId: 201, registeredAt: "2026-09-10T00:00:00.000Z" }, // 生成→成功→D1 回訪→現金充值
-    { userId: 202, registeredAt: "2026-09-11T00:00:00.000Z" }, // 生成→成功，同日兩單（不算回訪）
-    { userId: 203, registeredAt: "2026-09-12T00:00:00.000Z" }, // 生成但全失敗
-    { userId: 204, registeredAt: "2026-09-13T00:00:00.000Z" }, // 只註冊
-    { userId: 205, registeredAt: "2026-09-14T00:00:00.000Z" }, // 成功、未回訪但現金充值（不進漏斗付費步）
-    { userId: 206, registeredAt: "2026-09-15T00:00:00.000Z" }, // 成功、第 8 天才回來（不算回訪）；只有簽到入帳
-    { userId: 150, registeredAt: "2026-08-01T00:00:00.000Z" }, // 窗口外註冊
+    { userId: 117, registeredAt: "2026-09-20T00:00:00.000Z" }, // 内部（假设窗口内注册，验证剔除）
+    { userId: 201, registeredAt: "2026-09-10T00:00:00.000Z" }, // 生成→成功→D1 回访→现金充值
+    { userId: 202, registeredAt: "2026-09-11T00:00:00.000Z" }, // 生成→成功，同日两单（不算回访）
+    { userId: 203, registeredAt: "2026-09-12T00:00:00.000Z" }, // 生成但全失败
+    { userId: 204, registeredAt: "2026-09-13T00:00:00.000Z" }, // 只注册
+    { userId: 205, registeredAt: "2026-09-14T00:00:00.000Z" }, // 成功、未回访但现金充值（不进漏斗付费步）
+    { userId: 206, registeredAt: "2026-09-15T00:00:00.000Z" }, // 成功、第 8 天才回来（不算回访）；只有签到入帐
+    { userId: 150, registeredAt: "2026-08-01T00:00:00.000Z" }, // 窗口外注册
   ];
   const job = (userId: number, jobId: string, status: string, createdAt: string, finishedAt: string | null): FunnelJob => ({
     userId,
@@ -784,14 +784,14 @@ function funnelFixture(): {
   return { registrations, jobs, recharges };
 }
 
-test("內部名單：env 未設用預設 117,82；設值按逗號解析；空字串 = 不剔除", () => {
+test("内部名单：env 未设用预设 117,82；设值按逗号解析；空字串 = 不剔除", () => {
   assert.deepEqual(resolveInternalUserIds(undefined), [...DEFAULT_INTERNAL_USER_IDS]);
   assert.deepEqual(DEFAULT_INTERNAL_USER_IDS, [117, 82]);
   assert.deepEqual(resolveInternalUserIds(" 117, 82 ,253,abc,-1,117"), [82, 117, 253]);
   assert.deepEqual(resolveInternalUserIds(""), []);
 });
 
-test("激活漏斗：預設剔除內部用戶，切到「含內部」才計入", () => {
+test("激活漏斗：预设剔除内部用户，切到「含内部」才计入", () => {
   const fixture = funnelFixture();
   const excluded = projectActivationFunnel({
     ...fixture,
@@ -801,7 +801,7 @@ test("激活漏斗：預設剔除內部用戶，切到「含內部」才計入",
     includeInternal: false,
   });
   assert.equal(excluded.excludedInternalRegistrations, 1);
-  for (const step of excluded.steps) assert.ok(!step.userIds.includes(117), `${step.key} 混入內部用戶`);
+  for (const step of excluded.steps) assert.ok(!step.userIds.includes(117), `${step.key} 混入内部用户`);
   assert.equal(excluded.steps[0].count, 6);
 
   const included = projectActivationFunnel({
@@ -816,7 +816,7 @@ test("激活漏斗：預設剔除內部用戶，切到「含內部」才計入",
   assert.ok(included.steps[2].userIds.includes(117));
 });
 
-test("激活漏斗：每一步人數單調不增、且是上一步的子集；逐步人數與夾具手算一致", () => {
+test("激活漏斗：每一步人数单调不增、且是上一步的子集；逐步人数与夹具手算一致", () => {
   const funnel = projectActivationFunnel({
     ...funnelFixture(),
     days: 30,
@@ -838,22 +838,22 @@ test("激活漏斗：每一步人數單調不增、且是上一步的子集；�
     funnel.steps.map((step) => step.userIds),
     [[201, 202, 203, 204, 205, 206], [201, 202, 203, 205, 206], [201, 202, 205, 206], [201], [201]],
   );
-  // 不在漏斗鏈上的事實單列：205 沒回訪就付費，206 只有簽到入帳（非現金）
+  // 不在漏斗链上的事实单列：205 没回访就付费，206 只有签到入帐（非现金）
   assert.equal(funnel.paidAnyStage, 2);
   assert.equal(funnel.nonCashRechargesSkipped, 1);
   assert.equal(funnel.d1Returned, 1);
-  // 轉化率：註冊 6 → 生成 5
+  // 转化率：注册 6 → 生成 5
   const generated = funnel.steps[1].fromPrevious;
   assert.ok(generated && generated.state === "ok");
   assert.equal(generated.value, 5 / 6);
-  // 分母 < MIN_RATE_SAMPLES 時是「資料不足」而不是 0%
+  // 分母 < MIN_RATE_SAMPLES 时是「资料不足」而不是 0%
   assert.equal(funnel.steps[4].fromPrevious?.state, "insufficient");
-  // 首圖耗時：註冊→首成功 = 201:2h2m, 202:3h5m, 205:1h3m, 206:1h4m（秒）
+  // 首图耗时：注册→首成功 = 201:2h2m, 202:3h5m, 205:1h3m, 206:1h4m（秒）
   const first = funnel.timeToFirstImage.registerToFirstSuccess;
   assert.equal(first.samples, 4);
   assert.equal(first.p50Seconds, 3840);
   assert.equal(first.p90Seconds, 11100);
-  // 首單 created→finished：201:120, 202:600, 203:1200, 205:180, 206:240
+  // 首单 created→finished：201:120, 202:600, 203:1200, 205:180, 206:240
   const firstJob = funnel.timeToFirstImage.firstJobCreatedToFinished;
   assert.equal(firstJob.samples, 5);
   assert.equal(firstJob.p50Seconds, 240);
@@ -861,7 +861,7 @@ test("激活漏斗：每一步人數單調不增、且是上一步的子集；�
   assert.equal(firstJob.firstJobNotSucceeded, 2);
 });
 
-test("D1 回訪判定：同日多次不算、次日算 D1、第 7 天算回訪、第 8 天不算；日界按 Asia/Shanghai", () => {
+test("D1 回访判定：同日多次不算、次日算 D1、第 7 天算回访、第 8 天不算；日界按 Asia/Shanghai", () => {
   assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-10"]), { returned: false, d1: false, firstDay: "2026-09-10" });
   assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-11"]), { returned: true, d1: true, firstDay: "2026-09-10" });
   assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-17"]), { returned: true, d1: false, firstDay: "2026-09-10" });
@@ -875,7 +875,7 @@ test("D1 回訪判定：同日多次不算、次日算 D1、第 7 天算回訪�
   assert.equal(returnedWithin(days).d1, true);
 });
 
-test("現金判定與分位數口徑：開戶基線/簽到/新人禮不算付費；分位數同 percentile_disc", () => {
+test("现金判定与分位数口径：开户基线/签到/新人礼不算付费；分位数同 percentile_disc", () => {
   assert.equal(isCashRechargeSource("redemption-sync"), true);
   assert.equal(isCashRechargeSource("subscription-redemption"), true);
   for (const source of ["seed", "checkin", "daily-checkin", "welcome-grant", "gift", "newbie-bonus"]) {
@@ -887,7 +887,7 @@ test("現金判定與分位數口徑：開戶基線/簽到/新人禮不算付費
   assert.equal(nearestRankPercentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.9), 9);
 });
 
-test("組裝層：內部名單以綁定參數傳進帳本與漏斗查詢，漏斗從 stub 事實算出（無寫庫）", async () => {
+test("组装层：内部名单以绑定参数传进帐本与漏斗查询，漏斗从 stub 事实算出（无写库）", async () => {
   const seen: { text: string; values: unknown[] }[] = [];
   const fixture = funnelFixture();
   const stub = ((strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -929,7 +929,7 @@ test("組裝層：內部名單以綁定參數傳進帳本與漏斗查詢，漏�
 
   assert.deepEqual(projection.traffic, { includeInternal: false, internalUserIds: [82, 117] });
   const ledgerQuery = seen.find((entry) => entry.text.includes("FROM billing_operation operation") && entry.text.includes("operation_kind"));
-  assert.ok(ledgerQuery?.values.includes("{82,117}"), "帳本查詢未帶內部名單");
+  assert.ok(ledgerQuery?.values.includes("{82,117}"), "帐本查询未带内部名单");
   const jobQuery = seen.find((entry) => entry.text.includes("scoped.owner_user_id"));
   assert.ok(jobQuery && !String(jobQuery.values.find((value) => typeof value === "string" && value.startsWith("{"))).includes("117"));
   assert.equal(projection.activationFunnel.state, "ok");
@@ -951,11 +951,11 @@ test("組裝層：內部名單以綁定參數傳進帳本與漏斗查詢，漏�
     loadRemainingQuota: async () => [],
   });
   const lastLedger = [...seen].reverse().find((entry) => entry.text.includes("operation_kind"));
-  assert.ok(lastLedger?.values.includes("{}"), "含內部時不應剔除任何人");
+  assert.ok(lastLedger?.values.includes("{}"), "含内部时不应剔除任何人");
   assert.equal(withInternal.activationFunnel.state === "ok" && withInternal.activationFunnel.steps[0].count, 7);
 });
 
-test("漏斗讀不到註冊時整卡 unavailable 並說原因，不畫半截漏斗", async () => {
+test("漏斗读不到注册时整卡 unavailable 并说原因，不画半截漏斗", async () => {
   const stub = (() => Promise.resolve([])) as unknown as GenerationSql;
   const projection = await buildStatisticsProjection({
     days: 7,
@@ -972,7 +972,7 @@ test("漏斗讀不到註冊時整卡 unavailable 並說原因，不畫半截漏�
   }
 });
 
-test("首單取數保留毫秒：同一秒內建立的多單按真實先後取首單（postgres.js 回 Date 物件）", async () => {
+test("首单取数保留毫秒：同一秒内建立的多单按真实先后取首单（postgres.js 回 Date 物件）", async () => {
   const stub = ((strings: TemplateStringsArray) => {
     const text = strings.join("?");
     if (text.includes("scoped.owner_user_id")) {

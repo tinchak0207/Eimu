@@ -55,8 +55,8 @@ test("kunpeng style library ships all 161 styles verbatim with pinned source", (
 
 test("kunpeng style data is byte-identical to the vendored source json", (t) => {
   // 原样导入铁证：数据文件与源仓库 index.json 逐字节一致（四件套不可能被改写）。
-  // 源倉候选：/tmp/kp-assets（vendoring 時的臨時 checkout）→ ~/Desktop/kunpeng-vendor（持久輪子倉）。
-  // 兩者皆缺（如 CI/新機器）= 無法對證源倉，如實 skip 不謊報通過。
+  // 源仓候选：/tmp/kp-assets（vendoring 时的临时 checkout）→ ~/Desktop/kunpeng-vendor（持久轮子仓）。
+  // 两者皆缺（如 CI/新机器）= 无法对证源仓，如实 skip 不谎报通过。
   const candidates = [
     "/tmp/kp-assets/aigc-memory/style-library/index.json",
     join(process.env.HOME ?? "", "Desktop/kunpeng-vendor/aigc-memory/style-library/index.json"),
@@ -64,7 +64,7 @@ test("kunpeng style data is byte-identical to the vendored source json", (t) => 
   const sourcePath = candidates.find((p) => {
     try { readFileSync(p); return true; } catch { return false; }
   });
-  if (!sourcePath) { t.skip("kunpeng 源倉不在本機（/tmp/kp-assets 與 ~/Desktop/kunpeng-vendor 皆缺）"); return; }
+  if (!sourcePath) { t.skip("kunpeng 源仓不在本机（/tmp/kp-assets 与 ~/Desktop/kunpeng-vendor 皆缺）"); return; }
   const source = readFileSync(sourcePath, "utf8");
   const vendored = readFileSync(join(process.cwd(), "src/data/kunpeng-style-library.json"), "utf8");
   assert.equal(vendored, source);
@@ -272,7 +272,7 @@ test("workstation wires kunpeng apply handlers through the existing apply chain"
   assert.match(workstation, /buildKunpengStylePrompt\(style\)/);
   assert.match(workstation, /onApplyKunpengStyle=\{applyKunpengStyle\}/);
   assert.match(workstation, /onApplyKunpengPromptTemplate=\{applyKunpengPromptTemplate\}/);
-  // 面板有独立页籤且 UI 文案简体中文
+  // 面板有独立页签且 UI 文案简体中文
   assert.match(panel, /风格库/);
   assert.match(panel, /提示词模板/);
   assert.match(panel, /鲲鹏资产/);

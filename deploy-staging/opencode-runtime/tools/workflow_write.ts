@@ -4,12 +4,12 @@ import { gatewayReadSnapshot, gatewayDispatchOps } from "../lib/canvas-flow"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
-// workflow_write — 人機共筆的「筆」：agent 讀回畫布產線的宣告式 DSL（canvas_get_state 的
-// dsl 欄位），像改代碼一樣改它，整份交回本工具 → 站點確定性編譯器全圖校驗 → 原子落圖。
+// workflow_write — 人机共笔的「笔」：agent 读回画布产线的宣告式 DSL（canvas_get_state 的
+// dsl 栏位），像改代码一样改它，整份交回本工具 → 站点确定性编译器全图校验 → 原子落图。
 //
-// 為什麼不是直接下 ops：座標/增量/連線去重/冪等 id 全在編譯器裡（deterministic node id =
-// wf- + 內容雜湊），agent 手拼 ops 會破壞「聲明 ⇄ 圖」的可逆性，也會與人拖過的座標打架。
-// 本工具只做三件事：讀當前圖 → 交編譯 → 把編譯出的 ops 原樣下發。
+// 为什么不是直接下 ops：座标/增量/连线去重/幂等 id 全在编译器里（deterministic node id =
+// wf- + 内容杂凑），agent 手拼 ops 会破坏「声明 ⇄ 图」的可逆性，也会与人拖过的座标打架。
+// 本工具只做三件事：读当前图 → 交编译 → 把编译出的 ops 原样下发。
 export default tool({
   description:
     "把整份工作流声明（DSL）编译成画布操作并原子落图——「像改代码一样改工作流」的写入口。用法：先 canvas_get_state 读当前 dsl（工作流的可逆声明），按需增删改 steps，整份 source 交回本工具。\n\n" +
@@ -21,7 +21,7 @@ export default tool({
     "· gate: true = 人工批准门禁步。meta 是自由透传键值（≤4KB）。steps 1..24 个。\n\n" +
     "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；③v0 不删节点：源码里移除的步骤只回 warnings。\n\n" +
     "**改画布产线上任何东西（改单步 prompt／改结构）都用本工具**——它按 step id 幂等（同 id 同节点＝更新），先读 `dsl` 再整份交回即可；只有节点不在 `dsl` 里、或要动位置/尺寸/手调连线时，才用 `canvas_apply_ops`。**禁**手拼 `add_node`+`connect_nodes` 搭流程。\n\n" +
-    "**改畫布產線（節點在 `dsl` 裡）→ 一律 `workflow_write`**（冪等；讀 `dsl`→改 `steps`→整份交回）。單步或多步、改 prompt 或改結構，都是它。**節點不在 `dsl` 裡，或 DSL 表達不到的欄位（位置／尺寸／手調連線）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整條產線結構**（繞過編譯器、破壞可逆性）。",
+    "**改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。",
   args: {
     source: tool.schema
       .object({
@@ -68,7 +68,7 @@ export default tool({
 
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
     if (res.status === 422 || (data.success === false && data.code === "workflow_dsl_invalid")) {
-      // 教學式報錯原樣透傳：模型照 errors 改 source 重交（自修 ≤2 轮）。
+      // 教学式报错原样透传：模型照 errors 改 source 重交（自修 ≤2 轮）。
       return fail("workflow_dsl_invalid", "声明未通过全图校验，按 errors 修正后重交（画布未改动）", {
         errors: data.errors ?? [],
       })

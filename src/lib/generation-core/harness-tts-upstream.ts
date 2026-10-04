@@ -1,42 +1,42 @@
 /**
- * harness_tts 適配層：站點控制面 kind=tts 的 job → **harness 閘道既有 TTS 端點**。
+ * harness_tts 适配层：站点控制面 kind=tts 的 job → **harness 闸道既有 TTS 端点**。
  *
  * 上游真源（逐字）：
  *   · `deploy-staging/gateway/router.ts:531` → `POST /agent/v1/tts` → `handleTts(key, req)`
- *     （`deploy-staging/gateway/media-internal-routes.ts`：同步調用，入 `{text, voice?}`，
+ *     （`deploy-staging/gateway/media-internal-routes.ts`：同步调用，入 `{text, voice?}`，
  *      出 `{ok, url, chars, cost_coins, format:"mp3"}`；上游不可用回 503 `tts_unavailable`）。
- *   · 該端點的 `TTS_UPSTREAM`（media-internal-routes.ts:245-265）自 2026-08-30 起指向本機
- *     edge-tts-proxy（`/opt/edge-tts/`，免 key 中文音色）；此路徑已被一次真跑證實可出音檔
- *     （記憶 `tts-multiline-narration-p2-bug`：6 行台詞 → 6 個 distinct 音檔）。
+ *   · 该端点的 `TTS_UPSTREAM`（media-internal-routes.ts:245-265）自 2026-08-30 起指向本机
+ *     edge-tts-proxy（`/opt/edge-tts/`，免 key 中文音色）；此路径已被一次真跑证实可出音档
+ *     （记忆 `tts-multiline-narration-p2-bug`：6 行台词 → 6 个 distinct 音档）。
  *
- * 為何必須新增本 adapter（既有輪子都不能用，逐條）：
- *   · `openai_images` / `adobe2api`（openai-images-adapter.ts:154）請求路徑固定 `/images/generations`
- *     （video 才走 `/video/generations`）——kind=tts 會把 `{model,prompt,n,size,quality}` 送去生圖端點，
- *     必然失敗，且會污染生圖渠道的失敗域。
- *   · `metaso` / `openai_video` / `newapi_video` / `filmera` 全是異步 video 形（`/video(s)/generations`）。
- *   · 真正可複用的是「閘道那條已驗證的 TTS 路徑」本身：本 adapter 只做
- *     「POST `{supplier.baseUrl}/v1/tts` → 收斂 `{ok,url}`」的最小封裝（請求包裝與錯誤語義逐條
- *     照 `metaso-upstream.ts` 的 `metasoRequest`；同步協議不進 provider-reconciliation）。
+ * 为何必须新增本 adapter（既有轮子都不能用，逐条）：
+ *   · `openai_images` / `adobe2api`（openai-images-adapter.ts:154）请求路径固定 `/images/generations`
+ *     （video 才走 `/video/generations`）——kind=tts 会把 `{model,prompt,n,size,quality}` 送去生图端点，
+ *     必然失败，且会污染生图渠道的失败域。
+ *   · `metaso` / `openai_video` / `newapi_video` / `filmera` 全是异步 video 形（`/video(s)/generations`）。
+ *   · 真正可复用的是「闸道那条已验证的 TTS 路径」本身：本 adapter 只做
+ *     「POST `{supplier.baseUrl}/v1/tts` → 收敛 `{ok,url}`」的最小封装（请求包装与错误语义逐条
+ *     照 `metaso-upstream.ts` 的 `metasoRequest`；同步协议不进 provider-reconciliation）。
  *
- * 同步 adapter 鐵律（同 blender-node-upstream.ts 檔頭）：請求-回應內完成，不調
- * `onProviderTaskSubmitted`（永不落 provider task id、不進對帳），因此 `reconcileVia` 只是
- * `reconcileProtocolOf()` 的兜底映射（sync adapter 既有慣例＝"newapi_video"）。
+ * 同步 adapter 铁律（同 blender-node-upstream.ts 档头）：请求-回应内完成，不调
+ * `onProviderTaskSubmitted`（永不落 provider task id、不进对帐），因此 `reconcileVia` 只是
+ * `reconcileProtocolOf()` 的兜底映射（sync adapter 既有惯例＝"newapi_video"）。
  *
- * 費率／扣費：**不在本檔**。站內唯一真源＝`generation-model-catalog/tts-pricing.ts`（0.001 幣/字），
- * 由提交路由與消費端計算；本 adapter 只回上游事實，不重造第二份費率。
+ * 费率／扣费：**不在本档**。站内唯一真源＝`generation-model-catalog/tts-pricing.ts`（0.001 币/字），
+ * 由提交路由与消费端计算；本 adapter 只回上游事实，不重造第二份费率。
  */
 
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
-/** 閘道 TTS 路徑（router.ts:531 逐字）。 */
+/** 闸道 TTS 路径（router.ts:531 逐字）。 */
 export const HARNESS_TTS_PATH = "/v1/tts";
 
 function cleanBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-/** 憑證讀取（逐行照 openai-images-adapter.ts 的 readCredential；缺值＝401 確定性失敗）。 */
+/** 凭证读取（逐行照 openai-images-adapter.ts 的 readCredential；缺值＝401 确定性失败）。 */
 function readCredential(supplier: SupplierRecord): string {
   const value = process.env[supplier.account.credentialRef] ?? process.env[supplier.credentialRef] ?? "";
   if (!value.trim()) throw new SupplierRequestError(`Missing configured credential ${supplier.account.credentialRef}.`, 401);
@@ -52,11 +52,11 @@ interface HarnessTtsResponse {
 }
 
 /**
- * harness 閘道 TTS 端點 → SupplierGenerationOutput。
+ * harness 闸道 TTS 端点 → SupplierGenerationOutput。
  *
- * `responseFormat`：站點路由傳 `b64_json`／`url`，但閘道固定回一個公開 mp3 URL，故一律
- * 以 `url` 收斂，由 worker 既有 `persistOutputArtifact` 下載後入 Blob（artifact-service.ts
- * 已原生支援 audio/mpeg 魔數嗅探；worker-service.ts:371 已把 kind=tts 映射成 mediaKind=audio）。
+ * `responseFormat`：站点路由传 `b64_json`／`url`，但闸道固定回一个公开 mp3 URL，故一律
+ * 以 `url` 收敛，由 worker 既有 `persistOutputArtifact` 下载后入 Blob（artifact-service.ts
+ * 已原生支援 audio/mpeg 魔数嗅探；worker-service.ts:371 已把 kind=tts 映射成 mediaKind=audio）。
  */
 export async function generateWithHarnessTts(
   supplier: SupplierRecord,
@@ -68,9 +68,9 @@ export async function generateWithHarnessTts(
   const text = input.prompt.trim();
   if (!text) throw new SupplierRequestError("Harness TTS input text is empty.", 400);
 
-  // voice：站點路由未帶 voice 時填哨兵 "default"（route.ts 註解逐字：代表「上游自己決定預設」）。
-  // 對閘道語義＝不送 voice，讓閘道用它自己的 TTS_UPSTREAM_VOICE；其餘音色名逐字透傳
-  // （閘道／proxy 對無法辨識的 voice 是靜默回退，站點路由已在入口用 normalizeVoiceId 擋過）。
+  // voice：站点路由未带 voice 时填哨兵 "default"（route.ts 注解逐字：代表「上游自己决定预设」）。
+  // 对闸道语义＝不送 voice，让闸道用它自己的 TTS_UPSTREAM_VOICE；其余音色名逐字透传
+  // （闸道／proxy 对无法辨识的 voice 是静默回退，站点路由已在入口用 normalizeVoiceId 挡过）。
   const rawVoice = typeof input.workflow.voice === "string" ? input.workflow.voice.trim() : "";
   const voice = rawVoice && rawVoice !== "default" ? rawVoice : null;
 
@@ -99,7 +99,7 @@ export async function generateWithHarnessTts(
       typeof payload?.error?.message === "string" && payload.error.message
         ? payload.error.message
         : `HTTP ${response.status}`;
-    // 上游原文透傳不吞（tts_unavailable / text too long 等），交給 failure-classifier 分類。
+    // 上游原文透传不吞（tts_unavailable / text too long 等），交给 failure-classifier 分类。
     throw new SupplierRequestError(
       `Harness TTS gateway error: ${message}`,
       response.status,

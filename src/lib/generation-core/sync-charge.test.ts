@@ -1,13 +1,13 @@
-// V-07／V-08（2026-09-28）：同步直通路由的錢走 billing-ledger。
+// V-07／V-08（2026-09-28）：同步直通路由的钱走 billing-ledger。
 //
-// 真行為斷言：真 PGlite + 全套真 migration + 真 billing-ledger／sync-charge 函式；
-// 只有「外部扣退款」（billing adapter）是測試替身——零付費呼叫、零網關呼叫。
-// 斷言對象是帳本列（billing_operation／generation_job 的實際狀態）與替身收到的
-// 金額，不是源碼字串。
+// 真行为断言：真 PGlite + 全套真 migration + 真 billing-ledger／sync-charge 函式；
+// 只有「外部扣退款」（billing adapter）是测试替身——零付费呼叫、零网关呼叫。
+// 断言对象是帐本列（billing_operation／generation_job 的实际状态）与替身收到的
+// 金额，不是源码字串。
 //
-// PGlite 不是 repo 依賴（照 master-ingest-service.test.ts 的慣例）：
-//   NODE_PATH=<含 @electric-sql/pglite 的 node_modules> npx --yes tsx --test <本檔>
-// 缺席時 SQL 段逐測 skip（誠實聲明，不是通過）；無帳本回落段照跑。
+// PGlite 不是 repo 依赖（照 master-ingest-service.test.ts 的惯例）：
+//   NODE_PATH=<含 @electric-sql/pglite 的 node_modules> npx --yes tsx --test <本档>
+// 缺席时 SQL 段逐测 skip（诚实声明，不是通过）；无帐本回落段照跑。
 
 import test, { before } from "node:test";
 import assert from "node:assert/strict";
@@ -46,13 +46,13 @@ before(async () => {
 
 function skipWithoutPg(t: { skip: (m?: string) => void }): boolean {
   if (!pg) {
-    t.skip("PGlite 未安裝（SQL 整合段需要它；跑法見檔頭）");
+    t.skip("PGlite 未安装（SQL 整合段需要它；跑法见档头）");
     return true;
   }
   return false;
 }
 
-// postgres.js 形狀 shim（tagged template → $n → PGlite）。
+// postgres.js 形状 shim（tagged template → $n → PGlite）。
 function makeSql() {
   const tagged = async (strings: TemplateStringsArray, ...values: unknown[]) => {
     let text = strings[0];
@@ -79,7 +79,7 @@ function fakeAdapter(opts: { reserve?: (c: AdapterCall) => void; refund?: (c: Ad
 let userSeq = 7000;
 async function seededUser(sql: never): Promise<number> {
   const userId = ++userSeq;
-  // 帳本基線（account_ledger opening）：替身 fetchUser，避免任何網關呼叫。
+  // 帐本基线（account_ledger opening）：替身 fetchUser，避免任何网关呼叫。
   await ensureAccountBaselines([userId], { sql, fetchUser: async () => ({ id: userId, quota: 50_000_000 }) as never });
   return userId;
 }
@@ -113,7 +113,7 @@ async function jobRow(jobId: string) {
   return (await pg!.query("SELECT status, tenant_id, kind, completed_count FROM generation_job WHERE id = $1", [jobId])).rows[0];
 }
 
-test("扣費成功後上游失敗 → 帳本先有 pending refund op，回應後執行退款 → op applied、job refunded、替身只收到一次全額 credit", async (t) => {
+test("扣费成功后上游失败 → 帐本先有 pending refund op，回应后执行退款 → op applied、job refunded、替身只收到一次全额 credit", async (t) => {
   if (skipWithoutPg(t)) return;
   const sql = makeSql();
   const userId = await seededUser(sql);
@@ -128,11 +128,11 @@ test("扣費成功後上游失敗 → 帳本先有 pending refund op，回應後
   const running = await jobRow(jobId);
   assert.equal(running.status, "running");
   assert.equal(running.tenant_id, "sync:biz:key-sync");
-  // 同步 job 絕不進隊列：worker 撈不到它（否則會再打一次付費上游）。
+  // 同步 job 绝不进队列：worker 捞不到它（否则会再打一次付费上游）。
   assert.equal(await claimNextGenerationJob("worker-test", 30_000, sql), null);
 
   const settle = await refundSyncCharge(charged.charge, { status: 502 }, { sql, adapter });
-  // 回應前帳本已記「欠用戶 1.5M」：進程此刻死掉也有 op 可撈。
+  // 回应前帐本已记「欠用户 1.5M」：进程此刻死掉也有 op 可捞。
   assert.deepEqual((await ops(jobId)).refund, { operation: "refund", amount: 1_500_000, status: "pending" });
   assert.equal((await jobRow(jobId)).status, "failed");
   assert.equal(refunds.length, 0);
@@ -143,7 +143,7 @@ test("扣費成功後上游失敗 → 帳本先有 pending refund op，回應後
   assert.equal((await jobRow(jobId)).status, "refunded");
 });
 
-test("退款被 429 打回 → op 留 pending（不吞），reconcileGenerationBilling 下一輪撈到並補退一次", async (t) => {
+test("退款被 429 打回 → op 留 pending（不吞），reconcileGenerationBilling 下一轮捞到并补退一次", async (t) => {
   if (skipWithoutPg(t)) return;
   const sql = makeSql();
   const userId = await seededUser(sql);
@@ -166,17 +166,17 @@ test("退款被 429 打回 → op 留 pending（不吞），reconcileGenerationB
     console.error = origError;
   }
   assert.equal((await ops(jobId)).refund.status, "pending");
-  assert.ok(errors.some((a) => String(a[0]).includes("refund pending")), "退款未落地必須 console.error");
+  assert.ok(errors.some((a) => String(a[0]).includes("refund pending")), "退款未落地必须 console.error");
 
   refundFails = false;
   await pg!.query("UPDATE billing_operation SET next_attempt_at = now() WHERE job_id = $1", [jobId]);
   await reconcileGenerationBilling({ executorId: "reconcile-test", adapter, sql });
   assert.equal((await ops(jobId)).refund.status, "applied");
   assert.equal((await jobRow(jobId)).status, "refunded");
-  assert.equal(refunds.filter((c) => c.amount === 1_500_000).length, 2, "一次 429 失敗 + 一次補退成功");
+  assert.equal(refunds.filter((c) => c.amount === 1_500_000).length, 2, "一次 429 失败 + 一次补退成功");
 });
 
-test("部分交付（4 出 3）→ commit 實耗 3/4、未交付 1/4 落 refund op 並退回；job 保持 succeeded", async (t) => {
+test("部分交付（4 出 3）→ commit 实耗 3/4、未交付 1/4 落 refund op 并退回；job 保持 succeeded", async (t) => {
   if (skipWithoutPg(t)) return;
   const sql = makeSql();
   const userId = await seededUser(sql);
@@ -199,12 +199,12 @@ test("部分交付（4 出 3）→ commit 實耗 3/4、未交付 1/4 落 refund 
   assert.equal(done.status, "succeeded");
   assert.equal(done.completed_count, 3);
 
-  // reconcile 對 succeeded job 補 commit 全額 → 已有 commit 列，ON CONFLICT 不重記。
+  // reconcile 对 succeeded job 补 commit 全额 → 已有 commit 列，ON CONFLICT 不重记。
   await reconcileGenerationBilling({ executorId: "reconcile-test", adapter, sql });
   assert.equal((await ops(jobId)).commit.amount, 300_000);
 });
 
-test("全數交付 → 只有 commit 全額、沒有 refund op、替身零 credit", async (t) => {
+test("全数交付 → 只有 commit 全额、没有 refund op、替身零 credit", async (t) => {
   if (skipWithoutPg(t)) return;
   const sql = makeSql();
   const userId = await seededUser(sql);
@@ -218,7 +218,7 @@ test("全數交付 → 只有 commit 全額、沒有 refund op、替身零 credi
   assert.equal(refunds.length, 0);
 });
 
-test("扣款被網關確定拒絕（4xx）→ 402 insufficient_quota 同形；reserve op failed、job failed、不入隊", async (t) => {
+test("扣款被网关确定拒绝（4xx）→ 402 insufficient_quota 同形；reserve op failed、job failed、不入队", async (t) => {
   if (skipWithoutPg(t)) return;
   const sql = makeSql();
   const userId = await seededUser(sql);
@@ -236,7 +236,7 @@ test("扣款被網關確定拒絕（4xx）→ 402 insufficient_quota 同形；re
   assert.equal(await claimNextGenerationJob("worker-test", 30_000, sql), null);
 });
 
-test("扣款結果不明（5xx）→ 402；reserve op unknown、job billing_unknown（交既有 zombie reclaim 全額退），不入隊", async (t) => {
+test("扣款结果不明（5xx）→ 402；reserve op unknown、job billing_unknown（交既有 zombie reclaim 全额退），不入队", async (t) => {
   if (skipWithoutPg(t)) return;
   const sql = makeSql();
   const userId = await seededUser(sql);
@@ -251,7 +251,7 @@ test("扣款結果不明（5xx）→ 402；reserve op unknown、job billing_unkn
   assert.equal(await claimNextGenerationJob("worker-test", 30_000, sql), null);
 });
 
-test("無帳本實例（Vercel 副本）：回落 adapter 直扣直退；退款失敗 console.error 而非吞掉", async () => {
+test("无帐本实例（Vercel 副本）：回落 adapter 直扣直退；退款失败 console.error 而非吞掉", async () => {
   const { adapter, reserves } = fakeAdapter({ refund: () => { throw new Error("relay down"); } });
   const charged = await reserveSyncCharge(editInput(42), { adapter, databaseConfigured: false });
   assert.ok(charged.ok);
@@ -269,7 +269,7 @@ test("無帳本實例（Vercel 副本）：回落 adapter 直扣直退；退款�
   assert.match(String(errors[0][0]), /refund failed \(no ledger\).*quota=1500000/);
 });
 
-test("零價或 env 應急 key（userId=0）→ 不扣、不建 job", async () => {
+test("零价或 env 应急 key（userId=0）→ 不扣、不建 job", async () => {
   const { adapter, reserves } = fakeAdapter();
   const free = await reserveSyncCharge(editInput(42, { quota: 0 }), { adapter, databaseConfigured: false });
   assert.ok(free.ok && free.charge.reservedQuota === 0);

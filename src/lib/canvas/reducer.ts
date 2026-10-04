@@ -1,8 +1,8 @@
-// 畫布 reducer：把 gateway 送出的 canvas.* 事件套用到畫布狀態。
+// 画布 reducer：把 gateway 送出的 canvas.* 事件套用到画布状态。
 //
-// 純函式、無副作用，前端（畫布 store）直接呼叫。每個事件對應一個 reduce 步驟，
-// 與 gateway 的 autoCreateCanvasUnit 產出契約一一對齊。node 位置由前端 reducer
-// 自動排版（瀑布流/階梯），gateway 不給座標——它不懂版面，版權歸暴君前端。
+// 纯函式、无副作用，前端（画布 store）直接呼叫。每个事件对应一个 reduce 步骤，
+// 与 gateway 的 autoCreateCanvasUnit 产出契约一一对齐。node 位置由前端 reducer
+// 自动排版（瀑布流/阶梯），gateway 不给座标——它不懂版面，版权归暴君前端。
 import type {
   CanvasConnection,
   CanvasNode,
@@ -29,16 +29,16 @@ import {
 } from "./node-versions";
 
 export interface CanvasReducerState {
-  units: CanvasUnit[]; // 畫布單元（gateway 自動製畫布產出）
-  nodes: CanvasNode[]; // 扁平節點清單（**不含**已軟刪節點）
-  connections: CanvasConnection[]; // 扁平連線清單
+  units: CanvasUnit[]; // 画布单元（gateway 自动制画布产出）
+  nodes: CanvasNode[]; // 扁平节点清单（**不含**已软删节点）
+  connections: CanvasConnection[]; // 扁平连线清单
   /**
-   * 軟刪節點（2026-09-27）：不進 `nodes`，因此既有呼叫端（渲染/連線/批次）
-   * 看到的行為與舊硬刪一致；資料仍在，可經 `restoreCanvasNodes` 還原。
-   * optional＝向後相容（舊 state 沒有此欄視為空）。
+   * 软删节点（2026-09-27）：不进 `nodes`，因此既有呼叫端（渲染/连线/批次）
+   * 看到的行为与旧硬删一致；资料仍在，可经 `restoreCanvasNodes` 还原。
+   * optional＝向后相容（旧 state 没有此栏视为空）。
    */
   deletedNodes?: CanvasNode[];
-  /** 節點版本歷史（快照清單）；optional＝向後相容。 */
+  /** 节点版本历史（快照清单）；optional＝向后相容。 */
   nodeVersions?: CanvasNodeVersion[];
 }
 
@@ -48,26 +48,26 @@ export const CANVAS_INITIAL_STATE: CanvasReducerState = {
   connections: [],
 };
 
-/** 節點加入時自動排版的間距與起點。 */
+/** 节点加入时自动排版的间距与起点。 */
 const LAYOUT_GAP_X = 60;
 const LAYOUT_GAP_Y = 40;
 const LAYOUT_START = { x: 40, y: 40 };
 
 /**
- * DAG 分層自動排版（2026-08-15 重寫）：左 → 右流水線。
+ * DAG 分层自动排版（2026-08-15 重写）：左 → 右流水线。
  *
- * 舊版把「層」直着往下疊、層內橫排三欄，結果連線斜穿整張畫布、亂入別的卡片
- * （截圖證據：一團亂麻）。新版做正經的分層佈局：
- *   1. 分層：最長上游路徑深度（DAG；有環在有限次內停）。
- *   2. 交叉最小化：barycenter 兩趟掃描（下行看上游均位、上行看下游均位），
- *      同層順序按鄰層連線的平均索引排序 —— 邊盡量平行，不打叉。
- *   3. 座標：x 按層累加（層寬 = 該層最寬節點），y 層內縱向堆疊並對整圖
- *      垂直置中 —— 邊永遠短距離左進右出，bezierPath 的水平切線剛好貼合。
+ * 旧版把「层」直着往下叠、层内横排三栏，结果连线斜穿整张画布、乱入别的卡片
+ * （截图证据：一团乱麻）。新版做正经的分层布局：
+ *   1. 分层：最长上游路径深度（DAG；有环在有限次内停）。
+ *   2. 交叉最小化：barycenter 两趟扫描（下行看上游均位、上行看下游均位），
+ *      同层顺序按邻层连线的平均索引排序 —— 边尽量平行，不打叉。
+ *   3. 座标：x 按层累加（层宽 = 该层最宽节点），y 层内纵向堆叠并对整图
+ *      垂直置中 —— 边永远短距离左进右出，bezierPath 的水平切线刚好贴合。
  *
- * 手動拖動過的節點（moved）不重排，但仍佔用層內排序位（鄰居的邊不亂）。
+ * 手动拖动过的节点（moved）不重排，但仍占用层内排序位（邻居的边不乱）。
  *
- * 匯出給舊會話回放（use-canvas-chat restoreAgentSnapshot）：gateway 上行的
- * canvas_state 摘要刻意不帶座標，回填時必須跑同一套排版，否則全部疊在原點。
+ * 汇出给旧会话回放（use-canvas-chat restoreAgentSnapshot）：gateway 上行的
+ * canvas_state 摘要刻意不带座标，回填时必须跑同一套排版，否则全部叠在原点。
  */
 export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
   const { nodes, connections } = state;
@@ -81,7 +81,7 @@ export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const depth = new Map<string, number>();
   for (const n of nodes) depth.set(n.id, 0);
-  // 迭代求最長上游路徑深度（DAG；有環則停在有限次內，結果仍可用）
+  // 迭代求最长上游路径深度（DAG；有环则停在有限次内，结果仍可用）
   for (let iter = 0; iter < nodes.length; iter++) {
     let changed = false;
     for (const c of connections) {
@@ -95,12 +95,12 @@ export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
     if (!changed) break;
   }
 
-  // 分層（保持加入序作初始層內順序）
+  // 分层（保持加入序作初始层内顺序）
   const maxDepth = Math.max(...[...depth.values()], 0);
   const layers: CanvasNode[][] = Array.from({ length: maxDepth + 1 }, () => []);
   for (const n of nodes) layers[depth.get(n.id) ?? 0].push(n);
 
-  // 鄰接表（僅存在的端點）
+  // 邻接表（仅存在的端点）
   const upstream = new Map<string, string[]>();
   const downstream = new Map<string, string[]>();
   for (const c of connections) {
@@ -109,7 +109,7 @@ export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
     downstream.set(c.fromNodeId, [...(downstream.get(c.fromNodeId) ?? []), c.toNodeId]);
   }
 
-  // barycenter 掃描：鄰層索引均值排序（無鄰居者保持原相對順序 = 穩定排序）
+  // barycenter 扫描：邻层索引均值排序（无邻居者保持原相对顺序 = 稳定排序）
   const sweep = (neighborOf: Map<string, string[]>, neighborLayerOffset: number) => {
     for (let d = 0; d < layers.length; d++) {
       const refLayer = layers[d + neighborLayerOffset];
@@ -128,11 +128,11 @@ export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
       layers[d] = scored.map((s) => s.n);
     }
   };
-  sweep(upstream, -1); // 下行：向上游看齊
-  sweep(downstream, +1); // 上行：向下游看齊
-  sweep(upstream, -1); // 再一趟下行收斂
+  sweep(upstream, -1); // 下行：向上游看齐
+  sweep(downstream, +1); // 上行：向下游看齐
+  sweep(upstream, -1); // 再一趟下行收敛
 
-  // 座標：x 按層累加、y 層內堆疊 + 對整圖垂直置中
+  // 座标：x 按层累加、y 层内堆叠 + 对整图垂直置中
   const layerWidth = layers.map((arr) => Math.max(...arr.map((n) => n.width || 340), 0));
   const layerX: number[] = [];
   let cursorX = LAYOUT_START.x;
@@ -199,7 +199,7 @@ function upsertUnit(state: CanvasReducerState, unit: CanvasUnit): CanvasReducerS
   return { ...state, units };
 }
 
-/** canvas.plan — 記錄計畫（不建節點）；cost_hint 為數字時掛到 unit（C-FE）。 */
+/** canvas.plan — 记录计画（不建节点）；cost_hint 为数字时挂到 unit（C-FE）。 */
 export function reduceCanvasPlan(state: CanvasReducerState, data: CanvasPlanEvent): CanvasReducerState {
   const existing = findUnit(state, data.unit_id);
   if (existing) return state;
@@ -213,7 +213,7 @@ export function reduceCanvasPlan(state: CanvasReducerState, data: CanvasPlanEven
   return upsertUnit(state, unit);
 }
 
-/** canvas.node.created — 建節點（含 target_kind="result" 的結果預留節點）。 */
+/** canvas.node.created — 建节点（含 target_kind="result" 的结果预留节点）。 */
 export function reduceCanvasNodeCreated(state: CanvasReducerState, data: CanvasNodeCreatedEvent): CanvasReducerState {
   const unit = findUnit(state, data.unit_id) ?? {
     unitId: data.unit_id,
@@ -221,12 +221,12 @@ export function reduceCanvasNodeCreated(state: CanvasReducerState, data: CanvasN
     nodes: [],
     connections: [],
   };
-  // C-FE：plan 的 cost_hint 蓋章到本單元的生成卡（image/video）——
-  // 節點卡以它顯示「預估 N 幣」角標，實際 cost_coins 落地後由實際角標接班。
-  // workflow 計畫例外（tool 以 "workflow:" 開頭）：它的 cost_hint 是整張工作流
-  // 的總估價（estimateGraphCoins），逐卡蓋章會把全圖總額貼到每張卡上
-  //（2026-08-29 事故：5 張 pixai 圖 + 1 段 5 秒影片 → 全場卡片顯示 25.005 幣）。
-  // 總額只在側欄「预计 N 币」展示。
+  // C-FE：plan 的 cost_hint 盖章到本单元的生成卡（image/video）——
+  // 节点卡以它显示「预估 N 币」角标，实际 cost_coins 落地后由实际角标接班。
+  // workflow 计画例外（tool 以 "workflow:" 开头）：它的 cost_hint 是整张工作流
+  // 的总估价（estimateGraphCoins），逐卡盖章会把全图总额贴到每张卡上
+  //（2026-08-29 事故：5 张 pixai 图 + 1 段 5 秒影片 → 全场卡片显示 25.005 币）。
+  // 总额只在侧栏「预计 N 币」展示。
   const stamped: CanvasNode =
     unit.costHint !== undefined &&
     !unit.tool.startsWith("workflow:") &&
@@ -239,13 +239,13 @@ export function reduceCanvasNodeCreated(state: CanvasReducerState, data: CanvasN
     nodes: existingInUnit ? unit.nodes.map((n) => (n.id === stamped.id ? stamped : n)) : [...unit.nodes, stamped],
   };
   const nextState = upsertNode(upsertUnit(state, nextUnit), stamped);
-  // 新節點落一版 created 快照；已存在的節點被重送 create 時不重複落版。
+  // 新节点落一版 created 快照；已存在的节点被重送 create 时不重复落版。
   return state.nodes.some((n) => n.id === stamped.id)
     ? nextState
     : recordCanvasNodeVersion(nextState, stamped.id, "created");
 }
 
-/** canvas.node.connected — 建連線（跨 unit 也可）。 */
+/** canvas.node.connected — 建连线（跨 unit 也可）。 */
 export function reduceCanvasNodeConnected(state: CanvasReducerState, data: CanvasNodeConnectedEvent): CanvasReducerState {
   const unit = findUnit(state, data.unit_id);
   const nextState = upsertConnection(state, data.connection);
@@ -259,7 +259,7 @@ export function reduceCanvasNodeConnected(state: CanvasReducerState, data: Canva
   return upsertUnit(nextState, nextUnit);
 }
 
-/** canvas.node.updated — 更新節點（結果落地：status/content/url/cost）。 */
+/** canvas.node.updated — 更新节点（结果落地：status/content/url/cost）。 */
 export function reduceCanvasNodeUpdated(state: CanvasReducerState, data: CanvasNodeUpdatedEvent): CanvasReducerState {
   const node = state.nodes.find((n) => n.id === data.node_id);
   if (!node) return state;
@@ -279,12 +279,12 @@ export function reduceCanvasNodeUpdated(state: CanvasReducerState, data: CanvasN
       : u,
   );
   const nextState: CanvasReducerState = { ...state, nodes, units };
-  // 內容變更即落一版快照；進度/花費等瞬態抖動由 isNodeContentChange 過濾為 null。
+  // 内容变更即落一版快照；进度/花费等瞬态抖动由 isNodeContentChange 过滤为 null。
   const reason = isNodeContentChange(node, nextNode);
   return reason ? recordCanvasNodeVersion(nextState, data.node_id, reason) : nextState;
 }
 
-/** canvas.node.generating — 節點進生成態。 */
+/** canvas.node.generating — 节点进生成态。 */
 export function reduceCanvasNodeGenerating(
   state: CanvasReducerState,
   data: { unit_id: string; node_id: string; status: string; progress?: number },
@@ -297,10 +297,10 @@ export function reduceCanvasNodeGenerating(
 }
 
 /**
- * canvas.node.deleted — **軟刪**節點（2026-09-27 版本歷史＋回退）。
+ * canvas.node.deleted — **软删**节点（2026-09-27 版本历史＋回退）。
  *
- * 語義與舊硬刪對呼叫端一致：節點離開 `nodes`（列表不含）、連線斷開；差別是節點被
- * 收進 `deletedNodes` 並蓋 `deletedAt`，可經 `restoreCanvasNodes` / restore API 還原。
+ * 语义与旧硬删对呼叫端一致：节点离开 `nodes`（列表不含）、连线断开；差别是节点被
+ * 收进 `deletedNodes` 并盖 `deletedAt`，可经 `restoreCanvasNodes` / restore API 还原。
  */
 export function reduceCanvasNodeDeleted(
   state: CanvasReducerState,
@@ -311,10 +311,10 @@ export function reduceCanvasNodeDeleted(
 }
 
 /**
- * 批量軟刪（`delete_nodes` op 與 UI 刪除的單一執行體）。
+ * 批量软删（`delete_nodes` op 与 UI 删除的单一执行体）。
  *
- * 逐條保留舊硬刪的可觀察行為：節點離開 `nodes`/`units`、連線全斷、批次父節點的
- * `batchChildren` 清掉死子並把主圖 fallback 到剩餘第一個（全刪光則清空）。
+ * 逐条保留旧硬删的可观察行为：节点离开 `nodes`/`units`、连线全断、批次父节点的
+ * `batchChildren` 清掉死子并把主图 fallback 到剩余第一个（全删光则清空）。
  */
 export function softDeleteCanvasNodes(
   state: CanvasReducerState,
@@ -342,7 +342,7 @@ export function softDeleteCanvasNodes(
         return {
           ...n,
           batchChildren: kept,
-          // 主圖被刪 → fallback 剩餘第一個；全刪光 → 清空。
+          // 主图被删 → fallback 剩余第一个；全删光 → 清空。
           batchPrimaryImageId:
             n.batchPrimaryImageId && dead.has(n.batchPrimaryImageId) ? kept[0] : n.batchPrimaryImageId,
           metadata: { ...n.metadata, batchTotal: kept.length },
@@ -354,9 +354,9 @@ export function softDeleteCanvasNodes(
 }
 
 /**
- * 批量還原軟刪節點：把 `deletedNodes` 裡的目標搬回 `nodes` 並清掉 `deletedAt`。
- * `ids` 為空＝不回任何節點（不製造「靜默全還原」）。找不到的 id 略過，不捏造節點。
- * 還原後跑一次 `layoutGraph`：回來的節點與既有版面一起重排（與事件路徑一致）。
+ * 批量还原软删节点：把 `deletedNodes` 里的目标搬回 `nodes` 并清掉 `deletedAt`。
+ * `ids` 为空＝不回任何节点（不制造「静默全还原」）。找不到的 id 略过，不捏造节点。
+ * 还原后跑一次 `layoutGraph`：回来的节点与既有版面一起重排（与事件路径一致）。
  */
 export function restoreCanvasNodes(state: CanvasReducerState, ids: readonly string[]): CanvasReducerState {
   const wanted = new Set(ids.filter(Boolean));
@@ -376,10 +376,10 @@ export function restoreCanvasNodes(state: CanvasReducerState, ids: readonly stri
 }
 
 /**
- * 對當前節點落一版快照。
+ * 对当前节点落一版快照。
  *
- * 去重：若與該節點最新一版的內容無差（`isNodeContentChange` 回 null），不重複落版
- * （呼叫端可能對同一 patch 重送；版本歷史不該被同內容灌滿）。
+ * 去重：若与该节点最新一版的内容无差（`isNodeContentChange` 回 null），不重复落版
+ * （呼叫端可能对同一 patch 重送；版本历史不该被同内容灌满）。
  */
 export function recordCanvasNodeVersion(
   state: CanvasReducerState,
@@ -400,11 +400,11 @@ export function recordCanvasNodeVersion(
 }
 
 /**
- * 回退節點到某一版：`version` 有值＝指定版；省略＝上一版（`previousNodeVersion`）。
+ * 回退节点到某一版：`version` 有值＝指定版；省略＝上一版（`previousNodeVersion`）。
  *
- * 回退本身也落一版（reason `revert`）——版本歷史 append-only，回退可再被回退。
- * 只還原 title＋metadata（`applyNodeVersion`），座標/尺寸不動。
- * 沒有可回的版本、或該版與當前內容無差 → 原樣返回（不製造空版本）。
+ * 回退本身也落一版（reason `revert`）——版本历史 append-only，回退可再被回退。
+ * 只还原 title＋metadata（`applyNodeVersion`），座标/尺寸不动。
+ * 没有可回的版本、或该版与当前内容无差 → 原样返回（不制造空版本）。
  */
 export function revertCanvasNodeToVersion(
   state: CanvasReducerState,
@@ -428,7 +428,7 @@ export function revertCanvasNodeToVersion(
   return { ...state, nodes, units, nodeVersions: appendNodeVersion(versions, recorded) };
 }
 
-/** canvas.node.disconnected — 移除 from->to 連線（不斷節點）。 */
+/** canvas.node.disconnected — 移除 from->to 连线（不断节点）。 */
 export function reduceCanvasNodeDisconnected(
   state: CanvasReducerState,
   data: { unit_id: string; from: string; to: string },
@@ -442,7 +442,7 @@ export function reduceCanvasNodeDisconnected(
   return { ...state, connections, units };
 }
 
-/** 主入口：把一個 canvas.* 事件套用到畫布狀態。未知事件原樣返回。 */
+/** 主入口：把一个 canvas.* 事件套用到画布状态。未知事件原样返回。 */
 export function reduceCanvasEvent(state: CanvasReducerState, event: CanvasSseEvent): CanvasReducerState {
   let next = state;
   switch (event.name) {
@@ -470,11 +470,11 @@ export function reduceCanvasEvent(state: CanvasReducerState, event: CanvasSseEve
     default:
       return state;
   }
-  // 結構性事件後自動排版：DAG 分層、整齊流水線（手動拖過的節點不重排）。
+  // 结构性事件后自动排版：DAG 分层、整齐流水线（手动拖过的节点不重排）。
   return layoutGraph(next);
 }
 
-/** 工具：取出單一 unit 的完整節點/連線（含跨 unit 的結果節點）。 */
+/** 工具：取出单一 unit 的完整节点/连线（含跨 unit 的结果节点）。 */
 export function getUnitGraph(state: CanvasReducerState, unitId: string): { nodes: CanvasNode[]; connections: CanvasConnection[] } {
   const unit = findUnit(state, unitId);
   if (!unit) return { nodes: [], connections: [] };

@@ -1,15 +1,15 @@
-// 直傳物件的「擁有者紀錄」真源（Blob 持久化）。
+// 直传物件的「拥有者纪录」真源（Blob 持久化）。
 //
-// D36 語義：上傳完要**回寫 TosKey 才算入庫**。本檔就是那張擁有者紀錄——
-// 每個使用者一份索引 `upload-records/<userId>/index-<ts>-<rand>.json`，內容是
-// 「已回寫的物件鍵 ＋ 伺服器親自取回位元組算出的 sha256 ＋ 大小 ＋ mime」。
+// D36 语义：上传完要**回写 TosKey 才算入库**。本档就是那张拥有者纪录——
+// 每个使用者一份索引 `upload-records/<userId>/index-<ts>-<rand>.json`，内容是
+// 「已回写的物件键 ＋ 伺服器亲自取回位元组算出的 sha256 ＋ 大小 ＋ mime」。
 //
-// 沿用 `asset-pack-store.ts` / `project-store.ts` 的既有模式（**同一個輪子**，
-// 不另立第三代寫法）：每次寫入落新路徑 + 修剪舊世代（避開 Blob cacheControlMaxAge
-// 60s 下限造成的「剛存讀不到」）、單用戶寫入串行。
+// 沿用 `asset-pack-store.ts` / `project-store.ts` 的既有模式（**同一个轮子**，
+// 不另立第三代写法）：每次写入落新路径 + 修剪旧世代（避开 Blob cacheControlMaxAge
+// 60s 下限造成的「刚存读不到」）、单用户写入串行。
 //
-// 記憶體降級：只在 `blob-backend` 的既有一致門禁允許時（非生產，或顯式
-// BLOB_ALLOW_MEMORY_FALLBACK=true）才落進程內，生產缺後端一律誠實拋錯。
+// 记忆体降级：只在 `blob-backend` 的既有一致门禁允许时（非生产，或显式
+// BLOB_ALLOW_MEMORY_FALLBACK=true）才落进程内，生产缺后端一律诚实抛错。
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
@@ -18,19 +18,19 @@ const RECORD_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
 const INDEX_CACHE_TTL_MS = 3_000;
 
-/** 每位使用者的已入庫物件紀錄上限（超出時拒絕，不靜默丟最舊的）。 */
+/** 每位使用者的已入库物件纪录上限（超出时拒绝，不静默丢最旧的）。 */
 export const MAX_UPLOAD_RECORDS_PER_USER = 2_000;
 
-/** 一筆已回寫入庫的直傳物件。 */
+/** 一笔已回写入库的直传物件。 */
 export interface UploadedObjectRecord {
   id: string;
-  /** 物件鍵（＝對稱差口徑的 TosKey）。回寫授權由 owner 前綴把關。 */
+  /** 物件键（＝对称差口径的 TosKey）。回写授权由 owner 前缀把关。 */
   objectKey: string;
-  /** 公網讀取 URL。 */
+  /** 公网读取 URL。 */
   url: string;
   mimeType: string;
   size: number;
-  /** 伺服器取回位元組算出的 sha256（不是客戶端自稱）。 */
+  /** 伺服器取回位元组算出的 sha256（不是客户端自称）。 */
   sha256: string;
   title?: string;
   backend: "vercel-blob" | "vps-blob" | "unconfigured";
@@ -72,7 +72,7 @@ async function listIndexBlobs(userId: number): Promise<BlobRef[]> {
   return blobs.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
 }
 
-/** 逐項清洗（不可信 payload）：形狀不全的項目直接丟，不讓髒資料冒充已入庫。 */
+/** 逐项清洗（不可信 payload）：形状不全的项目直接丢，不让脏资料冒充已入库。 */
 function normalizeRecord(payload: unknown): UploadedObjectRecord | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Partial<UploadedObjectRecord>;
@@ -158,23 +158,23 @@ async function writeRecords(userId: number, records: UploadedObjectRecord[]): Pr
   const stale = previous.slice(INDEX_GENERATIONS_KEPT - 1);
   if (stale.length) {
     await del(stale.map((b) => b.url)).catch((error) => {
-      console.error("[upload-records] 清理舊索引失敗。", error);
+      console.error("[upload-records] 清理旧索引失败。", error);
     });
   }
 }
 
-/** 列出該使用者已入庫的物件（newest 優先）。 */
+/** 列出该使用者已入库的物件（newest 优先）。 */
 export async function listUploadedObjects(userId: number): Promise<UploadedObjectRecord[]> {
   return readRecords(userId);
 }
 
-/** 依物件鍵取單筆（沒有回 null）。 */
+/** 依物件键取单笔（没有回 null）。 */
 export async function findUploadedObject(userId: number, objectKey: string): Promise<UploadedObjectRecord | null> {
   return (await readRecords(userId)).find((record) => record.objectKey === objectKey) ?? null;
 }
 
 /**
- * 回寫（upsert by objectKey）。達上限且是新物件時拋錯——**誠實拒絕**，不丟最舊的冒充成功。
+ * 回写（upsert by objectKey）。达上限且是新物件时抛错——**诚实拒绝**，不丢最旧的冒充成功。
  */
 export async function upsertUploadedObject(userId: number, record: UploadedObjectRecord): Promise<void> {
   const normalized = normalizeRecord(record);
@@ -183,13 +183,13 @@ export async function upsertUploadedObject(userId: number, record: UploadedObjec
     const current = await readRecords(userId);
     const exists = current.some((r) => r.objectKey === normalized.objectKey);
     if (!exists && current.length >= MAX_UPLOAD_RECORDS_PER_USER) {
-      throw new Error(`已入庫物件數量達上限 ${MAX_UPLOAD_RECORDS_PER_USER} 筆`);
+      throw new Error(`已入库物件数量达上限 ${MAX_UPLOAD_RECORDS_PER_USER} 笔`);
     }
     await writeRecords(userId, [normalized, ...current.filter((r) => r.objectKey !== normalized.objectKey)]);
   });
 }
 
-/** 僅測試：重置進程內狀態。 */
+/** 仅测试：重置进程内状态。 */
 export function __resetUploadRecordStoreForTests(): void {
   memoryStore.clear();
   indexCache.clear();

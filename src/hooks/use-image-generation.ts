@@ -265,8 +265,8 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     setTasks((current) => mergeGenerationTaskProjections(current, [task]));
   }, []);
 
-  // 離頁再回來的恢復：server 端 durable task 還在跑，重掛載後重新輪詢並把結果接回畫布。
-  // resumePollersRef 去重（3s 同步會反覆發現同一個 live task）；計數驅動對外的 isLoading。
+  // 离页再回来的恢复：server 端 durable task 还在跑，重挂载后重新轮询并把结果接回画布。
+  // resumePollersRef 去重（3s 同步会反覆发现同一个 live task）；计数驱动对外的 isLoading。
   const resumePollersRef = useRef<Set<string>>(new Set());
   const [resumedLoadingCount, setResumedLoadingCount] = useState(0);
   const resumeLiveTasks = useCallback((liveTasks: GenerationTaskProjection[]) => {
@@ -331,13 +331,13 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     if (!response.ok) return;
     const payload = await response.json().catch(() => null) as { success?: boolean; enabled?: boolean; data?: GenerationTaskProjection[] } | null;
     if (!payload?.success || !payload.enabled || !Array.isArray(payload.data)) return;
-    // 效能審計 P1-D（2026-10-01）：內容沒變就不寫 state——原本每 3s 換一批新陣列，整個首頁跟著重渲染。
+    // 效能审计 P1-D（2026-10-01）：内容没变就不写 state——原本每 3s 换一批新阵列，整个首页跟著重渲染。
     liveTasksRef.current = payload.data.some((task) => task.status === "queued" || task.status === "running");
     const signature = generationTaskListSignature(payload.data);
     if (signature === lastSyncSignatureRef.current) return;
     lastSyncSignatureRef.current = signature;
     setTasks((current) => mergeGenerationTaskProjections(current, payload.data ?? []));
-    // 掛著未完成的任務（含離頁期間提交的）→ 恢復輪詢，結果直接落畫布
+    // 挂著未完成的任务（含离页期间提交的）→ 恢复轮询，结果直接落画布
     resumeLiveTasks((payload.data ?? []).filter((task) =>
       (task.status === "queued" || task.status === "running")
       && (task.kind === "image_generate" || task.kind === "image_edit" || task.kind === "video_generate")
@@ -428,7 +428,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     return () => { cancelled = true; };
   }, [enableServerHistory]);
 
-  // 自排程輪詢（效能審計 P1-D）：有任務在跑才 3s 一拍；閒置 30s；分頁隱藏時停，回來（focus/可見）立刻補一次。
+  // 自排程轮询（效能审计 P1-D）：有任务在跑才 3s 一拍；闲置 30s；分页隐藏时停，回来（focus/可见）立刻补一次。
   useEffect(() => {
     if (!enableServerHistory) return;
     let cancelled = false;
@@ -805,7 +805,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     errors,
     timings,
     failedProviders,
-    // 恢復中的離頁任務也佔用生成通道：對外呈現為載入中（畫布渲染態/狀態條/提交按鈕共用）
+    // 恢复中的离页任务也占用生成通道：对外呈现为载入中（画布渲染态/状态条/提交按钮共用）
     isLoading: isLoading || resumedLoadingCount > 0,
     recentWorkflows,
     tasks,
@@ -817,11 +817,11 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
 }
 
 /**
- * 生成完成尾端的 localStorage 寫入挪出關鍵路徑。
- * recordGenerationResult 已在寫入前把 image(dataURL) 置 null（檔內既有 strip 前移），
- * 殘留的同步 setItem 仍可能在生成結束瞬間與其它主線程工作搶佔；这里延後到 idle 執行，
- * 并節流 ≥500ms：連續多次生成只保留最新快照、至多每 500ms 落盤一次。
- * Safari 無 requestIdleCallback → 降級 setTimeout。
+ * 生成完成尾端的 localStorage 写入挪出关键路径。
+ * recordGenerationResult 已在写入前把 image(dataURL) 置 null（档内既有 strip 前移），
+ * 残留的同步 setItem 仍可能在生成结束瞬间与其它主线程工作抢占；这里延后到 idle 执行，
+ * 并节流 ≥500ms：连续多次生成只保留最新快照、至多每 500ms 落盘一次。
+ * Safari 无 requestIdleCallback → 降级 setTimeout。
  */
 const CACHE_WRITE_MIN_GAP_MS = 500;
 let cacheWritePending: Parameters<typeof writeGenerationCache>[0] | null = null;

@@ -1,15 +1,15 @@
 /**
- * 私有 skill 端點的身份解析（`/api/skills/mine` 兩支路由共用一份）。
+ * 私有 skill 端点的身份解析（`/api/skills/mine` 两支路由共用一份）。
  *
- * **不是第二套鑑權**：這裡只把既有入口的兩步接起來，零新邏輯——
- *   1. `resolveAgentCaller`（`agent-session-guard.ts`）＝七條 agent 路由共用的身份入口，
- *      內部強制 `requireVerifiedUser`（把 Authorization + New-Api-User 交上游
- *      `/api/user/self` 驗證，回來的 id 才可信），絕不讀 `x-user-id` 這種未校驗請求頭；
- *   2. `deriveMemoryOwnerKey`（`agent-memory-injection.ts`）＝與 gateway 注入/批次
- *      同一把演算法、同一套正典化，故使用者在私有庫寫入的 skill 能被同一身份的
+ * **不是第二套鉴权**：这里只把既有入口的两步接起来，零新逻辑——
+ *   1. `resolveAgentCaller`（`agent-session-guard.ts`）＝七条 agent 路由共用的身份入口，
+ *      内部强制 `requireVerifiedUser`（把 Authorization + New-Api-User 交上游
+ *      `/api/user/self` 验证，回来的 id 才可信），绝不读 `x-user-id` 这种未校验请求头；
+ *   2. `deriveMemoryOwnerKey`（`agent-memory-injection.ts`）＝与 gateway 注入/批次
+ *      同一把演算法、同一套正典化，故使用者在私有库写入的 skill 能被同一身份的
  *      agent 召回到。
- * 與原本那條語義錯誤的 publish 端點（2026-09-27 已刪）逐字相同，差別只在
- * 抽出來給兩支端點共用，避免兩份複製品日後分叉。
+ * 与原本那条语义错误的 publish 端点（2026-09-27 已删）逐字相同，差别只在
+ * 抽出来给两支端点共用，避免两份复制品日后分叉。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -21,12 +21,12 @@ export const noStore = { "Cache-Control": "no-store" } as const;
 export type SkillOwner = { ok: true; ownerKey: string } | { ok: false; response: NextResponse };
 
 /**
- * 解析呼叫者的私有庫 ownerKey。
+ * 解析呼叫者的私有库 ownerKey。
  *
- * 失敗語義：**未登入／憑證失效一律 401**（guard 這兩種情況都回 401，已自帶
- * `code: agent_not_signed_in`）；guard 的 5xx（agent 網關未啟用等基礎設施態）
- * 原樣帶出，**不冒充 401**——把故障說成「請先登入」會讓運維查錯方向。
- * 錯誤體與其他 skills 路由同款（`{ error, success:false }`），不新增第二套格式。
+ * 失败语义：**未登入／凭证失效一律 401**（guard 这两种情况都回 401，已自带
+ * `code: agent_not_signed_in`）；guard 的 5xx（agent 网关未启用等基础设施态）
+ * 原样带出，**不冒充 401**——把故障说成「请先登入」会让运维查错方向。
+ * 错误体与其他 skills 路由同款（`{ error, success:false }`），不新增第二套格式。
  */
 export async function resolveSkillOwner(req: NextRequest): Promise<SkillOwner> {
   const caller = await resolveAgentCaller(req);

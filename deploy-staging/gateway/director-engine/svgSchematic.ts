@@ -1,9 +1,9 @@
 /**
- * svgSchematic —— 新膠水，非輪子。
- * 輪子錨：投影數學逐行取自 vendor src/lib/director/shotDescription.ts（NDC pinhole 投影：
- * camDir/right/camUp 基、zDepth、深度三分類前景/中景/背景）；俯視圖運動路徑取 vendor
- * src/lib/director/pathCurve.ts 的 sampleMotionPath。本檔只負責把這些純數學輸出畫成 SVG 字串。
- * 美學：白模線框——深底（#0b0f14 系）白線、等寬字標注、無漸變無動畫。輸出 ≤32KB。
+ * svgSchematic —— 新胶水，非轮子。
+ * 轮子锚：投影数学逐行取自 vendor src/lib/director/shotDescription.ts（NDC pinhole 投影：
+ * camDir/right/camUp 基、zDepth、深度三分类前景/中景/背景）；俯视图运动路径取 vendor
+ * src/lib/director/pathCurve.ts 的 sampleMotionPath。本档只负责把这些纯数学输出画成 SVG 字串。
+ * 美学：白模线框——深底（#0b0f14 系）白线、等宽字标注、无渐变无动画。输出 ≤32KB。
  */
 import type {
   DirectorElement,
@@ -43,7 +43,7 @@ function svgWrap(width: number, height: number, body: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="${FONT}">${body}</svg>`;
 }
 
-/** 元素俯視佔地半徑（米）——粗略線框尺度，僅示意用。 */
+/** 元素俯视占地半径（米）——粗略线框尺度，仅示意用。 */
 function elementFootprint(el: DirectorElement): { w: number; h: number } {
   if (el.kind === 'mannequin') return { w: 0.5, h: 0.5 };
   if (el.kind === 'wall') return { w: Math.max(0.2, el.scale.x), h: Math.max(0.2, el.scale.z) };
@@ -55,14 +55,14 @@ function elementShape(el: DirectorElement): 'circle' | 'rect' {
   return el.kind === 'mannequin' || el.kind === 'sphere' || el.kind === 'cylinder' ? 'circle' : 'rect';
 }
 
-/** 俯視圖：元素位置框 + sampleMotionPath 運動路徑 + 攝影機位置與視野扇形。 */
+/** 俯视图：元素位置框 + sampleMotionPath 运动路径 + 摄影机位置与视野扇形。 */
 export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[], shot?: DirectorSequenceShot): string {
   const W = 480;
   const H = 360;
   const MARGIN = 36;
   const active = shot ?? plan.shots[0];
 
-  // 世界包圍盒（元素 + 動作終點 + 攝影機），含 1m padding
+  // 世界包围盒（元素 + 动作终点 + 摄影机），含 1m padding
   const xs: number[] = [];
   const zs: number[] = [];
   for (const el of elements) {
@@ -89,7 +89,7 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
 
   const body: string[] = [];
   body.push(`<rect width="${W}" height="${H}" fill="${BG}"/>`);
-  // 網格（世界 1m 間距，示意）
+  // 网格（世界 1m 间距，示意）
   for (let gx = Math.ceil(minX); gx <= Math.floor(maxX); gx += 1) {
     body.push(`<line x1="${fmt(px(gx))}" y1="${MARGIN}" x2="${fmt(px(gx))}" y2="${H - MARGIN}" stroke="${GRID}" stroke-width="1"/>`);
   }
@@ -97,7 +97,7 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
     body.push(`<line x1="${MARGIN}" y1="${fmt(pz(gz))}" x2="${W - MARGIN}" y2="${fmt(pz(gz))}" stroke="${GRID}" stroke-width="1"/>`);
   }
 
-  // 運動路徑（sampleMotionPath 輪子錨：pathCurve.ts）
+  // 运动路径（sampleMotionPath 轮子锚：pathCurve.ts）
   for (const el of elements) {
     const clips = plan.shots.flatMap((s) => s.actions.filter((a) => a.elementId === el.id && a.keyframes && a.keyframes.some((k) => k.position)));
     for (const clip of clips) {
@@ -105,7 +105,7 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
       const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${fmt(px(p.position.x))},${fmt(pz(p.position.z))}`).join(' ');
       body.push(`<path d="${d}" fill="none" stroke="${DIM}" stroke-width="1.5" stroke-dasharray="4 3"/>`);
     }
-    // 動作直線路徑（from → to）
+    // 动作直线路径（from → to）
     for (const s of plan.shots) {
       for (const a of s.actions) {
         if (a.elementId !== el.id) continue;
@@ -115,7 +115,7 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
     }
   }
 
-  // 元素框（按類型區分：mannequin/sphere/cylinder=圓，box/wall/billboard/crowd=矩形）
+  // 元素框（按类型区分：mannequin/sphere/cylinder=圆，box/wall/billboard/crowd=矩形）
   for (const el of elements) {
     const fp = elementFootprint(el);
     const cx = px(el.position.x);
@@ -132,7 +132,7 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
     body.push(`<text x="${fmt(cx + 6)}" y="${fmt(cy - 6)}" font-size="9" fill="${DIM}">${esc(el.name)}</text>`);
   }
 
-  // 攝影機位置與視野扇形（活動鏡頭；無活動鏡頭則全部鏡頭起點）
+  // 摄影机位置与视野扇形（活动镜头；无活动镜头则全部镜头起点）
   const cameras = active ? [active] : plan.shots;
   for (const s of cameras) {
     const cx = px(s.position.x);
@@ -140,7 +140,7 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
     const tx = px(s.target.x);
     const ty = pz(s.target.z);
     const halfFov = (s.fov / 2) * (Math.PI / 180);
-    const reach = 0.35 * Math.min(W, H); // 扇形半徑（像素）
+    const reach = 0.35 * Math.min(W, H); // 扇形半径（像素）
     const yaw = Math.atan2(ty - cy, tx - cx);
     const a1 = yaw - halfFov;
     const a2 = yaw + halfFov;
@@ -155,20 +155,20 @@ export function renderTopViewSvg(plan: DirectorPlan, elements: DirectorElement[]
     body.push(`<text x="${fmt(cx + 7)}" y="${fmt(cy + 12)}" font-size="9" fill="${LINE}">${esc(s.name)}</text>`);
   }
 
-  // 標題欄
+  // 标题栏
   const dur = planDuration(plan);
-  body.push(`<text x="10" y="16" font-size="10" fill="${LINE}">${esc(plan.name)} · ${plan.shots.length} 鏡 · ${fmt(dur)}s</text>`);
+  body.push(`<text x="10" y="16" font-size="10" fill="${LINE}">${esc(plan.name)} · ${plan.shots.length} 镜 · ${fmt(dur)}s</text>`);
 
   return svgWrap(W, H, body.join(''));
 }
 
-/** 鏡頭框圖：shotDescription.ts 投影數學逐行取用——NDC 投影 + 深度三分類 + 畫家算法 zDepth 降冪。 */
+/** 镜头框图：shotDescription.ts 投影数学逐行取用——NDC 投影 + 深度三分类 + 画家算法 zDepth 降幂。 */
 export function renderCameraViewSvg(shot: DirectorSequenceShot, elements: DirectorElement[]): string {
   const W = 480;
   const H = 270;
   const body: string[] = [];
 
-  // ── 輪子錨：vendor shotDescription.ts 的投影數學（逐行取用） ──
+  // ── 轮子锚：vendor shotDescription.ts 的投影数学（逐行取用） ──
   function sub(a: Vec3, b: Vec3): Vec3 { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
   function len(v: Vec3): number { return Math.hypot(v.x, v.y, v.z); }
   function norm(v: Vec3): Vec3 { const l = len(v) || 1; return { x: v.x / l, y: v.y / l, z: v.z / l }; }
@@ -199,29 +199,29 @@ export function renderCameraViewSvg(shot: DirectorSequenceShot, elements: Direct
   const depths = inFrame.map((p) => p.depth).sort((a, b) => a - b);
   const t1 = depths[Math.floor(depths.length / 3)] ?? Infinity;
   const t2 = depths[Math.floor((depths.length * 2) / 3)] ?? Infinity;
-  // ── 輪子錨結束 ──
+  // ── 轮子锚结束 ──
 
   body.push(`<rect width="${W}" height="${H}" fill="${BG}"/>`);
-  // 畫框安全區（NDC ±1 → 畫布，留 16px 邊）
+  // 画框安全区（NDC ±1 → 画布，留 16px 边）
   const frameL = 16;
   const frameT = 16;
   const frameW = W - frameL * 2;
   const frameH = H - frameT * 2;
   body.push(`<rect x="${frameL}" y="${frameT}" width="${frameW}" height="${frameH}" fill="none" stroke="${GRID}" stroke-width="1"/>`);
-  // 三分線（九宮格）
+  // 三分线（九宫格）
   for (let i = 1; i <= 2; i += 1) {
     body.push(`<line x1="${fmt(frameL + (frameW * i) / 3)}" y1="${frameT}" x2="${fmt(frameL + (frameW * i) / 3)}" y2="${frameT + frameH}" stroke="${GRID}" stroke-width="1"/>`);
     body.push(`<line x1="${frameL}" y1="${fmt(frameT + (frameH * i) / 3)}" x2="${frameL + frameW}" y2="${fmt(frameT + (frameH * i) / 3)}" stroke="${GRID}" stroke-width="1"/>`);
   }
 
-  // 畫家算法：zDepth 降冪（遠→近）繪製
+  // 画家算法：zDepth 降幂（远→近）绘制
   const painterOrder = [...inFrame].sort((a, b) => b.depth - a.depth);
   for (const p of painterOrder) {
     const color = p.depth <= t1 ? FG_COLOR : p.depth <= t2 ? MG_COLOR : BG_COLOR;
     const depthLabel = p.depth <= t1 ? '前景' : p.depth <= t2 ? '中景' : '背景';
     const cx = frameL + (p.ndcX * 0.5 + 0.5) * frameW;
     const cy = frameT + (0.5 - p.ndcY * 0.5) * frameH;
-    // 示意尺寸：越近越大（zDepth 反比，鉗制）
+    // 示意尺寸：越近越大（zDepth 反比，钳制）
     const size = Math.max(8, Math.min(60, 260 / Math.max(1, p.depth)));
     const shape = elementShape(p.e);
     if (shape === 'circle') {
@@ -232,12 +232,12 @@ export function renderCameraViewSvg(shot: DirectorSequenceShot, elements: Direct
     body.push(`<text x="${fmt(cx + size / 2 + 3)}" y="${fmt(cy + 3)}" font-size="9" fill="${color}">${esc(p.e.name)}·${depthLabel}</text>`);
   }
 
-  // 畫外元素（含攝影機身後）
-  const offNames = projected.filter((p) => p.off).map((p) => `${p.e.name}${p.behind ? '(鏡後)' : ''}`);
+  // 画外元素（含摄影机身后）
+  const offNames = projected.filter((p) => p.off).map((p) => `${p.e.name}${p.behind ? '(镜后)' : ''}`);
   if (offNames.length > 0) {
-    body.push(`<text x="${frameL}" y="${H - 22}" font-size="9" fill="${DIM}">畫外：${esc(offNames.join('、'))}</text>`);
+    body.push(`<text x="${frameL}" y="${H - 22}" font-size="9" fill="${DIM}">画外：${esc(offNames.join('、'))}</text>`);
   }
-  // 標題欄（畫框描述文字取輪子 describeShot 輸出，逐行原樣）
+  // 标题栏（画框描述文字取轮子 describeShot 输出，逐行原样）
   const descSnapshots: ElementSnapshotForDesc[] = elements.map((e) => {
     const state = shot.elementStates[e.id];
     const worldPos = state?.position ?? e.position;

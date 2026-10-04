@@ -1,19 +1,19 @@
 // desktop/scripts/e2e/harness.mjs
 //
-// Eimu 真桌面殼 E2E 測試台。
+// Eimu 真桌面壳 E2E 测试台。
 //
-// 目的：可程式化啟動「真的 Electron 殼」（打包後的 eimu-desktop，或 source 樹的
-// electron），用 CDP（playwright-core.chromium.connectOverCDP）接管頁面，
-// 截圖、等待、點擊、在頁面內發 fetch、記錄網路請求。
+// 目的：可程式化启动「真的 Electron 壳」（打包后的 eimu-desktop，或 source 树的
+// electron），用 CDP（playwright-core.chromium.connectOverCDP）接管页面，
+// 截图、等待、点击、在页面内发 fetch、记录网路请求。
 //
-// 設計事實（沿用記憶 2026-10-04-built-artifact-vs-tree-drift）：
-//   - playwright-core **沒有** top-level connectOverCDP，必須 chromium.connectOverCDP(url)，
-//     且不可把方法抽成變數呼叫（會丟 this）。
-//   - 啟動參數：--remote-debugging-port=<free> --ozone-platform=x11
-//     --user-data-dir=<tmp> --no-sandbox --disable-gpu（＋暫存 HOME）。
-//   - 殺程序用 process group（spawn detached，kill(-pid)），避免 pkill -f 匹配 bash 自殺。
+// 设计事实（沿用记忆 2026-10-04-built-artifact-vs-tree-drift）：
+//   - playwright-core **没有** top-level connectOverCDP，必须 chromium.connectOverCDP(url)，
+//     且不可把方法抽成变数呼叫（会丢 this）。
+//   - 启动参数：--remote-debugging-port=<free> --ozone-platform=x11
+//     --user-data-dir=<tmp> --no-sandbox --disable-gpu（＋暂存 HOME）。
+//   - 杀程序用 process group（spawn detached，kill(-pid)），避免 pkill -f 匹配 bash 自杀。
 //
-// 本檔可直接執行做 smoke（見檔尾 main()）。
+// 本档可直接执行做 smoke（见档尾 main()）。
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -73,25 +73,25 @@ async function waitForCdp(port, timeoutMs) {
     await sleep(200);
   }
   throw new Error(
-    `CDP endpoint 未就緒：${url}（${timeoutMs}ms）；last=${lastErr && lastErr.message}`,
+    `CDP endpoint 未就绪：${url}（${timeoutMs}ms）；last=${lastErr && lastErr.message}`,
   );
 }
 
 /**
- * 啟動真殼並回傳控制代碼。
+ * 启动真壳并回传控制代码。
  *
  * opts:
- *   origin            設定 EIMU_APP_ORIGIN（未設＝生產 www.eimu.dev）
- *   binary            打包後的 eimu-desktop（預設 dist-e2e/linux-unpacked）
- *   electronBinary    改走 source 樹：electron 執行檔 + appDir
- *   appDir            傳給 electronBinary 的 app 目錄
- *   homeDir           暫存 HOME（預設 <outDir>/home）
- *   seedProfileFrom   把某 profile 目錄複製到 <homeDir>/.config/Eimu（只讀來源）
- *   userDataDir       預設 <homeDir>/.config/Eimu（由 Electron 自行推導，不強制）
- *   extraEnv          追加環境變數
- *   outDir            預設 /tmp/eimu-e2e-<ts>
- *   deviceScaleFactor 固定截圖 DPR（預設 2）
- *   viewport          固定 {width,height}（預設 1280x800）
+ *   origin            设定 EIMU_APP_ORIGIN（未设＝生产 www.eimu.dev）
+ *   binary            打包后的 eimu-desktop（预设 dist-e2e/linux-unpacked）
+ *   electronBinary    改走 source 树：electron 执行档 + appDir
+ *   appDir            传给 electronBinary 的 app 目录
+ *   homeDir           暂存 HOME（预设 <outDir>/home）
+ *   seedProfileFrom   把某 profile 目录复制到 <homeDir>/.config/Eimu（只读来源）
+ *   userDataDir       预设 <homeDir>/.config/Eimu（由 Electron 自行推导，不强制）
+ *   extraEnv          追加环境变数
+ *   outDir            预设 /tmp/eimu-e2e-<ts>
+ *   deviceScaleFactor 固定截图 DPR（预设 2）
+ *   viewport          固定 {width,height}（预设 1280x800）
  */
 export async function launchShell(opts = {}) {
   const outDir =
@@ -101,7 +101,7 @@ export async function launchShell(opts = {}) {
   const homeDir = opts.homeDir || path.join(outDir, "home");
   fs.mkdirSync(homeDir, { recursive: true });
 
-  // 只讀複製暴君的真實 profile（紅線：絕不修改 ~/.config/Eimu）。
+  // 只读复制暴君的真实 profile（红线：绝不修改 ~/.config/Eimu）。
   if (opts.seedProfileFrom) {
     const dest = path.join(homeDir, ".config", "Eimu");
     if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
@@ -162,7 +162,7 @@ export async function launchShell(opts = {}) {
 
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
 
-  // 找主視窗頁面（排除 devtools://）。
+  // 找主视窗页面（排除 devtools://）。
   const context = browser.contexts()[0];
   const deadline = Date.now() + (opts.pageTimeoutMs || 30000);
   let page = null;
@@ -185,9 +185,9 @@ export async function launchShell(opts = {}) {
     if (page) break;
     await sleep(200);
   }
-  if (!page) throw new Error("找不到可用的主視窗頁面");
+  if (!page) throw new Error("找不到可用的主视窗页面");
 
-  // 網路記錄（requestfinished 才拿得到 responseBodySize；供「原檔未上傳」類斷言）。
+  // 网路记录（requestfinished 才拿得到 responseBodySize；供「原档未上传」类断言）。
   const net = [];
   const attach = (p) => {
     p.on("requestfinished", async (req) => {
@@ -198,7 +198,7 @@ export async function launchShell(opts = {}) {
           const sizes = await req.sizes();
           responseBodySize = sizes.responseBodySize;
         } catch {
-          /* 部分請求拿不到大小 */
+          /* 部分请求拿不到大小 */
         }
         net.push({
           ts: Date.now(),
@@ -272,7 +272,7 @@ export async function launchShell(opts = {}) {
       }
     },
 
-    /** 截圖到 outDir/<name>.png；固定 viewport 與 DPR。回傳 {path,size}。 */
+    /** 截图到 outDir/<name>.png；固定 viewport 与 DPR。回传 {path,size}。 */
     async screenshot(name, { fixed = true, fullPage = false } = {}) {
       if (fixed) {
         await handle.setFixedViewport(
@@ -295,7 +295,7 @@ export async function launchShell(opts = {}) {
       return await page.waitForFunction(target, arg, { timeout });
     },
 
-    /** 依可見文字點擊（預設找可點元素）。 */
+    /** 依可见文字点击（预设找可点元素）。 */
     async clickByText(text, { selector = "button, a, [role=button], summary", timeout = 15000 } = {}) {
       const loc = page.locator(selector, { hasText: text }).first();
       await loc.click({ timeout });
@@ -305,7 +305,7 @@ export async function launchShell(opts = {}) {
       return await page.evaluate(fn, arg);
     },
 
-    /** 在頁面內對相對路徑發 fetch，回 {status, ok, json, textHead}。 */
+    /** 在页面内对相对路径发 fetch，回 {status, ok, json, textHead}。 */
     async fetchInPage(pathname, fetchOpts = {}) {
       return await page.evaluate(
         async ({ pathname, fetchOpts }) => {
@@ -394,7 +394,7 @@ export async function stopChild(child) {
   }
 }
 
-/** 啟動本地 next dev（給 EIMU_APP_ORIGIN=http://localhost:<port> 用）。 */
+/** 启动本地 next dev（给 EIMU_APP_ORIGIN=http://localhost:<port> 用）。 */
 export function startNextDev({ port, cwd, env = {}, outDir }) {
   const logPath = path.join(outDir, `next-dev-${port}.log`);
   const logStream = fs.createWriteStream(logPath, { flags: "a" });
@@ -426,7 +426,7 @@ export async function waitForHttp(url, { timeout = 180000, interval = 1500 } = {
   return { ok: false, last };
 }
 
-// ---- smoke（可選）：node harness.mjs [--origin URL] [--out DIR] ----
+// ---- smoke（可选）：node harness.mjs [--origin URL] [--out DIR] ----
 function parseArgs(argv) {
   const out = {};
   for (let i = 2; i < argv.length; i++) {

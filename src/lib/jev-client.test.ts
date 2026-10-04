@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { jevAsk, type JevChoiceQuestion, type JevNoulQuestion } from "./jev-client";
 
-/** 全部 mock fetch：單測不打真 API（實彈驗證走 env JEV_ENABLED=true 的手動腳本）。 */
+/** 全部 mock fetch：单测不打真 API（实弹验证走 env JEV_ENABLED=true 的手动脚本）。 */
 
 const STATE = '{"tool":"image_generate","ok":true,"task_id":"task_9f3a","url":null}';
 
@@ -14,7 +14,7 @@ const QUESTIONS = {
   expert_route: {
     type: "choice",
     instructions: "Which expert should handle this task?",
-    criteria: { music: "作曲/編曲", editor: "剪輯", other: "none of the above" },
+    criteria: { music: "作曲/编曲", editor: "剪辑", other: "none of the above" },
   } satisfies JevChoiceQuestion,
 } as const;
 

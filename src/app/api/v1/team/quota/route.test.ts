@@ -1,7 +1,7 @@
-// /v1/team/quota 端點的不變量測試（源碼斷言，沿用 v1/route.test.ts 的姿勢）。
+// /v1/team/quota 端点的不变量测试（源码断言，沿用 v1/route.test.ts 的姿势）。
 //
-// 這一層只做契約與授權：配額數學在 lib/generation-core/member-quota.ts（另有測試），
-// 餘額真源在 new-api。路由自己算餘額、或寫本地餘額 = 影子帳本，直接判死。
+// 这一层只做契约与授权：配额数学在 lib/generation-core/member-quota.ts（另有测试），
+// 余额真源在 new-api。路由自己算余额、或写本地余额 = 影子帐本，直接判死。
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -17,34 +17,34 @@ function code(relPath: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-test("團隊配額端點只認 Authorization 的 B 端密鑰，身份不來自請求體", () => {
+test("团队配额端点只认 Authorization 的 B 端密钥，身份不来自请求体", () => {
   const source = code(ROUTE);
   assert.match(source, /readBearerToken\(req\.headers\.get\("authorization"\)\)/);
   assert.match(source, /authenticateBizApiKey/);
   assert.doesNotMatch(source, /x-user-id/);
-  // 團隊主帳 = 呼叫方密鑰的 userId，不從 body 取（否則任何人可代別人分配）。
+  // 团队主帐 = 呼叫方密钥的 userId，不从 body 取（否则任何人可代别人分配）。
   assert.match(source, /auth\.key\.userId/);
   assert.doesNotMatch(source, /payload\.user_id|body\.user_id|team_user_id\s*=\s*payload/);
 });
 
-test("成員金鑰不得自行分配額度（用團隊主帳號密鑰操作）", () => {
+test("成员金钥不得自行分配额度（用团队主帐号密钥操作）", () => {
   const source = code(ROUTE);
   assert.match(source, /member_cannot_allocate/);
-  // user 層判據：呼叫方 key 的 user 是不是在成員名冊裡（不再走 token 映射）。
+  // user 层判据：呼叫方 key 的 user 是不是在成员名册里（不再走 token 映射）。
   assert.match(source, /findMemberByUserId\(auth\.key\.userId\)/);
   assert.doesNotMatch(source, /findMemberByTokenId|member_token_id/);
 });
 
-test("額度寫入只走 member-quota 的分配層（不在路由重算餘額、不寫本地餘額）", () => {
+test("额度写入只走 member-quota 的分配层（不在路由重算余额、不写本地余额）", () => {
   const source = code(ROUTE);
   assert.match(source, /allocateMemberQuota\(/);
   assert.match(source, /readTeamQuotaView\(/);
-  // 路由不得自己碰上游 token/users，也不得寫任何本地額度表。
+  // 路由不得自己碰上游 token/users，也不得写任何本地额度表。
   assert.doesNotMatch(source, /setGatewayTokenQuota|adjustGatewayUserQuotaExact|fetchGatewayToken/);
   assert.doesNotMatch(source, /INSERT INTO|UPDATE .*quota/i);
 });
 
-test("可視面欄位齊備：主帳剩餘／已分配／已用／成員各自額度與消耗", () => {
+test("可视面栏位齐备：主帐剩余／已分配／已用／成员各自额度与消耗", () => {
   const source = code(ROUTE);
   for (const field of [
     "balance_coins",
@@ -54,8 +54,8 @@ test("可視面欄位齊備：主帳剩餘／已分配／已用／成員各自�
     "used_coins",
     "remaining_coins",
   ]) {
-    assert.ok(source.includes(field), `可視面必須輸出 ${field}`);
+    assert.ok(source.includes(field), `可视面必须输出 ${field}`);
   }
-  // 成員身份按 user 暴露（配額桶在成員 user 身上）。
-  assert.ok(source.includes("member_user_id"), "成員可視面必須輸出 member_user_id");
+  // 成员身份按 user 暴露（配额桶在成员 user 身上）。
+  assert.ok(source.includes("member_user_id"), "成员可视面必须输出 member_user_id");
 });

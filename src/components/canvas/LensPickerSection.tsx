@@ -22,7 +22,7 @@
 //      「已忽略 N 条」，不静默吞掉。
 //   3. 槽位视图**只归类不改语序**：实际插入文本按勾选顺序拼接；三个槽
 //      （Format/Aspect Ratio、Setting/Environment、Subject/Scene）本站词库没有对应类别，
-//      不假裝覆盖。
+//      不假装覆盖。
 
 import { useMemo, useState } from "react";
 import { Check, Search, X } from "lucide-react";
@@ -38,7 +38,7 @@ import {
 
 // 尺寸铁律：正文 ≥13px（DESIGN.md §4）。本区的搜索框也走 13px（ios-footnote）——
 // 同面板的提示词库/风格库搜索框是既有的 text-xs(12px)，本区刻意不跟：使用者要读/改的
-// 文本不低於 13px，不為視覺一致犧牲可讀性（既有那兩處不屬本片範圍，未動）。
+// 文本不低于 13px，不为视觉一致牺牲可读性（既有那两处不属本片范围，未动）。
 const INPUT_CLASS =
   "w-full rounded-lg border border-input bg-black/5 py-2 pl-8 pr-3 text-ios-footnote outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ios-blue";
 

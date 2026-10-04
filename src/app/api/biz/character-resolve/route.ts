@@ -1,5 +1,5 @@
 // POST /api/biz/character-resolve — 把 prompt 里的行内实体 tag `@[种类:名称]` 就地展开，
-// 并把命中的卡的参考图併进参考图清单，回传「已解析」结果给调用端（agent 工具层会把结果
+// 并把命中的卡的参考图并进参考图清单，回传「已解析」结果给调用端（agent 工具层会把结果
 // 转投给控制面的生图端点）。
 //
 // 为什么是 `/api/biz/*`：生产 next.config.mjs 的 beforeFiles 改写把 `/v1/:path*` 与
@@ -25,7 +25,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 /**
  * Blob 落地用的幂等键：**刻意不是随机值**。
@@ -50,10 +50,10 @@ interface ResolveRequestBody {
  * 回：`{ prompt: string, reference_images: string[], warnings: string[] }`
  *   - `prompt` ＝ 展开后的正文（token 命中者就地换成卡的 prompt 片段，片段空 → 换卡名；
  *     未命中者**原样保留**；零 token 时与输入逐位元相同）。
- *   - `target` ＝ 生成链路。缺省／`"image"`＝既有视觉行为（**逐位元不變**）；
+ *   - `target` ＝ 生成链路。缺省／`"image"`＝既有视觉行为（**逐位元不变**）；
  *     `"audio"`＝只有音频卡参与（`applyCharacterCards(..., { target: "audio" })`），
  *     未引用的锁定音频卡照常进前缀，**`reference_images` 一律空数组**（音频链路没有参考图语义），
- *     显式传的 `reference_images` 被忽略并出一條 warning。值域外 → 400 `invalid_target`
+ *     显式传的 `reference_images` 被忽略并出一条 warning。值域外 → 400 `invalid_target`
  *     （**不默默收敛成默认**：把 `"Audio"` 静默当视觉会静默丢掉音频卡）。
  *   - `reference_images` ＝ **已可直送上游的公网 URL**，顺序＝命中卡的图在前、调用端显式带的
  *     图在后，按 url 去重，总数上限 5。`data:image` 必须先落地 Blob 换成公网 URL——
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     return bizErrorResponse(400, "缺少必填参数 prompt。", "invalid_request_error", "missing_prompt", traceId);
   }
 
-  // 生成链路形状校验（任何 I/O 之前）：缺省/null → "image"（＝既有行为，逐位元不變）。
+  // 生成链路形状校验（任何 I/O 之前）：缺省/null → "image"（＝既有行为，逐位元不变）。
   let target: BizGenerationTarget;
   try {
     target = parseBizGenerationTarget(body?.target);

@@ -1,27 +1,27 @@
-// 生命週期郵件（Resend）——激活到付費的四個時刻，各發一封、只發一次。
+// 生命周期邮件（Resend）——激活到付费的四个时刻，各发一封、只发一次。
 //
-// 為什麼在控制面 worker 跑：email 存在控制面 postgres 的 user_attribution 側車表
-// （db/migrations/025），「有沒有出過圖」在 generation_job、餘額在 account_ledger，
-// Vercel 都讀不到；worker 的帳本維護循環（10 分鐘一輪）天然是排程點，不另造 cron。
+// 为什么在控制面 worker 跑：email 存在控制面 postgres 的 user_attribution 侧车表
+// （db/migrations/025），「有没有出过图」在 generation_job、余额在 account_ledger，
+// Vercel 都读不到；worker 的帐本维护循环（10 分钟一轮）天然是排程点，不另造 cron。
 //
-// 四封信對應四個產品時刻：
-//   - welcome（交易類）：新人禮 applied 且有已驗證 email。目標＝第一張圖。
-//   - nudge（營銷類）：welcome 已發滿 48h、仍無任何 succeeded 生成。目標＝第一張圖。
-//   - depleted（營銷類）：出過圖、新人禮額度已用到不夠一張標準圖、從未充值、
-//     最後一次出圖已過 1h（不在創作中途打擾）。目標＝第一次付費。
-//   - key_idle（營銷類）：建了第一把 biz key 滿 24h、卻沒有任何 source=biz 的 job。
-//     這一群不是被拒絕，是拿到 key 後沒有下一步；信裡直接放一段可直接跑通的 /v1 curl
-//     （key 位置只放 $EMU_API_KEY 佔位符，永不嵌入真實 key）。目標＝首次 API 調用。
-// 每個示例都是「這句話 → 它真實生成的那張圖」（public/email/example-*.jpg 由同一句
-// prompt 以 gpt-image-2 生成），點擊落地 `/?agent=1&q=` 交接通道：提示詞已填進
-// 助理輸入框，按發送即出圖；未登入者由 a8362440 的補送鏈在登入後自動送出。
+// 四封信对应四个产品时刻：
+//   - welcome（交易类）：新人礼 applied 且有已验证 email。目标＝第一张图。
+//   - nudge（营销类）：welcome 已发满 48h、仍无任何 succeeded 生成。目标＝第一张图。
+//   - depleted（营销类）：出过图、新人礼额度已用到不够一张标准图、从未充值、
+//     最后一次出图已过 1h（不在创作中途打扰）。目标＝第一次付费。
+//   - key_idle（营销类）：建了第一把 biz key 满 24h、却没有任何 source=biz 的 job。
+//     这一群不是被拒绝，是拿到 key 后没有下一步；信里直接放一段可直接跑通的 /v1 curl
+//     （key 位置只放 $EMU_API_KEY 占位符，永不嵌入真实 key）。目标＝首次 API 调用。
+// 每个示例都是「这句话 → 它真实生成的那张图」（public/email/example-*.jpg 由同一句
+// prompt 以 gpt-image-2 生成），点击落地 `/?agent=1&q=` 交接通道：提示词已填进
+// 助理输入框，按发送即出图；未登入者由 a8362440 的补送链在登入后自动送出。
 //
-// 冪等：先在 email_send_log 佔位（user_id+template 唯一）再呼叫 Resend 並帶
-// Idempotency-Key。單收件人錯誤記 failed 不重試；系統性錯誤（401/403/429/5xx/網路）
-// 釋放佔位、中止本輪、下輪重試。未配置 RESEND_API_KEY → 整體 no-op。
-// 營銷類帶一鍵退訂（List-Unsubscribe + 頁內連結）。
+// 幂等：先在 email_send_log 占位（user_id+template 唯一）再呼叫 Resend 并带
+// Idempotency-Key。单收件人错误记 failed 不重试；系统性错误（401/403/429/5xx/网路）
+// 释放占位、中止本轮、下轮重试。未配置 RESEND_API_KEY → 整体 no-op。
+// 营销类带一键退订（List-Unsubscribe + 页内连结）。
 //
-// 隱私：email 永不進日誌；日誌只記 user_id 與計數。
+// 隐私：email 永不进日志；日志只记 user_id 与计数。
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GenerationSql } from "@/lib/generation-core/database";
@@ -41,18 +41,18 @@ const MARKETING_TEMPLATES: ReadonlySet<LifecycleTemplate> = new Set(["nudge", "d
 
 export const LIFECYCLE_EMAIL_FROM = "Emu <hello@eimu.dev>";
 export const NUDGE_DELAY_MS = 48 * 60 * 60_000;
-/** 最後一次出圖後至少等多久才發「額度用完」——不在創作中途打擾。 */
+/** 最后一次出图后至少等多久才发「额度用完」——不在创作中途打扰。 */
 export const DEPLETED_QUIET_MS = 60 * 60_000;
-/** 建 key 後至少觀察多久仍無 biz 調用才發信（當天建的 key 不急著催）。 */
+/** 建 key 后至少观察多久仍无 biz 调用才发信（当天建的 key 不急著催）。 */
 export const KEY_IDLE_DELAY_MS = 24 * 60 * 60_000;
-/** curl 範例裡的 key 佔位符：郵件永不嵌入真實 key，收件人自己替換。 */
+/** curl 范例里的 key 占位符：邮件永不嵌入真实 key，收件人自己替换。 */
 export const KEY_IDLE_KEY_PLACEHOLDER = "$EMU_API_KEY";
-/** key 管理頁的實際路由（對應 src/app/settings/api-keys/page.tsx，非 query tab）。 */
+/** key 管理页的实际路由（对应 src/app/settings/api-keys/page.tsx，非 query tab）。 */
 export const KEY_IDLE_SETTINGS_PATH = "/settings/api-keys";
-/** 每輪每種模板最多發幾封（Resend 免費檔 100 封/天、2 req/s）。 */
+/** 每轮每种模板最多发几封（Resend 免费档 100 封/天、2 req/s）。 */
 export const LIFECYCLE_BATCH_LIMIT = 20;
 
-/** 示例＝這句話與它真實生成的圖（同一句 prompt、gpt-image-2、1536x1024）。 */
+/** 示例＝这句话与它真实生成的图（同一句 prompt、gpt-image-2、1536x1024）。 */
 export const EMAIL_EXAMPLES = [
   { prompt: "一只橘猫趴在洒满阳光的窗台上，水彩风格", image: "/email/example-1.jpg" },
   { prompt: "雨后的赛博朋克城市街角，霓虹灯倒映在湿漉漉的地面上，电影感", image: "/email/example-2.jpg" },
@@ -64,14 +64,14 @@ export type LifecycleRecipient = { userId: number; email: string; imagesMade?: n
 export type LifecycleEmailStore = {
   listWelcomeCandidates(limit: number): Promise<LifecycleRecipient[]>;
   listNudgeCandidates(limit: number, sentBefore: Date): Promise<LifecycleRecipient[]>;
-  /** 已出圖、額度不足一張標準圖、未充值、最後出圖早於 quietBefore 的用戶。 */
+  /** 已出图、额度不足一张标准图、未充值、最后出图早于 quietBefore 的用户。 */
   listDepletedCandidates(limit: number, quietBefore: Date): Promise<LifecycleRecipient[]>;
-  /** 建第一把 biz key 早於 idleBefore、卻無任何 source=biz job、未退訂的用戶。 */
+  /** 建第一把 biz key 早于 idleBefore、却无任何 source=biz job、未退订的用户。 */
   listKeyIdleCandidates(limit: number, idleBefore: Date): Promise<LifecycleRecipient[]>;
-  /** 佔位；已存在回 false。 */
+  /** 占位；已存在回 false。 */
   claim(userId: number, template: LifecycleTemplate): Promise<boolean>;
   settle(userId: number, template: LifecycleTemplate, status: "sent" | "failed", detail: string | null): Promise<void>;
-  /** 撤銷佔位（系統性錯誤時），讓下一輪重試。 */
+  /** 撤销占位（系统性错误时），让下一轮重试。 */
   release(userId: number, template: LifecycleTemplate): Promise<void>;
 };
 
@@ -83,7 +83,7 @@ export type EmailMessage = {
   headers?: Record<string, string>;
 };
 
-/** systemic＝帳號/網域/限流/上游/網路層錯誤：與收件人無關，應釋放佔位、中止本輪、下輪重試。 */
+/** systemic＝帐号/网域/限流/上游/网路层错误：与收件人无关，应释放占位、中止本轮、下轮重试。 */
 export type SendResult = { ok: true; id: string } | { ok: false; error: string; systemic?: boolean };
 
 export function resendApiKey(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -125,7 +125,7 @@ export async function sendViaResend(
   }
 }
 
-// ── 退訂 token（HMAC，復用兩側都有的 GENERATION_BILLING_RELAY_SECRET，域分隔） ──
+// ── 退订 token（HMAC，复用两侧都有的 GENERATION_BILLING_RELAY_SECRET，域分隔） ──
 
 export function unsubscribeSecret(env: NodeJS.ProcessEnv = process.env): string | null {
   return env.GENERATION_BILLING_RELAY_SECRET?.trim() || null;
@@ -146,18 +146,18 @@ export function unsubscribeUrl(userId: number, secret: string, siteUrl = getSite
   return `${siteUrl}/api/email/unsubscribe?u=${userId}&t=${unsubscribeToken(userId, secret)}`;
 }
 
-// ── 連結 ──
+// ── 连结 ──
 
 function utm(campaign: LifecycleTemplate, content: string): string {
   return `utm_source=email&utm_medium=lifecycle&utm_campaign=${campaign}&utm_content=${content}`;
 }
 
-/** 點一下＝提示詞填進助理輸入框（`?agent=1&q=` 既有交接通道），按發送即出圖。 */
+/** 点一下＝提示词填进助理输入框（`?agent=1&q=` 既有交接通道），按发送即出图。 */
 export function tryPromptUrl(siteUrl: string, prompt: string, campaign: LifecycleTemplate, content: string): string {
   return `${siteUrl}/?agent=1&q=${encodeURIComponent(prompt)}&${utm(campaign, content)}`;
 }
 
-/** 最便宜的一檔（付費信只講一個數字：最低多少錢能接著做）。 */
+/** 最便宜的一档（付费信只讲一个数字：最低多少钱能接著做）。 */
 export function entryPlan(): { name: string; price: number; coins: number; images: number } {
   const plan = [...PLANS].sort((a, b) => a.price - b.price)[0];
   const shortName = plan.name.split("·")[0].trim();
@@ -169,7 +169,7 @@ export function entryPlan(): { name: string; price: number; coins: number; image
   };
 }
 
-// ── 版式（表格佈局：Gmail/Apple Mail/Outlook/QQ 邮箱都穩；品牌色取自 DESIGN.md） ──
+// ── 版式（表格布局：Gmail/Apple Mail/Outlook/QQ 邮箱都稳；品牌色取自 DESIGN.md） ──
 
 const C = {
   page: "#f5f7f9",
@@ -247,9 +247,9 @@ function marketingFooter(unsub?: string): string {
 // ── 模板 ──
 
 /**
- * key_idle 信裡的 curl：直接復用建 key 頁的 gpt-image-2 範例（dev-quickstart 真源），
- * 只把 key 換成 $EMU_API_KEY 佔位符——郵件永不嵌入真實 key。
- * catalog 內查無該 model 時回 null（寧可不給範例，也不給一段打不通的命令）。
+ * key_idle 信里的 curl：直接复用建 key 页的 gpt-image-2 范例（dev-quickstart 真源），
+ * 只把 key 换成 $EMU_API_KEY 占位符——邮件永不嵌入真实 key。
+ * catalog 内查无该 model 时回 null（宁可不给范例，也不给一段打不通的命令）。
  */
 function keyIdleCurlExample(): string | null {
   const example = quickstartCurlExamples(KEY_IDLE_KEY_PLACEHOLDER).find(
@@ -342,7 +342,7 @@ ${button(pricingHref, "去充值")}
   };
 }
 
-// ── 執行一輪 ──
+// ── 执行一轮 ──
 
 export type LifecycleRunReport = {
   skipped?: "no_api_key" | "no_secret";
@@ -413,7 +413,7 @@ export async function runLifecycleEmailsOnce(deps: {
 let schemaReady: Promise<void> | null = null;
 
 function ensureSchema(sql: GenerationSql): Promise<void> {
-  // 與 db/migrations/027_lifecycle_email.sql 同一 DDL（冪等，首用即建）。
+  // 与 db/migrations/027_lifecycle_email.sql 同一 DDL（幂等，首用即建）。
   schemaReady ??= (async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS email_send_log (
@@ -499,7 +499,7 @@ export function createPostgresLifecycleEmailStore(sql: GenerationSql): Lifecycle
           AND NOT EXISTS (SELECT 1 FROM account_ledger r WHERE r.billing_user_id = a.user_id AND r.entry_type = 'recharge')
         ORDER BY s.last_success
         LIMIT ${limit * 3}`;
-      // 餘額以帳本唯一讀法判定（含訂閱池 lazy 過期），不在 SQL 裡重算一套。
+      // 余额以帐本唯一读法判定（含订阅池 lazy 过期），不在 SQL 里重算一套。
       const out: LifecycleRecipient[] = [];
       for (const recipient of toRecipients(rows)) {
         if (out.length >= limit) break;
@@ -559,7 +559,7 @@ export async function setMarketingOptOut(sql: GenerationSql, userId: number): Pr
     ON CONFLICT (user_id) DO UPDATE SET marketing_opt_out = true, updated_at = now()`;
 }
 
-/** worker 帳本維護循環的掛點：失敗只記日誌，不擋任務路徑。 */
+/** worker 帐本维护循环的挂点：失败只记日志，不挡任务路径。 */
 export async function runLifecycleEmailsWithSql(sql: GenerationSql): Promise<LifecycleRunReport> {
   return runLifecycleEmailsOnce({
     store: createPostgresLifecycleEmailStore(sql),

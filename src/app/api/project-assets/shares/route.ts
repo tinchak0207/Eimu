@@ -1,8 +1,8 @@
-// REQ-B2 團隊資產空間 API（顯式分享授權）：
-//   POST   { assetKind, assetId, fromProjectId, toProjectId } → 授權（冪等：同鍵重放回 created:false）
-//   DELETE { id } 或 { assetKind, assetId, fromProjectId, toProjectId } → 撤銷
-// 認證：requireVerifiedUser。
-// 紅線：跨項目復用只能靠**這個顯式動作**——沒有隱含可見、沒有「同帳號自動放行」。
+// REQ-B2 团队资产空间 API（显式分享授权）：
+//   POST   { assetKind, assetId, fromProjectId, toProjectId } → 授权（幂等：同键重放回 created:false）
+//   DELETE { id } 或 { assetKind, assetId, fromProjectId, toProjectId } → 撤销
+// 认证：requireVerifiedUser。
+// 红线：跨项目复用只能靠**这个显式动作**——没有隐含可见、没有「同帐号自动放行」。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { findOwnedAsset } from "@/lib/asset-library";
@@ -11,7 +11,7 @@ import { assetShareId, decideAssetShareGrant, toAssetKind } from "@/lib/asset-sc
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       toProjectId,
     });
     if (!decision.ok) {
-      // 越權與值域錯分開：不是自己的資產回 403，參數問題回 400。
+      // 越权与值域错分开：不是自己的资产回 403，参数问题回 400。
       const status = decision.reason === "cross_user" ? 403 : 400;
       return fail(status, REJECT_MESSAGES[decision.reason] ?? "分享被拒绝", `share_rejected:${decision.reason}`);
     }
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, share, created }, { status: 200 });
   } catch (error) {
     if (error instanceof AssetShareConflictError) {
-      // 確定性鍵碰撞（別名）：這是衝突，不是「已授權」——不得回 success:true 冒充冪等。
+      // 确定性键碰撞（别名）：这是冲突，不是「已授权」——不得回 success:true 冒充幂等。
       return fail(409, "分享键冲突：该确定性键已对应另一笔授权，请勿复用同一 asset id", "asset_share_conflict");
     }
     if (error instanceof AssetShareLimitError) {

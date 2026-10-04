@@ -16,7 +16,7 @@ export interface GenerationTaskResultProjection {
   outputIndex: number;
   url: string | null;
   mimeType: string;
-  /** 實測尺寸；成片（G4）probe 缺失時為 null——禁止 0 冒充。 */
+  /** 实测尺寸；成片（G4）probe 缺失时为 null——禁止 0 冒充。 */
   width: number | null;
   height: number | null;
 }
@@ -54,7 +54,7 @@ export function mergeGenerationTaskProjections(
   return [...byId.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
-/** 任務列表指紋：id＋狀態＋更新時間＋完成數。同指紋＝伺服器端沒有任何變化，前端不必寫 state。 */
+/** 任务列表指纹：id＋状态＋更新时间＋完成数。同指纹＝伺服器端没有任何变化，前端不必写 state。 */
 export function generationTaskListSignature(tasks: readonly GenerationTaskProjection[]): string {
   return tasks.map((t) => `${t.taskId}:${t.status}:${t.updatedAt}:${t.completedCount}`).join("|");
 }
@@ -62,7 +62,7 @@ export function generationTaskListSignature(tasks: readonly GenerationTaskProjec
 export const GENERATION_SYNC_LIVE_MS = 3_000;
 export const GENERATION_SYNC_IDLE_MS = 30_000;
 
-/** 下一次同步的延遲：分頁隱藏＝不排（回到前景再補）；有任務在跑 3s；閒置 30s（仍能發現別處提交的任務）。 */
+/** 下一次同步的延迟：分页隐藏＝不排（回到前景再补）；有任务在跑 3s；闲置 30s（仍能发现别处提交的任务）。 */
 export function nextGenerationSyncDelay({ hidden, hasLiveTasks }: { hidden: boolean; hasLiveTasks: boolean }): number | null {
   if (hidden) return null;
   return hasLiveTasks ? GENERATION_SYNC_LIVE_MS : GENERATION_SYNC_IDLE_MS;

@@ -17,46 +17,46 @@ import type { DeliverableKind } from "./deliverable-kind";
 import { GENERATION_MODEL_CATALOG } from "./generation-model-catalog/catalog";
 import type { MediaKind } from "./generation-model-catalog/types";
 
-// ─────────────────────────────────────────── MediaKind ↔ 註冊表對齊
+// ─────────────────────────────────────────── MediaKind ↔ 注册表对齐
 
-// 編譯期守門：MediaKind 現由 DeliverableKind 推導（types.ts `export type MediaKind =
-// DeliverableKind`）。若日後有人把 MediaKind 改回手寫平行聯集、且兩者值域分歧，
-// 這行賦值會 tsc 失敗——本檔在 tsc 掃描面內，等於把註解聲明變成編譯期事實。
+// 编译期守门：MediaKind 现由 DeliverableKind 推导（types.ts `export type MediaKind =
+// DeliverableKind`）。若日后有人把 MediaKind 改回手写平行联集、且两者值域分歧，
+// 这行赋值会 tsc 失败——本档在 tsc 扫描面内，等于把注解声明变成编译期事实。
 const _mediaKindOfDeliverableKind: (kind: DeliverableKind) => MediaKind = (kind) => kind;
 void _mediaKindOfDeliverableKind;
 
-test("catalog 每個模型的 kind 都在 DELIVERABLE_KIND_IDS 內（獨立 oracle：真 catalog 資料）", () => {
+test("catalog 每个模型的 kind 都在 DELIVERABLE_KIND_IDS 内（独立 oracle：真 catalog 资料）", () => {
   const models = Object.values(GENERATION_MODEL_CATALOG);
-  assert.ok(models.length > 0, "catalog 不得為空");
+  assert.ok(models.length > 0, "catalog 不得为空");
   for (const model of models) {
     assert.ok(
       isDeliverableKind(model.kind),
-      `模型 ${model.id} 的 kind=${model.kind} 不在交付物註冊表內`,
+      `模型 ${model.id} 的 kind=${model.kind} 不在交付物注册表内`,
     );
   }
 });
 
-test("catalog 用到的 kind 集合與註冊表 id 集合双向相等（無未承接種類、無孤兒 id）", () => {
+test("catalog 用到的 kind 集合与注册表 id 集合双向相等（无未承接种类、无孤儿 id）", () => {
   const usedByCatalog = new Set(Object.values(GENERATION_MODEL_CATALOG).map((model) => model.kind));
-  // 方向一：catalog 出現的每種 kind 都必須已註冊。
+  // 方向一：catalog 出现的每种 kind 都必须已注册。
   for (const kind of usedByCatalog) {
-    assert.ok(DELIVERABLE_KIND_IDS.includes(kind), `catalog 用了未註冊的 kind: ${kind}`);
+    assert.ok(DELIVERABLE_KIND_IDS.includes(kind), `catalog 用了未注册的 kind: ${kind}`);
   }
-  // 方向二：註冊表每個 id 都至少有一個模型在用（無宣告了卻沒人承接的孤兒 id）。
+  // 方向二：注册表每个 id 都至少有一个模型在用（无宣告了却没人承接的孤儿 id）。
   for (const id of DELIVERABLE_KIND_IDS) {
-    assert.ok(usedByCatalog.has(id), `註冊表 id ${id} 沒有任何 catalog 模型使用`);
+    assert.ok(usedByCatalog.has(id), `注册表 id ${id} 没有任何 catalog 模型使用`);
   }
 });
 
 
-// ─────────────────────────────────────────── 種類推斷
+// ─────────────────────────────────────────── 种类推断
 
-test("deliverableKindOfResult 三種 URL 各自推出正確 id，順序 image→video→audio", () => {
+test("deliverableKindOfResult 三种 URL 各自推出正确 id，顺序 image→video→audio", () => {
   assert.equal(deliverableKindOfResult({ imageUrl: "https://x/a.png" }), "image");
   assert.equal(deliverableKindOfResult({ videoUrl: "https://x/a.mp4" }), "video");
   assert.equal(deliverableKindOfResult({ audioUrl: "https://x/a.mp3" }), "audio");
 
-  // 多欄位同時非空時，按註冊表宣告序 image → video → audio 取先者。
+  // 多栏位同时非空时，按注册表宣告序 image → video → audio 取先者。
   assert.equal(
     deliverableKindOfResult({
       imageUrl: "https://x/a.png",
@@ -67,16 +67,16 @@ test("deliverableKindOfResult 三種 URL 各自推出正確 id，順序 image→
   );
 });
 
-test("deliverableKindOfResult 对空 / 缺欄 / 空白字串一律回 null", () => {
+test("deliverableKindOfResult 对空 / 缺栏 / 空白字串一律回 null", () => {
   assert.equal(deliverableKindOfResult({}), null);
   assert.equal(deliverableKindOfResult({ imageUrl: null, videoUrl: null, audioUrl: null }), null);
   assert.equal(deliverableKindOfResult({ imageUrl: "" }), null);
   assert.equal(deliverableKindOfResult({ imageUrl: "   " }), null);
-  // 非字串（畸形输入）不當成有值。
+  // 非字串（畸形输入）不当成有值。
   assert.equal(deliverableKindOfResult({ videoUrl: 42 as unknown as string }), null);
 });
 
-// ─────────────────────────────────────────── 白名單
+// ─────────────────────────────────────────── 白名单
 
 test("isDeliverableKind 只放行注册表里的种类", () => {
   for (const kind of DELIVERABLE_KINDS) {
@@ -90,13 +90,13 @@ test("isDeliverableKind 只放行注册表里的种类", () => {
   assert.equal(isDeliverableKind(7), false);
 });
 
-// ─────────────────────────────────────────── 清單同步（防两份清单走钟）
+// ─────────────────────────────────────────── 清单同步（防两份清单走钟）
 
 test("DELIVERABLE_KIND_IDS 与 DELIVERABLE_KINDS.map(id) 逐值相等", () => {
   assert.deepEqual([...DELIVERABLE_KIND_IDS], DELIVERABLE_KINDS.map((kind) => kind.id));
 });
 
-// ─────────────────────────────────────────── 資產側映射（三態）
+// ─────────────────────────────────────────── 资产侧映射（三态）
 
 test("assetItemKindOf / assetUrlFieldOf 三态映射正确", () => {
   assert.equal(assetItemKindOf("image"), "image");
@@ -116,15 +116,15 @@ test("deliverableKindSpec / deliverableKindLabel 回注册表真源值", () => {
   assert.equal(deliverableKindSpec("video").playable, true);
   assert.equal(deliverableKindSpec("audio").playable, true);
   assert.equal(deliverableKindSpec("image").playable, false);
-  // label 是 UI 文案真源（簡體）：audio 刻意叫「音乐」，与站内既有口径一致。
+  // label 是 UI 文案真源（简体）：audio 刻意叫「音乐」，与站内既有口径一致。
   assert.equal(deliverableKindLabel("image"), "图片");
   assert.equal(deliverableKindLabel("video"), "视频");
   assert.equal(deliverableKindLabel("audio"), "音乐");
 });
 
-// ─────────────────────────────────────────── 擴充性
+// ─────────────────────────────────────────── 扩充性
 
-test("filterableDeliverableKinds 的長度與內容完全由 DELIVERABLE_KINDS 推導", () => {
+test("filterableDeliverableKinds 的长度与内容完全由 DELIVERABLE_KINDS 推导", () => {
   const filterable = filterableDeliverableKinds();
   const expected = DELIVERABLE_KINDS.filter((kind) => kind.filterable);
   assert.equal(filterable.length, expected.length);
@@ -132,7 +132,7 @@ test("filterableDeliverableKinds 的長度與內容完全由 DELIVERABLE_KINDS �
     filterable.map((kind) => kind.id),
     expected.map((kind) => kind.id),
   );
-  // 每一项都確實標記 filterable（不是別處硬寫的清單）。
+  // 每一项都确实标记 filterable（不是别处硬写的清单）。
   for (const kind of filterable) {
     assert.equal(kind.filterable, true);
   }
@@ -149,7 +149,7 @@ test("注册表每一行的 resultField / assetUrlField 都在合法值域内", 
   }
 });
 
-// ─────────────────────────────────────────── detectPriority（擴充性契約）
+// ─────────────────────────────────────────── detectPriority（扩充性契约）
 
 test("注册表每个种类都带有限数字 detectPriority（新增种类忘填＝测试咬住，不只编译错）", () => {
   for (const kind of DELIVERABLE_KINDS) {
@@ -177,7 +177,7 @@ test("deliverableKindsByDetectPriority 按 detectPriority 升序（期待值由�
     deliverableKindSpec("audio").detectPriority < deliverableKindSpec("image").detectPriority,
     "audio 必须优于 image",
   );
-  // 排序结果与註冊表三行的位置一致：video / audio / image 依次出现。
+  // 排序结果与注册表三行的位置一致：video / audio / image 依次出现。
   assert.ok(actual.indexOf("video") < actual.indexOf("audio"), "video 应排在 audio 前");
   assert.ok(actual.indexOf("audio") < actual.indexOf("image"), "audio 应排在 image 前");
 });
@@ -192,10 +192,10 @@ test("deliverableKindsByDetectPriority 与注册表 id 集合相等（无遗漏�
 });
 
 test("deliverableKindsByDetectPriority 逐值等于 detectPriority 数值本身手工排序（独立 oracle，非重跑实现）", () => {
-  // 独立来源：10/20/30 是「值本身」——写死为 oracle 的 detectPriority 承諾值，
-  // 不依赖实现的 sort，也不由 DELIVERABLE_KINDS 現算（避免同源斷言）。
+  // 独立来源：10/20/30 是「值本身」——写死为 oracle 的 detectPriority 承诺值，
+  // 不依赖实现的 sort，也不由 DELIVERABLE_KINDS 现算（避免同源断言）。
   const oraclePriorityByKind: Record<string, number> = { image: 30, video: 10, audio: 20 };
-  // 先核注册表宣告值 == oracle 值（值本身即資料，而非用實作反推）。
+  // 先核注册表宣告值 == oracle 值（值本身即资料，而非用实作反推）。
   for (const kind of DELIVERABLE_KINDS) {
     assert.equal(
       kind.detectPriority,
@@ -203,11 +203,11 @@ test("deliverableKindsByDetectPriority 逐值等于 detectPriority 数值本身�
       `${kind.id} detectPriority 与 oracle 承诺值不符`,
     );
   }
-  // 把 oracle 的值手工升序排序后映射回种类，與實作輸出逐值比對。
+  // 把 oracle 的值手工升序排序后映射回种类，与实作输出逐值比对。
   const handSorted = Object.entries(oraclePriorityByKind)
     .sort((a, b) => a[1] - b[1])
     .map(([id]) => id);
   assert.deepEqual([...deliverableKindsByDetectPriority()], handSorted);
-  // 獨立再釘一次既有語義：10(video) < 20(audio) < 30(image)。
+  // 独立再钉一次既有语义：10(video) < 20(audio) < 30(image)。
   assert.deepEqual(handSorted, ["video", "audio", "image"]);
 });

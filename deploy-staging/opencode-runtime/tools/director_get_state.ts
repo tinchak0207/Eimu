@@ -3,7 +3,7 @@ import { ok, fail, directorFetch, directorFail, FPS_OUT } from "../lib/director-
 
 // 3D 导演台读取面（片4，2026-09-02）：包 gateway（loopback）GET /agent/v1/director/state。
 // schema 照搬 kunpeng directorTools.ts getStateTool；存取层白名单：zustand→GATEWAY loopback。
-// 2026-09-03 驗屍修復 R2：默认 summary 模式（gateway R1-#1 已支持 ?mode=summary，剥 joints/keyframes
+// 2026-09-03 验尸修复 R2：默认 summary 模式（gateway R1-#1 已支持 ?mode=summary，剥 joints/keyframes
 // 阵列，体积约 1/3）；需要完整 K 帧座标时显式传 mode=full。
 
 const GATEWAY_DESC =

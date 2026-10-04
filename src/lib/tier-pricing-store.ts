@@ -1,10 +1,10 @@
-// tier-pricing 的 Blob-backed 持久化：代理/分銷價目（分層價目）的「改價不用重新部署」
-// 開關。儲存紀律完全照 pricing-overrides.ts——不可變時間戳路徑名、走頁讀、15s 快取、
-// last-known-good + 負向退避——所以 Blob 故障永遠不會卡住一張生成請求，價目（非機密）
-// 是純 JSON。
+// tier-pricing 的 Blob-backed 持久化：代理/分销价目（分层价目）的「改价不用重新部署」
+// 开关。储存纪律完全照 pricing-overrides.ts——不可变时间戳路径名、走页读、15s 快取、
+// last-known-good + 负向退避——所以 Blob 故障永远不会卡住一张生成请求，价目（非机密）
+// 是纯 JSON。
 //
-// sanitization 不在這裡重implement：進出皆走 tier-pricing 核心的
-// normalizeTierPricingDocument。依賴方向：tier-pricing-store → tier-pricing（核心純層）
+// sanitization 不在这里重implement：进出皆走 tier-pricing 核心的
+// normalizeTierPricingDocument。依赖方向：tier-pricing-store → tier-pricing（核心纯层）
 // → generation-model-catalog。
 
 import { randomBytes } from "node:crypto";
@@ -108,8 +108,8 @@ export async function writeTierPricingDocument(doc: TierPricingDocument): Promis
 }
 
 /**
- * 永不拋錯。讀取失敗時服務 last-known-good（只有從未讀取成功的冷實例會拿到空文件——
- * 空 = 全部回落基準價）。Blob 故障不會把已設好的 tier 價靜默改回基準價。
+ * 永不抛错。读取失败时服务 last-known-good（只有从未读取成功的冷实例会拿到空文件——
+ * 空 = 全部回落基准价）。Blob 故障不会把已设好的 tier 价静默改回基准价。
  */
 export async function getRuntimeTierPricingDocument(): Promise<TierPricingDocument> {
   if (Date.now() - lastReadFailureAt < FAILURE_BACKOFF_MS) {

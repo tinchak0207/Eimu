@@ -1,16 +1,16 @@
-// GET /api/blender-artifact?name=<file> — 橋產物讀取通道（2026-09-06 片P）。
+// GET /api/blender-artifact?name=<file> — 桥产物读取通道（2026-09-06 片P）。
 //
-// 存在理由：blender-bridge 產物落在橋工作目錄 `.blender-work/out/`（repo root，
-// 已 gitignore，不在 public/ 靜態服務範圍內），而 blender-delegate 的
-// defaultResolveArtifactUrl 把它落成站內絕對路徑（/blender-work/out/<file>），
-// 該路徑 Next 不服務 → 3D 場景卡的 glTF 預覽與下載連結全部 404。本路由以
-// 站內同源身份代讀，供 Scene3dGltfViewport（鑑權 fetch → blob → engine.setGltfAsset）
-// 與既有 <a download> 連結消費。
+// 存在理由：blender-bridge 产物落在桥工作目录 `.blender-work/out/`（repo root，
+// 已 gitignore，不在 public/ 静态服务范围内），而 blender-delegate 的
+// defaultResolveArtifactUrl 把它落成站内绝对路径（/blender-work/out/<file>），
+// 该路径 Next 不服务 → 3D 场景卡的 glTF 预览与下载连结全部 404。本路由以
+// 站内同源身份代读，供 Scene3dGltfViewport（鉴权 fetch → blob → engine.setGltfAsset）
+// 与既有 <a download> 连结消费。
 //
-// 安全立場：只讀 `<cwd>/.blender-work/out/` 固定目錄、只認單段純檔名
-// （無目錄分隔符 → 無 traversal）、副檔名白名單（只出渲染產物，不出腳本/日誌）、
-// 不做任何上游 fetch（無 SSRF 面）。登入用戶限定（requireVerifiedUser，
-// NEXT_PUBLIC_LOCAL_TEST_MODE=true 時按站內慣例放行）。
+// 安全立场：只读 `<cwd>/.blender-work/out/` 固定目录、只认单段纯档名
+// （无目录分隔符 → 无 traversal）、副档名白名单（只出渲染产物，不出脚本/日志）、
+// 不做任何上游 fetch（无 SSRF 面）。登入用户限定（requireVerifiedUser，
+// NEXT_PUBLIC_LOCAL_TEST_MODE=true 时按站内惯例放行）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { createReadStream, existsSync, statSync } from "node:fs";
@@ -20,9 +20,9 @@ import { requireVerifiedUser } from "@/lib/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** 副檔名白名單 → content-type（只收渲染產物；.py/.log 等一律 404）。 */
+/** 副档名白名单 → content-type（只收渲染产物；.py/.log 等一律 404）。 */
 const CONTENT_TYPES: Record<string, string> = {
   ".glb": "model/gltf-binary",
   ".gltf": "model/gltf+json",
@@ -35,7 +35,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".webm": "video/webm",
 };
 
-/** 檔名白名單：單段、無分隔符、不以點開頭（防 .env/.blender-work 本體與 traversal）。 */
+/** 档名白名单：单段、无分隔符、不以点开头（防 .env/.blender-work 本体与 traversal）。 */
 function isSafeArtifactName(name: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(name) && !name.includes("..") && !name.includes("/");
 }
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
   const stat = statSync(filePath);
   if (!stat.isFile()) return fail(404, "产物不存在", "not_found");
 
-  // Content-Disposition：附件下載時用原始檔名；GLTFLoader fetch 不受影響。
+  // Content-Disposition：附件下载时用原始档名；GLTFLoader fetch 不受影响。
   const asAttachment = req.nextUrl.searchParams.get("download") === "1";
   const stream = Readable.toWeb(createReadStream(filePath)) as ReadableStream;
   return new NextResponse(stream, {

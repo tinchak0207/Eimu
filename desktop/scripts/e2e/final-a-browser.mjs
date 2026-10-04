@@ -1,13 +1,13 @@
 // desktop/scripts/e2e/final-a-browser.mjs
 //
-// 最終驗收代理 A —— 設計意圖 9：非桌面瀏覽器（無 window.eimuLocal）漸進增強。
+// 最终验收代理 A —— 设计意图 9：非桌面浏览器（无 window.eimuLocal）渐进增强。
 //
-// 用一般 Playwright Chromium（**無** Electron preload / window.eimuLocal）打生產
-// https://eimu.dev。為取得已登入上下文，僅在**記憶體內**把真桌面殼 localStorage 的
-// napi_token / napi_user 複製進本 Chromium context；**絕不**寫入 log/檔案/報告。
+// 用一般 Playwright Chromium（**无** Electron preload / window.eimuLocal）打生产
+// https://eimu.dev。为取得已登入上下文，仅在**记忆体内**把真桌面壳 localStorage 的
+// napi_token / napi_user 复制进本 Chromium context；**绝不**写入 log/档案/报告。
 //
-// 判準（任務口徑，非舊 A25）：可用、零 console error、不上傳原檔；瀏覽器也走
-// 「本機 canvas 抽幀 → 只上傳衍生檔」是**刻意設計**，不是 bug。
+// 判准（任务口径，非旧 A25）：可用、零 console error、不上传原档；浏览器也走
+// 「本机 canvas 抽帧 → 只上传衍生档」是**刻意设计**，不是 bug。
 //
 // 用法：node desktop/scripts/e2e/final-a-browser.mjs --out /tmp/final-a-bf-XXX --assets /tmp/bug1-e2e/assets
 
@@ -83,7 +83,7 @@ async function attachFiles(page, files) {
   await cdp.send("DOM.enable");
   const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
   const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: FILE_SEL });
-  if (!nodeId) throw new Error("file input nodeId 為空");
+  if (!nodeId) throw new Error("file input nodeId 为空");
   await cdp.send("DOM.setFileInputFiles", { files: list, nodeId });
 }
 
@@ -124,10 +124,10 @@ async function waitChipsSettledSafe(page, timeout) {
 }
 
 async function main() {
-  log(`最終驗收 A · 設計意圖 9（一般 Chromium，無 eimuLocal）`);
+  log(`最终验收 A · 设计意图 9（一般 Chromium，无 eimuLocal）`);
   log(`out=${outDir} good-a=${sizeOf(goodA)}B`);
 
-  // ── 取已登入 localStorage（僅記憶體）；啟動失敗重試 ≤3（GPU/資源偶發） ──
+  // ── 取已登入 localStorage（仅记忆体）；启动失败重试 ≤3（GPU/资源偶发） ──
   let authJson = null;
   for (let attempt = 1; attempt <= 3 && !authJson; attempt++) {
     try {
@@ -140,7 +140,7 @@ async function main() {
           u: localStorage.getItem("napi_user") || "",
         }));
       } finally { await shell.close().catch(() => {}); }
-    } catch (e) { log(`取 auth 第 ${attempt} 次失敗：${e && e.message}`); await sleep(3000); }
+    } catch (e) { log(`取 auth 第 ${attempt} 次失败：${e && e.message}`); await sleep(3000); }
   }
   let hasAuth = false;
   try { const p = authJson && JSON.parse(authJson); hasAuth = Boolean(p && p.t) && Boolean(p.u); } catch { hasAuth = false; }
@@ -211,7 +211,7 @@ async function main() {
       const usable = !!after && after.chipCount >= 1 && after.uploadingChips === 0 && after.errorChips === 0;
       const pass = eimuLocalUndefined && noExceptions && usable && derivedSeen && originalNotUploaded;
       result.status = pass ? "pass" : "fail";
-      result.intent = "非桌面瀏覽器（無 window.eimuLocal）→ 漸進增強：本機 canvas 抽幀可用、零 console error、不上傳原檔";
+      result.intent = "非桌面浏览器（无 window.eimuLocal）→ 渐进增强：本机 canvas 抽帧可用、零 console error、不上传原档";
       result.observations = {
         eimuLocalType: boot.eimuLocal, eimuShellType: boot.eimuShell, authUsed: hasAuth,
         composerPresent: boot.hasComposer, uploadError: uploadErr, settled,
@@ -222,11 +222,11 @@ async function main() {
         derivedNames, derivedSeen, videoUploadRequests: vid.length,
         originalInAnyParts, originalNotUploaded,
         consoleErrors, pageErrors,
-        note: "瀏覽器走『本機 canvas 抽幀→只上傳衍生檔』符合任務口徑（刻意設計，非 bug）",
+        note: "浏览器走『本机 canvas 抽帧→只上传衍生档』符合任务口径（刻意设计，非 bug）",
       };
       result.networkEvidence = since.map((e) => ({ method: e.method, url: e.url, status: e.status, parts: e.parts, responseJson: e.responseJson }));
       result.artifacts = { boot: bootShot, afterUpload: uploadShot };
-      result.error = pass ? undefined : "判準未達（見 observations）";
+      result.error = pass ? undefined : "判准未达（见 observations）";
     } finally {
       await ctx.close().catch(() => {});
     }
@@ -236,7 +236,7 @@ async function main() {
 
   fs.writeFileSync(path.join(outDir, "BF9.json"), JSON.stringify(result, null, 2));
   log(`▶ BF9: ${result.status}${result.error ? " :: " + result.error : ""}`);
-  log(`messages=0 · 結果目錄：${outDir}`);
+  log(`messages=0 · 结果目录：${outDir}`);
 }
 
 main().catch((e) => { console.error("fatal:", (e && e.stack) || e); process.exit(2); });

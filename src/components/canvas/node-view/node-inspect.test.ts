@@ -9,7 +9,7 @@ function node(type: CanvasNodeType, metadata: CanvasNodeMetadata, title = "镜 0
 
 const labelsOf = (n: CanvasNode, inputs = []) => inspectSections(n, inputs).flatMap((s) => s.rows.map((r) => r.label));
 
-test("inspectSections：生成節點給調參/排錯有用的欄位，全中文標籤、完整值", () => {
+test("inspectSections：生成节点给调参/排错有用的栏位，全中文标签、完整值", () => {
   const n = node(CanvasNodeType.Image, {
     model: "seedream-4",
     prompt: "雨夜旧车站远景，霓虹反光",
@@ -29,18 +29,18 @@ test("inspectSections：生成節點給調參/排錯有用的欄位，全中文�
   assert.equal((byLabel.get("参考图") as { value: string }).value, "主角·林雨");
   assert.equal((byLabel.get("模型") as { value: string }).value, "seedream-4");
   assert.equal((byLabel.get("提示词") as { value: string }).value, "雨夜旧车站远景，霓虹反光");
-  assert.equal((byLabel.get("任务 ID") as { value: string }).value, "gt_2026_abcdef123456", "id 完整不截斷");
+  assert.equal((byLabel.get("任务 ID") as { value: string }).value, "gt_2026_abcdef123456", "id 完整不截断");
   assert.equal((byLabel.get("错误") as { value: string; tone?: string }).tone, "error");
   assert.equal((byLabel.get("状态") as { value: string }).value, "失败");
 });
 
-test("inspectSections：不放對使用者無意義的欄位（座標/尺寸/內部 id/英文縮寫）", () => {
+test("inspectSections：不放对使用者无意义的栏位（座标/尺寸/内部 id/英文缩写）", () => {
   const labels = labelsOf(node(CanvasNodeType.Image, { model: "m", size: "1:1", workflow_id: "wf-1", session_id: "s-1" }));
-  for (const bad of ["ID", "TYPE", "DIM", "POS", "WF", "SES", "CARD"]) assert.ok(!labels.includes(bad), `不應出現 ${bad}`);
-  for (const l of labels) assert.ok(!/^[A-Z.]{2,}$/.test(l), `標籤不得是英文縮寫：${l}`);
+  for (const bad of ["ID", "TYPE", "DIM", "POS", "WF", "SES", "CARD"]) assert.ok(!labels.includes(bad), `不应出现 ${bad}`);
+  for (const l of labels) assert.ok(!/^[A-Z.]{2,}$/.test(l), `标签不得是英文缩写：${l}`);
 });
 
-test("inspectSections：流水線步驟卡＝步驟/工具/交付物/輸入來源；工具輸入 JSON 縮排排版", () => {
+test("inspectSections：流水线步骤卡＝步骤/工具/交付物/输入来源；工具输入 JSON 缩排排版", () => {
   const step = node(CanvasNodeType.Config, {
     pipelineCard: "step_head",
     stepIndex: 1,
@@ -57,7 +57,7 @@ test("inspectSections：流水線步驟卡＝步驟/工具/交付物/輸入來�
   assert.match(input.value, /\n {2}"cast"/);
 });
 
-test("inspectSections：分鏡 21 欄用 AID 中文欄名；總行數給「还有 N 项」用", () => {
+test("inspectSections：分镜 21 栏用 AID 中文栏名；总行数给「还有 N 项」用", () => {
   const n = node(CanvasNodeType.Image, { storyboardShot: { shotNumber: "03", visualDescription: "少女撑伞站在月台边", shotSize: "中景" } as never });
   const shot = inspectSections(n).find((s) => s.key === "shot");
   assert.deepEqual(shot?.rows.map((r) => r.label), ["镜号", "画面描述", "景别"]);

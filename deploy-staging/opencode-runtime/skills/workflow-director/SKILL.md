@@ -117,9 +117,9 @@ content: {
 `steps` 形状：`{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }`（`id` 小写字母开头 `[a-z0-9_]`、档内唯一，**同 id 同节点＝幂等更新**；`needs` 驱动画布连线；`kind` ∈ image／text／video／audio／director，缺省 image）。
 
 **负面案例（禁止）**：
-- **改畫布產線（節點在 `dsl` 裡）→ 一律 `workflow_write`**（冪等；讀 `dsl`→改 `steps`→整份交回）。單步或多步、改 prompt 或改結構，都是它。——改**整条产线结构**（加/删步骤、重排依赖）固然用它，**单步微调也走它**：同 id 同节点＝幂等更新（读了整份 `dsl`、只动第 2 步的 prompt、整份交回，就是正确做法）。
-- **節點不在 `dsl` 裡，或 DSL 表達不到的欄位（位置／尺寸／手調連線）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。
-- **禁手拼 `add_node`＋`connect_nodes` 搭整條產線結構**（繞過編譯器、破壞可逆性）——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），也和人工拖过的坐标打架。
+- **改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。——改**整条产线结构**（加/删步骤、重排依赖）固然用它，**单步微调也走它**：同 id 同节点＝幂等更新（读了整份 `dsl`、只动第 2 步的 prompt、整份交回，就是正确做法）。
+- **节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。
+- **禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），也和人工拖过的坐标打架。
 - **人拖过的节点位置不会被覆盖**：落图时节点位置由画布排布，人工编辑优先。
 - **v0 不删节点**：`source` 里移除的步骤只回 warnings，不会真删画布上已有节点。
 

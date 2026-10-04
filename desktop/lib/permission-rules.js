@@ -1,34 +1,34 @@
 // desktop/lib/permission-rules.js
 //
-// W6c 裝置橋「第二道防線」：**純函式**權限規則評估 + 硬 denylist（零 I/O、零狀態、
-// 零 Electron 依賴，CommonJS，形態照 desktop/lib/policy.js）。
+// W6c 装置桥「第二道防线」：**纯函式**权限规则评估 + 硬 denylist（零 I/O、零状态、
+// 零 Electron 依赖，CommonJS，形态照 desktop/lib/policy.js）。
 //
-// 為什麼要有這一層（機制原則）：「gateway 與裝置橋各擋一次」。雲端閘道即使被 prompt
-// injection 繞過、或規則被下發端篡改，本機仍以**同一份決策語義**獨立拒絕。唯一執法點
-// 不得只放在雲端。
+// 为什么要有这一层（机制原则）：「gateway 与装置桥各挡一次」。云端闸道即使被 prompt
+// injection 绕过、或规则被下发端篡改，本机仍以**同一份决策语义**独立拒绝。唯一执法点
+// 不得只放在云端。
 //
-// 語義來源（逐項對齊，非自創）：
-//   - 規則形式 `ToolName` / `ToolName(specifier)`、三桶 deny/ask/allow 首命中、
-//     路徑前綴 `//` / `~/` / `/` / 無前綴、`/**`：Claude Code v2.1.88 源碼
+// 语义来源（逐项对齐，非自创）：
+//   - 规则形式 `ToolName` / `ToolName(specifier)`、三桶 deny/ask/allow 首命中、
+//     路径前缀 `//` / `~/` / `/` / 无前缀、`/**`：Claude Code v2.1.88 源码
 //     `/tmp/teacher-repo/src/utils/permissions/permissionRuleParser.ts`、
 //     `src/utils/permissions/filesystem.ts:patternWithRoot/matchSpecifier` 等。
-//   - safetyCheck 清單：`src/utils/permissions/filesystem.ts:57-79`
+//   - safetyCheck 清单：`src/utils/permissions/filesystem.ts:57-79`
 //     DANGEROUS_FILES / DANGEROUS_DIRECTORIES（照抄）。
-//   - 硬 denylist 是**我方自補**（Claude Code 並無全域硬編碼 denylist；其二進位那串
-//     `Read(~/.ssh/**)` 是某內建 skill 的 disallowedTools，非全域預設——見記憶
-//     `2026-10-04-claude-code-permission-model-anatomy.md` 第 37-41 行）。清單取本任務
-//     spec 逐條落地：「任何模式都拒」。
+//   - 硬 denylist 是**我方自补**（Claude Code 并无全域硬编码 denylist；其二进位那串
+//     `Read(~/.ssh/**)` 是某内建 skill 的 disallowedTools，非全域预设——见记忆
+//     `2026-10-04-claude-code-permission-model-anatomy.md` 第 37-41 行）。清单取本任务
+//     spec 逐条落地：「任何模式都拒」。
 //
-// 判定序（與 gateway 那路逐項一致，固定不可調換）：
-//   硬 denylist(一律 deny) → safety-check(一律 ask) → 規則 deny → 規則 ask
-//   → 規則 allow → 模式語義 → 預設 ask
+// 判定序（与 gateway 那路逐项一致，固定不可调换）：
+//   硬 denylist(一律 deny) → safety-check(一律 ask) → 规则 deny → 规则 ask
+//   → 规则 allow → 模式语义 → 预设 ask
 //
-// 與 policy.js 的關係：**刻意不動 policy.js**。policy.js 的 isSensitivePath 是與雲端
-// `device-bridge-policy.ts` 逐字對齊的單一真源（雲端向量表 device-bridge-policy.vectors.json
-// 釘住），且被 local-worker.js / device-bridge-client.js / bridge-executor.js /
-// bridge-protocol.js 四個 live 呼叫端使用。把 isSensitivePath 改成轉呼叫本檔的硬 denylist
-// 會讓它比雲端語義更嚴（例：整個 `~/.config` 段、`*.pem` 任意位置），**改動既有呼叫端語義**，
-// 故本模組獨立存在為「更嚴的第二道」，policy.js 一行不動（不得讓既有檢查變鬆）。
+// 与 policy.js 的关系：**刻意不动 policy.js**。policy.js 的 isSensitivePath 是与云端
+// `device-bridge-policy.ts` 逐字对齐的单一真源（云端向量表 device-bridge-policy.vectors.json
+// 钉住），且被 local-worker.js / device-bridge-client.js / bridge-executor.js /
+// bridge-protocol.js 四个 live 呼叫端使用。把 isSensitivePath 改成转呼叫本档的硬 denylist
+// 会让它比云端语义更严（例：整个 `~/.config` 段、`*.pem` 任意位置），**改动既有呼叫端语义**，
+// 故本模组独立存在为「更严的第二道」，policy.js 一行不动（不得让既有检查变松）。
 
 "use strict";
 
@@ -36,22 +36,22 @@ const posix = require("node:path").posix;
 const os = require("node:os");
 
 // ---------------------------------------------------------------------------
-// 常數（單一真源）
+// 常数（单一真源）
 // ---------------------------------------------------------------------------
 
-/** 規則效果三桶。順序即判定優先序：deny → ask → allow。 */
+/** 规则效果三桶。顺序即判定优先序：deny → ask → allow。 */
 const RULE_EFFECTS = Object.freeze(["deny", "ask", "allow"]);
 
 /**
- * 權限模式（我方定義，非 Claude Code 的 default/acceptEdits/…；語義見本任務 spec）：
+ * 权限模式（我方定义，非 Claude Code 的 default/acceptEdits/…；语义见本任务 spec）：
  *   off  — 一律拒
- *   ask  — 根內也問
- *   auto — 授權根內自動、根外問
- *   full — 家目錄內自動、家目錄外問（硬 denylist 仍拒）
+ *   ask  — 根内也问
+ *   auto — 授权根内自动、根外问
+ *   full — 家目录内自动、家目录外问（硬 denylist 仍拒）
  */
 const PERMISSION_MODES = Object.freeze(["off", "ask", "auto", "full"]);
 
-/** 決策理由（結構化，非自由字串；正對應 Claude PermissionDecisionReason 的精神）。 */
+/** 决策理由（结构化，非自由字串；正对应 Claude PermissionDecisionReason 的精神）。 */
 const REASONS = Object.freeze({
   HARD_DENY: "hard_deny",
   SAFETY_CHECK: "safety_check",
@@ -66,7 +66,7 @@ const REASONS = Object.freeze({
   INVALID_MODE: "invalid_mode",
 });
 
-/** safety-check 檔案（bypass-immune，一律 ask）：清單照 Claude Code filesystem.ts:57-68。 */
+/** safety-check 档案（bypass-immune，一律 ask）：清单照 Claude Code filesystem.ts:57-68。 */
 const SAFETY_CHECK_FILES = Object.freeze([
   ".gitconfig",
   ".gitmodules",
@@ -80,58 +80,58 @@ const SAFETY_CHECK_FILES = Object.freeze([
   ".claude.json",
 ]);
 
-/** safety-check 目錄（bypass-immune，一律 ask）：清單照 Claude Code filesystem.ts:74-79。 */
+/** safety-check 目录（bypass-immune，一律 ask）：清单照 Claude Code filesystem.ts:74-79。 */
 const SAFETY_CHECK_DIRS = Object.freeze([".git", ".vscode", ".idea", ".claude"]);
 
 /**
- * 硬 denylist（**我方自補**，任何模式都拒、先於一切）：
- * 逐條附來源。`kind` 決定比對方式：
- *   home-dir       — 家目錄下的目錄本身與其下
- *   home-file      — 家目錄下精確檔名
- *   abs-file       — 檔案系統絕對精確路徑
- *   abs-glob       — 檔案系統絕對 glob（`*` 不跨 `/`）
+ * 硬 denylist（**我方自补**，任何模式都拒、先于一切）：
+ * 逐条附来源。`kind` 决定比对方式：
+ *   home-dir       — 家目录下的目录本身与其下
+ *   home-file      — 家目录下精确档名
+ *   abs-file       — 档案系统绝对精确路径
+ *   abs-glob       — 档案系统绝对 glob（`*` 不跨 `/`）
  *   basename-glob  — 任意位置的 basename glob
- *   basename-exact — 任意位置的 basename 精確相等
- * 全部大小寫折疊（macOS/APFS 不敏感，避免 `.SSH` 繞過）。
+ *   basename-exact — 任意位置的 basename 精确相等
+ * 全部大小写折叠（macOS/APFS 不敏感，避免 `.SSH` 绕过）。
  */
 const HARD_DENY_PATTERNS = Object.freeze([
-  // —— 憑證/金鑰目錄（家目錄下）——
-  { pattern: "~/.ssh", kind: "home-dir", source: "spec 硬 denylist（SSH 私鑰）" },
-  { pattern: "~/.aws", kind: "home-dir", source: "spec 硬 denylist（雲端憑證）" },
-  { pattern: "~/.gnupg", kind: "home-dir", source: "spec 硬 denylist（GPG 私鑰）" },
-  { pattern: "~/.kube", kind: "home-dir", source: "spec 硬 denylist（k8s 憑證）" },
-  { pattern: "~/.docker", kind: "home-dir", source: "spec 硬 denylist（registry 憑證）" },
-  { pattern: "~/.config", kind: "home-dir", source: "spec 硬 denylist（各 CLI 憑證/profile 集中地）" },
+  // —— 凭证/金钥目录（家目录下）——
+  { pattern: "~/.ssh", kind: "home-dir", source: "spec 硬 denylist（SSH 私钥）" },
+  { pattern: "~/.aws", kind: "home-dir", source: "spec 硬 denylist（云端凭证）" },
+  { pattern: "~/.gnupg", kind: "home-dir", source: "spec 硬 denylist（GPG 私钥）" },
+  { pattern: "~/.kube", kind: "home-dir", source: "spec 硬 denylist（k8s 凭证）" },
+  { pattern: "~/.docker", kind: "home-dir", source: "spec 硬 denylist（registry 凭证）" },
+  { pattern: "~/.config", kind: "home-dir", source: "spec 硬 denylist（各 CLI 凭证/profile 集中地）" },
   { pattern: "~/.local/share/keyrings", kind: "home-dir", source: "spec 硬 denylist（GNOME keyring）" },
-  // —— 憑證/歷史檔案（家目錄下）——
-  { pattern: "~/.git-credentials", kind: "home-file", source: "spec 硬 denylist（git 明文憑證）" },
-  { pattern: "~/.netrc", kind: "home-file", source: "spec 硬 denylist（curl/ftp 憑證）" },
-  { pattern: "~/.pgpass", kind: "home-file", source: "spec 硬 denylist（PostgreSQL 密碼）" },
-  { pattern: "~/.bash_history", kind: "home-file", source: "spec 硬 denylist（命令歷史含密文）" },
-  // —— 系統檔案（絕對）——
-  { pattern: "/etc/shadow", kind: "abs-file", source: "spec 硬 denylist（密碼雜湊）" },
-  { pattern: "/etc/sudoers", kind: "abs-file", source: "spec 硬 denylist（提權設定）" },
-  { pattern: "/proc/*/environ", kind: "abs-glob", source: "spec 硬 denylist（進程環境變數含 secret）" },
-  // —— 檔名樣式（任意位置）——
-  { pattern: "*.pem", kind: "basename-glob", source: "spec 硬 denylist（PEM 憑證）" },
-  { pattern: "*.key", kind: "basename-glob", source: "spec 硬 denylist（私鑰）" },
-  { pattern: "*.p12", kind: "basename-glob", source: "spec 硬 denylist（PKCS#12 憑證）" },
-  { pattern: "id_rsa*", kind: "basename-glob", source: "spec 硬 denylist（RSA 私鑰）" },
-  { pattern: "id_ed25519*", kind: "basename-glob", source: "spec 硬 denylist（Ed25519 私鑰）" },
-  { pattern: "*credential*", kind: "basename-glob", source: "spec 硬 denylist（憑證檔名）" },
-  { pattern: "*secret*", kind: "basename-glob", source: "spec 硬 denylist（密文檔名）" },
+  // —— 凭证/历史档案（家目录下）——
+  { pattern: "~/.git-credentials", kind: "home-file", source: "spec 硬 denylist（git 明文凭证）" },
+  { pattern: "~/.netrc", kind: "home-file", source: "spec 硬 denylist（curl/ftp 凭证）" },
+  { pattern: "~/.pgpass", kind: "home-file", source: "spec 硬 denylist（PostgreSQL 密码）" },
+  { pattern: "~/.bash_history", kind: "home-file", source: "spec 硬 denylist（命令历史含密文）" },
+  // —— 系统档案（绝对）——
+  { pattern: "/etc/shadow", kind: "abs-file", source: "spec 硬 denylist（密码杂凑）" },
+  { pattern: "/etc/sudoers", kind: "abs-file", source: "spec 硬 denylist（提权设定）" },
+  { pattern: "/proc/*/environ", kind: "abs-glob", source: "spec 硬 denylist（进程环境变数含 secret）" },
+  // —— 档名样式（任意位置）——
+  { pattern: "*.pem", kind: "basename-glob", source: "spec 硬 denylist（PEM 凭证）" },
+  { pattern: "*.key", kind: "basename-glob", source: "spec 硬 denylist（私钥）" },
+  { pattern: "*.p12", kind: "basename-glob", source: "spec 硬 denylist（PKCS#12 凭证）" },
+  { pattern: "id_rsa*", kind: "basename-glob", source: "spec 硬 denylist（RSA 私钥）" },
+  { pattern: "id_ed25519*", kind: "basename-glob", source: "spec 硬 denylist（Ed25519 私钥）" },
+  { pattern: "*credential*", kind: "basename-glob", source: "spec 硬 denylist（凭证档名）" },
+  { pattern: "*secret*", kind: "basename-glob", source: "spec 硬 denylist（密文档名）" },
   { pattern: "*service-account*.json", kind: "basename-glob", source: "spec 硬 denylist（GCP service account）" },
   { pattern: ".env", kind: "basename-exact", source: "spec 硬 denylist（dotenv 密文）" },
-  { pattern: ".env.*", kind: "basename-glob", source: "spec 硬 denylist（dotenv 變體）" },
+  { pattern: ".env.*", kind: "basename-glob", source: "spec 硬 denylist（dotenv 变体）" },
 ]);
 
 // ---------------------------------------------------------------------------
-// 路徑正規化 / glob 工具（純函式）
+// 路径正规化 / glob 工具（纯函式）
 // ---------------------------------------------------------------------------
 
 /**
- * 正規化成比對用路徑：展開 `~`（需 home）、反斜線→`/`、一律小寫、posix 歸一化。
- * 相對路徑保持相對。無法處理（非字串/空/`~` 但無 home）→ null（呼叫端 fail-closed）。
+ * 正规化成比对用路径：展开 `~`（需 home）、反斜线→`/`、一律小写、posix 归一化。
+ * 相对路径保持相对。无法处理（非字串/空/`~` 但无 home）→ null（呼叫端 fail-closed）。
  */
 function toMatchPath(p, home) {
   if (typeof p !== "string") return null;
@@ -147,14 +147,14 @@ function toMatchPath(p, home) {
   return normalized;
 }
 
-/** 單一字元 regex 轉義。 */
+/** 单一字元 regex 转义。 */
 function escapeRegExpChar(c) {
   return c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
- * glob → regex 主體（未加錨點）。`**` 跨 `/`、`*` 不跨 `/`、`?` 單一非 `/`。
- * 輸入需已小寫、已把 `\` 轉 `/`。
+ * glob → regex 主体（未加锚点）。`**` 跨 `/`、`*` 不跨 `/`、`?` 单一非 `/`。
+ * 输入需已小写、已把 `\` 转 `/`。
  */
 function globBody(glob) {
   let out = "";
@@ -176,12 +176,12 @@ function globBody(glob) {
   return out;
 }
 
-/** glob 對整個字串的完全比對（basename 樣式用）。 */
+/** glob 对整个字串的完全比对（basename 样式用）。 */
 function globMatches(glob, value) {
   return new RegExp(`^${globBody(glob)}$`).test(value);
 }
 
-/** target 是否落在 root 之內（含相等）；兩者皆需絕對、已小寫正規化。 */
+/** target 是否落在 root 之内（含相等）；两者皆需绝对、已小写正规化。 */
 function pathWithin(target, root) {
   if (typeof target !== "string" || typeof root !== "string") return false;
   if (!target.startsWith("/") || !root.startsWith("/")) return false;
@@ -190,19 +190,19 @@ function pathWithin(target, root) {
 }
 
 /**
- * 把規則 specifier 依前綴解析成 {root, rel}：
- *   `//path` → 檔案系統根絕對（root `/`）
- *   `~/path` → 家目錄
- *   `/path`  → 相對於設定來源（settingsRoot）
- *   無前綴 / `./x` → root null（任意位置）
- * root 為 null 表示不限定根，於任意深度比對。
+ * 把规则 specifier 依前缀解析成 {root, rel}：
+ *   `//path` → 档案系统根绝对（root `/`）
+ *   `~/path` → 家目录
+ *   `/path`  → 相对于设定来源（settingsRoot）
+ *   无前缀 / `./x` → root null（任意位置）
+ * root 为 null 表示不限定根，于任意深度比对。
  */
 function resolveSpecifier(specifier, ctx) {
   const s = String(specifier).replace(/\\/g, "/").toLowerCase();
   if (s.startsWith("//")) return { root: "/", rel: s.slice(2) };
   if (s === "~" || s.startsWith("~/")) {
     const homeNorm = toMatchPath(ctx.home, null);
-    // ~ 但無 home → fail-closed（不得退化為「任意位置」而意外放行/命中）
+    // ~ 但无 home → fail-closed（不得退化为「任意位置」而意外放行/命中）
     if (homeNorm === null) return { invalid: true };
     return { root: homeNorm, rel: s === "~" ? "" : s.slice(2) };
   }
@@ -216,8 +216,8 @@ function resolveSpecifier(specifier, ctx) {
 }
 
 /**
- * specifier 是否命中指定路徑。`/**`＝該目錄含其下；無 glob 的目錄/檔案樣式亦比對
- * 「本身與其下」（對齊 Claude ignore() 對裸路徑的語義）。
+ * specifier 是否命中指定路径。`/**`＝该目录含其下；无 glob 的目录/档案样式亦比对
+ * 「本身与其下」（对齐 Claude ignore() 对裸路径的语义）。
  */
 function matchSpecifier(specifier, targetNorm, ctx) {
   if (typeof specifier !== "string" || specifier.length === 0) return false;
@@ -243,7 +243,7 @@ function matchSpecifier(specifier, targetNorm, ctx) {
     body = globBody(rel.slice(0, -3));
     suffix = "(?:/.*)?";
   } else if (!/[*?]/.test(rel)) {
-    // 無 glob：比對本身與其下（Claude ignore() 對裸路徑語義）。
+    // 无 glob：比对本身与其下（Claude ignore() 对裸路径语义）。
     body = globBody(rel);
     suffix = "(?:/.*)?";
   } else {
@@ -258,7 +258,7 @@ function matchSpecifier(specifier, targetNorm, ctx) {
 // parseRule
 // ---------------------------------------------------------------------------
 
-/** 找第一個未轉義字元（前導反斜線數為偶數＝未轉義）。 */
+/** 找第一个未转义字元（前导反斜线数为偶数＝未转义）。 */
 function findFirstUnescaped(str, char) {
   for (let i = 0; i < str.length; i += 1) {
     if (str[i] !== char) continue;
@@ -273,7 +273,7 @@ function findFirstUnescaped(str, char) {
   return -1;
 }
 
-/** 找最後一個未轉義字元。 */
+/** 找最后一个未转义字元。 */
 function findLastUnescaped(str, char) {
   for (let i = str.length - 1; i >= 0; i -= 1) {
     if (str[i] !== char) continue;
@@ -288,19 +288,19 @@ function findLastUnescaped(str, char) {
   return -1;
 }
 
-/** 規則內容去轉義（照 Claude unescapeRuleContent 的反序）。 */
+/** 规则内容去转义（照 Claude unescapeRuleContent 的反序）。 */
 function unescapeContent(content) {
   return content.replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\\\\/g, "\\");
 }
 
 /**
- * 解析規則字串。
+ * 解析规则字串。
  *
- * 語法：`[effect ":"] ToolName [ "(" specifier ")" ]`
- *   - effect 可省略；省略時回 effect:null，由呼叫端依桶別指派。
- *   - effect 若出現但不在 RULE_EFFECTS → 壞形式（回 null）。
- *   - `Tool()`／`Tool(*)` ≡ 工具級規則（specifier:null），照 Claude。
- *   - 任何括號不匹配、tool 名空、收尾後仍有殘字、空字串 → 回 null（壞形式）。
+ * 语法：`[effect ":"] ToolName [ "(" specifier ")" ]`
+ *   - effect 可省略；省略时回 effect:null，由呼叫端依桶别指派。
+ *   - effect 若出现但不在 RULE_EFFECTS → 坏形式（回 null）。
+ *   - `Tool()`／`Tool(*)` ≡ 工具级规则（specifier:null），照 Claude。
+ *   - 任何括号不匹配、tool 名空、收尾后仍有残字、空字串 → 回 null（坏形式）。
  *
  * @returns {{effect: "deny"|"ask"|"allow"|null, tool: string, specifier: string|null}|null}
  */
@@ -313,7 +313,7 @@ function parseRule(text) {
   const m = /^([A-Za-z]+):/.exec(s);
   if (m) {
     const cand = m[1].toLowerCase();
-    if (!RULE_EFFECTS.includes(cand)) return null; // 非白名單 effect
+    if (!RULE_EFFECTS.includes(cand)) return null; // 非白名单 effect
     effect = cand;
     s = s.slice(m[0].length).trim();
     if (s.length === 0) return null;
@@ -321,7 +321,7 @@ function parseRule(text) {
 
   const open = findFirstUnescaped(s, "(");
   if (open === -1) {
-    if (s.includes("(") || s.includes(")")) return null; // 孤立括號
+    if (s.includes("(") || s.includes(")")) return null; // 孤立括号
     const tool = s.trim();
     if (tool.length === 0) return null;
     return { effect, tool, specifier: null };
@@ -368,15 +368,15 @@ function hardDenyMatchNorm(norm, homeNorm) {
 }
 
 /**
- * 是否命中硬 denylist（任何模式都拒、先於一切）。
+ * 是否命中硬 denylist（任何模式都拒、先于一切）。
  *
- * 呼叫端契約：**同時傳入原始路徑與 symlink 解析後路徑**，只要任一命中即拒；
- * 這正是「純字串判定跟不了 symlink」的補位（policy.js 註釋已載明）。
- * fail-closed：raw 非字串/空、`~` 無法展開、resolved 有給但不合法 → 一律視為命中。
- * resolved 未提供（如尚不存在的輸出路徑）→ 只比對 raw（由呼叫端負責補 realpath）。
+ * 呼叫端契约：**同时传入原始路径与 symlink 解析后路径**，只要任一命中即拒；
+ * 这正是「纯字串判定跟不了 symlink」的补位（policy.js 注释已载明）。
+ * fail-closed：raw 非字串/空、`~` 无法展开、resolved 有给但不合法 → 一律视为命中。
+ * resolved 未提供（如尚不存在的输出路径）→ 只比对 raw（由呼叫端负责补 realpath）。
  *
  * @param {{raw: string, resolved?: string|null, home?: string}} input
- * @param {string} [home] 預設 os.homedir()
+ * @param {string} [home] 预设 os.homedir()
  */
 function isHardDenied(input, home = os.homedir()) {
   if (!input || typeof input !== "object") return true;
@@ -404,8 +404,8 @@ function isHardDenied(input, home = os.homedir()) {
 // ---------------------------------------------------------------------------
 
 /**
- * 是否為 safety-check 路徑（bypass-immune、一律 ask、先於規則）。
- * 檔名精確相等或任一路徑段為危險目錄即命中；大小寫折疊。
+ * 是否为 safety-check 路径（bypass-immune、一律 ask、先于规则）。
+ * 档名精确相等或任一路径段为危险目录即命中；大小写折叠。
  * 亦接受 `{raw, resolved}`（任一命中即命中）。非字串/空 → fail-closed true（＝ask）。
  *
  * @param {string|{raw?: string, resolved?: string|null}} p
@@ -436,12 +436,12 @@ function isSafetyCheckPath(p) {
 // evaluatePermission
 // ---------------------------------------------------------------------------
 
-/** 把 rules（陣列或 {deny,ask,allow} 物件）正規化成三桶 parsed 規則。 */
+/** 把 rules（阵列或 {deny,ask,allow} 物件）正规化成三桶 parsed 规则。 */
 function normalizeRules(rules) {
   const buckets = { deny: [], ask: [], allow: [] };
   if (rules === null || rules === undefined) return buckets;
-  // 已解析的規則物件（`{effect, tool, specifier}`）：直接採用（供裝置端把
-  // allowRuleForRoot 的物件規則併入既有規則集，與閘道 PermissionRule 同形）。
+  // 已解析的规则物件（`{effect, tool, specifier}`）：直接采用（供装置端把
+  // allowRuleForRoot 的物件规则并入既有规则集，与闸道 PermissionRule 同形）。
   const pushObject = (entry) => {
     if (!entry || typeof entry !== "object") return;
     if (typeof entry.tool !== "string" || entry.tool.length === 0) return;
@@ -460,7 +460,7 @@ function normalizeRules(rules) {
         continue;
       }
       const parsed = parseRule(entry);
-      // 扁平陣列必須自帶 effect；無 effect 者不套用（不猜測、不意外放行）。
+      // 扁平阵列必须自带 effect；无 effect 者不套用（不猜测、不意外放行）。
       if (!parsed || !parsed.tool || !parsed.effect) continue;
       buckets[parsed.effect].push(parsed);
     }
@@ -477,7 +477,7 @@ function normalizeRules(rules) {
         }
         const parsed = parseRule(entry);
         if (!parsed || !parsed.tool) continue;
-        // 物件桶別為準（entry 內若自帶 effect 一律以桶為準）。
+        // 物件桶别为准（entry 内若自带 effect 一律以桶为准）。
         buckets[effect].push({ effect, tool: parsed.tool, specifier: parsed.specifier });
       }
     }
@@ -485,7 +485,7 @@ function normalizeRules(rules) {
   return buckets;
 }
 
-/** 正規化授權根：絕對、非檔案系統根、非硬 denylist 根，去重。 */
+/** 正规化授权根：绝对、非档案系统根、非硬 denylist 根，去重。 */
 function normalizeRoots(roots, home) {
   if (!Array.isArray(roots)) return [];
   const out = [];
@@ -493,29 +493,29 @@ function normalizeRoots(roots, home) {
     if (typeof r !== "string") continue;
     const n = toMatchPath(r, home);
     if (!n || !n.startsWith("/")) continue;
-    if (n === "/") continue; // 過寬根不授權
-    if (isHardDenied({ raw: n, resolved: n, home }, home)) continue; // 敏感根不授權
+    if (n === "/") continue; // 过宽根不授权
+    if (isHardDenied({ raw: n, resolved: n, home }, home)) continue; // 敏感根不授权
     if (!out.includes(n)) out.push(n);
   }
   return out;
 }
 
 /**
- * 權限決策（與 gateway 同一條判定序，逐項一致）：
- *   硬 denylist → safety-check → 規則 deny → 規則 ask → 規則 allow → 模式語義 → 預設 ask
+ * 权限决策（与 gateway 同一条判定序，逐项一致）：
+ *   硬 denylist → safety-check → 规则 deny → 规则 ask → 规则 allow → 模式语义 → 预设 ask
  *
- * 規則的 deny/ask 對「原始路徑與 resolved 路徑」任一命中即命中（fail-closed）；
- * 規則的 allow 與模式的自動放行要求**所有**提供的路徑皆命中（防 symlink 走私出根）。
+ * 规则的 deny/ask 对「原始路径与 resolved 路径」任一命中即命中（fail-closed）；
+ * 规则的 allow 与模式的自动放行要求**所有**提供的路径皆命中（防 symlink 走私出根）。
  *
  * @param {object} opts
  * @param {string} opts.tool
  * @param {string} opts.rawPath
  * @param {string} [opts.resolvedPath]
- * @param {"off"|"ask"|"auto"|"full"} [opts.mode] 預設 "ask"
+ * @param {"off"|"ask"|"auto"|"full"} [opts.mode] 预设 "ask"
  * @param {string[]|{deny?:string[],ask?:string[],allow?:string[]}} [opts.rules]
  * @param {string[]} [opts.authorizedRoots]
- * @param {string} [opts.home] 預設 os.homedir()
- * @param {string} [opts.settingsRoot] 單斜線 `/path` 的設定來源根；預設 process.cwd()
+ * @param {string} [opts.home] 预设 os.homedir()
+ * @param {string} [opts.settingsRoot] 单斜线 `/path` 的设定来源根；预设 process.cwd()
  * @returns {{decision: "allow"|"deny"|"ask", reason: string, rule?: object}}
  */
 function evaluatePermission(opts = {}) {
@@ -531,12 +531,12 @@ function evaluatePermission(opts = {}) {
     return { decision: "deny", reason: REASONS.INVALID_MODE };
   }
 
-  // 1. 硬 denylist（一律 deny，先於一切）
+  // 1. 硬 denylist（一律 deny，先于一切）
   if (isHardDenied({ raw: rawPath, resolved: resolvedPath, home }, home)) {
     return { decision: "deny", reason: REASONS.HARD_DENY };
   }
 
-  // 2. safety-check 檔案（一律 ask，先於規則）
+  // 2. safety-check 档案（一律 ask，先于规则）
   if (
     (typeof rawPath === "string" && rawPath.trim().length > 0 && isSafetyCheckPath(rawPath)) ||
     (typeof resolvedPath === "string" && resolvedPath.trim().length > 0 && isSafetyCheckPath(resolvedPath))
@@ -544,7 +544,7 @@ function evaluatePermission(opts = {}) {
     return { decision: "ask", reason: REASONS.SAFETY_CHECK };
   }
 
-  // 建立比對用候選路徑（原始 + resolved）
+  // 建立比对用候选路径（原始 + resolved）
   const candidates = [];
   const rawNorm = typeof rawPath === "string" && rawPath.trim().length > 0 ? toMatchPath(rawPath, home) : null;
   const resNorm =
@@ -555,11 +555,11 @@ function evaluatePermission(opts = {}) {
 
   const rules = normalizeRules(opts.rules);
 
-  // 工具名比對：`*` 為萬用（與閘道 device-bridge-policy.ts toolMatches 同語義）。
-  // allowRuleForRoot 產生的規則固定用 tool:"*"（授權根對四個唯讀工具皆放行）。
+  // 工具名比对：`*` 为万用（与闸道 device-bridge-policy.ts toolMatches 同语义）。
+  // allowRuleForRoot 产生的规则固定用 tool:"*"（授权根对四个唯读工具皆放行）。
   const toolMatches = (ruleTool) => ruleTool === "*" || ruleTool === tool;
 
-  // 3. 規則 deny（任一候選命中即命中）
+  // 3. 规则 deny（任一候选命中即命中）
   for (const rule of rules.deny) {
     if (!toolMatches(rule.tool)) continue;
     if (candidates.some((c) => matchSpecifier(rule.specifier, c, ctx))) {
@@ -567,7 +567,7 @@ function evaluatePermission(opts = {}) {
     }
   }
 
-  // 4. 規則 ask
+  // 4. 规则 ask
   for (const rule of rules.ask) {
     if (!toolMatches(rule.tool)) continue;
     if (candidates.some((c) => matchSpecifier(rule.specifier, c, ctx))) {
@@ -575,7 +575,7 @@ function evaluatePermission(opts = {}) {
     }
   }
 
-  // 5. 規則 allow（所有候選皆命中才放行）
+  // 5. 规则 allow（所有候选皆命中才放行）
   for (const rule of rules.allow) {
     if (!toolMatches(rule.tool)) continue;
     if (candidates.length > 0 && candidates.every((c) => matchSpecifier(rule.specifier, c, ctx))) {
@@ -583,7 +583,7 @@ function evaluatePermission(opts = {}) {
     }
   }
 
-  // 6. 模式語義
+  // 6. 模式语义
   if (mode === "off") return { decision: "deny", reason: REASONS.MODE_OFF };
   if (mode === "ask") return { decision: "ask", reason: REASONS.MODE_ASK };
 
@@ -594,7 +594,7 @@ function evaluatePermission(opts = {}) {
     return { decision: "ask", reason: REASONS.DEFAULT_ASK };
   }
 
-  // mode === "full"（家目錄內自動；硬 denylist 已於第 1 步先拒）
+  // mode === "full"（家目录内自动；硬 denylist 已于第 1 步先拒）
   const homeNorm = typeof home === "string" && home.trim().length > 0 ? toMatchPath(home, null) : null;
   const withinHome =
     homeNorm !== null && candidates.length > 0 && candidates.every((c) => pathWithin(c, homeNorm));
@@ -607,20 +607,20 @@ function evaluatePermission(opts = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * 建議授權的最接近目錄（供授權卡「允許此目錄」使用）。
+ * 建议授权的最接近目录（供授权卡「允许此目录」使用）。
  *
- * 契約：把輸入當作「被要求的檔案」，回其所在目錄；**不得**回過寬根
- * （`/`、`~`、`/home`、家目錄本身、家目錄祖先、單層目錄、硬 denylist / safety-check 目錄），
- * 這種情況一律回 null，由呼叫端改為要求單檔授權。
+ * 契约：把输入当作「被要求的档案」，回其所在目录；**不得**回过宽根
+ * （`/`、`~`、`/home`、家目录本身、家目录祖先、单层目录、硬 denylist / safety-check 目录），
+ * 这种情况一律回 null，由呼叫端改为要求单档授权。
  *
- * @param {string} resolvedPath 已 realpath 的絕對路徑
+ * @param {string} resolvedPath 已 realpath 的绝对路径
  * @param {{home?: string}} [opts]
- * @returns {string|null} 正規化後的絕對目錄，或 null
+ * @returns {string|null} 正规化后的绝对目录，或 null
  */
 function suggestRoot(resolvedPath, opts = {}) {
   const home = opts.home !== undefined ? opts.home : os.homedir();
   if (typeof resolvedPath !== "string") return null;
-  // 保留原始大小寫（供顯示/落盤授權用），比對另以低階正規化路徑為準。
+  // 保留原始大小写（供显示/落盘授权用），比对另以低阶正规化路径为准。
   let s = resolvedPath.trim();
   if (s.length === 0) return null;
   if (s === "~" || s.startsWith("~/") || s.startsWith("~\\")) {
@@ -635,12 +635,12 @@ function suggestRoot(resolvedPath, opts = {}) {
 
   const low = parentDisplay.toLowerCase();
   const segs = low.split("/").filter((x) => x.length > 0);
-  if (segs.length < 2) return null; // /home、/tmp、/etc … 單層＝過寬
+  if (segs.length < 2) return null; // /home、/tmp、/etc … 单层＝过宽
 
   const homeNorm = typeof home === "string" && home.trim().length > 0 ? toMatchPath(home, null) : null;
   if (homeNorm !== null) {
-    if (low === homeNorm) return null; // 家目錄本身過寬
-    if (homeNorm.startsWith(`${low}/`)) return null; // parent 是家目錄祖先（如 /home、/Users）
+    if (low === homeNorm) return null; // 家目录本身过宽
+    if (homeNorm.startsWith(`${low}/`)) return null; // parent 是家目录祖先（如 /home、/Users）
   }
   if (isHardDenied({ raw: parentDisplay, resolved: parentDisplay, home }, home)) return null;
   if (isSafetyCheckPath(parentDisplay)) return null;
@@ -648,16 +648,16 @@ function suggestRoot(resolvedPath, opts = {}) {
 }
 
 /**
- * 產生「已同意授權根」的放行規則（**純函式**，與閘道 `authorizationRuleSpecifier`
- * 同形：`//<root 去頭尾斜線>/**`）。用途：對話內就地授權（session/permanent）後，
- * 裝置端第二道防線（mode=ask）必須認得雲端已放行的根；規則以 `tool:"*"` 對四個
- * 唯讀工具一體放行，路徑以 `//`（檔案系統絕對）＋`/**`（含其下）表達，裝置端既有
- * `matchSpecifier` 語義即可命中。
+ * 产生「已同意授权根」的放行规则（**纯函式**，与闸道 `authorizationRuleSpecifier`
+ * 同形：`//<root 去头尾斜线>/**`）。用途：对话内就地授权（session/permanent）后，
+ * 装置端第二道防线（mode=ask）必须认得云端已放行的根；规则以 `tool:"*"` 对四个
+ * 唯读工具一体放行，路径以 `//`（档案系统绝对）＋`/**`（含其下）表达，装置端既有
+ * `matchSpecifier` 语义即可命中。
  *
- * fail-closed：非字串／非絕對（不以 `/` 開頭且非 Windows 磁碟）/ 過寬（去頭尾斜線後
- * 為空，即 `/`）→ 回 `null`（呼叫端須略過，**不得**當成 `//**` 而意外全放行）。
+ * fail-closed：非字串／非绝对（不以 `/` 开头且非 Windows 磁碟）/ 过宽（去头尾斜线后
+ * 为空，即 `/`）→ 回 `null`（呼叫端须略过，**不得**当成 `//**` 而意外全放行）。
  *
- * @param {string} root 授權根（絕對路徑；可含尾斜線）
+ * @param {string} root 授权根（绝对路径；可含尾斜线）
  * @returns {{effect:"allow", tool:"*", specifier:string}|null}
  */
 function allowRuleForRoot(root) {
@@ -667,7 +667,7 @@ function allowRuleForRoot(root) {
   const isAbsolute = trimmed.startsWith("/") || /^[A-Za-z]:[\\/]/.test(trimmed);
   if (!isAbsolute) return null;
   const body = trimmed.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
-  if (body.length === 0 || body === ".") return null; // `/`／空＝過寬
+  if (body.length === 0 || body === ".") return null; // `/`／空＝过宽
   return { effect: "allow", tool: "*", specifier: `//${body}/**` };
 }
 
@@ -684,6 +684,6 @@ module.exports = {
   evaluatePermission,
   suggestRoot,
   allowRuleForRoot,
-  // 低階工具導出供測試與跨模組複用（不改變語義）
+  // 低阶工具导出供测试与跨模组复用（不改变语义）
   _internals: { toMatchPath, globMatches, matchSpecifier, pathWithin },
 };

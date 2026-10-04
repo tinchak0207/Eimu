@@ -16,15 +16,15 @@ import { recordFirstTouchCookieViaRelay, recordInviteViaRelay } from "@/lib/user
 
 export const preferredRegion = "sfo1";
 
-// 對控面 GET /api/user/self 的硬超時。沒有它，上游 hang 死時本路由會一路佔滿
-// Vercel maxDuration（RTT 150-220ms/跳的裸 HTTP 串行鏈）。取 2.5s：正常單跳
-// 加少量重試餘量，超時即走 catch → 503「服務暫時不可用」，前端按 transient 處理。
+// 对控面 GET /api/user/self 的硬超时。没有它，上游 hang 死时本路由会一路占满
+// Vercel maxDuration（RTT 150-220ms/跳的裸 HTTP 串行链）。取 2.5s：正常单跳
+// 加少量重试余量，超时即走 catch → 503「服务暂时不可用」，前端按 transient 处理。
 const ME_UPSTREAM_TIMEOUT_MS = 2_500;
 
-// 驗證結果微快取（複製 image-billing authMicroCache 模式）：30 秒 TTL、上限 500
-// 條、只快取成功結果。key 為憑證雜湊（SHA-256 hex），明文 token 永不進快取、
-// 永不進日誌。命中免去對控面的串行往返；資料只被 JSON 序列化、無調用方改寫，
-// 故直接持有引用，無需像計費快取那樣淺拷貝防污染。
+// 验证结果微快取（复制 image-billing authMicroCache 模式）：30 秒 TTL、上限 500
+// 条、只快取成功结果。key 为凭证杂凑（SHA-256 hex），明文 token 永不进快取、
+// 永不进日志。命中免去对控面的串行往返；资料只被 JSON 序列化、无调用方改写，
+// 故直接持有引用，无需像计费快取那样浅拷贝防污染。
 const ME_CACHE_TTL_MS = 30_000;
 const ME_CACHE_MAX_ENTRIES = 500;
 const meMicroCache = new Map<string, { expiresAt: number; data: unknown }>();
@@ -37,28 +37,28 @@ function cacheVerifiedMe(key: string, data: unknown) {
   meMicroCache.set(key, { expiresAt: Date.now() + ME_CACHE_TTL_MS, data });
 }
 
-// 新人礼掛點（src/lib/welcome-gift-login.ts → 控面 welcome-gift）：驗證通過後、寫快取前，
-// 首次命中即發，已發/不符合則 no-op。每個實例每個用戶只問一次控面（結案狀態永久記住；
-// 未結案 5 分鐘後再試），整段最多等 WELCOME_GIFT_BUDGET_MS，失敗只記日誌、絕不擋登入。
-// 本次發放成功時把 quota 就地加上，錢包當場看到到帳；站內通知同時寫入。
+// 新人礼挂点（src/lib/welcome-gift-login.ts → 控面 welcome-gift）：验证通过后、写快取前，
+// 首次命中即发，已发/不符合则 no-op。每个实例每个用户只问一次控面（结案状态永久记住；
+// 未结案 5 分钟后再试），整段最多等 WELCOME_GIFT_BUDGET_MS，失败只记日志、绝不挡登入。
+// 本次发放成功时把 quota 就地加上，钱包当场看到到帐；站内通知同时写入。
 const WELCOME_GIFT_TIMEOUT_MS = 3_000;
 const WELCOME_GIFT_BUDGET_MS = 4_000;
 const WELCOME_GIFT_RETRY_MS = 5 * 60_000;
 const WELCOME_GIFT_MEMO_MAX = 5_000;
 const welcomeGiftNextCheckAt = new Map<number, number>();
-// 新人禮首登彈窗的待展示狀態（每實例每用戶一份）。
-// 為什麼要單獨記：上面的「結案即不再問控面」memo 會讓後續請求拿不到 grant 結果，
-// 但彈窗狀態必須持續可讀——用戶可能先落在別的頁面、刷新後才回首頁，那時才該彈。
-// 回執（POST）後立刻刪掉，本實例不再拿舊狀態回答。
+// 新人礼首登弹窗的待展示状态（每实例每用户一份）。
+// 为什么要单独记：上面的「结案即不再问控面」memo 会让后续请求拿不到 grant 结果，
+// 但弹窗状态必须持续可读——用户可能先落在别的页面、刷新后才回首页，那时才该弹。
+// 回执（POST）后立刻删掉，本实例不再拿旧状态回答。
 const welcomeGiftModalMemo = new Map<number, WelcomeGiftModal | null>();
 
-/** 由 grant 結果推導彈窗內容（幣數/張數/文案皆來自 welcome-gift 的具名常量）。 */
+/** 由 grant 结果推导弹窗内容（币数/张数/文案皆来自 welcome-gift 的具名常量）。 */
 function welcomeGiftModalOf(result: WelcomeGiftResult): WelcomeGiftModal {
   const copy = welcomeGiftModalCopy(result.coins, WELCOME_GIFT_IMAGE_COUNT);
   return { pending: true, coins: result.coins, images: WELCOME_GIFT_IMAGE_COUNT, ...copy };
 }
 
-/** 記住本輪拿到的彈窗狀態；本輪沒拿到答案（null）時保留上一輪的記憶。 */
+/** 记住本轮拿到的弹窗状态；本轮没拿到答案（null）时保留上一轮的记忆。 */
 function rememberWelcomeGiftModal(userId: number, result: WelcomeGiftResult | null): void {
   if (!result) return;
   if (welcomeGiftModalMemo.size >= WELCOME_GIFT_MEMO_MAX) welcomeGiftModalMemo.clear();
@@ -66,8 +66,8 @@ function rememberWelcomeGiftModal(userId: number, result: WelcomeGiftResult | nu
 }
 
 /**
- * 把彈窗狀態 additive 掛到 new-api 既有回應上（既有欄位一字不動，只多一個 welcomeGift）。
- * pending=false 也照掛：前端只認 pending===true，缺欄位與 false 同義，明寫出來才好回報。
+ * 把弹窗状态 additive 挂到 new-api 既有回应上（既有栏位一字不动，只多一个 welcomeGift）。
+ * pending=false 也照挂：前端只认 pending===true，缺栏位与 false 同义，明写出来才好回报。
  */
 function attachWelcomeGiftModal(user: { id?: unknown }, userId: number): void {
   (user as { welcomeGift?: WelcomeGiftModal }).welcomeGift =
@@ -92,7 +92,7 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
         budgetTimer = setTimeout(() => resolve(null), WELCOME_GIFT_BUDGET_MS);
       }),
     ]).finally(() => clearTimeout(budgetTimer));
-    // 結案＝不必再問：已發且通知已送達、或不符合資格。通知待送的下次再試。
+    // 结案＝不必再问：已发且通知已送达、或不符合资格。通知待送的下次再试。
     const settled = result?.status === "ineligible" ||
       ((result?.status === "granted" || result?.status === "already_granted") && !result.noticePending);
     if (welcomeGiftNextCheckAt.size >= WELCOME_GIFT_MEMO_MAX) welcomeGiftNextCheckAt.clear();
@@ -108,11 +108,11 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
   }
 }
 
-// 首次觸達歸因補記（src/lib/user-attribution.ts → 控面 user-attribution）：
-// OAuth 回調已帶 email 落庫，這裡是**所有 provider 的兜底**（微信等沒有 callback 的路徑
-// 也在登入後打 /api/auth/me，同樣帶著瀏覽器的 eimu_first_touch cookie）。控面是首觸勝出的
-// 冪等 upsert，重複送無副作用。沒有 cookie（多數回訪）＝零網路成本直接跳過。
-// 每個實例每個用戶成功一次即永久記住；失敗 10 分鐘後再試，整段最多等 FIRST_TOUCH_BUDGET_MS。
+// 首次触达归因补记（src/lib/user-attribution.ts → 控面 user-attribution）：
+// OAuth 回调已带 email 落库，这里是**所有 provider 的兜底**（微信等没有 callback 的路径
+// 也在登入后打 /api/auth/me，同样带著浏览器的 eimu_first_touch cookie）。控面是首触胜出的
+// 幂等 upsert，重复送无副作用。没有 cookie（多数回访）＝零网路成本直接跳过。
+// 每个实例每个用户成功一次即永久记住；失败 10 分钟后再试，整段最多等 FIRST_TOUCH_BUDGET_MS。
 const FIRST_TOUCH_BUDGET_MS = 1_500;
 const FIRST_TOUCH_RETRY_MS = 10 * 60_000;
 const FIRST_TOUCH_MEMO_MAX = 5_000;
@@ -139,7 +139,7 @@ async function applyFirstTouchAttribution(userId: number, rawCookie: string | nu
   }
 }
 
-// 邀請綁定：同一套記憶（每實例每用戶處理完一次即永久記住，失敗 10 分鐘後再試）。
+// 邀请绑定：同一套记忆（每实例每用户处理完一次即永久记住，失败 10 分钟后再试）。
 const inviteNextAttemptAt = new Map<number, number>();
 
 async function applyInviteBinding(userId: number, rawCookie: string | null | undefined): Promise<void> {
@@ -163,7 +163,7 @@ async function applyInviteBinding(userId: number, rawCookie: string | null | und
   }
 }
 
-/** 登入後的側車事實：新人禮（額度）與首次觸達歸因並行；兩者都永不 throw、都不擋登入。 */
+/** 登入后的侧车事实：新人礼（额度）与首次触达归因并行；两者都永不 throw、都不挡登入。 */
 async function applyLoginSideFacts(payload: unknown, req: NextRequest): Promise<void> {
   const userId = Number((payload as { data?: { id?: unknown } } | null)?.data?.id);
   const attribution = Number.isInteger(userId) && userId > 0
@@ -191,7 +191,7 @@ export async function GET(req: NextRequest) {
 
   // ── Real mode ──────────────────────────────────────────────────────────────
   try {
-    // 緩存 key 用整串憑證頭（Bearer token + 可選 userId）的雜湊；日誌只印前 8 碼。
+    // 缓存 key 用整串凭证头（Bearer token + 可选 userId）的杂凑；日志只印前 8 码。
     const cacheKey = createHash("sha256")
       .update(`${authHeader}|${userIdHeader ?? ""}`)
       .digest("hex");
@@ -216,7 +216,7 @@ export async function GET(req: NextRequest) {
 
     // new-api 对 Bearer 模式强制 New-Api-User 头；前端 user 存储可能是坏残留
     // （缺失或旧 id）。token 的唯一可信 userId 在控面稳定令牌表——反查重试。
-    // 反查鏈與首查是真相依（失敗回退路徑），保持串行不並行。
+    // 反查链与首查是真相依（失败回退路径），保持串行不并行。
     if (!upstream.ok || !data?.success) {
       const lookedUp = await lookupUserIdByTokenViaRelay(token);
       if (lookedUp) {
@@ -257,7 +257,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** 用憑證向上游問自己的 userId（與 GET 同一真源：new-api 對 Bearer 強制 New-Api-User 頭）。 */
+/** 用凭证向上游问自己的 userId（与 GET 同一真源：new-api 对 Bearer 强制 New-Api-User 头）。 */
 async function upstreamUserId(token: string, userIdHeader: string | null): Promise<number | null> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   if (userIdHeader) headers["New-Api-User"] = userIdHeader;
@@ -272,14 +272,14 @@ async function upstreamUserId(token: string, userIdHeader: string | null): Promi
 }
 
 /**
- * POST /api/auth/me —— 「我的會話態」回執（加法式：GET 的語義一行不動）。
+ * POST /api/auth/me —— 「我的会话态」回执（加法式：GET 的语义一行不动）。
  *
- * 目前只有一件事：新人禮首登彈窗已展示（控制面 welcome-gift op=modal_seen，寫
- * welcome_gift_grant.modal_seen_at）。這是彈窗「只展示一次」的服務端權威——換設備、
- * 換瀏覽器再登入也不會重彈；前端 localStorage 只是本設備的輔助閘門。
+ * 目前只有一件事：新人礼首登弹窗已展示（控制面 welcome-gift op=modal_seen，写
+ * welcome_gift_grant.modal_seen_at）。这是弹窗「只展示一次」的服务端权威——换设备、
+ * 换浏览器再登入也不会重弹；前端 localStorage 只是本设备的辅助闸门。
  *
- * 身份取上游 /api/user/self（與 GET 同一真源），拿不到再走控面穩定令牌反查。
- * 永不 throw 到調用方：失敗只回 {success:false}，前端已本地記「看過」，不影響登入。
+ * 身份取上游 /api/user/self（与 GET 同一真源），拿不到再走控面稳定令牌反查。
+ * 永不 throw 到调用方：失败只回 {success:false}，前端已本地记「看过」，不影响登入。
  */
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, message: "无法确认用户身份" }, { status: 401 });
     }
     const updated = await ackWelcomeGiftModalSeenViaRelay(userId);
-    // 本實例立刻忘掉待展示狀態（跨實例由服務端 modal_seen_at 保證不再彈）。
+    // 本实例立刻忘掉待展示状态（跨实例由服务端 modal_seen_at 保证不再弹）。
     welcomeGiftModalMemo.delete(userId);
     welcomeGiftNextCheckAt.delete(userId);
     return NextResponse.json({ success: true, updated });

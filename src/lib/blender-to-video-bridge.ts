@@ -1,25 +1,25 @@
 /**
- * Blender → Video bridge：3D 場景卡幀 → 視頻生成參考卡映射。
+ * Blender → Video bridge：3D 场景卡帧 → 视频生成参考卡映射。
  *
- * 輪子真源（白名單外逐行等價，白名單內只改數據源）：
- * - 欄位構造：`GenerationReference`（src/lib/generation-core/types.ts:34-42）——
- *   url / mimeType / name / referenceRole，referenceRole 沿用既有枚舉
- *   （"general"|"character"|"product"|"style"|"composition"），不建第二套詞表。
- * - 通道契約：i2v 首/尾幀通道 references[0..1]（newapi-video-upstream.ts:144-155
+ * 轮子真源（白名单外逐行等价，白名单内只改数据源）：
+ * - 栏位构造：`GenerationReference`（src/lib/generation-core/types.ts:34-42）——
+ *   url / mimeType / name / referenceRole，referenceRole 沿用既有枚举
+ *   （"general"|"character"|"product"|"style"|"composition"），不建第二套词表。
+ * - 通道契约：i2v 首/尾帧通道 references[0..1]（newapi-video-upstream.ts:144-155
  *   → metadata.first_frame_image/last_frame_image、metaso-upstream.ts:57-63 →
- *   role first_frame/last_frame，兩通道都 cap 2 張）。
+ *   role first_frame/last_frame，两通道都 cap 2 张）。
  *
- * 白名單改動 = 數據源：幀來自 sceneCard.stills_urls（Blender 渲染 PNG），
- * 而非用戶上傳圖。品質标注（欄位級區分）：previz 灰盒幀 referenceRole 只准
- * "composition"（構圖參考）；lookdev 檔幀可作 "style"（風格參考）。
- * previz 幀永不佔 i2v 首/尾幀位（references[0..1]）——上游不讀 role，role 區分
- * 對它們無防護力，故用分層輸出硬隔離。
+ * 白名单改动 = 数据源：帧来自 sceneCard.stills_urls（Blender 渲染 PNG），
+ * 而非用户上传图。品质标注（栏位级区分）：previz 灰盒帧 referenceRole 只准
+ * "composition"（构图参考）；lookdev 档帧可作 "style"（风格参考）。
+ * previz 帧永不占 i2v 首/尾帧位（references[0..1]）——上游不读 role，role 区分
+ * 对它们无防护力，故用分层输出硬隔离。
  */
 
 import type { Scene3dCardMetadata } from "./canvas/types";
 import type { GenerationReference } from "./generation-core/types";
 
-/** 場景幀品質檔位：previz=Eevee 灰盒預演（samples=1 存活預設），lookdev=cycles/材質燈光定稿檔。 */
+/** 场景帧品质档位：previz=Eevee 灰盒预演（samples=1 存活预设），lookdev=cycles/材质灯光定稿档。 */
 export type SceneFrameQuality = "previz" | "lookdev";
 
 const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
@@ -30,27 +30,27 @@ const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
 };
 
 export interface SceneFrameReferenceInput {
-  /** 3D 場景卡（canvas scene_3d 節點 metadata，雙白名單已透傳）。 */
+  /** 3D 场景卡（canvas scene_3d 节点 metadata，双白名单已透传）。 */
   sceneCard: Scene3dCardMetadata;
-  /** 幀品質檔位。缺省 "previz"（保守：Blender 橋默認走 Eevee previz 存活預設）。 */
+  /** 帧品质档位。缺省 "previz"（保守：Blender 桥默认走 Eevee previz 存活预设）。 */
   quality?: SceneFrameQuality;
-  /** 首/尾幀覆蓋（例如從 turntable 抽幀後的 URL）；缺省用 stills 前兩張。 */
+  /** 首/尾帧覆盖（例如从 turntable 抽帧后的 URL）；缺省用 stills 前两张。 */
   firstFrameUrl?: string;
   lastFrameUrl?: string;
-  /** 參考卡張數帽。缺省 2 = i2v 首/尾幀通道契約（兩上游一致）。 */
+  /** 参考卡张数帽。缺省 2 = i2v 首/尾帧通道契约（两上游一致）。 */
   maxReferences?: number;
 }
 
 export interface SceneFrameReferenceCard {
-  /** 可直接餵視頻生成 workflow.references 的參考卡（≤ maxReferences 張）。 */
+  /** 可直接喂视频生成 workflow.references 的参考卡（≤ maxReferences 张）。 */
   references: GenerationReference[];
-  /** 生效的品質檔位。 */
+  /** 生效的品质档位。 */
   quality: SceneFrameQuality;
-  /** true = previz：參考幀只准構圖參考，不得作風格參考，也不得佔首/尾幀位。 */
+  /** true = previz：参考帧只准构图参考，不得作风格参考，也不得占首/尾帧位。 */
   compositionOnly: boolean;
-  /** 隨卡拼接進視頻 prompt 的參考聲明（Seedance 正向語彙，品質鎖同形）。 */
+  /** 随卡拼接进视频 prompt 的参考声明（Seedance 正向语汇，品质锁同形）。 */
   referenceDirective: string;
-  /** 構造備注：剔除項與原因（可觀測、可驗收）。 */
+  /** 构造备注：剔除项与原因（可观测、可验收）。 */
   notes: string[];
 }
 
@@ -70,14 +70,14 @@ const LOOKDEV_DIRECTIVE =
   "The reference frames define composition, materials, and lighting mood — keep the on-screen look consistent with them.";
 
 /**
- * sceneCard 幀 → 視頻生成參考卡。
+ * sceneCard 帧 → 视频生成参考卡。
  *
- * 分層規則（previz 品質标注的欄位級落地）：
- * - lookdev 檔：still 幀可佔 references[0..1]（i2v 首/尾幀位），referenceRole = "style"。
- * - previz 檔：referenceRole = "composition"，compositionOnly = true；本函數只產出
- *   構圖角色卡，呼叫方不得把它們放進 references[0..1]（上游按位置解讀，不讀 role）。
- * - turntable_url 是視頻（mp4/webm），不是幀：永不入參考卡；要抽幀由呼叫方先解出
- *   幀 URL 再經 firstFrameUrl/lastFrameUrl 覆蓋傳入。
+ * 分层规则（previz 品质标注的栏位级落地）：
+ * - lookdev 档：still 帧可占 references[0..1]（i2v 首/尾帧位），referenceRole = "style"。
+ * - previz 档：referenceRole = "composition"，compositionOnly = true；本函数只产出
+ *   构图角色卡，呼叫方不得把它们放进 references[0..1]（上游按位置解读，不读 role）。
+ * - turntable_url 是视频（mp4/webm），不是帧：永不入参考卡；要抽帧由呼叫方先解出
+ *   帧 URL 再经 firstFrameUrl/lastFrameUrl 覆盖传入。
  */
 export function buildSceneFrameReferenceCard(input: SceneFrameReferenceInput): SceneFrameReferenceCard {
   const quality: SceneFrameQuality = input.quality ?? "previz";
@@ -93,7 +93,7 @@ export function buildSceneFrameReferenceCard(input: SceneFrameReferenceInput): S
     seen.add(trimmed);
     const mime = mimeOf(trimmed);
     if (!mime) {
-      notes.push(`skipped non-image frame ${trimmed.slice(0, 120)} (turntable/blend/glb 不入參考卡)`);
+      notes.push(`skipped non-image frame ${trimmed.slice(0, 120)} (turntable/blend/glb 不入参考卡)`);
       return;
     }
     references.push({
@@ -105,11 +105,11 @@ export function buildSceneFrameReferenceCard(input: SceneFrameReferenceInput): S
   };
 
   if (compositionOnly && (input.firstFrameUrl || input.lastFrameUrl)) {
-    notes.push("previz 品質檔下 firstFrameUrl/lastFrameUrl 覆蓋被忽略：灰盒幀不得佔 i2v 首/尾幀位");
+    notes.push("previz 品质档下 firstFrameUrl/lastFrameUrl 覆盖被忽略：灰盒帧不得占 i2v 首/尾帧位");
   }
 
-  // 首/尾幀位：僅 lookdev 檔允許；顯式覆蓋優先，否則 stills 順位補位。
-  // stills_urls 自 2026-09-27 起是可選欄（本機導入卡只帶 glb_path）→ 缺席＝空清單。
+  // 首/尾帧位：仅 lookdev 档允许；显式覆盖优先，否则 stills 顺位补位。
+  // stills_urls 自 2026-09-27 起是可选栏（本机导入卡只带 glb_path）→ 缺席＝空清单。
   const stills = input.sceneCard.stills_urls ?? [];
   if (!compositionOnly) {
     const first = input.firstFrameUrl?.trim() || stills[0];
@@ -118,17 +118,17 @@ export function buildSceneFrameReferenceCard(input: SceneFrameReferenceInput): S
     if (last) push(last, "scene3d-last-frame");
   }
 
-  // 剩餘槽位：stills 順位補齊（previz 檔在這裡以 composition 角色進卡）。
+  // 剩余槽位：stills 顺位补齐（previz 档在这里以 composition 角色进卡）。
   for (const still of stills) {
     if (references.length >= max) break;
     push(still, `scene3d-ref-${references.length}`);
   }
 
   if (references.length === 0) {
-    notes.push("sceneCard 無可用圖像幀（stills 空或全為視頻/模型檔）：參考卡為空，不得宣稱已附參考圖");
+    notes.push("sceneCard 无可用图像帧（stills 空或全为视频/模型档）：参考卡为空，不得宣称已附参考图");
   }
   if (!input.sceneCard.turntable_url && !input.sceneCard.blend_path) {
-    notes.push("sceneCard 缺 turntable_url 與 blend_path：非完整交付，幀可信度存疑");
+    notes.push("sceneCard 缺 turntable_url 与 blend_path：非完整交付，帧可信度存疑");
   }
 
   return {

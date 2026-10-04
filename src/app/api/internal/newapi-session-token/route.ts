@@ -16,7 +16,7 @@ import { ensureNewApiSessionToken, lookupUserIdByToken } from "@/lib/newapi-sess
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const SIGNATURE_DOMAIN = "newapi-session-token";
 
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, token: result.token, reused: result.reused });
   } catch (error) {
-    // 不洩漏内部错误细节（DB 拓扑/网关拓扑/SQL 等），只留固定文案；细节进日志。
+    // 不泄漏内部错误细节（DB 拓扑/网关拓扑/SQL 等），只留固定文案；细节进日志。
     console.error("[internal/newapi-session-token] ensure failed", error);
     return NextResponse.json({ ok: false, message: "会话令牌处理失败。" }, { status: 500 });
   }

@@ -59,9 +59,9 @@ export function usePixaiEdit({
   prompt: string;
   isLoggedIn?: boolean;
   onEditResult?: (url: string) => void;
-  /** D-24 提示抑制下發（useAgentHint 回傳）：三條送出路徑閉包共享同一個。 */
+  /** D-24 提示抑制下发（useAgentHint 回传）：三条送出路径闭包共享同一个。 */
   suppress: () => void;
-  /** 未登入送出時的登入入口（standalone PWA / Electron 殼走交接）；不傳則退回同窗口跳轉。 */
+  /** 未登入送出时的登入入口（standalone PWA / Electron 壳走交接）；不传则退回同窗口跳转。 */
   onNeedLogin?: () => void;
 }) {
   const { token, user } = useAuth();
@@ -137,9 +137,9 @@ export function usePixaiUpscale({
 }: {
   isLoggedIn?: boolean;
   onUpscaleResult?: (url: string) => void;
-  /** D-24 提示抑制下發（useAgentHint 回傳）：三條送出路徑閉包共享同一個。 */
+  /** D-24 提示抑制下发（useAgentHint 回传）：三条送出路径闭包共享同一个。 */
   suppress: () => void;
-  /** 未登入送出時的登入入口（standalone PWA / Electron 殼走交接）；不傳則退回同窗口跳轉。 */
+  /** 未登入送出时的登入入口（standalone PWA / Electron 壳走交接）；不传则退回同窗口跳转。 */
   onNeedLogin?: () => void;
 }) {
   const { token, user } = useAuth();

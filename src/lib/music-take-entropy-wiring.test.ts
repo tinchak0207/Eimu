@@ -1,16 +1,16 @@
 /**
- * music-take-entropy 接線測試（多版本偏好闸接進 music_gen 交付口，2026-10-03）。
+ * music-take-entropy 接线测试（多版本偏好闸接进 music_gen 交付口，2026-10-03）。
  *
- * node:test + fetch mock（不真連上游、不真落盤）。覆蓋本次 additive 改動的**行為**：
- *   1. 一次 FlowMusic 多 clips 回包（2 個 clip，metadata 幾乎相同、時長接近）→ 回執帶
- *      preference_question、其 asked===false、options 尾端兩條退路、optionTakeUrls 鍵數
- *      === take 選項數。
- *   2. 2 個 metadata 明顯相異的 clip → asked===true、options.length <= 4。
- *   3. 單 clip（audios.length===1）→ 回執不含 preference_question 鍵（既有形狀零變化）。
- *   4. clips[].sound_prompt 真的被解析並逐候選帶出（audios[0]/[1].sound_prompt 逐字等值）。
+ * node:test + fetch mock（不真连上游、不真落盘）。覆盖本次 additive 改动的**行为**：
+ *   1. 一次 FlowMusic 多 clips 回包（2 个 clip，metadata 几乎相同、时长接近）→ 回执带
+ *      preference_question、其 asked===false、options 尾端两条退路、optionTakeUrls 键数
+ *      === take 选项数。
+ *   2. 2 个 metadata 明显相异的 clip → asked===true、options.length <= 4。
+ *   3. 单 clip（audios.length===1）→ 回执不含 preference_question 键（既有形状零变化）。
+ *   4. clips[].sound_prompt 真的被解析并逐候选带出（audios[0]/[1].sound_prompt 逐字等值）。
  *
- * 真源：src/lib/music-take-entropy.ts（熵決策層）、src/lib/music-flowmusic.ts（sound_prompt
- * 解析）、src/lib/music-tools.ts（audios[] additive 鍵 + preference_question 組裝）。
+ * 真源：src/lib/music-take-entropy.ts（熵决策层）、src/lib/music-flowmusic.ts（sound_prompt
+ * 解析）、src/lib/music-tools.ts（audios[] additive 键 + preference_question 组装）。
  */
 
 import test, { beforeEach, afterEach } from "node:test";
@@ -39,7 +39,7 @@ function installFetchMock(responder: (url: string) => MockResponse): void {
 }
 
 beforeEach(() => {
-  delete process.env[YUE2_MODAL_ENDPOINT_ENV]; // 強制走 flowmusic2api
+  delete process.env[YUE2_MODAL_ENDPOINT_ENV]; // 强制走 flowmusic2api
   process.env.FLOWMUSIC2API_URL = "http://127.0.0.1:8000";
   process.env.FLOWMUSIC2API_KEY = "test-key";
   delete process.env.GEMINI_API_KEY;
@@ -57,7 +57,7 @@ afterEach(() => {
 
 type Clip = { audio_url: string; audio: { format: string }; duration: number; title?: string; sound_prompt?: string };
 
-/** 兩 clips 的 FlowMusic 響應 mock（逐次上傳序號；音頻下載固定回假位元組）。 */
+/** 两 clips 的 FlowMusic 响应 mock（逐次上传序号；音频下载固定回假位元组）。 */
 function flowMusicResponder(clips: Clip[]): (url: string) => MockResponse {
   let uploadSeq = 0;
   return (url: string): MockResponse => {
@@ -91,16 +91,16 @@ type PreferenceQuestion = {
   suggestedIndex: number;
 };
 
-/** 專案風格的窄化：斷言在場並返回窄化後物件（缺鍵即 assertion 失敗）。 */
+/** 专案风格的窄化：断言在场并返回窄化后物件（缺键即 assertion 失败）。 */
 function requirePreferenceQuestion(out: Record<string, unknown>): PreferenceQuestion {
   const pq = out.preference_question;
-  assert.ok(pq && typeof pq === "object", `回執應帶 preference_question，實際鍵：${Object.keys(out).join("、")}`);
+  assert.ok(pq && typeof pq === "object", `回执应带 preference_question，实际键：${Object.keys(out).join("、")}`);
   return pq as PreferenceQuestion;
 }
 
-// ── 1. 幾乎一致的雙 take：帶卡但不問 ─────────────────────────────────────────
+// ── 1. 几乎一致的双 take：带卡但不问 ─────────────────────────────────────────
 
-test("多 take 幾乎一致（時長 179.53/174.62、標題相同）→ preference_question 在場、asked=false、尾端兩條退路、optionTakeUrls 鍵數=take 選項數", async () => {
+test("多 take 几乎一致（时长 179.53/174.62、标题相同）→ preference_question 在场、asked=false、尾端两条退路、optionTakeUrls 键数=take 选项数", async () => {
   installFetchMock(
     flowMusicResponder([
       { audio_url: "https://cdn.example/a.m4a", audio: { format: "m4a" }, duration: 179.53, title: "隐秘的折痕" },
@@ -113,26 +113,26 @@ test("多 take 幾乎一致（時長 179.53/174.62、標題相同）→ preferen
   assert.equal(out.channel, "flowmusic2api");
 
   const pq = requirePreferenceQuestion(out);
-  assert.equal(pq.asked, false, `幾乎一致的雙 take 不該問，reason=${pq.entropy.reason}`);
-  // 尾端兩條退路逐字固定
+  assert.equal(pq.asked, false, `几乎一致的双 take 不该问，reason=${pq.entropy.reason}`);
+  // 尾端两条退路逐字固定
   const tail = pq.options.slice(-2).map((o) => o.label);
   assert.deepEqual(tail, ["都不行，重写", "你替我定"]);
   assert.deepEqual(pq.options[pq.options.length - 1].label, pq.fallbackLabels.trustModel);
-  // optionTakeUrls 只含 take 選項（不含退路）：鍵數 = options 去掉兩條退路
+  // optionTakeUrls 只含 take 选项（不含退路）：键数 = options 去掉两条退路
   const takeOptionCount = pq.options.length - 2;
   assert.equal(Object.keys(pq.optionTakeUrls).length, takeOptionCount);
-  // 每個 take 選項 label 都有 url 對照，且對照到真實 audios url
+  // 每个 take 选项 label 都有 url 对照，且对照到真实 audios url
   const audios = out.audios as Array<{ url: string }>;
   for (const [label, url] of Object.entries(pq.optionTakeUrls)) {
-    assert.ok(audios.some((a) => a.url === url), `label ${label} 的 url 應對應某個 audios 條目`);
+    assert.ok(audios.some((a) => a.url === url), `label ${label} 的 url 应对应某个 audios 条目`);
   }
   // asked=false → suggestedIndex 是保守的 0
   assert.equal(pq.suggestedIndex, 0);
 });
 
-// ── 2. 明顯相異的雙 take：問 ─────────────────────────────────────────────────
+// ── 2. 明显相异的双 take：问 ─────────────────────────────────────────────────
 
-test("多 take 明顯相異（時長 90s/200s、標題不同、sound_prompt 無交集）→ asked=true、options.length<=4", async () => {
+test("多 take 明显相异（时长 90s/200s、标题不同、sound_prompt 无交集）→ asked=true、options.length<=4", async () => {
   installFetchMock(
     flowMusicResponder([
       { audio_url: "https://cdn.example/a.m4a", audio: { format: "m4a" }, duration: 90, title: "晨光", sound_prompt: "Alt-pop, Guzheng, 80 BPM" },
@@ -144,19 +144,19 @@ test("多 take 明顯相異（時長 90s/200s、標題不同、sound_prompt 無�
   assert.equal(out.ok, true);
 
   const pq = requirePreferenceQuestion(out);
-  assert.equal(pq.asked, true, `明顯相異應問，reason=${pq.entropy.reason}`);
-  assert.ok(pq.options.length <= 4, `options 上限 4（含兩條退路），實際 ${pq.options.length}`);
-  assert.ok(pq.options.length >= 2, "至少要有 take 選項");
-  // take 選項數上限 check（4 - 2 條退路）
+  assert.equal(pq.asked, true, `明显相异应问，reason=${pq.entropy.reason}`);
+  assert.ok(pq.options.length <= 4, `options 上限 4（含两条退路），实际 ${pq.options.length}`);
+  assert.ok(pq.options.length >= 2, "至少要有 take 选项");
+  // take 选项数上限 check（4 - 2 条退路）
   assert.ok(Object.keys(pq.optionTakeUrls).length <= 2);
-  // 問題文案/分類標籤在場且非空（簡體）
+  // 问题文案/分类标签在场且非空（简体）
   assert.ok(pq.question.length > 0 && pq.header.length > 0);
   assert.deepEqual(pq.options.slice(-2).map((o) => o.label), ["都不行，重写", "你替我定"]);
 });
 
-// ── 3. 單 clip：既有形狀零變化 ───────────────────────────────────────────────
+// ── 3. 单 clip：既有形状零变化 ───────────────────────────────────────────────
 
-test("單 clip（audios.length===1）→ 回執不含 preference_question 鍵", async () => {
+test("单 clip（audios.length===1）→ 回执不含 preference_question 键", async () => {
   installFetchMock(
     flowMusicResponder([
       { audio_url: "https://cdn.example/a.m4a", audio: { format: "m4a" }, duration: 150, title: "唯一" },
@@ -169,9 +169,9 @@ test("單 clip（audios.length===1）→ 回執不含 preference_question 鍵", 
   assert.equal(Object.prototype.hasOwnProperty.call(out, "preference_question"), false);
 });
 
-// ── 4. sound_prompt 真的被解析並逐候選帶出 ───────────────────────────────────
+// ── 4. sound_prompt 真的被解析并逐候选带出 ───────────────────────────────────
 
-test("clips[].sound_prompt 逐字解析：audios[0]/[1].sound_prompt 等於上游值（trim 後）", async () => {
+test("clips[].sound_prompt 逐字解析：audios[0]/[1].sound_prompt 等于上游值（trim 后）", async () => {
   installFetchMock(
     flowMusicResponder([
       { audio_url: "https://cdn.example/a.m4a", audio: { format: "m4a" }, duration: 150, title: "Take A", sound_prompt: "Alt-pop, Guzheng" },
@@ -184,7 +184,7 @@ test("clips[].sound_prompt 逐字解析：audios[0]/[1].sound_prompt 等於上�
   assert.equal(audios.length, 2);
   assert.equal(audios[0].sound_prompt, "Alt-pop, Guzheng");
   assert.equal(audios[1].sound_prompt, "Techno, Distorted bass");
-  // title 亦逐候選帶出（有能力才帶，缺省不帶鍵）
+  // title 亦逐候选带出（有能力才带，缺省不带键）
   assert.equal(audios[0].title, "Take A");
   assert.equal(audios[1].title, undefined);
   assert.equal(Object.prototype.hasOwnProperty.call(audios[1], "title"), false);

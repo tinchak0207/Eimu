@@ -1,7 +1,7 @@
-// 共用 API client 層（PRD §377「邏輯只寫一次」）
-// 負責：解析 caller 自己的 sk-biz-* key、簽章呼叫平台、錯誤對照表、
-// 扣費確認閘門、前端事件推送、poller 註冊、定價表、回傳格式。
-// 此檔不是 tool，不得 export tool 定義，必須放在 tools/ 之外。
+// 共用 API client 层（PRD §377「逻辑只写一次」）
+// 负责：解析 caller 自己的 sk-biz-* key、签章呼叫平台、错误对照表、
+// 扣费确认闸门、前端事件推送、poller 注册、定价表、回传格式。
+// 此档不是 tool，不得 export tool 定义，必须放在 tools/ 之外。
 
 import { existsSync, readFileSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
@@ -13,21 +13,21 @@ const POLLER = process.env.POLLER_URL || "http://127.0.0.1:8082/"
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 // 20MB
 
 // ---------------------------------------------------------------------------
-// 定價表（原散落在各 tool 的 IMAGE_PRICES / edit / upscale / video 估價）
+// 定价表（原散落在各 tool 的 IMAGE_PRICES / edit / upscale / video 估价）
 // ---------------------------------------------------------------------------
 
-// 幣價一律來自 GET /v1/models 的 x_coins_per_image，形狀是
-// {standard:number, hd:number}（2026-08-07 實測 20 個模型）。
-// 不要硬編碼價格表：實測發現舊表的 model id 有錯（haruka-v2 實為
-// pixai-haruka-v2）、缺 15 個模型、且價格差 1000 倍（PixAI 0.001 vs
-// gpt-image 6）——報錯價會讓 confirm 彈窗上的金額對不上真實扣費。
+// 币价一律来自 GET /v1/models 的 x_coins_per_image，形状是
+// {standard:number, hd:number}（2026-08-07 实测 20 个模型）。
+// 不要硬编码价格表：实测发现旧表的 model id 有错（haruka-v2 实为
+// pixai-haruka-v2）、缺 15 个模型、且价格差 1000 倍（PixAI 0.001 vs
+// gpt-image 6）——报错价会让 confirm 弹窗上的金额对不上真实扣费。
 type PriceEntry = { standard?: number; hd?: number }
 
 let catalogCache: { at: number; prices: Record<string, PriceEntry> } | null = null
 const CATALOG_TTL_MS = 10 * 60 * 1000
-const FALLBACK_COINS = 1 // 取不到目錄時的保守估值（偏高，寧可多問一次確認）
+const FALLBACK_COINS = 1 // 取不到目录时的保守估值（偏高，宁可多问一次确认）
 
-/** 讀取（並快取 10 分鐘）平台模型幣價目錄。取不到回 null，不 throw。 */
+/** 读取（并快取 10 分钟）平台模型币价目录。取不到回 null，不 throw。 */
 export async function loadCatalog(
   sessionID: string,
   signal?: AbortSignal,
@@ -60,14 +60,14 @@ export async function loadCatalog(
   }
 }
 
-// R7-A（2026-08-29）：視頻報價錨點=5 幣/秒（720P）/10 幣/秒（1080P），與 gateway
-// videoTierPerSecond 同口徑。舊 0.05 是 RMB 混幣髒價殘留，曾致確認卡報 0.25 實扣 25（100 倍失真）。
+// R7-A（2026-08-29）：视频报价锚点=5 币/秒（720P）/10 币/秒（1080P），与 gateway
+// videoTierPerSecond 同口径。旧 0.05 是 RMB 混币脏价残留，曾致确认卡报 0.25 实扣 25（100 倍失真）。
 const VIDEO_COIN_PER_SEC_720P = 5
 const VIDEO_COIN_PER_SEC_1080P = 10
 
 /**
- * 生圖單張幣價（權威值，來自平台目錄）。
- * quality: "hd" 走 hd 價，其餘走 standard。取不到目錄時回 FALLBACK_COINS。
+ * 生图单张币价（权威值，来自平台目录）。
+ * quality: "hd" 走 hd 价，其余走 standard。取不到目录时回 FALLBACK_COINS。
  */
 export async function priceForAsync(
   model: string,
@@ -83,7 +83,7 @@ export async function priceForAsync(
   return typeof v === "number" ? v : FALLBACK_COINS
 }
 
-/** 生影片估價：720P 5 幣/秒 / 1080P 10 幣/秒，預設 10 秒（quality="hd" 走 1080P 檔） */
+/** 生影片估价：720P 5 币/秒 / 1080P 10 币/秒，预设 10 秒（quality="hd" 走 1080P 档） */
 export function estimateVideoCoins(duration_seconds?: number, quality?: string): number {
   const secs = duration_seconds || 10
   const per = quality === "hd" ? VIDEO_COIN_PER_SEC_1080P : VIDEO_COIN_PER_SEC_720P
@@ -91,9 +91,9 @@ export function estimateVideoCoins(duration_seconds?: number, quality?: string):
 }
 
 /**
- * 改圖估價：走平台目錄的模型單價，跟生圖同一個權威來源。
- * 舊版按 size 猜（1k=3 幣 / 2k=5 幣），但平台是按模型計價、不按尺寸，
- * 猜出來的數字會讓 confirm 彈窗金額跟真實扣費差幾千倍（PixAI 0.001 vs 猜的 3）。
+ * 改图估价：走平台目录的模型单价，跟生图同一个权威来源。
+ * 旧版按 size 猜（1k=3 币 / 2k=5 币），但平台是按模型计价、不按尺寸，
+ * 猜出来的数字会让 confirm 弹窗金额跟真实扣费差几千倍（PixAI 0.001 vs 猜的 3）。
  */
 export async function estimateEditCoins(
   model: string,
@@ -105,8 +105,8 @@ export async function estimateEditCoins(
 }
 
 /**
- * 放大估價：同樣取目錄單價。scale 只影響輸出尺寸，不影響平台計價，
- * 所以不再用 scale 推算幣值。
+ * 放大估价：同样取目录单价。scale 只影响输出尺寸，不影响平台计价，
+ * 所以不再用 scale 推算币值。
  */
 export async function estimateUpscaleCoins(
   model: string,
@@ -131,8 +131,8 @@ const keyCache = new Map<string, string>()
 const keyInflight = new Map<string, Promise<string>>()
 
 /**
- * 從 gateway（loopback）解析 caller 自己的 sk-biz-* key。
- * gateway 無法解析時（如 CLI session 沒有 gateway 側記錄）退回
+ * 从 gateway（loopback）解析 caller 自己的 sk-biz-* key。
+ * gateway 无法解析时（如 CLI session 没有 gateway 侧记录）退回
  * process.env.HARNESS_API_KEY。以 sessionID 快取。
  */
 export async function resolveKey(sessionID: string, signal?: AbortSignal): Promise<string> {
@@ -158,11 +158,11 @@ export async function resolveKey(sessionID: string, signal?: AbortSignal): Promi
         }
       }
     } catch {
-      // gateway 無法解析，走 fallback
+      // gateway 无法解析，走 fallback
     }
     const fallback = process.env.HARNESS_API_KEY
     if (!fallback) {
-      throw new Error("無法解析 API key：gateway 無此 session 記錄且無 HARNESS_API_KEY")
+      throw new Error("无法解析 API key：gateway 无此 session 记录且无 HARNESS_API_KEY")
     }
     keyCache.set(sessionID, fallback)
     return fallback
@@ -176,7 +176,7 @@ export async function resolveKey(sessionID: string, signal?: AbortSignal): Promi
   }
 }
 
-/** 簽章 + 呼叫平台。處理 JSON 與 multipart（FormData 不手動設 Content-Type）。 */
+/** 签章 + 呼叫平台。处理 JSON 与 multipart（FormData 不手动设 Content-Type）。 */
 // ---- per-key rate limiting (D-22) ----
 //
 // The platform enforces 60 requests / 60s per sk-biz- key with a SLIDING WINDOW
@@ -251,17 +251,17 @@ async function acquireRateSlot(key: string, signal?: AbortSignal): Promise<void>
 }
 
 /**
- * 站點本體 origin（Vercel 全功能應用直服，不帶 /v1）。
- * 生產 next.config.mjs 把 /v1/:path* 與 /api/v1/:path* 改寫到 VPS 控制面，
- * 而控制面那棵樹是落後的分叉（沒有角色卡路由）；/api/biz/* 不在改寫清單內，
- * 由站點本體服務（有 Blob、有完整五值卡模型）。角色卡與 tag 解析走這裡。
+ * 站点本体 origin（Vercel 全功能应用直服，不带 /v1）。
+ * 生产 next.config.mjs 把 /v1/:path* 与 /api/v1/:path* 改写到 VPS 控制面，
+ * 而控制面那棵树是落后的分叉（没有角色卡路由）；/api/biz/* 不在改写清单内，
+ * 由站点本体服务（有 Blob、有完整五值卡模型）。角色卡与 tag 解析走这里。
  */
 export const SITE_BASE = "https://image.tinchak0207.xyz"
 
 /**
- * 簽章 + 出網的共用核心：key 解析、限流、header 組裝只寫一次。
- * platformFetch（/v1 控制面）與 siteFetch（/api/biz 站點本體）共用同一套，
- * 差別只有 origin 前綴。
+ * 签章 + 出网的共用核心：key 解析、限流、header 组装只写一次。
+ * platformFetch（/v1 控制面）与 siteFetch（/api/biz 站点本体）共用同一套，
+ * 差别只有 origin 前缀。
  */
 async function fetchWithBase(
   base: string,
@@ -278,7 +278,7 @@ async function fetchWithBase(
   return fetch(`${base}${path}`, { ...init, headers, signal })
 }
 
-/** 簽章 + 呼叫平台（/v1 控制面）。處理 JSON 與 multipart（FormData 不手動設 Content-Type）。 */
+/** 签章 + 呼叫平台（/v1 控制面）。处理 JSON 与 multipart（FormData 不手动设 Content-Type）。 */
 export async function platformFetch(
   path: string,
   init: RequestInit,
@@ -289,8 +289,8 @@ export async function platformFetch(
 }
 
 /**
- * 簽章 + 呼叫站點本體（/api/biz/*）：同一把 sk-biz-* key、同一套 header 組裝與限流，
- * 只換 origin。用於 /v1 控制面分叉沒有的路由（角色卡、tag 解析）。
+ * 签章 + 呼叫站点本体（/api/biz/*）：同一把 sk-biz-* key、同一套 header 组装与限流，
+ * 只换 origin。用于 /v1 控制面分叉没有的路由（角色卡、tag 解析）。
  */
 export async function siteFetch(
   path: string,
@@ -301,7 +301,7 @@ export async function siteFetch(
   return fetchWithBase(SITE_BASE, path, init, sessionID, signal)
 }
 
-/** 從已解析 body / 拋出錯誤取出小寫錯誤訊息 */
+/** 从已解析 body / 抛出错误取出小写错误讯息 */
 function extractMsg(err?: unknown): string {
   if (!err) return ""
   if (typeof err === "string") return err.toLowerCase()
@@ -311,12 +311,12 @@ function extractMsg(err?: unknown): string {
 }
 
 /**
- * 失敗回應 / 拋出錯誤 → PRD 錯誤對照表。
- * 402 → insufficient_quota（告知充值，勿重試）
- * 413 → too_large（壓縮重傳）
+ * 失败回应 / 抛出错误 → PRD 错误对照表。
+ * 402 → insufficient_quota（告知充值，勿重试）
+ * 413 → too_large（压缩重传）
  * 429 → rate_limited（等 Retry-After，附 retry_after_ms）
- * message 含 "model" → bad_model（換表內模型名）
- * message 含 "Your store is blocked" → blob_blocked（改 response_format=json，勿重發）
+ * message 含 "model" → bad_model（换表内模型名）
+ * message 含 "Your store is blocked" → blob_blocked（改 response_format=json，勿重发）
  */
 export async function classifyError(
   res: Response | null,
@@ -326,27 +326,27 @@ export async function classifyError(
     if (err instanceof Error && err.name === "AbortError") {
       return { code: "aborted", hint: "操作已中止" }
     }
-    // 0913 誠實歸因：本地路徑不存在/過大/空檔等參數錯誤自帶 code，
-    // 不得再被兜底成 network_error 套「上游原因」誤導重試。
+    // 0913 诚实归因：本地路径不存在/过大/空档等参数错误自带 code，
+    // 不得再被兜底成 network_error 套「上游原因」误导重试。
     const code = err instanceof Error ? (err as any).code : undefined
     if (typeof code === "string" && code) {
       return { code, hint: (err as Error).message }
     }
     const msg = err instanceof Error ? err.message : String(err)
-    return { code: "network_error", hint: msg || "網路錯誤" }
+    return { code: "network_error", hint: msg || "网路错误" }
   }
 
   const msg = extractMsg(err)
   if (res.status === 402) {
-    // R9-C（2026-09-30）：402 來自站點錢包預扣閘（quota-precheck / sync-charge），是「用戶帳戶
-    // 餘額」層的失敗，與模型/通路無關（evidence：yuri-op-mv SSE 9868 把 pixai 的 402 誤報成「無通路」）。
+    // R9-C（2026-09-30）：402 来自站点钱包预扣闸（quota-precheck / sync-charge），是「用户帐户
+    // 余额」层的失败，与模型/通路无关（evidence：yuri-op-mv SSE 9868 把 pixai 的 402 误报成「无通路」）。
     return {
       code: "insufficient_quota",
-      hint: "餘額不足：用戶平台帳戶錢包餘額不夠扣這一單（帳戶層失敗，不是模型/通路不可用；換任何付費模型都會同樣失敗）。請如實告知用戶「是餘額不足、需充值」，勿重試、勿換模型試探；也不得宣稱任何付費通路「可用/是活的」——本次沒有任何圖生成成功。",
+      hint: "余额不足：用户平台帐户钱包余额不够扣这一单（帐户层失败，不是模型/通路不可用；换任何付费模型都会同样失败）。请如实告知用户「是余额不足、需充值」，勿重试、勿换模型试探；也不得宣称任何付费通路「可用/是活的」——本次没有任何图生成成功。",
     }
   }
   if (res.status === 413) {
-    return { code: "too_large", hint: "圖片超過 20MB，請壓縮後重傳" }
+    return { code: "too_large", hint: "图片超过 20MB，请压缩后重传" }
   }
   if (res.status === 429) {
     const headerSeconds = Number(res.headers.get("retry-after"))
@@ -354,22 +354,22 @@ export async function classifyError(
     const seconds = headerSeconds > 0 ? headerSeconds : bodySeconds > 0 ? bodySeconds : 60
     return {
       code: "rate_limited",
-      hint: "超過 60rpm，請等待後再重試",
+      hint: "超过 60rpm，请等待后再重试",
       retry_after_ms: seconds * 1000,
     }
   }
   if (msg.includes("your store is blocked")) {
-    return { code: "blob_blocked", hint: "儲存空間被封鎖，請改 response_format=json 拿直鏈，勿重發" }
+    return { code: "blob_blocked", hint: "储存空间被封锁，请改 response_format=json 拿直链，勿重发" }
   }
-  // R9-C：站點 size 白名單拒單（400 unsupported_size）具名透出，附上游原文（含可選尺寸清單）。
+  // R9-C：站点 size 白名单拒单（400 unsupported_size）具名透出，附上游原文（含可选尺寸清单）。
   if (String((err as any)?.error?.code ?? "") === "unsupported_size") {
     return {
       code: "unsupported_size",
-      hint: `${(err as any)?.error?.message || "不支持的 size"}（參數錯誤，請求未進入生成與計費；這不證明通路或餘額可用）`,
+      hint: `${(err as any)?.error?.message || "不支持的 size"}（参数错误，请求未进入生成与计费；这不证明通路或余额可用）`,
     }
   }
   if (msg.includes("model")) {
-    return { code: "bad_model", hint: "模型名錯誤，換表內模型名重試" }
+    return { code: "bad_model", hint: "模型名错误，换表内模型名重试" }
   }
   const bodyCode = String((err as any)?.error?.code ?? (err as any)?.code ?? "")
   if (res.status === 404 || bodyCode === "task_not_found") {
@@ -380,7 +380,7 @@ export async function classifyError(
   }
   return {
     code: `http_${res.status}`,
-    hint: extractMsg(err) || "請求失敗",
+    hint: extractMsg(err) || "请求失败",
   }
 }
 
@@ -390,14 +390,14 @@ export interface ConfirmSpendInput {
   description: string
   model?: string
   task_id?: string
-  /** 用於平台 idempotency-key（edits/upscale 避免重試重複扣費） */
+  /** 用于平台 idempotency-key（edits/upscale 避免重试重复扣费） */
   request_id?: string
 }
 
 /**
- * 詢問用戶核准一筆花費。gateway 阻塞至多 ~90s，故 fetch 逾時 ≥100s。
- * 外部 signal（如 context.abort）也接上，用戶取消同樣能中止等待。
- * 任何失敗（gateway 錯誤 / 逾時 / 用戶取消）都回 false → caller 必須中止。
+ * 询问用户核准一笔花费。gateway 阻塞至多 ~90s，故 fetch 逾时 ≥100s。
+ * 外部 signal（如 context.abort）也接上，用户取消同样能中止等待。
+ * 任何失败（gateway 错误 / 逾时 / 用户取消）都回 false → caller 必须中止。
  */
 export async function confirmSpend(
   input: ConfirmSpendInput,
@@ -504,7 +504,7 @@ async function postInternal(
   }
 }
 
-/** 推送前端事件（白名單：image.done / session.error / tool.progress / video.done / audio.done / canvas.*）。fire-and-forget，失敗不外拋。 */
+/** 推送前端事件（白名单：image.done / session.error / tool.progress / video.done / audio.done / canvas.*）。fire-and-forget，失败不外抛。 */
 const CANVAS_EMIT_EVENTS = new Set([
   "canvas.plan",
   "canvas.node.created",
@@ -530,19 +530,19 @@ export async function emitEvent(
       signal,
     })
   } catch {
-    // 忽略：推送失敗不應影響 tool 結果
+    // 忽略：推送失败不应影响 tool 结果
   }
 }
 
 /**
- * 註冊非同步任務給 poller 自動輪詢。best-effort，回 {ok, error?}。
+ * 注册非同步任务给 poller 自动轮询。best-effort，回 {ok, error?}。
  *
- * dedup_hash / model / cost_coins 一定要帶：
- * - dedup_hash 不帶，poller 的去重快取永遠不會命中（等於整段死碼），
- *   同一個 prompt 重送會再扣一次錢。
- * - cost_coins 不帶，平台輪詢回應裡沒有價格欄位（2026-08-07 實測），
- *   poller 發出的 image.done 就會少掉 cost_coins，前端顯示不出扣費、
- *   帳本那一列也缺金額。
+ * dedup_hash / model / cost_coins 一定要带：
+ * - dedup_hash 不带，poller 的去重快取永远不会命中（等于整段死码），
+ *   同一个 prompt 重送会再扣一次钱。
+ * - cost_coins 不带，平台轮询回应里没有价格栏位（2026-08-07 实测），
+ *   poller 发出的 image.done 就会少掉 cost_coins，前端显示不出扣费、
+ *   帐本那一列也缺金额。
  */
 export async function registerTask(
   task_id: string,
@@ -573,8 +573,8 @@ export async function registerTask(
 }
 
 /**
- * (model, prompt, size, n) 的標準化去重 hash（PRD §437）。
- * 排序 key 後穩定字串化 + FNV-1a，跨 session 穩定。
+ * (model, prompt, size, n) 的标准化去重 hash（PRD §437）。
+ * 排序 key 后稳定字串化 + FNV-1a，跨 session 稳定。
  */
 export function dedupHash(input: Record<string, unknown>): string {
   const norm: Record<string, unknown> = {
@@ -597,8 +597,8 @@ export function dedupHash(input: Record<string, unknown>): string {
 }
 
 /**
- * 解析 mediaId：已是 "media:" 開頭直接回；否則把圖片（URL 或本地路徑）
- * 上傳到平台 /uploads。上傳走 platformFetch（免費）。
+ * 解析 mediaId：已是 "media:" 开头直接回；否则把图片（URL 或本地路径）
+ * 上传到平台 /uploads。上传走 platformFetch（免费）。
  */
 export async function resolveMediaId(
   image_url: string,
@@ -611,14 +611,14 @@ export async function resolveMediaId(
 }
 
 /**
- * 讀取圖片來源 → POST /uploads（JSON base64 契約 {data, mimeType}，平台側
- * req.json()，multipart 必 400）→ { mediaId, url }。resolveMediaId 與
- * image_upload 工具共用此函數（邏輯只寫一次）。
- * 來源二分（2026-09-13 附件路徑閉環）：http(s)/data URL 走 fetch；其餘一律
- * 按本地路徑直讀字節 —— 聊天附件落盤 workspace/uploads/<sid>/，工具與附件
- * 同機（opencode-server 沙箱讀得到），此前只能吃 URL，本地路徑被 fetch 拒
- * （「fetch() URL is invalid」），agent 被迫繞道 base64/起 HTTP server 連環失敗。
- * 拋錯帶 .code → classifyError 誠實歸因，不再一律 network_error 冒充上游。
+ * 读取图片来源 → POST /uploads（JSON base64 契约 {data, mimeType}，平台侧
+ * req.json()，multipart 必 400）→ { mediaId, url }。resolveMediaId 与
+ * image_upload 工具共用此函数（逻辑只写一次）。
+ * 来源二分（2026-09-13 附件路径闭环）：http(s)/data URL 走 fetch；其余一律
+ * 按本地路径直读字节 —— 聊天附件落盘 workspace/uploads/<sid>/，工具与附件
+ * 同机（opencode-server 沙箱读得到），此前只能吃 URL，本地路径被 fetch 拒
+ * （「fetch() URL is invalid」），agent 被迫绕道 base64/起 HTTP server 连环失败。
+ * 抛错带 .code → classifyError 诚实归因，不再一律 network_error 冒充上游。
  */
 export async function uploadImageBytes(
   imageSource: string,
@@ -663,9 +663,9 @@ export async function uploadImageBytes(
 }
 
 /**
- * 讀本地圖片來源（chat 附件絕對路徑 / workspace 相對路徑）→ 位元組 + mime。
- * 路徑解析：原樣 → process.cwd() → /opt/agent-harness/workspace 依序命中。
- * 拋錯帶 .code 供 classifyError 誠實歸因。
+ * 读本地图片来源（chat 附件绝对路径 / workspace 相对路径）→ 位元组 + mime。
+ * 路径解析：原样 → process.cwd() → /opt/agent-harness/workspace 依序命中。
+ * 抛错带 .code 供 classifyError 诚实归因。
  */
 async function readLocalImageBytes(src: string): Promise<{ buffer: Buffer; mimeType: string; absPath: string }> {
   let abs = src
@@ -686,11 +686,11 @@ async function readLocalImageBytes(src: string): Promise<{ buffer: Buffer; mimeT
 }
 
 /**
- * 把任意圖片來源歸一成「改圖端點可直接引用的 image 值」（2026-09-13 durable 改圖鏈）：
- * - http(s) URL / data:image URI：原樣放行（data URI 上限 ~4MB，站點端另有硬校驗）。
- * - media: 前綴：只屬 pixai 域，durable 鏈明確拒絕（誠實报错，不再 fetch 炸 URL invalid）。
- * - 本地絕對/相對路徑：沙箱內讀位元組 → 網關 /internal/media/upload（video_upload 同合同，
- *   網關已放行 image/*）→ 平台公網 URL。網關讀不到 agent 私有 /tmp，故位元組由沙箱側送上。
+ * 把任意图片来源归一成「改图端点可直接引用的 image 值」（2026-09-13 durable 改图链）：
+ * - http(s) URL / data:image URI：原样放行（data URI 上限 ~4MB，站点端另有硬校验）。
+ * - media: 前缀：只属 pixai 域，durable 链明确拒绝（诚实报错，不再 fetch 炸 URL invalid）。
+ * - 本地绝对/相对路径：沙箱内读位元组 → 网关 /internal/media/upload（video_upload 同合同，
+ *   网关已放行 image/*）→ 平台公网 URL。网关读不到 agent 私有 /tmp，故位元组由沙箱侧送上。
  */
 export async function publicImageUrl(
   imageSource: string,
@@ -740,7 +740,7 @@ export async function publicImageUrl(
   return data.url as string
 }
 
-/** 從檔名/URL 猜 mime：webp/jpg/jpeg/png/gif，未知回 png。 */
+/** 从档名/URL 猜 mime：webp/jpg/jpeg/png/gif，未知回 png。 */
 export function guessMime(url: string): string {
   const ext = (url.split(".").pop() || "png").toLowerCase().split("?")[0].split("#")[0]
   if (ext === "webp") return "image/webp"
@@ -750,10 +750,10 @@ export function guessMime(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 模型可用性探測（2026-08-15）：調用生成模型前必須確認可用，避免把請求發給
-// 不可用的渠道。權威來源 = 平台 GET /v1/model-status；60 秒 per-model 緩存。
-// 2026-08-27：透傳 last_24h（最近 24h 真實表現：jobs/delivered/failed/
-// success_rate/refunded）——可用 ≠ 表現好，選模型時兩個都要看。
+// 模型可用性探测（2026-08-15）：调用生成模型前必须确认可用，避免把请求发给
+// 不可用的渠道。权威来源 = 平台 GET /v1/model-status；60 秒 per-model 缓存。
+// 2026-08-27：透传 last_24h（最近 24h 真实表现：jobs/delivered/failed/
+// success_rate/refunded）——可用 ≠ 表现好，选模型时两个都要看。
 // ---------------------------------------------------------------------------
 
 export type ModelLast24h = {
@@ -769,14 +769,14 @@ type ProbeResult = {
   availability: "available" | "unavailable" | "unknown"
   note?: string
   checked_at: string
-  /** 最近 24h 真實生圖表現（樣本只覆蓋最近 200 條遙測事件；無樣本時缺省）。 */
+  /** 最近 24h 真实生图表现（样本只覆盖最近 200 条遥测事件；无样本时缺省）。 */
   last_24h?: ModelLast24h
 }
 
 const probeCache = new Map<string, { at: number; result: ProbeResult }>()
 const PROBE_TTL_MS = 60_000
 
-/** 探測單一模型是否可用（走 platformFetch，不觸發生成、不扣費）。 */
+/** 探测单一模型是否可用（走 platformFetch，不触发生成、不扣费）。 */
 export async function probeModelAvailable(
   model: string,
   sessionID: string,
@@ -798,7 +798,7 @@ export async function probeModelAvailable(
         }
       : {
           availability: "unknown",
-          note: resp.ok ? "模型不在 /v1/model-status 清單" : "探測端點不可用",
+          note: resp.ok ? "模型不在 /v1/model-status 清单" : "探测端点不可用",
           checked_at: new Date().toISOString(),
         }
     probeCache.set(model, { at: Date.now(), result })
@@ -806,7 +806,7 @@ export async function probeModelAvailable(
   } catch {
     const result: ProbeResult = {
       availability: "unknown",
-      note: "探測失敗（網絡/認證）",
+      note: "探测失败（网络/认证）",
       checked_at: new Date().toISOString(),
     }
     probeCache.set(model, { at: Date.now(), result })
@@ -814,7 +814,7 @@ export async function probeModelAvailable(
   }
 }
 
-/** 成功回傳：{ title?, output: JSON.stringify({ok:true, ...}) } */
+/** 成功回传：{ title?, output: JSON.stringify({ok:true, ...}) } */
 export function ok(
   data: Record<string, unknown>,
   metadata?: Record<string, unknown>,
@@ -828,7 +828,7 @@ export function ok(
   return result
 }
 
-/** 失敗回傳：{ title?, output: JSON.stringify({ok:false, error:{code,hint}, ...extra}) } */
+/** 失败回传：{ title?, output: JSON.stringify({ok:false, error:{code,hint}, ...extra}) } */
 export function fail(
   code: string,
   hint: string,
@@ -836,7 +836,7 @@ export function fail(
 ): { title: string; output: string } {
   const { title, ...rest } = extra ?? {}
   return {
-    title: (title as string) ?? "失敗",
+    title: (title as string) ?? "失败",
     output: JSON.stringify({ ok: false, error: { code, hint }, ...rest }),
   }
 }

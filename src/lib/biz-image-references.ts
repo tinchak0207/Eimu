@@ -1,18 +1,18 @@
-// B 端參考圖通道（`/v1/images/generations` 與 `/v1/images/edits` 共用的輪子）。
+// B 端参考图通道（`/v1/images/generations` 与 `/v1/images/edits` 共用的轮子）。
 //
 // 2026-09-25：原 `/v1/images/edits` 的私有 helper（`resolveEditReference` 及相依的
 // `mimeFromUrl` / `extensionFor` / `MAX_DATA_IMAGE_BYTES` / `EditInputError`）整段搬到
-// 本檔，edits 路由改成 import —— **純搬移，行為逐位元不變**。唯一的形式改動是把
-// data URI 正則提成常數 `DATA_IMAGE_PATTERN`（原為 inline 字面），形狀校驗與落地
-// 共用同一個字面，語義零改。
+// 本档，edits 路由改成 import —— **纯搬移，行为逐位元不变**。唯一的形式改动是把
+// data URI 正则提成常数 `DATA_IMAGE_PATTERN`（原为 inline 字面），形状校验与落地
+// 共用同一个字面，语义零改。
 //
-// generations 側新增的 `reference_images` 與 prompt 裡的行內實體 tag `@[種類:名稱]`
-// 也走這裡：形狀校驗（任何 I/O 之前）→ 命中的卡的參考圖在前、顯式 `reference_images`
-// 在後 → 按 url 去重 → 上限 `MAX_REFERENCE_IMAGES` 張 → http(s) 直通、
-// `data:image/*;base64` 落地 Blob 換公網 URL。
+// generations 侧新增的 `reference_images` 与 prompt 里的行内实体 tag `@[种类:名称]`
+// 也走这里：形状校验（任何 I/O 之前）→ 命中的卡的参考图在前、显式 `reference_images`
+// 在后 → 按 url 去重 → 上限 `MAX_REFERENCE_IMAGES` 张 → http(s) 直通、
+// `data:image/*;base64` 落地 Blob 换公网 URL。
 //
-// 核心層本來就吃 `workflow.references`（worker 端 `supplier-adapter.ts` 按
-// `references.length` 分支，不按 kind），所以本檔只負責把入口接出來，不重寫上游通道。
+// 核心层本来就吃 `workflow.references`（worker 端 `supplier-adapter.ts` 按
+// `references.length` 分支，不按 kind），所以本档只负责把入口接出来，不重写上游通道。
 
 import { createHash } from "node:crypto";
 import { put } from "@/lib/blob-backend";
@@ -28,25 +28,25 @@ import {
   type MalformedEntityToken,
 } from "./entity-tokens";
 
-// ─────────────────────────────────────────── 純搬移（原 edits 私有 helper）
+// ─────────────────────────────────────────── 纯搬移（原 edits 私有 helper）
 
-/** data:image URI 單張大小上限（4MB；Vercel 請求體限制留餘裕）。 */
+/** data:image URI 单张大小上限（4MB；Vercel 请求体限制留余裕）。 */
 export const MAX_DATA_IMAGE_BYTES = 4 * 1024 * 1024;
 
 /**
- * 單次生成最多帶的參考圖張數（與 /api/canvas/generate 同尺）。
- * 值＝執行端常數單點（`generation-core/request-limits.ts`）——本檔只是這個閘門的
- * **引用點**，不再自己存一份數字（D23：能力契約揭露的值與真的擋人的值必須同一顆）。
+ * 单次生成最多带的参考图张数（与 /api/canvas/generate 同尺）。
+ * 值＝执行端常数单点（`generation-core/request-limits.ts`）——本档只是这个闸门的
+ * **引用点**，不再自己存一份数字（D23：能力契约揭露的值与真的挡人的值必须同一颗）。
  */
 export const MAX_REFERENCE_IMAGES = MAX_REQUEST_REFERENCE_IMAGES;
 
-/** 參考圖名稱上限（與 character-cards 的 MAX_REFERENCE_NAME_LENGTH 同尺）。 */
+/** 参考图名称上限（与 character-cards 的 MAX_REFERENCE_NAME_LENGTH 同尺）。 */
 const MAX_REFERENCE_NAME_LENGTH = 60;
 
-/** data:image base64 URI（落地 Blob 用；形狀校驗與 resolveEditReference 共用同一個字面）。 */
+/** data:image base64 URI（落地 Blob 用；形状校验与 resolveEditReference 共用同一个字面）。 */
 const DATA_IMAGE_PATTERN = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i;
 
-/** 形狀錯誤：呼叫端據 `status`/`code` 直接回錯誤體（原 edits 的 EditInputError）。 */
+/** 形状错误：呼叫端据 `status`/`code` 直接回错误体（原 edits 的 EditInputError）。 */
 export class EditInputError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message);
@@ -66,7 +66,7 @@ export function extensionFor(mimeType: string): string {
   return "png";
 }
 
-/** image 參數 → 工作流參考圖。URL 直接引用；data URI 落地 blob 後轉平台公網 URL。 */
+/** image 参数 → 工作流参考图。URL 直接引用；data URI 落地 blob 后转平台公网 URL。 */
 export async function resolveEditReference(
   image: string,
   tenantId: string,
@@ -105,15 +105,15 @@ export async function resolveEditReference(
   throw new EditInputError(
     400,
     "invalid_image",
-    "image must be a public http(s) URL or a data:image base64 URI（pixai media id 僅適用於 pixai 系模型）.",
+    "image must be a public http(s) URL or a data:image base64 URI（pixai media id 仅适用于 pixai 系模型）.",
   );
 }
 
-// ─────────────────────────────────────────── 參考圖角色值域
+// ─────────────────────────────────────────── 参考图角色值域
 
 /**
  * `GenerationReference.referenceRole` 的唯一值域（`generation-core/types.ts:36-44`）。
- * 這是**對外契約**，不是 UI 的 `ReferenceImageRole`（後者多一個 `face`）。
+ * 这是**对外契约**，不是 UI 的 `ReferenceImageRole`（后者多一个 `face`）。
  */
 export const BIZ_REFERENCE_ROLE_VALUES: readonly NonNullable<GenerationReference["referenceRole"]>[] = [
   "general",
@@ -125,23 +125,23 @@ export const BIZ_REFERENCE_ROLE_VALUES: readonly NonNullable<GenerationReference
 
 export type BizReferenceRole = NonNullable<GenerationReference["referenceRole"]>;
 
-/** 無法對應（含缺省、UI 專屬的 `face`、亂填）一律收斂為 `"general"` —— 不把值域外的值傳給上游。 */
+/** 无法对应（含缺省、UI 专属的 `face`、乱填）一律收敛为 `"general"` —— 不把值域外的值传给上游。 */
 export function normalizeBizReferenceRole(value: unknown): BizReferenceRole {
   return typeof value === "string" && (BIZ_REFERENCE_ROLE_VALUES as readonly string[]).includes(value)
     ? (value as BizReferenceRole)
     : "general";
 }
 
-// ─────────────────────────────────────────── reference_images 形狀校驗
+// ─────────────────────────────────────────── reference_images 形状校验
 
-/** 一個待落地的參考圖規格（形狀已驗、尚未 materialize 成 GenerationReference）。 */
+/** 一个待落地的参考图规格（形状已验、尚未 materialize 成 GenerationReference）。 */
 interface ReferenceImageSpec {
   url: string;
   role: BizReferenceRole;
   name?: string;
 }
 
-/** http(s) 或 data:image base64 —— 兩者之外一律 400（`resolveEditReference` 也只認這兩種）。 */
+/** http(s) 或 data:image base64 —— 两者之外一律 400（`resolveEditReference` 也只认这两种）。 */
 function isReferenceImageUrl(url: string): boolean {
   return /^https?:\/\//i.test(url) || DATA_IMAGE_PATTERN.test(url);
 }
@@ -151,11 +151,11 @@ function invalidReferenceImages(message: string): EditInputError {
 }
 
 /**
- * `reference_images` body 欄位的形狀校驗（純函式，零 I/O）。
+ * `reference_images` body 栏位的形状校验（纯函式，零 I/O）。
  *
- * 契約：`Array<string | { url: string; role?: string; name?: string }>`，上限
- * `MAX_REFERENCE_IMAGES` 張、保序；超過或形狀非法一律 400 `invalid_reference_images`，
- * **不靜默截斷**（靜默截斷＝客戶以為 6 張都進去了）。
+ * 契约：`Array<string | { url: string; role?: string; name?: string }>`，上限
+ * `MAX_REFERENCE_IMAGES` 张、保序；超过或形状非法一律 400 `invalid_reference_images`，
+ * **不静默截断**（静默截断＝客户以为 6 张都进去了）。
  */
 export function parseReferenceImageSpecs(input: unknown): ReferenceImageSpec[] {
   if (input === undefined || input === null) return [];
@@ -191,11 +191,11 @@ export function parseReferenceImageSpecs(input: unknown): ReferenceImageSpec[] {
   return specs;
 }
 
-// ─────────────────────────────────────────── 卡 → 參考圖規格
+// ─────────────────────────────────────────── 卡 → 参考图规格
 
 /**
- * 命中 token 的卡，其 `references[]` 展開成規格（保序）。
- * 卡裡形狀不合法的 URL 直接跳過——卡是增強，不讓一張髒卡把生成打失敗。
+ * 命中 token 的卡，其 `references[]` 展开成规格（保序）。
+ * 卡里形状不合法的 URL 直接跳过——卡是增强，不让一张脏卡把生成打失败。
  */
 function cardReferenceSpecs(cards: readonly CharacterCard[], usedCardIds: readonly string[]): ReferenceImageSpec[] {
   const byId = new Map(cards.map((card) => [card.id, card]));
@@ -219,7 +219,7 @@ function cardReferenceSpecs(cards: readonly CharacterCard[], usedCardIds: readon
   return specs;
 }
 
-/** 按 url 去重（保首見序）。 */
+/** 按 url 去重（保首见序）。 */
 function dedupeSpecsByUrl(specs: readonly ReferenceImageSpec[]): ReferenceImageSpec[] {
   const seen = new Set<string>();
   const out: ReferenceImageSpec[] = [];
@@ -231,21 +231,21 @@ function dedupeSpecsByUrl(specs: readonly ReferenceImageSpec[]): ReferenceImageS
   return out;
 }
 
-// ─────────────────────────────────────────── 生成鏈路（target）形狀校驗
+// ─────────────────────────────────────────── 生成链路（target）形状校验
 
 /**
- * 生成鏈路值域。`"image"`＝視覺（既有行為）；`"audio"`＝音頻（只有音頻卡參與、無參考圖語義）。
+ * 生成链路值域。`"image"`＝视觉（既有行为）；`"audio"`＝音频（只有音频卡参与、无参考图语义）。
  */
 export type BizGenerationTarget = "image" | "audio";
 
 export const BIZ_GENERATION_TARGET_VALUES: readonly BizGenerationTarget[] = ["image", "audio"];
 
 /**
- * `target` body 欄位的形狀校驗（純函式，零 I/O）。
+ * `target` body 栏位的形状校验（纯函式，零 I/O）。
  *
- * 契約：缺省／`null` → `"image"`（＝既有行為，逐位元不變）；值域外一律 **400
- * `invalid_target`**，**不默默收斂成預設**——呼叫端把 `"Audio"`（大小寫）或 `"video"`
- * 打成預設值時，音頻卡會被靜默排除（＝本輪要消滅的那類靜默失效），寧可當場報錯。
+ * 契约：缺省／`null` → `"image"`（＝既有行为，逐位元不变）；值域外一律 **400
+ * `invalid_target`**，**不默默收敛成预设**——呼叫端把 `"Audio"`（大小写）或 `"video"`
+ * 打成预设值时，音频卡会被静默排除（＝本轮要消灭的那类静默失效），宁可当场报错。
  */
 export function parseBizGenerationTarget(input: unknown): BizGenerationTarget {
   if (input === undefined || input === null) return "image";
@@ -254,7 +254,7 @@ export function parseBizGenerationTarget(input: unknown): BizGenerationTarget {
   throw new EditInputError(400, "invalid_target", `target 只接受 "image" 或 "audio"，收到 ${shown}。`);
 }
 
-/** 畸形 token 的人話提示（**只提示，原文照留**——不改寫提示詞）。 */
+/** 畸形 token 的人话提示（**只提示，原文照留**——不改写提示词）。 */
 function malformedTokenWarning(entry: MalformedEntityToken): string {
   switch (entry.reason) {
     case "empty_name":
@@ -266,60 +266,60 @@ function malformedTokenWarning(entry: MalformedEntityToken): string {
   }
 }
 
-// ─────────────────────────────────────────── 組裝：prompt + references
+// ─────────────────────────────────────────── 组装：prompt + references
 
 export interface BizGenerationInputPlan {
-  /** 實體 tag 展開後的 prompt（零 token 時與輸入逐位元相同）。 */
+  /** 实体 tag 展开后的 prompt（零 token 时与输入逐位元相同）。 */
   prompt: string;
-  /** 卡的圖在前、顯式 reference_images 在後，去重並受上限；零參考圖時為空陣列。 */
+  /** 卡的图在前、显式 reference_images 在后，去重并受上限；零参考图时为空阵列。 */
   references: GenerationReference[];
-  /** 給呼叫端看得見的降級/截尾/未命中說明；無事發生時為空陣列。 */
+  /** 给呼叫端看得见的降级/截尾/未命中说明；无事发生时为空阵列。 */
   warnings: string[];
 }
 
 /**
- * prompt 與 `reference_images` → 可直接送進 `submitGenerationCommand` 的
+ * prompt 与 `reference_images` → 可直接送进 `submitGenerationCommand` 的
  * `prompt` + `references`。
  *
- * 語義（凍結契約）：
- *   - 零 token 且零 reference_images → prompt 逐位元不變、references 空、warnings 空
- *     （呼叫端據此**完全不加 `workflow` 鍵**，零漂移）。
- *   - 命中 token → 就地換成卡的 prompt 片段（片段為空換卡名，`expandEntityTokens` 已內建）；
- *     卡的 `references[].url` 併入。
- *   - 未命中 token → 原樣保留 token（fail-open）＋一條 warning。
- *   - 卡庫讀取失敗 → **降級為不解析 token**（生成是主線、卡庫是增強），原樣送 prompt ＋ warning。
- *   - 形狀非法的 reference_images 在任何 I/O 之前拋 `EditInputError`。
- *   - `target: "audio"`（新）→ 走 `applyCharacterCards(..., { target: "audio" })`：只有音頻卡
- *     參與（被引用的卡就地展開片段、未引用的鎖定音頻卡照常進前綴），**references 一律空**、
- *     顯式 `reference_images` 被忽略並出一條 warning。缺省／`"image"` 逐位元走上面那條舊路。
+ * 语义（冻结契约）：
+ *   - 零 token 且零 reference_images → prompt 逐位元不变、references 空、warnings 空
+ *     （呼叫端据此**完全不加 `workflow` 键**，零漂移）。
+ *   - 命中 token → 就地换成卡的 prompt 片段（片段为空换卡名，`expandEntityTokens` 已内建）；
+ *     卡的 `references[].url` 并入。
+ *   - 未命中 token → 原样保留 token（fail-open）＋一条 warning。
+ *   - 卡库读取失败 → **降级为不解析 token**（生成是主线、卡库是增强），原样送 prompt ＋ warning。
+ *   - 形状非法的 reference_images 在任何 I/O 之前抛 `EditInputError`。
+ *   - `target: "audio"`（新）→ 走 `applyCharacterCards(..., { target: "audio" })`：只有音频卡
+ *     参与（被引用的卡就地展开片段、未引用的锁定音频卡照常进前缀），**references 一律空**、
+ *     显式 `reference_images` 被忽略并出一条 warning。缺省／`"image"` 逐位元走上面那条旧路。
  */
 export async function planBizGenerationInput(input: {
   prompt: string;
   rawReferenceImages: unknown;
-  /** 生成鏈路；缺省 `"image"`＝既有行為（零漂移）。 */
+  /** 生成链路；缺省 `"image"`＝既有行为（零漂移）。 */
   target?: BizGenerationTarget;
-  /** 卡庫讀取（route 注入 `listCharacterCards(userId)`）；只有 prompt 真的帶 token 時才會被呼叫。 */
+  /** 卡库读取（route 注入 `listCharacterCards(userId)`）；只有 prompt 真的带 token 时才会被呼叫。 */
   loadCards?: () => Promise<readonly CharacterCard[]>;
   tenantId: string;
   idempotencyKey: string;
 }): Promise<BizGenerationInputPlan> {
   const warnings: string[] = [];
   const target = input.target ?? "image";
-  // 形狀校驗先做：非法輸入必須在卡庫/Blob 任何 I/O 之前就 400。
+  // 形状校验先做：非法输入必须在卡库/Blob 任何 I/O 之前就 400。
   const explicitSpecs = parseReferenceImageSpecs(input.rawReferenceImages);
 
   let prompt = input.prompt;
-  // 畸形 token 診斷（只診斷、不改寫）：`@[角色:]` / `@[角色:灰羽` / `@[未知种类:灰羽]` 在
-  // 解析器裡分別是「不算 token」「不算 token」「未命中」，不主動提示就永遠靜默。原文一律照留。
+  // 畸形 token 诊断（只诊断、不改写）：`@[角色:]` / `@[角色:灰羽` / `@[未知种类:灰羽]` 在
+  // 解析器里分别是「不算 token」「不算 token」「未命中」，不主动提示就永远静默。原文一律照留。
   const malformed = findMalformedEntityTokens(prompt);
   const malformedRaws = new Set(malformed.map((entry) => entry.raw));
   for (const entry of malformed) warnings.push(malformedTokenWarning(entry));
 
   if (target === "audio") {
-    // 音頻鏈路：只有音頻卡參與（`character-cards.ts` 的 target:"audio" 語義），參考圖一律空。
-    // 註：`applyCharacterCards` 的卡參數是可變陣列，故載入後展開成新陣列（不改原陣列）。
+    // 音频链路：只有音频卡参与（`character-cards.ts` 的 target:"audio" 语义），参考图一律空。
+    // 注：`applyCharacterCards` 的卡参数是可变阵列，故载入后展开成新阵列（不改原阵列）。
     let cards: CharacterCard[] = [];
-    // 與視覺鏈路同紀律：零 token 不讀卡庫（不多一次 I/O）。
+    // 与视觉链路同纪律：零 token 不读卡库（不多一次 I/O）。
     if (parseEntityTokens(prompt).length > 0 && input.loadCards) {
       try {
         cards = [...(await input.loadCards())];
@@ -329,20 +329,20 @@ export async function planBizGenerationInput(input: {
         warnings.push("角色卡库读取失败，本次未解析 @[种类:名称] 引用，提示词原样提交。");
       }
     }
-    // 未命中清單：`applyCharacterCards` 不回報 unresolved，故用**同一個解析器**
-    // （`expandEntityTokens`，不是第二套解析）在原文上取一次未命中清單，才不會靜默。
-    // 必須餵**同一個參與卡池**（只有音頻卡）——餵全卡庫會把「被 target 排除、最終留在正文裡」
-    // 的非音頻 token 當成已命中，warning 就漏了（實測踩過）。
-    // 這行 kind 過濾與 `character-cards.ts:375` 的 audio 卡池規則同義（那邊是唯一權威；
-    // 本檔不改它、也不另立語義，只為「算 warning」對齊同一個池）。
+    // 未命中清单：`applyCharacterCards` 不回报 unresolved，故用**同一个解析器**
+    // （`expandEntityTokens`，不是第二套解析）在原文上取一次未命中清单，才不会静默。
+    // 必须喂**同一个参与卡池**（只有音频卡）——喂全卡库会把「被 target 排除、最终留在正文里」
+    // 的非音频 token 当成已命中，warning 就漏了（实测踩过）。
+    // 这行 kind 过滤与 `character-cards.ts:375` 的 audio 卡池规则同义（那边是唯一权威；
+    // 本档不改它、也不另立语义，只为「算 warning」对齐同一个池）。
     const audioCards = cards.filter((card) => card.kind === "audio");
     for (const raw of expandEntityTokens(prompt, audioCards).unresolved) {
-      if (malformedRaws.has(raw)) continue; // 已用更精確的「種類字無法辨識」提示過，不重複
+      if (malformedRaws.has(raw)) continue; // 已用更精确的「种类字无法辨识」提示过，不重复
       warnings.push(`未找到匹配的实体引用 ${raw}，已原样保留在提示词里。`);
     }
     prompt = applyCharacterCards(prompt, cards, { target: "audio" }).prompt;
     if (explicitSpecs.length > 0) {
-      // 音頻鏈路沒有參考圖語義 ⇒ 不回圖，但**不靜默**：明說忽略了幾張。
+      // 音频链路没有参考图语义 ⇒ 不回图，但**不静默**：明说忽略了几张。
       warnings.push(`音频链路不带参考图语义，已忽略 ${explicitSpecs.length} 张 reference_images（提示词照常展开）。`);
     }
     return { prompt, references: [], warnings };
@@ -363,13 +363,13 @@ export async function planBizGenerationInput(input: {
     const expanded = expandEntityTokens(prompt, cards);
     prompt = expanded.prompt;
     for (const raw of expanded.unresolved) {
-      if (malformedRaws.has(raw)) continue; // 同上：種類字不認的已單獨提示
+      if (malformedRaws.has(raw)) continue; // 同上：种类字不认的已单独提示
       warnings.push(`未找到匹配的实体引用 ${raw}，已原样保留在提示词里。`);
     }
     cardSpecs = cardReferenceSpecs(cards, expanded.usedCardIds);
   }
 
-  // 卡的圖在前、顯式 reference_images 在後；同 URL 去重後受同一個上限。
+  // 卡的图在前、显式 reference_images 在后；同 URL 去重后受同一个上限。
   const deduped = dedupeSpecsByUrl([...cardSpecs, ...explicitSpecs]);
   let kept = deduped;
   if (deduped.length > MAX_REFERENCE_IMAGES) {
@@ -393,11 +393,11 @@ export async function planBizGenerationInput(input: {
   return { prompt, references, warnings };
 }
 
-// ─────────────────────────────────────────── workflow 合併
+// ─────────────────────────────────────────── workflow 合并
 
 /**
- * `references` 與既有 `metadata.controlNets` 合成**同一個** workflow 物件
- * （兩個都在場時互不覆蓋）；兩者皆空回 `undefined`。
+ * `references` 与既有 `metadata.controlNets` 合成**同一个** workflow 物件
+ * （两个都在场时互不覆盖）；两者皆空回 `undefined`。
  */
 export function buildGenerationWorkflow(input: {
   references?: readonly GenerationReference[];
@@ -413,8 +413,8 @@ export function buildGenerationWorkflow(input: {
 }
 
 /**
- * 提交命令用的 workflow 展開。**沒有參考圖也沒有 ControlNet 時回空物件**——
- * route 以 `...generationWorkflowField(...)` 展開，零鍵＝與改動前的 payload 逐位元等價。
+ * 提交命令用的 workflow 展开。**没有参考图也没有 ControlNet 时回空物件**——
+ * route 以 `...generationWorkflowField(...)` 展开，零键＝与改动前的 payload 逐位元等价。
  */
 export function generationWorkflowField(input: {
   references?: readonly GenerationReference[];

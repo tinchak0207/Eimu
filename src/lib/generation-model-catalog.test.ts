@@ -18,7 +18,7 @@ import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "./ge
 
 test("recommended model is first and the requested image supply models lead the public menu", () => {
   assert.equal(GENERATION_MODEL_IDS[0], "gpt-image-2");
-  // 2026-09-09：GPT Image 2.5 兩檔緊隨 GPT Image 2 之後插入菜單
+  // 2026-09-09：GPT Image 2.5 两档紧随 GPT Image 2 之后插入菜单
   assert.deepEqual(GENERATION_MODEL_IDS.slice(1, 6), [
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
@@ -100,7 +100,7 @@ test("catalog resolves image and video selections to real Adobe2API model ids", 
   assert.equal(resolveAdobe2ApiImageModelId("adobe-firefly", "16:9", "2k"), "firefly-image5-2k-16x9");
   assert.equal(resolveAdobe2ApiVideoModelId("veo-3.1-fast", "9:16", "1080p", 8), "firefly-veo31-fast-8s-9x16-1080p");
   assert.equal(resolveAdobe2ApiVideoModelId("kling-3.0", "16:9", "720p", 10), "firefly-kling3-10s-16x9-720p");
-  // 2026-09-05 暴君裁定：Seedance 全系時長地板 10s（虧錢線以下禁賣），4s 已從目錄移除。
+  // 2026-09-05 暴君裁定：Seedance 全系时长地板 10s（亏钱线以下禁卖），4s 已从目录移除。
   assert.equal(resolveAdobe2ApiVideoModelId("seedance-2.0-fast", "16:9", "480p", 4), null);
   assert.equal(resolveAdobe2ApiVideoModelId("seedance-2.0-fast", "16:9", "480p", 10), "firefly-seedance2-fast-10s-16x9-480p");
 });

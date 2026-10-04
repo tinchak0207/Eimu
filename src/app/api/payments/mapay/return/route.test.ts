@@ -1,10 +1,10 @@
-// 運行時測 /api/payments/mapay/return 的回跳語義（全程 127.0.0.1 假伺服器，無外網、無真實支付）：
+// 运行时测 /api/payments/mapay/return 的回跳语义（全程 127.0.0.1 假伺服器，无外网、无真实支付）：
 //
-//   - 訂單已直接入帳 → 回跳帶 `mapay=credited`（前端顯示「支付成功，已到账」），**不觸發兌換**。
-//   - 佔位結果未定／通道不可用 → `mapay=pending`（發放權留給 notify，不開第二條通道）。
-//   - 上游明確沒動（failed）→ 退回舊流程發碼（`cdk=`）。
+//   - 订单已直接入帐 → 回跳带 `mapay=credited`（前端显示「支付成功，已到账」），**不触发兑换**。
+//   - 占位结果未定／通道不可用 → `mapay=pending`（发放权留给 notify，不开第二条通道）。
+//   - 上游明确没动（failed）→ 退回旧流程发码（`cdk=`）。
 //
-// 控面側用真 HMAC 域驗簽後跑真實入帳核心；new-api 網關是假的，只記錄有沒有被發碼。
+// 控面侧用真 HMAC 域验签后跑真实入帐核心；new-api 网关是假的，只记录有没有被发码。
 
 import assert from "node:assert/strict";
 import test from "node:test";

@@ -1,6 +1,6 @@
-// 分鏡 → 配音台詞表 → 回寫分鏡（橋接純函式層）行為測試。
+// 分镜 → 配音台词表 → 回写分镜（桥接纯函式层）行为测试。
 //
-// 全部是**真函式行為斷言**：真組行、真拒寫、真回寫、真比對漂移；無源碼字串掃描。
+// 全部是**真函式行为断言**：真组行、真拒写、真回写、真比对漂移；无源码字串扫描。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -18,21 +18,21 @@ import type {
 
 const MP3 = (n: number) => `https://store.tinchak0207.xyz/tts_${n}.mp3`;
 
-/** 一顆最小分鏡（只帶本層會讀的欄位）。 */
+/** 一颗最小分镜（只带本层会读的栏位）。 */
 function shot(shotNumber: string, extra: Partial<StoryboardAudioShot> = {}): StoryboardAudioShot {
   return { shotNumber, ...extra };
 }
 
-/** 六鏡各有一段旁白（P2 病灶的長相：旁白貫穿鏡1-6，必須得到 6 行而非 1 行）。 */
+/** 六镜各有一段旁白（P2 病灶的长相：旁白贯穿镜1-6，必须得到 6 行而非 1 行）。 */
 function sixNarrationShots(): StoryboardAudioShot[] {
   return [1, 2, 3, 4, 5, 6].map((n) =>
-    shot(`S0${n}`, { narration: `第 ${n} 鏡的旁白台詞`, durationSeconds: 10 }),
+    shot(`S0${n}`, { narration: `第 ${n} 镜的旁白台词`, durationSeconds: 10 }),
   );
 }
 
 // ─────────────────────────────────────────── ① shotsToAudioScript
 
-test("6 鏡旁白 → 6 行（不摺成 1 行），source 逐行對回鏡號", () => {
+test("6 镜旁白 → 6 行（不折成 1 行），source 逐行对回镜号", () => {
   const plan = shotsToAudioScript(sixNarrationShots());
   assert.equal(plan.refused, undefined);
   assert.equal(plan.source.length, 6);
@@ -40,17 +40,17 @@ test("6 鏡旁白 → 6 行（不摺成 1 行），source 逐行對回鏡號", (
   assert.equal(rows.length, 6);
   assert.deepEqual(
     rows.map((r) => r.text),
-    ["第 1 鏡的旁白台詞", "第 2 鏡的旁白台詞", "第 3 鏡的旁白台詞", "第 4 鏡的旁白台詞", "第 5 鏡的旁白台詞", "第 6 鏡的旁白台詞"],
+    ["第 1 镜的旁白台词", "第 2 镜的旁白台词", "第 3 镜的旁白台词", "第 4 镜的旁白台词", "第 5 镜的旁白台词", "第 6 镜的旁白台词"],
   );
   assert.deepEqual(
     plan.source,
     ["S01", "S02", "S03", "S04", "S05", "S06"].map((shotNumber) => ({ shotNumber, field: "narration" })),
   );
-  // 鏡號**不得**出現在送去合成的 role/text 上。
+  // 镜号**不得**出现在送去合成的 role/text 上。
   assert.ok(rows.every((r) => !r.text.includes("S0") && r.role === "narration"));
 });
 
-test("同一鏡對白＋旁白 → 各一行（對白先於旁白），source.field 正確", () => {
+test("同一镜对白＋旁白 → 各一行（对白先于旁白），source.field 正确", () => {
   const plan = shotsToAudioScript([shot("S01", { dialogue: "站住！", narration: "夜色沉沉" })]);
   assert.equal(plan.source.length, 2);
   assert.deepEqual(plan.source, [
@@ -64,10 +64,10 @@ test("同一鏡對白＋旁白 → 各一行（對白先於旁白），source.fi
   ]);
 });
 
-test("空／純空白欄位不產生行（不送空行）；無鏡號項略過", () => {
+test("空／纯空白栏位不产生行（不送空行）；无镜号项略过", () => {
   const plan = shotsToAudioScript([
     shot("S01", { dialogue: "   ", narration: "" }),
-    shot("", { narration: "沒有鏡號" }),
+    shot("", { narration: "没有镜号" }),
     shot("S02", { narration: "有效旁白" }),
     shot("S03", { dialogue: "" }),
   ]);
@@ -75,14 +75,14 @@ test("空／純空白欄位不產生行（不送空行）；無鏡號項略過",
   assert.deepEqual(plan.source, [{ shotNumber: "S02", field: "narration" }]);
 });
 
-test("對白中的 [角色]：「…」 標記逐字照送（本層不切分、不改寫）", () => {
-  const raw = "[阿明]：「我不會走的。」";
+test("对白中的 [角色]：「…」 标记逐字照送（本层不切分、不改写）", () => {
+  const raw = "[阿明]：「我不会走的。」";
   const plan = shotsToAudioScript([shot("S01", { dialogue: raw })]);
   const rows = JSON.parse(plan.script) as Array<{ text: string }>;
   assert.equal(rows[0].text, raw);
 });
 
-test(`恰好 ${AUDIO_TOOL_MAX_LINES} 行放行、第 ${AUDIO_TOOL_MAX_LINES + 1} 行具名拒且不截斷`, () => {
+test(`恰好 ${AUDIO_TOOL_MAX_LINES} 行放行、第 ${AUDIO_TOOL_MAX_LINES + 1} 行具名拒且不截断`, () => {
   const make = (count: number) =>
     Array.from({ length: count }, (_, i) => shot(`S${i + 1}`, { narration: `旁白 ${i + 1}` }));
 
@@ -93,14 +93,14 @@ test(`恰好 ${AUDIO_TOOL_MAX_LINES} 行放行、第 ${AUDIO_TOOL_MAX_LINES + 1}
   const overLimit = shotsToAudioScript(make(AUDIO_TOOL_MAX_LINES + 1));
   assert.equal(overLimit.refused?.code, "too_many_lines");
   assert.match(overLimit.refused?.note ?? "", /50/);
-  // 不默默截斷：script 與 source 仍是**完整**的 51 行。
+  // 不默默截断：script 与 source 仍是**完整**的 51 行。
   assert.equal(overLimit.source.length, AUDIO_TOOL_MAX_LINES + 1);
   assert.equal((JSON.parse(overLimit.script) as unknown[]).length, AUDIO_TOOL_MAX_LINES + 1);
 });
 
 // ─────────────────────────────────────────── ② applyAudioTimelineToShots
 
-test("正常回寫：narrationAudioId 與 audioAnchorId 生效，且不動輸入分鏡", () => {
+test("正常回写：narrationAudioId 与 audioAnchorId 生效，且不动输入分镜", () => {
   const shots = sixNarrationShots();
   const snapshot = structuredClone(shots);
   const { source } = shotsToAudioScript(shots);
@@ -119,10 +119,10 @@ test("正常回寫：narrationAudioId 與 audioAnchorId 生效，且不動輸入
     assert.equal(s.narrationAudioId, MP3(i));
     assert.equal(s.audioAnchorId, MP3(i));
   });
-  assert.deepEqual(shots, snapshot, "輸入分鏡不得被突變");
+  assert.deepEqual(shots, snapshot, "输入分镜不得被突变");
 });
 
-test("對白軌優先於旁白軌（audioAnchorId = dialogueAudioId || narrationAudioId）", () => {
+test("对白轨优先于旁白轨（audioAnchorId = dialogueAudioId || narrationAudioId）", () => {
   const shots = [shot("S01", { dialogue: "站住", narration: "夜色" })];
   const { source } = shotsToAudioScript(shots);
   const timeline: AudioTimelineEntry[] = [
@@ -136,7 +136,7 @@ test("對白軌優先於旁白軌（audioAnchorId = dialogueAudioId || narration
   assert.equal(result.shots[0].audioAnchorId, MP3(1));
 });
 
-test("timeline 少一行 → 整批拒寫、分鏡原樣（含未截斷的來源）", () => {
+test("timeline 少一行 → 整批拒写、分镜原样（含未截断的来源）", () => {
   const shots = sixNarrationShots();
   const snapshot = structuredClone(shots);
   const { source } = shotsToAudioScript(shots);
@@ -148,11 +148,11 @@ test("timeline 少一行 → 整批拒寫、分鏡原樣（含未截斷的來源
   const result = applyAudioTimelineToShots(shots, timeline, source);
   assert.equal(result.applied, false);
   assert.equal(result.refused?.code, "length_mismatch");
-  assert.deepEqual(result.shots, snapshot, "整批拒寫時分鏡必須原樣");
+  assert.deepEqual(result.shots, snapshot, "整批拒写时分镜必须原样");
   assert.deepEqual(result.unmeasuredDurations, []);
 });
 
-test("任一行的 audio_url 缺失 → 整批拒寫、無部分寫入", () => {
+test("任一行的 audio_url 缺失 → 整批拒写、无部分写入", () => {
   const shots = sixNarrationShots();
   const snapshot = structuredClone(shots);
   const { source } = shotsToAudioScript(shots);
@@ -165,11 +165,11 @@ test("任一行的 audio_url 缺失 → 整批拒寫、無部分寫入", () => {
   assert.equal(result.applied, false);
   assert.equal(result.refused?.code, "missing_audio_url");
   assert.deepEqual(result.shots, snapshot);
-  // 前 3 行雖有效，也一律未寫（拒絕＝全不寫）。
+  // 前 3 行虽有效，也一律未写（拒绝＝全不写）。
   assert.ok(result.shots.every((s) => s.narrationAudioId === undefined));
 });
 
-test("非音頻 URL（.png）→ 整批拒寫，不冒充綁定", () => {
+test("非音频 URL（.png）→ 整批拒写，不冒充绑定", () => {
   const shots = [shot("S01", { narration: "旁白" })];
   const snapshot = structuredClone(shots);
   const { source } = shotsToAudioScript(shots);
@@ -183,7 +183,7 @@ test("非音頻 URL（.png）→ 整批拒寫，不冒充綁定", () => {
   assert.deepEqual(result.shots, snapshot);
 });
 
-test("source 指向不存在的鏡號 → 整批拒寫", () => {
+test("source 指向不存在的镜号 → 整批拒写", () => {
   const shots = [shot("S01", { narration: "旁白" })];
   const source: AudioSourceRef[] = [{ shotNumber: "S99", field: "narration" }];
   const result = applyAudioTimelineToShots(shots, [{ audio_url: MP3(1), duration_ms: 1000 }], source);
@@ -192,7 +192,7 @@ test("source 指向不存在的鏡號 → 整批拒寫", () => {
   assert.deepEqual(result.shots, [shot("S01", { narration: "旁白" })]);
 });
 
-test("duration_ms 未實測（null）仍寫 URL，但記進 unmeasuredDurations", () => {
+test("duration_ms 未实测（null）仍写 URL，但记进 unmeasuredDurations", () => {
   const shots = [shot("S01", { narration: "旁白一" }), shot("S02", { narration: "旁白二" })];
   const { source } = shotsToAudioScript(shots);
   const timeline: AudioTimelineEntry[] = [
@@ -207,7 +207,7 @@ test("duration_ms 未實測（null）仍寫 URL，但記進 unmeasuredDurations"
 
 // ─────────────────────────────────────────── ③ audioDurationDrift
 
-test("逐鏡漂移：超 0.5 秒被標出、未超不被標", () => {
+test("逐镜漂移：超 0.5 秒被标出、未超不被标", () => {
   const shots = [
     shot("S01", { narration: "旁白一", durationSeconds: 10 }),
     shot("S02", { narration: "旁白二", durationSeconds: 10 }),
@@ -235,14 +235,14 @@ test("逐鏡漂移：超 0.5 秒被標出、未超不被標", () => {
   assert.equal(DURATION_DRIFT_THRESHOLD_SEC, 0.5);
 });
 
-test("漂移：本批無此鏡的行 → actualSec 0 且被標；計畫值缺席 → 不比對", () => {
+test("漂移：本批无此镜的行 → actualSec 0 且被标；计画值缺席 → 不比对", () => {
   const shots = [
     shot("S01", { narration: "旁白一", durationSeconds: 8 }),
     shot("S02", { narration: "旁白二", durationSeconds: 8 }),
-    shot("S03", { narration: "旁白三" }), // 無計畫值
+    shot("S03", { narration: "旁白三" }), // 无计画值
   ];
   const { source } = shotsToAudioScript(shots);
-  // 只回 S01 一行（S02/S03 沒合成出來＝P2 病灶長相）
+  // 只回 S01 一行（S02/S03 没合成出来＝P2 病灶长相）
   const timeline: AudioTimelineEntry[] = [{ audio_url: MP3(1), duration_ms: 8_000 }];
   const drift = audioDurationDrift(shots, timeline, source);
 
@@ -255,19 +255,19 @@ test("漂移：本批無此鏡的行 → actualSec 0 且被標；計畫值缺席
   });
   assert.equal(drift[1].actualSec, 0);
   assert.equal(drift[1].overThreshold, true);
-  assert.match(drift[1].note ?? "", /無此鏡的配音行/);
+  assert.match(drift[1].note ?? "", /无此镜的配音行/);
   assert.equal(drift[2].plannedSec, null);
   assert.equal(drift[2].deltaSec, null);
   assert.equal(drift[2].overThreshold, false);
-  assert.match(drift[2].note ?? "", /計畫值/);
+  assert.match(drift[2].note ?? "", /计画值/);
 });
 
-test("漂移：時長未實測 → actualSec/deltaSec 皆 null，不冒充", () => {
+test("漂移：时长未实测 → actualSec/deltaSec 皆 null，不冒充", () => {
   const shots = [shot("S01", { narration: "旁白", durationSeconds: 10 })];
   const { source } = shotsToAudioScript(shots);
   const drift = audioDurationDrift(shots, [{ audio_url: MP3(1), duration_ms: null }], source);
   assert.equal(drift[0].actualSec, null);
   assert.equal(drift[0].deltaSec, null);
   assert.equal(drift[0].overThreshold, false);
-  assert.match(drift[0].note ?? "", /未實測/);
+  assert.match(drift[0].note ?? "", /未实测/);
 });

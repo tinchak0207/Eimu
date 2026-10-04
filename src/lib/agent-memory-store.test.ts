@@ -1,9 +1,9 @@
-// agent-memory-store 行為測試（PRD §9 R6／D6：真行為斷言，禁源碼字串測試）。
+// agent-memory-store 行为测试（PRD §9 R6／D6：真行为断言，禁源码字串测试）。
 //
-// 本機無 blob 憑證（實測 BlobError 即刻拋、0ms），readBlobTextAt/writeBlobText
-// 全部靜默失敗 → 走進程內 Map 兜底路徑，正好可做純內存 E2E。
-// 注意 loadCatalog 有進程內快取：每個 test 開頭一律 __resetAgentMemoryStoreForTests()。
-// 配額日期用 ingest 的 now 注入釘死（2026-09-15），測序自洽、不受跑測日期影響。
+// 本机无 blob 凭证（实测 BlobError 即刻抛、0ms），readBlobTextAt/writeBlobText
+// 全部静默失败 → 走进程内 Map 兜底路径，正好可做纯内存 E2E。
+// 注意 loadCatalog 有进程内快取：每个 test 开头一律 __resetAgentMemoryStoreForTests()。
+// 配额日期用 ingest 的 now 注入钉死（2026-09-15），测序自洽、不受跑测日期影响。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,11 +23,11 @@ const NOW = new Date("2026-09-15T12:00:00.000Z");
 function sharedDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDocInput {
   return {
     scope: "shared",
-    domain: "測試領域",
+    domain: "测试领域",
     slug: "basic-note",
     description: "a baseline shared knowledge note",
     type: "domain",
-    body: "**Why:** 測試\n**How to apply:** 測試",
+    body: "**Why:** 测试\n**How to apply:** 测试",
     evidence: "tool result line one",
     evidenceKind: "tool_result",
     selfScore: 5,
@@ -39,7 +39,7 @@ function privateDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDo
   return {
     scope: "private",
     ownerKey: "owner-a-hash",
-    domain: "賬戶偏好",
+    domain: "账户偏好",
     slug: "pref-cinematic",
     description: "user prefers cinematic lighting",
     type: "user",
@@ -51,7 +51,7 @@ function privateDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDo
   };
 }
 
-test("G5：同 slug 再入庫 → revision+1、id 穩定、清單只剩一條", async () => {
+test("G5：同 slug 再入库 → revision+1、id 稳定、清单只剩一条", async () => {
   __resetAgentMemoryStoreForTests();
   const first = await ingestMemoryDocs({ batchId: "b1", docs: [sharedDoc()], now: NOW });
   assert.deepEqual(first.rejected, []);
@@ -61,7 +61,7 @@ test("G5：同 slug 再入庫 → revision+1、id 穩定、清單只剩一條", 
   assert.equal(list1[0].revision, 1);
   assert.equal(list1[0].status, "active");
 
-  // 第二筆同 scope+slug（換批次號）→ 走更新分支：id 保留、revision 翻到 2。
+  // 第二笔同 scope+slug（换批次号）→ 走更新分支：id 保留、revision 翻到 2。
   const second = await ingestMemoryDocs({
     batchId: "b2",
     docs: [sharedDoc({ body: "**Why:** 第二版\n**How to apply:** 更新" })],
@@ -73,11 +73,11 @@ test("G5：同 slug 再入庫 → revision+1、id 穩定、清單只剩一條", 
   assert.equal(list2.length, 1);
   assert.equal(list2[0].revision, 2);
   assert.equal(list2[0].id, "b1-basic-note");
-  assert.equal(list2[0].batchId, "b1"); // 原批次錨定不變
+  assert.equal(list2[0].batchId, "b1"); // 原批次锚定不变
   assert.match(list2[0].body, /第二版/);
 });
 
-test("G5：description Jaccard>0.8 → duplicate 拒絕（不同 slug 也拒）", async () => {
+test("G5：description Jaccard>0.8 → duplicate 拒绝（不同 slug 也拒）", async () => {
   __resetAgentMemoryStoreForTests();
   const result = await ingestMemoryDocs({
     batchId: "b3",
@@ -92,11 +92,11 @@ test("G5：description Jaccard>0.8 → duplicate 拒絕（不同 slug 也拒）"
   assert.deepEqual(result.rejected, [{ slug: "beta", reason: "duplicate" }]);
 });
 
-test("G7：單 domain ≤8/日，第 9 條 quota_domain", async () => {
+test("G7：单 domain ≤8/日，第 9 条 quota_domain", async () => {
   __resetAgentMemoryStoreForTests();
   const docs = Array.from({ length: 9 }, (_, i) =>
     sharedDoc({
-      domain: "配額域",
+      domain: "配额域",
       slug: `note-${i + 1}`,
       description: `domain fact number ${i + 1} unique${i + 1}`,
     }),
@@ -107,7 +107,7 @@ test("G7：單 domain ≤8/日，第 9 條 quota_domain", async () => {
   assert.equal(result.stats.accepted, 8);
 });
 
-test("G7：單 ownerKey private ≤10/日，超額 quota_scope", async () => {
+test("G7：单 ownerKey private ≤10/日，超额 quota_scope", async () => {
   __resetAgentMemoryStoreForTests();
   const docs = Array.from({ length: 12 }, (_, i) =>
     privateDoc({
@@ -124,7 +124,7 @@ test("G7：單 ownerKey private ≤10/日，超額 quota_scope", async () => {
   assert.equal(listed.length, 10);
 });
 
-test("G7：單批 shared ≤20，第 21 條 quota_scope（Map 兜底很快，大批照測）", async () => {
+test("G7：单批 shared ≤20，第 21 条 quota_scope（Map 兜底很快，大批照测）", async () => {
   __resetAgentMemoryStoreForTests();
   const docs = Array.from({ length: 21 }, (_, i) =>
     sharedDoc({
@@ -138,7 +138,7 @@ test("G7：單批 shared ≤20，第 21 條 quota_scope（Map 兜底很快，大
   assert.deepEqual(result.rejected, [{ slug: "bulk-21", reason: "quota_scope" }]);
 });
 
-test("空 batchId → 全拒 structure、零寫入", async () => {
+test("空 batchId → 全拒 structure、零写入", async () => {
   __resetAgentMemoryStoreForTests();
   const result = await ingestMemoryDocs({
     batchId: "   ",
@@ -152,7 +152,7 @@ test("空 batchId → 全拒 structure、零寫入", async () => {
   assert.equal((await listMemoryDocs({ scope: "shared" })).length, 0);
 });
 
-test("結構防線：壞 slug／超長 description → structure", async () => {
+test("结构防线：坏 slug／超长 description → structure", async () => {
   __resetAgentMemoryStoreForTests();
   const result = await ingestMemoryDocs({
     batchId: "b7",
@@ -167,7 +167,7 @@ test("結構防線：壞 slug／超長 description → structure", async () => {
   assert.deepEqual(result.rejected.map((r) => r.reason), ["structure", "structure", "structure"]);
 });
 
-test("retract（按 doc_ids）：list 不含、INDEX 行移除、不刪檔（再入庫 id 錨定原目錄條目）", async () => {
+test("retract（按 doc_ids）：list 不含、INDEX 行移除、不删档（再入库 id 锚定原目录条目）", async () => {
   __resetAgentMemoryStoreForTests();
   const ingested = await ingestMemoryDocs({
     batchId: "b8",
@@ -185,10 +185,10 @@ test("retract（按 doc_ids）：list 不含、INDEX 行移除、不刪檔（再
   assert.deepEqual(listed.map((doc) => doc.slug), ["keep"]);
   const indexAfter = await readMemoryIndexMd("shared");
   assert.doesNotMatch(indexAfter, /drop/);
-  assert.match(indexAfter, /- \[測試領域\] keep — .*（v1）/);
+  assert.match(indexAfter, /- \[测试领域\] keep — .*（v1）/);
 });
 
-test("retract（按 batch_id）：整批移除；空條件回空", async () => {
+test("retract（按 batch_id）：整批移除；空条件回空", async () => {
   __resetAgentMemoryStoreForTests();
   const ingested = await ingestMemoryDocs({
     batchId: "b9",
@@ -200,11 +200,11 @@ test("retract（按 batch_id）：整批移除；空條件回空", async () => {
   assert.deepEqual(retracted.retracted.sort(), ["b9-p1", "b9-p2"]);
   assert.equal((await listMemoryDocs({ scope: "private", ownerKey: "owner-a-hash" })).length, 0);
   assert.equal(await readMemoryIndexMd("private", "owner-a-hash"), "");
-  // 空條件（無 ids 無 batch）：不炸、不回撤回任何筆。
+  // 空条件（无 ids 无 batch）：不炸、不回撤回任何笔。
   assert.deepEqual(await retractMemoryDocs({}), { retracted: [] });
 });
 
-test("review：pending_review 翻轉僅 shared（PRD §5.6 private 不自動翻）、清單與 INDEX 同步消失", async () => {
+test("review：pending_review 翻转仅 shared（PRD §5.6 private 不自动翻）、清单与 INDEX 同步消失", async () => {
   __resetAgentMemoryStoreForTests();
   const ingested = await ingestMemoryDocs({
     batchId: "rv1",
@@ -218,7 +218,7 @@ test("review：pending_review 翻轉僅 shared（PRD §5.6 private 不自動翻�
 
   const flipped = await reviewMemoryDocs({ batchId: "rv1", action: "pending_review" });
   assert.deepEqual(flipped, { reviewed: ["rv1-s-note"], action: "pending_review" });
-  // 翻轉後：shared 清單不含、INDEX 行消失；private 不受影響。
+  // 翻转后：shared 清单不含、INDEX 行消失；private 不受影响。
   assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
   assert.equal(await readMemoryIndexMd("shared"), "");
   const privates = await listMemoryDocs({ scope: "private", ownerKey: "owner-a-hash" });
@@ -226,7 +226,7 @@ test("review：pending_review 翻轉僅 shared（PRD §5.6 private 不自動翻�
   assert.match(await readMemoryIndexMd("private", "owner-a-hash"), /p-note/);
 });
 
-test("review：activate 人工放行 → pending_review 翻回 active，INDEX 行恢復", async () => {
+test("review：activate 人工放行 → pending_review 翻回 active，INDEX 行恢复", async () => {
   __resetAgentMemoryStoreForTests();
   await ingestMemoryDocs({
     batchId: "rv2",
@@ -244,11 +244,11 @@ test("review：activate 人工放行 → pending_review 翻回 active，INDEX �
   assert.equal(listed[0].status, "active");
   assert.match(
     await readMemoryIndexMd("shared"),
-    /- \[測試領域\] flip-me — doc to flip back on activation （v1）/,
+    /- \[测试领域\] flip-me — doc to flip back on activation （v1）/,
   );
 });
 
-test("review：顯式 scope=private 才可翻私有；retracted 拒絕翻轉；空條件回空", async () => {
+test("review：显式 scope=private 才可翻私有；retracted 拒绝翻转；空条件回空", async () => {
   __resetAgentMemoryStoreForTests();
   await ingestMemoryDocs({
     batchId: "rv3",
@@ -265,41 +265,41 @@ test("review：顯式 scope=private 才可翻私有；retracted 拒絕翻轉；�
   });
   assert.deepEqual(privFlip.reviewed, ["rv3-priv"]);
 
-  // retracted 為留證終態：兩個方向都不翻。
+  // retracted 为留证终态：两个方向都不翻。
   await retractMemoryDocs({ docIds: ["rv3-gone"] });
-  // 默認 pending_review 只查 shared：gone（retracted）不合來源態、priv（已 pending）不合默認過濾。
+  // 默认 pending_review 只查 shared：gone（retracted）不合来源态、priv（已 pending）不合默认过滤。
   const noPending = await reviewMemoryDocs({ batchId: "rv3", action: "pending_review" });
   assert.deepEqual(noPending.reviewed, []);
   const noActivate = await reviewMemoryDocs({ docIds: ["rv3-gone"], action: "activate" });
   assert.deepEqual(noActivate.reviewed, []);
-  // 人工放行：顯式 ids 把 pending 的 private 翻回 active。
+  // 人工放行：显式 ids 把 pending 的 private 翻回 active。
   const releasePriv = await reviewMemoryDocs({ docIds: ["rv3-priv"], action: "activate" });
   assert.deepEqual(releasePriv.reviewed, ["rv3-priv"]);
   assert.deepEqual(
     (await listMemoryDocs({ scope: "private", ownerKey: "owner-a-hash" })).map((doc) => doc.slug),
     ["priv"],
   );
-  // 空條件不炸。
+  // 空条件不炸。
   assert.deepEqual(await reviewMemoryDocs({ action: "activate" }), {
     reviewed: [],
     action: "activate",
   });
 });
 
-test("索引與清單形狀：INDEX 行符合契約格式；private 缺 ownerKey 回空", async () => {
+test("索引与清单形状：INDEX 行符合契约格式；private 缺 ownerKey 回空", async () => {
   __resetAgentMemoryStoreForTests();
   await ingestMemoryDocs({ batchId: "b10", docs: [sharedDoc()], now: NOW });
   const index = await readMemoryIndexMd("shared");
-  assert.equal(index, "- [測試領域] basic-note — a baseline shared knowledge note （v1）");
+  assert.equal(index, "- [测试领域] basic-note — a baseline shared knowledge note （v1）");
   assert.deepEqual(await listMemoryDocs({ scope: "private" }), []);
 });
 
-test("saveBatchReport 不炸（blob 失敗靜默）", async () => {
+test("saveBatchReport 不炸（blob 失败静默）", async () => {
   __resetAgentMemoryStoreForTests();
   await assert.doesNotReject(saveBatchReport("b11", { stored: 2, rejected: {} }));
 });
 
-test("stats.index_lines 與實際索引行數一致", async () => {
+test("stats.index_lines 与实际索引行数一致", async () => {
   __resetAgentMemoryStoreForTests();
   const result = await ingestMemoryDocs({
     batchId: "b12",

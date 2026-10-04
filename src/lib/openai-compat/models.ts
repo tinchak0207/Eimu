@@ -1,29 +1,29 @@
-// `/openai/v1/models` 的模型清單真源。
+// `/openai/v1/models` 的模型清单真源。
 //
-// 只列**當下真的能出圖**的模型，判準全部複用站內既有閘，不自己另立一套：
-//   ① `SUPPORTED_IMAGE_MODEL_IDS` ∩ `isSupportedImageModel()`（目錄裡 kind=image）；
-//   ② `isModelAllowedForKey()`（金鑰白名單，與提交入口同一支函數）；
-//   ③ `readUnavailableModels()`（真實生成結果驅動的熔斷／斷供名單，與 /v1/models 同一支）。
+// 只列**当下真的能出图**的模型，判准全部复用站内既有闸，不自己另立一套：
+//   ① `SUPPORTED_IMAGE_MODEL_IDS` ∩ `isSupportedImageModel()`（目录里 kind=image）；
+//   ② `isModelAllowedForKey()`（金钥白名单，与提交入口同一支函数）；
+//   ③ `readUnavailableModels()`（真实生成结果驱动的熔断／断供名单，与 /v1/models 同一支）。
 //
-// ②③ 的意義：列表不許宣稱比提交入口更多——列出來的名字必然能提交，提交得了的名字必然
-// 在列表裡（同一組閘）。③ 讀取失敗時與 `/v1/models` 一樣 degrade 成空 map（fail-open），
-// 不因觀測面抖動把整張清單打空。
+// ②③ 的意义：列表不许宣称比提交入口更多——列出来的名字必然能提交，提交得了的名字必然
+// 在列表里（同一组闸）。③ 读取失败时与 `/v1/models` 一样 degrade 成空 map（fail-open），
+// 不因观测面抖动把整张清单打空。
 //
-// 注意：`readUnavailableModels()` 需要控制面 DB。路由跑在 Vercel 時沒有
-// GENERATION_DATABASE_URL（見 generation.ts 檔頭），此閘會靜默 fail-open；要讓熔斷閘
-// 真正生效，這條路由必須跑在持有 DB 的一方（控制面）——部署判定見回報。
+// 注意：`readUnavailableModels()` 需要控制面 DB。路由跑在 Vercel 时没有
+// GENERATION_DATABASE_URL（见 generation.ts 档头），此闸会静默 fail-open；要让熔断闸
+// 真正生效，这条路由必须跑在持有 DB 的一方（控制面）——部署判定见回报。
 import { isModelAllowedForKey, type BizApiKey } from "@/lib/biz-api-keys";
 import { isSupportedImageModel, resolveGenerationModelId } from "@/lib/generation-model-catalog";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
 import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 
-/** OpenAI 客戶端的 `owned_by`；本站品牌名。 */
+/** OpenAI 客户端的 `owned_by`；本站品牌名。 */
 export const OPENAI_COMPAT_MODEL_OWNER = "eimu";
 
 /**
- * 固定 created：與 `/v1/models` 同慣例（2026-01-01）。模型清單不是時間序列資源，
- * 每次請求回不同時間戳只會讓客戶端快取判斷閃爍。
+ * 固定 created：与 `/v1/models` 同惯例（2026-01-01）。模型清单不是时间序列资源，
+ * 每次请求回不同时间戳只会让客户端快取判断闪烁。
  */
 export const OPENAI_COMPAT_MODEL_CREATED = Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000);
 
@@ -32,12 +32,12 @@ export interface CompatModelDeps {
   readUnavailable?: () => Promise<Map<string, string>>;
 }
 
-/** 可出圖的模型 id 清單（見檔頭三條閘）。 */
+/** 可出图的模型 id 清单（见档头三条闸）。 */
 export async function listCompatibleImageModelIds(
   key: BizApiKey,
   deps: CompatModelDeps = {},
 ): Promise<string[]> {
-  // 與扣費路由同源：先同步 admin 定價覆寫（內部吞錯），列表與扣費才不會各說一套。
+  // 与扣费路由同源：先同步 admin 定价覆写（内部吞错），列表与扣费才不会各说一套。
   await (deps.sync ?? syncModelPricing)();
   const unavailable = await (deps.readUnavailable ?? readUnavailableModels)().catch(
     () => new Map<string, string>(),
@@ -68,10 +68,10 @@ export function openAICompatModelList(ids: string[]): { object: "list"; data: Op
 }
 
 /**
- * 客戶端送來的 model → 站內 model id；不是可出圖模型回 null。
+ * 客户端送来的 model → 站内 model id；不是可出图模型回 null。
  *
- * 走 `resolveGenerationModelId`（顯示名風格分隔符容忍：`seedream 2.0` → `seedream-2.0`），
- * 與 `/v1/images/generations` 的解析路徑同一支，不另寫一份正則。
+ * 走 `resolveGenerationModelId`（显示名风格分隔符容忍：`seedream 2.0` → `seedream-2.0`），
+ * 与 `/v1/images/generations` 的解析路径同一支，不另写一份正则。
  */
 export function resolveCompatibleImageModelId(rawModelId: string): string | null {
   const resolved = resolveGenerationModelId(rawModelId) ?? rawModelId;

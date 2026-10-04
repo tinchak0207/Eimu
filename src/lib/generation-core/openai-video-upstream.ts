@@ -22,14 +22,14 @@ import {
 // sd7 族固定分辨率由模型名决定），不依赖 supplier 表 supplierModelId。
 
 const POLL_INTERVAL_MS = 5_000;
-// INC-VIDEO-0927（2026-09-27）：輪詢窗口原本 540s（9 分鐘），會誤殺慢而健康的
-// 影片上游——napi 實測單次 attempt 最長 993.9s（16.6 分鐘），生產日誌實錄
+// INC-VIDEO-0927（2026-09-27）：轮询窗口原本 540s（9 分钟），会误杀慢而健康的
+// 影片上游——napi 实测单次 attempt 最长 993.9s（16.6 分钟），生产日志实录
 // 「openai-video upstream generation timed out after 540s (last status: in_progress)」。
-// 預設放寬到 20 分鐘，可用 OPENAI_VIDEO_MAX_WAIT_MS 覆寫（下限 60s）；
-// worker 端影片生成預算同步放寬到 25 分鐘，留成品下載／持久化餘裕。
+// 预设放宽到 20 分钟，可用 OPENAI_VIDEO_MAX_WAIT_MS 覆写（下限 60s）；
+// worker 端影片生成预算同步放宽到 25 分钟，留成品下载／持久化余裕。
 const DEFAULT_MAX_WAIT_MS = 1_200_000;
 
-/** 輪詢窗口（每次調用讀 env，便於運維與測試覆寫）。 */
+/** 轮询窗口（每次调用读 env，便于运维与测试覆写）。 */
 export function openaiVideoMaxWaitMs(): number {
   const raw = Number(process.env.OPENAI_VIDEO_MAX_WAIT_MS ?? "");
   return Number.isFinite(raw) && raw >= 60_000 ? raw : DEFAULT_MAX_WAIT_MS;
@@ -41,17 +41,17 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // sd4 族：分辨率可选（480p/720p），请求带 resolution 字段
 // sd7 族：模型名固定分辨率，请求不带 resolution 字段
 //
-// INC-VIDEO-0927（2026-09-27 實彈）：上游已把 sd4-* 整族下架，/v1/models 只剩
-// sd7-* / sd8-* / sd10..sd14-*。對 sd4-seedance-2.0 提交直接被拒：
+// INC-VIDEO-0927（2026-09-27 实弹）：上游已把 sd4-* 整族下架，/v1/models 只剩
+// sd7-* / sd8-* / sd10..sd14-*。对 sd4-seedance-2.0 提交直接被拒：
 //   {"error":{"code":"","message":"无效的请求，model sd4-seedance-2.0 is not a
 //    public model name","type":"new_api_error"}}
-// 帳號就算有餘額也 100% 失敗。下表改用 GET /v1/models（2026-09-27 實查 37 個模型）
-// 中確實存在的名字，每族取當前最低價（上游 /api/pricing，元/次）：
+// 帐号就算有余额也 100% 失败。下表改用 GET /v1/models（2026-09-27 实查 37 个模型）
+// 中确实存在的名字，每族取当前最低价（上游 /api/pricing，元/次）：
 //   sd12-seedance-2.0 2.9 / sd13-seedance-2.0-mini 1.7 / sd8-seedance-2.5 3.9
 //   sd12-seedance-2.0-fast 2.9 / sd7-seedance-2.0-1080p 5.9
-// 形狀假設（未驗證）：sd10..sd14 與 sd4 同族協議（completed + video_url/
-// metadata.url，收 resolution/duration/aspect_ratio）。名字存在性已實查；
-// 有餘額後第一單須覆核形狀假設。
+// 形状假设（未验证）：sd10..sd14 与 sd4 同族协议（completed + video_url/
+// metadata.url，收 resolution/duration/aspect_ratio）。名字存在性已实查；
+// 有余额后第一单须覆核形状假设。
 const UPSTREAM_MODEL_BY_RESOLUTION: Record<string, Record<string, string>> = {
   "seedance-2.0": {
     "480p": "sd12-seedance-2.0",
@@ -105,10 +105,10 @@ const DURATION_RANGES: Record<string, [number, number]> = {
   "seedance-2.5-480p": [4, 30],
   "seedance-2.5-720p": [4, 29],
   "seedance-2.5-30s":  [30, 30],
-  // xiaoyxiao（2026-09-27 起為視頻唯一權威渠道）承载的 minimax-h3：
-  // 必須與 catalog 該 model 的 durations（4–15s）一致。
-  // 起因：capability 與 catalog 都有此 model，唯獨本表漏了 ⇒ 提交在呼叫上游前
-  // 被 400 擋下（"unknown model ... has no duration range configured"），零上游成本。
+  // xiaoyxiao（2026-09-27 起为视频唯一权威渠道）承载的 minimax-h3：
+  // 必须与 catalog 该 model 的 durations（4–15s）一致。
+  // 起因：capability 与 catalog 都有此 model，唯独本表漏了 ⇒ 提交在呼叫上游前
+  // 被 400 挡下（"unknown model ... has no duration range configured"），零上游成本。
   "minimax-h3":        [4, 15],
 };
 
@@ -128,13 +128,13 @@ function resolveUpstreamModel(platformModelId: string, resolution: string): stri
 }
 
 /**
- * 提交前的輸入校驗與上游模型名解析（prompt／duration 範圍／model 映射）。
- * generateWithOpenaiVideo 與成本閘的 `openaiVideoSubmissionFacts` 共用同一份，
- * 保證閘審的（model, resolution, seconds）＝真正送出的值，且拒收順序與搬遷前一致
- *（先輸入校驗，後成本閘）。
+ * 提交前的输入校验与上游模型名解析（prompt／duration 范围／model 映射）。
+ * generateWithOpenaiVideo 与成本闸的 `openaiVideoSubmissionFacts` 共用同一份，
+ * 保证闸审的（model, resolution, seconds）＝真正送出的值，且拒收顺序与搬迁前一致
+ *（先输入校验，后成本闸）。
  *
- * P1-3：生成式後期（續片／改片）的秒數＝**本次新生成的秒數**（續長／區段長），
- * 由 workflow.videoPostProduction 覆寫 `durationSeconds`——成本閘與上游拿到的是同一個值。
+ * P1-3：生成式后期（续片／改片）的秒数＝**本次新生成的秒数**（续长／区段长），
+ * 由 workflow.videoPostProduction 覆写 `durationSeconds`——成本闸与上游拿到的是同一个值。
  */
 function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierGenerationInput) {
   const prompt = input.prompt.trim();
@@ -169,9 +169,9 @@ function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierG
 }
 
 /**
- * 付費視頻成本閘的提交事實（V-03）：本協議實際會送給上游的（model, resolution, seconds）。
- * 閘本身已移到生產平面 worker（提交前執行，見 worker-service `submitWithSupplyCostGate`
- * 與 paid-video-cost-gate.ts）；本檔只回報事實，不做放行判定。
+ * 付费视频成本闸的提交事实（V-03）：本协议实际会送给上游的（model, resolution, seconds）。
+ * 闸本身已移到生产平面 worker（提交前执行，见 worker-service `submitWithSupplyCostGate`
+ * 与 paid-video-cost-gate.ts）；本档只回报事实，不做放行判定。
  */
 export function openaiVideoSubmissionFacts(supplier: SupplierRecord, input: SupplierGenerationInput): PaidVideoSubmissionFacts {
   const { upstreamModel, resolution, duration } = prepareOpenaiVideoSubmission(supplier, input);
@@ -191,13 +191,13 @@ export async function generateWithOpenaiVideo(
 ): Promise<SupplierGenerationOutput> {
   const { prompt, resolution, duration, ratio, upstreamModel, postProduction } = prepareOpenaiVideoSubmission(supplier, input);
 
-  // P1-3 生成式後期：映射未由真單校準 ⇒ 具名拒收（零上游成本）。
-  // 放在成本閘之後、任何 fetch 之前；見 video-post-production.ts 檔頭為何必須 fail-closed。
+  // P1-3 生成式后期：映射未由真单校准 ⇒ 具名拒收（零上游成本）。
+  // 放在成本闸之后、任何 fetch 之前；见 video-post-production.ts 档头为何必须 fail-closed。
   if (postProduction) assertVideoPostProductionUpstreamReady(postProduction);
 
-  // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）已於 V-03 移到生產平面：
-  // worker-service 取得租約後、呼叫本 adapter 前執行（對所有 video_generate 生效，
-  // 本協議 fail-closed）。唯一真源見 paid-video-cost-gate.ts。
+  // 付费视频上游硬闸（2026-09-27 ¥31.2857 事故后立）已于 V-03 移到生产平面：
+  // worker-service 取得租约后、呼叫本 adapter 前执行（对所有 video_generate 生效，
+  // 本协议 fail-closed）。唯一真源见 paid-video-cost-gate.ts。
 
   const isSd7 = SD7_MODEL_NAMES.has(upstreamModel);
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);
@@ -206,8 +206,8 @@ export async function generateWithOpenaiVideo(
   // 构建请求体
   let body: Record<string, unknown>;
   if (isNapi) {
-    // napi 上游 Go struct 的 seconds 欄位是 string（實彈 502 實錘：數字會被
-    // cannot unmarshal number 拒收；官方文檔 "seconds":"5" 亦帶引號）。
+    // napi 上游 Go struct 的 seconds 栏位是 string（实弹 502 实锤：数字会被
+    // cannot unmarshal number 拒收；官方文档 "seconds":"5" 亦带引号）。
     body = {
       model: upstreamModel,
       prompt,
@@ -259,8 +259,8 @@ export async function generateWithOpenaiVideo(
     }
   }
 
-  // P1-3 生成式後期欄位（來源影片＋續長／續接點｜區段＋改動描述）。欄位映射集中在
-  // video-post-production.ts 的 VIDEO_POST_PRODUCTION_UPSTREAM_FIELD（未校準，唯一落點）。
+  // P1-3 生成式后期栏位（来源影片＋续长／续接点｜区段＋改动描述）。栏位映射集中在
+  // video-post-production.ts 的 VIDEO_POST_PRODUCTION_UPSTREAM_FIELD（未校准，唯一落点）。
   const requestBody = postProduction
     ? applyVideoPostProductionToUpstreamBody(body, postProduction)
     : body;
@@ -373,18 +373,18 @@ function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, _t
     return topLevelUrl;
   }
 
-  // 顶层 url（xiaoyxiao 實彈形狀，2026-09-27）：completed 響應為
+  // 顶层 url（xiaoyxiao 实弹形状，2026-09-27）：completed 响应为
   // {"id":"task_…","object":"video","model":"seedance-2.0-mini-deal",
   //  "status":"completed","progress":100,
   //  "url":"https://dream-media.tos-cn-beijing.volces.com/videos/<uuid>/0.mp4"}
-  // —— 既無 video_url、無 metadata、無 data 陣列，缺這條會誤判 upstream_protocol
-  // （"completed but no output URL"），把已出好的片當協議 bug 丟掉。
+  // —— 既无 video_url、无 metadata、无 data 阵列，缺这条会误判 upstream_protocol
+  // （"completed but no output URL"），把已出好的片当协议 bug 丢掉。
   const rawTopLevelUrl = String(response.url ?? "").trim();
   if (rawTopLevelUrl.startsWith("http://") || rawTopLevelUrl.startsWith("https://")) {
     return rawTopLevelUrl;
   }
 
-  // result_urls（gway 形狀）：陣列取第一個有效 http(s) URL；容忍單一字串
+  // result_urls（gway 形状）：阵列取第一个有效 http(s) URL；容忍单一字串
   const resultUrls = response.result_urls;
   const resultCandidates: unknown[] = Array.isArray(resultUrls) ? resultUrls : [resultUrls];
   for (const candidate of resultCandidates) {
@@ -505,10 +505,10 @@ async function openaiVideoRequest(
   try {
     payload = await response.json();
   } catch {
-    // 同一類狀態洗白（D-3）：上游回 HTML 錯誤頁（常見於 400/5xx）時，真實狀態不能丟，
-    // 否則真 400 會以 502 進原生硬停判定。產品側 status 仍是 502（我方解析失敗）。
-    // 例外：401/403 的 HTML 頁＝被拒（2026-10-02 xiaoyxiao nginx 封 VPS IP），按鑑權失敗
-    // 交 401（與 newapi-video 同口徑）讓帳號進冷卻換道；當成 502 overloaded 帳號永遠 healthy。
+    // 同一类状态洗白（D-3）：上游回 HTML 错误页（常见于 400/5xx）时，真实状态不能丢，
+    // 否则真 400 会以 502 进原生硬停判定。产品侧 status 仍是 502（我方解析失败）。
+    // 例外：401/403 的 HTML 页＝被拒（2026-10-02 xiaoyxiao nginx 封 VPS IP），按鉴权失败
+    // 交 401（与 newapi-video 同口径）让帐号进冷却换道；当成 502 overloaded 帐号永远 healthy。
     const denied = response.status === 401 || response.status === 403;
     throw new SupplierRequestError(
       `openai-video upstream returned invalid JSON (HTTP ${response.status}).`,
@@ -525,8 +525,8 @@ async function openaiVideoRequest(
       typeof payload === "object" && payload !== null
         ? extractErrorMessage(payload as Record<string, unknown>)
         : `openai-video upstream API request failed with HTTP ${response.status}.`;
-    // status 照既有語義改寫（供應商側失敗，隔離/冷卻行為不動；請勿在此改判）；
-    // upstreamStatus 原樣帶上上游真實狀態，供確定性 4xx 的原生硬停判讀
+    // status 照既有语义改写（供应商侧失败，隔离/冷却行为不动；请勿在此改判）；
+    // upstreamStatus 原样带上上游真实状态，供确定性 4xx 的原生硬停判读
     // （D-3：真 400 不得被 502 洗成「可重放」而被重放 20 次）。
     throw new SupplierRequestError(
       message,
@@ -544,9 +544,9 @@ async function openaiVideoRequest(
   return payload as Record<string, unknown>;
 }
 /**
- * INC-0831 對帳輪詢：按 task id 查 openai-video 上游真相（provider-reconciliation
- * 用，只讀不改任何任務狀態）。響應解析與 generateWithOpenaiVideo 同源
- *（extractOutputUrl / downloadDramaContent 直接復用）。
+ * INC-0831 对帐轮询：按 task id 查 openai-video 上游真相（provider-reconciliation
+ * 用，只读不改任何任务状态）。响应解析与 generateWithOpenaiVideo 同源
+ *（extractOutputUrl / downloadDramaContent 直接复用）。
  */
 export async function pollOpenaiVideoTask(
   supplier: SupplierRecord,
@@ -562,7 +562,7 @@ export async function pollOpenaiVideoTask(
   if (status === "completed" || status === "succeeded") {
     const outputUrl = extractOutputUrl(queryResponse, baseUrl, providerTaskId);
     if (outputUrl) return { state: "succeeded", url: outputUrl, base64: null };
-    // completed 但無公網 URL（drama sd25-30s 形狀）：走 /videos/{id}/content 鑑欄下載。
+    // completed 但无公网 URL（drama sd25-30s 形状）：走 /videos/{id}/content 鉴栏下载。
     const base64 = await downloadDramaContent(baseUrl, providerTaskId, apiKey);
     return { state: "succeeded", url: null, base64 };
   }

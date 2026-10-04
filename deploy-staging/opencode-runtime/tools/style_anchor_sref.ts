@@ -3,18 +3,18 @@ import { ok, fail } from "../lib/client"
 import { createHash } from "node:crypto"
 import { vlmAskJson } from "../lib/img-orchestrate"
 
-// 風格錨（sref 級固定後綴）（2026-08-31 片3）：風格參考圖 → VLM 讀圖輸出四欄風格 DNA
-// （筆觸/色板 HEX/構圖/光照）→ 合成一段可注入生圖 prompt 的固定後綴 + 結構化 DNA JSON。
-// 誠實：這是「文字級風格錨」（把風格蒸餾成穩定可複用的 prompt 後綴），非 Midjourney 的 sref 參數；
-// 與片2 product_lock 的 DNA 後綴同學——後續所有生圖 prompt 追加該後綴即得風格一致性錨定。
+// 风格锚（sref 级固定后缀）（2026-08-31 片3）：风格参考图 → VLM 读图输出四栏风格 DNA
+// （笔触/色板 HEX/构图/光照）→ 合成一段可注入生图 prompt 的固定后缀 + 结构化 DNA JSON。
+// 诚实：这是「文字级风格锚」（把风格蒸馏成稳定可复用的 prompt 后缀），非 Midjourney 的 sref 参数；
+// 与片2 product_lock 的 DNA 后缀同学——后续所有生图 prompt 追加该后缀即得风格一致性锚定。
 
 const STYLE_Q =
-  "這是風格參考圖（可能多張，代表同一風格）。提煉可複用的風格 DNA 供 AI 生圖追加，輸出 JSON：" +
-  '{"brushwork":"筆觸/媒材/繪畫質感（中英文皆可，具體）",' +
-  '"palette":["主色 HEX","#輔色 HEX",... 4-6 個],' +
-  '"composition":"構圖傾向（視角/留白/主體位置/景深）",' +
-  '"lighting":"光照/色溫/氛圍",' +
-  '"english_suffix":"一段簡短英文風格後綴，可直接追加到生圖 prompt 末尾，精確描述筆觸色板構圖光照"}'
+  "这是风格参考图（可能多张，代表同一风格）。提炼可复用的风格 DNA 供 AI 生图追加，输出 JSON：" +
+  '{"brushwork":"笔触/媒材/绘画质感（中英文皆可，具体）",' +
+  '"palette":["主色 HEX","#辅色 HEX",... 4-6 个],' +
+  '"composition":"构图倾向（视角/留白/主体位置/景深）",' +
+  '"lighting":"光照/色温/氛围",' +
+  '"english_suffix":"一段简短英文风格后缀，可直接追加到生图 prompt 末尾，精确描述笔触色板构图光照"}'
 
 function normHex(s: unknown): string | null {
   if (typeof s !== "string") return null
@@ -27,25 +27,25 @@ function normHex(s: unknown): string | null {
 
 export default tool({
   description:
-    "風格錨 / sref 級固定後綴（零生圖扣費，僅 VLM 讀圖）：image_urls（風格參考圖 URL JSON 陣列，1+ 張）→ VLM 蒸餾四欄風格 DNA（筆觸/色板 HEX/構圖/光照），合成一段可直接追加到後續生圖 prompt 末尾的固定後綴 + 結構化 DNA JSON + 穩定錨 token（DNA 雜湊，同圖同 token）。誠實：這是文字級風格錨（prompt 後綴複用），不是 Midjourney 的 --sref 參數，也不產圖；要像素級風格遷移請走生圖/編輯鏈。VLM 不可達回 ok:false 不編造。",
+    "风格锚 / sref 级固定后缀（零生图扣费，仅 VLM 读图）：image_urls（风格参考图 URL JSON 阵列，1+ 张）→ VLM 蒸馏四栏风格 DNA（笔触/色板 HEX/构图/光照），合成一段可直接追加到后续生图 prompt 末尾的固定后缀 + 结构化 DNA JSON + 稳定锚 token（DNA 杂凑，同图同 token）。诚实：这是文字级风格锚（prompt 后缀复用），不是 Midjourney 的 --sref 参数，也不产图；要像素级风格迁移请走生图/编辑链。VLM 不可达回 ok:false 不编造。",
   args: {
-    image_urls: tool.schema.string().describe('風格參考圖 URL JSON 陣列字串，例 ["https://..."]'),
-    language: tool.schema.string().optional().describe("後綴語言偏好：en（默認，生圖模型友好）或 zh"),
+    image_urls: tool.schema.string().describe('风格参考图 URL JSON 阵列字串，例 ["https://..."]'),
+    language: tool.schema.string().optional().describe("后缀语言偏好：en（默认，生图模型友好）或 zh"),
   },
   async execute(args, context) {
     let urls: string[] = []
     try {
       const j = JSON.parse(args.image_urls)
-      if (!Array.isArray(j)) return fail("invalid_image_urls", "image_urls 必須是 JSON 陣列字串", { title: "輸入非法" })
+      if (!Array.isArray(j)) return fail("invalid_image_urls", "image_urls 必须是 JSON 阵列字串", { title: "输入非法" })
       urls = j.filter((x): x is string => typeof x === "string" && /^https?:\/\//.test(x.trim())).map((s) => s.trim())
     } catch {
-      return fail("invalid_image_urls", "image_urls 必須是合法 JSON 陣列字串", { title: "輸入非法" })
+      return fail("invalid_image_urls", "image_urls 必须是合法 JSON 阵列字串", { title: "输入非法" })
     }
-    if (!urls.length) return fail("empty_input", "image_urls 至少一個合法 http(s) URL", { title: "輸入缺失" })
-    if (urls.length > 6) return fail("too_many", "風格參考單次最多 6 張", { title: "輸入過多" })
+    if (!urls.length) return fail("empty_input", "image_urls 至少一个合法 http(s) URL", { title: "输入缺失" })
+    if (urls.length > 6) return fail("too_many", "风格参考单次最多 6 张", { title: "输入过多" })
 
     const v = await vlmAskJson(urls, STYLE_Q, 1200)
-    if (!v.ok) return fail("vlm_unavailable", `VLM 讀風格圖失敗：${v.reason}（未編造 DNA）`, { title: "風格抽取失敗" })
+    if (!v.ok) return fail("vlm_unavailable", `VLM 读风格图失败：${v.reason}（未编造 DNA）`, { title: "风格抽取失败" })
     const d = v.data as Record<string, unknown>
 
     const brushwork = typeof d.brushwork === "string" ? d.brushwork.trim() : ""
@@ -55,10 +55,10 @@ export default tool({
     const enSuffix = typeof d.english_suffix === "string" ? d.english_suffix.trim() : ""
 
     if (!brushwork && !composition && !lighting && !palette.length && !enSuffix) {
-      return fail("empty_dna", "VLM 回覆未含任何風格欄位", { title: "風格抽取失敗" })
+      return fail("empty_dna", "VLM 回覆未含任何风格栏位", { title: "风格抽取失败" })
     }
 
-    // 合成固定後綴（四欄 + 英文段），供後續生圖 prompt 直接追加
+    // 合成固定后缀（四栏 + 英文段），供后续生图 prompt 直接追加
     const parts: string[] = []
     if (enSuffix) parts.push(enSuffix)
     if (brushwork) parts.push(`brushwork: ${brushwork}`)
@@ -72,14 +72,14 @@ export default tool({
 
     return ok(
       {
-        title: `風格錨已鎖定（${token}）`,
+        title: `风格锚已锁定（${token}）`,
         style_anchor_token: token,
         prompt_suffix: suffix,
         style_dna: dna,
         source_refs: urls,
         mechanism: "text_style_anchor",
-        usage: "把 prompt_suffix 原樣追加到後續每次生圖 prompt 末尾，即得該風格的文字級錨定（同 token=同風格 DNA）。",
-        note: "誠實：文字級風格錨（可複用 prompt 後綴），非 Midjourney --sref 參數、不產圖；palette 已正規化為小寫 6 位 HEX。",
+        usage: "把 prompt_suffix 原样追加到后续每次生图 prompt 末尾，即得该风格的文字级锚定（同 token=同风格 DNA）。",
+        note: "诚实：文字级风格锚（可复用 prompt 后缀），非 Midjourney --sref 参数、不产图；palette 已正规化为小写 6 位 HEX。",
       },
       { token, suffix },
     )

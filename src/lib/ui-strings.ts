@@ -1,13 +1,13 @@
 /**
- * 界面文案單一來源（**只做禁硬編碼基座，不做多語**）。
+ * 界面文案单一来源（**只做禁硬编码基座，不做多语**）。
  *
- * 規則：
- * 1. 本期三個新面（C2 AdminStatistics／B2 ProjectAssetLibraryPanel／D1 LineageDrawer）的
- *    用戶可見字串全部收在本檔，元件內零硬編文案（守門件 `src/lib/ui-strings.test.ts`）。
- * 2. 文案內容＝改造前上屏原文，逐字不動＝UI 視覺零變化。
- * 3. `{name}` 是插值佔位符，由 `text(key, params)` 填充；缺參數保留佔位符（可診斷，不吐 undefined）。
- * 4. **未來要上 i18n 時的唯一接縫是本檔的 `text()`**（加一個 language 參數＋一張語言表即可），
- *    元件端不需要動——所以本檔刻意不放語言欄位、語系型別、fallback 機制等未使用的骨架。
+ * 规则：
+ * 1. 本期三个新面（C2 AdminStatistics／B2 ProjectAssetLibraryPanel／D1 LineageDrawer）的
+ *    用户可见字串全部收在本档，元件内零硬编文案（守门件 `src/lib/ui-strings.test.ts`）。
+ * 2. 文案内容＝改造前上屏原文，逐字不动＝UI 视觉零变化。
+ * 3. `{name}` 是插值占位符，由 `text(key, params)` 填充；缺参数保留占位符（可诊断，不吐 undefined）。
+ * 4. **未来要上 i18n 时的唯一接缝是本档的 `text()`**（加一个 language 参数＋一张语言表即可），
+ *    元件端不需要动——所以本档刻意不放语言栏位、语系型别、fallback 机制等未使用的骨架。
  */
 
 export const UI_STRINGS = {
@@ -15,7 +15,7 @@ export const UI_STRINGS = {
   "common.close": "关闭",
   "common.noRecord": "无记录",
   "common.noDescription": "（无描述）",
-  /** 數值缺口佔位符（讀不到就不畫數字，用破折號表達「無值」）。 */
+  /** 数值缺口占位符（读不到就不画数字，用破折号表达「无值」）。 */
   "common.placeholder": "—",
 
   // ── 剧本入口曝光（P0-1，2026-09-28）───────────────────────
@@ -76,7 +76,7 @@ export const UI_STRINGS = {
   "stats.duration.days": "{value} 天",
   "stats.error.read": "读取统计数据失败。",
   "stats.error.generic": "读取失败。",
-  "stats.notConfigured": "本实例没有控制面数据库连線（GENERATION_DATABASE_URL），统计不可用——不展示任何推测数字。",
+  "stats.notConfigured": "本实例没有控制面数据库连线（GENERATION_DATABASE_URL），统计不可用——不展示任何推测数字。",
   "stats.card.windowCoins": "窗口内消耗（币）",
   "stats.card.totalQuota": "账本 quota 原值 {quota}",
   "stats.card.windowCoinsCharged": "扣费 {charged} 币 · 已退款 {refunded} 币（净额已相减）",
@@ -130,7 +130,7 @@ export const UI_STRINGS = {
   "stats.quota.subtitle": "数据源 new-api users.quota（与配额预检同通路）；读不到的身份标「未知」，不以 0 计入合计。",
   "stats.quota.empty": "窗口内没有产生扣费的付费身份。",
   "stats.quota.coverage": "窗口内付费身份共 {total} 个，本次只读取前 {covered} 个（单次上限 {limit}）——合计为部分身份之和，不是全部身份。",
-  /** 付費身份標識（billing_user_id）。 */
+  /** 付费身份标识（billing_user_id）。 */
   "stats.quota.userId": "user #{id}",
   "stats.quota.entryCoins": "{coins} 币",
   "stats.quota.entryRaw": "quota {quota}",
@@ -147,7 +147,7 @@ export const UI_STRINGS = {
   "stats.sources.colSource": "数据源",
   "stats.sources.colNote": "口径",
 
-  // ── B2 項目資產庫面板 ────────────────────────────────────
+  // ── B2 项目资产库面板 ────────────────────────────────────
   "assets.title": "项目资产库",
   "assets.subtitle": "挂用＝在本项目建本地副本（改来源不影响副本，删来源副本仍可用）；跨项目复用需先显式分享",
   "assets.refresh": "刷新资产库",
@@ -170,7 +170,7 @@ export const UI_STRINGS = {
   "assets.mount.busy": "…",
   "assets.mount.mount": "挂用",
   "assets.mount.release": "已挂用 · 解除",
-  /** REQ-B2b：掛用＝copy-on-use（建本地副本並鎖進本項目生成用的卡）。 */
+  /** REQ-B2b：挂用＝copy-on-use（建本地副本并锁进本项目生成用的卡）。 */
   "assets.mount.created": "已挂用：已在本项目建本地副本并锁定（生成用的是副本）",
   "assets.mount.existing": "此前已挂用（幂等，未重复建副本）",
   "assets.mount.skipped": "已挂用：包内 {count} 个条目没有卡投影（如 LoRA / 3D 产物），未复制成卡",
@@ -186,7 +186,7 @@ export const UI_STRINGS = {
   "assets.visibility.inTeam": "本团队",
   "assets.visibility.sharedIn": "分享进来",
 
-  // ── D1 資產血統溯源抽屜 ──────────────────────────────────
+  // ── D1 资产血统溯源抽屉 ──────────────────────────────────
   "lineage.title": "溯源 · {hostKind}",
   "lineage.back": "返回上一级链",
   "lineage.loading": "正在加载血统数据…",
@@ -209,11 +209,11 @@ export const UI_STRINGS = {
 
 export type UiStringKey = keyof typeof UI_STRINGS;
 
-/** 插值參數（值由呼叫方給，元件內不做字串拼接）。 */
+/** 插值参数（值由呼叫方给，元件内不做字串拼接）。 */
 export type UiStringParams = Readonly<Record<string, string | number>>;
 
 /**
- * 文案唯一取用口。未來上 i18n 時在這裡加語言參數與語言表，
+ * 文案唯一取用口。未来上 i18n 时在这里加语言参数与语言表，
  * 呼叫端（元件）一行都不用改。
  */
 export function text(key: UiStringKey, params?: UiStringParams): string {
@@ -223,6 +223,6 @@ export function text(key: UiStringKey, params?: UiStringParams): string {
 }
 
 /**
- * 數字/日期格式化用的語言標籤（與文案同層，未來上 i18n 時跟隨文案一起切換）。
+ * 数字/日期格式化用的语言标签（与文案同层，未来上 i18n 时跟随文案一起切换）。
  */
 export const NUMBER_LOCALE = "zh-CN";

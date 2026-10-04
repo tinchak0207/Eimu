@@ -3,28 +3,28 @@ import { ok, fail } from "../lib/client"
 import { ORCH_DEFAULT_MODEL, SEED_NOTE, runEdit, vlmAskJson } from "../lib/img-orchestrate"
 import { normHex, parseUrlArray } from "../lib/batch5-matting"
 
-// 虛構試穿（2026-08-31 片6）：模特圖 + 服裝（參考圖 URL 或直接給 DNA 後綴）→
-// 站點編輯鏈 /v1/images/edits（同 image_edit.ts / 片2 runEdit 計費鏈），
-// 構造中文編輯指令 + garment DNA 文字錨定 → 產物 VLM 一致性抽檢（服裝色/版型 pass/warn）。
-// 誠實機制（spec 紅線）：instruction-based edit，非 CatVTON/IDM-VTON 專用試穿模型，
-// 不宣稱零形變；warn 時如實回報。
-// DNA 抽取段復用 garment_dna_lock.ts（片5）源碼（GARMENT_DNA_Q + 後綴合成逐行等價），白名單欄位改試穿注入。
+// 虚构试穿（2026-08-31 片6）：模特图 + 服装（参考图 URL 或直接给 DNA 后缀）→
+// 站点编辑链 /v1/images/edits（同 image_edit.ts / 片2 runEdit 计费链），
+// 构造中文编辑指令 + garment DNA 文字锚定 → 产物 VLM 一致性抽检（服装色/版型 pass/warn）。
+// 诚实机制（spec 红线）：instruction-based edit，非 CatVTON/IDM-VTON 专用试穿模型，
+// 不宣称零形变；warn 时如实回报。
+// DNA 抽取段复用 garment_dna_lock.ts（片5）源码（GARMENT_DNA_Q + 后缀合成逐行等价），白名单栏位改试穿注入。
 
 const GARMENT_DNA_Q =
-  "這是服裝單品圖（可能多張，代表同一件服裝的不同角度）。提煉服裝 DNA 供 AI 生圖/試穿複用，輸出 JSON：" +
-  '{"silhouette":"版型/輪廓（如 A字裙/修身/oversize/高腰）",' +
-  '"fit":"合身度與剪裁線索",' +
-  '"material":"材質/面料（如 亞麻/牛仔/針織/雪紡）",' +
-  '"colors":["主色 HEX","#輔色 HEX",... 3-6 個],' +
-  '"craft":"工藝線索（縫線/拉鏈/鈕扣/口袋/印花/刺繡/水洗等）",' +
-  '"details":"其他辨識細節",' +
-  '"english_suffix":"一段簡短英文，精確描述該服裝版型材質色彩工藝，可直接追加到生圖/試穿 prompt 末尾"}'
+  "这是服装单品图（可能多张，代表同一件服装的不同角度）。提炼服装 DNA 供 AI 生图/试穿复用，输出 JSON：" +
+  '{"silhouette":"版型/轮廓（如 A字裙/修身/oversize/高腰）",' +
+  '"fit":"合身度与剪裁线索",' +
+  '"material":"材质/面料（如 亚麻/牛仔/针织/雪纺）",' +
+  '"colors":["主色 HEX","#辅色 HEX",... 3-6 个],' +
+  '"craft":"工艺线索（缝线/拉链/钮扣/口袋/印花/刺绣/水洗等）",' +
+  '"details":"其他辨识细节",' +
+  '"english_suffix":"一段简短英文，精确描述该服装版型材质色彩工艺，可直接追加到生图/试穿 prompt 末尾"}'
 
 const TRYON_CHECK_Q =
-  "圖1 是服裝參考圖，圖2 是 AI 虛構試穿結果。對比圖2 模特身上穿的服裝與圖1 的服裝：" +
-  "顏色、版型輪廓、材質與關鍵工藝細節是否一致？輸出 JSON：" +
-  '{"consistency":"pass|warn","color":"色彩一致性簡評","silhouette":"版型一致性簡評","notes":"簡短理由"}。' +
-  "pass=色彩版型基本一致；warn=任何可見色偏、版型走樣、細節丟失或結構改動。只輸出 JSON。"
+  "图1 是服装参考图，图2 是 AI 虚构试穿结果。对比图2 模特身上穿的服装与图1 的服装：" +
+  "颜色、版型轮廓、材质与关键工艺细节是否一致？输出 JSON：" +
+  '{"consistency":"pass|warn","color":"色彩一致性简评","silhouette":"版型一致性简评","notes":"简短理由"}。' +
+  "pass=色彩版型基本一致；warn=任何可见色偏、版型走样、细节丢失或结构改动。只输出 JSON。"
 
 function buildDnaSuffix(d: Record<string, unknown>): { suffix: string; dna: Record<string, unknown> } {
   const silhouette = typeof d.silhouette === "string" ? d.silhouette.trim() : ""
@@ -47,48 +47,48 @@ function buildDnaSuffix(d: Record<string, unknown>): { suffix: string; dna: Reco
 
 export default tool({
   description:
-    "虛構試穿（AI try-on）：model_image_url（模特圖公網 URL，編輯基準）+ 服裝輸入二選一（garment_image_urls 參考圖 JSON 陣列，或直接 garment_dna 後綴文字，如 garment_dna_lock 的 prompt_suffix）→ 主路徑=站點編輯鏈 /v1/images/edits（同 image_edit 計費鏈），構造中文編輯指令「讓模特穿上這件服裝，保持臉型體態不變」+ garment DNA 文字錨定注入。產物自動 VLM（gemini-2.5-flash-image）一致性抽檢 1 次（服裝色/版型 pass/warn 證據）。誠實：機制=instruction-based edit（指令式編輯 + 文字級服裝 DNA），非 CatVTON/IDM-VTON 專用試穿模型，不宣稱零形變；verdict=warn 建議重試或簡化姿勢。metadata.consistency_mechanism 如實記錄實際路徑。dry_run=true 只返回編輯請求構造，不提交、不扣費。",
+    "虚构试穿（AI try-on）：model_image_url（模特图公网 URL，编辑基准）+ 服装输入二选一（garment_image_urls 参考图 JSON 阵列，或直接 garment_dna 后缀文字，如 garment_dna_lock 的 prompt_suffix）→ 主路径=站点编辑链 /v1/images/edits（同 image_edit 计费链），构造中文编辑指令「让模特穿上这件服装，保持脸型体态不变」+ garment DNA 文字锚定注入。产物自动 VLM（gemini-2.5-flash-image）一致性抽检 1 次（服装色/版型 pass/warn 证据）。诚实：机制=instruction-based edit（指令式编辑 + 文字级服装 DNA），非 CatVTON/IDM-VTON 专用试穿模型，不宣称零形变；verdict=warn 建议重试或简化姿势。metadata.consistency_mechanism 如实记录实际路径。dry_run=true 只返回编辑请求构造，不提交、不扣费。",
   args: {
-    model_image_url: tool.schema.string().describe("模特圖公網 URL（編輯基準）"),
-    garment_image_urls: tool.schema.string().optional().describe('服裝參考圖 URL JSON 陣列字串，例 ["https://..."]（1-4 張；無 garment_dna 時用它 VLM 抽 DNA）'),
-    garment_dna: tool.schema.string().optional().describe("可選：現成服裝 DNA 後綴（garment_dna_lock 的 prompt_suffix），給了就跳過 VLM 抽取"),
-    pose_note: tool.schema.string().optional().describe("可選：姿勢/構圖補充說明（追加到編輯指令）"),
-    model: tool.schema.string().optional().describe(`編輯模型，默認 ${ORCH_DEFAULT_MODEL}`),
-    size: tool.schema.enum(["1k", "2k"]).optional().describe("尺寸等級 1k/2k（編輯鏈契約），默認 1k"),
-    dry_run: tool.schema.boolean().optional().describe("true=只返回請求構造，不提交生圖"),
+    model_image_url: tool.schema.string().describe("模特图公网 URL（编辑基准）"),
+    garment_image_urls: tool.schema.string().optional().describe('服装参考图 URL JSON 阵列字串，例 ["https://..."]（1-4 张；无 garment_dna 时用它 VLM 抽 DNA）'),
+    garment_dna: tool.schema.string().optional().describe("可选：现成服装 DNA 后缀（garment_dna_lock 的 prompt_suffix），给了就跳过 VLM 抽取"),
+    pose_note: tool.schema.string().optional().describe("可选：姿势/构图补充说明（追加到编辑指令）"),
+    model: tool.schema.string().optional().describe(`编辑模型，默认 ${ORCH_DEFAULT_MODEL}`),
+    size: tool.schema.enum(["1k", "2k"]).optional().describe("尺寸等级 1k/2k（编辑链契约），默认 1k"),
+    dry_run: tool.schema.boolean().optional().describe("true=只返回请求构造，不提交生图"),
   },
   async execute(args, context) {
     const modelUrl = args.model_image_url.trim()
-    if (!/^https?:\/\//.test(modelUrl)) return fail("invalid_model_url", "model_image_url 必須是 http(s) URL", { title: "輸入非法" })
+    if (!/^https?:\/\//.test(modelUrl)) return fail("invalid_model_url", "model_image_url 必须是 http(s) URL", { title: "输入非法" })
     const gp = parseUrlArray(args.garment_image_urls, { min: 1, max: 4 })
     const dnaInput = args.garment_dna?.trim() || ""
     if (!gp.ok && !dnaInput) {
-      return fail("missing_garment", "服裝輸入缺失：garment_image_urls（合法 JSON 陣列）或 garment_dna 至少給一個", { title: "輸入缺失" })
+      return fail("missing_garment", "服装输入缺失：garment_image_urls（合法 JSON 阵列）或 garment_dna 至少给一个", { title: "输入缺失" })
     }
     const model = args.model ?? ORCH_DEFAULT_MODEL
     const size = args.size ?? "1k"
-    const pose = args.pose_note?.trim() ? ` 姿勢/構圖補充：${args.pose_note.trim()}。` : ""
+    const pose = args.pose_note?.trim() ? ` 姿势/构图补充：${args.pose_note.trim()}。` : ""
 
-    // 服裝 DNA：優先採用傳入後綴；否則 VLM 從參考圖抽取（復用 garment_dna_lock 同段邏輯）
+    // 服装 DNA：优先采用传入后缀；否则 VLM 从参考图抽取（复用 garment_dna_lock 同段逻辑）
     let dnaSuffix = dnaInput
     let dnaSource: "provided" | "vlm_extracted" | "none" = dnaInput ? "provided" : "none"
     if (!dnaSuffix && gp.ok) {
       const v = await vlmAskJson(gp.urls, GARMENT_DNA_Q, 1400)
-      if (!v.ok) return fail("vlm_unavailable", `VLM 抽服裝 DNA 失敗：${v.reason}（未編造 DNA、未扣費）`, { title: "服裝 DNA 抽取失敗" })
+      if (!v.ok) return fail("vlm_unavailable", `VLM 抽服装 DNA 失败：${v.reason}（未编造 DNA、未扣费）`, { title: "服装 DNA 抽取失败" })
       const built = buildDnaSuffix(v.data as Record<string, unknown>)
-      if (!built.suffix) return fail("empty_dna", "VLM 回覆未含任何服裝 DNA 欄位", { title: "服裝 DNA 抽取失敗" })
+      if (!built.suffix) return fail("empty_dna", "VLM 回覆未含任何服装 DNA 栏位", { title: "服装 DNA 抽取失败" })
       dnaSuffix = built.suffix
       dnaSource = "vlm_extracted"
     }
 
     const prompt =
-      `讓圖中模特穿上這件服裝：${dnaSuffix || "（無服裝描述，依圖中服裝參考自然穿著）"}。` +
-      `要求：服裝的版型、材質、顏色與工藝細節必須與上述描述完全一致，穿著合身自然、無懸空無穿透；` +
-      `嚴禁改變模特的臉型、髮型、膚色、體態與背景。${pose}`
+      `让图中模特穿上这件服装：${dnaSuffix || "（无服装描述，依图中服装参考自然穿著）"}。` +
+      `要求：服装的版型、材质、颜色与工艺细节必须与上述描述完全一致，穿著合身自然、无悬空无穿透；` +
+      `严禁改变模特的脸型、发型、肤色、体态与背景。${pose}`
     const mechanismPlan =
-      "instruction-based edit：站點 /v1/images/edits 編輯鏈（同 image_edit.ts 計費鏈，reserve/commit 在站點端），" +
-      "模特圖作編輯基準，服裝以中文編輯指令 + garment DNA 文字錨定注入；" +
-      "非 CatVTON/IDM-VTON 專用試穿模型，不宣稱零形變。"
+      "instruction-based edit：站点 /v1/images/edits 编辑链（同 image_edit.ts 计费链，reserve/commit 在站点端），" +
+      "模特图作编辑基准，服装以中文编辑指令 + garment DNA 文字锚定注入；" +
+      "非 CatVTON/IDM-VTON 专用试穿模型，不宣称零形变。"
 
     if (args.dry_run) {
       return ok({
@@ -99,16 +99,16 @@ export default tool({
         garment_dna_source: dnaSource,
         garment_dna_suffix: dnaSuffix || null,
         consistency_mechanism: mechanismPlan,
-        note: "dry_run：未提交、未扣費。實際執行後會自動 VLM 抽檢 1 次服裝一致性（pass/warn）。",
+        note: "dry_run：未提交、未扣费。实际执行后会自动 VLM 抽检 1 次服装一致性（pass/warn）。",
       })
     }
 
     const edit = await runEdit(modelUrl, prompt, model, size, context.sessionID, context.abort)
-    if (!edit.ok) return fail(edit.code, `試穿編輯鏈失敗：${edit.hint}`, { title: "虛構試穿失敗" })
+    if (!edit.ok) return fail(edit.code, `试穿编辑链失败：${edit.hint}`, { title: "虚构试穿失败" })
 
-    const mechanism = `${mechanismPlan}（image_mode=${edit.image_mode}${edit.image_mode === "raw_url" ? "，/v1/uploads 橋不可用故原 URL 直傳" : ""}；DNA 來源=${dnaSource}）`
+    const mechanism = `${mechanismPlan}（image_mode=${edit.image_mode}${edit.image_mode === "raw_url" ? "，/v1/uploads 桥不可用故原 URL 直传" : ""}；DNA 来源=${dnaSource}）`
 
-    // VLM 一致性抽檢：有參考圖才可比對；只有文字 DNA 時誠實標 no_reference
+    // VLM 一致性抽检：有参考图才可比对；只有文字 DNA 时诚实标 no_reference
     let check: { verdict: string; color?: string; silhouette?: string; notes: string }
     if (gp.ok) {
       const v = await vlmAskJson([gp.urls[0], edit.url], TRYON_CHECK_Q, 1500)
@@ -121,12 +121,12 @@ export default tool({
           }
         : { verdict: "unavailable", notes: v.reason }
     } else {
-      check = { verdict: "no_reference", notes: "僅文字 DNA 錨定、無服裝參考圖，未做視覺比對（不編造 verdict）" }
+      check = { verdict: "no_reference", notes: "仅文字 DNA 锚定、无服装参考图，未做视觉比对（不编造 verdict）" }
     }
 
     return ok(
       {
-        title: `虛構試穿完成（VLM 一致性抽檢：${check.verdict}）`,
+        title: `虚构试穿完成（VLM 一致性抽检：${check.verdict}）`,
         url: edit.url,
         before_url: modelUrl,
         task_id: edit.task_id,
@@ -138,7 +138,7 @@ export default tool({
         consistency_mechanism: mechanism,
         vlm_check: check,
         seed_policy: SEED_NOTE,
-        note: "誠實：instruction-based edit（指令式編輯+文字級服裝 DNA），非專用 try-on 模型，不宣稱零形變。verdict=warn 時建議重試、簡化 pose_note 或改用 garment_extract 透明底參考圖。",
+        note: "诚实：instruction-based edit（指令式编辑+文字级服装 DNA），非专用 try-on 模型，不宣称零形变。verdict=warn 时建议重试、简化 pose_note 或改用 garment_extract 透明底参考图。",
       },
       { url: edit.url, consistency_mechanism: mechanism, vlm_check: check, cost_coins: edit.cost_coins },
     )

@@ -1,12 +1,12 @@
-// /v1/team/join-requests —— 加入審批（面 3：pending/approved/rejected/ignored 四態）。
+// /v1/team/join-requests —— 加入审批（面 3：pending/approved/rejected/ignored 四态）。
 //
-//   GET  → 待審名單（owner/admin）?status=approved|rejected|ignored 可切換
-//   POST → { action: "apply", team_user_id }                    （申請人身份來自身份驗證）
+//   GET  → 待审名单（owner/admin）?status=approved|rejected|ignored 可切换
+//   POST → { action: "apply", team_user_id }                    （申请人身份来自身份验证）
 //          { action: "decide", request_id, decision }           decision = approve|reject|ignore
 //
-// 容量不變量：min_members(2) ≤ 名冊成員數 ≤ seats ≤ max_members(200)。
-// 滿員時申請不得自動通過；通過 = 既有 upsertTeamMember 登記名冊（role 默認 member），
-// **不觸碰任何點數、不做任何扣費**（禁影子帳本、禁重複扣費）。
+// 容量不变量：min_members(2) ≤ 名册成员数 ≤ seats ≤ max_members(200)。
+// 满员时申请不得自动通过；通过 = 既有 upsertTeamMember 登记名册（role 默认 member），
+// **不触碰任何点数、不做任何扣费**（禁影子帐本、禁重复扣费）。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!Number.isInteger(teamUserId) || teamUserId <= 0) {
       return fail(400, "invalid_team_user_id", "缺少 team_user_id（要加入的团队主账号）。");
     }
-    // 申請人身份只來自密鑰（user_id + 這把 key），不從 body 取 user。
+    // 申请人身份只来自密钥（user_id + 这把 key），不从 body 取 user。
     const result = await applyToJoinTeam({
       teamUserId,
       applicantUserId: auth.key.userId,
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (decision !== "approve" && decision !== "reject" && decision !== "ignore") {
       return fail(400, "invalid_decision", "decision 必须是 approve、reject 或 ignore。");
     }
-    // 審批者所屬團隊：名冊 admin → 其團隊；團隊主帳 → 自己。
+    // 审批者所属团队：名册 admin → 其团队；团队主帐 → 自己。
     const actorTeam = await resolveActorTeam(auth.key.userId);
     const result = await decideJoinRequest({
       teamUserId: actorTeam.teamUserId,

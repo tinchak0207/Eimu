@@ -6,10 +6,10 @@ import { pathToFileURL } from "node:url";
 
 import type { CONTROL_PLANE_PROXY_SOURCES as ProxySources } from "../../../../lib/control-plane-proxy-routes.mjs";
 
-// 代理清單真源是 .mjs（next.config.mjs 在建置期直接 import 它）。本檔跑在
-// tsx 的 CJS 模式下，靜態 import 相對路徑的 .mjs 會被包成 require 並解析失敗
-// （require 相對 .mjs 只認 .js）；靜態 import type 可以（型別不進執行期）。
-// 故執行期用 pathToFileURL 產生絕對 file:// URL 後動態 import。
+// 代理清单真源是 .mjs（next.config.mjs 在建置期直接 import 它）。本档跑在
+// tsx 的 CJS 模式下，静态 import 相对路径的 .mjs 会被包成 require 并解析失败
+// （require 相对 .mjs 只认 .js）；静态 import type 可以（型别不进执行期）。
+// 故执行期用 pathToFileURL 产生绝对 file:// URL 后动态 import。
 type ControlPlaneRewrite = { source: string; destination: string };
 let proxyModule: {
   CONTROL_PLANE_PROXY_SOURCES: string[];
@@ -21,7 +21,7 @@ async function loadProxyRoutes() {
   }
   return proxyModule;
 }
-/** 用不到的執行期值，只為讓上面的型別匯入不成為孤兒（避免 noUnusedLocals 類規則失火）。 */
+/** 用不到的执行期值，只为让上面的型别汇入不成为孤儿（避免 noUnusedLocals 类规则失火）。 */
 type _ProxySources = typeof ProxySources;
 
 const root = process.cwd();
@@ -268,62 +268,62 @@ test("/v1 对外路径通过重写指向 /api/v1，客户填的 Base URL 不带 
   assert.doesNotMatch(doc, /eimu\.dev\/api\/v1/, "对外文档不应暴露 /api/v1");
 });
 
-test("代理到控制面的端點必須同時覆蓋裸路徑與子路徑", async () => {
-  // `/:path*` 匹配不到「後面沒有任何一段」的裸路徑。前端打的是
-  // `POST /api/generation-jobs`（無子路徑），只寫 `/api/generation-jobs/:path*`
-  // 會讓它落在 Vercel，而 Vercel 沒有 GENERATION_CONTROL_PLANE_ENABLED /
-  // GENERATION_DATABASE_URL，於是回 503 control_plane_disabled，前端退回舊路徑、
-  // 拿到上游直鏈導致瀏覽器 ERR_CONNECTION_CLOSED。裸路徑要單獨寫一條。
+test("代理到控制面的端点必须同时覆盖裸路径与子路径", async () => {
+  // `/:path*` 匹配不到「后面没有任何一段」的裸路径。前端打的是
+  // `POST /api/generation-jobs`（无子路径），只写 `/api/generation-jobs/:path*`
+  // 会让它落在 Vercel，而 Vercel 没有 GENERATION_CONTROL_PLANE_ENABLED /
+  // GENERATION_DATABASE_URL，于是回 503 control_plane_disabled，前端退回旧路径、
+  // 拿到上游直链导致浏览器 ERR_CONNECTION_CLOSED。裸路径要单独写一条。
   //
-  // 斷言對象是代理清單的單一真源（`control-plane-proxy-routes.mjs`）的真實輸出，
-  // 不是 next.config.mjs 的文字：2026-09-28 起該檔只是呼叫 `controlPlaneRewrites()`，
-  // 清單本身不再以字面出現在 next.config.mjs，讀文字會永遠抓不到。
-  // 清單的逐條全量相等由 src/lib/control-plane-proxy-routes.test.ts 守；這裡只守
-  // 「裸路徑 vs 子路徑」這一格。
+  // 断言对象是代理清单的单一真源（`control-plane-proxy-routes.mjs`）的真实输出，
+  // 不是 next.config.mjs 的文字：2026-09-28 起该档只是呼叫 `controlPlaneRewrites()`，
+  // 清单本身不再以字面出现在 next.config.mjs，读文字会永远抓不到。
+  // 清单的逐条全量相等由 src/lib/control-plane-proxy-routes.test.ts 守；这里只守
+  // 「裸路径 vs 子路径」这一格。
   const origin = "https://o.example";
   const { CONTROL_PLANE_PROXY_SOURCES, controlPlaneRewrites } = await loadProxyRoutes();
   const rewrites = controlPlaneRewrites(origin);
   for (const base of ["/api/generation-jobs"]) {
     assert.ok(
       CONTROL_PLANE_PROXY_SOURCES.includes(base),
-      `${base} 缺精確匹配的 rewrite，裸路徑會落在 Vercel 回 503`,
+      `${base} 缺精确匹配的 rewrite，裸路径会落在 Vercel 回 503`,
     );
     assert.ok(
       CONTROL_PLANE_PROXY_SOURCES.includes(`${base}/:path*`),
-      `${base} 缺子路徑 rewrite`,
+      `${base} 缺子路径 rewrite`,
     );
 
-    // destination 也必須原樣把路徑接在控面 origin 之後（控面在 /image-control
-    // 前綴下服務同一組路徑）。只驗 source 抓不到 destination 被寫壞。
+    // destination 也必须原样把路径接在控面 origin 之后（控面在 /image-control
+    // 前缀下服务同一组路径）。只验 source 抓不到 destination 被写坏。
     assert.equal(
       rewrites.find((r) => r.source === base)?.destination,
       `${origin}/image-control${base}`,
-      `${base} 的 destination 必須原樣接到控面 origin 之後`,
+      `${base} 的 destination 必须原样接到控面 origin 之后`,
     );
     assert.equal(
       rewrites.find((r) => r.source === `${base}/:path*`)?.destination,
       `${origin}/image-control${base}/:path*`,
-      `${base}/:path* 的 destination 必須原樣接到控面 origin 之後`,
+      `${base}/:path* 的 destination 必须原样接到控面 origin 之后`,
     );
   }
 });
 
-test("控制面代理必須位於 beforeFiles，否則同名 route.ts 會讓它整條失效", async () => {
-  // 這是上一條測試沒抓到的更深一層：即使兩條 rewrite 都寫齊，只要它們待在
-  // `rewrites()` 的回傳陣列裡（語意等同 afterFiles），Next.js 就會先比對檔案系統
-  // 路由並命中 src/app/api/generation-jobs/route.ts，代理永遠不會觸發。
-  // /v1/:path* 當時看起來正常只是因為 repo 裡沒有 src/app/v1 目錄。
+test("控制面代理必须位于 beforeFiles，否则同名 route.ts 会让它整条失效", async () => {
+  // 这是上一条测试没抓到的更深一层：即使两条 rewrite 都写齐，只要它们待在
+  // `rewrites()` 的回传阵列里（语意等同 afterFiles），Next.js 就会先比对档案系统
+  // 路由并命中 src/app/api/generation-jobs/route.ts，代理永远不会触发。
+  // /v1/:path* 当时看起来正常只是因为 repo 里没有 src/app/v1 目录。
   process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://example.invalid";
   const { default: config } = await import("../../../../next.config.mjs");
   const rewrites = await config.rewrites();
 
-  assert.ok(!Array.isArray(rewrites), "rewrites() 不能回傳陣列——陣列等同 afterFiles");
-  assert.ok(Array.isArray(rewrites.beforeFiles), "必須有 beforeFiles 分組");
+  assert.ok(!Array.isArray(rewrites), "rewrites() 不能回传阵列——阵列等同 afterFiles");
+  assert.ok(Array.isArray(rewrites.beforeFiles), "必须有 beforeFiles 分组");
 
   const before = rewrites.beforeFiles.map((r: { source: string }) => r.source);
-  // 每個「本地存在同名 route.ts」的代理端點都必須在 beforeFiles 裡。
+  // 每个「本地存在同名 route.ts」的代理端点都必须在 beforeFiles 里。
   for (const source of ["/api/generate-images", "/api/generation-jobs", "/api/generation-jobs/:path*"]) {
-    assert.ok(before.includes(source), `${source} 必須在 beforeFiles，否則被本地 route 攔截`);
+    assert.ok(before.includes(source), `${source} 必须在 beforeFiles，否则被本地 route 拦截`);
   }
 });
 

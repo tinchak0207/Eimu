@@ -6,7 +6,7 @@ import type { GenerationSql } from "./database.ts";
 
 type Call = { sql: string; values: unknown[] };
 
-/** 病灶 A（2026-08-30）回歸針：failed + 真實上游消耗的 0 額 job 必須記 writeoff、不扣用戶。 */
+/** 病灶 A（2026-08-30）回归针：failed + 真实上游消耗的 0 额 job 必须记 writeoff、不扣用户。 */
 
 function failedGateJobRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -23,8 +23,8 @@ function failedGateJobRow(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * 依查詢內容分流的 mock sql：succeeded 掃描 / writeoff 掃描 依注入的回傳，
- * 其餘（INSERT/UPDATE/event）回空陣列；逐筆呼叫記錄進 calls 供斷言。
+ * 依查询内容分流的 mock sql：succeeded 扫描 / writeoff 扫描 依注入的回传，
+ * 其余（INSERT/UPDATE/event）回空阵列；逐笔呼叫记录进 calls 供断言。
  */
 function mockSql(opts: { succeeded?: Record<string, unknown>[]; writeoff?: Record<string, unknown>[] }) {
   const calls: Call[] = [];
@@ -39,16 +39,16 @@ function mockSql(opts: { succeeded?: Record<string, unknown>[]; writeoff?: Recor
   return { sql: tagged, calls };
 }
 
-test("FG-b：commit 扣款失敗 → 問 registry 求重放授權，被拒即終結該 claim（不得靜默重扣）", async () => {
-  // users.quota 扣減確定性失敗：管理憑證清空 → adminHeaders 在 fetch 之前就拋，
-  // 不會發出任何網路請求（測試不得碰真上游）。
+test("FG-b：commit 扣款失败 → 问 registry 求重放授权，被拒即终结该 claim（不得静默重扣）", async () => {
+  // users.quota 扣减确定性失败：管理凭证清空 → adminHeaders 在 fetch 之前就抛，
+  // 不会发出任何网路请求（测试不得碰真上游）。
   const savedToken = process.env.GATEWAY_ADMIN_ACCESS_TOKEN;
   const savedUserId = process.env.GATEWAY_ADMIN_USER_ID;
   process.env.GATEWAY_ADMIN_ACCESS_TOKEN = "";
   process.env.GATEWAY_ADMIN_USER_ID = "";
   try {
     const { sql, calls } = mockSql({ succeeded: [failedGateJobRow({ id: "job-debit-fail" })] });
-    // 對抗性：呼叫方夾帶 999 次預算（型別外欄位）。
+    // 对抗性：呼叫方夹带 999 次预算（型别外栏位）。
     const adversarial = {
       executorId: "worker-test",
       sql,
@@ -57,20 +57,20 @@ test("FG-b：commit 扣款失敗 → 問 registry 求重放授權，被拒即終
     } as unknown as Parameters<typeof projectGatePathBilling>[0];
     const summary = await projectGatePathBilling(adversarial);
 
-    assert.equal(summary.failed, 1, "扣款失敗必須計入 failed（不灌水成 projected）");
-    assert.equal(summary.projected, 0, "扣款沒成功就不得聲稱已投影");
+    assert.equal(summary.failed, 1, "扣款失败必须计入 failed（不灌水成 projected）");
+    assert.equal(summary.projected, 0, "扣款没成功就不得声称已投影");
     const terminal = calls.find((call) => call.sql.includes("UPDATE billing_operation SET status = 'failed'"));
-    assert.ok(terminal, "claim 必須被終結（不是留在 pending 等下一輪重扣）");
+    assert.ok(terminal, "claim 必须被终结（不是留在 pending 等下一轮重扣）");
     assert.ok(
       String(terminal.values).includes("operation registry"),
-      "last_error 必須寫明是 registry 拒絕（不是靜默失敗）",
+      "last_error 必须写明是 registry 拒绝（不是静默失败）",
     );
     assert.ok(
       !calls.some((call) => call.sql.includes("UPDATE billing_operation SET status = 'pending'")),
-      "不得把 claim 退回 pending 讓下一輪重扣（上游對 quota 調整無冪等契約 → 可能雙扣）",
+      "不得把 claim 退回 pending 让下一轮重扣（上游对 quota 调整无幂等契约 → 可能双扣）",
     );
     const denied = calls.find((call) => (call.values as unknown[]).some((v) => typeof v === "string" && v === "replay_denied"));
-    assert.ok(denied, "必須留下 replay_denied 事件（裁決可審查，不是查常數）");
+    assert.ok(denied, "必须留下 replay_denied 事件（裁决可审查，不是查常数）");
   } finally {
     process.env.GATEWAY_ADMIN_ACCESS_TOKEN = savedToken;
     process.env.GATEWAY_ADMIN_USER_ID = savedUserId;
@@ -106,7 +106,7 @@ test("failed job with upstream attempt -> writeoff row written, no commit, no qu
 });
 
 test("failed job without upstream attempt -> no writeoff, no insert at all", async () => {
-  // 無 attempt（provider_task_id / provider_http_status 皆空）時，查詢的 EXISTS 條件不命中 → 掃描回空。
+  // 无 attempt（provider_task_id / provider_http_status 皆空）时，查询的 EXISTS 条件不命中 → 扫描回空。
   const { sql, calls } = mockSql({ writeoff: [] });
   const summary = await projectGatePathBilling({ executorId: "worker-test", sql });
 
@@ -118,7 +118,7 @@ test("failed job without upstream attempt -> no writeoff, no insert at all", asy
   assert.equal(summary.projected, 0);
 });
 
-/** 從呼叫記錄中撈出 writeoff 掃描查詢的 SQL 文本（含 job.status = 'failed'）。 */
+/** 从呼叫记录中捞出 writeoff 扫描查询的 SQL 文本（含 job.status = 'failed'）。 */
 function writeoffScanSql(calls: Call[]): string {
   const call = calls.find((c) => c.sql.includes("job.status = 'failed'"));
   assert.ok(call, "writeoff scan query should be issued");
@@ -126,8 +126,8 @@ function writeoffScanSql(calls: Call[]): string {
 }
 
 test("writeoff scan excludes client-rejected 4xx attempts (401/403/408/422) -> no writeoff for those jobs", async () => {
-  // mock 不執行 SQL，真實過濾發生在 DB 端（EXISTS 子查詢）。此處鎖定掃描 SQL 文本，
-  // 保證 400-499 被 NOT(...) 排除、且不誤傷 2xx/5xx/NULL（僅 BETWEEN 400 AND 499）。
+  // mock 不执行 SQL，真实过滤发生在 DB 端（EXISTS 子查询）。此处锁定扫描 SQL 文本，
+  // 保证 400-499 被 NOT(...) 排除、且不误伤 2xx/5xx/NULL（仅 BETWEEN 400 AND 499）。
   const { sql, calls } = mockSql({ writeoff: [failedGateJobRow()] });
   await projectGatePathBilling({ executorId: "worker-test", sql });
 
@@ -135,18 +135,18 @@ test("writeoff scan excludes client-rejected 4xx attempts (401/403/408/422) -> n
   assert.match(
     scan,
     /AND NOT \(attempt\.provider_http_status IS NOT NULL AND attempt\.provider_http_status BETWEEN 400 AND 499\)/,
-    "4xx 必須在 EXISTS 子查詢中被 NOT(...) 排除（保守原則：4xx 一律不寫賬）",
+    "4xx 必须在 EXISTS 子查询中被 NOT(...) 排除（保守原则：4xx 一律不写账）",
   );
-  // 既有「有上游記錄」判據必須保留（provider_task_id 或 provider_http_status 任一非空）。
+  // 既有「有上游记录」判据必须保留（provider_task_id 或 provider_http_status 任一非空）。
   assert.match(
     scan,
     /provider_task_id IS NOT NULL OR attempt\.provider_http_status IS NOT NULL/,
-    "有上游記錄的判據（task_id/http_status 任一非空）必須保留",
+    "有上游记录的判据（task_id/http_status 任一非空）必须保留",
   );
 });
 
 test("failed job with 5xx attempt (504 timeout) -> writeoff written (real upstream consumption)", async () => {
-  // 5xx = 上游側失敗（可能已扣），保留寫賬——掃描命中並寫 writeoff。
+  // 5xx = 上游侧失败（可能已扣），保留写账——扫描命中并写 writeoff。
   const { sql, calls } = mockSql({ writeoff: [failedGateJobRow()] });
   const summary = await projectGatePathBilling({ executorId: "worker-test", sql });
 
@@ -157,7 +157,7 @@ test("failed job with 5xx attempt (504 timeout) -> writeoff written (real upstre
 });
 
 test("failed job with attempt having provider_task_id but no http_status -> writeoff written", async () => {
-  // 已拿到任務號 = 上游已受理（真實消耗），即使沒有 http_status 也要寫賬。
+  // 已拿到任务号 = 上游已受理（真实消耗），即使没有 http_status 也要写账。
   const { sql, calls } = mockSql({ writeoff: [failedGateJobRow()] });
   const summary = await projectGatePathBilling({ executorId: "worker-test", sql });
 
@@ -168,7 +168,7 @@ test("failed job with attempt having provider_task_id but no http_status -> writ
 });
 
 test("failed job with 2xx attempt -> writeoff written (upstream succeeded then job failed later)", async () => {
-  // 2xx = 上游成功處理過（已消耗），即使 job 後續掛掉也要寫賬。
+  // 2xx = 上游成功处理过（已消耗），即使 job 后续挂掉也要写账。
   const { sql, calls } = mockSql({ writeoff: [failedGateJobRow()] });
   const summary = await projectGatePathBilling({ executorId: "worker-test", sql });
 

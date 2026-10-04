@@ -1,4 +1,4 @@
-<!-- source: multimodal-art-projection/YuE skills/yue2-music/references/abc-editing.md | license: Apache-2.0 | ingested: 2026-09-19 | 不翻譯不修改，YuE2 通路 ABC 方言編輯記法真源（Expert 改譜時必查）。License 全文：https://www.apache.org/licenses/LICENSE-2.0 -->
+<!-- source: multimodal-art-projection/YuE skills/yue2-music/references/abc-editing.md | license: Apache-2.0 | ingested: 2026-09-19 | 不翻译不修改，YuE2 通路 ABC 方言编辑记法真源（Expert 改谱时必查）。License 全文：https://www.apache.org/licenses/LICENSE-2.0 -->
 # Edit the score while preserving its musical meaning
 
 Start from `plan.save(...)`'s `score.abc`, or SheetSage2's exported `score.abc` when covering an audio recording. Keep an untouched source and write a new edited file. Model-generated plans and transcriptions can contain mistakes; inspect them before treating them as a musical reference.

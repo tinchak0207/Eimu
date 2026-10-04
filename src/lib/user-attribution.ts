@@ -1,16 +1,16 @@
-// 用戶側車事實的服務端通道：已驗證真實 email（觸達）＋ 首次觸達歸因（來源）。
+// 用户侧车事实的服务端通道：已验证真实 email（触达）＋ 首次触达归因（来源）。
 //
-// 為什麼是側車而不是「第二套用戶資料」：身分／憑證的 owner 仍是 new-api 的 users 表
-// （合成帳號、派生密碼、quota）。真 email 在 OAuth 流程被丟棄、歸因 new-api 根本沒有欄位，
-// 所以只補這兩類事實，鍵＝new-api users.id（`user_attribution.user_id`）。
+// 为什么是侧车而不是「第二套用户资料」：身分／凭证的 owner 仍是 new-api 的 users 表
+// （合成帐号、派生密码、quota）。真 email 在 OAuth 流程被丢弃、归因 new-api 根本没有栏位，
+// 所以只补这两类事实，键＝new-api users.id（`user_attribution.user_id`）。
 //
-// 部署拓撲（與 welcome-gift 同一骨架）：
-//   寫庫只在控制面（直連控制面 Postgres）。Vercel 站點沒有控制面 DB，走 HMAC 簽名通道
-//   轉投 `/image-control/api/internal/user-attribution`（簽名域 "user-attribution"，與
+// 部署拓扑（与 welcome-gift 同一骨架）：
+//   写库只在控制面（直连控制面 Postgres）。Vercel 站点没有控制面 DB，走 HMAC 签名通道
+//   转投 `/image-control/api/internal/user-attribution`（签名域 "user-attribution"，与
 //   welcome-gift / newapi-session-token 互相不可重放）。
 //
-// 隱私鐵律：email 屬個資，**永不進日誌、永不進回傳值**；本檔所有日誌只印 user_id 與
-// 布林狀態。失敗一律吞（登入流程不因觸達/歸因寫入失敗而中斷）。
+// 隐私铁律：email 属个资，**永不进日志、永不进回传值**；本档所有日志只印 user_id 与
+// 布林状态。失败一律吞（登入流程不因触达/归因写入失败而中断）。
 
 import { signBizKeySync } from "@/lib/biz-key-sync";
 import {
@@ -25,7 +25,7 @@ import { getGenerationSql, type GenerationSql } from "@/lib/generation-core/data
 
 export type EmailProvider = "github" | "google";
 
-/** 一次登入要落地的事實（email 可缺、歸因可缺；兩者皆缺時不寫庫）。 */
+/** 一次登入要落地的事实（email 可缺、归因可缺；两者皆缺时不写库）。 */
 export interface UserAttributionUpsert {
   userId: number;
   email?: string | null;
@@ -33,28 +33,28 @@ export interface UserAttributionUpsert {
   firstTouch?: FirstTouchInput | null;
 }
 
-/** 投影用的最簡形狀（統計層只認 userId → 分組鍵）。 */
+/** 投影用的最简形状（统计层只认 userId → 分组键）。 */
 export interface UserAttributionSourceRow {
   userId: number;
   source: string | null;
 }
 
 export interface UserAttributionStore {
-  /** 冪等 upsert：email 最新已驗證值勝出，歸因首觸勝出。回是否有寫入。 */
+  /** 幂等 upsert：email 最新已验证值胜出，归因首触胜出。回是否有写入。 */
   upsert(record: UserAttributionUpsert): Promise<boolean>;
 }
 
 export interface UserAttributionRead {
   rows: UserAttributionSourceRow[];
-  /** 讀取是否成功（表未建／連線失敗＝false，呼叫方必須把來源拆分標成不可用，不假裝沒歸因）。 */
+  /** 读取是否成功（表未建／连线失败＝false，呼叫方必须把来源拆分标成不可用，不假装没归因）。 */
   ok: boolean;
 }
 
-// ─────────────────────────────────────────── 輸入組裝（呼叫方只給原料）
+// ─────────────────────────────────────────── 输入组装（呼叫方只给原料）
 
 /**
- * OAuth 回調用：provider 原始 profile → 要落庫的事實（只收已驗證 email）。
- * GitHub 走 `/user/emails`（挑 verified，優先 primary），Google 走 userinfo 的 email_verified。
+ * OAuth 回调用：provider 原始 profile → 要落库的事实（只收已验证 email）。
+ * GitHub 走 `/user/emails`（挑 verified，优先 primary），Google 走 userinfo 的 email_verified。
  */
 export function buildOAuthAttributionInput(input: {
   userId: number;
@@ -74,7 +74,7 @@ export function buildOAuthAttributionInput(input: {
   };
 }
 
-/** 有東西要寫才寫（純 fact：email 與歸因皆空 → 不必打一次庫）。 */
+/** 有东西要写才写（纯 fact：email 与归因皆空 → 不必打一次库）。 */
 export function hasAttributionFacts(record: UserAttributionUpsert): boolean {
   if (!Number.isInteger(record.userId) || record.userId <= 0) return false;
   const hasEmail = typeof record.email === "string" && record.email.trim().length > 0;
@@ -87,7 +87,7 @@ let schemaReady: Promise<void> | null = null;
 
 async function ensureSchema(sql: GenerationSql): Promise<void> {
   if (!schemaReady) {
-    // 與 db/migrations/025_user_attribution.sql 同一 DDL（冪等，首用即建，免人工遷移）。
+    // 与 db/migrations/025_user_attribution.sql 同一 DDL（幂等，首用即建，免人工迁移）。
     schemaReady = (async () => {
       await sql`
         CREATE TABLE IF NOT EXISTS user_attribution (
@@ -139,11 +139,11 @@ export function createPostgresUserAttributionStore(
           ${touch?.capturedAt ?? null}::timestamptz
         )
         ON CONFLICT (user_id) DO UPDATE SET
-          -- email：最新一筆「已驗證」值勝出；新值為 NULL（provider 沒給）時保留舊值。
+          -- email：最新一笔「已验证」值胜出；新值为 NULL（provider 没给）时保留旧值。
           email             = COALESCE(EXCLUDED.email, user_attribution.email),
           email_provider    = COALESCE(EXCLUDED.email_provider, user_attribution.email_provider),
           email_verified_at = COALESCE(EXCLUDED.email_verified_at, user_attribution.email_verified_at),
-          -- 歸因：首觸勝出（既有非 NULL 值永不覆蓋）。
+          -- 归因：首触胜出（既有非 NULL 值永不覆盖）。
           signup_source     = COALESCE(user_attribution.signup_source, EXCLUDED.signup_source),
           utm_source        = COALESCE(user_attribution.utm_source, EXCLUDED.utm_source),
           utm_medium        = COALESCE(user_attribution.utm_medium, EXCLUDED.utm_medium),
@@ -160,8 +160,8 @@ export function createPostgresUserAttributionStore(
 }
 
 /**
- * 統計投影用：讀窗口內註冊用戶的來源分組鍵（只讀，一條寫入都沒有）。
- * 表未建／讀取失敗 → `ok: false`（呼叫方必須把「來源拆分」標成不可用，不假裝大家都沒歸因）。
+ * 统计投影用：读窗口内注册用户的来源分组键（只读，一条写入都没有）。
+ * 表未建／读取失败 → `ok: false`（呼叫方必须把「来源拆分」标成不可用，不假装大家都没归因）。
  */
 export async function readFunnelAttribution(input: {
   userIds: number[];
@@ -190,7 +190,7 @@ export async function readFunnelAttribution(input: {
   }
 }
 
-// ─────────────────────────────────────────── Vercel 側簽名通道
+// ─────────────────────────────────────────── Vercel 侧签名通道
 
 export const USER_ATTRIBUTION_RELAY_SIGNATURE_DOMAIN = "user-attribution";
 const RELAY_PATH = "/image-control/api/internal/user-attribution";
@@ -225,7 +225,7 @@ async function postRelay(body: Record<string, unknown>, options: RelayOptions): 
 }
 
 /**
- * 請控制面寫一次側車事實。**永不 throw、永不回傳 email**；env 缺一或失敗回 false（不擋登入）。
+ * 请控制面写一次侧车事实。**永不 throw、永不回传 email**；env 缺一或失败回 false（不挡登入）。
  */
 export async function recordUserAttributionViaRelay(
   record: UserAttributionUpsert,
@@ -263,8 +263,8 @@ export async function recordUserAttributionViaRelay(
 }
 
 /**
- * 首次觸達 cookie → 落庫（歸因部分）。cookie 無值／壞值 → 直接 false（不寫）。
- * 供 `/api/auth/me` 在**任何** provider 登入後補記（涵蓋微信等沒有 OAuth callback 的路徑）。
+ * 首次触达 cookie → 落库（归因部分）。cookie 无值／坏值 → 直接 false（不写）。
+ * 供 `/api/auth/me` 在**任何** provider 登入后补记（涵盖微信等没有 OAuth callback 的路径）。
  */
 export async function recordFirstTouchCookieViaRelay(
   userId: number,
@@ -277,8 +277,8 @@ export async function recordFirstTouchCookieViaRelay(
 }
 
 /**
- * 邀請碼 cookie → 控面綁定邀請關係（驗簽與「未出過圖才可綁」都在控面）。永不 throw。
- * 回 true ＝ 控面已處理（綁上或判定不可綁都算處理完，免得每次登入重送）。
+ * 邀请码 cookie → 控面绑定邀请关系（验签与「未出过图才可绑」都在控面）。永不 throw。
+ * 回 true ＝ 控面已处理（绑上或判定不可绑都算处理完，免得每次登入重送）。
  */
 export async function recordInviteViaRelay(
   userId: number,
@@ -294,9 +294,9 @@ export async function recordInviteViaRelay(
   }
 }
 
-// ─────────────────────────────────────────── 控制面入站（供 internal route 組裝）
+// ─────────────────────────────────────────── 控制面入站（供 internal route 组装）
 
-/** 入站請求體（provider 已在 Vercel 側挑出「已驗證」email；控制面只做形狀校驗再落庫）。 */
+/** 入站请求体（provider 已在 Vercel 侧挑出「已验证」email；控制面只做形状校验再落库）。 */
 export function parseAttributionUpsertBody(body: unknown): UserAttributionUpsert | null {
   if (!body || typeof body !== "object") return null;
   const payload = body as Record<string, unknown>;
@@ -307,7 +307,7 @@ export function parseAttributionUpsertBody(body: unknown): UserAttributionUpsert
   const provider = payload.emailProvider === "github" || payload.emailProvider === "google"
     ? payload.emailProvider
     : null;
-  // email 與 provider 必須成對出現：沒 provider 的 email 一律丟（來源不可考＝不存）。
+  // email 与 provider 必须成对出现：没 provider 的 email 一律丢（来源不可考＝不存）。
   const email = rawEmail && provider ? rawEmail.toLowerCase() : null;
 
   const raw = payload.attribution;

@@ -18,7 +18,7 @@ type ScalePage = {
   prompts: [string, string];
   evidence: [RedditEvidence, RedditEvidence];
   related: string[];
-  /** 所屬行業樞紐 slug（/use-cases/<category>）。 */
+  /** 所属行业枢纽 slug（/use-cases/<category>）。 */
   category: string;
 };
 

@@ -1,6 +1,6 @@
-// 逐帧確定性渲染：Chrome 截圖 → ffmpeg。用法：
-//   node promo-video/render.mjs stills 1,5.5,12      # 輸出指定時間點靜幀到 out/stills/
-//   node promo-video/render.mjs video                 # 全片（WORKERS 路並行 + 動態模糊子幀）
+// 逐帧确定性渲染：Chrome 截图 → ffmpeg。用法：
+//   node promo-video/render.mjs stills 1,5.5,12      # 输出指定时间点静帧到 out/stills/
+//   node promo-video/render.mjs video                 # 全片（WORKERS 路并行 + 动态模糊子帧）
 import { chromium } from "playwright-core";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(DIR, "out");
 const FPS = Number(process.env.FPS || 30);
-const SUB = Number(process.env.SUB || 8);          // 動態模糊子幀數（快門 180°）
+const SUB = Number(process.env.SUB || 8);          // 动态模糊子帧数（快门 180°）
 const WORKERS = Number(process.env.WORKERS || 4);
 const [mode = "stills", arg = "1"] = process.argv.slice(2);
 const MODE_STILL = mode === "stills";
@@ -20,7 +20,7 @@ const browser = await chromium.launch({
   executablePath: "/usr/bin/google-chrome-stable",
   args: ["--force-color-profile=srgb", "--hide-scrollbars", "--font-render-hinting=none", "--ignore-gpu-blocklist",
     "--enable-gpu-rasterization", "--use-angle=gl", "--allow-file-access-from-files"],
-  // 走獨顯 RTX（PRIME offload）
+  // 走独显 RTX（PRIME offload）
   env: { ...process.env, __NV_PRIME_RENDER_OFFLOAD: "1", __GLX_VENDOR_LIBRARY_NAME: "nvidia", __EGL_VENDOR_LIBRARY_FILENAMES: "/usr/share/glvnd/egl_vendor.d/10_nvidia.json" },
 });
 
@@ -46,7 +46,7 @@ if (mode === "stills") {
     console.log("still", t);
   }
 } else if (mode === "cover") {
-  // 封面背景：arg = JSON 檔，[{name, t, cam, qinVid, grain, vig}]，輸出無疊字 PNG
+  // 封面背景：arg = JSON 档，[{name, t, cam, qinVid, grain, vig}]，输出无叠字 PNG
   const specs = JSON.parse(fs.readFileSync(arg, "utf8"));
   const { page } = await openPage();
   for (const sp of specs) {
@@ -66,7 +66,7 @@ if (mode === "stills") {
     const a = w * per, b = Math.min(total, a + per);
     const file = path.join(OUT, `seg${w}.mkv`);
     const { page } = await openPage();
-    // 子幀在 ffmpeg 端用 tmix 平均（線性光近似足夠），輸出幀率 = FPS
+    // 子帧在 ffmpeg 端用 tmix 平均（线性光近似足够），输出帧率 = FPS
     const vf = SUB > 1 ? `tmix=frames=${SUB}:weights=${Array(SUB).fill(1).join(" ")},select='eq(mod(n\\,${SUB})\\,${SUB - 1})',setpts=N/${FPS}/TB` : "null";
     const ff = spawn("ffmpeg", ["-loglevel", "error", "-y", "-f", "image2pipe", "-c:v", "mjpeg", "-framerate", String(FPS * SUB), "-i", "-",
       "-vf", vf, "-r", String(FPS), "-c:v", "libx264", "-preset", "slow", "-crf", "12", "-pix_fmt", "yuv420p", "-x264-params", "aq-mode=3", file], { stdio: ["pipe", "inherit", "inherit"] });
@@ -74,7 +74,7 @@ if (mode === "stills") {
       const tc = f / FPS, cuts = cues.cuts || [];
       let lo = 0, hi = Infinity; for (const c of cuts) { if (c <= tc) lo = c; else { hi = c; break; } }
       for (let s = 0; s < SUB; s++) {
-        let t = (f + (SUB > 1 ? ((s + 0.5) / SUB - 0.5) * 0.5 : 0)) / FPS;   // 180° 快門：子幀對稱分佈在幀中心 ±1/4 幀
+        let t = (f + (SUB > 1 ? ((s + 0.5) / SUB - 0.5) * 0.5 : 0)) / FPS;   // 180° 快门：子帧对称分布在帧中心 ±1/4 帧
         t = Math.min(Math.max(t, lo), hi - 1e-4);                           // 不跨硬切
         const buf = await grab(page, Math.max(0, t));
         if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once("drain", r));

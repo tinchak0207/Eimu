@@ -1,4 +1,4 @@
-// 生產 gateway 唯一真源快照（2026-09-15 拉回，8306 行）。勿以 .gateway-work/ 下舊目錄為準（PRD D7）。
+// 生产 gateway 唯一真源快照（2026-09-15 拉回，8306 行）。勿以 .gateway-work/ 下旧目录为准（PRD D7）。
 import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import path from "node:path"
@@ -19,7 +19,7 @@ import { loadAgentModelRegistry, bindingRef, personaModel } from "./model-regist
 import type { AgentModelRef } from "./model-registry.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { PORT, HEARTBEAT_INTERVAL_MS, CONFIRM_RESOLVED_TTL_MS, SESSION_IDLE_TTL_MS, SESSION_SWEEP_DAYS, SESSION_REAP_INTERVAL_MS, UPLOADS_DIR, OPENCODE_URL } from "./constants-gateway.ts"
-// 2026-10-02：子代理喚醒同樣需要「opencode-server OOM/重啟後恢復等待」——輪子與 workflow 喚醒同源（workflow-gw）。
+// 2026-10-02：子代理唤醒同样需要「opencode-server OOM/重启后恢复等待」——轮子与 workflow 唤醒同源（workflow-gw）。
 import { waitForOpencodeReady, isConnectionRefused } from "./workflow-gw.ts"
 
 /**
@@ -55,11 +55,11 @@ setDirectorSessionResolver((sid) => {
   return st ? { sessionId: st.sessionId, apiKey: st.apiKey } : undefined
 })
 
-// ─── REQ-D2（2026-09-22）：steer 回合中引導的投遞縫 ───
-// 回合收尾時待投的 steer 要變成「下一回合」，走的必須是既有用戶訊息受理鏈
-//（handleSendMessage：記憶注入/計時/閘門/壓縮讓位全套語義），不另造投遞輪子。
-// 這條縫是為了不讓 steer-gw → messages-gw → opencode-client → opencode-event-handler
-// 繞成新環；合成 Request 只為滿足既有簽名，body 與前端送出的 shape 一致。
+// ─── REQ-D2（2026-09-22）：steer 回合中引导的投递缝 ───
+// 回合收尾时待投的 steer 要变成「下一回合」，走的必须是既有用户讯息受理链
+//（handleSendMessage：记忆注入/计时/闸门/压缩让位全套语义），不另造投递轮子。
+// 这条缝是为了不让 steer-gw → messages-gw → opencode-client → opencode-event-handler
+// 绕成新环；合成 Request 只为满足既有签名，body 与前端送出的 shape 一致。
 setSteerTurnDeliverer(async (state, text) => {
   const req = new Request(`http://gateway.internal/agent/v1/sessions/${state.sessionId}/messages`, {
     method: "POST",
@@ -150,19 +150,19 @@ setInterval(() => {
     if (now - state.lastActivityAt < SESSION_IDLE_TTL_MS) continue
     const idleMs = now - state.lastActivityAt
     teardownSession(id, state, "idle_timeout", true)
-    // 2026-08-29 修復「空殼會話」：閒置回收不再刪 opencode 會話與上傳目錄。
-    // 訊息歷史權威在 opencode，DB row（keepRow=true）revive 後靠它回填正文；
-    // 之前這裡刪掉 opencode → 恢復出來只有殼沒有內容（天天丟記錄）。
-    // opencode/上傳的清理只跟 7 天 stale sweep 與顯式 DELETE 走。
+    // 2026-08-29 修复「空壳会话」：闲置回收不再删 opencode 会话与上传目录。
+    // 讯息历史权威在 opencode，DB row（keepRow=true）revive 后靠它回填正文；
+    // 之前这里删掉 opencode → 恢复出来只有壳没有内容（天天丢记录）。
+    // opencode/上传的清理只跟 7 天 stale sweep 与显式 DELETE 走。
     console.log(`[gateway] reaped idle session ${id} after ${Math.round(idleMs / 1000)}s idle`)
   }
-  // DB 孤兒 row 清掃：gateway 重啟後無人 reference 的持久化 row（updated_at 超過
-  // 7 天）連同 upstream opencode session 與 uploads 一起回收，避免 sessions.db
-  // 無限增長。7 天 >> SESSION_IDLE_TTL_MS：寧可晚刪，不誤刪可恢復的會話。
-  // 永久保留默認關閉（SESSION_SWEEP_DAYS=0 → sweepRows=[]）；env>0 恢復 N 天清掃。
+  // DB 孤儿 row 清扫：gateway 重启后无人 reference 的持久化 row（updated_at 超过
+  // 7 天）连同 upstream opencode session 与 uploads 一起回收，避免 sessions.db
+  // 无限增长。7 天 >> SESSION_IDLE_TTL_MS：宁可晚删，不误删可恢复的会话。
+  // 永久保留默认关闭（SESSION_SWEEP_DAYS=0 → sweepRows=[]）；env>0 恢复 N 天清扫。
   const sweepRows = SESSION_SWEEP_DAYS > 0 ? sweepStaleRows(SESSION_SWEEP_DAYS * 24 * 60 * 60 * 1000) : []
   for (const stale of sweepRows) {
-    if (sessions.has(stale.sessionId)) continue // 剛被 lazy reload 回來的不動
+    if (sessions.has(stale.sessionId)) continue // 刚被 lazy reload 回来的不动
     void deleteOpencodeSession(stale.opencodeSessionId)
     const staleUploadDir = path.join(UPLOADS_DIR, stale.sessionId)
     if (existsSync(staleUploadDir)) {
@@ -172,13 +172,13 @@ setInterval(() => {
   }
 }, SESSION_REAP_INTERVAL_MS)
 
-// ── R6（2026-09-10）subagent async 完成喚醒 ─────────────────────────────
-// async dispatch 的子代理終態（成功/失敗皆喚）時，把結果摘要以系統消息投進
-// 父會話並續 turn。輪子 = workflow 喚醒掃描器的 prompt_async 段（2026-09-01 修 3）：
-// beastAgentField 帶 agent 欄＋lastPromptBody 落盤＋turn 計數重置＋watchdog 布哨。
-// 冪等：finishRun 的 status 守衛保每 run 只喚一次；本函數 turn 在途（ackTimer
-// 掛著）時讓位重試一次（60s），仍掛則放棄——結果留在 completed（10 分鐘 TTL）
-// 可被 subagent_status 工具查詢，不重複注入。
+// ── R6（2026-09-10）subagent async 完成唤醒 ─────────────────────────────
+// async dispatch 的子代理终态（成功/失败皆唤）时，把结果摘要以系统消息投进
+// 父会话并续 turn。轮子 = workflow 唤醒扫描器的 prompt_async 段（2026-09-01 修 3）：
+// beastAgentField 带 agent 栏＋lastPromptBody 落盘＋turn 计数重置＋watchdog 布哨。
+// 幂等：finishRun 的 status 守卫保每 run 只唤一次；本函数 turn 在途（ackTimer
+// 挂著）时让位重试一次（60s），仍挂则放弃——结果留在 completed（10 分钟 TTL）
+// 可被 subagent_status 工具查询，不重复注入。
 async function wakeSessionForSubagent(
   parentState: any,
   run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string },
@@ -195,7 +195,7 @@ async function wakeSessionForSubagent(
       `【子代理${verdict}·系统自动唤醒】subagent ${shortId}（label="${run.label}"）已${verdict}。` +
       (run.status === "ok" ? `结果摘要：${payload}` : `失败原因：${payload}`) +
       `\n请基于以上真实结果立即继续推进（汇总/补派/返工），并简报当前进度。若尚有其他子代理在跑，可用 subagent_status 工具查询并在简报里说明还剩几路在跑；注意：最终成品未交付前，禁止宣称「已全部完成」，禁止结束回合等待用户——没有可推进动作时也要说明下一步计划。`
-    // 刀 1（2026-09-19）：喚醒摘要收集（Jev 測謊題的事實面；有界 16 條，session.idle 消費）。
+    // 刀 1（2026-09-19）：唤醒摘要收集（Jev 测谎题的事实面；有界 16 条，session.idle 消费）。
     state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
     const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
     const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
@@ -211,16 +211,16 @@ async function wakeSessionForSubagent(
     state.turnReasoningChars = 0
     state.turnRetries = 0
     state.turnAborted = false
-    state.turnAbortSource = undefined // D2-1b：新輪起點清中止來源（與 turnAborted 同點）
+    state.turnAbortSource = undefined // D2-1b：新轮起点清中止来源（与 turnAborted 同点）
     state.retryQueued = false
     state.turnUpstreamError = null
     state.turnToolStarted = false
     state.watchdogRetried = false
     state.questionAnsweredThisTurn = false
     state.deathDeclared = false
-    // 2026-10-02 steer 誤判修復：喚醒輪也是「進行中的回合」——lastTurnActiveAt 是
-    // steer 受理閘（steer-gw.turnInFlight）的唯一依據。此漏點曾讓喚醒驅動的會話
-    // （MV 全程）所有 steer 被 409 no_active_turn 誤判失敗、前端彈兩條無用提示。
+    // 2026-10-02 steer 误判修复：唤醒轮也是「进行中的回合」——lastTurnActiveAt 是
+    // steer 受理闸（steer-gw.turnInFlight）的唯一依据。此漏点曾让唤醒驱动的会话
+    // （MV 全程）所有 steer 被 409 no_active_turn 误判失败、前端弹两条无用提示。
     state.lastTurnActiveAt = Date.now()
     markDirty(state)
     armWatchdogTimer(state)
@@ -238,8 +238,8 @@ async function wakeSessionForSubagent(
     }
     await deliver(parentState)
   } catch (e) {
-    // 2026-10-02：opencode-server 全域 OOM/重啟（127.0.0.1:4096 斷線）時單發喚醒會永久丟失。
-    // 遇 ECONNREFUSED 輪詢 /config 至恢復（上限 180s），恢復後補投一次（輪子同 workflow 喚醒）。
+    // 2026-10-02：opencode-server 全域 OOM/重启（127.0.0.1:4096 断线）时单发唤醒会永久丢失。
+    // 遇 ECONNREFUSED 轮询 /config 至恢复（上限 180s），恢复后补投一次（轮子同 workflow 唤醒）。
     if (isConnectionRefused(e)) {
       console.error(`[gateway] subagent wake connection refused; polling /config: session=${parentState.sessionId} sub=${shortId}`)
       const ready = await waitForOpencodeReady()
@@ -266,11 +266,11 @@ initSubagent({
   findSessionByOpenCodeId,
   openCodeUrl: OPENCODE_URL,
   openCodeHeaders: opencodeHeaders,
-  // 野獸模式（MOE 改革，2026-09-08）：父會話 settings.beast_mode 布林；dispatch
-  // 時快照進 run，任務書頭部注入 Expert 憲法（prompt 約束；物理斷路留樁）。
+  // 野兽模式（MOE 改革，2026-09-08）：父会话 settings.beast_mode 布林；dispatch
+  // 时快照进 run，任务书头部注入 Expert 宪法（prompt 约束；物理断路留桩）。
   beastMode: (parentState: any) => loadUserSettings(parentState?.apiKey)?.beast_mode === true,
-  // R6（2026-09-10）async 完成喚醒出口：subagent.ts finishRun 在 async run 終態時
-  // 呼叫（成功與失敗皆喚）。輪子見上方 wakeSessionForSubagent（workflow 喚醒同款）。
+  // R6（2026-09-10）async 完成唤醒出口：subagent.ts finishRun 在 async run 终态时
+  // 呼叫（成功与失败皆唤）。轮子见上方 wakeSessionForSubagent（workflow 唤醒同款）。
   wakeParent: wakeSessionForSubagent,
   // 2026-08-31：子代理错误透传 + persona 模型链（与主路径同源，见 subagent.ts 头注）。
   describeError: opencodeErrorMessage,
@@ -287,15 +287,15 @@ initSubagent({
 // Single global connection to opencode's event stream, fanned out per session.
 connectOpencode()
 
-// 刀 F（2026-09-15）：啟動掃描 in-flight rework 孤兒（延後一拍讓 opencode /event 先連上、
-// 父會話可 lazy 恢復；探針與 wake 都帶超時，失敗留記錄交下次重啟，不卡啟動）。
+// 刀 F（2026-09-15）：启动扫描 in-flight rework 孤儿（延后一拍让 opencode /event 先连上、
+// 父会话可 lazy 恢复；探针与 wake 都带超时，失败留记录交下次重启，不卡启动）。
 setTimeout(() => {
   void recoverReworkRunsOnStartup().catch((e) => console.error("[gateway] rework recovery scan failed:", e))
 }, 3000)
 
 console.log(`[gateway] listening on :${server.port}, opencode=${OPENCODE_URL}`)
 
-// ── 第一階段橋接 re-export（16 個舊橋接符號已遷入第二階段模組，re-export 保住 import { X } from "./index.ts" 的下游）──
+// ── 第一阶段桥接 re-export（16 个旧桥接符号已迁入第二阶段模组，re-export 保住 import { X } from "./index.ts" 的下游）──
 export { contentTypeForExt } from "./uploads-media.ts"
 export { opencodeHeaders } from "./opencode-client.ts"
 export { getOwnedSession, resolveSession } from "./sessions-core.ts"
@@ -303,8 +303,8 @@ export { humanMessageFor } from "./humanize-gw.ts"
 export { emitToSession } from "./sse-core.ts"
 export { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
 export { resolveConnectedVideoDuration } from "./workflow-gw.ts"
-// 第二階段模組橋接 re-export（media-internal-routes/sessions-http/pricing-gateway/canvas-cascade-state/
-// events-translate/plan-gw/sessions-core/outbound-sanitize/opencode-event-handler/workflow-gw 曾以 ./index.ts 橋接的符號）
+// 第二阶段模组桥接 re-export（media-internal-routes/sessions-http/pricing-gateway/canvas-cascade-state/
+// events-translate/plan-gw/sessions-core/outbound-sanitize/opencode-event-handler/workflow-gw 曾以 ./index.ts 桥接的符号）
 export { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 export { emitImageDone, emitVideoDone, emitAudioDone, toolErrorPayload, trackTurnNodeTerminal, resolveInvisibleUploadPaths } from "./events-translate.ts"
 export { emitSessionError, emitAgentNotice } from "./emit-helpers.ts"

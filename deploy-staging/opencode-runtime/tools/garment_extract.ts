@@ -2,27 +2,27 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail } from "../lib/client"
 import { cutoutFromUrl, vlmAskJson, permilleBboxToPx } from "../lib/batch5-matting"
 
-// 服裝單品提取（2026-08-31 片5）：服裝圖 → rembg 去背單品資產（透明底）+ VLM 標品类/描述/邊界框。
-// 復用 background_remove 同一摳圖核心（cutoutFromUrl），疊加 VLM 讀圖元數據。
+// 服装单品提取（2026-08-31 片5）：服装图 → rembg 去背单品资产（透明底）+ VLM 标品类/描述/边界框。
+// 复用 background_remove 同一抠图核心（cutoutFromUrl），叠加 VLM 读图元数据。
 
 const GARMENT_Q =
-  "這是含服裝的圖片。請框出最主要的單一件服裝（上衣/褲子/裙子/外套/連身裙等，不含模特臉部/配飾除非用戶指的是配飾），輸出 JSON：" +
-  '{"category":"服裝品類（如 連衣裙/西裝外套/T恤/牛仔褲）",' +
-  '"description":"該單品的簡短視覺描述（顏色/版型/明顯特徵）",' +
-  '"bbox":[x1,y1,x2,y2]}，bbox 為相對寬高的千分比（0-1000，左上為原點，x1<x2, y1<y2）。只輸出 JSON。'
+  "这是含服装的图片。请框出最主要的单一件服装（上衣/裤子/裙子/外套/连身裙等，不含模特脸部/配饰除非用户指的是配饰），输出 JSON：" +
+  '{"category":"服装品类（如 连衣裙/西装外套/T恤/牛仔裤）",' +
+  '"description":"该单品的简短视觉描述（颜色/版型/明显特征）",' +
+  '"bbox":[x1,y1,x2,y2]}，bbox 为相对宽高的千分比（0-1000，左上为原点，x1<x2, y1<y2）。只输出 JSON。'
 
 export default tool({
   description:
-    "服裝單品提取（rembg u2net 去背 + VLM 標注，零生圖扣費）：image_url 填服裝圖 URL → 復用 background_remove 同一摳圖核心產透明底單品資產 → VLM（gemini-2.5-flash-image）讀原圖給品類/描述/邊界框（千分比 + 換算像素）。輸出公網透明 PNG URL + bbox 元數據 + alpha 統計。誠實：bbox 為 VLM 目測千分比換算，非像素級實例分割框；摳圖精度同 background_remove（u2net 通用分割，髮絲/網紗有限）。VLM 不可達時仍交付去背資產，bbox/category 誠實標 null。",
+    "服装单品提取（rembg u2net 去背 + VLM 标注，零生图扣费）：image_url 填服装图 URL → 复用 background_remove 同一抠图核心产透明底单品资产 → VLM（gemini-2.5-flash-image）读原图给品类/描述/边界框（千分比 + 换算像素）。输出公网透明 PNG URL + bbox 元数据 + alpha 统计。诚实：bbox 为 VLM 目测千分比换算，非像素级实例分割框；抠图精度同 background_remove（u2net 通用分割，发丝/网纱有限）。VLM 不可达时仍交付去背资产，bbox/category 诚实标 null。",
   args: {
-    image_url: tool.schema.string().describe("服裝圖 URL（http(s)）"),
-    max_side: tool.schema.number().int().min(256).max(2048).optional().describe("輸入長邊上限，默認 1536"),
+    image_url: tool.schema.string().describe("服装图 URL（http(s)）"),
+    max_side: tool.schema.number().int().min(256).max(2048).optional().describe("输入长边上限，默认 1536"),
   },
   async execute(args, context) {
     const imageUrl = args.image_url?.trim() || ""
-    if (!/^https?:\/\//.test(imageUrl)) return fail("invalid_image_url", "image_url 必須是 http(s) URL", { title: "輸入非法" })
+    if (!/^https?:\/\//.test(imageUrl)) return fail("invalid_image_url", "image_url 必须是 http(s) URL", { title: "输入非法" })
     const r = await cutoutFromUrl(imageUrl, context.abort, "garment", args.max_side ?? 1536)
-    if (!r.ok) return fail(r.code || "matting_failed", r.reason || "摳圖失敗", { title: "服裝提取失敗", source_url: imageUrl })
+    if (!r.ok) return fail(r.code || "matting_failed", r.reason || "抠图失败", { title: "服装提取失败", source_url: imageUrl })
 
     const v = await vlmAskJson([imageUrl], GARMENT_Q, 800)
     let category: string | null = null
@@ -38,7 +38,7 @@ export default tool({
     }
     return ok(
       {
-        title: "服裝單品提取完成",
+        title: "服装单品提取完成",
         url: r.url,
         source_url: r.source_url,
         garment: { category, description, bbox_px: bboxPx, bbox_permille: bboxPermille },
@@ -46,8 +46,8 @@ export default tool({
         size: `${r.stats?.width}x${r.stats?.height}`,
         vlm_status: v.ok ? "ok" : `unavailable: ${v.reason}`,
         elapsed_ms: r.elapsed_ms,
-        mechanism: "rembg u2net 去背 + VLM 目測 bbox",
-        note: "bbox_px 依去背資產尺寸換算（千分比→像素）；category/description 為 VLM 讀原圖結果。",
+        mechanism: "rembg u2net 去背 + VLM 目测 bbox",
+        note: "bbox_px 依去背资产尺寸换算（千分比→像素）；category/description 为 VLM 读原图结果。",
       },
       { url: r.url, category, bbox_px: bboxPx },
     )

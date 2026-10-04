@@ -1,26 +1,26 @@
-// opencode 全量歷史 → AgentTranscriptItem[] 的歸一化（純函數）。
+// opencode 全量历史 → AgentTranscriptItem[] 的归一化（纯函数）。
 //
-// 為什麼要這層：「回到歷史會話」改由 GET /api/agent/sessions/[id] 的全量
-// 歷史重建 transcript，不再依賴網關 1000 幀 ring buffer 回放（長會話會被
-// 截斷成空白）。opencode 的 messages 是 [{info:{id,role,time,tokens},parts:[...]}]
-// 的原始 shape，與前端渲染模型（AgentTranscriptItem）不同構，中間需要一個
-// 忠實且防炸的映射層。
+// 为什么要这层：「回到历史会话」改由 GET /api/agent/sessions/[id] 的全量
+// 历史重建 transcript，不再依赖网关 1000 帧 ring buffer 回放（长会话会被
+// 截断成空白）。opencode 的 messages 是 [{info:{id,role,time,tokens},parts:[...]}]
+// 的原始 shape，与前端渲染模型（AgentTranscriptItem）不同构，中间需要一个
+// 忠实且防炸的映射层。
 //
-// 紀律：
-//   - 純函數：不碰 React / DOM / Date.now / Math.random，同輸入同輸出，
-//     `npx tsx --test` 直接測。
-//   - 結構規則忠實對齊 agent-chat-reducer：
-//       * assistant 文字條目 streaming=false（歷史已定案，不詐尸流式）；
-//       * image/video/audio 的 seq 是「該 kind 會話內展示序號」（鏡像
-//         image.done 的 imageSeq 語義），錨定文案「第 N 張」直接唼它；
-//         user/assistant/tool 的 seq 用全局遞增的合成游標（嚴格遞增）；
-//       * id 用 `<kind>-<全局序>`，全陣列唯一，且與 SSE 事件的
-//         `<kind>-<event_id>` 命名空間文字上不撞（合成游標帶 h 前綴）。
-//   - 產出的每個 item 必須能過 persistence.ts 的 sanitizeItemsForStorage
-//     白名單（ITEM_KINDS）：只會產出 user/assistant/tool/image/video/audio
-//     /subagent_result，不產 director/subagent/notice。附件 url 只收
-//     http(s)（data: 的 base64 嚴禁進 localStorage）。
-//   - 未知 part / 髒資料一律跳過不炸，丟棄計進 droppedParts 統計。
+// 纪律：
+//   - 纯函数：不碰 React / DOM / Date.now / Math.random，同输入同输出，
+//     `npx tsx --test` 直接测。
+//   - 结构规则忠实对齐 agent-chat-reducer：
+//       * assistant 文字条目 streaming=false（历史已定案，不诈尸流式）；
+//       * image/video/audio 的 seq 是「该 kind 会话内展示序号」（镜像
+//         image.done 的 imageSeq 语义），锚定文案「第 N 张」直接唼它；
+//         user/assistant/tool 的 seq 用全局递增的合成游标（严格递增）；
+//       * id 用 `<kind>-<全局序>`，全阵列唯一，且与 SSE 事件的
+//         `<kind>-<event_id>` 命名空间文字上不撞（合成游标带 h 前缀）。
+//   - 产出的每个 item 必须能过 persistence.ts 的 sanitizeItemsForStorage
+//     白名单（ITEM_KINDS）：只会产出 user/assistant/tool/image/video/audio
+//     /subagent_result，不产 director/subagent/notice。附件 url 只收
+//     http(s)（data: 的 base64 严禁进 localStorage）。
+//   - 未知 part / 脏资料一律跳过不炸，丢弃计进 droppedParts 统计。
 
 import type {
   AgentAttachmentRef,
@@ -35,12 +35,12 @@ import type {
   OpenCodeMessage,
 } from "./agent-chat-types";
 
-/** 歸一化結果：items 供 restore；dropped 統計供排觀（測試斷言用）。 */
+/** 归一化结果：items 供 restore；dropped 统计供排观（测试断言用）。 */
 export interface NormalizeHistoryResult {
   items: AgentTranscriptItem[];
-  /** 被丟棄的 part 總數（未知型別、無公網 URL 的媒體、髒 tool 等）。 */
+  /** 被丢弃的 part 总数（未知型别、无公网 URL 的媒体、脏 tool 等）。 */
   droppedParts: number;
-  /** 丟棄原因分桶，key 為 part 型別或歸類標籤。 */
+  /** 丢弃原因分桶，key 为 part 型别或归类标签。 */
   droppedByType: Record<string, number>;
 }
 
@@ -56,7 +56,7 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-/** 只認公網 http(s) URL：data: URI 是 base64，落存檔會撐爆 localStorage。 */
+/** 只认公网 http(s) URL：data: URI 是 base64，落存档会撑爆 localStorage。 */
 function isPublicUrl(url: unknown): url is string {
   return typeof url === "string" && /^https?:\/\//i.test(url);
 }
@@ -65,7 +65,7 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)([?#]|$)/i;
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|avi|m4v)([?#]|$)/i;
 const AUDIO_EXT = /\.(mp3|wav|ogg|m4a|aac|flac|opus)([?#]|$)/i;
 
-/** 依 mime（優先）與副檔名判媒體三類；判不出回 null。 */
+/** 依 mime（优先）与副档名判媒体三类；判不出回 null。 */
 function mediaKind(mime: string | undefined, name: string | undefined, url: string): "image" | "video" | "audio" | null {
   if (mime) {
     if (mime.startsWith("image/")) return "image";
@@ -81,7 +81,7 @@ function mediaKind(mime: string | undefined, name: string | undefined, url: stri
   return null;
 }
 
-/** 附件 kind 對齊 client 的 toAgentAttachmentRef：image/→image，video/→video，其餘→document（副檔名兜底）。 */
+/** 附件 kind 对齐 client 的 toAgentAttachmentRef：image/→image，video/→video，其余→document（副档名兜底）。 */
 function attachmentKind(mime: string | undefined, name: string | undefined, url: string): AgentAttachmentRef["kind"] {
   if (mime?.startsWith("image/")) return "image";
   if (mime?.startsWith("video/")) return "video";
@@ -90,7 +90,7 @@ function attachmentKind(mime: string | undefined, name: string | undefined, url:
   return "document";
 }
 
-/** opencode tool part 的 state.status → 前端狀態枚舉；判不了回 null（丟棄）。 */
+/** opencode tool part 的 state.status → 前端状态枚举；判不了回 null（丢弃）。 */
 function toolStatus(raw: unknown): AgentToolCallItem["status"] | null {
   switch (raw) {
     case "completed":
@@ -105,7 +105,7 @@ function toolStatus(raw: unknown): AgentToolCallItem["status"] | null {
   }
 }
 
-/** 工具參數摘要：字串直用，其餘 JSON 化並截斷（存檔瘦身，也與 live 的 args_summary 同量級）。 */
+/** 工具参数摘要：字串直用，其余 JSON 化并截断（存档瘦身，也与 live 的 args_summary 同量级）。 */
 function argsSummary(input: unknown): string | undefined {
   if (typeof input === "string") return input.length > 200 ? `${input.slice(0, 200)}…` : input;
   if (input === null || input === undefined) return undefined;
@@ -117,7 +117,7 @@ function argsSummary(input: unknown): string | undefined {
   }
 }
 
-/** 失敗原因：opencode 的 state.error 多為字串；物件退而取 message，再退 JSON。 */
+/** 失败原因：opencode 的 state.error 多为字串；物件退而取 message，再退 JSON。 */
 function toolErrorText(raw: unknown): string | undefined {
   if (typeof raw === "string" && raw.length > 0) return raw;
   const rec = asRecord(raw);
@@ -128,23 +128,23 @@ function toolErrorText(raw: unknown): string | undefined {
   return undefined;
 }
 
-// ─────────────────────────── 系統注入訊息識別（歸因錯覺病灶）
+// ─────────────────────────── 系统注入讯息识别（归因错觉病灶）
 
-// gateway 機制上必須以 user role 注入會話的三類訊息（喚醒/重試提示/召回前綴），
-// 歷史路徑若一律畫成用戶氣泡，用戶事後翻記錄會看到自己「說過」從沒說過的話。
-// 識別標記全部對齊後端真源（deploy-staging/gateway）：index.ts wakeSessionForSubagent、
+// gateway 机制上必须以 user role 注入会话的三类讯息（唤醒/重试提示/召回前缀），
+// 历史路径若一律画成用户气泡，用户事后翻记录会看到自己「说过」从没说过的话。
+// 识别标记全部对齐后端真源（deploy-staging/gateway）：index.ts wakeSessionForSubagent、
 // opencode-event-handler.ts turn failover、memory-recall.ts renderRecallPrefix。
 
-/** 子代理喚醒訊息骨架（真源 gateway/index.ts wakeSessionForSubagent，勿改後端）。 */
+/** 子代理唤醒讯息骨架（真源 gateway/index.ts wakeSessionForSubagent，勿改后端）。 */
 const SUBAGENT_WAKE_RE =
   /^【子代理(完成|失败)·系统自动唤醒】subagent\s+([0-9A-Za-z]+)（label="([^"]*)"）已(?:完成|失败)。(?:结果摘要|失败原因)：/;
 
-/** 喚醒訊息尾部固定的續跑指令行（給模型的指令，不是產出內容）。 */
+/** 唤醒讯息尾部固定的续跑指令行（给模型的指令，不是产出内容）。 */
 const SUBAGENT_WAKE_TAIL = "请基于以上真实结果继续推进";
 
 /**
- * 解析子代理喚醒訊息。命中回 {status, subagentId, label, text(產出正文)}；
- * 標記對但骨架漂移（label 含引號等）走兜底盡力提取——總之絕不冒充用戶氣泡。
+ * 解析子代理唤醒讯息。命中回 {status, subagentId, label, text(产出正文)}；
+ * 标记对但骨架漂移（label 含引号等）走兜底尽力提取——总之绝不冒充用户气泡。
  */
 function parseSubagentWake(text: string): { status: "ok" | "error"; subagentId: string; label: string; text: string } | null {
   if (!text.startsWith("【子代理完成·系统自动唤醒】") && !text.startsWith("【子代理失败·系统自动唤醒】")) return null;
@@ -162,19 +162,19 @@ function parseSubagentWake(text: string): { status: "ok" | "error"; subagentId: 
   return { status, subagentId: m[2] ?? "", label: m[3] ?? "", text: body.trim() };
 }
 
-/** 記憶召回知識塊標記行開頭（真源 gateway/memory-recall.ts RECALL_HEADER）。 */
-const RECALL_BLOCK_MARKER = "[相關領域知識";
+/** 记忆召回知识块标记行开头（真源 gateway/memory-recall.ts RECALL_HEADER）。 */
+const RECALL_BLOCK_MARKER = "[相关领域知识";
 
-/** 知識塊內容行：`- [domain] slug` 條目行或縮兩格的 body 延續行。 */
+/** 知识块内容行：`- [domain] slug` 条目行或缩两格的 body 延续行。 */
 function isRecallBodyLine(l: string): boolean {
   return /^- \[[^\]]*\]\s*\S/.test(l) || /^ {2,}\S/.test(l);
 }
 
 /**
- * 從用戶文本剝離 gateway 注入的記憶召回知識塊。位置無關（頭/尾皆處理）：
- * messages-gw.ts 現場實際是前綴注入（`prefix + "\n\n" + 用戶正文`），
- * 舊規格描述的「尾部追加」也一併覆蓋。找不到標記原樣返回。
- * 塊 = 標記行 + 若干條目/body 行，直到空行接非塊內容或文本結束。
+ * 从用户文本剥离 gateway 注入的记忆召回知识块。位置无关（头/尾皆处理）：
+ * messages-gw.ts 现场实际是前缀注入（`prefix + "\n\n" + 用户正文`），
+ * 旧规格描述的「尾部追加」也一并覆盖。找不到标记原样返回。
+ * 块 = 标记行 + 若干条目/body 行，直到空行接非块内容或文本结束。
  */
 function stripRecallBlock(text: string): string {
   const lines = text.split("\n");
@@ -187,18 +187,18 @@ function stripRecallBlock(text: string): string {
     const next = lines[i + 1];
     const isBlockGap = l.length === 0 && next !== undefined && isRecallBodyLine(next);
     if (isRecallBodyLine(l) || isBlockGap) continue;
-    break; // 塊結束：此行起屬於用戶正文（前綴注入的分隔空行也在此消掉）
+    break; // 块结束：此行起属于用户正文（前缀注入的分隔空行也在此消掉）
   }
-  // 尾部注入：塊吞到文本結束（或只剩殘留空行）→ 前文的收尾空行一併吃掉。
+  // 尾部注入：块吞到文本结束（或只剩残留空行）→ 前文的收尾空行一并吃掉。
   const atTail = i >= lines.length || lines.slice(i).every((l) => l.trim().length === 0);
   if (i < lines.length && !atTail) out.push(...lines.slice(i));
   let res = out.join("\n");
-  if (head === 0) res = res.replace(/^(?:[ \t]*\n)+/, ""); // 前綴剝離：吃掉殘留空行
+  if (head === 0) res = res.replace(/^(?:[ \t]*\n)+/, ""); // 前缀剥离：吃掉残留空行
   if (atTail) res = res.replace(/(?:[ \t]*\n)+$/, "");
   return res;
 }
 
-/** 內部框架段標題行（live 路徑真源 gateway/outbound-sanitize.ts + e2e 實錘的 Progress Summary）。 */
+/** 内部框架段标题行（live 路径真源 gateway/outbound-sanitize.ts + e2e 实锤的 Progress Summary）。 */
 export const INTERNAL_SECTION_HEADING_RE =
   /^#{1,6}[ \t]*(?:objective|work state|next move|relevant files|important details|completed|active|blocked|progress summary)[ \t]*:?[ \t]*$/i;
 
@@ -206,9 +206,9 @@ const ANY_HEADING_RE = /^#{1,6}[ \t]/;
 const FENCE_RE = /^\s*(```|~~~)/;
 
 /**
- * assistant 歷史文本的內部框架段剝離（live 路徑 gateway 出站已剝、歷史路徑漏）：
- * `## Objective` 等標題行起吞到下一個非內部 markdown 標題或文本結束；
- * 代碼柵欄（``` / ~~~）內容直通不判。無內部段時原樣返回（零改動）。
+ * assistant 历史文本的内部框架段剥离（live 路径 gateway 出站已剥、历史路径漏）：
+ * `## Objective` 等标题行起吞到下一个非内部 markdown 标题或文本结束；
+ * 代码栅栏（``` / ~~~）内容直通不判。无内部段时原样返回（零改动）。
  */
 export function stripInternalSections(text: string): string {
   if (!text) return text;
@@ -229,7 +229,7 @@ export function stripInternalSections(text: string): string {
       continue;
     }
     if (suppress) {
-      // 內部段到下一個「非內部」標題為止；下一個內部段標題繼續吞。
+      // 内部段到下一个「非内部」标题为止；下一个内部段标题继续吞。
       if (ANY_HEADING_RE.test(line) && !INTERNAL_SECTION_HEADING_RE.test(line)) {
         suppress = false;
         out.push(line);
@@ -245,19 +245,19 @@ export function stripInternalSections(text: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// ─────────────────────────── 歸一化主體
+// ─────────────────────────── 归一化主体
 
 /**
- * 把 opencode 原始訊息陣列重建為前端 transcript。
+ * 把 opencode 原始讯息阵列重建为前端 transcript。
  *
  * 映射表（part.type → item）：
- *   user.text      → 拼接進該輪 user item 的 text
- *   user.file      → user item 的 attachments（僅 http(s) URL；鏡像 live 上傳語義）
- *   assistant.text → 順次累積進當前 assistant item（工具/媒體卡會切斷段落）
- *   assistant.reasoning → 併入 assistant item 的 reasoning 欄位（型別有承載，不丟）
+ *   user.text      → 拼接进该轮 user item 的 text
+ *   user.file      → user item 的 attachments（仅 http(s) URL；镜像 live 上传语义）
+ *   assistant.text → 顺次累积进当前 assistant item（工具/媒体卡会切断段落）
+ *   assistant.reasoning → 并入 assistant item 的 reasoning 栏位（型别有承载，不丢）
  *   assistant.tool → tool item（completed→ok / error→failed / running、pending→running）
- *   assistant.file → image/video/audio item（按 mime/副檔名；判不出或無公網 URL 丟棄計數）
- *   其餘（step-start/patch/…）→ 跳過並計數
+ *   assistant.file → image/video/audio item（按 mime/副档名；判不出或无公网 URL 丢弃计数）
+ *   其余（step-start/patch/…）→ 跳过并计数
  */
 export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): NormalizeHistoryResult {
   const items: AgentTranscriptItem[] = [];
@@ -268,15 +268,15 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
     droppedByType[type] = (droppedByType[type] ?? 0) + 1;
   };
 
-  // 全局序：id 後綴（h 前綴隔開 SSE 的 <kind>-<event_id> 命名空間）；
-  // 同時是 user/assistant/tool 的 seq（嚴格遞增）。
+  // 全局序：id 后缀（h 前缀隔开 SSE 的 <kind>-<event_id> 命名空间）；
+  // 同时是 user/assistant/tool 的 seq（严格递增）。
   let order = 0;
-  // 媒體 seq：該 kind 會話內展示序號（鏡像 reducer 的 imageSeq 語義）。
+  // 媒体 seq：该 kind 会话内展示序号（镜像 reducer 的 imageSeq 语义）。
   let imageSeq = 0;
   let videoSeq = 0;
   let audioSeq = 0;
   let userCount = 0;
-  // 同 kind 同 url 去重（鏡像 reducer 的 exists 守衛：重複完成幰不刷兩張卡）。
+  // 同 kind 同 url 去重（镜像 reducer 的 exists 守卫：重复完成幰不刷两张卡）。
   const seenMedia = new Set<string>();
 
   for (const rawMsg of Array.isArray(messages) ? messages : []) {
@@ -285,7 +285,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
     const role = asString(info?.role);
     const parts = Array.isArray(msg?.parts) ? (msg.parts as unknown[]) : null;
     if (!parts) {
-      // 整則訊息不可用：無 part 可逐個計，算一個 message 級丟棄。
+      // 整则讯息不可用：无 part 可逐个计，算一个 message 级丢弃。
       drop("message");
       continue;
     }
@@ -306,8 +306,8 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
           continue;
         }
         if (type === "file") {
-          // 使用者上傳附件鏡像 live 語義：掛在 user item 的 attachments 上，
-          // 不是漂浮的媒體卡；只收公網 URL（data: base64 嚴禁進存檔）。
+          // 使用者上传附件镜像 live 语义：挂在 user item 的 attachments 上，
+          // 不是漂浮的媒体卡；只收公网 URL（data: base64 严禁进存档）。
           if (!isPublicUrl(part.url)) {
             drop("file-no-public-url");
             continue;
@@ -328,10 +328,10 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
       }
       const text = texts.join("\n");
 
-      // ① 子代理喚醒訊息：機制上必須走 user role，但它是系統注入，不是用戶
-      // 說的話——渲染成 subagent_result 產出卡（前端已有
-      // AgentSubagentReportCard），絕不畫成用戶氣泡。佔 order seq 保時序，
-      // 不佔 userCount（不是用戶輪，user id 續號不受污染）。
+      // ① 子代理唤醒讯息：机制上必须走 user role，但它是系统注入，不是用户
+      // 说的话——渲染成 subagent_result 产出卡（前端已有
+      // AgentSubagentReportCard），绝不画成用户气泡。占 order seq 保时序，
+      // 不占 userCount（不是用户轮，user id 续号不受污染）。
       const wake = parseSubagentWake(text);
       if (wake !== null) {
         order += 1;
@@ -348,27 +348,27 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         continue;
       }
 
-      // ② 系統重試提示（上游錯誤後 gateway 的續跑指令）：整條不顯示。
+      // ② 系统重试提示（上游错误后 gateway 的续跑指令）：整条不显示。
       const trimmed = text.trim();
       if (trimmed.startsWith("（系统提示：") && trimmed.endsWith("）")) {
         drop("system-hint");
         continue;
       }
 
-      // ③ 記憶召回知識塊（gateway 每回合注入的語料前綴）：從用戶文本剝掉，
-      // 只留用戶真正說的話。剝完空文本且無附件 → 整條不留。
+      // ③ 记忆召回知识块（gateway 每回合注入的语料前缀）：从用户文本剥掉，
+      // 只留用户真正说的话。剥完空文本且无附件 → 整条不留。
       const userText = stripRecallBlock(text);
       if (userText !== text && userText.trim().length === 0 && attachments.length === 0) {
         drop("recall-block");
         continue;
       }
-      if (userText.length === 0 && attachments.length === 0) continue; // 全丟光的空輪不留言
+      if (userText.length === 0 && attachments.length === 0) continue; // 全丢光的空轮不留言
       order += 1;
       userCount += 1;
       const item: AgentUserTurnItem = {
         kind: "user",
-        // user id 鏡像 reducer 的 `user-<該 kind 已有條目數>`：後續樂觀
-        // 插入沿同一計數續號，不撞 React key。
+        // user id 镜像 reducer 的 `user-<该 kind 已有条目数>`：后续乐观
+        // 插入沿同一计数续号，不撞 React key。
         id: `user-${userCount - 1}`,
         seq: order,
         text: userText,
@@ -379,18 +379,18 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
     }
 
     if (role !== "assistant") {
-      // 未知角色（髒資料）：整則跳過，逐 part 計數留痕。
+      // 未知角色（脏资料）：整则跳过，逐 part 计数留痕。
       for (let i = 0; i < parts.length; i += 1) drop("unknown-role");
       continue;
     }
 
-    // assistant：text/reasoning 順次累積；遇到 tool/file 先打斷成卡，
-    // 保持「文字→工具→文字→圖」的原始時序。
+    // assistant：text/reasoning 顺次累积；遇到 tool/file 先打断成卡，
+    // 保持「文字→工具→文字→图」的原始时序。
     let pendingText: string[] = [];
     let pendingReasoning: string[] = [];
     const flush = (): void => {
-      // 內部框架段剝離（live 路徑 gateway 出站已剝、歷史路徑此前漏）：
-      // `## Objective` 等模型工作狀態骨架不得當正文渲染。
+      // 内部框架段剥离（live 路径 gateway 出站已剥、历史路径此前漏）：
+      // `## Objective` 等模型工作状态骨架不得当正文渲染。
       const text = stripInternalSections(pendingText.join("\n"));
       const reasoning = pendingReasoning.join("\n");
       pendingText = [];
@@ -402,9 +402,9 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         id: `assistant-h${order}`,
         seq: order,
         text,
-        // 歷史已定案：false，讓後續增量的 message.delta 開新條目而不是
-        // 往殭屍氣泡裡續字。（進行中 turn 的尾巴由 SSE 增量重開新泡，
-        // 代價是氣泡分裂，好過詐尸流式。）
+        // 历史已定案：false，让后续增量的 message.delta 开新条目而不是
+        // 往僵尸气泡里续字。（进行中 turn 的尾巴由 SSE 增量重开新泡，
+        // 代价是气泡分裂，好过诈尸流式。）
         streaming: false,
       };
       if (reasoning.length > 0) item.reasoning = reasoning;
@@ -455,8 +455,8 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         continue;
       }
       if (type === "file") {
-        // 媒體卡會切斷文字段落（同 tool 的處理）：否則卡在先、其前面的
-        // 文字在訊息尾聲才 flush，時序就顛倒了。
+        // 媒体卡会切断文字段落（同 tool 的处理）：否则卡在先、其前面的
+        // 文字在讯息尾声才 flush，时序就颠倒了。
         flush();
         if (!isPublicUrl(part.url)) {
           drop("file-no-public-url");
@@ -470,7 +470,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
           continue;
         }
         const dedupeKey = `${kind}:${part.url}`;
-        if (seenMedia.has(dedupeKey)) continue; // 鏡像 reducer 的同 url 去重守衛
+        if (seenMedia.has(dedupeKey)) continue; // 镜像 reducer 的同 url 去重守卫
         seenMedia.add(dedupeKey);
         order += 1;
         if (kind === "image") {
@@ -479,7 +479,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
           items.push(item);
         } else if (kind === "video") {
           videoSeq += 1;
-          // mediaKind 欄位（"film"/"video"）歷史無從判定，缺省按 "video" 展示。
+          // mediaKind 栏位（"film"/"video"）历史无从判定，缺省按 "video" 展示。
           const item: AgentVideoItem = { kind: "video", id: `video-h${order}`, seq: videoSeq, url: part.url };
           items.push(item);
         } else {
@@ -489,7 +489,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         }
         continue;
       }
-      // step-start / step-finish / patch / snapshot 等 opencode 內部片段：跳過計數。
+      // step-start / step-finish / patch / snapshot 等 opencode 内部片段：跳过计数。
       drop(type);
     }
     flush();

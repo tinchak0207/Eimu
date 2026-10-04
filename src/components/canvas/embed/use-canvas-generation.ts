@@ -1,11 +1,11 @@
 /**
- * use-canvas-generation —— CanvasEmbed 生成編排域（自 CanvasEmbed.tsx L621-1002 機械搬遷，符號/依賴陣列不變）：
+ * use-canvas-generation —— CanvasEmbed 生成编排域（自 CanvasEmbed.tsx L621-1002 机械搬迁，符号/依赖阵列不变）：
  *   callCanvasGenerate → generateIntoNode → handleGenerateFromNode → stopGeneration/retryNode/upscaleNode → runAgentGeneration。
- * 2026-09-28 新增節點動作 extractFramesFromNode（影片節點「截帧／序列帧」：計劃走 /api/canvas/video-frames，
- * 像素走 video-frames.ts 的 extractFramesAtTimes，產物落成畫布圖片節點）。
- * P2 掛接點：鎖定的角色/場景卡在 callCanvasGenerate 注入——手動面板、agent run_generation、
- * 編輯器派生全部經過這一條路，保證項目級鎖定對所有畫布生成生效。
- * 認證立場：生成/超分走 Bearer + x-user-id，未登入誠實報錯。
+ * 2026-09-28 新增节点动作 extractFramesFromNode（影片节点「截帧／序列帧」：计划走 /api/canvas/video-frames，
+ * 像素走 video-frames.ts 的 extractFramesAtTimes，产物落成画布图片节点）。
+ * P2 挂接点：锁定的角色/场景卡在 callCanvasGenerate 注入——手动面板、agent run_generation、
+ * 编辑器派生全部经过这一条路，保证项目级锁定对所有画布生成生效。
+ * 认证立场：生成/超分走 Bearer + x-user-id，未登入诚实报错。
  */
 import { useCallback, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
@@ -48,12 +48,12 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 /**
- * 行內 @ 引用 → 本鏡參考集收窄覆寫（純函數，唯一推導入口；面板批次與原地生成共用同一契約）。
- *   - entityCardIds 缺省/空 → undefined（不覆寫＝既有全量鎖定行為）
- *   - 有 id 但全對不到卡 → undefined（**刻意**：收窄到空集合會讓參考圖靜默全空，
- *     比不收窄更壞；退回既有全量行為）
- *   - 命中 → { cards, referenceScope: "referenced" }，卡順序沿用 cards 原序（不重排；
- *     注入端穩定序由 applyCharacterCards 負責）
+ * 行内 @ 引用 → 本镜参考集收窄覆写（纯函数，唯一推导入口；面板批次与原地生成共用同一契约）。
+ *   - entityCardIds 缺省/空 → undefined（不覆写＝既有全量锁定行为）
+ *   - 有 id 但全对不到卡 → undefined（**刻意**：收窄到空集合会让参考图静默全空，
+ *     比不收窄更坏；退回既有全量行为）
+ *   - 命中 → { cards, referenceScope: "referenced" }，卡顺序沿用 cards 原序（不重排；
+ *     注入端稳定序由 applyCharacterCards 负责）
  */
 export function resolveEntityCardsOverride(
   cards: CharacterCard[],
@@ -66,13 +66,13 @@ export function resolveEntityCardsOverride(
 }
 
 /**
- * 專案風格綁定注入（P1-8／對稱差 D34）：與同檔 LoRA 段同款 merge（`{ ...payload, key: value }`）。
- *   - `payload` 尚未帶 `style_id` 且有專案綁定 → 帶上（值＝`CanvasProject.styleId`）；
- *   - 無綁定（undefined／空字串）→ 原物件逐位不變，**不新增 `style_id` 鍵**（不得塞 undefined
- *     或空字串；route 端「無 id ⇒ prompt 逐位零回歸」的契約靠這個保證）。
- *   - 已帶 `style_id`（呼叫端顯式給定）→ 不覆寫。
- * 抽成純函式：本檔的請求組裝只有這一條路徑，抽出後可對「請求真的帶了風格」作真行為斷言
- * （本 repo 測試範式是 node:test + 純函式，無 React renderer）。行為與行內 merge 逐位等價。
+ * 专案风格绑定注入（P1-8／对称差 D34）：与同档 LoRA 段同款 merge（`{ ...payload, key: value }`）。
+ *   - `payload` 尚未带 `style_id` 且有专案绑定 → 带上（值＝`CanvasProject.styleId`）；
+ *   - 无绑定（undefined／空字串）→ 原物件逐位不变，**不新增 `style_id` 键**（不得塞 undefined
+ *     或空字串；route 端「无 id ⇒ prompt 逐位零回归」的契约靠这个保证）。
+ *   - 已带 `style_id`（呼叫端显式给定）→ 不覆写。
+ * 抽成纯函式：本档的请求组装只有这一条路径，抽出后可对「请求真的带了风格」作真行为断言
+ * （本 repo 测试范式是 node:test + 纯函式，无 React renderer）。行为与行内 merge 逐位等价。
  */
 export function withProjectStyleId<T extends Record<string, unknown>>(
   payload: T,
@@ -83,24 +83,24 @@ export function withProjectStyleId<T extends Record<string, unknown>>(
 }
 
 export interface UseCanvasGenerationInput {
-  /** canvas 最新值鏡像 ref（由組件殼持有並傳入）。 */
+  /** canvas 最新值镜像 ref（由组件壳持有并传入）。 */
   canvasStateRef: RefObject<UseCanvasChatReturn>;
-  /** 視口尺寸鏡像 ref（生成後 fitView 用）。 */
+  /** 视口尺寸镜像 ref（生成后 fitView 用）。 */
   viewportSizeRef: RefObject<{ width: number; height: number }>;
-  /** 錯誤提示（交互域 hook 回傳）。 */
+  /** 错误提示（交互域 hook 回传）。 */
   showError: (message: string) => void;
-  /** 生成面板選中的參考圖節點 id。 */
+  /** 生成面板选中的参考图节点 id。 */
   panelRefIds: string[];
   setPromptPanelNodeId: Dispatch<SetStateAction<string | null>>;
   setPanelRefIds: Dispatch<SetStateAction<string[]>>;
-  /** 生成面板行內 @ 引用的素材卡 id（生成落地後清空；與 setPanelRefIds 同款）。 */
+  /** 生成面板行内 @ 引用的素材卡 id（生成落地后清空；与 setPanelRefIds 同款）。 */
   setPanelEntityIds?: Dispatch<SetStateAction<string[]>>;
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
-  /** 當前選中的 LoRA（2026-08-27 自專業工作站遷入；null = 不帶）。 */
+  /** 当前选中的 LoRA（2026-08-27 自专业工作站迁入；null = 不带）。 */
   selectedLora?: SelectedLora | null;
 }
 
-/** 生成編排域回傳：狀態 + handlers（消費端：組件殼 / menuItems 工廠 / 節點掛載）。 */
+/** 生成编排域回传：状态 + handlers（消费端：组件壳 / menuItems 工厂 / 节点挂载）。 */
 export function useCanvasGeneration({
   canvasStateRef,
   viewportSizeRef,
@@ -115,17 +115,17 @@ export function useCanvasGeneration({
   const [isGenerating, setIsGenerating] = useState(false);
   const [upscalingIds, setUpscalingIds] = useState<Set<string>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
-  // 最新 LoRA 鏡像 ref：callCanvasGenerate 的 useCallback 不因 LoRA 選擇換身份。
+  // 最新 LoRA 镜像 ref：callCanvasGenerate 的 useCallback 不因 LoRA 选择换身份。
   const selectedLoraRef = useRef(selectedLora);
   selectedLoraRef.current = selectedLora;
 
   /**
-   * 生成唯一出口。第三參數（可選）＝本鏡參考集覆寫：
-   *   - 不傳：逐位元既有行為（用 canvasStateRef 的 activeCharacterCards 全量注入）
-   *   - 傳：用指定的卡子集注入，並把 referenceScope 交給 applyCharacterCardsToPayload
-   *     （"referenced" = 本鏡只行內 @ 引用了這幾張卡，其餘鎖定卡不進本鏡）
-   * 卡集最後再併入**本段 prompt token 引用到的卡**（mergeTokenReferencedCards：卡在庫即可
-   * 被 @ 引用，不必先手動鎖定；零 token／全未命中＝同一陣列參考，逐位元等價）。
+   * 生成唯一出口。第三参数（可选）＝本镜参考集覆写：
+   *   - 不传：逐位元既有行为（用 canvasStateRef 的 activeCharacterCards 全量注入）
+   *   - 传：用指定的卡子集注入，并把 referenceScope 交给 applyCharacterCardsToPayload
+   *     （"referenced" = 本镜只行内 @ 引用了这几张卡，其余锁定卡不进本镜）
+   * 卡集最后再并入**本段 prompt token 引用到的卡**（mergeTokenReferencedCards：卡在库即可
+   * 被 @ 引用，不必先手动锁定；零 token／全未命中＝同一阵列参考，逐位元等价）。
    */
   const callCanvasGenerate = useCallback(
     async (
@@ -136,10 +136,10 @@ export function useCanvasGeneration({
       const headers = buildAuthHeaders(true);
       if (!headers) throw new Error("请先登录再生成图片");
       const baseCards = cardsOverride?.cards ?? canvasStateRef.current.activeCharacterCards ?? [];
-      // 本段提示詞 token 就地解析（2026-09-25）：卡在庫即可被 @ 引用，不必先手動鎖定——
-      // 把命中 token 的卡併入注入集（聯集，不自動鎖定、不改鎖定語義）。
-      // 顯式關閉注入（cards: []，資產重生成那條路）＝不併入：該 payload 的參考圖已顯式給定，
-      // 再注入一次會把「要被換掉的那張圖」同時當參考（把錯誤傳染給新圖）。
+      // 本段提示词 token 就地解析（2026-09-25）：卡在库即可被 @ 引用，不必先手动锁定——
+      // 把命中 token 的卡并入注入集（联集，不自动锁定、不改锁定语义）。
+      // 显式关闭注入（cards: []，资产重生成那条路）＝不并入：该 payload 的参考图已显式给定，
+      // 再注入一次会把「要被换掉的那张图」同时当参考（把错误传染给新图）。
       const explicitOff = !!cardsOverride && cardsOverride.cards.length === 0;
       const promptText = typeof payload.prompt === "string" ? payload.prompt : "";
       const lockedCards = explicitOff
@@ -148,7 +148,7 @@ export function useCanvasGeneration({
       let finalPayload: Record<string, unknown> = lockedCards.length
         ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[], cardsOverride ? { referenceScope: cardsOverride.referenceScope } : undefined)
         : payload;
-      // 2026-08-27 LoRA 注入（自專業工作站等價接線）：模型支援才帶，單選鐵律一個 id。
+      // 2026-08-27 LoRA 注入（自专业工作站等价接线）：模型支援才带，单选铁律一个 id。
       const lora = selectedLoraRef.current;
       if (lora) {
         const modelId = typeof finalPayload.model === "string" && finalPayload.model ? finalPayload.model : undefined;
@@ -157,8 +157,8 @@ export function useCanvasGeneration({
           finalPayload = { ...finalPayload, loraModelVersionIds: [lora.versionId] };
         }
       }
-      // 專案風格綁定注入（P1-8／對稱差 D34）：呼叫端帶 id 進 route（route 端只做 id→全文素材化，
-      // 不自行讀 CanvasProject.styleId，見 route:202-206）；無綁定＝不新增鍵（逐位零回歸）。
+      // 专案风格绑定注入（P1-8／对称差 D34）：呼叫端带 id 进 route（route 端只做 id→全文素材化，
+      // 不自行读 CanvasProject.styleId，见 route:202-206）；无绑定＝不新增键（逐位零回归）。
       finalPayload = withProjectStyleId(finalPayload, canvasStateRef.current.styleId);
       const res = await fetch(`/api/canvas/generate`, {
         method: "POST",
@@ -178,11 +178,11 @@ export function useCanvasGeneration({
   );
 
   /**
-   * 原地生成：結果回填該節點本體（A4 / A12 重試 / agent run_generation 共用）。
-   * 語義接線（2026-08-22）：連入的 prompt 節點文本自動作為 prompt 前綴、
-   * 連入的 reference 節點自動帶圖+角色進生成請求——手動 UI 與 agent 同一條路。
-   * entityCardIds（可選，2026-09-24 WS6）：本鏡正文行內 @ 引用過的素材卡 id——非空且
-   * 命中時把參考集收窄到這批（referenceScope "referenced"）；缺省/全 miss＝既有全量行為。
+   * 原地生成：结果回填该节点本体（A4 / A12 重试 / agent run_generation 共用）。
+   * 语义接线（2026-08-22）：连入的 prompt 节点文本自动作为 prompt 前缀、
+   * 连入的 reference 节点自动带图+角色进生成请求——手动 UI 与 agent 同一条路。
+   * entityCardIds（可选，2026-09-24 WS6）：本镜正文行内 @ 引用过的素材卡 id——非空且
+   * 命中时把参考集收窄到这批（referenceScope "referenced"）；缺省/全 miss＝既有全量行为。
    */
   const generateIntoNode = useCallback(
     async (
@@ -203,7 +203,7 @@ export function useCanvasGeneration({
       const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
       const finalPrompt = composeGenerationPrompt(semantic.promptParts, params.prompt);
       const references = mergeGenerationReferences(params.references ?? [], semantic.references);
-      // 回分鏡溯源（P1-1）：連入的 scene_3d 舞台 → 記下 directorStageId/shotId（讀得回）。
+      // 回分镜溯源（P1-1）：连入的 scene_3d 舞台 → 记下 directorStageId/shotId（读得回）。
       const sceneTrace = resolveSceneDirectorReferences(state.nodes, state.connections, nodeId).trace;
       const traceMetadata = sceneDirectorTraceMetadata(sceneTrace);
       const cardsOverride = resolveEntityCardsOverride(state.activeCharacterCards, params.entityCardIds);
@@ -234,7 +234,7 @@ export function useCanvasGeneration({
           {
             content: img.url,
             status: "success",
-            // 含 imageTaskId（LOD3 工程透析的 job 指針）；legacy 無 job＝清掉舊指針。
+            // 含 imageTaskId（LOD3 工程透析的 job 指针）；legacy 无 job＝清掉旧指针。
             ...generatedImageMetadata(img),
           },
           { history: false },
@@ -256,9 +256,9 @@ export function useCanvasGeneration({
   );
 
   /**
-   * 面板生成：空圖片節點 count=1 原地回填；其餘批次子節點插回。
-   * entityCardIds（可選）：本鏡正文行內 @ 引用過的素材卡 id——非空時把本鏡的卡注入
-   * 收窄到這幾張（referenceScope "referenced"）；缺省不傳＝既有全量鎖定行為逐位元不變。
+   * 面板生成：空图片节点 count=1 原地回填；其余批次子节点插回。
+   * entityCardIds（可选）：本镜正文行内 @ 引用过的素材卡 id——非空时把本镜的卡注入
+   * 收窄到这几张（referenceScope "referenced"）；缺省不传＝既有全量锁定行为逐位元不变。
    */
   const handleGenerateFromNode = useCallback(
     async (
@@ -270,7 +270,7 @@ export function useCanvasGeneration({
       const node = state.nodes.find((n) => n.id === nodeId);
       if (!node) return;
       const cardsOverride = resolveEntityCardsOverride(state.activeCharacterCards, options.entityCardIds);
-      // @引用（顯式選取）+ 連入 reference 節點（自動帶入）→ 帶角色的參考圖清單。
+      // @引用（显式选取）+ 连入 reference 节点（自动带入）→ 带角色的参考图清单。
       const panelRefs: CanvasGenerationReference[] = panelRefIds
         .map((id) => state.nodes.find((n) => n.id === id))
         .filter((n): n is CanvasNode => !!n && !!imageUrlOf(n))
@@ -287,7 +287,7 @@ export function useCanvasGeneration({
       const count = Math.min(Math.max(1, options.count ?? 1), 4);
       const sourceUrl = imageUrlOf(node);
 
-      // A4：空圖片節點 + 單張 → 原地變身，不另建節點。
+      // A4：空图片节点 + 单张 → 原地变身，不另建节点。
       if (node.type === CanvasNodeType.Image && !sourceUrl && count === 1) {
         setPromptPanelNodeId(null);
         await generateIntoNode(nodeId, { prompt, model: options.model, size: options.size, references, entityCardIds: options.entityCardIds });
@@ -348,7 +348,7 @@ export function useCanvasGeneration({
     abortRef.current?.abort();
   }, []);
 
-  /** A12：失敗重試——沿用節點 metadata 保存的參數，結果回填原節點。 */
+  /** A12：失败重试——沿用节点 metadata 保存的参数，结果回填原节点。 */
   const retryNode = useCallback(
     (nodeId: string) => {
       const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);

@@ -15,7 +15,7 @@ const state = () => ({
 })
 
 describe("canvas_get_state summary", () => {
-  test("大畫布摘要 <50KB，連線只回數量，計數正確", () => {
+  test("大画布摘要 <50KB，连线只回数量，计数正确", () => {
     const r: any = buildCanvasReceipt(state())
     expect(JSON.stringify(r).length).toBeLessThan(50_000)
     expect(r.node_count).toBe(342)
@@ -25,24 +25,24 @@ describe("canvas_get_state summary", () => {
     expect(r.by_status).toEqual({ success: 341, error: 1 })
     expect(r.selected_node_ids).toEqual(["n1"])
   })
-  test("失敗資訊完整保留", () => {
+  test("失败资讯完整保留", () => {
     const r: any = buildCanvasReceipt(state())
     expect(r.failed_node_ids).toEqual(["n7"])
     expect(r.nodes[7].metadata.error.length).toBeGreaterThan(600)
     expect(r.nodes[7].metadata.junk).toBeUndefined()
   })
-  test("node_id 取單點含上下游；不存在回 found:false", () => {
+  test("node_id 取单点含上下游；不存在回 found:false", () => {
     const r: any = buildCanvasReceipt(state(), { nodeId: "n5" })
     expect(r.node.id).toBe("n5")
     expect(r.upstream.length).toBeGreaterThan(0)
     expect((buildCanvasReceipt(state(), { nodeId: "nope" }) as any).found).toBe(false)
   })
-  test("view=full 回全量壓縮狀態（含連線）", () => {
+  test("view=full 回全量压缩状态（含连线）", () => {
     const r: any = buildCanvasReceipt(state(), { view: "full" })
     expect(r.state.connections.length).toBe(1213)
     expect(r.state.nodes.length).toBe(342)
   })
-  test("空/壞輸入不拋", () => {
+  test("空/坏输入不抛", () => {
     expect((buildCanvasReceipt(null) as any).node_count).toBe(0)
   })
 })

@@ -43,5 +43,5 @@ export function getUseCaseCategory(slug: string): UseCaseCategory | undefined {
   return USE_CASE_CATEGORIES.find((item) => item.slug === slug);
 }
 
-/** 舊門頁前綴 → 行業 slug（next.config.mjs 的 301 用同一份清單）。 */
+/** 旧门页前缀 → 行业 slug（next.config.mjs 的 301 用同一份清单）。 */
 export const LEGACY_CATEGORY_PREFIXES = USE_CASE_CATEGORIES.map((item) => item.slug);

@@ -51,7 +51,7 @@ export default tool({
       if (q) params.set("q", q)
       params.set("limit", String(limit))
 
-      // 打站點本體 /api/biz/*（不經 /v1 控制面改寫：控制面那棵樹沒有角色卡路由）。
+      // 打站点本体 /api/biz/*（不经 /v1 控制面改写：控制面那棵树没有角色卡路由）。
       const resp = await siteFetch(
         `/api/biz/character-cards?${params.toString()}`,
         { method: "GET" },

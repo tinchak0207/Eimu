@@ -1,35 +1,35 @@
-// 畫布語義節點（prompt / reference）的純邏輯：
+// 画布语义节点（prompt / reference）的纯逻辑：
 //
-//   - resolveGenerationInputs：沿「入邊」收集連到生成節點的 prompt 節點文本、
-//     reference 節點圖片（含角色），以及 3D 場景卡（scene_3d）的白模/靜態圖參考
-//     （P1-1 參考綁定），供手動 UI 與 agent run_generation 共用，保證兩條路徑的
-//     接線語義完全一致。
-//   - composeGenerationPrompt：prompt 節點文本作為前綴，與面板正文合成最終 prompt。
-//   - mergeGenerationReferences：手動 @引用 與連線自動帶入的參考圖按 nodeId 去重合併。
+//   - resolveGenerationInputs：沿「入边」收集连到生成节点的 prompt 节点文本、
+//     reference 节点图片（含角色），以及 3D 场景卡（scene_3d）的白模/静态图参考
+//     （P1-1 参考绑定），供手动 UI 与 agent run_generation 共用，保证两条路径的
+//     接线语义完全一致。
+//   - composeGenerationPrompt：prompt 节点文本作为前缀，与面板正文合成最终 prompt。
+//   - mergeGenerationReferences：手动 @引用 与连线自动带入的参考图按 nodeId 去重合并。
 //
-// 角色枚舉 owner 是 image-types.ReferenceImageRole；這裡只做純函式，不建第二套。
+// 角色枚举 owner 是 image-types.ReferenceImageRole；这里只做纯函式，不建第二套。
 import { CanvasNodeType } from "./types";
 import type { CanvasConnection, CanvasNode } from "./types";
 import { toReferenceImageRole } from "../image-types";
 import type { ReferenceImageRole } from "../image-types";
 import { sceneCardGenerationReferences } from "./scene-3d-reference";
 
-/** 畫布參考圖的傳輸形狀（CanvasEmbed → /api/canvas/generate）。 */
+/** 画布参考图的传输形状（CanvasEmbed → /api/canvas/generate）。 */
 export interface CanvasGenerationReference {
-  /** 來源節點 id（去重用；API 直傳的參考可省略）。 */
+  /** 来源节点 id（去重用；API 直传的参考可省略）。 */
   nodeId?: string;
   url: string;
   role: ReferenceImageRole;
   name: string;
 }
 
-/** 圖片 URL 判定：http(s) 與 data:image（與 /api/canvas/generate 的收口一致）。 */
+/** 图片 URL 判定：http(s) 与 data:image（与 /api/canvas/generate 的收口一致）。 */
 function isUsableImageUrl(url: string | undefined | null): url is string {
   if (!url) return false;
   return url.startsWith("http") || url.startsWith("data:image/");
 }
 
-/** 節點的可作為參考圖的 URL（image / reference 節點）。 */
+/** 节点的可作为参考图的 URL（image / reference 节点）。 */
 export function referenceImageUrlOf(node: CanvasNode | undefined): string | null {
   const content = node?.metadata?.content;
   if (!content) return null;
@@ -38,19 +38,19 @@ export function referenceImageUrlOf(node: CanvasNode | undefined): string | null
 }
 
 export interface GenerationSemanticInputs {
-  /** 連入的 prompt 節點文本（連線順序，已過濾空文本）。 */
+  /** 连入的 prompt 节点文本（连线顺序，已过滤空文本）。 */
   promptParts: string[];
-  /** 連入的 reference 節點（url + 角色 + 標題）。 */
+  /** 连入的 reference 节点（url + 角色 + 标题）。 */
   references: CanvasGenerationReference[];
 }
 
 /**
- * 收集 targetNodeId 的入邊語義輸入：
- *   - prompt 節點 → 文本進 promptParts（作為前綴）
- *   - reference 節點 → 圖 + 角色進 references
- *   - scene_3d 節點 → sceneCard 白模/靜態圖進 references（P1-1 參考綁定；走
- *     `sceneCardGenerationReferences` 的既有參考卡輪子，previz→composition）
- * 普通 image / text 節點不自動帶入（維持 @引用 的顯式選取語義）。
+ * 收集 targetNodeId 的入边语义输入：
+ *   - prompt 节点 → 文本进 promptParts（作为前缀）
+ *   - reference 节点 → 图 + 角色进 references
+ *   - scene_3d 节点 → sceneCard 白模/静态图进 references（P1-1 参考绑定；走
+ *     `sceneCardGenerationReferences` 的既有参考卡轮子，previz→composition）
+ * 普通 image / text 节点不自动带入（维持 @引用 的显式选取语义）。
  */
 export function resolveGenerationInputs(
   nodes: CanvasNode[],
@@ -68,7 +68,7 @@ export function resolveGenerationInputs(
       const text = (from.metadata?.content ?? "").trim();
       if (text) promptParts.push(text);
     } else if (from.type === CanvasNodeType.Scene3d) {
-      // 3D 場景卡：白模/靜態圖 → 生成參考（首張帶 nodeId 作回分鏡指針，其餘靠 url 去重）。
+      // 3D 场景卡：白模/静态图 → 生成参考（首张带 nodeId 作回分镜指针，其余靠 url 去重）。
       references.push(...sceneCardGenerationReferences(from));
     } else if (from.type === CanvasNodeType.Reference) {
       const url = referenceImageUrlOf(from);
@@ -86,8 +86,8 @@ export function resolveGenerationInputs(
 }
 
 /**
- * 合成最終生成 prompt：prompt 節點文本在前（前綴），面板正文在後。
- * 無前綴時原文返回（不動舊路徑的請求位元組）。
+ * 合成最终生成 prompt：prompt 节点文本在前（前缀），面板正文在后。
+ * 无前缀时原文返回（不动旧路径的请求位元组）。
  */
 export function composeGenerationPrompt(promptParts: string[], basePrompt: string): string {
   const prefix = promptParts.map((p) => p.trim()).filter(Boolean).join("\n");
@@ -97,8 +97,8 @@ export function composeGenerationPrompt(promptParts: string[], basePrompt: strin
 }
 
 /**
- * 合併參考圖清單：primary 在前（手動 @引用 的顯式意圖優先），
- * 按 nodeId（有則）或 url 去重，連線自動帶入的排其後。
+ * 合并参考图清单：primary 在前（手动 @引用 的显式意图优先），
+ * 按 nodeId（有则）或 url 去重，连线自动带入的排其后。
  */
 export function mergeGenerationReferences(
   primary: CanvasGenerationReference[],

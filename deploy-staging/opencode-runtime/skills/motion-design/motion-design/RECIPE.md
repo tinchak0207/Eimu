@@ -3,11 +3,11 @@ name: motion-design
 description: Use this skill whenever motion, animation, timing, easing, or composition over time is the subject. Triggers on "animate", "motion", "easing", "timing", "keyframe", "transition", "stagger", "loop", "bounce", "overshoot", "follow-through", "anticipation", "12 principles", "motion hierarchy", "composition for motion". Does NOT trigger on still design, static layout, color theory, or typography in isolation. Pair with aftereffects-motion or blender-motion when a tool is named. Load this first; specialists layer on top.
 ---
 <!--
-來源（輪子）: https://github.com/LobzyJay/motion-design-with-claude
-License: MIT · 原作者: LobzyJay · 僅內部使用
-入庫批次: 2026-09-06 對稱差擴容 W5（動態設計）。
-Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
-正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
+来源（轮子）: https://github.com/LobzyJay/motion-design-with-claude
+License: MIT · 原作者: LobzyJay · 仅内部使用
+入库批次: 2026-09-06 对称差扩容 W5（动态设计）。
+Blender 5.2 雷区（仅 Blender 类配方适用）：① BLENDER_EEVEE_NEXT 已死，只认 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 为默认 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
+正文保留英文原文；MCP 调用表述执行时改走我方 bridge /v1/execute 同构协议。
 -->
 
 

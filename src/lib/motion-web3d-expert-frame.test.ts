@@ -12,7 +12,7 @@
  *   3. 宪法注入：OFF 一个字不多 / ON 样本串注入（DI，不读真档）/
  *      载入失败结构化报错拒绝裸奔 / OFF 不触碰档案
  *   4. 交付物：合法通过 / 缺 qc 拒 / no_output / 篡改与 kind 钉死
- *   5. routeExpert：provisioned 行不可路由（佔位语义不回归）
+ *   5. routeExpert：provisioned 行不可路由（占位语义不回归）
  */
 
 import test from "node:test";
@@ -118,7 +118,7 @@ function web3dOkToolResult(): { title: string; output: string } {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 組A：motion-director
+// 组A：motion-director
 // ════════════════════════════════════════════════════════════════════════════
 
 test("motion：PERSONA_ID / LABEL / DESCRIPTION / token 帽钉死", () => {
@@ -138,7 +138,7 @@ test("motion persona 工具白名单：每个 id 都真实存在于 harness-tool
   for (const toolId of MOTION_DIRECTOR_PERSONA_TOOL_IDS) {
     assert.ok(
       HARNESS_TOOL_ID_LIST.includes(toolId),
-      `persona 工具 "${toolId}" 不在 harness-tool-registry 真源內（幻影工具）`,
+      `persona 工具 "${toolId}" 不在 harness-tool-registry 真源内（幻影工具）`,
     );
   }
 });
@@ -150,9 +150,9 @@ test("motion persona 工具白名单 id 与 harness 真源行号逐一对账（�
   // - blender-tools.ts：blender_exec L503 / blender_render L587 /
   //   blender_export_gltf L795（id: 字面量），L853 BLENDER_HARNESS_TOOL_IDS
   //   经 harness-tool-registry L36 spread 登记进 HARNESS_TOOL_ID_LIST。
-  // 2026-09-28：harness-tool-registry.ts 因档头诚实註記 +10 行、新增 4 支影片工具
+  // 2026-09-28：harness-tool-registry.ts 因档头诚实注记 +10 行、新增 4 支影片工具
   // 而整体位移（keyframe_render 79→89、image_quote 76→86）；blender-tools.ts 未动。
-  // 2026-10-03：人机共笔三件登记 + 档头註記更新，再次自愿增行 → keyframe_render 89→91、
+  // 2026-10-03：人机共笔三件登记 + 档头注记更新，再次自愿增行 → keyframe_render 89→91、
   // image_quote 86→88；blender-tools.ts 仍未动。
   const harnessLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
   const blenderLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"), "utf8").split("\n");
@@ -182,7 +182,7 @@ test("motion persona 工具白名单 id 与 harness 真源行号逐一对账（�
     assert.equal(lineOf(blenderLines, id), line, `blender-tools.ts 中 "${id}" 行号漂移`);
     assert.ok(
       (BLENDER_HARNESS_TOOL_IDS as readonly string[]).includes(id),
-      `"${id}" 不在 BLENDER_HARNESS_TOOL_IDS 登记集內`,
+      `"${id}" 不在 BLENDER_HARNESS_TOOL_IDS 登记集内`,
     );
   }
 });
@@ -301,9 +301,9 @@ test("motion OFF：readBeastMode({})=false，委派 prompt 不含宪法特征句
   assert.ok(r.prompt.includes("动态规格："));
   // 宪法特征句一个字不多（繁体宪法原文不出现在 OFF 输出）
   assert.equal(r.prompt.includes("诚实铁律"), false);
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("motion ON：宪法经 loadConstitution DI 注入头部（样本串，不读真档）", () => {
@@ -338,7 +338,7 @@ test("motion ON：beastMode 布林由 caller 传入（readBeastMode true → 默
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.ok(r.prompt.startsWith(constitution), "宪法原文必须逐字注入 prompt 头");
-  assert.ok(r.prompt.indexOf("Expert 憲法") < r.prompt.indexOf("动态设计委托单"));
+  assert.ok(r.prompt.indexOf("Expert 宪法") < r.prompt.indexOf("动态设计委托单"));
 });
 
 test("motion ON：宪法载入失败结构化报错（constitution_unavailable，拒绝裸奔不静默降级）", () => {
@@ -480,7 +480,7 @@ test("motion persona 组装：assembleMotionDirectorReply 合法回传 deliverab
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// 組B：web3d-director
+// 组B：web3d-director
 // ════════════════════════════════════════════════════════════════════════════
 
 test("web3d：PERSONA_ID / LABEL / DESCRIPTION / token 帽钉死", () => {
@@ -501,7 +501,7 @@ test("web3d persona 工具白名单：每个 id 都真实存在于 harness-tool-
   for (const toolId of WEB3D_DIRECTOR_PERSONA_TOOL_IDS) {
     assert.ok(
       HARNESS_TOOL_ID_LIST.includes(toolId),
-      `persona 工具 "${toolId}" 不在 harness-tool-registry 真源內（幻影工具）`,
+      `persona 工具 "${toolId}" 不在 harness-tool-registry 真源内（幻影工具）`,
     );
   }
 });
@@ -510,7 +510,7 @@ test("web3d persona 工具白名单 id 与 harness 真源行号逐一对账（�
   // 行号考古（现场实测，2026-09-08）：blender-tools.ts blender_export_gltf L795
   // （id: 字面量；L853 BLENDER_HARNESS_TOOL_IDS 经 harness-tool-registry L36
   // spread）、harness-tool-registry.ts image_quote L76。
-  // 2026-09-28：image_quote 76→86（registry 档头註記 +10 行；blender-tools.ts 未动）。
+  // 2026-09-28：image_quote 76→86（registry 档头注记 +10 行；blender-tools.ts 未动）。
   // 2026-10-03：人机共笔三件登记 → image_quote 86→88（blender-tools.ts 未动）。
   const harnessLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
   const blenderLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"), "utf8").split("\n");
@@ -642,9 +642,9 @@ test("web3d OFF：readBeastMode({})=false，委派 prompt 不含宪法特征句"
   assert.ok(r.prompt.includes("Web3D 委托单"));
   assert.ok(r.prompt.includes("场景规格："));
   assert.equal(r.prompt.includes("诚实铁律"), false);
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("web3d ON：宪法经 loadConstitution DI 注入头部（样本串，不读真档）", () => {
@@ -677,7 +677,7 @@ test("web3d ON：beastMode 布林由 caller 传入（readBeastMode true → 默�
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.ok(r.prompt.startsWith(constitution), "宪法原文必须逐字注入 prompt 头");
-  assert.ok(r.prompt.indexOf("Expert 憲法") < r.prompt.indexOf("Web3D 委托单"));
+  assert.ok(r.prompt.indexOf("Expert 宪法") < r.prompt.indexOf("Web3D 委托单"));
 });
 
 test("web3d ON：宪法载入失败结构化报错（constitution_unavailable，拒绝裸奔不静默降级）", () => {

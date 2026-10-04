@@ -1,14 +1,14 @@
-// SKU run 編排服務：run_id 管理、可插拔發射器、run 聚合查詢與視圖構建。
+// SKU run 编排服务：run_id 管理、可插拔发射器、run 聚合查询与视图构建。
 //
-// 鐵律：不自建第二套提交/計費/鑑權——每個鏡頭都走同一條 submitGenerationCommand
-// （冪等鍵逐鏡頭生成），鑑權/限流在路由層復用既有 biz-api 模式。
+// 铁律：不自建第二套提交/计费/鉴权——每个镜头都走同一条 submitGenerationCommand
+// （幂等键逐镜头生成），鉴权/限流在路由层复用既有 biz-api 模式。
 //
-// run 的狀態存儲論證（為什麼「無狀態優先」成立）：
-// run_id 不落新表——它就是冪等鍵根。每個鏡頭任務帶確定性冪等鍵
+// run 的状态存储论证（为什么「无状态优先」成立）：
+// run_id 不落新表——它就是幂等键根。每个镜头任务带确定性幂等键
 // skurun:<run_id>:<shot_index>，落在既有 generation_job.idempotency_key 上；
-// GET /v1/skus/runs/:id 用前綴查詢把 run 的任務撈回來聚合。零新遷移、零新表，
-// 任務本身就是 run 的唯一事實源（提交/計費/狀態全在 job 上）。量級大了再加
-// 專用索引或 runs 表（見 docs TODO）。
+// GET /v1/skus/runs/:id 用前缀查询把 run 的任务捞回来聚合。零新迁移、零新表，
+// 任务本身就是 run 的唯一事实源（提交/计费/状态全在 job 上）。量级大了再加
+// 专用索引或 runs 表（见 docs TODO）。
 
 import { randomUUID } from "node:crypto";
 import { ADOBE_FIREFLY_MODEL_ID, imageGenerationCoins } from "@/lib/provider-config";
@@ -28,36 +28,36 @@ import type { ExpandedSkuShot, MarketingSku } from "./types";
 
 // ─────────────────────────────────────────── 常量
 
-/** run 冪等鍵前綴；與 /v1/batches 的 "batch:" 前綴命名空間互不重疊。 */
+/** run 幂等键前缀；与 /v1/batches 的 "batch:" 前缀命名空间互不重叠。 */
 export const SKU_RUN_KEY_PREFIX = "skurun";
-/** 單次請求最多展開幾個 run（表格批量場景的上限）。 */
+/** 单次请求最多展开几个 run（表格批量场景的上限）。 */
 export const MAX_RUNS_PER_REQUEST = 10;
-/** 單個 run 的鏡頭數上限（現有 SKU 最高 8；留餘量給未來 SKU）。 */
+/** 单个 run 的镜头数上限（现有 SKU 最高 8；留余量给未来 SKU）。 */
 export const MAX_SHOTS_PER_RUN = 12;
-/** run_id 字符集：字母數字開頭，允許連字號/下劃線（冪等鍵與 LIKE 查詢都安全）。 */
+/** run_id 字符集：字母数字开头，允许连字号/下划线（幂等键与 LIKE 查询都安全）。 */
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
 
-/** 客戶自帶 run_id（或 Idempotency-Key）的合法性檢查。 */
+/** 客户自带 run_id（或 Idempotency-Key）的合法性检查。 */
 export function normalizeRunId(raw: unknown): { ok: true; runId: string } | { ok: false; message: string } {
-  if (typeof raw !== "string") return { ok: false, message: "run_id / Idempotency-Key 需為字符串。" };
+  if (typeof raw !== "string") return { ok: false, message: "run_id / Idempotency-Key 需为字符串。" };
   const trimmed = raw.trim();
   if (!RUN_ID_PATTERN.test(trimmed)) {
-    return { ok: false, message: "run_id 需為 8-128 位字母數字開頭的字符串（可含連字號/下劃線）。" };
+    return { ok: false, message: "run_id 需为 8-128 位字母数字开头的字符串（可含连字号/下划线）。" };
   }
   return { ok: true, runId: trimmed };
 }
 
-/** 生成新 run_id（客戶未帶 Idempotency-Key 時）。 */
+/** 生成新 run_id（客户未带 Idempotency-Key 时）。 */
 export function generateRunId(): string {
   return "skurun_" + randomUUID();
 }
 
-/** 單鏡頭的確定性冪等鍵：崩潰後重放同一 run 時，已提交鏡頭不會重複建任務/扣費。 */
+/** 单镜头的确定性幂等键：崩溃后重放同一 run 时，已提交镜头不会重复建任务/扣费。 */
 export function skuRunIdempotencyKey(runId: string, shotIndex: number): string {
   return SKU_RUN_KEY_PREFIX + ":" + runId + ":" + shotIndex;
 }
 
-/** 從冪等鍵反解鏡頭序號；非本層鍵回 null。 */
+/** 从幂等键反解镜头序号；非本层键回 null。 */
 export function shotIndexFromIdempotencyKey(key: string | null): number | null {
   if (!key) return null;
   const match = new RegExp("^" + SKU_RUN_KEY_PREFIX + ":(.+):(\\d+)$").exec(key);
@@ -66,7 +66,7 @@ export function shotIndexFromIdempotencyKey(key: string | null): number | null {
   return Number.isInteger(index) ? index : null;
 }
 
-// ─────────────────────────────────────────── 鏡頭 → 提交計劃
+// ─────────────────────────────────────────── 镜头 → 提交计划
 
 export interface SkuShotCommandPlan {
   runId: string;
@@ -91,11 +91,11 @@ export interface SkuRunPlanOptions {
   runId: string;
   modelId: string;
   callbackUrl?: string | null;
-  /** 可選：附加進 workflow 元數據的輸入線索（如 product_image_url，v1 僅記錄）。 */
+  /** 可选：附加进 workflow 元数据的输入线索（如 product_image_url，v1 仅记录）。 */
   extraMetadata?: Record<string, unknown>;
 }
 
-/** 把展開後的鏡頭計劃轉成 submitGenerationCommand 的輸入形狀（純函數，可單測）。 */
+/** 把展开后的镜头计划转成 submitGenerationCommand 的输入形状（纯函数，可单测）。 */
 export function buildSkuShotCommandPlans(
   sku: MarketingSku,
   shots: ExpandedSkuShot[],
@@ -142,7 +142,7 @@ export function buildSkuShotCommandPlans(
   });
 }
 
-// ─────────────────────────────────────────── 可插拔發射器
+// ─────────────────────────────────────────── 可插拔发射器
 
 export interface SkuDispatchContext {
   tenantId: string;
@@ -154,16 +154,16 @@ export interface SkuDispatchOutcome {
   shotIndex: number;
   accepted: boolean;
   taskId: string | null;
-  /** true = 冪等重放命中既有任務（未重複建任務/扣費）。 */
+  /** true = 幂等重放命中既有任务（未重复建任务/扣费）。 */
   replayed?: boolean;
   error?: { message: string; type: "invalid_request_error" | "api_error"; code: string; param: null };
 }
 
 /**
- * 發射器接口：把一個 run 的全部鏡頭計劃提交出去。
- * 默認實現 = 單任務循環（submitGenerationCommand 逐項、冪等鍵逐項）；
- * /v1/batches 批量端點就緒後，加一個 batch 實現並在 resolveSkuDispatcher
- * 一行切換——SKU 層其他代碼不動。
+ * 发射器接口：把一个 run 的全部镜头计划提交出去。
+ * 默认实现 = 单任务循环（submitGenerationCommand 逐项、幂等键逐项）；
+ * /v1/batches 批量端点就绪后，加一个 batch 实现并在 resolveSkuDispatcher
+ * 一行切换——SKU 层其他代码不动。
  */
 export interface SkuDispatcher {
   submitAll(plans: SkuShotCommandPlan[], context: SkuDispatchContext): Promise<SkuDispatchOutcome[]>;
@@ -216,7 +216,7 @@ export function createLoopSkuDispatcher(): SkuDispatcher {
             });
             continue;
           }
-          // 模型可用性閘：該鏡頭建單/扣費前拒絕，誠實回報（不假裝提交）。
+          // 模型可用性闸：该镜头建单/扣费前拒绝，诚实回报（不假装提交）。
           if (error instanceof GenerationModelUnavailableError) {
             outcomes.push({
               shotIndex: plan.shotIndex,
@@ -251,25 +251,25 @@ export function createLoopSkuDispatcher(): SkuDispatcher {
 }
 
 /**
- * 發射器解析（切換點）：SKU_RUN_DISPATCHER=loop（默認）。
- * batch 值保留給「經 /v1/batches 批量端點發射」的實現——接入時在這裡返回
- * batch dispatcher 即可，路由層與展開層零改動。
+ * 发射器解析（切换点）：SKU_RUN_DISPATCHER=loop（默认）。
+ * batch 值保留给「经 /v1/batches 批量端点发射」的实现——接入时在这里返回
+ * batch dispatcher 即可，路由层与展开层零改动。
  */
 export function resolveSkuDispatcher(env: NodeJS.ProcessEnv = process.env): SkuDispatcher {
   const mode = env.SKU_RUN_DISPATCHER?.trim().toLowerCase() ?? "loop";
   if (mode !== "loop") {
-    console.warn("[sku-run] SKU_RUN_DISPATCHER=" + mode + " 尚未接入，回退 loop 發射器。");
+    console.warn("[sku-run] SKU_RUN_DISPATCHER=" + mode + " 尚未接入，回退 loop 发射器。");
   }
   return createLoopSkuDispatcher();
 }
 
-// ─────────────────────────────────────────── run 聚合查詢（無狀態）
+// ─────────────────────────────────────────── run 聚合查询（无状态）
 
 type JobRow = Record<string, unknown>;
 
 /**
- * 撈回一個 run 的全部鏡頭任務：按冪等鍵前綴（skurun:<run_id>:*）查既有
- * generation_job 表。run 不落新表——任務本身就是事實源。
+ * 捞回一个 run 的全部镜头任务：按幂等键前缀（skurun:<run_id>:*）查既有
+ * generation_job 表。run 不落新表——任务本身就是事实源。
  */
 export async function getSkuRunJobs(
   runId: string,
@@ -283,7 +283,7 @@ export async function getSkuRunJobs(
     ORDER BY idempotency_key ASC
   `;
   const jobs = rows.map(mapGenerationJob);
-  // 冪等鍵字典序在 shot_index >= 10 時錯序（…:10 排在 …:2 前），按解析出的序號重排。
+  // 幂等键字典序在 shot_index >= 10 时错序（…:10 排在 …:2 前），按解析出的序号重排。
   return jobs.sort((left, right) => {
     const a = shotIndexFromIdempotencyKey(left.idempotencyKey) ?? 0;
     const b = shotIndexFromIdempotencyKey(right.idempotencyKey) ?? 0;
@@ -291,9 +291,9 @@ export async function getSkuRunJobs(
   });
 }
 
-// ─────────────────────────────────────────── 視圖構建（純函數，可單測）
+// ─────────────────────────────────────────── 视图构建（纯函数，可单测）
 
-/** 從 job 的 workflow 元數據裡取 SKU 回填信息。 */
+/** 从 job 的 workflow 元数据里取 SKU 回填信息。 */
 function skuMetadata(job: GenerationJob): Record<string, unknown> {
   const metadata = (job.workflow as { metadata?: { sku?: Record<string, unknown> } })?.metadata;
   return metadata?.sku ?? {};
@@ -353,8 +353,8 @@ export interface SkuRunStatusView {
 }
 
 /**
- * run 聚合視圖：聚合數學復用 batch 層的 computeBatchAggregate（同一套
- * task_status 分桶 + billingAmount 進出賬邏輯，不抄第二份）。
+ * run 聚合视图：聚合数学复用 batch 层的 computeBatchAggregate（同一套
+ * task_status 分桶 + billingAmount 进出账逻辑，不抄第二份）。
  */
 export function buildSkuRunStatusView(runId: string, jobs: GenerationJob[]): SkuRunStatusView {
   const items = jobs.map(toSkuRunItemView);

@@ -56,7 +56,7 @@ function videoFile(): File {
   return new File([new Uint8Array([1, 2, 3])], "clip.mp4", { type: "video/mp4" });
 }
 
-test("uploadVideoDirect：成功回单个 video ref；URL 打网关 video-upload 带票；body 是 multipart 且不設 Content-Type", async () => {
+test("uploadVideoDirect：成功回单个 video ref；URL 打网关 video-upload 带票；body 是 multipart 且不设 Content-Type", async () => {
   await withFetch(
     () =>
       jsonResponse({
@@ -87,7 +87,7 @@ test("uploadVideoDirect：成功回单个 video ref；URL 打网关 video-upload
       assert.equal(upload.init?.method, "POST");
       assert.ok(upload.init?.body instanceof FormData);
       assert.equal((upload.init!.body as FormData).get("file"), file);
-      // 不設 Content-Type：FormData 要由浏览器补 multipart boundary。
+      // 不设 Content-Type：FormData 要由浏览器补 multipart boundary。
       const headers = upload.init?.headers;
       assert.ok(
         headers === undefined ||

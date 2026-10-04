@@ -183,7 +183,7 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string }> = [
   {
     name: "list_canvas_projects",
     scope: "eimu:canvas:read",
-    description: "列出本密钥账号自己的畫布项目摘要（id / 名称 / 时间 / 节点数）；拿到 project_id 才能写画布产线。",
+    description: "列出本密钥账号自己的画布项目摘要（id / 名称 / 时间 / 节点数）；拿到 project_id 才能写画布产线。",
   },
   {
     name: "canvas_get_state",

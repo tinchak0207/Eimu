@@ -1,8 +1,8 @@
-// 激活漏斗「按註冊來源拆分」的具名驗收（node:test）。
+// 激活漏斗「按注册来源拆分」的具名验收（node:test）。
 //
-// 這一刀的核心不變式（缺了就是假報表）：**各來源的每一格加總恆等於總漏斗對應步驟的人數**。
-// 另外釘住：沒有歸因事實 → 進 UNATTRIBUTED 桶（不猜成 direct）；不在 cohort 內的歸因列
-// 不許憑空造出一個來源；歸因讀取失敗的旗標要原樣透出。
+// 这一刀的核心不变式（缺了就是假报表）：**各来源的每一格加总恒等于总漏斗对应步骤的人数**。
+// 另外钉住：没有归因事实 → 进 UNATTRIBUTED 桶（不猜成 direct）；不在 cohort 内的归因列
+// 不许凭空造出一个来源；归因读取失败的旗标要原样透出。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,18 +31,18 @@ function job(userId: number, jobId: string, status: string, createdAt: string, f
 const REGISTRATIONS: FunnelRegistration[] = [301, 302, 303, 304, 305, 306].map((id) => registration(id));
 
 const JOBS: FunnelJob[] = [
-  // 301：唯一一天出圖成功（不回訪）
+  // 301：唯一一天出图成功（不回访）
   job(301, "j-301", "succeeded", "2026-09-11T01:00:00.000Z", "2026-09-11T01:05:00.000Z"),
-  // 302：D1 回訪 + 現金充值
+  // 302：D1 回访 + 现金充值
   job(302, "j-302a", "succeeded", "2026-09-11T02:00:00.000Z", "2026-09-11T02:05:00.000Z"),
   job(302, "j-302b", "succeeded", "2026-09-12T02:00:00.000Z", "2026-09-12T02:05:00.000Z"),
-  // 303：發起過但沒成功（direct 來源）
+  // 303：发起过但没成功（direct 来源）
   job(303, "j-303", "failed", "2026-09-11T03:00:00.000Z", "2026-09-11T03:10:00.000Z"),
-  // 304：登入後從未發起 → 只在 registered 步驟
-  // 305：回訪但沒付費（weixin 來源）
+  // 304：登入后从未发起 → 只在 registered 步骤
+  // 305：回访但没付费（weixin 来源）
   job(305, "j-305a", "succeeded", "2026-09-11T05:00:00.000Z", "2026-09-11T05:05:00.000Z"),
   job(305, "j-305b", "succeeded", "2026-09-12T05:00:00.000Z", "2026-09-12T05:05:00.000Z"),
-  // 306：回訪 + 現金充值，但歸因列存在而來源為 NULL（例如舊列）→ 未標記
+  // 306：回访 + 现金充值，但归因列存在而来源为 NULL（例如旧列）→ 未标记
   job(306, "j-306a", "succeeded", "2026-09-11T06:00:00.000Z", "2026-09-11T06:05:00.000Z"),
   job(306, "j-306b", "succeeded", "2026-09-12T06:00:00.000Z", "2026-09-12T06:05:00.000Z"),
 ];
@@ -58,17 +58,17 @@ const ATTRIBUTION: FunnelAttribution[] = [
   { userId: 303, source: "direct" },
   { userId: 305, source: "weixin" },
   { userId: 306, source: null },
-  // 不在 cohort 內（例如本期窗口外註冊）→ 不許造出一個來源桶。
+  // 不在 cohort 内（例如本期窗口外注册）→ 不许造出一个来源桶。
   { userId: 999, source: "someone-else" },
 ];
 
 function rowFor(rows: readonly FunnelSourceRow[], source: string): FunnelSourceRow {
   const found = rows.find((row) => row.source === source);
-  assert.ok(found, `缺少來源桶 ${source}（現有：${rows.map((row) => row.source).join(", ")}）`);
+  assert.ok(found, `缺少来源桶 ${source}（现有：${rows.map((row) => row.source).join(", ")}）`);
   return found;
 }
 
-test("來源拆分：各來源每一格加總恆等於總漏斗對應步驟（registered/generated/succeeded/paid）", () => {
+test("来源拆分：各来源每一格加总恒等于总漏斗对应步骤（registered/generated/succeeded/paid）", () => {
   const funnel = projectActivationFunnel({
     days: 30,
     now: NOW,
@@ -104,7 +104,7 @@ test("來源拆分：各來源每一格加總恆等於總漏斗對應步驟（re
   });
 });
 
-test("來源拆分：逐桶人數與夾具手算一致；無歸因／來源 NULL 都進未標記桶，cohort 外歸因列被忽略", () => {
+test("来源拆分：逐桶人数与夹具手算一致；无归因／来源 NULL 都进未标记桶，cohort 外归因列被忽略", () => {
   const funnel = projectActivationFunnel({
     days: 30,
     now: NOW,
@@ -137,7 +137,7 @@ test("來源拆分：逐桶人數與夾具手算一致；無歸因／來源 NULL
     succeeded: 1,
     paid: 0,
   });
-  // 304（無歸因列）＋ 306（列存在但來源 NULL）
+  // 304（无归因列）＋ 306（列存在但来源 NULL）
   assert.deepEqual(rowFor(funnel.sources, UNATTRIBUTED_SOURCE), {
     source: UNATTRIBUTED_SOURCE,
     registered: 2,
@@ -147,13 +147,13 @@ test("來源拆分：逐桶人數與夾具手算一致；無歸因／來源 NULL
   });
   assert.equal(funnel.sources.some((row) => row.source === "someone-else"), false);
   assert.equal(funnel.sources.length, 4);
-  // 排序：註冊人數多的在前；同數按分組鍵排序（穩定、可重放）。
+  // 排序：注册人数多的在前；同数按分组键排序（稳定、可重放）。
   const counts = funnel.sources.map((row) => row.registered);
   assert.deepEqual(counts, [...counts].sort((a, b) => b - a));
   assert.equal(funnel.sourceBreakdownUnavailable, false);
 });
 
-test("來源拆分：沒有歸因事實＝全部進未標記桶（不猜成 direct）；旗標原樣透出", () => {
+test("来源拆分：没有归因事实＝全部进未标记桶（不猜成 direct）；旗标原样透出", () => {
   const funnel = projectActivationFunnel({
     days: 30,
     now: NOW,
@@ -175,7 +175,7 @@ test("來源拆分：沒有歸因事實＝全部進未標記桶（不猜成 dire
   assert.equal(funnel.sourceBreakdownUnavailable, true);
 });
 
-test("buildFunnelSourceRows：只以 registered 開桶，後續步驟必定落在既有桶內", () => {
+test("buildFunnelSourceRows：只以 registered 开桶，后续步骤必定落在既有桶内", () => {
   const rows = buildFunnelSourceRows({
     registered: [1, 2, 3],
     generated: [1, 2],
@@ -192,6 +192,6 @@ test("buildFunnelSourceRows：只以 registered 開桶，後續步驟必定落�
     succeeded: 0,
     paid: 0,
   });
-  // 空 cohort → 空拆分（不是一個 0 人桶）。
+  // 空 cohort → 空拆分（不是一个 0 人桶）。
   assert.deepEqual(buildFunnelSourceRows({ registered: [], generated: [], succeeded: [], paid: [] }), []);
 });

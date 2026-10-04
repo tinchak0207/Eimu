@@ -1,15 +1,15 @@
 /**
- * timeline.ts — AI 自主後期：時間線生命週期層（施工片 B1，2026-08-31）
+ * timeline.ts — AI 自主后期：时间线生命周期层（施工片 B1，2026-08-31）
  *
- * 需求源：《Eimu 剪輯體驗 PRD v1.0》REQ-EDIT-01（可計算時間線）+ REQ-EDIT-05（版本/決策日誌）。
+ * 需求源：《Eimu 剪辑体验 PRD v1.0》REQ-EDIT-01（可计算时间线）+ REQ-EDIT-05（版本/决策日志）。
  * 真源：$WORKSPACE_DIR/timelines/<session_id>/current.json + append-only versions/<n>.json + log.jsonl。
  *
- * 輪子紀律：clip/音軌/字幕型別一律 import 自 ./editor/adapter/editorStore
- * （kunpeng-vendor @872a58b 逐行移植件），本檔不重新定義任何輪子型別；
- * 有效時長公式與 wheel clipLength 逐字一致：(outSec - inSec) / speed，下限 0.1s。
+ * 轮子纪律：clip/音轨/字幕型别一律 import 自 ./editor/adapter/editorStore
+ * （kunpeng-vendor @872a58b 逐行移植件），本档不重新定义任何轮子型别；
+ * 有效时长公式与 wheel clipLength 逐字一致：(outSec - inSec) / speed，下限 0.1s。
  *
- * 本檔只做「時間線生命週期層」：ops 套用/守衛/版本快照/決策日誌/欄位級 diff。
- * 不碰 composeEngine 的 harness state（匯出側由 assembleFilmNode 自行注入）。
+ * 本档只做「时间线生命周期层」：ops 套用/守卫/版本快照/决策日志/栏位级 diff。
+ * 不碰 composeEngine 的 harness state（汇出侧由 assembleFilmNode 自行注入）。
  */
 import { mkdir, readFile, readdir, rm, appendFile, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -25,30 +25,30 @@ import type {
 } from "./editor/adapter/editorStore"
 import { EDITOR_ASPECTS } from "./editor/aspect"
 
-// 與 gateway/index.ts L433 同值；env 可覆蓋（測試用）。
+// 与 gateway/index.ts L433 同值；env 可覆盖（测试用）。
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 const TIMELINES_DIR = path.join(WORKSPACE_DIR, "timelines")
 
-// 保留策略：最近 20 版 + 每 10 版里程碑版（v % 10 === 0），其餘刪。
+// 保留策略：最近 20 版 + 每 10 版里程碑版（v % 10 === 0），其余删。
 const KEEP_RECENT = 20
 const MILESTONE_EVERY = 10
 
-// ── 資料模型（import 輪子型別 + 擴展） ─────────────────────────────────────────
+// ── 资料模型（import 轮子型别 + 扩展） ─────────────────────────────────────────
 
 export interface TimelineClip extends EditorClip {
-  /** 所屬場景 id（agent 語義層標註，軟欄位） */
+  /** 所属场景 id（agent 语义层标注，软栏位） */
   sceneId?: string
-  /** 景別：wide/medium/close-up…（agent 標註，不做語義 lint） */
+  /** 景别：wide/medium/close-up…（agent 标注，不做语义 lint） */
   shotSize?: string
-  /** 情緒標籤（PRD 妥協清單：接受 agent 標註序列作軟輸入） */
+  /** 情绪标签（PRD 妥协清单：接受 agent 标注序列作软输入） */
   emotionTag?: string
-  /** 鎖定：拒絕任何變更 op（unlock 除外） */
+  /** 锁定：拒绝任何变更 op（unlock 除外） */
   locked?: boolean
-  /** 分組名（同組語義標記，供 B 系列片聚合用） */
+  /** 分组名（同组语义标记，供 B 系列片聚合用） */
   group?: string
-  /** 該鏡頭累計生成成本（幣），決策日誌 cost_delta 的來源 */
+  /** 该镜头累计生成成本（币），决策日志 cost_delta 的来源 */
   costCoins?: number
-  /** 調色四滑桿（B7 風格貨架；ClipFilter = 輪子型別，preset 存檔供 UI 高亮） */
+  /** 调色四滑杆（B7 风格货架；ClipFilter = 轮子型别，preset 存档供 UI 高亮） */
   filter?: ClipFilter
 }
 
@@ -58,7 +58,7 @@ export interface TimelineMarker {
   label?: string
 }
 
-/** 與 vendor EditorBgm 同形（gateway editorStore 未 export 該符號，此處結構對齊，非重定義） */
+/** 与 vendor EditorBgm 同形（gateway editorStore 未 export 该符号，此处结构对齐，非重定义） */
 export interface TimelineBgm {
   path: string
   label: string
@@ -78,7 +78,7 @@ export interface Timeline {
   updated_at: string
 }
 
-/** 機器可讀 diff 條目（ops 返回與 diffVersions 共用同一形態） */
+/** 机器可读 diff 条目（ops 返回与 diffVersions 共用同一形态） */
 export interface DiffEntry {
   clip_id: string
   field: string
@@ -86,7 +86,7 @@ export interface DiffEntry {
   after: unknown
 }
 
-/** 決策日誌條目（log.jsonl，append-only） */
+/** 决策日志条目（log.jsonl，append-only） */
 export interface LogEntry {
   at: string
   action: string
@@ -97,7 +97,7 @@ export interface LogEntry {
   cost_delta: number
 }
 
-// ── Ops 型別 ───────────────────────────────────────────────────────────────────
+// ── Ops 型别 ───────────────────────────────────────────────────────────────────
 
 export type TimelineOp =
   | { type: "add"; clip: TimelineClip; index?: number }
@@ -117,7 +117,7 @@ export type TimelineOp =
   | { type: "add_subtitle"; cue: SubtitleCue }
   | { type: "set_aspect"; aspect: EditorAspect }
 
-// ── 錯誤（HTTP 層映射：blocked→409 flat {blocked, reason}；invalid→400） ────────
+// ── 错误（HTTP 层映射：blocked→409 flat {blocked, reason}；invalid→400） ────────
 
 export class TimelineBlockedError extends Error {
   constructor(public readonly blocked: string, message?: string) {
@@ -140,14 +140,14 @@ export class TimelineNotFoundError extends Error {
   }
 }
 
-// ── 工具函數 ───────────────────────────────────────────────────────────────────
+// ── 工具函数 ───────────────────────────────────────────────────────────────────
 
-/** 有效時長：與 wheel clipLength 逐字一致（editorStore.ts L228-230） */
+/** 有效时长：与 wheel clipLength 逐字一致（editorStore.ts L228-230） */
 export function clipLength(c: EditorClip): number {
   return Math.max(0.1, (c.outSec - c.inSec) / (c.speed && c.speed > 0 ? c.speed : 1))
 }
 
-/** 總時長：主軌求和 + 音軌/字幕尾端（wheel totalDuration 口徑，去掉本層沒有的 overlay/text/fx 軌） */
+/** 总时长：主轨求和 + 音轨/字幕尾端（wheel totalDuration 口径，去掉本层没有的 overlay/text/fx 轨） */
 export function totalDurationSec(tl: Pick<Timeline, "clips" | "audioClips" | "subtitles">): number {
   const main = tl.clips.reduce((sum, c) => sum + clipLength(c), 0)
   const tails = [
@@ -207,7 +207,7 @@ function findClip(tl: Timeline, id: string): TimelineClip | undefined {
   return tl.clips.find((c) => c.id === id)
 }
 
-/** locked 守衛：任何以該 clip 為目標的變更 op 一律整批拒絕（unlock 除外） */
+/** locked 守卫：任何以该 clip 为目标的变更 op 一律整批拒绝（unlock 除外） */
 function guardLocked(clip: TimelineClip | undefined, opIndex: number): void {
   if (clip && clip.locked) {
     throw new TimelineBlockedError(clip.id, `op[${opIndex}]: clip ${clip.id} is locked; mutation refused`)
@@ -227,9 +227,9 @@ function str(v: unknown, name: string, opIndex: number): string {
   return v
 }
 
-// ── 單 op 套用（對 draft 就地修改並 push diff；呼叫前已通過驗證） ──────────────
-// 設計：驗證與套用共用同一 switch，驗證階段跑在 draft 副本上（先全驗證後套用），
-// 因此每個 op 的「驗證」其實就是「套用到 draft 前的檢查」，套用於第二輪。
+// ── 单 op 套用（对 draft 就地修改并 push diff；呼叫前已通过验证） ──────────────
+// 设计：验证与套用共用同一 switch，验证阶段跑在 draft 副本上（先全验证后套用），
+// 因此每个 op 的「验证」其实就是「套用到 draft 前的检查」，套用于第二轮。
 
 function validateOp(tl: Timeline, op: TimelineOp, i: number): void {
   if (!op || typeof op !== "object" || typeof (op as { type?: unknown }).type !== "string") {
@@ -444,7 +444,7 @@ function applyOp(tl: Timeline, op: TimelineOp, diff: DiffEntry[], affected: Set<
         transitionAfter: { type: "cut", duration: 0 },
         locked: false,
       }
-      // 記帳衛生：生成成本屬源鏡頭，拆分不重複計費（costCoins 留在原段，後半段不帶）
+      // 记帐卫生：生成成本属源镜头，拆分不重复计费（costCoins 留在原段，后半段不带）
       delete tail.costCoins
       diff.push({ clip_id: orig.id, field: "outSec", before: orig.outSec, after: op.atSec })
       orig.outSec = op.atSec
@@ -569,7 +569,7 @@ function applyOp(tl: Timeline, op: TimelineOp, diff: DiffEntry[], affected: Set<
   }
 }
 
-// ── 快照級欄位 diff（diffVersions 用） ─────────────────────────────────────────
+// ── 快照级栏位 diff（diffVersions 用） ─────────────────────────────────────────
 
 function diffRecordList<T extends { id: string }>(
   before: T[],
@@ -597,7 +597,7 @@ function diffRecordList<T extends { id: string }>(
   for (const [id, a] of aMap) {
     if (!bMap.has(id)) diff.push({ clip_id: id, field: `${kind}.added`, before: null, after: a })
   }
-  // 順序變化（僅主軌 clip 有時間軸語義）
+  // 顺序变化（仅主轨 clip 有时间轴语义）
   if (kind === "clip") {
     const bOrder = before.map((c) => c.id)
     const aOrder = after.map((c) => c.id)
@@ -623,7 +623,7 @@ export function computeTimelineDiff(before: Timeline, after: Timeline): DiffEntr
   return diff
 }
 
-// ── 並發鎖（per-session 串行化 read-modify-write） ─────────────────────────────
+// ── 并发锁（per-session 串行化 read-modify-write） ─────────────────────────────
 
 const sessionLocks = new Map<string, { tail: Promise<void>; pending: number }>()
 
@@ -653,7 +653,7 @@ async function loadCurrent(sid: string): Promise<Timeline | null> {
   try {
     const raw = await readFile(currentPath(sid), "utf-8")
     const tl = JSON.parse(raw) as Timeline
-    // 防禦：缺欄位補默認，避免舊檔炸后续 op
+    // 防御：缺栏位补默认，避免旧档炸后续 op
     tl.clips ??= []
     tl.audioTracks ??= []
     tl.audioClips ??= []
@@ -690,7 +690,7 @@ async function appendLog(sid: string, entry: LogEntry): Promise<void> {
   await appendFile(logPath(sid), JSON.stringify(entry) + "\n", "utf-8")
 }
 
-/** 保留策略：最近 KEEP_RECENT 版 + 每 MILESTONE_EVERY 版里程碑，其餘刪 */
+/** 保留策略：最近 KEEP_RECENT 版 + 每 MILESTONE_EVERY 版里程碑，其余删 */
 async function pruneVersions(sid: string, latest: number): Promise<void> {
   const dir = path.join(sessionDir(sid), "versions")
   let names: string[]
@@ -708,7 +708,7 @@ async function pruneVersions(sid: string, latest: number): Promise<void> {
   }
 }
 
-// ── 公開函數面 ─────────────────────────────────────────────────────────────────
+// ── 公开函数面 ─────────────────────────────────────────────────────────────────
 
 export async function getTimeline(sessionId: string): Promise<Timeline> {
   assertSessionId(sessionId)
@@ -724,9 +724,9 @@ export interface ApplyOpsResult {
 }
 
 /**
- * 一批 ops：先全驗證（跑在 draft 上）後套用；驗證失敗整批拒絕並回報第一顆炸點。
- * locked clip 拒絕任何變更 op → TimelineBlockedError（HTTP 409, {blocked, reason:"locked"}）。
- * 成功且有實際變化 → version+1、寫 current + versions/<n>.json + log.jsonl、按策略裁剪。
+ * 一批 ops：先全验证（跑在 draft 上）后套用；验证失败整批拒绝并回报第一颗炸点。
+ * locked clip 拒绝任何变更 op → TimelineBlockedError（HTTP 409, {blocked, reason:"locked"}）。
+ * 成功且有实际变化 → version+1、写 current + versions/<n>.json + log.jsonl、按策略裁剪。
  */
 export async function applyOps(sessionId: string, ops: TimelineOp[], reason = ""): Promise<ApplyOpsResult> {
   assertSessionId(sessionId)
@@ -737,7 +737,7 @@ export async function applyOps(sessionId: string, ops: TimelineOp[], reason = ""
     const current = (await loadCurrent(sessionId)) ?? emptyTimeline(sessionId)
     const draft = clone(current)
 
-    // 第一輪：全驗證（逐 op 套用到 draft，驗證即套用前檢查）
+    // 第一轮：全验证（逐 op 套用到 draft，验证即套用前检查）
     const diff: DiffEntry[] = []
     const affected = new Set<string>()
     for (let i = 0; i < ops.length; i++) {
@@ -748,7 +748,7 @@ export async function applyOps(sessionId: string, ops: TimelineOp[], reason = ""
     const costDelta = round3(sumCost(draft) - sumCost(current))
 
     if (diff.length === 0) {
-      // 無實際變化（冪等 op）：不 bump 版本、不寫日誌
+      // 无实际变化（幂等 op）：不 bump 版本、不写日志
       return {
         timeline: current,
         diff: [],
@@ -814,14 +814,14 @@ export async function listVersions(sessionId: string): Promise<VersionSummary[]>
         total_duration_sec: round3(totalDurationSec(tl)),
       })
     } catch {
-      /* 壞快照跳過，不炸列表 */
+      /* 坏快照跳过，不炸列表 */
     }
   }
   out.sort((a, b) => a.version - b.version)
   return out
 }
 
-/** 欄位級 diff：版本 a → 版本 b（含被裁剪的版本 → TimelineNotFoundError） */
+/** 栏位级 diff：版本 a → 版本 b（含被裁剪的版本 → TimelineNotFoundError） */
 export async function diffVersions(sessionId: string, a: number, b: number): Promise<DiffEntry[]> {
   assertSessionId(sessionId)
   if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1) {
@@ -832,8 +832,8 @@ export async function diffVersions(sessionId: string, a: number, b: number): Pro
 }
 
 /**
- * 還原到版本 v：內容回到 v 的快照，版本號單調遞增（新版本 = current+1），
- * restore 本身寫日誌（action="restore"）。
+ * 还原到版本 v：内容回到 v 的快照，版本号单调递增（新版本 = current+1），
+ * restore 本身写日志（action="restore"）。
  */
 export async function restoreVersion(sessionId: string, v: number): Promise<ApplyOpsResult> {
   assertSessionId(sessionId)
@@ -882,7 +882,7 @@ export async function getLog(sessionId: string): Promise<LogEntry[]> {
     try {
       out.push(JSON.parse(line) as LogEntry)
     } catch {
-      /* 壞行跳過 */
+      /* 坏行跳过 */
     }
   }
   return out

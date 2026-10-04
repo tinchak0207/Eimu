@@ -1,13 +1,13 @@
-// `POST /openai/v1/images/generations` 的**真行為斷言**（不是源碼字串守門件）。
+// `POST /openai/v1/images/generations` 的**真行为断言**（不是源码字串守门件）。
 //
-// 驗的是「分發管道真正會解析的那幾個欄位」：一次 POST 同步回 200、`created` 是秒級整數、
-// `data[0].url` 是字串、`response_format` 預設 url；要 b64 時由服務端取件編碼；失敗回
-// OpenAI 錯誤信封且訊息帶 task id；超時回 504 且任務仍在後台（輪詢過）。
+// 验的是「分发管道真正会解析的那几个栏位」：一次 POST 同步回 200、`created` 是秒级整数、
+// `data[0].url` 是字串、`response_format` 预设 url；要 b64 时由服务端取件编码；失败回
+// OpenAI 错误信封且讯息带 task id；超时回 504 且任务仍在后台（轮询过）。
 //
-// 沒有 `openai` npm 套件（`npm ls openai` = empty），且紅線禁止為本片新增依賴 →
-// 用 fetch + 逐欄斷言驗 OpenAI 形狀（形狀字面量抄自 OpenAI Images API 契約，獨立於本實現）。
+// 没有 `openai` npm 套件（`npm ls openai` = empty），且红线禁止为本片新增依赖 →
+// 用 fetch + 逐栏断言验 OpenAI 形状（形状字面量抄自 OpenAI Images API 契约，独立于本实现）。
 //
-// 上游一律替身（src/lib/openai-compat/upstream-stub.ts）：零外網、零付費調用。
+// 上游一律替身（src/lib/openai-compat/upstream-stub.ts）：零外网、零付费调用。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";

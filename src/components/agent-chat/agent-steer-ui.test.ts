@@ -55,7 +55,7 @@ test("面板把 turnActive 接成 steerActive：与 onStop 同源同一颗真相
 test("用户气泡带 steer 状态徽章：五态文案齐全，排队与已生效一眼分得开", () => {
   assert.match(bubble, /data-steer-status=\{item\.steer\.status\}/);
   assert.match(bubble, /item\.kind === "user" && item\.steer \?/);
-  // 五态人话（与网關 steer-core.ts 的 SteerStatus 值域一一对应）。
+  // 五态人话（与网关 steer-core.ts 的 SteerStatus 值域一一对应）。
   assert.match(bubble, /引导已排队\$\{typeof position === "number" \? `（第 \$\{position\} 条）` : ""\}·本回合结束后生效/);
   assert.match(bubble, /"引导已注入本回合"/);
   assert.match(bubble, /"引导已生效"/);
@@ -66,7 +66,7 @@ test("用户气泡带 steer 状态徽章：五态文案齐全，排队与已生�
 });
 
 test("引导腿不落回 sendAgentMessage：不另起用户消息，且只在「回合进行中 + steer 设定」时启用", () => {
-  // 触发条件逐字：turnActive 为假 ⇒ steering 为假 ⇒ 下面路径与改动前逐位等價。
+  // 触发条件逐字：turnActive 为假 ⇒ steering 为假 ⇒ 下面路径与改动前逐位等价。
   assert.match(
     hookCode,
     /const steering = stateRef\.current\.turnActive && readCachedAgentSettings\(\)\.interrupt_mode === "steer";/,
@@ -103,7 +103,7 @@ test("停止优先：abort 落地后本端同步改判排队中的 steer 为已�
   );
 });
 
-test("端点链路齐备：client → 站内中继 → 网關 /steer（三处都不得缺席）", () => {
+test("端点链路齐备：client → 站内中继 → 网关 /steer（三处都不得缺席）", () => {
   assert.match(client, /export async function steerAgentSession\(/);
   assert.match(client, /`\/api\/agent\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/steer`/);
   assert.match(client, /content: content\.trim\(\)/);
@@ -113,32 +113,32 @@ test("端点链路齐备：client → 站内中继 → 网關 /steer（三处都
   assert.match(client, /throw new AgentChatError\("parse_error", "服务器未返回有效的引导状态。"\);/);
 
   const relay = "src/app/api/agent/sessions/[id]/steer/route.ts";
-  assert.ok(existsSync(join(root, relay)), "中继路由必须存在（复制 abort 路由，只换网關路径）");
+  assert.ok(existsSync(join(root, relay)), "中继路由必须存在（复制 abort 路由，只换网关路径）");
   const relayCode = read(relay);
   assert.match(relayCode, /callAgentGateway\(`\/agent\/v1\/sessions\/\$\{id\}\/steer`, \{/);
   assert.match(relayCode, /export async function POST\(req: NextRequest/);
   assert.match(relayCode, /resolveAgentCaller\(req\)/);
-  // D2b（2026-09-23）修復鎖：中繼**必須把 body 轉發**。
-  // 舊實作只送 `{ method, key }`——正文與 steer_id 全丟在站內：網關只會回
-  // 400 "content is required"（REQ-D2 前端→網關這段根本走不通），而且 steer_id
-  // 丟了＝命令身份層永遠由網關自鑄新 id，重放偵測對不上（本刀的整個前提）。
+  // D2b（2026-09-23）修复锁：中继**必须把 body 转发**。
+  // 旧实作只送 `{ method, key }`——正文与 steer_id 全丢在站内：网关只会回
+  // 400 "content is required"（REQ-D2 前端→网关这段根本走不通），而且 steer_id
+  // 丢了＝命令身份层永远由网关自铸新 id，重放侦测对不上（本刀的整个前提）。
   const relayFn = relayCode.slice(relayCode.indexOf("export async function POST"));
-  assert.match(relayFn, /await req\.json\(\)/, "中繼必須讀取請求 body");
-  assert.match(relayFn, /body: \{[\s\S]*content,[\s\S]*steer_id: steerId/, "content 與 steer_id 必須原樣轉發給網關");
-  assert.match(relayFn, /empty_message/, "空正文本地誠實拒絕（不吞）");
+  assert.match(relayFn, /await req\.json\(\)/, "中继必须读取请求 body");
+  assert.match(relayFn, /body: \{[\s\S]*content,[\s\S]*steer_id: steerId/, "content 与 steer_id 必须原样转发给网关");
+  assert.match(relayFn, /empty_message/, "空正文本地诚实拒绝（不吞）");
 });
 
-// ─────────────── F-D2（2026-09-23）對抗性驗收缺陷的具名回歸 ───────────────
+// ─────────────── F-D2（2026-09-23）对抗性验收缺陷的具名回归 ───────────────
 
-test("D2-2 409 契約落地：引導端點回 409 時落回正常送出腿（訊息不得被吞）", () => {
+test("D2-2 409 契约落地：引导端点回 409 时落回正常送出腿（讯息不得被吞）", () => {
   const client2 = read("src/lib/agent-chat-client.ts");
-  // 判定器在 client：409 只有一個語義（沒有可引導的回合），與失敗區分開。
+  // 判定器在 client：409 只有一个语义（没有可引导的回合），与失败区分开。
   assert.match(client2, /export function isSteerUnavailableError\(err: unknown\): boolean \{/);
   assert.match(client2, /err\.status === 409/);
   assert.match(client2, /err\.code === "no_active_turn"/);
   assert.match(hook, /isSteerUnavailableError,/);
 
-  // hook：409 走旗標（不吞訊息），非 409 才在 steer 腿收口。
+  // hook：409 走旗标（不吞讯息），非 409 才在 steer 腿收口。
   assert.match(hookCode, /let fellBackToPlainSend = false;/);
   assert.match(hookCode, /if \(isSteerUnavailableError\(err\)\) \{/);
   assert.match(hookCode, /fellBackToPlainSend = true;/);
@@ -150,24 +150,24 @@ test("D2-2 409 契約落地：引導端點回 409 時落回正常送出腿（訊
   const fallbackAt = hookCode.indexOf("if (isSteerUnavailableError(err)) {");
   const plainSendAt = hookCode.indexOf("await sendAgentMessage(");
   assert.ok(fallbackAt > -1 && plainSendAt > fallbackAt, "正常送出腿必须在 409 分支之后（落回才送得出去）");
-  // 409 分支本身絕不得 return——那正是「訊息被吞」的實錘（舊版改完徽章就 return）。
-  // 收口只能靠下面那個把關旗標的條件式 return。
+  // 409 分支本身绝不得 return——那正是「讯息被吞」的实锤（旧版改完徽章就 return）。
+  // 收口只能靠下面那个把关旗标的条件式 return。
   const branch = hookCode.slice(fallbackAt, hookCode.indexOf("} else {", fallbackAt));
-  assert.doesNotMatch(branch, /\breturn;/, "409 分支內不得出現 return");
+  assert.doesNotMatch(branch, /\breturn;/, "409 分支内不得出现 return");
   assert.match(branch, /fellBackToPlainSend = true;/);
   assert.match(hookCode.slice(fallbackAt, plainSendAt), /if \(!fellBackToPlainSend\) return;/);
-  // 409 時不再補「已加入队列」提示（避免與 fallback 提示重複誤導）。
+  // 409 时不再补「已加入队列」提示（避免与 fallback 提示重复误导）。
   assert.match(hookCode, /if \(stateRef\.current\.turnActive && !fellBackToPlainSend\) \{/);
 });
 
-test("D2-3 逾時收口接線：TTL 兩端鏡像、排隊時排定清掃、存檔還原帶 savedAt", () => {
+test("D2-3 逾时收口接线：TTL 两端镜像、排队时排定清扫、存档还原带 savedAt", () => {
   const gatewayCore = read("deploy-staging/gateway/steer-core.ts");
   const types = read("src/lib/agent-chat-types.ts");
-  // 鏡像鎖：兩端 TTL 必須逐字同值（網關判逾時、前端判逾時用的是同一個時鐘契約）。
+  // 镜像锁：两端 TTL 必须逐字同值（网关判逾时、前端判逾时用的是同一个时钟契约）。
   assert.match(gatewayCore, /export const STEER_QUEUE_TTL_MS = 30 \* 60 \* 1000;/);
   assert.match(types, /export const AGENT_STEER_QUEUE_TTL_MS = 30 \* 60 \* 1000;/);
 
-  // hook：排隊 ack 後排定清掃；存檔還原把 savedAt 一起送進 reducer 並排定剩餘時窗。
+  // hook：排队 ack 后排定清扫；存档还原把 savedAt 一起送进 reducer 并排定剩余时窗。
   assert.match(hookCode, /const steerExpiryTimerRef = useRef<number \| null>\(null\);/);
   assert.match(hookCode, /if \(ack\.status === "queued"\) armSteerExpiry\(AGENT_STEER_QUEUE_TTL_MS\);/);
   assert.match(hookCode, /dispatch\(\{ type: "steer-expire", now: Date\.now\(\) \}\)/);
@@ -178,6 +178,6 @@ test("D2-3 逾時收口接線：TTL 兩端鏡像、排隊時排定清掃、存�
     "restore 必须带存档时刻（逾时判定的兜底锚点）",
   );
   assert.match(hookCode, /armSteerExpiry\(saved\.savedAt \+ AGENT_STEER_QUEUE_TTL_MS - Date\.now\(\)\)/);
-  // reducer：還原路徑必須先掃一趟（存檔裡的「排队中」不得原樣復活）。
+  // reducer：还原路径必须先扫一趟（存档里的「排队中」不得原样复活）。
   assert.match(hookCode, /return expireQueuedSteers\(restored, \{/);
 });

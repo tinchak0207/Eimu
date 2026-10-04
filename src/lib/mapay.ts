@@ -78,7 +78,7 @@ export function mapayMoneyMatches(actual: string | undefined, expected: number):
   return Number(actual).toFixed(2) === formatMapayMoney(expected);
 }
 
-/** 渠道手續費容忍：實收必須 ≥ 應收（少付一律拒），超出部分 ≤ max(0.5 元, 5%)。 */
+/** 渠道手续费容忍：实收必须 ≥ 应收（少付一律拒），超出部分 ≤ max(0.5 元, 5%)。 */
 export function mapayMoneyAcceptable(actual: string | undefined, expected: number): boolean {
   const n = Number(actual);
   if (!Number.isFinite(n) || actual === undefined || actual === "") return false;
@@ -93,7 +93,7 @@ export function buildMapayCheckoutFields(input: {
   orderId: string;
   paymentType: MapayPaymentType;
   plan: MapayPlanInput;
-  /** 已登入下單時的三段自簽值（`planId.userId.hmac8`，見 mapay-order-param.ts）；省略＝舊格式 plan.id。 */
+  /** 已登入下单时的三段自签值（`planId.userId.hmac8`，见 mapay-order-param.ts）；省略＝旧格式 plan.id。 */
   param?: string;
 }): MapayFields {
   const { config, orderId, paymentType, plan, param } = input;

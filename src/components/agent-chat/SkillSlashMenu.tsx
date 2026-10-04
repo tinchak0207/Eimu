@@ -51,11 +51,11 @@ export type SlashMenuStatus = "loading" | "ready" | "error";
 /* ------------------------------------------------------------------ */
 
 /**
- * 菜單閘門：**输入框为空，或首字符是「/」**才允許開菜單。
+ * 菜单闸门：**输入框为空，或首字符是「/」**才允许开菜单。
  *
- * 这是「必要形態」判定，不是触发条件——真正的触发是使用者在输入框里真的打出那一颗
- * 「/」（AgentComposer 的 slashArmed）。两層都真才显示菜单：所以「普通文字」「/ 在句
- * 中」「首字符是空格再打 /」一律不開。
+ * 这是「必要形态」判定，不是触发条件——真正的触发是使用者在输入框里真的打出那一颗
+ * 「/」（AgentComposer 的 slashArmed）。两层都真才显示菜单：所以「普通文字」「/ 在句
+ * 中」「首字符是空格再打 /」一律不开。
  */
 export function shouldOpenSlashMenu(text: string): boolean {
   return text === "" || text.startsWith("/");
@@ -70,7 +70,7 @@ export function slashQueryOf(text: string): string {
  * 上下键移动选中项（回绕，不越界不卡死）。纯函数，可直测。
  *
  * 越界或非整数的 index（列表刚变短、父层没来得及复位）按 0 起算，避免落到 undefined
- * 那一項上；length 为 0 时恒回 0（Enter 会因为取不到项而什么都不做）。
+ * 那一项上；length 为 0 时恒回 0（Enter 会因为取不到项而什么都不做）。
  */
 export function moveActiveIndex(index: number, delta: number, length: number): number {
   if (length <= 0) return 0;
@@ -80,11 +80,11 @@ export function moveActiveIndex(index: number, delta: number, length: number): n
 }
 
 /**
- * 選中一条技能 → 写回输入框的文字（纯函数）。
+ * 选中一条技能 → 写回输入框的文字（纯函数）。
  *
  * 指令形态（框里正在打「/关键词」）＝整框就是那条指令，选中即把查询词换成技能名，
  * 末尾留一格空格好接着打需求，且**不再以「/」开头的查询词形态**继续触发搜索。
- * 其余形态（理论上菜单不開）不覆盖使用者已打的字，指令接在后面——与 D-24 prefill
+ * 其余形态（理论上菜单不开）不覆盖使用者已打的字，指令接在后面——与 D-24 prefill
  * 「接在后面不吃掉用户内容」同一条规矩。
  */
 export function applySkillPick(current: string, skill: { name: string }): string {
@@ -94,7 +94,7 @@ export function applySkillPick(current: string, skill: { name: string }): string
   return `${base} ${command}`;
 }
 
-/** 只读列舉/搜尋端点的 URL（`q` 与 `limit` 由 URLSearchParams 负责编码）。 */
+/** 只读列举/搜寻端点的 URL（`q` 与 `limit` 由 URLSearchParams 负责编码）。 */
 export function slashMenuUrl(query: string, limit: number = SLASH_MENU_LIMIT): string {
   const params = new URLSearchParams();
   params.set("q", query.trim());
@@ -158,7 +158,7 @@ export function parseFamilyLabels(payload: unknown): Record<string, string> {
 /** 「我的技能」分区标题（分区标题只是标题，不是可选项）。 */
 export const SLASH_MINE_SECTION_LABEL = "我的技能";
 
-/** 我的技能端点的 URL（未登入回 401；列舉自己的自訂技能）。 */
+/** 我的技能端点的 URL（未登入回 401；列举自己的自订技能）。 */
 export function slashMineUrl(): string {
   return "/api/skills/mine";
 }
@@ -187,7 +187,7 @@ function dedupeSkills(list: readonly SlashMenuSkill[]): SlashMenuSkill[] {
  * 两路结果合并（纯函数）：
  * - 分区顺序固定：公开库在上、我的技能在下（命中才出现）；
  * - 去重按 id，公开库那条优先（同一 id 不重复出现两次）；
- * - **我的技能为空（含未登入 401 静默略过）= 不產生分区标题**，不留空区块；
+ * - **我的技能为空（含未登入 401 静默略过）= 不产生分区标题**，不留空区块；
  * - 各自截到 SLASH_MENU_LIMIT（上游 limit 之外的保险）。
  */
 export function mergeSlashResults(
@@ -297,7 +297,7 @@ export function SkillSlashMenu({
         }
       })();
       void (async () => {
-        // 我的技能：未登入（无凭证 / 401）与任何失败**一律静默略過**——
+        // 我的技能：未登入（无凭证 / 401）与任何失败**一律静默略过**——
         // 不报错、不摆空区块、不伪造条目；公开库照常显示。
         const headers = tryAuthHeaders();
         if (!headers) {

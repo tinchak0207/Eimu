@@ -1,22 +1,22 @@
 /**
- * Expert 註冊表（MOE 改革波 0-A 地基，2026-09-08）。
+ * Expert 注册表（MOE 改革波 0-A 地基，2026-09-08）。
  *
- * 設計真源：docs/expert-constitution-draft.md 卷三「波 0 落地映射」——
- * 本檔承擔「能力斷路」落點：域工具白名單 + task-type 映射 + 交付物契約聲明，
- * 後續波 1 由 gateway 攔截（本片只做註冊表地基，不接 gateway）。
+ * 设计真源：docs/expert-constitution-draft.md 卷三「波 0 落地映射」——
+ * 本档承担「能力断路」落点：域工具白名单 + task-type 映射 + 交付物契约声明，
+ * 后续波 1 由 gateway 拦截（本片只做注册表地基，不接 gateway）。
  *
- * 輪子血緣（禁自造輪子鐵律）：
+ * 轮子血缘（禁自造轮子铁律）：
  *   - proto-Expert = src/lib/blender-director-persona.ts：director3d 行的
- *     身份/工具白名單/配方庫路徑/回覆 token 帽全部 import 該檔常量，禁止複製值。
- *   - 交付物契約欄 = src/lib/blender-delegate.ts 的 BLENDER_DELIVERABLES
+ *     身份/工具白名单/配方库路径/回覆 token 帽全部 import 该档常量，禁止复制值。
+ *   - 交付物契约栏 = src/lib/blender-delegate.ts 的 BLENDER_DELIVERABLES
  *     （import，勿手抄）。
- *   - 結構範式 = src/lib/harness-tool-registry.ts（常量導出 + 測試守衛）。
+ *   - 结构范式 = src/lib/harness-tool-registry.ts（常量导出 + 测试守卫）。
  *
- * 野獸模式：BEAST_MODE_SETTINGS_KEY 默認 OFF（readBeastMode 缺欄位/非布林
- * 一律 false = 現狀零變化）；ON 才允許下游按 routeExpert 啟用 Expert 路由。
- * Wave2 收口（2026-09-08）：註冊表七行全部啟用；09-15 critic 行翻正啟用
- * （部署片刪 provisioned，同兄弟行不設該鍵），註冊表八行全激活、無佔位行，
- * routeExpert 的佔位排除分支保留為防回歸門禁。
+ * 野兽模式：BEAST_MODE_SETTINGS_KEY 默认 OFF（readBeastMode 缺栏位/非布林
+ * 一律 false = 现状零变化）；ON 才允许下游按 routeExpert 启用 Expert 路由。
+ * Wave2 收口（2026-09-08）：注册表七行全部启用；09-15 critic 行翻正启用
+ * （部署片删 provisioned，同兄弟行不设该键），注册表八行全激活、无占位行，
+ * routeExpert 的占位排除分支保留为防回归门禁。
  */
 
 import {
@@ -85,52 +85,52 @@ import {
 } from "./critic-persona";
 import { CRITIC_DELIVERABLES } from "./critic-delegate";
 
-// ─────────────────────────────────────────── 野獸模式 toggle
+// ─────────────────────────────────────────── 野兽模式 toggle
 
-/** 設定鍵（settings 記錄中的欄位名；缺欄位 = OFF = 現狀零遷移）。 */
+/** 设定键（settings 记录中的栏位名；缺栏位 = OFF = 现状零迁移）。 */
 export const BEAST_MODE_SETTINGS_KEY = "beast_mode" as const;
 
 /**
- * 讀取野獸模式開關：settings 記錄中 beast_mode 欄位為布林 true 才返回 true。
- * 缺欄位 / 非布林 / settings 本身非物件 = false（默認 OFF，零遷移）。
+ * 读取野兽模式开关：settings 记录中 beast_mode 栏位为布林 true 才返回 true。
+ * 缺栏位 / 非布林 / settings 本身非物件 = false（默认 OFF，零迁移）。
  */
 export function readBeastMode(settings: unknown): boolean {
   if (typeof settings !== "object" || settings === null) return false;
   return (settings as Record<string, unknown>)[BEAST_MODE_SETTINGS_KEY] === true;
 }
 
-// ─────────────────────────────────────────── Expert 定義
+// ─────────────────────────────────────────── Expert 定义
 
-/** 單個 Expert 的註冊表行（能力斷路 / 路由 / 交付閘三件套的聲明面）。 */
+/** 单个 Expert 的注册表行（能力断路 / 路由 / 交付闸三件套的声明面）。 */
 export interface ExpertDef {
-  /** 註冊表鍵與 id 一致（gateway bindings / 日誌統一用此 id）。 */
+  /** 注册表键与 id 一致（gateway bindings / 日志统一用此 id）。 */
   id: string;
-  /** 展示名（簡體文案，記憶 agent-gateway-copy-rules）。 */
+  /** 展示名（简体文案，记忆 agent-gateway-copy-rules）。 */
   label: string;
-  /** 一句話定位（設定頁/選單/派遣 spec 用）。 */
+  /** 一句话定位（设定页/选单/派遣 spec 用）。 */
   description: string;
-  /** 域工具白名單（能力斷路依據：域外工具不存在於該 Expert 的工具表）。 */
+  /** 域工具白名单（能力断路依据：域外工具不存在于该 Expert 的工具表）。 */
   toolIds: readonly string[];
-  /** must-load 配方庫路徑（進 Expert 即載，不是「高興才查」）。 */
+  /** must-load 配方库路径（进 Expert 即载，不是「高兴才查」）。 */
   skillPaths: readonly string[];
-  /** 路由鍵（routeExpert 按精確/前綴匹配）。 */
+  /** 路由键（routeExpert 按精确/前缀匹配）。 */
   taskTypes: readonly string[];
-  /** 交付物契約（缺欄位/缺 QC 簽名 = 組裝閘門不過 = 視為未交付）。 */
+  /** 交付物契约（缺栏位/缺 QC 签名 = 组装闸门不过 = 视为未交付）。 */
   deliverableContract: {
     requiredFields: readonly string[];
     qcSignatureRequired: boolean;
   };
-  /** 回覆 token 帽（隔離鐵律：過程不出 subagent，摘要限長）。 */
+  /** 回覆 token 帽（隔离铁律：过程不出 subagent，摘要限长）。 */
   replyTokenCap: number;
-  /** true = 佔位未啟用（野獸模式 ON 時也不可路由，routeExpert 不返回）。 */
+  /** true = 占位未启用（野兽模式 ON 时也不可路由，routeExpert 不返回）。 */
   provisioned?: boolean;
 }
 
-// ─────────────────────────────────────────── 註冊表
+// ─────────────────────────────────────────── 注册表
 
 /**
- * Expert 註冊表（鍵 = ExpertDef.id；首行 director3d 為 proto-Expert 輪子行，
- * 全部契約值 import 自 blender-director-persona / blender-delegate，零複製）。
+ * Expert 注册表（键 = ExpertDef.id；首行 director3d 为 proto-Expert 轮子行，
+ * 全部契约值 import 自 blender-director-persona / blender-delegate，零复制）。
  */
 export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
   director3d: {
@@ -162,17 +162,17 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
 
   // ─────────────────────────────────────── Wave2 收口翻正式（2026-09-08）
   //
-  // 五行全部按 director3d/music 先例 import 各 persona/delegate 常量（零複製），
-  // 刪 provisioned 正式啟用（野獸模式 ON 時 routeExpert 可按 taskTypes 命中）。
+  // 五行全部按 director3d/music 先例 import 各 persona/delegate 常量（零复制），
+  // 删 provisioned 正式启用（野兽模式 ON 时 routeExpert 可按 taskTypes 命中）。
   "video-director": {
     id: "video-director",
     label: VIDEO_DIRECTOR_PERSONA_LABEL,
     description: VIDEO_DIRECTOR_PERSONA_DESCRIPTION,
-    // 域工具白名單 = persona 常量（video_quote/video_upload/last_frame_video_chain
-    // + 報價對偶 image_quote，全在 harness 真源）。
-    // video_gen 無現成 harness 工具：generation 通路待接線（缺口如實保留）。
+    // 域工具白名单 = persona 常量（video_quote/video_upload/last_frame_video_chain
+    // + 报价对偶 image_quote，全在 harness 真源）。
+    // video_gen 无现成 harness 工具：generation 通路待接线（缺口如实保留）。
     toolIds: VIDEO_DIRECTOR_PERSONA_TOOL_IDS,
-    // skills/ 無視頻導演域配方庫 → persona 常量置空（skill 待補）。
+    // skills/ 无视频导演域配方库 → persona 常量置空（skill 待补）。
     skillPaths: VIDEO_DIRECTOR_PERSONA_SKILL_PATHS,
     taskTypes: ["video", "video_gen", "shot_video", "film_clip"],
     deliverableContract: {
@@ -186,7 +186,7 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
     label: EDITOR_PERSONA_LABEL,
     description: EDITOR_PERSONA_DESCRIPTION,
     toolIds: EDITOR_PERSONA_TOOL_IDS,
-    // skills/ 無剪輯域配方庫 → persona 常量置空（skill 待補）。
+    // skills/ 无剪辑域配方库 → persona 常量置空（skill 待补）。
     skillPaths: EDITOR_PERSONA_SKILL_PATHS,
     taskTypes: ["editing", "timeline", "cut", "film_assembly"],
     deliverableContract: {
@@ -200,7 +200,7 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
     label: SCREENWRITER_PERSONA_LABEL,
     description: SCREENWRITER_PERSONA_DESCRIPTION,
     toolIds: SCREENWRITER_PERSONA_TOOL_IDS,
-    // skills/ 無編劇域配方庫 → persona 常量置空（skill 待補）。
+    // skills/ 无编剧域配方库 → persona 常量置空（skill 待补）。
     skillPaths: SCREENWRITER_PERSONA_SKILL_PATHS,
     taskTypes: ["screenplay", "storyboard", "script", "story_beats"],
     deliverableContract: {
@@ -214,7 +214,7 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
     label: MOTION_DIRECTOR_PERSONA_LABEL,
     description: MOTION_DIRECTOR_PERSONA_DESCRIPTION,
     toolIds: MOTION_DIRECTOR_PERSONA_TOOL_IDS,
-    // skills/motion-design/ 無域根 SKILL.md → 指域目錄（2026-09-07 配方庫索引先例）。
+    // skills/motion-design/ 无域根 SKILL.md → 指域目录（2026-09-07 配方库索引先例）。
     skillPaths: MOTION_DIRECTOR_PERSONA_SKILL_PATHS,
     taskTypes: ["motion", "motion_design", "animation"],
     deliverableContract: {
@@ -242,7 +242,7 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
   // 独立审核 Expert（质量闸）：裁定背景 = 评测实案 Orchestrator 自产自验
   // 0 次 QC / 0 次驳回（REPORT 见 eval-2026-op-theme/）。原 provisioned: true
   // 占位（routeExpert 跳过、digest 标「未启用」挡死路由）已于 09-15 翻正部署片
-  // 删除该键，与七个可路由兄弟行逐栏同构（不設 provisioned = 激活可路由）。契约四栏
+  // 删除该键，与七个可路由兄弟行逐栏同构（不设 provisioned = 激活可路由）。契约四栏
   // critic-delegate 常量（09-15 翻正接线片换挂）：CRITIC_DELIVERABLES 为该清单
   // 唯一真源，registry 行 / persona re-export / contracts 产物三处引用同一数组，
   // 零手抄第二份（同 director3d…web3d 各行 import 各 delegate 常量先例）。
@@ -263,15 +263,15 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
   },
 };
 
-// ─────────────────────────────────────────── 路由與能力斷路
+// ─────────────────────────────────────────── 路由与能力断路
 
-/** 前綴匹配的邊界符：防止「3dx」誤命中「3d」、「musical」誤命中「music」。 */
+/** 前缀匹配的边界符：防止「3dx」误命中「3d」、「musical」误命中「music」。 */
 const TASK_TYPE_PREFIX_BOUNDARIES = new Set(["-", "_", ".", "/", ":"]);
 
 /**
- * 按 taskType 路由 Expert：精確匹配優先、其次邊界前綴匹配
- * （如 "blender_render" 命中 "blender"）。provisioned 行一律跳過不返回；
- * 無命中返回 null（= 留在 Orchestrator 本體，零變化）。
+ * 按 taskType 路由 Expert：精确匹配优先、其次边界前缀匹配
+ * （如 "blender_render" 命中 "blender"）。provisioned 行一律跳过不返回；
+ * 无命中返回 null（= 留在 Orchestrator 本体，零变化）。
  */
 export function routeExpert(taskType: string): ExpertDef | null {
   const requested = taskType.trim();
@@ -292,9 +292,9 @@ export function routeExpert(taskType: string): ExpertDef | null {
 }
 
 /**
- * 能力斷路判定：Expert 是否持有某工具（域外工具不存在於其工具表）。
- * 未註冊的 expertId 一律 false。註冊但 provisioned 的行不在此攔
- * （佔位不可路由是 routeExpert 的門禁職責，本函數只判工具白名單）。
+ * 能力断路判定：Expert 是否持有某工具（域外工具不存在于其工具表）。
+ * 未注册的 expertId 一律 false。注册但 provisioned 的行不在此拦
+ * （占位不可路由是 routeExpert 的门禁职责，本函数只判工具白名单）。
  */
 export function assertExpertToolAccess(expertId: string, toolId: string): boolean {
   const expert = EXPERT_REGISTRY[expertId];

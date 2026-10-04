@@ -1,17 +1,17 @@
 /**
- * 助理起手模板——顯示 metadata 入口（首屏只載入本目錄；2026-09-12 首屏減重拆分，
- * 2026-09-20 逐模板拆檔）。
+ * 助理起手模板——显示 metadata 入口（首屏只载入本目录；2026-09-12 首屏减重拆分，
+ * 2026-09-20 逐模板拆档）。
  *
- * 卡面渲染所需欄位（標題/領域/痛點/漸變/海報/環節短名）留在本目錄各模板檔；
- * 大段執行文案（slots 六槽、initialPrompt、directive、步驟的
- * promptNotes/deliverable/inputFrom/gate/requiredTools）在同層
- * `agent-templates-payload/`，由使用處/回調 `await import()` 動態載入，
- * 經 `hydrateAgentTemplate(card)` 合併為 `AgentTemplateFull` 後再走
- * cropTemplate / templateToCanvasLayout / 注入鏈路。兩邊以模板 id +
- * 步驟索引對齊；hydrate 帶防呆，步數漂移即拋錯。
- * 禁止把執行文案加回本目錄——靜態 import 鏈會把它們再灌進 app/page chunk。
+ * 卡面渲染所需栏位（标题/领域/痛点/渐变/海报/环节短名）留在本目录各模板档；
+ * 大段执行文案（slots 六槽、initialPrompt、directive、步骤的
+ * promptNotes/deliverable/inputFrom/gate/requiredTools）在同层
+ * `agent-templates-payload/`，由使用处/回调 `await import()` 动态载入，
+ * 经 `hydrateAgentTemplate(card)` 合并为 `AgentTemplateFull` 后再走
+ * cropTemplate / templateToCanvasLayout / 注入链路。两边以模板 id +
+ * 步骤索引对齐；hydrate 带防呆，步数漂移即抛错。
+ * 禁止把执行文案加回本目录——静态 import 链会把它们再灌进 app/page chunk。
  *
- * 新增模板 = 加一個 `<slug>.ts`（卡面）+ 一個 payload 檔 + 兩邊 index 各一行。
+ * 新增模板 = 加一个 `<slug>.ts`（卡面）+ 一个 payload 档 + 两边 index 各一行。
  */
 
 import type { AgentTemplate, AgentTemplateDomain } from "./types";
@@ -82,19 +82,19 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
 ];
 
 /**
- * H15（2026-10-02）題材 → 後端 workflow 模板映射護欄。
- * 病根：OP/MV 類（片頭曲/主題曲/卡點 MV/預告）被路由到 shortdrama_visual，整條鏈是 9:16 豎屏短劇骨架
- * （分鏡 9:16、鏡頭視頻 size=9:16、成片 9:16），與 OP/MV 橫屏母帶衝突；真實生產走的是 feature_film（16:9）。
- * repo 內沒有專用 MV 模板，feature_film（泛用多鏡頭、16:9 影片配置）是最貼近的橫屏模板。
- * 純函式：任何以題材文字決定 harnessTemplateId 的使用處，一律過這裡；非 MV/OP 題材原樣回傳。
+ * H15（2026-10-02）题材 → 后端 workflow 模板映射护栏。
+ * 病根：OP/MV 类（片头曲/主题曲/卡点 MV/预告）被路由到 shortdrama_visual，整条链是 9:16 竖屏短剧骨架
+ * （分镜 9:16、镜头视频 size=9:16、成片 9:16），与 OP/MV 横屏母带冲突；真实生产走的是 feature_film（16:9）。
+ * repo 内没有专用 MV 模板，feature_film（泛用多镜头、16:9 影片配置）是最贴近的横屏模板。
+ * 纯函式：任何以题材文字决定 harnessTemplateId 的使用处，一律过这里；非 MV/OP 题材原样回传。
  */
 export const MV_OP_TOPIC_RE =
-  /(?:\bMV\b|\bOP\b|\bED\b|\bPV\b|music\s*video|opening\s*(?:theme|song)|片头曲|片頭曲|片头|片頭|主题曲|主題曲|角色歌|卡点|卡點|音乐视频|音樂視頻|音樂影片|歌曲\s*MV)/i;
+  /(?:\bMV\b|\bOP\b|\bED\b|\bPV\b|music\s*video|opening\s*(?:theme|song)|片头曲|片头曲|片头|片头|主题曲|主题曲|角色歌|卡点|卡点|音乐视频|音乐视频|音乐影片|歌曲\s*MV)/i;
 
-/** 橫屏 MV/OP 落點：repo 現有最貼近的橫屏模板。 */
+/** 横屏 MV/OP 落点：repo 现有最贴近的横屏模板。 */
 export const MV_OP_HARNESS_TEMPLATE_ID = "feature_film";
 
-/** 豎屏短劇模板 id（MV/OP 不得落此）。 */
+/** 竖屏短剧模板 id（MV/OP 不得落此）。 */
 export const VERTICAL_SHORTDRAMA_TEMPLATE_ID = "shortdrama_visual";
 
 export function isMvOpTopic(text: string): boolean {
@@ -102,12 +102,12 @@ export function isMvOpTopic(text: string): boolean {
 }
 
 /**
- * 依題材文字修正 harnessTemplateId：題材為 OP/MV 且候選落在 shortdrama_visual → feature_film（橫屏）。
- * 用戶明說「豎屏/竖屏/9:16」時尊重其意圖，不改寫。
+ * 依题材文字修正 harnessTemplateId：题材为 OP/MV 且候选落在 shortdrama_visual → feature_film（横屏）。
+ * 用户明说「竖屏/竖屏/9:16」时尊重其意图，不改写。
  */
 export function resolveHarnessTemplateId(candidateId: string | undefined, topicText: string): string | undefined {
   if (candidateId !== VERTICAL_SHORTDRAMA_TEMPLATE_ID) return candidateId;
   if (!isMvOpTopic(topicText)) return candidateId;
-  if (/竖屏|豎屏|9\s*:\s*16|vertical/i.test(topicText)) return candidateId;
+  if (/竖屏|竖屏|9\s*:\s*16|vertical/i.test(topicText)) return candidateId;
   return MV_OP_HARNESS_TEMPLATE_ID;
 }

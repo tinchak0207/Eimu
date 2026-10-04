@@ -2,12 +2,12 @@ import { get, list } from "@/lib/blob-backend";
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
-/** @vercel/blob v2.x 的 list() 支援 abortSignal，但 TypeScript 型別未包含 */
+/** @vercel/blob v2.x 的 list() 支援 abortSignal，但 TypeScript 型别未包含 */
 function listWithTimeout(prefix: string, timeoutMs: number) {
   return list({ prefix, limit: 1, abortSignal: AbortSignal.timeout(timeoutMs) } as Parameters<typeof list>[0] & { abortSignal: AbortSignal });
 }
 
-/** @vercel/blob v2.x 的 get() 支援 abortSignal，但 TypeScript 型別未包含 */
+/** @vercel/blob v2.x 的 get() 支援 abortSignal，但 TypeScript 型别未包含 */
 function getWithTimeout(url: string, timeoutMs: number) {
   return get(url, { access: "public", abortSignal: AbortSignal.timeout(timeoutMs) } as Parameters<typeof get>[1] & { abortSignal: AbortSignal });
 }
@@ -28,7 +28,7 @@ async function loadOauthAccessToken(): Promise<{ access_token: string; expires_i
     if (!url) return null;
     const blob = await getWithTimeout(url, 10_000);
     if (!blob || blob.statusCode !== 200) return null;
-    // blob.stream 是 ReadableStream<Uint8Array>，用 Response 讀取
+    // blob.stream 是 ReadableStream<Uint8Array>，用 Response 读取
     const text = await new Response(blob.stream).text();
     return JSON.parse(text);
   } catch {
@@ -39,7 +39,7 @@ async function loadOauthAccessToken(): Promise<{ access_token: string; expires_i
 export async function getAdobeAccessToken(): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.token;
 
-  // 先從 Vercel Blob 載入 OAuth token（Adobe IMS access token，adobe2api 容器專用格式）
+  // 先从 Vercel Blob 载入 OAuth token（Adobe IMS access token，adobe2api 容器专用格式）
   const oauthData = await loadOauthAccessToken();
   if (oauthData?.access_token) {
     const expiresAt = (oauthData.created_at ?? Date.now()) + (oauthData.expires_in ?? 86_399) * 1000;
@@ -74,7 +74,7 @@ export async function getAdobeAccessToken(): Promise<string> {
     }
   }
 
-  // 降級：client_credentials（可能沒有 firefly_api scope，看 Adobe 應用配置）
+  // 降级：client_credentials（可能没有 firefly_api scope，看 Adobe 应用配置）
   const clientId = process.env.ADOBE_CLIENT_ID?.trim();
   const clientSecret = process.env.ADOBE_CLIENT_SECRET?.trim();
   if (clientId && clientSecret) {

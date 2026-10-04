@@ -5,12 +5,12 @@
 // 引擎（workflow-engine.ts）把模板展开成 CanvasNode[] + 连线并执行。
 //
 // 本目录 = 纯资料 + 纯函式（不依赖 Bun），可单独单测。
-// 每个模板一个文件（<template-id>.ts），改一個模板只動一個檔，
-// 部署與并行修改不再互相冲突。
+// 每个模板一个文件（<template-id>.ts），改一个模板只动一个档，
+// 部署与并行修改不再互相冲突。
 //
-// 注意：部署機制為逐檔 SFTP（.gateway-work/sftp-put-443.js），目錄結構
-// 必須手動在 VPS 上建立 remote-dir 並逐檔上傳；舊單檔 workflow-templates.ts
-// 必須刪除或重命名，否則會因 extensionless 解析優先命中舊檔而掩蔽新目錄。
+// 注意：部署机制为逐档 SFTP（.gateway-work/sftp-put-443.js），目录结构
+// 必须手动在 VPS 上建立 remote-dir 并逐档上传；旧单档 workflow-templates.ts
+// 必须删除或重命名，否则会因 extensionless 解析优先命中旧档而掩蔽新目录。
 
 import type { WorkflowNodeSpec, WorkflowConnectionSpec, WorkflowTemplate } from "./types";
 import { singleImageTemplate } from "./single_image";
@@ -68,20 +68,20 @@ export function getWorkflowTemplate(id: string): WorkflowTemplate | undefined {
 }
 
 /**
- * 0920 暴君裁定（第二版）：模板判定完成即建骨架彈上畫布——不等 Expert 去調
- * workflow_start（實錘：Expert 根本沒調，右邊永遠空白，「太慢了」）。
+ * 0920 暴君裁定（第二版）：模板判定完成即建骨架弹上画布——不等 Expert 去调
+ * workflow_start（实锤：Expert 根本没调，右边永远空白，「太慢了」）。
  *
- * 後端 startSync 要求每個 text role 非空，故建構時用「佔位內容」先滿足驗證；
- * Expert 之後同模板呼叫 workflow_start 走 P0 冪等守衛復用同一支 wf，再用
- * workflow_update_node 回填真內容。config/image/video/audio/film role 無需 content。
+ * 后端 startSync 要求每个 text role 非空，故建构时用「占位内容」先满足验证；
+ * Expert 之后同模板呼叫 workflow_start 走 P0 幂等守卫复用同一支 wf，再用
+ * workflow_update_node 回填真内容。config/image/video/audio/film role 无需 content。
  */
 export function templatePlaceholderContent(templateId: string): Record<string, unknown> {
   const t = getWorkflowTemplate(templateId)
   if (!t) return {}
   const content: Record<string, unknown> = {}
   for (const n of t.nodes) {
-    // 契約形狀：{ role: { content: "..." } }（startSync 逐 role 讀 c.content）；
-    // 傳純字串會被判「缺少必要内容」而 400（實錘 2026-09-20）。
+    // 契约形状：{ role: { content: "..." } }（startSync 逐 role 读 c.content）；
+    // 传纯字串会被判「缺少必要内容」而 400（实锤 2026-09-20）。
     if (n.kind === "text") content[n.role] = { content: `（待填：${n.title}）` }
   }
   return content

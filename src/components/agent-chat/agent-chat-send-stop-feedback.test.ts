@@ -46,8 +46,8 @@ test("panel 把 stopPending 传下去：composer 与 batchProgress 两处都在"
 test("panel 的 onSend 型别放宽，composer 接线回传 promise", () => {
   assert.match(panel, /onSend: \(text: string\) => void \| Promise<void>;/);
   // 首条消息通知照旧触发；接线必须把 promise 回传下去（输入区靠它收在途态）。
-  // 2026-09-18 第二版（面板＝在途態单一真相源）：不再直接 `return onSend(text);`，
-  // 改成先立面板自己的在途態、把结果存进 result 再回传——下游契约相同（拿得到
+  // 2026-09-18 第二版（面板＝在途态单一真相源）：不再直接 `return onSend(text);`，
+  // 改成先立面板自己的在途态、把结果存进 result 再回传——下游契约相同（拿得到
   // promise），所以这里钉语义而不是钉当初那行字面。
   assert.match(panel, /if \(items\.length === 0\) onFirstUserMessage\?\.\(\);/);
   assert.match(panel, /let result: void \| Promise<void>;/);
@@ -66,10 +66,10 @@ test("空态单一 DOM：忙碌不再分流，建号在飞推荐语渲染但强�
   const emptyBlock = panel.slice(emptyStart, emptyEnd);
 
   // 09-20 零位移定案：忙碌分流分支必须绝迹——分流＝换一套 DOM＝输入框跳位，
-  // 前两版（裸 composer 忙碌行 / 同構容器但置中群体不同）都被暴君打回。
+  // 前两版（裸 composer 忙碌行 / 同构容器但置中群体不同）都被暴君打回。
   assert.doesNotMatch(emptyBlock, /sessionStarting \|\| turnActive \? \(/, "忙碌分流分支必须已拆");
   assert.doesNotMatch(emptyBlock, /正在建立会话/, "忙碌文字行必须已删");
-  // 防重复送出的锁改由「渲染但禁用」承担：建号/首發在飛時 chipState 强制 disabled。
+  // 防重复送出的锁改由「渲染但禁用」承担：建号/首发在飞时 chipState 强制 disabled。
   assert.match(
     emptyBlock,
     /sessionStarting \|\| turnActive \? "disabled" : exampleChipState\(/,
@@ -77,7 +77,7 @@ test("空态单一 DOM：忙碌不再分流，建号在飞推荐语渲染但强�
   );
   // 单一欢迎 DOM：标题、composer 容器、推荐语各一份。
   assert.match(emptyBlock, /想做点什么？/);
-  // 2026-10-01：空態不再覆寫 composer 的 py/shadow（虹彩外框自帶上下兩層間距與紫調投影）。
+  // 2026-10-01：空态不再覆写 composer 的 py/shadow（虹彩外框自带上下两层间距与紫调投影）。
   assert.match(emptyBlock, /<div className="mt-8 w-full">\s*\{composerNode\}/);
   assert.match(emptyBlock, /EXAMPLES\.map/);
 });
@@ -105,7 +105,7 @@ test("batchProgress 的 pending 态与既有 abort 文案并存", () => {
   // 非 pending 时的 title 与既有字面逐字保留（旧测试钉着它）。
   assert.match(batchProgress, /立即中止当前这轮生成/);
   assert.match(batchProgress, /title=\{stopPending \? "正在中止，请稍候…" : "立即中止当前这轮生成"\}/);
-  // pending 时图标换转圈（2026-09-20 對版預覽：幽靈紅字鈕，spinner 前置 mr-1）。
+  // pending 时图标换转圈（2026-09-20 对版预览：幽灵红字钮，spinner 前置 mr-1）。
   assert.match(batchProgress, /Loader2 className="mr-1 h-3\.5 w-3\.5 animate-spin"/);
   assert.match(batchProgress, /disabled:cursor-wait disabled:opacity-60/);
 });
@@ -116,7 +116,7 @@ test("既有字面未回退", () => {
   // 停止仍然接到 abort 端点，不是往对话里塞一句停止指令。
   assert.match(surface, /const onStopGeneration = useCallback/);
   assert.match(surface, /void abort\(\)/);
-  // 2026-09-20 Route C 重设计裁定：决策卡（question/confirm）在場不再锁
+  // 2026-09-20 Route C 重设计裁定：决策卡（question/confirm）在场不再锁
   // composerDisabled（改由 composer 上缘 2px 蓝提示条提示「有卡待选」）。
   // 这里锁收窄后的字面，且不许 pending 条件悄悄吃回来。
   assert.match(panel, /composerDisabled = disabled \|\| closed/);

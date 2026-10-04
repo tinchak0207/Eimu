@@ -2,7 +2,7 @@
 # Global Source of Truth
 
 ## Identity
-- **Product**: Commercial AI image generation SaaS (中轉站)
+- **Product**: Commercial AI image generation SaaS (中转站)
 - **URL**: eimu.dev
 - **Stack**: Next.js 15, Tailwind CSS 3, shadcn/ui, TypeScript
 - **Target**: Non-technical users (小白), mobile-first

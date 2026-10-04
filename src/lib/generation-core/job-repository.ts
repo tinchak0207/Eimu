@@ -45,9 +45,9 @@ function jsonValue<T>(value: unknown, fallback: T): T {
 }
 
 /**
- * 落庫用：把 FailureRecord 轉成 postgres.js 的 jsonb 參數（null 走 SQL NULL）。
- * 測試用的錄音 mock 沒有 `sql.json`，故退回原物件（真實客戶端由此包裝成 jsonb）。
- * 回傳 `never` 是 postgres.js tagged template 的參數型別慣例（同檔其它 jsonb 寫法）。
+ * 落库用：把 FailureRecord 转成 postgres.js 的 jsonb 参数（null 走 SQL NULL）。
+ * 测试用的录音 mock 没有 `sql.json`，故退回原物件（真实客户端由此包装成 jsonb）。
+ * 回传 `never` 是 postgres.js tagged template 的参数型别惯例（同档其它 jsonb 写法）。
  */
 function failureRecordParam(sql: GenerationSql, record: FailureRecord | null | undefined): never {
   if (!record) return null as never;
@@ -57,7 +57,7 @@ function failureRecordParam(sql: GenerationSql, record: FailureRecord | null | u
   return param as never;
 }
 
-/** 讀回用：jsonb → FailureRecord（未知版本／壞結構回 null，不靜默當成當前版本）。 */
+/** 读回用：jsonb → FailureRecord（未知版本／坏结构回 null，不静默当成当前版本）。 */
 export function mapFailureRecordColumn(value: unknown): FailureRecord | null {
   return readFailureRecord(value);
 }
@@ -259,7 +259,7 @@ export async function listCompletedGenerationArtifacts(
       url: row.delivery_url === null ? null : String(row.delivery_url),
       mimeType: String(row.mime_type),
       sha256: String(row.sha256),
-      // NULL 直譯為 null：Number(null) 是 0，會把「未實測」偽造成「0×0」（G4 成片可缺尺寸）。
+      // NULL 直译为 null：Number(null) 是 0，会把「未实测」伪造成「0×0」（G4 成片可缺尺寸）。
       width: row.width === null ? null : Number(row.width),
       height: row.height === null ? null : Number(row.height),
       endpointLabel: typeof metadata.endpointLabel === "string" ? metadata.endpointLabel : "unknown",
@@ -274,7 +274,7 @@ export async function hasGenerationCapability(input: {
   resolution?: string | null;
   routingClass: GenerationJob["routingClass"];
 }, sql: GenerationSql = getGenerationSql()): Promise<boolean> {
-  // 與 acquireSupplierLease 同一把尺：不在生效路由裡的 supplier 不算可供給。
+  // 与 acquireSupplierLease 同一把尺：不在生效路由里的 supplier 不算可供给。
   const route = await resolveModelRoute(input.modelId, sql);
   if (!route.supplierIds.length) return false;
   const rows = await sql<{ present: boolean }[]>`
@@ -360,13 +360,13 @@ export async function releaseJobForRetry(input: {
   `;
 }
 
-// R7-D（2026-08-29）：排隊 deadline（預設 3 分鐘）只保護「等容量」階段；
-// 開工後以 started_at 為錨展期到 15 分鐘總生成預算。GREATEST 保證對顯式
-// 傳入更長 deadlineMs 的調用者只增不減；只在租約仍屬本 worker 時生效。
+// R7-D（2026-08-29）：排队 deadline（预设 3 分钟）只保护「等容量」阶段；
+// 开工后以 started_at 为锚展期到 15 分钟总生成预算。GREATEST 保证对显式
+// 传入更长 deadlineMs 的调用者只增不减；只在租约仍属本 worker 时生效。
 //
-// 病灶 D 修復（2026-08-30）：改為 RETURNING 實際寫入的 deadline_at，讓調用方
-// 同步內存 `job.deadlineAt`，消除「內存快照 deadline 與 DB 不一致」的語義漂移
-// （真正開工的 job 內存 deadline 停在 claim 時 3 分鐘，DB 已被 extend 到 15 分鐘）。
+// 病灶 D 修复（2026-08-30）：改为 RETURNING 实际写入的 deadline_at，让调用方
+// 同步内存 `job.deadlineAt`，消除「内存快照 deadline 与 DB 不一致」的语义漂移
+// （真正开工的 job 内存 deadline 停在 claim 时 3 分钟，DB 已被 extend 到 15 分钟）。
 export async function extendGenerationDeadlineJob(
   job: { id: string; startedAt: Date | null },
   workerId: string,
@@ -385,13 +385,13 @@ export async function extendGenerationDeadlineJob(
   return rows[0] ? asDate(rows[0].deadline_at) : null;
 }
 
-// 病灶 D（2026-08-30）：排隊期退避撞穿 3 分鐘 deadline —— 無 lease 時反覆
-// claim→acquire 失敗→releaseForRetry(backoff)，直到排隊 deadline 到期被
-// deadline_exceeded 殺單（實錄 12 筆 video job 全死於此，attempt_count=0）。
-// 這裡做一次排隊順延：deadline 快到期且還在「可恢復」的等容量狀態時，把
-// deadline 往後推 extraMs（相對 now 增量，避免 started_at 錨定的 GREATEST
-// 第二次就推不動）。上限由調用方用 shouldExtendQueueDeadline 把關（20min 封頂），
-// 確保純無供應商的死路不會無限掛單。
+// 病灶 D（2026-08-30）：排队期退避撞穿 3 分钟 deadline —— 无 lease 时反覆
+// claim→acquire 失败→releaseForRetry(backoff)，直到排队 deadline 到期被
+// deadline_exceeded 杀单（实录 12 笔 video job 全死于此，attempt_count=0）。
+// 这里做一次排队顺延：deadline 快到期且还在「可恢复」的等容量状态时，把
+// deadline 往后推 extraMs（相对 now 增量，避免 started_at 锚定的 GREATEST
+// 第二次就推不动）。上限由调用方用 shouldExtendQueueDeadline 把关（20min 封顶），
+// 确保纯无供应商的死路不会无限挂单。
 export async function extendGenerationQueueDeadline(
   job: { id: string; startedAt: Date | null },
   workerId: string,
@@ -450,8 +450,8 @@ export async function completeGenerationAttempt(input: {
   latencyMs: number;
   evidence?: Record<string, unknown>;
   /**
-   * INC-0831：false = 該輸出的 canonical artifact 早已存在（重放/晚到命中冪等鍵），
-   * 只記 attempt 成功、不重複遞增 completed_count。
+   * INC-0831：false = 该输出的 canonical artifact 早已存在（重放/晚到命中幂等键），
+   * 只记 attempt 成功、不重复递增 completed_count。
    */
   advanceOutput?: boolean;
 }, sql: GenerationSql = getGenerationSql()): Promise<void> {
@@ -478,14 +478,14 @@ export async function failGenerationAttempt(input: {
   attemptId: string;
   failureClass: FailureClass;
   failureDetail: string;
-  /** 適配器拋錯時帶出的上游任務 id（INC-0830-VIDEO：失敗 attempt 也要留上游 task 對賬錨點）。 */
+  /** 适配器抛错时带出的上游任务 id（INC-0830-VIDEO：失败 attempt 也要留上游 task 对账锚点）。 */
   providerTaskId?: string;
   providerHttpStatus?: number;
   retryAfterAt?: Date | null;
   latencyMs: number;
   /**
-   * FG-01：版本化失敗記錄。原生欄位（name/message/code/status/requestId/metadata/
-   * cause 遞迴）逐字落庫，與 failureClass/failureDetail 這組產品解釋分欄存放。
+   * FG-01：版本化失败记录。原生栏位（name/message/code/status/requestId/metadata/
+   * cause 递回）逐字落库，与 failureClass/failureDetail 这组产品解释分栏存放。
    */
   failureRecord?: FailureRecord | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<void> {
@@ -506,22 +506,22 @@ export async function failGenerationAttempt(input: {
   });
 }
 
-// ─────────────────────────────────────────────────── INC-0831 provider 對帳
+// ─────────────────────────────────────────────────── INC-0831 provider 对帐
 
 /**
- * 上游任務提交成功的瞬間，把 provider task id + 對帳排程 durably 落進 attempt 行。
- * 這是事故根治點：只發事件不落行，輪詢斷掉後 task id 就沒人認領（INC-0831 根因）。
- * 同 id 重寫（提交回調後失敗路徑再保險一次）冪等；不同 task id 不覆蓋。
- * 返回 false = 行已易主或已被其它 task id 佔用（調用端不應視為錯誤）。
+ * 上游任务提交成功的瞬间，把 provider task id + 对帐排程 durably 落进 attempt 行。
+ * 这是事故根治点：只发事件不落行，轮询断掉后 task id 就没人认领（INC-0831 根因）。
+ * 同 id 重写（提交回调后失败路径再保险一次）幂等；不同 task id 不覆盖。
+ * 返回 false = 行已易主或已被其它 task id 占用（调用端不应视为错误）。
  */
 export async function markProviderTaskSubmitted(input: {
   jobId: string;
   attemptId: string;
   providerTaskId: string;
   protocol: ProviderProtocol;
-  /** 首輪對帳延遲（默認 60s：上游任務剛提交，立刻問也是 running）。 */
+  /** 首轮对帐延迟（默认 60s：上游任务刚提交，立刻问也是 running）。 */
   firstPollDelayMs?: number;
-  /** 對帳窗口（默認 24h：窗口耗盡 → 凍結人工，不退款）。 */
+  /** 对帐窗口（默认 24h：窗口耗尽 → 冻结人工，不退款）。 */
   reconcileWindowMs?: number;
 }, sql: GenerationSql = getGenerationSql()): Promise<boolean> {
   const delaySec = Math.max(1, Math.floor((input.firstPollDelayMs ?? 60_000) / 1000));
@@ -543,9 +543,9 @@ export async function markProviderTaskSubmitted(input: {
 }
 
 /**
- * job 進入對帳凍結（submit_unknown）：deadline 到/租約易主/輪詢斷，但已知有
- * 上游任務在跑。錢凍結在 reserve，等 provider-reconciliation 查出真相再結算。
- * 只清租約不動計費；已排程的對帳不受影響，未排程的（回調寫入失敗的殘留）立刻補排。
+ * job 进入对帐冻结（submit_unknown）：deadline 到/租约易主/轮询断，但已知有
+ * 上游任务在跑。钱冻结在 reserve，等 provider-reconciliation 查出真相再结算。
+ * 只清租约不动计费；已排程的对帐不受影响，未排程的（回调写入失败的残留）立刻补排。
  */
 export async function freezeGenerationJobForReconciliation(input: {
   jobId: string;
@@ -584,9 +584,9 @@ export async function freezeGenerationJobForReconciliation(input: {
 }
 
 /**
- * 對帳確認上游成功、artifact 已落庫後，把已判死/殭屍的 job 復活為 succeeded。
- * CAS 只碰非活躍 job（活躍 job 的交付由 worker 正常路徑完成）；計費結算交給
- * reconcileGenerationBilling 的 terminalReservedJobs 通道（冪等 commit）。
+ * 对帐确认上游成功、artifact 已落库后，把已判死/僵尸的 job 复活为 succeeded。
+ * CAS 只碰非活跃 job（活跃 job 的交付由 worker 正常路径完成）；计费结算交给
+ * reconcileGenerationBilling 的 terminalReservedJobs 通道（幂等 commit）。
  */
 export async function reviveGenerationJobWithArtifacts(input: {
   jobId: string;
@@ -622,8 +622,8 @@ export async function reviveGenerationJobWithArtifacts(input: {
 }
 
 /**
- * 對帳確認上游失敗後的收尾：job 沒有可交付產出且對帳窗口已無在飛任務 →
- * 誠實終結為 failed。退款由調用方走 refundGenerationBilling（僅認上游確認失敗）。
+ * 对帐确认上游失败后的收尾：job 没有可交付产出且对帐窗口已无在飞任务 →
+ * 诚实终结为 failed。退款由调用方走 refundGenerationBilling（仅认上游确认失败）。
  */
 export async function failGenerationJobForReconciliation(input: {
   jobId: string;
@@ -652,7 +652,7 @@ export async function failGenerationJobForReconciliation(input: {
   return true;
 }
 
-/** job 是否仍有真相未明的已提交上游任務（INC-0831：deadline/失敗路徑先查這個再動錢）。 */
+/** job 是否仍有真相未明的已提交上游任务（INC-0831：deadline/失败路径先查这个再动钱）。 */
 export async function jobHasUnresolvedProviderTask(jobId: string, sql: GenerationSql = getGenerationSql()): Promise<boolean> {
   const rows = await sql<{ id: string }[]>`
     SELECT id FROM generation_attempt
@@ -688,15 +688,15 @@ export interface GenerationAttemptSummary {
   providerHttpStatus: number | null;
   latencyMs: number | null;
   failureClass: string | null;
-  /** 上游失敗原文（僅 failed attempt 有）。worker 診斷排除鏈時帶給 supplier_excluded 訊息。 */
+  /** 上游失败原文（仅 failed attempt 有）。worker 诊断排除链时带给 supplier_excluded 讯息。 */
   failureDetail: string | null;
-  /** FG-01：版本化失敗記錄（原生欄位逐字保留）；讀不出來（未知版本/壞結構）為 null。 */
+  /** FG-01：版本化失败记录（原生栏位逐字保留）；读不出来（未知版本/坏结构）为 null。 */
   failureRecord: FailureRecord | null;
   supplierLabel: string;
   supplierBaseUrl: string;
 }
 
-/** /v1/videos/[id] attempts 摘要行（INC-0830-VIDEO，plain object，供網關 rerun 防重消費）。 */
+/** /v1/videos/[id] attempts 摘要行（INC-0830-VIDEO，plain object，供网关 rerun 防重消费）。 */
 export interface VideoAttemptSummary {
   attempt_no: number;
   output_index: number;
@@ -704,13 +704,13 @@ export interface VideoAttemptSummary {
   status: string;
   provider_task_id: string | null;
   failure_class: string | null;
-  /** 截斷 300 字的失敗原文。 */
+  /** 截断 300 字的失败原文。 */
   failure_detail: string | null;
   submitted_at: string;
   finished_at: string | null;
 }
 
-/** 讀取 job 的全部 attempt 摘要（attempt_no 升冪）。只讀，job 不存在時返回空數組。 */
+/** 读取 job 的全部 attempt 摘要（attempt_no 升幂）。只读，job 不存在时返回空数组。 */
 export async function listVideoAttemptSummariesForJob(jobId: string, sql: GenerationSql = getGenerationSql()): Promise<VideoAttemptSummary[]> {
   const rows = await sql<{
     attempt_no: number;
@@ -784,7 +784,7 @@ export async function failGenerationJob(input: {
   workerId?: string;
   failureClass: FailureClass;
   failureDetail: string;
-  /** FG-01：終態失敗也要留版本化原生記錄（帳本之外的可回溯真相）。 */
+  /** FG-01：终态失败也要留版本化原生记录（帐本之外的可回溯真相）。 */
   failureRecord?: FailureRecord | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<void> {
   const rows = await sql<{ id: string }[]>`
@@ -798,8 +798,8 @@ export async function failGenerationJob(input: {
       AND status NOT IN ('succeeded', 'failed', 'cancelled')
     RETURNING id
   `;
-  // audit P2-1（INC-0830-VIDEO）：終態不靜默。僅在實際狀態遷移時補發 job_failed
-  // （fire-and-forget，遙測不擋主流程）；重複調用（已終態）不再發。
+  // audit P2-1（INC-0830-VIDEO）：终态不静默。仅在实际状态迁移时补发 job_failed
+  // （fire-and-forget，遥测不挡主流程）；重复调用（已终态）不再发。
   if (rows[0]) {
     emitJobEvent({
       jobId: input.jobId,
@@ -841,9 +841,9 @@ export async function cancelGenerationJob(
   tenantId: string,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<{ cancelled: boolean; previousStatus: GenerationJobStatus | null }> {
-  // previous_status 經 CTE 快照取回（UPDATE ... RETURNING 只能拿到新值）。
-  // CAS 的 status IN 條件保證只有可取消態才會更新成功；快照與實際前一態在
-  // 併發下可能偶有偏差，但它只進入遙測 detail，不參與結算判斷。
+  // previous_status 经 CTE 快照取回（UPDATE ... RETURNING 只能拿到新值）。
+  // CAS 的 status IN 条件保证只有可取消态才会更新成功；快照与实际前一态在
+  // 并发下可能偶有偏差，但它只进入遥测 detail，不参与结算判断。
   const rows = await sql<{ id: string; previous_status: string | null }[]>`
     WITH previous AS (
       SELECT status FROM generation_job WHERE id = ${jobId} AND tenant_id = ${tenantId} LIMIT 1
@@ -879,8 +879,8 @@ export async function recoverExpiredGenerationLeases(sql: GenerationSql = getGen
       WHERE status = 'leased' AND lease_expires_at < now()
       RETURNING id
     `;
-    // INC-0831：submit_unknown 不再是死路——同時把未排程的對帳（task id 已知）補排，
-    // 讓 provider-reconciliation 接手查真相；錢凍結在 reserve，真相出來才結算。
+    // INC-0831：submit_unknown 不再是死路——同时把未排程的对帐（task id 已知）补排，
+    // 让 provider-reconciliation 接手查真相；钱冻结在 reserve，真相出来才结算。
     const unknown = await tx<{ id: string }[]>`
       UPDATE generation_job
       SET status = 'submit_unknown', failure_class = 'unknown',

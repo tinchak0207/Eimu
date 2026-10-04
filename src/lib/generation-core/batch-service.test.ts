@@ -90,15 +90,15 @@ function expectReject(
   result: { ok: boolean; error?: { code: string; type?: string }; code?: string },
   code: string,
 ): void {
-  assert.equal(result.ok, false, `期望被拒（${code}），實際通過`);
+  assert.equal(result.ok, false, `期望被拒（${code}），实际通过`);
   if (result.ok) return;
-  // validateBatchItem 的錯誤碼在 error.code；validateBatchRequestBody 的在頂層 code。
+  // validateBatchItem 的错误码在 error.code；validateBatchRequestBody 的在顶层 code。
   assert.equal(result.error?.code ?? result.code, code);
 }
 
-// ── 批級結構驗證 ────────────────────────────────────────────
+// ── 批级结构验证 ────────────────────────────────────────────
 
-test("validateBatchRequestBody：合法預設與 max_in_flight", () => {
+test("validateBatchRequestBody：合法预设与 max_in_flight", () => {
   const ok = validateBatchRequestBody({ requests: [{ prompt: "a", model: IMAGE_MODEL }] });
   assert.equal(ok.ok, true);
   if (ok.ok) {
@@ -110,7 +110,7 @@ test("validateBatchRequestBody：合法預設與 max_in_flight", () => {
   if (withInFlight.ok) assert.equal(withInFlight.maxInFlight, 8);
 });
 
-test("validateBatchRequestBody：形狀錯誤逐碼拒絕", () => {
+test("validateBatchRequestBody：形状错误逐码拒绝", () => {
   expectReject(validateBatchRequestBody(null), "invalid_request_body");
   expectReject(validateBatchRequestBody({}), "missing_requests");
   expectReject(validateBatchRequestBody({ requests: [] }), "empty_requests");
@@ -124,9 +124,9 @@ test("批量上限正好卡在 MAX_BATCH_SIZE（100）", () => {
   assert.equal(exactly.ok, true);
 });
 
-// ── 逐項驗證 ────────────────────────────────────────────────
+// ── 逐项验证 ────────────────────────────────────────────────
 
-test("inferBatchItemKind：顯式 kind 優先，欄位判別次之，缺省 image", () => {
+test("inferBatchItemKind：显式 kind 优先，栏位判别次之，缺省 image", () => {
   assert.equal(inferBatchItemKind({ kind: "video" }), "video");
   assert.equal(inferBatchItemKind({ kind: "image_generate" }), "image");
   assert.equal(inferBatchItemKind({ duration_seconds: 5 }), "video");
@@ -136,8 +136,8 @@ test("inferBatchItemKind：顯式 kind 優先，欄位判別次之，缺省 imag
   assert.equal(inferBatchItemKind({ kind: 123 }), null);
 });
 
-test("validateBatchItem 圖片默認值與單任務端點對齊", () => {
-  const result = validateBatchItem({ model: IMAGE_MODEL, prompt: " 一隻貓 " }, 0, key);
+test("validateBatchItem 图片默认值与单任务端点对齐", () => {
+  const result = validateBatchItem({ model: IMAGE_MODEL, prompt: " 一只猫 " }, 0, key);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.plan.kind, "image_generate");
@@ -148,11 +148,11 @@ test("validateBatchItem 圖片默認值與單任務端點對齊", () => {
   assert.equal(result.plan.responseFormat, "b64_json");
   assert.equal(result.plan.routingClass, "generic");
   assert.equal(result.plan.requestedCount, 1);
-  assert.equal(result.plan.prompt, "一隻貓");
+  assert.equal(result.plan.prompt, "一只猫");
   assert.equal(result.plan.billingAmount, imageGenerationCoins(IMAGE_MODEL, "fast") * QUOTA_PER_COIN);
 });
 
-test("validateBatchItem hd 質量與 firefly 路由對齊", () => {
+test("validateBatchItem hd 质量与 firefly 路由对齐", () => {
   const hd = validateBatchItem({ model: IMAGE_MODEL, prompt: "x", quality: "hd", n: 2 }, 0, key);
   assert.equal(hd.ok, true);
   if (hd.ok) {
@@ -165,7 +165,7 @@ test("validateBatchItem hd 質量與 firefly 路由對齊", () => {
   if (firefly.ok) assert.equal(firefly.plan.routingClass, "firefly_only");
 });
 
-test("validateBatchItem 視頻項強制 url、走 catalog 歸一化", () => {
+test("validateBatchItem 视频项强制 url、走 catalog 归一化", () => {
   const result = validateBatchItem(
     { kind: "video", model: VIDEO_MODEL, prompt: "x", size: "16:9", duration_seconds: 5 },
     0,
@@ -187,7 +187,7 @@ test("validateBatchItem 視頻項強制 url、走 catalog 歸一化", () => {
   );
 });
 
-test("validateBatchItem 逐項錯誤碼與單任務端點一致", () => {
+test("validateBatchItem 逐项错误码与单任务端点一致", () => {
   expectReject(validateBatchItem({ model: IMAGE_MODEL }, 0, key), "missing_prompt");
   expectReject(validateBatchItem({ prompt: "x" }, 0, key), "missing_model");
   expectReject(validateBatchItem({ prompt: "x", model: "no-such-model" }, 0, key), "model_not_found");
@@ -197,7 +197,7 @@ test("validateBatchItem 逐項錯誤碼與單任務端點一致", () => {
   expectReject(validateBatchItem("not an object", 0, key), "invalid_item");
 });
 
-test("validateBatchItem 金鑰模型白名單逐項拒絕（permission_error）", () => {
+test("validateBatchItem 金钥模型白名单逐项拒绝（permission_error）", () => {
   const result = validateBatchItem({ prompt: "x", model: IMAGE_MODEL }, 0, restrictedKey);
   assert.equal(result.ok, false);
   if (result.ok) return;
@@ -205,9 +205,9 @@ test("validateBatchItem 金鑰模型白名單逐項拒絕（permission_error）"
   assert.equal(result.error.type, "permission_error");
 });
 
-// ── 冪等 ────────────────────────────────────────────────────
+// ── 幂等 ────────────────────────────────────────────────────
 
-test("batchRequestHash 鍵序無關、內容敏感", () => {
+test("batchRequestHash 键序无关、内容敏感", () => {
   const left = batchRequestHash([{ model: IMAGE_MODEL, prompt: "a", n: 1 }]);
   const right = batchRequestHash([{ n: 1, prompt: "a", model: IMAGE_MODEL }]);
   assert.equal(left, right);
@@ -215,14 +215,14 @@ test("batchRequestHash 鍵序無關、內容敏感", () => {
   assert.notEqual(left, different);
 });
 
-test("batchItemIdempotencyKey 由 batch 與 index 確定性派生", () => {
+test("batchItemIdempotencyKey 由 batch 与 index 确定性派生", () => {
   assert.equal(batchItemIdempotencyKey("b1", 0), "batch:b1:item:0");
   assert.equal(batchItemIdempotencyKey("b1", 7), "batch:b1:item:7");
 });
 
-// ── 聚合數學 ────────────────────────────────────────────────
+// ── 聚合数学 ────────────────────────────────────────────────
 
-test("computeBatchAggregate：counts 分桶 + unsubmitted + 金額三桶", () => {
+test("computeBatchAggregate：counts 分桶 + unsubmitted + 金额三桶", () => {
   const batch = fakeBatch({ totalCount: 6 });
   const jobs = [
     fakeJob({ id: "j0", status: "succeeded", billingAmount: 100, batchIndex: 0, finishedAt: new Date() }),
@@ -249,7 +249,7 @@ test("computeBatchAggregate：counts 分桶 + unsubmitted + 金額三桶", () =>
   assert.equal(aggregate.status, "open");
 });
 
-test("computeBatchAggregate：全部終結 → completed（未提交項不算在途）", () => {
+test("computeBatchAggregate：全部终结 → completed（未提交项不算在途）", () => {
   const batch = fakeBatch({
     totalCount: 3,
     failedItems: [{ index: 2, code: "missing_prompt", message: "x", type: "invalid_request_error" }],
@@ -273,13 +273,13 @@ test("computeBatchAggregate：全部被拒 → 立即 completed", () => {
   assert.equal(aggregate.counts.unsubmitted, 1);
 });
 
-test("computeBatchAggregate：cancelled 批的判定不被覆寫", () => {
+test("computeBatchAggregate：cancelled 批的判定不被覆写", () => {
   const batch = fakeBatch({ status: "cancelled" });
   const aggregate = computeBatchAggregate(batch, [fakeJob({ status: "succeeded" })]);
   assert.equal(aggregate.status, "cancelled");
 });
 
-test("computeBatchAggregate：billing_unknown / submit_unknown 都歸 unknown 桶", () => {
+test("computeBatchAggregate：billing_unknown / submit_unknown 都归 unknown 桶", () => {
   const jobs: GenerationJob[] = [
     fakeJob({ status: "billing_unknown" }),
     fakeJob({ status: "submit_unknown" }),
@@ -290,30 +290,30 @@ test("computeBatchAggregate：billing_unknown / submit_unknown 都歸 unknown �
   assert.equal(aggregate.counts.running, 0);
 });
 
-// ── 逐項視圖 ────────────────────────────────────────────────
+// ── 逐项视图 ────────────────────────────────────────────────
 
-test("toBatchItemView：不洩漏密文/workflow/lease；billed 只在 succeeded", () => {
+test("toBatchItemView：不泄漏密文/workflow/lease；billed 只在 succeeded", () => {
   const view = toBatchItemView(fakeJob({ id: "j0", batchIndex: 2, status: "succeeded", finishedAt: new Date() }));
   assert.equal(view.task_id, "j0");
   assert.equal(view.index, 2);
   assert.equal(view.accepted, true);
   assert.equal(view.billed, true);
   assert.equal(view.task_url, "/v1/images/j0");
-  assert.ok(!("promptCiphertext" in view), "不得帶 prompt 密文");
-  assert.ok(!("workflow" in view), "不得帶 workflow 內部結構");
-  assert.ok(!("leaseOwner" in view), "不得帶租約內部字段");
+  assert.ok(!("promptCiphertext" in view), "不得带 prompt 密文");
+  assert.ok(!("workflow" in view), "不得带 workflow 内部结构");
+  assert.ok(!("leaseOwner" in view), "不得带租约内部字段");
   const running = toBatchItemView(fakeJob({ status: "running" }));
   assert.equal(running.billed, false);
   const video = toBatchItemView(fakeJob({ kind: "video_generate", id: "v1" }));
   assert.equal(video.task_url, "/v1/videos/v1");
 });
 
-test("buildBatchItems：jobs 與拒絕項按 index 合併排序", () => {
+test("buildBatchItems：jobs 与拒绝项按 index 合并排序", () => {
   const batch = fakeBatch({
     totalCount: 3,
     failedItems: [
       { index: 0, code: "missing_prompt", message: "缺少必填参数 prompt。", type: "invalid_request_error" },
-      { index: 2, code: "stale", message: "已被任務覆蓋，不應出現", type: "invalid_request_error" },
+      { index: 2, code: "stale", message: "已被任务覆盖，不应出现", type: "invalid_request_error" },
     ],
   });
   const jobs = [
@@ -330,7 +330,7 @@ test("buildBatchItems：jobs 與拒絕項按 index 合併排序", () => {
   assert.equal(items[2].task_id, "j2");
 });
 
-test("computeBatchFailureBreakdown：failure_class 與拒絕碼各計數、按量排序", () => {
+test("computeBatchFailureBreakdown：failure_class 与拒绝码各计数、按量排序", () => {
   const batch = fakeBatch({
     totalCount: 5,
     failedItems: [
@@ -350,7 +350,7 @@ test("computeBatchFailureBreakdown：failure_class 與拒絕碼各計數、按�
   ]);
 });
 
-test("toBatchReconciliationItem：對賬行帶金額且截斷 failure_detail", () => {
+test("toBatchReconciliationItem：对账行带金额且截断 failure_detail", () => {
   const longDetail = "x".repeat(500);
   const item = toBatchReconciliationItem(
     fakeJob({ status: "failed", failureClass: "overloaded", failureDetail: longDetail, billingAmount: 77, batchIndex: 4 }),
@@ -361,7 +361,7 @@ test("toBatchReconciliationItem：對賬行帶金額且截斷 failure_detail", (
   assert.equal(item.failure_detail?.length, 200);
 });
 
-test("buildBatchReconciliationItems：拒絕項的金額為 0、帶 error_code", () => {
+test("buildBatchReconciliationItems：拒绝项的金额为 0、带 error_code", () => {
   const batch = fakeBatch({
     totalCount: 2,
     failedItems: [{ index: 1, code: "invalid_n", message: "x", type: "invalid_request_error" }],
@@ -376,7 +376,7 @@ test("buildBatchReconciliationItems：拒絕項的金額為 0、帶 error_code",
   assert.equal(items[1].task_id, null);
 });
 
-test("狀態全集投影：聚合涵蓋所有內部狀態不漏計", () => {
+test("状态全集投影：聚合涵盖所有内部状态不漏计", () => {
   const statuses: GenerationJobStatus[] = [
     "pending_billing",
     "billing_unknown",

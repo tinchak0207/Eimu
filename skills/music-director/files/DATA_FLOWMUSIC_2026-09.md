@@ -188,7 +188,7 @@ updated: "2026-09-11"
     · Writing lyrics as clearly delimited sections. The tag vocabulary is
       understood and re-emitted.
 
-  SUSPEND on this path (mark as “此通路無效” wherever the recipes teach them):
+  SUSPEND on this path (mark as “此通路无效” wherever the recipes teach them):
     · **Timed structure `[0:00 - 0:10] …`** — no time-code control exists between
       here and the song tool, and it did not constrain length.
     · **“The lyrics you write are what gets sung, verbatim.”** They are anchors:

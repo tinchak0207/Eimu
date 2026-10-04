@@ -4,9 +4,9 @@ import { gatewayReadSnapshot } from "../lib/canvas-flow"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
-// workflow_history — 人機共筆的「版本面」：讀當前產線的可逆聲明（dsl）與各節點版本史。
-// 版本史住在畫布端（append-only，單節點 20 版 / 單專案 400 版；挪位置/調尺寸不佔版本），
-// agent 讀索引後指名 version 交 workflow_rollback，不必把舊 metadata 抄進上下文。
+// workflow_history — 人机共笔的「版本面」：读当前产线的可逆声明（dsl）与各节点版本史。
+// 版本史住在画布端（append-only，单节点 20 版 / 单专案 400 版；挪位置/调尺寸不占版本），
+// agent 读索引后指名 version 交 workflow_rollback，不必把旧 metadata 抄进上下文。
 export default tool({
   description:
     "读取工作流当前的可逆声明（dsl）与节点版本史。用在：要回滚某一步的内容（先看该节点有哪些 version）、或要在改前确认当前声明基线。\n\n" +

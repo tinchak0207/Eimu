@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""modal_common.py — blender-modal POC 純邏輯層（stdlib only，本地可單測）。
+"""modal_common.py — blender-modal POC 纯逻辑层（stdlib only，本地可单测）。
 
-分層輪子：liqi155134/blender_modal_bridge 的 farm_common.py（「pure protocol
-functions ... unit-tested」）同構——Modal 容器內與本機 worker 共用的純函數
-全部收在本檔，Modal 邊界（import modal）只許出現在 modal_app.py / worker 的
-執行路徑，不進本檔，保證本地可跑。
+分层轮子：liqi155134/blender_modal_bridge 的 farm_common.py（「pure protocol
+functions ... unit-tested」）同构——Modal 容器内与本机 worker 共用的纯函数
+全部收在本档，Modal 边界（import modal）只许出现在 modal_app.py / worker 的
+执行路径，不进本档，保证本地可跑。
 
-內容：
-  - build_turntable_script(): 確定性場景構建腳本生成（片M 存活配方：pivot
-    全跨度關鍵幀、不觸 .fcurves 5.2 雷區、無隨機無環境依賴）
-  - ffmpeg_image2_args(): PNG 序列→mp4 參數（片L 實錘：image2 demuxer；
+内容：
+  - build_turntable_script(): 确定性场景构建脚本生成（片M 存活配方：pivot
+    全跨度关键帧、不触 .fcurves 5.2 雷区、无随机无环境依赖）
+  - ffmpeg_image2_args(): PNG 序列→mp4 参数（片L 实锤：image2 demuxer；
     片M 配方；list-form 免 shell 注入面）
-  - HMAC 簽名/驗證（web endpoint 鑑權，X-Render-Signature）
-  - kind_from_path() / tail() / bridge_envelope(): bridge 契約欄位同構件
+  - HMAC 签名/验证（web endpoint 鉴权，X-Render-Signature）
+  - kind_from_path() / tail() / bridge_envelope(): bridge 契约栏位同构件
 """
 from __future__ import annotations
 
@@ -23,13 +23,13 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-# bridge server.py 契約的 kind 枚舉（additive-only，枚舉面不得自創）
+# bridge server.py 契约的 kind 枚举（additive-only，枚举面不得自创）
 BRIDGE_KINDS = ("blend", "png", "mp4", "glb", "other")
-# 與本機橋 test/smoke 同名頭；worker 與 endpoint 兩端共用此常量
+# 与本机桥 test/smoke 同名头；worker 与 endpoint 两端共用此常量
 SIGNATURE_HEADER = "X-Render-Signature"
 
 
-# ---------------------------------------------------------------- 場景構建
+# ---------------------------------------------------------------- 场景构建
 
 
 def build_turntable_script(
@@ -39,20 +39,20 @@ def build_turntable_script(
     radius: float = 4.2,
     height: float = 1.6,
 ) -> str:
-    """生成確定性 turntable 場景構建腳本（單次 exec 進 bpy 即得完整場景）。
+    """生成确定性 turntable 场景构建脚本（单次 exec 进 bpy 即得完整场景）。
 
-    片M 存活配方約束：
-      - pivot/關鍵幀按「全跨度」一次算好——任何單幀調用重建出的場景逐位相同
-        （serverless 每幀一個新容器，場景無法跨調用駐留，確定性=正確性）；
-      - 只用 keyframe_insert，不觸 action.fcurves（5.2 slotted action 雷區，
-        片M/片C 實錘；插值走默認 Bezier，POC 可接受）；
-      - 腳本自含、無隨機、無環境依賴。
+    片M 存活配方约束：
+      - pivot/关键帧按「全跨度」一次算好——任何单帧调用重建出的场景逐位相同
+        （serverless 每帧一个新容器，场景无法跨调用驻留，确定性=正确性）；
+      - 只用 keyframe_insert，不触 action.fcurves（5.2 slotted action 雷区，
+        片M/片C 实锤；插值走默认 Bezier，POC 可接受）；
+      - 脚本自含、无随机、无环境依赖。
     """
     return f"""# Auto-generated deterministic turntable scene (blender-modal POC)
 # full-span keyframes per 2026-09-06 片M survival recipe; no .fcurves access (5.2 minefield)
 import bpy, math
 
-bpy.ops.wm.read_factory_settings(use_empty=True)  # 必須先重置再抓 scene 引用——否則 StructRNA of type Scene has been removed（真雲實錘）
+bpy.ops.wm.read_factory_settings(use_empty=True)  # 必须先重置再抓 scene 引用——否则 StructRNA of type Scene has been removed（真云实锤）
 
 scene = bpy.context.scene
 scene.frame_start = {first_frame}
@@ -116,11 +116,11 @@ def ffmpeg_image2_args(
     start_number: int = 0,
     ffmpeg_bin: Optional[str] = None,
 ) -> List[str]:
-    """PNG 序列→h264 mp4 參數（list-form，無 shell）。
+    """PNG 序列→h264 mp4 参数（list-form，无 shell）。
 
-    白名單偏離主輪子（官方 blender_video 用 glob+shell=True）的理由：
-      - 片L 實錘 concat 對 PNG 丟幀、image2 demuxer 才是可靠通道（本機
-        ffmpeg 9.0.1 + 片M 96 幀 30fps 實彈驗證過同一參數形）；
+    白名单偏离主轮子（官方 blender_video 用 glob+shell=True）的理由：
+      - 片L 实锤 concat 对 PNG 丢帧、image2 demuxer 才是可靠通道（本机
+        ffmpeg 9.0.1 + 片M 96 帧 30fps 实弹验证过同一参数形）；
       - list-form 免 shell 注入面（片M：spawn 不走 shell）。
     """
     return [
@@ -140,7 +140,7 @@ def ffmpeg_image2_args(
 
 
 def sign_hex(key: str, body: bytes) -> str:
-    """HMAC-SHA256(key, body).hexdigest —— worker 與 endpoint 兩端同一實現。"""
+    """HMAC-SHA256(key, body).hexdigest —— worker 与 endpoint 两端同一实现。"""
     return hmac.new(key.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
@@ -150,7 +150,7 @@ def verify_signature(key: str, body: bytes, signature: str) -> bool:
     return hmac.compare_digest(sign_hex(key, body), signature)
 
 
-# ---------------------------------------------------------------- bridge 契約同構件
+# ---------------------------------------------------------------- bridge 契约同构件
 
 
 def kind_from_path(path: str) -> str:
@@ -165,7 +165,7 @@ def kind_from_path(path: str) -> str:
 
 
 def tail(text: str, limit: int = 2000) -> str:
-    """bridge stdout_tail 語義：最後 ≤2000 字符。"""
+    """bridge stdout_tail 语义：最后 ≤2000 字符。"""
     text = text or ""
     return text[-limit:]
 
@@ -180,14 +180,14 @@ def bridge_envelope(
     error: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """組裝 bridge /v1/execute 同構回應。
+    """组装 bridge /v1/execute 同构回应。
 
-    契約基準（bridge/blender-bridge/server.py L14-19，additive-only）：
+    契约基准（bridge/blender-bridge/server.py L14-19，additive-only）：
       200 {ok, artifacts:[{path,bytes,kind}], scene_summary, stdout_tail,
            duration_ms, queued, queue_position}
-    本 POC 恆為「有槽即跑」：queued=false, queue_position=0（Modal 併發
-    由平台調度，應用層無佇列）。artifacts 條目附加 b64 欄（雲端產物傳輸
-    必需）與 extra 欄位——均為 additive，不動既有欄位語義。
+    本 POC 恒为「有槽即跑」：queued=false, queue_position=0（Modal 并发
+    由平台调度，应用层无伫列）。artifacts 条目附加 b64 栏（云端产物传输
+    必需）与 extra 栏位——均为 additive，不动既有栏位语义。
     """
     resp: Dict[str, Any] = {
         "ok": bool(ok),
@@ -206,7 +206,7 @@ def bridge_envelope(
 
 
 def artifact_entry(path: str, size: int, data: Optional[bytes] = None) -> Dict[str, Any]:
-    """構造 bridge 形 artifacts 條目；data 給出時附 b64（additive 欄）。"""
+    """构造 bridge 形 artifacts 条目；data 给出时附 b64（additive 栏）。"""
     entry: Dict[str, Any] = {
         "path": path,
         "bytes": int(size),
@@ -217,70 +217,70 @@ def artifact_entry(path: str, size: int, data: Optional[bytes] = None) -> Dict[s
     return entry
 
 
-# ---------------------------------------------------------------- 自測（本地跑）
+# ---------------------------------------------------------------- 自测（本地跑）
 
 
 def _self_test() -> int:
     failures = []
 
-    # 1. 場景構建腳本：確定性 + 全跨度關鍵幀 + 禁區未觸
+    # 1. 场景构建脚本：确定性 + 全跨度关键帧 + 禁区未触
     s1 = build_turntable_script(1, 96, 30)
     s2 = build_turntable_script(1, 96, 30)
     if s1 != s2:
-        failures.append("build_turntable_script 非確定性")
+        failures.append("build_turntable_script 非确定性")
     for marker in ("frame_start = 1", "frame_end = 96", "render.fps = 30",
                    "keyframe_insert", "turntable_pivot", "TRACK_NEGATIVE_Z"):
         if marker not in s1:
-            failures.append(f"場景腳本缺 marker: {marker}")
+            failures.append(f"场景脚本缺 marker: {marker}")
     for banned in (".fcurves", 'file_format="FFMPEG"', "BLENDER_EEVEE_NEXT"):
-        # 只掃代碼行（註釋裡的「no .fcurves」是警示不是觸雷）
+        # 只扫代码行（注释里的「no .fcurves」是警示不是触雷）
         code = "\n".join(l for l in s1.splitlines() if not l.lstrip().startswith("#"))
         if banned in code:
-            failures.append(f"場景腳本觸 5.2 雷區: {banned}")
+            failures.append(f"场景脚本触 5.2 雷区: {banned}")
     s3 = build_turntable_script(10, 25, 24)
     if "frame_start = 10" not in s3 or "frame_end = 25" not in s3 or "render.fps = 24" not in s3:
-        failures.append("參數未注入場景腳本")
+        failures.append("参数未注入场景脚本")
 
-    # 2. ffmpeg 參數形（片M 同構）
+    # 2. ffmpeg 参数形（片M 同构）
     args = ffmpeg_image2_args("/tmp/out", 30, "/tmp/out/a.mp4", ffmpeg_bin="ffx")
     want = ["ffx", "-y", "-framerate", "30", "-start_number", "0",
             "-i", "/tmp/out/frame_%04d.png", "-c:v", "libx264",
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", "/tmp/out/a.mp4"]
     if args != want:
-        failures.append(f"ffmpeg 參數形不符: {args}")
+        failures.append(f"ffmpeg 参数形不符: {args}")
     args2 = ffmpeg_image2_args("/o", 24, "/o/b.mp4", start_number=11, ffmpeg_bin=None)
     if args2[0] != os.environ.get("BLENDER_FFMPEG_BIN", "ffmpeg") or "-start_number" not in args2:
-        failures.append("ffmpeg 預設 bin / start_number 異常")
+        failures.append("ffmpeg 预设 bin / start_number 异常")
 
     # 3. HMAC
     k = "unit-test-key"
     sig = sign_hex(k, b"hello")
     if not verify_signature(k, b"hello", sig) or verify_signature(k, b"hello2", sig) \
             or verify_signature("bad", b"hello", sig) or verify_signature(k, b"hello", ""):
-        failures.append("HMAC 簽驗迴路失敗")
+        failures.append("HMAC 签验回路失败")
 
     # 4. kind/tail/envelope
     if [kind_from_path("out/a.png"), kind_from_path("out/b.mp4"), kind_from_path("c.blend"),
             kind_from_path("d.glb"), kind_from_path("e.txt")] != ["png", "mp4", "blend", "glb", "other"]:
-        failures.append("kind_from_path 枚舉錯")
+        failures.append("kind_from_path 枚举错")
     if tail("x" * 3000) != "x" * 2000:
-        failures.append("tail 語義錯")
+        failures.append("tail 语义错")
     env = bridge_envelope(ok=True, artifacts=[artifact_entry("out/frame_0001.png", 123, b"PNG")],
                           scene_summary="s", stdout_tail="t" * 2500, duration_ms=7,
                           extra={"frame_count": 1})
     for field in ("ok", "artifacts", "scene_summary", "stdout_tail", "duration_ms",
                   "queued", "queue_position"):
         if field not in env:
-            failures.append(f"bridge_envelope 缺契約欄位 {field}")
+            failures.append(f"bridge_envelope 缺契约栏位 {field}")
     if env["artifacts"][0] != {"path": "out/frame_0001.png", "bytes": 123, "kind": "png",
                                "b64": base64.b64encode(b"PNG").decode("ascii")}:
-        failures.append("artifact_entry 形狀錯")
+        failures.append("artifact_entry 形状错")
     if len(env["stdout_tail"]) != 2000 or env["queued"] is not False or env["queue_position"] != 0:
-        failures.append("envelope tail/queued 語義錯")
+        failures.append("envelope tail/queued 语义错")
 
-    # 5. PNG 簽名驗真 helper（worker 用）
+    # 5. PNG 签名验真 helper（worker 用）
     if not looks_like_png(b"\x89PNG\r\n\x1a\n" + b"0" * 16) or looks_like_png(b"JFIF-not-png"):
-        failures.append("looks_like_png 判定錯")
+        failures.append("looks_like_png 判定错")
 
     if failures:
         for f in failures:

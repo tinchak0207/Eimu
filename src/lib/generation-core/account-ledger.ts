@@ -1,46 +1,46 @@
-// REQ-E1a 我方帳本（餘額權威）——「客戶可見餘額的權威歸我方帳本」（暴君 2026-09-23 裁定）。
+// REQ-E1a 我方帐本（余额权威）——「客户可见余额的权威归我方帐本」（暴君 2026-09-23 裁定）。
 //
-// 為什麼要有本檔：waoowaoo BA-07「賬本唯一 writer」。new-api 內核在 relay 前扣
-// `users.quota`，與我方帳本構成雙寫（B1 真轉移更讓兩層同時變動）；只要對外餘額直接
-// 讀 new-api，我方就永遠說不清「這個數字是怎麼來的」。本檔把對外餘額的計算源搬回
-// 我方帳本：`account_ledger` 是 append-only 的有號流水，餘額 = Σ amount（單一公式，
-// 見 computeAccountBalance）。new-api 的 users.quota 降格為「上游供貨水位」與內核
-// 執法點，只作對帳另一側（見 account-reconciliation.ts）。
+// 为什么要有本档：waoowaoo BA-07「账本唯一 writer」。new-api 内核在 relay 前扣
+// `users.quota`，与我方帐本构成双写（B1 真转移更让两层同时变动）；只要对外余额直接
+// 读 new-api，我方就永远说不清「这个数字是怎么来的」。本档把对外余额的计算源搬回
+// 我方帐本：`account_ledger` 是 append-only 的有号流水，余额 = Σ amount（单一公式，
+// 见 computeAccountBalance）。new-api 的 users.quota 降格为「上游供货水位」与内核
+// 执法点，只作对帐另一侧（见 account-reconciliation.ts）。
 //
-// 加項 / 減項（完整判別表，權威在本檔）：
-//   + opening      上線基線（以 new-api 當時 users.quota 種入，可為負）
-//   + recharge     充值入帳（new-api 兌換碼被使用）
-//   + refund       任務退款
-//   + transfer_in  B1 成員收到分配
-//   ± adjustment   管理員加減額度（建戶初始額度／人工補正）
-//   − consumption  消費扣費（legacy reserve 的上游扣款、gate path 投影扣款）
-//   − transfer_out B1 主帳劃出給成員
-//   不入帳：writeoff（平台自身損失，不影響用戶 users.quota）。
+// 加项 / 减项（完整判别表，权威在本档）：
+//   + opening      上线基线（以 new-api 当时 users.quota 种入，可为负）
+//   + recharge     充值入帐（new-api 兑换码被使用）
+//   + refund       任务退款
+//   + transfer_in  B1 成员收到分配
+//   ± adjustment   管理员加减额度（建户初始额度／人工补正）
+//   − consumption  消费扣费（legacy reserve 的上游扣款、gate path 投影扣款）
+//   − transfer_out B1 主帐划出给成员
+//   不入帐：writeoff（平台自身损失，不影响用户 users.quota）。
 //
-// REQ-D3（訂閱 SKU）在原模型上加**一個維度**（不新造第二條帳務通道）：每一列可標
-//   pool        'permanent'（默認）｜'subscription'
-//   term_ref    'sub:<訂閱 id>:term:<期次序號>'（永久池 NULL）
-//   expires_at  該期到期時刻（訂閱池必填）
-// 兩個餘額口徑（單一權威在本檔 + subscription-sku.ts）：
-//   book(user)      = Σ amount                                    ← 帳面淨額（對帳用，不變）
-//   available(user) = 永久池 Σ + **未過期**訂閱池 Σ（讀取時 lazy 判定，不依賴 cron）
-// 加減項新增一種：
-//   − expire       訂閱續期替換：舊期未用完餘額在寫入時作廢（見 subscription.ts）
+// REQ-D3（订阅 SKU）在原模型上加**一个维度**（不新造第二条帐务通道）：每一列可标
+//   pool        'permanent'（默认）｜'subscription'
+//   term_ref    'sub:<订阅 id>:term:<期次序号>'（永久池 NULL）
+//   expires_at  该期到期时刻（订阅池必填）
+// 两个余额口径（单一权威在本档 + subscription-sku.ts）：
+//   book(user)      = Σ amount                                    ← 帐面净额（对帐用，不变）
+//   available(user) = 永久池 Σ + **未过期**订阅池 Σ（读取时 lazy 判定，不依赖 cron）
+// 加减项新增一种：
+//   − expire       订阅续期替换：旧期未用完余额在写入时作废（见 subscription.ts）
 //
-// 四條紀律：
-//   1. append-only：只 INSERT。錯帳靠再 INSERT 一筆反向 adjustment 更正，不改歷史
-//      （本檔沒有任何 UPDATE/DELETE account_ledger 的語句，測試具名守門）。
-//   2. 冪等：每筆帳帶 `idempotency_ref`（UNIQUE）。寫入端重放同一件事 = 命中
-//      ON CONFLICT DO NOTHING，不雙算。
-//   2b. 順序鐵律：**先 ensureAccountBaselines() 種基線，再動上游，最後記增量**。
-//      顛倒順序 = 基線已含該筆增量 + 帳本再記一次 = 雙算（見 ensureAccountBaselines 註釋）。
-//   3. 不擋錢路：記帳失敗只 console.error + 回傳 false，永不讓計費/上游調整路徑失敗。
-//      差額由 E1b 的對帳報告如實指出（可解釋優先於假裝同步成功）。
-//      唯一例外（E1-b D-2）：**基線不成立時不得動上游**——沒有基線的上游變動無法歸屬，
-//      lazy 種子之後會把它算進基線 ⇒ 同一筆增量算兩次、差額永久存在。故此種情況回
-//      blocked=true，由呼叫端在動上游之前就停手（見 ensureAccountBaselinesWithStatus）。
-//   4. 方向由 entry_type 決定（signed 類型只有 opening/adjustment），簽名不符的行
-//      一律拒收——寧可不記，不記錯方向的帳。
+// 四条纪律：
+//   1. append-only：只 INSERT。错帐靠再 INSERT 一笔反向 adjustment 更正，不改历史
+//      （本档没有任何 UPDATE/DELETE account_ledger 的语句，测试具名守门）。
+//   2. 幂等：每笔帐带 `idempotency_ref`（UNIQUE）。写入端重放同一件事 = 命中
+//      ON CONFLICT DO NOTHING，不双算。
+//   2b. 顺序铁律：**先 ensureAccountBaselines() 种基线，再动上游，最后记增量**。
+//      颠倒顺序 = 基线已含该笔增量 + 帐本再记一次 = 双算（见 ensureAccountBaselines 注释）。
+//   3. 不挡钱路：记帐失败只 console.error + 回传 false，永不让计费/上游调整路径失败。
+//      差额由 E1b 的对帐报告如实指出（可解释优先于假装同步成功）。
+//      唯一例外（E1-b D-2）：**基线不成立时不得动上游**——没有基线的上游变动无法归属，
+//      lazy 种子之后会把它算进基线 ⇒ 同一笔增量算两次、差额永久存在。故此种情况回
+//      blocked=true，由呼叫端在动上游之前就停手（见 ensureAccountBaselinesWithStatus）。
+//   4. 方向由 entry_type 决定（signed 类型只有 opening/adjustment），签名不符的行
+//      一律拒收——宁可不记，不记错方向的帐。
 
 import { randomUUID } from "node:crypto";
 
@@ -69,8 +69,8 @@ export type LedgerEntryType =
   | "transfer_out"
   | "transfer_in"
   | "adjustment"
-  // REQ-D3：訂閱續期的「下一期替換而非累加」——把舊期未用完餘額在**寫入時**作廢。
-  // 與 lazy 過期（讀取時判定）是兩件事：時間到＝不落帳；續費替換＝真的有一筆事件。
+  // REQ-D3：订阅续期的「下一期替换而非累加」——把旧期未用完余额在**写入时**作废。
+  // 与 lazy 过期（读取时判定）是两件事：时间到＝不落帐；续费替换＝真的有一笔事件。
   | "expire";
 
 export type { LedgerPool };
@@ -78,8 +78,8 @@ export type { LedgerPool };
 export type LedgerDirection = "credit" | "debit";
 
 /**
- * 每個 entry_type 的法定方向。`signed` = 加減皆可（基線可為負；人工調整兩個方向
- * 都是合法更正）。這張表是「餘額模型」的單一權威，不得在別處另立第二份判別。
+ * 每个 entry_type 的法定方向。`signed` = 加减皆可（基线可为负；人工调整两个方向
+ * 都是合法更正）。这张表是「余额模型」的单一权威，不得在别处另立第二份判别。
  */
 export const LEDGER_ENTRY_DIRECTION: Record<LedgerEntryType, LedgerDirection | "signed"> = {
   opening: "signed",
@@ -92,7 +92,7 @@ export const LEDGER_ENTRY_DIRECTION: Record<LedgerEntryType, LedgerDirection | "
   expire: "debit",
 };
 
-/** 會計恆等式用的方向分類：opening/adjustment 按實際符號判。 */
+/** 会计恒等式用的方向分类：opening/adjustment 按实际符号判。 */
 export function ledgerDirectionOf(entryType: LedgerEntryType, amount: number): LedgerDirection {
   const fixed = LEDGER_ENTRY_DIRECTION[entryType];
   if (fixed === "credit") return "credit";
@@ -103,19 +103,19 @@ export function ledgerDirectionOf(entryType: LedgerEntryType, amount: number): L
 export interface LedgerEntryDraft {
   billingUserId: number;
   entryType: LedgerEntryType;
-  /** 有號金額（quota 單位）：正 = 加項，負 = 減項。 */
+  /** 有号金额（quota 单位）：正 = 加项，负 = 减项。 */
   amount: number;
-  /** 寫入者（'billing-projection' / 'member-quota' / 'seed' / …）。 */
+  /** 写入者（'billing-projection' / 'member-quota' / 'seed' / …）。 */
   source: string;
-  /** 外部事實位址（'job:<id>' / 'billing-op:<id>' / 'redemption:<id>' …）。 */
+  /** 外部事实位址（'job:<id>' / 'billing-op:<id>' / 'redemption:<id>' …）。 */
   sourceRef: string;
-  /** 一次性判重鍵。 */
+  /** 一次性判重键。 */
   idempotencyRef: string;
-  /** 池維度（REQ-D3）：未指定 = 永久池（020 既有列與所有舊呼叫端語義不變）。 */
+  /** 池维度（REQ-D3）：未指定 = 永久池（020 既有列与所有旧呼叫端语义不变）。 */
   pool?: LedgerPool;
-  /** 訂閱期次身份（永久池為 null/省略）；訂閱池必填。 */
+  /** 订阅期次身份（永久池为 null/省略）；订阅池必填。 */
   termRef?: string | null;
-  /** 該期到期時刻 ISO（永久池為 null/省略）；訂閱池必填。 */
+  /** 该期到期时刻 ISO（永久池为 null/省略）；订阅池必填。 */
   expiresAt?: string | null;
   jobId?: string | null;
   operationId?: string | null;
@@ -133,8 +133,8 @@ export interface LedgerEntry {
   sourceRef: string;
   idempotencyRef: string;
   /**
-   * 池維度（可選：020 期間落地的列與測試自建的記錄集沒有這一欄，一律按永久池讀）。
-   * 判定一律走 subscription-sku 的 poolOf()，別處不得自己 `?? "permanent"`。
+   * 池维度（可选：020 期间落地的列与测试自建的记录集没有这一栏，一律按永久池读）。
+   * 判定一律走 subscription-sku 的 poolOf()，别处不得自己 `?? "permanent"`。
    */
   pool?: LedgerPool | null;
   termRef?: string | null;
@@ -149,80 +149,80 @@ export interface LedgerEntry {
 export interface PostLedgerResult {
   /** 真正落地的 idempotency_ref。 */
   inserted: string[];
-  /** 已存在（重放/併發）而被 ON CONFLICT 跳過的。 */
+  /** 已存在（重放/并发）而被 ON CONFLICT 跳过的。 */
   duplicates: string[];
-  /** 本地契約檢查拒收（方向不符、缺來源、金額非整數等）——記帳端 bug，必須可見。 */
+  /** 本地契约检查拒收（方向不符、缺来源、金额非整数等）——记帐端 bug，必须可见。 */
   rejected: { idempotencyRef: string; reason: string }[];
-  /** SQL/連線層失敗（記帳端不擋錢路，只回報）。 */
+  /** SQL/连线层失败（记帐端不挡钱路，只回报）。 */
   errors: string[];
 }
 
 export interface AccountBalance {
   billingUserId: number;
-  /** Σ amount（quota 單位，可為負）。 */
+  /** Σ amount（quota 单位，可为负）。 */
   quota: number;
   coins: number;
   credits: number;
   debits: number;
   entryCount: number;
-  /** 各類型加總（未出現的類型不列出——沒帳就是沒帳）。 */
+  /** 各类型加总（未出现的类型不列出——没帐就是没帐）。 */
   byType: Partial<Record<LedgerEntryType, { quota: number; entries: number }>>;
 }
 
-// ─────────────────────────────────────────── 純函式：契約檢查與餘額
+// ─────────────────────────────────────────── 纯函式：契约检查与余额
 
 function isFiniteInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
 }
 
 /**
- * 帳本行契約（純函式，可單獨測）：方向、來源、冪等鍵、金額。
- * 回 null = 可入帳；回字串 = 拒收原因。
+ * 帐本行契约（纯函式，可单独测）：方向、来源、幂等键、金额。
+ * 回 null = 可入帐；回字串 = 拒收原因。
  *
- * 金額 0 的唯一例外是 `opening`：0 基線是一句真話（「此刻這個身份沒有可入帳的歷史
- * 淨額」），且它定下「哪一刻之後的充值才該入帳」的時間界線。其餘類型 0 一律拒收。
+ * 金额 0 的唯一例外是 `opening`：0 基线是一句真话（「此刻这个身份没有可入帐的历史
+ * 净额」），且它定下「哪一刻之后的充值才该入帐」的时间界线。其余类型 0 一律拒收。
  */
 export function validateLedgerEntryDraft(draft: LedgerEntryDraft): string | null {
   if (!isFiniteInteger(draft.billingUserId) || draft.billingUserId <= 0) {
-    return `billing_user_id 必須是正整數（收到 ${String(draft.billingUserId)}）`;
+    return `billing_user_id 必须是正整数（收到 ${String(draft.billingUserId)}）`;
   }
   if (!isFiniteInteger(draft.amount)) {
-    return `amount 必須是整數 quota（收到 ${String(draft.amount)}）`;
+    return `amount 必须是整数 quota（收到 ${String(draft.amount)}）`;
   }
   if (draft.amount === 0 && draft.entryType !== "opening") {
-    return `amount 0 只允許出現在 opening 基線（${draft.entryType} 的 0 是空帳）`;
+    return `amount 0 只允许出现在 opening 基线（${draft.entryType} 的 0 是空帐）`;
   }
   const direction = LEDGER_ENTRY_DIRECTION[draft.entryType];
   if (direction === undefined) return `未知的 entry_type：${String(draft.entryType)}`;
   if (direction === "credit" && draft.amount < 0) {
-    return `${draft.entryType} 是加項，不得為負（收到 ${draft.amount}）`;
+    return `${draft.entryType} 是加项，不得为负（收到 ${draft.amount}）`;
   }
   if (direction === "debit" && draft.amount > 0) {
-    return `${draft.entryType} 是減項，不得為正（收到 ${draft.amount}）`;
+    return `${draft.entryType} 是减项，不得为正（收到 ${draft.amount}）`;
   }
-  if (!draft.source.trim()) return "source 必填（哪個寫入器記的帳）";
-  if (!draft.sourceRef.trim()) return "source_ref 必填（這筆帳指回哪一件外部事實）";
-  if (!draft.idempotencyRef.trim()) return "idempotency_ref 必填（重放不得雙算）";
-  // 池維度契約（REQ-D3）：池值必須合法；訂閱池的每一列必須帶期次與到期時刻——
-  // 沒有這兩個欄位，讀取端就只能靠定時任務改餘額（違反「過期只在讀取時 lazy 判定」）。
+  if (!draft.source.trim()) return "source 必填（哪个写入器记的帐）";
+  if (!draft.sourceRef.trim()) return "source_ref 必填（这笔帐指回哪一件外部事实）";
+  if (!draft.idempotencyRef.trim()) return "idempotency_ref 必填（重放不得双算）";
+  // 池维度契约（REQ-D3）：池值必须合法；订阅池的每一列必须带期次与到期时刻——
+  // 没有这两个栏位，读取端就只能靠定时任务改余额（违反「过期只在读取时 lazy 判定」）。
   if (draft.pool !== undefined && !isLedgerPool(draft.pool)) {
     return `未知的 pool：${String(draft.pool)}`;
   }
   const pool = draft.pool ?? LEDGER_POOL_DEFAULT;
   if (pool === "subscription") {
     if (typeof draft.termRef !== "string" || !draft.termRef.trim()) {
-      return "訂閱池的帳本行必須帶 term_ref（期次身份）";
+      return "订阅池的帐本行必须带 term_ref（期次身份）";
     }
     if (typeof draft.expiresAt !== "string" || !Number.isFinite(Date.parse(draft.expiresAt))) {
-      return `訂閱池的帳本行必須帶可解析的 expires_at（收到 ${String(draft.expiresAt)}）`;
+      return `订阅池的帐本行必须带可解析的 expires_at（收到 ${String(draft.expiresAt)}）`;
     }
   }
   return null;
 }
 
 /**
- * 餘額公式（唯一口徑）：Σ amount。同一份帳本記錄集在任何地方只能算出一個數字。
- * 非有限值整行跳過並回報（跳過的筆數計進 skippedRows——不當 0 加、不靜默吞）。
+ * 余额公式（唯一口径）：Σ amount。同一份帐本记录集在任何地方只能算出一个数字。
+ * 非有限值整行跳过并回报（跳过的笔数计进 skippedRows——不当 0 加、不静默吞）。
  */
 export function computeAccountBalance(
   entries: LedgerEntry[],
@@ -260,10 +260,10 @@ export function computeAccountBalance(
 }
 
 /**
- * 對外餘額讀取口的回應形體（`/v1/quota` 的契約）：與 2026-08-29 事故後定下的形狀
- * **逐字相同**（success / balance_coins / currency）——本刀改的是數字的來源，不是形狀。
- * 放在這裡是為了讓「契約」有一條可被真實斷言的路徑（路由只負責包 NextResponse）。
- * 幣值換算沿用 statistics-projection 的 quotaToCoins（同一條換算式，不另立第二份）。
+ * 对外余额读取口的回应形体（`/v1/quota` 的契约）：与 2026-08-29 事故后定下的形状
+ * **逐字相同**（success / balance_coins / currency）——本刀改的是数字的来源，不是形状。
+ * 放在这里是为了让「契约」有一条可被真实断言的路径（路由只负责包 NextResponse）。
+ * 币值换算沿用 statistics-projection 的 quotaToCoins（同一条换算式，不另立第二份）。
  */
 export const QUOTA_RESPONSE_CURRENCY = "coins";
 
@@ -271,29 +271,29 @@ export function quotaResponseBody(quota: number): { success: true; balance_coins
   return { success: true, balance_coins: quotaToCoins(quota), currency: QUOTA_RESPONSE_CURRENCY };
 }
 
-// ─────────────────────────────────────────── 純函式：契約檢查（冪等鍵）
+// ─────────────────────────────────────────── 纯函式：契约检查（幂等键）
 
-/** 寫入器用的冪等鍵約定（單一權威，別處不得自拼）。 */
+/** 写入器用的幂等键约定（单一权威，别处不得自拼）。 */
 export const ledgerRef = {
   opening: (userId: number) => `seed:${userId}:v1`,
   consumption: (operationId: string) => `billing-op:${operationId}:debit`,
   refund: (operationId: string) => `billing-op:${operationId}:credit`,
-  /** 非首條出資腿/退款腿的冪等鍵（首條永遠用上面那兩個，維持既有帳本行的鍵不變）。 */
+  /** 非首条出资腿/退款腿的幂等键（首条永远用上面那两个，维持既有帐本行的键不变）。 */
   consumptionLeg: (operationId: string, legIndex: number) => `billing-op:${operationId}:debit:${legIndex}`,
   refundLeg: (operationId: string, legIndex: number) => `billing-op:${operationId}:credit:${legIndex}`,
   transferOut: (transferId: string) => `transfer:${transferId}:out`,
   transferIn: (transferId: string) => `transfer:${transferId}:in`,
   recharge: (redemptionId: string | number) => `redemption:${String(redemptionId)}`,
-  /** 基線沖銷腿：充值發生在開戶基線之前（金額已含在 opening 內）時的對沖行（見 ingest）。 */
+  /** 基线冲销腿：充值发生在开户基线之前（金额已含在 opening 内）时的对冲行（见 ingest）。 */
   rechargeBaselineOffset: (redemptionId: string | number) => `redemption:${String(redemptionId)}:opening-offset`,
   adjustment: (sourceRef: string) => `adjustment:${sourceRef}`,
-  /** REQ-D3 期次發放冪等鍵：(訂閱 id, 期次序號)（不變量 ③）。 */
+  /** REQ-D3 期次发放幂等键：(订阅 id, 期次序号)（不变量 ③）。 */
   subscriptionTerm: (subscriptionId: string, termIndex: number) => `subscription:${subscriptionId}:term:${termIndex}`,
-  /** 續期替換（把上一期未用完餘額作廢）的冪等鍵。 */
+  /** 续期替换（把上一期未用完余额作废）的幂等键。 */
   subscriptionReplace: (subscriptionId: string, termIndex: number) => `subscription:${subscriptionId}:term:${termIndex}:replace`,
 } as const;
 
-// ─────────────────────────────────────────── 寫入層
+// ─────────────────────────────────────────── 写入层
 
 type Row = Record<string, unknown>;
 
@@ -321,7 +321,7 @@ function mapLedgerRow(row: Row): LedgerEntry {
   };
 }
 
-/** 帳本儲存層可用嗎（C 端 Vercel 沒有控制面庫 ⇒ 走降級，不炸）。 */
+/** 帐本储存层可用吗（C 端 Vercel 没有控制面库 ⇒ 走降级，不炸）。 */
 export function accountLedgerStoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return generationDatabaseConfigured(env);
 }
@@ -359,10 +359,10 @@ async function insertLedgerRow(sql: GenerationSql, id: string, draft: LedgerEntr
 }
 
 /**
- * 記一批帳（append-only + 冪等）。多筆時包在一個事務裡——轉移的兩條腿要嘛都記、
- * 要嘛都不記（單腿落地 = 我方帳本自己製造不對稱）。
+ * 记一批帐（append-only + 幂等）。多笔时包在一个事务里——转移的两条腿要嘛都记、
+ * 要嘛都不记（单腿落地 = 我方帐本自己制造不对称）。
  *
- * 永不 throw：本地契約拒收與 SQL 失敗都只是回報值（記帳不擋錢路，第 3 條紀律）。
+ * 永不 throw：本地契约拒收与 SQL 失败都只是回报值（记帐不挡钱路，第 3 条纪律）。
  */
 export async function postLedgerEntries(
   drafts: LedgerEntryDraft[],
@@ -374,7 +374,7 @@ export async function postLedgerEntries(
     const reason = validateLedgerEntryDraft(draft);
     if (reason) {
       result.rejected.push({ idempotencyRef: draft?.idempotencyRef ?? "(missing)", reason });
-      console.error(`[account-ledger] 拒收帳本行 ref=${String(draft?.idempotencyRef)}：${reason}`);
+      console.error(`[account-ledger] 拒收帐本行 ref=${String(draft?.idempotencyRef)}：${reason}`);
       continue;
     }
     accepted.push({ id: (deps.newId ?? randomUUID)(), draft });
@@ -401,12 +401,12 @@ export async function postLedgerEntries(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     result.errors.push(reason);
-    console.error(`[account-ledger] 記帳失敗（不擋錢路，差額由對帳報告負責）：${reason}`);
+    console.error(`[account-ledger] 记帐失败（不挡钱路，差额由对帐报告负责）：${reason}`);
   }
   return result;
 }
 
-// ─────────────────────────────────────────── 讀取層
+// ─────────────────────────────────────────── 读取层
 
 export async function readAccountLedger(
   billingUserId: number,
@@ -424,7 +424,7 @@ export async function readAccountLedger(
   return rows.map(mapLedgerRow);
 }
 
-/** 對外餘額的唯一讀法：取該身份帳本 → Σ amount。 */
+/** 对外余额的唯一读法：取该身份帐本 → Σ amount。 */
 export async function readAccountBalance(
   billingUserId: number,
   deps: { sql?: GenerationSql } = {},
@@ -434,8 +434,8 @@ export async function readAccountBalance(
 }
 
 /**
- * 池餘額的唯一讀法（REQ-D3）：取該身份帳本 → 按池分堆 + **讀取時 lazy 判定過期**。
- * 純函式在 subscription-sku.ts（computePoolBalances），本函式只負責把帳本餵進去。
+ * 池余额的唯一读法（REQ-D3）：取该身份帐本 → 按池分堆 + **读取时 lazy 判定过期**。
+ * 纯函式在 subscription-sku.ts（computePoolBalances），本函式只负责把帐本喂进去。
  */
 export async function readPoolBalances(
   billingUserId: number,
@@ -447,9 +447,9 @@ export async function readPoolBalances(
 }
 
 /**
- * **可用餘額**（不變量 ①）：永久池 + 未過期訂閱池。對外讀取口與配額預檢共用這一條。
- * 回 null ＝ 讀不出來（儲存層未配置／查詢失敗）——呼叫端據此走既有降級路徑，
- * 絕不讓「讀不到」被當成 0 或當成「足夠」。
+ * **可用余额**（不变量 ①）：永久池 + 未过期订阅池。对外读取口与配额预检共用这一条。
+ * 回 null ＝ 读不出来（储存层未配置／查询失败）——呼叫端据此走既有降级路径，
+ * 绝不让「读不到」被当成 0 或当成「足够」。
  */
 export async function readAvailableQuota(
   billingUserId: number,
@@ -460,39 +460,39 @@ export async function readAvailableQuota(
     return balances.availableQuota;
   } catch (error) {
     console.error(
-      `[account-ledger] 可用餘額讀取失敗 user=${billingUserId}：${error instanceof Error ? error.message : String(error)}`,
+      `[account-ledger] 可用余额读取失败 user=${billingUserId}：${error instanceof Error ? error.message : String(error)}`,
     );
     return null;
   }
 }
 
-// ─────────────────────────────────────────── 基線（種子）
+// ─────────────────────────────────────────── 基线（种子）
 
 /**
- * 基線不可得的類別（E1-b D-2）：決定呼叫端能不能安全地動上游。
+ * 基线不可得的类别（E1-b D-2）：决定呼叫端能不能安全地动上游。
  *
- *   store_unavailable    帳本儲存層未配置（C 端降級實例，沒有帳本權威）→ 呼叫端照舊走錢路
- *   upstream_unavailable 上游 users.quota 讀不到（基線不明）→ 帳本權威實例上不得動上游
- *   ledger_unavailable   基線行落不了地（INSERT 失敗／回讀不到基線行）→ 不得動上游
+ *   store_unavailable    帐本储存层未配置（C 端降级实例，没有帐本权威）→ 呼叫端照旧走钱路
+ *   upstream_unavailable 上游 users.quota 读不到（基线不明）→ 帐本权威实例上不得动上游
+ *   ledger_unavailable   基线行落不了地（INSERT 失败／回读不到基线行）→ 不得动上游
  */
 export type OpeningFailureKind = "store_unavailable" | "upstream_unavailable" | "ledger_unavailable";
 
 export interface OpeningSeedResult {
   billingUserId: number;
-  /** true = 本次真的種進去（第一次）；false = 已有基線（重放幂等）或基線不可得。 */
+  /** true = 本次真的种进去（第一次）；false = 已有基线（重放幂等）或基线不可得。 */
   seeded: boolean;
   /**
-   * 基線值（**經回讀確認**帳本裡真的有這一行的 amount）；不可得為 null。
+   * 基线值（**经回读确认**帐本里真的有这一行的 amount）；不可得为 null。
    *
-   * 為什麼只有回讀確認過的基線才回非 null（E1-b D-2 必修）：基線 INSERT 失敗時若仍回
-   * 上游讀數，呼叫端會以為「基線就緒」→ 照常動上游並記增量，但帳本裡沒有基線行；
-   * 之後 lazy 種子讀到**扣款後**的 users.quota 當基線 → 同一筆消費算兩次，差額永久存在。
+   * 为什么只有回读确认过的基线才回非 null（E1-b D-2 必修）：基线 INSERT 失败时若仍回
+   * 上游读数，呼叫端会以为「基线就绪」→ 照常动上游并记增量，但帐本里没有基线行；
+   * 之后 lazy 种子读到**扣款后**的 users.quota 当基线 → 同一笔消费算两次，差额永久存在。
    */
   baselineQuota: number | null;
   reason?: string;
-  /** baselineQuota === null 時的分類；null = 基線已就位（回讀確認過）。 */
+  /** baselineQuota === null 时的分类；null = 基线已就位（回读确认过）。 */
   failure?: OpeningFailureKind | null;
-  /** 基線行是否經**回讀確認**存在（不是「函式回了非 null」）。 */
+  /** 基线行是否经**回读确认**存在（不是「函式回了非 null」）。 */
   verified?: boolean;
 }
 
@@ -508,8 +508,8 @@ type OpeningRead =
   | { status: "error"; reason: string };
 
 /**
- * 讀基線行（唯一判據：帳本裡真的有這一行）。查詢文本與寫入端同一條冪等鍵，
- * 成功／失敗／併發三條路徑共用 ⇒ 「基線就緒」永遠是回讀的結論，不是函式回傳值的推論。
+ * 读基线行（唯一判据：帐本里真的有这一行）。查询文本与写入端同一条幂等键，
+ * 成功／失败／并发三条路径共用 ⇒ 「基线就绪」永远是回读的结论，不是函式回传值的推论。
  */
 async function readOpeningRow(sql: GenerationSql, billingUserId: number): Promise<OpeningRead> {
   try {
@@ -518,7 +518,7 @@ async function readOpeningRow(sql: GenerationSql, billingUserId: number): Promis
     `;
     if (!rows[0]) return { status: "absent" };
     const amount = Number(rows[0].amount);
-    if (!Number.isFinite(amount)) return { status: "error", reason: `基線行金額非有限值（${String(rows[0].amount)}）` };
+    if (!Number.isFinite(amount)) return { status: "error", reason: `基线行金额非有限值（${String(rows[0].amount)}）` };
     return { status: "found", amount };
   } catch (error) {
     return { status: "error", reason: error instanceof Error ? error.message : String(error) };
@@ -526,15 +526,15 @@ async function readOpeningRow(sql: GenerationSql, billingUserId: number): Promis
 }
 
 /**
- * 種入/確認基線：**上線基線 = new-api 當時的 users.quota**（歷史淨額已含在裡面，
- * 故本表只記基線之後的增量，不得雙算既有歷史）。
+ * 种入/确认基线：**上线基线 = new-api 当时的 users.quota**（历史净额已含在里面，
+ * 故本表只记基线之后的增量，不得双算既有历史）。
  *
- * 幂等機制：idempotency_ref = `seed:<userId>:v1` 且 UNIQUE ⇒ 同一份 new-api 基線
- * 重放兩次，第二次命中 ON CONFLICT DO NOTHING（實測見測試「重放不雙算」）。
+ * 幂等机制：idempotency_ref = `seed:<userId>:v1` 且 UNIQUE ⇒ 同一份 new-api 基线
+ * 重放两次，第二次命中 ON CONFLICT DO NOTHING（实测见测试「重放不双算」）。
  *
- * 呼叫時機：對外餘額第一次被讀、或任何寫入器動手前（見 ensureOpeningBeforeWrite）。
- * 「先種基線、後記增量」是防雙算的關鍵：若先記了一筆扣費再種基線，基線已經含了
- * 那筆扣費 ⇒ 兩邊都算。
+ * 呼叫时机：对外余额第一次被读、或任何写入器动手前（见 ensureOpeningBeforeWrite）。
+ * 「先种基线、后记增量」是防双算的关键：若先记了一笔扣费再种基线，基线已经含了
+ * 那笔扣费 ⇒ 两边都算。
  */
 export async function ensureAccountOpening(
   billingUserId: number,
@@ -545,7 +545,7 @@ export async function ensureAccountOpening(
       billingUserId,
       seeded: false,
       baselineQuota: null,
-      reason: "帳本儲存層未配置",
+      reason: "帐本储存层未配置",
       failure: "store_unavailable",
       verified: false,
     };
@@ -554,18 +554,18 @@ export async function ensureAccountOpening(
 
   const existing = await readOpeningRow(sql, billingUserId);
   if (existing.status === "error") {
-    // 讀不到（連線/語法/權限）：既不能說基線在、也不能說不在 ⇒ 回不可得（不得猜）。
+    // 读不到（连线/语法/权限）：既不能说基线在、也不能说不在 ⇒ 回不可得（不得猜）。
     return {
       billingUserId,
       seeded: false,
       baselineQuota: null,
-      reason: `基線回讀失敗：${existing.reason}`,
+      reason: `基线回读失败：${existing.reason}`,
       failure: "ledger_unavailable",
       verified: false,
     };
   }
   if (existing.status === "found") {
-    return { billingUserId, seeded: false, baselineQuota: existing.amount, reason: "已有基線（重放）", failure: null, verified: true };
+    return { billingUserId, seeded: false, baselineQuota: existing.amount, reason: "已有基线（重放）", failure: null, verified: true };
   }
 
   const fetchUser = deps.fetchUser ?? fetchGatewayUser;
@@ -577,7 +577,7 @@ export async function ensureAccountOpening(
       billingUserId,
       seeded: false,
       baselineQuota: null,
-      reason: `基線讀取失敗：${error instanceof Error ? error.message : String(error)}`,
+      reason: `基线读取失败：${error instanceof Error ? error.message : String(error)}`,
       failure: "upstream_unavailable",
       verified: false,
     };
@@ -587,7 +587,7 @@ export async function ensureAccountOpening(
       billingUserId,
       seeded: false,
       baselineQuota: null,
-      reason: "new-api 未回該用戶額度（基線不明）",
+      reason: "new-api 未回该用户额度（基线不明）",
       failure: "upstream_unavailable",
       verified: false,
     };
@@ -597,14 +597,14 @@ export async function ensureAccountOpening(
       billingUserId,
       seeded: false,
       baselineQuota: null,
-      reason: "上游額度非整數，基線不可信",
+      reason: "上游额度非整数，基线不可信",
       failure: "upstream_unavailable",
       verified: false,
     };
   }
 
-  // 0 基線也照樣入帳（amount=0 的 opening）：它不改變任何金額，但把「基線時刻」記下來，
-  // 充值同步據此判斷「這筆充值是否已含在基線裡」。
+  // 0 基线也照样入帐（amount=0 的 opening）：它不改变任何金额，但把「基线时刻」记下来，
+  // 充值同步据此判断「这笔充值是否已含在基线里」。
   const posted = await postLedgerEntries(
     [
       {
@@ -614,22 +614,22 @@ export async function ensureAccountOpening(
         source: "seed",
         sourceRef: `new-api:users/${billingUserId}@${(deps.now ?? (() => new Date()))().toISOString()}`,
         idempotencyRef: ledgerRef.opening(billingUserId),
-        note: "上線基線：以 new-api users.quota 為起點，歷史淨額已含在此",
+        note: "上线基线：以 new-api users.quota 为起点，历史净额已含在此",
         metadata: { baseline_source: "new-api/users.quota" },
       },
     ],
     { sql },
   );
 
-  // 唯一判據＝回讀：INSERT 回報成功但讀不到（或 INSERT 直接失敗）都算基線未落地，
-  // 一律回 null（呼叫端據此 503／不動上游），**不得**回一個上游讀數當作「基線就緒」。
+  // 唯一判据＝回读：INSERT 回报成功但读不到（或 INSERT 直接失败）都算基线未落地，
+  // 一律回 null（呼叫端据此 503／不动上游），**不得**回一个上游读数当作「基线就绪」。
   const confirmed = await readOpeningRow(sql, billingUserId);
   if (confirmed.status !== "found") {
     const reason =
       confirmed.status === "error"
-        ? `基線回讀失敗：${confirmed.reason}`
-        : posted.errors[0] ?? posted.rejected[0]?.reason ?? "基線未落地（回讀不到基線行）";
-    console.error(`[account-ledger] 基線未落地 user=${billingUserId}（${reason}）——不得當成基線就緒`);
+        ? `基线回读失败：${confirmed.reason}`
+        : posted.errors[0] ?? posted.rejected[0]?.reason ?? "基线未落地（回读不到基线行）";
+    console.error(`[account-ledger] 基线未落地 user=${billingUserId}（${reason}）——不得当成基线就绪`);
     return { billingUserId, seeded: false, baselineQuota: null, reason, failure: "ledger_unavailable", verified: false };
   }
   if (posted.inserted.length > 0) {
@@ -639,13 +639,13 @@ export async function ensureAccountOpening(
     billingUserId,
     seeded: false,
     baselineQuota: confirmed.amount,
-    reason: posted.duplicates.length > 0 ? "併發種入（另一寫入者已種）" : "基線已落地（回讀確認）",
+    reason: posted.duplicates.length > 0 ? "并发种入（另一写入者已种）" : "基线已落地（回读确认）",
     failure: null,
     verified: true,
   };
 }
 
-/** 批量種基線（上線遷移工具用）。逐個幂等 ⇒ 整批可任意重放。 */
+/** 批量种基线（上线迁移工具用）。逐个幂等 ⇒ 整批可任意重放。 */
 export async function seedAccountOpenings(
   billingUserIds: number[],
   deps: OpeningDeps = {},
@@ -661,19 +661,19 @@ export async function seedAccountOpenings(
 }
 
 /**
- * 基線保證（**必須在動上游之前呼叫**，這是防雙算的關鍵順序）：
+ * 基线保证（**必须在动上游之前呼叫**，这是防双算的关键顺序）：
  *
- *   先種基線 →[上游扣/加]→ 再記增量
+ *   先种基线 →[上游扣/加]→ 再记增量
  *
- * 為什麼順序不能顛倒：基線取的是「當下 new-api users.quota」，若先動了上游再種基線，
- * 那筆增量已經被算進基線裡，帳本再把同一件事記一次 = 雙算（本刀端到端測試實錘：
- * B1 分配若不先種基線，主帳帳本會憑空少 2,000,000）。反之「先種基線、後動上游」是
- * 安全的：多種的基線是無害的（餘額仍等於上游），而缺記的增量由 E1b 對帳報告負責。
+ * 为什么顺序不能颠倒：基线取的是「当下 new-api users.quota」，若先动了上游再种基线，
+ * 那笔增量已经被算进基线里，帐本再把同一件事记一次 = 双算（本刀端到端测试实锤：
+ * B1 分配若不先种基线，主帐帐本会凭空少 2,000,000）。反之「先种基线、后动上游」是
+ * 安全的：多种的基线是无害的（余额仍等于上游），而缺记的增量由 E1b 对帐报告负责。
  *
- * **基線就緒的判據＝回讀確認**（不是「函式回了非 null」）：見 ensureOpeningBeforeWrite。
- * 基線不可得 → 放棄記這次增量；帳本權威實例（儲存層已配置）上**連上游都不准動**，
- * 否則就留下一筆沒有基線歸屬的上游變動，之後 lazy 種子讀到變動後的 users.quota 當基線
- * ⇒ 同一筆增量算兩次、差額永久存在（E1-b D-2 實測）。
+ * **基线就绪的判据＝回读确认**（不是「函式回了非 null」）：见 ensureOpeningBeforeWrite。
+ * 基线不可得 → 放弃记这次增量；帐本权威实例（储存层已配置）上**连上游都不准动**，
+ * 否则就留下一笔没有基线归属的上游变动，之后 lazy 种子读到变动后的 users.quota 当基线
+ * ⇒ 同一笔增量算两次、差额永久存在（E1-b D-2 实测）。
  */
 export async function ensureAccountBaselines(
   billingUserIds: number[],
@@ -682,17 +682,17 @@ export async function ensureAccountBaselines(
   return (await ensureAccountBaselinesWithStatus(billingUserIds, deps)).ready;
 }
 
-/** 基線閘門的完整結論（呼叫端據 `blocked` 決定能不能動上游）。 */
+/** 基线闸门的完整结论（呼叫端据 `blocked` 决定能不能动上游）。 */
 export interface BaselineGuardResult {
-  /** 全部身份的基線都經回讀確認存在。 */
+  /** 全部身份的基线都经回读确认存在。 */
   ready: boolean;
   /**
-   * **不得動上游**：帳本儲存層已配置（有帳本權威）、但基線不成立——包括
-   * ①基線行落不了地（ledger_unavailable）②上游 users.quota 讀不到（upstream_unavailable）。
-   * 儲存層未配置的降級實例（C 端站點副本）回 false：那裡本來就沒有帳本權威，不改變既有行為。
+   * **不得动上游**：帐本储存层已配置（有帐本权威）、但基线不成立——包括
+   * ①基线行落不了地（ledger_unavailable）②上游 users.quota 读不到（upstream_unavailable）。
+   * 储存层未配置的降级实例（C 端站点副本）回 false：那里本来就没有帐本权威，不改变既有行为。
    */
   blocked: boolean;
-  /** 不可得的身份與分類（ready=false 時非空）。 */
+  /** 不可得的身份与分类（ready=false 时非空）。 */
   failures: { billingUserId: number; failure: OpeningFailureKind; reason: string }[];
 }
 
@@ -707,7 +707,7 @@ export async function ensureAccountBaselinesWithStatus(
       failures: billingUserIds.map((billingUserId) => ({
         billingUserId,
         failure: "store_unavailable" as const,
-        reason: "帳本儲存層未配置",
+        reason: "帐本储存层未配置",
       })),
     };
   }
@@ -720,24 +720,24 @@ async function ensureOpeningBeforeWrite(
   sql: GenerationSql,
   fetchUser?: LedgerWriterDeps["fetchUser"],
 ): Promise<BaselineGuardResult> {
-  // 帳本權威實例＝儲存層已配置。降級實例沒有帳本可記，擋上游只會弄壞可用性。
+  // 帐本权威实例＝储存层已配置。降级实例没有帐本可记，挡上游只会弄坏可用性。
   const authoritative = accountLedgerStoreEnabled();
   for (const userId of [...new Set(billingUserIds)]) {
     const result = await ensureAccountOpening(userId, { sql, fetchUser });
-    // 判據是「回讀確認過的基線行」，不是回傳值非 null（result.verified 由 readOpeningRow 定案）。
+    // 判据是「回读确认过的基线行」，不是回传值非 null（result.verified 由 readOpeningRow 定案）。
     if (result.baselineQuota !== null && result.verified !== false) continue;
     const failure: OpeningFailureKind = result.failure ?? "ledger_unavailable";
     const blocked = authoritative && failure !== "store_unavailable";
     console.error(
-      `[account-ledger] 基線不可得 user=${userId}（${failure}：${result.reason}）——本次增量不記帳` +
-        `${blocked ? "，且不得動上游（基線不成立＝上游變動無法歸屬）" : ""}`,
+      `[account-ledger] 基线不可得 user=${userId}（${failure}：${result.reason}）——本次增量不记帐` +
+        `${blocked ? "，且不得动上游（基线不成立＝上游变动无法归属）" : ""}`,
     );
     return { ready: false, blocked, failures: [{ billingUserId: userId, failure, reason: result.reason ?? "" }] };
   }
   return { ready: true, blocked: false, failures: [] };
 }
 
-// ─────────────────────────────────────────── 寫入器（各錢路徑呼叫）
+// ─────────────────────────────────────────── 写入器（各钱路径呼叫）
 
 export interface PendingWriteOutcome {
   posted: boolean;
@@ -745,8 +745,8 @@ export interface PendingWriteOutcome {
 }
 
 /**
- * 寫入器共通依賴。`fetchUser` 是基線讀法的注入點（測試與 worker 用同一條生產通路：
- * 默認 fetchGatewayUser）。基線種不進去＝放棄記這次增量（見 ensureOpeningBeforeWrite）。
+ * 写入器共通依赖。`fetchUser` 是基线读法的注入点（测试与 worker 用同一条生产通路：
+ * 默认 fetchGatewayUser）。基线种不进去＝放弃记这次增量（见 ensureOpeningBeforeWrite）。
  */
 export interface LedgerWriterDeps {
   sql?: GenerationSql;
@@ -758,28 +758,28 @@ async function withOpeningGuard(
   drafts: LedgerEntryDraft[],
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
-  if (!accountLedgerStoreEnabled() && !deps.sql) return { posted: false, reason: "帳本儲存層未配置" };
+  if (!accountLedgerStoreEnabled() && !deps.sql) return { posted: false, reason: "帐本储存层未配置" };
   const sql = deps.sql ?? getGenerationSql();
   try {
     if (!(await ensureOpeningBeforeWrite(billingUserIds, sql, deps.fetchUser))) {
-      return { posted: false, reason: "基線不可得，放棄記帳（對帳報告負責）" };
+      return { posted: false, reason: "基线不可得，放弃记帐（对帐报告负责）" };
     }
     const result = await postLedgerEntries(drafts, { sql });
     if (result.errors.length > 0) return { posted: false, reason: result.errors[0] };
     if (result.rejected.length > 0) return { posted: false, reason: result.rejected[0].reason };
-    return { posted: result.inserted.length > 0, reason: result.duplicates.length > 0 ? "已記過（重放）" : undefined };
+    return { posted: result.inserted.length > 0, reason: result.duplicates.length > 0 ? "已记过（重放）" : undefined };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`[account-ledger] 帳本寫入異常（不擋錢路）：${reason}`);
+    console.error(`[account-ledger] 帐本写入异常（不挡钱路）：${reason}`);
     return { posted: false, reason };
   }
 }
 
-/** 消費扣費（legacy reserve 的上游扣款、gate path 投影扣款）。amount 取正數入帳為減項。
+/** 消费扣费（legacy reserve 的上游扣款、gate path 投影扣款）。amount 取正数入帐为减项。
  *
- * REQ-D3：扣款**按池拆腿**（預設先扣訂閱池、再扣永久池，見 CONSUMPTION_POOL_ORDER）。
- * 沒有任何訂閱資料時，只有一條永久池腿、冪等鍵與 020 期間逐字相同（行為零變化）。
- * 讀帳本失敗＝回退單一永久池腿：記帳永不擋錢路，池歸屬的缺口由對帳報告指出。
+ * REQ-D3：扣款**按池拆腿**（预设先扣订阅池、再扣永久池，见 CONSUMPTION_POOL_ORDER）。
+ * 没有任何订阅资料时，只有一条永久池腿、幂等键与 020 期间逐字相同（行为零变化）。
+ * 读帐本失败＝回退单一永久池腿：记帐永不挡钱路，池归属的缺口由对帐报告指出。
  */
 export async function recordConsumption(
   input: {
@@ -788,13 +788,13 @@ export async function recordConsumption(
     jobId: string;
     operationId: string;
     source: string;
-    /** 指定扣款池（省略＝按 CONSUMPTION_POOL_ORDER 自動選）。 */
+    /** 指定扣款池（省略＝按 CONSUMPTION_POOL_ORDER 自动选）。 */
     pool?: LedgerPool;
   },
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
   const amount = Math.abs(Math.round(input.amountQuota));
-  if (amount === 0) return { posted: false, reason: "金額為 0，無帳可記" };
+  if (amount === 0) return { posted: false, reason: "金额为 0，无帐可记" };
   const legs = await resolveConsumptionLegs(input.billingUserId, amount, input.pool, deps);
   const drafts: LedgerEntryDraft[] = legs.map((leg, index) => {
     const primary = legs.length === 1;
@@ -817,8 +817,8 @@ export async function recordConsumption(
 }
 
 /**
- * 訂閱池的「當前期」：未過期的期中最早到期的那一期（先到期先扣）。
- * 純讀帳本；拿不到就回 null（呼叫端據此不指定期次，不製造無效的訂閱帳本行）。
+ * 订阅池的「当前期」：未过期的期中最早到期的那一期（先到期先扣）。
+ * 纯读帐本；拿不到就回 null（呼叫端据此不指定期次，不制造无效的订阅帐本行）。
  */
 async function resolveConsumptionLegs(
   billingUserId: number,
@@ -837,16 +837,16 @@ async function resolveConsumptionLegs(
     return legs.map((leg) => ({ ...leg }));
   } catch (error) {
     console.error(
-      `[account-ledger] 池餘額讀取失敗，本次消費記在永久池 user=${billingUserId}：${error instanceof Error ? error.message : String(error)}`,
+      `[account-ledger] 池余额读取失败，本次消费记在永久池 user=${billingUserId}：${error instanceof Error ? error.message : String(error)}`,
     );
     return permanentOnly;
   }
 }
 
-/** 退款入帳（billing_operation refund applied 對應的上游 credit）。
+/** 退款入帐（billing_operation refund applied 对应的上游 credit）。
  *
- * REQ-D3 **按原出資歸還**：退款回到原本出資的池——訂閱消耗退訂閱池、永久消耗退永久池，
- * 不跨池搬。出資腿的事實來自帳本本身的消費行（不是重算一遍計劃，避免兩處口徑漂移）。
+ * REQ-D3 **按原出资归还**：退款回到原本出资的池——订阅消耗退订阅池、永久消耗退永久池，
+ * 不跨池搬。出资腿的事实来自帐本本身的消费行（不是重算一遍计划，避免两处口径漂移）。
  */
 export async function recordRefund(
   input: {
@@ -855,13 +855,13 @@ export async function recordRefund(
     jobId: string;
     operationId: string;
     source: string;
-    /** 帳本沒有該 operation 的消費行時（歷史資料）的兜底池。 */
+    /** 帐本没有该 operation 的消费行时（历史资料）的兜底池。 */
     pool?: LedgerPool;
   },
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
   const amount = Math.abs(Math.round(input.amountQuota));
-  if (amount === 0) return { posted: false, reason: "金額為 0，無帳可記" };
+  if (amount === 0) return { posted: false, reason: "金额为 0，无帐可记" };
   const legs = await resolveRefundLegs(input, amount, deps);
   const drafts: LedgerEntryDraft[] = legs.map((leg, index) => {
     const primary = legs.length === 1;
@@ -918,16 +918,16 @@ async function resolveRefundLegs(
     return planned.map((leg) => ({ ...leg }));
   } catch (error) {
     console.error(
-      `[account-ledger] 出資腿讀取失敗，本次退款記在兜底池 user=${input.billingUserId}：${error instanceof Error ? error.message : String(error)}`,
+      `[account-ledger] 出资腿读取失败，本次退款记在兜底池 user=${input.billingUserId}：${error instanceof Error ? error.message : String(error)}`,
     );
     return fallback;
   }
 }
 
 /**
- * B1 分配/回收 = 真轉移：主帳 −Δ、成員 +Δ，**兩條腿同一個事務**記帳（單腿落地
- * = 我方帳本自己製造不對稱）。amountQuota 傳正數（劃出方向），回收時呼叫端傳負數
- * 由本函式翻向：正 = 主帳→成員，負 = 成員→主帳。
+ * B1 分配/回收 = 真转移：主帐 −Δ、成员 +Δ，**两条腿同一个事务**记帐（单腿落地
+ * = 我方帐本自己制造不对称）。amountQuota 传正数（划出方向），回收时呼叫端传负数
+ * 由本函式翻向：正 = 主帐→成员，负 = 成员→主帐。
  */
 export async function recordTransfer(
   input: {
@@ -941,7 +941,7 @@ export async function recordTransfer(
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
   const amount = Math.round(input.amountQuota);
-  if (!Number.isFinite(amount) || amount === 0) return { posted: false, reason: "轉移金額為 0，無帳可記" };
+  if (!Number.isFinite(amount) || amount === 0) return { posted: false, reason: "转移金额为 0，无帐可记" };
   const outgoing = amount > 0;
   const magnitude = Math.abs(amount);
   const from = outgoing ? input.teamUserId : input.memberUserId;
@@ -975,7 +975,7 @@ export async function recordTransfer(
   );
 }
 
-/** 充值入帳（兌換碼被使用）。source 決定「現金 / 非現金」語義（投影層據此判付費）。 */
+/** 充值入帐（兑换码被使用）。source 决定「现金 / 非现金」语义（投影层据此判付费）。 */
 export async function recordRecharge(
   input: {
     billingUserId: number;
@@ -983,13 +983,13 @@ export async function recordRecharge(
     redemptionId: string | number;
     redemptionKey?: string;
     redeemedAt?: string | null;
-    /** 省略＝現金通道（`redemption-sync`）；人工發碼必須傳非現金來源。 */
+    /** 省略＝现金通道（`redemption-sync`）；人工发码必须传非现金来源。 */
     source?: string;
   },
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
   const amount = Math.round(input.amountQuota);
-  if (!Number.isFinite(amount) || amount <= 0) return { posted: false, reason: "充值金額非正數" };
+  if (!Number.isFinite(amount) || amount <= 0) return { posted: false, reason: "充值金额非正数" };
   return withOpeningGuard(
     [input.billingUserId],
     [
@@ -1000,7 +1000,7 @@ export async function recordRecharge(
         source: input.source ?? REDEMPTION_CASH_SOURCE,
         sourceRef: `redemption:${String(input.redemptionId)}`,
         idempotencyRef: ledgerRef.recharge(input.redemptionId),
-        note: "new-api 兌換碼已使用（充值入帳）",
+        note: "new-api 兑换码已使用（充值入帐）",
         metadata: { redemption_key: input.redemptionKey ?? null, redeemed_at: input.redeemedAt ?? null },
       },
     ],
@@ -1009,41 +1009,41 @@ export async function recordRecharge(
 }
 
 /**
- * REQ-D3 期次切換（訂閱池入帳，**不變量 ③**）：一次寫入「本期發放」與（可選）「上一期
- * 未用完餘額作廢」。
+ * REQ-D3 期次切换（订阅池入帐，**不变量 ③**）：一次写入「本期发放」与（可选）「上一期
+ * 未用完余额作废」。
  *
- *   發放行：entry_type=recharge、pool='subscription'、term_ref='sub:<id>:term:<n>'，
- *           expires_at = 本期到期時刻；冪等鍵 = `subscription:<id>:term:<n>`（就是
- *           「(訂閱 id, 期次序號)」那條不變量）。
- *   替換行：entry_type=expire、amount = −舊期未用完額（寫入時作廢；replace 語義）。
- *           兩行同一批 ⇒ 同一個事務，要嘛都記、要嘛都不記（不會出現「舊額已作廢、
- *           新額卻沒發」的淨損失）。
+ *   发放行：entry_type=recharge、pool='subscription'、term_ref='sub:<id>:term:<n>'，
+ *           expires_at = 本期到期时刻；幂等键 = `subscription:<id>:term:<n>`（就是
+ *           「(订阅 id, 期次序号)」那条不变量）。
+ *   替换行：entry_type=expire、amount = −旧期未用完额（写入时作废；replace 语义）。
+ *           两行同一批 ⇒ 同一个事务，要嘛都记、要嘛都不记（不会出现「旧额已作废、
+ *           新额却没发」的净损失）。
  *
- * 重放防護兩層：①呼叫端先按 source_ref（redemption:<id>）判斷同一張碼是否已發過；
- * ②帳本 UNIQUE(idempotency_ref) 擋並發（同一期次只會落一次）。
+ * 重放防护两层：①呼叫端先按 source_ref（redemption:<id>）判断同一张码是否已发过；
+ * ②帐本 UNIQUE(idempotency_ref) 挡并发（同一期次只会落一次）。
  */
 export async function recordSubscriptionTermSwitch(
   input: {
     billingUserId: number;
     subscriptionId: string;
-    /** 本期期次序號（從 1 起算）。 */
+    /** 本期期次序号（从 1 起算）。 */
     termIndex: number;
-    /** 本期額度（quota）。 */
+    /** 本期额度（quota）。 */
     termQuota: number;
-    /** 本期到期時刻 ISO。 */
+    /** 本期到期时刻 ISO。 */
     expiresAt: string;
-    /** 發放來源（'redemption:<id>'）。 */
+    /** 发放来源（'redemption:<id>'）。 */
     sourceRef: string;
     sku: string;
     grantedAt?: string | null;
     redemptionKey?: string | null;
-    /** 要作廢的上一期未用完餘額（>0 才寫 expire 行；由 subscription.ts 依替換語義算出）。 */
+    /** 要作废的上一期未用完余额（>0 才写 expire 行；由 subscription.ts 依替换语义算出）。 */
     replaced?: { termIndex: number; termRef: string; expiresAt: string; amountQuota: number } | null;
   },
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
   const amount = Math.round(input.termQuota);
-  if (!Number.isFinite(amount) || amount <= 0) return { posted: false, reason: "期次額度非正數" };
+  if (!Number.isFinite(amount) || amount <= 0) return { posted: false, reason: "期次额度非正数" };
   const drafts: LedgerEntryDraft[] = [
     {
       billingUserId: input.billingUserId,
@@ -1055,7 +1055,7 @@ export async function recordSubscriptionTermSwitch(
       pool: "subscription",
       termRef: subscriptionTermRef(input.subscriptionId, input.termIndex),
       expiresAt: input.expiresAt,
-      note: `訂閱期次發放（第 ${input.termIndex} 期）`,
+      note: `订阅期次发放（第 ${input.termIndex} 期）`,
       metadata: {
         subscription_id: input.subscriptionId,
         sku: input.sku,
@@ -1077,7 +1077,7 @@ export async function recordSubscriptionTermSwitch(
       pool: "subscription",
       termRef: input.replaced.termRef,
       expiresAt: input.replaced.expiresAt,
-      note: `續期替換：第 ${input.replaced.termIndex} 期未用完餘額作廢`,
+      note: `续期替换：第 ${input.replaced.termIndex} 期未用完余额作废`,
       metadata: {
         subscription_id: input.subscriptionId,
         replaced_term_index: input.replaced.termIndex,
@@ -1089,7 +1089,7 @@ export async function recordSubscriptionTermSwitch(
   return withOpeningGuard([input.billingUserId], drafts, deps);
 }
 
-/** 管理員加減額度（建戶初始額度、人工補正）。sourceRef 必填且要能指回操作人。 */
+/** 管理员加减额度（建户初始额度、人工补正）。sourceRef 必填且要能指回操作人。 */
 export async function recordAdjustment(
   input: {
     billingUserId: number;
@@ -1101,7 +1101,7 @@ export async function recordAdjustment(
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
   const amount = Math.round(input.amountQuota);
-  if (!Number.isFinite(amount) || amount === 0) return { posted: false, reason: "調整金額為 0，無帳可記" };
+  if (!Number.isFinite(amount) || amount === 0) return { posted: false, reason: "调整金额为 0，无帐可记" };
   return withOpeningGuard(
     [input.billingUserId],
     [
@@ -1119,53 +1119,53 @@ export async function recordAdjustment(
   );
 }
 
-// ─────────────────────────────────────────── 充值入帳（上游兌換碼 → 帳本）
+// ─────────────────────────────────────────── 充值入帐（上游兑换码 → 帐本）
 
 export interface RechargeIngestSummary {
   scanned: number;
   charged: number;
-  /** 基線前兌換、以「充值＋沖銷」兩條腿入帳的筆數（淨額 0，僅為讓來源可見）。 */
+  /** 基线前兑换、以「充值＋冲销」两条腿入帐的笔数（净额 0，仅为让来源可见）。 */
   chargedBaselineAbsorbed: number;
   skippedUnused: number;
-  /** 基線前且連沖銷腿都寫不進去（擋下）的筆數——非 0 即為待查。 */
+  /** 基线前且连冲销腿都写不进去（挡下）的笔数——非 0 即为待查。 */
   skippedBeforeBaseline: number;
   skippedNoUser: number;
-  /** REQ-D3：帶訂閱 SKU 標記的碼（由 subscription.ts 的訂閱通道入帳，本通道**不得**再記一筆）。 */
+  /** REQ-D3：带订阅 SKU 标记的码（由 subscription.ts 的订阅通道入帐，本通道**不得**再记一笔）。 */
   skippedSubscription: number;
   errors: string[];
 }
 
 type RedemptionReader = (input: { pages: number; pageSize: number }) => Promise<GatewayRedemption[]>;
 
-/** 現金通道（mPay 真實單）的帳本來源：投影層据此把該行計入「付費」。 */
+/** 现金通道（mPay 真实单）的帐本来源：投影层据此把该行计入「付费」。 */
 export const REDEMPTION_CASH_SOURCE = "redemption-sync";
 /**
- * 人工發碼 / 贈送碼的帳本來源。**必須**命中 statistics-projection 的
- * NON_CASH_RECHARGE_SOURCE（`gift`）——人工碼沒有外部現金流入，記成現金＝謊報營收。
+ * 人工发码 / 赠送码的帐本来源。**必须**命中 statistics-projection 的
+ * NON_CASH_RECHARGE_SOURCE（`gift`）——人工码没有外部现金流入，记成现金＝谎报营收。
  */
 export const REDEMPTION_MANUAL_SOURCE = "gift-manual-code";
-/** 基線沖銷腿的來源（淨額 0，兩條腿成對，永不單獨出現在帳上）。 */
+/** 基线冲销腿的来源（净额 0，两条腿成对，永不单独出现在帐上）。 */
 export const REDEMPTION_BASELINE_OFFSET_SOURCE = "opening-offset";
 
 /**
- * 兌換碼是不是「真金白銀買來的」。唯一判據＝mPay 發碼時的命名約定
- * （`mapay-redemption.mapayOrderRedemptionName` = `MP` + out_trade_no 後 18 碼）。
- * 人工碼（eimu1500 / MANUAL-* / tier-* / gift）一律非現金——帳本語義上不是營收。
+ * 兑换码是不是「真金白银买来的」。唯一判据＝mPay 发码时的命名约定
+ * （`mapay-redemption.mapayOrderRedemptionName` = `MP` + out_trade_no 后 18 码）。
+ * 人工码（eimu1500 / MANUAL-* / tier-* / gift）一律非现金——帐本语义上不是营收。
  */
 export function isCashBackedRedemptionName(name: string | null | undefined): boolean {
   return /^MP[A-Z0-9]{6,}$/.test((name ?? "").trim());
 }
 
 /**
- * 基線前（`redeemed_time` 早於開戶基線行）的充值入帳：**兩條腿同一批**——
+ * 基线前（`redeemed_time` 早于开户基线行）的充值入帐：**两条腿同一批**——
  *
- *   recharge       +Q  ← 讓「這筆錢從哪來」在帳本上可見（營收/漏斗的唯一事實源）
- *   adjustment     −Q  ← 沖銷：該筆額度在開戶基線（opening，讀自 new-api 當時餘額）裡
- *                        已經算過一次，若只記 recharge 就是憑空多一份錢。
+ *   recharge       +Q  ← 让「这笔钱从哪来」在帐本上可见（营收/漏斗的唯一事实源）
+ *   adjustment     −Q  ← 冲销：该笔额度在开户基线（opening，读自 new-api 当时余额）里
+ *                        已经算过一次，若只记 recharge 就是凭空多一份钱。
  *
- * 淨額恆為 0 ⇒ 餘額（Σ amount）與既有帳本逐位相同；兩腿由 postLedgerEntries 包在
- * 同一事務（`ON CONFLICT` 冪等），掃描重放不雙算。缺腿自癒：先讀兩把冪等鍵，
- * 只補缺的那條——不會出現「recharge 在、沖銷不在」的單腿漂移。
+ * 净额恒为 0 ⇒ 余额（Σ amount）与既有帐本逐位相同；两腿由 postLedgerEntries 包在
+ * 同一事务（`ON CONFLICT` 幂等），扫描重放不双算。缺腿自愈：先读两把幂等键，
+ * 只补缺的那条——不会出现「recharge 在、冲销不在」的单腿漂移。
  */
 async function recordBaselineAbsorbedRecharge(
   input: {
@@ -1180,7 +1180,7 @@ async function recordBaselineAbsorbedRecharge(
 ): Promise<PendingWriteOutcome> {
   const amount = Math.round(input.amountQuota);
   const sql = deps.sql;
-  if (!sql) return { posted: false, reason: "帳本儲存層未配置" };
+  if (!sql) return { posted: false, reason: "帐本储存层未配置" };
   try {
     const rechargeRef = ledgerRef.recharge(input.redemptionId);
     const offsetRef = ledgerRef.rechargeBaselineOffset(input.redemptionId);
@@ -1190,7 +1190,7 @@ async function recordBaselineAbsorbedRecharge(
     `;
     const seen = new Set(existing.map((row) => String(row.idempotency_ref)));
     if (seen.has(rechargeRef) && seen.has(offsetRef)) {
-      return { posted: false, reason: "已記過（重放）" };
+      return { posted: false, reason: "已记过（重放）" };
     }
     const sourceRef = `redemption:${String(input.redemptionId)}`;
     const drafts: LedgerEntryDraft[] = [];
@@ -1202,7 +1202,7 @@ async function recordBaselineAbsorbedRecharge(
         source: input.source,
         sourceRef,
         idempotencyRef: rechargeRef,
-        note: "new-api 兌換碼已使用（充值入帳，金額已含在開戶基線內）",
+        note: "new-api 兑换码已使用（充值入帐，金额已含在开户基线内）",
         metadata: { redemption_key: input.redemptionKey ?? null, redeemed_at: input.redeemedAt ?? null, baseline_absorbed: true },
       });
     }
@@ -1214,7 +1214,7 @@ async function recordBaselineAbsorbedRecharge(
         source: REDEMPTION_BASELINE_OFFSET_SOURCE,
         sourceRef,
         idempotencyRef: offsetRef,
-        note: "沖銷：該筆充值已含在開戶基線（opening）內，避免雙算",
+        note: "冲销：该笔充值已含在开户基线（opening）内，避免双算",
         metadata: { redemption_key: input.redemptionKey ?? null, redeemed_at: input.redeemedAt ?? null, baseline_absorbed: true },
       });
     }
@@ -1224,30 +1224,30 @@ async function recordBaselineAbsorbedRecharge(
     return { posted: result.inserted.length > 0, reason: undefined };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`[account-ledger] 基線沖銷入帳異常（不擋錢路）：${reason}`);
+    console.error(`[account-ledger] 基线冲销入帐异常（不挡钱路）：${reason}`);
     return { posted: false, reason };
   }
 }
 
 /**
- * 充值入帳：把 new-api「已被使用」的兌換碼同步成我方帳本的 recharge 加項。
+ * 充值入帐：把 new-api「已被使用」的兑换码同步成我方帐本的 recharge 加项。
  *
- * 為什麼讀上游而不是在發碼時記帳：mPay 回調只是**產生**兌換碼（`fulfillMapayRedemption`），
- * 真正入帳要用戶在 new-api 端兌換（`POST /api/user/topup`）。發碼即記 = 未被兌換的碼
- * 憑空變成餘額；故一律以「上游記錄顯示已使用」為唯一入帳依據（同時涵蓋人工發碼）。
+ * 为什么读上游而不是在发码时记帐：mPay 回调只是**产生**兑换码（`fulfillMapayRedemption`），
+ * 真正入帐要用户在 new-api 端兑换（`POST /api/user/topup`）。发码即记 = 未被兑换的码
+ * 凭空变成余额；故一律以「上游记录显示已使用」为唯一入帐依据（同时涵盖人工发码）。
  *
- * 兩種來源，兩套語義（現金判定在投影層按 `source` 做，此處只負責如實標記）：
- *   - mPay 真實單（name=`MP…`）→ source=`redemption-sync`，是現金營收。
- *   - 人工發碼 / 贈送碼 → source=`gift-manual-code`（命中 NON_CASH_RECHARGE_SOURCE），
- *     額度有效但不是現金流入，禁止混進付費漏斗。
+ * 两种来源，两套语义（现金判定在投影层按 `source` 做，此处只负责如实标记）：
+ *   - mPay 真实单（name=`MP…`）→ source=`redemption-sync`，是现金营收。
+ *   - 人工发码 / 赠送码 → source=`gift-manual-code`（命中 NON_CASH_RECHARGE_SOURCE），
+ *     额度有效但不是现金流入，禁止混进付费漏斗。
  *
- * 防雙算（關鍵）：`redeemed_time` **晚於該身份基線入帳時間**的碼直接入帳；早於基線的
- * （額度已含在 opening 裡）入帳**兩條腿**——recharge +Q 讓「錢從哪來」在帳上可見，
- * adjustment −Q 沖銷防雙算（淨額 0）。舊版是直接丟棄這類碼，導致 09-19 前後所有
- * 已兌換碼在帳本上完全消失（營收恆為 0 的根因之一）。
+ * 防双算（关键）：`redeemed_time` **晚于该身份基线入帐时间**的码直接入帐；早于基线的
+ * （额度已含在 opening 里）入帐**两条腿**——recharge +Q 让「钱从哪来」在帐上可见，
+ * adjustment −Q 冲销防双算（净额 0）。旧版是直接丢弃这类码，导致 09-19 前后所有
+ * 已兑换码在帐本上完全消失（营收恒为 0 的根因之一）。
  *
- * 幂等：idempotency_ref = `redemption:<id>`（沖銷腿 `…:opening-offset`）⇒ 週期性重掃
- * 不會重複入帳。
+ * 幂等：idempotency_ref = `redemption:<id>`（冲销腿 `…:opening-offset`）⇒ 周期性重扫
+ * 不会重复入帐。
  */
 export async function ingestRedeemedRecharges(
   input: { pages?: number; pageSize?: number } = {},
@@ -1264,7 +1264,7 @@ export async function ingestRedeemedRecharges(
     errors: [],
   };
   if (!accountLedgerStoreEnabled() && !deps.sql) {
-    summary.errors.push("帳本儲存層未配置");
+    summary.errors.push("帐本储存层未配置");
     return summary;
   }
   const sql = deps.sql ?? getGenerationSql();
@@ -1276,7 +1276,7 @@ export async function ingestRedeemedRecharges(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     summary.errors.push(reason);
-    console.error(`[account-ledger] 兌換碼讀取失敗：${reason}`);
+    console.error(`[account-ledger] 兑换码读取失败：${reason}`);
     return summary;
   }
 
@@ -1292,24 +1292,24 @@ export async function ingestRedeemedRecharges(
       summary.skippedNoUser += 1;
       continue;
     }
-    // REQ-D3 防雙算（關鍵）：帶訂閱 SKU 標記的兌換碼**只**走訂閱通道（subscription.ts
-    // 建訂閱＋發期次，記在訂閱池）。這裡若照舊記一筆 recharge，同一張碼就會同時產生
-    // 「永久充值」與「訂閱發放」兩筆入帳 = 憑空多一筆錢。
+    // REQ-D3 防双算（关键）：带订阅 SKU 标记的兑换码**只**走订阅通道（subscription.ts
+    // 建订阅＋发期次，记在订阅池）。这里若照旧记一笔 recharge，同一张码就会同时产生
+    // 「永久充值」与「订阅发放」两笔入帐 = 凭空多一笔钱。
     if (parseSubscriptionCodeMarker(item.name)) {
       summary.skippedSubscription += 1;
       continue;
     }
     const opening = await ensureAccountOpening(usedUserId, { sql, fetchUser: deps.fetchUser });
     if (opening.baselineQuota === null) {
-      // 基線不明（上游 user 讀不到/額度非整數）⇒ 不入帳，留給對帳報告解釋。
+      // 基线不明（上游 user 读不到/额度非整数）⇒ 不入帐，留给对帐报告解释。
       summary.skippedNoUser += 1;
       continue;
     }
     const openingRow = await sql<Row[]>`
       SELECT created_at FROM account_ledger WHERE idempotency_ref = ${ledgerRef.opening(usedUserId)} LIMIT 1
     `;
-    // 基線時刻 = 這筆充值是否已含在基線裡的分界線。基線行寫入失敗時保守取 now
-    // （寧可漏記一筆舊充值讓對帳報告指出，也不把已含在基線裡的錢再加一次）。
+    // 基线时刻 = 这笔充值是否已含在基线里的分界线。基线行写入失败时保守取 now
+    // （宁可漏记一笔旧充值让对帐报告指出，也不把已含在基线里的钱再加一次）。
     const openingAtMs = openingRow[0] ? new Date(String(openingRow[0].created_at)).getTime() : Date.now();
     const source = isCashBackedRedemptionName(item.name) ? REDEMPTION_CASH_SOURCE : REDEMPTION_MANUAL_SOURCE;
     const common = {
@@ -1320,7 +1320,7 @@ export async function ingestRedeemedRecharges(
       redeemedAt: new Date(redeemedAtSec * 1000).toISOString(),
     };
     if (redeemedAtSec * 1000 < openingAtMs) {
-      // 基線前兌換：額度已含在 opening 內 ⇒ 記「充值 + 沖銷」兩條腿，淨額 0 但可見。
+      // 基线前兑换：额度已含在 opening 内 ⇒ 记「充值 + 冲销」两条腿，净额 0 但可见。
       const absorbed = await recordBaselineAbsorbedRecharge({ ...common, source }, { sql });
       if (absorbed.posted) summary.chargedBaselineAbsorbed += 1;
       else if (absorbed.reason && !/重放/.test(absorbed.reason)) {

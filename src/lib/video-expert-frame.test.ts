@@ -185,9 +185,9 @@ test("OFF：readBeastMode({})=false，委派 prompt 不含宪法文本", () => {
   assert.ok(r.prompt.includes("模型提示：seedance-2.5"));
   // 宪法特征句一个字不多（繁体宪法原文不出现在 OFF 输出）
   assert.equal(r.prompt.includes("诚实铁律"), false);
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("ON：readBeastMode({beast_mode:true})=true，宪法经 loadConstitution DI 注入头部（样本串，不读真档）", () => {

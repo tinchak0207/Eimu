@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """FlowMusic2API session watchdog.
 
-每 10 分鐘（systemd timer）檢查帳號池的 expires_at：
-- 新鮮 → 記一筆 healthy 離開（絕不消費活 token）。
-- 停滯 → 先用 classify_session() 判讀；已知死訊（reuse / bearer 401）直接寫結構化
+每 10 分钟（systemd timer）检查帐号池的 expires_at：
+- 新鲜 → 记一笔 healthy 离开（绝不消费活 token）。
+- 停滞 → 先用 classify_session() 判读；已知死讯（reuse / bearer 401）直接写结构化
   CHAIN_DEAD.json＋stderr ERROR（journald -p err 可抓），不再盲目打 grant。
-  - 其餘停滯 → 用庫內 refresh_token 做 Supabase refresh grant：
-    - 成功 → PUT 寫回（自動搶救，service ticker 停擺/丟失輪換可自癒）。
-    - refresh_token_already_used → classify_session() 判為 chain_dead → 寫
-      CHAIN_DEAD.json（偵測時間／last_sign_in_at／判讀／建議動作）＋CHAIN_DEAD 文字標記
-      （music-tools probeFlowMusic 讀此檔）＋stderr ERROR。
-- 任何判定鏈活著的出口（healthy／誤報／搶救成功）→ 殘留 CHAIN_DEAD／CHAIN_DEAD.json
-  歸檔為 .resolved-<UTC>，否則 music_gen 探針會把已救回的通路持續判成
-  「需人工登录」（2026-10-01 實錘）。
-- 健康噪音 supabase_refresh_no_provider_token 歸 healthy（09-30 §4 定案），不誤報。
+  - 其余停滞 → 用库内 refresh_token 做 Supabase refresh grant：
+    - 成功 → PUT 写回（自动抢救，service ticker 停摆/丢失轮换可自愈）。
+    - refresh_token_already_used → classify_session() 判为 chain_dead → 写
+      CHAIN_DEAD.json（侦测时间／last_sign_in_at／判读／建议动作）＋CHAIN_DEAD 文字标记
+      （music-tools probeFlowMusic 读此档）＋stderr ERROR。
+- 任何判定链活著的出口（healthy／误报／抢救成功）→ 残留 CHAIN_DEAD／CHAIN_DEAD.json
+  归档为 .resolved-<UTC>，否则 music_gen 探针会把已救回的通路持续判成
+  「需人工登录」（2026-10-01 实锤）。
+- 健康噪音 supabase_refresh_no_provider_token 归 healthy（09-30 §4 定案），不误报。
 """
 import base64
 import json
@@ -28,15 +28,15 @@ ENV_PATH = "/opt/flowmusic2api/.env"
 DEAD_MARKER = "/opt/flowmusic2api/CHAIN_DEAD"
 DEAD_MARKER_JSON = "/opt/flowmusic2api/CHAIN_DEAD.json"
 
-# 訊號常數（classify_session 的判讀依據；09-30 §4／09-11 實錘）
+# 讯号常数（classify_session 的判读依据；09-30 §4／09-11 实锤）
 SIG_REUSE = "refresh_token_already_used"
 SIG_BEARER_401 = "bearer update failed"
 SIG_HEALTH_NOISE = "supabase_refresh_no_provider_token"
-# Supabase 對被吊銷 family 的 refresh_token 回 4xx，錯誤碼形如
-# refresh_token_not_found / refresh_token_expired …（長度不一，用前綴比對）。
+# Supabase 对被吊销 family 的 refresh_token 回 4xx，错误码形如
+# refresh_token_not_found / refresh_token_expired …（长度不一，用前缀比对）。
 _REFRESH_TOKEN_ERR_RE = re.compile(r"refresh_token_[a-z][a-z_]*")
-JUDGEMENT = "疑似瀏覽器第二消費者搶輪換"
-SUGGESTED_ACTION = "請暴君關閉並清除該 profile 後重新導出 cookie"
+JUDGEMENT = "疑似浏览器第二消费者抢轮换"
+SUGGESTED_ACTION = "请暴君关闭并清除该 profile 后重新导出 cookie"
 SIGNAL_HINT = {
     "second_consumer_reuse_detected": "refresh_token_already_used",
     "supabase_refresh_token_revoked": "supabase refresh_token_* 4xx",
@@ -49,29 +49,29 @@ def log(msg):
 
 
 def log_error(msg):
-    # systemd stdout/stderr 連接器解析 kmsg 風格 "<N>" 前綴 → priority=N。
-    # 2026-10-02 實測：plain stderr 只記成 info(6)；加 "<3>" 才落 err(3)，
-    # journalctl -u flowmusic-watchdog -p err 才抓得到。故顯式加前綴。
+    # systemd stdout/stderr 连接器解析 kmsg 风格 "<N>" 前缀 → priority=N。
+    # 2026-10-02 实测：plain stderr 只记成 info(6)；加 "<3>" 才落 err(3)，
+    # journalctl -u flowmusic-watchdog -p err 才抓得到。故显式加前缀。
     print("<3>ERROR " + msg, file=sys.stderr, flush=True)
 
 
 def classify_session(last_st_refresh_result, expires_at, now=None):
-    """純函數：由 last_st_refresh_result 全文 + expires_at 判讀鏈狀態（無 I/O、可單測）。
+    """纯函数：由 last_st_refresh_result 全文 + expires_at 判读链状态（无 I/O、可单测）。
 
-    輸出 {"state","reason","action"}：
-      - state=chain_dead：鏈已死，需人工換血。
-      - state=healthy  ：鏈活著或僅為已知健康噪音。
-      - state=stale     ：憑證過期但無已知死訊，可嘗試 grant 搶救。
-    判讀優先序：
+    输出 {"state","reason","action"}：
+      - state=chain_dead：链已死，需人工换血。
+      - state=healthy  ：链活著或仅为已知健康噪音。
+      - state=stale     ：凭证过期但无已知死讯，可尝试 grant 抢救。
+    判读优先序：
       1. refresh_token_already_used → chain_dead（Supabase reuse detection）
       2. Supabase refresh_token_* 4xx（含 refresh_token_not_found）→ chain_dead
-         （**必須排在 provider 401 之前**：P1 修復後 Supabase 真錯誤會與
-         provider fallback 的 401 串接在同一行，順序反了會繼續誤判成
-         provider_bearer_401 —— 2026-10-03 實錘教訓）
-      3. provider bearer update failed … 401 → chain_dead（provider_token 死訊）
-      4. supabase_refresh_no_provider_token → healthy（健康噪音，非死訊）
-      5. expires_at 未過期 → healthy
-      6. 其他過期 → stale
+         （**必须排在 provider 401 之前**：P1 修复后 Supabase 真错误会与
+         provider fallback 的 401 串接在同一行，顺序反了会继续误判成
+         provider_bearer_401 —— 2026-10-03 实锤教训）
+      3. provider bearer update failed … 401 → chain_dead（provider_token 死讯）
+      4. supabase_refresh_no_provider_token → healthy（健康噪音，非死讯）
+      5. expires_at 未过期 → healthy
+      6. 其他过期 → stale
     """
     text = last_st_refresh_result or ""
     if SIG_REUSE in text:
@@ -93,10 +93,10 @@ def classify_session(last_st_refresh_result, expires_at, now=None):
 
 
 def extract_last_sign_in_at(google_cookies):
-    """從 google_cookies（`name=value; name=value`）解出 Supabase session 的 last_sign_in_at。
+    """从 google_cookies（`name=value; name=value`）解出 Supabase session 的 last_sign_in_at。
 
-    只讀 .0/.1 兩 chunk（.0 去 `base64-` 前綴）→ 拼接 → 嚴格 UTF-8 解 → user.last_sign_in_at。
-    任何解析失敗回 None（不拋、不影響看門狗主流程）。
+    只读 .0/.1 两 chunk（.0 去 `base64-` 前缀）→ 拼接 → 严格 UTF-8 解 → user.last_sign_in_at。
+    任何解析失败回 None（不抛、不影响看门狗主流程）。
     """
     try:
         parts = {}
@@ -121,8 +121,8 @@ def extract_last_sign_in_at(google_cookies):
 
 
 def write_chain_dead_json(acct, cls, detected_at=None):
-    """寫結構化 CHAIN_DEAD.json（治本：判讀機器可讀 + 人話建議動作）。"""
-    # 首次偵測優先：已存在（未歸檔）就不覆寫，保留最初死訊時間
+    """写结构化 CHAIN_DEAD.json（治本：判读机器可读 + 人话建议动作）。"""
+    # 首次侦测优先：已存在（未归档）就不覆写，保留最初死讯时间
     if os.path.exists(DEAD_MARKER_JSON):
         try:
             with open(DEAD_MARKER_JSON) as f:
@@ -148,7 +148,7 @@ def write_chain_dead_json(acct, cls, detected_at=None):
 
 
 def mark_chain_dead(acct, cls):
-    """死訊出口：文字標記（probeFlowMusic 相容）＋結構化 JSON＋stderr ERROR。"""
+    """死讯出口：文字标记（probeFlowMusic 相容）＋结构化 JSON＋stderr ERROR。"""
     now = datetime.now(timezone.utc).isoformat()
     with open(DEAD_MARKER, "w") as f:
         f.write("%s %s（%s；%s）\n" % (now, cls.get("reason"), SIGNAL_HINT.get(cls.get("reason"), ""), JUDGEMENT))
@@ -159,7 +159,7 @@ def mark_chain_dead(acct, cls):
 
 
 def clear_dead_marker():
-    """鏈存活出口：把殘留的 CHAIN_DEAD 與 CHAIN_DEAD.json 一併歸檔 .resolved-<UTC>。"""
+    """链存活出口：把残留的 CHAIN_DEAD 与 CHAIN_DEAD.json 一并归档 .resolved-<UTC>。"""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     cleared = []
     for p in (DEAD_MARKER, DEAD_MARKER_JSON):
@@ -168,7 +168,7 @@ def clear_dead_marker():
             os.rename(p, dst)
             cleared.append(os.path.basename(dst))
     if cleared:
-        log("CHAIN_DEAD_CLEARED 鏈已存活 → 標記歸檔 %s" % ", ".join(cleared))
+        log("CHAIN_DEAD_CLEARED 链已存活 → 标记归档 %s" % ", ".join(cleared))
 
 
 def getenv(key):
@@ -180,7 +180,7 @@ def getenv(key):
 
 
 def parse_ts(s):
-    # Go RFC3339Nano：小數秒可達 9 位，Python fromisoformat 只收 6 位 → 截斷
+    # Go RFC3339Nano：小数秒可达 9 位，Python fromisoformat 只收 6 位 → 截断
     m = re.match(r"(.*\.\d{6})\d*(Z|[+-]\d{2}:\d{2})$", s or "")
     if m:
         s = m.group(1) + m.group(2)
@@ -230,10 +230,10 @@ def main():
         clear_dead_marker()
         return 0
 
-    # 停滯：先純函數判讀，已知死訊不再盲目打 grant
+    # 停滞：先纯函数判读，已知死讯不再盲目打 grant
     cls0 = classify_session(acct.get("last_st_refresh_result"), acct.get("expires_at"), now=now)
     if cls0["state"] == "chain_dead":
-        log("STALE 且已知死訊 judge=%s/%s → 直接歸檔死訊（不打 grant）" % (cls0["state"], cls0["reason"]))
+        log("STALE 且已知死讯 judge=%s/%s → 直接归档死讯（不打 grant）" % (cls0["state"], cls0["reason"]))
         mark_chain_dead(acct, cls0)
         return 1
 
@@ -250,10 +250,10 @@ def main():
             sess = json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:300]
-        # 複查：可能 service ticker 剛好在我們讀取後自己恢復了
+        # 复查：可能 service ticker 刚好在我们读取后自己恢复了
         acct2 = get_account(tok)
         if acct2 and parse_ts(acct2.get("expires_at")) > datetime.now(timezone.utc):
-            log("STALE 誤報：service 已自行恢復 expires_at=%s" % acct2["expires_at"])
+            log("STALE 误报：service 已自行恢复 expires_at=%s" % acct2["expires_at"])
             clear_dead_marker()
             return 0
         cls = classify_session(body, acct.get("expires_at"))
@@ -263,10 +263,10 @@ def main():
             log_error("RESCUE_FAIL http %s judge=%s/%s body=%s" % (e.code, cls["state"], cls["reason"], body))
         return 1
 
-    # 搶救成功 → PUT 寫回；寫回前複查仍停滯（防與 service ticker 競態覆寫新 token）
+    # 抢救成功 → PUT 写回；写回前复查仍停滞（防与 service ticker 竞态覆写新 token）
     acct2 = get_account(tok)
     if acct2 and parse_ts(acct2.get("expires_at")) > datetime.now(timezone.utc):
-        log("STALE 誤報：service 已自行恢復 expires_at=%s" % acct2["expires_at"])
+        log("STALE 误报：service 已自行恢复 expires_at=%s" % acct2["expires_at"])
         clear_dead_marker()
         return 0
     payload = {

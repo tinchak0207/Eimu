@@ -1,4 +1,4 @@
-// 席位下單（刀 2）真行為斷言測試：報價 + 待支付訂單 + 明確拒單 + 冪等。
+// 席位下单（刀 2）真行为断言测试：报价 + 待支付订单 + 明确拒单 + 幂等。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -31,7 +31,7 @@ function priced(overrides: Partial<Record<string, Partial<Record<string, number 
 
 const PRICED = priced({ team: { month: 39 } });
 
-test("冪等：訂單 id 由請求四元組決定（同請求同 id、不同席位不同 id），形狀同 mapay out_trade_no", () => {
+test("幂等：订单 id 由请求四元组决定（同请求同 id、不同席位不同 id），形状同 mapay out_trade_no", () => {
   const a = seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
   const b = seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
   const c = seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 6 });
@@ -46,17 +46,17 @@ test("冪等：訂單 id 由請求四元組決定（同請求同 id、不同席�
   assert.equal(isSeatOrderId("TSzz"), false);
 });
 
-test("履約識別碼帶 seat: 前綴：既有金幣套餐解析器認不得它（不會被 redeem 成金幣）", () => {
+test("履约识别码带 seat: 前缀：既有金币套餐解析器认不得它（不会被 redeem 成金币）", () => {
   const param = seatOrderParam({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
   assert.equal(param, "seat:117:team:month:5");
-  // 真行為交叉斷言：席位訂單若誤走既有 mapay checkout，notify 端的 resolvePricingPlan
-  // 必然取不到套餐 ⇒ 對支付渠道回 400（收錢不履約）。此斷言正是「必須另接履約分支」的證據。
+  // 真行为交叉断言：席位订单若误走既有 mapay checkout，notify 端的 resolvePricingPlan
+  // 必然取不到套餐 ⇒ 对支付渠道回 400（收钱不履约）。此断言正是「必须另接履约分支」的证据。
   assert.equal(resolvePricingPlan(param), null);
   assert.equal(resolvePricingPlan(param) === null, true);
-  assert.notEqual(resolvePricingPlan("popular"), null, "既有套餐仍可解析（沒被本片動到）");
+  assert.notEqual(resolvePricingPlan("popular"), null, "既有套餐仍可解析（没被本片动到）");
 });
 
-test("待支付訂單形狀：out_trade_no/param/name/money 沿用 mapay 欄位口徑", () => {
+test("待支付订单形状：out_trade_no/param/name/money 沿用 mapay 栏位口径", () => {
   const quote = quoteSeatOrder({ tier: "team", cycle: "month", seats: 5 }, PRICED);
   assert.equal(quote.ok, true);
   if (!quote.ok) return;
@@ -74,13 +74,13 @@ test("待支付訂單形狀：out_trade_no/param/name/money 沿用 mapay 欄位�
     team_user_id: 117,
   });
   assert.equal(order.money, formatMapayMoney(quote.totalPrice));
-  // 待支付訂單是可序列化的字段袋（形狀與 mapay 的 fields 同族：字串鍵值）。
+  // 待支付订单是可序列化的字段袋（形状与 mapay 的 fields 同族：字串键值）。
   const asFields: MapayFields = { out_trade_no: order.out_trade_no, money: order.money, param: order.param };
   assert.deepEqual(Object.keys(asFields), ["out_trade_no", "money", "param"]);
 });
 
-test("價格未配置 → 409 seat_price_not_configured：沒有報價、更沒有待支付訂單", () => {
-  // 未配置語義用注入的全 null 價表驗（真源已於 2026-10-01 配置；見下一條）。
+test("价格未配置 → 409 seat_price_not_configured：没有报价、更没有待支付订单", () => {
+  // 未配置语义用注入的全 null 价表验（真源已于 2026-10-01 配置；见下一条）。
   const unconfigured: TeamSeatPriceTable = {
     starter: { month: null, quarter: null, year: null },
     team: { month: null, quarter: null, year: null },
@@ -97,39 +97,39 @@ test("價格未配置 → 409 seat_price_not_configured：沒有報價、更沒�
   assert.equal(JSON.stringify(decision).includes("money"), false, "不得出现任何金额字段（不能算成 0 元）");
 });
 
-test("真源已配置 → 不注入價表也能算出報價：可支付，報價/金額來自單一真源", () => {
-  // 真行為斷言：改 team-seat-pricing.ts 這一個物件，下單判定（不注入）就必須跟著動。
+test("真源已配置 → 不注入价表也能算出报价：可支付，报价/金额来自单一真源", () => {
+  // 真行为断言：改 team-seat-pricing.ts 这一个物件，下单判定（不注入）就必须跟著动。
   const decision = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
   assert.equal(decision.status, 200);
-  assert.equal(decision.payable, true, "全链已接線：报价合法即可支付");
+  assert.equal(decision.payable, true, "全链已接线：报价合法即可支付");
   assert.equal(decision.quote?.unitPrice, TEAM_SEAT_PRICING.team.month);
   assert.equal(decision.quote?.totalPrice, (TEAM_SEAT_PRICING.team.month as number) * 5);
   assert.equal(decision.pending_order?.money, formatMapayMoney((TEAM_SEAT_PRICING.team.month as number) * 5));
   assert.equal(decision.pending_order?.param.startsWith("seat:"), true);
 });
 
-test("報價合法 → 200 可支付：回報價 + 待支付訂單 + 收銀台入口（決定性 out_trade_no）", () => {
+test("报价合法 → 200 可支付：回报价 + 待支付订单 + 收银台入口（决定性 out_trade_no）", () => {
   const decision = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }, PRICED);
   assert.equal(decision.status, 200);
   assert.equal(decision.payable, true);
   assert.equal(decision.quote?.totalPrice, 195);
   assert.equal(decision.pending_order?.money, "195.00");
-  // 收銀台入口帶著同一個 seat: param（與金幣套餐 id 空間隔離）。
+  // 收银台入口带著同一个 seat: param（与金币套餐 id 空间隔离）。
   assert.equal(decision.checkout.method, "GET");
   assert.match(decision.checkout.path, /^\/api\/payments\/mapay\/checkout\?plan=seat%3A117%3Ateam%3Amonth%3A5$/);
-  // 接線清單保留（前兩條已落地、續費/退款未做）。
+  // 接线清单保留（前两条已落地、续费/退款未做）。
   assert.equal(decision.todo.length, 3);
   assert.match(decision.todo.join("\n"), /已落地/);
   assert.match(decision.todo.join("\n"), /fulfillMapayRedemption/);
-  // 重放：同一請求再判一次，out_trade_no 一模一樣（沒有第二張訂單、沒有狀態被寫）。
+  // 重放：同一请求再判一次，out_trade_no 一模一样（没有第二张订单、没有状态被写）。
   const replay = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }, PRICED);
   assert.equal(replay.pending_order?.out_trade_no, decision.pending_order?.out_trade_no);
 });
 
-test("param 反解：seatOrderParam → parseSeatOrderParam 逐欄還原；畸形/非席位一律 null", () => {
+test("param 反解：seatOrderParam → parseSeatOrderParam 逐栏还原；畸形/非席位一律 null", () => {
   const identity = { teamUserId: 117, tier: "team", cycle: "month", seats: 5 };
   assert.deepEqual(parseSeatOrderParam(seatOrderParam(identity)), identity);
-  // 含幣額與價表同源（席位數 × 檔位含幣額）。
+  // 含币额与价表同源（席位数 × 档位含币额）。
   assert.equal(seatOrderEntitlementCoins(identity), 5 * 1000);
   for (const bad of [null, "", "popular", "seat:117:team:month", "seat:0:team:month:5", "seat:117:nope:month:5", "seat:117:team:monthly:5", "seat:117:team:month:0", "IMG123"]) {
     assert.equal(parseSeatOrderParam(bad), null, String(bad));
@@ -137,7 +137,7 @@ test("param 反解：seatOrderParam → parseSeatOrderParam 逐欄還原；畸�
   assert.equal(seatOrderEntitlementCoins({ teamUserId: 1, tier: "nope", cycle: "month", seats: 1 }), null);
 });
 
-test("參數不合法逐條回自己的碼（400），且都不產生訂單", () => {
+test("参数不合法逐条回自己的码（400），且都不产生订单", () => {
   const cases: { input: Parameters<typeof decideSeatOrder>[0]; code: string }[] = [
     { input: { teamUserId: 117, tier: "nope", cycle: "month", seats: 1 }, code: "unknown_tier" },
     { input: { teamUserId: 117, tier: "team", cycle: "monthly", seats: 1 }, code: "invalid_cycle" },

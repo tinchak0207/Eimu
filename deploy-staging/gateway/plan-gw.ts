@@ -1,32 +1,32 @@
-// 從 index.ts 無損抽取（2026-09-19 第二階段 Wave1）：兩段式首字 turn.plan（原 index.ts 890–1130 行）。
-// 橋接依賴說明（仍住 index.ts 的符號）：
+// 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave1）：两段式首字 turn.plan（原 index.ts 890–1130 行）。
+// 桥接依赖说明（仍住 index.ts 的符号）：
 //  - emitToSession：index.ts 已 export，真 import。
-//  - sessions / markTurnFirst / clearAckTimer：index.ts 尚未 export（2026-09-19 實錘
-//    bun build 報 No matching export），以 declare 佔位（第一階段 pricing-gateway 同法，
-//    bun build 只轉譯不查名，建得過）；index.ts 補 export 後替換為正式 import。
+//  - sessions / markTurnFirst / clearAckTimer：index.ts 尚未 export（2026-09-19 实锤
+//    bun build 报 No matching export），以 declare 占位（第一阶段 pricing-gateway 同法，
+//    bun build 只转译不查名，建得过）；index.ts 补 export 后替换为正式 import。
 //  - loadAgentModelRegistry / bindingRef / AgentModelRef：原住 index.ts，Wave2
-//    （2026-09-19）遷入 model-registry.ts，現為真 import。
+//    （2026-09-19）迁入 model-registry.ts，现为真 import。
 import { readFileSync } from "node:fs"
 import type { SessionState } from "./types-gateway.ts"
 import { loadUserSettings } from "./persistence"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { TURN_PLAN_DISABLE_THINKING, TURN_PLAN_ENABLED, TURN_PLAN_MAX_CANDIDATES, TURN_PLAN_MAX_CHARS, TURN_PLAN_MAX_TOKENS, TURN_PLAN_SYSTEM_HEAD, TURN_PLAN_TIMEOUT_MS } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
-//  - loadAgentModelRegistry/bindingRef/AgentModelRef：已於 Wave2（2026-09-19）遷入
+//  - loadAgentModelRegistry/bindingRef/AgentModelRef：已于 Wave2（2026-09-19）迁入
 //    model-registry.ts，改真 import。
 import { loadAgentModelRegistry, bindingRef, type AgentModelRef } from "./model-registry.ts"
 import { sessions } from "./sessions-core.ts"
 import { markTurnFirst } from "./metrics-gw.ts"
 import { clearAckTimer } from "./timers-gw.ts"
 
-// ─── 兩段式首字（2026-09-18）：turn.plan ────────────────────────────────
-// 契約見檔頭常數區註釋。此處只做一件事：在回合受理後立刻 fire-and-forget 打一次
-// 直連 provider 的輕量調用，把「打算怎麼做」的一行計畫當成最早的用戶可見輸出。
-// 全程不可阻塞主線、不可影響 promptBody、不可冒充正文、失敗一律靜默。
+// ─── 两段式首字（2026-09-18）：turn.plan ────────────────────────────────
+// 契约见档头常数区注释。此处只做一件事：在回合受理后立刻 fire-and-forget 打一次
+// 直连 provider 的轻量调用，把「打算怎么做」的一行计画当成最早的用户可见输出。
+// 全程不可阻塞主线、不可影响 promptBody、不可冒充正文、失败一律静默。
 
-/** turn.plan 用的模型：bindings.plan_model（新增選配）→ bindings.persona[persona]
- *  → bindings.default；形狀不合格一律 null（寧可不發計畫，絕不猜）。
- *  刻意不走 personaModel()——它帶硬編碼回退，違反「不猜」原則。 */
+/** turn.plan 用的模型：bindings.plan_model（新增选配）→ bindings.persona[persona]
+ *  → bindings.default；形状不合格一律 null（宁可不发计画，绝不猜）。
+ *  刻意不走 personaModel()——它带硬编码回退，违反「不猜」原则。 */
 export function planModel(state: SessionState): AgentModelRef | null {
   const reg = loadAgentModelRegistry()
   const b = reg?.bindings
@@ -36,10 +36,10 @@ export function planModel(state: SessionState): AgentModelRef | null {
   return bindingRef(b.plan_model) ?? bindingRef(b.persona?.[persona]) ?? bindingRef(b.default)
 }
 
-/** turn.plan 的候選鏈：主候選（plan_model → persona → default）＋ plan_fallbacks
- *  （選配，供本段獨立策展：計畫要的是「快」，主鏈要的是「強」，判準不同）
- *  ＋ 該 persona 的 fallbacks。去重、剔除缺 provider options 者，上限
- *  TURN_PLAN_MAX_CANDIDATES。為什麼要鏈見該常數註釋。 */
+/** turn.plan 的候选链：主候选（plan_model → persona → default）＋ plan_fallbacks
+ *  （选配，供本段独立策展：计画要的是「快」，主链要的是「强」，判准不同）
+ *  ＋ 该 persona 的 fallbacks。去重、剔除缺 provider options 者，上限
+ *  TURN_PLAN_MAX_CANDIDATES。为什么要链见该常数注释。 */
 export function planCandidates(state: SessionState): AgentModelRef[] {
   const primary = planModel(state)
   if (!primary) return []
@@ -62,10 +62,10 @@ export function planCandidates(state: SessionState): AgentModelRef[] {
   return out
 }
 
-/** 從 agent-models.json 的 providers.<id>.options.{baseURL,apiKey} 取連線資訊。
- *  gateway 首例讀 providers[].options（此前只讀 bindings）→ 形狀嚴格防呆：
- *  非字串/空值/非 http(s) 一律回 null（該回 null 就靜默跳過，絕不猜端點）。
- *  apiKey 只在本函數回傳值內存活，永不落 log、永不進幀。 */
+/** 从 agent-models.json 的 providers.<id>.options.{baseURL,apiKey} 取连线资讯。
+ *  gateway 首例读 providers[].options（此前只读 bindings）→ 形状严格防呆：
+ *  非字串/空值/非 http(s) 一律回 null（该回 null 就静默跳过，绝不猜端点）。
+ *  apiKey 只在本函数回传值内存活，永不落 log、永不进帧。 */
 export function planProviderConn(providerID: string): { baseURL: string; apiKey: string } | null {
   const prov = loadAgentModelRegistry()?.providers?.[providerID]
   if (!prov || typeof prov !== "object") return null
@@ -78,9 +78,9 @@ export function planProviderConn(providerID: string): { baseURL: string; apiKey:
   return { baseURL: base, apiKey: typeof o.apiKey === "string" ? o.apiKey : "" }
 }
 
-/** 讀 OpenAI 相容 SSE 串流，只取 choices[0].delta.content——reasoning_content
- *  一律丟棄（這是「首 content 1.3s」契約的前提）。攢夠 maxChars 即主動取消
- *  上游串流（不為計畫多燒 token）。 */
+/** 读 OpenAI 相容 SSE 串流，只取 choices[0].delta.content——reasoning_content
+ *  一律丢弃（这是「首 content 1.3s」契约的前提）。攒够 maxChars 即主动取消
+ *  上游串流（不为计画多烧 token）。 */
 export async function readSseContent(stream: ReadableStream<Uint8Array>, maxChars: number): Promise<string> {
   const reader = stream.getReader()
   const dec = new TextDecoder()
@@ -103,7 +103,7 @@ export async function readSseContent(stream: ReadableStream<Uint8Array>, maxChar
               const c = j?.choices?.[0]?.delta?.content
               if (typeof c === "string" && c) out += c
             } catch {
-              // 非 JSON 行（上游註解/心跳）忽略：不影響其餘行解析。
+              // 非 JSON 行（上游注解/心跳）忽略：不影响其余行解析。
             }
           }
         }
@@ -114,14 +114,14 @@ export async function readSseContent(stream: ReadableStream<Uint8Array>, maxChar
     try {
       await reader.cancel()
     } catch {
-      // 串流已結束/已取消：無需處理。
+      // 串流已结束/已取消：无需处理。
     }
   }
   return out
 }
 
-/** 計畫文字正規化：去 markdown 圍欄、取「打算这么做」那行（模型有時仍會先鋪一句），
- *  再截到 TURN_PLAN_MAX_CHARS。空字串 = 不可用（呼叫方據此靜默跳過）。 */
+/** 计画文字正规化：去 markdown 围栏、取「打算这么做」那行（模型有时仍会先铺一句），
+ *  再截到 TURN_PLAN_MAX_CHARS。空字串 = 不可用（呼叫方据此静默跳过）。 */
 export function planLineFromText(raw: string): string {
   const cleaned = raw.replace(/```[a-zA-Z]*\n?/g, "\n").trim()
   if (!cleaned) return ""
@@ -133,10 +133,10 @@ export function planLineFromText(raw: string): string {
   return hit.slice(0, TURN_PLAN_MAX_CHARS)
 }
 
-/** 從計畫文字抽出「確實出現在 digest 白名單」的 expert id。**命不中就不回，絕不編**：
- *  白名單由 `/^- ([a-z0-9-]+)（/gm` 從 digest 現場抽取（digest 是 id 真源，不另存表）；
- *  比對要求 id 前後不是 [a-z0-9-]（防 `image` 之類短 id 誤命中 `image_generate`）。
- *  回傳順序 = digest 順序（決定性）。 */
+/** 从计画文字抽出「确实出现在 digest 白名单」的 expert id。**命不中就不回，绝不编**：
+ *  白名单由 `/^- ([a-z0-9-]+)（/gm` 从 digest 现场抽取（digest 是 id 真源，不另存表）；
+ *  比对要求 id 前后不是 [a-z0-9-]（防 `image` 之类短 id 误命中 `image_generate`）。
+ *  回传顺序 = digest 顺序（决定性）。 */
 export function extractPlanExperts(plan: string, digest: string): string[] {
   const found: string[] = []
   for (const m of digest.matchAll(/^- ([a-z0-9-]+)（/gm)) {
@@ -148,9 +148,9 @@ export function extractPlanExperts(plan: string, digest: string): string[] {
   return found
 }
 
-/** 單一候選的一次嘗試：成功回計畫文字，失敗一律 throw（原因字串供 AggregateError
- *  匯總）。**刻意不在此處印 log**——N 條候選各印一行會把日誌淹掉，失敗雜訊一律由
- *  startTurnPlan 匯總成一行。 */
+/** 单一候选的一次尝试：成功回计画文字，失败一律 throw（原因字串供 AggregateError
+ *  汇总）。**刻意不在此处印 log**——N 条候选各印一行会把日志淹掉，失败杂讯一律由
+ *  startTurnPlan 汇总成一行。 */
 export async function planAttempt(model: AgentModelRef, userText: string, digest: string): Promise<string> {
   const conn = planProviderConn(model.providerID)
   if (!conn) throw new Error(`${model.providerID}: no provider options`)
@@ -161,7 +161,7 @@ export async function planAttempt(model: AgentModelRef, userText: string, digest
       method: "POST",
       headers: {
         "content-type": "application/json",
-        // 完全不帶 User-Agent 會被上游 403（Bun fetch 實測）——顯式給一個。
+        // 完全不带 User-Agent 会被上游 403（Bun fetch 实测）——显式给一个。
         "user-agent": "image-studio-gateway/turn-plan",
         ...(conn.apiKey ? { authorization: `Bearer ${conn.apiKey}` } : {}),
       },
@@ -169,7 +169,7 @@ export async function planAttempt(model: AgentModelRef, userText: string, digest
         model: model.modelID,
         stream: true,
         max_tokens: TURN_PLAN_MAX_TOKENS,
-        // 見 TURN_PLAN_DISABLE_THINKING 註釋：這一行是把首字從 2.2s 拉到 1.3s 的關鍵。
+        // 见 TURN_PLAN_DISABLE_THINKING 注释：这一行是把首字从 2.2s 拉到 1.3s 的关键。
         ...(TURN_PLAN_DISABLE_THINKING ? { reasoning_effort: "none" } : {}),
         messages: [
           { role: "system", content: TURN_PLAN_SYSTEM_HEAD + (digest ? `Expert 注册表：\n${digest}` : "") },
@@ -190,12 +190,12 @@ export async function planAttempt(model: AgentModelRef, userText: string, digest
   }
 }
 
-/** 兩段式首字主體：fire-and-forget（void async IIFE），絕不 await、絕不擋主線。
- *  候選鏈併發競速（Promise.any），取最快成功者；全數失敗才印一行可 grep 的
- *  `[gateway] turn.plan skipped (<reason>)`——絕不影響主回合、絕不用罐頭計畫冒充。 */
+/** 两段式首字主体：fire-and-forget（void async IIFE），绝不 await、绝不挡主线。
+ *  候选链并发竞速（Promise.any），取最快成功者；全数失败才印一行可 grep 的
+ *  `[gateway] turn.plan skipped (<reason>)`——绝不影响主回合、绝不用罐头计画冒充。 */
 export function startTurnPlan(state: SessionState, userText: string, gen: number, tAccept: number): void {
   if (!TURN_PLAN_ENABLED) return
-  if (state.planState && state.planState.gen === gen) return // 本輪已發起過
+  if (state.planState && state.planState.gen === gen) return // 本轮已发起过
   state.planState = { gen, emittedAt: null }
   void (async () => {
     try {
@@ -204,7 +204,7 @@ export function startTurnPlan(state: SessionState, userText: string, gen: number
         console.log("[gateway] turn.plan skipped (no plan model)")
         return
       }
-      // digest 來源與 beast 段同一行讀法（讀不到仍可產計畫：只是少了白名單）。
+      // digest 来源与 beast 段同一行读法（读不到仍可产计画：只是少了白名单）。
       let digest = ""
       try {
         digest = readFileSync(`${import.meta.dir}/expert/registry-digest.txt`, "utf8")
@@ -220,9 +220,9 @@ export function startTurnPlan(state: SessionState, userText: string, gen: number
         plan = won.plan
         model = won.model
       } catch (e) {
-        // AggregateError：逐條列出「誰因為什麼失敗」。只印一個 http 403 正是
-        // 「安靜地壞掉」的來源——2026-09-18 實錘：persona 主模型當日多次 403，
-        // 計畫段整天零輸出而日誌只有一句 skipped，沒人看得出是渠道死了。
+        // AggregateError：逐条列出「谁因为什么失败」。只印一个 http 403 正是
+        // 「安静地坏掉」的来源——2026-09-18 实锤：persona 主模型当日多次 403，
+        // 计画段整天零输出而日志只有一句 skipped，没人看得出是渠道死了。
         const why =
           e instanceof AggregateError
             ? e.errors.map((x) => (x instanceof Error ? x.message : String(x))).join(" | ")
@@ -230,14 +230,14 @@ export function startTurnPlan(state: SessionState, userText: string, gen: number
         console.log(`[gateway] turn.plan skipped (all ${cands.length} candidates failed: ${why})`)
         return
       }
-      // 讓位三條件（一個都不能少）：會話已不存在 / 已進入下一輪 / 本輪已被中止。
+      // 让位三条件（一个都不能少）：会话已不存在 / 已进入下一轮 / 本轮已被中止。
       const cur = sessions.get(state.sessionId)
       if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted) return
-      // 附加安全網（本輪加註）：本輪已收尾（turnMetrics 已收檔）→ 不補發過期計畫。
-      // 為什麼需要：逾時預算 4s（見 TURN_PLAN_TIMEOUT_MS）＋冷連線 headers 實測
-      // 可達 3.2s，短 turn（實測最短 3.8s）理論上可能先收尾、計畫後到，屆時計畫
-      // 會落在答案之後。turnMetrics 在受理當下建立、turn.done/abort/superseded 收檔，故
-      // 「null」＝本輪已收尾。此條只會少發一個已無意義的過期計畫，不會誤殺在途輪。
+      // 附加安全网（本轮加注）：本轮已收尾（turnMetrics 已收档）→ 不补发过期计画。
+      // 为什么需要：逾时预算 4s（见 TURN_PLAN_TIMEOUT_MS）＋冷连线 headers 实测
+      // 可达 3.2s，短 turn（实测最短 3.8s）理论上可能先收尾、计画后到，届时计画
+      // 会落在答案之后。turnMetrics 在受理当下建立、turn.done/abort/superseded 收档，故
+      // 「null」＝本轮已收尾。此条只会少发一个已无意义的过期计画，不会误杀在途轮。
       if (!cur.turnMetrics) return
       const experts = digest ? extractPlanExperts(plan, digest) : []
       emitToSession(cur, "turn.plan", {
@@ -249,7 +249,7 @@ export function startTurnPlan(state: SessionState, userText: string, gen: number
       })
       cur.planExperts = experts.length ? experts : undefined
       if (cur.planState && cur.planState.gen === gen) cur.planState.emittedAt = Date.now()
-      // 讓位罐頭 ack：否則使用者先讀到真計畫、15 秒後又冒一句罐頭蓋掉它。
+      // 让位罐头 ack：否则使用者先读到真计画、15 秒后又冒一句罐头盖掉它。
       cur.ackSent = true
       clearAckTimer(cur)
       markTurnFirst(cur, "plan")

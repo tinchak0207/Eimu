@@ -12,7 +12,7 @@ const FULL_SCENE_CARD = {
   ],
   blend_path: "https://cdn.example.com/scene3d/scene.blend",
   glb_path: "https://cdn.example.com/scene3d/scene.glb",
-  scene_summary: "荒漠驛站黃昏外景",
+  scene_summary: "荒漠驿站黄昏外景",
   duration_ms: 6000,
 };
 
@@ -36,17 +36,17 @@ test("fuseSceneVideo returns null on malformed shapes (dirty fields never block 
 test("fuseSceneVideo assembles references and camera directive from sceneZ contracts", () => {
   const fusion = fuseSceneVideo(FULL_SCENE_CARD, { moves: ["dolly-in", "orbit"], focalLengthMm: 35 });
   assert.ok(fusion);
-  // references：previz 缺省檔 → composition role，cap 2（i2v 首/尾幀通道契約）
+  // references：previz 缺省档 → composition role，cap 2（i2v 首/尾帧通道契约）
   assert.equal(fusion.frameCard.references.length, 2);
   assert.ok(fusion.frameCard.references.every((reference) => reference.referenceRole === "composition"));
   assert.ok(fusion.frameCard.compositionOnly);
   assert.ok(fusion.frameCard.referenceDirective.includes("composition and spatial layout only"));
-  // Camera 詞：CAMERA_MOVE_TO_PROMPT 逐 id 翻譯 + 焦距尾巴
+  // Camera 词：CAMERA_MOVE_TO_PROMPT 逐 id 翻译 + 焦距尾巴
   assert.ok(fusion.cameraDirective.startsWith("Camera: "));
   assert.ok(fusion.cameraDirective.includes("slow dolly-in pushing toward the subject"));
   assert.ok(fusion.cameraDirective.includes("full 360-degree orbit"));
   assert.ok(fusion.cameraDirective.includes("35mm lens"));
-  // DirectorOptions 直通對（契約：把 sceneCard/cameraTrajectory 傳進 DirectorOptions 即生效）
+  // DirectorOptions 直通对（契约：把 sceneCard/cameraTrajectory 传进 DirectorOptions 即生效）
   assert.equal(fusion.sceneCard.scene_summary, FULL_SCENE_CARD.scene_summary);
   assert.deepEqual(fusion.cameraTrajectory.moves, ["dolly-in", "orbit"]);
 });
@@ -76,7 +76,7 @@ test("last_frame_video_chain without the two optional fields has zero behavior c
   );
   assert.ok(bare.output && typeof bare.output === "object");
   assert.equal((bare.output as { sceneDirector?: unknown }).sceneDirector, undefined);
-  // 髒欄（非 JSON 物件/形狀不合）＝缺欄：不阻斷、不出 sceneDirector
+  // 脏栏（非 JSON 物件/形状不合）＝缺栏：不阻断、不出 sceneDirector
   const dirty = runShortDramaTool<Record<string, unknown>>(
     "last_frame_video_chain",
     { shots: [{ shotId: "S01-01", keyframeId: "kf-01", durationSeconds: 4 }], scene_card_ref: "not-json", camera_trajectory: 42 },
@@ -102,6 +102,6 @@ test("last_frame_video_chain with scene_card_ref + camera_trajectory stitches sc
   assert.equal(stitched.output.sceneDirector.references.length, 2);
   assert.ok(stitched.output.sceneDirector.references.every((reference) => reference.referenceRole === "composition"));
   assert.ok(Array.isArray(stitched.output.sceneDirector.notes));
-  // 既有 chains 結構不動
+  // 既有 chains 结构不动
   assert.equal(stitched.output.chains.length, 1);
 });

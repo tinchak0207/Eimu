@@ -1,20 +1,20 @@
 "use client";
 
-// CanvasStageOverview —— 語義縮放 LOD 1「導演鳥瞰層」（2026-09-30 打磨版）。
+// CanvasStageOverview —— 语义缩放 LOD 1「导演鸟瞰层」（2026-09-30 打磨版）。
 //
-// 形態＝導演故事板牌組：4 張階段卡橫排於螢幕安全區（讓出右側縮放軌）。
-// 視覺紀律：單一強調色（ios-blue＝進行中），其餘中性；不做水印大字、彩虹漸層、框中框。
-// 封面優先級：真實產出縮圖 ＞ 劇本摘錄 ＞ 狀態珠點陣（一珠一節點）＞ 階段圖示。
+// 形态＝导演故事板牌组：4 张阶段卡横排于萤幕安全区（让出右侧缩放轨）。
+// 视觉纪律：单一强调色（ios-blue＝进行中），其余中性；不做水印大字、彩虹渐层、框中框。
+// 封面优先级：真实产出缩图 ＞ 剧本摘录 ＞ 状态珠点阵（一珠一节点）＞ 阶段图示。
 //
-// 轉場（k 是唯一真源，gather 由宿主每幀傳入，可被滾輪「刷」、可逆）：
-//   phase A（gather 0→0.6）：在各階段「世界質心」的螢幕位置浮現階段徽章（膠囊），scale 0.6→1。
-//                             此時畫布上的節點正往同一個質心收束（CSS --lod-g），徽章就是它們的歸宿。
-//   phase B（gather 0.6→1）：徽章從質心滑向 HUD 槽位並展開成完整卡片（矩形插值＋easeOut），
-//                             卡內容在 B 後半淡入。反向即散開。
-// 空階段沒有質心：跳過 A，在槽位原地淡入。窄螢幕（<768）縱排、不做 B 滑動（直接淡入）。
+// 转场（k 是唯一真源，gather 由宿主每帧传入，可被滚轮「刷」、可逆）：
+//   phase A（gather 0→0.6）：在各阶段「世界质心」的萤幕位置浮现阶段徽章（胶囊），scale 0.6→1。
+//                             此时画布上的节点正往同一个质心收束（CSS --lod-g），徽章就是它们的归宿。
+//   phase B（gather 0.6→1）：徽章从质心滑向 HUD 槽位并展开成完整卡片（矩形插值＋easeOut），
+//                             卡内容在 B 后半淡入。反向即散开。
+// 空阶段没有质心：跳过 A，在槽位原地淡入。窄萤幕（<768）纵排、不做 B 滑动（直接淡入）。
 //
-// 點卡：該卡 scale 1.03＋描邊 120ms、其餘卡加速淡出 → 宿主 flyTo 該階段（飛行途中聚合自動散開）。
-// 可點元素帶 data-canvas-interactive，InfiniteCanvas 手勢層放行。
+// 点卡：该卡 scale 1.03＋描边 120ms、其余卡加速淡出 → 宿主 flyTo 该阶段（飞行途中聚合自动散开）。
+// 可点元素带 data-canvas-interactive，InfiniteCanvas 手势层放行。
 
 import { useEffect, useState } from "react";
 import { Check, ChevronRight, Clapperboard, Film, ScrollText, Users, type LucideIcon } from "lucide-react";
@@ -39,9 +39,9 @@ export interface CanvasStageOverviewProps {
   gather: number;
   viewport: CanvasViewport;
   size: { width: number; height: number };
-  /** 離散 LOD === 1：卡片可點。 */
+  /** 离散 LOD === 1：卡片可点。 */
   interactive: boolean;
-  /** ≥768px：橫排＋兩段式形變；否則縱排直接淡入。 */
+  /** ≥768px：横排＋两段式形变；否则纵排直接淡入。 */
   wide: boolean;
   reduceMotion?: boolean;
   projectTitle?: string;
@@ -49,7 +49,7 @@ export interface CanvasStageOverviewProps {
   onReviewStage: (stage: CanvasStageSummary) => void;
 }
 
-/** 階段圖示：鳥瞰卡標題列與空封面共用（單色、不發新色）。 */
+/** 阶段图示：鸟瞰卡标题列与空封面共用（单色、不发新色）。 */
 const STAGE_ICON: Record<CanvasStageId, LucideIcon> = {
   1: ScrollText,
   2: Users,
@@ -88,7 +88,7 @@ export function CanvasStageOverview({
 }: CanvasStageOverviewProps) {
   const [pickedId, setPickedId] = useState<CanvasStageId | null>(null);
 
-  // 點選態撐過整段飛行（其他卡保持隱去，不在半途閃回）；完全散開或逾時即清，下次回來是乾淨的牌組。
+  // 点选态撑过整段飞行（其他卡保持隐去，不在半途闪回）；完全散开或逾时即清，下次回来是干净的牌组。
   const dispersed = gather <= 0;
   useEffect(() => {
     if (dispersed) setPickedId(null);
@@ -104,7 +104,7 @@ export function CanvasStageOverview({
   const phaseA = clamp01(gather / 0.6);
   const phaseB = clamp01((gather - 0.6) / 0.4);
   const eB = easeOutCubic(phaseB);
-  // 內容與殼同步長出（B 段 15%→65% 淡入）：不出現「空白殼」過渡幀。
+  // 内容与壳同步长出（B 段 15%→65% 淡入）：不出现「空白壳」过渡帧。
   const contentOpacity = clamp01((phaseB - 0.15) / 0.5);
   const clickable = interactive && phaseB > 0.95;
   const overall = overallProgress(stages);
@@ -124,7 +124,7 @@ export function CanvasStageOverview({
     </div>
   );
 
-  // ── 窄螢幕：縱排、直接淡入（不做 phase B 滑動）
+  // ── 窄萤幕：纵排、直接淡入（不做 phase B 滑动）
   if (!wide) {
     return (
       <div
@@ -152,18 +152,18 @@ export function CanvasStageOverview({
     );
   }
 
-  // ── 寬螢幕：兩段式形變（徽章 → 卡片）
+  // ── 宽萤幕：两段式形变（徽章 → 卡片）
   const { mode, slots } = hudLayout(size, stages.length);
   const first = slots[0];
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden={!interactive}>
-      {/* 標題列：與第一張卡左緣對齊 */}
+      {/* 标题列：与第一张卡左缘对齐 */}
       <div className="absolute" style={{ left: first.x + 2, top: first.y - 34 }}>
         {header}
       </div>
 
-      {/* 卡間方向指示：細 chevron，只在卡片成形後出現 */}
+      {/* 卡间方向指示：细 chevron，只在卡片成形后出现 */}
       {mode === "row" && slots.slice(0, -1).map((slot, i) => (
         <ChevronRight
           key={`chev-${i}`}
@@ -186,10 +186,10 @@ export function CanvasStageOverview({
             }
           : { x: slot.x + slot.width * 0.04, y: slot.y + slot.height * 0.04, width: slot.width * 0.92, height: slot.height * 0.92 };
         const rect = lerpRect(badgeRect, slot, eB);
-        // A 段：徽章 scale 0.6→1、淡入；空階段無 A 段，只在 B 段原地淡入。
+        // A 段：徽章 scale 0.6→1、淡入；空阶段无 A 段，只在 B 段原地淡入。
         const aEase = easeOutCubic(phaseA);
         const scale = empty ? 1 : phaseB > 0 ? 1 : 0.6 + 0.4 * aEase;
-        // 徽章只在節點收進來之後才現身（g 0.25→0.45）：散開時節點一回來它就退場，不壓在節點上。
+        // 徽章只在节点收进来之后才现身（g 0.25→0.45）：散开时节点一回来它就退场，不压在节点上。
         const shellOpacity = empty ? phaseB : phaseB > 0 ? 1 : smoothstepLocal(0.25, 0.45, gather);
         const chipOpacity = empty ? 0 : 1 - clamp01(phaseB / 0.35);
         const picked = pickedId === stage.id;
@@ -220,7 +220,7 @@ export function CanvasStageOverview({
                   : undefined,
             }}
           >
-            {/* 徽章內容（A 段主角，B 段前 35% 淡出） */}
+            {/* 徽章内容（A 段主角，B 段前 35% 淡出） */}
             {chipOpacity > 0 && (
               <div
                 className="pointer-events-none absolute left-0 top-0 flex items-center gap-1.5 px-3"
@@ -231,7 +231,7 @@ export function CanvasStageOverview({
                 <span className="min-w-0 truncate text-ios-caption1 font-semibold text-foreground">{stage.label}</span>
               </div>
             )}
-            {/* 卡片本體：固定槽位尺寸，殼縮小時被裁切；B 段後半淡入。 */}
+            {/* 卡片本体：固定槽位尺寸，壳缩小时被裁切；B 段后半淡入。 */}
             {contentOpacity > 0 && (
               <div className="absolute left-0 top-0" style={{ width: slot.width, height: slot.height, opacity: contentOpacity }}>
                 <StageCard
@@ -251,7 +251,7 @@ export function CanvasStageOverview({
   );
 }
 
-// ─────────────────────────────────────────── 卡片內容
+// ─────────────────────────────────────────── 卡片内容
 
 interface StageCardProps {
   stage: CanvasStageSummary;
@@ -288,7 +288,7 @@ function StageCard({ stage, clickable, onPick, onReview, className }: StageCardP
         className,
       )}
     >
-      {/* 封面：真實產出 ＞ 劇本摘錄 ＞ 狀態珠點陣 ＞ 空 */}
+      {/* 封面：真实产出 ＞ 剧本摘录 ＞ 状态珠点阵 ＞ 空 */}
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-[12px] bg-foreground/[0.035]">
         {stage.previews.length > 0 ? (
           <>
@@ -311,7 +311,7 @@ function StageCard({ stage, clickable, onPick, onReview, className }: StageCardP
         )}
       </div>
 
-      {/* 標題列 */}
+      {/* 标题列 */}
       <div className="mt-3 flex items-center gap-1.5">
         <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{stage.code}</span>
         <span className="min-w-0 truncate text-[15px] font-semibold tracking-[-0.01em] text-foreground">{stage.label}</span>
@@ -328,7 +328,7 @@ function StageCard({ stage, clickable, onPick, onReview, className }: StageCardP
         )}
       </div>
 
-      {/* 數字＋狀態 */}
+      {/* 数字＋状态 */}
       <div className="mt-2.5 flex items-end justify-between gap-2">
         {empty ? (
           <span className="text-[12px] text-muted-foreground">尚无节点</span>
@@ -359,7 +359,7 @@ function StageCard({ stage, clickable, onPick, onReview, className }: StageCardP
         </div>
       </div>
 
-      {/* 進度細條 */}
+      {/* 进度细条 */}
       <div className="mt-2.5 h-[3px] w-full overflow-hidden rounded-full bg-foreground/[0.07]">
         {percent > 0 && (
           <div
@@ -372,7 +372,7 @@ function StageCard({ stage, clickable, onPick, onReview, className }: StageCardP
   );
 }
 
-/** 1/2/3/4 張各自的網格：1＝滿版、2＝對開、3＝左大右二、4＝田字。 */
+/** 1/2/3/4 张各自的网格：1＝满版、2＝对开、3＝左大右二、4＝田字。 */
 function PreviewMosaic({ previews }: { previews: CanvasStagePreview[] }) {
   const n = previews.length;
   const grid = n === 1 ? "grid-cols-1" : n === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2";
@@ -408,7 +408,7 @@ const STRIP_BEAD_CLASS: Record<CanvasStageBead, string> = {
   idle: "bg-white/30",
 };
 
-/** 縮圖封面底部的狀態珠條：縮圖只露 4 張，其餘鏡頭的進度靠這條一眼看完。 */
+/** 缩图封面底部的状态珠条：缩图只露 4 张，其余镜头的进度靠这条一眼看完。 */
 function BeadStrip({ beads }: { beads: CanvasStageBead[] }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent px-2.5 pb-2 pt-5">
@@ -421,10 +421,10 @@ function BeadStrip({ beads }: { beads: CanvasStageBead[] }) {
   );
 }
 
-/** 狀態珠點陣：每顆＝一個節點（按位置排序），沒有產出縮圖時一眼看清整段進度。 */
+/** 状态珠点阵：每颗＝一个节点（按位置排序），没有产出缩图时一眼看清整段进度。 */
 function BeadGrid({ beads, total, icon: Icon }: { beads: CanvasStageBead[]; total: number; icon: LucideIcon }) {
   const overflow = total - beads.length;
-  // 珠子太少撐不起封面：上方補階段圖示，珠子退為圖示下的狀態列。
+  // 珠子太少撑不起封面：上方补阶段图示，珠子退为图示下的状态列。
   const sparse = beads.length <= 6;
   return (
     <div className="flex h-full flex-col items-center justify-center px-4">

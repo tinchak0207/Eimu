@@ -12,7 +12,7 @@
  *   ② 委托单/回传契约 import 自 screenwriter-delegate.ts（编剧版委派组装，
  *      交付物三栏 beats/shotlist/qc）；
  *   ③ SKILL 挂载：skills/ 无编剧域配方库，SKILL_PATH 为空（skill 待补，
- *      expert-registry screenwriter 佔位行同源声明）。
+ *      expert-registry screenwriter 占位行同源声明）。
  * 交互/组装逻辑一行不动：assembleScreenwriterReply 六段同构（唯一出口、
  * 不新增校验、composeScreenwriterDelegation 直接透传）。
  *
@@ -43,10 +43,10 @@ import type { ScreenwriterToolResult } from "./screenwriter-delegate";
 /** persona 键名（gateway bindings / 设定 UI / 日志统一用此 id）。 */
 export const SCREENWRITER_PERSONA_ID = "screenwriter" as const;
 
-/** 展示名（简体文案；选单/卡片/日志统一取此值，与 registry 佔位行 label 一致）。 */
+/** 展示名（简体文案；选单/卡片/日志统一取此值，与 registry 占位行 label 一致）。 */
 export const SCREENWRITER_PERSONA_LABEL = "编剧分镜" as const;
 
-/** persona 一句话定位（设定页/选单描述用，与 registry 佔位行 description 一致）。 */
+/** persona 一句话定位（设定页/选单描述用，与 registry 占位行 description 一致）。 */
 export const SCREENWRITER_PERSONA_DESCRIPTION =
   "剧本与分镜：故事节拍、分镜清单与一致性，输出 beats 与 shotlist。" as const;
 
@@ -57,7 +57,7 @@ export const SCREENWRITER_PERSONA_DESCRIPTION =
  * 不需要画图/跑 Blender/渲染视频）。
  *
  * 六个编剧域工具 + image_quote 报价查询，id 全部在 harness-tool-registry
- * 登记在案（行号考古见档头 ①；registry 佔位行 toolIds 为考古六件，
+ * 登记在案（行号考古见档头 ①；registry 占位行 toolIds 为考古六件，
  * image_quote 为 persona 常量补充，与 blender/music 版同款）。
  */
 export const SCREENWRITER_PERSONA_TOOL_IDS = [
@@ -76,7 +76,7 @@ export type ScreenwriterPersonaToolId = (typeof SCREENWRITER_PERSONA_TOOL_IDS)[n
 
 /**
  * SKILL 挂载点：skills/ 无编剧域配方库（无域目录），SKILL_PATH 为空数组
- * （skill 待补；与 expert-registry screenwriter 佔位行 skillPaths: [] 同源）。
+ * （skill 待补；与 expert-registry screenwriter 占位行 skillPaths: [] 同源）。
  */
 export const SCREENWRITER_PERSONA_SKILL_PATHS: readonly string[] = [];
 

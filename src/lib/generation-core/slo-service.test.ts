@@ -8,7 +8,7 @@ import {
 } from "./slo-service.ts";
 import type { GenerationSql } from "./database.ts";
 
-// ─────────────────────────────────────────── evaluateSloBreaches（純函式，無 DB）
+// ─────────────────────────────────────────── evaluateSloBreaches（纯函式，无 DB）
 
 function makeRow(overrides: Partial<SloWindowRow> = {}): SloWindowRow {
   return {
@@ -28,12 +28,12 @@ function makeRow(overrides: Partial<SloWindowRow> = {}): SloWindowRow {
 
 const THRESHOLDS = { minSuccessRate: 0.95, maxP95LatencyMs: 10_000, maxRefundRate: 0.05 };
 
-test("evaluateSloBreaches: 無違規時回空陣列", () => {
+test("evaluateSloBreaches: 无违规时回空阵列", () => {
   const breaches = evaluateSloBreaches([makeRow()], THRESHOLDS);
   assert.deepEqual(breaches, []);
 });
 
-test("evaluateSloBreaches: 成功率低於門檻獨立標記", () => {
+test("evaluateSloBreaches: 成功率低于门槛独立标记", () => {
   const row = makeRow({ successRate: 0.8 });
   const breaches = evaluateSloBreaches([row], THRESHOLDS);
   assert.equal(breaches.length, 1);
@@ -42,34 +42,34 @@ test("evaluateSloBreaches: 成功率低於門檻獨立標記", () => {
   assert.equal(breaches[0].modelId, "gpt-image-2");
 });
 
-test("evaluateSloBreaches: p95 延遲超過門檻獨立標記", () => {
+test("evaluateSloBreaches: p95 延迟超过门槛独立标记", () => {
   const row = makeRow({ p95LatencyMs: 20_000 });
   const breaches = evaluateSloBreaches([row], THRESHOLDS);
   assert.equal(breaches.length, 1);
   assert.deepEqual(breaches[0].kinds, ["p95_latency"]);
 });
 
-test("evaluateSloBreaches: 退款率超過門檻獨立標記", () => {
+test("evaluateSloBreaches: 退款率超过门槛独立标记", () => {
   const row = makeRow({ refundRate: 0.2 });
   const breaches = evaluateSloBreaches([row], THRESHOLDS);
   assert.equal(breaches.length, 1);
   assert.deepEqual(breaches[0].kinds, ["refund_rate"]);
 });
 
-test("evaluateSloBreaches: 多項門檻同時違規時合併回報", () => {
+test("evaluateSloBreaches: 多项门槛同时违规时合并回报", () => {
   const row = makeRow({ successRate: 0.5, p95LatencyMs: 50_000, refundRate: 0.5 });
   const breaches = evaluateSloBreaches([row], THRESHOLDS);
   assert.equal(breaches.length, 1);
   assert.deepEqual(breaches[0].kinds, ["success_rate", "p95_latency", "refund_rate"]);
 });
 
-test("evaluateSloBreaches: successRate/p95LatencyMs 為 null（樣本不足）時不觸發對應門檻", () => {
+test("evaluateSloBreaches: successRate/p95LatencyMs 为 null（样本不足）时不触发对应门槛", () => {
   const row = makeRow({ successRate: null, p95LatencyMs: null, refundRate: 0.0 });
   const breaches = evaluateSloBreaches([row], THRESHOLDS);
   assert.deepEqual(breaches, []);
 });
 
-test("evaluateSloBreaches: 多組群組各自獨立評估", () => {
+test("evaluateSloBreaches: 多组群组各自独立评估", () => {
   const rows = [
     makeRow({ tenantId: "tenant-a", modelId: "model-1", successRate: 0.99 }),
     makeRow({ tenantId: "tenant-b", modelId: "model-2", successRate: 0.5 }),
@@ -80,9 +80,9 @@ test("evaluateSloBreaches: 多組群組各自獨立評估", () => {
   assert.equal(breaches[0].modelId, "model-2");
 });
 
-// ─────────────────────────────────────────── computeSloWindow：未配置 Postgres 時回空陣列
+// ─────────────────────────────────────────── computeSloWindow：未配置 Postgres 时回空阵列
 
-/** 模擬 database.ts 的 getGenerationSql() 在未配置時拋出的確切錯誤訊息。 */
+/** 模拟 database.ts 的 getGenerationSql() 在未配置时抛出的确切错误讯息。 */
 function makeNotConfiguredSql(): GenerationSql {
   const sql = (async () => {
     throw new Error("GENERATION_DATABASE_URL or DATABASE_URL is required for the generation control plane.");
@@ -90,7 +90,7 @@ function makeNotConfiguredSql(): GenerationSql {
   return sql;
 }
 
-test("computeSloWindow: 注入模擬「未配置 Postgres」的 sql 時回空陣列而非拋錯", async () => {
+test("computeSloWindow: 注入模拟「未配置 Postgres」的 sql 时回空阵列而非抛错", async () => {
   const rows = await computeSloWindow(
     { windowStart: new Date("2026-01-01T00:00:00Z"), windowEnd: new Date("2026-01-01T01:00:00Z") },
     makeNotConfiguredSql(),
@@ -98,7 +98,7 @@ test("computeSloWindow: 注入模擬「未配置 Postgres」的 sql 時回空陣
   assert.deepEqual(rows, []);
 });
 
-test("computeSloWindow: 未傳入 sql 且環境變數未配置時，透過 getGenerationSql() 觸發同一錯誤仍回空陣列", async () => {
+test("computeSloWindow: 未传入 sql 且环境变数未配置时，透过 getGenerationSql() 触发同一错误仍回空阵列", async () => {
   const previousGen = process.env.GENERATION_DATABASE_URL;
   const previousDb = process.env.DATABASE_URL;
   delete process.env.GENERATION_DATABASE_URL;
@@ -118,7 +118,7 @@ test("computeSloWindow: 未傳入 sql 且環境變數未配置時，透過 getGe
   }
 });
 
-test("computeSloWindow: 非「未配置」的其他查詢錯誤應照樣往外拋，不被靜默吞掉", async () => {
+test("computeSloWindow: 非「未配置」的其他查询错误应照样往外抛，不被静默吞掉", async () => {
   const failingSql = (async () => {
     throw new Error("connection refused");
   }) as unknown as GenerationSql;

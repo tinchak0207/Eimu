@@ -15,21 +15,21 @@ import {
 
 const SECRET = "test-secret";
 
-test("邀請碼：自簽可還原、偽造與畸形一律拒", () => {
+test("邀请码：自签可还原、伪造与畸形一律拒", () => {
   const code = inviteCodeFor(257, SECRET);
-  assert.ok(looksLikeInviteCode(code), "形狀要能過前端閘");
+  assert.ok(looksLikeInviteCode(code), "形状要能过前端闸");
   assert.equal(parseInviteCode(code, SECRET), 257);
-  assert.equal(parseInviteCode(code.toUpperCase(), SECRET), 257, "大小寫不敏感");
-  assert.equal(parseInviteCode(code, "other-secret"), null, "換密鑰＝偽造");
+  assert.equal(parseInviteCode(code.toUpperCase(), SECRET), 257, "大小写不敏感");
+  assert.equal(parseInviteCode(code, "other-secret"), null, "换密钥＝伪造");
   const [id36] = code.split("-");
-  assert.equal(parseInviteCode(`${(258).toString(36)}-${code.split("-")[1]}`, SECRET), null, "改 id 不改簽名＝拒");
+  assert.equal(parseInviteCode(`${(258).toString(36)}-${code.split("-")[1]}`, SECRET), null, "改 id 不改签名＝拒");
   assert.equal(parseInviteCode(`${id36}-zzzzzzzz`, SECRET), null);
   assert.equal(parseInviteCode("", SECRET), null);
   assert.equal(parseInviteCode(null, SECRET), null);
   assert.equal(buildInviteUrl("https://eimu.dev/", code), `https://eimu.dev/?invite=${code}`);
 });
 
-test("分享連結帶作者邀請碼，且排在第一位（防落地路徑截斷）", () => {
+test("分享连结带作者邀请码，且排在第一位（防落地路径截断）", () => {
   const url = new URL(buildShareUrl("https://eimu.dev", "abc123", "7-deadbeef"));
   assert.equal(url.searchParams.get("invite"), "7-deadbeef");
   assert.equal([...url.searchParams.keys()][0], "invite");
@@ -90,7 +90,7 @@ function harness(candidates: ReferralCandidate[], opts: { inviterUsed?: number; 
 
 const fresh = (inviteeId: number, inviterId: number): ReferralCandidate => ({ inviteeId, inviterId, inviterStatus: null, inviteeStatus: null });
 
-test("首圖後雙方各發一次，金額＝口徑，帳本冪等鍵按角色分開", async () => {
+test("首图后双方各发一次，金额＝口径，帐本幂等键按角色分开", async () => {
   const h = harness([fresh(300, 117)]);
   const report = await runReferralRewardsOnce(h.deps);
   assert.deepEqual(report, { granted: 2, skipped: 0, failed: 0, aborted: false });
@@ -104,7 +104,7 @@ test("首圖後雙方各發一次，金額＝口徑，帳本冪等鍵按角色�
   assert.equal(h.rows.get("300:inviter"), "applied");
 });
 
-test("已結清的角色不重發；邀請人達上限只發被邀請人", async () => {
+test("已结清的角色不重发；邀请人达上限只发被邀请人", async () => {
   const done = harness([{ inviteeId: 301, inviterId: 117, inviterStatus: "applied", inviteeStatus: "applied" }]);
   assert.equal((await runReferralRewardsOnce(done.deps)).granted, 0);
   assert.equal(done.adjusted.length, 0);
@@ -116,15 +116,15 @@ test("已結清的角色不重發；邀請人達上限只發被邀請人", async
   assert.equal(capped.rows.get("302:inviter"), "skipped");
 });
 
-test("上游調額失敗＝整輪停，quota 未動記 failed 可重試", async () => {
+test("上游调额失败＝整轮停，quota 未动记 failed 可重试", async () => {
   const h = harness([fresh(303, 117), fresh(304, 117)], { adjustFails: true });
   const report = await runReferralRewardsOnce(h.deps);
   assert.equal(report.aborted, true);
   assert.equal(h.rows.get("303:invitee"), "failed");
-  assert.equal(h.rows.has("304:invitee"), false, "停了就不再連打");
+  assert.equal(h.rows.has("304:invitee"), false, "停了就不再连打");
 });
 
-test("基線不可得＝不動上游，記 failed", async () => {
+test("基线不可得＝不动上游，记 failed", async () => {
   const h = harness([fresh(305, 117)], { baselineBlocked: true });
   const report = await runReferralRewardsOnce(h.deps);
   assert.equal(h.adjusted.length, 0);

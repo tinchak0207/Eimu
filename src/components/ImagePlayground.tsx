@@ -66,17 +66,17 @@ import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasCha
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
 import { templateToCanvasLayout } from "@/components/canvas-workstation/agent-template-canvas";
 import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/DirectorMiniViewport";
-// 2026-09-12 首屏減重拆分：AGENT_TEMPLATES 只含卡面顯示 metadata；
-// 執行 payload（initialPrompt/directive/slots/步驟文案）在 agent-templates-payload.ts，
-// 由 handleUseAgentTemplate 在使用處 await import() 動態載入（見下方回調）。
-// AgentTemplateFull 為純型別 import（編譯期擦除，不拉 payload 進 bundle）。
+// 2026-09-12 首屏减重拆分：AGENT_TEMPLATES 只含卡面显示 metadata；
+// 执行 payload（initialPrompt/directive/slots/步骤文案）在 agent-templates-payload.ts，
+// 由 handleUseAgentTemplate 在使用处 await import() 动态载入（见下方回调）。
+// AgentTemplateFull 为纯型别 import（编译期擦除，不拉 payload 进 bundle）。
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
 import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 
-// 2026-08-27 專業工作站入口移除：AI 工作站（agent 模式）已吸收其獨有機制
-// （LoRA 庫 / 配方模板 / kunpeng 風格库），舊工作站不再被動態 import。
+// 2026-08-27 专业工作站入口移除：AI 工作站（agent 模式）已吸收其独有机制
+// （LoRA 库 / 配方模板 / kunpeng 风格库），旧工作站不再被动态 import。
 
 // AGENT_PARAM_LABELS（D-12 撤销条项目名）留在 hooks/use-agent-param-reflect.ts；
 // 撤销条 UI 已随罪状 7 删除，钩子里的三态标记仍服务参数回流。
@@ -88,28 +88,28 @@ import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 type PlaygroundMode = PromptInputMode;
 
 export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) {
-  // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
+  // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
   // D-1 + D-24 状态B：agent 是卡片的第四个面，和 edit / upscale 同一层级的 toggle。
   // 按下去只换卡片中间那块控件区（共用 generate/edit/upscale 那套 dust 转场），
   // 卡片底板、右边结果画布、底下案例区全部原地不动，也不跳 /agent 独立页。
   //
-  // 2026-09-22 暴君裁定：**首屏初始面翻成 AI 助理**，直接生圖降為同級第二面
-  // （不刪除、toggle 語義一行不動）。理由是首屏決定產品定位——進站第一眼看見
-  // 的是參數框＋輸入框＋輸出框，就會被判定成生圖中轉站；新範式若鎖在「先點
-  // 助理再發話」兩步之後，每一步都不是使用者已知的。深度連結（?agent=1）的
-  // setMode("agent") 因此常態成為冪等，但那段仍需處理 q / session 注入。
+  // 2026-09-22 暴君裁定：**首屏初始面翻成 AI 助理**，直接生图降为同级第二面
+  // （不删除、toggle 语义一行不动）。理由是首屏决定产品定位——进站第一眼看见
+  // 的是参数框＋输入框＋输出框，就会被判定成生图中转站；新范式若锁在「先点
+  // 助理再发话」两步之后，每一步都不是使用者已知的。深度连结（?agent=1）的
+  // setMode("agent") 因此常态成为幂等，但那段仍需处理 q / session 注入。
   const [mode, setMode] = useState<PlaygroundMode>("agent");
   const [displayMode, setDisplayMode] = useState<PlaygroundMode>("agent");
   const [animState, setAnimState] = useState<"idle" | "exit" | "enter">("idle");
   // 别的页面（D-18 图库卡）用 ?agent=1&q= 交接过来的一句话。
   const [agentSeed, setAgentSeed] = useState("");
-  // 2026-08-25 模板庫：點卡注入 pending（nonce 讓「換一張卡」也是新注入）。
-  // directive 是隱形引導詞：隨首條訊息經網關 system 欄位注入，用戶全程不可見。
+  // 2026-08-25 模板库：点卡注入 pending（nonce 让「换一张卡」也是新注入）。
+  // directive 是隐形引导词：随首条讯息经网关 system 栏位注入，用户全程不可见。
   const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string; echo?: boolean } | null>(null);
-  // C4 生成閉環事件橋：導演台視口「生成真实画面」完成 capture+上傳後 dispatch
-  // director-render-request → 與模板庫共用同一注入 setter（AgentChatSurface 的
-  // injection effect 收到即靜默發送，send() 無會話時 lazy 建號＋連線）。卸載時移除監聽。
+  // C4 生成闭环事件桥：导演台视口「生成真实画面」完成 capture+上传后 dispatch
+  // director-render-request → 与模板库共用同一注入 setter（AgentChatSurface 的
+  // injection effect 收到即静默发送，send() 无会话时 lazy 建号＋连线）。卸载时移除监听。
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ text?: unknown }>).detail;
@@ -119,39 +119,39 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
     window.addEventListener(DIRECTOR_RENDER_REQUEST_EVENT, handler);
     return () => window.removeEventListener(DIRECTOR_RENDER_REQUEST_EVENT, handler);
   }, []);
-  // 模板庫退場旗標：發出第一條用戶消息（模板注入或手打）即收起，之後不再出現。
+  // 模板库退场旗标：发出第一条用户消息（模板注入或手打）即收起，之后不再出现。
   const [agentTemplateDismissed, setAgentTemplateDismissed] = useState(false);
   // PWA 登录交接面板（standalone 内 GitHub 授权走跨浏览器 handoff）。
   const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
   /**
-   * 未登入新訪客的進站宣傳片（2026-09-27 暴君裁定落地）。
+   * 未登入新访客的进站宣传片（2026-09-27 暴君裁定落地）。
    *
-   * 頻率：每瀏覽器一次（PROMO_SEEN_KEY）——新機／新瀏覽器給完整震撼，回訪的
-   * 未登入用戶不再被反覆擋在門外。判定鏈是純函式（promo-gate.ts），這裡只負責
-   * 讀儲存、開浮層、以及收尾那句「一送出就開新對話直送產線」。
+   * 频率：每浏览器一次（PROMO_SEEN_KEY）——新机／新浏览器给完整震撼，回访的
+   * 未登入用户不再被反覆挡在门外。判定链是纯函式（promo-gate.ts），这里只负责
+   * 读储存、开浮层、以及收尾那句「一送出就开新对话直送产线」。
    *
-   * 為什麼掛在這頁而不是 layout：收尾要當場開新對話並把那句話送進聊天區，
-   * 那條通路（startNewSessionRef ＋ agentTemplateInjection）只在這棵樹上——
-   * 掛 layout 就只能整頁跳轉，等於把畫布與聊天區整個重建一次。
+   * 为什么挂在这页而不是 layout：收尾要当场开新对话并把那句话送进聊天区，
+   * 那条通路（startNewSessionRef ＋ agentTemplateInjection）只在这棵树上——
+   * 挂 layout 就只能整页跳转，等于把画布与聊天区整个重建一次。
    */
   const [promoOpen, setPromoOpen] = useState(false);
-  // 未登入時送不出去的那句話：存起來，登入態翻真就自動補送（見 promo-gate.ts）。
+  // 未登入时送不出去的那句话：存起来，登入态翻真就自动补送（见 promo-gate.ts）。
   const promoPendingRef = useRef<string | null>(null);
-  // 本次載入已替使用者補送過那句話（登入後）：新人禮彈窗讓路，別蓋住剛開的會話。
+  // 本次载入已替使用者补送过那句话（登入后）：新人礼弹窗让路，别盖住刚开的会话。
   const pendingTrialSentRef = useRef(false);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
-  // authLoading 必須與上面 useImageGeneration 的 isLoading 區分開：
-  // 那是生圖忙碌態，不是登入態——拿它當水合判斷，等於對狀態不明的用戶插播。
-  // 註：措辭避開「生＋成＋中」那三字連寫，ImageDisplay.test 以它在四檔的
-  // 出現次數＝1 當契約，這裡多一次會讓它誤紅。
+  // authLoading 必须与上面 useImageGeneration 的 isLoading 区分开：
+  // 那是生图忙碌态，不是登入态——拿它当水合判断，等于对状态不明的用户插播。
+  // 注：措辞避开「生＋成＋中」那三字连写，ImageDisplay.test 以它在四档的
+  // 出现次数＝1 当契约，这里多一次会让它误红。
   const { user, token, isLoggedIn, refresh, isLoading: authLoading, welcomeGift, clearWelcomeGift } = useAuth();
   const { toast } = useToast();
-  // 新人禮首登彈窗的開啟態（每設備只彈一次的輔助閘門見 welcomeGiftModalSeenLocally）。
+  // 新人礼首登弹窗的开启态（每设备只弹一次的辅助闸门见 welcomeGiftModalSeenLocally）。
   const [welcomeGiftOpen, setWelcomeGiftOpen] = useState(false);
-  // 彈窗主按鈕的「預填但不送出」通路：走 AgentChatSurface 既有的 prefillRequest
-  // （輸入框有字、光標在末尾、焦點在框上，人再按送出），不是新機制。
+  // 弹窗主按钮的「预填但不送出」通路：走 AgentChatSurface 既有的 prefillRequest
+  // （输入框有字、光标在末尾、焦点在框上，人再按送出），不是新机制。
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
   const [selectedModels, setSelectedModels] = useState(MODEL_CONFIGS.fast);
@@ -164,19 +164,19 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
 // PixAI edit/upscale results are delivered straight to the result canvas on
 // the right; they do not go through the normal generation queue.
 const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
-  // v3 embed：右側結果面板 mode。2026-08-25 canvas 常駐化：agent 模式右側
-  // 一進入就是 canvas（模板庫或畫布），不再有「AI 助理左邊、圖片結果右邊」
-  // 的中間態。非 agent 模式（generate/edit/upscale）維持 ImageDisplay。
-  // 畫布工作站（2026-08-16，暴君裁定「擠」）：畫布模式 = 全場畫布，聊天卡
-  // 變成左側浮動面板，expanded|rail 兩態 + 右緣拖寬，localStorage 記憶。
-  // 遼闊是預設，不是獎勵——不再有「compact 嵌右欄」這種把畫布塞縫裡的狀態。
-  // 面板兩態/寬度/拖寬與 localStorage 持久化抽到 canvas-workstation/use-chat-panel。
-  // 單一 SSE：AgentChatSurface 自建 useAgentChat，其 onCanvasEvent 出口餵回畫布。
-  // 用 ref 解開循環依賴：onCanvasEvent 轉交 canvasHostRef；canvasHost 後建，餵回 ref。
+  // v3 embed：右侧结果面板 mode。2026-08-25 canvas 常驻化：agent 模式右侧
+  // 一进入就是 canvas（模板库或画布），不再有「AI 助理左边、图片结果右边」
+  // 的中间态。非 agent 模式（generate/edit/upscale）维持 ImageDisplay。
+  // 画布工作站（2026-08-16，暴君裁定「挤」）：画布模式 = 全场画布，聊天卡
+  // 变成左侧浮动面板，expanded|rail 两态 + 右缘拖宽，localStorage 记忆。
+  // 辽阔是预设，不是奖励——不再有「compact 嵌右栏」这种把画布塞缝里的状态。
+  // 面板两态/宽度/拖宽与 localStorage 持久化抽到 canvas-workstation/use-chat-panel。
+  // 单一 SSE：AgentChatSurface 自建 useAgentChat，其 onCanvasEvent 出口喂回画布。
+  // 用 ref 解开循环依赖：onCanvasEvent 转交 canvasHostRef；canvasHost 后建，喂回 ref。
   const canvasHostRef = useRef<UseCanvasChatReturn | null>(null);
   const handleCanvasEvent = useCallback((event: AgentSseEvent) => {
-    // 畫布資料管線只吃 canvas 結構事件，tool.invoke 不入 reducer
-    // （模式切換已不需要：canvas 常駐化後 agent 模式右側恆為 canvas）。
+    // 画布资料管线只吃 canvas 结构事件，tool.invoke 不入 reducer
+    // （模式切换已不需要：canvas 常驻化后 agent 模式右侧恒为 canvas）。
     if (event.name === "tool.invoke") {
       return;
     }
@@ -184,11 +184,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
   const handleCanvasSummary = useCallback(() => canvasHostRef.current?.summarize(), []);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  // Bug1a：模板庫退場旗標隨「進入新對話」復位。session id 變了 = 開新聊天 =
-  // 畫布已被清空，模板庫必須再次出現（「開啟新聊天就代表 Canvas 進入模板展示態」）；
-  // 續上同一會話（toggle 往返 / 刷新 resume）不復位 —— 那是繼續對話，不是新開始。
-  // ref 記住上一個非空 id：卸載-重掛時的 onSessionChange(null) 中間態不許把
-  // 錨點洗掉，否則同會話 resume 也會被誤判成「新對話」而重播模板庫。
+  // Bug1a：模板库退场旗标随「进入新对话」复位。session id 变了 = 开新聊天 =
+  // 画布已被清空，模板库必须再次出现（「开启新聊天就代表 Canvas 进入模板展示态」）；
+  // 续上同一会话（toggle 往返 / 刷新 resume）不复位 —— 那是继续对话，不是新开始。
+  // ref 记住上一个非空 id：卸载-重挂时的 onSessionChange(null) 中间态不许把
+  // 锚点洗掉，否则同会话 resume 也会被误判成「新对话」而重播模板库。
   const prevAgentSessionRef = useRef<string | null>(null);
   const handleAgentSessionChange = useCallback((nextSessionId: string | null) => {
     if (nextSessionId === null) {
@@ -204,13 +204,13 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   const canvasHost = useCanvasChat(currentSessionId);
   canvasHostRef.current = canvasHost;
 
-  // 雙向同步方向A：畫布選中 workflow 節點 → chat 切到該節點所屬會話。
-  // switchSessionRef 由 AgentChatSurface 上拋（畫布 → chat 方向唯一入口）；
-  // 節點不帶 session_id（普通生成/提示卡）不切，避免誤切。
-  // 反饋閉環靠 currentSessionId 兜底：切完後 selectedNodeId 對應節點的
-  // session_id === currentSessionId，相等判斷擋住死循環。
+  // 双向同步方向A：画布选中 workflow 节点 → chat 切到该节点所属会话。
+  // switchSessionRef 由 AgentChatSurface 上抛（画布 → chat 方向唯一入口）；
+  // 节点不带 session_id（普通生成/提示卡）不切，避免误切。
+  // 反馈闭环靠 currentSessionId 兜底：切完后 selectedNodeId 对应节点的
+  // session_id === currentSessionId，相等判断挡住死循环。
   const switchSessionRef = useRef<((sessionId: string) => Promise<boolean>) | null>(null);
-  // 暴君裁定 2026-09-01：套模板「留舊開新」——AgentChatSurface 上拋 startNewSession。
+  // 暴君裁定 2026-09-01：套模板「留旧开新」——AgentChatSurface 上抛 startNewSession。
   const startNewSessionRef = useRef<(() => Promise<boolean>) | null>(null);
   const lastLinkedSelectionRef = useRef<string | null>(null);
   useEffect(() => {
@@ -225,8 +225,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     void switchSessionRef.current?.(targetSessionId);
   }, [canvasHost.selectedNodeId, canvasHost.nodes, currentSessionId]);
 
-  // 模板庫只在「畫布空且無對話」的初始態出現：有任何節點/計畫（模板鋪過、
-  // agent 建過、或歷史專案恢復）或已發過消息（agentTemplateDismissed）就讓位。
+  // 模板库只在「画布空且无对话」的初始态出现：有任何节点/计画（模板铺过、
+  // agent 建过、或历史专案恢复）或已发过消息（agentTemplateDismissed）就让位。
   const showAgentTemplateGallery =
     displayMode === "agent" &&
     !agentTemplateDismissed &&
@@ -234,21 +234,21 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     canvasHost.plans.length === 0;
 
   /**
-   * 2026-08-25 模板卡點擊（卡即動作）：
-   * ① initialPrompt 經既有 useAgentChat 鏈路自動發出（PromptInput →
+   * 2026-08-25 模板卡点击（卡即动作）：
+   * ① initialPrompt 经既有 useAgentChat 链路自动发出（PromptInput →
    *    AgentChatSurface 的 agentInjection：09-12 起注入到了就 send，
-   *    send() 無會話時 lazy 建號＋連線，不再等 autoStart/連線 open）。
-   * ② 模板 slots 經 recipeTemplateToRecallConfig → templateToCanvasLayout
-   *    → useCanvasChat.replaceWorkflowNodes 鋪成 workflow，等 agent 修改。
-   * ③ 首條消息落地即收起畫廊（onUserMessage）。
-   * 2026-08-26 環節選擇：第二參 selectedIndices 來自卡面圓環，先 cropTemplate
-   *    裁剪（全選 = 原對象零開銷），注入與鋪畫布都用裁剪後的模板。
-   * 09-01 裁定「留舊開新」+ 09-12 建號權收歸發送按鈕：startNewSession 只清空
-   *    回空態（不建號、無 session transition），結算即鋪即注入；注入的首條
-   *    消息 lazy 建新會話承接，畫布摘要隨該消息上行。
+   *    send() 无会话时 lazy 建号＋连线，不再等 autoStart/连线 open）。
+   * ② 模板 slots 经 recipeTemplateToRecallConfig → templateToCanvasLayout
+   *    → useCanvasChat.replaceWorkflowNodes 铺成 workflow，等 agent 修改。
+   * ③ 首条消息落地即收起画廊（onUserMessage）。
+   * 2026-08-26 环节选择：第二参 selectedIndices 来自卡面圆环，先 cropTemplate
+   *    裁剪（全选 = 原对象零开销），注入与铺画布都用裁剪后的模板。
+   * 09-01 裁定「留旧开新」+ 09-12 建号权收归发送按钮：startNewSession 只清空
+   *    回空态（不建号、无 session transition），结算即铺即注入；注入的首条
+   *    消息 lazy 建新会话承接，画布摘要随该消息上行。
    */
-  // Bug3：同一 workflow 重點 = 替換不是疊加。cropTemplate 裁剪後 template.id 不變，
-  // 重選環節再點同一張卡 = 同 id 替換：舊節點及其連線一次清掉，history 一格可整體 undo。
+  // Bug3：同一 workflow 重点 = 替换不是叠加。cropTemplate 裁剪后 template.id 不变，
+  // 重选环节再点同一张卡 = 同 id 替换：旧节点及其连线一次清掉，history 一格可整体 undo。
   const applyPendingTemplate = useCallback((cropped: AgentTemplateFull) => {
     const layout = templateToCanvasLayout(cropped);
     canvasHostRef.current?.replaceWorkflowNodes(cropped.id, layout.nodes, layout.connections);
@@ -256,8 +256,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     setAgentTemplateDismissed(true);
   }, []);
   const handleUseAgentTemplate = useCallback((card: AgentTemplate, selectedIndices: number[]) => {
-    // 2026-09-12 首屏減重：執行 payload 點卡才動態載入（chunk 進快取，之後零開銷）；
-    // 載入失敗（離線等）不收起畫廊，模板不會憑空消失，可重試。
+    // 2026-09-12 首屏减重：执行 payload 点卡才动态载入（chunk 进快取，之后零开销）；
+    // 载入失败（离线等）不收起画廊，模板不会凭空消失，可重试。
     void (async () => {
       const { hydrateAgentTemplate, cropTemplate } = await import("@/lib/agent-templates-payload");
       const template = hydrateAgentTemplate(card);
@@ -265,24 +265,24 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateDismissed(true);
       const start = startNewSessionRef.current;
       if (!start) {
-        // ref 未接上（極端時序）：退回舊行為直接鋪在當前會話，模板不能憑空消失。
+        // ref 未接上（极端时序）：退回旧行为直接铺在当前会话，模板不能凭空消失。
         applyPendingTemplate(cropped);
         return;
       }
-      // 開新＝清空回空態是同步語義（僅在建號管線在飛時等一下），結算即鋪；
-      // ok=false（auth/closed 封鎖開新）同樣直接鋪在當前會話——模板不能憑空消失。
+      // 开新＝清空回空态是同步语义（仅在建号管线在飞时等一下），结算即铺；
+      // ok=false（auth/closed 封锁开新）同样直接铺在当前会话——模板不能凭空消失。
       void Promise.resolve(start()).then(() => applyPendingTemplate(cropped));
     })().catch((error) => {
-      console.error("[agent-templates] 執行 payload 載入失敗", error);
+      console.error("[agent-templates] 执行 payload 载入失败", error);
       setAgentTemplateDismissed(false);
     });
   }, [applyPendingTemplate]);
 
-  // Bug1b：會話恢復回填。refresh/重進後左聊天續上（本地存檔 resume），但右畫布
-  // 空白 —— 快照此前只有上行沒有下行。監聽 currentSessionId：每個新拿到的 sid 拉
-  // 一次閘道存檔（GET 同上行端點），僅當 nodes>0 才回填；拉取異步到達時 sessionId
-  // 變化 effect（newCanvasSession 清場）已跑完，load 直接覆蓋即可。用戶搶先鋪過
-  // 模板（或有計畫卡）就不覆蓋，避免快照把剛做好的東西沖掉。
+  // Bug1b：会话恢复回填。refresh/重进后左聊天续上（本地存档 resume），但右画布
+  // 空白 —— 快照此前只有上行没有下行。监听 currentSessionId：每个新拿到的 sid 拉
+  // 一次闸道存档（GET 同上行端点），仅当 nodes>0 才回填；拉取异步到达时 sessionId
+  // 变化 effect（newCanvasSession 清场）已跑完，load 直接覆盖即可。用户抢先铺过
+  // 模板（或有计画卡）就不覆盖，避免快照把刚做好的东西冲掉。
   const restoredSnapshotForRef = useRef<string | null>(null);
   useEffect(() => {
     const sid = currentSessionId;
@@ -304,9 +304,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   const [progressDurationMs, setProgressDurationMs] = useState(NORMAL_PROGRESS_DURATION_MS);
   const [showProgress, setShowProgress] = useState(false);
 
-  // 進度條 ETA：服務端已按模型統計成功生成的耗時 p80（/api/user/model-eta，
-  // 數據源 = generation_attempt.latency_ms 遙測）。掛載時拉一次；讀不到
-  // （遙測不可用/樣本不足）就沿用固定 duration。ETA 不顯示，只調進度流逝。
+  // 进度条 ETA：服务端已按模型统计成功生成的耗时 p80（/api/user/model-eta，
+  // 数据源 = generation_attempt.latency_ms 遥测）。挂载时拉一次；读不到
+  // （遥测不可用/样本不足）就沿用固定 duration。ETA 不显示，只调进度流逝。
   const [modelEtaMs, setModelEtaMs] = useState<Record<string, number>>({});
   useEffect(() => {
     let cancelled = false;
@@ -316,7 +316,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
         if (!cancelled && payload?.models) setModelEtaMs(payload.models);
       })
       .catch(() => {
-        // ETA 是加分項：拉不到就靜默用固定 duration。
+        // ETA 是加分项：拉不到就静默用固定 duration。
       });
     return () => {
       cancelled = true;
@@ -327,17 +327,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     [modelEtaMs],
   );
 
-  // 2026-08-25 canvas 常駐化：右側面板 mode 由 displayMode 唯一決定——agent 模式
-  // 恆為 canvas（模板庫→畫布），非 agent 模式恆為 ImageDisplay。原黏性旗標/
-  // workflow_start 切換/節點數回退等中間態邏輯全部收斂刪除。
+  // 2026-08-25 canvas 常驻化：右侧面板 mode 由 displayMode 唯一决定——agent 模式
+  // 恒为 canvas（模板库→画布），非 agent 模式恒为 ImageDisplay。原黏性旗标/
+  // workflow_start 切换/节点数回退等中间态逻辑全部收敛删除。
   const inCanvasWorkstation = displayMode === "agent";
-  // 首頁輸入欄高度自適應（2026-09-11）：結果欄 ImageDisplay 一直吃滿欄高，輸入卡
-  // 過去由內容高決定、下方留一片空白。≥xl（Tailwind xl = 1280px，與 globals.css 的
-  // .playground-column-fill 同一斷點）把卡片交給 flex 鏈吃滿欄高，跟隨結果欄；
-  // <xl 維持文檔流自然高（useIsNarrow 首幀回 false＝寬屏，與 CSS 的 mobile-first
-  // 方向一致，不會出現 CSS/JS 斷點錯位）。
+  // 首页输入栏高度自适应（2026-09-11）：结果栏 ImageDisplay 一直吃满栏高，输入卡
+  // 过去由内容高决定、下方留一片空白。≥xl（Tailwind xl = 1280px，与 globals.css 的
+  // .playground-column-fill 同一断点）把卡片交给 flex 链吃满栏高，跟随结果栏；
+  // <xl 维持文档流自然高（useIsNarrow 首帧回 false＝宽屏，与 CSS 的 mobile-first
+  // 方向一致，不会出现 CSS/JS 断点错位）。
   const isBelowXl = useIsNarrow("(max-width: 1279.98px)");
-  // ─── 畫布工作站：畫布模式鎖頁面捲動（面板記憶載入/持久化在 use-chat-panel）───
+  // ─── 画布工作站：画布模式锁页面卷动（面板记忆载入/持久化在 use-chat-panel）───
   useEffect(() => {
     if (!inCanvasWorkstation) return;
     const prev = document.body.style.overflow;
@@ -406,18 +406,18 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [mode, agentSeed]);
 
   /**
-   * 進站判定：登入態水合完成後才判——水合中（authLoading）是「還不知道」，
-   * 對還不知道的用戶插播等於對已登入用戶插播。讀一次 localStorage，
-   * 看過就不再開；深鏈交接（?agent=1&q=/?session=）讓路、渠道來訪（B 站／微信，
-   * 人是被宣傳片吸引來的）也讓路，判準全在 promo-gate.ts。
+   * 进站判定：登入态水合完成后才判——水合中（authLoading）是「还不知道」，
+   * 对还不知道的用户插播等于对已登入用户插播。读一次 localStorage，
+   * 看过就不再开；深链交接（?agent=1&q=/?session=）让路、渠道来访（B 站／微信，
+   * 人是被宣传片吸引来的）也让路，判准全在 promo-gate.ts。
    *
-   * 頻率：**每頁載入只判一次**（resolvePromoEntry）。這條 effect 依賴登入態，
-   * 但登入態翻面不等於重新進站——2026-09-27 暴君實錘：登入中的用戶按登出，
-   * isLoggedIn 由真翻假，若重判就會把 `?promo=1` 的強制預覽又播一次（見
-   * promo-gate.ts 的 resolvePromoEntry 註釋）。定案後一律沿用首次結果。
+   * 频率：**每页载入只判一次**（resolvePromoEntry）。这条 effect 依赖登入态，
+   * 但登入态翻面不等于重新进站——2026-09-27 暴君实锤：登入中的用户按登出，
+   * isLoggedIn 由真翻假，若重判就会把 `?promo=1` 的强制预览又播一次（见
+   * promo-gate.ts 的 resolvePromoEntry 注释）。定案后一律沿用首次结果。
    *
-   * 渠道來訪只是「這次不開浮層」，不寫「已看過」：他下次直接進站（無 Referer）
-   * 仍會被影片接住，首次進站的震撼不會被渠道那一次的判斷吃掉。
+   * 渠道来访只是「这次不开浮层」，不写「已看过」：他下次直接进站（无 Referer）
+   * 仍会被影片接住，首次进站的震撼不会被渠道那一次的判断吃掉。
    */
   const promoEntryRef = useRef<PromoEntryDecision>(PROMO_ENTRY_UNDECIDED);
   useEffect(() => {
@@ -427,7 +427,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     try {
       seen = window.localStorage.getItem(PROMO_SEEN_KEY) === "1";
     } catch {
-      // 私密模式／停用儲存：讀不到就當沒看過（本次照播），不因此炸掉首頁。
+      // 私密模式／停用储存：读不到就当没看过（本次照播），不因此炸掉首页。
     }
     const decision = resolvePromoEntry(promoEntryRef.current, {
       isLoading: authLoading,
@@ -442,26 +442,26 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [authLoading, isLoggedIn]);
 
   /**
-   * 浮層收尾（2026-09-27 暴君第二輪：「还不如把封面做成结尾界面，输入框变成
-   * 真的能输入，用户一发送马上开新对话」）：不再只是預填，而是當場開新對話把那句
-   * 送進聊天區——送出去的動作就是人按的那一下，D-5／D-24 的語義不受影響。
+   * 浮层收尾（2026-09-27 暴君第二轮：「还不如把封面做成结尾界面，输入框变成
+   * 真的能输入，用户一发送马上开新对话」）：不再只是预填，而是当场开新对话把那句
+   * 送进聊天区——送出去的动作就是人按的那一下，D-5／D-24 的语义不受影响。
    *
-   * 強制預覽（?promo=1）不寫「已看過」：驗收看過一次不等於這個瀏覽器已經
-   * 消耗掉真正的首次進站體驗。
+   * 强制预览（?promo=1）不写「已看过」：验收看过一次不等于这个浏览器已经
+   * 消耗掉真正的首次进站体验。
    */
   const markPromoSeen = useCallback(() => {
     if (isForcedPreview(window.location.search)) return;
     try {
       window.localStorage.setItem(PROMO_SEEN_KEY, "1");
     } catch {
-      // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
+      // 存不了就算了：不挡这次的动作，最坏情况是下次再播一遍。
     }
   }, []);
 
   /**
-   * 留舊開新＋直送。與模板卡同一條路（startNewSessionRef → 注入即送），
-   * 但這條要 echo：那句話是使用者自己打的，必須出現在他自己的聊天記錄裡
-   * ——不 echo 的話，送出後到第一個字回來之前畫面完全是空的（2026-09-27 暴君）。
+   * 留旧开新＋直送。与模板卡同一条路（startNewSessionRef → 注入即送），
+   * 但这条要 echo：那句话是使用者自己打的，必须出现在他自己的聊天记录里
+   * ——不 echo 的话，送出后到第一个字回来之前画面完全是空的（2026-09-27 暴君）。
    */
   const runPromoTrial = useCallback((text: string) => {
     const trimmed = text.trim() || PROMO_TRIAL_PROMPT;
@@ -469,7 +469,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateInjection({ text: trimmed, nonce: Date.now(), echo: true });
     const start = startNewSessionRef.current;
     if (!start) {
-      // ref 未接上（極端時序）：退回直接送在當前會話，不能把這句話吃掉。
+      // ref 未接上（极端时序）：退回直接送在当前会话，不能把这句话吃掉。
       inject();
       return;
     }
@@ -477,20 +477,20 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
 
   /**
-   * 收尾送出的那句話（2026-09-27 暴君第三輪）：登入態決定「當場開跑」還是
-   * 「先彈登入窗再開跑」，分流是純函式（resolvePromoTrialIntent）。
+   * 收尾送出的那句话（2026-09-27 暴君第三轮）：登入态决定「当场开跑」还是
+   * 「先弹登入窗再开跑」，分流是纯函式（resolvePromoTrialIntent）。
    *
-   * 未登入那條不是丟掉：那句話先寫進 ref ＋ sessionStorage，登入態一翻真就補送。
-   * 兩型登入都吃這條——微信彈窗是原地完成（ref 還在），GitHub 同窗口跳轉回來
-   * 時元件已重掛（ref 沒了，靠 sessionStorage 那一份接住）。
-   * 使用者主動按了送出＝這部片對他是有效的，所以無論走哪條都先記「看過」。
+   * 未登入那条不是丢掉：那句话先写进 ref ＋ sessionStorage，登入态一翻真就补送。
+   * 两型登入都吃这条——微信弹窗是原地完成（ref 还在），GitHub 同窗口跳转回来
+   * 时元件已重挂（ref 没了，靠 sessionStorage 那一份接住）。
+   * 使用者主动按了送出＝这部片对他是有效的，所以无论走哪条都先记「看过」。
    */
   const handlePromoTrial = useCallback(
     (text: string) => {
       markPromoSeen();
       const intent = resolvePromoTrialIntent(text, isLoggedIn);
       if (intent.kind === "login") {
-        // 那句話先留住；登入小框由浮層自己長（在送出鈕正上方），不遮蓋結尾畫面。
+        // 那句话先留住；登入小框由浮层自己长（在送出钮正上方），不遮盖结尾画面。
         promoPendingRef.current = intent.pending;
         writePendingTrial(typeof window === "undefined" ? null : window.sessionStorage, intent.pending);
         return;
@@ -504,9 +504,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   );
 
   /**
-   * 收尾的退路（跳過 / Esc / 先逛逛）：只關浮層，不送話。
-   * 順手清掉待送的那句——使用者在登入窗前選了「先不登入」並離開，
-   * 之後某次無關的登入不該突然把這句話送出去（那不是他要的）。
+   * 收尾的退路（跳过 / Esc / 先逛逛）：只关浮层，不送话。
+   * 顺手清掉待送的那句——使用者在登入窗前选了「先不登入」并离开，
+   * 之后某次无关的登入不该突然把这句话送出去（那不是他要的）。
    */
   const handlePromoDismiss = useCallback(() => {
     markPromoSeen();
@@ -516,8 +516,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [markPromoSeen]);
 
   /**
-   * 登入小框被關掉（先不登录／Esc／點封面空白處）：浮層留在原地，但那句話不再
-   * 待送——他選擇不登入，之後某次無關的登入不該突然把它送出去。
+   * 登入小框被关掉（先不登录／Esc／点封面空白处）：浮层留在原地，但那句话不再
+   * 待送——他选择不登入，之后某次无关的登入不该突然把它送出去。
    */
   const handlePromoLoginDismiss = useCallback(() => {
     promoPendingRef.current = null;
@@ -525,12 +525,12 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
 
   /**
-   * 主輸入區那句話被登入擋下（hook 的 onSendBlockedByAuth）→ 存進與宣傳片同一格。
+   * 主输入区那句话被登入挡下（hook 的 onSendBlockedByAuth）→ 存进与宣传片同一格。
    *
-   * 為什麼要有這條：宣傳片浮層已經有「pending + 登入後補送」，但站上真正的入口
-   * （首頁主輸入區）沒吃到——未登入的人在那裡打字送出，那句話當場消失（composer
-   * 已清空，且 GitHub 登入是同窗口整頁跳轉，回來元件狀態全死），要重打一遍。
-   * 存同一格＝下面那條「登入態翻真 → 補送」effect 原樣接手，不必另造補送鏈。
+   * 为什么要有这条：宣传片浮层已经有「pending + 登入后补送」，但站上真正的入口
+   * （首页主输入区）没吃到——未登入的人在那里打字送出，那句话当场消失（composer
+   * 已清空，且 GitHub 登入是同窗口整页跳转，回来元件状态全死），要重打一遍。
+   * 存同一格＝下面那条「登入态翻真 → 补送」effect 原样接手，不必另造补送链。
    */
   const handleSendBlockedByAuth = useCallback((text: string) => {
     const stashed = stashBlockedSend(
@@ -541,14 +541,14 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
 
   /**
-   * 登入態翻真 → 補送那句話。
-   * 讀 ref 與 sessionStorage 兩處：ref 覆蓋同頁登入（按對話區的登入鈕／微信 popup），
-   * sessionStorage 覆蓋跳轉型登入（OAuth 落地回 / 時元件已重掛、ref 早就沒了）。
+   * 登入态翻真 → 补送那句话。
+   * 读 ref 与 sessionStorage 两处：ref 覆盖同页登入（按对话区的登入钮／微信 popup），
+   * sessionStorage 覆盖跳转型登入（OAuth 落地回 / 时元件已重挂、ref 早就没了）。
    *
-   * 這句話有兩個來源，共用同一格、走同一條補送：
-   * ①宣傳片收尾輸入框（handlePromoTrial 的 login 分支）；
-   * ②首頁主輸入區（handleSendBlockedByAuth：未登入送出＝hook 的 not_authenticated）。
-   * 兩者都是「使用者已經按下送出、只是還沒登入」，所以補送就是完成他那個動作，
+   * 这句话有两个来源，共用同一格、走同一条补送：
+   * ①宣传片收尾输入框（handlePromoTrial 的 login 分支）；
+   * ②首页主输入区（handleSendBlockedByAuth：未登入送出＝hook 的 not_authenticated）。
+   * 两者都是「使用者已经按下送出、只是还没登入」，所以补送就是完成他那个动作，
    * 不是替他多做一件事。
    */
   useEffect(() => {
@@ -559,7 +559,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     promoPendingRef.current = null;
     clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
     pendingTrialSentRef.current = true;
-    // 登入成功＝宣傳片這條線走完：浮層收掉，然後真的開一個會話開跑。
+    // 登入成功＝宣传片这条线走完：浮层收掉，然后真的开一个会话开跑。
     setPromoOpen(false);
     setMode("agent");
     setDisplayMode("agent");
@@ -567,26 +567,26 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [authLoading, isLoggedIn, runPromoTrial]);
 
   /**
-   * 新人禮待展示 → 開彈窗。
-   * 閘門權威在服務端（welcome_gift_grant.modal_seen_at，經 /api/auth/me 的加法欄位）；
-   * 本機 localStorage 只擋「同一台設備已經看過」的重複彈，換設備時本機標記是空的，
-   * 仍由服務端決定彈不彈。未登入／還沒水合完都不彈——否則會對未登入的人插播
-   * 一條「已送你 5 币」。
+   * 新人礼待展示 → 开弹窗。
+   * 闸门权威在服务端（welcome_gift_grant.modal_seen_at，经 /api/auth/me 的加法栏位）；
+   * 本机 localStorage 只挡「同一台设备已经看过」的重复弹，换设备时本机标记是空的，
+   * 仍由服务端决定弹不弹。未登入／还没水合完都不弹——否则会对未登入的人插播
+   * 一条「已送你 5 币」。
    */
   useEffect(() => {
     if (authLoading || !isLoggedIn || !user?.id) return;
     if (!welcomeGift?.pending) return;
-    // 這次登入是為了送出那句話（宣傳片結尾／首頁輸入框被登入擋下）：畫面要留給
-    // 剛開跑的真會話，新人禮彈窗不蓋上去（2026-09-30）。不回執、不本機關門，
-    // 服務端仍是 pending，下次進站照彈。
+    // 这次登入是为了送出那句话（宣传片结尾／首页输入框被登入挡下）：画面要留给
+    // 刚开跑的真会话，新人礼弹窗不盖上去（2026-09-30）。不回执、不本机关门，
+    // 服务端仍是 pending，下次进站照弹。
     if (pendingTrialSentRef.current) return;
     if (welcomeGiftModalSeenLocally(user.id)) return;
     setWelcomeGiftOpen(true);
   }, [authLoading, isLoggedIn, user?.id, welcomeGift]);
 
   /**
-   * 展示過的回執＋本機關門。回執失敗照樣關窗（見 ackWelcomeGiftModalSeen 註：
-   * 沒寫上只會讓下次登入再彈一次，比把新人禮藏起來輕）。
+   * 展示过的回执＋本机关门。回执失败照样关窗（见 ackWelcomeGiftModalSeen 注：
+   * 没写上只会让下次登入再弹一次，比把新人礼藏起来轻）。
    */
   const handleWelcomeGiftSeen = useCallback(() => {
     const userId = user?.id;
@@ -597,8 +597,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [clearWelcomeGift, token, user?.id]);
 
   /**
-   * 主按鈕「马上生成第一张」：關窗、切到 AI 助理、把**既有示例的第一條**預填進輸入框。
-   * 示例句不寫死——與聊天面板空態快捷 chips 共用 agent-example-prompts 這一真源。
+   * 主按钮「马上生成第一张」：关窗、切到 AI 助理、把**既有示例的第一条**预填进输入框。
+   * 示例句不写死——与聊天面板空态快捷 chips 共用 agent-example-prompts 这一真源。
    */
   const handleWelcomeGiftStart = useCallback(() => {
     handleWelcomeGiftSeen();
@@ -624,10 +624,10 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     // 参考图的清理交给下面的 effect：副作用（提示）不能写在 setState 的 updater 里。
   }, []);
 
-  // ── D-12：助理动过的参数回流到工作台控件（三态復原抽到 use-agent-param-reflect）──
-  // userSet* 系列 setter 的身分（useCallback 依賴陣列）在 hook 內原樣保留：
-  // PromptInput 那側沒有 memo 依賴，但工作站 onModelChange 的穩定引用設計
-  // 不允許這裡換身分。
+  // ── D-12：助理动过的参数回流到工作台控件（三态复原抽到 use-agent-param-reflect）──
+  // userSet* 系列 setter 的身分（useCallback 依赖阵列）在 hook 内原样保留：
+  // PromptInput 那侧没有 memo 依赖，但工作站 onModelChange 的稳定引用设计
+  // 不允许这里换身分。
   const {
     handleParamsReflected,
     userSetAspectRatio,
@@ -705,8 +705,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     if (usedFallback) setProgressDurationMs(FALLBACK_PROGRESS_DURATION_MS);
   }, [usedFallback]);
 
-  // 離頁再回來時本地沒有進度條狀態，但 hook 恢復了 server 端還在跑的任務（isLoading=true）：
-  // 補喚進度條，避免「回來進度消失」；完成時由上方 effect 依 isLoading=false 收起並揭曉結果。
+  // 离页再回来时本地没有进度条状态，但 hook 恢复了 server 端还在跑的任务（isLoading=true）：
+  // 补唤进度条，避免「回来进度消失」；完成时由上方 effect 依 isLoading=false 收起并揭晓结果。
   useEffect(() => {
     if (!isLoading || showProgress || failedProviders.length > 0) return;
     if (hasGeneratedImage) return;
@@ -730,8 +730,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   const resultView = useMemo(() => {
     const key: ProviderKey = "image_tinchak";
     const imageItem = images.find((img) => img.provider === key);
-    // agent 模式只產圖片（kotone-bridge 回傳的是靜態圖）。右側空態與展示都
-    // 該按圖片走，不能繼承普通模式的影片模型選擇——否则右側空態显示
+    // agent 模式只产图片（kotone-bridge 回传的是静态图）。右侧空态与展示都
+    // 该按图片走，不能继承普通模式的影片模型选择——否则右侧空态显示
     // 「视频会出现在这里」，与「生成图片」的请求自相矛盾。
     const mediaTypeOverride = displayMode === "agent" ? "image" : undefined;
     return {
@@ -768,19 +768,19 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
 
   return (
     <>
-      {/* 這一層不參與模式轉場：dust 動畫的範圍只有卡片中間那塊控制區
-          （在 PromptInput 裡）。上一版讓整頁跟著翻面，等於為了開個聊天區
-          把首頁整塊換掉——使用者要的是卡片換一面，不是換個網站。 */}
-      {/* F6 應用式滿屏（2026-09-10）：≥xl 兩欄態走「Navbar 自然高 → main flex-1 →
-          本層 flex-1 → page-shell flex-1 → grid flex-1 → 結果欄吃滿」的高度鏈，
-          視口高於內容時右欄結果卡撐滿到視口底，不再出現下方大面積空白。
-          2026-10-01：<xl（含手機）原本用 min-h-screen，但本層是 main(flex-1) 的直接
-          子項，min-h-screen＝100vh 又加在 70px header 之下 ⇒ body＝100vh+header，
-          手機 agent 態內容全 fixed、流內高度 0 ⇒ 多出的 header 高度成為純空滑（且
-          header 被 sticky 一起拖走）。改用 flex-1：精確吃掉「視口−header」，視覺上
-          仍撐滿視口；內容真的高於視口時 flex item 的自動最小高度會讓它自然長高、
-          整頁照常滾動。
-          pb 收斂 28/32→16：底部只需為 fixed bottom-4 的浮動 toast 條留安全空間。 */}
+      {/* 这一层不参与模式转场：dust 动画的范围只有卡片中间那块控制区
+          （在 PromptInput 里）。上一版让整页跟著翻面，等于为了开个聊天区
+          把首页整块换掉——使用者要的是卡片换一面，不是换个网站。 */}
+      {/* F6 应用式满屏（2026-09-10）：≥xl 两栏态走「Navbar 自然高 → main flex-1 →
+          本层 flex-1 → page-shell flex-1 → grid flex-1 → 结果栏吃满」的高度链，
+          视口高于内容时右栏结果卡撑满到视口底，不再出现下方大面积空白。
+          2026-10-01：<xl（含手机）原本用 min-h-screen，但本层是 main(flex-1) 的直接
+          子项，min-h-screen＝100vh 又加在 70px header 之下 ⇒ body＝100vh+header，
+          手机 agent 态内容全 fixed、流内高度 0 ⇒ 多出的 header 高度成为纯空滑（且
+          header 被 sticky 一起拖走）。改用 flex-1：精确吃掉「视口−header」，视觉上
+          仍撑满视口；内容真的高于视口时 flex item 的自动最小高度会让它自然长高、
+          整页照常滚动。
+          pb 收敛 28/32→16：底部只需为 fixed bottom-4 的浮动 toast 条留安全空间。 */}
       <div className="flex-1 bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
             <div className="page-shell xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
               <div className={inCanvasWorkstation ? "block" : "grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-rows-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"}>
@@ -788,15 +788,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     minimum from the item's min-content, so a single nowrap
                     control inside the card would widen the column past the
                     viewport and push the whole page sideways on phones.
-                    畫布工作站的殼（inline style + 全場畫布 overlay + 面板殼/拖寬
+                    画布工作站的壳（inline style + 全场画布 overlay + 面板壳/拖宽
                     手柄）抽到 canvas-workstation/CanvasChatWorkstation；inCanvas
-                    Workstation 仍在這裡派生並經 props 下發。面板內容（D-12 撤銷條
-                    + PromptInput）經 children 原地注入——聊天卡 DOM 不搬家，SSE
-                    會話與輸入狀態零丟失；chatHeaderExtra（收合按鈕）由面板兩態
-                    決定，經 render prop 回傳接線。
-                    F6（2026-09-10）：這層 wrapper 是左欄真正的 grid item——≥xl 撐滿
-                    row 高（stretch）且內容超出時自身滾動，不撐破視口；內容不足時
-                    內部卡保持自然高不拉伸。工作站態面板是 fixed 定位，不吃此層。 */}
+                    Workstation 仍在这里派生并经 props 下发。面板内容（D-12 撤销条
+                    + PromptInput）经 children 原地注入——聊天卡 DOM 不搬家，SSE
+                    会话与输入状态零丢失；chatHeaderExtra（收合按钮）由面板两态
+                    决定，经 render prop 回传接线。
+                    F6（2026-09-10）：这层 wrapper 是左栏真正的 grid item——≥xl 撑满
+                    row 高（stretch）且内容超出时自身滚动，不撑破视口；内容不足时
+                    内部卡保持自然高不拉伸。工作站态面板是 fixed 定位，不吃此层。 */}
                 <div className={cn("min-w-0 xl:min-h-0 xl:overflow-y-auto", !inCanvasWorkstation && "playground-column-fill")}>
                 <CanvasChatWorkstation
                   inCanvasWorkstation={inCanvasWorkstation}
@@ -836,12 +836,12 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onModeChange={handleModeChange}
                     animState={animState}
                     displayMode={displayMode}
-                    /* 工作站面板態本來就吃滿；首頁 ≥xl 也吃滿（跟隨右側結果欄） */
+                    /* 工作站面板态本来就吃满；首页 ≥xl 也吃满（跟随右侧结果栏） */
                     fillAvailableHeight={inCanvasWorkstation || !isBelowXl}
-                    /* 收合面板按鈕併入聊天 header——面板頂欄已刪，觸發前後
-                       同一個 header 同一套操作（2026-08-22 統一裁定）。按鈕本體
-                       在 CanvasChatWorkstation（面板兩態是它的私有狀態），經
-                       render prop 回傳到這裡接線。 */
+                    /* 收合面板按钮并入聊天 header——面板顶栏已删，触发前后
+                       同一个 header 同一套操作（2026-08-22 统一裁定）。按钮本体
+                       在 CanvasChatWorkstation（面板两态是它的私有状态），经
+                       render prop 回传到这里接线。 */
                     chatHeaderExtra={chatHeaderExtra}
                     onEditResult={setPixaiResultUrl}
                     onUpscaleResult={setPixaiResultUrl}
@@ -867,9 +867,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                 {/* Result canvas only — the picker moved onto the left rail, so
                     this column no longer needs an identity header or a status
                     badge duplicating the one ImageDisplay already draws.
-                    畫布工作站態：整欄隱藏（畫布已是全場主角）。
+                    画布工作站态：整栏隐藏（画布已是全场主角）。
                     F6：xl:min-h-0 打通 grid row → #generation-result → ImageDisplay
-                    的 xl:h-full 高度鏈（ImageDisplay 自帶 xl:min-h-[30rem] 地板）。 */}
+                    的 xl:h-full 高度链（ImageDisplay 自带 xl:min-h-[30rem] 地板）。 */}
                 <div id="generation-result" className={cn("flex min-w-0 flex-col xl:min-h-0", inCanvasWorkstation && "hidden")}>
                   <ImageDisplay
                     modelId={resultView.modelId}
@@ -886,7 +886,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             </div>
           </div>
 
-          {/* 場景指南及以下为 SEO 内容：保留 DOM，但视觉隐藏。 */}
+          {/* 场景指南及以下为 SEO 内容：保留 DOM，但视觉隐藏。 */}
           <div className="hidden" aria-hidden="true">
             <UseCaseLinks />
             <FaqSection />
@@ -903,9 +903,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
         />
       )}
 
-      {/* 未登入新訪客的進站宣傳片：z-[120] 在 navbar(z-80) 與既有 portal 彈層(z-90) 之上，
-          浮層開著時底下的首頁仍完整掛載——收尾的「开始试玩」要當場把話預填進輸入框，
-          整頁跳轉會把那個輸入框連同畫布一起重建。 */}
+      {/* 未登入新访客的进站宣传片：z-[120] 在 navbar(z-80) 与既有 portal 弹层(z-90) 之上，
+          浮层开著时底下的首页仍完整挂载——收尾的「开始试玩」要当场把话预填进输入框，
+          整页跳转会把那个输入框连同画布一起重建。 */}
       {promoOpen && (
         <PromoIntroOverlay
           onTrial={handlePromoTrial}
@@ -915,8 +915,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
         />
       )}
 
-      {/* 新人禮首登彈窗（已發放、未展示才彈）。標題/正文/幣數全部來自服務端，
-          這裡不寫死任何數字；與宣傳片浮層同層級（z-[95] 的 portal）。 */}
+      {/* 新人礼首登弹窗（已发放、未展示才弹）。标题/正文/币数全部来自服务端，
+          这里不写死任何数字；与宣传片浮层同层级（z-[95] 的 portal）。 */}
       {welcomeGiftOpen && welcomeGift && welcomeGift.title && welcomeGift.body && (
         <WelcomeGiftDialog
           open

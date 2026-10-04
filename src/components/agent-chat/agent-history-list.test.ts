@@ -28,9 +28,9 @@ const mk = (id: string, overrides: Partial<AgentSessionSummary> = {}): AgentSess
   ...overrides,
 });
 
-// ─────────────────────────── 相對日期 helper（固定 now 注入，逐 case）
+// ─────────────────────────── 相对日期 helper（固定 now 注入，逐 case）
 
-// now＝2026-10-03 16:46（本地時區的自然日，斷言不依賴 ICU）。
+// now＝2026-10-03 16:46（本地时区的自然日，断言不依赖 ICU）。
 const NOW = new Date(2026, 9, 3, 16, 46, 0).getTime();
 
 test("相对日期：今天 → HH:mm（含当天 00:00 边界与未来时间）", () => {
@@ -61,7 +61,7 @@ test("相对日期：更早同年 → M月D日；跨年 → YYYY/M/D", () => {
   assert.equal(formatSessionRelativeTime(new Date(2025, 11, 25, 12, 0).getTime(), NOW), "2025/12/25");
 });
 
-// ─────────────────────────── 搜尋過濾（純函數行為）
+// ─────────────────────────── 搜寻过滤（纯函数行为）
 
 const FILTER_FIXTURE: AgentSessionSummary[] = [
   mk("s1", { title: "Poster Draft v2" }),
@@ -69,10 +69,10 @@ const FILTER_FIXTURE: AgentSessionSummary[] = [
   mk("s3", { title: null }), // 降级标签「10月1日 10:00 的对话」
 ];
 
-// 標題格式化在生產由 AgentChatSurface 注入（唯一實作在該檔，測試不對它下斷言）。
-// 這裡給濾網一份自帶的替身標籤：無 title 的會話降級成時間標籤，形狀照生產的
-// 「<日期> <時間> 的对话」，值由測試自備——濾網的契約是「比對呼叫方給的標籤」，
-// 不是比對降級邏輯本身。
+// 标题格式化在生产由 AgentChatSurface 注入（唯一实作在该档，测试不对它下断言）。
+// 这里给滤网一份自带的替身标签：无 title 的会话降级成时间标签，形状照生产的
+// 「<日期> <时间> 的对话」，值由测试自备——滤网的契约是「比对呼叫方给的标签」，
+// 不是比对降级逻辑本身。
 const fixtureLabel = (it: AgentSessionSummary): string => it.title ?? "10月1日 10:00 的对话";
 
 test("搜索过滤：大小写不敏感、命中降级时间标签、空白词不过滤", () => {
@@ -86,7 +86,7 @@ test("搜索过滤：大小写不敏感、命中降级时间标签、空白词�
   assert.deepEqual(filterAgentSessions(FILTER_FIXTURE, "不存在的词", fixtureLabel), []);
 });
 
-// ─────────────────────────── 渲染行為（renderToStaticMarkup）
+// ─────────────────────────── 渲染行为（renderToStaticMarkup）
 
 const RENDER_FIXTURE: AgentSessionSummary[] = [
   mk("s1", { title: "海报构图三轮修" }),
@@ -99,8 +99,8 @@ const baseProps = {
   currentSessionId: "s2",
   switchingTo: null as string | null,
   startingNew: false,
-  // 標題格式化照樣注入（生產＝AgentChatSurface.formatSessionLabel；斷言只對
-  // 「渲染出來的是注入的那份標籤」，不對降級規則本身）。
+  // 标题格式化照样注入（生产＝AgentChatSurface.formatSessionLabel；断言只对
+  // 「渲染出来的是注入的那份标签」，不对降级规则本身）。
   formatLabel: (it: AgentSessionSummary) => it.title ?? "10月1日 10:00 的对话",
   onPick: () => {},
   onStartNew: () => {},
@@ -148,8 +148,8 @@ test("加载中与真空态：沿用既有文案与开新对话 CTA", () => {
   assert.match(empty, /开始新对话/);
 });
 
-// ─────────────────────────── 點列 → 切會話 callback（真行為斷言，不走 DOM：
-// 元件無 hooks，直接呼叫取元素樹，對列按鈕的 onClick 逐一斷言）
+// ─────────────────────────── 点列 → 切会话 callback（真行为断言，不走 DOM：
+// 元件无 hooks，直接呼叫取元素树，对列按钮的 onClick 逐一断言）
 
 type AnyElement = { props?: Record<string, unknown> & { children?: unknown } };
 
@@ -211,15 +211,15 @@ test("空态 CTA 触发 onStartNew", () => {
   assert.equal(started, 1);
 });
 
-// ─────────────────────────── 窄屏抽屜：portal 結構斷言（原始碼層；runner 無 jsdom）
+// ─────────────────────────── 窄屏抽屉：portal 结构断言（原始码层；runner 无 jsdom）
 //
-// 真行為（scrim 是否等於全視窗、抽屜內點擊不被 outside-click 誤收）由 Playwright
-// 在 390×844 實測複驗，數字見交付回報；這裡鎖住產生那棵 DOM 的結構：
-// scrim 是 createPortal 的第一個參數、容器是 document.body、drawer ref 掛在
-// scrim 上、outside-click 同時認 historyRef 與 historyDrawerRef（純函數
-// isInsideHistorySurface）。這些任一改壞，Playwright 那條也就會紅，屬結構契約。
+// 真行为（scrim 是否等于全视窗、抽屉内点击不被 outside-click 误收）由 Playwright
+// 在 390×844 实测复验，数字见交付回报；这里锁住产生那棵 DOM 的结构：
+// scrim 是 createPortal 的第一个参数、容器是 document.body、drawer ref 挂在
+// scrim 上、outside-click 同时认 historyRef 与 historyDrawerRef（纯函数
+// isInsideHistorySurface）。这些任一改坏，Playwright 那条也就会红，属结构契约。
 
-/** 取出 createPortal(...) 呼叫本體（到該呼叫的收尾 `)` 為止，含嵌套括號配對）。 */
+/** 取出 createPortal(...) 呼叫本体（到该呼叫的收尾 `)` 为止，含嵌套括号配对）。 */
 function portalCallRegion(src: string): string {
   const at = src.indexOf("createPortal(");
   if (at < 0) return "";
@@ -237,19 +237,19 @@ function portalCallRegion(src: string): string {
 test("窄屏抽屉 portal 结构：scrim 是 portal 子节点、容器为 document.body、ref 挂 scrim（结构断言）", () => {
   const region = portalCallRegion(surfaceSrc);
   assert.ok(region.length > 0, "必须存在 createPortal 调用");
-  // 第一个参数＝带 agent-param-scrim 与 historyDrawerRef 的 div（抽屜不在卡片子树内）。
+  // 第一个参数＝带 agent-param-scrim 与 historyDrawerRef 的 div（抽屉不在卡片子树内）。
   assert.match(region, /className="agent-param-scrim"/);
   assert.match(region, /ref=\{historyDrawerRef\}/);
-  // 第二个参数＝document.body：抽屜掛到 body 直下，不再受卡片 backdrop-filter 的
+  // 第二个参数＝document.body：抽屉挂到 body 直下，不再受卡片 backdrop-filter 的
   // containing block 影响（否则 scrim 会被缩成卡片大小，非全屏）。
   assert.match(region, /,\s*document\.body,?\s*\)\s*$/);
-  // portal 出去的抽屜不含 lg-sheet（半透）——材质改 agent-pop，字不叠字。
+  // portal 出去的抽屉不含 lg-sheet（半透）——材质改 agent-pop，字不叠字。
   assert.match(region, /agent-param-drawer agent-pop/);
   assert.doesNotMatch(region, /lg-sheet/);
 });
 
 test("窄屏抽屉放行逻辑：outside-click 同时认 historyRef 与 portal 的 historyDrawerRef（结构断言）", () => {
-  // 抽屜 portal 后不在 historyRef 子树内，必须以第二个 ref 放行抽屜内点击，
+  // 抽屉 portal 后不在 historyRef 子树内，必须以第二个 ref 放行抽屉内点击，
   // 否则点搜索框／点列都会被当成「点外面」而收掉（本刀必须一起改的连带项）。
   assert.match(
     surfaceSrc,
@@ -262,14 +262,14 @@ test("窄屏抽屉放行逻辑：outside-click 同时认 historyRef 与 portal �
   assert.match(surfaceSrc, /typeof document !== "undefined" &&/);
 });
 
-// ─────────────────────────── 變更探針（源碼字串，只證明改動在場，不計入已驗證）
+// ─────────────────────────── 变更探针（源码字串，只证明改动在场，不计入已验证）
 
 test("探针：工具列走廊修复与抽屉轮子在场（非行为断言）", () => {
   assert.match(surfaceSrc, /max-sm:justify-between/);
   assert.match(surfaceSrc, /flex items-center gap-0\.5 max-sm:contents/);
   assert.match(surfaceSrc, /ml-auto flex items-center gap-0\.5 max-sm:contents/);
   assert.match(surfaceSrc, /agent-param-scrim/);
-  // 抽屜材質改 agent-pop（不透明彈層），不再用半透 lg-sheet（底下消息流的字會透上來）。
+  // 抽屉材质改 agent-pop（不透明弹层），不再用半透 lg-sheet（底下消息流的字会透上来）。
   assert.match(surfaceSrc, /agent-param-drawer agent-pop/);
   assert.doesNotMatch(surfaceSrc, /agent-param-drawer lg-sheet/);
   assert.match(surfaceSrc, /agent-param-drawer-body/);

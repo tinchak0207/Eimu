@@ -1,13 +1,10 @@
-// events-translate.ts —— 自 index.ts 第二階段 Wave2 抽取：opencode 事件翻譯層——eventSessionId/boundMap/boundSet/isAssistantMessage/parseToolOutput、resolveResultUrl、emitImageDone/emitVideoDone/emitAudioDone、自動製畫布（canvasUnitId/readGenerateInput/autoCreateCanvasUnit/attachCanvasTask/emitCanvasResult）、toolErrorPayload、bash deny 歸因（bashDenyCache）、findUploadsByBasename/resolveInvisibleUploadPaths/deniedOperationLabel、trackTurnNodeTerminal、workflowStartSchemaHint、handleToolPartUpdate、idle-step breaker（finalizeIdleStep/triggerIdleStepBreaker）。
-// 原 index.ts 2708–3618 行，逐行原樣搬運（僅頂層宣告加 export 前綴）。
+// events-translate.ts —— 自 index.ts 第二阶段 Wave2 抽取：opencode 事件翻译层——eventSessionId/boundMap/boundSet/isAssistantMessage/parseToolOutput、resolveResultUrl、emitImageDone/emitVideoDone/emitAudioDone、自动制画布（canvasUnitId/readGenerateInput/autoCreateCanvasUnit/attachCanvasTask/emitCanvasResult）、toolErrorPayload、bash deny 归因（bashDenyCache）、findUploadsByBasename/resolveInvisibleUploadPaths/deniedOperationLabel、trackTurnNodeTerminal、workflowStartSchemaHint、handleToolPartUpdate、idle-step breaker（finalizeIdleStep/triggerIdleStepBreaker）。
+// 原 index.ts 2708–3618 行，逐行原样搬运（仅顶层宣告加 export 前缀）。
 import { readFileSync, readdirSync, statSync, appendFileSync } from "node:fs"
 import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
-import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IDLE_STEP_NUDGE_HANT, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
-// 2026-10-04 語言漂移：守衛家族文案（空轉止損 nudge／deny 守衛等）鏡像**會話黏性**
-// 書寫體。T 首輪用非黏性 detectUserScript（看當前句），繁體會話夾一句英文/短句即掉
-// 回簡體（Hack-H2 §2.4）；改用與出站正文同一黏性判準 sessionUserScript。
-import { sessionUserScript, type UserScript } from "./outbound-sanitize.ts"
+import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
+// 2026-10-04 W：守卫家族文案（空转止损 nudge／deny 守卫等）书写体镜像已整体拆除——一律简体。
 import { sessions, markDirty } from "./sessions-core.ts"
 import { opencodeFetch, revertDeadTail } from "./opencode-client.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
@@ -19,8 +16,8 @@ import { emitSessionError } from "./emit-helpers.ts"
 import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
-// TODO(整合 Wave2)：以下為「仍住 index.ts 且尚未 export」符號的 declare 佔位（stage1 記憶「subagent 佔位符法」，bun build 不查名可過）。
-// 整合階段於 index.ts 補 export 後換成真 import、刪除全部 declare，即完成橋接：
+// TODO(整合 Wave2)：以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
+// 整合阶段于 index.ts 补 export 后换成真 import、删除全部 declare，即完成桥接：
 // import { workflowService, emitQuestionRequest, armWatchdogTimer } from "./index.ts"
 
 // ---- opencode event translation -> frontend events ----
@@ -79,14 +76,14 @@ export function parseToolOutput(
   return null
 }
 
-// 2026-10-02：有界巢狀成品 URL 提取器（自 translateToolStatus completed 分支抽出，零行為變更；
-// subagent.ts 的子代理工具結果路徑共用同一提取器）。真實取件工具回的是**巢狀**形狀——
+// 2026-10-02：有界巢状成品 URL 提取器（自 translateToolStatus completed 分支抽出，零行为变更；
+// subagent.ts 的子代理工具结果路径共用同一提取器）。真实取件工具回的是**巢状**形状——
 // video_result_fetch 回 {jobs:[{video_url}]}、last_frame_video_chain 回 {shots:[{mp4_url}]}；
-// 舊版只認頂層 url/video_url/audio_url 與字面 videos[]/audios[]，兩者都不命中（模型手動查到
-// 成品、把 URL 貼進文字時，網關不發卡，用戶只看到泡泡裡一條純文字連結）。
-// 走訪有界（深度 ≤3、節點 ≤200，防病態大 payload），逐層認候選鍵；判定仍只認既有副檔名正則，
-// 不因工具名放寬（不猜）。cost_coins 優先用候選項自己那顆物件的，沒有才退回頂層（照原寫法）。
-// 純函式、無副作用。
+// 旧版只认顶层 url/video_url/audio_url 与字面 videos[]/audios[]，两者都不命中（模型手动查到
+// 成品、把 URL 贴进文字时，网关不发卡，用户只看到泡泡里一条纯文字连结）。
+// 走访有界（深度 ≤3、节点 ≤200，防病态大 payload），逐层认候选键；判定仍只认既有副档名正则，
+// 不因工具名放宽（不猜）。cost_coins 优先用候选项自己那颗物件的，没有才退回顶层（照原写法）。
+// 纯函式、无副作用。
 export function collectToolOutputMediaUrls(parsed: unknown): {
   video: { url: string; cost_coins?: number }[]
   audio: { url: string; cost_coins?: number }[]
@@ -98,7 +95,7 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
     typeof u === "string" && u.length > 0 && /\.(mp4|mov|webm|m4v)(\?|$)/i.test(u)
   const isAudioUrl = (u: unknown): u is string =>
     typeof u === "string" && u.length > 0 && /\.(m4a|mp3|wav|aac|ogg|flac|opus)(\?|$)/i.test(u)
-  // 候選鍵：頂層 url/video_url/audio_url 保留，新增 mp4_url/output_url；容器項再收 file_url。
+  // 候选键：顶层 url/video_url/audio_url 保留，新增 mp4_url/output_url；容器项再收 file_url。
   const CANDIDATE_URL_KEYS = new Set(["url", "video_url", "mp4_url", "output_url", "audio_url", "file_url"])
   const MAX_SCAN_DEPTH = 3
   const MAX_SCAN_NODES = 200
@@ -121,7 +118,7 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
     for (const [k, v] of Object.entries(obj)) {
       if (v === null || typeof v !== "object") {
         if (CANDIDATE_URL_KEYS.has(k) && typeof v === "string" && v.length > 0) {
-          // cost_coins 優先用候選項自己那顆物件的，沒有才退回頂層（照現有寫法）。
+          // cost_coins 优先用候选项自己那颗物件的，没有才退回顶层（照现有写法）。
           const cc = typeof obj.cost_coins === "number" ? obj.cost_coins : undefined
           if (isVideoUrl(v)) vidCands.push({ url: v, cost_coins: cc })
           if (isAudioUrl(v)) audCands.push({ url: v, cost_coins: cc })
@@ -159,7 +156,7 @@ export async function resolveResultUrl(rawUrl: string, key: string): Promise<str
   // Already a public asset URL (poller/tool may hand one over directly).
   if (/^https?:\/\//i.test(rawUrl) && !/\/v1\/images\/[^/]+\/result\/?$/.test(rawUrl)) return rawUrl
   const absolute = /^https?:\/\//i.test(rawUrl) ? rawUrl : `${PLATFORM_BASE}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`
-  // 平台 /v1/images/{id}/result 預設回 JSON，帶 ?format=redirect 才 302 到公開 blob URL。
+  // 平台 /v1/images/{id}/result 预设回 JSON，带 ?format=redirect 才 302 到公开 blob URL。
   const target = /\/v1\/images\/[^/]+\/result\/?$/.test(absolute) ? absolute + "?format=redirect" : absolute
   try {
     const res = await fetch(target, {
@@ -194,7 +191,7 @@ export async function emitImageDone(
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
   const publicUrl = await resolveResultUrl(url, state.apiKey)
   emitToSession(state, "image.done", { url: publicUrl, cost_coins, task_id, ...(recipe ? { recipe } : {}) })
-  // 自動製畫布：task 掛過 unit 就更新該 unit 的結果圖片節點。
+  // 自动制画布：task 挂过 unit 就更新该 unit 的结果图片节点。
   if (task_id) {
     emitCanvasResult(state, task_id, publicUrl, cost_coins)
   }
@@ -219,7 +216,7 @@ export async function emitVideoDone(
   if (state.announcedUrls.has(url)) return
   state.announcedUrls.add(url)
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
-  // 影片/成片 content 已是絕對公開 URL，無需 resolveResultUrl（它只重寫 /v1/images/.../result 形態）。
+  // 影片/成片 content 已是绝对公开 URL，无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   emitToSession(state, "video.done", { url, cost_coins, task_id, media_kind })
   void appendLedgerFor(state, {
     kind: "video",
@@ -242,7 +239,7 @@ export async function emitAudioDone(
   if (state.announcedUrls.has(url)) return
   state.announcedUrls.add(url)
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
-  // 音頻 content 已是絕對公開 URL（平台 uploads），無需 resolveResultUrl（它只重寫 /v1/images/.../result 形態）。
+  // 音频 content 已是绝对公开 URL（平台 uploads），无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   emitToSession(state, "audio.done", { url, cost_coins, task_id, media_kind })
   void appendLedgerFor(state, {
     kind: "audio",
@@ -254,13 +251,13 @@ export async function emitAudioDone(
   void emitQuotaChanged(state)
 }
 
-// ---- 自動製畫布（Auto Canvas Builder） ----
+// ---- 自动制画布（Auto Canvas Builder） ----
 //
-// 暴君立場：deepseek 不「思考」畫布的事。它只提交生圖/改圖請求，
-// gateway 攔截每個 image_* 工具的參數與結果，自動在畫布上重現：
-//   文本節點(prompt) → 配置節點(model/size/n) → [執行] → 圖片節點(結果)
-// 每次請求建立一個「畫布單元」(unit)，unit 內節點用相同 unit_id 前綴，
-// 前端以 unit_id 關聯成組；task_id 掛在同一 unit 上，完成時更新該組。
+// 暴君立场：deepseek 不「思考」画布的事。它只提交生图/改图请求，
+// gateway 拦截每个 image_* 工具的参数与结果，自动在画布上重现：
+//   文本节点(prompt) → 配置节点(model/size/n) → [执行] → 图片节点(结果)
+// 每次请求建立一个「画布单元」(unit)，unit 内节点用相同 unit_id 前缀，
+// 前端以 unit_id 关联成组；task_id 挂在同一 unit 上，完成时更新该组。
 
 export function canvasUnitId(): string {
   return `cu_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`
@@ -272,7 +269,7 @@ export function summarizeCanvasTitle(model: string, prompt: string): string {
   return p ? `${m} · ${p}${prompt.trim().length > 18 ? "…" : ""}` : m
 }
 
-// 從工具 input 抽取生成參數（deepseek 送哪欄就用哪欄，缺失給安全預設）。
+// 从工具 input 抽取生成参数（deepseek 送哪栏就用哪栏，缺失给安全预设）。
 export function readGenerateInput(input: unknown): {
   prompt: string
   model: string
@@ -280,8 +277,8 @@ export function readGenerateInput(input: unknown): {
   n: number
   kind: string
   quality?: string
-  image?: string // edit/upscale 的來源 mediaId/URL
-  lora?: string // P1-E1：聊天「存為資產」帶真 LoRA（loraModelVersionIds 首位）
+  image?: string // edit/upscale 的来源 mediaId/URL
+  lora?: string // P1-E1：聊天「存为资产」带真 LoRA（loraModelVersionIds 首位）
 } {
   const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
   const prompt =
@@ -307,12 +304,12 @@ export function readGenerateInput(input: unknown): {
   return { prompt, model, size, n, kind, quality, image, lora }
 }
 
-// 建立一個畫布單元並 emit 節點/連線事件。回傳 unit id。
-// S4：cost_hint 需查平台目錄（async），函數簽名改 async；兩處呼叫點
-//（tool status running / completed 補發）均改 await，行為語義不變。
-// 自動製畫布只給「真的會出圖」的工具（2026-09-29 e2e 像素實錘）：原本 startsWith("image_")
-// 讓 image_quote／image_get_result／image_upload 也各鋪一組「(未填写内容) + gpt-image-2 · 1024x1024
-// 待处理」空節點，永遠不會跑，還一路帶到用戶之後開的新對話畫布上。
+// 建立一个画布单元并 emit 节点/连线事件。回传 unit id。
+// S4：cost_hint 需查平台目录（async），函数签名改 async；两处呼叫点
+//（tool status running / completed 补发）均改 await，行为语义不变。
+// 自动制画布只给「真的会出图」的工具（2026-09-29 e2e 像素实锤）：原本 startsWith("image_")
+// 让 image_quote／image_get_result／image_upload 也各铺一组「(未填写内容) + gpt-image-2 · 1024x1024
+// 待处理」空节点，永远不会跑，还一路带到用户之后开的新对话画布上。
 const AUTO_CANVAS_TOOLS = new Set(["image_generate", "image_edit", "image_upscale"])
 
 export async function autoCreateCanvasUnit(
@@ -324,21 +321,21 @@ export async function autoCreateCanvasUnit(
   const cfg = readGenerateInput(input)
   const unitId = canvasUnitId()
 
-  // 計畫卡：一句話讓暴君知道他會被怎麼對待。
+  // 计画卡：一句话让暴君知道他会被怎么对待。
   const planLabel =
     toolName === "image_edit"
-      ? "改圖（圖生圖）"
+      ? "改图（图生图）"
       : toolName === "image_upscale"
         ? "放大"
         : toolName === "image_generate"
           ? cfg.kind === "video"
             ? "生影片"
-            : "生圖"
+            : "生图"
           : "生成"
-  // S4 規格2（2026-08-27）：cost_hint 從 null 改為真實估算（幣）。估算鏈：
-  // ① 工具 input 自帶 cost_coins（上游工具已按目錄算好，最準）→
-  // ② 平台目錄單價 × 數量（image）/ 檔位價 5/10 幣每秒（video，R5-C）→
-  // ③ 兩者都取不到保持 null（不許編數）。
+  // S4 规格2（2026-08-27）：cost_hint 从 null 改为真实估算（币）。估算链：
+  // ① 工具 input 自带 cost_coins（上游工具已按目录算好，最准）→
+  // ② 平台目录单价 × 数量（image）/ 档位价 5/10 币每秒（video，R5-C）→
+  // ③ 两者都取不到保持 null（不许编数）。
   let costHint: number | null = null
   if (input && typeof input === "object") {
     const inline = (input as Record<string, unknown>).cost_coins
@@ -374,7 +371,7 @@ export async function autoCreateCanvasUnit(
     cost_hint: costHint,
   })
 
-  // 模板權威（2026-10-02）：畫布上有用戶配的模板且還有同類型空位 → 這次生成落在模板節點，不另鋪 cu_* 單元。
+  // 模板权威（2026-10-02）：画布上有用户配的模板且还有同类型空位 → 这次生成落在模板节点，不另铺 cu_* 单元。
   if (toolName === "image_generate") {
     const slot = claimTemplateSlot(state.sessionId, unitId, cfg.kind === "video" ? "video" : "image")
     if (slot) {
@@ -389,7 +386,7 @@ export async function autoCreateCanvasUnit(
     }
   }
 
-  // 文本節點：承載 prompt（source_image 存在時併���提示，編輯語義）。
+  // 文本节点：承载 prompt（source_image 存在时并���提示，编辑语义）。
   const textNode = {
     id: `${unitId}-text`,
     type: "text",
@@ -406,7 +403,7 @@ export async function autoCreateCanvasUnit(
   emitToSession(state, "canvas.node.created", { unit_id: unitId, node: textNode })
   applyCanvasNodeCreated(state.sessionId, { node: textNode })
 
-  // 配置節點：model/size/n/kind。
+  // 配置节点：model/size/n/kind。
   const configNode = {
     id: `${unitId}-config`,
     type: "config",
@@ -427,14 +424,14 @@ export async function autoCreateCanvasUnit(
   emitToSession(state, "canvas.node.created", { unit_id: unitId, node: configNode })
   applyCanvasNodeCreated(state.sessionId, { node: configNode })
 
-  // 連線：文本 → 配置。
+  // 连线：文本 → 配置。
   emitToSession(state, "canvas.node.connected", {
     unit_id: unitId,
     connection: { id: `${unitId}-c1`, fromNodeId: textNode.id, toNodeId: configNode.id },
   })
   applyCanvasNodeConnected(state.sessionId, { connection: { id: `${unitId}-c1`, fromNodeId: textNode.id, toNodeId: configNode.id } })
 
-  // 預留圖片節點（結果落地時更新同一節點）。
+  // 预留图片节点（结果落地时更新同一节点）。
   const imageNode = {
     id: `${unitId}-image`,
     type: "image",
@@ -446,7 +443,7 @@ export async function autoCreateCanvasUnit(
   }
   emitToSession(state, "canvas.node.created", { unit_id: unitId, node: imageNode, target_kind: "result" })
   applyCanvasNodeCreated(state.sessionId, { node: imageNode })
-  // 連線：配置 → 圖片。
+  // 连线：配置 → 图片。
   emitToSession(state, "canvas.node.connected", {
     unit_id: unitId,
     connection: { id: `${unitId}-c2`, fromNodeId: configNode.id, toNodeId: imageNode.id },
@@ -456,16 +453,16 @@ export async function autoCreateCanvasUnit(
 
   state.canvasUnitByCall.set(callID, unitId)
   boundMap(state.canvasUnitByCall, TOOL_STATUS_DEDUP_CAP)
-  markDirty(state) // 畫布快照已套用：隨 session 防抖落盤，重啟後可恢復
+  markDirty(state) // 画布快照已套用：随 session 防抖落盘，重启后可恢复
   return unitId
 }
 
-// 為已建立的 unit 掛上 task_id（submit 完成階段），供結果更新。
+// 为已建立的 unit 挂上 task_id（submit 完成阶段），供结果更新。
 export function attachCanvasTask(state: SessionState, callID: string, taskId: string, unitId?: string): void {
   const target = unitId ?? state.canvasUnitByCall.get(callID)
-  // 0831：本輪任務登記（權威 task_id 來源 + 壓縮在途閘依據）。置於 unit 判斷之前：
-  // 即使畫布 unit 尚未就緒（autoCreateCanvasUnit 異步），已提交的 task 也必須被追蹤，
-  // 否則在途閘漏放 → 壓縮照樣踩中摘要 tool-call 死鎖。
+  // 0831：本轮任务登记（权威 task_id 来源 + 压缩在途闸依据）。置于 unit 判断之前：
+  // 即使画布 unit 尚未就绪（autoCreateCanvasUnit 异步），已提交的 task 也必须被追踪，
+  // 否则在途闸漏放 → 压缩照样踩中摘要 tool-call 死锁。
   if (taskId) {
     state.sessionTasks.set(taskId, { task_id: taskId, status: "queued", submitted_at: Date.now() })
   }
@@ -474,14 +471,14 @@ export function attachCanvasTask(state: SessionState, callID: string, taskId: st
   boundMap(state.canvasUnitByTask, TOOL_STATUS_DEDUP_CAP)
 }
 
-// task_id → unit 存在時，emit 完成事件；返回命中與否。
+// task_id → unit 存在时，emit 完成事件；返回命中与否。
 export function emitCanvasResult(
   state: SessionState,
   taskId: string,
   url: string,
   cost_coins?: number,
 ): boolean {
-  // 0831：任務終態登記（成功）。置於 unit 判斷前：無畫布 unit 也要如實記 succeeded+url。
+  // 0831：任务终态登记（成功）。置于 unit 判断前：无画布 unit 也要如实记 succeeded+url。
   const t = state.sessionTasks.get(taskId)
   if (t) {
     t.status = "succeeded"
@@ -502,17 +499,16 @@ export function emitCanvasResult(
 }
 
 /**
- * S2a：從結構化工具輸出抽失敗載荷，組出三欄位錯誤合同
- * {code, message, human_message}。兼容三種輸入形態：
- *  - 工具層 fail()：{error:{code,hint}}
- *  - gateway jsonError 透傳：{error:{message,type,code}}（code 可能被工具層
- *    塞成物件——workflow_rerun 舊裂縫的實際形態）
- *  - 純字串/無 error：fallback message。
+ * S2a：从结构化工具输出抽失败载荷，组出三栏位错误合同
+ * {code, message, human_message}。兼容三种输入形态：
+ *  - 工具层 fail()：{error:{code,hint}}
+ *  - gateway jsonError 透传：{error:{message,type,code}}（code 可能被工具层
+ *    塞成物件——workflow_rerun 旧裂缝的实际形态）
+ *  - 纯字串/无 error：fallback message。
  */
 export function toolErrorPayload(
   parsed: { error?: unknown } | null,
   fallbackMessage: string,
-  script?: UserScript,
 ): { code: string; message: string; human_message: string } {
   let code = "tool_failed"
   let message = fallbackMessage
@@ -531,25 +527,25 @@ export function toolErrorPayload(
       if (typeof o.code === "string" && o.code) code = o.code
     }
   }
-  return { code, message, human_message: humanMessageFor(message, code, script) }
+  return { code, message, human_message: humanMessageFor(message, code) }
 }
 
 /**
- * 取第一個非空字串。本機檔案授權的附帶欄位（root／reason）可能落在頂層或 error 內
- * （不同上游版本形狀不同），統一收斂。
+ * 取第一个非空字串。本机档案授权的附带栏位（root／reason）可能落在顶层或 error 内
+ * （不同上游版本形状不同），统一收敛。
  */
 function firstNonEmptyString(...values: unknown[]): string {
   for (const v of values) if (typeof v === "string" && v.length > 0) return v
   return ""
 }
 
-// ── R8-B 工單 #2（2026-08-29）：拒單報因 ──
-// R8 實錘：grep BRE 交替 \| 撞 deny 的 *|* 被拒，報錯不說命中哪條規則，
-// 模型花 78s 人肉逆向權限表。修法：被拒 bash 命令對 permission.bash 的
-// deny glob 求匹配，error 幀附 matched_pattern + 一句替代寫法。
+// ── R8-B 工单 #2（2026-08-29）：拒单报因 ──
+// R8 实锤：grep BRE 交替 \| 撞 deny 的 *|* 被拒，报错不说命中哪条规则，
+// 模型花 78s 人肉逆向权限表。修法：被拒 bash 命令对 permission.bash 的
+// deny glob 求匹配，error 帧附 matched_pattern + 一句替代写法。
 export let bashDenyCache: { at: number; patterns: string[] } | null = null
 
-/** 從 opencode.json 原文解析 deny glob（純函式；載入路徑與測試共用同一解析，避免測試用假表）。 */
+/** 从 opencode.json 原文解析 deny glob（纯函式；载入路径与测试共用同一解析，避免测试用假表）。 */
 export function parseBashDenyPatterns(raw: string): string[] {
   try {
     const cfg = JSON.parse(raw) as { permission?: { bash?: Record<string, string> } }
@@ -566,20 +562,20 @@ export function loadBashDenyPatterns(): string[] {
   if (bashDenyCache && now - bashDenyCache.at < 60_000) return bashDenyCache.patterns
   let patterns: string[] = []
   try {
-    // 路徑可 env 覆寫（測試餵真實表；生產不設即為既有 WORKSPACE_DIR 路徑）。
+    // 路径可 env 覆写（测试喂真实表；生产不设即为既有 WORKSPACE_DIR 路径）。
     const cfgPath = process.env.BASH_DENY_CONFIG_PATH || path.join(WORKSPACE_DIR, ".opencode", "opencode.json")
     const raw = readFileSync(cfgPath, "utf-8")
     patterns = parseBashDenyPatterns(raw)
   } catch {
-    // 配置讀不到就不歸因——報錯退回短句，不阻塞工具錯誤透傳
+    // 配置读不到就不归因——报错退回短句，不阻塞工具错误透传
   }
   bashDenyCache = { at: now, patterns }
-  // 需求2（2026-10-02）：啟動／每次 60s 重載後做一次被遮蔽規則偵測並以結構化日誌告警。
+  // 需求2（2026-10-02）：启动／每次 60s 重载后做一次被遮蔽规则侦测并以结构化日志告警。
   logShadowedBashDenyRules(patterns)
   return patterns
 }
 
-/** deny glob → RegExp（* 通配任意字元含換行，其餘按字面量）。 */
+/** deny glob → RegExp（* 通配任意字元含换行，其余按字面量）。 */
 export function denyGlobToRegExp(glob: string): RegExp {
   const body = glob
     .split("*")
@@ -588,61 +584,51 @@ export function denyGlobToRegExp(glob: string): RegExp {
   return new RegExp(`^${body}$`)
 }
 
-/** 替代寫法提示（按命中規則類型給一句可操作的話；出站文案一律簡體）。
- *  2026-10-04 T2：script==="hant" 時出繁體鏡像（這四句是 deny 守衛的用戶可見固定文案）。 */
-export function denyHintFor(pattern: string, script?: UserScript): string {
-  const hant = script === "hant"
+/** 替代写法提示（按命中规则类型给一句可操作的话；出站文案一律简体，书写体镜像已拆）。 */
+export function denyHintFor(pattern: string): string {
   if (pattern === "*|*")
-    return hant
-      ? "BRE 交替 \\| 含禁止符 |。改用寬匹配後自行篩選（如 grep -n \"第.*章\"），或改用 run_py 工具寫腳本處理"
-      : "BRE 交替 \\| 含禁止符 |。改用宽匹配后自行筛选（如 grep -n \"第.*章\"），或改用 run_py 工具写脚本处理"
+    return "BRE 交替 \\| 含禁止符 |。改用宽匹配后自行筛选（如 grep -n \"第.*章\"），或改用 run_py 工具写脚本处理"
   if (pattern === "*&&*" || pattern === "*||*" || pattern === "*;*")
-    return hant
-      ? "執行環境只允許單條命令。拆成多次單命令調用，或改用 run_py 工具寫腳本一次完成"
-      : "执行环境只允许单条命令。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
+    return "执行环境只允许单条命令。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
   if (pattern === "*>*" || pattern === "*>>*" || pattern === "*<*")
-    return hant
-      ? "執行環境禁止重定向/輸入改向。拆成多次單命令調用，或改用 run_py 工具寫腳本一次完成"
-      : "执行环境禁止重定向/输入改向。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
-  return hant
-    ? "請改用允許的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具寫腳本"
-    : "请改用允许的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具写脚本"
+    return "执行环境禁止重定向/输入改向。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
+  return "请改用允许的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具写脚本"
 }
 
-/** 對 deny glob 求匹配；命中多條時取最具體的（非 * 字面量最長者），跳過全捕 *。
- *  patterns 可注入（測試直接餵真實 opencode.json 解析出的表）；省略時走 60s 快取載入。 */
-export function bashDenyAttribution(cmd: string, patterns?: string[], script?: UserScript): { pattern: string; hint: string } | null {
+/** 对 deny glob 求匹配；命中多条时取最具体的（非 * 字面量最长者），跳过全捕 *。
+ *  patterns 可注入（测试直接喂真实 opencode.json 解析出的表）；省略时走 60s 快取载入。 */
+export function bashDenyAttribution(cmd: string, patterns?: string[]): { pattern: string; hint: string } | null {
   if (!cmd) return null
   let best: { pattern: string; score: number } | null = null
   for (const p of patterns ?? loadBashDenyPatterns()) {
-    if (p === "*") continue // 全捕規則不報因（零信息量）
+    if (p === "*") continue // 全捕规则不报因（零信息量）
     if (!denyGlobToRegExp(p).test(cmd)) continue
     const score = p.replace(/\*/g, "").length
     if (!best || score > best.score) best = { pattern: p, score }
   }
   if (!best) return null
-  return { pattern: best.pattern, hint: denyHintFor(best.pattern, script) }
+  return { pattern: best.pattern, hint: denyHintFor(best.pattern) }
 }
 
-// ── 需求1（2026-10-02）：拒絕決策的 provenance ──
-// 設計取自 Claude Code PermissionDecisionReason（帶型別聯合 rule/mode/hook/classifier/
-// sandboxOverride/safetyCheck，見 teacher-repo src/types/permissions.ts:271-324）；
-// **未複製任何程式碼**，只取其「拒絕原因須為結構化帶型別物件，而非自由字串」的設計。
-// 向下相容：既有 error 幀欄位 matched_pattern / hint 語義一字不改，只新增 deny_provenance。
+// ── 需求1（2026-10-02）：拒绝决策的 provenance ──
+// 设计取自 Claude Code PermissionDecisionReason（带型别联合 rule/mode/hook/classifier/
+// sandboxOverride/safetyCheck，见 teacher-repo src/types/permissions.ts:271-324）；
+// **未复制任何程式码**，只取其「拒绝原因须为结构化带型别物件，而非自由字串」的设计。
+// 向下相容：既有 error 帧栏位 matched_pattern / hint 语义一字不改，只新增 deny_provenance。
 export type DenySource = "deny_glob" | "path_gate" | "sandbox_unavailable" | "unknown"
 
 export interface DenyProvenance {
-  /** 拒絕成因類別。當前網關此分支只會真正產生 deny_glob（與 unknown）；其餘為其他層預留。 */
+  /** 拒绝成因类别。当前网关此分支只会真正产生 deny_glob（与 unknown）；其余为其他层预留。 */
   source: DenySource
-  /** 命中的 deny glob 原文；無明確歸因時為 null。 */
+  /** 命中的 deny glob 原文；无明确归因时为 null。 */
   pattern: string | null
-  /** 機器可讀的結構化理由。 */
+  /** 机器可读的结构化理由。 */
   reason: string
-  /** 給模型的可操作替代寫法；無則 null。 */
+  /** 给模型的可操作替代写法；无则 null。 */
   hint: string | null
 }
 
-/** 依 opencode 拒絕訊息判定成因類別（為 path gate / sandbox 層預留同一 provenance 型別）。 */
+/** 依 opencode 拒绝讯息判定成因类别（为 path gate / sandbox 层预留同一 provenance 型别）。 */
 export function classifyDenySource(message: string): DenySource {
   if (/\bsandbox\b|bwrap|operation not permitted/i.test(message)) return "sandbox_unavailable"
   if (/(^|[^A-Za-z])path([^A-Za-z]|$)|路径|不可见|outside the workspace/i.test(message)) return "path_gate"
@@ -650,7 +636,7 @@ export function classifyDenySource(message: string): DenySource {
   return "unknown"
 }
 
-/** 拒絕決策的結構化 provenance；與 bashDenyAttribution 同源，不改變其結果。 */
+/** 拒绝决策的结构化 provenance；与 bashDenyAttribution 同源，不改变其结果。 */
 export function bashDenyProvenance(cmd: string, patterns?: string[], message?: string): DenyProvenance | null {
   const cls = message ? classifyDenySource(message) : "deny_glob"
   const att = bashDenyAttribution(cmd, patterns)
@@ -671,8 +657,8 @@ export function bashDenyProvenance(cmd: string, patterns?: string[], message?: s
   }
 }
 
-// 持久稽核：沿用既有日誌落點（gateway stdout → journald）＋ append-only jsonl；
-// 落盤失敗一律 fail-open，絕不阻塞拒單。路徑可用 env 覆寫（測試注入 tmp 檔）。
+// 持久稽核：沿用既有日志落点（gateway stdout → journald）＋ append-only jsonl；
+// 落盘失败一律 fail-open，绝不阻塞拒单。路径可用 env 覆写（测试注入 tmp 档）。
 export const DENY_AUDIT_PATH = process.env.DENY_AUDIT_PATH || "/opt/agent-harness/deny-audit.jsonl"
 
 export interface DenyAuditRecord {
@@ -689,7 +675,7 @@ export interface DenyAuditRecord {
 
 export function appendDenyAudit(
   record: DenyAuditRecord,
-  // 預設路徑於呼叫時解析（env 可於執行期覆寫，供測試把稽核導入 tmp；生產不設＝DENY_AUDIT_PATH）。
+  // 预设路径于呼叫时解析（env 可于执行期覆写，供测试把稽核导入 tmp；生产不设＝DENY_AUDIT_PATH）。
   auditPath: string = process.env.DENY_AUDIT_PATH ?? DENY_AUDIT_PATH,
 ): void {
   let line: string
@@ -703,52 +689,52 @@ export function appendDenyAudit(
   try {
     appendFileSync(auditPath, line + "\n")
   } catch {
-    // 稽核落盤失敗不得阻塞拒單
+    // 稽核落盘失败不得阻塞拒单
   }
 }
 
-// ── 需求2（2026-10-02）：被遮蔽規則偵測 ──
-// 設計取自 Claude Code shadowedRuleDetection（偵測 tool-wide deny/ask 使更具體的 allow
-// 永不生效，見 teacher-repo src/utils/permissions/shadowedRuleDetection.ts:193-234）；
-// **未複製任何程式碼**。
+// ── 需求2（2026-10-02）：被遮蔽规则侦测 ──
+// 设计取自 Claude Code shadowedRuleDetection（侦测 tool-wide deny/ask 使更具体的 allow
+// 永不生效，见 teacher-repo src/utils/permissions/shadowedRuleDetection.ts:193-234）；
+// **未复制任何程式码**。
 //
-// 語義界定（現場證據 opencode-runtime/opencode.json）：我方 permission.bash 是 deny-only
-// 表＝ 44 條 deny ＋ 唯一一條 tool-wide "*": "allow"。**沒有 allow/ask 分層**，故 teacher 的
-// 缺陷類（specific allow 被 tool-wide deny 遮蔽 ⇒ 有人意圖放行卻被永久擋住）在此形態下
-// **真空不成立**：不 deny 即 allow，不存在「意圖放行的 allow 規則」可被遮蔽。硬套 allow/deny
-// 對抗模型只會做出無意義的假缺陷。可計算的真實類比有兩類（皆為 lint 級，非安全缺陷）：
-//   (a) subsumed：更窄的 deny 規則其匹配集是某更寬 deny 規則的子集 ⇒ 該規則對拒絕覆蓋面
-//       零貢獻（冗餘），刪除不改變行為；
-//   (b) pathological_breadth：匹配面病態過寬的樣式（`*` 全捕，或 `*x*` 內容級子串掃描）——
-//       這是 08-29 橘貓事件的真實病灶（`*curl*` 掃描封死免費池）。
+// 语义界定（现场证据 opencode-runtime/opencode.json）：我方 permission.bash 是 deny-only
+// 表＝ 44 条 deny ＋ 唯一一条 tool-wide "*": "allow"。**没有 allow/ask 分层**，故 teacher 的
+// 缺陷类（specific allow 被 tool-wide deny 遮蔽 ⇒ 有人意图放行却被永久挡住）在此形态下
+// **真空不成立**：不 deny 即 allow，不存在「意图放行的 allow 规则」可被遮蔽。硬套 allow/deny
+// 对抗模型只会做出无意义的假缺陷。可计算的真实类比有两类（皆为 lint 级，非安全缺陷）：
+//   (a) subsumed：更窄的 deny 规则其匹配集是某更宽 deny 规则的子集 ⇒ 该规则对拒绝覆盖面
+//       零贡献（冗余），删除不改变行为；
+//   (b) pathological_breadth：匹配面病态过宽的样式（`*` 全捕，或 `*x*` 内容级子串扫描）——
+//       这是 08-29 橘猫事件的真实病灶（`*curl*` 扫描封死免费池）。
 export interface ShadowedRule {
   rule: string
   kind: "subsumed" | "pathological_breadth"
-  /** 遮蔽它的更寬規則（subsumed 時非 null；過寬類為 null）。 */
+  /** 遮蔽它的更宽规则（subsumed 时非 null；过宽类为 null）。 */
   shadowedBy: string | null
   reason: string
 }
 
-/** glob 首個 `*` 之前的字面前綴（首字元即 * 時為 ""）。 */
+/** glob 首个 `*` 之前的字面前缀（首字元即 * 时为 ""）。 */
 function globLeadLiteral(glob: string): string {
   const i = glob.indexOf("*")
   return i < 0 ? glob : glob.slice(0, i)
 }
 
-/** 病態過寬判定（保守門檻，避免把常規短前綴誤報成缺陷）。 */
+/** 病态过宽判定（保守门槛，避免把常规短前缀误报成缺陷）。 */
 function pathologicalBreadth(glob: string): string | null {
   if (glob === "*") return "全捕规则（*）：覆盖全部命令，等于禁用 bash 工具"
   if (glob.length > 2 && glob.startsWith("*") && glob.endsWith("*")) {
-    return `内容级子串扫描（${glob}）：任何命令参数含该子串即被拒——08-29 橘貓事件的病灶形态`
+    return `内容级子串扫描（${glob}）：任何命令参数含该子串即被拒——08-29 橘猫事件的病灶形态`
   }
-  if (/^.\*$/.test(glob)) return `前綴仅 1 个字元的宽匹配（${glob}）：覆盖面极大，易误伤合法命令`
+  if (/^.\*$/.test(glob)) return `前缀仅 1 个字元的宽匹配（${glob}）：覆盖面极大，易误伤合法命令`
   return null
 }
 
 /**
- * 聲音式（不誤報）子集判定：規則 r 的匹配集 ⊆ 規則 b 的匹配集。
- * 僅對「單尾星」寬規則（b = P*，匹配一切以 P 開頭的字串）做證明；其餘形態一律回 false
- * （寧可漏報不可誤報——lint 警告不能造假缺陷）。
+ * 声音式（不误报）子集判定：规则 r 的匹配集 ⊆ 规则 b 的匹配集。
+ * 仅对「单尾星」宽规则（b = P*，匹配一切以 P 开头的字串）做证明；其余形态一律回 false
+ * （宁可漏报不可误报——lint 警告不能造假缺陷）。
  */
 function isPatternSubset(r: string, b: string): boolean {
   if (r === b) return false
@@ -756,13 +742,13 @@ function isPatternSubset(r: string, b: string): boolean {
   if (!b.endsWith("*") || b.indexOf("*") !== b.length - 1) return false
   const prefix = b.slice(0, -1)
   if (prefix === "") return true
-  if (r.startsWith("*")) return false // 首字元即 * ⇒ 可匹配不以 prefix 開頭的字串，無法證明
+  if (r.startsWith("*")) return false // 首字元即 * ⇒ 可匹配不以 prefix 开头的字串，无法证明
   return globLeadLiteral(r).startsWith(prefix)
 }
 
 /**
- * 偵測 deny 表中被遮蔽／病態過寬的規則。純函式，供載入路徑與測試共用。
- * 回傳順序：先全部 pathological_breadth，再全部 subsumed（各自按輸入序）。
+ * 侦测 deny 表中被遮蔽／病态过宽的规则。纯函式，供载入路径与测试共用。
+ * 回传顺序：先全部 pathological_breadth，再全部 subsumed（各自按输入序）。
  */
 export function detectShadowedBashDenyRules(patterns: string[]): ShadowedRule[] {
   const uniq = [...new Set(patterns)]
@@ -795,13 +781,13 @@ export function detectShadowedBashDenyRules(patterns: string[]): ShadowedRule[] 
   return out
 }
 
-/** 載入／重載時呼叫：結構化日誌告警；回傳偵測結果供測試與呼叫方使用。 */
+/** 载入／重载时呼叫：结构化日志告警；回传侦测结果供测试与呼叫方使用。 */
 export function logShadowedBashDenyRules(patterns: string[]): ShadowedRule[] {
   const shadowed = detectShadowedBashDenyRules(patterns)
-  if (patterns.length === 0) return shadowed // 表讀不到：不報「0 findings」誤導（與 parse 失敗區分）
+  if (patterns.length === 0) return shadowed // 表读不到：不报「0 findings」误导（与 parse 失败区分）
   if (shadowed.length === 0) {
     console.log(
-      "[gateway] shadowed-deny scan: 0 findings（deny-only 表無 allow 層，teacher 的 allow-shadowed 缺陷類真空）",
+      "[gateway] shadowed-deny scan: 0 findings（deny-only 表无 allow 层，teacher 的 allow-shadowed 缺陷类真空）",
     )
     return shadowed
   }
@@ -815,7 +801,7 @@ export function logShadowedBashDenyRules(patterns: string[]): ShadowedRule[] {
   return shadowed
 }
 
-/** R8-B 工單 #5：uploads 目錄遞歸找同名文件，取 mtime 最新者。 */
+/** R8-B 工单 #5：uploads 目录递归找同名文件，取 mtime 最新者。 */
 export function findUploadsByBasename(basename: string): string | null {
   let found: string | null = null
   let foundMtime = 0
@@ -841,7 +827,7 @@ export function findUploadsByBasename(basename: string): string | null {
             found = p
           }
         } catch {
-          // stat 失敗的文件跳過
+          // stat 失败的文件跳过
         }
       }
     }
@@ -850,17 +836,17 @@ export function findUploadsByBasename(basename: string): string | null {
   return found
 }
 
-// R8-B 工單 #5：消息文本裡的絕對路徑 token（≥2 段，含 /tmp/daming-book.pdf 形態）。
+// R8-B 工单 #5：消息文本里的绝对路径 token（≥2 段，含 /tmp/daming-book.pdf 形态）。
 export const ABS_PATH_RE = /\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+/g
 
-/** R8-B 工單 #5：用戶給的路徑在沙箱視圖（workspace）不存在但 uploads/** 有同名
- *  文件 → 返回系統注文本（拼進送模型的 message 前面）；解析不到回 null。 */
+/** R8-B 工单 #5：用户给的路径在沙箱视图（workspace）不存在但 uploads/** 有同名
+ *  文件 → 返回系统注文本（拼进送模型的 message 前面）；解析不到回 null。 */
 export function resolveInvisibleUploadPaths(content: string): string | null {
   const candidates = new Set(content.match(ABS_PATH_RE) ?? [])
   const notes: string[] = []
   for (const raw of candidates) {
     const p = raw.replace(/[.,;:!?)）】"'，。；：]+$/, "")
-    if (p.startsWith(WORKSPACE_DIR)) continue // 沙箱視圖內本來就可見
+    if (p.startsWith(WORKSPACE_DIR)) continue // 沙箱视图内本来就可见
     const basename = p.split("/").pop() ?? ""
     if (!basename) continue
     const hit = findUploadsByBasename(basename)
@@ -869,7 +855,7 @@ export function resolveInvisibleUploadPaths(content: string): string | null {
   return notes.length > 0 ? notes.join("\n") : null
 }
 
-/** R4-A S10：被拒操作的可讀標籤——bash 取命令前綴（截 80 字符），其他工具取工具名。 */
+/** R4-A S10：被拒操作的可读标签——bash 取命令前缀（截 80 字符），其他工具取工具名。 */
 export function deniedOperationLabel(toolName: string, input: unknown): string {
   let op = ""
   if (input && typeof input === "object") {
@@ -883,7 +869,7 @@ export function deniedOperationLabel(toolName: string, input: unknown): string {
   return `（被拒操作：${op}）`
 }
 
-/** R4-A S8：採集本 turn 內到達終態的節點（emitToSession 中央出口調用）。 */
+/** R4-A S8：采集本 turn 内到达终态的节点（emitToSession 中央出口调用）。 */
 export function trackTurnNodeTerminal(state: SessionState, data: unknown): void {
   const d = (data ?? {}) as {
     node_id?: unknown
@@ -903,10 +889,10 @@ export function trackTurnNodeTerminal(state: SessionState, data: unknown): void 
   if (state.turnTerminalNodes.length > 64) state.turnTerminalNodes.shift()
 }
 
-/** 修 4（2026-09-01）：workflow_start 載荷形狀示例。opencode 工具層把 gateway
- *  400 丟成裸「tool failed」，模型只能拿用戶的幣和時間盲猜形狀（實測連錯 2 張
- *  失敗卡才中）。從模板註冊表取該模板 text role 的真實欄位，回一段可照抄的
- *  緊湊 JSON 示例；註冊表不可得時用 single_video 的 canonical 形狀兜底。 */
+/** 修 4（2026-09-01）：workflow_start 载荷形状示例。opencode 工具层把 gateway
+ *  400 丢成裸「tool failed」，模型只能拿用户的币和时间盲猜形状（实测连错 2 张
+ *  失败卡才中）。从模板注册表取该模板 text role 的真实栏位，回一段可照抄的
+ *  紧凑 JSON 示例；注册表不可得时用 single_video 的 canonical 形状兜底。 */
 export function workflowStartSchemaHint(input: unknown): string {
   const templateId =
     input && typeof input === "object" && typeof (input as { template_id?: unknown }).template_id === "string"
@@ -922,7 +908,7 @@ export function workflowStartSchemaHint(input: unknown): string {
         if (n.kind === "text" && typeof n.role === "string") roles.push(n.role)
       }
     } catch {
-      // 註冊表不可得：走通用示例兜底
+      // 注册表不可得：走通用示例兜底
     }
   }
   const contentShape = roles.length
@@ -949,8 +935,8 @@ export function handleToolPartUpdate(state: SessionState, part: any): void {
   state.toolStatusSeen.add(dedupKey)
   boundSet(state.toolStatusSeen, TOOL_STATUS_DEDUP_CAP)
 
-  // R2-A 看門狗：工具真實開跑 = turn 已啟動，餵狗。（question 工具的
-  // pending 也要算——它在等用戶回答，turn 顯然活著。）
+  // R2-A 看门狗：工具真实开跑 = turn 已启动，喂狗。（question 工具的
+  // pending 也要算——它在等用户回答，turn 显然活著。）
   if (status === "pending" || status === "running" || status === "completed") {
     state.turnToolStarted = true
   }
@@ -962,9 +948,9 @@ if (status === "pending" || status === "running") {
       void emitQuestionRequest(state, callId, st.input)
       return
     }
-    // 只在拿到工具輸入後才發 invoke。opencode 的 pending 狀態常只有
-    // {status:"pending"} 而沒有 input；等 running（input 完整）再發，
-    // 前端工具卡才顯示得出「在做什麼」，不是黑盒。
+    // 只在拿到工具输入后才发 invoke。opencode 的 pending 状态常只有
+    // {status:"pending"} 而没有 input；等 running（input 完整）再发，
+    // 前端工具卡才显示得出「在做什么」，不是黑盒。
     const argsSummary = summarizeArgs(st.input)
     if (state.toolInvokeSeen.has(callId)) return
     if (!argsSummary && status === "pending") return
@@ -974,14 +960,14 @@ if (status === "pending" || status === "running") {
       tool: toolName,
       args_summary: argsSummary,
     })
-    // 自動製畫布：image_* 工具首次建立畫布單元。deepseek 完全不知道——
-    // 它只是提交請求，gateway 攔截參數自動建文本/配置/圖片節點。
+    // 自动制画布：image_* 工具首次建立画布单元。deepseek 完全不知道——
+    // 它只是提交请求，gateway 拦截参数自动建文本/配置/图片节点。
     if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId) && st.input != null) {
       void autoCreateCanvasUnit(state, toolName, st.input, callId)
     }
   } else if (status === "completed") {
-    // 若 running 階段因 input 缺失沒發過 invoke，這裡補發一次（completed 的
-    // input 一定完整），確保前端工具卡必定有說明、不黑盒。
+    // 若 running 阶段因 input 缺失没发过 invoke，这里补发一次（completed 的
+    // input 一定完整），确保前端工具卡必定有说明、不黑盒。
     if (!state.toolInvokeSeen.has(callId) && st.input != null) {
       state.toolInvokeSeen.add(callId)
       boundSet(state.toolInvokeSeen, TOOL_STATUS_DEDUP_CAP)
@@ -989,21 +975,21 @@ if (status === "pending" || status === "running") {
         tool: toolName,
         args_summary: summarizeArgs(st.input),
       })
-      // 同上：跑到 completed 才見到 input 的工具（理論上不會，但保險起見）。
+      // 同上：跑到 completed 才见到 input 的工具（理论上不会，但保险起见）。
       if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId)) {
         void autoCreateCanvasUnit(state, toolName, st.input, callId)
       }
     }
     const parsed = parseToolOutput(st.output)
-    // 只認明確帶 ok 欄位的結構化輸出；沒有 ok 欄位（原生工具文字輸出）一律視為成功。
+    // 只认明确带 ok 栏位的结构化输出；没有 ok 栏位（原生工具文字输出）一律视为成功。
     const hasOkFlag = parsed !== null && typeof parsed === "object" && typeof (parsed as { ok?: unknown }).ok === "boolean"
-    // 缺陷 A（2026-10-04 本機檔案橋，真殼實錘）：未授權路徑的讀取**不是成功**。凍結契約下
-    // gateway 對 needs_authorization 回 HTTP 200，local_files 把它包成
-    // {ok:true, action_required:"authorize_local_files", root, reason, options}（授權發生在對話裡）。
-    // 舊碼只看 bool ok ⇒ 折成 ok:true 並丟掉 action_required／options／root ⇒ 前端卡片顯示
-    // 「完成」（實錘：助手文字「读取被拦下了」而卡片「读取本机文件 完成」）。此處把它正規化為
-    // needs_authorization，並把 code／root／reason／options 原樣帶進 SSE。裝置橋原生
-    // {ok:false,error:{code:"needs_authorization",…}} 亦收斂到同一條路。
+    // 缺陷 A（2026-10-04 本机档案桥，真壳实锤）：未授权路径的读取**不是成功**。冻结契约下
+    // gateway 对 needs_authorization 回 HTTP 200，local_files 把它包成
+    // {ok:true, action_required:"authorize_local_files", root, reason, options}（授权发生在对话里）。
+    // 旧码只看 bool ok ⇒ 折成 ok:true 并丢掉 action_required／options／root ⇒ 前端卡片显示
+    // 「完成」（实锤：助手文字「读取被拦下了」而卡片「读取本机文件 完成」）。此处把它正规化为
+    // needs_authorization，并把 code／root／reason／options 原样带进 SSE。装置桥原生
+    // {ok:false,error:{code:"needs_authorization",…}} 亦收敛到同一条路。
     const parsedRecord = parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null
     const parsedErrorRecord =
       parsedRecord && parsedRecord.error && typeof parsedRecord.error === "object"
@@ -1019,33 +1005,30 @@ if (status === "pending" || status === "running") {
     const authReason = firstNonEmptyString(parsedRecord?.reason, parsedRecord?.auth_reason, parsedErrorRecord?.reason)
     const authOptionsRaw = parsedRecord?.options ?? parsedRecord?.auth_options ?? parsedErrorRecord?.options
     const ok = needsAuthorization ? false : hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
-    // S2a（2026-08-27）：ok 語義收緊為「已執行且成功」。失敗必落
+    // S2a（2026-08-27）：ok 语义收紧为「已执行且成功」。失败必落
     // {ok:false, error:{code,message,human_message}}——human_message 中文短句必填。
-    // 舊代碼非 image_ 工具無條件回 ok:true，導致 workflow_rerun_node 等失敗工具
-    // 在 SSE 上偽成功（評測 event 687-690 實錘）。
+    // 旧代码非 image_ 工具无条件回 ok:true，导致 workflow_rerun_node 等失败工具
+    // 在 SSE 上伪成功（评测 event 687-690 实锤）。
     const toolErr = needsAuthorization
       ? {
           code: "needs_authorization",
-          // 2026-10-04 T2：本機檔案授權閘＝守衛家族固定文案，依會話黏性書寫體出對應版本。
-          message: authReason || (sessionUserScript(state) === "hant" ? "此路徑尚未授權。" : "此路径尚未授权。"),
+          message: authReason || "此路径尚未授权。",
           human_message:
             firstNonEmptyString(parsedErrorRecord?.human_message) ||
-            (sessionUserScript(state) === "hant"
-              ? "讀取此路徑需要你的授權，請選擇授權範圍。"
-              : "读取此路径需要你的授权，请选择授权范围。"),
+            "读取此路径需要你的授权，请选择授权范围。",
           action_required: "authorize_local_files",
           ...(authRoot ? { root: authRoot } : {}),
           ...(authReason ? { reason: authReason } : {}),
           ...(Array.isArray(authOptionsRaw) ? { options: authOptionsRaw } : {}),
         }
       : !ok
-        ? toolErrorPayload(parsed, "tool failed", sessionUserScript(state))
+        ? toolErrorPayload(parsed, "tool failed")
         : null
     // artifact_pending：已提交、成品未到——回包给了 task_id 但还没有成品 url。
     const artifactPending =
       ok && typeof parsed?.task_id === "string" && !!parsed.task_id && !(typeof parsed?.url === "string" && parsed.url.length > 0)
     if (toolName.startsWith("image_")) {
-      // 自動製畫布：submit 完成後把 task_id 掛回 unit，完成事件才夠關聯。
+      // 自动制画布：submit 完成后把 task_id 挂回 unit，完成事件才够关联。
       if (ok && typeof parsed?.task_id === "string" && parsed.task_id) {
         attachCanvasTask(state, callId, parsed.task_id)
       }
@@ -1055,8 +1038,8 @@ if (status === "pending" || status === "running") {
         ...(toolErr ? { error: toolErr } : {}),
         cost_coins: typeof parsed?.cost_coins === "number" ? parsed.cost_coins : undefined,
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
-        // 落位回灌（2026-10-02）：若這次生成被綁到模板節點，如實回報落在哪顆 tpl-node
-        // （前端 tool 卡可見；模型側由 messages-gw 的 templateLandingFact 下一回合注入）。
+        // 落位回灌（2026-10-02）：若这次生成被绑到模板节点，如实回报落在哪颗 tpl-node
+        // （前端 tool 卡可见；模型侧由 messages-gw 的 templateLandingFact 下一回合注入）。
         ...((): Record<string, string> => {
           const uid = state.canvasUnitByCall.get(callId)
           const nodeId = uid ? canvasResultNodeId(state.sessionId, uid) : ""
@@ -1064,22 +1047,22 @@ if (status === "pending" || status === "running") {
         })(),
       })
       if (ok && typeof parsed?.url === "string" && parsed.url.length > 0) {
-        // P1-E1：image.done 附帶真實配方（prompt/model/size/lora），前端
-        // 「存為資產」直接拿，不必再從 transcript 對應。
+        // P1-E1：image.done 附带真实配方（prompt/model/size/lora），前端
+        // 「存为资产」直接拿，不必再从 transcript 对应。
         const cfg = st.input != null ? readGenerateInput(st.input) : undefined
         void emitImageDone(state, parsed.url, parsed.cost_coins, parsed.task_id, cfg ? { prompt: cfg.prompt, model: cfg.model, size: cfg.size, lora: cfg.lora } : undefined)
       }
     } else {
-      // R1（2026-09-11）刀4：非 image_ 工具的 tool.result 補回填載荷。評測實錘 10 條
-      // result 全為 {tool,ok,event_id} 空殼（前端契約的 cost_coins / error.human_message
-      // / summary 全部拿不到）。有成本數字就帶 cost_coins（quote/generate 類）；報價類
-      // 工具再帶一句 summary 短文案；同步子代理 deadline 超時補 partial/reason。
+      // R1（2026-09-11）刀4：非 image_ 工具的 tool.result 补回填载荷。评测实锤 10 条
+      // result 全为 {tool,ok,event_id} 空壳（前端契约的 cost_coins / error.human_message
+      // / summary 全部拿不到）。有成本数字就带 cost_coins（quote/generate 类）；报价类
+      // 工具再带一句 summary 短文案；同步子代理 deadline 超时补 partial/reason。
       const parsedObj =
         parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null
-      // 缺陷 B（2026-10-04 本機檔案橋）：local_files 的 read_file 結果把裝置/閘道算好的
-      // binary／bytes_read／size／truncated 放在 result 內；這裡原樣帶進 SSE，前端據此
-      // 顯示「这是二进制文件」並正確報「已读 X / 文件 Y 字节（已截断）」。成功判定不變
-      // （仍由 ok 決定），只是把後設欄位補齊，不改其他工具語義。
+      // 缺陷 B（2026-10-04 本机档案桥）：local_files 的 read_file 结果把装置/闸道算好的
+      // binary／bytes_read／size／truncated 放在 result 内；这里原样带进 SSE，前端据此
+      // 显示「这是二进制文件」并正确报「已读 X / 文件 Y 字节（已截断）」。成功判定不变
+      // （仍由 ok 决定），只是把后设栏位补齐，不改其他工具语义。
       const readFileResult =
         toolName === "local_files" &&
         parsedObj?.op === "read_file" &&
@@ -1125,13 +1108,13 @@ if (status === "pending" || status === "running") {
         tool: toolName,
         ok,
         ...(toolErr ? { error: toolErr } : {}),
-        // 報價類的 total_coins 是估價不是扣費：不掛 cost_coins（前端會當「已用/消耗」累加，
-        // 2026-09-29 e2e 實錘「已用 614 币」而帳戶只有 7 币）；金額已在 summary 裡。
+        // 报价类的 total_coins 是估价不是扣费：不挂 cost_coins（前端会当「已用/消耗」累加，
+        // 2026-09-29 e2e 实锤「已用 614 币」而帐户只有 7 币）；金额已在 summary 里。
         ...(typeof costCoins === "number" && !/quote/i.test(toolName) ? { cost_coins: costCoins } : {}),
         ...(quoteSummary ? { summary: quoteSummary } : {}),
         ...(subagentTimeout ? { partial: true, reason: "timeout" } : {}),
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
-        // 缺陷 A：授權請求的载荷原樣帶進 SSE（前端 needs_auth 態渲染三選一）。
+        // 缺陷 A：授权请求的载荷原样带进 SSE（前端 needs_auth 态渲染三选一）。
         ...(needsAuthorization
           ? {
               action_required: "authorize_local_files",
@@ -1140,7 +1123,7 @@ if (status === "pending" || status === "running") {
               ...(Array.isArray(authOptionsRaw) ? { auth_options: authOptionsRaw } : {}),
             }
           : {}),
-        // 缺陷 B：二進位／截斷後設欄位（前端 binary 面板與 bytes 顯示）。
+        // 缺陷 B：二进位／截断后设栏位（前端 binary 面板与 bytes 显示）。
         ...(readFileResult
           ? {
               ...(readBinary ? { binary: true } : {}),
@@ -1150,9 +1133,9 @@ if (status === "pending" || status === "running") {
             }
           : {}),
       })
-      // 原生工具（bash 等）可能回傳的是「含圖片 URL 的 JSON」——例如引擎用
-      // bash 呼叫 kotone-bridge 生圖，輸出 {text, images:[{url,...}]}。這類
-      // 結果也要送 image.done，前端右側展示框才會顯示圖片（否則只有泡泡文字）。
+      // 原生工具（bash 等）可能回传的是「含图片 URL 的 JSON」——例如引擎用
+      // bash 呼叫 kotone-bridge 生图，输出 {text, images:[{url,...}]}。这类
+      // 结果也要送 image.done，前端右侧展示框才会显示图片（否则只有泡泡文字）。
       if (parsed !== null && typeof parsed === "object" && Array.isArray((parsed as { images?: unknown }).images)) {
         const imgs = (parsed as { images: { url?: string; width?: number; height?: number }[] }).images
         for (const im of imgs) {
@@ -1161,17 +1144,17 @@ if (status === "pending" || status === "running") {
           }
         }
       }
-      // 影片／音頻安全網（2026-08-31；2026-10-02 擴掃描巢狀成品形狀）：任何非 image_ 工具結果
-      // 帶平台影片／音頻 URL（video_upload 回 {ok,url}、run_py 裁後上傳、workflow 工具回 {url}）→
-      // 發 video.done／audio.done，聊天框出卡。對稱於上面的 image.done；dedup 由
-      // emitVideoDone／emitAudioDone 的 announcedUrls 兜底，與 film 節點 runNode 出口不重複。
+      // 影片／音频安全网（2026-08-31；2026-10-02 扩扫描巢状成品形状）：任何非 image_ 工具结果
+      // 带平台影片／音频 URL（video_upload 回 {ok,url}、run_py 裁后上传、workflow 工具回 {url}）→
+      // 发 video.done／audio.done，聊天框出卡。对称于上面的 image.done；dedup 由
+      // emitVideoDone／emitAudioDone 的 announcedUrls 兜底，与 film 节点 runNode 出口不重复。
       //
-      // 2026-10-02 缺口 2：真實取件工具回的是**巢狀**形狀，舊版只認頂層 url/video_url/audio_url
-      // 與字面 videos[]/audios[]，兩個都不命中——video_result_fetch 回 {jobs:[{video_url}]}、
-      // last_frame_video_chain 回 {shots:[{mp4_url}]}。模型手動查到成品、把 URL 貼進文字時，
-      // 網關不發卡，用戶只看到泡泡裡一條純文字連結（暴君抱怨的真身）。
-      // 修法＝保留原行為、只擴掃描：有界走訪（深度 ≤3、節點 ≤200，防病態大 payload），
-      // 逐層認候選鍵；判定仍只認既有副檔名正則，不因工具名放寬（不猜）。
+      // 2026-10-02 缺口 2：真实取件工具回的是**巢状**形状，旧版只认顶层 url/video_url/audio_url
+      // 与字面 videos[]/audios[]，两个都不命中——video_result_fetch 回 {jobs:[{video_url}]}、
+      // last_frame_video_chain 回 {shots:[{mp4_url}]}。模型手动查到成品、把 URL 贴进文字时，
+      // 网关不发卡，用户只看到泡泡里一条纯文字连结（暴君抱怨的真身）。
+      // 修法＝保留原行为、只扩扫描：有界走访（深度 ≤3、节点 ≤200，防病态大 payload），
+      // 逐层认候选键；判定仍只认既有副档名正则，不因工具名放宽（不猜）。
       if (parsed !== null && typeof parsed === "object") {
         const media = collectToolOutputMediaUrls(parsed)
         for (const c of media.video) void emitVideoDone(state, c.url, c.cost_coins, undefined, "video")
@@ -1186,39 +1169,35 @@ if (status === "pending" || status === "running") {
         : err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
           ? (err as { message: string }).message
           : "tool failed"
-    // 0919 斷點②修復：question 工具以 aborted 收尾≠用戶中止——是 orchestrator
-    // 調 question 凍結 turn 時殺掉在途輪的內部中止（實錘 13:00:21 兩條
-    // 「已按你的要求中止本轮」冒充用戶話術）。此處換中性話術；用戶真中止
-    // 走 /abort 端點（6516），不經此分支。
+    // 0919 断点②修复：question 工具以 aborted 收尾≠用户中止——是 orchestrator
+    // 调 question 冻结 turn 时杀掉在途轮的内部中止（实锤 13:00:21 两条
+    // 「已按你的要求中止本轮」冒充用户话术）。此处换中性话术；用户真中止
+    // 走 /abort 端点（6516），不经此分支。
     let isQuestionFreezeAbort = false
     if (toolName === "question" && /\baborted?\b/i.test(message)) {
       isQuestionFreezeAbort = true
-      // 2026-10-04 T2：question 凍結＝守衛家族固定文案，依會話黏性書寫體出對應版本。
-      message =
-        sessionUserScript(state) === "hant"
-          ? "本回合已暫停，等待你在問題卡上選擇後繼續"
-          : "本回合已暂停，等待你在问题卡上选择后继续"
+      message = "本回合已暂停，等待你在问题卡上选择后继续"
     }
-    // 0920 暴君欽點：abort 類工具錯誤一律不發卡——①真用戶按停：UI 收尾由
-    // turn.done 表達（與 emitSessionError 的 MessageAbortedError 早退同構，09-18）；
-    // ②系統自殺輪（failover 換線/idle 止損/子代理換模殺在途工具）此前經此分支
-    // 彈「已按你的要求中止本轮」錯誤卡＝栽贓用戶＋欺君。兩種情況都只留日誌。
+    // 0920 暴君钦点：abort 类工具错误一律不发卡——①真用户按停：UI 收尾由
+    // turn.done 表达（与 emitSessionError 的 MessageAbortedError 早退同构，09-18）；
+    // ②系统自杀轮（failover 换线/idle 止损/子代理换模杀在途工具）此前经此分支
+    // 弹「已按你的要求中止本轮」错误卡＝栽赃用户＋欺君。两种情况都只留日志。
     if (!isQuestionFreezeAbort && /\b(aborted?|cancel(?:led|ed) by user|interrupted by user)\b/i.test(message)) {
       console.log(`[gateway] tool abort, card suppressed (UI 收尾走 turn.done): callId=${callId} tool=${toolName} message=${message}`)
       return
     }
-    // 修 4：workflow_start 的裸「tool failed」→ 帶期望 schema 的可照抄報錯。
-    // 工具層不透傳 gateway 400 body，模型此前只能盲猜載荷形狀；命中條件 =
-    // workflow_start + 報錯無任何中文（真實中文報錯如「缺少必要內容」不覆蓋）。
+    // 修 4：workflow_start 的裸「tool failed」→ 带期望 schema 的可照抄报错。
+    // 工具层不透传 gateway 400 body，模型此前只能盲猜载荷形状；命中条件 =
+    // workflow_start + 报错无任何中文（真实中文报错如「缺少必要内容」不覆盖）。
     if (toolName === "workflow_start" && !/[\u4e00-\u9fff]/.test(message)) {
       message = workflowStartSchemaHint(st.input)
     }
-    // 2026-08-22：opencode 的 deny 消息自帶完整權限規則表（120+ 條 JSON），
-    // 原樣透傳=防禦清單直接送給任何用戶（偵察面）。權限攔截一律換成短句。
-    // R4-A S10（2026-08-28）：R4 實錘「此操作不在允许范围内，已跳过」×7 不說
-    // 是哪個操作——補上被拒操作（bash 命令前綴，非 bash 工具補工具名）。
-    // R8-B 工單 #2（2026-08-29）：再補命中規則（matched_pattern）與替代寫法——
-    // R8 實錘模型花 78s 人肉逆向 deny 表，報因後此段歸零。
+    // 2026-08-22：opencode 的 deny 消息自带完整权限规则表（120+ 条 JSON），
+    // 原样透传=防御清单直接送给任何用户（侦察面）。权限拦截一律换成短句。
+    // R4-A S10（2026-08-28）：R4 实锤「此操作不在允许范围内，已跳过」×7 不说
+    // 是哪个操作——补上被拒操作（bash 命令前缀，非 bash 工具补工具名）。
+    // R8-B 工单 #2（2026-08-29）：再补命中规则（matched_pattern）与替代写法——
+    // R8 实锤模型花 78s 人肉逆向 deny 表，报因后此段归零。
     let denyInfo: { pattern: string; hint: string } | null = null
     let denyProv: DenyProvenance | null = null
     if (/specified a rule which prevents|relevant rules/i.test(message)) {
@@ -1226,22 +1205,14 @@ if (status === "pending" || status === "running") {
         st.input && typeof st.input === "object" && typeof (st.input as { command?: unknown }).command === "string"
           ? (st.input as { command: string }).command
           : ""
-      denyInfo = bashDenyAttribution(cmd, undefined, sessionUserScript(state))
-      // 需求1（2026-10-02）：結構化 provenance（向下相容，僅新增欄位）。
+      denyInfo = bashDenyAttribution(cmd)
+      // 需求1（2026-10-02）：结构化 provenance（向下相容，仅新增栏位）。
       denyProv = bashDenyProvenance(cmd, undefined, message)
-      // 2026-10-04 T2 語言鏡像：deny 守衛固定文案＋替代寫法提示（hint）依會話黏性
-      // 書寫體出對應版本（pattern 為規則 glob 原文，非文案，不譯）。
-      const denyHant = sessionUserScript(state) === "hant"
-      message = `${
-        denyHant ? "此操作不在允許範圍內，已跳過" : "此操作不在允许范围内，已跳过"
-      }${deniedOperationLabel(toolName, st.input)}${
-        denyInfo
-          ? denyHant
-            ? `。命中規則：${denyInfo.pattern}；替代寫法：${denyInfo.hint}`
-            : `。命中规则：${denyInfo.pattern}；替代写法：${denyInfo.hint}`
-          : ""
+      // 2026-10-04 W：deny 守卫固定文案一律简体（pattern 为规则 glob 原文，非文案，不译）。
+      message = `此操作不在允许范围内，已跳过${deniedOperationLabel(toolName, st.input)}${
+        denyInfo ? `。命中规则：${denyInfo.pattern}；替代写法：${denyInfo.hint}` : ""
       }`
-      // 持久稽核：每次拒絕落一筆結構化記錄。
+      // 持久稽核：每次拒绝落一笔结构化记录。
       if (denyProv) {
         appendDenyAudit({
           ts: new Date().toISOString(),
@@ -1256,20 +1227,20 @@ if (status === "pending" || status === "running") {
         })
       }
     }
-    // S2a：error 態的 tool.result 同樣補齊三欄位錯誤合同。
+    // S2a：error 态的 tool.result 同样补齐三栏位错误合同。
     emitToSession(state, "tool.result", {
       tool: toolName,
       ok: false,
       error: {
         code: isQuestionFreezeAbort ? "question_freeze" : "tool_error",
         message,
-        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message, undefined, sessionUserScript(state)),
+        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message),
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
         ...(denyProv ? { deny_provenance: denyProv } : {}),
       },
     })
-    // question 凍結中止不是錯誤：不進 session.error 幀（避免 UI 紅卡）、
-    // 不記上游錯（不是渠道故障，別誤觸 failover 重投）。
+    // question 冻结中止不是错误：不进 session.error 帧（避免 UI 红卡）、
+    // 不记上游错（不是渠道故障，别误触 failover 重投）。
     if (isQuestionFreezeAbort) {
       console.log(`[gateway] question freeze abort: callId=${callId} — turn paused pending answer (no error frame)`)
       return
@@ -1278,11 +1249,11 @@ if (status === "pending" || status === "running") {
   }
 }
 
-// ── P2b（2026-09-11）刀2：空轉止損 ──────────────────────────────────
-// step 結算：無 tool、無非空正文、無非空 reasoning = 空 step。空 step 連續累計；
-// 任一活動歸零。達閾值且 turn 活躍 → 中止 + 同輪補一次動作導向 nudge。
+// ── P2b（2026-09-11）刀2：空转止损 ──────────────────────────────────
+// step 结算：无 tool、无非空正文、无非空 reasoning = 空 step。空 step 连续累计；
+// 任一活动归零。达阈值且 turn 活跃 → 中止 + 同轮补一次动作导向 nudge。
 export function finalizeIdleStep(state: SessionState): void {
-  // 空轉補丁：本 step 只有 no-op bash 且無正文 → 視為空 step（即使有 reasoning）
+  // 空转补丁：本 step 只有 no-op bash 且无正文 → 视为空 step（即使有 reasoning）
   const noopOnly = !!state.stepNoopTool && !state.stepHasTool && !state.stepHasText
   const empty = noopOnly || (!state.stepHasTool && !state.stepHasText && !state.stepHasReasoning)
   state.stepNoopTool = false
@@ -1307,7 +1278,7 @@ export function finalizeIdleStep(state: SessionState): void {
 
 export function triggerIdleStepBreaker(
   state: SessionState,
-  nudgeText: string = sessionUserScript(state) === "hant" ? IDLE_STEP_NUDGE_HANT : IDLE_STEP_NUDGE,
+  nudgeText: string = IDLE_STEP_NUDGE,
 ): void {
   const body = state.lastPromptBody
   if (!body) return
@@ -1320,26 +1291,26 @@ export function triggerIdleStepBreaker(
   console.warn(
     `[gateway] idle-step breaker: ${IDLE_STEP_ABORT_THRESHOLD} empty steps (or reasoning-cap), abort+nudge — session=${state.sessionId} gen=${gen}`,
   )
-  // ① 中止當前 turn（與用戶中止同一後端路徑）。
+  // ① 中止当前 turn（与用户中止同一后端路径）。
   void opencodeFetch(`/session/${state.opencodeSessionId}/abort`, {
     method: "POST",
     timeoutMs: 5000,
   }).catch(() => {})
   state.turnAborted = true
-  // D2-1b（2026-09-23）：來源＝系統（內部斷路器），不是用戶叫停。排隊中的 steer
-  // 只能被「用戶停止」丟棄（停止優先的權威定義見 steer-core.abortIsUserStop）——
-  // 這裡只是換一種方式把同一輪續跑（下面補 nudge 重投），用戶的指引仍然有效。
+  // D2-1b（2026-09-23）：来源＝系统（内部断路器），不是用户叫停。排队中的 steer
+  // 只能被「用户停止」丢弃（停止优先的权威定义见 steer-core.abortIsUserStop）——
+  // 这里只是换一种方式把同一轮续跑（下面补 nudge 重投），用户的指引仍然有效。
   state.turnAbortSource = "system"
   stripStaleTurnTextFromReplay(state)
-  // 中止輪的 session.idle 不得再觸發抖動/failover 二次重投：retryQueued 佔位。
-  // 本輪的重投就是下面的 nudge；再空轉保持佔位 = 不循環，讓它自然失敗。
+  // 中止轮的 session.idle 不得再触发抖动/failover 二次重投：retryQueued 占位。
+  // 本轮的重投就是下面的 nudge；再空转保持占位 = 不循环，让它自然失败。
   state.retryQueued = true
-  // ② 同一 turn 週期僅一次：原樣重發最後一條用戶消息，尾端附動作導向提示。
+  // ② 同一 turn 周期仅一次：原样重发最后一条用户消息，尾端附动作导向提示。
   setTimeout(async () => {
     const cur = sessions.get(state.sessionId)
     if (!cur || (cur.turnGen ?? 0) !== gen) return
     try {
-      // 2026-10-01 去重：空 step 輪零產出 → 撤掉原 user 訊息，nudgeBody（原文＋提示）只留一條。
+      // 2026-10-01 去重：空 step 轮零产出 → 撤掉原 user 讯息，nudgeBody（原文＋提示）只留一条。
       await revertDeadTail(cur.opencodeSessionId)
       const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
@@ -1348,7 +1319,7 @@ export function triggerIdleStepBreaker(
       })
       if (!res.ok) throw new Error(`status ${res.status}`)
       cur.turnAborted = false
-      cur.turnAbortSource = undefined // 續跑同輪：中止來源隨中止狀態一併清（下一輪／下一次中止重設）
+      cur.turnAbortSource = undefined // 续跑同轮：中止来源随中止状态一并清（下一轮／下一次中止重设）
       cur.idleSteps = 0
       cur.stepOpen = false
       cur.stepHasTool = false
@@ -1364,9 +1335,9 @@ export function triggerIdleStepBreaker(
       console.error(`[gateway] idle-step breaker: nudge resend failed:`, e)
       cur.turnAborted = false
       cur.turnAbortSource = undefined
-      // 2026-10-02 steer 誤判修復：nudge 沒發出去＝本輪真的結束了，清 in-flight 打點。
-      // 必須與 turn.done 同點——idle 不再清了（見 opencode-event-handler.emitTurnDone），
-      // 這裡漏清會留下「假在途」：之後的引導被受理閘放行、收進隊列，卻再也等不到投遞。
+      // 2026-10-02 steer 误判修复：nudge 没发出去＝本轮真的结束了，清 in-flight 打点。
+      // 必须与 turn.done 同点——idle 不再清了（见 opencode-event-handler.emitTurnDone），
+      // 这里漏清会留下「假在途」：之后的引导被受理闸放行、收进队列，却再也等不到投递。
       cur.lastTurnActiveAt = 0
       markDirty(cur)
       emitToSession(cur, "turn.done", {})

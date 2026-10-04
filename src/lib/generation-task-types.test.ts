@@ -43,7 +43,7 @@ test("server task projections converge by stable task id and newest update", () 
   assert.equal(merged[0].status, "succeeded");
 });
 
-test("同步指紋：狀態/更新時間/完成數任一變化才算變化", () => {
+test("同步指纹：状态/更新时间/完成数任一变化才算变化", () => {
   const base = { taskId: "a", status: "running", updatedAt: "2026-10-01T00:00:00.000Z", completedCount: 0 } as GenerationTaskProjection;
   const same = generationTaskListSignature([base]);
   assert.equal(generationTaskListSignature([{ ...base }]), same);
@@ -53,7 +53,7 @@ test("同步指紋：狀態/更新時間/完成數任一變化才算變化", () 
   assert.notEqual(generationTaskListSignature([]), same);
 });
 
-test("同步節奏：隱藏不排、有任務 3s、閒置 30s", () => {
+test("同步节奏：隐藏不排、有任务 3s、闲置 30s", () => {
   assert.equal(nextGenerationSyncDelay({ hidden: true, hasLiveTasks: true }), null);
   assert.equal(nextGenerationSyncDelay({ hidden: false, hasLiveTasks: true }), GENERATION_SYNC_LIVE_MS);
   assert.equal(nextGenerationSyncDelay({ hidden: false, hasLiveTasks: false }), GENERATION_SYNC_IDLE_MS);

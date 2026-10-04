@@ -12,8 +12,8 @@ export function taskStatus(job: GenerationJob): "queued" | "running" | "succeede
 }
 
 /**
- * job kind → 對外 REST 路徑段。圖像走 /v1/images、影片走 /v1/videos、
- * AV 成片鏈路（配音/數字人/唇形）各走自己的資源名。
+ * job kind → 对外 REST 路径段。图像走 /v1/images、影片走 /v1/videos、
+ * AV 成片链路（配音/数字人/唇形）各走自己的资源名。
  */
 export function taskResourcePath(kind: GenerationJob["kind"]): "images" | "videos" | "tts" | "avatar" | "lipsync" {
   if (kind === "video_generate") return "videos";
@@ -22,7 +22,7 @@ export function taskResourcePath(kind: GenerationJob["kind"]): "images" | "video
 }
 
 export interface GenerationTaskResponseOptions {
-  /** succeeded 任務的真實花費（幣）。null/undefined = 查無，欄位省略。 */
+  /** succeeded 任务的真实花费（币）。null/undefined = 查无，栏位省略。 */
   costCoins?: number | null;
 }
 
@@ -63,11 +63,11 @@ export function generationTaskResponse(job: GenerationJob, options: GenerationTa
 }
 
 /**
- * succeeded 任務的真實花費（幣）= billing_operation 該 job 最新一筆
+ * succeeded 任务的真实花费（币）= billing_operation 该 job 最新一笔
  * operation='commit' 且 status='applied' 的 amount / 500000
- * （例如 amount=485 → 0.00097 幣，與 gateway ledger 的 cost_coins 同源）。
- * 查無行、控制面 DB 未配置或查詢失敗時返回 null，回應省略 cost_coins
- * 欄位（客戶端有「費用以平台账单为准」兜底）。只讀查詢，不參與任何計費寫入。
+ * （例如 amount=485 → 0.00097 币，与 gateway ledger 的 cost_coins 同源）。
+ * 查无行、控制面 DB 未配置或查询失败时返回 null，回应省略 cost_coins
+ * 栏位（客户端有「费用以平台账单为准」兜底）。只读查询，不参与任何计费写入。
  */
 export async function resolveTaskCostCoins(jobId: string): Promise<number | null> {
   if (!generationDatabaseConfigured()) return null;
@@ -91,13 +91,13 @@ export async function resolveTaskCostCoins(jobId: string): Promise<number | null
 }
 
 /**
- * 失敗信息。
+ * 失败信息。
  *
  * overloaded 原本只回一句「No eligible supplier capacity is currently available.」，
- * 客戶分不清是「這個模型根本沒註冊供應商」「供應商全下線」還是「額度打滿」——
- * 三種情況的處置完全不同（找我們開通 / 等恢復 / 換小並發）。
- * worker 把調度器的診斷寫成 `reason: detail`，這裡拆回獨立字段，
- * 讓 code 保持可判等，同時把具體原因單獨給出來。
+ * 客户分不清是「这个模型根本没注册供应商」「供应商全下线」还是「额度打满」——
+ * 三种情况的处置完全不同（找我们开通 / 等恢复 / 换小并发）。
+ * worker 把调度器的诊断写成 `reason: detail`，这里拆回独立字段，
+ * 让 code 保持可判等，同时把具体原因单独给出来。
  */
 function failureError(job: GenerationJob) {
   const detail = job.failureDetail ?? "Generation failed.";

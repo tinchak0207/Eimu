@@ -7,9 +7,9 @@ import { checkAgentPath, sandboxAvailable, sandboxPrefix, sessionRunDir, session
 
 const OUT_CAP = 64 * 1024
 
-// 通用資料加工逃生艙：確定型腳本（統計/清洗/格式轉換）一次呼叫完成。
-// 限制：bwrap 沙箱（lib/sandbox.ts：無秘密環境、無網路、只見本會話附件）、cwd=.run、超時 SIGKILL、
-// stdout+stderr 合計 64KB 截斷。沙箱不可用 → 拒絕執行（fail-closed）。
+// 通用资料加工逃生舱：确定型脚本（统计/清洗/格式转换）一次呼叫完成。
+// 限制：bwrap 沙箱（lib/sandbox.ts：无秘密环境、无网路、只见本会话附件）、cwd=.run、超时 SIGKILL、
+// stdout+stderr 合计 64KB 截断。沙箱不可用 → 拒绝执行（fail-closed）。
 
 function cap(s: string) {
   if (s.length <= OUT_CAP) return { text: s, truncated: false }
@@ -75,20 +75,20 @@ function runOnce(
 
 export default tool({
   description:
-    "通用 Python 資料加工腳本逃生艙。輸入 code（Python 3 原始碼），在沙箱 .run 目錄以受限環境執行一次，回傳 {ok, exit_code, duration_ms, stdout, stderr}。用途：確定型資料統計/清洗/格式轉換，一次呼叫完成，取代多輪 awk/grep 鏈。沙箱無網路（需要下載/上傳請用原生工具）；只能讀寫工作區與本會話附件；程序逾時會被 SIGKILL。stdout+stderr 合計超過 64KB 會截斷並標 truncated。沙箱 PATH 已含 ffmpeg/ffprobe（/opt/agent-harness/bin，靜態二進制）：可做視頻裁剪/拼接/轉碼/字幕/音頻混音等本地媒體處理（免費不扣費）。",
+    "通用 Python 资料加工脚本逃生舱。输入 code（Python 3 原始码），在沙箱 .run 目录以受限环境执行一次，回传 {ok, exit_code, duration_ms, stdout, stderr}。用途：确定型资料统计/清洗/格式转换，一次呼叫完成，取代多轮 awk/grep 链。沙箱无网路（需要下载/上传请用原生工具）；只能读写工作区与本会话附件；程序逾时会被 SIGKILL。stdout+stderr 合计超过 64KB 会截断并标 truncated。沙箱 PATH 已含 ffmpeg/ffprobe（/opt/agent-harness/bin，静态二进制）：可做视频裁剪/拼接/转码/字幕/音频混音等本地媒体处理（免费不扣费）。",
   args: {
-    code: tool.schema.string().min(1).describe("要執行的 Python 3 原始碼（一次呼叫內自足）"),
+    code: tool.schema.string().min(1).describe("要执行的 Python 3 原始码（一次呼叫内自足）"),
     timeout_seconds: tool.schema
       .number()
       .int()
       .min(5)
       .max(120)
       .optional()
-      .describe("逾時秒數，5–120，預設 30"),
+      .describe("逾时秒数，5–120，预设 30"),
     stdin_path: tool.schema
       .string()
       .optional()
-      .describe("可選：作為 stdin 餵給腳本的檔案路徑"),
+      .describe("可选：作为 stdin 喂给脚本的档案路径"),
   },
   async execute(args, context) {
     const t0 = Date.now()
@@ -115,15 +115,15 @@ export default tool({
         exit_code: r.code,
         duration_ms: Date.now() - t0,
         stdout: so.text,
-        stderr: timedOut ? `逾時被 SIGKILL（timeout_seconds=${(timeoutMs / 1000) | 0}）\n` + se.text : se.text,
+        stderr: timedOut ? `逾时被 SIGKILL（timeout_seconds=${(timeoutMs / 1000) | 0}）\n` + se.text : se.text,
         truncated: so.truncated || se.truncated,
       }
       if (okRun) {
         return ok({ title: "run_py", ...payload })
       }
-      return fail("run_py_failed", timedOut ? `逾時被 SIGKILL（${(timeoutMs / 1000) | 0}s）` : `exit=${r.code}；stderr 見 output`, payload)
+      return fail("run_py_failed", timedOut ? `逾时被 SIGKILL（${(timeoutMs / 1000) | 0}s）` : `exit=${r.code}；stderr 见 output`, payload)
     } catch (e: any) {
-      return fail("run_py_failed", `run_py 執行失敗：${e?.message ?? e}`, { duration_ms: Date.now() - t0 })
+      return fail("run_py_failed", `run_py 执行失败：${e?.message ?? e}`, { duration_ms: Date.now() - t0 })
     }
   },
 })

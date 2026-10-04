@@ -1,33 +1,33 @@
-// 逐鏡配音：分鏡 → 台詞表 → 逐行既有 TTS → 回寫分鏡雙音軌與錨（服務層）。
+// 逐镜配音：分镜 → 台词表 → 逐行既有 TTS → 回写分镜双音轨与锚（服务层）。
 //
-// 結構修因（病歷 `tts-multiline-narration-p2-bug`）：60s 片旁白只合成一段 25s。TTS 本身
-// 沒問題，缺的是**逐鏡組台詞表**與**把結果寫回分鏡**這兩跳。橋接純函式層
-// （`./storyboard-audio-bridge.ts`）已補上「分鏡 ↔ 台詞表 ↔ timeline」的純轉換；本檔是
-// **站點服務層**：把專案讀成扁平分鏡、決定台詞表上限／分批、**逐行序列**呼叫注入的 TTS
-// client、再用橋接層回寫，最後回報逐鏡時長漂移。
+// 结构修因（病历 `tts-multiline-narration-p2-bug`）：60s 片旁白只合成一段 25s。TTS 本身
+// 没问题，缺的是**逐镜组台词表**与**把结果写回分镜**这两跳。桥接纯函式层
+// （`./storyboard-audio-bridge.ts`）已补上「分镜 ↔ 台词表 ↔ timeline」的纯转换；本档是
+// **站点服务层**：把专案读成扁平分镜、决定台词表上限／分批、**逐行序列**呼叫注入的 TTS
+// client、再用桥接层回写，最后回报逐镜时长漂移。
 //
-// ── 職責邊界（照本 repo 的既有分工，不越界）─────────────────────────────────
-//   · 本檔**不碰網路、不碰 DB、不自己拼音頻 patch**：TTS 由上層注入
-//     （`StoryboardVoiceoverTtsClient`，真實現由路由提供、測試給假 client）；
-//     回寫一律走橋接層 `applyAudioTimelineToShots`（音頻判準與錨重算的唯一實作）。
-//   · 本檔**不量時長**：`duration_ms` 由注入 client 提供；站點側沒有 ffprobe
-//     （`music-tools.ts` 的 ffprobe 是 harness 沙箱工具，不是 Next 服務端；見
-//     `video-frames` 檔頭「Vercel 无 ffmpeg」）⇒ client 回 null 就照 null 傳下去，
-//     **不估算冒充實測**。
-//   · 本檔**不切 `dialogue` 的 `[角色]：「…」` 標記、不從 `dialogue` 猜旁白**：逐字照
-//     橋接層檔頭的三條裁定（該格式無契約、旁白只認 `metadata.narration`）。
+// ── 职责边界（照本 repo 的既有分工，不越界）─────────────────────────────────
+//   · 本档**不碰网路、不碰 DB、不自己拼音频 patch**：TTS 由上层注入
+//     （`StoryboardVoiceoverTtsClient`，真实现由路由提供、测试给假 client）；
+//     回写一律走桥接层 `applyAudioTimelineToShots`（音频判准与锚重算的唯一实作）。
+//   · 本档**不量时长**：`duration_ms` 由注入 client 提供；站点侧没有 ffprobe
+//     （`music-tools.ts` 的 ffprobe 是 harness 沙箱工具，不是 Next 服务端；见
+//     `video-frames` 档头「Vercel 无 ffmpeg」）⇒ client 回 null 就照 null 传下去，
+//     **不估算冒充实测**。
+//   · 本档**不切 `dialogue` 的 `[角色]：「…」` 标记、不从 `dialogue` 猜旁白**：逐字照
+//     桥接层档头的三条裁定（该格式无契约、旁白只认 `metadata.narration`）。
 //
-// ── 四個欄位的讀取規則（逐字照 `storyboard-audio-bridge.ts` 檔頭）──────────────
-//   · `shotNumber`  ← `node.metadata.storyboardShot.shotNumber`（非空＝這顆是分鏡）
+// ── 四个栏位的读取规则（逐字照 `storyboard-audio-bridge.ts` 档头）──────────────
+//   · `shotNumber`  ← `node.metadata.storyboardShot.shotNumber`（非空＝这颗是分镜）
 //   · `dialogue`    ← `node.metadata.storyboardShot.dialogue`
-//   · `narration`   ← `node.metadata.narration`（2026-09-30 落地的旁白文本鍵）
-//   · 既有兩軌／錨  ← `node.metadata.dialogueAudioId` / `narrationAudioId` /
-//                     `audioAnchorId`；**必須一起投影進扁平分鏡**，否則回寫時橋接層
-//                     依 `dialogueAudioId || narrationAudioId` 重算的錨會漏掉另一軌。
+//   · `narration`   ← `node.metadata.narration`（2026-09-30 落地的旁白文本键）
+//   · 既有两轨／锚  ← `node.metadata.dialogueAudioId` / `narrationAudioId` /
+//                     `audioAnchorId`；**必须一起投影进扁平分镜**，否则回写时桥接层
+//                     依 `dialogueAudioId || narrationAudioId` 重算的锚会漏掉另一轨。
 //
-// ── 「集」的讀取────複用既有輪子 `storyboard-episode-batch.storyboardShotsOfEpisode`
-//   （只認「分鏡節點 ＋ `metadata.episodeId` 逐字相符」，不按節點序切段、不臆造歸屬）。
-//   未指定 `episode` ＝ 全專案分鏡（按鏡號 numeric 排序，與既有輪子同序）。
+// ── 「集」的读取────复用既有轮子 `storyboard-episode-batch.storyboardShotsOfEpisode`
+//   （只认「分镜节点 ＋ `metadata.episodeId` 逐字相符」，不按节点序切段、不臆造归属）。
+//   未指定 `episode` ＝ 全专案分镜（按镜号 numeric 排序，与既有轮子同序）。
 
 import { usableAudioUrl } from "@/lib/agent-output-cards";
 import { TTS_COINS_PER_CHAR, ttsCoinsForChars } from "@/lib/generation-model-catalog/tts-pricing";
@@ -53,15 +53,15 @@ import type { CanvasNode, CanvasProject } from "./types";
 // ─────────────────────────────────────────── 成本
 
 /**
- * 站內 TTS 單價（幣/字），＝上游 `'tts-zh'.per_char`。**唯一真源已收攏到**
- * `@/lib/generation-model-catalog/tts-pricing`（站內三處消費點全吃那一顆）；
- * 本別名保留舊名供本檔內外引用（`estimatedCoins` 報價與實際扣費同一口徑）。
+ * 站内 TTS 单价（币/字），＝上游 `'tts-zh'.per_char`。**唯一真源已收拢到**
+ * `@/lib/generation-model-catalog/tts-pricing`（站内三处消费点全吃那一颗）；
+ * 本别名保留旧名供本档内外引用（`estimatedCoins` 报价与实际扣费同一口径）。
  */
 export const VOICEOVER_TTS_PER_CHAR_COINS = TTS_COINS_PER_CHAR;
 
 /**
- * 台詞表總字數 → 預估花費（幣）。精度收斂到 1e-6（與 `task-response.resolveTaskCostCoins`
- * 的 `Math.round(x * 1e6) / 1e6` 同一把尺）。默認走站內唯一真源 `ttsCoinsForChars`。
+ * 台词表总字数 → 预估花费（币）。精度收敛到 1e-6（与 `task-response.resolveTaskCostCoins`
+ * 的 `Math.round(x * 1e6) / 1e6` 同一把尺）。默认走站内唯一真源 `ttsCoinsForChars`。
  */
 export function estimateVoiceoverCoins(
   totalChars: number,
@@ -72,38 +72,38 @@ export function estimateVoiceoverCoins(
   return Math.round(totalChars * perChar * 1e6) / 1e6;
 }
 
-// ─────────────────────────────────────────── 資料形狀
+// ─────────────────────────────────────────── 资料形状
 
-/** 台詞表的一行（對外報備口徑＝路由的 `lines[]`）。 */
+/** 台词表的一行（对外报备口径＝路由的 `lines[]`）。 */
 export interface StoryboardVoiceoverLine {
   shotNumber: string;
   field: ShotAudioField;
   /** 送去合成的文本（逐字，未切分）。 */
   text: string;
-  /** 字數（`String.length`；中文在 BMP 內，一字＝1）。 */
+  /** 字数（`String.length`；中文在 BMP 内，一字＝1）。 */
   chars: number;
 }
 
-/** 分鏡節點 → 扁平分鏡的投影結果（`nodeId` 供回寫時對回節點）。 */
+/** 分镜节点 → 扁平分镜的投影结果（`nodeId` 供回写时对回节点）。 */
 export interface StoryboardVoiceoverShotEntry {
   nodeId: string;
   shot: StoryboardAudioShot;
 }
 
-/** 具名拒（整批不續作）。 */
+/** 具名拒（整批不续作）。 */
 export interface StoryboardVoiceoverRefusal {
   code: StoryboardVoiceoverRefusalCode;
   note: string;
 }
 
 /**
- * 本層會回的拒絕碼：
- *   · `episode_not_found`     —— 指定集不存在於 `project.episodes`（不猜、不按節點序切段）
- *   · `too_many_lines`        —— 橋接層硬上限 50 行（具名拒，不截斷）
- *   · `batch_size_over_tool_max_lines` —— 呼叫端要求的分批大小超過工具硬上限 50
- *   · `no_lines`              —— 專案／該集沒有任何可分句的台詞（不假裝成功寫入空集）
- *   · `tts_line_failed`       —— 某行 TTS 失敗（**立即停手**，不省下續行的錢、也不部分寫入）
- *   · 橋接層回寫拒絕碼（長度不符／URL 缺失／不可用／未知鏡號／source 非法）——原樣透傳
+ * 本层会回的拒绝码：
+ *   · `episode_not_found`     —— 指定集不存在于 `project.episodes`（不猜、不按节点序切段）
+ *   · `too_many_lines`        —— 桥接层硬上限 50 行（具名拒，不截断）
+ *   · `batch_size_over_tool_max_lines` —— 呼叫端要求的分批大小超过工具硬上限 50
+ *   · `no_lines`              —— 专案／该集没有任何可分句的台词（不假装成功写入空集）
+ *   · `tts_line_failed`       —— 某行 TTS 失败（**立即停手**，不省下续行的钱、也不部分写入）
+ *   · 桥接层回写拒绝码（长度不符／URL 缺失／不可用／未知镜号／source 非法）——原样透传
  */
 export type StoryboardVoiceoverRefusalCode =
   | "episode_not_found"
@@ -113,49 +113,49 @@ export type StoryboardVoiceoverRefusalCode =
   | "tts_line_failed"
   | AudioApplyRefusalCode;
 
-/** 分批邊界（**具名**：21..50 行絕不落在工具默認 20 的靜默截斷裡）。 */
+/** 分批边界（**具名**：21..50 行绝不落在工具默认 20 的静默截断里）。 */
 export interface StoryboardVoiceoverBatch {
-  /** 批號（0 起）。 */
+  /** 批号（0 起）。 */
   index: number;
   /** 起始行（含）。 */
   fromLine: number;
-  /** 結束行（不含）。 */
+  /** 结束行（不含）。 */
   toLine: number;
   lineCount: number;
 }
 
-/** 分批計畫：每批的行數上限與每批請求應顯式帶上的 `maxLines`。 */
+/** 分批计画：每批的行数上限与每批请求应显式带上的 `maxLines`。 */
 export interface StoryboardVoiceoverBatchPlan {
   batches: StoryboardVoiceoverBatch[];
-  /** 本計畫每批的行數上限（＝呼叫端指定值；> 工具硬上限時具名拒）。 */
+  /** 本计画每批的行数上限（＝呼叫端指定值；> 工具硬上限时具名拒）。 */
   maxLinesPerBatch: number;
 }
 
-/** dryRun 計畫（付費前的報備口徑）。 */
+/** dryRun 计画（付费前的报备口径）。 */
 export interface StoryboardVoiceoverDryRunPlan {
   ok: true;
   dryRun: true;
   lines: StoryboardVoiceoverLine[];
   totalChars: number;
   estimatedCoins: number;
-  /** 本次會用的旁白音色（專案綁定失效時＝`DEFAULT_TTS_VOICE`，見 `resolveVoiceoverVoice`）。 */
+  /** 本次会用的旁白音色（专案绑定失效时＝`DEFAULT_TTS_VOICE`，见 `resolveVoiceoverVoice`）。 */
   voice: string;
-  /** 分批計畫（具名邊界；供報備與分批型 client 對帳）。 */
+  /** 分批计画（具名边界；供报备与分批型 client 对帐）。 */
   batches: StoryboardVoiceoverBatch[];
-  /** 每一行請求應顯式帶上的 `maxLines`（逐批值，永遠 ≥ 該批行數；見 `planVoiceoverBatches`）。 */
+  /** 每一行请求应显式带上的 `maxLines`（逐批值，永远 ≥ 该批行数；见 `planVoiceoverBatches`）。 */
   maxLinesByLine: number[];
   refused?: StoryboardVoiceoverRefusal;
 }
 
-/** 真跑結果（對外報備口徑＝路由的凍結契約）。 */
+/** 真跑结果（对外报备口径＝路由的冻结契约）。 */
 export interface StoryboardVoiceoverRunResult {
   ok: boolean;
   applied: boolean;
   lines: StoryboardVoiceoverLine[];
   totalChars: number;
   /**
-   * 本次實際花費（幣）：全部執行行都有上游回報才給總和；有任何一行查不到＝`null`
-   * （不填 0 假裝免費）；一行都沒執行＝`0`（真的沒花）。
+   * 本次实际花费（币）：全部执行行都有上游回报才给总和；有任何一行查不到＝`null`
+   * （不填 0 假装免费）；一行都没执行＝`0`（真的没花）。
    */
   costCoins: number | null;
   drift: AudioDurationDrift[];
@@ -163,64 +163,64 @@ export interface StoryboardVoiceoverRunResult {
   unmeasuredDurations?: string[];
 }
 
-/** 真跑結果 ＋ 回寫後的分鏡（後者只在 `applied:true` 時可落盤）＋ 投影溯源（回寫節點時對回 nodeId）。 */
+/** 真跑结果 ＋ 回写后的分镜（后者只在 `applied:true` 时可落盘）＋ 投影溯源（回写节点时对回 nodeId）。 */
 export interface StoryboardVoiceoverExecution {
   result: StoryboardVoiceoverRunResult;
   shots: StoryboardAudioShot[];
-  /** 與 `shots` 同索引的節點溯源（`applyVoiceoverShotsToNodes` 的唯一輸入）。 */
+  /** 与 `shots` 同索引的节点溯源（`applyVoiceoverShotsToNodes` 的唯一输入）。 */
   entries: StoryboardVoiceoverShotEntry[];
 }
 
-/** 逐行 TTS 請求（**一行一次呼叫**；禁並發、禁 retry、禁迴圈試探由呼叫端保證）。 */
+/** 逐行 TTS 请求（**一行一次呼叫**；禁并发、禁 retry、禁回圈试探由呼叫端保证）。 */
 export interface StoryboardVoiceoverLineRequest {
-  /** 台詞表行序（＝ `source` 索引）。 */
+  /** 台词表行序（＝ `source` 索引）。 */
   index: number;
   shotNumber: string;
   field: ShotAudioField;
-  /** 逐字照送的文本（本層不改寫）。 */
+  /** 逐字照送的文本（本层不改写）。 */
   text: string;
   voice: string;
   /**
-   * 本批次的行數上限。**必須顯式帶上且 ≥ 本批行數**：上游工具默認 20、硬上限 50，
-   * 不顯式覆蓋就會把 21..50 行靜默截斷（＝後半段沒聲，使用者看不出來）。
+   * 本批次的行数上限。**必须显式带上且 ≥ 本批行数**：上游工具默认 20、硬上限 50，
+   * 不显式覆盖就会把 21..50 行静默截断（＝后半段没声，使用者看不出来）。
    */
   maxLines: number;
   batchIndex: number;
   batchCount: number;
 }
 
-/** 逐行 TTS 回應（真實來源由注入 client 決定；站點無 ffprobe ⇒ `durationMs` 可為 null）。 */
+/** 逐行 TTS 回应（真实来源由注入 client 决定；站点无 ffprobe ⇒ `durationMs` 可为 null）。 */
 export interface StoryboardVoiceoverLineResult {
-  /** 合成音檔 URL；空／不可用＝該行失敗（整批拒寫）。 */
+  /** 合成音档 URL；空／不可用＝该行失败（整批拒写）。 */
   audioUrl?: string | null;
-  /** ffprobe 實測時長（ms）；站點無此能力＝`null`（誠實缺，不估算冒充）。 */
+  /** ffprobe 实测时长（ms）；站点无此能力＝`null`（诚实缺，不估算冒充）。 */
   durationMs?: number | null;
-  /** 該行上游花費（幣）；上游未回報＝`null`（不填 0）。 */
+  /** 该行上游花费（币）；上游未回报＝`null`（不填 0）。 */
   costCoins?: number | null;
-  /** 該行失敗原因（有值＝該行失敗）。 */
+  /** 该行失败原因（有值＝该行失败）。 */
   error?: string;
 }
 
-/** 逐行 TTS client（真實現＝站點既有 TTS 路徑；測試＝假 client）。 */
+/** 逐行 TTS client（真实现＝站点既有 TTS 路径；测试＝假 client）。 */
 export type StoryboardVoiceoverTtsClient = (
   request: StoryboardVoiceoverLineRequest,
 ) => Promise<StoryboardVoiceoverLineResult>;
 
-// ─────────────────────────────────────────── ① 專案 → 扁平分鏡
+// ─────────────────────────────────────────── ① 专案 → 扁平分镜
 
 /**
- * 專案 → 目標集（或全專案）的分鏡投影。
+ * 专案 → 目标集（或全专案）的分镜投影。
  *
- *   · 指定 `episode`（＝`CanvasEpisode.episodeNo`，1 起）：查得到集 ⇒ 走既有輪子
- *     `storyboardShotsOfEpisode`（只認 `episodeId` 逐字相符）；查不到 ⇒ 具名拒
- *     `episode_not_found`（**不**退回全專案、**不**按節點序切段）。
- *   · 未指定 ⇒ 全專案分鏡（`storyboardShot.shotNumber` 非空），按鏡號 numeric 排序。
- *   · 每鏡的四欄逐字照橋接層規則投影；既有音軌只收 `usableAudioUrl` 認可的值
- *     （判準與 `storyboard-shots.readAudioTracks` 同一把尺）。
+ *   · 指定 `episode`（＝`CanvasEpisode.episodeNo`，1 起）：查得到集 ⇒ 走既有轮子
+ *     `storyboardShotsOfEpisode`（只认 `episodeId` 逐字相符）；查不到 ⇒ 具名拒
+ *     `episode_not_found`（**不**退回全专案、**不**按节点序切段）。
+ *   · 未指定 ⇒ 全专案分镜（`storyboardShot.shotNumber` 非空），按镜号 numeric 排序。
+ *   · 每镜的四栏逐字照桥接层规则投影；既有音轨只收 `usableAudioUrl` 认可的值
+ *     （判准与 `storyboard-shots.readAudioTracks` 同一把尺）。
  *
- * `durationSeconds` **刻意不填**：站點側 `CanvasNodeMetadata` 沒有分鏡計畫秒數欄
- * （21 欄契約是編劇階段口徑，`storyboardShot` 無此欄；`duration_ms` 是 Blender 卡的欄位）。
- * ⇒ 缺席＝drift 無計畫值可比（誠實回 null），不從別處推導、不編造。
+ * `durationSeconds` **刻意不填**：站点侧 `CanvasNodeMetadata` 没有分镜计画秒数栏
+ * （21 栏契约是编剧阶段口径，`storyboardShot` 无此栏；`duration_ms` 是 Blender 卡的栏位）。
+ * ⇒ 缺席＝drift 无计画值可比（诚实回 null），不从别处推导、不编造。
  */
 export function projectStoryboardShots(
   project: Pick<CanvasProject, "nodes" | "episodes">,
@@ -280,13 +280,13 @@ export function projectStoryboardShots(
 // ─────────────────────────────────────────── ② 音色
 
 /**
- * 本次逐鏡配音實際會用的音色。
+ * 本次逐镜配音实际会用的音色。
  *
- * 來源＝專案級旁白音色（`CanvasProject.narrationVoice`，值域＝`voice-library` 的語音庫，
- * 見 `types.ts` 該欄註釋），經既有輪子 `effectiveNarrationVoice` 判「此刻真的生效」——
- * 該輪子逐字規定旁白音色只在解說劇（`scriptType === "monologue"`）時生效。
- * 未綁定／不生效 ⇒ `DEFAULT_TTS_VOICE`（既有常數，＝上游 proxy 的 `DEFAULT_VOICE`）。
- * **不自己造預設音色**（禁造輪子）。
+ * 来源＝专案级旁白音色（`CanvasProject.narrationVoice`，值域＝`voice-library` 的语音库，
+ * 见 `types.ts` 该栏注释），经既有轮子 `effectiveNarrationVoice` 判「此刻真的生效」——
+ * 该轮子逐字规定旁白音色只在解说剧（`scriptType === "monologue"`）时生效。
+ * 未绑定／不生效 ⇒ `DEFAULT_TTS_VOICE`（既有常数，＝上游 proxy 的 `DEFAULT_VOICE`）。
+ * **不自己造预设音色**（禁造轮子）。
  */
 export function resolveVoiceoverVoice(project: Pick<CanvasProject, "scriptType" | "narrationVoice">): string {
   return effectiveNarrationVoice(project) ?? DEFAULT_TTS_VOICE;
@@ -295,16 +295,16 @@ export function resolveVoiceoverVoice(project: Pick<CanvasProject, "scriptType" 
 // ─────────────────────────────────────────── ③ 分批（max_lines 陷阱）
 
 /**
- * 台詞表分批計畫。**這一段是本層對上游 `max_lines` 陷阱的正面處理**：
+ * 台词表分批计画。**这一段是本层对上游 `max_lines` 陷阱的正面处理**：
  *
- *   · 上游工具默認 `max_lines = 20`、硬上限 50，超過即**截斷**（`AUDIO_TOOL_DEFAULT_MAX_LINES`
- *     / `AUDIO_TOOL_MAX_LINES`，逐字讀自橋接層檔頭）。本層**永不**讓任何一批的行數上限落在
- *     默認值上：每一批請求都帶顯式 `maxLines = 該批實際行數`（見 `buildLinesAndPlan`）。
- *   · 21..50 行**不會**被靜默截斷：它們是「一批、具名邊界、顯式 maxLines = 行數」，
+ *   · 上游工具默认 `max_lines = 20`、硬上限 50，超过即**截断**（`AUDIO_TOOL_DEFAULT_MAX_LINES`
+ *     / `AUDIO_TOOL_MAX_LINES`，逐字读自桥接层档头）。本层**永不**让任何一批的行数上限落在
+ *     默认值上：每一批请求都带显式 `maxLines = 该批实际行数`（见 `buildLinesAndPlan`）。
+ *   · 21..50 行**不会**被静默截断：它们是「一批、具名边界、显式 maxLines = 行数」，
  *     或被呼叫端用 `maxLinesPerBatch` 切成多批（每批具名 index/fromLine/toLine）。
- *   · `maxLinesPerBatch` 超過工具硬上限 50 ⇒ **具名拒** `batch_size_over_tool_max_lines`
- *     （不悄悄夾到 50——那會讓呼叫端以為自己設的大小生效了）。
- *   · 行數為 0 ⇒ 空批次（呼叫端自行決定是否為錯誤，本函式不對 0 行造假）。
+ *   · `maxLinesPerBatch` 超过工具硬上限 50 ⇒ **具名拒** `batch_size_over_tool_max_lines`
+ *     （不悄悄夹到 50——那会让呼叫端以为自己设的大小生效了）。
+ *   · 行数为 0 ⇒ 空批次（呼叫端自行决定是否为错误，本函式不对 0 行造假）。
  */
 export function planVoiceoverBatches(
   lineCount: number,
@@ -322,7 +322,7 @@ export function planVoiceoverBatches(
     return {
       refused: {
         code: "batch_size_over_tool_max_lines",
-        note: `maxLinesPerBatch ${maxLinesPerBatch} 超过上游 TTS 工具硬上限 ${AUDIO_TOOL_MAX_LINES}（默認 ${AUDIO_TOOL_DEFAULT_MAX_LINES}）；不悄悄夹小，请显式指定 ≤ ${AUDIO_TOOL_MAX_LINES}。`,
+        note: `maxLinesPerBatch ${maxLinesPerBatch} 超过上游 TTS 工具硬上限 ${AUDIO_TOOL_MAX_LINES}（默认 ${AUDIO_TOOL_DEFAULT_MAX_LINES}）；不悄悄夹小，请显式指定 ≤ ${AUDIO_TOOL_MAX_LINES}。`,
       },
     };
   }
@@ -335,7 +335,7 @@ export function planVoiceoverBatches(
   return { batches, maxLinesPerBatch };
 }
 
-/** 台詞表 + 分批（本層內部；`lines` 對外報備、`maxLinesByLine` 逐行帶給 client）。 */
+/** 台词表 + 分批（本层内部；`lines` 对外报备、`maxLinesByLine` 逐行带给 client）。 */
 function buildLinesAndPlan(
   entries: readonly StoryboardVoiceoverShotEntry[],
   maxLinesPerBatch: number,
@@ -348,14 +348,14 @@ function buildLinesAndPlan(
     }
   | { refused: StoryboardVoiceoverRefusal } {
   const plan = shotsToAudioScript(entries.map((entry) => entry.shot));
-  // 文本逐字取自橋接層吐出的 `script`（唯一真源＝它的欄位序與 trim 規則）；
-  // 不在此重寫「哪一欄進哪一行」的第二套邏輯。
+  // 文本逐字取自桥接层吐出的 `script`（唯一真源＝它的栏位序与 trim 规则）；
+  // 不在此重写「哪一栏进哪一行」的第二套逻辑。
   const rows = JSON.parse(plan.script) as Array<{ role?: string; text?: string }>;
   const lines: StoryboardVoiceoverLine[] = plan.source.map((ref, i) => {
     const text = typeof rows[i]?.text === "string" ? (rows[i]!.text as string) : "";
     return { shotNumber: ref.shotNumber, field: ref.field, text, chars: text.length };
   });
-  // 硬上限 50：橋接層已具名拒（`source` 仍是完整未截斷的內容）——原樣透傳，不代為截斷。
+  // 硬上限 50：桥接层已具名拒（`source` 仍是完整未截断的内容）——原样透传，不代为截断。
   if (plan.refused) {
     return { refused: { code: "too_many_lines", note: plan.refused.note } };
   }
@@ -373,12 +373,12 @@ function buildLinesAndPlan(
   };
 }
 
-// ─────────────────────────────────────────── ④ dryRun（付費前報備）
+// ─────────────────────────────────────────── ④ dryRun（付费前报备）
 
 /**
- * dryRun：只算行數／字數／預估幣，**不碰上游**（呼叫端保證不呼叫 TTS）。
- * 具名拒（>50 行／集不存在／分批大小非法）也在此回報，但 `ok` 仍為 true——dryRun 是
- * 「報備口徑」：報備的內容就是「會有多少行、要花多少、以及為何拒」。
+ * dryRun：只算行数／字数／预估币，**不碰上游**（呼叫端保证不呼叫 TTS）。
+ * 具名拒（>50 行／集不存在／分批大小非法）也在此回报，但 `ok` 仍为 true——dryRun 是
+ * 「报备口径」：报备的内容就是「会有多少行、要花多少、以及为何拒」。
  */
 export function planStoryboardVoiceoverDryRun(
   project: Pick<CanvasProject, "nodes" | "episodes" | "scriptType" | "narrationVoice">,
@@ -429,17 +429,17 @@ export function planStoryboardVoiceoverDryRun(
 // ─────────────────────────────────────────── ⑤ 真跑（逐行序列）
 
 /**
- * 逐行序列呼叫既有 TTS，成功才整批回寫分鏡。
+ * 逐行序列呼叫既有 TTS，成功才整批回写分镜。
  *
- * 序列與停手規則（**不並發、不 retry、不迴圈試探**）：
- *   · 逐行 for 迴圈，等一行完成才送下一行。
- *   · 任一行回 `error` 或拿不出可用 `audioUrl` ⇒ **立即停手**：不再送後續行（省下續行的錢），
- *     且**整批拒寫**（不部分寫入——部分寫入＝分鏡半數有聲、使用者以為完成）。
- *   · 上游不回 `duration_ms` ⇒ 照 `null` 傳給橋接層（它會把該鏡收進 `unmeasuredDurations`）。
+ * 序列与停手规则（**不并发、不 retry、不回圈试探**）：
+ *   · 逐行 for 回圈，等一行完成才送下一行。
+ *   · 任一行回 `error` 或拿不出可用 `audioUrl` ⇒ **立即停手**：不再送后续行（省下续行的钱），
+ *     且**整批拒写**（不部分写入——部分写入＝分镜半数有声、使用者以为完成）。
+ *   · 上游不回 `duration_ms` ⇒ 照 `null` 传给桥接层（它会把该镜收进 `unmeasuredDurations`）。
  *
- * 成本：全部執行行都有有限 `costCoins` ⇒ 總和；任一查不到 ⇒ `null`；一行未執行 ⇒ `0`。
- * 回寫：一律經橋接層 `applyAudioTimelineToShots`（不接受任何自拼 patch）。
- * 漂移：`audioDurationDrift` 只回報不改秒數；未成功寫入時 `drift` 回空陣列。
+ * 成本：全部执行行都有有限 `costCoins` ⇒ 总和；任一查不到 ⇒ `null`；一行未执行 ⇒ `0`。
+ * 回写：一律经桥接层 `applyAudioTimelineToShots`（不接受任何自拼 patch）。
+ * 漂移：`audioDurationDrift` 只回报不改秒数；未成功写入时 `drift` 回空阵列。
  */
 export async function runStoryboardVoiceover(
   project: Pick<CanvasProject, "nodes" | "episodes" | "scriptType" | "narrationVoice">,
@@ -475,7 +475,7 @@ export async function runStoryboardVoiceover(
   if (built.lines.length === 0) {
     return refuse({
       code: "no_lines",
-      note: "该专案／该集没有任何可分句的台詞（dialogue／narration 皆空或不存在）；不假裝写入空集。",
+      note: "该专案／该集没有任何可分句的台词（dialogue／narration 皆空或不存在）；不假装写入空集。",
     });
   }
 
@@ -499,7 +499,7 @@ export async function runStoryboardVoiceover(
     });
     const audioUrl = usableAudioUrl(response?.audioUrl);
     if (response?.error || !audioUrl) {
-      const reason = response?.error ?? "未回可用音檔 URL";
+      const reason = response?.error ?? "未回可用音档 URL";
       return {
         result: {
           ok: false,
@@ -576,16 +576,16 @@ export type StoryboardVoiceoverOutcome =
   | { kind: "run"; execution: StoryboardVoiceoverExecution };
 
 /**
- * `dryRun`／真跑的**唯一分派**（路由只調這支，分支語義只此一份）。
+ * `dryRun`／真跑的**唯一分派**（路由只调这支，分支语义只此一份）。
  *
- * 命門：`dryRun === true` ⇒ **保證一次都不呼叫 `client`**（呼叫端仍必須傳一個 client——
- * 傳個 tripwire 就能在測試裡把這條保證斷言出來；本函式的 dryRun 分支在結構上不碰它）。
+ * 命门：`dryRun === true` ⇒ **保证一次都不呼叫 `client`**（呼叫端仍必须传一个 client——
+ * 传个 tripwire 就能在测试里把这条保证断言出来；本函式的 dryRun 分支在结构上不碰它）。
  */
 export async function storyboardVoiceover(
   project: Pick<CanvasProject, "nodes" | "episodes" | "scriptType" | "narrationVoice">,
   options: {
     dryRun: boolean;
-    /** dryRun=true 時保證不被呼叫；dryRun=false 時為逐行 TTS 的唯一出口。 */
+    /** dryRun=true 时保证不被呼叫；dryRun=false 时为逐行 TTS 的唯一出口。 */
     client: StoryboardVoiceoverTtsClient;
     episode?: number;
     maxLinesPerBatch?: number;
@@ -604,20 +604,20 @@ export async function storyboardVoiceover(
   return { kind: "run", execution: await runStoryboardVoiceover(project, options) };
 }
 
-// ─────────────────────────────────────────── ⑦ 回寫分鏡節點
+// ─────────────────────────────────────────── ⑦ 回写分镜节点
 
-/** 音軌四鍵（介面凍結，逐字照 `storyboard-shots.StoryboardShotAudioMetadata`）；本層只投影這三支音軌鍵。 */
+/** 音轨四键（介面冻结，逐字照 `storyboard-shots.StoryboardShotAudioMetadata`）；本层只投影这三支音轨键。 */
 const AUDIO_PATCH_KEYS = ["dialogueAudioId", "narrationAudioId", "audioAnchorId"] as const;
 
 /**
- * 把逐鏡配音結果回寫到分鏡節點 metadata（純函式，回新陣列，**不動輸入**）。
+ * 把逐镜配音结果回写到分镜节点 metadata（纯函式，回新阵列，**不动输入**）。
  *
- * patch 的來源是**橋接層回寫後的扁平分鏡**（`applyAudioTimelineToShots` 的 `shots`），
- * 本層只把它投影成三支凍結欄位——**不重算錨、不重判 URL**（那些仍由橋接層唯一決定）。
- * 缺席的鍵**不刪既有值**（與 `bindShotAudioTrack` 的 patch 語義一致：只寫不刪）。
+ * patch 的来源是**桥接层回写后的扁平分镜**（`applyAudioTimelineToShots` 的 `shots`），
+ * 本层只把它投影成三支冻结栏位——**不重算锚、不重判 URL**（那些仍由桥接层唯一决定）。
+ * 缺席的键**不删既有值**（与 `bindShotAudioTrack` 的 patch 语义一致：只写不删）。
  *
- * `missingNodeIds`：entries 指向的節點在傳入 `nodes` 裡找不到（例如寫入前節點被刪）。
- * **非空＝整批不可落盤**（呼叫端據此拒寫，不做部分寫入）。
+ * `missingNodeIds`：entries 指向的节点在传入 `nodes` 里找不到（例如写入前节点被删）。
+ * **非空＝整批不可落盘**（呼叫端据此拒写，不做部分写入）。
  */
 export function applyVoiceoverShotsToNodes(
   nodes: readonly CanvasNode[],

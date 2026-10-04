@@ -6,24 +6,24 @@ import { cn } from "@/lib/utils";
 import { useEimuShell } from "@/hooks/use-eimu-shell";
 
 /**
- * Eimu 桌面殼的自訂視窗控制鈕（最小化／最大化·還原／關閉）。
+ * Eimu 桌面壳的自订视窗控制钮（最小化／最大化·还原／关闭）。
  *
- * 為什麼由網頁自繪：外殼（Electron 薄殼，loadURL eimu.dev）已移除原生視窗控制，
- * 三顆鈕要「看得出來精心設計、完美融入 Eimu」，系統原生的做不到。
+ * 为什么由网页自绘：外壳（Electron 薄壳，loadURL eimu.dev）已移除原生视窗控制，
+ * 三颗钮要「看得出来精心设计、完美融入 Eimu」，系统原生的做不到。
  *
- * 只在殼內渲染：外殼以 contextBridge 注入 `window.eimuShell`；普通瀏覽器（含 PWA）
- * 沒有這個物件 ⇒ 一顆都不渲染（出現按了沒反應的死鈕比沒有更糟）。
- * 偵測走 useEimuShell（useEffect 內判定），SSR／首幀一律 null，避免 hydration 不一致。
+ * 只在壳内渲染：外壳以 contextBridge 注入 `window.eimuShell`；普通浏览器（含 PWA）
+ * 没有这个物件 ⇒ 一颗都不渲染（出现按了没反应的死钮比没有更糟）。
+ * 侦测走 useEimuShell（useEffect 内判定），SSR／首帧一律 null，避免 hydration 不一致。
  *
- * 拖曳：外殼移除原生 overlay 後，拖曳區改由 header 的玻璃島（nav，app-region-drag）
- * 提供；本元件位於右簇（app-region-no-drag）內，自身再標一次 no-drag 明確化。
+ * 拖曳：外壳移除原生 overlay 后，拖曳区改由 header 的玻璃岛（nav，app-region-drag）
+ * 提供；本元件位于右簇（app-region-no-drag）内，自身再标一次 no-drag 明确化。
  */
 
-// 窄寬（<sm）縮一階：外殼移除原生視窗鈕後，三顆是唯關窗手段，絕不可隱藏；
-// 只能縮小讓它們在 480px 這種極窄外殼寬度下仍完整落在 nav 內。
+// 窄宽（<sm）缩一阶：外壳移除原生视窗钮后，三颗是唯关窗手段，绝不可隐藏；
+// 只能缩小让它们在 480px 这种极窄外壳宽度下仍完整落在 nav 内。
 const ICON = "h-3.5 w-3.5 max-sm:h-3 max-sm:w-3";
 
-/** 三顆鈕共用的極簡玻璃態：與 header 既有極簡圖標鈕同一階（h-9 w-9、icon h-3.5）。 */
+/** 三颗钮共用的极简玻璃态：与 header 既有极简图标钮同一阶（h-9 w-9、icon h-3.5）。 */
 const BASE_BUTTON =
   "flex h-9 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.82)] active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 max-sm:h-7 max-sm:w-7";
 
@@ -38,18 +38,18 @@ export function WindowControls({ className }: WindowControlsProps) {
   useEffect(() => {
     if (!shell) return;
     let alive = true;
-    // 初值取自外殼真相；外殼推送同步。Promise 包一層，外殼若回非 Promise 也不炸。
+    // 初值取自外壳真相；外壳推送同步。Promise 包一层，外壳若回非 Promise 也不炸。
     Promise.resolve(shell.isMaximized())
       .then((value) => {
         if (alive) setMaximized(Boolean(value));
       })
       .catch(() => {
-        /* 取不到初值就維持未最大化語義，不擋渲染 */
+        /* 取不到初值就维持未最大化语义，不挡渲染 */
       });
     const unsubscribe = shell.onMaximizeChange((value) => setMaximized(Boolean(value)));
     return () => {
       alive = false;
-      // 卸載務必退訂：外殼推送不能打到已卸載元件的 setState。
+      // 卸载务必退订：外壳推送不能打到已卸载元件的 setState。
       if (typeof unsubscribe === "function") unsubscribe();
     };
   }, [shell]);

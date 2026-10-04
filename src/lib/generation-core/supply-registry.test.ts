@@ -78,7 +78,7 @@ function captureFetch(body: unknown) {
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-test("registry：7 個內建協議全部註冊", () => {
+test("registry：7 个内建协议全部注册", () => {
   const protocols = listSupplyProtocols();
   for (const protocol of ["openai_images", "adobe2api", "metaso", "openai_video", "filmera", "blender_bridge", "newapi_video"]) {
     assert.ok(protocols.includes(protocol), `缺 ${protocol}`);
@@ -86,18 +86,18 @@ test("registry：7 個內建協議全部註冊", () => {
   }
 });
 
-test("對帳協議映射與舊 protocolOfAdapter 等價；未知協議拋錯（不再 default newapi_video）", () => {
+test("对帐协议映射与旧 protocolOfAdapter 等价；未知协议抛错（不再 default newapi_video）", () => {
   assert.equal(reconcileProtocolOf("metaso"), "metaso");
   assert.equal(reconcileProtocolOf("openai_video"), "openai_video");
   assert.equal(reconcileProtocolOf("filmera"), "filmera");
-  // 舊 default 分支涵蓋的已知同步協議：顯式 reconcileVia 保住原行為。
+  // 旧 default 分支涵盖的已知同步协议：显式 reconcileVia 保住原行为。
   assert.equal(reconcileProtocolOf("openai_images"), "newapi_video");
   assert.equal(reconcileProtocolOf("adobe2api"), "newapi_video");
   assert.equal(reconcileProtocolOf("blender_bridge"), "newapi_video");
   assert.throws(() => reconcileProtocolOf("no_such_protocol"), /Unknown supply protocol "no_such_protocol"/);
 });
 
-test("對帳輪詢：未知協議明確失敗（上層記 poll_error），不去打 new-api", async () => {
+test("对帐轮询：未知协议明确失败（上层记 poll_error），不去打 new-api", async () => {
   const mock = captureFetch({});
   try {
     await assert.rejects(() => pollSupplyTask("no_such_protocol", supplier(), "task-x"), /Unknown supply protocol/);
@@ -120,7 +120,7 @@ test("分派：未知 adapter_type → SupplierRequestError(400)，零上游呼�
   }
 });
 
-test("分派：openai_images 經 registry 仍打 /images/generations（回歸保護）", async () => {
+test("分派：openai_images 经 registry 仍打 /images/generations（回归保护）", async () => {
   const mock = captureFetch({ data: [{ b64_json: "BBBB" }] });
   try {
     const output = await generateWithSupplier(supplier(), imageInput("gpt-image-2"));
@@ -133,7 +133,7 @@ test("分派：openai_images 經 registry 仍打 /images/generations（回歸保
   }
 });
 
-test("V-04：sub2api 別名由 configuration.modelAliases 資料驅動——gemini-3-image 仍送 gemini-3-pro-image", async () => {
+test("V-04：sub2api 别名由 configuration.modelAliases 资料驱动——gemini-3-image 仍送 gemini-3-pro-image", async () => {
   const mock = captureFetch({ data: [{ b64_json: "CCCC" }] });
   try {
     const sub2api = supplier({
@@ -144,10 +144,10 @@ test("V-04：sub2api 別名由 configuration.modelAliases 資料驅動——gemi
     const output = await generateWithSupplier(sub2api, imageInput("gemini-3-image"));
     assert.equal(JSON.parse(mock.calls[0].body).model, "gemini-3-pro-image");
     assert.equal(output.supplierModelId, "gemini-3-pro-image");
-    // 未列別名的模型同名直傳。
+    // 未列别名的模型同名直传。
     await generateWithSupplier(sub2api, imageInput("gpt-image-2"));
     assert.equal(JSON.parse(mock.calls[1].body).model, "gpt-image-2");
-    // supplierModelId（capability 映射）優先於別名。
+    // supplierModelId（capability 映射）优先于别名。
     await generateWithSupplier({ ...sub2api, supplierModelId: "explicit-upstream" }, imageInput("gemini-3-image"));
     assert.equal(JSON.parse(mock.calls[2].body).model, "explicit-upstream");
   } finally {
@@ -155,7 +155,7 @@ test("V-04：sub2api 別名由 configuration.modelAliases 資料驅動——gemi
   }
 });
 
-test("V-04：分派不再認 supplier 身分——env:sub2api 沒有別名資料就同名直傳", async () => {
+test("V-04：分派不再认 supplier 身分——env:sub2api 没有别名资料就同名直传", async () => {
   const mock = captureFetch({ data: [{ b64_json: "DDDD" }] });
   try {
     await generateWithSupplier(supplier({ id: "env:sub2api", label: "sub2api" }), imageInput("gemini-3-image"));

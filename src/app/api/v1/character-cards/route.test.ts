@@ -1,5 +1,5 @@
-// `/v1/character-cards` 掛載點的斷言 = 共用套件（與 `/api/biz/character-cards` 逐條相同）。
-// 斷言本體在 src/lib/biz-character-cards-route-suite.ts，本檔只負責把它綁到本 route。
+// `/v1/character-cards` 挂载点的断言 = 共用套件（与 `/api/biz/character-cards` 逐条相同）。
+// 断言本体在 src/lib/biz-character-cards-route-suite.ts，本档只负责把它绑到本 route。
 import { registerBizCharacterCardRouteSuite } from "../../../../lib/biz-character-cards-route-suite";
 import { GET, POST } from "./route";
 

@@ -1,11 +1,11 @@
-// 伺服器端版位裁切執行（**server-only**）。
+// 伺服器端版位裁切执行（**server-only**）。
 //
-// 為什麼獨立一檔：sharp 是 Node 原生模組（`node:events` 進 browser bundle 會讓
-// webpack 直接炸，見 dag-png-server.ts 的同一段教訓）。本檔只給 route / worker
-// import，純幾何層（./format-crops.ts）保持零依賴、可被任何地方 import。
+// 为什么独立一档：sharp 是 Node 原生模组（`node:events` 进 browser bundle 会让
+// webpack 直接炸，见 dag-png-server.ts 的同一段教训）。本档只给 route / worker
+// import，纯几何层（./format-crops.ts）保持零依赖、可被任何地方 import。
 //
-// 職責邊界：本檔只做「Buffer + 裁切框 → 新 Buffer」。裁切框怎麼算由
-// ./format-crops.ts 決定，clamp 由 ./image-edit.ts 的 clampCropRect 決定。
+// 职责边界：本档只做「Buffer + 裁切框 → 新 Buffer」。裁切框怎么算由
+// ./format-crops.ts 决定，clamp 由 ./image-edit.ts 的 clampCropRect 决定。
 
 import sharp from "sharp";
 import { clampCropRect, type PixelRect } from "./image-edit";
@@ -13,18 +13,18 @@ import { clampCropRect, type PixelRect } from "./image-edit";
 export interface SourceImageInfo {
   width: number;
   height: number;
-  /** true＝EXIF 帶 90/270 旋轉，寬高已按自動旋轉後的口徑回報。 */
+  /** true＝EXIF 带 90/270 旋转，宽高已按自动旋转后的口径回报。 */
   autoOriented: boolean;
 }
 
-/** EXIF orientation 5~8 表示需旋轉 90/270，寬高要互換。 */
+/** EXIF orientation 5~8 表示需旋转 90/270，宽高要互换。 */
 function swapsAxes(orientation: number | undefined): boolean {
   return typeof orientation === "number" && orientation >= 5 && orientation <= 8;
 }
 
 /**
- * 讀源圖尺寸（自動旋轉後口徑）。回報的寬高與 cropImage 的 `.rotate()` 輸出同坐標系，
- * 兩者混用不會錯位。
+ * 读源图尺寸（自动旋转后口径）。回报的宽高与 cropImage 的 `.rotate()` 输出同坐标系，
+ * 两者混用不会错位。
  */
 export async function readSourceImageInfo(buffer: Buffer): Promise<SourceImageInfo> {
   const meta = await sharp(buffer).metadata();
@@ -35,15 +35,15 @@ export async function readSourceImageInfo(buffer: Buffer): Promise<SourceImageIn
 }
 
 export interface CropImageOptions {
-  /** 輸出格式，預設 webp（13 版位批量出圖時體積可控）。 */
+  /** 输出格式，预设 webp（13 版位批量出图时体积可控）。 */
   format?: "webp" | "png";
-  /** webp 品質，預設 82。 */
+  /** webp 品质，预设 82。 */
   quality?: number;
 }
 
 /**
- * 依裁切框裁出圖片。rect 以源圖像素座標計，內部先 clamp 再 extract，
- * 並以 `.rotate()` 套用 EXIF 自動旋轉（與 readSourceImageInfo 同口徑）。
+ * 依裁切框裁出图片。rect 以源图像素座标计，内部先 clamp 再 extract，
+ * 并以 `.rotate()` 套用 EXIF 自动旋转（与 readSourceImageInfo 同口径）。
  */
 export async function cropImage(
   buffer: Buffer,

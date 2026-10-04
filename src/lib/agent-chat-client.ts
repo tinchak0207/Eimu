@@ -1,14 +1,14 @@
-// Agent 聊天的传輸层：只負責把请求打到站内的 agent 代理路由，不碰 React。
+// Agent 聊天的传输层：只负责把请求打到站内的 agent 代理路由，不碰 React。
 //
 // 身份：token 和 user id 必须成对送出 —— `Authorization: Bearer <token>` 加
 // `x-user-id`。agent 代理的 resolveAgentCaller → requireVerifiedUser →
 // authenticateImageUser 是拿这两个头一起去问上游 /api/user/self 的：上游会拒绝
-// 「令牌持有者 ≠ 头里声称的 id」，所以 id 不是干擾，它是校验的另一半。
+// 「令牌持有者 ≠ 头里声称的 id」，所以 id 不是干扰，它是校验的另一半。
 // 少送 id，authenticateImageUser 在 `if (!auth || !userId)` 就 401，
 // 已登录的用户也会被挡在门外（这正是 agent 一开就报 401 的原因）。
 //
 // 错误：统一丢 AgentChatError（带 code），UI 分支用 code 判断，不做字串比对。
-// 安全：本模组永不 log token、ticket 或任何可能攜带它们的 response body。
+// 安全：本模组永不 log token、ticket 或任何可能携带它们的 response body。
 
 import { getStoredToken, getStoredUser } from "./new-api-client";
 import type {
@@ -32,7 +32,7 @@ export interface AgentAttachment {
 
 // ─────────────────────────── 常数
 
-/** 网道 SSE ticket 的有效期（网道 10 分鐘到期），native EventSource 自动重连会拿死票一直重試，所以前端自己管重连。 */
+/** 网道 SSE ticket 的有效期（网道 10 分钟到期），native EventSource 自动重连会拿死票一直重试，所以前端自己管重连。 */
 export const SSE_TICKET_TTL_MS = 10 * 60 * 1000;
 
 // ─────────────────────────── 错误型别
@@ -46,13 +46,13 @@ export type AgentChatErrorCode =
   | "gateway_error"
   | "network_error"
   | "parse_error"
-  // REQ-D2（2026-09-23 F-D2 對抗性驗收修復）：steer 端點的 409 契約——「當前沒有
-  // 可引導的回合（沒在跑／已中止）」。這不是失敗，是網關要求前端改走正常送出
-  //（見 use-agent-chat.send 的 fallback）；混進 gateway_error 會讓那條訊息被吞。
+  // REQ-D2（2026-09-23 F-D2 对抗性验收修复）：steer 端点的 409 契约——「当前没有
+  // 可引导的回合（没在跑／已中止）」。这不是失败，是网关要求前端改走正常送出
+  //（见 use-agent-chat.send 的 fallback）；混进 gateway_error 会让那条讯息被吞。
   | "no_active_turn"
-  // REQ-D2b（2026-09-23）：steer 重放被拒（同一個 steer_id 的第二次投遞）。
-  // **不是**「改走正常送出」——改走就等於把同一條指引送第二次（本刀要禁的事故）。
-  // 網關回可辨識錯誤碼：steer_replay_settled / steer_replay_in_flight /
+  // REQ-D2b（2026-09-23）：steer 重放被拒（同一个 steer_id 的第二次投递）。
+  // **不是**「改走正常送出」——改走就等于把同一条指引送第二次（本刀要禁的事故）。
+  // 网关回可辨识错误码：steer_replay_settled / steer_replay_in_flight /
   // steer_payload_mismatch / steer_id_conflict。
   | "steer_replay_rejected";
 
@@ -60,9 +60,9 @@ export class AgentChatError extends Error {
   readonly code: AgentChatErrorCode;
   readonly status?: number;
   /**
-   * D2b：重放被拒時，網關帶回的**既有命令真實狀態**（applied/injected/uncertain…）。
-   * 前端據此把徽章從本地占位的「未能送達」糾正成事實——沒有這個欄位就只能是猜測。
-   * 只有 steer 端點的重放拒絕會帶它。
+   * D2b：重放被拒时，网关带回的**既有命令真实状态**（applied/injected/uncertain…）。
+   * 前端据此把徽章从本地占位的「未能送达」纠正成事实——没有这个栏位就只能是猜测。
+   * 只有 steer 端点的重放拒绝会带它。
    */
   readonly steerStatus?: AgentSteerStatus;
 
@@ -116,27 +116,27 @@ function mapHttpStatus(status: number): AgentChatErrorCode {
 }
 
 /**
- * body 裡的 code 比 HTTP status 精確時就用它。
+ * body 里的 code 比 HTTP status 精确时就用它。
  *
- * `agent_not_signed_in`（guard 判定根本沒送凭证）映到 not_authenticated：
- * hook 收到它會直接关掉连线并提示登录，而不是把它当「登录过期」反覆重连 ——
+ * `agent_not_signed_in`（guard 判定根本没送凭证）映到 not_authenticated：
+ * hook 收到它会直接关掉连线并提示登录，而不是把它当「登录过期」反覆重连 ——
  * 没登录的人重连一万次也还是没登录。
  *
- * `no_active_turn` / `turn_aborted`（steer 端點的 409 契約）映到 no_active_turn：
- * 看的是這條訊息「該不該改走正常送出」，不是哪個端點回的。網關的錯誤 body 有兩種
- * 形狀（站内代理 flat {success,error,code} 與网關 {error:{message,type,code}}），
- * 两種都读。
+ * `no_active_turn` / `turn_aborted`（steer 端点的 409 契约）映到 no_active_turn：
+ * 看的是这条讯息「该不该改走正常送出」，不是哪个端点回的。网关的错误 body 有两种
+ * 形状（站内代理 flat {success,error,code} 与网关 {error:{message,type,code}}），
+ * 两种都读。
  */
 function mapErrorCode(data: unknown, status: number): AgentChatErrorCode {
   if (data !== null && typeof data === "object") {
     const d = data as Record<string, unknown>;
-    // 站内代理回 flat {code}，网關回巢状 {error:{code}}——两种形状都读。
+    // 站内代理回 flat {code}，网关回巢状 {error:{code}}——两种形状都读。
     const code =
       d.code ?? (d.error !== null && typeof d.error === "object" ? (d.error as Record<string, unknown>).code : undefined);
     if (code === "agent_not_signed_in") return "not_authenticated";
     if (code === "no_active_turn" || code === "turn_aborted") return "no_active_turn";
-    // D2b：重放拒絕（同一 steer_id 的第二次投遞）——與「沒有可引導的回合」分開歸類，
-    // 否則呼叫端會把它當成 409 契約落回正常送出，把同一條指引送第二次。
+    // D2b：重放拒绝（同一 steer_id 的第二次投递）——与「没有可引导的回合」分开归类，
+    // 否则呼叫端会把它当成 409 契约落回正常送出，把同一条指引送第二次。
     if (
       code === "steer_replay_settled" ||
       code === "steer_replay_in_flight" ||
@@ -149,7 +149,7 @@ function mapErrorCode(data: unknown, status: number): AgentChatErrorCode {
   return mapHttpStatus(status);
 }
 
-/** 網關重放拒絕回應裡的任務狀態（真實狀態；認不得就當作沒帶）。 */
+/** 网关重放拒绝回应里的任务状态（真实状态；认不得就当作没带）。 */
 function replayStatusFromBody(data: unknown): AgentSteerStatus | undefined {
   if (data === null || typeof data !== "object") return undefined;
   const raw = (data as Record<string, unknown>).status;
@@ -159,15 +159,15 @@ function replayStatusFromBody(data: unknown): AgentSteerStatus | undefined {
 }
 
 /**
- * steer 端點的「沒有可引導的回合」訊號（409）。前端唯一的合法反應是**改走正常送出**
- * ——內容不得被吞（D2-2 實錘：舊版只把徽章改 failed 就 return，turnActive 陳舊為真
- * 時每次送出都變成失敗的 steer，訊息永遠發不出去）。
- * status 409 也算：steer 端點的 409 只有這一個語義（網關契約）。code 的精確映射
- * 是給 body 透傳完整的情況用的（見 mapErrorCode）。
+ * steer 端点的「没有可引导的回合」讯号（409）。前端唯一的合法反应是**改走正常送出**
+ * ——内容不得被吞（D2-2 实锤：旧版只把徽章改 failed 就 return，turnActive 陈旧为真
+ * 时每次送出都变成失败的 steer，讯息永远发不出去）。
+ * status 409 也算：steer 端点的 409 只有这一个语义（网关契约）。code 的精确映射
+ * 是给 body 透传完整的情况用的（见 mapErrorCode）。
  *
- * D2b（2026-09-23）唯一的例外：**重放被拒**（steer_replay_rejected）同樣是 409，
- * 但它說的是「這條指引已經有結論／還在途中，不要再送」——落回正常送出就等於把它
- * 送第二次（正是本刀要禁的事故）。所以它明確排除在外（呼叫端另走糾正徽章那條路）。
+ * D2b（2026-09-23）唯一的例外：**重放被拒**（steer_replay_rejected）同样是 409，
+ * 但它说的是「这条指引已经有结论／还在途中，不要再送」——落回正常送出就等于把它
+ * 送第二次（正是本刀要禁的事故）。所以它明确排除在外（呼叫端另走纠正徽章那条路）。
  */
 export function isSteerUnavailableError(err: unknown): boolean {
   if (!(err instanceof AgentChatError)) return false;
@@ -175,15 +175,15 @@ export function isSteerUnavailableError(err: unknown): boolean {
   return err.code === "no_active_turn" || err.status === 409;
 }
 
-/** D2b：這次失敗是不是「重放被拒」（同 id 第二次投遞）。 */
+/** D2b：这次失败是不是「重放被拒」（同 id 第二次投递）。 */
 export function isSteerReplayRejected(err: unknown): boolean {
   return err instanceof AgentChatError && err.code === "steer_replay_rejected";
 }
 
 /**
- * D2b：重放被拒時網關帶回的既有任務狀態；帶不出來時回 "uncertain"——
- * 「已經有結論/還在途中，且不會重送」的最小誠實陳述，絕不回 "queued"（那會讓徽章
- * 停在排隊中，等一張永遠不會來的終態幀）。
+ * D2b：重放被拒时网关带回的既有任务状态；带不出来时回 "uncertain"——
+ * 「已经有结论/还在途中，且不会重送」的最小诚实陈述，绝不回 "queued"（那会让徽章
+ * 停在排队中，等一张永远不会来的终态帧）。
  */
 export function steerReplayStatus(err: unknown): AgentSteerStatus {
   if (err instanceof AgentChatError && err.steerStatus && err.steerStatus !== "queued") return err.steerStatus;
@@ -201,9 +201,9 @@ function fallbackMessage(status: number): string {
 
 /**
  * 抽出可读的错误讯息：站内代理回 `{ success:false, error, code }`，
- * 网道回 `{ error: { message, type, code } }`，兩种都要能读。
+ * 网道回 `{ error: { message, type, code } }`，两种都要能读。
  */
-/** 網關技術名詞 → 使用者能懂的人話。只映射確定語義的，未知的原樣透傳。 */
+/** 网关技术名词 → 使用者能懂的人话。只映射确定语义的，未知的原样透传。 */
 const GATEWAY_MESSAGE_ZH: Record<string, string> = {
   "question request unknown or already resolved": "这个选择已经提交过了，无需重复操作。",
   "confirm request unknown or already resolved": "这个确认已处理过，请继续对话。",
@@ -230,8 +230,8 @@ function extractMessage(data: unknown, status: number): string {
  * 显示「请先登录」却不知道该怎么办。
  */
 function authHeaders(reason: string): Record<string, string> {
-  // LOCAL_TEST_MODE：本機視覺重放/截圖用，送假憑證即可——站內代理的
-  // resolveAgentCaller 在該模式下直接換 B 端 key，不驗證這組頭。
+  // LOCAL_TEST_MODE：本机视觉重放/截图用，送假凭证即可——站内代理的
+  // resolveAgentCaller 在该模式下直接换 B 端 key，不验证这组头。
   if (LOCAL_TEST_MODE) {
     return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
   }
@@ -279,8 +279,8 @@ async function agentFetch(path: string, init?: RequestInit): Promise<unknown> {
   }
 
   if (!res.ok) {
-    // D2b：重放拒絕的回應帶既有命令的真實狀態（status），透傳進錯誤物件——
-    // 呼叫端據此把徽章從本地占位的「未能送達」糾正成事實（見 steerReplayStatus）。
+    // D2b：重放拒绝的回应带既有命令的真实状态（status），透传进错误物件——
+    // 呼叫端据此把徽章从本地占位的「未能送达」纠正成事实（见 steerReplayStatus）。
     throw new AgentChatError(
       mapErrorCode(data, res.status),
       extractMessage(data, res.status),
@@ -293,33 +293,33 @@ async function agentFetch(path: string, init?: RequestInit): Promise<unknown> {
 
 // ─────────────────────────── 公开 API
 
-/** 會話目錄項：對話歷史 dropdown 的數據源（網關 GET /agent/v1/sessions 透傳）。 */
+/** 会话目录项：对话历史 dropdown 的数据源（网关 GET /agent/v1/sessions 透传）。 */
 export interface AgentSessionSummary {
   session_id: string;
   created_at: number;
   updated_at: number;
   last_activity_at: number;
   /**
-   * 網關 2026-08-31 契約新增的會話運轉狀態。選填——舊網關/快取沒這欄位時
-   * 不得崩潰，渲染端按 idle 處理。
+   * 网关 2026-08-31 契约新增的会话运转状态。选填——旧网关/快取没这栏位时
+   * 不得崩溃，渲染端按 idle 处理。
    */
   status?: "running" | "waiting" | "idle";
   /**
-   * 網關 2026-09-12 契約新增的會話摘要標題（opencode 首輪生成）。選填——
-   * null/缺欄（佔位名已在網關側歸一化為 null）時不得崩潰，渲染端降級為時間標籤。
+   * 网关 2026-09-12 契约新增的会话摘要标题（opencode 首轮生成）。选填——
+   * null/缺栏（占位名已在网关侧归一化为 null）时不得崩溃，渲染端降级为时间标签。
    */
   title?: string | null;
 }
 
-/** 會話記憶補注：resume/switch 的老會話補上帳戶畫像（best-effort，失敗不打擾）。 */
+/** 会话记忆补注：resume/switch 的老会话补上帐户画像（best-effort，失败不打扰）。 */
 export async function patchAgentSessionMemory(sessionId: string): Promise<void> {
   try {
     await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/memory`, { method: "POST" });
   } catch {
-    // 補不上就算了：下一次建新會話時記憶仍會正常注入。
+    // 补不上就算了：下一次建新会话时记忆仍会正常注入。
   }
 }
-/** 列出當前用戶的歷史會話（按 updated_at 降序）。 */
+/** 列出当前用户的历史会话（按 updated_at 降序）。 */
 export async function listAgentSessions(): Promise<AgentSessionSummary[]> {
   const data = await agentFetch('/api/agent/sessions', { method: 'GET' });
   const sessions = (data as { sessions?: unknown })?.sessions;
@@ -359,51 +359,51 @@ export interface SendAgentMessageOptions {
 }
 
 /**
- * 直連網關發送腿（09-12）：砍掉首字關鍵路徑上的中繼 RTT。
+ * 直连网关发送腿（09-12）：砍掉首字关键路径上的中继 RTT。
  *
- * 為什麼：消息 POST 一直繞 Vercel 中繼，多付一整個跨境往返 ≈370–494ms
- * （審計實錘）；SSE token 流本就是瀏覽器→網關公網直連，發送腿走同一條路
- * 是對稱性修復。
+ * 为什么：消息 POST 一直绕 Vercel 中继，多付一整个跨境往返 ≈370–494ms
+ * （审计实锤）；SSE token 流本就是浏览器→网关公网直连，发送腿走同一条路
+ * 是对称性修复。
  *
- * 憑證：復用 requestSseTicket 已釀的同一張票，不另造第二套憑證——票綁定單一
- * session、短時效（10 分鐘）、不含 sk-biz/owner key，外洩半徑只有這一路會話
- * 與這一時窗。票放 Authorization 頭而非 query：query 會被 nginx access log
- * 原樣記錄，POST 我們控制得了頭。
+ * 凭证：复用 requestSseTicket 已酿的同一张票，不另造第二套凭证——票绑定单一
+ * session、短时效（10 分钟）、不含 sk-biz/owner key，外泄半径只有这一路会话
+ * 与这一时窗。票放 Authorization 头而非 query：query 会被 nginx access log
+ * 原样记录，POST 我们控制得了头。
  *
- * 條件化（本補丁先於網關補丁上線，行為必須零迴歸）：網關今天不接受帶票的
- * POST /messages（票按「只讀」設計——sse-ticket 路由註釋與 tools/* 的票用法
- * 全部是 GET）。所以直連腿是「探測」不是「保證」：
- * - 401/403（票被拒——含「老網關不認票」）→ 本票代閂鎖，後續發送全走中繼，
- *   每代最多只付一次學費 RTT。
- * - 網路/CORS preflight/超時錯誤在 fetch 層不可分辨（都是 TypeError）：
- *   連續 2 次失手才閂鎖，成功一次即歸零——防「補丁沒上時反覆流血」，
- *   也防「使用者真網路抖一下就永久縮回中繼」。
- * - 5xx → 這次落回中繼（降級不斷），但不閂鎖：5xx 是服務端瞬態，
- *   不是「票沒有權限」的證據。
- * - 4xx 且帶 JSON body：網關看過 payload 並拒絕——中繼轉發的是同一個 body，
- *   重發一次只会把同一个错再走一遍，直接抛出（與中繼路徑既有語義一致）。
+ * 条件化（本补丁先于网关补丁上线，行为必须零回归）：网关今天不接受带票的
+ * POST /messages（票按「只读」设计——sse-ticket 路由注释与 tools/* 的票用法
+ * 全部是 GET）。所以直连腿是「探测」不是「保证」：
+ * - 401/403（票被拒——含「老网关不认票」）→ 本票代闩锁，后续发送全走中继，
+ *   每代最多只付一次学费 RTT。
+ * - 网路/CORS preflight/超时错误在 fetch 层不可分辨（都是 TypeError）：
+ *   连续 2 次失手才闩锁，成功一次即归零——防「补丁没上时反覆流血」，
+ *   也防「使用者真网路抖一下就永久缩回中继」。
+ * - 5xx → 这次落回中继（降级不断），但不闩锁：5xx 是服务端瞬态，
+ *   不是「票没有权限」的证据。
+ * - 4xx 且带 JSON body：网关看过 payload 并拒绝——中继转发的是同一个 body，
+ *   重发一次只会把同一个错再走一遍，直接抛出（与中继路径既有语义一致）。
  *
- * 永不重放：直連失手後中繼只發一次；中繼也失敗就照擲錯讓使用者看到真實
- * 原因。成功之後絕不出現第二次 POST。
+ * 永不重放：直连失手后中继只发一次；中继也失败就照掷错让使用者看到真实
+ * 原因。成功之后绝不出现第二次 POST。
  *
- * 冪等：檔內（client/hook/gateway 封裝）無任何 idempotency-key 慣例
- * （grep 核實：request_id 僅存在於 confirm/question 的業務迴執），與中繼路徑
- * 維持同一等級——依賴「每用戶動作至多一次 POST」而非重試語義。
+ * 幂等：档内（client/hook/gateway 封装）无任何 idempotency-key 惯例
+ * （grep 核实：request_id 仅存在于 confirm/question 的业务回执），与中继路径
+ * 维持同一等级——依赖「每用户动作至多一次 POST」而非重试语义。
  */
 
-/** 直連硬超時：與服務端 callAgentGateway 的 10 秒同一把尺。 */
+/** 直连硬超时：与服务端 callAgentGateway 的 10 秒同一把尺。 */
 export const DIRECT_SEND_TIMEOUT_MS = 10_000;
 
-/** 預檢上限：鏡像中繼 messages/route.ts 的欄位校驗，確保兩路徑 400 語義等價。 */
+/** 预检上限：镜像中继 messages/route.ts 的栏位校验，确保两路径 400 语义等价。 */
 const DIRECT_MAX_CONTENT_LEN = 8_000;
 const DIRECT_MAX_CANVAS_STATE_BYTES = 128 * 1024;
 const DIRECT_MAX_DIRECTIVE_LEN = 4_000;
 
-/** 直連能力探測的閂鎖狀態（生命週期＝一張票代，重新鑄票即重設）。 */
+/** 直连能力探测的闩锁状态（生命周期＝一张票代，重新铸票即重设）。 */
 export interface DirectSendCapability {
-  /** true = 本票代停止直連嘗試（401/403，或連續 ≥2 次網路類失手）。 */
+  /** true = 本票代停止直连尝试（401/403，或连续 ≥2 次网路类失手）。 */
   rejected: boolean;
-  /** 連續網路類失手計數；任何一次直連成功即歸零。 */
+  /** 连续网路类失手计数；任何一次直连成功即归零。 */
   networkStrikes: number;
 }
 
@@ -411,18 +411,18 @@ export function createDirectSendCapability(): DirectSendCapability {
   return { rejected: false, networkStrikes: 0 };
 }
 
-/** 發送直連上下文：現任連線的 SSE 票 + 該票代的能力閂鎖。 */
+/** 发送直连上下文：现任连线的 SSE 票 + 该票代的能力闩锁。 */
 export interface DirectSendContext {
   ticket: AgentSseTicket;
   capability: DirectSendCapability;
 }
 
 /**
- * events_url → 同會話消息端點的公網 URL。
+ * events_url → 同会话消息端点的公网 URL。
  *
- * 構造契約的源頭是中繼 sse-ticket 路由：events_url 恆為
- * `${AGENT_GATEWAY_ORIGIN}/agent/v1/sessions/<id>/events`。只認這個形狀，
- *  pathname 不符（網關換路由/中繼換拼法）就回 null 老實走中繼，不做猜測式
+ * 构造契约的源头是中继 sse-ticket 路由：events_url 恒为
+ * `${AGENT_GATEWAY_ORIGIN}/agent/v1/sessions/<id>/events`。只认这个形状，
+ *  pathname 不符（网关换路由/中继换拼法）就回 null 老实走中继，不做猜测式
  * 字串裁剪。
  */
 export function deriveMessagesUrl(eventsUrl: string): string | null {
@@ -436,7 +436,7 @@ export function deriveMessagesUrl(eventsUrl: string): string | null {
   }
 }
 
-/** 預檢：與中繼同款形狀/體積校驗。不合格 → 不走直連，讓中繼出 canon 400。 */
+/** 预检：与中继同款形状/体积校验。不合格 → 不走直连，让中继出 canon 400。 */
 function directSendEligible(trimmedContent: string, options?: SendAgentMessageOptions): boolean {
   if (trimmedContent.length === 0 || trimmedContent.length > DIRECT_MAX_CONTENT_LEN) return false;
   const canvas = options?.canvasState;
@@ -455,16 +455,16 @@ function directSendEligible(trimmedContent: string, options?: SendAgentMessageOp
   return true;
 }
 
-/** 網路/CORS/超時類失手記一筆；湊滿兩筆升級為票代閂鎖。 */
+/** 网路/CORS/超时类失手记一笔；凑满两笔升级为票代闩锁。 */
 function noteNetworkStrike(capability: DirectSendCapability): void {
   capability.networkStrikes += 1;
   if (capability.networkStrikes >= 2) capability.rejected = true;
 }
 
 /**
- * 打一次直連。回 "sent" 即完成；回 "fallback" 交調用方落回中繼（每票代
- * 閂鎖規則見上）。確定性 4xx（帶可解析 JSON 錯誤體）直接擲 AgentChatError，
- * 不允許落回——那是重放同一個必敗請求。
+ * 打一次直连。回 "sent" 即完成；回 "fallback" 交调用方落回中继（每票代
+ * 闩锁规则见上）。确定性 4xx（带可解析 JSON 错误体）直接掷 AgentChatError，
+ * 不允许落回——那是重放同一个必败请求。
  */
 async function attemptDirectSend(
   messagesUrl: string,
@@ -486,7 +486,7 @@ async function attemptDirectSend(
       signal: AbortSignal.timeout(DIRECT_SEND_TIMEOUT_MS),
     });
   } catch {
-    // fetch 拋錯＝連不上／pre-flight 被拒／超時。請求未獲伺服器裁決，落回安全。
+    // fetch 抛错＝连不上／pre-flight 被拒／超时。请求未获伺服器裁决，落回安全。
     noteNetworkStrike(capability);
     return "fallback";
   }
@@ -495,16 +495,16 @@ async function attemptDirectSend(
     return "sent";
   }
   if (res.status === 401 || res.status === 403) {
-    // 票被拒（過期/綁定不符/老網關不認票）：本票代不再試，避免每次發送付學費。
+    // 票被拒（过期/绑定不符/老网关不认票）：本票代不再试，避免每次发送付学费。
     capability.rejected = true;
     return "fallback";
   }
   if (res.status >= 500) {
-    // 服務端瞬態：這次走中繼，保留下輪直連資格。
+    // 服务端瞬态：这次走中继，保留下轮直连资格。
     return "fallback";
   }
-  // 其餘 4xx：嘗試還原網關錯誤體。能還原 → 確定性拒絕，照中繼語義拋錯；
-  // 還原不了（nginx 兜底頁等）→ 屬基建異常而非網關裁決，記一筆後落回。
+  // 其余 4xx：尝试还原网关错误体。能还原 → 确定性拒绝，照中继语义抛错；
+  // 还原不了（nginx 兜底页等）→ 属基建异常而非网关裁决，记一笔后落回。
   let data: unknown = null;
   try {
     data = await res.json();
@@ -519,16 +519,16 @@ async function attemptDirectSend(
 }
 
 /**
- * 客户端環境上報（型別化白名單；閘道側 sanitizeClientEnvironmentReport 逐值白名單淨化）。
+ * 客户端环境上报（型别化白名单；闸道侧 sanitizeClientEnvironmentReport 逐值白名单净化）。
  *
- * 只有客戶端知道的事實隨訊息上報，閘道據此生成環境段。只從**可實證的訊號**推導，
- * 推不出的一律不送（閘道語義＝unknown），絕不送猜測值：
- *   - surface：globalThis.eimuLocal 是否存在（桌面殼 preload 注入）→ desktop-shell / web。
- *   - window_eimu_local / local_save：存在性檢查。
- *   - ffmpeg / ffprobe：僅桌面殼內向 capabilities() 探測（有界等待；失敗／超時即不送）。
- *   - renderHost：客戶端無可信訊號（由部署/伺服器決定）⇒ 不上報，閘道語義 unknown。
+ * 只有客户端知道的事实随讯息上报，闸道据此生成环境段。只从**可实证的讯号**推导，
+ * 推不出的一律不送（闸道语义＝unknown），绝不送猜测值：
+ *   - surface：globalThis.eimuLocal 是否存在（桌面壳 preload 注入）→ desktop-shell / web。
+ *   - window_eimu_local / local_save：存在性检查。
+ *   - ffmpeg / ffprobe：仅桌面壳内向 capabilities() 探测（有界等待；失败／超时即不送）。
+ *   - renderHost：客户端无可信讯号（由部署/伺服器决定）⇒ 不上报，闸道语义 unknown。
  *
- * 回傳值直接作為 POST body 的頂層 client_environment；不含任何自由文字。
+ * 回传值直接作为 POST body 的顶层 client_environment；不含任何自由文字。
  */
 const LOCAL_CAPABILITY_PROBE_TIMEOUT_MS = 1500;
 
@@ -572,9 +572,9 @@ export async function collectClientEnvironment(): Promise<Record<string, unknown
 /**
  * 送一条对话消息。网道回 202 即算已收。
  *
- * 09-12 起帶可選第 4 參數 direct：有現任 SSE 票且未閂鎖 → 先直連網關；
- * 票不可用/401/網路錯/5xx → 落回原有 Vercel 中繼路徑（用戶零感知）。
- * 不帶 direct 時與舊行為逐字元等價（老呼叫點不用改）。
+ * 09-12 起带可选第 4 参数 direct：有现任 SSE 票且未闩锁 → 先直连网关；
+ * 票不可用/401/网路错/5xx → 落回原有 Vercel 中继路径（用户零感知）。
+ * 不带 direct 时与旧行为逐字元等价（老呼叫点不用改）。
  */
 export async function sendAgentMessage(
   sessionId: string,
@@ -582,7 +582,7 @@ export async function sendAgentMessage(
   options?: SendAgentMessageOptions,
   direct?: DirectSendContext | null,
 ): Promise<void> {
-  // 中繼路由會 trim 後才轉發；直連自己先 trim，兩條路徑送到網關的 content 等價。
+  // 中继路由会 trim 后才转发；直连自己先 trim，两条路径送到网关的 content 等价。
   const trimmed = content.trim();
   const body: Record<string, unknown> = { content: trimmed };
   if (options?.canvasState !== undefined && options.canvasState !== null) {
@@ -591,15 +591,15 @@ export async function sendAgentMessage(
   if (typeof options?.sessionDirective === "string" && options.sessionDirective.trim().length > 0) {
     body.session_directive = options.sessionDirective;
   }
-  // 客戶端環境上報（本包）：與 content/canvas_state/session_directive 同一 payload，
-  // 直連與中繼兩條腿共用同一 body，閘道據此生成環境段（欄位缺失時閘道行為不變）。
+  // 客户端环境上报（本包）：与 content/canvas_state/session_directive 同一 payload，
+  // 直连与中继两条腿共用同一 body，闸道据此生成环境段（栏位缺失时闸道行为不变）。
   body.client_environment = await collectClientEnvironment();
   if (direct && !direct.capability.rejected) {
     const messagesUrl = deriveMessagesUrl(direct.ticket.events_url);
     if (messagesUrl && directSendEligible(trimmed, options)) {
       const outcome = await attemptDirectSend(messagesUrl, body, direct.ticket.ticket, direct.capability);
       if (outcome === "sent") return;
-      // fallback：繼續往下走中繼，僅此一次。
+      // fallback：继续往下走中继，仅此一次。
     }
   }
   await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
@@ -610,7 +610,7 @@ export async function sendAgentMessage(
 
 /**
  * 网道附件清单：每个元素带 path/mime/size，直接转成 AgentAttachmentRef。
- * 依 mime 決定 kind：影像 → "image"，影片 → "video"，其余 → "document"。
+ * 依 mime 决定 kind：影像 → "image"，影片 → "video"，其余 → "document"。
  */
 export interface AgentAttachment {
   name: string;
@@ -627,9 +627,9 @@ export function toAgentAttachmentRef(a: AgentAttachment): AgentAttachmentRef {
 }
 
 /**
- * 上传一组附件。FormData 可带多个 `file` 栏位；站内代理原样透传給网道，
+ * 上传一组附件。FormData 可带多个 `file` 栏位；站内代理原样透传给网道，
  * 网道回 `{ attachments: [...] }`。走的不是 agentFetch —— 它会把 body 当 JSON
- * 再蓋 Content-Type，multipart 必須保留 boundary。
+ * 再盖 Content-Type，multipart 必须保留 boundary。
  */
 export async function uploadAgentAttachments(
   sessionId: string,
@@ -683,7 +683,7 @@ export async function resolveAgentConfirm(sessionId: string, requestId: string, 
   });
 }
 
-/** 回复一次 opencode question。answers 是依題目順序的選中標籤。 */
+/** 回复一次 opencode question。answers 是依题目顺序的选中标签。 */
 export async function replyAgentQuestion(sessionId: string, requestId: string, answers: string[][]): Promise<void> {
   await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/question`, {
     method: "POST",
@@ -697,16 +697,16 @@ export async function deleteAgentSession(sessionId: string): Promise<void> {
 }
 
 /**
- * 拉一個會話的全量聊天歷史（opencode 原始訊息 + 游標元數據）。
+ * 拉一个会话的全量聊天历史（opencode 原始讯息 + 游标元数据）。
  *
- * 站內中繼 GET /api/agent/sessions/[id] 轉發網關 /agent/v1/sessions/:id/messages，
- * 契約：{ messages, event_counter, replay_first_id, fallback?:"replay_only" }。
- * 「回到歷史會話」由這個端點重建 transcript，SSE 只接 event_counter 之後的增量，
- * 不再依賴 1000 幀 ring buffer 回放（長會話會被截斷）。
+ * 站内中继 GET /api/agent/sessions/[id] 转发网关 /agent/v1/sessions/:id/messages，
+ * 契约：{ messages, event_counter, replay_first_id, fallback?:"replay_only" }。
+ * 「回到历史会话」由这个端点重建 transcript，SSE 只接 event_counter 之后的增量，
+ * 不再依赖 1000 帧 ring buffer 回放（长会话会被截断）。
  *
- * 錯誤沿 agentFetch 既有語義：404 → not_found、非 JSON → parse_error。
- * 這裡只補契約級校驗（messages 必為陣列、event_counter 必為有限非負數），
- * 校驗失敗丟 parse_error 讓調用方走降級路徑；逐 part 防呆歸歸一化層。
+ * 错误沿 agentFetch 既有语义：404 → not_found、非 JSON → parse_error。
+ * 这里只补契约级校验（messages 必为阵列、event_counter 必为有限非负数），
+ * 校验失败丢 parse_error 让调用方走降级路径；逐 part 防呆归归一化层。
  */
 export async function fetchAgentSessionMessages(sessionId: string): Promise<AgentSessionHistoryResponse> {
   const data = await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "GET" });
@@ -732,19 +732,19 @@ export async function fetchAgentSessionMessages(sessionId: string): Promise<Agen
  * REQ-D2：回合中追加一条指引（steer）。
  *
  * 语义与 sendAgentMessage 刻意分开：不终止当前回合、不另起一条用户消息。
- * 回传的 status 是网關的诚实判定——
+ * 回传的 status 是网关的诚实判定——
  *   "injected"：回合卡在 question 断点，这条已注入当前回合（applied_in_turn=true）
  *   "queued"：  当前回合跑着但没有可注入的断点 → 已排队，本回合结束后生效
  * 前端据此显示状态，绝不把 queued 当 injected 用。
  *
- * steer_id 由本端生成（乐观插入的条目要立刻有 id 可以挂状态帧；网關会回显同一个）。
+ * steer_id 由本端生成（乐观插入的条目要立刻有 id 可以挂状态帧；网关会回显同一个）。
  */
 export type AgentSteerAck =
   | { status: "injected"; steer_id: string; injected_into?: string[] }
   | { status: "queued"; steer_id: string; position?: number; deduped?: boolean };
 
 export interface AgentSteerOptions {
-  /** 本端生成并上送；非法时网關自行铸号（回传值才是权威）。 */
+  /** 本端生成并上送；非法时网关自行铸号（回传值才是权威）。 */
   steerId?: string;
 }
 
@@ -781,7 +781,7 @@ export async function steerAgentSession(
 }
 
 /**
- * 強制中止當下這輪生成（系统层取消，不是发 prompt 软停）。
+ * 强制中止当下这轮生成（系统层取消，不是发 prompt 软停）。
  * 网道转发到 opencode 的 /session/:id/abort，正在跑的 assistant turn 立刻终止。
  */
 export async function abortAgentSession(sessionId: string): Promise<void> {
@@ -924,7 +924,7 @@ export type AgentThinkingLevel = "low" | "medium" | "high" | "extreme";
 
 export const AGENT_THINKING_LEVELS: readonly AgentThinkingLevel[] = ["low", "medium", "high", "extreme"];
 
-/** 级別 → AgentSettings 三栏映射（唯一真源，逐档 × 三栏可被测试直接断言）。 */
+/** 级别 → AgentSettings 三栏映射（唯一真源，逐档 × 三栏可被测试直接断言）。 */
 export const AGENT_THINKING_LEVEL_SETTINGS: Record<
   AgentThinkingLevel,
   Pick<AgentSettings, "persona" | "cost_mode" | "beast_mode">
@@ -957,12 +957,12 @@ export const AGENT_THINKING_LEVEL_HINTS: Record<AgentThinkingLevel, string> = {
  */
 export const AGENT_THINKING_LEVEL_STORAGE_KEY = "agent-thinking-level-v1";
 
-/** 级別 → 写入 AgentSettings 的 patch（经 saveAgentSettings 既有链路落地）。 */
+/** 级别 → 写入 AgentSettings 的 patch（经 saveAgentSettings 既有链路落地）。 */
 export function agentThinkingLevelPatch(level: AgentThinkingLevel): Partial<AgentSettings> {
   return { ...AGENT_THINKING_LEVEL_SETTINGS[level] };
 }
 
-/** 由 settings 反推级別：mapping 覆盖不到的組合（如 premium + efficient）回 null。 */
+/** 由 settings 反推级别：mapping 覆盖不到的组合（如 premium + efficient）回 null。 */
 export function inferAgentThinkingLevel(settings: AgentSettings): AgentThinkingLevel | null {
   for (const level of AGENT_THINKING_LEVELS) {
     const spec = AGENT_THINKING_LEVEL_SETTINGS[level];
@@ -1025,7 +1025,7 @@ export async function requestSseTicket(sessionId: string): Promise<AgentSseTicke
   };
 }
 
-/** 组出带 ticket（与可选 last_event_id 續传游标）的 SSE URL。 */
+/** 组出带 ticket（与可选 last_event_id 续传游标）的 SSE URL。 */
 export function buildEventsUrl(eventsUrl: string, ticket: string, lastEventId?: number): string {
   const url = new URL(eventsUrl);
   url.searchParams.set("ticket", ticket);

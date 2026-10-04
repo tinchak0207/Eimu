@@ -2,7 +2,7 @@
 
 - 轮子来源：`/home/lenovo/Desktop/kunpeng-vendor`（pengfeiqiao/kunpeng，MIT），pin commit `872a58b`，复制时工作区干净（无未提交改动）。
 - 复制纪律：整档逐行 cp；白名单只允许 import 路径行改写，其余任何一行不许动。
-- 本档记录每一笔白名单改动（檔:行 → 改前/改後 → 理由），供后续 vendor 升级双向 diff。
+- 本档记录每一笔白名单改动（档:行 → 改前/改后 → 理由），供后续 vendor 升级双向 diff。
 - 本轮拆片方案：`eval-qinshihuang-polarbear/F-SHARDING.md` 片1（纯 A 类 5 档）。
 - 目标镜像本地为 `src/vendor-bridges/editor/`（对应 VPS 部署树 `/opt/agent-harness/gateway/editor/`），相对 import 路径两边同构。
 
@@ -10,17 +10,17 @@
 
 1. `src/vendor-bridges/editor/presets/filterPresets.ts:5`
    - 改前：`import type { ClipFilter } from '@/stores/editorStore';`
-   - 改後：`import type { ClipFilter } from '../adapter/editorStore';`
+   - 改后：`import type { ClipFilter } from '../adapter/editorStore';`
    - 理由：kunpeng `@/` alias（→ vendor `src/`）在 harness 树不存在；方案目标树中 store 替身落位 `editor/adapter/editorStore.ts`（片2 产物），从 `presets/` 子目录出发相对路径为 `../adapter/editorStore`。目标模块尚不存在，import 解析错误为预期（待片2补）。
 
 2. `src/vendor-bridges/editor/subtitleExport.ts:4`
    - 改前：`import type { SubtitleCue, EditorAspect } from '@/stores/editorStore';`
-   - 改後：`import type { SubtitleCue, EditorAspect } from './adapter/editorStore';`
+   - 改后：`import type { SubtitleCue, EditorAspect } from './adapter/editorStore';`
    - 理由：同上，editorStore 替身（片2）落位 `editor/adapter/editorStore.ts`，从 editor 根出发为 `./adapter/editorStore`。目标模块尚不存在，预期解析错误（待片2补）。
 
 3. `src/vendor-bridges/editor/subtitleExport.ts:5`
    - 改前：`import { aspectOutputSize, isPortraitAspect } from '@/lib/editor/aspect';`
-   - 改後：`import { aspectOutputSize, isPortraitAspect } from './aspect';`
+   - 改后：`import { aspectOutputSize, isPortraitAspect } from './aspect';`
    - 理由：方案片1白名单明文「`@/lib/editor/` → 相对路径」；aspect.ts 同为本片产物，落位于 editor 根，故 `./aspect`。
 
 ## tsc 归因验证（2026-08-29，片1验收）
@@ -45,19 +45,19 @@
 
 1. `fxRenderStub.ts:16`（vendor fxRender.ts:19 改写）
    - 改前：`import { DEFAULT_FX_TRANSFORM, useEditorStore, type EditorRenderError, type TextClip, type FxClip } from '@/stores/editorStore';`
-   - 改後：`import type { TextClip, FxClip } from './editorStore';`
+   - 改后：`import type { TextClip, FxClip } from './editorStore';`
    - 理由：片3 抽取面只有 5 个导出签名 + hashContent + 类型块，签名只消费 `TextClip`/`FxClip` 两类型；其余绑定（DEFAULT_FX_TRANSFORM/useEditorStore/EditorRenderError）属 Chromium worker 渲染层本体，不在抽取面。`@/stores/editorStore` → `./editorStore`（片2 产物，同目录）。
 
 2. `canvas/videoCompose.ts:11-13`（vendor videoCompose.ts:7/9/11 改写）
    - 改前：`import { convertFileSrc, invoke } from '@tauri-apps/api/tauri';` + `import { homeDir } from '@tauri-apps/api/path';` + `import { isWindowsSync } from '@/lib/platform';`
-   - 改後：三条统一 `from '../adapter/tauri-adapter'`（`invoke` / `homeDir` / `isWindowsSync`）
+   - 改后：三条统一 `from '../adapter/tauri-adapter'`（`invoke` / `homeDir` / `isWindowsSync`）
    - 理由：方案片5 白名单同映射（`@tauri-apps/*` → adapter、`@/lib/platform` → `./adapter/tauri-adapter`）；adapter 是片4 产物，当前缺档 → TS2307 × 3 为待片4 预期态（与片1 备案的 renderGraph 同类）。vendor:7 的 `convertFileSrc` 探测面用不到，未随档。
 
 3. `canvas/videoCompose.ts:22`（vendor L20 `shellQuote`）
    - 计划明文抽取段为 L21-48，但 Windows 候选分支引用 `shellQuote`，缺它 tsc 不过；逐行随档，记为「计划行段 +1 依赖行」。
 
 4. `fxRenderStub.ts` 四函数抛错体（buildTextClipDoc/buildFxClipDoc/renderFxTimelineLayer/renderFxTimelineOpaqueSegments）
-   - 全方案唯一非逐行偏差（F-SHARDING §6 风险2 授权），契约 = 同签名诚实抛错。文案 = 任务指定「特效/花字渲染层未接入：纯拼接场景不需要；带字幕烧录需 Chromium worker 农场另立项」+ 方案原文「fx 渲染需 Chromium，harness 場景不支援」。vendor fxRender L17 的 Vite `?raw`（MOTION_RUNTIME_SRC）确认隔离在替身之外，不进 Bun 解析器。
+   - 全方案唯一非逐行偏差（F-SHARDING §6 风险2 授权），契约 = 同签名诚实抛错。文案 = 任务指定「特效/花字渲染层未接入：纯拼接场景不需要；带字幕烧录需 Chromium worker 农场另立项」+ 方案原文「fx 渲染需 Chromium，harness 场景不支援」。vendor fxRender L17 的 Vite `?raw`（MOTION_RUNTIME_SRC）确认隔离在替身之外，不进 Bun 解析器。
 
 ### 类型块逐行抽取（diff 等价备案）
 
@@ -83,7 +83,7 @@
 
 1. `execute_command` 命令通道（方案 §2 明文）
    - 改前（vendor Rust）：`/bin/zsh -c` + `unsetopt EQUALS` 前缀，tokio Command + `process_group(0)`。
-   - 改後：`Bun.spawn(['bash','-lc',cmd])`，返回 `{ stdout, stderr, exit_code }` 同构（Rust CommandResult 8 字段中前端 composeEngine/videoCompose 本地 interface 只消费这 3 个；`output_id`/`*_total_chars`/`*_truncated` 属 read_command_output 分页面，无前端消费，不随）。
+   - 改后：`Bun.spawn(['bash','-lc',cmd])`，返回 `{ stdout, stderr, exit_code }` 同构（Rust CommandResult 8 字段中前端 composeEngine/videoCompose 本地 interface 只消费这 3 个；`output_id`/`*_total_chars`/`*_truncated` 属 read_command_output 分页面，无前端消费，不随）。
 2. timeout 语义：缺省 120000ms（对齐 bash.rs `unwrap_or(120_000)`）；自管 timer → SIGKILL 树杀；超时 reject 文案对齐 vendor `Command timed out after Nms`；被信号杀 `exit_code = -1`（对齐 `status.code().unwrap_or(-1)`）。
 3. `kill_command`（方案 §4 片4「kill 语义（AbortSignal → SIGKILL）」）：vendor 为进程组 `killpg` TERM→1.5s grace→SIGKILL；Bun.spawn 无 `process_group(0)` 等价 → 进程表（requestId→pid，对应 BashProcessState.active）+ 树杀复用 `stopBackgroundProcessCommand(pid, true)` Unix 分支公式（pkill -KILL -P 先杀直接子进程、再 kill -KILL 父，顺序保证 reparent 前可寻址）。表内无此 id 静默 Ok（对齐 vendor pgid None）。
 4. `get_home_dir` / `homeDir`（@tauri-apps/api/path）：`dirs::home_dir()` → `process.env.HOME`；缺失时抛同文案 `Cannot find home directory`。
@@ -120,31 +120,31 @@ artifactsStub（方案 §1.1 行 appendArtifact 明文「替身：no-op / JSONL 
 
 1. `composeEngine.ts:18`
    - 改前：`import { invoke } from '@tauri-apps/api/tauri';`
-   - 改後：`import { invoke } from './adapter/tauri-adapter';`
+   - 改后：`import { invoke } from './adapter/tauri-adapter';`
    - 理由：方案片5 白名单「`@tauri-apps/*`→adapter」；invoke = 片4 tauri-adapter 同签名导出。
 2. `composeEngine.ts:19`
    - 改前：`import { createDir, exists, removeDir } from '@tauri-apps/api/fs';`
-   - 改後：`import { createDir, exists, removeDir } from './adapter/tauri-adapter';`
+   - 改后：`import { createDir, exists, removeDir } from './adapter/tauri-adapter';`
    - 理由：同上；fs 三函数 = 片4 node:fs/promises 同签名替身。与 L18 分两条语句 import 同一模块，保持 vendor 行结构最小改动。
 3. `composeEngine.ts:20`
    - 改前：`import { stopBackgroundProcessCommand } from '@/lib/platform';`
-   - 改後：`import { stopBackgroundProcessCommand } from './adapter/tauri-adapter';`
+   - 改后：`import { stopBackgroundProcessCommand } from './adapter/tauri-adapter';`
    - 理由：任务改写表明文 `@/lib/platform`→`./adapter/tauri-adapter`；片4 已逐行随档该函数。
 4. `composeEngine.ts:24`
    - 改前：`} from '@/stores/editorStore';`
-   - 改後：`} from './adapter/editorStore';`
+   - 改后：`} from './adapter/editorStore';`
    - 理由：任务改写表明文；片2 产物（useEditorStore/EXPORT_RESOLUTIONS/五类型均已在位）。
 5. `composeEngine.ts:25`
    - 改前：`import { detectFfmpeg } from '@/lib/canvas/videoCompose';`
-   - 改後：`import { detectFfmpeg } from './canvas/videoCompose';`
+   - 改后：`import { detectFfmpeg } from './canvas/videoCompose';`
    - 理由：任务改写表明文；片3 产物。
 6. `composeEngine.ts:36`
    - 改前：`} from './fxRender';`
-   - 改後：`} from './adapter/fxRenderStub';`
+   - 改后：`} from './adapter/fxRenderStub';`
    - 理由：任务改写表明文；片3 stub 导出面与 vendor fxRender 五函数+两类型同签名（FxSegmentLayerResult/FxTimelineProgress 随档）。
 7. `composeEngine.ts:38`
    - 改前：`import { appendArtifact } from '@/lib/artifacts';`
-   - 改後：`import { appendArtifact } from './adapter/artifactsStub';`
+   - 改后：`import { appendArtifact } from './adapter/artifactsStub';`
    - 理由：任务改写表明文；片4 产物。
 
 未改动即合规的 import（备案）：L26 `./presets/transitionPresets`、L27 `./presets/filterPresets`、L37 `./subtitleExport`（片1 产物，vendor 原相对路径直接命中）；L39 `./renderGraph`（本片落位后解析成功）；L40 `./renderBackends`、L41 `./aspect`（片1 产物）。全档 import 仅 L18-41，无动态 `import()`，无其他改动点。
@@ -153,10 +153,10 @@ artifactsStub（方案 §1.1 行 appendArtifact 明文「替身：no-op / JSONL 
 
 1. `renderGraph.ts:8`
    - 改前：`import { useEditorStore, EXPORT_RESOLUTIONS, type EditorAspect } from '@/stores/editorStore';`
-   - 改後：`from './adapter/editorStore'`（片2 产物；EditorAspect 已在替身类型面）。
+   - 改后：`from './adapter/editorStore'`（片2 产物；EditorAspect 已在替身类型面）。
 2. `renderGraph.ts:9`
    - 改前：`import { aspectOutputSize } from '@/lib/editor/aspect';`
-   - 改後：`from './aspect'`（片1 产物）。
+   - 改后：`from './aspect'`（片1 产物）。
 
 ## 验收记录（2026-08-29，片5）
 
@@ -171,6 +171,6 @@ artifactsStub（方案 §1.1 行 appendArtifact 明文「替身：no-op / JSONL 
 
 - VPS `/opt/agent-harness/gateway/editor/` = 本地 `src/vendor-bridges/editor/` 整树逐档 md5 等价（13 档对账通过）。
 - `index.ts`：film 分支占位 return → `assembleFilmNode`（唯一函数级改动）+ 静态路由 Content-Type 加 `.mp4 → video/mp4` 一行（成片交付必要项）。model 解析三级/报价/confirm 零触碰。
-- `assembleFilmNode` 白名单内组合：收集上游 video 产物 → title 最前/shotN 升冪 → **store URL 直映射本盘 `/opt/image-data-api/data`**（VPS 内 fetch 公网回环会挂死，实弹发现）→ ffprobe 逐段真时长 → setHarnessState 注入 → `exportSelectedMainClips` → `probeRenderedVideo` 校验门（≥输入总长 90%）→ TTS 同款公网目录，costCoins: 0。
+- `assembleFilmNode` 白名单内组合：收集上游 video 产物 → title 最前/shotN 升幂 → **store URL 直映射本盘 `/opt/image-data-api/data`**（VPS 内 fetch 公网回环会挂死，实弹发现）→ ffprobe 逐段真时长 → setHarnessState 注入 → `exportSelectedMainClips` → `probeRenderedVideo` 校验门（≥输入总长 90%）→ TTS 同款公网目录，costCoins: 0。
 - 本地辅助行（非轮子改动）：`shq` 引号函数一行内联（轮内 shellQuote 为模块私有，不扩其导出面）。
 - 终极实弹：Bun 1.3.14 真身（VPS），7 段真实素材 36.225s 输入 → 成片 36.248s / 1280x720 / h264，PASS（`/tmp/qsbear-film-test.ts` 可重放）。bun build 门禁 + smoke health/auth/agent_text 3 PASS。

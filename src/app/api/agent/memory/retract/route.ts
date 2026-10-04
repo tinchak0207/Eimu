@@ -1,9 +1,9 @@
-// POST /api/agent/memory/retract —— 批次／指定 doc 撤回（契約 §3.2）。
+// POST /api/agent/memory/retract —— 批次／指定 doc 撤回（契约 §3.2）。
 //
-// 與 ingest 同一套紀律：raw bytes 驗簽 → snake_case 映射 → 調 store，route 內零業務閘門。
-// 請求二選一：`{ "batch_id": "..." }` 或 `{ "doc_ids": ["a","b"] }`；
-// 動作（status=retracted + 從 INDEX 移除、不刪檔留證）全在 store 的 retractMemoryDocs。
-// 響應形狀：`{ "retracted": ["<id>"] }`（契約 §3.2）。
+// 与 ingest 同一套纪律：raw bytes 验签 → snake_case 映射 → 调 store，route 内零业务闸门。
+// 请求二选一：`{ "batch_id": "..." }` 或 `{ "doc_ids": ["a","b"] }`；
+// 动作（status=retracted + 从 INDEX 移除、不删档留证）全在 store 的 retractMemoryDocs。
+// 响应形状：`{ "retracted": ["<id>"] }`（契约 §3.2）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { retractMemoryDocs } from "@/lib/agent-memory-store";
@@ -11,7 +11,7 @@ import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hma
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 interface RetractRequestBody {
   batch_id?: unknown;

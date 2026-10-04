@@ -1,4 +1,4 @@
-"""純代碼配樂：讀 out/cues.json（畫面時間軸導出的卡點），合成 48kHz 立體聲 → out/score.wav"""
+"""纯代码配乐：读 out/cues.json（画面时间轴导出的卡点），合成 48kHz 立体声 → out/score.wav"""
 import json, wave, os
 import numpy as np
 
@@ -34,7 +34,7 @@ def bell(f, dur=1.4, idx=2.2, ratio=2.0, dec=.45):
     return np.sin(2 * np.pi * f * t + idx * np.exp(-t / .12) * np.sin(2 * np.pi * f * ratio * t)) * env
 
 
-# ---------- Pad：每段一個和弦（和聲由畫面時間軸 cues.chords 決定），交叉淡入 ----------
+# ---------- Pad：每段一个和弦（和声由画面时间轴 cues.chords 决定），交叉淡入 ----------
 for (a, b, bass, notes, _) in cues["chords"]:
     a0 = max(0, a - .7); dur = b - a0 + 1.6
     t = tt(dur)
@@ -52,7 +52,7 @@ for (a, b, bass, notes, _) in cues["chords"]:
     sub = (np.sin(2 * np.pi * hz(bass) * t) + .35 * np.sin(2 * np.pi * hz(bass + 12) * t)) * env * .10
     put(sub, a0, 1, 0, .1)
 
-# ---------- 琶音（100 BPM 八分音符，全局網格；力度由每段決定） ----------
+# ---------- 琶音（100 BPM 八分音符，全局网格；力度由每段决定） ----------
 grid = .3
 for (a, b, bass, notes, vel) in cues["chords"]:
     if vel <= 0: continue
@@ -64,7 +64,7 @@ for (a, b, bass, notes, vel) in cues["chords"]:
         put(bell(hz(m), 1.1, 1.4, 2.0, .28), t0, .055 * vel * acc, (-.5, .5)[k % 2] * .6, .55)
         k += 1; t0 += grid
 
-# ---------- 低頻脈動 ----------
+# ---------- 低频脉动 ----------
 for (a, b) in cues["pulse"]:
     t0 = np.ceil(a / (grid * 2)) * grid * 2
     while t0 < b - .3:
@@ -72,7 +72,7 @@ for (a, b) in cues["pulse"]:
         put(np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .18) * .22, t0, 1, 0, .05)
         t0 += grid * 2
 
-# ---------- 電影重擊（影院段落剪輯點） ----------
+# ---------- 电影重击（影院段落剪辑点） ----------
 def boom():
     t = tt(2.4)
     f = 31 + 42 * np.exp(-t / .08)
@@ -83,7 +83,7 @@ def boom():
 for c in cues.get("boom", []):
     put(boom(), c - .005, .42, 0, .35)
 
-# ---------- 倒帶：下行鈴音急奔 ----------
+# ---------- 倒带：下行铃音急奔 ----------
 for c in cues.get("rewind", []):
     run = [96, 93, 91, 88, 86, 84, 81, 79, 76, 74, 72, 69, 67, 64, 62, 60]
     tt0 = c
@@ -95,7 +95,7 @@ for c in cues.get("rewind", []):
 def whoosh(dur=1.4, peak=.95):
     t = tt(dur); x = rng.standard_normal(len(t))
     env = np.where(t < peak, (t / peak) ** 2.5, np.exp(-(t - peak) / .18))
-    cut = .02 + .22 * env                                   # 隨包絡開合的一階低通
+    cut = .02 + .22 * env                                   # 随包络开合的一阶低通
     y = np.zeros_like(x); s = 0.0
     for i in range(len(x)):
         s += cut[i] * (x[i] - s); y[i] = s
@@ -142,7 +142,7 @@ for c in cues["swell"]:
     y = np.convolve(x, np.ones(60) / 60, "same") * np.sin(np.pi * np.clip(t / 2.2, 0, 1)) ** 2
     put(y * .25, c, 1, 0, .8)
 
-# ---------- 卷積殘響（合成 IR） ----------
+# ---------- 卷积残响（合成 IR） ----------
 L = int(2.8 * SR); ti = np.arange(L) / SR
 ir = np.zeros((2, L))
 for ch in range(2):
@@ -154,7 +154,7 @@ nfft = 1 << int(np.ceil(np.log2(N + L)))
 wet = np.stack([np.fft.irfft(np.fft.rfft(send[ch], nfft) * np.fft.rfft(ir[ch], nfft), nfft)[:N] for ch in range(2)])
 mix = dry + wet * .55
 
-# ---------- 母帶：去直流、柔性限幅、收尾淡出 ----------
+# ---------- 母带：去直流、柔性限幅、收尾淡出 ----------
 mix -= np.mean(mix, axis=1, keepdims=True)
 fade = np.clip((D - np.arange(N) / SR) / .9, 0, 1) ** 1.5
 fin = np.clip(np.arange(N) / SR / .05, 0, 1)

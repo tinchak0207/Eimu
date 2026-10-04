@@ -3,27 +3,27 @@ import { ok, fail } from "../lib/client"
 import { downloadImage, uploadBlob, runPIL, blobPath } from "../lib/img-composite"
 import { vlmAskJson } from "../lib/img-orchestrate"
 
-// 黑白線稿鎖定（2026-08-31 片3）：構圖草稿 → 邊緣線稿 + 構圖元數據。
-// 純確定性 PIL（灰度→FIND_EDGES→自動閾值反轉），零 LLM 依賴；可選 VLM 註解。
-// 誠實：這是低成本構圖驗證（把草稿壓成黑白線稿看結構），非 AI 重繪/美化。
+// 黑白线稿锁定（2026-08-31 片3）：构图草稿 → 边缘线稿 + 构图元数据。
+// 纯确定性 PIL（灰度→FIND_EDGES→自动阈值反转），零 LLM 依赖；可选 VLM 注解。
+// 诚实：这是低成本构图验证（把草稿压成黑白线稿看结构），非 AI 重绘/美化。
 
 export default tool({
   description:
-    "黑白線稿鎖定（純確定性 PIL，零生圖扣費、默認零 LLM）：image_url 填構圖草稿 → 灰度轉邊緣（FIND_EDGES + 95 百分位自動閾值反轉）輸出黑線白底線稿公網 URL，並附 PIL 統計的構圖元數據（主體重心/留白比例/三分線偏差/邊緣能量）。誠實：這是低成本構圖驗證（壓線稿看結構骨架），不是 AI 重繪或美化，也不產出新構圖。annotate=true 才額外調 VLM 給一句構圖註解（默認關，省呼叫）。",
+    "黑白线稿锁定（纯确定性 PIL，零生图扣费、默认零 LLM）：image_url 填构图草稿 → 灰度转边缘（FIND_EDGES + 95 百分位自动阈值反转）输出黑线白底线稿公网 URL，并附 PIL 统计的构图元数据（主体重心/留白比例/三分线偏差/边缘能量）。诚实：这是低成本构图验证（压线稿看结构骨架），不是 AI 重绘或美化，也不产出新构图。annotate=true 才额外调 VLM 给一句构图注解（默认关，省呼叫）。",
   args: {
-    image_url: tool.schema.string().describe("構圖草稿 URL"),
-    low: tool.schema.number().int().min(0).max(255).optional().describe("邊緣閾值下限，默認 64"),
-    high: tool.schema.number().int().min(0).max(255).optional().describe("自動閾值上限參考，默認 160"),
-    annotate: tool.schema.boolean().optional().describe("true=額外調 VLM 給一句構圖註解（默認 false）"),
+    image_url: tool.schema.string().describe("构图草稿 URL"),
+    low: tool.schema.number().int().min(0).max(255).optional().describe("边缘阈值下限，默认 64"),
+    high: tool.schema.number().int().min(0).max(255).optional().describe("自动阈值上限参考，默认 160"),
+    annotate: tool.schema.boolean().optional().describe("true=额外调 VLM 给一句构图注解（默认 false）"),
   },
   async execute(args, context) {
     const url = args.image_url.trim()
-    if (!/^https?:\/\//.test(url)) return fail("invalid_image_url", "image_url 必須是 http(s) URL", { title: "輸入非法" })
+    if (!/^https?:\/\//.test(url)) return fail("invalid_image_url", "image_url 必须是 http(s) URL", { title: "输入非法" })
     let buf: Buffer
     try {
       buf = await downloadImage(url, context.abort)
     } catch (e: any) {
-      return fail("download_failed", `下載草稿失敗：${e?.message ?? e}`, { title: "下載失敗" })
+      return fail("download_failed", `下载草稿失败：${e?.message ?? e}`, { title: "下载失败" })
     }
     const job = await runPIL({
       inputs: { img: buf },
@@ -39,30 +39,30 @@ emit(width=la.width, height=la.height, composition=st)
       timeoutMs: 90_000,
       signal: context.abort,
     })
-    if (!job.ok || !job.files?.sketch) return fail("sketch_failed", `線稿生成失敗：${job.stderr}`, { title: "線稿失敗" })
+    if (!job.ok || !job.files?.sketch) return fail("sketch_failed", `线稿生成失败：${job.stderr}`, { title: "线稿失败" })
 
     let pubUrl: string
     try {
       pubUrl = await uploadBlob(blobPath("sketch"), job.files.sketch, "image/png", context.abort)
     } catch (e: any) {
-      return fail("upload_failed", `上傳公網失敗：${e?.message ?? e}`, { title: "上傳失敗" })
+      return fail("upload_failed", `上传公网失败：${e?.message ?? e}`, { title: "上传失败" })
     }
 
     let annotation: string | null = null
     if (args.annotate) {
-      const v = await vlmAskJson([pubUrl], "這是黑白線稿。用一句中文點出構圖骨架（主體位置/視線/留白）與最大問題。輸出 JSON：{\"note\":\"...\"}", 400)
-      annotation = v.ok ? String((v.data as any)?.note ?? "") : `（VLM 不可達：${v.reason}）`
+      const v = await vlmAskJson([pubUrl], "这是黑白线稿。用一句中文点出构图骨架（主体位置/视线/留白）与最大问题。输出 JSON：{\"note\":\"...\"}", 400)
+      annotation = v.ok ? String((v.data as any)?.note ?? "") : `（VLM 不可达：${v.reason}）`
     }
 
     return ok(
       {
-        title: "黑白線稿鎖定完成",
+        title: "黑白线稿锁定完成",
         url: pubUrl,
         size: `${job.result?.width}x${job.result?.height}`,
         composition: (job.result as any)?.composition ?? null,
         annotation,
         mechanism: "deterministic_edge",
-        note: "line_art=灰度→FIND_EDGES→自動閾值反轉（黑線白底）；composition 為 PIL 像素統計（零 LLM）。低成本構圖驗證，非重繪。",
+        note: "line_art=灰度→FIND_EDGES→自动阈值反转（黑线白底）；composition 为 PIL 像素统计（零 LLM）。低成本构图验证，非重绘。",
       },
       { url: pubUrl },
     )

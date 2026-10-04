@@ -7,8 +7,8 @@ export interface ReferenceImage {
   file: File;
   previewUrl: string;
   size: number;
-  /** 原圖自然尺寸（新上傳由 ReferenceImageUpload 測量填入；舊資料可能缺）。
-   *  為後續「跟隨參考圖比例」功能鋪樁。 */
+  /** 原图自然尺寸（新上传由 ReferenceImageUpload 测量填入；旧资料可能缺）。
+   *  为后续「跟随参考图比例」功能铺桩。 */
   naturalWidth?: number;
   naturalHeight?: number;
   role?: ReferenceImageRole;
@@ -26,9 +26,9 @@ export type ReferenceImageRole =
   | "general";
 
 /**
- * ReferenceImageRole 的唯一運行時清單（2026-08-22 補）：
- * 角色枚舉的 owner 就是本檔案；畫布 reference 節點、API 校驗一律引用這裡，
- * 不另立第二套枚舉。標籤文案在 reference-image-roles.REFERENCE_IMAGE_ROLES。
+ * ReferenceImageRole 的唯一运行时清单（2026-08-22 补）：
+ * 角色枚举的 owner 就是本档案；画布 reference 节点、API 校验一律引用这里，
+ * 不另立第二套枚举。标签文案在 reference-image-roles.REFERENCE_IMAGE_ROLES。
  */
 export const REFERENCE_IMAGE_ROLE_VALUES: readonly ReferenceImageRole[] = [
   "style",
@@ -39,7 +39,7 @@ export const REFERENCE_IMAGE_ROLE_VALUES: readonly ReferenceImageRole[] = [
   "general",
 ];
 
-/** 未知值一律收斂為 "general"（舊數據/agent 亂填都不炸）。 */
+/** 未知值一律收敛为 "general"（旧数据/agent 乱填都不炸）。 */
 export function toReferenceImageRole(value: unknown): ReferenceImageRole {
   return typeof value === "string" && (REFERENCE_IMAGE_ROLE_VALUES as readonly string[]).includes(value)
     ? (value as ReferenceImageRole)

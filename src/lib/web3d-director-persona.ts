@@ -10,7 +10,7 @@
  *      定义真源 blender-tools.ts L795、L853 BLENDER_HARNESS_TOOL_IDS 经
  *      harness-tool-registry L36 spread；image_quote L76 报价对偶先例；
  *      three.js 域本身无 harness 工具，场景规格走 scene_spec/bundle_ref
- *      交付契约，registry 佔位行注释同源声明）；
+ *      交付契约，registry 占位行注释同源声明）；
  *   ② 委托单/回传契约 import 自 web3d-delegate.ts（Web3D 版委派组装，
  *      交付物三栏 scene_spec/bundle_ref/qc）；
  *   ③ SKILL 挂载：skills/web-3d-awwwards/SKILL.md（2026-09-08 现场验证存在；
@@ -45,10 +45,10 @@ import type { Web3dToolResult } from "./web3d-delegate";
 /** persona 键名（gateway bindings / 设定 UI / 日志统一用此 id）。 */
 export const WEB3D_DIRECTOR_PERSONA_ID = "web3d-director" as const;
 
-/** 展示名（简体文案；选单/卡片/日志统一取此值，与 registry 佔位行 label 一致）。 */
+/** 展示名（简体文案；选单/卡片/日志统一取此值，与 registry 占位行 label 一致）。 */
 export const WEB3D_DIRECTOR_PERSONA_LABEL = "Web3D 导演" as const;
 
-/** persona 一句话定位（设定页/选单描述用，与 registry 佔位行 description 一致）。 */
+/** persona 一句话定位（设定页/选单描述用，与 registry 占位行 description 一致）。 */
 export const WEB3D_DIRECTOR_PERSONA_DESCRIPTION =
   "Web3D 交互场景：three.js 场景规格与 GLB 资产导出，交付可部署的交互体验。" as const;
 

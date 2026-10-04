@@ -5,7 +5,7 @@ import { cleanFilmeraWatermark, isFilmeraMediaUrl, __internals } from "./filmera
 
 const { decodePng, encodePng, cleanPngBuffer } = __internals;
 
-/** 構造一張帶模擬水印的小 PNG：純色背景 + 右下角半透明白色污染區。 */
+/** 构造一张带模拟水印的小 PNG：纯色背景 + 右下角半透明白色污染区。 */
 function makeWatermarkedPng(width: number, height: number): Buffer {
   const channels = 3;
   const data = Buffer.alloc(width * height * channels);
@@ -15,7 +15,7 @@ function makeWatermarkedPng(width: number, height: number): Buffer {
     data[i * 3 + 1] = 100;
     data[i * 3 + 2] = 100;
   }
-  // 水印區（按 cleaner 的 bbox 常量）：半透明白 alpha 0.55 疊加
+  // 水印区（按 cleaner 的 bbox 常量）：半透明白 alpha 0.55 叠加
   const alpha = 0.55;
   const x0 = width - __internals.WATERMARK_RIGHT_OFFSET_START;
   const x1 = width - __internals.WATERMARK_RIGHT_OFFSET_END;
@@ -33,32 +33,32 @@ function makeWatermarkedPng(width: number, height: number): Buffer {
   return encodePng({ width, height, channels, data });
 }
 
-test("isFilmeraMediaUrl：正負例", () => {
+test("isFilmeraMediaUrl：正负例", () => {
   assert.ok(isFilmeraMediaUrl("https://media.filmera.ai/ref/abc.png"));
   assert.ok(!isFilmeraMediaUrl("https://www.filmera.ai/ref/abc.png"));
   assert.ok(!isFilmeraMediaUrl("https://cdn.example.com/x.png"));
   assert.ok(!isFilmeraMediaUrl("not a url"));
 });
 
-test("cleanPngBuffer：水印區像素被修復回接近背景色", () => {
+test("cleanPngBuffer：水印区像素被修复回接近背景色", () => {
   const width = 240;
   const height = 120;
   const marked = makeWatermarkedPng(width, height);
   const cleaned = cleanPngBuffer(marked);
   const img = decodePng(cleaned);
 
-  // 水印中心點採樣
+  // 水印中心点采样
   const cx = width - 105;
   const cy = height - 56;
   const idx = (cy * width + cx) * img.channels;
   const [r, g, b] = [img.data[idx], img.data[idx + 1], img.data[idx + 2]];
   assert.ok(
     Math.abs(r - 100) < 40 && Math.abs(g - 100) < 40 && Math.abs(b - 100) < 40,
-    `水印區未修復：rgb=(${r},${g},${b})`,
+    `水印区未修复：rgb=(${r},${g},${b})`,
   );
 });
 
-test("cleanFilmeraWatermark：mock fetch 成功路徑返回清洗後 PNG", async () => {
+test("cleanFilmeraWatermark：mock fetch 成功路径返回清洗后 PNG", async () => {
   const marked = makeWatermarkedPng(240, 120);
   const original = globalThis.fetch;
   globalThis.fetch = (async () => ({
@@ -78,7 +78,7 @@ test("cleanFilmeraWatermark：mock fetch 成功路徑返回清洗後 PNG", async
   }
 });
 
-test("cleanFilmeraWatermark：非 PNG 內容 → 原樣返回原 buffer", async () => {
+test("cleanFilmeraWatermark：非 PNG 内容 → 原样返回原 buffer", async () => {
   const jpegish = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
   const original = globalThis.fetch;
   globalThis.fetch = (async () => ({
@@ -94,7 +94,7 @@ test("cleanFilmeraWatermark：非 PNG 內容 → 原樣返回原 buffer", async 
   }
 });
 
-test("cleanFilmeraWatermark：HTTP 失敗 → 拋錯（調用方回退原始 URL）", async () => {
+test("cleanFilmeraWatermark：HTTP 失败 → 抛错（调用方回退原始 URL）", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => ({
     ok: false,
@@ -111,7 +111,7 @@ test("cleanFilmeraWatermark：HTTP 失敗 → 拋錯（調用方回退原始 URL
   }
 });
 
-test("cleanFilmeraWatermark：網絡異常 → 拋錯（調用方回退原始 URL）", async () => {
+test("cleanFilmeraWatermark：网络异常 → 抛错（调用方回退原始 URL）", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => {
     throw new Error("network down");

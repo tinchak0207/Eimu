@@ -568,10 +568,10 @@ test("normalizeHistoryEntry 白名单收 entryKind（非法值丢弃），source
     "server",
   );
   assert.equal(pushed?.entryKind, "workflow");
-  // workflow 字段维持 passthrough：DAG 四欄原样保留
+  // workflow 字段维持 passthrough：DAG 四栏原样保留
   assert.deepEqual((pushed?.workflow as { dagNodes: unknown[] }).dagNodes, [{ id: "n1" }]);
 
-  // source=workflow 且没给 entryKind → 自动补 workflow（旧记录/漏欄的兜底）
+  // source=workflow 且没给 entryKind → 自动补 workflow（旧记录/漏栏的兜底）
   const fromSource = normalizeHistoryEntry({ id: "b", generatedAt: 1 }, "workflow");
   assert.equal(fromSource?.entryKind, "workflow");
 });
@@ -762,7 +762,7 @@ test("filterHistoryEntries 支持按 entryKind:audio 过滤，且 audio 计入�
 });
 
 test("normalizeHistoryEntry 现在也显式写入 mediaType:image（新契约）", () => {
-  // 舊行为刻意对 image 不写 mediaType（缺省即 image）；改由交付物注册表统一后，
+  // 旧行为刻意对 image 不写 mediaType（缺省即 image）；改由交付物注册表统一后，
   // image 也显式落 mediaType，与 video/audio 同形。这不是放宽——是契约改变：
   // mediaType 的值域与 deliverable-kind 注册表完全一致。
   const normalized = normalizeHistoryEntry(

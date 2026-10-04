@@ -725,7 +725,7 @@ function AgentChatPreviewClientComponent() {
                 large
               />
             </div>
-            {/* 示例＝正式版同源（agent-example-prompts 唯一真源）＋同款玻璃膠囊。 */}
+            {/* 示例＝正式版同源（agent-example-prompts 唯一真源）＋同款玻璃胶囊。 */}
             <div className="mt-5 flex w-full flex-wrap items-center justify-center gap-2">
               {AGENT_EXAMPLE_PROMPTS.map((prompt) => (
                 <button

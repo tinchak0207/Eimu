@@ -125,25 +125,25 @@ export interface AgentComposerProps {
    * （空输入框时的红方块）语义彻底分开：**空框＝停止，有字＝引导**。
    *
    * 状态真相不在这里：这条指引到底「已注入本回合」还是「排队中·本回合结束后
-   * 生效」，由网關 steer.status 帧决定，落在用户气泡的徽章上。这里只负责让
+   * 生效」，由网关 steer.status 帧决定，落在用户气泡的徽章上。这里只负责让
    * 按钮不冒充停止。缺省 false = 渲染与不传时逐位元一致。
    */
   steerActive?: boolean;
   /**
-   * 外部（面板）在途：这条送出还没落地，或本輪还没真正开始——空態首發要先建號
-   * 鑄票，網關還要把 prompt 送進 opencode 才回 ack（实測 10–15s）。
+   * 外部（面板）在途：这条送出还没落地，或本轮还没真正开始——空态首发要先建号
+   * 铸票，网关还要把 prompt 送进 opencode 才回 ack（实测 10–15s）。
    *
    * 为真时送出钮位置立刻进入在途态：转圈、不可再点，输入框空白时也一样是转圈
    * 送出钮（不是 disabled 灰钮），并且压过「输入框空 → 停止钮」那条替换语义。
-   * 「本輪尚未开始」的单一真相源在 AgentChatPanel（它同时知道 turnActive 与
+   * 「本轮尚未开始」的单一真相源在 AgentChatPanel（它同时知道 turnActive 与
    * onSend 的 promise），这里只负责渲染，不自己猜。缺省 false = 行为与不传时
    * 逐位元一致。
    */
   externalSendPending?: boolean;
   /**
-   * 可選介面（2026-10-03）：把「把檔案加進附件列」的既有入口（enqueueFiles，
-   * 拖拽／貼上／選檔三條入口共用的同一條管道）註冊給外部呼叫。只暴露、不改入隊
-   * 邏輯（多檔逐個處理、lazy 建號、狀態機都在既有函式裡）。不傳＝行為逐位元不變。
+   * 可选介面（2026-10-03）：把「把档案加进附件列」的既有入口（enqueueFiles，
+   * 拖拽／贴上／选档三条入口共用的同一条管道）注册给外部呼叫。只暴露、不改入队
+   * 逻辑（多档逐个处理、lazy 建号、状态机都在既有函式里）。不传＝行为逐位元不变。
    */
   attachFilesRef?: MutableRefObject<((files: File[]) => void) | null>;
 }
@@ -169,7 +169,7 @@ const ACCEPTED_TYPES = [
   ".mp4",
   ".mov",
   ".zip",
-  // 音頻附件（本地參考素材）：與閘道 ALLOWED_UPLOAD_EXTS 音頻項對齊。
+  // 音频附件（本地参考素材）：与闸道 ALLOWED_UPLOAD_EXTS 音频项对齐。
   ".mp3",
   ".wav",
   ".m4a",
@@ -184,19 +184,19 @@ type PendingAttachmentStatus = "extracting" | "uploading" | "ready" | "error";
  * 罪状 2b：上传 413 无声标红。单请求体上限 = Vercel 平台硬顶 4.5MB
  * （attachments 路由只是透传代理，代码层无法调高平台限制），留出 multipart
  * 边界等开销后按 4MB 预检。超限文件在上传前就地给出人话错误，不再等 413。
- * 影片／音頻豁免此闸：原片走网关直传（uploadVideoDirect / uploadAudioDirect，
+ * 影片／音频豁免此闸：原片走网关直传（uploadVideoDirect / uploadAudioDirect，
  * 绕开 Vercel），上限改用网关的 100MB（MAX_VIDEO_BYTES）。
  */
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 /**
- * 音頻副檔名（本地參考素材，如一首真歌當翻唱 source_audio）。與閘道
- * `ALLOWED_UPLOAD_EXTS` 的音頻項同一份語義、與 `ACCEPTED_TYPES` 對齊；
- * MIME 優先、副檔名兜底（部分系統給空 MIME）。這類檔走大檔直傳而非小檔路。
+ * 音频副档名（本地参考素材，如一首真歌当翻唱 source_audio）。与闸道
+ * `ALLOWED_UPLOAD_EXTS` 的音频项同一份语义、与 `ACCEPTED_TYPES` 对齐；
+ * MIME 优先、副档名兜底（部分系统给空 MIME）。这类档走大档直传而非小档路。
  */
 const AUDIO_FILE_EXTS = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
 
-/** 判断一个 File 是否要走音頻大檔直傳路徑（與 isVideoFile 同款 MIME 優先、副檔名兜底）。 */
+/** 判断一个 File 是否要走音频大档直传路径（与 isVideoFile 同款 MIME 优先、副档名兜底）。 */
 function isAudioFile(file: { type?: string; name?: string }): boolean {
   if (file.type?.startsWith("audio/")) return true;
   return AUDIO_FILE_EXTS.test(file.name ?? "");
@@ -261,8 +261,8 @@ function formatMb(bytes: number): string {
  * 送出锁的硬保险上限（20s）。relay 路径的 fetch 没有 timeout，请求卡死时
  * 不能把送出钮永久锁死——到点无条件解锁，宁可让用户重试也不做假死按钮。
  *
- * 2026-09-18 起面板层（AgentChatPanel 的「本輪還沒开始」在途态）沿用同一个值，
- * 两处寿命一致：这里锁的是输入区自己的投递，那边锁的是面板在等的本輪开始。
+ * 2026-09-18 起面板层（AgentChatPanel 的「本轮还没开始」在途态）沿用同一个值，
+ * 两处寿命一致：这里锁的是输入区自己的投递，那边锁的是面板在等的本轮开始。
  */
 export const SEND_HARD_TIMEOUT_MS = 20_000;
 
@@ -279,7 +279,7 @@ interface PendingAttachment {
   refs?: AgentAttachmentRef[];
   /** 影片专用：原片的 Object URL（预览可播，D-16）。移除／送出时必须 revoke。 */
   videoUrl?: string;
-  /** 影片专用：關鍵幀縮圖的 Object URL 與時間點文案（本機 ingest 或降級抽幀皆會填）。 */
+  /** 影片专用：关键帧缩图的 Object URL 与时间点文案（本机 ingest 或降级抽帧皆会填）。 */
   frames?: { url: string; label: string }[];
   /** 抽帧进度（0…FRAME_COUNT），仅 extracting 期间有意义。 */
   framesDone?: number;
@@ -296,7 +296,7 @@ interface PendingAttachment {
 }
 
 /**
- * 输入框跟着内容长高，上限交给 CSS 的 max-h-[15rem]（=240px＠16px 根字級）（到顶后自己滚）。
+ * 输入框跟着内容长高，上限交给 CSS 的 max-h-[15rem]（=240px＠16px 根字级）（到顶后自己滚）。
  * rows=1 的固定高度下，续写一段长愿望只能看见最后一行，看不到自己写了什么。
  */
 function autoGrow(el: HTMLTextAreaElement) {
@@ -305,49 +305,49 @@ function autoGrow(el: HTMLTextAreaElement) {
 }
 
 /**
- * 窄框用的短 placeholder（2026-09-30 手機截圖實錘）：390px 手機上 textarea 只有
- * ~190px，長句折成兩行、第二行被一行高的空框裁掉一半（「／资产图拖进来」只剩上半截）。
- * 手機也拖不了檔，「拖进来」那半句對它本來就是廢話。
+ * 窄框用的短 placeholder（2026-09-30 手机截图实锤）：390px 手机上 textarea 只有
+ * ~190px，长句折成两行、第二行被一行高的空框裁掉一半（「／资产图拖进来」只剩上半截）。
+ * 手机也拖不了档，「拖进来」那半句对它本来就是废话。
  */
 const DEFAULT_PLACEHOLDER = "描述你想做的，或把剧本／资产图拖进来";
 const COMPACT_PLACEHOLDER = "描述你想做的画面或影片";
 /**
- * 觸控裝置（coarse pointer）用的長 placeholder（2026-10-03 手機端）：手機拖不了檔，
- * 「拖进来」對它是做不到的動作，換「传上来」。DEFAULT_PLACEHOLDER 原值不動
- * （桌面繼續用，且 agent-chat-ui.test.ts 源碼釘死了它）。
+ * 触控装置（coarse pointer）用的长 placeholder（2026-10-03 手机端）：手机拖不了档，
+ * 「拖进来」对它是做不到的动作，换「传上来」。DEFAULT_PLACEHOLDER 原值不动
+ * （桌面继续用，且 agent-chat-ui.test.ts 源码钉死了它）。
  */
 const TOUCH_PLACEHOLDER = "描述你想做的，或把剧本／资产图传上来";
 
 /**
- * 基礎 placeholder 決策（純函數，可直測）：內建長句＋觸控裝置 → 「传上来」版；
- * 其餘（桌面、呼叫端自訂 placeholder）原樣通過。後續 placeholderFits 量字與
- * COMPACT fallback 都對這份被選中的基礎句做，邏輯不變。
+ * 基础 placeholder 决策（纯函数，可直测）：内建长句＋触控装置 → 「传上来」版；
+ * 其余（桌面、呼叫端自订 placeholder）原样通过。后续 placeholderFits 量字与
+ * COMPACT fallback 都对这份被选中的基础句做，逻辑不变。
  */
 export function resolveBasePlaceholder(placeholder: string, coarsePointer: boolean): string {
   return coarsePointer && placeholder === DEFAULT_PLACEHOLDER ? TOUCH_PLACEHOLDER : placeholder;
 }
 
 /**
- * placeholder 量測的臨界安全邊際（px）。canvas 量字與實際排版間會有一兩 px 的
- * 舍入差，量到「剛好等於框寬」時瀏覽器仍會把 nowrap 的尾巴裁掉（2026-10-03
- * 390px 實錘：長句量到 288px、clientWidth 284px）。留 8px 讓臨界值一律回落
- * COMPACT_PLACEHOLDER，不再賭 0px 邊界。
+ * placeholder 量测的临界安全边际（px）。canvas 量字与实际排版间会有一两 px 的
+ * 舍入差，量到「刚好等于框宽」时浏览器仍会把 nowrap 的尾巴裁掉（2026-10-03
+ * 390px 实锤：长句量到 288px、clientWidth 284px）。留 8px 让临界值一律回落
+ * COMPACT_PLACEHOLDER，不再赌 0px 边界。
  */
 export const PLACEHOLDER_SAFETY_PX = 8;
 
 /**
- * 純函數決策（可直測，無須 DOM）：量得的字寬加安全邊際後是否放得進 clientWidth。
- * clientWidth ≤ 0 時無從判量，回 true（沿用原行為：量不到就不誤切短句）。
+ * 纯函数决策（可直测，无须 DOM）：量得的字宽加安全边际后是否放得进 clientWidth。
+ * clientWidth ≤ 0 时无从判量，回 true（沿用原行为：量不到就不误切短句）。
  */
 export function placeholderFitsWidth(measured: number, clientWidth: number): boolean {
   return clientWidth <= 0 || measured + PLACEHOLDER_SAFETY_PX <= clientWidth;
 }
 
 /**
- * canvas 量字用的字串。getComputedStyle(el).font 在部分瀏覽器對 textarea 會回
- * 空字串（2026-10-03 Chromium 手機實錘：回 ""），此時 ctx.font 落回預設 10px，
- * 量到 180px → 永遠「放得下」→ 長 placeholder 被 nowrap 裁尾（真凶）。
- * shorthand 非空時沿用；空時用長度屬性拼出可靠字串（桌面寬框仍量得出長句、不切短）。
+ * canvas 量字用的字串。getComputedStyle(el).font 在部分浏览器对 textarea 会回
+ * 空字串（2026-10-03 Chromium 手机实锤：回 ""），此时 ctx.font 落回预设 10px，
+ * 量到 180px → 永远「放得下」→ 长 placeholder 被 nowrap 裁尾（真凶）。
+ * shorthand 非空时沿用；空时用长度属性拼出可靠字串（桌面宽框仍量得出长句、不切短）。
  */
 function resolveMeasureFont(style: CSSStyleDeclaration): string {
   if (style.font) return style.font;
@@ -358,7 +358,7 @@ function resolveMeasureFont(style: CSSStyleDeclaration): string {
   return `${stylePart}${weightPart}${sizePart} ${family}`;
 }
 
-/** placeholder 在這個框寬下放不放得下一行（canvas 量字，與框同字型）。 */
+/** placeholder 在这个框宽下放不放得下一行（canvas 量字，与框同字型）。 */
 function placeholderFits(el: HTMLTextAreaElement, text: string): boolean {
   const ctx = document.createElement("canvas").getContext("2d");
   if (!ctx) return true;
@@ -401,7 +401,7 @@ export function computeCanSend(
 }
 
 /**
- * 「在途」的下一个值（纯函数，可直测）。内部送出锁或面板餵進來的在途任一为真
+ * 「在途」的下一个值（纯函数，可直测）。内部送出锁或面板喂进来的在途任一为真
  * 就是在途；两边都放下才真的放下（面板收了在途、但输入区自己的投递还在飞，
  * 仍然是在途）。回传 null ＝与当前值相同、不必动——render 期收敛靠这个 bail out，
  * 不然每次渲染都要多跑一轮。
@@ -425,30 +425,30 @@ let attachmentSeq = 0;
  * 说明文字挂每列 title），不再有长说明行。
  *
  * 状态归属：沿用设定既有的 localStorage 缓存 + 网关持久化链路——
- *   · 读：显式级別记录（agent-thinking-level-v1）优先，无记录由 settings 反推（resolve）。
+ *   · 读：显式级别记录（agent-thinking-level-v1）优先，无记录由 settings 反推（resolve）。
  *   · 写：writeCachedAgentThinkingLevel（跨重载保留）+ saveAgentSettings(三栏 patch)
  *     （既有唯一写入者；interrupt_mode 由合并语义原样保留）。不另开 store。
  *
- * 交互：真 button 元素（Tab 可达 / Enter / Space 可開），Esc 關，焦點環走 --ring 主題，
- * 點擊外部收起（與历史 dropdown / 设定弹层同一條 outside-click 規矩）。
+ * 交互：真 button 元素（Tab 可达 / Enter / Space 可开），Esc 关，焦点环走 --ring 主题，
+ * 点击外部收起（与历史 dropdown / 设定弹层同一条 outside-click 规矩）。
  */
 function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
-  // SSR 與首帧一律「中」：localStorage 只在挂载后读，避免 hydration 不一致。
+  // SSR 与首帧一律「中」：localStorage 只在挂载后读，避免 hydration 不一致。
   const [level, setLevel] = useState<AgentThinkingLevel>("medium");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  // 展開面板搬到 createPortal(document.body)：另持一個 ref 供 outside-click 與定位量測。
+  // 展开面板搬到 createPortal(document.body)：另持一个 ref 供 outside-click 与定位量测。
   const panelRef = useRef<HTMLDivElement | null>(null);
-  // 面板 fixed 座標（相對視窗）。null ＝尚未量到，首frame 以 visibility:hidden 佔位量尺寸。
+  // 面板 fixed 座标（相对视窗）。null ＝尚未量到，首frame 以 visibility:hidden 占位量尺寸。
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
-    // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到顯示「中」。
+    // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到显示「中」。
     setLevel(resolveAgentThinkingLevel(readCachedAgentSettings()));
   }, []);
 
   // 开着时点外面就收——与历史 dropdown / 设定弹层同一条规矩（pointerdown + contains）。
-  // 面板在 portal（document.body）内、不在 rootRef 子樹，所以兩棵樹都要算「裡面」。
+  // 面板在 portal（document.body）内、不在 rootRef 子树，所以两棵树都要算「里面」。
   useEffect(() => {
     if (!open) return;
     const onDocPointerDown = (ev: PointerEvent): void => {
@@ -461,18 +461,18 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   }, [open]);
 
   /*
-   * 面板定位（2026-10-04 改版）：以觸發鈕 rect 為錨，fixed 開在按鈕**正下方**、左緣對齊。
+   * 面板定位（2026-10-04 改版）：以触发钮 rect 为锚，fixed 开在按钮**正下方**、左缘对齐。
    *
-   * 為什麼是 portal + fixed，而不是晶片容器內 absolute top-full（原定寫法）：
-   * 助理頁＝PromptInput 卡片內的 AgentChatSurface，其 inline 態根節點帶
-   * `overflow-hidden`，而 composer 根帶 `backdrop-filter`（lg-float）＝fixed 子元素的
-   * containing block。absolute／fixed 留在樹內都會被祖先裁掉——本機 Playwright 實測
-   * （1280×900，composer 貼 surface 底緣）：面板只從 surface 底部露出約 8px，其餘全被
-   * overflow-hidden 切掉、點不到。搬到 document.body 的 portal 才不受該裁切，
-   * 也才能保證面板四邊都在視窗內。
+   * 为什么是 portal + fixed，而不是晶片容器内 absolute top-full（原定写法）：
+   * 助理页＝PromptInput 卡片内的 AgentChatSurface，其 inline 态根节点带
+   * `overflow-hidden`，而 composer 根带 `backdrop-filter`（lg-float）＝fixed 子元素的
+   * containing block。absolute／fixed 留在树内都会被祖先裁掉——本机 Playwright 实测
+   * （1280×900，composer 贴 surface 底缘）：面板只从 surface 底部露出约 8px，其余全被
+   * overflow-hidden 切掉、点不到。搬到 document.body 的 portal 才不受该裁切，
+   * 也才能保证面板四边都在视窗内。
    *
-   * 定位規則：預設在鈕下方（top = 鈕底 + 8px）；下方裝不下（面板高＋邊距超過視窗）才
-   * 翻到鈕上方——「必要的翻轉」，不是預設。左右以鈕左緣對齊，靠到右邊界時往內收。
+   * 定位规则：预设在钮下方（top = 钮底 + 8px）；下方装不下（面板高＋边距超过视窗）才
+   * 翻到钮上方——「必要的翻转」，不是预设。左右以钮左缘对齐，靠到右边界时往内收。
    */
   const place = useCallback((): void => {
     const trigger = rootRef.current;
@@ -485,17 +485,17 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
     const vh = window.innerHeight;
     const GAP = 8;
     const MARGIN = 8;
-    let top = r.bottom + GAP; // 預設：按鈕正下方
+    let top = r.bottom + GAP; // 预设：按钮正下方
     if (ph > 0 && top + ph > vh - MARGIN && r.top - GAP - ph >= MARGIN) {
       top = r.top - GAP - ph; // 下方不足才翻到上方
     }
     if (ph > 0) top = Math.min(top, Math.max(MARGIN, vh - MARGIN - ph));
-    let left = r.left; // 左緣與按鈕左緣對齊
+    let left = r.left; // 左缘与按钮左缘对齐
     if (pw > 0) left = Math.min(left, Math.max(MARGIN, vw - MARGIN - pw));
     setCoords({ top, left });
   }, []);
 
-  // 開面板：先量尺寸再入座（useLayoutEffect 在 paint 前跑，不會閃）。
+  // 开面板：先量尺寸再入座（useLayoutEffect 在 paint 前跑，不会闪）。
   useLayoutEffect(() => {
     if (!open) {
       setCoords(null);
@@ -504,7 +504,7 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
     place();
   }, [open, place]);
 
-  // 開著時視窗尺寸／任何祖先捲動（capture）都重新貼合錨點，面板不飄走。
+  // 开著时视窗尺寸／任何祖先卷动（capture）都重新贴合锚点，面板不飘走。
   useEffect(() => {
     if (!open) return;
     const onMove = (): void => place();
@@ -521,8 +521,8 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
     };
   }, [open, place]);
 
-  // Esc 收起（語義與舊版一致：只收起，不選、不清輸入框）。焦點在按鈕（rootRef 內）時
-  // 走 root 的 onKeyDown；焦點若落進 portal 的選項，root 收不到，故另掛一支 window keydown。
+  // Esc 收起（语义与旧版一致：只收起，不选、不清输入框）。焦点在按钮（rootRef 内）时
+  // 走 root 的 onKeyDown；焦点若落进 portal 的选项，root 收不到，故另挂一支 window keydown。
   useEffect(() => {
     if (!open) return;
     const onKey = (event: globalThis.KeyboardEvent): void => {
@@ -553,12 +553,12 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   const label = AGENT_THINKING_LEVEL_LABELS[level];
 
   return (
-    // 工具行同排、「+」右邊（暴君 2026-10-03 三選一定案）：控件進工具行流內，
-    // 右邊緊跟「+」，與「+」和「↑」同一條基線。
-    // 面板錨定改版（2026-10-04）：展開面板已搬到 createPortal(document.body) + fixed，
-    // 以本容器的 getBoundingClientRect() 定位（rootRef 只當錨點量測與 outside-click 判定）。
-    // 舊禁令「面板 absolute bottom-full 貼 composer 根、此容器不得 relative」整條作廢——
-    // 它只服務 upward 開法；現在面板在按鈕下方、且必須離開被 overflow-hidden 裁切的樹。
+    // 工具行同排、「+」右边（暴君 2026-10-03 三选一定案）：控件进工具行流内，
+    // 右边紧跟「+」，与「+」和「↑」同一条基线。
+    // 面板锚定改版（2026-10-04）：展开面板已搬到 createPortal(document.body) + fixed，
+    // 以本容器的 getBoundingClientRect() 定位（rootRef 只当锚点量测与 outside-click 判定）。
+    // 旧禁令「面板 absolute bottom-full 贴 composer 根、此容器不得 relative」整条作废——
+    // 它只服务 upward 开法；现在面板在按钮下方、且必须离开被 overflow-hidden 裁切的树。
     <div ref={rootRef} onKeyDown={onKeyDown} className="shrink-0 ml-0.5">
       <button
         type="button"
@@ -569,23 +569,23 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
         aria-label={`思考级别：${label}（低/中/高/极限）`}
         title={`思考级别：${label}（低/中/高/极限）`}
         className={cn(
-          // 2026-10-03 暴君定案：收起態＝腦圖標＋級別字＋小 chevron，零框零底零影零膠囊，
-          // 與同排「+」「↑」同一套無框語彙（舊的白底細邊玻璃膠囊已刪）。
-          // 只換顏色/透明度，無尺寸或位移變化——hover 零 layout shift。
-          // 2026-10-03 手機端：窄屏補 44px 觸控高度（max-sm:min-h-11），桌面維持原行高。
-          // 只加最小高度、不改寬/字級/位移——hover 與展開零 layout shift，items-center 保垂直置中。
+          // 2026-10-03 暴君定案：收起态＝脑图标＋级别字＋小 chevron，零框零底零影零胶囊，
+          // 与同排「+」「↑」同一套无框语汇（旧的白底细边玻璃胶囊已删）。
+          // 只换颜色/透明度，无尺寸或位移变化——hover 零 layout shift。
+          // 2026-10-03 手机端：窄屏补 44px 触控高度（max-sm:min-h-11），桌面维持原行高。
+          // 只加最小高度、不改宽/字级/位移——hover 与展开零 layout shift，items-center 保垂直置中。
           "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
           "transition-colors hover:text-ios-purple active:opacity-70",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           "disabled:cursor-not-allowed disabled:opacity-40",
-          // 絕對定位盒走 shrink-to-fit；含塊是工具行 flex。w-max＋nowrap 鎖死單行不斷行。
+          // 绝对定位盒走 shrink-to-fit；含块是工具行 flex。w-max＋nowrap 锁死单行不断行。
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
         )}
       >
         {/* lucide Brain（与同排 Plus / ArrowUp 同一套家族图标，风格统一）。装饰用，对辅助技术隐藏。 */}
         <Brain className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
         <span className="whitespace-nowrap text-ios-footnote font-medium">{label}</span>
-        {/* 尾端小 chevron：展開時 rotate-180（純 transform，零 layout shift）。 */}
+        {/* 尾端小 chevron：展开时 rotate-180（纯 transform，零 layout shift）。 */}
         <ChevronDown
           className={cn(
             "h-3.5 w-3.5 shrink-0 opacity-60 transition-transform",
@@ -595,28 +595,28 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
         />
       </button>
       {/*
-        展開面板：createPortal 到 document.body + fixed 定位（座標由 place() 以按鈕 rect
-        算出，預設在按鈕**正下方**、左緣與按鈕左緣對齊）。搬出樹才不被助理頁
-        .agent-chat-surface（inline 態帶 overflow-hidden）裁掉；不進流＝零 layout shift。
-        **不得**用 agent-pop-in：它的 keyframes 帶 translateX(-50%)（給「left-1/2 置中彈層」
-        用的），配 left 會把整個面板左移半個寬度、內容滑出面板外——那正是生產上「級別名跑到
-        面板左緣之外、四列只剩說明行」的根因。
-        樣式逐字複用助理頁既有浮層語彙：agent-pop 彈層材質 + rounded-[18px] + p-1 + 頂緣
-        specular 高光線（來源＝歷史下拉 AgentChatSurface.tsx:1129、設定彈層
-        AgentSettingsPopover.tsx:102）。選 agent-pop 而非 lg-float 的理由：①本面板已 portal
-        到 body，agent-chat.css 的 ≤639.98px 手機字級階梯正是以 `.agent-pop`（「DOM 已搬離
-        根容器」的彈層）為錨點，選它手機字才抬到 15px 地板；②面板浮在輸入框之外的頁面內容
-        上，0.96 白比 lg-float 的 0.56 白好讀。
-        寬度＝內容自適應（w-max）：四列只有級別名＋勾，不寫死 w-52 造成空曠或裁切。
-        底緣保護：max-h + 內部可滾（overscroll-contain），空間不足時面板自己滾，底部不被裁掉。
-        首frame coords 未量到＝visibility:hidden 佔位量尺寸，paint 前 place() 定位，不閃。
-        z-[85]（2026-10-04 修「打不開／被遮蔽」）：本面板 portal 到 body，就脫離了所屬助理
-        容器的堆疊脈絡——首頁／助理頁的聊天面板殼 `.canvas-chat-panel` 是 fixed z-60、
-        navbar 是 sticky z-80，而面板原本 z-50 ⇒ 浮層確實渲染了、卻整片被宿主面板蓋掉
-        （實測 elementsFromPoint 在浮層中心取到的是頁面內容，不是浮層自己的選項鈕）。
-        85 ＝ 壓過宿主面板(60)與 navbar(80)、又留在所有模態遮罩(89 起：宣傳片 120、
-        參數抽屜 .agent-param-scrim 90)之下——模態開著時浮層本就不該浮在最上。同樹內的
-        歷史／設定彈層維持 z-50 不動：它們沒有 portal，仍在宿主面板的堆疊脈絡內。
+        展开面板：createPortal 到 document.body + fixed 定位（座标由 place() 以按钮 rect
+        算出，预设在按钮**正下方**、左缘与按钮左缘对齐）。搬出树才不被助理页
+        .agent-chat-surface（inline 态带 overflow-hidden）裁掉；不进流＝零 layout shift。
+        **不得**用 agent-pop-in：它的 keyframes 带 translateX(-50%)（给「left-1/2 置中弹层」
+        用的），配 left 会把整个面板左移半个宽度、内容滑出面板外——那正是生产上「级别名跑到
+        面板左缘之外、四列只剩说明行」的根因。
+        样式逐字复用助理页既有浮层语汇：agent-pop 弹层材质 + rounded-[18px] + p-1 + 顶缘
+        specular 高光线（来源＝历史下拉 AgentChatSurface.tsx:1129、设定弹层
+        AgentSettingsPopover.tsx:102）。选 agent-pop 而非 lg-float 的理由：①本面板已 portal
+        到 body，agent-chat.css 的 ≤639.98px 手机字级阶梯正是以 `.agent-pop`（「DOM 已搬离
+        根容器」的弹层）为锚点，选它手机字才抬到 15px 地板；②面板浮在输入框之外的页面内容
+        上，0.96 白比 lg-float 的 0.56 白好读。
+        宽度＝内容自适应（w-max）：四列只有级别名＋勾，不写死 w-52 造成空旷或裁切。
+        底缘保护：max-h + 内部可滚（overscroll-contain），空间不足时面板自己滚，底部不被裁掉。
+        首frame coords 未量到＝visibility:hidden 占位量尺寸，paint 前 place() 定位，不闪。
+        z-[85]（2026-10-04 修「打不开／被遮蔽」）：本面板 portal 到 body，就脱离了所属助理
+        容器的堆叠脉络——首页／助理页的聊天面板壳 `.canvas-chat-panel` 是 fixed z-60、
+        navbar 是 sticky z-80，而面板原本 z-50 ⇒ 浮层确实渲染了、却整片被宿主面板盖掉
+        （实测 elementsFromPoint 在浮层中心取到的是页面内容，不是浮层自己的选项钮）。
+        85 ＝ 压过宿主面板(60)与 navbar(80)、又留在所有模态遮罩(89 起：宣传片 120、
+        参数抽屉 .agent-param-scrim 90)之下——模态开著时浮层本就不该浮在最上。同树内的
+        历史／设定弹层维持 z-50 不动：它们没有 portal，仍在宿主面板的堆叠脉络内。
       */}
       {open && typeof document !== "undefined"
         ? createPortal(
@@ -664,21 +664,21 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
 }
 
 /**
- * 本機檔案權限模式菜單（2026-10-04）：與相鄰的 ThinkingLevelMenu 同一套無框語彙，
- * 工具行流內、「+」右邊緊跟思考級別（同一顆工具列的兩顆同族控件）。
+ * 本机档案权限模式菜单（2026-10-04）：与相邻的 ThinkingLevelMenu 同一套无框语汇，
+ * 工具行流内、「+」右边紧跟思考级别（同一颗工具列的两颗同族控件）。
  *
- * 收起態＝模式圖示＋模式名＋小 chevron，零框零底零影；展開態＝四檔清單
- * （圖示＋標題＋副標＋右端勾），底下補一行「已授權 N 個資料夾」。
+ * 收起态＝模式图示＋模式名＋小 chevron，零框零底零影；展开态＝四档清单
+ * （图示＋标题＋副标＋右端勾），底下补一行「已授权 N 个资料夹」。
  *
  * 模式文案的唯一真源是 `@/lib/device-bridge-display` 的 LOCAL_FILE_MODES；
- * 本檔不得另寫一份字串。
+ * 本档不得另写一份字串。
  *
- * 漸進增強（比照 local-media-worker / device-bridge-display 的既有慣例）：
- *   · 無 window.eimuLocal（純瀏覽器）⇒ 整顆控件回 null，不渲染（不是報錯）。
- *   · 舊桌面產物（bridge.setMode 不存在）⇒ 可見但 disabled，副標提示「需更新桌面版」。
- *   · 舊 status 沒有 mode 欄位 ⇒ 由 enabled/roots 推導（modeFromStatus），不假裝真值。
+ * 渐进增强（比照 local-media-worker / device-bridge-display 的既有惯例）：
+ *   · 无 window.eimuLocal（纯浏览器）⇒ 整颗控件回 null，不渲染（不是报错）。
+ *   · 旧桌面产物（bridge.setMode 不存在）⇒ 可见但 disabled，副标提示「需更新桌面版」。
+ *   · 旧 status 没有 mode 栏位 ⇒ 由 enabled/roots 推导（modeFromStatus），不假装真值。
  *
- * 授權入口不在這裡：控件只負責切模式與顯示已授權數量；「授權哪些資料夾」在對話流程問。
+ * 授权入口不在这里：控件只负责切模式与显示已授权数量；「授权哪些资料夹」在对话流程问。
  */
 const LOCAL_FILE_MODE_ICONS: Record<LocalFileModeIcon, LucideIcon> = {
   power: Power,
@@ -691,16 +691,16 @@ export interface LocalFileModeMenuViewProps {
   open: boolean;
   onToggleOpen: () => void;
   onPick: (mode: LocalFileMode) => void;
-  /** 舊產物（bridge.setMode 不存在）＝false ⇒ disabled。 */
+  /** 旧产物（bridge.setMode 不存在）＝false ⇒ disabled。 */
   supported: boolean;
-  /** status 是否已讀到；false 時不把任何一檔畫成「已選中」。 */
+  /** status 是否已读到；false 时不把任何一档画成「已选中」。 */
   known: boolean;
   mode: LocalFileMode;
   rootsCount: number;
   busy: boolean;
 }
 
-/** 純展示層（受控）：文案／圖示由純函式與 LOCAL_FILE_MODES 算好，本層只畫。 */
+/** 纯展示层（受控）：文案／图示由纯函式与 LOCAL_FILE_MODES 算好，本层只画。 */
 export function LocalFileModeMenuView({
   open,
   onToggleOpen,
@@ -718,9 +718,9 @@ export function LocalFileModeMenuView({
   const disabled = !supported;
 
   return (
-    // 定位鏈（本控件仍走舊寫法）：面板 absolute bottom-full，containing block ＝
-    // composer 根（此 chip 容器不掛 relative）。相鄰 ThinkingLevelMenu 已改為容器
-    // relative + top-full 開在按鈕下方，兩者定位語彙不同，勿再宣稱「相同」。
+    // 定位链（本控件仍走旧写法）：面板 absolute bottom-full，containing block ＝
+    // composer 根（此 chip 容器不挂 relative）。相邻 ThinkingLevelMenu 已改为容器
+    // relative + top-full 开在按钮下方，两者定位语汇不同，勿再宣称「相同」。
     <div
       className="shrink-0 ml-1"
       onKeyDown={(event) => {
@@ -739,7 +739,7 @@ export function LocalFileModeMenuView({
         aria-label={`本机文件权限：${label}`}
         title={disabled ? "本机文件权限：需更新桌面版" : `本机文件权限：${label}`}
         className={cn(
-          // 與同排「+」「↑」「思考級別」同一套無框語彙：只換顏色/透明度，零 layout shift。
+          // 与同排「+」「↑」「思考级别」同一套无框语汇：只换颜色/透明度，零 layout shift。
           "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
           "transition-colors hover:text-ios-purple active:opacity-70",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
@@ -759,8 +759,8 @@ export function LocalFileModeMenuView({
         <div
           role="listbox"
           aria-label="本机文件权限"
-          // 定位語彙沿用舊寫法（與同檔 SkillSlashMenu 同款）：absolute bottom-full left-1.5 mb-2，
-          // 貼控件正上方、不進流＝零 layout shift（ThinkingLevelMenu 已改開按鈕下方，勿再對齊它）。
+          // 定位语汇沿用旧写法（与同档 SkillSlashMenu 同款）：absolute bottom-full left-1.5 mb-2，
+          // 贴控件正上方、不进流＝零 layout shift（ThinkingLevelMenu 已改开按钮下方，勿再对齐它）。
           className="lg-float absolute bottom-full left-1.5 z-50 mb-2 w-max min-w-0 rounded-ios-xl p-1"
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
@@ -787,7 +787,7 @@ export function LocalFileModeMenuView({
                   <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
                     {spec.title}
                   </span>
-                  {/* 副標＝本檔第二真源；僅本控件顯示，逐字取 LOCAL_FILE_MODES。 */}
+                  {/* 副标＝本档第二真源；仅本控件显示，逐字取 LOCAL_FILE_MODES。 */}
                   <span className="mt-0.5 max-w-[15rem] text-ios-caption2 leading-snug text-foreground/50">
                     {spec.subtitle}
                   </span>
@@ -796,7 +796,7 @@ export function LocalFileModeMenuView({
               </button>
             );
           })}
-          {/* 已授權數量：只「檢視」；授權入口在對話裡（本控件不做選擇資料夾按鈕）。 */}
+          {/* 已授权数量：只「检视」；授权入口在对话里（本控件不做选择资料夹按钮）。 */}
           <p className="mt-1 border-t border-black/[0.06] px-2.5 pb-1.5 pt-2 text-ios-caption2 text-foreground/45">
             {rootsCount > 0 ? `已授权 ${rootsCount} 个文件夹` : "尚未授权任何文件夹"}
           </p>
@@ -807,8 +807,8 @@ export function LocalFileModeMenuView({
 }
 
 /**
- * 薄殼：建立 controller、訂閱它（useSyncExternalStore）、把純函式吐出的語義交給展示層。
- * 純瀏覽器（無 window.eimuLocal）時 controller 快照 available:false ⇒ 本層回 null（漸進增強）。
+ * 薄壳：建立 controller、订阅它（useSyncExternalStore）、把纯函式吐出的语义交给展示层。
+ * 纯浏览器（无 window.eimuLocal）时 controller 快照 available:false ⇒ 本层回 null（渐进增强）。
  */
 function LocalFileModeMenu() {
   const controllerRef = useRef<DeviceBridgeController | null>(null);
@@ -818,13 +818,13 @@ function LocalFileModeMenu() {
 
   useEffect(() => {
     controller.init();
-    // 卸載時取消訂閱 onBridgeStatus（dispose 內含 unsubscribe）。
+    // 卸载时取消订阅 onBridgeStatus（dispose 内含 unsubscribe）。
     return () => controller.dispose();
   }, [controller]);
 
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getServerSnapshot);
 
-  // 開著時點外面就收——與 ThinkingLevelMenu / 歷史 dropdown 同一條 pointerdown + contains 規矩。
+  // 开著时点外面就收——与 ThinkingLevelMenu / 历史 dropdown 同一条 pointerdown + contains 规矩。
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -835,7 +835,7 @@ function LocalFileModeMenu() {
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
   }, [open]);
 
-  // SSR／hydration 首畫格：getServerSnapshot 一律 available:false ⇒ 伺服器與首畫格都回 null。
+  // SSR／hydration 首画格：getServerSnapshot 一律 available:false ⇒ 伺服器与首画格都回 null。
   if (!snap.available) return null;
 
   const supported = supportsSetMode(getDeviceBridgeApi());
@@ -882,7 +882,7 @@ function AgentComposerComponent({
    *
    * 闸门有两层，都在纯函数里：slashArmed＝使用者**真的打出那一颗「/」**的动作
    * （只有动作才开菜单，空框不主动弹一层盖住欢迎态）；shouldOpenSlashMenu(text)
-   * ＝文字形态還是指令（空框或首字符「/」）。两层都真才显示。
+   * ＝文字形态还是指令（空框或首字符「/」）。两层都真才显示。
    */
   const [slashArmed, setSlashArmed] = useState(false);
   /** 菜单当前选中行（受控）。查询词一变就复位到第一行。 */
@@ -905,10 +905,10 @@ function AgentComposerComponent({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 键盘规避：composer 根元素需要被抬升/复位，所以给它一个 ref。
   const composerRef = useRef<HTMLDivElement>(null);
-  // 框寬放不下長 placeholder 時換短句；框寬變化（轉屏、面板拖寬）即重量。
+  // 框宽放不下长 placeholder 时换短句；框宽变化（转屏、面板拖宽）即重量。
   const [compactPlaceholder, setCompactPlaceholder] = useState(false);
-  // 觸控裝置判定（2026-10-03）：SSR 與首幀一律 false（=桌面長句，避免 hydration
-  // mismatch），掛載後用 matchMedia("(pointer: coarse)") 判定一次再切「传上来」版。
+  // 触控装置判定（2026-10-03）：SSR 与首帧一律 false（=桌面长句，避免 hydration
+  // mismatch），挂载后用 matchMedia("(pointer: coarse)") 判定一次再切「传上来」版。
   const [coarsePointer, setCoarsePointer] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -974,16 +974,16 @@ function AgentComposerComponent({
   );
 
   /**
-   * 影片（D-16 + 本機前處理 W1）：**先把原檔在本機抽出衍生檔**（關鍵幀 JPEG＋poster
-   * ＋probe JSON），只把衍生檔送上行，原片留在本機當預覽——不再把原片傳上雲端讓 agent 看。
+   * 影片（D-16 + 本机前处理 W1）：**先把原档在本机抽出衍生档**（关键帧 JPEG＋poster
+   * ＋probe JSON），只把衍生档送上行，原片留在本机当预览——不再把原片传上云端让 agent 看。
    *
-   * 漸進增強（任何一步失敗都回到今天的行為，不得弄壞既有附件流程）：
-   *   1. 本機 ingest 可用 → 只上行衍生檔（載入關鍵幀縮圖，聊天框渲染原檔可播 + 關鍵幀列）。
-   *   2. ingest 降級／失敗，或衍生檔上傳失敗 → 原片直傳網關（uploadVideoDirect，繞開
-   *      Vercel 4.5MB 體上限）。
-   *   3. 直傳失敗（無票 / 401 / 413 / 415 / 網絡）→ 舊抽幀路徑：抽 4 張 JPEG 上傳。
-   * 上限（**600 秒** / 100 MB，以 video-frames.MAX_VIDEO_DURATION_SECONDS 為準）由抽幀
-   * 與 ingest 的計劃層把關，原因直接顯示在 chip 上。
+   * 渐进增强（任何一步失败都回到今天的行为，不得弄坏既有附件流程）：
+   *   1. 本机 ingest 可用 → 只上行衍生档（载入关键帧缩图，聊天框渲染原档可播 + 关键帧列）。
+   *   2. ingest 降级／失败，或衍生档上传失败 → 原片直传网关（uploadVideoDirect，绕开
+   *      Vercel 4.5MB 体上限）。
+   *   3. 直传失败（无票 / 401 / 413 / 415 / 网络）→ 旧抽帧路径：抽 4 张 JPEG 上传。
+   * 上限（**600 秒** / 100 MB，以 video-frames.MAX_VIDEO_DURATION_SECONDS 为准）由抽帧
+   * 与 ingest 的计划层把关，原因直接显示在 chip 上。
    */
   const uploadVideoFile = useCallback(
     async (session: string, id: string, file: File, signal: AbortSignal) => {
@@ -1044,12 +1044,12 @@ function AgentComposerComponent({
         patchAttachment(id, { status: "ready", refs: [ref], videoUrl, progress: 1 });
         return;
       } catch (err) {
-        // 逾時必須落明確終態並給人話（不得留在 uploading）；取消同理直接上抛。
-        // 其他直傳失敗（無票/401/413/415/網絡）照舊靜默落抽幀降級路徑。
+        // 逾时必须落明确终态并给人话（不得留在 uploading）；取消同理直接上抛。
+        // 其他直传失败（无票/401/413/415/网络）照旧静默落抽帧降级路径。
         if (err instanceof UploadTimeoutError || err instanceof UploadAbortedError) throw err;
       }
 
-      // 3) 直傳也失敗：既有抽幀降級路徑（行為與今天逐位一致）。
+      // 3) 直传也失败：既有抽帧降级路径（行为与今天逐位一致）。
       if (signal.aborted) {
         URL.revokeObjectURL(videoUrl);
         patchAttachment(id, { videoUrl: undefined });
@@ -1062,7 +1062,7 @@ function AgentComposerComponent({
           patchAttachment(id, { framesDone: done }),
         );
       } catch (err) {
-        // 抽幀失敗／超限：原片 URL 立刻釋放，別把 100 MB 掛在記憶體裡等用戶刪 chip。
+        // 抽帧失败／超限：原片 URL 立刻释放，别把 100 MB 挂在记忆体里等用户删 chip。
         URL.revokeObjectURL(videoUrl);
         patchAttachment(id, { videoUrl: undefined });
         throw err;
@@ -1149,7 +1149,7 @@ function AgentComposerComponent({
 
         const id = `att-${++attachmentSeq}`;
         // 罪状 2b：超限文件不上传，直接落一颗带人话文案的错误 chip。
-        // 影片／音頻豁免 4MB 站内代理闸（原片走网关直传），改用网关的 100MB 上限。
+        // 影片／音频豁免 4MB 站内代理闸（原片走网关直传），改用网关的 100MB 上限。
         const directUpload = isVideoFile(file) || isAudioFile(file);
         const maxBytes = directUpload ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
         if (file.size > maxBytes) {
@@ -1276,7 +1276,7 @@ function AgentComposerComponent({
   const canSend = computeCanSend(trimmed, readyRefs.length, attachments);
 
   /*
-   * 09-18「在途」的单一收敛点：输入区自己的送出锁（sendingRef）与面板餵進來的
+   * 09-18「在途」的单一收敛点：输入区自己的送出锁（sendingRef）与面板喂进来的
    * 在途（externalSendPending）合成同一个 sending——aria-busy={sending} 与
    * 「在途就转圈」这组既有契约（另一条测试线钉着字面）在面板在途期间也必须为真。
    *
@@ -1307,8 +1307,8 @@ function AgentComposerComponent({
   const handleSend = useCallback(() => {
     // 同步连点守卫：同一帧内第二次点击时 sending 还是旧值，只有 ref 挡得住。
     if (sendingRef.current) return;
-    // 09-18：面板餵進來的在途同样要挡——Enter 这条入口不吃 disabled 属性，
-    // 空態併發 send 是已记录的竞态（两条消息、两次计费）。
+    // 09-18：面板喂进来的在途同样要挡——Enter 这条入口不吃 disabled 属性，
+    // 空态并发 send 是已记录的竞态（两条消息、两次计费）。
     if (externalSendPending) return;
     if (!canSend) return;
     // 快照「本次实际发出去」的附件：canSend 已挡掉 uploading/extracting，
@@ -1620,7 +1620,7 @@ function AgentComposerComponent({
           松开以添加素材
         </div>
       )}
-      {/* 隐式文件选择：附件鈕在底部工具行左端，這裡只留 input 本體。 */}
+      {/* 隐式文件选择：附件钮在底部工具行左端，这里只留 input 本体。 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1738,8 +1738,8 @@ function AgentComposerComponent({
         )}
 
         {/*
-          影片预览（D-16）：原片可播（本機 ingest 成功時也只在本機播、不上行）；
-          關鍵幀縮圖列在本機 ingest 成功或降級抽幀態出現（原片直傳態無 frames）。
+          影片预览（D-16）：原片可播（本机 ingest 成功时也只在本机播、不上行）；
+          关键帧缩图列在本机 ingest 成功或降级抽帧态出现（原片直传态无 frames）。
           放在 chip 行下方而不是塞进 chip 里 —— chip 是一行文字的量级，
           缩图列需要自己的高度，挤进去两者都会变形。
         */}
@@ -1788,8 +1788,8 @@ function AgentComposerComponent({
           value={text}
           onChange={(event) => {
             const next = event.target.value;
-            // 斜线直呼：只在「打進那一顆 /」的當下開菜單（text 還是編輯前的值，
-            // 量的是這一擊的變化）；選完技能接著打需求不再弹。
+            // 斜线直呼：只在「打进那一颗 /」的当下开菜单（text 还是编辑前的值，
+            // 量的是这一击的变化）；选完技能接著打需求不再弹。
             setSlashArmed(next.startsWith("/") && !text.startsWith("/"));
             if (next.startsWith("/")) setSlashIndex(0);
             setText(next);
@@ -1803,7 +1803,7 @@ function AgentComposerComponent({
           rows={1}
           className={cn(
             "block min-h-[1.875rem] max-h-[15rem] w-full resize-none bg-transparent px-1.5 pb-1 pt-1 text-[0.9375rem] leading-[1.375rem] text-foreground",
-            // 空框只有一行高：placeholder 一律不折行（折了第二行必被裁半截），極窄時寧可截尾。
+            // 空框只有一行高：placeholder 一律不折行（折了第二行必被裁半截），极窄时宁可截尾。
             "placeholder:text-foreground/35 placeholder:whitespace-nowrap focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
@@ -1840,7 +1840,7 @@ function AgentComposerComponent({
         2026-10-01：纯「+」（ImagePlus 的加号挂右上角，字形重心偏）；与发送箭头同基线。
       */}
       {/* 左上角：素材「+」＋工具行同排、「+」右边的思考级别菜单（暴君 2026-10-03
-          三选一定案）。左組＝「+」容器＋chip，chip 是工具行流內的標準子項。 */}
+          三选一定案）。左组＝「+」容器＋chip，chip 是工具行流内的标准子项。 */}
       <div className="flex items-center">
         <div className="relative shrink-0">
           <button
@@ -1851,9 +1851,9 @@ function AgentComposerComponent({
             title="添加素材（剧本 / 图片 / 影片 / 文档）"
             className={cn(
               // 2026-10-01 暴君：纯图标、不包圆形边——只有一个「+」。36px 是隐形触控区，不画底不画框。
-              // 2026-10-03 手機端：窄屏（<640px）補 44px 觸控區（max-sm:h-11 w-11），桌面維持 36px。
-              // 走 JSX className 而非 agent-chat.css：該檔的 44px 補丁選擇器只打工具行直接子級，
-              // 打不到包在 relative 容器裡的這顆鈕。工具行 items-center 已在，加高不跑置中。
+              // 2026-10-03 手机端：窄屏（<640px）补 44px 触控区（max-sm:h-11 w-11），桌面维持 36px。
+              // 走 JSX className 而非 agent-chat.css：该档的 44px 补丁选择器只打工具行直接子级，
+              // 打不到包在 relative 容器里的这颗钮。工具行 items-center 已在，加高不跑置中。
               "flex h-9 w-9 max-sm:h-11 max-sm:w-11 shrink-0 items-center justify-center rounded-full text-foreground/50",
               "touch-manipulation [-webkit-tap-highlight-color:transparent]",
               "transition-colors hover:text-ios-purple active:scale-[0.92] focus:outline-none focus-visible:text-ios-purple",
@@ -1863,9 +1863,9 @@ function AgentComposerComponent({
             <Plus className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
           </button>
         </div>
-        {/* 思考级别菜单：工具行流內、「+」右邊（暴君 2026-10-03 三選一定案）。 */}
+        {/* 思考级别菜单：工具行流内、「+」右边（暴君 2026-10-03 三选一定案）。 */}
         <ThinkingLevelMenu disabled={!canAttach} />
-        {/* 本機檔案權限模式：同一工具行、同一無框語彙的第二顆控件（純瀏覽器自隱）。 */}
+        {/* 本机档案权限模式：同一工具行、同一无框语汇的第二颗控件（纯浏览器自隐）。 */}
         <LocalFileModeMenu />
       </div>
 
@@ -1877,7 +1877,7 @@ function AgentComposerComponent({
               rounded-full，切换零跳动）；aria-label / title / 图标
               （Square + Loader2 stopPending spinner）原样保留。
 
-              09-18：再补一个条件 !sending —— 本輪還沒开始（含面板餵進來的在途，
+              09-18：再补一个条件 !sending —— 本轮还没开始（含面板喂进来的在途，
               sending 已收敛成「内部或面板在途」）时不许被停止钮盖掉：那一段真空期
               使用者需要的是「正在送」的转圈钮，不是一颗按下去可能没东西可停的停止钮。
             */
@@ -1917,12 +1917,12 @@ function AgentComposerComponent({
                 "agent-send-btn",
                 "hover:-translate-y-[1px] active:scale-[0.92]",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                // 在途期間不上 disabled 的褪色：在途是「正在送」不是「不可用」，
-                // 轉圈要用實色才看得見。
-                // 非在途時 disabled＝同一個箭頭褪色待命（會話關閉 / 輸入框空）。
+                // 在途期间不上 disabled 的褪色：在途是「正在送」不是「不可用」，
+                // 转圈要用实色才看得见。
+                // 非在途时 disabled＝同一个箭头褪色待命（会话关闭 / 输入框空）。
                 !sending &&
                   "disabled:cursor-not-allowed disabled:opacity-40 disabled:saturate-[0.7] disabled:hover:translate-y-0",
-                // 送出進行中：游標與縮放回饋都收掉，連點由 sendingRef 在邏輯層擋。
+                // 送出进行中：游标与缩放回馈都收掉，连点由 sendingRef 在逻辑层挡。
                 sending && "cursor-wait active:scale-100",
               )}
             >

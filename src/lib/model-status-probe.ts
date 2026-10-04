@@ -1,15 +1,15 @@
-// 對外模型可用性探測（GET /v1/model-status 的純邏輯層）。
+// 对外模型可用性探测（GET /v1/model-status 的纯逻辑层）。
 //
-// 與 admin 的 channels/probe 同源但面向不同消費者：
-// - channels/probe 探「單一渠道」是否連通（admin 手動點）。
-// - 這裡探「每個生成模型」在生產隊列（buildModelQueue 第一順位端點）下的可用性，
-//   讓對外 agent 一眼判斷哪個模型可用、能幹嘛、調哪個端點。
+// 与 admin 的 channels/probe 同源但面向不同消费者：
+// - channels/probe 探「单一渠道」是否连通（admin 手动点）。
+// - 这里探「每个生成模型」在生产队列（buildModelQueue 第一顺位端点）下的可用性，
+//   让对外 agent 一眼判断哪个模型可用、能干嘛、调哪个端点。
 //
-// 探測只發 GET {baseURL}/models（渠道的模型清單端點）——不觸發真實生成、不扣費。
-// 誠實原則與 channels/probe 一致：某些渠道沒有 /models 端點，硬探只會恆紅騙人，
-// 所以明確回報 unknown + note「不支持 /models 探测」而不是假裝探測失敗。
+// 探测只发 GET {baseURL}/models（渠道的模型清单端点）——不触发真实生成、不扣费。
+// 诚实原则与 channels/probe 一致：某些渠道没有 /models 端点，硬探只会恒红骗人，
+// 所以明确回报 unknown + note「不支持 /models 探测」而不是假装探测失败。
 //
-// env/pools/overrides/probeFn/now 全部可注入，測試不打真實網絡。
+// env/pools/overrides/probeFn/now 全部可注入，测试不打真实网络。
 
 import {
   GENERATION_MODEL_IDS,
@@ -40,7 +40,7 @@ export interface ProbeEndpointResult {
   status?: number;
   ms: number;
   note?: string;
-  /** /models 回應裡的模型 id 清單；回應不是 OpenAI 清單格式時為 undefined。 */
+  /** /models 回应里的模型 id 清单；回应不是 OpenAI 清单格式时为 undefined。 */
   modelIds?: string[];
 }
 
@@ -48,14 +48,14 @@ export interface ModelStatusEntry {
   id: string;
   media_type: ModelMediaType;
   endpoint: GenerationEndpoint;
-  /** 該模型支援的功能：generate 恒有；edit/upscale 只標平台真實有該鏈路的模型。 */
+  /** 该模型支援的功能：generate 恒有；edit/upscale 只标平台真实有该链路的模型。 */
   functions: ModelFunction[];
   availability: ModelAvailability;
   checked_at: string;
-  /** 僅 available 時有值（探測成功才測得到延遲）。 */
+  /** 仅 available 时有值（探测成功才测得到延迟）。 */
   latency_ms?: number;
   channel_id?: string;
-  /** unknown/unavailable 時給原因（誠實原則）。 */
+  /** unknown/unavailable 时给原因（诚实原则）。 */
   note?: string;
 }
 
@@ -82,35 +82,35 @@ export interface ModelStatusProbeOptions {
   env?: EnvLike;
   pools?: AdminPool[];
   overrides?: ChannelOverrides;
-  /** 最近 24h 真實表現統計（route 層裁決 availability 用；probe 本體不消費）。 */
+  /** 最近 24h 真实表现统计（route 层裁决 availability 用；probe 本体不消费）。 */
   recentStats?: unknown[];
   probeFn?: (endpoint: ProbeEndpointInput) => Promise<ProbeEndpointResult>;
   now?: () => Date;
 }
 
-/** 渠道無 /models 能力的集合，與 channels/probe 的 UNPROBEABLE_CHANNEL_IDS 同源。 */
+/** 渠道无 /models 能力的集合，与 channels/probe 的 UNPROBEABLE_CHANNEL_IDS 同源。 */
 const UNPROBEABLE_CHANNEL_IDS = new Set<string>([]);
 const PROBE_TIMEOUT_MS = 10_000;
-/** 探測結果緩存 60 秒：避免每次請求都打所有上游。 */
+/** 探测结果缓存 60 秒：避免每次请求都打所有上游。 */
 const CACHE_TTL_MS = 60_000;
-/** 平行探測的並發上限：20+ 個模型串行太慢，全開又可能打爆上游。 */
+/** 平行探测的并发上限：20+ 个模型串行太慢，全开又可能打爆上游。 */
 const PROBE_CONCURRENCY = 5;
 const CACHE_KEY = "all";
 
 const cache = new Map<string, { expiresAt: number; snapshot: ModelStatusSnapshot }>();
 
-/** 僅供測試：清空模組級緩存。 */
+/** 仅供测试：清空模组级缓存。 */
 export function __resetModelStatusCacheForTests(): void {
   cache.clear();
 }
 
 /**
- * 功能標註（數據驅動，不硬編假能力）：
+ * 功能标注（数据驱动，不硬编假能力）：
  * - generate 恒有。
- * - edit：registry claims 宣稱 image_edit 的模型（2026-09-13 起 B 端
- *   /v1/images/edits 已接 durable 改圖管線）＋平台改圖鏈路 PIXAI_EDIT_MODEL_ID。
- *   與調度事實源同源：標了 edit 的模型，capability 預檢才有行可查。
- * - upscale：只有平台真實的放大鏈路模型（PIXAI_UPSCALE_MODEL_ID，走 /v1/upscale）才標。
+ * - edit：registry claims 宣称 image_edit 的模型（2026-09-13 起 B 端
+ *   /v1/images/edits 已接 durable 改图管线）＋平台改图链路 PIXAI_EDIT_MODEL_ID。
+ *   与调度事实源同源：标了 edit 的模型，capability 预检才有行可查。
+ * - upscale：只有平台真实的放大链路模型（PIXAI_UPSCALE_MODEL_ID，走 /v1/upscale）才标。
  * - video 模型一律不含 edit/upscale（除非真有）。
  */
 const EDIT_CLAIM_MODEL_IDS = new Set(
@@ -127,7 +127,7 @@ export function annotateModelFunctions(modelId: string, mediaType: MediaKind): M
   return functions;
 }
 
-/** 預設探測實作：對 {baseURL}/models 發 GET（Bearer、10 秒超時、no-store）。 */
+/** 预设探测实作：对 {baseURL}/models 发 GET（Bearer、10 秒超时、no-store）。 */
 export async function probeEndpointModels(endpoint: ProbeEndpointInput): Promise<ProbeEndpointResult> {
   const startedAt = Date.now();
   try {
@@ -153,8 +153,8 @@ export async function probeEndpointModels(endpoint: ProbeEndpointInput): Promise
 }
 
 /**
- * 該渠道上這個模型的上游模型名（registry claims；null＝同名直傳）。非 registry 渠道（admin 池）
- * 回 undefined——沒有 claim 就無從核對清單，只看 /models 是否 200。
+ * 该渠道上这个模型的上游模型名（registry claims；null＝同名直传）。非 registry 渠道（admin 池）
+ * 回 undefined——没有 claim 就无从核对清单，只看 /models 是否 200。
  */
 function expectedSupplierModelId(label: string, modelId: string): string | undefined {
   const claim = REGISTRY_CHANNELS.find((channel) => channel.label === label)?.claims.find(
@@ -164,7 +164,7 @@ function expectedSupplierModelId(label: string, modelId: string): string | undef
   return claim.supplierModelId ?? modelId;
 }
 
-/** 把 GatewayEndpoint.label 對回渠道 id（env:sub2api / 池名）。 */
+/** 把 GatewayEndpoint.label 对回渠道 id（env:sub2api / 池名）。 */
 function channelIdFromEndpointLabel(label: string): string {
   if (label in ENV_CHANNEL_PRIORITIES) return `env:${label}`;
   return label; // admin 池：池名即渠道 id
@@ -177,8 +177,8 @@ function mediaTypeFor(modelId: string): ModelMediaType {
 }
 
 /**
- * 單一模型的可用性探測（不經緩存，供測試直接調用）。
- * 隊列取 buildModelQueue 的第一順位端點——與真實生成路由同源。
+ * 单一模型的可用性探测（不经缓存，供测试直接调用）。
+ * 队列取 buildModelQueue 的第一顺位端点——与真实生成路由同源。
  */
 export async function probeModelStatus(
   modelId: string,
@@ -206,10 +206,10 @@ export async function probeModelStatus(
     return { ...base, availability: "unavailable" as const, note: "无可用渠道" };
   }
 
-  // 按隊列順位逐個探，任一渠道通即 available——與真實生成的 failover 同源。
-  // 只探第一順位會把「主渠道封 IP、備用渠道健在」誤判成整個模型不可用
-  // （2026-10-02 事故：xiaoyxiao nginx 對 VPS IP 全路徑 403，gway 備用正常，
-  // 4 個視頻模型全被報 unavailable，agent 誤以為影片通道全滅）。
+  // 按队列顺位逐个探，任一渠道通即 available——与真实生成的 failover 同源。
+  // 只探第一顺位会把「主渠道封 IP、备用渠道健在」误判成整个模型不可用
+  // （2026-10-02 事故：xiaoyxiao nginx 对 VPS IP 全路径 403，gway 备用正常，
+  // 4 个视频模型全被报 unavailable，agent 误以为影片通道全灭）。
   const failures: string[] = [];
   let unprobeableChannelId: string | undefined;
   for (const endpoint of queue) {
@@ -219,8 +219,8 @@ export async function probeModelStatus(
       continue;
     }
     const result = await probeFn({ baseURL: endpoint.baseURL, apiKey: endpoint.apiKey, label: endpoint.label });
-    // /models 200 ≠ 有這個模型（2026-10-02 hublinuxdo 實錘：200 但清單 20 個全是 LLM、零生圖模型，
-    // gpt-image-2 等被報 available）。registry 有 claim 的渠道必須在清單裡看到上游模型名才算通。
+    // /models 200 ≠ 有这个模型（2026-10-02 hublinuxdo 实锤：200 但清单 20 个全是 LLM、零生图模型，
+    // gpt-image-2 等被报 available）。registry 有 claim 的渠道必须在清单里看到上游模型名才算通。
     const expected = expectedSupplierModelId(endpoint.label, modelId);
     if (result.ok && expected && !result.modelIds?.includes(expected)) {
       failures.push(
@@ -270,7 +270,7 @@ function computeSummary(models: ModelStatusEntry[]): ModelStatusSummary {
   return { total: models.length, available, unavailable, unknown, by_media_type: byMediaType };
 }
 
-/** 帶並發上限的 map（Promise.all 的受限版，避免 20+ 上游同時被打）。 */
+/** 带并发上限的 map（Promise.all 的受限版，避免 20+ 上游同时被打）。 */
 async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
@@ -286,8 +286,8 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
 }
 
 /**
- * 全部生成模型（image+video，與 /v1/models 同源清單）的可用性快照。
- * 模組級緩存 60 秒：第二次調用直接回 cached=true 的快照，不重探。
+ * 全部生成模型（image+video，与 /v1/models 同源清单）的可用性快照。
+ * 模组级缓存 60 秒：第二次调用直接回 cached=true 的快照，不重探。
  */
 export async function probeAllModelsStatus(options: ModelStatusProbeOptions = {}): Promise<ModelStatusSnapshot> {
   const env = options.env ?? process.env;

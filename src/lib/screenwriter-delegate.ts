@@ -243,7 +243,7 @@ function strField(v: unknown): string | undefined {
 }
 
 /**
- * 分镜条目收敛（白名单欄位形）：只认 ShotlistEntry 已知键，description 必填
+ * 分镜条目收敛（白名单栏位形）：只认 ShotlistEntry 已知键，description 必填
  * 非空字符串；scene / duration_sec 正数四舍五入取整（同 music 版 bpm 取整口径）；
  * 未知键丢弃（防 payload 注入）。
  */
@@ -318,10 +318,10 @@ export function assembleScreenwriterPrompt(
   let constitution: string;
   try {
     const raw = (context.loadConstitution ?? defaultLoadConstitution)();
-    // 空值視為不可用（跟隨 blender-director-persona 同款範式）：空字串／全空白
-    // 不得視為「已注入憲法」，否則產出無憲法派遣（裸奔，誠實鐵律禁止）。
+    // 空值视为不可用（跟随 blender-director-persona 同款范式）：空字串／全空白
+    // 不得视为「已注入宪法」，否则产出无宪法派遣（裸奔，诚实铁律禁止）。
     if (raw.trim() === "") {
-      throw new Error("载入器回傳空內容（空或全空白）");
+      throw new Error("载入器回传空内容（空或全空白）");
     }
     constitution = raw;
   } catch (e) {

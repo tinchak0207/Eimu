@@ -1,17 +1,17 @@
-// 單節點軟刪恢復：POST /api/canvas/nodes/[id]/restore
+// 单节点软删恢复：POST /api/canvas/nodes/[id]/restore
 // body: { projectId: string }
 //
-// 與批量端點 `POST /api/canvas/nodes/restore` 同一語義，差別只在目標是路徑上的單一 id。
-// （競品同時有 `/{id}/restore` 與 `/batch-restore` 兩個入口，這裡對齊。）
+// 与批量端点 `POST /api/canvas/nodes/restore` 同一语义，差别只在目标是路径上的单一 id。
+// （竞品同时有 `/{id}/restore` 与 `/batch-restore` 两个入口，这里对齐。）
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** Next 15 的動態段是異步的，params 必須 await。 */
+/** Next 15 的动态段是异步的，params 必须 await。 */
 type RouteContext = { params: Promise<{ id: string }> };
 
 function fail(status: number, message: string, code: string): NextResponse {

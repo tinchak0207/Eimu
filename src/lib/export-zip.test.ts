@@ -4,9 +4,9 @@ import JSZip from "jszip";
 
 import { exportShotsZip } from "./export-zip.ts";
 
-// exportShotsZip 是瀏覽器端函式（依賴 document / URL.createObjectURL）。
-// 這裡補最小 browser stub，抓出它交給 createObjectURL 的 zip blob，
-// 再用 jszip 讀回真實條目名——斷言的是產物本身，不是原始碼字串。
+// exportShotsZip 是浏览器端函式（依赖 document / URL.createObjectURL）。
+// 这里补最小 browser stub，抓出它交给 createObjectURL 的 zip blob，
+// 再用 jszip 读回真实条目名——断言的是产物本身，不是原始码字串。
 async function buildZipEntryNames(
   items: Array<{ name: string; blob: Blob }>,
 ): Promise<string[]> {
@@ -20,8 +20,8 @@ async function buildZipEntryNames(
   const originalCreateObjectURL = URL.createObjectURL;
   const originalRevokeObjectURL = URL.revokeObjectURL;
 
-  // jszip 在 node 下要吃 Blob，必須先經過 FileReader 轉成 ArrayBuffer
-  // （jszip/lib/utils.js prepareContent 的 isBlob 分支）；node 沒有 FileReader，補一個。
+  // jszip 在 node 下要吃 Blob，必须先经过 FileReader 转成 ArrayBuffer
+  // （jszip/lib/utils.js prepareContent 的 isBlob 分支）；node 没有 FileReader，补一个。
   class StubFileReader {
     result: ArrayBuffer | null = null;
     onload: ((event: { target: { result: ArrayBuffer } }) => void) | null = null;
@@ -59,12 +59,12 @@ async function buildZipEntryNames(
   }
 
   const zipBlob = captured.blob;
-  assert.ok(zipBlob, "exportShotsZip 應把打包好的 zip blob 交給 createObjectURL");
+  assert.ok(zipBlob, "exportShotsZip 应把打包好的 zip blob 交给 createObjectURL");
   const zip = await JSZip.loadAsync(new Uint8Array(await zipBlob.arrayBuffer()));
   return Object.keys(zip.files).sort();
 }
 
-test("exportShotsZip 認得 .jpeg/.gif，不會補成 .jpeg.png/.gif.png", async () => {
+test("exportShotsZip 认得 .jpeg/.gif，不会补成 .jpeg.png/.gif.png", async () => {
   const names = await buildZipEntryNames([
     { name: "a.jpeg", blob: new Blob(["x"]) },
     { name: "b.gif", blob: new Blob(["y"]) },
@@ -72,7 +72,7 @@ test("exportShotsZip 認得 .jpeg/.gif，不會補成 .jpeg.png/.gif.png", async
   assert.deepEqual(names, ["a.jpeg", "b.gif"]);
 });
 
-test("exportShotsZip 缺副檔名補 .png，影片／音頻副檔名原樣保留", async () => {
+test("exportShotsZip 缺副档名补 .png，影片／音频副档名原样保留", async () => {
   const names = await buildZipEntryNames([
     { name: "a", blob: new Blob(["x"]) },
     { name: "b.mp4", blob: new Blob(["x"]) },
@@ -81,7 +81,7 @@ test("exportShotsZip 缺副檔名補 .png，影片／音頻副檔名原樣保留
   assert.deepEqual(names, ["a.png", "b.mp4", "c.mp3"]);
 });
 
-test("exportShotsZip 同名去重對新副檔名仍正確", async () => {
+test("exportShotsZip 同名去重对新副档名仍正确", async () => {
   const names = await buildZipEntryNames([
     { name: "a.jpeg", blob: new Blob(["x"]) },
     { name: "a.jpeg", blob: new Blob(["y"]) },

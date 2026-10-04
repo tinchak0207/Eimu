@@ -1,53 +1,53 @@
-// 首次觸達（first-touch）歸因的**純函式層**：cookie 編解碼、來源推導、provider email 挑選。
+// 首次触达（first-touch）归因的**纯函式层**：cookie 编解码、来源推导、provider email 挑选。
 //
-// 為什麼獨立成一檔：本檔沒有任何 node 內建模組（crypto/postgres）依賴，所以能被
-// "use client" 元件（AttributionCapture）與服務端（OAuth callback、統計投影）共用同一把尺。
-// 服務端寫庫／簽名中繼在 `user-attribution.ts`（那一檔才 import node:crypto 與 postgres）。
+// 为什么独立成一档：本档没有任何 node 内建模组（crypto/postgres）依赖，所以能被
+// "use client" 元件（AttributionCapture）与服务端（OAuth callback、统计投影）共用同一把尺。
+// 服务端写库／签名中继在 `user-attribution.ts`（那一档才 import node:crypto 与 postgres）。
 //
-// 口徑（唯一真源，測試釘住）：
-//   ① 首觸不覆蓋：cookie 已有合法值 → 不重寫（首次觸達時間戳與 90 天窗口固定）。
-//   ② 分組鍵 signup_source：utm_source → referrer host → 'direct'，一律小寫。
-//   ③ email 只存已驗證的（GitHub /user/emails 的 verified、Google 的 email_verified）。
+// 口径（唯一真源，测试钉住）：
+//   ① 首触不覆盖：cookie 已有合法值 → 不重写（首次触达时间戳与 90 天窗口固定）。
+//   ② 分组键 signup_source：utm_source → referrer host → 'direct'，一律小写。
+//   ③ email 只存已验证的（GitHub /user/emails 的 verified、Google 的 email_verified）。
 
-/** 首次觸達 cookie 名。 */
+/** 首次触达 cookie 名。 */
 export const FIRST_TOUCH_COOKIE = "eimu_first_touch";
 
-/** 首次觸達 cookie 有效期（天）。 */
+/** 首次触达 cookie 有效期（天）。 */
 export const FIRST_TOUCH_MAX_AGE_DAYS = 90;
 
-/** cookie 值的結構版本；解不出版本號＝視為不合法（寧可重寫一次，不讀半截 JSON）。 */
+/** cookie 值的结构版本；解不出版本号＝视为不合法（宁可重写一次，不读半截 JSON）。 */
 export const FIRST_TOUCH_COOKIE_VERSION = 1;
 
-/** 邀請碼在落地 URL 上的參數名（分享頁、定價頁邀請連結同一個）。 */
+/** 邀请码在落地 URL 上的参数名（分享页、定价页邀请连结同一个）。 */
 export const INVITE_PARAM = "invite";
 
-/** 邀請碼 cookie：與首觸 cookie 分開——首觸不覆蓋，但訪客可能先自然來過、之後才點好友連結。首個邀請勝出。 */
+/** 邀请码 cookie：与首触 cookie 分开——首触不覆盖，但访客可能先自然来过、之后才点好友连结。首个邀请胜出。 */
 export const INVITE_COOKIE = "eimu_invite";
 
-/** 邀請碼形狀（`<id36>-<8hex>`）；只擋畸形，驗簽在服務端（referral-code.ts）。 */
+/** 邀请码形状（`<id36>-<8hex>`）；只挡畸形，验签在服务端（referral-code.ts）。 */
 export function looksLikeInviteCode(value: string | null | undefined): value is string {
   return typeof value === "string" && /^[0-9a-z]{1,10}-[0-9a-f]{8}$/.test(value);
 }
 
-/** 沒有歸因事實的用戶（存量用戶、cookie 被清掉的人）在統計投影裡的分組哨兵值。 */
+/** 没有归因事实的用户（存量用户、cookie 被清掉的人）在统计投影里的分组哨兵值。 */
 export const UNATTRIBUTED_SOURCE = "__unknown__";
 
-/** 單一 token（utm 值 / campaign / 路徑）的長度上限，防 cookie 被塞爆。 */
+/** 单一 token（utm 值 / campaign / 路径）的长度上限，防 cookie 被塞爆。 */
 export const MAX_TOUCH_TOKEN_LENGTH = 120;
 
 export interface FirstTouchInput {
   utmSource?: string | null;
   utmMedium?: string | null;
   utmCampaign?: string | null;
-  /** 來源主機名（不含協議／路徑），本站自身不算來源。 */
+  /** 来源主机名（不含协议／路径），本站自身不算来源。 */
   referrerHost?: string | null;
-  /** 落地路徑（含 search），如 `/` 或 `/pricing?ref=x`。 */
+  /** 落地路径（含 search），如 `/` 或 `/pricing?ref=x`。 */
   landingPath?: string | null;
-  /** 首次觸達時刻（ISO）。 */
+  /** 首次触达时刻（ISO）。 */
   capturedAt?: string | null;
 }
 
-/** 落庫形狀（cookie 事實 + 推導出的分組鍵）。 */
+/** 落库形状（cookie 事实 + 推导出的分组键）。 */
 export interface FirstTouchRecord extends FirstTouchInput {
   signupSource: string;
 }
@@ -58,7 +58,7 @@ export interface GitHubEmailEntry {
   verified?: boolean | null;
 }
 
-/** 去控制字元、去頭尾空白、截長；空＝null。 */
+/** 去控制字元、去头尾空白、截长；空＝null。 */
 export function normalizeTouchToken(value: unknown, maxLength: number = MAX_TOUCH_TOKEN_LENGTH): string | null {
   if (typeof value !== "string") return null;
   // eslint-disable-next-line no-control-regex
@@ -68,8 +68,8 @@ export function normalizeTouchToken(value: unknown, maxLength: number = MAX_TOUC
 }
 
 /**
- * 從 document.referrer 取來源主機名。本站自己（selfHost）不算來源——站內跳轉不是歸因。
- * 解析失敗（空字串、非絕對 URL）回 null。
+ * 从 document.referrer 取来源主机名。本站自己（selfHost）不算来源——站内跳转不是归因。
+ * 解析失败（空字串、非绝对 URL）回 null。
  */
 export function referrerHostFrom(referrer: unknown, selfHost?: string | null): string | null {
   if (typeof referrer !== "string" || !referrer.trim()) return null;
@@ -86,8 +86,8 @@ export function referrerHostFrom(referrer: unknown, selfHost?: string | null): s
 }
 
 /**
- * 分組鍵：utm_source → referrer host → 'direct'（小寫）。
- * 'direct' 是一句真話：首觸當下確實沒有帶任何來源參數／來源主機。
+ * 分组键：utm_source → referrer host → 'direct'（小写）。
+ * 'direct' 是一句真话：首触当下确实没有带任何来源参数／来源主机。
  */
 export function deriveSignupSource(input: FirstTouchInput): string {
   const utmSource = normalizeTouchToken(input.utmSource)?.toLowerCase();
@@ -97,7 +97,7 @@ export function deriveSignupSource(input: FirstTouchInput): string {
   return "direct";
 }
 
-/** 把事實攤平成可落庫的形狀（保留原文，另附推導出的分組鍵）。 */
+/** 把事实摊平成可落库的形状（保留原文，另附推导出的分组键）。 */
 export function toFirstTouchRecord(input: FirstTouchInput): FirstTouchRecord {
   return {
     utmSource: normalizeTouchToken(input.utmSource),
@@ -110,7 +110,7 @@ export function toFirstTouchRecord(input: FirstTouchInput): FirstTouchRecord {
   };
 }
 
-/** cookie 值：緊湊 JSON（鍵短，省 cookie 額度）→ encodeURIComponent（RFC 6265 安全）。 */
+/** cookie 值：紧凑 JSON（键短，省 cookie 额度）→ encodeURIComponent（RFC 6265 安全）。 */
 export function encodeFirstTouchCookieValue(input: FirstTouchInput): string {
   const record = toFirstTouchRecord(input);
   const payload = {
@@ -126,7 +126,7 @@ export function encodeFirstTouchCookieValue(input: FirstTouchInput): string {
 }
 
 /**
- * 解 cookie。只有版本號對得上才算合法（`null`＝沒值／壞值／舊格式 → 呼叫方重寫一次）。
+ * 解 cookie。只有版本号对得上才算合法（`null`＝没值／坏值／旧格式 → 呼叫方重写一次）。
  */
 export function decodeFirstTouchCookieValue(raw: unknown): FirstTouchInput | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -150,8 +150,8 @@ export function decodeFirstTouchCookieValue(raw: unknown): FirstTouchInput | nul
 }
 
 /**
- * 首觸不覆蓋：既有 cookie 合法 → 回 null（呼叫方**不寫**，時間戳與 90 天窗口固定不動）；
- * 否則回新值。回 null 是「不必寫」的顯式信號，不是錯誤。
+ * 首触不覆盖：既有 cookie 合法 → 回 null（呼叫方**不写**，时间戳与 90 天窗口固定不动）；
+ * 否则回新值。回 null 是「不必写」的显式信号，不是错误。
  */
 export function resolveFirstTouchCookieValue(
   existingRaw: string | null | undefined,
@@ -161,7 +161,7 @@ export function resolveFirstTouchCookieValue(
   return encodeFirstTouchCookieValue(input);
 }
 
-/** 從 `window.location.search` 抽 utm 三兄弟（缺＝null，不做猜測）。 */
+/** 从 `window.location.search` 抽 utm 三兄弟（缺＝null，不做猜测）。 */
 export function firstTouchFromLocation(input: {
   search: string;
   referrer?: string | null;
@@ -180,7 +180,7 @@ export function firstTouchFromLocation(input: {
   };
 }
 
-/** 像樣的 email（含單一 @、兩側非空、無空白）；不通過一律不落庫。 */
+/** 像样的 email（含单一 @、两侧非空、无空白）；不通过一律不落库。 */
 export function isPlausibleEmail(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
@@ -191,8 +191,8 @@ export function isPlausibleEmail(value: unknown): value is string {
 }
 
 /**
- * GitHub 已驗證 email 的挑選：**只認 verified=true**（未驗證的可能是別人的信箱）。
- * 優先 primary，其次清單序第一個。挑不到回 null（絕不回退到合成 email）。
+ * GitHub 已验证 email 的挑选：**只认 verified=true**（未验证的可能是别人的信箱）。
+ * 优先 primary，其次清单序第一个。挑不到回 null（绝不回退到合成 email）。
  */
 export function selectVerifiedGitHubEmail(entries: readonly GitHubEmailEntry[] | null | undefined): string | null {
   if (!Array.isArray(entries)) return null;
@@ -203,7 +203,7 @@ export function selectVerifiedGitHubEmail(entries: readonly GitHubEmailEntry[] |
 }
 
 /**
- * Google 已驗證 email：`email_verified === true` 才認（OpenID Connect userinfo 的回報）。
+ * Google 已验证 email：`email_verified === true` 才认（OpenID Connect userinfo 的回报）。
  * 挑不到回 null。
  */
 export function selectVerifiedGoogleEmail(

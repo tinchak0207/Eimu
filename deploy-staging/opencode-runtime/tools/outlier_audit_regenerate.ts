@@ -2,16 +2,16 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail } from "../lib/client"
 import { vlmAskJson, parseUrlArray } from "../lib/batch5-matting"
 
-// 離群審計 + 重生指令（2026-08-31 片5）：成組圖 → VLM 逐圖與群體/風格錨的一致性評分 →
-// 統計離群（z-score）→ 對離群圖輸出修正重生 prompt（不自動生圖，扣費決策留給 agent/confirm）。
-// 單次 VLM 呼叫帶全部圖（省呼叫預算），TS 端做 z-score 排名。
+// 离群审计 + 重生指令（2026-08-31 片5）：成组图 → VLM 逐图与群体/风格锚的一致性评分 →
+// 统计离群（z-score）→ 对离群图输出修正重生 prompt（不自动生图，扣费决策留给 agent/confirm）。
+// 单次 VLM 呼叫带全部图（省呼叫预算），TS 端做 z-score 排名。
 
 const OUTLIER_Q =
-  "這是一組應風格/主題一致的圖（按輸入順序編號 0..N-1）。" +
-  "請逐圖評估其與『整組共識風格/主題』的一致性，輸出 JSON：" +
-  '{"scores":[{"index":0,"consistency":0.0~1.0,"deviation":"該圖偏離群體之處（若一致則空）","fix_prompt":"若偏離，給一段可讓重生貼合群體的英文 prompt 修正指令（一致則空）"}, ...每圖一項],' +
-  '"group_summary":"一句話描述整組共識風格/主題"}' +
-  " consistency 越高越貼合群體。只輸出 JSON。"
+  "这是一组应风格/主题一致的图（按输入顺序编号 0..N-1）。" +
+  "请逐图评估其与『整组共识风格/主题』的一致性，输出 JSON：" +
+  '{"scores":[{"index":0,"consistency":0.0~1.0,"deviation":"该图偏离群体之处（若一致则空）","fix_prompt":"若偏离，给一段可让重生贴合群体的英文 prompt 修正指令（一致则空）"}, ...每图一项],' +
+  '"group_summary":"一句话描述整组共识风格/主题"}' +
+  " consistency 越高越贴合群体。只输出 JSON。"
 
 function zScores(vals: number[]): number[] {
   const n = vals.length
@@ -24,22 +24,22 @@ function zScores(vals: number[]): number[] {
 
 export default tool({
   description:
-    "離群審計 + 重生指令（零生圖扣費，僅 VLM）：image_urls（成組圖 URL JSON 陣列，2-12 張）+ 可選 anchor（風格/主題錨文字，如 style_dna/garment_dna 的 prompt_suffix）→ VLM 逐圖給與群體（及錨）的一致性評分 → TS 端 z-score 統計離群（consistency z<-1 或排名末位標 outlier）→ 對離群圖輸出修正重生 prompt。輸出每圖 score/deviation_z/outlier/證據 + 匯總離群清單與重生指令清單。誠實：consistency 為 VLM 目測非像素量化；重生指令只給 prompt 不自動生圖（扣費決策留給 agent/用戶 confirm）。VLM 不可達回 ok:false 不編造。",
+    "离群审计 + 重生指令（零生图扣费，仅 VLM）：image_urls（成组图 URL JSON 阵列，2-12 张）+ 可选 anchor（风格/主题锚文字，如 style_dna/garment_dna 的 prompt_suffix）→ VLM 逐图给与群体（及锚）的一致性评分 → TS 端 z-score 统计离群（consistency z<-1 或排名末位标 outlier）→ 对离群图输出修正重生 prompt。输出每图 score/deviation_z/outlier/证据 + 汇总离群清单与重生指令清单。诚实：consistency 为 VLM 目测非像素量化；重生指令只给 prompt 不自动生图（扣费决策留给 agent/用户 confirm）。VLM 不可达回 ok:false 不编造。",
   args: {
-    image_urls: tool.schema.string().describe('成組圖 URL JSON 陣列字串，例 ["https://...","https://..."]'),
-    anchor: tool.schema.string().optional().describe("可選：風格/主題一致性錨文字（如 DNA prompt_suffix）"),
-    outlier_z: tool.schema.number().min(0.5).max(3).optional().describe("離群 z 閾值（consistency z < -閾值 判離群），默認 1.0"),
+    image_urls: tool.schema.string().describe('成组图 URL JSON 阵列字串，例 ["https://...","https://..."]'),
+    anchor: tool.schema.string().optional().describe("可选：风格/主题一致性锚文字（如 DNA prompt_suffix）"),
+    outlier_z: tool.schema.number().min(0.5).max(3).optional().describe("离群 z 阈值（consistency z < -阈值 判离群），默认 1.0"),
   },
   async execute(args, context) {
     const p = parseUrlArray(args.image_urls, { min: 2, max: 12 })
-    if (!p.ok) return fail(p.code, p.hint, { title: "輸入非法" })
+    if (!p.ok) return fail(p.code, p.hint, { title: "输入非法" })
     const anchor = args.anchor?.trim()
     const thr = args.outlier_z ?? 1.0
-    const q = anchor ? `${OUTLIER_Q}\n\n【一致性錨（額外對齊目標）】\n${anchor}` : OUTLIER_Q
+    const q = anchor ? `${OUTLIER_Q}\n\n【一致性锚（额外对齐目标）】\n${anchor}` : OUTLIER_Q
     const v = await vlmAskJson(p.urls, q, 2000)
-    if (!v.ok) return fail("vlm_unavailable", `VLM 審計失敗：${v.reason}（未編造評分）`, { title: "離群審計失敗" })
+    if (!v.ok) return fail("vlm_unavailable", `VLM 审计失败：${v.reason}（未编造评分）`, { title: "离群审计失败" })
     const raw = (v.data as Record<string, unknown>).scores
-    if (!Array.isArray(raw)) return fail("bad_schema", "VLM 回覆缺 scores 陣列", { title: "離群審計失敗" })
+    if (!Array.isArray(raw)) return fail("bad_schema", "VLM 回覆缺 scores 阵列", { title: "离群审计失败" })
     const byIndex = new Map<number, Record<string, unknown>>()
     for (const s of raw as Record<string, unknown>[]) {
       const idx = Number(s.index)
@@ -76,7 +76,7 @@ export default tool({
     }
     return ok(
       {
-        title: `離群審計完成（${p.urls.length} 張，離群 ${outliers.length}）`,
+        title: `离群审计完成（${p.urls.length} 张，离群 ${outliers.length}）`,
         group_summary: typeof (v.data as Record<string, unknown>).group_summary === "string" ? (v.data as Record<string, unknown>).group_summary : "",
         anchor_used: anchor || null,
         outlier_z_threshold: thr,
@@ -84,7 +84,7 @@ export default tool({
         outliers,
         regenerate_instructions: outliers.map((o) => ({ url: o.url, index: o.index, corrected_prompt: o.regenerate_prompt })),
         mechanism: "vlm_group_consistency + zscore",
-        note: "誠實：consistency 為 VLM 目測；outlier 判定 = consistency z<-閾值 或（≥4 張時）最低分且<0.6；regenerate_instructions 僅給 prompt，未自動生圖（扣費留給 agent/confirm）。",
+        note: "诚实：consistency 为 VLM 目测；outlier 判定 = consistency z<-阈值 或（≥4 张时）最低分且<0.6；regenerate_instructions 仅给 prompt，未自动生图（扣费留给 agent/confirm）。",
       },
       { outlier_count: outliers.length },
     )

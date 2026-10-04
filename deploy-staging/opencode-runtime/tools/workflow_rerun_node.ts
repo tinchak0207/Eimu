@@ -42,9 +42,9 @@ export default tool({
     workflow_id: tool.schema.string().describe("workflow id from workflow_start"),
     node_id: tool.schema.string().describe("node id to rerun"),
   },
-  // S3（2026-08-27）：opencode 工具上下文的會話鍵是 context.sessionID（全 VPS
-  // 其他工具一致）；舊代碼解構 { session_id } 得 undefined，導致 gateway
-  // resolveSession("undefined") 永遠 404 "session not found"。
+  // S3（2026-08-27）：opencode 工具上下文的会话键是 context.sessionID（全 VPS
+  // 其他工具一致）；旧代码解构 { session_id } 得 undefined，导致 gateway
+  // resolveSession("undefined") 永远 404 "session not found"。
   async execute({ workflow_id, node_id }, context) {
     // 2026-08-30：rerun 前先取 status，从 workflow.nodes 的真实 metadata 算出
     // resolvedModel 回显——AI 无法自欺。status 拉取失败只置 null，不阻塞 rerun。

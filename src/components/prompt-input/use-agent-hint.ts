@@ -23,8 +23,8 @@ export function useAgentHint({
 }) {
   const [agentHintOpen, setAgentHintOpen] = useState(false);
   const [agentHintSpent, setAgentHintSpent] = useState(false);
-  // 已送出（生成中/完成後看圖）→ 抑制提示：提示只屬於「還沒送出、卡在輸入」的時段。
-  // input 內容一變（使用者重新寫新任務）就解除，讓新任務也能獲得一次提示機會。
+  // 已送出（生成中/完成后看图）→ 抑制提示：提示只属于「还没送出、卡在输入」的时段。
+  // input 内容一变（使用者重新写新任务）就解除，让新任务也能获得一次提示机会。
   const [agentHintSuppressed, setAgentHintSuppressed] = useState(false);
   const agentHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -41,7 +41,7 @@ export function useAgentHint({
     if (agentHintTimerRef.current) clearTimeout(agentHintTimerRef.current);
     // 只在生成模式、已经打了字、还没用掉、还没送出、且不正在生成的情况下计时。
     // isLoading = 生成请求已发出：任务在跑时不弹「AI 助理帮你完成」，避免打断等待。
-    // agentHintSuppressed = 已送出：生成完成後看圖/檢查圖片期間也不彈，直到重新輸入新任务。
+    // agentHintSuppressed = 已送出：生成完成后看图/检查图片期间也不弹，直到重新输入新任务。
     if (agentHintSpent || agentHintSuppressed || displayMode !== "generate" || input.trim().length === 0 || isLoading) {
       setAgentHintOpen(false);
       return;
@@ -52,7 +52,7 @@ export function useAgentHint({
     };
   }, [input, displayMode, agentHintSpent, agentHintSuppressed, isLoading]);
 
-  // 送出後 suppress 只被「输入内容变化」解除：改成新任务的字才重新计时。
+  // 送出后 suppress 只被「输入内容变化」解除：改成新任务的字才重新计时。
   useEffect(() => {
     setAgentHintSuppressed(false);
   }, [input]);
@@ -68,8 +68,8 @@ export function useAgentHint({
   };
 
   /**
-   * 送出即抑制 D-24 提示：generate / edit / upscale 三条送出路径闭包共享同一個
-   * 下发（Task 3 抽 hook 时統一收敛到這裡）。
+   * 送出即抑制 D-24 提示：generate / edit / upscale 三条送出路径闭包共享同一个
+   * 下发（Task 3 抽 hook 时统一收敛到这里）。
    */
   const suppress = () => {
     setAgentHintOpen(false);

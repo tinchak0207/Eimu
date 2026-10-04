@@ -1,58 +1,58 @@
 // <harness-only>
 /**
- * music_gen harness 工具 VPS staging 稿（MOE Wave1 片B，2026-09-08 機械導出）。
+ * music_gen harness 工具 VPS staging 稿（MOE Wave1 片B，2026-09-08 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-tools.ts
- * 機械導出：真源全文逐行保留（工具定義/ok-fail/resolveKey/ffprobe 時長/上傳通路
- * 全在），除「環境適配」外與真源逐行等價。
- * 白名單 diff 僅六處：① 本注釋頭；②③④⑤⑥ 真源 `from "./music-lyria"` → `from "./music_lyria"`、
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-tools.ts
+ * 机械导出：真源全文逐行保留（工具定义/ok-fail/resolveKey/ffprobe 时长/上传通路
+ * 全在），除「环境适配」外与真源逐行等价。
+ * 白名单 diff 仅六处：① 本注释头；②③④⑤⑥ 真源 `from "./music-lyria"` → `from "./music_lyria"`、
  * `from "./music-flowmusic"` → `from "./music_flowmusic"`、
  * `from "./music-prompt-director"` → `from "./music_prompt_director"`、
- * `from "./music-yue2"` → `from "./music_yue2"` 與
- * `from "./music-take-entropy"` → `from "./music_take_entropy"`（同目錄落位檔名慣例）。
- * 禁止手改本檔——改真源後跑 `npx tsx tools/export-music-tools-staging.ts` 重導出。
+ * `from "./music-yue2"` → `from "./music_yue2"` 与
+ * `from "./music-take-entropy"` → `from "./music_take_entropy"`（同目录落位档名惯例）。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
- * env：GATEWAY_URL（默認 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
- *      GEMINI_STUDIO_API_KEY（lyria-3.5 generateContent 主 key，音頻落盤經 gateway 會話上傳存儲）、
- *      GEMINI_API_KEY（Vertex lyria-002 降級）、FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD
- *      （FlowMusic 真鑑權探針 /api/tokens/1/refresh-credits 用；缺失時探針降級為 unreachable 提示）。
+ * env：GATEWAY_URL（默认 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
+ *      GEMINI_STUDIO_API_KEY（lyria-3.5 generateContent 主 key，音频落盘经 gateway 会话上传存储）、
+ *      GEMINI_API_KEY（Vertex lyria-002 降级）、FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD
+ *      （FlowMusic 真鉴权探针 /api/tokens/1/refresh-credits 用；缺失时探针降级为 unreachable 提示）。
  */
 // </harness-only>
 
 /**
- * music_gen harness 工具（MOE 改革 Wave1 片B 音樂 Expert，2026-09-08）。
+ * music_gen harness 工具（MOE 改革 Wave1 片B 音乐 Expert，2026-09-08）。
  *
- * 定義形狀同構 src/lib/blender-tools.ts 的 BlenderToolDef（零依賴：
- * { id, description, args, execute } + ok()/fail() 契約，回 { title, output }，
- * output 為 JSON 字串）；ok/fail 與 resolveKey 逐行同構
- * src/vendor-bridges/lib/director-common.ts（VPS 落位範式：gateway
+ * 定义形状同构 src/lib/blender-tools.ts 的 BlenderToolDef（零依赖：
+ * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
+ * output 为 JSON 字串）；ok/fail 与 resolveKey 逐行同构
+ * src/vendor-bridges/lib/director-common.ts（VPS 落位范式：gateway
  * /internal/session-key 解 Bearer key，fallback env HARNESS_API_KEY）。
  *
  * 生成通路：Google Lyria（src/lib/music-lyria.ts，Gemini API v1beta/interactions，
- * env GEMINI_API_KEY）。duration_hint=full → lyria-3.5（整歌 ~3 分鐘）；
- * clip30 → lyria-3-clip-preview（固定 30 秒）。無歌詞默認按純器樂處理
- * （官方寫法 "Instrumental only, no vocals."），需要人声必须提供歌词。
+ * env GEMINI_API_KEY）。duration_hint=full → lyria-3.5（整歌 ~3 分钟）；
+ * clip30 → lyria-3-clip-preview（固定 30 秒）。无歌词默认按纯器乐处理
+ * （官方写法 "Instrumental only, no vocals."），需要人声必须提供歌词。
  *
- * prompt 規則層：buildToolPrompt 組出完整文本（含器樂聲明）後，最後一關過
- * src/lib/music-prompt-director.ts 的 directMusicPrompt（偽標籤/時間戳剝除、
- * 六層補齊、通路長度上限），回執 prompt_director 如實回報改寫/警告/截斷。
- * 順序不可顛倒：220 runes 上限要算進器樂聲明等所有字元。
+ * prompt 规则层：buildToolPrompt 组出完整文本（含器乐声明）后，最后一关过
+ * src/lib/music-prompt-director.ts 的 directMusicPrompt（伪标签/时间戳剥除、
+ * 六层补齐、通路长度上限），回执 prompt_director 如实回报改写/警告/截断。
+ * 顺序不可颠倒：220 runes 上限要算进器乐声明等所有字元。
  *
- * 音頻資產通路（復用既有 gateway 平台存儲，與影片/TTS 同域）：生成成功的音頻經
- * gateway 素材入庫端點 POST {GATEWAY}/internal/media/upload?session_id=<id> 落盤
- * （JSON body {path_b64, filename}，鑑權 = session_id 解析＋loopback 門，請求形狀同
- * tools/video_upload.ts），回應 url 即平台公網直連 URL
+ * 音频资产通路（复用既有 gateway 平台存储，与影片/TTS 同域）：生成成功的音频经
+ * gateway 素材入库端点 POST {GATEWAY}/internal/media/upload?session_id=<id> 落盘
+ * （JSON body {path_b64, filename}，鉴权 = session_id 解析＋loopback 门，请求形状同
+ * tools/video_upload.ts），回应 url 即平台公网直连 URL
  * （https://store.tinchak0207.xyz/image-data/files/uploads/<name>），直接交付。
- * uploadOverride 允許 VPS 接線時整體替換上傳入口（備用）。
+ * uploadOverride 允许 VPS 接线时整体替换上传入口（备用）。
  *
- * 時長：ffprobe 實測（同 audio_first_timeline 片4 先例，沙箱有 ffprobe）；
- * ffprobe 不可用時回退 model_hint（full≈180s / clip30=30s）並如實標注
- * duration_source，絕不把估算冒充实测。
+ * 时长：ffprobe 实测（同 audio_first_timeline 片4 先例，沙箱有 ffprobe）；
+ * ffprobe 不可用时回退 model_hint（full≈180s / clip30=30s）并如实标注
+ * duration_source，绝不把估算冒充实测。
  *
- * 錯誤鐵律（同 blender-tools）：所有失敗一律結構化 fail()，含人話 hint 與
- * 底層原因，絕不 throw 原始錯誤逃逸、絕不吞錯。
- * 工具文案一律簡體（記憶 agent-gateway-copy-rules）。
+ * 错误铁律（同 blender-tools）：所有失败一律结构化 fail()，含人话 hint 与
+ * 底层原因，绝不 throw 原始错误逃逸、绝不吞错。
+ * 工具文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
 import * as fsp from "node:fs/promises"
@@ -99,7 +99,7 @@ import {
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath } from "./sandbox"
 // </harness-only>
 
-// ── plumbing（ok/fail/resolveKey 同構 director-common.ts） ───────────────────
+// ── plumbing（ok/fail/resolveKey 同构 director-common.ts） ───────────────────
 
 export const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
@@ -115,7 +115,7 @@ function fail(code: string, hint: string, extra?: Record<string, unknown>): Musi
   return { title: (title as string) ?? "失败", output: JSON.stringify({ ok: false, error: { code, hint }, ...rest }) }
 }
 
-/** 同構 director-common resolveKey：gateway /internal/session-key 解 Bearer，fallback HARNESS_API_KEY。 */
+/** 同构 director-common resolveKey：gateway /internal/session-key 解 Bearer，fallback HARNESS_API_KEY。 */
 export async function resolveKey(sessionID: string, signal?: AbortSignal): Promise<string> {
   try {
     const resp = await fetch(`${GATEWAY}/internal/session-key`, {
@@ -129,7 +129,7 @@ export async function resolveKey(sessionID: string, signal?: AbortSignal): Promi
       if (typeof body?.api_key === "string" && body.api_key) return body.api_key
     }
   } catch {
-    // gateway 無法解析 → fallback
+    // gateway 无法解析 → fallback
   }
   const fallback = process.env.HARNESS_API_KEY
   if (!fallback) throw new Error("无法解析 API key：gateway 无此 session 记录且无 HARNESS_API_KEY")
@@ -150,15 +150,15 @@ function toFail(e: unknown): MusicToolResult {
   return fail("music_tool_error", `music_gen 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
-// ── YuE2 失敗回落 FlowMusic（2026-09-19，片 G）───────────────────────────────
+// ── YuE2 失败回落 FlowMusic（2026-09-19，片 G）───────────────────────────────
 
-/** 回落原因摘要上限（截斷防上游長原文把 LLM 可見回執撐爆）。 */
+/** 回落原因摘要上限（截断防上游长原文把 LLM 可见回执撑爆）。 */
 const FALLBACK_REASON_MAX_CHARS = 500
 
 /**
- * YuE2 拋錯的回落原因摘要：錯誤訊息壓平空白、以 env 密鑰值做防禦性遮蔽
- * （music-yue2 client 的錯誤訊息本就不含密鑰，這裡是第二道保險——secret 永不入回執）、
- * 超長截斷並如實標注。
+ * YuE2 抛错的回落原因摘要：错误讯息压平空白、以 env 密钥值做防御性遮蔽
+ * （music-yue2 client 的错误讯息本就不含密钥，这里是第二道保险——secret 永不入回执）、
+ * 超长截断并如实标注。
  */
 function yue2FallbackReason(e: unknown): string {
   let message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim()
@@ -169,7 +169,7 @@ function yue2FallbackReason(e: unknown): string {
     : message
 }
 
-// ── 參數整理助手（同構 blender-tools.ts 口徑） ────────────────────────────────
+// ── 参数整理助手（同构 blender-tools.ts 口径） ────────────────────────────────
 
 export interface MusicToolArgSpec {
   type: "string" | "number" | "boolean"
@@ -181,11 +181,11 @@ export interface MusicToolArgSpec {
 export interface MusicToolContext {
   abort?: AbortSignal
   /**
-   * 會話 id（音頻落盤目標會話；缺省時跳過上傳，result 只帶 audio_base64）。
-   * VPS harness 落位後由 adapter 從 opencode session 注入。
+   * 会话 id（音频落盘目标会话；缺省时跳过上传，result 只带 audio_base64）。
+   * VPS harness 落位后由 adapter 从 opencode session 注入。
    */
   sessionId?: string
-  /** 上傳入口整體替換（備用接線）；缺省走 gateway 會話上傳端點。 */
+  /** 上传入口整体替换（备用接线）；缺省走 gateway 会话上传端点。 */
   uploadOverride?: (audio: { bytes: Uint8Array; mimeType: string; filename: string }) => Promise<string>
 }
 
@@ -201,10 +201,10 @@ function asString(v: unknown): string | undefined {
 }
 
 /**
- * source_audio 前綴剝除（2026-09-19 片 O）：工具參數允許 data: 前綴
- * （與 reference_images 同款處理模式——agent 從 data URL/附件拿到的音頻常帶前綴），
- * client 端 /transcribe 只收純 base64（服務端 b64decode 不認前綴）。
- * 一律取**最後一個逗號**之後（data:audio/flac;base64,XXXX）。
+ * source_audio 前缀剥除（2026-09-19 片 O）：工具参数允许 data: 前缀
+ * （与 reference_images 同款处理模式——agent 从 data URL/附件拿到的音频常带前缀），
+ * client 端 /transcribe 只收纯 base64（服务端 b64decode 不认前缀）。
+ * 一律取**最后一个逗号**之后（data:audio/flac;base64,XXXX）。
  */
 function stripDataUrlPrefix(raw: string): string {
   const commaIndex = raw.lastIndexOf(",")
@@ -212,33 +212,33 @@ function stripDataUrlPrefix(raw: string): string {
 }
 
 // <harness-only>
-// ── source_audio 輸入解析：接受工作區檔案路徑（2026-10-04 本地參考音檔接線）─────────
+// ── source_audio 输入解析：接受工作区档案路径（2026-10-04 本地参考音档接线）─────────
 //
-// 背景：source_audio 原本只吃 base64／data: 前綴，模型得把幾 MB 音檔塞進工具參數，實務上
-// 做不到。使用者附件其實已落盤在 agent 工作區 uploads/<session>/，工具端本來就能讀檔
-// （既有流程已把 base64 寫成暫存檔餵 ffprobe）。故在此把「路徑」統一解析成純 base64，
-// 下游扒譜／生成／計費流程一行不動。
+// 背景：source_audio 原本只吃 base64／data: 前缀，模型得把几 MB 音档塞进工具参数，实务上
+// 做不到。使用者附件其实已落盘在 agent 工作区 uploads/<session>/，工具端本来就能读档
+// （既有流程已把 base64 写成暂存档喂 ffprobe）。故在此把「路径」统一解析成纯 base64，
+// 下游扒谱／生成／计费流程一行不动。
 //
-// 判定順序 fail-loud（不靜默忽略）：
-//   ① data: 前綴 → 剝前綴當 base64；
-//   ② http(s):// → 本輪不支援，明確報錯（不靜默忽略）；
-//   ③ 看似路徑 → **必須**經 checkAgentPath 沙箱白名單（realpath 落 workspace 子樹＋
-//      uploads 只放行本會話），通過才讀檔；越權路徑一律 path_denied；
-//   ④ 其餘 → 視為裸 base64。
-// 檔案大小上限沿用既有讀檔/音訊上限語義（20MB，同 read_image）；超限明確報錯並說出
-// 實際大小與上限，**絕不靜默截斷**（截斷後的音訊＝扒譜垃圾）。
+// 判定顺序 fail-loud（不静默忽略）：
+//   ① data: 前缀 → 剥前缀当 base64；
+//   ② http(s):// → 本轮不支援，明确报错（不静默忽略）；
+//   ③ 看似路径 → **必须**经 checkAgentPath 沙箱白名单（realpath 落 workspace 子树＋
+//      uploads 只放行本会话），通过才读档；越权路径一律 path_denied；
+//   ④ 其余 → 视为裸 base64。
+// 档案大小上限沿用既有读档/音讯上限语义（20MB，同 read_image）；超限明确报错并说出
+// 实际大小与上限，**绝不静默截断**（截断后的音讯＝扒谱垃圾）。
 
-/** 源音檔檔案大小上限（同 read_image 的 20MB 讀檔口徑）。 */
+/** 源音档档案大小上限（同 read_image 的 20MB 读档口径）。 */
 export const MAX_SOURCE_AUDIO_BYTES = 20 * 1024 * 1024
 
 export type SourceAudioResolution = {
-  /** 純 base64（無 data: 前綴，餵 transcribeYue2Score）。 */
+  /** 纯 base64（无 data: 前缀，喂 transcribeYue2Score）。 */
   base64: string
-  /** 來源種類（除錯/回執用，非契約欄位）。 */
+  /** 来源种类（除错/回执用，非契约栏位）。 */
   source: "base64" | "data_url" | "workspace_file"
-  /** 讀檔時的音檔位元組數（base64/data: 來源為 undefined）。 */
+  /** 读档时的音档位元组数（base64/data: 来源为 undefined）。 */
   bytes?: number
-  /** 讀檔時的原始路徑（僅 workspace_file）。 */
+  /** 读档时的原始路径（仅 workspace_file）。 */
   path?: string
 }
 
@@ -247,9 +247,9 @@ export type SourceAudioResolveResult =
   | { ok: false; code: string; message: string }
 
 /**
- * 把 source_audio 的原始輸入（base64／data:／工作區路徑）解析成純 base64。
- * 純函數語義外的唯一副作用＝讀檔（路徑分支時，且已過沙箱閘）。錯誤一律回結構化 code/message，
- * 由呼叫端轉 fail()（不 throw，保持工具 ok/fail 契約）。
+ * 把 source_audio 的原始输入（base64／data:／工作区路径）解析成纯 base64。
+ * 纯函数语义外的唯一副作用＝读档（路径分支时，且已过沙箱闸）。错误一律回结构化 code/message，
+ * 由呼叫端转 fail()（不 throw，保持工具 ok/fail 契约）。
  */
 export async function resolveSourceAudio(raw: string, sessionId: string | undefined): Promise<SourceAudioResolveResult> {
   const s = raw.trim()
@@ -267,7 +267,7 @@ export async function resolveSourceAudio(raw: string, sessionId: string | undefi
   if (!looksLikeAgentPath(s)) {
     return { ok: true, value: { base64: stripDataUrlPrefix(s), source: "base64" } }
   }
-  // 看似路徑 → 必須經沙箱白名單閘（不得繞過、不得讀工作區外的檔）。
+  // 看似路径 → 必须经沙箱白名单闸（不得绕过、不得读工作区外的档）。
   const verdict = checkAgentPath(s, sessionId ?? "")
   if (!verdict.ok) {
     const reasonText: Record<string, string> = {
@@ -318,7 +318,7 @@ export async function resolveSourceAudio(raw: string, sessionId: string | undefi
     return { ok: false, code: "source_audio_read_failed", message: `source_audio 读取失败：${s}（${errno}）。` }
   }
   if (buf.byteLength > MAX_SOURCE_AUDIO_BYTES) {
-    // stat 與 read 之間檔案變大（競態）；讀後複核同樣 fail-loud。
+    // stat 与 read 之间档案变大（竞态）；读后复核同样 fail-loud。
     return {
       ok: false,
       code: "source_audio_too_large",
@@ -329,7 +329,7 @@ export async function resolveSourceAudio(raw: string, sessionId: string | undefi
 }
 // </harness-only>
 
-// ── 時長實測（ffprobe；同 audio_first_timeline 片4 先例） ─────────────────────
+// ── 时长实测（ffprobe；同 audio_first_timeline 片4 先例） ─────────────────────
 
 function runFfprobeDuration(
   filePath: string,
@@ -362,7 +362,7 @@ function runFfprobeDuration(
   })
 }
 
-/** 寫臨時檔 → ffprobe 實測時長；任何失敗回 null（調用方回退 model_hint，不冒充）。 */
+/** 写临时档 → ffprobe 实测时长；任何失败回 null（调用方回退 model_hint，不冒充）。 */
 async function measureAudioDuration(audioBase64: string): Promise<number | null> {
   const tmpPath = nodePath.join(os.tmpdir(), `music-gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   try {
@@ -376,7 +376,7 @@ async function measureAudioDuration(audioBase64: string): Promise<number | null>
   }
 }
 
-// ── 音頻上傳（復用 gateway 會話上傳存儲，與 TTS/附件同域） ─────────────────────
+// ── 音频上传（复用 gateway 会话上传存储，与 TTS/附件同域） ─────────────────────
 
 const AUDIO_MIME_EXT: Readonly<Record<string, string>> = {
   "audio/mpeg": "mp3",
@@ -384,27 +384,27 @@ const AUDIO_MIME_EXT: Readonly<Record<string, string>> = {
   "audio/wav": "wav",
   "audio/x-wav": "wav",
   "audio/wave": "wav",
-  // YuE2 通路交付 FLAC（凍結合約 mime_type="audio/flac"）。缺這行副檔名會回退成 .mp3
-  // ＝檔名標籤說謊（同 2026-09-11 m4a 事故）；gateway contentTypeForExt 已收 .flac。
+  // YuE2 通路交付 FLAC（冻结合约 mime_type="audio/flac"）。缺这行副档名会回退成 .mp3
+  // ＝档名标签说谎（同 2026-09-11 m4a 事故）；gateway contentTypeForExt 已收 .flac。
   "audio/flac": "flac",
 }
 
 /**
- * 工具層暴露的 YuE2 cot 模式白名單（2026-09-19 片 K 開放樂譜編輯）。
- * 契約三值 full/melody/off 中只暴露前兩者：工具語義永遠要樂譜回執（score_abc），
- * off 不回樂譜、對 agent 無用，收到 "off" 一律 invalid_args 如實報錯。
+ * 工具层暴露的 YuE2 cot 模式白名单（2026-09-19 片 K 开放乐谱编辑）。
+ * 契约三值 full/melody/off 中只暴露前两者：工具语义永远要乐谱回执（score_abc），
+ * off 不回乐谱、对 agent 无用，收到 "off" 一律 invalid_args 如实报错。
  */
 const YUE2_TOOL_COT_MODES: readonly Yue2CotMode[] = ["full", "melody"]
 
-/** gateway 素材入庫端點（JSON 單筆位元組；請求形狀同 tools/video_upload.ts 的 path_b64 分支）。 */
+/** gateway 素材入库端点（JSON 单笔位元组；请求形状同 tools/video_upload.ts 的 path_b64 分支）。 */
 function uploadsEndpoint(sessionId: string): string {
   return `${GATEWAY}/internal/media/upload?session_id=${encodeURIComponent(sessionId)}`
 }
 
 /**
- * 上傳音頻入庫 gateway 平台存儲，返回平台公網直連 URL
+ * 上传音频入库 gateway 平台存储，返回平台公网直连 URL
  * （https://store.tinchak0207.xyz/image-data/files/uploads/<name>）。
- * 失敗帶 HTTP 狀態與原文摘錄拋 MusicToolError（誠實鐵律，不吞錯）。
+ * 失败带 HTTP 状态与原文摘录抛 MusicToolError（诚实铁律，不吞错）。
  */
 async function uploadAudio(
   audio: { bytes: Uint8Array; mimeType: string },
@@ -423,7 +423,7 @@ async function uploadAudio(
   }
   const ext = AUDIO_MIME_EXT[audio.mimeType] ?? "mp3"
   const filename = `music-gen-${Date.now()}.${ext}`
-  // 沙箱（PrivateTmp）內的位元組直傳：網關讀不到 agent FS，故 base64 內嵌 JSON body。
+  // 沙箱（PrivateTmp）内的位元组直传：网关读不到 agent FS，故 base64 内嵌 JSON body。
   const payload = { path_b64: Buffer.from(audio.bytes).toString("base64"), filename }
   let response: Response
   try {
@@ -465,21 +465,21 @@ async function uploadAudio(
       `音频入库响应缺少 url 字段（HTTP 200）。原文前 500 字符：${bodyText.slice(0, 500)}`,
     )
   }
-  // 平台公網 URL 由網關回傳（store.tinchak0207.xyz/image-data/files/uploads/...），直接交付不再拼前綴。
+  // 平台公网 URL 由网关回传（store.tinchak0207.xyz/image-data/files/uploads/...），直接交付不再拼前缀。
   return url
 }
 
 // ── music_gen 工具 ───────────────────────────────────────────────────────────
 
-// ── 免費通路健康探針（2026-09-30 R9 修復 D）─────────────────────────────────
+// ── 免费通路健康探针（2026-09-30 R9 修复 D）─────────────────────────────────
 //
-// 起因：yuri OP MV 評測（SSE 5578/6098）agent 先寫完歌詞、再撞 music_all_channels_failed
-// 三連敗（YuE2 OOM／FlowMusic OAuth 401／Lyria 403 SERVICE_DISABLED）。探針讓 agent 寫歌詞前
-// 就知道「歌做不做得出來、卡在誰手上」。鐵律：**不觸發任何生成、不花錢**——只打
-// /health、/v1/models、模型 metadata GET 與看門狗標記檔；憑證永不入回執。
-// 狀態分類：ready／needs_human_login（需暴君真人登入）／config_disabled（配置/帳號設定未啟用，
-// 需暴君改配置）／resource_insufficient（資源不足：顯存被佔、GPU 忙、配額耗盡）／
-// unreachable（服務不可達：筆電關機、隧道斷、容器掛）。
+// 起因：yuri OP MV 评测（SSE 5578/6098）agent 先写完歌词、再撞 music_all_channels_failed
+// 三连败（YuE2 OOM／FlowMusic OAuth 401／Lyria 403 SERVICE_DISABLED）。探针让 agent 写歌词前
+// 就知道「歌做不做得出来、卡在谁手上」。铁律：**不触发任何生成、不花钱**——只打
+// /health、/v1/models、模型 metadata GET 与看门狗标记档；凭证永不入回执。
+// 状态分类：ready／needs_human_login（需暴君真人登入）／config_disabled（配置/帐号设定未启用，
+// 需暴君改配置）／resource_insufficient（资源不足：显存被占、GPU 忙、配额耗尽）／
+// unreachable（服务不可达：笔电关机、隧道断、容器挂）。
 
 export type MusicChannelProbeStatus =
   | "ready"
@@ -491,21 +491,21 @@ export type MusicChannelProbeStatus =
 export interface MusicChannelProbe {
   channel: "yue2_modal" | "flowmusic2api" | "lyria_gemini"
   status: MusicChannelProbeStatus
-  /** 人話結論（簡體，給 agent/用戶看）。 */
+  /** 人话结论（简体，给 agent/用户看）。 */
   label: string
-  /** 探得的原始證據摘要（HTTP 碼/上游錯誤 reason/顯存數字），不含任何憑證。 */
+  /** 探得的原始证据摘要（HTTP 码/上游错误 reason/显存数字），不含任何凭证。 */
   evidence: string
-  /** 通路能力備註（例：YuE2 8GB 卡單首時長上限）。 */
+  /** 通路能力备注（例：YuE2 8GB 卡单首时长上限）。 */
   capability?: string
 }
 
 const PROBE_TIMEOUT_MS = 6_000
-/** YuE2 在 8GB 卡的實測峰值 ≈7.3GiB（2026-09-30 R9：peak_alloc 7.32GiB）；空閒顯存低於此＝被他人佔用。 */
+/** YuE2 在 8GB 卡的实测峰值 ≈7.3GiB（2026-09-30 R9：peak_alloc 7.32GiB）；空闲显存低于此＝被他人占用。 */
 const YUE2_MIN_FREE_VRAM_MIB = 7_400
-/** /health 未回報 ar_token_budget 時的誠實兜底：上限確實存在，但本次給不出精確秒數（不編數字）。 */
+/** /health 未回报 ar_token_budget 时的诚实兜底：上限确实存在，但本次给不出精确秒数（不编数字）。 */
 const YUE2_DURATION_CAP_FALLBACK =
   "YuE2 单首时长上限随歌词长度变化（歌词越长成片越短，超出部分在尾段截断并回报 yue2_truncated）；上游本次未回报 token 预算，无法给出精确秒数"
-/** FlowMusic 看門狗在 Supabase 鏈被連坐吊銷時寫的標記檔（/opt/flowmusic2api/watchdog.py DEAD_MARKER）。 */
+/** FlowMusic 看门狗在 Supabase 链被连坐吊销时写的标记档（/opt/flowmusic2api/watchdog.py DEAD_MARKER）。 */
 const FLOWMUSIC_CHAIN_DEAD_MARKER_DEFAULT = "/opt/flowmusic2api/CHAIN_DEAD"
 const LYRIA_MODELS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -618,9 +618,9 @@ async function probeFlowMusic(): Promise<MusicChannelProbe> {
   if (!("error" in models) && (models.status === 401 || models.status === 403)) {
     return { channel, status: "config_disabled", label: "FlowMusic2API 拒绝本机 API key", evidence: `GET /v1/models HTTP ${models.status}` }
   }
-  // 真鑑權探針（2026-10-02 修假綠燈）：/health 200 與 /v1/models 只證明容器活著＋本機 API key 有效，
-  // 不證明上游帳號 session 還能出曲。真 oracle = 用 admin 帳號打 POST /api/tokens/1/refresh-credits：
-  // 唯讀、不生成、比 /test 更省（任務 3b）。失敗才判 unreachable/needs_human_login；CHAIN_DEAD 僅附加訊號。
+  // 真鉴权探针（2026-10-02 修假绿灯）：/health 200 与 /v1/models 只证明容器活著＋本机 API key 有效，
+  // 不证明上游帐号 session 还能出曲。真 oracle = 用 admin 帐号打 POST /api/tokens/1/refresh-credits：
+  // 唯读、不生成、比 /test 更省（任务 3b）。失败才判 unreachable/needs_human_login；CHAIN_DEAD 仅附加讯号。
   const adminUser = (process.env.FLOWMUSIC_ADMIN_USER ?? "").trim()
   const adminPass = (process.env.FLOWMUSIC_ADMIN_PASSWORD ?? "").trim()
   const marker = (process.env.FLOWMUSIC_CHAIN_DEAD_MARKER ?? "").trim() || FLOWMUSIC_CHAIN_DEAD_MARKER_DEFAULT
@@ -708,13 +708,13 @@ async function probeLyria(): Promise<MusicChannelProbe> {
     return { channel, status: "config_disabled", label: "Gemini API key 或项目权限异常", evidence, capability: vocalCap }
   }
   if (vertexKey && isVertexExpressKey(vertexKey)) {
-    // Vertex express：POST 空 instances 的免費探針——鑑權通過回 400 "Empty instances"（不生成不計費），
-    // key 無效回 401，限額回 429。注意 ready 只代表「純器樂 30s 可出」，不等於能唱歌（見 capability）。
+    // Vertex express：POST 空 instances 的免费探针——鉴权通过回 400 "Empty instances"（不生成不计费），
+    // key 无效回 401，限额回 429。注意 ready 只代表「纯器乐 30s 可出」，不等于能唱歌（见 capability）。
     const v = await probeFetch(LYRIA_VERTEX_URL, {
       method: "POST",
       headers: { "x-goog-api-key": vertexKey, "Content-Type": "application/json" },
       body: JSON.stringify({ instances: [] }),
-    }, 25_000) // Vertex 對空請求的 400 實測也要 ~10s，6s 預設會把健康通路誤判不可達
+    }, 25_000) // Vertex 对空请求的 400 实测也要 ~10s，6s 预设会把健康通路误判不可达
     const vcap = `Vertex ${LYRIA_VERTEX_MODEL}：仅纯器乐、约 30 秒、WAV；不支持歌词/人声/参考图（歌词会被忽略并在回执标注）`
     if ("error" in v) return { channel, status: "unreachable", label: "Vertex AI 不可达", evidence: `POST ${LYRIA_VERTEX_MODEL}:predict 失败：${v.error}`, capability: vcap }
     const verr = ((v.body ?? {}) as { error?: { status?: string } }).error
@@ -733,7 +733,7 @@ async function probeLyria(): Promise<MusicChannelProbe> {
   }
 }
 
-/** 三通路並發探針（免費、不生成）。回執供 agent 開局決策：寫不寫歌詞、寫多長、要不要先找暴君。 */
+/** 三通路并发探针（免费、不生成）。回执供 agent 开局决策：写不写歌词、写多长、要不要先找暴君。 */
 export async function probeMusicChannels(): Promise<{
   channels: MusicChannelProbe[]
   can_generate_vocal_song: boolean
@@ -746,7 +746,7 @@ export async function probeMusicChannels(): Promise<{
   const humanActions = channels
     .filter((c) => c.status === "needs_human_login" || c.status === "config_disabled")
     .map((c) => `${c.channel}：${c.label}`)
-  // 誠實：無 GEMINI_STUDIO_API_KEY 時 Lyria 只剩 Vertex lyria-002（純器樂 30s），不能算「能唱歌」。
+  // 诚实：无 GEMINI_STUDIO_API_KEY 时 Lyria 只剩 Vertex lyria-002（纯器乐 30s），不能算「能唱歌」。
   const vocalCapable = (c: MusicChannelProbe) =>
     c.status === "ready" && !(c.channel === "lyria_gemini" && !hasGeminiStudioApiKey())
   const canVocal = channels.some(vocalCapable)
@@ -761,12 +761,12 @@ export async function probeMusicChannels(): Promise<{
 }
 
 /**
- * 情緒契約 → prompt（工具層薄組裝：契約欄位從 prompt 文本解析不了，所以工具參數
- * 只收自由文本 prompt；結構標籤/時間戳由調用方寫進 prompt 文本。lyrics 缺省=純器樂）。
+ * 情绪契约 → prompt（工具层薄组装：契约栏位从 prompt 文本解析不了，所以工具参数
+ * 只收自由文本 prompt；结构标签/时间戳由调用方写进 prompt 文本。lyrics 缺省=纯器乐）。
  */
 function buildToolPrompt(rawPrompt: string, hasLyrics: boolean): string {
   if (hasLyrics) return rawPrompt.trim()
-  // 無歌詞 → 官方器樂寫法收尾（若 prompt 已聲明 vocal 意圖則尊重原文不重複加）。
+  // 无歌词 → 官方器乐写法收尾（若 prompt 已声明 vocal 意图则尊重原文不重复加）。
   if (/instrumental only|no vocals/i.test(rawPrompt)) return rawPrompt.trim()
   return `${rawPrompt.trim()} Instrumental only, no vocals.`
 }
@@ -786,7 +786,7 @@ export const musicGenTool: MusicToolDef = {
     },
     prompt: {
       type: "string",
-      // 生成時必填（execute 內校驗並回 invalid_args）；schema 放寬是為了 probe=true 可單獨調用。
+      // 生成时必填（execute 内校验并回 invalid_args）；schema 放宽是为了 probe=true 可单独调用。
       required: false,
       description:
         "生成时必填（probe=true 时可省略）。风格描述按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ MOOD（≤2 个相容情绪词）→ INSTRUMENTATION（2-3 件乐器＋演奏法）→ VOCAL（谁唱/怎么唱）→ STRUCTURE（段落展开）→ PRODUCTION（年代/混音/空间；速度与调性用散文写，如 72 BPM, key of C major）。例：cinematic orchestral, 90 BPM, key of D minor, mood: heroic and sweeping。可写 [Verse]/[Chorus] 段落标签或 [0:00 - 0:10] Intro: 时间戳结构。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220／带歌词保版面分支 3000、YuE2 600、Lyria 无限制；超限时规则层按层权重整句丢低优先子句（保住 GENRE／MOOD／INSTRUMENTATION 与 BPM／调性，绝不切半句），丢掉的层见回执 prompt_director.truncated/warnings。注意：时间戳结构只对 Gemini Lyria 直连通路生效，FlowMusic2API 与 YuE2 通路不认时间戳（会被剥除并如实标注）。",
@@ -795,7 +795,7 @@ export const musicGenTool: MusicToolDef = {
       type: "string",
       required: false,
       description:
-        "自定义歌词（可选）。支持 [Verse]/[Chorus]/[Bridge] 段落标签或 [0:00 - 0:10] 时间戳结构；歌词语言跟随 prompt 语言。YuE2 通路要求自定义歌词带 [Verse]/[Chorus] 段落标签（上游语法必需）。时间码只有 Gemini Lyria 直连认：FlowMusic2API 与 YuE2 会剥除歌词里的 [0:00 - 0:10] 时间码（段落标签原样保留），并在回执 notes 用大白话说明。缺省=纯器乐（Instrumental only, no vocals）。",
+        "自定义歌词（可选）。支持 [Verse]/[Chorus]/[Bridge] 段落标签或 [0:00 - 0:10] 时间戳结构；中文歌词一律简体（用户给繁体中文歌词先转成简体再送，不写繁体字形）；非中文歌词按内容语言（英文歌英文、日文歌日文），不强制汉化。YuE2 通路要求自定义歌词带 [Verse]/[Chorus] 段落标签（上游语法必需）。时间码只有 Gemini Lyria 直连认：FlowMusic2API 与 YuE2 会剥除歌词里的 [0:00 - 0:10] 时间码（段落标签原样保留），并在回执 notes 用大白话说明。缺省=纯器乐（Instrumental only, no vocals）。",
     },
     duration_hint: {
       type: "string",
@@ -858,9 +858,9 @@ export const musicGenTool: MusicToolDef = {
         return fail("invalid_args", "缺少必填参数 prompt：需要风格+情绪描述（genre/BPM/调性/编制/氛围）。")
       }
       const lyrics = asString(rawArgs.lyrics)
-      // 歌詞時間碼剝除（2026-10-04 F-06）：FlowMusic2API／YuE2 不認 `[0:00 - 0:10]` 時間碼
-      // （只認 `[Verse]`/`[Chorus]` 段落標籤），剝除後如實回報；Lyria 直連認時間碼，原樣保留。
-      // 與 style prompt 同一政策（段落標籤保留、文字不動）。
+      // 歌词时间码剥除（2026-10-04 F-06）：FlowMusic2API／YuE2 不认 `[0:00 - 0:10]` 时间码
+      // （只认 `[Verse]`/`[Chorus]` 段落标签），剥除后如实回报；Lyria 直连认时间码，原样保留。
+      // 与 style prompt 同一政策（段落标签保留、文字不动）。
       const rawLyrics = lyrics ?? ""
       const strippedLyrics = stripLyricsTimestamps(rawLyrics)
       const lyricsForChannel = (channel: "yue2" | "flowmusic" | "lyria") =>
@@ -871,16 +871,16 @@ export const musicGenTool: MusicToolDef = {
       }
       const toolPrompt = buildToolPrompt(prompt, Boolean(lyrics))
 
-      // ── 樂譜編輯參數（片 K，2026-09-19）────────────────────────────────────
-      // abc＝自備/已編輯 ABC 樂譜（官方 editing.md 語義：同生成器、帶修改後的樂譜再渲染
-      // 一次）；cot_mode＝樂譜約束模式（full=旋律+和弦都約束／melody=只約束旋律、伴奏
-      // 自由適配＝翻唱模式）。僅 YuE2 通路有效——其他通路不認樂譜，如實報錯不靜默忽略
-      //（靜默忽略＝讓 agent 誤以為帶譜語義已生效，比報錯更糟）。
+      // ── 乐谱编辑参数（片 K，2026-09-19）────────────────────────────────────
+      // abc＝自备/已编辑 ABC 乐谱（官方 editing.md 语义：同生成器、带修改后的乐谱再渲染
+      // 一次）；cot_mode＝乐谱约束模式（full=旋律+和弦都约束／melody=只约束旋律、伴奏
+      // 自由适配＝翻唱模式）。仅 YuE2 通路有效——其他通路不认乐谱，如实报错不静默忽略
+      //（静默忽略＝让 agent 误以为带谱语义已生效，比报错更糟）。
       const abc = asString(rawArgs.abc)
-      // ── 翻唱參數（片 O，2026-09-19）────────────────────────────────────────
-      // source_audio＝源音頻 base64（允 data: 前綴，同 reference_images 處理模式）。
-      // 語義＝翻唱：先 transcribeYue2Score 扒出旋律骨幹 ABC，再帶 abc 生成。
-      // 互斥：source_audio 與 abc 同傳＝語義衝突（一個要現扒、一個已自備）→ invalid_args。
+      // ── 翻唱参数（片 O，2026-09-19）────────────────────────────────────────
+      // source_audio＝源音频 base64（允 data: 前缀，同 reference_images 处理模式）。
+      // 语义＝翻唱：先 transcribeYue2Score 扒出旋律骨干 ABC，再带 abc 生成。
+      // 互斥：source_audio 与 abc 同传＝语义冲突（一个要现扒、一个已自备）→ invalid_args。
       const sourceAudioRaw = asString(rawArgs.source_audio)
       if (sourceAudioRaw && abc) {
         return fail(
@@ -889,8 +889,8 @@ export const musicGenTool: MusicToolDef = {
         )
       }
       // <harness-only>
-      // 本地參考音檔接線（2026-10-04）：base64／data:／工作區檔案路徑統一解析成純 base64。
-      // 越權路徑（沙箱閘拒）、http(s) URL、超限檔在此 fail-loud，之後流程零改動。
+      // 本地参考音档接线（2026-10-04）：base64／data:／工作区档案路径统一解析成纯 base64。
+      // 越权路径（沙箱闸拒）、http(s) URL、超限档在此 fail-loud，之后流程零改动。
       let sourceAudioBase64: string | undefined
       if (sourceAudioRaw) {
         const resolved = await resolveSourceAudio(sourceAudioRaw, context?.sessionId)
@@ -898,8 +898,8 @@ export const musicGenTool: MusicToolDef = {
         sourceAudioBase64 = resolved.value.base64
       }
       // </harness-only>
-      // cot_mode 缺省：常規＝full；翻唱（帶 source_audio）＝melody（官方翻唱模式：
-      // 只保留旋律骨幹、伴奏自由適配新風格）；顯式傳 full 也允許＝保留原和聲的重渲染。
+      // cot_mode 缺省：常规＝full；翻唱（带 source_audio）＝melody（官方翻唱模式：
+      // 只保留旋律骨干、伴奏自由适配新风格）；显式传 full 也允许＝保留原和声的重渲染。
       const cotModeExplicit = asString(rawArgs.cot_mode)
       const cotModeRaw = cotModeExplicit ?? (sourceAudioRaw ? "melody" : "full")
       if (!YUE2_TOOL_COT_MODES.includes(cotModeRaw as Yue2CotMode)) {
@@ -909,8 +909,8 @@ export const musicGenTool: MusicToolDef = {
         )
       }
       const cotMode = cotModeRaw as Yue2CotMode
-      // melody 無樂譜來源（既無 abc 也無 source_audio）＝語義不成立；帶 source_audio
-      // 時 abc 由扒譜補上，不適用本規則。
+      // melody 无乐谱来源（既无 abc 也无 source_audio）＝语义不成立；带 source_audio
+      // 时 abc 由扒谱补上，不适用本规则。
       if (cotMode === "melody" && !abc && !sourceAudioRaw) {
         return fail(
           "invalid_args",
@@ -919,17 +919,17 @@ export const musicGenTool: MusicToolDef = {
       }
       const abcSha256 = abc ? createHash("sha256").update(abc, "utf8").digest("hex") : null
 
-      // 通路選擇（2026-09-09 換血，2026-09-18 加第三通路）：env YUE2_MODAL_ENDPOINT 非空
-      // → YuE2 Modal（白盒 ABC 樂譜、cot、無時長控制）；否則 FLOWMUSIC2API_URL 配置即走
-      // FlowMusic2API（lyria 整歌 / lyria-fast 快速；上游無 30s 片段模式，clip30 映射快速別名）；
-      // 兩者皆未配置回落 Gemini Lyria interactions 直連。三路返回形狀同構
-      // （audioBase64/mimeType），下游上傳/ffprobe 實測/交付形狀完全不變。
-      // 2026-09-19 加失敗回落：YuE2 服務跑在筆電上（反向隧道進 VPS），筆電關機/隧道
-      // 斷線時 generateYue2Track 拋錯（網路層/超時/非 2xx）→ 自動回落 FlowMusic 完整
-      // 重跑一次，音樂管線不因單通路故障而壞（見下方生成段）。
-      // YuE2 是「歌詞→整歌」：純器樂（無歌詞）或 30 秒短檔它兌現不了（上游 400「lyrics must be
-      // a non-empty string」／無時長欄位）。有別的通路在場就讓位給它們，而不是先撞 YuE2 再報錯
-      //（2026-09-29 e2e：「咖啡店背景音樂 30 秒」兩種都撞牆）。abc／翻唱委託仍必走 YuE2。
+      // 通路选择（2026-09-09 换血，2026-09-18 加第三通路）：env YUE2_MODAL_ENDPOINT 非空
+      // → YuE2 Modal（白盒 ABC 乐谱、cot、无时长控制）；否则 FLOWMUSIC2API_URL 配置即走
+      // FlowMusic2API（lyria 整歌 / lyria-fast 快速；上游无 30s 片段模式，clip30 映射快速别名）；
+      // 两者皆未配置回落 Gemini Lyria interactions 直连。三路返回形状同构
+      // （audioBase64/mimeType），下游上传/ffprobe 实测/交付形状完全不变。
+      // 2026-09-19 加失败回落：YuE2 服务跑在笔电上（反向隧道进 VPS），笔电关机/隧道
+      // 断线时 generateYue2Track 抛错（网路层/超时/非 2xx）→ 自动回落 FlowMusic 完整
+      // 重跑一次，音乐管线不因单通路故障而坏（见下方生成段）。
+      // YuE2 是「歌词→整歌」：纯器乐（无歌词）或 30 秒短档它兑现不了（上游 400「lyrics must be
+      // a non-empty string」／无时长栏位）。有别的通路在场就让位给它们，而不是先撞 YuE2 再报错
+      //（2026-09-29 e2e：「咖啡店背景音乐 30 秒」两种都撞墙）。abc／翻唱委托仍必走 YuE2。
       const otherMusicChannel = isFlowMusic2ApiEnabled() || hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
       const yue2Enabled =
         isYue2ModalEnabled() &&
@@ -938,12 +938,12 @@ export const musicGenTool: MusicToolDef = {
       const flowMusicModel = FLOWMUSIC_MODELS[durationHintRaw === "clip30" ? "clip30" : "full"]
       const lyriaModel = durationHintRaw === "clip30" ? LYRIA_MODELS.clip30 : LYRIA_MODELS.full
 
-      // YuE2 無 30 秒短檔模式（凍結合約根本沒有時長欄位）：如實報錯，絕不靜默生成整歌再
-      // 假裝是 30 秒。理由：clip30 的委託語義是「短檔對時」（MV 對點），上游產不出來；
-      // 硬吞會讓回執 duration_hint=clip30 與實際成品互相矛盾＝說謊，且 YuE2 一次生成是
-      // 分鐘級，先失敗比燒完才報廢便宜；hint 直接給可執行的下一步。
-      // 注意：這是參數性 fail（委託本身不合法，我們在上游前自己拒的），不是 YuE2 服務
-      // 拋錯——不觸發回落，語義與「隧道斷線」不同。
+      // YuE2 无 30 秒短档模式（冻结合约根本没有时长栏位）：如实报错，绝不静默生成整歌再
+      // 假装是 30 秒。理由：clip30 的委托语义是「短档对时」（MV 对点），上游产不出来；
+      // 硬吞会让回执 duration_hint=clip30 与实际成品互相矛盾＝说谎，且 YuE2 一次生成是
+      // 分钟级，先失败比烧完才报废便宜；hint 直接给可执行的下一步。
+      // 注意：这是参数性 fail（委托本身不合法，我们在上游前自己拒的），不是 YuE2 服务
+      // 抛错——不触发回落，语义与「隧道断线」不同。
       if (yue2Enabled && durationHintRaw === "clip30") {
         return fail(
           "unsupported_duration_hint",
@@ -951,8 +951,8 @@ export const musicGenTool: MusicToolDef = {
         )
       }
 
-      // 帶 abc 的委託在非 YuE2 通路＝通路能力不匹配，如實報錯不靜默忽略（clip30 同款
-      // 參數性 fail 語義：委託本身帶了通路兌現不了的語義，上游前自己拒，不觸發回落）。
+      // 带 abc 的委托在非 YuE2 通路＝通路能力不匹配，如实报错不静默忽略（clip30 同款
+      // 参数性 fail 语义：委托本身带了通路兑现不了的语义，上游前自己拒，不触发回落）。
       if (abc && !yue2Enabled) {
         return fail(
           "unsupported_channel_for_abc",
@@ -960,9 +960,9 @@ export const musicGenTool: MusicToolDef = {
         )
       }
 
-      // 帶 source_audio 的委託（翻唱）同樣僅 YuE2 通路：扒譜（/transcribe）與帶譜生成
-      // 都是 YuE2 服務能力，其他通路兌現不了「以這首歌的旋律骨幹重新演繹」的語義。
-      // 同款參數性 fail（上游前自己拒，零上游請求，不觸發回落）。
+      // 带 source_audio 的委托（翻唱）同样仅 YuE2 通路：扒谱（/transcribe）与带谱生成
+      // 都是 YuE2 服务能力，其他通路兑现不了「以这首歌的旋律骨干重新演绎」的语义。
+      // 同款参数性 fail（上游前自己拒，零上游请求，不触发回落）。
       if (sourceAudioRaw && !yue2Enabled) {
         return fail(
           "unsupported_channel_for_source_audio",
@@ -970,10 +970,10 @@ export const musicGenTool: MusicToolDef = {
         )
       }
 
-      // 確定性規則層（Music Prompt Director）必須是送上游前的最後一關：
-      // 先讓 buildToolPrompt 組出含器樂聲明的完整文本，再過 director 做偽標籤/時間戳
-      // 剝除、六層補齊與長度上限——220 runes 上限必須把器樂聲明等所有字元算進去，
-      // 提前過 director 會讓後加的聲明把長度頂爆（且 strip-timestamps 只認 flowmusic/yue2）。
+      // 确定性规则层（Music Prompt Director）必须是送上游前的最后一关：
+      // 先让 buildToolPrompt 组出含器乐声明的完整文本，再过 director 做伪标签/时间戳
+      // 剥除、六层补齐与长度上限——220 runes 上限必须把器乐声明等所有字元算进去，
+      // 提前过 director 会让后加的声明把长度顶爆（且 strip-timestamps 只认 flowmusic/yue2）。
       let directorChannel: "yue2" | "flowmusic" | "lyria" = yue2Enabled
         ? "yue2"
         : flowMusicEnabled
@@ -992,10 +992,10 @@ export const musicGenTool: MusicToolDef = {
         .map((s) => s.trim())
         .filter((s) => s !== "")
 
-      // ── 翻唱：先扒譜（片 O，2026-09-19）──────────────────────────────────
-      // source_audio → transcribeYue2Score 得旋律骨幹 ABC（melodyOnly=true 與 cot=melody
-      // 語義對齊）。扒譜拋錯（含 422 abc_missing 確定性失敗）→ 帶專屬錯誤碼 fail，
-      // **不回落**（翻唱語義不可被無譜通路頂替，同帶 abc 不回落的誠實鐵律）。
+      // ── 翻唱：先扒谱（片 O，2026-09-19）──────────────────────────────────
+      // source_audio → transcribeYue2Score 得旋律骨干 ABC（melodyOnly=true 与 cot=melody
+      // 语义对齐）。扒谱抛错（含 422 abc_missing 确定性失败）→ 带专属错误码 fail，
+      // **不回落**（翻唱语义不可被无谱通路顶替，同带 abc 不回落的诚实铁律）。
       let effectiveAbc: string | undefined = abc
       let transcribedAbcSha256: string | null = null
       let transcribeWarnings: string[] | null = null
@@ -1010,7 +1010,7 @@ export const musicGenTool: MusicToolDef = {
           })
         } catch (e) {
           if (e instanceof Yue2TranscribeError) {
-            // abc_missing（422）＝這份音頻扒不出旋律，重試同一份不會變好，hint 如實說。
+            // abc_missing（422）＝这份音频扒不出旋律，重试同一份不会变好，hint 如实说。
             return fail(
               e.code,
               e.code === YUE2_TRANSCRIBE_ABC_MISSING_CODE
@@ -1024,26 +1024,26 @@ export const musicGenTool: MusicToolDef = {
         transcribedAbcSha256 = createHash("sha256").update(transcribed.abc, "utf8").digest("hex")
         transcribeWarnings = transcribed.warnings
       }
-      // 實際送生成的樂譜指紋：帶 abc＝委託譜；翻唱＝扒譜產物（與 transcribed_abc_sha256 同值）。
+      // 实际送生成的乐谱指纹：带 abc＝委托谱；翻唱＝扒谱产物（与 transcribed_abc_sha256 同值）。
       const effectiveAbcSha256 = effectiveAbc
         ? createHash("sha256").update(effectiveAbc, "utf8").digest("hex")
         : null
 
-      // ── 生成＋失敗回落（2026-09-19）────────────────────────────────────────
-      // yue2 啟用且 generateYue2Track 拋錯（網路層/超時/非 2xx）→ 若 FlowMusic 已配置，
-      // 回落走 generateFlowMusicTrack 完整重跑一次；回執 channel 用實際通路字串，
-      // additive 加 fallback_from/fallback_reason。回落時 prompt 必須用 flowmusic 通道
-      // **重新過 director**（yue2 與 flowmusic 的規則層不同：剝時間戳 vs 壓單行/220 上限），
-      // 不能拿 yue2 版面直接送 flowmusic——director 是純函數，可重複呼叫。
-      // 2026-09-28 改為整條鏈回落：YuE2 → FlowMusic → Gemini Lyria 直連（Lyria 僅在
-      // GEMINI_API_KEY 已配置時入鏈）。起因＝漫劇評測實錘：純器樂 BGM 送 YuE2 被凍結合約
-      // 400（lyrics 必填）→ 回落 FlowMusic 又遇帳號鑑權 502 → 整集無 BGM，而 Lyria 金鑰
-      // 在場卻從未被嘗試。回落只在「已選通路拋錯」時發生，全鏈失敗 fail 帶每一路原因。
-      // 2026-09-19 片 K 例外：帶 abc 的委託 YuE2 拋錯**不觸發回落**，直接 fail 帶原文。
-      // 理由＝語義完整性優先：FlowMusic 不認 abc，回落會靜靜丟失「以這份樂譜為約束」的
-      // 委託語義，agent 拿到的是一首語義無關的歌卻以為編輯已生效——比直接失敗更糟
-      //（誠實鐵律：能力不匹配要如實報錯，絕不靜默降級）。
-      // 2026-09-19 片 O 同款：帶 source_audio（翻唱）的委託拋錯同樣不回落。
+      // ── 生成＋失败回落（2026-09-19）────────────────────────────────────────
+      // yue2 启用且 generateYue2Track 抛错（网路层/超时/非 2xx）→ 若 FlowMusic 已配置，
+      // 回落走 generateFlowMusicTrack 完整重跑一次；回执 channel 用实际通路字串，
+      // additive 加 fallback_from/fallback_reason。回落时 prompt 必须用 flowmusic 通道
+      // **重新过 director**（yue2 与 flowmusic 的规则层不同：剥时间戳 vs 压单行/220 上限），
+      // 不能拿 yue2 版面直接送 flowmusic——director 是纯函数，可重复呼叫。
+      // 2026-09-28 改为整条链回落：YuE2 → FlowMusic → Gemini Lyria 直连（Lyria 仅在
+      // GEMINI_API_KEY 已配置时入链）。起因＝漫剧评测实锤：纯器乐 BGM 送 YuE2 被冻结合约
+      // 400（lyrics 必填）→ 回落 FlowMusic 又遇帐号鉴权 502 → 整集无 BGM，而 Lyria 金钥
+      // 在场却从未被尝试。回落只在「已选通路抛错」时发生，全链失败 fail 带每一路原因。
+      // 2026-09-19 片 K 例外：带 abc 的委托 YuE2 抛错**不触发回落**，直接 fail 带原文。
+      // 理由＝语义完整性优先：FlowMusic 不认 abc，回落会静静丢失「以这份乐谱为约束」的
+      // 委托语义，agent 拿到的是一首语义无关的歌却以为编辑已生效——比直接失败更糟
+      //（诚实铁律：能力不匹配要如实报错，绝不静默降级）。
+      // 2026-09-19 片 O 同款：带 source_audio（翻唱）的委托抛错同样不回落。
       const hasScoreSemantics = abc !== undefined || sourceAudioRaw !== undefined
       const lyriaEnabled = hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
       const channelChain: Array<"yue2" | "flowmusic" | "lyria"> = []
@@ -1060,10 +1060,10 @@ export const musicGenTool: MusicToolDef = {
         const channel = channelChain[i]
         activeChannel = channel
         if (channel !== directorChannel) {
-          // 換通路必須用該通路**重新過 director**（各通路規則層不同），director 是純函數可重複呼叫。
+          // 换通路必须用该通路**重新过 director**（各通路规则层不同），director 是纯函数可重复呼叫。
           directorChannel = channel
-          // Vertex lyria-002 純器樂：含人聲/歌詞措辭的 prompt 會被上游 500「Could not generate audio」，
-          // 故落到它時按純器樂重組 prompt（歌詞丟棄會在回執 degraded/ignored_inputs 明說）。
+          // Vertex lyria-002 纯器乐：含人声/歌词措辞的 prompt 会被上游 500「Could not generate audio」，
+          // 故落到它时按纯器乐重组 prompt（歌词丢弃会在回执 degraded/ignored_inputs 明说）。
           const lyriaInstrumentalOnly = channel === "lyria" && !hasGeminiStudioApiKey()
           directed = directMusicPrompt(lyriaInstrumentalOnly ? buildToolPrompt(prompt, false) : toolPrompt, {
             channel,
@@ -1088,7 +1088,7 @@ export const musicGenTool: MusicToolDef = {
         } catch (e) {
           if (hasScoreSemantics) throw e
           if (i === channelChain.length - 1) {
-            // 單通路失敗照舊拋原錯誤；多通路全滅則每一路原因都要在回執裡看得見。
+            // 单通路失败照旧抛原错误；多通路全灭则每一路原因都要在回执里看得见。
             if (channelFailures.length === 0) throw e
             throw new MusicToolError(
               "music_all_channels_failed",
@@ -1109,15 +1109,15 @@ export const musicGenTool: MusicToolDef = {
             : ((generated as GenerateLyriaTrackResult).effectiveModel ?? lyriaModel)
       const lyriaVertex = activeChannel === "lyria" && (generated as GenerateLyriaTrackResult).backend === "vertex_express"
       const lyriaIgnored = lyriaVertex ? ((generated as GenerateLyriaTrackResult).ignoredInputs ?? []) : []
-      // 誠實降級：要人聲(有歌詞)或要整歌(full)卻落到 Vertex lyria-002（純器樂 30s）＝降級交付，必須明說。
+      // 诚实降级：要人声(有歌词)或要整歌(full)却落到 Vertex lyria-002（纯器乐 30s）＝降级交付，必须明说。
       const degradedReasons: string[] = []
       if (lyriaVertex && lyrics) degradedReasons.push("请求含歌词/人声，但最终通路 Vertex lyria-002 仅纯器乐，成品无人声、歌词未使用")
       if (lyriaVertex && durationHintRaw !== "clip30") degradedReasons.push("请求整歌，但 lyria-002 仅出约 30 秒片段")
       const upstreamUrl =
         activeChannel === "flowmusic" ? (generated as unknown as { upstreamUrl: string }).upstreamUrl : null
 
-      // 音頻落盤：復用 gateway 會話上傳存儲（與 TTS/附件同域）。無 sessionId 時
-      // 跳過上傳、result 如實帶 audio_base64（不偽造 URL）。
+      // 音频落盘：复用 gateway 会话上传存储（与 TTS/附件同域）。无 sessionId 时
+      // 跳过上传、result 如实带 audio_base64（不伪造 URL）。
       const bytes = Buffer.from(generated.audioBase64, "base64")
       let url: string | null = null
       let uploadCode = "skipped_no_session"
@@ -1139,16 +1139,16 @@ export const musicGenTool: MusicToolDef = {
         }
       }
 
-      // 時長：ffprobe 實測優先；不可用回退通路提示值並如實標注
-      // （YuE2 帶上游自報 duration_s＝上游端真量測值 → duration_source=upstream_reported；
-      //  FlowMusic2API 帶上游 Duration 提示、Gemini 通路按 model_hint → model_hint）。
-      // 170/180 = 整歌實測區間 162–182s 的中位，僅為模型提示值非實測
-      // （duration_source=model_hint 如實標注，不冒充 ffprobe；YuE2 契約保證回 duration_s，
-      //  180 只在該欄缺失時才走到，且照樣標 model_hint）。
-      // 2026-09-19 回落後這段以 activeChannel 為準（回落成功＝實際通路是 flowmusic，
-      //  時長語義照 flowmusic：上游 Duration 提示 → model_hint）。
+      // 时长：ffprobe 实测优先；不可用回退通路提示值并如实标注
+      // （YuE2 带上游自报 duration_s＝上游端真量测值 → duration_source=upstream_reported；
+      //  FlowMusic2API 带上游 Duration 提示、Gemini 通路按 model_hint → model_hint）。
+      // 170/180 = 整歌实测区间 162–182s 的中位，仅为模型提示值非实测
+      // （duration_source=model_hint 如实标注，不冒充 ffprobe；YuE2 契约保证回 duration_s，
+      //  180 只在该栏缺失时才走到，且照样标 model_hint）。
+      // 2026-09-19 回落后这段以 activeChannel 为准（回落成功＝实际通路是 flowmusic，
+      //  时长语义照 flowmusic：上游 Duration 提示 → model_hint）。
       const yue2Track = activeChannel === "yue2" ? (generated as GenerateYue2TrackResult) : null
-      // 上游自報時長（YuE2 duration_s，>0 才是可用量測值；契約保證有，缺了照樣標 model_hint）。
+      // 上游自报时长（YuE2 duration_s，>0 才是可用量测值；契约保证有，缺了照样标 model_hint）。
       const yue2Duration = yue2Track?.durationSeconds ?? 0
       const measured = await measureAudioDuration(generated.audioBase64)
       const hintSeconds =
@@ -1169,17 +1169,17 @@ export const musicGenTool: MusicToolDef = {
             ? "upstream_reported"
             : "model_hint"
 
-      // 多候選交付（2026-10-02）：FlowMusic 上游多數回 2 個 clips。主候選照舊走既有
-      // url/upstream_url 單數欄位（向後兼容零改動），其餘候選經同一上傳通路落成平台
-      // URL，以 gateway 既已消費的 audios[] 形狀 additive 帶出（每筆一個 audio.done）。
-      // 誠實降級：次候選下載/上傳失敗只記進 candidate_errors，絕不拖垮主候選交付。
+      // 多候选交付（2026-10-02）：FlowMusic 上游多数回 2 个 clips。主候选照旧走既有
+      // url/upstream_url 单数栏位（向后兼容零改动），其余候选经同一上传通路落成平台
+      // URL，以 gateway 既已消费的 audios[] 形状 additive 带出（每笔一个 audio.done）。
+      // 诚实降级：次候选下载/上传失败只记进 candidate_errors，绝不拖垮主候选交付。
       const flowResult = activeChannel === "flowmusic" ? (generated as GenerateFlowMusicTrackResult) : null
       const candidateErrors: Array<{ candidate_index: number; upstream_url: string; error: string }> = (
         flowResult?.candidateErrors ?? []
       ).map((e) => ({ candidate_index: e.candidateIndex, upstream_url: e.upstreamUrl, error: e.error }))
-      // title/sound_prompt（2026-10-03 多 take 偏好闸 additive）：上游 clips[].title 與
-      // 回吐的 clips[].sound_prompt 逐候選帶出（缺省不帶鍵，既有鍵零改動），供熵決策層
-      // 判「這幾版聽起來一不一樣」。
+      // title/sound_prompt（2026-10-03 多 take 偏好闸 additive）：上游 clips[].title 与
+      // 回吐的 clips[].sound_prompt 逐候选带出（缺省不带键，既有键零改动），供熵决策层
+      // 判「这几版听起来一不一样」。
       const audios: Array<{
         url: string
         upstream_url?: string
@@ -1190,7 +1190,7 @@ export const musicGenTool: MusicToolDef = {
       }> = []
       if (flowResult && url) {
         const primaryCandidate = flowResult.candidates[0]
-        // 主候選（index 0）沿用既有 url：同一份位元組不重複上傳。
+        // 主候选（index 0）沿用既有 url：同一份位元组不重复上传。
         audios.push({
           url,
           ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),
@@ -1225,10 +1225,10 @@ export const musicGenTool: MusicToolDef = {
         }
       }
 
-      // 多版本偏好闸（2026-10-03 additive）：≥2 個候選時呼叫熵決策層，把偏好問題帶進
-      // 回執（鍵名 preference_question，只在 ≥2 候選時在場；< 2 時回執形狀零變化）。
-      // 音檔已隨各 take 的 audio.done 卡交付，問題卡只「指認」；label → 音頻 URL 的
-      // 對照見 optionTakeUrls，供導演在拿到答覆後翻譯成定版 URL。
+      // 多版本偏好闸（2026-10-03 additive）：≥2 个候选时呼叫熵决策层，把偏好问题带进
+      // 回执（键名 preference_question，只在 ≥2 候选时在场；< 2 时回执形状零变化）。
+      // 音档已随各 take 的 audio.done 卡交付，问题卡只「指认」；label → 音频 URL 的
+      // 对照见 optionTakeUrls，供导演在拿到答覆后翻译成定版 URL。
       const preferenceQuestion =
         audios.length >= 2
           ? buildMusicPreferenceQuestion(
@@ -1243,8 +1243,8 @@ export const musicGenTool: MusicToolDef = {
             )
           : undefined
 
-      // 人話回執（2026-10-04 F-06／220）：把規則層「動了什麼」用人能懂的話帶出，
-      // 不只丟內部 tag（使用者看不到 agent 的 tool part 細節，這條要 agent 能直接轉述）。
+      // 人话回执（2026-10-04 F-06／220）：把规则层「动了什么」用人能懂的话带出，
+      // 不只丢内部 tag（使用者看不到 agent 的 tool part 细节，这条要 agent 能直接转述）。
       const notes: string[] = []
       if (strippedLyrics.hadTimestamp && activeChannel !== "lyria") {
         notes.push(
@@ -1268,9 +1268,9 @@ export const musicGenTool: MusicToolDef = {
         ...(preferenceQuestion !== undefined ? { preference_question: preferenceQuestion } : {}),
         ...(candidateErrors.length > 0 ? { candidate_errors: candidateErrors } : {}),
         ...(notes.length > 0 ? { notes } : {}),
-        // 通路如實回報實際生成通路（回落時 flowmusic2api＝真的走 flowmusic，不虛報 yue2）。
+        // 通路如实回报实际生成通路（回落时 flowmusic2api＝真的走 flowmusic，不虚报 yue2）。
         channel: activeChannel === "yue2" ? "yue2_modal" : activeChannel === "flowmusic" ? "flowmusic2api" : "lyria_gemini",
-        // 回落事實 additive 回報（只在真的發生回落時在場；既有鍵零改動）。
+        // 回落事实 additive 回报（只在真的发生回落时在场；既有键零改动）。
         ...(degradedReasons.length > 0 ? { degraded: true, degraded_reason: degradedReasons.join("；") } : {}),
         ...(lyriaIgnored.length > 0 ? { ignored_inputs: lyriaIgnored } : {}),
         ...(fallbackFrom !== null ? { fallback_from: fallbackFrom, fallback_reason: fallbackReason } : {}),
@@ -1280,26 +1280,26 @@ export const musicGenTool: MusicToolDef = {
         model,
         mime_type: generated.mimeType,
         audio_bytes: bytes.length,
-        // 白盒樂譜入交付契約的接點（additive 欄位）：YuE2 通路帶可編輯 ABC 樂譜，
-        // 其餘通路固定 null（欄位一律在場，前端/Expert 契約相容）。
+        // 白盒乐谱入交付契约的接点（additive 栏位）：YuE2 通路带可编辑 ABC 乐谱，
+        // 其余通路固定 null（栏位一律在场，前端/Expert 契约相容）。
         score_abc: yue2Track?.scoreAbc ?? null,
-        // 樂譜編輯回執（片 K additive）：實際生效的 cot 模式（僅 YuE2 通路在場——
-        // 其餘通路無樂譜語義，回報反而誤導）＋帶譜委託的樂譜指紋（有傳 abc 時在場，
-        // 長樂譜不重複回傳，agent 比對指紋即知編輯版是否被採用）。
+        // 乐谱编辑回执（片 K additive）：实际生效的 cot 模式（仅 YuE2 通路在场——
+        // 其余通路无乐谱语义，回报反而误导）＋带谱委托的乐谱指纹（有传 abc 时在场，
+        // 长乐谱不重复回传，agent 比对指纹即知编辑版是否被采用）。
         ...(activeChannel === "yue2" ? { cot_mode: cotMode } : {}),
         ...(abcSha256 !== null ? { abc_sha256: abcSha256 } : {}),
-        // 翻唱回執（片 O additive）：扒譜產物的樂譜指紋（＝本次送入生成的旋律骨幹）＋
-        // 扒譜警告如實透傳（空數組＝無警告）。僅帶 source_audio 的委託在場——
-        // 與 abc_sha256 獨立：abc_sha256 指委託自備譜、transcribed_abc_sha256 指扒譜產物，
-        // 互斥規則保證兩者不同時在場。
+        // 翻唱回执（片 O additive）：扒谱产物的乐谱指纹（＝本次送入生成的旋律骨干）＋
+        // 扒谱警告如实透传（空数组＝无警告）。仅带 source_audio 的委托在场——
+        // 与 abc_sha256 独立：abc_sha256 指委托自备谱、transcribed_abc_sha256 指扒谱产物，
+        // 互斥规则保证两者不同时在场。
         ...(transcribedAbcSha256 !== null ? { transcribed_abc_sha256: transcribedAbcSha256 } : {}),
         ...(transcribeWarnings !== null ? { transcribe_warnings: transcribeWarnings } : {}),
-        // 上游如實回報的截斷資訊（凍結合約 truncated）：只有 YuE2 會有，不靜默吞掉。
+        // 上游如实回报的截断资讯（冻结合约 truncated）：只有 YuE2 会有，不静默吞掉。
         ...(yue2Track?.truncated ? { yue2_truncated: yue2Track.truncated } : {}),
         lyrics_echo: (generated as { lyricsEcho?: string }).lyricsEcho ?? null,
         prompt_used: finalPrompt,
-        // 規則層如實回報：改了什麼/發現什麼/丟了什麼層，不粉飾（prompt_used 才是實送上游文本）。
-        // 回落時 director 以 flowmusic 通道重跑，channel 如實回報實際版面。
+        // 规则层如实回报：改了什么/发现什么/丢了什么层，不粉饰（prompt_used 才是实送上游文本）。
+        // 回落时 director 以 flowmusic 通道重跑，channel 如实回报实际版面。
         prompt_director: {
           channel: directorChannel,
           applied: directed.applied,
@@ -1326,9 +1326,9 @@ export const musicGenTool: MusicToolDef = {
   },
 }
 
-/** 情緒契約組裝導出（Expert spec 模板用：orchestrator 心意 → 契約 → prompt）。 */
+/** 情绪契约组装导出（Expert spec 模板用：orchestrator 心意 → 契约 → prompt）。 */
 export type { LyriaMusicContract }
 export { buildLyriaStylePrompt }
 
-/** harness-tool-registry.ts 登記用 id 元組（同 BLENDER_HARNESS_TOOL_IDS 範式）。 */
+/** harness-tool-registry.ts 登记用 id 元组（同 BLENDER_HARNESS_TOOL_IDS 范式）。 */
 export const MUSIC_HARNESS_TOOL_IDS = ["music_gen"] as const

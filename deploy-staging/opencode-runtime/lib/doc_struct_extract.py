@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""doc_struct_extract.py — 文檔結構化原則（open-source PyMuPDF + 純 python 啟發式）。
+"""doc_struct_extract.py — 文档结构化原则（open-source PyMuPDF + 纯 python 启发式）。
 
 用法: python3 doc_struct_extract.py '<json>'
 json: {"path": "...", "workspace": "...", "max_items": 500}
 
-輸出 JSON 到 stdout:
+输出 JSON 到 stdout:
 {ok, source_path, text_path, doc_kind, item_count, items:[{level,title,page_start?,txt_line_start,txt_line_end,chars}], reason?}
 
-標題偵測 = 兩級通用信號融合：
-1. 幾何信號（pdf）：行最大字號 ≥1.18× 正文眾數字號且行文本 ≤60 字，按字號聚類分 level（最大=1，cap 4）
-2. 語義信號（pdf/txt）：單獨成行的章題模式（第[零〇一二两三四五六七八九十百千0-9]{1,12}[章回节節卷部幕] 等）短行 → level 1
-同一行兩信號都命中時取幾何 level。目錄區去重：同章題 key 取「後隨非空正文」的最後一次。
-- md: ^#{1,6} 標題；epub: zipfile 讀 OPF spine 逐 html 抽 <h1-6> 與文本。
-掃描版（零文本）→ ok:false + 用戶視角誠實原因。
+标题侦测 = 两级通用信号融合：
+1. 几何信号（pdf）：行最大字号 ≥1.18× 正文众数字号且行文本 ≤60 字，按字号聚类分 level（最大=1，cap 4）
+2. 语义信号（pdf/txt）：单独成行的章题模式（第[零〇一二两三四五六七八九十百千0-9]{1,12}[章回节节卷部幕] 等）短行 → level 1
+同一行两信号都命中时取几何 level。目录区去重：同章题 key 取「后随非空正文」的最后一次。
+- md: ^#{1,6} 标题；epub: zipfile 读 OPF spine 逐 html 抽 <h1-6> 与文本。
+扫描版（零文本）→ ok:false + 用户视角诚实原因。
 """
 import sys, os, re, json, glob
 from collections import Counter
 
-ARC_RE = re.compile(r"第[零〇一二两兩三四五六七八九十百千0-9]{1,12}[章回节節卷部幕]")
-CH_DIG = {"零":0,"〇":0,"一":1,"二":2,"两":2,"兩":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9}
-NUM_RE = re.compile(r"第([零〇一二两兩三四五六七八九十百千0-9]{1,12})[章回节節卷部幕]")
+ARC_RE = re.compile(r"第[零〇一二两两三四五六七八九十百千0-9]{1,12}[章回节节卷部幕]")
+CH_DIG = {"零":0,"〇":0,"一":1,"二":2,"两":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9}
+NUM_RE = re.compile(r"第([零〇一二两两三四五六七八九十百千0-9]{1,12})[章回节节卷部幕]")
 
 def ch2int(s):
     if s.isdigit():
@@ -49,22 +49,22 @@ def resolve_path(path, workspace):
     return hits[0] if hits else None
 
 def chapter_level(text):
-    """語義編號的層級：章/卷/部/回/幕 → 1；節 → 2；非語義標題 → None。"""
+    """语义编号的层级：章/卷/部/回/幕 → 1；节 → 2；非语义标题 → None。"""
     s = text.strip()
     if not s or len(s) > 80 or any(p in s for p in "。！？；!?;"):
         return None
-    if re.match(r"^第[零〇一二两兩三四五六七八九十百千0-9]{1,12}(章|卷|部|回|幕)", s):
+    if re.match(r"^第[零〇一二两两三四五六七八九十百千0-9]{1,12}(章|卷|部|回|幕)", s):
         return 1
-    if re.match(r"^第[零〇一二两兩三四五六七八九十百千0-9]{1,12}(节|節)", s):
+    if re.match(r"^第[零〇一二两两三四五六七八九十百千0-9]{1,12}(节|节)", s):
         return 2
     return None
 
 def is_chapter_title(text):
-    """章題行（含 節）：行首錨定 + 短行 + 無句讀標點。"""
+    """章题行（含 节）：行首锚定 + 短行 + 无句读标点。"""
     return chapter_level(text) is not None
 
 def has_body_after(lines, idx, span=25, min_len=25):
-    """idx 行之後 span 行內存在「非章題的長行」→ 該處後隨真實正文。"""
+    """idx 行之后 span 行内存在「非章题的长行」→ 该处后随真实正文。"""
     for j in range(idx + 1, min(idx + 1 + span, len(lines))):
         s = lines[j].strip()
         if len(s) >= min_len and not is_chapter_title(s):
@@ -72,7 +72,7 @@ def has_body_after(lines, idx, span=25, min_len=25):
     return False
 
 def dedup_toc(entries, lines):
-    """entries: [(line_idx0, title)]。同章題 key 取後隨正文的最後一次；無章題 key 的原樣保留。"""
+    """entries: [(line_idx0, title)]。同章题 key 取后随正文的最后一次；无章题 key 的原样保留。"""
     best, plain = {}, []
     for idx, title in entries:
         m = NUM_RE.search(title)
@@ -85,7 +85,7 @@ def dedup_toc(entries, lines):
     return sorted(plain + list(best.values()))
 
 def finalize_items(items, total_lines):
-    """排序、end=下一項 start、chars 統計、中文序號排序校驗。"""
+    """排序、end=下一项 start、chars 统计、中文序号排序校验。"""
     items.sort(key=lambda x: x["txt_line_start"])
     for k in range(len(items) - 1):
         items[k]["txt_line_end"] = items[k + 1]["txt_line_start"]
@@ -109,7 +109,7 @@ def finish(items, total_lines, path, out_path, kind, max_items):
                "total": total, "shown": min(total, max_items)}
     if not order_ok:
         payload["chapter_order_ok"] = False
-        payload["reason"] = "章節序號校驗未通過（序號跳號或亂序），items 可能不完整，請人工複核。"
+        payload["reason"] = "章节序号校验未通过（序号跳号或乱序），items 可能不完整，请人工复核。"
     emit(payload)
 
 def do_pdf(path, max_items):
@@ -117,10 +117,10 @@ def do_pdf(path, max_items):
     doc = pymupdf.open(path)
     if doc.page_count == 0:
         emit({"ok": False, "source_path": path, "doc_kind": "pdf", "item_count": 0, "items": [],
-              "reason": "這份 PDF 沒有任何頁面，無法解析。"})
+              "reason": "这份 PDF 没有任何页面，无法解析。"})
         return
     sizes = Counter()
-    page_lines = []  # 每頁 [(text, max_size)]
+    page_lines = []  # 每页 [(text, max_size)]
     for pno in range(doc.page_count):
         plines = []
         for blk in doc[pno].get_text("dict")["blocks"]:
@@ -140,16 +140,16 @@ def do_pdf(path, max_items):
     total_chars = sum(v for k, v in sizes.items() if k > 0)
     if total_chars < 50:
         emit({"ok": False, "source_path": path, "doc_kind": "pdf", "item_count": 0, "items": [],
-              "reason": "這份 PDF 抽不出文字內容（大概率是掃描版/圖片型 PDF）。請改用 OCR 流程或換文字版文件。"})
+              "reason": "这份 PDF 抽不出文字内容（大概率是扫描版/图片型 PDF）。请改用 OCR 流程或换文字版文件。"})
         return
     body_size = sizes.most_common(1)[0][0] or 1.0
-    # 幾何候選字號聚類 → level（降序 1..4）
+    # 几何候选字号聚类 → level（降序 1..4）
     font_sizes = sorted({mx for plines in page_lines for _, mx in plines
                          if mx >= body_size * 1.18}, reverse=True)
     level_of = {s: min(i + 1, 4) for i, s in enumerate(font_sizes)}
-    # 全局行表（寫 txt 用），先收集候選再寫盤以對齊行號
-    # 候選三類：sem（語義章/節號，level 由 chapter_level 定，權威優先）
-    #          font（字號 ≥1.18× 正文且 ≤60 字，按字號聚類 level）
+    # 全局行表（写 txt 用），先收集候选再写盘以对齐行号
+    # 候选三类：sem（语义章/节号，level 由 chapter_level 定，权威优先）
+    #          font（字号 ≥1.18× 正文且 ≤60 字，按字号聚类 level）
     all_lines = []
     sem_cands, font_only = {}, {}  # line_idx -> (title, level); line_idx -> (title, level)
     for pno, plines in enumerate(page_lines):
@@ -164,7 +164,7 @@ def do_pdf(path, max_items):
     out_path = path + ".struct.txt"
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(all_lines) + "\n")
-    # 章題兩行合併：語義章題緊接的下一行若是同字號大字短行（font-only 候選）→ 併入 title
+    # 章题两行合并：语义章题紧接的下一行若是同字号大字短行（font-only 候选）→ 并入 title
     used = set()
     for idx in list(sem_cands):
         if idx + 1 in font_only and idx + 1 not in sem_cands:
@@ -172,7 +172,7 @@ def do_pdf(path, max_items):
             if len(t2) <= 30:
                 sem_cands[idx] = (sem_cands[idx][0] + " " + t2, sem_cands[idx][1], sem_cands[idx][2])
                 used.add(idx + 1)
-    # 目錄去重：同章題 key 取後隨正文的最後一次（正文版優先保留）
+    # 目录去重：同章题 key 取后随正文的最后一次（正文版优先保留）
     best, plain = {}, []
     for idx, (title, level, page) in sem_cands.items():
         m = NUM_RE.search(title)
@@ -255,7 +255,7 @@ def main():
     path = resolve_path(raw, workspace) if raw else None
     if not path:
         emit({"ok": False, "source_path": raw, "doc_kind": "unknown", "item_count": 0, "items": [],
-              "reason": "找不到檔案 %r（已嘗試絕對路徑與 workspace/uploads/** 同名遞迴解析）。" % raw})
+              "reason": "找不到档案 %r（已尝试绝对路径与 workspace/uploads/** 同名递回解析）。" % raw})
         return
     ext = os.path.splitext(path)[1].lower()
     try:
@@ -269,10 +269,10 @@ def main():
             do_epub(path, max_items)
         else:
             emit({"ok": False, "source_path": path, "doc_kind": ext, "item_count": 0, "items": [],
-                  "reason": "暫不支援的副檔名 %r（支援 pdf/epub/txt/md）。" % ext})
+                  "reason": "暂不支援的副档名 %r（支援 pdf/epub/txt/md）。" % ext})
     except Exception as e:
         emit({"ok": False, "source_path": path, "doc_kind": ext, "item_count": 0, "items": [],
-              "reason": "解析失敗：%s" % e})
+              "reason": "解析失败：%s" % e})
 
 if __name__ == "__main__":
     main()

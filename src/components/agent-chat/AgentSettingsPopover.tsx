@@ -44,7 +44,7 @@ const INTERACTION_HINTS: Record<(typeof INTERACTION_MODES)[number], string> = {
 
 export function AgentSettingsPopover() {
   const [open, setOpen] = useState(false);
-  /** 「我的技能」管理面：在同一個設定彈層裡再開一張 lg-sheet（不造第二個入口）。 */
+  /** 「我的技能」管理面：在同一个设定弹层里再开一张 lg-sheet（不造第二个入口）。 */
   const [skillsOpen, setSkillsOpen] = useState(false);
   // 初值直接吃本地缓存：弹层打开立即是用户上次的值，不等网络。
   const [settings, setSettings] = useState<AgentSettings>(() => readCachedAgentSettings());
@@ -108,8 +108,8 @@ export function AgentSettingsPopover() {
           {/* MASTER.md：每张 sheet 都要有一条顶缘高光线。 */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
           <div className="divide-y divide-black/[0.06]">
-            {/* a0) 我的技能：使用者自建 Skill 的管理入口（列舉／新增／編輯／刪除）。
-                站內沒有公開發布／市集，自己存的技能打「/」就能直呼；入口只此一處。 */}
+            {/* a0) 我的技能：使用者自建 Skill 的管理入口（列举／新增／编辑／删除）。
+                站内没有公开发布／市集，自己存的技能打「/」就能直呼；入口只此一处。 */}
             <div className="px-2.5 py-2.5">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-ios-footnote font-medium text-foreground">我的技能</span>
@@ -163,8 +163,8 @@ export function AgentSettingsPopover() {
           </div>
         </div>
       )}
-      {/* 管理面：無公開市集，只有「我自己的技能」。對話框自行 portal 到 document.body，
-          點它內部由上面的 outside-click 以 data-my-skills-dialog 放行、不收設定彈層。 */}
+      {/* 管理面：无公开市集，只有「我自己的技能」。对话框自行 portal 到 document.body，
+          点它内部由上面的 outside-click 以 data-my-skills-dialog 放行、不收设定弹层。 */}
       {skillsOpen && <MySkillsDialog onClose={() => setSkillsOpen(false)} />}
     </div>
   );

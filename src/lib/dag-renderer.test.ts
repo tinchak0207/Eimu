@@ -1,9 +1,9 @@
-// dag-renderer 測試：SVG 結構合法性（開頭 <svg、含全部 title、含箭頭 marker、
-// failed 紅框、空圖與單節點不炸）。風格對齊 src/lib/workflow-png.test.ts
+// dag-renderer 测试：SVG 结构合法性（开头 <svg、含全部 title、含箭头 marker、
+// failed 红框、空图与单节点不炸）。风格对齐 src/lib/workflow-png.test.ts
 // （node:test + assert/strict）。
 //
-// 注意：這些測試只驗 SVG 字串本身；PNG 端到端（sharp）在
-// src/lib/workflow-png-dag.test.ts，兩者故意分開，讓本檔保持零原生依賴。
+// 注意：这些测试只验 SVG 字串本身；PNG 端到端（sharp）在
+// src/lib/workflow-png-dag.test.ts，两者故意分开，让本档保持零原生依赖。
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -11,10 +11,10 @@ import type { DagNodeInput } from "./dag-renderer";
 import { renderDagSvg } from "./dag-renderer";
 
 function node(overrides: Partial<DagNodeInput> & { id: string }): DagNodeInput {
-  return { role: overrides.id, kind: "image", title: `節點 ${overrides.id}`, ...overrides };
+  return { role: overrides.id, kind: "image", title: `节点 ${overrides.id}`, ...overrides };
 }
 
-test("正常 DAG（3 節點 2 連線）→ SVG 開頭是 <svg、含所有 title、含箭頭 marker", () => {
+test("正常 DAG（3 节点 2 连线）→ SVG 开头是 <svg、含所有 title、含箭头 marker", () => {
   const svg = renderDagSvg(
     [node({ id: "a" }), node({ id: "b", kind: "video" }), node({ id: "c", kind: "text" })],
     [
@@ -23,98 +23,98 @@ test("正常 DAG（3 節點 2 連線）→ SVG 開頭是 <svg、含所有 title�
     ],
   );
 
-  assert.ok(svg.trimStart().startsWith("<svg"), "開頭必須是 <svg");
-  assert.ok(svg.endsWith("</svg>"), "結尾必須是 </svg>");
+  assert.ok(svg.trimStart().startsWith("<svg"), "开头必须是 <svg");
+  assert.ok(svg.endsWith("</svg>"), "结尾必须是 </svg>");
   for (const id of ["a", "b", "c"]) {
-    assert.ok(svg.includes(`節點 ${id}`), `必須含 title「節點 ${id}」`);
+    assert.ok(svg.includes(`节点 ${id}`), `必须含 title「节点 ${id}」`);
   }
-  assert.ok(svg.includes("marker-end"), "連線必須帶 marker-end");
-  assert.ok(svg.includes('id="dag-arrow"'), "必須宣告箭頭 marker");
-  // 兩條連線 = 兩個 marker-end 引用
+  assert.ok(svg.includes("marker-end"), "连线必须带 marker-end");
+  assert.ok(svg.includes('id="dag-arrow"'), "必须宣告箭头 marker");
+  // 两条连线 = 两个 marker-end 引用
   assert.equal((svg.match(/marker-end/g) ?? []).length, 2);});
 
-test("節點依 kind 上色（頂部色條 + 標籤成對）", () => {
+test("节点依 kind 上色（顶部色条 + 标签成对）", () => {
   const svg = renderDagSvg(
     [node({ id: "img", kind: "image" }), node({ id: "vid", kind: "video" })],
     [{ from: "img", to: "vid" }],
   );
-  // image/video 都是「產出」類，色相分開落在站內畫布規範的綠／紫
-  assert.ok(svg.includes('fill="#00b578"'), "image 應落在綠色系");
-  assert.ok(svg.includes('fill="#722ed1"'), "video 應落在紫色系");
-  // 標籤徽章：底色與文字色成對
-  assert.ok(svg.includes('fill="#e6fffb"'), "image 標籤底色");
-  assert.ok(svg.includes('fill="#f9f0ff"'), "video 標籤底色");
+  // image/video 都是「产出」类，色相分开落在站内画布规范的绿／紫
+  assert.ok(svg.includes('fill="#00b578"'), "image 应落在绿色系");
+  assert.ok(svg.includes('fill="#722ed1"'), "video 应落在紫色系");
+  // 标签徽章：底色与文字色成对
+  assert.ok(svg.includes('fill="#e6fffb"'), "image 标签底色");
+  assert.ok(svg.includes('fill="#f9f0ff"'), "video 标签底色");
 });
 
-test("卡片帶頂部色條與標籤（縮圖可辨識度）", () => {
+test("卡片带顶部色条与标签（缩图可辨识度）", () => {
   const svg = renderDagSvg([node({ id: "cfg", kind: "config" })], []);
-  assert.ok(svg.includes('fill="#1677ff"'), "config 頂部色條＝工具藍");
-  assert.ok(svg.includes("配置"), "config 標籤文字＝配置");
-  assert.ok(svg.includes('width="220"'), "卡片寬度＝站內畫布節點寬");
-  assert.ok(svg.includes('id="dag-grid"'), "背景需有網格點陣");
+  assert.ok(svg.includes('fill="#1677ff"'), "config 顶部色条＝工具蓝");
+  assert.ok(svg.includes("配置"), "config 标签文字＝配置");
+  assert.ok(svg.includes('width="220"'), "卡片宽度＝站内画布节点宽");
+  assert.ok(svg.includes('id="dag-grid"'), "背景需有网格点阵");
 });
 
-test("I/O 描述行：連線關係必須進節點卡（↳ 來源 / → 目標）", () => {
+test("I/O 描述行：连线关系必须进节点卡（↳ 来源 / → 目标）", () => {
   const svg = renderDagSvg(
     [node({ id: "a", role: "garment_extract" }), node({ id: "b", role: "asset_out" })],
     [{ from: "a", to: "b" }],
   );
-  assert.ok(svg.includes("↳"), "下游節點要有輸入來源行");
-  assert.ok(svg.includes("→"), "上游節點要有產出目標行");
-  assert.ok(svg.includes("garment extract"), "role 應可讀化（底線轉空白）");
+  assert.ok(svg.includes("↳"), "下游节点要有输入来源行");
+  assert.ok(svg.includes("→"), "上游节点要有产出目标行");
+  assert.ok(svg.includes("garment extract"), "role 应可读化（底线转空白）");
 });
 
-test("空節點陣列 → 不炸，回傳最小合法 SVG", () => {
+test("空节点阵列 → 不炸，回传最小合法 SVG", () => {
   const svg = renderDagSvg([], []);
-  assert.ok(svg.trimStart().startsWith("<svg"), "空圖也要是合法 SVG");
+  assert.ok(svg.trimStart().startsWith("<svg"), "空图也要是合法 SVG");
   assert.ok(svg.endsWith("</svg>"));
-  assert.ok(svg.includes("暫無節點"), "空圖要有提示文字");
+  assert.ok(svg.includes("暂无节点"), "空图要有提示文字");
 });
 
-test("單節點無連線 → 不炸，節點有座標", () => {
+test("单节点无连线 → 不炸，节点有座标", () => {
   const svg = renderDagSvg([node({ id: "solo" })], []);
   assert.ok(svg.trimStart().startsWith("<svg"));
-  assert.ok(svg.includes("節點 solo"));
+  assert.ok(svg.includes("节点 solo"));
 });
 
-test("status:failed → SVG 含紅色邊框色 #f53f3f（light theme）", () => {
+test("status:failed → SVG 含红色边框色 #f53f3f（light theme）", () => {
   const svg = renderDagSvg(
     [node({ id: "bad", status: "failed" }), node({ id: "ok", status: "succeeded" })],
     [{ from: "ok", to: "bad" }],
   );
-  assert.ok(svg.includes('stroke="#f53f3f"'), "failed 節點要有紅框");
+  assert.ok(svg.includes('stroke="#f53f3f"'), "failed 节点要有红框");
 });
 
-test("costCoins → 右下角顯示幣數（含 0 也要顯示）", () => {
+test("costCoins → 右下角显示币数（含 0 也要显示）", () => {
   const svg = renderDagSvg(
     [node({ id: "paid", costCoins: 3 }), node({ id: "free", costCoins: 0 })],
     [{ from: "paid", to: "free" }],
   );
-  assert.ok(svg.includes("3 幣"), "整數幣數直接顯示");
-  assert.ok(svg.includes("0 幣"), "0 幣也是事實，要顯示");
+  assert.ok(svg.includes("3 币"), "整数币数直接显示");
+  assert.ok(svg.includes("0 币"), "0 币也是事实，要显示");
 });
 
-test("costCoins 小數 → 留一位小數", () => {
+test("costCoins 小数 → 留一位小数", () => {
   const svg = renderDagSvg([node({ id: "x", costCoins: 3.14159 })], []);
-  assert.ok(svg.includes("3.1 幣"));
+  assert.ok(svg.includes("3.1 币"));
 });
 
-test("error 欄位被轉義，不破壞 SVG 結構", () => {
+test("error 栏位被转义，不破坏 SVG 结构", () => {
   const svg = renderDagSvg(
     [node({ id: "esc", title: 'a<b>&"c' })],
     [],
   );
-  assert.ok(svg.includes("a&lt;b&gt;&amp;&quot;c"), "標題必須 XML 轉義");
-  assert.ok(svg.trimStart().startsWith("<svg"), "轉義不得破壞外殼");
+  assert.ok(svg.includes("a&lt;b&gt;&amp;&quot;c"), "标题必须 XML 转义");
+  assert.ok(svg.trimStart().startsWith("<svg"), "转义不得破坏外壳");
 });
 
-test("連線指向不存在的節點 → 該邊略過，不炸", () => {
+test("连线指向不存在的节点 → 该边略过，不炸", () => {
   const svg = renderDagSvg([node({ id: "a" })], [{ from: "a", to: "ghost" }]);
   assert.ok(svg.trimStart().startsWith("<svg"));
-  assert.equal((svg.match(/marker-end/g) ?? []).length, 0, "孤兒邊不得畫出");
+  assert.equal((svg.match(/marker-end/g) ?? []).length, 0, "孤儿边不得画出");
 });
 
-test("重複邊去重", () => {
+test("重复边去重", () => {
   const svg = renderDagSvg(
     [node({ id: "a" }), node({ id: "b" })],
     [
@@ -125,16 +125,16 @@ test("重複邊去重", () => {
   assert.equal((svg.match(/marker-end/g) ?? []).length, 1);
 });
 
-test("節點多於預設畫布 → viewBox 依實際範圍放大，不硬切", () => {
+test("节点多于预设画布 → viewBox 依实际范围放大，不硬切", () => {
   const ids = Array.from({ length: 12 }, (_, i) => `n${i}`);
   const nodes = ids.map((id) => node({ id }));
   const connections = ids.slice(0, -1).map((id, i) => ({ from: id, to: ids[i + 1] as string }));
   const svg = renderDagSvg(nodes, connections, { width: 640, height: 400 });
   const m = svg.match(/viewBox="0 0 (\d+) (\d+)"/);
-  assert.ok(m, "必須有 viewBox");
+  assert.ok(m, "必须有 viewBox");
   const w = Number(m?.[1]);
   const h = Number(m?.[2]);
-  assert.ok(w > 640, `12 個 LR 節點寬度必超過 640，實得 ${w}`);
+  assert.ok(w > 640, `12 个 LR 节点宽度必超过 640，实得 ${w}`);
   assert.ok(h >= 400, "高度至少 400");
 });
 

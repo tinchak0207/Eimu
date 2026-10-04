@@ -1,10 +1,10 @@
-// /v1/team/usage —— 團隊與成員維度用量統計（面 6）。
+// /v1/team/usage —— 团队与成员维度用量统计（面 6）。
 //
-//   GET → 團隊總量 ＋ 各成員用量 ＋ 逐筆明細（?member_key_id= 可只看一個成員）
+//   GET → 团队总量 ＋ 各成员用量 ＋ 逐笔明细（?member_key_id= 可只看一个成员）
 //
-// 數字一律讀既有權威面（new-api 經 member-quota 的可視面；逐筆明細讀既有
-// account_ledger），**不新建統計帳本**。回傳帶守恆檢驗：
-//   主帳手上餘額 + Σ成員桶剩餘 = 團隊未消耗總額（沿用 member-quota 的不變量）。
+// 数字一律读既有权威面（new-api 经 member-quota 的可视面；逐笔明细读既有
+// account_ledger），**不新建统计帐本**。回传带守恒检验：
+//   主帐手上余额 + Σ成员桶剩余 = 团队未消耗总额（沿用 member-quota 的不变量）。
 
 import { NextRequest, NextResponse } from "next/server";
 

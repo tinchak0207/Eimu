@@ -1,8 +1,8 @@
-// 資產包真源（Blob 持久化）。
+// 资产包真源（Blob 持久化）。
 //
-// 沿用 project-store.ts 的模式：每次寫入落到新路徑 + 修剪舊世代，
-// 避免 Blob cacheControlMaxAge 60s 下限造成的「剛存讀不到」；單用戶寫入串行。
-// 與畫布素材庫分開命名空間（asset-packs/），互不影響。
+// 沿用 project-store.ts 的模式：每次写入落到新路径 + 修剪旧世代，
+// 避免 Blob cacheControlMaxAge 60s 下限造成的「刚存读不到」；单用户写入串行。
+// 与画布素材库分开命名空间（asset-packs/），互不影响。
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
@@ -10,23 +10,23 @@ import { GHOST_ASSET_SCOPE, isUsableAssetId, MAX_ASSET_ID_LENGTH, normalizeAsset
 import type { AssetScope } from "./asset-scope";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
-// 交付物種類真源（./deliverable-kind，零依賴純函數檔）：資產側的媒體 item kind
-// （image/video/audio）與 URL 欄位（imageUrl/mediaUrl）全由它推導，不再各寫一份。
+// 交付物种类真源（./deliverable-kind，零依赖纯函数档）：资产侧的媒体 item kind
+// （image/video/audio）与 URL 栏位（imageUrl/mediaUrl）全由它推导，不再各写一份。
 import { DELIVERABLE_KINDS } from "./deliverable-kind";
 
 const PACK_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
 const INDEX_CACHE_TTL_MS = 3_000;
 
-/** 每用戶資產包上限（超出時 saveAssetPack 拒絕，不做靜默截斷）。 */
+/** 每用户资产包上限（超出时 saveAssetPack 拒绝，不做静默截断）。 */
 export const MAX_PACKS_PER_USER = 100;
-/** 每包 item 上限（超出時 normalizeAssetPack 截斷）。 */
+/** 每包 item 上限（超出时 normalizeAssetPack 截断）。 */
 export const MAX_ITEMS_PER_PACK = 50;
-/** digest 語義摘要上限（模型注入用）。 */
+/** digest 语义摘要上限（模型注入用）。 */
 export const MAX_DIGEST_LENGTH = 500;
 /**
- * pack id 上限（與 share/mount 的 200 同一個界；超長 id 過去「可建不可分享」）。
- * 界線與字元邊界同源：一律走 asset-scope 的 isUsableAssetId。
+ * pack id 上限（与 share/mount 的 200 同一个界；超长 id 过去「可建不可分享」）。
+ * 界线与字元边界同源：一律走 asset-scope 的 isUsableAssetId。
  */
 export const MAX_PACK_ID_LENGTH = MAX_ASSET_ID_LENGTH;
 export const MAX_TITLE_LENGTH = 200;
@@ -36,23 +36,23 @@ const MAX_NOTE_LENGTH = 200;
 const MAX_SCENE_SUMMARY_LENGTH = 500;
 
 /**
- * 資產專屬 item kind（資產庫自身與配方/3D 等用途，不由歷史交付物直接產生）。
- * 與下面的媒體段分開宣告：新增交付物種類只動 deliverable-kind 註冊表，這裡不動。
+ * 资产专属 item kind（资产库自身与配方/3D 等用途，不由历史交付物直接产生）。
+ * 与下面的媒体段分开宣告：新增交付物种类只动 deliverable-kind 注册表，这里不动。
  */
 export const ASSET_ONLY_ITEM_KINDS = [
   "prompt",
   "reference",
   "lora",
   "recipe",
-  // 3D 資產（Astra P1-5）：scene_3d=.blend/.glb 產物；bpy_script=bpy 腳本模板。
+  // 3D 资产（Astra P1-5）：scene_3d=.blend/.glb 产物；bpy_script=bpy 脚本模板。
   "scene_3d",
   "bpy_script",
 ] as const;
 
 /**
- * 資產包 item kind = 資產專屬六類 ∪ 交付物媒體種類（image/video/audio）。
- * 兩段都由真源推導（第二段直接取 deliverable-kind 註冊表的 assetItemKind），
- * 不手寫字串聯集；新增一種交付物＝在註冊表加一行，這裡自動跟上。
+ * 资产包 item kind = 资产专属六类 ∪ 交付物媒体种类（image/video/audio）。
+ * 两段都由真源推导（第二段直接取 deliverable-kind 注册表的 assetItemKind），
+ * 不手写字串联集；新增一种交付物＝在注册表加一行，这里自动跟上。
  */
 export type AssetPackItemKind =
   | (typeof ASSET_ONLY_ITEM_KINDS)[number]
@@ -61,25 +61,25 @@ export type AssetPackItemKind =
 export interface AssetPackItem {
   kind: AssetPackItemKind;
   title: string;
-  /** prompt / recipe 用：提示詞或六槽配方文本。 */
+  /** prompt / recipe 用：提示词或六槽配方文本。 */
   content?: string;
-  /** reference / image 用：既有 URL（不複製位元組）。 */
+  /** reference / image 用：既有 URL（不复制位元组）。 */
   imageUrl?: string;
-  /** video / audio 用：影片/音樂產物 URL（與 imageUrl 並存不互斥）。 */
+  /** video / audio 用：影片/音乐产物 URL（与 imageUrl 并存不互斥）。 */
   mediaUrl?: string;
   /** lora 用。 */
   loraVersionId?: string;
   loraWeight?: number;
-  /** recipe 用：該配方對應的模型/size/lora 清單。 */
+  /** recipe 用：该配方对应的模型/size/lora 清单。 */
   modelId?: string;
   size?: string;
   loraModelVersionIds?: string[];
-  /** scene_3d / bpy_script 用（Astra P1-5）：bridge 產物路徑 / 檔案大小 / 腳本指紋 / 場景摘要。 */
+  /** scene_3d / bpy_script 用（Astra P1-5）：bridge 产物路径 / 档案大小 / 脚本指纹 / 场景摘要。 */
   artifactPath?: string;
   bytes?: number;
   fingerprint?: string;
   sceneSummary?: string;
-  /** 來源標記。 */
+  /** 来源标记。 */
   source?: { type: "history" | "canvas" | "chat" | "workflow" | "manual"; id: string; sessionId?: string };
   note?: string;
   createdAt?: string;
@@ -88,32 +88,32 @@ export interface AssetPackItem {
 export interface AssetPack {
   id: string;
   title: string;
-  /** 語義摘要（≤500 字，模型注入用）。 */
+  /** 语义摘要（≤500 字，模型注入用）。 */
   digest?: string;
   items: AssetPackItem[];
   active?: boolean;
   tags: string[];
   note?: string;
   /**
-   * REQ-B2 歸屬（個人 / 項目）：缺省＝personal（既有資產零改動）。
-   * 只給人看（項目資產庫面板的歸屬標記與顯式分享入口）——
-   * **裁決排除**：不進 canvas 節點 metadata、不進 toNodeMetadata、
-   * 不進 compactMetadataForAgent（agent 不讀資產歸屬）。
+   * REQ-B2 归属（个人 / 项目）：缺省＝personal（既有资产零改动）。
+   * 只给人看（项目资产库面板的归属标记与显式分享入口）——
+   * **裁决排除**：不进 canvas 节点 metadata、不进 toNodeMetadata、
+   * 不进 compactMetadataForAgent（agent 不读资产归属）。
    */
   scope?: AssetScope;
   /**
-   * REQ-D1 血統（與 CharacterCard 同形、同一清洗收口）：REQ-B2b 的
-   * 「包掛用＝在目標項目記本地包記錄＋lineage 指向來源包」寫入這一欄。
-   * 同 D1 裁決：只存在包本體供人看，不進 canvas 節點 metadata、不進 agent 壓縮白名單。
+   * REQ-D1 血统（与 CharacterCard 同形、同一清洗收口）：REQ-B2b 的
+   * 「包挂用＝在目标项目记本地包记录＋lineage 指向来源包」写入这一栏。
+   * 同 D1 裁决：只存在包本体供人看，不进 canvas 节点 metadata、不进 agent 压缩白名单。
    */
   lineage?: LineageLink[];
-  /** parents 曾超上限被截尾的顯式標記。 */
+  /** parents 曾超上限被截尾的显式标记。 */
   lineageTruncated?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-/** 資產包數達上限時拋出（API 層轉 400，誠實拒絕）。 */
+/** 资产包数达上限时抛出（API 层转 400，诚实拒绝）。 */
 export class AssetPackLimitError extends Error {
   constructor() {
     super(`资产包数量已达上限 ${MAX_PACKS_PER_USER} 个`);
@@ -156,8 +156,8 @@ async function listIndexBlobs(userId: number): Promise<BlobRef[]> {
 }
 
 /**
- * kind 白名單＝與 AssetPackItemKind 同源推導（資產專屬六類 ＋ 交付物媒體種類），
- * 消掉過去手抄的第二份清單；新增交付物種類這裡自動跟上。
+ * kind 白名单＝与 AssetPackItemKind 同源推导（资产专属六类 ＋ 交付物媒体种类），
+ * 消掉过去手抄的第二份清单；新增交付物种类这里自动跟上。
  */
 const ITEM_KINDS: readonly AssetPackItemKind[] = [
   ...ASSET_ONLY_ITEM_KINDS,
@@ -165,18 +165,18 @@ const ITEM_KINDS: readonly AssetPackItemKind[] = [
 ];
 
 /**
- * 交付物媒體 kind → 資產 URL 欄位（由註冊表推導：image→imageUrl、video/audio→mediaUrl）。
- * 資產專屬六類不在表內；reference 收 imageUrl 的既有語義單獨處理。
+ * 交付物媒体 kind → 资产 URL 栏位（由注册表推导：image→imageUrl、video/audio→mediaUrl）。
+ * 资产专属六类不在表内；reference 收 imageUrl 的既有语义单独处理。
  */
 const MEDIA_URL_FIELD_BY_KIND: ReadonlyMap<string, "imageUrl" | "mediaUrl"> = new Map(
   DELIVERABLE_KINDS.map((kind) => [kind.assetItemKind, kind.assetUrlField] as const),
 );
 
 /**
- * 純函式：把不可信 item payload 正規化為 AssetPackItem。
- * 驗 kind/title；content/imageUrl/mediaUrl 按 kind 才收（媒體欄位由交付物註冊表推導）；
- * loraVersionId 僅 lora；recipe 收 modelId/size/loraModelVersionIds；source 白名單 type + 必填 id。
- * video/audio 缺 mediaUrl 回 null（媒體 item 無 URL 無意義）；其餘不合法回 null。
+ * 纯函式：把不可信 item payload 正规化为 AssetPackItem。
+ * 验 kind/title；content/imageUrl/mediaUrl 按 kind 才收（媒体栏位由交付物注册表推导）；
+ * loraVersionId 仅 lora；recipe 收 modelId/size/loraModelVersionIds；source 白名单 type + 必填 id。
+ * video/audio 缺 mediaUrl 回 null（媒体 item 无 URL 无意义）；其余不合法回 null。
  */
 function normalizeItem(payload: unknown): AssetPackItem | null {
   if (!payload || typeof payload !== "object") return null;
@@ -193,14 +193,14 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
   if (kind === "prompt" || kind === "recipe") {
     if (typeof p.content === "string") item.content = p.content;
   }
-  // reference 沿用既有 imageUrl 收法（資產專屬參考圖，不因新增媒體種類而動）。
+  // reference 沿用既有 imageUrl 收法（资产专属参考图，不因新增媒体种类而动）。
   if (kind === "reference") {
     if (typeof p.imageUrl === "string" && p.imageUrl.trim()) item.imageUrl = p.imageUrl.trim();
   }
-  // 交付物媒體（image/video/audio）：收哪個 URL 欄位由註冊表推導（assetItemKind → assetUrlField）。
-  //   * image → imageUrl，維持既有尺度：缺 URL 仍保留 item（僅 trim 後非空才收）。
-  //   * video/audio → mediaUrl，**缺 mediaUrl 回 null**（無產物 URL 的媒體 item 無意義）。
-  // 長度上限與 imageUrl 現行做法對齊：只 trim、不另設上限（imageUrl 既有亦無長度常數）。
+  // 交付物媒体（image/video/audio）：收哪个 URL 栏位由注册表推导（assetItemKind → assetUrlField）。
+  //   * image → imageUrl，维持既有尺度：缺 URL 仍保留 item（仅 trim 后非空才收）。
+  //   * video/audio → mediaUrl，**缺 mediaUrl 回 null**（无产物 URL 的媒体 item 无意义）。
+  // 长度上限与 imageUrl 现行做法对齐：只 trim、不另设上限（imageUrl 既有亦无长度常数）。
   const mediaUrlField = MEDIA_URL_FIELD_BY_KIND.get(kind);
   if (mediaUrlField === "imageUrl") {
     if (typeof p.imageUrl === "string" && p.imageUrl.trim()) item.imageUrl = p.imageUrl.trim();
@@ -221,8 +221,8 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
       if (ids.length) item.loraModelVersionIds = ids;
     }
   }
-  // 3D 資產（Astra P1-5）：scene_3d 收 bridge 產物欄（artifactPath/bytes/sceneSummary），
-  // bpy_script 收腳本模板欄（content=腳本全文 + fingerprint 指紋）。與 recipe/lora 分支同構。
+  // 3D 资产（Astra P1-5）：scene_3d 收 bridge 产物栏（artifactPath/bytes/sceneSummary），
+  // bpy_script 收脚本模板栏（content=脚本全文 + fingerprint 指纹）。与 recipe/lora 分支同构。
   if (kind === "scene_3d") {
     if (typeof p.artifactPath === "string" && p.artifactPath.trim()) item.artifactPath = p.artifactPath.trim();
     if (typeof p.bytes === "number" && Number.isFinite(p.bytes) && p.bytes >= 0) item.bytes = p.bytes;
@@ -263,15 +263,15 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
 }
 
 /**
- * 純函式：把不可信 payload 正規化為 AssetPack。
- * 驗 id/title；items 逐項 normalizeItem（非法項 drop、超出 MAX_ITEMS_PER_PACK 截斷）；
- * tags 陣列化 + 去重 + 截斷；標題截 200；digest 截 500；note 截 200；
- * active 只收 boolean（僅 true 寫入）。不合法回 null。
+ * 纯函式：把不可信 payload 正规化为 AssetPack。
+ * 验 id/title；items 逐项 normalizeItem（非法项 drop、超出 MAX_ITEMS_PER_PACK 截断）；
+ * tags 阵列化 + 去重 + 截断；标题截 200；digest 截 500；note 截 200；
+ * active 只收 boolean（仅 true 写入）。不合法回 null。
  *
- * id 邊界（REQ-B2）：走 asset-scope 的 isUsableAssetId —— **拒絕**（非截斷）空 /
- * 超長（>MAX_PACK_ID_LENGTH）/ 含保留分隔符 `:` / 含控制字元的 id。
- * 截斷會讓兩個不同 id 落成同一個 id（作用域層確定性鍵的撞鍵源），故一律 fail-closed；
- * 也與 share/mount 的長度界對齊，避免「可建不可分享」。
+ * id 边界（REQ-B2）：走 asset-scope 的 isUsableAssetId —— **拒绝**（非截断）空 /
+ * 超长（>MAX_PACK_ID_LENGTH）/ 含保留分隔符 `:` / 含控制字元的 id。
+ * 截断会让两个不同 id 落成同一个 id（作用域层确定性键的撞键源），故一律 fail-closed；
+ * 也与 share/mount 的长度界对齐，避免「可建不可分享」。
  */
 export function normalizeAssetPack(payload: unknown): AssetPack | null {
   if (!payload || typeof payload !== "object") return null;
@@ -305,13 +305,13 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
   const now = new Date().toISOString();
   const note = typeof p.note === "string" ? p.note.trim().slice(0, MAX_NOTE_LENGTH) : "";
   const digest = typeof p.digest === "string" ? p.digest.trim().slice(0, MAX_DIGEST_LENGTH) : "";
-  // REQ-B2 作用域：走 ./asset-scope 的清洗收口（非 project/team 一律收斂成 personal 並省略欄位，
-  // 不寫 `scope:{owner:"personal"}` 冒充已設定）；**鬼狀態（project 但無 projectId / team 但無
-  // teamId）寫回 GHOST_ASSET_SCOPE 而非降格成 personal**——降格＝把歸屬不明的項目資產變成
-  // 人人可用的個人資產（D3）。P0-2：team 作用域同樣要落欄（否則團隊包在存檔端靜默丟歸屬）。
+  // REQ-B2 作用域：走 ./asset-scope 的清洗收口（非 project/team 一律收敛成 personal 并省略栏位，
+  // 不写 `scope:{owner:"personal"}` 冒充已设定）；**鬼状态（project 但无 projectId / team 但无
+  // teamId）写回 GHOST_ASSET_SCOPE 而非降格成 personal**——降格＝把归属不明的项目资产变成
+  // 人人可用的个人资产（D3）。P0-2：team 作用域同样要落栏（否则团队包在存档端静默丢归属）。
   const scope = normalizeAssetScope(p.scope);
-  // REQ-D1 血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）；
-  // 與 character-cards.normalizeCharacterCard 同款，宿主不同、白名單同一把尺。
+  // REQ-D1 血统栏位复用 ./lineage 的清洗收口（非法条目丢、上限截尾并显式标记）；
+  // 与 character-cards.normalizeCharacterCard 同款，宿主不同、白名单同一把尺。
   const lineageRaw = Array.isArray(p.lineage) ? normalizeLineageLinks(p.lineage) : null;
   return {
     id: p.id.trim(),
@@ -377,7 +377,7 @@ async function readPacks(userId: number): Promise<AssetPack[]> {
 }
 
 async function writePacks(userId: number, packs: AssetPack[]): Promise<void> {
-  // 上限在 saveAssetPack 拒絕，這裡只排序（newest 優先），不靜默丟資料。
+  // 上限在 saveAssetPack 拒绝，这里只排序（newest 优先），不静默丢资料。
   const sorted = [...packs].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   if (!ensureBlobBackendWritable("asset-pack-store.writePacks")) {
     memoryStore.set(userId, sorted);
@@ -396,28 +396,28 @@ async function writePacks(userId: number, packs: AssetPack[]): Promise<void> {
   const stale = previous.slice(INDEX_GENERATIONS_KEPT - 1);
   if (stale.length) {
     await del(stale.map((b) => b.url)).catch((error) => {
-      console.error("[asset-packs] 清理舊索引失敗。", error);
+      console.error("[asset-packs] 清理旧索引失败。", error);
     });
   }
 }
 
-// ─────────────────────────────────────────── 對外接口
+// ─────────────────────────────────────────── 对外接口
 
-/** 讀全部資產包（newest 優先）。 */
+/** 读全部资产包（newest 优先）。 */
 export async function listAssetPacks(userId: number): Promise<AssetPack[]> {
   return readPacks(userId);
 }
 
-/** 讀 active===true 的資產包；無則回 null（單一 active 鐵律）。 */
+/** 读 active===true 的资产包；无则回 null（单一 active 铁律）。 */
 export async function getActiveAssetPack(userId: number): Promise<AssetPack | null> {
   const packs = await readPacks(userId);
   return packs.find((p) => p.active === true) ?? null;
 }
 
 /**
- * 儲存/覆蓋一個資產包（upsert by id）。
- * 不合法拋錯（呼叫端應先 normalizeAssetPack 驗證）；新增超過上限拋 AssetPackLimitError。
- * 若新包 active===true，則把同用戶其它包的 active 清掉（單一 active 鐵律）。
+ * 储存/覆盖一个资产包（upsert by id）。
+ * 不合法抛错（呼叫端应先 normalizeAssetPack 验证）；新增超过上限抛 AssetPackLimitError。
+ * 若新包 active===true，则把同用户其它包的 active 清掉（单一 active 铁律）。
  */
 export async function saveAssetPack(userId: number, pack: AssetPack): Promise<void> {
   const normalized = normalizeAssetPack(pack);
@@ -434,7 +434,7 @@ export async function saveAssetPack(userId: number, pack: AssetPack): Promise<vo
   });
 }
 
-/** 刪除若干資產包（不存在的 id 忽略）。 */
+/** 删除若干资产包（不存在的 id 忽略）。 */
 export async function deleteAssetPacks(userId: number, ids: string[]): Promise<void> {
   const targets = new Set(ids.filter(Boolean));
   if (!targets.size) return;
@@ -446,7 +446,7 @@ export async function deleteAssetPacks(userId: number, ids: string[]): Promise<v
   });
 }
 
-/** 僅測試：重置進程內狀態。 */
+/** 仅测试：重置进程内状态。 */
 export function __resetAssetPackStoreForTests(): void {
   memoryStore.clear();
   indexCache.clear();

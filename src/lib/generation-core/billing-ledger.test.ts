@@ -165,12 +165,12 @@ test("commit is recorded only against an applied reserve operation", async () =>
 });
 
 /**
- * FG-b（2026-09-23）接線回歸：計費重放的預算由 operation registry 決定。
- * 全部走真實服務函式，斷言可觀測的外部效果（adapter 呼叫次數／金額、回傳值、狀態轉移），
- * 不是查常數、不是看原始碼字串。
+ * FG-b（2026-09-23）接线回归：计费重放的预算由 operation registry 决定。
+ * 全部走真实服务函式，断言可观测的外部效果（adapter 呼叫次数／金额、回传值、状态转移），
+ * 不是查常数、不是看原始码字串。
  */
 
-/** 計費 op mock：claim（attempt_count+1）後回傳指定的「這次嘗試」序號。 */
+/** 计费 op mock：claim（attempt_count+1）后回传指定的「这次尝试」序号。 */
 function mockBillingSql(input: {
   claimedAttemptNo: number;
   status?: string;
@@ -203,7 +203,7 @@ function mockBillingSql(input: {
     if (sql.includes("SET status = 'unknown'")) { opStatus = "unknown"; return []; }
     if (sql.includes("SET status = 'failed'")) { opStatus = "failed"; return []; }
     if (sql.includes("SET status = 'pending'")) { opStatus = "pending"; return []; }
-    // job 側轉移（reserve 被凍結時 job → billing_unknown）
+    // job 侧转移（reserve 被冻结时 job → billing_unknown）
     if (sql.includes("status = 'billing_unknown'")) { jobStatus = "billing_unknown"; return []; }
     if (sql.includes("status = 'queued'")) { jobStatus = "queued"; return []; }
     return [];
@@ -212,7 +212,7 @@ function mockBillingSql(input: {
   return { sql: tagged as unknown as GenerationSql, calls, status: () => opStatus };
 }
 
-/** 把 GenerationJob fixture 映成 DB 行（reserve 路徑的 freshJob 會直接讀 DB）。 */
+/** 把 GenerationJob fixture 映成 DB 行（reserve 路径的 freshJob 会直接读 DB）。 */
 function jobRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const j = job();
   return {
@@ -230,11 +230,11 @@ function jobRow(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
-/** 計費 op 預算的 registry 值（billing.reserve / billing.refund），當 oracle 用。 */
+/** 计费 op 预算的 registry 值（billing.reserve / billing.refund），当 oracle 用。 */
 const RESERVE_REFUND_BUDGET = resolveReplayPolicy("billing.refund").maxReplayAttempts;
 const COMMIT_BUDGET = resolveReplayPolicy("billing.commit").maxReplayAttempts;
 
-test("FG-b：退款重放預算內（第 64 次）照舊落地一次，金額等於應退額", async () => {
+test("FG-b：退款重放预算内（第 64 次）照旧落地一次，金额等于应退额", async () => {
   const { sql } = mockBillingSql({ claimedAttemptNo: RESERVE_REFUND_BUDGET });
   const amounts: number[] = [];
   const result = await refundGenerationBilling({
@@ -247,11 +247,11 @@ test("FG-b：退款重放預算內（第 64 次）照舊落地一次，金額等
     },
   }, sql);
 
-  assert.equal(result, "applied", "預算內的重試必須照舊執行");
-  assert.deepEqual(amounts, [10], "外部 credit 恰好一次、金額等於應退額");
+  assert.equal(result, "applied", "预算内的重试必须照旧执行");
+  assert.deepEqual(amounts, [10], "外部 credit 恰好一次、金额等于应退额");
 });
 
-test("FG-b：退款重放預算耗盡（第 65 次）→ 一次外部 credit 都不發，op 終結為 failed", async () => {
+test("FG-b：退款重放预算耗尽（第 65 次）→ 一次外部 credit 都不发，op 终结为 failed", async () => {
   const { sql, calls, status } = mockBillingSql({ claimedAttemptNo: RESERVE_REFUND_BUDGET + 1 });
   let credits = 0;
   const result = await refundGenerationBilling({
@@ -264,26 +264,26 @@ test("FG-b：退款重放預算耗盡（第 65 次）→ 一次外部 credit 都
     },
   }, sql);
 
-  assert.equal(credits, 0, "超預算的嘗試不得發出外部 credit（重放不得放大成重複退款）");
-  assert.equal(result, "failed", "回報 failed（不是 pending：pending 會讓呼叫方以為還在跑）");
-  assert.equal(status(), "failed", "op 終結為 failed（不再被 stranded 掃描撈起，也不被假裝 applied）");
+  assert.equal(credits, 0, "超预算的尝试不得发出外部 credit（重放不得放大成重复退款）");
+  assert.equal(result, "failed", "回报 failed（不是 pending：pending 会让呼叫方以为还在跑）");
+  assert.equal(status(), "failed", "op 终结为 failed（不再被 stranded 扫描捞起，也不被假装 applied）");
   assert.ok(
     !calls.some((call) => call.sql.includes("SET status = 'applied'")),
-    "被拒的重放不得寫入任何 applied 轉移",
+    "被拒的重放不得写入任何 applied 转移",
   );
   assert.ok(
     calls.some((call) => call.sql.includes("SET status = 'pending'") === false),
-    "被拒的重放不得再排下一次重試（否則就是死循環）",
+    "被拒的重放不得再排下一次重试（否则就是死循环）",
   );
   const denial = calls.find((call) => call.sql.includes("SET status = 'failed'"));
-  assert.ok(denial, "必須寫入終結轉移");
+  assert.ok(denial, "必须写入终结转移");
   assert.ok(
     String(denial.values).includes("operation registry"),
-    "last_error 必須留下拒絕理由（不是靜默失敗）",
+    "last_error 必须留下拒绝理由（不是静默失败）",
   );
 });
 
-test("FG-b 對抗性：呼叫方自帶 maxAttempts/retryCount/預算 999 一律無效（預算仍由 registry 決定）", async () => {
+test("FG-b 对抗性：呼叫方自带 maxAttempts/retryCount/预算 999 一律无效（预算仍由 registry 决定）", async () => {
   const { sql } = mockBillingSql({ claimedAttemptNo: RESERVE_REFUND_BUDGET + 1 });
   let credits = 0;
   const adversarial = {
@@ -298,10 +298,10 @@ test("FG-b 對抗性：呼叫方自帶 maxAttempts/retryCount/預算 999 一律�
   } as unknown as Parameters<typeof refundGenerationBilling>[0];
   const result = await refundGenerationBilling(adversarial, sql);
 
-  assert.equal(credits, 0, "呼叫方注入的 999 次預算不得讓超額重放過關");
+  assert.equal(credits, 0, "呼叫方注入的 999 次预算不得让超额重放过关");
   assert.equal(result, "failed");
 
-  // 預算內的同一份注入入參照舊放行（證明拒絕來自預算，不是因為多傳欄位把裁決弄壞）。
+  // 预算内的同一份注入入参照旧放行（证明拒绝来自预算，不是因为多传栏位把裁决弄坏）。
   const within = mockBillingSql({ claimedAttemptNo: RESERVE_REFUND_BUDGET });
   let ok = 0;
   const withinResult = await refundGenerationBilling({
@@ -312,8 +312,8 @@ test("FG-b 對抗性：呼叫方自帶 maxAttempts/retryCount/預算 999 一律�
   assert.equal(ok, 1);
 });
 
-test("FG-b：429 重放一次後成功——退款只落地一次、兩次金額相同、已落地不再重複 credit", async () => {
-  // 第一次：claim 序號 1 → 上游 429（可安全重放，op 退回 pending）
+test("FG-b：429 重放一次后成功——退款只落地一次、两次金额相同、已落地不再重复 credit", async () => {
+  // 第一次：claim 序号 1 → 上游 429（可安全重放，op 退回 pending）
   const first = mockBillingSql({ claimedAttemptNo: 1 });
   const amounts: number[] = [];
   let attempt = 0;
@@ -329,13 +329,13 @@ test("FG-b：429 重放一次後成功——退款只落地一次、兩次金額
   assert.equal(pending, "pending", "429 是可安全重放 → 退回 pending 等下一次");
   assert.equal(first.status(), "pending");
 
-  // 第二次：claim 序號 2 → 成功。兩次呼叫合計只有 1 筆 credit 落地。
+  // 第二次：claim 序号 2 → 成功。两次呼叫合计只有 1 笔 credit 落地。
   const second = mockBillingSql({ claimedAttemptNo: 2 });
   const applied = await refundGenerationBilling({ job: job(), amount: 10, executorId: "worker-b", adapter }, second.sql);
   assert.equal(applied, "applied");
-  assert.deepEqual(amounts, [10, 10], "重試前後金額不得漂移");
+  assert.deepEqual(amounts, [10, 10], "重试前后金额不得漂移");
 
-  // 第三次（已 applied）：短路，不得再發一次 credit。
+  // 第三次（已 applied）：短路，不得再发一次 credit。
   const third = mockBillingSql({ claimedAttemptNo: 3, status: "applied" });
   const again = await refundGenerationBilling({
     job: job(),
@@ -344,16 +344,16 @@ test("FG-b：429 重放一次後成功——退款只落地一次、兩次金額
     adapter: { reserve: async () => {}, refund: async () => { amounts.push(-1); } },
   }, third.sql);
   assert.equal(again, "applied");
-  assert.deepEqual(amounts, [10, 10], "已落地的退款不得再 credit 一次（帳面只准一筆）");
+  assert.deepEqual(amounts, [10, 10], "已落地的退款不得再 credit 一次（帐面只准一笔）");
   assert.ok(
     !third.calls.some((call) => call.sql.includes("attempt_count = attempt_count + 1")),
-    "已 applied 的 op 不再被 claim（連預算都不消耗）",
+    "已 applied 的 op 不再被 claim（连预算都不消耗）",
   );
 });
 
-test("FG-b：quota_exhausted(402) fail-fast 後的應退額精確（退款語義不隨裁決改變）", async () => {
-  // 402 由 registry 原生硬停 fail-fast（暴君 08-29 裁定），退款立刻發生；
-  // 金額仍是 billingAmount - committed：requested 3 完成 1 → 應退 30 - floor(30/3) = 20。
+test("FG-b：quota_exhausted(402) fail-fast 后的应退额精确（退款语义不随裁决改变）", async () => {
+  // 402 由 registry 原生硬停 fail-fast（暴君 08-29 裁定），退款立刻发生；
+  // 金额仍是 billingAmount - committed：requested 3 完成 1 → 应退 30 - floor(30/3) = 20。
   const partial = mockBillingSql({ claimedAttemptNo: 1, amount: 20 });
   const partialAmounts: number[] = [];
   const partialResult = await refundGenerationBilling({
@@ -363,10 +363,10 @@ test("FG-b：quota_exhausted(402) fail-fast 後的應退額精確（退款語義
     adapter: { reserve: async () => {}, refund: async (input) => { partialAmounts.push(input.amount); } },
   }, partial.sql);
   assert.equal(partialResult, "applied");
-  assert.deepEqual(partialAmounts, [20], "應退額必須精確等於 billingAmount - committed");
+  assert.deepEqual(partialAmounts, [20], "应退额必须精确等于 billingAmount - committed");
   assert.ok(
     !partial.calls.some((call) => call.sql.includes("status = 'refunded'")),
-    "部分退款不得把 job 標成 refunded（狀態機語義不變）",
+    "部分退款不得把 job 标成 refunded（状态机语义不变）",
   );
 
   const full = mockBillingSql({ claimedAttemptNo: 1, amount: 30 });
@@ -381,11 +381,11 @@ test("FG-b：quota_exhausted(402) fail-fast 後的應退額精確（退款語義
   assert.deepEqual(fullAmounts, [30]);
   assert.ok(
     full.calls.some((call) => call.sql.includes("status = 'refunded'")),
-    "全額退款才標 refunded（既有公開語義）",
+    "全额退款才标 refunded（既有公开语义）",
   );
 });
 
-test("FG-b：reserve 超預算不扣款——凍結為 billing_unknown（保守終結，等既有 zombie 全額退款）", async () => {
+test("FG-b：reserve 超预算不扣款——冻结为 billing_unknown（保守终结，等既有 zombie 全额退款）", async () => {
   const { sql, calls, status } = mockBillingSql({
     claimedAttemptNo: RESERVE_REFUND_BUDGET + 1,
     jobRow: jobRow({ status: "pending_billing" }),
@@ -400,20 +400,20 @@ test("FG-b：reserve 超預算不扣款——凍結為 billing_unknown（保守�
     },
   }, sql);
 
-  assert.equal(reserves, 0, "超預算的 reserve 不得發出外部扣款");
-  assert.equal(status(), "unknown", "reserve op 凍結為 unknown（扣款狀態不明 → 走保守全額退款）");
-  assert.equal(result.status, "billing_unknown", "job 進 billing_unknown 供 probe 看見");
+  assert.equal(reserves, 0, "超预算的 reserve 不得发出外部扣款");
+  assert.equal(status(), "unknown", "reserve op 冻结为 unknown（扣款状态不明 → 走保守全额退款）");
+  assert.equal(result.status, "billing_unknown", "job 进 billing_unknown 供 probe 看见");
   assert.ok(
     calls.some((call) => call.sql.includes("SET status = 'unknown'") && String(call.values).includes("operation registry")),
-    "凍結時留下 registry 拒絕理由",
+    "冻结时留下 registry 拒绝理由",
   );
   assert.ok(
     !calls.some((call) => call.sql.includes("SET status = 'queued'")),
-    "被拒的 reserve 不得把 job 放進 queued（否則等於沒扣款就生成）",
+    "被拒的 reserve 不得把 job 放进 queued（否则等于没扣款就生成）",
   );
 });
 
-test("FG-b：擱淺退款通道（每 30s 跑）在預算耗盡後不得再 credit，且不自稱重試成功", async () => {
+test("FG-b：搁浅退款通道（每 30s 跑）在预算耗尽后不得再 credit，且不自称重试成功", async () => {
   const { sql, calls, status } = mockBillingSql({
     claimedAttemptNo: RESERVE_REFUND_BUDGET + 1,
     jobRow: jobRow({ status: "refunded" }),
@@ -426,26 +426,26 @@ test("FG-b：擱淺退款通道（每 30s 跑）在預算耗盡後不得再 cred
     sql,
   });
 
-  assert.equal(retried, 0, "被拒的重放不得計入 retried（summary 不許灌水）");
-  assert.equal(credits, 0, "超預算的擱淺退款不得發出外部 credit");
-  assert.equal(status(), "failed", "op 終結為 failed → 下一輪掃描（只撈 pending）不會再選中它");
+  assert.equal(retried, 0, "被拒的重放不得计入 retried（summary 不许灌水）");
+  assert.equal(credits, 0, "超预算的搁浅退款不得发出外部 credit");
+  assert.equal(status(), "failed", "op 终结为 failed → 下一轮扫描（只捞 pending）不会再选中它");
   assert.ok(
     !calls.some((call) => call.sql.includes("SET status = 'applied'")),
-    "被拒的擱淺重試不得寫 applied",
+    "被拒的搁浅重试不得写 applied",
   );
 });
 
-test("FG-b：預算常數 oracle——reserve/refund 各 64、commit 只許 1 次（政策不得互相借走）", () => {
+test("FG-b：预算常数 oracle——reserve/refund 各 64、commit 只许 1 次（政策不得互相借走）", () => {
   assert.deepEqual(
     [resolveReplayPolicy("billing.reserve").maxReplayAttempts, resolveReplayPolicy("billing.refund").maxReplayAttempts, COMMIT_BUDGET],
     [RESERVE_REFUND_BUDGET, RESERVE_REFUND_BUDGET, 1],
   );
-  assert.equal(COMMIT_BUDGET, 1, "commit 的扣款無上游冪等契約 → 重放預算必須是 1（只准第一次）");
+  assert.equal(COMMIT_BUDGET, 1, "commit 的扣款无上游幂等契约 → 重放预算必须是 1（只准第一次）");
 });
 
 test("2026-08-30: stranded refund retry scans only pending ops, never failed (dead loop killed)", async () => {
-  // failed refund op 是確定性拒絕（refundGenerationBilling 直接短路），再撈起來只會
-  // 30s 死循環刷日誌。回歸針：掃描查詢只能選 status='pending'，且 failed op 不觸發 refund。
+  // failed refund op 是确定性拒绝（refundGenerationBilling 直接短路），再捞起来只会
+  // 30s 死循环刷日志。回归针：扫描查询只能选 status='pending'，且 failed op 不触发 refund。
   const calls: Call[] = [];
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     calls.push({ sql: strings.join(" "), values });

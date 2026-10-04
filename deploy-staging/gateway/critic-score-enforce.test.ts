@@ -1,14 +1,14 @@
 // critic-score-enforce.test.ts（2026-10-03）
 //
-// 驗收：evaluateCriticScoreThreshold（此前生產路徑零呼叫）接上機器 critic 判決——
-//   (a) 開關 CRITIC_SCORE_ENFORCE 未設 → 即使 measured 低分也不強制（回歸保護）。
-//   (b) 開關="1" 且 measured 低分 → 走既有 reject→重派鏈（CRITIC_REJECT_MARK），且每會話
-//       只觸發一次（既有 critic-pass 硬帽；不新增第二條重派路徑、不動 reworkCount）。
-//   (c) 來源非 measured（model_self）低分 → 不強制（模型自評非驗收 oracle）。
-//   (d) 無量測（score=null）→ 不強制（未知≠失敗）。
+// 验收：evaluateCriticScoreThreshold（此前生产路径零呼叫）接上机器 critic 判决——
+//   (a) 开关 CRITIC_SCORE_ENFORCE 未设 → 即使 measured 低分也不强制（回归保护）。
+//   (b) 开关="1" 且 measured 低分 → 走既有 reject→重派链（CRITIC_REJECT_MARK），且每会话
+//       只触发一次（既有 critic-pass 硬帽；不新增第二条重派路径、不动 reworkCount）。
+//   (c) 来源非 measured（model_self）低分 → 不强制（模型自评非验收 oracle）。
+//   (d) 无量测（score=null）→ 不强制（未知≠失败）。
 //
-// 量測模組以 mock 替換：真實 ffprobe / 媒體下載不進單測。
-// DB 路徑在 import subagent（連帶 persistence）之前指向臨時檔，不碰生產 sessions.db。
+// 量测模组以 mock 替换：真实 ffprobe / 媒体下载不进单测。
+// DB 路径在 import subagent（连带 persistence）之前指向临时档，不碰生产 sessions.db。
 
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -19,7 +19,7 @@ const TEST_DB_DIR = mkdtempSync(join(tmpdir(), "critic-score-"))
 process.env.SESSIONS_DB_PATH = join(TEST_DB_DIR, "sessions.db")
 
 const MEASURED_MARK = "【技术硬检·measured】"
-// 可控量測結果：每個測試設定 mockScore（null＝量測失敗/無量測）。
+// 可控量测结果：每个测试设定 mockScore（null＝量测失败/无量测）。
 let mockScore: number | null = 3
 mock.module("./media-quality.ts", () => ({
   measureMediaScore: async () =>
@@ -36,7 +36,7 @@ persistence.initPersistence()
 const { initSubagent, handleSubagentDispatch, handleSubagentEvent, maybeRunMachineCriticPass, criticScoreEnforcementEnabled, shouldForceCriticRejectByScore } = sg
 const { CRITIC_PASS_MARK, CRITIC_REJECT_MARK, CRITIC_SCORE_THRESHOLD_POLICY } = dg
 
-// ── 極簡 gateway harness（同 subagent.test.ts 口徑，mock fetch） ─────────────────
+// ── 极简 gateway harness（同 subagent.test.ts 口径，mock fetch） ─────────────────
 const parents = new Map<string, { sessionId: string; opencodeSessionId: string; turnGen: number }>()
 const wakes: Array<{ id: string; summary: string }> = []
 const emitted: Array<{ name: string; data: any }> = []
@@ -106,7 +106,7 @@ async function dispatch(p: { sessionId: string }, label: string, extra: Record<s
     req("http://gw.test/internal/subagent/dispatch", {
       sessionId: p.sessionId,
       label,
-      prompt: "【任務】产出交付物（预期 5 分钟）。",
+      prompt: "【任务】产出交付物（预期 5 分钟）。",
       async: true,
       ...extra,
     }),
@@ -116,7 +116,7 @@ async function dispatch(p: { sessionId: string }, label: string, extra: Record<s
 }
 const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms))
 
-/** 走完整鏈：Expert(music) 終態 → 機器 critic 派遣 → critic 終態；回傳 critic run id 與其 child。 */
+/** 走完整链：Expert(music) 终态 → 机器 critic 派遣 → critic 终态；回传 critic run id 与其 child。 */
 async function runCriticFlow(p: { sessionId: string }): Promise<{ criticRunId: string; criticChild: string }> {
   const expert = await dispatch(p, "音乐交付", { expert: "music" })
   await handleSubagentEvent({ type: "session.idle" }, expert.childId)
@@ -160,15 +160,15 @@ afterAll(() => {
   }
 })
 
-// ── 純函數：開關語義（必須字面 "1"）＋三條件判定 ────────────────────────────────
-describe("開關與閾值判定（純函數）", () => {
+// ── 纯函数：开关语义（必须字面 "1"）＋三条件判定 ────────────────────────────────
+describe("开关与阈值判定（纯函数）", () => {
   const restore = process.env.CRITIC_SCORE_ENFORCE
   afterAll(() => {
     if (restore === undefined) delete process.env.CRITIC_SCORE_ENFORCE
     else process.env.CRITIC_SCORE_ENFORCE = restore
   })
 
-  test('開關語義：只有字面 "1" 為真；未設/其他值一律 false', () => {
+  test('开关语义：只有字面 "1" 为真；未设/其他值一律 false', () => {
     delete process.env.CRITIC_SCORE_ENFORCE
     expect(criticScoreEnforcementEnabled()).toBe(false)
     for (const v of ["true", "on", "yes", "TRUE", "01", "1x", " 1"]) {
@@ -179,21 +179,21 @@ describe("開關與閾值判定（純函數）", () => {
     expect(criticScoreEnforcementEnabled()).toBe(true)
   })
 
-  test("(c) 來源 model_self 低分 → 不強制（非 oracle）", () => {
+  test("(c) 来源 model_self 低分 → 不强制（非 oracle）", () => {
     expect(shouldForceCriticRejectByScore({ value: 2, source: "model_self" }, true)).toBe(false)
     expect(shouldForceCriticRejectByScore({ value: 2, source: "human" }, true)).toBe(false)
     expect(shouldForceCriticRejectByScore({ value: 2, source: null }, true)).toBe(false)
   })
 
-  test("(d) score=null → 不強制（未知≠失敗）", () => {
+  test("(d) score=null → 不强制（未知≠失败）", () => {
     expect(shouldForceCriticRejectByScore({ value: null, source: "measured" }, true)).toBe(false)
   })
 
-  test("(a) 開關 false：measured 低分也不強制（回歸保護）", () => {
+  test("(a) 开关 false：measured 低分也不强制（回归保护）", () => {
     expect(shouldForceCriticRejectByScore({ value: 1, source: "measured" }, false)).toBe(false)
   })
 
-  test("(b-單元) 開關 true + measured 低分 → 強制；達標/邊界不強制", () => {
+  test("(b-单元) 开关 true + measured 低分 → 强制；达标/边界不强制", () => {
     const below = CRITIC_SCORE_THRESHOLD_POLICY.reworkBelow
     expect(shouldForceCriticRejectByScore({ value: below - 1, source: "measured" }, true)).toBe(true)
     expect(shouldForceCriticRejectByScore({ value: below, source: "measured" }, true)).toBe(false)
@@ -201,15 +201,15 @@ describe("開關與閾值判定（純函數）", () => {
   })
 })
 
-// ── 端到端：強制退回與否取決於開關 + measured 分 ──────────────────────────────
-describe("machine critic 判決：measured 閾值接入既有 reject 鏈", () => {
+// ── 端到端：强制退回与否取决于开关 + measured 分 ──────────────────────────────
+describe("machine critic 判决：measured 阈值接入既有 reject 链", () => {
   const restore = process.env.CRITIC_SCORE_ENFORCE
   afterAll(() => {
     if (restore === undefined) delete process.env.CRITIC_SCORE_ENFORCE
     else process.env.CRITIC_SCORE_ENFORCE = restore
   })
 
-  test("(a) 開關未設 + 低分 measured → 不強制，PASS 回灌（零回歸）", async () => {
+  test("(a) 开关未设 + 低分 measured → 不强制，PASS 回灌（零回归）", async () => {
     delete process.env.CRITIC_SCORE_ENFORCE
     mockScore = 2
     const p = makeParent("gw-score-a")
@@ -217,29 +217,29 @@ describe("machine critic 判決：measured 閾值接入既有 reject 鏈", () =>
     const w = wakes[wakes.length - 1]
     expect(w.summary).toContain(CRITIC_PASS_MARK)
     expect(w.summary).not.toContain(CRITIC_REJECT_MARK)
-    // 未啟用＝不 await 量測；fire-and-forget 旁路仍照寫 measured 供觀測。
+    // 未启用＝不 await 量测；fire-and-forget 旁路仍照写 measured 供观测。
     await settle()
     const v = persistence.getCriticVerdictByRun(criticRunId)
     if (v) expect(v.score_source === "measured" || v.score_source === "model_self").toBe(true)
   })
 
-  test("(b) 開關=1 + 低分 measured → 強制退回（既有 reject→重派鏈）；每會話只一次", async () => {
+  test("(b) 开关=1 + 低分 measured → 强制退回（既有 reject→重派链）；每会话只一次", async () => {
     process.env.CRITIC_SCORE_ENFORCE = "1"
     mockScore = 2
     const p = makeParent("gw-score-b")
     const { criticRunId } = await runCriticFlow(p)
     const w = wakes[wakes.length - 1]
     expect(w.summary).toContain(CRITIC_REJECT_MARK)
-    // measured 落庫：score=2、來源 measured、判決 reject（供審計與下游 join）。
+    // measured 落库：score=2、来源 measured、判决 reject（供审计与下游 join）。
     const v = persistence.getCriticVerdictByRun(criticRunId)
     expect(v?.score).toBe(2)
     expect(v?.score_source).toBe("measured")
     expect(v?.verdict).toBe("reject")
-    // 既有硬帽：critic pass 每會話 ≤1 次 → 強制退回不可能連觸發（未新增第二條重派路徑/未動 reworkCount）。
+    // 既有硬帽：critic pass 每会话 ≤1 次 → 强制退回不可能连触发（未新增第二条重派路径/未动 reworkCount）。
     expect(maybeRunMachineCriticPass(p, false)).toBe(false)
   })
 
-  test("(d-端到端) 開關=1 但量測回 null → 不強制，PASS 回灌", async () => {
+  test("(d-端到端) 开关=1 但量测回 null → 不强制，PASS 回灌", async () => {
     process.env.CRITIC_SCORE_ENFORCE = "1"
     mockScore = null
     const p = makeParent("gw-score-d")
@@ -248,7 +248,7 @@ describe("machine critic 判決：measured 閾值接入既有 reject 鏈", () =>
     expect(w.summary).toContain(CRITIC_PASS_MARK)
     expect(w.summary).not.toContain(CRITIC_REJECT_MARK)
     const v = persistence.getCriticVerdictByRun(criticRunId)
-    // 無量測 → 誠實 null 分、來源 model_self（自評只作篩子，永不觸發閾值）。
+    // 无量测 → 诚实 null 分、来源 model_self（自评只作筛子，永不触发阈值）。
     expect(v?.score).toBeNull()
     expect(v?.score_source).toBe("model_self")
   })

@@ -1,231 +1,231 @@
-# 第 7 批（47 commit）我方能力清單
+# 第 7 批（47 commit）我方能力清单
 
-- 範圍：/tmp/cap/batch-7.hashes 全 47 條（2026-09-28 ～ 2026-09-30）
-- 口徑：能力＝使用者可見或可呼叫的行為；檔名/模組名不算能力。修復類若暴露邊界語義另列。
-- 領域標籤限用 11 個。同一能力只列一次。
+- 范围：/tmp/cap/batch-7.hashes 全 47 条（2026-09-28 ～ 2026-09-30）
+- 口径：能力＝使用者可见或可呼叫的行为；档名/模组名不算能力。修复类若暴露边界语义另列。
+- 领域标签限用 11 个。同一能力只列一次。
 
 ## 生成核心
 
-- [生成核心] 音樂三路全鏈回落（YuE2→FlowMusic→Gemini Lyria） — 只在「已選通路拋錯」時回落；Lyria 僅在 GEMINI_API_KEY 已配置或有前路時入鏈；換通路必須用該通路重新過 director；全鏈失敗回退帶每一路原因碼 music_all_channels_failed ｜ 證據: e75a2e8e
-- [生成核心] 欠費無替補即時失敗＋退款 — 上次失敗判定 quota_exhausted 且診斷顯示無可用替代供應商（全被排除／冷卻／不健康）即當下失敗並退款，不再空轉到 25 分鐘 deadline（實彈 2.4 秒）；capacity_saturated 不算（仍有健康供應商在忙）｜ 證據: e75a2e8e
-- [生成核心] 影片生成式後期（續片 extend_video／局部改片 edit_video） — 僅 catalog 宣告 videoGenerationTypes 含該型別者可提交（今日＝Seedance-2.5 族）；型別契約＋能力閘門＋具名錯誤碼；兩條 route（api/generation-jobs、api/v1/videos/generations）皆接 ｜ 證據: 51ca0474
-- [生成核心] 生成式後期來源影片解析 — 收 source_video.url 或 source_video.object_key（objectKey→url resolver），非 http(s) 一律 video_source_video_not_url 拒、缺來源 video_source_video_missing 拒（fail-closed，不猜）｜ 證據: 51ca0474
-- [生成核心] 一鍵超分檔位契約 — 檔位是 (size, factor) 參數對而非枚舉字串：1k→(1k,×2)、2k→(2k,×2)、4k→(2k,×4)，長邊保底 4608px；一鍵預設＝最高可提交檔位 ｜ 證據: 329c4221
-- [生成核心] 超分提交路由統一走檔位解析 — C 端 /api/pixai/upscale 與 B 端 /v1/upscale 都走 resolveUpscaleSubmission，factor 由呼叫端任意值改為契約值（計費口徑未動）｜ 證據: 329c4221
-- [生成核心] 4K 提交端打開＋嚴格解析度解析 — 顯式 resolution／size:"4k"／size:"4096x4096" 皆可到 4k；未由模型宣告即具名拒 resolution_not_declared_by_model，禁靜默降級 ｜ 證據: 0289ade9
-- [生成核心] durable 圖片尺寸白名單單一真源 — 已知可交上游尺寸（1024x1024／1536x1024／1024x1536／2048x2048／4096x4096）＋檔位倍率折算（1k×1／2k×2／4k×4）＋舊 "1k"/"2k" 別名；generations 的 SUPPORTED_SIZES 與 edits 的 DURABLE_EDIT_SIZES 收攏一處 ｜ 證據: 82ee2b9a
-- [生成核心] 數量上限單一真源（批次數／參考上限） — request-limits 零 import 葉模組為唯一真源（MAX_REQUEST_BATCH_COUNT=4、MAX_REQUEST_REFERENCE_IMAGES=5），images/videos generations、biz-image-references、batch-service 全改引用點 ｜ 證據: a9b33109
-- [生成核心] Web durable 任務負面詞與參考圖角色不再丟失 — 分發層用與 legacy /api/generate-images 同一函式（buildWorkflowPrompt）組進單一 prompt，位元組一致；用戶原文記 workflow.originalPrompt，顯示/重跑讀 displayGenerationPrompt 還原 ｜ 證據: 64b2bf91
+- [生成核心] 音乐三路全链回落（YuE2→FlowMusic→Gemini Lyria） — 只在「已选通路抛错」时回落；Lyria 仅在 GEMINI_API_KEY 已配置或有前路时入链；换通路必须用该通路重新过 director；全链失败回退带每一路原因码 music_all_channels_failed ｜ 证据: e75a2e8e
+- [生成核心] 欠费无替补即时失败＋退款 — 上次失败判定 quota_exhausted 且诊断显示无可用替代供应商（全被排除／冷却／不健康）即当下失败并退款，不再空转到 25 分钟 deadline（实弹 2.4 秒）；capacity_saturated 不算（仍有健康供应商在忙）｜ 证据: e75a2e8e
+- [生成核心] 影片生成式后期（续片 extend_video／局部改片 edit_video） — 仅 catalog 宣告 videoGenerationTypes 含该型别者可提交（今日＝Seedance-2.5 族）；型别契约＋能力闸门＋具名错误码；两条 route（api/generation-jobs、api/v1/videos/generations）皆接 ｜ 证据: 51ca0474
+- [生成核心] 生成式后期来源影片解析 — 收 source_video.url 或 source_video.object_key（objectKey→url resolver），非 http(s) 一律 video_source_video_not_url 拒、缺来源 video_source_video_missing 拒（fail-closed，不猜）｜ 证据: 51ca0474
+- [生成核心] 一键超分档位契约 — 档位是 (size, factor) 参数对而非枚举字串：1k→(1k,×2)、2k→(2k,×2)、4k→(2k,×4)，长边保底 4608px；一键预设＝最高可提交档位 ｜ 证据: 329c4221
+- [生成核心] 超分提交路由统一走档位解析 — C 端 /api/pixai/upscale 与 B 端 /v1/upscale 都走 resolveUpscaleSubmission，factor 由呼叫端任意值改为契约值（计费口径未动）｜ 证据: 329c4221
+- [生成核心] 4K 提交端打开＋严格解析度解析 — 显式 resolution／size:"4k"／size:"4096x4096" 皆可到 4k；未由模型宣告即具名拒 resolution_not_declared_by_model，禁静默降级 ｜ 证据: 0289ade9
+- [生成核心] durable 图片尺寸白名单单一真源 — 已知可交上游尺寸（1024x1024／1536x1024／1024x1536／2048x2048／4096x4096）＋档位倍率折算（1k×1／2k×2／4k×4）＋旧 "1k"/"2k" 别名；generations 的 SUPPORTED_SIZES 与 edits 的 DURABLE_EDIT_SIZES 收拢一处 ｜ 证据: 82ee2b9a
+- [生成核心] 数量上限单一真源（批次数／参考上限） — request-limits 零 import 叶模组为唯一真源（MAX_REQUEST_BATCH_COUNT=4、MAX_REQUEST_REFERENCE_IMAGES=5），images/videos generations、biz-image-references、batch-service 全改引用点 ｜ 证据: a9b33109
+- [生成核心] Web durable 任务负面词与参考图角色不再丢失 — 分发层用与 legacy /api/generate-images 同一函式（buildWorkflowPrompt）组进单一 prompt，位元组一致；用户原文记 workflow.originalPrompt，显示/重跑读 displayGenerationPrompt 还原 ｜ 证据: 64b2bf91
 
-## 模型與供應商
+## 模型与供应商
 
-- [模型與供應商] 極途 Gway 備用視頻渠道（priority 2） — xiaoyxiao 直接上游，同名模型同協議；控面 DB＋env 已上線，seed 不會把它當未知渠道 ｜ 證據: ed47cb58
-- [模型與供應商] 供給 adapter registry（協議註冊表） — 新增一條新協議供給＝2 檔（adapter 檔＋channels.config 條目），載入時自動註冊；分派／對帳／對帳協議映射三處中央 switch 皆查此表；未註冊協議明確失敗（不再 default 成 newapi_video）｜ 證據: 64b2bf91
-- [模型與供應商] 上游模型別名改讀資料 configuration.modelAliases — 不再認 supplier 身分特例（廢除 supplier.id === "env:sub2api" 硬編）｜ 證據: 64b2bf91
-- [模型與供應商] catalog 只外露可服務的超分檔位 — 宣告 upscaleTiers:[1k,2k,4k] 但 generationCapabilities 只給 servableUpscaleTiers（校準前不含 4K），不宣告提交時必被拒收的檔位 ｜ 證據: 329c4221
-- [模型與供應商] YuE2 模型輸入預算（8GB 卡） — style 上限 3000→600 runes、ABC ≤500 token，截斷標記泛化為 truncate-${limit}-hard；同單 52.4s 成片、峰值 7.10GiB ｜ 證據: b68c0fdd
+- [模型与供应商] 极途 Gway 备用视频渠道（priority 2） — xiaoyxiao 直接上游，同名模型同协议；控面 DB＋env 已上线，seed 不会把它当未知渠道 ｜ 证据: ed47cb58
+- [模型与供应商] 供给 adapter registry（协议注册表） — 新增一条新协议供给＝2 档（adapter 档＋channels.config 条目），载入时自动注册；分派／对帐／对帐协议映射三处中央 switch 皆查此表；未注册协议明确失败（不再 default 成 newapi_video）｜ 证据: 64b2bf91
+- [模型与供应商] 上游模型别名改读资料 configuration.modelAliases — 不再认 supplier 身分特例（废除 supplier.id === "env:sub2api" 硬编）｜ 证据: 64b2bf91
+- [模型与供应商] catalog 只外露可服务的超分档位 — 宣告 upscaleTiers:[1k,2k,4k] 但 generationCapabilities 只给 servableUpscaleTiers（校准前不含 4K），不宣告提交时必被拒收的档位 ｜ 证据: 329c4221
+- [模型与供应商] YuE2 模型输入预算（8GB 卡） — style 上限 3000→600 runes、ABC ≤500 token，截断标记泛化为 truncate-${limit}-hard；同单 52.4s 成片、峰值 7.10GiB ｜ 证据: b68c0fdd
 
-## 控制平面與計費
+## 控制平面与计费
 
-- [控制平面與計費] 成本閘按（供給 label, 上游 model）核價 — 讀 claim 的 unitPriceCny/priceSource（含來源原文與日期），缺價才回退兜底表；兩者皆無＝未核價不許提交；openai_video 協議 fail-closed，其他協議只在上游 model 落白名單時套價檢 ｜ 證據: 64b2bf91
-- [控制平面與計費] 同步直通路由的錢進帳本 — /v1/images/edits（pixai 分支）、/v1/upscale、/v1/template-generations、/api/pixai/* 經 sync-charge 門面留 billing_operation 列，可被 reconcileGenerationBilling／retryStrandedRefundOperations 撈回（原本退款失敗只剩一行日誌）｜ 證據: 64b2bf91
-- [控制平面與計費] 同步 job 狀態機（絕不進 queued） — reserve 成功後 job 保持 running；確定未扣 → op failed＋job failed（客戶當下拿 402，不在背後偷偷扣）；不明 → op unknown＋job billing_unknown 交 6h 殭屍回收全額退款 ｜ 證據: 64b2bf91
-- [控制平面與計費] 取消任務＋條件退款門面 — 分發路由只收 { cancelled, previousStatus, refund }；queued/leased 全額退款、pending_billing 未扣不退、submitting/running 由 worker 丟棄並交 reconcile 兜底；退款未 applied 不向客戶端謊報已完成 ｜ 證據: 64b2bf91
-- [控制平面與計費] 4K 超分計費改吃檔位 — imageGenerationCoins 第三參數帶檔位，4K 不再按 1k/2k 價賣；既有輸入（1024x1024／2048x2048 ＋ fast/hd）解析度與價格逐位元不變 ｜ 證據: 0289ade9
-- [控制平面與計費] GET /api/admin/statistics?format=csv 統計/用量導出 — 同一份投影的 CSV（單表＋section 欄供 Excel 篩選/pivot），meta 段帶窗口與口徑；只認 json／csv，其餘具名 400；導出與 JSON 同一道 admin 門 ｜ 證據: c6ca3857
-- [控制平面與計費] 用量按生成物類別切分 — byAssetKind 切面（shot_video／still_image／unclassified 三桶），錨點與日／模型同一個 job ⇒ 三切面可逐桶對帳；CSV 增 asset_kind section ｜ 證據: 8d9e067f
-- [控制平面與計費] 後台統計看板取真數字 — /api/admin/statistics 加進 CONTROL_PLANE_PROXY_SOURCES（控面容器同時有 route 與庫），不再由 Vercel 本地副本回「統計不可用」降級投影 ｜ 證據: 6221c69d
+- [控制平面与计费] 成本闸按（供给 label, 上游 model）核价 — 读 claim 的 unitPriceCny/priceSource（含来源原文与日期），缺价才回退兜底表；两者皆无＝未核价不许提交；openai_video 协议 fail-closed，其他协议只在上游 model 落白名单时套价检 ｜ 证据: 64b2bf91
+- [控制平面与计费] 同步直通路由的钱进帐本 — /v1/images/edits（pixai 分支）、/v1/upscale、/v1/template-generations、/api/pixai/* 经 sync-charge 门面留 billing_operation 列，可被 reconcileGenerationBilling／retryStrandedRefundOperations 捞回（原本退款失败只剩一行日志）｜ 证据: 64b2bf91
+- [控制平面与计费] 同步 job 状态机（绝不进 queued） — reserve 成功后 job 保持 running；确定未扣 → op failed＋job failed（客户当下拿 402，不在背后偷偷扣）；不明 → op unknown＋job billing_unknown 交 6h 僵尸回收全额退款 ｜ 证据: 64b2bf91
+- [控制平面与计费] 取消任务＋条件退款门面 — 分发路由只收 { cancelled, previousStatus, refund }；queued/leased 全额退款、pending_billing 未扣不退、submitting/running 由 worker 丢弃并交 reconcile 兜底；退款未 applied 不向客户端谎报已完成 ｜ 证据: 64b2bf91
+- [控制平面与计费] 4K 超分计费改吃档位 — imageGenerationCoins 第三参数带档位，4K 不再按 1k/2k 价卖；既有输入（1024x1024／2048x2048 ＋ fast/hd）解析度与价格逐位元不变 ｜ 证据: 0289ade9
+- [控制平面与计费] GET /api/admin/statistics?format=csv 统计/用量导出 — 同一份投影的 CSV（单表＋section 栏供 Excel 筛选/pivot），meta 段带窗口与口径；只认 json／csv，其余具名 400；导出与 JSON 同一道 admin 门 ｜ 证据: c6ca3857
+- [控制平面与计费] 用量按生成物类别切分 — byAssetKind 切面（shot_video／still_image／unclassified 三桶），锚点与日／模型同一个 job ⇒ 三切面可逐桶对帐；CSV 增 asset_kind section ｜ 证据: 8d9e067f
+- [控制平面与计费] 后台统计看板取真数字 — /api/admin/statistics 加进 CONTROL_PLANE_PROXY_SOURCES（控面容器同时有 route 与库），不再由 Vercel 本地副本回「统计不可用」降级投影 ｜ 证据: 6221c69d
 
 ## B端API
 
-- [B端API] /v1/models 升級成能力契約 — 逐模型揭露 maxBatchCount（全給）＋maxReferenceImages（僅 referenceImages===true 時給）；openapi ModelCapabilities schema 補 5 欄（新 2 欄＋videoGenerationTypes／promptCharLimit／upscaleTiers）｜ 證據: a9b33109
-- [B端API] GET /v1/tts/voices 結構化語音庫 — 照對手 ListVoices 無參數全量回，每條附 route（實際走哪條上游）與 source（屬性實查來源），另回 default_voice 與 Age 缺席說明 ｜ 證據: 215d2f07
-- [B端API] POST /v1/tts/generations 音色值域把關 — voice 走 normalizeVoiceId，未知 → 400 voice_unknown（訊息指向語音清單）；未帶 voice ⇒ 既有 "default" 行為逐位不變 ｜ 證據: 215d2f07
-- [B端API] /v1/upscale 對外文件揭露檔位契約 — 三檔位上游配對、一鍵預設語義、三個具名拒收碼寫進摘要；schema 補 upscale_tier（enum＝執行端 UPSCALE_TIERS）、factor 改寫成檔位倍率語義、size 去掉假的 default ｜ 證據: de4f5df9
-- [B端API] generations 的 size 列舉從執行端常數派生 — enum: [...DURABLE_IMAGE_SIZES] 補 4096x4096，並揭露 resolution／output_resolution 檔位鍵 ｜ 證據: b32c4818
-- [B端API] 建 key 面板與 /docs/api 曝光 OpenAI 兼容 base — 顯示 https://eimu.dev/openai/v1（此前只寫在 repo docs，開發者不可見）｜ 證據: 3a483ee6
-- [B端API] /v1/upscale 新後端口徑與自證欄位 — 文件寫明「是重新繪製、不是保真像素放大」、後端與具名碼；ImageObject 補 width/height（回應帶實測尺寸供自證）｜ 證據: 0289ade9
-- [B端API] /v1/upscale 揭露「檔位以 size 表達」口徑與新碼 upscale_backend_size_unavailable ｜ 證據: 82ee2b9a
+- [B端API] /v1/models 升级成能力契约 — 逐模型揭露 maxBatchCount（全给）＋maxReferenceImages（仅 referenceImages===true 时给）；openapi ModelCapabilities schema 补 5 栏（新 2 栏＋videoGenerationTypes／promptCharLimit／upscaleTiers）｜ 证据: a9b33109
+- [B端API] GET /v1/tts/voices 结构化语音库 — 照对手 ListVoices 无参数全量回，每条附 route（实际走哪条上游）与 source（属性实查来源），另回 default_voice 与 Age 缺席说明 ｜ 证据: 215d2f07
+- [B端API] POST /v1/tts/generations 音色值域把关 — voice 走 normalizeVoiceId，未知 → 400 voice_unknown（讯息指向语音清单）；未带 voice ⇒ 既有 "default" 行为逐位不变 ｜ 证据: 215d2f07
+- [B端API] /v1/upscale 对外文件揭露档位契约 — 三档位上游配对、一键预设语义、三个具名拒收码写进摘要；schema 补 upscale_tier（enum＝执行端 UPSCALE_TIERS）、factor 改写成档位倍率语义、size 去掉假的 default ｜ 证据: de4f5df9
+- [B端API] generations 的 size 列举从执行端常数派生 — enum: [...DURABLE_IMAGE_SIZES] 补 4096x4096，并揭露 resolution／output_resolution 档位键 ｜ 证据: b32c4818
+- [B端API] 建 key 面板与 /docs/api 曝光 OpenAI 兼容 base — 显示 https://eimu.dev/openai/v1（此前只写在 repo docs，开发者不可见）｜ 证据: 3a483ee6
+- [B端API] /v1/upscale 新后端口径与自证栏位 — 文件写明「是重新绘制、不是保真像素放大」、后端与具名码；ImageObject 补 width/height（回应带实测尺寸供自证）｜ 证据: 0289ade9
+- [B端API] /v1/upscale 揭露「档位以 size 表达」口径与新码 upscale_backend_size_unavailable ｜ 证据: 82ee2b9a
 
 ## Agent助理
 
-- [Agent助理] 「已思考 N 秒」當下結算 — 思考後直接調工具（中間無正文）時在 tool.invoke 即結算 reasoningMs，不再等整輪 settleItems 造成每段思考都顯示成到整輪結束 ｜ 證據: bd5405f5
-- [Agent助理] 「已用 N 币」只算真花費 — 報價估價與失敗工具不計入；網關側報價類工具 tool.result 不再掛 cost_coins（雙端同修）｜ 證據: 5d4e202b, e5d954a7
-- [Agent助理] 自動製畫布只給出圖工具 — image_quote／get_result／upload 不再鋪永遠待處理的空節點 ｜ 證據: c5115e19
-- [Agent助理] 站內可達 Remote MCP 安裝頁 /mcp — 助理帶走頁補連結（此前站內零連結、文檔只教克隆自建）｜ 證據: 74fb5728
-- [Agent助理] 斜線技能選單底部「瀏覽全部技能」→ /skills ｜ 證據: 905bcccf
-- [Agent助理] 助理可用影片取證工具登記＋知識正文還工具 — video_evidence／video_fetch／video_measure／video_transcribe 進 harness-tool-registry；kunpeng-knowledge 把「怎麼看參考片」從純文字指導接回這四支（含環境未 prepare 時回 video_fetch_unavailable 的誠實邊界）｜ 證據: 1fdcafc0
+- [Agent助理] 「已思考 N 秒」当下结算 — 思考后直接调工具（中间无正文）时在 tool.invoke 即结算 reasoningMs，不再等整轮 settleItems 造成每段思考都显示成到整轮结束 ｜ 证据: bd5405f5
+- [Agent助理] 「已用 N 币」只算真花费 — 报价估价与失败工具不计入；网关侧报价类工具 tool.result 不再挂 cost_coins（双端同修）｜ 证据: 5d4e202b, e5d954a7
+- [Agent助理] 自动制画布只给出图工具 — image_quote／get_result／upload 不再铺永远待处理的空节点 ｜ 证据: c5115e19
+- [Agent助理] 站内可达 Remote MCP 安装页 /mcp — 助理带走页补连结（此前站内零连结、文档只教克隆自建）｜ 证据: 74fb5728
+- [Agent助理] 斜线技能选单底部「浏览全部技能」→ /skills ｜ 证据: 905bcccf
+- [Agent助理] 助理可用影片取证工具登记＋知识正文还工具 — video_evidence／video_fetch／video_measure／video_transcribe 进 harness-tool-registry；kunpeng-knowledge 把「怎么看参考片」从纯文字指导接回这四支（含环境未 prepare 时回 video_fetch_unavailable 的诚实边界）｜ 证据: 1fdcafc0
 
-## 畫布與工作流
+## 画布与工作流
 
-- [畫布與工作流] 畫布生成預設走 durable job — 每張 POST /api/generation-jobs（帶 Idempotency-Key）→ 伺服器端輪詢取件，回應形狀與舊版一字不變；等待上限＝maxDuration−20s，超時回 504 generation_timeout 且不取消任務 ｜ 證據: 64b2bf91
-- [畫布與工作流] Blender 插件下載入口 — 畫布「连接 Blender」補 public/downloads/eimu-blender-addon.py（測試鎖與 bridge 真源逐字一致）｜ 證據: 3a483ee6
-- [畫布與工作流] 節點右鍵「恢复上一版」 — 接既有 revert_node reducer（進撤銷棧，無更早版本時灰掉）｜ 證據: 3a483ee6
-- [畫布與工作流] 圖片右鍵「一稿多版位」 — 經 /api/canvas/format-crops 按常用尺寸裁出版位，落成源圖右側子節點＋連線（擴圖版位無上游照實略過）｜ 證據: 3a483ee6
-- [畫布與工作流] 3D 白模當生成參考 — scene_3d 節點的 stills 經既有 blender-to-video-bridge 參考卡接成生成節點的一等參考（影片/模型檔由該輪子剔除、首張帶 nodeId 作去重載體）｜ 證據: aa81b4b0
-- [畫布與工作流] 回分鏡溯源兩鍵 — directorStageId／shotId 進 metadata 雙白名單；shotId 優先舞台自身 storyboardShot.shotNumber，其次生成節點自身 ｜ 證據: aa81b4b0
-- [畫布與工作流] 分鏡級候選集與星標選定 — 一分鏡 ≤4 條（第 5 條明確拒絕）、首條自動選定、不自動搶稿、星標者被刪除才回退首條 ｜ 證據: aa81b4b0
-- [畫布與工作流] 候選 prompt 回溯 — 候選可讀回產生它的 prompt 供重跑；缺 prompt 整條丟棄，不編造 ｜ 證據: aa81b4b0
-- [畫布與工作流] 分鏡增刪複製重排 — 複製品剝掉來源的產物／裁決／溯源指針 ｜ 證據: aa81b4b0
-- [畫布與工作流] 按集批次換模型／批次重跑 — metadata.episodeId＝CanvasEpisode.id（現場原無「分鏡→集」的邊）；缺 prompt 的格列 missingPromptShotNumbers 並排除，不用假 prompt 花錢 ｜ 證據: aa81b4b0
-- [畫布與工作流] 任務版本／Tags／選中標記 — per-任務版本（重跑產生新版本且舊版本存活）、Tags 語義與分組、選中照既有 batchPrimaryImageId／reducer 星標回退語義（不自創第三套）｜ 證據: 51ca0474
-- [畫布與工作流] 專案級風格綁定（風格一等 id） — styleId id 進全文出：request > project 優先序、查不到回 null（不猜近似 id、不回退第一個風格）；未知 id 在 /api/canvas/generate 於任何下游請求之前 400 style_id_unknown 擋下；無風格時 prompt／負面詞逐位不變 ｜ 證據: 8dcdcd57
-- [畫布與工作流] 專案級劇本型別與旁白音色 — scriptType 接既有 AID enum（plot／monologue，desc 逐字取自 AID 未改寫）、narrationVoice 直接複用 normalizeVoiceId（與 /v1/tts/generations 同一把尺）｜ 證據: f2668377
-- [畫布與工作流] 專案級欄位匯出／匯入帶得走 — styleId、scriptType、narrationVoice 走完整七處接線（types／normalizeProject 逐欄白名單／canvasProjectMeta／normalizeProjectMetaPatch／專案 PUT／hook state 與三處還原點／setProjectMeta），匯出整包帶走、匯入經 canvasProjectMeta ｜ 證據: 8dcdcd57, f2668377
-- [畫布與工作流] 影片截幀容量放開與 at 模式 — /api/canvas/video-frames 時長上限 60→600s、序列幀 24→600、新增 mode:"at"＋atSec 時間點清單（嚴格遞增、全部 < 片長），加 intervalSamples／tileSampleTimes／frameFileName（照 hypit 語義移植）｜ 證據: 1fdcafc0
-- [畫布與工作流] 模板卡片旋轉木馬重構 — 沿用 CaseShowcase 交互機件（wheel {passive:false}／SPRING_TRACK／drive() 全保留），提交鍵跑選定步驟、海報浮水印卡片、挑著跑時主按鈕帶 k/N 與「恢复全部」、零選時禁用 ｜ 證據: c859432b
+- [画布与工作流] 画布生成预设走 durable job — 每张 POST /api/generation-jobs（带 Idempotency-Key）→ 伺服器端轮询取件，回应形状与旧版一字不变；等待上限＝maxDuration−20s，超时回 504 generation_timeout 且不取消任务 ｜ 证据: 64b2bf91
+- [画布与工作流] Blender 插件下载入口 — 画布「连接 Blender」补 public/downloads/eimu-blender-addon.py（测试锁与 bridge 真源逐字一致）｜ 证据: 3a483ee6
+- [画布与工作流] 节点右键「恢复上一版」 — 接既有 revert_node reducer（进撤销栈，无更早版本时灰掉）｜ 证据: 3a483ee6
+- [画布与工作流] 图片右键「一稿多版位」 — 经 /api/canvas/format-crops 按常用尺寸裁出版位，落成源图右侧子节点＋连线（扩图版位无上游照实略过）｜ 证据: 3a483ee6
+- [画布与工作流] 3D 白模当生成参考 — scene_3d 节点的 stills 经既有 blender-to-video-bridge 参考卡接成生成节点的一等参考（影片/模型档由该轮子剔除、首张带 nodeId 作去重载体）｜ 证据: aa81b4b0
+- [画布与工作流] 回分镜溯源两键 — directorStageId／shotId 进 metadata 双白名单；shotId 优先舞台自身 storyboardShot.shotNumber，其次生成节点自身 ｜ 证据: aa81b4b0
+- [画布与工作流] 分镜级候选集与星标选定 — 一分镜 ≤4 条（第 5 条明确拒绝）、首条自动选定、不自动抢稿、星标者被删除才回退首条 ｜ 证据: aa81b4b0
+- [画布与工作流] 候选 prompt 回溯 — 候选可读回产生它的 prompt 供重跑；缺 prompt 整条丢弃，不编造 ｜ 证据: aa81b4b0
+- [画布与工作流] 分镜增删复制重排 — 复制品剥掉来源的产物／裁决／溯源指针 ｜ 证据: aa81b4b0
+- [画布与工作流] 按集批次换模型／批次重跑 — metadata.episodeId＝CanvasEpisode.id（现场原无「分镜→集」的边）；缺 prompt 的格列 missingPromptShotNumbers 并排除，不用假 prompt 花钱 ｜ 证据: aa81b4b0
+- [画布与工作流] 任务版本／Tags／选中标记 — per-任务版本（重跑产生新版本且旧版本存活）、Tags 语义与分组、选中照既有 batchPrimaryImageId／reducer 星标回退语义（不自创第三套）｜ 证据: 51ca0474
+- [画布与工作流] 专案级风格绑定（风格一等 id） — styleId id 进全文出：request > project 优先序、查不到回 null（不猜近似 id、不回退第一个风格）；未知 id 在 /api/canvas/generate 于任何下游请求之前 400 style_id_unknown 挡下；无风格时 prompt／负面词逐位不变 ｜ 证据: 8dcdcd57
+- [画布与工作流] 专案级剧本型别与旁白音色 — scriptType 接既有 AID enum（plot／monologue，desc 逐字取自 AID 未改写）、narrationVoice 直接复用 normalizeVoiceId（与 /v1/tts/generations 同一把尺）｜ 证据: f2668377
+- [画布与工作流] 专案级栏位汇出／汇入带得走 — styleId、scriptType、narrationVoice 走完整七处接线（types／normalizeProject 逐栏白名单／canvasProjectMeta／normalizeProjectMetaPatch／专案 PUT／hook state 与三处还原点／setProjectMeta），汇出整包带走、汇入经 canvasProjectMeta ｜ 证据: 8dcdcd57, f2668377
+- [画布与工作流] 影片截帧容量放开与 at 模式 — /api/canvas/video-frames 时长上限 60→600s、序列帧 24→600、新增 mode:"at"＋atSec 时间点清单（严格递增、全部 < 片长），加 intervalSamples／tileSampleTimes／frameFileName（照 hypit 语义移植）｜ 证据: 1fdcafc0
+- [画布与工作流] 模板卡片旋转木马重构 — 沿用 CaseShowcase 交互机件（wheel {passive:false}／SPRING_TRACK／drive() 全保留），提交键跑选定步骤、海报浮水印卡片、挑著跑时主按钮带 k/N 与「恢复全部」、零选时禁用 ｜ 证据: c859432b
 
-## 創作域
+## 创作域
 
-- [創作域] 變裝子資產 — 既有 variantOf 之上長出：角色掛多個具名變裝（各自參考圖）、可新增變裝、設定階段缺件明確具名回報（不得靜默用主造型頂替）；drama-recipe 套用路徑真的取到變裝參考 ｜ 證據: 51ca0474
-- [創作域] 變裝缺件 fail-closed 落到資料面 — disguises 為空時 prompt 一律清空（needsAsset/missingDisguiseNames 只是回報欄位，擋不住消費端）；命中變裝但變裝自己沒寫 prompt 才沿用卡本體片段；清洗去重鍵與 addCharacterDisguise 對齊（id 或 name，留最後一張）｜ 證據: 3d46f837
-- [創作域] 兩段式上傳（直傳憑證 → objectKey 入庫） — VPS 走 image-data-api 短效 HMAC 簽名（母鑰只留伺服器端）、Vercel 走 handleUpload client token；第二段親自取回位元組算 sha256 才入庫；上限 512MB、內容型別白名單；端點 /api/uploads{,/sign,/commit} ｜ 證據: 1fdcafc0
-- [創作域] 視頻運鏡預設 23 條 — 視頻生成面板「运镜」行接 camera-motion-presets，後綴替換語義同風格 chip（可選「不指定」）｜ 證據: 3a483ee6
-- [創作域] 劇本入口曝光（novel_film） — 正面卡補一行入口提示；示範 chip 第三條換成長文本改編口徑（原「大电影」命中泛用 feature_film，等於把人往通用產線引）；純 UI/文案、零判定邏輯改動 ｜ 證據: 1fdcafc0
+- [创作域] 变装子资产 — 既有 variantOf 之上长出：角色挂多个具名变装（各自参考图）、可新增变装、设定阶段缺件明确具名回报（不得静默用主造型顶替）；drama-recipe 套用路径真的取到变装参考 ｜ 证据: 51ca0474
+- [创作域] 变装缺件 fail-closed 落到资料面 — disguises 为空时 prompt 一律清空（needsAsset/missingDisguiseNames 只是回报栏位，挡不住消费端）；命中变装但变装自己没写 prompt 才沿用卡本体片段；清洗去重键与 addCharacterDisguise 对齐（id 或 name，留最后一张）｜ 证据: 3d46f837
+- [创作域] 两段式上传（直传凭证 → objectKey 入库） — VPS 走 image-data-api 短效 HMAC 签名（母钥只留伺服器端）、Vercel 走 handleUpload client token；第二段亲自取回位元组算 sha256 才入库；上限 512MB、内容型别白名单；端点 /api/uploads{,/sign,/commit} ｜ 证据: 1fdcafc0
+- [创作域] 视频运镜预设 23 条 — 视频生成面板「运镜」行接 camera-motion-presets，后缀替换语义同风格 chip（可选「不指定」）｜ 证据: 3a483ee6
+- [创作域] 剧本入口曝光（novel_film） — 正面卡补一行入口提示；示范 chip 第三条换成长文本改编口径（原「大电影」命中泛用 feature_film，等于把人往通用产线引）；纯 UI/文案、零判定逻辑改动 ｜ 证据: 1fdcafc0
 
-## 帳號與增長
+## 帐号与增长
 
-- [帳號與增長] 助理出的圖可以分享（分享即邀請迴路） — 圖卡「分享」先以 agent-<taskId> 經既有 POST /api/history 冪等補寫歷史（順帶讓助理作品出現在歷史頁）再開既有分享框；/api/share 未命中時等歷史索引快取（3s）過期重讀一次，免跨實例剛寫入即 404 ｜ 證據: d9169959
-- [帳號與增長] 公告橫幅／彈窗兩個投放面渲染 — AnnouncementSurfaces 由 Navbar 單例掛載，關閉即 dismiss/mark-read ｜ 證據: 3a483ee6
+- [帐号与增长] 助理出的图可以分享（分享即邀请回路） — 图卡「分享」先以 agent-<taskId> 经既有 POST /api/history 幂等补写历史（顺带让助理作品出现在历史页）再开既有分享框；/api/share 未命中时等历史索引快取（3s）过期重读一次，免跨实例刚写入即 404 ｜ 证据: d9169959
+- [帐号与增长] 公告横幅／弹窗两个投放面渲染 — AnnouncementSurfaces 由 Navbar 单例挂载，关闭即 dismiss/mark-read ｜ 证据: 3a483ee6
 
-## 前端與UI
+## 前端与UI
 
-- [前端與UI] 工作站跨螢幕等比 — 以 1274×664 為設計基準按 min(寬比,高比) 放大根字級；面板／間隙／圓角／FAB／卡內字級改 rem，3D 透視跟卡寬等比 ｜ 證據: ee89d6c3
-- [前端與UI] body 與助理面板 px→rem 等比縮放 — 字級／圖標／輸入框跟工作站根字級縮放（基準機零變化）｜ 證據: 620b6267
-- [前端與UI] 工作站態解除導覽列頁殼 1440 上限 — >1440 視口面板／畫布不再被夾成置中窄殼 ｜ 證據: fc314d43
-- [前端與UI] 首頁不再每次 hydration 失敗重建 — 內聯 <style> 註解不再含字面 <style>（SSR 轉義不符）｜ 證據: ef4e8b19
-- [前端與UI] 文檔中心「找现成做法」三入口 — 場景指南／創作產線／技能目錄三個此前對用戶零可見入口（此前 /use-cases、/workflows 只在 hidden SEO 區塊）｜ 證據: 14a99737
+- [前端与UI] 工作站跨萤幕等比 — 以 1274×664 为设计基准按 min(宽比,高比) 放大根字级；面板／间隙／圆角／FAB／卡内字级改 rem，3D 透视跟卡宽等比 ｜ 证据: ee89d6c3
+- [前端与UI] body 与助理面板 px→rem 等比缩放 — 字级／图标／输入框跟工作站根字级缩放（基准机零变化）｜ 证据: 620b6267
+- [前端与UI] 工作站态解除导览列页壳 1440 上限 — >1440 视口面板／画布不再被夹成置中窄壳 ｜ 证据: fc314d43
+- [前端与UI] 首页不再每次 hydration 失败重建 — 内联 <style> 注解不再含字面 <style>（SSR 转义不符）｜ 证据: ef4e8b19
+- [前端与UI] 文档中心「找现成做法」三入口 — 场景指南／创作产线／技能目录三个此前对用户零可见入口（此前 /use-cases、/workflows 只在 hidden SEO 区块）｜ 证据: 14a99737
 
-## 運維與觀測
+## 运维与观测
 
-- [運維與觀測] 網關 opencode SSE 30s 看門狗 — /event 30s 無位元組即 abort 重連（opencode 每 ~10s heartbeat），消除重啟 opencode-server 後最長 5 分鐘的 SSE 盲窗（VPS 實測重連 35s）｜ 證據: c7788ee8
-- [運維與觀測] npm healthz/smoke:image 改 curl（Arch Linux）｜ 證據: c7788ee8
-- [運維與觀測] 控面建置 context 白名單＋next build 快取掛載 — .dockerignore 改 allowlist（VPS context 383M→只剩建置所需）；builder 層 RUN --mount=type=cache 掛 .next/cache，改一行不再全量編譯 ｜ 證據: c7788ee8
-- [運維與觀測] 控面代理清單單一真源＋DB 綁定 route 漂移棘輪 — CONTROL_PLANE_PROXY_SOURCES／controlPlaneRewrites(origin) 為唯一真源（rewrites() 輸出逐字相等）；測試掃 src/app/api route.ts 遞迴 import 閉包，觸及含 GENERATION_DATABASE_URL 的模組且未被代理者必須列 KNOWN_VERCEL_LOCAL 基線，過期條目亦紅 ｜ 證據: 203a86ae
-- [運維與觀測] 補四條漏網代理 DB route — billing-operations 裸路徑、biz-keys/provision、probe/stuck、probe/jobs/*（原本 Vercel 無庫、登入後必 500）｜ 證據: 1c6e0e20
-- [運維與觀測] nginx 改 nginx -t＋reload（禁 restart）＋postcheck 加經 nginx 的對外 healthz — 事故：restart 遇上游容器已被移除 → [emerg] host not found → 全站入口重啟迴圈；容器內 healthz 當時仍 200，故補對外探測 ｜ 證據: a823d5f1
-- [運維與觀測] 控面部署腳本修正 — 本機無 hostname 改 uname -n；build 快取清理改 --keep-storage 2gb（until=72h 放過新快取，部署後磁碟觸 98%）｜ 證據: 73f37beb
+- [运维与观测] 网关 opencode SSE 30s 看门狗 — /event 30s 无位元组即 abort 重连（opencode 每 ~10s heartbeat），消除重启 opencode-server 后最长 5 分钟的 SSE 盲窗（VPS 实测重连 35s）｜ 证据: c7788ee8
+- [运维与观测] npm healthz/smoke:image 改 curl（Arch Linux）｜ 证据: c7788ee8
+- [运维与观测] 控面建置 context 白名单＋next build 快取挂载 — .dockerignore 改 allowlist（VPS context 383M→只剩建置所需）；builder 层 RUN --mount=type=cache 挂 .next/cache，改一行不再全量编译 ｜ 证据: c7788ee8
+- [运维与观测] 控面代理清单单一真源＋DB 绑定 route 漂移棘轮 — CONTROL_PLANE_PROXY_SOURCES／controlPlaneRewrites(origin) 为唯一真源（rewrites() 输出逐字相等）；测试扫 src/app/api route.ts 递回 import 闭包，触及含 GENERATION_DATABASE_URL 的模组且未被代理者必须列 KNOWN_VERCEL_LOCAL 基线，过期条目亦红 ｜ 证据: 203a86ae
+- [运维与观测] 补四条漏网代理 DB route — billing-operations 裸路径、biz-keys/provision、probe/stuck、probe/jobs/*（原本 Vercel 无库、登入后必 500）｜ 证据: 1c6e0e20
+- [运维与观测] nginx 改 nginx -t＋reload（禁 restart）＋postcheck 加经 nginx 的对外 healthz — 事故：restart 遇上游容器已被移除 → [emerg] host not found → 全站入口重启回圈；容器内 healthz 当时仍 200，故补对外探测 ｜ 证据: a823d5f1
+- [运维与观测] 控面部署脚本修正 — 本机无 hostname 改 uname -n；build 快取清理改 --keep-storage 2gb（until=72h 放过新快取，部署后磁碟触 98%）｜ 证据: 73f37beb
 
-## 團隊與企業
+## 团队与企业
 
-- [團隊與企業] 資產團隊維度 — asset-scope 加 owner:"team"＋teamId；鬼狀態 fail-closed（不降格 personal）｜ 證據: 1fdcafc0
-- [團隊與企業] 團隊／成員配額判定與存取 — fixed/daily 模式、UTC+8 日界（epoch offset 480 分）、回收上限、超賣保護；配額只寫意圖（team_settings／team_member_quota）不寫五態帳本、不預扣 ｜ 證據: 1fdcafc0
-- [團隊與企業] 三級權限矩陣（主帳／管理員／成員） ｜ 證據: 1fdcafc0
-- [團隊與企業] GET/POST /v1/team/quota/limits 配額讀寫面 — GET 團隊模式＋各成員模式與當日用量；POST scope=team/member 設配額；鑑權照同群組既有 /v1/team/quota，團隊主帳＝呼叫方密鑰的 user_id，成員密鑰改配額 403 ｜ 證據: 1fdcafc0
-- [團隊與企業] /v1/team/members 回團隊與成員配額區塊 — 讀不到映射層就省略該欄（不冒充）｜ 證據: 1fdcafc0
+- [团队与企业] 资产团队维度 — asset-scope 加 owner:"team"＋teamId；鬼状态 fail-closed（不降格 personal）｜ 证据: 1fdcafc0
+- [团队与企业] 团队／成员配额判定与存取 — fixed/daily 模式、UTC+8 日界（epoch offset 480 分）、回收上限、超卖保护；配额只写意图（team_settings／team_member_quota）不写五态帐本、不预扣 ｜ 证据: 1fdcafc0
+- [团队与企业] 三级权限矩阵（主帐／管理员／成员） ｜ 证据: 1fdcafc0
+- [团队与企业] GET/POST /v1/team/quota/limits 配额读写面 — GET 团队模式＋各成员模式与当日用量；POST scope=team/member 设配额；鉴权照同群组既有 /v1/team/quota，团队主帐＝呼叫方密钥的 user_id，成员密钥改配额 403 ｜ 证据: 1fdcafc0
+- [团队与企业] /v1/team/members 回团队与成员配额区块 — 读不到映射层就省略该栏（不冒充）｜ 证据: 1fdcafc0
 
-## 非程式碼能力
+## 非程式码能力
 
-- 控面一鍵部署腳本 deploy/vps/deploy-control-plane.sh — plan 唯讀雙向 diff 閘（VPS 將覆寫檔的 md5 不在 repo 該路徑歷史任一版 ⇒ BLOCKED）／deploy 版本化鏡像＋postcheck 自動回滾／rollback；來源＝git HEAD（git archive 白名單，不部署 working tree）；本機無 rsync 時退 md5 清單比對＋tar（判準等價）｜ 9e5664be
-- DB 遷移 032_supplier_adapter_type_open.sql — 供給 adapter_type 開放為任意協議字串（由 registry 執行期判定合法值）｜ 64b2bf91
-- DB 遷移 033_team_quota_limits.sql — 團隊／成員配額意圖欄位 ｜ 1fdcafc0
-- VPS 側 image-data-api 新增 POST /api/blob/presign（短效 HMAC 簽名直傳）＋ nginx 上限，已完成端到端驗證（簽名直傳→讀回 sha256 相符）｜ 1fdcafc0
-- VPS /opt/agent-harness/gateway/events-translate.ts 同步（報價不掛 cost_coins、自動製畫布只給出圖工具），各自留 .bak 備份 ｜ e5d954a7, c5115e19
-- 控面 env 同步 ADMIN_SESSION_SECRET／ADMIN_USERNAME 進 .env.control-plane（統計代理的前置條件）｜ 6221c69d
-- 控面 DB＋env 上線 gway 渠道（seed 不當未知渠道）；V-03 起在 channels.config 帶入已核單價與來源日期 ｜ ed47cb58, 64b2bf91
-- 控面 compose 模板同步 control-plane-compose.yml（補齊與 VPS 現役檔的非 secret 差異並標明為模板）｜ c7788ee8
-- Runbook 更新 docs/runbooks/infra-debugging.md — 網關 session 已 SQLite 持久化；opencode SSE 懸掛根因與 30s 看門狗（VPS 實測重連 35s，原 5 分鐘）｜ a7d81d8d
-- 雙真相邊界文件 docs/architecture/dual-truth-boundary.md（W5，純文件） — world1（畫布多步生產鏈）↔ world2（模板＋素材注入＋成片）；新事實：world2 自己有兩份（VPS 活本 /opt/agent-harness/gateway/ 與 repo 鏡像 deploy-staging/gateway/，2026-09-29 逐檔 md5 全等但「一致」是當下狀態不是契約）｜ 79e1f5a3
-- AGENTS.md 規則：禁內聯——任何動手環節一律派 subagent ｜ 1fdcafc0
-- staging 鏡像同步 staging/music-tools/{music_tools,music_prompt_director}.ts（e75a2e8e／b68c0fdd 的 staging 側）｜ aa729665
+- 控面一键部署脚本 deploy/vps/deploy-control-plane.sh — plan 唯读双向 diff 闸（VPS 将覆写档的 md5 不在 repo 该路径历史任一版 ⇒ BLOCKED）／deploy 版本化镜像＋postcheck 自动回滚／rollback；来源＝git HEAD（git archive 白名单，不部署 working tree）；本机无 rsync 时退 md5 清单比对＋tar（判准等价）｜ 9e5664be
+- DB 迁移 032_supplier_adapter_type_open.sql — 供给 adapter_type 开放为任意协议字串（由 registry 执行期判定合法值）｜ 64b2bf91
+- DB 迁移 033_team_quota_limits.sql — 团队／成员配额意图栏位 ｜ 1fdcafc0
+- VPS 侧 image-data-api 新增 POST /api/blob/presign（短效 HMAC 签名直传）＋ nginx 上限，已完成端到端验证（签名直传→读回 sha256 相符）｜ 1fdcafc0
+- VPS /opt/agent-harness/gateway/events-translate.ts 同步（报价不挂 cost_coins、自动制画布只给出图工具），各自留 .bak 备份 ｜ e5d954a7, c5115e19
+- 控面 env 同步 ADMIN_SESSION_SECRET／ADMIN_USERNAME 进 .env.control-plane（统计代理的前置条件）｜ 6221c69d
+- 控面 DB＋env 上线 gway 渠道（seed 不当未知渠道）；V-03 起在 channels.config 带入已核单价与来源日期 ｜ ed47cb58, 64b2bf91
+- 控面 compose 模板同步 control-plane-compose.yml（补齐与 VPS 现役档的非 secret 差异并标明为模板）｜ c7788ee8
+- Runbook 更新 docs/runbooks/infra-debugging.md — 网关 session 已 SQLite 持久化；opencode SSE 悬挂根因与 30s 看门狗（VPS 实测重连 35s，原 5 分钟）｜ a7d81d8d
+- 双真相边界文件 docs/architecture/dual-truth-boundary.md（W5，纯文件） — world1（画布多步生产链）↔ world2（模板＋素材注入＋成片）；新事实：world2 自己有两份（VPS 活本 /opt/agent-harness/gateway/ 与 repo 镜像 deploy-staging/gateway/，2026-09-29 逐档 md5 全等但「一致」是当下状态不是契约）｜ 79e1f5a3
+- AGENTS.md 规则：禁内联——任何动手环节一律派 subagent ｜ 1fdcafc0
+- staging 镜像同步 staging/music-tools/{music_tools,music_prompt_director}.ts（e75a2e8e／b68c0fdd 的 staging 侧）｜ aa729665
 
-## 邊界與拒絕
+## 边界与拒绝
 
-- YuE2 輸入硬截斷：style 600 runes、ABC 500 token，截斷標記 truncate-${limit}-hard（8GB 卡 NAR prefill 顯存預算）｜ b68c0fdd
-- 生成式後期閘門壓在成本閘之後、任何 fetch 之前（fail-closed）；不支援的模型即拒，不靜默降級成 generate ｜ 51ca0474
-- 分鏡候選第 5 條明確拒絕；缺 prompt 的候選/格列整條丟棄（不用假 prompt 花錢）｜ aa81b4b0
-- 4K 超分 fail-closed：upscale_4k_upstream_unverified（上游 factor 語義未經真單校準），env UPSCALE_4K_UPSTREAM=1 於校準後開啟；切 gpt-image-2 新後端亦同閘（直到真單量到長邊 ≥3840px）｜ 329c4221, 0289ade9
-- 不製造假檔位：對手列 720P/1080P/2K/4K，上游 RATIO_SIZES 只有 1k／2k 兩個鍵，720P 鍵不存在 ⇒ 只列 1K/2K/4K，不加靜默回退成 1K 的假標籤 ｜ 329c4221
-- 超分具名拒收碼：upscale_bridge_size_unsupported／upscale_tier_unsupported／upscale_factor_conflict／upscale_input_too_large／resolution_not_declared_by_model／upscale_backend_size_unavailable（不支援一律具名拒、不靜默降級）｜ 329c4221, 0289ade9, 82ee2b9a
-- 視頻超分上游無通道 ⇒ 帶 video 具名拒 upscale_video_upstream_unsupported ｜ 329c4221
-- 超分後端切換（legacy PixAI bridge ↔ gpt-image-2 重繪）＝定價決策（0.001 币一口價 → 檔位價），未經裁定不擅自切；默認 legacy ｜ 0289ade9
-- 檔位折算出的像素 size 落不進白名單即具名拒，不靜默降級成較低檔位（如 3:2 的 2k⇒3072x2048、16:9 的 1k⇒1792x1024）｜ 82ee2b9a
-- 資產團隊維度鬼狀態 fail-closed（不降格 personal）｜ 1fdcafc0
-- 配額只寫意圖上限與速率計數，不寫本地餘額、不呼叫上游額度調整、不預扣；「改回不限 ⇒ 剩餘全數回收」只回報應回收額度（reclaim），實際點數移動須另走既有轉移通路 ｜ 1fdcafc0
-- 統計 CSV 缺值留空不填 0（「沒有這個數字」≠「這筆量是 0」）；control-plane DB 未配置時照抄投影的 configured:false，不吐一排 0 ｜ c6ca3857
-- 統計 CSV 組織維度（總／團隊／子帳號／專案）缺席 ⇒ 一列都不偽造；byScope 留為延伸點 ｜ c6ca3857
-- 用量類別：角色／場景／道具保留在值域但不指派（提交端完全沒有落盤事實，節點類型與 episodeId 都不進請求）；未知／缺席 kind 一律 unclassified 不猜 ｜ 8d9e067f
-- 語音庫 Age 一律缺席（上游清單沒有 Age 欄位 ⇒ 不編造）；接受集≠描述集，刻意不收 foo:bar 這種上游會拒→降級→靜默變預設的形式 ｜ 215d2f07
-- 上游缺陷釘成事實（未修，proxy 在 VPS）：shimmer → zh-CN-XiaoyouNeural 而 Microsoft 現行清單已無該音色 ⇒ 降級路徑對 shimmer 會失敗 ｜ 215d2f07
-- 非解說劇卻綁旁白音色 ⇒ narrationVoiceConflicts 具名回報該設定不生效（不靜默忽略、也不代用戶清掉）；effectiveNarrationVoice 未綁＝null（不假裝綁了）｜ f2668377
-- 非法值逐一欄位獨立省略（同既有 meta 範式，不整包作廢）；專案欄位型別寬 string 因載荷不可信 ｜ f2668377, 8dcdcd57
-- 生成路由刻意不讀專案：按未驗證的 x-user-id 讀他人專案＝跨租戶讀取，故以「專案持久化綁定＋呼叫端帶 id」表達 ｜ 8dcdcd57
-- 沒套風格時 /api/canvas/generate 回應形狀與舊版逐位一致（style_id／style_source 只在真套了才吐）｜ 8dcdcd57
-- pixai-upscale 不進 /v1/models：image-model-ids 明文規定服務類定價條目不入 SUPPORTED_*，硬塞會製造空能力宣稱並壞 openapi x_endpoint 枚舉；由測試釘成事實（哪天進清單該測試會紅）｜ a9b33109, 329c4221
-- maxReferenceImages 只在 referenceImages === true 時給（否則就是空能力宣稱）｜ a9b33109
-- 報價類工具 tool.result 不再掛 cost_coins（報價 ≠ 已用/消耗）；失敗工具與估價不計入「已用 N 币」｜ e5d954a7, 5d4e202b
-- 自動製畫布只給出圖工具（image_quote／get_result／upload 不鋪永遠待處理的空節點）｜ c5115e19
-- 無 GENERATION_DATABASE_URL 的實例（Vercel 站點副本的 /api/pixai/*）沒有帳本可寫 ⇒ 門面退回直接經 billing adapter 扣退款並如實標 ledger=false（既有行為保留，不是帳本化）｜ 64b2bf91
-- 供給 registry 載入期驗證：protocol 不得為空且全域唯一、channel.adapterType 須等於 adapter.protocol、reconcileVia 必須是「可輪詢」的已註冊協議，違反即載入拋錯 ｜ 64b2bf91
-- Next route 模組只准匯出 handler（__setAssetsTeamGateDepsForTests 這類測試 setter 必須移出 route 檔，否則生產 build 失敗）；route 檔內不得讓 useVpsBlobBackend 被 rules-of-hooks 誤判 ｜ 0e7b3745, 159259a7
-- 尺寸別名改走 hasOwnProperty 查表（原型鍵不會再被當別名讀出函式）｜ 36fcbab5
-- Vercel 生產 env 無 GENERATION_DATABASE_URL（7 個鍵）⇒ 觸及該庫的 route 沒被代理就是登入後必 500，棘輪會逼刪過期基線條目 ｜ 1c6e0e20, 203a86ae
-- 文件與執行端漂移鎖：/v1/upscale 檔位列舉＝執行端檔位全集、size 列舉＝bridge 比例表實際有的鍵、size.default 不得假；generations size 枚舉從執行端常數派生（改歪就紅）｜ de4f5df9, b32c4818
-- 控面無 ADMIN_SESSION_SECRET／ADMIN_USERNAME 時，統計代理過去也只是 401（前置條件寫進註解）｜ 6221c69d
-- 影片抽幀到頂明確拒絕、不靜默截斷（600 幀／600 秒；訊息給提高 step 或改伺服器端抽幀的出路）；mode:"at" 清單須嚴格遞增且全 < 片長；序列幀數須 ≥2（單幀用 mode:"current"）｜ 1fdcafc0
-- 非綁定式變裝缺件無法歸屬到哪張卡，但作者宣告了變裝就不該有人以主造型出圖 ⇒ 本鏡所有角色卡一起去造型；場景／道具卡不受影響 ｜ 3d46f837
-- 模板旋轉木馬必須保留原交互機件（wheel {passive:false}／SPRING_TRACK／drive()）——禁精簡複製（2026-08-25 三輪返工教訓）｜ c859432b
+- YuE2 输入硬截断：style 600 runes、ABC 500 token，截断标记 truncate-${limit}-hard（8GB 卡 NAR prefill 显存预算）｜ b68c0fdd
+- 生成式后期闸门压在成本闸之后、任何 fetch 之前（fail-closed）；不支援的模型即拒，不静默降级成 generate ｜ 51ca0474
+- 分镜候选第 5 条明确拒绝；缺 prompt 的候选/格列整条丢弃（不用假 prompt 花钱）｜ aa81b4b0
+- 4K 超分 fail-closed：upscale_4k_upstream_unverified（上游 factor 语义未经真单校准），env UPSCALE_4K_UPSTREAM=1 于校准后开启；切 gpt-image-2 新后端亦同闸（直到真单量到长边 ≥3840px）｜ 329c4221, 0289ade9
+- 不制造假档位：对手列 720P/1080P/2K/4K，上游 RATIO_SIZES 只有 1k／2k 两个键，720P 键不存在 ⇒ 只列 1K/2K/4K，不加静默回退成 1K 的假标签 ｜ 329c4221
+- 超分具名拒收码：upscale_bridge_size_unsupported／upscale_tier_unsupported／upscale_factor_conflict／upscale_input_too_large／resolution_not_declared_by_model／upscale_backend_size_unavailable（不支援一律具名拒、不静默降级）｜ 329c4221, 0289ade9, 82ee2b9a
+- 视频超分上游无通道 ⇒ 带 video 具名拒 upscale_video_upstream_unsupported ｜ 329c4221
+- 超分后端切换（legacy PixAI bridge ↔ gpt-image-2 重绘）＝定价决策（0.001 币一口价 → 档位价），未经裁定不擅自切；默认 legacy ｜ 0289ade9
+- 档位折算出的像素 size 落不进白名单即具名拒，不静默降级成较低档位（如 3:2 的 2k⇒3072x2048、16:9 的 1k⇒1792x1024）｜ 82ee2b9a
+- 资产团队维度鬼状态 fail-closed（不降格 personal）｜ 1fdcafc0
+- 配额只写意图上限与速率计数，不写本地余额、不呼叫上游额度调整、不预扣；「改回不限 ⇒ 剩余全数回收」只回报应回收额度（reclaim），实际点数移动须另走既有转移通路 ｜ 1fdcafc0
+- 统计 CSV 缺值留空不填 0（「没有这个数字」≠「这笔量是 0」）；control-plane DB 未配置时照抄投影的 configured:false，不吐一排 0 ｜ c6ca3857
+- 统计 CSV 组织维度（总／团队／子帐号／专案）缺席 ⇒ 一列都不伪造；byScope 留为延伸点 ｜ c6ca3857
+- 用量类别：角色／场景／道具保留在值域但不指派（提交端完全没有落盘事实，节点类型与 episodeId 都不进请求）；未知／缺席 kind 一律 unclassified 不猜 ｜ 8d9e067f
+- 语音库 Age 一律缺席（上游清单没有 Age 栏位 ⇒ 不编造）；接受集≠描述集，刻意不收 foo:bar 这种上游会拒→降级→静默变预设的形式 ｜ 215d2f07
+- 上游缺陷钉成事实（未修，proxy 在 VPS）：shimmer → zh-CN-XiaoyouNeural 而 Microsoft 现行清单已无该音色 ⇒ 降级路径对 shimmer 会失败 ｜ 215d2f07
+- 非解说剧却绑旁白音色 ⇒ narrationVoiceConflicts 具名回报该设定不生效（不静默忽略、也不代用户清掉）；effectiveNarrationVoice 未绑＝null（不假装绑了）｜ f2668377
+- 非法值逐一栏位独立省略（同既有 meta 范式，不整包作废）；专案栏位型别宽 string 因载荷不可信 ｜ f2668377, 8dcdcd57
+- 生成路由刻意不读专案：按未验证的 x-user-id 读他人专案＝跨租户读取，故以「专案持久化绑定＋呼叫端带 id」表达 ｜ 8dcdcd57
+- 没套风格时 /api/canvas/generate 回应形状与旧版逐位一致（style_id／style_source 只在真套了才吐）｜ 8dcdcd57
+- pixai-upscale 不进 /v1/models：image-model-ids 明文规定服务类定价条目不入 SUPPORTED_*，硬塞会制造空能力宣称并坏 openapi x_endpoint 枚举；由测试钉成事实（哪天进清单该测试会红）｜ a9b33109, 329c4221
+- maxReferenceImages 只在 referenceImages === true 时给（否则就是空能力宣称）｜ a9b33109
+- 报价类工具 tool.result 不再挂 cost_coins（报价 ≠ 已用/消耗）；失败工具与估价不计入「已用 N 币」｜ e5d954a7, 5d4e202b
+- 自动制画布只给出图工具（image_quote／get_result／upload 不铺永远待处理的空节点）｜ c5115e19
+- 无 GENERATION_DATABASE_URL 的实例（Vercel 站点副本的 /api/pixai/*）没有帐本可写 ⇒ 门面退回直接经 billing adapter 扣退款并如实标 ledger=false（既有行为保留，不是帐本化）｜ 64b2bf91
+- 供给 registry 载入期验证：protocol 不得为空且全域唯一、channel.adapterType 须等于 adapter.protocol、reconcileVia 必须是「可轮询」的已注册协议，违反即载入抛错 ｜ 64b2bf91
+- Next route 模组只准汇出 handler（__setAssetsTeamGateDepsForTests 这类测试 setter 必须移出 route 档，否则生产 build 失败）；route 档内不得让 useVpsBlobBackend 被 rules-of-hooks 误判 ｜ 0e7b3745, 159259a7
+- 尺寸别名改走 hasOwnProperty 查表（原型键不会再被当别名读出函式）｜ 36fcbab5
+- Vercel 生产 env 无 GENERATION_DATABASE_URL（7 个键）⇒ 触及该库的 route 没被代理就是登入后必 500，棘轮会逼删过期基线条目 ｜ 1c6e0e20, 203a86ae
+- 文件与执行端漂移锁：/v1/upscale 档位列举＝执行端档位全集、size 列举＝bridge 比例表实际有的键、size.default 不得假；generations size 枚举从执行端常数派生（改歪就红）｜ de4f5df9, b32c4818
+- 控面无 ADMIN_SESSION_SECRET／ADMIN_USERNAME 时，统计代理过去也只是 401（前置条件写进注解）｜ 6221c69d
+- 影片抽帧到顶明确拒绝、不静默截断（600 帧／600 秒；讯息给提高 step 或改伺服器端抽帧的出路）；mode:"at" 清单须严格递增且全 < 片长；序列帧数须 ≥2（单帧用 mode:"current"）｜ 1fdcafc0
+- 非绑定式变装缺件无法归属到哪张卡，但作者宣告了变装就不该有人以主造型出图 ⇒ 本镜所有角色卡一起去造型；场景／道具卡不受影响 ｜ 3d46f837
+- 模板旋转木马必须保留原交互机件（wheel {passive:false}／SPRING_TRACK／drive()）——禁精简复制（2026-08-25 三轮返工教训）｜ c859432b
 
 ## 存疑
 
-- aa729665：staging 側鏡像同步（staging/music-tools/music_tools.ts）——訊息僅稱「e75a2e8e 的 staging 側」，無新能力；是否有 staging 獨有差異需逐行 diff staging 與 src 才能斷定 ｜ 缺：staging 執行環境與 diff 證據
-- 1fdcafc0：「站內 /api/uploads 尚未部署」為 commit 自陳；兩段式上傳目前只在 VPS 側（presign 端點）端到端驗證 ｜ 缺：站內部署與站內端到端證據
-- 1fdcafc0：P1-1（白模當生成參考）與其 11 條測試因與在飛的 canvas/types.ts 同檔而暫不提交；下一顆 aa81b4b0 是否即為其落地需比對（兩顆都寫 P1-1，內容一致）｜ 缺：commit 父鏈外的在飛檔狀態
-- aa81b4b0：抽卡面板／集側欄／批次按鈕等 React 接線未做；episodeId 的寫入端（誰在分鏡產生時蓋集指針）未做（commit 自陳）⇒ 「按集換模型」目前缺前端入口 ｜ 缺：前端接線證據
-- 51ca0474：三條已知未收口（①字串式宣告缺件時任務 referenceImages 仍含主造型參考、閘只在 needsAsset；②綁定式缺件時 prompt 仍沿用卡本體片段；③清單清洗只按 id 去重、新增路徑才按名字覆蓋 ⇒ 解析取決於清單序），測試以「現況記錄」釘住待裁決 ｜ 缺：裁定與收緊後測試
-- 51ca0474：生成式後期的真單未驗（上游生成請求需暴君逐次報備，本輪零付費呼叫）⇒ 「Seedance-2.5 族可續片/改片」僅契約與行為測試層已證 ｜ 缺：付費真單證據
-- 329c4221 / 0289ade9：PixAI 是否接受 upscale=4、輸出是否等於「基底 × factor」未經真單校準；gpt-image-2 的 4K 輸出色校準亦未完成（控面唯讀取證只到能力閘 present）｜ 缺：真單色校準證據
-- ed47cb58：gway「控面 DB＋env 已上線」無法從 repo 驗證（本 repo 只有 config 與 seed）｜ 缺：控面 supplier 表證據
-- 64b2bf91：三平面違規項（V-01～V-09）進度表在 docs/architecture/planes-violations.md，未逐條核是否全清（V-05 渠道選擇由 new-api Distribute 承擔，本檔自陳「另案」）｜ 缺：違規表逐條核對
-- c859432b：訊息未說明「海報浮水印卡片」的水印是否可關／是否影響產線；未查到相關測試語義 ｜ 缺：水印行為的驗收口徑
-## 逐條對帳
+- aa729665：staging 侧镜像同步（staging/music-tools/music_tools.ts）——讯息仅称「e75a2e8e 的 staging 侧」，无新能力；是否有 staging 独有差异需逐行 diff staging 与 src 才能断定 ｜ 缺：staging 执行环境与 diff 证据
+- 1fdcafc0：「站内 /api/uploads 尚未部署」为 commit 自陈；两段式上传目前只在 VPS 侧（presign 端点）端到端验证 ｜ 缺：站内部署与站内端到端证据
+- 1fdcafc0：P1-1（白模当生成参考）与其 11 条测试因与在飞的 canvas/types.ts 同档而暂不提交；下一颗 aa81b4b0 是否即为其落地需比对（两颗都写 P1-1，内容一致）｜ 缺：commit 父链外的在飞档状态
+- aa81b4b0：抽卡面板／集侧栏／批次按钮等 React 接线未做；episodeId 的写入端（谁在分镜产生时盖集指针）未做（commit 自陈）⇒ 「按集换模型」目前缺前端入口 ｜ 缺：前端接线证据
+- 51ca0474：三条已知未收口（①字串式宣告缺件时任务 referenceImages 仍含主造型参考、闸只在 needsAsset；②绑定式缺件时 prompt 仍沿用卡本体片段；③清单清洗只按 id 去重、新增路径才按名字覆盖 ⇒ 解析取决于清单序），测试以「现况记录」钉住待裁决 ｜ 缺：裁定与收紧后测试
+- 51ca0474：生成式后期的真单未验（上游生成请求需暴君逐次报备，本轮零付费呼叫）⇒ 「Seedance-2.5 族可续片/改片」仅契约与行为测试层已证 ｜ 缺：付费真单证据
+- 329c4221 / 0289ade9：PixAI 是否接受 upscale=4、输出是否等于「基底 × factor」未经真单校准；gpt-image-2 的 4K 输出色校准亦未完成（控面唯读取证只到能力闸 present）｜ 缺：真单色校准证据
+- ed47cb58：gway「控面 DB＋env 已上线」无法从 repo 验证（本 repo 只有 config 与 seed）｜ 缺：控面 supplier 表证据
+- 64b2bf91：三平面违规项（V-01～V-09）进度表在 docs/architecture/planes-violations.md，未逐条核是否全清（V-05 渠道选择由 new-api Distribute 承担，本档自陈「另案」）｜ 缺：违规表逐条核对
+- c859432b：讯息未说明「海报浮水印卡片」的水印是否可关／是否影响产线；未查到相关测试语义 ｜ 缺：水印行为的验收口径
+## 逐条对帐
 
-| hash | 該 commit 貢獻的能力（或「純修復／純重構／無新能力」） |
+| hash | 该 commit 贡献的能力（或「纯修复／纯重构／无新能力」） |
 |---|---|
-| e75a2e8e | 音樂三路全鏈回落（YuE2→FlowMusic→Lyria）＋欠費無替補即時失敗並退款 |
-| b68c0fdd | 邊界語義：YuE2 style 上限 600 runes／ABC 500 token，截斷標記 truncate-${limit}-hard |
-| aa729665 | 無新能力（staging 鏡像同步 e75a2e8e 的 music_tools） |
-| ed47cb58 | 極途 Gway 備用視頻渠道（priority 2），控面 DB＋env 上線、seed 不當未知渠道 |
-| c7788ee8 | 網關 opencode SSE 30s 看門狗；npm healthz/smoke 改 curl；控面建置 context 白名單＋build 快取；compose 模板同步 |
-| a7d81d8d | 無新能力（runbook 文檔：session SQLite 持久化、SSE 懸掛根因與看門狗） |
-| 203a86ae | 控面代理清單單一真源＋DB 綁定 route 漂移棘輪（KNOWN_VERCEL_LOCAL 基線） |
-| 9e5664be | 非程式碼：控面一鍵部署腳本（plan 雙向 diff 閘／deploy 版本化＋postcheck 回滾／rollback） |
-| 73f37beb | 純修復：部署腳本 uname -n、build 快取 --keep-storage 2gb（防磁碟 98%） |
-| 1c6e0e20 | 補四條漏網代理 DB route（billing-operations 裸路徑、biz-keys/provision、probe/stuck、probe/jobs/*）；邊界：未代理＝登入後必 500 |
-| a823d5f1 | nginx -t＋reload 禁 restart＋postcheck 對外 healthz；邊界：容器內 healthz 200 ≠ 對外可用 |
-| 64b2bf91 | 供給 adapter registry；成本閘按供給核價；同步直通路由計費入帳本（sync-charge）；同步 job 狀態機；取消＋條件退款門面；canvas 生成走 durable；Web 負面詞/參考圖角色不再丟失；模型別名讀資料；migration 032 |
-| 3a483ee6 | 六個用戶面入口：OpenAI 兼容 base 曝光、Blender 插件下載、公告橫幅/彈窗、節點恢復上一版、一稿多版位、視頻運鏡預設 23 條 |
-| 74fb5728 | 站內可達 Remote MCP 安裝頁 /mcp（此前零連結） |
-| 905bcccf | 斜線技能選單底部「瀏覽全部技能」→ /skills |
-| 1fdcafc0 | 資產團隊維度＋三級 RBAC＋團隊/成員配額＋/v1/team/quota/limits＋migration 033；劇本入口曝光（novel_film）；兩段式上傳（/api/uploads{,/sign,/commit}，VPS presign）；影片截幀容量放開＋at 模式；W7 影片取證工具登記＋知識還工具；AGENTS.md 禁內聯 |
-| aa81b4b0 | 3D 白模當生成參考＋回分鏡溯源兩鍵；分鏡候選集/星標/prompt 回溯/增刪複製重排；按集批次換模型與批次重跑（episodeId） |
-| d9169959 | 助理出的圖可分享（agent-<taskId> 冪等補寫歷史再開分享框；/api/share 快取過期重讀） |
-| 159259a7 | 純修復：two-phase-upload 的 useVpsBlobBackend 補 rules-of-hooks 豁免（1fdcafc0 起 build 失敗） |
-| 0e7b3745 | 純重構／修復：/api/assets 團隊閘移出 route 模組（Next 不准 route 匯出測試 setter） |
-| ef4e8b19 | 純修復：內聯 style 註解含字面 <style> 致首頁每次 hydration 失敗重建 |
-| 14a99737 | 文檔中心「找現成做法」三入口（場景指南／創作產線／技能目錄） |
-| 51ca0474 | 生成式後期（續片 extend_video／改片 edit_video，僅 Seedance-2.5 族）；任務版本／Tags／選中；變裝子資產＋缺件具名回報 |
-| fc314d43 | 工作站態解除導覽列 1440 上限（>1440 不再夾成窄殼） |
-| bd5405f5 | 「已思考 N 秒」在 tool.invoke 當下結算（不再等整輪 settleItems） |
-| 5d4e202b | 「已用 N 币」不再把報價估價與失敗工具算成花費（前端側） |
-| e5d954a7 | 報價類工具 tool.result 不掛 cost_coins（網關側，已同步 VPS） |
-| c5115e19 | 自動製畫布只給出圖工具，image_quote/get_result/upload 不鋪空節點（已同步 VPS） |
-| ee89d6c3 | 工作站跨螢幕等比（1274×664 基準、min(寬比,高比) 放大根字級、多項改 rem、3D 透視等比） |
-| 620b6267 | body 與助理面板字級／圖標／輸入框 px→rem 跟根字級縮放（基準機零變化） |
-| 3d46f837 | 變裝缺件 fail-closed 落到資料面（參考圖與 prompt 雙清、drama-recipe 全角色卡去造型、去重鍵與 add 對齊） |
-| 329c4221 | 一鍵超分檔位契約＋4K 檔位（(size,factor) 對）；具名拒收碼；servableUpscaleTiers 只外露可服務檔位；C/B 端路由統一；4K fail-closed；視頻超分具名拒 |
-| 79e1f5a3 | 無新能力（W5 純文件：雙真相邊界；新事實＝world2 有 VPS 活本與 repo 鏡像兩份） |
-| 8dcdcd57 | 專案級風格一等 id（id 進全文出、未知 400 style_id_unknown、不讀專案避免跨租戶讀取、匯出匯入帶走） |
-| a9b33109 | /v1/models 升級成能力契約（maxBatchCount／maxReferenceImages＋openapi 補 5 欄）；request-limits 數量上限單一真源；邊界：pixai-upscale 不進清單 |
-| c6ca3857 | GET /api/admin/statistics?format=csv 統計/用量 CSV 導出（BOM＋CRLF＋RFC4180、缺值留空、不偽造組織維度） |
-| c859432b | 模板卡片旋轉木馬重構（沿用 wheel/spring/drive，提交鍵跑選定步驟、海報浮水印卡片） |
-| 215d2f07 | GET /v1/tts/voices 結構化語音庫＋POST /v1/tts/generations 未知音色 400 voice_unknown；Age 誠實缺席；接受集≠描述集 |
-| 8d9e067f | 用量按生成物類別切分（shot_video／still_image／unclassified）＋CSV asset_kind section；角色/場景/道具保留不指派 |
-| f2668377 | 專案級劇本型別（接 AID enum）＋旁白音色（走語音庫同一把尺）；非解說劇綁音色具名回報 |
-| de4f5df9 | /v1/upscale 對外文件對齊檔位契約（upscale_tier enum、factor 語義、size 去假 default、三閘碼）＋漂移鎖測試 |
-| 6221c69d | 後台統計 /api/admin/statistics 代理到控面（生產看板取真數字）；前置條件 ADMIN_SESSION_SECRET/USERNAME |
-| 0289ade9 | 4K 提交端打開＋嚴格解析（resolution_not_declared_by_model）；計費改吃檔位；/v1/upscale 後端二 gpt-image-2 生成式重繪；默認仍 legacy（定價決策不擅自切） |
-| 94c48e3e | 純重構：超分後端規劃搬到 lib（route 檔只准匯出 handler）；邊界：next build 型別閘 |
-| 82ee2b9a | 檔位靠像素 size 承載（推翻 resolution 假設）；durable-image-sizes 尺寸白名單單一真源；折算落不進白名單具名拒 upscale_backend_size_unavailable |
-| b32c4818 | generations size 枚舉從執行端常數派生並補 4096x4096、揭露 resolution 檔位鍵；漂移鎖擴到生成端 schema |
-| 36fcbab5 | 純修復：尺寸別名改走 hasOwnProperty 查表（原型鍵不再被當別名讀出函式） |
+| e75a2e8e | 音乐三路全链回落（YuE2→FlowMusic→Lyria）＋欠费无替补即时失败并退款 |
+| b68c0fdd | 边界语义：YuE2 style 上限 600 runes／ABC 500 token，截断标记 truncate-${limit}-hard |
+| aa729665 | 无新能力（staging 镜像同步 e75a2e8e 的 music_tools） |
+| ed47cb58 | 极途 Gway 备用视频渠道（priority 2），控面 DB＋env 上线、seed 不当未知渠道 |
+| c7788ee8 | 网关 opencode SSE 30s 看门狗；npm healthz/smoke 改 curl；控面建置 context 白名单＋build 快取；compose 模板同步 |
+| a7d81d8d | 无新能力（runbook 文档：session SQLite 持久化、SSE 悬挂根因与看门狗） |
+| 203a86ae | 控面代理清单单一真源＋DB 绑定 route 漂移棘轮（KNOWN_VERCEL_LOCAL 基线） |
+| 9e5664be | 非程式码：控面一键部署脚本（plan 双向 diff 闸／deploy 版本化＋postcheck 回滚／rollback） |
+| 73f37beb | 纯修复：部署脚本 uname -n、build 快取 --keep-storage 2gb（防磁碟 98%） |
+| 1c6e0e20 | 补四条漏网代理 DB route（billing-operations 裸路径、biz-keys/provision、probe/stuck、probe/jobs/*）；边界：未代理＝登入后必 500 |
+| a823d5f1 | nginx -t＋reload 禁 restart＋postcheck 对外 healthz；边界：容器内 healthz 200 ≠ 对外可用 |
+| 64b2bf91 | 供给 adapter registry；成本闸按供给核价；同步直通路由计费入帐本（sync-charge）；同步 job 状态机；取消＋条件退款门面；canvas 生成走 durable；Web 负面词/参考图角色不再丢失；模型别名读资料；migration 032 |
+| 3a483ee6 | 六个用户面入口：OpenAI 兼容 base 曝光、Blender 插件下载、公告横幅/弹窗、节点恢复上一版、一稿多版位、视频运镜预设 23 条 |
+| 74fb5728 | 站内可达 Remote MCP 安装页 /mcp（此前零连结） |
+| 905bcccf | 斜线技能选单底部「浏览全部技能」→ /skills |
+| 1fdcafc0 | 资产团队维度＋三级 RBAC＋团队/成员配额＋/v1/team/quota/limits＋migration 033；剧本入口曝光（novel_film）；两段式上传（/api/uploads{,/sign,/commit}，VPS presign）；影片截帧容量放开＋at 模式；W7 影片取证工具登记＋知识还工具；AGENTS.md 禁内联 |
+| aa81b4b0 | 3D 白模当生成参考＋回分镜溯源两键；分镜候选集/星标/prompt 回溯/增删复制重排；按集批次换模型与批次重跑（episodeId） |
+| d9169959 | 助理出的图可分享（agent-<taskId> 幂等补写历史再开分享框；/api/share 快取过期重读） |
+| 159259a7 | 纯修复：two-phase-upload 的 useVpsBlobBackend 补 rules-of-hooks 豁免（1fdcafc0 起 build 失败） |
+| 0e7b3745 | 纯重构／修复：/api/assets 团队闸移出 route 模组（Next 不准 route 汇出测试 setter） |
+| ef4e8b19 | 纯修复：内联 style 注解含字面 <style> 致首页每次 hydration 失败重建 |
+| 14a99737 | 文档中心「找现成做法」三入口（场景指南／创作产线／技能目录） |
+| 51ca0474 | 生成式后期（续片 extend_video／改片 edit_video，仅 Seedance-2.5 族）；任务版本／Tags／选中；变装子资产＋缺件具名回报 |
+| fc314d43 | 工作站态解除导览列 1440 上限（>1440 不再夹成窄壳） |
+| bd5405f5 | 「已思考 N 秒」在 tool.invoke 当下结算（不再等整轮 settleItems） |
+| 5d4e202b | 「已用 N 币」不再把报价估价与失败工具算成花费（前端侧） |
+| e5d954a7 | 报价类工具 tool.result 不挂 cost_coins（网关侧，已同步 VPS） |
+| c5115e19 | 自动制画布只给出图工具，image_quote/get_result/upload 不铺空节点（已同步 VPS） |
+| ee89d6c3 | 工作站跨萤幕等比（1274×664 基准、min(宽比,高比) 放大根字级、多项改 rem、3D 透视等比） |
+| 620b6267 | body 与助理面板字级／图标／输入框 px→rem 跟根字级缩放（基准机零变化） |
+| 3d46f837 | 变装缺件 fail-closed 落到资料面（参考图与 prompt 双清、drama-recipe 全角色卡去造型、去重键与 add 对齐） |
+| 329c4221 | 一键超分档位契约＋4K 档位（(size,factor) 对）；具名拒收码；servableUpscaleTiers 只外露可服务档位；C/B 端路由统一；4K fail-closed；视频超分具名拒 |
+| 79e1f5a3 | 无新能力（W5 纯文件：双真相边界；新事实＝world2 有 VPS 活本与 repo 镜像两份） |
+| 8dcdcd57 | 专案级风格一等 id（id 进全文出、未知 400 style_id_unknown、不读专案避免跨租户读取、汇出汇入带走） |
+| a9b33109 | /v1/models 升级成能力契约（maxBatchCount／maxReferenceImages＋openapi 补 5 栏）；request-limits 数量上限单一真源；边界：pixai-upscale 不进清单 |
+| c6ca3857 | GET /api/admin/statistics?format=csv 统计/用量 CSV 导出（BOM＋CRLF＋RFC4180、缺值留空、不伪造组织维度） |
+| c859432b | 模板卡片旋转木马重构（沿用 wheel/spring/drive，提交键跑选定步骤、海报浮水印卡片） |
+| 215d2f07 | GET /v1/tts/voices 结构化语音库＋POST /v1/tts/generations 未知音色 400 voice_unknown；Age 诚实缺席；接受集≠描述集 |
+| 8d9e067f | 用量按生成物类别切分（shot_video／still_image／unclassified）＋CSV asset_kind section；角色/场景/道具保留不指派 |
+| f2668377 | 专案级剧本型别（接 AID enum）＋旁白音色（走语音库同一把尺）；非解说剧绑音色具名回报 |
+| de4f5df9 | /v1/upscale 对外文件对齐档位契约（upscale_tier enum、factor 语义、size 去假 default、三闸码）＋漂移锁测试 |
+| 6221c69d | 后台统计 /api/admin/statistics 代理到控面（生产看板取真数字）；前置条件 ADMIN_SESSION_SECRET/USERNAME |
+| 0289ade9 | 4K 提交端打开＋严格解析（resolution_not_declared_by_model）；计费改吃档位；/v1/upscale 后端二 gpt-image-2 生成式重绘；默认仍 legacy（定价决策不擅自切） |
+| 94c48e3e | 纯重构：超分后端规划搬到 lib（route 档只准汇出 handler）；边界：next build 型别闸 |
+| 82ee2b9a | 档位靠像素 size 承载（推翻 resolution 假设）；durable-image-sizes 尺寸白名单单一真源；折算落不进白名单具名拒 upscale_backend_size_unavailable |
+| b32c4818 | generations size 枚举从执行端常数派生并补 4096x4096、揭露 resolution 档位键；漂移锁扩到生成端 schema |
+| 36fcbab5 | 纯修复：尺寸别名改走 hasOwnProperty 查表（原型键不再被当别名读出函式） |

@@ -1,15 +1,15 @@
 /**
- * GET /api/skills — 站內只讀**公開**技能列舉/搜尋（builtin + recipe + template）。
+ * GET /api/skills — 站内只读**公开**技能列举/搜寻（builtin + recipe + template）。
  *
- * **公開面隔離（2026-09-27 立）**：本端點**永不**含任何使用者的私有自建 skill——
- * 即使呼叫者登入也一樣（公開列舉與身份無關，不讀 user 來源插槽）。`source=user`
- * 因此不是合法篩選值（回 400，不靜默回空集合假裝「沒有」）。「我的技能」走
- * `GET /api/skills/mine`（需登入），前端要「公開＋我的」就打兩支端點。
+ * **公开面隔离（2026-09-27 立）**：本端点**永不**含任何使用者的私有自建 skill——
+ * 即使呼叫者登入也一样（公开列举与身份无关，不读 user 来源插槽）。`source=user`
+ * 因此不是合法筛选值（回 400，不静默回空集合假装「没有」）。「我的技能」走
+ * `GET /api/skills/mine`（需登入），前端要「公开＋我的」就打两支端点。
  *
- * query：`family=<家族id>`、`q=<關鍵詞>`、`source=builtin|recipe|template`、`limit=<n>`。
- * 回應：`{ skills, total, families }`；`total` = 過濾後總數（未受 limit 截斷），
- * `families` = 全家族列舉（id + 簡體標籤 + 公開庫條目數，含 0 條的家族）。
- * 只讀：不寫入、不計費、不動任何帳本。
+ * query：`family=<家族id>`、`q=<关键词>`、`source=builtin|recipe|template`、`limit=<n>`。
+ * 回应：`{ skills, total, families }`；`total` = 过滤后总数（未受 limit 截断），
+ * `families` = 全家族列举（id + 简体标签 + 公开库条目数，含 0 条的家族）。
+ * 只读：不写入、不计费、不动任何帐本。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -24,11 +24,11 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const noStore = { "Cache-Control": "no-store" } as const;
 
-/** 單次回應上限（公開庫全量 151 條，500 足夠且能擋掃庫）。 */
+/** 单次回应上限（公开库全量 151 条，500 足够且能挡扫库）。 */
 const MAX_LIMIT = 500;
 
 function fail(status: number, message: string, code: string) {

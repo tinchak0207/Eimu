@@ -1,13 +1,13 @@
 /**
- * 产线落地页（/workflows/<slug>）文案型別（2026-09-27 SEO 重構）。
+ * 产线落地页（/workflows/<slug>）文案型别（2026-09-27 SEO 重构）。
  *
- * 分工：卡面名稱、環節名（pipeline.steps）、展示媒體一律從
- * src/lib/agent-templates/<slug>.ts 讀取，本目錄只寫落地頁專屬文案，
- * 避免雙份真源。steps 陣列按索引與 pipeline.steps 對齊，index.ts 會在
- * 模組載入時校驗步數，漂移即拋錯（build 期就擋住）。
+ * 分工：卡面名称、环节名（pipeline.steps）、展示媒体一律从
+ * src/lib/agent-templates/<slug>.ts 读取，本目录只写落地页专属文案，
+ * 避免双份真源。steps 阵列按索引与 pipeline.steps 对齐，index.ts 会在
+ * 模组载入时校验步数，漂移即抛错（build 期就挡住）。
  *
- * 文案事實來源：src/lib/agent-templates-payload/<slug>.ts（每步
- * deliverable / gate / promptNotes）。不得寫 payload 與共用簡報以外的數字。
+ * 文案事实来源：src/lib/agent-templates-payload/<slug>.ts（每步
+ * deliverable / gate / promptNotes）。不得写 payload 与共用简报以外的数字。
  */
 
 /** 单个环节的落地页说明（与 pipeline.steps 同索引）。 */

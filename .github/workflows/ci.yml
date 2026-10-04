@@ -1,8 +1,8 @@
 name: CI
 
-# 為什麼 CI 只做 typecheck + test：這兩個是本 repo 唯一有真實斷言、且不依賴生產憑證的閘。
-# 刻意「不做」的事：不部署（Vercel 部署需 scope/auth，屬人工授權動作）、不跑 build
-# （remote build 才是穩路，本地 build 會因自裝 node_modules 缺 sharp 而炸）。
+# 为什么 CI 只做 typecheck + test：这两个是本 repo 唯一有真实断言、且不依赖生产凭证的闸。
+# 刻意「不做」的事：不部署（Vercel 部署需 scope/auth，属人工授权动作）、不跑 build
+# （remote build 才是稳路，本地 build 会因自装 node_modules 缺 sharp 而炸）。
 
 on:
   push:
@@ -22,11 +22,11 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      # package-lock.json 是本 repo 的安裝契約（vercel.json installCommand = npm install，
-      # 且 package-lock.json 為現行 lockfile；pnpm-lock.yaml 是 8 月的殘留，勿用 pnpm）。
+      # package-lock.json 是本 repo 的安装契约（vercel.json installCommand = npm install，
+      # 且 package-lock.json 为现行 lockfile；pnpm-lock.yaml 是 8 月的残留，勿用 pnpm）。
       - run: npm ci
-      # 注意：next-env.d.ts 被 .gitignore 排除（.gitignore:61），乾淨 checkout 不存在，
-      # 已在本機以「HEAD clean worktree（無 next-env.d.ts、無 .next）」實測 tsc 仍 0 error。
+      # 注意：next-env.d.ts 被 .gitignore 排除（.gitignore:61），干净 checkout 不存在，
+      # 已在本机以「HEAD clean worktree（无 next-env.d.ts、无 .next）」实测 tsc 仍 0 error。
       - run: npx tsc --noEmit
 
   test:
@@ -43,27 +43,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ── 明確排除清單 ───────────────────────────────────────────────
-          # 只有兩類原因，且都已在本機實測確認與「被測代碼」零因果：
+          # ── 明确排除清单 ───────────────────────────────────────────────
+          # 只有两类原因，且都已在本机实测确认与「被测代码」零因果：
           #
-          # A. 需要外部服務（CI 不可達）
+          # A. 需要外部服务（CI 不可达）
           #    src/lib/blender-e2e.test.ts
-          #      需真 3D bridge http://127.0.0.1:8765/v1/execute；不可達時 health 重試
-          #      上限 10 分鐘／每案等 600s，整批看起來像「測試掛了」，實際是等不到外部服務。
+          #      需真 3D bridge http://127.0.0.1:8765/v1/execute；不可达时 health 重试
+          #      上限 10 分钟／每案等 600s，整批看起来像「测试挂了」，实际是等不到外部服务。
           #
-          # B. 讀 `deploy-staging/expert-gateway/` 下的本地夾具，而該目錄被 .gitignore:150
+          # B. 读 `deploy-staging/expert-gateway/` 下的本地夹具，而该目录被 .gitignore:150
           #    `/deploy-staging/*` 排除（例外只有 gateway/、laya-server/、vps-tools/）。
-          #    乾淨 checkout 不存在這些檔 → readFileSync ENOENT 或逐字/行號對賬失敗。
-          #    本地綠只是因為夾具存在於本機工作區。真正修法是把它們入庫（需授權），
-          #    不是刪斷言、也不是 `|| true`。
+          #    干净 checkout 不存在这些档 → readFileSync ENOENT 或逐字/行号对账失败。
+          #    本地绿只是因为夹具存在于本机工作区。真正修法是把它们入库（需授权），
+          #    不是删断言、也不是 `|| true`。
           #    - src/lib/orchestrator-beast-frame.test.ts  → orchestrator-dispatch-playbook.md
-          #      （另有 2 條本地既有紅燈：片E/片F 的行號錨點 L152 已不存在於該檔）
+          #      （另有 2 条本地既有红灯：片E/片F 的行号锚点 L152 已不存在于该档）
           #    - src/lib/blender-expert-frame.test.ts     → expert-constitution.md（DIRECTOR_EXPERT_CONSTITUTION_PATH）
           #    - src/lib/blender-honesty-gate.test.ts     → expert-constitution.md
           #    - src/lib/critic-expert-frame.test.ts      → expert-delivery-contracts.json
           #    - src/lib/music-expert-frame.test.ts       → expert-constitution.md（EXPERT_CONSTITUTION_PATH）
           #
-          # 本機基線（乾淨 HEAD worktree、排除上列 6 檔）：tests 2774 / pass 2769 / fail 0 / skipped 5
+          # 本机基线（干净 HEAD worktree、排除上列 6 档）：tests 2774 / pass 2769 / fail 0 / skipped 5
           EXCLUDE_FILES=(
             "src/lib/blender-e2e.test.ts"
             "src/lib/orchestrator-beast-frame.test.ts"
@@ -73,8 +73,8 @@ jobs:
             "src/lib/music-expert-frame.test.ts"
           )
 
-          # 排除清單腐化守門：清單裡的檔必須存在。若某檔被刪/改名而清單沒更新，
-          # 這裡直接變紅，防止「排除範圍」靜默漂移成空操作或超範圍。
+          # 排除清单腐化守门：清单里的档必须存在。若某档被删/改名而清单没更新，
+          # 这里直接变红，防止「排除范围」静默漂移成空操作或超范围。
           for f in "${EXCLUDE_FILES[@]}"; do
             if [ ! -f "$f" ]; then
               echo "::error::excluded test file not found: $f — exclusion list is stale, fix .github/workflows/ci.yml"
@@ -93,6 +93,6 @@ jobs:
           echo "test files: total=${#ALL[@]} running=${#RUN[@]} excluded=$((${#ALL[@]}-${#RUN[@]}))"
           echo "excluded: ${EXCLUDE_FILES[*]}"
 
-          # 測試指令以 package.json 的 test script 為準（tsx --test）；
-          # 不吞 exit code：任何非預期失敗都會讓 job 變紅。
+          # 测试指令以 package.json 的 test script 为准（tsx --test）；
+          # 不吞 exit code：任何非预期失败都会让 job 变红。
           npx --yes tsx --test "${RUN[@]}"

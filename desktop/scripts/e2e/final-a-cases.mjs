@@ -1,13 +1,13 @@
 // desktop/scripts/e2e/final-a-cases.mjs
 //
-// 最終驗收代理 A（附件／影片上傳路徑）——對已部署生產 https://eimu.dev，
-// 用真桌面殼 + 真實已登入 profile 逐條驗設計意圖，每條截圖。
+// 最终验收代理 A（附件／影片上传路径）——对已部署生产 https://eimu.dev，
+// 用真桌面壳 + 真实已登入 profile 逐条验设计意图，每条截图。
 //
 // 用法：
 //   node desktop/scripts/e2e/final-a-cases.mjs --out /tmp/final-a-XXX --assets /tmp/bug1-e2e/assets [--only F1,F2]
 //
-// 紅線：不部署/不 SSH/不連 DB/不呼叫付費上游；送給 agent 的訊息一律只要求分析、禁止生成。
-// 本檔只新增，不改既有 harness 檔。
+// 红线：不部署/不 SSH/不连 DB/不呼叫付费上游；送给 agent 的讯息一律只要求分析、禁止生成。
+// 本档只新增，不改既有 harness 档。
 
 import fs from "node:fs";
 import os from "node:os";
@@ -56,7 +56,7 @@ const GEN_HINT = /generate|batch|upscale|generation-jobs|storyboard-voiceover|ru
 let MESSAGES_SENT = 0;
 let GENERATION_SEEN = [];
 
-// ─────────────────────── 網路錄製（同 session-cases 契約）
+// ─────────────────────── 网路录制（同 session-cases 契约）
 function attachRecorder(shell) {
   const list = [];
   const byReq = new Map();
@@ -65,7 +65,7 @@ function attachRecorder(shell) {
     const cdp = shell._recCdp || (shell._recCdp = null);
     void cdp;
   } catch { /* ignore */ }
-  // CDP session（async 建立，透過 promise 暴露）
+  // CDP session（async 建立，透过 promise 暴露）
   const cdpReady = (async () => {
     const cdp = await shell.context.newCDPSession(shell.page);
     await cdp.send("Network.enable");
@@ -80,7 +80,7 @@ function attachRecorder(shell) {
       try {
         const r = await cdp.send("Network.getRequestPostData", { requestId: p.requestId });
         if (r && r.postData) postByUrl.set(info.url, r.postData);
-      } catch { /* body 可能已釋放 */ }
+      } catch { /* body 可能已释放 */ }
     });
     return cdp;
   })().catch(() => null);
@@ -159,7 +159,7 @@ const netLine = (e) => ({
   parts: e.parts || e.cdpParts || null, responseJson: e.responseJson ?? null, responseText: e.responseText ?? null,
 });
 
-// ─────────────────────── 頁面探針
+// ─────────────────────── 页面探针
 async function probeComposer(shell) {
   return await shell.evaluate(() => {
     const inputs = [...document.querySelectorAll("#agent-composer-input")];
@@ -256,7 +256,7 @@ async function pickFileInputNodeId(shell) {
   }
   const { root } = await shell._e2eCdp.send("DOM.getDocument", { depth: -1 });
   const { nodeId } = await shell._e2eCdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: `input[${TARGET_ATTR}="1"]` });
-  if (!nodeId) throw new Error("file input nodeId 為空");
+  if (!nodeId) throw new Error("file input nodeId 为空");
   return nodeId;
 }
 
@@ -269,7 +269,7 @@ async function attachFiles(shell, files) {
 
 function fileToBase64(p) { return fs.readFileSync(p).toString("base64"); }
 
-/** 真拖放：在 .agent-composer 上派發 dragenter→dragover→drop（DataTransfer 帶 File）。 */
+/** 真拖放：在 .agent-composer 上派发 dragenter→dragover→drop（DataTransfer 带 File）。 */
 async function dropFile(shell, filePath, mime = "video/mp4") {
   const b64 = fileToBase64(filePath);
   const name = path.basename(filePath);
@@ -279,7 +279,7 @@ async function dropFile(shell, filePath, mime = "video/mp4") {
     const dt = new DataTransfer();
     dt.items.add(file);
     const target = document.querySelector(".agent-composer");
-    if (!target) throw new Error("找不到 .agent-composer 拖放目標");
+    if (!target) throw new Error("找不到 .agent-composer 拖放目标");
     const mk = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
     target.dispatchEvent(mk("dragenter"));
     target.dispatchEvent(mk("dragover"));
@@ -289,7 +289,7 @@ async function dropFile(shell, filePath, mime = "video/mp4") {
   }, { b64, name, mime });
 }
 
-/** 真貼上：在可見 textarea 派發 paste（clipboardData 帶 File）。 */
+/** 真贴上：在可见 textarea 派发 paste（clipboardData 带 File）。 */
 async function pasteFile(shell, filePath, mime = "video/mp4") {
   const b64 = fileToBase64(filePath);
   const name = path.basename(filePath);
@@ -300,14 +300,14 @@ async function pasteFile(shell, filePath, mime = "video/mp4") {
     dt.items.add(file);
     const inputs = [...document.querySelectorAll("#agent-composer-input")];
     const ta = inputs.find((i) => i.offsetParent !== null) || inputs[0];
-    if (!ta) throw new Error("找不到可見 composer textarea");
+    if (!ta) throw new Error("找不到可见 composer textarea");
     const ev = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt });
     ta.dispatchEvent(ev);
     return { targetFound: true, defaultPrevented: ev.defaultPrevented, filesInClipboard: dt.files.length };
   }, { b64, name, mime });
 }
 
-// ─────────────────────── 訊息（只分析、禁生成）
+// ─────────────────────── 讯息（只分析、禁生成）
 async function setText(shell, text) {
   await shell.evaluate((t) => {
     const inputs = [...document.querySelectorAll("#agent-composer-input")];
@@ -361,7 +361,7 @@ async function sendAndWait(shell, text, timeout = 150000) {
 // ─────────────────────── 主流程
 let shell, rec;
 
-/** 統一的附件觀測計算。 */
+/** 统一的附件观测计算。 */
 function analyze(rec, t0, origNames = []) {
   const since = rec.since(t0);
   const att = since.filter((e) => e.method === "POST" && /\/attachments$/.test(e.url || ""));
@@ -377,7 +377,7 @@ function analyze(rec, t0, origNames = []) {
   const derivedSeen = derivedNames.some((n) => derivedPattern.test(n));
   const vidParts = vid.flatMap((e) => e.parts || e.cdpParts || []);
   const origInVideoUpload = origNames.filter((n) => vidParts.some((p) => p === n));
-  // 伺服器回應是權威來源（multipart 的 CDP postData 對跨域請求可能拿不到）。
+  // 伺服器回应是权威来源（multipart 的 CDP postData 对跨域请求可能拿不到）。
   const vidRespNames = vid.map((e) => e.responseJson && e.responseJson.name).filter(Boolean);
   const vidRespSizes = vid.map((e) => e.responseJson && e.responseJson.size).filter((s) => typeof s === "number");
   const originalUploadedViaVideoUpload = [...new Set([
@@ -401,7 +401,7 @@ async function main() {
   if (!fs.existsSync(A.goodA) || !fs.existsSync(A.bad)) {
     console.error(`缺少素材：${A.goodA} / ${A.bad}`); process.exit(2);
   }
-  log(`最終驗收 A（附件／影片上傳路徑）`);
+  log(`最终验收 A（附件／影片上传路径）`);
   log(`out=${outDir}`);
   log(`good-a=${sizeOf(A.goodA)}B bad=${sizeOf(A.bad)}B`);
 
@@ -414,7 +414,7 @@ async function main() {
     fs.writeFileSync(path.join(outDir, "F0-dom.json"), JSON.stringify(dom, null, 2));
     log(`F0 dom: composers=${dom.composers.length} mp4Inputs=${dom.fileInputs.filter((f) => f.mp4).length} dropTargets=${dom.dropTargets}`);
 
-    // ───────── F1：好影片 → 只上傳衍生檔 ─────────
+    // ───────── F1：好影片 → 只上传衍生档 ─────────
     if (want("F1")) {
       await reloadFresh(shell);
       const t0 = rec.mark();
@@ -430,20 +430,20 @@ async function main() {
         && an.originalUploadedViaVideoUpload.length === 0;
       saveCase("F1", {
         status: pass ? "pass" : "fail",
-        intent: "好影片附件 → 本機探測／抽幀／海報，只上傳衍生檔，不上傳原檔",
+        intent: "好影片附件 → 本机探测／抽帧／海报，只上传衍生档，不上传原档",
         observations: { settled, beforeChips: before.chipCount, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, frameCount: after.frameCount, frameAlts: after.frameAlts.slice(0, 6), videoPreviews: after.videoPreviews, chips: after.chips, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F2：不可解碼影片 → 降級執行（video-upload）＋終態 ─────────
+    // ───────── F2：不可解码影片 → 降级执行（video-upload）＋终态 ─────────
     if (want("F2")) {
       await reloadFresh(shell);
       const t0 = rec.mark();
       const attachT0 = Date.now();
       await attachFiles(shell, A.bad);
-      // ingest 上限 30s + 直傳 180s 上限 → 寬鬆 260s
+      // ingest 上限 30s + 直传 180s 上限 → 宽松 260s
       const settled = await waitChipsSettledSafe(shell, 260000);
       const settleMs = Date.now() - attachT0;
       await sleep(1500);
@@ -455,14 +455,14 @@ async function main() {
       const pass = settled && hasTerminal && an.videoUploadRequests >= 1 && an.originalUploadedViaVideoUpload.length >= 1;
       saveCase("F2", {
         status: pass ? "pass" : "fail",
-        intent: "不可解碼影片 → 不永卡、降級真的執行（video-upload）、有終態",
+        intent: "不可解码影片 → 不永卡、降级真的执行（video-upload）、有终态",
         observations: { settleMs, settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, stuckChips: stuck, chips: after.chips, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F3：多檔混批（好＋壞）─────────
+    // ───────── F3：多档混批（好＋坏）─────────
     if (want("F3")) {
       await reloadFresh(shell);
       const t0 = rec.mark();
@@ -478,19 +478,19 @@ async function main() {
       const pass = settled && after.chipCount >= 2 && stuck.length === 0 && !!goodChip && !goodChip.isError && !!badChip;
       saveCase("F3", {
         status: pass ? "pass" : "fail",
-        intent: "多檔混批（好＋壞）→ 壞檔不影響好檔，全部 chip 落終態",
+        intent: "多档混批（好＋坏）→ 坏档不影响好档，全部 chip 落终态",
         observations: { settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, stuckChips: stuck, goodChip: goodChip || null, badChip: badChip || null, chips: after.chips, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F4：鏈式降級 ─────────
-    // attachments 失敗 → video-upload（由 F2 的 ingest-degraded 自然路徑證明）；
-    // 兩者都失敗 → 明確 error 終態，需故障注入（不可為之），此處只記錄設計與可觀測部分。
+    // ───────── F4：链式降级 ─────────
+    // attachments 失败 → video-upload（由 F2 的 ingest-degraded 自然路径证明）；
+    // 两者都失败 → 明确 error 终态，需故障注入（不可为之），此处只记录设计与可观测部分。
     if (want("F4")) {
       await reloadFresh(shell);
-      // 走「本機 ingest 失敗→原檔直傳」這條（F2 的壞檔）作為 attachments 段不可用的替代證據。
+      // 走「本机 ingest 失败→原档直传」这条（F2 的坏档）作为 attachments 段不可用的替代证据。
       const t0 = rec.mark();
       await attachFiles(shell, A.bad);
       const settled = await waitChipsSettledSafe(shell, 260000);
@@ -505,17 +505,17 @@ async function main() {
       };
       saveCase("F4", {
         status: "partial",
-        intent: "鏈式降級：attachments 失敗 → video-upload；兩者都失敗 → 明確 error 終態",
+        intent: "链式降级：attachments 失败 → video-upload；两者都失败 → 明确 error 终态",
         observations: { settled, ...observed, chips: after.chips, ...an,
-          limitation: "「兩者都失敗→error 終態」需故障注入（人工斷網/改端點），紅線禁連 VPS/改網，故只驗到第一段降級；error 終態由 F2 逾時分支與既有 harness A18 覆蓋" },
+          limitation: "「两者都失败→error 终态」需故障注入（人工断网/改端点），红线禁连 VPS/改网，故只验到第一段降级；error 终态由 F2 逾时分支与既有 harness A18 覆盖" },
         artifacts: { screenshot: shot },
       });
-      saveCase("F4-note", { status: "info", note: "第二段（attachments 與 video-upload 皆失敗）本輪無法在不故障注入下觀測。" });
+      saveCase("F4-note", { status: "info", note: "第二段（attachments 与 video-upload 皆失败）本轮无法在不故障注入下观测。" });
     }
 
-    // ───────── F4a：鏈式降級第一段（attachments 失敗 → video-upload）─────────
-    // 本機 CDP 阻擋 attachments 端點（請求根本沒送出，非改網/不碰 VPS）：
-    // 好檔 ingest 成功 → 衍生檔上行被擋 → 落回原檔直傳 video-upload（成功）。
+    // ───────── F4a：链式降级第一段（attachments 失败 → video-upload）─────────
+    // 本机 CDP 阻挡 attachments 端点（请求根本没送出，非改网/不碰 VPS）：
+    // 好档 ingest 成功 → 衍生档上行被挡 → 落回原档直传 video-upload（成功）。
     if (want("F4a")) {
       await reloadFresh(shell);
       const cdp = await shell.context.newCDPSession(shell.page);
@@ -534,14 +534,14 @@ async function main() {
         && an.videoUploadRespNames.includes("good-a.mp4");
       saveCase("F4a", {
         status: pass ? "pass" : "fail",
-        intent: "鏈式降級第一段：attachments 失敗 → video-upload（原檔直傳成功）",
+        intent: "链式降级第一段：attachments 失败 → video-upload（原档直传成功）",
         observations: { settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, stuckChips: stuck, chips: after.chips, blockedAttachments: true, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F4b：鏈式降級第二段（兩者皆失敗 → 明確 error 終態，非永卡）─────────
+    // ───────── F4b：链式降级第二段（两者皆失败 → 明确 error 终态，非永卡）─────────
     if (want("F4b")) {
       await reloadFresh(shell);
       const cdp = await shell.context.newCDPSession(shell.page);
@@ -559,18 +559,18 @@ async function main() {
       const pass = settled && after.chipCount >= 1 && stuck.length === 0 && after.errorChips >= 1;
       saveCase("F4b", {
         status: pass ? "pass" : "fail",
-        intent: "鏈式降級第二段：attachments 與 video-upload 皆失敗 → 明確 error 終態（非永卡）",
+        intent: "链式降级第二段：attachments 与 video-upload 皆失败 → 明确 error 终态（非永卡）",
         observations: { settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, stuckChips: stuck, chips: after.chips, blockedAttachmentsAndVideoUpload: true, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F5：上傳中並發互動（切思考級別／模式）─────────
+    // ───────── F5：上传中并发互动（切思考级别／模式）─────────
     if (want("F5")) {
       await reloadFresh(shell);
-      // 壞檔修復後 ~2s 就落地，沒有「上傳中」窗口 → 用 CDP 限流把上行壓到 40KB/s
-      // （1.5MB ≈ 37s），製造真實 in-flight 窗口再切設定。
+      // 坏档修复后 ~2s 就落地，没有「上传中」窗口 → 用 CDP 限流把上行压到 40KB/s
+      // （1.5MB ≈ 37s），制造真实 in-flight 窗口再切设定。
       const cdp = await shell.context.newCDPSession(shell.page);
       await cdp.send("Network.enable");
       let throttled = false;
@@ -579,7 +579,7 @@ async function main() {
           offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 40 * 1024,
         });
         throttled = true;
-      } catch { /* 限流失敗則退回無窗口版本 */ }
+      } catch { /* 限流失败则退回无窗口版本 */ }
       const t0 = rec.mark();
       await attachFiles(shell, A.bad);
       // 等「video-upload 已在途」（entry 存在且 status 仍 null）＝真 in-flight。
@@ -592,7 +592,7 @@ async function main() {
       }
       const duringProbe = await probeComposer(shell);
       const inFlightShot = await shell.screenshot("F5-in-flight");
-      // 真設定互動：開思考級別下拉、選另一級
+      // 真设定互动：开思考级别下拉、选另一级
       let switchResult = null;
       try {
         const btn = shell.page.locator('[aria-label^="思考级别："]').first();
@@ -611,7 +611,7 @@ async function main() {
       } catch (e) {
         switchResult = { opened: false, err: String(e && e.message) };
       }
-      // 切完設定：確認附件仍在（未被互動打斷）
+      // 切完设定：确认附件仍在（未被互动打断）
       const afterInteract = await probeComposer(shell);
       const stillUploadingOrSettled = afterInteract.chipCount >= 1;
       // 解除限流，等落地
@@ -628,10 +628,10 @@ async function main() {
         && an.videoUploadRespNames.includes("bad.mp4");
       saveCase("F5", {
         status: pass ? "pass" : "fail",
-        intent: "上傳中的並發互動（切設定／切模式）不打斷附件",
+        intent: "上传中的并发互动（切设定／切模式）不打断附件",
         observations: { throttled, inFlight, duringProbeChips: duringProbe.chips, afterInteractChips: afterInteract.chips, stillUploadingOrSettled, switchResult, settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, chips: after.chips, ...an },
         artifacts: { screenshot: shot, inFlightShot, duringOpen: switchResult && switchResult.openShot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
@@ -652,14 +652,14 @@ async function main() {
       const pass = dropR.defaultPrevented && appeared && settled && after.chipCount >= 1 && after.uploadingChips === 0 && an.derivedSeen && an.videoUploadRequests === 0;
       saveCase("F6", {
         status: pass ? "pass" : "fail",
-        intent: "真拖放（drag-drop）入口與 input 選檔等價",
+        intent: "真拖放（drag-drop）入口与 input 选档等价",
         observations: { dropResult: dropR, chipAppeared: appeared, settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, chips: after.chips, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F7：貼上入口 ─────────
+    // ───────── F7：贴上入口 ─────────
     if (want("F7")) {
       await reloadFresh(shell);
       const t0 = rec.mark();
@@ -676,14 +676,14 @@ async function main() {
       const pass = pasteR.defaultPrevented && appeared && settled && after.chipCount >= 1 && after.uploadingChips === 0 && an.derivedSeen && an.videoUploadRequests === 0;
       saveCase("F7", {
         status: pass ? "pass" : "fail",
-        intent: "貼上（paste）入口與 input 選檔等價",
+        intent: "贴上（paste）入口与 input 选档等价",
         observations: { pasteResult: pasteR, chipAppeared: appeared, settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, chips: after.chips, ...an },
         artifacts: { screenshot: shot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
 
-    // ───────── F8：長對話多輪後再上傳 ─────────
+    // ───────── F8：长对话多轮后再上传 ─────────
     if (want("F8")) {
       await reloadFresh(shell);
       const msgs = [
@@ -711,10 +711,10 @@ async function main() {
       const pass = settled && after.chipCount >= 1 && after.uploadingChips === 0 && an.derivedSeen && an.videoUploadRequests === 0 && genDuringChat.length === 0;
       saveCase("F8", {
         status: pass ? "pass" : "fail",
-        intent: "長對話多輪後再上傳 → 照常、無殘留",
+        intent: "长对话多轮后再上传 → 照常、无残留",
         observations: { turns, messagesSentThisCase: turns.filter((t) => t.sent).length, generationDuringChat: genDuringChat, settled, chipCount: after.chipCount, uploadingChips: after.uploadingChips, errorChips: after.errorChips, chips: after.chips, ...an },
         artifacts: { screenshot: shot, chatScreenshot: chatShot },
-        error: pass ? undefined : "判準未達（見 observations）",
+        error: pass ? undefined : "判准未达（见 observations）",
       });
     }
   } finally {
@@ -733,7 +733,7 @@ async function main() {
   };
   fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   log(`\n=== ${summary.pass} pass / ${summary.fail} fail / ${summary.partial} partial · messages=${MESSAGES_SENT} · genSeen=${GENERATION_SEEN.length} ===`);
-  log(`結果目錄：${outDir}`);
+  log(`结果目录：${outDir}`);
 }
 
 main().catch((e) => { console.error("fatal:", (e && e.stack) || e); process.exit(2); });

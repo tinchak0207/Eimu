@@ -1,31 +1,31 @@
-// 團隊畫布閘（片F 面 2 接線 → 2026-09-27 片P 刀 3 換真資料源）。
+// 团队画布闸（片F 面 2 接线 → 2026-09-27 片P 刀 3 换真资料源）。
 //
-// 真源：全站**唯一**的畫布建立/落盤入口是 `PUT /api/canvas/projects`
-// （`saveCanvasProject` upsert by id；前端所有建立路徑——工具箱「新建画布」、
-// 模板鋪畫布、agent 下發節點後 debounce 存檔——最終都收斂到這條 PUT）。
-// 因此閘設在這裡，而不是各前端入口——否則新入口一加就漏。
+// 真源：全站**唯一**的画布建立/落盘入口是 `PUT /api/canvas/projects`
+// （`saveCanvasProject` upsert by id；前端所有建立路径——工具箱「新建画布」、
+// 模板铺画布、agent 下发节点后 debounce 存档——最终都收敛到这条 PUT）。
+// 因此闸设在这里，而不是各前端入口——否则新入口一加就漏。
 //
-// 資料源（刀 3）：`lookupTeamMembershipViaRelay`（Vercel → 控制面簽名通道）。
-// 片K 的舊源是控制面直連（`canMemberCreateSharedCanvas` 讀 PG），但 Vercel 按設計
-// 不持有 `GENERATION_DATABASE_URL` ⇒ `governanceStoreEnabled()===false` ⇒ 閘恆走
-// 「未配置→放行」，等於沒接上。改經 relay 後 Vercel 才真的查得到團隊。
+// 资料源（刀 3）：`lookupTeamMembershipViaRelay`（Vercel → 控制面签名通道）。
+// 片K 的旧源是控制面直连（`canMemberCreateSharedCanvas` 读 PG），但 Vercel 按设计
+// 不持有 `GENERATION_DATABASE_URL` ⇒ `governanceStoreEnabled()===false` ⇒ 闸恒走
+// 「未配置→放行」，等于没接上。改经 relay 后 Vercel 才真的查得到团队。
 //
-// 判定（與 team-governance.canCreateSharedCanvas 逐字對齊，不另立判斷）：
-//   ★ relay 回 null（未配置／逾時／查不到／載荷不合法）→ 放行（fail-open 兜底）。
-//   ★ 非團隊成員（個人帳號）→ 不受此閘，一律放行。
-//   ★ owner / admin（含團隊主帳）→ 恆放行。
-//   ★ 成員（role=member）→ 依團隊設定 member_create_canvas：開啟放行，關閉拒絕。
+// 判定（与 team-governance.canCreateSharedCanvas 逐字对齐，不另立判断）：
+//   ★ relay 回 null（未配置／逾时／查不到／载荷不合法）→ 放行（fail-open 兜底）。
+//   ★ 非团队成员（个人帐号）→ 不受此闸，一律放行。
+//   ★ owner / admin（含团队主帐）→ 恒放行。
+//   ★ 成员（role=member）→ 依团队设定 member_create_canvas：开启放行，关闭拒绝。
 //
-// 「不得產生半成品專案」：先判後存——拒絕時**不呼叫** save*，專案數維持不變。
-// 既有的「更新」不是「建」：已存在的專案 id 不受事後關閘影響
-//（否則團隊一關開關，成員手上既有畫布會存不進去，等於資料損失）。
+// 「不得产生半成品专案」：先判后存——拒绝时**不呼叫** save*，专案数维持不变。
+// 既有的「更新」不是「建」：已存在的专案 id 不受事后关闸影响
+//（否则团队一关开关，成员手上既有画布会存不进去，等于资料损失）。
 //
-// 作用域（刀 1/刀 2）：`project.scope === "team"` 且已驗成員身份 → 落團隊命名空間
-// `canvas/team/<teamId>`（teamId **以 relay 回傳的權威值蓋章**，客戶端送來的不採信）；
-// 查不到成員身份 → 降級個人命名空間（fail-open，不拒、不寫進別人的團隊）。
-// 團隊畫布單寫（後寫覆蓋），刻意不做鎖／CRDT／衝突解決。
+// 作用域（刀 1/刀 2）：`project.scope === "team"` 且已验成员身份 → 落团队命名空间
+// `canvas/team/<teamId>`（teamId **以 relay 回传的权威值盖章**，客户端送来的不采信）；
+// 查不到成员身份 → 降级个人命名空间（fail-open，不拒、不写进别人的团队）。
+// 团队画布单写（后写覆盖），刻意不做锁／CRDT／冲突解决。
 //
-// 本模組只讀成員身份與畫布 store，不碰任何點數/計費（禁影子帳本）。
+// 本模组只读成员身份与画布 store，不碰任何点数/计费（禁影子帐本）。
 
 import {
   TEAM_CANVAS_FORBIDDEN_CODE,
@@ -44,7 +44,7 @@ import {
 import type { CanvasProject } from "./types";
 
 export interface TeamCanvasGateDeps {
-  /** 測試注入點：缺省＝真實 relay 查詢 lookupTeamMembershipViaRelay()。 */
+  /** 测试注入点：缺省＝真实 relay 查询 lookupTeamMembershipViaRelay()。 */
   membership?: (userId: number) => Promise<TeamMembership | null>;
 }
 
@@ -56,8 +56,8 @@ export interface TeamCanvasGateDenied {
 }
 
 /**
- * 成員建畫布裁決（純函式，資料源＝membership）。
- * null（查不到／fail-open）與非 member 一律放行；member 依開關。
+ * 成员建画布裁决（纯函式，资料源＝membership）。
+ * null（查不到／fail-open）与非 member 一律放行；member 依开关。
  */
 function decide(membership: TeamMembership | null): { allowed: boolean; code?: string; message?: string } {
   if (!membership) return { allowed: true };
@@ -73,16 +73,16 @@ async function lookupMembership(
   return deps.membership ? deps.membership(userId) : lookupTeamMembershipViaRelay(userId);
 }
 
-/** 寫團隊命名空間時**剝掉** scope/teamId（降級個人用；teamId 由委派決定）。 */
+/** 写团队命名空间时**剥掉** scope/teamId（降级个人用；teamId 由委派决定）。 */
 function asPersonal(project: CanvasProject): CanvasProject {
   const { scope: _scope, teamId: _teamId, ...rest } = project;
   return rest;
 }
 
 /**
- * 帶團隊閘的畫布落盤：先判權限，拒絕則不寫（無半成品）；放行後才落對應命名空間。
+ * 带团队闸的画布落盘：先判权限，拒绝则不写（无半成品）；放行后才落对应命名空间。
  *
- * 回傳 `{ ok: true }` ＝已落盤；`{ ok: false, ... }` ＝被團隊閘拒（呼叫端原樣轉 403）。
+ * 回传 `{ ok: true }` ＝已落盘；`{ ok: false, ... }` ＝被团队闸拒（呼叫端原样转 403）。
  */
 export async function saveCanvasProjectWithTeamGate(
   userId: number,
@@ -92,8 +92,8 @@ export async function saveCanvasProjectWithTeamGate(
   const membership = await lookupMembership(userId, deps);
   const authoritativeTeamId = membership?.teamId ?? null;
 
-  // 宣告 team 作用域但送的 teamId 與權威值不符 → 拒（不得寫進別人的團隊）；
-  // 查不到成員身份（fail-open）不在此列——走降級個人，不拒。
+  // 宣告 team 作用域但送的 teamId 与权威值不符 → 拒（不得写进别人的团队）；
+  // 查不到成员身份（fail-open）不在此列——走降级个人，不拒。
   if (
     project.scope === "team" &&
     authoritativeTeamId &&
@@ -108,7 +108,7 @@ export async function saveCanvasProjectWithTeamGate(
 
   const decision = decide(membership);
   if (!decision.allowed) {
-    // 只有「建新畫布」受閘；既有專案（更新/自動存檔）不受事後關閘影響。
+    // 只有「建新画布」受闸；既有专案（更新/自动存档）不受事后关闸影响。
     const existing =
       teamId !== null
         ? await readTeamCanvasProject(teamId, project.id)
@@ -131,7 +131,7 @@ export async function saveCanvasProjectWithTeamGate(
   return { ok: true };
 }
 
-// ─────────────────────────────────────────── 讀路徑（刀 2：我個人的 + 我所屬團隊的）
+// ─────────────────────────────────────────── 读路径（刀 2：我个人的 + 我所属团队的）
 
 function sortByUpdatedDesc(projects: CanvasProject[]): CanvasProject[] {
   return [...projects].sort((a, b) => {
@@ -142,10 +142,10 @@ function sortByUpdatedDesc(projects: CanvasProject[]): CanvasProject[] {
 }
 
 /**
- * 呼叫端可見的畫布清單＝**我個人的 + 我所屬團隊的**（同 id 取新的）。
+ * 呼叫端可见的画布清单＝**我个人的 + 我所属团队的**（同 id 取新的）。
  *
- * fail-open：relay 查不到成員身份（未配置／掛掉）→ 只回個人（**不 500、不 403**），
- * 個人畫布讀取零影響。
+ * fail-open：relay 查不到成员身份（未配置／挂掉）→ 只回个人（**不 500、不 403**），
+ * 个人画布读取零影响。
  */
 export async function listCanvasProjectsForCaller(
   userId: number,
@@ -170,12 +170,12 @@ export async function listCanvasProjectsForCaller(
 }
 
 /**
- * 呼叫端**顯式**讀某團隊的畫布（`GET /api/canvas/projects?teamId=…`）。
+ * 呼叫端**显式**读某团队的画布（`GET /api/canvas/projects?teamId=…`）。
  *
- * 這邊是**拒**而不是放行：讀團隊命名空間＝碰別人的資料，必須先證明成員身份
- *（relay 回 null ⇒ 證明不了 ⇒ 403，與建畫布閘同碼同文案）。
- * 這不是 fail-closed 的回歸——建畫布/個人畫布路徑仍是 fail-open（見上），
- * 且查不到成員身份時唯一無法做的只有「讀別團的畫布」，不影響任何既有功能。
+ * 这边是**拒**而不是放行：读团队命名空间＝碰别人的资料，必须先证明成员身份
+ *（relay 回 null ⇒ 证明不了 ⇒ 403，与建画布闸同码同文案）。
+ * 这不是 fail-closed 的回归——建画布/个人画布路径仍是 fail-open（见上），
+ * 且查不到成员身份时唯一无法做的只有「读别团的画布」，不影响任何既有功能。
  */
 export async function readTeamCanvasProjectsForCaller(
   userId: number,

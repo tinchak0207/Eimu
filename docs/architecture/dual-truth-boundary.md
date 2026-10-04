@@ -1,81 +1,81 @@
-# 雙真相邊界（W5）
+# 双真相边界（W5）
 
-> 2026-09-29 文件化。**本檔只描述，不改碼**——裁定來源＝`eimu-competition-report/Dramagic對稱差-決策表-0928.md:63`：
-> 「W5：DSL 只管 world1、world2 另一套真相 → **P2：雙真相邊界文件化**（寫文件，不改碼）」。
-> 現場原話（`Eimu能力審視-工業化盤點-0928.md:81`）：「world2 執行圖（模板＋素材注入＋成片）仍走後端原子鋪
-> ——兩套真相並存，是設計取捨也是認知負擔」。
+> 2026-09-29 文件化。**本档只描述，不改码**——裁定来源＝`eimu-competition-report/Dramagic对称差-决策表-0928.md:63`：
+> 「W5：DSL 只管 world1、world2 另一套真相 → **P2：双真相边界文件化**（写文件，不改码）」。
+> 现场原话（`Eimu能力审视-工业化盘点-0928.md:81`）：「world2 执行图（模板＋素材注入＋成片）仍走后端原子铺
+> ——两套真相并存，是设计取舍也是认知负担」。
 
-## 0. 一句話
+## 0. 一句话
 
-**畫布圖（world1）是運行時唯一真相；產線執行圖（world2）是鋪圖的真相。**
-兩者在「SSE 事件把節點寫進畫布」這一條縫上相接：world2 的產物是節點，節點之後歸 world1 管。
+**画布图（world1）是运行时唯一真相；产线执行图（world2）是铺图的真相。**
+两者在「SSE 事件把节点写进画布」这一条缝上相接：world2 的产物是节点，节点之后归 world1 管。
 
-判準（拿這句話回答 90% 的問題）：**問「畫布上有什麼」→ world1；問「一次產線要跑幾步、每步用什麼模型／門禁／素材」→ world2。**
+判准（拿这句话回答 90% 的问题）：**问「画布上有什么」→ world1；问「一次产线要跑几步、每步用什么模型／门禁／素材」→ world2。**
 
-## 1. world1 ＝ 畫布多步生產鏈
+## 1. world1 ＝ 画布多步生产链
 
-| 角色 | 權威位置 | 說明 |
+| 角色 | 权威位置 | 说明 |
 |---|---|---|
-| 契約真源 | `src/lib/canvas/types.ts` 的 `CanvasAgentOp` | 8 op：`add_node`／`update_node`／`delete_nodes`／`connect_nodes`／`delete_connections`／`select_nodes`／`set_viewport`／`run_generation`；2026-09-16（G1）加第 9 個 `set_project_meta`（專案級欄位補丁，唯一能改 `CanvasProject` 頂層的 agent 入口）；2026-10-03 加第 10 個 `revert_node`（節點版本回退＝人機共筆回滾面，執行端＝adapter agent_ops → reducer 既有 `revert_node`；閘道白名單另在 `deploy-staging/gateway/canvas-op-types.ts`） |
-| 執行語義 | `src/lib/canvas/reducer.ts`、`src/lib/canvas/layout.ts` | **執行語義全在前端 reducer**（types.ts 註記）；`layout.ts` 另負責節點／metadata 的白名單清洗 |
-| AI 的筆 | `src/lib/workflow-dsl/schema.ts` → `compile.ts` → `decompile.ts` | 暴君裁定 2026-09-02：**AI 不直接吐 `CanvasAgentOp`**，只吐 `WorkflowDslSource`，由 `compile.ts` 確定性編譯成 op；`decompile.ts` 支援回讀（round-trip 冪等）。**2026-10-03 讀改回滾三件接通**：讀面＝前端 `src/hooks/canvas/canvas-agent-snapshot.ts` 從全量 state 反推 `dsl`＋`node_versions` 塞快照（gateway `canvas-flow.compactCanvasState`／`canvas-state-summary.buildCanvasReceipt` 透傳）；寫面＝harness `deploy-staging/opencode-runtime/tools/workflow_write.ts`（站點 `/v1/workflow/compile` → `canvas_apply_ops` 通道）；回滾面＝`workflow_history`＋`workflow_rollback`（`revert_node` op） |
-| agent 入場 | gateway 工具 `canvas_apply_ops` → SSE `canvas.ops` → `src/hooks/use-canvas-chat.ts` 的佇列（`canvas-agent-ops-queue.ts`）→ reducer | ops 一到即自動落 reducer（畫布操作自動化）；`applyAgentOps` 仍負責 dispatch＋`postCanvasOpsResult` 回報，讓工具調用拿到明確結果而非超時 |
-| 失敗語義 | `compile.ts` 的教學式報錯、環路整份拒絕、`layout.ts` 逐欄白名單 | 非法值**省略該鍵**（＝不動該欄），不寫預設值冒充用戶設定 |
+| 契约真源 | `src/lib/canvas/types.ts` 的 `CanvasAgentOp` | 8 op：`add_node`／`update_node`／`delete_nodes`／`connect_nodes`／`delete_connections`／`select_nodes`／`set_viewport`／`run_generation`；2026-09-16（G1）加第 9 个 `set_project_meta`（专案级栏位补丁，唯一能改 `CanvasProject` 顶层的 agent 入口）；2026-10-03 加第 10 个 `revert_node`（节点版本回退＝人机共笔回滚面，执行端＝adapter agent_ops → reducer 既有 `revert_node`；闸道白名单另在 `deploy-staging/gateway/canvas-op-types.ts`） |
+| 执行语义 | `src/lib/canvas/reducer.ts`、`src/lib/canvas/layout.ts` | **执行语义全在前端 reducer**（types.ts 注记）；`layout.ts` 另负责节点／metadata 的白名单清洗 |
+| AI 的笔 | `src/lib/workflow-dsl/schema.ts` → `compile.ts` → `decompile.ts` | 暴君裁定 2026-09-02：**AI 不直接吐 `CanvasAgentOp`**，只吐 `WorkflowDslSource`，由 `compile.ts` 确定性编译成 op；`decompile.ts` 支援回读（round-trip 幂等）。**2026-10-03 读改回滚三件接通**：读面＝前端 `src/hooks/canvas/canvas-agent-snapshot.ts` 从全量 state 反推 `dsl`＋`node_versions` 塞快照（gateway `canvas-flow.compactCanvasState`／`canvas-state-summary.buildCanvasReceipt` 透传）；写面＝harness `deploy-staging/opencode-runtime/tools/workflow_write.ts`（站点 `/v1/workflow/compile` → `canvas_apply_ops` 通道）；回滚面＝`workflow_history`＋`workflow_rollback`（`revert_node` op） |
+| agent 入场 | gateway 工具 `canvas_apply_ops` → SSE `canvas.ops` → `src/hooks/use-canvas-chat.ts` 的伫列（`canvas-agent-ops-queue.ts`）→ reducer | ops 一到即自动落 reducer（画布操作自动化）；`applyAgentOps` 仍负责 dispatch＋`postCanvasOpsResult` 回报，让工具调用拿到明确结果而非超时 |
+| 失败语义 | `compile.ts` 的教学式报错、环路整份拒绝、`layout.ts` 逐栏白名单 | 非法值**省略该键**（＝不动该栏），不写预设值冒充用户设定 |
 
-## 2. world2 ＝ 後端執行圖（模板＋素材注入＋成片）
+## 2. world2 ＝ 后端执行图（模板＋素材注入＋成片）
 
-| 角色 | 權威位置 | 說明 |
+| 角色 | 权威位置 | 说明 |
 |---|---|---|
-| 模板真源 | **VPS** `/opt/agent-harness/gateway/workflow-templates/` | 13 模板、一個模板一個檔（`single_image`／`character_sheet`／`scene_setup`／`single_video`／`feature_film`／`novel_film`／`novel_ip`／`ecom_launch`／`ecom_model`／`shortdrama_visual`／`shortdrama_poster`／`art_curation`／`art_style`）＋`index.ts`（共享註冊）＋`types.ts`；節點 `kind` ∈ `text｜config｜image｜video｜audio｜film`，節點 `role` 是**模板內唯一鍵**，連線寫 `{fromRole, toRole}` |
-| 展開與執行 | **VPS** `gateway/workflow-engine.ts`／`workflow-service.ts`／`workflow-gw.ts` 的 `expandTemplate` | **活本在 VPS**（`/opt/agent-harness/gateway/`）。`src/` 內 grep `expandTemplate` 只會命中註釋——但 repo **另有一份可跑的鏡像**：`deploy-staging/gateway/`（見下） |
-| repo 鏡像 | `deploy-staging/gateway/`（含 `workflow-engine.ts` 與 `workflow-templates/`） | 這是**測試與建置用的第二份拷貝**：`src/lib/agent-output-cards.test.ts:29` 直接 `import { expandTemplate } from "../../deploy-staging/gateway/workflow-engine"` 跑真引擎（不重寫它的 merge）。AGENTS.md 明記此目錄「勿當真源」。**2026-09-29 實查**：15 個模板檔（13 模板＋`index.ts`＋`types.ts`）與 VPS 逐檔 md5 **全等**，VPS 另多一支 `workflow-templates.test.ts`（W6 常駐回歸）⇒ 此刻兩份一致，但**一致是狀態、不是契約**（逐檔 SFTP 部署、無遞迴同步 ⇒ 隨時可漂） |
-| 站點側資料面 | `src/lib/agent-templates.ts`（`AgentPipelineStep`）、`recipe-templates.ts`、`scenario-templates.ts` | 是產線的**資料鏡像與 UI 面**，不是執行引擎 |
-| 鋪圖排版 | `src/components/canvas-workstation/agent-template-canvas.ts`（`pipelineToCanvasLayout`） | 模板 → 畫布版面（節點位置／型別徽章），**只排版，不改產線語義** |
-| 落圖事件 | `canvas.plan`／`canvas.node.created`／`canvas.node.updated`（`src/lib/agent-chat-types.ts`、`src/lib/canvas/reducer.ts`） | 「首訊 8 秒建骨架」就是這條：模板展開後節點以事件落進畫布，之後歸 world1 |
+| 模板真源 | **VPS** `/opt/agent-harness/gateway/workflow-templates/` | 13 模板、一个模板一个档（`single_image`／`character_sheet`／`scene_setup`／`single_video`／`feature_film`／`novel_film`／`novel_ip`／`ecom_launch`／`ecom_model`／`shortdrama_visual`／`shortdrama_poster`／`art_curation`／`art_style`）＋`index.ts`（共享注册）＋`types.ts`；节点 `kind` ∈ `text｜config｜image｜video｜audio｜film`，节点 `role` 是**模板内唯一键**，连线写 `{fromRole, toRole}` |
+| 展开与执行 | **VPS** `gateway/workflow-engine.ts`／`workflow-service.ts`／`workflow-gw.ts` 的 `expandTemplate` | **活本在 VPS**（`/opt/agent-harness/gateway/`）。`src/` 内 grep `expandTemplate` 只会命中注释——但 repo **另有一份可跑的镜像**：`deploy-staging/gateway/`（见下） |
+| repo 镜像 | `deploy-staging/gateway/`（含 `workflow-engine.ts` 与 `workflow-templates/`） | 这是**测试与建置用的第二份拷贝**：`src/lib/agent-output-cards.test.ts:29` 直接 `import { expandTemplate } from "../../deploy-staging/gateway/workflow-engine"` 跑真引擎（不重写它的 merge）。AGENTS.md 明记此目录「勿当真源」。**2026-09-29 实查**：15 个模板档（13 模板＋`index.ts`＋`types.ts`）与 VPS 逐档 md5 **全等**，VPS 另多一支 `workflow-templates.test.ts`（W6 常驻回归）⇒ 此刻两份一致，但**一致是状态、不是契约**（逐档 SFTP 部署、无递回同步 ⇒ 随时可漂） |
+| 站点侧资料面 | `src/lib/agent-templates.ts`（`AgentPipelineStep`）、`recipe-templates.ts`、`scenario-templates.ts` | 是产线的**资料镜像与 UI 面**，不是执行引擎 |
+| 铺图排版 | `src/components/canvas-workstation/agent-template-canvas.ts`（`pipelineToCanvasLayout`） | 模板 → 画布版面（节点位置／型别徽章），**只排版，不改产线语义** |
+| 落图事件 | `canvas.plan`／`canvas.node.created`／`canvas.node.updated`（`src/lib/agent-chat-types.ts`、`src/lib/canvas/reducer.ts`） | 「首讯 8 秒建骨架」就是这条：模板展开后节点以事件落进画布，之后归 world1 |
 
-## 3. 邊界（哪一格歸誰）
+## 3. 边界（哪一格归谁）
 
-| 問題 | 歸屬 |
+| 问题 | 归属 |
 |---|---|
-| 畫布上有哪些節點／連線／選中／視窗 | world1（reducer） |
-| 一次生成要跑幾步、每步的模型／門禁／素材注入／成片合成 | world2（gateway 模板＋engine） |
-| 產物（圖／影片／音訊／音樂）本身 | 生成平面（`/api/generation-jobs`＋artifact），兩邊都只是**引用**它的節點 metadata |
-| 專案級欄位（作品類型／劇集／風格綁定…） | world1 的 `CanvasProject` 頂層；agent 唯一寫入口＝`set_project_meta` |
+| 画布上有哪些节点／连线／选中／视窗 | world1（reducer） |
+| 一次生成要跑几步、每步的模型／门禁／素材注入／成片合成 | world2（gateway 模板＋engine） |
+| 产物（图／影片／音讯／音乐）本身 | 生成平面（`/api/generation-jobs`＋artifact），两边都只是**引用**它的节点 metadata |
+| 专案级栏位（作品类型／剧集／风格绑定…） | world1 的 `CanvasProject` 顶层；agent 唯一写入口＝`set_project_meta` |
 
-## 4. 為什麼這是取捨，不是缺陷
+## 4. 为什么这是取舍，不是缺陷
 
-- **好處**：兩邊可各自演進——產線可只動模板檔（VPS 逐檔部署、`index.ts` 單獨一趟註冊），畫布 DSL 可只動前端編譯器。多數改動**只需落在其中一邊**。
-- **代價**：同一個「步驟」在兩邊各表達一次（模板檔的節點 ↔ 畫布節點），兩者的節點 metadata 靠**雙白名單**同步；漏一處＝鍵**靜默消失**（實例見 `mem show 2026-09-24-ws10-emits-entity-whitelist-strip-fix.md`：`emitsEntity` 被白名單剝除，自動落卡鏈整條失效）。
-- **代價二（世界2 自己有兩份）**：產線的活本在 VPS `/opt/agent-harness/gateway/`，repo 另有一份 `deploy-staging/gateway/` 供測試直接跑真 `expandTemplate`。兩份靠**逐檔 SFTP**（`.gateway-work/sftp-put-443.js`，無遞迴同步）維持一致，2026-09-29 實查 15 檔 md5 全等——但「一致」只是當下狀態，改模板時**兩份都要動**，否則測試驗的是舊真相、線上跑的是新真相。
-- **代價三**：只讀站點 repo 會誤判「這功能沒實作」。查產線**實際行為**必須上 VPS 看 `gateway/`；站點側的 `agent-templates.ts` 只是資料面。
+- **好处**：两边可各自演进——产线可只动模板档（VPS 逐档部署、`index.ts` 单独一趟注册），画布 DSL 可只动前端编译器。多数改动**只需落在其中一边**。
+- **代价**：同一个「步骤」在两边各表达一次（模板档的节点 ↔ 画布节点），两者的节点 metadata 靠**双白名单**同步；漏一处＝键**静默消失**（实例见 `mem show 2026-09-24-ws10-emits-entity-whitelist-strip-fix.md`：`emitsEntity` 被白名单剥除，自动落卡链整条失效）。
+- **代价二（世界2 自己有两份）**：产线的活本在 VPS `/opt/agent-harness/gateway/`，repo 另有一份 `deploy-staging/gateway/` 供测试直接跑真 `expandTemplate`。两份靠**逐档 SFTP**（`.gateway-work/sftp-put-443.js`，无递回同步）维持一致，2026-09-29 实查 15 档 md5 全等——但「一致」只是当下状态，改模板时**两份都要动**，否则测试验的是旧真相、线上跑的是新真相。
+- **代价三**：只读站点 repo 会误判「这功能没实作」。查产线**实际行为**必须上 VPS 看 `gateway/`；站点侧的 `agent-templates.ts` 只是资料面。
 
-## 5. 鐵律（改動前先讀本節）
+## 5. 铁律（改动前先读本节）
 
-1. 要改「畫布上有什麼」⇒ **只動 world1**：`CanvasAgentOp` 契約 → `reducer.ts` → `layout.ts` 清洗 → 前端。禁把產線圖硬編進 DSL。
-2. 要改「產線怎麼跑」⇒ **VPS 模板檔＋engine 與 repo 鏡像 `deploy-staging/gateway/` 兩份同批改**；部署走逐檔 SFTP（無遞迴同步），改完比對 md5。禁在別的目錄另抄第三份 `expandTemplate`。
-3. 節點 metadata 出現新鍵 ⇒ **雙白名單同批改**（漏一處＝靜默丟鍵）：
+1. 要改「画布上有什么」⇒ **只动 world1**：`CanvasAgentOp` 契约 → `reducer.ts` → `layout.ts` 清洗 → 前端。禁把产线图硬编进 DSL。
+2. 要改「产线怎么跑」⇒ **VPS 模板档＋engine 与 repo 镜像 `deploy-staging/gateway/` 两份同批改**；部署走逐档 SFTP（无递回同步），改完比对 md5。禁在别的目录另抄第三份 `expandTemplate`。
+3. 节点 metadata 出现新键 ⇒ **双白名单同批改**（漏一处＝静默丢键）：
    `src/lib/canvas/node-metadata-fields.ts`（`DURABLE_METADATA_FIELDS` / `AGENT_METADATA_FIELDS`）
    ＋ `src/lib/canvas/layout.ts`（`DURABLE_FIELD_CLEANERS`）
    ＋ `src/hooks/canvas/canvas-chat-types.ts`（`applyAgentFieldTransform`）
-   ＋ 對應測試樣本。
-4. `CanvasProject` 出現新欄位 ⇒ 逐欄白名單**七處同批**（先例：2026-09-15 的 `projectType`／`currentStep`／`episodes`）：
-   型別（`types.ts`）→ `normalizeProject`（`project-store.ts`）→ `CanvasProjectMetaPatch`（`types.ts`）→ `canvasProjectMeta` 與 `normalizeProjectMetaPatch`（`layout.ts`）→ 專案 PUT 透傳（`src/app/api/canvas/projects/route.ts`）→ hook 的 `setProjectMeta` 與還原點（`src/hooks/use-canvas-chat.ts`）→ 匯出／匯入。
-5. 事故判準：**當同一個事實需要在兩個地方各寫一次，先問它屬於哪一邊，再寫**——寫在兩邊就是下一次漂移的起點。
+   ＋ 对应测试样本。
+4. `CanvasProject` 出现新栏位 ⇒ 逐栏白名单**七处同批**（先例：2026-09-15 的 `projectType`／`currentStep`／`episodes`）：
+   型别（`types.ts`）→ `normalizeProject`（`project-store.ts`）→ `CanvasProjectMetaPatch`（`types.ts`）→ `canvasProjectMeta` 与 `normalizeProjectMetaPatch`（`layout.ts`）→ 专案 PUT 透传（`src/app/api/canvas/projects/route.ts`）→ hook 的 `setProjectMeta` 与还原点（`src/hooks/use-canvas-chat.ts`）→ 汇出／汇入。
+5. 事故判准：**当同一个事实需要在两个地方各写一次，先问它属于哪一边，再写**——写在两边就是下一次漂移的起点。
 
-## 6. 複核用命令
+## 6. 复核用命令
 
 ```bash
-# world1 契約與執行語義
+# world1 契约与执行语义
 grep -n "export type CanvasAgentOp" -A 20 src/lib/canvas/types.ts
-grep -n "export function compileWorkflowDsl\|環路\|教學" -A 5 src/lib/workflow-dsl/compile.ts
+grep -n "export function compileWorkflowDsl\|环路\|教学" -A 5 src/lib/workflow-dsl/compile.ts
 
-# world2：活本在 VPS，鏡像在 repo（2026-09-29 實查 md5 全等；僅 VPS 多一支回歸測試）
+# world2：活本在 VPS，镜像在 repo（2026-09-29 实查 md5 全等；仅 VPS 多一支回归测试）
 ls /opt/agent-harness/gateway/workflow-templates/
 ssh -i ~/.ssh/new.pem -p 22443 ubuntu@43.172.85.76 \
   "cd /opt/agent-harness/gateway && find workflow-templates -name '*.ts' | sort | xargs md5sum"
-cd deploy-staging/gateway && find workflow-templates -name '*.ts' | sort | xargs md5sum   # 逐檔比對
+cd deploy-staging/gateway && find workflow-templates -name '*.ts' | sort | xargs md5sum   # 逐档比对
 
-# 雙白名單三處
+# 双白名单三处
 grep -rn "DURABLE_METADATA_FIELDS\|AGENT_METADATA_FIELDS" src/lib/canvas/node-metadata-fields.ts
 grep -rn "DURABLE_FIELD_CLEANERS" src/lib/canvas/layout.ts
 grep -rn "applyAgentFieldTransform" src/hooks/canvas/canvas-chat-types.ts

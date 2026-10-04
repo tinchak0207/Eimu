@@ -12,8 +12,8 @@ import {
 } from "./failure-record.ts";
 
 /**
- * FG-01 驗收：合成一個含巢狀 cause + requestId 的上游錯誤，逐欄位（含遞迴層）
- * 斷言原生欄位被逐字保留。oracle = 測試自己手工構造的上游錯誤物件（獨立於被測實現）。
+ * FG-01 验收：合成一个含巢状 cause + requestId 的上游错误，逐栏位（含递回层）
+ * 断言原生栏位被逐字保留。oracle = 测试自己手工构造的上游错误物件（独立于被测实现）。
  */
 function syntheticUpstreamError() {
   const innermost = Object.assign(new Error("ECONNRESET while reading upstream body"), {
@@ -39,7 +39,7 @@ function syntheticUpstreamError() {
   return { outer, middle, innermost };
 }
 
-test("FG-01：原生欄位逐字保留，cause 遞迴到最內層", () => {
+test("FG-01：原生栏位逐字保留，cause 递回到最内层", () => {
   const { outer, middle, innermost } = syntheticUpstreamError();
   const native = captureNativeFailure(outer);
 
@@ -74,12 +74,12 @@ test("FG-01：原生欄位逐字保留，cause 遞迴到最內層", () => {
       },
     },
   });
-  // 型別不合併：字串碼保持字串，數字碼保持數字（禁止 coerce 造成事實失真）。
+  // 型别不合并：字串码保持字串，数字码保持数字（禁止 coerce 造成事实失真）。
   assert.equal(typeof native.code, "string");
   assert.equal(typeof native.cause?.code, "number");
 });
 
-test("FG-01：產品解釋寫入不改動原生欄位（同一物件、逐欄位等價）", () => {
+test("FG-01：产品解释写入不改动原生栏位（同一物件、逐栏位等价）", () => {
   const { outer } = syntheticUpstreamError();
   const classified = classifySupplierFailure(outer);
   const record = createFailureRecord({ error: outer, explanation: explainFailure(classified) });
@@ -87,12 +87,12 @@ test("FG-01：產品解釋寫入不改動原生欄位（同一物件、逐欄位
   const nativeBefore = structuredClone(record.native);
   const record2 = attachExplanation(record, explainFailure(classified));
 
-  // 原生節點是同一個物件（不是複製品），且內容逐欄位等價（含遞迴層）。
+  // 原生节点是同一个物件（不是复制品），且内容逐栏位等价（含递回层）。
   assert.equal(record2.native, record.native, "explanation 不得重建 native 物件");
   assert.deepEqual(record2.native, nativeBefore);
-  assert.deepEqual(record.native, nativeBefore, "原 record 的原生欄位不得被改寫");
+  assert.deepEqual(record.native, nativeBefore, "原 record 的原生栏位不得被改写");
 
-  // 產品的解釋只住在 explanation：原生 message 未被產品文案覆蓋。
+  // 产品的解释只住在 explanation：原生 message 未被产品文案覆盖。
   assert.equal(record2.explanation?.failureClass, "content_rejected");
   assert.equal(record2.explanation?.detail, "upstream rejected: content policy");
   assert.equal(record2.explanation?.humanMessage, humanMessageForFailureClass("content_rejected"));
@@ -100,7 +100,7 @@ test("FG-01：產品解釋寫入不改動原生欄位（同一物件、逐欄位
   assert.equal(record2.native.cause?.cause?.message, "ECONNRESET while reading upstream body");
 });
 
-test("FG-01 對抗性：迴圈 metadata 不得拋錯，且不得靜默丟欄位", () => {
+test("FG-01 对抗性：回圈 metadata 不得抛错，且不得静默丢栏位", () => {
   const metadata: Record<string, unknown> = { provider: "adobe2firefly" };
   metadata.self = metadata;
   metadata.when = new Date("2026-09-23T00:00:00.000Z");
@@ -109,16 +109,16 @@ test("FG-01 對抗性：迴圈 metadata 不得拋錯，且不得靜默丟欄位"
   const native = captureNativeFailure(error);
   assert.equal(native.code, "X-1");
   assert.equal(native.message, "upstream blew up");
-  // 可序列化的欄位原樣保留。
+  // 可序列化的栏位原样保留。
   assert.equal(native.metadata?.provider, "adobe2firefly");
-  // 不可序列化的欄位以可辨識字串代替，不是消失。
+  // 不可序列化的栏位以可辨识字串代替，不是消失。
   assert.equal(native.metadata?.self, "[unserializable:object]");
   assert.equal(typeof native.metadata?.when, "string");
-  // 整個記錄仍可序列化（落 jsonb 不會炸）。
+  // 整个记录仍可序列化（落 jsonb 不会炸）。
   assert.ok(serializeFailureRecord(createFailureRecord({ error })).length > 0);
 });
 
-test("FG-01：序列化 → 解析逐欄位等價（含遞迴層），且版本閘可辨識地拒絕未知版本", () => {
+test("FG-01：序列化 → 解析逐栏位等价（含递回层），且版本闸可辨识地拒绝未知版本", () => {
   const { outer } = syntheticUpstreamError();
   const record = createFailureRecord({ error: outer, explanation: explainFailure(classifySupplierFailure(outer)) });
 
@@ -144,7 +144,7 @@ test("FG-01：序列化 → 解析逐欄位等價（含遞迴層），且版本�
   assert.equal(missing.reason, "missing");
 });
 
-test("FG-01 對抗性：迴圈 cause 不得無限遞迴或拋錯（且深度有上限）", () => {
+test("FG-01 对抗性：回圈 cause 不得无限递回或抛错（且深度有上限）", () => {
   const looped = Object.assign(new Error("self referencing failure"), { code: "LOOP" });
   (looped as unknown as { cause: unknown }).cause = looped;
 
@@ -152,7 +152,7 @@ test("FG-01 對抗性：迴圈 cause 不得無限遞迴或拋錯（且深度有�
   assert.equal(native.code, "LOOP");
   assert.equal(native.cause?.message, "[circular cause]");
 
-  // 深度上限：12 層 cause 不會被全部展開（避免打爆 jsonb 與日誌）。
+  // 深度上限：12 层 cause 不会被全部展开（避免打爆 jsonb 与日志）。
   let deep: Error = new Error("level-0");
   for (let index = 1; index <= 12; index += 1) {
     deep = Object.assign(new Error(`level-${index}`), { cause: deep });
@@ -163,6 +163,6 @@ test("FG-01 對抗性：迴圈 cause 不得無限遞迴或拋錯（且深度有�
     depth += 1;
     cursor = cursor.cause ?? null;
   }
-  assert.ok(depth <= 10, `cause 展開深度應被限制，實際 ${depth}`);
+  assert.ok(depth <= 10, `cause 展开深度应被限制，实际 ${depth}`);
   assert.ok(depth >= 2);
 });

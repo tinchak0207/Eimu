@@ -8,7 +8,7 @@ import {
   extractWorkflowFromPng,
 } from "./workflow-png";
 
-// 1x1 透明 PNG（67 bytes，含 IEND chunk），十六進位已知良好的最小合法樣本。
+// 1x1 透明 PNG（67 bytes，含 IEND chunk），十六进位已知良好的最小合法样本。
 const MINIMAL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -27,11 +27,11 @@ test("embed keeps the original PNG bytes intact and appends a valid trailing blo
   const workflow = JSON.stringify({ prompt: "product poster", copies: 2 });
   const embedded = embedWorkflowIntoPng(png, workflow);
 
-  // 前綴必須逐位元組等於原始 PNG：開圖功能不受影響（IEND 與 CRC 都在前綴內）。
+  // 前缀必须逐位元组等于原始 PNG：开图功能不受影响（IEND 与 CRC 都在前缀内）。
   assert.equal(embedded.length, png.length + WORKFLOW_PNG_HEADER_SIZE + new TextEncoder().encode(workflow).length);
   assert.deepEqual(Array.from(embedded.subarray(0, png.length)), Array.from(png));
 
-  // 尾端 13 位元組 = magic + version + length
+  // 尾端 13 位元组 = magic + version + length
   const tail = embedded.subarray(embedded.length - WORKFLOW_PNG_HEADER_SIZE);
   const magic = String.fromCharCode(...Array.from(tail.subarray(0, 8)));
   assert.equal(magic, WORKFLOW_PNG_MAGIC);
@@ -57,7 +57,7 @@ test("roundtrip embed -> extract returns the exact workflow JSON", () => {
 
 test("roundtrip preserves unicode without mangling", () => {
   const png = minimalPng();
-  const workflow = JSON.stringify({ prompt: "產品海報，柔和光影，中文文案可直接閱讀" });
+  const workflow = JSON.stringify({ prompt: "产品海报，柔和光影，中文文案可直接阅读" });
   const embedded = embedWorkflowIntoPng(png, workflow);
   assert.equal(extractWorkflowFromPng(embedded), workflow);
 });
@@ -74,13 +74,13 @@ test("corrupted trailing block returns null", () => {
   const workflow = JSON.stringify({ prompt: "x" });
   const embedded = embedWorkflowIntoPng(png, workflow);
 
-  // 把 magic 換掉一個位元組 → 視為一般 PNG，回 null
+  // 把 magic 换掉一个位元组 → 视为一般 PNG，回 null
   const badMagic = Uint8Array.from(embedded);
   badMagic[badMagic.length - WORKFLOW_PNG_HEADER_SIZE] =
     badMagic[badMagic.length - WORKFLOW_PNG_HEADER_SIZE] === 0x57 ? 0x00 : 0x58;
   assert.equal(extractWorkflowFromPng(badMagic), null);
 
-  // 版本位元組不符 → 回 null
+  // 版本位元组不符 → 回 null
   const badVersion = Uint8Array.from(embedded);
   badVersion[badVersion.length - 5] = 99;
   assert.equal(extractWorkflowFromPng(badVersion), null);
@@ -94,7 +94,7 @@ test("corrupted trailing block returns null", () => {
 
 test("non-PNG bytes that happen to carry the magic still return null", () => {
   const fake = Uint8Array.from(randomBytes(512));
-  // 自己拼一個有 magic 但沒有 PNG 簽名的資料
+  // 自己拼一个有 magic 但没有 PNG 签名的资料
   const suffix = new TextEncoder().encode(WORKFLOW_PNG_MAGIC);
   const withMagic = new Uint8Array(fake.length + suffix.length + 5);
   withMagic.set(fake, 0);

@@ -1,16 +1,16 @@
-// questions-gw.ts —— 自 index.ts 第二階段 Wave3 抽取：question 工具鏈（normalizeQuestionOptions/normalizeQuestionItems/isQuestionAnswers/lookupOpencodeQuestion/emitQuestionRequest/hydratePendingQuestions/rejectOpencodeQuestion/handleQuestion/settleQuestion），原 index.ts 5181–5450 行，逐行機械搬運。
+// questions-gw.ts —— 自 index.ts 第二阶段 Wave3 抽取：question 工具链（normalizeQuestionOptions/normalizeQuestionItems/isQuestionAnswers/lookupOpencodeQuestion/emitQuestionRequest/hydratePendingQuestions/rejectOpencodeQuestion/handleQuestion/settleQuestion），原 index.ts 5181–5450 行，逐行机械搬运。
 import type { PendingQuestion, SessionState } from "./types-gateway.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { jsonError } from "./gw-lib.ts"
 import { armQuestionHeartbeat, armQuestionAssumeTimer, clearQuestionHeartbeat, armMidturnStallTimer } from "./timers-gw.ts"
-// 2026-10-02：記錄「用戶真的答覆過 question」。此紀錄是模板偏離（deviate_from_template）
-// 的「用戶同意憑據」——模型自宣告不等於有用戶同意，須以網關記錄的用戶真答覆為準。
-// 只在 handleQuestion（用戶真答覆）路徑記；settleQuestion 的自動跳過代答與 3 分鐘超時
-// 自動代答**都不是用戶同意**，一律不記（見下方 handleQuestion 成功分支）。
+// 2026-10-02：记录「用户真的答覆过 question」。此纪录是模板偏离（deviate_from_template）
+// 的「用户同意凭据」——模型自宣告不等于有用户同意，须以网关记录的用户真答覆为准。
+// 只在 handleQuestion（用户真答覆）路径记；settleQuestion 的自动跳过代答与 3 分钟超时
+// 自动代答**都不是用户同意**，一律不记（见下方 handleQuestion 成功分支）。
 import { markUserAnsweredQuestion } from "./canvas-cascade-state.ts"
-// TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地後換成真 import（bun build 硬查 named import）。
+// TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地后换成真 import（bun build 硬查 named import）。
 export function normalizeQuestionOptions(raw: unknown): Array<{ label: string; description?: string }> {
   if (!Array.isArray(raw)) return []
   const out: Array<{ label: string; description?: string }> = []
@@ -66,9 +66,9 @@ export async function lookupOpencodeQuestion(state: SessionState, callId: string
         const tool = rec.tool && typeof rec.tool === "object" ? (rec.tool as Record<string, unknown>) : null
         const toolCallId = typeof tool?.callID === "string" ? tool.callID : ""
         if (toolCallId && toolCallId !== callId) continue
-        // 2026-08-31: 移除 sessionID 過濾——opencode question record 的
-        // sessionID 常是幽靈 session（不存在於 session 清單），會濾掉全部卡片。
-        // tool.callID 已全域唯一，無跨 session 誤配風險。
+        // 2026-08-31: 移除 sessionID 过滤——opencode question record 的
+        // sessionID 常是幽灵 session（不存在于 session 清单），会滤掉全部卡片。
+        // tool.callID 已全域唯一，无跨 session 误配风险。
         const questions = normalizeQuestionItems(rec.questions)
         if (questions.length === 0) continue
         return { id, questions }
@@ -102,9 +102,9 @@ export async function emitQuestionRequest(state: SessionState, callId: string, i
   if (state.pendingQuestions.has(requestId)) return
   state.pendingQuestions.set(requestId, { requestId, callId, questions })
   emitToSession(state, "question.request", { request_id: requestId, questions })
-  // R8-B 工單 #3：pending 期間 30s 心跳接管用戶可見性（R8 實錘 129s 零幀死寂）。
+  // R8-B 工单 #3：pending 期间 30s 心跳接管用户可见性（R8 实锤 129s 零帧死寂）。
   armQuestionHeartbeat(state)
-  // 片AJ：3 分鐘無人回覆按推薦方案代答繼續（assumed）。
+  // 片AJ：3 分钟无人回覆按推荐方案代答继续（assumed）。
   armQuestionAssumeTimer(state)
 }
 
@@ -127,7 +127,7 @@ export async function hydratePendingQuestions(state: SessionState): Promise<void
         const id = typeof rec.id === "string" ? rec.id : ""
         if (!id.startsWith("que")) continue
         const sessionID = typeof rec.sessionID === "string" ? rec.sessionID : ""
-        // 2026-08-31: 同 lookupOpencodeQuestion，移除 sessionID 過濾（幽靈 session 誤殺）
+        // 2026-08-31: 同 lookupOpencodeQuestion，移除 sessionID 过滤（幽灵 session 误杀）
         const questions = normalizeQuestionItems(rec.questions)
         if (questions.length === 0) continue
         if (state.pendingQuestions.has(id)) continue
@@ -135,9 +135,9 @@ export async function hydratePendingQuestions(state: SessionState): Promise<void
         const callId = typeof tool?.callID === "string" ? tool.callID : ""
         state.pendingQuestions.set(id, { requestId: id, callId, questions })
         emitToSession(state, "question.request", { request_id: id, questions })
-        // R8-B 工單 #3：hydrate 出的 pending question 同樣布心跳。
+        // R8-B 工单 #3：hydrate 出的 pending question 同样布心跳。
         armQuestionHeartbeat(state)
-        // 片AJ：hydrate 的 pending 同樣布 3 分鐘代答哨。
+        // 片AJ：hydrate 的 pending 同样布 3 分钟代答哨。
         armQuestionAssumeTimer(state)
       }
       return
@@ -201,22 +201,22 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
       if (res.ok) {
         state.pendingQuestions.delete(requestId)
         const answerText = body.answers.flat().find((cell) => cell.length > 0) ?? ""
-        // R8-B 工單 #4：記錄答覆語義。opencode 的 reply 端點會把 answers 作為
-        // question 工具結果回灌模型上下文（R8 實錘模型正確執行「先看第三章」
-        // /「就地打住」）；gateway 側職責 = 不再用兜底結語「要繼續跑嗎」自我推翻
-        //（emitRecoveryClosingIfSilent 讓位），並把哨兵打點刷新到恢復段起點。
+        // R8-B 工单 #4：记录答覆语义。opencode 的 reply 端点会把 answers 作为
+        // question 工具结果回灌模型上下文（R8 实锤模型正确执行「先看第三章」
+        // /「就地打住」）；gateway 侧职责 = 不再用兜底结语「要继续跑吗」自我推翻
+        //（emitRecoveryClosingIfSilent 让位），并把哨兵打点刷新到恢复段起点。
         state.questionAnsweredThisTurn = true
         state.turnFrozenByQuestion = false
-        // 2026-10-02：這是「用戶真答覆」路徑（用戶在 question 卡上實際作答）→ 記錄同意憑據，
-        // 供模板偏離（deviate_from_template）當「用戶同意」的機器可驗事實。settleQuestion 的
-        // 自動跳過代答與 3 分鐘超時自動代答不走這裡，故不會被誤記為同意。
+        // 2026-10-02：这是「用户真答覆」路径（用户在 question 卡上实际作答）→ 记录同意凭据，
+        // 供模板偏离（deviate_from_template）当「用户同意」的机器可验事实。settleQuestion 的
+        // 自动跳过代答与 3 分钟超时自动代答不走这里，故不会被误记为同意。
         markUserAnsweredQuestion(state.sessionId)
         if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
         state.turnLastFrameAt = Date.now()
         state.turnProgressAt = Date.now()
         state.lastUserVisibleAt = Date.now()
-        // 恢復段重新布哨：若答覆後 opencode 未續跑，中段停滯哨 90s 兜底；
-        // pending 期間停滯哨會讓位（見 armMidturnStallTimer），此處已清空 pending。
+        // 恢复段重新布哨：若答覆后 opencode 未续跑，中段停滞哨 90s 兜底；
+        // pending 期间停滞哨会让位（见 armMidturnStallTimer），此处已清空 pending。
         armMidturnStallTimer(state)
         emitToSession(state, "question.replied", { request_id: requestId, answer: answerText })
         return Response.json({ ok: true })
@@ -231,14 +231,14 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
   return jsonError(lastStatus >= 400 ? lastStatus : 502, lastText || "failed to reply to question", "backend_error", "backend_error")
 }
 
-// R9-2（2026-08-30）：question pending 時新消息入口的自動跳過代答。轉發核心
-// 逐行複製 handleQuestion 的 reply 鏈路（雙 URL 兜底 + ok 後同款記賬），只換
-// answer 內容為跳過語義；best-effort——上游失敗不拋出，由調用方清 Map 並照常
-// 發新消息。
+// R9-2（2026-08-30）：question pending 时新消息入口的自动跳过代答。转发核心
+// 逐行复制 handleQuestion 的 reply 链路（双 URL 兜底 + ok 后同款记账），只换
+// answer 内容为跳过语义；best-effort——上游失败不抛出，由调用方清 Map 并照常
+// 发新消息。
 export async function settleQuestion(state: SessionState, requestId: string, answerOverride?: string): Promise<void> {
   const answerText = answerOverride ?? "（用户已转向新话题，本问题自动跳过）"
-  // reply 端點要求 answers 為 string[][] 且每格非空（isQuestionAnswers 同款），
-  // 一行對應一道 question：逐題填充同一句跳過文案。
+  // reply 端点要求 answers 为 string[][] 且每格非空（isQuestionAnswers 同款），
+  // 一行对应一道 question：逐题填充同一句跳过文案。
   const pending = state.pendingQuestions.get(requestId)
   const answers = Array.from({ length: Math.max(pending?.questions.length ?? 1, 1) }, () => [answerText])
   const urls = [
@@ -264,9 +264,9 @@ export async function settleQuestion(state: SessionState, requestId: string, ans
   }
   state.pendingQuestions.delete(requestId)
   if (replied) {
-    // ok 後記賬同 handleQuestion：答覆語義標記 + 時間戳刷新。此處布的中段哨捕獲舊
-    // turnGen，handleSendMessage 隨後 bump turnGen，tick 因 gen
-    // 不匹配自行失效，無殘留（見 armMidturnStallTimer 守衛）。
+    // ok 后记账同 handleQuestion：答覆语义标记 + 时间戳刷新。此处布的中段哨捕获旧
+    // turnGen，handleSendMessage 随后 bump turnGen，tick 因 gen
+    // 不匹配自行失效，无残留（见 armMidturnStallTimer 守卫）。
     state.questionAnsweredThisTurn = true
     state.turnFrozenByQuestion = false
     if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
@@ -275,6 +275,6 @@ export async function settleQuestion(state: SessionState, requestId: string, ans
     state.lastUserVisibleAt = Date.now()
     armMidturnStallTimer(state)
   }
-  // 無論上游成敗都按既有形態 emit：前端 question 卡必須變已決，否則永遠 pending。
+  // 无论上游成败都按既有形态 emit：前端 question 卡必须变已决，否则永远 pending。
   emitToSession(state, "question.replied", { request_id: requestId, answer: answerText })
 }

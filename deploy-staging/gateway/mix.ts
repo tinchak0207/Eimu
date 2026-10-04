@@ -1,7 +1,7 @@
-// B5（2026-08-31）混音後置 pass — REQ-EDIT-06 三軌（voice/music/sfx）+ ducking + 響度量測。
-// 口徑權威 = editor/composeEngine L1125（atrim/asetpts/volume/afade/adelay），本檔不改輪子一字節。
-// ducking 配方 orchestrator 實測：sidechaincompress threshold=0.05 ratio=8 attack=20 release=300（duck 深度 20.5dB）。
-// 量測順序鐵律：先 duck 出純壓縮 bus、再與人聲 amix——量 BGM 時人聲能量會掩蓋 duck 深度。
+// B5（2026-08-31）混音后置 pass — REQ-EDIT-06 三轨（voice/music/sfx）+ ducking + 响度量测。
+// 口径权威 = editor/composeEngine L1125（atrim/asetpts/volume/afade/adelay），本档不改轮子一字节。
+// ducking 配方 orchestrator 实测：sidechaincompress threshold=0.05 ratio=8 attack=20 release=300（duck 深度 20.5dB）。
+// 量测顺序铁律：先 duck 出纯压缩 bus、再与人声 amix——量 BGM 时人声能量会掩盖 duck 深度。
 import { mkdir, access, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { getTimeline, totalDurationSec, TimelineValidationError, type Timeline, type AudioClip, type AudioTrack } from "./timeline"
@@ -35,7 +35,7 @@ async function fileExists(p: string): Promise<boolean> {
   try { await access(p); return true } catch { return false }
 }
 
-/** 素材解析：本地檔直用；http(s) 下載到 tmp。返回 {path, downloaded} 或 null（不可達）。B6 master 導出複用。 */
+/** 素材解析：本地档直用；http(s) 下载到 tmp。返回 {path, downloaded} 或 null（不可达）。B6 master 导出复用。 */
 export async function resolveSource(src: string, idx: number, ext: string): Promise<{ path: string } | null> {
   if (/^https?:\/\//.test(src)) {
     await mkdir(TMP_DIR, { recursive: true })
@@ -47,7 +47,7 @@ export async function resolveSource(src: string, idx: number, ext: string): Prom
   return (await fileExists(src)) ? { path: src } : null
 }
 
-/** 單 clip 音頻圖（時間線座標）：atrim→asetpts→volume→afade→adelay（composeEngine L1125 口徑）。 */
+/** 单 clip 音频图（时间线座标）：atrim→asetpts→volume→afade→adelay（composeEngine L1125 口径）。 */
 function clipFilter(c: AudioClip): string {
   const dur = Math.max(0.01, (c.outSec ?? c.duration) - (c.inSec ?? 0))
   const parts = [
@@ -61,8 +61,8 @@ function clipFilter(c: AudioClip): string {
   return parts.join(",")
 }
 
-/** ebur128 summary 解析（peak=true 時 Peak 行即 true peak，單位 dBTP 口徑）。
- *  只解析 Summary 塊：live 遙測行也有 "I: x LUFS"，開頭靜音的節目首行 running I=-70 會污染量測（0831 B5 實測）。 */
+/** ebur128 summary 解析（peak=true 时 Peak 行即 true peak，单位 dBTP 口径）。
+ *  只解析 Summary 块：live 遥测行也有 "I: x LUFS"，开头静音的节目首行 running I=-70 会污染量测（0831 B5 实测）。 */
 function parseEbur128(stderr: string): { i: number | null; tp: number | null; lra: number | null } {
   const sum = stderr.slice(stderr.lastIndexOf("Summary:"))
   const grab = (re: RegExp): number | null => {
@@ -79,7 +79,7 @@ const num = (v: number | null): number | null => (v === null || Number.isNaN(v) 
 const negInf = (v: number | null): number | null => (v !== null && !isFinite(v) ? -100 : v)
 
 async function measureEbur128(ffmpeg: string, file: string) {
-  // 單引號包 -af 參數：filtergraph 經 shell 層時方括號/等號有被咬的實測風險（0831 B5 事故）
+  // 单引号包 -af 参数：filtergraph 经 shell 层时方括号/等号有被咬的实测风险（0831 B5 事故）
   const r = await run(`${ffmpeg} -hide_banner -nostats -i ${shq(file)} -af 'ebur128=peak=true' -f null - 2>&1`, 120_000)
   const e = parseEbur128(r.stderr + r.stdout)
   return { integrated_lufs: num(negInf(e.i)), true_peak_dbtp: num(negInf(e.tp)), lra: num(e.lra) }
@@ -104,16 +104,16 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
   for (const c of tl.audioClips ?? []) {
     const kind = trackById.get(c.trackId)?.kind
     if (!kind) {
-      syncErrors.push({ clip_id: c.id, type: "track_missing", detail: `trackId=${c.trackId} 無對應音軌` })
+      syncErrors.push({ clip_id: c.id, type: "track_missing", detail: `trackId=${c.trackId} 无对应音轨` })
       continue
     }
     if (c.startSec + (c.outSec ?? c.duration) - (c.inSec ?? 0) > total + 0.05) {
-      syncErrors.push({ clip_id: c.id, type: "beyond_timeline", detail: `endSec 超出時間線總長 ${total.toFixed(3)}s` })
+      syncErrors.push({ clip_id: c.id, type: "beyond_timeline", detail: `endSec 超出时间线总长 ${total.toFixed(3)}s` })
       continue
     }
     groups[kind === "voice" ? "voice" : kind === "bgm" ? "music" : "sfx"].push(c)
   }
-  // bgm 主軌（EditorBgm）視為 music 一枚 clip
+  // bgm 主轨（EditorBgm）视为 music 一枚 clip
   const bgmEntry: AudioClip | null = tl.bgm?.path
     ? { id: "bgm-virtual", trackId: "bgm-virtual", path: tl.bgm.path, label: tl.bgm.label || "bgm", startSec: 0, duration: total, inSec: 0, outSec: total, volume: tl.bgm.volume ?? 1 }
     : null
@@ -128,21 +128,21 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     notes,
   }
   if (syncErrors.length) {
-    notes.push("sync_errors 非空：先按 clip_id 修時間線再重跑（本規則不渲染不量測）")
+    notes.push("sync_errors 非空：先按 clip_id 修时间线再重跑（本规则不渲染不量测）")
     return { report, mixPath: null, workDir: "" }
   }
   if (!groups.voice.length && !groups.music.length && !groups.sfx.length) {
-    notes.push("時間線無任何音頻素材，無混音可量測")
+    notes.push("时间线无任何音频素材，无混音可量测")
     return { report, mixPath: null, workDir: "" }
   }
 
   const ffmpeg = await detectFfmpeg()
-  if (!ffmpeg) { notes.push("ffmpeg 不可用，量測中止"); return { report, mixPath: null, workDir: "" } }
+  if (!ffmpeg) { notes.push("ffmpeg 不可用，量测中止"); return { report, mixPath: null, workDir: "" } }
 
   const workDir = path.join(TMP_DIR, `mix-flow-${Date.now()}`)
   await mkdir(workDir, { recursive: true })
   try {
-    // 素材解析（含下載），失敗進 sync_errors
+    // 素材解析（含下载），失败进 sync_errors
     const sources = new Map<string, string>()
     let idx = 0
     let resolveFail = false
@@ -150,7 +150,7 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
       const ext = (c.path.split("?")[0].split(".").pop() || "wav")
       const s = await resolveSource(c.path, idx++, ext)
       if (!s) {
-        syncErrors.push({ clip_id: c.id, type: "source_unreachable", detail: `素材不可達：${c.path.slice(0, 120)}` })
+        syncErrors.push({ clip_id: c.id, type: "source_unreachable", detail: `素材不可达：${c.path.slice(0, 120)}` })
         resolveFail = true
         continue
       }
@@ -158,16 +158,16 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     }
     if (resolveFail) {
       report.sync_errors = syncErrors
-      notes.push("素材解析存在失敗，本輪不渲染不量測")
+      notes.push("素材解析存在失败，本轮不渲染不量测")
       return { report, mixPath: null, workDir }
     }
 
-    // 濾鏡圖：voice 側鏈源 + bus（music+sfx），duck 後 amix
+    // 滤镜图：voice 侧链源 + bus（music+sfx），duck 后 amix
     const inputs: string[] = []
     const chains: string[] = []
     const addInput = (c: AudioClip): string => {
       const p = sources.get(c.id)!
-      // 輸入 link 只能用裸索引 [N:a]；label 含冒號會被 ffmpeg 當 stream specifier 解析而 matches no streams
+      // 输入 link 只能用裸索引 [N:a]；label 含冒号会被 ffmpeg 当 stream specifier 解析而 matches no streams
       const inIdx = inputs.length
       inputs.push(`-i ${shq(p)}`)
       const lb = `c${inIdx}`
@@ -181,20 +181,20 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     const busLabels = [...groups.music, ...groups.sfx].map(addInput)
     const total3 = total.toFixed(3)
     const tail = `atrim=0:${total3},asetpts=PTS-STARTPTS[mix]`
-    // 輸入鏈段（[N:a]atrim...[cNf]）是 filtergraph 的上游，必須先行拼接
+    // 输入链段（[N:a]atrim...[cNf]）是 filtergraph 的上游，必须先行拼接
     let fc = chains.length ? chains.join(";") + ";" : ""
     if (voiceLabels.length) fc += amixChain(voiceLabels, "voiceMix") + ";"
     if (busLabels.length) fc += amixChain(busLabels, "bus") + ";"
     let maps = ""
     if (voiceLabels.length && busLabels.length) {
-      // label 單次消費：voiceMix/ducked 各 asplit 一份單獨輸出（sidechain 側鏈一份、終混一份）
-      // 第二輸出檔 = ducked bus（純壓縮 BGM/SFX），duck 深度量測必須量它；量未壓縮 bus 恆為 0dB（0831 B5 實測坑）
+      // label 单次消费：voiceMix/ducked 各 asplit 一份单独输出（sidechain 侧链一份、终混一份）
+      // 第二输出档 = ducked bus（纯压缩 BGM/SFX），duck 深度量测必须量它；量未压缩 bus 恒为 0dB（0831 B5 实测坑）
       fc += `[voiceMix]asplit=2[voiceSc][voiceFin];[bus][voiceSc]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=300[ducked];[ducked]asplit=2[duckMix][duckOnly];[duckMix][voiceFin]amix=inputs=2:duration=longest:normalize=0[mixfull];[mixfull]${tail}`
       maps = `-map "[mix]"`
     } else if (voiceLabels.length) {
       fc += `[voiceMix]${tail}`
       maps = `-map "[mix]"`
-      notes.push("僅人聲軌：無 BGM/SFX 可壓，ducking_events 為空")
+      notes.push("仅人声轨：无 BGM/SFX 可压，ducking_events 为空")
     } else {
       fc += `[bus]${tail}`
       maps = `-map "[mix]"`
@@ -202,20 +202,20 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     const mixRaw = path.join(workDir, "mix_raw.wav")
     const duckOnly = path.join(workDir, "duck_bus.wav")
     const needBusOnly = Boolean(voiceLabels.length && busLabels.length)
-    // filtergraph 落檔傳遞（-filter_complex_script）：0831 實測 fc 字串經 shell 層會被
-    // 切斷（`[busMain]` 咬成 `[busMai`+`n]`→matches no streams），script 檔零引用風險
+    // filtergraph 落档传递（-filter_complex_script）：0831 实测 fc 字串经 shell 层会被
+    // 切断（`[busMain]` 咬成 `[busMai`+`n]`→matches no streams），script 档零引用风险
     const fcFile = path.join(workDir, "filtergraph.txt")
     await writeFile(fcFile, fc)
-    // -map 只作用於緊隨其後的輸出檔：兩輸出必須各帶各的 -map，併排寫會把兩條流全塞進第一個 wav（wav muxer 拒多音軌）
+    // -map 只作用于紧随其后的输出档：两输出必须各带各的 -map，并排写会把两条流全塞进第一个 wav（wav muxer 拒多音轨）
     const cmd = `${ffmpeg} -y -hide_banner -loglevel error ${inputs.join(" ")} -filter_complex_script ${shq(fcFile)} ${maps} ${shq(mixRaw)}${needBusOnly ? ` -map "[duckOnly]" ${shq(duckOnly)}` : ""}`
     const r = await run(cmd, 300_000)
     if (r.exit_code !== 0) {
-      notes.push(`混音渲染失敗：${(r.stderr || "unknown").slice(-600)}`)
+      notes.push(`混音渲染失败：${(r.stderr || "unknown").slice(-600)}`)
       return { report, mixPath: null, workDir }
     }
 
-    // ducking_events：量 ducked bus（純壓縮 BGM/SFX，無人聲污染）對比人聲窗口內外 RMS。
-    // 基準窗必須落在無人聲區間——相鄰人聲時 start-1 會踩進上一段的鴨子區，基準=壓縮態→深度恆 0（0831 B5 實測）
+    // ducking_events：量 ducked bus（纯压缩 BGM/SFX，无人声污染）对比人声窗口内外 RMS。
+    // 基准窗必须落在无人声区间——相邻人声时 start-1 会踩进上一段的鸭子区，基准=压缩态→深度恒 0（0831 B5 实测）
     if (needBusOnly) {
       const voiced = groups.voice.map((c) => ({ s: c.startSec, e: Math.min(c.startSec + ((c.outSec ?? c.duration) - (c.inSec ?? 0)), total) }))
       const overlapsVoice = (s: number, d: number) => voiced.some((v) => s < v.e - 1e-3 && s + d > v.s + 1e-3)
@@ -244,33 +244,33 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
       }
     }
 
-    // 響度實測（raw 混合）
+    // 响度实测（raw 混合）
     report.measured = await measureEbur128(ffmpeg, mixRaw)
     report.compliant = report.measured.integrated_lufs !== null
       && report.measured.true_peak_dbtp !== null
       && Math.abs(report.measured.integrated_lufs + 16) <= 1.5
       && report.measured.true_peak_dbtp <= -1.0
-    if (!report.compliant) notes.push("raw 混合未達 -16 LUFS/TP -1.0 門（applyMix 將 loudnorm 兩遍法矯正後複量）")
+    if (!report.compliant) notes.push("raw 混合未达 -16 LUFS/TP -1.0 门（applyMix 将 loudnorm 两遍法矫正后复量）")
     return { report, mixPath: mixRaw, workDir }
   } catch (e) {
-    notes.push(`混音流程異常：${(e as Error).message}`)
+    notes.push(`混音流程异常：${(e as Error).message}`)
     return { report, mixPath: null, workDir }
   }
 }
 
-/** GET /agent/v1/timeline/mix：只量測不落盤。 */
+/** GET /agent/v1/timeline/mix：只量测不落盘。 */
 export async function analyzeMix(sessionId: string): Promise<MixReport> {
   const { report, mixPath, workDir } = await buildMixFlow(sessionId)
   if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
   return report
 }
 
-/** POST /agent/v1/timeline/mix：loudnorm 兩遍法渲染落盤 mix.wav。 */
+/** POST /agent/v1/timeline/mix：loudnorm 两遍法渲染落盘 mix.wav。 */
 export async function applyMix(sessionId: string): Promise<{ report: MixReport; outPath: string | null; publicUrl: string | null }> {
   const { report, mixPath, workDir } = await buildMixFlow(sessionId)
   if (report.sync_errors.length) {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
-    throw new TimelineValidationError(`sync_errors 非空（${report.sync_errors.length} 條），先修時間線再混音：` + JSON.stringify(report.sync_errors))
+    throw new TimelineValidationError(`sync_errors 非空（${report.sync_errors.length} 条），先修时间线再混音：` + JSON.stringify(report.sync_errors))
   }
   if (!mixPath) {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
@@ -278,11 +278,11 @@ export async function applyMix(sessionId: string): Promise<{ report: MixReport; 
   }
   const ffmpeg = await detectFfmpeg()
   if (!ffmpeg) return { report, outPath: null, publicUrl: null }
-  // loudnorm 兩遍：pass1 量 → pass2 注入（composeEngine 內建同款目標 I=-16/TP=-1.5/LRA=11）
+  // loudnorm 两遍：pass1 量 → pass2 注入（composeEngine 内建同款目标 I=-16/TP=-1.5/LRA=11）
   const p1 = await run(`${ffmpeg} -hide_banner -nostats -i ${shq(mixPath)} -af 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json' -f null - 2>&1`, 180_000)
   const jm = (p1.stderr + p1.stdout).match(/\{[^{}]*"input_i"[^{}]*\}/)
   if (!jm) {
-    report.notes.push("loudnorm pass1 量測解析失敗，保留 raw 混合")
+    report.notes.push("loudnorm pass1 量测解析失败，保留 raw 混合")
     const outDir = path.join(WORKSPACE_DIR, "timelines", sessionId)
     await mkdir(outDir, { recursive: true })
     const dst = path.join(outDir, "mix.wav")
@@ -296,14 +296,14 @@ export async function applyMix(sessionId: string): Promise<{ report: MixReport; 
   const lnArgs = `measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:linear=true`
   const p2 = await run(`${ffmpeg} -y -hide_banner -loglevel error -i ${shq(mixPath)} -af 'loudnorm=I=-16:TP=-1.5:LRA=11:${lnArgs}' -ar 48000 -c:a pcm_s16le ${shq(dst)}`, 180_000)
   if (p2.exit_code !== 0) {
-    report.notes.push(`loudnorm pass2 失敗：${(p2.stderr || "").slice(-200)}`)
+    report.notes.push(`loudnorm pass2 失败：${(p2.stderr || "").slice(-200)}`)
     return { report, outPath: null, publicUrl: null }
   }
   const after = await measureEbur128(ffmpeg, dst)
   report.measured = after
   report.compliant = after.integrated_lufs !== null && after.true_peak_dbtp !== null
     && Math.abs(after.integrated_lufs + 16) <= 1.5 && after.true_peak_dbtp <= -1.0
-  report.notes.push("loudnorm 兩遍法完成（I=-16/TP=-1.5 目標），publicUrl 暫不掛公網路由（本片決策：返回本地路徑）")
+  report.notes.push("loudnorm 两遍法完成（I=-16/TP=-1.5 目标），publicUrl 暂不挂公网路由（本片决策：返回本地路径）")
   if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
   return { report, outPath: dst, publicUrl: null }
 }

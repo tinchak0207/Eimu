@@ -1,37 +1,37 @@
-// device-bridge-policy.ts — W6a 裝置橋雲端側：**純函式** 政策層（零 I/O、零狀態）。
+// device-bridge-policy.ts — W6a 装置桥云端侧：**纯函式** 政策层（零 I/O、零状态）。
 //
-// 這一層是「雲端 agent 經由使用者機器的出站連線讀本機檔案」的四道守門裡，
-// 掛在**雲端閘道**上的那一道（縱深防禦的第二層）。第一層是使用者本機 daemon：
-// daemon 在真正開檔前必須 `realpath` 後再跑同一組 denylist（本檔的 isSensitivePath
-// 是字串判定，跟不了 symlink，見下方註釋）。兩層都要擋，不能只信本機端。
+// 这一层是「云端 agent 经由使用者机器的出站连线读本机档案」的四道守门里，
+// 挂在**云端闸道**上的那一道（纵深防御的第二层）。第一层是使用者本机 daemon：
+// daemon 在真正开档前必须 `realpath` 后再跑同一组 denylist（本档的 isSensitivePath
+// 是字串判定，跟不了 symlink，见下方注释）。两层都要挡，不能只信本机端。
 //
-// 為什麼是純函式：MCP/HTTP 兩條路徑都要複用同一份判定，且測試要能在不碰檔案系統、
-// 不碰網路的前提下逐條斷言。任何 I/O（實際讀檔、realpath、網路）都不進本檔。
+// 为什么是纯函式：MCP/HTTP 两条路径都要复用同一份判定，且测试要能在不碰档案系统、
+// 不碰网路的前提下逐条断言。任何 I/O（实际读档、realpath、网路）都不进本档。
 //
-// 預設 OFF：本檔本身不含開關；開關與否在 device-bridge.ts（EIMU_DEVICE_BRIDGE）。
+// 预设 OFF：本档本身不含开关；开关与否在 device-bridge.ts（EIMU_DEVICE_BRIDGE）。
 
-/** 允許經裝置橋執行的工具**最小集合**。刻意不含任何寫入／刪除／執行命令工具。 */
+/** 允许经装置桥执行的工具**最小集合**。刻意不含任何写入／删除／执行命令工具。 */
 export const DEVICE_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat"] as const
 export type DeviceBridgeTool = (typeof DEVICE_BRIDGE_TOOLS)[number]
 
-/** 單次回傳內容硬上限。避免把整個檔案灌進模型上下文。 */
+/** 单次回传内容硬上限。避免把整个档案灌进模型上下文。 */
 export const MAX_READ_BYTES = 256 * 1024
-/** 未指定 limit 時的預設讀取量。 */
+/** 未指定 limit 时的预设读取量。 */
 export const DEFAULT_READ_BYTES = 64 * 1024
 /**
- * H2 輸入側上限（契約）：遞迴型工具（grep）在裝置端逐檔讀取時，**每個檔案**
- * 的讀入位元組上限。雲端本身讀不到裝置上的檔，故由契約要求裝置端遵守；
- * 雲端把這個值隨 `grep` 參數下發（`max_file_bytes`）並在回傳時夾總量。
- * 沒有這條上限，一個超大／特殊檔（FIFO、巨大 log）可在裝置端把記憶體吃爆。
+ * H2 输入侧上限（契约）：递回型工具（grep）在装置端逐档读取时，**每个档案**
+ * 的读入位元组上限。云端本身读不到装置上的档，故由契约要求装置端遵守；
+ * 云端把这个值随 `grep` 参数下发（`max_file_bytes`）并在回传时夹总量。
+ * 没有这条上限，一个超大／特殊档（FIFO、巨大 log）可在装置端把记忆体吃爆。
  */
 export const MAX_FILE_READ_BYTES = 1024 * 1024
-/** 裝置端授權根數量上限（避免註冊表被灌爆）。 */
+/** 装置端授权根数量上限（避免注册表被灌爆）。 */
 export const MAX_AUTHORIZED_ROOTS = 64
 
-/** 敏感目錄**段**（任一層級出現即敏感，不限 home 前綴）。 */
+/** 敏感目录**段**（任一层级出现即敏感，不限 home 前缀）。 */
 const SENSITIVE_DIR_SEGMENTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker"])
 
-/** 敏感檔案**basename**（精確整段相等，防前綴混淆）。 */
+/** 敏感档案**basename**（精确整段相等，防前缀混淆）。 */
 const SENSITIVE_FILE_BASENAMES = new Set([
   ".git-credentials",
   ".netrc",
@@ -42,8 +42,8 @@ const SENSITIVE_FILE_BASENAMES = new Set([
 ])
 
 /**
- * 瀏覽器 profile 目錄：以「連續段序列」匹配（做了大小寫/分隔符正規化）。
- * 涵蓋 Linux（~/.config/*、~/.mozilla/firefox）與 macOS（~/Library/Application Support/*）。
+ * 浏览器 profile 目录：以「连续段序列」匹配（做了大小写/分隔符正规化）。
+ * 涵盖 Linux（~/.config/*、~/.mozilla/firefox）与 macOS（~/Library/Application Support/*）。
  */
 const BROWSER_PROFILE_SEQUENCES: readonly (readonly string[])[] = [
   [".mozilla", "firefox"],
@@ -75,22 +75,22 @@ function containsSequence(haystack: string[], needle: readonly string[]): boolea
 }
 
 /**
- * 敏感路徑 denylist（Claude Code 清單照抄 + 瀏覽器 profile）。
+ * 敏感路径 denylist（Claude Code 清单照抄 + 浏览器 profile）。
  *
- * 判定語義（刻意偏 fail-closed）：
- *  - 非字串／空字串 → 視為敏感（true），呼叫端不得據此放行。
- *  - 反斜線一律正規成 `/`（Windows 路徑也擋）。
- *  - 全部轉小寫後判定：大小寫碰撞（`.SSH`）在區分大小寫的 FS 上雖非真敏感目錄，
- *    但擋掉無害、放行有害。
- *  - 掃描**所有**路徑段，不是只比前綴：`/home/x/.ssh/id_rsa`、`/tmp/../.ssh/x`
- *    都命中；因此 `..` 逃逸、深層巢狀都擋得住。
- *  - 前綴混淆不誤命中：`~/.sshfoo`、`~/.ssh-backup` 的段是 `.sshfoo`／`.ssh-backup`，
- *    與 `.ssh` 整段不等 → 放行（這是真檔名，不是敏感目錄）。
+ * 判定语义（刻意偏 fail-closed）：
+ *  - 非字串／空字串 → 视为敏感（true），呼叫端不得据此放行。
+ *  - 反斜线一律正规成 `/`（Windows 路径也挡）。
+ *  - 全部转小写后判定：大小写碰撞（`.SSH`）在区分大小写的 FS 上虽非真敏感目录，
+ *    但挡掉无害、放行有害。
+ *  - 扫描**所有**路径段，不是只比前缀：`/home/x/.ssh/id_rsa`、`/tmp/../.ssh/x`
+ *    都命中；因此 `..` 逃逸、深层巢状都挡得住。
+ *  - 前缀混淆不误命中：`~/.sshfoo`、`~/.ssh-backup` 的段是 `.sshfoo`／`.ssh-backup`，
+ *    与 `.ssh` 整段不等 → 放行（这是真档名，不是敏感目录）。
  *
- * 已知限制（必須由本機 daemon 的 realpath 補上）：
- *  純字串判定跟不了 symlink。若 `~/link_to_ssh -> ~/.ssh`，這段字串不含 `.ssh` 段，
- *  本函式回 false。故 daemon 必須對「要開的檔」做 realpath 後**再跑一次**本函式；
- *  雲端這層是第二道，不是唯一一道。
+ * 已知限制（必须由本机 daemon 的 realpath 补上）：
+ *  纯字串判定跟不了 symlink。若 `~/link_to_ssh -> ~/.ssh`，这段字串不含 `.ssh` 段，
+ *  本函式回 false。故 daemon 必须对「要开的档」做 realpath 后**再跑一次**本函式；
+ *  云端这层是第二道，不是唯一一道。
  */
 export function isSensitivePath(p: unknown): boolean {
   if (typeof p !== "string" || p.trim().length === 0) return true
@@ -108,33 +108,33 @@ export function isSensitivePath(p: unknown): boolean {
   return false
 }
 
-// ── H2：遞迴型工具（grep / list_dir）的根夾制 ─────────────────────────────
+// ── H2：递回型工具（grep / list_dir）的根夹制 ─────────────────────────────
 //
-// 為什麼需要（第一性原理）：雲端只在**請求路徑**上跑 denylist。`path="/home/u/project"`
-// 本身不含敏感段而放行，但裝置端 grep 會**遞迴**進 `project/.ssh/` 並只回截斷後的行，
-// 雲端看不到遞迴到底收集了哪些檔。純字串 denylist 補不了這個洞（它跟不了遞迴），
-// 故雲端第二道防禦＝把遞迴根**夾在使用者已授權的根之下**：
-//   1. 檔案系統根（`/`、Windows 磁碟根、UNC share）一律拒——遞迴整碟。
-//   2. 遞迴根必須落在某個裝置回報的「已授權根」之內（含相等）。
-//      ⇒ 授權根 `/home/u/project` 時，父目錄 `/home/u`、`/home`、`/` 都被拒
-//        （「父目錄路徑被拒」），前綴混淆 `/home/u/project-evil` 也被拒。
-//   3. 已授權根本身（或請求路徑的任一祖先段）命中敏感名 → 拒（見 isSensitivePath）。
+// 为什么需要（第一性原理）：云端只在**请求路径**上跑 denylist。`path="/home/u/project"`
+// 本身不含敏感段而放行，但装置端 grep 会**递回**进 `project/.ssh/` 并只回截断后的行，
+// 云端看不到递回到底收集了哪些档。纯字串 denylist 补不了这个洞（它跟不了递回），
+// 故云端第二道防御＝把递回根**夹在使用者已授权的根之下**：
+//   1. 档案系统根（`/`、Windows 磁碟根、UNC share）一律拒——递回整碟。
+//   2. 递回根必须落在某个装置回报的「已授权根」之内（含相等）。
+//      ⇒ 授权根 `/home/u/project` 时，父目录 `/home/u`、`/home`、`/` 都被拒
+//        （「父目录路径被拒」），前缀混淆 `/home/u/project-evil` 也被拒。
+//   3. 已授权根本身（或请求路径的任一祖先段）命中敏感名 → 拒（见 isSensitivePath）。
 //
-// 這是**契約面**處理：雲端不知道裝置遞迴會收到哪些檔，故以「把根關進授權集」+
-// 「裝置端逐檔 denylist（另一包修 all-segment 語義）」+「裝置自報觸碰敏感即整筆拒
-// （sensitiveResultProblem）」三層合力，而非假裝雲端能列舉遞迴結果。
+// 这是**契约面**处理：云端不知道装置递回会收到哪些档，故以「把根关进授权集」+
+// 「装置端逐档 denylist（另一包修 all-segment 语义）」+「装置自报触碰敏感即整笔拒
+// （sensitiveResultProblem）」三层合力，而非假装云端能列举递回结果。
 
 /**
- * 去掉 Windows 裝置路徑前綴（`\\?\`、`\\.\`，正規化後為 `//?/`、`//./`），
- * 使 `\\?\C:\` 與 `C:\` 同判。
+ * 去掉 Windows 装置路径前缀（`\\?\`、`\\.\`，正规化后为 `//?/`、`//./`），
+ * 使 `\\?\C:\` 与 `C:\` 同判。
  */
 function stripWindowsPrefix(s: string): string {
   return s.replace(/^\/\/[?.]\//, "")
 }
 
 /**
- * 是否為檔案系統根：POSIX `/`、Windows 磁碟根（`C:`、`C:\`、`C:/`、`\\?\C:\`）、
- * UNC share 根（`\\server\share`）。空值／非字串回 false（由 isSensitivePath 以 fail-closed 處理）。
+ * 是否为档案系统根：POSIX `/`、Windows 磁碟根（`C:`、`C:\`、`C:/`、`\\?\C:\`）、
+ * UNC share 根（`\\server\share`）。空值／非字串回 false（由 isSensitivePath 以 fail-closed 处理）。
  */
 export function isFilesystemRoot(p: unknown): boolean {
   if (typeof p !== "string") return false
@@ -144,15 +144,15 @@ export function isFilesystemRoot(p: unknown): boolean {
     const rest = s.slice(2)
     return rest === "" || /^\/+$/.test(rest)
   }
-  // UNC share 根：//server/share（其下才是真正可遞迴的內容）。
+  // UNC share 根：//server/share（其下才是真正可递回的内容）。
   if (/^\/{2}[^/]+\/[^/]+$/.test(s)) return true
   return false
 }
 
 /**
- * 詞法歸一化成絕對路徑段（小寫）。相對路徑、`~`、無法解析、或 `..` 逃逸超出根
- * 之上者 → null（呼叫端一律當作「不在任何根之下」＝拒）。
- * 不碰檔案系統、不解 symlink（那是裝置端 realpath 的職責）。
+ * 词法归一化成绝对路径段（小写）。相对路径、`~`、无法解析、或 `..` 逃逸超出根
+ * 之上者 → null（呼叫端一律当作「不在任何根之下」＝拒）。
+ * 不碰档案系统、不解 symlink（那是装置端 realpath 的职责）。
  */
 function lexicalSegments(p: unknown): string[] | null {
   if (typeof p !== "string") return null
@@ -174,10 +174,10 @@ function lexicalSegments(p: unknown): string[] | null {
 }
 
 /**
- * 同 lexicalSegments，但**保留原大小寫**（授權回執顯示用）。
- * 絕對／相對、`..` 逃逸、Windows 前綴的判定逐條同 lexicalSegments，唯一差別是不 toLowerCase。
- * 既有判定（isPathWithinRoot／matchRuleSpecifier／denylist）一律走 lexicalSegments（小寫），
- * 本函式不參與任何放行判斷，故不改變大小寫不敏感語義。
+ * 同 lexicalSegments，但**保留原大小写**（授权回执显示用）。
+ * 绝对／相对、`..` 逃逸、Windows 前缀的判定逐条同 lexicalSegments，唯一差别是不 toLowerCase。
+ * 既有判定（isPathWithinRoot／matchRuleSpecifier／denylist）一律走 lexicalSegments（小写），
+ * 本函式不参与任何放行判断，故不改变大小写不敏感语义。
  */
 function lexicalSegmentsPreserveCase(p: unknown): string[] | null {
   if (typeof p !== "string") return null
@@ -199,9 +199,9 @@ function lexicalSegmentsPreserveCase(p: unknown): string[] | null {
 }
 
 /**
- * candidate 是否落在 root 之內（含相等）。
- * 以「段」逐段比對，天生杜絕前綴混淆（`/home/u/project-evil` 不匹配 `/home/u/project`）。
- * root 為檔案系統根、相對路徑、`..` 逃逸 → false（fail-closed）。
+ * candidate 是否落在 root 之内（含相等）。
+ * 以「段」逐段比对，天生杜绝前缀混淆（`/home/u/project-evil` 不匹配 `/home/u/project`）。
+ * root 为档案系统根、相对路径、`..` 逃逸 → false（fail-closed）。
  */
 export function isPathWithinRoot(candidate: unknown, root: unknown): boolean {
   if (isFilesystemRoot(root) || isSensitivePath(root)) return false
@@ -214,8 +214,8 @@ export function isPathWithinRoot(candidate: unknown, root: unknown): boolean {
 }
 
 /**
- * grep/list_dir 的遞迴根判定。回傳 null＝放行；否則回拒收原因字串。
- * 順序：檔案系統根 → 無授權根 → 不在任何授權根之下。
+ * grep/list_dir 的递回根判定。回传 null＝放行；否则回拒收原因字串。
+ * 顺序：档案系统根 → 无授权根 → 不在任何授权根之下。
  */
 export function recursiveRootProblem(p: unknown, authorizedRoots: unknown): string | null {
   if (isFilesystemRoot(p)) return "filesystem_root"
@@ -229,8 +229,8 @@ export function recursiveRootProblem(p: unknown, authorizedRoots: unknown): stri
 }
 
 /**
- * 淨化裝置回報的已授權根：只留可歸一化的絕對路徑、非敏感、非檔案系統根；去重、限量。
- * 敏感／根／相對／`~` 一律**丟棄**（不是報錯）——授權集寧缺勿濫，缺了只是少放行。
+ * 净化装置回报的已授权根：只留可归一化的绝对路径、非敏感、非档案系统根；去重、限量。
+ * 敏感／根／相对／`~` 一律**丢弃**（不是报错）——授权集宁缺勿滥，缺了只是少放行。
  */
 export function sanitizeAuthorizedRoots(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
@@ -241,7 +241,7 @@ export function sanitizeAuthorizedRoots(raw: unknown): string[] {
     if (p.length === 0) continue
     if (isSensitivePath(p) || isFilesystemRoot(p)) continue
     const segs = lexicalSegments(p)
-    if (!segs || segs.length === 0) continue // 相對／`~`／無法歸一化／空段 → 不可作根
+    if (!segs || segs.length === 0) continue // 相对／`~`／无法归一化／空段 → 不可作根
     if (!out.includes(p)) out.push(p)
     if (out.length >= MAX_AUTHORIZED_ROOTS) break
   }
@@ -249,11 +249,11 @@ export function sanitizeAuthorizedRoots(raw: unknown): string[] {
 }
 
 /**
- * H2 契約面第二層：裝置自報「遞迴時是否觸碰到敏感段」。
- * 若裝置在 result 標記 `sensitive_path_touched===true`、`excluded_sensitive_count>0`
- * 或 `sensitive_paths` 非空，雲端**整筆拒絕**（不落地結果）。這是裝置端逐檔 denylist
- * 的旁證；裝置誠實（威脅模型＝雲端 agent 被誘導），故自報可用作縱深。
- * 未攜帶欄位不視為「有觸碰」（避免與既有客戶端不相容）。
+ * H2 契约面第二层：装置自报「递回时是否触碰到敏感段」。
+ * 若装置在 result 标记 `sensitive_path_touched===true`、`excluded_sensitive_count>0`
+ * 或 `sensitive_paths` 非空，云端**整笔拒绝**（不落地结果）。这是装置端逐档 denylist
+ * 的旁证；装置诚实（威胁模型＝云端 agent 被诱导），故自报可用作纵深。
+ * 未携带栏位不视为「有触碰」（避免与既有客户端不相容）。
  */
 export function sensitiveResultProblem(result: unknown): string | null {
   if (typeof result !== "object" || result === null) return null
@@ -265,21 +265,21 @@ export function sensitiveResultProblem(result: unknown): string | null {
   return null
 }
 
-/** grep 逐檔讀取上限夾制：非有限／<=0 → 上限；其餘向下取整並夾到上限。 */
+/** grep 逐档读取上限夹制：非有限／<=0 → 上限；其余向下取整并夹到上限。 */
 export function clampFileBytes(requested: unknown): number {
   const n = typeof requested === "number" ? requested : Number.NaN
   if (!Number.isFinite(n) || n <= 0) return MAX_FILE_READ_BYTES
   return Math.min(Math.floor(n), MAX_FILE_READ_BYTES)
 }
 
-/** 工具白名單。非字串或不在白名單 → false（呼叫端一律拒收）。 */
+/** 工具白名单。非字串或不在白名单 → false（呼叫端一律拒收）。 */
 export function isToolAllowed(tool: unknown): tool is DeviceBridgeTool {
   return typeof tool === "string" && (DEVICE_BRIDGE_TOOLS as readonly string[]).includes(tool)
 }
 
 /**
- * 讀取大小夾制：非有限數／<=0 → 預設；超過上限 → 上限；其餘向下取整。
- * 回傳值保證落在 [1, MAX_READ_BYTES]。
+ * 读取大小夹制：非有限数／<=0 → 预设；超过上限 → 上限；其余向下取整。
+ * 回传值保证落在 [1, MAX_READ_BYTES]。
  */
 export function clampReadSize(requested: unknown): number {
   const n = typeof requested === "number" ? requested : Number.NaN
@@ -288,12 +288,12 @@ export function clampReadSize(requested: unknown): number {
 }
 
 export interface TruncatedText {
-  /** 實際要回給 agent 的文字；若被截斷，尾端附帶截斷標記。 */
+  /** 实际要回给 agent 的文字；若被截断，尾端附带截断标记。 */
   text: string
   truncated: boolean
-  /** 原始內容位元組數。 */
+  /** 原始内容位元组数。 */
   originalBytes: number
-  /** 保留（未含標記）的內容位元組數，保證 <= max。 */
+  /** 保留（未含标记）的内容位元组数，保证 <= max。 */
   keptBytes: number
 }
 
@@ -301,13 +301,13 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 /**
- * 以位元組為單位截斷，並附上明確標記 `…[truncated N bytes]`。
+ * 以位元组为单位截断，并附上明确标记 `…[truncated N bytes]`。
  *
- * 語義：
- *  - 內容位元組 <= max → 原樣回傳，truncated=false。
- *  - 超過 → 內容截到 <=max（UTF-8 邊界安全），再附加標記；`keptBytes <= max`。
- *  - 標記本身是「內容之外」的後設資訊，故回傳 text 的總位元組可能略大於 max；
- *    呼叫端若需要硬上限，對 `keptBytes` 設限（本函式保證它不超）。
+ * 语义：
+ *  - 内容位元组 <= max → 原样回传，truncated=false。
+ *  - 超过 → 内容截到 <=max（UTF-8 边界安全），再附加标记；`keptBytes <= max`。
+ *  - 标记本身是「内容之外」的后设资讯，故回传 text 的总位元组可能略大于 max；
+ *    呼叫端若需要硬上限，对 `keptBytes` 设限（本函式保证它不超）。
  */
 export function truncateWithMarker(text: unknown, max: unknown): TruncatedText {
   const input = typeof text === "string" ? text : String(text ?? "")
@@ -318,7 +318,7 @@ export function truncateWithMarker(text: unknown, max: unknown): TruncatedText {
     return { text: input, truncated: false, originalBytes, keptBytes: originalBytes }
   }
   let kept = bytes.slice(0, cap)
-  // UTF-8 切在多位元組字元中間會產生 U+FFFD；退回一個位元組直到解碼尾端不再是替換字元。
+  // UTF-8 切在多位元组字元中间会产生 U+FFFD；退回一个位元组直到解码尾端不再是替换字元。
   let decoded = decoder.decode(kept)
   while (decoded.endsWith("\uFFFD") && kept.length > 0) {
     kept = kept.slice(0, kept.length - 1)
@@ -329,39 +329,39 @@ export function truncateWithMarker(text: unknown, max: unknown): TruncatedText {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// 權限決策引擎（W6b, 2026-10-04）—— Claude Code 式三桶規則 ＋ 模式檔次。
+// 权限决策引擎（W6b, 2026-10-04）—— Claude Code 式三桶规则 ＋ 模式档次。
 //
-// 為什麼是純函式：判定必須可被兩端（雲端閘道、本機 daemon）以同一份向量表逐條
-// 斷言；同一輸入必得同一輸出（無 I/O、無時間、無隨機）。模式／規則的來源（register
-// 的 body、session 授權）在 device-bridge.ts 接線，本檔只做判定。
+// 为什么是纯函式：判定必须可被两端（云端闸道、本机 daemon）以同一份向量表逐条
+// 断言；同一输入必得同一输出（无 I/O、无时间、无随机）。模式／规则的来源（register
+// 的 body、session 授权）在 device-bridge.ts 接线，本档只做判定。
 //
-// 判定序（**固定，不得調換**）：
-//   0. mode === "off" → deny（任何 invoke 一律拒，不進入授權流程）
-//   1. 硬 denylist（`isHardDeniedPath` ∪ 既有 `isSensitivePath`）→ deny，先於一切
-//   2. 檔案系統根 → deny（遞迴整碟／非具體授權目標）
-//   3. safety-check 檔案／目錄 → ask（**先於規則**；session/permanent 規則不得自動放行）
-//   4. 規則 deny（bucket denylist ⇒ 首命中）
-//   5. 規則 ask
-//   6. 規則 allow
-//   7. 模式語義（ask／auto／full）
-//   8. 預設 ask
+// 判定序（**固定，不得调换**）：
+//   0. mode === "off" → deny（任何 invoke 一律拒，不进入授权流程）
+//   1. 硬 denylist（`isHardDeniedPath` ∪ 既有 `isSensitivePath`）→ deny，先于一切
+//   2. 档案系统根 → deny（递回整碟／非具体授权目标）
+//   3. safety-check 档案／目录 → ask（**先于规则**；session/permanent 规则不得自动放行）
+//   4. 规则 deny（bucket denylist ⇒ 首命中）
+//   5. 规则 ask
+//   6. 规则 allow
+//   7. 模式语义（ask／auto／full）
+//   8. 预设 ask
 //
-// 三桶互斥優先序由 4→6 保證：deny 壓過 ask 壓過 allow；掃描各桶時「各取首命中」。
+// 三桶互斥优先序由 4→6 保证：deny 压过 ask 压过 allow；扫描各桶时「各取首命中」。
 // ══════════════════════════════════════════════════════════════════════════
 
-/** 規則的效果桶（三桶，判定序 deny → ask → allow）。 */
+/** 规则的效果桶（三桶，判定序 deny → ask → allow）。 */
 export type PermissionEffect = "allow" | "deny" | "ask"
-/** 規則的作用工具；`*` 為通配。 */
+/** 规则的作用工具；`*` 为通配。 */
 export type PermissionTool = DeviceBridgeTool | "*"
-/** session 級權限規則（`tool` 或 `tool(specifier)` 的形式化落點）。 */
+/** session 级权限规则（`tool` 或 `tool(specifier)` 的形式化落点）。 */
 export interface PermissionRule {
   effect: PermissionEffect
   tool: PermissionTool
-  /** `tool(specifier)` 的 specifier；缺＝`tool(*)` ≡ 該工具任意路徑。 */
+  /** `tool(specifier)` 的 specifier；缺＝`tool(*)` ≡ 该工具任意路径。 */
   specifier?: string
 }
 
-/** 判定結果。`reason` 為人類可讀（並供 needs_authorization 映射）。 */
+/** 判定结果。`reason` 为人类可读（并供 needs_authorization 映射）。 */
 export type PermissionDecision = "allow" | "deny" | "ask"
 export type PermissionReason =
   | "mode_off"
@@ -380,11 +380,11 @@ export type PermissionReason =
 export interface PermissionVerdict {
   decision: PermissionDecision
   reason: PermissionReason
-  /** 命中的規則（四桶之一命中時才有）。 */
+  /** 命中的规则（四桶之一命中时才有）。 */
   rule?: PermissionRule
 }
 
-/** per-device 模式（隨 register 上報）。預設語義為 `ask`。 */
+/** per-device 模式（随 register 上报）。预设语义为 `ask`。 */
 export type DeviceBridgeMode = "off" | "ask" | "auto" | "full"
 export const DEVICE_BRIDGE_MODES = ["off", "ask", "auto", "full"] as const
 
@@ -392,30 +392,30 @@ export function isDeviceBridgeMode(v: unknown): v is DeviceBridgeMode {
   return typeof v === "string" && (DEVICE_BRIDGE_MODES as readonly string[]).includes(v)
 }
 
-/** session 規則數量上限（避免註冊表／會話被灌爆）。 */
+/** session 规则数量上限（避免注册表／会话被灌爆）。 */
 export const MAX_PERMISSION_RULES = 64
 
-// ── 硬 denylist（全域，任何模式／規則不得繞）─────────────────────────────
+// ── 硬 denylist（全域，任何模式／规则不得绕）─────────────────────────────
 //
-// 為什麼獨立於既有 `isSensitivePath`：既有清單是「Claude Code 洩漏源碼的敏感清單照抄」，
-// 偏瀏覽器 profile；硬 denylist 是**我方補上的全域不可繞集合**（私鑰、憑證、雲端
-// 設定、系統影子檔、行程環境），份額內所有樣式在任何模式（含 full）與任何 allow
-// 規則下都必須 deny。兩者取**聯集**參與判定（既有 isSensitivePath 只加不減）。
+// 为什么独立于既有 `isSensitivePath`：既有清单是「Claude Code 泄漏源码的敏感清单照抄」，
+// 偏浏览器 profile；硬 denylist 是**我方补上的全域不可绕集合**（私钥、凭证、云端
+// 设定、系统影子档、行程环境），份额内所有样式在任何模式（含 full）与任何 allow
+// 规则下都必须 deny。两者取**联集**参与判定（既有 isSensitivePath 只加不减）。
 
-/** 敏感目錄段（任一層級出現即硬拒）。含 `~/.config`（整個設定目錄）。 */
+/** 敏感目录段（任一层级出现即硬拒）。含 `~/.config`（整个设定目录）。 */
 const HARD_DENY_DIR_SEGMENTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config"])
 
-/** 連續段序列（正規化後比對）：`~/.local/share/keyrings`、`/etc/shadow`、`/etc/sudoers`。 */
+/** 连续段序列（正规化后比对）：`~/.local/share/keyrings`、`/etc/shadow`、`/etc/sudoers`。 */
 const HARD_DENY_SEQUENCES: readonly (readonly string[])[] = [
   [".local", "share", "keyrings"],
   ["etc", "shadow"],
   ["etc", "sudoers"],
 ]
 
-/** 精確 basename（防前綴混淆：`.env.bak` 不因本集合命中，但 `^\.env\.` 樣式會命中）。 */
+/** 精确 basename（防前缀混淆：`.env.bak` 不因本集合命中，但 `^\.env\.` 样式会命中）。 */
 const HARD_DENY_BASENAMES = new Set([".git-credentials", ".netrc", ".pgpass", ".bash_history", ".env"])
 
-/** basename 樣式（已轉小寫後比對）：私鑰／憑證／service account／dotenv 家族。 */
+/** basename 样式（已转小写后比对）：私钥／凭证／service account／dotenv 家族。 */
 const HARD_DENY_BASENAME_PATTERNS: readonly RegExp[] = [
   /\.pem$/,
   /\.key$/,
@@ -429,11 +429,11 @@ const HARD_DENY_BASENAME_PATTERNS: readonly RegExp[] = [
 ]
 
 /**
- * 全域硬 denylist：任何模式（含 full）與任何 allow 規則**都不得繞過**。
- * 語義與 isSensitivePath 同款 fail-closed：
- *  - 非字串／空字串 → true（呼叫端不得據此放行）。
- *  - 反斜線正規成 `/`、全部轉小寫、掃描所有段。
- *  - 另涵蓋 `/proc/<pid>/environ`（行程環境）。
+ * 全域硬 denylist：任何模式（含 full）与任何 allow 规则**都不得绕过**。
+ * 语义与 isSensitivePath 同款 fail-closed：
+ *  - 非字串／空字串 → true（呼叫端不得据此放行）。
+ *  - 反斜线正规成 `/`、全部转小写、扫描所有段。
+ *  - 另涵盖 `/proc/<pid>/environ`（行程环境）。
  */
 export function isHardDeniedPath(p: unknown): boolean {
   if (typeof p !== "string" || p.trim().length === 0) return true
@@ -449,11 +449,11 @@ export function isHardDeniedPath(p: unknown): boolean {
   return false
 }
 
-// ── safety check（auto-edit 安全網；一律 ask，規則不得自動放行）────────────
+// ── safety check（auto-edit 安全网；一律 ask，规则不得自动放行）────────────
 //
-// 照抄 Claude Code 的 DANGEROUS_FILES／DANGEROUS_DIRECTORIES：這些是 shell／git／
-// agent 自身的設定與狀態檔，改動（含被模型引導的讀取脈絡）風險最高，故強制詢問、
-// 不可由 session/permanent 授權自動放行。**硬 denylist 仍先於本節**（deny > ask）。
+// 照抄 Claude Code 的 DANGEROUS_FILES／DANGEROUS_DIRECTORIES：这些是 shell／git／
+// agent 自身的设定与状态档，改动（含被模型引导的读取脉络）风险最高，故强制询问、
+// 不可由 session/permanent 授权自动放行。**硬 denylist 仍先于本节**（deny > ask）。
 export const DANGEROUS_FILES: ReadonlySet<string> = new Set([
   ".gitconfig",
   ".gitmodules",
@@ -469,7 +469,7 @@ export const DANGEROUS_FILES: ReadonlySet<string> = new Set([
 
 export const DANGEROUS_DIRECTORIES: ReadonlySet<string> = new Set([".git", ".vscode", ".idea", ".claude"])
 
-/** 是否為 safety-check 檔案／目錄（一律 ask；判定先於規則）。 */
+/** 是否为 safety-check 档案／目录（一律 ask；判定先于规则）。 */
 export function isSafetyCheckPath(p: unknown): boolean {
   if (typeof p !== "string" || p.trim().length === 0) return false
   const segs = splitSegments(p.replace(/\\/g, "/").toLowerCase())
@@ -479,7 +479,7 @@ export function isSafetyCheckPath(p: unknown): boolean {
   return false
 }
 
-// ── 路徑展開／規則 specifier 比對 ────────────────────────────────────────
+// ── 路径展开／规则 specifier 比对 ────────────────────────────────────────
 
 function expandTilde(s: string, home: string | null | undefined): string | null {
   const norm = s.replace(/\\/g, "/")
@@ -493,8 +493,8 @@ function expandTilde(s: string, home: string | null | undefined): string | null 
 }
 
 /**
- * 把路徑展開成歸一化的絕對路徑（`~`→home、反斜線→`/`、丟 `.`／`..`、全小寫）。
- * 相對路徑／無法展開／`..` 逃逸根之上 → null（呼叫端一律當「不可信」）。
+ * 把路径展开成归一化的绝对路径（`~`→home、反斜线→`/`、丢 `.`／`..`、全小写）。
+ * 相对路径／无法展开／`..` 逃逸根之上 → null（呼叫端一律当「不可信」）。
  */
 export function expandToAbsolute(p: unknown, home?: string | null): string | null {
   if (typeof p !== "string" || p.trim().length === 0) return null
@@ -508,9 +508,9 @@ export function expandToAbsolute(p: unknown, home?: string | null): string | nul
 }
 
 /**
- * 同 expandToAbsolute（`~`→home、反斜線→`/`、丟 `.`／`..`），但**保留原大小寫**。
- * 授權端點（authorize）回執的 `applied.root` 與規則 specifier 用本函式，讓使用者看到自己
- * 輸入的真實大小寫；規則**比對**仍走 expandToAbsolute／lexicalSegments（小寫），語義不變。
+ * 同 expandToAbsolute（`~`→home、反斜线→`/`、丢 `.`／`..`），但**保留原大小写**。
+ * 授权端点（authorize）回执的 `applied.root` 与规则 specifier 用本函式，让使用者看到自己
+ * 输入的真实大小写；规则**比对**仍走 expandToAbsolute／lexicalSegments（小写），语义不变。
  */
 export function expandToAbsolutePreserveCase(p: unknown, home?: string | null): string | null {
   if (typeof p !== "string" || p.trim().length === 0) return null
@@ -531,12 +531,12 @@ interface ParsedSpecifier {
 }
 
 /**
- * 解析規則 specifier 的路徑前綴語義（照 Claude Code）：
- *   - `//path` → 檔案系統根絕對（去一個 `/` 後當絕對路徑）。
- *   - `~/path` → 家目錄。
- *   - `/path`  → 相對於**設定檔所在目錄**（未提供 configDir 時退回絕對路徑）。
- *   - 無前綴 / `./x` → 任意位置（gitignore 式比對）。
- *   - 尾端 `/**` → 該目錄**含其下**（遞迴）。
+ * 解析规则 specifier 的路径前缀语义（照 Claude Code）：
+ *   - `//path` → 档案系统根绝对（去一个 `/` 后当绝对路径）。
+ *   - `~/path` → 家目录。
+ *   - `/path`  → 相对于**设定档所在目录**（未提供 configDir 时退回绝对路径）。
+ *   - 无前缀 / `./x` → 任意位置（gitignore 式比对）。
+ *   - 尾端 `/**` → 该目录**含其下**（递回）。
  */
 export function parseRuleSpecifier(specifier: string, opts: { home?: string | null; configDir?: string } = {}): ParsedSpecifier | null {
   if (typeof specifier !== "string") return null
@@ -570,8 +570,8 @@ function globToRegex(glob: string): RegExp {
 }
 
 /**
- * 單一 specifier 是否命中單一路徑（specifier 的四種前綴語義 ＋ `/**` 遞迴）。
- * 全部轉小寫比對；段級相等杜絕前綴混淆。
+ * 单一 specifier 是否命中单一路径（specifier 的四种前缀语义 ＋ `/**` 递回）。
+ * 全部转小写比对；段级相等杜绝前缀混淆。
  */
 export function matchRuleSpecifier(
   specifier: string,
@@ -604,17 +604,17 @@ function toolMatches(ruleTool: PermissionTool, tool: PermissionTool): boolean {
   return ruleTool === "*" || ruleTool === tool
 }
 
-/** specifier 缺／空 → 該工具任意路徑（`Tool()`／`Tool(*)` ≡ `Tool`）。 */
+/** specifier 缺／空 → 该工具任意路径（`Tool()`／`Tool(*)` ≡ `Tool`）。 */
 function ruleMatchesPath(rule: PermissionRule, paths: readonly string[], opts: { home?: string | null; configDir?: string }): boolean {
   if (rule.specifier === undefined || rule.specifier === "") return true
   return paths.some((p) => matchRuleSpecifier(rule.specifier!, p, opts))
 }
 
-// ── 規則淨化 ────────────────────────────────────────────────────────────
+// ── 规则净化 ────────────────────────────────────────────────────────────
 
 /**
- * 淨化（未信任的）規則陣列：只留合法 effect／tool，specifier 只留非空字串，
- * 去重、限量。未知工具／效果的規則**丟棄**（不是報錯）——規則集寧缺勿濫。
+ * 净化（未信任的）规则阵列：只留合法 effect／tool，specifier 只留非空字串，
+ * 去重、限量。未知工具／效果的规则**丢弃**（不是报错）——规则集宁缺勿滥。
  */
 export function sanitizePermissionRules(raw: unknown): PermissionRule[] {
   if (!Array.isArray(raw)) return []
@@ -642,22 +642,22 @@ export function sanitizePermissionRules(raw: unknown): PermissionRule[] {
 
 export interface PermissionQuery {
   tool: PermissionTool
-  /** 被存取的路徑（可為 `~` 形式）。 */
+  /** 被存取的路径（可为 `~` 形式）。 */
   resolvedPath: string
   mode?: DeviceBridgeMode | string
-  /** session 規則（未淨化；函式內淨化）。 */
+  /** session 规则（未净化；函式内净化）。 */
   rules?: unknown
   authorizedRoots?: unknown
   home?: string | null
-  /** symlink 解析後的真實路徑；與 resolvedPath **任一命中即算命中**。 */
+  /** symlink 解析后的真实路径；与 resolvedPath **任一命中即算命中**。 */
   realPath?: string
-  /** `/path` 前綴語義的設定檔所在目錄（未提供時退回首碼 `/` 的絕對路徑）。 */
+  /** `/path` 前缀语义的设定档所在目录（未提供时退回首码 `/` 的绝对路径）。 */
   configDir?: string
 }
 
 /**
- * 決策函式：**硬 denylist → safety-check → 規則 deny/ask/allow → 模式 → 預設 ask**。
- * 固定順序見檔頭註釋；任何規則或模式都不得繞過硬 denylist 與 safety-check。
+ * 决策函式：**硬 denylist → safety-check → 规则 deny/ask/allow → 模式 → 预设 ask**。
+ * 固定顺序见档头注释；任何规则或模式都不得绕过硬 denylist 与 safety-check。
  */
 export function evaluatePermission(q: PermissionQuery): PermissionVerdict {
   const mode: DeviceBridgeMode = isDeviceBridgeMode(q.mode) ? q.mode : "ask"
@@ -665,22 +665,22 @@ export function evaluatePermission(q: PermissionQuery): PermissionVerdict {
   if (typeof q.realPath === "string" && q.realPath.length > 0) rawPaths.push(q.realPath)
   const nonEmpty = rawPaths.filter((p) => p.length > 0)
 
-  // 0. mode off：一律拒，不進入授權流程。
+  // 0. mode off：一律拒，不进入授权流程。
   if (mode === "off") return { decision: "deny", reason: "mode_off" }
 
-  // 1. 硬 denylist（聯集既有 isSensitivePath，只加不減）→ deny，先於一切。
+  // 1. 硬 denylist（联集既有 isSensitivePath，只加不减）→ deny，先于一切。
   if (nonEmpty.length === 0) return { decision: "deny", reason: "denylist" }
   for (const p of nonEmpty) {
     if (isHardDeniedPath(p) || isSensitivePath(p)) return { decision: "deny", reason: "denylist" }
   }
 
-  // 2. 檔案系統根 → deny（遞迴整碟／非具體授權目標）。
+  // 2. 档案系统根 → deny（递回整碟／非具体授权目标）。
   if (nonEmpty.some((p) => isFilesystemRoot(expandTilde(p, q.home) ?? p))) return { decision: "deny", reason: "filesystem_root" }
 
-  // 3. safety-check → ask（先於規則；session/permanent 不得自動放行）。
+  // 3. safety-check → ask（先于规则；session/permanent 不得自动放行）。
   if (nonEmpty.some((p) => isSafetyCheckPath(p))) return { decision: "ask", reason: "safety_check" }
 
-  // 4-6. 三桶規則，判定序 deny → ask → allow，各取首命中。
+  // 4-6. 三桶规则，判定序 deny → ask → allow，各取首命中。
   const rules = sanitizePermissionRules(q.rules)
   const shared = { home: q.home, configDir: q.configDir }
   const eligible = rules.filter((r) => toolMatches(r.tool, q.tool) && ruleMatchesPath(r, nonEmpty, shared))
@@ -691,7 +691,7 @@ export function evaluatePermission(q: PermissionQuery): PermissionVerdict {
   const allow = eligible.find((r) => r.effect === "allow")
   if (allow) return { decision: "allow", reason: "rule_allow", rule: allow }
 
-  // 7. 模式語義。
+  // 7. 模式语义。
   if (mode === "ask") return { decision: "ask", reason: "mode_ask" }
   const absPaths = nonEmpty.map((p) => expandToAbsolute(p, q.home)).filter((x): x is string => x !== null)
   if (mode === "auto") {
@@ -705,19 +705,19 @@ export function evaluatePermission(q: PermissionQuery): PermissionVerdict {
     return { decision: "ask", reason: "outside_roots" }
   }
 
-  // 8. 預設 ask。
+  // 8. 预设 ask。
   return { decision: "ask", reason: "default_ask" }
 }
 
-// ── 授權根（authorize 端點用）────────────────────────────────────────────
+// ── 授权根（authorize 端点用）────────────────────────────────────────────
 
 export type AuthorizationRootProblem = "root_not_absolute" | "root_too_broad" | "denylisted_root"
 
 /**
- * 檢核「建議授權的根」是否可用；回 null＝可用，否則回拒收原因。
- *  - `root_not_absolute`：相對路徑／`~` 無法展開。
- *  - `denylisted_root`：根落在硬 denylist 或既有敏感集合內（denylist 沒有「授權」選項）。
- *  - `root_too_broad`：`/`、`/home`、使用者家目錄本身（除非 mode=full）、空根。
+ * 检核「建议授权的根」是否可用；回 null＝可用，否则回拒收原因。
+ *  - `root_not_absolute`：相对路径／`~` 无法展开。
+ *  - `denylisted_root`：根落在硬 denylist 或既有敏感集合内（denylist 没有「授权」选项）。
+ *  - `root_too_broad`：`/`、`/home`、使用者家目录本身（除非 mode=full）、空根。
  */
 export function authorizationRootProblem(root: unknown, home: string | null | undefined, mode: DeviceBridgeMode | string = "ask"): AuthorizationRootProblem | null {
   if (typeof root !== "string" || root.trim().length === 0) return "root_not_absolute"
@@ -738,26 +738,26 @@ export function authorizationRootProblem(root: unknown, home: string | null | un
 }
 
 /**
- * 建議授權的根。
- *  - `isDirectory=false`（read_file／stat；預設）：取被存取路徑**之上最接近的目錄**
- *    （檔案→父目錄；已是單段則回該段）。
- *  - `isDirectory=true`（list_dir／grep，被存取者本身是目錄）：建議**該目錄本身**，
- *    避免對 `…/Downloads` 建議其父目錄（家目錄）而引導使用者永久授權整個家目錄。
+ * 建议授权的根。
+ *  - `isDirectory=false`（read_file／stat；预设）：取被存取路径**之上最接近的目录**
+ *    （档案→父目录；已是单段则回该段）。
+ *  - `isDirectory=true`（list_dir／grep，被存取者本身是目录）：建议**该目录本身**，
+ *    避免对 `…/Downloads` 建议其父目录（家目录）而引导使用者永久授权整个家目录。
  *
- * **夾制**：建議值若等於家目錄、等於檔案系統根、或落在 authorizationRootProblem 會判
- * `root_too_broad` 的範圍，則退回「被存取路徑本身（檔案則其父目錄）」，且**不得回 null**
- * （null 會讓呼叫端退化成請求路徑，使用者更無從判斷）。
- * 無法歸一化（相對路徑／`~` 且無 home）→ null（呼叫端據此不可建議）。
+ * **夹制**：建议值若等于家目录、等于档案系统根、或落在 authorizationRootProblem 会判
+ * `root_too_broad` 的范围，则退回「被存取路径本身（档案则其父目录）」，且**不得回 null**
+ * （null 会让呼叫端退化成请求路径，使用者更无从判断）。
+ * 无法归一化（相对路径／`~` 且无 home）→ null（呼叫端据此不可建议）。
  *
- * **大小寫（2026-10-04 修）**：本函式回傳值會被（a）顯示在授權卡、（b）使用者據以呼叫
- * authorize 端點、（c）成為下發給裝置的授權根／規則 specifier ⇒ 必須**保留使用者路徑
- * 的原始大小寫**。裝置端（Linux，大小寫敏感）`policy.isPathAllowed` 做的是逐字比對，
- * 若這裡折成小寫（舊版 `expandToAbsolute`＋`lexicalSegments`），含大寫段的路徑
- * （`~/Desktop`、`~/Downloads`）授權後一律 `not_authorized`。夾制判定仍走
- * `authorizationRootProblem`（內部折小寫），安全語義不變。
+ * **大小写（2026-10-04 修）**：本函式回传值会被（a）显示在授权卡、（b）使用者据以呼叫
+ * authorize 端点、（c）成为下发给装置的授权根／规则 specifier ⇒ 必须**保留使用者路径
+ * 的原始大小写**。装置端（Linux，大小写敏感）`policy.isPathAllowed` 做的是逐字比对，
+ * 若这里折成小写（旧版 `expandToAbsolute`＋`lexicalSegments`），含大写段的路径
+ * （`~/Desktop`、`~/Downloads`）授权后一律 `not_authorized`。夹制判定仍走
+ * `authorizationRootProblem`（内部折小写），安全语义不变。
  */
 export function suggestAuthorizationRoot(p: unknown, home?: string | null, isDirectory: boolean = false): string | null {
-  // 檔案系統根本身沒有任何「更窄的目錄」可建議；原樣回（呼叫端授權時仍會被 root_too_broad 擋）。
+  // 档案系统根本身没有任何「更窄的目录」可建议；原样回（呼叫端授权时仍会被 root_too_broad 挡）。
   if (isFilesystemRoot(p)) return typeof p === "string" ? p.trim().replace(/\\/g, "/") : null
   const abs = expandToAbsolutePreserveCase(p, home)
   if (!abs) return null
@@ -773,9 +773,9 @@ export function suggestAuthorizationRoot(p: unknown, home?: string | null, isDir
 }
 
 /**
- * 授權規則的 specifier：以 `//` 明確標示檔案系統絕對根 ＋ `/**` 遞迴，
- * 使規則不依賴 configDir 語義（自動授權的根永遠是絕對、含其下）。
- * 保留傳入 root 的大小寫（回執一致）；比對端照舊大小寫不敏感。
+ * 授权规则的 specifier：以 `//` 明确标示档案系统绝对根 ＋ `/**` 递回，
+ * 使规则不依赖 configDir 语义（自动授权的根永远是绝对、含其下）。
+ * 保留传入 root 的大小写（回执一致）；比对端照旧大小写不敏感。
  */
 export function authorizationRuleSpecifier(root: string): string {
   const abs = expandToAbsolutePreserveCase(root, null)

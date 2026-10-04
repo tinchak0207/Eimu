@@ -3,7 +3,7 @@
 // 新人礼首登弹窗：登录后第一眼把「已到账 5 币」讲清楚，并给一条一步就能开跑的入口。
 //
 // 本档只做容器与两颗按钮，**不含任何运营文案**：标题/正文/币数/张数全部来自 props
-// （服务端由 welcome-gift 的具名常量推導，见 welcome-gift-modal.ts 的契约）。这样文案
+// （服务端由 welcome-gift 的具名常量推导，见 welcome-gift-modal.ts 的契约）。这样文案
 // 改一处就全站一致，客户端不会偷偷长出第二份写死的数字。
 //
 // 结构逐字沿用 AnnouncementDialog 的弹窗骨架（portal + 点外关闭 + Escape + lg-sheet

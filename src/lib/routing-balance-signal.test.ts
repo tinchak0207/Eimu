@@ -20,7 +20,7 @@ function event(modelId: string, ts: number, attempts: { ok: boolean; reason?: st
   } as RoutingEvent;
 }
 
-test("連續 ≥2 筆 quota_exhausted 收尾 → exhausted，帶連續筆數", () => {
+test("连续 ≥2 笔 quota_exhausted 收尾 → exhausted，带连续笔数", () => {
   const signals = summarizeChannelBalance([
     event("minimax-h3", 1, [{ ok: true }]),
     event("minimax-h3", 2, [{ ok: false, reason: "quota_exhausted" }]),
@@ -29,7 +29,7 @@ test("連續 ≥2 筆 quota_exhausted 收尾 → exhausted，帶連續筆數", (
   assert.deepEqual(signals.get("minimax-h3"), { status: "exhausted", consecutiveQuotaFailures: 3 });
 });
 
-test("尾部有成功 → 無信號（渠道活著）", () => {
+test("尾部有成功 → 无信号（渠道活著）", () => {
   const signals = summarizeChannelBalance([
     event("m", 1, [{ ok: false, reason: "quota_exhausted" }]),
     event("m", 2, [{ ok: false, reason: "quota_exhausted" }]),
@@ -38,7 +38,7 @@ test("尾部有成功 → 無信號（渠道活著）", () => {
   assert.equal(signals.has("m"), false);
 });
 
-test("非欠費失敗收尾 → 不冒充欠費", () => {
+test("非欠费失败收尾 → 不冒充欠费", () => {
   const signals = summarizeChannelBalance([
     event("m", 1, [{ ok: false, reason: "quota_exhausted" }]),
     event("m", 2, [{ ok: false, reason: "overloaded" }]),
@@ -47,7 +47,7 @@ test("非欠費失敗收尾 → 不冒充欠費", () => {
   assert.equal(signals.has("m"), false);
 });
 
-test("單筆 quota_exhausted 不觸發（門檻 ≥2）", () => {
+test("单笔 quota_exhausted 不触发（门槛 ≥2）", () => {
   const signals = summarizeChannelBalance([
     event("m", 1, [{ ok: true }]),
     event("m", 2, [{ ok: false, reason: "quota_exhausted" }]),
@@ -55,7 +55,7 @@ test("單筆 quota_exhausted 不觸發（門檻 ≥2）", () => {
   assert.equal(signals.has("m"), false);
 });
 
-test("事件亂序輸入仍按時間序判定（尾部欠費×2 → exhausted）", () => {
+test("事件乱序输入仍按时间序判定（尾部欠费×2 → exhausted）", () => {
   const signals = summarizeChannelBalance([
     event("m", 3, [{ ok: false, reason: "quota_exhausted" }]),
     event("m", 1, [{ ok: true }]),

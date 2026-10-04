@@ -1,7 +1,7 @@
 /**
- * use-canvas-shortcuts —— CanvasEmbed 鍵盤快捷鍵 + 系統剪貼簿 effects
- * （自 CanvasEmbed.tsx L1299-1402 機械搬遷；effect 依賴陣列隨函數整組搬，全部為穩定引用）。
- * 依賴「最新值鏡像 refs」語義：Escape/全選/複製貼上讀 refs 而非閉包 state。
+ * use-canvas-shortcuts —— CanvasEmbed 键盘快捷键 + 系统剪贴簿 effects
+ * （自 CanvasEmbed.tsx L1299-1402 机械搬迁；effect 依赖阵列随函数整组搬，全部为稳定引用）。
+ * 依赖「最新值镜像 refs」语义：Escape/全选/复制贴上读 refs 而非闭包 state。
  */
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
@@ -69,7 +69,7 @@ export function useCanvasShortcuts({
   importImageFiles,
   createNodeAt,
 }: UseCanvasShortcutsInput) {
-  // ── 鍵盤快捷鍵
+  // ── 键盘快捷键
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -109,7 +109,7 @@ export function useCanvasShortcuts({
         return;
       }
       if (mod && (e.key === "v" || e.key === "V")) {
-        // 內部剪貼簿優先；空的話交給 window paste 事件讀系統剪貼簿。
+        // 内部剪贴簿优先；空的话交给 window paste 事件读系统剪贴簿。
         if (clipboardRef.current?.nodes.length) pasteClipboard();
         return;
       }
@@ -169,12 +169,12 @@ export function useCanvasShortcuts({
     setSelectedIds,
   ]);
 
-  // ── A8：系統剪貼簿貼圖/貼文字（畫布容器有 hover/焦點語境時）
+  // ── A8：系统剪贴簿贴图/贴文字（画布容器有 hover/焦点语境时）
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-      if (clipboardRef.current?.nodes.length) return; // 內部剪貼簿優先（keydown 已處理）
+      if (clipboardRef.current?.nodes.length) return; // 内部剪贴簿优先（keydown 已处理）
       const el = containerRef.current;
       if (!el) return;
       const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));

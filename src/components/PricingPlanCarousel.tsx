@@ -44,8 +44,8 @@ import "./pricing3d/pricing3d.css";
    环半径随卡宽等比缩放，物理不变）。
 
    ── 2026-09-26 卡面 3D 化（白名单②卡面渲染，几何/物理/手势/吸附/弹簧仍一行未动）──
-   ① 拆掉 .lg-card 外壳：卡面 = 3D 满版（pricing3d/，手写 three，透明画布叠在 SSR 夢境底图上）；
-      正面卡不放静态封面（避免「先出卡片再换 3D」），3D 到位时卡堆直接落进夢境；
+   ① 拆掉 .lg-card 外壳：卡面 = 3D 满版（pricing3d/，手写 three，透明画布叠在 SSR 梦境底图上）；
+      正面卡不放静态封面（避免「先出卡片再换 3D」），3D 到位时卡堆直接落进梦境；
    ② 卡面只留价格 + 支付 CTA（浮在 3D 之上的 DOM 玻璃层 .ppc-glass）；额度文字从卡面删除，
       只留在 sr-only 描述里（3D 卡堆是纯视觉，读屏用户仍要拿到额度与换算口径）；
    ③ 选片条：环停下后非正面卡缩成底部一排缩图（usePlanFilmstrip + CSS 覆盖位姿，
@@ -98,7 +98,7 @@ const PLAN_TINTS: Record<string, string> = {
 /** 卡面转角相对环角的压缩比。1 = 严格贴合圆周切线，但边卡会侧得几乎只剩一条线；
  *  0.82 是「还能看清是什么图」和「有空间纵深」之间的平衡（coverflow 的经典做法）。*/
 const TILT = 0.82;
-/** 環半徑放大（模板廊同款，不改任何卡片寬高）。 */
+/** 环半径放大（模板廊同款，不改任何卡片宽高）。 */
 const RADIUS_SCALE = 4;
 /** 转角上限。夹住之后没有一张卡面会翻过 90°，所以永远不会出现背面。 */
 const TILT_MAX = 80;
@@ -143,7 +143,7 @@ function nearestAngleFor(index: number, current: number, step: number) {
   return base + Math.round((current - base) / 360) * 360;
 }
 
-/** GLSL 的 smoothstep：兩端導數為 0，所以是「平台 → 斷崖 → 平台」而不是單調衰減。 */
+/** GLSL 的 smoothstep：两端导数为 0，所以是「平台 → 断崖 → 平台」而不是单调衰减。 */
 function smoothstep(edge0: number, edge1: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -163,8 +163,8 @@ function computeFrame(phi: number) {
   const align = Math.max(0, Math.cos(tiltRad - (LIGHT_DEG * Math.PI) / 180));
   const sheen = 0.22 + 0.78 * Math.pow(align, 3);
 
-  /* ── 側壁寬度：為什麼是 tan 而不是 sin ──
-     一塊厚 T 的板轉 θ 之後，投影輪廓寬 = W·cosθ + T·sinθ。 */
+  /* ── 侧壁宽度：为什么是 tan 而不是 sin ──
+     一块厚 T 的板转 θ 之后，投影轮廓宽 = W·cosθ + T·sinθ。 */
   const wall = Math.min(Math.abs(Math.tan(tiltRad)), 1.5) * GLASS;
 
   return {
@@ -173,7 +173,7 @@ function computeFrame(phi: number) {
     lift: (-LIFT * (1 - cos)) / 2,
     tilt,
     depth,
-    /* smoothstep 給的是**平台加斷崖**：0~30° 幾乎不掉，45° 才開始讓位，60° 準時交棒。 */
+    /* smoothstep 给的是**平台加断崖**：0~30° 几乎不掉，45° 才开始让位，60° 准时交棒。 */
     opacity: 0.07 + 0.93 * smoothstep(0.34, 1, Math.max(0, 2 * depth - 1)),
     /* 模糊量化到 0.5px：filter 每次变化都要重新栅格化这一层。 */
     blur: Math.round((1 - depth) * 8) / 2,
@@ -181,7 +181,7 @@ function computeFrame(phi: number) {
     sheen,
     /** ×卡宽：高光带随倾角横向扫过 */
     sheenXF: (tilt / TILT_MAX) * 0.55,
-    /** ×卡宽：側壁在卡面座標裡的寬度。 */
+    /** ×卡宽：侧壁在卡面座标里的宽度。 */
     sideLF: tilt > 0 ? wall : 0,
     sideRF: tilt < 0 ? wall : 0,
     /* 迎光侧的棱线。 */
@@ -671,7 +671,7 @@ export function PricingPlanCarousel({
   const glowRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
-  /* 每張卡的 GL draw() 佔位（模板廊原樣：GL 層未掛載時為 null，paint 跳過）。 */
+  /* 每张卡的 GL draw() 占位（模板廊原样：GL 层未挂载时为 null，paint 跳过）。 */
   const glDrawRefs = useRef<Array<((tiltDeg: number) => void) | null>>([]);
   const glTiltRefs = useRef<number[]>([]);
 
@@ -1206,7 +1206,7 @@ export function PricingPlanCarousel({
         onKeyDown={onKeyDown}
       >
         <div ref={glowRef} className="case-glow" aria-hidden="true" />
-        {/* 3D 舞台：全页唯一 WebGL context；透明画布叠在夢境底图上，挂载即载入（不等 idle）。 */}
+        {/* 3D 舞台：全页唯一 WebGL context；透明画布叠在梦境底图上，挂载即载入（不等 idle）。 */}
         {frontItem && (
           <PricingStage3D
             planId={frontItem.id}
@@ -1222,7 +1222,7 @@ export function PricingPlanCarousel({
             className="case-slab focus-visible:ring-2 focus-visible:ring-ring"
             style={STATIC_FRAMES[index]}
             data-plan={item.id}
-            /* SSR 首幀就標出正面卡（之後由 paint() 每幀維護）：首屏正面卡不閃一張封面。 */
+            /* SSR 首帧就标出正面卡（之后由 paint() 每帧维护）：首屏正面卡不闪一张封面。 */
             data-front={index === HOME ? "true" : "false"}
             role="radio"
             aria-checked={isSelected(item)}
@@ -1236,7 +1236,7 @@ export function PricingPlanCarousel({
             }}
             onClick={() => onCardClick(index)}
           >
-            {/* ── 側壁：厚度的唯一真證據（模板廊原样，必須是 .case-face 的兄弟）── */}
+            {/* ── 侧壁：厚度的唯一真证据（模板廊原样，必须是 .case-face 的兄弟）── */}
             <div className="case-side case-side-l" aria-hidden="true" />
             <div className="case-side case-side-r" aria-hidden="true" />
 
@@ -1288,7 +1288,7 @@ export function PricingPlanCarousel({
                   </div>
                 </div>
               </div>
-              {/* 最外緣那條掠射亮線（模板廊原样）。 */}
+              {/* 最外缘那条掠射亮线（模板廊原样）。 */}
               <div className="case-edge" aria-hidden="true" />
               <div className="case-surface" aria-hidden="true">
                 <div className="case-sheen" />

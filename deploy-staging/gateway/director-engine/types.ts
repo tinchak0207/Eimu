@@ -263,7 +263,7 @@ export function vecEq(a: Vec3, b: Vec3, eps = 1e-4): boolean {
   return Math.abs(a.x - b.x) < eps && Math.abs(a.y - b.y) < eps && Math.abs(a.z - b.z) < eps;
 }
 
-/* ── 白名單摘入：以下兩個 interface 自 vendor engine.ts 移入（斷 engine 依賴邊），逐行等價 ── */
+/* ── 白名单摘入：以下两个 interface 自 vendor engine.ts 移入（断 engine 依赖边），逐行等价 ── */
 
 export interface CameraPose { position: Vec3; target: Vec3; fov: number; rollDeg?: number }
 

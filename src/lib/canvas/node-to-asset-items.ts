@@ -1,14 +1,14 @@
-// 純函式：把「畫布節點 / 提示詞卡」轉為資產包 item 清單。
+// 纯函式：把「画布节点 / 提示词卡」转为资产包 item 清单。
 //
-// 供 CanvasLibraryPanel 的「存入资产包」動作使用（確定性包 id "canvas-assets"）：
-// - 有 prompt → {kind:"prompt", title: 節點標題或"画布提示词", content, modelId?, size?, source:{type:"canvas", id}}
-// - 有 LoRA（loraModelVersionIds 第一個）→ {kind:"lora", title:"LoRA", loraVersionId}
-// - 有關聯圖 → {kind:"image", title:"参考图", imageUrl}
-// 純函式無副作用（不 fetch / 不讀 store），方便單測。
+// 供 CanvasLibraryPanel 的「存入资产包」动作使用（确定性包 id "canvas-assets"）：
+// - 有 prompt → {kind:"prompt", title: 节点标题或"画布提示词", content, modelId?, size?, source:{type:"canvas", id}}
+// - 有 LoRA（loraModelVersionIds 第一个）→ {kind:"lora", title:"LoRA", loraVersionId}
+// - 有关联图 → {kind:"image", title:"参考图", imageUrl}
+// 纯函式无副作用（不 fetch / 不读 store），方便单测。
 
 import type { AssetPackItem } from "@/lib/asset-pack-store";
 
-/** 轉換輸入：涵蓋畫布節點與提示詞卡的共通欄位。 */
+/** 转换输入：涵盖画布节点与提示词卡的共通栏位。 */
 export interface NodeToAssetPackInput {
   id: string;
   title?: string;

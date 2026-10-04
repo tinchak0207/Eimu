@@ -1,4 +1,4 @@
-// 模板預設補完：視頻模板預設模型 = seedance-2.0，錨點價 = 控面目錄真價（720p 13 / 1080p 16 幣/秒），不再有 minimax-h3 預設。
+// 模板预设补完：视频模板预设模型 = seedance-2.0，锚点价 = 控面目录真价（720p 13 / 1080p 16 币/秒），不再有 minimax-h3 预设。
 // 跑法：timeout 60 bun test deploy-staging/gateway/template-video-default.test.ts
 import { test } from "node:test"
 import assert from "node:assert/strict"
@@ -10,7 +10,7 @@ const videoCfgs = WORKFLOW_TEMPLATES.flatMap((t) =>
   (t.nodes as Spec[]).filter((n) => n.kind === "config" && n.defaults?.kind === "video").map((n) => ({ tpl: t.id, ...n })),
 )
 
-test("所有視頻 config 預設不得是 minimax-h3，錨點價為 13/16", () => {
+test("所有视频 config 预设不得是 minimax-h3，锚点价为 13/16", () => {
   assert.ok(videoCfgs.length >= 4)
   for (const c of videoCfgs) {
     assert.notEqual(c.defaults?.model, "minimax-h3", `${c.tpl}/${c.role}`)
@@ -19,7 +19,7 @@ test("所有視頻 config 預設不得是 minimax-h3，錨點價為 13/16", () =
   }
 })
 
-test("single_video / novel_film 預設 model=seedance-2.0 且時長 ≥10s", () => {
+test("single_video / novel_film 预设 model=seedance-2.0 且时长 ≥10s", () => {
   for (const id of ["single_video", "novel_film"]) {
     const c = videoCfgs.find((x) => x.tpl === id)!
     assert.equal(c.defaults?.model, "seedance-2.0", id)
@@ -27,7 +27,7 @@ test("single_video / novel_film 預設 model=seedance-2.0 且時長 ≥10s", () 
   }
 })
 
-test("錨點價與控面目錄一致（目錄檔存在時，credits/10）", () => {
+test("锚点价与控面目录一致（目录档存在时，credits/10）", () => {
   const p = new URL("../../src/lib/generation-model-catalog/catalog.ts", import.meta.url)
   if (!existsSync(p)) return
   const src = readFileSync(p, "utf8")

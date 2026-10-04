@@ -1,12 +1,12 @@
-// GET /v1/tts/voices — 語音庫（P1-11／對稱差 D33）。
+// GET /v1/tts/voices — 语音库（P1-11／对称差 D33）。
 //
-// 對標口徑：對手的 `ListVoices` **無參數全量回**，每個音色帶結構化屬性
-// `{Id, Age, Gender, Description, Name}`。本端點照這個形狀回，並多給兩欄我方誠實需要的資訊：
-//   - `route`：這顆音色實際走哪條上游（siliconflow 主路／edge 降級）
-//   - `source`：每一條屬性的實查來源（檔案:行號／指令），讓「這不是編的」可被複核
-//   - `age`：**一律缺席**——上游 edge-tts 清單沒有 Age，我方沒有真源，不編造。
+// 对标口径：对手的 `ListVoices` **无参数全量回**，每个音色带结构化属性
+// `{Id, Age, Gender, Description, Name}`。本端点照这个形状回，并多给两栏我方诚实需要的资讯：
+//   - `route`：这颗音色实际走哪条上游（siliconflow 主路／edge 降级）
+//   - `source`：每一条属性的实查来源（档案:行号／指令），让「这不是编的」可被复核
+//   - `age`：**一律缺席**——上游 edge-tts 清单没有 Age，我方没有真源，不编造。
 //
-// 認證與錯誤形狀與其他 `/v1/*` 同一套（biz key → 401/403/429；不新造收口）。
+// 认证与错误形状与其他 `/v1/*` 同一套（biz key → 401/403/429；不新造收口）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
@@ -16,7 +16,7 @@ import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { DEFAULT_TTS_VOICE, listVoices } from "@/lib/voice-library";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(
   status: number,
@@ -55,10 +55,10 @@ export async function GET(req: NextRequest) {
         route: voice.route,
         source: voice.source,
       })),
-      // 未帶 voice 時上游實際用的音色（proxy 的 DEFAULT_VOICE）——把預設值也變成明示的，
-      // 呼叫端不必去猜「不填會怎樣」。
+      // 未带 voice 时上游实际用的音色（proxy 的 DEFAULT_VOICE）——把预设值也变成明示的，
+      // 呼叫端不必去猜「不填会怎样」。
       default_voice: DEFAULT_TTS_VOICE,
-      // 我方的邊界宣告：這些屬性有真源、Age 沒有。誠實比完整重要。
+      // 我方的边界宣告：这些属性有真源、Age 没有。诚实比完整重要。
       notes: [
         "age 一律不提供：上游 edge-tts 语音清单没有 Age 字段，我方无真源，不编造。",
         "接受集大于描述集：voice 也接受上游按模式接受的 edge 音色名与 \"<model>:<preset>\" 形式（见 /docs 或 voice-library.ts 档头）。",

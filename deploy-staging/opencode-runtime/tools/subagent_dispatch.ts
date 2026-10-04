@@ -6,8 +6,8 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const POLL_INTERVAL_MS = 4000
 const POLL_DEADLINE_MS = 16 * 60 * 1000 // 网关侧 15 分钟硬顶会先以 error 收尾
 
-// D2（2026-10-02）：必填自检与示例——把過去 135 次空參數（`{}`）造成的
-// opencode schema 空錯誤碼，換成「指名缺哪欄 + 可照抄的完整參數」。
+// D2（2026-10-02）：必填自检与示例——把过去 135 次空参数（`{}`）造成的
+// opencode schema 空错误码，换成「指名缺哪栏 + 可照抄的完整参数」。
 const EXAMPLE_ARGS = {
   label: "素材整理",
   prompt:
@@ -23,7 +23,7 @@ export default tool({
     "**必填两个字段**：`label`（短标签，简体中文，≤20 字）与 `prompt`（自包含任务书：目标、素材路径/数据、验收标准、预期产出格式，四样缺一不可；子代理看不到你们的对话历史，只能拿到 prompt 里的信息）。缺任一个都会被拒，并回传缺哪个字段与一个可照抄的完整参数示例。",
     "async=true（后台模式，默认推荐）：立即返回，主对话可继续推进其他工作或结束回合；子代理完成后系统自动唤醒你并附结果摘要（失败也唤醒并附死因）。async=false（默认）：阻塞等待完成并直接返回 summary，仅用于必须立即拿结果才能继续的小任务。",
     "并发上限 3；满了工具会返回「已有 3 个子代理在跑，等一个完成再派」，此时等一个完成再派，不要连续重试（连续重试同一参数会被工具层重复呼叫断路器拦截）。",
-    "简单单步任务（答一句话、一张图的直接生成）不要派，避免杀鸡用牛刀。野獸模式下派 Expert 域內任務時指定 expert 欄（如 3D 場景→director3d、剪輯→editor），讓子代理以該域專家身分與工具表執行。",
+    "简单单步任务（答一句话、一张图的直接生成）不要派，避免杀鸡用牛刀。野兽模式下派 Expert 域内任务时指定 expert 栏（如 3D 场景→director3d、剪辑→editor），让子代理以该域专家身分与工具表执行。",
     `示例参数：${EXAMPLE_JSON}`,
   ].join("\n"),
   args: {
@@ -39,7 +39,7 @@ export default tool({
       .string()
       .optional()
       .describe(
-        "Expert id（僅野獸模式生效）：director3d=3D導演 / music=音樂導演 / video-director=視頻導演 / editor=剪輯師 / screenwriter=編劇分鏡 / motion-director=動態設計 / web3d-director=Web3D導演。指定後子代理以該 Expert 身分執行（僅持該域工具）。非野獸模式或省略時=通用子代理。",
+        "Expert id（仅野兽模式生效）：director3d=3D导演 / music=音乐导演 / video-director=视频导演 / editor=剪辑师 / screenwriter=编剧分镜 / motion-director=动态设计 / web3d-director=Web3D导演。指定后子代理以该 Expert 身分执行（仅持该域工具）。非野兽模式或省略时=通用子代理。",
       ),
     async: tool.schema
       .boolean()
@@ -49,7 +49,7 @@ export default tool({
       ),
   },
   async execute(args, context) {
-    // D2：必填先自检——不讓空參數走到網路層，也不回空錯誤碼。
+    // D2：必填先自检——不让空参数走到网路层，也不回空错误码。
     const label = typeof args.label === "string" ? args.label.trim() : ""
     const prompt = typeof args.prompt === "string" ? args.prompt.trim() : ""
     const missing: string[] = []

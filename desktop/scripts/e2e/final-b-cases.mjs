@@ -1,13 +1,13 @@
 // desktop/scripts/e2e/final-b-cases.mjs
 //
-// 最終驗收代理 B（本機 I/O 與畫布路徑）——只新增本檔，不動既有 harness/cases。
-// 覆蓋三條本輪修復在「已部署生產」上的行為：
-//   B0：3D >4MB 直傳真鏈路（sign → PUT(store) → commit）+ 建 scene3d 節點
-//   B2：歷史頁批量匯出真 CDN（不注入媒體替身）+ 真 zip 位元組 + unzip 清單 + 單張下載
-//   B3：畫布取指定時間點幀對「無視訊軌」來源落明確終態（不再永卡「取帧中…」）
+// 最终验收代理 B（本机 I/O 与画布路径）——只新增本档，不动既有 harness/cases。
+// 覆盖三条本轮修复在「已部署生产」上的行为：
+//   B0：3D >4MB 直传真链路（sign → PUT(store) → commit）+ 建 scene3d 节点
+//   B2：历史页批量汇出真 CDN（不注入媒体替身）+ 真 zip 位元组 + unzip 清单 + 单张下载
+//   B3：画布取指定时间点帧对「无视讯轨」来源落明确终态（不再永卡「取帧中…」）
 //
-// 紅線：不部署/不 SSH/不連 DB/不呼叫付費上游；真殼用複製 profile（只讀）；
-//       截圖輸出 /tmp/final-b-*；不記 token/cookie 值。
+// 红线：不部署/不 SSH/不连 DB/不呼叫付费上游；真壳用复制 profile（只读）；
+//       截图输出 /tmp/final-b-*；不记 token/cookie 值。
 //
 // 用法：node desktop/scripts/e2e/final-b-cases.mjs --only B0,B2,B3 [--out DIR]
 
@@ -60,7 +60,7 @@ function makeGlb(sizeBytes, { valid = true, name = "big.glb" } = {}) {
   return p;
 }
 
-// ── 網路錄製（request/response/requestfinished/requestfailed/console）──
+// ── 网路录制（request/response/requestfinished/requestfailed/console）──
 function attachNet(shell) {
   const list = [];
   const byReq = new Map();
@@ -102,7 +102,7 @@ function attachNet(shell) {
   };
 }
 
-// ── 殼啟動（GPU 崩潰常態，重試至多 3 次；收殼刪複製 profile）──
+// ── 壳启动（GPU 崩溃常态，重试至多 3 次；收壳删复制 profile）──
 async function launchShellRetry(opts, tries = 3) {
   let lastErr = null;
   for (let i = 0; i < tries; i++) {
@@ -128,7 +128,7 @@ async function withShell(fn, { origin, extraEnv } = {}) {
   }
 }
 
-/** 等頁面真的落在 http(s) 來源（localStorage 可讀），否則重導。 */
+/** 等页面真的落在 http(s) 来源（localStorage 可读），否则重导。 */
 async function ensureAppOrigin(shell) {
   const url = shell.page.url();
   if (/^https?:/.test(url)) return true;
@@ -189,7 +189,7 @@ async function mountCanvas(shell) {
 }
 async function openCreateMenu(shell) {
   const box = await shell.page.locator(".ce-embed-root").boundingBox();
-  if (!box) throw new Error("無畫布 bounding box");
+  if (!box) throw new Error("无画布 bounding box");
   const points = [
     [box.x + 50, box.y + 50],
     [box.x + Math.min(160, box.width / 4), box.y + 70],
@@ -229,7 +229,7 @@ async function enumerateWindows() {
   return wins;
 }
 
-// ───────────────────────── B0：真後端 3D 大檔直傳 ─────────────────────────
+// ───────────────────────── B0：真后端 3D 大档直传 ─────────────────────────
 async function B0() {
   const big = makeGlb(5 * 1024 * 1024, { name: "e2e-finalb-big.glb" });
   return await withShell(async (shell) => {
@@ -238,7 +238,7 @@ async function B0() {
     shell.page.on("console", (m) => consoleAll.push({ type: m.type(), text: m.text().slice(0, 200) }));
     await mountCanvas(shell);
     const menuOpen = await openCreateMenu(shell);
-    if (!menuOpen) return { status: "fail", observations: { menuOpen }, error: "無法開啟建節點選單" };
+    if (!menuOpen) return { status: "fail", observations: { menuOpen }, error: "无法开启建节点选单" };
 
     const t0 = net.mark();
     let firstAlert = null;
@@ -252,7 +252,7 @@ async function B0() {
     const setHow = await setFileInput(shell, 'input[accept=".glb,.gltf"]', big);
     await poll;
 
-    // 耐心等 commit + 節點（大檔 5MB 上傳可能超過 12s）
+    // 耐心等 commit + 节点（大档 5MB 上传可能超过 12s）
     const deadline = Date.now() + 90000;
     let nodeCreated = false;
     let commitSeen = false;
@@ -267,7 +267,7 @@ async function B0() {
       await sleep(1000);
     }
     await sleep(2000);
-    // 最終節點判定（迴圈可能在節點 render 前就因 commit+PUT 齊備而跳出）
+    // 最终节点判定（回圈可能在节点 render 前就因 commit+PUT 齐备而跳出）
     nodeCreated = await shell.evaluate((stem) => {
       const inBody = document.body.innerText.includes(stem);
       const inNodes = [...document.querySelectorAll("[data-canvas-node]")].some((n) => (n.innerText || "").includes(stem));
@@ -287,9 +287,9 @@ async function B0() {
     const pass = signOk && putOk && commitOk && nodeCreated && !illegal;
     return {
       status: pass ? "pass" : "fail",
-      title: "3D >4MB 直傳真鏈路：sign 200 → PUT(store) 200 → commit 200、建出節點、無 Illegal invocation",
+      title: "3D >4MB 直传真链路：sign 200 → PUT(store) 200 → commit 200、建出节点、无 Illegal invocation",
       observations: {
-        evidenceStrength: "真後端（生產 /api/uploads/sign ＋ store.tinchak0207.xyz PUT ＋ /api/uploads/commit，真 auth）",
+        evidenceStrength: "真后端（生产 /api/uploads/sign ＋ store.tinchak0207.xyz PUT ＋ /api/uploads/commit，真 auth）",
         bigFileBytes: fs.statSync(big).size,
         setFileInputMethod: setHow,
         firstAlert,
@@ -305,21 +305,21 @@ async function B0() {
         expected: "sign=1×200, PUT≥1×200, commit=1×200, node=true, illegal=false",
       },
       artifacts: { screenshot: shot },
-      error: pass ? undefined : "直傳真鏈路未達預期",
+      error: pass ? undefined : "直传真链路未达预期",
       cleanupFiles: [big],
     };
   });
 }
 
-// ───────────────────────── B2：批量匯出真 CDN ─────────────────────────
+// ───────────────────────── B2：批量汇出真 CDN ─────────────────────────
 async function B2() {
   return await withShell(async (shell) => {
     await gotoHistory(shell);
     const cardCount = await shell.page.locator('button[aria-label="下载"]').count();
-    if (cardCount < 2) return { status: "fail", observations: { cardCount }, error: "歷史頁可下載卡片 <2" };
+    if (cardCount < 2) return { status: "fail", observations: { cardCount }, error: "历史页可下载卡片 <2" };
 
     const net = attachNet(shell);
-    // 移除目錄 picker（逼走 zip 路徑）＋替身 saveFilePicker 攔下 zip blob；anchor 抑制真下載。
+    // 移除目录 picker（逼走 zip 路径）＋替身 saveFilePicker 拦下 zip blob；anchor 抑制真下载。
     await shell.evaluate(() => {
       try { delete window.showDirectoryPicker; } catch { window.showDirectoryPicker = undefined; }
       window.__b2 = { saveCalls: [], writes: [], _blob: null };
@@ -343,7 +343,7 @@ async function B2() {
       };
     });
 
-    // 多選 2 張
+    // 多选 2 张
     await domClickText(shell, "多选");
     await sleep(900);
     const selected = await shell.page.evaluate(() => {
@@ -370,7 +370,7 @@ async function B2() {
     await sleep(1500);
     const shot = await shell.screenshot("B2-bulk-export");
 
-    // 取回 zip 位元組 → 落盤 → unzip -l
+    // 取回 zip 位元组 → 落盘 → unzip -l
     const zipInfo = await shell.evaluate(async () => {
       const b = window.__b2;
       if (!b || !b._blob) return null;
@@ -405,7 +405,7 @@ async function B2() {
     const mediaEntries = (listingOut.match(/\.(png|jpe?g|webp|gif|avif|mp4|webm|mov|mp3|wav|m4a|aac)\b/gi) || []).length;
     const anchors = await shell.evaluate(() => window.__eimuAnchors || []);
 
-    // 單張下載（退出多選 → 點第一張下載鈕）
+    // 单张下载（退出多选 → 点第一张下载钮）
     await shell.evaluate(() => {
       const b = [...document.querySelectorAll("button")].find((x) => x.getAttribute("aria-label") === "退出多选");
       if (b) b.click();
@@ -433,9 +433,9 @@ async function B2() {
 
     return {
       status: pass ? "pass" : "fail",
-      title: "歷史頁批量匯出真 CDN：exported≥2 / skipped=0 / 真 zip 含媒體+manifest / 無 ERR_FAILED / 帶 ?dl=1",
+      title: "历史页批量汇出真 CDN：exported≥2 / skipped=0 / 真 zip 含媒体+manifest / 无 ERR_FAILED / 带 ?dl=1",
       observations: {
-        evidenceStrength: "真網路（store.tinchak0207.xyz 真圖、不注入媒體替身）＋真 zip 位元組（unzip -l）＋元件層 notice",
+        evidenceStrength: "真网路（store.tinchak0207.xyz 真图、不注入媒体替身）＋真 zip 位元组（unzip -l）＋元件层 notice",
         cardCount,
         selected,
         notice,
@@ -456,25 +456,25 @@ async function B2() {
           anyFailed: singleReqs.some((r) => r.failed),
           allDl: singleReqs.length > 0 && singleReqs.every((r) => r.hasDl),
         },
-        expected: "exported≥2, skipped=0, zip含manifest+≥2媒體, 無ERR_FAILED, 帶?dl=1",
+        expected: "exported≥2, skipped=0, zip含manifest+≥2媒体, 无ERR_FAILED, 带?dl=1",
       },
       artifacts: { bulkScreenshot: shot, singleScreenshot: singleShot, zip: zipPath ? { path: zipPath, size: fs.statSync(zipPath).size } : null },
-      error: pass ? undefined : "批量匯出真鏈路未達預期",
+      error: pass ? undefined : "批量汇出真链路未达预期",
     };
   });
 }
 
-// ───────────────────────── B3：取幀終態 ─────────────────────────
+// ───────────────────────── B3：取帧终态 ─────────────────────────
 async function B3once() {
   const projectId = `e2e-finalb-${Date.now().toString(36)}`;
   const GOOD = "https://eimu.dev/promo/eimu-promo.mp4";
-  const BAD = "https://eimu.dev/showcase/agent-templates/ecom-model-2.webp"; // 圖片：無視訊軌
+  const BAD = "https://eimu.dev/showcase/agent-templates/ecom-model-2.webp"; // 图片：无视讯轨
   return await withShell(async (shell) => {
     const net = attachNet(shell);
     await ensureAppOrigin(shell);
     const appOriginOk = /^https?:/.test(shell.page.url());
 
-    // 以真 auth 播一張含 2 個 video 節點的畫布專案（正常影片 + 無視訊軌圖片）
+    // 以真 auth 播一张含 2 个 video 节点的画布专案（正常影片 + 无视讯轨图片）
     let seed = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -517,11 +517,11 @@ async function B3once() {
         await sleep(1500);
       }
     }
-    if (!seed) return { status: "fail", observations: { appOriginOk }, error: "seed 無法執行（localStorage/來源不可讀）" };
-    if (!seed.ok) return { status: "fail", observations: { seed }, error: `播專案失敗（HTTP ${seed.status}）` };
+    if (!seed) return { status: "fail", observations: { appOriginOk }, error: "seed 无法执行（localStorage/来源不可读）" };
+    if (!seed.ok) return { status: "fail", observations: { seed }, error: `播专案失败（HTTP ${seed.status}）` };
 
     await mountCanvas(shell);
-    // 開歷史畫布 → 點載入我們播的專案
+    // 开历史画布 → 点载入我们播的专案
     await shell.page.evaluate(() => { const b = document.querySelector('button[aria-label="历史画布"]'); if (b) b.click(); });
     await shell.page.waitForSelector('[aria-label="历史画布列表"]', { timeout: 15000 }).catch(() => {});
     await sleep(1200);
@@ -533,7 +533,7 @@ async function B3once() {
     await sleep(2500);
     const nodeCount0 = await shell.page.locator("[data-canvas-node]").count();
 
-    // ── 無視訊軌來源：截帧 → 應落人話終態（不是永卡）──
+    // ── 无视讯轨来源：截帧 → 应落人话终态（不是永卡）──
     const tBad = net.mark();
     const badBtn = shell.page.locator('[data-canvas-node="b3-bad"] button').filter({ hasText: "截帧" }).first();
     const badVisible = await badBtn.isVisible().catch(() => false);
@@ -547,7 +547,7 @@ async function B3once() {
       await sleep(250);
     }
     if (!badAlert) {
-      // 沒錯誤：看它有沒有卡在「取帧中…」
+      // 没错误：看它有没有卡在「取帧中…」
       badStuck = await shell.page.evaluate(() => !!document.body.innerText.includes("取帧中"));
       if (badStuck) badShotPath = (await shell.screenshot("B3-bad-stuck")).path;
     }
@@ -559,10 +559,10 @@ async function B3once() {
     });
     const badPlanReqs = net.pick(/\/api\/canvas\/video-frames/, tBad).map((e) => ({ method: e.method, status: e.status, failed: e.failed }));
 
-    // ── 正常影片：截帧 → 應成功落節點（無回歸）──
-    // 先等 bad 的 toast 自然消失（6s 自動關），避免誤讀殘留錯誤
+    // ── 正常影片：截帧 → 应成功落节点（无回归）──
+    // 先等 bad 的 toast 自然消失（6s 自动关），避免误读残留错误
     for (let i = 0; i < 30; i++) { if (!(await readAlerts(shell).catch(() => [])).length) break; await sleep(500); }
-    // 診斷：本殼能否解碼這支 H.264（獨立探針，非付費）
+    // 诊断：本壳能否解码这支 H.264（独立探针，非付费）
     const codecProbe = await shell.page.evaluate(async (url) => {
       const v = document.createElement("video");
       v.muted = true; v.crossOrigin = "anonymous"; v.preload = "auto"; v.src = url;
@@ -598,7 +598,7 @@ async function B3once() {
     const goodPlanOk = goodPlanReqs.some((r) => r.status === 200);
     const goodSucceeded = goodNodes > nodeCountBeforeGood;
 
-    // 清理：刪掉本輪播的畫布
+    // 清理：删掉本轮播的画布
     await shell.evaluate(async (id) => {
       let token = localStorage.getItem("napi_token");
       let uid = null;
@@ -609,9 +609,9 @@ async function B3once() {
     const pass = !!badAlert && /取帧/.test(badAlert) && !badStuck && goodSucceeded && !goodAlert;
     return {
       status: pass ? "pass" : "fail",
-      title: "取幀終態：無視訊軌來源→人話錯誤（非永卡）；正常影片→照常成功",
+      title: "取帧终态：无视讯轨来源→人话错误（非永卡）；正常影片→照常成功",
       observations: {
-        evidenceStrength: "真環境元件層（畫布節點動作，真 /api/canvas/video-frames）＋UI 終態",
+        evidenceStrength: "真环境元件层（画布节点动作，真 /api/canvas/video-frames）＋UI 终态",
         appOriginOk,
         projectSeed: seed,
         projectLoaded: clicked,
@@ -636,26 +636,26 @@ async function B3once() {
           planRequests: goodPlanReqs,
           planOk: goodPlanOk,
         },
-        expected: "bad：有『取帧失败：』人話錯誤且不卡；good：新增節點且 plan 200、無錯誤",
+        expected: "bad：有『取帧失败：』人话错误且不卡；good：新增节点且 plan 200、无错误",
       },
       artifacts: {
         badScreenshot: badShotPath ? { path: badShotPath } : null,
         goodScreenshot: goodShot,
       },
-      error: pass ? undefined : "取幀終態未達預期",
+      error: pass ? undefined : "取帧终态未达预期",
     };
   }, { extraEnv: { LIBGL_ALWAYS_SOFTWARE: "1", GALLIUM_DRIVER: "llvmpipe" } });
 }
 
-// ───────────────────────── B4：app 路徑真原生對話框 ─────────────────────────
-/** 歷史頁多選後按底部固定操作條「打包下载」→ 真 showDirectoryPicker 原生對話框。 */
+// ───────────────────────── B4：app 路径真原生对话框 ─────────────────────────
+/** 历史页多选后按底部固定操作条「打包下载」→ 真 showDirectoryPicker 原生对话框。 */
 async function B4() {
   return await withShell(async (shell) => {
     await gotoHistory(shell);
     const cards = await shell.page.locator('button[aria-label="下载"]').count();
-    if (!cards) return { status: "fail", observations: { cards }, error: "history 無可下載卡片" };
+    if (!cards) return { status: "fail", observations: { cards }, error: "history 无可下载卡片" };
 
-    // 診斷包裝（保留原函式，只記錄呼叫；不影響真對話框）
+    // 诊断包装（保留原函式，只记录呼叫；不影响真对话框）
     await shell.evaluate(() => {
       window.__b4 = { dirCalls: 0, dirSettled: null, dirErr: null };
       const orig = window.showDirectoryPicker;
@@ -685,7 +685,7 @@ async function B4() {
     });
     await sleep(900);
 
-    // 真滑鼠點擊底部固定操作條的「打包下载」（提供 transient user activation）
+    // 真滑鼠点击底部固定操作条的「打包下载」（提供 transient user activation）
     const btn = shell.page.locator("button", { hasText: "打包下载" }).first();
     const visible = await btn.isVisible().catch(() => false);
     if (visible) await btn.click({ timeout: 12000 }).catch(() => {});
@@ -706,17 +706,17 @@ async function B4() {
     const dialogOpen = diag && diag.dirSettled === null && diag.dirCalls > 0;
     return {
       status: triggered ? "pass" : "blocked",
-      title: "app 路徑：歷史頁多選→底部操作條「打包下载」→真原生目錄對話框",
+      title: "app 路径：历史页多选→底部操作条「打包下载」→真原生目录对话框",
       observations: {
-        evidenceStrength: triggered ? "真原生對話框（app 路徑觸發，spectacle 整屏截圖）" : "未觸發（自動化限制）",
+        evidenceStrength: triggered ? "真原生对话框（app 路径触发，spectacle 整屏截图）" : "未触发（自动化限制）",
         buttonVisible: visible,
         dirPickerDiag: diag,
         dialogStillPending: dialogOpen,
         newWindows: winsAfter.filter((w) => !winsBefore.some((b) => b.id === w.id)),
         fullscreen: fs.existsSync(fullPath) ? { path: fullPath, size: fs.statSync(fullPath).size } : null,
         note: triggered
-          ? "真 user gesture 觸發 app 的 saveManyLocally → showDirectoryPicker 原生對話框（對話框截圖後由收殼關閉）。"
-          : "底部操作條「打包下载」未觸發 picker（自動化限制）。",
+          ? "真 user gesture 触发 app 的 saveManyLocally → showDirectoryPicker 原生对话框（对话框截图后由收壳关闭）。"
+          : "底部操作条「打包下载」未触发 picker（自动化限制）。",
       },
       artifacts: { pageScreenshot: pageShot, fullscreen: fs.existsSync(fullPath) ? { path: fullPath, size: fs.statSync(fullPath).size } : null },
     };
@@ -726,7 +726,7 @@ async function B4() {
 const CASES = { B0, B2, B3, B4 };
 
 async function B3() {
-  // GPU/renderer 崩潰是本機常態：崩了就換一個殼重跑一次。
+  // GPU/renderer 崩溃是本机常态：崩了就换一个壳重跑一次。
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -734,7 +734,7 @@ async function B3() {
     } catch (e) {
       lastErr = e;
       if (/crash/i.test(String(e && e.message)) && attempt < 2) {
-        log(`  [B3 retry ${attempt + 1}] 頁面崩塌，換殼重跑`);
+        log(`  [B3 retry ${attempt + 1}] 页面崩塌，换壳重跑`);
         await sleep(4000);
         continue;
       }

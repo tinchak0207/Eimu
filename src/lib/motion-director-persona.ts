@@ -48,10 +48,10 @@ import type { MotionToolResult } from "./motion-delegate";
 /** persona 键名（gateway bindings / 设定 UI / 日志统一用此 id）。 */
 export const MOTION_DIRECTOR_PERSONA_ID = "motion-director" as const;
 
-/** 展示名（简体文案；选单/卡片/日志统一取此值，与 registry 佔位行 label 一致）。 */
+/** 展示名（简体文案；选单/卡片/日志统一取此值，与 registry 占位行 label 一致）。 */
 export const MOTION_DIRECTOR_PERSONA_LABEL = "动态设计" as const;
 
-/** persona 一句话定位（设定页/选单描述用，与 registry 佔位行 description 一致）。 */
+/** persona 一句话定位（设定页/选单描述用，与 registry 占位行 description 一致）。 */
 export const MOTION_DIRECTOR_PERSONA_DESCRIPTION =
   "动态设计：MG 动画与动态规格，产出 motion_spec 与关键帧预览。" as const;
 

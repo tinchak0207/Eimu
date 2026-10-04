@@ -1,15 +1,15 @@
-// 畫布生成結果 → 節點 metadata 補丁（手動面板原地回填與批次子節點共用）。
+// 画布生成结果 → 节点 metadata 补丁（手动面板原地回填与批次子节点共用）。
 //
-// imageTaskId 是 LOD3 工程透析面板查 `GET /api/generation-jobs/{id}` 的唯一指針：
-//   · durable 路徑回 job id → 寫入；
-//   · legacy 路徑沒有 job（task_id: null）→ 明確寫 undefined 清掉舊指針——同一節點重生成後
-//     若殘留上一次的 id，面板會展示「上一張圖」的參數（張冠李戴比缺席更糟）。
-// 與 settler 的關係：本補丁總是與 content（圖片 URL）同時落地，節點不再滿足
-// isPendingSettledNode（要求 content 為空），gateway image.done 對帳不會誤配這些節點。
+// imageTaskId 是 LOD3 工程透析面板查 `GET /api/generation-jobs/{id}` 的唯一指针：
+//   · durable 路径回 job id → 写入；
+//   · legacy 路径没有 job（task_id: null）→ 明确写 undefined 清掉旧指针——同一节点重生成后
+//     若残留上一次的 id，面板会展示「上一张图」的参数（张冠李戴比缺席更糟）。
+// 与 settler 的关系：本补丁总是与 content（图片 URL）同时落地，节点不再满足
+// isPendingSettledNode（要求 content 为空），gateway image.done 对帐不会误配这些节点。
 
 import type { CanvasNodeMetadata } from "./types";
 
-/** `/api/canvas/generate` 回應裡單張圖的形狀（與路由 CanvasImageResult 同源；task_id 舊回應可能缺席）。 */
+/** `/api/canvas/generate` 回应里单张图的形状（与路由 CanvasImageResult 同源；task_id 旧回应可能缺席）。 */
 export interface CanvasGeneratedImage {
   url: string;
   cost_coins: number | null;

@@ -67,8 +67,8 @@ test("admin home dashboard renders the routing treemap on landing", () => {
 });
 
 /**
- * 與 src/app/api/generate-images/route.test.ts 的 readCode 相同：負向斷言只能跑在
- * 去註解後的程式碼上，否則解釋舊 bug 的註解會誤觸守衛；(^|[^:]) 保住 URL 裡的 //。
+ * 与 src/app/api/generate-images/route.test.ts 的 readCode 相同：负向断言只能跑在
+ * 去注解后的程式码上，否则解释旧 bug 的注解会误触守卫；(^|[^:]) 保住 URL 里的 //。
  */
 function readCode(relPath: string) {
   return read(relPath)

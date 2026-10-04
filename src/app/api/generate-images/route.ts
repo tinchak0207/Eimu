@@ -90,7 +90,7 @@ type UpstreamSuccess = {
 
 type ParsedGenerateImageRequest = Omit<GenerateImageRequest, "controlNets"> & {
   referenceImages: File[];
-  /** 已歸一成 pixai 形狀的 ControlNet entries；無控制網時為 undefined。 */
+  /** 已归一成 pixai 形状的 ControlNet entries；无控制网时为 undefined。 */
   controlNets?: PixaiControlNetEntry[];
 };
 
@@ -182,8 +182,8 @@ function readWorkflowMetadata(value: unknown): GenerationWorkflowMetadata | unde
 }
 
 /**
- * 把請求攜帶的 controlNets（JSON body 物件或 multipart 的 JSON 字串欄位）
- * 清洗並歸一成 pixai 形狀。非法輸入回 undefined —— 呼叫方自行決定回 400。
+ * 把请求携带的 controlNets（JSON body 物件或 multipart 的 JSON 字串栏位）
+ * 清洗并归一成 pixai 形状。非法输入回 undefined —— 呼叫方自行决定回 400。
  */
 function readControlNets(value: unknown): PixaiControlNetEntry[] | undefined {
   if (value === undefined || value === null) return undefined;
@@ -278,10 +278,10 @@ function buildUpstreamImageRequestBody(
 }
 
 /**
- * PixAI bridge 的 img2img：參考圖先 POST /v1/uploads 換 mediaId，再以 JSON
+ * PixAI bridge 的 img2img：参考图先 POST /v1/uploads 换 mediaId，再以 JSON
  * {image: mediaId} 打 /v1/images/edits。bridge 的 edits 只吃 JSON——multipart
- * 會直接 400，所以不能走通用的 multipart edits 路徑。多張參考圖取第一張作
- * 底圖（bridge 是單 mediaId 契約）。
+ * 会直接 400，所以不能走通用的 multipart edits 路径。多张参考图取第一张作
+ * 底图（bridge 是单 mediaId 契约）。
  */
 async function buildPixaiEditRequestBody(
   endpoint: { baseURL: string; apiKey: string },
@@ -384,8 +384,8 @@ async function requestImageGeneration(
   const directRequest = endpoint.protocol === "adobe2api"
     ? await buildAdobe2ApiImageRequestBody(prompt, modelId, referenceImages, aspectRatio, outputResolution)
     : null;
-  // pixai-bridge 的 img2img 要 mediaId 而非 multipart——有參考圖時先上傳換 id。
-  // 非 pixai 渠道維持原 multipart edits 契約（sub2api 等 OpenAI 相容吃 multipart）。
+  // pixai-bridge 的 img2img 要 mediaId 而非 multipart——有参考图时先上传换 id。
+  // 非 pixai 渠道维持原 multipart edits 契约（sub2api 等 OpenAI 相容吃 multipart）。
   const pixaiRequest = !directRequest && endpoint.protocol === "pixai" && referenceImages.length > 0
     ? await buildPixaiEditRequestBody(
         endpoint,
@@ -424,8 +424,8 @@ async function requestImageGeneration(
         response.status,
       );
     }
-    // 202 Accepted 只代表任務已收、成品未回。本管線不做輪詢，202 等於沒拿到圖，
-    // 必須記失敗讓下一個端點接手——否則「卡 202」會被虛假判定為成功。
+    // 202 Accepted 只代表任务已收、成品未回。本管线不做轮询，202 等于没拿到图，
+    // 必须记失败让下一个端点接手——否则「卡 202」会被虚假判定为成功。
     if (response.status === 202) {
       throw new UpstreamImageError(
         `Upstream ${endpoint.label} returned HTTP 202 (accepted) without an image; this pipeline does not poll tasks.`,
@@ -482,7 +482,7 @@ export async function POST(req: NextRequest) {
     requestedOutputResolution ?? workflow?.outputResolution ?? (requestedQualityMode === "quality" ? "2k" : "1k"),
   );
   const qualityMode: ModelMode = outputResolution === "1k" ? "fast" : "quality";
-  // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
+  // 管理员改价需立即对扣费生效：算价前先把最新定价覆写同步进目录（核心层内部吞错，失败不挡生成）。
   await syncModelPricing();
   const requiredCoins = imageGenerationCoins(modelId, qualityMode, outputResolution);
   const generationQuota = requiredCoins * QUOTA_PER_COIN;
@@ -702,10 +702,10 @@ export async function POST(req: NextRequest) {
         // needs to see, and an error response can afford ~100ms.
         after(() => emitRoutingEvent("delivered", { deliveredBy: endpoint.label, imageUrls: responseImageUrl ? [responseImageUrl] : undefined }));
         if (authenticatedUser.id) {
-          // REQ-D1 掛鉤 a：生成完成落歷史時登記 parents——本次請求帶的參考圖若出自
-          // 另一條生成任務（sourceGenerationId）記 derivation、若直接引用產物
-          // （sourceResultId）記 reference；裸上傳無持久身份，不登記（跳不動的
-          // 假鏈條比沒有鏈條更壞）。血統只落歷史本體，agent/canvas 兩面零觸碰。
+          // REQ-D1 挂钩 a：生成完成落历史时登记 parents——本次请求带的参考图若出自
+          // 另一条生成任务（sourceGenerationId）记 derivation、若直接引用产物
+          // （sourceResultId）记 reference；裸上传无持久身份，不登记（跳不动的
+          // 假链条比没有链条更坏）。血统只落历史本体，agent/canvas 两面零触碰。
           const historyLineage = mergeLineageIntoHost(
             null,
             parentsFromReferences(workflow?.referenceImages, new Date().toISOString()),

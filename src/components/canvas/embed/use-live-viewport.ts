@@ -1,11 +1,11 @@
 "use client";
 
-// 畫布即時視口（2026-10-01 效能審計 P0-1）。
+// 画布即时视口（2026-10-01 效能审计 P0-1）。
 //
-// 宿主的 viewport state 在 use-canvas-chat（掛在 ImagePlayground 根）：每幀平移/縮放/飛行都 setState
-// ＝整站（聊天面板、素材庫、首頁 SEO 區塊…）每幀重渲染，實測佔飛行主線程 44%。
-// 這裡把「每幀」留在 CanvasEmbed 本地：live 視口即時更新畫布，停手 VIEWPORT_COMMIT_MS 後才回寫宿主
-// （存檔、agent 快照、undo 都只關心落點）。宿主側主動改視口（fitView / 開專案 / agent op / undo）照常採用。
+// 宿主的 viewport state 在 use-canvas-chat（挂在 ImagePlayground 根）：每帧平移/缩放/飞行都 setState
+// ＝整站（聊天面板、素材库、首页 SEO 区块…）每帧重渲染，实测占飞行主线程 44%。
+// 这里把「每帧」留在 CanvasEmbed 本地：live 视口即时更新画布，停手 VIEWPORT_COMMIT_MS 后才回写宿主
+// （存档、agent 快照、undo 都只关心落点）。宿主侧主动改视口（fitView / 开专案 / agent op / undo）照常采用。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasViewport } from "@/lib/canvas/types";
@@ -20,7 +20,7 @@ function sameViewport(a: CanvasViewport, b: CanvasViewport): boolean {
 
 export function useLiveViewport(hostViewport: CanvasViewport, hostSetViewport: (next: CanvasViewport) => void) {
   const [viewport, setLive] = useState(hostViewport);
-  // 視口變動中（尚未回寫宿主）：節點拿量化倍率，免得每幀都重渲染。
+  // 视口变动中（尚未回写宿主）：节点拿量化倍率，免得每帧都重渲染。
   const [moving, setMoving] = useState(false);
   const liveRef = useRef(hostViewport);
   const committedRef = useRef(hostViewport);
@@ -51,7 +51,7 @@ export function useLiveViewport(hostViewport: CanvasViewport, hostSetViewport: (
     [flush],
   );
 
-  // 宿主側改了視口（不是我們回寫的那一筆）→ 採用，並丟掉未回寫的 live 值。
+  // 宿主侧改了视口（不是我们回写的那一笔）→ 采用，并丢掉未回写的 live 值。
   useEffect(() => {
     if (sameViewport(hostViewport, committedRef.current)) return;
     committedRef.current = hostViewport;
@@ -64,7 +64,7 @@ export function useLiveViewport(hostViewport: CanvasViewport, hostSetViewport: (
     setMoving(false);
   }, [hostViewport]);
 
-  // 卸載前把最後一筆寫回宿主（存檔要記住落點）。
+  // 卸载前把最后一笔写回宿主（存档要记住落点）。
   useEffect(() => flush, [flush]);
 
   return { viewport, viewportRef: liveRef, setViewport, flush, moving };

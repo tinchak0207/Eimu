@@ -1,36 +1,36 @@
 /**
- * 分鏡 21 欄位契約（作品 → 劇集 → 分鏡的第三層實體，刀 2）。
+ * 分镜 21 栏位契约（作品 → 剧集 → 分镜的第三层实体，刀 2）。
  *
- * 輪子來源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
- * 源檔：`doc/提示词开发指南.md` §「分鏡脚本与画师链路」輸出欄位表（本地取證副本 `/tmp/aid-prompt-guide.md:840`）
+ * 轮子来源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
+ * 源档：`doc/提示词开发指南.md` §「分镜脚本与画师链路」输出栏位表（本地取证副本 `/tmp/aid-prompt-guide.md:840`）
  * 取得日：2026-09-15
- * 逐字保留：21 個英文 key 的名稱**與順序**（AID 硬規則 §開發要點 1：名稱與順序不可改動）
- * 白名單改寫（僅此處）：
- *   1. **剔除第 22 欄 `sceneCode`**。AID v2.1.4 已明令（同檔 §開發要點 5）「場景歸屬使用外層
- *      sceneName，禁止輸出 sceneCode」；舊版 22 欄契約的 `sceneCode` 是場次編碼（`aid_storyboard
- *      .source_scene_code`），本站無場次編碼表，場景歸屬一律走 Group 節點的 `storyboardScene.sceneName`。
- *   2. AID 用 DB 表承載（`aid_storyboard` + `script_params` JSON）；本站**不建表、不建 migration**，
- *      改用既有 `CanvasNode.metadata`（Group 節點 = 場景外殼，子節點 = 一鏡一 shot）——
- *      PRD `docs/symdiff-aid-swallow-prd.md` §刀 2「白名單改寫」。
- *   3. AID 的 `image_prompt` / `video_prompt*` / `final_*_id` 不在 21 欄內，屬**成片階段**產物
- *      （畫師 agent / 視覺導演 / 後端選片），本站由後續刀（分鏡→成片）補，本檔不冒充。
+ * 逐字保留：21 个英文 key 的名称**与顺序**（AID 硬规则 §开发要点 1：名称与顺序不可改动）
+ * 白名单改写（仅此处）：
+ *   1. **剔除第 22 栏 `sceneCode`**。AID v2.1.4 已明令（同档 §开发要点 5）「场景归属使用外层
+ *      sceneName，禁止输出 sceneCode」；旧版 22 栏契约的 `sceneCode` 是场次编码（`aid_storyboard
+ *      .source_scene_code`），本站无场次编码表，场景归属一律走 Group 节点的 `storyboardScene.sceneName`。
+ *   2. AID 用 DB 表承载（`aid_storyboard` + `script_params` JSON）；本站**不建表、不建 migration**，
+ *      改用既有 `CanvasNode.metadata`（Group 节点 = 场景外壳，子节点 = 一镜一 shot）——
+ *      PRD `docs/symdiff-aid-swallow-prd.md` §刀 2「白名单改写」。
+ *   3. AID 的 `image_prompt` / `video_prompt*` / `final_*_id` 不在 21 栏内，属**成片阶段**产物
+ *      （画师 agent / 视觉导演 / 后端选片），本站由后续刀（分镜→成片）补，本档不冒充。
  *
- * 空值規則（逐字沿用 AID）：無內容欄位填 `""`，不寫 null、不寫「无」。
+ * 空值规则（逐字沿用 AID）：无内容栏位填 `""`，不写 null、不写「无」。
  *
- * 本檔為純常數 + 純函數，無副作用。消費入口：
- *   - `CanvasNodeMetadata.storyboardShot`（子節點，一鏡一 shot）/ `.storyboardScene`（Group 節點）
- *   - 雙白名單兩處：`layout.ts toNodeMetadata`（讀取端）+ `canvas-chat-types.ts
- *     compactMetadataForAgent`（上行壓縮端）。漏一端 = 刷新/換裝置後 21 欄憑空消失
- *     （2026-09-03 director SVG 事故同型病灶，見記憶 canvas-snapshot-compressor-director-whitelist-fix）。
+ * 本档为纯常数 + 纯函数，无副作用。消费入口：
+ *   - `CanvasNodeMetadata.storyboardShot`（子节点，一镜一 shot）/ `.storyboardScene`（Group 节点）
+ *   - 双白名单两处：`layout.ts toNodeMetadata`（读取端）+ `canvas-chat-types.ts
+ *     compactMetadataForAgent`（上行压缩端）。漏一端 = 刷新/换装置后 21 栏凭空消失
+ *     （2026-09-03 director SVG 事故同型病灶，见记忆 canvas-snapshot-compressor-director-whitelist-fix）。
  *
- * REQ-B2（2026-09-23）：本檔多了一個**純邏輯**依賴 `./asset-scope`（零 IO、不成環），
- * 只為在「專案 cardIds → 鎖定卡」這條**生成注入路徑**上過一次作用域裁決
- * （`options.scope` 給了才生效；未給＝既有行為逐位不變）。
+ * REQ-B2（2026-09-23）：本档多了一个**纯逻辑**依赖 `./asset-scope`（零 IO、不成环），
+ * 只为在「专案 cardIds → 锁定卡」这条**生成注入路径**上过一次作用域裁决
+ * （`options.scope` 给了才生效；未给＝既有行为逐位不变）。
  *
- * 資產批准閘（2026-09-24）：型別 `ApprovalState` 與判定函式 `isAssetApproved` **單一真源在
- * `./character-cards`**（不另建第二套 shape、不重寫第二套判定），本檔只負責把它接到
- * **分鏡卡引用欄**（`filterApprovedShotCardIds` ＋ `productionFieldsFromContext` 第 ⑥ 條）。
- * 檔位語義同樣在該檔：**只有 `"collaborate"` 會擋**，`preset`/`auto`/未給 mode 一律放行（護城河）。
+ * 资产批准闸（2026-09-24）：型别 `ApprovalState` 与判定函式 `isAssetApproved` **单一真源在
+ * `./character-cards`**（不另建第二套 shape、不重写第二套判定），本档只负责把它接到
+ * **分镜卡引用栏**（`filterApprovedShotCardIds` ＋ `productionFieldsFromContext` 第 ⑥ 条）。
+ * 档位语义同样在该档：**只有 `"collaborate"` 会挡**，`preset`/`auto`/未给 mode 一律放行（护城河）。
  */
 import { isAssetApproved } from "./character-cards";
 import type { ApprovalState } from "./character-cards";
@@ -39,8 +39,8 @@ import { canUseAsset } from "./asset-scope";
 import type { AssetScope, AssetShareRecord } from "./asset-scope";
 
 /**
- * 21 欄名稱，**順序即 AID 契約順序**（逐字取自 `doc/提示词开发指南.md` §分鏡脚本 輸出欄位表）。
- * 型別由本常數推導（`StoryboardShotField`），所以名稱或順序改動會同時改到型別——不會漂移。
+ * 21 栏名称，**顺序即 AID 契约顺序**（逐字取自 `doc/提示词开发指南.md` §分镜脚本 输出栏位表）。
+ * 型别由本常数推导（`StoryboardShotField`），所以名称或顺序改动会同时改到型别——不会漂移。
  */
 export const STORYBOARD_SHOT_FIELDS = [
   "shotNumber",
@@ -68,30 +68,30 @@ export const STORYBOARD_SHOT_FIELDS = [
 
 export type StoryboardShotField = (typeof STORYBOARD_SHOT_FIELDS)[number];
 
-/** 一鏡的 21 欄（全字串；空值 = `""`）。 */
+/** 一镜的 21 栏（全字串；空值 = `""`）。 */
 export type StoryboardScriptShot = { readonly [K in StoryboardShotField]: string };
 
 /**
- * 單欄長度上限（字元）。
- * 用途：`aid_storyboard` 對應欄位是 `text`（64KB byte），本站要過
- * `agent/sessions/[id]/canvas-state` 的 512KB 快照與 Blob 存檔，故收斂到 20000 字/欄。
- * 刻意**不逐欄設不同上限**：21 欄各自一套數字 = 21 個漂移點；單一上限已遠大於
- * AID 實務值（正文片段／畫面描述／台詞 ≤15 字），正常分鏡不會觸發。
+ * 单栏长度上限（字元）。
+ * 用途：`aid_storyboard` 对应栏位是 `text`（64KB byte），本站要过
+ * `agent/sessions/[id]/canvas-state` 的 512KB 快照与 Blob 存档，故收敛到 20000 字/栏。
+ * 刻意**不逐栏设不同上限**：21 栏各自一套数字 = 21 个漂移点；单一上限已远大于
+ * AID 实务值（正文片段／画面描述／台词 ≤15 字），正常分镜不会触发。
  */
 export const MAX_STORYBOARD_FIELD_CHARS = 20000;
 
 /**
- * 上行快照（`compactMetadataForAgent`）的單欄上限。
- * 為何不是 20000（本檔 `MAX_STORYBOARD_FIELD_CHARS`）：單鏡 21 欄 × 20000 = 420KB，
- * 一顆節點就頂爆 `canvas-state` 的 512KB（`route.ts:15`）。4000 字/欄已遠大於 AID 實務值
- * （`scriptContent` 是保序切片後的一段正文、`dialogue` ≤15 字、`visualDescription` 一段），
- * 21 欄 × 4000 ≈ 84KB 是理論上界、實務單鏡約 1-2KB。
+ * 上行快照（`compactMetadataForAgent`）的单栏上限。
+ * 为何不是 20000（本档 `MAX_STORYBOARD_FIELD_CHARS`）：单镜 21 栏 × 20000 = 420KB，
+ * 一颗节点就顶爆 `canvas-state` 的 512KB（`route.ts:15`）。4000 字/栏已远大于 AID 实务值
+ * （`scriptContent` 是保序切片后的一段正文、`dialogue` ≤15 字、`visualDescription` 一段），
+ * 21 栏 × 4000 ≈ 84KB 是理论上界、实务单镜约 1-2KB。
  *
- * **殘餘風險（誠實標記）**：截斷只發生在「上行給 agent 的快照」這一層；Blob 正規存檔
- * （`saveCanvasProject` → `normalizeProject`，nodes 原樣透傳）永遠是全形值。但 agent 若把
- * 讀到的截斷值再經 `canvas_apply_ops` 寫回，會覆蓋真值——與 `canvas-project-sync.ts:168`
- * 記錄的 episodes 寫回風險同型。當前判據：4000 字遠大於實務值，觸發機率近零；
- * 若未來出現 >4000 字的單欄，改法應是「整鏡不進快照」而非繼續截。
+ * **残余风险（诚实标记）**：截断只发生在「上行给 agent 的快照」这一层；Blob 正规存档
+ * （`saveCanvasProject` → `normalizeProject`，nodes 原样透传）永远是全形值。但 agent 若把
+ * 读到的截断值再经 `canvas_apply_ops` 写回，会覆盖真值——与 `canvas-project-sync.ts:168`
+ * 记录的 episodes 写回风险同型。当前判据：4000 字远大于实务值，触发机率近零；
+ * 若未来出现 >4000 字的单栏，改法应是「整镜不进快照」而非继续截。
  */
 export const STORYBOARD_SNAPSHOT_FIELD_CHARS = 4000;
 
@@ -99,16 +99,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-/** 逐欄清洗：非字串 → `""`（AID 空值規則）；超長截斷；其餘**逐字保留**（不 trim，保 scriptContent 原文相加=完整劇本）。 */
+/** 逐栏清洗：非字串 → `""`（AID 空值规则）；超长截断；其余**逐字保留**（不 trim，保 scriptContent 原文相加=完整剧本）。 */
 function cleanField(v: unknown): string {
   if (typeof v !== "string") return "";
   return v.length > MAX_STORYBOARD_FIELD_CHARS ? v.slice(0, MAX_STORYBOARD_FIELD_CHARS) : v;
 }
 
 /**
- * 逐欄白名單清洗（照 `normalizeProject` / `normalizeEpisode` 範式）：只認 21 欄，其餘丟棄。
- * 判據：非物件、或 `shotNumber`（鏡號，本實體唯一鍵）清洗後為空 → 回 null（呼叫端丟棄該鏡，不整份作廢）。
- * 回傳物件的 key **順序 = `STORYBOARD_SHOT_FIELDS` 順序**（AID 硬規則：順序不可改動）。
+ * 逐栏白名单清洗（照 `normalizeProject` / `normalizeEpisode` 范式）：只认 21 栏，其余丢弃。
+ * 判据：非物件、或 `shotNumber`（镜号，本实体唯一键）清洗后为空 → 回 null（呼叫端丢弃该镜，不整份作废）。
+ * 回传物件的 key **顺序 = `STORYBOARD_SHOT_FIELDS` 顺序**（AID 硬规则：顺序不可改动）。
  */
 export function normalizeStoryboardShot(payload: unknown): StoryboardScriptShot | null {
   if (!isRecord(payload)) return null;
@@ -121,7 +121,7 @@ export function normalizeStoryboardShot(payload: unknown): StoryboardScriptShot 
   return out as StoryboardScriptShot;
 }
 
-/** 分鏡清單清洗：逐鏡白名單 → 丟棄非法項；`ordinal` 供「無法供應鏡號」時回報位置資訊。 */
+/** 分镜清单清洗：逐镜白名单 → 丢弃非法项；`ordinal` 供「无法供应镜号」时回报位置资讯。 */
 export function normalizeStoryboardShots(payload: unknown): StoryboardScriptShot[] | null {
   if (!Array.isArray(payload)) return null;
   const out: StoryboardScriptShot[] = [];
@@ -132,14 +132,14 @@ export function normalizeStoryboardShots(payload: unknown): StoryboardScriptShot
   return out;
 }
 
-// ─────────────────────────────────────────── 上行快照壓縮（雙白名單第二處的純函數）
+// ─────────────────────────────────────────── 上行快照压缩（双白名单第二处的纯函数）
 
 /**
- * 21 欄 → 快照用壓縮形（逐欄截 `STORYBOARD_SNAPSHOT_FIELD_CHARS`）。
+ * 21 栏 → 快照用压缩形（逐栏截 `STORYBOARD_SNAPSHOT_FIELD_CHARS`）。
  * 供 `compactMetadataForAgent`（`src/hooks/canvas/canvas-chat-types.ts`）呼叫——
- * 壓縮邏輯留在本檔，是為了讓「欄位清單只有一份」：新增欄位時只改
- * `STORYBOARD_SHOT_FIELDS`，壓縮器與讀取端自動跟上，不會出現
- * 「壓縮端漏欄」（= 刷新後空殼，2026-09-03 director 事故）。
+ * 压缩逻辑留在本档，是为了让「栏位清单只有一份」：新增栏位时只改
+ * `STORYBOARD_SHOT_FIELDS`，压缩器与读取端自动跟上，不会出现
+ * 「压缩端漏栏」（= 刷新后空壳，2026-09-03 director 事故）。
  */
 export function compactStoryboardShot(shot: StoryboardScriptShot): StoryboardScriptShot {
   const out = {} as Record<StoryboardShotField, string>;
@@ -150,22 +150,22 @@ export function compactStoryboardShot(shot: StoryboardScriptShot): StoryboardScr
   return out as StoryboardScriptShot;
 }
 
-// ─────────────────────────────────────────── 場景外殼（AID 根結構 `scenes[].sceneName`）
+// ─────────────────────────────────────────── 场景外壳（AID 根结构 `scenes[].sceneName`）
 
 /**
- * 場景外殼：掛在 Group 節點 metadata。
- * AID 根結構 = `{"scenes":[{"sceneName":"…","shots":[...]}]}`；本站 Group 節點承載
- * `sceneName`（場景歸屬的唯一權威，取代已廢的 `sceneCode`），一鏡一 shot 掛子節點。
- * `shotCount` 是給卡面顯示的冗餘指針，真值永遠在子節點（不在此存 shots，避免雙真源）。
+ * 场景外壳：挂在 Group 节点 metadata。
+ * AID 根结构 = `{"scenes":[{"sceneName":"…","shots":[...]}]}`；本站 Group 节点承载
+ * `sceneName`（场景归属的唯一权威，取代已废的 `sceneCode`），一镜一 shot 挂子节点。
+ * `shotCount` 是给卡面显示的冗余指针，真值永远在子节点（不在此存 shots，避免双真源）。
  */
 export interface StoryboardSceneRef {
-  /** 場景名（AID 規則：必須逐字選自可用場景資產）。 */
+  /** 场景名（AID 规则：必须逐字选自可用场景资产）。 */
   sceneName: string;
-  /** 本場鏡數（顯示用指針）。 */
+  /** 本场镜数（显示用指针）。 */
   shotCount: number;
 }
 
-/** 場景外殼清洗：sceneName 非空字串才成立；shotCount 非負整數，缺省 0。 */
+/** 场景外壳清洗：sceneName 非空字串才成立；shotCount 非负整数，缺省 0。 */
 export function normalizeStoryboardSceneRef(payload: unknown): StoryboardSceneRef | null {
   if (!isRecord(payload)) return null;
   const sceneName = typeof payload.sceneName === "string" ? payload.sceneName.trim() : "";
@@ -179,8 +179,8 @@ export function normalizeStoryboardSceneRef(payload: unknown): StoryboardSceneRe
 // ─────────────────────────────────────────── referenceAssets 解析
 
 /**
- * `referenceAssets` 結構化結果（AID 格式：`場景:[图名] 角色:[图名]、… 道具:[图名]`）。
- * 名稱取自資產庫，未命中者 AID 後端會剔除；本站解析只做結構化，不做資產存在性判定。
+ * `referenceAssets` 结构化结果（AID 格式：`场景:[图名] 角色:[图名]、… 道具:[图名]`）。
+ * 名称取自资产库，未命中者 AID 后端会剔除；本站解析只做结构化，不做资产存在性判定。
  */
 export interface StoryboardReferenceAssets {
   scene: string[];
@@ -194,7 +194,7 @@ const REFERENCE_LABELS: ReadonlyArray<{ key: keyof StoryboardReferenceAssets; la
   { key: "prop", label: /道具\s*[:：]/ },
 ];
 
-/** `场景:[A] 角色:[B]、[C] 道具:[D]` → `{scene:["A"],character:["B","C"],prop:["D"]}`；無標籤段落入前一個標籤；空輸入回三空陣列。 */
+/** `场景:[A] 角色:[B]、[C] 道具:[D]` → `{scene:["A"],character:["B","C"],prop:["D"]}`；无标签段落入前一个标签；空输入回三空阵列。 */
 export function parseReferenceAssets(text: string): StoryboardReferenceAssets {
   const out: StoryboardReferenceAssets = { scene: [], character: [], prop: [] };
   if (typeof text !== "string" || text.length === 0) return out;
@@ -215,38 +215,38 @@ export function parseReferenceAssets(text: string): StoryboardReferenceAssets {
   return out;
 }
 
-// ─────────────────────────────────────────── storyboard_qc_17 門禁輸入橋接
+// ─────────────────────────────────────────── storyboard_qc_17 门禁输入桥接
 
 /**
- * `storyboard_qc_17`（VPS `workspace/.opencode/tools/storyboard_qc_17.ts`）的輸入欄位名。
- * **注意**：門禁的欄名與 AID 21 欄**完全不同名**——門禁吃的是成片階段口徑
+ * `storyboard_qc_17`（VPS `workspace/.opencode/tools/storyboard_qc_17.ts`）的输入栏位名。
+ * **注意**：门禁的栏名与 AID 21 栏**完全不同名**——门禁吃的是成片阶段口径
  * （`shotId/order/sceneId/prompt/durationSeconds/characterCardIds/sceneCardIds/keyframeId/
- * lastFrameId/audioAnchorId/aspectRatio`），21 欄是編劇階段口徑（`shotNumber/
- * scriptContent/visualDescription/…`）。不經本橋接直接餵 21 欄 → 門禁全門 block。
+ * lastFrameId/audioAnchorId/aspectRatio`），21 栏是编剧阶段口径（`shotNumber/
+ * scriptContent/visualDescription/…`）。不经本桥接直接喂 21 栏 → 门禁全门 block。
  */
 export interface StoryboardQcShot {
   shotId: string;
   order: number;
-  /** 生圖/視頻描述。21 欄無對應「畫師 prompt」欄（AID 的 `image_prompt` 由畫師 agent 另產），回退 `visualDescription`。 */
+  /** 生图/视频描述。21 栏无对应「画师 prompt」栏（AID 的 `image_prompt` 由画师 agent 另产），回退 `visualDescription`。 */
   prompt: string;
   sceneId?: string;
   durationSeconds?: number;
   characterCardIds: string[];
   sceneCardIds: string[];
   /**
-   * 道具卡 id（本場鏡頭引用的道具資產，2026-09-24 加成欄位）。
-   * **刻意不在 `QC_REQUIRED_FIELDS` 內**（見該常數上方註）：道具是加成不是門檻，
-   * 缺道具不得讓門禁 block。門禁讀到不認得的鍵時忽略，故多帶此鍵對 17 門判定零影響。
+   * 道具卡 id（本场镜头引用的道具资产，2026-09-24 加成栏位）。
+   * **刻意不在 `QC_REQUIRED_FIELDS` 内**（见该常数上方注）：道具是加成不是门槛，
+   * 缺道具不得让门禁 block。门禁读到不认得的键时忽略，故多带此键对 17 门判定零影响。
    */
   propCardIds: string[];
   /**
-   * 本鏡旁白文本（2026-09-30 加成欄位；單一鏡的旁白，供旁白 TTS 逐鏡合成對齊）。
-   * 結構性動機：分鏡過去無旁白欄 → 旁白 TTS 只能整段合成、無法按鏡對齊
-   * （記憶 `tts-multiline-narration-p2-bug`）。本欄是**加成欄位**：有則更好、無則不罰。
-   * **刻意不在 `QC_REQUIRED_FIELDS` 內**（見該常數上方註）：我方 21 欄契約無旁白欄、AID 的
-   * `dialogue` 也不是旁白（見 `productionFieldsFromContext`「刻意不做的推導」），一旦列為門檻，
-   * 全部既有鏡次會瞬間多一項 missing＝純回歸。門禁 `storyboard_qc_17` 讀具名欄位、未知鍵忽略
-   * → 本鍵對 17 門判定零影響。只在呼叫端供給時出現（不補默認值）。
+   * 本镜旁白文本（2026-09-30 加成栏位；单一镜的旁白，供旁白 TTS 逐镜合成对齐）。
+   * 结构性动机：分镜过去无旁白栏 → 旁白 TTS 只能整段合成、无法按镜对齐
+   * （记忆 `tts-multiline-narration-p2-bug`）。本栏是**加成栏位**：有则更好、无则不罚。
+   * **刻意不在 `QC_REQUIRED_FIELDS` 内**（见该常数上方注）：我方 21 栏契约无旁白栏、AID 的
+   * `dialogue` 也不是旁白（见 `productionFieldsFromContext`「刻意不做的推导」），一旦列为门槛，
+   * 全部既有镜次会瞬间多一项 missing＝纯回归。门禁 `storyboard_qc_17` 读具名栏位、未知键忽略
+   * → 本键对 17 门判定零影响。只在呼叫端供给时出现（不补默认值）。
    */
   narration?: string;
   keyframeId?: string;
@@ -254,17 +254,17 @@ export interface StoryboardQcShot {
   audioAnchorId?: string;
   aspectRatio?: string;
   /**
-   * 本鏡的分鏡確認狀態（決策 24：新建的分鏡審查面板與資產面板同構，**與資產側同一個 shape**）。
-   * 缺省＝已批准（決策 23 存量相容）；只在呼叫端供給時出現（不補默認值）。
-   * **不在 `QC_REQUIRED_FIELDS` 內**：門檻欄位清單一個字不加，否則全鏡次瞬間多一項 missing。
-   * 門禁 `storyboard_qc_17` 讀具名欄位、未知鍵忽略 → 本鍵對 17 門判定零影響。
+   * 本镜的分镜确认状态（决策 24：新建的分镜审查面板与资产面板同构，**与资产侧同一个 shape**）。
+   * 缺省＝已批准（决策 23 存量相容）；只在呼叫端供给时出现（不补默认值）。
+   * **不在 `QC_REQUIRED_FIELDS` 内**：门槛栏位清单一个字不加，否则全镜次瞬间多一项 missing。
+   * 门禁 `storyboard_qc_17` 读具名栏位、未知键忽略 → 本键对 17 门判定零影响。
    */
   approval?: ApprovalState;
 }
 
 /**
- * 成片階段欄位（21 欄契約無法供應，須由呼叫端提供；缺者列進 `missing` 並由門禁自行 block）。
- * 鍵 = `shotNumber`（AID 鏡號三位數）。
+ * 成片阶段栏位（21 栏契约无法供应，须由呼叫端提供；缺者列进 `missing` 并由门禁自行 block）。
+ * 键 = `shotNumber`（AID 镜号三位数）。
  */
 export interface StoryboardQcProductionFields {
   sceneId?: string;
@@ -272,43 +272,43 @@ export interface StoryboardQcProductionFields {
   prompt?: string;
   characterCardIds?: string[];
   sceneCardIds?: string[];
-  /** 道具卡 id（`kind === "prop"` 逐字命中；加成欄位，不入 `QC_REQUIRED_FIELDS`）。 */
+  /** 道具卡 id（`kind === "prop"` 逐字命中；加成栏位，不入 `QC_REQUIRED_FIELDS`）。 */
   propCardIds?: string[];
-  /** 本鏡旁白文本（單一鏡的旁白；**加成欄位**，不入 `QC_REQUIRED_FIELDS`——有則更好、無則不罰）。 */
+  /** 本镜旁白文本（单一镜的旁白；**加成栏位**，不入 `QC_REQUIRED_FIELDS`——有则更好、无则不罚）。 */
   narration?: string;
   keyframeId?: string;
   lastFrameId?: string;
   audioAnchorId?: string;
   aspectRatio?: string;
   /**
-   * 本鏡的分鏡確認狀態（決策 24：分鏡審查面板的載體，**與資產側同一個 shape**）。
-   * 缺省＝已批准（決策 23 存量相容）；只在呼叫端供給時出現（不補默認值）。
-   * **不在 `QC_REQUIRED_FIELDS` 內**：門檻欄位清單一個字不加（加了＝全鏡次多一項 missing）。
+   * 本镜的分镜确认状态（决策 24：分镜审查面板的载体，**与资产侧同一个 shape**）。
+   * 缺省＝已批准（决策 23 存量相容）；只在呼叫端供给时出现（不补默认值）。
+   * **不在 `QC_REQUIRED_FIELDS` 内**：门槛栏位清单一个字不加（加了＝全镜次多一项 missing）。
    */
   approval?: ApprovalState;
 }
 
 export interface StoryboardQcBridgeResult {
   shots: StoryboardQcShot[];
-  /** 仍有鏡次缺的成片階段欄位名（誠實回報，不補假值；門禁據此 block 是預期行為）。 */
+  /** 仍有镜次缺的成片阶段栏位名（诚实回报，不补假值；门禁据此 block 是预期行为）。 */
   missing: string[];
-  /** 全鏡成片階段欄位齊備（唯一可以宣告「門禁可望 17/17」的條件）。 */
+  /** 全镜成片阶段栏位齐备（唯一可以宣告「门禁可望 17/17」的条件）。 */
   complete: boolean;
 }
 
 /**
- * 「缺了就列進 `missing`」的**門檻欄位**清單（門檻語義 = 缺 → `missing` → 門禁 block）。
+ * 「缺了就列进 `missing`」的**门槛栏位**清单（门槛语义 = 缺 → `missing` → 门禁 block）。
  *
- * **刻意不含 `propCardIds`（2026-09-24 裁定，勿加）**：`missing` 會讓 `storyboard_qc_17`
- * 門禁把該鏡 block。現存所有鏡次都沒有 `propCardIds`，一旦把道具卡列為門檻欄位，
- * **全部鏡次會瞬間多一項 missing**（門禁分數從 11/17 起直接再掉）＝純回歸，不是新能力。
- * 道具卡是**加成欄位**：它照樣出現在 `StoryboardQcShot` 輸出上（與
- * `characterCardIds`/`sceneCardIds` 同構）、照樣有 `unresolvedProps` 誠實回報未命中的道具名，
- * 但**不參與** `missing` / `complete` 的判定——有則更好，無則不罰。
+ * **刻意不含 `propCardIds`（2026-09-24 裁定，勿加）**：`missing` 会让 `storyboard_qc_17`
+ * 门禁把该镜 block。现存所有镜次都没有 `propCardIds`，一旦把道具卡列为门槛栏位，
+ * **全部镜次会瞬间多一项 missing**（门禁分数从 11/17 起直接再掉）＝纯回归，不是新能力。
+ * 道具卡是**加成栏位**：它照样出现在 `StoryboardQcShot` 输出上（与
+ * `characterCardIds`/`sceneCardIds` 同构）、照样有 `unresolvedProps` 诚实回报未命中的道具名，
+ * 但**不参与** `missing` / `complete` 的判定——有则更好，无则不罚。
  *
- * **同樣刻意不含 `narration`（2026-09-30 裁定，勿加）**：旁白是同一類**加成欄位**——只有呼叫端
- * 供給時才出現在輸出上，未供給既不補默認值也不進 `missing`。理由同道具卡（加了＝全鏡次多一項
- * missing＝純回歸）；且我方 21 欄契約無旁白欄、無合法推導來源（見下方「刻意不做的推導」）。
+ * **同样刻意不含 `narration`（2026-09-30 裁定，勿加）**：旁白是同一类**加成栏位**——只有呼叫端
+ * 供给时才出现在输出上，未供给既不补默认值也不进 `missing`。理由同道具卡（加了＝全镜次多一项
+ * missing＝纯回归）；且我方 21 栏契约无旁白栏、无合法推导来源（见下方「刻意不做的推导」）。
  */
 const QC_REQUIRED_FIELDS = [
   "sceneId",
@@ -321,20 +321,20 @@ const QC_REQUIRED_FIELDS = [
   "aspectRatio",
 ] as const;
 
-/** 非空（trim 後）字串——門禁讀值前一律 trim（VPS `text()`），故純空白字串等於「沒有值」。 */
+/** 非空（trim 后）字串——门禁读值前一律 trim（VPS `text()`），故纯空白字串等于「没有值」。 */
 function isNonBlankString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
 /**
- * 「這一欄真的有值」的判準——**判的是值，不是鍵存不存在**。
+ * 「这一栏真的有值」的判准——**判的是值，不是键存不存在**。
  *
- * 為何不能只判 `v === undefined`（2026-09-17 實測缺陷，已修）：
- *   - `sceneId: ""` 舊判準算「已供給」→ `missing` 漏報、`complete` 回 `true`；
- *     但門禁 `Boolean(text(s.sceneId))` 照樣 block →「橋接宣告可望 17/17、門禁實際 11/17」。
- *   - `durationSeconds: NaN` 舊判準算「已供給」，且 `typeof NaN === "number"` 讓它**真的被送進門禁**；
- *     `JSON.stringify` 把 NaN 變成 `null` → 門禁 `num(null)` → `undefined` → 一樣 block。
- *   兩者都是「用空值騙門禁」的同型病灶，故本判準與門禁自身的正規化（trim 後非空、有限數）對齊。
+ * 为何不能只判 `v === undefined`（2026-09-17 实测缺陷，已修）：
+ *   - `sceneId: ""` 旧判准算「已供给」→ `missing` 漏报、`complete` 回 `true`；
+ *     但门禁 `Boolean(text(s.sceneId))` 照样 block →「桥接宣告可望 17/17、门禁实际 11/17」。
+ *   - `durationSeconds: NaN` 旧判准算「已供给」，且 `typeof NaN === "number"` 让它**真的被送进门禁**；
+ *     `JSON.stringify` 把 NaN 变成 `null` → 门禁 `num(null)` → `undefined` → 一样 block。
+ *   两者都是「用空值骗门禁」的同型病灶，故本判准与门禁自身的正规化（trim 后非空、有限数）对齐。
  */
 function hasUsableQcValue(field: (typeof QC_REQUIRED_FIELDS)[number], v: unknown): boolean {
   if (field === "characterCardIds" || field === "sceneCardIds") {
@@ -344,16 +344,16 @@ function hasUsableQcValue(field: (typeof QC_REQUIRED_FIELDS)[number], v: unknown
   return isNonBlankString(v);
 }
 
-/** 卡 id 陣列 → 只留非空字串（門禁 `strArr` 只認字串；非字串項不送過去，避免製造假綁定）。 */
+/** 卡 id 阵列 → 只留非空字串（门禁 `strArr` 只认字串；非字串项不送过去，避免制造假绑定）。 */
 function usableCardIds(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((id): id is string => isNonBlankString(id)) : [];
 }
 
 /**
- * `usableCardIds` + 去重（清洗規則**完全復用**，只多一步「同一來源內重複 id 只留一份」）。
- * 為何要一致：①②④ 的名稱解析路徑（`resolveReferenceAssetsToCardIds`）與
- * `storyboardQcContextFromProject` 的節點累積本來就 `!ids.includes(id)` 去重；
- * ⑤ 若不去重，同一批 id 會在 `fields` 裡長成 `["a","a"]`（審計跡與輸出無謂膨脹）。
+ * `usableCardIds` + 去重（清洗规则**完全复用**，只多一步「同一来源内重复 id 只留一份」）。
+ * 为何要一致：①②④ 的名称解析路径（`resolveReferenceAssetsToCardIds`）与
+ * `storyboardQcContextFromProject` 的节点累积本来就 `!ids.includes(id)` 去重；
+ * ⑤ 若不去重，同一批 id 会在 `fields` 里长成 `["a","a"]`（审计迹与输出无谓膨胀）。
  */
 function uniqueCardIds(v: unknown): string[] {
   const out: string[] = [];
@@ -362,10 +362,10 @@ function uniqueCardIds(v: unknown): string[] {
 }
 
 /**
- * 21 欄分鏡 → 門禁輸入。只做**欄名映射**，不製造 21 欄裡不存在的值：
- *   - `shotId` ← `shotNumber`（無則 `S{序}`）、`order` ← 陣列序（門禁 `shot_order` 要求 1..N 連續）
+ * 21 栏分镜 → 门禁输入。只做**栏名映射**，不制造 21 栏里不存在的值：
+ *   - `shotId` ← `shotNumber`（无则 `S{序}`）、`order` ← 阵列序（门禁 `shot_order` 要求 1..N 连续）
  *   - `prompt` ← `production.prompt` ?? `visualDescription`
- *   - 其餘成片階段欄位只從 `production` 取，缺者列進 `missing`。
+ *   - 其余成片阶段栏位只从 `production` 取，缺者列进 `missing`。
  */
 export function storyboardQcShots(
   shots: readonly StoryboardScriptShot[],
@@ -374,7 +374,7 @@ export function storyboardQcShots(
   return storyboardQcShotsWith(shots, production);
 }
 
-/** `storyboardQcShots` 的實作本體（保持原函數簽名與語義不動，只抽出可被下方複用）。 */
+/** `storyboardQcShots` 的实作本体（保持原函数签名与语义不动，只抽出可被下方复用）。 */
 function storyboardQcShotsWith(
   shots: readonly StoryboardScriptShot[],
   production?: Readonly<Record<string, StoryboardQcProductionFields>>,
@@ -402,9 +402,9 @@ function storyboardQcShotsWith(
       ...(isNonBlankString(p.lastFrameId) ? { lastFrameId: p.lastFrameId.trim() } : {}),
       ...(isNonBlankString(p.audioAnchorId) ? { audioAnchorId: p.audioAnchorId.trim() } : {}),
       ...(isNonBlankString(p.aspectRatio) ? { aspectRatio: p.aspectRatio.trim() } : {}),
-      // 旁白（加成欄位）：呼叫端供給才帶（同 `approval` 範式，未供給不補默認值 → 既有輸出鍵逐位不變）。
+      // 旁白（加成栏位）：呼叫端供给才带（同 `approval` 范式，未供给不补默认值 → 既有输出键逐位不变）。
       ...(isNonBlankString(p.narration) ? { narration: p.narration.trim() } : {}),
-      // 分鏡確認狀態：呼叫端供給才帶（未供給＝缺省＝已批准，不補默認值 → 既有輸出鍵逐位不變）。
+      // 分镜确认状态：呼叫端供给才带（未供给＝缺省＝已批准，不补默认值 → 既有输出键逐位不变）。
       ...(p.approval ? { approval: p.approval } : {}),
     } satisfies StoryboardQcShot;
   });
@@ -412,85 +412,85 @@ function storyboardQcShotsWith(
   return { shots: out, missing: missingList, complete: shots.length > 0 && missingList.length === 0 };
 }
 
-// ─────────────────────────────────────────── 上下文 → 成片階段欄位（G5 合法推導）
+// ─────────────────────────────────────────── 上下文 → 成片阶段栏位（G5 合法推导）
 
 /**
- * 卡索引最小形：只吃解析需要的三欄。
- * **刻意不 import `character-cards.ts`**：`canvas/types.ts:19` 已 type-only import 本檔，
- * 反向 import 會成環；本檔維持「純常數 + 純函式、零依賴」。呼叫端傳 `CharacterCard[]`
- * 結構相容（`id`/`name`/`kind` 三欄，見 `character-cards.ts:39-41`）。
+ * 卡索引最小形：只吃解析需要的三栏。
+ * **刻意不 import `character-cards.ts`**：`canvas/types.ts:19` 已 type-only import 本档，
+ * 反向 import 会成环；本档维持「纯常数 + 纯函式、零依赖」。呼叫端传 `CharacterCard[]`
+ * 结构相容（`id`/`name`/`kind` 三栏，见 `character-cards.ts:39-41`）。
  */
 export interface StoryboardQcCardRef {
   id: string;
   name: string;
   kind: string;
   /**
-   * REQ-B2 作用域（可選）。缺省＝personal（本帳號所有項目可用）。
-   * 只在 `options.scope` 給了上下文時生效；未給＝既有行為逐位不變（零回歸）。
+   * REQ-B2 作用域（可选）。缺省＝personal（本帐号所有项目可用）。
+   * 只在 `options.scope` 给了上下文时生效；未给＝既有行为逐位不变（零回归）。
    */
   scope?: AssetScope;
   /**
-   * 資產批准狀態（2026-09-24，**與 `CharacterCard.approval` 同一個 shape**，
-   * 型別真源在 `./character-cards`）。缺省＝已批准（決策 23）。
-   * 只在協作檔當門檻（見 `filterApprovedShotCardIds`）。
+   * 资产批准状态（2026-09-24，**与 `CharacterCard.approval` 同一个 shape**，
+   * 型别真源在 `./character-cards`）。缺省＝已批准（决策 23）。
+   * 只在协作档当门槛（见 `filterApprovedShotCardIds`）。
    */
   approval?: ApprovalState;
 }
 
 /**
- * REQ-B2 作用域裁決上下文（可選）。給了它＝卡清單與 `project.cardIds` 都先過
- * `canUseAsset`（= `resolveAssetVisibility` 的唯一入口）：跨項目、未顯式分享的卡
- * **不可見即不可用**——不進鎖定集合、不進注入上下文，另在 `outOfScopeCardIds` 如實回報。
+ * REQ-B2 作用域裁决上下文（可选）。给了它＝卡清单与 `project.cardIds` 都先过
+ * `canUseAsset`（= `resolveAssetVisibility` 的唯一入口）：跨项目、未显式分享的卡
+ * **不可见即不可用**——不进锁定集合、不进注入上下文，另在 `outOfScopeCardIds` 如实回报。
  */
 export interface StoryboardQcScopeContext {
   viewerUserId: number;
-  /** 當前項目 id；null＝無項目上下文（項目歸屬的卡一律不可用，個人卡照用）。 */
+  /** 当前项目 id；null＝无项目上下文（项目归属的卡一律不可用，个人卡照用）。 */
   projectId: string | null;
   shares: readonly AssetShareRecord[];
 }
 
-/** 每鏡每欄的**值來源**（合法推導的可審計痕跡；缺者不在表內，改進 `missing`）。 */
+/** 每镜每栏的**值来源**（合法推导的可审计痕迹；缺者不在表内，改进 `missing`）。 */
 export type StoryboardQcFieldSource = "production" | "referenceAssets" | "nodeSize" | "nodeMetadata";
 
 /**
- * 分鏡節點 metadata 的最小形（**結構相容 `CanvasNodeMetadata`，不 import**）。
- * 為何不 import `canvas/types.ts`：該檔已 type-only import 本檔（`types.ts:19`），反向 import
- * 會成環；本檔維持「純常數 + 純函式、零依賴」（同 `StoryboardQcCardRef` / `StoryboardQcNodeRef` 範式）。
+ * 分镜节点 metadata 的最小形（**结构相容 `CanvasNodeMetadata`，不 import**）。
+ * 为何不 import `canvas/types.ts`：该档已 type-only import 本档（`types.ts:19`），反向 import
+ * 会成环；本档维持「纯常数 + 纯函式、零依赖」（同 `StoryboardQcCardRef` / `StoryboardQcNodeRef` 范式）。
  *
- * `size` 語義不變（canvas 的 `size` 就是交付比例，見 ③ 條推導）。三個卡 id 欄（2026-09-24 新增）
- * 的真源是 agent 自動落卡後回填進節點 metadata 的引用——**粗（可能把該模板產出的卡全填上）**，
- * 因此推導優先序刻意排在 `referenceAssets`（編劇逐字指名）之後。
+ * `size` 语义不变（canvas 的 `size` 就是交付比例，见 ③ 条推导）。三个卡 id 栏（2026-09-24 新增）
+ * 的真源是 agent 自动落卡后回填进节点 metadata 的引用——**粗（可能把该模板产出的卡全填上）**，
+ * 因此推导优先序刻意排在 `referenceAssets`（编剧逐字指名）之后。
  *
- * `audioAnchorId`（2026-09-30 新增）**有真生產者**：逐鏡配音（`storyboard-voiceover`）把
- * `dialogueAudioId || narrationAudioId` 寫回節點 metadata；本欄供 `productionFieldsFromContext`
- * 第 ⑤ 條在呼叫端未供給時把它餵進門禁的 `audio_anchor_present`/`dialogue_alignment`。
+ * `audioAnchorId`（2026-09-30 新增）**有真生产者**：逐镜配音（`storyboard-voiceover`）把
+ * `dialogueAudioId || narrationAudioId` 写回节点 metadata；本栏供 `productionFieldsFromContext`
+ * 第 ⑤ 条在呼叫端未供给时把它喂进门禁的 `audio_anchor_present`/`dialogue_alignment`。
  */
 export interface StoryboardQcShotNodeMetadata {
   size?: unknown;
-  /** 本鏡引用的實體卡 id（canvas 節點 metadata；真源見 `CanvasNodeMetadata`）。 */
+  /** 本镜引用的实体卡 id（canvas 节点 metadata；真源见 `CanvasNodeMetadata`）。 */
   characterCardIds?: unknown;
   sceneCardIds?: unknown;
   propCardIds?: unknown;
   /**
-   * 本鏡的音軌錨 id（2026-09-30 新增；節點 metadata 的相容鍵
-   * `CanvasNodeMetadata.audioAnchorId` = `dialogueAudioId || narrationAudioId`，寫入者 =
-   * `storyboard-voiceover` 逐鏡配音回寫）。**單值語義**（同 `size`，非卡 id 的集合語義）：
-   * 同鏡多節點取首個非空，矛盾則整個不給——音軌錨是單一交付物，猜不得。
+   * 本镜的音轨锚 id（2026-09-30 新增；节点 metadata 的相容键
+   * `CanvasNodeMetadata.audioAnchorId` = `dialogueAudioId || narrationAudioId`，写入者 =
+   * `storyboard-voiceover` 逐镜配音回写）。**单值语义**（同 `size`，非卡 id 的集合语义）：
+   * 同镜多节点取首个非空，矛盾则整个不给——音轨锚是单一交付物，猜不得。
    */
   audioAnchorId?: unknown;
 }
 
 /**
- * 推導上下文。**每個欄位只在有真實來源時才生成**，缺者一律留在 `missing`（不補默認值）。
+ * 推导上下文。**每个栏位只在有真实来源时才生成**，缺者一律留在 `missing`（不补默认值）。
  *
- * - `production`：呼叫端已有的成片階段欄位（最高優先，覆蓋一切推導）
- * - `cards`：卡實體清單（唯一真源 = `character-card-store.listCharacterCards`，
- *   `src/lib/character-card-store.ts:122`）。**只用於名稱→id 解析**，不背書卡的存在性判定
- * - `shotMetadata`：每鏡節點 metadata（鍵 = `shotNumber`）。用兩族欄位：
- *   `size` 一欄推 `aspectRatio`（③）；`characterCardIds`/`sceneCardIds`/`propCardIds` 三欄推
- *   同名成片欄位（⑤，**只在 `production` 與 `referenceAssets` 都沒供給時才生效**）；
- *   `audioAnchorId` 一欄推同名成片欄位（⑤，2026-09-30；**單值語義**，只在 `production` 未供給時生效）
- * - `locked*CardIds`：專案級鎖定卡（真源 = `CanvasProject.cardIds`，`src/lib/canvas/types.ts:356`）
+ * - `production`：呼叫端已有的成片阶段栏位（最高优先，覆盖一切推导）
+ * - `cards`：卡实体清单（唯一真源 = `character-card-store.listCharacterCards`，
+ *   `src/lib/character-card-store.ts:122`）。**只用于名称→id 解析**，不背书卡的存在性判定
+ * - `shotMetadata`：每镜节点 metadata（键 = `shotNumber`）。用两族栏位：
+ *   `size` 一栏推 `aspectRatio`（③）；`characterCardIds`/`sceneCardIds`/`propCardIds` 三栏推
+ *   同名成片栏位（⑤，**只在 `production` 与 `referenceAssets` 都没供给时才生效**）；
+ *   `audioAnchorId` 一栏推同名成片栏位（⑤，2026-09-30；**单值语义**，只在 `production` 未供给时生效）
+ * - `locked*CardIds`：专案级锁定卡（真源 = `CanvasProject.cardIds`，`src/lib/canvas/types.ts:356`）
  */
 export interface StoryboardQcContext {
   production?: Readonly<Record<string, StoryboardQcProductionFields>>;
@@ -500,24 +500,24 @@ export interface StoryboardQcContext {
   lockedSceneCardIds?: readonly string[];
   segmentDurationSeconds?: number;
   /**
-   * 互動檔位（型別真源 = `AgentInteractionMode`，`src/lib/agent-chat-client.ts:749`）。
-   * **只有 `"collaborate"` 會讓批准閘（第 ⑥ 條）生效**；未給 = `preset`/`auto` 待遇 =
-   * 既有行為逐位不變（決策 2：全自動檔零改動、不停不阻塞＝護城河）。
+   * 互动档位（型别真源 = `AgentInteractionMode`，`src/lib/agent-chat-client.ts:749`）。
+   * **只有 `"collaborate"` 会让批准闸（第 ⑥ 条）生效**；未给 = `preset`/`auto` 待遇 =
+   * 既有行为逐位不变（决策 2：全自动档零改动、不停不阻塞＝护城河）。
    */
   mode?: AgentInteractionMode;
 }
 
-/** ratio 形狀（`9:16`）。**只認已顯式是比例的欄位**，不把像素尺寸換算成比例（見 `productionFieldsFromContext` 註）。 */
+/** ratio 形状（`9:16`）。**只认已显式是比例的栏位**，不把像素尺寸换算成比例（见 `productionFieldsFromContext` 注）。 */
 const RATIO_SHAPE = /^\d+:\d+$/;
 
 /**
- * 卡名 → 卡 id 索引（**同名同kind 歧義者整批排除**）。
+ * 卡名 → 卡 id 索引（**同名同kind 歧义者整批排除**）。
  *
- * 為何排除而非取首個：`CharacterCard.name` 沒有唯一性約束（`character-cards.ts:85` 只驗非空與長度），
- * 撞名時任取一個就是**猜**——寧可回報未解析（該鏡進 `missing`），也不把兩張卡混為一談。
- * 名稱比對用 trim 後逐字相等（不做大小寫/前綴模糊匹配：模糊匹配會把不同卡黏在一起）。
- * `prop` 表**沿用完全同一套規則**（同 kind 逐字命中、同名同 kind 歧義整批排除），
- * 不為道具另立規則；`style` 卡不進任何表（風格不是道具）。
+ * 为何排除而非取首个：`CharacterCard.name` 没有唯一性约束（`character-cards.ts:85` 只验非空与长度），
+ * 撞名时任取一个就是**猜**——宁可回报未解析（该镜进 `missing`），也不把两张卡混为一谈。
+ * 名称比对用 trim 后逐字相等（不做大小写/前缀模糊匹配：模糊匹配会把不同卡黏在一起）。
+ * `prop` 表**沿用完全同一套规则**（同 kind 逐字命中、同名同 kind 歧义整批排除），
+ * 不为道具另立规则；`style` 卡不进任何表（风格不是道具）。
  */
 export function indexCardsByName(cards: readonly StoryboardQcCardRef[]): {
   character: Map<string, string>;
@@ -544,24 +544,24 @@ export function indexCardsByName(cards: readonly StoryboardQcCardRef[]): {
     if (kind === "character") character.set(name, entry.id);
     else if (kind === "scene") scene.set(name, entry.id);
     else if (kind === "prop") prop.set(name, entry.id);
-    // 其餘 kind（含 "style"）不進任何表：風格卡不是道具、也不屬門禁兩集。
+    // 其余 kind（含 "style"）不进任何表：风格卡不是道具、也不属门禁两集。
   }
   return { character, scene, prop };
 }
 
 /**
- * `referenceAssets` → 卡 id（**名稱逐字命中才成立**）。
+ * `referenceAssets` → 卡 id（**名称逐字命中才成立**）。
  *
- * 語義邊界（誠實標記）：AID 的 `referenceAssets` 名稱取自**資產庫**（`storyboard-contract.ts`
- * 契約註：名稱取自資產庫、未命中者 AID 後端剔除），本站資產庫有兩族：
+ * 语义边界（诚实标记）：AID 的 `referenceAssets` 名称取自**资产库**（`storyboard-contract.ts`
+ * 契约注：名称取自资产库、未命中者 AID 后端剔除），本站资产库有两族：
  *   - `CharacterCard`（`kind: "character"|"scene"|"prop"`）→ 可解析成卡 id
- *   - 資產包/歷史資產條目（`node-to-asset-items.ts`）→ **沒有卡 id**，解析不到（留在 unsolved）
- * 故：解析失敗 = 名稱不存在於卡清單，或該名稱屬資產包另一族，或同名歧義 —— 三種都**不臆造 id**。
+ *   - 资产包/历史资产条目（`node-to-asset-items.ts`）→ **没有卡 id**，解析不到（留在 unsolved）
+ * 故：解析失败 = 名称不存在于卡清单，或该名称属资产包另一族，或同名歧义 —— 三种都**不臆造 id**。
  *
- * **三段的 `unresolved*` 語義現在一致**（2026-09-24 統一）：「真的沒命中」的名稱清單——
- * 名稱在卡清單裡找不到（含同名歧義、kind 不符）才進這裡。舊版 `unresolvedProps` 是
- * 「本站沒有對應欄位」的原樣回報（`propCardIds` 不存在於門禁 Shot），道具卡走完解析鏈後
- * 該語義已失效：`prop` 段現在與角色/場景段**逐字同一條解析規則**（`kind === "prop"` 命中
+ * **三段的 `unresolved*` 语义现在一致**（2026-09-24 统一）：「真的没命中」的名称清单——
+ * 名称在卡清单里找不到（含同名歧义、kind 不符）才进这里。旧版 `unresolvedProps` 是
+ * 「本站没有对应栏位」的原样回报（`propCardIds` 不存在于门禁 Shot），道具卡走完解析链后
+ * 该语义已失效：`prop` 段现在与角色/场景段**逐字同一条解析规则**（`kind === "prop"` 命中
  * `indexCardsByName` 的 prop 表 → 卡 id；未命中 → `unresolvedProps`）。
  */
 export function resolveReferenceAssetsToCardIds(
@@ -600,24 +600,24 @@ export function resolveReferenceAssetsToCardIds(
   };
 }
 
-// ─────────────────────────────────────────── 資產批准閘（檔位相關，2026-09-24）
+// ─────────────────────────────────────────── 资产批准闸（档位相关，2026-09-24）
 
-/** 分鏡的三條卡引用欄（鍵名 = `storyboard_qc_17` 門禁欄名；本檔唯一清單，勿另立）。 */
+/** 分镜的三条卡引用栏（键名 = `storyboard_qc_17` 门禁栏名；本档唯一清单，勿另立）。 */
 const SHOT_CARD_ID_FIELDS = ["characterCardIds", "sceneCardIds", "propCardIds"] as const;
 
 /**
- * 卡 id 過批准閘（純函式；**只有協作檔會擋**——護城河寫在函式體內，不靠呼叫端自律）。
+ * 卡 id 过批准闸（纯函式；**只有协作档会挡**——护城河写在函式体内，不靠呼叫端自律）。
  *
- * 規則（決策 2/23）：
- *   - `mode !== "collaborate"`（含 `preset`/`auto`/**未給 mode**）→ **原樣回傳**：
- *     順序與重複項逐位不變（全自動檔零改動、既有呼叫端零漂移）。
- *   - `mode === "collaborate"` → 逐 id 問 `isAssetApproved`（判定單一真源在 `./character-cards`）：
- *     顯式 `pending`/`rejected` 的卡 id 剔除；缺 `approval` 的卡（＝已批准）保留。
- *   - **卡清單裡查不到的 id → 保留**：查不到 ≠ 未批准，不猜（與 `unresolvedCardIds` 同一條界線）。
- *   - 同 id 多筆卡且其中有未批准者 → **擋**（不能證明已批准的，不當已批准處理）。
+ * 规则（决策 2/23）：
+ *   - `mode !== "collaborate"`（含 `preset`/`auto`/**未给 mode**）→ **原样回传**：
+ *     顺序与重复项逐位不变（全自动档零改动、既有呼叫端零漂移）。
+ *   - `mode === "collaborate"` → 逐 id 问 `isAssetApproved`（判定单一真源在 `./character-cards`）：
+ *     显式 `pending`/`rejected` 的卡 id 剔除；缺 `approval` 的卡（＝已批准）保留。
+ *   - **卡清单里查不到的 id → 保留**：查不到 ≠ 未批准，不猜（与 `unresolvedCardIds` 同一条界线）。
+ *   - 同 id 多笔卡且其中有未批准者 → **挡**（不能证明已批准的，不当已批准处理）。
  *
- * 呼叫端＝寫入/消費分鏡卡引用欄的人（分鏡審查面板、`productionFieldsFromContext` 第 ⑥ 條）。
- * 本函式**只做判定**：不做 UI 觸發、不改 gateway、不動扣費。
+ * 呼叫端＝写入/消费分镜卡引用栏的人（分镜审查面板、`productionFieldsFromContext` 第 ⑥ 条）。
+ * 本函式**只做判定**：不做 UI 触发、不改 gateway、不动扣费。
  */
 export function filterApprovedShotCardIds(
   ids: readonly string[] | undefined,
@@ -637,63 +637,63 @@ export function filterApprovedShotCardIds(
 }
 
 export interface StoryboardQcContextFields {
-  /** 鍵 = `shotNumber`；值只含**真的有來源**的欄位（呼叫端 production 覆蓋推導值）。 */
+  /** 键 = `shotNumber`；值只含**真的有来源**的栏位（呼叫端 production 覆盖推导值）。 */
   fields: Record<string, StoryboardQcProductionFields>;
-  /** 鍵 = `shotNumber` → 欄位 → 值來源（審計跡；無來源欄位不出現，改進 `missing`）。 */
+  /** 键 = `shotNumber` → 栏位 → 值来源（审计迹；无来源栏位不出现，改进 `missing`）。 */
   sources: Record<string, Record<string, StoryboardQcFieldSource>>;
   /**
-   * 鍵 = `shotNumber` → 被批准閘擋下的卡 id（**只在協作檔且真的有擋到時出現**）。
-   * 為何要回報：被擋下的 id 不進 `fields`（連帶該欄進 `missing`），若不同時回報，
-   * 呼叫端只看到「憑空少了一張卡」＝無法解釋，正是本閘要修的「不明不白」病灶。
+   * 键 = `shotNumber` → 被批准闸挡下的卡 id（**只在协作档且真的有挡到时出现**）。
+   * 为何要回报：被挡下的 id 不进 `fields`（连带该栏进 `missing`），若不同时回报，
+   * 呼叫端只看到「凭空少了一张卡」＝无法解释，正是本闸要修的「不明不白」病灶。
    */
   blockedCardIdsByShot?: Record<string, string[]>;
 }
 
 /**
- * 上下文 → 成片階段欄位（純函數，唯一推導入口——**不用隱式魔法、不改任何既有函數語義**）。
+ * 上下文 → 成片阶段栏位（纯函数，唯一推导入口——**不用隐式魔法、不改任何既有函数语义**）。
  *
- * 目前**只有五條**推導成立（每條都有來源，逐條列在回報）：
- *   1. `characterCardIds` ← `referenceAssets` 的 `角色:[…]` 名稱 → 卡 id（`kind==="character"` 逐字命中）
- *   2. `sceneCardIds` ← `referenceAssets` 的 `场景:[…]` 名稱 → 卡 id（`kind==="scene"` 逐字命中）
- *   3. `aspectRatio` ← 該鏡節點 `metadata.size`（canvas 的 `size` **就是比例**：
+ * 目前**只有五条**推导成立（每条都有来源，逐条列在回报）：
+ *   1. `characterCardIds` ← `referenceAssets` 的 `角色:[…]` 名称 → 卡 id（`kind==="character"` 逐字命中）
+ *   2. `sceneCardIds` ← `referenceAssets` 的 `场景:[…]` 名称 → 卡 id（`kind==="scene"` 逐字命中）
+ *   3. `aspectRatio` ← 该镜节点 `metadata.size`（canvas 的 `size` **就是比例**：
  *      `src/app/api/canvas/generate/route.ts:133` `const aspectRatio = body.size ?? "1:1"`；
- *      可選值域見 `src/components/canvas/CanvasNodePromptPanel.tsx:96-102`）
- *   4. `propCardIds` ← `referenceAssets` 的 `道具:[…]` 名稱 → 卡 id（`kind==="prop"` 逐字命中，
- *      2026-09-24 新增）。**加成欄位**：推導不到不進 `missing`（`QC_REQUIRED_FIELDS` 刻意不含它，
- *      否則全部既有鏡次瞬間多一項 missing＝門禁回歸）。`kind==="style"` 的卡不進 prop 表。
- *   5. `characterCardIds`/`sceneCardIds`/`propCardIds`/`audioAnchorId` ← 該鏡節點 `metadata` 的同名
- *      欄（2026-09-24 卡 id；2026-09-30 `audioAnchorId`）。來源 = agent 自動落卡後回填 ＋ 逐鏡配音
- *      回寫（閉環的消費端）。卡 id 是**集合**語義（聯集去重）；`audioAnchorId` 是**單值**語義
- *      （同鏡矛盾不給，值真源見 `storyboardQcContextFromProject`）。
+ *      可选值域见 `src/components/canvas/CanvasNodePromptPanel.tsx:96-102`）
+ *   4. `propCardIds` ← `referenceAssets` 的 `道具:[…]` 名称 → 卡 id（`kind==="prop"` 逐字命中，
+ *      2026-09-24 新增）。**加成栏位**：推导不到不进 `missing`（`QC_REQUIRED_FIELDS` 刻意不含它，
+ *      否则全部既有镜次瞬间多一项 missing＝门禁回归）。`kind==="style"` 的卡不进 prop 表。
+ *   5. `characterCardIds`/`sceneCardIds`/`propCardIds`/`audioAnchorId` ← 该镜节点 `metadata` 的同名
+ *      栏（2026-09-24 卡 id；2026-09-30 `audioAnchorId`）。来源 = agent 自动落卡后回填 ＋ 逐镜配音
+ *      回写（闭环的消费端）。卡 id 是**集合**语义（联集去重）；`audioAnchorId` 是**单值**语义
+ *      （同镜矛盾不给，值真源见 `storyboardQcContextFromProject`）。
  *
- * **推導優先序（照抄，勿改）**：`production`（呼叫端供給） > `referenceAssets`（①②④）
- * > 節點 metadata（⑤）。理由：`referenceAssets` 是**編劇階段逐字寫下的意圖**（名稱級、有明確
- * 指名）；節點 metadata 的卡 id 多半是**機器自動落卡後回填**（粗：可能把該模板產出的卡全填上）。
- * 若讓 metadata 優先，會用「機器猜的較大集合」蓋掉「編劇明確指名的較小集合」。
- * 實作上 ①②④ 的 `if (!out.x …)` 寫法保證「已供給者不被覆蓋」，⑤ 再對同一條件做第二次檢查。
+ * **推导优先序（照抄，勿改）**：`production`（呼叫端供给） > `referenceAssets`（①②④）
+ * > 节点 metadata（⑤）。理由：`referenceAssets` 是**编剧阶段逐字写下的意图**（名称级、有明确
+ * 指名）；节点 metadata 的卡 id 多半是**机器自动落卡后回填**（粗：可能把该模板产出的卡全填上）。
+ * 若让 metadata 优先，会用「机器猜的较大集合」盖掉「编剧明确指名的较小集合」。
+ * 实作上 ①②④ 的 `if (!out.x …)` 写法保证「已供给者不被覆盖」，⑤ 再对同一条件做第二次检查。
  *
- * **刻意不做的推導（附理由，避免下游誤以為漏做）**：
- *   - `durationSeconds`：本 repo 有兩把尺但**互相衝突**且**輸入契約不同**——
- *     `drama-recipe.ts:340 deriveDurations`（4 字/秒，吃「場次 beat 清單」）與
- *     `shortdrama-domain/index.ts:499`（4 字/秒，吃「台詞行清單」），而劇本模板教義寫 **4.5 字/秒**
- *     （`agent-templates-payload.ts:103`）。射手的 `dialogue` 是**單一字串**、其 `[角色]：「…」`
- *     標記格式無契約文件，硬套等於**自造轉換**→ 不生成，留 `missing` 由門禁如實 block。
- *   - `narration`（2026-09-30）：**旁白不從 `dialogue` 猜**。我方 21 欄契約**無旁白欄**，
- *     射手的 `dialogue` 是**單一字串**且其 `[角色]：「…」` 標記格式**無契約文件**——從 `dialogue`
- *     切出旁白＝**自造轉換**（同 `durationSeconds` 的病灶），且分鏡的旁白本就非逐鏡台詞可比。
- *     故本檔不推導 `narration`，一律留給呼叫端供給：供給即進 `fields`（來源記 `production`）；
- *     未供給＝加成欄位不罰（不進 `missing`）。
- *   - `sceneId`：門禁 `sceneId` 是**場次編號**（`drama-recipe.ts:111-112` `DramaScriptScene.sceneId`
- *     「場次編號（如 S01）」），21 欄只有外層 `sceneName` = **場景資產名**（`storyboard-contract.ts:148`）。
- *     兩者是不同實體，名稱不可互換 → 不生成。
- *   - `keyframeId`/`lastFrameId`：本 repo **無生產者**（`grep keyframeId src/` 除本檔與
- *     `shortdrama-domain` 型別外無寫入端）→ 不生成。
- *   - `audioAnchorId`：**2026-09-30 起有生產者**——`storyboard-voiceover`／voiceboard 把
- *     `dialogueAudioId || narrationAudioId` 寫回節點 metadata 的相容鍵，本橋第 ⑤ 條現會在
- *     呼叫端未供給時從節點 metadata 讀取（單值語義：同鏡矛盾不給）。因為 `audioAnchorId`
- *     已在 `QC_REQUIRED_FIELDS` 內，供給後自然不再進 `missing`。（舊註「無生產者→不生成」已過時。）
- *   - `pixels→ratio` 換算（`aspectRatioFromImageSize`）：canvas 存的是比例不是像素，用不到；
- *     且會把「尺寸」與「交付比例」兩概念混一，故只認已是 ratio 形狀的值。
+ * **刻意不做的推导（附理由，避免下游误以为漏做）**：
+ *   - `durationSeconds`：本 repo 有两把尺但**互相冲突**且**输入契约不同**——
+ *     `drama-recipe.ts:340 deriveDurations`（4 字/秒，吃「场次 beat 清单」）与
+ *     `shortdrama-domain/index.ts:499`（4 字/秒，吃「台词行清单」），而剧本模板教义写 **4.5 字/秒**
+ *     （`agent-templates-payload.ts:103`）。射手的 `dialogue` 是**单一字串**、其 `[角色]：「…」`
+ *     标记格式无契约文件，硬套等于**自造转换**→ 不生成，留 `missing` 由门禁如实 block。
+ *   - `narration`（2026-09-30）：**旁白不从 `dialogue` 猜**。我方 21 栏契约**无旁白栏**，
+ *     射手的 `dialogue` 是**单一字串**且其 `[角色]：「…」` 标记格式**无契约文件**——从 `dialogue`
+ *     切出旁白＝**自造转换**（同 `durationSeconds` 的病灶），且分镜的旁白本就非逐镜台词可比。
+ *     故本档不推导 `narration`，一律留给呼叫端供给：供给即进 `fields`（来源记 `production`）；
+ *     未供给＝加成栏位不罚（不进 `missing`）。
+ *   - `sceneId`：门禁 `sceneId` 是**场次编号**（`drama-recipe.ts:111-112` `DramaScriptScene.sceneId`
+ *     「场次编号（如 S01）」），21 栏只有外层 `sceneName` = **场景资产名**（`storyboard-contract.ts:148`）。
+ *     两者是不同实体，名称不可互换 → 不生成。
+ *   - `keyframeId`/`lastFrameId`：本 repo **无生产者**（`grep keyframeId src/` 除本档与
+ *     `shortdrama-domain` 型别外无写入端）→ 不生成。
+ *   - `audioAnchorId`：**2026-09-30 起有生产者**——`storyboard-voiceover`／voiceboard 把
+ *     `dialogueAudioId || narrationAudioId` 写回节点 metadata 的相容键，本桥第 ⑤ 条现会在
+ *     呼叫端未供给时从节点 metadata 读取（单值语义：同镜矛盾不给）。因为 `audioAnchorId`
+ *     已在 `QC_REQUIRED_FIELDS` 内，供给后自然不再进 `missing`。（旧注「无生产者→不生成」已过时。）
+ *   - `pixels→ratio` 换算（`aspectRatioFromImageSize`）：canvas 存的是比例不是像素，用不到；
+ *     且会把「尺寸」与「交付比例」两概念混一，故只认已是 ratio 形状的值。
  */
 export function productionFieldsFromContext(
   shots: readonly StoryboardScriptShot[],
@@ -713,14 +713,14 @@ export function productionFieldsFromContext(
       if (supplied[field] !== undefined) src[field] = "production";
     }
     if (supplied.prompt) src.prompt = "production";
-    // `propCardIds` 不在 `QC_REQUIRED_FIELDS`（加成欄位，見該常數註），故上面的迴圈不會標它；
-    // 呼叫端有供給時補記來源（與 `prompt` 同一範式），否則它在審計跡裡會是「有值卻無來源」。
+    // `propCardIds` 不在 `QC_REQUIRED_FIELDS`（加成栏位，见该常数注），故上面的回圈不会标它；
+    // 呼叫端有供给时补记来源（与 `prompt` 同一范式），否则它在审计迹里会是「有值却无来源」。
     if (supplied.propCardIds !== undefined) src.propCardIds = "production";
-    // `narration` 同樣不在 `QC_REQUIRED_FIELDS`（加成欄位，見該常數註），迴圈不標它；呼叫端供給時
-    // 補記來源（與 `propCardIds`/`prompt` 同一範式），否則審計跡裡會是「有值卻無來源」。
+    // `narration` 同样不在 `QC_REQUIRED_FIELDS`（加成栏位，见该常数注），回圈不标它；呼叫端供给时
+    // 补记来源（与 `propCardIds`/`prompt` 同一范式），否则审计迹里会是「有值却无来源」。
     if (supplied.narration !== undefined) src.narration = "production";
 
-    // ① / ② referenceAssets 名稱 → 卡 id（僅在呼叫端未供給時才推導；已供給者不被覆蓋）
+    // ① / ② referenceAssets 名称 → 卡 id（仅在呼叫端未供给时才推导；已供给者不被覆盖）
     const resolved = resolveReferenceAssetsToCardIds(shot.referenceAssets, cards);
     if (!(out.characterCardIds && out.characterCardIds.length > 0) && resolved.characterCardIds.length > 0) {
       out.characterCardIds = resolved.characterCardIds;
@@ -731,23 +731,23 @@ export function productionFieldsFromContext(
       src.sceneCardIds = "referenceAssets";
     }
 
-    // ③ 節點 ratio → aspectRatio（只認已是 ratio 形狀者，絕不做像素換算或補默認值）
+    // ③ 节点 ratio → aspectRatio（只认已是 ratio 形状者，绝不做像素换算或补默认值）
     const nodeSize = context?.shotMetadata?.[key]?.size;
     if (!out.aspectRatio && typeof nodeSize === "string" && RATIO_SHAPE.test(nodeSize.trim())) {
       out.aspectRatio = nodeSize.trim();
       src.aspectRatio = "nodeSize";
     }
 
-    // ④ referenceAssets 道具名稱 → propCardIds（僅在呼叫端未供給時才推導）
-    // 加成欄位：推導不到不進 missing（`QC_REQUIRED_FIELDS` 刻意不含它），有命中才回報來源。
+    // ④ referenceAssets 道具名称 → propCardIds（仅在呼叫端未供给时才推导）
+    // 加成栏位：推导不到不进 missing（`QC_REQUIRED_FIELDS` 刻意不含它），有命中才回报来源。
     if (!(out.propCardIds && out.propCardIds.length > 0) && resolved.propCardIds.length > 0) {
       out.propCardIds = resolved.propCardIds;
       src.propCardIds = "referenceAssets";
     }
 
-    // ⑤ 分鏡節點 metadata 的卡 id → 三欄（**只在 ①②④ 都沒推導到、且呼叫端未供給時**才生效）
-    // 優先序最低的理由見上方函數註（編劇逐字指名 > 機器自動落卡的較大集合）。
-    // 清洗復用 `usableCardIds`（`uniqueCardIds` = 同規則 + 去重）。
+    // ⑤ 分镜节点 metadata 的卡 id → 三栏（**只在 ①②④ 都没推导到、且呼叫端未供给时**才生效）
+    // 优先序最低的理由见上方函数注（编剧逐字指名 > 机器自动落卡的较大集合）。
+    // 清洗复用 `usableCardIds`（`uniqueCardIds` = 同规则 + 去重）。
     const nodeCards = context?.shotMetadata?.[key];
     if (!(out.characterCardIds && out.characterCardIds.length > 0)) {
       const ids = uniqueCardIds(nodeCards?.characterCardIds);
@@ -770,10 +770,10 @@ export function productionFieldsFromContext(
         src.propCardIds = "nodeMetadata";
       }
     }
-    // `audioAnchorId` 同樣由節點 metadata 帶入（2026-09-30；寫法與上方三條卡 id 逐行對稱，
-    // 含 `src[X] = "nodeMetadata"` 的來源補記）。**單值語義**（同 `size`，非卡 id 的集合語義），
-    // 故只在呼叫端未供給且節點值是非空字串時才拿；因為本欄在 `QC_REQUIRED_FIELDS` 內，
-    // 供給後自然不再進 `missing`。
+    // `audioAnchorId` 同样由节点 metadata 带入（2026-09-30；写法与上方三条卡 id 逐行对称，
+    // 含 `src[X] = "nodeMetadata"` 的来源补记）。**单值语义**（同 `size`，非卡 id 的集合语义），
+    // 故只在呼叫端未供给且节点值是非空字串时才拿；因为本栏在 `QC_REQUIRED_FIELDS` 内，
+    // 供给后自然不再进 `missing`。
     if (!isNonBlankString(out.audioAnchorId)) {
       const nodeAudioAnchorId = nodeCards?.audioAnchorId;
       if (isNonBlankString(nodeAudioAnchorId)) {
@@ -782,12 +782,12 @@ export function productionFieldsFromContext(
       }
     }
 
-    // ⑥ 資產批准閘（**只在協作檔生效**，決策 2/23）：未批准的卡 id 不得進分鏡卡引用欄。
-    // 未給 mode／preset／auto → 整段跳過（既有行為逐位不變，這是全自動檔的護城河）。
-    // 三條欄一律過（不論值來自 production 還是 ①②④⑤ 推導）：使用者在落卡後才駁回時，
-    // 節點 metadata 裡的舊綁定照樣要被擋——否則「駁回」只是事後貼紙。
-    // 擋到一個都不剩 → **連鍵與來源一起移除**（改進 `missing` 讓門禁如實 block，
-    // 不留 `[]` 這種「有鍵無值」騙門禁的空值；擋下的 id 記進 `blockedCardIdsByShot` 回報）。
+    // ⑥ 资产批准闸（**只在协作档生效**，决策 2/23）：未批准的卡 id 不得进分镜卡引用栏。
+    // 未给 mode／preset／auto → 整段跳过（既有行为逐位不变，这是全自动档的护城河）。
+    // 三条栏一律过（不论值来自 production 还是 ①②④⑤ 推导）：使用者在落卡后才驳回时，
+    // 节点 metadata 里的旧绑定照样要被挡——否则「驳回」只是事后贴纸。
+    // 挡到一个都不剩 → **连键与来源一起移除**（改进 `missing` 让门禁如实 block，
+    // 不留 `[]` 这种「有键无值」骗门禁的空值；挡下的 id 记进 `blockedCardIdsByShot` 回报）。
     if (context?.mode === "collaborate") {
       for (const field of SHOT_CARD_ID_FIELDS) {
         const before = out[field];
@@ -816,25 +816,25 @@ export function productionFieldsFromContext(
   };
 }
 
-// ─────────────────────────────────────────── 專案上下文 → 橋接上下文（G5 接線）
+// ─────────────────────────────────────────── 专案上下文 → 桥接上下文（G5 接线）
 
 /**
- * 專案側最小形（**結構相容 `CanvasProject`，不 import**）：只吃推導真正需要的兩個欄位。
- * 為何不 import `canvas/types.ts`：該檔已 type-only import 本檔（`types.ts:19`），反向 import
- * 會成環；本檔維持「純常數 + 純函式、零依賴」。
+ * 专案侧最小形（**结构相容 `CanvasProject`，不 import**）：只吃推导真正需要的两个栏位。
+ * 为何不 import `canvas/types.ts`：该档已 type-only import 本档（`types.ts:19`），反向 import
+ * 会成环；本档维持「纯常数 + 纯函式、零依赖」。
  */
 export interface StoryboardQcProjectRef {
-  /** 專案級鎖定卡 id（真源 = `CanvasProject.cardIds`，`src/lib/canvas/types.ts:356`）。 */
+  /** 专案级锁定卡 id（真源 = `CanvasProject.cardIds`，`src/lib/canvas/types.ts:356`）。 */
   cardIds?: readonly string[];
-  /** 節點清單（真源 = `CanvasProject.nodes`）；只用 `metadata.size` 一欄推比例。 */
+  /** 节点清单（真源 = `CanvasProject.nodes`）；只用 `metadata.size` 一栏推比例。 */
   nodes?: readonly StoryboardQcNodeRef[];
 }
 
-/** 節點側最小形（結構相容 `CanvasNode`）：用 `metadata` 的 `size`、卡 id 三欄與鏡號。 */
+/** 节点侧最小形（结构相容 `CanvasNode`）：用 `metadata` 的 `size`、卡 id 三栏与镜号。 */
 export interface StoryboardQcNodeRef {
   /**
-   * 節點 id（真源 = `CanvasNode.id`）。**只**供 `affectedShotNodesByCardIds` 回報
-   * 「受影響的分鏡節點 id」；缺省/非字串 → 不回報該節點（不臆造 id）。
+   * 节点 id（真源 = `CanvasNode.id`）。**只**供 `affectedShotNodesByCardIds` 回报
+   * 「受影响的分镜节点 id」；缺省/非字串 → 不回报该节点（不臆造 id）。
    */
   id?: unknown;
   metadata?:
@@ -843,32 +843,32 @@ export interface StoryboardQcNodeRef {
 }
 
 /**
- * 專案上下文 → 橋接上下文（**唯一專案級推導入口，顯式不魔法**）。
+ * 专案上下文 → 桥接上下文（**唯一专案级推导入口，显式不魔法**）。
  *
- * 目前只有四條專案級推導成立（每條都有來源）：
+ * 目前只有四条专案级推导成立（每条都有来源）：
  *   1. `lockedCharacterCardIds` / `lockedSceneCardIds` ← `project.cardIds` 按卡 `kind` 分流
- *      （卡實體真源 = `listCharacterCards`，`src/lib/character-card-store.ts:122`）。
- *      門禁 `character_lock`/`scene_lock` 要求「每鏡引用的卡都在鎖定集合內」——集合就是專案鎖定卡。
- *      `kind` 分流只認門禁真有集合的兩族：`style`/`prop`（2026-09-24 起 prop 是真 kind）都
- *      **靜默略過**（既不進鎖定集合也不算未解析）——門禁 `Shot` 沒有 lockedStyle/lockedProp 這兩集。
+ *      （卡实体真源 = `listCharacterCards`，`src/lib/character-card-store.ts:122`）。
+ *      门禁 `character_lock`/`scene_lock` 要求「每镜引用的卡都在锁定集合内」——集合就是专案锁定卡。
+ *      `kind` 分流只认门禁真有集合的两族：`style`/`prop`（2026-09-24 起 prop 是真 kind）都
+ *      **静默略过**（既不进锁定集合也不算未解析）——门禁 `Shot` 没有 lockedStyle/lockedProp 这两集。
  *   2. `shotMetadata[k]` ← `project.nodes` 中 `metadata.size`（供 `productionFieldsFromContext`
- *      推 `aspectRatio`；該欄位是否**真的**已是 ratio 形狀由下游 `RATIO_SHAPE` 把關）。
+ *      推 `aspectRatio`；该栏位是否**真的**已是 ratio 形状由下游 `RATIO_SHAPE` 把关）。
  *   3. `shotMetadata[k]` ← `project.nodes` 中 `metadata.characterCardIds`/`sceneCardIds`/
- *      `propCardIds`（2026-09-24 新增；供 `productionFieldsFromContext` 第 ⑤ 條推導——即
- *      「agent 自動落卡 → 節點 metadata 宣告 → 門禁消費」閉環的帶入端）。清洗用 `usableCardIds`，
- *      **空陣列省略該鍵**（不造 `characterCardIds: []` 的空鍵，否則 `src` 審計跡會誤報「有值」）。
- *   4. `shotMetadata[k]` ← `project.nodes` 中 `metadata.audioAnchorId`（2026-09-30 新增；供第 ⑤ 條
- *      推導——「逐鏡配音回寫 → 節點 metadata → 門禁 `audio_anchor_present`/`dialogue_alignment`」
- *      閉環的帶入端）。**單值語義**（同 `size`）：同鏡多節點取首個非空，矛盾則整個不給；空值/非
- *      字串一律省略該鍵（不臆造、不誤報「有值」）。
+ *      `propCardIds`（2026-09-24 新增；供 `productionFieldsFromContext` 第 ⑤ 条推导——即
+ *      「agent 自动落卡 → 节点 metadata 宣告 → 门禁消费」闭环的带入端）。清洗用 `usableCardIds`，
+ *      **空阵列省略该键**（不造 `characterCardIds: []` 的空键，否则 `src` 审计迹会误报「有值」）。
+ *   4. `shotMetadata[k]` ← `project.nodes` 中 `metadata.audioAnchorId`（2026-09-30 新增；供第 ⑤ 条
+ *      推导——「逐镜配音回写 → 节点 metadata → 门禁 `audio_anchor_present`/`dialogue_alignment`」
+ *      闭环的带入端）。**单值语义**（同 `size`）：同镜多节点取首个非空，矛盾则整个不给；空值/非
+ *      字串一律省略该键（不臆造、不误报「有值」）。
  *
- * **刻意不做的推導**：`aspectRatio` 沒有專案級欄位可取（`grep aspectRatio src/lib/canvas/types.ts`
- * 為空——比例只存在於**節點** metadata，不在 `CanvasProject`），故不「從專案繼承」；
- * 亦無 `segmentDurationSeconds` 的專案級來源（`CanvasEpisode` 無時長欄位）。
+ * **刻意不做的推导**：`aspectRatio` 没有专案级栏位可取（`grep aspectRatio src/lib/canvas/types.ts`
+ * 为空——比例只存在于**节点** metadata，不在 `CanvasProject`），故不「从专案继承」；
+ * 亦无 `segmentDurationSeconds` 的专案级来源（`CanvasEpisode` 无时长栏位）。
  *
- * `unresolvedCardIds`：`cardIds` 中**查不到卡片實體**的 id（卡未載入/已刪）。這些 id 無法判定
- * `kind` → **不猜**、不塞進任一鎖定集合，如實回報。缺卡清單時（`cards` 未提供）同理：
- * 寧可回報全部未解析，也不把角色卡當場景卡通關。
+ * `unresolvedCardIds`：`cardIds` 中**查不到卡片实体**的 id（卡未载入/已删）。这些 id 无法判定
+ * `kind` → **不猜**、不塞进任一锁定集合，如实回报。缺卡清单时（`cards` 未提供）同理：
+ * 宁可回报全部未解析，也不把角色卡当场景卡通关。
  */
 export function storyboardQcContextFromProject(
   project?: StoryboardQcProjectRef,
@@ -877,32 +877,32 @@ export function storyboardQcContextFromProject(
     production?: Readonly<Record<string, StoryboardQcProductionFields>>;
     segmentDurationSeconds?: number;
     /**
-     * 互動檔位（`AgentInteractionMode`）。未給 → 既有行為逐位不變（零回歸）；
-     * 給了 `"collaborate"` → 推導出的分鏡卡引用欄再過一次批准閘（第 ⑥ 條）。
+     * 互动档位（`AgentInteractionMode`）。未给 → 既有行为逐位不变（零回归）；
+     * 给了 `"collaborate"` → 推导出的分镜卡引用栏再过一次批准闸（第 ⑥ 条）。
      */
     mode?: AgentInteractionMode;
     /**
-     * REQ-B2 作用域上下文。未給 → 既有行為逐位不變（零回歸）；
-     * 給了 → 卡與 cardIds 先過作用域裁決（不可見即不可用）。
+     * REQ-B2 作用域上下文。未给 → 既有行为逐位不变（零回归）；
+     * 给了 → 卡与 cardIds 先过作用域裁决（不可见即不可用）。
      */
     scope?: StoryboardQcScopeContext;
   },
 ): { context: StoryboardQcContext; unresolvedCardIds: string[]; outOfScopeCardIds: string[] } {
   const cards = options?.cards ?? [];
   const scope = options?.scope;
-  // 作用域裁決：唯一入口 canUseAsset（= resolveAssetVisibility）。未給上下文＝全放行
-  // （＝本刀之前的行為，逐位不變）；給了＝跨項目未分享的卡在此不可用。
+  // 作用域裁决：唯一入口 canUseAsset（= resolveAssetVisibility）。未给上下文＝全放行
+  // （＝本刀之前的行为，逐位不变）；给了＝跨项目未分享的卡在此不可用。
   const usableCard = (card: StoryboardQcCardRef): boolean => {
     if (!scope) return true;
     const id = typeof card?.id === "string" ? card.id.trim() : "";
-    if (!id) return true; // 無 id 的卡既非可見也非不可見，走原有「不猜」路徑
+    if (!id) return true; // 无 id 的卡既非可见也非不可见，走原有「不猜」路径
     return canUseAsset(
       { id, kind: "card", scope: card.scope, ownerUserId: scope.viewerUserId },
       { viewerUserId: scope.viewerUserId, projectId: scope.projectId, shares: scope.shares },
     );
   };
   const visibleCards = scope ? cards.filter(usableCard) : cards;
-  // 被作用域拒掉的卡 id：與「查不到卡實體」分開如實回報（兩態不混）。
+  // 被作用域拒掉的卡 id：与「查不到卡实体」分开如实回报（两态不混）。
   const outOfScopeCardIds: string[] = [];
   if (scope) {
     for (const card of cards) {
@@ -917,7 +917,7 @@ export function storyboardQcContextFromProject(
     if (!card || typeof card.id !== "string" || typeof card.kind !== "string") continue;
     const id = card.id.trim();
     if (!id) continue;
-    // 同 id 多卡：kind 不一致 → 無法判定，標成歧義（空字串）以排除出兩個鎖定集合
+    // 同 id 多卡：kind 不一致 → 无法判定，标成歧义（空字串）以排除出两个锁定集合
     const prev = kindById.get(id);
     if (prev !== undefined && prev !== card.kind) kindById.set(id, "\u0000ambiguous");
     else if (prev === undefined) kindById.set(id, card.kind);
@@ -929,7 +929,7 @@ export function storyboardQcContextFromProject(
   for (const raw of project?.cardIds ?? []) {
     if (!isNonBlankString(raw)) continue;
     const id = raw.trim();
-    // 不可見即不可用：跨項目未分享的卡不進鎖定集合（已在上方如實回報，不重複算未解析）。
+    // 不可见即不可用：跨项目未分享的卡不进锁定集合（已在上方如实回报，不重复算未解析）。
     if (outOfScopeCardIds.includes(id)) continue;
     const kind = kindById.get(id);
     if (kind === "character") {
@@ -937,28 +937,28 @@ export function storyboardQcContextFromProject(
     } else if (kind === "scene") {
       if (!lockedSceneCardIds.includes(id)) lockedSceneCardIds.push(id);
     } else if (kind === "style") {
-      // style 卡不屬門禁兩集（`Shot` 無 styleCardIds）→ 既非未解析也非兩者之一，靜默略過
+      // style 卡不属门禁两集（`Shot` 无 styleCardIds）→ 既非未解析也非两者之一，静默略过
     } else if (kind === "prop") {
-      // prop 卡同理：門禁 `Shot` 沒有 lockedPropCardIds 這一集（道具是加成欄位，不設鎖），
-      // 故既不入角色/場景鎖定集合，也**不得**被當成「查不到卡實體」而誤進 unresolvedCardIds。
+      // prop 卡同理：门禁 `Shot` 没有 lockedPropCardIds 这一集（道具是加成栏位，不设锁），
+      // 故既不入角色/场景锁定集合，也**不得**被当成「查不到卡实体」而误进 unresolvedCardIds。
     } else {
-      // 查不到卡實體 / id 撞 kind / 非字串 kind → 不猜
+      // 查不到卡实体 / id 撞 kind / 非字串 kind → 不猜
       if (!unresolvedCardIds.includes(id)) unresolvedCardIds.push(id);
     }
   }
 
   const shotMetadata: Record<string, StoryboardQcShotNodeMetadata> = {};
-  // 卡 id 三欄與 `size` **分開累積**：`size` 是同鏡矛盾就整個不給（比例是單一交付格式，猜不得）；
-  // 卡 id 是**集合**語義（節點宣告「本鏡引用這些卡」），同鏡多節點取聯集去重、不取首個也不丟資訊。
+  // 卡 id 三栏与 `size` **分开累积**：`size` 是同镜矛盾就整个不给（比例是单一交付格式，猜不得）；
+  // 卡 id 是**集合**语义（节点宣告「本镜引用这些卡」），同镜多节点取联集去重、不取首个也不丢资讯。
   const cardsByShot: Record<string, { character: string[]; scene: string[]; prop: string[] }> = {};
-  // `audioAnchorId` 與 `size` **同範式（單值語義）**、**不照卡 id 的聯集**：同鏡多節點取首個非空，
-  // 一旦矛盾（第二個非空值不同）就整個不給（`null` 哨兵），後續節點不得把它「救回」——音軌錨是
-  // 單一交付物，猜不得。空/非字串值一律忽略（不佔位、不算首個）。
+  // `audioAnchorId` 与 `size` **同范式（单值语义）**、**不照卡 id 的联集**：同镜多节点取首个非空，
+  // 一旦矛盾（第二个非空值不同）就整个不给（`null` 哨兵），后续节点不得把它「救回」——音轨锚是
+  // 单一交付物，猜不得。空/非字串值一律忽略（不占位、不算首个）。
   const anchorByShot: Record<string, string | null> = {};
   for (const node of project?.nodes ?? []) {
     const meta = node?.metadata;
     const shotNumber = meta?.storyboardShot?.shotNumber;
-    if (!isNonBlankString(shotNumber)) continue; // 無鏡號的節點不歸屬任一鏡（不臆造鍵）
+    if (!isNonBlankString(shotNumber)) continue; // 无镜号的节点不归属任一镜（不臆造键）
     const key = shotNumber.trim();
 
     const bucket = (cardsByShot[key] ??= { character: [], scene: [], prop: [] });
@@ -974,24 +974,24 @@ export function storyboardQcContextFromProject(
       const anchor = rawAnchor.trim();
       const prevAnchor = anchorByShot[key];
       if (prevAnchor === undefined) anchorByShot[key] = anchor;
-      else if (prevAnchor !== anchor) anchorByShot[key] = null; // 同鏡矛盾 → 不給（不取首個猜）
+      else if (prevAnchor !== anchor) anchorByShot[key] = null; // 同镜矛盾 → 不给（不取首个猜）
     }
 
     const size = meta?.size;
     if (size === undefined) continue;
-    // 同鏡號多節點：ratio 不一致 → 寧可不給（該鏡 aspectRatio 留 missing），不取首個猜
+    // 同镜号多节点：ratio 不一致 → 宁可不给（该镜 aspectRatio 留 missing），不取首个猜
     const prev = shotMetadata[key];
     if (prev === undefined) shotMetadata[key] = { size };
     else if (prev.size !== size) shotMetadata[key] = {};
   }
-  // 音軌錨：真的有單一非空值時才掛上；同鏡矛盾則**保留該鏡鍵但不給值**（照 `size` 範式——
-  // `{ [key]: {} }`，審計跡不誤報「有值」）。
+  // 音轨锚：真的有单一非空值时才挂上；同镜矛盾则**保留该镜键但不给值**（照 `size` 范式——
+  // `{ [key]: {} }`，审计迹不误报「有值」）。
   for (const [key, anchor] of Object.entries(anchorByShot)) {
     const entry = (shotMetadata[key] ??= {});
     if (anchor === null) continue;
     entry.audioAnchorId = anchor;
   }
-  // 卡 id 只在真的有值時掛上（空陣列省略該鍵 → 審計跡不誤報「有值」）
+  // 卡 id 只在真的有值时挂上（空阵列省略该键 → 审计迹不误报「有值」）
   for (const [key, bucket] of Object.entries(cardsByShot)) {
     if (bucket.character.length === 0 && bucket.scene.length === 0 && bucket.prop.length === 0) continue;
     const entry = (shotMetadata[key] ??= {});
@@ -1002,7 +1002,7 @@ export function storyboardQcContextFromProject(
 
   const context: StoryboardQcContext = {
     ...(options?.production ? { production: options.production } : {}),
-    // 注入上下文只帶可用（可見）的卡：不可見即不可用，卡實體也不例外。
+    // 注入上下文只带可用（可见）的卡：不可见即不可用，卡实体也不例外。
     cards: visibleCards,
     ...(Object.keys(shotMetadata).length > 0 ? { shotMetadata } : {}),
     ...(lockedCharacterCardIds.length > 0 ? { lockedCharacterCardIds } : {}),
@@ -1014,14 +1014,14 @@ export function storyboardQcContextFromProject(
 }
 
 export interface StoryboardQcGateArgs {
-  /** 本地判定邏輯（`runShortDramaTool("storyboard_qc_17", input)`，`shortdrama-domain/index.ts:411`）的輸入。 */
+  /** 本地判定逻辑（`runShortDramaTool("storyboard_qc_17", input)`，`shortdrama-domain/index.ts:411`）的输入。 */
   input: {
     shots: StoryboardQcShot[];
     lockedCharacterCardIds?: string[];
     lockedSceneCardIds?: string[];
     segmentDurationSeconds?: number;
   };
-  /** VPS 工具 `storyboard_qc_17` 的 args（`shots` 與鎖定 id 是 **JSON 字串**，見工具 schema）。 */
+  /** VPS 工具 `storyboard_qc_17` 的 args（`shots` 与锁定 id 是 **JSON 字串**，见工具 schema）。 */
   toolArgs: {
     shots: string;
     locked_character_card_ids?: string;
@@ -1029,20 +1029,20 @@ export interface StoryboardQcGateArgs {
     segment_duration_seconds?: number;
   };
   /**
-   * 門禁輸入缺項（欄位名）。**含兩個門禁層輸入**：`lockedCharacterCardIds`/`lockedSceneCardIds`
-   *（缺 → 空集合 → `character_lock`/`scene_lock` 必 block）與 `segmentDurationSeconds`
-   *（缺/≤0 → `segment_duration` 必 block）。誠實回報 = 不讓「只是沒填」被誤讀成「門禁過了」。
+   * 门禁输入缺项（栏位名）。**含两个门禁层输入**：`lockedCharacterCardIds`/`lockedSceneCardIds`
+   *（缺 → 空集合 → `character_lock`/`scene_lock` 必 block）与 `segmentDurationSeconds`
+   *（缺/≤0 → `segment_duration` 必 block）。诚实回报 = 不让「只是没填」被误读成「门禁过了」。
    */
   missing: string[];
-  /** 所有門禁輸入齊備（**不同於** `storyboardQcShots().complete`——後者只算鏡欄位）。 */
+  /** 所有门禁输入齐备（**不同于** `storyboardQcShots().complete`——后者只算镜栏位）。 */
   complete: boolean;
   sources: Record<string, Record<string, StoryboardQcFieldSource>>;
 }
 
 /**
- * 一次組出**可直接餵門禁的兩形 args**（本地判定 + VPS 工具），把推導結果真的接到門禁。
- * `missing` 為空不代表 17 門全過（門禁有自己的值域判定，如 `4:3` 不在 9:16/16:9/1:1 內），
- * 也不代表 `duration_bounds`/`scene_binding` 等已成立——**本函數只保證「輸入沒有缺項」**。
+ * 一次组出**可直接喂门禁的两形 args**（本地判定 + VPS 工具），把推导结果真的接到门禁。
+ * `missing` 为空不代表 17 门全过（门禁有自己的值域判定，如 `4:3` 不在 9:16/16:9/1:1 内），
+ * 也不代表 `duration_bounds`/`scene_binding` 等已成立——**本函数只保证「输入没有缺项」**。
  */
 export function storyboardQcGateArgs(
   shots: readonly StoryboardScriptShot[],
@@ -1083,23 +1083,23 @@ export function storyboardQcGateArgs(
   };
 }
 
-// ─────────────────────────────────────────── 重跑影響面（純判定，2026-09-24）
+// ─────────────────────────────────────────── 重跑影响面（纯判定，2026-09-24）
 
 /**
- * 「某步重跑 → 哪些已完成結果受影響」的**純判定**（決策 15：步驟條可回跳，只重跑後續）。
+ * 「某步重跑 → 哪些已完成结果受影响」的**纯判定**（决策 15：步骤条可回跳，只重跑后续）。
  *
- * 輸入：
- *   - `nodes`：專案節點（`CanvasProject.nodes`，結構相容 `StoryboardQcNodeRef`）
- *   - `cardIds`：本輪會重做的卡 id。例：重跑資產步 → 該步節點的卡 id ＝
- *     `entityCardIdForNode(nodeId)`（`agent-output-cards.ts:154`，決定性推導），
- *     把這批 id 原樣餵進來即得影響面（**不新建節點→卡的第二套推導**）。
- * 輸出：
- *   - `affectedCardIds`：真的被某顆分鏡節點引用到的卡 id（輸入裡沒被引用的不回報）
- *   - `shotNodeIds`：宣告了這些卡的**分鏡節點** id（`metadata.storyboardShot.shotNumber`
- *     非空才算分鏡節點；節點無 id／非分鏡節點 → 不回報，不臆造）
+ * 输入：
+ *   - `nodes`：专案节点（`CanvasProject.nodes`，结构相容 `StoryboardQcNodeRef`）
+ *   - `cardIds`：本轮会重做的卡 id。例：重跑资产步 → 该步节点的卡 id ＝
+ *     `entityCardIdForNode(nodeId)`（`agent-output-cards.ts:154`，决定性推导），
+ *     把这批 id 原样喂进来即得影响面（**不新建节点→卡的第二套推导**）。
+ * 输出：
+ *   - `affectedCardIds`：真的被某颗分镜节点引用到的卡 id（输入里没被引用的不回报）
+ *   - `shotNodeIds`：宣告了这些卡的**分镜节点** id（`metadata.storyboardShot.shotNumber`
+ *     非空才算分镜节点；节点无 id／非分镜节点 → 不回报，不臆造）
  *
- * **邊界（誠實標記）**：只認**節點 metadata 三條卡引用欄**宣告的綁定；專案級鎖定集合
- * （`CanvasProject.cardIds` → 全項目注入）不在此判定內。只回報，不觸發任何重跑/UI/寫入。
+ * **边界（诚实标记）**：只认**节点 metadata 三条卡引用栏**宣告的绑定；专案级锁定集合
+ * （`CanvasProject.cardIds` → 全项目注入）不在此判定内。只回报，不触发任何重跑/UI/写入。
  */
 export function affectedShotNodesByCardIds(
   nodes: readonly StoryboardQcNodeRef[],

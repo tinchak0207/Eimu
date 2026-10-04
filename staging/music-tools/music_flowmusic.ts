@@ -1,44 +1,44 @@
 /**
- * FlowMusic2API client VPS staging 稿（死線3 music_gen 通路換血，2026-09-09 機械導出）。
+ * FlowMusic2API client VPS staging 稿（死线3 music_gen 通路换血，2026-09-09 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-flowmusic.ts
- * 機械導出：真源全文逐行保留（端點/鑑權/clips 解析/下載/錯誤鐵律/超時全在），
- * 零依賴、無 import，除本注釋頭外與真源逐行等價。
- * 禁止手改本檔——改真源後跑 `npx tsx tools/export-music-tools-staging.ts` 重導出。
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-flowmusic.ts
+ * 机械导出：真源全文逐行保留（端点/鉴权/clips 解析/下载/错误铁律/超时全在），
+ * 零依赖、无 import，除本注释头外与真源逐行等价。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
- * env：FLOWMUSIC2API_URL（服務地址，缺省禁用本通路）、FLOWMUSIC2API_KEY（Bearer）。
+ * env：FLOWMUSIC2API_URL（服务地址，缺省禁用本通路）、FLOWMUSIC2API_KEY（Bearer）。
  */
 
 /**
- * FlowMusic2API 音樂生成 client（死線3 music_gen 通路換血，2026-09-09）。
+ * FlowMusic2API 音乐生成 client（死线3 music_gen 通路换血，2026-09-09）。
  *
- * 上游事實（已查證，2026-09-09 實彈探測 + genz27/FlowMusic2API README）：
- *   端點  POST {FLOWMUSIC2API_URL}/v1/chat/completions（OpenAI 兼容，非流式）
- *   鑑權  header `Authorization: Bearer $FLOWMUSIC2API_KEY`
- *   模型  lyria（Lyria 3.5 旗艦，整歌實測 162–182s）/ lyria-fast（與 lyria 規格全等，
- *         無短檔模式，僅是快速別名）
- *   歌詞  無專用欄位——style prompt 與歌詞全部內嵌在 message content（README 範式）；
- *         歌詞段落標籤 [Verse]/[Chorus] 隨 content 傳遞，器樂在 prompt 註明 no vocals
- *   響應  頂級 clips 陣列（機器可讀：clip_id/audio_url/audio.format/duration）；
- *         choices[0].message.content 為 markdown（Audio/Duration/Lyrics 塊）——
- *         解析優先 clips 陣列，content markdown 作後備（誠實降級，不猜）
- *   實測  2026-09-09 VPS 實彈：HTTP 200，clips[0].audio_url 為
- *         storage.googleapis.com producer-app-public 公網 m4a（148.19s）
+ * 上游事实（已查证，2026-09-09 实弹探测 + genz27/FlowMusic2API README）：
+ *   端点  POST {FLOWMUSIC2API_URL}/v1/chat/completions（OpenAI 兼容，非流式）
+ *   鉴权  header `Authorization: Bearer $FLOWMUSIC2API_KEY`
+ *   模型  lyria（Lyria 3.5 旗舰，整歌实测 162–182s）/ lyria-fast（与 lyria 规格全等，
+ *         无短档模式，仅是快速别名）
+ *   歌词  无专用栏位——style prompt 与歌词全部内嵌在 message content（README 范式）；
+ *         歌词段落标签 [Verse]/[Chorus] 随 content 传递，器乐在 prompt 注明 no vocals
+ *   响应  顶级 clips 阵列（机器可读：clip_id/audio_url/audio.format/duration）；
+ *         choices[0].message.content 为 markdown（Audio/Duration/Lyrics 块）——
+ *         解析优先 clips 阵列，content markdown 作后备（诚实降级，不猜）
+ *   实测  2026-09-09 VPS 实弹：HTTP 200，clips[0].audio_url 为
+ *         storage.googleapis.com producer-app-public 公网 m4a（148.19s）
  *
- * 設計：
- *   - 零依賴（同構 music-lyria.ts 範式），僅用 fetch / env / 類型。
- *   - env：FLOWMUSIC2API_URL（缺省禁用本通路，工具回落 Gemini Lyria 直連）、
- *     FLOWMUSIC2API_KEY（Bearer 鑑權，缺缺失 fail-fast 人話報錯）。
- *   - 錯誤鐵律（誠實鐵律）：非 2xx / 無音頻 URL / 下載失敗一律帶原文摘錄拋出，
- *     絕不吞錯、絕不靜默降級、絕不偽造 URL。
- *   - 工具文案一律簡體（記憶 agent-gateway-copy-rules）。
+ * 设计：
+ *   - 零依赖（同构 music-lyria.ts 范式），仅用 fetch / env / 类型。
+ *   - env：FLOWMUSIC2API_URL（缺省禁用本通路，工具回落 Gemini Lyria 直连）、
+ *     FLOWMUSIC2API_KEY（Bearer 鉴权，缺缺失 fail-fast 人话报错）。
+ *   - 错误铁律（诚实铁律）：非 2xx / 无音频 URL / 下载失败一律带原文摘录抛出，
+ *     绝不吞错、绝不静默降级、绝不伪造 URL。
+ *   - 工具文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
-/** FlowMusic2API 服務地址 env 名（VPS 上為 http://127.0.0.1:8000，容器僅綁本機）。 */
+/** FlowMusic2API 服务地址 env 名（VPS 上为 http://127.0.0.1:8000，容器仅绑本机）。 */
 const FLOWMUSIC2API_URL_ENV = "FLOWMUSIC2API_URL"
 
-/** duration_hint → FlowMusic2API 模型映射（full=旗艦整歌；clip30=僅快速別名：上游 lyria-fast 與 lyria 規格全等、無短檔模式）。 */
+/** duration_hint → FlowMusic2API 模型映射（full=旗舰整歌；clip30=仅快速别名：上游 lyria-fast 与 lyria 规格全等、无短档模式）。 */
 export const FLOWMUSIC_MODELS = {
   full: "lyria",
   clip30: "lyria-fast",
@@ -46,83 +46,83 @@ export const FLOWMUSIC_MODELS = {
 
 export type FlowMusicModelId = (typeof FLOWMUSIC_MODELS)[keyof typeof FLOWMUSIC_MODELS]
 
-/** 非流式生成超時（上游整歌實測 162–182s，300s 硬頂含下載餘量）。 */
+/** 非流式生成超时（上游整歌实测 162–182s，300s 硬顶含下载余量）。 */
 export const FLOWMUSIC_TIMEOUT_MS = 300_000
 
-/** 音頻檔下載超時。 */
+/** 音频档下载超时。 */
 const FLOWMUSIC_DOWNLOAD_TIMEOUT_MS = 120_000
 
 /**
- * 候選上限（上游響應 clips 實測多數回 2 個；病理響應不得放大下載/上傳成本）。
- * 超出即截斷，回執不靜默——被截斷的候選數由 extractFlowMusicAudioCandidates 全量解析、
- * 此處只決定下載幾個。
+ * 候选上限（上游响应 clips 实测多数回 2 个；病理响应不得放大下载/上传成本）。
+ * 超出即截断，回执不静默——被截断的候选数由 extractFlowMusicAudioCandidates 全量解析、
+ * 此处只决定下载几个。
  */
 export const FLOWMUSIC_MAX_CANDIDATES = 2
 
-/** 錯誤訊息裡攜帶的原文 body 上限（同 music-lyria.ts 口徑）。 */
+/** 错误讯息里携带的原文 body 上限（同 music-lyria.ts 口径）。 */
 const ERROR_BODY_MAX_CHARS = 8000
 
-/** 讀 FlowMusic2API 服務地址（未配置 → null，調用方回落 Lyria 直連通路）。 */
+/** 读 FlowMusic2API 服务地址（未配置 → null，调用方回落 Lyria 直连通路）。 */
 export function flowMusic2ApiUrl(): string | null {
   const raw = (process.env[FLOWMUSIC2API_URL_ENV] ?? "").trim()
   if (!raw) return null
   return raw.replace(/\/+$/, "")
 }
 
-/** 本通路是否啟用（env FLOWMUSIC2API_URL 非空即啟用）。 */
+/** 本通路是否启用（env FLOWMUSIC2API_URL 非空即启用）。 */
 export function isFlowMusic2ApiEnabled(): boolean {
   return flowMusic2ApiUrl() !== null
 }
 
 export interface GenerateFlowMusicTrackOptions {
   prompt: string
-  /** 自訂歌詞（[Verse]/[Chorus] 段落標籤）；缺省=隨 style prompt 意圖（器樂需 prompt 註明）。 */
+  /** 自订歌词（[Verse]/[Chorus] 段落标签）；缺省=随 style prompt 意图（器乐需 prompt 注明）。 */
   lyrics?: string
   model: FlowMusicModelId
 }
 
-/** 上游 clips[] 的單一音頻候選（機器可讀欄位；index 0 = 既有單 URL 路徑的主交付）。 */
+/** 上游 clips[] 的单一音频候选（机器可读栏位；index 0 = 既有单 URL 路径的主交付）。 */
 export interface FlowMusicAudioCandidate {
   url: string
-  /** 上游 clips[] 內的下標（0 起；content markdown 後備路徑固定 0）。 */
+  /** 上游 clips[] 内的下标（0 起；content markdown 后备路径固定 0）。 */
   candidateIndex: number
-  /** 音頻格式（clips[].audio.format，如 m4a/wav/mp3）。 */
+  /** 音频格式（clips[].audio.format，如 m4a/wav/mp3）。 */
   mimeHint?: string
-  /** 上游自報時長（秒）。 */
+  /** 上游自报时长（秒）。 */
   durationHint?: number
-  /** 上游標題（clips[].title，缺省即無）。 */
+  /** 上游标题（clips[].title，缺省即无）。 */
   title?: string
   /**
-   * 上游回吐的風格字串（clips[].sound_prompt，實測 Lyria 會把模糊需求擴寫成
-   * 完整英文 Sound Prompt 後回吐；缺省不帶此鍵）。多 take 熵決策的 soundPrompt 軸來源。
+   * 上游回吐的风格字串（clips[].sound_prompt，实测 Lyria 会把模糊需求扩写成
+   * 完整英文 Sound Prompt 后回吐；缺省不带此键）。多 take 熵决策的 soundPrompt 轴来源。
    */
   soundPrompt?: string
 }
 
-/** 已下載的候選音頻（供工具層逐個上傳為平台 URL）。 */
+/** 已下载的候选音频（供工具层逐个上传为平台 URL）。 */
 export interface FlowMusicDownloadedCandidate {
   audioBase64: string
   mimeType: string
   upstreamUrl: string
   candidateIndex: number
-  /** 上游自報時長提示（秒）。 */
+  /** 上游自报时长提示（秒）。 */
   upstreamDurationHint?: number
-  /** 上游 clips[].title（供工具層帶進 audios[] 與熵決策；缺省不帶鍵）。 */
+  /** 上游 clips[].title（供工具层带进 audios[] 与熵决策；缺省不带键）。 */
   title?: string
-  /** 上游 clips[].sound_prompt（供工具層帶進 audios[] 與熵決策；缺省不帶鍵）。 */
+  /** 上游 clips[].sound_prompt（供工具层带进 audios[] 与熵决策；缺省不带键）。 */
   soundPrompt?: string
 }
 
-/** 與 generateLyriaTrack 返回形狀同構，另帶 upstreamUrl（音頻原始公網 URL，交付兜底用）。 */
+/** 与 generateLyriaTrack 返回形状同构，另带 upstreamUrl（音频原始公网 URL，交付兜底用）。 */
 export interface GenerateFlowMusicTrackResult {
   audioBase64: string
   mimeType: string
   lyricsEcho?: string
   upstreamUrl: string
   upstreamDurationHint?: number
-  /** 全部已下載候選（index 0 = 既有單 URL 主交付；已按 FLOWMUSIC_MAX_CANDIDATES 截斷）。 */
+  /** 全部已下载候选（index 0 = 既有单 URL 主交付；已按 FLOWMUSIC_MAX_CANDIDATES 截断）。 */
   candidates: FlowMusicDownloadedCandidate[]
-  /** 次候選下載失敗如實回報（主候選失敗照舊拋錯；次要候選不拖垮整次交付＝誠實降級）。 */
+  /** 次候选下载失败如实回报（主候选失败照旧抛错；次要候选不拖垮整次交付＝诚实降级）。 */
   candidateErrors?: Array<{ candidateIndex: number; upstreamUrl: string; error: string }>
 }
 
@@ -130,13 +130,13 @@ function requireApiKey(): string {
   const key = (process.env.FLOWMUSIC2API_KEY ?? "").trim()
   if (!key) {
     throw new Error(
-      "缺少 FLOWMUSIC2API_KEY（FlowMusic2API 通路 Bearer 鑑權）。請在 harness 環境配置後重試，或取消 FLOWMUSIC2API_URL 回落 Gemini Lyria 直連通路。",
+      "缺少 FLOWMUSIC2API_KEY（FlowMusic2API 通路 Bearer 鉴权）。请在 harness 环境配置后重试，或取消 FLOWMUSIC2API_URL 回落 Gemini Lyria 直连通路。",
     )
   }
   return key
 }
 
-/** style prompt + 歌詞合併為單條 message content（README 範式：無專用歌詞欄位）。 */
+/** style prompt + 歌词合并为单条 message content（README 范式：无专用歌词栏位）。 */
 export function buildFlowMusicContent(prompt: string, lyrics?: string): string {
   const parts = [prompt.trim()]
   if (lyrics && lyrics.trim()) {
@@ -145,7 +145,7 @@ export function buildFlowMusicContent(prompt: string, lyrics?: string): string {
   return parts.join("\n\n")
 }
 
-/** clips[].audio.format → MIME（m4a 實測主格式；未知格式按 content-type 後備）。 */
+/** clips[].audio.format → MIME（m4a 实测主格式；未知格式按 content-type 后备）。 */
 function formatToMime(format: unknown, fallback: string): string {
   if (format === "m4a") return "audio/mp4"
   if (format === "wav") return "audio/wav"
@@ -154,10 +154,10 @@ function formatToMime(format: unknown, fallback: string): string {
 }
 
 /**
- * 從響應解析**全部**音頻候選：優先頂級 clips 陣列（機器可讀，逐項取
- * url/format/duration/title），後備 content markdown `- Audio: <url>` 行
- * （README 流式/文本形態的降級路徑，固定單候選）。找不到任何候選一律拋錯（不猜）。
- * 單 URL 提取器 extractFlowMusicAudioUrl 由此包裝——全檔只有這一個解析器。
+ * 从响应解析**全部**音频候选：优先顶级 clips 阵列（机器可读，逐项取
+ * url/format/duration/title），后备 content markdown `- Audio: <url>` 行
+ * （README 流式/文本形态的降级路径，固定单候选）。找不到任何候选一律抛错（不猜）。
+ * 单 URL 提取器 extractFlowMusicAudioUrl 由此包装——全档只有这一个解析器。
  */
 export function extractFlowMusicAudioCandidates(body: unknown): FlowMusicAudioCandidate[] {
   const clips = (body as { clips?: unknown })?.clips
@@ -197,12 +197,12 @@ export function extractFlowMusicAudioCandidates(body: unknown): FlowMusicAudioCa
     if (match) return [{ url: match[1].replace(/[)\]]+$/, ""), candidateIndex: 0 }]
   }
   const excerpt = JSON.stringify(body)?.slice(0, 2000) ?? ""
-  throw new Error(`FlowMusic2API 響應中未找到音頻 URL（clips 陣列與 content markdown 均無 Audio 行）。原文摘錄：${excerpt}`)
+  throw new Error(`FlowMusic2API 响应中未找到音频 URL（clips 阵列与 content markdown 均无 Audio 行）。原文摘录：${excerpt}`)
 }
 
 /**
- * 從響應解析主音頻 URL（既有單 URL 契約，向後兼容）：取全部候選的第一個。
- * 由 extractFlowMusicAudioCandidates 包裝，行為與舊版一致（同一個解析器）。
+ * 从响应解析主音频 URL（既有单 URL 契约，向后兼容）：取全部候选的第一个。
+ * 由 extractFlowMusicAudioCandidates 包装，行为与旧版一致（同一个解析器）。
  */
 export function extractFlowMusicAudioUrl(body: unknown): { url: string; mimeHint?: string; durationHint?: number } {
   const first = extractFlowMusicAudioCandidates(body)[0]
@@ -213,14 +213,14 @@ export function extractFlowMusicAudioUrl(body: unknown): { url: string; mimeHint
   }
 }
 
-/** 從 content 提取首個 ```text 歌詞塊作 lyrics_echo（無則 undefined）。 */
+/** 从 content 提取首个 ```text 歌词块作 lyrics_echo（无则 undefined）。 */
 function extractLyricsBlock(content: string): string | undefined {
   const match = content.match(/```text\n([\s\S]*?)```/)
   const block = match?.[1]?.trim()
   return block ? block : undefined
 }
 
-/** 下載音頻檔 → base64；MIME 取 clips format，content-type 後備。 */
+/** 下载音频档 → base64；MIME 取 clips format，content-type 后备。 */
 async function downloadAudio(
   url: string,
   mimeHint: string | undefined,
@@ -229,23 +229,23 @@ async function downloadAudio(
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(FLOWMUSIC_DOWNLOAD_TIMEOUT_MS) })
   } catch (e) {
-    throw new Error(`FlowMusic2API 音頻下載失敗（網絡層，URL=${url}）：${(e as Error)?.message ?? String(e)}`)
+    throw new Error(`FlowMusic2API 音频下载失败（网络层，URL=${url}）：${(e as Error)?.message ?? String(e)}`)
   }
   if (!response.ok) {
-    throw new Error(`FlowMusic2API 音頻下載返回 HTTP ${response.status}（URL=${url}）。`)
+    throw new Error(`FlowMusic2API 音频下载返回 HTTP ${response.status}（URL=${url}）。`)
   }
   const buf = Buffer.from(await response.arrayBuffer())
-  if (buf.length === 0) throw new Error(`FlowMusic2API 音頻下載為空檔（URL=${url}）。`)
+  if (buf.length === 0) throw new Error(`FlowMusic2API 音频下载为空档（URL=${url}）。`)
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "audio/mp4"
   return { audioBase64: buf.toString("base64"), mimeType: formatToMime(mimeHint, contentType) }
 }
 
-/** 調 FlowMusic2API 生成整曲並下載音頻（工具層拿到 base64 後走既有上傳/實測通路）。 */
+/** 调 FlowMusic2API 生成整曲并下载音频（工具层拿到 base64 后走既有上传/实测通路）。 */
 export async function generateFlowMusicTrack(
   opts: GenerateFlowMusicTrackOptions,
 ): Promise<GenerateFlowMusicTrackResult> {
   const baseUrl = flowMusic2ApiUrl()
-  if (!baseUrl) throw new Error("FLOWMUSIC2API_URL 未配置，FlowMusic2API 通路未啟用。")
+  if (!baseUrl) throw new Error("FLOWMUSIC2API_URL 未配置，FlowMusic2API 通路未启用。")
   const prompt = opts.prompt?.trim()
   if (!prompt) throw new Error("prompt 不能为空：请提供风格+情绪描述（genre/BPM/调性/编制/氛围）。")
   const apiKey = requireApiKey()
@@ -283,7 +283,7 @@ export async function generateFlowMusicTrack(
 
   const candidates = extractFlowMusicAudioCandidates(body)
   const primary = candidates[0]
-  // 主候選失敗照舊拋錯（既有誠實鐵律）；次候選失敗只如實回報，不拖垮已到手的交付。
+  // 主候选失败照旧抛错（既有诚实铁律）；次候选失败只如实回报，不拖垮已到手的交付。
   const primaryAudio = await downloadAudio(primary.url, primary.mimeHint)
   const downloaded: FlowMusicDownloadedCandidate[] = [
     {

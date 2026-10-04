@@ -12,31 +12,31 @@ import {
 import { runPIL, downloadImage, vlmAskJson } from "../lib/batch5-matting"
 import { parseUrlArray } from "../lib/batch5-matting"
 
-// 放大 + 細節審計（2026-08-31 片5）：交付圖組 → 逐圖走站點 /upscale 計費鏈真放大 →
-// PIL 實測輸出尺寸 + VLM 對放大結果做細節審計（鋸齒/糊邊/artefacts → pass/warn/block）。
-// 復用 image_upscale 的同一套 client 調法（resolveMediaId→estimateUpscaleCoins→confirmSpend→platformFetch），
-// 不重造計費鏈；扣費閘門與 image_upscale 同口徑（單價>0.1 幣才確認，一次確認覆蓋整批）。
+// 放大 + 细节审计（2026-08-31 片5）：交付图组 → 逐图走站点 /upscale 计费链真放大 →
+// PIL 实测输出尺寸 + VLM 对放大结果做细节审计（锯齿/糊边/artefacts → pass/warn/block）。
+// 复用 image_upscale 的同一套 client 调法（resolveMediaId→estimateUpscaleCoins→confirmSpend→platformFetch），
+// 不重造计费链；扣费闸门与 image_upscale 同口径（单价>0.1 币才确认，一次确认覆盖整批）。
 
 const AUDIT_Q =
-  "這是放大後的交付圖。請審計放大品質，輸出 JSON：" +
+  "这是放大后的交付图。请审计放大品质，输出 JSON：" +
   '{"verdict":"pass|warn|block",' +
-  '"issues":["鋸齒","糊邊","artefact","色帶","過度銳化",... 若無問題為空陣列],' +
-  '"evidence":"一句話具體證據（指出問題出現的區域或無問題的依據）"}' +
-  " 判定標準：無可見鋸齒/糊邊/偽影=pass；輕微瑕疵不影響交付=warn；明顯鋸齒/糊邊/結構偽影=block。只輸出 JSON。"
+  '"issues":["锯齿","糊边","artefact","色带","过度锐化",... 若无问题为空阵列],' +
+  '"evidence":"一句话具体证据（指出问题出现的区域或无问题的依据）"}' +
+  " 判定标准：无可见锯齿/糊边/伪影=pass；轻微瑕疵不影响交付=warn；明显锯齿/糊边/结构伪影=block。只输出 JSON。"
 
 export default tool({
   description:
-    "放大 + 細節審計（真扣費，走站點 /upscale 計費鏈）：image_urls（交付圖 URL JSON 陣列，1-6 張）→ 逐圖真放大（默認 pixai-upscale 2x）→ PIL 實測輸出尺寸 + VLM 逐圖細節審計（鋸齒/糊邊/artefacts → pass/warn/block + 證據）。輸出每圖：放大後 URL + 實測尺寸 + 審計判定 + 實際扣費（從站點響應讀），並匯總 pass/warn/block 計數。誠實：審計 verdict 為 VLM 目測非像素級量化；扣費閘門與 image_upscale 同口徑（單價>0.1 幣先確認一次）。dry_run=true 只做尺寸探測+審計規劃不提交放大（零扣費）。upscale 上游失敗如實回傳錯誤不假裝成功。",
+    "放大 + 细节审计（真扣费，走站点 /upscale 计费链）：image_urls（交付图 URL JSON 阵列，1-6 张）→ 逐图真放大（默认 pixai-upscale 2x）→ PIL 实测输出尺寸 + VLM 逐图细节审计（锯齿/糊边/artefacts → pass/warn/block + 证据）。输出每图：放大后 URL + 实测尺寸 + 审计判定 + 实际扣费（从站点响应读），并汇总 pass/warn/block 计数。诚实：审计 verdict 为 VLM 目测非像素级量化；扣费闸门与 image_upscale 同口径（单价>0.1 币先确认一次）。dry_run=true 只做尺寸探测+审计规划不提交放大（零扣费）。upscale 上游失败如实回传错误不假装成功。",
   args: {
-    image_urls: tool.schema.string().describe('交付圖 URL JSON 陣列字串，例 ["https://..."]'),
-    scale: tool.schema.number().int().min(2).max(4).optional().describe("放大倍數，默認 2"),
-    model: tool.schema.string().optional().describe("放大模型，默認 pixai-upscale"),
-    dry_run: tool.schema.boolean().optional().describe("true=不提交放大（零扣費），僅回規劃與原圖尺寸"),
-    request_id: tool.schema.string().optional().describe("可選：批次冪等/確認 request_id（省略則自動生成）"),
+    image_urls: tool.schema.string().describe('交付图 URL JSON 阵列字串，例 ["https://..."]'),
+    scale: tool.schema.number().int().min(2).max(4).optional().describe("放大倍数，默认 2"),
+    model: tool.schema.string().optional().describe("放大模型，默认 pixai-upscale"),
+    dry_run: tool.schema.boolean().optional().describe("true=不提交放大（零扣费），仅回规划与原图尺寸"),
+    request_id: tool.schema.string().optional().describe("可选：批次幂等/确认 request_id（省略则自动生成）"),
   },
   async execute(args, context) {
     const p = parseUrlArray(args.image_urls, { min: 1, max: 6 })
-    if (!p.ok) return fail(p.code, p.hint, { title: "輸入非法" })
+    if (!p.ok) return fail(p.code, p.hint, { title: "输入非法" })
     const model = args.model?.trim() || "pixai-upscale"
     const scale = args.scale ?? 2
     const request_id = args.request_id?.trim() || randomUUID()
@@ -52,28 +52,28 @@ export default tool({
           const buf = await downloadImage(u, context.abort)
           const j = await runPIL({ inputs: { in: buf }, outputs: [], code: `im=load('in')\nim=im.convert('RGB')\nemit(w=im.width,h=im.height)`, timeoutMs: 30_000, signal: context.abort })
           if (j.ok) size = `${j.result?.w}x${j.result?.h}`
-        } catch { /* 誠實留 null */ }
+        } catch { /* 诚实留 null */ }
         plan.push({ source_url: u, source_size: size })
       }
       return ok({
-        title: "upscale_audit dry_run（未扣費）",
+        title: "upscale_audit dry_run（未扣费）",
         dry_run: true,
         model,
         scale,
         estimate_coins_per_image: per,
         estimate_coins_total: total,
         plan,
-        note: "dry_run 未提交放大；estimate 取自站點目錄（upscale 若不在目錄則為保守 FALLBACK 估值，實際扣費以站點響應 cost_coins 為準）。",
+        note: "dry_run 未提交放大；estimate 取自站点目录（upscale 若不在目录则为保守 FALLBACK 估值，实际扣费以站点响应 cost_coins 为准）。",
       })
     }
 
-    // 扣費閘門：與 image_upscale 同口徑，>0.1 幣先確認一次（覆蓋整批）
+    // 扣费闸门：与 image_upscale 同口径，>0.1 币先确认一次（覆盖整批）
     if (total > 0.1) {
       const approved = await confirmSpend(
-        { sessionID: context.sessionID, amount_coins: total, description: `放大審計 ${p.urls.length} 張 ×${scale}x，預估 ${total} 幣`, model, request_id },
+        { sessionID: context.sessionID, amount_coins: total, description: `放大审计 ${p.urls.length} 张 ×${scale}x，预估 ${total} 币`, model, request_id },
         context.abort,
       )
-      if (!approved) return fail("user_declined", "用戶未確認扣費，已取消放大審計。", { title: "未確認扣費", request_id })
+      if (!approved) return fail("user_declined", "用户未确认扣费，已取消放大审计。", { title: "未确认扣费", request_id })
     }
 
     const results: Record<string, unknown>[] = []
@@ -101,14 +101,14 @@ export default tool({
         entry.upscaled_url = url
         entry.cost_coins = cost
         entry.upscale_status = "ok"
-        // PIL 實測輸出尺寸
+        // PIL 实测输出尺寸
         if (url) {
           try {
             const buf = await downloadImage(url, context.abort)
             const j = await runPIL({ inputs: { in: buf }, outputs: [], code: `im=load('in').convert('RGB')\nemit(w=im.width,h=im.height)`, timeoutMs: 30_000, signal: context.abort })
             if (j.ok) entry.upscaled_size = `${j.result?.w}x${j.result?.h}`
           } catch { /* 尺寸留 null */ }
-          // VLM 審計放大結果
+          // VLM 审计放大结果
           const a = await vlmAskJson([url], AUDIT_Q, 700)
           if (a.ok) {
             const ad = a.data as Record<string, unknown>
@@ -117,7 +117,7 @@ export default tool({
             entry.audit = { verdict: v, issues: Array.isArray(ad.issues) ? ad.issues : [], evidence: typeof ad.evidence === "string" ? ad.evidence : "" }
             counts[v]++
           } else {
-            entry.audit = { verdict: "warn", issues: [], evidence: `VLM 審計不可達：${a.reason}` }
+            entry.audit = { verdict: "warn", issues: [], evidence: `VLM 审计不可达：${a.reason}` }
             counts.warn++
           }
         }
@@ -131,7 +131,7 @@ export default tool({
     }
     return ok(
       {
-        title: `放大審計完成（${p.urls.length} 張：pass ${counts.pass}/warn ${counts.warn}/block ${counts.block}/err ${counts.error}）`,
+        title: `放大审计完成（${p.urls.length} 张：pass ${counts.pass}/warn ${counts.warn}/block ${counts.block}/err ${counts.error}）`,
         model,
         scale,
         request_id,
@@ -139,7 +139,7 @@ export default tool({
         estimate_coins_per_image: per,
         counts,
         results,
-        note: "誠實：cost_coins 從站點 /upscale 響應讀（實際扣費）；upscaled_size 為 PIL 實測；audit.verdict 為 VLM 目測非像素量化；upscale_status=failed 的圖如實帶 error 不假裝成功。",
+        note: "诚实：cost_coins 从站点 /upscale 响应读（实际扣费）；upscaled_size 为 PIL 实测；audit.verdict 为 VLM 目测非像素量化；upscale_status=failed 的图如实带 error 不假装成功。",
       },
       { spend, counts },
     )

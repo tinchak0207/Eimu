@@ -18,7 +18,7 @@ function recordingMock(respond?: (sql: string) => unknown[]) {
   return { sql: tagged, calls };
 }
 
-test("extendGenerationDeadlineJob 返回實際寫入的新 deadline_at（供內存同步，病灶 D）", async () => {
+test("extendGenerationDeadlineJob 返回实际写入的新 deadline_at（供内存同步，病灶 D）", async () => {
   const startedAt = new Date("2026-08-30T00:00:00.000Z");
   const written = new Date("2026-08-30T00:15:00.000Z");
   const { sql, calls } = recordingMock((query) => {
@@ -35,13 +35,13 @@ test("extendGenerationDeadlineJob 返回實際寫入的新 deadline_at（供內�
   assert.match(update.sql, /RETURNING deadline_at/);
 });
 
-test("extendGenerationDeadlineJob 無 started_at 或未更新時返回 null", async () => {
+test("extendGenerationDeadlineJob 无 started_at 或未更新时返回 null", async () => {
   const { sql } = recordingMock(() => []);
   const result = await extendGenerationDeadlineJob({ id: "job-1", startedAt: null }, "worker-a", 15 * 60_000, sql);
   assert.equal(result, null);
 });
 
-test("extendGenerationQueueDeadline 相對 now 順延並返回新 deadline（排隊期退避，病灶 D）", async () => {
+test("extendGenerationQueueDeadline 相对 now 顺延并返回新 deadline（排队期退避，病灶 D）", async () => {
   const written = new Date("2026-08-30T00:05:00.000Z");
   const { sql, calls } = recordingMock((query) => {
     if (query.includes("UPDATE generation_job")) return [{ deadline_at: written }];
@@ -53,7 +53,7 @@ test("extendGenerationQueueDeadline 相對 now 順延並返回新 deadline（排
   assert.equal(result.getTime(), written.getTime());
   const update = calls.find((call) => call.sql.includes("UPDATE generation_job"));
   assert.ok(update);
-  // 相對 now 增量（GREATEST(deadline_at, now() + interval)），重複調用仍會推後。
+  // 相对 now 增量（GREATEST(deadline_at, now() + interval)），重复调用仍会推后。
   assert.match(update.sql, /GREATEST\(deadline_at, now\(\) \+/);
   assert.match(update.sql, /RETURNING deadline_at/);
 });

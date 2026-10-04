@@ -1,8 +1,8 @@
 // POST /v1/template-generations — B 端模板生成。
 //
-// 2026-08-05：原先只在 VPS 上，扣費空轉。定價改走 generationCoins(pixai-template)，
-// 該鍵同時建入目錄（見 generation-model-catalog.ts），admin 可覆寫。
-// 錯誤體與 trace id 與 /v1/images/generations 對齊。
+// 2026-08-05：原先只在 VPS 上，扣费空转。定价改走 generationCoins(pixai-template)，
+// 该键同时建入目录（见 generation-model-catalog.ts），admin 可覆写。
+// 错误体与 trace id 与 /v1/images/generations 对齐。
 
 import { NextRequest } from "next/server";
 import { after } from "next/server";
@@ -24,7 +24,7 @@ import { getOrCreateTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function POST(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_TEMPLATE_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN) * n;
 
-  // 錢走生產平面帳本（V-07）：同步 job 列 + billing_operation，失敗退款可被 reconcile 撈回。
+  // 钱走生产平面帐本（V-07）：同步 job 列 + billing_operation，失败退款可被 reconcile 捞回。
   const charged = await reserveSyncCharge({
     userId: auth.key.userId,
     quota,

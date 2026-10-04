@@ -90,35 +90,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 調整前的權威讀數（REQ-E1a 帳本 delta 的基準）；帳號不存在時視為新建（0 起算）。
+    // 调整前的权威读数（REQ-E1a 帐本 delta 的基准）；帐号不存在时视为新建（0 起算）。
     const beforeUser = await findGatewayUserByUsername(username);
     const beforeQuota = Math.round(Number(beforeUser?.quota ?? 0) || 0);
-    // 順序鐵律：帳號存在時先種基線（動上游之前），再調整，最後記 adjustment。
-    // 新帳號沒有可種的基線（第一次 touch 就是本刀的 adjustment），故只對既有帳號先種。
+    // 顺序铁律：帐号存在时先种基线（动上游之前），再调整，最后记 adjustment。
+    // 新帐号没有可种的基线（第一次 touch 就是本刀的 adjustment），故只对既有帐号先种。
     const baselineReady = beforeUser
       ? await ensureAccountBaselines([beforeUser.id], { fetchUser: async (id) => fetchGatewayUser(id) })
       : true;
 
     const result = await provisionBizBillingAccount(username, Math.floor(images));
 
-    // REQ-E1a 雙寫：provision 改的是上游 users.quota（adjust 路徑），我方帳本同步記
-    // 一筆 adjustment。delta 由「呼叫前後的權威讀數」相減得出（不是重算目標值，
-    // 免得把上游的取整/覆寫算成我們自己的帳）。記帳失敗不擋路，差額由對帳報告指出。
+    // REQ-E1a 双写：provision 改的是上游 users.quota（adjust 路径），我方帐本同步记
+    // 一笔 adjustment。delta 由「呼叫前后的权威读数」相减得出（不是重算目标值，
+    // 免得把上游的取整/覆写算成我们自己的帐）。记帐失败不挡路，差额由对帐报告指出。
     const delta = Math.round(result.user.quota) - Math.round(beforeQuota);
     if (delta !== 0 && baselineReady) {
       const ledger = await recordAdjustment({
         billingUserId: result.user.id,
         amountQuota: delta,
-        // 幂等鍵含「調整後的目標額度」：重放同一次 provision（同名、同目標）必然算出同一個鍵。
+        // 幂等键含「调整后的目标额度」：重放同一次 provision（同名、同目标）必然算出同一个键。
         sourceRef: `provision:${username}:${Math.round(result.user.quota)}`,
         note: `管理员调整 B 端计费账户额度（delta ${delta} quota）`,
         source: "admin-provision",
       });
       if (!ledger.posted) {
-        console.error(`[admin/provision] ${username}: 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+        console.error(`[admin/provision] ${username}: 帐本同步未落地（${ledger.reason}）——已由对帐报告负责`);
       }
     } else if (delta !== 0) {
-      console.error(`[admin/provision] ${username}: 基線不可得，未記帳（delta ${delta} quota）——已由對帳報告負責`);
+      console.error(`[admin/provision] ${username}: 基线不可得，未记帐（delta ${delta} quota）——已由对帐报告负责`);
     }
 
     return NextResponse.json({

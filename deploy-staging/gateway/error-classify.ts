@@ -1,21 +1,20 @@
-// F3（2026-08-31）：統一錯誤信封。0920 收口：全 gateway 唯一一張有序錯誤規則表
-// ERROR_RULES，同時承載兩個判定——
-//   1. 可重試（原 workflow-service.ts RETRYABLE_NODE_ERROR 單條正則，只判 retryable）
-//   2. 人話翻譯（原 index.ts SUPPLIER_ERROR_HUMANIZERS，0919 已抽到 humanize-gw.ts）
-// 兩表各自維護曾導致真實漏洞（429/限流不重試、人話與重試判定打架）。現在單表
-// 單次掃描同時產出 retryable + human，規則順序即優先序，加規則只改這裡。
+// F3（2026-08-31）：统一错误信封。0920 收口：全 gateway 唯一一张有序错误规则表
+// ERROR_RULES，同时承载两个判定——
+//   1. 可重试（原 workflow-service.ts RETRYABLE_NODE_ERROR 单条正则，只判 retryable）
+//   2. 人话翻译（原 index.ts SUPPLIER_ERROR_HUMANIZERS，0919 已抽到 humanize-gw.ts）
+// 两表各自维护曾导致真实漏洞（429/限流不重试、人话与重试判定打架）。现在单表
+// 单次扫描同时产出 retryable + human，规则顺序即优先序，加规则只改这里。
 //
-// 順序語義（0920 凍結，逐訊息與改前兩表行為等價）：
-//   - 人話命中順序 = 原 SUPPLIER_ERROR_HUMANIZERS 逐條順序（通用 timeout 在
-//     poll 條目之前——"poll timeout" 現場實際命中通用條目，本表照抄現場，
-//     不照抄註釋裡的理想順序）。
-//   - retryable 逐條對齊原 RETRYABLE_NODE_ERROR 正則在「命中該條的訊息」上的
-//     實際輸出。原正則是單條無順序的，部分人話條目內部混合了可重試與不可重試
-//     的訊息形態（如 http_502 可重試、"Bad Gateway" 文字形態不可），故少數條目
-//     按「緊鄰形態（正則會命中）/視窗形態（不會命中）」拆成兩條，人話逐字相同。
-//   - 表尾保留原 RETRYABLE_NODE_ERROR 正則逐字作兜底條目（無人話）：命中前 27
-//     條但含關鍵字的訊息（如 "submit 503"、中文「超时」）保持改前 (true, "")。
-import type { UserScript } from "./outbound-sanitize.ts"
+// 顺序语义（0920 冻结，逐讯息与改前两表行为等价）：
+//   - 人话命中顺序 = 原 SUPPLIER_ERROR_HUMANIZERS 逐条顺序（通用 timeout 在
+//     poll 条目之前——"poll timeout" 现场实际命中通用条目，本表照抄现场，
+//     不照抄注释里的理想顺序）。
+//   - retryable 逐条对齐原 RETRYABLE_NODE_ERROR 正则在「命中该条的讯息」上的
+//     实际输出。原正则是单条无顺序的，部分人话条目内部混合了可重试与不可重试
+//     的讯息形态（如 http_502 可重试、"Bad Gateway" 文字形态不可），故少数条目
+//     按「紧邻形态（正则会命中）/视窗形态（不会命中）」拆成两条，人话逐字相同。
+//   - 表尾保留原 RETRYABLE_NODE_ERROR 正则逐字作兜底条目（无人话）：命中前 27
+//     条但含关键字的讯息（如 "submit 503"、中文「超时」）保持改前 (true, "")。
 export type ErrorClass =
   | "rate_limit"
   | "capacity"
@@ -39,7 +38,7 @@ export interface ErrorRule {
   name: string
   pattern: RegExp
   retryable: boolean
-  /** 人話文案；缺省 = 只參與可重試判定（兜底關鍵字條目），人話出口回空串。 */
+  /** 人话文案；缺省 = 只参与可重试判定（兜底关键字条目），人话出口回空串。 */
   human?: string
   class: ErrorClass
 }
@@ -50,7 +49,7 @@ export const ERROR_RULES: ErrorRule[] = [
     name: "tls-cert-chain",
     pattern: /unable to verify (?:the )?(?:first )?certificate|self signed certificate|socket connection was closed|unable to verify leaf signature|ERR_TLS/i,
     class: "network",
-    // 改前現場：純證書錯不含 RETRYABLE 關鍵字 → 節點級不重試（failover 換渠道才是修徑）。
+    // 改前现场：纯证书错不含 RETRYABLE 关键字 → 节点级不重试（failover 换渠道才是修径）。
     retryable: false,
     human: "上游模型服务的网络连接不稳定（证书校验/连接中断），系统已自动换渠道重试，无需你做任何操作。",
   },
@@ -85,8 +84,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "该模型当前没有可用上游供给（可能不支持此尺寸或比例），请更换模型或调整尺寸后重试",
   },
   {
-    // 通用 timeout：人話表裡排在 poll 條目之前（照現場順序），凡含 \btimeout\b
-    // 或 "timed out" 的訊息人話都是這條；兩種形態原 RETRYABLE 均命中 → 可重試。
+    // 通用 timeout：人话表里排在 poll 条目之前（照现场顺序），凡含 \btimeout\b
+    // 或 "timed out" 的讯息人话都是这条；两种形态原 RETRYABLE 均命中 → 可重试。
     name: "timeout-legacy",
     pattern: /\b(?:timeout|timed out)\b/i,
     class: "timeout",
@@ -94,8 +93,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游响应超时，请稍后重试",
   },
   {
-    // timeout 變體（"time-out"/"time out"/"timed-out"）：原 RETRYABLE 只認
-    // "timeout|timed out" 字面，變體不可重試；人話與上一條逐字相同。
+    // timeout 变体（"time-out"/"time out"/"timed-out"）：原 RETRYABLE 只认
+    // "timeout|timed out" 字面，变体不可重试；人话与上一条逐字相同。
     name: "timeout-variants",
     pattern: /\b(?:time[ -]?out|timed[ -]?out)\b/i,
     class: "timeout",
@@ -103,7 +102,7 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游响应超时，请稍后重试",
   },
   {
-    // poll+5xx 緊鄰形態（"poll 502"）：原 RETRYABLE "poll 5\d\d" 命中 → 可重試。
+    // poll+5xx 紧邻形态（"poll 502"）：原 RETRYABLE "poll 5\d\d" 命中 → 可重试。
     name: "poll-502-adjacent",
     pattern: /poll 502\b/i,
     class: "network",
@@ -111,8 +110,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游画图服务超时（poll 502），节点可在画布上重试",
   },
   {
-    // poll+502 視窗形態（"poll failed: 502"，poll 與 502 不緊鄰）：原 RETRYABLE
-    // 不命中 → 不可重試；人話與上一條逐字相同。
+    // poll+502 视窗形态（"poll failed: 502"，poll 与 502 不紧邻）：原 RETRYABLE
+    // 不命中 → 不可重试；人话与上一条逐字相同。
     name: "poll-502-window",
     pattern: /\bpoll\b[^\n]{0,40}\b502\b|\b502\b[^\n]{0,40}\bpoll\b/i,
     class: "network",
@@ -134,8 +133,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游画图服务异常（poll 503/504），节点可在画布上重试",
   },
   {
-    // 到得了這條的訊息必含 time[ -]?out/timed[ -]?out 形態；實務上通用 timeout
-    // 條目（更靠前）已攔走，本條僅為順序完整性保留（照抄原 humanizer 條目）。
+    // 到得了这条的讯息必含 time[ -]?out/timed[ -]?out 形态；实务上通用 timeout
+    // 条目（更靠前）已拦走，本条仅为顺序完整性保留（照抄原 humanizer 条目）。
     name: "poll-timeout",
     pattern: /\bpoll\b[^\n]{0,40}(time[ -]?out|timed[ -]?out)|(time[ -]?out|timed[ -]?out)[^\n]{0,40}\bpoll\b/i,
     class: "timeout",
@@ -143,8 +142,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游画图服务超时（poll 超时），节点可在画布上重试",
   },
   {
-    // 0913 誠實歸因：附件本地路徑被 fetch 拒（"fetch() URL is invalid"）是參數
-    // 問題而非上游故障，重試無效。
+    // 0913 诚实归因：附件本地路径被 fetch 拒（"fetch() URL is invalid"）是参数
+    // 问题而非上游故障，重试无效。
     name: "url-invalid",
     pattern: /url is invalid|failed to parse url/i,
     class: "unknown",
@@ -152,7 +151,7 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "图片地址无效（既不是可抓取的 URL，也不是可读的本地文件），属参数问题而非上游故障，重试无效：请传 http(s)/data URL、本地绝对路径或 media: 图片 ID。",
   },
   {
-    // http_502 機器形態：原 RETRYABLE "http_5\d\d" 命中 → 可重試。
+    // http_502 机器形态：原 RETRYABLE "http_5\d\d" 命中 → 可重试。
     name: "http-502-exact",
     pattern: /\bhttp_502\b/i,
     class: "network",
@@ -160,7 +159,7 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游网关错误（502 Bad Gateway），请稍后重试",
   },
   {
-    // "Bad Gateway" 文字形態：原 RETRYABLE 不認（只認 http_5\d\d）→ 不可重試。
+    // "Bad Gateway" 文字形态：原 RETRYABLE 不认（只认 http_5\d\d）→ 不可重试。
     name: "bad-gateway-text",
     pattern: /\bbad[ -]?gateway\b|\bhttp_?502\b/i,
     class: "network",
@@ -189,7 +188,7 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游网关超时（504），请稍后重试",
   },
   {
-    // "gateway timeout"（無連字號）含 \btimeout\b → 原 RETRYABLE 命中 → 可重試。
+    // "gateway timeout"（无连字号）含 \btimeout\b → 原 RETRYABLE 命中 → 可重试。
     name: "gateway-timeout-plain",
     pattern: /\bgateway timeout\b/i,
     class: "network",
@@ -197,8 +196,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游网关超时（504），请稍后重试",
   },
   {
-    // "gateway time-out"/"time out" 變體與 "HTTP 504" 裸碼：原 RETRYABLE 不命中
-    // → 不可重試（實測 "504 Gateway Time-out" 改前即 non-retryable）。
+    // "gateway time-out"/"time out" 变体与 "HTTP 504" 裸码：原 RETRYABLE 不命中
+    // → 不可重试（实测 "504 Gateway Time-out" 改前即 non-retryable）。
     name: "gateway-timeout-variants",
     pattern: /\bgateway[ -]?time[ -]?out\b|\bhttp_?504\b/i,
     class: "network",
@@ -213,7 +212,7 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游连接中断（网络错误），请稍后重试",
   },
   {
-    // "socket hang-up"（連字號變體）：原 RETRYABLE 只認 "socket hang up" 空格形。
+    // "socket hang-up"（连字号变体）：原 RETRYABLE 只认 "socket hang up" 空格形。
     name: "socket-hang-up-variant",
     pattern: /\bsocket hang[ -]?up\b/i,
     class: "network",
@@ -221,9 +220,9 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游连接中断（网络错误），请稍后重试",
   },
   {
-    // 429/限流/過載：原 RETRYABLE_NODE_ERROR 完全沒覆蓋（error-classify 舊註釋
-    // 稱已修，但那張表無人引用）——改前現場這類節點級「不可重試」，靠 failover
-    // 換渠道。行為等價優先，照抄現場 false；要放開需暴君點頭另案。
+    // 429/限流/过载：原 RETRYABLE_NODE_ERROR 完全没覆盖（error-classify 旧注释
+    // 称已修，但那张表无人引用）——改前现场这类节点级「不可重试」，靠 failover
+    // 换渠道。行为等价优先，照抄现场 false；要放开需暴君点头另案。
     name: "rate-limit",
     pattern: /\b(overload|overloaded|capacity[_ -]?saturated|rate[ -]?limit|too many requests|http_?429|429)\b/i,
     class: "rate_limit",
@@ -231,11 +230,11 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游过载或限流，请稍后重试",
   },
   {
-    // 0919 誠實歸因（video-director 試產事故）：shuai(new-api) 預扣費閘方言。
-    // 話術 0919 暴君釘死，一字不動。欠費重試也不會好，換渠道（F2）才有意義。
-    // 注意：正則逐字照抄原 humanize-gw 條目——\b 包中文條目在 JS 裡要求緊鄰
-    // ASCII 詞字符才命中（"预扣费额度失败" 開頭的訊息實測不命中），這是原表
-    // 既有可能性，合併不改行為；要修另案。
+    // 0919 诚实归因（video-director 试产事故）：shuai(new-api) 预扣费闸方言。
+    // 话术 0919 暴君钉死，一字不动。欠费重试也不会好，换渠道（F2）才有意义。
+    // 注意：正则逐字照抄原 humanize-gw 条目——\b 包中文条目在 JS 里要求紧邻
+    // ASCII 词字符才命中（"预扣费额度失败" 开头的讯息实测不命中），这是原表
+    // 既有可能性，合并不改行为；要修另案。
     name: "quota-exhausted",
     pattern: /\b(insufficient[ _-]?(account[ _-]?)?(balance|credit)|quota exceeded|余额不足|欠费|预扣费额度失败|额度不足)\b/i,
     class: "quota",
@@ -250,8 +249,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游供给认证失败，请联系维护方",
   },
   {
-    // "aborted"：原 RETRYABLE 明確包含 aborted → 節點級可重試（R8-C/0920：人話
-    // 中性「本轮已中止」、UI 不發卡，與節點重試判定是兩回事，照現場 true）。
+    // "aborted"：原 RETRYABLE 明确包含 aborted → 节点级可重试（R8-C/0920：人话
+    // 中性「本轮已中止」、UI 不发卡，与节点重试判定是两回事，照现场 true）。
     name: "aborted-core",
     pattern: /\baborted\b/i,
     class: "aborted",
@@ -259,8 +258,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "本轮已中止",
   },
   {
-    // "cancelled by user"/"interrupted by user" 形態：原 RETRYABLE 只認 aborted
-    // 字面 → 不可重試；人話與上一條逐字相同（0920 中性，不歸因用戶）。
+    // "cancelled by user"/"interrupted by user" 形态：原 RETRYABLE 只认 aborted
+    // 字面 → 不可重试；人话与上一条逐字相同（0920 中性，不归因用户）。
     name: "aborted-variants",
     pattern: /\bcancel(?:led|ed) by user\b|\binterrupted by user\b/i,
     class: "aborted",
@@ -268,8 +267,8 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "本轮已中止",
   },
   {
-    // 修復3b（2026-09-19）：確定性死模型（渠道清單裡沒有該模型）不是瞬態故障，
-    // 與 failover 零退避（DEAD_MODEL_ERROR_RE）配套。
+    // 修复3b（2026-09-19）：确定性死模型（渠道清单里没有该模型）不是瞬态故障，
+    // 与 failover 零退避（DEAD_MODEL_ERROR_RE）配套。
     name: "dead-model",
     pattern: /no channel candidates remain|model not found/i,
     class: "unknown",
@@ -277,9 +276,9 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "上游渠道暂无此模型，正在自动切换线路重试",
   },
   {
-    // 兜底（無人話）：原 RETRYABLE_NODE_ERROR 正則逐字。命中前 27 條之外的訊息
-    // 若含這些關鍵字（"submit 503"、"poll 505"、中文「超时」、"econnaborted"、
-    // 非邊界 "timeout" 等），改前 (true, "")，合併後必須相同。
+    // 兜底（无人话）：原 RETRYABLE_NODE_ERROR 正则逐字。命中前 27 条之外的讯息
+    // 若含这些关键字（"submit 503"、"poll 505"、中文「超时」、"econnaborted"、
+    // 非边界 "timeout" 等），改前 (true, "")，合并后必须相同。
     name: "legacy-retryable-keywords",
     pattern: /timeout|timed out|超时|poll 5\d\d|submit 5\d\d|fetch failed|network|econn|socket hang up|aborted|http_5\d\d/i,
     class: "unknown",
@@ -287,45 +286,11 @@ export const ERROR_RULES: ErrorRule[] = [
   },
 ]
 
-// ── 2026-10-04 T2：錯誤人話家族繁體鏡像 ──────────────────────────────────
-// Hack-H2 §2.3 指認：ERROR_RULES 的 human 欄是**用戶可見固定文案**（經
-// humanize-gw → events-translate 的 human_message 出口），簡體用戶得到簡體、
-// 繁體用戶同樣得到簡體＝語言漂移。此處按規則 name 建一張繁體並列表（鍵＝name），
-// 由 humanForError 按書寫體選表——**不動 0920 凍結的 ERROR_RULES 本體**（順序即
-// 優先序，改本體有回歸風險），只加一張同構的鏡像表，與 T 既有「逐條顯式變體」同機制。
-// 文案＝字級繁化（保留原措辭，僅替換簡體字形，與 T 的 HANT 字串風格一致）。
-export const ERROR_HUMAN_HANT: Record<string, string> = {
-  "tls-cert-chain": "上游模型服務的網絡連接不穩定（證書校驗/連接中斷），系統已自動換渠道重試，無需你做任何操作。",
-  "task-not-found": "這個任務 ID 在平台查不到（ID 不完整或已過期）。不要憑記憶猜 ID：調用 image_get_result 不帶參數即可取回本輪全部真實任務 ID 與 URL。",
-  "input-too-long": "輸入內容太長，超出了模型單次可讀的上限。我會在本輪結束後自動壓縮上下文再繼續；若反覆出現，建議讓我分章/分段處理。",
-  "upstream-compliance-rejection": "上游內容安全審查拒絕了這次生成（451），這是永久拒絕：同一提示詞重試大概率同樣被拒。建議調整提示詞中可能觸發審查的表述後重新生成，或更換其他模型。",
-  "no-supplier-capability": "該模型當前沒有可用上游供給（可能不支持此尺寸或比例），請更換模型或調整尺寸後重試",
-  "timeout-legacy": "上游響應超時，請稍後重試",
-  "timeout-variants": "上游響應超時，請稍後重試",
-  "poll-502-adjacent": "上游繪圖服務超時（poll 502），節點可在畫布上重試",
-  "poll-502-window": "上游繪圖服務超時（poll 502），節點可在畫布上重試",
-  "poll-503-504-adjacent": "上游繪圖服務異常（poll 503/504），節點可在畫布上重試",
-  "poll-503-504-window": "上游繪圖服務異常（poll 503/504），節點可在畫布上重試",
-  "poll-timeout": "上游繪圖服務超時（poll 超時），節點可在畫布上重試",
-  "url-invalid": "圖片地址無效（既不是可抓取的 URL，也不是可讀的本地文件），屬參數問題而非上游故障，重試無效：請傳 http(s)/data URL、本地絕對路徑或 media: 圖片 ID。",
-  "http-502-exact": "上游網關錯誤（502 Bad Gateway），請稍後重試",
-  "bad-gateway-text": "上游網關錯誤（502 Bad Gateway），請稍後重試",
-  "http-503-exact": "上游服務暫不可用（503），請稍後重試",
-  "service-unavailable-text": "上游服務暫不可用（503），請稍後重試",
-  "http-504-exact": "上游網關超時（504），請稍後重試",
-  "gateway-timeout-plain": "上游網關超時（504），請稍後重試",
-  "gateway-timeout-variants": "上游網關超時（504），請稍後重試",
-  "conn-reset-core": "上游連接中斷（網絡錯誤），請稍後重試",
-  "socket-hang-up-variant": "上游連接中斷（網絡錯誤），請稍後重試",
-  "rate-limit": "上游過載或限流，請稍後重試",
-  "quota-exhausted": "上游渠道帳戶餘額不足（欠費）：本次調用未提交、未扣費、無產物。這不是模型不可用——充值前重試不會成功，請聯繫維護方",
-  "auth-failed": "上游供給認證失敗，請聯繫維護方",
-  "aborted-core": "本輪已中止",
-  "aborted-variants": "本輪已中止",
-  "dead-model": "上游渠道暫無此模型，正在自動切換線路重試",
-}
+// ── 2026-10-04 T2：错误人话家族繁体镜像（2026-10-04 W 拆除）─────────────────
+// Hack-H2 §2.3 曾按 ERROR_RULES 的 name 建一张繁体并列表，由 humanForError 按书写体选表。
+// 本站只做简体：该镜像表已整体删除，用户可见文案一律取 ERROR_RULES 的 human 栏（简体）。
 
-/** 統一錯誤分類入口：命中規則表 → {class, retryable, human}；未命中 → unknown/不重試/空人話。 */
+/** 统一错误分类入口：命中规则表 → {class, retryable, human}；未命中 → unknown/不重试/空人话。 */
 export function classifyUpstreamError(message: string): ClassifiedError {
   if (!message) return { class: "unknown", retryable: false, human: "" }
   for (const r of ERROR_RULES) {
@@ -335,8 +300,8 @@ export function classifyUpstreamError(message: string): ClassifiedError {
 }
 
 /**
- * 節點級可重試判定（原 workflow-service.ts RETRYABLE_NODE_ERROR 的單表等價物）：
- * 首條命中規則的 retryable 即結果；未命中任何規則 → false（與原正則未命中一致）。
+ * 节点级可重试判定（原 workflow-service.ts RETRYABLE_NODE_ERROR 的单表等价物）：
+ * 首条命中规则的 retryable 即结果；未命中任何规则 → false（与原正则未命中一致）。
  */
 export function isRetryableNodeError(message: string | null | undefined): boolean {
   if (!message) return false
@@ -346,31 +311,28 @@ export function isRetryableNodeError(message: string | null | undefined): boolea
   return false
 }
 
-/** 人話查表（原 humanize-gw humanizeSupplierError 的單表等價物）：首條命中規則
- *  的人話即結果；無人話條目（兜底關鍵字）或未命中 → 空串。
- *  2026-10-04 T2：script==="hant" 時改用 ERROR_HUMAN_HANT 的繁體鏡像（未收錄則回簡體本體）。 */
-export function humanForError(message: string, script?: UserScript): string {
+/** 人话查表（原 humanize-gw humanizeSupplierError 的单表等价物）：首条命中规则
+ *  的人话即结果；无人话条目（兜底关键字）或未命中 → 空串。
+ *  2026-10-04 W：ERROR_RULES 的 human 栏即唯一简体文案，书写体镜像已拆除。 */
+export function humanForError(message: string): string {
   if (!message) return ""
   for (const r of ERROR_RULES) {
-    if (r.pattern.test(message)) {
-      if (script === "hant") return ERROR_HUMAN_HANT[r.name] ?? r.human ?? ""
-      return r.human ?? ""
-    }
+    if (r.pattern.test(message)) return r.human ?? ""
   }
   return ""
 }
 
-// ── 「錯誤訊息即模型上下文」（2026-10-02 能力片）────────────────────────────────
-// 設計取自 Claude Code 的三個概念（**未複製其程式碼**，僅取形態後我方式重寫）：
-//   ① max_output/串流中斷後注入隱藏續寫訊息（直接續寫、勿道歉、勿複述、拆小步驟）；
-//   ② 換模型（fallback）時替未收到結果的孤兒 tool_use 補 is_error 語義的補注，
-//      讓接手模型知道這些調用沒跑完、需重做。
+// ── 「错误讯息即模型上下文」（2026-10-02 能力片）────────────────────────────────
+// 设计取自 Claude Code 的三个概念（**未复制其程式码**，仅取形态后我方式重写）：
+//   ① max_output/串流中断后注入隐藏续写讯息（直接续写、勿道歉、勿复述、拆小步骤）；
+//   ② 换模型（fallback）时替未收到结果的孤儿 tool_use 补 is_error 语义的补注，
+//      让接手模型知道这些调用没跑完、需重做。
 // 我方落地通道＝既有 prompt_async 文本 part（opencode 存成 user-role message）：
-// 模型可見；使用者不可見——message.part.updated / message.part.delta 的
-// isAssistantMessage 閘（opencode-event-handler.ts）不放行 user-role 文本。
-// 本模組只產出純字串，不發任何幀、不碰網路。
+// 模型可见；使用者不可见——message.part.updated / message.part.delta 的
+// isAssistantMessage 闸（opencode-event-handler.ts）不放行 user-role 文本。
+// 本模组只产出纯字串，不发任何帧、不碰网路。
 
-/** 續寫指示（串流中斷／重投）。模型可見、使用者不可見。 */
+/** 续写指示（串流中断／重投）。模型可见、使用者不可见。 */
 export const CONTINUATION_DIRECTIVE_MARK = "【系统续写指示】"
 export function buildContinuationDirective(): string {
   return (
@@ -385,7 +347,7 @@ export interface OrphanToolUse {
   name?: string
 }
 
-/** 換模型時孤兒 tool_use 的補償：對每個未收到結果的工具調用，注入 is_error 語義的補注。 */
+/** 换模型时孤儿 tool_use 的补偿：对每个未收到结果的工具调用，注入 is_error 语义的补注。 */
 export const ORPHAN_TOOL_USE_MARK = "【工具结果缺失·系统补注】"
 export function buildOrphanToolUseDirective(tools: OrphanToolUse[]): string {
   const list = (tools ?? []).filter((t) => t && (t.name || t.id))
@@ -399,8 +361,8 @@ export function buildOrphanToolUseDirective(tools: OrphanToolUse[]): string {
 }
 
 /**
- * failover 重投的模型可見注入文本：續寫指示 ＋（若有孤兒工具）補注。
- * hadOutput=false（零產出重投）時不注入續寫指示——沒有「中斷處」可續，重投原任務書即可。
+ * failover 重投的模型可见注入文本：续写指示 ＋（若有孤儿工具）补注。
+ * hadOutput=false（零产出重投）时不注入续写指示——没有「中断处」可续，重投原任务书即可。
  */
 export function buildFailoverInjection(opts: { hadOutput: boolean; orphanTools?: OrphanToolUse[] }): string {
   const parts: string[] = []

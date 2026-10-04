@@ -11,7 +11,7 @@ interface SplitLoginButtonProps {
   githubBusy?: string | null;
 }
 
-/** 微信官方白綠雙對話框 + 眼睛圓點 + 尾巴的精簡 SVG（內嵌，無外部依賴） */
+/** 微信官方白绿双对话框 + 眼睛圆点 + 尾巴的精简 SVG（内嵌，无外部依赖） */
 function WechatLogo({ className }: { className?: string }) {
   return (
     <svg
@@ -38,9 +38,9 @@ function WechatLogo({ className }: { className?: string }) {
 }
 
 /**
- * Google 官方四色「G」（藍/綠/黃/紅四段 path，viewBox 24）。
- * 藍弧與按鈕底色同色，直接疊藍底會斷線——故墊一層白底圓：G 縮到 65% 置中，
- * 縮放後最外角距圓心 11.03 < 圓半徑 11.5，四段全落在白圓內。
+ * Google 官方四色「G」（蓝/绿/黄/红四段 path，viewBox 24）。
+ * 蓝弧与按钮底色同色，直接叠蓝底会断线——故垫一层白底圆：G 缩到 65% 置中，
+ * 缩放后最外角距圆心 11.03 < 圆半径 11.5，四段全落在白圆内。
  */
 function GoogleLogo({ className }: { className?: string }) {
   return (
@@ -75,9 +75,9 @@ function GoogleLogo({ className }: { className?: string }) {
 
 const DIAGONAL = 12;
 
-// 三段斜切（Google → GitHub → 微信）：每段在「自己的框」內斜切，相鄰兩段的
-// 公共邊必須是同一條斜線——段 N 的右邊界（底 100%-12px）與段 N+1 的左邊界
-// （底 -12px）在容器座標裡逐點重合，否則交界處會露出一道透明楔形缺口。
+// 三段斜切（Google → GitHub → 微信）：每段在「自己的框」内斜切，相邻两段的
+// 公共边必须是同一条斜线——段 N 的右边界（底 100%-12px）与段 N+1 的左边界
+// （底 -12px）在容器座标里逐点重合，否则交界处会露出一道透明楔形缺口。
 export function SplitLoginButton({ onGoogle, onGithub, onWechat, githubBusy }: SplitLoginButtonProps) {
   const [hover, setHover] = useState<"google" | "github" | "wechat" | null>(null);
 

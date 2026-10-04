@@ -15,8 +15,8 @@ import { buildOAuthAttributionInput, recordUserAttributionViaRelay } from "@/lib
 
 export const preferredRegion = "sfo1";
 
-// 外呼硬超時：本路由在回調請求內串行打 GitHub 與控面，任何一跳 hang 死都會
-// 佔滿函數時限；GitHub/控面正常應答遠低於 5s，超時即快速失敗走既有 catch。
+// 外呼硬超时：本路由在回调请求内串行打 GitHub 与控面，任何一跳 hang 死都会
+// 占满函数时限；GitHub/控面正常应答远低于 5s，超时即快速失败走既有 catch。
 const GITHUB_UPSTREAM_TIMEOUT_MS = 5_000;
 
 function getBaseUrl(req: NextRequest) {
@@ -57,8 +57,8 @@ async function fetchGithubProfile(accessToken: string) {
   return response.json() as Promise<GitHubProfile>;
 }
 
-// 可觸達通道的原料：/user/emails 需要 user:email scope（authorize URL 已申請）。
-// 舊授權若沒有這個 scope 會回 404/403 —— 那不是登入失敗，只回空陣列（email 留給下次登入補）。
+// 可触达通道的原料：/user/emails 需要 user:email scope（authorize URL 已申请）。
+// 旧授权若没有这个 scope 会回 404/403 —— 那不是登入失败，只回空阵列（email 留给下次登入补）。
 async function fetchGithubEmails(accessToken: string): Promise<GitHubEmailEntry[]> {
   try {
     const response = await fetch("https://api.github.com/user/emails", {
@@ -101,7 +101,7 @@ export async function GET(req: NextRequest) {
 
   // PWA 跨浏览器交接分支：state 内嵌 handoff ticket（常用浏览器打开授权链
   // 接，无本站 state cookie）。ticket 是 128-bit 随机 hex + 一次性消费，足以
-  // 替代 state cookie 的 CSRF 防護；其余（exchange/注册/login）全走原路径。
+  // 替代 state cookie 的 CSRF 防护；其余（exchange/注册/login）全走原路径。
   const handoffTicket = state ? extractTicketFromState(state) : null;
   if (handoffTicket) {
     // 落进下方共享流程；仅在 state 校验与最终 redirect 两处分叉。
@@ -141,8 +141,8 @@ export async function GET(req: NextRequest) {
       throw new Error(`github_login:${loginResult.message || "unknown"}`);
     }
 
-    // 側車事實（觸達 email ＋ 首次觸達歸因）：每次登入冪等 upsert，老用戶再登入一次即被補上。
-    // 絕不擋登入：失敗只記 user_id 與錯誤訊息（email 永不進日誌），流程照走。
+    // 侧车事实（触达 email ＋ 首次触达归因）：每次登入幂等 upsert，老用户再登入一次即被补上。
+    // 绝不挡登入：失败只记 user_id 与错误讯息（email 永不进日志），流程照走。
     try {
       const emails = await fetchGithubEmails(tokenResult.access_token);
       await recordUserAttributionViaRelay(
@@ -192,10 +192,10 @@ export async function GET(req: NextRequest) {
       sameSite: "lax",
       secure: true,
     });
-    // 值必須 encodeURIComponent：客戶端 setCookieValue/getCookieValue 按
-    // encode/decode 對稱寫死，裸 JSON 含 `"` `,` 屬 RFC 6265 非法字節，
-    // 嚴格的瀏覽器會整顆丟棄 → localStorage 被清後 cookie 兜底失效，
-    // 表現就是「明明登過錄卻偶爾跳未登录」（2026-09-05）。
+    // 值必须 encodeURIComponent：客户端 setCookieValue/getCookieValue 按
+    // encode/decode 对称写死，裸 JSON 含 `"` `,` 属 RFC 6265 非法字节，
+    // 严格的浏览器会整颗丢弃 → localStorage 被清后 cookie 兜底失效，
+    // 表现就是「明明登过录却偶尔跳未登录」（2026-09-05）。
     redirect.cookies.set("napi_user", encodeURIComponent(JSON.stringify(loginResult.user)), {
       path: "/",
       maxAge: 60 * 60 * 24 * 30,

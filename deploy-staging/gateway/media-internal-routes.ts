@@ -1,6 +1,6 @@
-// 從 index.ts 無損抽取（2026-09-19 第一階段）
-// media-internal-routes.ts — Media 上傳/Canvas 內部 HTTP 處理器＋TTS＋confirm＋internal emit
-// 涵蓋 index.ts 原行區：7636–7908（canvas/media handlers）、7910–8036（TTS）、
+// 从 index.ts 无损抽取（2026-09-19 第一阶段）
+// media-internal-routes.ts — Media 上传/Canvas 内部 HTTP 处理器＋TTS＋confirm＋internal emit
+// 涵盖 index.ts 原行区：7636–7908（canvas/media handlers）、7910–8036（TTS）、
 // 8165–8285（confirm）、8410–8483（emitImageFailed＋handleInternalEmit）。
 import path from "node:path"
 import { mkdir } from "node:fs/promises"
@@ -18,17 +18,15 @@ import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.
 import { emitSessionError } from "./emit-helpers.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
-// 2026-10-04 T2：失敗原因人話依會話黏性書寫體出對應版本。
-import { sessionUserScript } from "./outbound-sanitize.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 
-// POST /internal/media/upload — agent 素材入庫：服務端下載外部影片/音頻 URL →
-// 平台存儲（image-data uploads 目錄，公網面 store.tinchak0207.xyz/image-data/files/）。
-// 外部 URL 直連常被 Cloudflare 403 挑戰攔截、/v1/uploads 拒收 video——
-// 影片/音頻素材一律先經此端點入庫取得平台 URL，再注入工作流節點。
-// 鑑權同其他 session 類 internal 路由：分發層 loopback 門 + session_id 解析。
+// POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频 URL →
+// 平台存储（image-data uploads 目录，公网面 store.tinchak0207.xyz/image-data/files/）。
+// 外部 URL 直连常被 Cloudflare 403 挑战拦截、/v1/uploads 拒收 video——
+// 影片/音频素材一律先经此端点入库取得平台 URL，再注入工作流节点。
+// 鉴权同其他 session 类 internal 路由：分发层 loopback 门 + session_id 解析。
 export async function handleMediaUpload(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const sessionId = url.searchParams.get("session_id")
@@ -51,9 +49,9 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
   let total = 0
   let contentType = ""
   let outExt: string
-  // 本地成片以 base64 位元組上傳：video_upload 工具跑在 opencode-server 沙箱（PrivateTmp=yes）內，
-  // 讀得到 agent 寫進私有 /tmp 的成片；網關進程（PrivateTmp=no）讀不到該私有 /tmp，故由工具讀檔傳
-  // 位元組、網關不碰 agent FS。仍校驗大小/視頻音頻圖片擴展名，保持「僅媒體」契約。
+  // 本地成片以 base64 位元组上传：video_upload 工具跑在 opencode-server 沙箱（PrivateTmp=yes）内，
+  // 读得到 agent 写进私有 /tmp 的成片；网关进程（PrivateTmp=no）读不到该私有 /tmp，故由工具读档传
+  // 位元组、网关不碰 agent FS。仍校验大小/视频音频图片扩展名，保持「仅媒体」契约。
   if (typeof body.path_b64 === "string" && body.path_b64.trim()) {
     buf = Buffer.from(body.path_b64, "base64")
     total = buf.length
@@ -131,8 +129,8 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
   return Response.json({ ok: true, url: publicUrl, bytes: total, content_type: contentType })
 }
 
-// POST /internal/canvas/dispatch-ops — opencode canvas_* 工具的下發入口。
-// 阻塞至前端回執或逾時；timeout_ms 僅供測試縮短，上限即預設值。
+// POST /internal/canvas/dispatch-ops — opencode canvas_* 工具的下发入口。
+// 阻塞至前端回执或逾时；timeout_ms 仅供测试缩短，上限即预设值。
 export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   let body: { session_id?: unknown; ops?: unknown; label?: unknown; timeout_ms?: unknown; deviate_from_template?: unknown; deviate_reason?: unknown; deviate_token?: unknown }
   try {
@@ -147,7 +145,7 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   const v = validateCanvasOps(body.ops)
   if ("message" in v) return jsonError(400, v.message, "bad_request", "bad_request")
-  // 模板節點守衛：守接線契約與防平行重複生成（見 checkTemplateGuard）；偏離只認網關簽發 token。
+  // 模板节点守卫：守接线契约与防平行重复生成（见 checkTemplateGuard）；偏离只认网关签发 token。
   const tplBlock = checkTemplateGuard(state.sessionId, v.ops, {
     declared: body.deviate_from_template === true,
     reason: typeof body.deviate_reason === "string" ? body.deviate_reason : "",
@@ -166,7 +164,7 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
     const err = e as { code?: string; request_id?: string }
     if (err?.code === "OPS_TIMEOUT") {
       return Response.json(
-        { ok: false, code: "OPS_TIMEOUT", request_id: err.request_id ?? null, error: "前端未在時限內回執畫布操作結果" },
+        { ok: false, code: "OPS_TIMEOUT", request_id: err.request_id ?? null, error: "前端未在时限内回执画布操作结果" },
         { status: 504 },
       )
     }
@@ -175,7 +173,7 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   }
 }
 
-// POST /internal/canvas/ops-result — loopback 回執（body 帶 session_id）。
+// POST /internal/canvas/ops-result — loopback 回执（body 带 session_id）。
 export async function handleCanvasOpsResultInternal(req: Request): Promise<Response> {
   let body: Record<string, unknown>
   try {
@@ -195,7 +193,7 @@ export async function handleCanvasOpsResultInternal(req: Request): Promise<Respo
   return Response.json({ ok: true, matched })
 }
 
-// POST /agent/v1/sessions/:id/canvas/state — 前端（經站點代理）快照上行。
+// POST /agent/v1/sessions/:id/canvas/state — 前端（经站点代理）快照上行。
 export async function handleCanvasStatePublic(key: string, id: string, req: Request): Promise<Response> {
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
@@ -216,11 +214,11 @@ export async function handleCanvasStatePublic(key: string, id: string, req: Requ
   return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt })
 }
 
-// GET /agent/v1/sessions/:id/canvas/state — 前端（經站點代理）快照下行。
-// 2026-08-29 修復：站點路由 GET /api/agent/sessions/:id/canvas-state 代理到這裡，
-// 但本網關此前只有 POST 沒有 GET → 刷新/恢復會話必然 404。語義對齊
-// GET /internal/canvas/snapshot；getOwnedSession 內含 DB 懶恢復（canvasStates 回灌），
-// 進程重啟/閒置回收後照樣讀得到。
+// GET /agent/v1/sessions/:id/canvas/state — 前端（经站点代理）快照下行。
+// 2026-08-29 修复：站点路由 GET /api/agent/sessions/:id/canvas-state 代理到这里，
+// 但本网关此前只有 POST 没有 GET → 刷新/恢复会话必然 404。语义对齐
+// GET /internal/canvas/snapshot；getOwnedSession 内含 DB 懒恢复（canvasStates 回灌），
+// 进程重启/闲置回收后照样读得到。
 export async function handleCanvasStatePublicGet(key: string, id: string): Promise<Response> {
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
@@ -233,7 +231,7 @@ export async function handleCanvasStatePublicGet(key: string, id: string): Promi
   })
 }
 
-// POST /agent/v1/sessions/:id/canvas/ops-result — 前端（經站點代理）回執。
+// POST /agent/v1/sessions/:id/canvas/ops-result — 前端（经站点代理）回执。
 export async function handleCanvasOpsResultPublic(key: string, id: string, req: Request): Promise<Response> {
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
@@ -254,22 +252,22 @@ export async function handleCanvasOpsResultPublic(key: string, id: string, req: 
 
 // ─────────────────────────── TTS（配音）工具支持
 //
-// 背景：novel_film 8 環承諾裡的「配音」環此前是牆上菜單——劇本表按 4.5 字/秒
-// 折算了秒數但整條鏈路沒有任何 TTS 消費方。此端點把配音變成真實可調用的
-// 最小閉環：同步快速調用（不走 poller），輸入台詞文本，產出音頻 URL。
+// 背景：novel_film 8 环承诺里的「配音」环此前是墙上菜单——剧本表按 4.5 字/秒
+// 折算了秒数但整条链路没有任何 TTS 消费方。此端点把配音变成真实可调用的
+// 最小闭环：同步快速调用（不走 poller），输入台词文本，产出音频 URL。
 //
-// 誠實原則（honest-error）：2026-08-30 起 TTS_UPSTREAM 指向本機 edge-tts-proxy(127.0.0.1:8893，
-// /opt/edge-tts/，Microsoft edge-tts 免 key 中文音色)；此前 Groq playai-tts 已下架、orpheus 被 org 條款鎖死：
-// - Groq playai-tts 已 decommissioned；canopylabs/orpheus-* 需 org 條款接受
-//   且只有英文/阿拉伯文音色，無中文；
-// - 平台 image.tinchak0207.xyz /v1/models 無任何 TTS 條目（seed_audio、
-//   qwen_audio_tts、text2speech_v2 只存在於 higgsfield 快照文檔，未上線）；
-// - new-api 渠道表只有 gpt-image-2 / nano-banana-pro，無 TTS 渠道。
-// 所以本端點的上游調用路徑是「探測 → 上游不存在 → 誠實報錯」，不接任何
-// 不穩定的外部免費 API 湊數。上游接入後只需改 TTS_UPSTREAM 一處。
+// 诚实原则（honest-error）：2026-08-30 起 TTS_UPSTREAM 指向本机 edge-tts-proxy(127.0.0.1:8893，
+// /opt/edge-tts/，Microsoft edge-tts 免 key 中文音色)；此前 Groq playai-tts 已下架、orpheus 被 org 条款锁死：
+// - Groq playai-tts 已 decommissioned；canopylabs/orpheus-* 需 org 条款接受
+//   且只有英文/阿拉伯文音色，无中文；
+// - 平台 image.tinchak0207.xyz /v1/models 无任何 TTS 条目（seed_audio、
+//   qwen_audio_tts、text2speech_v2 只存在于 higgsfield 快照文档，未上线）；
+// - new-api 渠道表只有 gpt-image-2 / nano-banana-pro，无 TTS 渠道。
+// 所以本端点的上游调用路径是「探测 → 上游不存在 → 诚实报错」，不接任何
+// 不稳定的外部免费 API 凑数。上游接入后只需改 TTS_UPSTREAM 一处。
 
 export const TTS_UPSTREAM = {
-  // Groq audio proxy（VPS 本機 8892，透傳 api.groq.com，KEY 在 .env）
+  // Groq audio proxy（VPS 本机 8892，透传 api.groq.com，KEY 在 .env）
   base: process.env.TTS_UPSTREAM_BASE || "http://127.0.0.1:8892",
   speechPath: "/openai/v1/audio/speech",
   model: process.env.TTS_UPSTREAM_MODEL || "canopylabs/orpheus-v1-english",
@@ -281,7 +279,7 @@ interface TtsProbeResult {
   note: string
 }
 
-/** 探測 TTS 上游是否真的能產中文音頻（帶 60s 負緩存避免反覆打壞渠道）。 */
+/** 探测 TTS 上游是否真的能产中文音频（带 60s 负缓存避免反覆打坏渠道）。 */
 let ttsProbeCache: { at: number; result: TtsProbeResult } | null = null
 export async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeResult> {
   if (ttsProbeCache && Date.now() - ttsProbeCache.at < 60_000) return ttsProbeCache.result
@@ -304,7 +302,7 @@ export async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeRe
       const looksLikeAudio = buf.byteLength > 64 && (head[0] === 0x49 || head[0] === 0x52 || head[0] === 0xff)
       result = looksLikeAudio
         ? { available: true, note: "上游可用" }
-        : { available: false, note: "上游返回 200 但載荷不是音頻" }
+        : { available: false, note: "上游返回 200 但载荷不是音频" }
     } else {
       const bodyText = await res.text().catch(() => "")
       let msg = bodyText.slice(0, 200)
@@ -315,16 +313,16 @@ export async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeRe
       result = { available: false, note: `上游 HTTP ${res.status}: ${msg}` }
     }
   } catch (e) {
-    result = { available: false, note: `上游不可達: ${e instanceof Error ? e.message : String(e)}` }
+    result = { available: false, note: `上游不可达: ${e instanceof Error ? e.message : String(e)}` }
   }
   ttsProbeCache = { at: Date.now(), result }
   return result
 }
 
 /**
- * POST /agent/v1/tts { text, voice?, session 帶 Bearer key }
- * 同步調用：成功 → { ok, url, cost_coins, chars }；上游不可用 → 503 誠實錯誤。
- * 定價一律走 pricing-and-validation.ts 的 estimateTtsCoins（工具側不硬編碼）。
+ * POST /agent/v1/tts { text, voice?, session 带 Bearer key }
+ * 同步调用：成功 → { ok, url, cost_coins, chars }；上游不可用 → 503 诚实错误。
+ * 定价一律走 pricing-and-validation.ts 的 estimateTtsCoins（工具侧不硬编码）。
  */
 export async function handleTts(key: string, req: Request): Promise<Response> {
   let body: { text?: string; voice?: string }
@@ -347,18 +345,18 @@ export async function handleTts(key: string, req: Request): Promise<Response> {
     )
   }
 
-  // 行內實體 tag（`@[音频:夜雨环境音]`）展開（2026-09-25，音頻卡接線）。
-  // 背景：`applyCharacterCards(..., { target: "audio" })` 此前**零生產呼叫端**——音頻卡只是
-  // 型別層能力，`tts_speak` 收到 `@[音频:X]` 只會把字面串念出來。這裡在**送上游前**補上：
-  // 文字含 `@[` 才打站點（零 token 零 HTTP），站點用 `target:"audio"` 就地展開音頻卡的鎖定片段。
-  // **fail-open 硬契約**：解析失敗／逾時／形狀不符／缺 key → 原文照送，永不阻斷配音
-  // （薄客戶端 entity-resolve.ts 已內建；其 warn 只印長度與 status，prompt 全文與 key 永不落 log）。
+  // 行内实体 tag（`@[音频:夜雨环境音]`）展开（2026-09-25，音频卡接线）。
+  // 背景：`applyCharacterCards(..., { target: "audio" })` 此前**零生产呼叫端**——音频卡只是
+  // 型别层能力，`tts_speak` 收到 `@[音频:X]` 只会把字面串念出来。这里在**送上游前**补上：
+  // 文字含 `@[` 才打站点（零 token 零 HTTP），站点用 `target:"audio"` 就地展开音频卡的锁定片段。
+  // **fail-open 硬契约**：解析失败／逾时／形状不符／缺 key → 原文照送，永不阻断配音
+  // （薄客户端 entity-resolve.ts 已内建；其 warn 只印长度与 status，prompt 全文与 key 永不落 log）。
   const ttsText = await resolveAudioEntityTokens(text, undefined, { apiKey: key })
   if (ttsText.prompt !== text) {
     console.info(`[tts] 已展开行内实体 tag：prompt_length=${text.length}→${ttsText.prompt.length}`)
   }
 
-  // 上游可用路徑（目前現實中走不到，保留完整閉環以便上游接入後即刻生效）
+  // 上游可用路径（目前现实中走不到，保留完整闭环以便上游接入后即刻生效）
   try {
     const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
       method: "POST",
@@ -494,44 +492,44 @@ export function settleConfirm(state: SessionState, requestId: string, outcome: C
       })
     }
     void emitQuotaChanged(state)
-    // 2026-08-29 整改：批量執行 confirm 批准 → 觸發續跑（非阻塞設計的另一半）。
-    // 未註冊回調的 confirm（image_* 單筆等）不受影響。
+    // 2026-08-29 整改：批量执行 confirm 批准 → 触发续跑（非阻塞设计的另一半）。
+    // 未注册回调的 confirm（image_* 单笔等）不受影响。
     const wfCont = wfGenerateContinuations.get(requestId)
     if (wfCont) {
       wfGenerateContinuations.delete(requestId)
-      workflowGenerateApproved.set(wfCont.wfid, { amount: wfCont.amount, nodes: wfCont.nodes }) // 本批（節點數）已批；擴計畫須重批
-      // 修 2：批量批准額記入 billing 真值——節點失敗時據此寫 refund 終態行，
-      // workflow_status 據此回真值對象。
-      recordWorkflowApproval(wfCont.wfid, wfCont.amount) // H13：累加不覆寫
+      workflowGenerateApproved.set(wfCont.wfid, { amount: wfCont.amount, nodes: wfCont.nodes }) // 本批（节点数）已批；扩计画须重批
+      // 修 2：批量批准额记入 billing 真值——节点失败时据此写 refund 终态行，
+      // workflow_status 据此回真值对象。
+      recordWorkflowApproval(wfCont.wfid, wfCont.amount) // H13：累加不覆写
       runWfGenerate(wfCont.state, wfCont.wfid)
     }
-    // 2026-09-24 協作確認閘（collaborate 檔）：停點批准 → 續跑。與上面的批次扣費
-    // 續跑鏈同構但**完全不碰計費真值**（見 workflow-gw 的 wfGateContinuations 註：
-    // 那條鏈會覆寫 workflowBilling，把真實退款抹成 0）。request_id 前綴互斥
-    //（wfgate_ vs wfgen_），兩表不可能同時命中，這個呼叫對計費確認是 no-op。
+    // 2026-09-24 协作确认闸（collaborate 档）：停点批准 → 续跑。与上面的批次扣费
+    // 续跑链同构但**完全不碰计费真值**（见 workflow-gw 的 wfGateContinuations 注：
+    // 那条链会覆写 workflowBilling，把真实退款抹成 0）。request_id 前缀互斥
+    //（wfgate_ vs wfgen_），两表不可能同时命中，这个呼叫对计费确认是 no-op。
     resumeWorkflowGate(requestId, true)
   } else {
-    // 否決/過期（含會話拆除的 expired 沖刷）同樣要解停點註冊——否則該 workflow
-    // 永遠被當「已有一張未決卡」，後續 generate 再也彈不出確認卡（靜默卡死）。
+    // 否决/过期（含会话拆除的 expired 冲刷）同样要解停点注册——否则该 workflow
+    // 永远被当「已有一张未决卡」，后续 generate 再也弹不出确认卡（静默卡死）。
     resumeWorkflowGate(requestId, false)
   }
   return true
 }
 
-// 用 task_id（或按序）把 loading 節點置 error，resume 的 agent 文案講人話。
+// 用 task_id（或按序）把 loading 节点置 error，resume 的 agent 文案讲人话。
 function emitImageFailed(
   state: SessionState,
   task_id: string,
   reason: string,
   refunded: boolean,
 ): void {
-  // 0831：任務終態登記（失敗）。task 可能不在登記表（重啟丟內存態），不可假設存在。
+  // 0831：任务终态登记（失败）。task 可能不在登记表（重启丢内存态），不可假设存在。
   const t = state.sessionTasks.get(task_id)
   if (t) {
     t.status = "failed"
   }
-  // S5a：失敗原因人話化（原文保留），SSE 幀與畫布 errorDetails 補 human_message。
-  const human = humanMessageFor(reason, undefined, sessionUserScript(state))
+  // S5a：失败原因人话化（原文保留），SSE 帧与画布 errorDetails 补 human_message。
+  const human = humanMessageFor(reason)
   emitToSession(state, "image.failed", { task_id, reason, refunded, human_message: human })
   const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
   if (unitId) {
@@ -541,7 +539,7 @@ function emitImageFailed(
       node_id: canvasResultNodeId(state.sessionId, unitId),
       patch: failPatch,
     })
-    // 2026-09-20 寫穿：失敗 patch 同步落 canvasStates（快照無該節點時靜默跳過）。
+    // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
     applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
   }
   void appendLedgerFor(state, {
@@ -576,19 +574,19 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
     // session — otherwise the agent could describe an image the UI lacks.
     await emitImageDone(state, d.url ?? "", d.cost_coins, d.task_id)
   } else if (event === "video.done") {
-    // 缺口 1（2026-10-02）：INTERNAL_EMIT_ALLOWED 早已放行 video.done，但 if 鏈
-    // 無此分支 → 通過白名單後掉到鏈尾，什麼都不發卻回 {ok:true}（靜默丟幀=假成功）。
-    // 與 image.done 同構：共用 emitVideoDone（dedup 走 state.announcedUrls），
-    // await 讓 redirect/落帳在 poller 收到 200 前完成，poller 復活時 UI 不會缺卡。
+    // 缺口 1（2026-10-02）：INTERNAL_EMIT_ALLOWED 早已放行 video.done，但 if 链
+    // 无此分支 → 通过白名单后掉到链尾，什么都不发却回 {ok:true}（静默丢帧=假成功）。
+    // 与 image.done 同构：共用 emitVideoDone（dedup 走 state.announcedUrls），
+    // await 让 redirect/落帐在 poller 收到 200 前完成，poller 复活时 UI 不会缺卡。
     const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "video" | "film" }
     await emitVideoDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
   } else if (event === "audio.done") {
-    // 同 video.done：放行卻靜默丟幀。共用 emitAudioDone，語義與前端 audio.done 卡對齊。
+    // 同 video.done：放行却静默丢帧。共用 emitAudioDone，语义与前端 audio.done 卡对齐。
     const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio" }
     await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
   } else if (event === "image.failed") {
     const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
-    if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失敗", d.refunded === true)
+    if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
   } else if (event === "session.error") {
     const d = (data ?? {}) as { code?: string; message?: string }
     emitSessionError(state, d.code ?? "backend_error", d.message ?? "session error")
@@ -599,9 +597,9 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
   } else if (event === "tool.progress") {
     emitToSession(state, "tool.progress", data ?? {})
   } else if (CANVAS_EMIT_ALLOWED.has(event)) {
-    // 畫布事件：純透傳，Frontend reducer 決定如何渲染。不做任何加工，
-    // 保留 data 原樣。這讓 opencode 的 canvas_* 工具可以直接 speak 畫布
-    // 指令給前端，而不需要透過 message.delta 繞一圈。
+    // 画布事件：纯透传，Frontend reducer 决定如何渲染。不做任何加工，
+    // 保留 data 原样。这让 opencode 的 canvas_* 工具可以直接 speak 画布
+    // 指令给前端，而不需要透过 message.delta 绕一圈。
     emitToSession(state, event, data ?? {})
   }
   return Response.json({ ok: true })

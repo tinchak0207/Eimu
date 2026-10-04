@@ -355,7 +355,7 @@ function NotificationPanel({
                 onClick={() => handleItemClick(item)}
                 className="flex w-full cursor-pointer items-start gap-2.5 rounded-[0.95rem] px-3 py-2.5 text-left transition-colors duration-150 hover:bg-[rgba(0,122,255,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               >
-                {/* 未读标记：一顆 6px 圆点，已读位用等宽占位保持标题左缘对齐。 */}
+                {/* 未读标记：一颗 6px 圆点，已读位用等宽占位保持标题左缘对齐。 */}
                 <span className="mt-1 flex h-1.5 w-1.5 shrink-0 items-center justify-center" aria-hidden="true">
                   {item.read ? null : <span className="h-1.5 w-1.5 rounded-full bg-[#FF3B30]" />}
                 </span>

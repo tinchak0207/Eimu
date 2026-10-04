@@ -1,27 +1,27 @@
-// device-bridge-session-consent.ts — W6 裝置橋雲端側：**會話同意**的行程外持久化。
+// device-bridge-session-consent.ts — W6 装置桥云端侧：**会话同意**的行程外持久化。
 //
-// 背景（2026-10-04 真殼定位，缺陷 2）：`DeviceBridge` 的 `sessionRules`／`sessionConsent`
-// 是行程內 `Map`，gateway 一重啟（每次部署）就清空，已 `session` 授權的子目錄立刻回
-// `needs_authorization`——「同意」在使用者眼中是會話級的，卻活不過一次部署。
-// 本檔把 **session 同意的根**（連同 permanent，保留其原 scope）落 gateway 本地單檔，
-// 啟動時載入、由 DeviceBridge 重建規則與同意記錄。
+// 背景（2026-10-04 真壳定位，缺陷 2）：`DeviceBridge` 的 `sessionRules`／`sessionConsent`
+// 是行程内 `Map`，gateway 一重启（每次部署）就清空，已 `session` 授权的子目录立刻回
+// `needs_authorization`——「同意」在使用者眼中是会话级的，却活不过一次部署。
+// 本档把 **session 同意的根**（连同 permanent，保留其原 scope）落 gateway 本地单档，
+// 启动时载入、由 DeviceBridge 重建规则与同意记录。
 //
-// 紀律（逐條對應 spec 硬要求）：
-//   - **只存** tenant id ＋ root 路徑 ＋ scope ＋ tool ＋ 到期時間；**絕不存任何
-//     token／憑證／session id**（檔內出現即違規）。
-//   - **原子寫入**：同目錄暫存檔 → `rename` 覆蓋；權限 0600（寫入後再 chmod 一次，
-//     不受進程 umask 影響）。
-//   - **有 TTL**（預設 12h，`EIMU_DEVICE_BRIDGE_SESSION_CONSENT_TTL_MS` 可覆寫）；
-//     載入時丟棄過期項。
-//   - **`once` 不進本檔**：一次性授權走 `OnceGrantStore` 核銷，重啟即失效。
-//   - **不升級同意**：`session` 記錄永遠以 `scope:"session"` 讀回，絕不因落盤而變成
-//     permanent（permanent 只在使用者明確選擇時才以 permanent 名義下發裝置落盤）。
-//   - **載入即安全複核**：每個 root 重新過 policy 的檔案系統根／硬 denylist／敏感集合；
-//     即使檔案被竄改，敏感根也載入不進（denylist 重啟後仍硬拒）。
-//   - **落點**＝gateway 執行時狀態目錄（與 `sessions.db` 同目錄者；部署目錄每次換版、
-//     狀態目錄不隨版本搬移），**不在 web 可服務目錄**下。
-//   - 任何 IO 失敗只以「檔名層級」記 log、**不拋**：持久化失敗只等於退回「重啟即忘」的
-//     舊行為，絕不得讓授權流程掛掉。
+// 纪律（逐条对应 spec 硬要求）：
+//   - **只存** tenant id ＋ root 路径 ＋ scope ＋ tool ＋ 到期时间；**绝不存任何
+//     token／凭证／session id**（档内出现即违规）。
+//   - **原子写入**：同目录暂存档 → `rename` 覆盖；权限 0600（写入后再 chmod 一次，
+//     不受进程 umask 影响）。
+//   - **有 TTL**（预设 12h，`EIMU_DEVICE_BRIDGE_SESSION_CONSENT_TTL_MS` 可覆写）；
+//     载入时丢弃过期项。
+//   - **`once` 不进本档**：一次性授权走 `OnceGrantStore` 核销，重启即失效。
+//   - **不升级同意**：`session` 记录永远以 `scope:"session"` 读回，绝不因落盘而变成
+//     permanent（permanent 只在使用者明确选择时才以 permanent 名义下发装置落盘）。
+//   - **载入即安全复核**：每个 root 重新过 policy 的档案系统根／硬 denylist／敏感集合；
+//     即使档案被窜改，敏感根也载入不进（denylist 重启后仍硬拒）。
+//   - **落点**＝gateway 执行时状态目录（与 `sessions.db` 同目录者；部署目录每次换版、
+//     状态目录不随版本搬移），**不在 web 可服务目录**下。
+//   - 任何 IO 失败只以「档名层级」记 log、**不抛**：持久化失败只等于退回「重启即忘」的
+//     旧行为，绝不得让授权流程挂掉。
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -35,40 +35,40 @@ import {
 export type PersistedConsentScope = "session" | "permanent"
 export type PersistedConsentTool = "list_dir" | "read_file" | "grep" | "stat" | "*"
 
-/** 持久化的單筆同意（**無任何憑證欄位**）。 */
+/** 持久化的单笔同意（**无任何凭证栏位**）。 */
 export interface PersistedConsentEntry {
-  /** 租戶（userId 字串）；與 DeviceBridge 的 tenant key 同一把。 */
+  /** 租户（userId 字串）；与 DeviceBridge 的 tenant key 同一把。 */
   tenant: string
-  /** 已同意的絕對路徑根（**保留原大小寫**，裝置端要逐字比對）。 */
+  /** 已同意的绝对路径根（**保留原大小写**，装置端要逐字比对）。 */
   root: string
   scope: PersistedConsentScope
   tool: PersistedConsentTool
-  /** 到期時間（epoch ms）；載入時 <= now 即丟棄。 */
+  /** 到期时间（epoch ms）；载入时 <= now 即丢弃。 */
   expiresAt: number
 }
 
 const FILE_NAME = "device-bridge-session-consent.json"
 const STORE_VERSION = 1
-/** 預設 TTL 12h（spec 建議值）。 */
+/** 预设 TTL 12h（spec 建议值）。 */
 export const DEFAULT_SESSION_CONSENT_TTL_MS = 12 * 60 * 60 * 1000
-/** 載入筆數上限（防被灌爆的檔案把記憶體吃爆）。 */
+/** 载入笔数上限（防被灌爆的档案把记忆体吃爆）。 */
 const MAX_LOADED_ENTRIES = 512
 
 const CONSENT_TOOLS: readonly PersistedConsentTool[] = ["list_dir", "read_file", "grep", "stat", "*"]
 
-/** TTL 讀取：非有限／<=0 → 預設 12h。 */
+/** TTL 读取：非有限／<=0 → 预设 12h。 */
 export function sessionConsentTtlMs(env: NodeJS.ProcessEnv = process.env): number {
   const n = Number.parseInt(String(env.EIMU_DEVICE_BRIDGE_SESSION_CONSENT_TTL_MS ?? ""), 10)
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_SESSION_CONSENT_TTL_MS
 }
 
 /**
- * 落點解析（優先序）：
- *   1. `EIMU_DEVICE_BRIDGE_CONSENT_FILE`（明確覆寫，測試／維運用）。
- *   2. `MEMORY_STATE_DIR/device-bridge-session-consent.json`（若設）。
- *   3. `dirname(realpath(SESSIONS_DB_PATH))`——生產 `sessions.db` 是「release 目錄 →
- *      狀態目錄」的 symlink，realpath 後即 `/opt/agent-harness/state`（與代碼目錄分離、
- *      不在 web 可服務目錄、不隨部署換版消失）。取不到（開發／尚未建庫）退回設定路徑目錄。
+ * 落点解析（优先序）：
+ *   1. `EIMU_DEVICE_BRIDGE_CONSENT_FILE`（明确覆写，测试／维运用）。
+ *   2. `MEMORY_STATE_DIR/device-bridge-session-consent.json`（若设）。
+ *   3. `dirname(realpath(SESSIONS_DB_PATH))`——生产 `sessions.db` 是「release 目录 →
+ *      状态目录」的 symlink，realpath 后即 `/opt/agent-harness/state`（与代码目录分离、
+ *      不在 web 可服务目录、不随部署换版消失）。取不到（开发／尚未建库）退回设定路径目录。
  */
 export function defaultConsentFilePath(env: NodeJS.ProcessEnv = process.env): string {
   const explicit = String(env.EIMU_DEVICE_BRIDGE_CONSENT_FILE ?? "").trim()
@@ -80,12 +80,12 @@ export function defaultConsentFilePath(env: NodeJS.ProcessEnv = process.env): st
   try {
     dir = dirname(realpathSync(dbPath))
   } catch {
-    // sessions.db 尚未建立：退回設定路徑目錄。
+    // sessions.db 尚未建立：退回设定路径目录。
   }
   return join(dir, FILE_NAME)
 }
 
-/** 會話同意的本地單檔儲存（純 IO，無業務判定；判定由 DeviceBridge 接線）。 */
+/** 会话同意的本地单档储存（纯 IO，无业务判定；判定由 DeviceBridge 接线）。 */
 export class SessionConsentStore {
   private readonly filePath: string
   private readonly ttlMs: number
@@ -98,12 +98,12 @@ export class SessionConsentStore {
     this.now = opts.now ?? (() => Date.now())
   }
 
-  /** 供運維／測試辨識落點（非敏感）。 */
+  /** 供运维／测试辨识落点（非敏感）。 */
   get path(): string {
     return this.filePath
   }
 
-  /** 讀回「未過期且通過安全複核」的同意記錄；任何錯誤＝空集（fail-safe，不拋）。 */
+  /** 读回「未过期且通过安全复核」的同意记录；任何错误＝空集（fail-safe，不抛）。 */
   load(): PersistedConsentEntry[] {
     const parsed = this.readFile()
     if (!parsed) return []
@@ -123,8 +123,8 @@ export class SessionConsentStore {
   }
 
   /**
-   * 記一筆同意（同 tenant+scope+tool+root 覆寫到期時間）並立即原子落盤。
-   * 安全複核不通過（非絕對／檔案系統根／硬 denylist／敏感）→ 靜默略過，**不落盤**。
+   * 记一笔同意（同 tenant+scope+tool+root 覆写到期时间）并立即原子落盘。
+   * 安全复核不通过（非绝对／档案系统根／硬 denylist／敏感）→ 静默略过，**不落盘**。
    */
   record(entry: { tenant: string; root: string; scope: PersistedConsentScope; tool: PersistedConsentTool }): void {
     const now = this.now()
@@ -143,7 +143,7 @@ export class SessionConsentStore {
     this.writeFile(kept)
   }
 
-  /** 清空落盤（運維／測試；不影響行程內狀態）。 */
+  /** 清空落盘（运维／测试；不影响行程内状态）。 */
   clear(): void {
     this.writeFile([])
   }
@@ -159,7 +159,7 @@ export class SessionConsentStore {
     }
   }
 
-  /** 逐欄驗證；任一不合法 → null（不落盤、不載入）。 */
+  /** 逐栏验证；任一不合法 → null（不落盘、不载入）。 */
   private sanitizeEntry(raw: unknown, now: number): PersistedConsentEntry | null {
     if (typeof raw !== "object" || raw === null) return null
     const r = raw as Record<string, unknown>
@@ -171,7 +171,7 @@ export class SessionConsentStore {
     if (!tool) return null
     const rootRaw = r.root
     if (typeof rootRaw !== "string" || rootRaw.trim().length === 0) return null
-    // 載入即安全複核：被竄改的檔不得載入檔案系統根／硬 denylist／敏感根。
+    // 载入即安全复核：被窜改的档不得载入档案系统根／硬 denylist／敏感根。
     if (isFilesystemRoot(rootRaw) || isHardDeniedPath(rootRaw) || isSensitivePath(rootRaw)) return null
     const root = expandToAbsolutePreserveCase(rootRaw, null)
     if (!root) return null
@@ -180,7 +180,7 @@ export class SessionConsentStore {
     return { tenant, root, scope, tool, expiresAt }
   }
 
-  /** 原子寫入：同目錄暫存（0600）→ rename 覆蓋；失敗只記路徑層級、不拋。 */
+  /** 原子写入：同目录暂存（0600）→ rename 覆盖；失败只记路径层级、不抛。 */
   private writeFile(entries: PersistedConsentEntry[]): void {
     const tmp = `${this.filePath}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`
     try {
@@ -192,7 +192,7 @@ export class SessionConsentStore {
       try {
         rmSync(tmp, { force: true })
       } catch {
-        /* 清暫存失敗可忽略 */
+        /* 清暂存失败可忽略 */
       }
       console.error(
         `[device-bridge] session consent persist failed: ${dirname(this.filePath)}`,

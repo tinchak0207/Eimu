@@ -136,7 +136,7 @@ function HistoryCardComponent({
   // find 命中；否则卡片落回「没有留存图片」占位，音乐记录在历史里是一张死卡。
   const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl || item.audioUrl);
   const isVideo = !dagThumbnailUrl && !(result?.image || result?.imageUrl) && Boolean(result?.videoUrl);
-  /** 音频態：有 audioUrl 且没有任何可当 <img> 的媒体（图像/视频）。 */
+  /** 音频态：有 audioUrl 且没有任何可当 <img> 的媒体（图像/视频）。 */
   const isAudio = !dagThumbnailUrl && !(result?.image || result?.imageUrl) && !result?.videoUrl && Boolean(result?.audioUrl);
   // audioUrl 不进 src（src 只喂 <img>）；它走下面独立的可播放面分支，
   // 这样 imageFailed 的破图判定不会被音频误触发。
@@ -208,8 +208,8 @@ function HistoryCardComponent({
             <ParticleSeaWaiting visible startedAt={entry.generatedAt} />
           </div>
         ) : isAudio ? (
-          /* 音频態媒體面：icon + 曲目標題 + 原生播放器。點播放器不冒泡到卡片
-             （否則會同時開燈箱）；鍵盤同理，保住播放器的原生空白鍵行為。 */
+          /* 音频态媒体面：icon + 曲目标题 + 原生播放器。点播放器不冒泡到卡片
+             （否则会同时开灯箱）；键盘同理，保住播放器的原生空白键行为。 */
           <div className="hist-card-media flex aspect-[4/3] w-full flex-col items-center justify-center gap-3 px-4">
             <span
               className="lg-float flex h-12 w-12 items-center justify-center rounded-full text-[rgba(0,0,0,0.62)]"

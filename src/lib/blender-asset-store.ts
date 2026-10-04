@@ -1,43 +1,43 @@
 /**
- * 3D 資產入資產包 + bpy 腳本指紋索引（Astra 3D 導演工作站 P1-5，片I，2026-09-06）。
+ * 3D 资产入资产包 + bpy 脚本指纹索引（Astra 3D 导演工作站 P1-5，片I，2026-09-06）。
  *
- * 職責（成本護欄核心——相似委託命中腳本模板即零 token 復用，不觸發渠道）：
- *   ① fingerprintScript —— bpy 腳本規範化（引號外去註釋 + 空白摺疊）後 FNV-1a 指紋。
- *   ② findTemplateByFingerprint —— 指紋命中既有 bpy_script 資產即回（含腳本全文+元數據），
+ * 职责（成本护栏核心——相似委托命中脚本模板即零 token 复用，不触发渠道）：
+ *   ① fingerprintScript —— bpy 脚本规范化（引号外去注释 + 空白折叠）后 FNV-1a 指纹。
+ *   ② findTemplateByFingerprint —— 指纹命中既有 bpy_script 资产即回（含脚本全文+元数据），
  *      供上游「先命中再呼叫模型」。
- *   ③ saveSceneAssets —— bridge POST /v1/execute 產物（blend/glb）+ 腳本全文批量入
- *      資產包（kind scene_3d / bpy_script），冪等去重，回確定性存儲 id 清單。
+ *   ③ saveSceneAssets —— bridge POST /v1/execute 产物（blend/glb）+ 脚本全文批量入
+ *      资产包（kind scene_3d / bpy_script），幂等去重，回确定性存储 id 清单。
  *
- * 輪子對照（禁自造輪子鐵律）：
- *   - 持久化 = 既有資產包真源 src/lib/asset-pack-store.ts（schema 枚舉/normalize 分支
- *     已同構追加 scene_3d / bpy_script 兩類，本檔不自建第二套存儲）。
- *   - 指紋 = blender-delegate.ts stableId 的 FNV-1a 同構（同一 offset basis 0x811c9dc5、
- *     prime 0x01000193、Math.imul 位運算）；因全倉 target ES2017 無 BigInt 字面量，
- *     64-bit 寬度以雙通道 32-bit FNV-1a（lane2 異基 0x1f2be47c）拼接實現（等價方案）。
- *   - 產物形狀真源 = src/lib/blender-tools.ts 的 BlenderArtifact（bridge 回傳
- *     {path,bytes,kind}）；分揀/畫布卡寫入側在 blender-delegate.ts（本檔不碰）。
+ * 轮子对照（禁自造轮子铁律）：
+ *   - 持久化 = 既有资产包真源 src/lib/asset-pack-store.ts（schema 枚举/normalize 分支
+ *     已同构追加 scene_3d / bpy_script 两类，本档不自建第二套存储）。
+ *   - 指纹 = blender-delegate.ts stableId 的 FNV-1a 同构（同一 offset basis 0x811c9dc5、
+ *     prime 0x01000193、Math.imul 位运算）；因全仓 target ES2017 无 BigInt 字面量，
+ *     64-bit 宽度以双通道 32-bit FNV-1a（lane2 异基 0x1f2be47c）拼接实现（等价方案）。
+ *   - 产物形状真源 = src/lib/blender-tools.ts 的 BlenderArtifact（bridge 回传
+ *     {path,bytes,kind}）；分拣/画布卡写入侧在 blender-delegate.ts（本档不碰）。
  *
- * 與規格的兩處必要偏差（存儲面對齊既有真源）：
- *   - findTemplateByFingerprint / saveSceneAssets 首參補 userId：資產包是
- *     per-user 持久化（asset-pack-store 全接口帶 userId），無模組級用戶上下文可省。
- *   - 腳本全文存 item.content（bpy_script 複用既有 content 欄，與 prompt/recipe
- *     同構）；bridge 產物只有 {path,bytes,kind}，腳本全文由呼叫端從委託執行側帶入。
+ * 与规格的两处必要偏差（存储面对齐既有真源）：
+ *   - findTemplateByFingerprint / saveSceneAssets 首参补 userId：资产包是
+ *     per-user 持久化（asset-pack-store 全接口带 userId），无模组级用户上下文可省。
+ *   - 脚本全文存 item.content（bpy_script 复用既有 content 栏，与 prompt/recipe
+ *     同构）；bridge 产物只有 {path,bytes,kind}，脚本全文由呼叫端从委托执行侧带入。
  */
 
 import { MAX_ITEMS_PER_PACK, listAssetPacks, saveAssetPack } from "./asset-pack-store";
 import type { AssetPack, AssetPackItem } from "./asset-pack-store";
 import type { BlenderArtifact } from "./blender-tools";
 
-/** 3D 資產包固定 id（同構 chat-assets / canvas-assets 的確定性包 id 慣例）。 */
+/** 3D 资产包固定 id（同构 chat-assets / canvas-assets 的确定性包 id 惯例）。 */
 export const BLENDER_ASSET_PACK_ID = "blender-3d-assets";
-const PACK_TITLE = "3D 資產庫";
+const PACK_TITLE = "3D 资产库";
 
-// ─────────────────────────────────────────── ① 腳本指紋
+// ─────────────────────────────────────────── ① 脚本指纹
 
-/** FNV-1a 32 常數（lane1 與 blender-delegate.ts stableId 逐字同構）。 */
+/** FNV-1a 32 常数（lane1 与 blender-delegate.ts stableId 逐字同构）。 */
 const FNV_OFFSET_32 = 0x811c9dc5;
 const FNV_PRIME_32 = 0x01000193;
-/** lane2 異基（0x811c9dc5 ^ 0x9e3779b9），雙通道合計 64-bit 指紋寬度。 */
+/** lane2 异基（0x811c9dc5 ^ 0x9e3779b9），双通道合计 64-bit 指纹宽度。 */
 const FNV_OFFSET_32_LANE2 = 0x1f2be47c;
 
 function fnv1a32(input: string, offsetBasis: number): number {
@@ -50,14 +50,14 @@ function fnv1a32(input: string, offsetBasis: number): number {
 }
 
 /**
- * 規範化：去註釋（僅引號外，感知 ' " ''' """ 與反斜線轉義）+ 每行 trim +
- * 行內空白摺疊（連續空白→單空格、丟空行、CRLF→LF）。
+ * 规范化：去注释（仅引号外，感知 ' " ''' """ 与反斜线转义）+ 每行 trim +
+ * 行内空白折叠（连续空白→单空格、丢空行、CRLF→LF）。
  *
- * 兩個判斷（規格授權自判）：
- *   - 保留縮進層級：Python 縮進即語義，全摺疊會把語義不同的腳本撞成同指紋
- *     （模板庫誤命中 = 復用錯腳本，比漏命中更貴）。
- *   - 變數名無關化不做：無 Python AST 支撐的字面改名會誤傷字符串字面量，
- *     誤判面大於收益。
+ * 两个判断（规格授权自判）：
+ *   - 保留缩进层级：Python 缩进即语义，全折叠会把语义不同的脚本撞成同指纹
+ *     （模板库误命中 = 复用错脚本，比漏命中更贵）。
+ *   - 变数名无关化不做：无 Python AST 支撑的字面改名会误伤字符串字面量，
+ *     误判面大于收益。
  */
 export function normalizeScript(script: string): string {
   const lines = script.replace(/\r\n?/g, "\n").split("\n");
@@ -103,8 +103,8 @@ export function normalizeScript(script: string): string {
       }
       line += ch;
     }
-    // 行內空白摺疊（連續空白→單空格）；只去尾隨空白，保留行首縮進
-    // （Python 縮進即語義，trim() 會剝掉縮進造成誤命中）。
+    // 行内空白折叠（连续空白→单空格）；只去尾随空白，保留行首缩进
+    // （Python 缩进即语义，trim() 会剥掉缩进造成误命中）。
     const collapsed = line.replace(/[ \t\f\v]+/g, " ");
     const trimmed = collapsed.endsWith(" ") ? collapsed.slice(0, -1) : collapsed;
     if (trimmed) out.push(trimmed);
@@ -113,8 +113,8 @@ export function normalizeScript(script: string): string {
 }
 
 /**
- * bpy 腳本指紋：規範化後雙通道 FNV-1a 32 拼接成 16 位 hex（64-bit 寬度）。
- * 確定性：同腳本必同指紋；去註釋/空白差異後仍同指紋；不同腳本異指紋（見測試）。
+ * bpy 脚本指纹：规范化后双通道 FNV-1a 32 拼接成 16 位 hex（64-bit 宽度）。
+ * 确定性：同脚本必同指纹；去注释/空白差异后仍同指纹；不同脚本异指纹（见测试）。
  */
 export function fingerprintScript(script: string): string {
   const normalized = normalizeScript(script);
@@ -123,14 +123,14 @@ export function fingerprintScript(script: string): string {
   return lane1.toString(16).padStart(8, "0") + lane2.toString(16).padStart(8, "0");
 }
 
-// ─────────────────────────────────────────── ② 指紋命中（先命中再呼叫模型）
+// ─────────────────────────────────────────── ② 指纹命中（先命中再呼叫模型）
 
-/** 命中的腳本模板（含元數據 + 腳本全文，零 token 復用）。 */
+/** 命中的脚本模板（含元数据 + 脚本全文，零 token 复用）。 */
 export interface BpyScriptTemplate {
   packId: string;
   itemTitle: string;
   fingerprint: string;
-  /** 腳本全文（AssetPackItem.content），直接可執行。 */
+  /** 脚本全文（AssetPackItem.content），直接可执行。 */
   script: string;
   artifactPath?: string;
   bytes?: number;
@@ -142,8 +142,8 @@ export type FindTemplateResult =
   | { ok: false; code: "invalid_fingerprint" | "not_found"; hint: string };
 
 /**
- * 指紋查既有 bpy_script 資產：命中即回（含腳本全文與元數據）。
- * newest 優先（listAssetPacks 排序），只認「有腳本全文」的條目為可復用模板。
+ * 指纹查既有 bpy_script 资产：命中即回（含脚本全文与元数据）。
+ * newest 优先（listAssetPacks 排序），只认「有脚本全文」的条目为可复用模板。
  */
 export async function findTemplateByFingerprint(userId: number, fingerprint: string): Promise<FindTemplateResult> {
   const fp = typeof fingerprint === "string" ? fingerprint.trim().toLowerCase() : "";
@@ -151,7 +151,7 @@ export async function findTemplateByFingerprint(userId: number, fingerprint: str
     return {
       ok: false,
       code: "invalid_fingerprint",
-      hint: "指紋格式非法（期望 8-64 位 hex）。請用 fingerprintScript(script) 生成後再查。",
+      hint: "指纹格式非法（期望 8-64 位 hex）。请用 fingerprintScript(script) 生成后再查。",
     };
   }
   const packs = await listAssetPacks(userId);
@@ -178,24 +178,24 @@ export async function findTemplateByFingerprint(userId: number, fingerprint: str
   return {
     ok: false,
     code: "not_found",
-    hint: "腳本模板庫未命中該指紋：走首次設計路徑（3D 導演產腳本，執行後自動入庫）。",
+    hint: "脚本模板库未命中该指纹：走首次设计路径（3D 导演产脚本，执行后自动入库）。",
   };
 }
 
-// ─────────────────────────────────────────── ③ bridge 產物批量入庫
+// ─────────────────────────────────────────── ③ bridge 产物批量入库
 
 export interface SceneAssetSaveOptions {
-  /** bridge scene_summary（可選，存進每個 item 的 sceneSummary）。 */
+  /** bridge scene_summary（可选，存进每个 item 的 sceneSummary）。 */
   scene_summary?: string;
-  /** 委託單（可選；effect_description 作為標題基底）。 */
+  /** 委托单（可选；effect_description 作为标题基底）。 */
   delegation?: { effect_description?: string } | null;
-  /** 本次執行的 bpy 腳本全文；提供時入庫為 bpy_script 資產並產指紋。 */
+  /** 本次执行的 bpy 脚本全文；提供时入库为 bpy_script 资产并产指纹。 */
   script?: string;
-  /** 腳本檔落盤路徑（如橋工作目錄 .py），可選。 */
+  /** 脚本档落盘路径（如桥工作目录 .py），可选。 */
   script_path?: string;
 }
 
-/** 確定性存儲 id（內容位址，同構 blender-delegate.stableId 用法：取出端可重算同 id）。 */
+/** 确定性存储 id（内容位址，同构 blender-delegate.stableId 用法：取出端可重算同 id）。 */
 export interface SavedSceneAssetRef {
   id: string;
   kind: "scene_3d" | "bpy_script";
@@ -231,13 +231,13 @@ function itemId(item: AssetPackItem): string {
 }
 
 /**
- * bridge 產物批量入資產包（upsert 固定包 blender-3d-assets，冪等去重）：
+ * bridge 产物批量入资产包（upsert 固定包 blender-3d-assets，幂等去重）：
  *   - kind blend/glb → AssetPackItem kind "scene_3d"（artifactPath/bytes/sceneSummary，
- *     fingerprint 帶本次腳本指紋作「場景↔腳本」關聯）。
- *   - script 全文 → AssetPackItem kind "bpy_script"（content=腳本全文、fingerprint、
- *     bytes=腳本位元組數）。
- *   - png/mp4 不入（畫布場景卡側 blender-delegate.ts 已管，職責不重疊）。
- * 上限與資產包鐵律一致（MAX_ITEMS_PER_PACK，新資產優先保留）。
+ *     fingerprint 带本次脚本指纹作「场景↔脚本」关联）。
+ *   - script 全文 → AssetPackItem kind "bpy_script"（content=脚本全文、fingerprint、
+ *     bytes=脚本位元组数）。
+ *   - png/mp4 不入（画布场景卡侧 blender-delegate.ts 已管，职责不重叠）。
+ * 上限与资产包铁律一致（MAX_ITEMS_PER_PACK，新资产优先保留）。
  */
 export async function saveSceneAssets(
   userId: number,
@@ -251,19 +251,19 @@ export async function saveSceneAssets(
     return {
       ok: false,
       code: "no_assets",
-      hint: "沒有可入庫的 3D 資產：artifacts 缺 blend/glb 產物且未帶腳本全文。先跑 blender_render / blender_export_gltf 取得產物再入庫。",
+      hint: "没有可入库的 3D 资产：artifacts 缺 blend/glb 产物且未带脚本全文。先跑 blender_render / blender_export_gltf 取得产物再入库。",
     };
   }
 
   const summary = typeof opts.scene_summary === "string" ? opts.scene_summary.trim() : "";
-  const titleBase = (opts.delegation?.effect_description ?? "").trim() || summary || "3D 場景資產";
+  const titleBase = (opts.delegation?.effect_description ?? "").trim() || summary || "3D 场景资产";
   const fingerprint = script ? fingerprintScript(script) : undefined;
 
   const fresh: AssetPackItem[] = [];
   if (script) {
     fresh.push({
       kind: "bpy_script",
-      title: `bpy 腳本 · ${titleBase}`.slice(0, 200),
+      title: `bpy 脚本 · ${titleBase}`.slice(0, 200),
       content: script,
       ...(opts.script_path && opts.script_path.trim() !== "" ? { artifactPath: opts.script_path.trim() } : {}),
       bytes: Buffer.byteLength(script, "utf8"),
@@ -286,10 +286,10 @@ export async function saveSceneAssets(
 
   const existing = (await listAssetPacks(userId)).find((p) => p.id === BLENDER_ASSET_PACK_ID);
 
-  // 去重合併：fresh 先行註冊 key，existing 遇同 key 跳過（冪等重入庫=零新增）。
-  // 注意不預種 existing 的 key——合併迴圈本身會重跑 existing 條目，預種會讓
-  // 每個既有條目「自己撞自己」被丟掉（包永遠只剩本次新增）。
-  // existingKeys 僅供 deduped 計數（fresh 撞既有 key = 本次重複入庫），不參與合併判定。
+  // 去重合并：fresh 先行注册 key，existing 遇同 key 跳过（幂等重入库=零新增）。
+  // 注意不预种 existing 的 key——合并回圈本身会重跑 existing 条目，预种会让
+  // 每个既有条目「自己撞自己」被丢掉（包永远只剩本次新增）。
+  // existingKeys 仅供 deduped 计数（fresh 撞既有 key = 本次重复入库），不参与合并判定。
   const existingKeys = new Set<string>((existing?.items ?? []).map(itemKey));
   const seen = new Set<string>();
   const merged: AssetPackItem[] = [];
@@ -312,7 +312,7 @@ export async function saveSceneAssets(
 
   const scriptCount = merged.filter((i) => i.kind === "bpy_script").length;
   const sceneCount = merged.filter((i) => i.kind === "scene_3d").length;
-  const digest = `3D 資產庫：${scriptCount} 個 bpy 腳本模板、${sceneCount} 個場景資產（.blend/.glb）。相似委託先用 fingerprintScript 查指紋，命中即零 token 復用腳本模板。${summary ? `最近場景摘要：${summary}` : ""}`.slice(0, 500);
+  const digest = `3D 资产库：${scriptCount} 个 bpy 脚本模板、${sceneCount} 个场景资产（.blend/.glb）。相似委托先用 fingerprintScript 查指纹，命中即零 token 复用脚本模板。${summary ? `最近场景摘要：${summary}` : ""}`.slice(0, 500);
 
   const pack: AssetPack = {
     id: BLENDER_ASSET_PACK_ID,

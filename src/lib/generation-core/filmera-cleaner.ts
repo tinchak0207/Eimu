@@ -1,22 +1,22 @@
 import zlib from "node:zlib";
 
 /**
- * Filmera 渠道圖片去水印清洗模塊（純 JS，無原生依賴）。
+ * Filmera 渠道图片去水印清洗模块（纯 JS，无原生依赖）。
  *
- * 事實（實測 1280x720 樣圖）：
- * - 水印位於右下角，半透明淺色 "filmera.ai" 文字。
- * - bbox（相對右下角）：x from w-167 to w-43，y from h-65 to h-47（約 124x18）。
- * - 媒體 URL host 為 media.filmera.ai，RGBA PNG。
+ * 事实（实测 1280x720 样图）：
+ * - 水印位于右下角，半透明浅色 "filmera.ai" 文字。
+ * - bbox（相对右下角）：x from w-167 to w-43，y from h-65 to h-47（约 124x18）。
+ * - 媒体 URL host 为 media.filmera.ai，RGBA PNG。
  *
- * 失敗安全：任何下載/解碼/編碼異常都 fallback 返回原圖 buffer，絕不擋出圖。
+ * 失败安全：任何下载/解码/编码异常都 fallback 返回原图 buffer，绝不挡出图。
  */
 
-/** 水印 bbox（相對右下角的偏移，負值表示從右/下邊緣往回量）。 */
+/** 水印 bbox（相对右下角的偏移，负值表示从右/下边缘往回量）。 */
 const WATERMARK_RIGHT_OFFSET_START = 167;
 const WATERMARK_RIGHT_OFFSET_END = 43;
 const WATERMARK_BOTTOM_OFFSET_START = 65;
 const WATERMARK_BOTTOM_OFFSET_END = 47;
-/** 修復區外擴像素，避免邊緣殘影。 */
+/** 修复区外扩像素，避免边缘残影。 */
 const PATCH_EXPAND_PX = 4;
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -40,7 +40,7 @@ export async function cleanFilmeraWatermark(
   sourceUrl: string,
   signal?: AbortSignal,
 ): Promise<CleanedMedia> {
-  // 下載原圖；任何失敗直接拋給上層 fallback 路徑（本函數內 catch）。
+  // 下载原图；任何失败直接抛给上层 fallback 路径（本函数内 catch）。
   let raw: Buffer;
   try {
     const response = await fetch(sourceUrl, { signal });
@@ -53,8 +53,8 @@ export async function cleanFilmeraWatermark(
     console.warn(
       `[filmera-cleaner] download failed: ${error instanceof Error ? error.message : String(error)}`,
     );
-    // 下載失敗時無原圖 buffer 可返回，rethrow 讓調用方直接沿用原始 media URL
-    // （接入方 try/catch 後回退原 URL，即「絕不擋出圖」）。
+    // 下载失败时无原图 buffer 可返回，rethrow 让调用方直接沿用原始 media URL
+    // （接入方 try/catch 后回退原 URL，即「绝不挡出图」）。
     throw error instanceof Error ? error : new Error(String(error));
   }
 
@@ -70,18 +70,18 @@ export async function cleanFilmeraWatermark(
 }
 
 // ---------------------------------------------------------------------------
-// 純 JS PNG 編解碼（僅支援 8-bit RGB / RGBA，非交錯）
+// 纯 JS PNG 编解码（仅支援 8-bit RGB / RGBA，非交错）
 // ---------------------------------------------------------------------------
 
 interface PngImage {
   width: number;
   height: number;
   channels: number; // 3 (RGB) 或 4 (RGBA)
-  /** 像素數據，逐行存儲，length = width * height * channels */
+  /** 像素数据，逐行存储，length = width * height * channels */
   data: Buffer;
 }
 
-// PNG CRC32 表（IEEE 802.3，反射多項式 0xEDB88320），模組級預先建好
+// PNG CRC32 表（IEEE 802.3，反射多项式 0xEDB88320），模组级预先建好
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -197,7 +197,7 @@ function decodePng(input: Buffer): PngImage {
 function encodePng(image: PngImage): Buffer {
   const { width, height, channels, data } = image;
   const stride = width * channels;
-  // filter 0（None）逐行編碼，最簡可靠
+  // filter 0（None）逐行编码，最简可靠
   const rawPixels = Buffer.alloc((stride + 1) * height);
   for (let y = 0; y < height; y++) {
     const rawRow = y * (stride + 1);
@@ -232,7 +232,7 @@ function makeChunk(type: string, data: Buffer): Buffer {
 }
 
 // ---------------------------------------------------------------------------
-// 水印修復
+// 水印修复
 // ---------------------------------------------------------------------------
 
 function cleanPngBuffer(input: Buffer): Buffer {
@@ -240,31 +240,31 @@ function cleanPngBuffer(input: Buffer): Buffer {
   const { width, height, channels, data } = image;
   const stride = width * channels;
 
-  // 嚴格水印 bbox（相對右下角），clamp 到圖內
+  // 严格水印 bbox（相对右下角），clamp 到图内
   const bx0 = Math.max(0, width - WATERMARK_RIGHT_OFFSET_START);
   const bx1 = Math.min(width - 1, width - WATERMARK_RIGHT_OFFSET_END);
   const by0 = Math.max(0, height - WATERMARK_BOTTOM_OFFSET_START);
   const by1 = Math.min(height - 1, height - WATERMARK_BOTTOM_OFFSET_END);
-  if (bx1 <= bx0 || by1 <= by0) return encodePng(image); // 圖太小，無水印區
+  if (bx1 <= bx0 || by1 <= by0) return encodePng(image); // 图太小，无水印区
 
-  // 修復區 = bbox 外擴 4px（吃掉抗鋸齒邊緣殘影）
+  // 修复区 = bbox 外扩 4px（吃掉抗锯齿边缘残影）
   const px0 = Math.max(0, bx0 - PATCH_EXPAND_PX);
   const px1 = Math.min(width - 1, bx1 + PATCH_EXPAND_PX);
   const py0 = Math.max(0, by0 - PATCH_EXPAND_PX);
   const py1 = Math.min(height - 1, by1 + PATCH_EXPAND_PX);
 
   const patched = Buffer.from(data);
-  // 水印是抗鋸齒文字：實心筆畫 alpha≈1.0（純白），反混合 (c-a*255)/(1-a) 對其
-  // 無效（信息已丟失），固定 alpha 反推會放大噪聲。實測（1280x720 真圖）：
-  // 純插值填充行均值極差 19 vs 反混合 115。直接用邊緣雙線性插值填充整個修復區。
+  // 水印是抗锯齿文字：实心笔画 alpha≈1.0（纯白），反混合 (c-a*255)/(1-a) 对其
+  // 无效（信息已丢失），固定 alpha 反推会放大噪声。实测（1280x720 真图）：
+  // 纯插值填充行均值极差 19 vs 反混合 115。直接用边缘双线性插值填充整个修复区。
   bilinearFill(patched, data, stride, channels, width, height, px0, py0, px1, py1);
 
   return encodePng({ width, height, channels, data: patched });
 }
 
 /**
- * 用修復區四邊外側像素做雙線性插值填充內部。
- * 從 source（原始像素快照）取樣、寫入 target，避免讀寫同一 buffer 互相污染。
+ * 用修复区四边外侧像素做双线性插值填充内部。
+ * 从 source（原始像素快照）取样、写入 target，避免读写同一 buffer 互相污染。
  */
 function bilinearFill(
   target: Buffer,
@@ -306,7 +306,7 @@ function bilinearFill(
   }
 }
 
-// 匯出內部函數僅供測試使用（不屬於對外穩定接口）。
+// 汇出内部函数仅供测试使用（不属于对外稳定接口）。
 export const __internals = {
   decodePng,
   encodePng,

@@ -43,7 +43,7 @@ function fakeDeps(options: { quota?: number; adjustFails?: boolean; quotaMovesOn
   const deps: MapayCreditDeps = {
     store,
     async ensureBaseline() {
-      return options.baselineBlocked ? { ready: false, blocked: true, reason: "帳本儲存層未配置" } : { ready: true, blocked: false };
+      return options.baselineBlocked ? { ready: false, blocked: true, reason: "帐本储存层未配置" } : { ready: true, blocked: false };
     },
     async readUpstreamQuota() {
       return upstream.quota;

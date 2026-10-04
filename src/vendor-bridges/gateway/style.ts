@@ -1,7 +1,7 @@
-// B7（2026-08-31）風格貨架 ffmpeg 子集 — REQ-EDIT-08。
-// 口徑權威 = vendored presets/filterPresets.ts + presets/transitionPresets.ts + editor/subtitleExport.ts
-//（預設表逐字內嵌，禁重算；字卡走 toAss，燒錄在 B6 導出閘執行）。
-// fx 組件 / 運動追蹤是 PRD 妥協清單項，catalog 明示 unsupported。
+// B7（2026-08-31）风格货架 ffmpeg 子集 — REQ-EDIT-08。
+// 口径权威 = vendored presets/filterPresets.ts + presets/transitionPresets.ts + editor/subtitleExport.ts
+//（预设表逐字内嵌，禁重算；字卡走 toAss，烧录在 B6 导出闸执行）。
+// fx 组件 / 运动追踪是 PRD 妥协清单项，catalog 明示 unsupported。
 import type { Timeline } from "./timeline"
 import { toAss } from "./editor/subtitleExport"
 
@@ -18,7 +18,7 @@ export interface TransitionCatalogEntry {
   defaultDuration: number
 }
 
-/** FILTER_PRESETS 逐字內嵌（src/vendor-bridges/editor/presets/filterPresets.ts） */
+/** FILTER_PRESETS 逐字内嵌（src/vendor-bridges/editor/presets/filterPresets.ts） */
 export const STYLE_PRESETS: StylePreset[] = [
   { id: "none", label: "原始", values: { brightness: 0, contrast: 0, saturation: 0, temperature: 0 } },
   { id: "cinematic", label: "电影感", values: { brightness: -5, contrast: 18, saturation: -12, temperature: -10 } },
@@ -34,7 +34,7 @@ export const STYLE_PRESETS: StylePreset[] = [
   { id: "milkfog", label: "奶雾", values: { brightness: 12, contrast: -12, saturation: -10, temperature: 8 } },
 ]
 
-/** TRANSITION_PRESETS 逐字內嵌（src/vendor-bridges/editor/presets/transitionPresets.ts；type=xfade 名走既有 set_transition op） */
+/** TRANSITION_PRESETS 逐字内嵌（src/vendor-bridges/editor/presets/transitionPresets.ts；type=xfade 名走既有 set_transition op） */
 export const TRANSITION_CATALOG: TransitionCatalogEntry[] = [
   { id: "fade", label: "叠化", xfade: "fade", defaultDuration: 0.5 },
   { id: "fadeblack", label: "闪黑", xfade: "fadeblack", defaultDuration: 0.5 },
@@ -69,9 +69,9 @@ export function styleCatalog(tl: Timeline) {
     per_clip: tl.clips.map((c) => ({ id: c.id, label: c.label, filter: c.filter ?? null, transition: c.transitionAfter ?? null })),
     unsupported: ["fx_components", "motion_tracking"],
     notes: [
-      "套用走 POST /agent/v1/timeline/style（presetId 或四滑桿 brightness/contrast/saturation/temperature，transition.presetId 走既有 set_transition op，type=xfade 名）",
-      "字卡導出 GET /agent/v1/timeline/style/subtitles.ass（toAss 生成，燒錄在 B6 導出閘執行）",
-      "fx 組件與運動追蹤不支持（PRD 妥協清單）",
+      "套用走 POST /agent/v1/timeline/style（presetId 或四滑杆 brightness/contrast/saturation/temperature，transition.presetId 走既有 set_transition op，type=xfade 名）",
+      "字卡导出 GET /agent/v1/timeline/style/subtitles.ass（toAss 生成，烧录在 B6 导出闸执行）",
+      "fx 组件与运动追踪不支持（PRD 妥协清单）",
     ],
   }
 }

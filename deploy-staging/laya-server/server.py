@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-Laya 判定服務 — jev-gate.ts 的開源兜底後端。
+Laya 判定服务 — jev-gate.ts 的开源兜底后端。
 
 用途：把 `laya` Python 套件（convaiinnovations/laya，Apache-2.0）包成
-gateway 可直接 fetch 的 HTTP 端點。契約與 Jev 對齊：
+gateway 可直接 fetch 的 HTTP 端点。契约与 Jev 对齐：
 
     POST /predict  {"state": <any>, "questions": {<qid>: {...}}}
       -> {"answers": {<qid>: {"type":"noul","noul":0.97} | {"type":"choice","choice":"music",...} | {"type":"score",...}}}
 
     GET  /healthz  -> 200 {"ok":true,"model":...,"loaded":true}
 
-設計要點（實測 2026-09-20，2 執行緒模擬免費層 2 vCPU）：
-- 冷啟動載入 ~18s、峰值 RSS ~4.4GB（multilingual checkpoint）。
-  → **必須常駐**，不可 per-request 載入；啟動時 preload 並用 lazy lock 擋併發。
-- warm predict p50 ~170ms；輸入上限 model max_len=1024 tokens（超出自動截斷）。
-- **必用 subfolder="multilingual"**：root（英文）checkpoint 對中文輸入校準崩壞。
-  實測 multilingual：benign 0.00–0.04、jailbreak 攻擊 0.996（分離度完好）；
-  公開 demo Space 跑的 checkpoint 校準已壞（benign 被判 0.9999），切勿沿用。
+设计要点（实测 2026-09-20，2 执行绪模拟免费层 2 vCPU）：
+- 冷启动载入 ~18s、峰值 RSS ~4.4GB（multilingual checkpoint）。
+  → **必须常驻**，不可 per-request 载入；启动时 preload 并用 lazy lock 挡并发。
+- warm predict p50 ~170ms；输入上限 model max_len=1024 tokens（超出自动截断）。
+- **必用 subfolder="multilingual"**：root（英文）checkpoint 对中文输入校准崩坏。
+  实测 multilingual：benign 0.00–0.04、jailbreak 攻击 0.996（分离度完好）；
+  公开 demo Space 跑的 checkpoint 校准已坏（benign 被判 0.9999），切勿沿用。
 
-執行：python3 server.py    （環境變數 LAYA_PORT 預設 8082、LAYA_SUBFOLDER 預設 multilingual）
+执行：python3 server.py    （环境变数 LAYA_PORT 预设 8082、LAYA_SUBFOLDER 预设 multilingual）
 """
 
 import json
@@ -36,7 +36,7 @@ _lock = threading.Lock()
 
 
 def get_agent():
-    """惰性載入＋單次鎖：首個請求觸發載入，其餘併發請求等待同一份模型。"""
+    """惰性载入＋单次锁：首个请求触发载入，其余并发请求等待同一份模型。"""
     global _agent
     if _agent is not None:
         return _agent
@@ -88,14 +88,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "questions required"})
                 return
 
-            # state 可為物件或字串：物件序列化成 JSON 字串餵給模型（與 jev-gate 一致）。
+            # state 可为物件或字串：物件序列化成 JSON 字串喂给模型（与 jev-gate 一致）。
             state_text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)
 
             agent = get_agent()
             result = agent.predict(state_text, questions)
             answers = result.get("answers", {}) if isinstance(result, dict) else {}
 
-            # 只回契約欄位；confidence 缺席時補算（choice 有 probabilities 可推）。
+            # 只回契约栏位；confidence 缺席时补算（choice 有 probabilities 可推）。
             out = {}
             for qid, a in answers.items():
                 if not isinstance(a, dict):
@@ -106,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
                         clean[k] = a[k]
                 out[qid] = clean
             self._send(200, {"answers": out})
-        except Exception as exc:  # 判定層永不讓呼叫端崩：一律 200 + 空 answers 以外的明確錯誤
+        except Exception as exc:  # 判定层永不让呼叫端崩：一律 200 + 空 answers 以外的明确错误
             print(f"[laya-server] predict error: {type(exc).__name__}: {exc}", flush=True)
             self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
 

@@ -1,5 +1,5 @@
 /**
- * 鲲鹏创作知识注入（Agent Harness 知識層擴充，2026-08-27）。
+ * 鲲鹏创作知识注入（Agent Harness 知识层扩充，2026-08-27）。
  *
  * 数据来源：pengfeiqiao/kunpeng（v2.9.16，commit 872a58b，MIT License）
  * 的 aigc-memory/{checklists,shot-patterns,reference} 与 skills/{script-doctor,
@@ -7,8 +7,8 @@
  * 正文逐字复制，仅做「接入格式转换 + 外部工具引用剔除/映射」两类白名单改写
  * （逐条清单见各段注释与完工报告；完整对账结论见 KUNPENG_SKILL_AUDIT）。
  *
- * 接入方式：沿现有 agent-templates 的 directive 链路（模板卡点擊 →
- * sessionDirective 隨首條消息上送 → 網關拼進 system 注入），不建第二條注入通道。
+ * 接入方式：沿现有 agent-templates 的 directive 链路（模板卡点击 →
+ * sessionDirective 随首条消息上送 → 网关拼进 system 注入），不建第二条注入通道。
  * 文案一律简体中文。
  */
 
@@ -803,7 +803,7 @@ AI不是"写字"是"画像素"，笔画越多越容易画错。
  * - 词级转写：本站 `video_transcribe`（{source, language} → 每词 start/end 秒，
  *   `eimu.transcript@1` 形状；ASR 未配置时回 `asr_unavailable`，正文如实写明此边界；
  *   language 不接受 auto/und）
- * - 台词量测：本站 `video_measure`（中文沿用 4.5 字/秒口径：传 rate: 4.5；英文音節启发式估算）
+ * - 台词量测：本站 `video_measure`（中文沿用 4.5 字/秒口径：传 rate: 4.5；英文音节启发式估算）
  * - 远端参考片：`video_fetch`（action=prepare/fetch/status，钉版 yt-dlp 隔离环境；
  *   未 prepare 回 `video_fetch_unavailable`）→ `video_evidence`（action=fetch）
  * - 「旧 ConversationGuide 或单张串行脚本」→ 剔除（内部黑话，与我们无关）

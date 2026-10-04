@@ -1,12 +1,12 @@
 /**
- * music_gen 工具 opencode 形狀機械包裝器（Wave1 收尾接線片，2026-09-08）。
+ * music_gen 工具 opencode 形状机械包装器（Wave1 收尾接线片，2026-09-08）。
  *
- * 形狀輪子 = lib/blender-tools-adapter.ts 的 wrapBlenderTool（逐行同構，白名單
- * diff 僅：名稱/導入源/context.sessionId 透傳三處——MusicToolDef 契約多一個
- * sessionId 欄，opencode execute context 的 sessionID 原樣塞進去，音頻才能
- * 經 gateway /agent/v1/sessions/<id>/uploads 落盤拼公網 URL）。
- * 行為真源 = lib/music-tools-impl.ts（staging/music-tools/music_tools.ts 落位稿，
- * 描述符形狀 MusicToolDef，描述符 → schema 映射純機械翻譯零二次維護面）。
+ * 形状轮子 = lib/blender-tools-adapter.ts 的 wrapBlenderTool（逐行同构，白名单
+ * diff 仅：名称/导入源/context.sessionId 透传三处——MusicToolDef 契约多一个
+ * sessionId 栏，opencode execute context 的 sessionID 原样塞进去，音频才能
+ * 经 gateway /agent/v1/sessions/<id>/uploads 落盘拼公网 URL）。
+ * 行为真源 = lib/music-tools-impl.ts（staging/music-tools/music_tools.ts 落位稿，
+ * 描述符形状 MusicToolDef，描述符 → schema 映射纯机械翻译零二次维护面）。
  */
 import { tool } from "@opencode-ai/plugin/tool"
 import { musicGenTool, type MusicToolDef, type MusicToolContext } from "./music-tools-impl"

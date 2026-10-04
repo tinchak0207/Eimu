@@ -1,16 +1,16 @@
-// G4 生產端測試（2026-09-17）：真 PGlite + 全套真 migration（含 018）+ 真服務函式。
+// G4 生产端测试（2026-09-17）：真 PGlite + 全套真 migration（含 018）+ 真服务函式。
 //
-// 覆蓋三件事：
-//   1. migration 018 的 SQL 本身（kind/source 詞表擴展在真 Postgres 上可執行、舊值仍合法）
-//   2. ingestMasterExport 的正向鏈：job(kind='film_export', status='succeeded') +
-//      artifact(role='output', metadata_json.masterExport) 落庫，欄位實值（sha256/byte_size）
-//   3. 誠實語義：欄位缺失逐欄回報（不補假值）；冪等重放 job 不重複、artifact 不重複插；
-//      probe 缺失時尺寸落 NULL 而非 0 冒充
+// 覆盖三件事：
+//   1. migration 018 的 SQL 本身（kind/source 词表扩展在真 Postgres 上可执行、旧值仍合法）
+//   2. ingestMasterExport 的正向链：job(kind='film_export', status='succeeded') +
+//      artifact(role='output', metadata_json.masterExport) 落库，栏位实值（sha256/byte_size）
+//   3. 诚实语义：栏位缺失逐栏回报（不补假值）；幂等重放 job 不重复、artifact 不重复插；
+//      probe 缺失时尺寸落 NULL 而非 0 冒充
 //
-// PGlite（WASM Postgres，migration 與生產 image-control-postgres 同源）**不是 repo 依賴**：
-// 裝了它（或 NODE_PATH 指向有它的 node_modules）就跑全量；沒有時 SQL 整合段逐測 skip，
-// validate 純函式段照跑——skip 是誠實聲明「這段需要 PG」，不是通過。
-//   NODE_PATH=<含 @electric-sql/pglite 的 node_modules> npx --yes tsx --test <本檔>
+// PGlite（WASM Postgres，migration 与生产 image-control-postgres 同源）**不是 repo 依赖**：
+// 装了它（或 NODE_PATH 指向有它的 node_modules）就跑全量；没有时 SQL 整合段逐测 skip，
+// validate 纯函式段照跑——skip 是诚实声明「这段需要 PG」，不是通过。
+//   NODE_PATH=<含 @electric-sql/pglite 的 node_modules> npx --yes tsx --test <本档>
 
 import test, { before } from "node:test";
 import { createRequire } from "node:module";
@@ -19,19 +19,19 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { ingestMasterExport, validateMasterIngestPayload } from "./master-ingest-service";
 
-// tsx 的 CJS 變換下 import.meta.dirname 不存在；照 aid-enums.test 的 import.meta.url 慣例。
+// tsx 的 CJS 变换下 import.meta.dirname 不存在；照 aid-enums.test 的 import.meta.url 惯例。
 const REPO = new URL("../../..", import.meta.url).pathname;
 
-// 動態解析：包不存在時走 catch（靜態 import 會讓整檔炸掉）。走 createRequire（CJS 解析，
-// 認 NODE_PATH——tsx 的 ESM import() 不認 NODE_PATH，實測會把「有 NODE_PATH」誤判成缺席）。
-// 型別斷言是刻意的——PGlite 不是 repo 依賴，TS 端不解析它。
+// 动态解析：包不存在时走 catch（静态 import 会让整档炸掉）。走 createRequire（CJS 解析，
+// 认 NODE_PATH——tsx 的 ESM import() 不认 NODE_PATH，实测会把「有 NODE_PATH」误判成缺席）。
+// 型别断言是刻意的——PGlite 不是 repo 依赖，TS 端不解析它。
 const PGLITE_PKG = "@electric-sql/pglite";
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pg: { exec: (sql: string) => Promise<unknown>; query: (sql: string, values?: unknown[]) => Promise<{ rows: any[] }> } | null = null;
 
-// 服務經 encryptGenerationPrompt 讀 process.env（不像 crypto.test 顯式傳 env），
-// before 設、after 清，不讓測試密鑰漏進同進程的其他測試檔。
+// 服务经 encryptGenerationPrompt 读 process.env（不像 crypto.test 显式传 env），
+// before 设、after 清，不让测试密钥漏进同进程的其他测试档。
 const TEST_PROMPT_KEY = Buffer.alloc(32, 7).toString("base64");
 
 before(async () => {
@@ -41,34 +41,34 @@ before(async () => {
     const mod = require(PGLITE_PKG) as { PGlite: new () => { exec: (s: string) => Promise<unknown>; query: (s: string, v?: unknown[]) => Promise<{ rows: never[] }> } };
     pg = new mod.PGlite();
   } catch {
-    return; // PGlite 未安裝 → SQL 段逐測 skip
+    return; // PGlite 未安装 → SQL 段逐测 skip
   }
   for (const f of readdirSync(path.join(REPO, "db/migrations")).filter((f) => f.endsWith(".sql")).sort()) {
     const sqlText = readFileSync(path.join(REPO, "db/migrations", f), "utf8");
     try {
       await pg.exec(sqlText);
     } catch (e) {
-      // IF NOT EXISTS 類重跑噪音可略；018 若炸會在斷言處現形
+      // IF NOT EXISTS 类重跑噪音可略；018 若炸会在断言处现形
       if (!String((e as Error).message).includes("already exists")) throw e;
     }
   }
-  // 詞表擴展的實證 fixture：018 後 film_export + agent source 必須能直接落 job
+  // 词表扩展的实证 fixture：018 后 film_export + agent source 必须能直接落 job
   await pg.query(
     `INSERT INTO generation_job (id, tenant_id, source, request_hash, kind, model_id, prompt_ciphertext, deadline_at, status)
      VALUES ('g4-mig-job', 'web:22', 'agent', 'h0', 'film_export', 'timeline_master', 'ct', now(), 'succeeded')`,
   );
 });
 
-/** SQL 整合段的守衛：PGlite 缺席時 skip（誠實聲明，非靜默通過）。 */
+/** SQL 整合段的守卫：PGlite 缺席时 skip（诚实声明，非静默通过）。 */
 function skipWithoutPg(t: { skip: (m?: string) => void }): boolean {
   if (!pg) {
-    t.skip("PGlite 未安裝（SQL 整合段需要它；跑法見檔頭）");
+    t.skip("PGlite 未安装（SQL 整合段需要它；跑法见档头）");
     return true;
   }
   return false;
 }
 
-// postgres.js 形狀 shim（tagged template → $n → PGlite）；begin 直呼同一 tag（本服務的事務用法）。
+// postgres.js 形状 shim（tagged template → $n → PGlite）；begin 直呼同一 tag（本服务的事务用法）。
 function makeSql() {
   const tagged = async (strings: TemplateStringsArray, ...values: unknown[]) => {
     let text = strings[0];
@@ -77,17 +77,17 @@ function makeSql() {
     return res.rows;
   };
   (tagged as unknown as { begin: (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> }).begin = async (fn) => fn(tagged);
-  // postgres.js 的 json() 助手：序列化成 JSON 字串，綁進 jsonb 欄由 PG 自動收斂（shim 同語義）
+  // postgres.js 的 json() 助手：序列化成 JSON 字串，绑进 jsonb 栏由 PG 自动收敛（shim 同语义）
   (tagged as unknown as { json: (v: unknown) => string }).json = (v: unknown) => JSON.stringify(v ?? null);
   return tagged as never;
 }
 
 const sql = makeSql();
 
-/** 真實流量必經 validate（snake→駝映射在這裡），測試同樣不得繞過。 */
+/** 真实流量必经 validate（snake→驼映射在这里），测试同样不得绕过。 */
 function payloadOf(input: unknown) {
   const v = validateMasterIngestPayload(input);
-  assert.ok(v.ok, "fixture 應通過 validate");
+  assert.ok(v.ok, "fixture 应通过 validate");
   return v.ok ? v.value : (v as never);
 }
 
@@ -108,40 +108,40 @@ const VALID = {
   probe: { codec: "h264", width: 1920, height: 1080, duration_sec: 12.345, size: 1_048_576, probe_error: null },
 };
 
-test("migration 018：film_export + agent source 可落 job（詞表擴展在真 PG 生效）", async (t) => {
+test("migration 018：film_export + agent source 可落 job（词表扩展在真 PG 生效）", async (t) => {
   if (skipWithoutPg(t)) return;
   const row = await pg.query(
     `SELECT kind, source FROM generation_job WHERE id = 'g4-mig-job'`,
   );
-  assert.equal(row.rows.length, 1, "before() 階段插入的 film_export job 應已存在");
+  assert.equal(row.rows.length, 1, "before() 阶段插入的 film_export job 应已存在");
   const j = row.rows[0] as { kind: string; source: string };
   assert.equal(j.kind, "film_export");
   assert.equal(j.source, "agent");
 });
 
-test("validate：全欄合法通過；逐欄缺失/非法回報欄位名（不補假值）", () => {
+test("validate：全栏合法通过；逐栏缺失/非法回报栏位名（不补假值）", () => {
   const ok = validateMasterIngestPayload(VALID);
   assert.ok(ok.ok);
   const bad = validateMasterIngestPayload({
     ...VALID,
     session_id: "",
-    tenant_id: "biz:xyz", // 刻意不收（寫得進、讀不到的 namespace 是地雷）
+    tenant_id: "biz:xyz", // 刻意不收（写得进、读不到的 namespace 是地雷）
     fingerprint: "短",
     sha256: undefined,
     mime_type: "video/webm",
     byte_size: 0,
     delivery_url: "http://insecure.example/x.mp4",
-    probe: { width: "寬不是數字" },
+    probe: { width: "宽不是数字" },
   });
   assert.equal(bad.ok, false);
   if (!bad.ok) {
     for (const f of ["session_id", "tenant_id", "fingerprint", "sha256", "mime_type", "byte_size", "delivery_url", "probe"]) {
-      assert.ok(bad.fields.includes(f), `缺欄位回報：${f}`);
+      assert.ok(bad.fields.includes(f), `缺栏位回报：${f}`);
     }
   }
 });
 
-test("正向鏈：job + artifact 落庫，metadata.masterExport 實值（probe/指紋/來源）", async (t) => {
+test("正向链：job + artifact 落库，metadata.masterExport 实值（probe/指纹/来源）", async (t) => {
   if (skipWithoutPg(t)) return;
   const r = await ingestMasterExport(payloadOf(VALID), sql);
   assert.equal(r.jobDeduped, false);
@@ -193,7 +193,7 @@ test("正向鏈：job + artifact 落庫，metadata.masterExport 實值（probe/�
   assert.equal(meta?.probe?.verified, true);
 });
 
-test("冪等重放：同會話同指紋 → job 不重複、artifact 不重複插", async (t) => {
+test("幂等重放：同会话同指纹 → job 不重复、artifact 不重复插", async (t) => {
   if (skipWithoutPg(t)) return;
   const r1 = await ingestMasterExport(payloadOf(VALID), sql);
   assert.equal(r1.jobDeduped, true);
@@ -208,7 +208,7 @@ test("冪等重放：同會話同指紋 → job 不重複、artifact 不重複�
   assert.equal(Number(c.arts), 1);
 });
 
-test("probe 缺失：width/height 落 NULL（禁 0 冒充實測值），durationSec 落 NULL", async (t) => {
+test("probe 缺失：width/height 落 NULL（禁 0 冒充实测值），durationSec 落 NULL", async (t) => {
   if (skipWithoutPg(t)) return;
   const r = await ingestMasterExport(payloadOf({ ...VALID, session_id: "sess-g4-noprobe", probe: null }), sql);
   const art = await pg.query(`SELECT width, height, metadata_json FROM artifact WHERE id = $1`, [r.artifactId]);
@@ -219,13 +219,13 @@ test("probe 缺失：width/height 落 NULL（禁 0 冒充實測值），duration
   };
   assert.equal(a.width, null);
   assert.equal(a.height, null);
-  // 刀 4 寫入端口徑：缺值 = 鍵省略（buildMasterArtifactMetadata 只在實測值存在時寫鍵），
-  // 不是顯式 null——讀取端 readMasterArtifactMetadata 同樣按「鍵在不在」判讀。
+  // 刀 4 写入端口径：缺值 = 键省略（buildMasterArtifactMetadata 只在实测值存在时写键），
+  // 不是显式 null——读取端 readMasterArtifactMetadata 同样按「键在不在」判读。
   assert.equal(a.metadata_json.masterExport.resolution, undefined);
   assert.equal(a.metadata_json.masterExport.durationSec, undefined);
 });
 
-test("probe_error：如實進 metadata（normalizeProbe 口徑：verified:false + error 原文）", async (t) => {
+test("probe_error：如实进 metadata（normalizeProbe 口径：verified:false + error 原文）", async (t) => {
   if (skipWithoutPg(t)) return;
   const r = await ingestMasterExport(
     payloadOf({ ...VALID, session_id: "sess-g4-probeerr", probe: { ...VALID.probe, probe_error: "ffprobe timed out" } }),

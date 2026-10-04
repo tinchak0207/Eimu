@@ -24,8 +24,8 @@ endpoints:
       timeout: 10m
     conditions:
       # production 的 /v1/images/generations 是非同步 API：POST 一律回 202 + task body。
-      # 探測必須驗證「202 + task id 存在」，而不是寬鬆的 2xx——否則卡 202 也算成功。
-      # routing_hint=hub → 調度器固定走 hublinuxdo 渠道。
+      # 探测必须验证「202 + task id 存在」，而不是宽松的 2xx——否则卡 202 也算成功。
+      # routing_hint=hub → 调度器固定走 hublinuxdo 渠道。
       - "[STATUS] == 202"
       - "[BODY].id != \"\""
     ui:
@@ -36,9 +36,9 @@ endpoints:
         response-time:
           thresholds: [10000, 30000, 60000, 120000, 300000]
 
-  # 風控絆線（金絲雀／異常註冊）：此前只存在於 VPS `/opt/image-gatus/config/config.yaml`，
-  # repo 沒有這一段 ⇒ 拿 repo 單向覆蓋會把它整條沖掉。2026-10-04 依「雙向 diff 取並集」
-  # 併回 repo，repo 從此是兩條探針的唯一天源。
+  # 风控绊线（金丝雀／异常注册）：此前只存在于 VPS `/opt/image-gatus/config/config.yaml`，
+  # repo 没有这一段 ⇒ 拿 repo 单向覆盖会把它整条冲掉。2026-10-04 依「双向 diff 取并集」
+  # 并回 repo，repo 从此是两条探针的唯一天源。
   - name: 风控绊线（金丝雀/异常注册）
     group: Risk
     url: https://store.tinchak0207.xyz/risk/status.json
@@ -51,12 +51,12 @@ endpoints:
       hide-port: true
       hide-errors: false
 
-  # 付款對帳探針：用支付商自己的資料對帳「已付款 vs 已履約」。
-  # 端點由控制面承載（需要控制面 DB + 支付商憑證），故走 /image-control/ 前綴
-  # （與 deploy/vps/deploy-control-plane.sh 的 PUBLIC_HEALTHZ 同一族）。
-  # 有 paid_unfulfilled > 0（付了錢沒履約）→ 端點回 503 → 探針紅燈；這正是不許
-  # 用假 200 假裝健康的那條。修好前刻意紅著，逼履約。
-  - name: mPay 付款對帳（已付款 vs 已履約）
+  # 付款对帐探针：用支付商自己的资料对帐「已付款 vs 已履约」。
+  # 端点由控制面承载（需要控制面 DB + 支付商凭证），故走 /image-control/ 前缀
+  # （与 deploy/vps/deploy-control-plane.sh 的 PUBLIC_HEALTHZ 同一族）。
+  # 有 paid_unfulfilled > 0（付了钱没履约）→ 端点回 503 → 探针红灯；这正是不许
+  # 用假 200 假装健康的那条。修好前刻意红著，逼履约。
+  - name: mPay 付款对帐（已付款 vs 已履约）
     group: Production
     url: https://store.tinchak0207.xyz/image-control/api/payments/mapay/health
     interval: 30m

@@ -71,7 +71,7 @@ arm_ob.keyframe_insert(data_path="location", frame=round(D * FPS) + 1)
 action = arm_ob.animation_data.action
 action.name = "AN_Blocky_Walk"
 # Blender 5.2：4.4 起 slotted action，fcurves 在 layers[0].strips[0].channelbag(slot).fcurves
-# （上游 4.x 寫法：action.fcurves —— API 名變更，邏輯等價）
+# （上游 4.x 写法：action.fcurves —— API 名变更，逻辑等价）
 def action_fcurves(act):
     for layer in act.layers:
         for strip in layer.strips:
@@ -95,7 +95,7 @@ key.name = "LGT_Key_Sun"
 key.data.energy = 3.0
 key.rotation_euler = (0.6, 0.2, 0.6)
 
-# --- Eevee 渲染首/末帧（出幀到 /tmp 验证） ---
+# --- Eevee 渲染首/末帧（出帧到 /tmp 验证） ---
 scene = bpy.context.scene
 scene.render.engine = "BLENDER_EEVEE"  # Blender 5.2：4.2 起 Eevee Next 已合并为唯一 Eevee，enum=BLENDER_EEVEE
 scene.render.resolution_x = 960

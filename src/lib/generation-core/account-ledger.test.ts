@@ -1,8 +1,8 @@
-// REQ-E1a 我方帳本（account-ledger）測試：加減項模型、餘額公式、基線種子幂等、
-// 轉移兩條腿、充值入帳、以及「記帳失敗不擋錢路」。
+// REQ-E1a 我方帐本（account-ledger）测试：加减项模型、余额公式、基线种子幂等、
+// 转移两条腿、充值入帐、以及「记帐失败不挡钱路」。
 //
-// 驗收姿勢（AGENTS.md 09-23）：每一條都是**真實行為斷言**（真輸入 → 真輸出），
-// 不是源碼字串掃描。源碼掃描（append-only 守門）只作變更探針，另列。
+// 验收姿势（AGENTS.md 09-23）：每一条都是**真实行为断言**（真输入 → 真输出），
+// 不是源码字串扫描。源码扫描（append-only 守门）只作变更探针，另列。
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -30,7 +30,7 @@ import {
 } from "./account-ledger.ts";
 import type { GatewayAdminUser, GatewayRedemption } from "@/lib/gateway-admin";
 
-/** 寫入器注入：基線讀法走假上游（生產默認 fetchGatewayUser）。 */
+/** 写入器注入：基线读法走假上游（生产默认 fetchGatewayUser）。 */
 function writerDeps(ledger: ReturnType<typeof fakeLedger>, baseline = 1_000_000) {
   return {
     sql: ledger.sql,
@@ -43,7 +43,7 @@ const CONTROL_PLANE_ENV = {
   GENERATION_CONTROL_PLANE_ENABLED: "true",
 };
 
-/** 環境覆寫（async-aware：非同步任務跑完才還原，否則 async fn 會看到已還原的環境）。 */
+/** 环境覆写（async-aware：非同步任务跑完才还原，否则 async fn 会看到已还原的环境）。 */
 function withEnv<T>(overrides: Record<string, string | undefined>, fn: () => T): T {
   const saved: Record<string, string | undefined> = {};
   for (const key of Object.keys(overrides)) saved[key] = process.env[key];
@@ -68,7 +68,7 @@ function withEnv<T>(overrides: Record<string, string | undefined>, fn: () => T):
   }
 }
 
-// ── 假帳本 SQL：記憶體表 + 真 UNIQUE(idempotency_ref) + 真 ON CONFLICT DO NOTHING ──
+// ── 假帐本 SQL：记忆体表 + 真 UNIQUE(idempotency_ref) + 真 ON CONFLICT DO NOTHING ──
 
 interface FakeLedgerRow {
   id: string;
@@ -123,7 +123,7 @@ function fakeLedger(seed: { rows?: FakeLedgerRow[]; failInsert?: boolean; clock?
       const row = rows.find((candidate) => candidate.idempotency_ref === values[0]);
       return row ? [{ amount: row.amount }] : [];
     }
-    // 基線沖銷兩條腿的存在性探測（`WHERE idempotency_ref IN (…, …)`）。
+    // 基线冲销两条腿的存在性探测（`WHERE idempotency_ref IN (…, …)`）。
     if (query.includes("SELECT idempotency_ref FROM account_ledger") && query.includes("IN")) {
       const wanted = new Set(values.map((value) => String(value)));
       return rows
@@ -142,7 +142,7 @@ function fakeLedger(seed: { rows?: FakeLedgerRow[]; failInsert?: boolean; clock?
       return ids.map((id) => ({ billing_user_id: id, total_identities: ids.length }));
     }
     if (query.includes("FROM billing_operation")) return [];
-    throw new Error(`fakeLedger: 未預期的查詢：${query}`);
+    throw new Error(`fakeLedger: 未预期的查询：${query}`);
   }) as unknown as GenerationSql;
 
   Object.assign(tagged, {
@@ -163,9 +163,9 @@ function gatewayUser(id: number, quota: number): GatewayAdminUser {
   return { id, username: `user-${id}`, quota };
 }
 
-// ── 加減項模型（純函式，真輸入真輸出） ────────────────────────────────────
+// ── 加减项模型（纯函式，真输入真输出） ────────────────────────────────────
 
-test("加減項判別表：消費/轉出是減項、充值/退款/轉入是加項，基線與調整看符號", () => {
+test("加减项判别表：消费/转出是减项、充值/退款/转入是加项，基线与调整看符号", () => {
   assert.equal(ledgerDirectionOf("consumption", -100), "debit");
   assert.equal(ledgerDirectionOf("transfer_out", -100), "debit");
   assert.equal(ledgerDirectionOf("recharge", 100), "credit");
@@ -176,7 +176,7 @@ test("加減項判別表：消費/轉出是減項、充值/退款/轉入是加�
   assert.equal(ledgerDirectionOf("adjustment", -1), "debit");
 });
 
-test("帳本行契約：方向不符/金額為 0/缺來源缺冪等鍵一律拒收，訊息指出原因", () => {
+test("帐本行契约：方向不符/金额为 0/缺来源缺幂等键一律拒收，讯息指出原因", () => {
   const base: LedgerEntryDraft = {
     billingUserId: 7,
     entryType: "consumption",
@@ -186,34 +186,34 @@ test("帳本行契約：方向不符/金額為 0/缺來源缺冪等鍵一律拒�
     idempotencyRef: "test:1",
   };
   assert.equal(validateLedgerEntryDraft(base), null);
-  assert.match(validateLedgerEntryDraft({ ...base, amount: 100 }) ?? "", /consumption 是減項/);
-  assert.match(validateLedgerEntryDraft({ ...base, amount: 0 }) ?? "", /amount 0 只允許出現在 opening/);
-  assert.match(validateLedgerEntryDraft({ ...base, entryType: "refund", amount: -5 }) ?? "", /refund 是加項/);
+  assert.match(validateLedgerEntryDraft({ ...base, amount: 100 }) ?? "", /consumption 是减项/);
+  assert.match(validateLedgerEntryDraft({ ...base, amount: 0 }) ?? "", /amount 0 只允许出现在 opening/);
+  assert.match(validateLedgerEntryDraft({ ...base, entryType: "refund", amount: -5 }) ?? "", /refund 是加项/);
   assert.match(validateLedgerEntryDraft({ ...base, billingUserId: 0 }) ?? "", /billing_user_id/);
   assert.match(validateLedgerEntryDraft({ ...base, source: "  " }) ?? "", /source 必填/);
   assert.match(validateLedgerEntryDraft({ ...base, sourceRef: "" }) ?? "", /source_ref 必填/);
   assert.match(validateLedgerEntryDraft({ ...base, idempotencyRef: "" }) ?? "", /idempotency_ref 必填/);
-  assert.match(validateLedgerEntryDraft({ ...base, amount: 1.5 }) ?? "", /必須是整數/);
-  // opening 的 0 基線是合法的一句真話（記下「基線時刻」）。
+  assert.match(validateLedgerEntryDraft({ ...base, amount: 1.5 }) ?? "", /必须是整数/);
+  // opening 的 0 基线是合法的一句真话（记下「基线时刻」）。
   assert.equal(
     validateLedgerEntryDraft({ ...base, entryType: "opening", amount: 0, idempotencyRef: "seed:7:v1" }),
     null,
   );
 });
 
-test("餘額公式：真實形態帳本記錄集（充值/消費/全額退款/部分退款/分配轉移）與手算逐位吻合", () => {
-  // 手算（單位 quota，1 幣 = 500000）：
+test("余额公式：真实形态帐本记录集（充值/消费/全额退款/部分退款/分配转移）与手算逐位吻合", () => {
+  // 手算（单位 quota，1 币 = 500000）：
   //   opening        10,000,000
   //   recharge       +2,000,000
   //   consumption A  −500,000
-  //   refund A（全額）+500,000
+  //   refund A（全额）+500,000
   //   consumption B  −1,500,000
   //   refund B（部分）+750,000
   //   transfer_out   −3,000,000
-  //   transfer_in    +3,000,000（成員側）
-  //   consumption 成員 −1,000,000
-  //   主帳 = 10,000,000+2,000,000−500,000+500,000−1,500,000+750,000−3,000,000 = 8,250,000
-  //   成員 = 3,000,000−1,000,000 = 2,000,000
+  //   transfer_in    +3,000,000（成员侧）
+  //   consumption 成员 −1,000,000
+  //   主帐 = 10,000,000+2,000,000−500,000+500,000−1,500,000+750,000−3,000,000 = 8,250,000
+  //   成员 = 3,000,000−1,000,000 = 2,000,000
   const entry = (
     billingUserId: number,
     entryType: LedgerEntry["entryType"],
@@ -259,16 +259,16 @@ test("餘額公式：真實形態帳本記錄集（充值/消費/全額退款/�
   assert.equal(member.coins, 4);
   assert.equal(member.credits, 3_000_000);
 
-  // 逐位無損：quota 與幣的關係由 QUOTA_PER_COIN 決定（獨立常數，不是被測實現的輸出）。
+  // 逐位无损：quota 与币的关系由 QUOTA_PER_COIN 决定（独立常数，不是被测实现的输出）。
   assert.equal(master.quota / QUOTA_PER_COIN, 16.5);
   assert.equal(member.quota / QUOTA_PER_COIN, 4);
 
-  // 全體加總 = 各身份之和（守恆，逐位）。
+  // 全体加总 = 各身份之和（守恒，逐位）。
   const all = computeAccountBalance(entries);
   assert.equal(all.quota, master.quota + member.quota);
 });
 
-test("餘額公式：非有限金額整行跳過並記數，不當 0 加、不裝作沒發生", () => {
+test("余额公式：非有限金额整行跳过并记数，不当 0 加、不装作没发生", () => {
   const entries: LedgerEntry[] = [
     {
       id: "x1",
@@ -305,9 +305,9 @@ test("餘額公式：非有限金額整行跳過並記數，不當 0 加、不�
   assert.equal(balance.entryCount, 1);
 });
 
-// ── 記帳冪等 / 基線種子（真 SQL 契約 + 假儲存層） ──────────────────────────
+// ── 记帐幂等 / 基线种子（真 SQL 契约 + 假储存层） ──────────────────────────
 
-test("基線種子：同一份 new-api 基線重放兩次不雙算（第二次完全不落帳）", async () => {
+test("基线种子：同一份 new-api 基线重放两次不双算（第二次完全不落帐）", async () => {
   const ledger = fakeLedger();
   const fetchUser = async (userId: number) => gatewayUser(userId, 5_000_000);
 
@@ -323,11 +323,11 @@ test("基線種子：同一份 new-api 基線重放兩次不雙算（第二次�
   assert.equal(second.seeded, false);
   assert.match(second.reason ?? "", /重放/);
 
-  assert.equal(ledger.inserts.length, 1, "整份基線只能落一次帳");
-  assert.equal(ledger.balanceOf(40), 5_000_000, "重放後餘額不得翻倍");
+  assert.equal(ledger.inserts.length, 1, "整份基线只能落一次帐");
+  assert.equal(ledger.balanceOf(40), 5_000_000, "重放后余额不得翻倍");
 });
 
-test("基線種子：new-api 讀不到就不種（餘額不得靠猜）", async () => {
+test("基线种子：new-api 读不到就不种（余额不得靠猜）", async () => {
   const ledger = fakeLedger();
   const result = await withEnv(CONTROL_PLANE_ENV, () =>
     ensureAccountOpening(40, { sql: ledger.sql, fetchUser: async () => null }),
@@ -337,7 +337,7 @@ test("基線種子：new-api 讀不到就不種（餘額不得靠猜）", async 
   assert.equal(ledger.rows.length, 0);
 });
 
-test("0 額帳號也留 0 基線：記下基線時刻（充值入帳的分界線）", async () => {
+test("0 额帐号也留 0 基线：记下基线时刻（充值入帐的分界线）", async () => {
   const ledger = fakeLedger();
   const result = await withEnv(CONTROL_PLANE_ENV, () =>
     ensureAccountOpening(40, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 0) }),
@@ -348,7 +348,7 @@ test("0 額帳號也留 0 基線：記下基線時刻（充值入帳的分界線
   assert.equal(ledger.rows[0].entry_type, "opening");
 });
 
-test("記帳重放：同一 idempotency_ref 第二次只回報 duplicates，餘額不變", async () => {
+test("记帐重放：同一 idempotency_ref 第二次只回报 duplicates，余额不变", async () => {
   const ledger = fakeLedger();
   const draft: LedgerEntryDraft = {
     billingUserId: 40,
@@ -369,7 +369,7 @@ test("記帳重放：同一 idempotency_ref 第二次只回報 duplicates，餘�
   assert.equal(ledger.rows.length, 1);
 });
 
-test("記帳失敗不擋錢路：儲存層拋錯只回報，不往外拋", async () => {
+test("记帐失败不挡钱路：储存层抛错只回报，不往外抛", async () => {
   const ledger = fakeLedger({ failInsert: true });
   const outcome = await withEnv(CONTROL_PLANE_ENV, () =>
     recordConsumption(
@@ -381,7 +381,7 @@ test("記帳失敗不擋錢路：儲存層拋錯只回報，不往外拋", async
   assert.match(outcome.reason ?? "", /fake ledger insert failure/);
 });
 
-test("消費/退款寫入器：上游扣了才記、退款記加項，operation_id 指回帳務事件", async () => {
+test("消费/退款写入器：上游扣了才记、退款记加项，operation_id 指回帐务事件", async () => {
   const ledger = fakeLedger();
   const consumed = await withEnv(CONTROL_PLANE_ENV, () =>
     recordConsumption(
@@ -410,7 +410,7 @@ test("消費/退款寫入器：上游扣了才記、退款記加項，operation_
   assert.equal(ledger.balanceOf(40), 1_000_000);
 });
 
-test("分配轉移：兩條腿同一批寫入、互相對稱；主帳 −Δ 成員 +Δ", async () => {
+test("分配转移：两条腿同一批写入、互相对称；主帐 −Δ 成员 +Δ", async () => {
   const ledger = fakeLedger();
   const outcome = await withEnv(CONTROL_PLANE_ENV, () =>
     recordTransfer(
@@ -432,7 +432,7 @@ test("分配轉移：兩條腿同一批寫入、互相對稱；主帳 −Δ 成�
   assert.equal(team[0].source_ref, "transfer:t-1");
   assert.equal(member[0].source_ref, "transfer:t-1");
 
-  // 重放同一筆轉移（同一 transferId）→ 兩條腿都不再落帳。
+  // 重放同一笔转移（同一 transferId）→ 两条腿都不再落帐。
   const replay = await withEnv(CONTROL_PLANE_ENV, () =>
     recordTransfer(
       { teamUserId: 40, memberUserId: 117, amountQuota: 2_000_000, transferId: "t-1", source: "member-quota" },
@@ -443,7 +443,7 @@ test("分配轉移：兩條腿同一批寫入、互相對稱；主帳 −Δ 成�
   assert.equal(ledger.rows.filter((row) => row.source_ref === "transfer:t-1").length, 2);
 });
 
-test("分配回收（負方向）：成員 −Δ、主帳 +Δ，方向不得顛倒", async () => {
+test("分配回收（负方向）：成员 −Δ、主帐 +Δ，方向不得颠倒", async () => {
   const ledger = fakeLedger();
   await withEnv(CONTROL_PLANE_ENV, () =>
     recordTransfer(
@@ -459,7 +459,7 @@ test("分配回收（負方向）：成員 −Δ、主帳 +Δ，方向不得顛�
   assert.equal(member?.amount, -800_000);
 });
 
-test("管理員調整：加減皆入帳，幂等鍵含調整目標（重放同一次調整不雙算）", async () => {
+test("管理员调整：加减皆入帐，幂等键含调整目标（重放同一次调整不双算）", async () => {
   const ledger = fakeLedger();
   const first = await withEnv(CONTROL_PLANE_ENV, () =>
     recordAdjustment(
@@ -475,24 +475,24 @@ test("管理員調整：加減皆入帳，幂等鍵含調整目標（重放同�
     ),
   );
   assert.equal(replay.posted, false);
-  // 手算：基線 1,000,000 + 調整 5,000,000 = 6,000,000（重放不得再加一次）
+  // 手算：基线 1,000,000 + 调整 5,000,000 = 6,000,000（重放不得再加一次）
   assert.equal(ledger.balanceOf(40), 6_000_000);
 });
 
-test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基線前兌換補記而不雙算", async () => {
-  // 基線時刻 = 2026-09-23T00:00:00Z（fake 時鐘），基線值 = 1,000,000。
+test("充值入帐：已使用的兑换码入帐、未使用的不入帐、基线前兑换补记而不双算", async () => {
+  // 基线时刻 = 2026-09-23T00:00:00Z（fake 时钟），基线值 = 1,000,000。
   const ledger = fakeLedger();
   await withEnv(CONTROL_PLANE_ENV, () =>
     ensureAccountOpening(40, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 1_000_000) }),
   );
 
   const redemptions: GatewayRedemption[] = [
-    // 已使用、且兌換時間晚於基線 → 應入帳 +2,000,000
+    // 已使用、且兑换时间晚于基线 → 应入帐 +2,000,000
     { id: 9001, key: "k-1", name: "MP0001", quota: 2_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 23, 1, 0) / 1000 },
-    // 未使用（redeemed_time=0）→ 不入帳（發碼 ≠ 入賬）
+    // 未使用（redeemed_time=0）→ 不入帐（发码 ≠ 入账）
     { id: 9002, key: "k-2", name: "MP0002", quota: 3_000_000, status: 1, redeemed_time: 0 },
-    // 基線之前就已兌換 → 額度已含在基線裡：記「充值 +2,000,000」讓來源可見，
-    // 同時記 −2,000,000 沖銷腿 ⇒ 淨額 0，不得讓餘額多出這 4,000,000。
+    // 基线之前就已兑换 → 额度已含在基线里：记「充值 +2,000,000」让来源可见，
+    // 同时记 −2,000,000 冲销腿 ⇒ 净额 0，不得让余额多出这 4,000,000。
     { id: 9003, key: "k-3", name: "MP0003", quota: 4_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 22, 0, 0) / 1000 },
   ];
   const summary = await withEnv(CONTROL_PLANE_ENV, () =>
@@ -506,13 +506,13 @@ test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基�
   assert.equal(summary.chargedBaselineAbsorbed, 1);
   assert.equal(summary.skippedUnused, 1);
   assert.equal(summary.skippedBeforeBaseline, 0);
-  assert.equal(ledger.balanceOf(40), 3_000_000, "1,000,000 基線 + 2,000,000 充值（沖銷腿淨額 0）");
+  assert.equal(ledger.balanceOf(40), 3_000_000, "1,000,000 基线 + 2,000,000 充值（冲销腿净额 0）");
   assert.equal(ledger.rows.filter((row) => row.entry_type === "recharge").length, 2);
   const offset = ledger.rows.filter((row) => row.entry_type === "adjustment" && row.source_ref === "redemption:9003");
   assert.equal(offset.length, 1);
   assert.equal(offset[0]?.amount, -4_000_000);
 
-  // 週期性重掃（同一批兌換碼再掃一次）不得重複入帳，也不得重複補記沖銷。
+  // 周期性重扫（同一批兑换码再扫一次）不得重复入帐，也不得重复补记冲销。
   const again = await withEnv(CONTROL_PLANE_ENV, () =>
     ingestRedeemedRecharges(
       {},
@@ -525,9 +525,9 @@ test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基�
   assert.equal(ledger.rows.filter((row) => row.entry_type === "adjustment" && row.source_ref === "redemption:9003").length, 1);
 });
 
-test("生產實錄回放：415 張碼全掃、11 張已兌換全數在帳本上（含人工碼，淨額不變）", async () => {
+test("生产实录回放：415 张码全扫、11 张已兑换全数在帐本上（含人工码，净额不变）", async () => {
   // 2026-09-27 直查 /opt/imagesite/new-api-data/one-api.db 的原值（id/name/quota/
-  // used_user_id/redeemed_time 一字不改），上游分頁語義 p=0≡p=1 亦照實模擬。
+  // used_user_id/redeemed_time 一字不改），上游分页语义 p=0≡p=1 亦照实模拟。
   const used: { id: number; name: string; quota: number; userId: number; at: string }[] = [
     { id: 1, name: "starter-9.9-200", quota: 100_000_000, userId: 9, at: "2026-06-02 19:51:05" },
     { id: 7, name: "tier-1", quota: 50_000_000, userId: 30, at: "2026-06-08 14:20:55" },
@@ -559,7 +559,7 @@ test("生產實錄回放：415 張碼全掃、11 張已兌換全數在帳本上�
     return items;
   };
 
-  // 開戶基線：全部種在 2026-09-23（中控手術日）⇒ 這 11 筆兌換全在基線之前。
+  // 开户基线：全部种在 2026-09-23（中控手术日）⇒ 这 11 笔兑换全在基线之前。
   const openingRows = [...new Set(used.map((item) => item.userId))].map((userId, index) => ({
     id: `opening-${userId}`,
     billing_user_id: userId,
@@ -571,7 +571,7 @@ test("生產實錄回放：415 張碼全掃、11 張已兌換全數在帳本上�
     job_id: null,
     operation_id: null,
     counterparty_user_id: null,
-    note: "基線",
+    note: "基线",
     metadata_json: "{}",
     created_at: `2026-09-23T00:00:${String(index).padStart(2, "0")}.000Z`,
   }));
@@ -594,26 +594,26 @@ test("生產實錄回放：415 張碼全掃、11 張已兌換全數在帳本上�
   }) as typeof fetch;
 
   try {
-    // 不注入 readRedemptions：走真 listGatewayRedemptions（真分頁邏輯）。
+    // 不注入 readRedemptions：走真 listGatewayRedemptions（真分页逻辑）。
     const summary = await withEnv(CONTROL_PLANE_ENV, () =>
       ingestRedeemedRecharges({}, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 0) }),
     );
-    assert.equal(summary.scanned, 415, "415 張碼必須一張不漏（舊版只看得到 200 次、100 張唯一）");
+    assert.equal(summary.scanned, 415, "415 张码必须一张不漏（旧版只看得到 200 次、100 张唯一）");
     assert.equal(summary.skippedUnused, 404);
-    assert.equal(summary.charged + summary.chargedBaselineAbsorbed, 11, "11 張已兌換碼全部要在帳本上留痕");
-    assert.equal(summary.charged, 0, "全部早於基線 ⇒ 全走補記+沖銷，不走直接充值");
+    assert.equal(summary.charged + summary.chargedBaselineAbsorbed, 11, "11 张已兑换码全部要在帐本上留痕");
+    assert.equal(summary.charged, 0, "全部早于基线 ⇒ 全走补记+冲销，不走直接充值");
     assert.equal(summary.chargedBaselineAbsorbed, 11);
     assert.equal(summary.errors.length, 0);
     const recharges = ledger.rows.filter((row) => row.entry_type === "recharge");
-    assert.equal(recharges.length, 11, "人工碼也要入帳（額度是真的發出去了）");
-    assert.equal(ledger.rows.filter((row) => row.entry_type === "adjustment").length, 11, "每筆補記都配一條沖銷腿");
-    // 人工碼（全部非 MP）不得被記成現金來源。
+    assert.equal(recharges.length, 11, "人工码也要入帐（额度是真的发出去了）");
+    assert.equal(ledger.rows.filter((row) => row.entry_type === "adjustment").length, 11, "每笔补记都配一条冲销腿");
+    // 人工码（全部非 MP）不得被记成现金来源。
     assert.equal(recharges.filter((row) => row.source === "redemption-sync").length, 0);
     assert.equal(recharges.filter((row) => row.source === "gift-manual-code").length, 11);
-    // 淨額：基線 0 + Σ充值 − Σ沖銷 = 0（不許因為回放而多出一分錢）。
+    // 净额：基线 0 + Σ充值 − Σ冲销 = 0（不许因为回放而多出一分钱）。
     assert.equal(ledger.balanceOf(117), 0);
 
-    // 再掃一輪：不得重複入帳。
+    // 再扫一轮：不得重复入帐。
     const again = await withEnv(CONTROL_PLANE_ENV, () =>
       ingestRedeemedRecharges({}, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 0) }),
     );
@@ -630,15 +630,15 @@ test("生產實錄回放：415 張碼全掃、11 張已兌換全數在帳本上�
   }
 });
 
-test("充值入帳現金判定：mPay 單記現金來源、人工碼記非現金來源（投影層据此排除付費）", async () => {
+test("充值入帐现金判定：mPay 单记现金来源、人工码记非现金来源（投影层据此排除付费）", async () => {
   const ledger = fakeLedger();
   await withEnv(CONTROL_PLANE_ENV, () =>
     ensureAccountOpening(40, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 1_000_000) }),
   );
   const redemptions: GatewayRedemption[] = [
-    // mPay 真實單命名 = `MP` + out_trade_no 後 18 碼（mapay-redemption.mapayOrderRedemptionName）
+    // mPay 真实单命名 = `MP` + out_trade_no 后 18 码（mapay-redemption.mapayOrderRedemptionName）
     { id: 9101, key: "k-cash", name: "MPIMGMUJU63WMD1D372", quota: 50_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 24, 1, 0) / 1000 },
-    // 人工發碼（eimu1500 / MANUAL-* / tier-* 一族）
+    // 人工发码（eimu1500 / MANUAL-* / tier-* 一族）
     { id: 9102, key: "k-manual", name: "MANUAL-1500C-0919", quota: 750_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 24, 2, 0) / 1000 },
   ];
   await withEnv(CONTROL_PLANE_ENV, () =>
@@ -651,12 +651,12 @@ test("充值入帳現金判定：mPay 單記現金來源、人工碼記非現金
   const manual = ledger.rows.find((row) => row.source_ref === "redemption:9102");
   assert.equal(cash?.source, "redemption-sync");
   assert.equal(manual?.source, "gift-manual-code");
-  // 非現金來源必須命中投影層的 NON_CASH_RECHARGE_SOURCE，否則人工碼會被算成營收。
+  // 非现金来源必须命中投影层的 NON_CASH_RECHARGE_SOURCE，否则人工码会被算成营收。
   assert.match(manual?.source ?? "", /gift|opening|checkin|check-in|welcome|bonus|grant|promo|trial|newbie|signup|reward/i);
   assert.doesNotMatch(cash?.source ?? "", /gift|opening|checkin|check-in|welcome|bonus|grant|promo|trial|newbie|signup|reward/i);
 });
 
-test("充值入帳：沖銷腿缺一半時自癒補齊（不得留下單腿漂移）", async () => {
+test("充值入帐：冲销腿缺一半时自愈补齐（不得留下单腿漂移）", async () => {
   const ledger = fakeLedger({
     rows: [
       {
@@ -670,7 +670,7 @@ test("充值入帳：沖銷腿缺一半時自癒補齊（不得留下單腿漂�
         job_id: null,
         operation_id: null,
         counterparty_user_id: null,
-        note: "基線",
+        note: "基线",
         metadata_json: "{}",
         created_at: "2026-09-23T00:00:00.000Z",
       },
@@ -685,7 +685,7 @@ test("充值入帳：沖銷腿缺一半時自癒補齊（不得留下單腿漂�
         job_id: null,
         operation_id: null,
         counterparty_user_id: null,
-        note: "沖銷腿（充值腿遺失）",
+        note: "冲销腿（充值腿遗失）",
         metadata_json: "{}",
         created_at: "2026-09-23T00:00:01.000Z",
       },
@@ -704,13 +704,13 @@ test("充值入帳：沖銷腿缺一半時自癒補齊（不得留下單腿漂�
   assert.equal(summary.chargedBaselineAbsorbed, 1);
   assert.equal(ledger.rows.filter((row) => row.idempotency_ref === "redemption:9201").length, 1);
   assert.equal(ledger.rows.filter((row) => row.idempotency_ref === "redemption:9201:opening-offset").length, 1);
-  // 壞狀態本身是漂移（只有沖銷腿 ⇒ 少算了 5,000,000）；補上充值腿後回到
-  // 基線 1,000,000 + 充值 5,000,000 − 沖銷 5,000,000 = 1,000,000。
+  // 坏状态本身是漂移（只有冲销腿 ⇒ 少算了 5,000,000）；补上充值腿后回到
+  // 基线 1,000,000 + 充值 5,000,000 − 冲销 5,000,000 = 1,000,000。
   assert.equal(ledger.balanceOf(40), balanceBefore + 5_000_000);
   assert.equal(ledger.balanceOf(40), 1_000_000);
 });
 
-test("單筆充值寫入器：金額非正數拒收（不得記出負充值）", async () => {
+test("单笔充值写入器：金额非正数拒收（不得记出负充值）", async () => {
   const ledger = fakeLedger();
   const outcome = await withEnv(CONTROL_PLANE_ENV, () =>
     recordRecharge({ billingUserId: 40, amountQuota: -1, redemptionId: 1 }, writerDeps(ledger)),
@@ -719,7 +719,7 @@ test("單筆充值寫入器：金額非正數拒收（不得記出負充值）",
   assert.equal(ledger.rows.length, 0);
 });
 
-test("讀餘額：走同一條 Σ 公式（與純函式逐位一致）", async () => {
+test("读余额：走同一条 Σ 公式（与纯函式逐位一致）", async () => {
   const ledger = fakeLedger();
   await withEnv(CONTROL_PLANE_ENV, () =>
     ensureAccountOpening(40, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 4_000_000) }),
@@ -736,29 +736,29 @@ test("讀餘額：走同一條 Σ 公式（與純函式逐位一致）", async (
   assert.equal(balance.entryCount, 2);
 });
 
-test("契約不破：對外餘額回應形體與事故後定下的形狀逐字相同（獨立 oracle：生產實測值）", () => {
-  // 獨立 oracle：2026-09-23 生產 GET /v1/quota 對 biz key 實回
-  // {"success":true,"balance_coins":9539.62973,"currency":"coins"}（users.quota 讀法）。
-  // 我方帳本的 Σ amount 只要等於當時的 quota，回應就必須逐位重現這個數字與形狀。
+test("契约不破：对外余额回应形体与事故后定下的形状逐字相同（独立 oracle：生产实测值）", () => {
+  // 独立 oracle：2026-09-23 生产 GET /v1/quota 对 biz key 实回
+  // {"success":true,"balance_coins":9539.62973,"currency":"coins"}（users.quota 读法）。
+  // 我方帐本的 Σ amount 只要等于当时的 quota，回应就必须逐位重现这个数字与形状。
   assert.deepEqual(quotaResponseBody(4_769_814_865), {
     success: true,
     balance_coins: 9539.62973,
     currency: "coins",
   });
-  // 餘額可為負（真實狀態不夾到 0），形狀不變。
+  // 余额可为负（真实状态不夹到 0），形状不变。
   assert.deepEqual(quotaResponseBody(-2 * QUOTA_PER_COIN), {
     success: true,
     balance_coins: -2,
     currency: "coins",
   });
-  // 鍵集合恰為三個（多一個欄位就是改形狀，得先報備）。
+  // 键集合恰为三个（多一个栏位就是改形状，得先报备）。
   assert.deepEqual(Object.keys(quotaResponseBody(0)).sort(), ["balance_coins", "currency", "success"]);
 });
 
-// ── B1 真轉移 ↔ 我方帳本：兩層同筆變動（端到端，真輸入真輸出） ─────────────
+// ── B1 真转移 ↔ 我方帐本：两层同笔变动（端到端，真输入真输出） ─────────────
 
-test("B1 分配（真轉移）雙寫：我方帳本主帳 −Δ／成員 +Δ，與上游 users.quota 增量逐位一致", async () => {
-  // 假上游 users.quota：主帳 40 = 5,000,000；成員 117 = 0。
+test("B1 分配（真转移）双写：我方帐本主帐 −Δ／成员 +Δ，与上游 users.quota 增量逐位一致", async () => {
+  // 假上游 users.quota：主帐 40 = 5,000,000；成员 117 = 0。
   const quotas = new Map<number, number>([[40, 5_000_000], [117, 0]]);
   const adjustments: { userId: number; delta: number }[] = [];
   const fetchUser = (async (id: number) => gatewayUser(id, quotas.get(id) ?? 0)) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser;
@@ -767,12 +767,12 @@ test("B1 分配（真轉移）雙寫：我方帳本主帳 −Δ／成員 +Δ，�
     adjustments.push({ userId: id, delta: Math.round(delta) });
   }) as unknown as typeof import("@/lib/gateway-admin").adjustGatewayUserQuotaExact;
 
-  // 假控制面：成員 key → user 117 的歸屬，加上真帳本表（UNIQUE + ON CONFLICT DO NOTHING）。
+  // 假控制面：成员 key → user 117 的归属，加上真帐本表（UNIQUE + ON CONFLICT DO NOTHING）。
   const ledger = fakeLedger();
   const members: { id: string; team_user_id: number; member_user_id: number; member_key_id: string }[] = [];
   const tagged = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(" ? ").replace(/\s+/g, " ").trim();
-    if (query.includes("pg_advisory_xact_lock")) return []; // 假鎖：單執行緒測試不需要真鎖
+    if (query.includes("pg_advisory_xact_lock")) return []; // 假锁：单执行绪测试不需要真锁
     if (query.includes("FROM biz_api_key")) return [{ id: values[0], label: "成员A", user_id: 117 }];
     if (query.includes("FROM team_member_quota")) {
       return members.filter((member) =>
@@ -807,10 +807,10 @@ test("B1 分配（真轉移）雙寫：我方帳本主帳 −Δ／成員 +Δ，�
       },
     ),
   );
-  assert.equal(result.ok, true, `分配必須成功，實際：${JSON.stringify(result)}`);
+  assert.equal(result.ok, true, `分配必须成功，实际：${JSON.stringify(result)}`);
   if (!result.ok) return;
 
-  // ① 上游（B1 權威讀數／成員顯示口徑）：主帳 −2,000,000、成員 +2,000,000。
+  // ① 上游（B1 权威读数／成员显示口径）：主帐 −2,000,000、成员 +2,000,000。
   assert.deepEqual(adjustments, [
     { userId: 40, delta: -2_000_000 },
     { userId: 117, delta: 2_000_000 },
@@ -818,9 +818,9 @@ test("B1 分配（真轉移）雙寫：我方帳本主帳 −Δ／成員 +Δ，�
   assert.equal(quotas.get(40), 3_000_000);
   assert.equal(quotas.get(117), 2_000_000);
 
-  // ② 我方帳本（餘額權威）：兩條腿同事務入帳，增量與上游逐位相同。
-  assert.equal(ledger.balanceOf(40), 3_000_000, "主帳帳本淨額 = 上游 users.quota");
-  assert.equal(ledger.balanceOf(117), 2_000_000, "成員帳本淨額 = 上游 users.quota");
+  // ② 我方帐本（余额权威）：两条腿同事务入帐，增量与上游逐位相同。
+  assert.equal(ledger.balanceOf(40), 3_000_000, "主帐帐本净额 = 上游 users.quota");
+  assert.equal(ledger.balanceOf(117), 2_000_000, "成员帐本净额 = 上游 users.quota");
   const out = ledger.rows.find((row) => row.entry_type === "transfer_out");
   const incoming = ledger.rows.find((row) => row.entry_type === "transfer_in");
   assert.equal(out?.amount, -2_000_000);
@@ -831,9 +831,9 @@ test("B1 分配（真轉移）雙寫：我方帳本主帳 −Δ／成員 +Δ，�
   assert.equal(incoming?.source_ref, "transfer:transfer-1");
 });
 
-// ── 變更探針（源碼守門：只算探針，不計入已驗證） ──────────────────────────
+// ── 变更探针（源码守门：只算探针，不计入已验证） ──────────────────────────
 
-test("變更探針：本模組對 account_ledger 只有 INSERT（append-only，無 UPDATE/DELETE）", () => {
+test("变更探针：本模组对 account_ledger 只有 INSERT（append-only，无 UPDATE/DELETE）", () => {
   const source = readFileSync(join(process.cwd(), "src/lib/generation-core/account-ledger.ts"), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
@@ -842,9 +842,9 @@ test("變更探針：本模組對 account_ledger 只有 INSERT（append-only，�
   assert.match(source, /INSERT INTO account_ledger/);
 });
 
-test("變更探針：migration 020 建表帶 UNIQUE(idempotency_ref) 與 append-only 註釋", () => {
+test("变更探针：migration 020 建表带 UNIQUE(idempotency_ref) 与 append-only 注释", () => {
   const ddl = readFileSync(join(process.cwd(), "db/migrations/020_account_ledger.sql"), "utf8");
   assert.match(ddl, /CREATE TABLE IF NOT EXISTS account_ledger/);
   assert.match(ddl, /idempotency_ref text NOT NULL UNIQUE/);
-  assert.match(ddl, /只允許 INSERT/);
+  assert.match(ddl, /只允许 INSERT/);
 });

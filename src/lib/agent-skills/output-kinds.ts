@@ -1,15 +1,15 @@
 /**
- * 技能交付型別的標籤真源（2026-09-27 立）。
+ * 技能交付型别的标签真源（2026-09-27 立）。
  *
- * 為什麼單獨成檔：這組詞同時被三個面消費——表單下拉（`MySkillsDialog`，client）、
- * 技能庫列表頁（`/skills`，server）、單技能頁（`/skills/[id]`，server）。
- * 放在任一消費檔裡都會逼另一邊複製一份同義詞，或讓 server 端去讀 client 模組
- * （`"use client"` 的匯出在 server 元件裡只是 reference 代理，**不是資料**）。
- * 本檔零依賴、可在任一邊直接讀。
+ * 为什么单独成档：这组词同时被三个面消费——表单下拉（`MySkillsDialog`，client）、
+ * 技能库列表页（`/skills`，server）、单技能页（`/skills/[id]`，server）。
+ * 放在任一消费档里都会逼另一边复制一份同义词，或让 server 端去读 client 模组
+ * （`"use client"` 的汇出在 server 元件里只是 reference 代理，**不是资料**）。
+ * 本档零依赖、可在任一边直接读。
  */
 import type { AgentSkillOutputKind } from "./types";
 
-/** 權威枚舉順序即下拉順序；`id` 必須與 `AgentSkillOutputKind` 逐一對齊。 */
+/** 权威枚举顺序即下拉顺序；`id` 必须与 `AgentSkillOutputKind` 逐一对齐。 */
 export const SKILL_OUTPUT_KIND_OPTIONS: readonly { id: AgentSkillOutputKind; label: string }[] = [
   { id: "image", label: "图像" },
   { id: "text", label: "文本" },
@@ -19,7 +19,7 @@ export const SKILL_OUTPUT_KIND_OPTIONS: readonly { id: AgentSkillOutputKind; lab
   { id: "mixed", label: "混合" },
 ] as const;
 
-/** 同組詞的查表形態（列表徽章／詳情頁直接取用）。 */
+/** 同组词的查表形态（列表徽章／详情页直接取用）。 */
 export const OUTPUT_KIND_LABELS: Record<AgentSkillOutputKind, string> = Object.fromEntries(
   SKILL_OUTPUT_KIND_OPTIONS.map((option) => [option.id, option.label]),
 ) as Record<AgentSkillOutputKind, string>;

@@ -1,9 +1,9 @@
-// refactor-audit.ts — 無損重構機械等價審計
+// refactor-audit.ts — 无损重构机械等价审计
 // 用法：bun run refactor-audit.ts <baseline.ts> <newIndex.ts> [module2.ts module3.ts ...]
-// 原理：基線檔 vs {新 index.ts + 全部新模組} 的「語義行多重集」必須完全相等。
-// 語義行 = 剝離註釋行後，去掉行首 `export ` 前綴、去掉 import 語句（跨模組補線）、
-// 去掉純 import 相關的新增行。任何缺失/多出的邏輯行都會被列出。
-// 白名單（顯式登記的等價改寫，例如整合時剝掉冗餘 import）以 exact-line 形式登記。
+// 原理：基线档 vs {新 index.ts + 全部新模组} 的「语义行多重集」必须完全相等。
+// 语义行 = 剥离注释行后，去掉行首 `export ` 前缀、去掉 import 语句（跨模组补线）、
+// 去掉纯 import 相关的新增行。任何缺失/多出的逻辑行都会被列出。
+// 白名单（显式登记的等价改写，例如整合时剥掉冗余 import）以 exact-line 形式登记。
 
 import { readFileSync } from "node:fs";
 
@@ -14,8 +14,8 @@ if (args.length < 2) {
 }
 
 const WHITELIST_MISSING: string[] = [
-  // 登記基線中有、新集合中「允許」沒有的行（整行 trim 後精確匹配）。
-  // 僅用於：基線 import 語句被整併、已宣佈的等價改寫。逐條附理由註釋。
+  // 登记基线中有、新集合中「允许」没有的行（整行 trim 后精确匹配）。
+  // 仅用于：基线 import 语句被整并、已宣布的等价改写。逐条附理由注释。
 ];
 
 function semanticLines(path: string): { lines: string[]; count: number } {
@@ -26,7 +26,7 @@ function semanticLines(path: string): { lines: string[]; count: number } {
     const trimmed = line.trim();
     if (trimmed === "") continue;
     if (trimmed.startsWith("//")) continue;
-    // 多行 import 塊：從 `import {` 起整塊跳過（跨模組補線，非語義行）
+    // 多行 import 块：从 `import {` 起整块跳过（跨模组补线，非语义行）
     if (inImport) {
       if (/from\s+["'][^"']+["']\s*;?\s*$/.test(trimmed)) inImport = false;
       continue;
@@ -35,9 +35,9 @@ function semanticLines(path: string): { lines: string[]; count: number } {
       if (/\{\s*$/.test(trimmed) && !/from\s+["'][^"']+["']/.test(trimmed)) inImport = true;
       continue;
     }
-    // 再導出行（組合根橋接）：export { X } from "./y.ts" / export * from ...
+    // 再导出行（组合根桥接）：export { X } from "./y.ts" / export * from ...
     if (/^export\s+(type\s*)?(\{[^}]*\}|\*)\s+from\s+["']/.test(trimmed)) continue;
-    // 剝離 export 前綴（函數/常量/型別搬到模組後補的關鍵字）
+    // 剥离 export 前缀（函数/常量/型别搬到模组后补的关键字）
     if (trimmed.startsWith("export ")) {
       line = trimmed.replace(/^export\s+(?=(const|let|var|function|async function|class|type|interface|enum|declare)\b)/, "");
     }
@@ -86,7 +86,7 @@ if (blocked) {
   console.log("\n=== EXTRA ===");
   for (const l of extra.slice(0, 80)) console.log(`  + ${l.slice(0, 160)}`);
   if (allowedMissing.length > 80 || extra.length > 80) console.log("  ... (truncated)");
-  console.log("\n[audit] FAIL — 行多重集不等價，重構非無損");
+  console.log("\n[audit] FAIL — 行多重集不等价，重构非无损");
   process.exit(1);
 }
-console.log("\n[audit] PASS — 行多重集完全等價（無損證明成立）");
+console.log("\n[audit] PASS — 行多重集完全等价（无损证明成立）");

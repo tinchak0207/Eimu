@@ -1,9 +1,9 @@
 <!--
-來源（輪子）: https://github.com/sunxiayi/make-blender-education-video-skill
-License: MIT · 原作者: sunxiayi · 僅內部使用
-入庫批次: 2026-09-06 對稱差擴容 W5（教育視頻全鏈）。
-Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
-正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
+来源（轮子）: https://github.com/sunxiayi/make-blender-education-video-skill
+License: MIT · 原作者: sunxiayi · 仅内部使用
+入库批次: 2026-09-06 对称差扩容 W5（教育视频全链）。
+Blender 5.2 雷区（仅 Blender 类配方适用）：① BLENDER_EEVEE_NEXT 已死，只认 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 为默认 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
+正文保留英文原文；MCP 调用表述执行时改走我方 bridge /v1/execute 同构协议。
 -->
 
 # Production Workflow

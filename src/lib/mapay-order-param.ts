@@ -1,18 +1,18 @@
-// mPay 訂單參數（我方自簽，把訂單綁到下單的那個用戶）。
+// mPay 订单参数（我方自签，把订单绑到下单的那个用户）。
 //
-// 形狀：`<planId>.<userId>.<HMAC 前 8 hex>`，如 `popular.253.1a2b3c4d`。
-// 為什麼要綁：舊格式 param 只有 planId，回調無從得知這筆錢屬於誰——兌現只能靠用戶
-// 回跳 /pricing 自動兌換碼。用戶付完直接關掉分頁（不回跳），錢已付、額度卻沒到帳。
-// 綁上 userId 後 notify 可以**直接入帳**（見 mapay-credit.ts），不再依賴用戶回跳；
-// 舊格式（未登入下單）一字不動地走原兌換碼流程。
-// 密鑰復用兩側（Vercel／控面）都有的 GENERATION_BILLING_RELAY_SECRET，以域前綴分隔。
+// 形状：`<planId>.<userId>.<HMAC 前 8 hex>`，如 `popular.253.1a2b3c4d`。
+// 为什么要绑：旧格式 param 只有 planId，回调无从得知这笔钱属于谁——兑现只能靠用户
+// 回跳 /pricing 自动兑换码。用户付完直接关掉分页（不回跳），钱已付、额度却没到帐。
+// 绑上 userId 后 notify 可以**直接入帐**（见 mapay-credit.ts），不再依赖用户回跳；
+// 旧格式（未登入下单）一字不动地走原兑换码流程。
+// 密钥复用两侧（Vercel／控面）都有的 GENERATION_BILLING_RELAY_SECRET，以域前缀分隔。
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-/** 簽名長度（hex 位數）。 */
+/** 签名长度（hex 位数）。 */
 const SIG_HEX = 8;
 
-/** 訂單參數的簽名前綴（改它等於讓新舊兩側互不認，屬破壞性變更）。 */
+/** 订单参数的签名前缀（改它等于让新旧两侧互不认，属破坏性变更）。 */
 const SIGNATURE_DOMAIN = "mapay-order";
 
 export function mapayOrderSecret(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -26,7 +26,7 @@ function sign(planId: string, userId: number, secret: string): string {
     .slice(0, SIG_HEX);
 }
 
-/** 已登入下單時寫進 mPay `param` 的三段值。 */
+/** 已登入下单时写进 mPay `param` 的三段值。 */
 export function buildMapayOrderParam(planId: string, userId: number, secret: string): string {
   return `${planId}.${userId}.${sign(planId, userId, secret)}`;
 }
@@ -37,14 +37,14 @@ export interface ParsedMapayOrderParam {
 }
 
 /**
- * 驗簽並還原 (planId, userId)；任何不合法（舊格式／畸形／簽名錯／篡改 userId）一律 null。
- * 回 null ＝ 呼叫方完全走舊流程（兌換碼）。
+ * 验签并还原 (planId, userId)；任何不合法（旧格式／畸形／签名错／篡改 userId）一律 null。
+ * 回 null ＝ 呼叫方完全走旧流程（兑换码）。
  */
 export function parseMapayOrderParam(
   param: string | null | undefined,
   secret: string,
 ): ParsedMapayOrderParam | null {
-  // planId 不含 "."（靜態檔 starter/popular/pro、自定義檔 custom:<coins>），從最後兩段切。
+  // planId 不含 "."（静态档 starter/popular/pro、自定义档 custom:<coins>），从最后两段切。
   const match = /^(.+)\.([0-9]{1,15})\.([0-9a-f]{8})$/.exec((param ?? "").trim());
   if (!match) return null;
 
@@ -60,8 +60,8 @@ export function parseMapayOrderParam(
 }
 
 /**
- * 回調／回跳側的統一入口：`param` → 綁定資訊。
- * **未綁一律 null**（舊格式、驗簽失敗、篡改、密鑰未配置）＝呼叫方完全走舊兌換碼流程。
+ * 回调／回跳侧的统一入口：`param` → 绑定资讯。
+ * **未绑一律 null**（旧格式、验签失败、篡改、密钥未配置）＝呼叫方完全走旧兑换码流程。
  */
 export function resolveMapayOrderBinding(
   param: string | null | undefined,

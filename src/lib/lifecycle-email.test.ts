@@ -20,14 +20,14 @@ import {
   type LifecycleTemplate,
 } from "@/lib/lifecycle-email";
 
-/** key_idle 候選的事實來源：key 建立時間、有沒有 biz job、有沒有退訂。 */
+/** key_idle 候选的事实来源：key 建立时间、有没有 biz job、有没有退订。 */
 type KeyIdleFixture = {
   recipient: LifecycleRecipient;
-  /** 第一把 biz key 建立的時間；null = 從沒建過 key。 */
+  /** 第一把 biz key 建立的时间；null = 从没建过 key。 */
   firstKeyAt: Date | null;
-  /** 該用戶有沒有任何 source=biz 的 job。 */
+  /** 该用户有没有任何 source=biz 的 job。 */
   hasBizJob?: boolean;
-  /** 有沒有退訂營銷郵件。 */
+  /** 有没有退订营销邮件。 */
   optedOut?: boolean;
 };
 
@@ -51,7 +51,7 @@ function fakeStore(
     async listDepletedCandidates() {
       return depleted.filter((r) => !log.has(`${r.userId}:depleted`));
     },
-    // 與生產 SQL 同一組閘門（讀 runLifecycleEmailsOnce 傳進來的 idleBefore，故 24h 常數受測）。
+    // 与生产 SQL 同一组闸门（读 runLifecycleEmailsOnce 传进来的 idleBefore，故 24h 常数受测）。
     async listKeyIdleCandidates(_limit, idleBefore) {
       keyIdleCutoff = idleBefore;
       return keyIdle
@@ -179,13 +179,13 @@ test("depleted: names images made and the cheapest plan, carries unsubscribe", a
   assert.ok(sent[0].html.includes("/pricing?utm_source=email"));
 });
 
-// ── key_idle：建了 key 卻零調用的召回（S7） ──
+// ── key_idle：建了 key 却零调用的召回（S7） ──
 
 const NOW = new Date("2026-09-28T00:00:00Z");
 const HOUR = 60 * 60_000;
 const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * HOUR);
 
-/** 預設合格：建 key 已 25h、無 biz job、未退訂、有已驗證 email。 */
+/** 预设合格：建 key 已 25h、无 biz job、未退订、有已验证 email。 */
 const eligible = (overrides: Partial<KeyIdleFixture> = {}): KeyIdleFixture => ({
   recipient: { userId: 61, email: "d@x.test" },
   firstKeyAt: hoursAgo(25),
@@ -207,53 +207,53 @@ async function runKeyIdle(fixtures: KeyIdleFixture[]) {
   return { ...state, sent, report };
 }
 
-test("key_idle: 沒建 key → 不發", async () => {
+test("key_idle: 没建 key → 不发", async () => {
   const { sent, report } = await runKeyIdle([eligible({ firstKeyAt: null })]);
   assert.equal(sent.length, 0);
   assert.equal(report.sent, 0);
 });
 
-test("key_idle: 建了未滿 24 小時 → 不發", async () => {
+test("key_idle: 建了未满 24 小时 → 不发", async () => {
   const { sent } = await runKeyIdle([eligible({ firstKeyAt: hoursAgo(23) })]);
   assert.equal(sent.length, 0);
 });
 
-test("key_idle: 已有 source=biz 的 job → 不發", async () => {
+test("key_idle: 已有 source=biz 的 job → 不发", async () => {
   const { sent } = await runKeyIdle([eligible({ hasBizJob: true })]);
   assert.equal(sent.length, 0);
 });
 
-test("key_idle: 已退訂營銷郵件 → 不發", async () => {
+test("key_idle: 已退订营销邮件 → 不发", async () => {
   const { sent } = await runKeyIdle([eligible({ optedOut: true })]);
   assert.equal(sent.length, 0);
 });
 
-test("key_idle: 四條件全滿足 → 發一封；curl 只放佔位符、CTA 指真路由、HTML 無 sk-", async () => {
+test("key_idle: 四条件全满足 → 发一封；curl 只放占位符、CTA 指真路由、HTML 无 sk-", async () => {
   const { sent, keyIdleCutoff } = await runKeyIdle([eligible()]);
-  assert.equal(keyIdleCutoff()?.getTime(), NOW.getTime() - KEY_IDLE_DELAY_MS, "24h 切點由生產常數提供");
+  assert.equal(keyIdleCutoff()?.getTime(), NOW.getTime() - KEY_IDLE_DELAY_MS, "24h 切点由生产常数提供");
   assert.equal(sent.length, 1);
   const mail = sent[0];
   assert.equal(mail.idempotencyKey, "key_idle:61:v1");
   assert.equal(mail.subject, "你的 API key 还没出过第一张图");
-  assert.ok(mail.html.includes(`Bearer ${KEY_IDLE_KEY_PLACEHOLDER}`), "key 位置只放 $EMU_API_KEY 佔位符");
+  assert.ok(mail.html.includes(`Bearer ${KEY_IDLE_KEY_PLACEHOLDER}`), "key 位置只放 $EMU_API_KEY 占位符");
   assert.ok(
     mail.html.includes("&quot;model&quot;:&quot;gpt-image-2&quot;"),
-    "curl 復用 dev-quickstart 的 gpt-image-2 範例（HTML 內引號已轉義）",
+    "curl 复用 dev-quickstart 的 gpt-image-2 范例（HTML 内引号已转义）",
   );
   assert.ok(
     mail.html.includes(`新人礼 ${WELCOME_GIFT_IMAGE_COUNT} 张可直接调用`),
-    "餘額字面取自 WELCOME_GIFT 常數",
+    "余额字面取自 WELCOME_GIFT 常数",
   );
   assert.ok(
     mail.html.includes(`${SITE}${KEY_IDLE_SETTINGS_PATH}?utm_source=email`),
-    "CTA 指向實際存在的 key 管理路由",
+    "CTA 指向实际存在的 key 管理路由",
   );
   assert.ok(mail.html.includes("一键退订"));
-  assert.equal(/sk-/.test(mail.html), false, "渲染出的 HTML 不含任何 sk- 開頭字串");
-  assert.ok(mail.headers?.["List-Unsubscribe"], "營銷信帶一鍵退訂 header");
+  assert.equal(/sk-/.test(mail.html), false, "渲染出的 HTML 不含任何 sk- 开头字串");
+  assert.ok(mail.headers?.["List-Unsubscribe"], "营销信带一键退订 header");
 });
 
-test("key_idle: 每人只發一次（email_send_log 冪等）", async () => {
+test("key_idle: 每人只发一次（email_send_log 幂等）", async () => {
   const { store, log } = fakeStore([], [], [], [eligible()]);
   const sent: EmailMessage[] = [];
   const send = async (m: EmailMessage) => (sent.push(m), { ok: true as const, id: "re_k" });
@@ -264,7 +264,7 @@ test("key_idle: 每人只發一次（email_send_log 冪等）", async () => {
   assert.deepEqual(log.get("61:key_idle"), { status: "sent", detail: "re_k" });
 });
 
-test("key_idle 候選 SQL：24h 切點、零 source=biz、未退訂、一次性（變更探針）", async () => {
+test("key_idle 候选 SQL：24h 切点、零 source=biz、未退订、一次性（变更探针）", async () => {
   const queries: string[] = [];
   const values: unknown[][] = [];
   const tagged = (async (strings: TemplateStringsArray, ...v: unknown[]) => {
@@ -274,14 +274,14 @@ test("key_idle 候選 SQL：24h 切點、零 source=biz、未退訂、一次性�
   }) as unknown as GenerationSql;
   await createPostgresLifecycleEmailStore(tagged).listKeyIdleCandidates(20, new Date("2026-09-27T00:00:00.000Z"));
   const query = queries.find((q) => q.includes("source = 'biz'")) ?? "";
-  assert.ok(query.includes("FROM biz_api_key"), "以 biz_api_key 判定建 key 時間");
+  assert.ok(query.includes("FROM biz_api_key"), "以 biz_api_key 判定建 key 时间");
   assert.ok(query.includes("min(created_at)"), "第一把 key = 最早 created_at");
-  assert.ok(query.includes("l.template = 'key_idle'"), "一次性由 email_send_log 保證");
-  assert.ok(query.includes("marketing_opt_out"), "退訂者剔除");
-  assert.ok(query.includes("j.api_key_id"), "biz job 以 api_key_id 歸屬到用戶");
+  assert.ok(query.includes("l.template = 'key_idle'"), "一次性由 email_send_log 保证");
+  assert.ok(query.includes("marketing_opt_out"), "退订者剔除");
+  assert.ok(query.includes("j.api_key_id"), "biz job 以 api_key_id 归属到用户");
 });
 
-test("key_idle: 渲染 HTML 全域不含 sk- 字串（直接渲染，不經 store）", () => {
+test("key_idle: 渲染 HTML 全域不含 sk- 字串（直接渲染，不经 store）", () => {
   const { subject, html } = renderLifecycleEmail("key_idle", { siteUrl: SITE, unsubscribeUrl: `${SITE}/u` });
   assert.equal(/sk-/.test(subject + html), false);
   assert.ok(html.includes(KEY_IDLE_KEY_PLACEHOLDER));

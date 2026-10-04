@@ -1,9 +1,9 @@
 // SVG 字串 → data:image/svg+xml;base64 data URL。
 //
-// 導演台小卡（聊天 AgentDirectorCard + 畫布 Director 節點）共用：gateway 下發的
-// 示意圖是 <svg …> 原文字串，禁止 dangerouslySetInnerHTML，統一轉成 <img src>。
-// UTF-8 安全編碼（btoa 只吃 Latin1，先過 TextEncoder），分塊拼 binary 字串
-// 避免 spread 撞引數上限；輸入不似 <svg> 開頭或編碼環境缺失時回 null。
+// 导演台小卡（聊天 AgentDirectorCard + 画布 Director 节点）共用：gateway 下发的
+// 示意图是 <svg …> 原文字串，禁止 dangerouslySetInnerHTML，统一转成 <img src>。
+// UTF-8 安全编码（btoa 只吃 Latin1，先过 TextEncoder），分块拼 binary 字串
+// 避免 spread 撞引数上限；输入不似 <svg> 开头或编码环境缺失时回 null。
 
 export function svgToDataUrl(svg: string | undefined | null): string | null {
   if (typeof svg !== "string") return null;

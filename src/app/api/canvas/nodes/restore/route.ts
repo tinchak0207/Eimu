@@ -1,18 +1,18 @@
-// 批量恢復軟刪節點：POST /api/canvas/nodes/restore
+// 批量恢复软删节点：POST /api/canvas/nodes/restore
 // body: { projectId: string; ids: string[] }
 //
-// 軟刪（delete_nodes / UI 刪除）把節點收進 `nodes[].deletedAt`，本端點清掉該標記
-// 即恢復。語義：
-//   - ids 空＝不恢復任何節點（不製造「靜默全還原」）
-//   - 只認專案裡真的存在的節點，猜不中的 id 忽略（不捏造節點）
-//   - 全都不存在 → 404，不寫空更新
+// 软删（delete_nodes / UI 删除）把节点收进 `nodes[].deletedAt`，本端点清掉该标记
+// 即恢复。语义：
+//   - ids 空＝不恢复任何节点（不制造「静默全还原」）
+//   - 只认专案里真的存在的节点，猜不中的 id 忽略（不捏造节点）
+//   - 全都不存在 → 404，不写空更新
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });

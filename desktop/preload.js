@@ -1,23 +1,23 @@
 // desktop/preload.js
 //
-// 以 contextBridge 暴露兩組「極窄」能力給 www.eimu.dev 頁面：
+// 以 contextBridge 暴露两组「极窄」能力给 www.eimu.dev 页面：
 //
-//   1. window.eimuLocal（W3／W6c）：本機媒體能力（5 個），加上 device bridge
+//   1. window.eimuLocal（W3／W6c）：本机媒体能力（5 个），加上 device bridge
 //      的使用者面（authorizedRoots / bridge.{status,enable,disable} / onBridgeStatus）。
-//      每個方法各自對應一個固定 eimu-local:* channel，逐一白名單、無通用 invoke。
-//      真正的安全判斷（origin / 路徑授權 / denylist / argv 白名單 / 啟停授權）
-//      全在主進程 local-worker.js，preload 不是信任邊界。
+//      每个方法各自对应一个固定 eimu-local:* channel，逐一白名单、无通用 invoke。
+//      真正的安全判断（origin / 路径授权 / denylist / argv 白名单 / 启停授权）
+//      全在主进程 local-worker.js，preload 不是信任边界。
 //
-//   2. window.eimuShell（0.3.0）：自繪視窗控制鈕。只暴露三個視窗動作
-//      （minimize / toggleMaximize / close）、一個狀態查詢 isMaximized，
-//      以及一個狀態訂閱 onMaximizeChange。titleBarOverlay 已移除，三顆鈕
-//      由頁面自繪；導航政策仍只允許 eimu.dev（見 main.js），這裡不放寬任何
-//      導航或檔案能力。
+//   2. window.eimuShell（0.3.0）：自绘视窗控制钮。只暴露三个视窗动作
+//      （minimize / toggleMaximize / close）、一个状态查询 isMaximized，
+//      以及一个状态订阅 onMaximizeChange。titleBarOverlay 已移除，三颗钮
+//      由页面自绘；导航政策仍只允许 eimu.dev（见 main.js），这里不放宽任何
+//      导航或档案能力。
 //
-// 安全邊界（兩組共同）：
-//   - 只暴露具名方法，各自對應一個固定 ipc channel。
+// 安全边界（两组共同）：
+//   - 只暴露具名方法，各自对应一个固定 ipc channel。
 //   - 不暴露 ipcRenderer、exec/spawn/shell、fs、任何通用 invoke。
-//   - contextIsolation 保持開啟；本檔在隔離的 preload world 執行。
+//   - contextIsolation 保持开启；本档在隔离的 preload world 执行。
 
 "use strict";
 
@@ -29,7 +29,7 @@ const CHANNELS = {
   probe: "eimu-local:probe",
   extractFrames: "eimu-local:extract-frames",
   transcode: "eimu-local:transcode",
-  // W6c：device bridge（本機檔案授權）——四個 invoke + 一個 event，逐一明列。
+  // W6c：device bridge（本机档案授权）——四个 invoke + 一个 event，逐一明列。
   authorizedRoots: "eimu-local:authorized-roots",
   bridgeStatus: "eimu-local:bridge-status",
   bridgeEnable: "eimu-local:bridge-enable",
@@ -39,16 +39,16 @@ const CHANNELS = {
 };
 
 /**
- * 呼叫主進程，並把結構化信封還原成值或擲出 Error。
- * 主進程成功回 { ok:true, value }，失敗回 { ok:false, code, message }。
- * code 同時編進 message 前綴（contextBridge 穿越時自訂屬性可能被丟棄，
- * 消費端請一律解析 message 前綴，或讀 err.code）。
+ * 呼叫主进程，并把结构化信封还原成值或掷出 Error。
+ * 主进程成功回 { ok:true, value }，失败回 { ok:false, code, message }。
+ * code 同时编进 message 前缀（contextBridge 穿越时自订属性可能被丢弃，
+ * 消费端请一律解析 message 前缀，或读 err.code）。
  */
 async function call(channel, ...args) {
   const res = await ipcRenderer.invoke(channel, ...args);
   if (res && res.ok === true) return res.value;
   const code = (res && res.code) || "E_INTERNAL";
-  const message = (res && res.message) || "未知錯誤";
+  const message = (res && res.message) || "未知错误";
   const err = new Error(`${code}: ${message}`);
   err.name = "EimuLocalError";
   err.code = code;
@@ -56,41 +56,41 @@ async function call(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld("eimuLocal", {
-  // 探測本機 ffmpeg 是否可用。
+  // 探测本机 ffmpeg 是否可用。
   capabilities: () => call(CHANNELS.capabilities),
 
-  // 開原生挑檔對話框；只有使用者主動挑選的路徑才會被主進程授權。
+  // 开原生挑档对话框；只有使用者主动挑选的路径才会被主进程授权。
   // opts: { kind?: 'files'|'directory', multiple?: boolean, filters?: [{name,extensions}] }
   pickFiles: (opts) => call(CHANNELS.pickFiles, opts && typeof opts === "object" ? opts : {}),
 
-  // 讀取已授權檔案的媒體資訊（ffprobe）。
+  // 读取已授权档案的媒体资讯（ffprobe）。
   probe: (filePath) => call(CHANNELS.probe, String(filePath)),
 
-  // 抽關鍵幀到主進程管理的輸出目錄。
+  // 抽关键帧到主进程管理的输出目录。
   // plan: { count?: number, timesSec?: number[], maxWidth?: number }
   extractFrames: (filePath, plan) =>
     call(CHANNELS.extractFrames, String(filePath), plan && typeof plan === "object" ? plan : null),
 
-  // 轉碼（本機 ffmpeg），回傳輸出檔絕對路徑。
+  // 转码（本机 ffmpeg），回传输出档绝对路径。
   // opts: { format?, videoCodec?, preset?, crf?, audioCodec?, audioBitrateKbps?, maxWidth?, maxHeight?, copy?, faststart?, outputPath?, timeoutMs? }
   transcode: (filePath, opts) =>
     call(CHANNELS.transcode, String(filePath), opts && typeof opts === "object" ? opts : {}),
 
-  // W6c：目前已授權的根目錄（絕對路徑 realpath）。由 pickFiles 累積。
+  // W6c：目前已授权的根目录（绝对路径 realpath）。由 pickFiles 累积。
   authorizedRoots: () => call(CHANNELS.authorizedRoots),
 
-  // W6c：device bridge（讓雲端 agent 讀本機**已授權**檔案）。具名方法各自對應
-  // 一個固定 channel；真正的啟停與授權判斷在主進程 local-worker.js／main.js。
-  // 契約：status/enable/disable/setMode 皆回 { enabled, state, roots, deviceId, mode, lastError? }。
+  // W6c：device bridge（让云端 agent 读本机**已授权**档案）。具名方法各自对应
+  // 一个固定 channel；真正的启停与授权判断在主进程 local-worker.js／main.js。
+  // 契约：status/enable/disable/setMode 皆回 { enabled, state, roots, deviceId, mode, lastError? }。
   bridge: {
     status: () => call(CHANNELS.bridgeStatus),
     enable: () => call(CHANNELS.bridgeEnable),
     disable: () => call(CHANNELS.bridgeDisable),
-    // W6c：設定權限模式（"off"|"ask"|"auto"|"full"）。非法值由主進程回 E_BAD_ARGS。
+    // W6c：设定权限模式（"off"|"ask"|"auto"|"full"）。非法值由主进程回 E_BAD_ARGS。
     setMode: (mode) => call(CHANNELS.bridgeSetMode, typeof mode === "string" ? mode : ""),
   },
 
-  // W6c：訂閱 bridge 狀態變化，回傳取消訂閱函式（比照 eimuShell.onMaximizeChange）。
+  // W6c：订阅 bridge 状态变化，回传取消订阅函式（比照 eimuShell.onMaximizeChange）。
   onBridgeStatus: (cb) => {
     if (typeof cb !== "function") return () => {};
     const listener = (_event, payload) => cb(payload && typeof payload === "object" ? payload : {});
@@ -99,8 +99,8 @@ contextBridge.exposeInMainWorld("eimuLocal", {
   },
 });
 
-// 0.3.0：自繪視窗控制鈕。只做視窗動作與狀態查詢，不接受任何目標視窗參數
-// （目標由主進程以 event.sender 反查，見 window-controls.js）。
+// 0.3.0：自绘视窗控制钮。只做视窗动作与状态查询，不接受任何目标视窗参数
+// （目标由主进程以 event.sender 反查，见 window-controls.js）。
 const SHELL_CHANNELS = {
   minimize: "eimu-shell:minimize",
   toggleMaximize: "eimu-shell:toggle-maximize",
@@ -112,7 +112,7 @@ const SHELL_CHANNELS = {
 };
 
 contextBridge.exposeInMainWorld("eimuShell", {
-  // 讓頁面可依平台微調控制鈕擺位（macOS 左上、其餘右上）。
+  // 让页面可依平台微调控制钮摆位（macOS 左上、其余右上）。
   platform: process.platform,
 
   minimize: () => ipcRenderer.send(SHELL_CHANNELS.minimize),
@@ -120,7 +120,7 @@ contextBridge.exposeInMainWorld("eimuShell", {
   close: () => ipcRenderer.send(SHELL_CHANNELS.close),
   isMaximized: () => ipcRenderer.invoke(SHELL_CHANNELS.isMaximized),
 
-  // 訂閱最大化狀態變化，回傳取消訂閱函式（供 React effect cleanup 用）。
+  // 订阅最大化状态变化，回传取消订阅函式（供 React effect cleanup 用）。
   onMaximizeChange: (cb) => {
     if (typeof cb !== "function") return () => {};
     const listener = (_event, payload) =>
@@ -129,8 +129,8 @@ contextBridge.exposeInMainWorld("eimuShell", {
     return () => ipcRenderer.removeListener(SHELL_CHANNELS.state, listener);
   },
 
-  // 0.3.2：自動更新。訂閱「更新已下載、待重啟套用」，回傳取消訂閱函式
-  // （比照 onMaximizeChange）。payload 為 { version }。
+  // 0.3.2：自动更新。订阅「更新已下载、待重启套用」，回传取消订阅函式
+  // （比照 onMaximizeChange）。payload 为 { version }。
   onUpdateReady: (cb) => {
     if (typeof cb !== "function") return () => {};
     const listener = (_event, payload) =>
@@ -139,6 +139,6 @@ contextBridge.exposeInMainWorld("eimuShell", {
     return () => ipcRenderer.removeListener(SHELL_CHANNELS.updateReady, listener);
   },
 
-  // 0.3.2：套用已下載的更新並重啟（主進程 updater.js applyUpdate）。
+  // 0.3.2：套用已下载的更新并重启（主进程 updater.js applyUpdate）。
   applyUpdate: () => ipcRenderer.send(SHELL_CHANNELS.applyUpdate),
 });

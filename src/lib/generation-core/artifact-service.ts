@@ -28,8 +28,8 @@ export type ArtifactRole = "reference" | "output";
 export interface ValidatedImage {
   mimeType: string;
   /**
-   * 實測尺寸；probe 缺失時為 null（G4：成片導出的 probe 可能失敗）。
-   * **禁止用 0 冒充**——`artifact.width/height` 是對外投影欄，寫 0 = 編造實測值。
+   * 实测尺寸；probe 缺失时为 null（G4：成片导出的 probe 可能失败）。
+   * **禁止用 0 冒充**——`artifact.width/height` 是对外投影栏，写 0 = 编造实测值。
    */
   width: number | null;
   height: number | null;
@@ -61,7 +61,7 @@ export interface PersistedOutputArtifact {
   deliveryUrl: string;
   validated: ValidatedImage;
   byteSize: number;
-  /** false = canonical 行早已存在（重放/晚到），呼叫端不得重複遞增 completed_count。 */
+  /** false = canonical 行早已存在（重放/晚到），呼叫端不得重复递增 completed_count。 */
   inserted: boolean;
 }
 
@@ -206,10 +206,10 @@ function detectVideoMimeType(buffer: Buffer): string | null {
 }
 
 /**
- * 音頻魔數嗅探（AV 成片鏈路的 TTS 輸出）：
- *   - mp3：ID3 標頭或 MPEG 幀同步（0xFF Ex/Fx）。
+ * 音频魔数嗅探（AV 成片链路的 TTS 输出）：
+ *   - mp3：ID3 标头或 MPEG 帧同步（0xFF Ex/Fx）。
  *   - wav：RIFF 容器 + "WAVE"。
- *   - ogg："OggS" 頁首。
+ *   - ogg："OggS" 页首。
  *   - m4a：MP4 容器的 "ftyp" at offset 4。
  */
 export function detectAudioMimeType(buffer: Buffer): string | null {
@@ -289,21 +289,21 @@ export function validateAndDescribeBase64Image(base64: string, maxBytes: number)
 export interface RecordedArtifact {
   id: string;
   /**
-   * false = 該 (job_id, output_index) 已有 canonical 行（晚到/重放的同一輸出）。
-   * 呼叫端據此決定是否遞增 completed_count（INC-0831 對帳閉環的冪等閘）。
+   * false = 该 (job_id, output_index) 已有 canonical 行（晚到/重放的同一输出）。
+   * 呼叫端据此决定是否递增 completed_count（INC-0831 对帐闭环的幂等闸）。
    */
   inserted: boolean;
 }
 
 /**
- * 把校驗结果写进 `artifact` 表。輸出 artifact 以 (job_id, output_index) 為冪等鍵
- * （016_provider_reconciliation.sql 的 partial unique index）：同一輸出無論 worker
- * 先到還是 provider reconciliation 晚到，永遠只有一行 canonical，重放一律
- * DO NOTHING 並返回既有行 id。
+ * 把校验结果写进 `artifact` 表。输出 artifact 以 (job_id, output_index) 为幂等键
+ * （016_provider_reconciliation.sql 的 partial unique index）：同一输出无论 worker
+ * 先到还是 provider reconciliation 晚到，永远只有一行 canonical，重放一律
+ * DO NOTHING 并返回既有行 id。
  */
 export async function recordArtifact(
   input: RecordArtifactInput,
-  // 事務內呼叫（G4 成片索引：job+artifact 同事務）傳 tx；不傳則用進程級連線。
+  // 事务内呼叫（G4 成片索引：job+artifact 同事务）传 tx；不传则用进程级连线。
   sql: GenerationSql | postgres.TransactionSql = getGenerationSql(),
 ): Promise<RecordedArtifact> {
   const id = randomUUID();
@@ -346,23 +346,23 @@ function extensionForMimeType(mimeType: string): string {
 }
 
 /**
- * 平台把上游結果抓回本地校驗／落庫時的單檔硬上限。
- * 原為 `outputBuffer` 內兩處散落的 magic number（2026-09-29 P1-4 抽出成具名常數）：
- * 高階檔位（4K 超分）的產物體積上限必須由**同一條**真源判定，不能各處各寫一份。
+ * 平台把上游结果抓回本地校验／落库时的单档硬上限。
+ * 原为 `outputBuffer` 内两处散落的 magic number（2026-09-29 P1-4 抽出成具名常数）：
+ * 高阶档位（4K 超分）的产物体积上限必须由**同一条**真源判定，不能各处各写一份。
  */
 export const ARTIFACT_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
- * 「上游回 URL」抓回產物的時間上限。原為單一 `AbortSignal.timeout(30_000)`
- * （連線＋主體讀取共用 30s），對 4K 級產物（~18MB）明顯過短：2026-10-01 yyds
- * 4K 事故即上游已生成、我方卻在讀取階段逾時（`env:yyds` network timeout 55.6s）。
- * 改為兩段式：標頭階段固定上限，主體階段依 Content-Length 分級放大，且**硬上界**。
+ * 「上游回 URL」抓回产物的时间上限。原为单一 `AbortSignal.timeout(30_000)`
+ * （连线＋主体读取共用 30s），对 4K 级产物（~18MB）明显过短：2026-10-01 yyds
+ * 4K 事故即上游已生成、我方却在读取阶段逾时（`env:yyds` network timeout 55.6s）。
+ * 改为两段式：标头阶段固定上限，主体阶段依 Content-Length 分级放大，且**硬上界**。
  */
-/** 連線與標頭階段的固定上限（毫秒）。 */
+/** 连线与标头阶段的固定上限（毫秒）。 */
 export const ARTIFACT_DOWNLOAD_HEADER_TIMEOUT_MS = 30_000;
-/** 主體讀取時對上游要求的最低吞吐（位元組/秒）；用於依 Content-Length 放大時限。 */
+/** 主体读取时对上游要求的最低吞吐（位元组/秒）；用于依 Content-Length 放大时限。 */
 export const ARTIFACT_DOWNLOAD_MIN_BYTES_PER_SECOND = 256 * 1024;
-/** 主體讀取時限的硬上界（毫秒）：任何情況都不得超過，禁止無上限等待。 */
+/** 主体读取时限的硬上界（毫秒）：任何情况都不得超过，禁止无上限等待。 */
 export const ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS = 180_000;
 
 export interface ArtifactDownloadTimeouts {
@@ -378,8 +378,8 @@ export const DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS: ArtifactDownloadTimeouts = {
 };
 
 /**
- * 依 Content-Length 求主體讀取上限：未知大小（chunked）時用硬上界，仍具上界；
- * 小檔不放大（下限＝標頭上限），大檔按 minBytesPerSecond 線性放大到硬上界為止。
+ * 依 Content-Length 求主体读取上限：未知大小（chunked）时用硬上界，仍具上界；
+ * 小档不放大（下限＝标头上限），大档按 minBytesPerSecond 线性放大到硬上界为止。
  */
 export function artifactBodyTimeoutMs(
   contentLength: number,
@@ -390,7 +390,7 @@ export function artifactBodyTimeoutMs(
   return Math.min(config.maxTimeoutMs, Math.max(config.headerTimeoutMs, scaled));
 }
 
-/** 抓回「上游回 URL」的產物；失敗一律具名拋出，絕不以空／截斷的成功回應收場。 */
+/** 抓回「上游回 URL」的产物；失败一律具名抛出，绝不以空／截断的成功回应收场。 */
 export async function outputBuffer(
   input: { base64: string | null; url: string | null },
   timeouts: ArtifactDownloadTimeouts = DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS,

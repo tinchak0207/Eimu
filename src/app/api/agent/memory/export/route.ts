@@ -1,12 +1,12 @@
-// GET /api/agent/memory/export —— 導出 active 記憶供 gateway 召回語料與共享索引（契約 §3.3 §3.4）。
+// GET /api/agent/memory/export —— 导出 active 记忆供 gateway 召回语料与共享索引（契约 §3.3 §3.4）。
 //
-// 驗簽沿用同套 HMAC：GET 沒有 body → 對「空 bytes」驗簽（memory-hmac.ts 檔頭已載明，
-// gateway 端同算法）。query：`scope=shared|private`，private 另帶 `owner_key=<hex>`；
-// scope 缺省／非法由 store 歸一化為 shared，private 缺 ownerKey 由 store 回空——
-// route 內不重複攔。只回 status="active"（listMemoryDocs 語義）。
+// 验签沿用同套 HMAC：GET 没有 body → 对「空 bytes」验签（memory-hmac.ts 档头已载明，
+// gateway 端同算法）。query：`scope=shared|private`，private 另带 `owner_key=<hex>`；
+// scope 缺省／非法由 store 归一化为 shared，private 缺 ownerKey 由 store 回空——
+// route 内不重复拦。只回 status="active"（listMemoryDocs 语义）。
 //
-// 響應形狀（契約 §3.3）：`{ "docs": [...], "index_md": "...", "generated_at": "ISO" }`。
-// gateway 側 TTL 快取 5 分鐘，故本端 no-store。
+// 响应形状（契约 §3.3）：`{ "docs": [...], "index_md": "...", "generated_at": "ISO" }`。
+// gateway 侧 TTL 快取 5 分钟，故本端 no-store。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -18,10 +18,10 @@ import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hma
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const raw = await req.arrayBuffer(); // GET 無 body → 空 bytes 驗簽
+  const raw = await req.arrayBuffer(); // GET 无 body → 空 bytes 验签
   if (!verifyMemorySignature(raw, req.headers.get(MEMORY_SIGNATURE_HEADER))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

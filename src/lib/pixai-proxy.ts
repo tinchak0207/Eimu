@@ -1,31 +1,31 @@
-// PixAI bridge 的服務端代理。
+// PixAI bridge 的服务端代理。
 //
-// 這個檔案與同目錄下的 4 個 /v1 路由曾經只存在於 VPS 上的 control plane，
-// 不在 repo 裡（2026-08-05 排障時發現）。後果有兩個：
-//   1. 從 repo 部署會直接刪掉生產上正在工作的 edits/upscale/templates
-//   2. 這些路由裡 `const coins = …` 算完從未使用 —— B 端改圖/放大/模板
-//      一直是免費的，賬對不上
-// 補回 repo 的同時把計費接上真實通道。
+// 这个档案与同目录下的 4 个 /v1 路由曾经只存在于 VPS 上的 control plane，
+// 不在 repo 里（2026-08-05 排障时发现）。后果有两个：
+//   1. 从 repo 部署会直接删掉生产上正在工作的 edits/upscale/templates
+//   2. 这些路由里 `const coins = …` 算完从未使用 —— B 端改图/放大/模板
+//      一直是免费的，账对不上
+// 补回 repo 的同时把计费接上真实通道。
 //
-// 2026-09-28（V-07）：扣退款已移出本檔——供給模組不碰錢。同步路由改呼叫生產平面
-// 門面 generation-core/sync-charge.ts（經 billing-ledger，留 billing_operation 列）。
-// 本檔只剩上游呼叫與錯誤體形狀。
+// 2026-09-28（V-07）：扣退款已移出本档——供给模组不碰钱。同步路由改呼叫生产平面
+// 门面 generation-core/sync-charge.ts（经 billing-ledger，留 billing_operation 列）。
+// 本档只剩上游呼叫与错误体形状。
 
 import { NextResponse } from "next/server";
 import { pixaiBridgeModelId } from "@/lib/pixai-model-map";
 import { withTraceId } from "@/lib/request-trace";
 
 /**
- * env 在函數內讀，不在模組頂層。
+ * env 在函数内读，不在模组顶层。
  *
- * 頂層讀取會把值凍結在模組載入那一刻：容器改了 env 但沒重啟、或測試想換
- * 配置，都會拿到過期值 —— 而症狀是「配置明明對的但 503」。
+ * 顶层读取会把值冻结在模组载入那一刻：容器改了 env 但没重启、或测试想换
+ * 配置，都会拿到过期值 —— 而症状是「配置明明对的但 503」。
  */
 function bridgeConfig(): { base: string; key: string } | null {
-  // 歸一到不含 /v1 的根，拼接處統一 `${base}/v1/${action}`。控制面 env 的
-  // PIXAI_BASE_URL 帶 /v1 後綴（lora 路由 `${base}/lora-models` 的慣例），
-  // 這裡曾直接再拼 /v1/ 造成 /v1/v1/ 雙字首 404 —— 改圖/放大/模板/上傳
-  // 全鏈死。strip 後綴讓兩種 env 寫法都正確。
+  // 归一到不含 /v1 的根，拼接处统一 `${base}/v1/${action}`。控制面 env 的
+  // PIXAI_BASE_URL 带 /v1 后缀（lora 路由 `${base}/lora-models` 的惯例），
+  // 这里曾直接再拼 /v1/ 造成 /v1/v1/ 双字首 404 —— 改图/放大/模板/上传
+  // 全链死。strip 后缀让两种 env 写法都正确。
   const base = process.env.PIXAI_BASE_URL?.trim().replace(/\/+$/, "").replace(/\/v1$/, "") ?? "";
   const key = process.env.PIXAI_API_KEY?.trim() ?? "";
   return base && key ? { base, key } : null;
@@ -61,11 +61,11 @@ export async function proxyPixai(
 }
 
 /**
- * 把公開模型名歸一成 bridge 認的名字。
+ * 把公开模型名归一成 bridge 认的名字。
  *
- * 未傳 model 時返回 undefined，交給 bridge 用它自己的默認模型；傳了但不認識
- * 的返回 null，讓路由回 400 —— 而不是把一個 bridge 不認的名字丟過去，
- * 換回一條「Unknown model」的上游錯誤讓客戶去猜。
+ * 未传 model 时返回 undefined，交给 bridge 用它自己的默认模型；传了但不认识
+ * 的返回 null，让路由回 400 —— 而不是把一个 bridge 不认的名字丢过去，
+ * 换回一条「Unknown model」的上游错误让客户去猜。
  */
 export function resolveBridgeModel(raw: unknown): string | null | undefined {
   if (typeof raw !== "string" || !raw.trim()) return undefined;
@@ -73,12 +73,12 @@ export function resolveBridgeModel(raw: unknown): string | null | undefined {
 }
 
 /**
- * 統一的錯誤體。
+ * 统一的错误体。
  *
- * 與 /v1/images/generations 的 errorResponse 逐字段對齊：同樣的
- * `{ error: { message, type, code, param, trace_id } }`。原本這邊少了
- * `param` 與 `trace_id`，客戶要按端點分兩套解析邏輯，報障時也給不出
- * 能跨層追的 id —— 而耐久路由那邊早就有了。
+ * 与 /v1/images/generations 的 errorResponse 逐字段对齐：同样的
+ * `{ error: { message, type, code, param, trace_id } }`。原本这边少了
+ * `param` 与 `trace_id`，客户要按端点分两套解析逻辑，报障时也给不出
+ * 能跨层追的 id —— 而耐久路由那边早就有了。
  */
 export function pixaiError(data: unknown, fallback: string, traceId?: string) {
   const d = data as { error?: { message?: string; code?: string; type?: string } } | null;
@@ -93,7 +93,7 @@ export function pixaiError(data: unknown, fallback: string, traceId?: string) {
   };
 }
 
-/** 請求參數錯誤。與耐久路由的 invalid_request_error 同形。 */
+/** 请求参数错误。与耐久路由的 invalid_request_error 同形。 */
 export function pixaiRequestError(message: string, code: string, traceId?: string) {
   return {
     error: {
@@ -107,8 +107,8 @@ export function pixaiRequestError(message: string, code: string, traceId?: strin
 }
 
 /**
- * 認證/限流錯誤。type 的映射與耐久路由一致：
- * 429 → rate_limit_error，403 → permission_error，其餘 → authentication_error。
+ * 认证/限流错误。type 的映射与耐久路由一致：
+ * 429 → rate_limit_error，403 → permission_error，其余 → authentication_error。
  */
 export function pixaiAuthError(
   status: number,
@@ -124,7 +124,7 @@ export function json(data: unknown, status: number, headers?: Record<string, str
   return NextResponse.json(data, { status, ...(headers ? { headers } : {}) });
 }
 
-/** 帶 trace id 的響應。同一個 id 同時進錯誤體與 X-Request-Id 頭。 */
+/** 带 trace id 的响应。同一个 id 同时进错误体与 X-Request-Id 头。 */
 export function jsonWithTrace(data: unknown, status: number, traceId: string, headers?: Record<string, string>) {
   return withTraceId(NextResponse.json(data, { status, ...(headers ? { headers } : {}) }), traceId);
 }

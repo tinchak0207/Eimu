@@ -1,17 +1,17 @@
-// 控制面側的 mPay 直達入帳端點（付款直接綁用戶加額，不再發兌換碼）。
+// 控制面侧的 mPay 直达入帐端点（付款直接绑用户加额，不再发兑换码）。
 //
 // 呼叫方：Vercel 上
-//   - /api/payments/mapay/notify（mPay 回調驗簽通過後直接入帳）
-//   - /api/payments/mapay/return（回跳頁只讀狀態，決定顯示「已到账」還是走舊兌換碼流程）
+//   - /api/payments/mapay/notify（mPay 回调验签通过后直接入帐）
+//   - /api/payments/mapay/return（回跳页只读状态，决定显示「已到账」还是走旧兑换码流程）
 //
-// 鑑權復用 biz-key-sync 的 HMAC 通道（signatureDomain "mapay-credit"），
-// 與 welcome-gift / user-attribution / newapi-session-token 同一骨架；不回顯任何內部錯誤細節。
+// 鉴权复用 biz-key-sync 的 HMAC 通道（signatureDomain "mapay-credit"），
+// 与 welcome-gift / user-attribution / newapi-session-token 同一骨架；不回显任何内部错误细节。
 //
-// 金額口徑一律由控面自己重算（planId → plans.ts），**不接受呼叫方傳來的額度**；
-// 上游調額不冪等，冪等鍵是 mPay 的 out_trade_no（mapay_credit 主鍵）。
+// 金额口径一律由控面自己重算（planId → plans.ts），**不接受呼叫方传来的额度**；
+// 上游调额不幂等，幂等键是 mPay 的 out_trade_no（mapay_credit 主键）。
 //
-// 首充专享档（plan id `first-charge`）的額度例外地不是標價函數：有資格才給 300 幣，
-// 資格不符按正價折算（見 src/lib/first-charge.ts 的 resolveFirstChargeGrant）。
+// 首充专享档（plan id `first-charge`）的额度例外地不是标价函数：有资格才给 300 币，
+// 资格不符按正价折算（见 src/lib/first-charge.ts 的 resolveFirstChargeGrant）。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -34,9 +34,9 @@ import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** 已佔位記錄 → 只讀回報用結果詞（applied 以外的狀態呼叫方不得再發一次）。 */
+/** 已占位记录 → 只读回报用结果词（applied 以外的状态呼叫方不得再发一次）。 */
 function outcomeOfStatus(status: string | null): MapayCreditOutcome {
   if (status === "applied") return "already_credited";
   if (status === "pending" || status === "unknown") return "in_flight";
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, message: "缺少合法的 orderId。" }, { status: 400 });
   }
 
-  // 只讀：回跳頁據此決定顯示「已到账」還是退回兌換碼流程。
+  // 只读：回跳页据此决定显示「已到账」还是退回兑换码流程。
   if (body?.op === "status") {
     try {
       const record = await createPostgresMapayCreditStore(getGenerationSql()).get(orderId);
@@ -98,9 +98,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, message: "缺少合法的 userId。" }, { status: 400 });
   }
   const planId = typeof body.planId === "string" ? body.planId.trim() : "";
-  // 席位訂單（`seat:` 前綴）：額度由 param 的 (team,tier,cycle,seats) 在同源價表重算
-  // （seats × 檔位含幣額 × QUOTA_PER_COIN），team 身分也以 param 為準——一律不接受
-  // 呼叫方傳來的額度；其餘維持既有 plan 解析（靜態檔 / custom:<coins> / 首充）。
+  // 席位订单（`seat:` 前缀）：额度由 param 的 (team,tier,cycle,seats) 在同源价表重算
+  // （seats × 档位含币额 × QUOTA_PER_COIN），team 身分也以 param 为准——一律不接受
+  // 呼叫方传来的额度；其余维持既有 plan 解析（静态档 / custom:<coins> / 首充）。
   const seatIdentity = parseSeatOrderParam(planId);
   if (seatIdentity && seatIdentity.teamUserId !== userId) {
     return NextResponse.json({ ok: false, message: "席位订单团队与调用方不一致。" }, { status: 400 });

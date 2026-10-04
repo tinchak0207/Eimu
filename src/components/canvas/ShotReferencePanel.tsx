@@ -1,16 +1,16 @@
 "use client";
 
-// ShotReferencePanel —— 「本镜参考素材」解析清單（生成前看得見本鏡實際帶上的參考素材）。
+// ShotReferencePanel —— 「本镜参考素材」解析清单（生成前看得见本镜实际带上的参考素材）。
 //
-// 定位：卡是項目級「鎖定配置」，token 是正文裡的「逐處引用」。本元件把兩者攤在同一塊：
-//   - source "token"：正文用 @ 就地引用的卡（本鏡真正點名的實體）
-//   - source "shot"：本鏡**已指定**的卡（來源＝節點 metadata 的卡 id 欄，非行內引用）
-//   - source "locked"：項目鎖定、但本鏡沒行內引用的卡（低對比灰——一眼看出漏引）
-//   - unresolvedTokens：解析不到對應卡的 token 原文（紅字警示，**不阻擋生成**——
-//     與 entity-tokens 的 fail-open 語義一致：未命中就原樣留在 prompt 裡）
+// 定位：卡是项目级「锁定配置」，token 是正文里的「逐处引用」。本元件把两者摊在同一块：
+//   - source "token"：正文用 @ 就地引用的卡（本镜真正点名的实体）
+//   - source "shot"：本镜**已指定**的卡（来源＝节点 metadata 的卡 id 栏，非行内引用）
+//   - source "locked"：项目锁定、但本镜没行内引用的卡（低对比灰——一眼看出漏引）
+//   - unresolvedTokens：解析不到对应卡的 token 原文（红字警示，**不阻挡生成**——
+//     与 entity-tokens 的 fail-open 语义一致：未命中就原样留在 prompt 里）
 //
-// 純展示：零 API、零 hook 副作用。條目與未解析清單由宿主用下列純函式推導（useMemo），
-// 本檔不讀 DOM、不發請求、不訂閱。
+// 纯展示：零 API、零 hook 副作用。条目与未解析清单由宿主用下列纯函式推导（useMemo），
+// 本档不读 DOM、不发请求、不订阅。
 
 import type { CharacterCardKind } from "@/lib/character-cards";
 import { parseEntityTokens, resolveEntityTokenKind, serializeEntityToken } from "@/lib/entity-tokens";
@@ -21,19 +21,19 @@ export interface ShotReferenceEntry {
   kindLabel: string; // 角色/场景/风格/道具
   name: string;
   previewUrl?: string;
-  /** token = 行內 @ 引用；shot = 本鏡已指定（metadata 卡 id 欄）；locked = 項目鎖定但本鏡沒引用。 */
+  /** token = 行内 @ 引用；shot = 本镜已指定（metadata 卡 id 栏）；locked = 项目锁定但本镜没引用。 */
   source: "token" | "locked" | "shot";
 }
 
 export interface ShotReferencePanelProps {
   entries: ShotReferenceEntry[];
-  /** 正文裡無法解析的 token 原文（紅字警示，不阻擋生成）。 */
+  /** 正文里无法解析的 token 原文（红字警示，不阻挡生成）。 */
   unresolvedTokens?: string[];
 }
 
 /**
- * 推導用的候選卡形狀——與 CanvasNodePromptPanel 的 `CanvasEntityCandidate` 同構。
- * 本檔刻意不回向 import 面板（避免元件互相 import 成環），改吃結構相容的窄型別。
+ * 推导用的候选卡形状——与 CanvasNodePromptPanel 的 `CanvasEntityCandidate` 同构。
+ * 本档刻意不回向 import 面板（避免元件互相 import 成环），改吃结构相容的窄型别。
  */
 export interface ShotReferenceCandidate {
   cardId: string;
@@ -49,14 +49,14 @@ export interface ShotReferenceDerivation {
 }
 
 /**
- * 純推導：正文 token × 可用候選卡 → 本鏡參考素材條目 + 未解析 token。
+ * 纯推导：正文 token × 可用候选卡 → 本镜参考素材条目 + 未解析 token。
  *
- * 語義：
- *   - token 命中（種類字可解析且同名同 kind 的卡在候選內）→ 一條 source "token"；
- *     同一張卡被引用多次只列一條（首次出現序）。
- *   - 候選卡未被任何 token 引用 → 一條 source "locked"（候選原序，排在 token 段之後）。
- *   - token 未命中（種類字未知 / 候選裡沒這張卡）→ 原始字串進 unresolvedTokens（去重）。
- *   - 純函式：不改輸入。
+ * 语义：
+ *   - token 命中（种类字可解析且同名同 kind 的卡在候选内）→ 一条 source "token"；
+ *     同一张卡被引用多次只列一条（首次出现序）。
+ *   - 候选卡未被任何 token 引用 → 一条 source "locked"（候选原序，排在 token 段之后）。
+ *   - token 未命中（种类字未知 / 候选里没这张卡）→ 原始字串进 unresolvedTokens（去重）。
+ *   - 纯函式：不改输入。
  */
 export function deriveShotReference(
   promptText: string,
@@ -99,7 +99,7 @@ export function deriveShotReference(
   return { entries, unresolvedTokens };
 }
 
-/** 純分組：條目按來源分三段（token → shot → locked，locked 永遠墊底）。 */
+/** 纯分组：条目按来源分三段（token → shot → locked，locked 永远垫底）。 */
 export function groupShotReferenceEntries(
   entries: readonly ShotReferenceEntry[],
 ): { token: ShotReferenceEntry[]; locked: ShotReferenceEntry[]; shot: ShotReferenceEntry[] } {
@@ -110,25 +110,25 @@ export function groupShotReferenceEntries(
   };
 }
 
-// ─────────────────────────── @ 選單候選列（純邏輯，DOM 無關）
+// ─────────────────────────── @ 选单候选列（纯逻辑，DOM 无关）
 
-/** @ 選單的攤平列：兩組候選共用同一個連續索引序列（↑↓ 跨組導航）。 */
+/** @ 选单的摊平列：两组候选共用同一个连续索引序列（↑↓ 跨组导航）。 */
 export interface MentionRow {
-  /** 攤平後的連續索引（跨組），鍵盤導航吃這個。 */
+  /** 摊平后的连续索引（跨组），键盘导航吃这个。 */
   index: number;
   group: "image" | "entity";
-  /** 在該組候選陣列中的下標（消費端用它取回原候選物件）。 */
+  /** 在该组候选阵列中的下标（消费端用它取回原候选物件）。 */
   sourceIndex: number;
 }
 
 /**
- * 純函式：把兩組候選攤平成一列（圖片組在前、素材卡組在後），並套用 query 過濾。
+ * 纯函式：把两组候选摊平成一列（图片组在前、素材卡组在后），并套用 query 过滤。
  *
- * 語義：
- *   - 過濾對兩組都生效：圖片比標題、素材卡比名稱（lowercase includes）。
- *   - 空 query（含純空白）＝不過濾，順序即「圖片組在前、素材卡組在後」。
- *   - 某組為空 → 該組不出列（消費端據此不渲染組標題，零空組）。
- *   - 兩組都沒命中 → 回空陣列（消費端據此關閉選單，維持既有行為）。
+ * 语义：
+ *   - 过滤对两组都生效：图片比标题、素材卡比名称（lowercase includes）。
+ *   - 空 query（含纯空白）＝不过滤，顺序即「图片组在前、素材卡组在后」。
+ *   - 某组为空 → 该组不出列（消费端据此不渲染组标题，零空组）。
+ *   - 两组都没命中 → 回空阵列（消费端据此关闭选单，维持既有行为）。
  */
 export function buildMentionRows(
   imageCandidates: readonly { title: string }[],
@@ -149,25 +149,25 @@ export function buildMentionRows(
   return rows;
 }
 
-// ─────────────────────────── chip 序列化分派（純函式，吃假 dataset）
+// ─────────────────────────── chip 序列化分派（纯函式，吃假 dataset）
 
-/** chip 序列化只看這幾個 data-* 欄位（純函式介面：測試可餵假物件）。 */
+/** chip 序列化只看这几个 data-* 栏位（纯函式介面：测试可喂假物件）。 */
 export interface ChipSerializationInput {
-  /** data-node-id：上游圖片 chip。 */
+  /** data-node-id：上游图片 chip。 */
   nodeId?: string;
-  /** data-card-id：素材卡 chip（有此欄即走 token 序列化）。 */
+  /** data-card-id：素材卡 chip（有此栏即走 token 序列化）。 */
   cardId?: string;
   /** data-card-kind：卡 kind 原文（"scene" / "角色" 皆可解析）。 */
   cardKind?: string;
-  /** data-title：顯示／引用用的全名（未被 CHIP_TITLE_MAX 截斷）。 */
+  /** data-title：显示／引用用的全名（未被 CHIP_TITLE_MAX 截断）。 */
   title?: string;
 }
 
 /**
- * 生成用 chip 序列化分派（純函式）：
- *   - 帶 `cardId` → `@[场景:雨夜街]`（種類字由 cardKind 正規化；認不出 → 角色）
- *   - 帶 `nodeId` → `@图片N`（N = 在 selectedIds 的序號 + 1；不在清單則退回 `@标题`）
- * 分派靠 `cardId` 判定（不是 class）——素材卡 chip 不會被誤編成 `@图片N`。
+ * 生成用 chip 序列化分派（纯函式）：
+ *   - 带 `cardId` → `@[场景:雨夜街]`（种类字由 cardKind 正规化；认不出 → 角色）
+ *   - 带 `nodeId` → `@图片N`（N = 在 selectedIds 的序号 + 1；不在清单则退回 `@标题`）
+ * 分派靠 `cardId` 判定（不是 class）——素材卡 chip 不会被误编成 `@图片N`。
  */
 export function serializeChipText(input: ChipSerializationInput, selectedIds: readonly string[]): string {
   if (input.cardId) {
@@ -184,8 +184,8 @@ export function serializeChipText(input: ChipSerializationInput, selectedIds: re
 // ─────────────────────────── 展示元件
 
 function ShotReferenceItem({ entry }: { entry: ShotReferenceEntry }) {
-  // 灰階 chip ＝「不是行內 @ 引用」的兩種來源（locked 未引用 / shot 已指定），
-  // 只有 token（本鏡真正行內點名）走有色 chip。
+  // 灰阶 chip ＝「不是行内 @ 引用」的两种来源（locked 未引用 / shot 已指定），
+  // 只有 token（本镜真正行内点名）走有色 chip。
   const muted = entry.source !== "token";
   return (
     <span
@@ -206,16 +206,16 @@ function ShotReferenceItem({ entry }: { entry: ShotReferenceEntry }) {
 }
 
 /**
- * 本镜参考素材清單（玻璃面板語彙沿用 CanvasNodePromptPanel 既有小卡片：
- * `border-t` 分隔 + `bg-black/5` 徽章 + `text-ios-caption2 text-foreground/45` 標題）。
- * 條目為空且無未解析 token → 整塊不渲染（零空殼）。
+ * 本镜参考素材清单（玻璃面板语汇沿用 CanvasNodePromptPanel 既有小卡片：
+ * `border-t` 分隔 + `bg-black/5` 徽章 + `text-ios-caption2 text-foreground/45` 标题）。
+ * 条目为空且无未解析 token → 整块不渲染（零空壳）。
  */
 export function ShotReferencePanel({ entries, unresolvedTokens = [] }: ShotReferencePanelProps) {
   if (entries.length === 0 && unresolvedTokens.length === 0) return null;
   const { token, locked, shot } = groupShotReferenceEntries(entries);
   return (
     <div className="border-t px-3 py-2" data-shot-reference-panel>
-      {/* 一行摘要（預設即可見）；條目區自身限高可捲，不撐高面板影響既有按鈕列 */}
+      {/* 一行摘要（预设即可见）；条目区自身限高可卷，不撑高面板影响既有按钮列 */}
       <p className="mb-1.5 text-ios-caption2 font-medium text-foreground/45">
         本镜参考素材 {entries.length}
       </p>

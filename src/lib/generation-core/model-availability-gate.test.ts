@@ -54,19 +54,19 @@ function failures(modelId: string, count: number, startMinutesAgo: number, overr
 
 const now = () => NOW;
 
-test("0/5 真實失敗 → unavailable；拒單訊息誠實且推薦同介質成功率最高的模型", async () => {
+test("0/5 真实失败 → unavailable；拒单讯息诚实且推荐同介质成功率最高的模型", async () => {
   __resetModelBreakerStateForTests();
   const rows = [
-    // 死模型：最後一次建單 5 分鐘前，半開窗口未到。
+    // 死模型：最后一次建单 5 分钟前，半开窗口未到。
     ...failures("gemini-3.1-flash-image", 5, 5),
-    // 同介質替代：gpt-image-2 3/4，pixai-tsubaki2 2/2（成功率更高）。
+    // 同介质替代：gpt-image-2 3/4，pixai-tsubaki2 2/2（成功率更高）。
     row("gpt-image-2", "succeeded", 20),
     row("gpt-image-2", "succeeded", 30),
     row("gpt-image-2", "succeeded", 40),
     row("gpt-image-2", "failed", 50),
     row("pixai-tsubaki2", "succeeded", 60),
     row("pixai-tsubaki2", "succeeded", 70),
-    // 不同介質的高成功率模型不得被推薦給圖像模型。
+    // 不同介质的高成功率模型不得被推荐给图像模型。
     row("seedream-video", "succeeded", 80, { kind: "video_generate" }),
   ];
   const { sql } = fakeSql(rows);
@@ -88,13 +88,13 @@ test("0/5 真實失敗 → unavailable；拒單訊息誠實且推薦同介質成
   assert.deepEqual(await checkModelAvailability("gpt-image-2", { sql, now, env: {} }), { allowed: true, probe: false });
 });
 
-test("user_input / cancelled 失敗不計入樣本：5 單用戶側失敗不熔斷", async () => {
+test("user_input / cancelled 失败不计入样本：5 单用户侧失败不熔断", async () => {
   __resetModelBreakerStateForTests();
   const rows = [
     ...failures("gpt-image-2", 3, 5, { failure_class: "user_input" }),
     ...failures("gpt-image-2", 2, 40, { status: "refunded", failure_class: "user_input" }),
     ...failures("gpt-image-2", 2, 60, { status: "cancelled", failure_class: "cancelled" }),
-    // 兩單真實失敗 < 5 樣本門檻。
+    // 两单真实失败 < 5 样本门槛。
     ...failures("gpt-image-2", 2, 100),
   ];
   const { sql } = fakeSql(rows);
@@ -102,11 +102,11 @@ test("user_input / cancelled 失敗不計入樣本：5 單用戶側失敗不熔�
   assert.deepEqual(await checkModelAvailability("gpt-image-2", { sql, now, env: {} }), { allowed: true, probe: false });
 });
 
-test("樣本 ≥10 且成功率 <20% → unavailable；恰 20% 不熔斷", async () => {
+test("样本 ≥10 且成功率 <20% → unavailable；恰 20% 不熔断", async () => {
   __resetModelBreakerStateForTests();
-  // 1/10：最近 9 單全失敗、最早一單成功。
+  // 1/10：最近 9 单全失败、最早一单成功。
   const low = [...failures("seedance-2.0", 9, 5, { kind: "video_generate" }), row("seedance-2.0", "succeeded", 200, { kind: "video_generate" })];
-  // 2/10：同樣最近一單失敗，成功在更早。
+  // 2/10：同样最近一单失败，成功在更早。
   const edge = [
     ...failures("seedance-2.0-fast", 8, 5, { kind: "video_generate" }),
     row("seedance-2.0-fast", "succeeded", 200, { kind: "video_generate" }),
@@ -118,15 +118,15 @@ test("樣本 ≥10 且成功率 <20% → unavailable；恰 20% 不熔斷", async
   assert.equal(unavailable.has("seedance-2.0-fast"), false);
 });
 
-test("72h 窗口外的失敗不計入", async () => {
+test("72h 窗口外的失败不计入", async () => {
   __resetModelBreakerStateForTests();
   const { sql } = fakeSql(failures("gemini-3.1-flash-image", 6, 73 * 60));
   assert.equal((await readUnavailableModels(sql, { now, env: {} })).size, 0);
 });
 
-test("半開：超過間隔放行恰 1 單試探，緊接的下一單仍被拒", async () => {
+test("半开：超过间隔放行恰 1 单试探，紧接的下一单仍被拒", async () => {
   __resetModelBreakerStateForTests();
-  // 最後一次建單在 31 分鐘前 → 半開窗口已到。
+  // 最后一次建单在 31 分钟前 → 半开窗口已到。
   const { sql } = fakeSql(failures("gemini-3.1-flash-image", 5, 31));
   const first = await checkModelAvailability("gemini-3.1-flash-image", { sql, now, env: {} });
   assert.deepEqual(first, { allowed: true, probe: true });
@@ -137,7 +137,7 @@ test("半開：超過間隔放行恰 1 單試探，緊接的下一單仍被拒",
     assert.equal(second.retryAfterSeconds, MODEL_BREAKER_HALF_OPEN_INTERVAL_MS / 1000);
   }
 
-  // 再過一個間隔 → 再放行 1 單。
+  // 再过一个间隔 → 再放行 1 单。
   const later = () => NOW + MODEL_BREAKER_HALF_OPEN_INTERVAL_MS;
   __resetModelBreakerStateForTests();
   const { sql: laterSql } = fakeSql(failures("gemini-3.1-flash-image", 5, 31));
@@ -147,7 +147,7 @@ test("半開：超過間隔放行恰 1 單試探，緊接的下一單仍被拒",
   });
 });
 
-test("試探單成功即恢復：最近一個計入終態成功 → available", async () => {
+test("试探单成功即恢复：最近一个计入终态成功 → available", async () => {
   __resetModelBreakerStateForTests();
   const rows = [row("gemini-3.1-flash-image", "succeeded", 2), ...failures("gemini-3.1-flash-image", 19, 40)];
   const { sql } = fakeSql(rows);
@@ -158,7 +158,7 @@ test("試探單成功即恢復：最近一個計入終態成功 → available", 
   });
 });
 
-test("fail-open：DB 讀取失敗不攔任何模型；回滾開關關閉整個閘", async () => {
+test("fail-open：DB 读取失败不拦任何模型；回滚开关关闭整个闸", async () => {
   __resetModelBreakerStateForTests();
   const { sql } = fakeSql(new Error("db down"));
   assert.deepEqual(await checkModelAvailability("gemini-3.1-flash-image", { sql, now, env: {} }), {
@@ -174,10 +174,10 @@ test("fail-open：DB 讀取失敗不攔任何模型；回滾開關關閉整個�
     probe: false,
   });
   assert.equal((await readUnavailableModels(deadSql, { now, env })).size, 0);
-  assert.equal(queries.length, 0, "停用時不讀 DB");
+  assert.equal(queries.length, 0, "停用时不读 DB");
 });
 
-test("提交 fail-fast：被判死的模型在建單與預扣費之前拒單，零 SQL 寫入、零計費調用", async () => {
+test("提交 fail-fast：被判死的模型在建单与预扣费之前拒单，零 SQL 写入、零计费调用", async () => {
   process.env.GENERATION_PROMPT_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
   const blocked: ModelGateDecision = {
     allowed: false,
@@ -214,10 +214,10 @@ test("提交 fail-fast：被判死的模型在建單與預扣費之前拒單，�
       return true;
     },
   );
-  assert.equal(queries.length, 0, "無冪等鍵時拒單不得觸碰 DB（不建 job、不 reserve）");
+  assert.equal(queries.length, 0, "无幂等键时拒单不得触碰 DB（不建 job、不 reserve）");
   assert.equal(billingCalls, 0);
 
-  // 帶冪等鍵但原 job 不存在：只允許一次只讀冪等查詢，仍拒單。
+  // 带幂等键但原 job 不存在：只允许一次只读幂等查询，仍拒单。
   await assert.rejects(
     submitGenerationCommand({ ...command, idempotencyKey: "k-1" }, { sql, billingAdapter, availabilityGate: async () => blocked }),
     GenerationModelUnavailableError,
@@ -228,10 +228,10 @@ test("提交 fail-fast：被判死的模型在建單與預扣費之前拒單，�
   assert.equal(billingCalls, 0);
 });
 
-test("供給面斷供（帳號全 disabled）→ 立即不可用、不放試探、列表標出；替代不含斷供模型（INC-VIDEO-0927b）", async () => {
+test("供给面断供（帐号全 disabled）→ 立即不可用、不放试探、列表标出；替代不含断供模型（INC-VIDEO-0927b）", async () => {
   __resetModelBreakerStateForTests();
   const rows = [
-    // 斷供模型在窗口內沒有任何終態樣本（排隊中的單不算）——舊閘會判 closed 放行。
+    // 断供模型在窗口内没有任何终态样本（排队中的单不算）——旧闸会判 closed 放行。
     row("seedance-2.5-480p", "queued", 5, { kind: "video_generate" }),
     row("minimax-h3", "succeeded", 90, { kind: "video_generate" }),
     row("veo-good", "succeeded", 30, { kind: "video_generate" }),
@@ -243,7 +243,7 @@ test("供給面斷供（帳號全 disabled）→ 立即不可用、不放試探�
   assert.match(decision.message, /供应商账户暂不可用/);
   assert.match(decision.message, /未扣费/);
 
-  // 即使過了半開間隔也不放試探：斷供時試探不可能成功。
+  // 即使过了半开间隔也不放试探：断供时试探不可能成功。
   __resetModelBreakerStateForTests();
   const later = await checkModelAvailability("seedance-2.5-480p", { sql, now: () => NOW + 24 * 60 * MIN, env: {} });
   assert.equal(later.allowed, false);
@@ -251,13 +251,13 @@ test("供給面斷供（帳號全 disabled）→ 立即不可用、不放試探�
   __resetModelBreakerStateForTests();
   const listed = await readUnavailableModels(sql, { now, env: {} });
   assert.ok(listed.has("seedance-2.5-480p"));
-  assert.ok(listed.has("minimax-h3"), "有歷史成功但現已斷供，同樣下架");
+  assert.ok(listed.has("minimax-h3"), "有历史成功但现已断供，同样下架");
   assert.equal(listed.has("veo-good"), false);
 
   __resetModelBreakerStateForTests();
   const minimax = await checkModelAvailability("minimax-h3", { sql, now, env: {} });
   assert.equal(minimax.allowed, false);
   if (!minimax.allowed) {
-    assert.deepEqual(minimax.alternatives.map((a) => a.modelId), ["veo-good"], "替代只推有供給且有成功證據的模型");
+    assert.deepEqual(minimax.alternatives.map((a) => a.modelId), ["veo-good"], "替代只推有供给且有成功证据的模型");
   }
 });

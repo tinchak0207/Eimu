@@ -1,22 +1,22 @@
 /**
- * 剪輯域 Agent 能力面活化 驗收測試（2026-09-27）。
+ * 剪辑域 Agent 能力面活化 验收测试（2026-09-27）。
  *
  * 跑法：npx --yes tsx --test src/lib/editor-timeline-activation.test.ts
  *
- * 本片三刀（全部在「讓現有 timeline 工具被真調用」，不造新工具；禁新增第 11 個
+ * 本片三刀（全部在「让现有 timeline 工具被真调用」，不造新工具；禁新增第 11 个
  * timeline_* id，已有 10 件）：
- *   刀1 配方庫：skills/editor/ 落庫 + persona skillPaths 指真實路徑。
- *   刀2 閘門：成片交付與 timeline 工具回執綁死——機器層 = collect 閘門（缺 qc
- *            回執直接判 missing_deliverables）+ 契約檢查器（required_fields）；
- *            紀律層 = 委派 prompt 的質檢閘硬規則。
- *   刀3 默認注入：persona toolIds 覆蓋十件套 + skillPaths 進 Expert 註冊表摘要
- *            （buildExpertLine，beast ON 時進 Orchestrator 主 prompt）。
+ *   刀1 配方库：skills/editor/ 落库 + persona skillPaths 指真实路径。
+ *   刀2 闸门：成片交付与 timeline 工具回执绑死——机器层 = collect 闸门（缺 qc
+ *            回执直接判 missing_deliverables）+ 契约检查器（required_fields）；
+ *            纪律层 = 委派 prompt 的质检闸硬规则。
+ *   刀3 默认注入：persona toolIds 覆盖十件套 + skillPaths 进 Expert 注册表摘要
+ *            （buildExpertLine，beast ON 时进 Orchestrator 主 prompt）。
  *
- * 斷言口徑（守門件不是 oracle 鐵律）：
- *   - 真行為斷言：呼叫實際函數看輸入→輸出（collect 閘門、validateExpertDeliverable、
- *     checkJsonOutput、buildExpertLine、assembleEditorPrompt），非掃源碼字串。
- *   - 檔案存在性（fs）為檔案系統 oracle（配方落盤的客觀事實）；配方**內容**提及
- *     工具名只算「路由聲明探針」，不是能力已驗的 oracle（執行鏈在 VPS）。
+ * 断言口径（守门件不是 oracle 铁律）：
+ *   - 真行为断言：呼叫实际函数看输入→输出（collect 闸门、validateExpertDeliverable、
+ *     checkJsonOutput、buildExpertLine、assembleEditorPrompt），非扫源码字串。
+ *   - 档案存在性（fs）为档案系统 oracle（配方落盘的客观事实）；配方**内容**提及
+ *     工具名只算「路由声明探针」，不是能力已验的 oracle（执行链在 VPS）。
  */
 
 import test from "node:test";
@@ -44,7 +44,7 @@ import { EXPERT_LINE_SKILL_PATHS_UNCONFIGURED, buildExpertLine, buildExpertRegis
 import { getContract } from "./agent-prompt-contracts.ts";
 import { checkJsonOutput } from "./agent-prompt-contract-check.ts";
 
-// ── 域真源：剪輯域十件套（harness-tool-registry 已登記的既有 id，禁新增） ─────
+// ── 域真源：剪辑域十件套（harness-tool-registry 已登记的既有 id，禁新增） ─────
 
 const TIMELINE_DOMAIN_TOOL_IDS = [
   "timeline_lint",
@@ -59,7 +59,7 @@ const TIMELINE_DOMAIN_TOOL_IDS = [
   "audio_first_timeline",
 ] as const;
 
-/** 每份配方的工具鏈（路由聲明探針：內容須點名鏈上工具）。 */
+/** 每份配方的工具链（路由声明探针：内容须点名链上工具）。 */
 const RECIPE_TOOL_CHAIN: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["skills/editor/SKILL.md", TIMELINE_DOMAIN_TOOL_IDS],
   ["skills/editor/assembly/SKILL.md", ["video_upload", "editing_manifest", "timeline_query", "timeline_ops", "timeline_restore"]],
@@ -105,35 +105,35 @@ function passingToolResult(): EditorToolResult {
   };
 }
 
-// ── 刀1：配方庫落庫（檔案系統 oracle + 路由聲明探針） ─────────────────────────
+// ── 刀1：配方库落库（档案系统 oracle + 路由声明探针） ─────────────────────────
 
-test("刀1：skills/editor/ 七份配方全部落盤，且 persona skillPaths 逐條指向真實檔案", () => {
-  assert.ok(EDITOR_PERSONA_SKILL_PATHS.length > 0, "配方庫落庫後 skillPaths 不得為空");
+test("刀1：skills/editor/ 七份配方全部落盘，且 persona skillPaths 逐条指向真实档案", () => {
+  assert.ok(EDITOR_PERSONA_SKILL_PATHS.length > 0, "配方库落库后 skillPaths 不得为空");
   assert.deepEqual(
     [...EDITOR_PERSONA_SKILL_PATHS],
     RECIPE_TOOL_CHAIN.map(([p]) => p),
-    "persona skillPaths 必須逐條等於已落庫的配方檔（禁幻影路徑）",
+    "persona skillPaths 必须逐条等于已落库的配方档（禁幻影路径）",
   );
   for (const p of EDITOR_PERSONA_SKILL_PATHS) {
     const abs = nodePath.resolve(process.cwd(), p);
-    assert.ok(existsSync(abs), `配方檔不存在（幻影路徑禁入 skillPaths）：${p}`);
-    assert.ok(readFileSync(abs, "utf8").trim().length > 200, `配方檔內容為空/過短：${p}`);
+    assert.ok(existsSync(abs), `配方档不存在（幻影路径禁入 skillPaths）：${p}`);
+    assert.ok(readFileSync(abs, "utf8").trim().length > 200, `配方档内容为空/过短：${p}`);
   }
 });
 
-test("刀1：每份配方 frontmatter 有 name/description（可被 skill 索引收錄），且點名其工具鏈", () => {
+test("刀1：每份配方 frontmatter 有 name/description（可被 skill 索引收录），且点名其工具链", () => {
   for (const [p, tools] of RECIPE_TOOL_CHAIN) {
     const body = readFileSync(nodePath.resolve(process.cwd(), p), "utf8");
-    // 2026-09-27 修：原本的 /---\n([\s\S]*?)\n---/.exec(body.slice(0, 800)) 允許
-    // frontmatter 前有前置註解（HTML 註解塊），是假陽性破口——VPS opencode 1.18.14
-    // 實測只解析 byte 0 的 frontmatter，前置註解者靜默不進索引。
-    // 此處改為 byte 0 錨定；repo 級全量掃描見 skill-frontmatter-indexability.test.ts。
+    // 2026-09-27 修：原本的 /---\n([\s\S]*?)\n---/.exec(body.slice(0, 800)) 允许
+    // frontmatter 前有前置注解（HTML 注解块），是假阳性破口——VPS opencode 1.18.14
+    // 实测只解析 byte 0 的 frontmatter，前置注解者静默不进索引。
+    // 此处改为 byte 0 锚定；repo 级全量扫描见 skill-frontmatter-indexability.test.ts。
     assert.ok(
       body.startsWith("---\n"),
-      `${p} frontmatter 未在 byte 0（前置註解＝opencode 靜默不收錄）`,
+      `${p} frontmatter 未在 byte 0（前置注解＝opencode 静默不收录）`,
     );
     const fm = /^---\n([\s\S]*?)\n---/.exec(body);
-    assert.ok(fm, `${p} 缺 frontmatter（skill 索引收錄面）`);
+    assert.ok(fm, `${p} 缺 frontmatter（skill 索引收录面）`);
     assert.match(fm[1], /^name:\s*\S+/m, `${p} frontmatter 缺 name`);
     assert.match(fm[1], /^description:\s*\S+/m, `${p} frontmatter 缺 description`);
     for (const tool of tools) {
@@ -146,14 +146,14 @@ test("刀1：timeline_lint 在域根与 qc-master 配方中被写成闸门（未
   for (const p of ["skills/editor/SKILL.md", "skills/editor/qc-master/SKILL.md"]) {
     const body = readFileSync(nodePath.resolve(process.cwd(), p), "utf8");
     assert.ok(body.includes("timeline_lint"), `${p} 未点名 lint`);
-    assert.ok(body.includes("閘門") || body.includes("闸门"), `${p} 未把 lint 写成闸门`);
+    assert.ok(body.includes("闸门") || body.includes("闸门"), `${p} 未把 lint 写成闸门`);
     assert.ok(body.includes("未清不得交付"), `${p} 缺「must 未清不得交付」闸门语义`);
   }
 });
 
-// ── 刀2：閘門（機器層真行為：缺欄被拒 / 完整放行） ───────────────────────────
+// ── 刀2：闸门（机器层真行为：缺栏被拒 / 完整放行） ───────────────────────────
 
-test("刀2 機器層：完整工具回执（qc 通过）→ collect 放行且全闸过（payload 三栏全形）", () => {
+test("刀2 机器层：完整工具回执（qc 通过）→ collect 放行且全闸过（payload 三栏全形）", () => {
   const r = collectEditorDeliverableFromToolResult(passingToolResult(), CTX);
   assert.ok(r.ok, r.ok ? "" : r.hint);
   if (!r.ok) return;
@@ -167,7 +167,7 @@ test("刀2 機器層：完整工具回执（qc 通过）→ collect 放行且全
   assert.deepEqual(validateExpertDeliverable(r.deliverable), { ok: true, errors: [] });
 });
 
-test("刀2 機器層：回执缺 qc → 闸门拒（missing_deliverables，成片 URL 有了也不算交付）", () => {
+test("刀2 机器层：回执缺 qc → 闸门拒（missing_deliverables，成片 URL 有了也不算交付）", () => {
   const noQc = collectEditorDeliverableFromToolResult(
     {
       title: "成片导出完成但无质检结论",
@@ -187,7 +187,7 @@ test("刀2 機器層：回执缺 qc → 闸门拒（missing_deliverables，成�
   }
 });
 
-test("刀2 機器層：qc 为空串 / 空白 → 同样拒（非空判定，不许用空串占位）", () => {
+test("刀2 机器层：qc 为空串 / 空白 → 同样拒（非空判定，不许用空串占位）", () => {
   for (const emptyQc of ["", "   "]) {
     const r = collectEditorDeliverableFromToolResult(
       {
@@ -206,7 +206,7 @@ test("刀2 機器層：qc 为空串 / 空白 → 同样拒（非空判定，不�
   }
 });
 
-test("刀2 機器層：非工具回执（ok:false / 非 JSON）→ no_output（禁手拼交付物绕过工具）", () => {
+test("刀2 机器层：非工具回执（ok:false / 非 JSON）→ no_output（禁手拼交付物绕过工具）", () => {
   const failed = collectEditorDeliverableFromToolResult(
     { title: "导出失败", output: JSON.stringify({ ok: false, error: { code: "master_gate_rejected", hint: "av_mismatch must" } }) },
     CTX,
@@ -222,7 +222,7 @@ test("刀2 機器層：非工具回执（ok:false / 非 JSON）→ no_output（�
   if (!handWritten.ok) assert.equal(handWritten.code, "no_output");
 });
 
-test("刀2 機器層（契約檢查器）：editor 回执文本缺 qc → required_fields 违规；完整 → 零违规", () => {
+test("刀2 机器层（契约检查器）：editor 回执文本缺 qc → required_fields 违规；完整 → 零违规", () => {
   const contract = getContract(EDITOR_PERSONA_ID);
   assert.ok(contract, "editor 必须有提示词契约（agent-prompt-contracts）");
   if (!contract) return;
@@ -239,9 +239,9 @@ test("刀2 機器層（契約檢查器）：editor 回执文本缺 qc → requir
   assert.deepEqual(checkJsonOutput(complete, contract), [], "完整回执零违规（放行）");
 });
 
-// ── 刀2：紀律層（委派 prompt 硬規則，真函數輸出） ────────────────────────────
+// ── 刀2：纪律层（委派 prompt 硬规则，真函数输出） ────────────────────────────
 
-test("刀2 紀律層：委派 prompt 帶質檢閘硬規則（timeline_lint / timeline_master / qc 未過視為未交付）", () => {
+test("刀2 纪律层：委派 prompt 带质检闸硬规则（timeline_lint / timeline_master / qc 未过视为未交付）", () => {
   const composed = composeEditorDelegation(VALID_INPUT);
   assert.ok(composed.ok);
   if (!composed.ok) return;
@@ -253,13 +253,13 @@ test("刀2 紀律層：委派 prompt 帶質檢閘硬規則（timeline_lint / tim
   assert.ok(r.prompt.includes("timeline_master"), "硬规则必须点名 timeline_master");
   assert.ok(r.prompt.includes("qc 缺失或未过 lint 视为未交付"), "硬规则必须写死 qc 闸语义");
   // OFF 仍不得出现宪法文本（零回归：纪律段不等于宪法注入）
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
 });
 
-// ── 刀3：默認注入（工具白名單覆蓋十件套 + skillPaths 進注入面） ───────────────
+// ── 刀3：默认注入（工具白名单覆盖十件套 + skillPaths 进注入面） ───────────────
 
-test("刀3：EDITOR_PERSONA_TOOL_IDS 完整覆蓋剪輯域十件套，且全部在 harness 真源登記（防幻影）", () => {
+test("刀3：EDITOR_PERSONA_TOOL_IDS 完整覆盖剪辑域十件套，且全部在 harness 真源登记（防幻影）", () => {
   const persona = new Set<string>(EDITOR_PERSONA_TOOL_IDS);
   assert.equal(persona.size, EDITOR_PERSONA_TOOL_IDS.length, "persona 工具白名单不得有重复 id");
   const covered = TIMELINE_DOMAIN_TOOL_IDS.filter((id) => persona.has(id));

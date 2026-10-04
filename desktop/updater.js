@@ -1,31 +1,31 @@
 // desktop/updater.js
 //
-// 0.3.2：自動更新接入點（electron-updater + generic provider）。
+// 0.3.2：自动更新接入点（electron-updater + generic provider）。
 //
-// 為什麼用 electron-updater 而不是自寫更新器：
-//   - AppImage 自我替換、NSIS 安裝編排都有現成且經過檢驗的實作；
-//   - 產物托管在 Vercel Blob 的固定目錄，透過 electron-builder 產出的
-//     app-update.yml（由 build.publish 生成）取得 feed，不硬編 URL。
+// 为什么用 electron-updater 而不是自写更新器：
+//   - AppImage 自我替换、NSIS 安装编排都有现成且经过检验的实作；
+//   - 产物托管在 Vercel Blob 的固定目录，透过 electron-builder 产出的
+//     app-update.yml（由 build.publish 生成）取得 feed，不硬编 URL。
 //
-// 差分下載（differential download）在本主機不生效：多段 HTTP Range 請求
-// 會被忽略，electron-updater 會自動退回全量下載。這是可接受的；日後若把
-// 產物改放自家 nginx（支援多段 Range），差分下載就會自動生效，無需改碼。
+// 差分下载（differential download）在本主机不生效：多段 HTTP Range 请求
+// 会被忽略，electron-updater 会自动退回全量下载。这是可接受的；日后若把
+// 产物改放自家 nginx（支援多段 Range），差分下载就会自动生效，无需改码。
 //
-// 安全邊界：本模組只在 app.isPackaged 為真時才檢查更新；開發模式（electron .）
-// 一律 no-op，避免本機開發時打生產 feed。feed 覆寫僅供 E2E 用
-// （EIMU_UPDATE_FEED），預設以 app-update.yml 為單一真源。
+// 安全边界：本模组只在 app.isPackaged 为真时才检查更新；开发模式（electron .）
+// 一律 no-op，避免本机开发时打生产 feed。feed 覆写仅供 E2E 用
+// （EIMU_UPDATE_FEED），预设以 app-update.yml 为单一真源。
 
 "use strict";
 
 const { app } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
-const FIRST_CHECK_DELAY_MS = 15 * 1000; // 啟動後延遲 15 秒，不阻塞視窗顯示
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 之後每 6 小時再查一次
+const FIRST_CHECK_DELAY_MS = 15 * 1000; // 启动后延迟 15 秒，不阻塞视窗显示
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 之后每 6 小时再查一次
 
-// 由 initUpdater 注入的取主視窗函式（main.js 的 () => mainWindow）。
+// 由 initUpdater 注入的取主视窗函式（main.js 的 () => mainWindow）。
 let getWindowRef = () => null;
-// 冪等：initUpdater 只生效一次，避免重複掛事件 / 重複排程。
+// 幂等：initUpdater 只生效一次，避免重复挂事件 / 重复排程。
 let started = false;
 
 function log(...args) {
@@ -33,17 +33,17 @@ function log(...args) {
 }
 
 /**
- * 更新下載完成時通知頁面（channel eimu-shell:update-ready）。
- * 視窗不在（已關閉/尚未建立）就只記 log，不視為錯誤。
+ * 更新下载完成时通知页面（channel eimu-shell:update-ready）。
+ * 视窗不在（已关闭/尚未建立）就只记 log，不视为错误。
  */
 function notifyUpdateReady(version) {
   const win = typeof getWindowRef === "function" ? getWindowRef() : null;
   if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
     win.webContents.send("eimu-shell:update-ready", { version });
-    log(`已通知頁面 update-ready version=${version}`);
+    log(`已通知页面 update-ready version=${version}`);
     return;
   }
-  log(`update-ready version=${version}（視窗不在，僅記錄）`);
+  log(`update-ready version=${version}（视窗不在，仅记录）`);
 }
 
 function wireEvents() {
@@ -78,75 +78,75 @@ function wireEvents() {
 }
 
 function scheduleChecks() {
-  // 首次檢查延遲：等視窗顯示、網站載入完成再打 feed，不與首屏爭資源。
+  // 首次检查延迟：等视窗显示、网站载入完成再打 feed，不与首屏争资源。
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch((err) => {
-      log("checkForUpdates 失敗:", err && err.message);
+      log("checkForUpdates 失败:", err && err.message);
     });
   }, FIRST_CHECK_DELAY_MS);
 
   setInterval(() => {
     autoUpdater.checkForUpdates().catch((err) => {
-      log("checkForUpdates 失敗:", err && err.message);
+      log("checkForUpdates 失败:", err && err.message);
     });
   }, CHECK_INTERVAL_MS);
 }
 
 /**
- * 初始化自動更新。由 main.js 在 app.whenReady() 內呼叫一次。
- * options.getWindow：取主視窗的函式（() => mainWindow）。
+ * 初始化自动更新。由 main.js 在 app.whenReady() 内呼叫一次。
+ * options.getWindow：取主视窗的函式（() => mainWindow）。
  */
 function initUpdater(options = {}) {
   getWindowRef = typeof options.getWindow === "function" ? options.getWindow : () => null;
 
   if (!app.isPackaged) {
-    // 開發模式（electron .）：不檢查更新。這裡刻意在掛事件/排程之前返回。
-    log("未打包（app.isPackaged=false），開發模式略過自動更新檢查");
+    // 开发模式（electron .）：不检查更新。这里刻意在挂事件/排程之前返回。
+    log("未打包（app.isPackaged=false），开发模式略过自动更新检查");
     return;
   }
 
   if (started) return;
   started = true;
 
-  // 下載與安裝策略：背景自動下載；下載完成後在退出時自動安裝。
+  // 下载与安装策略：背景自动下载；下载完成后在退出时自动安装。
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  // E2E 用的 feed 覆寫；未設時沿用 app-update.yml（build.publish 生成）內建值。
+  // E2E 用的 feed 覆写；未设时沿用 app-update.yml（build.publish 生成）内建值。
   const feed = process.env.EIMU_UPDATE_FEED;
   if (feed) {
-    log(`使用 EIMU_UPDATE_FEED 覆寫 feed: ${feed}`);
+    log(`使用 EIMU_UPDATE_FEED 覆写 feed: ${feed}`);
     autoUpdater.setFeedURL({ provider: "generic", url: feed });
   } else {
-    log("使用 app-update.yml 內建 feed");
+    log("使用 app-update.yml 内建 feed");
   }
 
   wireEvents();
 
-  // main.js 已在 app ready 後呼叫本函式；再包一層 whenReady 保證排程一定在
-  // app 就緒後才開始（重複呼叫安全，已 resolved 的 promise 會立即執行）。
+  // main.js 已在 app ready 后呼叫本函式；再包一层 whenReady 保证排程一定在
+  // app 就绪后才开始（重复呼叫安全，已 resolved 的 promise 会立即执行）。
   void app.whenReady().then(() => {
-    log(`自動更新已啟動，${FIRST_CHECK_DELAY_MS / 1000}s 後首次檢查，之後每 6 小時一次`);
+    log(`自动更新已启动，${FIRST_CHECK_DELAY_MS / 1000}s 后首次检查，之后每 6 小时一次`);
     scheduleChecks();
   });
 }
 
 /**
- * 套用已下載的更新並重啟。
- *   - AppImage：electron-updater 自我替換後重啟；
- *   - Windows：執行新下載的安裝檔。
- * 開發模式 no-op。
+ * 套用已下载的更新并重启。
+ *   - AppImage：electron-updater 自我替换后重启；
+ *   - Windows：执行新下载的安装档。
+ * 开发模式 no-op。
  */
 function applyUpdate() {
   if (!app.isPackaged) {
-    log("未打包（app.isPackaged=false），applyUpdate 略過");
+    log("未打包（app.isPackaged=false），applyUpdate 略过");
     return;
   }
   log("呼叫 quitAndInstall()");
   try {
     autoUpdater.quitAndInstall();
   } catch (err) {
-    log("quitAndInstall 失敗:", err && err.message);
+    log("quitAndInstall 失败:", err && err.message);
     if (err && err.stack) log(err.stack);
   }
 }

@@ -1,13 +1,13 @@
-// 角色卡 B 端路由的**共用斷言套件**。
+// 角色卡 B 端路由的**共用断言套件**。
 //
-// 為什麼要共用：`/api/v1/character-cards` 與 `/api/biz/character-cards` 是同一份實現的兩個
-// 掛載點（實現只在 src/lib/biz-character-cards-route.ts）。兩邊各抄一份斷言 = 兩份會各自
-// 漂移的「尺」；共用同一份斷言才能證明「兩條 route 真的代理到同一行為」。
+// 为什么要共用：`/api/v1/character-cards` 与 `/api/biz/character-cards` 是同一份实现的两个
+// 挂载点（实现只在 src/lib/biz-character-cards-route.ts）。两边各抄一份断言 = 两份会各自
+// 漂移的「尺」；共用同一份断言才能证明「两条 route 真的代理到同一行为」。
 //
-// 斷言全是**真行為**（不是源碼字串守門件）：POST 一張卡 → GET 讀回同一張（逐欄相等），
-// 走真 store（無 BLOB_READ_WRITE_TOKEN 時落 character-card-store 的 memoryStore，真 store
-// 非 mock）＋ 真 normalizeCharacterCard；upsert 幂等；負控制（不同 name → 兩張）；
-// 用戶隔離；401 閘；kind 收斂；reference_urls 非法 400。
+// 断言全是**真行为**（不是源码字串守门件）：POST 一张卡 → GET 读回同一张（逐栏相等），
+// 走真 store（无 BLOB_READ_WRITE_TOKEN 时落 character-card-store 的 memoryStore，真 store
+// 非 mock）＋ 真 normalizeCharacterCard；upsert 幂等；负控制（不同 name → 两张）；
+// 用户隔离；401 闸；kind 收敛；reference_urls 非法 400。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -16,7 +16,7 @@ import { hashBizApiKey } from "./biz-api-keys";
 import { __resetBizKeyStoreForTests } from "./biz-api-key-store";
 import { __resetCharacterCardStoreForTests } from "./character-card-store";
 
-/** 一個掛載點（route 檔）真正導出的 HTTP handler。 */
+/** 一个挂载点（route 档）真正导出的 HTTP handler。 */
 export interface CharacterCardRouteHandlers {
   GET: (req: NextRequest) => Promise<Response>;
   POST: (req: NextRequest) => Promise<Response>;
@@ -42,8 +42,8 @@ interface CardBody {
 }
 
 /**
- * 註冊一整套斷言到 `label` 這個掛載點上（同一份斷言可對多條 route 各跑一次）。
- * 必須在測試檔的模組頂層呼叫（node:test 的 hook 註冊在呼叫當下生效）。
+ * 注册一整套断言到 `label` 这个挂载点上（同一份断言可对多条 route 各跑一次）。
+ * 必须在测试档的模组顶层呼叫（node:test 的 hook 注册在呼叫当下生效）。
  */
 export function registerBizCharacterCardRouteSuite(
   label: string,
@@ -99,9 +99,9 @@ export function registerBizCharacterCardRouteSuite(
     __resetCharacterCardStoreForTests();
   });
 
-  // ─────────────────────────────────────────── 真行為：存得下、看得到
+  // ─────────────────────────────────────────── 真行为：存得下、看得到
 
-  test(`${label}｜POST 存一張卡 → GET 讀回同一張（id/name/kind/prompt/reference_urls 逐欄相等）`, async () => {
+  test(`${label}｜POST 存一张卡 → GET 读回同一张（id/name/kind/prompt/reference_urls 逐栏相等）`, async () => {
     const input = {
       name: "霍辞渊",
       kind: "character",
@@ -132,7 +132,7 @@ export function registerBizCharacterCardRouteSuite(
     assert.equal(readBack.prompt, created.prompt);
     assert.deepEqual(readBack.reference_urls, created.reference_urls);
     assert.equal(readBack.updated_at, created.updated_at);
-    // 逐欄等價：GET 項的鍵集合就是契約那六個（內部欄位不得外洩）
+    // 逐栏等价：GET 项的键集合就是契约那六个（内部栏位不得外泄）
     assert.deepEqual(
       Object.keys(readBack).sort(),
       ["id", "kind", "name", "prompt", "reference_urls", "updated_at"],
@@ -219,7 +219,7 @@ export function registerBizCharacterCardRouteSuite(
   // ─────────────────────────────────────────── 清洗（唯一收口 normalizeCharacterCard）
 
   test(`${label}｜kind 传乱值 → 收敛成 character，不报错`, async () => {
-    const response = await postCard({ name: "乱填 kind 的卡", kind: "亂七八糟" });
+    const response = await postCard({ name: "乱填 kind 的卡", kind: "乱七八糟" });
     assert.equal(response.status, 201);
     const created = (await bodyOf(response)).data as WireCard;
     assert.equal(created.kind, "character");
@@ -229,7 +229,7 @@ export function registerBizCharacterCardRouteSuite(
 
     // kind 过滤器精确匹配：五值之一命中，不认识的值不收敛成 character（免得假命中）
     assert.equal((await listData(await listCards("?kind=character"))).length, 1);
-    assert.equal((await listData(await listCards("?kind=亂七八糟"))).length, 0);
+    assert.equal((await listData(await listCards("?kind=乱七八糟"))).length, 0);
   });
 
   test(`${label}｜reference_urls 含非法项 → 400，且不落卡；>8 条 → 400`, async () => {

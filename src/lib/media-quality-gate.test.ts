@@ -1,7 +1,7 @@
-// media-quality-gate 測試（2026-10-03）——用**真 fixture**，不是 mock 斷言。
+// media-quality-gate 测试（2026-10-03）——用**真 fixture**，不是 mock 断言。
 //
-// 測試期用本機 ffmpeg 生成 1 秒素材到 os.tmpdir()，再餵給 probeMedia 實測；
-// 若本機無 ffmpeg 則整組 skip（並在測試名標明）。runner：
+// 测试期用本机 ffmpeg 生成 1 秒素材到 os.tmpdir()，再喂给 probeMedia 实测；
+// 若本机无 ffmpeg 则整组 skip（并在测试名标明）。runner：
 //   npx --yes tsx --test src/lib/media-quality-gate.test.ts
 
 import test, { after, before } from "node:test";
@@ -25,7 +25,7 @@ let imagePng = "";
 
 function ff(args: string[]): void {
   const r = spawnSync(FFMPEG, args, { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`ffmpeg fixture 生成失敗（${r.status}）：${r.stderr?.slice(-400)}`);
+  if (r.status !== 0) throw new Error(`ffmpeg fixture 生成失败（${r.status}）：${r.stderr?.slice(-400)}`);
 }
 
 before(() => {
@@ -52,15 +52,15 @@ function override(base: QualityPolicy, patch: Partial<QualityPolicy>): QualityPo
   return { ...base, ...patch };
 }
 
-test("正常影片（有音軌）：probe 實測 + video_default pass", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+test("正常影片（有音轨）：probe 实测 + video_default pass", async (t) => {
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
   const probe = await probeMedia(videoWithAudio);
   assert.equal(probe.status, "ok");
   assert.equal(probe.video?.width, 640);
   assert.equal(probe.video?.height, 480);
   assert.equal(probe.video?.codec, "h264");
-  assert.ok(probe.audio, "應偵測到音軌");
-  assert.ok(probe.durationSec !== null && Math.abs(probe.durationSec - 1) < 0.2, `時長應約 1s，實測 ${probe.durationSec}`);
+  assert.ok(probe.audio, "应侦测到音轨");
+  assert.ok(probe.durationSec !== null && Math.abs(probe.durationSec - 1) < 0.2, `时长应约 1s，实测 ${probe.durationSec}`);
   assert.ok((probe.sizeBytes ?? 0) > 0);
 
   const verdict = evaluateMediaQuality(probe, QUALITY_POLICIES.video_default);
@@ -70,23 +70,23 @@ test("正常影片（有音軌）：probe 實測 + video_default pass", async (t
   assert.equal(verdict.measured.width, 640);
 });
 
-test("無音軌影片：video_with_audio fail（audio_stream_missing）", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+test("无音轨影片：video_with_audio fail（audio_stream_missing）", async (t) => {
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
   const probe = await probeMedia(videoNoAudio);
   assert.equal(probe.status, "ok");
-  assert.equal(probe.audio, null, "無音軌影片不應有 audio");
+  assert.equal(probe.audio, null, "无音轨影片不应有 audio");
 
   const strict = evaluateMediaQuality(probe, QUALITY_POLICIES.video_with_audio);
   assert.equal(strict.ok, false);
   assert.ok(strict.failures.some((f) => f.code === "audio_stream_missing"), JSON.stringify(strict.failures));
 
-  // 同一檔在「音軌可選」的政策下應 pass——證明是政策在判，不是硬編碼。
+  // 同一档在「音轨可选」的政策下应 pass——证明是政策在判，不是硬编码。
   const lax = evaluateMediaQuality(probe, QUALITY_POLICIES.video_default);
   assert.equal(lax.ok, true, JSON.stringify(lax.failures));
 });
 
-test("時長超界：fail duration_above_max / below_min", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+test("时长超界：fail duration_above_max / below_min", async (t) => {
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
   const probe = await probeMedia(videoWithAudio);
   const tooShort = override(QUALITY_POLICIES.video_default, { id: "test_max_0_5", maxDurationSec: 0.5 });
   const v1 = evaluateMediaQuality(probe, tooShort);
@@ -100,7 +100,7 @@ test("時長超界：fail duration_above_max / below_min", async (t) => {
 });
 
 test("解析度不足：fail width_below_min + height_below_min", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
   const probe = await probeMedia(videoWithAudio);
   const hiRes = override(QUALITY_POLICIES.video_default, { id: "test_1080p", minWidth: 1920, minHeight: 1080 });
   const verdict = evaluateMediaQuality(probe, hiRes);
@@ -109,24 +109,24 @@ test("解析度不足：fail width_below_min + height_below_min", async (t) => {
   assert.ok(verdict.failures.some((f) => f.code === "height_below_min"), JSON.stringify(verdict.failures));
 });
 
-test("probe 不可用（路徑不存在）：ok 必須 false 且帶 probe_unavailable", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+test("probe 不可用（路径不存在）：ok 必须 false 且带 probe_unavailable", async (t) => {
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
   const missing = path.join(dir, "does-not-exist-1234567890.mp4");
   const probe = await probeMedia(missing);
   assert.equal(probe.status, "probe_unavailable", `error=${probe.error}`);
   assert.ok(probe.error && probe.error.length > 0);
 
   const verdict = evaluateMediaQuality(probe, QUALITY_POLICIES.video_default);
-  assert.equal(verdict.ok, false, "未知不可當通過");
+  assert.equal(verdict.ok, false, "未知不可当通过");
   assert.ok(verdict.failures.some((f) => f.code === "probe_unavailable"), JSON.stringify(verdict.failures));
 });
 
-test("音訊：靜音 fail（silent_audio）、有聲 pass", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+test("音讯：静音 fail（silent_audio）、有声 pass", async (t) => {
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
 
   const silentProbe = await probeMedia(silentWav);
   assert.equal(silentProbe.status, "ok");
-  assert.ok(silentProbe.audio, "應偵測到音軌");
+  assert.ok(silentProbe.audio, "应侦测到音轨");
   const silentVerdict = evaluateMediaQuality(silentProbe, QUALITY_POLICIES.audio_default);
   assert.equal(silentVerdict.ok, false, `measured=${JSON.stringify(silentVerdict.measured)}`);
   assert.ok(silentVerdict.failures.some((f) => f.code === "silent_audio"), JSON.stringify(silentVerdict.failures));
@@ -137,8 +137,8 @@ test("音訊：靜音 fail（silent_audio）、有聲 pass", async (t) => {
   assert.ok(typeof toneProbe.audio?.meanVolumeDb === "number" && (toneProbe.audio?.meanVolumeDb ?? -Infinity) > -60);
 });
 
-test("圖片：image_default pass（無時長/音軌也能過）", async (t) => {
-  if (!FFMPEG_PRESENT) return t.skip("本機無 ffmpeg，跳過（檔名標明）");
+test("图片：image_default pass（无时长/音轨也能过）", async (t) => {
+  if (!FFMPEG_PRESENT) return t.skip("本机无 ffmpeg，跳过（档名标明）");
   const probe = await probeMedia(imagePng);
   assert.equal(probe.status, "ok");
   assert.equal(probe.video?.width, 512);

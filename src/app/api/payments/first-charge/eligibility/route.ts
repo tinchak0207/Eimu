@@ -1,12 +1,12 @@
-// 定價頁首充卡（plan id `first-charge`）的資格查詢：這張卡要不要顯示。
+// 定价页首充卡（plan id `first-charge`）的资格查询：这张卡要不要显示。
 //
-// 登入態從 napi_token cookie 反查 userId（控面穩定令牌表，與 checkout 同一條路），
-// 再經 HMAC 通道問控面「這個帳號還有沒有首充資格」（判準唯一權威在 src/lib/first-charge.ts：
-// 帳本從無 recharge 行、且從未買過本檔）。
+// 登入态从 napi_token cookie 反查 userId（控面稳定令牌表，与 checkout 同一条路），
+// 再经 HMAC 通道问控面「这个帐号还有没有首充资格」（判准唯一权威在 src/lib/first-charge.ts：
+// 帐本从无 recharge 行、且从未买过本档）。
 //
-// 只讀、不碰錢路。通道不可用／未登入一律回 eligible:false（保守：優惠卡不給，
-// 真正的執法點是 checkout 的 403 與入帳時的按正價折算，這裡只是增值入口）。
-// 回應不含 userId，也不含任何憑證。
+// 只读、不碰钱路。通道不可用／未登入一律回 eligible:false（保守：优惠卡不给，
+// 真正的执法点是 checkout 的 403 与入帐时的按正价折算，这里只是增值入口）。
+// 回应不含 userId，也不含任何凭证。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
@@ -14,11 +14,11 @@ import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** 登入 cookie 名（與 new-api-client.ts 的 TOKEN_KEY 同名；服務端只讀不寫）。 */
+/** 登入 cookie 名（与 new-api-client.ts 的 TOKEN_KEY 同名；服务端只读不写）。 */
 const TOKEN_COOKIE = "napi_token";
-/** 反查預算是增值路徑的禮貌：查不到就當沒資格，不拖慢定價頁。 */
+/** 反查预算是增值路径的礼貌：查不到就当没资格，不拖慢定价页。 */
 const LOOKUP_BUDGET_MS = 2_500;
 
 async function resolveUserId(token: string): Promise<number | null> {

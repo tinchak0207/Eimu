@@ -1,26 +1,26 @@
-// 節點版本歷史的純函式層（2026-09-27）。
+// 节点版本历史的纯函式层（2026-09-27）。
 //
-// 職責：快照落版、裁剪（保留上限 N 版）、按版號選取、版本 diff、把某版套回節點。
-// 全部純函式、零副作用、零 IO——reducer 動作與 API 路由共用同一份語義，不各寫一套。
+// 职责：快照落版、裁剪（保留上限 N 版）、按版号选取、版本 diff、把某版套回节点。
+// 全部纯函式、零副作用、零 IO——reducer 动作与 API 路由共用同一份语义，不各写一套。
 //
-// 資料形狀真源＝`types.ts` 的 `CanvasNodeVersion`（掛在 `CanvasProject.nodeVersions`，
-// 不新增 DB/檔案）。持久化清洗＝本檔的 `normalizeNodeVersion(s)`，store 與讀取端共用。
+// 资料形状真源＝`types.ts` 的 `CanvasNodeVersion`（挂在 `CanvasProject.nodeVersions`，
+// 不新增 DB/档案）。持久化清洗＝本档的 `normalizeNodeVersion(s)`，store 与读取端共用。
 
 import type { CanvasNode, CanvasNodeMetadata, CanvasNodeVersion, CanvasNodeVersionReason } from "./types";
 
-// ─────────────────────────────────────────── 上限與值域
+// ─────────────────────────────────────────── 上限与值域
 
 /**
- * 單一節點保留的版本數上限（最早的先被裁掉）。
- * 20 版的理由：一次「生成→微調→再生成」的來回通常 ≤ 10 版，20 給一倍餘裕；
- * 每個版本只存 title＋metadata（無座標/無二進位），不會隨畫布尺寸膨脹。
+ * 单一节点保留的版本数上限（最早的先被裁掉）。
+ * 20 版的理由：一次「生成→微调→再生成」的来回通常 ≤ 10 版，20 给一倍余裕；
+ * 每个版本只存 title＋metadata（无座标/无二进位），不会随画布尺寸膨胀。
  */
 export const MAX_NODE_VERSIONS_PER_NODE = 20;
 
-/** 單一專案全部節點的版本數總上限（防「節點很多×每節點 20 版」撐爆 Blob）。 */
+/** 单一专案全部节点的版本数总上限（防「节点很多×每节点 20 版」撑爆 Blob）。 */
 export const MAX_NODE_VERSIONS_PER_PROJECT = 400;
 
-/** 落版原因值域（與 `CanvasNodeVersionReason` 同步；執行期判據用）。 */
+/** 落版原因值域（与 `CanvasNodeVersionReason` 同步；执行期判据用）。 */
 export const NODE_VERSION_REASONS = ["created", "generated", "edited", "metadata", "revert"] as const;
 
 export function isNodeVersionReason(v: unknown): v is CanvasNodeVersionReason {
@@ -28,10 +28,10 @@ export function isNodeVersionReason(v: unknown): v is CanvasNodeVersionReason {
 }
 
 /**
- * 純瞬態 metadata 鍵：這些鍵的變化**不算內容變更**，不落版。
- * （進度、開始時間、花費角標、任務 id、錯誤訊息、以及非 success 的 status 抖動）
- * 注意 `status` 在此被視為瞬態，但**翻到 success** 由 `isNodeContentChange` 優先判為
- * `generated`（生成完成是內容事件，不能因 status 在瞬態清單裡被吃掉）。
+ * 纯瞬态 metadata 键：这些键的变化**不算内容变更**，不落版。
+ * （进度、开始时间、花费角标、任务 id、错误讯息、以及非 success 的 status 抖动）
+ * 注意 `status` 在此被视为瞬态，但**翻到 success** 由 `isNodeContentChange` 优先判为
+ * `generated`（生成完成是内容事件，不能因 status 在瞬态清单里被吃掉）。
  */
 const VOLATILE_METADATA_KEYS = new Set([
   "progress",
@@ -43,17 +43,17 @@ const VOLATILE_METADATA_KEYS = new Set([
   "status",
 ]);
 
-// ─────────────────────────────────────────── 清洗（store / 讀取端共用）
+// ─────────────────────────────────────────── 清洗（store / 读取端共用）
 
-/** metadata 深拷貝：切斷與當前節點的參考共用（版本是歷史，不可被後續就地改寫）。 */
+/** metadata 深拷贝：切断与当前节点的参考共用（版本是历史，不可被后续就地改写）。 */
 function cloneMetadata(metadata: CanvasNodeMetadata | undefined | unknown): CanvasNodeMetadata {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
   return JSON.parse(JSON.stringify(metadata)) as CanvasNodeMetadata;
 }
 
 /**
- * 版本逐項清洗（照 `project-store.normalizeEpisode` 的逐欄白名單範式）：
- * 非法項回 null（呼叫端 flatMap 丟棄），不整份作廢。
+ * 版本逐项清洗（照 `project-store.normalizeEpisode` 的逐栏白名单范式）：
+ * 非法项回 null（呼叫端 flatMap 丢弃），不整份作废。
  */
 export function normalizeNodeVersion(raw: unknown): CanvasNodeVersion | null {
   if (!raw || typeof raw !== "object") return null;
@@ -73,8 +73,8 @@ export function normalizeNodeVersion(raw: unknown): CanvasNodeVersion | null {
 }
 
 /**
- * 版本清單清洗：逐項白名單 → 同節點同版號去重（保留首見）→ 逐節點裁剪到上限
- * → 總量裁剪（保留末段＝最新）。非陣列回 undefined（省略鍵）。
+ * 版本清单清洗：逐项白名单 → 同节点同版号去重（保留首见）→ 逐节点裁剪到上限
+ * → 总量裁剪（保留末段＝最新）。非阵列回 undefined（省略键）。
  */
 export function normalizeNodeVersions(
   raw: unknown,
@@ -95,14 +95,14 @@ export function normalizeNodeVersions(
   return pruned.length > 0 ? pruned.slice(-MAX_NODE_VERSIONS_PER_PROJECT) : undefined;
 }
 
-// ─────────────────────────────────────────── 查詢
+// ─────────────────────────────────────────── 查询
 
-/** 同一節點的版本清單，按版號升序（＝時間序）。 */
+/** 同一节点的版本清单，按版号升序（＝时间序）。 */
 export function listNodeVersions(versions: readonly CanvasNodeVersion[], nodeId: string): CanvasNodeVersion[] {
   return versions.filter((v) => v.nodeId === nodeId).sort((a, b) => a.version - b.version);
 }
 
-/** 最新一版；沒有回 undefined。 */
+/** 最新一版；没有回 undefined。 */
 export function latestNodeVersion(
   versions: readonly CanvasNodeVersion[],
   nodeId: string,
@@ -111,15 +111,15 @@ export function latestNodeVersion(
   return list.length > 0 ? list[list.length - 1] : undefined;
 }
 
-/** 下一版號（同節點最大版號 + 1；首版＝1）。 */
+/** 下一版号（同节点最大版号 + 1；首版＝1）。 */
 export function nextNodeVersion(versions: readonly CanvasNodeVersion[], nodeId: string): number {
   const list = listNodeVersions(versions, nodeId);
   return list.length > 0 ? list[list.length - 1].version + 1 : 1;
 }
 
 /**
- * 選版：`version` 有值＝取該版（找不到回 undefined）；省略＝取最新一版。
- * 純查詢，不改任何狀態。
+ * 选版：`version` 有值＝取该版（找不到回 undefined）；省略＝取最新一版。
+ * 纯查询，不改任何状态。
  */
 export function selectNodeVersion(
   versions: readonly CanvasNodeVersion[],
@@ -131,8 +131,8 @@ export function selectNodeVersion(
 }
 
 /**
- * 「上一版」＝最新一版的前一版（回退的預設目標）。
- * 只有 1 版（或 0 版）時回 undefined＝沒有更早的版本可回。
+ * 「上一版」＝最新一版的前一版（回退的预设目标）。
+ * 只有 1 版（或 0 版）时回 undefined＝没有更早的版本可回。
  */
 export function previousNodeVersion(
   versions: readonly CanvasNodeVersion[],
@@ -142,9 +142,9 @@ export function previousNodeVersion(
   return list.length >= 2 ? list[list.length - 2] : undefined;
 }
 
-// ─────────────────────────────────────────── 寫入（純函式，回新陣列）
+// ─────────────────────────────────────────── 写入（纯函式，回新阵列）
 
-/** 逐節點裁剪：每個節點只留最後 `maxPerNode` 版；鍵序/相對順序保持不變。 */
+/** 逐节点裁剪：每个节点只留最后 `maxPerNode` 版；键序/相对顺序保持不变。 */
 export function pruneNodeVersions(
   versions: readonly CanvasNodeVersion[],
   maxPerNode: number = MAX_NODE_VERSIONS_PER_NODE,
@@ -163,7 +163,7 @@ export function pruneNodeVersions(
   return versions.filter((v) => kept.has(v));
 }
 
-/** 追加一版並裁剪（回新陣列，不改輸入）。 */
+/** 追加一版并裁剪（回新阵列，不改输入）。 */
 export function appendNodeVersion(
   versions: readonly CanvasNodeVersion[],
   entry: CanvasNodeVersion,
@@ -173,8 +173,8 @@ export function appendNodeVersion(
 }
 
 /**
- * 從當前節點造一版快照。版號＝同節點 nextNodeVersion。
- * `createdAt` 可注入（測試用固定時間，避免同毫秒去重歧義）。
+ * 从当前节点造一版快照。版号＝同节点 nextNodeVersion。
+ * `createdAt` 可注入（测试用固定时间，避免同毫秒去重歧义）。
  */
 export function createNodeVersion(
   node: CanvasNode,
@@ -192,9 +192,9 @@ export function createNodeVersion(
   };
 }
 
-// ─────────────────────────────────────────── 內容變更判定 / diff / 套用
+// ─────────────────────────────────────────── 内容变更判定 / diff / 套用
 
-/** 內容簽名：title ＋ metadata 去掉瞬態鍵後穩定序列化。 */
+/** 内容签名：title ＋ metadata 去掉瞬态键后稳定序列化。 */
 function nodeContentSignature(node: CanvasNode): string {
   const metadata = node.metadata;
   const stable: Record<string, unknown> = {};
@@ -208,10 +208,10 @@ function nodeContentSignature(node: CanvasNode): string {
 }
 
 /**
- * 內容變更判定：回落版原因，或 null（＝不值得落版）。
+ * 内容变更判定：回落版原因，或 null（＝不值得落版）。
  *   - status 翻到 success → `generated`（生成完成）
- *   - 內容簽名變化 → title/content/prompt 之一變＝`edited`，其餘＝`metadata`
- *   - 純瞬態抖動（進度/費用/任務 id/非 success 的 status）→ null
+ *   - 内容签名变化 → title/content/prompt 之一变＝`edited`，其余＝`metadata`
+ *   - 纯瞬态抖动（进度/费用/任务 id/非 success 的 status）→ null
  */
 export function isNodeContentChange(prev: CanvasNode, next: CanvasNode): CanvasNodeVersionReason | null {
   const prevStatus = prev.metadata?.status;
@@ -225,8 +225,8 @@ export function isNodeContentChange(prev: CanvasNode, next: CanvasNode): CanvasN
 }
 
 /**
- * 版本 diff（判斷「兩版差在哪」；UI 顯示「與目前版本的差異」用）。
- * `changedKeys`＝兩版 metadata 鍵聯集裡值不同者（穩定排序）；title 是否變另計。
+ * 版本 diff（判断「两版差在哪」；UI 显示「与目前版本的差异」用）。
+ * `changedKeys`＝两版 metadata 键联集里值不同者（稳定排序）；title 是否变另计。
  */
 export function diffNodeVersions(
   a: CanvasNodeVersion,
@@ -244,14 +244,14 @@ export function diffNodeVersions(
 }
 
 /**
- * 把某一版套回節點：**只換 title ＋ metadata**，座標/尺寸/連線等版面欄位原樣保留
- * （版本＝內容歷史，不是版面歷史）。回新節點，不改輸入。
+ * 把某一版套回节点：**只换 title ＋ metadata**，座标/尺寸/连线等版面栏位原样保留
+ * （版本＝内容历史，不是版面历史）。回新节点，不改输入。
  */
 export function applyNodeVersion(node: CanvasNode, entry: CanvasNodeVersion): CanvasNode {
   return { ...node, title: entry.title, metadata: cloneMetadata(entry.metadata) };
 }
 
-/** 純資料工具：某節點目前保留了幾版（測試與上限顯示用）。 */
+/** 纯资料工具：某节点目前保留了几版（测试与上限显示用）。 */
 export function countNodeVersions(versions: readonly CanvasNodeVersion[], nodeId: string): number {
   return listNodeVersions(versions, nodeId).length;
 }

@@ -90,7 +90,7 @@ export interface MemoryRetractInput {
   docIds?: string[];
 }
 
-/** 品質複核翻轉動作（PRD §5.6）：pending_review＝轉待人工複核；activate＝人工放行回 active。 */
+/** 品质复核翻转动作（PRD §5.6）：pending_review＝转待人工复核；activate＝人工放行回 active。 */
 export type MemoryReviewAction = "pending_review" | "activate";
 
 export interface MemoryReviewInput {
@@ -98,9 +98,9 @@ export interface MemoryReviewInput {
   docIds?: string[];
   action: MemoryReviewAction;
   /**
-   * 可選 scope 過濾。缺省時：pending_review 默認**只動 shared**（PRD §5.6「private
-   * 不自動轉 pending，只記 badge」——自動翻轉永不碰私有庫）；activate 不過濾
-   * （人工複核放行，誰是 pending_review 就放誰）。
+   * 可选 scope 过滤。缺省时：pending_review 默认**只动 shared**（PRD §5.6「private
+   * 不自动转 pending，只记 badge」——自动翻转永不碰私有库）；activate 不过滤
+   * （人工复核放行，谁是 pending_review 就放谁）。
    */
   scope?: MemoryScope;
 }
@@ -623,9 +623,9 @@ export async function retractMemoryDocs(input: MemoryRetractInput): Promise<{ re
 }
 
 /**
- * 品質複核翻轉（PRD §5.6 抽檢判據；【契約外新增】，比照 §3.2 retract 的目錄＋正文同步紀律）：
- * active↔pending_review 雙向翻轉，INDEX 重建沿用 rebuildIndex（pending_review 不在
- * activeDocs → 索引行自動消失）；retracted 永不翻轉（留證不動，兩個方向都不是它的來源態）。
+ * 品质复核翻转（PRD §5.6 抽检判据；【契约外新增】，比照 §3.2 retract 的目录＋正文同步纪律）：
+ * active↔pending_review 双向翻转，INDEX 重建沿用 rebuildIndex（pending_review 不在
+ * activeDocs → 索引行自动消失）；retracted 永不翻转（留证不动，两个方向都不是它的来源态）。
  */
 export async function reviewMemoryDocs(
   input: MemoryReviewInput,
@@ -644,7 +644,7 @@ export async function reviewMemoryDocs(
     input?.scope === "private" || input?.scope === "shared"
       ? input.scope
       : action === "pending_review"
-        ? "shared" // PRD §5.6：自動翻轉僅限 shared；私有庫要翻得顯式帶 scope
+        ? "shared" // PRD §5.6：自动翻转仅限 shared；私有库要翻得显式带 scope
         : undefined;
 
   const nowIso = new Date().toISOString();

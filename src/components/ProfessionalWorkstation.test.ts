@@ -320,8 +320,8 @@ test("professional workstation is based on open-source workstation patterns", ()
   assert.match(source, /CreatorResourcePanel/);
   assert.match(source, /concurrency/);
   assert.match(source, /contextPrompt/);
-  // 2026-08-27 專業工作站入口移除：playground 不再動態 import 工作站，
-  // 也不再持有 showProfessionalMode / onToggleProfessionalMode / recentWorkflows 接線。
+  // 2026-08-27 专业工作站入口移除：playground 不再动态 import 工作站，
+  // 也不再持有 showProfessionalMode / onToggleProfessionalMode / recentWorkflows 接线。
   assert.doesNotMatch(playground, /pro-workstation/);
   assert.doesNotMatch(playground, /showProfessionalMode/);
   assert.doesNotMatch(playground, /onToggleProfessionalMode/);
@@ -522,8 +522,8 @@ test("professional workstation stays fast on low-end hardware", () => {
   assert.match(source, /await import\("driver\.js"\)/);
   assert.match(source, /import type \{ Driver \} from "driver\.js"/);
 
-  // 2026-08-27 專業工作站入口移除：workstation.css 不再被首頁任何路徑拉起
-  // （playground 零引用），原「懶載入 chunk」契約由「無引用」取代。
+  // 2026-08-27 专业工作站入口移除：workstation.css 不再被首页任何路径拉起
+  // （playground 零引用），原「懒载入 chunk」契约由「无引用」取代。
   assert.doesNotMatch(playground, /pro-workstation/);
   assert.doesNotMatch(playground, /import "\.\/pro-workstation\/workstation\.css"/);
 
@@ -558,8 +558,8 @@ test("professional workstation keeps a compact single-screen liquid glass layout
   const globals = read("src/app/globals.css");
   const styles = read("src/components/pro-workstation/workstation.css");
 
-  // 2026-08-27 專業工作站入口移除：globals.css 的 .pro-app-shell / pro-mode-active
-  // 基块隨入口清除（workstation.css 內部的樣式保留，僅供無入口的舊檔自洽）。
+  // 2026-08-27 专业工作站入口移除：globals.css 的 .pro-app-shell / pro-mode-active
+  // 基块随入口清除（workstation.css 内部的样式保留，仅供无入口的旧档自洽）。
   assert.doesNotMatch(globals, /\.pro-app-shell/);
   assert.doesNotMatch(globals, /\.pro-mode-active/);
   assert.doesNotMatch(globals, /\.pro-studio-shell/);
@@ -932,7 +932,7 @@ test("downloaded PNG embeds the workflow and re-import restores it", () => {
   assert.match(pngLib, /WORKFLOW_PNG_MAGIC/);
   assert.match(pngLib, /WORKFLOW_PNG_VERSION/);
 
-  // 下载侧：工作台下载成片时把这张成片的工作流嵌入 PNG 檔尾。
+  // 下载侧：工作台下载成片时把这张成片的工作流嵌入 PNG 档尾。
   assert.match(source, /import \{ embedWorkflowIntoPng \} from "@\/lib\/workflow-png"/);
   assert.match(source, /buildProvenanceConfig\(image\)/);
   assert.match(source, /embedWorkflowIntoPng\(/);

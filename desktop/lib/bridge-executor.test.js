@@ -1,10 +1,10 @@
 // desktop/lib/bridge-executor.test.js
 //
-// W6b 執行器測試（**真正讀檔的危險路徑**）。跑法：
+// W6b 执行器测试（**真正读档的危险路径**）。跑法：
 //   npx --yes tsx --test desktop/lib/bridge-executor.test.js
 //
-// 用 node:test + node:assert，真暫存目錄（真檔案系統行為）＋注入計數版 fs。
-// 這補上先前「所有綠燈只測純函式複本、executeTool/requireLocalPath 零測試」的自欺。
+// 用 node:test + node:assert，真暂存目录（真档案系统行为）＋注入计数版 fs。
+// 这补上先前「所有绿灯只测纯函式复本、executeTool/requireLocalPath 零测试」的自欺。
 
 "use strict";
 
@@ -26,7 +26,7 @@ function rmrf(p) {
   nodeFs.rmSync(p, { recursive: true, force: true });
 }
 
-/** 注入用 fs：預設 node:fs，另記錄 readFileSync/statSync 被呼叫的路徑。 */
+/** 注入用 fs：预设 node:fs，另记录 readFileSync/statSync 被呼叫的路径。 */
 function countingFs() {
   const calls = { readFileSync: [], statSync: [] };
   const fs = { ...nodeFs };
@@ -48,7 +48,7 @@ function isCode(code) {
 // ---------------------------------------------------------------------------
 // H1：allowlist 必填，空集 = 全拒
 // ---------------------------------------------------------------------------
-test("H1: 空 allowlist ⇒ 一律拒（no_authorized_roots），不得退回只驗 denylist", async () => {
+test("H1: 空 allowlist ⇒ 一律拒（no_authorized_roots），不得退回只验 denylist", async () => {
   const root = makeTempRoot();
   try {
     const f = path.join(root, "a.txt");
@@ -62,7 +62,7 @@ test("H1: 空 allowlist ⇒ 一律拒（no_authorized_roots），不得退回只
   }
 });
 
-test("H1: 未提供 roots（undefined）⇒ 視為空集全拒", () => {
+test("H1: 未提供 roots（undefined）⇒ 视为空集全拒", () => {
   const root = makeTempRoot();
   try {
     const f = path.join(root, "a.txt");
@@ -75,9 +75,9 @@ test("H1: 未提供 roots（undefined）⇒ 視為空集全拒", () => {
 });
 
 // ---------------------------------------------------------------------------
-// H3：家目錄外敏感路徑
+// H3：家目录外敏感路径
 // ---------------------------------------------------------------------------
-test("H3: 家目錄外敏感路徑 ⇒ 拒（sensitive_path）", () => {
+test("H3: 家目录外敏感路径 ⇒ 拒（sensitive_path）", () => {
   const ex = createBridgeExecutor({ fs: nodeFs, roots: ["/tmp"] });
   for (const p of [
     "/tmp/x/.ssh/id_rsa",
@@ -90,7 +90,7 @@ test("H3: 家目錄外敏感路徑 ⇒ 拒（sensitive_path）", () => {
   }
 });
 
-test("H3: 授權根之下仍不得放行敏感路徑", () => {
+test("H3: 授权根之下仍不得放行敏感路径", () => {
   const root = makeTempRoot();
   try {
     nodeFs.mkdirSync(path.join(root, ".ssh"), { recursive: true });
@@ -103,7 +103,7 @@ test("H3: 授權根之下仍不得放行敏感路徑", () => {
   }
 });
 
-test("symlink: 授權根內指到敏感位置的 symlink ⇒ 解 realpath 後拒", () => {
+test("symlink: 授权根内指到敏感位置的 symlink ⇒ 解 realpath 后拒", () => {
   const root = makeTempRoot();
   const outside = makeTempRoot();
   try {
@@ -121,9 +121,9 @@ test("symlink: 授權根內指到敏感位置的 symlink ⇒ 解 realpath 後拒
 });
 
 // ---------------------------------------------------------------------------
-// H2：遞迴收集剪掉敏感段
+// H2：递回收集剪掉敏感段
 // ---------------------------------------------------------------------------
-test("H2: 父目錄含敏感段的遞迴收集 ⇒ 敏感檔被排除", () => {
+test("H2: 父目录含敏感段的递回收集 ⇒ 敏感档被排除", () => {
   const root = makeTempRoot();
   try {
     nodeFs.writeFileSync(path.join(root, "normal.txt"), "NEEDLE here\n");
@@ -136,16 +136,16 @@ test("H2: 父目錄含敏感段的遞迴收集 ⇒ 敏感檔被排除", () => {
     const hit = res.matches.map((m) => m.path);
     assert.ok(hit.some((p) => p.endsWith("normal.txt")));
     assert.ok(hit.some((p) => p.endsWith("ok.txt")));
-    assert.equal(hit.some((p) => p.includes(".ssh")), false, "敏感段不得被收集/讀取");
+    assert.equal(hit.some((p) => p.includes(".ssh")), false, "敏感段不得被收集/读取");
   } finally {
     rmrf(root);
   }
 });
 
 // ---------------------------------------------------------------------------
-// M3：單檔大小上限 + 檔案系統根拒絕
+// M3：单档大小上限 + 档案系统根拒绝
 // ---------------------------------------------------------------------------
-test("M3: 超過單檔大小上限 ⇒ 跳過並標記，且不整檔讀入記憶體", () => {
+test("M3: 超过单档大小上限 ⇒ 跳过并标记，且不整档读入记忆体", () => {
   const root = makeTempRoot();
   try {
     const big = path.join(root, "big.txt");
@@ -157,13 +157,13 @@ test("M3: 超過單檔大小上限 ⇒ 跳過並標記，且不整檔讀入記�
     assert.equal(res.skipped_large_files, 1);
     assert.ok(res.matches.some((m) => m.path.endsWith("small.txt")));
     assert.equal(res.matches.some((m) => m.path.endsWith("big.txt")), false);
-    assert.equal(calls.readFileSync.some((p) => p.endsWith("big.txt")), false, "大檔不得被 readFileSync");
+    assert.equal(calls.readFileSync.some((p) => p.endsWith("big.txt")), false, "大档不得被 readFileSync");
   } finally {
     rmrf(root);
   }
 });
 
-test("M3: path='/'（檔案系統根）⇒ 拒（path_is_root）", () => {
+test("M3: path='/'（档案系统根）⇒ 拒（path_is_root）", () => {
   assert.equal(isFsRoot("/"), true);
   assert.equal(isFsRoot("/tmp"), false);
   const ex = createBridgeExecutor({ fs: nodeFs, roots: ["/tmp"] });
@@ -171,9 +171,9 @@ test("M3: path='/'（檔案系統根）⇒ 拒（path_is_root）", () => {
 });
 
 // ---------------------------------------------------------------------------
-// H2 輸入側：grep 逐檔上限 = min(雲端下發 max_file_bytes, 本機上限)
+// H2 输入侧：grep 逐档上限 = min(云端下发 max_file_bytes, 本机上限)
 // ---------------------------------------------------------------------------
-test("H2: grep 真的用 max_file_bytes（超過即跳過且不讀檔；雲端大值被本機夾住）", () => {
+test("H2: grep 真的用 max_file_bytes（超过即跳过且不读档；云端大值被本机夹住）", () => {
   const root = makeTempRoot();
   try {
     const medium = path.join(root, "medium.txt");
@@ -181,19 +181,19 @@ test("H2: grep 真的用 max_file_bytes（超過即跳過且不讀檔；雲端�
     const { fs, calls } = countingFs();
     const ex = createBridgeExecutor({ fs, roots: [root] });
 
-    // 未帶 max_file_bytes → 本機上限（1MB），4KB 檔可讀
+    // 未带 max_file_bytes → 本机上限（1MB），4KB 档可读
     const all = ex.toolGrep({ path: root, pattern: "NEEDLE" });
     assert.equal(all.skipped_large_files, 0);
     assert.ok(all.matches.some((m) => m.path.endsWith("medium.txt")));
 
-    // 雲端下發 64 bytes → 4KB 檔被跳過，且不得 readFileSync（不整檔入記憶體）
+    // 云端下发 64 bytes → 4KB 档被跳过，且不得 readFileSync（不整档入记忆体）
     calls.readFileSync.length = 0;
     const capped = ex.toolGrep({ path: root, pattern: "NEEDLE", max_file_bytes: 64 });
     assert.equal(capped.skipped_large_files, 1);
     assert.equal(capped.matches.some((m) => m.path.endsWith("medium.txt")), false);
     assert.equal(calls.readFileSync.some((p) => p.endsWith("medium.txt")), false);
 
-    // 雲端下發超大值 → 被本機上限夾住（不得比契約鬆）
+    // 云端下发超大值 → 被本机上限夹住（不得比契约松）
     const clamped = ex.toolGrep({ path: root, pattern: "NEEDLE", max_file_bytes: 64 * 1024 * 1024 });
     assert.equal(clamped.skipped_large_files, 0);
     assert.ok(clamped.matches.some((m) => m.path.endsWith("medium.txt")));
@@ -203,9 +203,9 @@ test("H2: grep 真的用 max_file_bytes（超過即跳過且不讀檔；雲端�
 });
 
 // ---------------------------------------------------------------------------
-// H2 契約面第二層：grep/list_dir 自報敏感觸碰
+// H2 契约面第二层：grep/list_dir 自报敏感触碰
 // ---------------------------------------------------------------------------
-test("H2: grep 遞迴碰到敏感段 ⇒ 自報 excluded_sensitive_count / sensitive_path_touched", () => {
+test("H2: grep 递回碰到敏感段 ⇒ 自报 excluded_sensitive_count / sensitive_path_touched", () => {
   const root = makeTempRoot();
   const clean = makeTempRoot();
   try {
@@ -229,7 +229,7 @@ test("H2: grep 遞迴碰到敏感段 ⇒ 自報 excluded_sensitive_count / sensi
   }
 });
 
-test("H2: list_dir 敏感 entry 不進回傳並自報計數", () => {
+test("H2: list_dir 敏感 entry 不进回传并自报计数", () => {
   const root = makeTempRoot();
   try {
     nodeFs.writeFileSync(path.join(root, "a.txt"), "a");
@@ -245,9 +245,9 @@ test("H2: list_dir 敏感 entry 不進回傳並自報計數", () => {
 });
 
 // ---------------------------------------------------------------------------
-// allowlist 邊界 / 工具白名單 / 一般操作
+// allowlist 边界 / 工具白名单 / 一般操作
 // ---------------------------------------------------------------------------
-test("allowlist: 授權根外的一般路徑 ⇒ not_authorized", () => {
+test("allowlist: 授权根外的一般路径 ⇒ not_authorized", () => {
   const root = makeTempRoot();
   const other = makeTempRoot();
   try {
@@ -261,7 +261,7 @@ test("allowlist: 授權根外的一般路徑 ⇒ not_authorized", () => {
   }
 });
 
-test("requireLocalPath: 授權根內不存在的路徑 ⇒ not_found", () => {
+test("requireLocalPath: 授权根内不存在的路径 ⇒ not_found", () => {
   const root = makeTempRoot();
   try {
     const ex = createBridgeExecutor({ fs: nodeFs, roots: [root] });
@@ -271,13 +271,13 @@ test("requireLocalPath: 授權根內不存在的路徑 ⇒ not_found", () => {
   }
 });
 
-test("executeTool: 未知工具 ⇒ tool_not_allowed（無任何寫/刪/執行工具）", async () => {
+test("executeTool: 未知工具 ⇒ tool_not_allowed（无任何写/删/执行工具）", async () => {
   const ex = createBridgeExecutor({ fs: nodeFs, roots: ["/tmp"] });
   await assert.rejects(ex.executeTool("exec", { path: "/tmp" }), isCode("tool_not_allowed"));
   await assert.rejects(ex.executeTool("write_file", { path: "/tmp" }), isCode("tool_not_allowed"));
 });
 
-test("read_file: offset/limit 生效且 limit 夾到硬上限", async () => {
+test("read_file: offset/limit 生效且 limit 夹到硬上限", async () => {
   const root = makeTempRoot();
   try {
     const f = path.join(root, "a.txt");
@@ -293,7 +293,7 @@ test("read_file: offset/limit 生效且 limit 夾到硬上限", async () => {
   }
 });
 
-test("list_dir/stat: 授權根內正常運作", async () => {
+test("list_dir/stat: 授权根内正常运作", async () => {
   const root = makeTempRoot();
   try {
     nodeFs.writeFileSync(path.join(root, "a.txt"), "a");
@@ -311,23 +311,23 @@ test("list_dir/stat: 授權根內正常運作", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 第二道防線（W6c）：permission-rules.evaluatePermission 在執行前獨立複核
-// 即使 gateway 端放行（餵 allow 規則 ＋ mode=full）本機仍自行拒絕。
+// 第二道防线（W6c）：permission-rules.evaluatePermission 在执行前独立复核
+// 即使 gateway 端放行（喂 allow 规则 ＋ mode=full）本机仍自行拒绝。
 // ---------------------------------------------------------------------------
 
-/** 給定設定（home=授權根）＋一個「放行一切」的 allow 規則的執行器。 */
+/** 给定设定（home=授权根）＋一个「放行一切」的 allow 规则的执行器。 */
 function defenseExecutor(home, mode = "full") {
   return createBridgeExecutor({
     fs: nodeFs,
     roots: [home],
     mode,
-    // 工具級規則在 matchSpecifier 會回 false，故用 `//**`（任意絕對路徑）確保 allow 真的命中。
+    // 工具级规则在 matchSpecifier 会回 false，故用 `//**`（任意绝对路径）确保 allow 真的命中。
     rules: { allow: ["read_file(//**)"] },
     home,
   });
 }
 
-/** 依 HARD_DENY_PATTERN 的 kind 構造一條命中用路徑。 */
+/** 依 HARD_DENY_PATTERN 的 kind 构造一条命中用路径。 */
 function hardDenyCasePath(p, home) {
   if (p.kind === "home-dir") return `${home}/${p.pattern.slice(2)}/x.txt`;
   if (p.kind === "home-file") return `${home}/${p.pattern.slice(2)}`;
@@ -337,11 +337,11 @@ function hardDenyCasePath(p, home) {
   return `${home}/proj/${p.pattern}`; // basename-exact
 }
 
-test("第二道防線：硬 denylist 逐樣式，gateway 放行（allow 規則＋mode=full）仍 deny", () => {
+test("第二道防线：硬 denylist 逐样式，gateway 放行（allow 规则＋mode=full）仍 deny", () => {
   const home = makeTempRoot();
   try {
     const ex = defenseExecutor(home, "full");
-    assert.ok(HARD_DENY_PATTERNS.length >= 20, "硬 denylist 應有完整樣式");
+    assert.ok(HARD_DENY_PATTERNS.length >= 20, "硬 denylist 应有完整样式");
     for (const p of HARD_DENY_PATTERNS) {
       const casePath = hardDenyCasePath(p, home);
       assert.throws(
@@ -355,7 +355,7 @@ test("第二道防線：硬 denylist 逐樣式，gateway 放行（allow 規則�
   }
 });
 
-test("第二道防線：safety-check 檔案/目錄逐條，gateway 放行仍 ask（needs_authorization）", () => {
+test("第二道防线：safety-check 档案/目录逐条，gateway 放行仍 ask（needs_authorization）", () => {
   const home = makeTempRoot();
   try {
     const ex = defenseExecutor(home, "full");
@@ -380,21 +380,21 @@ test("第二道防線：safety-check 檔案/目錄逐條，gateway 放行仍 ask
   }
 });
 
-test("第二道防線（執行路徑）：授權根內硬 denylist 檔（x.pem）即使 mode=full 也被拒", async () => {
+test("第二道防线（执行路径）：授权根内硬 denylist 档（x.pem）即使 mode=full 也被拒", async () => {
   const root = makeTempRoot();
   try {
     const pem = path.join(root, "x.pem");
     nodeFs.writeFileSync(pem, "-----BEGIN KEY-----");
     const ex = defenseExecutor(root, "full");
-    // policy.isSensitivePath 不含 *.pem ⇒ 必須由第二道防線攔下（證明不是靠第一層）。
-    assert.equal(policy.isSensitivePath(pem), false, "前提：policy denylist 不擋 *.pem");
+    // policy.isSensitivePath 不含 *.pem ⇒ 必须由第二道防线拦下（证明不是靠第一层）。
+    assert.equal(policy.isSensitivePath(pem), false, "前提：policy denylist 不挡 *.pem");
     await assert.rejects(ex.executeTool("read_file", { path: pem }), (err) => err && err.code === "permission_denied");
   } finally {
     rmrf(root);
   }
 });
 
-test("第二道防線（執行路徑）：授權根內 .bashrc ⇒ needs_authorization（ask，不執行）", async () => {
+test("第二道防线（执行路径）：授权根内 .bashrc ⇒ needs_authorization（ask，不执行）", async () => {
   const root = makeTempRoot();
   try {
     const bashrc = path.join(root, ".bashrc");
@@ -406,7 +406,7 @@ test("第二道防線（執行路徑）：授權根內 .bashrc ⇒ needs_authori
   }
 });
 
-test("第二道防線（模式語義）：mode=ask 對一般檔也 ask；mode=auto 授權根內放行", async () => {
+test("第二道防线（模式语义）：mode=ask 对一般档也 ask；mode=auto 授权根内放行", async () => {
   const root = makeTempRoot();
   try {
     const f = path.join(root, "normal.txt");
@@ -422,7 +422,7 @@ test("第二道防線（模式語義）：mode=ask 對一般檔也 ask；mode=au
   }
 });
 
-test("第二道防線（模式語義）：mode=off 一律拒（deny，先於一切）", async () => {
+test("第二道防线（模式语义）：mode=off 一律拒（deny，先于一切）", async () => {
   const root = makeTempRoot();
   try {
     const f = path.join(root, "normal.txt");
@@ -434,43 +434,43 @@ test("第二道防線（模式語義）：mode=off 一律拒（deny，先於一�
   }
 });
 
-test("第二道防線：grep/list_dir 不會曝露或讀入硬 denylist 檔（.env）", async () => {
+test("第二道防线：grep/list_dir 不会曝露或读入硬 denylist 档（.env）", async () => {
   const root = makeTempRoot();
   try {
     nodeFs.writeFileSync(path.join(root, "ok.txt"), "NEEDLE\n");
     nodeFs.writeFileSync(path.join(root, ".env"), "NEEDLE=secret\n");
     const ex = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "auto" });
     const g = ex.toolGrep({ path: root, pattern: "NEEDLE" });
-    assert.equal(g.matches.some((m) => m.path.endsWith(".env")), false, "硬 denylist 檔不得被讀入");
-    assert.ok(g.excluded_sensitive_count >= 1, "應自報排除硬 denylist 檔");
+    assert.equal(g.matches.some((m) => m.path.endsWith(".env")), false, "硬 denylist 档不得被读入");
+    assert.ok(g.excluded_sensitive_count >= 1, "应自报排除硬 denylist 档");
     const ld = ex.toolListDir({ path: root });
-    assert.equal(ld.entries.some((e) => e.name === ".env"), false, "硬 denylist 檔不得曝露於 list_dir");
+    assert.equal(ld.entries.some((e) => e.name === ".env"), false, "硬 denylist 档不得曝露于 list_dir");
   } finally {
     rmrf(root);
   }
 });
 
 // ---------------------------------------------------------------------------
-// grantedRoots（對話內就地授權）：mode=ask 下已同意的根放行；未同意仍 needs_authorization；
-// 硬 denylist 不得被繞過。
+// grantedRoots（对话内就地授权）：mode=ask 下已同意的根放行；未同意仍 needs_authorization；
+// 硬 denylist 不得被绕过。
 // ---------------------------------------------------------------------------
-test("grantedRoots：mode=ask 下，已同意的根（同/子路徑）走 rule_allow 放行", async () => {
+test("grantedRoots：mode=ask 下，已同意的根（同/子路径）走 rule_allow 放行", async () => {
   const parent = makeTempRoot();
   try {
     const sub = path.join(parent, "sub");
     nodeFs.mkdirSync(sub);
     nodeFs.writeFileSync(path.join(sub, "a.txt"), "hi");
-    // 既有 allowlist 只有 sub（使用者 pickFiles 挑的根）；同意根是 parent（對話內授權）。
+    // 既有 allowlist 只有 sub（使用者 pickFiles 挑的根）；同意根是 parent（对话内授权）。
     const ex = createBridgeExecutor({ fs: nodeFs, roots: [sub], mode: "ask", home: parent });
-    // 未同意：sub 雖在 allowlist，mode=ask ⇒ needs_authorization
+    // 未同意：sub 虽在 allowlist，mode=ask ⇒ needs_authorization
     await assert.rejects(
       ex.executeTool("list_dir", { path: sub }),
       (err) => err && err.code === "needs_authorization",
     );
-    // 同意 parent 後：sub 內放行（當次請求即生效）
+    // 同意 parent 后：sub 内放行（当次请求即生效）
     const ok = await ex.executeTool("list_dir", { path: sub }, { grantedRoots: [parent] });
     assert.ok(Array.isArray(ok.entries));
-    // parent 本身亦在同意根內 ⇒ 放行
+    // parent 本身亦在同意根内 ⇒ 放行
     const ok2 = await ex.executeTool("list_dir", { path: parent }, { grantedRoots: [parent] });
     assert.equal(ok2.path, parent);
   } finally {
@@ -478,7 +478,7 @@ test("grantedRoots：mode=ask 下，已同意的根（同/子路徑）走 rule_a
   }
 });
 
-test("grantedRoots：未同意的其他已授權路徑仍 needs_authorization（不放寬）", async () => {
+test("grantedRoots：未同意的其他已授权路径仍 needs_authorization（不放宽）", async () => {
   const parent = makeTempRoot();
   const other = makeTempRoot();
   try {
@@ -495,7 +495,7 @@ test("grantedRoots：未同意的其他已授權路徑仍 needs_authorization（
   }
 });
 
-test("grantedRoots：硬 denylist（~/.ssh/id_rsa）即使同意根含家目錄祖先仍 deny", async () => {
+test("grantedRoots：硬 denylist（~/.ssh/id_rsa）即使同意根含家目录祖先仍 deny", async () => {
   const home = makeTempRoot();
   try {
     const ssh = path.join(home, ".ssh");
@@ -511,18 +511,18 @@ test("grantedRoots：硬 denylist（~/.ssh/id_rsa）即使同意根含家目錄�
   }
 });
 
-test("grantedRoots：非陣列／非字串元素 fail-closed（不當空陣列清空既有授權）", async () => {
+test("grantedRoots：非阵列／非字串元素 fail-closed（不当空阵列清空既有授权）", async () => {
   const root = makeTempRoot();
   try {
     const f = path.join(root, "a.txt");
     nodeFs.writeFileSync(f, "hi");
     const ex = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "ask", home: root });
-    // 既有 root 仍有效（allowlist 未因 grantedRoots 型別錯被清空）⇒ 走第二道防線回 needs_authorization
+    // 既有 root 仍有效（allowlist 未因 grantedRoots 型别错被清空）⇒ 走第二道防线回 needs_authorization
     await assert.rejects(
       ex.executeTool("read_file", { path: f }, { grantedRoots: "not-an-array" }),
       (err) => err && err.code === "needs_authorization",
     );
-    // 空陣列亦同
+    // 空阵列亦同
     await assert.rejects(
       ex.executeTool("read_file", { path: f }, { grantedRoots: [] }),
       (err) => err && err.code === "needs_authorization",

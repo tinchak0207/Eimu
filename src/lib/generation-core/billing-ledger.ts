@@ -25,9 +25,9 @@ type BillingOperation = "reserve" | "commit" | "refund";
 const EXECUTION_LEASE_MS = 45_000;
 const DEFAULT_RECONCILE_BATCH = 50;
 
-// P0 止血（2026-08-28 域 E）：殭屍回收門檻。非終態卡在計費狀態超過此時長的任務，
-// 由 reconcile 強制對帳（該 refund 的 refund、確定性失敗的終結），不再無限重試。
-// P1 拆除 reserve 阻塞閘門後本段整體退役。
+// P0 止血（2026-08-28 域 E）：僵尸回收门槛。非终态卡在计费状态超过此时长的任务，
+// 由 reconcile 强制对帐（该 refund 的 refund、确定性失败的终结），不再无限重试。
+// P1 拆除 reserve 阻塞闸门后本段整体退役。
 const ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT = 6 * 60 * 60 * 1000;
 const ZOMBIE_RECLAIM_BATCH = 100;
 
@@ -94,7 +94,7 @@ async function moveJobToQueued(jobId: string, sql: GenerationSql): Promise<void>
   `;
 }
 
-/** 計費動作 → 封閉 registry 的動作鍵（FG-b：重放預算的唯一來源）。 */
+/** 计费动作 → 封闭 registry 的动作键（FG-b：重放预算的唯一来源）。 */
 const BILLING_REPLAY_KEY: Record<BillingOperation, BillingReplayOperation> = {
   reserve: "billing.reserve",
   commit: "billing.commit",
@@ -107,14 +107,14 @@ type BillingClaimOutcome =
   | { kind: "replay_denied"; plan: ReplayPlan };
 
 /**
- * claim = 計費動作的自動重放裁決點。CAS（status='pending' → 'executing' ＋ 租約）
- * 仍是併發邊界；差別是 claim 成功後**先問封閉 operation registry「這次嘗試准不准」**，
- * 不許就更不執行外部扣款／退款。裁決序號用 RETURNING 的 attempt_count：
- * UPDATE 內已 +1，故它就是「即將執行的這次嘗試」的序號（FG 教訓：先定序號語義再改點）。
+ * claim = 计费动作的自动重放裁决点。CAS（status='pending' → 'executing' ＋ 租约）
+ * 仍是并发边界；差别是 claim 成功后**先问封闭 operation registry「这次尝试准不准」**，
+ * 不许就更不执行外部扣款／退款。裁决序号用 RETURNING 的 attempt_count：
+ * UPDATE 内已 +1，故它就是「即将执行的这次尝试」的序号（FG 教训：先定序号语义再改点）。
  *
- * 被拒時的終結刻意沿用既有桶，不動金額與狀態機語義：
- *  - reserve → unknown（扣款狀態不明 → 既有 6h zombie reclaim 全額退款給用戶，用戶不虧）
- *  - refund  → failed（退款未落地且不再自動重試 → 出現在 probe 的 refund_failed 名單）
+ * 被拒时的终结刻意沿用既有桶，不动金额与状态机语义：
+ *  - reserve → unknown（扣款状态不明 → 既有 6h zombie reclaim 全额退款给用户，用户不亏）
+ *  - refund  → failed（退款未落地且不再自动重试 → 出现在 probe 的 refund_failed 名单）
  */
 async function claimBillingOperation(input: {
   jobId: string;
@@ -268,12 +268,12 @@ export async function reserveGenerationBilling(input: {
     executorId: input.executorId,
     sql,
   });
-  // replay_denied：claim 已把 reserve op 凍結為 unknown（job → billing_unknown），
-  // 不再執行外部扣款；後續由既有 zombie reclaim 走保守全額退款，金額不變。
+  // replay_denied：claim 已把 reserve op 冻结为 unknown（job → billing_unknown），
+  // 不再执行外部扣款；后续由既有 zombie reclaim 走保守全额退款，金额不变。
   if (claim.kind !== "claimed") return freshJob(input.job.id, sql);
   const claimed = claim.row;
 
-  // REQ-E1a 順序鐵律：先種基線（取「扣款之前」的 users.quota），再扣上游，最後記帳本。
+  // REQ-E1a 顺序铁律：先种基线（取「扣款之前」的 users.quota），再扣上游，最后记帐本。
   const baselineReady = await ensureAccountBaselines([input.job.billingUserId], { sql });
   try {
     await (input.adapter ?? configuredGenerationBillingAdapter()).reserve({
@@ -298,9 +298,9 @@ export async function reserveGenerationBilling(input: {
         `;
         emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingReserved, actor: input.executorId, detail: { amount: input.job.billingAmount, operation: "reserve" } }, sql);
       });
-      // REQ-E1a 雙寫：legacy 路徑的 reserve 是真的動了上游 users.quota（gate 路徑
-      // billing_amount=0 會在前面早退，永不走到這裡），故上游扣款同步記進我方帳本。
-      // 記帳失敗不擋路，差額由 E1b 對帳報告逐筆指出。
+      // REQ-E1a 双写：legacy 路径的 reserve 是真的动了上游 users.quota（gate 路径
+      // billing_amount=0 会在前面早退，永不走到这里），故上游扣款同步记进我方帐本。
+      // 记帐失败不挡路，差额由 E1b 对帐报告逐笔指出。
       const ledger = baselineReady
         ? await recordConsumption({
             billingUserId: input.job.billingUserId,
@@ -309,9 +309,9 @@ export async function reserveGenerationBilling(input: {
             operationId: String(claimed.id),
             source: "billing-ledger-reserve",
           }, { sql })
-        : { posted: false, reason: "基線不可得（未記帳）" };
+        : { posted: false, reason: "基线不可得（未记帐）" };
       if (!ledger.posted) {
-        console.error(`[billing-ledger] job ${input.job.id}: reserve 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+        console.error(`[billing-ledger] job ${input.job.id}: reserve 帐本同步未落地（${ledger.reason}）——已由对帐报告负责`);
       }
   } catch (error) {
     const detail = detailOf(error);
@@ -362,8 +362,8 @@ export async function commitGenerationBilling(
     throw new Error(`Invalid committed amount for generation job ${job.id}.`);
   }
 
-  // 埋點需要知道 INSERT 是否真正落地（重複 reconcile 會命中 ON CONFLICT 無聲跳過），
-  // 故追加 RETURNING id——不改變寫入語義，只讓「帳已結」事件不撒謊、不重複。
+  // 埋点需要知道 INSERT 是否真正落地（重复 reconcile 会命中 ON CONFLICT 无声跳过），
+  // 故追加 RETURNING id——不改变写入语义，只让「帐已结」事件不撒谎、不重复。
   const applied = await sql<Row[]>`
     INSERT INTO billing_operation (
       id, job_id, operation, amount, status, idempotency_ref, applied_at,
@@ -449,13 +449,13 @@ export async function refundGenerationBilling(input: {
     executorId: input.executorId,
     sql,
   });
-  // 預算耗盡 → claim 已把 refund op 終結為 failed（不重複 credit）。回報 "failed" 而非
-  // "pending"：pending 會讓呼叫方以為「還在跑、等一下就好」，那是假話。
+  // 预算耗尽 → claim 已把 refund op 终结为 failed（不重复 credit）。回报 "failed" 而非
+  // "pending"：pending 会让呼叫方以为「还在跑、等一下就好」，那是假话。
   if (claim.kind === "replay_denied") return "failed";
   if (claim.kind === "unavailable") return "pending";
   const claimed = claim.row;
 
-  // REQ-E1a 順序鐵律：先種基線（取「加款之前」的 users.quota），再加回上游，最後記帳本。
+  // REQ-E1a 顺序铁律：先种基线（取「加款之前」的 users.quota），再加回上游，最后记帐本。
   const baselineReady = await ensureAccountBaselines([input.job.billingUserId], { sql });
   try {
     await (input.adapter ?? configuredGenerationBillingAdapter()).refund({
@@ -481,8 +481,8 @@ export async function refundGenerationBilling(input: {
         WHERE id = ${input.job.id} AND status IN ('failed', 'cancelled')
       `;
     });
-    // REQ-E1a 雙寫：這筆退款真的把 quota 加回了上游 users.quota，我方帳本同步記加項。
-    // 記帳失敗不擋路（對帳報告會如實指出這筆未入帳）。
+    // REQ-E1a 双写：这笔退款真的把 quota 加回了上游 users.quota，我方帐本同步记加项。
+    // 记帐失败不挡路（对帐报告会如实指出这笔未入帐）。
     const ledger = baselineReady
       ? await recordRefund({
           billingUserId: input.job.billingUserId,
@@ -491,9 +491,9 @@ export async function refundGenerationBilling(input: {
           operationId: String(claimed.id),
           source: "billing-ledger-refund",
         }, { sql })
-      : { posted: false, reason: "基線不可得（未記帳）" };
+      : { posted: false, reason: "基线不可得（未记帐）" };
     if (!ledger.posted) {
-      console.error(`[billing-ledger] job ${input.job.id}: refund 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+      console.error(`[billing-ledger] job ${input.job.id}: refund 帐本同步未落地（${ledger.reason}）——已由对帐报告负责`);
     }
     return "applied";
   } catch (error) {
@@ -666,22 +666,22 @@ type ZombieDisposition =
   | { action: "failed"; refundFull: boolean; job: GenerationJob };
 
 /**
- * P0 止血（2026-08-28 域 E）：回收卡死在 pending_billing / billing_unknown 的殭屍。
+ * P0 止血（2026-08-28 域 E）：回收卡死在 pending_billing / billing_unknown 的僵尸。
  *
- * 判據（保守原則：用戶虧 1 幣重於平台黑 1 幣）：
- * - reserve op = applied：扣款已確認但任務未入隊（原子更新失敗的殘留）→
- *   任務重回 queued 繼續生成，由正常路徑 commit 結帳。
- * - reserve op = pending 且最近一次錯誤含 "reversed"：ImageBillingRevertedError
- *   只在「subtract 成功→複核失敗→add 回滾成功」後拋出，淨額為零由代碼路徑保證；
- *   這是確定性失敗（典型：用戶餘額買不起該模型，每次重試都扣成負數再回滾），
- *   無限重試毫無意義 → CAS 將 op 鎖成 failed，任務終結為 failed，不退款。
- * - reserve op = failed：reserve 已被確定性拒絕（4xx），無外部扣款 → 任務 failed，不退款。
- * - 其餘（op = unknown，或 pending 但無 reversed 憑據）：扣款狀態不明 →
- *   任務 failed 後全額退款（寧可平台承擔可能的風贈，也不讓用戶承擔不確定）。
+ * 判据（保守原则：用户亏 1 币重于平台黑 1 币）：
+ * - reserve op = applied：扣款已确认但任务未入队（原子更新失败的残留）→
+ *   任务重回 queued 继续生成，由正常路径 commit 结帐。
+ * - reserve op = pending 且最近一次错误含 "reversed"：ImageBillingRevertedError
+ *   只在「subtract 成功→复核失败→add 回滚成功」后抛出，净额为零由代码路径保证；
+ *   这是确定性失败（典型：用户余额买不起该模型，每次重试都扣成负数再回滚），
+ *   无限重试毫无意义 → CAS 将 op 锁成 failed，任务终结为 failed，不退款。
+ * - reserve op = failed：reserve 已被确定性拒绝（4xx），无外部扣款 → 任务 failed，不退款。
+ * - 其余（op = unknown，或 pending 但无 reversed 凭据）：扣款状态不明 →
+ *   任务 failed 后全额退款（宁可平台承担可能的风赠，也不让用户承担不确定）。
  *
- * op 為 pending 時必須先 CAS（帶 status='pending' 條件的原子更新）再改任務，
- * 避免與另一個 worker 正在執行的外部扣款賽跑；CAS 影響 0 行 = 本輪有併發 claim，跳過。
- * unknown op 不可再被 claim（claim 只認 pending），無賽跑風險。
+ * op 为 pending 时必须先 CAS（带 status='pending' 条件的原子更新）再改任务，
+ * 避免与另一个 worker 正在执行的外部扣款赛跑；CAS 影响 0 行 = 本轮有并发 claim，跳过。
+ * unknown op 不可再被 claim（claim 只认 pending），无赛跑风险。
  */
 async function reclaimStaleBillingZombies(input: {
   executorId: string;
@@ -821,19 +821,19 @@ async function reclaimOneZombie(input: {
 }
 
 /**
- * P0 止血（2026-08-28 域 E）：重跑擱淺的 refund operation。
- * terminalReservedJobs 只覆蓋 reserve=applied 的終態任務；reserve 非 applied 的
- * 終態任務，其 refund op 一旦落入 pending 就沒有任何循環會再碰它——
- * 用戶該退的錢永遠退不出去。這裡按同樣的 claim 門禁補一條重試通道。
- * unknown 的 refund 仍保留人工對帳（盲目重放可能已落地的 credit 會雙倍退款）。
+ * P0 止血（2026-08-28 域 E）：重跑搁浅的 refund operation。
+ * terminalReservedJobs 只覆盖 reserve=applied 的终态任务；reserve 非 applied 的
+ * 终态任务，其 refund op 一旦落入 pending 就没有任何循环会再碰它——
+ * 用户该退的钱永远退不出去。这里按同样的 claim 门禁补一条重试通道。
+ * unknown 的 refund 仍保留人工对帐（盲目重放可能已落地的 credit 会双倍退款）。
  *
- * 2026-08-30 整改：failed refund 是確定性拒絕（refundGenerationBilling 對 failed op
- * 直接短路返回 "failed"，永遠進不了 claim/執行），把 failed 撈進來只會每 30s 重複
- * 「撈起→短路→返回 failed」刷日誌（實證：job 2bc5aefd-… Billing relay refund failed
- * HTTP 404，500000 quota 永遠退不掉）。故只重試 status='pending'；failed op 由
- * probe terminal_unsettled(refund_failed) 如實可見、需人工對帳，不再自動重試。
- * 過期的 executing op 已由 markExpiredBillingOperationsUnknown 在同輪凍結為 unknown，
- * 走人工對帳通道，這裡不再重掃。
+ * 2026-08-30 整改：failed refund 是确定性拒绝（refundGenerationBilling 对 failed op
+ * 直接短路返回 "failed"，永远进不了 claim/执行），把 failed 捞进来只会每 30s 重复
+ * 「捞起→短路→返回 failed」刷日志（实证：job 2bc5aefd-… Billing relay refund failed
+ * HTTP 404，500000 quota 永远退不掉）。故只重试 status='pending'；failed op 由
+ * probe terminal_unsettled(refund_failed) 如实可见、需人工对帐，不再自动重试。
+ * 过期的 executing op 已由 markExpiredBillingOperationsUnknown 在同轮冻结为 unknown，
+ * 走人工对帐通道，这里不再重扫。
  */
 export async function retryStrandedRefundOperations(input: {
   executorId: string;
@@ -1012,9 +1012,9 @@ export async function reconcileBillingOperationManually(input: {
       if (currentStatus !== "unknown" && currentStatus !== "failed" && currentStatus !== "pending") {
         throw new Error("Only unknown, failed, or pending billing operations can be retried.");
       }
-      // FG-b：人工重試同時把自動重放預算歸零（attempt_count = 0）。operation registry
-      // 的預算是**自動**重放的預算，不該否決一個明確的人工決定——否則預算耗盡後
-      // 這個入口會變成看得到摸不到的空殼（claim 每次都立刻被拒）。
+      // FG-b：人工重试同时把自动重放预算归零（attempt_count = 0）。operation registry
+      // 的预算是**自动**重放的预算，不该否决一个明确的人工决定——否则预算耗尽后
+      // 这个入口会变成看得到摸不到的空壳（claim 每次都立刻被拒）。
       await tx`
         UPDATE billing_operation
         SET status = 'pending', executor_id = ${input.actor}, execution_expires_at = NULL,
@@ -1044,12 +1044,12 @@ export async function reconcileBillingOperationManually(input: {
   return view;
 }
 
-// ── 同步路由門面用的帳本原語（V-07/V-08，2026-09-28）──────────────────────
+// ── 同步路由门面用的帐本原语（V-07/V-08，2026-09-28）──────────────────────
 //
 // 同步直通路由（/v1/images/edits pixai 分支、/v1/upscale、/v1/template-generations、
-// /api/pixai/*）沒有 worker 執行，但錢必須跟 durable 任務一樣留 billing_operation 列，
-// 讓 reconcileGenerationBilling／retryStrandedRefundOperations 撈得到。
-// 以下兩個 export 是**新增**的，不改上方既有函式語義；唯一門面是 ./sync-charge.ts。
+// /api/pixai/*）没有 worker 执行，但钱必须跟 durable 任务一样留 billing_operation 列，
+// 让 reconcileGenerationBilling／retryStrandedRefundOperations 捞得到。
+// 以下两个 export 是**新增**的，不改上方既有函式语义；唯一门面是 ./sync-charge.ts。
 
 export type SyncReserveOutcome =
   | { status: "applied"; job: GenerationJob }
@@ -1057,16 +1057,16 @@ export type SyncReserveOutcome =
   | { status: "unknown"; job: GenerationJob; error: unknown };
 
 /**
- * 同步 job 的預扣。與 reserveGenerationBilling 同一條 claim／外部扣款／帳本雙寫鏈，
- * 差別只在 job 狀態機：
- *  - 成功：job 保持在「已在執行」態（'running'，租約由門面設），**絕不進 queued**——
- *    同步 job 沒有 worker 可接，進隊列等於讓 worker 再打一次付費上游。
- *  - 確定未扣（rejected／retry 類）：op → failed、job → failed。同步路由不排程重試：
- *    客戶當下就拿到 402，不能在背後偷偷扣。
+ * 同步 job 的预扣。与 reserveGenerationBilling 同一条 claim／外部扣款／帐本双写链，
+ * 差别只在 job 状态机：
+ *  - 成功：job 保持在「已在执行」态（'running'，租约由门面设），**绝不进 queued**——
+ *    同步 job 没有 worker 可接，进队列等于让 worker 再打一次付费上游。
+ *  - 确定未扣（rejected／retry 类）：op → failed、job → failed。同步路由不排程重试：
+ *    客户当下就拿到 402，不能在背后偷偷扣。
  *  - 不明（unknown）：op → unknown、job → billing_unknown，交既有 zombie reclaim
- *    （6h 後全額退款）——與 durable 路徑同一保守語義。
- * 呼叫前 job 必須處於 'submitting'（門面建單時設定），使 dueReservationJobs／
- * zombie reclaim（只認 pending_billing/billing_unknown）在扣款進行中碰不到它。
+ *    （6h 后全额退款）——与 durable 路径同一保守语义。
+ * 呼叫前 job 必须处于 'submitting'（门面建单时设定），使 dueReservationJobs／
+ * zombie reclaim（只认 pending_billing/billing_unknown）在扣款进行中碰不到它。
  */
 export async function reserveSyncGenerationBilling(input: {
   job: GenerationJob;
@@ -1162,19 +1162,19 @@ export async function reserveSyncGenerationBilling(input: {
         operationId: String(claimed.id),
         source: "billing-ledger-reserve",
       }, { sql })
-    : { posted: false, reason: "基線不可得（未記帳）" };
+    : { posted: false, reason: "基线不可得（未记帐）" };
   if (!ledger.posted) {
-    console.error(`[billing-ledger] sync job ${input.job.id}: reserve 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+    console.error(`[billing-ledger] sync job ${input.job.id}: reserve 帐本同步未落地（${ledger.reason}）——已由对帐报告负责`);
   }
   return { status: "applied", job: await freshJob(input.job.id, sql) };
 }
 
 /**
- * 只落一條 pending 的 refund op（不做外部 credit）。同步門面在回應客戶前先把
- * 「該退多少」寫進帳本，外部退款放到回應之後執行；進程若在那之前死掉，
- * reconcileGenerationBilling（failed 終態）或 retryStrandedRefundOperations
- * （succeeded 終態的部分退款）會撈到這條 op 補退。與 refundGenerationBilling
- * 共用同一個 ensureRefundOperation（同 idempotency_ref，金額衝突即拋）。
+ * 只落一条 pending 的 refund op（不做外部 credit）。同步门面在回应客户前先把
+ * 「该退多少」写进帐本，外部退款放到回应之后执行；进程若在那之前死掉，
+ * reconcileGenerationBilling（failed 终态）或 retryStrandedRefundOperations
+ * （succeeded 终态的部分退款）会捞到这条 op 补退。与 refundGenerationBilling
+ * 共用同一个 ensureRefundOperation（同 idempotency_ref，金额冲突即抛）。
  */
 export async function recordPendingGenerationRefund(
   job: GenerationJob,

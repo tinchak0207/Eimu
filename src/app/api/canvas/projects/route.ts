@@ -1,5 +1,5 @@
-// 畫布專案 API：雲端持久化（list / save / delete）。
-// 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
+// 画布专案 API：云端持久化（list / save / delete）。
+// 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { filterCardIdsForProject } from "@/lib/asset-library";
@@ -14,18 +14,18 @@ import { toCanvasProjectSummaryWire } from "@/lib/canvas/project-summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
 /**
- * 回應形狀（效能審計 P0-B，2026-10-01）：
- *   `?id=<projectId>` → `{ project }`，只回那一張（找不到 404）；
- *   `?view=summary`   → `{ summaries }`，只回標題/時間/節點數（歷史清單用）；
- *   缺省              → `{ projects }` 全量（舊客戶端相容，形狀逐字不變）。
- * 可見範圍與全量一致（同一份 listCanvasProjectsForCaller / 團隊讀閘結果），只是少傳。
+ * 回应形状（效能审计 P0-B，2026-10-01）：
+ *   `?id=<projectId>` → `{ project }`，只回那一张（找不到 404）；
+ *   `?view=summary`   → `{ summaries }`，只回标题/时间/节点数（历史清单用）；
+ *   缺省              → `{ projects }` 全量（旧客户端相容，形状逐字不变）。
+ * 可见范围与全量一致（同一份 listCanvasProjectsForCaller / 团队读闸结果），只是少传。
  */
 function projectsResponse(projects: CanvasProject[], params: URLSearchParams): NextResponse {
   const headers = { "Cache-Control": "no-store" };
@@ -45,8 +45,8 @@ export async function GET(req: NextRequest) {
   const caller = await requireVerifiedUser(req);
   if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
   try {
-    // 團隊可讀（片P 刀 2）：顯式指定 teamId ⇒ 只回該團隊畫布（非成員 403，同刀3 碼/文案）；
-    // 不指定 ⇒ 我個人的 + 我所屬團隊的（relay 查不到成員身份時只回個人，fail-open，不 500）。
+    // 团队可读（片P 刀 2）：显式指定 teamId ⇒ 只回该团队画布（非成员 403，同刀3 码/文案）；
+    // 不指定 ⇒ 我个人的 + 我所属团队的（relay 查不到成员身份时只回个人，fail-open，不 500）。
     const teamId = req.nextUrl.searchParams.get("teamId")?.trim();
     let projects: CanvasProject[];
     if (teamId) {
@@ -82,9 +82,9 @@ export async function PUT(req: NextRequest) {
 
   try {
     const now = new Date().toISOString();
-    // REQ-B2 作用域閘：cardIds 逐個過作用域裁決——跨項目、未顯式分享的卡不得鎖進本項目
-    // （生成時的卡注入讀的就是這份 cardIds）。走 asset-library 的單一裁決入口
-    // （內部＝resolveAssetVisibility）；個人卡逐位不變，查不到的 id 不猜（原樣保留）。
+    // REQ-B2 作用域闸：cardIds 逐个过作用域裁决——跨项目、未显式分享的卡不得锁进本项目
+    // （生成时的卡注入读的就是这份 cardIds）。走 asset-library 的单一裁决入口
+    // （内部＝resolveAssetVisibility）；个人卡逐位不变，查不到的 id 不猜（原样保留）。
     const cardIds = Array.isArray(body.cardIds)
       ? await filterCardIdsForProject({
           userId: caller.user.id,
@@ -92,8 +92,8 @@ export async function PUT(req: NextRequest) {
           cardIds: body.cardIds.filter((id): id is string => typeof id === "string"),
         })
       : null;
-    // 團隊建畫布閘（片F 面 2）：先判後存。成員且團隊關閉「成員建畫布」時拒新建，
-    // 既有專案更新與非成員（個人畫布）不受影響；拒絕時不落盤（無半成品）。
+    // 团队建画布闸（片F 面 2）：先判后存。成员且团队关闭「成员建画布」时拒新建，
+    // 既有专案更新与非成员（个人画布）不受影响；拒绝时不落盘（无半成品）。
     const gate = await saveCanvasProjectWithTeamGate(caller.user.id, {
       id: body.id,
       title: body.title?.trim()?.slice(0, 200) || "未命名画布",
@@ -105,23 +105,23 @@ export async function PUT(req: NextRequest) {
       backgroundMode: body.backgroundMode === "blank" || body.backgroundMode === "lines" ? body.backgroundMode : "dots",
       ...(body.budget ? { budget: body.budget } : {}),
       ...(cardIds ? { cardIds } : {}),
-      // 作品/劇集（2026-09-15 刀 1）：原樣透傳。清洗一律交給 project-store 的逐欄白名單，
-      // 本路由不重複實作洗欄邏輯（避免兩處白名單漂移）。不在此靜默丟欄。
+      // 作品/剧集（2026-09-15 刀 1）：原样透传。清洗一律交给 project-store 的逐栏白名单，
+      // 本路由不重复实作洗栏逻辑（避免两处白名单漂移）。不在此静默丢栏。
       ...(body.projectType !== undefined ? { projectType: body.projectType } : {}),
       ...(body.currentStep !== undefined ? { currentStep: body.currentStep } : {}),
       ...(body.episodes !== undefined ? { episodes: body.episodes } : {}),
-      // 專案級風格綁定（P1-8／對稱差 D34）：原樣透傳，清洗（＝STYLE_LIBRARY 註冊面查詢）
-      // 交給 project-store 的 normalizeProject，本路由不重複實作（避免兩處白名單漂移）。
+      // 专案级风格绑定（P1-8／对称差 D34）：原样透传，清洗（＝STYLE_LIBRARY 注册面查询）
+      // 交给 project-store 的 normalizeProject，本路由不重复实作（避免两处白名单漂移）。
       ...(body.styleId !== undefined ? { styleId: body.styleId } : {}),
-      // 解說劇設定（P1-5／D7）：原樣透傳，清洗/值域一律交給 project-store 的逐欄白名單
-      // （本路由不重複實作，避免兩處白名單漂移——同上方 projectType/episodes 的既有範式）。
+      // 解说剧设定（P1-5／D7）：原样透传，清洗/值域一律交给 project-store 的逐栏白名单
+      // （本路由不重复实作，避免两处白名单漂移——同上方 projectType/episodes 的既有范式）。
       ...(body.scriptType !== undefined ? { scriptType: body.scriptType } : {}),
       ...(body.narrationVoice !== undefined ? { narrationVoice: body.narrationVoice } : {}),
-      // 節點版本歷史（2026-09-27）：原樣透傳，清洗/裁剪交給 project-store 的
-      // normalizeNodeVersions（與讀取端同一份），本路由不重複實作。
+      // 节点版本历史（2026-09-27）：原样透传，清洗/裁剪交给 project-store 的
+      // normalizeNodeVersions（与读取端同一份），本路由不重复实作。
       ...(body.nodeVersions !== undefined ? { nodeVersions: body.nodeVersions } : {}),
-      // 作用域（片P 刀 1）：只透傳「宣告為 team」的情形；清洗在 project-store，
-      // teamId 由 team-canvas-gate 以已驗成員身份的權威值蓋章（不採信客戶端值）。
+      // 作用域（片P 刀 1）：只透传「宣告为 team」的情形；清洗在 project-store，
+      // teamId 由 team-canvas-gate 以已验成员身份的权威值盖章（不采信客户端值）。
       ...(body.scope === "team" ? { scope: "team" as const } : {}),
       ...(body.scope === "team" && typeof body.teamId === "string" ? { teamId: body.teamId } : {}),
     });

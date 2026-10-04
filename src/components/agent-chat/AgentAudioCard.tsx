@@ -8,17 +8,17 @@ import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentAudioCardProps {
   item: AgentAudioItem;
-  /** 存图库：true＝已存入／本來就在；false＝失敗（卡片顯示短暫「未存入」）。回調缺席＝disabled。 */
+  /** 存图库：true＝已存入／本来就在；false＝失败（卡片显示短暂「未存入」）。回调缺席＝disabled。 */
   onSaveToLibrary?: (item: AgentAudioItem) => Promise<boolean>;
-  /** 下载：true＝已觸發下載；false/拋錯＝按鈕短暫「失败」。 */
+  /** 下载：true＝已触发下载；false/抛错＝按钮短暂「失败」。 */
   onDownload?: (item: AgentAudioItem) => Promise<boolean>;
   /**
-   * 「再来 N 组」：會話級——音樂/音頻同樣按延遲出稿計費，payload 級重跑不開放
-   * （history-rerun.ts:53 註釋），只把「再來 N 組」翻成一句話丟回對話，
-   * 由助理重新決定參數並走既有計費鏈。
+   * 「再来 N 组」：会话级——音乐/音频同样按延迟出稿计费，payload 级重跑不开放
+   * （history-rerun.ts:53 注释），只把「再来 N 组」翻成一句话丢回对话，
+   * 由助理重新决定参数并走既有计费链。
    */
   onRerun?: (item: AgentAudioItem, count: number) => void;
-  /** 「微调」：只把半句話預填進輸入框（不自動送出＝不替使用者開一輪扣費）。 */
+  /** 「微调」：只把半句话预填进输入框（不自动送出＝不替使用者开一轮扣费）。 */
   onVariant?: (item: AgentAudioItem) => void;
 }
 
@@ -27,7 +27,7 @@ function formatCoins(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-/** 出音頻卡上的动作按钮：回调缺席时保持 disabled，沿用图片/影片卡的 Action 惯例。
+/** 出音频卡上的动作按钮：回调缺席时保持 disabled，沿用图片/影片卡的 Action 惯例。
  *  触控目标 44px（h-11），加 manipulation / 去高亮，避免 iOS 双击缩放与长按闪烁。 */
 function AudioAction({
   label,
@@ -71,7 +71,7 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
   const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // item.url 變化（同實例換曲）時重置加載態，避免舊曲的 failed 串台。
+  // item.url 变化（同实例换曲）时重置加载态，避免旧曲的 failed 串台。
   useEffect(() => {
     setFailed(false);
   }, [item.url]);
@@ -196,8 +196,8 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </AudioAction>
-        {/* 音頻走會話級重跑（見 props 註釋）：N 組檔位與歷史卡同源；回調缺席＝disabled。
-            選單本體是觸發鈕的兄弟（AgentRerunMenu 內部自有 relative 容器），不嵌套 button。 */}
+        {/* 音频走会话级重跑（见 props 注释）：N 组档位与历史卡同源；回调缺席＝disabled。
+            选单本体是触发钮的兄弟（AgentRerunMenu 内部自有 relative 容器），不嵌套 button。 */}
         <AgentRerunMenu
           label="再来 N 组"
           disabled={!onRerun}

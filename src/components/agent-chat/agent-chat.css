@@ -13,16 +13,16 @@
 }
 
 /* 滚动区：细滚动条，与站内 iOS 风格一致。
-   2026-09-20 修：overflow-x hidden —— 單列對話流裡任何超寬內容（長英文串/
-   超長 URL）都不該撐出「帶箭頭的原生橫向滾動條」（視覺破損感第一元凶：
-   overflow-y:auto 時 overflow-x:visible 會被規範計算成 auto）；超寬內容的
-   裁切由各內容塊自己負責（行內 code=break-all、表格=自滾、氣泡=break-words）。
+   2026-09-20 修：overflow-x hidden —— 单列对话流里任何超宽内容（长英文串/
+   超长 URL）都不该撑出「带箭头的原生横向滚动条」（视觉破损感第一元凶：
+   overflow-y:auto 时 overflow-x:visible 会被规范计算成 auto）；超宽内容的
+   裁切由各内容块自己负责（行内 code=break-all、表格=自滚、气泡=break-words）。
 
-   2026-09-20 第二刀（根因清剿）：細滾動條配方抽成可複用 class
-   `.agent-scroll-thin`——轉錄區與卡片區（confirm/questions）共用同一份，
-   不再各寫一份。webkit 的 `height` 必須跟 `width` 一起給：只給 width 時，
-   垂直條是細的、橫向條卻退回瀏覽器原生高度（Windows 上就是那條帶箭頭的
-   粗灰條），同一面板兩條滾動條兩種樣子＝破損感。 */
+   2026-09-20 第二刀（根因清剿）：细滚动条配方抽成可复用 class
+   `.agent-scroll-thin`——转录区与卡片区（confirm/questions）共用同一份，
+   不再各写一份。webkit 的 `height` 必须跟 `width` 一起给：只给 width 时，
+   垂直条是细的、横向条却退回浏览器原生高度（Windows 上就是那条带箭头的
+   粗灰条），同一面板两条滚动条两种样子＝破损感。 */
 .agent-transcript,
 .agent-scroll-thin {
   scrollbar-width: thin;
@@ -61,8 +61,8 @@
   animation: agent-rise 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-/* 串流打字光标（R9-2：step-end 閃爍改平滑呼吸——閃滅像壞掉的像素，
-   呼吸讓「正在流式輸出」的狀態一眼可讀，也不刺眼） */
+/* 串流打字光标（R9-2：step-end 闪烁改平滑呼吸——闪灭像坏掉的像素，
+   呼吸让「正在流式输出」的状态一眼可读，也不刺眼） */
 @keyframes agent-caret-blink {
   0%,
   100% {
@@ -94,11 +94,11 @@
 }
 .agent-args-inner {
   min-height: 0;
-  /* 舊瀏覽器回退值。真正生效的是元件上的行內 overflow:clip——
-     hidden 仍是滾動容器，Chrome 滾輪會先滾這個無捲軸的隱形容器
-     （使用者看到「滾不動、也不滾聊天流」）；clip 不建立滾動容器，
-     手勢直接冒泡給最外側訊息流。行內樣式可躲過 Lightning CSS 把
-     hidden;clip 雙宣告精簡掉 clip 的行為（2026-09-14 建置產物實錘）。 */
+  /* 旧浏览器回退值。真正生效的是元件上的行内 overflow:clip——
+     hidden 仍是滚动容器，Chrome 滚轮会先滚这个无卷轴的隐形容器
+     （使用者看到「滚不动、也不滚聊天流」）；clip 不建立滚动容器，
+     手势直接冒泡给最外侧讯息流。行内样式可躲过 Lightning CSS 把
+     hidden;clip 双宣告精简掉 clip 的行为（2026-09-14 建置产物实锤）。 */
   overflow: hidden;
 }
 
@@ -177,13 +177,13 @@
   .agent-panel .animate-bounce {
     animation: none !important;
   }
-  /* 「回到底部」鈕的 140ms 淡入淡出也讓位（JS 側捲動同時改 instant）。 */
+  /* 「回到底部」钮的 140ms 淡入淡出也让位（JS 侧卷动同时改 instant）。 */
   .agent-back-to-bottom {
     transition: none !important;
   }
 }
 
-/* ── 行動端適配 ─────────────────────────────────────────────
+/* ── 行动端适配 ─────────────────────────────────────────────
    断点对齐 useIsNarrow / Tailwind sm 断点（≤639.98px 算窄屏），
    与 D-23 参数抽屉的窄屏判定是同一个数，避免 CSS/JS 错位。
    只叠加行动端缺的东西：触控目标、iOS 键盘、可读字级、溢出保护；
@@ -278,7 +278,7 @@
 
 /* ── 输入框外壳 / 发送钮：Eimu 虹彩（2026-10-01）───────────────────────
    取色自玻璃 E 图标：蓝 → 薰衣草 → 粉。同日一度撤回站内中性色，暴君复裁
-   「不如刚才的色系，改回来，只是浅一点」→ 色相不变、整体调淡（寧淡勿豔）。
+   「不如刚才的色系，改回来，只是浅一点」→ 色相不变、整体调淡（宁淡勿艳）。
    只给签名件用：输入框描边、发送钮、空态光晕——不做卡片底色、不做渐变文字。 */
 .agent-composer-shell {
   /* padding-box 白玻璃 + border-box 虹彩渐变＝1px 虹彩描边（lg-float 的模糊折射保留）。 */

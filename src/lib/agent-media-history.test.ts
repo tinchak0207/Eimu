@@ -38,7 +38,7 @@ const audioItem: AgentAudioItem = {
   mediaKind: "music",
 };
 
-test("圖條目 → image entry：url/mediaType/taskId/prompt/modelId/尺寸齊備", () => {
+test("图条目 → image entry：url/mediaType/taskId/prompt/modelId/尺寸齐备", () => {
   const entry = agentHistoryEntryForMedia(imageItem);
   assert.equal(entry.entryKind, "image");
   assert.equal(entry.prompt, "a cat");
@@ -48,15 +48,15 @@ test("圖條目 → image entry：url/mediaType/taskId/prompt/modelId/尺寸齊�
   assert.equal(result.imageUrl, imageItem.url);
   assert.equal(result.mediaType, "image");
   assert.equal(result.taskId, "job-img-1");
-  // recipe.size 必須進 workflow.imageSize——RerunDialog/buildHistoryRerunPlan 靠它推比例，
-  // 不放會退化成 1:1 / 1k。
+  // recipe.size 必须进 workflow.imageSize——RerunDialog/buildHistoryRerunPlan 靠它推比例，
+  // 不放会退化成 1:1 / 1k。
   assert.equal(entry.workflow?.imageSize, "1536x1024");
-  // 同一張圖重複合成 → 同一條 id（冪等 upsert 的前提）。
+  // 同一张图重复合成 → 同一条 id（幂等 upsert 的前提）。
   assert.equal(agentHistoryEntryForMedia(imageItem).id, entry.id);
   assert.equal(entry.id, "agent-job-img-1");
 });
 
-test("影片條目 → video entry：videoUrl + mediaType=video，image 欄位留 null", () => {
+test("影片条目 → video entry：videoUrl + mediaType=video，image 栏位留 null", () => {
   const entry = agentHistoryEntryForMedia(videoItem);
   assert.equal(entry.entryKind, "video");
   const result = entry.results[0];
@@ -67,7 +67,7 @@ test("影片條目 → video entry：videoUrl + mediaType=video，image 欄位�
   assert.equal(inferEntryKind(entry), "video");
 });
 
-test("音頻條目 → audio entry：audioUrl + mediaType=audio", () => {
+test("音频条目 → audio entry：audioUrl + mediaType=audio", () => {
   const entry = agentHistoryEntryForMedia(audioItem);
   assert.equal(entry.entryKind, "audio");
   const result = entry.results[0];
@@ -78,14 +78,14 @@ test("音頻條目 → audio entry：audioUrl + mediaType=audio", () => {
   assert.equal(inferEntryKind(entry), "audio");
 });
 
-test("無 taskId 時以 url 雜湊兜底：同 url 兩次合成同一條", () => {
+test("无 taskId 时以 url 杂凑兜底：同 url 两次合成同一条", () => {
   const a = agentHistoryEntryForMedia({ ...imageItem, taskId: undefined });
   const b = agentHistoryEntryForMedia({ ...imageItem, taskId: undefined });
   assert.equal(a.id, b.id);
   assert.match(a.id, /^agent-u[0-9a-z]+$/);
 });
 
-test("三種媒體 entry 都能過 POST /api/history 的正規化（不被拒收）", () => {
+test("三种媒体 entry 都能过 POST /api/history 的正规化（不被拒收）", () => {
   for (const item of [imageItem, videoItem, audioItem]) {
     const entry = agentHistoryEntryForMedia(item);
     const normalized = normalizeHistoryEntry(JSON.parse(JSON.stringify(entry)), "server");
@@ -102,7 +102,7 @@ test("三種媒體 entry 都能過 POST /api/history 的正規化（不被拒收
   }
 });
 
-test("isAgentMediaItem 只放行圖／影片／音頻", () => {
+test("isAgentMediaItem 只放行图／影片／音频", () => {
   assert.equal(isAgentMediaItem(imageItem), true);
   assert.equal(isAgentMediaItem(videoItem), true);
   assert.equal(isAgentMediaItem(audioItem), true);
@@ -110,7 +110,7 @@ test("isAgentMediaItem 只放行圖／影片／音頻", () => {
   assert.equal(isAgentMediaItem({ kind: "assistant", id: "a1", seq: 1, text: "x", streaming: false }), false);
 });
 
-test("agentMediaItemIds 只收媒體條目的 id，順序保留", () => {
+test("agentMediaItemIds 只收媒体条目的 id，顺序保留", () => {
   const items: AgentTranscriptItem[] = [
     { kind: "assistant", id: "a1", seq: 1, text: "x", streaming: false },
     imageItem,
@@ -120,30 +120,30 @@ test("agentMediaItemIds 只收媒體條目的 id，順序保留", () => {
   assert.deepEqual(agentMediaItemIds(items), ["img-1", "vid-1", "aud-1"]);
 });
 
-test("pendingAgentMediaHistoryEntries：只回未處理的媒體，已在集合的跳過、同輪同 id 只出一次", () => {
+test("pendingAgentMediaHistoryEntries：只回未处理的媒体，已在集合的跳过、同轮同 id 只出一次", () => {
   const items: AgentTranscriptItem[] = [imageItem, videoItem, audioItem, imageItem];
-  // 影片已處理 → 不出；imageItem 重複兩次也只出一次。
+  // 影片已处理 → 不出；imageItem 重复两次也只出一次。
   const pending = pendingAgentMediaHistoryEntries(items, new Set(["vid-1"]));
   assert.deepEqual(
     pending.map((entry) => entry.id),
     ["agent-job-img-1", "agent-job-aud-1"],
   );
-  // 全部已處理 → 空（重渲染不重打 POST）。
+  // 全部已处理 → 空（重渲染不重打 POST）。
   const none = pendingAgentMediaHistoryEntries(items, new Set(["img-1", "vid-1", "aud-1"]));
   assert.equal(none.length, 0);
-  // 非媒體條目一律不進輸出。
+  // 非媒体条目一律不进输出。
   const onlyText: AgentTranscriptItem[] = [
     { kind: "notice", id: "n1", seq: 1, tone: "info", text: "x" },
   ];
   assert.equal(pendingAgentMediaHistoryEntries(onlyText, new Set()).length, 0);
 });
 
-test("planAgentMediaHistoryWrites：失敗撤回佔位後，下一輪仍會被挑出來重試", () => {
+test("planAgentMediaHistoryWrites：失败撤回占位后，下一轮仍会被挑出来重试", () => {
   const first = planAgentMediaHistoryWrites([imageItem], new Set(), new Set(), new Map());
-  // 送出前即佔位（防重渲染重打同一條）。
+  // 送出前即占位（防重渲染重打同一条）。
   assert.deepEqual(first.writes.map((w) => w.itemId), ["img-1"]);
-  assert.ok(first.nextProcessedIds.includes("img-1"), "送出中先佔位");
-  // 模擬寫入失敗：撤回 img-1（未達上限），attempts +1。
+  assert.ok(first.nextProcessedIds.includes("img-1"), "送出中先占位");
+  // 模拟写入失败：撤回 img-1（未达上限），attempts +1。
   const afterFailure = new Set(first.nextProcessedIds);
   afterFailure.delete("img-1");
   const retry = planAgentMediaHistoryWrites(
@@ -152,15 +152,15 @@ test("planAgentMediaHistoryWrites：失敗撤回佔位後，下一輪仍會被�
     new Set(),
     new Map([["img-1", 1]]),
   );
-  assert.deepEqual(retry.writes.map((w) => w.itemId), ["img-1"], "失敗後不再 processed，重試仍挑出");
+  assert.deepEqual(retry.writes.map((w) => w.itemId), ["img-1"], "失败后不再 processed，重试仍挑出");
 });
 
-test("planAgentMediaHistoryWrites：重試達上限即放棄，不再挑出（且不影響其他條目）", () => {
+test("planAgentMediaHistoryWrites：重试达上限即放弃，不再挑出（且不影响其他条目）", () => {
   const attempts = new Map([["img-1", AGENT_MEDIA_HISTORY_MAX_ATTEMPTS]]);
   const plan = planAgentMediaHistoryWrites([imageItem, videoItem], new Set(), new Set(), attempts);
-  assert.deepEqual(plan.writes.map((w) => w.itemId), ["vid-1"], "放棄的 img-1 不挑，正常條目 vid-1 仍挑");
-  assert.ok(plan.nextProcessedIds.includes("img-1"), "放棄者併入 processed 定案");
-  // 上限前一輪仍可挑（邊界：attempts = MAX-1 尚在預算內）。
+  assert.deepEqual(plan.writes.map((w) => w.itemId), ["vid-1"], "放弃的 img-1 不挑，正常条目 vid-1 仍挑");
+  assert.ok(plan.nextProcessedIds.includes("img-1"), "放弃者并入 processed 定案");
+  // 上限前一轮仍可挑（边界：attempts = MAX-1 尚在预算内）。
   const under = planAgentMediaHistoryWrites(
     [imageItem],
     new Set(),
@@ -170,7 +170,7 @@ test("planAgentMediaHistoryWrites：重試達上限即放棄，不再挑出（�
   assert.deepEqual(under.writes.map((w) => w.itemId), ["img-1"]);
 });
 
-test("planAgentMediaHistoryWrites：in-flight 中的 id 不重複挑出", () => {
+test("planAgentMediaHistoryWrites：in-flight 中的 id 不重复挑出", () => {
   const plan = planAgentMediaHistoryWrites(
     [imageItem, videoItem],
     new Set(),
@@ -180,7 +180,7 @@ test("planAgentMediaHistoryWrites：in-flight 中的 id 不重複挑出", () => 
   assert.deepEqual(plan.writes.map((w) => w.itemId), ["vid-1"]);
 });
 
-test("planAgentMediaHistoryWrites：首屏既有 items（已 processed）不進待寫清單", () => {
+test("planAgentMediaHistoryWrites：首屏既有 items（已 processed）不进待写清单", () => {
   const plan = planAgentMediaHistoryWrites(
     [imageItem, videoItem],
     new Set(["img-1", "vid-1"]),

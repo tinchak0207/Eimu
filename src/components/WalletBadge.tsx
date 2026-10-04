@@ -15,8 +15,8 @@ interface WalletBadgeProps {
   showTopUp?: boolean;
   showCheckin?: boolean;
   /**
-   * 呼叫端若已從更權威的來源取得額度狀態（例如未來直接讀 `/v1/quota` 的元件），
-   * 可傳入覆寫；省略時由本元件從 auth session 推導。純顯示層入口，不觸發任何 IO。
+   * 呼叫端若已从更权威的来源取得额度状态（例如未来直接读 `/v1/quota` 的元件），
+   * 可传入覆写；省略时由本元件从 auth session 推导。纯显示层入口，不触发任何 IO。
    */
   quotaState?: QuotaDisplayState;
 }
@@ -51,17 +51,17 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
   }, [showCheckin, token]);
 
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
-  /* 「+」浮層的落點（fixed 座標）：portal 到 body 後就脫離了 .lg-bar 的
-     overflow-hidden 與 backdrop-filter containing block，位置必須自己算。
-     量測時機＝開啟當下 ＋ resize/scroll（navbar 是 sticky，捲動時鈕的視口座標不變，
-     但展開中的浮層仍跟著量，避免縮窗後錯位）。 */
+  /* 「+」浮层的落点（fixed 座标）：portal 到 body 后就脱离了 .lg-bar 的
+     overflow-hidden 与 backdrop-filter containing block，位置必须自己算。
+     量测时机＝开启当下 ＋ resize/scroll（navbar 是 sticky，卷动时钮的视口座标不变，
+     但展开中的浮层仍跟著量，避免缩窗后错位）。 */
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; right: number } | null>(null);
   const measureAnchor = useCallback(() => {
     const btn = plusBtnRef.current;
     const rect = btn?.getBoundingClientRect();
     if (!rect) return;
-    // 用「+」鈕下緣對齊，但膠囊鈕比 .lg-bar 矮（bar 有 py 內距），只取鈕下緣
-    // 會讓浮層頂端落進 bar 的下內距、蓋住玻璃條底緣；故取兩者較低者再留 8px。
+    // 用「+」钮下缘对齐，但胶囊钮比 .lg-bar 矮（bar 有 py 内距），只取钮下缘
+    // 会让浮层顶端落进 bar 的下内距、盖住玻璃条底缘；故取两者较低者再留 8px。
     const barBottom = btn?.closest(".lg-bar")?.getBoundingClientRect().bottom ?? rect.bottom;
     setMenuAnchor({ top: Math.max(rect.bottom, barBottom) + 8, right: Math.max(8, window.innerWidth - rect.right) });
   }, []);
@@ -79,11 +79,11 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
     };
   }, [plusOpen, measureAnchor]);
 
-  // 額度顯示語義（R3）：把 auth session 的讀數收斂成 describeQuota 的三態。
-  //   有有限讀數 ⇒ authoritative（帳本權威值，直接顯示，包含真實的 0）；
-  //   讀不到／非有限 ⇒ 有上次成功的讀數就標 estimated（約值 + 時效），否則
-  //   unavailable（顯示「暂不可用」，永不畫假 0）。
-  // 這只在顯示層收斂語義，不改任何取餘額的 API／資料層。
+  // 额度显示语义（R3）：把 auth session 的读数收敛成 describeQuota 的三态。
+  //   有有限读数 ⇒ authoritative（帐本权威值，直接显示，包含真实的 0）；
+  //   读不到／非有限 ⇒ 有上次成功的读数就标 estimated（约值 + 时效），否则
+  //   unavailable（显示「暂不可用」，永不画假 0）。
+  // 这只在显示层收敛语义，不改任何取余额的 API／资料层。
   const liveCoins =
     isLoggedIn && user && Number.isFinite(user.quota) ? quotaToCoins(user.quota) : null;
   const lastGoodQuotaRef = useRef<{ coins: number; asOf: number } | null>(null);
@@ -130,7 +130,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
   return (
     <div className={cn("relative flex min-w-0 items-center gap-1.5", className)}>
       {/* 余额 + 「+」合体胶囊：币值一段、加号一段，同一颗圆角外壳。
-          「+」恆為加號入口；已簽態只在菜單項裡表達。 */}
+          「+」恒为加号入口；已签态只在菜单项里表达。 */}
       <div
         className="inline-flex max-w-full shrink items-stretch overflow-hidden rounded-full bg-[rgba(0,0,0,0.05)] max-sm:bg-transparent select-none"
         aria-label={`余额 ${quotaDisplay.label}${quotaDisplay.stale ? "（数据可能已过期）" : ""}`}
@@ -155,20 +155,20 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
             aria-label="余额操作"
             className="flex w-6 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 sm:hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            {/* 2026-09-05 暴君裁定：「+」是充值/签到入口，恆為加號——
-                簽到完成態只反映在菜單項裡，不侵占入口圖標。 */}
+            {/* 2026-09-05 暴君裁定：「+」是充值/签到入口，恒为加号——
+                签到完成态只反映在菜单项里，不侵占入口图标。 */}
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         )}
       </div>
 
       {/* 「+」菜单：数量为 2（充值 / 签到），lg-sheet 玻璃 + specular 顶线。
-          2026-09-27：portal 到 body——祖先 .lg-bar 的 overflow-hidden 會裁掉浮層、
-          backdrop-filter 又會把 fixed 後代縮成 bar 大小，兩者都在 portal 後失效；
-          位置改用「+」鈕的 rect 以 fixed 座標自算，層級對齊同檔帳號選單 z-90。 */}
+          2026-09-27：portal 到 body——祖先 .lg-bar 的 overflow-hidden 会裁掉浮层、
+          backdrop-filter 又会把 fixed 后代缩成 bar 大小，两者都在 portal 后失效；
+          位置改用「+」钮的 rect 以 fixed 座标自算，层级对齐同档帐号选单 z-90。 */}
       {plusOpen && menuAnchor && (showTopUp || showCheckin) && createPortal(
         <>
-          {/* 点外收起：透明层只承接点击，不遮视觉。portal 到 body 後才是真正的全屏层。 */}
+          {/* 点外收起：透明层只承接点击，不遮视觉。portal 到 body 后才是真正的全屏层。 */}
           <div className="fixed inset-0 z-[89]" aria-hidden="true" onClick={() => setPlusOpen(false)} />
           <div
             role="menu"

@@ -1,5 +1,5 @@
-// agent-surface-actions 的單測：用最小 window 樁驗「有無宿主」這個事實的回報，
-// 因為這是呼叫端決定退路的唯一依據。不引 jsdom。
+// agent-surface-actions 的单测：用最小 window 桩验「有无宿主」这个事实的回报，
+// 因为这是呼叫端决定退路的唯一依据。不引 jsdom。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -11,7 +11,7 @@ import {
   type AgentSurfaceAction,
 } from "./agent-surface-actions";
 
-/** 最小 window 樁：只有事件註冊與「依 defaultPrevented 回傳」的 dispatchEvent。 */
+/** 最小 window 桩：只有事件注册与「依 defaultPrevented 回传」的 dispatchEvent。 */
 function makeWindowStub(): {
   window: Pick<Window, "addEventListener" | "removeEventListener" | "dispatchEvent">;
 } {
@@ -47,13 +47,13 @@ function withWindow<T>(stub: ReturnType<typeof makeWindowStub>["window"] | null,
   }
 }
 
-test("無 window（SSR）時回 false", () => {
+test("无 window（SSR）时回 false", () => {
   withWindow(null, () => {
     assert.equal(requestAgentSurfaceAction("assets"), false);
   });
 });
 
-test("有人接走時回 true，且 handler 收到正確 action", () => {
+test("有人接走时回 true，且 handler 收到正确 action", () => {
   withWindow(makeWindowStub().window, () => {
     const seen: AgentSurfaceAction[] = [];
     const unsubscribe = subscribeAgentSurfaceActions((action) => {
@@ -66,7 +66,7 @@ test("有人接走時回 true，且 handler 收到正確 action", () => {
   });
 });
 
-test("handler 回 false 時回 false（呼叫端會退回導航）", () => {
+test("handler 回 false 时回 false（呼叫端会退回导航）", () => {
   withWindow(makeWindowStub().window, () => {
     const seen: AgentSurfaceAction[] = [];
     const unsubscribe = subscribeAgentSurfaceActions((action) => {
@@ -79,7 +79,7 @@ test("handler 回 false 時回 false（呼叫端會退回導航）", () => {
   });
 });
 
-test("退訂後不再收到事件（且無人接走 ⇒ false）", () => {
+test("退订后不再收到事件（且无人接走 ⇒ false）", () => {
   withWindow(makeWindowStub().window, () => {
     let calls = 0;
     const unsubscribe = subscribeAgentSurfaceActions(() => {
@@ -92,10 +92,10 @@ test("退訂後不再收到事件（且無人接走 ⇒ false）", () => {
   });
 });
 
-test("事件名與可取消語意：監聽者呼叫 preventDefault 決定回報", () => {
+test("事件名与可取消语意：监听者呼叫 preventDefault 决定回报", () => {
   const stub = makeWindowStub();
   withWindow(stub.window, () => {
-    // 直接掛一個原生監聽，驗證 dispatchEvent 回傳值由 defaultPrevented 決定。
+    // 直接挂一个原生监听，验证 dispatchEvent 回传值由 defaultPrevented 决定。
     let received = false;
     stub.window.addEventListener(AGENT_SURFACE_ACTION_EVENT, (event) => {
       received = true;

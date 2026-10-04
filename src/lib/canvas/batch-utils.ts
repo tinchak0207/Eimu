@@ -1,7 +1,7 @@
-// 批次父子節點工具函式：批次管理、佈局、建立子節點。
+// 批次父子节点工具函式：批次管理、布局、建立子节点。
 //
-// 批次父節點是一個帶 batchChildren 的 CanvasNode，展開時顯示多個子圖片
-// 節點，收起時只顯示 batchPrimaryImageId 指定的主圖片。
+// 批次父节点是一个带 batchChildren 的 CanvasNode，展开时显示多个子图片
+// 节点，收起时只显示 batchPrimaryImageId 指定的主图片。
 
 import { CanvasNodeType, CANVAS_NODE_DEFAULT_SIZE } from '@/lib/canvas/types';
 import type {
@@ -11,31 +11,31 @@ import type {
   CanvasPosition,
 } from '@/lib/canvas/types';
 
-/** 水平間距（子節點之間） */
+/** 水平间距（子节点之间） */
 const BATCH_GAP_X = 24;
 
-/** 垂直間距（子節點換行時） */
+/** 垂直间距（子节点换行时） */
 const BATCH_GAP_Y = 24;
 
-/** 每行最大子節點數 */
+/** 每行最大子节点数 */
 const BATCH_ROW_CAPACITY = 4;
 
 /**
- * 判斷節點是否為批次父節點（有 batchChildren 且非空）。
- * 純粹的 JavaScript 檢查：不處理 undefined 以外的邊界情況。
+ * 判断节点是否为批次父节点（有 batchChildren 且非空）。
+ * 纯粹的 JavaScript 检查：不处理 undefined 以外的边界情况。
  */
 export function hasBatchChildren(node: CanvasNode): boolean {
   return !!node.batchChildren && node.batchChildren.length > 0;
 }
 
 /**
- * 彙總批次子節點的整體狀態與進度。
+ * 汇总批次子节点的整体状态与进度。
  *
- * 狀態優先級：error > loading > success > idle。
- * 進度 = 所有子節點進度的平均值（success 有 100，idle 為 0）。
+ * 状态优先级：error > loading > success > idle。
+ * 进度 = 所有子节点进度的平均值（success 有 100，idle 为 0）。
  *
- * @param batchChildren - 子節點陣列（必須是已 resolve 的完整 CanvasNode 實體）。
- * @returns 彙總 status 與平均 progress（0–100）。
+ * @param batchChildren - 子节点阵列（必须是已 resolve 的完整 CanvasNode 实体）。
+ * @returns 汇总 status 与平均 progress（0–100）。
  */
 export function getBatchStatusSummary(
   batchChildren: CanvasNode[],
@@ -63,7 +63,7 @@ export function getBatchStatusSummary(
     }
   }
 
-  // 決定彙總 status
+  // 决定汇总 status
   let status: CanvasNodeStatus;
   if (hasError) {
     status = 'error';
@@ -75,7 +75,7 @@ export function getBatchStatusSummary(
     status = 'idle';
   }
 
-  // 決定彙總 progress
+  // 决定汇总 progress
   const progress =
     progressCount > 0
       ? Math.round(progressSum / progressCount)
@@ -87,15 +87,15 @@ export function getBatchStatusSummary(
 }
 
 /**
- * 計算批次子節點在畫布上的位置。
+ * 计算批次子节点在画布上的位置。
  *
- * 佈局策略：子節點排列在父節點右側，每行 BATCH_ROW_CAPACITY 個，
- * 超出換行。子節點尺寸取 Image 預設值（340×240）。
+ * 布局策略：子节点排列在父节点右侧，每行 BATCH_ROW_CAPACITY 个，
+ * 超出换行。子节点尺寸取 Image 预设值（340×240）。
  *
- * @param parent - 批次父節點。
- * @param childIndex - 子節點在批次中的順序索引（0-based）。
- * @param _totalCount - 批次總數（用於控制換行，目前僅用於傳遞語意）。
- * @returns 子節點的左上角位置。
+ * @param parent - 批次父节点。
+ * @param childIndex - 子节点在批次中的顺序索引（0-based）。
+ * @param _totalCount - 批次总数（用于控制换行，目前仅用于传递语意）。
+ * @returns 子节点的左上角位置。
  */
 export function computeBatchChildPosition(
   parent: CanvasNode,
@@ -112,30 +112,30 @@ export function computeBatchChildPosition(
   };
 }
 
-/** createBatchChildNode 的選項參數。 */
+/** createBatchChildNode 的选项参数。 */
 export interface CreateBatchChildNodeOptions {
-  /** 子節點 id（預設為 `${parent.id}-b${childIndex}`） */
+  /** 子节点 id（预设为 `${parent.id}-b${childIndex}`） */
   id?: string;
-  /** 子節點標題（預設為 `${parent.title} #${childIndex + 1}`） */
+  /** 子节点标题（预设为 `${parent.title} #${childIndex + 1}`） */
   title?: string;
-  /** 額外的 metadata 覆蓋（會與預設值合併） */
+  /** 额外的 metadata 覆盖（会与预设值合并） */
   metadata?: Partial<CanvasNodeMetadata>;
-  /** 強制指定子節點 type（預設 Image） */
+  /** 强制指定子节点 type（预设 Image） */
   type?: CanvasNodeType;
 }
 
 /**
- * 建立一個批次子節點。
+ * 建立一个批次子节点。
  *
- * 自動設定位置（由 computeBatchChildPosition 計算）、尺寸（取 Image 預設）、
- * metadata.content（圖片 URL）、batchIndex、batchTotal 及 status。
+ * 自动设定位置（由 computeBatchChildPosition 计算）、尺寸（取 Image 预设）、
+ * metadata.content（图片 URL）、batchIndex、batchTotal 及 status。
  *
- * @param parent - 批次父節點。
- * @param imageUrl - 圖片 URL（設為 metadata.content）。
- * @param childIndex - 子節點索引（0-based）。
- * @param totalCount - 批次總數。
- * @param options - 可選覆蓋參數。
- * @returns 完整的 CanvasNode 實體。
+ * @param parent - 批次父节点。
+ * @param imageUrl - 图片 URL（设为 metadata.content）。
+ * @param childIndex - 子节点索引（0-based）。
+ * @param totalCount - 批次总数。
+ * @param options - 可选覆盖参数。
+ * @returns 完整的 CanvasNode 实体。
  */
 export function createBatchChildNode(
   parent: CanvasNode,

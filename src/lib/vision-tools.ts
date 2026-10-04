@@ -1,33 +1,33 @@
 /**
- * vision_analyze harness 工具（野獸模式多毒蛇評審的眼睛，beast-army R2→R2c，2026-09-10）。
+ * vision_analyze harness 工具（野兽模式多毒蛇评审的眼睛，beast-army R2→R2c，2026-09-10）。
  *
- * 定義形狀同構 src/lib/music-tools.ts 的 MusicToolDef（零依賴：
- * { id, description, args, execute } + ok()/fail() 契約，回 { title, output }，
- * output 為 JSON 字串）。
+ * 定义形状同构 src/lib/music-tools.ts 的 MusicToolDef（零依赖：
+ * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
+ * output 为 JSON 字串）。
  *
- * 模型通路（R2c 遷移，暴君鐵律「模型調用禁直連必走 new-api」記憶
- * vision-must-route-newapi-not-direct）：唯一通路 = new-api 中控端點
- * POST {NEWAPI_BASE_URL}/chat/completions（OpenAI chat 形狀），Bearer 鑑權
- * env NEWAPI_API_KEY。多上游冗餘由中控渠道池原生承擔（failover/計費/冷卻），
- * 換上游只動中控配置，代碼零改。視覺模型 env NEWAPI_VISION_MODEL 可配，
- * 默認 gemini-3-flash（hub 實證唯一帶圖可用名；pro 家族已死路，見 R2c 實測）。
+ * 模型通路（R2c 迁移，暴君铁律「模型调用禁直连必走 new-api」记忆
+ * vision-must-route-newapi-not-direct）：唯一通路 = new-api 中控端点
+ * POST {NEWAPI_BASE_URL}/chat/completions（OpenAI chat 形状），Bearer 鉴权
+ * env NEWAPI_API_KEY。多上游冗余由中控渠道池原生承担（failover/计费/冷却），
+ * 换上游只动中控配置，代码零改。视觉模型 env NEWAPI_VISION_MODEL 可配，
+ * 默认 gemini-3-flash（hub 实证唯一带图可用名；pro 家族已死路，见 R2c 实测）。
  *
- * 圖片以 chat content image_url（data URL）攜帶：支持 http(s) URL 下載 /
- * 本地路徑讀取 / data URL，非圖類（.m4a 音頻等）在讀取前按副檔名 fail-fast
- * 人話報錯，不浪費上游調用。
+ * 图片以 chat content image_url（data URL）携带：支持 http(s) URL 下载 /
+ * 本地路径读取 / data URL，非图类（.m4a 音频等）在读取前按副档名 fail-fast
+ * 人话报错，不浪费上游调用。
  *
- * 審核維度（aspect）內建三套毒蛇 prompt 模板（簡體，記憶 agent-gateway-copy-rules）：
- *   aesthetic   毒蛇藝術總監：構圖/光線/色彩/質感/敘事張力/鏡頭語言，1-10 分+逐維點評+最毒一句總結
- *   consistency 角色與場景一致性
- *   emotion     情緒表達與節奏
+ * 审核维度（aspect）内建三套毒蛇 prompt 模板（简体，记忆 agent-gateway-copy-rules）：
+ *   aesthetic   毒蛇艺术总监：构图/光线/色彩/质感/叙事张力/镜头语言，1-10 分+逐维点评+最毒一句总结
+ *   consistency 角色与场景一致性
+ *   emotion     情绪表达与节奏
  *
- * 返回：verdict（1-10）＋逐維點評＋最毒總結；上游非 2xx / 響應解析失敗一律帶
- * 原文拋出（誠實鐵律，同 music-lyria.ts）。超時 60s。
+ * 返回：verdict（1-10）＋逐维点评＋最毒总结；上游非 2xx / 响应解析失败一律带
+ * 原文抛出（诚实铁律，同 music-lyria.ts）。超时 60s。
  */
 
 import * as fsp from "node:fs/promises"
 
-// ── plumbing（ok/fail 同構 music-tools.ts） ──────────────────────────────────
+// ── plumbing（ok/fail 同构 music-tools.ts） ──────────────────────────────────
 
 export type VisionToolResult = { title: string; output: string }
 
@@ -62,32 +62,32 @@ function asString(v: unknown): string | undefined {
 // ── 常量 ─────────────────────────────────────────────────────────────────────
 
 /**
- * new-api 中控 chat 端點（唯一模型通路；R2c 定案）。
- * 公網閘道 image.tinchak0207.xyz/v1 無 chat/completions 路由（站點自營
- * 圖/視頻 API，/v1/models 為站點自營清單 46 模型），視覺審核走 VPS 內網
- * http://127.0.0.1:3001/v1（與 new-api 內核同機，controller/worker 同款）。
+ * new-api 中控 chat 端点（唯一模型通路；R2c 定案）。
+ * 公网闸道 image.tinchak0207.xyz/v1 无 chat/completions 路由（站点自营
+ * 图/视频 API，/v1/models 为站点自营清单 46 模型），视觉审核走 VPS 内网
+ * http://127.0.0.1:3001/v1（与 new-api 内核同机，controller/worker 同款）。
  */
 export const VISION_NEWAPI_CHAT_URL = "http://127.0.0.1:3001/v1/chat/completions"
 
 /**
- * 視覺審核模型（new-api 公開名）。默認 gemini-3-flash：hub.linux.do 帶圖實證
- * 200@9.4s（prompt_tokens 1201、中文描述正確）；gemini-3-pro-high/low 回上游
- * 棄用告示、pro-medium 403（違規停用）、gemini-3.1-pro-high 422 不存在——
- * pro 檔全部死路，flash 即主模型。可用 env NEWAPI_VISION_MODEL 覆蓋
- * （中控註冊新視覺模型後零代碼切換）。
+ * 视觉审核模型（new-api 公开名）。默认 gemini-3-flash：hub.linux.do 带图实证
+ * 200@9.4s（prompt_tokens 1201、中文描述正确）；gemini-3-pro-high/low 回上游
+ * 弃用告示、pro-medium 403（违规停用）、gemini-3.1-pro-high 422 不存在——
+ * pro 档全部死路，flash 即主模型。可用 env NEWAPI_VISION_MODEL 覆盖
+ * （中控注册新视觉模型后零代码切换）。
  */
 export const VISION_MODEL_DEFAULT = "gemini-3-flash"
 
-/** 上游響應超時（審核 prompt 較長，統一 60s 硬頂）。 */
+/** 上游响应超时（审核 prompt 较长，统一 60s 硬顶）。 */
 export const VISION_TIMEOUT_MS = 60_000
 
-/** 圖片下載超時。 */
+/** 图片下载超时。 */
 export const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000
 
-/** data URL 請求體上限保護（請求 JSON 總量 ~20MB，留餘量）。 */
+/** data URL 请求体上限保护（请求 JSON 总量 ~20MB，留余量）。 */
 export const IMAGE_MAX_BYTES = 18 * 1024 * 1024
 
-/** 認得的圖片副檔名 → mime（白名單外一律人話報錯，讀檔前攔截）。 */
+/** 认得的图片副档名 → mime（白名单外一律人话报错，读档前拦截）。 */
 export const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -100,21 +100,21 @@ export const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
   ".heif": "image/heif",
 }
 
-/** 錯誤訊息裡攜帶的原文 body 上限（防日誌爆炸；截斷時顯式標注）。 */
+/** 错误讯息里携带的原文 body 上限（防日志爆炸；截断时显式标注）。 */
 const ERROR_BODY_MAX_CHARS = 8000
 
-// ── 審核 prompt 模板（aspect → 毒蛇視角，簡體文案） ──────────────────────────
+// ── 审核 prompt 模板（aspect → 毒蛇视角，简体文案） ──────────────────────────
 
 export const VISION_ASPECTS = ["aesthetic", "consistency", "emotion"] as const
 export type VisionAspect = (typeof VISION_ASPECTS)[number]
 
-/** 響應 JSON 契約（要求模型只輸出這個形狀）。 */
+/** 响应 JSON 契约（要求模型只输出这个形状）。 */
 export interface VisionReview {
-  /** 總分 1-10（整數）。 */
+  /** 总分 1-10（整数）。 */
   verdict: number
-  /** 逐維點評。 */
+  /** 逐维点评。 */
   dimensions: Array<{ name: string; score: number; comment: string }>
-  /** 最毒一句總結。 */
+  /** 最毒一句总结。 */
   venom: string
 }
 
@@ -156,7 +156,7 @@ const ASPECT_TEMPLATES: Record<VisionAspect, { title: string; dimensions: string
   },
 }
 
-/** 組裝審核 prompt（模板 + 輸出契約 + 可選 prompt_hint），確定性拼接可測。 */
+/** 组装审核 prompt（模板 + 输出契约 + 可选 prompt_hint），确定性拼接可测。 */
 export function buildVisionPrompt(aspect: VisionAspect, promptHint?: string): string {
   const tpl = ASPECT_TEMPLATES[aspect]
   const lines = [
@@ -172,7 +172,7 @@ export function buildVisionPrompt(aspect: VisionAspect, promptHint?: string): st
   return lines.join("\n")
 }
 
-// ── 圖片讀取（URL 下載 / 本地路徑 / data URL） ───────────────────────────────
+// ── 图片读取（URL 下载 / 本地路径 / data URL） ───────────────────────────────
 
 function extMimeOf(pathOrUrl: string): { mime: string; ext: string } | null {
   const clean = pathOrUrl.split(/[?#]/)[0] ?? pathOrUrl
@@ -180,14 +180,14 @@ function extMimeOf(pathOrUrl: string): { mime: string; ext: string } | null {
   if (dot < 0) return null
   const ext = clean.slice(dot).toLowerCase()
   const mime = IMAGE_MIME_BY_EXT[ext]
-  // 有擴展名但不在白名單 → mime 為空串（區別於「無擴展名」的 null），上層分兩種人話報錯。
+  // 有扩展名但不在白名单 → mime 为空串（区别于「无扩展名」的 null），上层分两种人话报错。
   return { mime: mime ?? "", ext }
 }
 
 /**
- * 解析圖片來源為 { bytes, mime, source }。
- * 3 種來源：data URL（直接解碼）、http(s) URL（下載 + content-type 白名單）、本地路徑（副檔名白名單預檢）。
- * 非圖類（.m4a 等）在讀取/下載前人話報錯，錯誤帶具體類型說明。
+ * 解析图片来源为 { bytes, mime, source }。
+ * 3 种来源：data URL（直接解码）、http(s) URL（下载 + content-type 白名单）、本地路径（副档名白名单预检）。
+ * 非图类（.m4a 等）在读取/下载前人话报错，错误带具体类型说明。
  */
 export async function readImageSource(
   imageUrl: string | undefined,
@@ -265,15 +265,15 @@ export async function readImageSource(
   throw new VisionToolError("invalid_args", "缺少图片来源：参数 image_url 与 image_path 必须二选一提供。")
 }
 
-// ── new-api 中控上游（誠實鐵律：非 2xx 帶原文；解析失敗帶原文） ───────────────
+// ── new-api 中控上游（诚实铁律：非 2xx 带原文；解析失败带原文） ───────────────
 
-/** env NEWAPI_API_KEY 缺失 fail-fast（人話報錯，同 music-lyria.ts requireGeminiApiKey 範式）。 */
+/** env NEWAPI_API_KEY 缺失 fail-fast（人话报错，同 music-lyria.ts requireGeminiApiKey 范式）。 */
 export function requireNewapiKey(): string {
   const key = process.env.NEWAPI_API_KEY?.trim()
   if (!key) {
     throw new VisionToolError(
       "newapi_key_missing",
-      "环境变量 NEWAPI_API_KEY 未设置，vision_analyze 无法调用 new-api 中控读图。请部署侧注入该 env（中控端點以 NEWAPI_BASE_URL 配置，默認 " +
+      "环境变量 NEWAPI_API_KEY 未设置，vision_analyze 无法调用 new-api 中控读图。请部署侧注入该 env（中控端点以 NEWAPI_BASE_URL 配置，默认 " +
         VISION_NEWAPI_CHAT_URL +
         "）。",
     )
@@ -281,12 +281,12 @@ export function requireNewapiKey(): string {
   return key
 }
 
-/** 視覺模型解析：env NEWAPI_VISION_MODEL 覆蓋 → 默認 gemini-3-flash。 */
+/** 视觉模型解析：env NEWAPI_VISION_MODEL 覆盖 → 默认 gemini-3-flash。 */
 export function resolveVisionModel(): string {
   return process.env.NEWAPI_VISION_MODEL?.trim() || VISION_MODEL_DEFAULT
 }
 
-/** 從 chat/completions 響應提取首選文本（choices[0].message.content，容忍 reasoning 欄位缺失）。 */
+/** 从 chat/completions 响应提取首选文本（choices[0].message.content，容忍 reasoning 栏位缺失）。 */
 export function extractChatText(body: unknown): string {
   const choices = (body as { choices?: Array<Record<string, unknown>> })?.choices
   if (!Array.isArray(choices) || choices.length === 0) return ""
@@ -294,7 +294,7 @@ export function extractChatText(body: unknown): string {
   return typeof content === "string" ? content.trim() : ""
 }
 
-/** 從模型文本解析審核 JSON（容忍 ```json 圍欄與前後雜訊）。 */
+/** 从模型文本解析审核 JSON（容忍 ```json 围栏与前后杂讯）。 */
 export function parseVisionReview(raw: string): VisionReview {
   let text = raw.trim()
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)
@@ -333,10 +333,10 @@ export function parseVisionReview(raw: string): VisionReview {
   return { verdict, dimensions: dims, venom }
 }
 
-/** 上游通路標識（結果如實回報，誠實鐵律；R2c 起唯一通路 = new-api 中控）。 */
+/** 上游通路标识（结果如实回报，诚实铁律；R2c 起唯一通路 = new-api 中控）。 */
 export type VisionChannel = "newapi"
 
-/** 單次 chat/completions POST（成功/非 2xx 都帶原文回來，網路層異常直接拋）。 */
+/** 单次 chat/completions POST（成功/非 2xx 都带原文回来，网路层异常直接抛）。 */
 async function postChat(
   url: string,
   apiKey: string,
@@ -359,7 +359,7 @@ async function postChat(
   return { ok: response.ok, status: response.status, body: bodyText }
 }
 
-/** 調用 new-api 中控讀圖審核（唯一通路），返回解析結論＋實際通路。 */
+/** 调用 new-api 中控读图审核（唯一通路），返回解析结论＋实际通路。 */
 export async function callNewapiVision(opts: {
   base64: string
   mime: string
@@ -401,13 +401,13 @@ export async function callNewapiVision(opts: {
   if (!rawText) {
     throw new VisionToolError(
       "newapi_bad_response",
-      `new-api 中控响应没有文本候选（可能被上游安全策略拦截或渠道剝圖）。原文前 1500 字符：${body.slice(0, 1500)}`,
+      `new-api 中控响应没有文本候选（可能被上游安全策略拦截或渠道剥图）。原文前 1500 字符：${body.slice(0, 1500)}`,
     )
   }
   return { review: parseVisionReview(rawText), channel: "newapi" }
 }
 
-// ── vision_analyze 工具定義 ──────────────────────────────────────────────────
+// ── vision_analyze 工具定义 ──────────────────────────────────────────────────
 
 export interface VisionToolArgSpec {
   type: "string"
@@ -478,7 +478,7 @@ export const visionAnalyzeTool: VisionToolDef = {
       const aspect = aspectRaw as VisionAspect
       const promptHint = asString(rawArgs.prompt_hint)
 
-      // 缺 key fail-fast：先於讀圖與上游調用（同 music-lyria.ts require 範式）。
+      // 缺 key fail-fast：先于读图与上游调用（同 music-lyria.ts require 范式）。
       requireNewapiKey()
 
       const image = await readImageSource(imageUrl, imagePath)
@@ -517,5 +517,5 @@ export const visionAnalyzeTool: VisionToolDef = {
   },
 }
 
-/** harness-tool-registry.ts 登記用 id 元組（同 MUSIC_HARNESS_TOOL_IDS 範式）。 */
+/** harness-tool-registry.ts 登记用 id 元组（同 MUSIC_HARNESS_TOOL_IDS 范式）。 */
 export const VISION_HARNESS_TOOL_IDS = ["vision_analyze"] as const

@@ -1,12 +1,12 @@
-// local-media-worker 單元測試（runner：npx --yes tsx --test）。
+// local-media-worker 单元测试（runner：npx --yes tsx --test）。
 //
-// 只測 adapter 的行為邊界（無真 ffmpeg、無真桌面殼）：
-//   1. 無 window.eimuLocal ⇒ hasLocalMediaWorker() false，且三個操作回 { ok:false } 不 throw。
-//   2. 有 worker 但 ffmpeg:false ⇒ 同上（reason 為 ffmpeg_unavailable）。
-//   3. worker reject ⇒ { ok:false, reason }（原樣帶回 worker 的訊息）。
-//   4. 成功路徑 ⇒ 回傳形狀正確。
+// 只测 adapter 的行为边界（无真 ffmpeg、无真桌面壳）：
+//   1. 无 window.eimuLocal ⇒ hasLocalMediaWorker() false，且三个操作回 { ok:false } 不 throw。
+//   2. 有 worker 但 ffmpeg:false ⇒ 同上（reason 为 ffmpeg_unavailable）。
+//   3. worker reject ⇒ { ok:false, reason }（原样带回 worker 的讯息）。
+//   4. 成功路径 ⇒ 回传形状正确。
 //   5. capabilities() 自身 reject ⇒ 不可用且附 capabilities_failed（不 throw）。
-// 真正的桌面殼內 ffmpeg 抽幀／轉碼屬 GUI E2E，需真人在殼內驗（見回報未驗清單）。
+// 真正的桌面壳内 ffmpeg 抽帧／转码属 GUI E2E，需真人在壳内验（见回报未验清单）。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +23,7 @@ import {
   type EimuLocalCapabilities,
 } from "./local-media-worker.ts";
 
-// ─────────────────────────── 測試輔助
+// ─────────────────────────── 测试辅助
 
 type GlobalWithLocal = typeof globalThis & { eimuLocal?: EimuLocalApi };
 
@@ -67,14 +67,14 @@ function makeApi(opts: ApiOptions = {}): EimuLocalApi {
   };
 }
 
-// ─────────────────────────── 1. 無 eimuLocal
+// ─────────────────────────── 1. 无 eimuLocal
 
-test("無 window.eimuLocal：hasLocalMediaWorker() 為 false", async () => {
+test("无 window.eimuLocal：hasLocalMediaWorker() 为 false", async () => {
   setWorker(undefined);
   assert.equal(await hasLocalMediaWorker(), false);
 });
 
-test("無 window.eimuLocal：三個操作均回 { ok:false } 且不 throw", async () => {
+test("无 window.eimuLocal：三个操作均回 { ok:false } 且不 throw", async () => {
   setWorker(undefined);
   const probe = await probeLocally("/tmp/x.mp4");
   const frames = await extractFramesLocally("/tmp/x.mp4");
@@ -86,7 +86,7 @@ test("無 window.eimuLocal：三個操作均回 { ok:false } 且不 throw", asyn
 
 // ─────────────────────────── 2. 有 worker 但 ffmpeg:false
 
-test("worker 存在但 ffmpeg:false：hasLocalMediaWorker() 為 false，操作回 ffmpeg_unavailable", async () => {
+test("worker 存在但 ffmpeg:false：hasLocalMediaWorker() 为 false，操作回 ffmpeg_unavailable", async () => {
   setWorker(makeApi({ caps: NO_FFMPEG_CAPS }));
   assert.equal(await hasLocalMediaWorker(), false);
   assert.deepEqual(await probeLocally("/tmp/x.mp4"), { ok: false, reason: LOCAL_FFMPEG_UNAVAILABLE });
@@ -96,32 +96,32 @@ test("worker 存在但 ffmpeg:false：hasLocalMediaWorker() 為 false，操作�
 
 // ─────────────────────────── 3. worker reject ⇒ { ok:false, reason }
 
-test("worker reject：probe/extractFrames/transcode 均收斂成 { ok:false, reason }，不 throw", async () => {
+test("worker reject：probe/extractFrames/transcode 均收敛成 { ok:false, reason }，不 throw", async () => {
   setWorker(
     makeApi({
       probe: async () => {
-        throw new Error("E_NOT_AUTHORIZED: 未經 pickFiles 授權");
+        throw new Error("E_NOT_AUTHORIZED: 未经 pickFiles 授权");
       },
       extractFrames: async () => {
         throw new Error("E_FFMPEG_FAILED: exit 1");
       },
       transcode: async () => {
-        throw "E_TIMEOUT: 逾時"; // 非 Error 的 reject 也要收斂
+        throw "E_TIMEOUT: 逾时"; // 非 Error 的 reject 也要收敛
       },
     }),
   );
   assert.equal(await hasLocalMediaWorker(), true);
   assert.deepEqual(await probeLocally("/tmp/x.mp4"), {
     ok: false,
-    reason: "E_NOT_AUTHORIZED: 未經 pickFiles 授權",
+    reason: "E_NOT_AUTHORIZED: 未经 pickFiles 授权",
   });
   assert.deepEqual(await extractFramesLocally("/tmp/x.mp4"), { ok: false, reason: "E_FFMPEG_FAILED: exit 1" });
-  assert.deepEqual(await transcodeLocally("/tmp/x.mp4"), { ok: false, reason: "E_TIMEOUT: 逾時" });
+  assert.deepEqual(await transcodeLocally("/tmp/x.mp4"), { ok: false, reason: "E_TIMEOUT: 逾时" });
 });
 
-// ─────────────────────────── 4. 成功路徑形狀
+// ─────────────────────────── 4. 成功路径形状
 
-test("成功路徑：回傳形狀正確", async () => {
+test("成功路径：回传形状正确", async () => {
   let transcodeArgs: unknown[] = [];
   let extractArgs: unknown[] = [];
   setWorker(
@@ -178,9 +178,9 @@ test("capabilities() reject：不可用且附 capabilities_failed，不 throw", 
   }
 });
 
-// ─────────────────────────── 6. 能力探測快取 + 參數防護
+// ─────────────────────────── 6. 能力探测快取 + 参数防护
 
-test("能力探測只跑一次（同一 api 物件快取）", async () => {
+test("能力探测只跑一次（同一 api 物件快取）", async () => {
   let calls = 0;
   setWorker(makeApi({ onCapabilities: () => (calls += 1) }));
   await hasLocalMediaWorker();
@@ -189,7 +189,7 @@ test("能力探測只跑一次（同一 api 物件快取）", async () => {
   assert.equal(calls, 1);
 });
 
-test("空字串路徑回 bad_file_path，不呼叫 worker", async () => {
+test("空字串路径回 bad_file_path，不呼叫 worker", async () => {
   let probed = false;
   setWorker(
     makeApi({

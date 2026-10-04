@@ -1,5 +1,5 @@
-// 片P 測試：Scene3dCardBody「3D 预览」入口 + Scene3dGltfViewport 資產模式視口。
-// 慣例：node:test + 行為斷言（純函數直測 / SSR 渲染 / 源碼形狀斷言）。
+// 片P 测试：Scene3dCardBody「3D 预览」入口 + Scene3dGltfViewport 资产模式视口。
+// 惯例：node:test + 行为断言（纯函数直测 / SSR 渲染 / 源码形状断言）。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// tsconfig jsx=preserve → classic runtime，SSR 渲染前補全局 React 桩
+// tsconfig jsx=preserve → classic runtime，SSR 渲染前补全局 React 桩
 // （agent-chat-ui.test.ts 同款）。
 (globalThis as unknown as Record<string, unknown>).React ??= React;
 
@@ -61,54 +61,54 @@ test("3D 预览默认收起：初次渲染显示 turntable 主体而非 glTF 视
 
 test("Scene3dGltfViewport 通路形：鉴权 fetch → blob → engine.setGltfAsset（禁裸 GLTFLoader 直连）", () => {
   const source = read("src/components/canvas/node-view/Scene3dGltfViewport.tsx");
-  // 鑑權通路：authHeaders 必帶（歷史坑：裸 fetch 401 靜默 → 視口永遠空）
+  // 鉴权通路：authHeaders 必带（历史坑：裸 fetch 401 静默 → 视口永远空）
   assert.match(source, /authHeaders\(\)/);
   assert.match(source, /URL\.createObjectURL/);
-  // 資產模式掛點：走片E engine.setGltfAsset，不走白模 plan 數據源
+  // 资产模式挂点：走片E engine.setGltfAsset，不走白模 plan 数据源
   assert.match(source, /setGltfAsset\(/);
   assert.doesNotMatch(source, /director\/state/);
   assert.doesNotMatch(source, /evaluateDirectorFrame/);
-  // 結構化錯誤：onGltfAssetError 回呼必接（人話提示含 glb 路徑）
+  // 结构化错误：onGltfAssetError 回呼必接（人话提示含 glb 路径）
   assert.match(source, /onGltfAssetError/);
   assert.match(source, /模型：\$\{glbPath\}/);
-  // 畫布手勢隔離（DirectorMiniViewport 同款鐵律）
+  // 画布手势隔离（DirectorMiniViewport 同款铁律）
   assert.match(source, /data-canvas-interactive/);
   assert.match(source, /stopPropagation\(\)/);
-  // 卸載衛生：engine.dispose + blob URL 回收
+  // 卸载卫生：engine.dispose + blob URL 回收
   assert.match(source, /\.dispose\(\)/);
   assert.match(source, /revokeObjectURL/);
 });
 
-test("Scene3dGltfViewport 代理分支固定：只認 /api/blender-artifact 單檔名形", () => {
+test("Scene3dGltfViewport 代理分支固定：只认 /api/blender-artifact 单档名形", () => {
   const source = read("src/components/canvas/node-view/Scene3dGltfViewport.tsx");
   assert.match(source, /\/api\/blender-artifact\?name=/);
   assert.doesNotMatch(source, /image-proxy/);
 });
 
-// ── 本機導入卡（2026-09-27）：缺 turntable/stills 一律走減法，不出空播放器/空網格 ──
+// ── 本机导入卡（2026-09-27）：缺 turntable/stills 一律走减法，不出空播放器/空网格 ──
 
-/** 導入卡：只帶 glb_path（真實來源＝公網物件存儲 URL）。 */
+/** 导入卡：只带 glb_path（真实来源＝公网物件存储 URL）。 */
 const IMPORT_SCENE: Scene3dCardMetadata = {
   glb_path: "https://blob.example.com/files/canvas/scene3d/42/a.glb",
   scene_summary: "从本机导入的 GLB",
   source: "import",
 };
 
-test("導入卡：缺 turntable/stills 時不渲染播放器、空網格與死按鈕，只留 GLB 視口與下載", () => {
+test("导入卡：缺 turntable/stills 时不渲染播放器、空网格与死按钮，只留 GLB 视口与下载", () => {
   const html = renderToStaticMarkup(createElement(Scene3dCardBody, { node: sceneNode(IMPORT_SCENE) }));
-  // 行為斷言：空播放器 / 未同步提示 / 靜帧網格 / 預覽切換鈕一律不出現
+  // 行为断言：空播放器 / 未同步提示 / 静帧网格 / 预览切换钮一律不出现
   assert.doesNotMatch(html, /<video/);
   assert.doesNotMatch(html, /turntable 未同步/);
   assert.doesNotMatch(html, /场景静帧/);
   assert.doesNotMatch(html, /3D 预览/);
-  // 留下的：GLB 視口容器（Scene3dGltfViewport 的殼）+ 下載連結 + 本機導入標籤 + 真實摘要
-  assert.match(html, /0b0f14/, "GLB 視口殼應在場");
+  // 留下的：GLB 视口容器（Scene3dGltfViewport 的壳）+ 下载连结 + 本机导入标签 + 真实摘要
+  assert.match(html, /0b0f14/, "GLB 视口壳应在场");
   assert.match(html, /\.glb/);
   assert.match(html, /本机导入<\/span>/);
   assert.match(html, /从本机导入的 GLB/);
 });
 
-test("導入卡：glb 地址不可用（空值）時主體與資產行整塊不出現，只剩摘要", () => {
+test("导入卡：glb 地址不可用（空值）时主体与资产行整块不出现，只剩摘要", () => {
   const html = renderToStaticMarkup(
     createElement(Scene3dCardBody, {
       node: sceneNode({ glb_path: "", scene_summary: "从本机导入的 GLB", source: "import" }),
@@ -120,17 +120,17 @@ test("導入卡：glb 地址不可用（空值）時主體與資產行整塊不�
   assert.match(html, /从本机导入的 GLB/);
 });
 
-test("導演卡不受導入刀影響：無「本机导入」標籤、turntable 主體照舊", () => {
+test("导演卡不受导入刀影响：无「本机导入」标签、turntable 主体照旧", () => {
   const html = renderToStaticMarkup(createElement(Scene3dCardBody, { node: sceneNode(SCENE) }));
   assert.doesNotMatch(html, /本机导入/);
   assert.match(html, /场景资产/);
 });
 
-test("blender-artifact 代理路由形：白名單/禁 traversal/白模共存不動 elements", () => {
+test("blender-artifact 代理路由形：白名单/禁 traversal/白模共存不动 elements", () => {
   const route = read("src/app/api/blender-artifact/route.ts");
   assert.match(route, /requireVerifiedUser/);
   assert.match(route, /\.\.\/|traversal|includes\("\.\."\)|includes\("\/"\)/s);
   assert.match(route, /model\/gltf-binary/);
-  // 產物目錄釘死 .blender-work/out（不出橋工作目錄範圍）
+  // 产物目录钉死 .blender-work/out（不出桥工作目录范围）
   assert.match(route, /\.blender-work/, "out");
 });

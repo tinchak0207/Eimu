@@ -1,10 +1,10 @@
-// REQ-B2-2 使用/注入路徑的作用域裁決測試（**實際呼叫**，非源碼字串掃描）。
+// REQ-B2-2 使用/注入路径的作用域裁决测试（**实际呼叫**，非源码字串扫描）。
 //
-// 覆蓋三條硬要求：
-//   ① 跨 project 未分享的資產在**使用路徑**不可用（生成卡注入 / agent 包注入）
-//   ② 跨 owner 未分享一律不可用（fail-closed，不因「同帳號」放行）
-//   ③ 個人資產零回歸：既有單用戶個人資產流程逐位不變
-// 走記憶體降級路徑（測試環境無 BLOB_READ_WRITE_TOKEN）。
+// 覆盖三条硬要求：
+//   ① 跨 project 未分享的资产在**使用路径**不可用（生成卡注入 / agent 包注入）
+//   ② 跨 owner 未分享一律不可用（fail-closed，不因「同帐号」放行）
+//   ③ 个人资产零回归：既有单用户个人资产流程逐位不变
+// 走记忆体降级路径（测试环境无 BLOB_READ_WRITE_TOKEN）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { __resetAssetPackStoreForTests, normalizeAssetPack, saveAssetPack } from "./asset-pack-store";
@@ -31,7 +31,7 @@ function pack(id: string, scope?: { owner: "personal" | "project"; projectId?: s
     createdAt: AT,
     updatedAt: AT,
   });
-  assert.ok(normalized, `pack ${id} 應可清洗`);
+  assert.ok(normalized, `pack ${id} 应可清洗`);
   return normalized;
 }
 
@@ -44,34 +44,34 @@ function card(id: string, scope?: { owner: "personal" | "project"; projectId?: s
     createdAt: AT,
     updatedAt: AT,
   });
-  assert.ok(normalized, `card ${id} 應可清洗`);
+  assert.ok(normalized, `card ${id} 应可清洗`);
   return normalized;
 }
 
-// ─────────────────────────────────────────── ① agent 主動包注入路徑
+// ─────────────────────────────────────────── ① agent 主动包注入路径
 
-test("B2-2 agent 包注入：跨 project 未分享的包不可用（無項目上下文＝不注入）", async () => {
+test("B2-2 agent 包注入：跨 project 未分享的包不可用（无项目上下文＝不注入）", async () => {
   reset();
   await saveAssetPack(42, pack("pack-in-a", { owner: "project", projectId: "proj-a" }));
 
   assert.equal(
     await isAssetUsable({ userId: 42, projectId: null, assetKind: "pack", assetId: "pack-in-a" }),
     false,
-    "無項目上下文時項目歸屬的包必須不可用（不可見即不可用）",
+    "无项目上下文时项目归属的包必须不可用（不可见即不可用）",
   );
   assert.equal(
     await isAssetUsable({ userId: 42, projectId: "proj-b", assetKind: "pack", assetId: "pack-in-a" }),
     false,
-    "別的項目不得讀到本項目歸屬的包",
+    "别的项目不得读到本项目归属的包",
   );
   assert.equal(
     await isAssetUsable({ userId: 42, projectId: "proj-a", assetKind: "pack", assetId: "pack-in-a" }),
     true,
-    "本項目上下文下可用（不是無條件拒絕）",
+    "本项目上下文下可用（不是无条件拒绝）",
   );
 });
 
-test("B2-2 agent 包注入：顯式分享後才在目標項目可用（撤銷後立刻回到不可用）", async () => {
+test("B2-2 agent 包注入：显式分享后才在目标项目可用（撤销后立刻回到不可用）", async () => {
   reset();
   await saveAssetPack(42, pack("pack-in-a", { owner: "project", projectId: "proj-a" }));
   const shared = await grantAssetShare(42, {
@@ -85,13 +85,13 @@ test("B2-2 agent 包注入：顯式分享後才在目標項目可用（撤銷後
   assert.equal(
     await isAssetUsable({ userId: 42, projectId: "proj-b", assetKind: "pack", assetId: "pack-in-a" }),
     true,
-    "顯式分享後目標項目可用",
+    "显式分享后目标项目可用",
   );
   assert.equal(await revokeAssetShare(42, shared.share.id), true);
   assert.equal(
     await isAssetUsable({ userId: 42, projectId: "proj-b", assetKind: "pack", assetId: "pack-in-a" }),
     false,
-    "撤銷後立刻回到不可用",
+    "撤销后立刻回到不可用",
   );
 });
 
@@ -99,33 +99,33 @@ test("B2-2 agent 包注入：跨 owner 未分享一律不可用（fail-closed）
   reset();
   await saveAssetPack(42, pack("pack-in-a", { owner: "project", projectId: "proj-a" }));
   await saveAssetPack(42, pack("pack-personal"));
-  // 別人的存儲桶裡沒有這個包 → 不可用（不是「同帳號自動放行」）。
+  // 别人的存储桶里没有这个包 → 不可用（不是「同帐号自动放行」）。
   assert.equal(await isAssetUsable({ userId: 7, projectId: "proj-a", assetKind: "pack", assetId: "pack-in-a" }), false);
   assert.equal(await isAssetUsable({ userId: 7, projectId: null, assetKind: "pack", assetId: "pack-personal" }), false);
-  // 個人包對本帳號在所有項目上下文都可用（零回歸）。
+  // 个人包对本帐号在所有项目上下文都可用（零回归）。
   assert.equal(await isAssetUsable({ userId: 42, projectId: "proj-a", assetKind: "pack", assetId: "pack-personal" }), true);
   assert.equal(await isAssetUsable({ userId: 42, projectId: null, assetKind: "pack", assetId: "pack-personal" }), true);
   assert.equal(await isAssetUsable({ userId: 42, projectId: "proj-z", assetKind: "pack", assetId: "pack-personal" }), true);
 });
 
-// ─────────────────────────────────────────── ② 生成卡注入路徑（cardIds 閘）
+// ─────────────────────────────────────────── ② 生成卡注入路径（cardIds 闸）
 
-test("B2-2 生成卡注入：跨 project 未分享的卡不得鎖進本項目（其餘原樣）", async () => {
+test("B2-2 生成卡注入：跨 project 未分享的卡不得锁进本项目（其余原样）", async () => {
   reset();
   await saveCharacterCard(42, card("card-in-a", { owner: "project", projectId: "proj-a" }));
   await saveCharacterCard(42, card("card-personal"));
 
-  // 本項目：全數保留（不誤傷）。
+  // 本项目：全数保留（不误伤）。
   assert.deepEqual(
     await filterCardIdsForProject({ userId: 42, projectId: "proj-a", cardIds: ["card-in-a", "card-personal"] }),
     ["card-in-a", "card-personal"],
   );
-  // 別的項目：A 的卡被拒，個人卡與「查不到的 id」原樣保留（不猜、不靜默丟）。
+  // 别的项目：A 的卡被拒，个人卡与「查不到的 id」原样保留（不猜、不静默丢）。
   assert.deepEqual(
     await filterCardIdsForProject({ userId: 42, projectId: "proj-b", cardIds: ["card-in-a", "card-personal", "card-ghost"] }),
     ["card-personal", "card-ghost"],
   );
-  // 顯式分享後才可在 proj-b 鎖定。
+  // 显式分享后才可在 proj-b 锁定。
   await grantAssetShare(42, {
     assetKind: "card",
     assetId: "card-in-a",
@@ -139,10 +139,10 @@ test("B2-2 生成卡注入：跨 project 未分享的卡不得鎖進本項目（
   );
 });
 
-test("B2-2 生成卡注入：跨 owner 的卡不在本人卡池 → 只按「查不到」語義處理，不因此放行他人資產", async () => {
+test("B2-2 生成卡注入：跨 owner 的卡不在本人卡池 → 只按「查不到」语义处理，不因此放行他人资产", async () => {
   reset();
   await saveCharacterCard(7, card("card-in-a", { owner: "project", projectId: "proj-a" }));
-  // 42 的卡池裡沒有它 → 查不到（維持不猜語義），但 42 也拿不到卡實體（store 按 userId 隔離）。
+  // 42 的卡池里没有它 → 查不到（维持不猜语义），但 42 也拿不到卡实体（store 按 userId 隔离）。
   assert.deepEqual(
     await filterCardIdsForProject({ userId: 42, projectId: "proj-b", cardIds: ["card-in-a"] }),
     ["card-in-a"],
@@ -150,9 +150,9 @@ test("B2-2 生成卡注入：跨 owner 的卡不在本人卡池 → 只按「查
   assert.equal(await isAssetUsable({ userId: 42, projectId: "proj-b", assetKind: "card", assetId: "card-in-a" }), false);
 });
 
-// ─────────────────────────────────────────── ③ 上下文取值與零回歸
+// ─────────────────────────────────────────── ③ 上下文取值与零回归
 
-test("B2-2 項目上下文取值：非字串/空 → null（fail-closed，不臆造項目）", () => {
+test("B2-2 项目上下文取值：非字串/空 → null（fail-closed，不臆造项目）", () => {
   assert.equal(projectIdFromBody({ projectId: "proj-a" }), "proj-a");
   assert.equal(projectIdFromBody({ project_id: "proj-a" }), "proj-a");
   assert.equal(projectIdFromBody({ projectId: "  proj-a  " }), "proj-a");
@@ -163,7 +163,7 @@ test("B2-2 項目上下文取值：非字串/空 → null（fail-closed，不臆
   assert.equal(projectIdFromBody("proj-a"), null);
 });
 
-test("B2-2 零回歸：只有個人卡/包的用戶，行為與加作用域層之前逐位一致", async () => {
+test("B2-2 零回归：只有个人卡/包的用户，行为与加作用域层之前逐位一致", async () => {
   reset();
   await saveCharacterCard(42, card("card-personal-1"));
   await saveCharacterCard(42, card("card-personal-2"));
@@ -173,6 +173,6 @@ test("B2-2 零回歸：只有個人卡/包的用戶，行為與加作用域層�
     assert.deepEqual(await filterCardIdsForProject({ userId: 42, projectId, cardIds: ids }), ids);
   }
   assert.equal(await isAssetUsable({ userId: 42, projectId: null, assetKind: "pack", assetId: "pack-personal" }), true);
-  // 空 cardIds 不觸發任何讀取，原樣回空（零成本短路）。
+  // 空 cardIds 不触发任何读取，原样回空（零成本短路）。
   assert.deepEqual(await filterCardIdsForProject({ userId: 42, projectId: "proj-a", cardIds: [] }), []);
 });

@@ -1,27 +1,27 @@
-// POST /api/uploads/sign —— 兩段式上傳【第一段】：簽發直傳憑證。
+// POST /api/uploads/sign —— 两段式上传【第一段】：签发直传凭证。
 //
-// 對稱差 D36（Dramagic 全站 303 行）：
-//   `UploadFileUrl{Type,Target:"temp",Suffix}` → 簽名 PUT（`Expires:3600`）→ 回寫 `TosKey`
+// 对称差 D36（Dramagic 全站 303 行）：
+//   `UploadFileUrl{Type,Target:"temp",Suffix}` → 签名 PUT（`Expires:3600`）→ 回写 `TosKey`
 //
-// 契約：
-//   請求（**只帶 metadata，零檔案位元組**——大檔直傳的唯一意義）
+// 契约：
+//   请求（**只带 metadata，零档案位元组**——大档直传的唯一意义）
 //     { filename?: string, contentType: string, size?: number }
-//   或官方 `@vercel/blob/client` 的 `upload()` 事件體
+//   或官方 `@vercel/blob/client` 的 `upload()` 事件体
 //     { type: "blob.generate-client-token", payload: { pathname, clientPayload, multipart } }
-//   回應：{ success, backend, objectKey, uploadUrl, method, access, clientToken,
+//   回应：{ success, backend, objectKey, uploadUrl, method, access, clientToken,
 //           contentType, maxBytes, expiresInMs, expiresAt, downloadUrl, type }
 //
-// 後端判定與簽發細節全在 `@/lib/two-phase-upload`（單一真源）。VPS image-data-api
-// 沒有簽名端點 ⇒ 具名錯誤 `vps_blob_direct_upload_unsupported`（不假裝成功）。
+// 后端判定与签发细节全在 `@/lib/two-phase-upload`（单一真源）。VPS image-data-api
+// 没有签名端点 ⇒ 具名错误 `vps_blob_direct_upload_unsupported`（不假装成功）。
 //
-// 鑑權：requireVerifiedUser（授權走上游 /api/user/self，不信任 x-user-id）。
+// 鉴权：requireVerifiedUser（授权走上游 /api/user/self，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { UploadSignError, issueDirectUploadCredential } from "@/lib/two-phase-upload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
 
-  // 官方協議：客戶端（`@vercel/blob/client` 的 upload()）自帶 pathname；owner 前綴照樣要過檢查。
+  // 官方协议：客户端（`@vercel/blob/client` 的 upload()）自带 pathname；owner 前缀照样要过检查。
   const isOfficialProtocol = body?.type === "blob.generate-client-token";
   const payload = (body?.payload ?? null) as { pathname?: unknown } | null;
 
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, ...credential }, { status: 200 });
   } catch (error) {
     if (error instanceof UploadSignError) return fail(error.status, error.message, error.code);
-    console.error("[uploads/sign] 簽發直傳憑證失敗。", error);
-    return fail(500, "签發直传凭证失败，请稍后再试。", "internal_error");
+    console.error("[uploads/sign] 签发直传凭证失败。", error);
+    return fail(500, "签发直传凭证失败，请稍后再试。", "internal_error");
   }
 }

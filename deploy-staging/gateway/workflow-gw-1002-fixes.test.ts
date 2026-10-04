@@ -1,8 +1,8 @@
-// 2026-10-02 三缺陷注入驗收（真行為，非源碼字串斷言）。
-//   1) settleWorkflowCharges：job succeeded 但 cost_coins 先 0、約 10 秒後才 130
-//      → 不得記出假退款（refunded_coins 必須為 0，charged 必須為 130）。
-//   2) capacity_saturated：換道門檻（WORKFLOW_QUEUE_SWITCH_MS=300000）內必須
-//      __queueSwitches ≥ 1 且畫布提示幀原文含「5 分钟」。
+// 2026-10-02 三缺陷注入验收（真行为，非源码字串断言）。
+//   1) settleWorkflowCharges：job succeeded 但 cost_coins 先 0、约 10 秒后才 130
+//      → 不得记出假退款（refunded_coins 必须为 0，charged 必须为 130）。
+//   2) capacity_saturated：换道门槛（WORKFLOW_QUEUE_SWITCH_MS=300000）内必须
+//      __queueSwitches ≥ 1 且画布提示帧原文含「5 分钟」。
 // 跑法：timeout 120 bun run deploy-staging/gateway/workflow-gw-1002-fixes.test.ts
 process.env.PLATFORM_BASE = "http://test.local"
 process.env.QUOTA_URL = "http://test.local/v1/quota"
@@ -48,7 +48,7 @@ async function run(): Promise<void> {
   const assert = await import("node:assert/strict")
   const gw = await import("./workflow-gw.ts")
 
-  // ── 缺陷 1：假退款不再發生（cost_coins 延遲落地）────────────────────────
+  // ── 缺陷 1：假退款不再发生（cost_coins 延迟落地）────────────────────────
   {
     const captured: string[] = []
     const state = makeState("sess-refund", captured)
@@ -62,7 +62,7 @@ async function run(): Promise<void> {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(typeof input === "string" ? input : (input as Request).url ?? input)
       if (url.includes(`/v1/videos/${jobId}`)) {
-        // 控面投影延遲：前兩次查詢 cost_coins 仍為 0，約 10 秒後才落帳 130。
+        // 控面投影延迟：前两次查询 cost_coins 仍为 0，约 10 秒后才落帐 130。
         const cost = Date.now() - started >= 9_000 ? 130 : 0
         return json({ status: "succeeded", cost_coins: cost })
       }
@@ -72,17 +72,17 @@ async function run(): Promise<void> {
       const report = await gw.settleWorkflowCharges(state, wfid)
       const billing = gw.workflowBilling.get(wfid)!
       console.log(`  [1] report.charged=${report.charged} unresolved=${report.unresolved} refunded_coins=${billing.refunded_coins}`)
-      assert.equal(report.charged, 130, "實扣應等到 130（不再把「還沒查到」當 0）")
-      assert.equal(report.unresolved, 0, "延遲落地後不應殘留 unresolved")
-      assert.equal(billing.refunded_coins, 0, "不得記出假退款")
-      assert.equal(billing.billing_status, "confirmed", "無退款則狀態不得翻 refunded")
-      console.log("  ✓ [1] 假退款不再發生（cost 延遲 10s 仍結算到 130、退款 0）")
+      assert.equal(report.charged, 130, "实扣应等到 130（不再把「还没查到」当 0）")
+      assert.equal(report.unresolved, 0, "延迟落地后不应残留 unresolved")
+      assert.equal(billing.refunded_coins, 0, "不得记出假退款")
+      assert.equal(billing.billing_status, "confirmed", "无退款则状态不得翻 refunded")
+      console.log("  ✓ [1] 假退款不再发生（cost 延迟 10s 仍结算到 130、退款 0）")
     } finally {
       globalThis.fetch = realFetch
     }
   }
 
-  // ── 缺陷 2：capacity_saturated 在門檻內先換道並提示 5 分鐘 ───────────────
+  // ── 缺陷 2：capacity_saturated 在门槛内先换道并提示 5 分钟 ───────────────
   {
     const captured: string[] = []
     const state = makeState("sess-switch", captured)
@@ -121,7 +121,7 @@ async function run(): Promise<void> {
       }
       if (url.includes("/v1/videos/jobA")) {
         jobACalls++
-        // 第二次輪詢時把虛擬時鐘推過 5 分鐘換道門檻（門檻字面仍為 300000 → 文案 5 分钟）。
+        // 第二次轮询时把虚拟时钟推过 5 分钟换道门槛（门槛字面仍为 300000 → 文案 5 分钟）。
         if (jobACalls >= 2) offset = 300_001
         return json({ status: "queued", failure_class: "capacity_saturated: upstream concurrency limit" })
       }
@@ -139,23 +139,23 @@ async function run(): Promise<void> {
       const hintFrames = captured.filter((f) => f.includes("canvas.node.updated") && f.includes("排队"))
       console.log(`  [2] result.ok=${r.ok} content=${r.content} __queueSwitches=${switches} hintFrames=${hintFrames.length}`)
       console.log(`  [2] hint frame raw: ${hintFrames[0]?.trim().replace(/\n/g, " | ")}`)
-      assert.equal(r.ok, true, "換道後應成功")
-      assert.ok(switches >= 1, `capacity_saturated 應觸發換道，實得 __queueSwitches=${switches}`)
-      assert.ok(hintFrames.length >= 1, "應有換道提示幀")
-      assert.match(hintFrames[0], /5 分钟/, "提示幀原文須含門檻分鐘數「5 分钟」")
-      console.log("  ✓ [2] capacity_saturated 門檻內換同價通道 + 5 分钟提示")
+      assert.equal(r.ok, true, "换道后应成功")
+      assert.ok(switches >= 1, `capacity_saturated 应触发换道，实得 __queueSwitches=${switches}`)
+      assert.ok(hintFrames.length >= 1, "应有换道提示帧")
+      assert.match(hintFrames[0], /5 分钟/, "提示帧原文须含门槛分钟数「5 分钟」")
+      console.log("  ✓ [2] capacity_saturated 门槛内换同价通道 + 5 分钟提示")
     } finally {
       globalThis.fetch = realFetch
       Date.now = realNow
     }
   }
 
-  console.log("ALL PASS: workflow-gw 2026-10-02 三缺陷注入驗收")
+  console.log("ALL PASS: workflow-gw 2026-10-02 三缺陷注入验收")
   process.exit(0)
 }
 
 if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
-  console.error("需以 bun 執行")
+  console.error("需以 bun 执行")
   process.exit(2)
 } else {
   run().catch((e) => {

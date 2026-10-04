@@ -1,17 +1,17 @@
-// REQ-D3 訂閱 SKU：**寫入器層**（訂閱合約＋期次發放＋兌換碼通道）。
+// REQ-D3 订阅 SKU：**写入器层**（订阅合约＋期次发放＋兑换码通道）。
 //
-// 純算術在 subscription-sku.ts，帳本在 account-ledger.ts，本檔只做「讀事實 → 決定 →
-// 記帳」的編排：
-//   ① 兌換碼通道（預設，見 SUBSCRIPTION_FULFILLMENT_CHANNEL）：從 new-api 兌換記錄
-//      回讀「已被使用」且 name 帶 SKU 標記的碼（與 E1a 充值入帳同一條可觀測真相）。
-//   ② 建立訂閱合約（subscription 表，UNIQUE(source_ref) ⇒ 同碼不得雙開）。
-//   ③ 發放期次：冪等鍵＝(訂閱 id, 期次序號)；replace 語義下把上一期未用完餘額作廢。
-//   ④ 防雙算：帶標記的碼由本模組處理，account-ledger 的永久充值通道明確跳過它。
-//   ⑤ 基線規則沿用 E1a：redeemed_time 早於帳本基線的碼已含在 opening 裡 ⇒ 不發放。
+// 纯算术在 subscription-sku.ts，帐本在 account-ledger.ts，本档只做「读事实 → 决定 →
+// 记帐」的编排：
+//   ① 兑换码通道（预设，见 SUBSCRIPTION_FULFILLMENT_CHANNEL）：从 new-api 兑换记录
+//      回读「已被使用」且 name 带 SKU 标记的码（与 E1a 充值入帐同一条可观测真相）。
+//   ② 建立订阅合约（subscription 表，UNIQUE(source_ref) ⇒ 同码不得双开）。
+//   ③ 发放期次：幂等键＝(订阅 id, 期次序号)；replace 语义下把上一期未用完余额作废。
+//   ④ 防双算：带标记的码由本模组处理，account-ledger 的永久充值通道明确跳过它。
+//   ⑤ 基线规则沿用 E1a：redeemed_time 早于帐本基线的码已含在 opening 里 ⇒ 不发放。
 //
-// 不變量 ④（過期只在讀取時 lazy 判定）：本檔**不負責**過期——沒有任何「到期清零」的
-// 定時任務；過期只在讀取餘額/預檢時由 computePoolBalances(entries, now) 判定。
-// 本檔唯一與時間有關的寫入是「續期替換」（有人按了續費，是事件不是時間流逝）。
+// 不变量 ④（过期只在读取时 lazy 判定）：本档**不负责**过期——没有任何「到期清零」的
+// 定时任务；过期只在读取余额/预检时由 computePoolBalances(entries, now) 判定。
+// 本档唯一与时间有关的写入是「续期替换」（有人按了续费，是事件不是时间流逝）。
 
 import { listGatewayRedemptions, type GatewayAdminUser, type GatewayRedemption } from "@/lib/gateway-admin";
 import {
@@ -37,7 +37,7 @@ import { getGenerationSql, type GenerationSql } from "./database";
 
 type Row = Record<string, unknown>;
 
-/** 訂閱合約（subscription 表的一列）——只存合約，不存當前期的可變游標（見 migration 022）。 */
+/** 订阅合约（subscription 表的一列）——只存合约，不存当前期的可变游标（见 migration 022）。 */
 export interface SubscriptionRecord {
   id: string;
   billingUserId: number;
@@ -51,24 +51,24 @@ export interface SubscriptionRecord {
 export interface SubscriptionGrantOutcome {
   ok: boolean;
   subscriptionId: string;
-  /** 本期期次序號（1 起算）。 */
+  /** 本期期次序号（1 起算）。 */
   termIndex: number;
-  /** true = 本次真的發放；false = 已發過（重放／併發）。 */
+  /** true = 本次真的发放；false = 已发过（重放／并发）。 */
   granted: boolean;
-  /** 本次作廢的上一期未用完餘額（replace 語義）。 */
+  /** 本次作废的上一期未用完余额（replace 语义）。 */
   replacedQuota: number;
-  /** 本期到期時刻。 */
+  /** 本期到期时刻。 */
   expiresAt: string | null;
   reason?: string;
 }
 
 export interface SubscriptionDeps extends LedgerWriterDeps {
   now?: () => Date;
-  /** 合約 id 生成（默認訂閱 id = sub-<userId>-<sku>；測試可注入）。 */
+  /** 合约 id 生成（默认订阅 id = sub-<userId>-<sku>；测试可注入）。 */
   newSubscriptionId?: (billingUserId: number, sku: string) => string;
 }
 
-/** 把訂閱層的依賴縮成帳本層要的形狀（不多帶欄位，避免型別外溢）。 */
+/** 把订阅层的依赖缩成帐本层要的形状（不多带栏位，避免型别外溢）。 */
 function asLedgerDeps(deps: SubscriptionDeps, sql: GenerationSql): LedgerWriterDeps {
   return deps.fetchUser ? { sql, fetchUser: deps.fetchUser } : { sql };
 }
@@ -94,10 +94,10 @@ async function readSubscription(sql: GenerationSql, id: string): Promise<Subscri
 }
 
 /**
- * 建立訂閱合約（**冪等**：同 id 已存在 ⇒ 不覆寫）。
- * 合約 id 由 (billing_user_id, sku) 決定 ⇒ 同一用戶同一 SKU 只有一份合約，續期＝同一份
- * 合約的下一個期次（期次冪等的載體）。
- * `source_ref` 有 UNIQUE ⇒ 同一張兌換碼不可能開出第二份合約（雙開的另一道門）。
+ * 建立订阅合约（**幂等**：同 id 已存在 ⇒ 不覆写）。
+ * 合约 id 由 (billing_user_id, sku) 决定 ⇒ 同一用户同一 SKU 只有一份合约，续期＝同一份
+ * 合约的下一个期次（期次幂等的载体）。
+ * `source_ref` 有 UNIQUE ⇒ 同一张兑换码不可能开出第二份合约（双开的另一道门）。
  */
 async function ensureSubscription(
   input: { billingUserId: number; sku: string; termQuota: number; redemptionId: string | number; redeemedAt: string },
@@ -120,19 +120,19 @@ async function ensureSubscription(
   `;
   if (rows[0]) return { subscription: mapSubscriptionRow(rows[0]), created: true };
 
-  // 併發：另一路先插了同 id。讀回來用（合約內容以先落地者為準，不覆寫）。
+  // 并发：另一路先插了同 id。读回来用（合约内容以先落地者为准，不覆写）。
   const raced = await readSubscription(sql, id);
-  if (!raced) throw new Error(`訂閱合約建立失敗（${id}）`);
+  if (!raced) throw new Error(`订阅合约建立失败（${id}）`);
   return { subscription: raced, created: false };
 }
 
 /**
- * 發放一期（**不變量 ③**）：期次序號由帳本推導（Σ 已發放的期次行），冪等鍵 (訂閱 id, 期次)。
+ * 发放一期（**不变量 ③**）：期次序号由帐本推导（Σ 已发放的期次行），幂等键 (订阅 id, 期次)。
  *
- * 重放防護：同一張兌換碼（source_ref='redemption:<id>'）已有發放行 ⇒ 直接回報「已發過」，
- * 不再指派新期次（否則每掃一次就多發一期）。並發時由帳本 UNIQUE(idempotency_ref) 擋。
+ * 重放防护：同一张兑换码（source_ref='redemption:<id>'）已有发放行 ⇒ 直接回报「已发过」，
+ * 不再指派新期次（否则每扫一次就多发一期）。并发时由帐本 UNIQUE(idempotency_ref) 挡。
  *
- * replace 語義（預設）：新期取代舊期未用完餘額 ⇒ 作廢舊期剩餘；accumulate 則不作廢。
+ * replace 语义（预设）：新期取代旧期未用完余额 ⇒ 作废旧期剩余；accumulate 则不作废。
  */
 export async function grantSubscriptionTermFromRedemption(
   input: {
@@ -142,7 +142,7 @@ export async function grantSubscriptionTermFromRedemption(
     redemptionId: string | number;
     redemptionKey?: string | null;
     redeemedAt: string;
-    /** 已存在的合約 id（由呼叫端從兌換記錄推出）；省略＝按 (user, sku) 生成。 */
+    /** 已存在的合约 id（由呼叫端从兑换记录推出）；省略＝按 (user, sku) 生成。 */
     subscriptionId?: string;
   },
   deps: SubscriptionDeps = {},
@@ -159,7 +159,7 @@ export async function grantSubscriptionTermFromRedemption(
     expiresAt: null,
   };
 
-  if (!accountLedgerStoreEnabled() && !deps.sql) return { ...empty, reason: "帳本儲存層未配置" };
+  if (!accountLedgerStoreEnabled() && !deps.sql) return { ...empty, reason: "帐本储存层未配置" };
   const sql = deps.sql ?? getGenerationSql();
   const now = (deps.now ?? (() => new Date()))();
 
@@ -176,7 +176,7 @@ export async function grantSubscriptionTermFromRedemption(
     );
 
     const entries = await readAccountLedger(input.billingUserId, { sql });
-    // ① 同一張碼是否已發放過（source_ref 指回這張碼且落在訂閱池）。
+    // ① 同一张码是否已发放过（source_ref 指回这张码且落在订阅池）。
     const already = entries.find(
       (entry) => entry.sourceRef === sourceRef && entry.pool === "subscription" && entry.entryType === "recharge",
     );
@@ -186,11 +186,11 @@ export async function grantSubscriptionTermFromRedemption(
         granted: false,
         termIndex: termIndexFromEntry(already.termRef) ?? 0,
         expiresAt: already.expiresAt ?? null,
-        reason: "同一張兌換碼已發放過（重放不雙發）",
+        reason: "同一张兑换码已发放过（重放不双发）",
       };
     }
 
-    // ② 期次序號 = 已發放期次 + 1（帳本是唯一權威）。
+    // ② 期次序号 = 已发放期次 + 1（帐本是唯一权威）。
     let maxTerm = 0;
     let previousGrant: { termIndex: number; termRef: string; expiresAt: string; quota: number } | null = null;
     const termQuotaByRef = new Map<string, number>();
@@ -216,7 +216,7 @@ export async function grantSubscriptionTermFromRedemption(
       previousGrant.quota = termQuotaByRef.get(previousGrant.termRef) ?? 0;
     }
 
-    // ③ 替換語義：舊期未用完餘額作廢（accumulate 模式回 0 ＝ 不作廢）。
+    // ③ 替换语义：旧期未用完余额作废（accumulate 模式回 0 ＝ 不作废）。
     const replacedQuota =
       previousGrant && SUBSCRIPTION_RENEWAL_MODE === "replace"
         ? replacedQuotaForRenewal(previousGrant.quota)
@@ -265,7 +265,7 @@ export async function grantSubscriptionTermFromRedemption(
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`[subscription] 期次發放失敗（不擋錢路，留待下一輪／對帳）user=${input.billingUserId}：${reason}`);
+    console.error(`[subscription] 期次发放失败（不挡钱路，留待下一轮／对帐）user=${input.billingUserId}：${reason}`);
     return { ...empty, reason };
   }
 }
@@ -278,18 +278,18 @@ function termIndexFromEntry(termRef: string | null | undefined): number | null {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
 }
 
-// ─────────────────────────────────────────────── 兌換碼通道（上游記錄 → 訂閱）
+// ─────────────────────────────────────────────── 兑换码通道（上游记录 → 订阅）
 
 export interface SubscriptionIngestSummary {
   scanned: number;
-  /** 本次發放的期次數（含續期）。 */
+  /** 本次发放的期次数（含续期）。 */
   granted: number;
-  /** 認出是訂閱碼但已發放過。 */
+  /** 认出是订阅码但已发放过。 */
   skippedAlreadyGranted: number;
   skippedUnused: number;
   skippedBeforeBaseline: number;
   skippedNoUser: number;
-  /** 標記認得、SKU 不在註冊表（用兜底期長兌現，留審計訊息）。 */
+  /** 标记认得、SKU 不在注册表（用兜底期长兑现，留审计讯息）。 */
   unknownSku: number;
   errors: string[];
 }
@@ -297,16 +297,16 @@ export interface SubscriptionIngestSummary {
 type RedemptionReader = (input: { pages: number; pageSize: number }) => Promise<GatewayRedemption[]>;
 
 /**
- * 訂閱兌換碼入帳（**預設通道**，不變量：訂閱沿用兌換碼）。
+ * 订阅兑换码入帐（**预设通道**，不变量：订阅沿用兑换码）。
  *
- * 為什麼與 E1a 充值入帳讀同一份上游事實：兌換這個動作只發生在 new-api 端，我方唯一
- * 可觀測的真相就是兌換記錄（status/redeemed_time/used_user_id）。發碼即入帳 = 未兌換的
- * 碼憑空變成訂閱餘額，違反「充值必兌現」的另一面（我方不得憑空給，也不得收了不給）。
+ * 为什么与 E1a 充值入帐读同一份上游事实：兑换这个动作只发生在 new-api 端，我方唯一
+ * 可观测的真相就是兑换记录（status/redeemed_time/used_user_id）。发码即入帐 = 未兑换的
+ * 码凭空变成订阅余额，违反「充值必兑现」的另一面（我方不得凭空给，也不得收了不给）。
  *
- * 基線規則（與 E1a 逐條相同）：redeemed_time 早於該身份基線入帳時刻的碼已含在 opening 裡
- * ⇒ 不再發放（否則雙算）。
+ * 基线规则（与 E1a 逐条相同）：redeemed_time 早于该身份基线入帐时刻的码已含在 opening 里
+ * ⇒ 不再发放（否则双算）。
  *
- * 幂等：同一張碼重放 ⇒ grantSubscriptionTermFromRedemption 依 source_ref 判「已發放」。
+ * 幂等：同一张码重放 ⇒ grantSubscriptionTermFromRedemption 依 source_ref 判「已发放」。
  */
 export async function ingestSubscriptionRedemptions(
   input: { pages?: number; pageSize?: number } = {},
@@ -328,11 +328,11 @@ export async function ingestSubscriptionRedemptions(
     errors: [],
   };
   if (SUBSCRIPTION_FULFILLMENT_CHANNEL !== "redemption") {
-    summary.errors.push(`訂閱兌現通道為 ${SUBSCRIPTION_FULFILLMENT_CHANNEL}（非兌換碼），本輪不掃碼`);
+    summary.errors.push(`订阅兑现通道为 ${SUBSCRIPTION_FULFILLMENT_CHANNEL}（非兑换码），本轮不扫码`);
     return summary;
   }
   if (!accountLedgerStoreEnabled() && !deps.sql) {
-    summary.errors.push("帳本儲存層未配置");
+    summary.errors.push("帐本储存层未配置");
     return summary;
   }
   const sql = deps.sql ?? getGenerationSql();
@@ -347,13 +347,13 @@ export async function ingestSubscriptionRedemptions(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     summary.errors.push(reason);
-    console.error(`[subscription] 兌換碼讀取失敗：${reason}`);
+    console.error(`[subscription] 兑换码读取失败：${reason}`);
     return summary;
   }
 
   for (const item of items) {
     const marker = parseSubscriptionCodeMarker(item.name);
-    if (!marker) continue; // 非訂閱碼：不屬於本通道
+    if (!marker) continue; // 非订阅码：不属于本通道
     summary.scanned += 1;
 
     const redeemedAtSec = Number(item.redeemed_time ?? 0);
@@ -377,7 +377,7 @@ export async function ingestSubscriptionRedemptions(
     `;
     const openingAtMs = openingRow[0] ? new Date(String(openingRow[0].created_at)).getTime() : Date.now();
     if (redeemedAtSec * 1000 < openingAtMs) {
-      // 基線前兌換：額度已含在 opening 基線裡（防雙算，與 E1a 同一條判別）。
+      // 基线前兑换：额度已含在 opening 基线里（防双算，与 E1a 同一条判别）。
       summary.skippedBeforeBaseline += 1;
       continue;
     }
@@ -385,8 +385,8 @@ export async function ingestSubscriptionRedemptions(
     if (!isKnownSubscriptionSku(marker.sku)) {
       summary.unknownSku += 1;
       console.error(
-        `[subscription] 認得訂閱標記但 SKU 未註冊 sku=${marker.sku} redemption=${item.id}；` +
-          `仍按兜底期長發放（充值必兌現），期長=${subscriptionSkuTermSeconds(marker.sku)}s`,
+        `[subscription] 认得订阅标记但 SKU 未注册 sku=${marker.sku} redemption=${item.id}；` +
+          `仍按兜底期长发放（充值必兑现），期长=${subscriptionSkuTermSeconds(marker.sku)}s`,
       );
     }
 
@@ -402,22 +402,22 @@ export async function ingestSubscriptionRedemptions(
       { sql, fetchUser: deps.fetchUser, now: deps.now },
     );
     if (outcome.granted) summary.granted += 1;
-    else if (/已發放/.test(outcome.reason ?? "")) summary.skippedAlreadyGranted += 1;
-    else summary.errors.push(`redemption ${item.id}: ${outcome.reason ?? "未發放"}`);
+    else if (/已发放/.test(outcome.reason ?? "")) summary.skippedAlreadyGranted += 1;
+    else summary.errors.push(`redemption ${item.id}: ${outcome.reason ?? "未发放"}`);
   }
   return summary;
 }
 
-// ─────────────────────────────────────────────── 訂閱檢視（只讀，供後續 UI/排障）
+// ─────────────────────────────────────────────── 订阅检视（只读，供后续 UI/排障）
 
 export interface SubscriptionView {
   subscription: SubscriptionRecord;
   termIndex: number;
   expiresAt: string | null;
   termQuota: number;
-  /** 該訂閱在帳本上的餘額（僅訂閱池、含已過期部分）。 */
+  /** 该订阅在帐本上的余额（仅订阅池、含已过期部分）。 */
   bookQuota: number;
-  /** 未過期部分（可用）。 */
+  /** 未过期部分（可用）。 */
   availableQuota: number;
   expired: boolean;
 }

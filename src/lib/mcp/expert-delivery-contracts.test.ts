@@ -36,9 +36,9 @@ type Contracts = Record<string, DomainContract>;
 
 /** deploy-staging/ 是本机专属目录（未进 git）；别人 clone 没有它 → 同步检查须 skip，不得红。 */
 const ORIGINAL_ABSENT_MSG =
-  "deploy-staging/ 為本機專屬目錄（未進 git），缺席時跳過同步檢查（src 鏡像已隨 git 上傳，不影響建置）";
+  "deploy-staging/ 为本机专属目录（未进 git），缺席时跳过同步检查（src 镜像已随 git 上传，不影响建置）";
 
-test("同步棘輪：src 鏡像與 deploy-staging 原檔逐位元組相同（原檔缺席則 skip）", (t) => {
+test("同步棘轮：src 镜像与 deploy-staging 原档逐位元组相同（原档缺席则 skip）", (t) => {
   if (!existsSync(ORIGINAL_PATH)) {
     t.skip(ORIGINAL_ABSENT_MSG);
     return;

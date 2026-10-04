@@ -7,13 +7,13 @@ const controlPlaneOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  // Vercel 遠程構建跳過 lint＋型別檢查（每次省約 60s）；本機 `npm run build` 照常把關。
+  // Vercel 远程构建跳过 lint＋型别检查（每次省约 60s）；本机 `npm run build` 照常把关。
   eslint: { ignoreDuringBuilds: process.env.VERCEL === "1" },
   typescript: { ignoreBuildErrors: process.env.VERCEL === "1" },
-  // 建置期版本指紋，供 /api/version 取證用（唯一消費者，不影響其他 bundle）。
-  // 必要性：VERCEL_GIT_COMMIT_SHA 只在 build 階段保證存在、runtime 不保證；而 route 內
-  // new Date() 是「請求時間」不是「建置時間」。兩者都會誤導「生產跑的是哪一版」的取證，
-  // 故在此（=config 求值時 = build 時）凍結成常數，由 Next 內聯進 server bundle。
+  // 建置期版本指纹，供 /api/version 取证用（唯一消费者，不影响其他 bundle）。
+  // 必要性：VERCEL_GIT_COMMIT_SHA 只在 build 阶段保证存在、runtime 不保证；而 route 内
+  // new Date() 是「请求时间」不是「建置时间」。两者都会误导「生产跑的是哪一版」的取证，
+  // 故在此（=config 求值时 = build 时）冻结成常数，由 Next 内联进 server bundle。
   env: {
     BUILD_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA ?? "",
     BUILD_COMMIT_REF: process.env.VERCEL_GIT_COMMIT_REF ?? "",
@@ -37,11 +37,11 @@ const nextConfig = {
       },
     ],
   },
-  // 2026-09-27 SEO 重構：舊 URL 全部 301 到承接頁，不留 404。
-  //  - 102 個 `<行業>-<n>` 模板門頁併入 17 個行業樞紐頁 /use-cases/<行業>
-  //    （清單與 src/lib/use-case-categories/index.ts 的 17 個 slug 一致）。
-  //  - /docs/harness 與 /docs/harness/deep 在 GSC 仍有曝光且排名最好，
-  //    子頁已在文檔收斂時刪除，內容歸入「工作流与画布」。
+  // 2026-09-27 SEO 重构：旧 URL 全部 301 到承接页，不留 404。
+  //  - 102 个 `<行业>-<n>` 模板门页并入 17 个行业枢纽页 /use-cases/<行业>
+  //    （清单与 src/lib/use-case-categories/index.ts 的 17 个 slug 一致）。
+  //  - /docs/harness 与 /docs/harness/deep 在 GSC 仍有曝光且排名最好，
+  //    子页已在文档收敛时删除，内容归入「工作流与画布」。
   async redirects() {
     const legacyCategories = [
       "ecommerce", "content", "design", "personal-brand", "marketing", "anime",
@@ -61,18 +61,18 @@ const nextConfig = {
   },
   async rewrites() {
     const controlPlaneRewrites = buildControlPlaneRewrites(controlPlaneOrigin);
-    // CRITICAL: 控制面代理必須放 `beforeFiles`，不能放在回傳陣列裡。
+    // CRITICAL: 控制面代理必须放 `beforeFiles`，不能放在回传阵列里。
     //
-    // `rewrites()` 回傳陣列時語意等同 `afterFiles`——Next.js 先比對檔案系統路由，
-    // 命中就結束，rewrite 永遠不會被考慮。而 /api/generate-images 與
-    // /api/generation-jobs 在本 repo 都有同名 route.ts，所以那兩條代理曾長期是死的：
-    // 請求全落在 Vercel 上，而 Vercel 沒有 GENERATION_CONTROL_PLANE_ENABLED 與
-    // GENERATION_DATABASE_URL，於是回 503 control_plane_disabled（generate-images 回 500）。
-    // 前端收到 503 會退回舊生成路徑，那條路徑直接把上游 images-ng.pixai.art 直鏈交給
-    // 瀏覽器，於是使用者看到 ERR_CONNECTION_CLOSED、下載按鈕失效。
+    // `rewrites()` 回传阵列时语意等同 `afterFiles`——Next.js 先比对档案系统路由，
+    // 命中就结束，rewrite 永远不会被考虑。而 /api/generate-images 与
+    // /api/generation-jobs 在本 repo 都有同名 route.ts，所以那两条代理曾长期是死的：
+    // 请求全落在 Vercel 上，而 Vercel 没有 GENERATION_CONTROL_PLANE_ENABLED 与
+    // GENERATION_DATABASE_URL，于是回 503 control_plane_disabled（generate-images 回 500）。
+    // 前端收到 503 会退回旧生成路径，那条路径直接把上游 images-ng.pixai.art 直链交给
+    // 浏览器，于是使用者看到 ERR_CONNECTION_CLOSED、下载按钮失效。
     //
-    // /v1/:path* 當時看起來正常，只是因為 repo 裡沒有 src/app/v1 目錄，不是因為順序對。
-    // 別把這幾條搬回回傳陣列。
+    // /v1/:path* 当时看起来正常，只是因为 repo 里没有 src/app/v1 目录，不是因为顺序对。
+    // 别把这几条搬回回传阵列。
     return {
       beforeFiles: controlPlaneRewrites,
       afterFiles: [

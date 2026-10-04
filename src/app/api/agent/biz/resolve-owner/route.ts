@@ -18,7 +18,7 @@ import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent-use
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -45,9 +45,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail(503, "服务暂不可用，请稍后重试。", "agent_key_unavailable");
   }
 
-  // user_id（G4，2026-09-17）：屬主數字 id，**非密**（金鑰字面值才是密，照舊不出本響應）。
-  // gateway 對 agent 觸發的成片導出要向控制面報 `web:<userId>` tenant——控制面不持有
-  // agent key 明文（單向哈希），反解不了 owner，所以屬主身份必須在這個既有正典化回應裡
-  // 順帶給出。缺了它，導出索引無法歸屬（ingest 會 422）。
+  // user_id（G4，2026-09-17）：属主数字 id，**非密**（金钥字面值才是密，照旧不出本响应）。
+  // gateway 对 agent 触发的成片导出要向控制面报 `web:<userId>` tenant——控制面不持有
+  // agent key 明文（单向哈希），反解不了 owner，所以属主身份必须在这个既有正典化回应里
+  // 顺带给出。缺了它，导出索引无法归属（ingest 会 422）。
   return NextResponse.json({ canonical_key: canonicalKey, user_id: auth.key.userId });
 }

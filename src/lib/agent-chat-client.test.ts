@@ -94,12 +94,12 @@ test("legacy cache object missing interaction_mode is patched with default witho
   });
 });
 
-// ─── 09-12 直連發送腿（ticket-scoped direct POST to gateway）───
+// ─── 09-12 直连发送腿（ticket-scoped direct POST to gateway）───
 //
-// 三態要求：票可用直連／票失效（401）回落／直連 5xx 回落不重放；
-// 外加「無票＝純中繼（舊路徑逐字元等價）」與網路失手閂鎖。
-// mock 方式：直接換 globalThis.fetch 記錄每一次請求（agentFetch 與直連腿
-// 都走全域 fetch），風格對齊本檔既有的 window/localStorage 樁。
+// 三态要求：票可用直连／票失效（401）回落／直连 5xx 回落不重放；
+// 外加「无票＝纯中继（旧路径逐字元等价）」与网路失手闩锁。
+// mock 方式：直接换 globalThis.fetch 记录每一次请求（agentFetch 与直连腿
+// 都走全域 fetch），风格对齐本档既有的 window/localStorage 桩。
 
 interface RecordedCall {
   url: string;
@@ -112,7 +112,7 @@ const GATEWAY_EVENTS_URL = "https://store.tinchak0207.xyz/agent/v1/sessions/ses_
 const GATEWAY_MESSAGES_URL = "https://store.tinchak0207.xyz/agent/v1/sessions/ses_abc/messages";
 const RELAY_MESSAGES_URL = "/api/agent/sessions/ses_abc/messages";
 
-/** 「已登入 + fetch 可窵」的最小瀏覽器環境：authHeaders 讀 window/document/localStorage。 */
+/** 「已登入 + fetch 可窎」的最小浏览器环境：authHeaders 读 window/document/localStorage。 */
 async function withClientEnv(
   fetchImpl: (url: string, init: RequestInit) => Promise<Response>,
   fn: () => Promise<void>,
@@ -170,9 +170,9 @@ test("state 1 — valid ticket: POST goes straight to gateway /messages, relay u
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, GATEWAY_MESSAGES_URL);
     assert.equal(calls[0].method, "POST");
-    // 憑證在 Authorization 頭（票不入 URL/query，防 nginx access log 記票）。
+    // 凭证在 Authorization 头（票不入 URL/query，防 nginx access log 记票）。
     assert.equal(calls[0].headers.Authorization, "Bearer TK");
-    // 兩路徑語義等價：content 先 trim（中繼 handler 也會 trim 後才轉發）。
+    // 两路径语义等价：content 先 trim（中继 handler 也会 trim 后才转发）。
     assert.equal(JSON.parse(calls[0].body!).content, "hi");
     assert.equal(cap.rejected, false);
     assert.equal(cap.networkStrikes, 0);
@@ -190,12 +190,12 @@ test("state 2 — dead ticket (401): falls back to relay exactly once and latche
     assert.equal(calls.length, 2);
     assert.equal(calls[0].url, GATEWAY_MESSAGES_URL);
     assert.equal(calls[1].url, RELAY_MESSAGES_URL);
-    // 回落走的是既有中繼：站內身份頭照常（token+user id 成對），零感知降級。
+    // 回落走的是既有中继：站内身份头照常（token+user id 成对），零感知降级。
     assert.equal(calls[1].headers.Authorization, "Bearer tok-1");
     assert.equal(calls[1].headers["x-user-id"], "7");
     assert.equal(cap.rejected, true);
 
-    // 閂鎖生效：同一票代的後續發送不再付直連學費。
+    // 闩锁生效：同一票代的后续发送不再付直连学费。
     await sendAgentMessage("ses_abc", "second", undefined, ctx);
     assert.equal(calls.length, 3);
     assert.equal(calls[2].url, RELAY_MESSAGES_URL);
@@ -212,11 +212,11 @@ test("state 3 — direct 5xx: falls back to relay, never replays beyond one atte
       ticket: { ticket: "TK", events_url: GATEWAY_EVENTS_URL },
       capability: cap,
     });
-    // 恰兩次請求：1 直連 + 1 中繼；中繼成功後沒有第三次（永不重放）。
+    // 恰两次请求：1 直连 + 1 中继；中继成功后没有第三次（永不重放）。
     assert.equal(calls.length, 2);
     assert.equal(calls[0].url, GATEWAY_MESSAGES_URL);
     assert.equal(calls[1].url, RELAY_MESSAGES_URL);
-    // 5xx 是服務端瞬態不是「票無權限」：不閂鎖，下輪仍保留直連資格。
+    // 5xx 是服务端瞬态不是「票无权限」：不闩锁，下轮仍保留直连资格。
     assert.equal(cap.rejected, false);
   });
 });
@@ -245,7 +245,7 @@ test("gateway deterministic 4xx (JSON error body): surfaces like relay, no fallb
       }),
       (err: unknown) => err instanceof AgentChatError && err.code === "not_found" && err.status === 404,
     );
-    // 中繼轉發同一 body 也只會拿到同一個 404 —— 不應出現第二次請求。
+    // 中继转发同一 body 也只会拿到同一个 404 —— 不应出现第二次请求。
     assert.equal(calls.length, 1);
   });
 });
@@ -259,11 +259,11 @@ test("network errors: first falls back without latch, second latches the generat
     const cap = createDirectSendCapability();
     const ctx = { ticket: { ticket: "TK", events_url: GATEWAY_EVENTS_URL }, capability: cap };
     await sendAgentMessage("ses_abc", "a", undefined, ctx);
-    assert.equal(cap.rejected, false); // 一次可能是真網路抖動，保留資格
+    assert.equal(cap.rejected, false); // 一次可能是真网路抖动，保留资格
     await sendAgentMessage("ses_abc", "b", undefined, ctx);
-    assert.equal(cap.rejected, true); // 連兩筆升閂鎖，止血
+    assert.equal(cap.rejected, true); // 连两笔升闩锁，止血
     await sendAgentMessage("ses_abc", "c", undefined, ctx);
-    // 直連 3 次嘗試（前兩輪）＋中繼 3 次 + 第三輪只有中繼：共 5 筆。
+    // 直连 3 次尝试（前两轮）＋中继 3 次 + 第三轮只有中继：共 5 笔。
     assert.equal(calls.length, 5);
     assert.equal(calls[4].url, RELAY_MESSAGES_URL);
   });
@@ -280,7 +280,7 @@ test("payload failing relay-equivalent pre-validation skips direct and lets rela
     await sendAgentMessage("ses_abc", "hi", { canvasState: "not-an-object" }, ctx);
     assert.equal(calls.length, 2);
     assert.ok(calls.every((c) => c.url === RELAY_MESSAGES_URL));
-    assert.equal(ctx.capability.rejected, false); // 預檢攔下 ≠ 網關裁決，不計失手
+    assert.equal(ctx.capability.rejected, false); // 预检拦下 ≠ 网关裁决，不计失手
   });
 });
 
@@ -292,9 +292,9 @@ test("deriveMessagesUrl: only the relay's events-url shape converts", () => {
   assert.equal(deriveMessagesUrl("not a url"), null);
 });
 
-// ─── REQ-D2（2026-09-23 F-D2）：steer 端點的 409 契約 ───
+// ─── REQ-D2（2026-09-23 F-D2）：steer 端点的 409 契约 ───
 
-test("steer 409：网關回「当前没有正在进行中的回合」→ 分类为 no_active_turn（前端据此改走正常送出）", async () => {
+test("steer 409：网关回「当前没有正在进行中的回合」→ 分类为 no_active_turn（前端据此改走正常送出）", async () => {
   const { fetchImpl } = recorder(async () =>
     new Response(
       JSON.stringify({
@@ -381,7 +381,7 @@ test("D2b steer 重放被拒：可辨识码 + 不落回正常送出 + 透传既�
       false,
       "同样 409 但语义相反：重放被拒 = 不要再送（落回正常送出就等于把同一指引送第二次）",
     );
-    assert.equal(steerReplayStatus(caught), "uncertain", "透传网關带回的既有真实状态");
+    assert.equal(steerReplayStatus(caught), "uncertain", "透传网关带回的既有真实状态");
     assert.equal(calls.length, 1);
   });
 });
@@ -410,7 +410,7 @@ test("D2b 其余重放码同样归类（in_flight / payload_mismatch / id_confli
 test("D2b 状态兜底：带不出真实状态时一律 uncertain，绝不回 queued", () => {
   assert.equal(steerReplayStatus(new AgentChatError("steer_replay_rejected", "x", 409)), "uncertain");
   assert.equal(steerReplayStatus(new Error("plain")), "uncertain");
-  // 网關不会说 queued（那是「等一张永远不会来的终态帧」），认不得就退回 uncertain。
+  // 网关不会说 queued（那是「等一张永远不会来的终态帧」），认不得就退回 uncertain。
   assert.equal(steerReplayStatus(new AgentChatError("steer_replay_rejected", "x", 409, "queued")), "uncertain");
   assert.equal(steerReplayStatus(new AgentChatError("steer_replay_rejected", "x", 409, "injected")), "injected");
   assert.equal(isSteerReplayRejected(new AgentChatError("no_active_turn", "x", 409)), false);
@@ -471,11 +471,11 @@ test("思考级别持久化：显式记录优先；无记录反推；反推不�
   });
 });
 
-// ─── 客戶端環境上報（本包）：真實發送方 ───
-// 型別化白名單欄位；閘道側 sanitizeClientEnvironmentReport 逐值淨化。
-test("client_environment 发送方：web 送 surface=web；桌面壳由 window.eimuLocal 推導並探 ffmpeg", async () => {
+// ─── 客户端环境上报（本包）：真实发送方 ───
+// 型别化白名单栏位；闸道侧 sanitizeClientEnvironmentReport 逐值净化。
+test("client_environment 发送方：web 送 surface=web；桌面壳由 window.eimuLocal 推导并探 ffmpeg", async () => {
   const g = globalThis as Record<string, unknown>;
-  // A) 純瀏覽器（無 eimuLocal）→ surface=web，不探 ffmpeg（不送猜測值）
+  // A) 纯浏览器（无 eimuLocal）→ surface=web，不探 ffmpeg（不送猜测值）
   const rec = recorder(async () => ok202());
   await withClientEnv(rec.fetchImpl as typeof fetch, async () => {
     delete g.eimuLocal;
@@ -484,8 +484,8 @@ test("client_environment 发送方：web 送 surface=web；桌面壳由 window.e
   const body = JSON.parse(rec.calls[0].body!);
   assert.equal(body.client_environment.surface, "web");
   assert.equal(body.client_environment.local_capabilities.window_eimu_local, false);
-  assert.equal("ffmpeg" in body.client_environment.local_capabilities, false, "非桌面壳不探 ffmpeg（未上報≠沒有）");
-  assert.equal(JSON.stringify(body.client_environment).includes("忽略"), false, "不得夾帶自由文字");
+  assert.equal("ffmpeg" in body.client_environment.local_capabilities, false, "非桌面壳不探 ffmpeg（未上报≠没有）");
+  assert.equal(JSON.stringify(body.client_environment).includes("忽略"), false, "不得夹带自由文字");
 
   // B) 桌面壳（window.eimuLocal 存在）→ surface=desktop-shell，capabilities() 探到 ffmpeg
   const rec2 = recorder(async () => ok202());

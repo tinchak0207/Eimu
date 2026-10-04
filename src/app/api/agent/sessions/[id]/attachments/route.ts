@@ -1,11 +1,11 @@
-// POST /api/agent/sessions/[id]/attachments —— 上傳一組檔案附件。
+// POST /api/agent/sessions/[id]/attachments —— 上传一组档案附件。
 //
-// multipart/form-data 的「file」欄位（可多個）。站內代理不解析檔案內容本身，
-// 只把它們原樣透傳給 agent 閘道，閘道回 `{ attachments: [{ name, path, size, mime }] }`。
+// multipart/form-data 的「file」栏位（可多个）。站内代理不解析档案内容本身，
+// 只把它们原样透传给 agent 闸道，闸道回 `{ attachments: [{ name, path, size, mime }] }`。
 //
-// 為什麼不自己解析再重新組：檔案進出都會佔記憶體（base64 / buffer），
-// multipart 有既有的 boundary 簽章，重組反而有機會改變內容。直接把 FormData
-// 交給 callAgentGateway 的 form 通道，由它可以保持 boundary 與 Content-Type。
+// 为什么不自己解析再重新组：档案进出都会占记忆体（base64 / buffer），
+// multipart 有既有的 boundary 签章，重组反而有机会改变内容。直接把 FormData
+// 交给 callAgentGateway 的 form 通道，由它可以保持 boundary 与 Content-Type。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -13,11 +13,11 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
-// Vercel 平台對單一請求 body 有 4.5MB 的硬上限；超過時由平台直接擋掉，
-// 本地不另外做大檔繞過。這裡多個檔案合計就是總 body，注意別一次選爆。
-// (Node runtime 沒有 per-route body limit 可配，靠平台層。)
+// Vercel 平台对单一请求 body 有 4.5MB 的硬上限；超过时由平台直接挡掉，
+// 本地不另外做大档绕过。这里多个档案合计就是总 body，注意别一次选爆。
+// (Node runtime 没有 per-route body limit 可配，靠平台层。)
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -25,7 +25,7 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
-/** gateway 響應原樣透傳：status 與 body 都不吞。 */
+/** gateway 响应原样透传：status 与 body 都不吞。 */
 function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
   if (resp.status >= 200 && resp.status < 300) {
     return NextResponse.json(resp.json ?? {}, { status: resp.status, headers: { "Cache-Control": "no-store" } });
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return fail(400, "会话 id 无效。", "invalid_session_id");
   }
 
-  // 讀成 FormData 再照原樣重組轉送。檔案是二進位，不能先 JSON 化。
+  // 读成 FormData 再照原样重组转送。档案是二进位，不能先 JSON 化。
   let form: FormData;
   try {
     form = await req.formData();
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return fail(400, "存在空文件。", "empty_file");
   }
 
-  // 重組一份新的 FormData 只帶 file 欄位，避免把瀏覽器夾帶的其他欄位一起丟給閘道。
+  // 重组一份新的 FormData 只带 file 栏位，避免把浏览器夹带的其他栏位一起丢给闸道。
   const forward = new FormData();
   for (const file of files) forward.append("file", file);
 

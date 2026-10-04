@@ -1,21 +1,21 @@
-/* ╁━ PricingPlanCarousel ── 充值方案環 ╁━
-   本組件是 canvas-workstation/AgentTemplateCarousel.tsx 的逐行複製（2026-09-07
-   暴君裁定：/pricing 方案選擇器 carousel 化 = 模板廊同款輪子），幾何/物理/材質/
-   佈局全部由共享 ../case-showcase.css 提供。這裡只有充值卡獨有的卡面材質與排版。
+/* ╁━ PricingPlanCarousel ── 充值方案环 ╁━
+   本组件是 canvas-workstation/AgentTemplateCarousel.tsx 的逐行复制（2026-09-07
+   暴君裁定：/pricing 方案选择器 carousel 化 = 模板廊同款轮子），几何/物理/材质/
+   布局全部由共享 ../case-showcase.css 提供。这里只有充值卡独有的卡面材质与排版。
 
-   2026-09-11 卡面重做（視覺驗收不通過：四檔卡面全數不合 DESIGN.md）：
-   ① 材料改走 .lg-card（白玻璃 0.72 + blur 40 + 頂緣亮邊），方案色只做低透明度
-      暈染——原本的滿版粉彩漸變（#FFF6E5→#FFE7C2 之類）是舊 paper 時代的語言，
-      不是 Liquid Glass，也讓四張卡看起來像另一套設計系統；
-   ② 字級全部回到 Dynamic Type 尺度（title3 / largetitle，見 JSX），不再用
-      calc(卡寬 × 0.068) 把價格推到 44px——那個尺寸超出全站字級表，渲染出來就是
-      「瀏覽器預設大黑字」的觀感（截圖實測：卡名 28px、額度 44px、weight 800）；
-   ③ 滑桿自己畫：原生 accent-color 的系統藍滑桿是全頁最像「沒做完」的控件；
-   ④ 未選中 CTA 改白玻璃膠囊：原本的 rgba(0,0,0,0.05) 灰底讀起來像禁用態；
-   ⑤ 內容分三帶（頭/中/尾），中帶吃下多餘高度，卡面中間不再留一塊空洞；
-   ⑥ 卡面還原成不縮放、不視差（見 .case-photo，原本被外擴 3.75% 後裁掉內距）。 */
+   2026-09-11 卡面重做（视觉验收不通过：四档卡面全数不合 DESIGN.md）：
+   ① 材料改走 .lg-card（白玻璃 0.72 + blur 40 + 顶缘亮边），方案色只做低透明度
+      晕染——原本的满版粉彩渐变（#FFF6E5→#FFE7C2 之类）是旧 paper 时代的语言，
+      不是 Liquid Glass，也让四张卡看起来像另一套设计系统；
+   ② 字级全部回到 Dynamic Type 尺度（title3 / largetitle，见 JSX），不再用
+      calc(卡宽 × 0.068) 把价格推到 44px——那个尺寸超出全站字级表，渲染出来就是
+      「浏览器预设大黑字」的观感（截图实测：卡名 28px、额度 44px、weight 800）；
+   ③ 滑杆自己画：原生 accent-color 的系统蓝滑杆是全页最像「没做完」的控件；
+   ④ 未选中 CTA 改白玻璃胶囊：原本的 rgba(0,0,0,0.05) 灰底读起来像禁用态；
+   ⑤ 内容分三带（头/中/尾），中带吃下多余高度，卡面中间不再留一块空洞；
+   ⑥ 卡面还原成不缩放、不视差（见 .case-photo，原本被外扩 3.75% 后裁掉内距）。 */
 
-/* 容器：頁面內嵌流式佈局（不做模板廊的 min-height:100vh 滿屏態）。 */
+/* 容器：页面内嵌流式布局（不做模板廊的 min-height:100vh 满屏态）。 */
 .pricing-plan-carousel {
   width: 100%;
 }
@@ -25,32 +25,32 @@
   margin-inline: auto;
 }
 
-/* ── 環光跟著卡高走 ──
-   模板廊的 .case-glow 是「卡寬 × 1.05 高」，因為模板卡是 4:3 橫的、卡寬就是最長邊；
-   充值卡是豎的（卡高 > 卡寬），沿用它會讓光暈變成卡腰上的一條橫帶。這裡改成
-   跟著 --case-card-h 走，四周才均勻透出方案色。 */
+/* ── 环光跟著卡高走 ──
+   模板廊的 .case-glow 是「卡宽 × 1.05 高」，因为模板卡是 4:3 横的、卡宽就是最长边；
+   充值卡是竖的（卡高 > 卡宽），沿用它会让光晕变成卡腰上的一条横带。这里改成
+   跟著 --case-card-h 走，四周才均匀透出方案色。 */
 .pricing-plan-carousel .case-glow {
   height: calc(var(--case-card-h, 390px) * 1.16);
 }
 
 /* ── 卡面是 UI，不是照片 ──
-   .case-photo 的 scale(1.075) + 視差位移是給「照片沉在玻璃背面」用的：套在充值卡上
-   會把卡面內容外擴 3.75%/側、被 .case-media 的圓角裁掉（可見內距被吃掉一大截，
-   控件貼著卡緣），文字還要被重採樣。卡面是控件不是照片，站位必須是靜的。 */
+   .case-photo 的 scale(1.075) + 视差位移是给「照片沉在玻璃背面」用的：套在充值卡上
+   会把卡面内容外扩 3.75%/侧、被 .case-media 的圆角裁掉（可见内距被吃掉一大截，
+   控件贴著卡缘），文字还要被重采样。卡面是控件不是照片，站位必须是静的。 */
 .pricing-plan-carousel .case-photo {
   transform: none;
 }
 
-/* ── 方案色：一一對應設計系統色板（DESIGN.md §3）──
+/* ── 方案色：一一对应设计系统色板（DESIGN.md §3）──
    coin-gold #c9a84c / ios-blue #007AFF / ios-purple #AF52DE / ios-green #34C759。
-   只做角落暈染、滑桿著色與環光；不引入設計系統外的色（舊值 #8A6D3B/#1F3A5F/
-   #5E2E7D/#2E7D64 都不在色板裡）。
-   真源在 PricingPlanCarousel.tsx 的 PLAN_TINTS（與 PLAN_GLOWS 同一張表），
-   由 STATIC_FRAMES 以 inline style 寫到 .case-slab 上；這裡只消費。 */
+   只做角落晕染、滑杆著色与环光；不引入设计系统外的色（旧值 #8A6D3B/#1F3A5F/
+   #5E2E7D/#2E7D64 都不在色板里）。
+   真源在 PricingPlanCarousel.tsx 的 PLAN_TINTS（与 PLAN_GLOWS 同一张表），
+   由 STATIC_FRAMES 以 inline style 写到 .case-slab 上；这里只消费。 */
 
-/* ── 卡面材料（2026-09-26 3D 化：拆掉 .lg-card 外殼）──
-   卡面 = 主角卡本身（身後的夢境噴泉在 pricing3d/dream-*.css）；這裡是卡面層：
-   封面照（真實生成圖）+ 方案色暈染 + 浮在上面的價格玻璃層。 */
+/* ── 卡面材料（2026-09-26 3D 化：拆掉 .lg-card 外壳）──
+   卡面 = 主角卡本身（身后的梦境喷泉在 pricing3d/dream-*.css）；这里是卡面层：
+   封面照（真实生成图）+ 方案色晕染 + 浮在上面的价格玻璃层。 */
 .ppc-face {
   position: absolute;
   inset: 0;
@@ -68,7 +68,7 @@
   transition: opacity 420ms var(--lg-ease, ease);
 }
 
-/* 方案色從左上角取樣（Liquid Glass 的 color sampling），壓在封面上、玻璃層下。 */
+/* 方案色从左上角取样（Liquid Glass 的 color sampling），压在封面上、玻璃层下。 */
 .ppc-face::before {
   content: "";
   position: absolute;
@@ -85,7 +85,7 @@
   transition: opacity 420ms var(--lg-ease, ease);
 }
 
-/* ── 卡面排版：只剩底部一塊價格玻璃層 ── */
+/* ── 卡面排版：只剩底部一块价格玻璃层 ── */
 .ppc-card {
   position: absolute;
   inset: 0;
@@ -98,11 +98,11 @@
   transition: opacity 280ms var(--lg-ease, ease);
 }
 
-/* 價格玻璃層 = 一張白色液態玻璃票券（2026-09-27 暴君：「kahoot 風」→ 堅守藍粉白）。
-   注意 .case-slab 有 will-change: opacity（backdrop root），backdrop-filter 取樣不到 canvas，
-   所以不賭模糊：本體是近實的珍珠白（右上一抹粉、左下一抹藍，像光穿過玻璃的色散），
-   邊是一圈跟著滑鼠轉的虹彩細邊（--mx 由 PricingAtmosphere 寫在頁面根），
-   面上一道全息鍍膜光帶隨滑鼠滑過；影子帶藍粉色，不用灰黑。 */
+/* 价格玻璃层 = 一张白色液态玻璃票券（2026-09-27 暴君：「kahoot 风」→ 坚守蓝粉白）。
+   注意 .case-slab 有 will-change: opacity（backdrop root），backdrop-filter 取样不到 canvas，
+   所以不赌模糊：本体是近实的珍珠白（右上一抹粉、左下一抹蓝，像光穿过玻璃的色散），
+   边是一圈跟著滑鼠转的虹彩细边（--mx 由 PricingAtmosphere 写在页面根），
+   面上一道全息镀膜光带随滑鼠滑过；影子带蓝粉色，不用灰黑。 */
 .ppc-glass {
   --t-ink: #1a2147;
   --t-ink-2: rgba(26, 33, 71, 0.74);
@@ -125,7 +125,7 @@
     0 12px 28px -8px rgba(247, 168, 184, 0.24);
 }
 
-/* 虹彩細邊：粉 → 白 → 藍的一圈 1.5px 邊，角度跟著滑鼠轉（像手裡轉一張雷射卡）。 */
+/* 虹彩细边：粉 → 白 → 蓝的一圈 1.5px 边，角度跟著滑鼠转（像手里转一张雷射卡）。 */
 .ppc-glass::before {
   content: "";
   position: absolute;
@@ -141,7 +141,7 @@
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
 }
 
-/* 全息鍍膜：一道粉白藍的斜光帶，滑鼠左右移時從票面上滑過。 */
+/* 全息镀膜：一道粉白蓝的斜光带，滑鼠左右移时从票面上滑过。 */
 .ppc-glass::after {
   content: "";
   position: absolute;
@@ -155,7 +155,7 @@
   transition: background-position 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* 選中態（環停在哪檔即選中）：影子更深一點、藍粉光更亮——不另畫藍框。 */
+/* 选中态（环停在哪档即选中）：影子更深一点、蓝粉光更亮——不另画蓝框。 */
 .case-slab[aria-checked="true"] .ppc-glass {
   box-shadow:
     inset 0 1px 0 #fff,
@@ -164,8 +164,8 @@
     0 14px 34px -8px rgba(247, 168, 184, 0.3);
 }
 
-/* 票面主 CTA：深墨藍液態玻璃（DESIGN.md 主 CTA 同色系），面上一道光週期掠過，
-   底下一團粉藍柔光——整頁唯一的深色塊，眼睛最後落在這裡。 */
+/* 票面主 CTA：深墨蓝液态玻璃（DESIGN.md 主 CTA 同色系），面上一道光周期掠过，
+   底下一团粉蓝柔光——整页唯一的深色块，眼睛最后落在这里。 */
 .ppc-cta {
   position: relative;
   overflow: hidden;
@@ -226,18 +226,18 @@
   }
 }
 
-/* ── Log Scale 滑桿（自訂檔）──
-   保留原生 input[type=range]（鍵盤走訪、aria-valuetext、步進全部免費），但軌道與
-   滑塊自己畫：系統預設的藍色滑桿是瀏覽器的長相，不是本站的長相。
-   手勢規範不變：縱向滾動歸 case-stage 的 touch-action: pan-y，滑桿不另設 touch-none，
-   按下時由 data-pricing-control 阻止把滑桿手勢交給轉卡。 */
+/* ── Log Scale 滑杆（自订档）──
+   保留原生 input[type=range]（键盘走访、aria-valuetext、步进全部免费），但轨道与
+   滑块自己画：系统预设的蓝色滑杆是浏览器的长相，不是本站的长相。
+   手势规范不变：纵向滚动归 case-stage 的 touch-action: pan-y，滑杆不另设 touch-none，
+   按下时由 data-pricing-control 阻止把滑杆手势交给转卡。 */
 .ppc-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  /* 22px 觸控高度 = 6px 軌道 + 上下各 8px padding（站內 box-sizing 是 border-box）。
-     軌道因此正好等於內容盒，垂直位置不依賴各引擎「軌道是否居中」的實作差異；
-     滑塊比軌道高、溢出內容盒，range 的滑塊本來就不被裁。 */
+  /* 22px 触控高度 = 6px 轨道 + 上下各 8px padding（站内 box-sizing 是 border-box）。
+     轨道因此正好等于内容盒，垂直位置不依赖各引擎「轨道是否居中」的实作差异；
+     滑块比轨道高、溢出内容盒，range 的滑块本来就不被裁。 */
   height: 22px;
   padding: 8px 0;
   margin: 0;
@@ -259,7 +259,7 @@
   appearance: none;
   width: 18px;
   height: 18px;
-  /* (軌道 6px − 滑塊 18px) / 2：把滑塊對準軌道中線。 */
+  /* (轨道 6px − 滑块 18px) / 2：把滑块对准轨道中线。 */
   margin-top: -6px;
   border: 3px solid #86acfb;
   border-radius: 50%;
@@ -299,9 +299,9 @@
   border-radius: 999px;
 }
 
-/* ── 票面（2026-09-26 第三輪：一眼看懂給誰的、能畫多少、每張多少錢）── */
+/* ── 票面（2026-09-26 第三轮：一眼看懂给谁的、能画多少、每张多少钱）── */
 
-/* 張數：粉 → 藍的虹彩大字（oklab 插值，不經過髒紫），票面上最大的一個數。 */
+/* 张数：粉 → 蓝的虹彩大字（oklab 插值，不经过脏紫），票面上最大的一个数。 */
 .ppc-quota {
   background: linear-gradient(in oklab 100deg, #eb8dbb 0%, #b69cf0 45%, #7fa6f7 100%);
   -webkit-background-clip: text;
@@ -320,8 +320,8 @@
   box-shadow: inset 0 0 0 1px rgba(255, 143, 194, 0.3);
 }
 
-/* ── 檔位梯：白色液態玻璃條，選中那格是一塊會滑動的玻璃透鏡（帶彈性過衝），
-   額度條一檔比一檔長 ── */
+/* ── 档位梯：白色液态玻璃条，选中那格是一块会滑动的玻璃透镜（带弹性过冲），
+   额度条一档比一档长 ── */
 .ppc-ladder-wrap {
   position: relative;
   z-index: 1200;
@@ -517,8 +517,8 @@
   }
 }
 
-/* 寬屏構圖：卡堆在左、票面在右，兩者不重疊（engine 的 fitCamera 按卡寬把卡堆推到左半）。
-   票面垂直置中、貼右緣：視線從檔位梯 → 卡堆 → 票面，一條 Z 字。 */
+/* 宽屏构图：卡堆在左、票面在右，两者不重叠（engine 的 fitCamera 按卡宽把卡堆推到左半）。
+   票面垂直置中、贴右缘：视线从档位梯 → 卡堆 → 票面，一条 Z 字。 */
 @media (min-width: 768px) {
   .pricing-plan-carousel .ppc-card {
     justify-content: center;
@@ -532,13 +532,13 @@
     transform: translateX(min(calc(var(--case-card-w, 520px) * 0.46), calc((100vw - var(--case-card-w, 520px)) / 2 - 1rem)));
   }
 
-  /* 正面卡的票面要伸出卡框右緣（卡框本身在 3D 模式下是隱形的），不裁。 */
+  /* 正面卡的票面要伸出卡框右缘（卡框本身在 3D 模式下是隐形的），不裁。 */
   .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-media {
     overflow: visible;
   }
 }
 
-/* 票面首行的档位色點（四檔都在藍粉白之內）。 */
+/* 票面首行的档位色点（四档都在蓝粉白之内）。 */
 .ppc-tier-dot {
   display: inline-block;
   width: 0.55rem;

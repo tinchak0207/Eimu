@@ -1,15 +1,15 @@
-// 從 index.ts 無損抽取（2026-09-19 第一階段）：Sessions HTTP 業務區段。
-// 遷出區間：原 index.ts 4928–4972（L0 畫像 onboarding＋S7 用戶級 Settings）、
-// 6320–6365（handleGetSession）、6371–6503（P1-E1 歷史讀取輔助＋handleGetSessionMessages）。
-// 依賴說明：
+// 从 index.ts 无损抽取（2026-09-19 第一阶段）：Sessions HTTP 业务区段。
+// 迁出区间：原 index.ts 4928–4972（L0 画像 onboarding＋S7 用户级 Settings）、
+// 6320–6365（handleGetSession）、6371–6503（P1-E1 历史读取辅助＋handleGetSessionMessages）。
+// 依赖说明：
 //  - jsonError：import 自 ./gw-lib.ts
-//  - loadUserSettings：import 自 ./persistence（照抄 index.ts 頭部 import 符號）
-//  - gzipSync：import 自 node:zlib（照抄 index.ts 頭部 import 語句）
-//  - SessionState：TODO types-gateway.ts 未建（B 路任務），整合時改
-//    `import type { SessionState } from "./types-gateway.ts"`；本檔先以結構佔位型別（只用 apiKey）
-//  - getOwnedSession / opencodeHeaders / OPENCODE_URL / TAIL_PAYLOAD_MARKER：仍定義在
-//    index.ts（≈1352/1119/462/5394 行），以 declare 佔位（bun build 只轉譯不查名），
-//    整合階段接線時替換為正式 import
+//  - loadUserSettings：import 自 ./persistence（照抄 index.ts 头部 import 符号）
+//  - gzipSync：import 自 node:zlib（照抄 index.ts 头部 import 语句）
+//  - SessionState：TODO types-gateway.ts 未建（B 路任务），整合时改
+//    `import type { SessionState } from "./types-gateway.ts"`；本档先以结构占位型别（只用 apiKey）
+//  - getOwnedSession / opencodeHeaders / OPENCODE_URL / TAIL_PAYLOAD_MARKER：仍定义在
+//    index.ts（≈1352/1119/462/5394 行），以 declare 占位（bun build 只转译不查名），
+//    整合阶段接线时替换为正式 import
 import { gzipSync } from "node:zlib"
 import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
@@ -20,30 +20,30 @@ import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 
-// L0 畫像 onboarding：賬戶還沒有任何確認過的畫像時，引導 agent 用 question 工具
-// 以選擇題採集畫像（PM 原則：別讓用戶動腦寫表單）。答案存 pendingProfile，
-// 下次建會話時作為臨時畫像注入（站點 DB 落庫前的過渡方案）。
+// L0 画像 onboarding：账户还没有任何确认过的画像时，引导 agent 用 question 工具
+// 以选择题采集画像（PM 原则：别让用户动脑写表单）。答案存 pendingProfile，
+// 下次建会话时作为临时画像注入（站点 DB 落库前的过渡方案）。
 export const PROFILE_ONBOARDING_DIRECTIVE = [
-  "這個賬戶還沒有畫像記錄。開場簡短歡迎一句，先問用戶今天想做什麼。",
-  "畫像信息（行業/常做素材/風格偏好）在對話中自然了解即可，不要用 question 工具刻意採集，更不要一次問多道題。",
-  "若用戶直接說出任務，直接開工，別問畫像。",
+  "这个账户还没有画像记录。开场简短欢迎一句，先问用户今天想做什么。",
+  "画像信息（行业/常做素材/风格偏好）在对话中自然了解即可，不要用 question 工具刻意采集，更不要一次问多道题。",
+  "若用户直接说出任务，直接开工，别问画像。",
 ].join("\n")
 
-// ── S7（2026-08-29）：用戶級 Settings（罪狀6 網關側真實 Adapt）─────────────
-// 存 sessions.db user_settings 表（key 維度，owner_key 與 sessions 表同一 key、
-// 同一歸一化方式），重啟不丟。GET 無記錄回默認值；POST 部分更新、非法值 400。
-// Adapt 兩條腿：
-//   1. system 指令：persona/cost_mode 每輪注入 promptBody.system（不是只首輪；
-//      balanced 不注入成本線）。
-//   2. 等待容忍窗：persona=thoughtful 時 ack/心跳延遲 ×1.5（思考本來就久，
-//      30s 就說「收到」是騷擾）；實現為投遞時按 settings 計算延遲，不改全局常量。
-// 模型思考強度（cost_mode → 真實模型切換）本期不落地，如實原因見任務報告：
-// opencode.jsonc 無第二個可用模型、有效配置 small_model 與主模型相同
-// （b-ai/glm-5.3-flash），PATCH /session/:id 200 但 model 無落地證據。
+// ── S7（2026-08-29）：用户级 Settings（罪状6 网关侧真实 Adapt）─────────────
+// 存 sessions.db user_settings 表（key 维度，owner_key 与 sessions 表同一 key、
+// 同一归一化方式），重启不丢。GET 无记录回默认值；POST 部分更新、非法值 400。
+// Adapt 两条腿：
+//   1. system 指令：persona/cost_mode 每轮注入 promptBody.system（不是只首轮；
+//      balanced 不注入成本线）。
+//   2. 等待容忍窗：persona=thoughtful 时 ack/心跳延迟 ×1.5（思考本来就久，
+//      30s 就说「收到」是骚扰）；实现为投递时按 settings 计算延迟，不改全局常量。
+// 模型思考强度（cost_mode → 真实模型切换）本期不落地，如实原因见任务报告：
+// opencode.jsonc 无第二个可用模型、有效配置 small_model 与主模型相同
+// （b-ai/glm-5.3-flash），PATCH /session/:id 200 但 model 无落地证据。
 const DEFAULT_USER_SETTINGS: UserSettingsShape = { interrupt_mode: "steer", persona: "efficient", cost_mode: "balanced", interaction_mode: "preset" }
-// 野獸模式開關（MOE 改革，2026-09-08）：settings 布林欄，缺省=false（零回歸）。
-// 不入 USER_SETTINGS_ENUMS（那是枚舉字串欄白名單）；POST 專門放行本欄（僅接受
-// 真布林），sanitize 顯式列出欄位、缺欄=保持現值。
+// 野兽模式开关（MOE 改革，2026-09-08）：settings 布林栏，缺省=false（零回归）。
+// 不入 USER_SETTINGS_ENUMS（那是枚举字串栏白名单）；POST 专门放行本栏（仅接受
+// 真布林），sanitize 显式列出栏位、缺栏=保持现值。
 export type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string; beast_mode?: boolean }
 export const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast_mode">, readonly string[]> = {
   interrupt_mode: ["steer", "queue"],
@@ -52,7 +52,7 @@ export const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast
   interaction_mode: ["collaborate", "preset", "auto"],
 }
 
-/** 任意輸入 → 合法 settings（非法欄位值一律回落默認，寫入路徑另有 400 校驗）。 */
+/** 任意输入 → 合法 settings（非法栏位值一律回落默认，写入路径另有 400 校验）。 */
 export function normalizeUserSettings(raw: unknown): UserSettingsShape {
   const s: UserSettingsShape = { ...DEFAULT_USER_SETTINGS }
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -65,14 +65,14 @@ export function normalizeUserSettings(raw: unknown): UserSettingsShape {
   return s
 }
 
-/** 性格 → 等待容忍倍率：thoughtful ×1.5，efficient（及未知值）默認 1。 */
+/** 性格 → 等待容忍倍率：thoughtful ×1.5，efficient（及未知值）默认 1。 */
 export function personaPatienceMul(state: SessionState): number {
   return loadUserSettings(state.apiKey)?.persona === "thoughtful" ? 1.5 : 1
 }
 
-// GET /agent/v1/sessions/:id — 會話恢復端點（重啟後歷史仍在的讀取路徑）。
-// 歷史從 opencode（權威存儲）讀取；getOwnedSession 內含 DB lazy reload，
-// 因此進程重啟後仍可解析。只讀，不改任何狀態、不動 CORS/SSE/ticket 行為。
+// GET /agent/v1/sessions/:id — 会话恢复端点（重启后历史仍在的读取路径）。
+// 历史从 opencode（权威存储）读取；getOwnedSession 内含 DB lazy reload，
+// 因此进程重启后仍可解析。只读，不改任何状态、不动 CORS/SSE/ticket 行为。
 export async function handleGetSession(key: string, id: string): Promise<Response> {
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
@@ -81,7 +81,7 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
       timeoutMs: 15_000,
     })
     if (!res.ok) {
-      // upstream opencode session 已不在（被外部清理等）：仍回會話元數據，標記歷史不可用。
+      // upstream opencode session 已不在（被外部清理等）：仍回会话元数据，标记历史不可用。
       return Response.json({
         session_id: id,
         opencode_session_id: state.opencodeSessionId,
@@ -116,25 +116,25 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
   }
 }
 
-// P1-E1：對話 transcript 端點。真源是 opencode（gateway 不另存 messages，
-// 見 L3496 註釋——那是第二份會漂移的歷史副本）。返回輕量結構：每條 message
-// 只保留 role + text/tool parts，tool part 帶完整 input（prompt/lora/model/
-// size 在此），供前端「存為資產」提取真配方。輸出/圖片等重 payload 一律不帶。
-// GET /agent/v1/sessions/:id/messages — 全量歷史端點（2026-09-12 永久保留改造）。
-// 鑑權與 GET /agent/v1/sessions/:id 完全同構：Bearer 閘門 + getOwnedSession（owner 校驗 +
-// DB lazy hydrate，reaped/重啟後的 row 可讀）。返回帶游標的物件（前端契約）：
-//   { messages: <opencode 消息瘦身陣列（同構 [{info,parts}]，欄位白名單）>, event_counter: <當前計數器>,
-//     replay_first_id: <replayBuffer 最舊幀 id，無緩衝則 null> }
-// event_counter 給前端做 SSE 續傳游標：restore 全史後 openConnection(counter) 只接增量。
-// 上游不可達/非 2xx/會話無 messages → 200 且附 fallback:"replay_only"（前端退回回放兜底）。
-// 瘦身：前端唯一消費者 normalizeOpenCodeMessages 只讀 info.role + text/reasoning/tool/file
-// 四类 part 的少數欄位（實測 tool.state.output/metadata 與 info 冗餘欄位佔 payload ~80%），
-// 白名單外欄位一率刪除；輸出保持 [{info,parts}] 同構契約，未知 part 型別整塊丟棄。
-// 防呆：讀路徑寧跳不炸——任何單則/單 part 處理異常只丟棄該項，函數永不拋錯。
-/** 0918：剝掉網關注入的 user 訊息尾端 payload（野獸幀等，見
- *  appendSystemPayloadToTurnTail）。只用在顯示讀路徑（slimHistoryMessages）；
- *  模型上下文由 opencode 持有、不經此函式，故不影響模型看到的內容。
- *  找不到標記＝原樣返回（零回歸）。 */
+// P1-E1：对话 transcript 端点。真源是 opencode（gateway 不另存 messages，
+// 见 L3496 注释——那是第二份会漂移的历史副本）。返回轻量结构：每条 message
+// 只保留 role + text/tool parts，tool part 带完整 input（prompt/lora/model/
+// size 在此），供前端「存为资产」提取真配方。输出/图片等重 payload 一律不带。
+// GET /agent/v1/sessions/:id/messages — 全量历史端点（2026-09-12 永久保留改造）。
+// 鉴权与 GET /agent/v1/sessions/:id 完全同构：Bearer 闸门 + getOwnedSession（owner 校验 +
+// DB lazy hydrate，reaped/重启后的 row 可读）。返回带游标的物件（前端契约）：
+//   { messages: <opencode 消息瘦身阵列（同构 [{info,parts}]，栏位白名单）>, event_counter: <当前计数器>,
+//     replay_first_id: <replayBuffer 最旧帧 id，无缓冲则 null> }
+// event_counter 给前端做 SSE 续传游标：restore 全史后 openConnection(counter) 只接增量。
+// 上游不可达/非 2xx/会话无 messages → 200 且附 fallback:"replay_only"（前端退回回放兜底）。
+// 瘦身：前端唯一消费者 normalizeOpenCodeMessages 只读 info.role + text/reasoning/tool/file
+// 四类 part 的少数栏位（实测 tool.state.output/metadata 与 info 冗余栏位占 payload ~80%），
+// 白名单外栏位一率删除；输出保持 [{info,parts}] 同构契约，未知 part 型别整块丢弃。
+// 防呆：读路径宁跳不炸——任何单则/单 part 处理异常只丢弃该项，函数永不抛错。
+/** 0918：剥掉网关注入的 user 讯息尾端 payload（野兽帧等，见
+ *  appendSystemPayloadToTurnTail）。只用在显示读路径（slimHistoryMessages）；
+ *  模型上下文由 opencode 持有、不经此函式，故不影响模型看到的内容。
+ *  找不到标记＝原样返回（零回归）。 */
 function stripTailInjectedPayload(text: string): string {
   const marker = TAIL_PAYLOAD_MARKER.trim()
   const i = text.indexOf(marker)
@@ -156,7 +156,7 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
         if (typeof infoSrc.role === "string") info.role = infoSrc.role
       }
       const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
-      // H14 補完：user 訊息首個 text part 為系統喚醒文本 → 歷史回放呈現為 system（顯示層，不改模型上下文）。
+      // H14 补完：user 讯息首个 text part 为系统唤醒文本 → 历史回放呈现为 system（显示层，不改模型上下文）。
       if (info.role === "user" && partsSrc.some((p) => {
         const q = p as Record<string, unknown> | null
         return !!q && q.type === "text" && isSystemWakeText(q.text)
@@ -168,10 +168,10 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
           const part = rawPart as Record<string, unknown>
           const type = part.type
           if (type === "text" || type === "reasoning") {
-            // 0918：歷史端點是「顯示」通道——剝掉網關附在 user 訊息尾端的注入
-            // payload（野獸幀等，見 appendSystemPayloadToTurnTail），否則用戶
-            // 氣泡會被 17.2k 字的派遣協議正文灌爆。模型上下文由 opencode 持有、
-            // 不經本函式，故剝除不改變模型看到的內容（純顯示層過濾）。
+            // 0918：历史端点是「显示」通道——剥掉网关附在 user 讯息尾端的注入
+            // payload（野兽帧等，见 appendSystemPayloadToTurnTail），否则用户
+            // 气泡会被 17.2k 字的派遣协议正文灌爆。模型上下文由 opencode 持有、
+            // 不经本函式，故剥除不改变模型看到的内容（纯显示层过滤）。
             if (type === "text" && (info.role === "user" || info.role === "system") && typeof part.text === "string") {
               parts.push({ ...part, text: stripTailInjectedPayload(part.text) })
               continue
@@ -217,11 +217,11 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
             parts.push(tool)
             continue
           }
-          // step-start / step-finish / compaction / patch / snapshot / 未知型別：丟棄。
-        } catch { /* 單 part 壞數據：跳過 */ }
+          // step-start / step-finish / compaction / patch / snapshot / 未知型别：丢弃。
+        } catch { /* 单 part 坏数据：跳过 */ }
       }
       out.push({ info, parts })
-    } catch { /* 單則壞數據：跳過 */ }
+    } catch { /* 单则坏数据：跳过 */ }
   }
   return out
 }
@@ -249,7 +249,7 @@ export async function handleGetSessionMessages(key: string, id: string): Promise
     if (!Array.isArray(msgs) || msgs.length === 0) {
       return Response.json({ messages: [], ...cursor, fallback: "replay_only" })
     }
-    // 成功路徑體積大（實測單會話 452KB），瘦身後再 gzip 傳輸；降級路徑體積小維持原樣。
+    // 成功路径体积大（实测单会话 452KB），瘦身后再 gzip 传输；降级路径体积小维持原样。
     const payload = { messages: slimHistoryMessages(msgs), ...cursor }
     return new Response(gzipSync(Buffer.from(JSON.stringify(payload))), {
       headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" },

@@ -1,6 +1,6 @@
-// G3 測試：StoryboardShotBody / StoryboardSceneBody 分鏡渲染消費端（2026-09-16）。
-// 慣例（同 Scene3dPreview.test.ts）：node:test + 行為斷言（純函數直測 / SSR 渲染 /
-// 源碼形狀斷言）。tsconfig 排除 *.test.tsx，故測試檔用 .ts + createElement（同款）。
+// G3 测试：StoryboardShotBody / StoryboardSceneBody 分镜渲染消费端（2026-09-16）。
+// 惯例（同 Scene3dPreview.test.ts）：node:test + 行为断言（纯函数直测 / SSR 渲染 /
+// 源码形状断言）。tsconfig 排除 *.test.tsx，故测试档用 .ts + createElement（同款）。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// tsconfig jsx=preserve → classic runtime，SSR 渲染前補全局 React 桩（Scene3dPreview 同款）。
+// tsconfig jsx=preserve → classic runtime，SSR 渲染前补全局 React 桩（Scene3dPreview 同款）。
 (globalThis as unknown as Record<string, unknown>).React ??= React;
 
 function read(relPath: string) {
@@ -78,31 +78,31 @@ function sceneNode(scene: { sceneName: string; shotCount: number } | undefined):
   };
 }
 
-// ─────────────────────────────────────────── 契約釘
+// ─────────────────────────────────────────── 契约钉
 
-test("分組切分：四組並集恰為 21 欄全清單（新增欄位忘歸組 → 本測紅，不靜默消失）", () => {
+test("分组切分：四组并集恰为 21 栏全清单（新增栏位忘归组 → 本测红，不静默消失）", () => {
   const grouped = SHOT_FIELD_GROUPS.flatMap((g) => g.fields);
   const expected = STORYBOARD_SHOT_FIELDS.filter((f) => f !== "shotNumber");
   assert.deepEqual([...grouped].sort(), [...expected].sort());
-  // 無重複歸組（同一欄出現在兩組 = 卡面重複渲染）
+  // 无重复归组（同一栏出现在两组 = 卡面重复渲染）
   assert.equal(new Set(grouped).size, grouped.length);
-  // 每欄都有中文標籤，且無空標籤
-  for (const f of STORYBOARD_SHOT_FIELDS) assert.ok(SHOT_FIELD_LABEL[f]?.length > 0, `缺標籤: ${f}`);
+  // 每栏都有中文标签，且无空标签
+  for (const f of STORYBOARD_SHOT_FIELDS) assert.ok(SHOT_FIELD_LABEL[f]?.length > 0, `缺标签: ${f}`);
 });
 
-test("分組數 = 4（畫面/台词·音效/时空/摄影），摄影组含 9 欄", () => {
+test("分组数 = 4（画面/台词·音效/时空/摄影），摄影组含 9 栏", () => {
   assert.equal(SHOT_FIELD_GROUPS.length, 4);
   const camera = SHOT_FIELD_GROUPS.find((g) => g.key === "camera");
   assert.ok(camera);
   assert.equal(camera.fields.length, 9);
 });
 
-// ─────────────────────────────────────────── 純函數
+// ─────────────────────────────────────────── 纯函数
 
-test("storyboardShotRows：空值欄位不渲染該行（AID 空值 = \"\" 寫「无」是冒充）", () => {
+test("storyboardShotRows：空值栏位不渲染该行（AID 空值 = \"\" 写「无」是冒充）", () => {
   const groups = storyboardShotRows(SHOT);
   const rows = groups.flatMap((g) => g.rows);
-  // 21 欄 - shotNumber（入卡頭徽章，不入列）= 20 行
+  // 21 栏 - shotNumber（入卡头徽章，不入列）= 20 行
   assert.equal(rows.length, 20);
   assert.ok(!rows.some((r) => r.field === "shotNumber"));
 
@@ -127,20 +127,20 @@ test("storyboardShotRows：组内顺序 = 契约顺序，组间顺序固定不�
   );
 });
 
-test("storyboardFilledCount：數非空欄位（不灌水成百分比）", () => {
+test("storyboardFilledCount：数非空栏位（不灌水成百分比）", () => {
   assert.equal(storyboardFilledCount(SHOT), 21);
   assert.equal(storyboardFilledCount({ ...SHOT, dialogue: "", weather: "" }), 19);
 });
 
 // ─────────────────────────────────────────── SSR 渲染
 
-test("分镜卡：关键欄位可见（镜号/剧本原文/视觉描述/台词/摄影四欄）", () => {
+test("分镜卡：关键栏位可见（镜号/剧本原文/视觉描述/台词/摄影四栏）", () => {
   const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node: shotNode(SHOT) }));
   assert.match(html, /007/); // shotNumber
   assert.match(html, /她推开门，雨声灌进走廊。/); // scriptContent
   assert.match(html, /中景，女人推门而入/); // visualDescription
   assert.match(html, /你来了。/); // dialogue
-  // 摄影四欄（最能体现专业度）
+  // 摄影四栏（最能体现专业度）
   assert.match(html, /中景/);
   assert.match(html, /平视/);
   assert.match(html, /50mm 标准/);
@@ -177,7 +177,7 @@ test("分镜卡：旁白文本与双音轨状态（有/无）可见；无旁白�
   assert.match(html, /对白轨(?:<!-- -->)? 有/);
   assert.match(html, /旁白轨(?:<!-- -->)? 无/);
 
-  // 基准 SHOT（无旁白无音轨）：不渲染音轨块，也不把「无」冒充成有欄位
+  // 基准 SHOT（无旁白无音轨）：不渲染音轨块，也不把「无」冒充成有栏位
   const plain = renderToStaticMarkup(createElement(StoryboardShotBody, { node: shotNode(SHOT) }));
   assert.doesNotMatch(plain, /音轨/);
   assert.doesNotMatch(plain, /旁白/);
@@ -191,7 +191,7 @@ test("分镜卡：对话/音效皆空但有旁白时，「台词 · 音效」组
   assert.match(html, /旁白：屋檐下的积水映着路灯。/);
 });
 
-test("分镜场景壳：sceneName + 镜数可见；无欄位时回落原 Group 虚线框", () => {
+test("分镜场景壳：sceneName + 镜数可见；无栏位时回落原 Group 虚线框", () => {
   const html = renderToStaticMarkup(
     createElement(StoryboardSceneBody, { node: sceneNode({ sceneName: "旧公寓走廊", shotCount: 4 }) }),
   );
@@ -202,7 +202,7 @@ test("分镜场景壳：sceneName + 镜数可见；无欄位时回落原 Group �
   assert.match(empty, /border-dashed/);
 });
 
-test("正文 ≥13px 铁律：欄位值与徽章 ≥13px，12px 只给欄位名，11px 只给标签", () => {
+test("正文 ≥13px 铁律：栏位值与徽章 ≥13px，12px 只给栏位名，11px 只给标签", () => {
   const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node: shotNode(SHOT) }));
   const count = (px: string) => [...html.matchAll(new RegExp(`text-\\[${px}\\]`, "g"))].length;
 
@@ -211,11 +211,11 @@ test("正文 ≥13px 铁律：欄位值与徽章 ≥13px，12px 只给欄位名�
   // 引用资产：3 段胶囊（场景/角色/道具），共 4 个胶囊名
   const refCapsules = 4;
 
-  // 正文盒（欄位值 + 胶囊名 + 镜号徽章）必须是 13px —— DESIGN.md §4「正文不小于 13px」
+  // 正文盒（栏位值 + 胶囊名 + 镜号徽章）必须是 13px —— DESIGN.md §4「正文不小于 13px」
   assert.equal(count("13px"), plainRows + refCapsules + 1);
   // 11px 只给标签：eyebrow(1) + 已填徽章(1) + 组标题(4) + 引用分段名(3)
   assert.equal(count("11px"), 1 + 1 + SHOT_FIELD_GROUPS.length + 3);
-  // 欄位名 12px（恰好每个非空欄位一个，不得大于正文）
+  // 栏位名 12px（恰好每个非空栏位一个，不得大于正文）
   assert.equal(count("12px"), rows.length);
   // 无 <10px 正文
   assert.equal(count("10px"), 0);
@@ -224,19 +224,19 @@ test("正文 ≥13px 铁律：欄位值与徽章 ≥13px，12px 只给欄位名�
 
 // ─────────────────────────────────────────── 接线形状（NodeBody 消费端）
 
-test("NodeBody 已接分镜渲染：先於 type 分發的 storyboardShot 早退 + Group 分支 storyboardScene", () => {
+test("NodeBody 已接分镜渲染：先于 type 分发的 storyboardShot 早退 + Group 分支 storyboardScene", () => {
   const source = read("src/components/canvas/node-view/NodeBody.tsx");
   assert.match(source, /import \{ StoryboardSceneBody, StoryboardShotBody \} from "\.\/StoryboardShotBody"/);
-  // 欄位族早退必須在 switch (node.type) 之前（type 未受契約約束，綁 type 分支會漏渲染）
+  // 栏位族早退必须在 switch (node.type) 之前（type 未受契约约束，绑 type 分支会漏渲染）
   const earlyReturn = source.indexOf("if (metadata?.storyboardShot) {");
   const switchAt = source.indexOf("switch (node.type) {");
   assert.ok(earlyReturn > 0 && switchAt > 0 && earlyReturn < switchAt, "storyboardShot 早退不在 switch 之前");
-  // 批次封面早退在前（既有批次節點行為零改動）
+  // 批次封面早退在前（既有批次节点行为零改动）
   assert.ok(source.indexOf("batchPrimaryImageUrl && batchExpanded === false") < earlyReturn);
-  // Group 分支有 storyboardScene 優先渲染，且保留原虛線框兜底
+  // Group 分支有 storyboardScene 优先渲染，且保留原虚线框兜底
   assert.match(source, /if \(metadata\?\.storyboardScene\) \{/);
   assert.match(source, /border-dashed border-black\/10/);
-  // 三件套手勢顯式傳入（不引 context）
+  // 三件套手势显式传入（不引 context）
   assert.match(source, /onScrollAreaPointerDown=\{onScrollAreaPointerDown\}/);
 });
 
@@ -245,22 +245,22 @@ test("StoryboardShotBody 走既有 scrollDrag 三件套接手势（canvas-node-s
   assert.match(source, /canvas-node-scroll/);
   assert.match(source, /touch-pan-y/);
   assert.match(source, /overscroll-contain/);
-  // 只讀卡：無編輯/生成入口（與 Scene3dCardBody 同姿態）
+  // 只读卡：无编辑/生成入口（与 Scene3dCardBody 同姿态）
   assert.doesNotMatch(source, /onEditPrompt|onRetry|run_generation/);
 });
 
-test("StoryboardShotBody 不重複定義契約：欄位清單單一真源 = storyboard-contract", () => {
+test("StoryboardShotBody 不重复定义契约：栏位清单单一真源 = storyboard-contract", () => {
   const source = read("src/components/canvas/node-view/StoryboardShotBody.tsx");
   assert.match(source, /from "@\/lib\/storyboard-contract"/);
   assert.match(source, /STORYBOARD_SHOT_FIELDS/);
   assert.match(source, /parseReferenceAssets/);
-  // 禁止硬編 21 個 key 常數（會成為第二真源）
+  // 禁止硬编 21 个 key 常数（会成为第二真源）
   assert.doesNotMatch(source, /const SHOT_FIELDS = \[/);
 });
 
-// ─────────────────────────────────────────── NodeBody 端到端接線（真渲染，非源碼形狀）
+// ─────────────────────────────────────────── NodeBody 端到端接线（真渲染，非源码形状）
 
-test("NodeBody 真渲染：text 型 + storyboardShot → 正文出镜号/剧本原文/摄影欄（非源碼形狀斷言）", async () => {
+test("NodeBody 真渲染：text 型 + storyboardShot → 正文出镜号/剧本原文/摄影栏（非源码形状断言）", async () => {
   const { NodeBody } = await import("./NodeBody");
   const noop = () => {};
   const html = renderToStaticMarkup(
@@ -294,7 +294,7 @@ test("NodeBody 真渲染：image 型 + storyboardShot → 仍走分镜正文（t
   assert.match(html, /她推开门，雨声灌进走廊。/);
 });
 
-test("NodeBody 真渲染：Group + storyboardScene → 场景名+镜数；无该欄位的 Group → 保持原虚线框", async () => {
+test("NodeBody 真渲染：Group + storyboardScene → 场景名+镜数；无该栏位的 Group → 保持原虚线框", async () => {
   const { NodeBody } = await import("./NodeBody");
   const noop = () => {};
   const props = {
@@ -315,22 +315,22 @@ test("NodeBody 真渲染：Group + storyboardScene → 场景名+镜数；无该
   assert.match(plain, /border-dashed/);
 });
 
-// ═══════════════════════════════════════════ 音軌綁定／解除（2026-09-30）
+// ═══════════════════════════════════════════ 音轨绑定／解除（2026-09-30）
 //
-// 驗收立場（守門件不是 oracle）：主體是**行為斷言**——餵真 metadata 與真 URL 進
-// `shotAudioBindOutcome` / `shotAudioClearOutcome`（＝按鈕 onClick 實際呼叫的那兩支），
-// 斷言合併後的 metadata 逐鍵結果；末尾的源碼級斷言只算「變更探針」，不計入已驗證。
+// 验收立场（守门件不是 oracle）：主体是**行为断言**——喂真 metadata 与真 URL 进
+// `shotAudioBindOutcome` / `shotAudioClearOutcome`（＝按钮 onClick 实际呼叫的那两支），
+// 断言合并后的 metadata 逐键结果；末尾的源码级断言只算「变更探针」，不计入已验证。
 
 const DIALOGUE_MP3 = "https://cdn.example.com/line-008.mp3";
 const NARRATION_WAV = "https://cdn.example.com/vo-008.wav";
 const NOOP_PATCH = () => {};
 
-/** 依 UI 的落盤語義合併（patch 直餵宿主 `patchNodeMetadata`）：{{...metadata, ...patch}}。 */
+/** 依 UI 的落盘语义合并（patch 直喂宿主 `patchNodeMetadata`）：{{...metadata, ...patch}}。 */
 function merged(base: CanvasNodeMetadata | undefined, patch: unknown): CanvasNodeMetadata {
   return { ...(base ?? {}), ...((patch ?? {}) as CanvasNodeMetadata) };
 }
 
-/** 寬化袋子讀（音軌鍵在 interface 上，但測試要驗「鍵在不在」，故走袋子）。 */
+/** 宽化袋子读（音轨键在 interface 上，但测试要验「键在不在」，故走袋子）。 */
 function bag(metadata: CanvasNodeMetadata | undefined): Record<string, unknown> {
   return (metadata ?? {}) as Record<string, unknown>;
 }

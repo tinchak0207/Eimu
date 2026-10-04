@@ -45,9 +45,9 @@ const EXPECTED_TOOL_NAMES = [
   "evaluate_media_quality",
 ] as const;
 
-// 這份清單是「scope 真值」的漂移探針：/mcp 頁與 well-known 發現文件都必須完整宣告它。
-// 目前 scope 真源落在 src/app/mcp/page.tsx 的 MCP_TOOLS（tools.ts 只承載工具名，不帶 scope）；
-// 新增工具帶新 scope 而未同步本清單、頁面或發現文件，任一處漏掉都會在這裡紅。
+// 这份清单是「scope 真值」的漂移探针：/mcp 页与 well-known 发现文件都必须完整宣告它。
+// 目前 scope 真源落在 src/app/mcp/page.tsx 的 MCP_TOOLS（tools.ts 只承载工具名，不带 scope）；
+// 新增工具带新 scope 而未同步本清单、页面或发现文件，任一处漏掉都会在这里红。
 const EXPECTED_SCOPES = [
   "eimu:models:read",
   "eimu:skills:read",

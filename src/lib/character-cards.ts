@@ -1,14 +1,14 @@
-// 角色/場景卡（P2 跨鏡頭一致性）：純邏輯層。
+// 角色/场景卡（P2 跨镜头一致性）：纯逻辑层。
 //
-// 定位：卡 = 項目級「鎖定」配置。一經鎖定（掛到畫布項目的 cardIds），
-// 該畫布所有生成（手動面板、agent run_generation、編輯器派生）自動攜帶：
-//   - locked prompt 片段 → 以穩定順序（卡 id 序）注入 prompt 前綴
-//   - 參考圖 → 合併進 reference_images（各帶 ReferenceRole，卡優先）
-//   - 負面詞 → 合併進 negative_prompt
+// 定位：卡 = 项目级「锁定」配置。一经锁定（挂到画布项目的 cardIds），
+// 该画布所有生成（手动面板、agent run_generation、编辑器派生）自动携带：
+//   - locked prompt 片段 → 以稳定顺序（卡 id 序）注入 prompt 前缀
+//   - 参考图 → 合并进 reference_images（各带 ReferenceRole，卡优先）
+//   - 负面词 → 合并进 negative_prompt
 //
-// 角色枚舉 owner 是 image-types.ReferenceImageRole（復用，不建第二套）；
-// LoRA 關聯引用既有 lora versionId 標識（不建新 LoRA 體系）。
-// 本檔只做純函式；存儲在 character-card-store.ts、HTTP 在 /api/character-cards。
+// 角色枚举 owner 是 image-types.ReferenceImageRole（复用，不建第二套）；
+// LoRA 关联引用既有 lora versionId 标识（不建新 LoRA 体系）。
+// 本档只做纯函式；存储在 character-card-store.ts、HTTP 在 /api/character-cards。
 
 import { toReferenceImageRole } from "./image-types";
 import type { AgentInteractionMode } from "./agent-chat-client";
@@ -20,12 +20,12 @@ import type { AssetScope } from "./asset-scope";
 import { expandEntityTokens, parseEntityTokens, resolveEntityTokenKind } from "./entity-tokens";
 
 /**
- * 卡種類：角色卡（外觀鎖定）/ 場景卡（環境鎖定）/ 風格卡（畫風鎖定）
- * / 道具卡（物件鎖定）/ 音頻卡（配樂/音效鎖定）。
+ * 卡种类：角色卡（外观锁定）/ 场景卡（环境锁定）/ 风格卡（画风锁定）
+ * / 道具卡（物件锁定）/ 音频卡（配乐/音效锁定）。
  *
- * 音頻卡是**唯讀型別上的新 kind**：它照常是項目級「鎖定配置」，但只參與
- * `applyCharacterCards(..., { target: "audio" })` 的音頻提示詞鏈路
- * （視覺鏈路完全忽略它——不進 prompt 前綴、不進參考圖）。
+ * 音频卡是**唯读型别上的新 kind**：它照常是项目级「锁定配置」，但只参与
+ * `applyCharacterCards(..., { target: "audio" })` 的音频提示词链路
+ * （视觉链路完全忽略它——不进 prompt 前缀、不进参考图）。
  */
 export type CharacterCardKind = "character" | "scene" | "style" | "prop" | "audio";
 
@@ -37,7 +37,7 @@ export const CHARACTER_CARD_KIND_VALUES: readonly CharacterCardKind[] = [
   "audio",
 ];
 
-/** 卡種類的簡體中文標籤（UI 與 toast 共用，不散落三元表達式）。 */
+/** 卡种类的简体中文标签（UI 与 toast 共用，不散落三元表达式）。 */
 export const CHARACTER_CARD_KIND_LABEL: Record<CharacterCardKind, string> = {
   character: "角色",
   scene: "场景",
@@ -46,7 +46,7 @@ export const CHARACTER_CARD_KIND_LABEL: Record<CharacterCardKind, string> = {
   audio: "音频",
 };
 
-/** 未知值收斂為 character（舊數據/agent 亂填不炸）。 */
+/** 未知值收敛为 character（旧数据/agent 乱填不炸）。 */
 export function toCharacterCardKind(value: unknown): CharacterCardKind {
   return typeof value === "string" && (CHARACTER_CARD_KIND_VALUES as readonly string[]).includes(value)
     ? (value as CharacterCardKind)
@@ -54,13 +54,13 @@ export function toCharacterCardKind(value: unknown): CharacterCardKind {
 }
 
 /**
- * 資產批准狀態（2026-09-24 決策定稿 23/4）。**路 1/2/3 與分鏡側共用同一個 shape**
- * （分鏡側見 `storyboard-contract.ts` 的 `approval?: ApprovalState`），禁止另建第二套。
+ * 资产批准状态（2026-09-24 决策定稿 23/4）。**路 1/2/3 与分镜侧共用同一个 shape**
+ * （分镜侧见 `storyboard-contract.ts` 的 `approval?: ApprovalState`），禁止另建第二套。
  *
- * 語義（決策 23）：**缺省（`undefined`）＝ 已批准** —— 存量資產（無此欄位）一律視為已批准，
- * 不追溯、不攔流程。只有顯式 `pending`/`rejected` 才算「未批准」。
- * 檔位（決策 2）：批准閘**只在協作檔生效**；`preset`/`auto` 一律視為已批准（護城河）。
- * `reason` 是駁回理由（決策 4：駁回後停下等用戶指定怎麼改，理由存下、不擅自重生成）。
+ * 语义（决策 23）：**缺省（`undefined`）＝ 已批准** —— 存量资产（无此栏位）一律视为已批准，
+ * 不追溯、不拦流程。只有显式 `pending`/`rejected` 才算「未批准」。
+ * 档位（决策 2）：批准闸**只在协作档生效**；`preset`/`auto` 一律视为已批准（护城河）。
+ * `reason` 是驳回理由（决策 4：驳回后停下等用户指定怎么改，理由存下、不擅自重生成）。
  */
 export interface ApprovalState {
   status: "approved" | "pending" | "rejected";
@@ -74,7 +74,7 @@ export const APPROVAL_STATUS_VALUES: readonly ApprovalState["status"][] = [
   "rejected",
 ];
 
-/** 卡的參考圖：url + 角色（ReferenceImageRole）+ 顯示名。 */
+/** 卡的参考图：url + 角色（ReferenceImageRole）+ 显示名。 */
 export interface CharacterCardReferenceImage {
   url: string;
   role: ReferenceImageRole;
@@ -82,37 +82,37 @@ export interface CharacterCardReferenceImage {
 }
 
 /**
- * 變裝（Disguise，對稱差 D8「變裝作為角色的一等子資產」）：
- * **同一角色的具名替代造型**——有自己在本卡內唯一的穩定識別 `id`、自己的名字、
- * 自己的參考圖（與可選的鎖定 prompt 片段）。
+ * 变装（Disguise，对称差 D8「变装作为角色的一等子资产」）：
+ * **同一角色的具名替代造型**——有自己在本卡内唯一的稳定识别 `id`、自己的名字、
+ * 自己的参考图（与可选的锁定 prompt 片段）。
  *
- * 為什麼不是「把變裝攤平成互不相關的角色卡」（我方舊況只有 `variantOf` 單向指針）：
- *   - 母卡身分不變（`kind` 仍 `"character"`、卡 id/名稱不變）⇒ 卡 id 序鎖定注入、
- *     分鏡引用欄（`characterCardIds`）、專案鎖定（`activeCardIds`）全部零遷移；
- *   - 一個角色可掛**多個**變裝，鏡次只挑它要的那個（`resolveCharacterDisguises`）；
- *   - **變裝自己的參考圖就是它自己的參考圖**，缺件時不回退主造型（見 `withCharacterDisguises`）。
+ * 为什么不是「把变装摊平成互不相关的角色卡」（我方旧况只有 `variantOf` 单向指针）：
+ *   - 母卡身分不变（`kind` 仍 `"character"`、卡 id/名称不变）⇒ 卡 id 序锁定注入、
+ *     分镜引用栏（`characterCardIds`）、专案锁定（`activeCardIds`）全部零迁移；
+ *   - 一个角色可挂**多个**变装，镜次只挑它要的那个（`resolveCharacterDisguises`）；
+ *   - **变装自己的参考图就是它自己的参考图**，缺件时不回退主造型（见 `withCharacterDisguises`）。
  */
 export interface CharacterCardDisguise {
-  /** 卡內唯一識別（新增時沒有也可由名字導出，見 `disguiseIdFromName`）。 */
+  /** 卡内唯一识别（新增时没有也可由名字导出，见 `disguiseIdFromName`）。 */
   id: string;
-  /** 變裝名（**具名狀態的載體**：缺件回報、`requiredDisguises` 對帳都用這個名字）。 */
+  /** 变装名（**具名状态的载体**：缺件回报、`requiredDisguises` 对帐都用这个名字）。 */
   name: string;
-  /** 該變裝的鎖定 prompt 片段（可選；空＝只用參考圖鎖造型）。 */
+  /** 该变装的锁定 prompt 片段（可选；空＝只用参考图锁造型）。 */
   prompt?: string;
-  /** 該變裝專屬參考圖（自己的尺，不共用主造型的）。 */
+  /** 该变装专属参考图（自己的尺，不共用主造型的）。 */
   references: CharacterCardReferenceImage[];
 }
 
-/** 變裝選擇：在哪些角色卡上找哪個具名變裝（`cardId` 缺省＝在全部傳入卡拉上找）。 */
+/** 变装选择：在哪些角色卡上找哪个具名变装（`cardId` 缺省＝在全部传入卡拉上找）。 */
 export interface DisguiseSelection {
   cardId?: string;
   name: string;
 }
 
 export interface ResolvedCharacterDisguises {
-  /** 命中的變裝（帶所屬卡 id）。 */
+  /** 命中的变装（带所属卡 id）。 */
   matched: { cardId: string; disguise: CharacterCardDisguise }[];
-  /** 具名缺件：找不到同名變裝的名字（trim 去重、宣告序）。 */
+  /** 具名缺件：找不到同名变装的名字（trim 去重、宣告序）。 */
   missing: string[];
 }
 
@@ -120,78 +120,78 @@ export interface CharacterCard {
   id: string;
   name: string;
   kind: CharacterCardKind;
-  /** 鎖定的 prompt 片段（外觀/場景描述）；空字串 = 純參考圖卡。 */
+  /** 锁定的 prompt 片段（外观/场景描述）；空字串 = 纯参考图卡。 */
   prompt: string;
-  /** 參考圖列表（各帶角色）。 */
+  /** 参考图列表（各带角色）。 */
   references: CharacterCardReferenceImage[];
-  /** 負面詞（可選）。 */
+  /** 负面词（可选）。 */
   negativePrompt?: string;
-  /** LoRA 關聯（可選）：引用既有 lora versionId，不建新體系。 */
+  /** LoRA 关联（可选）：引用既有 lora versionId，不建新体系。 */
   loraIds?: string[];
-  /** 變體母卡 id（變體＝kind 仍是 "character" 但帶此欄，例如「劼后-霍辞渊」是「霍辞渊」的造型變體）。
-   *  指到的卡不存在＝當普通角色卡處理（fail-open，不報錯）。 */
+  /** 变体母卡 id（变体＝kind 仍是 "character" 但带此栏，例如「劼后-霍辞渊」是「霍辞渊」的造型变体）。
+   *  指到的卡不存在＝当普通角色卡处理（fail-open，不报错）。 */
   variantOf?: string;
   /**
-   * 變裝清單（對稱差 D8，一等子資產）：本角色可用的具名造型，每個帶自己的 id/名字/參考圖。
-   * 缺省＝沒有變裝（舊卡零改動、零欄位）。**不影響既有鎖定注入**——
-   * 只有當分鏡/呼叫端**明確選用**某個變裝時才換參考（`withCharacterDisguises`），
-   * 沒選＝行為與舊況逐位元相同（用 `references` 主造型）。
+   * 变装清单（对称差 D8，一等子资产）：本角色可用的具名造型，每个带自己的 id/名字/参考图。
+   * 缺省＝没有变装（旧卡零改动、零栏位）。**不影响既有锁定注入**——
+   * 只有当分镜/呼叫端**明确选用**某个变装时才换参考（`withCharacterDisguises`），
+   * 没选＝行为与旧况逐位元相同（用 `references` 主造型）。
    */
   disguises?: CharacterCardDisguise[];
   /**
-   * 必要變裝清單（**設定階段的強制補齊要求**）：這個角色在本劇必須具備哪些具名造型。
-   * 缺省＝無要求（舊卡零改動）。以**名字**對帳（不是 id：缺件要用人看得懂的名字回報），
-   * 對帳入口 `auditCharacterDisguises` / 全庫入口 `auditDisguiseRequirements`——
-   * 缺件＝明確回報缺哪些名字，**不得靜默用主造型頂替**。
+   * 必要变装清单（**设定阶段的强制补齐要求**）：这个角色在本剧必须具备哪些具名造型。
+   * 缺省＝无要求（旧卡零改动）。以**名字**对帐（不是 id：缺件要用人看得懂的名字回报），
+   * 对帐入口 `auditCharacterDisguises` / 全库入口 `auditDisguiseRequirements`——
+   * 缺件＝明确回报缺哪些名字，**不得静默用主造型顶替**。
    */
   requiredDisguises?: string[];
   /**
-   * REQ-D1 資產血統：這張卡的直接來源鏈（例如「存為卡片」時登記的歷史來源）。
-   * 只存在卡本體供人看的「溯源」抽屜；不進 canvas 節點 metadata、
-   * 不進 compactMetadataForAgent（裁決②：agent 不讀血統）。缺省＝來源不明。
+   * REQ-D1 资产血统：这张卡的直接来源链（例如「存为卡片」时登记的历史来源）。
+   * 只存在卡本体供人看的「溯源」抽屉；不进 canvas 节点 metadata、
+   * 不进 compactMetadataForAgent（裁决②：agent 不读血统）。缺省＝来源不明。
    */
   lineage?: LineageLink[];
-  /** parents 曾超上限被截尾的顯式標記。 */
+  /** parents 曾超上限被截尾的显式标记。 */
   lineageTruncated?: boolean;
   /**
-   * REQ-B2 歸屬（個人 / 項目）：缺省＝personal（既有卡零改動）。
-   * 只給人看（項目資產庫面板的歸屬標記與顯式分享入口）——
-   * **裁決排除**（同 D1 lineage 先例）：不進 canvas 節點 metadata、
-   * 不進 toNodeMetadata、不進 compactMetadataForAgent。
+   * REQ-B2 归属（个人 / 项目）：缺省＝personal（既有卡零改动）。
+   * 只给人看（项目资产库面板的归属标记与显式分享入口）——
+   * **裁决排除**（同 D1 lineage 先例）：不进 canvas 节点 metadata、
+   * 不进 toNodeMetadata、不进 compactMetadataForAgent。
    */
   scope?: AssetScope;
   /**
-   * 資產批准狀態（2026-09-24 決策 23）：**缺省＝已批准**（存量資產零改動、不追溯）。
-   * 只有 `pending`/`rejected` 才算未批准，且**只在協作檔**（`interaction_mode === "collaborate"`）
-   * 當門檻（未批准的卡 id 不得進分鏡卡引用欄，見 `storyboard-contract.ts`
-   * `filterApprovedShotCardIds`）；全自動檔（`preset`/`auto`）一律視為已批准、不擋（護城河）。
+   * 资产批准状态（2026-09-24 决策 23）：**缺省＝已批准**（存量资产零改动、不追溯）。
+   * 只有 `pending`/`rejected` 才算未批准，且**只在协作档**（`interaction_mode === "collaborate"`）
+   * 当门槛（未批准的卡 id 不得进分镜卡引用栏，见 `storyboard-contract.ts`
+   * `filterApprovedShotCardIds`）；全自动档（`preset`/`auto`）一律视为已批准、不挡（护城河）。
    */
   approval?: ApprovalState;
   createdAt: string;
   updatedAt: string;
 }
 
-// ─────────────────────────────────────────── 清洗與上限
+// ─────────────────────────────────────────── 清洗与上限
 
 const MAX_CARD_ID_LENGTH = 100;
 const MAX_CARD_NAME_LENGTH = 100;
 const MAX_CARD_PROMPT_LENGTH = 2000;
 const MAX_CARD_NEGATIVE_LENGTH = 1000;
-/** 單張卡參考物上限（**唯一宣告**：卡清洗在此截尾；B 端 /v1/character-cards 用它做
- *  「超限回 400」的前置校驗——不靜默截尾，故必須與此處同值、不得另立常數）。 */
+/** 单张卡参考物上限（**唯一宣告**：卡清洗在此截尾；B 端 /v1/character-cards 用它做
+ *  「超限回 400」的前置校验——不静默截尾，故必须与此处同值、不得另立常数）。 */
 export const MAX_CARD_REFERENCES = 8;
 const MAX_CARD_LORA_IDS = 8;
 const MAX_REFERENCE_NAME_LENGTH = 60;
 const MAX_APPROVAL_REASON_LENGTH = 200;
 const MAX_APPROVAL_DECIDED_AT_LENGTH = 40;
-/** 單卡變裝上限（新增超過＝拒絕，清洗超過＝截尾；與 `MAX_CARD_REFERENCES` 同一種界）。 */
+/** 单卡变装上限（新增超过＝拒绝，清洗超过＝截尾；与 `MAX_CARD_REFERENCES` 同一种界）。 */
 export const MAX_DISGUISES_PER_CARD = 12;
 const MAX_DISGUISE_NAME_LENGTH = 60;
 const MAX_DISGUISE_PROMPT_LENGTH = 1000;
-/** 必要變裝清單上限（`requiredDisguises`）。 */
+/** 必要变装清单上限（`requiredDisguises`）。 */
 export const MAX_REQUIRED_DISGUISES = 12;
 
-/** 圖片 URL 判定核心：與 semantic-nodes 的收口一致（http(s) 與 data:image）。純布林，兩種呼叫端共用。 */
+/** 图片 URL 判定核心：与 semantic-nodes 的收口一致（http(s) 与 data:image）。纯布林，两种呼叫端共用。 */
 function isCardImageUrl(url: string): boolean {
   return url.startsWith("http") || url.startsWith("data:image/");
 }
@@ -202,16 +202,16 @@ function isUsableCardImageUrl(url: string | undefined | null): url is string {
 }
 
 /**
- * 卡**參考物** URL 判定（kind-aware，唯一收口）：卡儲存時用這把尺，不是純圖片尺。
+ * 卡**参考物** URL 判定（kind-aware，唯一收口）：卡储存时用这把尺，不是纯图片尺。
  *
- *   - `http(s)`：兩類都收（既有寬鬆面原樣保留——舊尺 `startsWith("http")` 從不辨 mime／
- *     副檔名，本刀不動它：收緊會讓存量卡當場掉參考）。
- *   - `data:`：圖片卡收 `data:image/`；**音頻卡收 `data:audio/`**。
+ *   - `http(s)`：两类都收（既有宽松面原样保留——旧尺 `startsWith("http")` 从不辨 mime／
+ *     副档名，本刀不动它：收紧会让存量卡当场掉参考）。
+ *   - `data:`：图片卡收 `data:image/`；**音频卡收 `data:audio/`**。
  *
- * Why：音頻卡的載體是音頻（`@[音频:…]` 片段 + 音頻參考），舊尺只認 `data:image/`
- * ⇒ `data:audio/mpeg;base64,…` 這種合法的內嵌參考音頻會被 `normalizeCharacterCard`
- * **靜默丟掉**（卡變成沒有載體的空殼）。視覺鏈路不受影響：音頻卡在
- * `applyCharacterCards` 的視覺 target 下整張被排除，其參考物永不冒充圖片。
+ * Why：音频卡的载体是音频（`@[音频:…]` 片段 + 音频参考），旧尺只认 `data:image/`
+ * ⇒ `data:audio/mpeg;base64,…` 这种合法的内嵌参考音频会被 `normalizeCharacterCard`
+ * **静默丢掉**（卡变成没有载体的空壳）。视觉链路不受影响：音频卡在
+ * `applyCharacterCards` 的视觉 target 下整张被排除，其参考物永不冒充图片。
  */
 function isUsableCardReferenceUrl(url: string | undefined | null, kind: CharacterCardKind): url is string {
   if (typeof url !== "string" || !url) return false;
@@ -225,10 +225,10 @@ function boundedString(value: unknown, max: number): string | null {
 }
 
 /**
- * 卡 id 邊界（REQ-B2）：在長度界之上**拒絕含保留分隔符 `:` 的 id**。
- * 理由：`:` 是作用域層確定性鍵（share/mount）的段分隔符，含它的 id 在舊版裸拼接鍵下
- * 可與別的 (kind, id) 組合撞鍵 → 授權跨資產別名。截斷/改寫 id 都不行（會斷掉 cardIds
- * 與既有引用），故一律 fail-closed 拒收（回 null）。
+ * 卡 id 边界（REQ-B2）：在长度界之上**拒绝含保留分隔符 `:` 的 id**。
+ * 理由：`:` 是作用域层确定性键（share/mount）的段分隔符，含它的 id 在旧版裸拼接键下
+ * 可与别的 (kind, id) 组合撞键 → 授权跨资产别名。截断/改写 id 都不行（会断掉 cardIds
+ * 与既有引用），故一律 fail-closed 拒收（回 null）。
  */
 function usableCardId(value: unknown): string | null {
   const clean = boundedString(value, MAX_CARD_ID_LENGTH);
@@ -241,8 +241,8 @@ function usableCardId(value: unknown): string | null {
 }
 
 /**
- * 參考物陣列清洗（**唯一收口**：卡的 `references` 與變裝的 `references` 走同一把尺，
- * 不另立第二套變裝參考尺）。非法 URL 丟、名字缺省回 `fallbackName`、上限截尾。
+ * 参考物阵列清洗（**唯一收口**：卡的 `references` 与变装的 `references` 走同一把尺，
+ * 不另立第二套变装参考尺）。非法 URL 丢、名字缺省回 `fallbackName`、上限截尾。
  */
 function normalizeCardReferenceImages(
   raw: unknown,
@@ -266,12 +266,12 @@ function normalizeCardReferenceImages(
 }
 
 /**
- * 批准狀態清洗（**唯一收口**：`normalizeCharacterCard` 與 `setApproval` 共用同一把尺）。
- *   - 非物件 / `status` 不在 `APPROVAL_STATUS_VALUES` 三值域 → **null（呼叫端省略欄位＝缺省＝已批准）**。
- *     讀不懂的值不猜成「未批准」：批准狀態不是安全邊界（卡內容對本帳號本來就可見），
- *     且與決策 23「缺省＝已批准」同向——髒資料不該讓存量卡突然被擋在分鏡之外。
- *   - `decidedAt` 只驗「非空字串且不超長」，**不做日期解析**（不引入第二套時間語義）。
- *   - `reason` 走 `boundedString`（trim + 上限）；空/純空白＝沒有理由（欄位省略）。
+ * 批准状态清洗（**唯一收口**：`normalizeCharacterCard` 与 `setApproval` 共用同一把尺）。
+ *   - 非物件 / `status` 不在 `APPROVAL_STATUS_VALUES` 三值域 → **null（呼叫端省略栏位＝缺省＝已批准）**。
+ *     读不懂的值不猜成「未批准」：批准状态不是安全边界（卡内容对本帐号本来就可见），
+ *     且与决策 23「缺省＝已批准」同向——脏资料不该让存量卡突然被挡在分镜之外。
+ *   - `decidedAt` 只验「非空字串且不超长」，**不做日期解析**（不引入第二套时间语义）。
+ *   - `reason` 走 `boundedString`（trim + 上限）；空/纯空白＝没有理由（栏位省略）。
  */
 export function normalizeApprovalState(payload: unknown): ApprovalState | null {
   if (!payload || typeof payload !== "object") return null;
@@ -286,7 +286,7 @@ export function normalizeApprovalState(payload: unknown): ApprovalState | null {
   return { status, ...(decidedAt ? { decidedAt } : {}), ...(reason ? { reason } : {}) };
 }
 
-/** 清洗單張卡：欄位缺損返回 null（API 與 store 共用同一收口）。 */
+/** 清洗单张卡：栏位缺损返回 null（API 与 store 共用同一收口）。 */
 export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   if (!payload || typeof payload !== "object") return null;
   const c = payload as Partial<CharacterCard>;
@@ -294,30 +294,30 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   const name = boundedString(c.name, MAX_CARD_NAME_LENGTH);
   if (!id || !name) return null;
   const now = new Date().toISOString();
-  // kind 先落定：參考物 URL 的收口尺是 kind-aware 的（音頻卡收 data:audio/，見上）。
+  // kind 先落定：参考物 URL 的收口尺是 kind-aware 的（音频卡收 data:audio/，见上）。
   const kind = toCharacterCardKind(c.kind);
   const references = normalizeCardReferenceImages(c.references, kind, name);
   const negativePrompt = boundedString(c.negativePrompt, MAX_CARD_NEGATIVE_LENGTH);
   const loraIds = (Array.isArray(c.loraIds) ? c.loraIds : [])
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     .slice(0, MAX_CARD_LORA_IDS);
-  // 變體母卡指針：走與卡 id 同級的邊界（長度上限 + 拒 `:` + 拒控制字元）。
-  // 不合法 → **只省略該欄位**（不整張卡回 null：母卡指針壞掉不該讓造型卡本身消失）；
-  // 自環（指向自己）同樣省略——不製造鬼引用。
+  // 变体母卡指针：走与卡 id 同级的边界（长度上限 + 拒 `:` + 拒控制字元）。
+  // 不合法 → **只省略该栏位**（不整张卡回 null：母卡指针坏掉不该让造型卡本身消失）；
+  // 自环（指向自己）同样省略——不制造鬼引用。
   const variantOfRaw = usableCardId(c.variantOf);
   const variantOf = variantOfRaw && variantOfRaw !== id ? variantOfRaw : null;
-  // 變裝（D8）：走本檔的變裝清洗收口；id 與卡本體 id 相同的變裝條目丟掉
-  //（自指＝鬼引用，與 variantOf 自環同款處置）。空清單＝不寫欄位（舊卡零改動）。
+  // 变装（D8）：走本档的变装清洗收口；id 与卡本体 id 相同的变装条目丢掉
+  //（自指＝鬼引用，与 variantOf 自环同款处置）。空清单＝不写栏位（旧卡零改动）。
   const disguises = normalizeCharacterDisguises(c.disguises).filter((d) => d.id !== id);
-  // 必要變裝清單：名字清單，缺省＝無要求（不寫空陣列）。
+  // 必要变装清单：名字清单，缺省＝无要求（不写空阵列）。
   const requiredDisguises = normalizeRequiredDisguises(c.requiredDisguises);
-  // REQ-D1：血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）。
+  // REQ-D1：血统栏位复用 ./lineage 的清洗收口（非法条目丢、上限截尾并显式标记）。
   const lineageRaw = Array.isArray(c.lineage) ? normalizeLineageLinks(c.lineage) : null;
-  // REQ-B2 作用域：同樣走 ./asset-scope 的清洗收口（缺省＝personal 且省略欄位）。
-  // 回 null＝鬼狀態（owner=project 卻無 projectId / owner=team 卻無 teamId）：
-  // **寫回 GHOST_ASSET_SCOPE**（不降格成 personal），該卡在任何上下文都不可見/不可用
-  //（D3：降格＝把歸屬不明的項目資產變成人人可用的個人資產）。
-  // P0-2：team 作用域同樣要落欄（只寫 project 會讓團隊卡在存檔端靜默丟失歸屬）。
+  // REQ-B2 作用域：同样走 ./asset-scope 的清洗收口（缺省＝personal 且省略栏位）。
+  // 回 null＝鬼状态（owner=project 却无 projectId / owner=team 却无 teamId）：
+  // **写回 GHOST_ASSET_SCOPE**（不降格成 personal），该卡在任何上下文都不可见/不可用
+  //（D3：降格＝把归属不明的项目资产变成人人可用的个人资产）。
+  // P0-2：team 作用域同样要落栏（只写 project 会让团队卡在存档端静默丢失归属）。
   const scope = normalizeAssetScope(c.scope);
   const approval = normalizeApprovalState(c.approval);
   return {
@@ -348,17 +348,17 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   };
 }
 
-// ─────────────────────────────────────────── 資產批准狀態（檔位相關）
+// ─────────────────────────────────────────── 资产批准状态（档位相关）
 
 /**
- * 「這張資產算不算已批准」的**唯一判定入口**（純函式，不 mutate）。
+ * 「这张资产算不算已批准」的**唯一判定入口**（纯函式，不 mutate）。
  *
- * 檔位規則（決策 2/23，護城河）：
+ * 档位规则（决策 2/23，护城河）：
  *   - `mode !== "collaborate"`（含 `preset`/`auto`/`undefined`）→ **一律 `true`**：
- *     全自動檔零改動、不停不阻塞；既有呼叫端（不知道 mode 這回事）行為逐位不變。
- *   - `mode === "collaborate"` → 只有顯式 `pending`/`rejected` 才算未批准；
- *     缺省 `approval`（存量資產）仍＝已批准。
- * 因此「只有協作檔才可能回 false」寫進型別層的判定，不靠呼叫端自律——護城河不是約定。
+ *     全自动档零改动、不停不阻塞；既有呼叫端（不知道 mode 这回事）行为逐位不变。
+ *   - `mode === "collaborate"` → 只有显式 `pending`/`rejected` 才算未批准；
+ *     缺省 `approval`（存量资产）仍＝已批准。
+ * 因此「只有协作档才可能回 false」写进型别层的判定，不靠呼叫端自律——护城河不是约定。
  */
 export function isAssetApproved(
   approval: ApprovalState | null | undefined,
@@ -371,18 +371,18 @@ export function isAssetApproved(
 
 export interface SetApprovalOptions {
   /**
-   * 決策時間（ISO）。缺省＝現在。**同時作為該卡的 `updatedAt`**（一次讀鐘，不產生第二個時間源）：
-   * 批准是使用者對該卡的動作，卡列表按 `updatedAt` 排序（`character-card-store.ts:125`），
-   * 不更新會讓剛確認過的卡沉在列表底部。
+   * 决策时间（ISO）。缺省＝现在。**同时作为该卡的 `updatedAt`**（一次读钟，不产生第二个时间源）：
+   * 批准是使用者对该卡的动作，卡列表按 `updatedAt` 排序（`character-card-store.ts:125`），
+   * 不更新会让刚确认过的卡沉在列表底部。
    */
   decidedAt?: string;
-  /** 駁回理由（決策 4）。空白＝沒有理由（省略欄位）。 */
+  /** 驳回理由（决策 4）。空白＝没有理由（省略栏位）。 */
   reason?: string;
 }
 
 /**
- * 設定批准狀態（純函式：回新物件、**不改傳入卡**）。
- * `status` 不合法（型別外呼叫）→ **原卡回傳**（不製造半形狀態、不寫半套）。
+ * 设定批准状态（纯函式：回新物件、**不改传入卡**）。
+ * `status` 不合法（型别外呼叫）→ **原卡回传**（不制造半形状态、不写半套）。
  */
 export function setApproval(
   card: CharacterCard,
@@ -396,9 +396,9 @@ export function setApproval(
 }
 
 /**
- * 清除批准狀態 → 回到**缺省＝已批准**（決策 23 的存量相容態）。
- * 刻意不是「設成 pending」：清狀態的語義是「這張卡沒有待決事項」，不是「再等一下」。
- * 本來就沒有 `approval` → **回同一物件**（呼叫端可用 `===` 略過無謂寫入）。
+ * 清除批准状态 → 回到**缺省＝已批准**（决策 23 的存量相容态）。
+ * 刻意不是「设成 pending」：清状态的语义是「这张卡没有待决事项」，不是「再等一下」。
+ * 本来就没有 `approval` → **回同一物件**（呼叫端可用 `===` 略过无谓写入）。
  */
 export function clearApproval(card: CharacterCard): CharacterCard {
   if (!card.approval) return card;
@@ -407,12 +407,12 @@ export function clearApproval(card: CharacterCard): CharacterCard {
   return next;
 }
 
-// ─────────────────────────────────────────── 變裝子資產（對稱差 D8）
+// ─────────────────────────────────────────── 变装子资产（对称差 D8）
 
 /**
- * 由變裝名導出穩定 id（無 id 時使用）：trim、空白折成 `-`，再走**與卡 id 同一把尺**
- * （`usableCardId`：長度上限、拒保留分隔符 `:`、拒控制字元）。
- * 導不出（名含 `:`／空／超長）→ null（呼叫端拒收，不製造半形 id）。
+ * 由变装名导出稳定 id（无 id 时使用）：trim、空白折成 `-`，再走**与卡 id 同一把尺**
+ * （`usableCardId`：长度上限、拒保留分隔符 `:`、拒控制字元）。
+ * 导不出（名含 `:`／空／超长）→ null（呼叫端拒收，不制造半形 id）。
  */
 export function disguiseIdFromName(name: unknown): string | null {
   const clean = boundedString(name, MAX_DISGUISE_NAME_LENGTH);
@@ -421,8 +421,8 @@ export function disguiseIdFromName(name: unknown): string | null {
 }
 
 /**
- * 清洗單個變裝。缺名字 = null（沒有名字就沒有「具名狀態」，無法被要求/對帳）。
- * id 非法或未給 → 由名字導出（導不出才 null）；參考圖走卡參考物同一把尺。
+ * 清洗单个变装。缺名字 = null（没有名字就没有「具名状态」，无法被要求/对帐）。
+ * id 非法或未给 → 由名字导出（导不出才 null）；参考图走卡参考物同一把尺。
  */
 export function normalizeCharacterDisguise(payload: unknown): CharacterCardDisguise | null {
   if (!payload || typeof payload !== "object") return null;
@@ -441,14 +441,14 @@ export function normalizeCharacterDisguise(payload: unknown): CharacterCardDisgu
 }
 
 /**
- * 清洗變裝清單：非法項丟、**同 id 或同 name 只留最後一張**、上限 `MAX_DISGUISES_PER_CARD` 截尾。
+ * 清洗变装清单：非法项丢、**同 id 或同 name 只留最后一张**、上限 `MAX_DISGUISES_PER_CARD` 截尾。
  *
- * 為什麼是「同 id **或**同 name」且留最後一張：去重鍵必須與 `addCharacterDisguise` 一致。
- * 新增路徑覆蓋既有變裝時用的判準是 `d.id === id || d.name === name`，即**同名不同 id 也會被覆蓋**
- * （舊稿被移出、新稿排在後面）——舊版清洗器只按 `id` 去重，於是「同名不同 id」兩條並存，
- * 而下游 `resolveCharacterDisguises` 是**按 name 取第一條**，解析結果就取決於清單序（不確定）。
- * 留最後一張而非第一張，理由同上：清洗器讀的是可能被多次寫入過的持久化資料，
- * 先出現者是被覆蓋掉的舊稿；若留第一張，把 add 路徑寫出的資料再清洗一次會把舊稿復活。
+ * 为什么是「同 id **或**同 name」且留最后一张：去重键必须与 `addCharacterDisguise` 一致。
+ * 新增路径覆盖既有变装时用的判准是 `d.id === id || d.name === name`，即**同名不同 id 也会被覆盖**
+ * （旧稿被移出、新稿排在后面）——旧版清洗器只按 `id` 去重，于是「同名不同 id」两条并存，
+ * 而下游 `resolveCharacterDisguises` 是**按 name 取第一条**，解析结果就取决于清单序（不确定）。
+ * 留最后一张而非第一张，理由同上：清洗器读的是可能被多次写入过的持久化资料，
+ * 先出现者是被覆盖掉的旧稿；若留第一张，把 add 路径写出的资料再清洗一次会把旧稿复活。
  */
 export function normalizeCharacterDisguises(raw: unknown): CharacterCardDisguise[] {
   if (!Array.isArray(raw)) return [];
@@ -461,11 +461,11 @@ export function normalizeCharacterDisguises(raw: unknown): CharacterCardDisguise
     }
     kept.set(disguise.id, disguise);
   }
-  // 截尾在去重之後：上限管的是「最終有幾張」，不是「掃過幾筆」。
+  // 截尾在去重之后：上限管的是「最终有几张」，不是「扫过几笔」。
   return [...kept.values()].slice(0, MAX_DISGUISES_PER_CARD);
 }
 
-/** 清洗必要變裝名清單：trim、去重、上限 `MAX_REQUIRED_DISGUISES` 截尾。 */
+/** 清洗必要变装名清单：trim、去重、上限 `MAX_REQUIRED_DISGUISES` 截尾。 */
 export function normalizeRequiredDisguises(raw: unknown): string[] {
   const out: string[] = [];
   if (!Array.isArray(raw)) return out;
@@ -479,7 +479,7 @@ export function normalizeRequiredDisguises(raw: unknown): string[] {
 }
 
 export interface AddCharacterDisguiseInput {
-  /** 穩定 id（可選；缺省由名字導出）。同名／同 id ＝ 覆蓋（新增冪等）。 */
+  /** 稳定 id（可选；缺省由名字导出）。同名／同 id ＝ 覆盖（新增幂等）。 */
   id?: string;
   name: string;
   prompt?: string;
@@ -487,14 +487,14 @@ export interface AddCharacterDisguiseInput {
 }
 
 /**
- * **可新增變裝**（為既有角色新增，含命名與參考圖）：純函式，回新卡、**不改傳入卡**。
+ * **可新增变装**（为既有角色新增，含命名与参考图）：纯函式，回新卡、**不改传入卡**。
  *
- * 拒收（回 null，不製造半形資產）：
- *   - 非角色卡（`kind !== "character"`：變裝是角色的子資產，場景/道具卡沒有這個概念）；
- *   - 沒有名字 / 名字含保留分隔符 `:` / id 導不出；
- *   - id 等於卡自己的 id（自指）；
- *   - 已達 `MAX_DISGUISES_PER_CARD` 且不是覆蓋既有變裝。
- * 同名或同 id ＝ **覆蓋**（同一名字重複新增不長張數，參考圖/片段換成新的）。
+ * 拒收（回 null，不制造半形资产）：
+ *   - 非角色卡（`kind !== "character"`：变装是角色的子资产，场景/道具卡没有这个概念）；
+ *   - 没有名字 / 名字含保留分隔符 `:` / id 导不出；
+ *   - id 等于卡自己的 id（自指）；
+ *   - 已达 `MAX_DISGUISES_PER_CARD` 且不是覆盖既有变装。
+ * 同名或同 id ＝ **覆盖**（同一名字重复新增不长张数，参考图/片段换成新的）。
  */
 export function addCharacterDisguise(
   card: CharacterCard,
@@ -523,8 +523,8 @@ export function addCharacterDisguise(
 }
 
 /**
- * 設定這個角色**必要的變裝名清單**（設定階段的「要求補齊」寫入端）。
- * 空清單＝清掉要求（回缺省＝無要求）；純函式，回新卡。
+ * 设定这个角色**必要的变装名清单**（设定阶段的「要求补齐」写入端）。
+ * 空清单＝清掉要求（回缺省＝无要求）；纯函式，回新卡。
  */
 export function setRequiredDisguises(card: CharacterCard, names: readonly string[]): CharacterCard {
   const clean = normalizeRequiredDisguises(names);
@@ -535,18 +535,18 @@ export function setRequiredDisguises(card: CharacterCard, names: readonly string
 }
 
 export interface CharacterDisguiseAudit {
-  /** 沒有缺件＝true（無 `requiredDisguises` 的舊卡一律 true，零追溯）。 */
+  /** 没有缺件＝true（无 `requiredDisguises` 的旧卡一律 true，零追溯）。 */
   complete: boolean;
   required: string[];
-  /** 要求中已具備的變裝名。 */
+  /** 要求中已具备的变装名。 */
   present: string[];
-  /** **缺件（具名）**：要求中卡上沒有的變裝名——這就是「要求補齊」要回報的東西。 */
+  /** **缺件（具名）**：要求中卡上没有的变装名——这就是「要求补齐」要回报的东西。 */
   missing: string[];
-  /** 卡上實際掛載的變裝名（診斷用）。 */
+  /** 卡上实际挂载的变装名（诊断用）。 */
   provided: string[];
 }
 
-/** 單卡變裝對帳（純函式）：以**名字**比對 `requiredDisguises` ↔ `disguises`。 */
+/** 单卡变装对帐（纯函式）：以**名字**比对 `requiredDisguises` ↔ `disguises`。 */
 export function auditCharacterDisguises(card: CharacterCard): CharacterDisguiseAudit {
   const required = normalizeRequiredDisguises(card?.requiredDisguises);
   const provided = (card?.disguises ?? []).map((d) => d.name);
@@ -562,23 +562,23 @@ export function auditCharacterDisguises(card: CharacterCard): CharacterDisguiseA
 export interface DisguiseRequirementGap {
   cardId: string;
   cardName: string;
-  /** 具名缺件（設定階段要照這個名字要求補齊）。 */
+  /** 具名缺件（设定阶段要照这个名字要求补齐）。 */
   missingDisguises: string[];
 }
 
 export interface DisguiseRequirementReport {
-  /** 全部有要求的卡都已補齊＝true（沒有任何要求＝true）。 */
+  /** 全部有要求的卡都已补齐＝true（没有任何要求＝true）。 */
   complete: boolean;
-  /** 未補齊的卡（具名：卡 id + 卡名 + 缺的變裝名）。 */
+  /** 未补齐的卡（具名：卡 id + 卡名 + 缺的变装名）。 */
   gaps: DisguiseRequirementGap[];
-  /** 有要求且已補齊的卡 id。 */
+  /** 有要求且已补齐的卡 id。 */
   satisfiedCardIds: string[];
 }
 
 /**
- * **設定階段強制補齊的入口**（純函式）：掃卡庫裡所有宣告了 `requiredDisguises` 的卡，
- * 回報哪些卡缺哪些**具名**變裝。呼叫端據此要求補齊（缺件非空即不得放行），
- * 而不是拿主造型頂上——「強制」二字的落點。
+ * **设定阶段强制补齐的入口**（纯函式）：扫卡库里所有宣告了 `requiredDisguises` 的卡，
+ * 回报哪些卡缺哪些**具名**变装。呼叫端据此要求补齐（缺件非空即不得放行），
+ * 而不是拿主造型顶上——「强制」二字的落点。
  */
 export function auditDisguiseRequirements(cards: readonly CharacterCard[]): DisguiseRequirementReport {
   const gaps: DisguiseRequirementGap[] = [];
@@ -596,9 +596,9 @@ export function auditDisguiseRequirements(cards: readonly CharacterCard[]): Disg
 }
 
 /**
- * 解析變裝選擇 → 命中的（卡 id, 變裝）與**具名缺件**。
- * `cardId` 有給＝只在那張卡拉上找；缺省＝在全部傳入卡拉上找（同名到多卡＝全命中）。
- * 缺件名字 trim 去重、按宣告序（回報順序穩定＝可測）。
+ * 解析变装选择 → 命中的（卡 id, 变装）与**具名缺件**。
+ * `cardId` 有给＝只在那张卡拉上找；缺省＝在全部传入卡拉上找（同名到多卡＝全命中）。
+ * 缺件名字 trim 去重、按宣告序（回报顺序稳定＝可测）。
  */
 export function resolveCharacterDisguises(
   cards: readonly CharacterCard[],
@@ -632,19 +632,19 @@ export function resolveCharacterDisguises(
 }
 
 /**
- * 把命中的變裝套成「該角色卡在本鏡的造型版本」（純函式，回 clone、原卡不動）：
- *   - 參考圖＝**變裝自己的參考圖**（url 去重），主造型參考圖**一律不進**——
- *     變裝的造型由它自己的參考圖表達，混入主造型參考即「靜默用主造型頂替」；
- *     變裝沒帶參考圖＝這一鏡沒有角色參考（缺件由 `resolveCharacterDisguises.missing` /
- *     審計函式具名回報，不靠主造型補位）。
- *   - prompt＝各變裝片段（去重、"\\n" 連接）。**缺件（`disguises` 為空）時 prompt 一律清空**，
- *     不沿用卡本體片段——參考圖已清空而文字還在，等於用主造型出圖；命中的變裝自己沒寫 prompt
- *     才沿用卡本體片段（那是角色的基礎外觀描述，不是造型替換）。
- *   - 卡 id / 名稱 / kind / loraIds / negativePrompt 原樣保留（母卡身分不變，
- *     卡 id 序鎖定注入與分鏡引用欄零遷移）。
- * 呼叫本函式＝宣告「本卡在這一鏡**不是主造型**」⇒ 變裝清單為空時參考圖一樣清空
- * （仍回 clone，不退化成主造型；那正是「綁定式缺件不得頂替」的落點）。
- * 不需要變裝的呼叫端就**別呼叫本函式**（原卡直通，零行為漂移）。
+ * 把命中的变装套成「该角色卡在本镜的造型版本」（纯函式，回 clone、原卡不动）：
+ *   - 参考图＝**变装自己的参考图**（url 去重），主造型参考图**一律不进**——
+ *     变装的造型由它自己的参考图表达，混入主造型参考即「静默用主造型顶替」；
+ *     变装没带参考图＝这一镜没有角色参考（缺件由 `resolveCharacterDisguises.missing` /
+ *     审计函式具名回报，不靠主造型补位）。
+ *   - prompt＝各变装片段（去重、"\\n" 连接）。**缺件（`disguises` 为空）时 prompt 一律清空**，
+ *     不沿用卡本体片段——参考图已清空而文字还在，等于用主造型出图；命中的变装自己没写 prompt
+ *     才沿用卡本体片段（那是角色的基础外观描述，不是造型替换）。
+ *   - 卡 id / 名称 / kind / loraIds / negativePrompt 原样保留（母卡身分不变，
+ *     卡 id 序锁定注入与分镜引用栏零迁移）。
+ * 呼叫本函式＝宣告「本卡在这一镜**不是主造型**」⇒ 变装清单为空时参考图一样清空
+ * （仍回 clone，不退化成主造型；那正是「绑定式缺件不得顶替」的落点）。
+ * 不需要变装的呼叫端就**别呼叫本函式**（原卡直通，零行为漂移）。
  */
 export function withCharacterDisguises(
   card: CharacterCard,
@@ -666,11 +666,11 @@ export function withCharacterDisguises(
       });
     }
   }
-  // prompt：全部變裝都沒片段時要分辨兩種形狀相同的處境——
-  //   * `disguises` 為空＝**這張卡在這一鏡宣告了變裝卻沒命中（缺件）**：不得沿用卡本體片段，
-  //     否則參考圖清空了、文字描述卻還在，等於用主造型去出圖（缺件必須整格 fail-closed）。
-  //   * `disguises` 非空但都沒寫 prompt＝命中變裝、只是它沒描述：沿用卡本體片段合理
-  //     （角色的基礎外觀描述仍然成立，這一鏡換的只是造型）。
+  // prompt：全部变装都没片段时要分辨两种形状相同的处境——
+  //   * `disguises` 为空＝**这张卡在这一镜宣告了变装却没命中（缺件）**：不得沿用卡本体片段，
+  //     否则参考图清空了、文字描述却还在，等于用主造型去出图（缺件必须整格 fail-closed）。
+  //   * `disguises` 非空但都没写 prompt＝命中变装、只是它没描述：沿用卡本体片段合理
+  //     （角色的基础外观描述仍然成立，这一镜换的只是造型）。
   const missingDeclaration = disguises.length === 0;
   return {
     ...card,
@@ -679,43 +679,43 @@ export function withCharacterDisguises(
   };
 }
 
-// ─────────────────────────────────────────── 鎖定注入語義
+// ─────────────────────────────────────────── 锁定注入语义
 
 export interface AppliedCharacterCards {
-  /** 未引用卡的前綴片段 + token 已就地展開的正文。 */
+  /** 未引用卡的前缀片段 + token 已就地展开的正文。 */
   prompt: string;
-  /** 卡的參考圖（url 去重、角色保留；卡 id 序）。 */
+  /** 卡的参考图（url 去重、角色保留；卡 id 序）。 */
   references: CharacterCardReferenceImage[];
-  /** 合併後的負面詞；無則 null。 */
+  /** 合并后的负面词；无则 null。 */
   negativePrompt: string | null;
 }
 
 export interface ApplyCharacterCardsOptions {
-  /** "visual"（預設）：character/scene/style/prop 參與，audio 卡完全忽略（＝既有行為）。
-   *  "audio"：只有 audio 卡參與，其餘 kind 忽略，references 一律回空。 */
+  /** "visual"（预设）：character/scene/style/prop 参与，audio 卡完全忽略（＝既有行为）。
+   *  "audio"：只有 audio 卡参与，其余 kind 忽略，references 一律回空。 */
   target?: "visual" | "audio";
-  /** "all"（預設，＝既有行為）：所有傳入卡都貢獻 references。
-   *  "referenced"：只讓「被 token 引用到的卡」貢獻 references；若正文裡一個 token 都沒有，
-   *  退回 "all"（不讓「沒用 token」變成靜默丟參考圖）。 */
+  /** "all"（预设，＝既有行为）：所有传入卡都贡献 references。
+   *  "referenced"：只让「被 token 引用到的卡」贡献 references；若正文里一个 token 都没有，
+   *  退回 "all"（不让「没用 token」变成静默丢参考图）。 */
   referenceScope?: "all" | "referenced";
 }
 
 /**
- * 生成時卡集推導：把**本段提示詞 token 引用到的卡**就地併入既有卡集（純函式）。
+ * 生成时卡集推导：把**本段提示词 token 引用到的卡**就地并入既有卡集（纯函式）。
  *
- * 補的缺口：agent 建的卡只落進卡庫（`characterCards`），不會自動鎖進項目
- * （`activeCardIds`／`project.cardIds` 的既有語義不動，本函式也**不自動鎖任何卡**）。
- * 於是正文寫了 `@[角色:灰羽]`，注入集裡卻沒有灰羽 → `expandEntityTokens` 找不到卡
- * → token 原樣送上游。本函式讓「卡在庫」就足以被 `@` 引用。
+ * 补的缺口：agent 建的卡只落进卡库（`characterCards`），不会自动锁进项目
+ * （`activeCardIds`／`project.cardIds` 的既有语义不动，本函式也**不自动锁任何卡**）。
+ * 于是正文写了 `@[角色:灰羽]`，注入集里却没有灰羽 → `expandEntityTokens` 找不到卡
+ * → token 原样送上游。本函式让「卡在库」就足以被 `@` 引用。
  *
- * 語義（判準與 `expandEntityTokens` 逐字同一把尺，不另立第二套）：
- *   - 種類字 → kind 走 `resolveEntityTokenKind`；命中卡＝**卡庫全量**裡第一張
+ * 语义（判准与 `expandEntityTokens` 逐字同一把尺，不另立第二套）：
+ *   - 种类字 → kind 走 `resolveEntityTokenKind`；命中卡＝**卡库全量**里第一张
  *     `card.kind === kind && card.name.trim() === hit.name.trim()` 的卡。
- *   - 未命中（種類字未知／卡庫沒有同名同 kind 的卡）→ 不併入、不 throw；
- *     該 token 交由 `expandEntityTokens` 既有的 fail-open 原樣保留處理。
- *   - 併入＝**聯集**：`cards` 原序在前，新命中的卡按 token 出現序補在後，同 id 去重。
- *   - 零 token／全部未命中 → **回傳同一陣列參考**（逐位元等價：零新增、零 I/O、payload 形狀不變）。
- *   - 純函式：不 mutate 任何輸入。
+ *   - 未命中（种类字未知／卡库没有同名同 kind 的卡）→ 不并入、不 throw；
+ *     该 token 交由 `expandEntityTokens` 既有的 fail-open 原样保留处理。
+ *   - 并入＝**联集**：`cards` 原序在前，新命中的卡按 token 出现序补在后，同 id 去重。
+ *   - 零 token／全部未命中 → **回传同一阵列参考**（逐位元等价：零新增、零 I/O、payload 形状不变）。
+ *   - 纯函式：不 mutate 任何输入。
  */
 export function mergeTokenReferencedCards(
   cards: CharacterCard[],
@@ -742,13 +742,13 @@ export function mergeTokenReferencedCards(
 
 
 /**
- * 鎖定注入核心（純函式、冪等）：
- *   - 穩定順序：卡按 id 升序（卡 id 序），與傳入順序無關
- *   - token 展開：正文裡的 `@[角色:霍辞渊]` 就地在原位置換成該卡的 prompt 片段
- *   - 冪等：同一卡出現兩次只注入一次；片段已存在於 prompt 時不再重複（含 token 展開後的位置）
- *   - 參考圖按 url 去重、角色原樣保留
- *   - 負面詞合併去重（", " 連接），**不論 referenceScope 一律收全部參與卡**
- *     （否定詞不影響構圖綁定，收窄反而讓畫面失控）
+ * 锁定注入核心（纯函式、幂等）：
+ *   - 稳定顺序：卡按 id 升序（卡 id 序），与传入顺序无关
+ *   - token 展开：正文里的 `@[角色:霍辞渊]` 就地在原位置换成该卡的 prompt 片段
+ *   - 幂等：同一卡出现两次只注入一次；片段已存在于 prompt 时不再重复（含 token 展开后的位置）
+ *   - 参考图按 url 去重、角色原样保留
+ *   - 负面词合并去重（", " 连接），**不论 referenceScope 一律收全部参与卡**
+ *     （否定词不影响构图绑定，收窄反而让画面失控）
  */
 export function applyCharacterCards(
   basePrompt: string,
@@ -758,8 +758,8 @@ export function applyCharacterCards(
   const target = options?.target ?? "visual";
   const referenceScope = options?.referenceScope ?? "all";
 
-  // 卡池過濾：visual 丟 audio 卡；audio 只留 audio 卡。
-  // variantOf 指到存在卡的變體＝照常參與（它就是角色卡）；指不到＝照常參與（fail-open）。
+  // 卡池过滤：visual 丢 audio 卡；audio 只留 audio 卡。
+  // variantOf 指到存在卡的变体＝照常参与（它就是角色卡）；指不到＝照常参与（fail-open）。
   const pool = cards.filter((card) =>
     target === "audio" ? card.kind === "audio" : card.kind !== "audio",
   );
@@ -776,21 +776,21 @@ export function applyCharacterCards(
     unique.push(card);
   }
 
-  // token 就地展開（用整個參與卡池解析；audio 鏈路同樣支援 `@[音频:配乐]`）。
+  // token 就地展开（用整个参与卡池解析；audio 链路同样支援 `@[音频:配乐]`）。
   const expanded = expandEntityTokens(basePrompt, unique);
   const referenced = new Set(expanded.usedCardIds);
 
   const fragments: string[] = [];
   const negatives: string[] = [];
-  // referenceScope："referenced" 且**真的有 token 命中**時才收窄到被引用的卡；
-  // 零 token → 退回全收（既有行為，不讓「沒用 token」變成靜默丟參考圖）。
+  // referenceScope："referenced" 且**真的有 token 命中**时才收窄到被引用的卡；
+  // 零 token → 退回全收（既有行为，不让「没用 token」变成静默丢参考图）。
   const narrowReferences = referenceScope === "referenced" && expanded.usedCardIds.length > 0;
   const referenceCards = narrowReferences
     ? unique.filter((card) => referenced.has(card.id))
     : unique;
   const references: CharacterCardReferenceImage[] = [];
   const seenUrls = new Set<string>();
-  // audio 鏈路沒有參考圖語義：references 一律回空。
+  // audio 链路没有参考图语义：references 一律回空。
   if (target !== "audio") {
     for (const card of referenceCards) {
       for (const ref of card.references) {
@@ -805,7 +805,7 @@ export function applyCharacterCards(
     }
   }
   for (const card of unique) {
-    // 已被 token 引用的卡：片段已在正文對應位置，不再進前綴。
+    // 已被 token 引用的卡：片段已在正文对应位置，不再进前缀。
     if (!referenced.has(card.id)) {
       const fragment = card.prompt.trim();
       if (fragment && !fragments.includes(fragment)) fragments.push(fragment);
@@ -814,7 +814,7 @@ export function applyCharacterCards(
     if (negative && !negatives.includes(negative)) negatives.push(negative);
   }
 
-  // 冪等：正文已含的片段不重複注入（apply 兩次 = 一次）。
+  // 幂等：正文已含的片段不重复注入（apply 两次 = 一次）。
   const base = expanded.prompt.trim();
   const injectable = fragments.filter((fragment) => !base.includes(fragment));
   const prefix = injectable.join("\n");
@@ -827,9 +827,9 @@ export function applyCharacterCards(
   };
 }
 
-// ─────────────────────────────────────────── 生成請求掛接
+// ─────────────────────────────────────────── 生成请求挂接
 
-/** /api/canvas/generate 請求體中與卡相關的欄位形狀。 */
+/** /api/canvas/generate 请求体中与卡相关的栏位形状。 */
 export interface CardAwareGeneratePayload {
   prompt: string;
   reference_images?: { url: string; role: ReferenceImageRole; name: string }[];
@@ -838,13 +838,13 @@ export interface CardAwareGeneratePayload {
 }
 
 /**
- * 把鎖定卡注入生成請求 payload（不改動其餘欄位）：
- *   - prompt：卡片段前綴（冪等）
- *   - reference_images：卡參考圖排最前（locked 優先——上游 5 張上限從尾部截斷，
- *     鎖定卡不可被靜默丟棄），原有參考按 url 去重後排其後
- *   - negative_prompt：合併（原有在前、卡在後，去重）
- * 無卡可注入時原樣返回同一物件（零行為漂移）。options 透傳 applyCharacterCards
- * （target 選視覺/音頻鏈路、referenceScope 選參考圖收窄）。
+ * 把锁定卡注入生成请求 payload（不改动其余栏位）：
+ *   - prompt：卡片段前缀（幂等）
+ *   - reference_images：卡参考图排最前（locked 优先——上游 5 张上限从尾部截断，
+ *     锁定卡不可被静默丢弃），原有参考按 url 去重后排其后
+ *   - negative_prompt：合并（原有在前、卡在后，去重）
+ * 无卡可注入时原样返回同一物件（零行为漂移）。options 透传 applyCharacterCards
+ * （target 选视觉/音频链路、referenceScope 选参考图收窄）。
  */
 export function applyCharacterCardsToPayload<T extends CardAwareGeneratePayload>(
   payload: T,
@@ -856,7 +856,7 @@ export function applyCharacterCardsToPayload<T extends CardAwareGeneratePayload>
   if (!applied.references.length && applied.prompt === payload.prompt && !applied.negativePrompt) return payload;
 
   const existingRefs = Array.isArray(payload.reference_images) ? payload.reference_images : [];
-  // 同 URL 以卡為準（locked 覆蓋）：手動引用撞卡圖時保留卡的角色與名稱。
+  // 同 URL 以卡为准（locked 覆盖）：手动引用撞卡图时保留卡的角色与名称。
   const cardUrls = new Set(applied.references.map((ref) => ref.url));
   const mergedRefs = [...applied.references, ...existingRefs.filter((ref) => !cardUrls.has(ref.url))];
 

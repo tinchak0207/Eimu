@@ -56,24 +56,24 @@ export interface WorkflowServiceOptions {
    */
   onDirty?: (wf: ActiveWorkflow) => void
   /**
-   * S4（2026-08-27）：整圖幣耗估價掛點（gateway 注入，同步簽名）。
-   * 用於 canvas.plan 的 cost_hint。null = 估不出（不許編數）。未注入回 null。
+   * S4（2026-08-27）：整图币耗估价挂点（gateway 注入，同步签名）。
+   * 用于 canvas.plan 的 cost_hint。null = 估不出（不许编数）。未注入回 null。
    */
   estimateGraphCoins?: (graph: WorkflowGraph) => number | null
   /**
-   * R8（2026-09-10 多鏡展開修復）：可用視頻模型動態選型掛點（gateway 注入）。
-   * 大片模板 shotN_gen 不再寫死 model=minimax-h3（該模型當前不可用），start 時
-   * 由 gateway 查 /v1/model-status 選當前可用的視頻模型回填。回 null/undefined =
-   * 掛點不可用（探測故障），回退引擎默認（與舊行為一致，submit 前仍有 F2 failover
-   * 兜底）。輪子 = index.ts 的 resolveActiveModel 同源（/v1/model-status 判活）。
+   * R8（2026-09-10 多镜展开修复）：可用视频模型动态选型挂点（gateway 注入）。
+   * 大片模板 shotN_gen 不再写死 model=minimax-h3（该模型当前不可用），start 时
+   * 由 gateway 查 /v1/model-status 选当前可用的视频模型回填。回 null/undefined =
+   * 挂点不可用（探测故障），回退引擎默认（与旧行为一致，submit 前仍有 F2 failover
+   * 兜底）。轮子 = index.ts 的 resolveActiveModel 同源（/v1/model-status 判活）。
    */
   pickDefaultVideoModel?: () => Promise<string | null>
   /**
-   * 2026-09-24 協作確認閘（collaborate 檔專屬）：批次間掛點，語義與 R9 中途閘
-   *（midBatchBudgetGate）同構——回非 null 字串＝暫停，該字串即回給呼叫端/用戶的
-   * 誠實原因；回 null＝照跑。gateway 注入的實作只認 interaction_mode === "collaborate"，
-   * auto/preset 兩檔恆回 null（護城河：全自動零新增阻塞）。
-   * 未注入（測試/舊呼叫端）＝恆 null，與舊行為逐位元一致。
+   * 2026-09-24 协作确认闸（collaborate 档专属）：批次间挂点，语义与 R9 中途闸
+   *（midBatchBudgetGate）同构——回非 null 字串＝暂停，该字串即回给呼叫端/用户的
+   * 诚实原因；回 null＝照跑。gateway 注入的实作只认 interaction_mode === "collaborate"，
+   * auto/preset 两档恒回 null（护城河：全自动零新增阻塞）。
+   * 未注入（测试/旧呼叫端）＝恒 null，与旧行为逐位元一致。
    */
   awaitingApproval?: (wf: ActiveWorkflow) => Promise<string | null>
 }
@@ -116,22 +116,22 @@ function splitIntoBatches(order: string[], graph: WorkflowGraph): string[][] {
 }
 
 /**
- * R5-B（2026-08-28）：可重試錯誤識別——poll timeout / 上游 5xx / 網絡抖動類
- * 自動退避重試；語義性失敗（缺提示詞、模型不可用、submit 4xx）不浪費重試。
- * 0920 收口：原單條正則 RETRYABLE_NODE_ERROR 併入 error-classify.ts 的單一
- * 有序表 ERROR_RULES（與人話翻譯同源同序），判定改走 isRetryableNodeError。
+ * R5-B（2026-08-28）：可重试错误识别——poll timeout / 上游 5xx / 网络抖动类
+ * 自动退避重试；语义性失败（缺提示词、模型不可用、submit 4xx）不浪费重试。
+ * 0920 收口：原单条正则 RETRYABLE_NODE_ERROR 并入 error-classify.ts 的单一
+ * 有序表 ERROR_RULES（与人话翻译同源同序），判定改走 isRetryableNodeError。
  */
 
 /**
- * R5-B/R5-D2（2026-08-29 價目表糾偏）：節點單價解析——沿連線向上游 config（≤2 層）
- * 取指定價格欄位。取數原則 = 與 /pricing 數據源同源，衝突時改代碼：
- *   - unit_price_coins（幣/張）：pixai 系 0.001（價目表權威值；/v1/models 目錄同源
- *     正確。R5-B 曾誤信 ledger 實扣 3 幣/張——真相是計費層多扣 3000 倍的 bug，
- *     另線修復，ledger 不作價格依據）。
- *   - unit_price_per_second（幣/秒）：MiniMax H3 檔位 720P = 5、1080P 見
- *     unit_price_per_second_1080p = 10（暴君價目表）。目錄對 minimax-h3 標 0.25
- *     是 RMB 混幣髒價，影片禁用目錄。
- * 圖片預設欄位行為不變；欄位參數化供影片檔位復用同一條 2 層上游解析。
+ * R5-B/R5-D2（2026-08-29 价目表纠偏）：节点单价解析——沿连线向上游 config（≤2 层）
+ * 取指定价格栏位。取数原则 = 与 /pricing 数据源同源，冲突时改代码：
+ *   - unit_price_coins（币/张）：pixai 系 0.001（价目表权威值；/v1/models 目录同源
+ *     正确。R5-B 曾误信 ledger 实扣 3 币/张——真相是计费层多扣 3000 倍的 bug，
+ *     另线修复，ledger 不作价格依据）。
+ *   - unit_price_per_second（币/秒）：MiniMax H3 档位 720P = 5、1080P 见
+ *     unit_price_per_second_1080p = 10（暴君价目表）。目录对 minimax-h3 标 0.25
+ *     是 RMB 混币脏价，影片禁用目录。
+ * 图片预设栏位行为不变；栏位参数化供影片档位复用同一条 2 层上游解析。
  */
 export function resolveNodeUnitPrice(node: WorkflowNode, graph: WorkflowGraph, field = "unit_price_coins"): number | null {
   const self = node.metadata[field]
@@ -196,9 +196,9 @@ export function resolveVideoPerSecond(
   return tier === "1080p" ? 10 : 5
 }
 /**
- * R5-D2：影片檔位探測——quality 欄位（節點自身或上游 config ≤2 層；index.ts 提交
- * 視頻時原樣透傳 cfg.quality）含 "1080" → 1080P 檔；含 "720" 或缺省 → 720P 檔
- *（保守取低檔）。resolution/definition 欄位同名同判。
+ * R5-D2：影片档位探测——quality 栏位（节点自身或上游 config ≤2 层；index.ts 提交
+ * 视频时原样透传 cfg.quality）含 "1080" → 1080P 档；含 "720" 或缺省 → 720P 档
+ *（保守取低档）。resolution/definition 栏位同名同判。
  */
 function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1080p" {
   const scan = (meta: Record<string, unknown>): string | null => {
@@ -233,7 +233,7 @@ function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1
   return "720p"
 }
 
-/** 餘額解析（與 gateway fetchBalance/extractBalance 同構：balance_coins/balance/coins/credit，遞歸 data）。 */
+/** 余额解析（与 gateway fetchBalance/extractBalance 同构：balance_coins/balance/coins/credit，递归 data）。 */
 function extractBalanceLocal(data: unknown): number | null {
   if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>
@@ -251,9 +251,9 @@ export function resolveNodeShot(node: { kind: string; metadata: Record<string, u
 }
 
 /**
- * R5-D2：image 節點模型名解析——自身 metadata.model → 直接上游 config 的 model
- *（引擎對缺 model 的 image 節點用 pixai-tsubaki2，index.ts submitWorkflowNode
- * 文檔行為）；取不到回 null（= 走引擎 pixai 預設）。
+ * R5-D2：image 节点模型名解析——自身 metadata.model → 直接上游 config 的 model
+ *（引擎对缺 model 的 image 节点用 pixai-tsubaki2，index.ts submitWorkflowNode
+ * 文档行为）；取不到回 null（= 走引擎 pixai 预设）。
  */
 function resolveImageModelName(node: WorkflowNode, graph: WorkflowGraph): string | null {
   if (typeof node.metadata.model === "string" && node.metadata.model) return node.metadata.model
@@ -269,7 +269,7 @@ function resolveImageModelName(node: WorkflowNode, graph: WorkflowGraph): string
 
 export class WorkflowService {
   private workflows = new Map<string, ActiveWorkflow>()
-  // F1（2026-08-31）：執行循環去重集合——generate() 重入守衛與 finally 清理用。
+  // F1（2026-08-31）：执行循环去重集合——generate() 重入守卫与 finally 清理用。
   private generateLoops = new Set<string>()
   constructor(private opts: WorkflowServiceOptions) {}
 
@@ -293,9 +293,9 @@ export class WorkflowService {
   }
 
   /**
-   * R5-B：節點執行 + 自動重試——可重試錯誤（timeout/poll 5xx/網絡）退避 5s、15s
-   * 重試 2 次，重試耗盡才判 error；不可重試錯誤（缺提示詞/模型不可用/submit 4xx）
-   * 立即返回不浪費重試。每步 console.log 留 journal 路徑證據。
+   * R5-B：节点执行 + 自动重试——可重试错误（timeout/poll 5xx/网络）退避 5s、15s
+   * 重试 2 次，重试耗尽才判 error；不可重试错误（缺提示词/模型不可用/submit 4xx）
+   * 立即返回不浪费重试。每步 console.log 留 journal 路径证据。
    */
   private async runNodeWithRetry(node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph): Promise<WorkflowNodeResult> {
     const maxRetries = 2
@@ -325,13 +325,13 @@ export class WorkflowService {
   }
 
   /**
-   * R5-B/R5-D2：本地估價——image 節點取 config 的 unit_price_coins（pixai 系 0.001
-   * 幣/張 = 價目表同源值；5 張 ≈ 0.005 幣是正確顯示）；無 config 價錨時解析模型：
-   * 缺 model（引擎預設 pixai-tsubaki2）或 pixai 系 → 價目表 0.001，其他模型無本地錨
-   * → null（純圖工作流由目錄掛點同源補價）。video 節點按 quality 檔位取
-   * unit_price_per_second（720P = 5 幣/秒預設、1080P = 10 幣/秒），秒數取節點/上游
-   * config 的 duration_seconds，取不到按保守預設 5s。0.05 幣/秒舊口徑與目錄髒價
-   *（minimax-h3 被標 0.25，RMB 混幣）一律禁用；解析不到錨點 → null（寧缺勿編）。
+   * R5-B/R5-D2：本地估价——image 节点取 config 的 unit_price_coins（pixai 系 0.001
+   * 币/张 = 价目表同源值；5 张 ≈ 0.005 币是正确显示）；无 config 价锚时解析模型：
+   * 缺 model（引擎预设 pixai-tsubaki2）或 pixai 系 → 价目表 0.001，其他模型无本地锚
+   * → null（纯图工作流由目录挂点同源补价）。video 节点按 quality 档位取
+   * unit_price_per_second（720P = 5 币/秒预设、1080P = 10 币/秒），秒数取节点/上游
+   * config 的 duration_seconds，取不到按保守预设 5s。0.05 币/秒旧口径与目录脏价
+   *（minimax-h3 被标 0.25，RMB 混币）一律禁用；解析不到锚点 → null（宁缺勿编）。
    */
   estimateGraphLocalCoins(graph: WorkflowGraph): number | null {
     let total = 0
@@ -340,18 +340,18 @@ export class WorkflowService {
       if (n.kind === "text" || n.kind === "config") continue
       any = true
       if (n.kind === "video") {
-        // R5-D2：檔位價——1080P 只認 unit_price_per_second_1080p（無檔位價不低報，
-        // 回 null）；720P（含缺省）認 unit_price_per_second。
+        // R5-D2：档位价——1080P 只认 unit_price_per_second_1080p（无档位价不低报，
+        // 回 null）；720P（含缺省）认 unit_price_per_second。
         const perSec =
           videoQualityTier(n, graph) === "1080p"
             ? resolveNodeUnitPrice(n, graph, "unit_price_per_second_1080p")
             : resolveNodeUnitPrice(n, graph, "unit_price_per_second")
-        if (perSec === null) return null // 無錨點不編數（0.05 舊口徑已廢）
+        if (perSec === null) return null // 无锚点不编数（0.05 旧口径已废）
         const selfSecs = n.metadata.duration_seconds
         const secs =
           typeof selfSecs === "number" && selfSecs > 0
             ? selfSecs
-            : (resolveNodeUnitPrice(n, graph, "duration_seconds") ?? 5) // 保守預設 5s
+            : (resolveNodeUnitPrice(n, graph, "duration_seconds") ?? 5) // 保守预设 5s
         total += perSec * secs
         continue
       }
@@ -361,21 +361,21 @@ export class WorkflowService {
         total += anchored
         continue
       }
-      // R5-D2：無價錨——模型歸屬判斷（見 resolveImageModelName）
+      // R5-D2：无价锚——模型归属判断（见 resolveImageModelName）
       const model = resolveImageModelName(n, graph)
       if (model && !model.startsWith("pixai")) return null
-      total += 0.001 // 缺 model = 引擎預設 pixai-tsubaki2；pixai 系 = 價目表 0.001 幣/張
+      total += 0.001 // 缺 model = 引擎预设 pixai-tsubaki2；pixai 系 = 价目表 0.001 币/张
     }
     return any ? Math.round(total * 1e6) / 1e6 : null
   }
 
   /**
-   * R5-B/R5-D2：全圖估價——本地錨點（unit_price_coins / unit_price_per_second，
-   * 價目表同源）優先。含 video 節點的圖禁用 gateway 目錄回落：video 舊口徑
-   * 0.05 幣/秒與目錄髒價（minimax-h3 標 0.25，RMB 混幣）都會從回落漏進來——
-   * 寧可 null 不回落髒價。純圖工作流本地估不出才回落 gateway 目錄掛點
-   *（目錄圖片價與 /pricing 同源正確；seedance 2.0 是視頻模型，分類歸屬由域 A 修，
-   * 本估價不把它當圖片模型——無 unit_price 錨點即 null）。
+   * R5-B/R5-D2：全图估价——本地锚点（unit_price_coins / unit_price_per_second，
+   * 价目表同源）优先。含 video 节点的图禁用 gateway 目录回落：video 旧口径
+   * 0.05 币/秒与目录脏价（minimax-h3 标 0.25，RMB 混币）都会从回落漏进来——
+   * 宁可 null 不回落脏价。纯图工作流本地估不出才回落 gateway 目录挂点
+   *（目录图片价与 /pricing 同源正确；seedance 2.0 是视频模型，分类归属由域 A 修，
+   * 本估价不把它当图片模型——无 unit_price 锚点即 null）。
    */
   estimateTotalCoins(graph: WorkflowGraph): number | null {
     const local = this.estimateGraphLocalCoins(graph)
@@ -385,12 +385,12 @@ export class WorkflowService {
   }
 
   /**
-   * R5-B：開工前餘額預檢——/v1/quota（QUOTA_URL env，先例=gateway fetchBalance；
-   * 2026-08-28 實測 200 {balance_coins}）。餘額 < 預算 → 拒絕開工（帶缺口數字），
-   * 不燒到一半才死。預算估不出或餘額端點故障 → fail-open 放行（預檢故障不卡死工作流）。
-   * 回 null = 放行；回字串 = 拒絕原因（帶缺口數字）。
+   * R5-B：开工前余额预检——/v1/quota（QUOTA_URL env，先例=gateway fetchBalance；
+   * 2026-08-28 实测 200 {balance_coins}）。余额 < 预算 → 拒绝开工（带缺口数字），
+   * 不烧到一半才死。预算估不出或余额端点故障 → fail-open 放行（预检故障不卡死工作流）。
+   * 回 null = 放行；回字串 = 拒绝原因（带缺口数字）。
    */
-  /** R9：讀 owner 餘額（/v1/quota，幣）。端點缺失/故障/解析失敗 = null，fail-open 姿勢由呼叫方定。 */
+  /** R9：读 owner 余额（/v1/quota，币）。端点缺失/故障/解析失败 = null，fail-open 姿势由呼叫方定。 */
   private async ownerBalance(wf: ActiveWorkflow): Promise<number | null> {
     const owner = wf.owner as { apiKey?: string } | null | undefined
     const key = owner?.apiKey
@@ -408,11 +408,11 @@ export class WorkflowService {
   }
 
   /**
-   * R9：批間餘額閘——對「尚未成功的可執行節點」重估總價，餘額不足即暫停。
-   * commit 在批次之間落帳，preflight 只看開工那一刻，攔不住「跑到一半扣穿」
-   *（2026-08-29 實錘：agent 影片批量淨扣 145 幣把餘額打成 -9.11 無人攔）。
-   * 回 null = 放行；回字串 = 暫停原因（帶缺口數字，經 generate 拒絕通道轉發用戶）。
-   * 已成功節點保留；充值後重新 generate 沿用 resume 語義只跑剩餘部分。
+   * R9：批间余额闸——对「尚未成功的可执行节点」重估总价，余额不足即暂停。
+   * commit 在批次之间落帐，preflight 只看开工那一刻，拦不住「跑到一半扣穿」
+   *（2026-08-29 实锤：agent 影片批量净扣 145 币把余额打成 -9.11 无人拦）。
+   * 回 null = 放行；回字串 = 暂停原因（带缺口数字，经 generate 拒绝通道转发用户）。
+   * 已成功节点保留；充值后重新 generate 沿用 resume 语义只跑剩余部分。
    */
   private async midBatchBudgetGate(wf: ActiveWorkflow): Promise<string | null> {
     const pending = wf.graph.nodes.filter(
@@ -458,18 +458,18 @@ export class WorkflowService {
   }
 
   /**
-   * R8（2026-09-10 多鏡展開修復）：async 入口。shotN_gen 的 model 動態選型
-   * （pickDefaultVideoModel 掛點查 /v1/model-status 判活）需要 await——舊 start
-   * 是同步函數，gateway 路由「error in r」守衛對 Promise 誤判。拆成：
-   *   start()          = async 包裝（選模型，5s 超時 fail-open 回 null）→ startSync()
-   *   startSync(...)   = 原有全部邏輯（驗證/展開/預設/duration 對齊/建 wf），同步純淨。
-   * content shot 的 duration_seconds 對齊在 startSync 內做（text 節點 shot JSON
-   * 解析後，同鏈回寫下游 config 的 duration_seconds——agent 傳 10s 就 10s，別回 5s）。
+   * R8（2026-09-10 多镜展开修复）：async 入口。shotN_gen 的 model 动态选型
+   * （pickDefaultVideoModel 挂点查 /v1/model-status 判活）需要 await——旧 start
+   * 是同步函数，gateway 路由「error in r」守卫对 Promise 误判。拆成：
+   *   start()          = async 包装（选模型，5s 超时 fail-open 回 null）→ startSync()
+   *   startSync(...)   = 原有全部逻辑（验证/展开/预设/duration 对齐/建 wf），同步纯净。
+   * content shot 的 duration_seconds 对齐在 startSync 内做（text 节点 shot JSON
+   * 解析后，同链回写下游 config 的 duration_seconds——agent 传 10s 就 10s，别回 5s）。
    */
   async start(templateId: string | null, content: TemplateContent = {}, owner?: unknown): Promise<{ workflowId: string } | { error: string }> {
     let videoModel: string | null = null
     if (templateId && this.opts.pickDefaultVideoModel && getWorkflowTemplate(templateId)?.multiShot) {
-      // fail-open：探測不可達/逾時 → null → startSync 用引擎默認（submit 前仍有 F2 failover）
+      // fail-open：探测不可达/逾时 → null → startSync 用引擎默认（submit 前仍有 F2 failover）
       videoModel = await Promise.race([
         this.opts.pickDefaultVideoModel().catch(() => null),
         new Promise<null>((r) => setTimeout(() => r(null), 5000)),
@@ -479,11 +479,11 @@ export class WorkflowService {
   }
 
   /**
-   * 0920 暴君裁定（壓縮垃圾時間）：骨架上畫布路徑**禁**走視頻模型探測——
-   * start() 對 multiShot 模板會 await pickDefaultVideoModel（上限 5s fail-open），
-   * 而那 5 秒對「讓用戶看見骨架」零貢獻（節點 metadata.model 由 config 節點
-   * defaults 或 workflow_generate 時的動態選型接手，startSync 的 videoModel 只是
-   * 建構期預填）。Jev 判定是毫秒級，骨架也該是毫秒級。
+   * 0920 暴君裁定（压缩垃圾时间）：骨架上画布路径**禁**走视频模型探测——
+   * start() 对 multiShot 模板会 await pickDefaultVideoModel（上限 5s fail-open），
+   * 而那 5 秒对「让用户看见骨架」零贡献（节点 metadata.model 由 config 节点
+   * defaults 或 workflow_generate 时的动态选型接手，startSync 的 videoModel 只是
+   * 建构期预填）。Jev 判定是毫秒级，骨架也该是毫秒级。
    */
   startFast(templateId: string | null, content: TemplateContent = {}, owner?: unknown): { workflowId: string } | { error: string } {
     return this.startSync(templateId, content, owner, null)
@@ -546,10 +546,10 @@ export class WorkflowService {
         if (params.aspect_ratio && typeof n.metadata.size !== "string") n.metadata.size = params.aspect_ratio
       }
     }
-    // R8（2026-09-10 duration 對齊）：同鏈 config（shotN → shotN_gen）缺
-    // duration_seconds 時，從上游 shotN text 節點的 shot JSON / duration_seconds
-    // 回寫——agent 傳 10s 就 10s，別回 5s。舊版 config 寫死 duration_seconds: 5
-    // 蓋住 agent 計劃時長（模板 defaults 已同步拔除），此處補齊回寫鏈。
+    // R8（2026-09-10 duration 对齐）：同链 config（shotN → shotN_gen）缺
+    // duration_seconds 时，从上游 shotN text 节点的 shot JSON / duration_seconds
+    // 回写——agent 传 10s 就 10s，别回 5s。旧版 config 写死 duration_seconds: 5
+    // 盖住 agent 计划时长（模板 defaults 已同步拔除），此处补齐回写链。
     for (const c of graph.connections) {
       const fromNode = graph.nodes.find((n) => n.id === c.from)
       const toNode = graph.nodes.find((n) => n.id === c.to)
@@ -708,15 +708,15 @@ export class WorkflowService {
     return { ok: true }
   }
 
-  /** H6：路由層同步預檢用——該工作流是否已有 generate 循環在跑。 */
+  /** H6：路由层同步预检用——该工作流是否已有 generate 循环在跑。 */
   isGenerating(workflowId: string): boolean {
     return this.generateLoops.has(workflowId)
   }
 
   /** 执行工作流。emit canvas 事件；text/config 节点视为完成，image/video 调 runNode。 */
   async generate(workflowId: string): Promise<{ ok: boolean; status: string }> {
-    // F1（2026-08-31）重入守衛：同一工作流已有執行循環在跑時拒絕二次 generate，
-    // 防「自動續跑 + 手動 rerun / 重複 start」並發雙跑雙扣費。finally 保證清理。
+    // F1（2026-08-31）重入守卫：同一工作流已有执行循环在跑时拒绝二次 generate，
+    // 防「自动续跑 + 手动 rerun / 重复 start」并发双跑双扣费。finally 保证清理。
     if (this.generateLoops.has(workflowId)) return { ok: false, status: "already running" }
     this.generateLoops.add(workflowId)
     try {
@@ -729,7 +729,7 @@ export class WorkflowService {
   private async generateInner(workflowId: string): Promise<{ ok: boolean; status: string }> {
     const wf = this.workflows.get(workflowId)
     if (!wf) return { ok: false, status: "workflow not found" }
-    // R5-B：餘額預檢在置 running 之前——拒絕開工時工作流狀態不動、一幣不燒。
+    // R5-B：余额预检在置 running 之前——拒绝开工时工作流状态不动、一币不烧。
     const budgetBlocked = await this.preflightBudget(wf)
     if (budgetBlocked) return { ok: false, status: budgetBlocked }
     wf.status = "running"
@@ -766,8 +766,8 @@ export class WorkflowService {
     // 逐节点执行（同层并行：按依赖深度分批，同批节点互不依赖、Promise.all 同时飞行，
     // 批间串行——下游等上游；批内 generating/updated 事件仍按 order 原序发射，画布顺序稳定）
     const upstreamContent = new Map<string, string>()
-    // R5-B：重入恢復語義——已 success 且有成果的節點直接沿用其產物，絕不重跑重置
-    //（R5 23:07 實錄：重試整鏈把先前成功節點重置為 error，畫布倒退）。失敗/待跑節點照常執行。
+    // R5-B：重入恢复语义——已 success 且有成果的节点直接沿用其产物，绝不重跑重置
+    //（R5 23:07 实录：重试整链把先前成功节点重置为 error，画布倒退）。失败/待跑节点照常执行。
     let reusedCount = 0
     for (const [id, content] of Object.entries(wf.nodeContent)) {
       if (wf.nodeStatus[id] === "success" && content) {
@@ -783,25 +783,25 @@ export class WorkflowService {
         const node = wf.graph.nodes.find((n) => n.id === nodeId)
         if (!node) continue
         if (node.kind === "text" || node.kind === "config") continue // audio/film 不跳过：执行由 runNode 诚实回报上游可用性
-        if (wf.nodeStatus[nodeId] === "success" && wf.nodeContent[nodeId]) continue // R5-B 恢復語義：沿用既有成果，不重跑成功節點
+        if (wf.nodeStatus[nodeId] === "success" && wf.nodeContent[nodeId]) continue // R5-B 恢复语义：沿用既有成果，不重跑成功节点
         executableIds.push(nodeId)
       }
       if (!executableIds.length) continue
-      // R9 中途閘：批間重查餘額（詳見 midBatchBudgetGate 註）。
+      // R9 中途闸：批间重查余额（详见 midBatchBudgetGate 注）。
       const pausedReason = await this.midBatchBudgetGate(wf)
       if (pausedReason) {
         wf.status = "paused_insufficient_quota"
         this.dirty(wf)
         return { ok: false, status: pausedReason }
       }
-      // 2026-09-24 協作確認閘（collaborate 檔專屬）：與上閘同構的批間掛點。
-      // 順序刻意在餘額閘之後——餘額不足是系統安全（一幣不燒），優先於人工確認。
-      // 掛點未注入＝恆不暫停（auto/preset 與測試呼叫端逐位元舊行為）。
+      // 2026-09-24 协作确认闸（collaborate 档专属）：与上闸同构的批间挂点。
+      // 顺序刻意在余额闸之后——余额不足是系统安全（一币不烧），优先于人工确认。
+      // 挂点未注入＝恒不暂停（auto/preset 与测试呼叫端逐位元旧行为）。
       if (this.opts.awaitingApproval) {
         const approvalReason = await this.opts.awaitingApproval(wf)
         if (approvalReason) {
           wf.status = "paused_awaiting_approval"
-          this.dirty(wf) // 暫停落盤：重啟後回灌停在暫停態，不偽造還在跑
+          this.dirty(wf) // 暂停落盘：重启后回灌停在暂停态，不伪造还在跑
           return { ok: false, status: approvalReason }
         }
       }
@@ -842,15 +842,15 @@ export class WorkflowService {
           })
         }
       }
-      // R5-B：節點失敗不再中斷後續批——下游節點照跑（跳過失敗節點繼續下游），
-      // 下游能否成功由其餘上游/自身條件決定；終態由可執行節點統計判定（partial 語義）。
+      // R5-B：节点失败不再中断后续批——下游节点照跑（跳过失败节点继续下游），
+      // 下游能否成功由其余上游/自身条件决定；终态由可执行节点统计判定（partial 语义）。
     }
 
-    // R5-B：三態終判——無 error = success；有 error 有 success = partial（成功成果保留）；
-    // 全 error = failed。統計只看可執行節點（text/config 恆 success，不參與判定）。
-    // R10（2026-08-31）：此三態只判定 execution 維度（節點是否跑完），不代表交付完整性
-    //（宣告4鏡頭只跑成1鏡頭時，此處仍會是 success——delivery 維度的完整性檢查見 status() 的
-    // delivery 陣列，兩個維度刻意分離，不在此處混入）。
+    // R5-B：三态终判——无 error = success；有 error 有 success = partial（成功成果保留）；
+    // 全 error = failed。统计只看可执行节点（text/config 恒 success，不参与判定）。
+    // R10（2026-08-31）：此三态只判定 execution 维度（节点是否跑完），不代表交付完整性
+    //（宣告4镜头只跑成1镜头时，此处仍会是 success——delivery 维度的完整性检查见 status() 的
+    // delivery 阵列，两个维度刻意分离，不在此处混入）。
     const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
     const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
     const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length
@@ -863,10 +863,10 @@ export class WorkflowService {
   status(workflowId: string) {
     const wf = this.workflows.get(workflowId)
     if (!wf) return null
-    // R10（2026-08-31）交付誠實：final_cut（film 節點）存在時，統計其上游 video
-    // 節點的宣告數 vs 實際成功數，暴露「execution success 但 delivery 不完整」
-    // 這類假成功（本次事故：宣告4鏡頭實得1鏡頭，status 仍回 success）。不改變既有
-    // status 三態語義（execution 維度），只新增只讀統計，向後兼容。
+    // R10（2026-08-31）交付诚实：final_cut（film 节点）存在时，统计其上游 video
+    // 节点的宣告数 vs 实际成功数，暴露「execution success 但 delivery 不完整」
+    // 这类假成功（本次事故：宣告4镜头实得1镜头，status 仍回 success）。不改变既有
+    // status 三态语义（execution 维度），只新增只读统计，向后兼容。
     const filmNodes = wf.graph.nodes.filter((n) => n.kind === "film")
     const delivery = filmNodes.map((filmNode) => {
       const upstreamVideoIds = wf.graph.connections.filter((c) => c.to === filmNode.id).map((c) => c.from)
@@ -908,9 +908,9 @@ export class WorkflowService {
   private emitNodeDelta(wf: ActiveWorkflow, node: WorkflowNode): void {
     if (wf.emittedNodes.has(node.id)) return
     wf.emittedNodes.add(node.id)
-    // 泳道座標：81 节点重算是微秒级，幂等安全（也可在 emitGraph 算一次传入，取简单）。
+    // 泳道座标：81 节点重算是微秒级，幂等安全（也可在 emitGraph 算一次传入，取简单）。
     const pos = computeSwimlanePositions(wf.graph.nodes, wf.graph.connections).get(node.id) ?? { x: 0, y: 0 }
-    // 衍生卡（pipelineCard tool/note/gate 或 role 含 __）用小尺寸；主節點尺寸對齊 SWIM_CARD_W=300，徹底防止第 0 列與第 1 列卡片水平重疊（440 擠佔 360）。
+    // 衍生卡（pipelineCard tool/note/gate 或 role 含 __）用小尺寸；主节点尺寸对齐 SWIM_CARD_W=300，彻底防止第 0 列与第 1 列卡片水平重叠（440 挤占 360）。
     const isDerived =
       (typeof node.metadata.pipelineCard === "string" && ["tool", "note", "gate"].includes(node.metadata.pipelineCard as string)) ||
       node.role.includes("__")
@@ -934,13 +934,13 @@ export class WorkflowService {
     if (!wf.planEmitted) {
       wf.planEmitted = true
       // S4 规格2（2026-08-27）：cost_hint 从 null 改为真实估算（币）。
-      // R5-D2（2026-08-29 價目表糾偏）：估算鏈全走本地錨點（與 /pricing 同源）——
-      // image = unit_price_coins（pixai 系 0.001 幣/張）/ video = 檔位秒價 × 秒
-      //（MiniMax H3：720P 5 幣/秒、1080P 10 幣/秒，預設時長 5s）；0.05 幣/秒舊
-      // 口徑與目錄 0.25 髒價已廢。取不到錨點保持 null（不許編數）。
+      // R5-D2（2026-08-29 价目表纠偏）：估算链全走本地锚点（与 /pricing 同源）——
+      // image = unit_price_coins（pixai 系 0.001 币/张）/ video = 档位秒价 × 秒
+      //（MiniMax H3：720P 5 币/秒、1080P 10 币/秒，预设时长 5s）；0.05 币/秒旧
+      // 口径与目录 0.25 脏价已废。取不到锚点保持 null（不许编数）。
       let costHint: number | null = null
       try {
-        // R5-D2：本地錨點優先；目錄僅在純圖且無本地錨點時回落（video 圖禁回落）。
+        // R5-D2：本地锚点优先；目录仅在纯图且无本地锚点时回落（video 图禁回落）。
         costHint = this.estimateTotalCoins(wf.graph)
       } catch {
         costHint = null // 估价故障不挡工作流搭建
@@ -1049,10 +1049,10 @@ export class WorkflowService {
           })
         }
       }
-      // R5-B：同 generate——節點失敗不中斷後續批（partial 語義）
+      // R5-B：同 generate——节点失败不中断后续批（partial 语义）
     }
 
-    // R5-B：三態終判（與 generate 同口徑）——partial 時成功節點成果原樣保留
+    // R5-B：三态终判（与 generate 同口径）——partial 时成功节点成果原样保留
     const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
     const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
     const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length
@@ -1063,22 +1063,22 @@ export class WorkflowService {
   }
 }
 
-// ── 泳道座標（2026-09-21 分層重排）─────────────────────────────────────────
-// 舊版「每主節點獨佔一行、衍生卡向右排」會讓主鏈長距離跳線（feature_film 的
-// script→shot1 跨 10 行、char_view1→shot1_gen 跨 8 行）縱貫切穿整列卡片。
-// 新版改 DAG 分層：主鏈按最長路徑深度分欄（欄間距＝一跳），欄內 barycenter
-// 排序壓交叉；每個工序的衍生卡（工具/配方/門禁）垂直掛在該工序正下方，
-// 行內串聯線走乾淨垂直脊柱。所有主鏈連線＝相鄰欄位短跳線，零長距離貫穿。
+// ── 泳道座标（2026-09-21 分层重排）─────────────────────────────────────────
+// 旧版「每主节点独占一行、衍生卡向右排」会让主链长距离跳线（feature_film 的
+// script→shot1 跨 10 行、char_view1→shot1_gen 跨 8 行）纵贯切穿整列卡片。
+// 新版改 DAG 分层：主链按最长路径深度分栏（栏间距＝一跳），栏内 barycenter
+// 排序压交叉；每个工序的衍生卡（工具/配方/门禁）垂直挂在该工序正下方，
+// 行内串联线走干净垂直脊柱。所有主链连线＝相邻栏位短跳线，零长距离贯穿。
 const SWIM_CARD_W = 300 // 与前端 CARD_W 同值
-const SWIM_MAIN_H = 220 // 主節點高
-const SWIM_GAP_X = 80 // 欄間距（一跳連線的呼吸空間）
+const SWIM_MAIN_H = 220 // 主节点高
+const SWIM_GAP_X = 80 // 栏间距（一跳连线的呼吸空间）
 const SWIM_DERIVED_H = 150 // 衍生卡高
-const SWIM_DERIVED_GAP = 24 // 衍生卡間距
-const SWIM_BLOCK_GAP_Y = 60 // 同欄相鄰工序塊的間距
+const SWIM_DERIVED_GAP = 24 // 衍生卡间距
+const SWIM_BLOCK_GAP_Y = 60 // 同栏相邻工序块的间距
 
 const isDerivedRole = (role: string) => /__tool_\d+$/.test(role) || /__note_\d+$/.test(role) || /__gate$/.test(role)
 
-// 导出供 E2E 断言用（2026-09-20 Route A 验收；09-21 簽名加 connections 參數）。
+// 导出供 E2E 断言用（2026-09-20 Route A 验收；09-21 签名加 connections 参数）。
 export function computeSwimlanePositions(
   nodes: { id: string; role: string }[],
   connections: { from: string; to: string }[] = [],
@@ -1091,7 +1091,7 @@ export function computeSwimlanePositions(
 
   const mains = nodes.filter((n) => !isDerivedRole(n.role))
 
-  // 衍生卡按 role 前綴歸到父工序（nodes 陣列序＝tools→notes→gate 的鋪卡序）
+  // 衍生卡按 role 前缀归到父工序（nodes 阵列序＝tools→notes→gate 的铺卡序）
   const derivedByParent = new Map<string, { id: string }[]>()
   const mainByRole = new Map(mains.map((n) => [n.role, n]))
   for (const n of nodes) {
@@ -1103,7 +1103,7 @@ export function computeSwimlanePositions(
     derivedByParent.set(parentRole, list)
   }
 
-  // 最長路徑分層（只看主鏈連線；衍生卡不在 depth 表裡，自動被排除）
+  // 最长路径分层（只看主链连线；衍生卡不在 depth 表里，自动被排除）
   const depth = new Map<string, number>()
   for (const n of mains) depth.set(n.id, 0)
   for (let iter = 0; iter < mains.length; iter++) {
@@ -1124,7 +1124,7 @@ export function computeSwimlanePositions(
   const columns: { id: string; role: string }[][] = Array.from({ length: maxDepth + 1 }, () => [])
   for (const n of mains) columns[depth.get(n.id) ?? 0].push(n)
 
-  // barycenter：向左欄看齊排序，壓低跨欄連線交叉（無上游者保持原序）
+  // barycenter：向左栏看齐排序，压低跨栏连线交叉（无上游者保持原序）
   const upstreamOf = new Map<string, string[]>()
   for (const c of conns) {
     if (depth.has(c.from) && depth.has(c.to)) {
@@ -1143,7 +1143,7 @@ export function computeSwimlanePositions(
     columns[d] = scored.map((s) => s.n)
   }
 
-  // 座標：欄 x 按深度推進；欄內工序塊（主節點＋下方衍生脊柱）垂直堆疊
+  // 座标：栏 x 按深度推进；栏内工序块（主节点＋下方衍生脊柱）垂直堆叠
   const blockH = (role: string) => {
     const derived = derivedByParent.get(role) ?? []
     return derived.length

@@ -7,8 +7,8 @@ import { HistoryCard } from "./HistoryCard";
 import { HistorySkeleton } from "./HistorySkeleton";
 
 /**
- * 記錄類型檔位；"all" 不過濾。與 HistoryFilterBar 的 Chip 一一對應，
- * 值域由 history-types 的 HistoryEntryKind（交付物註冊表 ∪ 非交付種類）推導，不再手寫聯集。
+ * 记录类型档位；"all" 不过滤。与 HistoryFilterBar 的 Chip 一一对应，
+ * 值域由 history-types 的 HistoryEntryKind（交付物注册表 ∪ 非交付种类）推导，不再手写联集。
  */
 export type HistoryEntryKindFilter = "all" | HistoryEntryKind;
 

@@ -1,12 +1,12 @@
 "use client";
 
-// NodeInspectBody —— 語義縮放 LOD 3：卡片正文區放大後露出的「內部參數」（2026-10-01）。
+// NodeInspectBody —— 语义缩放 LOD 3：卡片正文区放大后露出的「内部参数」（2026-10-01）。
 //
-// 不是另一張卡：標題列、類型色頂線、徽章、玻璃材質都沿用原卡；只有正文區換內容。
-// 視覺詞彙與 StoryboardShotBody 同源（段落眉標 11px uppercase tracking-[0.18em]、欄名 12px、值 13px、
-// 藍色膠囊），但字級用 em 綁在 .lod-inspect 的 font-size＝13px×(1/k) 上——螢幕上永遠是 13px，
-// 放大＝同一張卡在世界座標裡裝得下更多行（語義縮放）。HTML 文字會隨畫布停手後重新柵格化，不糊。
-// 放不下的行數如實顯示「还有 N 项 · 继续放大」。
+// 不是另一张卡：标题列、类型色顶线、徽章、玻璃材质都沿用原卡；只有正文区换内容。
+// 视觉词汇与 StoryboardShotBody 同源（段落眉标 11px uppercase tracking-[0.18em]、栏名 12px、值 13px、
+// 蓝色胶囊），但字级用 em 绑在 .lod-inspect 的 font-size＝13px×(1/k) 上——萤幕上永远是 13px，
+// 放大＝同一张卡在世界座标里装得下更多行（语义缩放）。HTML 文字会随画布停手后重新栅格化，不糊。
+// 放不下的行数如实显示「还有 N 项 · 继续放大」。
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight, Clapperboard, Cpu, FileText, History, PlugZap, SlidersHorizontal, Sparkles, Timer, Wrench, type LucideIcon } from "lucide-react";
@@ -73,7 +73,7 @@ function Row({ row, hideLabel = false }: { row: InspectRow; hideLabel?: boolean 
 type FieldRow = Extract<InspectRow, { kind: "field" }>;
 type Block = { kind: "grid"; rows: FieldRow[] } | { kind: "row"; row: InspectRow };
 
-/** 相鄰的短欄位（值 ≤ 18 字）併成一個網格塊；長值與文字段保持整行。 */
+/** 相邻的短栏位（值 ≤ 18 字）并成一个网格块；长值与文字段保持整行。 */
 function groupRows(rows: readonly InspectRow[]): Block[] {
   const blocks: Block[] = [];
   for (const row of rows) {
@@ -92,7 +92,7 @@ export function NodeInspectBody({
   onOpen,
 }: {
   sections: InspectSection[];
-  /** 量化後的縮放倍率：變了才重算「還有 N 項」。 */
+  /** 量化后的缩放倍率：变了才重算「还有 N 项」。 */
   zoomKey: number;
   onOpen?: () => void;
 }) {
@@ -112,13 +112,13 @@ export function NodeInspectBody({
 
   return (
     <div ref={ref} className="lod-inspect absolute inset-0 overflow-hidden px-[0.9em] pb-[2.4em] pt-[0.7em]">
-      {/* 段落之間的導軌：一條細線把各段串起來（與透析面板同一語彙） */}
+      {/* 段落之间的导轨：一条细线把各段串起来（与透析面板同一语汇） */}
       <div className="pointer-events-none absolute bottom-[2.4em] left-[1.45em] top-[1.3em] w-px bg-gradient-to-b from-ios-blue/30 via-black/[0.08] to-transparent" aria-hidden="true" />
       <div className="space-y-[0.85em]">
         {sections.map((section) => {
           const Icon = ICON[section.icon];
           const only = section.rows.length === 1 ? section.rows[0] : null;
-          // 單值段落：值直接接在段名後（「模型  seedream-4」），不再多佔一行。
+          // 单值段落：值直接接在段名后（「模型  seedream-4」），不再多占一行。
           const inline = only && only.kind === "field" ? only : null;
           const blocks = inline ? [] : groupRows(section.rows);
           return (
@@ -139,7 +139,7 @@ export function NodeInspectBody({
                   <span className="block text-[0.846em] font-medium uppercase leading-[1.4] tracking-[0.18em] text-muted-foreground/70">{section.title}</span>
                   {blocks.map((block, i) =>
                     block.kind === "grid" ? (
-                      // 連續的短欄位排成網格（欄名在上、值在下），同一張卡放得下更多參數。
+                      // 连续的短栏位排成网格（栏名在上、值在下），同一张卡放得下更多参数。
                       <div key={`${section.key}-g${i}`} className="grid gap-x-[0.9em] gap-y-[0.35em]" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(7.5em, 1fr))" }}>
                         {block.rows.map((row, j) => (
                           <div key={j} data-inspect-row className="min-w-0">
@@ -162,7 +162,7 @@ export function NodeInspectBody({
         {sections.length === 0 && <p className="text-muted-foreground">这个节点还没有可展示的参数</p>}
       </div>
 
-      {/* 底部：溢出淡出＋如實計數＋透析入口 */}
+      {/* 底部：溢出淡出＋如实计数＋透析入口 */}
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-[0.6em] bg-gradient-to-t from-white via-white/90 to-white/0 px-[0.9em] pb-[0.6em] pt-[1.6em]">
         <span className="text-[0.846em] text-muted-foreground">{hidden > 0 ? `还有 ${hidden} 项 · 继续放大查看` : ""}</span>
         {onOpen && (

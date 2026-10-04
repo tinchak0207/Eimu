@@ -1,16 +1,16 @@
 "use client";
 
-// 歷史「再來 N 組／微調變體」對話框：把一條歷史記錄的配方 payload 批量重跑。
+// 历史「再来 N 组／微调变体」对话框：把一条历史记录的配方 payload 批量重跑。
 //
-// rerun = 原樣重跑（N 張、參數零改動）；variant = 先改提示詞/模型/尺寸再批量。
-// 提交走既有 /api/generation-jobs 任務通道（每個任務獨立帳本預檢，餘額不足
-// 會在提交時被擋下），retryOfTaskId 同時承擔父鏈與參考圖繼承。
+// rerun = 原样重跑（N 张、参数零改动）；variant = 先改提示词/模型/尺寸再批量。
+// 提交走既有 /api/generation-jobs 任务通道（每个任务独立帐本预检，余额不足
+// 会在提交时被挡下），retryOfTaskId 同时承担父链与参考图继承。
 //
-// 費用預估由計費配置即時計算（generationCoins），不寫死數字；管理員改價後
-// 通過 usePricingRevision 觸發重算，這裡的數字不會滯後。
+// 费用预估由计费配置即时计算（generationCoins），不写死数字；管理员改价后
+// 通过 usePricingRevision 触发重算，这里的数字不会滞后。
 //
-// 面板風格複用歷史頁既有語法（SaveCardDialog 同款）：lg-sheet 玻璃面板 +
-// iOS 字級/圓角；N 與尺寸用 segmented radiogroup（站內 kind 三選同形態）。
+// 面板风格复用历史页既有语法（SaveCardDialog 同款）：lg-sheet 玻璃面板 +
+// iOS 字级/圆角；N 与尺寸用 segmented radiogroup（站内 kind 三选同形态）。
 import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Coins, Layers, SlidersHorizontal, X } from "lucide-react";

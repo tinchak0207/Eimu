@@ -1,9 +1,9 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, directorFetch, directorFail, num } from "../lib/director-common"
 
-// 3D 导演台播放控制（片4，2026-09-02）：op 線格式 camelCase（片3 坑①）。
-// seek=setCurrentTime（幀→秒）、play/pause=setPlaying、undo/redo/save 同名 op。
-//kunpeng transportTool 守衛文案照搬。
+// 3D 导演台播放控制（片4，2026-09-02）：op 线格式 camelCase（片3 坑①）。
+// seek=setCurrentTime（帧→秒）、play/pause=setPlaying、undo/redo/save 同名 op。
+//kunpeng transportTool 守卫文案照搬。
 
 export default tool({
   description:

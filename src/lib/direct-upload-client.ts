@@ -1,21 +1,21 @@
-// 兩段式上傳（D36）的**瀏覽器端薄客戶端**。
+// 两段式上传（D36）的**浏览器端薄客户端**。
 //
-// 流程（與伺服器端 `two-phase-upload.ts` 同一份契約，不另立第二套簽名邏輯）：
+// 流程（与伺服器端 `two-phase-upload.ts` 同一份契约，不另立第二套签名逻辑）：
 //   sign   POST /api/uploads/sign   → 只送 metadata，拿 { objectKey, uploadUrl, method, clientToken, maxBytes, headers? }
-//   PUT    credential.uploadUrl     → 帶 credential.headers 直傳物件存儲（本站不經手位元組）
-//   commit POST /api/uploads/commit → { objectKey } 回寫入庫（伺服器親自驗 sha256）
+//   PUT    credential.uploadUrl     → 带 credential.headers 直传物件存储（本站不经手位元组）
+//   commit POST /api/uploads/commit → { objectKey } 回写入库（伺服器亲自验 sha256）
 //
-// 三條硬規矩：
-//   1. 有效上限**一律取回應的 `maxBytes`**（VPS presign 實際回 100MB，不是本檔或
-//      `two-phase-upload.ts` 的 512MB 常數）——上傳前先預檢，超限即拋具名錯誤。
-//   2. 同一次 `uploadDirect` 內部的 PUT 重試**沿用同一個 objectKey**：重跑 sign 時
-//      以官方協議體 `{type:"blob.generate-client-token", payload:{pathname}}` 帶回上次
-//      的 objectKey，讓伺服器端 commit 的 `alreadyCommitted` 冪等成立。
-//   3. 每個本站請求帶 `X-Request-Id`。
+// 三条硬规矩：
+//   1. 有效上限**一律取回应的 `maxBytes`**（VPS presign 实际回 100MB，不是本档或
+//      `two-phase-upload.ts` 的 512MB 常数）——上传前先预检，超限即抛具名错误。
+//   2. 同一次 `uploadDirect` 内部的 PUT 重试**沿用同一个 objectKey**：重跑 sign 时
+//      以官方协议体 `{type:"blob.generate-client-token", payload:{pathname}}` 带回上次
+//      的 objectKey，让伺服器端 commit 的 `alreadyCommitted` 幂等成立。
+//   3. 每个本站请求带 `X-Request-Id`。
 
 import { GENERATION_TRACE_ID_HEADER } from "./generation-request-headers";
 
-/** 具名錯誤：呼叫端可依 `code` 分流（例如超限顯示人話、其餘顯示通用失敗）。 */
+/** 具名错误：呼叫端可依 `code` 分流（例如超限显示人话、其余显示通用失败）。 */
 export class DirectUploadError extends Error {
   constructor(
     readonly code: string,
@@ -27,28 +27,28 @@ export class DirectUploadError extends Error {
   }
 }
 
-/** `file.size > maxBytes` 的固定錯誤碼（呼叫端不必猜訊息文字）。 */
+/** `file.size > maxBytes` 的固定错误码（呼叫端不必猜讯息文字）。 */
 export const UPLOAD_TOO_LARGE_CODE = "upload_too_large";
-/** 目前後端（Vercel Blob）直傳不走「帶 headers 的 PUT」協議，本薄客戶端不支援。 */
+/** 目前后端（Vercel Blob）直传不走「带 headers 的 PUT」协议，本薄客户端不支援。 */
 export const UNSUPPORTED_BACKEND_CODE = "direct_upload_backend_unsupported";
 export const PUT_FAILED_CODE = "upload_put_failed";
 
 /**
- * 本站請求統一帶的 trace header 名。單一真源＝`generation-request-headers.ts`
- * 的 `GENERATION_TRACE_ID_HEADER`（它再往上收斂到 `request-trace.ts` 的
- * `TRACE_ID_HEADER`），本檔不另立第二個字串。
+ * 本站请求统一带的 trace header 名。单一真源＝`generation-request-headers.ts`
+ * 的 `GENERATION_TRACE_ID_HEADER`（它再往上收敛到 `request-trace.ts` 的
+ * `TRACE_ID_HEADER`），本档不另立第二个字串。
  *
- * 為什麼現在可以安全 import：`request-trace.ts` 現場已改用
+ * 为什么现在可以安全 import：`request-trace.ts` 现场已改用
  * `globalThis.crypto.randomUUID`，**零 import、不再拉 `node:crypto`**；
- * `generation-request-headers.ts` 也只 import 它，故整條鏈對 client bundle 安全。
- * （舊註解說「靜態 import node:crypto 會炸」的理由已不成立。）
+ * `generation-request-headers.ts` 也只 import 它，故整条链对 client bundle 安全。
+ * （旧注解说「静态 import node:crypto 会炸」的理由已不成立。）
  */
 const TRACE_HEADER = GENERATION_TRACE_ID_HEADER;
-/** 與 `request-trace.ts` 同源的路徑；沿用同一組端點。 */
+/** 与 `request-trace.ts` 同源的路径；沿用同一组端点。 */
 const SIGN_PATH = "/api/uploads/sign";
 const COMMIT_PATH = "/api/uploads/commit";
 
-/** sign 端點回應（＝ `DirectUploadCredential` 展開成 JSON）。 */
+/** sign 端点回应（＝ `DirectUploadCredential` 展开成 JSON）。 */
 interface CredentialResponse {
   backend?: string;
   objectKey?: unknown;
@@ -64,7 +64,7 @@ interface CredentialResponse {
   code?: unknown;
 }
 
-/** commit 端點回應（route 展開 `CommitUploadResult`）。 */
+/** commit 端点回应（route 展开 `CommitUploadResult`）。 */
 interface CommitResponse {
   success?: unknown;
   alreadyCommitted?: unknown;
@@ -91,20 +91,20 @@ export interface UploadDirectResult {
 }
 
 export interface UploadDirectOptions {
-  /** 入庫標題（commit 端第二段的 `title`）。 */
+  /** 入库标题（commit 端第二段的 `title`）。 */
   title?: string;
-  /** 粗粒度進度回報（0→1）。VPS 直傳無法逐塊回報，僅在送出前後各回一次。 */
+  /** 粗粒度进度回报（0→1）。VPS 直传无法逐块回报，仅在送出前后各回一次。 */
   onProgress?: (progress: number) => void;
   signal?: AbortSignal;
-  /** 測試注入點：取代全域 fetch（sign／PUT／commit 全走它）。 */
+  /** 测试注入点：取代全域 fetch（sign／PUT／commit 全走它）。 */
   fetchFn?: typeof fetch;
-  /** 鑑權標頭（例如 `Authorization: Bearer <token>`、`x-user-id`）。省略時靠同源 cookie。 */
+  /** 鉴权标头（例如 `Authorization: Bearer <token>`、`x-user-id`）。省略时靠同源 cookie。 */
   headers?: Record<string, string>;
-  /** PUT 失敗後的重試次數（預設 1＝初次＋重試一次），重試沿用同一 objectKey。 */
+  /** PUT 失败后的重试次数（预设 1＝初次＋重试一次），重试沿用同一 objectKey。 */
   putRetries?: number;
 }
 
-/** 瀏覽器安全的 trace id：與 `request-trace` 同一形狀（alnum + `. _ -`，8–128 字）。 */
+/** 浏览器安全的 trace id：与 `request-trace` 同一形状（alnum + `. _ -`，8–128 字）。 */
 function mintTraceId(): string {
   const webCrypto = (globalThis as { crypto?: Crypto }).crypto;
   if (webCrypto && typeof webCrypto.randomUUID === "function") return webCrypto.randomUUID();
@@ -130,8 +130,8 @@ async function readJson(response: Response): Promise<Record<string, unknown> | n
 }
 
 /**
- * 送 sign 請求取憑證。`objectKey` 非空 ⇒ 走官方協議體把上次的 objectKey 帶回，
- * 讓重試落在**同一個**物件鍵上（commit 冪等的必要條件）。
+ * 送 sign 请求取凭证。`objectKey` 非空 ⇒ 走官方协议体把上次的 objectKey 带回，
+ * 让重试落在**同一个**物件键上（commit 幂等的必要条件）。
  */
 async function requestCredential(input: {
   objectKey: string | null;
@@ -147,9 +147,9 @@ async function requestCredential(input: {
     ? { type: "blob.generate-client-token", payload: { pathname: input.objectKey }, contentType: input.contentType }
     : { filename: input.filename, contentType: input.contentType, size: input.size };
 
-  // `input.fetchFn(...)` 是**方法呼叫**，會把 `this` 綁成 `input`；瀏覽器原生 fetch 要求
-  // receiver 是 global，否則在發出任何請求前就拋 `Illegal invocation`（Node undici 不看
-  // receiver，故單元測試抓不到）。先取出成裸變數再呼叫，receiver 回歸 `undefined`。
+  // `input.fetchFn(...)` 是**方法呼叫**，会把 `this` 绑成 `input`；浏览器原生 fetch 要求
+  // receiver 是 global，否则在发出任何请求前就抛 `Illegal invocation`（Node undici 不看
+  // receiver，故单元测试抓不到）。先取出成裸变数再呼叫，receiver 回归 `undefined`。
   const callFetch = input.fetchFn;
   const response = await callFetch(SIGN_PATH, {
     method: "POST",
@@ -160,11 +160,11 @@ async function requestCredential(input: {
   const json = (await readJson(response)) as CredentialResponse | null;
   if (!response.ok || !json || json.success === false) {
     const code = typeof json?.code === "string" ? json.code : "sign_failed";
-    const message = typeof json?.error === "string" && json.error ? json.error : `取得直傳憑證失敗（HTTP ${response.status}）。`;
+    const message = typeof json?.error === "string" && json.error ? json.error : `取得直传凭证失败（HTTP ${response.status}）。`;
     throw new DirectUploadError(code, message, response.status);
   }
   if (typeof json.objectKey !== "string" || !json.objectKey || typeof json.uploadUrl !== "string" || !json.uploadUrl) {
-    throw new DirectUploadError("sign_malformed", "直傳憑證形狀不完整（缺 objectKey 或 uploadUrl）。");
+    throw new DirectUploadError("sign_malformed", "直传凭证形状不完整（缺 objectKey 或 uploadUrl）。");
   }
   const headers =
     json.headers && typeof json.headers === "object" && !Array.isArray(json.headers)
@@ -185,14 +185,14 @@ async function requestCredential(input: {
 }
 
 /**
- * 直傳一段。VPS 後端憑證帶 `headers`（x-upload-ticket 等）⇒ 直接 PUT；
- * Vercel Blob 後端不走此協議（要用官方 SDK）⇒ 具名錯誤，不假裝成功。
+ * 直传一段。VPS 后端凭证带 `headers`（x-upload-ticket 等）⇒ 直接 PUT；
+ * Vercel Blob 后端不走此协议（要用官方 SDK）⇒ 具名错误，不假装成功。
  */
 async function putObject(credential: ResolvedCredential, file: Blob | File, opts: UploadDirectOptions, fetchFn: typeof fetch): Promise<void> {
   if (credential.backend !== "vps-blob" && Object.keys(credential.headers).length === 0) {
     throw new DirectUploadError(
       UNSUPPORTED_BACKEND_CODE,
-      "目前物件儲存後端不支援瀏覽器直傳（僅 VPS 簽名 PUT 後端支援）。",
+      "目前物件储存后端不支援浏览器直传（仅 VPS 签名 PUT 后端支援）。",
     );
   }
   opts.onProgress?.(0);
@@ -203,12 +203,12 @@ async function putObject(credential: ResolvedCredential, file: Blob | File, opts
     signal: opts.signal,
   });
   if (!response.ok) {
-    throw new DirectUploadError(PUT_FAILED_CODE, `直傳物件存儲失敗（HTTP ${response.status}）。`, response.status);
+    throw new DirectUploadError(PUT_FAILED_CODE, `直传物件存储失败（HTTP ${response.status}）。`, response.status);
   }
   opts.onProgress?.(1);
 }
 
-/** 第二段：把 objectKey 回寫入庫。 */
+/** 第二段：把 objectKey 回写入库。 */
 async function commitObject(input: {
   objectKey: string;
   title?: string;
@@ -218,7 +218,7 @@ async function commitObject(input: {
   traceId: string;
   signal?: AbortSignal;
 }): Promise<UploadDirectResult> {
-  // 同 `requestCredential`：取出成裸變數，避免把 fetch 當 `input` 的方法呼叫。
+  // 同 `requestCredential`：取出成裸变数，避免把 fetch 当 `input` 的方法呼叫。
   const callFetch = input.fetchFn;
   const response = await callFetch(COMMIT_PATH, {
     method: "POST",
@@ -229,7 +229,7 @@ async function commitObject(input: {
   const json = (await readJson(response)) as CommitResponse | null;
   if (!response.ok || !json || json.success === false) {
     const code = typeof json?.code === "string" ? json.code : "commit_failed";
-    const message = typeof json?.error === "string" && json.error ? json.error : `回寫入庫失敗（HTTP ${response.status}）。`;
+    const message = typeof json?.error === "string" && json.error ? json.error : `回写入库失败（HTTP ${response.status}）。`;
     throw new DirectUploadError(code, message, response.status);
   }
   const recordUrl = json.record && typeof json.record.url === "string" ? json.record.url : null;
@@ -241,10 +241,10 @@ async function commitObject(input: {
 }
 
 /**
- * sign → PUT（帶 `credential.headers`）→ commit。
+ * sign → PUT（带 `credential.headers`）→ commit。
  *
- * 重試語義：PUT 失敗時重跑 sign 並**帶回上一次的 objectKey**（官方協議體），使位元組
- * 落在同一物件鍵；commit 失敗時只重試 commit（物件已存在，不重複上傳）。
+ * 重试语义：PUT 失败时重跑 sign 并**带回上一次的 objectKey**（官方协议体），使位元组
+ * 落在同一物件键；commit 失败时只重试 commit（物件已存在，不重复上传）。
  */
 export async function uploadDirect(file: Blob | File, opts: UploadDirectOptions = {}): Promise<UploadDirectResult> {
   const fetchFn = opts.fetchFn ?? fetch;
@@ -262,7 +262,7 @@ export async function uploadDirect(file: Blob | File, opts: UploadDirectOptions 
     credential = await requestCredential({ objectKey, filename, contentType, size: file.size, fetchFn, authHeaders, traceId, signal: opts.signal });
     objectKey = credential.objectKey;
 
-    // 有效上限＝伺服器回報的 maxBytes（不寫死常數）。
+    // 有效上限＝伺服器回报的 maxBytes（不写死常数）。
     if (file.size > credential.maxBytes) {
       throw new DirectUploadError(
         UPLOAD_TOO_LARGE_CODE,
@@ -281,7 +281,7 @@ export async function uploadDirect(file: Blob | File, opts: UploadDirectOptions 
     }
   }
   if (lastPutError) throw lastPutError;
-  if (!credential || !objectKey) throw new DirectUploadError("upload_failed", "直傳未完成。");
+  if (!credential || !objectKey) throw new DirectUploadError("upload_failed", "直传未完成。");
 
   let lastCommitError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {

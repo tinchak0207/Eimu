@@ -1,7 +1,7 @@
-// reduceCanvasEvent 的 adapter（自 use-canvas-chat.ts 外圍搬遷，符號名不變）。
+// reduceCanvasEvent 的 adapter（自 use-canvas-chat.ts 外围搬迁，符号名不变）。
 //
-// reduceCanvasEvent 的簽名是 (state, CanvasSseEvent)，不是標準 reducer。
-// 這裡包一層 adapter，同時容納「本端動作」（載入專案、拖動節點、undo 還原）。
+// reduceCanvasEvent 的签名是 (state, CanvasSseEvent)，不是标准 reducer。
+// 这里包一层 adapter，同时容纳「本端动作」（载入专案、拖动节点、undo 还原）。
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import {
   CANVAS_INITIAL_STATE,
@@ -44,27 +44,27 @@ export type CanvasAction =
   | { type: "batch_toggle_expanded"; parentId: string }
   | { type: "add_reference"; nodeId: string; referenceNodeId: string }
   | { type: "remove_reference"; nodeId: string; referenceNodeId: string }
-  // Phase 3 畫布交互：群組拖動 / 貼上插入 / 多刪 / 手動連線
+  // Phase 3 画布交互：群组拖动 / 贴上插入 / 多删 / 手动连线
   | { type: "move_many"; moves: { nodeId: string; position: CanvasPosition }[] }
   | { type: "add_nodes"; nodes: CanvasNode[]; connections?: CanvasConnection[] }
   | { type: "delete_many"; nodeIds: string[] }
   | { type: "connect"; fromNodeId: string; toNodeId: string }
   | { type: "disconnect"; connectionId: string }
-  // Wave A：就地編輯（改名 / metadata 補丁——文本直編、原地生成回填、字號）
+  // Wave A：就地编辑（改名 / metadata 补丁——文本直编、原地生成回填、字号）
   | { type: "rename"; nodeId: string; title: string }
   | { type: "patch_metadata"; nodeId: string; patch: Partial<CanvasNodeMetadata> }
-  // 版本歷史＋回退（2026-09-27）：軟刪還原 / 回退到指定版或上一版
+  // 版本历史＋回退（2026-09-27）：软删还原 / 回退到指定版或上一版
   | { type: "restore_nodes"; nodeIds: string[] }
   | { type: "revert_node"; nodeId: string; version?: number }
-  // Wave C：agent 批量操作（一次 dispatch = 一格歷史）
+  // Wave C：agent 批量操作（一次 dispatch = 一格历史）
   | { type: "agent_ops"; ops: CanvasAgentOp[] };
 
-/** reducer 純函式另行匯出：測試直接驅動 action，不用架 React。 */
+/** reducer 纯函式另行汇出：测试直接驱动 action，不用架 React。 */
 export function canvasReducer(state: CanvasReducerState, action: CanvasAction): CanvasReducerState {
   switch (action.type) {
     case "event": {
       const normalized = normalizeCanvasEvent(action.event);
-      // derive.started / budget.updated 不改畫布結構，由 hook 另存展示狀態。
+      // derive.started / budget.updated 不改画布结构，由 hook 另存展示状态。
       if (!normalized) return state;
       return reduceCanvasEvent(state, normalized);
     }
@@ -79,7 +79,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
     case "move":
       return {
         ...state,
-        // 手動拖過＝用戶接管這顆節點的位置，自動排版不再動它。
+        // 手动拖过＝用户接管这颗节点的位置，自动排版不再动它。
         nodes: state.nodes.map((n) => (n.id === action.nodeId ? { ...n, position: action.position, moved: true } : n)),
       };
     case "resize":
@@ -90,7 +90,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
         ),
       };
     case "remove":
-      // 軟刪（2026-09-27）：節點離開 nodes（呼叫端語義不變），但可經 restore_nodes 還原。
+      // 软删（2026-09-27）：节点离开 nodes（呼叫端语义不变），但可经 restore_nodes 还原。
       return softDeleteCanvasNodes(state, [action.nodeId]);
     case "clear":
       return CANVAS_INITIAL_STATE;
@@ -101,7 +101,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       const nextChildren = [...(parent.batchChildren ?? []), child.id];
       return {
         ...state,
-        // 原位更新父節點（filter+append 會改變節點順序，連帶打亂進場動畫與 z 序）。
+        // 原位更新父节点（filter+append 会改变节点顺序，连带打乱进场动画与 z 序）。
         nodes: [
           ...state.nodes.map((n) =>
             n.id === parentId
@@ -109,7 +109,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
                   ...n,
                   batchChildren: nextChildren,
                   batchExpanded: true,
-                  // 首個子節點自動成為主圖：收起時封面才有東西可顯示。
+                  // 首个子节点自动成为主图：收起时封面才有东西可显示。
                   batchPrimaryImageId: n.batchPrimaryImageId ?? child.id,
                   metadata: { ...n.metadata, batchTotal: nextChildren.length },
                 }
@@ -142,7 +142,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
               ? {
                   ...n,
                   batchChildren: newChildren,
-                  // 刪掉的是主圖 → fallback 到剩餘第一個子節點（沒有就清空）。
+                  // 删掉的是主图 → fallback 到剩余第一个子节点（没有就清空）。
                   batchPrimaryImageId:
                     n.batchPrimaryImageId === childId ? newChildren[0] : n.batchPrimaryImageId,
                   metadata: { ...n.metadata, batchTotal: newChildren.length },
@@ -198,7 +198,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       };
     }
     case "move_many": {
-      // 群組拖動：一幀一個 dispatch 移動整組（逐顆 dispatch 會讓 React 重渲染 N 次）。
+      // 群组拖动：一帧一个 dispatch 移动整组（逐颗 dispatch 会让 React 重渲染 N 次）。
       const byId = new Map(action.moves.map((m) => [m.nodeId, m.position]));
       if (byId.size === 0) return state;
       return {
@@ -210,7 +210,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       };
     }
     case "add_nodes": {
-      // 貼上/切圖插入：id 由呼叫端保證不撞（cloneForPaste 已防撞）。撞了就以新值覆蓋，不重複。
+      // 贴上/切图插入：id 由呼叫端保证不撞（cloneForPaste 已防撞）。撞了就以新值覆盖，不重复。
       if (action.nodes.length === 0 && !(action.connections?.length)) return state;
       const incomingIds = new Set(action.nodes.map((n) => n.id));
       const keptNodes = state.nodes.filter((n) => !incomingIds.has(n.id));
@@ -221,18 +221,18 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
         nodes: [...keptNodes, ...action.nodes],
         connections: [...state.connections, ...newConns],
       };
-      // 新節點逐顆落一版 created 快照（貼上是內容事件的起點）。
+      // 新节点逐颗落一版 created 快照（贴上是内容事件的起点）。
       for (const node of action.nodes) next = recordCanvasNodeVersion(next, node.id, "created");
       return next;
     }
     case "delete_many": {
-      // 軟刪（2026-09-27）：與舊硬刪對呼叫端同語義（nodes 不含、連線斷、批次清理），
-      // 差別是收進 deletedNodes 可還原。
+      // 软删（2026-09-27）：与旧硬删对呼叫端同语义（nodes 不含、连线断、批次清理），
+      // 差别是收进 deletedNodes 可还原。
       return softDeleteCanvasNodes(state, action.nodeIds);
     }
     case "connect": {
       const { fromNodeId, toNodeId } = action;
-      // 自環與空端點拒絕；同向重複連線去重。
+      // 自环与空端点拒绝；同向重复连线去重。
       if (!fromNodeId || !toNodeId || fromNodeId === toNodeId) return state;
       if (state.connections.some((c) => c.fromNodeId === fromNodeId && c.toNodeId === toNodeId)) return state;
       return {
@@ -256,35 +256,35 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
         ...state,
         nodes: state.nodes.map((n) => (n.id === action.nodeId ? renamed : n)),
       };
-      // 改名是內容變更 → 落一版（版本歷史看得到改名軌跡）。
+      // 改名是内容变更 → 落一版（版本历史看得到改名轨迹）。
       return isNodeContentChange(prev, renamed)
         ? recordCanvasNodeVersion(next, action.nodeId, "edited")
         : next;
     }
     case "patch_metadata": {
-      // 契約（metadata 直通）：此處 patch 原樣併入節點 metadata，不過白名單。
-      // **本 op 沒有 agent 入口**：`CanvasAgentOp`（types.ts:427 起的九個 op）裡沒有
-      // patch_metadata——agent 只能經 agent_ops 的 add_node/update_node 寫畫布；
-      // 本 action 的呼叫端全是前端/工具層（use-canvas-chat 的 patchNodeMetadata、
-      // revokeDownstream 下游作廢、CanvasEmbed 的批准/prompt/字號回填）。
-      // 為什麼要有白名單（理由不變）：session 內任意鍵可見、重載後只剩白名單鍵活著
-      //（唯一還原路徑 fromCanvasProject → normalizeCanvasNode → toNodeMetadata）。
+      // 契约（metadata 直通）：此处 patch 原样并入节点 metadata，不过白名单。
+      // **本 op 没有 agent 入口**：`CanvasAgentOp`（types.ts:427 起的九个 op）里没有
+      // patch_metadata——agent 只能经 agent_ops 的 add_node/update_node 写画布；
+      // 本 action 的呼叫端全是前端/工具层（use-canvas-chat 的 patchNodeMetadata、
+      // revokeDownstream 下游作废、CanvasEmbed 的批准/prompt/字号回填）。
+      // 为什么要有白名单（理由不变）：session 内任意键可见、重载后只剩白名单键活著
+      //（唯一还原路径 fromCanvasProject → normalizeCanvasNode → toNodeMetadata）。
       //
-      // 2026-09-25 實測裁定：**不能收緊成「過一次 toNodeMetadata」**——本 action 的
-      // payload 裡有白名單外但**被讀**的鍵，收緊＝當場弄壞功能（非重載才壞）：
-      //   · `fontSize`：context-menu-items.ts:155/156 寫（放大/縮小字號）→ NodeBody.tsx:431 讀
-      //   · `approval`：CanvasEmbed.tsx:683 寫（分鏡批准閘）→ assets/ShotReviewPanel.tsx:144 讀
-      //   · `bytes`/`mimeType`：use-canvas-interaction.ts:443 寫（上傳回填；目前查無讀者）
-      // 要收緊的前提＝先把這些鍵加進 `layout.ts` 的 `toNodeMetadata`（白名單真源不在本檔）。
+      // 2026-09-25 实测裁定：**不能收紧成「过一次 toNodeMetadata」**——本 action 的
+      // payload 里有白名单外但**被读**的键，收紧＝当场弄坏功能（非重载才坏）：
+      //   · `fontSize`：context-menu-items.ts:155/156 写（放大/缩小字号）→ NodeBody.tsx:431 读
+      //   · `approval`：CanvasEmbed.tsx:683 写（分镜批准闸）→ assets/ShotReviewPanel.tsx:144 读
+      //   · `bytes`/`mimeType`：use-canvas-interaction.ts:443 写（上传回填；目前查无读者）
+      // 要收紧的前提＝先把这些键加进 `layout.ts` 的 `toNodeMetadata`（白名单真源不在本档）。
       const prev = state.nodes.find((n) => n.id === action.nodeId);
       if (!prev) return state;
-      // W2（2026-09-30）：分鏡內容變更 → 該鏡舊關聯媒體失效。本 op 是分鏡內容 patch 的
-      // **唯一寫入漏斗**（agent 走 agent_ops，進不到這裡）。before 取**合併前**現值；
-      // 要清哪些鍵的唯一依據＝`storyboard-invalidation` 的純函式輸出（不在此擴張範圍）。
-      // patch 顯式帶了新關聯 id 的欄位由該純函式讓路（規則⑤），先清後併不會清掉新值。
-      // 版本帳仍由既有節點版本機制承載（`recordCanvasNodeVersion`），此處只補關聯失效。
-      // 兩次寬化是形狀事實：`CanvasNodeMetadata` 是 interface，無 index signature，
-      // 音軌關聯鍵（dialogueAudioId/…）刻意不在其內（同 WS-審查 approval 的寫法）。
+      // W2（2026-09-30）：分镜内容变更 → 该镜旧关联媒体失效。本 op 是分镜内容 patch 的
+      // **唯一写入漏斗**（agent 走 agent_ops，进不到这里）。before 取**合并前**现值；
+      // 要清哪些键的唯一依据＝`storyboard-invalidation` 的纯函式输出（不在此扩张范围）。
+      // patch 显式带了新关联 id 的栏位由该纯函式让路（规则⑤），先清后并不会清掉新值。
+      // 版本帐仍由既有节点版本机制承载（`recordCanvasNodeVersion`），此处只补关联失效。
+      // 两次宽化是形状事实：`CanvasNodeMetadata` 是 interface，无 index signature，
+      // 音轨关联键（dialogueAudioId/…）刻意不在其内（同 WS-审查 approval 的写法）。
       const mediaBefore = (prev.metadata ?? {}) as Record<string, unknown>;
       const invalidated = invalidatedShotMediaLinks(mediaBefore, action.patch as Record<string, unknown>);
       const patched: CanvasNode = {
@@ -295,40 +295,40 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
         ...state,
         nodes: state.nodes.map((n) => (n.id === action.nodeId ? patched : n)),
       };
-      // 內容/metadata 真的變了才落版（純 status 抖動等瞬態由 isNodeContentChange 過濾）。
+      // 内容/metadata 真的变了才落版（纯 status 抖动等瞬态由 isNodeContentChange 过滤）。
       const reason = isNodeContentChange(prev, patched);
       return reason ? recordCanvasNodeVersion(next, action.nodeId, reason) : next;
     }
-    // ── 版本歷史＋回退（2026-09-27）
+    // ── 版本历史＋回退（2026-09-27）
     case "restore_nodes":
       return restoreCanvasNodes(state, action.nodeIds);
     case "revert_node":
       return revertCanvasNodeToVersion(state, action.nodeId, action.version);
     case "agent_ops": {
-      // Agent 批量操作原子套用：一次 dispatch = 撤銷棧一格，中途壞 op 跳過不炸整批。
-      // 契約（metadata 直通，2026-09-24 WS11）：本分派的 add_node（normalizeAgentNode 的
-      // raw.metadata）與 update_node（op.patch.metadata）都是**原始 metadata 直通，刻意不過
-      // 白名單**——agent 在同一 session 內可寫任意鍵；重載後只有存在於兩處白名單
-      //（layout.ts toNodeMetadata ＋ canvas-chat-types.ts compactMetadataForAgent）的鍵會活
-      // 下來，因為 fromCanvasProject → normalizeCanvasNode → toNodeMetadata 是唯一還原路徑。
-      // 消費端自行清洗（例：agent-output-cards.emittedEntityOf 對非法 kind 回 null）。
+      // Agent 批量操作原子套用：一次 dispatch = 撤销栈一格，中途坏 op 跳过不炸整批。
+      // 契约（metadata 直通，2026-09-24 WS11）：本分派的 add_node（normalizeAgentNode 的
+      // raw.metadata）与 update_node（op.patch.metadata）都是**原始 metadata 直通，刻意不过
+      // 白名单**——agent 在同一 session 内可写任意键；重载后只有存在于两处白名单
+      //（layout.ts toNodeMetadata ＋ canvas-chat-types.ts compactMetadataForAgent）的键会活
+      // 下来，因为 fromCanvasProject → normalizeCanvasNode → toNodeMetadata 是唯一还原路径。
+      // 消费端自行清洗（例：agent-output-cards.emittedEntityOf 对非法 kind 回 null）。
       //
-      // 2026-09-25 實測裁定（逐鍵清點後）：**不能照「過一次 toNodeMetadata」收緊**——差集裡
-      // 有被讀的鍵，且不只 LLM 亂塞的鍵，還有**設計上必須透傳**的 DSL 通道：
-      //   · workflow-dsl/compile.ts:328-343 經本分派發 add_node/update_node，metadata 由
-      //     buildStepMetadata 組裝（compile.ts:129-131 寫 `workflow_ns` / `stepId` /
-      //     `stepIndex`）＋ `step.meta` 任意鍵透傳（compile.ts:139-141）；反推端
-      //     decompile.ts:87/102 讀回 `workflow_ns`/`stepId`/`stepIndex`/meta 做畫布→DSL
-      //     還原（workflow-dsl.test.ts:266 釘死「meta 透傳＝白名單外剩餘」）。
-      //     白名單外鍵一剝＝這條雙向契約單邊斷（AI 筆 workflow_write 通道為活路：
+      // 2026-09-25 实测裁定（逐键清点后）：**不能照「过一次 toNodeMetadata」收紧**——差集里
+      // 有被读的键，且不只 LLM 乱塞的键，还有**设计上必须透传**的 DSL 通道：
+      //   · workflow-dsl/compile.ts:328-343 经本分派发 add_node/update_node，metadata 由
+      //     buildStepMetadata 组装（compile.ts:129-131 写 `workflow_ns` / `stepId` /
+      //     `stepIndex`）＋ `step.meta` 任意键透传（compile.ts:139-141）；反推端
+      //     decompile.ts:87/102 读回 `workflow_ns`/`stepId`/`stepIndex`/meta 做画布→DSL
+      //     还原（workflow-dsl.test.ts:266 钉死「meta 透传＝白名单外剩余」）。
+      //     白名单外键一剥＝这条双向契约单边断（AI 笔 workflow_write 通道为活路：
       //     /api/v1/workflow/compile → canvas_apply_ops）。
-      //   · 其餘白名單外**被讀**的鍵（NodeBody.tsx:396/397/406/621 讀 description/
-      //     key_features/locked/inputFrom；CanvasNodeView.tsx:335/390/391 讀 role/
-      //     shot_size/camera_move；CanvasEmbed.tsx:395/412 與 use-canvas-chat.ts:333 讀
-      //     session_id；use-canvas-generation.ts:304 讀 referenceNodeIds）。
-      // 收緊的唯一正解＝先把要放行的鍵加進 `layout.ts` 的 `toNodeMetadata`（白名單真源不在
-      // 本檔），再回來把這裡改成過白名單。在那之前維持直通，消費端自行清洗。
-      // 未列舉白名單外且無讀者的死資料：batchIndex / batchTotal / storageKey / stepName / toolIds。
+      //   · 其余白名单外**被读**的键（NodeBody.tsx:396/397/406/621 读 description/
+      //     key_features/locked/inputFrom；CanvasNodeView.tsx:335/390/391 读 role/
+      //     shot_size/camera_move；CanvasEmbed.tsx:395/412 与 use-canvas-chat.ts:333 读
+      //     session_id；use-canvas-generation.ts:304 读 referenceNodeIds）。
+      // 收紧的唯一正解＝先把要放行的键加进 `layout.ts` 的 `toNodeMetadata`（白名单真源不在
+      // 本档），再回来把这里改成过白名单。在那之前维持直通，消费端自行清洗。
+      // 未列举白名单外且无读者的死资料：batchIndex / batchTotal / storageKey / stepName / toolIds。
       let next = state;
       for (const op of action.ops) {
         switch (op.type) {
@@ -336,7 +336,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             const node = normalizeAgentNode(op.node, next.nodes);
             if (node) {
               next = { ...next, nodes: [...next.nodes, node] };
-              // agent 落節點也是內容事件的起點 → 落 created 版。
+              // agent 落节点也是内容事件的起点 → 落 created 版。
               next = recordCanvasNodeVersion(next, node.id, "created");
             }
             break;
@@ -350,15 +350,15 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
               ...(op.patch.position ? { position: op.patch.position, moved: true } : {}),
               ...(typeof op.patch.width === "number" ? { width: Math.max(120, op.patch.width) } : {}),
               ...(typeof op.patch.height === "number" ? { height: Math.max(90, op.patch.height) } : {}),
-              // 契約：op.patch.metadata 原樣併入（不過白名單）——2026-09-25 逐鍵清點後
-              // 確認收緊會剝掉被讀鍵，維持直通，理由見 agent_ops 開頭註釋。
+              // 契约：op.patch.metadata 原样并入（不过白名单）——2026-09-25 逐键清点后
+              // 确认收紧会剥掉被读键，维持直通，理由见 agent_ops 开头注释。
               ...(op.patch.metadata ? { metadata: { ...prevNode.metadata, ...op.patch.metadata } } : {}),
             };
             next = {
               ...next,
               nodes: next.nodes.map((n) => (n.id === op.id ? updated : n)),
             };
-            // agent 的內容/meta 變更 → 落一版（位置/尺寸改動不算內容，由分類器過濾）。
+            // agent 的内容/meta 变更 → 落一版（位置/尺寸改动不算内容，由分类器过滤）。
             const reason = isNodeContentChange(prevNode, updated);
             if (reason) next = recordCanvasNodeVersion(next, op.id, reason);
             break;
@@ -375,19 +375,19 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             next = { ...next, connections: next.connections.filter((c) => !op.ids.includes(c.id)) };
             break;
           case "set_project_meta":
-            // 專案級欄位（projectType/currentStep/episodes）在 CanvasProject 頂層，
-            // 不在 reducer state 裡，且不進撤銷棧（CanvasSnapshot 只有 nodes/connections/
-            // viewport）——由 hook 層 applyAgentOps 呼叫 setProjectMeta 執行。
-            // 這裡顯式列出而非落 default：新增 op 時若誤以為 reducer 會處理，行為會靜默消失。
+            // 专案级栏位（projectType/currentStep/episodes）在 CanvasProject 顶层，
+            // 不在 reducer state 里，且不进撤销栈（CanvasSnapshot 只有 nodes/connections/
+            // viewport）——由 hook 层 applyAgentOps 呼叫 setProjectMeta 执行。
+            // 这里显式列出而非落 default：新增 op 时若误以为 reducer 会处理，行为会静默消失。
             break;
           case "revert_node":
-            // 版本回退（2026-10-03）：直接復用 reducer 既有回退語義（只還原 title+metadata，
-            // 座標/尺寸不動；回退本身 append 一版 reason="revert"）。agent 讀 node_versions
-            // 索引後指名版本即可，不必把舊 metadata 抄進上下文。
+            // 版本回退（2026-10-03）：直接复用 reducer 既有回退语义（只还原 title+metadata，
+            // 座标/尺寸不动；回退本身 append 一版 reason="revert"）。agent 读 node_versions
+            // 索引后指名版本即可，不必把旧 metadata 抄进上下文。
             next = revertCanvasNodeToVersion(next, op.nodeId, op.version);
             break;
           default:
-            // select_nodes / set_viewport / run_generation 不是畫布結構，hook 層處理。
+            // select_nodes / set_viewport / run_generation 不是画布结构，hook 层处理。
             break;
         }
       }
@@ -396,7 +396,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
   }
 }
 
-/** agent add_node → 完整 CanvasNode：缺尺寸取型別預設、id 撞號丟棄、type 不認識降級文本。 */
+/** agent add_node → 完整 CanvasNode：缺尺寸取型别预设、id 撞号丢弃、type 不认识降级文本。 */
 function normalizeAgentNode(
   raw: Partial<CanvasNode> & { id: string; type: CanvasNodeType | string },
   existing: CanvasNode[],
@@ -413,8 +413,8 @@ function normalizeAgentNode(
     position: raw.position ?? { x: 40, y: 40 },
     width: raw.width ?? preset.width,
     height: raw.height ?? preset.height,
-    // 契約：raw metadata 原始直通（不過白名單）——2026-09-25 逐鍵清點後確認
-    // 收緊會剝掉被讀鍵（含 DSL 通道的 step.meta 透傳），維持直通，見 agent_ops 開頭註釋。
+    // 契约：raw metadata 原始直通（不过白名单）——2026-09-25 逐键清点后确认
+    // 收紧会剥掉被读键（含 DSL 通道的 step.meta 透传），维持直通，见 agent_ops 开头注释。
     ...(raw.metadata ? { metadata: raw.metadata } : {}),
     moved: true,
   };

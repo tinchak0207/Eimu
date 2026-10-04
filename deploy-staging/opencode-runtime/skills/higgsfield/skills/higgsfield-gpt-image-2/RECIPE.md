@@ -79,7 +79,7 @@ Write a single JSON object describing every visible region. GPT Image 2.0 reads 
 
 ```json
 {
-  "title": "衣装・装備詳細",
+  "title": "衣装・装备详细",
   "position": "bottom-left",
   "count": 9,
   "labels": ["胸当て", "肩当て", "腕甲", "..."]

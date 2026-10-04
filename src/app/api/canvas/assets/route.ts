@@ -1,5 +1,5 @@
-// 雲端素材庫 API：list / upsert / delete。
-// 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
+// 云端素材库 API：list / upsert / delete。
+// 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import {
@@ -14,7 +14,7 @@ import type { CanvasAsset } from "@/lib/canvas/asset-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -52,7 +52,7 @@ export async function PUT(req: NextRequest) {
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
-  // dataURL 超限先給明確錯誤訊息（normalizeAsset 也會拒絕，但訊息含糊）。
+  // dataURL 超限先给明确错误讯息（normalizeAsset 也会拒绝，但讯息含糊）。
   if (
     typeof body?.imageUrl === "string" &&
     body.imageUrl.startsWith("data:") &&

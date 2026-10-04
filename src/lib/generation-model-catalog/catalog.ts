@@ -227,16 +227,16 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     // 价目表同源：一口价 0.001 币（admin 覆写层 fixedCoins 原值折入，与覆写层同值）。
     fixedCoins: 0.001,
     referenceImages: true,
-    // 一鍵超分檔位（P1-4／對稱差 D10）。**能力宣告 ≠ 已可提交**：
-    // - `1k`／`2k`：上游 bridge 的 size 白名單內、factor=2，可提交。
-    // - `4k`：契約已備（size="2k"＋factor=4，保底長邊 4608px），但 factor 的輸出色
-    //   語義未由真單校準 ⇒ 提交端 fail-closed；`/v1/models` 只外露 `servableUpscaleTiers`
-    //   （即 4K 校準前不外露）。真源＝generation-core/upscale-tier.ts。
+    // 一键超分档位（P1-4／对称差 D10）。**能力宣告 ≠ 已可提交**：
+    // - `1k`／`2k`：上游 bridge 的 size 白名单内、factor=2，可提交。
+    // - `4k`：契约已备（size="2k"＋factor=4，保底长边 4608px），但 factor 的输出色
+    //   语义未由真单校准 ⇒ 提交端 fail-closed；`/v1/models` 只外露 `servableUpscaleTiers`
+    //   （即 4K 校准前不外露）。真源＝generation-core/upscale-tier.ts。
     upscaleTiers: ["1k", "2k", "4k"],
   },
-  // 模板生成的定價鍵。2026-08-29 价目表同源（暴君钦定）：模板 0.001 币/张 → 0.01 credit，
+  // 模板生成的定价键。2026-08-29 价目表同源（暴君钦定）：模板 0.001 币/张 → 0.01 credit，
   // 与 gateway workflow 估价的 unit_price_coins=0.001 对接；/v1/template-generations 扣费走
-  // generationCoins(pixai-template) 同源。舊值 50/80/160 credits（5/8/16 幣）為錯價。
+  // generationCoins(pixai-template) 同源。旧值 50/80/160 credits（5/8/16 币）为错价。
   [PIXAI_TEMPLATE_MODEL_ID]: {
     id: PIXAI_TEMPLATE_MODEL_ID,
     displayName: "模板生成 (Template)",
@@ -491,12 +491,12 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: false,
   },
 
-  // ── blender 節點能力標籤（2026-09-06 片AA，照 deploy-staging/blender-nodes 稿 §C）。
-  // blender_bridge 供應商（blender-local 本機橋）認領的 capability model_id——模型名
-  // 即引擎標籤（eevee=previz 存活配方 samples=1+RT off、cycles=品質檔）。不入
-  // SUPPORTED_* 列表 → C 端選單不可見（同 TTS/AV 服務條目先例）；ratios/resolutions
-  // 取 square 檔：bridge 實際渲染分辨率由腳本內 blender 相機決定，catalog 欄位僅供
-  // 平台側契約顯示（seed capability 契約與 /v1 入參校驗用）。
+  // ── blender 节点能力标签（2026-09-06 片AA，照 deploy-staging/blender-nodes 稿 §C）。
+  // blender_bridge 供应商（blender-local 本机桥）认领的 capability model_id——模型名
+  // 即引擎标签（eevee=previz 存活配方 samples=1+RT off、cycles=品质档）。不入
+  // SUPPORTED_* 列表 → C 端选单不可见（同 TTS/AV 服务条目先例）；ratios/resolutions
+  // 取 square 档：bridge 实际渲染分辨率由脚本内 blender 相机决定，catalog 栏位仅供
+  // 平台侧契约显示（seed capability 契约与 /v1 入参校验用）。
   [BLENDER_RENDER_EEVEE_MODEL_ID]: {
     id: BLENDER_RENDER_EEVEE_MODEL_ID,
     displayName: "Blender Eevee Render",
@@ -507,7 +507,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    // 本機節點零邊際成本（first_party 電費邊際≈0）；對外計費前由 admin 定價覆寫。
+    // 本机节点零边际成本（first_party 电费边际≈0）；对外计费前由 admin 定价覆写。
     imageCredits: { "1k": 0 },
     referenceImages: false,
   },
@@ -645,8 +645,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: true,
     supportsAudio: true,
     defaultAudio: true,
-    // 生成式後期（P1-3／對稱差 D22）：續片＋局部改片是 Seedance-2.5 專屬型別
-    // （上游 ListModelCapabilities 實測：2.0 系只有 reference_frame／head_tail_frame）。
+    // 生成式后期（P1-3／对称差 D22）：续片＋局部改片是 Seedance-2.5 专属型别
+    // （上游 ListModelCapabilities 实测：2.0 系只有 reference_frame／head_tail_frame）。
     videoGenerationTypes: ["generate", "extend_video", "edit_video"],
   },
   [SEEDANCE_25_720P_MODEL_ID]: {
@@ -665,7 +665,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: true,
     supportsAudio: true,
     defaultAudio: true,
-    // 生成式後期（P1-3／對稱差 D22）：同 2.5-480p，續片＋局部改片。
+    // 生成式后期（P1-3／对称差 D22）：同 2.5-480p，续片＋局部改片。
     videoGenerationTypes: ["generate", "extend_video", "edit_video"],
   },
   // drama 渠道专属 30 秒固定档（上游 sd25-30s，按条 6 RMB；94 = 9.4 币/秒 × 10，
@@ -872,9 +872,9 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: true,
   },
 
-  // ── AV 成片鏈路（B 端專用）：配音 TTS / 數字人口播 / 唇形。不入 SUPPORTED_* 列表，
-  // C 端選單看不到；上游供應商全部由 DB supplier 行驅動（minimax / did 適配器）。
-  // fixedCoins 預設 0 = 試運行價；正式上線前必須由 admin 定價覆寫（覆寫禁止 0）。
+  // ── AV 成片链路（B 端专用）：配音 TTS / 数字人口播 / 唇形。不入 SUPPORTED_* 列表，
+  // C 端选单看不到；上游供应商全部由 DB supplier 行驱动（minimax / did 适配器）。
+  // fixedCoins 预设 0 = 试运行价；正式上线前必须由 admin 定价覆写（覆写禁止 0）。
   [TTS_1_MODEL_ID]: {
     id: TTS_1_MODEL_ID,
     displayName: "TTS 1",
@@ -886,9 +886,9 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: [],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    // TTS 不走 fixedCoins：計價維度是「字」（0.001 幣/字），本欄表達不了。
-    // 此 0 對應上游定價表的固定成分（`'tts-zh'.base_cost = 0`），非試運行價；
-    // 真實費率與扣費在 `generation-model-catalog/tts-pricing.ts`（站內唯一真源）。
+    // TTS 不走 fixedCoins：计价维度是「字」（0.001 币/字），本栏表达不了。
+    // 此 0 对应上游定价表的固定成分（`'tts-zh'.base_cost = 0`），非试运行价；
+    // 真实费率与扣费在 `generation-model-catalog/tts-pricing.ts`（站内唯一真源）。
     fixedCoins: 0,
     referenceImages: false,
   },
@@ -922,7 +922,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
   },
 };
 
-// 模型卡三字段（吞併決策清單主線四首件）：知识数据独立成档（knowledge.ts，纯加法、
+// 模型卡三字段（吞并决策清单主线四首件）：知识数据独立成档（knowledge.ts，纯加法、
 // 可单测），这里在目录初始化时一次性挂到对应条目上。pricing 覆写走浅合并（{...base}），
 // knowledge 字段天然在覆写后存活，下游一律经 generationModel()/modelKnowledge() 读取。
 for (const [modelId, knowledge] of Object.entries(MODEL_KNOWLEDGE)) {

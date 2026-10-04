@@ -16,14 +16,14 @@ import {
 } from "./agent-chat-types";
 import { agentChatReducer, appendUserTurn, applyQuotaSnapshot } from "./agent-chat-reducer";
 
-/** 建一幀被 TypeScript 檢過型別的 SSE 事件。 */
+/** 建一帧被 TypeScript 检过型别的 SSE 事件。 */
 function evt(event: AgentSseEvent): AgentSseEvent {
   return event;
 }
 
 const EMPTY = EMPTY_AGENT_CHAT_STATE;
 
-test("message.delta 併進同一個 streaming 條目，不逐幀開新條目", () => {
+test("message.delta 并进同一个 streaming 条目，不逐帧开新条目", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 1, data: { text: "你" } }));
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "好" } }));
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "！" } }));
@@ -36,7 +36,7 @@ test("message.delta 併進同一個 streaming 條目，不逐幀開新條目", (
   assert.equal(s.turnActive, true);
 });
 
-test("reasoning.delta 累積到 streaming 條目的 reasoning 欄位，不污染 text", () => {
+test("reasoning.delta 累积到 streaming 条目的 reasoning 栏位，不污染 text", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "reasoning.delta", event_id: 1, data: { text: "The" } }));
   s = agentChatReducer(s, evt({ name: "reasoning.delta", event_id: 2, data: { text: " user" } }));
   assert.equal(s.items.length, 1);
@@ -47,16 +47,16 @@ test("reasoning.delta 累積到 streaming 條目的 reasoning 欄位，不污染
   assert.equal(a.streaming, true);
 });
 
-test("reasoning 後接 message.delta：同一條目，text 與 reasoning 並存", () => {
-  let s = agentChatReducer(EMPTY, evt({ name: "reasoning.delta", event_id: 1, data: { text: "畫" } }));
+test("reasoning 后接 message.delta：同一条目，text 与 reasoning 并存", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "reasoning.delta", event_id: 1, data: { text: "画" } }));
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "完成" } }));
   const a = s.items[0] as AgentAssistantTextItem;
-  assert.equal(a.reasoning, "畫");
+  assert.equal(a.reasoning, "画");
   assert.equal(a.text, "完成");
   assert.equal(s.items.length, 1);
 });
 
-test("turn.done 之後的 delta 才開新條目", () => {
+test("turn.done 之后的 delta 才开新条目", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 1, data: { text: "a" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 2, data: {} }));
 
@@ -70,7 +70,7 @@ test("turn.done 之後的 delta 才開新條目", () => {
   assert.equal(second.streaming, true);
 });
 
-test("tool.invoke → tool.result 回填同一個條目，id 不變", () => {
+test("tool.invoke → tool.result 回填同一个条目，id 不变", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "generate_image", args_summary: "..." } }));
   assert.equal(s.items.length, 1);
   const before = s.items[0] as AgentToolCallItem;
@@ -80,13 +80,13 @@ test("tool.invoke → tool.result 回填同一個條目，id 不變", () => {
 
   assert.equal(s.items.length, 1);
   const after = s.items[0] as AgentToolCallItem;
-  assert.equal(after.id, before.id, "回填必須沿用原條目 id");
+  assert.equal(after.id, before.id, "回填必须沿用原条目 id");
   assert.equal(after.status, "ok");
   assert.equal(after.costCoins, 3);
   assert.equal(s.turnActive, true);
 });
 
-test("tool.result 沒有對應 invoke 時，補一筆已定案條目（去重/斷線把 invoke 弄丟了）", () => {
+test("tool.result 没有对应 invoke 时，补一笔已定案条目（去重/断线把 invoke 弄丢了）", () => {
   const s = agentChatReducer(EMPTY, evt({ name: "tool.result", event_id: 5, data: { tool: "gen", ok: false } }));
 
   assert.equal(s.items.length, 1);
@@ -96,7 +96,7 @@ test("tool.result 沒有對應 invoke 時，補一筆已定案條目（去重/�
   assert.equal(it.seq, 5);
 });
 
-test("tool.result 失敗時透傳 error.human_message 到條目（R10-1：紅卡帶人類可讀錯誤）", () => {
+test("tool.result 失败时透传 error.human_message 到条目（R10-1：红卡带人类可读错误）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "workflow_add_node" } }));
   s = agentChatReducer(
     s,
@@ -113,11 +113,11 @@ test("tool.result 失敗時透傳 error.human_message 到條目（R10-1：紅卡
 
   const it = s.items[0] as AgentToolCallItem;
   assert.equal(it.status, "failed");
-  assert.equal(it.error, "text 节点必须填 content（提示词内容）或 shot", "優先取 human_message");
+  assert.equal(it.error, "text 节点必须填 content（提示词内容）或 shot", "优先取 human_message");
   assert.equal(s.turnActive, true);
 });
 
-test("tool.result 失敗但無 error 欄位時，error 為 undefined（不假造錯誤面）", () => {
+test("tool.result 失败但无 error 栏位时，error 为 undefined（不假造错误面）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: false } }));
 
@@ -126,29 +126,29 @@ test("tool.result 失敗但無 error 欄位時，error 為 undefined（不假造
   assert.equal(it.error, undefined);
 });
 
-test("tool.result 只回填最近一個同名 running 條目", () => {
+test("tool.result 只回填最近一个同名 running 条目", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.result", event_id: 3, data: { tool: "gen", ok: true, cost_coins: 1 } }));
 
   const items = s.items as AgentToolCallItem[];
-  assert.equal(items[0]?.status, "running", "前面的同名調用不受影響");
+  assert.equal(items[0]?.status, "running", "前面的同名调用不受影响");
   assert.equal(items[1]?.status, "ok");
   assert.equal(items[1]?.costCoins, 1);
 });
 
-test("tool.progress 回填同名 running 卡的進度（逐鏡中間態）", () => {
+test("tool.progress 回填同名 running 卡的进度（逐镜中间态）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "keyframe_render" } }));
-  s = agentChatReducer(s, evt({ name: "tool.progress", event_id: 2, data: { tool: "keyframe_render", done: 3, total: 8, label: "渲染關鍵幀" } }));
+  s = agentChatReducer(s, evt({ name: "tool.progress", event_id: 2, data: { tool: "keyframe_render", done: 3, total: 8, label: "渲染关键帧" } }));
 
   const items = s.items as AgentToolCallItem[];
-  assert.equal(items.length, 1, "進度不新建條目");
-  assert.equal(items[0]?.status, "running", "進度不改終態");
-  assert.deepEqual(items[0]?.progress, { done: 3, total: 8, label: "渲染關鍵幀" });
+  assert.equal(items.length, 1, "进度不新建条目");
+  assert.equal(items[0]?.status, "running", "进度不改终态");
+  assert.deepEqual(items[0]?.progress, { done: 3, total: 8, label: "渲染关键帧" });
   assert.equal(s.turnActive, true);
 });
 
-test("tool.progress 逐鏡跳動：後一幀覆蓋前一幀，id 不變", () => {
+test("tool.progress 逐镜跳动：后一帧覆盖前一帧，id 不变", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "keyframe_render" } }));
   const firstId = (s.items[0] as AgentToolCallItem).id;
   s = agentChatReducer(s, evt({ name: "tool.progress", event_id: 2, data: { tool: "keyframe_render", done: 1, total: 8 } }));
@@ -156,40 +156,40 @@ test("tool.progress 逐鏡跳動：後一幀覆蓋前一幀，id 不變", () => 
 
   const items = s.items as AgentToolCallItem[];
   assert.equal(items.length, 1);
-  assert.equal(items[0]?.id, firstId, "同一張卡原地更新");
+  assert.equal(items[0]?.id, firstId, "同一张卡原地更新");
   assert.deepEqual(items[0]?.progress, { done: 2, total: 8 });
 });
 
-test("tool.progress 找不到同名 running 卡時丟棄（invoke 丟了/已結算）", () => {
-  // 無任何條目
+test("tool.progress 找不到同名 running 卡时丢弃（invoke 丢了/已结算）", () => {
+  // 无任何条目
   const empty = agentChatReducer(EMPTY, evt({ name: "tool.progress", event_id: 1, data: { tool: "gen", done: 1, total: 4 } }));
-  assert.equal(empty.items.length, 0, "無 running 卡不憑空造條目");
+  assert.equal(empty.items.length, 0, "无 running 卡不凭空造条目");
 
-  // 已結算（ok）的卡不再吃進度
+  // 已结算（ok）的卡不再吃进度
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: true } }));
   s = agentChatReducer(s, evt({ name: "tool.progress", event_id: 3, data: { tool: "gen", done: 1, total: 4 } }));
   const items = s.items as AgentToolCallItem[];
   assert.equal(items.length, 1);
-  assert.equal(items[0]?.progress, undefined, "終態卡不被進度污染");
+  assert.equal(items[0]?.progress, undefined, "终态卡不被进度污染");
 });
 
-test("tool.progress 只回填最近一個同名 running 條目", () => {
+test("tool.progress 只回填最近一个同名 running 条目", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.progress", event_id: 3, data: { tool: "gen", done: 1, total: 5 } }));
 
   const items = s.items as AgentToolCallItem[];
-  assert.equal(items[0]?.progress, undefined, "前面的同名調用不受影響");
+  assert.equal(items[0]?.progress, undefined, "前面的同名调用不受影响");
   assert.deepEqual(items[1]?.progress, { done: 1, total: 5 });
 });
 
-test("image.done 同 url 去重，不同 url 各自成條目", () => {
+test("image.done 同 url 去重，不同 url 各自成条目", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "image.done", event_id: 1, data: { url: "https://x/1.png", cost_coins: 2 } }));
   assert.equal(s.items.length, 1);
 
   s = agentChatReducer(s, evt({ name: "image.done", event_id: 2, data: { url: "https://x/1.png", cost_coins: 2 } }));
-  assert.equal(s.items.length, 1, "同 url 重送必須被吃掉");
+  assert.equal(s.items.length, 1, "同 url 重送必须被吃掉");
 
   s = agentChatReducer(s, evt({ name: "image.done", event_id: 3, data: { url: "https://x/2.png" } }));
   assert.equal(s.items.length, 2);
@@ -199,7 +199,7 @@ test("image.done 同 url 去重，不同 url 各自成條目", () => {
   assert.equal(second.url, "https://x/2.png");
 });
 
-test("video.done 同 url 去重，不同 url 各自成條目，mediaKind 透傳", () => {
+test("video.done 同 url 去重，不同 url 各自成条目，mediaKind 透传", () => {
   let s = agentChatReducer(
     EMPTY,
     evt({ name: "video.done", event_id: 1, data: { url: "https://x/a.mp4", cost_coins: 5, media_kind: "film" } }),
@@ -208,7 +208,7 @@ test("video.done 同 url 去重，不同 url 各自成條目，mediaKind 透傳"
   assert.equal(s.turnActive, true);
 
   s = agentChatReducer(s, evt({ name: "video.done", event_id: 2, data: { url: "https://x/a.mp4", cost_coins: 5 } }));
-  assert.equal(s.items.length, 1, "同 url 重送必須被吃掉");
+  assert.equal(s.items.length, 1, "同 url 重送必须被吃掉");
 
   s = agentChatReducer(s, evt({ name: "video.done", event_id: 3, data: { url: "https://x/b.mp4", media_kind: "video" } }));
   assert.equal(s.items.length, 2);
@@ -218,24 +218,24 @@ test("video.done 同 url 去重，不同 url 各自成條目，mediaKind 透傳"
   assert.equal(first.kind, "video");
   assert.equal(first.url, "https://x/a.mp4");
   assert.equal(first.costCoins, 5);
-  assert.equal(first.mediaKind, "film", "media_kind 要透傳到條目");
+  assert.equal(first.mediaKind, "film", "media_kind 要透传到条目");
   assert.equal(second.kind, "video");
   assert.equal(second.url, "https://x/b.mp4");
   assert.equal(second.mediaKind, "video");
 
-  // 缺 media_kind 時條目留 undefined（展示層回落「影片」）。
+  // 缺 media_kind 时条目留 undefined（展示层回落「影片」）。
   s = agentChatReducer(s, evt({ name: "video.done", event_id: 4, data: { url: "https://x/c.mp4" } }));
   const third = s.items[2] as AgentVideoItem;
   assert.equal(third.mediaKind, undefined);
 });
 
-test("video.done 與 image.done 互不影響去重（url 相同也各自成條目）", () => {
+test("video.done 与 image.done 互不影响去重（url 相同也各自成条目）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "image.done", event_id: 1, data: { url: "https://x/same" } }));
   s = agentChatReducer(s, evt({ name: "video.done", event_id: 2, data: { url: "https://x/same" } }));
   assert.equal(s.items.length, 2, "去重只比同 kind 的 url");
 });
 
-test("audio.done 同 url 去重，不同 url 各自成條目，mediaKind 透傳", () => {
+test("audio.done 同 url 去重，不同 url 各自成条目，mediaKind 透传", () => {
   let s = agentChatReducer(
     EMPTY,
     evt({ name: "audio.done", event_id: 1, data: { url: "https://x/a.m4a", cost_coins: 3, media_kind: "music" } }),
@@ -244,7 +244,7 @@ test("audio.done 同 url 去重，不同 url 各自成條目，mediaKind 透傳"
   assert.equal(s.turnActive, true);
 
   s = agentChatReducer(s, evt({ name: "audio.done", event_id: 2, data: { url: "https://x/a.m4a", cost_coins: 3 } }));
-  assert.equal(s.items.length, 1, "同 url 重送必須被吃掉");
+  assert.equal(s.items.length, 1, "同 url 重送必须被吃掉");
 
   s = agentChatReducer(s, evt({ name: "audio.done", event_id: 3, data: { url: "https://x/b.mp3", media_kind: "audio" } }));
   assert.equal(s.items.length, 2);
@@ -254,56 +254,56 @@ test("audio.done 同 url 去重，不同 url 各自成條目，mediaKind 透傳"
   assert.equal(first.kind, "audio");
   assert.equal(first.url, "https://x/a.m4a");
   assert.equal(first.costCoins, 3);
-  assert.equal(first.mediaKind, "music", "media_kind 要透傳到條目");
-  assert.equal(first.seq, 1, "seq 是會話內第幾條音頻，不是網關 event_id");
+  assert.equal(first.mediaKind, "music", "media_kind 要透传到条目");
+  assert.equal(first.seq, 1, "seq 是会话内第几条音频，不是网关 event_id");
   assert.equal(second.kind, "audio");
   assert.equal(second.url, "https://x/b.mp3");
   assert.equal(second.mediaKind, "audio");
   assert.equal(second.seq, 2);
 
-  // 缺 media_kind 時條目留 undefined（展示層回落「音频」）。
+  // 缺 media_kind 时条目留 undefined（展示层回落「音频」）。
   s = agentChatReducer(s, evt({ name: "audio.done", event_id: 4, data: { url: "https://x/c.wav" } }));
   const third = s.items[2] as AgentAudioItem;
   assert.equal(third.mediaKind, undefined);
 
-  // 音頻與影片互不影響去重（url 相同也各自成條目）。
+  // 音频与影片互不影响去重（url 相同也各自成条目）。
   let both = agentChatReducer(EMPTY, evt({ name: "video.done", event_id: 1, data: { url: "https://x/same" } }));
   both = agentChatReducer(both, evt({ name: "audio.done", event_id: 2, data: { url: "https://x/same" } }));
   assert.equal(both.items.length, 2, "去重只比同 kind 的 url");
 });
 
-test("event_id <= lastEventId 的幀整幀丟棄（斷線重連去重）", () => {
+test("event_id <= lastEventId 的帧整帧丢弃（断线重连去重）", () => {
   const s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 3, data: { text: "hi" } }));
   assert.equal(s.lastEventId, 3);
 
-  // 同序號重放：回同一個 reference，內容不重複加。
+  // 同序号重放：回同一个 reference，内容不重复加。
   const frozen = s;
   const replayed = agentChatReducer(frozen, evt({ name: "message.delta", event_id: 3, data: { text: "X" } }));
   assert.equal(replayed, frozen);
   assert.equal(replayed.items.length, 1);
   assert.equal((replayed.items[0] as AgentAssistantTextItem).text, "hi");
 
-  // 更舊的序號（例如 reconnect 前的最後一幀）也一樣被吃掉。
+  // 更旧的序号（例如 reconnect 前的最后一帧）也一样被吃掉。
   const older = agentChatReducer(frozen, evt({ name: "tool.invoke", event_id: 1, data: { tool: "x" } }));
   assert.equal(older, frozen);
   assert.equal(older.items.length, 1);
 
-  // 新序號正常處理，且 lastEventId 推進。
+  // 新序号正常处理，且 lastEventId 推进。
   const newer = agentChatReducer(frozen, evt({ name: "message.delta", event_id: 4, data: { text: "!" } }));
   assert.equal(newer.lastEventId, 4);
 });
 
-test("turn.done 收掉還在轉的工具與 streaming 標記", () => {
+test("turn.done 收掉还在转的工具与 streaming 标记", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 1, data: { text: "a" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "t1" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 3, data: {} }));
 
   assert.equal(s.turnActive, false);
   assert.equal((s.items[0] as AgentAssistantTextItem).streaming, false);
-  assert.equal((s.items[1] as AgentToolCallItem).status, "failed", "一輪結束不能留一個永遠在轉的工具");
+  assert.equal((s.items[1] as AgentToolCallItem).status, "failed", "一轮结束不能留一个永远在转的工具");
 });
 
-test("session.closed 清空待確認、停掉 streaming/工具、留 notice", () => {
+test("session.closed 清空待确认、停掉 streaming/工具、留 notice", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "confirm.request", event_id: 1, data: { request_id: "r1", amount_coins: 10 } }));
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "a" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 3, data: { tool: "t" } }));
@@ -314,7 +314,7 @@ test("session.closed 清空待確認、停掉 streaming/工具、留 notice", ()
   assert.equal(s.pendingConfirms.length, 0);
   assert.equal(s.pendingQuestions.length, 0);
   assert.equal(s.turnActive, false);
-  // confirm.request 不產條目，所以 items = [assistant, tool, notice]。
+  // confirm.request 不产条目，所以 items = [assistant, tool, notice]。
   assert.equal((s.items[0] as AgentAssistantTextItem).streaming, false);
   assert.equal((s.items[1] as AgentToolCallItem).status, "failed");
   const last = s.items[s.items.length - 1] as AgentNoticeItem;
@@ -326,10 +326,10 @@ test("confirm.request 同 requestId 去重", () => {
   s = agentChatReducer(s, evt({ name: "confirm.request", event_id: 2, data: { request_id: "r1", amount_coins: 9 } }));
 
   assert.equal(s.pendingConfirms.length, 1);
-  assert.equal(s.pendingConfirms[0]?.amountCoins, 5, "以先到的金額為準");
+  assert.equal(s.pendingConfirms[0]?.amountCoins, 5, "以先到的金额为准");
 });
 
-test("confirm.resolved 移除對應待確認並留 notice", () => {
+test("confirm.resolved 移除对应待确认并留 notice", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "confirm.request", event_id: 1, data: { request_id: "r1", amount_coins: 5 } }));
   s = agentChatReducer(s, evt({ name: "confirm.resolved", event_id: 2, data: { request_id: "r1", approved: false } }));
 
@@ -342,9 +342,9 @@ test("confirm.resolved 移除對應待確認並留 notice", () => {
 test("question.request 同 requestId 去重，replied / rejected 清掉 pending", () => {
   const questions = [
     {
-      question: "要什麼規格？",
-      header: "規格",
-      options: [{ label: "10 秒", description: "穩" }, { label: "15 秒" }],
+      question: "要什么规格？",
+      header: "规格",
+      options: [{ label: "10 秒", description: "稳" }, { label: "15 秒" }],
     },
   ];
   let s = agentChatReducer(EMPTY, evt({
@@ -382,7 +382,7 @@ test("question.request 同 requestId 去重，replied / rejected 清掉 pending"
   assert.equal((s.items[s.items.length - 1] as AgentNoticeItem).text, "已取消。");
 });
 
-test("confirm.resolved 對從沒看過的 requestId 不拋錯（另一台裝置裁的）", () => {
+test("confirm.resolved 对从没看过的 requestId 不抛错（另一台装置裁的）", () => {
   const s = agentChatReducer(EMPTY, evt({ name: "confirm.resolved", event_id: 1, data: { request_id: "never-seen", approved: true } }));
 
   assert.equal(s.pendingConfirms.length, 0);
@@ -390,7 +390,7 @@ test("confirm.resolved 對從沒看過的 requestId 不拋錯（另一台裝置�
   assert.equal(s.items[0]?.kind, "notice");
 });
 
-test("quota.changed 替換額度", () => {
+test("quota.changed 替换额度", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "quota.changed", event_id: 1, data: { balance_coins: 20, currency: "coins", available: true } }));
   assert.equal(s.quota?.balanceCoins, 20);
   assert.equal(s.quota?.currency, "coins");
@@ -401,17 +401,17 @@ test("quota.changed 替換額度", () => {
   assert.equal(s.quota?.available, false);
 });
 
-test("session.error 留 error notice，但不終結會話", () => {
-  const s = agentChatReducer(EMPTY, evt({ name: "session.error", event_id: 1, data: { code: "tool_failed", message: "出圖失敗" } }));
+test("session.error 留 error notice，但不终结会话", () => {
+  const s = agentChatReducer(EMPTY, evt({ name: "session.error", event_id: 1, data: { code: "tool_failed", message: "出图失败" } }));
 
-  assert.equal(s.closed, false, "錯誤不該關掉會話");
+  assert.equal(s.closed, false, "错误不该关掉会话");
   const last = s.items[s.items.length - 1] as AgentNoticeItem;
   assert.equal(last.kind, "notice");
   assert.equal(last.tone, "error");
-  assert.equal(last.text, "出圖失敗");
+  assert.equal(last.text, "出图失败");
 });
 
-test("image.failed 當場留 error notice（refunded 講退款、普通失敗講原因）", () => {
+test("image.failed 当场留 error notice（refunded 讲退款、普通失败讲原因）", () => {
   const refunded = agentChatReducer(
     EMPTY,
     evt({ name: "image.failed", event_id: 1, data: { task_id: "t1", reason: "已退款：deadline exceeded", refunded: true } }),
@@ -430,10 +430,10 @@ test("image.failed 當場留 error notice（refunded 講退款、普通失敗講
   const n2 = failed.items[failed.items.length - 1] as AgentNoticeItem;
   assert.equal(n2.tone, "error");
   assert.match(n2.text, /生成失败/);
-  assert.equal(failed.turnActive, true, "失敗也是產出訊號，turn 照樣活著等 turn.done");
+  assert.equal(failed.turnActive, true, "失败也是产出讯号，turn 照样活著等 turn.done");
 });
 
-test("turnActive 由產出事件打開、turn.done 關掉", () => {
+test("turnActive 由产出事件打开、turn.done 关掉", () => {
   assert.equal(EMPTY.turnActive, false);
 
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "t" } }));
@@ -446,7 +446,7 @@ test("turnActive 由產出事件打開、turn.done 關掉", () => {
   assert.equal(s.turnActive, false);
 });
 
-test("reducer 不 mutate 輸入 state（條目陣列與內容原封不動）", () => {
+test("reducer 不 mutate 输入 state（条目阵列与内容原封不动）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 1, data: { text: "a" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "t" } }));
 
@@ -466,11 +466,11 @@ test("reducer 不 mutate 輸入 state（條目陣列與內容原封不動）", (
   );
   assert.equal(before.lastEventId, lastEventIdSnapshot);
   assert.deepEqual(before.pendingConfirms, pendingSnapshot);
-  assert.equal((before.items[1] as AgentToolCallItem).status, "running", "原條目不能被回填改掉");
+  assert.equal((before.items[1] as AgentToolCallItem).status, "running", "原条目不能被回填改掉");
   assert.equal((next.items[1] as AgentToolCallItem).status, "ok");
 });
 
-test("appendUserTurn 樂觀插入使用者訊息，id 穩定不碰撞", () => {
+test("appendUserTurn 乐观插入使用者讯息，id 稳定不碰撞", () => {
   let s = appendUserTurn(EMPTY, "hello");
   assert.equal(s.items.length, 1);
   const first = s.items[0] as AgentUserTurnItem;
@@ -481,16 +481,16 @@ test("appendUserTurn 樂觀插入使用者訊息，id 穩定不碰撞", () => {
   s = appendUserTurn(s, "world", [{ kind: "image", url: "https://x/a.png" }]);
   assert.equal(s.items.length, 2);
   const second = s.items[1] as AgentUserTurnItem;
-  assert.notEqual(second.id, first.id, "兩則使用者訊息的 id 不能碰撞");
+  assert.notEqual(second.id, first.id, "两则使用者讯息的 id 不能碰撞");
   assert.equal(second.attachments?.length, 1);
 });
 
-test("applyQuotaSnapshot 填入額度", () => {
+test("applyQuotaSnapshot 填入额度", () => {
   const s = applyQuotaSnapshot(EMPTY, { balanceCoins: 12, currency: "coins", available: true });
   assert.deepEqual(s.quota, { balanceCoins: 12, currency: "coins", available: true });
 });
 
-test("條目 id 是決定性的：同樣事件序列產出同樣結果", () => {
+test("条目 id 是决定性的：同样事件序列产出同样结果", () => {
   const run = () => {
     let s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 1, data: { text: "a" } }));
     s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "t" } }));
@@ -503,46 +503,46 @@ test("條目 id 是決定性的：同樣事件序列產出同樣結果", () => {
 
 // ── turn.status：网关暂态状态行（2026-08-30 正文污染根治）──────────────
 
-test("turn.status 落 turnStatus 暫態欄位，不進 items 正文", () => {
-  const s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "處理中（已 45s）：工具與子代理仍在執行。" } }));
-  assert.equal(s.turnStatus, "處理中（已 45s）：工具與子代理仍在執行。");
+test("turn.status 落 turnStatus 暂态栏位，不进 items 正文", () => {
+  const s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "处理中（已 45s）：工具与子代理仍在执行。" } }));
+  assert.equal(s.turnStatus, "处理中（已 45s）：工具与子代理仍在执行。");
   assert.equal(s.turnActive, true);
   assert.equal(s.items.length, 0);
 });
 
-test("turn.status 新狀態替換舊狀態（單行原地刷新，不累加）", () => {
-  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "處理中（已 45s）：工具與子代理仍在執行。" } }));
-  s = agentChatReducer(s, evt({ name: "turn.status", event_id: 2, data: { text: "處理中（已 90s）：可繼續等待；若想中斷，按停止後改派更小範圍。" } }));
-  assert.equal(s.turnStatus, "處理中（已 90s）：可繼續等待；若想中斷，按停止後改派更小範圍。");
+test("turn.status 新状态替换旧状态（单行原地刷新，不累加）", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "处理中（已 45s）：工具与子代理仍在执行。" } }));
+  s = agentChatReducer(s, evt({ name: "turn.status", event_id: 2, data: { text: "处理中（已 90s）：可继续等待；若想中断，按停止后改派更小范围。" } }));
+  assert.equal(s.turnStatus, "处理中（已 90s）：可继续等待；若想中断，按停止后改派更小范围。");
 });
 
-test("真實正文 message.delta 到達即清 turnStatus", () => {
-  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "處理中（已 45s）：工具與子代理仍在執行。" } }));
+test("真实正文 message.delta 到达即清 turnStatus", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "处理中（已 45s）：工具与子代理仍在执行。" } }));
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "搞定，" } }));
   assert.equal(s.turnStatus, undefined);
 });
 
-test("tool.invoke 期間 turnStatus 保留（工具執行中狀態行仍成立）", () => {
-  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "處理中（已 45s）：工具與子代理仍在執行。" } }));
+test("tool.invoke 期间 turnStatus 保留（工具执行中状态行仍成立）", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "处理中（已 45s）：工具与子代理仍在执行。" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "bash", args_summary: "curl …" } }));
-  assert.equal(s.turnStatus, "處理中（已 45s）：工具與子代理仍在執行。");
+  assert.equal(s.turnStatus, "处理中（已 45s）：工具与子代理仍在执行。");
 });
 
 test("turn.done 清 turnStatus", () => {
-  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "處理中（已 45s）：工具與子代理仍在執行。" } }));
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "处理中（已 45s）：工具与子代理仍在执行。" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 2, data: {} }));
   assert.equal(s.turnStatus, undefined);
 });
 
-test("appendUserTurn 新輪開始清 turnStatus", () => {
-  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "處理中（已 45s）：工具與子代理仍在執行。" } }));
+test("appendUserTurn 新轮开始清 turnStatus", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "处理中（已 45s）：工具与子代理仍在执行。" } }));
   s = appendUserTurn(s, "再画一张");
   assert.equal(s.turnStatus, undefined);
 });
 
 // ── 会话已关闭后的迟到帧守卫（P0 回归） ─────────────────────────
 
-test("state.closed 後，遲到的 message.delta 不再被處理（items 不變，不重新開 assistant 條目）", () => {
+test("state.closed 后，迟到的 message.delta 不再被处理（items 不变，不重新开 assistant 条目）", () => {
   const closed = agentChatReducer(EMPTY, evt({ name: "session.closed", event_id: 1, data: { reason: "quota_exhausted" } }));
   assert.equal(closed.closed, true);
   const itemsBefore = closed.items;
@@ -560,7 +560,7 @@ test("state.closed 後，遲到的 message.delta 不再被處理（items 不變�
   assert.equal(after.closed, true);
 });
 
-test("state.closed 後，遲到的 confirm.request 不再讓 pendingConfirms 死會話復活", () => {
+test("state.closed 后，迟到的 confirm.request 不再让 pendingConfirms 死会话复活", () => {
   const closed = agentChatReducer(EMPTY, evt({ name: "session.closed", event_id: 1, data: {} }));
   assert.equal(closed.pendingConfirms.length, 0);
 
@@ -572,7 +572,7 @@ test("state.closed 後，遲到的 confirm.request 不再讓 pendingConfirms 死
   assert.equal(after.closed, true);
 });
 
-test("已關閉後再次收到 session.closed（本端 end() 合成的 event_id:0 收尾帧）是幂等 no-op", () => {
+test("已关闭后再次收到 session.closed（本端 end() 合成的 event_id:0 收尾帧）是幂等 no-op", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 1, data: { text: "a" } }));
   s = agentChatReducer(s, evt({ name: "session.closed", event_id: 2, data: { reason: "user_ended" } }));
   assert.equal(s.closed, true);
@@ -593,7 +593,7 @@ test("已關閉後再次收到 session.closed（本端 end() 合成的 event_id:
   );
 });
 
-test("event_id>0 的既有去重行為不受影響（eventId<=lastEventId 整幀丟棄）", () => {
+test("event_id>0 的既有去重行为不受影响（eventId<=lastEventId 整帧丢弃）", () => {
   const s = agentChatReducer(EMPTY, evt({ name: "message.delta", event_id: 3, data: { text: "hi" } }));
   assert.equal(s.lastEventId, 3);
 
@@ -611,9 +611,9 @@ test("event_id>0 的既有去重行為不受影響（eventId<=lastEventId 整幀
   assert.equal(newer.lastEventId, 4);
 });
 
-// ── 子代理：狀態單一真源（F1）+ 產出保留（F3）+ 全文不截斷（F4）──────────
+// ── 子代理：状态单一真源（F1）+ 产出保留（F3）+ 全文不截断（F4）──────────
 
-test("F1 async 派遣：工具卡先回 ok，子代理後失敗 → 卡片同步拉回失敗（不兩處打臉）", () => {
+test("F1 async 派遣：工具卡先回 ok，子代理后失败 → 卡片同步拉回失败（不两处打脸）", () => {
   let s = agentChatReducer(
     EMPTY,
     evt({
@@ -628,13 +628,13 @@ test("F1 async 派遣：工具卡先回 ok，子代理後失敗 → 卡片同步
   assert.equal((s.items[0] as AgentToolCallItem).status, "ok");
   assert.equal(s.items.find((it) => it.kind === "subagent")?.status, "running");
 
-  // 子代理随后被中止/失敗：兩處狀態必須一致，不能一處「已完成」一處「失败」。
+  // 子代理随后被中止/失败：两处状态必须一致，不能一处「已完成」一处「失败」。
   s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 4, data: { id: "sa3", status: "error", summary: "被中止" } }));
   assert.equal((s.items[0] as AgentToolCallItem).status, "failed");
   assert.equal((s.items[1] as AgentSubagentItem).status, "error");
 });
 
-test("F1 停止≠失败：subagent.done status=stopped → 派遣卡走 ok 同款中性結算、子代理標已停止（0920 gateway 契约）", () => {
+test("F1 停止≠失败：subagent.done status=stopped → 派遣卡走 ok 同款中性结算、子代理标已停止（0920 gateway 契约）", () => {
   let s = agentChatReducer(
     EMPTY,
     evt({
@@ -651,12 +651,12 @@ test("F1 停止≠失败：subagent.done status=stopped → 派遣卡走 ok 同�
   const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(tool && sub);
   assert.equal(sub.status, "stopped", "人工停止成功＝中性 stopped，不判 error");
-  assert.equal(tool.status, "ok", "派遣卡走 ok 同款中性結算，不打红成 failed");
-  assert.equal(tool.error, undefined, "不產生錯誤文案");
+  assert.equal(tool.status, "ok", "派遣卡走 ok 同款中性结算，不打红成 failed");
+  assert.equal(tool.error, undefined, "不产生错误文案");
   assert.ok(!s.items.some((it) => it.kind === "tool" && (it as AgentToolCallItem).status === "failed"), "没有任何卡片被打成失败");
 });
 
-test("F1 子代理狀態單一真源：started 綁定 dispatch 工具卡，done 一次結兩處", () => {
+test("F1 子代理状态单一真源：started 绑定 dispatch 工具卡，done 一次结两处", () => {
   let s = agentChatReducer(
     EMPTY,
     evt({
@@ -670,7 +670,7 @@ test("F1 子代理狀態單一真源：started 綁定 dispatch 工具卡，done 
   const toolBefore = s.items.find((it): it is AgentToolCallItem => it.kind === "tool");
   const subBefore = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(toolBefore && subBefore);
-  assert.equal(toolBefore.subagentId, "sa1", "started 必須把子代理綁到剛派出的工具卡上");
+  assert.equal(toolBefore.subagentId, "sa1", "started 必须把子代理绑到刚派出的工具卡上");
   assert.equal(toolBefore.status, "running");
   assert.equal(subBefore.status, "running");
 
@@ -680,13 +680,13 @@ test("F1 子代理狀態單一真源：started 綁定 dispatch 工具卡，done 
   const subAfter = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(toolAfter && subAfter);
   assert.equal(subAfter.status, "ok");
-  assert.equal(toolAfter.status, "ok", "子代理完成即結算綁定的工具卡：同一批任務不許兩處狀態互相打臉");
-  // 同一子代理在畫面模型裡只有一處狀態，且是完成態。
+  assert.equal(toolAfter.status, "ok", "子代理完成即结算绑定的工具卡：同一批任务不许两处状态互相打脸");
+  // 同一子代理在画面模型里只有一处状态，且是完成态。
   const statuses = s.items
     .filter((it) => it.kind === "tool" && (it as AgentToolCallItem).subagentId === "sa1")
     .map((it) => (it as AgentToolCallItem).status);
   assert.deepEqual(statuses, ["ok"]);
-  assert.ok(!s.items.some((it) => it.kind === "subagent" && it.status === "running"), "不得還有一處說運行中");
+  assert.ok(!s.items.some((it) => it.kind === "subagent" && it.status === "running"), "不得还有一处说运行中");
 });
 
 test("F1 跨回合在跑不退场：started 未 done + turn.done → 工具卡照旧判死、running 子代理原样保留（0921 契约）", () => {
@@ -699,40 +699,40 @@ test("F1 跨回合在跑不退场：started 未 done + turn.done → 工具卡�
     }),
   );
   s = agentChatReducer(s, evt({ name: "subagent.started", event_id: 2, data: { id: "sa2", label: "视频全量模型普查" } }));
-  s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 3, data: { id: "sa2", text: "610 秒零輸出" } }));
+  s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 3, data: { id: "sa2", text: "610 秒零输出" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 4, data: {} }));
 
   const tool = s.items.find((it): it is AgentToolCallItem => it.kind === "tool" && it.subagentId === "sa2");
   const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(tool && sub);
-  assert.notEqual(tool.status, "running", "收尾不能留一張永遠在轉的工具卡");
+  assert.notEqual(tool.status, "running", "收尾不能留一张永远在转的工具卡");
   assert.equal(tool.status, "failed");
-  assert.equal(sub.status, "running", "回合收尾不得退場在跑的子代理：它完工才 wakeParent 發 done，那時才該退場");
-  assert.equal(sub.text, "610 秒零輸出", "串流產出留在條目上，定案前不轉存");
-  assert.ok(!s.items.some((it) => it.kind === "subagent_result"), "未定態不轉存：終態由 subagent.done 幀獨佔裁決");
+  assert.equal(sub.status, "running", "回合收尾不得退场在跑的子代理：它完工才 wakeParent 发 done，那时才该退场");
+  assert.equal(sub.text, "610 秒零输出", "串流产出留在条目上，定案前不转存");
+  assert.ok(!s.items.some((it) => it.kind === "subagent_result"), "未定态不转存：终态由 subagent.done 帧独占裁决");
 });
 
-test("F3 中止不銷毀產出：subagent.done 的 summary 轉存成產出卡留在轉錄裡", () => {
+test("F3 中止不销毁产出：subagent.done 的 summary 转存成产出卡留在转录里", () => {
   const summary = [
-    "| 模型 | 720p 單價 | 15s｜10s｜5s |",
+    "| 模型 | 720p 单价 | 15s｜10s｜5s |",
     "|---|---|---|",
-    "| seedance-2.0 | 13 幣/條 | 15s=10s=13 |",
-    "seedance-2.0 近 24h 9 筆 0 交付（全退款）",
+    "| seedance-2.0 | 13 币/条 | 15s=10s=13 |",
+    "seedance-2.0 近 24h 9 笔 0 交付（全退款）",
   ].join("\n");
   let s = agentChatReducer(EMPTY, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "视频牌价预检" } }));
   s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 2, data: { id: "sa1", status: "ok", summary } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 3, data: {} }));
 
   const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(report, "summary 必須轉存成產出卡，不得隨 clearSubagentItems 消失");
+  assert.ok(report, "summary 必须转存成产出卡，不得随 clearSubagentItems 消失");
   assert.equal(report.text, summary);
   assert.equal(report.label, "视频牌价预检");
   assert.equal(report.status, "ok");
   assert.equal(report.subagentId, "sa1");
 });
 
-test("F3 中止走 session.error 也不銷毀產出：running 條目跨中止保留（0921 契約）", () => {
-  const stream = "權威牌價表：seedance-2.0 13 幣/條\nseedance-2.0-fast 10 幣/條";
+test("F3 中止走 session.error 也不销毁产出：running 条目跨中止保留（0921 契约）", () => {
+  const stream = "权威牌价表：seedance-2.0 13 币/条\nseedance-2.0-fast 10 币/条";
   let s = agentChatReducer(EMPTY, evt({ name: "subagent.started", event_id: 1, data: { id: "sa9", label: "视频全量模型普查" } }));
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 2, data: { id: "sa9", text: stream } }));
   s = agentChatReducer(
@@ -741,72 +741,72 @@ test("F3 中止走 session.error 也不銷毀產出：running 條目跨中止保
   );
 
   const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
-  assert.ok(sub, "中止當下 running 條目原樣保留——中止後畫面不能比中止前更空");
-  assert.equal(sub.status, "running", "終態留給 gateway 的 subagent.done（0920 停止閘會發 stopped）獨佔裁決");
-  assert.equal(sub.text, stream, "串流全文留在條目上，不丟棄");
+  assert.ok(sub, "中止当下 running 条目原样保留——中止后画面不能比中止前更空");
+  assert.equal(sub.status, "running", "终态留给 gateway 的 subagent.done（0920 停止闸会发 stopped）独占裁决");
+  assert.equal(sub.text, stream, "串流全文留在条目上，不丢弃");
 });
 
-test("F4 超長文字進模型時保留全文（截斷只發生在渲染層）", () => {
-  const lines = Array.from({ length: 120 }, (_, i) => `第 ${i} 行：權威牌價與交付證據`);
+test("F4 超长文字进模型时保留全文（截断只发生在渲染层）", () => {
+  const lines = Array.from({ length: 120 }, (_, i) => `第 ${i} 行：权威牌价与交付证据`);
   const long = lines.join("\n");
   let s = agentChatReducer(EMPTY, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "研究" } }));
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 2, data: { id: "sa1", text: long } }));
 
   const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
-  assert.equal(sub.text, long, "模型層保留全文");
-  assert.equal(sub.lastLine, lines[lines.length - 1], "lastLine 只是渲染預覽（末行）");
+  assert.equal(sub.text, long, "模型层保留全文");
+  assert.equal(sub.lastLine, lines[lines.length - 1], "lastLine 只是渲染预览（末行）");
 
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 3, data: {} }));
-  // 0921 契約：running 條目跨回合保留，回合收尾不退場也不轉存——全文仍留在條目上。
+  // 0921 契约：running 条目跨回合保留，回合收尾不退场也不转存——全文仍留在条目上。
   const kept = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
-  assert.ok(kept, "running 條目跨回合保留，收尾不得退場");
+  assert.ok(kept, "running 条目跨回合保留，收尾不得退场");
   assert.equal(kept.status, "running");
-  assert.ok(!s.items.some((it) => it.kind === "subagent_result"), "未定態不轉存：等 done 幀");
-  assert.equal(kept.text, long, "模型層保留全文（截斷只發生在渲染層）");
+  assert.ok(!s.items.some((it) => it.kind === "subagent_result"), "未定态不转存：等 done 帧");
+  assert.equal(kept.text, long, "模型层保留全文（截断只发生在渲染层）");
 
-  // 完工的 done 幀落在後續回合，下一次收尾才轉存成帶全文的產出卡。
+  // 完工的 done 帧落在后续回合，下一次收尾才转存成带全文的产出卡。
   s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 4, data: { id: "sa1", status: "ok" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 5, data: {} }));
   const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(report, "定案後的收尾才轉存產出卡");
-  assert.equal(report.text, long, "產出卡帶全文");
-  assert.ok(report.text.includes("第 0 行"), "開頭沒有被砍掉");
-  assert.ok(report.text.includes(lines[lines.length - 1]), "結尾沒有被砍掉");
+  assert.ok(report, "定案后的收尾才转存产出卡");
+  assert.equal(report.text, long, "产出卡带全文");
+  assert.ok(report.text.includes("第 0 行"), "开头没有被砍掉");
+  assert.ok(report.text.includes(lines[lines.length - 1]), "结尾没有被砍掉");
 });
 
-// ── S2 活動流：reasoning 只餵跑馬燈，不污染交付物（2026-09-11 跨片契約）──────
+// ── S2 活动流：reasoning 只喂跑马灯，不污染交付物（2026-09-11 跨片契约）──────
 
-test("S2 活動流：kind=reasoning 的 delta 只進 activity，不污染 text / lastLine", () => {
+test("S2 活动流：kind=reasoning 的 delta 只进 activity，不污染 text / lastLine", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "搜索素材" } }));
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 2, data: { id: "sa1", text: "先看看候选", kind: "reasoning" } }));
 
   let sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
-  assert.equal(sub.activity, "先看看候选", "reasoning 進活動流（跑馬燈才有東西可滾）");
-  // text 是交付物：產出卡會把 text 當全文帶走，混入思考就是謊報交付物。
-  assert.equal(sub.text, undefined, "reasoning 不得進 text");
-  assert.equal(sub.lastLine, "", "reasoning 不得進 lastLine");
+  assert.equal(sub.activity, "先看看候选", "reasoning 进活动流（跑马灯才有东西可滚）");
+  // text 是交付物：产出卡会把 text 当全文带走，混入思考就是谎报交付物。
+  assert.equal(sub.text, undefined, "reasoning 不得进 text");
+  assert.equal(sub.lastLine, "", "reasoning 不得进 lastLine");
   assert.equal(sub.status, "running");
   assert.equal(s.turnActive, true);
 
-  // 尾段累加：第二幀 reasoning 接在 activity 尾巴上。
-  s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 3, data: { id: "sa1", text: "，再核價", kind: "reasoning" } }));
+  // 尾段累加：第二帧 reasoning 接在 activity 尾巴上。
+  s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 3, data: { id: "sa1", text: "，再核价", kind: "reasoning" } }));
   sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
-  assert.equal(sub.activity, "先看看候选，再核價", "activity 尾端累加，不替換");
-  assert.equal(sub.text, undefined, "連續 reasoning 也不長出 text");
+  assert.equal(sub.activity, "先看看候选，再核价", "activity 尾端累加，不替换");
+  assert.equal(sub.text, undefined, "连续 reasoning 也不长出 text");
 
-  // 正文到來：text 只收正文，activity 收全部（reasoning 也算在工作）。
+  // 正文到来：text 只收正文，activity 收全部（reasoning 也算在工作）。
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 4, data: { id: "sa1", text: "找到 3 张" } }));
   sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
   assert.equal(sub.text, "找到 3 张", "text 只有正文");
   assert.equal(sub.lastLine, "找到 3 张");
-  assert.equal(sub.activity, "先看看候选，再核價找到 3 张", "活動流是「全部增量」的超集");
+  assert.equal(sub.activity, "先看看候选，再核价找到 3 张", "活动流是「全部增量」的超集");
 
-  // 思考不是交付物（0921 契約版）：首回合收尾 running 不退場、無產出卡；
-  // done 落在 wake 後的回合，下一次收尾才轉存——屆時全文仍只收正文，思考不得混進。
+  // 思考不是交付物（0921 契约版）：首回合收尾 running 不退场、无产出卡；
+  // done 落在 wake 后的回合，下一次收尾才转存——届时全文仍只收正文，思考不得混进。
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 5, data: {} }));
   assert.ok(
     s.items.some((it) => it.kind === "subagent" && (it as AgentSubagentItem).status === "running"),
@@ -815,25 +815,25 @@ test("S2 活動流：kind=reasoning 的 delta 只進 activity，不污染 text /
   s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 6, data: { id: "sa1", status: "ok" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 7, data: {} }));
   const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(report, "定案後的收尾轉存產出卡");
-  assert.ok(!report.text.includes("先看看候选"), "reasoning 不得流入產出卡全文");
+  assert.ok(report, "定案后的收尾转存产出卡");
+  assert.ok(!report.text.includes("先看看候选"), "reasoning 不得流入产出卡全文");
 });
 
-test("S2 活動流：無 kind 的正文 delta 同時追加 text 與 activity（正文也算活動）", () => {
+test("S2 活动流：无 kind 的正文 delta 同时追加 text 与 activity（正文也算活动）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "搜索素材" } }));
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 2, data: { id: "sa1", text: "第一行" } }));
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 3, data: { id: "sa1", text: "\n第二行" } }));
 
   const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
-  // 既有行為不變（F4）。
-  assert.equal(sub.text, "第一行\n第二行", "text 照舊累積全文");
-  assert.equal(sub.lastLine, "第二行", "lastLine 照舊只當渲染預覽");
-  // 新增：正文同樣是「子代理在工作」的訊號，活動流必須同步跟上。
-  assert.equal(sub.activity, "第一行\n第二行", "正文 delta 同步進 activity");
+  // 既有行为不变（F4）。
+  assert.equal(sub.text, "第一行\n第二行", "text 照旧累积全文");
+  assert.equal(sub.lastLine, "第二行", "lastLine 照旧只当渲染预览");
+  // 新增：正文同样是「子代理在工作」的讯号，活动流必须同步跟上。
+  assert.equal(sub.activity, "第一行\n第二行", "正文 delta 同步进 activity");
 });
 
-test("S2 活動流：started 丟失且首幀是 reasoning 時，補的卡只有 activity、不偽造 text", () => {
+test("S2 活动流：started 丢失且首帧是 reasoning 时，补的卡只有 activity、不伪造 text", () => {
   const s = agentChatReducer(EMPTY, evt({ name: "subagent.delta", event_id: 1, data: { id: "sa-x", text: "在想…", kind: "reasoning" } }));
   const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
@@ -843,13 +843,13 @@ test("S2 活動流：started 丟失且首幀是 reasoning 時，補的卡只有 
   assert.equal(sub.lastLine, "");
 });
 
-// ── 提交型工具的中继態（2026-09-18 契約：artifact_pending / task_id）──────────
+// ── 提交型工具的中继态（2026-09-18 契约：artifact_pending / task_id）──────────
 //
-// 语义：tool.result 带 artifact_pending=true = 任務已提交成功、成品还没到，
-// 卡片停在中继態 pending（绝不显示「已完成」）；等成品事件（image/video/audio.done）
-// 或失敗事件（image.failed）到了才转终态。旧格式（不带新栏位）逐位元照旧。
+// 语义：tool.result 带 artifact_pending=true = 任务已提交成功、成品还没到，
+// 卡片停在中继态 pending（绝不显示「已完成」）；等成品事件（image/video/audio.done）
+// 或失败事件（image.failed）到了才转终态。旧格式（不带新栏位）逐位元照旧。
 
-test("tool.result artifact_pending=true → 卡片是中继態 pending，不是 ok，且回填 taskId", () => {
+test("tool.result artifact_pending=true → 卡片是中继态 pending，不是 ok，且回填 taskId", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
   s = agentChatReducer(
     s,
@@ -863,12 +863,12 @@ test("tool.result artifact_pending=true → 卡片是中继態 pending，不是 
   const it = s.items[0] as AgentToolCallItem;
   assert.equal(it.status, "pending", "已提交 ≠ 已完成");
   assert.notEqual(it.status, "ok");
-  assert.equal(it.taskId, "t-1", "task_id 必須寫進卡片，成品事件才配得回來");
-  assert.equal(it.costCoins, 3, "計費欄位照舊透傳（錢確實花了）");
+  assert.equal(it.taskId, "t-1", "task_id 必须写进卡片，成品事件才配得回来");
+  assert.equal(it.costCoins, 3, "计费栏位照旧透传（钱确实花了）");
   assert.equal(s.turnActive, true);
 });
 
-test("image.done 帶 task_id → 只結算對應那張 pending 卡（同批其他任務照舊等）", () => {
+test("image.done 带 task_id → 只结算对应那张 pending 卡（同批其他任务照旧等）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
   s = agentChatReducer(
     s,
@@ -883,12 +883,12 @@ test("image.done 帶 task_id → 只結算對應那張 pending 卡（同批其�
   s = agentChatReducer(s, evt({ name: "image.done", event_id: 5, data: { url: "https://x/a.png", task_id: "t-b" } }));
 
   const tools = s.items.filter((it): it is AgentToolCallItem => it.kind === "tool");
-  assert.equal(tools[0]?.status, "pending", "任務號不匹配的卡不得被誤結算");
-  assert.equal(tools[1]?.status, "ok", "成品到了，對應的 pending 卡結算成 ok");
-  assert.equal(s.items.filter((it) => it.kind === "image").length, 1, "出圖卡照舊建立（去重行為不變）");
+  assert.equal(tools[0]?.status, "pending", "任务号不匹配的卡不得被误结算");
+  assert.equal(tools[1]?.status, "ok", "成品到了，对应的 pending 卡结算成 ok");
+  assert.equal(s.items.filter((it) => it.kind === "image").length, 1, "出图卡照旧建立（去重行为不变）");
 });
 
-test("image.failed 帶 task_id → 對應的 pending 卡判失敗、帶上 human_message，notice 照舊留痕", () => {
+test("image.failed 带 task_id → 对应的 pending 卡判失败、带上 human_message，notice 照旧留痕", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
   s = agentChatReducer(
     s,
@@ -900,14 +900,14 @@ test("image.failed 帶 task_id → 對應的 pending 卡判失敗、帶上 human
   );
 
   const it = s.items[0] as AgentToolCallItem;
-  assert.equal(it.status, "failed", "失敗事件必須把還在轉的卡判死，不留假「生成中…」");
-  assert.equal(it.error, "上游超时，费用已退回", "human_message 順手填進卡片");
+  assert.equal(it.status, "failed", "失败事件必须把还在转的卡判死，不留假「生成中…」");
+  assert.equal(it.error, "上游超时，费用已退回", "human_message 顺手填进卡片");
   const notice = s.items.find((n): n is AgentNoticeItem => n.kind === "notice");
-  assert.ok(notice, "原本的 notice 行為保留");
+  assert.ok(notice, "原本的 notice 行为保留");
   assert.match(notice.text, /费用已退回/);
 });
 
-test("turn.done 不判死 pending 卡（running 照舊判死，pending 留著等成品/失敗事件）", () => {
+test("turn.done 不判死 pending 卡（running 照旧判死，pending 留著等成品/失败事件）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "bash" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "image_generate" } }));
   s = agentChatReducer(
@@ -918,12 +918,12 @@ test("turn.done 不判死 pending 卡（running 照舊判死，pending 留著等
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 4, data: {} }));
 
   const tools = s.items as AgentToolCallItem[];
-  assert.equal(tools[0]?.status, "failed", "沒交出去的 running 卡照舊判死");
-  assert.equal(tools[1]?.status, "pending", "回合結束 ≠ 成品到了：pending 必須留著，不能被 settleItems 判死");
+  assert.equal(tools[0]?.status, "failed", "没交出去的 running 卡照旧判死");
+  assert.equal(tools[1]?.status, "pending", "回合结束 ≠ 成品到了：pending 必须留著，不能被 settleItems 判死");
   assert.equal(s.turnActive, false);
 });
 
-test("無 task_id 的 image.done → FIFO 結算最舊的一張 pending 卡", () => {
+test("无 task_id 的 image.done → FIFO 结算最旧的一张 pending 卡", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
   s = agentChatReducer(
     s,
@@ -935,15 +935,15 @@ test("無 task_id 的 image.done → FIFO 結算最舊的一張 pending 卡", ()
     evt({ name: "tool.result", event_id: 4, data: { tool: "image_generate", ok: true, task_id: "t-2", artifact_pending: true } }),
   );
 
-  // 成品事件沒帶 task_id：配不到精確的，回退結算最舊那張（防成品到了卡還在轉）。
+  // 成品事件没带 task_id：配不到精确的，回退结算最旧那张（防成品到了卡还在转）。
   s = agentChatReducer(s, evt({ name: "image.done", event_id: 5, data: { url: "https://x/a.png" } }));
 
   const tools = s.items.filter((it): it is AgentToolCallItem => it.kind === "tool");
-  assert.equal(tools[0]?.status, "ok", "FIFO：最舊的 pending 先結算");
-  assert.equal(tools[1]?.status, "pending", "較新的 pending 留著，繼續等自己的成品事件");
+  assert.equal(tools[0]?.status, "ok", "FIFO：最旧的 pending 先结算");
+  assert.equal(tools[1]?.status, "pending", "较新的 pending 留著，继续等自己的成品事件");
 });
 
-test("video.done / audio.done 同樣結算 pending 卡（成品事件不只有圖）", () => {
+test("video.done / audio.done 同样结算 pending 卡（成品事件不只有图）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "video_generate" } }));
   s = agentChatReducer(
     s,
@@ -961,24 +961,24 @@ test("video.done / audio.done 同樣結算 pending 卡（成品事件不只有�
   assert.equal((a.items[0] as AgentToolCallItem).status, "ok");
 });
 
-test("缺席新欄位的舊格式 tool.result → 行為與現狀逐位元一致（直接 ok，不長 taskId）", () => {
+test("缺席新栏位的旧格式 tool.result → 行为与现状逐位元一致（直接 ok，不长 taskId）", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   s = agentChatReducer(s, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: true, cost_coins: 2 } }));
 
   const it = s.items[0] as AgentToolCallItem;
-  assert.equal(it.status, "ok", "舊格式不得被當成中继態");
+  assert.equal(it.status, "ok", "旧格式不得被当成中继态");
   assert.equal(it.taskId, undefined);
   assert.equal(it.costCoins, 2);
 
-  // ok:false 的舊格式照舊 failed。
+  // ok:false 的旧格式照旧 failed。
   let f = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   f = agentChatReducer(f, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: false } }));
   assert.equal((f.items[0] as AgentToolCallItem).status, "failed");
 });
 
-// ─────────────────────────── turn.plan（本輪計畫，2026-09-18 契約）
+// ─────────────────────────── turn.plan（本轮计画，2026-09-18 契约）
 
-test("turn.plan 落成獨立的 plan 條目，不併進 assistant 條目", () => {
+test("turn.plan 落成独立的 plan 条目，不并进 assistant 条目", () => {
   const s = agentChatReducer(
     EMPTY,
     evt({
@@ -988,67 +988,67 @@ test("turn.plan 落成獨立的 plan 條目，不併進 assistant 條目", () =>
     }),
   );
 
-  assert.equal(s.items.length, 1, "計畫自成條目，不寄生在任何既有條目上");
+  assert.equal(s.items.length, 1, "计画自成条目，不寄生在任何既有条目上");
   const plan = s.items[0] as AgentPlanItem;
   assert.equal(plan.kind, "plan");
   assert.equal(plan.text, "打算这么做：先拆解分镜脚本，再生成配乐。");
   assert.deepEqual(plan.experts, ["screenwriter"]);
   assert.equal(plan.provisional, true);
-  assert.equal(plan.collapsed, false, "剛到的計畫預設展開（此刻它是畫面上唯一的資訊）");
-  assert.equal(s.turnActive, true, "計畫幀到達 = 回合確實開始了");
+  assert.equal(plan.collapsed, false, "刚到的计画预设展开（此刻它是画面上唯一的资讯）");
+  assert.equal(s.turnActive, true, "计画帧到达 = 回合确实开始了");
 });
 
-test("turn.plan 清掉罐頭狀態行（turnStatus），與 message.delta 同款", () => {
+test("turn.plan 清掉罐头状态行（turnStatus），与 message.delta 同款", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "正在思考…" } }));
   assert.equal(s.turnStatus, "正在思考…");
   s = agentChatReducer(s, evt({ name: "turn.plan", event_id: 2, data: { plan: "先出分镜再出片。" } }));
-  assert.equal(s.turnStatus, undefined, "真實計畫到了，暫態罐頭行必須退場");
+  assert.equal(s.turnStatus, undefined, "真实计画到了，暂态罐头行必须退场");
   assert.equal((s.items[0] as AgentPlanItem).kind, "plan");
 });
 
-test("首條 message.delta 開新 assistant 條目時，計畫被收合成一行", () => {
+test("首条 message.delta 开新 assistant 条目时，计画被收合成一行", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "turn.plan", event_id: 1, data: { plan: "先拆解剧情节拍，再逐镜生成。" } }));
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "好的" } }));
 
-  assert.equal(s.items.length, 2, "計畫與正文是兩條獨立條目");
+  assert.equal(s.items.length, 2, "计画与正文是两条独立条目");
   const plan = s.items[0] as AgentPlanItem;
   const assistant = s.items[1] as AgentAssistantTextItem;
-  assert.equal(plan.collapsed, true, "真實正文開新條目 = 計畫讓位，自動收合");
-  assert.equal(plan.text, "先拆解剧情节拍，再逐镜生成。", "收合只翻 collapsed，計畫文字一字不動");
+  assert.equal(plan.collapsed, true, "真实正文开新条目 = 计画让位，自动收合");
+  assert.equal(plan.text, "先拆解剧情节拍，再逐镜生成。", "收合只翻 collapsed，计画文字一字不动");
   assert.equal(assistant.kind, "assistant");
-  assert.equal(assistant.text, "好的", "正文不得把計畫文字吃進同一條氣泡");
+  assert.equal(assistant.text, "好的", "正文不得把计画文字吃进同一条气泡");
 });
 
-test("追加到既有 streaming assistant 條目的 delta 不動計畫卡（不誤觸另一條分支）", () => {
-  // reasoning 先開條目（思維鏈通常先於正文），之後的 message.delta 走「追加既有
-  // streaming 條目」分支 —— 那條分支與工具卡 pending 契約的測試語義掛在一起，
-  // 計畫收合只在「開新條目」分支發生，這裡不得被波及。
+test("追加到既有 streaming assistant 条目的 delta 不动计画卡（不误触另一条分支）", () => {
+  // reasoning 先开条目（思维链通常先于正文），之后的 message.delta 走「追加既有
+  // streaming 条目」分支 —— 那条分支与工具卡 pending 契约的测试语义挂在一起，
+  // 计画收合只在「开新条目」分支发生，这里不得被波及。
   let s = agentChatReducer(EMPTY, evt({ name: "turn.plan", event_id: 1, data: { plan: "先出分镜。" } }));
   s = agentChatReducer(s, evt({ name: "reasoning.delta", event_id: 2, data: { text: "先想一下" } }));
-  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "開始" } }));
+  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "开始" } }));
 
-  assert.equal((s.items[0] as AgentPlanItem).collapsed, false, "同一條交付物的續寫不觸發計畫收合");
-  assert.equal((s.items[1] as AgentAssistantTextItem).text, "開始");
+  assert.equal((s.items[0] as AgentPlanItem).collapsed, false, "同一条交付物的续写不触发计画收合");
+  assert.equal((s.items[1] as AgentAssistantTextItem).text, "开始");
 });
 
-test("turn.done 後計畫仍在，且不影響 settleItems 對 running 工具卡的結算", () => {
+test("turn.done 后计画仍在，且不影响 settleItems 对 running 工具卡的结算", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "turn.plan", event_id: 1, data: { plan: "先出分镜，再逐镜生成视频。" } }));
   s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "bash" } }));
-  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "開始處理" } }));
+  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "开始处理" } }));
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 4, data: {} }));
 
   const plan = s.items.find((it): it is AgentPlanItem => it.kind === "plan");
-  assert.ok(plan, "回合收尾不刪計畫卡（它是這一輪做過什麼的痕跡）");
+  assert.ok(plan, "回合收尾不删计画卡（它是这一轮做过什么的痕迹）");
   assert.equal(plan.collapsed, true);
   const tool = s.items.find((it): it is AgentToolCallItem => it.kind === "tool");
-  assert.equal(tool?.status, "failed", "running 工具卡照舊由 settleItems 判死");
+  assert.equal(tool?.status, "failed", "running 工具卡照旧由 settleItems 判死");
   assert.equal(s.turnActive, false);
 });
 
-test("superseded 幀就地換掉既有計畫文字（同一 id），不新增第二張卡", () => {
+test("superseded 帧就地换掉既有计画文字（同一 id），不新增第二张卡", () => {
   let s = agentChatReducer(
     EMPTY,
-    evt({ name: "turn.plan", event_id: 1, data: { plan: "舊計畫：先出分镜。", source: "rule" } }),
+    evt({ name: "turn.plan", event_id: 1, data: { plan: "旧计画：先出分镜。", source: "rule" } }),
   );
   const firstId = s.items[0].id;
   s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "正文" } }));
@@ -1056,17 +1056,17 @@ test("superseded 幀就地換掉既有計畫文字（同一 id），不新增第
 
   s = agentChatReducer(
     s,
-    evt({ name: "turn.plan", event_id: 3, data: { plan: "新計畫：先拆解剧情节拍，再逐镜生成并剪辑。", superseded: true, source: "model" } }),
+    evt({ name: "turn.plan", event_id: 3, data: { plan: "新计画：先拆解剧情节拍，再逐镜生成并剪辑。", superseded: true, source: "model" } }),
   );
 
   const plans = s.items.filter((it): it is AgentPlanItem => it.kind === "plan");
-  assert.equal(plans.length, 1, "同一輪只有一份計畫：就地換文字，不堆成版本流水帳");
-  assert.equal(plans[0].id, firstId, "id 不變，React 不重掛卡片");
-  assert.equal(plans[0].text, "新計畫：先拆解剧情节拍，再逐镜生成并剪辑。");
-  assert.equal(plans[0].collapsed, true, "換文字不動使用者在看／收合狀態");
+  assert.equal(plans.length, 1, "同一轮只有一份计画：就地换文字，不堆成版本流水帐");
+  assert.equal(plans[0].id, firstId, "id 不变，React 不重挂卡片");
+  assert.equal(plans[0].text, "新计画：先拆解剧情节拍，再逐镜生成并剪辑。");
+  assert.equal(plans[0].collapsed, true, "换文字不动使用者在看／收合状态");
 });
 
-test("思考後直接調工具：tool.invoke 當下結算 reasoningMs，不拖到整輪結束", () => {
+test("思考后直接调工具：tool.invoke 当下结算 reasoningMs，不拖到整轮结束", () => {
   let s = agentChatReducer(EMPTY, evt({ name: "reasoning.delta", event_id: 1, data: { text: "先抓影片" } }));
   const started = s.items[0];
   assert.equal(started.kind, "assistant");

@@ -93,7 +93,7 @@ export function UpscalePanel({
               </div>
 
               <div className={ROW_CLASS}>
-                <span className={LABEL_CLASS}>倍數</span>
+                <span className={LABEL_CLASS}>倍数</span>
                 <div className={RAIL_CLASS}>
                   <span className="style-chip active">2×</span>
                 </div>

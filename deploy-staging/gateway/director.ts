@@ -1,18 +1,18 @@
 /**
- * director.ts — 3D 導演台服務端生命週期層（施工片3，2026-09-02）。
+ * director.ts — 3D 导演台服务端生命周期层（施工片3，2026-09-02）。
  *
- * 需求源：docs/director-console-integration-spec.md §3（HTTP 路由契約）§4（director.done 事件契約）。
- * 存儲範式：./timeline.ts（$WORKSPACE_DIR/director/<sid>/current.json + versions/ last 20
+ * 需求源：docs/director-console-integration-spec.md §3（HTTP 路由契约）§4（director.done 事件契约）。
+ * 存储范式：./timeline.ts（$WORKSPACE_DIR/director/<sid>/current.json + versions/ last 20
  * + 每第 10 里程碑 + log.jsonl + withSessionLock + pruneVersions），逐段照搬。
- * 語義真源：kunpeng-vendor @872a58b src/stores/directorStore.ts（mutation 逐一對齊：
+ * 语义真源：kunpeng-vendor @872a58b src/stores/directorStore.ts（mutation 逐一对齐：
  * normalizeShotTimes / upgradePlanKeyframes / makeSequenceShot / makeDefaultPlan /
  * stateOfElement / snapshot / undo-redo JSON 快照 / removePlan 至少留一 / replacePlans
- * 空列表拒絕 / setActive* 重置 currentTime 與 playing）；守衛真源：kunpeng
- * src/lib/agent/tools/directorTools.ts（set_lock/delete 守衛、apply_proposal 無確認拒絕、
- * proposals 30 分 TTL）。純函數層一律 import director-engine（片1+2 產物，禁改動）。
+ * 空列表拒绝 / setActive* 重置 currentTime 与 playing）；守卫真源：kunpeng
+ * src/lib/agent/tools/directorTools.ts（set_lock/delete 守卫、apply_proposal 无确认拒绝、
+ * proposals 30 分 TTL）。纯函数层一律 import director-engine（片1+2 产物，禁改动）。
  *
- * 白名單聲明：wheel 的 id 生成本用 `nanoid(7/8)`——本檔逐字保留 nanoid 調用。
- * 文案紀律：本檔所有工具錯誤/欄位描述一律簡體（用戶裁定，agent-gateway-copy-rules）。
+ * 白名单声明：wheel 的 id 生成本用 `nanoid(7/8)`——本档逐字保留 nanoid 调用。
+ * 文案纪律：本档所有工具错误/栏位描述一律简体（用户裁定，agent-gateway-copy-rules）。
  */
 import { mkdir, readFile, readdir, rm, appendFile, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -38,25 +38,25 @@ import { renderTopViewSvg, renderCameraViewSvg } from "./director-engine/svgSche
 import { fallbackPlans } from "./director-engine/planning-core"
 import { applyCanvasNodeCreated, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 
-// 與 gateway/index.ts 同值；env 可覆蓋（測試用）。timeline.ts L29 同款。
+// 与 gateway/index.ts 同值；env 可覆盖（测试用）。timeline.ts L29 同款。
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
-// 2026-09-03 驗屍修復 R3-⑧（隔離）：director 存儲根可經 DIRECTOR_DATA_ROOT 移出 agent 可讀區。
-// 極限評測實錘（REPORT P1-3）：agent bash 在 workspace/ 內可讀「其他會話」的 director/<sid>/current.json
-// （本場讀了 3 個別案 JSON）——數據隔離面 + 誘惑 agent 抄別案。
-// 默認值保持現狀（WORKSPACE_DIR/director）兼容本地測試；VPS 部署時 env 指 workspace 外新址
-// （如 /opt/agent-harness/director-data），遷移用 `sudo mv` 舊目錄（保留在途會話數據）。
+// 2026-09-03 验尸修复 R3-⑧（隔离）：director 存储根可经 DIRECTOR_DATA_ROOT 移出 agent 可读区。
+// 极限评测实锤（REPORT P1-3）：agent bash 在 workspace/ 内可读「其他会话」的 director/<sid>/current.json
+// （本场读了 3 个别案 JSON）——数据隔离面 + 诱惑 agent 抄别案。
+// 默认值保持现状（WORKSPACE_DIR/director）兼容本地测试；VPS 部署时 env 指 workspace 外新址
+// （如 /opt/agent-harness/director-data），迁移用 `sudo mv` 旧目录（保留在途会话数据）。
 const DIRECTOR_DIR = process.env.DIRECTOR_DATA_ROOT || path.join(WORKSPACE_DIR, "director")
 
-// 保留策略：最近 20 版 + 每 10 版里程碑版（v % 10 === 0），其餘刪（timeline.ts 同款）。
+// 保留策略：最近 20 版 + 每 10 版里程碑版（v % 10 === 0），其余删（timeline.ts 同款）。
 const KEEP_RECENT = 20
 const MILESTONE_EVERY = 10
 
-// proposals 暫存 TTL：30 分鐘（kunpeng directorTools.ts pendingProposals 同款）。
+// proposals 暂存 TTL：30 分钟（kunpeng directorTools.ts pendingProposals 同款）。
 const PROPOSAL_TTL_MS = 30 * 60_000
 
 /**
- * 2026-09-03 驗屍修復 R3-⑦：已知 op 清單（未知 op 報錯帶可用清單；同時供 capabilities 暴露）。
- * 與 DirectorOp 聯合逐項對齊，新增 op 必須同步此表。
+ * 2026-09-03 验尸修复 R3-⑦：已知 op 清单（未知 op 报错带可用清单；同时供 capabilities 暴露）。
+ * 与 DirectorOp 联合逐项对齐，新增 op 必须同步此表。
  */
 const KNOWN_OPS: string[] = [
   "addElement", "removeElements", "updateShotElementState",
@@ -70,23 +70,23 @@ const KNOWN_OPS: string[] = [
 ]
 
 /**
- * 2026-09-03 驗屍修復 R3-②：能力清單進 state。
- * 極限評測實錘（REPORT P1-2）：state 無能力清單，agent 思維鏈 4 次抱怨「didn't return capabilities」，
- * 被迫 bash 翻檔 130s（還翻到別會話工程檔）。此處把 action/camera/pose 註冊表 + op 集 + 群組/導出邊界
- * 一次性如實暴露，agent 不再需要翻檔猜能力。純靜態小數據，summary/full 兩態都帶。
+ * 2026-09-03 验尸修复 R3-②：能力清单进 state。
+ * 极限评测实锤（REPORT P1-2）：state 无能力清单，agent 思维链 4 次抱怨「didn't return capabilities」，
+ * 被迫 bash 翻档 130s（还翻到别会话工程档）。此处把 action/camera/pose 注册表 + op 集 + 群组/导出边界
+ * 一次性如实暴露，agent 不再需要翻档猜能力。纯静态小数据，summary/full 两态都带。
  */
 export interface DirectorCapabilities {
-  /** 動作模板 key 清單（MOTION_TEMPLATES 註冊表） */
+  /** 动作模板 key 清单（MOTION_TEMPLATES 注册表） */
   action_templates: string[]
-  /** 運鏡 key 清單（CAMERA_TEMPLATES 註冊表） */
+  /** 运镜 key 清单（CAMERA_TEMPLATES 注册表） */
   camera_moves: string[]
-  /** 素模姿勢 key 清單（POSE_PRESETS 註冊表） */
+  /** 素模姿势 key 清单（POSE_PRESETS 注册表） */
   poses: string[]
-  /** 服務端支持的 op 清單（與 DirectorOp 聯合對齊） */
+  /** 服务端支持的 op 清单（与 DirectorOp 联合对齐） */
   supported_ops: string[]
-  /** 群組寫路徑邊界聲明（R3-⑤ 完成後如實標 true） */
+  /** 群组写路径边界声明（R3-⑤ 完成后如实标 true） */
   group_write: boolean
-  /** 導出邊界誠實聲明：工具面只能設範圍+save，渲染/序列帧導出在前端畫布 */
+  /** 导出边界诚实声明：工具面只能设范围+save，渲染/序列帧导出在前端画布 */
   export_boundary: string
 }
 
@@ -99,7 +99,7 @@ const DIRECTOR_CAPABILITIES: DirectorCapabilities = {
   export_boundary: "prepare_export 仅设置导出范围与保存标记，不会执行渲染导出；白模渲染/序列帧导出在前端画布",
 }
 
-/** undo 歷史快照（kunpeng directorStore.ts L39-45 HistorySnapshot 同構：JSON 序列化） */
+/** undo 历史快照（kunpeng directorStore.ts L39-45 HistorySnapshot 同构：JSON 序列化） */
 interface HistorySnapshot {
   elements: DirectorElement[]
   groups: DirectorGroup[]
@@ -111,14 +111,14 @@ interface HistorySnapshot {
 interface DirectorGroup {
   id: string
   name: string
-  /** 2026-09-03 驗屍修復 R3-⑤：群組寫路徑——成員元素 id 清單（與 element.groupId 雙向同步）。 */
+  /** 2026-09-03 验尸修复 R3-⑤：群组写路径——成员元素 id 清单（与 element.groupId 双向同步）。 */
   elementIds: string[]
 }
 
 /**
- * 服務端導演工程文檔 = kunpeng DirectorSceneFile（schema v2 欄位逐一同構：version/elements/
- * groups/plans/activePlanId/aspect/origin/exports/updatedAt）+ 會話擴展（revision/activeShotId/
- * currentTimeSec/playing/undo-redo 棧）。存盤兼容 wheel save() 產物。
+ * 服务端导演工程文档 = kunpeng DirectorSceneFile（schema v2 栏位逐一同构：version/elements/
+ * groups/plans/activePlanId/aspect/origin/exports/updatedAt）+ 会话扩展（revision/activeShotId/
+ * currentTimeSec/playing/undo-redo 栈）。存盘兼容 wheel save() 产物。
  */
 export interface DirectorDoc {
   session_id: string
@@ -132,16 +132,16 @@ export interface DirectorDoc {
   aspect: AspectId
   origin: DirectorSceneFile["origin"]
   exports: DirectorSceneFile["exports"]
-  /** 播放狀態（服務端擴展；wheel 在 store 內存，重開回 0） */
+  /** 播放状态（服务端扩展；wheel 在 store 内存，重开回 0） */
   currentTimeSec: number
   playing: boolean
-  /** undo/redo JSON 快照棧（kunpeng HistorySnapshot 逐字同構） */
+  /** undo/redo JSON 快照栈（kunpeng HistorySnapshot 逐字同构） */
   undoStack: HistorySnapshot[]
   redoStack: HistorySnapshot[]
   updated_at: string
 }
 
-/** 決策日誌條目（log.jsonl，append-only；timeline LogEntry 簡化形） */
+/** 决策日志条目（log.jsonl，append-only；timeline LogEntry 简化形） */
 export interface DirectorLogEntry {
   at: string
   action: string
@@ -149,13 +149,13 @@ export interface DirectorLogEntry {
   changed: string[]
 }
 
-/** 健康檢查形狀（spec §4；wheel DirectorHealthIssue = {id, severity, shotId, message}） */
+/** 健康检查形状（spec §4；wheel DirectorHealthIssue = {id, severity, shotId, message}） */
 export interface DirectorHealth {
   ok: boolean
   issues: Array<{ code: string; message: string; shot_id?: string }>
 }
 
-// ── 錯誤（HTTP 層映射：not_initialized→409；invalid→400；not_found→404；blocked→409）──
+// ── 错误（HTTP 层映射：not_initialized→409；invalid→400；not_found→404；blocked→409）──
 
 export class DirectorNotInitializedError extends Error {
   constructor() {
@@ -185,7 +185,7 @@ export class DirectorBlockedError extends Error {
   }
 }
 
-// ── 存儲層（timeline.ts L164-709 逐段照搬：timelines→director、Timeline→DirectorDoc） ──
+// ── 存储层（timeline.ts L164-709 逐段照搬：timelines→director、Timeline→DirectorDoc） ──
 
 function assertSessionId(sid: string): void {
   if (typeof sid !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(sid)) {
@@ -210,7 +210,7 @@ function clone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x)) as T
 }
 
-/** kunpeng directorStore.ts L215-225 normalizeShotTimes 逐行等價 */
+/** kunpeng directorStore.ts L215-225 normalizeShotTimes 逐行等价 */
 function normalizeShotTimes(plan: DirectorPlan): DirectorPlan {
   let cursor = 0
   return {
@@ -224,8 +224,8 @@ function normalizeShotTimes(plan: DirectorPlan): DirectorPlan {
 }
 
 /**
- * kunpeng directorStore.ts L227-245 upgradePlanKeyframes 逐行等價：
- * 舊工程鏡頭補 cameraKeyframes 首尾兩幀；動作補 templateId/intensity/source/keyframes。
+ * kunpeng directorStore.ts L227-245 upgradePlanKeyframes 逐行等价：
+ * 旧工程镜头补 cameraKeyframes 首尾两帧；动作补 templateId/intensity/source/keyframes。
  */
 function upgradePlanKeyframes(plan: DirectorPlan): DirectorPlan {
   return {
@@ -247,7 +247,7 @@ function upgradePlanKeyframes(plan: DirectorPlan): DirectorPlan {
   }
 }
 
-/** kunpeng directorStore.ts L125-132 stateOfElement 逐行等價 */
+/** kunpeng directorStore.ts L125-132 stateOfElement 逐行等价 */
 function stateOfElement(element: DirectorElement): DirectorElementState {
   return {
     position: clone(element.position),
@@ -257,12 +257,12 @@ function stateOfElement(element: DirectorElement): DirectorElementState {
   }
 }
 
-/** kunpeng directorStore.ts L134-136 elementStateMap 逐行等價 */
+/** kunpeng directorStore.ts L134-136 elementStateMap 逐行等价 */
 function elementStateMap(elements: DirectorElement[]): Record<string, DirectorElementState> {
   return Object.fromEntries(elements.map((element) => [element.id, stateOfElement(element)]))
 }
 
-/** kunpeng directorStore.ts L205-213 snapshot 逐行等價 */
+/** kunpeng directorStore.ts L205-213 snapshot 逐行等价 */
 function snapshotDoc(doc: DirectorDoc): HistorySnapshot {
   return clone({
     elements: doc.elements,
@@ -277,9 +277,9 @@ async function loadCurrent(sid: string): Promise<DirectorDoc | null> {
   try {
     const raw = await readFile(currentPath(sid), "utf-8")
     const doc = JSON.parse(raw) as DirectorDoc
-    // 防禦：缺欄位補默認，避免舊檔炸後續 op（timeline.ts 同款）
+    // 防御：缺栏位补默认，避免旧档炸后续 op（timeline.ts 同款）
     doc.elements ??= []
-    // R3-⑤：舊檔群組無 elementIds（僅 {id,name}），補空陣列避免後續 op 讀 undefined
+    // R3-⑤：旧档群组无 elementIds（仅 {id,name}），补空阵列避免后续 op 读 undefined
     doc.groups = (doc.groups ?? []).map((g) => ({ ...g, elementIds: Array.isArray(g.elementIds) ? g.elementIds : [] }))
     doc.plans ??= []
     doc.exports ??= []
@@ -318,7 +318,7 @@ async function appendLog(sid: string, entry: DirectorLogEntry): Promise<void> {
   await appendFile(logPath(sid), JSON.stringify(entry) + "\n", "utf-8")
 }
 
-/** 保留策略：最近 KEEP_RECENT 版 + 每 MILESTONE_EVERY 版里程碑，其餘刪 */
+/** 保留策略：最近 KEEP_RECENT 版 + 每 MILESTONE_EVERY 版里程碑，其余删 */
 async function pruneVersions(sid: string, latest: number): Promise<void> {
   const dir = path.join(sessionDir(sid), "versions")
   let names: string[]
@@ -336,7 +336,7 @@ async function pruneVersions(sid: string, latest: number): Promise<void> {
   }
 }
 
-// ── 並發鎖（timeline.ts L628-648 逐字照搬：per-session 串行化 read-modify-write） ──
+// ── 并发锁（timeline.ts L628-648 逐字照搬：per-session 串行化 read-modify-write） ──
 
 const sessionLocks = new Map<string, { tail: Promise<void>; pending: number }>()
 
@@ -360,24 +360,24 @@ async function withSessionLock<T>(sid: string, fn: () => Promise<T>): Promise<T>
   }
 }
 
-// ── 事件發射（index.ts 注入 emitToSession；模組層不 import index 防環） ─────────
+// ── 事件发射（index.ts 注入 emitToSession；模组层不 import index 防环） ─────────
 
-/** index.ts 補丁注入：emitToSession(stateFor(sid), name, data)——含會話解析 */
+/** index.ts 补丁注入：emitToSession(stateFor(sid), name, data)——含会话解析 */
 export type DirectorEmitter = (sid: string, name: string, data: unknown) => void
 
 let emitFn: DirectorEmitter | null = null
 
-/** index.ts 補丁啟動時呼叫一次 */
+/** index.ts 补丁启动时呼叫一次 */
 export function setDirectorEmitter(fn: DirectorEmitter): void {
   emitFn = fn
 }
 
-/** index.ts 補丁注入：resolveSession——sid（gateway UUID 或 opencode session id）→ 會話狀態 */
+/** index.ts 补丁注入：resolveSession——sid（gateway UUID 或 opencode session id）→ 会话状态 */
 export type DirectorSessionResolver = (sid: string) => { sessionId: string; apiKey: string } | undefined
 
 let resolveFn: DirectorSessionResolver | null = null
 
-/** index.ts 補丁啟動時呼叫一次 */
+/** index.ts 补丁启动时呼叫一次 */
 export function setDirectorSessionResolver(fn: DirectorSessionResolver): void {
   resolveFn = fn
 }
@@ -386,11 +386,11 @@ function emitToSessionBySid(sid: string, name: string, data: unknown): void {
   try {
     emitFn?.(sid, name, data)
   } catch {
-    /* 事件發射失敗不擋寫入路徑 */
+    /* 事件发射失败不挡写入路径 */
   }
 }
 
-// ── SVG / 健康 / 計數（spec §4 payload 組裝；渲染輪子錨 = svgSchematic/shotDescription） ──
+// ── SVG / 健康 / 计数（spec §4 payload 组装；渲染轮子锚 = svgSchematic/shotDescription） ──
 
 function activePlanOf(doc: DirectorDoc): DirectorPlan | null {
   return doc.plans.find((p) => p.id === doc.activePlanId) ?? doc.plans[0] ?? null
@@ -434,8 +434,8 @@ function countsOf(doc: DirectorDoc): { shots: number; elements: number; actions:
 }
 
 /**
- * spec §4 director.done + canvas 側（首次 canvas.node.created / 後續 canvas.node.updated，
- * node.type "director"；SVG 合計 >48KB 時 canvas metadata 省略 SVG，director.done 內不省）。
+ * spec §4 director.done + canvas 侧（首次 canvas.node.created / 后续 canvas.node.updated，
+ * node.type "director"；SVG 合计 >48KB 时 canvas metadata 省略 SVG，director.done 内不省）。
  */
 const announcedDirectorNodes = new Set<string>()
 
@@ -466,13 +466,13 @@ function emitDirectorDone(sid: string, doc: DirectorDoc, action: string, svg?: {
     planName: activePlan?.name ?? null,
     shotCount: counts.shots,
     healthOk: health.ok,
-    // doc.revision 透傳（刷新缺口修復）：已掛載視口比對 revision 變化重拉 state。
+    // doc.revision 透传（刷新缺口修复）：已挂载视口比对 revision 变化重拉 state。
     revision: doc.revision,
     ...(includeSvg ? { topViewSvg: schematic.top_view_svg, cameraViewSvg: schematic.camera_view_svg } : {}),
   }
   if (!announcedDirectorNodes.has(nodeId)) {
     announcedDirectorNodes.add(nodeId)
-    // 事件形狀照 index.ts autoCreateCanvasUnit 的 canvas.node.created：{unit_id, node}
+    // 事件形状照 index.ts autoCreateCanvasUnit 的 canvas.node.created：{unit_id, node}
     emitToSessionBySid(sid, "canvas.node.created", {
       unit_id: nodeId,
       node: {
@@ -485,7 +485,7 @@ function emitDirectorDone(sid: string, doc: DirectorDoc, action: string, svg?: {
         metadata,
       },
     })
-    // 2026-09-20 寫穿：SSE 幀發出即落 canvasStates（同一 node 物件，冪等 upsert）。
+    // 2026-09-20 写穿：SSE 帧发出即落 canvasStates（同一 node 物件，幂等 upsert）。
     applyCanvasNodeCreated(sid, {
       unit_id: nodeId,
       node: {
@@ -499,25 +499,25 @@ function emitDirectorDone(sid: string, doc: DirectorDoc, action: string, svg?: {
       },
     })
   } else {
-    // 事件形狀照 index.ts emitCanvasResult 的 canvas.node.updated：{unit_id, node_id, patch}
-    // 前端 reducer（canvas/reducer.ts reduceCanvasNodeUpdated）把 patch 攤平進 node.metadata，
-    // 故 patch = metadata 欄位本身（不包 metadata 鍵）。
+    // 事件形状照 index.ts emitCanvasResult 的 canvas.node.updated：{unit_id, node_id, patch}
+    // 前端 reducer（canvas/reducer.ts reduceCanvasNodeUpdated）把 patch 摊平进 node.metadata，
+    // 故 patch = metadata 栏位本身（不包 metadata 键）。
     emitToSessionBySid(sid, "canvas.node.updated", { unit_id: nodeId, node_id: nodeId, patch: metadata })
-    // 2026-09-20 寫穿：同一 patch 淺合併進快照節點 metadata（冪等 last-write-wins）。
+    // 2026-09-20 写穿：同一 patch 浅合并进快照节点 metadata（幂等 last-write-wins）。
     applyCanvasNodeUpdated(sid, { unit_id: nodeId, node_id: nodeId, patch: metadata })
   }
 }
 
-// ── proposals 暫存（kunpeng directorTools.ts L26/812-815 同款：Map + 30 分 TTL） ──
+// ── proposals 暂存（kunpeng directorTools.ts L26/812-815 同款：Map + 30 分 TTL） ──
 //
-// 2026-09-04 持久化（複測實錘病灶：agent-gateway 重啟清零內存 Map → 用戶手裡提案卡全部過期，
-// R3 部署窗口恰逢提案在途，apply 必 EXPIRED）：內存 Map 保留為熱路徑，新增落盤
-// `<sid>/proposals.json`（與 current.json/versions/log.jsonl 同目錄同 fs 範式）：
-// - create：生成後在既有 withSessionLock(sid) 內合併寫盤；寫盤失敗降級純內存 + console.error，不阻塞提案。
-// - apply：內存 miss → 惰性按 sid 讀盤（進程啟動無全量預載）；TTL 仍按 createdAt 校驗，過期即刪盤上條目。
-// - 死鎖紀律：proposals.json 的所有變更（create 合併寫、apply 消費刪、過期刪）都收斂在
-//   withSessionLock(sid) 域內串行；apply 的刪盤發生在 applyDirectorOps（自持鎖）返回之後，
-//   兩段鎖順序不嵌套。純讀（loadCurrent/讀 proposals.json）不取鎖。
+// 2026-09-04 持久化（复测实锤病灶：agent-gateway 重启清零内存 Map → 用户手里提案卡全部过期，
+// R3 部署窗口恰逢提案在途，apply 必 EXPIRED）：内存 Map 保留为热路径，新增落盘
+// `<sid>/proposals.json`（与 current.json/versions/log.jsonl 同目录同 fs 范式）：
+// - create：生成后在既有 withSessionLock(sid) 内合并写盘；写盘失败降级纯内存 + console.error，不阻塞提案。
+// - apply：内存 miss → 惰性按 sid 读盘（进程启动无全量预载）；TTL 仍按 createdAt 校验，过期即删盘上条目。
+// - 死锁纪律：proposals.json 的所有变更（create 合并写、apply 消费删、过期删）都收敛在
+//   withSessionLock(sid) 域内串行；apply 的删盘发生在 applyDirectorOps（自持锁）返回之后，
+//   两段锁顺序不嵌套。纯读（loadCurrent/读 proposals.json）不取锁。
 
 const pendingProposals = new Map<string, { plans: DirectorPlan[]; createdAt: number }>()
 
@@ -533,13 +533,13 @@ function proposalsPath(sid: string): string {
 
 type StoredProposal = { plans: DirectorPlan[]; createdAt: number }
 
-/** 盤上條目防呆：結構異常（非物件 plans / createdAt 非數）視同損壞 */
+/** 盘上条目防呆：结构异常（非物件 plans / createdAt 非数）视同损坏 */
 function isUsableProposal(p: unknown): p is StoredProposal {
   const c = p as StoredProposal | null
   return !!c && typeof c === "object" && typeof c.createdAt === "number" && Array.isArray(c.plans) && c.plans.length > 0
 }
 
-/** 讀盤上 proposals；任何異常（缺檔/損壞）收斂為空表——內存路徑必須不被輔助持久化拖死 */
+/** 读盘上 proposals；任何异常（缺档/损坏）收敛为空表——内存路径必须不被辅助持久化拖死 */
 async function readProposalsFile(sid: string): Promise<Record<string, StoredProposal>> {
   try {
     const parsed = JSON.parse(await readFile(proposalsPath(sid), "utf-8")) as unknown
@@ -551,13 +551,13 @@ async function readProposalsFile(sid: string): Promise<Record<string, StoredProp
     return {}
   } catch (e) {
     if ((e as { code?: string }).code !== "ENOENT") {
-      console.error(`[director] proposals.json 不可讀（sid=${sid}），按空處理:`, e)
+      console.error(`[director] proposals.json 不可读（sid=${sid}），按空处理:`, e)
     }
     return {}
   }
 }
 
-/** 合併新提案進盤上檔案並清掉過期條目；調用方必須已持有 withSessionLock(sid)。 */
+/** 合并新提案进盘上档案并清掉过期条目；调用方必须已持有 withSessionLock(sid)。 */
 async function mergeProposalsOntoDisk(sid: string, entries: Array<{ id: string; proposal: StoredProposal }>): Promise<void> {
   const stored = await readProposalsFile(sid)
   const now = Date.now()
@@ -569,7 +569,7 @@ async function mergeProposalsOntoDisk(sid: string, entries: Array<{ id: string; 
   await writeFile(proposalsPath(sid), JSON.stringify(stored), "utf-8")
 }
 
-/** 刪盤上單條（不存在則 no-op，不無故建檔）；調用方必須已持有 withSessionLock(sid)。 */
+/** 删盘上单条（不存在则 no-op，不无故建档）；调用方必须已持有 withSessionLock(sid)。 */
 async function dropProposalFromDisk(sid: string, id: string): Promise<void> {
   const stored = await readProposalsFile(sid)
   if (!(id in stored)) return
@@ -578,36 +578,36 @@ async function dropProposalFromDisk(sid: string, id: string): Promise<void> {
   await writeFile(proposalsPath(sid), JSON.stringify(stored), "utf-8")
 }
 
-/** applyDirectorOps 之外調用的刪盤包裝：自取會話鎖 + 失敗僅記日誌（不反噬已成功的 apply）。 */
+/** applyDirectorOps 之外调用的删盘包装：自取会话锁 + 失败仅记日志（不反噬已成功的 apply）。 */
 async function dropProposalWithLock(sid: string, id: string): Promise<void> {
   try {
     await withSessionLock(sid, () => dropProposalFromDisk(sid, id))
   } catch (e) {
-    console.error(`[director] proposal 盤上刪除失敗（sid=${sid}, id=${id}）:`, e)
+    console.error(`[director] proposal 盘上删除失败（sid=${sid}, id=${id}）:`, e)
   }
 }
 
-/** 測試鉤子：模擬 gateway 重啟（僅清內存 Map，盤上保留），驗證 apply 走盤載入路徑。 */
+/** 测试钩子：模拟 gateway 重启（仅清内存 Map，盘上保留），验证 apply 走盘载入路径。 */
 export function __clearPendingProposalsForTest(): void {
   pendingProposals.clear()
 }
 
-// ── op 聯合（~20 個純文檔操作；語義逐一對齊 directorStore mutation + directorTools 守衛） ──
+// ── op 联合（~20 个纯文档操作；语义逐一对齐 directorStore mutation + directorTools 守卫） ──
 
-/** addAction 入參（kunpeng upsert_action 的新建路徑；欄位名走 HTTP snake_case） */
+/** addAction 入参（kunpeng upsert_action 的新建路径；栏位名走 HTTP snake_case） */
 export interface DirectorActionSeed {
   element_id: string
   action: DirectorActionClip["action"]
   start_sec?: number
   duration_sec: number
-  /** 2026-09-03 R1-#2：顯式起點覆蓋；省略時默認取「前一鏡末幀（或同鏡頭前序動作結束時）」求解位置 */
+  /** 2026-09-03 R1-#2：显式起点覆盖；省略时默认取「前一镜末帧（或同镜头前序动作结束时）」求解位置 */
   from?: Vec3
   to?: Vec3
   from_rotation_deg?: Vec3
   to_rotation_deg?: Vec3
   intensity?: number
   locked?: boolean
-  /** 2026-09-03 驗屍修復 R3-⑥：同元素同鏡動作時間重疊時強制覆蓋（默認 false → 重疊報錯） */
+  /** 2026-09-03 验尸修复 R3-⑥：同元素同镜动作时间重叠时强制覆盖（默认 false → 重叠报错） */
   force?: boolean
 }
 
@@ -642,7 +642,7 @@ export type DirectorOp =
   | { op: "checkpoint" }
   | { op: "save" }
 
-/** 首個 op 需要已初始化工程嗎？addPlan/addElement/save/undo/redo/checkpoint/播放控制/群組可在空工程上跑。 */
+/** 首个 op 需要已初始化工程吗？addPlan/addElement/save/undo/redo/checkpoint/播放控制/群组可在空工程上跑。 */
 function requiresPlan(op: DirectorOp): boolean {
   return !["addPlan", "addElement", "save", "undo", "redo", "checkpoint", "setCurrentTime", "setPlaying", "replacePlans", "addGroup", "removeGroup"].includes(op.op)
 }
@@ -657,10 +657,10 @@ function str(v: unknown, name: string): string {
 }
 
 /**
- * 2026-09-03 驗屍修復 R3-⑦（錯誤文案衛生）：manage_plan 系 op 的目標方案 id 校驗。
- * 極限評測實錘（REPORT P0-1/⑦）：無效/空 plan_id 舊路徑落 `str()` 回英文 "plan_id must be a
- * non-empty string"，或工具層拼出「找不到方案 」（尾空格+空 id）。統一為中文 not_found：
- * 空 id → 「找不到方案（未提供有效的 plan_id）」；非空但不存在 → 呼叫點回「找不到方案 <id>」（無尾空格）。
+ * 2026-09-03 验尸修复 R3-⑦（错误文案卫生）：manage_plan 系 op 的目标方案 id 校验。
+ * 极限评测实锤（REPORT P0-1/⑦）：无效/空 plan_id 旧路径落 `str()` 回英文 "plan_id must be a
+ * non-empty string"，或工具层拼出「找不到方案 」（尾空格+空 id）。统一为中文 not_found：
+ * 空 id → 「找不到方案（未提供有效的 plan_id）」；非空但不存在 → 呼叫点回「找不到方案 <id>」（无尾空格）。
  */
 function requirePlanId(raw: unknown): string {
   const id = typeof raw === "string" ? raw.trim() : ""
@@ -668,13 +668,13 @@ function requirePlanId(raw: unknown): string {
   return id
 }
 
-/** R3-⑥：動作時間區間可讀化（秒，保留兩位） */
+/** R3-⑥：动作时间区间可读化（秒，保留两位） */
 function actionRangeLabel(startSec: number, durationSec: number): string {
   const round = (n: number) => Math.round(n * 100) / 100
   return `${round(startSec)}-${round(startSec + durationSec)}s`
 }
 
-/** kunpeng directorStore.ts L138-166 makeSequenceShot 逐行等價 */
+/** kunpeng directorStore.ts L138-166 makeSequenceShot 逐行等价 */
 function makeSequenceShot(
   index: number,
   startSec: number,
@@ -705,7 +705,7 @@ function makeSequenceShot(
   }
 }
 
-/** kunpeng directorStore.ts L168-177 makeDefaultPlan 逐行等價 */
+/** kunpeng directorStore.ts L168-177 makeDefaultPlan 逐行等价 */
 function makeDefaultPlan(elements: DirectorElement[], aspect: AspectId, name = "稳定叙事"): DirectorPlan {
   const duration = 3.75
   return {
@@ -718,9 +718,9 @@ function makeDefaultPlan(elements: DirectorElement[], aspect: AspectId, name = "
 }
 
 /**
- * 2026-09-03 驗屍修復 R1-#3：bare 方案殼（shots: []，摘要同步空工程口徑）。
- * 工具觸發的 auto-seed 用此殼——極限會話實錘：makeDefaultPlan 播種的 4 個模板鏡頭
- * 在 agent 從零搭建時要逐個 delete 清垃圾。makeDefaultPlan 模板語義保留給前端 open()（二期）。
+ * 2026-09-03 验尸修复 R1-#3：bare 方案壳（shots: []，摘要同步空工程口径）。
+ * 工具触发的 auto-seed 用此壳——极限会话实锤：makeDefaultPlan 播种的 4 个模板镜头
+ * 在 agent 从零搭建时要逐个 delete 清垃圾。makeDefaultPlan 模板语义保留给前端 open()（二期）。
  */
 function makeBarePlan(name = "未命名方案"): DirectorPlan {
   return {
@@ -732,30 +732,30 @@ function makeBarePlan(name = "未命名方案"): DirectorPlan {
   }
 }
 
-/** 2026-09-03 驗屍修復 R1-#6：方案摘要動態口徑（鏡頭數 · 總秒數） */
+/** 2026-09-03 验尸修复 R1-#6：方案摘要动态口径（镜头数 · 总秒数） */
 function planSummaryOf(plan: DirectorPlan): string {
   const totalSec = Math.round(plan.shots.reduce((sum, shot) => sum + shot.durationSec, 0) * 100) / 100
   return `${plan.shots.length} 个镜头 · ${totalSec} 秒`
 }
 
-/** R1-#6：結構性鏡頭操作後同步所在方案 summary */
+/** R1-#6：结构性镜头操作后同步所在方案 summary */
 function withSyncedSummary(plan: DirectorPlan): DirectorPlan {
   return { ...plan, summary: planSummaryOf(plan) }
 }
 
 /**
- * 2026-09-03 驗屍修復 R3-④（propose_plans 尊重鏡頭數）：從 instruction 解析「N 个镜头 / N 镜头 / N 镜」。
- * 極限評測實錘（REPORT P1-5）：指令明寫六鏡，提案 4 鏡，agent 手補 2。
- * 正則照 spec 原樣：(\d+)\s*[个個]?\s*镜头|(\d+)\s*镜；解析不出回 null（維持模板默認）。
+ * 2026-09-03 验尸修复 R3-④（propose_plans 尊重镜头数）：从 instruction 解析「N 个镜头 / N 镜头 / N 镜」。
+ * 极限评测实锤（REPORT P1-5）：指令明写六镜，提案 4 镜，agent 手补 2。
+ * 正则照 spec 原样：(\d+)\s*[个个]?\s*镜头|(\d+)\s*镜；解析不出回 null（维持模板默认）。
  */
 function parseShotCountFromInstruction(instruction: string): number | null {
-  const m = instruction.match(/(\d+)\s*[个個]?\s*镜头|(\d+)\s*镜/)
+  const m = instruction.match(/(\d+)\s*[个个]?\s*镜头|(\d+)\s*镜/)
   if (!m) return null
   const n = Number(m[1] ?? m[2])
   return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null
 }
 
-/** R3-④：克隆鏡頭並換全套 id（循環湊數時避免 id 重複；名稱統一「镜头 N」口徑）。 */
+/** R3-④：克隆镜头并换全套 id（循环凑数时避免 id 重复；名称统一「镜头 N」口径）。 */
 function cloneShotFreshIds(shot: DirectorSequenceShot, index: number): DirectorSequenceShot {
   return {
     ...clone(shot),
@@ -772,8 +772,8 @@ function cloneShotFreshIds(shot: DirectorSequenceShot, index: number): DirectorS
 }
 
 /**
- * R3-④：把方案鏡頭序列調整為 count 個——不足循環模板序列湊數（克隆換 id），超出截斷；
- * 之後 normalizeShotTimes 重排 startSec。空序列無從循環，原樣返回。
+ * R3-④：把方案镜头序列调整为 count 个——不足循环模板序列凑数（克隆换 id），超出截断；
+ * 之后 normalizeShotTimes 重排 startSec。空序列无从循环，原样返回。
  */
 function resizePlanShotCount(plan: DirectorPlan, count: number): DirectorPlan {
   if (!Number.isInteger(count) || count < 1) return plan
@@ -788,10 +788,10 @@ function resizePlanShotCount(plan: DirectorPlan, count: number): DirectorPlan {
 }
 
 /**
- * 2026-09-03 驗屍修復 R1-#2：動作起點接續求解（見 addAction 註釋）。
- * 用 evaluateDirectorFrame 在目標時刻解算該元素位置：
- * 同鏡頭前序動作 → 動作 startSec 時刻；否則上一鏡末幀（末幀前 1ms 落在前鏡內）；
- * 首鏡頭無前序 → 回退 fallback（elementStates/element.position，現狀語義）。
+ * 2026-09-03 验尸修复 R1-#2：动作起点接续求解（见 addAction 注释）。
+ * 用 evaluateDirectorFrame 在目标时刻解算该元素位置：
+ * 同镜头前序动作 → 动作 startSec 时刻；否则上一镜末帧（末帧前 1ms 落在前镜内）；
+ * 首镜头无前序 → 回退 fallback（elementStates/element.position，现状语义）。
  */
 function solvedFromPosition(plan: DirectorPlan, elements: DirectorElement[], shot: DirectorSequenceShot, elementId: string, startSec: number, fallback: Vec3): Vec3 {
   const hasEarlierAction = shot.actions.some((action) => action.elementId === elementId && action.startSec <= startSec + 1e-6)
@@ -813,12 +813,12 @@ function solvedFromPosition(plan: DirectorPlan, elements: DirectorElement[], sho
   }
 }
 
-/** 2026-09-03 驗屍修復 R1-#4：K 幀規整——按 timeSec 升冪重排 + 同幀去重（一個 24fps 幀槽內視為同幀）。
- * 真實會話彈跳實錘（fd22bd6e rev49/55「step-back 末帧时间轴异常，重建干净版本」）：
- * 用戶 K 幀 t=1.0（位置 15,-2，提前到達語義）與模板填充 K 幀 t=1.025（11.4,-1.64，0.6 幀間隔）共存，
- * 回放位置 15,-2 → 11.4,-1.64 → 15,-2 來回彈跳；舊去重窗僅半幀（1/48）攔不住 0.6 幀間隔。
- * 本規整窗寬 = 1/24（同幀槽），同槽保留時間較早者（保住「提前到達」意圖；模板殘留填充丟棄）。
- * 意圖感知的精細去重（用戶幀 next 優先，一幀窗）在工具層 set_motion_keyframe，先於本規整執行。 */
+/** 2026-09-03 验尸修复 R1-#4：K 帧规整——按 timeSec 升幂重排 + 同帧去重（一个 24fps 帧槽内视为同帧）。
+ * 真实会话弹跳实锤（fd22bd6e rev49/55「step-back 末帧时间轴异常，重建干净版本」）：
+ * 用户 K 帧 t=1.0（位置 15,-2，提前到达语义）与模板填充 K 帧 t=1.025（11.4,-1.64，0.6 帧间隔）共存，
+ * 回放位置 15,-2 → 11.4,-1.64 → 15,-2 来回弹跳；旧去重窗仅半帧（1/48）拦不住 0.6 帧间隔。
+ * 本规整窗宽 = 1/24（同帧槽），同槽保留时间较早者（保住「提前到达」意图；模板残留填充丢弃）。
+ * 意图感知的精细去重（用户帧 next 优先，一帧窗）在工具层 set_motion_keyframe，先于本规整执行。 */
 const KF_DEDUPE_SEC = 1 / 24
 
 function normalizeMotionKeyframes(keyframes: DirectorMotionKeyframe[]): DirectorMotionKeyframe[] {
@@ -829,7 +829,7 @@ function normalizeMotionKeyframes(keyframes: DirectorMotionKeyframe[]): Director
   for (const keyframe of sorted) {
     const previous = out[out.length - 1]
     if (previous && keyframe.timeSec - previous.timeSec < KF_DEDUPE_SEC) {
-      // 人工鎖定幀永不丟棄：同幀槽撞上鎖定幀時保留鎖定者
+      // 人工锁定帧永不丢弃：同帧槽撞上锁定帧时保留锁定者
       if (!previous.locked && keyframe.locked) out[out.length - 1] = keyframe
       continue
     }
@@ -839,14 +839,14 @@ function normalizeMotionKeyframes(keyframes: DirectorMotionKeyframe[]): Director
 }
 
 /**
- * 單 op 套用（draft 就地修改；語義註釋標 wheel mutation 名；錯誤文案全簡體，照 directorTools）。
- * 回傳 changed 摘要（log.jsonl changed 欄位）。
+ * 单 op 套用（draft 就地修改；语义注释标 wheel mutation 名；错误文案全简体，照 directorTools）。
+ * 回传 changed 摘要（log.jsonl changed 栏位）。
  */
 function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
   switch (op.op) {
-    // wheel addElement：push + 全 plan 全 shot elementStates 補 baseState
-    // （API 邊界防禦：部分形狀補默認——wheel 假設 UI 工廠傳完整元素，裸 API/agent 補丁層可能缺欄，
-    // 不補會在 clone(undefined) 處炸 JSON.parse）
+    // wheel addElement：push + 全 plan 全 shot elementStates 补 baseState
+    // （API 边界防御：部分形状补默认——wheel 假设 UI 工厂传完整元素，裸 API/agent 补丁层可能缺栏，
+    // 不补会在 clone(undefined) 处炸 JSON.parse）
     case "addElement": {
       const raw = op.element
       if (!raw || typeof raw.id !== "string") throw new DirectorValidationError("element.id is required")
@@ -868,7 +868,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }
       return `element:${element.id}`
     }
-    // wheel removeElements（delete_element 為 director_delete target=element 路徑，含存在性守衛）
+    // wheel removeElements（delete_element 为 director_delete target=element 路径，含存在性守卫）
     case "removeElements":
     case "delete_element": {
       const ids = op.op === "removeElements" ? op.ids : [op.element_id]
@@ -886,7 +886,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }
       return `elements:${ids.join(",")}`
     }
-    // wheel updateShotElementState：全 plan 中目標 shot 的 elementStates 合併
+    // wheel updateShotElementState：全 plan 中目标 shot 的 elementStates 合并
     case "updateShotElementState": {
       const shotId = str(op.shot_id, "shot_id")
       const elementId = str(op.element_id, "element_id")
@@ -908,20 +908,20 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       if (!hit) throw new DirectorNotFoundError(`找不到镜头 ${shotId}`)
       return `shot:${shotId} element:${elementId}`
     }
-    // wheel addShot：目標=activePlan；追加後 normalizeShotTimes；activeShot 切新鏡頭
+    // wheel addShot：目标=activePlan；追加后 normalizeShotTimes；activeShot 切新镜头
     case "addShot": {
       const plan = doc.plans.find((p) => p.id === doc.activePlanId)
       if (!plan) throw new DirectorNotFoundError("当前没有活动方案")
       const duration = op.shot?.durationSec ?? 3.75
       const start = plan.shots.reduce((sum, shot) => sum + shot.durationSec, 0)
       const shot = { ...makeSequenceShot(plan.shots.length, start, duration, doc.aspect, doc.elements), ...(op.shot ?? {}), id: op.shot?.id ?? `shot-${nanoid(7)}` } as DirectorSequenceShot
-      // R1-#6：結構變更後同步方案摘要
+      // R1-#6：结构变更后同步方案摘要
       doc.plans = doc.plans.map((item) => (item.id === plan.id ? withSyncedSummary(normalizeShotTimes({ ...item, shots: [...item.shots, shot] })) : item))
       doc.activeShotId = shot.id
       doc.currentTimeSec = start
       return `shot:${shot.id}`
     }
-    // wheel updateShot：patch 合併 + durationSec 比例縮放 cameraKeyframes/actions + normalizeShotTimes
+    // wheel updateShot：patch 合并 + durationSec 比例缩放 cameraKeyframes/actions + normalizeShotTimes
     case "updateShot": {
       const shotId = str(op.shot_id, "shot_id")
       if (!op.patch || typeof op.patch !== "object") throw new DirectorValidationError("patch is required")
@@ -941,13 +941,13 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }))
       return `shot:${shotId}`
     }
-    // wheel removeShot：activePlan；至少留一鏡頭；normalizeShotTimes；activeShot 回退首鏡頭
+    // wheel removeShot：activePlan；至少留一镜头；normalizeShotTimes；activeShot 回退首镜头
     case "removeShot": {
       const shotId = str(op.shot_id, "shot_id")
       const plan = doc.plans.find((p) => p.id === doc.activePlanId)
       if (!plan) throw new DirectorNotFoundError("当前没有活动方案")
       if (plan.shots.length <= 1) throw new DirectorBlockedError("方案至少保留一个镜头")
-      // R1-#6：結構變更後同步方案摘要
+      // R1-#6：结构变更后同步方案摘要
       doc.plans = doc.plans.map((item) => (item.id === plan.id ? withSyncedSummary(normalizeShotTimes({ ...item, shots: item.shots.filter((shot) => shot.id !== shotId) })) : item))
       if (doc.activeShotId === shotId) {
         const next = doc.plans.find((item) => item.id === plan.id)?.shots[0]
@@ -966,14 +966,14 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
         const shots = [...plan.shots]
         const [shot] = shots.splice(index, 1)
         shots.splice(Math.max(0, Math.min(toIndex, shots.length)), 0, shot)
-        // R1-#6：結構變更後同步方案摘要
+        // R1-#6：结构变更后同步方案摘要
         return withSyncedSummary(normalizeShotTimes({ ...plan, shots }))
       })
       return `shot:${shotId}`
     }
-    // wheel addPlan：partial 覆蓋；activePlan/activeShot 切過去
-    // R1-#3：帶 shots 陣列的 addPlan 以 bare 殼為基底（工具 auto-seed / 從零搭建語義，
-    // 不再先造 4 個模板鏡頭再整體覆蓋）；無 shots 參數維持 makeDefaultPlan 模板（前端 open() 二期）。
+    // wheel addPlan：partial 覆盖；activePlan/activeShot 切过去
+    // R1-#3：带 shots 阵列的 addPlan 以 bare 壳为基底（工具 auto-seed / 从零搭建语义，
+    // 不再先造 4 个模板镜头再整体覆盖）；无 shots 参数维持 makeDefaultPlan 模板（前端 open() 二期）。
     case "addPlan": {
       const base = Array.isArray(op.plan?.shots) ? makeBarePlan(op.plan?.name) : makeDefaultPlan(doc.elements, doc.aspect, op.plan?.name)
       const plan = { ...base, ...(op.plan ?? {}), id: op.plan?.id ?? base.id } as DirectorPlan
@@ -983,7 +983,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.currentTimeSec = 0
       return `plan:${plan.id}`
     }
-    // wheel updatePlan：name/summary patch（rename 語義，kunpeng manage_plan rename 同款守衛）
+    // wheel updatePlan：name/summary patch（rename 语义，kunpeng manage_plan rename 同款守卫）
     case "updatePlan": {
       const planId = requirePlanId(op.plan_id)
       if (!op.patch || typeof op.patch !== "object") throw new DirectorValidationError("patch is required")
@@ -1005,7 +1005,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.currentTimeSec = 0
       return `plan:${planId}`
     }
-    // wheel duplicatePlan：深拷貝 + 全 id 換新
+    // wheel duplicatePlan：深拷贝 + 全 id 换新
     case "duplicatePlan": {
       const planId = requirePlanId(op.plan_id)
       const source = doc.plans.find((p) => p.id === planId)
@@ -1026,7 +1026,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.currentTimeSec = 0
       return `plan:${copy.id}`
     }
-    // wheel replacePlans：空列表拒絕；normalizeShotTimes；activePlan=首方案
+    // wheel replacePlans：空列表拒绝；normalizeShotTimes；activePlan=首方案
     case "replacePlans": {
       if (!Array.isArray(op.plans) || op.plans.length === 0) throw new DirectorValidationError("plans must be a non-empty array")
       const next = clone(op.plans).map(upgradePlanKeyframes).map(normalizeShotTimes)
@@ -1037,7 +1037,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.playing = false
       return `plans:${next.length}`
     }
-    // wheel setActivePlan：切方案 + activeShot=首鏡頭 + currentTime=0 + playing=false
+    // wheel setActivePlan：切方案 + activeShot=首镜头 + currentTime=0 + playing=false
     case "setActivePlan": {
       const planId = requirePlanId(op.plan_id)
       const plan = doc.plans.find((item) => item.id === planId)
@@ -1048,7 +1048,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.playing = false
       return `plan:${planId}`
     }
-    // wheel setActiveShot：跨方案找鏡頭；currentTime=該鏡頭 startSec；playing=false
+    // wheel setActiveShot：跨方案找镜头；currentTime=该镜头 startSec；playing=false
     case "setActiveShot": {
       const shotId = op.shot_id === null ? null : str(op.shot_id, "shot_id")
       const shot = shotId ? doc.plans.flatMap((plan) => plan.shots).find((item) => item.id === shotId) : undefined
@@ -1067,14 +1067,14 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.playing = Boolean(op.playing)
       return `playing:${doc.playing}`
     }
-    // wheel addAction：補 id/templateId/intensity/source/keyframes（createMotionKeyframes 輪子）
+    // wheel addAction：补 id/templateId/intensity/source/keyframes（createMotionKeyframes 轮子）
     case "addAction": {
       const shotId = str(op.shot_id, "shot_id")
       const seed = op.action
       if (!seed || typeof seed !== "object") throw new DirectorValidationError("action is required")
       const elementId = str(seed.element_id, "action.element_id")
       const actionId = str(seed.action, "action.action") as DirectorActionClip["action"]
-      // R1-#2：定位所在方案（from 接續求解需要完整 plan 上下文）
+      // R1-#2：定位所在方案（from 接续求解需要完整 plan 上下文）
       const containingPlan = doc.plans.find((plan) => plan.shots.some((item) => item.id === shotId))
       const shot = containingPlan?.shots.find((item) => item.id === shotId)
       if (!shot) throw new DirectorNotFoundError(`找不到镜头 ${shotId}`)
@@ -1084,17 +1084,17 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       const startSec = num(seed.start_sec ?? 0, "action.start_sec")
       const state = shot.elementStates[elementId]
       const fallback = state?.position ?? element.position
-      // 2026-09-03 驗屍修復 R1-#2：from 默認接續動線——極限會話實錘 12 次手工「起点锚定 S4 终点」：
-      // 舊邏輯取 shot.elementStates（可能滯留全局初始位），跨鏡動線每鏡都要手工錨一次。
-      // 新默認：a) 同鏡頭有更早動作 → 取該動作進行中/結束時的求解位置；
-      //         b) 無同鏡頭前序但有上一鏡 → 取上一鏡末幀（startSec+durationSec 邊界內）求解位置；
-      //         c) 首鏡頭 → 維持現狀（elementStates/element.position）。
-      // 顯式 from 參數永遠可覆蓋。
+      // 2026-09-03 验尸修复 R1-#2：from 默认接续动线——极限会话实锤 12 次手工「起点锚定 S4 终点」：
+      // 旧逻辑取 shot.elementStates（可能滞留全局初始位），跨镜动线每镜都要手工锚一次。
+      // 新默认：a) 同镜头有更早动作 → 取该动作进行中/结束时的求解位置；
+      //         b) 无同镜头前序但有上一镜 → 取上一镜末帧（startSec+durationSec 边界内）求解位置；
+      //         c) 首镜头 → 维持现状（elementStates/element.position）。
+      // 显式 from 参数永远可覆盖。
       const from = seed.from ? clone(seed.from) : solvedFromPosition(containingPlan!, doc.elements, shot, elementId, startSec, fallback)
       const to = seed.to ? clone(seed.to) : { ...from }
-      // 2026-09-03 驗屍修復 R3-⑥（動作重疊守衛）：同元素同鏡頭時間區間重疊 → 舊行為直接追加，
-      // 回放時兩動作搶同一元素造成位置跳變（REPORT P2-7：look-back+raise-hand 靠 agent 自查自刪）。
-      // 新默認：重疊回結構化錯誤帶兩動作 id+區間；force:true 保留舊覆蓋出口。
+      // 2026-09-03 验尸修复 R3-⑥（动作重叠守卫）：同元素同镜头时间区间重叠 → 旧行为直接追加，
+      // 回放时两动作抢同一元素造成位置跳变（REPORT P2-7：look-back+raise-hand 靠 agent 自查自删）。
+      // 新默认：重叠回结构化错误带两动作 id+区间；force:true 保留旧覆盖出口。
       const clipId = `act-${nanoid(7)}`
       if (!seed.force) {
         const EPS = 1e-6
@@ -1130,7 +1130,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }))
       return `action:${complete.id}`
     }
-    // wheel updateAction：patch 合併 + durationSec 比例縮放 keyframes
+    // wheel updateAction：patch 合并 + durationSec 比例缩放 keyframes
     case "updateAction": {
       const shotId = str(op.shot_id, "shot_id")
       const actionId = str(op.action_id, "action_id")
@@ -1150,7 +1150,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
               const ratio = Math.max(0.01, patch.durationSec) / action.durationSec
               next.keyframes = next.keyframes.map((keyframe) => ({ ...keyframe, timeSec: Math.min(patch.durationSec!, keyframe.timeSec * ratio) }))
             }
-            // R1-#4：寫入前規整（升冪重排 + 同幀去重；縮放 clamp 造成的同刻重複也在此收斂）
+            // R1-#4：写入前规整（升幂重排 + 同帧去重；缩放 clamp 造成的同刻重复也在此收敛）
             if (next.keyframes) next.keyframes = normalizeMotionKeyframes(next.keyframes)
             return next
           }),
@@ -1158,7 +1158,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }))
       return `action:${actionId}`
     }
-    // wheel removeAction / delete_action（含 locked 守衛，kunpeng deleteTool 同款文案）
+    // wheel removeAction / delete_action（含 locked 守卫，kunpeng deleteTool 同款文案）
     case "removeAction":
     case "delete_action": {
       const shotId = str(op.shot_id, "shot_id")
@@ -1174,7 +1174,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }))
       return `action:${actionId}`
     }
-    // wheel set_lock（kunpeng lockTool）：action/motion_keyframe/camera_keyframe 三目標
+    // wheel set_lock（kunpeng lockTool）：action/motion_keyframe/camera_keyframe 三目标
     case "set_lock": {
       const shotId = str(op.shot_id, "shot_id")
       const locked = Boolean(op.locked)
@@ -1216,7 +1216,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }
       throw new DirectorValidationError("不支持的锁定目标")
     }
-    // kunpeng deleteTool：motion_keyframe/camera_keyframe 刪除（locked 守衛 + override）
+    // kunpeng deleteTool：motion_keyframe/camera_keyframe 删除（locked 守卫 + override）
     case "delete_keyframe": {
       const shotId = str(op.shot_id, "shot_id")
       const keyframeId = str(op.keyframe_id, "keyframe_id")
@@ -1250,8 +1250,8 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       }
       throw new DirectorValidationError("不支持的删除目标")
     }
-    // 2026-09-03 驗屍修復 R3-⑤（群組寫路徑）：建群組——元素存在性校驗 + 與 element.groupId 雙向同步。
-    // 一個元素至多屬一個群組：入新組時從其他組的 elementIds 剔除，保持兩處真相一致。
+    // 2026-09-03 验尸修复 R3-⑤（群组写路径）：建群组——元素存在性校验 + 与 element.groupId 双向同步。
+    // 一个元素至多属一个群组：入新组时从其他组的 elementIds 剔除，保持两处真相一致。
     case "addGroup": {
       const name = str(op.name, "name")
       const ids = Array.isArray(op.element_ids) ? op.element_ids : []
@@ -1267,7 +1267,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.groups = doc.groups.map((g) => (g.id === group.id ? g : { ...g, elementIds: g.elementIds.filter((id) => !memberSet.has(id)) }))
       return `group_added:${group.id}`
     }
-    // R3-⑤：刪群組——只刪組不刪元素，成員 groupId 復位 null。
+    // R3-⑤：删群组——只删组不删元素，成员 groupId 复位 null。
     case "removeGroup": {
       const groupId = str(op.group_id, "group_id")
       const group = doc.groups.find((g) => g.id === groupId)
@@ -1276,7 +1276,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       for (const element of doc.elements) if (element.groupId === groupId) element.groupId = null
       return `group_removed:${groupId}`
     }
-    // wheel undo：JSON 快照回滾
+    // wheel undo：JSON 快照回滚
     case "undo": {
       const previous = doc.undoStack[doc.undoStack.length - 1]
       if (!previous) throw new DirectorBlockedError("没有可撤销的历史")
@@ -1302,7 +1302,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.redoStack = doc.redoStack.slice(0, -1)
       return "redo"
     }
-    // wheel checkpoint：同狀態去重 + 上限 40
+    // wheel checkpoint：同状态去重 + 上限 40
     case "checkpoint": {
       const next = snapshotDoc(doc)
       const previous = doc.undoStack[doc.undoStack.length - 1]
@@ -1311,7 +1311,7 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
       doc.redoStack = []
       return "checkpoint"
     }
-    // wheel save：寫入路徑統一走 applyWithinLock，此處僅標記
+    // wheel save：写入路径统一走 applyWithinLock，此处仅标记
     case "save":
       return "save"
     default:
@@ -1319,9 +1319,9 @@ function applyDirectorOp(doc: DirectorDoc, op: DirectorOp): string {
   }
 }
 
-// ── 對外 API（spec §3 六條路由的服務層） ─────────────────────────────────────
+// ── 对外 API（spec §3 六条路由的服务层） ─────────────────────────────────────
 
-/** wheel save() 產物形狀（DirectorSceneFile v2）——spec §3 GET /state 出參 project 欄位 */
+/** wheel save() 产物形状（DirectorSceneFile v2）——spec §3 GET /state 出参 project 栏位 */
 function sceneFileOf(doc: DirectorDoc): DirectorSceneFile {
   return {
     version: 2,
@@ -1337,17 +1337,17 @@ function sceneFileOf(doc: DirectorDoc): DirectorSceneFile {
 }
 
 /**
- * 2026-09-03 驗屍修復 R1-#1：state 分級輸出。
- * 極限會話實錘（fd22bd6e）：GET /state project 載荷 55KB，joints（動作 K 幀內嵌 10+ 關節座標）
- * 佔 44%，agent 覆核被迫派子代理落盤定點查。summary 模式：保留 plan/shots 結構與每個 action 的
+ * 2026-09-03 验尸修复 R1-#1：state 分级输出。
+ * 极限会话实锤（fd22bd6e）：GET /state project 载荷 55KB，joints（动作 K 帧内嵌 10+ 关节座标）
+ * 占 44%，agent 覆核被迫派子代理落盘定点查。summary 模式：保留 plan/shots 结构与每个 action 的
  * {id, elementId, action, startSec, durationSec, from, to, keyframe_count, 首末位置}、
- * cameraKeyframes 摘要（id/幀位/位置）、health/issues/counts；剝除所有 joints 與 keyframes 陣列。
- * 默認仍是 full（前端 viewport 的 evaluateDirectorFrame 需要完整 keyframes，兼容零風險）；
- * 工具層 director_get_state 顯式傳 ?mode=summary（R2 跟進）。
+ * cameraKeyframes 摘要（id/帧位/位置）、health/issues/counts；剥除所有 joints 与 keyframes 阵列。
+ * 默认仍是 full（前端 viewport 的 evaluateDirectorFrame 需要完整 keyframes，兼容零风险）；
+ * 工具层 director_get_state 显式传 ?mode=summary（R2 跟进）。
  */
 export type DirectorStateMode = "summary" | "full"
 
-/** summary 模式動作摘要（keyframes 陣列 → keyframe_count + 首末位置） */
+/** summary 模式动作摘要（keyframes 阵列 → keyframe_count + 首末位置） */
 export interface DirectorActionSummary {
   id: string
   elementId: string
@@ -1370,7 +1370,7 @@ export interface DirectorShotSummary extends Omit<DirectorSequenceShot, "actions
 }
 
 export type DirectorStateSummary = Omit<DirectorSceneFile, "plans" | "groups"> & {
-  /** R3-⑤：群組進 state 兩態；summary 帶 id/name/element_ids（elementIds 同值保留，兼容 camel 讀法） */
+  /** R3-⑤：群组进 state 两态；summary 带 id/name/element_ids（elementIds 同值保留，兼容 camel 读法） */
   groups: Array<{ id: string; name: string; elementIds: string[]; element_ids: string[] }>
   plans: Array<Omit<DirectorPlan, "shots"> & { shots: DirectorShotSummary[] }>
 }
@@ -1399,14 +1399,14 @@ function summarizeAction(action: DirectorActionClip): DirectorActionSummary {
 function summarizeSceneFile(scene: DirectorSceneFile): DirectorStateSummary {
   return {
     ...scene,
-    // R3-⑤：summary 群組帶雙寫法成員清單（契約 element_ids；elementIds 為存儲原形）
+    // R3-⑤：summary 群组带双写法成员清单（契约 element_ids；elementIds 为存储原形）
     groups: (scene.groups as Array<{ id: string; name: string; elementIds?: string[] }>).map((g) => ({
       id: g.id,
       name: g.name,
       elementIds: [...(g.elementIds ?? [])],
       element_ids: [...(g.elementIds ?? [])],
     })),
-    // mannequin 元素的 joints 關節覆蓋屬於大體積低頻欄位，summary 剝除（poseId 保留）
+    // mannequin 元素的 joints 关节覆盖属于大体积低频栏位，summary 剥除（poseId 保留）
     elements: scene.elements.map((element) => (element.kind === "mannequin" ? (({ joints: _joints, ...rest }) => rest)(element) as DirectorElement : element)) as DirectorElement[],
     plans: scene.plans.map((plan) => ({
       ...plan,
@@ -1424,7 +1424,7 @@ function summarizeSceneFile(scene: DirectorSceneFile): DirectorStateSummary {
 
 export interface DirectorStateResult {
   ok: true
-  /** R1-#1：本回包的分級（默認 full） */
+  /** R1-#1：本回包的分级（默认 full） */
   mode: DirectorStateMode
   project: DirectorSceneFile | DirectorStateSummary
   active_plan_id: string | null
@@ -1433,7 +1433,7 @@ export interface DirectorStateResult {
   counts: { shots: number; elements: number; actions: number }
   revision: number
   initialized: boolean
-  /** R3-②：能力清單（action/camera/pose 模板 + op 集 + 群組/導出邊界），summary/full 兩態都帶 */
+  /** R3-②：能力清单（action/camera/pose 模板 + op 集 + 群组/导出边界），summary/full 两态都带 */
   capabilities: DirectorCapabilities
 }
 
@@ -1486,16 +1486,16 @@ export interface ApplyDirectorOpsResult {
   changed: string[]
   emitted: boolean
   /**
-   * 2026-09-03 驗屍修復 R3-⑤（群組寫路徑契約，工具層按此調用）：批內含 addGroup 時回
-   * 新建群組 `{id, name, element_ids}`；含 removeGroup 時回 `removed_group_id`。無則不帶。
+   * 2026-09-03 验尸修复 R3-⑤（群组写路径契约，工具层按此调用）：批内含 addGroup 时回
+   * 新建群组 `{id, name, element_ids}`；含 removeGroup 时回 `removed_group_id`。无则不带。
    */
   group?: { id: string; name: string; element_ids: string[] }
   removed_group_id?: string
 }
 
 /**
- * 一批 ops：變更類 op 先 checkpoint（wheel mutation 慣例）後套用；有實際變化 → revision+1、
- * 寫 current + versions/<n>.json + log.jsonl、按策略裁剪、emit director.done + canvas.node.*。
+ * 一批 ops：变更类 op 先 checkpoint（wheel mutation 惯例）后套用；有实际变化 → revision+1、
+ * 写 current + versions/<n>.json + log.jsonl、按策略裁剪、emit director.done + canvas.node.*。
  * spec §3：store 未初始化 → DirectorNotInitializedError（409 director_not_initialized）。
  */
 export async function applyDirectorOps(
@@ -1509,7 +1509,7 @@ export async function applyDirectorOps(
 
   return withSessionLock(sid, async () => {
     const loaded = await loadCurrent(sid)
-    // 空工程文檔殼（無 doc 時用；wheel open() 語義：kunpeng directorStore.open() 對空目錄首開即播種）
+    // 空工程文档壳（无 doc 时用；wheel open() 语义：kunpeng directorStore.open() 对空目录首开即播种）
     const doc: DirectorDoc = loaded ?? {
       session_id: sid,
       revision: 0,
@@ -1528,12 +1528,12 @@ export async function applyDirectorOps(
       redoStack: [],
       updated_at: new Date(0).toISOString(),
     }
-    // 2026-09-03 驗屍修復 R3-①（P0：無 plan 即播種）：舊門禁只在 `!current`（無 doc）時 auto-seed，
-    // 首 op 為 addElement 時 doc 建了但 plans 空、activePlanId:null → 後續需 plan 的 op（addShot 等）
-    // 全撞「当前没有活动方案」死路且無出口（REPORT P0-1：agent 連續撞牆 3 次）。
-    // 新守衛：只要「無 activePlan（plans 空）」且本批 ops 含 requiresPlan 且批內無自建 plan op（addPlan/
-    // replacePlans）→ 注入 bare addPlan（R1-#3 的 bare 殼語義，不帶模板鏡頭垃圾）。
-    // 已有 plan 的用戶（前端已建方案）activePlanOf 非 null → 零影響。
+    // 2026-09-03 验尸修复 R3-①（P0：无 plan 即播种）：旧门禁只在 `!current`（无 doc）时 auto-seed，
+    // 首 op 为 addElement 时 doc 建了但 plans 空、activePlanId:null → 后续需 plan 的 op（addShot 等）
+    // 全撞「当前没有活动方案」死路且无出口（REPORT P0-1：agent 连续撞墙 3 次）。
+    // 新守卫：只要「无 activePlan（plans 空）」且本批 ops 含 requiresPlan 且批内无自建 plan op（addPlan/
+    // replacePlans）→ 注入 bare addPlan（R1-#3 的 bare 壳语义，不带模板镜头垃圾）。
+    // 已有 plan 的用户（前端已建方案）activePlanOf 非 null → 零影响。
     const hasPlanCreator = ops.some((op) => op.op === "addPlan" || op.op === "replacePlans")
     const needsSeed = activePlanOf(doc) === null && !hasPlanCreator && ops.some((op) => requiresPlan(op))
     const ops2 = needsSeed ? ([{ op: "addPlan", plan: { name: "未命名方案", shots: [] } } as DirectorOp, ...ops] as DirectorOp[]) : ops
@@ -1550,7 +1550,7 @@ async function applyWithinLock(
   const draft = clone(current)
   const changed: string[] = []
   for (const op of ops) {
-    // wheel 慣例：變更類 mutation 先 checkpoint（快照去重 + 上限 40，同 checkpoint()）
+    // wheel 惯例：变更类 mutation 先 checkpoint（快照去重 + 上限 40，同 checkpoint()）
     const mutating = !["undo", "redo", "checkpoint", "save", "setCurrentTime", "setPlaying"].includes(op.op)
     if (mutating) {
       const snap = snapshotDoc(draft)
@@ -1563,8 +1563,8 @@ async function applyWithinLock(
     changed.push(applyDirectorOp(draft, op))
   }
 
-  // R3-⑤：群組 op 響應契約——從 changed 提取本批 addGroup/removeGroup 結果
-  // （changed 與 ops 逐位對齊；批內多個同類 op 取最後一個）。
+  // R3-⑤：群组 op 响应契约——从 changed 提取本批 addGroup/removeGroup 结果
+  // （changed 与 ops 逐位对齐；批内多个同类 op 取最后一个）。
   let group: ApplyDirectorOpsResult["group"]
   let removed_group_id: string | undefined
   ops.forEach((op, i) => {
@@ -1580,7 +1580,7 @@ async function applyWithinLock(
   })
 
   if (JSON.stringify(draft) === JSON.stringify(current)) {
-    // 冪等 op：不 bump 版本、不寫日誌（timeline.ts 同款），但仍回當前狀態
+    // 幂等 op：不 bump 版本、不写日志（timeline.ts 同款），但仍回当前状态
     return { ok: true, project: sceneFileOf(current), revision: current.revision, changed, emitted: false, ...(group ? { group } : {}), ...(removed_group_id ? { removed_group_id } : {}) }
   }
 
@@ -1603,7 +1603,7 @@ async function applyWithinLock(
   return { ok: true, project: sceneFileOf(draft), revision: draft.revision, changed, emitted: true, ...(group ? { group } : {}), ...(removed_group_id ? { removed_group_id } : {}) }
 }
 
-/** spec §3 POST /proposals 出參（每案帶 requires_user_confirmation: true） */
+/** spec §3 POST /proposals 出参（每案带 requires_user_confirmation: true） */
 export interface DirectorProposalSummary {
   proposal_id: string
   requires_user_confirmation: true
@@ -1614,19 +1614,19 @@ export interface DirectorProposalSummary {
 }
 
 /**
- * spec §3 POST /proposals：planning-core 輪子（fallbackPlans 內部含 inferPromptActionsByShot
- * + ensurePlanActions + buildPlans 鏈，見片1 白名單④）對 instruction 生成 2-3 案；
- * 暫存 30 分 TTL。無已初始化工程 → DirectorNotInitializedError（守衛同 requireDirector）。
+ * spec §3 POST /proposals：planning-core 轮子（fallbackPlans 内部含 inferPromptActionsByShot
+ * + ensurePlanActions + buildPlans 链，见片1 白名单④）对 instruction 生成 2-3 案；
+ * 暂存 30 分 TTL。无已初始化工程 → DirectorNotInitializedError（守卫同 requireDirector）。
  */
 export async function createDirectorProposals(
   sid: string,
   instruction: string,
-  /** R3-④：可選目標鏡頭數（1-12）；未傳時從 instruction 解析「N 个镜头/N 镜」 */
+  /** R3-④：可选目标镜头数（1-12）；未传时从 instruction 解析「N 个镜头/N 镜」 */
   shotCount?: number,
 ): Promise<{ ok: true; proposal_ids: string[]; plans: DirectorProposalSummary[] }> {
   assertSessionId(sid)
   const trimmed = str(instruction, "instruction")
-  // R3-④：顯式 shot_count 優先並嚴格校驗；未傳走正則解析；都無 → null 維持模板默認
+  // R3-④：显式 shot_count 优先并严格校验；未传走正则解析；都无 → null 维持模板默认
   let targetCount: number | null = null
   if (shotCount !== undefined && shotCount !== null) {
     if (!Number.isInteger(shotCount) || shotCount < 1 || shotCount > 12) {
@@ -1639,8 +1639,8 @@ export async function createDirectorProposals(
   return withSessionLock(sid, async () => {
     let doc = await loadCurrent(sid)
     if (!doc || doc.plans.length === 0) {
-      // 空工程：用默認方案當 base 生成候選（wheel open() 播種語義）；apply_proposal 的
-      // replacePlans 是 seedable op，確認後會真正落盤。已有 elements/origin 時保留。
+      // 空工程：用默认方案当 base 生成候选（wheel open() 播种语义）；apply_proposal 的
+      // replacePlans 是 seedable op，确认后会真正落盘。已有 elements/origin 时保留。
       const elements = doc?.elements ?? []
       const aspect = doc?.aspect ?? "16:9"
       doc = {
@@ -1663,9 +1663,9 @@ export async function createDirectorProposals(
       }
     }
     const base = doc.plans.find((p) => p.id === doc.activePlanId) ?? doc.plans[0]
-    // R3-④：生成鏈湊數——先按目標數預調 base（≤8：planning-core adaptBaseForMotion 硬上限 8，
-    // 讓運鏡交替與動作推理按目標鏡頭數自然分佈），生成後再兜底 resize
-    // （覆蓋 >8 循環、prompt「镜头N」節區數量與目標不一致、bare base 默認 4 鏡等路徑）。
+    // R3-④：生成链凑数——先按目标数预调 base（≤8：planning-core adaptBaseForMotion 硬上限 8，
+    // 让运镜交替与动作推理按目标镜头数自然分布），生成后再兜底 resize
+    // （覆盖 >8 循环、prompt「镜头N」节区数量与目标不一致、bare base 默认 4 镜等路径）。
     const genBase = targetCount ? resizePlanShotCount(clone(base), Math.min(targetCount, 8)) : base
     let plans = fallbackPlans(clone(genBase), clone(doc.elements), trimmed)
     if (targetCount) plans = plans.map((plan) => resizePlanShotCount(plan, targetCount))
@@ -1688,21 +1688,21 @@ export async function createDirectorProposals(
         shots: plan.shots.map((shot) => ({ name: shot.name, duration_sec: shot.durationSec, camera_move: shot.cameraMove, actions: shot.actions.length })),
       })
     }
-    // 2026-09-04 持久化：本處已在 withSessionLock(sid) 內，直接合併寫盤；失敗降級純內存（舊行為）不阻塞提案。
+    // 2026-09-04 持久化：本处已在 withSessionLock(sid) 内，直接合并写盘；失败降级纯内存（旧行为）不阻塞提案。
     try {
       await mergeProposalsOntoDisk(sid, diskEntries)
     } catch (e) {
-      console.error(`[director] proposals 落盤失敗（sid=${sid}，降級純內存）:`, e)
+      console.error(`[director] proposals 落盘失败（sid=${sid}，降级纯内存）:`, e)
     }
     return { ok: true, proposal_ids: ids, plans: summaries }
   })
 }
 
 /**
- * spec §3 POST /apply_proposal：無暫存記錄 → DirectorNotFoundError（守衛照搬 kunpeng
+ * spec §3 POST /apply_proposal：无暂存记录 → DirectorNotFoundError（守卫照搬 kunpeng
  * applyProposalTool「候选方案不存在或已过期，请重新生成」）；成功 → replacePlans + emit。
- * 2026-09-04 持久化：內存 miss → 惰性讀 `<sid>/proposals.json`（重啟後仍可批准在途提案）；
- * 盤上條目同樣按 createdAt 校 TTL，過期即刪。成功後盤上殘留一併清除（內存命中時也清，冪等 no-op）。
+ * 2026-09-04 持久化：内存 miss → 惰性读 `<sid>/proposals.json`（重启后仍可批准在途提案）；
+ * 盘上条目同样按 createdAt 校 TTL，过期即删。成功后盘上残留一并清除（内存命中时也清，幂等 no-op）。
  */
 export async function applyDirectorProposal(sid: string, proposalId: string): Promise<ApplyDirectorOpsResult> {
   assertSessionId(sid)
@@ -1720,9 +1720,9 @@ export async function applyDirectorProposal(sid: string, proposalId: string): Pr
     }
   }
   if (!proposal) {
-    // 2026-09-03 驗屍修復 R3-③（提案過期禁止靜默換案）：極限評測實錘（REPORT P1-4/摩擦點 2）——
-    // 用戶選定方案過期後，agent 重新 propose 直接 apply 新 id，用戶批准被靜默替換。
-    // 錯誤文案顯式封死該路徑：過期必須重新出卡請示，不許生成新 proposal 後直接套用。
+    // 2026-09-03 验尸修复 R3-③（提案过期禁止静默换案）：极限评测实锤（REPORT P1-4/摩擦点 2）——
+    // 用户选定方案过期后，agent 重新 propose 直接 apply 新 id，用户批准被静默替换。
+    // 错误文案显式封死该路径：过期必须重新出卡请示，不许生成新 proposal 后直接套用。
     throw new DirectorNotFoundError("候选方案不存在或已过期，请重新生成；必须重新向用户出提案卡并等待用户批准，禁止生成新 proposal 后直接 apply")
   }
   pendingProposals.delete(id)
@@ -1744,7 +1744,7 @@ export async function getDirectorSchematic(sid: string, planId?: string, shotId?
   return { ok: true, ...renderSchematics(doc, plan, shot) }
 }
 
-/** spec §3 POST /reset：清空會話導演工程（rm 目錄 + 清 announced 記錄 + 廣播重置） */
+/** spec §3 POST /reset：清空会话导演工程（rm 目录 + 清 announced 记录 + 广播重置） */
 export async function resetDirector(sid: string): Promise<{ ok: true }> {
   assertSessionId(sid)
   return withSessionLock(sid, async () => {
@@ -1764,11 +1764,11 @@ export async function resetDirector(sid: string): Promise<{ ok: true }> {
   })
 }
 
-// ── HTTP 路由層（spec §3 六條；掛載與鑑權照 handleTimelineRoutes 慣例） ──────────
+// ── HTTP 路由层（spec §3 六条；挂载与鉴权照 handleTimelineRoutes 惯例） ──────────
 //
-// index.ts 補丁在 Bearer sk-biz 閘門之後呼叫 handleDirectorRoutes(key, req, pathname)。
-// 鑑權 = getOwnedSession 同款：resolveSession 三段解析（gateway UUID / opencode id 均收斂）
-// + apiKey 比對防跨 key 越權；session_id 一律走 query（Bun Request body 只能讀一次）。
+// index.ts 补丁在 Bearer sk-biz 闸门之后呼叫 handleDirectorRoutes(key, req, pathname)。
+// 鉴权 = getOwnedSession 同款：resolveSession 三段解析（gateway UUID / opencode id 均收敛）
+// + apiKey 比对防跨 key 越权；session_id 一律走 query（Bun Request body 只能读一次）。
 
 function directorHttpError(e: unknown): Response {
   if (e instanceof DirectorNotInitializedError) {
@@ -1794,7 +1794,7 @@ function directorHttpError(e: unknown): Response {
  *   POST /agent/v1/director/apply_proposal ?session_id= body {proposal_id}
  *   GET  /agent/v1/director/schematic    ?session_id=&plan=&shot=
  *   POST /agent/v1/director/reset        ?session_id=
- * spec 亦允許 /agent/v1/director/:sid/* 形；兩形都收（:sid 優先，退回 query）。
+ * spec 亦允许 /agent/v1/director/:sid/* 形；两形都收（:sid 优先，退回 query）。
  */
 export async function handleDirectorRoutes(key: string, req: Request, pathname: string): Promise<Response> {
   const url = new URL(req.url)
@@ -1811,7 +1811,7 @@ export async function handleDirectorRoutes(key: string, req: Request, pathname: 
     sid = url.searchParams.get("session_id") || ""
   }
   if (!sid) return Response.json({ ok: false, error: { message: "session_id (query or path) is required", type: "bad_request", code: "bad_request" } }, { status: 400 })
-  // 鑑權：resolveSession 收斂 opencode id → gateway UUID（timeline B2 修復同款）+ 跨 key 越權守衛
+  // 鉴权：resolveSession 收敛 opencode id → gateway UUID（timeline B2 修复同款）+ 跨 key 越权守卫
   const state = resolveFn?.(sid)
   if (!state || state.apiKey !== key) {
     return Response.json({ ok: false, error: { message: "session not found", type: "not_found", code: "not_found" } }, { status: 404 })
@@ -1819,14 +1819,14 @@ export async function handleDirectorRoutes(key: string, req: Request, pathname: 
   sid = state.sessionId
   try {
     if (req.method === "GET" && verb === "state") {
-      // R1-#1：?mode=summary 剝 joints/keyframes 摘要輸出；缺省 full（前端兼容零風險）
+      // R1-#1：?mode=summary 剥 joints/keyframes 摘要输出；缺省 full（前端兼容零风险）
       const mode = url.searchParams.get("mode") === "summary" ? "summary" : "full"
       return Response.json(await getDirectorState(sid, mode))
     }
     if (req.method === "POST" && verb === "op") {
       const body = (await req.json().catch(() => null)) as { op?: string; ops?: DirectorOp[]; reason?: string } & Record<string, unknown> | null
       if (!body) return Response.json({ ok: false, error: { message: "body must be JSON", type: "bad_request", code: "bad_request" } }, { status: 400 })
-      // 兩形：{ops:[...]} 批量（工具層規格化）或 {op:"...", ...payload} 單發（原生形狀）
+      // 两形：{ops:[...]} 批量（工具层规格化）或 {op:"...", ...payload} 单发（原生形状）
       let ops: DirectorOp[]
       if (Array.isArray(body.ops)) {
         ops = body.ops
@@ -1837,7 +1837,7 @@ export async function handleDirectorRoutes(key: string, req: Request, pathname: 
         return Response.json({ ok: false, error: { message: "body.op or body.ops is required", type: "bad_request", code: "bad_request" } }, { status: 400 })
       }
       const res = await applyDirectorOps(sid, ops, typeof body.reason === "string" ? body.reason : "")
-      // R3-⑤：群組 op 時透傳契約欄位（信封同現有 op，多回 group/removed_group_id）
+      // R3-⑤：群组 op 时透传契约栏位（信封同现有 op，多回 group/removed_group_id）
       return Response.json({ ok: true, project: res.project, revision: res.revision, changed: res.changed, emitted: res.emitted, ...(res.group ? { group: res.group } : {}), ...(res.removed_group_id ? { removed_group_id: res.removed_group_id } : {}) })
     }
     if (req.method === "POST" && verb === "proposals") {
@@ -1845,7 +1845,7 @@ export async function handleDirectorRoutes(key: string, req: Request, pathname: 
       if (!body || typeof body.instruction !== "string") {
         return Response.json({ ok: false, error: { message: "body.instruction is required", type: "bad_request", code: "bad_request" } }, { status: 400 })
       }
-      // R3-④：可選 shot_count（int 1-12）；缺省由服務端從 instruction 解析
+      // R3-④：可选 shot_count（int 1-12）；缺省由服务端从 instruction 解析
       const shotCount = body.shot_count === undefined || body.shot_count === null ? undefined : Number(body.shot_count)
       return Response.json(await createDirectorProposals(sid, body.instruction, shotCount))
     }
@@ -1869,8 +1869,8 @@ export async function handleDirectorRoutes(key: string, req: Request, pathname: 
 }
 
 /**
- * 單發 op 的 payload 欄位名轉換：HTTP 層用 snake_case（工具層慣例），op 聯合用 camelCase
- * （wheel DirectorPlan/DirectorSequenceShot 欄位名）。只轉已知鍵，值原樣透傳。
+ * 单发 op 的 payload 栏位名转换：HTTP 层用 snake_case（工具层惯例），op 联合用 camelCase
+ * （wheel DirectorPlan/DirectorSequenceShot 栏位名）。只转已知键，值原样透传。
  */
 function snakeToCamelOp(op: string, payload: Record<string, unknown>): DirectorOp {
   const p = payload
@@ -1893,8 +1893,8 @@ function snakeToCamelOp(op: string, payload: Record<string, unknown>): DirectorO
     case "setPlaying": return { op, playing: Boolean(p.playing) }
     case "addAction": {
       const a = (p.action ?? p) as Record<string, unknown>
-      // R1-#2：顯式 from 可覆蓋（工具層現不傳，raw API 逃生口）；to 缺參時不再虛構 (0,0,0)——
-      // 交由 gateway 以「原地動作 to={...from}」接續求解（與原地動作語義一致）
+      // R1-#2：显式 from 可覆盖（工具层现不传，raw API 逃生口）；to 缺参时不再虚构 (0,0,0)——
+      // 交由 gateway 以「原地动作 to={...from}」接续求解（与原地动作语义一致）
       const hasTo = a.to !== undefined || a.to_x !== undefined || a.to_y !== undefined || a.to_z !== undefined
       const hasFrom = a.from !== undefined || a.from_x !== undefined || a.from_y !== undefined || a.from_z !== undefined
       return {
@@ -1909,7 +1909,7 @@ function snakeToCamelOp(op: string, payload: Record<string, unknown>): DirectorO
           ...(hasTo ? { to: (a.to ?? { x: num0(a.to_x ?? a.moveX ?? 0) + 0, y: num0(a.to_y ?? 0), z: num0(a.to_z ?? a.moveZ ?? 0) }) as Vec3 } : {}),
           intensity: a.intensity === undefined ? undefined : Number(a.intensity),
           locked: a.locked === undefined ? undefined : Boolean(a.locked),
-          // R3-⑥：force 透傳（單發形逃生口；重疊守衛的強制覆蓋出口）
+          // R3-⑥：force 透传（单发形逃生口；重叠守卫的强制覆盖出口）
           force: a.force === undefined ? undefined : Boolean(a.force),
         },
       }
@@ -1920,7 +1920,7 @@ function snakeToCamelOp(op: string, payload: Record<string, unknown>): DirectorO
     case "delete_element": return { op, element_id: String(p.element_id ?? p.elementId ?? "") }
     case "delete_action": return { op, shot_id: sid0(p), action_id: aid0(p), override_locked: p.override_locked === undefined ? undefined : Boolean(p.override_locked) }
     case "delete_keyframe": return { op, target: (p.target ?? "motion_keyframe") as "motion_keyframe" | "camera_keyframe", shot_id: sid0(p), action_id: (p.action_id ?? undefined) as string | undefined, keyframe_id: String(p.keyframe_id ?? ""), override_locked: p.override_locked === undefined ? undefined : Boolean(p.override_locked) }
-    // R3-⑤：群組單發形（工具層契約：{op:"addGroup", name, element_ids} / {op:"removeGroup", group_id}）
+    // R3-⑤：群组单发形（工具层契约：{op:"addGroup", name, element_ids} / {op:"removeGroup", group_id}）
     case "addGroup": return { op, name: String(p.name ?? ""), element_ids: (p.element_ids ?? p.elementIds ?? []) as string[] }
     case "removeGroup": return { op, group_id: String(p.group_id ?? p.groupId ?? "") }
     case "undo": return { op }
@@ -1928,7 +1928,7 @@ function snakeToCamelOp(op: string, payload: Record<string, unknown>): DirectorO
     case "checkpoint": return { op }
     case "save": return { op }
     default:
-      // R3-⑦：未知 op 單發形與 applyDirectorOp 防衛同款文案（帶可用清單）
+      // R3-⑦：未知 op 单发形与 applyDirectorOp 防卫同款文案（带可用清单）
       throw new DirectorValidationError(`不支持的操作 ${op}，可用：${KNOWN_OPS.join("、")}`)
   }
 }

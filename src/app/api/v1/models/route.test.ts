@@ -1,8 +1,8 @@
-// `GET /v1/models` 的能力契約真行為斷言（對稱差 D23／P1-7）。
+// `GET /v1/models` 的能力契约真行为断言（对称差 D23／P1-7）。
 //
-// 驗的是**回應層**：新欄位（`x_capabilities.maxBatchCount`／`maxReferenceImages`）
-// 真的出現在 payload 裡，且值＝執行端常數（真的擋人的那顆）。
-// 認證走 BIZ_API_KEY_HASHES 兜底層；定價覆寫讀不到時既有程式碼吞錯並沿用現值，不擋列表。
+// 验的是**回应层**：新栏位（`x_capabilities.maxBatchCount`／`maxReferenceImages`）
+// 真的出现在 payload 里，且值＝执行端常数（真的挡人的那颗）。
+// 认证走 BIZ_API_KEY_HASHES 兜底层；定价覆写读不到时既有程式码吞错并沿用现值，不挡列表。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -60,9 +60,9 @@ test("x_capabilities 逐模型揭露批次数与参考上限，值＝执行端�
   assert.ok(image, "gpt-image-2 必须在列表里");
 
   assert.equal(image.x_capabilities?.mediaType, "image");
-  assert.equal(image.x_capabilities?.maxBatchCount, MAX_REQUEST_BATCH_COUNT, "批次數必須外露且等於實際 n 上限");
+  assert.equal(image.x_capabilities?.maxBatchCount, MAX_REQUEST_BATCH_COUNT, "批次数必须外露且等于实际 n 上限");
   assert.equal(image.x_capabilities?.referenceImages, true);
-  assert.equal(image.x_capabilities?.maxReferenceImages, MAX_REQUEST_REFERENCE_IMAGES, "參考上限必須外露且等於實際張數上限");
+  assert.equal(image.x_capabilities?.maxReferenceImages, MAX_REQUEST_REFERENCE_IMAGES, "参考上限必须外露且等于实际张数上限");
 });
 
 test("视频模型同样有批次数；不收参考图的模型省略参考上限（不输出空能力宣称）", async () => {

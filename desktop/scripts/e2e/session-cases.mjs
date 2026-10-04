@@ -1,18 +1,18 @@
 // desktop/scripts/e2e/session-cases.mjs
 //
-// 「真實已登入會話」附件本地化 + 複雜會話 E2E（A17/A18/B1/B2/B4/B5/B7）。
+// 「真实已登入会话」附件本地化 + 复杂会话 E2E（A17/A18/B1/B2/B4/B5/B7）。
 //
-// 紅線遵守：
-//   · 只讀複製 ~/.config/Eimu（seedProfileFrom），絕不修改原始 profile。
-//   · 不部署/不 SSH/不連 DB；只打生產站內附件端點（免費）與網關附件直傳（免費）。
-//   · 不觸發付費生成：本腳本「不發送任何 agent 訊息」；B4 只觀察送出鈕在未 ready
-//     時是否被鎖，若明顯可送則不點（避免產生 agent 回合）。
-//   · 輸出到 /tmp（不寫 repo）。
+// 红线遵守：
+//   · 只读复制 ~/.config/Eimu（seedProfileFrom），绝不修改原始 profile。
+//   · 不部署/不 SSH/不连 DB；只打生产站内附件端点（免费）与网关附件直传（免费）。
+//   · 不触发付费生成：本脚本「不发送任何 agent 讯息」；B4 只观察送出钮在未 ready
+//     时是否被锁，若明显可送则不点（避免产生 agent 回合）。
+//   · 输出到 /tmp（不写 repo）。
 //
 // 用法：
 //   node desktop/scripts/e2e/session-cases.mjs --out /tmp/eimu-session-e2e-XXX --assets /tmp/.../assets
 //
-// 產物：outDir/<case>.json、outDir/<case>.png、outDir/summary.json、outDir/net-<case>.json
+// 产物：outDir/<case>.json、outDir/<case>.png、outDir/summary.json、outDir/net-<case>.json
 
 import fs from "node:fs";
 import os from "node:os";
@@ -36,12 +36,12 @@ function parseArgs(argv) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ─────────────────────── 網路錄製（含 request body 大小與 multipart parts）
+// ─────────────────────── 网路录制（含 request body 大小与 multipart parts）
 
 async function attachRecorder(shell) {
   const list = [];
   const byReq = new Map();
-  // CDP：拿 multipart 原始 request body（Playwright postDataBuffer 對 FormData 回 null）。
+  // CDP：拿 multipart 原始 request body（Playwright postDataBuffer 对 FormData 回 null）。
   const postByUrl = new Map();
   try {
     const cdp = await shell.context.newCDPSession(shell.page);
@@ -58,11 +58,11 @@ async function attachRecorder(shell) {
         const r = await cdp.send("Network.getRequestPostData", { requestId: p.requestId });
         if (r && r.postData) postByUrl.set(info.url, r.postData);
       } catch {
-        /* body 可能已被釋放 */
+        /* body 可能已被释放 */
       }
     });
   } catch {
-    /* CDP 不可用時其餘錄製照常 */
+    /* CDP 不可用时其余录制照常 */
   }
   const onRequest = (req) => {
     let entry;
@@ -108,7 +108,7 @@ async function attachRecorder(shell) {
     try {
       const r = await req.response();
       e.status = r ? r.status() : null;
-      // 附件/直傳端點：抓伺服器回應（權威：列出實際入庫的檔名與 size）。
+      // 附件/直传端点：抓伺服器回应（权威：列出实际入库的档名与 size）。
       if (r && (/\/attachments$/.test(e.url) || /video-upload/.test(e.url))) {
         const t = await r.text();
         try {
@@ -120,7 +120,7 @@ async function attachRecorder(shell) {
     } catch {
       /* ignore */
     }
-    // CDP 拿到的 multipart 原始 body → 解析 parts 與位元組。
+    // CDP 拿到的 multipart 原始 body → 解析 parts 与位元组。
     const post = postByUrl.get(e.url);
     if (post) {
       e.cdpPostBytes = post.length;
@@ -157,7 +157,7 @@ async function attachRecorder(shell) {
   };
 }
 
-// ─────────────────────── 頁面狀態探針
+// ─────────────────────── 页面状态探针
 
 async function probeComposer(shell) {
   return await shell.evaluate(() => {
@@ -211,7 +211,7 @@ async function waitComposer(shell, timeout = 40000) {
   await shell.page.waitForSelector("#agent-composer-input", { state: "visible", timeout });
 }
 
-/** 等所有 chip 脫離 uploading/extracting（成功或失敗皆算落地）。 */
+/** 等所有 chip 脱离 uploading/extracting（成功或失败皆算落地）。 */
 async function waitChipsSettled(shell, timeout = 240000) {
   await shell.page.waitForFunction(
     () => {
@@ -228,7 +228,7 @@ async function waitChipsSettled(shell, timeout = 240000) {
   );
 }
 
-/** 同上但逾時不拋，回傳是否落地（讓案例能捕捉「卡住」狀態並繼續）。 */
+/** 同上但逾时不抛，回传是否落地（让案例能捕捉「卡住」状态并继续）。 */
 async function waitChipsSettledSafe(shell, timeout = 240000) {
   try {
     await waitChipsSettled(shell, timeout);
@@ -257,8 +257,8 @@ async function setText(shell, text) {
 const FILE_SEL = 'input[type="file"][accept*=".mp4"]';
 
 async function attachFiles(shell, files) {
-  // 輸入框 display:none（Tailwind hidden），Playwright setInputFiles 的可見性檢查會
-  // 間歇逾時 → 直接用 CDP DOM.setFileInputFiles（與 Playwright 同機制，但不做 actionability）。
+  // 输入框 display:none（Tailwind hidden），Playwright setInputFiles 的可见性检查会
+  // 间歇逾时 → 直接用 CDP DOM.setFileInputFiles（与 Playwright 同机制，但不做 actionability）。
   const list = Array.isArray(files) ? files : [files];
   try {
     if (!shell._e2eCdp) {
@@ -268,12 +268,12 @@ async function attachFiles(shell, files) {
     const cdp = shell._e2eCdp;
     const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
     const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: FILE_SEL });
-    if (!nodeId) throw new Error("file input nodeId 為空");
+    if (!nodeId) throw new Error("file input nodeId 为空");
     await cdp.send("DOM.setFileInputFiles", { files: list, nodeId });
     return;
   } catch (e) {
     shell._e2eCdp = null;
-    // 退路：暫時露出再 setInputFiles。
+    // 退路：暂时露出再 setInputFiles。
     await shell.page.evaluate((sel) => {
       const i = document.querySelector(sel);
       if (i) {
@@ -300,7 +300,7 @@ const assetsDir = args.assets;
 fs.mkdirSync(outDir, { recursive: true });
 
 if (!assetsDir || !fs.existsSync(path.join(assetsDir, "good-a.mp4"))) {
-  console.error("缺少素材：--assets 需含 good-a/b/c.mp4 與 bad.mp4");
+  console.error("缺少素材：--assets 需含 good-a/b/c.mp4 与 bad.mp4");
   process.exit(2);
 }
 const A = {
@@ -325,7 +325,7 @@ const only = args.only;
 const want = (n) => !only || only.includes(n);
 
 async function main() {
-  log(`Eimu 真實會話附件本地化 E2E`);
+  log(`Eimu 真实会话附件本地化 E2E`);
   log(`out=${outDir}`);
   log(`assets=${assetsDir} good=${sizeOf(A.goodA)}B bad=${sizeOf(A.bad)}B`);
   try {
@@ -367,7 +367,7 @@ async function main() {
     responseText: e.responseText ?? null,
   });
 
-  /** 從伺服器回應或 CDP body 取「實際入庫的檔名清單 + 位元組總和」。 */
+  /** 从伺服器回应或 CDP body 取「实际入库的档名清单 + 位元组总和」。 */
   const storedParts = (e) => {
     const arr = e.responseJson && Array.isArray(e.responseJson.attachments) ? e.responseJson.attachments : null;
     if (arr) {
@@ -388,7 +388,7 @@ async function main() {
 
   try {
     await shell.page.waitForLoadState("domcontentloaded").catch(() => {});
-    // 若不在工作台，導回首頁。
+    // 若不在工作台，导回首页。
     let boot = await probeComposer(shell).catch(() => null);
     if (!boot || !boot.hasTextarea) {
       await shell.page.goto(shell.origin + "/", { waitUntil: "domcontentloaded" }).catch(() => {});
@@ -405,14 +405,14 @@ async function main() {
     const bootShot = await shell.screenshot("boot");
     log(`bootScreenshot=${bootShot.path}`);
 
-    // ───────────── A17：只上行衍生檔 ─────────────
+    // ───────────── A17：只上行衍生档 ─────────────
     if (want("A17")) {
       const t0 = rec.mark();
       await clearChips(shell);
       await setText(shell, "");
       const beforeBytes = sizeOf(A.goodA);
       await attachFiles(shell, A.goodA);
-      // 立刻截「上傳中」態
+      // 立刻截「上传中」态
       await shell.page.waitForTimeout(200);
       const mid = await probeComposer(shell);
       const midShot = await shell.screenshot("A17-uploading");
@@ -436,7 +436,7 @@ async function main() {
         settledOk && attachments.length >= 1 && derivedOk && keyframes.length >= 1 && posters.length === 1 && probes.length === 1 && videoUpload.length === 0 && totalUp > 0 && totalUp <= 4 * 1024 * 1024;
       saveCase("A17", {
         status: pass ? "pass" : "fail",
-        title: "影片附件只上行衍生檔，原檔不上行",
+        title: "影片附件只上行衍生档，原档不上行",
         observations: {
           sourceBytes: beforeBytes,
           chipCount: after.chipCount,
@@ -457,23 +457,23 @@ async function main() {
           videoUploadRequests: videoUpload.length,
           videoUploadURLs: videoUpload.map((e) => e.url),
           totalUpstreamBytes: totalUp,
-          note: `原檔 ${beforeBytes}B 對比上行 ${totalUp}B（前後差 ${beforeBytes - totalUp}B 未上行）`,
+          note: `原档 ${beforeBytes}B 对比上行 ${totalUp}B（前后差 ${beforeBytes - totalUp}B 未上行）`,
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path, mid: midShot.path },
-        error: pass ? undefined : "A17 判準未全達（見 observations）",
+        error: pass ? undefined : "A17 判准未全达（见 observations）",
       });
       await clearChips(shell);
     }
 
-    // ───────────── B4：chip 未 ready 時立即按送出 ─────────────
+    // ───────────── B4：chip 未 ready 时立即按送出 ─────────────
     if (want("B4")) {
       const t0 = rec.mark();
       await clearChips(shell);
       await setText(shell, "请只列出附件的文件名与类型，不要生成任何内容。");
       await attachFiles(shell, A.goodB);
-      // 等 chip 真的出現且仍在 uploading（CDP 設定檔案後 change 事件非同步），
-      // 這一刻就是「尚未 ready」的窗口；在此立刻檢查送出鈕並嘗試點擊。
+      // 等 chip 真的出现且仍在 uploading（CDP 设定档案后 change 事件非同步），
+      // 这一刻就是「尚未 ready」的窗口；在此立刻检查送出钮并尝试点击。
       let chipAppeared = true;
       try {
         await shell.page.waitForFunction(
@@ -511,7 +511,7 @@ async function main() {
       const pass = sawUploadWindow && immediate.sendDisabled === true && messages.length === 0 && clickedDisabled.wasDisabled === true;
       saveCase("B4", {
         status: pass ? "pass" : "fail",
-        title: "附件未 ready 時按送出：被鎖住、不送半成品",
+        title: "附件未 ready 时按送出：被锁住、不送半成品",
         observations: {
           sawUploadWindow,
           immediatelyAfterAttach: {
@@ -524,15 +524,15 @@ async function main() {
           messagesRequestsDuringWindow: messages.length,
           settled: settledOkB4,
           settledChipStatuses: settled.chips,
-          whyComplex: "簡單會話送出前通常已 ready；此競態只在『選檔後同幀送出』這種複雜交互出現",
+          whyComplex: "简单会话送出前通常已 ready；此竞态只在『选档后同帧送出』这种复杂交互出现",
         },
         networkEvidence: { messages: messages.map(netLine) },
         artifacts: { screenshot: midShot.path },
-        error: pass ? undefined : "B4 判準未全達（見 observations）",
+        error: pass ? undefined : "B4 判准未全达（见 observations）",
       });
     }
 
-    // ───────────── B5：同檔重複上傳 ─────────────
+    // ───────────── B5：同档重复上传 ─────────────
     if (want("B5")) {
       await clearChips(shell);
       await setText(shell, "");
@@ -540,7 +540,7 @@ async function main() {
       await attachFiles(shell, A.goodC);
       const settled1 = await waitChipsSettledSafe(shell);
       const afterFirst = await probeComposer(shell);
-      await attachFiles(shell, A.goodC); // 同一路徑第二次
+      await attachFiles(shell, A.goodC); // 同一路径第二次
       const settled2 = await waitChipsSettledSafe(shell);
       await shell.page.waitForTimeout(600);
       const afterSecond = await probeComposer(shell);
@@ -550,7 +550,7 @@ async function main() {
       const pass = settled1 && settled2 && afterSecond.chipCount >= 2 && afterSecond.errorChips === 0 && attachments.length >= 2;
       saveCase("B5", {
         status: pass ? "pass" : "fail",
-        title: "同一檔連續上傳兩次：是否去重/覆寫",
+        title: "同一档连续上传两次：是否去重/覆写",
         observations: {
           afterFirstChips: afterFirst.chips,
           afterSecondChips: afterSecond.chips,
@@ -560,16 +560,16 @@ async function main() {
           settled: [settled1, settled2],
           attachmentsRequests: attachments.length,
           totalUpstreamBytes: attachments.reduce((s, e) => s + storedParts(e).bytes, 0),
-          whyComplex: "去重只在同會話連續操作同一檔時暴露；單檔會話無從觀察",
+          whyComplex: "去重只在同会话连续操作同一档时暴露；单档会话无从观察",
         },
         networkEvidence: { attachments: attachments.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "B5 判準未全達",
+        error: pass ? undefined : "B5 判准未全达",
       });
       await clearChips(shell);
     }
 
-    // ───────────── B7：一次入隊 3 檔（部分壞檔） ─────────────
+    // ───────────── B7：一次入队 3 档（部分坏档） ─────────────
     if (want("B7")) {
       await clearChips(shell);
       await setText(shell, "");
@@ -581,7 +581,7 @@ async function main() {
       const t1 = rec.mark();
       const { attachments, videoUpload, evs } = countCase(t0, t1);
       const shot = await shell.screenshot("B7-partial-fail");
-      // 若未落地：捕捉卡住的請求與 chip
+      // 若未落地：捕捉卡住的请求与 chip
       const pendingPosts = evs
         .filter((e) => ["POST", "PUT"].includes(e.method) && e.status == null && !e.failed)
         .map(netLine);
@@ -592,7 +592,7 @@ async function main() {
       const pass = settled && goodOk && noStuck && !!badChip;
       saveCase("B7", {
         status: pass ? "pass" : "fail",
-        title: "一次入隊多檔、部分壞檔：其餘照常、壞檔有明確結局",
+        title: "一次入队多档、部分坏档：其余照常、坏档有明确结局",
         observations: {
           settled,
           chipStatuses: after.chips,
@@ -606,17 +606,17 @@ async function main() {
           videoUploadRequests: videoUpload.length,
           pendingPosts,
           failedReqs,
-          note: "壞檔路徑：ingest 失敗 → 原檔直傳網關（若接受則 chip ready，非靜默丟棄）",
-          whyComplex: "一次多檔才暴露逐檔獨立成敗與批次管線；單檔測不出隔離性",
+          note: "坏档路径：ingest 失败 → 原档直传网关（若接受则 chip ready，非静默丢弃）",
+          whyComplex: "一次多档才暴露逐档独立成败与批次管线；单档测不出隔离性",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "B7 判準未全達（見 observations.stuckChips / pendingPosts）",
+        error: pass ? undefined : "B7 判准未全达（见 observations.stuckChips / pendingPosts）",
       });
       await clearChips(shell);
     }
 
-    // ───────────── B1：連續多個大檔 ─────────────
+    // ───────────── B1：连续多个大档 ─────────────
     if (want("B1")) {
       await clearChips(shell);
       await setText(shell, "");
@@ -648,7 +648,7 @@ async function main() {
       const t1 = rec.mark();
       const { attachments, videoUpload } = countCase(t0, t1);
       const after = await probeComposer(shell);
-      // UI 可用性：在輸入框打字再清掉
+      // UI 可用性：在输入框打字再清掉
       let uiOk = false;
       try {
         await setText(shell, "ui-usable-check");
@@ -663,7 +663,7 @@ async function main() {
       const pass = allSettled && after.chipCount >= 3 && after.errorChips === 0 && attachments.length >= 3 && videoUpload.length === 0 && totalUp > 0 && totalUp <= 4 * 1024 * 1024 && uiOk;
       saveCase("B1", {
         status: pass ? "pass" : "fail",
-        title: "同會話連續上傳 3 個大檔：全成功、上行小、UI 仍可用",
+        title: "同会话连续上传 3 个大档：全成功、上行小、UI 仍可用",
         observations: {
           perFile,
           allSettled,
@@ -678,12 +678,12 @@ async function main() {
           memBefore,
           memAfter: after.mem,
           authorizedRootsObservable: false,
-          authorizedRootsNote: "authorizedRoots 屬桌面 pickFiles 授權根，瀏覽器附件上傳不經它，頁面無法觀測 → 未驗",
-          whyComplex: "累積狀態/記憶體/授權根累積只在同會話連續操作時暴露",
+          authorizedRootsNote: "authorizedRoots 属桌面 pickFiles 授权根，浏览器附件上传不经它，页面无法观测 → 未验",
+          whyComplex: "累积状态/记忆体/授权根累积只在同会话连续操作时暴露",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "B1 判準未全達",
+        error: pass ? undefined : "B1 判准未全达",
       });
       await clearChips(shell);
     }
@@ -694,7 +694,7 @@ async function main() {
       await setText(shell, "");
       const errCountBefore = rec.all().filter((e) => e.console === "error").length;
       await attachFiles(shell, A.goodA);
-      await shell.page.waitForTimeout(350); // 上傳/抽幀途中
+      await shell.page.waitForTimeout(350); // 上传/抽帧途中
       const during = await probeComposer(shell);
       const midShot = await shell.screenshot("B2-mid-ingest");
       const t0 = rec.mark();
@@ -706,7 +706,7 @@ async function main() {
       const evs = rec.since(t0).filter((e) => e.url && e.ts <= t1);
       const aborted = evs.filter((e) => e.failed);
       const errCountAfter = rec.all().filter((e) => e.console === "error").length;
-      // 重整後仍可用：導回首頁 + 輸入框可打字
+      // 重整后仍可用：导回首页 + 输入框可打字
       let uiOk = false;
       try {
         await setText(shell, "reload-usable");
@@ -720,7 +720,7 @@ async function main() {
       const pass = afterReload.chipCount === 0 && afterReload.hasTextarea && uiOk;
       saveCase("B2", {
         status: pass ? "pass" : "fail",
-        title: "ingest 途中重整：無殘留/狀態錯亂",
+        title: "ingest 途中重整：无残留/状态错乱",
         observations: {
           duringChipStatuses: during.chips,
           duringUploadingChips: during.uploadingChips,
@@ -732,14 +732,14 @@ async function main() {
           consoleErrorsBefore: errCountBefore,
           consoleErrorsAfter: errCountAfter,
           uiUsableAfterReload: uiOk,
-          whyComplex: "只在『上傳途中』重整才暴露殘留/競態；靜止狀態重整無此風險",
+          whyComplex: "只在『上传途中』重整才暴露残留/竞态；静止状态重整无此风险",
         },
         artifacts: { screenshot: shot.path, mid: midShot.path },
-        error: pass ? undefined : "B2 判準未全達",
+        error: pass ? undefined : "B2 判准未全达",
       });
     }
 
-    // ───────────── A18：不可解碼假 mp4 → 降級原檔 ─────────────
+    // ───────────── A18：不可解码假 mp4 → 降级原档 ─────────────
     if (want("A18")) {
       await clearChips(shell);
       await setText(shell, "");
@@ -760,7 +760,7 @@ async function main() {
       const pass = settled && notStuck && hasOutcome;
       saveCase("A18", {
         status: pass ? "pass" : "fail",
-        title: "不可解碼假 mp4：ingest 失敗 → 落原檔直傳，chip 有終態不卡 uploading",
+        title: "不可解码假 mp4：ingest 失败 → 落原档直传，chip 有终态不卡 uploading",
         observations: {
           settled,
           chipStatuses: after.chips,
@@ -775,13 +775,13 @@ async function main() {
           pendingPosts,
           note:
             videoUpload.length > 0
-              ? "已觀察到 video-upload 原檔直傳（降級路徑生效）"
-              : "未見 video-upload：可能直傳失敗落抽幀路徑 → 結果見 chip 狀態",
-          whyComplex: "壞檔只在真實檔案輸入時暴露；此為降級路徑唯一觀測點",
+              ? "已观察到 video-upload 原档直传（降级路径生效）"
+              : "未见 video-upload：可能直传失败落抽帧路径 → 结果见 chip 状态",
+          whyComplex: "坏档只在真实档案输入时暴露；此为降级路径唯一观测点",
         },
         networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
         artifacts: { screenshot: shot.path },
-        error: pass ? undefined : "A18 chip 卡在 uploading 或無終態（見 stuckChips/pendingPosts）",
+        error: pass ? undefined : "A18 chip 卡在 uploading 或无终态（见 stuckChips/pendingPosts）",
       });
       await clearChips(shell);
     }

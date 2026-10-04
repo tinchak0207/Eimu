@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 
 /**
- * 微信公眾平台測試號（未認證也可用）被動回覆通道。
- * 用戶掃測試號二維碼關注 → 在微信對話中發送驗證碼 → 微信伺服器把
- * text 訊息 POST 到接口配置 URL（本模組的路由）→ 匹配登入碼 → 頁面輪詢完成。
- * FromUserName 即該用戶對測試號的唯一 openid（wxid），作為帳號身份。
+ * 微信公众平台测试号（未认证也可用）被动回覆通道。
+ * 用户扫测试号二维码关注 → 在微信对话中发送验证码 → 微信伺服器把
+ * text 讯息 POST 到接口配置 URL（本模组的路由）→ 匹配登入码 → 页面轮询完成。
+ * FromUserName 即该用户对测试号的唯一 openid（wxid），作为帐号身份。
  */
 
-/** GET 驗證：signature = sha1(字典序拼接 token/timestamp/nonce)。 */
+/** GET 验证：signature = sha1(字典序拼接 token/timestamp/nonce)。 */
 export function verifyWechatSignature(
   token: string,
   signature: string | null,
@@ -20,7 +20,7 @@ export function verifyWechatSignature(
   return digest === signature;
 }
 
-/** 極簡 XML 取節點文本（微信明文訊息 XML 結構固定，無需引入 XML 依賴）。 */
+/** 极简 XML 取节点文本（微信明文讯息 XML 结构固定，无需引入 XML 依赖）。 */
 export function xmlText(xml: string, tag: string): string {
   const m = xml.match(new RegExp(`<${tag}>\\s*(?:<!\\[CDATA\\[)?([^\\]\\s][\\s\\S]*?)(?:\\]\\]>)?\\s*</${tag}>`));
   if (!m) return "";
@@ -49,7 +49,7 @@ export function parseIncomingMessage(xml: string): WechatIncomingMessage {
   };
 }
 
-/** 被動回覆 text 訊息 XML。 */
+/** 被动回覆 text 讯息 XML。 */
 export function buildTextReply(
   toUserName: string,
   fromUserName: string,
@@ -65,15 +65,15 @@ export function buildTextReply(
 </xml>`;
 }
 
-/** 接口配置 Token；統一取 env，全局共享。 */
+/** 接口配置 Token；统一取 env，全局共享。 */
 export function getWechatOfficialToken(): string {
   return process.env.WECHAT_OFFICIAL_TOKEN?.trim() || "";
 }
 
-/** 測試號二維碼（後台『測試號二維碼』圖片 URL），未配置時前端隱藏。 */
+/** 测试号二维码（后台『测试号二维码』图片 URL），未配置时前端隐藏。 */
 export function getWechatOfficialQrUrl(): string | null {
   const base = process.env.WECHAT_OFFICIAL_QR_URL?.trim();
   if (!base) return null;
-  // cache-busting：public 靜態圖被 CDN/瀏覽器長快取，換圖後舊碼會殘留，帶 v 強制取新
+  // cache-busting：public 静态图被 CDN/浏览器长快取，换图后旧码会残留，带 v 强制取新
   return `${base}${base.includes("?") ? "&" : "?"}v=${Date.now()}`;
 }

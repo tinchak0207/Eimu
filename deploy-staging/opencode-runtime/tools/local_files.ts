@@ -1,29 +1,29 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import { ok, fail } from "../lib/client";
 
-// local_files — 本機檔案橋（W6）的**雲端側工具**。
+// local_files — 本机档案桥（W6）的**云端侧工具**。
 //
-// 檔案在使用者自己的電腦上，本工具跑在 VPS；因此這裡**不做任何本機檔案讀取**，
-// 也不得 import node:fs。一切走 loopback 的內部端點 `/internal/device/*`：
-//   工具只知道 `session_id` → 閘道用 session 解出租戶 → 挑該租戶唯一在線裝置 →
-//   既有 DeviceBridge.invoke（白名單/denylist/授權根/大小夾制全在閘道側）。
-// 契約（凍結，與 gateway device-bridge.ts 一對一）：
+// 档案在使用者自己的电脑上，本工具跑在 VPS；因此这里**不做任何本机档案读取**，
+// 也不得 import node:fs。一切走 loopback 的内部端点 `/internal/device/*`：
+//   工具只知道 `session_id` → 闸道用 session 解出租户 → 挑该租户唯一在线装置 →
+//   既有 DeviceBridge.invoke（白名单/denylist/授权根/大小夹制全在闸道侧）。
+// 契约（冻结，与 gateway device-bridge.ts 一对一）：
 //   POST /internal/device/invoke?session_id=…  body {op,path,pattern?,max_bytes?,limit?}
 //   GET  /internal/device/status?session_id=…
-// 總開關 EIMU_DEVICE_BRIDGE 預設 OFF：未開啟時閘道不掛此路由，呼叫會落到 404（由 router 處理）。
+// 总开关 EIMU_DEVICE_BRIDGE 预设 OFF：未开启时闸道不挂此路由，呼叫会落到 404（由 router 处理）。
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 
 const DEVICE_OPS = ["list_dir", "read_file", "grep", "stat"] as const;
 
-/** 裝置端 list_dir 的既有硬上限（desktop bridge-protocol MAX_LIST_ENTRIES＝閘道 max_entries 上界）。 */
+/** 装置端 list_dir 的既有硬上限（desktop bridge-protocol MAX_LIST_ENTRIES＝闸道 max_entries 上界）。 */
 const DEVICE_LIST_MAX_ENTRIES = 2000;
-/** 裝置端未帶 max_entries 時的預設筆數（desktop bridge-executor MAX_LIST_DEFAULT）。 */
+/** 装置端未带 max_entries 时的预设笔数（desktop bridge-executor MAX_LIST_DEFAULT）。 */
 const DEVICE_LIST_DEFAULT_ENTRIES = 200;
 
 /**
- * 把簡易 glob（僅 `*`、`?`）轉成整串錨定的 RegExp；其餘字元逐一轉義，
- * 避免使用者輸入被當成任意正則（不含 `/`，只比對 basename）。
+ * 把简易 glob（仅 `*`、`?`）转成整串锚定的 RegExp；其余字元逐一转义，
+ * 避免使用者输入被当成任意正则（不含 `/`，只比对 basename）。
  */
 function globToRegExp(glob: string): RegExp {
   let pattern = "^";
@@ -36,9 +36,9 @@ function globToRegExp(glob: string): RegExp {
 }
 
 /**
- * `name_glob` 匹配器（runtime 端過濾，裝置呼叫完全不變）：
- * 只比對檔名（basename）、**大小寫敏感**（Linux 真實語義），支援 `*`（任意長度）與
- * `?`（單一字元）；不得含 `/`。
+ * `name_glob` 匹配器（runtime 端过滤，装置呼叫完全不变）：
+ * 只比对档名（basename）、**大小写敏感**（Linux 真实语义），支援 `*`（任意长度）与
+ * `?`（单一字元）；不得含 `/`。
  */
 export function nameGlobMatcher(nameGlob: string): (name: string) => boolean {
   const re = globToRegExp(nameGlob);
@@ -46,8 +46,8 @@ export function nameGlobMatcher(nameGlob: string): (name: string) => boolean {
 }
 
 /**
- * 錯誤碼 → 面向使用者的引導語（繁中）。只在這些碼用引導語；
- * 其餘（session_unknown／bad_request／tool_not_allowed／internal_error）原樣帶出。
+ * 错误码 → 面向使用者的引导语（繁中）。只在这些码用引导语；
+ * 其余（session_unknown／bad_request／tool_not_allowed／internal_error）原样带出。
  */
 const GUIDANCE: Record<string, string> = {
   no_device_registered:
@@ -61,13 +61,13 @@ const GUIDANCE: Record<string, string> = {
     "该路径属于敏感位置（凭证、私钥等）的硬性禁止范围，不会读取、也**不能授权**；请改用其他路径。",
 };
 
-/** 需要補「目前授權根」的錯誤碼（裝置離線／路徑未授權時，使用者最需要看到可授權的範圍）。 */
+/** 需要补「目前授权根」的错误码（装置离线／路径未授权时，使用者最需要看到可授权的范围）。 */
 const CODES_WITH_ROOTS = new Set(["device_offline", "path_not_authorized"]);
 
 /**
- * `needs_authorization` 時給模型的**三段式選項逐字文案**。
- * 模型必須把 label 原樣列給使用者，等他選定後，把該項的 scope 原封不動傳給
- * `local_files_authorize`；不得升級（尤其不得自行選 permanent）。
+ * `needs_authorization` 时给模型的**三段式选项逐字文案**。
+ * 模型必须把 label 原样列给使用者，等他选定后，把该项的 scope 原封不动传给
+ * `local_files_authorize`；不得升级（尤其不得自行选 permanent）。
  */
 const AUTHORIZATION_OPTIONS = [
   { scope: "once", label: "允许一次" },
@@ -75,13 +75,13 @@ const AUTHORIZATION_OPTIONS = [
   { scope: "permanent", label: "永久允许（加入本机授权清单）" },
 ] as const;
 
-/** 給模型的明確指令：先問使用者，不得自行決定。 */
+/** 给模型的明确指令：先问使用者，不得自行决定。 */
 const AUTHORIZATION_INSTRUCTION =
   "把上面三个选项原样列给使用者，等他回答后再呼叫 local_files_authorize；不要自行决定。";
 
 /**
- * 讀取本會話租戶目前已授權的資料夾清單。任何失敗（網路/非 JSON）回 null，
- * 呼叫端據此退回不含 root 的引導語（status 失敗不影響主錯誤訊息）。
+ * 读取本会话租户目前已授权的资料夹清单。任何失败（网路/非 JSON）回 null，
+ * 呼叫端据此退回不含 root 的引导语（status 失败不影响主错误讯息）。
  */
 async function fetchAuthorizedRoots(sessionID: string): Promise<string[] | null> {
   try {
@@ -172,7 +172,7 @@ export default tool({
       return fail("bad_request", `不支援的本机档案操作：${String(op)}（仅限 list_dir/read_file/grep/stat）。`);
     }
 
-    // name_glob 只在雲端 runtime 過濾，**不下發**給閘道／裝置（凍結契約欄位不得增改）。
+    // name_glob 只在云端 runtime 过滤，**不下发**给闸道／装置（冻结契约栏位不得增改）。
     const nameGlob = typeof args.name_glob === "string" ? args.name_glob : "";
     const useGlob = nameGlob.length > 0;
     if (useGlob && op !== "list_dir") {
@@ -182,15 +182,15 @@ export default tool({
       return fail("bad_request", "name_glob 只比对档名（basename），不可包含路径分隔符号（/）。");
     }
 
-    // 只放行凍結契約欄位；undefined 不下發，讓閘道用自己的預設上限。
+    // 只放行冻结契约栏位；undefined 不下发，让闸道用自己的预设上限。
     const body: Record<string, unknown> = { op, path: args.path };
     if (args.pattern !== undefined) body.pattern = args.pattern;
     if (args.max_bytes !== undefined) body.max_bytes = args.max_bytes;
     if (args.limit !== undefined) body.limit = args.limit;
-    // offset：分段續讀的起點（非負整數）。夾制仍在閘道 sanitizeToolArgs（唯一夾制點）。
+    // offset：分段续读的起点（非负整数）。夹制仍在闸道 sanitizeToolArgs（唯一夹制点）。
     if (args.offset !== undefined) body.offset = args.offset;
-    // 帶 name_glob（＝要「列出所有」）時把 list_dir 的 max_entries 拉到裝置既有上限 2000，
-    // 以免預設 200 筆上限造成靜默漏列；不超過裝置上限，也不改裝置端上限。
+    // 带 name_glob（＝要「列出所有」）时把 list_dir 的 max_entries 拉到装置既有上限 2000，
+    // 以免预设 200 笔上限造成静默漏列；不超过装置上限，也不改装置端上限。
     if (useGlob) body.max_entries = DEVICE_LIST_MAX_ENTRIES;
 
     let res: Response;
@@ -212,8 +212,8 @@ export default tool({
       const err = (data?.error ?? {}) as Record<string, unknown>;
       const code = typeof err.code === "string" && err.code ? err.code : "internal_error";
 
-      // 路徑尚未授權（凍結契約）：回結構化結果，讓模型當場引導使用者三選一。
-      // ⚠ denylist 不走這條（閘道回硬 deny／sensitive_path），故這裡不得引導授權 denylist。
+      // 路径尚未授权（冻结契约）：回结构化结果，让模型当场引导使用者三选一。
+      // ⚠ denylist 不走这条（闸道回硬 deny／sensitive_path），故这里不得引导授权 denylist。
       if (code === "needs_authorization") {
         return ok({
           title: "需要授权",
@@ -263,17 +263,17 @@ export default tool({
           (e): e is { name: string } =>
             typeof e === "object" && e !== null && typeof (e as { name?: unknown }).name === "string",
         );
-        const total = rawEntries.length; // 裝置回的總項數（過濾前）
+        const total = rawEntries.length; // 装置回的总项数（过滤前）
         const entries = useGlob
           ? rawEntries.filter((e) => nameGlobMatcher(nameGlob)(e.name))
           : rawEntries;
-        const count = entries.length; // 本次回傳的 entries 數（過濾後＝匹配數）
-        // 把機制算好的過濾清單與計數寫回 result，模型只需照抄。
+        const count = entries.length; // 本次回传的 entries 数（过滤后＝匹配数）
+        // 把机制算好的过滤清单与计数写回 result，模型只需照抄。
         payload.result = { ...rawResult, entries, count };
         payload.count = count;
         payload.total = total;
-        // 截斷痕跡：閘道已標 truncated，或裝置回滿列舉上限（請求 2000；另防閘道未下發
-        // max_entries、裝置沿用預設 200 造成的漏列）。只在 name_glob 有給時報 incomplete。
+        // 截断痕迹：闸道已标 truncated，或装置回满列举上限（请求 2000；另防闸道未下发
+        // max_entries、装置沿用预设 200 造成的漏列）。只在 name_glob 有给时报 incomplete。
         const capHit = total >= DEVICE_LIST_MAX_ENTRIES || total === DEVICE_LIST_DEFAULT_ENTRIES;
         if (useGlob && (truncated || capHit)) {
           payload.incomplete = true;
@@ -287,12 +287,12 @@ export default tool({
             "列出时请逐字照抄 name，不得改写、转换或省略。";
         }
       } else if (useGlob) {
-        // 內容過大被閘道截斷、拿不到 entries 陣列：不得靜默給清單。
+        // 内容过大被闸道截断、拿不到 entries 阵列：不得静默给清单。
         payload.incomplete = true;
         payload.note = `清单不完整：装置回传内容过大被截断，无法完整列出符合「${nameGlob}」的项目；请缩小目录范围后再试。`;
       }
     } else if (op === "read_file") {
-      // 分段續讀：裝置端回 {offset, limit, size, bytes_read, text}，閘道原樣保留這些後設欄位。
+      // 分段续读：装置端回 {offset, limit, size, bytes_read, text}，闸道原样保留这些后设栏位。
       const rawResult =
         data.result && typeof data.result === "object" ? (data.result as Record<string, unknown>) : {};
       const startOffset =
@@ -301,7 +301,7 @@ export default tool({
           : typeof args.offset === "number"
             ? args.offset
             : 0;
-      // 本次實際讀到長度（位元組）：優先用裝置回報的 bytes_read，退回閘道回報的 bytes。
+      // 本次实际读到长度（位元组）：优先用装置回报的 bytes_read，退回闸道回报的 bytes。
       const readBytes =
         typeof rawResult.bytes_read === "number"
           ? rawResult.bytes_read
@@ -312,8 +312,8 @@ export default tool({
       payload.offset = startOffset;
       if (readBytes !== null) payload.bytes = readBytes;
       payload.next_offset = readBytes !== null ? startOffset + readBytes : null;
-      // 是否還有後續：以「起點＋本次長度 < 檔案大小」為準；資訊不足時退回閘道 truncated；
-      // 兩者都無法判斷則 null（模型依 description 指示自行比對 size 與 offset+bytes，或再讀一次）。
+      // 是否还有后续：以「起点＋本次长度 < 档案大小」为准；资讯不足时退回闸道 truncated；
+      // 两者都无法判断则 null（模型依 description 指示自行比对 size 与 offset+bytes，或再读一次）。
       if (size !== null && readBytes !== null) {
         payload.has_more = startOffset + readBytes < size;
       } else if (truncated) {

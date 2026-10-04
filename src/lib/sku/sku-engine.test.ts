@@ -1,7 +1,7 @@
-// SKU 展開與 run 視圖的確定性鎖——純函數測試（無 DB/env 依賴）。
+// SKU 展开与 run 视图的确定性锁——纯函数测试（无 DB/env 依赖）。
 //
-// 這些測試鎖的是 B 端契約的核心性質：同一份輸入永遠展開出逐字節相同的鏡頭
-// 計劃（prompt/順序/數量），缺參數報可判等錯誤碼，角度輪換按池取模循環。
+// 这些测试锁的是 B 端契约的核心性质：同一份输入永远展开出逐字节相同的镜头
+// 计划（prompt/顺序/数量），缺参数报可判等错误码，角度轮换按池取模循环。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +23,7 @@ const ECOM = getSkuById("sku-ecommerce-15s")!;
 const PAIN = getSkuById("sku-pain-point-ad")!;
 const ANGLE = getSkuById("sku-multi-angle")!;
 
-// ─────────────────────────────────────────── 電商帶貨 15s
+// ─────────────────────────────────────────── 电商带货 15s
 
 test("ecommerce sku expands to adaptive shot plan by selling point count", () => {
   const two = expandSkuShots(ECOM, {
@@ -36,7 +36,7 @@ test("ecommerce sku expands to adaptive shot plan by selling point count", () =>
     two.shots.map((shot) => shot.shotId),
     ["hook", "feature-1", "feature-2", "scene-demo", "cta"],
   );
-  // 4-6 鏡頭隨賣點數自適應
+  // 4-6 镜头随卖点数自适应
   assert.equal(expandSkuShots(ECOM, { product: "x", selling_points: ["a"] }).shots?.length, 4);
   assert.equal(
     expandSkuShots(ECOM, { product: "x", selling_points: ["a", "b", "c"] }).shots?.length,
@@ -56,7 +56,7 @@ test("ecommerce prompts inject product and per-index selling point variables", (
   assert.match(feature1.prompt, /整机仅 2\.6kg/);
   assert.match(feature1.prompt, /轻量折叠登机箱/);
   assert.match(feature2.prompt, /静音万向轮/);
-  // 模板變量必須全部被替換——不留 {{...}} 進生成 prompt
+  // 模板变量必须全部被替换——不留 {{...}} 进生成 prompt
   for (const shot of result.shots) {
     assert.equal(shot.prompt.includes("{{"), false, shot.shotId + " 残留未展开变量");
   }
@@ -86,7 +86,7 @@ test("ecommerce rejects selling point lists beyond schema max", () => {
   assert.equal(result.issues[0].param, "selling_points");
 });
 
-// ─────────────────────────────────────────── 痛點廣告
+// ─────────────────────────────────────────── 痛点广告
 
 test("pain point sku always expands to the five-act structure", () => {
   const result = expandSkuShots(PAIN, {
@@ -113,7 +113,7 @@ test("pain point sku errors on missing audience", () => {
   assert.equal(result.issues.some((item) => item.param === "audience"), true);
 });
 
-// ─────────────────────────────────────────── 多角度變體（輪換注入）
+// ─────────────────────────────────────────── 多角度变体（轮换注入）
 
 test("multi-angle sku defaults to 3 variants injected from rotation pools", () => {
   const result = expandSkuShots(ANGLE, { base_subject: "磨砂黑便携保温杯" });
@@ -135,11 +135,11 @@ test("multi-angle rotation cycles custom angle pools by index modulo", () => {
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  // 自定義角度池 2 檔循環：[0,1,0]
+  // 自定义角度池 2 档循环：[0,1,0]
   assert.match(result.shots[0].prompt, /仰视英雄视角/);
   assert.match(result.shots[1].prompt, /平贴桌面俯拍/);
   assert.match(result.shots[2].prompt, /仰视英雄视角/);
-  // 光線仍按內建池輪換（0/1/2 各不相同）
+  // 光线仍按内建池轮换（0/1/2 各不相同）
   assert.notEqual(result.shots[0].prompt, result.shots[1].prompt);
 });
 
@@ -168,7 +168,7 @@ test("catalog exposes exactly the three launch SKUs with honest image-kind outpu
   }
 });
 
-// ─────────────────────────────────────────── 模板變量渲染
+// ─────────────────────────────────────────── 模板变量渲染
 
 test("renderPromptTemplate replaces repeated variables and rejects unknown ones", () => {
   const ok = renderPromptTemplate("{{a}} 和 {{a}} 与 {{b}}", { a: "甲", b: "乙" });
@@ -177,7 +177,7 @@ test("renderPromptTemplate replaces repeated variables and rejects unknown ones"
   assert.equal("error" in missing, true);
 });
 
-// ─────────────────────────────────────────── run 冪等鍵與 run_id
+// ─────────────────────────────────────────── run 幂等键与 run_id
 
 test("run idempotency keys round-trip shot indexes", () => {
   const key = skuRunIdempotencyKey("skurun_abc", 7);
@@ -197,7 +197,7 @@ test("normalizeRunId enforces the safe charset", () => {
   assert.equal(normalizeRunId(generated).ok, true, generated);
 });
 
-// ─────────────────────────────────────────── 鏡頭 → 提交計劃
+// ─────────────────────────────────────────── 镜头 → 提交计划
 
 test("buildSkuShotCommandPlans maps aspect ratio to size and prices per shot", () => {
   const expansion = expandSkuShots(ANGLE, { base_subject: "保温杯", variant_count: 2 });
@@ -210,9 +210,9 @@ test("buildSkuShotCommandPlans maps aspect ratio to size and prices per shot", (
     assert.equal(plan.size, "1024x1024"); // 1:1 → 1024x1024
     assert.equal(plan.ratio, "1:1");
     assert.equal(plan.workflow.metadata?.sku?.runId, "skurun_test");
-    // 冪等鍵不進計劃——由發射器按 run_id + shot_index 派生（見 skuRunIdempotencyKey）
+    // 幂等键不进计划——由发射器按 run_id + shot_index 派生（见 skuRunIdempotencyKey）
   }
-  // gpt-image-2 1k fast = 1 幣/張
+  // gpt-image-2 1k fast = 1 币/张
   assert.equal(plans[0].billingAmount, 1 * QUOTA_PER_COIN);
 });
 
@@ -227,7 +227,7 @@ test("buildSkuShotCommandPlans maps 9:16 storyboard shots to portrait size", () 
   }
 });
 
-// ─────────────────────────────────────────── run 聚合視圖
+// ─────────────────────────────────────────── run 聚合视图
 
 function fakeJob(
   overrides: Partial<GenerationJob> & Pick<GenerationJob, "id" | "idempotencyKey" | "status" | "billingAmount">,
@@ -305,7 +305,7 @@ test("buildSkuRunStatusView aggregates counts, billing and shot order", () => {
   assert.equal(view.billing.charged_total, 500_000);
   assert.equal(view.billing.refunded_total, 500_000);
   assert.equal(view.billing.pending_total, 500_000);
-  // shot_index >= 10 的任務按數字序排在 1 之後（不是字典序的 0,1,10）
+  // shot_index >= 10 的任务按数字序排在 1 之后（不是字典序的 0,1,10）
   assert.deepEqual(
     view.items.map((item) => item.shot_index),
     [0, 1, 10],

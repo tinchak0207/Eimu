@@ -1,15 +1,15 @@
-// POST /openai/v1/chat/completions — **對話形式**的生圖兼容面。
+// POST /openai/v1/chat/completions — **对话形式**的生图兼容面。
 //
-// 酒館（SillyTavern）、Cherry Studio、LobeChat、Dify 這類客戶端只說 chat.completions：
-// 它們把最後一條 user 訊息當 prompt 送進來，期待回覆裡能渲染出圖。本路由取最後一條 user
-// 訊息 → 走既有 durable 生圖管線 → 同步等出圖 → 回標準 chat.completion，content 是
-// `![image](<url>)`（markdown，客戶端直接渲染）。
+// 酒馆（SillyTavern）、Cherry Studio、LobeChat、Dify 这类客户端只说 chat.completions：
+// 它们把最后一条 user 讯息当 prompt 送进来，期待回覆里能渲染出图。本路由取最后一条 user
+// 讯息 → 走既有 durable 生图管线 → 同步等出图 → 回标准 chat.completion，content 是
+// `![image](<url>)`（markdown，客户端直接渲染）。
 //
-// `stream:true` 是這幾家的主通道：先送 role delta，出圖前每 10s 送一個 SSE 註釋當
-// keep-alive（註釋行被所有 SSE 客戶端忽略，但足以讓 nginx/中轉站不切斷連線），出圖後送
-// 含圖片的 content delta，最後 `[DONE]`。
+// `stream:true` 是这几家的主通道：先送 role delta，出图前每 10s 送一个 SSE 注释当
+// keep-alive（注释行被所有 SSE 客户端忽略，但足以让 nginx/中转站不切断连线），出图后送
+// 含图片的 content delta，最后 `[DONE]`。
 //
-// 非生圖模型（gpt-4o 之類）→ 400 model_not_supported：我們沒有文本模型，假裝能答會更糟。
+// 非生图模型（gpt-4o 之类）→ 400 model_not_supported：我们没有文本模型，假装能答会更糟。
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { isModelAllowedForKey } from "@/lib/biz-api-keys";
@@ -27,13 +27,13 @@ import { resolveCompatibleImageModelId } from "@/lib/openai-compat/models";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
-// Next.js 只靜態解析字面量：段配置 export 引用識別符會讓整包 build 失敗
-// （`Unknown identifier ... at maxDuration`）。值須與 lib/openai-compat/generation.ts 的
+// Next.js 只静态解析字面量：段配置 export 引用识别符会让整包 build 失败
+// （`Unknown identifier ... at maxDuration`）。值须与 lib/openai-compat/generation.ts 的
 // FUNCTION_MAX_DURATION_SECONDS 保持一致。
 export const maxDuration = 300;
 export const preferredRegion = "sfo1";
 
-/** 出圖前的 SSE keep-alive 間隔。 */
+/** 出图前的 SSE keep-alive 间隔。 */
 const KEEPALIVE_INTERVAL_MS = 10_000;
 
 interface ChatRequestBody {
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
     idempotencyKey: req.headers.get("idempotency-key") ?? `openai-chat-${randomUUID()}`,
     ...(req.signal ? { signal: req.signal } : {}),
   });
-  // 提交失敗（認證/額度/模型閘）發生在開流之前 → 回正常 HTTP 錯誤，客戶端 SDK 直接抛。
+  // 提交失败（认证/额度/模型闸）发生在开流之前 → 回正常 HTTP 错误，客户端 SDK 直接抛。
   if (!submitted.ok) return openAIError(submitted.error, traceId);
 
   const streaming = body.stream === true;
@@ -168,14 +168,14 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(text));
       };
       try {
-        // ① 立刻開場（客戶端拿到 role delta 就算連上了）。
+        // ① 立刻开场（客户端拿到 role delta 就算连上了）。
         send(chunk({ role: "assistant", content: "" }, null));
-        // ② 出圖前的 keep-alive：SSE 註釋行，客戶端解析器一律忽略。
+        // ② 出图前的 keep-alive：SSE 注释行，客户端解析器一律忽略。
         keepAlive = setInterval(() => {
           try {
             send(": keep-alive\n\n");
           } catch {
-            // 連線已被客戶端關閉：下一次 send 會拋，交由外層收尾。
+            // 连线已被客户端关闭：下一次 send 会抛，交由外层收尾。
           }
         }, KEEPALIVE_INTERVAL_MS);
 
@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
             : undefined;
 
         if (failure) {
-          // OpenAI 串流錯誤語義：一個帶 error 的 chunk，SDK 收到即抛。
+          // OpenAI 串流错误语义：一个带 error 的 chunk，SDK 收到即抛。
           send(`data: ${JSON.stringify({ error: { ...failure, param: null, trace_id: traceId } })}\n\n`);
         } else if (!url) {
           send(
@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
             })}\n\n`,
           );
         } else {
-          // ③ 圖片 markdown delta + 收尾。
+          // ③ 图片 markdown delta + 收尾。
           send(chunk({ content: imageMarkdown(url) }, null));
           send(chunk({}, "stop"));
           if (wantsUsage) {
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
             })}\n\n`,
           );
         } catch {
-          // 客戶端已斷，無處可送。
+          // 客户端已断，无处可送。
         }
       } finally {
         if (keepAlive) clearInterval(keepAlive);
@@ -258,7 +258,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
-        // 反代不緩衝（Vercel/nginx 都會尊重這個頭），否則 delta 會被攢到最後才吐出。
+        // 反代不缓冲（Vercel/nginx 都会尊重这个头），否则 delta 会被攒到最后才吐出。
         "X-Accel-Buffering": "no",
       },
     }),

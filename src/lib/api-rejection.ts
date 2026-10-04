@@ -1,24 +1,24 @@
-// B 端 API 拒絕遙測：/v1/* 上「回非 2xx」的出口各留一行足跡。
+// B 端 API 拒绝遥测：/v1/* 上「回非 2xx」的出口各留一行足迹。
 //
-// 為什麼要單獨記：被拒的請求（鑑權／餘額／參數）根本不進 generation_job，
-// 所以「23 把 key 有 16 把一次都沒成功過」在既有數據裡是黑洞 —— 看不出流失在
-// 鑑權、餘額還是參數校驗。這裡補上那條看不見的漏斗。
+// 为什么要单独记：被拒的请求（鉴权／余额／参数）根本不进 generation_job，
+// 所以「23 把 key 有 16 把一次都没成功过」在既有数据里是黑洞 —— 看不出流失在
+// 鉴权、余额还是参数校验。这里补上那条看不见的漏斗。
 //
-// 三條硬約束（寫進測試，改壞了會紅）：
-//   ①只記 key 前 8 位：`sk-biz-7f`。不足以反推，也足夠在同批客訴裡對得上。
-//   ②不記 prompt、不記完整 key、不記 email：payload 只在記憶體裡被讀，落地前就丟。
-//   ③寫入失敗靜默吞掉：遙測壞掉不能把客戶的請求一起弄壞（best-effort，絕不 throw、
-//     絕不 await 阻塞回應）。
+// 三条硬约束（写进测试，改坏了会红）：
+//   ①只记 key 前 8 位：`sk-biz-7f`。不足以反推，也足够在同批客诉里对得上。
+//   ②不记 prompt、不记完整 key、不记 email：payload 只在记忆体里被读，落地前就丢。
+//   ③写入失败静默吞掉：遥测坏掉不能把客户的请求一起弄坏（best-effort，绝不 throw、
+//     绝不 await 阻塞回应）。
 //
-// 表結構與 db/migrations/029_api_rejection.sql 同源（ensureSchema 首用即建，仿 referral-reward）。
+// 表结构与 db/migrations/029_api_rejection.sql 同源（ensureSchema 首用即建，仿 referral-reward）。
 
 import type { GenerationSql } from "@/lib/generation-core/database";
 import { generationControlPlaneEnabled, getGenerationSql } from "@/lib/generation-core/database";
 
-/** 落地時保留的 key 位數。 */
+/** 落地时保留的 key 位数。 */
 export const API_REJECTION_KEY_PREFIX_CHARS = 8;
 
-/** 欄位上限：客戶端可控的字串不許把表撐大。 */
+/** 栏位上限：客户端可控的字串不许把表撑大。 */
 const MAX_PATH_CHARS = 300;
 const MAX_MODEL_CHARS = 128;
 const MAX_REASON_CHARS = 200;
@@ -34,12 +34,12 @@ export interface ApiRejectionRecord {
 
 export interface ApiRejectionInput {
   userId?: number | null;
-  /** 原始 Bearer 令牌。只在這裡被切成前 8 位，之後不再引用也不落地。 */
+  /** 原始 Bearer 令牌。只在这里被切成前 8 位，之后不再引用也不落地。 */
   rawKey?: string | null;
   path: string;
   model?: string | null;
   status: number;
-  /** 分組用的穩定碼：一律傳回應體裡的 OpenAI `code`（如 missing_api_key／insufficient_quota）。 */
+  /** 分组用的稳定码：一律传回应体里的 OpenAI `code`（如 missing_api_key／insufficient_quota）。 */
   reason: string;
 }
 
@@ -48,21 +48,21 @@ export interface ApiRejectionStore {
 }
 
 /**
- * 請求層的遙測上下文：路由在鑑權成功／解析出模型後就地填進來，
- * 出口由 `withApiRejectionTelemetry` 統一讀取。放物件而不是多個區域變數，
- * 是為了讓「後填的值」能穿過閉包回到包裝層。
+ * 请求层的遥测上下文：路由在鉴权成功／解析出模型后就地填进来，
+ * 出口由 `withApiRejectionTelemetry` 统一读取。放物件而不是多个区域变数，
+ * 是为了让「后填的值」能穿过闭包回到包装层。
  */
 export interface RejectionContext {
-  /** 原始 Bearer 令牌（只會被切成前 8 位）。 */
+  /** 原始 Bearer 令牌（只会被切成前 8 位）。 */
   rawKey: string | null;
   userId: number | null;
-  /** 客戶請求的模型名（未歸一，只作分組線索）。 */
+  /** 客户请求的模型名（未归一，只作分组线索）。 */
   model: string | null;
 }
 
-// ─────────────────────────────────────────────────────────── 純邏輯
+// ─────────────────────────────────────────────────────────── 纯逻辑
 
-/** key 前 8 位。空／非字串 → null（缺 key 的請求不編一個假的出來）。 */
+/** key 前 8 位。空／非字串 → null（缺 key 的请求不编一个假的出来）。 */
 export function apiKeyPrefix(rawKey: string | null | undefined): string | null {
   if (typeof rawKey !== "string") return null;
   const trimmed = rawKey.trim();
@@ -70,18 +70,18 @@ export function apiKeyPrefix(rawKey: string | null | undefined): string | null {
   return trimmed.slice(0, API_REJECTION_KEY_PREFIX_CHARS);
 }
 
-/** 去掉 query（可能帶 token）與控制字元，再截斷。 */
+/** 去掉 query（可能带 token）与控制字元，再截断。 */
 function sanitize(value: string, max: number): string {
   return value
     .split("?")[0]
-    // eslint-disable-next-line no-control-regex -- 遙測欄位不接受控制字元（防注入換行）
+    // eslint-disable-next-line no-control-regex -- 遥测栏位不接受控制字元（防注入换行）
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .slice(0, max);
 }
 
 /**
- * 把入口的原始輸入收成可落地的一行。形狀不合法（沒有 path 或 status 非整數）→ null，
- * 寧可少一行也不寫進無法解釋的髒資料。
+ * 把入口的原始输入收成可落地的一行。形状不合法（没有 path 或 status 非整数）→ null，
+ * 宁可少一行也不写进无法解释的脏资料。
  */
 export function normalizeApiRejection(input: ApiRejectionInput): ApiRejectionRecord | null {
   if (!Number.isInteger(input.status)) return null;
@@ -101,8 +101,8 @@ export function normalizeApiRejection(input: ApiRejectionInput): ApiRejectionRec
 }
 
 /**
- * 造一個記錄器。回傳的函式永不 throw、立即返回（不 await 儲存層）——
- * 遙測是旁路，客戶的請求不該為它多等一個 RTT。
+ * 造一个记录器。回传的函式永不 throw、立即返回（不 await 储存层）——
+ * 遥测是旁路，客户的请求不该为它多等一个 RTT。
  */
 export function createApiRejectionRecorder(store: ApiRejectionStore): (input: ApiRejectionInput) => void {
   return (input) => {
@@ -114,7 +114,7 @@ export function createApiRejectionRecorder(store: ApiRejectionStore): (input: Ap
     }
     if (!row) return;
     void store.insert(row).catch(() => {
-      // 靜默：記不上就算了，绝不能影響請求本身。
+      // 静默：记不上就算了，绝不能影响请求本身。
     });
   };
 }
@@ -125,7 +125,7 @@ let schemaReady: Promise<void> | null = null;
 
 async function ensureSchema(sql: GenerationSql): Promise<void> {
   if (!schemaReady) {
-    // 與 db/migrations/029_api_rejection.sql 同一 DDL（幂等，首用即建）。
+    // 与 db/migrations/029_api_rejection.sql 同一 DDL（幂等，首用即建）。
     schemaReady = (async () => {
       await sql`
         CREATE TABLE IF NOT EXISTS api_rejection (
@@ -161,18 +161,18 @@ export function createPostgresApiRejectionStore(sql: GenerationSql): ApiRejectio
   };
 }
 
-/** 僅供測試重置建表快取。 */
+/** 仅供测试重置建表快取。 */
 export function __resetApiRejectionSchemaForTests(): void {
   schemaReady = null;
 }
 
-// ─────────────────────────────────────────────────────────── 出口攔截
+// ─────────────────────────────────────────────────────────── 出口拦截
 
 /**
- * 從回應體裡取穩定碼當 reason。
+ * 从回应体里取稳定码当 reason。
  *
- * 用 clone() 讀：原回應仍可被客戶端正常消費。取不到（非 JSON、body 已被讀走、
- * 上游返回 HTML）就退回 `http_<status>` —— 這一組百分點本身就是「非 JSON 拒絕」的訊號。
+ * 用 clone() 读：原回应仍可被客户端正常消费。取不到（非 JSON、body 已被读走、
+ * 上游返回 HTML）就退回 `http_<status>` —— 这一组百分点本身就是「非 JSON 拒绝」的讯号。
  */
 export async function rejectionReasonFromResponse(response: Response): Promise<string> {
   try {
@@ -180,17 +180,17 @@ export async function rejectionReasonFromResponse(response: Response): Promise<s
     const code = (body as { error?: { code?: unknown } } | null)?.error?.code;
     if (typeof code === "string" && code.trim()) return code.trim();
   } catch {
-    // 落到下面的兜底碼。
+    // 落到下面的兜底码。
   }
   return `http_${response.status}`;
 }
 
 /**
- * 出口攔截：唯一記錄點。
+ * 出口拦截：唯一记录点。
  *
- * 寫成包裝層而不是在每個 `return` 前面插一行，是因為「漏記一條出口」這件事
- * 沒有任何測試能事後發現 —— 把規則放在邊界上，新增出口自動被覆蓋。
- * 只記錄 `status >= 300`；成功與 202 任務提交不進這張表。
+ * 写成包装层而不是在每个 `return` 前面插一行，是因为「漏记一条出口」这件事
+ * 没有任何测试能事后发现 —— 把规则放在边界上，新增出口自动被覆盖。
+ * 只记录 `status >= 300`；成功与 202 任务提交不进这张表。
  */
 export async function withApiRejectionTelemetry(
   path: string,
@@ -212,11 +212,11 @@ export async function withApiRejectionTelemetry(
   return response;
 }
 
-// ─────────────────────────────────────────────────────────── 生產入口
+// ─────────────────────────────────────────────────────────── 生产入口
 
 /**
- * 路由用的記錄器。控制面未開（本機／C 端 Vercel 直連）時是 no-op ——
- * 沒有資料庫就不假裝記了，也不讓呼叫端為此分支。
+ * 路由用的记录器。控制面未开（本机／C 端 Vercel 直连）时是 no-op ——
+ * 没有资料库就不假装记了，也不让呼叫端为此分支。
  */
 export function recordApiRejection(input: ApiRejectionInput): void {
   if (!generationControlPlaneEnabled()) return;

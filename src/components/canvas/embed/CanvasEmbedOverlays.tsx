@@ -1,7 +1,7 @@
 /**
- * CanvasEmbedOverlays —— CanvasEmbed 四個浮層 + 內嵌 <style>（自 CanvasEmbed.tsx L1563-1632/L1849-2068 機械搬遷）。
- * 本組件必須「無條件掛載」：<style> 的 .ce-embed-* 選擇器同時作用於組件殼的頂欄/根容器，
- * 浮層全關時仍渲染樣式塊，否則殼層樣式失效。
+ * CanvasEmbedOverlays —— CanvasEmbed 四个浮层 + 内嵌 <style>（自 CanvasEmbed.tsx L1563-1632/L1849-2068 机械搬迁）。
+ * 本组件必须「无条件挂载」：<style> 的 .ce-embed-* 选择器同时作用于组件壳的顶栏/根容器，
+ * 浮层全关时仍渲染样式块，否则壳层样式失效。
  */
 import { useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
@@ -26,30 +26,30 @@ import type { ReviewPanelKind } from "@/components/assets/AssetReviewPanel";
 import { openReviewPanel } from "@/components/assets/AssetReviewPanel";
 
 interface CanvasEmbedOverlaysProps {
-  /** embed 高度（.ce-embed-root 動態样式）。 */
+  /** embed 高度（.ce-embed-root 动态样式）。 */
   height: string;
   expanded: boolean;
-  /** Wave C：agent 畫布操作自動化狀態提示（ops 一到由宿主自動執行）。 */
+  /** Wave C：agent 画布操作自动化状态提示（ops 一到由宿主自动执行）。 */
   pendingOps: UseCanvasChatReturn["pendingAgentOps"];
-  /** P2：角色/場景卡面板。 */
+  /** P2：角色/场景卡面板。 */
   cardsOpen: boolean;
-  /** G2（2026-09-16）：作品/劇集面板。 */
+  /** G2（2026-09-16）：作品/剧集面板。 */
   creationFlowOpen: boolean;
   onCloseCreationFlow: () => void;
-  /** 歷史畫布下拉。 */
+  /** 历史画布下拉。 */
   historyOpen: boolean;
   onCloseHistory: () => void;
-  /** B2：節點清單（全屏態）。 */
+  /** B2：节点清单（全屏态）。 */
   elementListOpen: boolean;
   /**
-   * WS-審查（2026-09-24）：資產/分鏡審查面板的畫布工具列入口狀態。
-   * 面板本體掛在 CanvasEmbed（宿主），這裡只放入口——第二個門（步驟條）由另一路實作，
-   * 呼叫端可用 `openReviewPanel()`（`src/components/assets/AssetReviewPanel.tsx` 導出）派事件開這裡。
+   * WS-审查（2026-09-24）：资产/分镜审查面板的画布工具列入口状态。
+   * 面板本体挂在 CanvasEmbed（宿主），这里只放入口——第二个门（步骤条）由另一路实作，
+   * 呼叫端可用 `openReviewPanel()`（`src/components/assets/AssetReviewPanel.tsx` 导出）派事件开这里。
    */
   reviewPanel: ReviewPanelKind | null;
-  /** 待批准＋已駁回的總數（入口徽章；0 ＝不顯示徽章）。 */
+  /** 待批准＋已驳回的总数（入口徽章；0 ＝不显示徽章）。 */
   reviewPendingCount: number;
-  /** 入口開關（同一顆門：已開＝收合，未開＝開該面）。主面＝資產審查。 */
+  /** 入口开关（同一颗门：已开＝收合，未开＝开该面）。主面＝资产审查。 */
   onToggleReview: (panel: ReviewPanelKind) => void;
   canvas: UseCanvasChatReturn;
   viewportSizeRef: RefObject<{ width: number; height: number }>;
@@ -57,12 +57,12 @@ interface CanvasEmbedOverlaysProps {
 }
 
 /**
- * 分鏡媒體現況計數（引導面板 snapshot 的分母／分子）。
+ * 分镜媒体现况计数（引导面板 snapshot 的分母／分子）。
  *
- * 真源＝凍結介面 `shotMediaReadiness`（`@/lib/canvas/storyboard-shots`，W5a 2026-09-30）：
- * 逐鏡投影**分鏡節點自己**的 metadata，本層不另立第二套判準、不往外撈連線鄰居。
- * 「哪些節點算一鏡」＝`metadata.storyboardShot` 非空，與 `countStoryboardProgress`
- * （面板「已落画布 N 镜」）同一把尺，分子分母不會漂移。
+ * 真源＝冻结介面 `shotMediaReadiness`（`@/lib/canvas/storyboard-shots`，W5a 2026-09-30）：
+ * 逐镜投影**分镜节点自己**的 metadata，本层不另立第二套判准、不往外捞连线邻居。
+ * 「哪些节点算一镜」＝`metadata.storyboardShot` 非空，与 `countStoryboardProgress`
+ * （面板「已落画布 N 镜」）同一把尺，分子分母不会漂移。
  */
 function shotMediaCounts(nodes: readonly CanvasNode[]): {
   shots: number;
@@ -86,12 +86,12 @@ function shotMediaCounts(nodes: readonly CanvasNode[]): {
 }
 
 /**
- * 引導面板的現況快照（`CreationFlowSnapshot`）：全部由**當前真實資料**推導，
- * 零持久化 onboarding 標記。推不出來的欄位一律不填（fail-closed：`deriveNextStep`
- * 回 `unknown`，不補假進度）。
+ * 引导面板的现况快照（`CreationFlowSnapshot`）：全部由**当前真实资料**推导，
+ * 零持久化 onboarding 标记。推不出来的栏位一律不填（fail-closed：`deriveNextStep`
+ * 回 `unknown`，不补假进度）。
  *
- * `hasCut`：本站無剪輯產物欄位、也無任何產生剪輯的路徑 ⇒ 成片恆不存在（站點能力事實，
- * 非猜測）。取保守值 `false`——永不冒充「已完成」；`deriveNextStep` 的 cut 分支正為此現況而寫。
+ * `hasCut`：本站无剪辑产物栏位、也无任何产生剪辑的路径 ⇒ 成片恒不存在（站点能力事实，
+ * 非猜测）。取保守值 `false`——永不冒充「已完成」；`deriveNextStep` 的 cut 分支正为此现况而写。
  */
 function creationFlowSnapshot(
   summary: CreationFlowSummary,
@@ -99,7 +99,7 @@ function creationFlowSnapshot(
 ): CreationFlowSnapshot {
   const media = shotMediaCounts(nodes);
   return {
-    // 與面板「已設定」同一把尺（作品類型／當前步驟／已有劇集任一成立）。
+    // 与面板「已设定」同一把尺（作品类型／当前步骤／已有剧集任一成立）。
     hasProject: Boolean(summary.projectTypeLabel || summary.currentStep || summary.episodeCount > 0),
     episodes: summary.episodeCount,
     shots: summary.storyboard.shots,
@@ -111,11 +111,11 @@ function creationFlowSnapshot(
 }
 
 /**
- * 下一步主動作 → 既有入口（不另開通路）：
- *   · `agent`：聚焦畫布 AI 助理的對話輸入框（`AgentComposer` 的固定 id）。
- *     面板處於收合（rail）態時輸入框不在 DOM，此時聚焦落空——不假裝已開啟。
- *   · `canvas-generation`：開啟既有分鏡審查面。`openReviewPanel` 是專為「步驟條」這類
- *     CanvasEmbed 外呼叫端準備的既有外開介面（`AssetReviewPanel` 導出），不造第二個事件。
+ * 下一步主动作 → 既有入口（不另开通路）：
+ *   · `agent`：聚焦画布 AI 助理的对话输入框（`AgentComposer` 的固定 id）。
+ *     面板处于收合（rail）态时输入框不在 DOM，此时聚焦落空——不假装已开启。
+ *   · `canvas-generation`：开启既有分镜审查面。`openReviewPanel` 是专为「步骤条」这类
+ *     CanvasEmbed 外呼叫端准备的既有外开介面（`AssetReviewPanel` 导出），不造第二个事件。
  */
 function runNextStepAction(surface: CreationNextSurface): void {
   if (surface === "agent") {
@@ -126,15 +126,15 @@ function runNextStepAction(surface: CreationNextSurface): void {
   if (surface === "canvas-generation") openReviewPanel({ panel: "shot" });
 }
 
-/** 下一步主動作的路由結果（純函式，供呼叫端與測試斷言分派，不改既有 `runNextStepAction` 行為）。 */
+/** 下一步主动作的路由结果（纯函式，供呼叫端与测试断言分派，不改既有 `runNextStepAction` 行为）。 */
 export type NextActionRoute = "voiceover-quote" | "agent" | "review" | "none";
 
 /**
- * 由（surface, id）決定主動作怎麼走。
+ * 由（surface, id）决定主动作怎么走。
  *
- * 唯一新增的路由是 `id === "shot-audio"` → `voiceover-quote`（補配音真的接上生成入口）；
- * 其餘逐條照舊：`agent` → AI 助理輸入框、`canvas-generation` → 分鏡審查面、`none` → 無動作。
- * `surface === "none"` 的面板本來就不渲染按鈕，這裡回 `none` 只是讓函式全值域誠實。
+ * 唯一新增的路由是 `id === "shot-audio"` → `voiceover-quote`（补配音真的接上生成入口）；
+ * 其余逐条照旧：`agent` → AI 助理输入框、`canvas-generation` → 分镜审查面、`none` → 无动作。
+ * `surface === "none"` 的面板本来就不渲染按钮，这里回 `none` 只是让函式全值域诚实。
  */
 export function nextActionRoute(surface: CreationNextSurface, id?: CreationNextStepId): NextActionRoute {
   if (surface === "none") return "none";
@@ -147,9 +147,9 @@ export function nextActionRoute(surface: CreationNextSurface, id?: CreationNextS
 export const VOICEOVER_ENDPOINT = "/api/canvas/storyboard-voiceover";
 
 /**
- * 配音請求結果（伺服器回應的**忠實投影**，本層不加工、不算幣）。
- * `quote` ＝ 乾跑報價（未扣費）、`applied` ＝ 真跑完成（`costCoins` 為實扣）、
- * `refused` ＝ 伺服器明確拒收（附原因）、`error` ＝ 傳輸／回應不完整。
+ * 配音请求结果（伺服器回应的**忠实投影**，本层不加工、不算币）。
+ * `quote` ＝ 干跑报价（未扣费）、`applied` ＝ 真跑完成（`costCoins` 为实扣）、
+ * `refused` ＝ 伺服器明确拒收（附原因）、`error` ＝ 传输／回应不完整。
  */
 export type VoiceoverOutcome =
   | { status: "quote"; lineCount: number; totalChars: number; estimatedCoins: number }
@@ -157,12 +157,12 @@ export type VoiceoverOutcome =
   | { status: "refused"; reason: string }
   | { status: "error"; reason: string };
 
-/** 非負有限數判據（伺服器回的幣數/字數；不合法＝不知道，不四捨五入、不補 0）。 */
+/** 非负有限数判据（伺服器回的币数/字数；不合法＝不知道，不四舍五入、不补 0）。 */
 function asServerNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-/** 拒收原因的人話（形狀未凍結：字串或物件；讀不出就回一句誠實的通用話，不假成功）。 */
+/** 拒收原因的人话（形状未冻结：字串或物件；读不出就回一句诚实的通用话，不假成功）。 */
 function refusedReason(refused: unknown): string | null {
   if (refused == null || refused === false) return null;
   if (typeof refused === "string") return refused.trim() || "服务端拒绝（未附原因）";
@@ -178,9 +178,9 @@ function refusedReason(refused: unknown): string | null {
 /**
  * 呼叫配音姊妹路（`POST`）。
  *
- * `dryRun: true` ＝**只報價不生成**（付費硬閘的第一段）；`dryRun: false` ＝ 真跑，
- * 必須由使用者在看到報價後按確認鍵才會走到這裡。
- * `fetchImpl` 可注入（測試全程用假 fetch，禁任何真實付費呼叫）。
+ * `dryRun: true` ＝**只报价不生成**（付费硬闸的第一段）；`dryRun: false` ＝ 真跑，
+ * 必须由使用者在看到报价后按确认键才会走到这里。
+ * `fetchImpl` 可注入（测试全程用假 fetch，禁任何真实付费呼叫）。
  */
 export async function requestVoiceover(
   input: { projectId: string; dryRun: boolean },
@@ -197,7 +197,7 @@ export async function requestVoiceover(
     return { status: "error", reason: "无法连接配音服务（网络错误）" };
   }
   if (!response.ok) {
-    // 非 2xx 一律當失敗：不把錯誤回應當成功（HTTP 200 都 ≠ 可用，更何況非 200）。
+    // 非 2xx 一律当失败：不把错误回应当成功（HTTP 200 都 ≠ 可用，更何况非 200）。
     return { status: "error", reason: `配音服务返回 ${response.status}` };
   }
   let payload: unknown;
@@ -228,7 +228,7 @@ export async function requestVoiceover(
   return { status: "applied", lineCount, totalChars, costCoins };
 }
 
-/** 伺服器結果 → 面板顯示狀態（唯一的映射點，面板不再自行解讀回應）。 */
+/** 伺服器结果 → 面板显示状态（唯一的映射点，面板不再自行解读回应）。 */
 function voiceoverView(outcome: VoiceoverOutcome): VoiceoverFlowView {
   if (outcome.status === "quote") {
     return {
@@ -266,13 +266,13 @@ export function CanvasEmbedOverlays({
   viewportSizeRef,
   setSelectedIds,
 }: CanvasEmbedOverlaysProps) {
-  // REQ-D1：資產卡「溯源」抽屜——卡片面板每行一顆入口，單例抽屜掛在本浮層。
+  // REQ-D1：资产卡「溯源」抽屉——卡片面板每行一颗入口，单例抽屉挂在本浮层。
   const [lineageCardId, setLineageCardId] = useState<string | null>(null);
   const lineageCard = lineageCardId
     ? canvas.characterCards.find((card) => card.id === lineageCardId) ?? null
     : null;
 
-  // 补齐配音（`shot-audio`）：主動作＝乾跑報價（不扣費），確認鍵才真跑；在途時鎖住防重複送出。
+  // 补齐配音（`shot-audio`）：主动作＝干跑报价（不扣费），确认键才真跑；在途时锁住防重复送出。
   const [voiceover, setVoiceover] = useState<VoiceoverFlowView>({ status: "idle" });
   const voiceoverBusyRef = useRef(false);
 
@@ -332,7 +332,7 @@ export function CanvasEmbedOverlays({
           .ce-embed-root.ce-compact { height: min(72dvh, 620px) !important; }
         }
 
-        /* 材質（背景/陰影/模糊）改由 lg-float 供給；這裡只留尺寸與排版。 */
+        /* 材质（背景/阴影/模糊）改由 lg-float 供给；这里只留尺寸与排版。 */
         .ce-embed-bar-btn {
           touch-action: manipulation;
           -webkit-tap-highlight-color: transparent;
@@ -369,13 +369,13 @@ export function CanvasEmbedOverlays({
           .ce-embed-topbar, .ce-embed-leftpop { transition: none; }
         }
 
-        /* 工作站態避讓改由宿主完成：ImagePlayground 把整個 overlay 向右 dock
-           （--ce-dock-left = 面板寬 + 12px），畫布全域隨之右移，頂欄與左側彈層
-           不再各自加 --ce-chrome-left（避免雙重位移）。行動端面板在底部，
-           宿主把 overlay 復位成全屏，這裡只保留頂欄右緣約束讓 chips 能換行。 */
+        /* 工作站态避让改由宿主完成：ImagePlayground 把整个 overlay 向右 dock
+           （--ce-dock-left = 面板宽 + 12px），画布全域随之右移，顶栏与左侧弹层
+           不再各自加 --ce-chrome-left（避免双重位移）。行动端面板在底部，
+           宿主把 overlay 复位成全屏，这里只保留顶栏右缘约束让 chips 能换行。 */
         @media (max-width: 767px) {
           .ce-embed-topbar { right: 0.75rem; }
-          /* 行動端 chips 收斂：一排放得下，不再炸成兩行大藥丸。 */
+          /* 行动端 chips 收敛：一排放得下，不再炸成两行大药丸。 */
           .ce-embed-topbar .ce-embed-bar-btn {
             min-width: 0;
             min-height: 2.125rem;
@@ -386,19 +386,19 @@ export function CanvasEmbedOverlays({
         }
       `}</style>
 
-      {/* Wave C：agent 畫布操作自動化——非阻塞狀態提示（ops 一到即由宿主自動落地）。 */}
+      {/* Wave C：agent 画布操作自动化——非阻塞状态提示（ops 一到即由宿主自动落地）。 */}
       {pendingOps && (
         <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-full bg-black/75 px-3 py-1.5 text-ios-caption1 text-white">
           AI 正在操作画布…
         </div>
       )}
 
-      {/* WS-審查（2026-09-24）：畫布工具列入口——資產圖／分鏡確認的兩個面共用這一顆門
-          （面板本體在宿主 CanvasEmbed；主入口是步驟條，由另一路實作）。
-          位置選左下角：頂欄與左右彈層都被既有面板佔滿，左下是唯一不打架的空位。 */}
+      {/* WS-审查（2026-09-24）：画布工具列入口——资产图／分镜确认的两个面共用这一颗门
+          （面板本体在宿主 CanvasEmbed；主入口是步骤条，由另一路实作）。
+          位置选左下角：顶栏与左右弹层都被既有面板占满，左下是唯一不打架的空位。 */}
       <div
         data-canvas-interactive
-        // 桌面全屏態入口已併進右側縮放膠囊（2026-09-27），這顆只留給行動端／非全屏。
+        // 桌面全屏态入口已并进右侧缩放胶囊（2026-09-27），这颗只留给行动端／非全屏。
         className={cn("pointer-events-auto absolute z-20 flex items-center gap-1.5", expanded && "md:hidden")}
         style={{
           left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
@@ -417,7 +417,7 @@ export function CanvasEmbedOverlays({
         </button>
       </div>
 
-      {/* P2：角色/場景卡面板——卡列表、生效 badge、鎖定/解鎖、刪卡 */}
+      {/* P2：角色/场景卡面板——卡列表、生效 badge、锁定/解锁、删卡 */}
       {cardsOpen && (
         <div
           data-canvas-interactive
@@ -454,7 +454,7 @@ export function CanvasEmbedOverlays({
                       </span>
                       {card.variantOf && (
                         <span className="shrink-0 rounded-full bg-ios-blue/[0.12] px-1.5 py-0.5 text-ios-caption2 text-[#007AFF]">
-                          變體
+                          变体
                         </span>
                       )}
                     </p>
@@ -511,11 +511,11 @@ export function CanvasEmbedOverlays({
         />
       )}
 
-      {/* G2（2026-09-16）：作品/劇集面板——與角色卡同款左側彈層；資料全部取自
-          hook 既有出口（projectType/currentStep/episodes/nodes），本層零新增狀態。 */}
+      {/* G2（2026-09-16）：作品/剧集面板——与角色卡同款左侧弹层；资料全部取自
+          hook 既有出口（projectType/currentStep/episodes/nodes），本层零新增状态。 */}
       {creationFlowOpen && (
         (() => {
-          // 面板打開才算（nodes 可能上百顆）：現況快照與下一步都由此推導，零新增狀態。
+          // 面板打开才算（nodes 可能上百颗）：现况快照与下一步都由此推导，零新增状态。
           const summary = summarizeCreationFlow({
             projectType: canvas.projectType,
             currentStep: canvas.currentStep,
@@ -530,7 +530,7 @@ export function CanvasEmbedOverlays({
               voiceover={voiceover}
               onVoiceoverConfirm={() => void confirmVoiceover()}
               onClose={() => {
-                // 關閉即丟掉上一輪報價/結果（避免下次打開看到過期幣數）。
+                // 关闭即丢掉上一轮报价/结果（避免下次打开看到过期币数）。
                 setVoiceover({ status: "idle" });
                 onCloseCreationFlow();
               }}
@@ -539,7 +539,7 @@ export function CanvasEmbedOverlays({
         })()
       )}
 
-      {/* 歷史畫布下拉 */}
+      {/* 历史画布下拉 */}
       {historyOpen && (
         <div
           data-canvas-interactive
@@ -576,7 +576,7 @@ export function CanvasEmbedOverlays({
         </div>
       )}
 
-      {/* B2：節點清單（全屏態）→ 點擊飛行聚焦 */}
+      {/* B2：节点清单（全屏态）→ 点击飞行聚焦 */}
       {elementListOpen && expanded && (
         <div
           data-canvas-interactive

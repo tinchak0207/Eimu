@@ -1,15 +1,15 @@
-// analytics-meta.test.ts — 需求 1 的真值驗收：secret 出口遮罩（不使用任何真實憑證，全部假字串）。
+// analytics-meta.test.ts — 需求 1 的真值验收：secret 出口遮罩（不使用任何真实凭证，全部假字串）。
 //
-// 驗的是行為：餵入含 secret 的字串 → 輸出不含原 secret、含遮罩標記；
-// 反向：一般中文錯誤訊息不得被誤遮罩。另驗 redactMeta 的遞迴與 key 級遮罩。
+// 验的是行为：喂入含 secret 的字串 → 输出不含原 secret、含遮罩标记；
+// 反向：一般中文错误讯息不得被误遮罩。另验 redactMeta 的递回与 key 级遮罩。
 import { describe, expect, test } from "bun:test"
 import { redactForLog, redactMeta, REDACT_MARKER } from "./analytics-meta.ts"
 
-// redactForLog 回傳型別是 LogSafeText(= never)，測試端以 as string 取出字面值比對。
+// redactForLog 回传型别是 LogSafeText(= never)，测试端以 as string 取出字面值比对。
 const out = (s: unknown): string => redactForLog(s) as string
 
-describe("redactForLog — secret 樣式遮罩", () => {
-  test("Bearer token：輸出不含原 token、含遮罩標記", () => {
+describe("redactForLog — secret 样式遮罩", () => {
+  test("Bearer token：输出不含原 token、含遮罩标记", () => {
     const original = "Bearer sk-FAKE-1234"
     const r = out(original)
     expect(r).not.toContain(original)
@@ -17,7 +17,7 @@ describe("redactForLog — secret 樣式遮罩", () => {
     expect(r).toContain(REDACT_MARKER)
   })
 
-  test("token=FAKEVALUE：值被遮罩、原值不復現", () => {
+  test("token=FAKEVALUE：值被遮罩、原值不复现", () => {
     const r = out("token=FAKEVALUE")
     expect(r).not.toContain("FAKEVALUE")
     expect(r).toContain(REDACT_MARKER)
@@ -40,27 +40,27 @@ describe("redactForLog — secret 樣式遮罩", () => {
     expect(r).toContain(REDACT_MARKER)
   })
 
-  test("長 base64 blob 被遮罩", () => {
+  test("长 base64 blob 被遮罩", () => {
     const blob = "QWxwaGFOaW5qYVRlc3RWYWx1ZUZha2UwMDEyMzQ1Njc4OQ"
     const r = out(`payload=${blob}`)
     expect(r).not.toContain(blob)
     expect(r).toContain(REDACT_MARKER)
   })
 
-  test("反向：一般中文錯誤訊息不被誤遮罩（逐字不變）", () => {
+  test("反向：一般中文错误讯息不被误遮罩（逐字不变）", () => {
     const msg = "对话失败：上游超时，请稍后重试 (code=UPSTREAM_TIMEOUT)"
     expect(out(msg)).toBe(msg)
   })
 
-  test("非字串輸入（Error / 物件）不拋錯且可讀", () => {
+  test("非字串输入（Error / 物件）不抛错且可读", () => {
     const r = out(new Error("boom token=FAKEVALUE"))
     expect(r).not.toContain("FAKEVALUE")
     expect(r).toContain("boom")
   })
 })
 
-describe("redactMeta — 結構遞迴遮罩", () => {
-  test("字串值遮罩、數字/布林保留、secret 命名的鍵整值遮罩", () => {
+describe("redactMeta — 结构递回遮罩", () => {
+  test("字串值遮罩、数字/布林保留、secret 命名的键整值遮罩", () => {
     const m = redactMeta({
       provider: "openai",
       token: "FAKEVALUE-xyz",
@@ -75,7 +75,7 @@ describe("redactMeta — 結構遞迴遮罩", () => {
     expect(m.ok).toBe(true)
   })
 
-  test("circular 結構不無限遞迴", () => {
+  test("circular 结构不无限递回", () => {
     const a: Record<string, unknown> = { name: "x" }
     a.self = a
     const r = redactMeta(a) as Record<string, unknown>

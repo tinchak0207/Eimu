@@ -1,7 +1,7 @@
-// REQ-B2 團隊資產空間 API 的前端封裝（/api/project-assets 與 /api/project-assets/shares）。
+// REQ-B2 团队资产空间 API 的前端封装（/api/project-assets 与 /api/project-assets/shares）。
 //
-// 認證頭復用 canvas/client 的 authHeaders，行為模式對齊 character-card-client：
-// 不 throw 認證錯，回 { ok:false, reason }——資產庫面板未登入時安靜降級。
+// 认证头复用 canvas/client 的 authHeaders，行为模式对齐 character-card-client：
+// 不 throw 认证错，回 { ok:false, reason }——资产库面板未登入时安静降级。
 import { authHeaders, type CanvasClientResult } from "@/lib/canvas/client";
 import { invalidateEntityCardIndex } from "@/components/entities/entity-chip";
 import type { AssetKind, AssetLibraryItem, AssetShareRecord } from "@/lib/asset-scope";
@@ -46,11 +46,11 @@ export interface ProjectAssetListResult {
   items: AssetLibraryItem[];
   mountedCount: number;
   sharesOut: number;
-  /** 授權進來本項目的有效分享（讀取閘判「分享進來」用；與寫入端同一裁決函式）。 */
+  /** 授权进来本项目的有效分享（读取闸判「分享进来」用；与写入端同一裁决函式）。 */
   sharesIn: AssetShareRecord[];
 }
 
-/** 項目資產庫列表（服務端已過可見性；q/kind/mounted 交給服務端過濾）。 */
+/** 项目资产库列表（服务端已过可见性；q/kind/mounted 交给服务端过滤）。 */
 export function listProjectAssets(input: {
   projectId: string;
   q?: string;
@@ -81,8 +81,8 @@ export function listProjectAssets(input: {
 }
 
 /**
- * 只讀本項目的授權進來的分享（讀取端作用域閘用）。
- * 走同一支 GET（服務端已算好 sharesIn），不另開端點——兩支查詢結果不可能漂移。
+ * 只读本项目的授权进来的分享（读取端作用域闸用）。
+ * 走同一支 GET（服务端已算好 sharesIn），不另开端点——两支查询结果不可能漂移。
  */
 export async function listProjectSharesIn(projectId: string): Promise<CanvasClientResult<AssetShareRecord[]>> {
   const res = await listProjectAssets({ projectId });
@@ -90,7 +90,7 @@ export async function listProjectSharesIn(projectId: string): Promise<CanvasClie
   return { ok: true, data: res.data.sharesIn };
 }
 
-/** 掛用結果：localCopyIds 是**可鎖進 cardIds 的副本 id**（畫面標「已掛用」與生成注入必須是同一批）。 */
+/** 挂用结果：localCopyIds 是**可锁进 cardIds 的副本 id**（画面标「已挂用」与生成注入必须是同一批）。 */
 export interface ProjectAssetMountResult {
   created: boolean;
   copied: boolean;
@@ -99,7 +99,7 @@ export interface ProjectAssetMountResult {
   skippedItems: number;
 }
 
-/** 掛用一個資產到項目（copy-on-use：建本地副本；同鍵冪等，重放零副作用）。 */
+/** 挂用一个资产到项目（copy-on-use：建本地副本；同键幂等，重放零副作用）。 */
 export function mountProjectAsset(input: {
   projectId: string;
   assetKind: AssetKind;
@@ -126,7 +126,7 @@ export function mountProjectAsset(input: {
   );
 }
 
-/** 解除掛用（回該記錄的副本 id：前端據它把副本從 cardIds 解鎖）。 */
+/** 解除挂用（回该记录的副本 id：前端据它把副本从 cardIds 解锁）。 */
 export function unmountProjectAsset(input: {
   projectId: string;
   assetKind: AssetKind;
@@ -149,7 +149,7 @@ export function unmountProjectAsset(input: {
   );
 }
 
-/** 顯式分享：把 fromProjectId 名下的資產授權給 toProjectId（冪等）。 */
+/** 显式分享：把 fromProjectId 名下的资产授权给 toProjectId（幂等）。 */
 export function shareProjectAsset(input: {
   assetKind: AssetKind;
   assetId: string;
@@ -163,7 +163,7 @@ export function shareProjectAsset(input: {
   );
 }
 
-/** 撤銷分享。 */
+/** 撤销分享。 */
 export function revokeProjectAssetShare(shareId: string): Promise<CanvasClientResult<{ revoked: boolean }>> {
   return request<{ revoked: boolean }>(
     "/api/project-assets/shares",
@@ -173,9 +173,9 @@ export function revokeProjectAssetShare(shareId: string): Promise<CanvasClientRe
 }
 
 /**
- * 設定資產歸屬：projectId 有值 → 歸屬該項目；null → 收回個人。
- * 走**既有**寫入端點（包：PUT /api/assets 整包覆蓋；卡：POST /api/character-cards upsert by id），
- * 不另開端點、不改資產格式（歸屬只是記錄上的一個可選欄位）。
+ * 设定资产归属：projectId 有值 → 归属该项目；null → 收回个人。
+ * 走**既有**写入端点（包：PUT /api/assets 整包覆盖；卡：POST /api/character-cards upsert by id），
+ * 不另开端点、不改资产格式（归属只是记录上的一个可选栏位）。
  */
 export async function assignAssetScope(input: {
   assetKind: AssetKind;
@@ -209,8 +209,8 @@ export async function assignAssetScope(input: {
     { method: "POST", body: JSON.stringify({ ...card, scope }) },
     (json) => ((json as { success?: unknown })?.success === true ? true : undefined),
   );
-  // 這支改的是卡的 scope（卡庫內容變了），但不經 character-card-client，故不會自動發號；
-  // 成功才發（失敗分支已由上面的 listed 檢查與這裡的 !ok 提早返回）。
+  // 这支改的是卡的 scope（卡库内容变了），但不经 character-card-client，故不会自动发号；
+  // 成功才发（失败分支已由上面的 listed 检查与这里的 !ok 提早返回）。
   if (saved.ok) invalidateEntityCardIndex();
   return saved;
 }

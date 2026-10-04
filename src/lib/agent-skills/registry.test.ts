@@ -1,8 +1,8 @@
 /**
- * 統一技能註冊表不變量測試（2026-09-27 立）。
+ * 统一技能注册表不变量测试（2026-09-27 立）。
  *
- * 全部為**真行為斷言**：調 registry/index 的函式拿實際輸出再斷言，
- * 不做源碼字串掃描（源碼層守門件不算已驗，見 verification-guards-not-oracles 記憶）。
+ * 全部为**真行为断言**：调 registry/index 的函式拿实际输出再断言，
+ * 不做源码字串扫描（源码层守门件不算已验，见 verification-guards-not-oracles 记忆）。
  */
 
 import test from "node:test";
@@ -37,7 +37,7 @@ import { BUILT_IN_RECIPE_TEMPLATES } from "../recipe-templates.ts";
 
 const BUILTIN_TOTAL = 133;
 
-test("builtin 恰 133 條，公開集合＝builtin 133 / recipe 10 / template 8（永不含 user）", async () => {
+test("builtin 恰 133 条，公开集合＝builtin 133 / recipe 10 / template 8（永不含 user）", async () => {
   assert.equal(AGENT_SKILLS.length, BUILTIN_TOTAL, `builtin 应恰 ${BUILTIN_TOTAL} 条，实际 ${AGENT_SKILLS.length}`);
   assert.equal(RECIPE_SKILLS.length, BUILT_IN_RECIPE_TEMPLATES.length);
   assert.equal(TEMPLATE_SKILLS.length, AGENT_TEMPLATES.length);
@@ -62,11 +62,11 @@ test("builtin 恰 133 條，公開集合＝builtin 133 / recipe 10 / template 8�
 });
 
 /**
- * 家族分佈不變量。
- * 現況：10 個家族宣告皆有條目（`vfx-animation` 已由 12 條補齊，2026-09-27）。
- * 本測試把「無空家族」**釘成顯式事實**，而不是放任任一題材家族靜默歸零。
+ * 家族分布不变量。
+ * 现况：10 个家族宣告皆有条目（`vfx-animation` 已由 12 条补齐，2026-09-27）。
+ * 本测试把「无空家族」**钉成显式事实**，而不是放任任一题材家族静默归零。
  */
-test("10 個家族全部 ≥ 1 條（無空家族）", () => {
+test("10 个家族全部 ≥ 1 条（无空家族）", () => {
   const counts = countAgentSkillsByFamily(AGENT_SKILLS);
   const empty = AGENT_SKILL_FAMILIES.filter((family) => counts[family] === 0);
   assert.deepEqual(empty, [], `不应有空家族；实际空家族 ${JSON.stringify(empty)}`);
@@ -78,7 +78,7 @@ test("10 個家族全部 ≥ 1 條（無空家族）", () => {
   assert.equal(Object.keys(AGENT_SKILL_FAMILY_LABELS).length, AGENT_SKILL_FAMILIES.length);
 });
 
-test("全庫 id 唯一（builtin + recipe + template 聚合後）", async () => {
+test("全库 id 唯一（builtin + recipe + template 聚合后）", async () => {
   const all = await listPublicSkills();
   const ids = all.map((skill) => skill.id);
   assert.equal(new Set(ids).size, ids.length, `存在重复 id：${ids.filter((id, i) => ids.indexOf(id) !== i).join(",")}`);
@@ -140,7 +140,7 @@ test("template 投影忠实原档：id 加 tpl- 前缀、templateId 指回原 id
 });
 
 test("searchAgentSkills 命中真子集且非空；负向对照回空", () => {
-  // 查询词用**简体**：数据档已于 2026-09-27 由另一路繁转简（簡繁不一致会让查询词命中 0 条，
+  // 查询词用**简体**：数据档已于 2026-09-27 由另一路繁转简（简繁不一致会让查询词命中 0 条，
   // 是测试字面过时，不是搜索坏了）。
   const hits = searchAgentSkills("美学");
   assert.ok(hits.length > 0, "查「美学」应有命中");
@@ -161,7 +161,7 @@ test("searchAgentSkills 命中真子集且非空；负向对照回空", () => {
     const label = AGENT_SKILL_FAMILY_LABELS[hit.family] ?? "";
     assert.ok(
       ownText.includes("美学") || label.includes("美学"),
-      `${hit.id} 自身文本與家族标签都不含查询词却命中`,
+      `${hit.id} 自身文本与家族标签都不含查询词却命中`,
     );
   }
   assert.equal(searchAgentSkills("zzz不存在zzz").length, 0);
@@ -181,7 +181,7 @@ test("聚合搜索：家族标签「电影美学」命中的必属 cinema-auteur
   assert.ok(sources.has("builtin") && sources.has("recipe") && sources.has("template"),
     `命中来源应跨 builtin/recipe/template，实际 ${[...sources].join(",")}`);
   assert.equal((await searchPublicSkills("zzz不存在zzz")).length, 0);
-  // 第二个词取正文内容词（数据已繁转简，「美學」不再是有效查询词）：
+  // 第二个词取正文内容词（数据已繁转简，「美学」不再是有效查询词）：
   // 两词 AND 必须比单词窄，否则 AND 语义失效。
   const multi = await searchPublicSkills("电影美学 留白");
   assert.ok(multi.length > 0 && multi.length < hits.length, `多词 AND 应缩小结果集（${multi.length} vs ${hits.length}）`);
@@ -218,7 +218,7 @@ test("getSkillByIdPublic 只在公开三来源命中；listSkillFamilies 覆盖 
   assert.equal(families.find((entry) => entry.id === "vfx-animation")?.count, 12);
 });
 
-// —— 公开 / 私有分離（2026-09-27 核心隔離）——
+// —— 公开 / 私有分离（2026-09-27 核心隔离）——
 // 放最后：注册 user 插槽后逐条验「公开族不受影响、私有族只回自己的」，测完登出。
 function stubSkill(id: string, name: string): AgentSkillView {
   return {

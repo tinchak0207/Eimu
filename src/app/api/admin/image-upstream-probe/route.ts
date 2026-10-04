@@ -9,7 +9,7 @@ import { resolveUpstreamModelId } from "@/lib/provider-config";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const MODELS = ["gpt-image-2", "gemini-3.1-flash-image"];
 
@@ -76,9 +76,9 @@ export async function POST(req: NextRequest) {
     }, { status: 401 });
   }
 
-  // 隊列必須與生產同源：channel-registry 的 buildModelQueue（含 admin 池、調度啟停與
-  // 優先級覆寫）。舊版在這裡自行拼 env 端點 + 池合併，admin 在調度面板停用的渠道
-  // 照樣被真實出圖扣費，還被回報成「生產隊列」——正是渠道統一調度要消滅的病。
+  // 队列必须与生产同源：channel-registry 的 buildModelQueue（含 admin 池、调度启停与
+  // 优先级覆写）。旧版在这里自行拼 env 端点 + 池合并，admin 在调度面板停用的渠道
+  // 照样被真实出图扣费，还被回报成「生产队列」——正是渠道统一调度要消灭的病。
   const [pools, overrides] = await Promise.all([getRuntimeGatewayPools(), getRuntimeChannelOverrides()]);
   const results = [];
 

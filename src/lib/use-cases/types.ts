@@ -40,7 +40,7 @@ export interface UseCase {
   faqs: UseCaseFAQ[];
   author: UseCaseAuthor;
   relatedSlugs: string[];
-  /** 最相關的行業樞紐 slug（/use-cases/<categorySlug>），用於麵包屑與「所属行业」卡。 */
+  /** 最相关的行业枢纽 slug（/use-cases/<categorySlug>），用于面包屑与「所属行业」卡。 */
   categorySlug?: string;
   redditEvidence?: RedditEvidence[];
   workflowSteps?: string[];

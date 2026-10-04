@@ -43,10 +43,10 @@ export function ApiKeysClient() {
   /** 新签发的明文密钥，只在这一次拿得到。 */
   const [issued, setIssued] = useState<{ key: string; label: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  /** 剛複製過的 curl 片段（逐段反饋，兩段互不干擾）。 */
+  /** 刚复制过的 curl 片段（逐段反馈，两段互不干扰）。 */
   const [copiedCurl, setCopiedCurl] = useState<string | null>(null);
 
-  /** 建 key 成功即給可直接跑通的範例：model/size 由 catalog 推導（見 lib/dev-quickstart）。 */
+  /** 建 key 成功即给可直接跑通的范例：model/size 由 catalog 推导（见 lib/dev-quickstart）。 */
   const curlExamples = useMemo(() => (issued ? quickstartCurlExamples(issued.key) : []), [issued]);
 
   const authHeaders = useCallback((): Record<string, string> | null => {

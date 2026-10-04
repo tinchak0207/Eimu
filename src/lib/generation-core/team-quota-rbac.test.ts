@@ -1,11 +1,11 @@
-// P0-2 第二刀：團隊 RBAC（三級權限矩陣）＋ 團隊/成員配額。
+// P0-2 第二刀：团队 RBAC（三级权限矩阵）＋ 团队/成员配额。
 //
-// 口徑（TG-02 守門件不是 oracle）：本檔每一條都是對**純函式裁決**與**真 store 讀寫**
-// 的行為斷言，期望值**手寫**（不從被測實現的輸出反推，禁同源斷言）；RBAC 矩陣逐格
-// 手寫期望表；配額邊界手寫算術；「不寫帳本」用既有帳本讀取面（readAccountLedger）
-// 在配額操作前後筆數不變驗證。
+// 口径（TG-02 守门件不是 oracle）：本档每一条都是对**纯函式裁决**与**真 store 读写**
+// 的行为断言，期望值**手写**（不从被测实现的输出反推，禁同源断言）；RBAC 矩阵逐格
+// 手写期望表；配额边界手写算术；「不写帐本」用既有帐本读取面（readAccountLedger）
+// 在配额操作前后笔数不变验证。
 //
-// 紅線：本檔**不碰** billing-ledger.ts / account-ledger.ts 的實現，只讀它的讀取面。
+// 红线：本档**不碰** billing-ledger.ts / account-ledger.ts 的实现，只读它的读取面。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -29,9 +29,9 @@ import {
 } from "./team-quota-limits";
 import { readAccountLedger } from "./account-ledger";
 
-// ─────────────────────────────────────────── 測試夾具
+// ─────────────────────────────────────────── 测试夹具
 
-/** 造一個 TeamActor（唯讀欄位齊全，避免用部分 mock 掩蓋真實形狀）。 */
+/** 造一个 TeamActor（唯读栏位齐全，避免用部分 mock 掩盖真实形状）。 */
 function actor(role: TeamRole, userId: number, teamUserId = 1000): TeamActor {
   return {
     userId,
@@ -42,22 +42,22 @@ function actor(role: TeamRole, userId: number, teamUserId = 1000): TeamActor {
   };
 }
 
-const TEAM_MAIN = 1000; // 團隊主帳（Main / Super Admin）
-const TEAM_ADMIN = 2000; // 名冊 admin（Team Admin）
-const TEAM_MEMBER = 3000; // 名冊 member
-const TEAM_MEMBER_B = 3001; // 同隊另一位 member
-const OUTSIDER = 9000; // 隊外帳號
+const TEAM_MAIN = 1000; // 团队主帐（Main / Super Admin）
+const TEAM_ADMIN = 2000; // 名册 admin（Team Admin）
+const TEAM_MEMBER = 3000; // 名册 member
+const TEAM_MEMBER_B = 3001; // 同队另一位 member
+const OUTSIDER = 9000; // 队外帐号
 
-// ─────────────────────────────────────────── 1. RBAC 判定表（逐格手寫期望值）
+// ─────────────────────────────────────────── 1. RBAC 判定表（逐格手写期望值）
 //
-// 維度：{owner/admin/member/身份不明} × {資產屬主 = 自己/他人} × {隊內/隊外}
-// 「隊內/隊外」在此模型中以角色表達：owner/admin = 管理主體，member = 隊內成員，
+// 维度：{owner/admin/member/身份不明} × {资产属主 = 自己/他人} × {队内/队外}
+// 「队内/队外」在此模型中以角色表达：owner/admin = 管理主体，member = 队内成员，
 // 身份不明 = 查不到（fail-closed）。
 //
-//   判定來源（Dramagic 逐字）：
+//   判定来源（Dramagic 逐字）：
 //     Main      「can view and edit all global projects, assets, and teams」→ 全可管
-//     Team Admin「can view and edit projects, assets, and members within this team」→ 隊內全可管
-//     Member    「Team assets: view 全隊 / manage 自己建的」→ 只可管自己建的
+//     Team Admin「can view and edit projects, assets, and members within this team」→ 队内全可管
+//     Member    「Team assets: view 全队 / manage 自己建的」→ 只可管自己建的
 
 const MATRIX: {
   name: string;
@@ -66,36 +66,36 @@ const MATRIX: {
   actorUserId: number | null;
   expectManage: boolean;
 }[] = [
-  // Main（owner）：全帳號資產皆可管（含隊外、他人、屬主不明）
-  { name: "Main × 自己資產", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MAIN, actorUserId: TEAM_MAIN, expectManage: true },
-  { name: "Main × 隊內他人資產", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MAIN, expectManage: true },
-  { name: "Main × 隊外他人資產", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: OUTSIDER, actorUserId: TEAM_MAIN, expectManage: true },
-  { name: "Main × 屬主不明資產", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: null, actorUserId: TEAM_MAIN, expectManage: true },
+  // Main（owner）：全帐号资产皆可管（含队外、他人、属主不明）
+  { name: "Main × 自己资产", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MAIN, actorUserId: TEAM_MAIN, expectManage: true },
+  { name: "Main × 队内他人资产", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MAIN, expectManage: true },
+  { name: "Main × 队外他人资产", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: OUTSIDER, actorUserId: TEAM_MAIN, expectManage: true },
+  { name: "Main × 属主不明资产", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: null, actorUserId: TEAM_MAIN, expectManage: true },
 
-  // Team Admin：隊內全部（含他人建的）可管
-  { name: "Admin × 自己資產", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_ADMIN, actorUserId: TEAM_ADMIN, expectManage: true },
-  { name: "Admin × 隊內 member 資產", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_ADMIN, expectManage: true },
-  { name: "Admin × 隊內另一 admin 資產", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: 2001, actorUserId: TEAM_ADMIN, expectManage: true },
-  { name: "Admin × 屬主不明資產（fail-closed 不適用於 manager）", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: null, actorUserId: TEAM_ADMIN, expectManage: true },
+  // Team Admin：队内全部（含他人建的）可管
+  { name: "Admin × 自己资产", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_ADMIN, actorUserId: TEAM_ADMIN, expectManage: true },
+  { name: "Admin × 队内 member 资产", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_ADMIN, expectManage: true },
+  { name: "Admin × 队内另一 admin 资产", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: 2001, actorUserId: TEAM_ADMIN, expectManage: true },
+  { name: "Admin × 属主不明资产（fail-closed 不适用于 manager）", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: null, actorUserId: TEAM_ADMIN, expectManage: true },
 
   // Member：只可管自己建的
-  { name: "Member × 自己資產", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MEMBER, expectManage: true },
-  { name: "Member × 隊內他人資產", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: TEAM_MEMBER_B, actorUserId: TEAM_MEMBER, expectManage: false },
-  { name: "Member × 隊外他人資產", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: OUTSIDER, actorUserId: TEAM_MEMBER, expectManage: false },
-  { name: "Member × 屬主不明資產（fail-closed）", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: null, actorUserId: TEAM_MEMBER, expectManage: false },
+  { name: "Member × 自己资产", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MEMBER, expectManage: true },
+  { name: "Member × 队内他人资产", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: TEAM_MEMBER_B, actorUserId: TEAM_MEMBER, expectManage: false },
+  { name: "Member × 队外他人资产", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: OUTSIDER, actorUserId: TEAM_MEMBER, expectManage: false },
+  { name: "Member × 属主不明资产（fail-closed）", actor: actor("member", TEAM_MEMBER), assetOwnerUserId: null, actorUserId: TEAM_MEMBER, expectManage: false },
 
   // 身份不明（查不到）：fail-closed，一律拒
-  { name: "身份不明 × 自己資產", actor: null, assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MEMBER, expectManage: false },
-  { name: "身份不明 × 他人資產", actor: null, assetOwnerUserId: TEAM_MEMBER_B, actorUserId: TEAM_MEMBER, expectManage: false },
-  { name: "身份不明 × 屬主不明", actor: null, assetOwnerUserId: null, actorUserId: TEAM_MEMBER, expectManage: false },
+  { name: "身份不明 × 自己资产", actor: null, assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MEMBER, expectManage: false },
+  { name: "身份不明 × 他人资产", actor: null, assetOwnerUserId: TEAM_MEMBER_B, actorUserId: TEAM_MEMBER, expectManage: false },
+  { name: "身份不明 × 属主不明", actor: null, assetOwnerUserId: null, actorUserId: TEAM_MEMBER, expectManage: false },
 
   // 畸形 actorUserId：fail-closed
   { name: "非法 actorUserId（0）", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: 0, actorUserId: 0, expectManage: false },
-  { name: "非法 actorUserId（負數）", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: -1, expectManage: false },
-  { name: "actorUserId 非整數", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: 1.5, expectManage: false },
+  { name: "非法 actorUserId（负数）", actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: -1, expectManage: false },
+  { name: "actorUserId 非整数", actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: 1.5, expectManage: false },
 ];
 
-test("RBAC 三級矩陣 × {屬主} × {隊內/隊外}：逐格手寫期望值", () => {
+test("RBAC 三级矩阵 × {属主} × {队内/队外}：逐格手写期望值", () => {
   const results: string[] = [];
   for (const row of MATRIX) {
     const got = canManageTeamAsset({
@@ -107,45 +107,45 @@ test("RBAC 三級矩陣 × {屬主} × {隊內/隊外}：逐格手寫期望值",
     assert.equal(
       got.allowed,
       row.expectManage,
-      `${row.name}: 期望 ${row.expectManage ? "ALLOW" : "DENY"}，實得 ${got.allowed ? "ALLOW" : "DENY"}`,
+      `${row.name}: 期望 ${row.expectManage ? "ALLOW" : "DENY"}，实得 ${got.allowed ? "ALLOW" : "DENY"}`,
     );
     if (!got.allowed) {
-      assert.equal(got.code, TEAM_ASSET_FORBIDDEN_CODE, `${row.name}: 拒時須帶 ${TEAM_ASSET_FORBIDDEN_CODE}`);
-      assert.ok((got.message ?? "").length > 0, `${row.name}: 拒時須有文案`);
+      assert.equal(got.code, TEAM_ASSET_FORBIDDEN_CODE, `${row.name}: 拒时须带 ${TEAM_ASSET_FORBIDDEN_CODE}`);
+      assert.ok((got.message ?? "").length > 0, `${row.name}: 拒时须有文案`);
     }
   }
-  // 全表覆蓋率：18 格
-  assert.equal(MATRIX.length, 18, "矩陣應為 18 格");
-  console.log("[RBAC 實測]\n" + results.join("\n"));
+  // 全表覆盖率：18 格
+  assert.equal(MATRIX.length, 18, "矩阵应为 18 格");
+  console.log("[RBAC 实测]\n" + results.join("\n"));
 });
 
-test("RBAC 讀取面：隊內全角色可讀，身份不明只可讀自己", () => {
-  // Member 可讀隊內他人資產（Dramagic：Team assets view）
+test("RBAC 读取面：队内全角色可读，身份不明只可读自己", () => {
+  // Member 可读队内他人资产（Dramagic：Team assets view）
   assert.equal(canViewTeamAsset({ actor: actor("member", TEAM_MEMBER), assetOwnerUserId: TEAM_MEMBER_B, actorUserId: TEAM_MEMBER }), true);
-  // Admin / Main 可讀隊內他人
+  // Admin / Main 可读队内他人
   assert.equal(canViewTeamAsset({ actor: actor("admin", TEAM_ADMIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_ADMIN }), true);
   assert.equal(canViewTeamAsset({ actor: actor("owner", TEAM_MAIN), assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MAIN }), true);
-  // 自己的資產恆可讀（含身份不明時）
+  // 自己的资产恒可读（含身份不明时）
   assert.equal(canViewTeamAsset({ actor: null, assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MEMBER }), true);
-  // 身份不明且非自己 → 不可讀（fail-closed）
+  // 身份不明且非自己 → 不可读（fail-closed）
   assert.equal(canViewTeamAsset({ actor: null, assetOwnerUserId: TEAM_MEMBER_B, actorUserId: TEAM_MEMBER }), false);
 });
 
-test("RBAC fail-closed：canManageTeamAsset(null 身份) 與 canCreateSharedCanvas(null 身份) 語義相反且並存", async () => {
+test("RBAC fail-closed：canManageTeamAsset(null 身份) 与 canCreateSharedCanvas(null 身份) 语义相反且并存", async () => {
   const { canCreateSharedCanvas } = await import("./team-governance");
-  // 建畫布閘：null = 未配置/非成員 → 放行（fail-open，不擋創作）
+  // 建画布闸：null = 未配置/非成员 → 放行（fail-open，不挡创作）
   assert.equal(canCreateSharedCanvas({ actor: null, memberCreateCanvas: false }).allowed, true);
-  // 資產管理閘：null = 查不到身份 → 拒（fail-closed，不碰別人資料）
+  // 资产管理闸：null = 查不到身份 → 拒（fail-closed，不碰别人资料）
   assert.equal(
     canManageTeamAsset({ actor: null, assetOwnerUserId: TEAM_MEMBER, actorUserId: TEAM_MAIN }).allowed,
     false,
   );
-  // 兩者並列：member 建畫布受團隊開關限制（本刀未動）
+  // 两者并列：member 建画布受团队开关限制（本刀未动）
   assert.equal(canCreateSharedCanvas({ actor: { role: "member" }, memberCreateCanvas: false }).allowed, false);
   assert.equal(canCreateSharedCanvas({ actor: { role: "member" }, memberCreateCanvas: true }).allowed, true);
 });
 
-test("resolveTeamActor：主帳恆 owner（不入名冊）、名冊外回 null", () => {
+test("resolveTeamActor：主帐恒 owner（不入名册）、名册外回 null", () => {
   const roster = [
     { memberUserId: TEAM_ADMIN, role: "admin" as TeamRole },
     { memberUserId: TEAM_MEMBER, role: "member" as TeamRole },
@@ -157,53 +157,53 @@ test("resolveTeamActor：主帳恆 owner（不入名冊）、名冊外回 null",
   assert.equal(admin?.role, "admin");
   const member = resolveTeamActor({ userId: TEAM_MEMBER, teamUserId: TEAM_MAIN, roster });
   assert.equal(member?.role, "member");
-  // 外人（不在名冊、非主帳）→ null（fail-closed 的輸入）
+  // 外人（不在名册、非主帐）→ null（fail-closed 的输入）
   assert.equal(resolveTeamActor({ userId: OUTSIDER, teamUserId: TEAM_MAIN, roster }), null);
 });
 
-// ─────────────────────────────────────────── 2. 配額邊界
+// ─────────────────────────────────────────── 2. 配额边界
 
-test("團隊配額：fixed 不得低於已分配給成員（超賣保護）", () => {
+test("团队配额：fixed 不得低于已分配给成员（超卖保护）", () => {
   // 已分配 500，要求 fixed=400 → 拒（below_allocated）
   const bad = teamQuotaReclaim({ nextMode: "fixed", nextFixedQuota: 400, allocatedToMembers: 500 });
   assert.equal(bad.ok, false);
   assert.equal(bad.code, "below_allocated");
   assert.equal(bad.reclaim, 0);
-  // 已分配 500，要求 fixed=500 → 恰好通過（邊界，允許）
+  // 已分配 500，要求 fixed=500 → 恰好通过（边界，允许）
   assert.equal(teamQuotaReclaim({ nextMode: "fixed", nextFixedQuota: 500, allocatedToMembers: 500 }).ok, true);
-  // 已分配 500，要求 fixed=501 → 通過
+  // 已分配 500，要求 fixed=501 → 通过
   assert.equal(teamQuotaReclaim({ nextMode: "fixed", nextFixedQuota: 501, allocatedToMembers: 500 }).ok, true);
-  // 負數 → 拒
+  // 负数 → 拒
   assert.equal(teamQuotaReclaim({ nextMode: "fixed", nextFixedQuota: -1, allocatedToMembers: 0 }).ok, false);
 });
 
-test("團隊配額：改回不限 ⇒ 剩餘全數回收（reclaim = 已分配合計）", () => {
+test("团队配额：改回不限 ⇒ 剩余全数回收（reclaim = 已分配合计）", () => {
   const first = teamQuotaReclaim({ nextMode: "none", nextFixedQuota: 0, allocatedToMembers: 777 });
   assert.equal(first.ok, true);
   assert.equal(first.reclaim, 777);
-  // 已分配 0 時改不限 → 回收 0
+  // 已分配 0 时改不限 → 回收 0
   const zero = teamQuotaReclaim({ nextMode: "none", nextFixedQuota: 0, allocatedToMembers: 0 });
   assert.equal(zero.reclaim, 0);
-  // 非有限值不當成「有額度」：NaN → 回收 0（不編造）
+  // 非有限值不当成「有额度」：NaN → 回收 0（不编造）
   const nan = teamQuotaReclaim({ nextMode: "none", nextFixedQuota: 0, allocatedToMembers: Number.NaN });
   assert.equal(nan.reclaim, 0);
 });
 
-test("回收上限 = 團隊剩餘（超出即拒）", () => {
-  // 剩餘 100，回收 100 → 允許（邊界）
+test("回收上限 = 团队剩余（超出即拒）", () => {
+  // 剩余 100，回收 100 → 允许（边界）
   assert.equal(reclaimWithinRemaining({ reclaimQuota: 100, teamRemaining: 100 }).ok, true);
-  // 剩餘 100，回收 101 → 拒
+  // 剩余 100，回收 101 → 拒
   const over = reclaimWithinRemaining({ reclaimQuota: 101, teamRemaining: 100 });
   assert.equal(over.ok, false);
   assert.equal(over.code, "reclaim_above_remaining");
-  // 不限（null）⇒ 無上限
+  // 不限（null）⇒ 无上限
   assert.equal(reclaimWithinRemaining({ reclaimQuota: 9_999_999, teamRemaining: null }).ok, true);
-  // 負數 → 拒
+  // 负数 → 拒
   assert.equal(reclaimWithinRemaining({ reclaimQuota: -1, teamRemaining: 100 }).ok, false);
 });
 
-test("成員配額：不得超過團隊剩餘（fixed 與 daily 同一把尺）", () => {
-  // fixed 恰等於剩餘 → 允許；多 1 → 拒
+test("成员配额：不得超过团队剩余（fixed 与 daily 同一把尺）", () => {
+  // fixed 恰等于剩余 → 允许；多 1 → 拒
   assert.equal(memberQuotaWithinTeam({ mode: "fixed", fixedQuota: 300, dailyQuota: 0, teamRemaining: 300 }).ok, true);
   const overFixed = memberQuotaWithinTeam({ mode: "fixed", fixedQuota: 301, dailyQuota: 0, teamRemaining: 300 });
   assert.equal(overFixed.ok, false);
@@ -211,20 +211,20 @@ test("成員配額：不得超過團隊剩餘（fixed 與 daily 同一把尺）"
   // daily 也受同一上界
   const overDaily = memberQuotaWithinTeam({ mode: "daily", fixedQuota: 0, dailyQuota: 301, teamRemaining: 300 });
   assert.equal(overDaily.ok, false);
-  // unlimited 不受上界（不消耗團隊額度）
+  // unlimited 不受上界（不消耗团队额度）
   assert.equal(memberQuotaWithinTeam({ mode: "unlimited", fixedQuota: 0, dailyQuota: 0, teamRemaining: 1 }).ok, true);
-  // 團隊不限（null）⇒ 無上界
+  // 团队不限（null）⇒ 无上界
   assert.equal(memberQuotaWithinTeam({ mode: "fixed", fixedQuota: 9_999_999, dailyQuota: 0, teamRemaining: null }).ok, true);
 });
 
-test("成員無權設 admin 配額：admin/owner 目標只接受 unlimited", async () => {
+test("成员无权设 admin 配额：admin/owner 目标只接受 unlimited", async () => {
   const { canSetMemberQuota } = await import("./team-quota-limits");
   // member 呼叫方 → 一律拒
   assert.equal(canSetMemberQuota({ actorRole: "member", targetRole: "member", mode: "daily" }).ok, false);
   assert.equal(canSetMemberQuota({ actorRole: null, targetRole: "member", mode: "daily" }).ok, false);
-  // admin 呼叫方 → 可設 member 配額
+  // admin 呼叫方 → 可设 member 配额
   assert.equal(canSetMemberQuota({ actorRole: "admin", targetRole: "member", mode: "daily" }).ok, true);
-  // admin 呼叫方 → 對 admin/owner 目標，只接受 unlimited
+  // admin 呼叫方 → 对 admin/owner 目标，只接受 unlimited
   const locked = canSetMemberQuota({ actorRole: "admin", targetRole: "admin", mode: "fixed" });
   assert.equal(locked.ok, false);
   assert.equal(locked.code, "admin_unlimited_locked");
@@ -233,62 +233,62 @@ test("成員無權設 admin 配額：admin/owner 目標只接受 unlimited", asy
   assert.equal(canSetMemberQuota({ actorRole: "owner", targetRole: "owner", mode: "unlimited" }).ok, true);
 });
 
-// ─────────────────────────────────────────── 3. 每日額度：UTC+8 00:00 重置、不累積
+// ─────────────────────────────────────────── 3. 每日额度：UTC+8 00:00 重置、不累积
 
-test("配額日界：UTC+8 00:00（= UTC 16:00 前一日）", () => {
-  // 2026-09-28T15:59:59Z = 2026-09-28 23:59:59 (UTC+8) → 配額日仍是 09-28
+test("配额日界：UTC+8 00:00（= UTC 16:00 前一日）", () => {
+  // 2026-09-28T15:59:59Z = 2026-09-28 23:59:59 (UTC+8) → 配额日仍是 09-28
   assert.equal(quotaDayKey(Date.parse("2026-09-28T15:59:59Z")), "2026-09-28");
-  // 2026-09-28T16:00:00Z = 2026-09-29 00:00:00 (UTC+8) → 配額日翻成 09-29
+  // 2026-09-28T16:00:00Z = 2026-09-29 00:00:00 (UTC+8) → 配额日翻成 09-29
   assert.equal(quotaDayKey(Date.parse("2026-09-28T16:00:00Z")), "2026-09-29");
-  // UTC+8 的偏移常數是 480 分鐘
+  // UTC+8 的偏移常数是 480 分钟
   assert.equal(DAILY_QUOTA_EPOCH_OFFSET_MINUTES, 480);
 });
 
-test("每日額度跨日重置：不累積，隔日歸零", () => {
+test("每日额度跨日重置：不累积，隔日归零", () => {
   const beforeMidnight = Date.parse("2026-09-28T15:59:00Z"); // UTC+8 09-28 23:59
   const afterMidnight = Date.parse("2026-09-28T16:00:01Z"); // UTC+8 09-29 00:00:01
-  // 09-28 記了 500 已用
+  // 09-28 记了 500 已用
   assert.equal(effectiveDailyUsed({ storedDay: "2026-09-28", storedUsed: 500, nowMs: beforeMidnight }), 500);
-  // 跨到 09-29 → 歸零（不累積）
+  // 跨到 09-29 → 归零（不累积）
   assert.equal(effectiveDailyUsed({ storedDay: "2026-09-28", storedUsed: 500, nowMs: afterMidnight }), 0);
-  // 同日的負值/NaN 不當成已用
+  // 同日的负值/NaN 不当成已用
   assert.equal(effectiveDailyUsed({ storedDay: "2026-09-28", storedUsed: -3, nowMs: beforeMidnight }), 0);
   assert.equal(effectiveDailyUsed({ storedDay: "2026-09-28", storedUsed: Number.NaN, nowMs: beforeMidnight }), 0);
-  // 從未使用過（null）→ 0
+  // 从未使用过（null）→ 0
   assert.equal(effectiveDailyUsed({ storedDay: null, storedUsed: 0, nowMs: beforeMidnight }), 0);
 });
 
-test("下一次重置時刻 = 下一個 UTC+8 00:00", () => {
+test("下一次重置时刻 = 下一个 UTC+8 00:00", () => {
   const beforeMidnight = Date.parse("2026-09-28T15:59:00Z");
   assert.equal(nextQuotaResetMs(beforeMidnight), Date.parse("2026-09-28T16:00:00Z"));
   const atMidnight = Date.parse("2026-09-28T16:00:00Z");
-  // 恰在 00:00 → 進到隔天
+  // 恰在 00:00 → 进到隔天
   assert.equal(nextQuotaResetMs(atMidnight), Date.parse("2026-09-29T16:00:00Z"));
   const midday = Date.parse("2026-09-28T04:00:00Z"); // UTC+8 12:00
   assert.equal(nextQuotaResetMs(midday), Date.parse("2026-09-28T16:00:00Z"));
 });
 
-test("每日額度是速率限制：用滿即拒，重置後可再用（無預扣）", () => {
+test("每日额度是速率限制：用满即拒，重置后可再用（无预扣）", () => {
   const spec = { mode: "daily" as const, dailyQuota: 1000, dailyUsed: 900 };
-  // 再花 100 → 恰滿，允許
+  // 再花 100 → 恰满，允许
   assert.equal(dailyQuotaAllows({ spec, costQuota: 100 }).ok, true);
   // 再花 101 → 拒
   const over = dailyQuotaAllows({ spec, costQuota: 101 });
   assert.equal(over.ok, false);
   assert.equal(over.code, "daily_quota_exceeded");
-  // 非 daily 模式不受此閘
+  // 非 daily 模式不受此闸
   assert.equal(dailyQuotaAllows({ spec: { mode: "unlimited", dailyQuota: 0, dailyUsed: 0 }, costQuota: 9_999 }).ok, true);
   assert.equal(dailyQuotaAllows({ spec: { mode: "fixed", dailyQuota: 0, dailyUsed: 0 }, costQuota: 9_999 }).ok, true);
-  // 跨日後（已用歸零）可再用
+  // 跨日后（已用归零）可再用
   assert.equal(dailyQuotaAllows({ spec: { ...spec, dailyUsed: 0 }, costQuota: 1000 }).ok, true);
 });
 
-// ─────────────────────────────────────────── 4. 禁影子帳本：配額不產生任何帳本寫入
+// ─────────────────────────────────────────── 4. 禁影子帐本：配额不产生任何帐本写入
 
-test("配額操作不寫五態帳本：帳本筆數前後不變", async () => {
-  // 帳本讀取面是真實現（readAccountLedger），但本測試環境無控制面 DB。
-  // 這正是要證明的反面：**配額層根本沒有帳本寫入路徑**——
-  // 對一個不存在的帳本身份讀帳，筆數恆為 0，且配額純函式不觸碰帳本。
+test("配额操作不写五态帐本：帐本笔数前后不变", async () => {
+  // 帐本读取面是真实现（readAccountLedger），但本测试环境无控制面 DB。
+  // 这正是要证明的反面：**配额层根本没有帐本写入路径**——
+  // 对一个不存在的帐本身份读帐，笔数恒为 0，且配额纯函式不触碰帐本。
   const billingUserId = 987_654;
   let before: unknown[] | null = null;
   let readOk = false;
@@ -296,11 +296,11 @@ test("配額操作不寫五態帳本：帳本筆數前後不變", async () => {
     before = await readAccountLedger(billingUserId);
     readOk = true;
   } catch {
-    // 無 DB 時 readAccountLedger 會 throw（getGenerationSql 拒）；視為 0 筆。
+    // 无 DB 时 readAccountLedger 会 throw（getGenerationSql 拒）；视为 0 笔。
     before = [];
   }
 
-  // 執行一串配額裁決／邊界運算（純函式，無副作用）
+  // 执行一串配额裁决／边界运算（纯函式，无副作用）
   const ops = [
     teamQuotaReclaim({ nextMode: "fixed", nextFixedQuota: 10_000, allocatedToMembers: 0 }),
     teamQuotaReclaim({ nextMode: "none", nextFixedQuota: 0, allocatedToMembers: 5_000 }),
@@ -308,7 +308,7 @@ test("配額操作不寫五態帳本：帳本筆數前後不變", async () => {
     reclaimWithinRemaining({ reclaimQuota: 1_000, teamRemaining: 10_000 }),
     dailyQuotaAllows({ spec: { mode: "daily", dailyQuota: 500, dailyUsed: 100 }, costQuota: 50 }),
   ];
-  assert.ok(ops.every((op) => typeof op.ok === "boolean"), "配額裁決皆為純函式回傳值");
+  assert.ok(ops.every((op) => typeof op.ok === "boolean"), "配额裁决皆为纯函式回传值");
 
   let after: unknown[] | null = null;
   try {
@@ -319,25 +319,25 @@ test("配額操作不寫五態帳本：帳本筆數前後不變", async () => {
 
   const beforeCount = before?.length ?? 0;
   const afterCount = after?.length ?? 0;
-  assert.equal(afterCount, beforeCount, `配額操作不得改變帳本筆數（前 ${beforeCount} / 後 ${afterCount}）`);
-  assert.equal(afterCount, 0, "該身份在無 DB 環境下帳本應為 0 筆");
-  console.log(`[帳本證據] readAccountLedger 讀取成功=${readOk}；配額操作前後筆數=${beforeCount}/${afterCount}`);
+  assert.equal(afterCount, beforeCount, `配额操作不得改变帐本笔数（前 ${beforeCount} / 后 ${afterCount}）`);
+  assert.equal(afterCount, 0, "该身份在无 DB 环境下帐本应为 0 笔");
+  console.log(`[帐本证据] readAccountLedger 读取成功=${readOk}；配额操作前后笔数=${beforeCount}/${afterCount}`);
 });
 
-test("配額模組不 import 任何帳本模組（源碼層探針，僅作變更探針不計入已驗）", async () => {
-  // 這一條是**變更探針**（AGENTS.md：源碼字串斷言不計入「已驗證」）；
-  // 真正的行為斷言是上一條「帳本筆數不變」。
+test("配额模组不 import 任何帐本模组（源码层探针，仅作变更探针不计入已验）", async () => {
+  // 这一条是**变更探针**（AGENTS.md：源码字串断言不计入「已验证」）；
+  // 真正的行为断言是上一条「帐本笔数不变」。
   const fs = await import("node:fs/promises");
   const src = await fs.readFile(new URL("./team-quota-limits.ts", import.meta.url), "utf8");
-  // 只掃「程式碼」面：剝掉行註解與塊註解（檔頭合法地提到「禁影子帳本」與帳本檔名）。
+  // 只扫「程式码」面：剥掉行注解与块注解（档头合法地提到「禁影子帐本」与帐本档名）。
   const code = src
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n")
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
-  // 不准出現帳本寫入函式名或帳本模組 import
+  // 不准出现帐本写入函式名或帐本模组 import
   const IMPORT_OR_CALL = /(from\s+["'][^"']*billing-ledger|require\(["'][^"']*billing-ledger)/;
-  assert.ok(!IMPORT_OR_CALL.test(code), "配額模組不得 import 帳本模組");
+  assert.ok(!IMPORT_OR_CALL.test(code), "配额模组不得 import 帐本模组");
   for (const forbidden of [
     "postLedgerEntries",
     "recordConsumption",
@@ -346,12 +346,12 @@ test("配額模組不 import 任何帳本模組（源碼層探針，僅作變更
     "recordAdjustment",
     "reserveGenerationBilling",
   ]) {
-    assert.ok(!code.includes(forbidden), `配額模組不得引用帳本符號 ${forbidden}`);
+    assert.ok(!code.includes(forbidden), `配额模组不得引用帐本符号 ${forbidden}`);
   }
-  // member-quota 只准唯讀（readTeamQuotaView）——不准出現分配通路
-  assert.ok(!code.includes("allocateMemberQuota"), "配額模組不得呼叫分配通路（點數移動另走轉移通路）");
+  // member-quota 只准唯读（readTeamQuotaView）——不准出现分配通路
+  assert.ok(!code.includes("allocateMemberQuota"), "配额模组不得呼叫分配通路（点数移动另走转移通路）");
   assert.ok(
     !code.includes("adjustGatewayUserQuotaExact") && !code.includes("setGatewayUserImageQuota"),
-    "配額模組不得呼叫任何上游額度調整",
+    "配额模组不得呼叫任何上游额度调整",
   );
 });

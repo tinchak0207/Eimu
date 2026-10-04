@@ -1,19 +1,19 @@
-// REQ-D3 訂閱 SKU：**發碼端**（訂閱兌換碼的產生）。
+// REQ-D3 订阅 SKU：**发码端**（订阅兑换码的产生）。
 //
-// 為什麼要有本檔：訂閱走兌換碼通道（預設，見 subscription-sku 的 SUBSCRIPTION_FULFILLMENT_CHANNEL），
-// 而「這張碼是哪個 SKU」只能靠碼的 `name`（`SUB-<sku>@<ref>`）承載——沒有一個遵守這個
-// 約定的發碼端，入帳端就永遠認不出訂閱碼。本檔就是那個唯一的生產者。
+// 为什么要有本档：订阅走兑换码通道（预设，见 subscription-sku 的 SUBSCRIPTION_FULFILLMENT_CHANNEL），
+// 而「这张码是哪个 SKU」只能靠码的 `name`（`SUB-<sku>@<ref>`）承载——没有一个遵守这个
+// 约定的发码端，入帐端就永远认不出订阅码。本档就是那个唯一的生产者。
 //
-// 現場事實（為什麼標記放 name 不放 key，見 subscription-sku.ts 的長註釋）：
-//   ・key：API 建碼路徑由 new-api 生成（不透明隨機串）；直寫庫路徑由我方生成，但仍是
-//     隨機串 ⇒ 塞標記 = 改碼格式（對用戶可見、且兩條路徑不一致）。
-//   ・name：**兩條建碼路徑都由我方寫入**（mPay 走 `MP<orderId>`；人工碼走 `eimu1500`），
-//     且能由 `/api/redemption/` 只讀列出 ⇒ 標記的自然載體，無需映射表。
+// 现场事实（为什么标记放 name 不放 key，见 subscription-sku.ts 的长注释）：
+//   ・key：API 建码路径由 new-api 生成（不透明随机串）；直写库路径由我方生成，但仍是
+//     随机串 ⇒ 塞标记 = 改码格式（对用户可见、且两条路径不一致）。
+//   ・name：**两条建码路径都由我方写入**（mPay 走 `MP<orderId>`；人工码走 `eimu1500`），
+//     且能由 `/api/redemption/` 只读列出 ⇒ 标记的自然载体，无需映射表。
 //
-// 本檔與 `lib/mapay-redemption.ts` 同一族（同一個上游端點與同一個「先搜後建」冪等姿勢），
-// 差別只在白名單欄位：`name` 由 `subscriptionCodeName(sku, orderId)` 產生。
-// 未接線到任何結帳流程（哪個 SKU 對應哪個付費方案＝定價決策，需暴君定調）：本檔先把
-// 「發碼能力」備好，入帳端已可認。
+// 本档与 `lib/mapay-redemption.ts` 同一族（同一个上游端点与同一个「先搜后建」幂等姿势），
+// 差别只在白名单栏位：`name` 由 `subscriptionCodeName(sku, orderId)` 产生。
+// 未接线到任何结帐流程（哪个 SKU 对应哪个付费方案＝定价决策，需暴君定调）：本档先把
+// 「发码能力」备好，入帐端已可认。
 
 import type { GatewayRedemption } from "@/lib/gateway-admin";
 import { subscriptionCodeName } from "@/lib/generation-core/subscription-sku";
@@ -34,16 +34,16 @@ type RedemptionSearchData = {
 export type FulfilledSubscriptionRedemption = {
   key: string;
   created: boolean;
-  /** 碼的 name（帶 SKU 標記，入帳端據此認出訂閱碼）。 */
+  /** 码的 name（带 SKU 标记，入帐端据此认出订阅码）。 */
   name: string;
 };
 
 export interface SubscriptionRedemptionPlan {
-  /** SKU 識別（必須與 subscription-sku 的 SKU 註冊表或入帳端的兜底規則一致）。 */
+  /** SKU 识别（必须与 subscription-sku 的 SKU 注册表或入帐端的兜底规则一致）。 */
   sku: string;
-  /** 我方訂單/業務參照（寫進 name 的 @ 後段，只作審計與冪等搜尋）。 */
+  /** 我方订单/业务参照（写进 name 的 @ 后段，只作审计与幂等搜寻）。 */
   orderId: string;
-  /** 本期額度（quota 單位，1 幣 = QUOTA_PER_COIN）——由定價決定，本檔不發明。 */
+  /** 本期额度（quota 单位，1 币 = QUOTA_PER_COIN）——由定价决定，本档不发明。 */
   quota: number;
 }
 
@@ -92,10 +92,10 @@ function exactRedemption(items: GatewayRedemption[] | undefined, name: string, q
 }
 
 /**
- * 產生（或找回）一張訂閱兌換碼。
+ * 产生（或找回）一张订阅兑换码。
  *
- * 幂等：先按 name 搜尋，已存在同名同額的碼 ⇒ 直接回既有碼（`created: false`）——
- * 重複履約不會產生第二張碼（多一張碼 = 多一次可兌換的錢）。
+ * 幂等：先按 name 搜寻，已存在同名同额的码 ⇒ 直接回既有码（`created: false`）——
+ * 重复履约不会产生第二张码（多一张码 = 多一次可兑换的钱）。
  */
 export async function fulfillSubscriptionRedemption(
   input: { plan: SubscriptionRedemptionPlan },

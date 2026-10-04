@@ -1,8 +1,8 @@
 "use client";
 
-// 歷史「存为角色卡」輕量命名對話框：kind 五選（角色/場景/風格/道具/音頻），名稱輸入，
-// POST /api/character-cards（復用 character-card-client，不重複造 API 層）。
-// 面板風格複用歷史頁既有語法：lg-sheet 玻璃面板 + iOS 字級/圓角。
+// 历史「存为角色卡」轻量命名对话框：kind 五选（角色/场景/风格/道具/音频），名称输入，
+// POST /api/character-cards（复用 character-card-client，不重复造 API 层）。
+// 面板风格复用历史页既有语法：lg-sheet 玻璃面板 + iOS 字级/圆角。
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IdCard, X } from "lucide-react";
@@ -16,7 +16,7 @@ import type { HistoryEntry } from "@/lib/history-types";
 export interface SaveCardDialogProps {
   entry: HistoryEntry;
   onClose: () => void;
-  /** 完成回調（成功或明確失敗都由這裡把結果帶回頁面通知條）。 */
+  /** 完成回调（成功或明确失败都由这里把结果带回页面通知条）。 */
   onDone: (message: string) => void;
 }
 
@@ -109,7 +109,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
           </button>
         </div>
 
-        {/* kind 五选：segmented（三列網格自動換行，選項由 CHARACTER_CARD_KIND_VALUES 驅動），选中态用站内蓝 */}
+        {/* kind 五选：segmented（三列网格自动换行，选项由 CHARACTER_CARD_KIND_VALUES 驱动），选中态用站内蓝 */}
         <div role="radiogroup" aria-label="卡片类型" className="mt-4 grid grid-cols-3 gap-1.5">
           {CHARACTER_CARD_KIND_VALUES.map((value) => {
             const active = value === kind;

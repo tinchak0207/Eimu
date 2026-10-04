@@ -1,8 +1,8 @@
 <!--
-來源（輪子）: https://github.com/jangtrinh/design-os-3d-blender
-License: MIT · 原作者: jangtrinh · 僅內部使用
-入庫批次: 2026-09-06 對稱差擴容 W5（agent 執行合同/bpy 知識庫 — docs/system-architecture.md）。
-正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
+来源（轮子）: https://github.com/jangtrinh/design-os-3d-blender
+License: MIT · 原作者: jangtrinh · 仅内部使用
+入库批次: 2026-09-06 对称差扩容 W5（agent 执行合同/bpy 知识库 — docs/system-architecture.md）。
+正文保留英文原文；MCP 调用表述执行时改走我方 bridge /v1/execute 同构协议。
 -->
 
 # Blender AI Orchestration Foundation

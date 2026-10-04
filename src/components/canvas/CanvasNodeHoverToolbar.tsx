@@ -1,10 +1,10 @@
 "use client";
 
-// CanvasNodeHoverToolbar —— 節點 hover 時右上角的快速工具條。
+// CanvasNodeHoverToolbar —— 节点 hover 时右上角的快速工具条。
 //
-// 只放高頻動作（編輯/重跑/連線/下載/編輯圖片/超分/主圖/刪除），低頻與批次
-// 動作進右鍵選單。回呼未提供 = 按鈕不渲染——工具條永遠只長出真的能用的按鈕
-// （誠實原則：不擺沒接線的裝飾按鈕）。
+// 只放高频动作（编辑/重跑/连线/下载/编辑图片/超分/主图/删除），低频与批次
+// 动作进右键选单。回呼未提供 = 按钮不渲染——工具条永远只长出真的能用的按钮
+// （诚实原则：不摆没接线的装饰按钮）。
 
 import { useCallback } from "react";
 import { Crop, Download, Edit2, Link2, RefreshCw, Sparkles, Star, Trash2 } from "lucide-react";
@@ -18,15 +18,15 @@ export interface CanvasNodeHoverToolbarProps {
   onDelete?: (nodeId: string) => void;
   onAddToAssetLibrary?: (nodeId: string) => void;
   onConnect?: (nodeId: string) => void;
-  /** 圖片節點：下載原圖 */
+  /** 图片节点：下载原图 */
   onDownload?: (nodeId: string) => void;
-  /** 圖片節點：打開編輯器（裁剪/切图/抠除/旋转） */
+  /** 图片节点：打开编辑器（裁剪/切图/抠除/旋转） */
   onEditImage?: (nodeId: string) => void;
-  /** 圖片節點：高清放大（僅 https URL 圖） */
+  /** 图片节点：高清放大（仅 https URL 图） */
   onUpscale?: (nodeId: string) => void;
-  /** 超分處理中：按鈕轉圈防重複觸發 */
+  /** 超分处理中：按钮转圈防重复触发 */
   upscaling?: boolean;
-  /** 批次子節點：設為主圖 */
+  /** 批次子节点：设为主图 */
   onSetPrimary?: (nodeId: string) => void;
 }
 
@@ -47,7 +47,7 @@ export function CanvasNodeHoverToolbar({
   upscaling = false,
   onSetPrimary,
 }: CanvasNodeHoverToolbarProps) {
-  // 阻止事件冒泡到畫布（避免觸發平移/選擇）
+  // 阻止事件冒泡到画布（避免触发平移/选择）
   const stopPropagation = useCallback((e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.stopPropagation();
   }, []);

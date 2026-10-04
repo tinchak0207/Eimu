@@ -49,9 +49,9 @@ export interface GenerationWorkflow {
   references?: GenerationReference[];
   metadata?: Record<string, unknown>;
   /**
-   * 生成式後期（P1-3／對稱差 D22）：續片 `extend_video`／局部改片 `edit_video`。
-   * 建單前由 `parseVideoPostProduction()` 正規化（來源影片已解析成可讀 URL）；
-   * 缺省＝普通生成，零行為變化。kind 仍是 `video_generate`（不新增 DB kind）。
+   * 生成式后期（P1-3／对称差 D22）：续片 `extend_video`／局部改片 `edit_video`。
+   * 建单前由 `parseVideoPostProduction()` 正规化（来源影片已解析成可读 URL）；
+   * 缺省＝普通生成，零行为变化。kind 仍是 `video_generate`（不新增 DB kind）。
    */
   videoPostProduction?: NormalizedVideoPostProduction;
   [key: string]: unknown;
@@ -78,9 +78,9 @@ export interface GenerationJob {
   callbackUrl: string | null;
   retryOfTaskId: string | null;
   primaryResultId: string | null;
-  /** 批量生成編排層（/v1/batches）回填的歸屬；非批量任務為 null。 */
+  /** 批量生成编排层（/v1/batches）回填的归属；非批量任务为 null。 */
   batchId?: string | null;
-  /** 批內序號（0 起，對應 POST /v1/batches 的 requests 索引）；非批量任務為 null。 */
+  /** 批内序号（0 起，对应 POST /v1/batches 的 requests 索引）；非批量任务为 null。 */
   batchIndex?: number | null;
   status: GenerationJobStatus;
   requestedCount: number;
@@ -94,8 +94,8 @@ export interface GenerationJob {
   failureClass: FailureClass | null;
   failureDetail: string | null;
   /**
-   * FG-01：版本化失敗記錄（原生欄位逐字保留、cause 遞迴）。null = 無失敗或記錄缺失。
-   * 產品解釋只住在 record.explanation，永不回寫 failureClass/failureDetail 的來源事實。
+   * FG-01：版本化失败记录（原生栏位逐字保留、cause 递回）。null = 无失败或记录缺失。
+   * 产品解释只住在 record.explanation，永不回写 failureClass/failureDetail 的来源事实。
    */
   failureRecord: FailureRecord | null;
   result: GenerationJobResult | null;
@@ -112,7 +112,7 @@ export interface GenerationArtifactResult {
   b64Json?: string;
   mimeType: string;
   sha256: string;
-  /** 實測尺寸；成片（G4）probe 缺失時為 null——禁止 0 冒充。 */
+  /** 实测尺寸；成片（G4）probe 缺失时为 null——禁止 0 冒充。 */
   width: number | null;
   height: number | null;
   endpointLabel: string;
@@ -144,7 +144,7 @@ export interface CreateGenerationJobInput {
   responseFormat?: "b64_json" | "url";
   callbackUrl?: string | null;
   retryOfTaskId?: string | null;
-  /** 批量生成編排層（/v1/batches）回填的歸屬；單任務提交不帶。 */
+  /** 批量生成编排层（/v1/batches）回填的归属；单任务提交不带。 */
   batchId?: string | null;
   batchIndex?: number | null;
   referenceArtifacts?: CreateGenerationReferenceArtifactInput[];
@@ -160,7 +160,7 @@ export interface CreateGenerationReferenceArtifactInput {
   mimeType: string;
   sha256: string;
   byteSize: number;
-  /** 實測尺寸；圖片上傳驗證路徑恆有值，放寬是配合 ValidatedImage（G4 成片 probe 可缺）。 */
+  /** 实测尺寸；图片上传验证路径恒有值，放宽是配合 ValidatedImage（G4 成片 probe 可缺）。 */
   width: number | null;
   height: number | null;
   sourceResultId?: string | null;
@@ -173,8 +173,8 @@ export interface SupplierRecord {
   id: string;
   label: string;
   /**
-   * 供給協議（DB supplier.adapter_type）。V-06 起放寬為 string：合法值由
-   * supply-registry 在執行期判定（未註冊＝明確失敗），不再隨供給增長改聯集。
+   * 供给协议（DB supplier.adapter_type）。V-06 起放宽为 string：合法值由
+   * supply-registry 在执行期判定（未注册＝明确失败），不再随供给增长改联集。
    */
   adapterType: string;
   supplyTier: "first_party" | "managed_pool" | "relay" | "fallback";
@@ -220,9 +220,9 @@ export interface SupplierLease {
 }
 
 /**
- * 異步任務適配器的對帳協議標記（INC-0831）：provider task id 落庫後，由
- * provider-reconciliation 按協議向上游查詢真相。V-06 起＝supply-registry 的
- * `SupplyAdapter.protocol`（string），執行期由 registry 校驗；新增異步適配器不再改此型別。
+ * 异步任务适配器的对帐协议标记（INC-0831）：provider task id 落库后，由
+ * provider-reconciliation 按协议向上游查询真相。V-06 起＝supply-registry 的
+ * `SupplyAdapter.protocol`（string），执行期由 registry 校验；新增异步适配器不再改此型别。
  */
 export type ProviderProtocol = string;
 
@@ -239,10 +239,10 @@ export interface SupplierGenerationInput {
   quality: string | null;
   workflow: GenerationWorkflow;
   /**
-   * 異步任務適配器（openai-video/newapi-video/metaso/filmera 等）在上游提交完成、
-   * 取得 provider task id 的瞬間回調（INC-0830-VIDEO）。worker 用它把 task id +
-   * 對帳排程 durably 落進 attempt 行（只發事件不落行 = 事故重演）。同步適配器
-   * 不需要實現。
+   * 异步任务适配器（openai-video/newapi-video/metaso/filmera 等）在上游提交完成、
+   * 取得 provider task id 的瞬间回调（INC-0830-VIDEO）。worker 用它把 task id +
+   * 对帐排程 durably 落进 attempt 行（只发事件不落行 = 事故重演）。同步适配器
+   * 不需要实现。
    */
   onProviderTaskSubmitted?: (providerTaskId: string, protocol: ProviderProtocol) => void;
 }
@@ -259,10 +259,10 @@ export interface SupplierGenerationOutput {
 }
 
 /**
- * INC-0831 對帳輪詢結果：按 provider task id 問上游拿真相。
- * - running：仍在排隊/處理中（或上游暫時查不到，保守視為仍在跑，等下輪）。
- * - succeeded：上游確認成功（url 直用；base64 供需要鑑欄下載的渠道）。
- * - failed：上游確認失敗/取消（reason = 上游原文，退款只認這裡）。
+ * INC-0831 对帐轮询结果：按 provider task id 问上游拿真相。
+ * - running：仍在排队/处理中（或上游暂时查不到，保守视为仍在跑，等下轮）。
+ * - succeeded：上游确认成功（url 直用；base64 供需要鉴栏下载的渠道）。
+ * - failed：上游确认失败/取消（reason = 上游原文，退款只认这里）。
  */
 export type ProviderTaskPollResult =
   | { state: "running" }

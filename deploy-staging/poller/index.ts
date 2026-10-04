@@ -296,14 +296,14 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
         : undefined);
     const message =
       urlValue !== undefined
-        ? `任務完成：${urlValue}（task_id: ${task.task_id}）。請顯示圖片URL給用戶，詢問是否改圖/放大/重生成。`
-        : `任務完成（task_id: ${task.task_id}），但平台未返回 result_url。請顯示任務狀態給用戶，詢問是否改圖/放大/重生成。`;
+        ? `任务完成：${urlValue}（task_id: ${task.task_id}）。请显示图片URL给用户，询问是否改图/放大/重生成。`
+        : `任务完成（task_id: ${task.task_id}），但平台未返回 result_url。请显示任务状态给用户，询问是否改图/放大/重生成。`;
     return { done: true, outcome: "succeeded", message, url: urlValue, costCoins };
   }
 
   if (status === "failed") {
     const reason = errorText ? `原因：${errorText}` : "未知原因";
-    const message = `任務失敗（task_id: ${task.task_id}）。${reason}。請向用戶說明生成失敗，詢問是否重試。`;
+    const message = `任务失败（task_id: ${task.task_id}）。${reason}。请向用户说明生成失败，询问是否重试。`;
     return { done: true, outcome: "failed", message, reason: errorText ?? "未知原因" };
   }
 
@@ -313,8 +313,8 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
   if (status === "refunded") {
     const detail = errorText ? `（平台原因：${errorText}）` : "";
     const message =
-      `${task.kind === "video" ? "這部影片" : "這張圖"}沒排上隊，費用已全額退回${detail}（task_id: ${task.task_id}）。` +
-      `請用一句口語向用戶說明：這次生成沒成功、費用已退回，並主動問要不要換個時段或換個模型重試。不要輸出技術細節。`;
+      `${task.kind === "video" ? "这部影片" : "这张图"}没排上队，费用已全额退回${detail}（task_id: ${task.task_id}）。` +
+      `请用一句口语向用户说明：这次生成没成功、费用已退回，并主动问要不要换个时段或换个模型重试。不要输出技术细节。`;
     return {
       done: true,
       outcome: "failed",
@@ -437,11 +437,11 @@ async function tick(): Promise<void> {
       pendingTasks.delete(id);
       const lifetimeMin = task.kind === "video" ? 30 : 12;
       console.warn(`[poller] task ${id} exceeded ${lifetimeMin}min lifetime, timing out`);
-      emitTaskFailure(task.session_id, id, `任務逾時（超過 ${lifetimeMin} 分鐘未完成）`, false);
+      emitTaskFailure(task.session_id, id, `任务逾时（超过 ${lifetimeMin} 分钟未完成）`, false);
       await resumeSession(
         task.session_id,
-        `${task.kind === "video" ? "這部影片" : "這張圖"}等了 ${lifetimeMin} 分鐘還沒生成完，先不讓用戶乾等了（task_id: ${task.task_id}）。` +
-          `請向用戶口語說明這次生成超時，若平台後續退款會自動退回，並詢問要不要重試一次。`
+        `${task.kind === "video" ? "这部影片" : "这张图"}等了 ${lifetimeMin} 分钟还没生成完，先不让用户干等了（task_id: ${task.task_id}）。` +
+          `请向用户口语说明这次生成超时，若平台后续退款会自动退回，并询问要不要重试一次。`
       );
       continue;
     }
@@ -542,8 +542,8 @@ const server = serve({
               task_id: cached.task_id,
             });
             const msg =
-              `偵測到完全相同的請求，已直接從快取回傳先前結果，0 幣耗費。\n` +
-              `結果：${cached.url}（task_id: ${cached.task_id}）。\n請顯示圖片URL給用戶，詢問是否改圖/放大/重生成。`;
+              `侦测到完全相同的请求，已直接从快取回传先前结果，0 币耗费。\n` +
+              `结果：${cached.url}（task_id: ${cached.task_id}）。\n请显示图片URL给用户，询问是否改图/放大/重生成。`;
             await resumeSession(body.session_id, msg);
             return Response.json({ ok: true, deduped: true, url: cached.url });
           }

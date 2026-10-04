@@ -1,12 +1,12 @@
-// POST /api/agent/memory/ingest —— 記憶庫唯一寫入入口（契約 §3.1）。
+// POST /api/agent/memory/ingest —— 记忆库唯一写入入口（契约 §3.1）。
 //
-// 本 route 只做三件事：HMAC 驗簽（raw body bytes）→ snake_case 欄位映射 → 調 store。
-// 業務閘門全在 store（G5 去重／G7 配額）與 gateway（G1-G4/G6/G8），此處不重複攔
-// （契約 §5 閘門分工）。結構不合的 doc 由 store 的 structure 防線拒絕並逐條回報。
+// 本 route 只做三件事：HMAC 验签（raw body bytes）→ snake_case 栏位映射 → 调 store。
+// 业务闸门全在 store（G5 去重／G7 配额）与 gateway（G1-G4/G6/G8），此处不重复拦
+// （契约 §5 闸门分工）。结构不合的 doc 由 store 的 structure 防线拒绝并逐条回报。
 //
-// 驗簽鐵律：先 `req.arrayBuffer()` 拿原始位元組驗簽，再 `TextDecoder` 解析；
-// 若先 `req.json()` 再重新序列化，鍵序／空白差異會讓簽名永遠對不上
-// （理由見 memory-hmac.ts 檔頭）。無簽／錯簽／密鑰未配置 → 401（不靠網絡位置做安全）。
+// 验签铁律：先 `req.arrayBuffer()` 拿原始位元组验签，再 `TextDecoder` 解析；
+// 若先 `req.json()` 再重新序列化，键序／空白差异会让签名永远对不上
+// （理由见 memory-hmac.ts 档头）。无签／错签／密钥未配置 → 401（不靠网络位置做安全）。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -20,7 +20,7 @@ import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hma
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 interface IngestRequestBody {
   batch_id?: unknown;
@@ -29,8 +29,8 @@ interface IngestRequestBody {
 }
 
 /**
- * 請求 doc（契約 §1/§3.1 的 snake_case 欄位）→ store 輸入（camelCase）。
- * 原值直傳不做類型 coercion——壞類型交由 store 的 isStructurallyValid 拒（structure）。
+ * 请求 doc（契约 §1/§3.1 的 snake_case 栏位）→ store 输入（camelCase）。
+ * 原值直传不做类型 coercion——坏类型交由 store 的 isStructurallyValid 拒（structure）。
  */
 function mapDoc(raw: unknown): AgentMemoryDocInput {
   const doc = (raw ?? {}) as Record<string, unknown>;
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       promptVersion: body.prompt_version as string | undefined,
       docs: Array.isArray(body.docs) ? body.docs.map(mapDoc) : [],
     });
-    // 響應形狀 = MemoryIngestResult：{ accepted, rejected, stats{received,accepted,index_lines} }（契約 §3.1）。
+    // 响应形状 = MemoryIngestResult：{ accepted, rejected, stats{received,accepted,index_lines} }（契约 §3.1）。
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });

@@ -1,29 +1,29 @@
 /**
- * assetLoader — director-engine 的 glTF 資產載入入口（2026-09-06 片E）。
+ * assetLoader — director-engine 的 glTF 资产载入入口（2026-09-06 片E）。
  *
- * 職責：把 .glb/.gltf 載入指定 parent Object3D，並做包圍盒歸一化
- * （等比縮放至目標高度 + 落地對齊 min.y=0，複製 three 標準 Box3 做法）。
- * 失敗一律回傳結構化錯誤（GltfLoadOutcome ok:false），不 throw。
+ * 职责：把 .glb/.gltf 载入指定 parent Object3D，并做包围盒归一化
+ * （等比缩放至目标高度 + 落地对齐 min.y=0，复制 three 标准 Box3 做法）。
+ * 失败一律回传结构化错误（GltfLoadOutcome ok:false），不 throw。
  *
- * 邊界：本檔只提供載入入口；引擎掛點見 DirectorEngine.setGltfAsset。
- * 不解析 DRACO/KTX2 壓縮資產；動畫 clip 本片不播放（PRD 裁定只保留展示殼吃 glTF）。
+ * 边界：本档只提供载入入口；引擎挂点见 DirectorEngine.setGltfAsset。
+ * 不解析 DRACO/KTX2 压缩资产；动画 clip 本片不播放（PRD 裁定只保留展示壳吃 glTF）。
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Vec3 } from './types';
 
-/** 資產預設歸一化目標高度（公尺），對齊 mannequin 預設身高量級 */
+/** 资产预设归一化目标高度（公尺），对齐 mannequin 预设身高量级 */
 export const GLTF_DEFAULT_TARGET_HEIGHT_M = 1.75;
 
-/** 結構化 loader 介面：真身 GLTFLoader 滿足此形狀；測試可注入 mock */
+/** 结构化 loader 介面：真身 GLTFLoader 满足此形状；测试可注入 mock */
 export interface GltfLoaderLike {
   loadAsync(url: string): Promise<{ scene: THREE.Object3D }>;
 }
 
 export interface GltfAssetOptions {
-  /** 歸一化目標高度（公尺）；省略用 GLTF_DEFAULT_TARGET_HEIGHT_M */
+  /** 归一化目标高度（公尺）；省略用 GLTF_DEFAULT_TARGET_HEIGHT_M */
   targetHeightM?: number;
-  /** 注入自訂 loader（測試 mock 用）；省略用真 GLTFLoader */
+  /** 注入自订 loader（测试 mock 用）；省略用真 GLTFLoader */
   loader?: GltfLoaderLike;
 }
 
@@ -32,21 +32,21 @@ export type GltfLoadStage = 'invalid-url' | 'load' | 'empty';
 export type GltfLoadOutcome =
   | {
       ok: true;
-      /** 已歸一化並掛入 parent 的資產根物件 */
+      /** 已归一化并挂入 parent 的资产根物件 */
       object: THREE.Object3D;
-      /** 歸一化前包圍盒尺寸（世界單位） */
+      /** 归一化前包围盒尺寸（世界单位） */
       originalSize: Vec3;
-      /** 等比縮放係數（targetHeightM / originalSize.y） */
+      /** 等比缩放系数（targetHeightM / originalSize.y） */
       scaleFactor: number;
-      /** 落地對齊的 y 位移量（加到 position.y 使 min.y=0） */
+      /** 落地对齐的 y 位移量（加到 position.y 使 min.y=0） */
       groundOffsetY: number;
     }
   | { ok: false; stage: GltfLoadStage; message: string };
 
 /**
- * 歸一化（原地修改）：等比縮放至 targetHeightM，再落地對齊 min.y=0。
- * 複製 three 標準做法：Box3.setFromObject → getSize → scale → updateMatrixWorld → 位移。
- * 空包圍盒（無可渲染幾何）回 null；退化高度（size.y≈0）跳過縮放只落地。
+ * 归一化（原地修改）：等比缩放至 targetHeightM，再落地对齐 min.y=0。
+ * 复制 three 标准做法：Box3.setFromObject → getSize → scale → updateMatrixWorld → 位移。
+ * 空包围盒（无可渲染几何）回 null；退化高度（size.y≈0）跳过缩放只落地。
  */
 export function applyGltfNormalization(
   object: THREE.Object3D,
@@ -70,8 +70,8 @@ export function applyGltfNormalization(
 }
 
 /**
- * 載入 .glb/.gltf 到指定 parent 並歸一化。失敗回傳結構化錯誤，不 throw。
- * 成功時資產根物件已 add 進 parent；失敗時 parent 不變。
+ * 载入 .glb/.gltf 到指定 parent 并归一化。失败回传结构化错误，不 throw。
+ * 成功时资产根物件已 add 进 parent；失败时 parent 不变。
  */
 export async function loadGltfAsset(
   parent: THREE.Object3D,
@@ -79,18 +79,18 @@ export async function loadGltfAsset(
   opts: GltfAssetOptions = {},
 ): Promise<GltfLoadOutcome> {
   if (typeof url !== 'string' || url.trim() === '') {
-    return { ok: false, stage: 'invalid-url', message: 'glTF 資產 URL 為空' };
+    return { ok: false, stage: 'invalid-url', message: 'glTF 资产 URL 为空' };
   }
   const loader: GltfLoaderLike = opts.loader ?? new GLTFLoader();
   try {
     const gltf = await loader.loadAsync(url);
     const object = gltf?.scene;
     if (!object) {
-      return { ok: false, stage: 'load', message: 'glTF 解析結果缺少 scene' };
+      return { ok: false, stage: 'load', message: 'glTF 解析结果缺少 scene' };
     }
     const norm = applyGltfNormalization(object, opts.targetHeightM);
     if (!norm) {
-      return { ok: false, stage: 'empty', message: 'glTF 資產無可渲染幾何（空場景）' };
+      return { ok: false, stage: 'empty', message: 'glTF 资产无可渲染几何（空场景）' };
     }
     parent.add(object);
     return { ok: true, object, ...norm };
@@ -98,7 +98,7 @@ export async function loadGltfAsset(
     return {
       ok: false,
       stage: 'load',
-      message: `glTF 載入失敗：${err instanceof Error ? err.message : String(err)}`,
+      message: `glTF 载入失败：${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }
@@ -107,7 +107,7 @@ const GLTF_TEXTURE_SLOTS = [
   'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap',
 ] as const;
 
-/** 標準資源釋放：遍歷 dispose geometry / material / 常用紋理槽 */
+/** 标准资源释放：遍历 dispose geometry / material / 常用纹理槽 */
 export function disposeGltfObject(object: THREE.Object3D): void {
   object.traverse((child) => {
     const mesh = child as THREE.Mesh;

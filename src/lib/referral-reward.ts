@@ -1,13 +1,13 @@
-// 邀請獎勵（控制面執行）：綁定 → 被邀請人首圖成功 → 雙方各發一次額度。
+// 邀请奖励（控制面执行）：绑定 → 被邀请人首图成功 → 双方各发一次额度。
 //
-// 口徑（唯一真源，測試釘住）：
-//   ①綁定只在「被邀請人還沒成功出過圖」時成立——已經在用的老用戶點誰的連結都不算新邀請；
-//     首次綁定勝出（ON CONFLICT DO NOTHING），不能被後來的連結改綁。
-//   ②發獎時機＝被邀請人第一次成功出圖（激活），不是註冊：小號註冊不出圖拿不到任何東西。
-//   ③同一個邀請人最多領 MAX_REWARDED_INVITES 次；超過後被邀請人照發，邀請人不發（記 skipped）。
-//   ④上游調額不冪等 → 與新人禮同一套「先佔位、再動上游、再記帳本」狀態機：
-//     pending（已佔位，不自動重試）→ applied / failed（上游明確沒動，可重佔）/ unknown（不明，人工核對）。
-//   ⑤上游調額失敗＝整輪停（系統性故障不連打），下一輪 worker 再試。
+// 口径（唯一真源，测试钉住）：
+//   ①绑定只在「被邀请人还没成功出过图」时成立——已经在用的老用户点谁的连结都不算新邀请；
+//     首次绑定胜出（ON CONFLICT DO NOTHING），不能被后来的连结改绑。
+//   ②发奖时机＝被邀请人第一次成功出图（激活），不是注册：小号注册不出图拿不到任何东西。
+//   ③同一个邀请人最多领 MAX_REWARDED_INVITES 次；超过后被邀请人照发，邀请人不发（记 skipped）。
+//   ④上游调额不幂等 → 与新人礼同一套「先占位、再动上游、再记帐本」状态机：
+//     pending（已占位，不自动重试）→ applied / failed（上游明确没动，可重占）/ unknown（不明，人工核对）。
+//   ⑤上游调额失败＝整轮停（系统性故障不连打），下一轮 worker 再试。
 
 import { adjustGatewayUserQuotaExact, fetchGatewayUser } from "@/lib/gateway-admin";
 import { ensureAccountBaselinesWithStatus, recordAdjustment } from "@/lib/generation-core/account-ledger";
@@ -15,7 +15,7 @@ import type { GenerationSql } from "@/lib/generation-core/database";
 import { INVITEE_REWARD_IMAGES, INVITER_REWARD_IMAGES, MAX_REWARDED_INVITES, REFEREE_REWARD_COINS, REFERRAL_REWARD_COINS } from "@/lib/plans";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
-// ─────────────────────────────────────────── 常量（金額口徑在 plans.ts，定價頁與發放同源）
+// ─────────────────────────────────────────── 常量（金额口径在 plans.ts，定价页与发放同源）
 
 export { INVITEE_REWARD_IMAGES, INVITER_REWARD_IMAGES, MAX_REWARDED_INVITES };
 
@@ -35,27 +35,27 @@ export function referralRewardQuota(role: ReferralRole): number {
   return Math.round((role === "inviter" ? INVITER_REWARD_COINS : INVITEE_REWARD_COINS) * QUOTA_PER_COIN);
 }
 
-// ─────────────────────────────────────────── 儲存介面
+// ─────────────────────────────────────────── 储存介面
 
 export interface ReferralCandidate {
   inviteeId: number;
   inviterId: number;
-  /** 兩個角色各自的現狀（沒有行＝未處理）。 */
+  /** 两个角色各自的现状（没有行＝未处理）。 */
   inviterStatus: ReferralRewardStatus | null;
   inviteeStatus: ReferralRewardStatus | null;
 }
 
 export interface ReferralStore {
-  /** 綁定邀請關係；只在被邀請人未成功出圖且尚未綁定時寫入。寫入回 true。 */
+  /** 绑定邀请关系；只在被邀请人未成功出图且尚未绑定时写入。写入回 true。 */
   bind(inviteeId: number, inviterId: number): Promise<boolean>;
-  /** 已綁定、被邀請人已有成功出圖、且至少一個角色未結清（無行或 failed）。 */
+  /** 已绑定、被邀请人已有成功出图、且至少一个角色未结清（无行或 failed）。 */
   listCandidates(limit: number): Promise<ReferralCandidate[]>;
-  /** 邀請人已領（applied/pending/unknown）的次數。 */
+  /** 邀请人已领（applied/pending/unknown）的次数。 */
   countInviterRewards(inviterId: number): Promise<number>;
-  /** 佔位：新插 pending，或把 failed 重佔成 pending。拿到回 true。 */
+  /** 占位：新插 pending，或把 failed 重占成 pending。拿到回 true。 */
   claim(input: { inviteeId: number; role: ReferralRole; beneficiaryId: number; inviterId: number; amountQuota: number }): Promise<boolean>;
   mark(inviteeId: number, role: ReferralRole, status: Exclude<ReferralRewardStatus, "pending">, detail?: string): Promise<void>;
-  /** 直接記一筆 skipped（不動上游）。 */
+  /** 直接记一笔 skipped（不动上游）。 */
   skip(input: { inviteeId: number; role: ReferralRole; beneficiaryId: number; inviterId: number; detail: string }): Promise<void>;
 }
 
@@ -132,12 +132,12 @@ async function grantOnce(
   return "granted";
 }
 
-/** 跑一輪發獎。永不 throw（儲存層錯誤除外，由呼叫方 try/catch）。 */
+/** 跑一轮发奖。永不 throw（储存层错误除外，由呼叫方 try/catch）。 */
 export async function runReferralRewardsOnce(deps: ReferralDeps, limit = 50): Promise<ReferralRunReport> {
   const report: ReferralRunReport = { granted: 0, skipped: 0, failed: 0, aborted: false };
   const candidates = await deps.store.listCandidates(limit);
   for (const c of candidates) {
-    // 被邀請人先發（它不受上限約束）。
+    // 被邀请人先发（它不受上限约束）。
     if (!settled(c.inviteeStatus)) {
       const outcome = await grantOnce(deps, { inviteeId: c.inviteeId, role: "invitee", beneficiaryId: c.inviteeId, inviterId: c.inviterId });
       if (outcome === "granted") report.granted += 1;
@@ -174,7 +174,7 @@ let schemaReady: Promise<void> | null = null;
 
 async function ensureSchema(sql: GenerationSql): Promise<void> {
   if (!schemaReady) {
-    // 與 db/migrations/028_referral.sql 同一 DDL（幂等，首用即建）。
+    // 与 db/migrations/028_referral.sql 同一 DDL（幂等，首用即建）。
     schemaReady = (async () => {
       await sql`
         CREATE TABLE IF NOT EXISTS referral_binding (

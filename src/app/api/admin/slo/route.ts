@@ -1,6 +1,6 @@
-// SLO 唯讀面：GET 回報窗口內每個 (tenant, model) 分組的成功率/延遲/退款等指標，
-// 以及依門檻計算出的 breach 清單。這條路由讀的是租戶級成本/可靠性資料，
-// 跟 /api/admin/channels 一樣走 requireAdminSession，不對外公開。
+// SLO 唯读面：GET 回报窗口内每个 (tenant, model) 分组的成功率/延迟/退款等指标，
+// 以及依门槛计算出的 breach 清单。这条路由读的是租户级成本/可靠性资料，
+// 跟 /api/admin/channels 一样走 requireAdminSession，不对外公开。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -8,7 +8,7 @@ import { computeSloWindow, evaluateSloBreaches, type SloThresholds } from "@/lib
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const DEFAULT_WINDOW_MINUTES = 60;
 const DEFAULT_THRESHOLDS: SloThresholds = {

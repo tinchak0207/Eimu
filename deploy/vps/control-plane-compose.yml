@@ -1,6 +1,6 @@
-# 模板，不是現役檔。現役真源＝VPS /opt/image-control-plane/control-plane-compose.yml
+# 模板，不是现役档。现役真源＝VPS /opt/image-control-plane/control-plane-compose.yml
 # （api/worker 另有 PIXAI_BASE_URL/PIXAI_API_KEY 明文 env，secret 不入 git）。
-# deploy/vps/deploy-control-plane.sh 永不覆寫 VPS compose，只比對鍵名漂移。
+# deploy/vps/deploy-control-plane.sh 永不覆写 VPS compose，只比对键名漂移。
 services:
   generation-postgres:
     image: postgres:16-alpine

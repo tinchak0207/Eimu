@@ -84,18 +84,18 @@ test("buildWorkflowPrompt includes preset and hint guidance without leaking unsu
 
 // ─────────────────────── 工作流跑批推送投影（2026-09-20 Phase 2）───────────
 
-test("projectWorkflowRunToHistory 投影 gateway payload（{from,to} 形狀）", () => {
+test("projectWorkflowRunToHistory 投影 gateway payload（{from,to} 形状）", () => {
   const payload = {
     workflowId: "wf-abc123",
     templateId: "feature_film",
     sessionId: "ses_x",
     status: "success" as const,
     nodes: [
-      { id: "feature_film-script-0", role: "script", kind: "text", title: "故事腳本", status: "succeeded" },
-      { id: "feature_film-shot1_gen-10", role: "shot1_gen", kind: "config", title: "鏡頭 1 配置", status: "succeeded", costCoins: 5 },
-      { id: "feature_film-shot1_video-11", role: "shot1_video", kind: "video", title: "鏡頭 1 影片", status: "failed", error: "upstream 502" },
+      { id: "feature_film-script-0", role: "script", kind: "text", title: "故事脚本", status: "succeeded" },
+      { id: "feature_film-shot1_gen-10", role: "shot1_gen", kind: "config", title: "镜头 1 配置", status: "succeeded", costCoins: 5 },
+      { id: "feature_film-shot1_video-11", role: "shot1_video", kind: "video", title: "镜头 1 影片", status: "failed", error: "upstream 502" },
     ],
-    // workflow-engine.expandTemplate 展開後的真形狀：端點已經是 nodeId。
+    // workflow-engine.expandTemplate 展开后的真形状：端点已经是 nodeId。
     connections: [
       { from: "feature_film-script-0", to: "feature_film-shot1_gen-10" },
       { from: "feature_film-shot1_gen-10", to: "feature_film-shot1_video-11" },
@@ -120,14 +120,14 @@ test("projectWorkflowRunToHistory 投影 gateway payload（{from,to} 形狀）",
   assert.equal(projected.dagNodes[2].error, "upstream 502");
 });
 
-test("normalizeWorkflowConnections 把 fromRole/toRole 轉成 nodeId（role→id 映射）", () => {
+test("normalizeWorkflowConnections 把 fromRole/toRole 转成 nodeId（role→id 映射）", () => {
   const nodes = [
-    { id: "single_image-prompt-0", role: "prompt", kind: "text", title: "提示詞" },
+    { id: "single_image-prompt-0", role: "prompt", kind: "text", title: "提示词" },
     { id: "single_image-generation-1", role: "generation", kind: "config", title: "生成配置" },
-    { id: "single_image-result-2", role: "result", kind: "image", title: "圖片" },
+    { id: "single_image-result-2", role: "result", kind: "image", title: "图片" },
   ];
-  // workflow-templates.ts 的模板原始形狀（role 而非 id）——gateway 若改推模板層
-  // 資料或 agent 手動加連線時會出現。
+  // workflow-templates.ts 的模板原始形状（role 而非 id）——gateway 若改推模板层
+  // 资料或 agent 手动加连线时会出现。
   const connections = [
     { fromRole: "prompt", toRole: "generation" },
     { fromRole: "generation", toRole: "result" },
@@ -139,35 +139,35 @@ test("normalizeWorkflowConnections 把 fromRole/toRole 轉成 nodeId（role→id
   ]);
 });
 
-test("normalizeWorkflowConnections 缺欄位/孤兒邊/自環/重複一律容錯", () => {
+test("normalizeWorkflowConnections 缺栏位/孤儿边/自环/重复一律容错", () => {
   const nodes = [
     { id: "n1", role: "a", kind: "text", title: "A" },
     { id: "n2", role: "b", kind: "image", title: "B" },
   ];
   const connections = [
     { fromRole: "a", toRole: "b" },
-    { from: "n1", to: "n2" },       // 與上一條同邊（不同形狀）→ 去重
-    { from: "n1", to: "n1" },       // 自環 → 丟
-    { from: "ghost", to: "n2" },    // 孤兒邊 → 丟
-    { fromRole: "ghost", toRole: "b" }, // role 不存在 → 丟
-    { to: "n2" },                   // 缺起點 → 丟
+    { from: "n1", to: "n2" },       // 与上一条同边（不同形状）→ 去重
+    { from: "n1", to: "n1" },       // 自环 → 丢
+    { from: "ghost", to: "n2" },    // 孤儿边 → 丢
+    { fromRole: "ghost", toRole: "b" }, // role 不存在 → 丢
+    { to: "n2" },                   // 缺起点 → 丢
     {} as { from?: string; to?: string },
   ];
 
   assert.deepEqual(normalizeWorkflowConnections(nodes, connections), [{ from: "n1", to: "n2" }]);
-  // connections 缺欄位（undefined / 非陣列）→ 空陣列，不拋。
+  // connections 缺栏位（undefined / 非阵列）→ 空阵列，不抛。
   assert.deepEqual(normalizeWorkflowConnections(nodes, undefined), []);
   assert.deepEqual(normalizeWorkflowConnections(nodes, null as never), []);
 });
 
-test("projectWorkflowRunToHistory 缺欄位容錯：無 connections / 節點缺 id / 無 totalCostCoins", () => {
+test("projectWorkflowRunToHistory 缺栏位容错：无 connections / 节点缺 id / 无 totalCostCoins", () => {
   const projected = projectWorkflowRunToHistory({
     workflowId: "wf-min",
     status: "partial",
     nodes: [
-      { id: "only", role: "prompt", kind: "text", title: "只有標題" },
-      { id: "   ", role: "ghost" },     // id 為空白 → 丟
-      { role: "no-id" },                // 缺 id → 丟
+      { id: "only", role: "prompt", kind: "text", title: "只有标题" },
+      { id: "   ", role: "ghost" },     // id 为空白 → 丢
+      { role: "no-id" },                // 缺 id → 丢
     ],
   });
 
@@ -176,11 +176,11 @@ test("projectWorkflowRunToHistory 缺欄位容錯：無 connections / 節點缺 
   assert.deepEqual(projected.dagConnections, []);
   assert.equal(projected.workflow.totalCostCoins, undefined);
   assert.ok(!("totalCostCoins" in projected.workflow));
-  // 沒有 nodes 也不拋（route 已在前置校驗擋掉，這裡防禦縱深）。
+  // 没有 nodes 也不抛（route 已在前置校验挡掉，这里防御纵深）。
   assert.deepEqual(projectWorkflowRunToHistory({ workflowId: "wf-x", status: "success" }).dagNodes, []);
 });
 
-test("workflowHistoryEntryId 由 workflowId 派生（等鍵）", () => {
+test("workflowHistoryEntryId 由 workflowId 派生（等键）", () => {
   assert.equal(workflowHistoryEntryId("wf-abc123"), "workflow-wf-abc123");
   assert.equal(workflowHistoryEntryId("  wf-abc123  "), "workflow-wf-abc123");
 });
@@ -231,7 +231,7 @@ test("extractWorkflowRunConfig 只收纯量与短数组，长字符串/嵌套对
   assert.deepEqual(config.shortList, ["a", "b"]);
 });
 
-test("extractWorkflowRunConfig 缺欄位容错：无 text/config 节点、无 content、空数组都不抛", () => {
+test("extractWorkflowRunConfig 缺栏位容错：无 text/config 节点、无 content、空数组都不抛", () => {
   assert.deepEqual(extractWorkflowRunConfig(undefined), {});
   assert.deepEqual(extractWorkflowRunConfig([]), {});
   // 只有 text 节点但没有 content → 不出 prompt 键
@@ -292,18 +292,18 @@ test("ownerKey 两端收敛：gateway 的 hash(state.apiKey) 必须等于站点�
   const { createHash } = await import("node:crypto");
   const { deriveMemoryOwnerKey, hashMemoryOwnerKey } = await import("./agent-memory-injection.ts");
 
-  // gateway 側算法（deploy-staging/gateway/workflow-gw.ts 的 memoryOwnerKeyHash）
+  // gateway 侧算法（deploy-staging/gateway/workflow-gw.ts 的 memoryOwnerKeyHash）
   const gatewayOwnerKey = (apiKey: string) =>
     createHash("sha256").update(apiKey, "utf8").digest().subarray(0, 12).toString("hex");
 
-  // state.apiKey 是站點 getOrCreateAgentKeyForUser 簽發的 sk-biz- 派生 key，
-  // 正典化對它是恆等（defaultCanonicalKeyResolver 認得它、還原回同一把），
-  // 因此 deriveMemoryOwnerKey 收斂到 hash(同一把 key)。
+  // state.apiKey 是站点 getOrCreateAgentKeyForUser 签发的 sk-biz- 派生 key，
+  // 正典化对它是恒等（defaultCanonicalKeyResolver 认得它、还原回同一把），
+  // 因此 deriveMemoryOwnerKey 收敛到 hash(同一把 key)。
   const derivedKey = "sk-biz-0123456789abcdef0123456789abcdef";
   const siteOwnerKey = await deriveMemoryOwnerKey(derivedKey, async (raw) => raw);
 
   assert.equal(siteOwnerKey, hashMemoryOwnerKey(derivedKey));
-  assert.equal(gatewayOwnerKey(derivedKey), siteOwnerKey, "gateway 與站點的 ownerKey 必須逐字相同，否則記憶寫了召不回");
-  // 形狀：24 字元小寫 hex（契約 §1）
+  assert.equal(gatewayOwnerKey(derivedKey), siteOwnerKey, "gateway 与站点的 ownerKey 必须逐字相同，否则记忆写了召不回");
+  // 形状：24 字元小写 hex（契约 §1）
   assert.match(siteOwnerKey!, /^[0-9a-f]{24}$/);
 });

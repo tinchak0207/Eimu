@@ -1,24 +1,24 @@
-// B 端診斷面的資料源（/v1/queue、/v1/history、/v1/system_stats）。
+// B 端诊断面的资料源（/v1/queue、/v1/history、/v1/system_stats）。
 //
-// 刻意把「純邏輯」與「查詢層」分成兩半：
-//  - 純函式（toJobStatusSnapshot / clampPagination / computePlatformStats / …）
-//    不吃資料庫，可以被單測鎖住 shape 與數學；
-//  - 查詢函式接收可注入的 `sql`，測試只驗證純函式，不留真 DB 依賴。
+// 刻意把「纯逻辑」与「查询层」分成两半：
+//  - 纯函式（toJobStatusSnapshot / clampPagination / computePlatformStats / …）
+//    不吃资料库，可以被单测锁住 shape 与数学；
+//  - 查询函式接收可注入的 `sql`，测试只验证纯函式，不留真 DB 依赖。
 //
-// 安全約定：
-//  - 每個 job 只回「診斷所需的投影」，永不回 prompt 密文 / workflow 內部結構；
-//  - 所有查詢都以 tenant_id 為必備過濾鍵，金鑰只能看自己 tenant 的 job；
-//  - system_stats 只在 SQL 層做聚合，回傳面永遠沒有 per-tenant 欄位。
+// 安全约定：
+//  - 每个 job 只回「诊断所需的投影」，永不回 prompt 密文 / workflow 内部结构；
+//  - 所有查询都以 tenant_id 为必备过滤键，金钥只能看自己 tenant 的 job；
+//  - system_stats 只在 SQL 层做聚合，回传面永远没有 per-tenant 栏位。
 
 import { getGenerationSql, type GenerationSql } from "./database";
 import { mapGenerationJob } from "./job-repository";
 import { taskResourcePath, taskStatus } from "./task-response";
 import type { FailureClass, GenerationJob, GenerationJobStatus } from "./types";
 
-/** 金鑰計費主體 → 控制面 tenant。與 images/generations 的提交路徑同源。 */
+/** 金钥计费主体 → 控制面 tenant。与 images/generations 的提交路径同源。 */
 export const BIZ_TENANT_PREFIX = "biz:";
 
-/** 佇列/進行中 = 尚未終結的狀態全集。終結狀態（succeeded/failed/cancelled/refunded）不在佇列。 */
+/** 伫列/进行中 = 尚未终结的状态全集。终结状态（succeeded/failed/cancelled/refunded）不在伫列。 */
 export const QUEUE_STATUSES: readonly GenerationJobStatus[] = [
   "pending_billing",
   "billing_unknown",
@@ -33,22 +33,22 @@ export const HISTORY_DEFAULT_LIMIT = 20;
 export const HISTORY_MAX_LIMIT = 100;
 export const HISTORY_MAX_OFFSET = 10_000;
 
-// ─────────────────────────────────────────── 純邏輯（可單測，不吃 DB）
+// ─────────────────────────────────────────── 纯逻辑（可单测，不吃 DB）
 
 export function bizTenantId(apiKeyId: string): string {
   return `${BIZ_TENANT_PREFIX}${apiKeyId}`;
 }
 
 /**
- * 診斷投影：把持久化 job 收斂成對外安全的狀態卡。
- * 原則是「保留診斷需要的、拔掉隱私相關的」——prompt 密文、workflow 內部、
- * 計費與租約內部字段一律不離開控制面。
+ * 诊断投影：把持久化 job 收敛成对外安全的状态卡。
+ * 原则是「保留诊断需要的、拔掉隐私相关的」——prompt 密文、workflow 内部、
+ * 计费与租约内部字段一律不离开控制面。
  */
 export interface JobStatusSnapshot {
   object: "image_generation.task";
   id: string;
   task_id: string;
-  /** 內部原始狀態（含 leased / submit_unknown 等）——診斷用，比投影後黑盒更說明問題。 */
+  /** 内部原始状态（含 leased / submit_unknown 等）——诊断用，比投影后黑盒更说明问题。 */
   status: GenerationJobStatus;
   /** OpenAI 相容投影：queued / running / succeeded / failed / cancelled / refunded / unknown。 */
   task_state: ReturnType<typeof taskStatus>;
@@ -132,7 +132,7 @@ export interface PlatformModelStats {
   total_jobs: number;
   succeeded_jobs: number;
   failed_jobs: number;
-  /** 正交語義：只算成功/失敗，不含排隊中的——不灌水。無終結樣本時為 null。 */
+  /** 正交语义：只算成功/失败，不含排队中的——不灌水。无终结样本时为 null。 */
   success_rate: number | null;
 }
 
@@ -140,7 +140,7 @@ export interface SystemStatsDigest {
   total_jobs: number;
   succeeded_jobs: number;
   failed_jobs: number;
-  /** 仍在佇列/進行中的數量 = total - 成功 - 失敗。 */
+  /** 仍在伫列/进行中的数量 = total - 成功 - 失败。 */
   active_jobs: number;
   success_rate: number | null;
   by_model: PlatformModelStats[];
@@ -181,11 +181,11 @@ export function computePlatformStats(rows: PlatformAggregateRow[], now = new Dat
   };
 }
 
-// ─────────────────────────────────────────── 查詢層（sql 可注入）
+// ─────────────────────────────────────────── 查询层（sql 可注入）
 
 type Row = Record<string, unknown>;
 
-/** 控制面 DB 未配置時 getGenerationSql 拋出的訊息（見 database.ts）。 */
+/** 控制面 DB 未配置时 getGenerationSql 抛出的讯息（见 database.ts）。 */
 const NOT_CONFIGURED_MARKER = /GENERATION_DATABASE_URL|DATABASE_URL is required/i;
 
 export function isControlPlaneUnavailableError(error: unknown): boolean {
@@ -193,9 +193,9 @@ export function isControlPlaneUnavailableError(error: unknown): boolean {
 }
 
 /**
- * 診斷端點共用的「DB 未配置＝誠實的空/零」閘道。
- * 未配置時回 null，路由回空清單而非 500——因為控制平面沒接 DB 時，
- * 「我的 queue 是空的」就是事實，不是故障假裝成功。
+ * 诊断端点共用的「DB 未配置＝诚实的空/零」闸道。
+ * 未配置时回 null，路由回空清单而非 500——因为控制平面没接 DB 时，
+ * 「我的 queue 是空的」就是事实，不是故障假装成功。
  */
 export async function queryWhenReady<T>(fn: (sql: GenerationSql) => Promise<T>): Promise<T | null> {
   try {
@@ -253,8 +253,8 @@ export async function listTenantHistory(
 }
 
 /**
- * 平台層聚合——只取 biz 軌道的任務，且只在 SQL 層 GROUP BY model。
- * 回傳面只有數字，任何一個 cell 都無法反推出單一 tenant 的行為。
+ * 平台层聚合——只取 biz 轨道的任务，且只在 SQL 层 GROUP BY model。
+ * 回传面只有数字，任何一个 cell 都无法反推出单一 tenant 的行为。
  */
 export async function queryPlatformDigest(sql: GenerationSql = getGenerationSql()): Promise<PlatformAggregateRow[]> {
   const rows = await sql<PlatformAggregateRow[]>`

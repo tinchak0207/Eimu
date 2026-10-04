@@ -1,11 +1,11 @@
-// 物件儲存後端門禁測試（全部為**行為斷言**：真呼叫真函式、比對真拋錯/真回傳，非源碼字串掃描）。
+// 物件储存后端门禁测试（全部为**行为断言**：真呼叫真函式、比对真抛错/真回传，非源码字串扫描）。
 //
-// 病灶（本檔守住的回歸）：7 個 store 各自只看 `BLOB_READ_WRITE_TOKEN`。生產切到 VPS
-// image-data-api 後端時該 token 為空 → 全部誤判「無後端」→ 靜默落進程內記憶體。
-// Vercel 每個 serverless 實例各有自己的記憶體，冷啟動即消失，而用戶看到的是「寫入成功」。
+// 病灶（本档守住的回归）：7 个 store 各自只看 `BLOB_READ_WRITE_TOKEN`。生产切到 VPS
+// image-data-api 后端时该 token 为空 → 全部误判「无后端」→ 静默落进程内记忆体。
+// Vercel 每个 serverless 实例各有自己的记忆体，冷启动即消失，而用户看到的是「写入成功」。
 //
-// 本檔必須在任何 blob-backend 匯入**之前**清掉後端 env：vps-blob-adapter 的
-// BASE_URL/API_KEY 是模組載入期快照，所以本檔一律用動態 import 載入被測模組。
+// 本档必须在任何 blob-backend 汇入**之前**清掉后端 env：vps-blob-adapter 的
+// BASE_URL/API_KEY 是模组载入期快照，所以本档一律用动态 import 载入被测模组。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -16,7 +16,7 @@ delete process.env.BLOB_ALLOW_MEMORY_FALLBACK;
 
 type EnvPatch = Record<string, string | undefined>;
 
-/** 臨時改 env（NODE_ENV / 後端變數都是呼叫期讀取，可動態切換），結束必定還原。 */
+/** 临时改 env（NODE_ENV / 后端变数都是呼叫期读取，可动态切换），结束必定还原。 */
 async function withEnv<T>(patch: EnvPatch, run: () => Promise<T>): Promise<T> {
   const saved: EnvPatch = {};
   for (const key of Object.keys(patch)) saved[key] = process.env[key];
@@ -34,7 +34,7 @@ async function withEnv<T>(patch: EnvPatch, run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** 被測模組一律動態載入（見檔頭說明：模組載入期 env 快照）。 */
+/** 被测模组一律动态载入（见档头说明：模组载入期 env 快照）。 */
 async function loadModules() {
   const [backend, cards, projects, assets, packs, scope, gates, history] = await Promise.all([
     import("./blob-backend"),
@@ -49,7 +49,7 @@ async function loadModules() {
   return { backend, cards, projects, assets, packs, scope, gates, history };
 }
 
-/** 7 個 store 的讀取入口（零輸入，故無「參數不合法而靜默早退」的假通過空間）。 */
+/** 7 个 store 的读取入口（零输入，故无「参数不合法而静默早退」的假通过空间）。 */
 function readEntryPoints(m: Awaited<ReturnType<typeof loadModules>>): Array<[string, () => Promise<unknown>]> {
   return [
     ["character-card-store.listCharacterCards", () => m.cards.listCharacterCards(1)],
@@ -68,16 +68,16 @@ function card(id: string) {
     id,
     name: `卡-${id}`,
     kind: "character" as const,
-    prompt: "紅髮少女",
-    references: [{ url: "https://img.example/a.png", role: "character" as const, name: "定妝照" }],
+    prompt: "红发少女",
+    references: [{ url: "https://img.example/a.png", role: "character" as const, name: "定妆照" }],
     createdAt: "2026-09-25T00:00:00.000Z",
     updatedAt: "2026-09-25T00:00:00.000Z",
   };
 }
 
 /**
- * 真 HTTP 替身（@vercel/blob 走 undici 的 fetch，攔 globalThis.fetch 無效；
- * 改以 VERCEL_BLOB_API_URL 把 Vercel API 指到本機伺服器＝真請求、真路由）。
+ * 真 HTTP 替身（@vercel/blob 走 undici 的 fetch，拦 globalThis.fetch 无效；
+ * 改以 VERCEL_BLOB_API_URL 把 Vercel API 指到本机伺服器＝真请求、真路由）。
  */
 async function startLocalBlobApi(): Promise<{
   baseUrl: string;
@@ -113,17 +113,17 @@ async function startLocalBlobApi(): Promise<{
   };
 }
 
-test("production + 無後端：7 個 store 的讀取路徑全部誠實失敗，不得回空陣列冒充「這用戶沒有資料」", async () => {
+test("production + 无后端：7 个 store 的读取路径全部诚实失败，不得回空阵列冒充「这用户没有资料」", async () => {
   const m = await loadModules();
   await withEnv(
     { NODE_ENV: "production", BLOB_READ_WRITE_TOKEN: undefined, BLOB_ALLOW_MEMORY_FALLBACK: undefined },
     async () => {
-      assert.equal(m.backend.blobBackendConfigured(), false, "無後端時 blobBackendConfigured() 必須為 false");
+      assert.equal(m.backend.blobBackendConfigured(), false, "无后端时 blobBackendConfigured() 必须为 false");
       for (const [label, run] of readEntryPoints(m)) {
         await assert.rejects(run, (error: unknown) => {
           assert.ok(
             error instanceof m.backend.BlobBackendUnconfiguredError,
-            `${label} 應拋 BlobBackendUnconfiguredError，實際：${String(error)}`,
+            `${label} 应抛 BlobBackendUnconfiguredError，实际：${String(error)}`,
           );
           return true;
         });
@@ -132,21 +132,21 @@ test("production + 無後端：7 個 store 的讀取路徑全部誠實失敗，�
   );
 });
 
-test("非 production + 無後端：允許記憶體降級（同一組讀取入口回空陣列＝控制組，證明呼叫可達）", async () => {
+test("非 production + 无后端：允许记忆体降级（同一组读取入口回空阵列＝控制组，证明呼叫可达）", async () => {
   const m = await loadModules();
   await withEnv(
     { NODE_ENV: "test", BLOB_READ_WRITE_TOKEN: undefined, BLOB_ALLOW_MEMORY_FALLBACK: undefined },
     async () => {
       assert.equal(m.backend.blobBackendConfigured(), false);
-      assert.equal(m.backend.ensureBlobBackendWritable("probe"), false, "非生產允許降級時回 false（呼叫端走記憶體）");
+      assert.equal(m.backend.ensureBlobBackendWritable("probe"), false, "非生产允许降级时回 false（呼叫端走记忆体）");
       for (const [label, run] of readEntryPoints(m)) {
-        assert.deepEqual(await run(), [], `${label} 非生產降級路徑應回空陣列`);
+        assert.deepEqual(await run(), [], `${label} 非生产降级路径应回空阵列`);
       }
     },
   );
 });
 
-test("production + 無後端：寫入路徑誠實失敗（帶非生產控制組，證明輸入合法且路徑可達）", async () => {
+test("production + 无后端：写入路径诚实失败（带非生产控制组，证明输入合法且路径可达）", async () => {
   const m = await loadModules();
   const writes: Array<[string, () => Promise<unknown>, () => void]> = [
     [
@@ -159,7 +159,7 @@ test("production + 無後端：寫入路徑誠實失敗（帶非生產控制組�
       () =>
         m.projects.saveCanvasProject(1, {
           id: "proj-a",
-          title: "專案",
+          title: "专案",
           createdAt: "2026-09-25T00:00:00.000Z",
           updatedAt: "2026-09-25T00:00:00.000Z",
           nodes: [],
@@ -200,7 +200,7 @@ test("production + 無後端：寫入路徑誠實失敗（帶非生產控制組�
   await withEnv({ NODE_ENV: "test", BLOB_ALLOW_MEMORY_FALLBACK: undefined }, async () => {
     for (const [_label, run, reset] of writes) {
       reset();
-      await run(); // 控制組：輸入合法且非生產路徑可寫 → 不 reject
+      await run(); // 控制组：输入合法且非生产路径可写 → 不 reject
       reset();
     }
   });
@@ -211,7 +211,7 @@ test("production + 無後端：寫入路徑誠實失敗（帶非生產控制組�
       await assert.rejects(run, (error: unknown) => {
         assert.ok(
           error instanceof m.backend.BlobBackendUnconfiguredError,
-          `${label} 應誠實失敗，實際：${String(error)}`,
+          `${label} 应诚实失败，实际：${String(error)}`,
         );
         return true;
       });
@@ -220,7 +220,7 @@ test("production + 無後端：寫入路徑誠實失敗（帶非生產控制組�
   });
 });
 
-test("production + 無後端：錯誤訊息含可操作指引（要設哪兩個 VPS env / 哪個 token / 哪個 opt-in）", async () => {
+test("production + 无后端：错误讯息含可操作指引（要设哪两个 VPS env / 哪个 token / 哪个 opt-in）", async () => {
   const m = await loadModules();
   await withEnv({ NODE_ENV: "production", BLOB_ALLOW_MEMORY_FALLBACK: undefined }, async () => {
     await assert.rejects(
@@ -241,7 +241,7 @@ test("production + 無後端：錯誤訊息含可操作指引（要設哪兩個 
   });
 });
 
-test("production + BLOB_ALLOW_MEMORY_FALLBACK=true：顯式 opt-in 才允許記憶體降級（真寫真讀）", async () => {
+test("production + BLOB_ALLOW_MEMORY_FALLBACK=true：显式 opt-in 才允许记忆体降级（真写真读）", async () => {
   const m = await loadModules();
   await withEnv({ NODE_ENV: "production", BLOB_ALLOW_MEMORY_FALLBACK: "true" }, async () => {
     assert.equal(m.backend.blobMemoryFallbackAllowed(), true);
@@ -255,7 +255,7 @@ test("production + BLOB_ALLOW_MEMORY_FALLBACK=true：顯式 opt-in 才允許記�
   });
 });
 
-test("有 BLOB_READ_WRITE_TOKEN：視為已設定，寫入走 Vercel Blob 分支（真 HTTP 請求斷言）", async () => {
+test("有 BLOB_READ_WRITE_TOKEN：视为已设定，写入走 Vercel Blob 分支（真 HTTP 请求断言）", async () => {
   const m = await loadModules();
   const localApi = await startLocalBlobApi();
   try {
@@ -266,16 +266,16 @@ test("有 BLOB_READ_WRITE_TOKEN：視為已設定，寫入走 Vercel Blob 分支
         VERCEL_BLOB_API_URL: localApi.baseUrl,
       },
       async () => {
-        assert.equal(m.backend.useVpsBlobBackend(), false, "本檔無 VPS env，selector 應為 false");
+        assert.equal(m.backend.useVpsBlobBackend(), false, "本档无 VPS env，selector 应为 false");
         assert.equal(m.backend.blobBackendConfigured(), true);
-        assert.equal(m.backend.ensureBlobBackendWritable("probe"), true, "production 有 token 應允許寫入");
+        assert.equal(m.backend.ensureBlobBackendWritable("probe"), true, "production 有 token 应允许写入");
 
         m.cards.__resetCharacterCardStoreForTests();
         await m.cards.saveCharacterCard(1, card("card-blob"));
         m.cards.__resetCharacterCardStoreForTests();
 
         const puts = localApi.calls.filter((call) => call.method === "PUT");
-        assert.equal(puts.length, 1, "應恰有一次 PUT");
+        assert.equal(puts.length, 1, "应恰有一次 PUT");
         assert.match(decodeURIComponent(puts[0].path), /^\/api\/blob\/\?pathname=character-cards\/1\/index-/);
       },
     );

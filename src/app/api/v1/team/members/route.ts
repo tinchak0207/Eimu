@@ -1,11 +1,11 @@
-// /v1/team/members —— 團隊名冊與角色（面 1：角色）。
+// /v1/team/members —— 团队名册与角色（面 1：角色）。
 //
-//   GET  → 團隊名冊（含 role）＋ 席位/容量 ＋ 呼叫方的可指派角色
+//   GET  → 团队名册（含 role）＋ 席位/容量 ＋ 呼叫方的可指派角色
 //   POST → { action: "set_role", member_key_id, role } | { action: "remove", member_key_id }
 //
-// 鑑權與回執形狀逐行沿用 /v1/team/quota：身份只來自 Authorization 的 B 端密鑰，
-// 團隊主帳 = 呼叫方密鑰的 user_id（不從 body 取，否則任何人可代別人管事）。
-// 只有「意圖」寫本地（role），點數一律不碰（禁影子帳本，分配走 /v1/team/quota）。
+// 鉴权与回执形状逐行沿用 /v1/team/quota：身份只来自 Authorization 的 B 端密钥，
+// 团队主帐 = 呼叫方密钥的 user_id（不从 body 取，否则任何人可代别人管事）。
+// 只有「意图」写本地（role），点数一律不碰（禁影子帐本，分配走 /v1/team/quota）。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const settings = await readTeamSettings(actorTeam.teamUserId);
   const capacity = teamCapacity();
   const actor = resolveTeamActor({ userId: auth.key.userId, teamUserId: actorTeam.teamUserId, roster });
-  // 配額意圖面（速率／上界，非餘額）：讀不到（映射層不在）就不冒充，省略該欄。
+  // 配额意图面（速率／上界，非余额）：读不到（映射层不在）就不冒充，省略该栏。
   const quotaLimits = await readQuotaLimits({
     teamUserId: actorTeam.teamUserId,
     roster: roster.map((member) => ({
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail(400, "missing_member_key_id", "缺少 member_key_id（要操作的成员密钥 id）。");
   }
 
-  // 呼叫方所屬團隊：名冊成員 → 其團隊；團隊主帳 → 自己。
+  // 呼叫方所属团队：名册成员 → 其团队；团队主帐 → 自己。
   const actorTeam = await resolveActorTeam(auth.key.userId);
   const teamUserId = actorTeam.teamUserId;
 

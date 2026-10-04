@@ -1,13 +1,13 @@
-// 控制面側的用戶側車事實端點（已驗證真實 email ＋ 首次觸達歸因）。
+// 控制面侧的用户侧车事实端点（已验证真实 email ＋ 首次触达归因）。
 //
 // 呼叫方：Vercel 上
-//   - /api/auth/github/callback、/api/auth/google/callback（email + 歸因，每次登入冪等 upsert）
-//   - /api/auth/me（歸因補記，涵蓋微信等沒有 OAuth callback 的登入路徑）
+//   - /api/auth/github/callback、/api/auth/google/callback（email + 归因，每次登入幂等 upsert）
+//   - /api/auth/me（归因补记，涵盖微信等没有 OAuth callback 的登入路径）
 //
-// 鑑權復用 biz-key-sync 的 HMAC 通道（signatureDomain "user-attribution"），
-// 與 welcome-gift / newapi-session-token 同一骨架；不回顯任何內部錯誤細節。
+// 鉴权复用 biz-key-sync 的 HMAC 通道（signatureDomain "user-attribution"），
+// 与 welcome-gift / newapi-session-token 同一骨架；不回显任何内部错误细节。
 //
-// 隱私：本路由**永不把 email 寫進回應或日誌**——成功只回 ok + written 布林。
+// 隐私：本路由**永不把 email 写进回应或日志**——成功只回 ok + written 布林。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -26,7 +26,7 @@ import { createPostgresReferralStore } from "@/lib/referral-reward";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function POST(req: NextRequest) {
   const secret = process.env.GENERATION_BILLING_RELAY_SECRET?.trim();
@@ -54,8 +54,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, message: "请求体不是合法 JSON。" }, { status: 400 });
   }
 
-  // 邀請綁定：驗簽還原邀請人 → 只在被邀請人未出過圖時綁定（首個邀請勝出）。
-  // 碼不合法／自己邀自己／已出過圖＝判定完成（ok），不讓 Vercel 側每次登入重送。
+  // 邀请绑定：验签还原邀请人 → 只在被邀请人未出过图时绑定（首个邀请胜出）。
+  // 码不合法／自己邀自己／已出过图＝判定完成（ok），不让 Vercel 侧每次登入重送。
   const invite = parsed as { op?: unknown; userId?: unknown; inviteCode?: unknown } | null;
   if (invite?.op === "invite") {
     const inviteeId = Number(invite.userId);
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     const written = await createPostgresUserAttributionStore().upsert(record);
     return NextResponse.json({ ok: true, written });
   } catch (error) {
-    // 只印 user_id 與錯誤訊息，絕不印請求體（含 email）。
+    // 只印 user_id 与错误讯息，绝不印请求体（含 email）。
     console.error(
       `[internal/user-attribution] upsert failed user=${record.userId}：${error instanceof Error ? error.message : String(error)}`,
     );

@@ -1,22 +1,22 @@
 // desktop/scripts/e2e/verify-e2e-gate.mjs
 //
-// 一次性驗證腳本（本輪安全收尾用）：證明 E2E 閘門在「打包產物」的行為兩態。
+// 一次性验证脚本（本轮安全收尾用）：证明 E2E 闸门在「打包产物」的行为两态。
 //
-//   狀態 A（預設，不帶 EIMU_E2E=1）：即使設了 EIMU_APP_ORIGIN 與
-//     EIMU_E2E_PICK_FILES，兩者都必須被忽略 ——
-//       - 殼仍載入生產站（不載入我們指定的 localhost origin）；
-//       - shell log 不得出現兩條 audit warn（E2E origin 覆寫生效／E2E 授權閘生效）；
-//       - probe(pick 目標) 不得成功（授權閘沒被旁路）。
-//   狀態 B（帶 EIMU_E2E=1）：兩閘生效 ——
-//       - 殼載入指定 origin；
-//       - pickFiles() 直接回傳 override 路徑（未開對話框）；
-//       - probe(該路徑) 成功（授權成立）；
-//       - shell log 出現兩條 audit warn。
+//   状态 A（预设，不带 EIMU_E2E=1）：即使设了 EIMU_APP_ORIGIN 与
+//     EIMU_E2E_PICK_FILES，两者都必须被忽略 ——
+//       - 壳仍载入生产站（不载入我们指定的 localhost origin）；
+//       - shell log 不得出现两条 audit warn（E2E origin 覆写生效／E2E 授权闸生效）；
+//       - probe(pick 目标) 不得成功（授权闸没被旁路）。
+//   状态 B（带 EIMU_E2E=1）：两闸生效 ——
+//       - 壳载入指定 origin；
+//       - pickFiles() 直接回传 override 路径（未开对话框）；
+//       - probe(该路径) 成功（授权成立）；
+//       - shell log 出现两条 audit warn。
 //
-// 用真「打包」二進位（app.isPackaged === true）：由呼叫方先備好
-// /tmp/e2e-verify/unpacked/eimu-desktop（可用 VERIFY_BINARY 覆寫）。
+// 用真「打包」二进位（app.isPackaged === true）：由呼叫方先备好
+// /tmp/e2e-verify/unpacked/eimu-desktop（可用 VERIFY_BINARY 覆写）。
 //
-// 可執行：node desktop/scripts/e2e/verify-e2e-gate.mjs
+// 可执行：node desktop/scripts/e2e/verify-e2e-gate.mjs
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -26,7 +26,7 @@ const BINARY =
   process.env.VERIFY_BINARY || "/tmp/e2e-verify/unpacked/eimu-desktop";
 const WORK = "/tmp/e2e-verify";
 const PICK_TARGET = path.join(WORK, "pick-target.png");
-// 1x1 PNG（讓 probe 的 ffprobe 有真檔案可讀，避免用文字檔誤判）。
+// 1x1 PNG（让 probe 的 ffprobe 有真档案可读，避免用文字档误判）。
 const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
@@ -55,7 +55,7 @@ async function snapshot(shell) {
 
 const out = { binary: BINARY, pickTarget: PICK_TARGET };
 
-// ---------------- 狀態 A：預設（不帶 EIMU_E2E） ----------------
+// ---------------- 状态 A：预设（不带 EIMU_E2E） ----------------
 {
   const { srv, port } = await startServer();
   const origin = `http://127.0.0.1:${port}`;
@@ -63,8 +63,8 @@ const out = { binary: BINARY, pickTarget: PICK_TARGET };
   const shell = await launchShell({
     binary: BINARY,
     outDir: path.join(WORK, "out-a"),
-    // 兩個閘門的 env 都設，但**故意不設 EIMU_E2E=1**。
-    // 用 extraEnv（而非 opts.origin）以免 harness 依 origin 去做 host 比對。
+    // 两个闸门的 env 都设，但**故意不设 EIMU_E2E=1**。
+    // 用 extraEnv（而非 opts.origin）以免 harness 依 origin 去做 host 比对。
     extraEnv: { EIMU_APP_ORIGIN: origin, EIMU_E2E_PICK_FILES: PICK_TARGET },
   });
   try {
@@ -80,9 +80,9 @@ const out = { binary: BINARY, pickTarget: PICK_TARGET };
       envHadAppOrigin: true,
       envHadPickFiles: true,
       envHadE2E: false,
-      logHasOriginOverrideWarn: log.includes("E2E origin 覆寫生效"),
-      logHasPickGateWarn: log.includes("E2E 授權閘生效"),
-      // 期望：載入的不是我們指定的 localhost origin
+      logHasOriginOverrideWarn: log.includes("E2E origin 覆写生效"),
+      logHasPickGateWarn: log.includes("E2E 授权闸生效"),
+      // 期望：载入的不是我们指定的 localhost origin
       loadedRequestedLocalOrigin: info.url.includes(`127.0.0.1:${port}`),
       pageUrl: info.url,
       eimuLocalType: info.eimuLocal,
@@ -95,7 +95,7 @@ const out = { binary: BINARY, pickTarget: PICK_TARGET };
   }
 }
 
-// ---------------- 狀態 B：顯式 EIMU_E2E=1 ----------------
+// ---------------- 状态 B：显式 EIMU_E2E=1 ----------------
 {
   const { srv, port } = await startServer();
   const origin = `http://127.0.0.1:${port}`;
@@ -124,8 +124,8 @@ const out = { binary: BINARY, pickTarget: PICK_TARGET };
     const log = fs.readFileSync(shell.logPath, "utf8");
     out.stateB = {
       envHadE2E: true,
-      logHasOriginOverrideWarn: log.includes("E2E origin 覆寫生效"),
-      logHasPickGateWarn: log.includes("E2E 授權閘生效"),
+      logHasOriginOverrideWarn: log.includes("E2E origin 覆写生效"),
+      logHasPickGateWarn: log.includes("E2E 授权闸生效"),
       loadedRequestedLocalOrigin: info.url.includes(`127.0.0.1:${port}`),
       pageUrl: info.url,
       eimuLocalType: info.eimuLocal,

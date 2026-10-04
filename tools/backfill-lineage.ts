@@ -1,22 +1,22 @@
 /**
- * REQ-D1 存量回溯補丁（一次性交付件，非自造輔助腳本）。
+ * REQ-D1 存量回溯补丁（一次性交付件，非自造辅助脚本）。
  *
- * 從帳本/job 記錄的現成欄位撿血統線索回填 lineage：
- *   歷史條目：workflow.referenceImages[].sourceGenerationId/sourceResultId（生成時
- *   帶的參考圖來源把手）＋ entry.retryOfTaskId（「再來 N 組」父鏈）＋
- *   job 面 workflow.references（durable 任務投影帶回的同一批把手）。
- *   資產卡：卡參考圖 URL 對上歷史條目結果圖 URL → 該條歷史就是卡的來源
- *   （「存為卡片」動作的既有事實，用 URL 等值還原掛鉤 b 的登記）。
- * 補不回的資產不动欄位——溯源面板據「無 lineage 登記」老實顯示「來源不明」。
+ * 从帐本/job 记录的现成栏位捡血统线索回填 lineage：
+ *   历史条目：workflow.referenceImages[].sourceGenerationId/sourceResultId（生成时
+ *   带的参考图来源把手）＋ entry.retryOfTaskId（「再来 N 组」父链）＋
+ *   job 面 workflow.references（durable 任务投影带回的同一批把手）。
+ *   资产卡：卡参考图 URL 对上历史条目结果图 URL → 该条历史就是卡的来源
+ *   （「存为卡片」动作的既有事实，用 URL 等值还原挂钩 b 的登记）。
+ * 补不回的资产不动栏位——溯源面板据「无 lineage 登记」老实显示「来源不明」。
  *
- * 冪等（重跑雙登記必紅的防禦）：只補「沒有 lineage 欄位」的宿主；已有登記的
- * 一條不碰。save* 走各存儲的 upsert-by-id 語義，同一 userId 重跑結果恆等。
+ * 幂等（重跑双登记必红的防御）：只补「没有 lineage 栏位」的宿主；已有登记的
+ * 一条不碰。save* 走各存储的 upsert-by-id 语义，同一 userId 重跑结果恒等。
  *
- * 用法（repo 根目錄）：
+ * 用法（repo 根目录）：
  *   npx tsx tools/backfill-lineage.ts --user-ids=82[,4] [--dry-run]
- *   - 存儲後端與 seed 工具同款：BLOB_READ_WRITE_TOKEN（或 IMAGE_DATA_* 本地 api），
- *     缺憑證時落 memory store 僅供冒煙。
- *   - 結束打印覆蓋率實數：補回 N / 標記來源不明 M（掃描數、逐類分列）。
+ *   - 存储后端与 seed 工具同款：BLOB_READ_WRITE_TOKEN（或 IMAGE_DATA_* 本地 api），
+ *     缺凭证时落 memory store 仅供冒烟。
+ *   - 结束打印覆盖率实数：补回 N / 标记来源不明 M（扫描数、逐类分列）。
  */
 
 import { listGeneratedHistoryEntries, saveGeneratedHistoryEntry } from "../src/lib/server-history-store";
@@ -56,7 +56,7 @@ interface BackfillStats {
   cardsAlreadyRegistered: number;
 }
 
-/** 從歷史條目既有欄位撿血統（掛鉤 a/c 的回溯等價物；欄位一個不新增）。 */
+/** 从历史条目既有栏位捡血统（挂钩 a/c 的回溯等价物；栏位一个不新增）。 */
 export function lineageCandidatesFromEntry(entry: HistoryEntry): LineageLink[] {
   const at = new Date(entry.generatedAt).toISOString();
   const parents = parentsFromReferences(entry.workflow?.referenceImages, at);
@@ -65,7 +65,7 @@ export function lineageCandidatesFromEntry(entry: HistoryEntry): LineageLink[] {
   return parents;
 }
 
-/** 卡參考圖 URL → 來源歷史條目（「存為卡片」事實的 URL 等值還原）。 */
+/** 卡参考图 URL → 来源历史条目（「存为卡片」事实的 URL 等值还原）。 */
 function cardSourceLinks(card: CharacterCard, entries: HistoryEntry[]): LineageLink[] {
   const cardUrls = new Set(card.references.map((ref) => ref.url).filter(Boolean));
   if (!cardUrls.size) return [];

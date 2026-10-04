@@ -1,28 +1,28 @@
 "use client";
 
-// CanvasEmbed —— 畫布嵌合（v5）：agent 對話右側結果面板的畫布渲染模式。
+// CanvasEmbed —— 画布嵌合（v5）：agent 对话右侧结果面板的画布渲染模式。
 //
-// v5（2026-08-16，ABCD 全波）在 v4（多選/框選/快捷鍵/右鍵/批次/編輯器）之上：
-//   A1 port 拖線：節點左右圓點拖出虛線，鬆手在節點=成線（含環路阻止）、
-//      鬆手在空白=就地建節點選單並自動連線（工作流像藤蔓生長）
-//   A2 點選即面板：乾淨點擊節點直接吊出生成面板；生成中可「停止」
-//   A4 空節點=生成落地位：空圖片節點 count=1 結果原地回填，不另建節點
-//   A6 雙擊空白=建節點選單（桌面）；A8 拖圖入畫布/系統剪貼簿貼圖
-//   A7 鄰接高亮：hover/選中 → 上下游連線與節點同時點亮
-//   A5 連線可選可刪；A9 縮放控件+快捷鍵幫助；A12 失敗就地重試（參數不丟）
-//   B1 視口裁剪（±280px 才渲染）；B2 節點清單+450ms 飛行聚焦；B3 縮略圖降採樣
-//   C  agent 畫布操作自動化：canvas.ops 一到即自動落地（無人工確認閘；可 undo/redo 撤銷），
-//      執行後結果回流 gateway；run_generation 由本層代跑
-//   D  提示詞庫/雲端素材庫面板接線；編輯器角度重繪/AI 重繪回調接生成管線
+// v5（2026-08-16，ABCD 全波）在 v4（多选/框选/快捷键/右键/批次/编辑器）之上：
+//   A1 port 拖线：节点左右圆点拖出虚线，松手在节点=成线（含环路阻止）、
+//      松手在空白=就地建节点选单并自动连线（工作流像藤蔓生长）
+//   A2 点选即面板：干净点击节点直接吊出生成面板；生成中可「停止」
+//   A4 空节点=生成落地位：空图片节点 count=1 结果原地回填，不另建节点
+//   A6 双击空白=建节点选单（桌面）；A8 拖图入画布/系统剪贴簿贴图
+//   A7 邻接高亮：hover/选中 → 上下游连线与节点同时点亮
+//   A5 连线可选可删；A9 缩放控件+快捷键帮助；A12 失败就地重试（参数不丢）
+//   B1 视口裁剪（±280px 才渲染）；B2 节点清单+450ms 飞行聚焦；B3 缩略图降采样
+//   C  agent 画布操作自动化：canvas.ops 一到即自动落地（无人工确认闸；可 undo/redo 撤销），
+//      执行后结果回流 gateway；run_generation 由本层代跑
+//   D  提示词库/云端素材库面板接线；编辑器角度重绘/AI 重绘回调接生成管线
 //
 // 2026-08-22 域拆分（docs/plans/2026-08-22-large-file-refactor.md Task 7）：
-// 純函數/類型 → embed/embed-helpers.ts、交互域 → embed/use-canvas-interaction.ts、
-// 生成編排 → embed/use-canvas-generation.ts、鍵盤/剪貼簿 → embed/use-canvas-shortcuts.ts、
-// 右鍵選單 → embed/context-menu-items.ts、浮層+樣式 → embed/CanvasEmbedOverlays.tsx。
-// 本檔保留組件殼 + 節點掛載（visibleNodes.map 的 CanvasNodeView）+ 頂欄。
+// 纯函数/类型 → embed/embed-helpers.ts、交互域 → embed/use-canvas-interaction.ts、
+// 生成编排 → embed/use-canvas-generation.ts、键盘/剪贴簿 → embed/use-canvas-shortcuts.ts、
+// 右键选单 → embed/context-menu-items.ts、浮层+样式 → embed/CanvasEmbedOverlays.tsx。
+// 本档保留组件壳 + 节点挂载（visibleNodes.map 的 CanvasNodeView）+ 顶栏。
 //
-// 認證立場：生成/超分走 Bearer + x-user-id（與 playground 同款 getStoredToken），
-// 未登入誠實報錯，不假裝能生成。
+// 认证立场：生成/超分走 Bearer + x-user-id（与 playground 同款 getStoredToken），
+// 未登入诚实报错，不假装能生成。
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { X } from "lucide-react";
@@ -42,8 +42,8 @@ import { CanvasShortcutsHelp } from "./CanvasShortcutsHelp";
 import { CanvasNodeCreateMenu } from "./CanvasNodeCreateMenu";
 import { CanvasLibraryPanel } from "./CanvasLibraryPanel";
 import { ProjectAssetLibraryPanel } from "@/components/assets/ProjectAssetLibraryPanel";
-// WS-審查（2026-09-24 能力建設）：資產／分鏡審查面板 + 純轉換（批准狀態一律經面板導出的純函式組裝，
-// 不在宿主重寫第二份形狀）。外部開啟介面＝`openReviewPanel()` 派 CustomEvent，本檔掛監聽。
+// WS-审查（2026-09-24 能力建设）：资产／分镜审查面板 + 纯转换（批准状态一律经面板导出的纯函式组装，
+// 不在宿主重写第二份形状）。外部开启介面＝`openReviewPanel()` 派 CustomEvent，本档挂监听。
 import {
   AssetReviewPanel,
   REVIEW_PANEL_OPEN_EVENT,
@@ -54,7 +54,7 @@ import {
   type ReviewPanelOpenDetail,
 } from "@/components/assets/AssetReviewPanel";
 import { ShotReviewPanel, reviewShotsFromNodes, shotApprovalFor } from "@/components/assets/ShotReviewPanel";
-// 批准狀態（路 1 落地的真源）：寫入走 setApproval、分鏡側清洗走 shotApprovalFor（內部即 normalizeApprovalState）。
+// 批准状态（路 1 落地的真源）：写入走 setApproval、分镜侧清洗走 shotApprovalFor（内部即 normalizeApprovalState）。
 import { setApproval } from "@/lib/character-cards";
 import type { ApprovalState } from "@/lib/character-cards";
 import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent-chat-client";
@@ -96,15 +96,15 @@ import { CanvasStageOverview } from "./CanvasStageOverview";
 import { CanvasEngineeringPanel } from "./CanvasEngineeringPanel";
 
 export interface CanvasEmbedProps {
-  /** useCanvasChat 的完整 return（chat 部分由宿主另外用，這裡只用畫布部分）。 */
+  /** useCanvasChat 的完整 return（chat 部分由宿主另外用，这里只用画布部分）。 */
   canvas: UseCanvasChatReturn;
-  /** embed 高度；不傳則撐滿父容器。 */
+  /** embed 高度；不传则撑满父容器。 */
   height?: string;
-  /** 面板關閉（回到 ImageDisplay 模式）時觸發。 */
+  /** 面板关闭（回到 ImageDisplay 模式）时触发。 */
   onClose?: () => void;
-  /** 全屏展開態：頂部薄條改顯示「收合」。 */
+  /** 全屏展开态：顶部薄条改显示「收合」。 */
   expanded?: boolean;
-  /** 展開/收合切換：compact 時顯示「展开」、全屏時顯示「收合」。 */
+  /** 展开/收合切换：compact 时显示「展开」、全屏时显示「收合」。 */
   onToggleExpand?: () => void;
 }
 
@@ -125,7 +125,7 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-/** 語義縮放工程層只在 ≥768px 視窗開放（手機不出工程透析）。 */
+/** 语义缩放工程层只在 ≥768px 视窗开放（手机不出工程透析）。 */
 function useWideViewport(): boolean {
   const [wide, setWide] = useState(true);
   useEffect(() => {
@@ -144,8 +144,8 @@ function useWideViewport(): boolean {
 }
 
 export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expanded = false, onToggleExpand }: CanvasEmbedProps) {
-  // 效能 P0-1（2026-10-01）：每幀視口只活在本地，停手才回寫宿主——宿主在 ImagePlayground 根，
-  // 每幀 setState 等於整站重渲染。下游一律讀這個 canvas（viewport/setViewport 是 live 版）。
+  // 效能 P0-1（2026-10-01）：每帧视口只活在本地，停手才回写宿主——宿主在 ImagePlayground 根，
+  // 每帧 setState 等于整站重渲染。下游一律读这个 canvas（viewport/setViewport 是 live 版）。
   const live = useLiveViewport(hostCanvas.viewport, hostCanvas.setViewport);
   const { flush: flushViewport } = live;
   const hostFitView = hostCanvas.fitView;
@@ -168,7 +168,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     () => ({ ...hostCanvas, viewport: live.viewport, setViewport: live.setViewport, fitView: liveFitView, centerOn: liveCenterOn }),
     [hostCanvas, live.viewport, live.setViewport, liveFitView, liveCenterOn],
   );
-  // 移動中給節點量化倍率（6% 一格）：memo 過的節點卡不必每幀重渲染；停手回到精確值（拖拽換算用）。
+  // 移动中给节点量化倍率（6% 一格）：memo 过的节点卡不必每帧重渲染；停手回到精确值（拖拽换算用）。
   const nodeScale = live.moving ? quantizeScale(canvas.viewport.k) : canvas.viewport.k;
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
@@ -180,28 +180,28 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   const reduceMotion = usePrefersReducedMotion();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptPanelNodeId, setPromptPanelNodeId] = useState<string | null>(null);
-  // 面板行內 @ 引用的素材卡 id（與 panelRefIds 同級同生命週期；生成時收窄參考集）。
+  // 面板行内 @ 引用的素材卡 id（与 panelRefIds 同级同生命周期；生成时收窄参考集）。
   const [panelEntityIds, setPanelEntityIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  // LoRA 庫（2026-08-27 自專業工作站遷入）：同款滑入面板，選中結果注入生成鏈路。
+  // LoRA 库（2026-08-27 自专业工作站迁入）：同款滑入面板，选中结果注入生成链路。
   const [loraPanelOpen, setLoraPanelOpen] = useState(false);
   const [selectedLora, setSelectedLora] = useState<SelectedLora | null>(null);
   const [elementListOpen, setElementListOpen] = useState(false);
-  // P2：角色/場景卡面板（左側彈出，與歷史畫布/節點清單同模式）。
+  // P2：角色/场景卡面板（左侧弹出，与历史画布/节点清单同模式）。
   const [cardsOpen, setCardsOpen] = useState(false);
-  // G2（2026-09-16）：作品/劇集面板（同款左側彈層；資料取自 hook 三欄出口 + nodes）。
+  // G2（2026-09-16）：作品/剧集面板（同款左侧弹层；资料取自 hook 三栏出口 + nodes）。
   const [creationFlowOpen, setCreationFlowOpen] = useState(false);
-  // REQ-B2 團隊資產空間：項目資產庫面板（右側滑入，同資源庫/角色卡同款彈層語彙）。
+  // REQ-B2 团队资产空间：项目资产库面板（右侧滑入，同资源库/角色卡同款弹层语汇）。
   const [projectAssetsOpen, setProjectAssetsOpen] = useState(false);
-  // 登入態只在面板打開時讀一次（buildAuthHeaders 讀 cookie＋localStorage，放 render 裡＝每幀一次）。
+  // 登入态只在面板打开时读一次（buildAuthHeaders 读 cookie＋localStorage，放 render 里＝每帧一次）。
   const isLoggedIn = useMemo(() => projectAssetsOpen && Boolean(buildAuthHeaders()), [projectAssetsOpen]);
   const libraryLoggedIn = useMemo(() => libraryOpen && Boolean(buildAuthHeaders()), [libraryOpen]);
-  // WS-審查（2026-09-24）：資產／分鏡審查面板（null＝關）。兩個面共用一顆畫布工具列入口。
+  // WS-审查（2026-09-24）：资产／分镜审查面板（null＝关）。两个面共用一颗画布工具列入口。
   const [reviewPanel, setReviewPanel] = useState<ReviewPanelKind | null>(null);
-  // 縮略圖預設收合（2026-09-27）：常駐會壓住縮放條與右側節點，入口在縮放膠囊。
+  // 缩略图预设收合（2026-09-27）：常驻会压住缩放条与右侧节点，入口在缩放胶囊。
   const [minimapOpen, setMinimapOpen] = useState(false);
-  // 語義縮放（2026-09-30）：k → LOD（帶遲滯）；ref 存上一層，只在換層時 setState。
+  // 语义缩放（2026-09-30）：k → LOD（带迟滞）；ref 存上一层，只在换层时 setState。
   const allowEngineering = useWideViewport();
   const [lod, setLod] = useState<CanvasLod>(2);
   const lodRef = useRef<CanvasLod>(2);
@@ -211,18 +211,18 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     if (next === lodRef.current) return;
     lodRef.current = next;
     setLod(next);
-    // 鳥瞰層不掛載節點：內嵌 prompt 面板跟著收掉。
+    // 鸟瞰层不挂载节点：内嵌 prompt 面板跟著收掉。
     if (next === 1) setPromptPanelNodeId(null);
   }, [canvas.viewport.k, allowEngineering]);
   const stageSummaries = useMemo(() => summarizeStages(canvas.nodes), [canvas.nodes]);
   const gatherOffsetMap = useMemo(() => gatherOffsets(canvas.nodes, stageSummaries), [canvas.nodes, stageSummaries]);
-  // 連續轉場係數（k 是唯一真源）：每幀寫進內容層 CSS 變數，節點/連線靠 CSS 反應。
+  // 连续转场系数（k 是唯一真源）：每帧写进内容层 CSS 变数，节点/连线靠 CSS 反应。
   const blend = lodBlend(canvas.viewport.k);
   const gatherRaw = blend.gather;
   const gatherEased = easeOutCubic(gatherRaw);
   const xray = allowEngineering ? blend.xray : 0;
   const gatherLook = gatherVisuals(gatherRaw);
-  // 拆機內容「输入」段：每顆節點的入邊來源（連線/節點變了才重算；Map 值引用穩定）。
+  // 拆机内容「输入」段：每颗节点的入边来源（连线/节点变了才重算；Map 值引用稳定）。
   const boardInputMap = useMemo(() => {
     const byId = new Map(canvas.nodes.map((n) => [n.id, n]));
     const map = new Map<string, InspectInput[]>();
@@ -235,7 +235,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     }
     return map;
   }, [canvas.nodes, canvas.connections]);
-  // 只給「透析帶內＋在視野裡」的節點掛拆機內容：放大時視野裡本來就沒幾張卡，成本可控。
+  // 只给「透析带内＋在视野里」的节点挂拆机内容：放大时视野里本来就没几张卡，成本可控。
   const xrayOn = xray > 0;
   const boardNodeIds = useMemo(() => {
     const ids = new Set<string>();
@@ -252,14 +252,14 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     }
     return ids;
   }, [xrayOn, canvas.viewport, viewportSize, canvas.nodes]);
-  // 鳥瞰收束後節點會卸載；再散開時跳過首次進場的 stagger（不然節點會「排隊」出現）。
+  // 鸟瞰收束后节点会卸载；再散开时跳过首次进场的 stagger（不然节点会「排队」出现）。
   const nodesRemountedRef = useRef(false);
   const fullyGathered = gatherRaw >= 1;
   useEffect(() => {
     if (fullyGathered) nodesRemountedRef.current = true;
   }, [fullyGathered]);
 
-  // 相機飛行：三段按鈕／點階段卡／待審 CTA／透析全走這裡（飛行途中轉場自動發生）。
+  // 相机飞行：三段按钮／点阶段卡／待审 CTA／透析全走这里（飞行途中转场自动发生）。
   const viewportRef = live.viewportRef;
   const { flyTo } = useCameraFlight({
     setViewport: canvas.setViewport,
@@ -268,7 +268,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     containerRef,
     reduceMotion,
   });
-  // 飛向某階段途中：其他階段節點壓暗；落地後 300ms 恢復（被使用者中止也照時限恢復，不殘留）。
+  // 飞向某阶段途中：其他阶段节点压暗；落地后 300ms 恢复（被使用者中止也照时限恢复，不残留）。
   const [focusStage, setFocusStage] = useState<CanvasStageId | null>(null);
   const focusStageTimerRef = useRef<number | null>(null);
   const holdStageFocus = useCallback((stage: CanvasStageId, ms: number) => {
@@ -286,16 +286,16 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [],
   );
   const STAGE_FLIGHT_MS = 820;
-  /** 三層按鈕的相機飛行：穿帶飛行有帶內減速，820ms 讓形變本身約 600ms。 */
+  /** 三层按钮的相机飞行：穿带飞行有带内减速，820ms 让形变本身约 600ms。 */
   const LOD_FLIGHT_MS = 820;
   const handleSelectStage = useCallback(
     (stage: CanvasStageSummary) => {
       const size = viewportSizeRef.current;
       if (!stage.bbox || size.width <= 0) return;
       holdStageFocus(stage.id, STAGE_FLIGHT_MS + 300);
-      // 先無感對位：鳥瞰態畫布上只有週期點陣，把階段質心平移到被點的卡片中心底下（k 不變），
-      // 起飛後卡片沿直線收進質心、質心沿直線走到視口中心——不會先往節點真實位置繞一下。
-      // k 同時無感跳到聚合帶下緣（鳥瞰態 HUD 不隨 k 變）：省掉「卡片原地乾等 k 爬進帶」的空轉。
+      // 先无感对位：鸟瞰态画布上只有周期点阵，把阶段质心平移到被点的卡片中心底下（k 不变），
+      // 起飞后卡片沿直线收进质心、质心沿直线走到视口中心——不会先往节点真实位置绕一下。
+      // k 同时无感跳到聚合带下缘（鸟瞰态 HUD 不随 k 变）：省掉「卡片原地干等 k 爬进带」的空转。
       const current = viewportRef.current;
       const slot = hudLayout(size).slots[stage.id - 1];
       const k0 = Math.max(current.k, GATHER_RANGE.end - 0.004);
@@ -333,14 +333,14 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     },
     [flyTo, viewportRef],
   );
-  // 透析：開面板＋把卡片飛到面板左側可見區正中，同時進 focus 模式。
+  // 透析：开面板＋把卡片飞到面板左侧可见区正中，同时进 focus 模式。
   const openEngineering = useCallback(
     (nodeId: string) => {
       setEngineeringNodeId(nodeId);
       const target = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
       const size = viewportSizeRef.current;
       if (!target || size.width <= 0) return;
-      // 面板 fixed 貼視窗右緣（w-[26rem]、right 0.75rem）：換算成畫布座標，卡片置中於面板左側可見區。
+      // 面板 fixed 贴视窗右缘（w-[26rem]、right 0.75rem）：换算成画布座标，卡片置中于面板左侧可见区。
       const rect = containerRef.current?.getBoundingClientRect();
       const panelLeft = window.innerWidth - 12 - Math.min(416, window.innerWidth - 24);
       const free = rect ? { left: 16, right: Math.max(160, Math.min(size.width, panelLeft - rect.left) - 28) } : undefined;
@@ -348,10 +348,10 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     },
     [flyTo, viewportRef],
   );
-  // 互動檔位（決策 1/2）：只有協作檔才是停點；全自動檔下審查面板可看可改、不阻塞流程。
+  // 互动档位（决策 1/2）：只有协作档才是停点；全自动档下审查面板可看可改、不阻塞流程。
   const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
 
-  // ── 最新值 refs（組件殼域）
+  // ── 最新值 refs（组件壳域）
   const canvasStateRef = useRef(canvas);
   canvasStateRef.current = canvas;
   const promptPanelRef = useRef(promptPanelNodeId);
@@ -381,7 +381,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     return () => window.removeEventListener("keydown", onKey);
   }, [historyOpen]);
 
-  /** 檔位回讀（網關為準，失敗靜默落預設——與 getAgentSettings 自身契約一致，永不 reject）。 */
+  /** 档位回读（网关为准，失败静默落预设——与 getAgentSettings 自身契约一致，永不 reject）。 */
   useEffect(() => {
     let cancelled = false;
     void getAgentSettings().then((settings) => {
@@ -393,9 +393,9 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   }, []);
 
   /**
-   * 外部開啟介面（決策 10 的第二個門，步驟條由另一路實作）：
-   * 監聽 `REVIEW_PANEL_OPEN_EVENT`，把 `openReviewPanel({ panel })` 的請求翻成面板狀態。
-   * 沒有宿主掛載時呼叫端拿不到任何回應——`openReviewPanel()` 已在該處聲明「回傳 true 只代表事件已派發」。
+   * 外部开启介面（决策 10 的第二个门，步骤条由另一路实作）：
+   * 监听 `REVIEW_PANEL_OPEN_EVENT`，把 `openReviewPanel({ panel })` 的请求翻成面板状态。
+   * 没有宿主挂载时呼叫端拿不到任何回应——`openReviewPanel()` 已在该处声明「回传 true 只代表事件已派发」。
    */
   useEffect(() => {
     const handleOpen = (event: Event) => {
@@ -447,7 +447,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     return () => clearTimeout(t);
   }, [expanded, fitView]);
 
-  // 批次收起 → 子節點隱藏；B1 視口裁剪 → 螢幕外 ±280px 不渲染。
+  // 批次收起 → 子节点隐藏；B1 视口裁剪 → 萤幕外 ±280px 不渲染。
   const visibleNodes = useMemo(() => {
     const vp = canvas.viewport;
     const cullEnabled = viewportSize.width > 0 && canvas.nodes.length > 24;
@@ -469,7 +469,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     });
   }, [canvas.nodes, canvas.viewport, viewportSize, childToParent, nodeById]);
 
-  // ── 交互域（選取/框選/連線/埠拖拽/對齊/下載/建節點/右鍵選單定位；L227-237 交互 state 與鏡像 refs 由 hook 持有並回傳）
+  // ── 交互域（选取/框选/连线/埠拖拽/对齐/下载/建节点/右键选单定位；L227-237 交互 state 与镜像 refs 由 hook 持有并回传）
   const interaction = useCanvasInteraction({
     canvasStateRef,
     containerRef,
@@ -536,10 +536,10 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     saveNodeAsCard,
   } = interaction;
 
-  /** A7：鄰接集合（hover 優先，退回選中主節點）。 */
+  /** A7：邻接集合（hover 优先，退回选中主节点）。 */
   const highlightNodeId = hoveredNodeId ?? canvas.selectedNodeId;
 
-  // ── 生成編排域（A4 原地回填 / 批次子節點 / A12 重試 / 停止 / 高清放大 / agent 代跑）
+  // ── 生成编排域（A4 原地回填 / 批次子节点 / A12 重试 / 停止 / 高清放大 / agent 代跑）
   const {
     isGenerating,
     upscalingIds,
@@ -564,7 +564,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     selectedLora,
   });
 
-  // ── 鍵盤快捷鍵 + 系統剪貼簿（A8）
+  // ── 键盘快捷键 + 系统剪贴簿（A8）
   useCanvasShortcuts({
     canvasStateRef,
     containerRef,
@@ -604,8 +604,8 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     return set;
   }, [canvas.connections, highlightNodeId]);
 
-  // ── 舊 workflow 節點動作（站點代理 → 網關 /workflow/node/rerun|update；
-  // 舊 /api/internal/workflow/* 路徑在站點從不存在，生產 404，已廢棄）
+  // ── 旧 workflow 节点动作（站点代理 → 网关 /workflow/node/rerun|update；
+  // 旧 /api/internal/workflow/* 路径在站点从不存在，生产 404，已废弃）
   const handleRerun = useCallback(async (nodeId: string) => {
     const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
     const workflowId = node?.metadata?.workflow_id;
@@ -640,7 +640,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     }
   }, [showError]);
 
-  // ── D：存入素材庫
+  // ── D：存入素材库
   const saveNodeToAssets = useCallback(
     async (nodeId: string) => {
       const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
@@ -717,7 +717,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [menu, nodeById, childToParent, visibleNodes, upscalingIds, saveNodeAsCard],
   );
 
-  // ── 連線模式（工具列 Link2）游標跟隨
+  // ── 连线模式（工具列 Link2）游标跟随
   const handleContainerPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!connectingRef.current) return;
     const world = screenToWorld(e.clientX, e.clientY);
@@ -760,9 +760,9 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   );
 
   /**
-   * @ 可引用的素材卡候選 = 項目鎖定且過作用域裁決的卡（activeCharacterCards）。
-   * 語義是「全畫布可用」，不是「只連上游的卡」；音頻卡不做視覺引用故濾掉。
-   * nodeId 參數只為與 referenceCandidatesFor 同形（呼叫端條件式寫法照抄）。
+   * @ 可引用的素材卡候选 = 项目锁定且过作用域裁决的卡（activeCharacterCards）。
+   * 语义是「全画布可用」，不是「只连上游的卡」；音频卡不做视觉引用故滤掉。
+   * nodeId 参数只为与 referenceCandidatesFor 同形（呼叫端条件式写法照抄）。
    */
   const entityCandidatesFor = useCallback(
     (_nodeId: string) =>
@@ -779,17 +779,17 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   );
 
   /**
-   * 本鏡節點 metadata 已指定的實體卡 id（character/scene/prop 三欄聯集去重）。
-   * 供 prompt 面板「本镜参考素材」清單的 shot 來源；節點沒指定時為空陣列（既有行為不變）。
-   * 推導本體在 CanvasNodePromptPanel.shotEntityCardIdsFromMetadata（純函式，可直測）。
+   * 本镜节点 metadata 已指定的实体卡 id（character/scene/prop 三栏联集去重）。
+   * 供 prompt 面板「本镜参考素材」清单的 shot 来源；节点没指定时为空阵列（既有行为不变）。
+   * 推导本体在 CanvasNodePromptPanel.shotEntityCardIdsFromMetadata（纯函式，可直测）。
    */
   const shotEntityCardIdsFor = useCallback(
     (nodeId: string): string[] => shotEntityCardIdsFromMetadata(nodeById.get(nodeId)?.metadata),
     [nodeById],
   );
 
-  // ── WS-審查（2026-09-24）：資產／分鏡審查域的接線
-  // 分鏡列＝畫布節點投影（純函式在面板檔內，可單測）；場景名由外層 Group 的 storyboardScene 解析。
+  // ── WS-审查（2026-09-24）：资产／分镜审查域的接线
+  // 分镜列＝画布节点投影（纯函式在面板档内，可单测）；场景名由外层 Group 的 storyboardScene 解析。
   const reviewShots = useMemo(
     () =>
       reviewShotsFromNodes(canvas.nodes, {
@@ -801,14 +801,14 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
       }),
     [canvas.nodes, canvas.connections, childToParent, nodeById],
   );
-  /** 入口徽章＝待批准＋已駁回的總數（僅顯示，不構成任何阻塞）。 */
+  /** 入口徽章＝待批准＋已驳回的总数（仅显示，不构成任何阻塞）。 */
   const reviewPendingCount = useMemo(() => {
     const cards = reviewSummary(canvas.characterCards);
     const shots = reviewSummary(reviewShots);
     return cards.pending + cards.rejected + shots.pending + shots.rejected;
   }, [canvas.characterCards, reviewShots]);
 
-  /** 逐張重生成（決策 11：不過扣費確認卡，直接扣）。落地＝覆蓋該格原圖（決策 6）。 */
+  /** 逐张重生成（决策 11：不过扣费确认卡，直接扣）。落地＝覆盖该格原图（决策 6）。 */
   const handleRegenerateAsset = useCallback(
     async (cardId: string, referenceIndex: number): Promise<{ url: string; costCoins?: number } | null> => {
       const state = canvasStateRef.current;
@@ -820,8 +820,8 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
       }
       const controller = new AbortController();
       try {
-        // cards: [] ＝明確關閉卡注入：卡的片段與參考圖已在本 payload 內顯式給定，
-        // 再注入一次會讓「要被換掉的那張圖」同時當參考（把錯誤傳染給新圖）。
+        // cards: [] ＝明确关闭卡注入：卡的片段与参考图已在本 payload 内显式给定，
+        // 再注入一次会让「要被换掉的那张图」同时当参考（把错误传染给新图）。
         const images = await callCanvasGenerate(
           buildAssetRegeneratePayload(card, referenceIndex, DEFAULT_IMAGE_MODEL_ID),
           controller.signal,
@@ -831,7 +831,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         if (!image?.url) return null;
         const saved = await state.upsertCharacterCard(applyReplaceReference(card, referenceIndex, image.url));
         if (!saved) {
-          // 圖生了但沒寫回卡片＝不算成功（不謊報；原圖未動，用戶可重試）
+          // 图生了但没写回卡片＝不算成功（不谎报；原图未动，用户可重试）
           showError("新图已生成但写回卡片失败，原图未改动");
           return null;
         }
@@ -844,7 +844,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [callCanvasGenerate, canvasStateRef, showError],
   );
 
-  /** 用戶上傳自有素材＝直接覆蓋原圖（決策 6）；壓縮走既有的 `fileToDataUrl` 輪子（原地不改既有函式）。 */
+  /** 用户上传自有素材＝直接覆盖原图（决策 6）；压缩走既有的 `fileToDataUrl` 轮子（原地不改既有函式）。 */
   const handleReplaceAsset = useCallback(
     async (cardId: string, referenceIndex: number, file: File): Promise<boolean> => {
       const state = canvasStateRef.current;
@@ -863,7 +863,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [canvasStateRef, showError],
   );
 
-  /** 駁回（決策 4）：寫狀態與理由後停下——不重生成、不花錢。寫入走真源 `setApproval`。 */
+  /** 驳回（决策 4）：写状态与理由后停下——不重生成、不花钱。写入走真源 `setApproval`。 */
   const handleRejectAsset = useCallback(
     async (cardId: string, reason: string) => {
       const state = canvasStateRef.current;
@@ -875,7 +875,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [canvasStateRef, showError],
   );
 
-  /** 整批一鍵批准（決策 3）：逐筆套同一動作；失敗逐筆如實報，不謊報整批成功。 */
+  /** 整批一键批准（决策 3）：逐笔套同一动作；失败逐笔如实报，不谎报整批成功。 */
   const handleApproveAllAssets = useCallback(
     async (cardIds: readonly string[]) => {
       const state = canvasStateRef.current;
@@ -891,10 +891,10 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   );
 
   /**
-   * 分鏡批准狀態寫入（路 1 的凍結欄位；清洗走 `shotApprovalFor` → 真源 `normalizeApprovalState`）。
-   * **持久化已通**（2026-09-24 收口片）：`CanvasNodeMetadata.approval` 已宣告，且雙白名單兩端
-   * （`layout.toNodeMetadata` 讀取端、`canvas-chat-types.compactMetadataForAgent` 上行端）
-   * 都放行該鍵——刷新/回舊會話後分鏡審查面板的批准態不再消失。
+   * 分镜批准状态写入（路 1 的冻结栏位；清洗走 `shotApprovalFor` → 真源 `normalizeApprovalState`）。
+   * **持久化已通**（2026-09-24 收口片）：`CanvasNodeMetadata.approval` 已宣告，且双白名单两端
+   * （`layout.toNodeMetadata` 读取端、`canvas-chat-types.compactMetadataForAgent` 上行端）
+   * 都放行该键——刷新/回旧会话后分镜审查面板的批准态不再消失。
    */
   const patchShotApproval = useCallback(
     (nodeId: string, approval: ApprovalState) => {
@@ -920,7 +920,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [patchShotApproval],
   );
 
-  // ── A8：拖檔案入畫布
+  // ── A8：拖档案入画布
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
@@ -932,7 +932,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [screenToWorld, importImageFiles],
   );
 
-  // ── 編輯器產物 → 子節點插回
+  // ── 编辑器产物 → 子节点插回
   const handleEditorProduce = useCallback((results: CanvasImageEditResult[], _mode: CanvasImageEditMode) => {
     const ed = editorRef.current;
     const state = canvasStateRef.current;
@@ -973,7 +973,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     if (newNodes.length > 0) state.selectNode(newNodes[0].id);
   }, [editorRef, canvasStateRef, setSelectedIds]);
 
-  /** D：角度 AI 重繪 / mask AI 重繪 → 生成 loading 子節點 → 原地回填。 */
+  /** D：角度 AI 重绘 / mask AI 重绘 → 生成 loading 子节点 → 原地回填。 */
   const generateChildFromSource = useCallback(
     (sourceId: string, title: string, params: { prompt: string; referenceUrls?: string[] }) => {
       const state = canvasStateRef.current;
@@ -1002,21 +1002,21 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [generateIntoNode, canvasStateRef],
   );
 
-  // ── Wave C：agent 畫布操作自動化
+  // ── Wave C：agent 画布操作自动化
   const approveAgentOps = useCallback(() => {
     const { runGeneration } = canvasStateRef.current.applyAgentOps();
     runAgentGeneration(runGeneration);
   }, [runAgentGeneration, canvasStateRef]);
 
-  // 畫布操作自動化是產品主線：agent 下發的 ops 一到即執行，不設人工確認閘。
-  // 使用者仍可用 undo/redo 撤銷（approveAgentOps → applyAgentOps 內已 pushHistory）。
+  // 画布操作自动化是产品主线：agent 下发的 ops 一到即执行，不设人工确认闸。
+  // 使用者仍可用 undo/redo 撤销（approveAgentOps → applyAgentOps 内已 pushHistory）。
   useEffect(() => {
     if (!canvas.pendingAgentOps) return;
     approveAgentOps();
   }, [canvas.pendingAgentOps, approveAgentOps]);
 
   const hasNodes = canvas.nodes.length > 0;
-  // 透析卡的即時螢幕矩形（client 座標）：面板 FLIP 起訖點與光束起點，飛行途中每幀跟著走。
+  // 透析卡的即时萤幕矩形（client 座标）：面板 FLIP 起讫点与光束起点，飞行途中每帧跟著走。
   const engineeringNode = engineeringNodeId ? nodeById.get(engineeringNodeId) ?? null : null;
   const containerBox = engineeringNode ? containerRef.current?.getBoundingClientRect() : undefined;
   const engineeringAnchor =
@@ -1076,12 +1076,12 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
             "data-lod-inert": gatherEased > 0.35 ? "" : undefined,
             "data-focus-stage": focusStage !== null ? String(focusStage) : undefined,
             "data-eng-focus": engineeringNodeId ? "" : undefined,
-            // 拆機：卡面（背板）開始掀；過半後卡面不再吃指針，點擊落到板上。
+            // 拆机：卡面（背板）开始掀；过半后卡面不再吃指针，点击落到板上。
             "data-lod-xray": xray > 0 ? "" : undefined,
             "data-lod-xray-open": xray > 0.6 ? "" : undefined,
           }}
         >
-          {/* LOD 1 鳥瞰層：完全收束（gather=1）才卸載節點與連線；收束途中它們正往階段質心飛。 */}
+          {/* LOD 1 鸟瞰层：完全收束（gather=1）才卸载节点与连线；收束途中它们正往阶段质心飞。 */}
           {gatherRaw < 1 && (
           <>
           <CanvasConnections
@@ -1171,11 +1171,11 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
                   node.metadata?.status === "error"
                     ? isWorkflowNode
                       ? node.type !== CanvasNodeType.Text && node.type !== CanvasNodeType.Prompt
-                        ? (id) => void handleRerun(id) // workflow 節點（含配音/視頻卡）走網關真重跑；text/config 網關本就拒跑不給按鈕
+                        ? (id) => void handleRerun(id) // workflow 节点（含配音/视频卡）走网关真重跑；text/config 网关本就拒跑不给按钮
                         : undefined
                       : node.metadata?.prompt
-                        ? retryNode // A12 圖片重試：僅當參數確實存過
-                        : undefined // 沒參數就不渲染按鈕，不出「必定失敗」的死按鈕
+                        ? retryNode // A12 图片重试：仅当参数确实存过
+                        : undefined // 没参数就不渲染按钮，不出「必定失败」的死按钮
                     : undefined
                 }
                 lod={lod}
@@ -1218,7 +1218,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           />
         )}
 
-        {/* A9：縮放控件（全屏態；minimap 上方） */}
+        {/* A9：缩放控件（全屏态；minimap 上方） */}
         {expanded && (
           <CanvasZoomControls
             scale={canvas.viewport.k}
@@ -1249,7 +1249,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           />
         )}
 
-        {/* 頂部薄條 */}
+        {/* 顶部薄条 */}
         <div
           className="ce-embed-topbar pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2"
           style={{
@@ -1300,7 +1300,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           >
             资源库
           </button>
-          {/* LoRA 庫（2026-08-27 自專業工作站遷入）：與资源库同層入口 */}
+          {/* LoRA 库（2026-08-27 自专业工作站迁入）：与资源库同层入口 */}
           <button
             type="button"
             onClick={() => setLoraPanelOpen(true)}
@@ -1309,7 +1309,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           >
             LoRA{selectedLora ? " · 1" : ""}
           </button>
-          {/* P2：角色/場景卡——badge 數字 = 當前鎖定生效的卡數 */}
+          {/* P2：角色/场景卡——badge 数字 = 当前锁定生效的卡数 */}
           <button
             type="button"
             onClick={() => setCardsOpen((v) => !v)}
@@ -1319,7 +1319,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           >
             角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
           </button>
-          {/* REQ-B2 團隊資產空間：項目資產庫（資產包 + 資產卡的作用域/掛用/顯式分享入口） */}
+          {/* REQ-B2 团队资产空间：项目资产库（资产包 + 资产卡的作用域/挂用/显式分享入口） */}
           <button
             type="button"
             onClick={() => setProjectAssetsOpen((v) => !v)}
@@ -1329,7 +1329,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           >
             项目资产
           </button>
-          {/* G2（2026-09-16）：作品/劇集——badge 數字 = 劇集數，當前步驟顯示在面板內 */}
+          {/* G2（2026-09-16）：作品/剧集——badge 数字 = 剧集数，当前步骤显示在面板内 */}
           <button
             type="button"
             onClick={() => setCreationFlowOpen((v) => !v)}
@@ -1362,14 +1362,14 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           )}
         </div>
 
-        {/* 連線模式提示 */}
+        {/* 连线模式提示 */}
         {(connecting || portDrag) && (
           <div className="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-ios-blue/90 px-3 py-1.5 text-ios-caption1 font-medium text-white shadow-md">
             {portDrag ? "拖到目标节点成线 · 松手在空白处新建节点" : "点击目标节点完成连线 · Esc 取消"}
           </div>
         )}
 
-        {/* 浮層（agent 狀態提示 / 角色卡 / 歷史畫布 / 節點清單）+ .ce-embed-* 樣式塊（須無條件掛載，殼層頂欄樣式依賴它） */}
+        {/* 浮层（agent 状态提示 / 角色卡 / 历史画布 / 节点清单）+ .ce-embed-* 样式块（须无条件挂载，壳层顶栏样式依赖它） */}
         <CanvasEmbedOverlays
           height={height}
           expanded={expanded}
@@ -1388,7 +1388,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           setSelectedIds={setSelectedIds}
         />
 
-        {/* 操作錯誤/提示 */}
+        {/* 操作错误/提示 */}
         {actionError && (
           <div
             role="alert"
@@ -1401,7 +1401,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           </div>
         )}
 
-        {/* 右鍵選單 / 建節點選單 */}
+        {/* 右键选单 / 建节点选单 */}
         <CanvasContextMenu open={!!menu} position={menu?.position ?? { x: 0, y: 0 }} items={menuItems} onClose={() => setMenu(null)} />
         <CanvasNodeCreateMenu
           open={!!createMenu}
@@ -1422,10 +1422,10 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         )}
       </div>
 
-      {/* 快捷鍵幫助 / 資源庫 / 圖片編輯器（overflow 外層渲染） */}
+      {/* 快捷键帮助 / 资源库 / 图片编辑器（overflow 外层渲染） */}
       <CanvasShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
-      {/* REQ-B2：項目資產庫（專案 id 由 hook 的 getProjectId 直讀，未建號則面板顯示空態） */}
-      {/* REQ-B2b：掛用＝copy-on-use——面板把副本 id 交回來，這裡鎖進項目 cardIds（生成注入讀的就是它） */}
+      {/* REQ-B2：项目资产库（专案 id 由 hook 的 getProjectId 直读，未建号则面板显示空态） */}
+      {/* REQ-B2b：挂用＝copy-on-use——面板把副本 id 交回来，这里锁进项目 cardIds（生成注入读的就是它） */}
       <ProjectAssetLibraryPanel
         open={projectAssetsOpen}
         onClose={() => setProjectAssetsOpen(false)}
@@ -1433,8 +1433,8 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         isLoggedIn={isLoggedIn}
         onCopyChange={canvas.applyMountCopyChange}
       />
-      {/* WS-審查（2026-09-24）：資產／分鏡審查面板（同一顆畫布入口 + 步驟條的外開介面；
-          決策 2：全自動檔下這兩個面板可看可改、不阻塞流程——面板本身不擋任何生成路徑） */}
+      {/* WS-审查（2026-09-24）：资产／分镜审查面板（同一颗画布入口 + 步骤条的外开介面；
+          决策 2：全自动档下这两个面板可看可改、不阻塞流程——面板本身不挡任何生成路径） */}
       <AssetReviewPanel
         open={reviewPanel === "asset"}
         onClose={() => setReviewPanel(null)}
@@ -1448,7 +1448,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         onApproveAll={handleApproveAllAssets}
         onSwitchToShots={() => setReviewPanel("shot")}
       />
-      {/* 語義縮放 LOD 3：工程透析面板（節點被刪 → nodeById 取不到即不渲染） */}
+      {/* 语义缩放 LOD 3：工程透析面板（节点被删 → nodeById 取不到即不渲染） */}
       {engineeringNode && (
         <CanvasEngineeringPanel
           key={engineeringNode.id}
@@ -1489,7 +1489,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         onUsePrompt={
           promptPanelNodeId
             ? (prompt) => {
-                // 填進當前節點面板：寫入節點 metadata 後重開面板（面板讀 initialPrompt）。
+                // 填进当前节点面板：写入节点 metadata 后重开面板（面板读 initialPrompt）。
                 const nid = promptPanelNodeId;
                 canvasStateRef.current.patchNodeMetadata(nid, { prompt }, { history: false });
                 setPromptPanelNodeId(null);
@@ -1501,9 +1501,9 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         onApplyRecipeTemplate={
           promptPanelNodeId
             ? (config, label) => {
-                // 配方模板（2026-08-27 自專業工作站遷入）：六槽裡的 prompt 填進當前
-                // 節點面板（與 onUsePrompt 同一寫入路徑）；模型槽在 agent 模式由
-                // agent 依參數回流處理，這裡不越權切模型。
+                // 配方模板（2026-08-27 自专业工作站迁入）：六槽里的 prompt 填进当前
+                // 节点面板（与 onUsePrompt 同一写入路径）；模型槽在 agent 模式由
+                // agent 依参数回流处理，这里不越权切模型。
                 const nid = promptPanelNodeId;
                 if (typeof config.prompt === "string" && config.prompt.trim()) {
                   canvasStateRef.current.patchNodeMetadata(nid, { prompt: config.prompt }, { history: false });
@@ -1517,7 +1517,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         }
         isLoggedIn={libraryLoggedIn}
       />
-      {/* LoRA 庫（2026-08-27 自專業工作站遷入）：同款右側滑入面板，選中即注入生成 */}
+      {/* LoRA 库（2026-08-27 自专业工作站迁入）：同款右侧滑入面板，选中即注入生成 */}
       {loraPanelOpen && (
         <div
           data-canvas-interactive

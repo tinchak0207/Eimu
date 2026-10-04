@@ -1,8 +1,8 @@
-// 畫布專案摘要（2026-10-01 效能審計 P0-B）。
+// 画布专案摘要（2026-10-01 效能审计 P0-B）。
 //
-// 歷史清單只要「標題/更新時間/節點數」，原本卻每次把用戶全部專案（含節點、內嵌圖片 data URL；
-// 實測單用戶索引 2.5MB）整包下載到前端再自己摘要。服務端與前端共用這一份摘要形狀：
-// `GET /api/canvas/projects?view=summary` 只回摘要；打開某張畫布走 `?id=`，只回那一張。
+// 历史清单只要「标题/更新时间/节点数」，原本却每次把用户全部专案（含节点、内嵌图片 data URL；
+// 实测单用户索引 2.5MB）整包下载到前端再自己摘要。服务端与前端共用这一份摘要形状：
+// `GET /api/canvas/projects?view=summary` 只回摘要；打开某张画布走 `?id=`，只回那一张。
 
 import type { CanvasProject } from "./types";
 
@@ -24,7 +24,7 @@ export function toCanvasProjectSummaryWire(project: CanvasProject): CanvasProjec
   };
 }
 
-/** 外部 JSON → 摘要（逐欄驗證；不合法的項目丟棄，不整份作廢）。 */
+/** 外部 JSON → 摘要（逐栏验证；不合法的项目丢弃，不整份作废）。 */
 export function parseCanvasProjectSummaries(payload: unknown): CanvasProjectSummaryWire[] | undefined {
   if (!Array.isArray(payload)) return undefined;
   return payload.flatMap((item) => {

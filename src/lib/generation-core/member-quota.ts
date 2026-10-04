@@ -1,33 +1,33 @@
-// B1 成員點數配額（REQ-B1）：團隊-成員-配額的映射與分配層（user 層模型）。
+// B1 成员点数配额（REQ-B1）：团队-成员-配额的映射与分配层（user 层模型）。
 //
-// 分工（唯一權威源鐵律，見記憶 control-plane-billing-paradigm）：
-//   - new-api 是配額唯一權威源：主帳 = 團隊主帳 user 的 users.quota，成員桶 =
-//     成員 **user** 自己的 users.quota。**本模組不存任何點數數字**——本地表
-//     team_member_quota（migration 019）只存歸屬（哪個成員 user 屬於哪個團隊
-//     主帳）與意圖（enabled/label）。禁影子帳本。
-//   - 成員 = new-api 另一個 user（子帳號）。配額桶在 user 層、由內核一律執法
-//     （unlimited_quota 只是 token 層屬性；admin 憑證對他人 token 是 owner-scoped
-//     讀不到，token 桶模型已被 09-23 只讀探針硬否定）。
-//   - 分配 = **轉移**：主帳 user 扣 Δ、成員 user 加 Δ（setGatewayUserImageQuota /
-//     adjustGatewayUserQuotaExact 的既有生產通路）。寫的是絕對目標值（不是 delta
-//     疊加），所以重放同一請求天然冪等：目標與現值相同時連上游寫入都不發生。
-//     「先扣後加」＋失敗回滾 ⇒ 兩條腿不平衡不會靜默留下（不憑空印額度）。
-//   - 消耗 = new-api 內核自己扣成員 user 的 quota：成員扣費（內核）／主帳扣減
-//     （分配那一刻轉出）／餘額顯示（主帳 + Σ成員桶）三處可逐筆對帳、總額守恆。
-//   - 歸屬映射免新表：biz_api_key.user_id（migration 007）就是「成員 key ↔
-//     new-api user」映射；012 的 biz_key_newapi_token 映射層已於 2026-09-23 拔除
-//     （G1 裁定：預檢只按 user 額度閘），本模組從不依賴它。
+// 分工（唯一权威源铁律，见记忆 control-plane-billing-paradigm）：
+//   - new-api 是配额唯一权威源：主帐 = 团队主帐 user 的 users.quota，成员桶 =
+//     成员 **user** 自己的 users.quota。**本模组不存任何点数数字**——本地表
+//     team_member_quota（migration 019）只存归属（哪个成员 user 属于哪个团队
+//     主帐）与意图（enabled/label）。禁影子帐本。
+//   - 成员 = new-api 另一个 user（子帐号）。配额桶在 user 层、由内核一律执法
+//     （unlimited_quota 只是 token 层属性；admin 凭证对他人 token 是 owner-scoped
+//     读不到，token 桶模型已被 09-23 只读探针硬否定）。
+//   - 分配 = **转移**：主帐 user 扣 Δ、成员 user 加 Δ（setGatewayUserImageQuota /
+//     adjustGatewayUserQuotaExact 的既有生产通路）。写的是绝对目标值（不是 delta
+//     叠加），所以重放同一请求天然幂等：目标与现值相同时连上游写入都不发生。
+//     「先扣后加」＋失败回滚 ⇒ 两条腿不平衡不会静默留下（不凭空印额度）。
+//   - 消耗 = new-api 内核自己扣成员 user 的 quota：成员扣费（内核）／主帐扣减
+//     （分配那一刻转出）／余额显示（主帐 + Σ成员桶）三处可逐笔对帐、总额守恒。
+//   - 归属映射免新表：biz_api_key.user_id（migration 007）就是「成员 key ↔
+//     new-api user」映射；012 的 biz_key_newapi_token 映射层已于 2026-09-23 拔除
+//     （G1 裁定：预检只按 user 额度闸），本模组从不依赖它。
 //
-// 不變量：
-//   ① 成員 user_id ≠ team_user_id（成員是另一個 user，不是主帳自己）；
-//      同一 user 的多把 key 共用同一桶。成員同時只能屬一個團隊（跨團隊 403）。
-//   ② 本次劃出差額 ≤ 主帳手上餘額（轉移模型的不超賣條件）＋團隊鎖串行化；
-//      消耗不比分配少：主帳 + Σ成員桶 = 剩餘總額，Σ已用 + 剩餘總額 = 常數。
-//   ③ 分配/回收在同一團隊 advisory lock 內完成（多成員並發不超賣）。
-//   ④ 目標值不得低於該成員已消耗（已消耗部分不可回收）。
+// 不变量：
+//   ① 成员 user_id ≠ team_user_id（成员是另一个 user，不是主帐自己）；
+//      同一 user 的多把 key 共用同一桶。成员同时只能属一个团队（跨团队 403）。
+//   ② 本次划出差额 ≤ 主帐手上余额（转移模型的不超卖条件）＋团队锁串行化；
+//      消耗不比分配少：主帐 + Σ成员桶 = 剩余总额，Σ已用 + 剩余总额 = 常数。
+//   ③ 分配/回收在同一团队 advisory lock 内完成（多成员并发不超卖）。
+//   ④ 目标值不得低于该成员已消耗（已消耗部分不可回收）。
 //
-// 分配/回收是同一個操作：target > 現值 = 劃額度，target < 現值 = 回收，
-// 相等 = 幂等 no-op。全部金額單位是 new-api quota（1 幣 = QUOTA_PER_COIN）。
+// 分配/回收是同一个操作：target > 现值 = 划额度，target < 现值 = 回收，
+// 相等 = 幂等 no-op。全部金额单位是 new-api quota（1 币 = QUOTA_PER_COIN）。
 
 import { randomUUID } from "node:crypto";
 
@@ -36,35 +36,35 @@ import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { ensureAccountBaselines, recordTransfer } from "./account-ledger";
 import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
 
-/** 消耗面 402 文案：必須與主帳不足（quota-precheck 的「余额不足，请先充值。」）區分。 */
+/** 消耗面 402 文案：必须与主帐不足（quota-precheck 的「余额不足，请先充值。」）区分。 */
 export const MEMBER_QUOTA_INSUFFICIENT_MESSAGE = "成员额度不足，请联系团队主账号分配额度。";
-/** 成員額度被停用（enabled=false）——同 402 契約，文案不同。 */
+/** 成员额度被停用（enabled=false）——同 402 契约，文案不同。 */
 export const MEMBER_QUOTA_DISABLED_MESSAGE = "该成员额度已停用，请联系团队主账号。";
 
 export interface TeamMemberRecord {
   id: string;
   teamUserId: number;
-  /** 成員 new-api user（配額桶所在）。 */
+  /** 成员 new-api user（配额桶所在）。 */
   memberUserId: number;
-  /** 登記時使用的成員 biz key（手柄；同一 user 可能有多把）。 */
+  /** 登记时使用的成员 biz key（手柄；同一 user 可能有多把）。 */
   memberKeyId: string;
   displayName: string;
   enabled: boolean;
 }
 
-/** 成員 user 配額桶的權威讀數（new-api users.quota / used_quota）。 */
+/** 成员 user 配额桶的权威读数（new-api users.quota / used_quota）。 */
 export interface MemberQuotaSnapshot {
   memberUserId: number;
-  /** 該成員累計被授予的額度上限 = users.quota + users.used_quota。 */
+  /** 该成员累计被授予的额度上限 = users.quota + users.used_quota。 */
   granted: number;
-  /** 該帳號累計消耗 = users.used_quota。 */
+  /** 该帐号累计消耗 = users.used_quota。 */
   used: number;
-  /** 真正的桶 = users.quota（可為負：真實狀態不夾到 0）。 */
+  /** 真正的桶 = users.quota（可为负：真实状态不夹到 0）。 */
   remaining: number;
   /**
-   * user 層沒有 unlimited 概念——users.quota 由內核一律執法（unlimited_quota
-   * 只是 token 層屬性）。此欄位保留為契約的一部分（預檢/可視面的第三態判定
-   * 沿用舊形而語義恆 false），本模型不會產生 true。
+   * user 层没有 unlimited 概念——users.quota 由内核一律执法（unlimited_quota
+   * 只是 token 层属性）。此栏位保留为契约的一部分（预检/可视面的第三态判定
+   * 沿用旧形而语义恒 false），本模型不会产生 true。
    */
   unlimited: boolean;
 }
@@ -89,7 +89,7 @@ function mapMember(row: MemberRow): TeamMemberRecord {
   };
 }
 
-/** Postgres 可用作映射層嗎（C 端 Vercel 沒這個庫，必須走降級）。 */
+/** Postgres 可用作映射层吗（C 端 Vercel 没这个库，必须走降级）。 */
 export function memberQuotaStoreEnabled(): boolean {
   return generationControlPlaneEnabled();
 }
@@ -98,11 +98,11 @@ export function toCoins(quota: number): number {
   return Math.round((quota / QUOTA_PER_COIN) * 1e6) / 1e6;
 }
 
-// ─────────────────────────────────────────── 映射層存取
+// ─────────────────────────────────────────── 映射层存取
 
 /**
- * 預檢熱路徑：這個 user 是不是某團隊的成員（不是 → 完全不受成員配額執法）。
- * 成員判定按 **user_id**（配額桶在 user 層），不按 key 也不按 token。
+ * 预检热路径：这个 user 是不是某团队的成员（不是 → 完全不受成员配额执法）。
+ * 成员判定按 **user_id**（配额桶在 user 层），不按 key 也不按 token。
  */
 export async function findMemberByUserId(
   memberUserId: number,
@@ -134,7 +134,7 @@ export async function listTeamMembers(
   return rows.map(mapMember);
 }
 
-/** 歸屬登記/更新。點數數字不入庫——只寫身份與意圖。 */
+/** 归属登记/更新。点数数字不入库——只写身份与意图。 */
 export async function upsertTeamMember(
   member: {
     id: string;
@@ -171,12 +171,12 @@ type BindingRow = {
 
 export interface MemberBinding {
   memberKeyId: string;
-  /** biz_api_key.user_id：成員 key 對應的 new-api user（= 成員的配額桶所在）。 */
+  /** biz_api_key.user_id：成员 key 对应的 new-api user（= 成员的配额桶所在）。 */
   userId: number;
   label: string;
 }
 
-/** 成員 key 的歸屬鏈：biz_api_key.user_id（migration 007，免新表）。 */
+/** 成员 key 的归属链：biz_api_key.user_id（migration 007，免新表）。 */
 export async function resolveMemberBinding(
   memberKeyId: string,
   sql?: GenerationSql,
@@ -198,13 +198,13 @@ export async function resolveMemberBinding(
   };
 }
 
-// ─────────────────────────────────────────── new-api 權威讀數
+// ─────────────────────────────────────────── new-api 权威读数
 
 type GatewayUserReader = typeof fetchGatewayUser;
 
 /**
- * 讀成員 user 的配額桶（new-api 權威源）。查不到/上游抽風返回 null——調用方
- * 自行決定 fail-closed 還是 fail-open（預檢一律 fail-closed）。
+ * 读成员 user 的配额桶（new-api 权威源）。查不到/上游抽风返回 null——调用方
+ * 自行决定 fail-closed 还是 fail-open（预检一律 fail-closed）。
  */
 export async function readMemberQuota(
   memberUserId: number,
@@ -224,7 +224,7 @@ export async function readMemberQuota(
   return { memberUserId, granted: remaining + used, used, remaining, unlimited: false };
 }
 
-// ─────────────────────────────────────────── 可視面
+// ─────────────────────────────────────────── 可视面
 
 export interface TeamQuotaMemberView {
   memberKeyId: string;
@@ -236,29 +236,29 @@ export interface TeamQuotaMemberView {
   remaining: number;
   unlimited: boolean;
   coins: { granted: number; used: number; remaining: number };
-  /** 讀不到上游時的誠實第三態（不畫假數字）。 */
+  /** 读不到上游时的诚实第三态（不画假数字）。 */
   unavailable: boolean;
 }
 
 export interface TeamQuotaView {
   teamUserId: number;
-  /** 主帳手上餘額 = 團隊主帳 user 的 users.quota。 */
+  /** 主帐手上余额 = 团队主帐 user 的 users.quota。 */
   master: { remaining: number; coins: number };
-  /** 累計劃給成員的上限（= Σ 成員 granted）。 */
+  /** 累计划给成员的上限（= Σ 成员 granted）。 */
   allocated: number;
   allocatedCoins: number;
-  /** Σ 成員已消耗。 */
+  /** Σ 成员已消耗。 */
   used: number;
   usedCoins: number;
-  /** 還能再劃出去 = 主帳手上餘額（轉移模型：劃出的錢已在成員桶裡，不再佔主帳）。 */
+  /** 还能再划出去 = 主帐手上余额（转移模型：划出的钱已在成员桶里，不再占主帐）。 */
   unallocated: number;
   unallocatedCoins: number;
-  /** 團隊未消耗總額 = 主帳手上餘額 + Σ 成員桶剩餘（消耗後剩下的錢全在這兩處）。 */
+  /** 团队未消耗总额 = 主帐手上余额 + Σ 成员桶剩余（消耗后剩下的钱全在这两处）。 */
   team: { remaining: number; coins: number };
   members: TeamQuotaMemberView[];
 }
 
-/** 主帳總額／已分配／各成員額度與消耗。全部數字當場讀 new-api，無本地帳本。 */
+/** 主帐总额／已分配／各成员额度与消耗。全部数字当场读 new-api，无本地帐本。 */
 export async function readTeamQuotaView(
   input: { teamUserId: number },
   deps: { sql?: GenerationSql; fetchUser?: GatewayUserReader } = {},
@@ -350,9 +350,9 @@ export type AllocationResult =
       granted: number;
       used: number;
       remaining: number;
-      /** 本次實際轉移的 quota（正 = 劃出，負 = 回收，0 = 幂等 no-op）。 */
+      /** 本次实际转移的 quota（正 = 划出，负 = 回收，0 = 幂等 no-op）。 */
       transferred: number;
-      /** true = 目標與現值相同，未動上游（幂等 no-op）。 */
+      /** true = 目标与现值相同，未动上游（幂等 no-op）。 */
       unchanged: boolean;
     }
   | { ok: false; status: 400 | 402 | 403 | 404 | 409 | 503; code: AllocationFailureCode; message: string };
@@ -369,7 +369,7 @@ function reasonOf(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 300);
 }
 
-/** 團隊級串行化：同一主帳的分配/回收不並發（多成員並發不超賣的實現點）。 */
+/** 团队级串行化：同一主帐的分配/回收不并发（多成员并发不超卖的实现点）。 */
 export type TeamLock = <T>(teamUserId: number, fn: (tx: GenerationSql) => Promise<T>) => Promise<T>;
 
 async function defaultTeamLock<T>(
@@ -377,12 +377,12 @@ async function defaultTeamLock<T>(
   teamUserId: number,
   fn: (tx: GenerationSql) => Promise<T>,
 ): Promise<T> {
-  // postgres.js 的事務返回值類型是 UnwrapPromiseArray<T>，這裡斷言回 T。
+  // postgres.js 的事务返回值类型是 UnwrapPromiseArray<T>，这里断言回 T。
   return (await sql.begin(async (tx) => {
-    // 事務級 advisory lock：同團隊的分配/回收排隊執行，事務結束自動釋放。
+    // 事务级 advisory lock：同团队的分配/回收排队执行，事务结束自动释放。
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`team-member-quota:${teamUserId}`}))`;
-    // 事務句柄當查詢接口交下去（同一連接）：避免「等鎖佔著一條連接、拿到鎖
-    // 又要第二條連接」在連接池（默認 max=5）上打成的自鎖死。
+    // 事务句柄当查询接口交下去（同一连接）：避免「等锁占著一条连接、拿到锁
+    // 又要第二条连接」在连接池（默认 max=5）上打成的自锁死。
     return await fn(tx as unknown as GenerationSql);
   })) as T;
 }
@@ -390,10 +390,10 @@ async function defaultTeamLock<T>(
 type UserQuotaAdjuster = typeof adjustGatewayUserQuotaExact;
 
 /**
- * 主帳 → 成員的額度轉移（amount > 0）。
+ * 主帐 → 成员的额度转移（amount > 0）。
  *
- * 先扣後加：任何一步失敗都不會出現「憑空多出來的額度」。第二條腿失敗時回滾
- * 第一條腿；回滾也失敗（上游兩帳不平衡）→ 拋出的訊息講明需人工核對，不假裝沒事。
+ * 先扣后加：任何一步失败都不会出现「凭空多出来的额度」。第二条腿失败时回滚
+ * 第一条腿；回滚也失败（上游两帐不平衡）→ 抛出的讯息讲明需人工核对，不假装没事。
  */
 async function transferQuota(
   fromUserId: number,
@@ -420,10 +420,10 @@ async function transferQuota(
 }
 
 export interface AllocateMemberQuotaInput {
-  /** 團隊主帳（出資方 = 呼叫方 B key 的 user_id）。 */
+  /** 团队主帐（出资方 = 呼叫方 B key 的 user_id）。 */
   teamUserId: number;
   memberKeyId: string;
-  /** 目標額度上限（new-api quota，絕對值）。 */
+  /** 目标额度上限（new-api quota，绝对值）。 */
   targetGranted: number;
 }
 
@@ -431,20 +431,20 @@ export interface AllocateDeps {
   sql?: GenerationSql;
   fetchUser?: GatewayUserReader;
   adjustUserQuota?: UserQuotaAdjuster;
-  /** 測試注入：默認走 Postgres 事務級 advisory lock。 */
+  /** 测试注入：默认走 Postgres 事务级 advisory lock。 */
   withTeamLock?: TeamLock;
-  /** 歸屬登記 id 生成（默認 crypto.randomUUID）。 */
+  /** 归属登记 id 生成（默认 crypto.randomUUID）。 */
   newMemberId?: () => string;
-  /** 轉移身分證 id 生成（默認 crypto.randomUUID）；同一 id 的帳本兩條腿共用。 */
+  /** 转移身分证 id 生成（默认 crypto.randomUUID）；同一 id 的帐本两条腿共用。 */
   newTransferId?: () => string;
 }
 
 /**
- * 劃額度 / 回收 / 調整（同一操作，絕對目標值 ⇒ 幂等）。
+ * 划额度 / 回收 / 调整（同一操作，绝对目标值 ⇒ 幂等）。
  *
- * 順序：校驗目標 → 解析歸屬（key→user）→ 團隊鎖內 讀成員桶現值 → 判已消耗不可
- * 回收 → 讀主帳手上餘額 → 判本次差額是否劃得出來 → 轉移（先扣後加＋回滾）→
- * 登記歸屬。主帳不足時拒絕並給可執行錯誤（可先充值或回收其他成員額度）。
+ * 顺序：校验目标 → 解析归属（key→user）→ 团队锁内 读成员桶现值 → 判已消耗不可
+ * 回收 → 读主帐手上余额 → 判本次差额是否划得出来 → 转移（先扣后加＋回滚）→
+ * 登记归属。主帐不足时拒绝并给可执行错误（可先充值或回收其他成员额度）。
  */
 export async function allocateMemberQuota(
   input: AllocateMemberQuotaInput,
@@ -457,7 +457,7 @@ export async function allocateMemberQuota(
   if (!Number.isInteger(input.teamUserId) || input.teamUserId <= 0) {
     return fail(503, "member_quota_unavailable", "团队主账号不可用（缺少有效的计费用户）。");
   }
-  // 映射層不在（C 端 Vercel 沒有控制面庫）→ 服務不可用，不是「成員不存在」。
+  // 映射层不在（C 端 Vercel 没有控制面库）→ 服务不可用，不是「成员不存在」。
   if (!memberQuotaStoreEnabled()) {
     return fail(503, "member_quota_unavailable", "成员额度映射层不可用（控制面数据库未配置）。");
   }
@@ -471,7 +471,7 @@ export async function allocateMemberQuota(
     );
   }
   const memberLabel = binding.label || input.memberKeyId;
-  // 成員必須是「另一個 user」：主帳自己的 key 當成員 = 自己給自己劃額度，禁止。
+  // 成员必须是「另一个 user」：主帐自己的 key 当成员 = 自己给自己划额度，禁止。
   if (binding.userId === input.teamUserId) {
     return fail(
       403,
@@ -479,7 +479,7 @@ export async function allocateMemberQuota(
       `密钥 ${memberLabel} 的计费账号就是团队主账号 ${input.teamUserId} 本身；主账号不能作为成员，请改用成员自己的密钥。`,
     );
   }
-  // 一個成員 user 只屬一個團隊：已被別家團隊登記 ⇒ 不可跨團隊分配。
+  // 一个成员 user 只属一个团队：已被别家团队登记 ⇒ 不可跨团队分配。
   const owner = await findMemberByUserId(binding.userId, deps.sql);
   if (owner && owner.teamUserId !== input.teamUserId) {
     return fail(
@@ -500,8 +500,8 @@ export async function allocateMemberQuota(
       const fetchUser = deps.fetchUser ?? fetchGatewayUser;
       const adjustUserQuota = deps.adjustUserQuota ?? adjustGatewayUserQuotaExact;
 
-      // 一律讀現值（不論是否已登記）：成員桶可能早就帶著額度，按 0 起算會把
-      // 主帳的錢多劃出去。讀不到就 fail-closed。
+      // 一律读现值（不论是否已登记）：成员桶可能早就带著额度，按 0 起算会把
+      // 主帐的钱多划出去。读不到就 fail-closed。
       const current = await readMemberQuota(binding.userId, { fetchUser });
       if (!current) {
         return fail(503, "member_quota_unavailable", "成员当前额度读不到（new-api 不可达），请稍后重试。");
@@ -527,8 +527,8 @@ export async function allocateMemberQuota(
       }
 
       const delta = target - current.granted;
-      // 不變量②（user 層轉移模型）：劃出去的錢要從主帳手上真的拿得出來。
-      // 成員桶是真錢不是上限貼紙，所以可分配餘額 = 主帳手上餘額（劃出去的已不在主帳）。
+      // 不变量②（user 层转移模型）：划出去的钱要从主帐手上真的拿得出来。
+      // 成员桶是真钱不是上限贴纸，所以可分配余额 = 主帐手上余额（划出去的已不在主帐）。
       if (delta > masterQuota) {
         return fail(
           402,
@@ -540,18 +540,18 @@ export async function allocateMemberQuota(
       const transferred = delta;
       let confirmed: MinimalUserState;
       if (delta === 0) {
-        // 幂等 no-op：目標與現值相同，不動上游。
+        // 幂等 no-op：目标与现值相同，不动上游。
         confirmed = { remaining: current.remaining, used: current.used };
       } else {
-        // 轉移身分證：一次真實的上游雙腿轉移配一個 id，帳本兩條腿共用（同一事務寫入）。
-        // 重放的請求在 delta===0 分支就早退、根本不會產生新 id ⇒ 帳本天然不重複。
+        // 转移身分证：一次真实的上游双腿转移配一个 id，帐本两条腿共用（同一事务写入）。
+        // 重放的请求在 delta===0 分支就早退、根本不会产生新 id ⇒ 帐本天然不重复。
         const transferId = (deps.newTransferId ?? randomUUID)();
-        // REQ-E1a 順序鐵律：先種基線（取的是「動上游之前」的 users.quota），再轉移，最後記帳。
-        // 先轉移後種基線 = 基線已含這筆轉移 + 帳本再記一次 = 雙算。基線不可得則放棄記帳
-        // （錢路照走），差額由對帳報告負責。
+        // REQ-E1a 顺序铁律：先种基线（取的是「动上游之前」的 users.quota），再转移，最后记帐。
+        // 先转移后种基线 = 基线已含这笔转移 + 帐本再记一次 = 双算。基线不可得则放弃记帐
+        // （钱路照走），差额由对帐报告负责。
         const baselineReady = await ensureAccountBaselines([input.teamUserId, binding.userId], { sql: tx, fetchUser });
         try {
-          // delta > 0：主帳 → 成員；delta < 0：成員 → 主帳（回收）。
+          // delta > 0：主帐 → 成员；delta < 0：成员 → 主帐（回收）。
           if (delta > 0) {
             await transferQuota(input.teamUserId, binding.userId, delta, adjustUserQuota);
           } else {
@@ -563,8 +563,8 @@ export async function allocateMemberQuota(
           );
           return fail(503, "member_quota_unavailable", "上游调整成员额度失败，请稍后重试。");
         }
-        // REQ-E1a 雙寫：上游兩腿都動了才記我方帳本（transfer_out/transfer_in 同一事務）。
-        // 記帳失敗不擋路：差額由 E1b 對帳報告逐筆指出（不假裝兩層一致）。
+        // REQ-E1a 双写：上游两腿都动了才记我方帐本（transfer_out/transfer_in 同一事务）。
+        // 记帐失败不挡路：差额由 E1b 对帐报告逐笔指出（不假装两层一致）。
         const ledger = baselineReady
           ? await recordTransfer({
               teamUserId: input.teamUserId,
@@ -574,13 +574,13 @@ export async function allocateMemberQuota(
               source: "member-quota",
               memberKeyId: input.memberKeyId,
             }, { sql: tx, fetchUser })
-          : { posted: false, reason: "基線不可得（未記帳）" };
+          : { posted: false, reason: "基线不可得（未记帐）" };
         if (!ledger.posted) {
           console.error(
-            `[member-quota] team=${input.teamUserId} memberUser=${binding.userId} 轉移帳本未落地（${ledger.reason}）——已由對帳報告負責`,
+            `[member-quota] team=${input.teamUserId} memberUser=${binding.userId} 转移帐本未落地（${ledger.reason}）——已由对帐报告负责`,
           );
         }
-        // 上游寫入成功後覆核：拿不回權威讀數就不回報成功（不畫假數字）。
+        // 上游写入成功后覆核：拿不回权威读数就不回报成功（不画假数字）。
         const recheck = await readMemberQuota(binding.userId, { fetchUser });
         if (!recheck) {
           console.error(

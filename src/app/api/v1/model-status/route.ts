@@ -1,16 +1,16 @@
-// GET /v1/model-status — 對外、agent-friendly 的模型可用性狀態。
+// GET /v1/model-status — 对外、agent-friendly 的模型可用性状态。
 //
-// 回傳所有生成模型（image+video）的可用性 + 能力 + 功能標註，讓 AI 助手一眼判斷
-// 「哪個模型可用、能幹嘛、調哪個端點」。探測只發 GET {baseURL}/models（渠道的
-// /models 清單端點）——不觸發真實生成、不扣費；無 /models 能力的渠道
-// 回報 unknown + note，而不是假裝探測失敗。結果模組級緩存 60 秒（probe.cached 指示）。
+// 回传所有生成模型（image+video）的可用性 + 能力 + 功能标注，让 AI 助手一眼判断
+// 「哪个模型可用、能干嘛、调哪个端点」。探测只发 GET {baseURL}/models（渠道的
+// /models 清单端点）——不触发真实生成、不扣费；无 /models 能力的渠道
+// 回报 unknown + note，而不是假装探测失败。结果模组级缓存 60 秒（probe.cached 指示）。
 //
-// 認證/限流/錯誤格式與 /v1/system_stats 完全一致：biz key、rate limit headers、
-// trace_id、OpenAI 風格 {error:{message,type,code,param,trace_id}} 錯誤體。
+// 认证/限流/错误格式与 /v1/system_stats 完全一致：biz key、rate limit headers、
+// trace_id、OpenAI 风格 {error:{message,type,code,param,trace_id}} 错误体。
 //
-// 每個模型還會帶 last_24h（最近 24h 真實生圖表現：jobs/delivered/failed/
-// success_rate/refunded），數據源與 /admin「模型使用分布」同輪（routing-events
-// 遙測），樣本只覆蓋最近 200 條事件，樣本不足時 jobs 如實偏小。
+// 每个模型还会带 last_24h（最近 24h 真实生图表现：jobs/delivered/failed/
+// success_rate/refunded），数据源与 /admin「模型使用分布」同轮（routing-events
+// 遥测），样本只覆盖最近 200 条事件，样本不足时 jobs 如实偏小。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
@@ -27,20 +27,20 @@ import { readUnavailableModels } from "@/lib/generation-core/model-availability-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** 近 24h 表現統計：與探測緩存同節奏（60 秒），「时不时记录」不需要秒級實時。 */
+/** 近 24h 表现统计：与探测缓存同节奏（60 秒），「时不时记录」不需要秒级实时。 */
 const RECENT_STATS_TTL_MS = 60_000;
 const RECENT_STATS_EVENT_LIMIT = 200;
 let recentStatsCache: { expiresAt: number; stats: ModelRecentStats[] } | null = null;
 let recentEventsCache: { expiresAt: number; events: Awaited<ReturnType<typeof listRoutingEvents>> } | null = null;
 
 /**
- * 每模型的 last_24h 統計（jobs/delivered/failed/success_rate/refunded）。
- * 數據源與 /admin 模型使用分布同輪（listRoutingEvents + 純函數統計），遙測讀取
- * 失敗時回空列表——統計是加分項，絕不讓它把 model-status 打掛。
+ * 每模型的 last_24h 统计（jobs/delivered/failed/success_rate/refunded）。
+ * 数据源与 /admin 模型使用分布同轮（listRoutingEvents + 纯函数统计），遥测读取
+ * 失败时回空列表——统计是加分项，绝不让它把 model-status 打挂。
  */
-/** 最近 routing events（60 秒緩存）：last_24h 統計與渠道餘額信號共用一次讀取。 */
+/** 最近 routing events（60 秒缓存）：last_24h 统计与渠道余额信号共用一次读取。 */
 async function getRecentRoutingEvents() {
   const now = Date.now();
   if (recentEventsCache && recentEventsCache.expiresAt > now) return recentEventsCache.events;
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
   });
   if (!auth.ok) return errorResponse(auth.status, auth.message, auth.code, traceId);
 
-  // 隊列輸入與真實生成路由同源：admin 池 + admin overrides + 本實例 env。
+  // 队列输入与真实生成路由同源：admin 池 + admin overrides + 本实例 env。
   const [pools, overrides, recentStats] = await Promise.all([
     readAdminPools().catch(() => []),
     getRuntimeChannelOverrides(),
@@ -89,15 +89,15 @@ export async function GET(req: NextRequest) {
   ]);
   const snapshot = await probeAllModelsStatus({ env: process.env, pools, overrides, recentStats });
 
-  // 每模型追加 last_24h（最近 24h 真實表現統計）。窗口内無樣本的模型不帶該字段——
-  // 沒數據就誠實地不裝有數據。availability 已由 probe 層用同一份統計裁決：
-  // 近 24h 有真實交付 → available（真實産物是最高證據，GET /models 探測的
-  // 404 假陰性不推翻它）；非 OpenAI 兼容渠道（metaso/filmera/adobe2api）探測
-  // 無意義，一律 unknown，絕不允許假陰性標 unavailable。
+  // 每模型追加 last_24h（最近 24h 真实表现统计）。窗口内无样本的模型不带该字段——
+  // 没数据就诚实地不装有数据。availability 已由 probe 层用同一份统计裁决：
+  // 近 24h 有真实交付 → available（真实产物是最高证据，GET /models 探测的
+  // 404 假阴性不推翻它）；非 OpenAI 兼容渠道（metaso/filmera/adobe2api）探测
+  // 无意义，一律 unknown，绝不允许假阴性标 unavailable。
   const statsByModel = new Map(recentStats.map((stats) => [stats.modelId, stats]));
-  // R7-E：渠道餘額信號——連續 quota_exhausted 斷流的模型覆寫 availability=unavailable
-  // + note「渠道欠費」，agent 提交前就換道，不把任務燒進死隊列。探測/遙測故障 →
-  // 空 events → 無信號，不攔任何人。
+  // R7-E：渠道余额信号——连续 quota_exhausted 断流的模型覆写 availability=unavailable
+  // + note「渠道欠费」，agent 提交前就换道，不把任务烧进死队列。探测/遥测故障 →
+  // 空 events → 无信号，不拦任何人。
   const balanceSignals = summarizeChannelBalance(await getRecentRoutingEvents());
   // 执行侧同源裁决（2026-08-30）：worker 调度看 supplier_capability + supplier/account
   // health_status + cooldown，而旧探测只看「渠道 GET /models 可达」——两套判据错位：
@@ -112,8 +112,8 @@ export async function GET(req: NextRequest) {
   }));
   // probe 的 media_type 是 "image"/"video"；signal 的 kind 是 "image_generate"/"video_generate"。
   const signalKindByMedia = (media: string): string => (media === "video" ? "video_generate" : "image_generate");
-  // 真實結果閘（2026-09-27，model-availability-gate）：近 72h 真實生成全失敗/極低成功率
-  // 的模型，提交面會在扣費前拒單——這裡同判 unavailable，agent 不再往死模型投單。
+  // 真实结果闸（2026-09-27，model-availability-gate）：近 72h 真实生成全失败/极低成功率
+  // 的模型，提交面会在扣费前拒单——这里同判 unavailable，agent 不再往死模型投单。
   const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
   const models = snapshot.models.map((model) => {
     const last24h = statsByModel.get(model.id);

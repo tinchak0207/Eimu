@@ -1,12 +1,12 @@
-// node-view/constants —— CanvasNodeView 的類型/標籤映射與手勢常量。
-// 純資料，無副作用；符號名與遷移前一致（契約測試逐名斷言）。
+// node-view/constants —— CanvasNodeView 的类型/标签映射与手势常量。
+// 纯资料，无副作用；符号名与迁移前一致（契约测试逐名断言）。
 
 import type { CSSProperties } from "react";
 import { CanvasNodeType, type CanvasNodeStatus } from "@/lib/canvas/types";
 
 export const MIN_WIDTH = 120;
 export const MIN_HEIGHT = 90;
-/** 螢幕 px 死區：低於此距離視為點選而非拖動 */
+/** 萤幕 px 死区：低于此距离视为点选而非拖动 */
 export const MOVE_THRESHOLD_PX = 5;
 
 export const STATUS_COLOR: Record<CanvasNodeStatus, string> = {

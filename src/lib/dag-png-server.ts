@@ -1,31 +1,31 @@
-// DAG 視覺渲染出口（**server-only**）。
+// DAG 视觉渲染出口（**server-only**）。
 //
-// 為什麼單獨一檔而不是併進 workflow-png.ts：workflow-png.ts 會被客戶端元件
-// import（ReferenceImageUpload 讀用戶拖入的 PNG），而本檔經 dag-png.ts 拉進
-// sharp——sharp 是 Node 原生模組，`node:events` 進 browser bundle 會讓 webpack
+// 为什么单独一档而不是并进 workflow-png.ts：workflow-png.ts 会被客户端元件
+// import（ReferenceImageUpload 读用户拖入的 PNG），而本档经 dag-png.ts 拉进
+// sharp——sharp 是 Node 原生模组，`node:events` 进 browser bundle 会让 webpack
 // 直接炸（UnhandledSchemeError: Reading from "node:events" is not handled）。
-// 拆檔是唯一乾淨的隔離方式：客戶端只碰零依賴的 workflow-png.ts，伺服器端
-// （route / worker）才 import 本檔。
+// 拆档是唯一干净的隔离方式：客户端只碰零依赖的 workflow-png.ts，伺服器端
+// （route / worker）才 import 本档。
 //
-// ─────────────────── CJK 字型（2026-09-20 豆腐方框修復）───────────────────
-// Vercel serverless 完全沒有系統字型（實測 fc-list=0），librsvg 渲染中文
-// 全變方框。解法＝字型隨程式碼部署：
+// ─────────────────── CJK 字型（2026-09-20 豆腐方框修复）───────────────────
+// Vercel serverless 完全没有系统字型（实测 fc-list=0），librsvg 渲染中文
+// 全变方框。解法＝字型随程式码部署：
 //   public/fonts/NotoSansCJKsc-subset.otf（Noto Sans CJK SC 子集，5MB，
-//   常用漢字 U+4E00–U+9FA5 全覆蓋）
-//   public/fonts/dag-fonts.conf（fontconfig 設定，dir 由路徑佔位符運行時替換）
-// 放 public/ 的理由：Vercel 構建後 /var/task/public/ 的相對佈局穩定可預期
-//（Next.js 靜態資產標準位置），源碼 src/ 目錄在 serverless bundle 內不存在。
-// 本檔在首次渲染前：
-//   1. 把 dag-fonts.conf 的 __FONT_DIR__ 佔位符替換成實際絕對路徑，寫到 /tmp；
-//   2. 設 FONTCONFIG_FILE=/tmp/dag-fonts.conf——librsvg 經 fontconfig 找字型，
-//      這是它唯一認的入口；
-//   3. cachedir 指 /tmp/fontconfig-cache（serverless 唯一可寫目錄）。
-// 本機開發（有系統字型）不受影響：FONTCONFIG_FILE 只在本檔設置，且即便
-// fontconfig 找不到本子集，仍會 fallback 系統字型。
+//   常用汉字 U+4E00–U+9FA5 全覆盖）
+//   public/fonts/dag-fonts.conf（fontconfig 设定，dir 由路径占位符运行时替换）
+// 放 public/ 的理由：Vercel 构建后 /var/task/public/ 的相对布局稳定可预期
+//（Next.js 静态资产标准位置），源码 src/ 目录在 serverless bundle 内不存在。
+// 本档在首次渲染前：
+//   1. 把 dag-fonts.conf 的 __FONT_DIR__ 占位符替换成实际绝对路径，写到 /tmp；
+//   2. 设 FONTCONFIG_FILE=/tmp/dag-fonts.conf——librsvg 经 fontconfig 找字型，
+//      这是它唯一认的入口；
+//   3. cachedir 指 /tmp/fontconfig-cache（serverless 唯一可写目录）。
+// 本机开发（有系统字型）不受影响：FONTCONFIG_FILE 只在本档设置，且即便
+// fontconfig 找不到本子集，仍会 fallback 系统字型。
 //
-// 組合兩段純函式——renderDagSvg 算佈局並輸出 SVG，renderDagPng 走 sharp 轉 PNG。
-// 刻意不在這裡做 workflow JSON 嵌入：嵌入（IEND 之後追加 trailing data）與視覺
-// 渲染是兩件事，要一起用時由呼叫端自行
+// 组合两段纯函式——renderDagSvg 算布局并输出 SVG，renderDagPng 走 sharp 转 PNG。
+// 刻意不在这里做 workflow JSON 嵌入：嵌入（IEND 之后追加 trailing data）与视觉
+// 渲染是两件事，要一起用时由呼叫端自行
 // `embedWorkflowIntoPng(await renderWorkflowDagPng(...))`。
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -34,7 +34,7 @@ import type { DagConnectionInput, DagNodeInput, DagRenderOptions } from "./dag-r
 import { renderDagSvg } from "./dag-renderer";
 import { renderDagPng } from "./dag-png";
 
-/** 只跑一次：進程內第一張縮圖渲染前把 fontconfig 指向部署包內字型。 */
+/** 只跑一次：进程内第一张缩图渲染前把 fontconfig 指向部署包内字型。 */
 let fontConfigReady = false;
 function ensureFontConfig(): void {
   if (fontConfigReady) return;
@@ -42,24 +42,24 @@ function ensureFontConfig(): void {
   try {
     const fontDir = path.join(process.cwd(), "public/fonts");
     const confSrc = path.join(fontDir, "dag-fonts.conf");
-    if (!existsSync(confSrc)) return; // 找不到設定就交給系統 fontconfig（本機開發路徑）
-    // cachedir 先建（fontconfig 不會自建目錄，缺目錄時直接棄用整份設定）
+    if (!existsSync(confSrc)) return; // 找不到设定就交给系统 fontconfig（本机开发路径）
+    // cachedir 先建（fontconfig 不会自建目录，缺目录时直接弃用整份设定）
     try {
       mkdirSync("/tmp/fontconfig-cache", { recursive: true });
     } catch {
-      /* 唯讀或已存在都不影響 */
+      /* 唯读或已存在都不影响 */
     }
     const conf = readFileSync(confSrc, "utf8").replace("__FONT_DIR__", fontDir);
     writeFileSync("/tmp/dag-fonts.conf", conf);
     process.env.FONTCONFIG_FILE = "/tmp/dag-fonts.conf";
   } catch {
-    // 字型設定失敗不擋渲染：寧可方框也不能讓歷史寫入陪葬（與縮圖失敗同款語義）
+    // 字型设定失败不挡渲染：宁可方框也不能让历史写入陪葬（与缩图失败同款语义）
   }
 }
 
 /**
- * 端到端：DAG 資料 → PNG buffer（含 layout）。
- * 只能在 Node.js runtime 呼叫（sharp 為原生模組，Edge runtime 一定失敗）。
+ * 端到端：DAG 资料 → PNG buffer（含 layout）。
+ * 只能在 Node.js runtime 呼叫（sharp 为原生模组，Edge runtime 一定失败）。
  */
 export async function renderWorkflowDagPng(
   nodes: DagNodeInput[],

@@ -5,7 +5,7 @@ import { runCallbackWorkerOnce } from "@/lib/generation-core/callback-outbox";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 /**
  * Cron-triggered entrypoint that drains due callback_delivery rows once per call.
@@ -39,16 +39,16 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * 每分鐘觸發的 cron 入口，帶 Authorization: Bearer ${CRON_SECRET}。
+ * 每分钟触发的 cron 入口，带 Authorization: Bearer ${CRON_SECRET}。
  *
- * **不要把 `crons` 加回 vercel.json。** 兩個獨立原因：
- * 1. 本專案是 Hobby 帳號，`* * * * *` 直接讓整個 deploy 失敗
- *    （"Hobby accounts are limited to daily cron jobs"），連同批其他改動一起擋掉。
- * 2. 更根本：`callback_delivery` 表住在 VPS 控制面的 Postgres，那個容器不發佈任何
- *    埠，且 Vercel 上沒有 `GENERATION_DATABASE_URL`。所以就算升級 Pro，Vercel 端的
- *    cron 也永遠抽不到任何 outbox row。
+ * **不要把 `crons` 加回 vercel.json。** 两个独立原因：
+ * 1. 本专案是 Hobby 帐号，`* * * * *` 直接让整个 deploy 失败
+ *    （"Hobby accounts are limited to daily cron jobs"），连同批其他改动一起挡掉。
+ * 2. 更根本：`callback_delivery` 表住在 VPS 控制面的 Postgres，那个容器不发布任何
+ *    埠，且 Vercel 上没有 `GENERATION_DATABASE_URL`。所以就算升级 Pro，Vercel 端的
+ *    cron 也永远抽不到任何 outbox row。
  *
- * 真正的觸發來自 VPS crontab，每分鐘打控制面自己的這個路由（見
+ * 真正的触发来自 VPS crontab，每分钟打控制面自己的这个路由（见
  * /usr/local/bin/drain-callback-outbox.sh），用 `x-internal-worker-secret` 走 POST。
  */
 export async function GET(req: NextRequest) {

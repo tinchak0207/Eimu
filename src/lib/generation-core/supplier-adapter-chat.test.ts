@@ -84,22 +84,22 @@ function mockFetch(routes: Array<{ match: (url: string) => boolean; body: unknow
   };
 }
 
-test("chatImageOutput：data URL 優先抽 base64（取第一個）", () => {
-  const content = "前綴文字 ![image](data:image/jpeg;base64,/9j/4AAQSkZJRg==) 中綴 ![image](data:image/png;base64,AAAA) 後綴";
+test("chatImageOutput：data URL 优先抽 base64（取第一个）", () => {
+  const content = "前缀文字 ![image](data:image/jpeg;base64,/9j/4AAQSkZJRg==) 中缀 ![image](data:image/png;base64,AAAA) 后缀";
   const result = chatImageOutput(content);
   assert.equal(result.base64, "/9j/4AAQSkZJRg==");
   assert.equal(result.url, null);
 });
 
-test("chatImageOutput：沒有 data URL 時抽 http URL markdown", () => {
-  const content = "看這張 ![generated](https://cdn.example/img.png)";
+test("chatImageOutput：没有 data URL 时抽 http URL markdown", () => {
+  const content = "看这张 ![generated](https://cdn.example/img.png)";
   const result = chatImageOutput(content);
   assert.equal(result.base64, null);
   assert.equal(result.url, "https://cdn.example/img.png");
 });
 
-test("chatImageOutput：兩者皆無 → null/null", () => {
-  const result = chatImageOutput("模型只回了純文字");
+test("chatImageOutput：两者皆无 → null/null", () => {
+  const result = chatImageOutput("模型只回了纯文字");
   assert.equal(result.base64, null);
   assert.equal(result.url, null);
 });
@@ -114,7 +114,7 @@ test("chat 模型走 /chat/completions：content 抽 base64 成功", async () =>
   try {
     const output = await generateWithSupplier(supplier({ supplierModelId: "gemini-3-pro-image" }), input("gemini-3-image"));
     assert.equal(mock.calls.length, 1);
-    assert.ok(mock.calls[0].url.endsWith("/chat/completions"), "應打 /chat/completions");
+    assert.ok(mock.calls[0].url.endsWith("/chat/completions"), "应打 /chat/completions");
     const body = JSON.parse(String(mock.calls[0].body));
     assert.equal(body.model, "gemini-3-pro-image");
     assert.equal(body.messages[0].role, "user");
@@ -143,7 +143,7 @@ test("chat 模型走 /chat/completions：content 抽 http URL 成功", async () 
   }
 });
 
-test("chat 模型帶 references：請求體是多段 content（text + image_url）", async () => {
+test("chat 模型带 references：请求体是多段 content（text + image_url）", async () => {
   const mock = mockFetch([
     {
       match: (u) => u.endsWith("/chat/completions"),
@@ -166,24 +166,24 @@ test("chat 模型帶 references：請求體是多段 content（text + image_url�
   }
 });
 
-test("chat 模型空結果：報 Supplier result was empty", async () => {
+test("chat 模型空结果：报 Supplier result was empty", async () => {
   const mock = mockFetch([
     {
       match: (u) => u.endsWith("/chat/completions"),
-      body: { choices: [{ message: { content: "模型只回了純文字" } }] },
+      body: { choices: [{ message: { content: "模型只回了纯文字" } }] },
     },
   ]);
   try {
     await assert.rejects(
       generateWithSupplier(supplier({ supplierModelId: "gemini-3-pro-image" }), input("gemini-3-image")),
-      /Supplier chat image result was empty\. Content preview: 模型只回了純文字/,
+      /Supplier chat image result was empty\. Content preview: 模型只回了纯文字/,
     );
   } finally {
     mock.restore();
   }
 });
 
-test("非 chat 模型仍走 /images/generations（回歸保護）", async () => {
+test("非 chat 模型仍走 /images/generations（回归保护）", async () => {
   const mock = mockFetch([
     {
       match: (u) => u.endsWith("/images/generations"),
@@ -192,14 +192,14 @@ test("非 chat 模型仍走 /images/generations（回歸保護）", async () => 
   ]);
   try {
     const output = await generateWithSupplier(supplier(), input("gpt-image-2"));
-    assert.ok(mock.calls[0].url.endsWith("/images/generations"), "應打 /images/generations");
+    assert.ok(mock.calls[0].url.endsWith("/images/generations"), "应打 /images/generations");
     assert.equal(output.base64, "BBBB");
   } finally {
     mock.restore();
   }
 });
 
-test("chatImageModels 未配置時：模型不走 chat 路徑（回歸保護）", async () => {
+test("chatImageModels 未配置时：模型不走 chat 路径（回归保护）", async () => {
   const mock = mockFetch([
     {
       match: (u) => u.endsWith("/images/generations"),

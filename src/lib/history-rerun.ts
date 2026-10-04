@@ -1,14 +1,14 @@
-// 歷史「再來 N 組／微調變體」：workflow-recall payload 級重跑（MJ --r/Vary 等價）。
+// 历史「再来 N 组／微调变体」：workflow-recall payload 级重跑（MJ --r/Vary 等价）。
 //
-// 與會話級的 agent 重跑（把 prompt 念回給助理、讓它重新決定參數）不同：這裡把
-// 該條歷史記錄的完整配方 payload（HistoryEntry.workflow 六槽 + 模型 + 尺寸）
-// 原樣（或按微調覆寫）批量提交到既有 /api/generation-jobs 任務通道——每個任務
-// 獨立走帳本預檢，餘額不足會在提交時被 402 擋下，不會先跑後扣。
+// 与会话级的 agent 重跑（把 prompt 念回给助理、让它重新决定参数）不同：这里把
+// 该条历史记录的完整配方 payload（HistoryEntry.workflow 六槽 + 模型 + 尺寸）
+// 原样（或按微调覆写）批量提交到既有 /api/generation-jobs 任务通道——每个任务
+// 独立走帐本预检，余额不足会在提交时被 402 挡下，不会先跑后扣。
 //
-// 衍生關聯：提交時帶 retryOfTaskId 指回源任務。它同時是父鏈（歷史燈箱顯示
-// 「衍生自」）與參考圖繼承通道（任務系統按父任務帶回參考圖，前端無需重新
-// 上傳）。源記錄不是任務隊列任務（例如同步管道直出）時沒有 taskId，重跑仍
-// 可進行，只是無父鏈、參考圖無法自動找回——對話框裡要把這件事說出來。
+// 衍生关联：提交时带 retryOfTaskId 指回源任务。它同时是父链（历史灯箱显示
+// 「衍生自」）与参考图继承通道（任务系统按父任务带回参考图，前端无需重新
+// 上传）。源记录不是任务队列任务（例如同步管道直出）时没有 taskId，重跑仍
+// 可进行，只是无父链、参考图无法自动找回——对话框里要把这件事说出来。
 import { extractPromptSection } from "./workflow-recall";
 import { aspectRatioFromImageSize, generationCoins, generationModel } from "./generation-model-catalog";
 import { inferEntryKind, primaryModelId } from "./history-types";
@@ -96,9 +96,9 @@ export function buildHistoryRerunPlan(
       workflow.imageSize = overrideSize;
       workflow.imageSizes = [overrideSize];
     }
-    // REQ-D1 掛鉤 c：源記錄 id 隨配方帶上——源不是任務隊列任務（無 taskId，
-    // retry_of_job_id 無處可落）時，job 投影仍能從這個欄位組出 rerun 血統；
-    // 有 taskId 時它只是冗餘旁註，投影以 retryOfTaskId 為準。
+    // REQ-D1 挂钩 c：源记录 id 随配方带上——源不是任务队列任务（无 taskId，
+    // retry_of_job_id 无处可落）时，job 投影仍能从这个栏位组出 rerun 血统；
+    // 有 taskId 时它只是冗余旁注，投影以 retryOfTaskId 为准。
     workflow.sourceHistoryId = entry.id;
   }
 

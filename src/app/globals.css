@@ -79,9 +79,9 @@
       "Hiragino Sans GB", "Microsoft YaHei", var(--font-geist-sans), system-ui, sans-serif;
     font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
     min-height: 100vh;
-    /* 底色只留純色：環境光漸層已移到 body::after 的固定定位實體層
-       （原因見該處註釋——body 的 background-attachment: fixed 會讓
-       玻璃卡的 backdrop-filter 取樣座標系位移，卡片圓角旁出現色差）。 */
+    /* 底色只留纯色：环境光渐层已移到 body::after 的固定定位实体层
+       （原因见该处注释——body 的 background-attachment: fixed 会让
+       玻璃卡的 backdrop-filter 取样座标系位移，卡片圆角旁出现色差）。 */
     background: #f5fbff;
     overflow-x: clip;
     max-width: 100%;
@@ -112,17 +112,17 @@
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-track { background: transparent; }
-  /* 2026-09-27：細條、懸停才顯示——常駐灰條太吵。 */
+  /* 2026-09-27：细条、悬停才显示——常驻灰条太吵。 */
   *:hover::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.16); background-clip: padding-box; }
 }
 
 @media (max-width: 767px) {
-  /* 2026-10-01：手機端 sticky header 修復。原本 html, body 一起套 overflow-x:hidden，
-     但 body 一旦是 overflow-x:hidden，依規範 overflow-y 由 visible 計算成 auto ⇒ body
-     成為滾動容器，header 的 sticky 就綁在「永不滾動的 body scrollport」上，實際滾動發生在
-     viewport(html) ⇒ header 跟著頁面捲走（桌機 >767px 走 overflow-x:clip，clip 不建立滾動
-     容器，所以正常）。故 body 改用 clip：clip 只裁切、不建立滾動容器，橫向仍不可平移。 */
-  /* html 保留 hidden：裁切需求傳導到 viewport，維持本 media query 原本「禁橫向平移」的目的。 */
+  /* 2026-10-01：手机端 sticky header 修复。原本 html, body 一起套 overflow-x:hidden，
+     但 body 一旦是 overflow-x:hidden，依规范 overflow-y 由 visible 计算成 auto ⇒ body
+     成为滚动容器，header 的 sticky 就绑在「永不滚动的 body scrollport」上，实际滚动发生在
+     viewport(html) ⇒ header 跟著页面卷走（桌机 >767px 走 overflow-x:clip，clip 不建立滚动
+     容器，所以正常）。故 body 改用 clip：clip 只裁切、不建立滚动容器，横向仍不可平移。 */
+  /* html 保留 hidden：裁切需求传导到 viewport，维持本 media query 原本「禁横向平移」的目的。 */
   html {
     width: 100%;
     max-width: 100%;
@@ -187,11 +187,11 @@
     backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
   }
 
-  /* ≤639.98px：頂欄預設完全透明（與頁面底色無縫，見 Navbar 的 max-sm: 覆寫）；只有頁面捲動
-     之後才補一層毛玻璃，否則內容會從圖示底下穿過去。桌面島狀不受影響。
-     ID＋屬性選擇器的特異度蓋過同層的 max-sm:bg-transparent / max-sm:[backdrop-filter:none]，
-     所以捲動態不需動 JSX 的 utility；未捲動時不命中此規則＝仍全透明。
-     只給毛玻璃本身，不補 border / box-shadow——分隔線在手機上很刺眼。 */
+  /* ≤639.98px：顶栏预设完全透明（与页面底色无缝，见 Navbar 的 max-sm: 覆写）；只有页面卷动
+     之后才补一层毛玻璃，否则内容会从图示底下穿过去。桌面岛状不受影响。
+     ID＋属性选择器的特异度盖过同层的 max-sm:bg-transparent / max-sm:[backdrop-filter:none]，
+     所以卷动态不需动 JSX 的 utility；未卷动时不命中此规则＝仍全透明。
+     只给毛玻璃本身，不补 border / box-shadow——分隔线在手机上很刺眼。 */
   @media (max-width: 639.98px) {
     #global-navbar nav[aria-label="主导航"][data-nav-scrolled="true"] {
       background: rgba(255, 255, 255, 0.72);
@@ -200,12 +200,12 @@
     }
   }
 
-  /* ≥768px 桌面島：與左側助理卡同一滴玻璃。2026-10-03 暴君「桌面端兩個大組件背景顏色
-     不對齊，以左邊為基準」——島原本吃 .lg-bar（0.62 白／blur28／saturate200／brightness1.1），
+  /* ≥768px 桌面岛：与左侧助理卡同一滴玻璃。2026-10-03 暴君「桌面端两个大组件背景颜色
+     不对齐，以左边为基准」——岛原本吃 .lg-bar（0.62 白／blur28／saturate200／brightness1.1），
      而面板卡（.canvas-chat-scroll-fill > section.lg-card）是 0.56 白／blur40／saturate180／
-     brightness1.08；同一螢幕並排就是一深一淺。這裡把島降級到卡面同一組數值（blur 半徑不是
-     新增的上限，卡面本來就是 40px）。特異度（ID＋屬性）蓋過同層 .lg-bar。
-     行動版完全不受影響：<640 由上方規則接管，640–767 保持原樣。 */
+     brightness1.08；同一萤幕并排就是一深一浅。这里把岛降级到卡面同一组数值（blur 半径不是
+     新增的上限，卡面本来就是 40px）。特异度（ID＋属性）盖过同层 .lg-bar。
+     行动版完全不受影响：<640 由上方规则接管，640–767 保持原样。 */
   @media (min-width: 768px) {
     #global-navbar nav[aria-label="主导航"] {
       background: rgba(255, 255, 255, 0.56);
@@ -336,10 +336,10 @@
     transition: all 0.25s var(--lg-ease);
   }
 
-  /* ── Eimu 桌面殼視窗拖曳區（Electron only） ──
-     外殼移除了原生 overlay，視窗只能靠這組 CSS 拖動：header 的玻璃島（nav）標 drag，
-     其左組／右簇兩個直接子容器標 no-drag（按鈕全在裡面，不必逐顆標），
-     justify-between 之下的中間空帶即拖曳把手。普通瀏覽器對這兩個屬性完全 inert。 */
+  /* ── Eimu 桌面壳视窗拖曳区（Electron only） ──
+     外壳移除了原生 overlay，视窗只能靠这组 CSS 拖动：header 的玻璃岛（nav）标 drag，
+     其左组／右簇两个直接子容器标 no-drag（按钮全在里面，不必逐颗标），
+     justify-between 之下的中间空带即拖曳把手。普通浏览器对这两个属性完全 inert。 */
   .app-region-drag {
     -webkit-app-region: drag;
     app-region: drag;
@@ -512,7 +512,7 @@
   }
 }
 
-/* DESIGN.md §5：頂緣 specular 亮線（玻璃折射三要素之一）。 */
+/* DESIGN.md §5：顶缘 specular 亮线（玻璃折射三要素之一）。 */
 .driver-popover.atc-tour-popover::before {
   content: "";
   position: absolute;
@@ -526,14 +526,14 @@
 
 .driver-popover.atc-tour-popover .driver-popover-title {
   color: hsl(222 18% 22%);
-  font-size: 0.9375rem; /* 15px = DESIGN.md 標題層級下限 */
+  font-size: 0.9375rem; /* 15px = DESIGN.md 标题层级下限 */
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .driver-popover.atc-tour-popover .driver-popover-description {
   color: hsl(220 10% 40%);
-  font-size: 0.8125rem; /* 13px：正文不小於 13px（DESIGN.md §4 硬規則） */
+  font-size: 0.8125rem; /* 13px：正文不小于 13px（DESIGN.md §4 硬规则） */
   line-height: 1.6;
 }
 
@@ -658,13 +658,13 @@
   .paper-float  { @apply lg-float; border-radius: 9999px; }
 
 /* ── Force body background outside any layer — highest specificity ── */
-/* ── 環境光漸層（Trans flag ambient：#55CDFC 蓝 / #F7A8B8 粉，极淡）──
+/* ── 环境光渐层（Trans flag ambient：#55CDFC 蓝 / #F7A8B8 粉，极淡）──
    2026-09-11：由 body 的 background-attachment: fixed 改为「固定定位的实体层」。
-   原因：Chromium 在 backdrop-filter 的元素上取樣 fixed 背景時座標系會位移，
-   .lg-card（blur(40px) saturate(1.8)）四周因此出現與卡片外接矩形對齊的色差，
-   四個圓角旁最明顯（圓角外仍是外接矩形，色差露在最外面）。
-   改成 position: fixed 的实体层后，backdrop 取樣回到正常座標系、色差消失，
-   而「光晕不隨滾動移動」的視覺完全不變。 */
+   原因：Chromium 在 backdrop-filter 的元素上取样 fixed 背景时座标系会位移，
+   .lg-card（blur(40px) saturate(1.8)）四周因此出现与卡片外接矩形对齐的色差，
+   四个圆角旁最明显（圆角外仍是外接矩形，色差露在最外面）。
+   改成 position: fixed 的实体层后，backdrop 取样回到正常座标系、色差消失，
+   而「光晕不随滚动移动」的视觉完全不变。 */
 body {
   background: #f5fbff;
 }
@@ -694,10 +694,10 @@ body::after {
     );
 }
 
-/* ── 首頁輸入欄（≥xl）：跟隨右側結果卡的高度鏈 ──
-   結果欄（ImageDisplay）一直吃滿欄高，輸入卡過去由內容高決定，下方留一片空白。
-   這裡讓輸入卡在 ≥xl 吃滿所在欄位高度；內容超出時收進卡片內部滾動
-   （<xl 不受影響，仍是文檔流自然高 + 整頁滾動）。 */
+/* ── 首页输入栏（≥xl）：跟随右侧结果卡的高度链 ──
+   结果栏（ImageDisplay）一直吃满栏高，输入卡过去由内容高决定，下方留一片空白。
+   这里让输入卡在 ≥xl 吃满所在栏位高度；内容超出时收进卡片内部滚动
+   （<xl 不受影响，仍是文档流自然高 + 整页滚动）。 */
 @media (min-width: 1280px) {
   .playground-column-fill {
     display: flex;
@@ -705,9 +705,9 @@ body::after {
     min-height: 0;
     overflow: hidden;
   }
-  /* 中間兩層（欄 wrapper > CanvasChatWorkstation 的 div > 卡片直屬父層）都要是
-     縱向 flex 鏈，卡片自身的 flex-1 才咬得住。第二條用 :has 精準指名「卡片的
-     直屬父層」，避免用 `div div` 之類會誤傷卡片內部版面的選擇器。 */
+  /* 中间两层（栏 wrapper > CanvasChatWorkstation 的 div > 卡片直属父层）都要是
+     纵向 flex 链，卡片自身的 flex-1 才咬得住。第二条用 :has 精准指名「卡片的
+     直属父层」，避免用 `div div` 之类会误伤卡片内部版面的选择器。 */
   .playground-column-fill > div,
   .playground-column-fill div:has(> section.lg-card) {
     display: flex;
@@ -829,14 +829,14 @@ body::after {
   will-change: filter, transform, opacity;
 }
 
-/* 散開：向上模糊消失 */
+/* 散开：向上模糊消失 */
 @keyframes dust-exit-kf {
   0%   { opacity: 1; filter: blur(0px);   transform: scale(1)    translateY(0px); }
   50%  { opacity: 0.5; filter: blur(6px);  transform: scale(0.97) translateY(-6px); }
   100% { opacity: 0;   filter: blur(12px); transform: scale(0.93) translateY(-14px); }
 }
 
-/* 重組：從下方模糊匯聚進來 */
+/* 重组：从下方模糊汇聚进来 */
 @keyframes dust-enter-kf {
   0%   { opacity: 0;   filter: blur(10px); transform: scale(1.03) translateY(14px); }
   60%  { opacity: 0.85; filter: blur(2px);  transform: scale(1.01) translateY(-2px); }
@@ -853,11 +853,11 @@ body::after {
   pointer-events: none;
 }
 
-/* ─── Agent 聊天區高度（PromptInput AGENT_SURFACE_HEIGHT）───────────
+/* ─── Agent 聊天区高度（PromptInput AGENT_SURFACE_HEIGHT）───────────
     桌面：clamp(400px, calc(100dvh - 240px), 820px)——下方保留改图/放大/AI
-    助理按鈕行 + 頁面 padding 的空間，避免按鈕被推出可視區。
-    行動端：clamp(320px, 60dvh, 820px)——獨立處理，鍵盤彈出時靠 composer
-    anchor scroll 邏輯處理。 */
+    助理按钮行 + 页面 padding 的空间，避免按钮被推出可视区。
+    行动端：clamp(320px, 60dvh, 820px)——独立处理，键盘弹出时靠 composer
+    anchor scroll 逻辑处理。 */
 :root {
   --agent-surface-height: clamp(400px, calc(100dvh - 240px), 820px);
 }
@@ -912,7 +912,7 @@ body::after {
   }
 }
 
-/* 卡片內文字呼吸：光暈/色彩/明度緩慢脈動，與粒子海同頻不同相 */
+/* 卡片内文字呼吸：光晕/色彩/明度缓慢脉动，与粒子海同频不同相 */
 .sea-waiting-value {
   animation: sea-value-breathe 4.2s ease-in-out infinite alternate;
 }
@@ -961,22 +961,22 @@ body::after {
   }
 }
 
-/* 畫布節點卡（2026-10-01 效能審計 P1-3）：卡片浮在平坦的淺色點陣底上，40px 背景模糊在視覺上等於「近白」，
-   卻要求每幀為每張卡重取樣背景再模糊——Intel 核顯上平移/縮放掉到 30fps 的主因之一。
-   改用不透明近白（≈ 原玻璃壓在畫布底上的觀感）；描邊、亮線、陰影仍走 lg-card。 */
+/* 画布节点卡（2026-10-01 效能审计 P1-3）：卡片浮在平坦的浅色点阵底上，40px 背景模糊在视觉上等于「近白」，
+   却要求每帧为每张卡重取样背景再模糊——Intel 核显上平移/缩放掉到 30fps 的主因之一。
+   改用不透明近白（≈ 原玻璃压在画布底上的观感）；描边、亮线、阴影仍走 lg-card。 */
 .lg-card.lg-card-canvas {
   background: rgba(255, 255, 255, 0.94);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
 
-/* ─────────────────────────────────────────── 語義縮放（Semantic Zoom，2026-09-30 打磨）
-   k 是唯一真源：CanvasEmbed 每幀把 lodBlend(k) 寫進內容層 CSS 變數，節點不為轉場多 render。
-   --lod-g            聚合係數（easeOut 後，0＝協作、1＝鳥瞰）
-   --lod-node-scale   / --lod-node-opacity / --lod-blur  聚合態節點視覺
-   --lod-xray         透析係數（0→1）
-   節點自帶靜態 --gx/--gy（到階段質心的世界位移）。
-   聚合用獨立屬性 translate/scale＋filter:opacity，不碰既有 transform/opacity 過渡（無追尾延遲）。 */
+/* ─────────────────────────────────────────── 语义缩放（Semantic Zoom，2026-09-30 打磨）
+   k 是唯一真源：CanvasEmbed 每帧把 lodBlend(k) 写进内容层 CSS 变数，节点不为转场多 render。
+   --lod-g            聚合系数（easeOut 后，0＝协作、1＝鸟瞰）
+   --lod-node-scale   / --lod-node-opacity / --lod-blur  聚合态节点视觉
+   --lod-xray         透析系数（0→1）
+   节点自带静态 --gx/--gy（到阶段质心的世界位移）。
+   聚合用独立属性 translate/scale＋filter:opacity，不碰既有 transform/opacity 过渡（无追尾延迟）。 */
 [data-lod-gathering] .lod-node {
   translate: calc(var(--lod-g, 0) * var(--gx, 0) * 1px) calc(var(--lod-g, 0) * var(--gy, 0) * 1px);
   scale: var(--lod-node-scale, 1);
@@ -992,7 +992,7 @@ body::after {
   opacity: calc(1 - var(--lod-g, 0));
 }
 
-/* 點階段卡飛行途中：非目標階段節點壓暗（opacity 走節點既有 300ms 過渡，落地後柔和恢復）。 */
+/* 点阶段卡飞行途中：非目标阶段节点压暗（opacity 走节点既有 300ms 过渡，落地后柔和恢复）。 */
 [data-focus-stage="1"] .lod-node:not([data-lod-stage="1"]),
 [data-focus-stage="2"] .lod-node:not([data-lod-stage="2"]),
 [data-focus-stage="3"] .lod-node:not([data-lod-stage="3"]),
@@ -1000,7 +1000,7 @@ body::after {
   opacity: 0.35;
 }
 
-/* 透析 focus 模式：被透析的卡抬起，其餘退成灰影。 */
+/* 透析 focus 模式：被透析的卡抬起，其余退成灰影。 */
 [data-eng-focus] .lod-node:not([data-eng-focused]) {
   opacity: 0.25;
   filter: grayscale(1);
@@ -1010,10 +1010,10 @@ body::after {
   z-index: 40;
 }
 
-/* 拆機（LOD3）：卡面＝背板，隨 --lod-xray 掀起（上移、微放大、淡出），露出底下的電路板。
-   只在透析帶內掛規則（[data-lod-xray]），平常卡片不多出任何屬性。 */
-/* --lod-xray 註冊成可插值的數：透析中的節點把它過渡到 1（背板滑開），關閉後過渡回畫布值。
-   只有 focused/release 兩態的節點宣告 transition——一般節點仍逐幀跟畫布走，不被拖慢。 */
+/* 拆机（LOD3）：卡面＝背板，随 --lod-xray 掀起（上移、微放大、淡出），露出底下的电路板。
+   只在透析带内挂规则（[data-lod-xray]），平常卡片不多出任何属性。 */
+/* --lod-xray 注册成可插值的数：透析中的节点把它过渡到 1（背板滑开），关闭后过渡回画布值。
+   只有 focused/release 两态的节点宣告 transition——一般节点仍逐帧跟画布走，不被拖慢。 */
 @property --lod-xray {
   syntax: "<number>";
   inherits: true;
@@ -1024,33 +1024,33 @@ body::after {
   transition: --lod-xray 560ms cubic-bezier(0.34, 1.2, 0.64, 1) 0ms !important;
 }
 [data-lod-xray] .lod-cover {
-  /* 正文區像滑蓋一樣從下往上收：每一點要嘛是原正文、要嘛是內部參數，不做半透明混色。 */
+  /* 正文区像滑盖一样从下往上收：每一点要嘛是原正文、要嘛是内部参数，不做半透明混色。 */
   clip-path: inset(0 0 calc(var(--lod-xray, 0) * 100%) 0 round 0 0 16px 16px);
 }
 [data-lod-xray-open] .lod-cover {
   pointer-events: none;
 }
-/* 蓋在原正文上的浮層控件（參考圖角色等）隨蓋子一起退場。 */
+/* 盖在原正文上的浮层控件（参考图角色等）随盖子一起退场。 */
 [data-lod-xray] .lod-cover-overlay {
   opacity: clamp(0, calc(1 - var(--lod-xray, 0) * 4), 1);
 }
 [data-lod-xray-open] .lod-cover-overlay {
   pointer-events: none;
 }
-/* 滑蓋下緣：頂緣 specular 亮線＋投在內容上的淡陰影，跟著蓋子往上走；全開/全關時隱去。 */
+/* 滑盖下缘：顶缘 specular 亮线＋投在内容上的淡阴影，跟著盖子往上走；全开/全关时隐去。 */
 .lod-lid-edge {
   top: calc((1 - var(--lod-xray, 0)) * 100% - 1px);
   opacity: clamp(0, calc(min(var(--lod-xray, 0), 1 - var(--lod-xray, 0)) * 12), 1);
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.95) 1px, rgba(45, 49, 66, 0.12) 1px, rgba(45, 49, 66, 0) 12px);
 }
-/* 內部參數字級＝13px/√k（世界）：螢幕上 13×√k——進工程層時≈14px 與原正文銜接，
-   再放大字溫和變大、與卡片標題保持比例；世界字級持續縮小＝同一張卡裝得下更多行。 */
+/* 内部参数字级＝13px/√k（世界）：萤幕上 13×√k——进工程层时≈14px 与原正文衔接，
+   再放大字温和变大、与卡片标题保持比例；世界字级持续缩小＝同一张卡装得下更多行。 */
 .lod-inspect {
   font-size: calc(13px * var(--canvas-inverse-sqrt, 1));
   line-height: 1.45;
 }
 
-/* 狀態脈衝 / 骨架掃光 / 段落升起 / 光束流動 */
+/* 状态脉冲 / 骨架扫光 / 段落升起 / 光束流动 */
 @keyframes lod-pulse-ring {
   0% {
     box-shadow: 0 0 0 0 var(--pulse-color, rgba(0, 122, 255, 0.45));
@@ -1106,7 +1106,7 @@ body::after {
   }
 }
 
-/* 鳥瞰卡 hover：上浮 4px、陰影加深（進行中卡保留階段色柔光）、縮圖輕推。 */
+/* 鸟瞰卡 hover：上浮 4px、阴影加深（进行中卡保留阶段色柔光）、缩图轻推。 */
 .lod-stage-hover {
   transition: translate 220ms cubic-bezier(0.2, 0.9, 0.2, 1), box-shadow 220ms ease-out;
 }
@@ -1127,15 +1127,15 @@ body::after {
   transition: opacity 320ms ease-out;
 }
 
-/* ── 定價／行銷頁手機字級地板（2026-10-04）─────────────────────────────
-   這批頁面在 ≤639.98px 沒有字級地板：首頁 ImagePlayground（含子區塊
-   FaqSection／UseCaseLinks）與 /pricing 的 PricingClient（含其內 PricingPlanCarousel）
-   會把 11／12px 的 caption2／caption1 與 13px 的 footnote 直接漏出。錨點取兩條
-   頁面宿主類別：`.page-shell`＝站內頁面容器（首頁與 FAQ／用例區塊都在它子樹內），
-   `.p3d-page`＝定價頁根容器（PricingPlanCarousel 在它裡面）。分層抬法照
-   agent-chat.css 的窄屏字級階梯（footnote→15、caption1／caption2→14，只覆寫
-   font-size，line-height 沿用 token，零額外版面位移）；規則全包在 @media 內，
-   桌面 ≥640px 一字不動。 */
+/* ── 定价／行销页手机字级地板（2026-10-04）─────────────────────────────
+   这批页面在 ≤639.98px 没有字级地板：首页 ImagePlayground（含子区块
+   FaqSection／UseCaseLinks）与 /pricing 的 PricingClient（含其内 PricingPlanCarousel）
+   会把 11／12px 的 caption2／caption1 与 13px 的 footnote 直接漏出。锚点取两条
+   页面宿主类别：`.page-shell`＝站内页面容器（首页与 FAQ／用例区块都在它子树内），
+   `.p3d-page`＝定价页根容器（PricingPlanCarousel 在它里面）。分层抬法照
+   agent-chat.css 的窄屏字级阶梯（footnote→15、caption1／caption2→14，只覆写
+   font-size，line-height 沿用 token，零额外版面位移）；规则全包在 @media 内，
+   桌面 ≥640px 一字不动。 */
 @media (max-width: 639.98px) {
   .page-shell .text-ios-footnote,
   .p3d-page .text-ios-footnote {

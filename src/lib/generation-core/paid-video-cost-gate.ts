@@ -1,56 +1,56 @@
 /**
- * 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）。
+ * 付费视频上游硬闸（2026-09-27 ¥31.2857 事故后立）。
  *
- * ── 事故因果（本閘要堵的地雷）────────────────────────────────────────────
- * `api.xiaoyxiao.xyz` 的 `dreamina-seedance-2.0` 是**按 resolution/seconds 變動**
- * 的動態價模型（上游 billing_expr：`6.25714288 * u("seconds")`，計價隨 resolution
- * 分 tier）。前代理對 32 條模型發迴圈探針，body 只帶 `{"model":…,"seconds":"5"}`
- * 而**未帶 resolution** → 上游 resolution 缺省＝**4k** → 一筆即
- * `6.25714288 * 5 = ¥31.2857`（上游日誌 logid=3、matched_tier=4k 實錘）。
- * ⇒ 缺省值本身就是要命的定價輸入，所以本閘對 resolution 採 **fail-closed**：
- * 缺省／空字串／非白名單值一律拒收，絕不讓上游拿到缺省值。
+ * ── 事故因果（本闸要堵的地雷）────────────────────────────────────────────
+ * `api.xiaoyxiao.xyz` 的 `dreamina-seedance-2.0` 是**按 resolution/seconds 变动**
+ * 的动态价模型（上游 billing_expr：`6.25714288 * u("seconds")`，计价随 resolution
+ * 分 tier）。前代理对 32 条模型发回圈探针，body 只带 `{"model":…,"seconds":"5"}`
+ * 而**未带 resolution** → 上游 resolution 缺省＝**4k** → 一笔即
+ * `6.25714288 * 5 = ¥31.2857`（上游日志 logid=3、matched_tier=4k 实锤）。
+ * ⇒ 缺省值本身就是要命的定价输入，所以本闸对 resolution 采 **fail-closed**：
+ * 缺省／空字串／非白名单值一律拒收，绝不让上游拿到缺省值。
  *
- * 白名單內 7 條全部是 **quota_type=1 按次固定價**（`model_price` 固定、無
- * `billing_usage_schema`），不隨 resolution/seconds 變動；非白名單的動態價模型
- * 一律拒收——這就是白名單的設計依據。
+ * 白名单内 7 条全部是 **quota_type=1 按次固定价**（`model_price` 固定、无
+ * `billing_usage_schema`），不随 resolution/seconds 变动；非白名单的动态价模型
+ * 一律拒收——这就是白名单的设计依据。
  *
- * ── 秒數上限為何放寬到 30（2026-09-27 裁定，決策來源）────────────────────
- * 初始上限 5 是 AGENTS.md「付費上游呼叫硬閘」的通用值，但對本白名單**不是成本
- * 控制**：7 條皆按次固定價（同上），seconds 走 4 或 30 單價一分不差。5 只是
- * 「沒登錄長時長三元組」的副作用，且會把 catalog 最短時長＝10s 的三條在售 model
- * （seedance-2.0 / seedance-2.5-480p / seedance-2.5-720p）全部擋死。
- * 裁定：`PAID_VIDEO_MAX_SECONDS = 30`（＝catalog 最長時長），並把「已核價三元組」
- * 改為**由 catalog 生成**（見下），避免 catalog 改動後閘門落後。**三條紅線一字
+ * ── 秒数上限为何放宽到 30（2026-09-27 裁定，决策来源）────────────────────
+ * 初始上限 5 是 AGENTS.md「付费上游呼叫硬闸」的通用值，但对本白名单**不是成本
+ * 控制**：7 条皆按次固定价（同上），seconds 走 4 或 30 单价一分不差。5 只是
+ * 「没登录长时长三元组」的副作用，且会把 catalog 最短时长＝10s 的三条在售 model
+ * （seedance-2.0 / seedance-2.5-480p / seedance-2.5-720p）全部挡死。
+ * 裁定：`PAID_VIDEO_MAX_SECONDS = 30`（＝catalog 最长时长），并把「已核价三元组」
+ * 改为**由 catalog 生成**（见下），避免 catalog 改动后闸门落后。**三条红线一字
  * 不改**：
- *   ① 4k/2k/1080p 無條件拒收（上限仍 ≤720p）；
+ *   ① 4k/2k/1080p 无条件拒收（上限仍 ≤720p）；
  *   ② resolution 缺省／空字串拒收（上游缺省＝4k）；
- *   ③ 白名單外 model 拒收；`seconds > 30` 拒收。
+ *   ③ 白名单外 model 拒收；`seconds > 30` 拒收。
  *
- * ── 三元組＝catalog 生成（單一真源，禁止手抄）─────────────────────────────
- * 來源鏈：`supplier-channels.config.ts` 的 **xiaoyxiao claims**（平台 model id →
- * 上游 model 名，唯一映射真源）× `GENERATION_MODEL_CATALOG`（該平台 model 的
- * `durations` 與 `resolutions`）× 本檔 `PAID_VIDEO_ALLOWED_RESOLUTIONS`（≤720p）。
- * 交集即登錄；**沒有登錄＝拒收**（`triple_not_priced`），禁止現場猜檔位語義。
- * 後果：catalog 加時長/加檔位，閘門自動跟上；catalog 沒有的組合永遠進不來。
- * 上游單價是站外事實：2026-09-28 V-03 起按（供給 label, 上游 model）存在
- * `supplier-channels.config.ts` 的 claim `unitPriceCny/priceSource`；claim 無價時才回退
- * `PAID_VIDEO_UNIT_PRICE_CNY`（xiaoyxiao 價，附來源原文，保留為兜底）。未核價的
- * 上游 model **不生成任何三元組**（等於不許提交）。
- * `grok-video-1.5` 在白名單內但**無公開 model id ⇒ 無 claim ⇒ 零三元組 ⇒ 一律
- * 拒收**（2026-09-27 暴君裁定「先搁置留 memory」，見 notes/2026-09-27-grok-video-15-shelved.md）。
+ * ── 三元组＝catalog 生成（单一真源，禁止手抄）─────────────────────────────
+ * 来源链：`supplier-channels.config.ts` 的 **xiaoyxiao claims**（平台 model id →
+ * 上游 model 名，唯一映射真源）× `GENERATION_MODEL_CATALOG`（该平台 model 的
+ * `durations` 与 `resolutions`）× 本档 `PAID_VIDEO_ALLOWED_RESOLUTIONS`（≤720p）。
+ * 交集即登录；**没有登录＝拒收**（`triple_not_priced`），禁止现场猜档位语义。
+ * 后果：catalog 加时长/加档位，闸门自动跟上；catalog 没有的组合永远进不来。
+ * 上游单价是站外事实：2026-09-28 V-03 起按（供给 label, 上游 model）存在
+ * `supplier-channels.config.ts` 的 claim `unitPriceCny/priceSource`；claim 无价时才回退
+ * `PAID_VIDEO_UNIT_PRICE_CNY`（xiaoyxiao 价，附来源原文，保留为兜底）。未核价的
+ * 上游 model **不生成任何三元组**（等于不许提交）。
+ * `grok-video-1.5` 在白名单内但**无公开 model id ⇒ 无 claim ⇒ 零三元组 ⇒ 一律
+ * 拒收**（2026-09-27 暴君裁定「先搁置留 memory」，见 notes/2026-09-27-grok-video-15-shelved.md）。
  *
- * ── 作用域鐵律（2026-09-27 暴君追加，違反＝誤傷）────────────────────────
- * 本模組**只准在 video 提交路徑**上執行。2026-09-28 V-03（docs/architecture/
- * planes.md §4）起，執行點由供給 adapter（`openai-video-upstream.ts`）移到生產平面
- * `worker-service.ts` 的 `submitWithSupplyCostGate`：取得租約後、呼叫供給前，且**只**
- * 在 `job.kind === "video_generate"` 時呼叫；`openai_video` 協議 fail-closed（行為同
- * 搬遷前），其他協議只在上游 model 落入白名單時套價檢（metaso/filmera 等現有路徑不受影響）。
- * 嚴禁寫進任何共用層：通用 resolution/size 校驗、模型目錄（catalog）、
- * node-metadata 白名單、scheduler／派單層、或任何被圖片路徑 import 的模組。
- * 理由：我方 53 條圖片 capability 帶 `{1k,2k,4k}` 檔位（gpt-image-2 家族、
- * image-5、pixai-edit/template/upscale、seedream），全域 4k 禁令＝砍掉可賣
- * 高階圖片檔位且會靜默失敗。白名單只含視頻 model，圖片 model 不經本閘。
- * （本檔 import catalog 與 registry 是**讀取**；反向 import 才是違規。）
+ * ── 作用域铁律（2026-09-27 暴君追加，违反＝误伤）────────────────────────
+ * 本模组**只准在 video 提交路径**上执行。2026-09-28 V-03（docs/architecture/
+ * planes.md §4）起，执行点由供给 adapter（`openai-video-upstream.ts`）移到生产平面
+ * `worker-service.ts` 的 `submitWithSupplyCostGate`：取得租约后、呼叫供给前，且**只**
+ * 在 `job.kind === "video_generate"` 时呼叫；`openai_video` 协议 fail-closed（行为同
+ * 搬迁前），其他协议只在上游 model 落入白名单时套价检（metaso/filmera 等现有路径不受影响）。
+ * 严禁写进任何共用层：通用 resolution/size 校验、模型目录（catalog）、
+ * node-metadata 白名单、scheduler／派单层、或任何被图片路径 import 的模组。
+ * 理由：我方 53 条图片 capability 带 `{1k,2k,4k}` 档位（gpt-image-2 家族、
+ * image-5、pixai-edit/template/upscale、seedream），全域 4k 禁令＝砍掉可卖
+ * 高阶图片档位且会静默失败。白名单只含视频 model，图片 model 不经本闸。
+ * （本档 import catalog 与 registry 是**读取**；反向 import 才是违规。）
  */
 
 import { GENERATION_MODEL_CATALOG } from "../generation-model-catalog";
@@ -58,24 +58,24 @@ import { REGISTRY_CHANNELS } from "../supplier-channels.config";
 import { SupplierRequestError } from "./failure-classifier";
 
 /**
- * 單次秒數硬上限。
+ * 单次秒数硬上限。
  *
- * 2026-09-27 裁定：5 → 10 → **30（＝catalog 最長時長）**。白名單皆按次固定價，
- * 秒數不影響單價 ⇒ 放寬零成本。`seconds > 30` 仍拒收。
+ * 2026-09-27 裁定：5 → 10 → **30（＝catalog 最长时长）**。白名单皆按次固定价，
+ * 秒数不影响单价 ⇒ 放宽零成本。`seconds > 30` 仍拒收。
  */
 export const PAID_VIDEO_MAX_SECONDS = 30;
 
 /**
- * 允許送給付費視頻上游的 resolution 白名單（上限 ≤720p）。
- * 4k/2k/1080p/540p/360p 一律不在內 ⇒ 直接拒收。
+ * 允许送给付费视频上游的 resolution 白名单（上限 ≤720p）。
+ * 4k/2k/1080p/540p/360p 一律不在内 ⇒ 直接拒收。
  */
 export const PAID_VIDEO_ALLOWED_RESOLUTIONS = ["480p", "720p"] as const;
 
 export type PaidVideoResolution = (typeof PAID_VIDEO_ALLOWED_RESOLUTIONS)[number];
 
 /**
- * 上游 model 白名單（暴君 2026-09-27 裁定，逐字，**唯一真源**）。
- * 白名單外的 model id 一律不許發請求。
+ * 上游 model 白名单（暴君 2026-09-27 裁定，逐字，**唯一真源**）。
+ * 白名单外的 model id 一律不许发请求。
  */
 export const PAID_VIDEO_MODEL_WHITELIST = [
   "minimax-h3-933-2k-支持真人",
@@ -90,9 +90,9 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
 export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];
 
 /**
- * 上游按次單價（人民幣元／次）＋來源。**站外事實，無法從 catalog 推導**，故顯式。
+ * 上游按次单价（人民币元／次）＋来源。**站外事实，无法从 catalog 推导**，故显式。
  *
- * 來源原文（`GET https://api.xiaoyxiao.xyz/api/pricing`，2026-09-27 免登入唯讀實查，
+ * 来源原文（`GET https://api.xiaoyxiao.xyz/api/pricing`，2026-09-27 免登入唯读实查，
  * HTTP 200 / 28280 bytes / 32 model）：
  *   seedance-2.0-900-特惠        quota_type=1 model_price=0.7
  *   seedance-2.5-900-特惠        quota_type=1 model_price=0.9
@@ -102,7 +102,7 @@ export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];
  *   seedance-2.5-1010-特惠       quota_type=1 model_price=1.6
  *   minimax-h3-a                 quota_type=1 model_price=1.6
  * 全部 `billing_usage_schema=null`、`billing_usage_examples=null`、`quota_type=1`
- * ⇒ 按次固定價，**不隨 resolution/seconds 變動**（放寬秒數的依據）。
+ * ⇒ 按次固定价，**不随 resolution/seconds 变动**（放宽秒数的依据）。
  */
 export const PAID_VIDEO_UNIT_PRICE_CNY: Record<PaidVideoModelId, number> = {
   "seedance-2.0-900-特惠": 0.7,
@@ -116,19 +116,19 @@ export const PAID_VIDEO_UNIT_PRICE_CNY: Record<PaidVideoModelId, number> = {
 
 const PRICING_SOURCE = "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)";
 
-/** 已核價三元組（model, resolution, seconds）。 */
+/** 已核价三元组（model, resolution, seconds）。 */
 export interface PricedVideoTriple {
   supplierModelId: PaidVideoModelId;
-  /** 按次固定單價（人民幣元）。 */
+  /** 按次固定单价（人民币元）。 */
   unitCostCny: number;
   billingBasis: "per_call";
-  /** 已核價的 resolution 檔位。 */
+  /** 已核价的 resolution 档位。 */
   resolutions: readonly PaidVideoResolution[];
-  /** 已核價的秒數檔位。 */
+  /** 已核价的秒数档位。 */
   seconds: readonly number[];
-  /** 核價來源原文。 */
+  /** 核价来源原文。 */
   source: string;
-  /** 上游檔位名語義是否已由真單校準。 */
+  /** 上游档位名语义是否已由真单校准。 */
   semantics: "upstream-tier-semantics-unverified";
 }
 
@@ -142,9 +142,9 @@ interface ClaimPrice {
 }
 
 /**
- * 按（供給 label, 上游 model）查 claim 核價（V-03）；claim 無價回退
- * `PAID_VIDEO_UNIT_PRICE_CNY`（兜底表，xiaoyxiao 價）；兩者皆無回 null（＝未核價）。
- * label 未知（未帶 label 的呼叫）直接用兜底表。
+ * 按（供给 label, 上游 model）查 claim 核价（V-03）；claim 无价回退
+ * `PAID_VIDEO_UNIT_PRICE_CNY`（兜底表，xiaoyxiao 价）；两者皆无回 null（＝未核价）。
+ * label 未知（未带 label 的呼叫）直接用兜底表。
  */
 export function resolvePaidVideoUnitPrice(supplierLabel: string | null | undefined, supplierModelId: string): ClaimPrice | null {
   if (supplierLabel) {
@@ -162,11 +162,11 @@ export function resolvePaidVideoUnitPrice(supplierLabel: string | null | undefin
 
 /**
  * 由 registry claims（平台 id → 上游 model）× catalog（durations/resolutions）
- * 生成已核價三元組。未核價、未映射（如 grok-video-1.5）、或交集為空的組合
- * **不生成** ⇒ 提交時以 `triple_not_priced` 拒收。
+ * 生成已核价三元组。未核价、未映射（如 grok-video-1.5）、或交集为空的组合
+ * **不生成** ⇒ 提交时以 `triple_not_priced` 拒收。
  *
- * V-03：掃**所有** registry 渠道的 claims（同名同映射的供給去重，不重複生成），
- * 三元組只定「可提交的檔位組合」；單價在判定時按（供給 label, 上游 model）另查。
+ * V-03：扫**所有** registry 渠道的 claims（同名同映射的供给去重，不重复生成），
+ * 三元组只定「可提交的档位组合」；单价在判定时按（供给 label, 上游 model）另查。
  */
 function buildPricedVideoTriples(): PricedVideoTriple[] {
   const triples: PricedVideoTriple[] = [];
@@ -175,12 +175,12 @@ function buildPricedVideoTriples(): PricedVideoTriple[] {
     for (const claim of channel.claims) {
       if (!claim.kinds.includes("video_generate")) continue;
       const upstreamModel = claim.supplierModelId;
-      // 上游 model 必須在白名單內（白名單是硬上界；registry 不得繞過）
+      // 上游 model 必须在白名单内（白名单是硬上界；registry 不得绕过）
       if (!upstreamModel || !(PAID_VIDEO_MODEL_WHITELIST as readonly string[]).includes(upstreamModel)) continue;
       const dedupeKey = `${upstreamModel}\u0000${claim.modelId}`;
       if (seen.has(dedupeKey)) continue;
       const price = resolvePaidVideoUnitPrice(channel.label, upstreamModel);
-      if (!price) continue; // 未核價＝不許提交
+      if (!price) continue; // 未核价＝不许提交
       const catalogModel = GENERATION_MODEL_CATALOG[claim.modelId];
       if (!catalogModel) continue;
       const resolutions = (catalogModel.resolutions ?? []).filter(isAllowedResolution);
@@ -216,10 +216,10 @@ export type PaidVideoRejectionReason =
 export interface PaidVideoSubmissionFacts {
   supplierModelId?: string | null;
   resolution?: string | null;
-  /** 上游將收到的秒數（整數）。 */
+  /** 上游将收到的秒数（整数）。 */
   seconds?: number | string | null;
   supplierId?: string;
-  /** 供給 label（＝registry channel label）；按（label, model）查 claim 核價。缺省時由 `env:<label>` 形狀的 supplierId 推出。 */
+  /** 供给 label（＝registry channel label）；按（label, model）查 claim 核价。缺省时由 `env:<label>` 形状的 supplierId 推出。 */
   supplierLabel?: string | null;
   jobId?: string;
 }
@@ -229,12 +229,12 @@ export type PaidVideoGateDecision =
   | { allowed: false; reason: PaidVideoRejectionReason; detail: string };
 
 /**
- * 成本閘豁免名單（2026-09-27 立）：
- * 這三個渠道已於 2026-09-27 全數退役（`supplier.enabled=false`，不承接任何生產
- * 流量），只作為 `openai_video` 的**協議夾具**存在（sd4/sd7/napi/drama 的請求體
- * 形狀測試需要它們）。豁免它們是為了保住那些協議回歸；**任何在線或新接入的渠道
- * 一律受閘（fail-closed）**——它們的模型名不在白名單，一旦被重新啟用，會直接
- * 落到白名單檢查被拒收，繞不過。
+ * 成本闸豁免名单（2026-09-27 立）：
+ * 这三个渠道已于 2026-09-27 全数退役（`supplier.enabled=false`，不承接任何生产
+ * 流量），只作为 `openai_video` 的**协议夹具**存在（sd4/sd7/napi/drama 的请求体
+ * 形状测试需要它们）。豁免它们是为了保住那些协议回归；**任何在线或新接入的渠道
+ * 一律受闸（fail-closed）**——它们的模型名不在白名单，一旦被重新启用，会直接
+ * 落到白名单检查被拒收，绕不过。
  */
 export const PAID_VIDEO_GATE_EXEMPT_SUPPLIER_IDS = [
   "env:cangyuansuanli",
@@ -254,8 +254,8 @@ export function isPaidVideoModelWhitelisted(value: string | null | undefined): v
 }
 
 /**
- * 純函式判定（測試可直接調用，不拋錯也不寫日誌）。
- * 檢查順序：豁免渠道 → resolution → model → seconds → 三元組核價，其餘全 fail-closed。
+ * 纯函式判定（测试可直接调用，不抛错也不写日志）。
+ * 检查顺序：豁免渠道 → resolution → model → seconds → 三元组核价，其余全 fail-closed。
  */
 export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): PaidVideoGateDecision {
   if (isPaidVideoGateExemptSupplier(facts.supplierId)) {
@@ -266,14 +266,14 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
     return {
       allowed: false,
       reason: "resolution_missing",
-      detail: "resolution 缺省或空字串：上游缺省＝4k（¥31.2857/5s 事故形狀），fail-closed 拒收。",
+      detail: "resolution 缺省或空字串：上游缺省＝4k（¥31.2857/5s 事故形状），fail-closed 拒收。",
     };
   }
   if (!isAllowedResolution(rawResolution)) {
     return {
       allowed: false,
       reason: "resolution_not_allowed",
-      detail: `resolution "${rawResolution}" 不在白名單 ${PAID_VIDEO_ALLOWED_RESOLUTIONS.join("/")}（4k/2k/1080p 一律拒收）。`,
+      detail: `resolution "${rawResolution}" 不在白名单 ${PAID_VIDEO_ALLOWED_RESOLUTIONS.join("/")}（4k/2k/1080p 一律拒收）。`,
     };
   }
 
@@ -282,7 +282,7 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
     return {
       allowed: false,
       reason: "model_not_whitelisted",
-      detail: `model "${model || "(empty)"}" 不在視頻付費白名單（白名單外的動態價模型＝¥31.2857 事故成因）。`,
+      detail: `model "${model || "(empty)"}" 不在视频付费白名单（白名单外的动态价模型＝¥31.2857 事故成因）。`,
     };
   }
 
@@ -296,7 +296,7 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
     return {
       allowed: false,
       reason: "seconds_missing_or_invalid",
-      detail: `seconds "${String(facts.seconds ?? "")}" 必須是 1–${PAID_VIDEO_MAX_SECONDS} 的整數。`,
+      detail: `seconds "${String(facts.seconds ?? "")}" 必须是 1–${PAID_VIDEO_MAX_SECONDS} 的整数。`,
     };
   }
 
@@ -310,10 +310,10 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
     return {
       allowed: false,
       reason: "triple_not_priced",
-      detail: `三元組 (model="${model}", resolution="${rawResolution}", seconds=${seconds}) 未由 catalog 核價生成，拒收（禁止現場猜價／猜檔位語義）。`,
+      detail: `三元组 (model="${model}", resolution="${rawResolution}", seconds=${seconds}) 未由 catalog 核价生成，拒收（禁止现场猜价／猜档位语义）。`,
     };
   }
-  // V-03：單價按（供給 label, 上游 model）取 claim 核價，無則兜底表。
+  // V-03：单价按（供给 label, 上游 model）取 claim 核价，无则兜底表。
   const label = facts.supplierLabel
     ?? (typeof facts.supplierId === "string" && facts.supplierId.startsWith("env:") ? facts.supplierId.slice(4) : null);
   const price = resolvePaidVideoUnitPrice(label, model);
@@ -321,7 +321,7 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
     return {
       allowed: false,
       reason: "triple_not_priced",
-      detail: `供給 "${label ?? "(unknown)"}" 的 model "${model}" 無核價（claim 與兜底表皆無），拒收。`,
+      detail: `供给 "${label ?? "(unknown)"}" 的 model "${model}" 无核价（claim 与兜底表皆无），拒收。`,
     };
   }
   if (price.unitCostCny === triple.unitCostCny && triple.source.startsWith(price.source)) {
@@ -338,8 +338,8 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
 }
 
 /**
- * 提交硬閘：拒收時寫結構化稽核日誌並拋 SupplierRequestError(400)。
- * 400 ⇒ 確定性失敗，不會被當成暫時性錯誤重放（不重複燒錢）。
+ * 提交硬闸：拒收时写结构化稽核日志并抛 SupplierRequestError(400)。
+ * 400 ⇒ 确定性失败，不会被当成暂时性错误重放（不重复烧钱）。
  */
 export function assertPaidVideoSubmissionAllowed(facts: PaidVideoSubmissionFacts): PricedVideoTriple | null {
   const decision = evaluatePaidVideoSubmission(facts);
@@ -374,10 +374,10 @@ export function assertPaidVideoSubmissionAllowed(facts: PaidVideoSubmissionFacts
 }
 
 /**
- * 生產平面入口（V-03，worker-service 在取得租約後、呼叫供給前呼叫；只用於 video_generate）。
- * - `failClosed`（`openai_video` 協議）：一律過閘，白名單外即拒——與搬遷前行為一致。
- * - 否則：只有上游 model 落在白名單內才過閘；不在白名單的既有視頻路徑（metaso/filmera 等）放行不審。
- * 回傳 null＝未審（非白名單的非 fail-closed 協議）或豁免。
+ * 生产平面入口（V-03，worker-service 在取得租约后、呼叫供给前呼叫；只用于 video_generate）。
+ * - `failClosed`（`openai_video` 协议）：一律过闸，白名单外即拒——与搬迁前行为一致。
+ * - 否则：只有上游 model 落在白名单内才过闸；不在白名单的既有视频路径（metaso/filmera 等）放行不审。
+ * 回传 null＝未审（非白名单的非 fail-closed 协议）或豁免。
  */
 export function enforcePaidVideoCostGate(
   facts: PaidVideoSubmissionFacts,

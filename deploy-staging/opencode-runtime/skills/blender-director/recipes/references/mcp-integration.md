@@ -2,9 +2,9 @@
 
 When Blender MCP is available, **execute operations through MCP** instead of describing manual UI steps.
 
-<!-- 白名單改動②：刪除 Cursor/Claude Code 外部 IDE 整合段（上游原文：
+<!-- 白名单改动②：删除 Cursor/Claude Code 外部 IDE 整合段（上游原文：
 "**Setup:** See repo `docs/BLENDER_MCP_SETUP.md`. Project config: `.cursor/mcp.json` (Cursor) or `.mcp.json` (Claude Code)."）
-本庫執行契約 = bridge HTTP（POST /v1/execute），協議即 blender-mcp 同構。 -->
+本库执行契约 = bridge HTTP（POST /v1/execute），协议即 blender-mcp 同构。 -->
 **Setup:** Execution goes through the Blender bridge (blender-mcp-compatible protocol).
 
 **Tool catalog:** See `mcp-tools.md` for BlenderMCP capabilities and bpy fallbacks.

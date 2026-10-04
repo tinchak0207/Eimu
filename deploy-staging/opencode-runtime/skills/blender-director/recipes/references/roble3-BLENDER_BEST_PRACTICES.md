@@ -1,9 +1,9 @@
 <!--
-來源（輪子）: https://github.com/RobLe3/cc-blender-skill — docs/BLENDER_BEST_PRACTICES.md
+来源（轮子）: https://github.com/RobLe3/cc-blender-skill — docs/BLENDER_BEST_PRACTICES.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
-入庫批次: 2026-09-06 對稱差擴容 W4-docs（參考圖→3D 擬合管線/品質門禁）。執行環境契約見 ../../SKILL.md（bridge POST /v1/execute、產物寫 $BLENDER_WORK/out/、Blender 5.2.1）。
-Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
-正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
+入库批次: 2026-09-06 对称差扩容 W4-docs（参考图→3D 拟合管线/品质门禁）。执行环境契约见 ../../SKILL.md（bridge POST /v1/execute、产物写 $BLENDER_WORK/out/、Blender 5.2.1）。
+Blender 5.2 雷区：① BLENDER_EEVEE_NEXT 已死，只认 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 为默认 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
+正文保留英文原文；上游 MCP 调用表述执行时改走我方 bridge /v1/execute 同构协议。
 -->
 # Blender Best Practices for the Wireframe-to-3D Skill
 

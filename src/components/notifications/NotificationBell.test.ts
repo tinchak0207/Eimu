@@ -6,7 +6,7 @@ import {
   type AnchorElement,
 } from "@/components/notifications/NotificationBell";
 
-// 面板落点是本刀唯一的真假分界：菜單項点下去 Radix 就关菜单，
+// 面板落点是本刀唯一的真假分界：菜单项点下去 Radix 就关菜单，
 // 触发那一行随之从 DOM 消失。所以坐标必须在点击当下量成数字存下来，
 // 而且「量不到」时只能沿用旧坐标，不能清空（清了面板整个不显示）。
 

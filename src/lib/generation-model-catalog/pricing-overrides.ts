@@ -3,22 +3,22 @@ import { PRICING_DECIMALS, PRICING_COIN_STEP, PRICING_CREDIT_STEP } from "./type
 import type { GenerationModelDefinition, ImageCreditTable, VideoCreditTable } from "./types";
 
 /**
- * 模型定價覆寫（全局配置）。
+ * 模型定价覆写（全局配置）。
  *
- * 這是模組級的**全局可變狀態**，不是 per-request 快取：與 channel-overrides 的
- * 快取同性質，同實例併發請求共用同一份 effectiveCatalog 是刻意的。管理員在
- * /admin 改價後，服務端透過 pricing-runtime 的 syncModelPricing() 把覆寫灌進這裡；
- * 後端計費直接讀 generationCredits()/generationCoins() 立刻按新價走，前端以
- * usePricingRevision() 訂閱 revision 即時重繪，不需重新部署。
+ * 这是模组级的**全局可变状态**，不是 per-request 快取：与 channel-overrides 的
+ * 快取同性质，同实例并发请求共用同一份 effectiveCatalog 是刻意的。管理员在
+ * /admin 改价后，服务端透过 pricing-runtime 的 syncModelPricing() 把覆写灌进这里；
+ * 后端计费直接读 generationCredits()/generationCoins() 立刻按新价走，前端以
+ * usePricingRevision() 订阅 revision 即时重绘，不需重新部署。
  */
 export interface ModelPricingOverride {
-  /** 僅對 kind === "image" 生效：各解析度的單張圖 credit。 */
+  /** 仅对 kind === "image" 生效：各解析度的单张图 credit。 */
   imageCredits?: ImageCreditTable;
-  /** 僅對 kind === "video" 生效：每秒 video credit（無音軌）。 */
+  /** 仅对 kind === "video" 生效：每秒 video credit（无音轨）。 */
   videoCreditsPerSecond?: VideoCreditTable;
-  /** 僅對 kind === "video" 生效：每秒 video credit（含音軌）。 */
+  /** 仅对 kind === "video" 生效：每秒 video credit（含音轨）。 */
   videoCreditsWithAudioPerSecond?: VideoCreditTable;
-  /** 固定幣價（不隨解析度/時長變化）。不允許 0 或負數——0 幣會讓扣費為零。 */
+  /** 固定币价（不随解析度/时长变化）。不允许 0 或负数——0 币会让扣费为零。 */
   fixedCoins?: number;
 }
 
@@ -29,11 +29,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 清洗任何不可信輸入（Blob 內容 / PATCH body）到覆寫 schema。規則嚴格、越界
- * 直接丟棄該欄位而非報錯：未知 modelId、不存在於該模型 resolutions 的解析度、
- * 非整數或超出 [1, 1_000_000] 的 credit、錯位欄位（image 模型塞 video 欄位、
- * video 模型塞 image 欄位）、非法 fixedCoins——全部靜默丟棄；清洗後為空的模型
- * 條目不輸出。
+ * 清洗任何不可信输入（Blob 内容 / PATCH body）到覆写 schema。规则严格、越界
+ * 直接丢弃该栏位而非报错：未知 modelId、不存在于该模型 resolutions 的解析度、
+ * 非整数或超出 [1, 1_000_000] 的 credit、错位栏位（image 模型塞 video 栏位、
+ * video 模型塞 image 栏位）、非法 fixedCoins——全部静默丢弃；清洗后为空的模型
+ * 条目不输出。
  */
 export function normalizeModelPricingOverrides(raw: unknown): ModelPricingOverrides {
   if (!isPlainObject(raw)) return {};
@@ -62,17 +62,17 @@ export function normalizeModelPricingOverrides(raw: unknown): ModelPricingOverri
     }
 
     if (Object.keys(entry).length === 0) continue;
-    // defineProperty instead of assignment：JSON.parse 可能給我們 own "__proto__" key，
-    // 用 `overrides[key] = entry` 會設定原型而非 own property。
+    // defineProperty instead of assignment：JSON.parse 可能给我们 own "__proto__" key，
+    // 用 `overrides[key] = entry` 会设定原型而非 own property。
     Object.defineProperty(overrides, modelId, { value: entry, enumerable: true, writable: true, configurable: true });
   }
   return overrides;
 }
 
 /**
- * credit 表清洗：鍵必須在 allowedKeys（該模型真實 resolutions）內，值必須是
- * [PRICING_CREDIT_STEP, 1_000_000] 的有限數，按 PRICING_DECIMALS 派生精度舍入
- * （credit 小數位 = PRICING_DECIMALS - 1，與 admin UI 的輸入縮放一致，覆蓋限免級小數定價）。
+ * credit 表清洗：键必须在 allowedKeys（该模型真实 resolutions）内，值必须是
+ * [PRICING_CREDIT_STEP, 1_000_000] 的有限数，按 PRICING_DECIMALS 派生精度舍入
+ * （credit 小数位 = PRICING_DECIMALS - 1，与 admin UI 的输入缩放一致，覆盖限免级小数定价）。
  */
 function sanitizeCreditTable(raw: unknown, allowedKeys: readonly string[]): Record<string, number> {
   if (!isPlainObject(raw)) return {};
@@ -86,13 +86,13 @@ function sanitizeCreditTable(raw: unknown, allowedKeys: readonly string[]): Reco
   return table;
 }
 
-// 全局配置：模組級可變狀態，同實例併發請求共用一份是刻意的（與 channel-overrides 快取同性質）。
+// 全局配置：模组级可变状态，同实例并发请求共用一份是刻意的（与 channel-overrides 快取同性质）。
 let effectiveCatalog: Record<string, GenerationModelDefinition> = GENERATION_MODEL_CATALOG;
 let activeOverrides: ModelPricingOverrides = {};
 let pricingRevision = 0;
 const pricingListeners = new Set<() => void>();
 
-/** 「基準 + 覆寫」淺合併，只合併四個定價欄位；credit 表 per-key 合併。 */
+/** 「基准 + 覆写」浅合并，只合并四个定价栏位；credit 表 per-key 合并。 */
 function mergePricingOverride(base: GenerationModelDefinition, override: ModelPricingOverride): GenerationModelDefinition {
   const merged: GenerationModelDefinition = { ...base };
   if (override.imageCredits !== undefined) {
@@ -124,8 +124,8 @@ function buildEffectiveCatalog(overrides: ModelPricingOverrides): Record<string,
 }
 
 /**
- * 覆寫生效：重算有效目錄、bump revision、通知訂閱者。傳 {} 即回到基準價。
- * 只合併定價欄位，能力面（aspectRatios/resolutions/popularity 等）一律取基準。
+ * 覆写生效：重算有效目录、bump revision、通知订阅者。传 {} 即回到基准价。
+ * 只合并定价栏位，能力面（aspectRatios/resolutions/popularity 等）一律取基准。
  */
 export function applyModelPricingOverrides(raw: unknown): void {
   const normalized = normalizeModelPricingOverrides(raw);
@@ -135,7 +135,7 @@ export function applyModelPricingOverrides(raw: unknown): void {
   for (const listener of [...pricingListeners]) listener();
 }
 
-/** 當前生效的覆寫表（防禦性複製，避免呼叫端污染內部狀態）。 */
+/** 当前生效的覆写表（防御性复制，避免呼叫端污染内部状态）。 */
 export function activeModelPricingOverrides(): ModelPricingOverrides {
   const copy: ModelPricingOverrides = {};
   for (const [modelId, entry] of Object.entries(activeOverrides)) {
@@ -144,7 +144,7 @@ export function activeModelPricingOverrides(): ModelPricingOverrides {
   return copy;
 }
 
-/** 單調遞增的覆寫版本號；前端 useSyncExternalStore 的 snapshot。 */
+/** 单调递增的覆写版本号；前端 useSyncExternalStore 的 snapshot。 */
 export function modelPricingRevision(): number {
   return pricingRevision;
 }

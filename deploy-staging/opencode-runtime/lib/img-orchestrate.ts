@@ -1,8 +1,8 @@
-// 圖像編排共用 lib（2026-08-31 片2）。
-// 職責：批量生圖（站點 /v1/images/generations 計費鏈，與 image_generate.ts 同路徑，
-// 嚴禁繞過計費直打上游）+ 內聯輪詢取 URL + 編輯鏈（/images/edits，同 image_edit.ts）
-// + VLM 讀圖（new-api gemini-2.5-flash-image，key 運行時讀 control-plane env，永不打印）。
-// 此檔不是 tool，不得 export tool 定義，必須放在 tools/ 之外（見 client.ts 頂部說明）。
+// 图像编排共用 lib（2026-08-31 片2）。
+// 职责：批量生图（站点 /v1/images/generations 计费链，与 image_generate.ts 同路径，
+// 严禁绕过计费直打上游）+ 内联轮询取 URL + 编辑链（/images/edits，同 image_edit.ts）
+// + VLM 读图（new-api gemini-2.5-flash-image，key 运行时读 control-plane env，永不打印）。
+// 此档不是 tool，不得 export tool 定义，必须放在 tools/ 之外（见 client.ts 顶部说明）。
 
 import {
   platformFetch,
@@ -20,9 +20,9 @@ import { safeFetch } from "./sandbox"
 import { spawnSync } from "node:child_process"
 import { aggregateBatchCost, type CostAggregate } from "./cost-accounting"
 
-// VLM 讀圖前先由本機下載並內聯成 data URL（2026-09-29 e2e 實錘）：直接把 URL 交給上游，
-// 上游得自己抓圖——eimu.dev 等站在 Cloudflare 後，非瀏覽器抓取被擋（400/502），webp 也未必收。
-// 內聯後格式統一 jpeg/png；下載失敗才退回原 URL，不編造。
+// VLM 读图前先由本机下载并内联成 data URL（2026-09-29 e2e 实锤）：直接把 URL 交给上游，
+// 上游得自己抓图——eimu.dev 等站在 Cloudflare 后，非浏览器抓取被挡（400/502），webp 也未必收。
+// 内联后格式统一 jpeg/png；下载失败才退回原 URL，不编造。
 const VLM_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 async function inlineImageForVlm(u: string): Promise<string> {
   if (!/^https?:\/\//i.test(u)) return u
@@ -50,13 +50,13 @@ async function inlineImageForVlm(u: string): Promise<string> {
 
 export const ORCH_DEFAULT_MODEL = "pixai-tsubaki2"
 export const ORCH_DEFAULT_SIZE = "1024x1024"
-// R9-C2（2026-09-30）：原本地硬寫 SUPPORTED_SIZES（缺 4096x4096，與站點漂移）已移除，改讀站點真源，見 supportedImageSizes()。
+// R9-C2（2026-09-30）：原本地硬写 SUPPORTED_SIZES（缺 4096x4096，与站点漂移）已移除，改读站点真源，见 supportedImageSizes()。
 
 /**
- * 生圖尺寸白名單（R9-C2）：與 tools/image_generate.ts 的 supportedImageSizes() 同一真源——站點
+ * 生图尺寸白名单（R9-C2）：与 tools/image_generate.ts 的 supportedImageSizes() 同一真源——站点
  * GET /v1/openapi.json 的 components.schemas.ImageGenerationRequest.properties.size.enum。
- * 該函式在 tool 檔內且未 export（lib 不得依賴 tools/），故此處同形複刻：同端點、同欄位、快取 10 分鐘、
- * 取不到真源回 null → 呼叫端放行交上游裁決（上游 400 由 classifyError 具名成 unsupported_size）。
+ * 该函式在 tool 档内且未 export（lib 不得依赖 tools/），故此处同形复刻：同端点、同栏位、快取 10 分钟、
+ * 取不到真源回 null → 呼叫端放行交上游裁决（上游 400 由 classifyError 具名成 unsupported_size）。
  */
 let sizeWhitelistCache: { at: number; sizes: string[] } | null = null
 const SIZE_WHITELIST_TTL_MS = 10 * 60 * 1000
@@ -77,11 +77,11 @@ export async function supportedImageSizes(sessionID: string, signal?: AbortSigna
   }
 }
 
-/** 「通路可用」宣告紀律（同 image_generate CHANNEL_NOT_VERIFIED）。 */
+/** 「通路可用」宣告纪律（同 image_generate CHANNEL_NOT_VERIFIED）。 */
 const CHANNEL_NOT_VERIFIED =
-  "本次沒有生成出任何圖片，模型/付費通路的可用性未被驗證。只有真的成功出圖（拿到 url）才可對用戶說該模型/付費通路「可用、是活的」；參數錯誤、提交前被擋、確認被拒、insufficient_quota 都不算。insufficient_quota＝用戶帳戶餘額不足（帳戶層，換模型無效），model_unavailable＝模型通路故障（模型層，充值無效），兩者不可混報。"
+  "本次没有生成出任何图片，模型/付费通路的可用性未被验证。只有真的成功出图（拿到 url）才可对用户说该模型/付费通路「可用、是活的」；参数错误、提交前被挡、确认被拒、insufficient_quota 都不算。insufficient_quota＝用户帐户余额不足（帐户层，换模型无效），model_unavailable＝模型通路故障（模型层，充值无效），两者不可混报。"
 
-/** 非法尺寸的同比例建議：按寬高比（對數距離）找最接近的合法尺寸，比例相同再比面積。接受 "WxH" 或 "W:H"。 */
+/** 非法尺寸的同比例建议：按宽高比（对数距离）找最接近的合法尺寸，比例相同再比面积。接受 "WxH" 或 "W:H"。 */
 function nearestAllowedSize(size: string, allowed: string[]): string | null {
   const m = /^\s*(\d+(?:\.\d+)?)\s*[x×*:]\s*(\d+(?:\.\d+)?)\s*$/i.exec(size)
   if (!m) return null
@@ -108,7 +108,7 @@ function nearestAllowedSize(size: string, allowed: string[]): string | null {
   return best
 }
 
-/** 報價/確認前的尺寸校驗：非法尺寸回 unsupported_size + 可選清單 + 同比例建議，不靜默改寫。真源取不到回 null（放行）。 */
+/** 报价/确认前的尺寸校验：非法尺寸回 unsupported_size + 可选清单 + 同比例建议，不静默改写。真源取不到回 null（放行）。 */
 async function checkSizes(
   reqs: GenReq[],
   sessionID: string,
@@ -120,16 +120,16 @@ async function checkSizes(
   if (!bad.length) return null
   const size_suggestions = bad.map((s) => ({ requested: s, suggested: nearestAllowedSize(s, allowed) }))
   const sug = size_suggestions
-    .map((x) => (x.suggested ? `${x.requested} → 同比例最接近的合法尺寸 ${x.suggested}` : `${x.requested}（無法解析比例）`))
+    .map((x) => (x.suggested ? `${x.requested} → 同比例最接近的合法尺寸 ${x.suggested}` : `${x.requested}（无法解析比例）`))
     .join("；")
   return {
     code: "unsupported_size",
-    hint: `不支持的 size ${bad.join("、")}（未提交、未跳確認、未扣費；不會替你靜默改成其他尺寸）。可選：${allowed.join("、")}。建議：${sug}。16:9/橫圖請用 1536x1024，豎圖用 1024x1536。改好 size 再調用。`,
+    hint: `不支持的 size ${bad.join("、")}（未提交、未跳确认、未扣费；不会替你静默改成其他尺寸）。可选：${allowed.join("、")}。建议：${sug}。16:9/横图请用 1536x1024，竖图用 1024x1536。改好 size 再调用。`,
     detail: { allowed_sizes: allowed, size_suggestions, channel_verified: false, note: CHANNEL_NOT_VERIFIED },
   }
 }
 export const SEED_NOTE =
-  "平台 /v1/images/generations 契約不支持 seed 輸入/輸出（2026-08-31 源碼核實），seed 誠實標 null；跨圖一致性靠共用 DNA 後綴 + 統一 model/size 錨定，非魔法編碼。"
+  "平台 /v1/images/generations 契约不支持 seed 输入/输出（2026-08-31 源码核实），seed 诚实标 null；跨图一致性靠共用 DNA 后缀 + 统一 model/size 锚定，非魔法编码。"
 
 export interface GenReq {
   tag: string
@@ -154,8 +154,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * 尺寸缺省補默認（R9-C2）：只在沒給 size 時補 1024x1024；非法尺寸不再靜默改寫，
- * 原樣交給 runGenBatch/planRequests 在報價與確認前對站點白名單校驗（非法 → unsupported_size + 同比例建議）。
+ * 尺寸缺省补默认（R9-C2）：只在没给 size 时补 1024x1024；非法尺寸不再静默改写，
+ * 原样交给 runGenBatch/planRequests 在报价与确认前对站点白名单校验（非法 → unsupported_size + 同比例建议）。
  */
 export function normalizeSize(size?: string): string {
   return size?.trim() || ORCH_DEFAULT_SIZE
@@ -167,10 +167,10 @@ export function parseJsonArray(
 ): { ok: true; value: any[] } | { ok: false; hint: string } {
   try {
     const j = JSON.parse(raw)
-    if (!Array.isArray(j) || j.length === 0) return { ok: false, hint: `${field} 必須是非空 JSON 陣列字串` }
+    if (!Array.isArray(j) || j.length === 0) return { ok: false, hint: `${field} 必须是非空 JSON 阵列字串` }
     return { ok: true, value: j }
   } catch {
-    return { ok: false, hint: `${field} 必須是合法 JSON 陣列字串` }
+    return { ok: false, hint: `${field} 必须是合法 JSON 阵列字串` }
   }
 }
 
@@ -180,10 +180,10 @@ export function parseJsonObject(
 ): { ok: true; value: Record<string, unknown> } | { ok: false; hint: string } {
   try {
     const j = JSON.parse(raw)
-    if (!j || typeof j !== "object" || Array.isArray(j)) return { ok: false, hint: `${field} 必須是 JSON 物件字串` }
+    if (!j || typeof j !== "object" || Array.isArray(j)) return { ok: false, hint: `${field} 必须是 JSON 物件字串` }
     return { ok: true, value: j as Record<string, unknown> }
   } catch {
-    return { ok: false, hint: `${field} 必須是合法 JSON 物件字串` }
+    return { ok: false, hint: `${field} 必须是合法 JSON 物件字串` }
   }
 }
 
@@ -201,7 +201,7 @@ function extractUrls(body: any): string[] {
   return [...new Set(out)]
 }
 
-/** dry_run 計劃：只讀免費目錄報價構造請求清單，不提交、不確認、零扣費。 */
+/** dry_run 计划：只读免费目录报价构造请求清单，不提交、不确认、零扣费。 */
 export async function planRequests(reqs: GenReq[], sessionID: string, signal?: AbortSignal) {
   const sizeErr = await checkSizes(reqs, sessionID, signal)
   let estimated = 0
@@ -218,8 +218,8 @@ export async function planRequests(reqs: GenReq[], sessionID: string, signal?: A
     estimated_cost_coins: Math.round(estimated * 1e6) / 1e6,
     ...(sizeErr ? { size_check: { ok: false, code: sizeErr.code, hint: sizeErr.hint, ...sizeErr.detail } } : {}),
     note: sizeErr
-      ? `dry_run：未提交生圖、未扣費。注意：此清單 size 非法，原樣以 dry_run=false 執行會被拒（unsupported_size）——${sizeErr.hint}`
-      : "dry_run：未提交生圖、未扣費。確認請求清單後以 dry_run=false 重調執行（計費鏈同 image_generate：總額 >0.1 幣會先跳出用戶確認）。",
+      ? `dry_run：未提交生图、未扣费。注意：此清单 size 非法，原样以 dry_run=false 执行会被拒（unsupported_size）——${sizeErr.hint}`
+      : "dry_run：未提交生图、未扣费。确认请求清单后以 dry_run=false 重调执行（计费链同 image_generate：总额 >0.1 币会先跳出用户确认）。",
   }
 }
 
@@ -228,9 +228,9 @@ export type BatchResult =
   | { ok: false; code: string; hint: string; detail?: Record<string, unknown> }
 
 /**
- * 批量生圖：探測模型可用 → 目錄報價 →（>0.1 幣 confirmSpend 一次）→
- * 逐請求 POST /images/generations → 內聯輪詢 GET /images/{task_id} 至完成。
- * 計費與 image_generate.ts 完全同鏈（站點 API 端 reserve/commit），不繞過。
+ * 批量生图：探测模型可用 → 目录报价 →（>0.1 币 confirmSpend 一次）→
+ * 逐请求 POST /images/generations → 内联轮询 GET /images/{task_id} 至完成。
+ * 计费与 image_generate.ts 完全同链（站点 API 端 reserve/commit），不绕过。
  */
 export async function runGenBatch(
   reqs: GenReq[],
@@ -239,8 +239,8 @@ export async function runGenBatch(
   spendDescription?: string,
   progress?: { tool: string; label?: string },
 ): Promise<BatchResult> {
-  if (!reqs.length) return { ok: false, code: "empty_batch", hint: "無生成請求" }
-  // R9-C2：尺寸在探測/報價/confirm.request 之前校驗，非法尺寸不得讓用戶簽字，也不靜默改寫。
+  if (!reqs.length) return { ok: false, code: "empty_batch", hint: "无生成请求" }
+  // R9-C2：尺寸在探测/报价/confirm.request 之前校验，非法尺寸不得让用户签字，也不静默改写。
   const sizeErr = await checkSizes(reqs, sessionID, abort)
   if (sizeErr) return { ok: false, ...sizeErr }
   const models = [...new Set(reqs.map((r) => r.model))]
@@ -250,7 +250,7 @@ export async function runGenBatch(
       return {
         ok: false,
         code: "model_unavailable",
-        hint: `模型 ${m} 目前不可用（${probe.note ?? "渠道故障"}）。這是模型／通路層故障，不是餘額問題（充值無效）；請改用可用模型（可查 /v1/model-status）。`,
+        hint: `模型 ${m} 目前不可用（${probe.note ?? "渠道故障"}）。这是模型／通路层故障，不是余额问题（充值无效）；请改用可用模型（可查 /v1/model-status）。`,
         detail: { failure_codes: ["model_unavailable"], channel_verified: false, note: CHANNEL_NOT_VERIFIED },
       }
     }
@@ -263,11 +263,11 @@ export async function runGenBatch(
       {
         sessionID,
         amount_coins: total,
-        description: spendDescription || `圖像編排批量生圖 ${reqs.length} 項（${models.join(",")}），預估 ${total} 幣`,
+        description: spendDescription || `图像编排批量生图 ${reqs.length} 项（${models.join(",")}），预估 ${total} 币`,
       },
       abort,
     )
-    if (!approved) return { ok: false, code: "user_declined", hint: "用戶未確認扣費，已取消。可減少張數或換更便宜模型。" }
+    if (!approved) return { ok: false, code: "user_declined", hint: "用户未确认扣费，已取消。可减少张数或换更便宜模型。" }
   }
 
   const results: GenOutcome[] = []
@@ -313,7 +313,7 @@ export async function runGenBatch(
   }
 
   if (progress) void emitEvent(sessionID, "tool.progress", { tool: progress.tool, done: results.length, total: reqs.length, label: progress.label }, abort)
-  // 上游並行生成，本地輪詢查詢（查詢免費不扣費，同 image_get_result 端點）。
+  // 上游并行生成，本地轮询查询（查询免费不扣费，同 image_get_result 端点）。
   const deadline = Date.now() + 300_000
   const timedOut: typeof pending = []
   for (const p of pending) {
@@ -344,12 +344,12 @@ export async function runGenBatch(
             urls: [],
             seed: null,
             cost_coins: null,
-            error: body?.error?.message || body?.message || "生成失敗（平台逾時自動退款）",
+            error: body?.error?.message || body?.message || "生成失败（平台逾时自动退款）",
           })
           done = true
         }
       } catch {
-        // 瞬時查詢失敗不判死，繼續輪詢
+        // 瞬时查询失败不判死，继续轮询
       }
       if (!done) await sleep(4000)
     }
@@ -365,12 +365,12 @@ export async function runGenBatch(
       urls: [],
       seed: null,
       cost_coins: null,
-      error: "輪詢逾時 300s（任務可能仍在排隊，可用 image_get_result 續查）",
+      error: "轮询逾时 300s（任务可能仍在排队，可用 image_get_result 续查）",
     })
   }
 
-  // 成本對帳（2026-10-02）：上游輪詢回應常無「已結算價」（平台帳本秒級延遲）→ 逐項 cost_coins=null。
-  // 缺值一律以 null 表示並附 cost_known/unpriced_items，永不以 0 冒充未知；有產出卻顯式 0 者標 cost_suspect 並 warn。
+  // 成本对帐（2026-10-02）：上游轮询回应常无「已结算价」（平台帐本秒级延迟）→ 逐项 cost_coins=null。
+  // 缺值一律以 null 表示并附 cost_known/unpriced_items，永不以 0 冒充未知；有产出却显式 0 者标 cost_suspect 并 warn。
   const costAgg = aggregateBatchCost(results)
   if (!costAgg.cost_known) {
     console.warn(
@@ -378,10 +378,10 @@ export async function runGenBatch(
     )
   }
   const totalImages = results.reduce((s, r) => s + r.urls.length, 0)
-  // R9-C2（2026-09-30）：內部生圖失敗不得回綠燈，語義同 cast_asset_lock（R9-C）。
-  // 全敗：單一原因用該錯誤碼（如 insufficient_quota），多原因 generation_failed；部分成功：partial_failed。
-  // error 形如 "<code>: <hint>"（提交期 classifyError）；輪詢期失敗/逾時沒有 code，歸為 generation_failed。
-  // 成功項 url 保留在 detail.results，並寫進 hint，呼叫端只轉 fail(code, hint) 也不會丟掉已付費的圖。
+  // R9-C2（2026-09-30）：内部生图失败不得回绿灯，语义同 cast_asset_lock（R9-C）。
+  // 全败：单一原因用该错误码（如 insufficient_quota），多原因 generation_failed；部分成功：partial_failed。
+  // error 形如 "<code>: <hint>"（提交期 classifyError）；轮询期失败/逾时没有 code，归为 generation_failed。
+  // 成功项 url 保留在 detail.results，并写进 hint，呼叫端只转 fail(code, hint) 也不会丢掉已付费的图。
   const done = results.filter((r) => r.status === "succeeded").length
   if (done < results.length) {
     const failedItems = results.filter((r) => r.status !== "succeeded")
@@ -389,7 +389,7 @@ export async function runGenBatch(
       ...new Set(failedItems.map((r) => /^([a-z][a-z0-9_]*): /.exec(String(r.error ?? ""))?.[1] ?? "generation_failed")),
     ]
     const code = done > 0 ? "partial_failed" : codes.length === 1 ? codes[0] : "generation_failed"
-    const firstErr = String(failedItems[0]?.error ?? "生成失敗").replace(/[。.\s]+$/, "")
+    const firstErr = String(failedItems[0]?.error ?? "生成失败").replace(/[。.\s]+$/, "")
     const okList = results
       .filter((r) => r.status === "succeeded")
       .map((r) => `${r.tag}→${r.url}`)
@@ -398,12 +398,12 @@ export async function runGenBatch(
       ok: false,
       code,
       hint:
-        `批量生圖：${done}/${results.length} 成功，${results.length - done} 項沒生出來（失敗原因：${codes.join("、")}）。${firstErr}` +
+        `批量生图：${done}/${results.length} 成功，${results.length - done} 项没生出来（失败原因：${codes.join("、")}）。${firstErr}` +
         (done > 0
-          ? `。已成功項（可直接引用）：${okList}`
-          : firstErr.includes("本次沒有任何圖生成成功")
+          ? `。已成功项（可直接引用）：${okList}`
+          : firstErr.includes("本次没有任何图生成成功")
             ? "。"
-            : "。本次沒有任何圖生成成功，模型/付費通路可用性未被驗證，不得對用戶宣稱通路可用。"),
+            : "。本次没有任何图生成成功，模型/付费通路可用性未被验证，不得对用户宣称通路可用。"),
       detail: {
         failure_codes: codes,
         channel_verified: done > 0,
@@ -423,7 +423,7 @@ export async function runGenBatch(
         ...costAgg,
         note:
           done > 0
-            ? "只有 results[].status=succeeded 的項可引用；失敗項不得當作已完成。"
+            ? "只有 results[].status=succeeded 的项可引用；失败项不得当作已完成。"
             : CHANNEL_NOT_VERIFIED,
       },
     }
@@ -432,9 +432,9 @@ export async function runGenBatch(
 }
 
 /**
- * 編輯鏈單張（同 image_edit.ts 路徑：報價 → 確認閘門 → /images/edits 同步）。
- * 2026-08-31 片2 實測：站點 /v1/uploads（resolveMediaId）上游 PixAI 橋 404 故障，
- * 故 mediaId 解析失敗時誠實回退「原圖 URL 直傳 image 欄位」，image_mode 如實記錄。
+ * 编辑链单张（同 image_edit.ts 路径：报价 → 确认闸门 → /images/edits 同步）。
+ * 2026-08-31 片2 实测：站点 /v1/uploads（resolveMediaId）上游 PixAI 桥 404 故障，
+ * 故 mediaId 解析失败时诚实回退「原图 URL 直传 image 栏位」，image_mode 如实记录。
  */
 export async function runEdit(
   imageUrl: string,
@@ -449,7 +449,7 @@ export async function runEdit(
 > {
   const probe = await probeModelAvailable(model, sessionID, abort)
   if (probe.availability === "unavailable") {
-    return { ok: false, code: "model_unavailable", hint: `編輯模型 ${model} 目前不可用（${probe.note ?? "渠道故障"}）` }
+    return { ok: false, code: "model_unavailable", hint: `编辑模型 ${model} 目前不可用（${probe.note ?? "渠道故障"}）` }
   }
   let image = imageUrl
   let image_mode: "mediaId" | "raw_url" = "raw_url"
@@ -457,17 +457,17 @@ export async function runEdit(
     image = await resolveMediaId(imageUrl, sessionID, abort)
     image_mode = "mediaId"
   } catch {
-    // uploads 橋不可用：原 URL 直傳（edits 路由對 image 欄位透傳上游）
+    // uploads 桥不可用：原 URL 直传（edits 路由对 image 栏位透传上游）
   }
   try {
     const estimate = await estimateEditCoins(model, sessionID, undefined, abort)
     const request_id = randomUUID()
     if (estimate > 0.1) {
       const approved = await confirmSpend(
-        { sessionID, amount_coins: estimate, description: `條件化生成（編輯鏈 ${model}），預估 ${estimate} 幣`, model, request_id },
+        { sessionID, amount_coins: estimate, description: `条件化生成（编辑链 ${model}），预估 ${estimate} 币`, model, request_id },
         abort,
       )
-      if (!approved) return { ok: false, code: "user_declined", hint: "用戶未確認扣費，已取消。" }
+      if (!approved) return { ok: false, code: "user_declined", hint: "用户未确认扣费，已取消。" }
     }
     const payload: any = { image, prompt, model, response_format: "url" }
     if (size) payload.size = size
@@ -483,7 +483,7 @@ export async function runEdit(
       return { ok: false, code: err.code, hint: err.hint }
     }
     const url = body?.data?.[0]?.url || body?.result_url || body?.url
-    if (typeof url !== "string" || !url) return { ok: false, code: "no_result", hint: "編輯鏈未返回圖片 URL" }
+    if (typeof url !== "string" || !url) return { ok: false, code: "no_result", hint: "编辑链未返回图片 URL" }
     return { ok: true, url, cost_coins: body?.cost_coins ?? body?.x_cost_coins ?? estimate, task_id: request_id, image_mode }
   } catch (e: any) {
     const err = await classifyError(null, e)
@@ -492,7 +492,7 @@ export async function runEdit(
 }
 
 // ---------------------------------------------------------------------------
-// VLM 讀圖通道（new-api，2026-08-31 實彈驗證）。key 僅進程內使用，嚴禁入返回值/日誌。
+// VLM 读图通道（new-api，2026-08-31 实弹验证）。key 仅进程内使用，严禁入返回值/日志。
 // ---------------------------------------------------------------------------
 
 const CP_ENV = "/opt/image-control-plane/.env.control-plane"
@@ -516,8 +516,8 @@ async function resolveVlm(): Promise<{ bases: string[]; key: string } | null> {
       if (!/\/v\d+$/.test(x)) x += "/v1"
       return x
     }
-    // env 的 NEWAPI_BASE_URL 可能是 docker 內部網域名（imagesite-new-api:3001，
-    // 僅 control-plane 容器內可達）；harness 進程在宿主機，必須帶 loopback 候補。
+    // env 的 NEWAPI_BASE_URL 可能是 docker 内部网域名（imagesite-new-api:3001，
+    // 仅 control-plane 容器内可达）；harness 进程在宿主机，必须带 loopback 候补。
     const bases: string[] = []
     const envBase = pick("NEWAPI_BASE_URL")
     if (envBase) bases.push(norm(envBase))
@@ -537,10 +537,10 @@ export interface VlmResult {
   reason?: string
 }
 
-/** 多圖 VLM 提問（gemini-2.5-flash-image）。env base 不可達時自動試 loopback 候補。失敗回 ok:false，不編造。 */
+/** 多图 VLM 提问（gemini-2.5-flash-image）。env base 不可达时自动试 loopback 候补。失败回 ok:false，不编造。 */
 export async function vlmAsk(imageUrls: string[], question: string, maxTokens = 1200): Promise<VlmResult> {
   const cfg = await resolveVlm()
-  if (!cfg) return { ok: false, reason: "無法解析 VLM 通道（control-plane env 缺 NEWAPI_API_KEY）" }
+  if (!cfg) return { ok: false, reason: "无法解析 VLM 通道（control-plane env 缺 NEWAPI_API_KEY）" }
   let lastReason = ""
   const inlined = await Promise.all(imageUrls.map(inlineImageForVlm))
   for (const base of cfg.bases) {
@@ -549,7 +549,7 @@ export async function vlmAsk(imageUrls: string[], question: string, maxTokens = 
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.key}` },
         body: JSON.stringify({
-          model: process.env.NEWAPI_VISION_MODEL?.trim() || "glm-5.3-flash", // 2026-09-29：hub 已下架 gemini-2.5-flash-image，改與 vision_analyze 同一視覺模型
+          model: process.env.NEWAPI_VISION_MODEL?.trim() || "glm-5.3-flash", // 2026-09-29：hub 已下架 gemini-2.5-flash-image，改与 vision_analyze 同一视觉模型
           temperature: 0.2,
           max_tokens: maxTokens,
           messages: [
@@ -567,27 +567,27 @@ export async function vlmAsk(imageUrls: string[], question: string, maxTokens = 
       if (!res.ok) return { ok: false, reason: `VLM 上游 HTTP ${res.status}` }
       const body = (await res.json().catch(() => null)) as Record<string, any> | null
       const content = body?.choices?.[0]?.message?.content
-      if (typeof content !== "string" || !content.trim()) return { ok: false, reason: "VLM 回覆為空" }
+      if (typeof content !== "string" || !content.trim()) return { ok: false, reason: "VLM 回覆为空" }
       return { ok: true, text: content }
     } catch (e) {
-      lastReason = `VLM 呼叫失敗（${base}）：${(e as Error)?.message || String(e)}`
+      lastReason = `VLM 呼叫失败（${base}）：${(e as Error)?.message || String(e)}`
       continue
     }
   }
-  return { ok: false, reason: lastReason || "VLM 全部候補不可達" }
+  return { ok: false, reason: lastReason || "VLM 全部候补不可达" }
 }
 
-/** VLM 回覆解析為 JSON 物件（容忍 markdown 柵欄）。 */
+/** VLM 回覆解析为 JSON 物件（容忍 markdown 栅栏）。 */
 export async function vlmAskJson(
   imageUrls: string[],
   question: string,
   maxTokens = 1200,
 ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; reason: string }> {
-  const r = await vlmAsk(imageUrls, `${question}\n只輸出一個 JSON 物件，不要其他文字。`, maxTokens)
-  if (!r.ok) return { ok: false, reason: r.reason || "VLM 失敗" }
+  const r = await vlmAsk(imageUrls, `${question}\n只输出一个 JSON 物件，不要其他文字。`, maxTokens)
+  if (!r.ok) return { ok: false, reason: r.reason || "VLM 失败" }
   const parsed = extractJson(r.text || "")
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, reason: `VLM 回覆無法解析為 JSON：${(r.text || "").slice(0, 200)}` }
+    return { ok: false, reason: `VLM 回覆无法解析为 JSON：${(r.text || "").slice(0, 200)}` }
   }
   return { ok: true, data: parsed as Record<string, unknown> }
 }

@@ -1,28 +1,28 @@
 /**
- * Agent Prompt Director — 灌給 deepseek 優化 agent 的 system prompt 與規則表。
+ * Agent Prompt Director — 灌给 deepseek 优化 agent 的 system prompt 与规则表。
  *
- * 這不是規則層（invisible-prompt-director.ts），而是「讓 agent 學會寫提示詞」的
- * 工業級指令：把 Higgsfield Hell Grind 95 分鐘長片 pipeline + Seedance 2.0 官方
- * prompt 架構濃縮成可執行規則，agent 收到用戶短描述後照此生成優化稿。
- * 用戶可能是什麼都不懂的暴君，只輸入一句話 —— 規則負責自動補齊一切。
+ * 这不是规则层（invisible-prompt-director.ts），而是「让 agent 学会写提示词」的
+ * 工业级指令：把 Higgsfield Hell Grind 95 分钟长片 pipeline + Seedance 2.0 官方
+ * prompt 架构浓缩成可执行规则，agent 收到用户短描述后照此生成优化稿。
+ * 用户可能是什么都不懂的暴君，只输入一句话 —— 规则负责自动补齐一切。
  *
- * 知識來源：OSideMedia/higgsfield-ai-prompt-skill（MIT），
+ * 知识来源：OSideMedia/higgsfield-ai-prompt-skill（MIT），
  * skills/higgsfield-seedance/{SKILL,HELL-GRIND,ENGINE-RULES}.md、
  * skills/higgsfield-prompt/SKILL.md、templates/seedance/global-style-prefix.md。
  *
- * ⚠️ 這份必須與 VPS gateway `/agent/v1/optimize-prompt` 的 `OPTIMIZE_DIRECTOR_PREFIX`
+ * ⚠️ 这份必须与 VPS gateway `/agent/v1/optimize-prompt` 的 `OPTIMIZE_DIRECTOR_PREFIX`
  * （/opt/agent-harness/gateway/index.ts）保持一致。改一份就要同步另一份。
  *
- * 2026-08-27 補充段落：kunpeng Seedance 規則（pengfeiqiao/kunpeng @ 872a58b，MIT）
- * 作為補充引入——與上方 Higgsfield 規則逐條對賬後只補差異（VO 行/多主体定义/
- * 三视图禁用/音频音色引用/realPersonMode/中文分镜格式），不刪不改任何現有規則。
- * 完整對賬結論見 kunpeng-knowledge.ts 的 KUNPENG_SEEDANCE_RECONCILIATION。
+ * 2026-08-27 补充段落：kunpeng Seedance 规则（pengfeiqiao/kunpeng @ 872a58b，MIT）
+ * 作为补充引入——与上方 Higgsfield 规则逐条对账后只补差异（VO 行/多主体定义/
+ * 三视图禁用/音频音色引用/realPersonMode/中文分镜格式），不删不改任何现有规则。
+ * 完整对账结论见 kunpeng-knowledge.ts 的 KUNPENG_SEEDANCE_RECONCILIATION。
  */
 
 /**
- * kunpeng Seedance 補充規則（逐字取自 aigc-memory/prompt-templates/seedance/ 的
- * 規則段；白名單改寫僅一處：接口名 multimodal-video/text-to-video → 多图参考模式/
- * 纯文本模式，因為我們後端沒有 bytedance 直連端點）。
+ * kunpeng Seedance 补充规则（逐字取自 aigc-memory/prompt-templates/seedance/ 的
+ * 规则段；白名单改写仅一处：接口名 multimodal-video/text-to-video → 多图参考模式/
+ * 纯文本模式，因为我们后端没有 bytedance 直连端点）。
  */
 export const KUNPENG_SEEDANCE_SUPPLEMENT = `
 SEEDANCE SUPPLEMENTARY RULES (from kunpeng, MIT — additive only; when they conflict with the rules above, the rules above win):
@@ -36,8 +36,8 @@ SEEDANCE SUPPLEMENTARY RULES (from kunpeng, MIT — additive only; when they con
 - Official tail constraints (verbatim): 保持无字幕，不要生成Logo和水印。人物面部稳定不变形，动作自然流畅。表演克制真实，情绪有层次递进，无瞪眼嘶吼等夸张程式化表情。`;
 
 /**
- * System prompt：deepseek 優化 agent 的導演指令。
- * 刻意設計成「短描述/抽象請求 → 直接可用影片 prompt」的單向轉換，不加前言。
+ * System prompt：deepseek 优化 agent 的导演指令。
+ * 刻意设计成「短描述/抽象请求 → 直接可用影片 prompt」的单向转换，不加前言。
  */
 export const PROMPT_DIRECTOR_SYSTEM_PROMPT = `You are a professional video and image prompt director trained on the Higgsfield Hell Grind 95-minute feature film pipeline and Seedance 2.0 production prompt rules.
 

@@ -220,7 +220,7 @@ async function writeEntries(userId: number, entries: ServerHistoryEntry[]): Prom
 }
 
 export function canPersistGeneratedImages(): boolean {
-  // 能力探針（非寫入路徑）：任一後端可用即 true——只看 token 會在 VPS 後端下誤報「不能存圖」。
+  // 能力探针（非写入路径）：任一后端可用即 true——只看 token 会在 VPS 后端下误报「不能存图」。
   return blobBackendConfigured();
 }
 

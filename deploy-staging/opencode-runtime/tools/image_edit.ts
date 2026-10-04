@@ -15,13 +15,13 @@ import {
   fail,
 } from "../lib/client"
 
-// 編輯能力後盾 = 站點 /v1/images/edits（2026-09-13 暴君裁定：多模型化，gpt-image-2
-// 等在內）。站點現分兩域：pixai bridge 域走原同步鏈；其餘目錄模型走 durable 控制面
-// 改圖管線（kind:"image_edit"、202 任務合同）。harness 不做白名單門禁——不可用模型
-// 由站點回誠實 400（model_edit_unsupported/model_not_found），渠道事實源是
-// supplier_capability（與調度器同源），不在這裡另立一套。
+// 编辑能力后盾 = 站点 /v1/images/edits（2026-09-13 暴君裁定：多模型化，gpt-image-2
+// 等在内）。站点现分两域：pixai bridge 域走原同步链；其余目录模型走 durable 控制面
+// 改图管线（kind:"image_edit"、202 任务合同）。harness 不做白名单门禁——不可用模型
+// 由站点回诚实 400（model_edit_unsupported/model_not_found），渠道事实源是
+// supplier_capability（与调度器同源），不在这里另立一套。
 
-/** pixai bridge 域（站點 resolveBridgeModel 同集合）：同步改圖鏈。 */
+/** pixai bridge 域（站点 resolveBridgeModel 同集合）：同步改图链。 */
 const PIXAI_BRIDGE_MODELS = new Set([
   "pixai-tsubaki2",
   "pixai-haruka-v2",
@@ -37,38 +37,38 @@ const PIXAI_BRIDGE_MODELS = new Set([
 
 export default tool({
   description:
-    "圖生圖改圖。支援改圖的模型以平台目錄 edit=true 為準（GET /v1/model-status），預設 gpt-image-2。除 pixai 系為同步（10-30s 直接回圖）外，其餘模型是「非同步」任務制：提交後回 task_id，完成時間不定（空閒幾十秒到幾分鐘，高峰排隊更久、逾時自動退款），harness 會自動續接結果並出圖卡——提交後立即交還控制權，不要輪詢。超過 0.1 幣會先跳出扣費確認。",
+    "图生图改图。支援改图的模型以平台目录 edit=true 为准（GET /v1/model-status），预设 gpt-image-2。除 pixai 系为同步（10-30s 直接回图）外，其余模型是「非同步」任务制：提交后回 task_id，完成时间不定（空闲几十秒到几分钟，高峰排队更久、逾时自动退款），harness 会自动续接结果并出图卡——提交后立即交还控制权，不要轮询。超过 0.1 币会先跳出扣费确认。",
   args: {
     image_url: tool.schema
       .string()
-      .describe("原圖：http(s)/data URL 或本地絕對路徑（聊天附件解析出的 uploads 路徑直接可傳）；media: 圖片 ID 僅 pixai 系可用"),
-    prompt: tool.schema.string().describe("改圖提示詞"),
+      .describe("原图：http(s)/data URL 或本地绝对路径（聊天附件解析出的 uploads 路径直接可传）；media: 图片 ID 仅 pixai 系可用"),
+    prompt: tool.schema.string().describe("改图提示词"),
     model: tool.schema
       .string()
       .optional()
-      .describe("模型名，預設 gpt-image-2；支援編輯的模型以平台目錄為準，不支持的會回誠實錯誤"),
-    size: tool.schema.enum(["1k", "2k"]).optional().describe("尺寸等級 1k/2k，預設 1k"),
-    quality: tool.schema.enum(["standard", "hd"]).optional().describe("standard 或 hd，預設 standard"),
+      .describe("模型名，预设 gpt-image-2；支援编辑的模型以平台目录为准，不支持的会回诚实错误"),
+    size: tool.schema.enum(["1k", "2k"]).optional().describe("尺寸等级 1k/2k，预设 1k"),
+    quality: tool.schema.enum(["standard", "hd"]).optional().describe("standard 或 hd，预设 standard"),
   },
   async execute(args, context) {
     const model = args.model ?? "gpt-image-2"
     const request_id = randomUUID()
-    // 模型可用性強制探測（2026-08-15）
+    // 模型可用性强制探测（2026-08-15）
     const probe = await probeModelAvailable(model, context.sessionID, context.abort)
     if (probe.availability === "unavailable") {
       return fail(
         "model_unavailable",
-        `改圖模型 ${model} 目前不可用（${probe.note ?? "渠道故障"}）。請改用其他可用模型，或告知用戶。`,
+        `改图模型 ${model} 目前不可用（${probe.note ?? "渠道故障"}）。请改用其他可用模型，或告知用户。`,
       )
     }
     const estimate = await estimateEditCoins(model, context.sessionID, args.quality, context.abort)
 
-    // ── 分支一：pixai bridge 域 = 原同步鏈（mediaId + 同步回圖出卡）──
+    // ── 分支一：pixai bridge 域 = 原同步链（mediaId + 同步回图出卡）──
     if (PIXAI_BRIDGE_MODELS.has(model.toLowerCase())) {
       try {
         const image = await resolveMediaId(args.image_url, context.sessionID, context.abort)
 
-        // 扣費閘門：單價取自平台目錄；≤0.1 幣屬免確認的低價探索區間
+        // 扣费闸门：单价取自平台目录；≤0.1 币属免确认的低价探索区间
         if (estimate > 0.1) {
           const approved = await confirmSpend(
             {
@@ -81,7 +81,7 @@ export default tool({
             context.abort,
           )
           if (!approved) {
-            return fail("user_declined", "用戶未確認扣費，已取消。可以改用更便宜的模型或減少張數再試。")
+            return fail("user_declined", "用户未确认扣费，已取消。可以改用更便宜的模型或减少张数再试。")
           }
         }
 
@@ -93,7 +93,7 @@ export default tool({
           "/images/edits",
           {
             method: "POST",
-            headers: { "idempotency-key": request_id }, // PRD §152：重試不重複扣費
+            headers: { "idempotency-key": request_id }, // PRD §152：重试不重复扣费
             body: JSON.stringify(payload),
           },
           context.sessionID,
@@ -102,23 +102,23 @@ export default tool({
         const body = await resp.json().catch(() => ({}))
         if (!resp.ok) {
           const err = await classifyError(resp, body)
-          return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, title: "改圖失敗" })
+          return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, title: "改图失败" })
         }
 
         const url = body?.data?.[0]?.url || body?.result_url || body?.url
         const cost_coins = body?.cost_coins ?? body?.x_cost_coins ?? estimate
-        // 同步回圖，立即推前端圖片卡；fire-and-forget，失敗不影響 tool
+        // 同步回图，立即推前端图片卡；fire-and-forget，失败不影响 tool
         emitEvent(context.sessionID, "image.done", { url, cost_coins, task_id: request_id }, context.abort).catch(
           () => {},
         )
-        return ok({ title: "改圖完成", url, cost_coins })
+        return ok({ title: "改图完成", url, cost_coins })
       } catch (e: any) {
         const err = await classifyError(null, e)
-        return fail(err.code, err.hint, { title: "改圖失敗" })
+        return fail(err.code, err.hint, { title: "改图失败" })
       }
     }
 
-    // ── 分支二：durable 多模型改圖（2026-09-13）= 任務制，同 image_generate 輪子 ──
+    // ── 分支二：durable 多模型改图（2026-09-13）= 任务制，同 image_generate 轮子 ──
     try {
       const image = await publicImageUrl(args.image_url, context.sessionID, context.abort)
 
@@ -134,7 +134,7 @@ export default tool({
           context.abort,
         )
         if (!approved) {
-          return fail("user_declined", "用戶未確認扣費，已取消。可以改用更便宜的模型或減少張數再試。")
+          return fail("user_declined", "用户未确认扣费，已取消。可以改用更便宜的模型或减少张数再试。")
         }
       }
 
@@ -157,7 +157,7 @@ export default tool({
 
       if (resp.status === 202 || (resp.ok && task_id)) {
         if (task_id) {
-          // 註冊給 poller 自動輪詢續接（同 image_generate 輪子）；best-effort。
+          // 注册给 poller 自动轮询续接（同 image_generate 轮子）；best-effort。
           const reg = await registerTask(task_id, context.sessionID, "image", context.abort, {
             dedup_hash: dedupHash({ model, prompt: args.prompt, image, size: args.size }),
             model,
@@ -174,10 +174,10 @@ export default tool({
             { poller_ok: reg.ok, poller_error: reg.error },
           )
         }
-        return fail("bad_response", `平台回 202 但無 task_id（response=${JSON.stringify(data).slice(0, 200)}）`)
+        return fail("bad_response", `平台回 202 但无 task_id（response=${JSON.stringify(data).slice(0, 200)}）`)
       }
 
-      // 兼容：若站點日後恢復同步回圖，直接出卡。
+      // 兼容：若站点日后恢复同步回图，直接出卡。
       if (resp.ok) {
         const url = data?.data?.[0]?.url || data?.result_url || data?.url
         if (url) {
@@ -185,15 +185,15 @@ export default tool({
           emitEvent(context.sessionID, "image.done", { url, cost_coins, task_id: request_id }, context.abort).catch(
             () => {},
           )
-          return ok({ title: "改圖完成", url, cost_coins, model })
+          return ok({ title: "改图完成", url, cost_coins, model })
         }
       }
 
       const err = await classifyError(resp, data)
-      return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, title: "改圖失敗" })
+      return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, title: "改图失败" })
     } catch (e: any) {
       const err = await classifyError(null, e)
-      return fail(err.code, err.hint, { title: "改圖失敗" })
+      return fail(err.code, err.hint, { title: "改图失败" })
     }
   },
 })

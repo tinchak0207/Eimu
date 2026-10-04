@@ -1,8 +1,8 @@
-// 本次修復的**核心斷言**：VPS 後端 selector 為真、但沒有 BLOB_READ_WRITE_TOKEN 時，
-// 必須被視為「後端已設定」——舊病灶（只看 token）會在此靜默落進程內記憶體。
+// 本次修复的**核心断言**：VPS 后端 selector 为真、但没有 BLOB_READ_WRITE_TOKEN 时，
+// 必须被视为「后端已设定」——旧病灶（只看 token）会在此静默落进程内记忆体。
 //
-// vps-blob-adapter 的 BASE_URL/API_KEY 是模組載入期快照，所以本檔在載入任何被測模組
-// **之前**先設好 env，並一律用動態 import。
+// vps-blob-adapter 的 BASE_URL/API_KEY 是模组载入期快照，所以本档在载入任何被测模组
+// **之前**先设好 env，并一律用动态 import。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -94,26 +94,26 @@ function installVpsFetchStub(): {
   };
 }
 
-test("核心斷言：VPS selector 為真 + 無 BLOB token → 視為已設定，production 寫入走 VPS 後端且真能讀回", async () => {
+test("核心断言：VPS selector 为真 + 无 BLOB token → 视为已设定，production 写入走 VPS 后端且真能读回", async () => {
   const backend = await import("./blob-backend");
   const cards = await import("./character-card-store");
   const history = await import("./server-history-store");
 
-  // 前提斷言（不成立則本測試無意義）。
-  assert.equal(backend.useVpsBlobBackend(), true, "VPS selector 應為真（env 已設）");
-  assert.equal(process.env.BLOB_READ_WRITE_TOKEN, undefined, "本測試不得有 BLOB token");
+  // 前提断言（不成立则本测试无意义）。
+  assert.equal(backend.useVpsBlobBackend(), true, "VPS selector 应为真（env 已设）");
+  assert.equal(process.env.BLOB_READ_WRITE_TOKEN, undefined, "本测试不得有 BLOB token");
 
   const savedNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
   const stub = installVpsFetchStub();
   try {
-    assert.equal(backend.blobBackendConfigured(), true, "VPS 後端可用即視為已設定（本次修復核心）");
+    assert.equal(backend.blobBackendConfigured(), true, "VPS 后端可用即视为已设定（本次修复核心）");
     assert.equal(
       backend.ensureBlobBackendWritable("probe"),
       true,
-      "production + VPS 後端：門禁必須放行（舊版此處會 throw 或靜默落記憶體）",
+      "production + VPS 后端：门禁必须放行（旧版此处会 throw 或静默落记忆体）",
     );
-    // 舊病灶的產品級後果：canPersistGeneratedImages() 舊版在此回 false → 生成路由靜默跳過圖片轉存。
+    // 旧病灶的产品级后果：canPersistGeneratedImages() 旧版在此回 false → 生成路由静默跳过图片转存。
     assert.equal(history.canPersistGeneratedImages(), true);
 
     cards.__resetCharacterCardStoreForTests();
@@ -121,23 +121,23 @@ test("核心斷言：VPS selector 為真 + 無 BLOB token → 視為已設定，
       id: "card-vps",
       name: "VPS 卡",
       kind: "character",
-      prompt: "紅髮少女",
-      references: [{ url: "https://img.example/a.png", role: "character", name: "定妝照" }],
+      prompt: "红发少女",
+      references: [{ url: "https://img.example/a.png", role: "character", name: "定妆照" }],
       createdAt: "2026-09-25T00:00:00.000Z",
       updatedAt: "2026-09-25T00:00:00.000Z",
     });
 
     const puts = stub.calls.filter((call) => call.method === "PUT");
-    assert.equal(puts.length, 1, "寫入應恰發一次 PUT 到 VPS 後端");
+    assert.equal(puts.length, 1, "写入应恰发一次 PUT 到 VPS 后端");
     assert.match(puts[0].url, /^https:\/\/vps-data\.example\/api\/blob\//);
     assert.match(decodeURIComponent(puts[0].url), /character-cards\/1\/index-/);
     assert.equal(
       stub.calls.some((call) => call.url.includes("vercel")),
       false,
-      "不得有任何請求打到 Vercel Blob",
+      "不得有任何请求打到 Vercel Blob",
     );
 
-    // 清掉進程內快取與記憶體後仍能讀回 → 證明資料真的經 VPS 後端序列化往返，不是記憶體假象。
+    // 清掉进程内快取与记忆体后仍能读回 → 证明资料真的经 VPS 后端序列化往返，不是记忆体假象。
     cards.__resetCharacterCardStoreForTests();
     const roundTripped = await cards.listCharacterCards(1);
     assert.equal(roundTripped.length, 1);

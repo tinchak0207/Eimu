@@ -1,23 +1,23 @@
-// workflow-dsl/compile.ts — DSL → 既有 8-op CanvasAgentOp 的純函式編譯器。
+// workflow-dsl/compile.ts — DSL → 既有 8-op CanvasAgentOp 的纯函式编译器。
 //
-// 角色（暴君裁定 2026-09-02）：畫布圖為唯一運行時真相；AI 的筆 = 緊湊宣告式 DSL
-// （schema.ts 的 WorkflowDslSource），本檔把 DSL 編譯成 src/lib/canvas/types.ts
-// L239-247 的 CanvasAgentOp（契約真源），交由前端 canvas-reducer-adapter 執行。
+// 角色（暴君裁定 2026-09-02）：画布图为唯一运行时真相；AI 的笔 = 紧凑宣告式 DSL
+// （schema.ts 的 WorkflowDslSource），本档把 DSL 编译成 src/lib/canvas/types.ts
+// L239-247 的 CanvasAgentOp（契约真源），交由前端 canvas-reducer-adapter 执行。
 //
-// 語義要點：
-//   1. 校驗順序：schema（schema.ts）→ id 唯一 → needs 引用存在 → Kahn 拓撲（環列成員）
-//      → tool ∈ HARNESS_TOOL_IDS。任何 error → ok:false、ops 空；message 一律簡體中文
-//      且自帶修復提示（教學式報錯，2026-09-02 暴君追加）。
-//   2. 節點 id 確定性：wf- + 兩輪不同 seed 的 FNV-1a 32 位雜湊拼 16 hex——同輸入永遠同 id，
-//      冪等重套用根絕二次建號競態（記憶 2026-08-31-workflow-start-idempotent-p0）。
-//   3. 一律不帶 position/width/height：座標留 (0,0) 交 reducer nextPosition
-//      （src/lib/canvas/layout.ts 頭註、src/lib/canvas/reducer.ts upsertNode）。
-//   4. 增量發射：id 已存在 → update_node（patch 禁含 position/width/height/moved，
-//      人拖位置自動保留）；不存在 → add_node。連線合併成一條 connect_nodes，
-//      且全部 add_node 在前、connect_nodes 在後。
-//   5. v0 不刪節點：DSL 移除的步驟只進 summary.warnings。
-//   6. 對 DSL 編譯產物 decompile（decompile.ts）後再 compile → 全部 update_node、
-//      零新增連線（round-trip 冪等）。
+// 语义要点：
+//   1. 校验顺序：schema（schema.ts）→ id 唯一 → needs 引用存在 → Kahn 拓扑（环列成员）
+//      → tool ∈ HARNESS_TOOL_IDS。任何 error → ok:false、ops 空；message 一律简体中文
+//      且自带修复提示（教学式报错，2026-09-02 暴君追加）。
+//   2. 节点 id 确定性：wf- + 两轮不同 seed 的 FNV-1a 32 位杂凑拼 16 hex——同输入永远同 id，
+//      幂等重套用根绝二次建号竞态（记忆 2026-08-31-workflow-start-idempotent-p0）。
+//   3. 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition
+//      （src/lib/canvas/layout.ts 头注、src/lib/canvas/reducer.ts upsertNode）。
+//   4. 增量发射：id 已存在 → update_node（patch 禁含 position/width/height/moved，
+//      人拖位置自动保留）；不存在 → add_node。连线合并成一条 connect_nodes，
+//      且全部 add_node 在前、connect_nodes 在后。
+//   5. v0 不删节点：DSL 移除的步骤只进 summary.warnings。
+//   6. 对 DSL 编译产物 decompile（decompile.ts）后再 compile → 全部 update_node、
+//      零新增连线（round-trip 幂等）。
 
 import {
   CanvasNodeType,
@@ -34,10 +34,10 @@ import {
   type WorkflowValidationIssue,
 } from "./schema";
 
-// WorkflowValidationIssue 的權威定義在 schema.ts（compile/decompile 共用），此處按契約再導出。
+// WorkflowValidationIssue 的权威定义在 schema.ts（compile/decompile 共用），此处按契约再导出。
 export type { WorkflowValidationIssue } from "./schema";
 
-/** 編譯輸入 = 畫布當前真相（僅讀，不修改）。 */
+/** 编译输入 = 画布当前真相（仅读，不修改）。 */
 export interface WorkflowCompileInput {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
@@ -48,18 +48,18 @@ export type WorkflowCompileResult =
   | { ok: false; errors: WorkflowValidationIssue[]; ops: [] };
 
 /**
- * DSL 節點 metadata：CanvasNodeMetadata 白名單欄位 + workflow 運行期鍵
- * （workflow_ns/stepId/gate）+ meta 透傳剩餘鍵。workflow_ns/stepId 為
- * decompile 反推的依據；gate 為門禁步標記。型別上借 Record<string, unknown>
- * 承載白名單之外的鍵，不改 types.ts。
+ * DSL 节点 metadata：CanvasNodeMetadata 白名单栏位 + workflow 运行期键
+ * （workflow_ns/stepId/gate）+ meta 透传剩余键。workflow_ns/stepId 为
+ * decompile 反推的依据；gate 为门禁步标记。型别上借 Record<string, unknown>
+ * 承载白名单之外的键，不改 types.ts。
  */
 export type WorkflowNodeMetadata = Partial<CanvasNodeMetadata> & Record<string, unknown>;
 
-// ─────────────────────────── 確定性節點 id（FNV-1a 32，兩輪不同 seed 拼 16 hex）
+// ─────────────────────────── 确定性节点 id（FNV-1a 32，两轮不同 seed 拼 16 hex）
 
 const FNV_OFFSET_BASIS = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
-/** 黃金比例常數：第二輪雜湊的 seed 異擾，防兩輪同串碰撞。 */
+/** 黄金比例常数：第二轮杂凑的 seed 异扰，防两轮同串碰撞。 */
 const SECOND_ROUND_SEED = 0x9e3779b9;
 
 function fnv1a32(seed: number, input: string): number {
@@ -75,7 +75,7 @@ function toHex8(value: number): string {
   return value.toString(16).padStart(8, "0");
 }
 
-/** wf-${h1.hex}${h2.hex}（wf- + 16 hex）。同輸入永遠同 id。 */
+/** wf-${h1.hex}${h2.hex}（wf- + 16 hex）。同输入永远同 id。 */
 export function workflowNodeId(workflow: string, stepId: string): string {
   const key = `${workflow}/${stepId}`;
   const h1 = fnv1a32(FNV_OFFSET_BASIS, key);
@@ -94,8 +94,8 @@ function kindToNodeType(kind: WorkflowDslStep["kind"]): CanvasNodeType {
     case "audio":
       return CanvasNodeType.Audio;
     case "director":
-      // director 步 = 3D 白模预演（2026-09-03），鋪導演台節點；metadata.kind 仍不設
-      // （既有契約只承載 image/video），節點型別即導演語義。
+      // director 步 = 3D 白模预演（2026-09-03），铺导演台节点；metadata.kind 仍不设
+      // （既有契约只承载 image/video），节点型别即导演语义。
       return CanvasNodeType.Director;
     case "image":
     case undefined:
@@ -107,15 +107,15 @@ function isPresent<T>(value: T | undefined | null): value is T {
   return value !== undefined && value !== null;
 }
 
-/** 步驟 metadata 白名單組裝（對齊 src/lib/canvas/types.ts CanvasNodeMetadata 既有欄位名）。 */
+/** 步骤 metadata 白名单组装（对齐 src/lib/canvas/types.ts CanvasNodeMetadata 既有栏位名）。 */
 function buildStepMetadata(source: WorkflowDslSource, step: WorkflowDslStep, stepIndex: number): WorkflowNodeMetadata {
   const md: WorkflowNodeMetadata = {};
   if (isPresent(step.prompt)) {
     md.prompt = step.prompt;
-    // text 步另設 content=prompt（CanvasNodeMetadata.content：文本節點正文）。
+    // text 步另设 content=prompt（CanvasNodeMetadata.content：文本节点正文）。
     if (step.kind === "text") md.content = step.prompt;
   }
-  // metadata.kind 既有契約只承載 "image" | "video"；text/audio 由節點 type 表達。
+  // metadata.kind 既有契约只承载 "image" | "video"；text/audio 由节点 type 表达。
   const mdKind = step.kind === undefined || step.kind === "image" ? "image" : step.kind === "video" ? "video" : undefined;
   if (mdKind !== undefined) md.kind = mdKind;
   if (isPresent(step.model)) md.model = step.model;
@@ -126,26 +126,26 @@ function buildStepMetadata(source: WorkflowDslSource, step: WorkflowDslStep, ste
   md.workflow_id = source.workflow;
   md.workflow_ns = source.workflow;
   md.stepId = step.id;
-  md.stepIndex = stepIndex; // 拓撲序（1 起）
+  md.stepIndex = stepIndex; // 拓扑序（1 起）
   md.status = "idle";
   if (isPresent(step.meta)) {
-    for (const [key, value] of Object.entries(step.meta)) md[key] = value; // meta 透傳
+    for (const [key, value] of Object.entries(step.meta)) md[key] = value; // meta 透传
   }
   return md;
 }
 
-// ─────────────────────────── 編譯期校驗（schema 之後的跨步驟語義）
+// ─────────────────────────── 编译期校验（schema 之后的跨步骤语义）
 
 /**
- * 校驗順序：id 唯一 → needs 引用存在 → Kahn 拓撲 → tool 成員。
- * 通過時附帶確定性拓撲序（每輪按 DSL 原始順序掃描，同輸入同 stepIndex）。
+ * 校验顺序：id 唯一 → needs 引用存在 → Kahn 拓扑 → tool 成员。
+ * 通过时附带确定性拓扑序（每轮按 DSL 原始顺序扫描，同输入同 stepIndex）。
  */
 function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIssue[]; topoOrder: WorkflowDslStep[] | null } {
   const errors: WorkflowValidationIssue[] = [];
   const idSet = new Set(steps.map((s) => s.id));
   const allIds = steps.map((s) => s.id).join(", ");
 
-  // id 唯一（撞號時 needs/拓撲不可信，先返回）
+  // id 唯一（撞号时 needs/拓扑不可信，先返回）
   const seen = new Set<string>();
   for (const step of steps) {
     if (seen.has(step.id)) {
@@ -160,7 +160,7 @@ function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIs
   }
   if (errors.length > 0) return { errors, topoOrder: null };
 
-  // needs 引用存在（引用殘缺時拓撲不可信）
+  // needs 引用存在（引用残缺时拓扑不可信）
   for (const step of steps) {
     for (const dep of new Set(step.needs ?? [])) {
       if (!idSet.has(dep)) {
@@ -175,7 +175,7 @@ function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIs
   }
   if (errors.length > 0) return { errors, topoOrder: null };
 
-  // Kahn 拓撲（環是根因，先修環再談 tool，故有環時不再並行回報 tool 錯）
+  // Kahn 拓扑（环是根因，先修环再谈 tool，故有环时不再并行回报 tool 错）
   const needsMap = new Map<string, string[]>();
   for (const step of steps) needsMap.set(step.id, [...new Set(step.needs ?? [])]);
   const satisfied = new Set<string>();
@@ -213,12 +213,12 @@ function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIs
   return { errors, topoOrder };
 }
 
-/** 環成員與被環阻塞步驟分開歸因：真環給破環建議，被阻塞步驟指向先修環。 */
+/** 环成员与被环阻塞步骤分开归因：真环给破环建议，被阻塞步骤指向先修环。 */
 function cycleErrors(leftover: string[], needsMap: Map<string, string[]>): WorkflowValidationIssue[] {
   const errors: WorkflowValidationIssue[] = [];
   const remaining = new Set(leftover);
   while (remaining.size > 0) {
-    // 剝掉「無環內依賴」的純被阻塞步驟，剩下的才是真環成員。
+    // 剥掉「无环内依赖」的纯被阻塞步骤，剩下的才是真环成员。
     let peeled = true;
     while (peeled) {
       peeled = false;
@@ -238,7 +238,7 @@ function cycleErrors(leftover: string[], needsMap: Map<string, string[]>): Workf
     }
     if (remaining.size === 0) break;
     const cycle = findCyclePath([...remaining], needsMap);
-    if (cycle.length === 0) break; // 防禦：不可達
+    if (cycle.length === 0) break; // 防御：不可达
     errors.push({
       step: cycle[0],
       field: "needs",
@@ -250,7 +250,7 @@ function cycleErrors(leftover: string[], needsMap: Map<string, string[]>): Workf
   return errors;
 }
 
-/** 在剩餘節點裡沿 needs 反向走，取一條閉合環路（首尾相接，如 [a, b, a]）。 */
+/** 在剩余节点里沿 needs 反向走，取一条闭合环路（首尾相接，如 [a, b, a]）。 */
 function findCyclePath(remaining: string[], needsMap: Map<string, string[]>): string[] {
   const remainingSet = new Set(remaining);
   const start = remaining[0];
@@ -263,16 +263,16 @@ function findCyclePath(remaining: string[], needsMap: Map<string, string[]>): st
     walk.push(cur);
     const unmet = (needsMap.get(cur) ?? []).filter((d) => remainingSet.has(d));
     const next = unmet[0];
-    if (next === undefined) return []; // 剩餘節點全是被阻塞者，非真環（上層已剝除，理論不可達）
+    if (next === undefined) return []; // 剩余节点全是被阻塞者，非真环（上层已剥除，理论不可达）
     cur = next;
   }
   const startAt = seenAt.get(cur) ?? 0;
   return [...walk.slice(startAt), cur];
 }
 
-// ─────────────────────────── 工具 id 建議（教學式報錯）
+// ─────────────────────────── 工具 id 建议（教学式报错）
 
-/** 工具 id 建議 fallback：皆為 HARNESS_TOOL_ID_LIST 實際成員（由 workflow-dsl.test.ts 用真 registry 把關）。 */
+/** 工具 id 建议 fallback：皆为 HARNESS_TOOL_ID_LIST 实际成员（由 workflow-dsl.test.ts 用真 registry 把关）。 */
 const COMMON_TOOL_SUGGESTIONS: string[] = ["image_generate", "image_edit", "canvas_generate_image"];
 
 function levenshtein(a: string, b: string): number {
@@ -291,7 +291,7 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length];
 }
 
-/** 前綴命中優先，其次編輯距離最近的 1-3 個；都不沾邊給常用生成類 fallback。 */
+/** 前缀命中优先，其次编辑距离最近的 1-3 个；都不沾边给常用生成类 fallback。 */
 function suggestTools(input: string): string[] {
   const prefix = HARNESS_TOOL_ID_LIST.filter((id) => id.startsWith(input)).slice(0, 3);
   const scored = HARNESS_TOOL_ID_LIST.map((id) => ({ id, d: levenshtein(input, id) })).sort((x, y) => x.d - y.d || x.id.localeCompare(y.id));
@@ -301,19 +301,19 @@ function suggestTools(input: string): string[] {
   return suggestions.length > 0 ? suggestions : COMMON_TOOL_SUGGESTIONS;
 }
 
-// ─────────────────────────── 編譯主入口
+// ─────────────────────────── 编译主入口
 
 /**
- * 全圖校驗 → 增量 op 發射（對 current）。任何 error → ok:false、ops 空。
- * current 僅讀；呼叫方把 ops 交 canvas_apply_ops / 前端 adapter 執行。
+ * 全图校验 → 增量 op 发射（对 current）。任何 error → ok:false、ops 空。
+ * current 仅读；呼叫方把 ops 交 canvas_apply_ops / 前端 adapter 执行。
  */
 export function compileWorkflow(source: WorkflowDslSource, current: WorkflowCompileInput): WorkflowCompileResult {
-  // 1. schema（runtime 形狀防禦：source 型別上已窄，實際可能是 JSON 反序列化產物）
+  // 1. schema（runtime 形状防御：source 型别上已窄，实际可能是 JSON 反序列化产物）
   const schemaResult = validateWorkflowDsl(source);
   if (!schemaResult.ok) return { ok: false, errors: schemaResult.errors, ops: [] };
   const valid = schemaResult.source;
 
-  // 2-5. id 唯一 → needs 引用 → Kahn 拓撲 → tool 成員
+  // 2-5. id 唯一 → needs 引用 → Kahn 拓扑 → tool 成员
   const graph = validateGraph(valid.steps);
   if (graph.errors.length > 0 || graph.topoOrder === null) return { ok: false, errors: graph.errors, ops: [] };
   const topoOrder = graph.topoOrder;
@@ -327,24 +327,24 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
   let added = 0;
   let updated = 0;
 
-  // 增量發射：add_node 在前（拓撲序）
+  // 增量发射：add_node 在前（拓扑序）
   for (let i = 0; i < topoOrder.length; i++) {
     const step = topoOrder[i];
     const nodeId = nodeIds.get(step.id)!;
     const metadata = buildStepMetadata(valid, step, i + 1);
     const existing = currentById.get(nodeId);
     if (existing) {
-      // patch 禁含 position/width/height/moved——人拖位置自動保留（canvas-reducer-adapter update_node 語義）。
+      // patch 禁含 position/width/height/moved——人拖位置自动保留（canvas-reducer-adapter update_node 语义）。
       ops.push({ type: "update_node", id: nodeId, patch: { title: step.title, metadata } });
       updated++;
     } else {
-      // 一律不帶 position/width/height：座標留 (0,0) 交 reducer nextPosition。
+      // 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition。
       ops.push({ type: "add_node", node: { id: nodeId, type: kindToNodeType(step.kind), title: step.title, metadata } });
       added++;
     }
   }
 
-  // 連線：needs 邊 dep→step；current 已有同 from/to → 跳過；新的合併成一條 connect_nodes（在全部 add_node 之後）。
+  // 连线：needs 边 dep→step；current 已有同 from/to → 跳过；新的合并成一条 connect_nodes（在全部 add_node 之后）。
   const newConnections: { fromNodeId: string; toNodeId: string }[] = [];
   for (const step of topoOrder) {
     const toId = nodeIds.get(step.id)!;
@@ -358,14 +358,14 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
     ops.push({ type: "connect_nodes", connections: newConnections });
   }
 
-  // 刪除語義：v0 不刪節點；DSL 移除的步驟只進 warnings。
+  // 删除语义：v0 不删节点；DSL 移除的步骤只进 warnings。
   const dslStepIds = new Set(valid.steps.map((s) => s.id));
   const reportedRemoved = new Set<string>();
   for (const node of current.nodes) {
     const md = (node.metadata ?? {}) as WorkflowNodeMetadata;
     const nodeNs = typeof md.workflow_ns === "string" ? md.workflow_ns : undefined;
     const nodeWf = typeof md.workflow_id === "string" ? md.workflow_id : undefined;
-    // 屬於本工作流的節點：workflow_ns 命中；或無 workflow_ns 但 workflow_id 命中（舊產物衛生歸屬）。
+    // 属于本工作流的节点：workflow_ns 命中；或无 workflow_ns 但 workflow_id 命中（旧产物卫生归属）。
     const belongs = nodeNs === valid.workflow || (nodeNs === undefined && nodeWf === valid.workflow);
     if (!belongs) continue;
     const stepId = typeof md.stepId === "string" ? md.stepId : undefined;

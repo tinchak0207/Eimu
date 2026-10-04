@@ -1,18 +1,18 @@
 /**
- * MCP（Model Context Protocol）線協議層——**純型別 + 純函式，零 I/O、零業務**。
+ * MCP（Model Context Protocol）线协议层——**纯型别 + 纯函式，零 I/O、零业务**。
  *
- * 為什麼要有這一層：`/api/mcp` 是把 Eimu 既有的 `/api/v1/**`（B 端 OpenAI 相容 API）
- * 暴露給外部 coding agent（Codex / Claude Code / OpenClaw…）的第二個入口。入口可以多，
- * 業務與帳本只能有一份 —— 所以本檔只做「JSON-RPC 2.0 信封 + MCP 型別」的形狀定義，
- * 不碰認證、不碰計費、不碰生圖（那些逐字複用既有實作，見 `./tools.ts` 與
+ * 为什么要有这一层：`/api/mcp` 是把 Eimu 既有的 `/api/v1/**`（B 端 OpenAI 相容 API）
+ * 暴露给外部 coding agent（Codex / Claude Code / OpenClaw…）的第二个入口。入口可以多，
+ * 业务与帐本只能有一份 —— 所以本档只做「JSON-RPC 2.0 信封 + MCP 型别」的形状定义，
+ * 不碰认证、不碰计费、不碰生图（那些逐字复用既有实作，见 `./tools.ts` 与
  * `src/app/api/mcp/route.ts`）。
  *
- * 傳輸：Streamable HTTP，本版只支援 `POST`（單發 JSON 回應，不開 SSE 串流）。
+ * 传输：Streamable HTTP，本版只支援 `POST`（单发 JSON 回应，不开 SSE 串流）。
  */
 
 // ─────────────────────────────────────────── JSON-RPC 2.0
 
-/** JSON-RPC 2.0 標準錯誤碼（值不得改，客戶端按號碼分類）。 */
+/** JSON-RPC 2.0 标准错误码（值不得改，客户端按号码分类）。 */
 export const JSON_RPC_ERROR_CODES = {
   parseError: -32700,
   invalidRequest: -32600,
@@ -24,8 +24,8 @@ export const JSON_RPC_ERROR_CODES = {
 export type JsonRpcErrorCode = (typeof JSON_RPC_ERROR_CODES)[keyof typeof JSON_RPC_ERROR_CODES];
 
 /**
- * `id` 允許 string / number / null（null 專用於「請求根本解析不出 id」的回應）。
- * 沒有 `id`（undefined）= notification，服務端不回 body。
+ * `id` 允许 string / number / null（null 专用于「请求根本解析不出 id」的回应）。
+ * 没有 `id`（undefined）= notification，服务端不回 body。
  */
 export type JsonRpcId = string | number | null;
 
@@ -50,9 +50,9 @@ export interface JsonRpcResponse {
 }
 
 /**
- * 協議層錯誤：`tools.ts` 的參數驗證失敗拋它（`-32602`），
- * `route.ts` 據此決定回哪個 JSON-RPC 錯誤碼。**不要**拿它承載業務錯誤——
- * 上游 `/v1` 的失敗要走 `tools/call` 結果的 `isError`，讓模型自己看得見原文。
+ * 协议层错误：`tools.ts` 的参数验证失败抛它（`-32602`），
+ * `route.ts` 据此决定回哪个 JSON-RPC 错误码。**不要**拿它承载业务错误——
+ * 上游 `/v1` 的失败要走 `tools/call` 结果的 `isError`，让模型自己看得见原文。
  */
 export class McpRpcError extends Error {
   readonly code: number;
@@ -66,12 +66,12 @@ export class McpRpcError extends Error {
   }
 }
 
-/** 成功回應（`result` 缺席時補 `{}`，符合 JSON-RPC 的 result 必存在慣例）。 */
+/** 成功回应（`result` 缺席时补 `{}`，符合 JSON-RPC 的 result 必存在惯例）。 */
 export function jsonRpcOk(id: JsonRpcId, result: unknown): JsonRpcResponse {
   return { jsonrpc: "2.0", id, result: result === undefined ? {} : result };
 }
 
-/** 失敗回應。`data` 只在有值時掛上，避免多一個 `data: undefined` 的噪音鍵。 */
+/** 失败回应。`data` 只在有值时挂上，避免多一个 `data: undefined` 的噪音键。 */
 export function jsonRpcErr(
   id: JsonRpcId,
   code: number,
@@ -86,8 +86,8 @@ export function jsonRpcErr(
 }
 
 /**
- * 把任意 body 收斂成合法 id：string / number / null 原樣保留（含 `0` 與空字串——
- * 這兩個是最容易被 `if (id)` 誤傷的值），其餘形狀回 `null`（對應 -32600）。
+ * 把任意 body 收敛成合法 id：string / number / null 原样保留（含 `0` 与空字串——
+ * 这两个是最容易被 `if (id)` 误伤的值），其余形状回 `null`（对应 -32600）。
  */
 export function normalizeJsonRpcId(value: unknown): JsonRpcId {
   if (typeof value === "string" || typeof value === "number") return value;
@@ -96,8 +96,8 @@ export function normalizeJsonRpcId(value: unknown): JsonRpcId {
 }
 
 /**
- * 結構檢查：只認「object + jsonrpc === "2.0" + method 非空字串」。
- * 陣列（批次請求）不算合法單一請求，交由呼叫方回 -32600。
+ * 结构检查：只认「object + jsonrpc === "2.0" + method 非空字串」。
+ * 阵列（批次请求）不算合法单一请求，交由呼叫方回 -32600。
  */
 export function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -111,24 +111,24 @@ export function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
   return true;
 }
 
-/** 是不是 notification（無 `id`）：服務端對它只回 HTTP 202、無 body。 */
+/** 是不是 notification（无 `id`）：服务端对它只回 HTTP 202、无 body。 */
 export function isNotification(request: JsonRpcRequest): boolean {
   return request.id === undefined;
 }
 
-// ─────────────────────────────────────────── MCP 線協議
+// ─────────────────────────────────────────── MCP 线协议
 
 export const MCP_SERVER_NAME = "eimu";
-/** 本 server 的版本（/api/version 與 package.json 是站點版本，兩者語義不同，別互相 import）。 */
+/** 本 server 的版本（/api/version 与 package.json 是站点版本，两者语义不同，别互相 import）。 */
 export const MCP_SERVER_VERSION = "0.1.0";
 
-/** 我方支援（並宣告）的 MCP 協議版本，最新者放第一。 */
+/** 我方支援（并宣告）的 MCP 协议版本，最新者放第一。 */
 export const SUPPORTED_MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
 export const MCP_PROTOCOL_VERSION: string = SUPPORTED_MCP_PROTOCOL_VERSIONS[0];
 
 /**
- * 版本協商：客戶端宣告的版本在我方支援清單內就照單全收（回聲），
- * 不認識（含缺欄位、型別錯）一律回我方支援的最新版，由客戶端自行決定是否降級。
+ * 版本协商：客户端宣告的版本在我方支援清单内就照单全收（回声），
+ * 不认识（含缺栏位、型别错）一律回我方支援的最新版，由客户端自行决定是否降级。
  */
 export function negotiateProtocolVersion(clientVersion: unknown): string {
   if (typeof clientVersion !== "string") return MCP_PROTOCOL_VERSION;
@@ -140,11 +140,11 @@ export function negotiateProtocolVersion(clientVersion: unknown): string {
 
 /** 工具宣告。`inputSchema` = JSON Schema（object），由 `./tools.ts` 提供。 */
 export interface McpToolDescriptor {
-  /** snake_case，對模型穩定；改名等於破壞性變更。 */
+  /** snake_case，对模型稳定；改名等于破坏性变更。 */
   name: string;
-  /** 人類可讀短標題（簡體中文）。 */
+  /** 人类可读短标题（简体中文）。 */
   title: string;
-  /** 簡體中文描述；英文版接在同一個字串內（見 tools.ts 的 `bilingual()`）。 */
+  /** 简体中文描述；英文版接在同一个字串内（见 tools.ts 的 `bilingual()`）。 */
   description: string;
   inputSchema: Record<string, unknown>;
 }
@@ -156,21 +156,21 @@ export interface McpToolsListResult {
 // ─────────────────────────────────────────── resources / prompts（MCP 2025）
 
 /**
- * `resources/list` 的單筆資源描述。**不含 `text` 全文**——清單只做「有什麼」的發現，
- * 全文由 `resources/read` 按 `uri` 取；把整份指南塞進清單會灌爆 agent 上下文。
+ * `resources/list` 的单笔资源描述。**不含 `text` 全文**——清单只做「有什么」的发现，
+ * 全文由 `resources/read` 按 `uri` 取；把整份指南塞进清单会灌爆 agent 上下文。
  */
 export interface McpResourceDescriptor {
-  /** 唯一定位符（本 server 用自訂 scheme `eimu://`）。 */
+  /** 唯一定位符（本 server 用自订 scheme `eimu://`）。 */
   uri: string;
-  /** 穩定機讀名（kebab-case）。 */
+  /** 稳定机读名（kebab-case）。 */
   name: string;
-  /** 人類可讀描述（簡體中文，對齊工具描述風格）。 */
+  /** 人类可读描述（简体中文，对齐工具描述风格）。 */
   description: string;
-  /** MIME 型別（指南類一律 `text/markdown`）。 */
+  /** MIME 型别（指南类一律 `text/markdown`）。 */
   mimeType: string;
 }
 
-/** `resources/read` 回傳的單一內容區塊（text 型資源，故只給 `text`）。 */
+/** `resources/read` 回传的单一内容区块（text 型资源，故只给 `text`）。 */
 export interface McpResourceContents {
   uri: string;
   mimeType: string;
@@ -181,32 +181,32 @@ export interface McpResourceReadResult {
   contents: McpResourceContents[];
 }
 
-/** prompt 的可帶參數宣告；`required` 缺席視為 false（與官方 SDK 形狀一致）。 */
+/** prompt 的可带参数宣告；`required` 缺席视为 false（与官方 SDK 形状一致）。 */
 export interface McpPromptArgumentDescriptor {
   name: string;
   description: string;
   required?: boolean;
 }
 
-/** `prompts/list` 的單筆 prompt 描述（**不含** `build` 函式——純資料，可安全序列化）。 */
+/** `prompts/list` 的单笔 prompt 描述（**不含** `build` 函式——纯资料，可安全序列化）。 */
 export interface McpPromptDescriptor {
-  /** snake/kebab 混合名稱，對模型穩定；改名等於破壞性變更。 */
+  /** snake/kebab 混合名称，对模型稳定；改名等于破坏性变更。 */
   name: string;
-  /** 人類可讀短標題（簡體中文）。 */
+  /** 人类可读短标题（简体中文）。 */
   title: string;
-  /** 簡體中文描述。 */
+  /** 简体中文描述。 */
   description: string;
   arguments: McpPromptArgumentDescriptor[];
 }
 
-/** `prompts/get` 的訊息（本版只回 user 訊息、只回 text 內容）。 */
+/** `prompts/get` 的讯息（本版只回 user 讯息、只回 text 内容）。 */
 export interface McpPromptMessage {
   role: "user";
   content: McpTextContent;
 }
 
 export interface McpPromptGetResult {
-  /** 本次 prompt 的說明（回填 `prompts/list` 的同名描述）。 */
+  /** 本次 prompt 的说明（回填 `prompts/list` 的同名描述）。 */
   description: string;
   messages: McpPromptMessage[];
 }
@@ -219,9 +219,9 @@ export interface McpServerInfo {
 export interface McpInitializeResult {
   protocolVersion: string;
   /**
-   * 能力宣告。`tools` 恆存在（既有欄位不動）；`resources` / `prompts` 為本版新增，
-   * 宣告後客戶端才會去調 `resources/*` 與 `prompts/*`（空物件＝「有這能力、無子選項」，
-   * 對齊 MCP 2025 規範的形狀）。
+   * 能力宣告。`tools` 恒存在（既有栏位不动）；`resources` / `prompts` 为本版新增，
+   * 宣告后客户端才会去调 `resources/*` 与 `prompts/*`（空物件＝「有这能力、无子选项」，
+   * 对齐 MCP 2025 规范的形状）。
    */
   capabilities: {
     tools: Record<string, never>;
@@ -229,7 +229,7 @@ export interface McpInitializeResult {
     prompts?: Record<string, never>;
   };
   serverInfo: McpServerInfo;
-  /** 給 agent 的用法提示（可選欄位，客戶端可忽略）。 */
+  /** 给 agent 的用法提示（可选栏位，客户端可忽略）。 */
   instructions?: string;
 }
 
@@ -240,34 +240,34 @@ export interface McpTextContent {
 
 export interface McpToolCallResult {
   content: McpTextContent[];
-  /** 工具層失敗（未知工具 / 上游 4xx / 網路中斷）走這裡，**不是** JSON-RPC error。 */
+  /** 工具层失败（未知工具 / 上游 4xx / 网路中断）走这里，**不是** JSON-RPC error。 */
   isError?: boolean;
 }
 
-/** 單一文字區塊的工具結果。`isError` 只在 true 時掛上（形狀與官方 SDK 一致）。 */
+/** 单一文字区块的工具结果。`isError` 只在 true 时挂上（形状与官方 SDK 一致）。 */
 export function textResult(text: string, isError = false): McpToolCallResult {
   return isError ? { content: [{ type: "text", text }], isError: true } : { content: [{ type: "text", text }] };
 }
 
-// ─────────────────────────────────────────── 輸出消毒
+// ─────────────────────────────────────────── 输出消毒
 
-/** 工具結果上限：生圖預設回 b64_json，一張 1024² 就上百 KB，不限長會直接灌爆 agent 上下文。 */
+/** 工具结果上限：生图预设回 b64_json，一张 1024² 就上百 KB，不限长会直接灌爆 agent 上下文。 */
 export const MAX_TOOL_TEXT_LENGTH = 24_000;
 
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{6,}/gi;
 const BIZ_KEY_PATTERN = /\bsk-[A-Za-z0-9._-]{6,}/g;
 
 /**
- * 回應／錯誤訊息出網前的消毒：任何形態的憑證一律換成 `[REDACTED]`。
- * 上游正常不會回傳密鑰，但「不會」是推論不是事實——B 端 key 是錢，寧可錯殺。
+ * 回应／错误讯息出网前的消毒：任何形态的凭证一律换成 `[REDACTED]`。
+ * 上游正常不会回传密钥，但「不会」是推论不是事实——B 端 key 是钱，宁可错杀。
  */
 export function redactSecrets(text: string): string {
   return text.replace(BEARER_PATTERN, "Bearer [REDACTED]").replace(BIZ_KEY_PATTERN, "sk-[REDACTED]");
 }
 
-/** 消毒 + 截斷（截斷處標明，不假裝內容完整）。 */
+/** 消毒 + 截断（截断处标明，不假装内容完整）。 */
 export function truncateToolText(text: string, limit = MAX_TOOL_TEXT_LENGTH): string {
   const clean = redactSecrets(text);
   if (clean.length <= limit) return clean;
-  return `${clean.slice(0, limit)}\n…[內容已截斷，共 ${clean.length} 字元；完整結果請改用 GET /api/v1 對應端點或 response_format=url]`;
+  return `${clean.slice(0, limit)}\n…[内容已截断，共 ${clean.length} 字元；完整结果请改用 GET /api/v1 对应端点或 response_format=url]`;
 }

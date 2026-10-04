@@ -1,223 +1,223 @@
-# image-app repo 第 3 批（47 commit）我方能力清單
+# image-app repo 第 3 批（47 commit）我方能力清单
 
-- 範圍：`/tmp/cap/batch-3.hashes` 全部 47 條（2026-09-15 → 2026-09-20）
-- 唯一真源：`/tmp/cap/batch-3.txt` 訊息 ＋ `git show` 補細節 ＋ 現場 grep 驗是否還在
-- 能力定義：使用者可見或可呼叫的行為；檔名一律不當能力
-- 領域標籤：生成核心／模型與供應商／控制平面與計費／B端API／Agent助理／畫布與工作流／創作域／帳號與增長／前端與UI／運維與觀測／團隊與企業
+- 范围：`/tmp/cap/batch-3.hashes` 全部 47 条（2026-09-15 → 2026-09-20）
+- 唯一真源：`/tmp/cap/batch-3.txt` 讯息 ＋ `git show` 补细节 ＋ 现场 grep 验是否还在
+- 能力定义：使用者可见或可呼叫的行为；档名一律不当能力
+- 领域标签：生成核心／模型与供应商／控制平面与计费／B端API／Agent助理／画布与工作流／创作域／帐号与增长／前端与UI／运维与观测／团队与企业
 
 ---
 
 ## 生成核心
 
-- [生成核心] 成片導出冪等指紋 — 素材集合歸一化 SHA-256 指紋（絕對／相對 URL 視為同素材），指紋相同即視為同一成片 ｜ 證據: 51631bc1
-- [生成核心] 字幕分屏 — 每屏 7-12 字且切在換行 → 句末標點 → 句內停頓等語義邊界，逐行移植 AID SubtitleScreenSplitter ｜ 證據: 51631bc1
-- [生成核心] 成片導出後實算指紋並回填公開 URL — 導出成功且 probe 過檔後回填 public_url 與 master_artifact_id，sha256/byte_size 取盤上實值，不拿 probe 缺值充數 ｜ 證據: 349150f3
+- [生成核心] 成片导出幂等指纹 — 素材集合归一化 SHA-256 指纹（绝对／相对 URL 视为同素材），指纹相同即视为同一成片 ｜ 证据: 51631bc1
+- [生成核心] 字幕分屏 — 每屏 7-12 字且切在换行 → 句末标点 → 句内停顿等语义边界，逐行移植 AID SubtitleScreenSplitter ｜ 证据: 51631bc1
+- [生成核心] 成片导出后实算指纹并回填公开 URL — 导出成功且 probe 过档后回填 public_url 与 master_artifact_id，sha256/byte_size 取盘上实值，不拿 probe 缺值充数 ｜ 证据: 349150f3
 
-## 模型與供應商
+## 模型与供应商
 
-- [模型與供應商] yyds 渠道宣告 image_edit — gpt-image-2 改圖能力寫進 registry claims（此前只宣告 image_generate，改圖能力表只剩死渠道） ｜ 證據: 15f278d8
-- [模型與供應商] edit 標註與 registry claims 同源 — model-status-probe 的 edit 標註改由 registry 推導，標了才有 capability 預檢行可查 ｜ 證據: 15f278d8
-- [模型與供應商] 部署側渠道目錄同步 — gateway 15 檔與 VPS live 同步，帶入 agnes／seedance 渠道與 catalog 能力位 ｜ 證據: 75c25e24
+- [模型与供应商] yyds 渠道宣告 image_edit — gpt-image-2 改图能力写进 registry claims（此前只宣告 image_generate，改图能力表只剩死渠道） ｜ 证据: 15f278d8
+- [模型与供应商] edit 标注与 registry claims 同源 — model-status-probe 的 edit 标注改由 registry 推导，标了才有 capability 预检行可查 ｜ 证据: 15f278d8
+- [模型与供应商] 部署侧渠道目录同步 — gateway 15 档与 VPS live 同步，带入 agnes／seedance 渠道与 catalog 能力位 ｜ 证据: 75c25e24
 
-## 控制平面與計費
+## 控制平面与计费
 
-- [控制平面與計費] 成片導出落帳 — 以 generation_job(kind='film_export', source='agent', status='succeeded', model_id='timeline_master', billing_amount=0) 落帳；導出免費且不經任何供應商、無 billing_operation ｜ 證據: 349150f3
-- [控制平面與計費] 導出登記冪等 — 冪等鍵 `film_export:<session_id>:<fingerprint>`，重放導出 job 不重複、artifact 不重插（artifact_id 同值、total 不變） ｜ 證據: 349150f3
-- [控制平面與計費] 成片索引 HMAC ingest 通道 — `/api/v1/internal/masters/ingest` 復用 memory-hmac 同一通道與同一把密鑰，無簽／錯簽／密鑰未配置回 401 ｜ 證據: 349150f3
-- [控制平面與計費] 成片索引 tenant 屬主維度 — reader/ingest 兩端對稱改用 `web:<userId>`，避免成片按 B key id 查永遠查空 ｜ 證據: 349150f3
-- [控制平面與計費] 尺寸 NULL 誠實直譯 — 修掉既有 Number(null)→0 的偽實測，尺寸 NULL 直譯 null（禁 0 冒充） ｜ 證據: 349150f3
+- [控制平面与计费] 成片导出落帐 — 以 generation_job(kind='film_export', source='agent', status='succeeded', model_id='timeline_master', billing_amount=0) 落帐；导出免费且不经任何供应商、无 billing_operation ｜ 证据: 349150f3
+- [控制平面与计费] 导出登记幂等 — 幂等键 `film_export:<session_id>:<fingerprint>`，重放导出 job 不重复、artifact 不重插（artifact_id 同值、total 不变） ｜ 证据: 349150f3
+- [控制平面与计费] 成片索引 HMAC ingest 通道 — `/api/v1/internal/masters/ingest` 复用 memory-hmac 同一通道与同一把密钥，无签／错签／密钥未配置回 401 ｜ 证据: 349150f3
+- [控制平面与计费] 成片索引 tenant 属主维度 — reader/ingest 两端对称改用 `web:<userId>`，避免成片按 B key id 查永远查空 ｜ 证据: 349150f3
+- [控制平面与计费] 尺寸 NULL 诚实直译 — 修掉既有 Number(null)→0 的伪实测，尺寸 NULL 直译 null（禁 0 冒充） ｜ 证据: 349150f3
 
 ## B端API
 
-- [B端API] `/v1/images/edits` durable 改圖管線 — 非 pixai 模型改圖回 202 + Location，任務合同與 generations 一致（不再走即時短路） ｜ 證據: 15f278d8
-- [B端API] 成片索引列舉 — `/api/v1/masters` 按 session／project／時間列舉成片，每條帶導出指紋、preset、時長、解析度與 probe 摘要 ｜ 證據: 0b2c2843
-- [B端API] B 端讀回成片全欄位 — 讀端回 probe.verified、fingerprint、解析度、時長、job_kind=film_export 等全欄位 ｜ 證據: 349150f3
+- [B端API] `/v1/images/edits` durable 改图管线 — 非 pixai 模型改图回 202 + Location，任务合同与 generations 一致（不再走即时短路） ｜ 证据: 15f278d8
+- [B端API] 成片索引列举 — `/api/v1/masters` 按 session／project／时间列举成片，每条带导出指纹、preset、时长、解析度与 probe 摘要 ｜ 证据: 0b2c2843
+- [B端API] B 端读回成片全栏位 — 读端回 probe.verified、fingerprint、解析度、时长、job_kind=film_export 等全栏位 ｜ 证据: 349150f3
 
 ## Agent助理
 
-- [Agent助理] AI 助理全局記憶庫（私有 + 共享）— 私有 active docs 與共享索引注入 gateway 建號與 memory-patch payload；export／ingest／retract／review 四端點 ｜ 證據: 0625d6d5
-- [Agent助理] 會話級記憶追溯 — `memory-trace` 端點回某會話的記憶注入與命中軌跡（另有 sessions/:id/memory 查詢） ｜ 證據: 0625d6d5
-- [Agent助理] 審核官 Expert（critic）— 獨立審核 persona，只駁回不產內容，輪子鏡像 screenwriter-delegate ｜ 證據: ff5e6c7b
-- [Agent助理] 提示詞契約機械檢查器 — 27 份契約（結構範式參考 AID 提示詞開發指南），運營改完當場可判是否違約 ｜ 證據: ff5e6c7b
-- [Agent助理] Expert 資產機械導出 — export-expert-agents 導出 persona／registry／contracts 三產物（contracts 為本批新增第三產物） ｜ 證據: ff5e6c7b
-- [Agent助理] Jev 輸入閘與路由權威 — TypeSafe System One 接入輸入閘／expert 路由／模板判定／workflow 記憶入庫閘，附閾值校準工具 ｜ 證據: 75c25e24
-- [Agent助理] 判定層 Laya 兜底 — Jev 額度用盡（閉源按量計費）時自動切開源 Laya：契約逐位同構、fail-open、fallback 打 laya_fallback log 供歸因；Jev 通時 Laya 完全不碰 ｜ 證據: d25aed7d
-- [Agent助理] 工作流完成記憶沉澱 — 歷史寫入後非同步 persistWorkflowMemory（fail-open 不阻塞 202）；閘門為 prompt 非空且 ≥2 槽位、body 硬上限 2000 字 ｜ 證據: ac0dfa0d
-- [Agent助理] 記憶 ownerKey 收斂 — 從 state.apiKey 算 memoryOwnerKeyHash，與 agent 側 deriveMemoryOwnerKey 收斂到同一 ownerKey ｜ 證據: ac0dfa0d
-- [Agent助理] 記憶庫第五類型 workflow — TYPE_VALUES（G1 結構閘判定集）與 curator prompt output schema 兩處同時擴充，缺一即靜默丟棄或不提議 ｜ 證據: 8fff4595
-- [Agent助理] subagent 停止閘 — 可停止在途 subagent，gateway 送 subagent.done status="stopped"，subagentParentState 兜底 ｜ 證據: 7ae66e5b, 0d3e12af
-- [Agent助理] workflow 完成推送 — 工作流完成事件推給前端 ｜ 證據: 7ae66e5b
-- [Agent助理] TaskStatus 單一語義表 — stopped≠失敗 語義固化進 types-gateway.ts，wire 值零變更 ｜ 證據: 5a7b9a90
+- [Agent助理] AI 助理全局记忆库（私有 + 共享）— 私有 active docs 与共享索引注入 gateway 建号与 memory-patch payload；export／ingest／retract／review 四端点 ｜ 证据: 0625d6d5
+- [Agent助理] 会话级记忆追溯 — `memory-trace` 端点回某会话的记忆注入与命中轨迹（另有 sessions/:id/memory 查询） ｜ 证据: 0625d6d5
+- [Agent助理] 审核官 Expert（critic）— 独立审核 persona，只驳回不产内容，轮子镜像 screenwriter-delegate ｜ 证据: ff5e6c7b
+- [Agent助理] 提示词契约机械检查器 — 27 份契约（结构范式参考 AID 提示词开发指南），运营改完当场可判是否违约 ｜ 证据: ff5e6c7b
+- [Agent助理] Expert 资产机械导出 — export-expert-agents 导出 persona／registry／contracts 三产物（contracts 为本批新增第三产物） ｜ 证据: ff5e6c7b
+- [Agent助理] Jev 输入闸与路由权威 — TypeSafe System One 接入输入闸／expert 路由／模板判定／workflow 记忆入库闸，附阈值校准工具 ｜ 证据: 75c25e24
+- [Agent助理] 判定层 Laya 兜底 — Jev 额度用尽（闭源按量计费）时自动切开源 Laya：契约逐位同构、fail-open、fallback 打 laya_fallback log 供归因；Jev 通时 Laya 完全不碰 ｜ 证据: d25aed7d
+- [Agent助理] 工作流完成记忆沉淀 — 历史写入后非同步 persistWorkflowMemory（fail-open 不阻塞 202）；闸门为 prompt 非空且 ≥2 槽位、body 硬上限 2000 字 ｜ 证据: ac0dfa0d
+- [Agent助理] 记忆 ownerKey 收敛 — 从 state.apiKey 算 memoryOwnerKeyHash，与 agent 侧 deriveMemoryOwnerKey 收敛到同一 ownerKey ｜ 证据: ac0dfa0d
+- [Agent助理] 记忆库第五类型 workflow — TYPE_VALUES（G1 结构闸判定集）与 curator prompt output schema 两处同时扩充，缺一即静默丢弃或不提议 ｜ 证据: 8fff4595
+- [Agent助理] subagent 停止闸 — 可停止在途 subagent，gateway 送 subagent.done status="stopped"，subagentParentState 兜底 ｜ 证据: 7ae66e5b, 0d3e12af
+- [Agent助理] workflow 完成推送 — 工作流完成事件推给前端 ｜ 证据: 7ae66e5b
+- [Agent助理] TaskStatus 单一语义表 — stopped≠失败 语义固化进 types-gateway.ts，wire 值零变更 ｜ 证据: 5a7b9a90
 
-## 畫布與工作流
+## 画布与工作流
 
-- [畫布與工作流] 作品／劇集／分鏡三級狀態機資料 — CanvasProject 帶 projectType／currentStep／episodes（全 optional、向後相容），normalizeProject 單點清洗避免路由與 layout 漂移 ｜ 證據: 9d9f0483
-- [畫布與工作流] agent 建作品／建劇集 op — canvas op `set_project_meta` 是唯一可達專案級三欄的寫入口，episodes 在寫入端即做 episodeNo 去重與截斷 ｜ 證據: f603864c
-- [畫布與工作流] 分鏡節點 21 欄契約 — 畫面／台詞·音效／時空／攝影四組共 21 欄，讀取端與上行端雙白名單清洗，剔除已廢的第 22 欄 sceneCode ｜ 證據: b01a1c47
-- [畫布與工作流] 21 欄 → storyboard_qc_17 門禁橋接 — shotId←shotNumber、order←陣列序、prompt←visualDescription、characterCardIds/sceneCardIds←referenceAssets、aspectRatio←節點 size、卡鎖←project.cardIds 按 kind 分流 ｜ 證據: 49bffcd7
-- [畫布與工作流] 劇集狀態查表由 enum 值域推導 — 改由 AID_EPISODE_STATUS 推導＋satisfies 窮盡性，AID 新增第七態時編譯失敗而非靜默回 undefined（避免劇集整筆消失） ｜ 證據: 7a4bbcc0
-- [畫布與工作流] 作品類型值域單一真源 — CanvasProjectType {series, movie} 收斂全倉 8 處硬編字面值與 `=== "movie" || === "series"` 判斷 ｜ 證據: 7a4bbcc0
-- [畫布與工作流] 畫布節點事件寫穿快照 — canvas.node.created/updated/connected/disconnected/generating 全數寫穿 canvasStates（SSE 與快照雙軌收口），updated 淺合併 last-write-wins 冪等 ｜ 證據: cef439a0
-- [畫布與工作流] 工作流模板註冊表 6→13 — 7 模板修復到 novel_film 水準（card 補 harnessTemplateId、directive 補 workflow_start 指令、後端新建 WorkflowTemplate） ｜ 證據: d59d3976
-- [畫布與工作流] 打字路徑骨架卡帶 deliverable/gate — WorkflowNodeSpec 加兩欄、expandTemplate 帶進 metadata、13 模板 deliverable 100% 覆蓋、R8 克隆鏈繼承 ｜ 證據: 3525afcf
-- [畫布與工作流] gate 欄位雙形態 — string＝骨架門禁全文／true＝DSL「需人工批准」旗標；layout 白名單對 boolean 原樣保留 ｜ 證據: 95a6994e
-- [畫布與工作流] 工作流歷史可重跑 — canHistoryEntryRerun 對 workflow 放寬，提交前剝掉前端專用 DAG 欄位再送 ｜ 證據: 06baf18e
-- [畫布與工作流] 模板拆檔零漂移 — agent-templates(8)／agent-templates-payload(8)／workflow-templates(13) 逐模板獨立檔＋types＋barrel，切割前後快照 md5 逐位相同 ｜ 證據: d59d3976
-- [畫布與工作流] AID 37 enum 值域庫 — creation(7)／generation(11)／storyboard(7)／asset(4)／billing(8) 值與中文 desc 逐字入庫，供消費端以單一真源推導 ｜ 證據: c194f5f4
+- [画布与工作流] 作品／剧集／分镜三级状态机资料 — CanvasProject 带 projectType／currentStep／episodes（全 optional、向后相容），normalizeProject 单点清洗避免路由与 layout 漂移 ｜ 证据: 9d9f0483
+- [画布与工作流] agent 建作品／建剧集 op — canvas op `set_project_meta` 是唯一可达专案级三栏的写入口，episodes 在写入端即做 episodeNo 去重与截断 ｜ 证据: f603864c
+- [画布与工作流] 分镜节点 21 栏契约 — 画面／台词·音效／时空／摄影四组共 21 栏，读取端与上行端双白名单清洗，剔除已废的第 22 栏 sceneCode ｜ 证据: b01a1c47
+- [画布与工作流] 21 栏 → storyboard_qc_17 门禁桥接 — shotId←shotNumber、order←阵列序、prompt←visualDescription、characterCardIds/sceneCardIds←referenceAssets、aspectRatio←节点 size、卡锁←project.cardIds 按 kind 分流 ｜ 证据: 49bffcd7
+- [画布与工作流] 剧集状态查表由 enum 值域推导 — 改由 AID_EPISODE_STATUS 推导＋satisfies 穷尽性，AID 新增第七态时编译失败而非静默回 undefined（避免剧集整笔消失） ｜ 证据: 7a4bbcc0
+- [画布与工作流] 作品类型值域单一真源 — CanvasProjectType {series, movie} 收敛全仓 8 处硬编字面值与 `=== "movie" || === "series"` 判断 ｜ 证据: 7a4bbcc0
+- [画布与工作流] 画布节点事件写穿快照 — canvas.node.created/updated/connected/disconnected/generating 全数写穿 canvasStates（SSE 与快照双轨收口），updated 浅合并 last-write-wins 幂等 ｜ 证据: cef439a0
+- [画布与工作流] 工作流模板注册表 6→13 — 7 模板修复到 novel_film 水准（card 补 harnessTemplateId、directive 补 workflow_start 指令、后端新建 WorkflowTemplate） ｜ 证据: d59d3976
+- [画布与工作流] 打字路径骨架卡带 deliverable/gate — WorkflowNodeSpec 加两栏、expandTemplate 带进 metadata、13 模板 deliverable 100% 覆盖、R8 克隆链继承 ｜ 证据: 3525afcf
+- [画布与工作流] gate 栏位双形态 — string＝骨架门禁全文／true＝DSL「需人工批准」旗标；layout 白名单对 boolean 原样保留 ｜ 证据: 95a6994e
+- [画布与工作流] 工作流历史可重跑 — canHistoryEntryRerun 对 workflow 放宽，提交前剥掉前端专用 DAG 栏位再送 ｜ 证据: 06baf18e
+- [画布与工作流] 模板拆档零漂移 — agent-templates(8)／agent-templates-payload(8)／workflow-templates(13) 逐模板独立档＋types＋barrel，切割前后快照 md5 逐位相同 ｜ 证据: d59d3976
+- [画布与工作流] AID 37 enum 值域库 — creation(7)／generation(11)／storyboard(7)／asset(4)／billing(8) 值与中文 desc 逐字入库，供消费端以单一真源推导 ｜ 证据: c194f5f4
 
-## 創作域
+## 创作域
 
-- [創作域] 鏡頭語言詞庫 142 條（12 類）— MIT 逐字取自 AID aid_prompt_lib，可多選詞條插入提示詞 ｜ 證據: 30f01c7d
-- [創作域] 7 步創作流水線骨架 — 作品／劇集／分鏡七步狀態機常數，輪子源 AID CreationStepEnum，MAX_EPISODES_PER_PROJECT 收斂單一宣告處 ｜ 證據: 30f01c7d, f603864c
-- [創作域] 音樂管線 yue2 — music-tools/yue2 換血＋prompt-director 升級＋staging 同源導出＋music-director skill references ｜ 證據: 75c25e24
-- [創作域] shortdrama QC 時長放寬 — 單鏡 2-30s、去段上限，對齊分鏡秒數最大化（現場 `duration_bounds` gate 仍是 2-30s） ｜ 證據: 75c25e24
-- [創作域] 模板 promptNotes 配方級 — 6 模板加厚到 32-41 條／2,067-2,534 字，每條含具體數值、工具用法與可驗證判據 ｜ 證據: d59d3976
+- [创作域] 镜头语言词库 142 条（12 类）— MIT 逐字取自 AID aid_prompt_lib，可多选词条插入提示词 ｜ 证据: 30f01c7d
+- [创作域] 7 步创作流水线骨架 — 作品／剧集／分镜七步状态机常数，轮子源 AID CreationStepEnum，MAX_EPISODES_PER_PROJECT 收敛单一宣告处 ｜ 证据: 30f01c7d, f603864c
+- [创作域] 音乐管线 yue2 — music-tools/yue2 换血＋prompt-director 升级＋staging 同源导出＋music-director skill references ｜ 证据: 75c25e24
+- [创作域] shortdrama QC 时长放宽 — 单镜 2-30s、去段上限，对齐分镜秒数最大化（现场 `duration_bounds` gate 仍是 2-30s） ｜ 证据: 75c25e24
+- [创作域] 模板 promptNotes 配方级 — 6 模板加厚到 32-41 条／2,067-2,534 字，每条含具体数值、工具用法与可验证判据 ｜ 证据: d59d3976
 
-## 帳號與增長
+## 帐号与增长
 
-- [帳號與增長] Google OAuth 登入 — `/api/auth/google` start＋callback 三件套與 google-auth 橋接（與 GitHub 同款、禁真實 Gmail 合成 email）＋SplitLoginButton 三段斜切鈕與品牌圖標 ｜ 證據: 75c25e24
+- [帐号与增长] Google OAuth 登入 — `/api/auth/google` start＋callback 三件套与 google-auth 桥接（与 GitHub 同款、禁真实 Gmail 合成 email）＋SplitLoginButton 三段斜切钮与品牌图标 ｜ 证据: 75c25e24
 
-## 前端與UI
+## 前端与UI
 
-- [前端與UI] 全聊天流單層滾動 — 參數卡與參數抽屜改 overflow:clip，滾輪手勢直接冒泡給最外層消息流（不再被隱形容器吃掉） ｜ 證據: dc6ef7b9
-- [前端與UI] ParticleSeaWaiting 動效回退 — 回退 shadowBlur 直繪（去掉離屏 sprite 預渲染） ｜ 證據: dc6ef7b9
-- [前端與UI] 作品／劇集面板 — CreationFlowPanel 掛畫布左側彈層，資料全取自 hook 既有出口，只報「已落畫布 N 鏡／場景計畫 M 鏡」不報完成進度 ｜ 證據: f603864c
-- [前端與UI] 分鏡節點卡渲染 — 21 欄分四組呈現、shotNumber 作卡面徽章；Group 帶 storyboardScene 時顯示場景名＋鏡數 ｜ 證據: 84a3ce7a
-- [前端與UI] 鏡頭詞庫選詞入口 — 畫布庫面板新增「鏡頭詞庫」tab，多選後經既有 onInsertText／onUsePrompt 插入（與提示詞卡同一通道） ｜ 證據: 9e438082
-- [前端與UI] 工具卡中繼態 — 已提交成品未到時帶 task_id＋artifact_pending，顯示「生成中…」金徽章＋轉圈；image/video/audio.done 結 ok、image.failed 結 failed（精確 taskId 優先、FIFO 兜底） ｜ 證據: c86dd01d
-- [前端與UI] 思維鏈預設展開 — 預設受控 open，手動收起優先於任何自動行為（作廢 08-25「預設收合」契約） ｜ 證據: c86dd01d
-- [前端與UI] 在途反饋 — sendPending 為單一真相源，送出鈕真空期轉圈不可再點（輸入框空亦然）、被點模板 chip 轉圈其餘禁用、20s 硬保險 ｜ 證據: c86dd01d
-- [前端與UI] 文字帧併批渲染 — 每 delta 一次全面板重渲染收斂到每幀一次；中止成功合成 turn.done；IME Enter 不再誤送出 ｜ 證據: c86dd01d
-- [前端與UI] 聊天氣泡樣式 — 用戶灰底氣泡＋助理無底氣泡 ｜ 證據: eb1dcede
-- [前端與UI] AgentPlanCard 計畫卡 — agent 計畫以卡片呈現，reducer／types／契約同步 ｜ 證據: 75c25e24
-- [前端與UI] 桌面 Electron 薄殼 — desktop/ 薄殼 AppImage 可用（node_modules/dist 已 ignore） ｜ 證據: 75c25e24
-- [前端與UI] 歷史三檔位篩選＋DAG 縮圖 — 圖片／影片／工作流篩選、workflow 卡取 dagThumbnailUrl、影片卡補 videoUrl 與 Play 標示（原本純影片記錄在歷史隱形） ｜ 證據: 06baf18e
-- [前端與UI] RerunDialog 費用顯示 — 「上次實付 X 幣／本次預估 Y 幣」，實付缺時只顯預估並明確標「預估」不冒充實付 ｜ 證據: 06baf18e
-- [前端與UI] HistoryLightbox DAG 展開 — 展開工作流 DAG 節點清單＋節點合計幣數 ｜ 證據: 06baf18e
-- [前端與UI] 工作流縮圖對齊畫布節點卡 — 220px 卡、kind 色條、標籤徽章、I/O 行（↳來源／→目標）、站內色票、PNG density 216 ｜ 證據: 5881aff6
-- [前端與UI] 任務狀態→UI 語義單表 — AgentToolCard／AgentSubagentBar／reducer 改查 AGENT_TASK_STATUS_TABLE，渲染輸出逐字不變 ｜ 證據: 8b08d285
-- [前端與UI] subagent 已停止態可視化 — 派遣工具卡中性結算不打臉、不顯 abort 文案；SubagentBar 灰點中性徽章；ReportCard「已停止」 ｜ 證據: 0d3e12af
-- [前端與UI] 節點卡「產出／門禁」渲染 — NodeBody Config/Text 分支複用 step_head 膠囊樣式顯示 deliverable／gate ｜ 證據: 3525afcf
-- [前端與UI] Agent 模板卡 ID 可解析 — 7 模板 card 補 harnessTemplateId、art 系補 styleTemplateId（style-library 真 ID），8/8 可解析 ｜ 證據: d59d3976
+- [前端与UI] 全聊天流单层滚动 — 参数卡与参数抽屉改 overflow:clip，滚轮手势直接冒泡给最外层消息流（不再被隐形容器吃掉） ｜ 证据: dc6ef7b9
+- [前端与UI] ParticleSeaWaiting 动效回退 — 回退 shadowBlur 直绘（去掉离屏 sprite 预渲染） ｜ 证据: dc6ef7b9
+- [前端与UI] 作品／剧集面板 — CreationFlowPanel 挂画布左侧弹层，资料全取自 hook 既有出口，只报「已落画布 N 镜／场景计画 M 镜」不报完成进度 ｜ 证据: f603864c
+- [前端与UI] 分镜节点卡渲染 — 21 栏分四组呈现、shotNumber 作卡面徽章；Group 带 storyboardScene 时显示场景名＋镜数 ｜ 证据: 84a3ce7a
+- [前端与UI] 镜头词库选词入口 — 画布库面板新增「镜头词库」tab，多选后经既有 onInsertText／onUsePrompt 插入（与提示词卡同一通道） ｜ 证据: 9e438082
+- [前端与UI] 工具卡中继态 — 已提交成品未到时带 task_id＋artifact_pending，显示「生成中…」金徽章＋转圈；image/video/audio.done 结 ok、image.failed 结 failed（精确 taskId 优先、FIFO 兜底） ｜ 证据: c86dd01d
+- [前端与UI] 思维链预设展开 — 预设受控 open，手动收起优先于任何自动行为（作废 08-25「预设收合」契约） ｜ 证据: c86dd01d
+- [前端与UI] 在途反馈 — sendPending 为单一真相源，送出钮真空期转圈不可再点（输入框空亦然）、被点模板 chip 转圈其余禁用、20s 硬保险 ｜ 证据: c86dd01d
+- [前端与UI] 文字帧并批渲染 — 每 delta 一次全面板重渲染收敛到每帧一次；中止成功合成 turn.done；IME Enter 不再误送出 ｜ 证据: c86dd01d
+- [前端与UI] 聊天气泡样式 — 用户灰底气泡＋助理无底气泡 ｜ 证据: eb1dcede
+- [前端与UI] AgentPlanCard 计画卡 — agent 计画以卡片呈现，reducer／types／契约同步 ｜ 证据: 75c25e24
+- [前端与UI] 桌面 Electron 薄壳 — desktop/ 薄壳 AppImage 可用（node_modules/dist 已 ignore） ｜ 证据: 75c25e24
+- [前端与UI] 历史三档位筛选＋DAG 缩图 — 图片／影片／工作流筛选、workflow 卡取 dagThumbnailUrl、影片卡补 videoUrl 与 Play 标示（原本纯影片记录在历史隐形） ｜ 证据: 06baf18e
+- [前端与UI] RerunDialog 费用显示 — 「上次实付 X 币／本次预估 Y 币」，实付缺时只显预估并明确标「预估」不冒充实付 ｜ 证据: 06baf18e
+- [前端与UI] HistoryLightbox DAG 展开 — 展开工作流 DAG 节点清单＋节点合计币数 ｜ 证据: 06baf18e
+- [前端与UI] 工作流缩图对齐画布节点卡 — 220px 卡、kind 色条、标签徽章、I/O 行（↳来源／→目标）、站内色票、PNG density 216 ｜ 证据: 5881aff6
+- [前端与UI] 任务状态→UI 语义单表 — AgentToolCard／AgentSubagentBar／reducer 改查 AGENT_TASK_STATUS_TABLE，渲染输出逐字不变 ｜ 证据: 8b08d285
+- [前端与UI] subagent 已停止态可视化 — 派遣工具卡中性结算不打脸、不显 abort 文案；SubagentBar 灰点中性徽章；ReportCard「已停止」 ｜ 证据: 0d3e12af
+- [前端与UI] 节点卡「产出／门禁」渲染 — NodeBody Config/Text 分支复用 step_head 胶囊样式显示 deliverable／gate ｜ 证据: 3525afcf
+- [前端与UI] Agent 模板卡 ID 可解析 — 7 模板 card 补 harnessTemplateId、art 系补 styleTemplateId（style-library 真 ID），8/8 可解析 ｜ 证据: d59d3976
 
-## 運維與觀測
+## 运维与观测
 
-- [運維與觀測] gateway 生產↔git HEAD 對賬 — recon 腳本部署前必跑，漂移即擋；補子目錄盲區、排除 refactor-audit.ts 非運行時代碼 ｜ 證據: 581a7c6a, 07e3e42e, 5a7b9a90
-- [運維與觀測] 成片靜態服務 — `/agent/v1/masters/<sid>/master_<preset>.mp4(+_cover.jpg)`，放 Bearer 閘門前，路徑 resolve＋前綴守衛（路徑穿越被拒） ｜ 證據: 349150f3
-- [運維與觀測] 錯誤分類單一有序表 — 28 條 ERROR_RULES 進 error-classify.ts，humanize 表與 workflow-service RETRYABLE_NODE_ERROR 合併收編（17/17 行為全等） ｜ 證據: 5a7b9a90
-- [運維與觀測] opencode 接縫統一 — opencodeFetch／opencodeJson helper，批次 1+2 共 8 檔 33 呼叫點機械遷移（timeout／錯誤處理結構逐點保留） ｜ 證據: 5a7b9a90
-- [運維與觀測] serverless 中文字型隨程式碼部署 — Noto Sans CJK SC 子集化 18.6MB→5MB 放 public/fonts/，首次渲染把 dag-fonts.conf 的 __FONT_DIR__ 替換寫 /tmp 並設 FONTCONFIG_FILE ｜ 證據: 8a3a6728
-- [運維與觀測] sharp 隔離 — 拆出 dag-png-server.ts 隔離 sharp，workflow-png.ts 回歸零依賴，避免把 sharp 拖進 browser bundle 炸整包 build ｜ 證據: 5881aff6
-- [運維與觀測] 部署體積守衛 — .vercelignore 排除 .next/（847MB）與 desktop/dist/，避免單檔超 Vercel 100MB 上限 ｜ 證據: 5881aff6
-- [運維與觀測] Laya ONNX 服務可入 VPS — 無 torch（onnxruntime＋tokenizers）、RSS 1.61GB、同契約 POST /predict 與 GET /healthz、三型 choice/score/noul 校準與 torch 逐位吻合 ｜ 證據: f1d5dd98
-- [運維與觀測] gateway 無損切割 — index.ts 10029→8225→272 行組合根（共 32 個新模組），行多重集 7804=7804、missing 0 extra 0 審計證明零損 ｜ 證據: c8bfe4eb, bcd57a72
+- [运维与观测] gateway 生产↔git HEAD 对账 — recon 脚本部署前必跑，漂移即挡；补子目录盲区、排除 refactor-audit.ts 非运行时代码 ｜ 证据: 581a7c6a, 07e3e42e, 5a7b9a90
+- [运维与观测] 成片静态服务 — `/agent/v1/masters/<sid>/master_<preset>.mp4(+_cover.jpg)`，放 Bearer 闸门前，路径 resolve＋前缀守卫（路径穿越被拒） ｜ 证据: 349150f3
+- [运维与观测] 错误分类单一有序表 — 28 条 ERROR_RULES 进 error-classify.ts，humanize 表与 workflow-service RETRYABLE_NODE_ERROR 合并收编（17/17 行为全等） ｜ 证据: 5a7b9a90
+- [运维与观测] opencode 接缝统一 — opencodeFetch／opencodeJson helper，批次 1+2 共 8 档 33 呼叫点机械迁移（timeout／错误处理结构逐点保留） ｜ 证据: 5a7b9a90
+- [运维与观测] serverless 中文字型随程式码部署 — Noto Sans CJK SC 子集化 18.6MB→5MB 放 public/fonts/，首次渲染把 dag-fonts.conf 的 __FONT_DIR__ 替换写 /tmp 并设 FONTCONFIG_FILE ｜ 证据: 8a3a6728
+- [运维与观测] sharp 隔离 — 拆出 dag-png-server.ts 隔离 sharp，workflow-png.ts 回归零依赖，避免把 sharp 拖进 browser bundle 炸整包 build ｜ 证据: 5881aff6
+- [运维与观测] 部署体积守卫 — .vercelignore 排除 .next/（847MB）与 desktop/dist/，避免单档超 Vercel 100MB 上限 ｜ 证据: 5881aff6
+- [运维与观测] Laya ONNX 服务可入 VPS — 无 torch（onnxruntime＋tokenizers）、RSS 1.61GB、同契约 POST /predict 与 GET /healthz、三型 choice/score/noul 校准与 torch 逐位吻合 ｜ 证据: f1d5dd98
+- [运维与观测] gateway 无损切割 — index.ts 10029→8225→272 行组合根（共 32 个新模组），行多重集 7804=7804、missing 0 extra 0 审计证明零损 ｜ 证据: c8bfe4eb, bcd57a72
 
-## 團隊與企業
+## 团队与企业
 
-- （本批 47 commit 無新增能力）
-
----
-
-## 非程式碼能力
-
-- VPS／生產對賬落庫 — 三度以 VPS 生產實體重建 repo 基線（84952257 md5 4664e5bb；f22dd523 重立至 VPS live b65e5966 並拉齊全量源碼樹；7ae66e5b 逐檔 diff 後收編 09-20 十二檔已部署改動），終結「未 commit 部署＝生產分叉」
-- VPS／repo 鏡像內容（背景，非本批新增）— f22dd523 把 director-engine／editor／delivery-gate／beatDetect 等 VPS 既有能力拉進 repo；能力面本已存在於 VPS，本批只建鏡像
-- 部署紀律（runbook）— 改 registry 後必須同時 restart opencode-server 與 agent-gateway：只重啟前者會讓 gateway /event SSE 懸掛到 fetch 超時（實測 4 分 21 秒），期間模型照常推理出圖、DB 正文齊全但前端看不到任何 delta，watchdog 還會誤判零文本重發 ｜ 證據: 3ca62d82
-- DB 遷移 — migration 018 已套生產 DB：generation_job kind 擴 'film_export'、source 擴 'agent'；supplier_capability.kind 刻意不動 ｜ 證據: 349150f3
-- 外部服務 — Laya 自架服務（Python HTTP 包裝 multilingual checkpoint ＋ Dockerfile ＋ runbook；RSS ~2.8GB 禁與 opencode-server 同機） ｜ 證據: d25aed7d, f1d5dd98
-- 運營流程 — 派遣手冊第 20 條「研究是決策輸入，不是創作素材」進真源 orchestrator-dispatch-playbook.md，並以 15 例錨點測試鎖住關鍵詞在場、編號連續（19 後即 20 不跳號）、11-19 與 L152 原文零刪 ｜ 證據: 9a1cbf6d
-- 運營流程 — 提示詞契約運營化：27 份契約目錄＋機械檢查器，運營改完當場可判（不再靠人工複核） ｜ 證據: ff5e6c7b
-- 運營流程 — 歷史教訓資料遷移工具 tools/migrate-agent-lessons ｜ 證據: 0625d6d5
-- 運營流程 — skill 單一真源生成 tools/gen-lens-skill（禁手改兩份） ｜ 證據: 30f01c7d
-- 文檔／合規 — THIRD-PARTY-NOTICES 追加 AID 引入記錄（含逐條改寫說明與剔除項，如 AID OSS 不可達、voice 塌縮實測邊界） ｜ 證據: 90e7df76
-- 驗收紀律 — PRD §11 修正：tsconfig exclude 掉 src/vendor-bridges、deploy-staging 與全部 *.test.ts，標準驗收命令回 0 不代表 0 錯；改為「主庫 + 隔離檢查 + 真跑測試」三條並跑 ｜ 證據: 90e7df76
-- 審計文檔 — 「只做一半」審計（系統性模式：每刀停在型別＋清洗＋單測、消費端一律缺席）＋前端對稱差報告（我方強項＝能力表達：3D 導演台 39,251 行 vs AID 5,150；45 個 agent 模板，AID 無對應物） ｜ 證據: 7fd7bb0f
-- 協作紀律 — 兩線並行工作共用同一工作區時以「聯集落庫」避免乾淨 HEAD 樹部署互抹（部署史實錘 03:41/03:48 有帧批、03:52-03:59 被回退） ｜ 證據: c86dd01d
+- （本批 47 commit 无新增能力）
 
 ---
 
-## 邊界與拒絕
+## 非程式码能力
 
-- 素材 URL 守衛 fail-closed（邊界語義）— 成片導出 check 端以 blocker 拒絕 blob:／data:／嵌套協議／非 http(s) 素材 ｜ 證據: 51631bc1
-- 不做在線剪輯（明確不做）— 不提供時間軸 UI、不接 @webav（Eimu 賣 one-shot）；不新增前端頁面，沿用既有 chat 影片卡與畫布節點；不吞 AID 的 pending_video_* 雙槽（我方無審核隊列） ｜ 證據: 0b2c2843
-- storyboard_qc 缺值語義（fail-closed）— 缺欄回 missing[]＋complete:false，不補假值；hasUsableQcValue 對齊門禁自身正規化，空串／純空白／NaN／空卡 id 全進 missing（修掉 production 空值被誤判 complete=true 的「謊報可過」） ｜ 證據: b01a1c47, 49bffcd7
-- 無來源欄位絕不臆造（誠實留 missing）— durationSeconds（三把尺衝突且需自造台詞解析）、sceneId、keyframeId／lastFrameId／audioAnchorId、segmentDurationSeconds 全留 missing ｜ 證據: 49bffcd7
-- 不在 21 欄契約內的欄位不顯示 — durationSeconds 只在 StoryboardQcProductionFields，顯示就是編造 ｜ 證據: 84a3ce7a
-- set_project_meta 非法值省略該鍵 — 模型打錯一個 enum 不清掉用戶已填的劇集清單；代價：agent 無法借此清空欄位（已誠實標注） ｜ 證據: f603864c
-- ingest 誠實語義 — 欄位缺失／非法逐欄 422 回報，不補預設值（metadata 會被讀端當事實轉錄給 B 端）；登記失敗不反悔導出（檔案已在盤上、靜態路由已可服務），只誠實記 note ｜ 證據: 349150f3
-- 假能力拒絕（白名單外拒收）— supplier_capability.kind 刻意不加 film_export（該表語義是「供應商能承接什麼」，導出不經供應商，加了反而是假能力） ｜ 證據: 349150f3
-- AID 語音庫整支撤回（功能地基不成立）— 63 筆火山 bigtts 音色碼全不含冒號，撞上本站網關 /opt/edge-tts/tts-proxy.js:41 `if (!voice.includes(':')) voice = `${model}:alex`` ⇒ 全部塌縮成同一個 alex 音而 HTTP 200 完全掩蓋；判據修正：SF 輸出非確定，sha256 差異不能證明音色不同，唯一可靠判據是 MP3 frame header 採樣率（32k=SF 主路／24k=edge 降級），故只認實測可播的 8 條 SiliconFlow preset，移除 voice-library／tts-upstream adapter／AssetPackItemKind "voice"／CharacterCard.voiceCode／artifact voice_code 透傳鏈 ｜ 證據: 95c32abb, 0c418b53
-- 只埋樁不註冊（註冊即虛報能力）— tts_speech adapter 未進 supplier_adapter_type_check 白名單、未註冊 TTS 渠道 ｜ 證據: 95c32abb
-- enum 假對位拒接 — AID_MEDIA_TYPE {image,video} 是我方 MediaKind {image,video,audio} 的子集（接上會讓我方獨有 audio 失去型別來源）；AID_MEDIA_TASK_STATUS 8 態與我方含計費態的 11 態是不同生命週期；AID_CREATION_STEP 刻意保留字面值以維持 aid-enums.test.ts 的真交叉檢查（改推導會退化成自我比對） ｜ 證據: 7a4bbcc0
-- art-style 模板保持 unsupported 誠實口徑 ｜ 證據: d59d3976
-- Laya 校準陷阱 — HF 公開 demo Space 校準已壞（benign 判 0.9999）不可用；root 英文 checkpoint 中文崩壞，必用 multilingual 版本 ｜ 證據: d25aed7d
-- 縮圖／字型失敗不擋渲染 — 寧可方框不讓歷史寫入陪葬（與縮圖失敗同款語義）；已知取捨：動態 title 出現 U+9FA6 之後罕用字會落 notdef 方框 ｜ 證據: 8a3a6728
-- 記憶沉澱 fail-open — 沉澱失敗只影響記憶庫、不影響已落地歷史；不阻塞 202 回應 ｜ 證據: ac0dfa0d
-- Bun 陷阱（邊界語義）— Bun 的 node:crypto `Hash.update` 只吃 string/Buffer/TypedArray/DataView，裸 ArrayBuffer 會拋錯；成片索引登記因此整條靜默失敗而導出照樣成功（手簽 ingest 的 E2E 4/4 完全看不到此洞） ｜ 證據: f9660201
-- 未知狀態保守判失敗 — AGENT_TASK_STATUS_TABLE 未知值 fallback 保守判失敗 ｜ 證據: 8b08d285
-- 「完成」的判準不灌水 — 只建供給側不算完成：型別可寫＋測試綠是可機器驗證的，前端可見需真開瀏覽器，不能因此跳過 ｜ 證據: 7fd7bb0f
+- VPS／生产对账落库 — 三度以 VPS 生产实体重建 repo 基线（84952257 md5 4664e5bb；f22dd523 重立至 VPS live b65e5966 并拉齐全量源码树；7ae66e5b 逐档 diff 后收编 09-20 十二档已部署改动），终结「未 commit 部署＝生产分叉」
+- VPS／repo 镜像内容（背景，非本批新增）— f22dd523 把 director-engine／editor／delivery-gate／beatDetect 等 VPS 既有能力拉进 repo；能力面本已存在于 VPS，本批只建镜像
+- 部署纪律（runbook）— 改 registry 后必须同时 restart opencode-server 与 agent-gateway：只重启前者会让 gateway /event SSE 悬挂到 fetch 超时（实测 4 分 21 秒），期间模型照常推理出图、DB 正文齐全但前端看不到任何 delta，watchdog 还会误判零文本重发 ｜ 证据: 3ca62d82
+- DB 迁移 — migration 018 已套生产 DB：generation_job kind 扩 'film_export'、source 扩 'agent'；supplier_capability.kind 刻意不动 ｜ 证据: 349150f3
+- 外部服务 — Laya 自架服务（Python HTTP 包装 multilingual checkpoint ＋ Dockerfile ＋ runbook；RSS ~2.8GB 禁与 opencode-server 同机） ｜ 证据: d25aed7d, f1d5dd98
+- 运营流程 — 派遣手册第 20 条「研究是决策输入，不是创作素材」进真源 orchestrator-dispatch-playbook.md，并以 15 例锚点测试锁住关键词在场、编号连续（19 后即 20 不跳号）、11-19 与 L152 原文零删 ｜ 证据: 9a1cbf6d
+- 运营流程 — 提示词契约运营化：27 份契约目录＋机械检查器，运营改完当场可判（不再靠人工复核） ｜ 证据: ff5e6c7b
+- 运营流程 — 历史教训资料迁移工具 tools/migrate-agent-lessons ｜ 证据: 0625d6d5
+- 运营流程 — skill 单一真源生成 tools/gen-lens-skill（禁手改两份） ｜ 证据: 30f01c7d
+- 文档／合规 — THIRD-PARTY-NOTICES 追加 AID 引入记录（含逐条改写说明与剔除项，如 AID OSS 不可达、voice 塌缩实测边界） ｜ 证据: 90e7df76
+- 验收纪律 — PRD §11 修正：tsconfig exclude 掉 src/vendor-bridges、deploy-staging 与全部 *.test.ts，标准验收命令回 0 不代表 0 错；改为「主库 + 隔离检查 + 真跑测试」三条并跑 ｜ 证据: 90e7df76
+- 审计文档 — 「只做一半」审计（系统性模式：每刀停在型别＋清洗＋单测、消费端一律缺席）＋前端对称差报告（我方强项＝能力表达：3D 导演台 39,251 行 vs AID 5,150；45 个 agent 模板，AID 无对应物） ｜ 证据: 7fd7bb0f
+- 协作纪律 — 两线并行工作共用同一工作区时以「联集落库」避免干净 HEAD 树部署互抹（部署史实锤 03:41/03:48 有帧批、03:52-03:59 被回退） ｜ 证据: c86dd01d
+
+---
+
+## 边界与拒绝
+
+- 素材 URL 守卫 fail-closed（边界语义）— 成片导出 check 端以 blocker 拒绝 blob:／data:／嵌套协议／非 http(s) 素材 ｜ 证据: 51631bc1
+- 不做在线剪辑（明确不做）— 不提供时间轴 UI、不接 @webav（Eimu 卖 one-shot）；不新增前端页面，沿用既有 chat 影片卡与画布节点；不吞 AID 的 pending_video_* 双槽（我方无审核队列） ｜ 证据: 0b2c2843
+- storyboard_qc 缺值语义（fail-closed）— 缺栏回 missing[]＋complete:false，不补假值；hasUsableQcValue 对齐门禁自身正规化，空串／纯空白／NaN／空卡 id 全进 missing（修掉 production 空值被误判 complete=true 的「谎报可过」） ｜ 证据: b01a1c47, 49bffcd7
+- 无来源栏位绝不臆造（诚实留 missing）— durationSeconds（三把尺冲突且需自造台词解析）、sceneId、keyframeId／lastFrameId／audioAnchorId、segmentDurationSeconds 全留 missing ｜ 证据: 49bffcd7
+- 不在 21 栏契约内的栏位不显示 — durationSeconds 只在 StoryboardQcProductionFields，显示就是编造 ｜ 证据: 84a3ce7a
+- set_project_meta 非法值省略该键 — 模型打错一个 enum 不清掉用户已填的剧集清单；代价：agent 无法借此清空栏位（已诚实标注） ｜ 证据: f603864c
+- ingest 诚实语义 — 栏位缺失／非法逐栏 422 回报，不补预设值（metadata 会被读端当事实转录给 B 端）；登记失败不反悔导出（档案已在盘上、静态路由已可服务），只诚实记 note ｜ 证据: 349150f3
+- 假能力拒绝（白名单外拒收）— supplier_capability.kind 刻意不加 film_export（该表语义是「供应商能承接什么」，导出不经供应商，加了反而是假能力） ｜ 证据: 349150f3
+- AID 语音库整支撤回（功能地基不成立）— 63 笔火山 bigtts 音色码全不含冒号，撞上本站网关 /opt/edge-tts/tts-proxy.js:41 `if (!voice.includes(':')) voice = `${model}:alex`` ⇒ 全部塌缩成同一个 alex 音而 HTTP 200 完全掩盖；判据修正：SF 输出非确定，sha256 差异不能证明音色不同，唯一可靠判据是 MP3 frame header 采样率（32k=SF 主路／24k=edge 降级），故只认实测可播的 8 条 SiliconFlow preset，移除 voice-library／tts-upstream adapter／AssetPackItemKind "voice"／CharacterCard.voiceCode／artifact voice_code 透传链 ｜ 证据: 95c32abb, 0c418b53
+- 只埋桩不注册（注册即虚报能力）— tts_speech adapter 未进 supplier_adapter_type_check 白名单、未注册 TTS 渠道 ｜ 证据: 95c32abb
+- enum 假对位拒接 — AID_MEDIA_TYPE {image,video} 是我方 MediaKind {image,video,audio} 的子集（接上会让我方独有 audio 失去型别来源）；AID_MEDIA_TASK_STATUS 8 态与我方含计费态的 11 态是不同生命周期；AID_CREATION_STEP 刻意保留字面值以维持 aid-enums.test.ts 的真交叉检查（改推导会退化成自我比对） ｜ 证据: 7a4bbcc0
+- art-style 模板保持 unsupported 诚实口径 ｜ 证据: d59d3976
+- Laya 校准陷阱 — HF 公开 demo Space 校准已坏（benign 判 0.9999）不可用；root 英文 checkpoint 中文崩坏，必用 multilingual 版本 ｜ 证据: d25aed7d
+- 缩图／字型失败不挡渲染 — 宁可方框不让历史写入陪葬（与缩图失败同款语义）；已知取舍：动态 title 出现 U+9FA6 之后罕用字会落 notdef 方框 ｜ 证据: 8a3a6728
+- 记忆沉淀 fail-open — 沉淀失败只影响记忆库、不影响已落地历史；不阻塞 202 回应 ｜ 证据: ac0dfa0d
+- Bun 陷阱（边界语义）— Bun 的 node:crypto `Hash.update` 只吃 string/Buffer/TypedArray/DataView，裸 ArrayBuffer 会抛错；成片索引登记因此整条静默失败而导出照样成功（手签 ingest 的 E2E 4/4 完全看不到此洞） ｜ 证据: f9660201
+- 未知状态保守判失败 — AGENT_TASK_STATUS_TABLE 未知值 fallback 保守判失败 ｜ 证据: 8b08d285
+- 「完成」的判准不灌水 — 只建供给侧不算完成：型别可写＋测试绿是可机器验证的，前端可见需真开浏览器，不能因此跳过 ｜ 证据: 7fd7bb0f
 
 ---
 
 ## 存疑
 
-- 0625d6d5 共享庫注入的實際生效 — 端點與注入 payload 在 repo 可驗，但共享索引注入 gateway 建號的效果端在 VPS，本批無 VPS 側證據；缺「注入後 agent 行為差異」的實測。
-- 75c25e24「Jev 權威三刀」的具體三刀 — 訊息只說輸入閘／路由權威接入＋閾值校準工具，細節在 PRD/評估文檔；缺逐刀 diff 級證據（另同 commit 的 gateway 15 檔同步內容未逐檔核）。
-- 349150f3 的 resolve-owner（+user_id）部署狀態 — 訊息明說「待 Vercel 部署 resolve-owner 後索引歸屬才自動生效，此前以 note 標注跳過原因」；本批無法確認該部署是否已完成，缺部署證據。
-- 7ae66e5b「VPS 對賬逐檔一致」— 僅 commit 訊息聲明（除 router.ts 註釋文字外全部一致），未獨立復驗。
-- f22dd523 帶入的 gateway 模組（director-engine／editor／delivery-gate／beatDetect 等）使用者可見行為面 — 本批只證明它們進了 repo，未展開其入口與驗收；若清單要涵蓋這些能力須另批處理。
-- 581a7c6a 附帶刪除 src/lib/agent-templates.ts／agent-templates-payload.ts（-2505 行）— 現場已存在同名目錄（拆檔後形態），判斷為清理拆檔前殘留平檔；但 commit 訊息未說明，缺 diff 級確認其非能力移除。
+- 0625d6d5 共享库注入的实际生效 — 端点与注入 payload 在 repo 可验，但共享索引注入 gateway 建号的效果端在 VPS，本批无 VPS 侧证据；缺「注入后 agent 行为差异」的实测。
+- 75c25e24「Jev 权威三刀」的具体三刀 — 讯息只说输入闸／路由权威接入＋阈值校准工具，细节在 PRD/评估文档；缺逐刀 diff 级证据（另同 commit 的 gateway 15 档同步内容未逐档核）。
+- 349150f3 的 resolve-owner（+user_id）部署状态 — 讯息明说「待 Vercel 部署 resolve-owner 后索引归属才自动生效，此前以 note 标注跳过原因」；本批无法确认该部署是否已完成，缺部署证据。
+- 7ae66e5b「VPS 对账逐档一致」— 仅 commit 讯息声明（除 router.ts 注释文字外全部一致），未独立复验。
+- f22dd523 带入的 gateway 模组（director-engine／editor／delivery-gate／beatDetect 等）使用者可见行为面 — 本批只证明它们进了 repo，未展开其入口与验收；若清单要涵盖这些能力须另批处理。
+- 581a7c6a 附带删除 src/lib/agent-templates.ts／agent-templates-payload.ts（-2505 行）— 现场已存在同名目录（拆档后形态），判断为清理拆档前残留平档；但 commit 讯息未说明，缺 diff 级确认其非能力移除。
 
 ---
 
-## 逐條對帳（47/47）
+## 逐条对帐（47/47）
 
-| hash | 貢獻的能力（或無） |
+| hash | 贡献的能力（或无） |
 |---|---|
-| 0625d6d5 | AI 助理全局記憶庫（私有＋共享）＋四端點＋memory-trace；HMAC raw-body 驗簽；migrate-agent-lessons 工具 |
-| ff5e6c7b | 審核官 Expert（只駁不產）；27 份提示詞契約＋機械檢查器；Expert 導出三產物 |
-| 30f01c7d | 鏡頭語言詞庫 142 條；7 步創作流程骨架；gen-lens-skill 單源生成 |
-| 51631bc1 | 成片導出冪等指紋＋URL 守衛 blocker；字幕分屏 7-12 字 |
-| 15f278d8 | /v1/images/edits durable 改圖（202＋Location）；yyds 補 image_edit claim；edit 標註與 claims 同源 |
-| 9d9f0483 | 作品／劇集／分鏡三級狀態機資料層（projectType/currentStep/episodes） |
-| dc6ef7b9 | 全聊天流單層滾動（參數卡不吞手勢）；ParticleSeaWaiting 回退直繪 |
-| 9a1cbf6d | 純測試（釘死派遣手冊第 20 條）；能力屬非程式碼（運營規則） |
-| b01a1c47 | 分鏡 21 欄契約＋雙白名單；缺欄回 missing[]+complete:false |
-| c194f5f4 | AID 37 enum 值域庫入庫（純常量，尚無消費端） |
-| 0b2c2843 | 成片產物索引（可列舉可回溯）；明確不做在線剪輯／時間軸 UI／@webav |
-| 95c32abb | 曾交付配音音色庫＋TTS adapter（同批 0c418b53 全數移除）；遺留邊界語義：63 音色在網關塌縮成 alex |
-| 90e7df76 | 文檔：NOTICES 追加刀 2/刀 3 引入記錄；驗收紀律修正為三條並跑 |
-| 0c418b53 | 移除 95c32abb 全部內容（語音庫／adapter／voiceCode／透傳鏈）；淨新增能力＝0 |
-| f603864c | agent op set_project_meta（建作品／建劇集）；作品／劇集面板 CreationFlowPanel |
-| 84a3ce7a | 分鏡節點卡渲染（21 欄四組、shotNumber 徽章、Group 場景名＋鏡數） |
-| 9e438082 | 畫布「鏡頭詞庫」選詞入口（多選插入提示詞） |
-| 49bffcd7 | 21 欄→storyboard_qc_17 橋接；hasUsableQcValue 修掉謊報可過 |
-| 7fd7bb0f | 文檔：「只做一半」審計＋前端對稱差報告（無新可呼叫能力） |
-| 7a4bbcc0 | aid-enums 消費端接線：劇集狀態推導＋作品類型值域單一真源；拒接 3 個假對位 |
-| 349150f3 | 成片導出閉環：gateway 登記、HMAC ingest、film_export 落帳、冪等鍵、靜態服務、migration 018、tenant 屬主維度 |
-| f9660201 | 修復：Bun Hash.update 不吃 ArrayBuffer；邊界語義（登記靜默失敗而導出成功） |
-| c86dd01d | 工具卡中繼態；思維鏈預設展開；在途反饋；文字帧併批；中止合 turn.done；IME Enter 修正 |
-| 3ca62d82 | 文檔：單獨重啟 opencode-server 令 gateway 盲眼 4 分 21 秒（部署紀律） |
-| 84952257 | 純同步：以 VPS 生產鏡像作重構基線（無新能力） |
-| f22dd523 | 純同步：重立基線至 VPS live b65e5966＋拉齊全量源碼樹（含 director-engine/editor 等既有能力的鏡像，非新增） |
-| c8bfe4eb | 純重構：gateway 第一階段無損切割（10029→8225 行，7 模組） |
-| bcd57a72 | 純重構：第二階段無損切割（8225→272 行組合根，18 模組）；行為零變更 |
-| eb1dcede | 用戶／助理氣泡樣式對調（灰底用戶＋無底助理） |
-| 75c25e24 | Google OAuth 登入；Jev 輸入閘／路由權威；音樂 yue2 管線；桌面 Electron 薄殼；AgentPlanCard；shortdrama QC 時長放寬；gateway 渠道同步 |
-| d25aed7d | Jev 額度斷路保險：Laya 兜底判定層（fail-open）＋laya-server Python／Dockerfile |
-| f1d5dd98 | Laya ONNX 輕量版服務（無 torch、RSS 1.61GB、契約同構、校準逐位吻合） |
-| ac0dfa0d | 工作流完成記憶沉澱迴路（persistWorkflowMemory＋閘門＋ownerKey 收斂） |
-| 06baf18e | 工作流歷史卡＋DAG 縮圖＋三檔位篩選＋RerunDialog 費用顯示＋Lightbox 節點幣數＋工作流可重跑 |
-| 8fff4595 | 記憶庫第五類型 workflow（TYPE_VALUES＋curator prompt 兩處同步） |
-| 5881aff6 | 縮圖重寫對齊畫布節點卡；sharp 隔離 dag-png-server；.vercelignore 部署體積守衛 |
-| 8a3a6728 | serverless 中文字型隨程式碼部署（子集 5MB＋fontconfig 於 /tmp）；失敗不擋 |
-| 7ae66e5b | 收編 09-20 已部署改動（subagent 停止閘、workflow 完成推送、模板骨架等 12 檔） |
-| 581a7c6a | 部署前對賬腳本（漂移即擋）；附帶清理拆檔前殘留平檔（無新能力） |
-| 5a7b9a90 | TaskStatus 單一語義表；28 條 ERROR_RULES 單表；opencode 接縫 helper 遷移；recon 補子目錄盲區 |
-| 8b08d285 | 任務狀態→UI 語義單表（未知值保守判失敗） |
-| 0d3e12af | 補實裝 stopped 狀態（SSE 契約與三處 union；中性結算；灰點徽章；已停止） |
-| cef439a0 | 畫布節點事件寫穿 canvasStates 快照（雙軌收口、last-write-wins 冪等） |
-| 07e3e42e | 純運維修正：recon VPS 側排除 refactor-audit.ts |
-| d59d3976 | 工作流模板註冊表 6→13（7 模板齊平 novel_film）；拆檔零漂移；模板卡 ID 可解析；promptNotes 配方級 |
-| 3525afcf | 打字路徑骨架卡富化（deliverable/gate 貫通後端模板→SSE→畫布）＋節點卡膠囊渲染 |
-| 95a6994e | gate 欄位雙形態 string\|boolean 修撞名；NodeBody 分流渲染；白名單保留 boolean |
+| 0625d6d5 | AI 助理全局记忆库（私有＋共享）＋四端点＋memory-trace；HMAC raw-body 验签；migrate-agent-lessons 工具 |
+| ff5e6c7b | 审核官 Expert（只驳不产）；27 份提示词契约＋机械检查器；Expert 导出三产物 |
+| 30f01c7d | 镜头语言词库 142 条；7 步创作流程骨架；gen-lens-skill 单源生成 |
+| 51631bc1 | 成片导出幂等指纹＋URL 守卫 blocker；字幕分屏 7-12 字 |
+| 15f278d8 | /v1/images/edits durable 改图（202＋Location）；yyds 补 image_edit claim；edit 标注与 claims 同源 |
+| 9d9f0483 | 作品／剧集／分镜三级状态机资料层（projectType/currentStep/episodes） |
+| dc6ef7b9 | 全聊天流单层滚动（参数卡不吞手势）；ParticleSeaWaiting 回退直绘 |
+| 9a1cbf6d | 纯测试（钉死派遣手册第 20 条）；能力属非程式码（运营规则） |
+| b01a1c47 | 分镜 21 栏契约＋双白名单；缺栏回 missing[]+complete:false |
+| c194f5f4 | AID 37 enum 值域库入库（纯常量，尚无消费端） |
+| 0b2c2843 | 成片产物索引（可列举可回溯）；明确不做在线剪辑／时间轴 UI／@webav |
+| 95c32abb | 曾交付配音音色库＋TTS adapter（同批 0c418b53 全数移除）；遗留边界语义：63 音色在网关塌缩成 alex |
+| 90e7df76 | 文档：NOTICES 追加刀 2/刀 3 引入记录；验收纪律修正为三条并跑 |
+| 0c418b53 | 移除 95c32abb 全部内容（语音库／adapter／voiceCode／透传链）；净新增能力＝0 |
+| f603864c | agent op set_project_meta（建作品／建剧集）；作品／剧集面板 CreationFlowPanel |
+| 84a3ce7a | 分镜节点卡渲染（21 栏四组、shotNumber 徽章、Group 场景名＋镜数） |
+| 9e438082 | 画布「镜头词库」选词入口（多选插入提示词） |
+| 49bffcd7 | 21 栏→storyboard_qc_17 桥接；hasUsableQcValue 修掉谎报可过 |
+| 7fd7bb0f | 文档：「只做一半」审计＋前端对称差报告（无新可呼叫能力） |
+| 7a4bbcc0 | aid-enums 消费端接线：剧集状态推导＋作品类型值域单一真源；拒接 3 个假对位 |
+| 349150f3 | 成片导出闭环：gateway 登记、HMAC ingest、film_export 落帐、幂等键、静态服务、migration 018、tenant 属主维度 |
+| f9660201 | 修复：Bun Hash.update 不吃 ArrayBuffer；边界语义（登记静默失败而导出成功） |
+| c86dd01d | 工具卡中继态；思维链预设展开；在途反馈；文字帧并批；中止合 turn.done；IME Enter 修正 |
+| 3ca62d82 | 文档：单独重启 opencode-server 令 gateway 盲眼 4 分 21 秒（部署纪律） |
+| 84952257 | 纯同步：以 VPS 生产镜像作重构基线（无新能力） |
+| f22dd523 | 纯同步：重立基线至 VPS live b65e5966＋拉齐全量源码树（含 director-engine/editor 等既有能力的镜像，非新增） |
+| c8bfe4eb | 纯重构：gateway 第一阶段无损切割（10029→8225 行，7 模组） |
+| bcd57a72 | 纯重构：第二阶段无损切割（8225→272 行组合根，18 模组）；行为零变更 |
+| eb1dcede | 用户／助理气泡样式对调（灰底用户＋无底助理） |
+| 75c25e24 | Google OAuth 登入；Jev 输入闸／路由权威；音乐 yue2 管线；桌面 Electron 薄壳；AgentPlanCard；shortdrama QC 时长放宽；gateway 渠道同步 |
+| d25aed7d | Jev 额度断路保险：Laya 兜底判定层（fail-open）＋laya-server Python／Dockerfile |
+| f1d5dd98 | Laya ONNX 轻量版服务（无 torch、RSS 1.61GB、契约同构、校准逐位吻合） |
+| ac0dfa0d | 工作流完成记忆沉淀回路（persistWorkflowMemory＋闸门＋ownerKey 收敛） |
+| 06baf18e | 工作流历史卡＋DAG 缩图＋三档位筛选＋RerunDialog 费用显示＋Lightbox 节点币数＋工作流可重跑 |
+| 8fff4595 | 记忆库第五类型 workflow（TYPE_VALUES＋curator prompt 两处同步） |
+| 5881aff6 | 缩图重写对齐画布节点卡；sharp 隔离 dag-png-server；.vercelignore 部署体积守卫 |
+| 8a3a6728 | serverless 中文字型随程式码部署（子集 5MB＋fontconfig 于 /tmp）；失败不挡 |
+| 7ae66e5b | 收编 09-20 已部署改动（subagent 停止闸、workflow 完成推送、模板骨架等 12 档） |
+| 581a7c6a | 部署前对账脚本（漂移即挡）；附带清理拆档前残留平档（无新能力） |
+| 5a7b9a90 | TaskStatus 单一语义表；28 条 ERROR_RULES 单表；opencode 接缝 helper 迁移；recon 补子目录盲区 |
+| 8b08d285 | 任务状态→UI 语义单表（未知值保守判失败） |
+| 0d3e12af | 补实装 stopped 状态（SSE 契约与三处 union；中性结算；灰点徽章；已停止） |
+| cef439a0 | 画布节点事件写穿 canvasStates 快照（双轨收口、last-write-wins 幂等） |
+| 07e3e42e | 纯运维修正：recon VPS 侧排除 refactor-audit.ts |
+| d59d3976 | 工作流模板注册表 6→13（7 模板齐平 novel_film）；拆档零漂移；模板卡 ID 可解析；promptNotes 配方级 |
+| 3525afcf | 打字路径骨架卡富化（deliverable/gate 贯通后端模板→SSE→画布）＋节点卡胶囊渲染 |
+| 95a6994e | gate 栏位双形态 string\|boolean 修撞名；NodeBody 分流渲染；白名单保留 boolean |

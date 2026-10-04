@@ -1,9 +1,9 @@
-/* ╁━ AgentTemplateCarousel ── 助理模板環 ╁━
-   本組件是 CaseShowcase.tsx 的逐行複製（2026-08-25 用戶裁定：複用 = 整複製改文字，
-   禁止造輪子），幾何/物理/材質/佈局全部由共享 ../case-showcase.css 提供。
-   這裡只有模板卡獨有的卡面元素：領域大字水印 + 標題與流水線鏈。
-   （2026-08-27 回滾：eyebrow/tagline/珠鏈是錯誤 scope 的改動——用戶指定的
-   是畫布節點卡；卡面信息層維持「標題 + 選擇器 Dock」原樣。） */
+/* ╁━ AgentTemplateCarousel ── 助理模板环 ╁━
+   本组件是 CaseShowcase.tsx 的逐行复制（2026-08-25 用户裁定：复用 = 整复制改文字，
+   禁止造轮子），几何/物理/材质/布局全部由共享 ../case-showcase.css 提供。
+   这里只有模板卡独有的卡面元素：领域大字水印 + 标题与流水线链。
+   （2026-08-27 回滚：eyebrow/tagline/珠链是错误 scope 的改动——用户指定的
+   是画布节点卡；卡面信息层维持「标题 + 选择器 Dock」原样。） */
 
 /* 领域大字水印：压在渐变上的浮雕感，非标题。尺寸跟随 --case-card-w 缩放。 */
 .atc-watermark {
@@ -20,21 +20,21 @@
   user-select: none;
 }
 
-/* 卡面資訊排版（2026-09-29 暴君：資訊塊壓在卡中央搶成片、重心不平衡）：
-   整塊改錨卡**頂**做一條頁眉——左欄標題/副標、右欄按鈕，同一行左右平衡；
-   卡中央與下半部完全讓給成片，底部只剩分頁帶。調整環節的托盤從頁眉
-   下方展開（用戶主動打開才佔畫面）。頂部漸層只為頁眉文字托底。 */
+/* 卡面资讯排版（2026-09-29 暴君：资讯块压在卡中央抢成片、重心不平衡）：
+   整块改锚卡**顶**做一条页眉——左栏标题/副标、右栏按钮，同一行左右平衡；
+   卡中央与下半部完全让给成片，底部只剩分页带。调整环节的托盘从页眉
+   下方展开（用户主动打开才占画面）。顶部渐层只为页眉文字托底。 */
 .atc-info {
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
-  /* 頂/側內距 ≥ 卡片圓角的半徑感，標題不貼圓角。 */
+  /* 顶/侧内距 ≥ 卡片圆角的半径感，标题不贴圆角。 */
   padding: calc(var(--case-card-w, 520px) * 0.072) calc(var(--case-card-w, 520px) * 0.078)
     calc(var(--case-card-w, 520px) * 0.1);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  /* 標題與按鈕同一行左右平衡；副標獨佔整行，不被按鈕擠成兩行。 */
+  /* 标题与按钮同一行左右平衡；副标独占整行，不被按钮挤成两行。 */
   grid-template-areas:
     "title actions"
     "sub sub"
@@ -84,7 +84,7 @@
 .atc-info {
   --atc-u: calc(var(--case-card-w, 520px) / 100);
 }
-/* 選擇器本身不佔盒子：托盤與按鈕列直接落進 .atc-info 的格線區。 */
+/* 选择器本身不占盒子：托盘与按钮列直接落进 .atc-info 的格线区。 */
 .atc-step-selector {
   display: contents;
 }
@@ -174,7 +174,7 @@
 
 /* 手机卡（≤340px 宽、255px 高）容不下多行托盘：单行横滑，右缘渐隐提示还有。 */
 @media (max-width: 767px) {
-  /* 手機卡太窄，頁眉改兩段：標題/副標在上，按鈕在下，仍錨卡頂。 */
+  /* 手机卡太窄，页眉改两段：标题/副标在上，按钮在下，仍锚卡顶。 */
   .atc-info {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
@@ -218,9 +218,9 @@
   margin-inline: auto;
 }
 
-/* 2026-09-29 跨螢幕等比：卡寬隨畫布寬放大，透視距離若恆 1400px，大螢幕上
-   3D 環的縱深感會變強、形變跟基準機（卡寬 525px ↔ 1400px）不一致。
-   桌面改成跟卡寬等比（2.667×）；手機維持原 1400px 觀感。 */
+/* 2026-09-29 跨萤幕等比：卡宽随画布宽放大，透视距离若恒 1400px，大萤幕上
+   3D 环的纵深感会变强、形变跟基准机（卡宽 525px ↔ 1400px）不一致。
+   桌面改成跟卡宽等比（2.667×）；手机维持原 1400px 观感。 */
 @media (min-width: 768px) {
   .agent-template-carousel .case-stage {
     perspective: calc(var(--case-card-w, 525px) * 2.667);
@@ -244,24 +244,24 @@
   /* 无样式副作用：转卡冻结逻辑在组件的 wheel/scroll handler 里判断。 */
 }
 
-/* ══ 2026-09-24 用戶版面方案·刀1：分頁點+箭頭收進卡內 ══
-   與 spec 的現場衝突（按意圖等價實現，已回報）：spec 原定控制行 absolute
-   於根 section（bottom:16px），但根是滿版 flex 置中容器（.canvas-ws-overlay
-   top:header→bottom:0，高 ≈ 視口−68px），卡底距根底約 130–230px，
-   bottom:16px 會把點釘在卡外的背板上——違反「壓在深色卡面上」與刀2 的
-   Dock 淨空設計。等價方案：控制行 absolute 於緊貼 stage 的 .atc-stage-wrap。
-   幾何推導：stage 高 = 1.2×cardH（measure() 的 inline 高度；SSR/手機 CSS
+/* ══ 2026-09-24 用户版面方案·刀1：分页点+箭头收进卡内 ══
+   与 spec 的现场冲突（按意图等价实现，已回报）：spec 原定控制行 absolute
+   于根 section（bottom:16px），但根是满版 flex 置中容器（.canvas-ws-overlay
+   top:header→bottom:0，高 ≈ 视口−68px），卡底距根底约 130–230px，
+   bottom:16px 会把点钉在卡外的背板上——违反「压在深色卡面上」与刀2 的
+   Dock 净空设计。等价方案：控制行 absolute 于紧贴 stage 的 .atc-stage-wrap。
+   几何推导：stage 高 = 1.2×cardH（measure() 的 inline 高度；SSR/手机 CSS
    同比例 0.9×cardW），故 wrap 底 = stage 底，卡底高出 wrap 底 0.1×stage 高
-   → bottom: calc(8.334% + 16px) 即「卡底內 16px」，隨卡縮放自動對位。
-   z-index 依據：前卡 z=depth×1000（~1000）但全部被 .case-stage 的
-   perspective 鎖進 stage 自身堆疊上下文（該上下文在兄弟層只算 z≈0），
-   控制行是 wrap 的直接兄弟，z:30 穩壓整個 3D 環；確認彈窗走 createPortal
-   到 document.body（.fixed.z-50，DOM 在浮層之後）→ 彈窗永远盖過控制行；
-   driver.js 弹窗 z-9999 !important 不受影響。 */
+   → bottom: calc(8.334% + 16px) 即「卡底内 16px」，随卡缩放自动对位。
+   z-index 依据：前卡 z=depth×1000（~1000）但全部被 .case-stage 的
+   perspective 锁进 stage 自身堆叠上下文（该上下文在兄弟层只算 z≈0），
+   控制行是 wrap 的直接兄弟，z:30 稳压整个 3D 环；确认弹窗走 createPortal
+   到 document.body（.fixed.z-50，DOM 在浮层之后）→ 弹窗永远盖过控制行；
+   driver.js 弹窗 z-9999 !important 不受影响。 */
 .agent-template-carousel .atc-stage-wrap {
   position: relative;
   width: 100%;
-  max-width: 76rem; /* 與 .case-stage 同步，wrap 不引入第二套置中線 */
+  max-width: 76rem; /* 与 .case-stage 同步，wrap 不引入第二套置中线 */
   margin-inline: auto;
 }
 
@@ -270,13 +270,13 @@
   bottom: calc(8.334% + 1rem);
   left: 50%;
   transform: translateX(-50%);
-  margin-top: 0; /* 中和 flow 時代的 mt-4：absolute 下 margin-top 會把盒子上抬 16px */
+  margin-top: 0; /* 中和 flow 时代的 mt-4：absolute 下 margin-top 会把盒子上抬 16px */
   z-index: 30;
 }
 
-/* 卡內反色：共享 .case-arrow/.case-dot 是「淺底深字」（case-showcase.css
-   447–494），壓到深色卡面必須翻白。全部作用域覆蓋，case-showcase.css 一行不動
-   （它同時服務 CaseShowcase 頁與充值環，改它=誤傷）。 */
+/* 卡内反色：共享 .case-arrow/.case-dot 是「浅底深字」（case-showcase.css
+   447–494），压到深色卡面必须翻白。全部作用域覆盖，case-showcase.css 一行不动
+   （它同时服务 CaseShowcase 页与充值环，改它=误伤）。 */
 .agent-template-carousel .case-dot::after {
   background: rgba(255, 255, 255, 0.55);
 }
@@ -286,7 +286,7 @@
 }
 
 .agent-template-carousel .case-dot[aria-current="true"]::after {
-  /* 選中態保持品牌藍（用戶 spec 欽點 #0A84FF，比基礎 #007AFF 亮一档，深底更 readable） */
+  /* 选中态保持品牌蓝（用户 spec 钦点 #0A84FF，比基础 #007AFF 亮一档，深底更 readable） */
   background: #0A84FF;
 }
 
@@ -299,12 +299,12 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
-/* ══ 2026-09-24 用戶版面方案·刀3：卡面陰影減法 ══
-   基礎重陰影真值在 case-showcase.css .case-slab::before（0 58px 96px/0.22 +
-   0 22px 44px/0.13 + 0 6px 12px/0.07，Vision Pro「懸浮深空」用）。模板卡右欄
-   貼近淺色背板，這套重影讀成「髒」。覆蓋成單層輕影；--case-depth 的景深調製
-   保留（側卡仍按距離變淡），邊框不動（掠射亮線 .case-edge 沿用既有玻璃 edge，
-   卡面是深圖視頻/封面，不加黑邊）。 */
+/* ══ 2026-09-24 用户版面方案·刀3：卡面阴影减法 ══
+   基础重阴影真值在 case-showcase.css .case-slab::before（0 58px 96px/0.22 +
+   0 22px 44px/0.13 + 0 6px 12px/0.07，Vision Pro「悬浮深空」用）。模板卡右栏
+   贴近浅色背板，这套重影读成「脏」。覆盖成单层轻影；--case-depth 的景深调制
+   保留（侧卡仍按距离变淡），边框不动（掠射亮线 .case-edge 沿用既有玻璃 edge，
+   卡面是深图视频/封面，不加黑边）。 */
 .agent-template-carousel .case-slab::before {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }

@@ -1,48 +1,48 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
 import { recipeTemplateToRecallConfig } from "@/lib/recipe-templates";
 import type { RecipeTemplate } from "@/lib/recipe-templates";
-// 2026-09-12 首屏減重拆分：本檔是執行側鋪法，需要帶 promptNotes/deliverable/
-// requiredTools 的完整步驟；顯示檔的 AgentPipelineStep 只剩卡面環節字段。
-// 純 type import（編譯期擦除），不把 payload 的 11 萬字文案拉進 bundle。
+// 2026-09-12 首屏减重拆分：本档是执行侧铺法，需要带 promptNotes/deliverable/
+// requiredTools 的完整步骤；显示档的 AgentPipelineStep 只剩卡面环节字段。
+// 纯 type import（编译期擦除），不把 payload 的 11 万字文案拉进 bundle。
 import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent-templates-payload";
 import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
 
 /**
- * 助理起手模板 → 畫布 workflow（2026-08-26 工具鏈重鋪）。
+ * 助理起手模板 → 画布 workflow（2026-08-26 工具链重铺）。
  *
- * 兩種鋪法：
- * 1. 帶 pipeline 藍圖（AgentTemplate）：工業級泳道——每步展開成
- *    「步驟頭卡（deliverable 合同）→ 工具卡（每個 requiredTool 一張，
- *    輸入/輸出/unsupported 明示）→ 門禁卡（有 gate 才鋪）→ 生成卡
- *    （短名）」一整排卡片，步驟間按「上一步產出餵下一步」串連；
- *    promptNotes/deliverable/inputFrom/toolIds 全部進生成卡 metadata
- *    給 agent 執行，畫布上不鋪提示詞湊數卡。8 步流水線鋪開就是
- *    30-50 顆卡片的生產現場，不是兩顆孤節點。
- * 2. 無 pipeline（純 RecipeTemplate）：舊兩層兜底——槽位 Prompt 節點
- *    匯入單顆生成節點。
+ * 两种铺法：
+ * 1. 带 pipeline 蓝图（AgentTemplate）：工业级泳道——每步展开成
+ *    「步骤头卡（deliverable 合同）→ 工具卡（每个 requiredTool 一张，
+ *    输入/输出/unsupported 明示）→ 门禁卡（有 gate 才铺）→ 生成卡
+ *    （短名）」一整排卡片，步骤间按「上一步产出喂下一步」串连；
+ *    promptNotes/deliverable/inputFrom/toolIds 全部进生成卡 metadata
+ *    给 agent 执行，画布上不铺提示词凑数卡。8 步流水线铺开就是
+ *    30-50 颗卡片的生产现场，不是两颗孤节点。
+ * 2. 无 pipeline（纯 RecipeTemplate）：旧两层兜底——槽位 Prompt 节点
+ *    汇入单颗生成节点。
  */
 
-/** 槽位節點縱向間距：一行卡片高 + 呼吸空隙（舊兩層布局用）。 */
+/** 槽位节点纵向间距：一行卡片高 + 呼吸空隙（旧两层布局用）。 */
 const SLOT_GAP_Y = 232;
-/** 槽位節點與生成節點的橫向間隙。 */
+/** 槽位节点与生成节点的横向间隙。 */
 const SLOT_GAP_X = 80;
 
-// ── 工業級泳道幾何 ──
-/** 卡片統一寬度；高度按內容類型分檔。 */
+// ── 工业级泳道几何 ──
+/** 卡片统一宽度；高度按内容类型分档。 */
 const CARD_W = 300;
 const SPEC_H = 170;
 const NOTE_H = 150;
 const GATE_H = 150;
 const GEN_H = 240;
-/** 泳道內卡片橫向間隙。 */
+/** 泳道内卡片横向间隙。 */
 const CARD_GAP_X = 60;
 /** 泳道行高：最高卡（生成 240）+ 呼吸空隙。 */
 const LANE_GAP_Y = 330;
 
-/** applyTemplateToCanvas 接受的模板：RecipeTemplate 為底，pipeline 可選（執行完整形態）。 */
+/** applyTemplateToCanvas 接受的模板：RecipeTemplate 为底，pipeline 可选（执行完整形态）。 */
 export type TemplateCanvasInput = RecipeTemplate & {
   pipeline?: AgentPipelineFull;
-  /** VPS agent-harness 已註冊的 workflow 模板 id（如 novel_film；2026-08-27）。 */
+  /** VPS agent-harness 已注册的 workflow 模板 id（如 novel_film；2026-08-27）。 */
   harnessTemplateId?: string;
 };
 
@@ -52,7 +52,7 @@ interface SlotSpec {
   text: string;
 }
 
-/** WorkflowRecallConfig → 槽位文本清單（順序即畫布縱向順序）。 */
+/** WorkflowRecallConfig → 槽位文本清单（顺序即画布纵向顺序）。 */
 function recallConfigSlots(config: WorkflowRecallConfig): SlotSpec[] {
   const slots: SlotSpec[] = [];
   if (config.prompt) slots.push({ key: "prompt", title: "画面描述", text: config.prompt });
@@ -69,14 +69,14 @@ export interface TemplateCanvasLayout {
   connections: CanvasConnection[];
 }
 
-/** 要點精煉成生成節點 prompt（進 metadata，不鋪湊數卡）。 */
+/** 要点精炼成生成节点 prompt（进 metadata，不铺凑数卡）。 */
 function promptFromNotes(step: AgentPipelineStepFull): string {
   return step.promptNotes.join("，");
 }
 
-/** 步驟產出類型 → 畫布節點類型（生成卡按此鋪，不再一律 Image）。
- *  director（2026-09-03）= 3D 白模预演步，生成卡鋪成導演台節點；其餘 metadata
- *  （stepIndex/stepName/toolIds/promptNotes…）走與其它步驟同一條生成卡路徑，不分支。 */
+/** 步骤产出类型 → 画布节点类型（生成卡按此铺，不再一律 Image）。
+ *  director（2026-09-03）= 3D 白模预演步，生成卡铺成导演台节点；其余 metadata
+ *  （stepIndex/stepName/toolIds/promptNotes…）走与其它步骤同一条生成卡路径，不分支。 */
 const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, CanvasNodeType> = {
   image: CanvasNodeType.Image,
   text: CanvasNodeType.Text,
@@ -86,14 +86,14 @@ const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, Ca
 };
 
 /**
- * pipeline 藍圖 → 工業級泳道畫布（純函式，可測）。
+ * pipeline 蓝图 → 工业级泳道画布（纯函式，可测）。
  *
- * 2026-08-26 重鋪（用戶裁定：畫布要體現 Agent Harness 的工具鏈，不是提示詞湊數）：
- * 每步一條泳道，卡片序列 = 步驟頭卡（這步要產出什麼）→ 工具卡（每個
- * requiredTool 一張：輸入→輸出、unsupported 明示「harness 未接」）→
- * 門禁卡（驗收條件）→ 生成卡（短名，攜帶 promptNotes/deliverable 給 agent）。
- * 舊的 deliverable 拆項卡與 promptNotes 逐條卡（提示詞湊數）已刪——
- * 它們歸入生成卡 metadata，畫布上只留「用戶一眼看懂流水線」的結構卡。
+ * 2026-08-26 重铺（用户裁定：画布要体现 Agent Harness 的工具链，不是提示词凑数）：
+ * 每步一条泳道，卡片序列 = 步骤头卡（这步要产出什么）→ 工具卡（每个
+ * requiredTool 一张：输入→输出、unsupported 明示「harness 未接」）→
+ * 门禁卡（验收条件）→ 生成卡（短名，携带 promptNotes/deliverable 给 agent）。
+ * 旧的 deliverable 拆项卡与 promptNotes 逐条卡（提示词凑数）已删——
+ * 它们归入生成卡 metadata，画布上只留「用户一眼看懂流水线」的结构卡。
  */
 function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPipelineFull): TemplateCanvasLayout {
   const config = recipeTemplateToRecallConfig(template);
@@ -123,9 +123,9 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
         // 左→右 DAG 单行链（每张卡都是链上一环，深度=卡片数），泳道布局
         // 全毁。盖章后模板布局即权威，自动排版不再动它。
         moved: true,
-        // Bug3 前置：泳道上的每一張卡（頭卡/工具卡/門禁卡/生成卡）都蓋同一個
-        // workflow_id 章 —— replaceWorkflowNodes 才能把整條舊泳道一次刪淨。
-        // 只有生成卡帶章的話，重點模板會殘留 ~90% 的輔助卡。
+        // Bug3 前置：泳道上的每一张卡（头卡/工具卡/门禁卡/生成卡）都盖同一个
+        // workflow_id 章 —— replaceWorkflowNodes 才能把整条旧泳道一次删净。
+        // 只有生成卡带章的话，重点模板会残留 ~90% 的辅助卡。
         metadata: { ...(node.metadata ?? {}), workflow_id: template.id },
       } as CanvasNode);
       if (!previousId && previousGenerationId) {
@@ -137,7 +137,7 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
       return id;
     };
 
-    // ① 步驟头卡：这一步的产出规格（deliverable 全文）——不是提示词，是合同。
+    // ① 步骤头卡：这一步的产出规格（deliverable 全文）——不是提示词，是合同。
     //    2026-08-27 结构化（Liquid Glass 正文分层）：pipelineCard=step_head
     //    标记卡种，deliverable 走结构化字段（渲染层出 green tint 胶囊 + 正文），
     //    content 留纯文本兜底（旧画布/降级渲染仍可读）。
@@ -154,8 +154,8 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
       },
     }, 0);
 
-    // ② 工具卡：每個 requiredTool 一張——用戶一眼看到這步用什麼工具、
-    //    輸入餵什麼、輸出得什麼；unsupported 明示（harness 未接，不冒充）。
+    // ② 工具卡：每个 requiredTool 一张——用户一眼看到这步用什么工具、
+    //    输入喂什么、输出得什么；unsupported 明示（harness 未接，不冒充）。
     //    2026-08-27 结构化：tool 字段进 metadata（渲染层出等宽字名 + Lucide
     //    箭头 IO + unsupported 红色警示行），content 留纯文本兜底。标题去 🔧
     //    emoji（DESIGN.md 禁 emoji，图标识别改由渲染层 typeBadge 承担）。
@@ -186,7 +186,7 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
       }, 1 + ti);
     });
 
-    // ③ 門禁卡：驗收條件（有 gate 才鋪）。
+    // ③ 门禁卡：验收条件（有 gate 才铺）。
     //    2026-08-27 结构化：kind=gate 标记（渲染层出 ShieldCheck 图标 + 条件分行）。
     if (step.gate) {
       push("gate", {
@@ -198,8 +198,8 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
       }, 1 + (step.requiredTools?.length ?? 0));
     }
 
-    // ④ 生成卡：短名。promptNotes/deliverable/inputFrom 進 metadata 給 agent，
-    //    畫布上不鋪提示詞湊數卡。
+    // ④ 生成卡：短名。promptNotes/deliverable/inputFrom 进 metadata 给 agent，
+    //    画布上不铺提示词凑数卡。
     const genId = push("gen", {
       type: GEN_NODE_TYPE[step.outputKind ?? "image"],
       title: step.shortName ?? step.name,
@@ -229,10 +229,10 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
 }
 
 /**
- * 模板 → 畫布節點佈局（純函式，可測）。帶 pipeline 走工業級泳道布局；
- * 無 pipeline 走舊兩層：每個非空槽一顆 Prompt 節點（連到生成節點時
- * 文本注入為 prompt 前綴——Prompt 節點既有語義），終點一顆空 Image
- * 節點（A4：空節點=生成落地位，原地回填）。
+ * 模板 → 画布节点布局（纯函式，可测）。带 pipeline 走工业级泳道布局；
+ * 无 pipeline 走旧两层：每个非空槽一颗 Prompt 节点（连到生成节点时
+ * 文本注入为 prompt 前缀——Prompt 节点既有语义），终点一颗空 Image
+ * 节点（A4：空节点=生成落地位，原地回填）。
  */
 export function templateToCanvasLayout(template: TemplateCanvasInput): TemplateCanvasLayout {
   const pipeline = template.pipeline;
@@ -254,7 +254,7 @@ export function templateToCanvasLayout(template: TemplateCanvasInput): TemplateC
     height: 200,
     // 同罪状 8：模板槽位节点也是「摆好的」，不让 layoutGraph 重排。
     moved: true,
-    // 同上：槽位佈局也要能被同 workflow 替換清掉。
+    // 同上：槽位布局也要能被同 workflow 替换清掉。
     metadata: { content: slot.text, workflow_id: template.id },
   }));
 
@@ -264,7 +264,7 @@ export function templateToCanvasLayout(template: TemplateCanvasInput): TemplateC
     toNodeId: imageId,
   }));
 
-  // 連槽位都沒有（空模板）= 沒有可鋪的 workflow，直接回空。
+  // 连槽位都没有（空模板）= 没有可铺的 workflow，直接回空。
   if (slotNodes.length === 0) return { nodes: [], connections: [] };
 
   const imageNode: CanvasNode = {
@@ -286,7 +286,7 @@ export function templateToCanvasLayout(template: TemplateCanvasInput): TemplateC
   return { nodes: [...slotNodes, imageNode], connections };
 }
 
-/** 鋪到畫布：走 useCanvasChat 既有的 addNodes（入 reducer、可 undo）。 */
+/** 铺到画布：走 useCanvasChat 既有的 addNodes（入 reducer、可 undo）。 */
 export function applyTemplateToCanvas(
   addNodes: ((nodes: CanvasNode[], connections?: CanvasConnection[]) => void) | undefined,
   template: TemplateCanvasInput,

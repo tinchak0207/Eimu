@@ -4,20 +4,20 @@ import { llmChatJson } from "../lib/llm-channel"
 import { readFileSync, existsSync } from "node:fs"
 import path from "node:path"
 
-// 世界觀抽取（2026-08-31 片1 實裝）：小說/設定文本 → 世界觀 JSON。
-// 文本分塊 → 逐塊調 LLM 抽取（通道綁定見 lib/llm-channel.ts，key 不落任何輸出）
-// → 合併去重 → schema 校驗。LLM 失敗誠實回 ok:false，不降級編造。
+// 世界观抽取（2026-08-31 片1 实装）：小说/设定文本 → 世界观 JSON。
+// 文本分块 → 逐块调 LLM 抽取（通道绑定见 lib/llm-channel.ts，key 不落任何输出）
+// → 合并去重 → schema 校验。LLM 失败诚实回 ok:false，不降级编造。
 
 const WORKSPACE = "/opt/agent-harness/workspace"
 const CHUNK_CHARS = 4500
 const MAX_CHUNKS = 6
 
 const SYSTEM = [
-  "你是世界觀設定抽取器。從給定的小說/設定文本塊中抽取世界觀要素。",
-  "只輸出一個 JSON 物件，不要任何解釋、不要 markdown 柵欄。schema：",
+  "你是世界观设定抽取器。从给定的小说/设定文本块中抽取世界观要素。",
+  "只输出一个 JSON 物件，不要任何解释、不要 markdown 栅栏。schema：",
   '{"characters":[{"name","role","description"}],"locations":[{"name","description"}],"factions":[{"name","description"}],"terms":[{"term","definition"}],"keywords":["string"]}',
-  "規則：name/term 用文本原詞；description 不超過 60 字且只寫文本中有依據的內容，禁止編造；",
-  "keywords 為可複用於生圖 prompt 的視覺/風格詞（服裝、地貌、光線、色調、材質等），每塊最多 12 個。",
+  "规则：name/term 用文本原词；description 不超过 60 字且只写文本中有依据的内容，禁止编造；",
+  "keywords 为可复用于生图 prompt 的视觉/风格词（服装、地貌、光线、色调、材质等），每块最多 12 个。",
 ].join("\n")
 
 interface Entry {
@@ -32,16 +32,16 @@ function resolveText(inline?: string, filePath?: string): { text?: string; reaso
   if (typeof inline === "string" && inline.trim()) return { text: inline }
   if (typeof filePath === "string" && filePath.trim()) {
     const abs = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE, filePath)
-    if (!existsSync(abs)) return { reason: `檔案不存在：${abs}` }
+    if (!existsSync(abs)) return { reason: `档案不存在：${abs}` }
     try {
       const text = readFileSync(abs, "utf8")
-      if (!text.trim()) return { reason: `檔案為空：${abs}` }
+      if (!text.trim()) return { reason: `档案为空：${abs}` }
       return { text }
     } catch (e) {
-      return { reason: `讀檔失敗：${(e as Error).message}` }
+      return { reason: `读档失败：${(e as Error).message}` }
     }
   }
-  return { reason: "text 與 path 至少填一個：text 直接給小說文本，path 給 txt/md 檔案路徑" }
+  return { reason: "text 与 path 至少填一个：text 直接给小说文本，path 给 txt/md 档案路径" }
 }
 
 function chunkText(text: string): { chunks: string[]; truncated: boolean } {
@@ -95,15 +95,15 @@ function mergeInto(list: Entry[], seen: Map<string, number>, item: Entry, nameFi
 
 export default tool({
   description:
-    "世界觀抽取（LLM 語義任務，走 harness 文字通道，不產生任何圖像/視頻生成扣費）。text 填小說/設定文本原文，或 path 填 txt/md 路徑；可選 focus 指定抽取側重（如「只關注勢力與法術體系」）。輸出 world_bible JSON：characters/locations/factions/terms/keywords（可直接複用為生圖 prompt 詞庫）。文本超長自動分塊（最多 6 塊，超出截斷並老實標註）。短劇/小說可視化第一步：先抽世界觀再鎖角色場景卡。LLM 失敗時回 ok:false 與原因，絕不編造。",
+    "世界观抽取（LLM 语义任务，走 harness 文字通道，不产生任何图像/视频生成扣费）。text 填小说/设定文本原文，或 path 填 txt/md 路径；可选 focus 指定抽取侧重（如「只关注势力与法术体系」）。输出 world_bible JSON：characters/locations/factions/terms/keywords（可直接复用为生图 prompt 词库）。文本超长自动分块（最多 6 块，超出截断并老实标注）。短剧/小说可视化第一步：先抽世界观再锁角色场景卡。LLM 失败时回 ok:false 与原因，绝不编造。",
   args: {
-    text: tool.schema.string().optional().describe("小說/設定文本原文（與 path 二選一）"),
-    path: tool.schema.string().optional().describe("文本檔案路徑 txt/md（與 text 二選一）"),
-    focus: tool.schema.string().optional().describe("可選：抽取側重說明"),
+    text: tool.schema.string().optional().describe("小说/设定文本原文（与 path 二选一）"),
+    path: tool.schema.string().optional().describe("文本档案路径 txt/md（与 text 二选一）"),
+    focus: tool.schema.string().optional().describe("可选：抽取侧重说明"),
   },
   async execute(args) {
     const resolved = resolveText(args.text, args.path)
-    if (!resolved.text) return fail("empty_text", resolved.reason || "文本為空", { title: "文本為空" })
+    if (!resolved.text) return fail("empty_text", resolved.reason || "文本为空", { title: "文本为空" })
 
     const { chunks, truncated } = chunkText(resolved.text)
     const characters: Entry[] = []
@@ -120,7 +120,7 @@ export default tool({
     let chunksFailed = 0
     let lastReason = ""
     for (let i = 0; i < chunks.length; i += 1) {
-      const user = `${args.focus ? `抽取側重：${args.focus}\n` : ""}文本塊 ${i + 1}/${chunks.length}：\n${chunks[i]}`
+      const user = `${args.focus ? `抽取侧重：${args.focus}\n` : ""}文本块 ${i + 1}/${chunks.length}：\n${chunks[i]}`
       let result = await llmChatJson(SYSTEM, user, 3000)
       if (!result.ok) result = await llmChatJson(SYSTEM, user, 3000)
       if (!result.ok) {
@@ -151,16 +151,16 @@ export default tool({
     }
 
     if (chunksFailed === chunks.length) {
-      return fail("llm_channel_failed", `LLM 通道全部 ${chunks.length} 塊失敗：${lastReason}`, { title: "抽取失敗" })
+      return fail("llm_channel_failed", `LLM 通道全部 ${chunks.length} 块失败：${lastReason}`, { title: "抽取失败" })
     }
 
     const empty = characters.length + locations.length + factions.length + terms.length + keywords.length === 0
     if (empty) {
-      return fail("nothing_extracted", "LLM 有回應但未抽到任何要素，請檢查文本是否為敘事/設定內容", { title: "無抽取結果" })
+      return fail("nothing_extracted", "LLM 有回应但未抽到任何要素，请检查文本是否为叙事/设定内容", { title: "无抽取结果" })
     }
 
     return ok({
-      title: `世界觀：${characters.length} 人物/${locations.length} 地理/${factions.length} 勢力/${terms.length} 術語/${keywords.length} 關鍵詞`,
+      title: `世界观：${characters.length} 人物/${locations.length} 地理/${factions.length} 势力/${terms.length} 术语/${keywords.length} 关键词`,
       world_bible: { characters, locations, factions, terms, keywords },
       meta: {
         chunks_used: chunks.length,

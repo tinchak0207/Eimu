@@ -1,8 +1,8 @@
-// POST /v1/uploads — 上傳參考圖，換 mediaId。
+// POST /v1/uploads — 上传参考图，换 mediaId。
 //
-// 2026-08-05 從 VPS 補回 repo。上傳本身不出圖，不計費；只認證 + 限大小。
-// usage 仍記一筆，用於後台觀察誰在灌圖。
-// 錯誤體與 trace id 與 /v1/images/generations 對齊。
+// 2026-08-05 从 VPS 补回 repo。上传本身不出图，不计费；只认证 + 限大小。
+// usage 仍记一笔，用于后台观察谁在灌图。
+// 错误体与 trace id 与 /v1/images/generations 对齐。
 
 import { NextRequest } from "next/server";
 import { after } from "next/server";
@@ -14,9 +14,9 @@ import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-// ~20MB 原圖 → base64 膨脹 4/3。代理前先截。
+// ~20MB 原图 → base64 膨胀 4/3。代理前先截。
 const MAX_B64_LEN = 30 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 認證成功後的所有回應（成功 + 錯誤）都帶限流預測頭；401/403/429 不走這裡。
+  // 认证成功后的所有回应（成功 + 错误）都带限流预测头；401/403/429 不走这里。
   const respond = (data: unknown, status: number, headers?: Record<string, string>) =>
     addRateLimitHeaders(jsonWithTrace(data, status, traceId, headers), auth.key);
 

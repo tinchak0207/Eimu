@@ -1,12 +1,12 @@
 /**
- * DELETE /api/skills/mine/<id> — 刪除**自己**的一條私有自建 skill。
+ * DELETE /api/skills/mine/<id> — 删除**自己**的一条私有自建 skill。
  *
- * 語義：使用者私有庫的 CRUD（下架自己的東西），**沒有**「公開市集下架」這回事。
- * 不屬於自己／不存在一律回 **404**（不用 403，不以狀態碼洩漏他人資源存在性）。
- * 未登入在 `resolveSkillOwner` 就 401（與 GET/POST 同一支身份入口，非第二套鑑權）。
+ * 语义：使用者私有库的 CRUD（下架自己的东西），**没有**「公开市集下架」这回事。
+ * 不属于自己／不存在一律回 **404**（不用 403，不以状态码泄漏他人资源存在性）。
+ * 未登入在 `resolveSkillOwner` 就 401（与 GET/POST 同一支身份入口，非第二套鉴权）。
  *
- * 薄殼：業務本體在 `@/lib/agent-skills/user-skill` 的 `deleteMySkill`
- * （複用 store 的 `retractMemoryDocs`，不自造第二套刪除）。
+ * 薄壳：业务本体在 `@/lib/agent-skills/user-skill` 的 `deleteMySkill`
+ * （复用 store 的 `retractMemoryDocs`，不自造第二套删除）。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,7 +15,7 @@ import { noStore, resolveSkillOwner } from "../owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function DELETE(
   req: NextRequest,

@@ -11,16 +11,16 @@ export interface AuthResult {
   user?: NewApiUser;
   token?: string;
   /**
-   * 新人禮首登彈窗（/api/auth/me 的加法欄位）：非空＝服務端說「已發放、未展示」。
-   * 單獨回傳而不是塞進 user——user 會被整包寫進 localStorage，把「待展示」這種
-   * 一次性狀態種進本機快照，下次開頁就會拿舊值彈窗（服務端才是權威）。
+   * 新人礼首登弹窗（/api/auth/me 的加法栏位）：非空＝服务端说「已发放、未展示」。
+   * 单独回传而不是塞进 user——user 会被整包写进 localStorage，把「待展示」这种
+   * 一次性状态种进本机快照，下次开页就会拿旧值弹窗（服务端才是权威）。
    */
   welcomeGift?: WelcomeGiftModal | null;
   /**
-   * 暫時性失敗（網路抖動 / 閘道 5xx / 冷啟動）：登入態本身沒被否定，
-   * 呼叫方只該保留現狀重試，絕不可 clearStoredToken——
-   * 2026-09-05 事故：/api/auth/me 上游 503 曾被當成登出處理，
-   * 一次閘道打嗝就把全站 localStorage+cookie 抹掉，AI 助理彈「尚未登录」。
+   * 暂时性失败（网路抖动 / 闸道 5xx / 冷启动）：登入态本身没被否定，
+   * 呼叫方只该保留现状重试，绝不可 clearStoredToken——
+   * 2026-09-05 事故：/api/auth/me 上游 503 曾被当成登出处理，
+   * 一次闸道打嗝就把全站 localStorage+cookie 抹掉，AI 助理弹「尚未登录」。
    */
   transient?: boolean;
 }
@@ -32,8 +32,8 @@ export async function fetchMe(token: string): Promise<AuthResult> {
       : undefined;
     const candidateTokens = cookieToken ? [decodeURIComponent(cookieToken), token] : [token];
     for (const candidate of [...new Set(candidateTokens)]) {
-      // 每次候選重試都重新解析 user：getStoredUser 會自愈壞 cookie，
-      // 讓「舊殘留導致缺 x-user-id」的 401 在重試時恢復。
+      // 每次候选重试都重新解析 user：getStoredUser 会自愈坏 cookie，
+      // 让「旧残留导致缺 x-user-id」的 401 在重试时恢复。
       const storedUser = getStoredUser();
       const res = await fetch("/api/auth/me", {
         headers: {
@@ -45,7 +45,7 @@ export async function fetchMe(token: string): Promise<AuthResult> {
       if (res.status >= 500) return { ok: false, error: "服务暂时不可用", transient: true };
       const data = await res.json() as { success: boolean; data?: NewApiUser; message?: string };
       if (!data.success || !data.data) return { ok: false, error: data.message || "无法获取用户信息" };
-      // 彈窗欄位取出後不留進 user：user 會被整包寫進 localStorage（見 AuthResult.welcomeGift 註）。
+      // 弹窗栏位取出后不留进 user：user 会被整包写进 localStorage（见 AuthResult.welcomeGift 注）。
       const { welcomeGift, ...user } = data.data as NewApiUser & { welcomeGift?: unknown };
       return { ok: true, user, welcomeGift: parseWelcomeGiftModal(welcomeGift), token: candidate };
     }
@@ -57,11 +57,11 @@ export async function fetchMe(token: string): Promise<AuthResult> {
 }
 
 /**
- * 新人禮首登彈窗已展示的回執（POST /api/auth/me，op=welcome-gift-modal-seen）。
+ * 新人礼首登弹窗已展示的回执（POST /api/auth/me，op=welcome-gift-modal-seen）。
  *
- * 形狀刻意與 fetchMe 一致（Bearer + x-user-id）：站上對 /api/auth/me 的兩次呼叫
- * 必須帶同一組身分標頭，否則控制面認不出人、回執落不到 modal_seen_at 上。
- * 失敗只回 false，**呼叫方不得擋住關窗**——回執沒寫上只會讓下次登入再彈一次，
+ * 形状刻意与 fetchMe 一致（Bearer + x-user-id）：站上对 /api/auth/me 的两次呼叫
+ * 必须带同一组身分标头，否则控制面认不出人、回执落不到 modal_seen_at 上。
+ * 失败只回 false，**呼叫方不得挡住关窗**——回执没写上只会让下次登入再弹一次，
  * 比把人家的新人礼藏起来轻。
  */
 export async function ackWelcomeGiftModalSeen(token: string): Promise<boolean> {

@@ -1,10 +1,10 @@
-// `POST /openai/v1/chat/completions` 的**真行為斷言**。
+// `POST /openai/v1/chat/completions` 的**真行为断言**。
 //
-// 酒館／Cherry Studio／LobeChat 走的是 chat 形狀：最後一條 user 訊息當 prompt，回覆內容
-// 必須是能渲染的 markdown 圖片；`stream:true` 要能從頭收到 `[DONE]`。這裡逐欄驗 OpenAI
-// chat.completion(/chunk) 的形狀（沒有 `openai` npm 套件，且紅線禁止新增依賴）。
+// 酒馆／Cherry Studio／LobeChat 走的是 chat 形状：最后一条 user 讯息当 prompt，回覆内容
+// 必须是能渲染的 markdown 图片；`stream:true` 要能从头收到 `[DONE]`。这里逐栏验 OpenAI
+// chat.completion(/chunk) 的形状（没有 `openai` npm 套件，且红线禁止新增依赖）。
 //
-// 上游一律替身：零外網、零付費調用。
+// 上游一律替身：零外网、零付费调用。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -36,7 +36,7 @@ function req(body: unknown, headers: Record<string, string> = {}): NextRequest {
   });
 }
 
-/** 解析 SSE 文字成 data 行（忽略註釋行與空行）。 */
+/** 解析 SSE 文字成 data 行（忽略注释行与空行）。 */
 function sseData(text: string): string[] {
   return text
     .split("\n")
@@ -56,7 +56,7 @@ test.after(() => {
   clearCompatEnv();
 });
 
-test("同步：最后一条 user 訊息當 prompt，回 chat.completion + markdown 图片", async () => {
+test("同步：最后一条 user 讯息当 prompt，回 chat.completion + markdown 图片", async () => {
   const calls = installUpstreamStub({ taskSnapshots: [SUCCEEDED] });
 
   const response = await POST(
@@ -83,7 +83,7 @@ test("同步：最后一条 user 訊息當 prompt，回 chat.completion + markdo
   assert.match(body.id, /^chatcmpl-/);
   assert.equal(body.object, "chat.completion");
   assert.ok(Number.isInteger(body.created));
-  assert.equal(body.model, "gpt-image-2", "回覆必須回帶客戶端送來的模型 id");
+  assert.equal(body.model, "gpt-image-2", "回覆必须回带客户端送来的模型 id");
   assert.equal(body.choices.length, 1);
   assert.equal(body.choices[0].index, 0);
   assert.equal(body.choices[0].message.role, "assistant");
@@ -95,7 +95,7 @@ test("同步：最后一条 user 訊息當 prompt，回 chat.completion + markdo
   assert.equal(
     calls.submits[0].body.prompt,
     "第二张：一只在雨夜戴墨镜的猫",
-    "prompt 必须取最后一条 user 訊息，不是拼历史",
+    "prompt 必须取最后一条 user 讯息，不是拼历史",
   );
 });
 
@@ -200,7 +200,7 @@ test("图片输入：400 image_input_not_supported（不静默丢图后乱画）
   assert.equal(calls.submits.length, 0);
 });
 
-test("没有 user 訊息：400 invalid_request", async () => {
+test("没有 user 讯息：400 invalid_request", async () => {
   installUpstreamStub({ taskSnapshots: [SUCCEEDED] });
   const response = await POST(req({ model: "gpt-image-2", messages: [{ role: "system", content: "x" }] }));
   const body = (await response.json()) as { error: Record<string, unknown> };

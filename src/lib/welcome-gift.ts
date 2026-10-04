@@ -87,7 +87,7 @@ export function welcomeGiftNotice(
 export const WELCOME_GIFT_MODAL_TITLE = "新人礼已到账";
 
 /**
- * 首登弹窗文案（简体中文、直白、无 emoji）。币数与张数一律从上面的具名常量推導，
+ * 首登弹窗文案（简体中文、直白、无 emoji）。币数与张数一律从上面的具名常量推导，
  * 不写死数字——定价或张数调整时这里自动跟随。
  */
 export function welcomeGiftModalCopy(

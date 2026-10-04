@@ -36,7 +36,7 @@ export interface GenerationCommand {
   responseFormat?: "b64_json" | "url";
   callbackUrl?: string | null;
   retryOfTaskId?: string | null;
-  /** 批量編排層（/v1/batches）回填：任務所屬批與批內序號；單任務提交不帶。 */
+  /** 批量编排层（/v1/batches）回填：任务所属批与批内序号；单任务提交不带。 */
   batchId?: string | null;
   batchIndex?: number | null;
   referenceArtifacts?: CreateGenerationJobInput["referenceArtifacts"];
@@ -56,8 +56,8 @@ export async function submitGenerationCommand(
     billingAdapter?: GenerationBillingAdapter;
     executorId?: string;
     /**
-     * 模型可用性閘（circuit breaker）。缺省：控制面啟用時用真實判定
-     * （checkModelAvailability），否則不設閘；傳 null 顯式關閉。
+     * 模型可用性闸（circuit breaker）。缺省：控制面启用时用真实判定
+     * （checkModelAvailability），否则不设闸；传 null 显式关闭。
      */
     availabilityGate?: ModelAvailabilityGate | null;
   } = {},
@@ -104,14 +104,14 @@ export async function submitGenerationCommand(
     referenceArtifacts: command.referenceArtifacts ?? [],
     requestedCount,
     billingAmount: command.billingAmount ?? 0,
-    // R7-D（2026-08-29）：預設 deadline 只覆蓋排隊等容量的階段（3 分鐘）。
-    // 供應商飽和的死單不再佔用 15 分鐘；真正開工後由 worker 依 started_at
-    // 展期到 15 分鐘總生成預算（extendGenerationDeadlineJob，GREATEST 防縮短）。
+    // R7-D（2026-08-29）：预设 deadline 只覆盖排队等容量的阶段（3 分钟）。
+    // 供应商饱和的死单不再占用 15 分钟；真正开工后由 worker 依 started_at
+    // 展期到 15 分钟总生成预算（extendGenerationDeadlineJob，GREATEST 防缩短）。
     deadlineAt: new Date(Date.now() + (command.deadlineMs ?? 3 * 60_000)),
   };
-  // 模型可用性閘：在建單與預扣費（reserve）之前 fail-fast——被判死的模型不建 job、
-  // 不動錢、不讓用戶白等到 deadline。唯一例外是同一冪等鍵的重放：原 job 已存在，
-  // 照舊回同一 job（冪等承諾優先於閘門）。
+  // 模型可用性闸：在建单与预扣费（reserve）之前 fail-fast——被判死的模型不建 job、
+  // 不动钱、不让用户白等到 deadline。唯一例外是同一幂等键的重放：原 job 已存在，
+  // 照旧回同一 job（幂等承诺优先于闸门）。
   const gate = options.availabilityGate === undefined
     ? (generationControlPlaneEnabled() ? defaultAvailabilityGate(sql) : null)
     : options.availabilityGate;

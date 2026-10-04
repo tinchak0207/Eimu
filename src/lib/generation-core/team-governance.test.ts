@@ -1,8 +1,8 @@
-// 團隊治理六面（席位／角色／建畫布權限／加入審批／生命週期／用量）真行為斷言測試。
+// 团队治理六面（席位／角色／建画布权限／加入审批／生命周期／用量）真行为断言测试。
 //
-// 姿勢沿用 member-quota.test.ts：注入假控制面 SQL（記憶體）與假 new-api，
-// 斷言的是規則與副作用（誰被拒、名冊怎麼變、冷靜期怎麼算、有没有碰點數），
-// 不是源碼字串。源碼掃描只用在「路由鑑權契約」與「禁影子帳本」兩處護欄。
+// 姿势沿用 member-quota.test.ts：注入假控制面 SQL（记忆体）与假 new-api，
+// 断言的是规则与副作用（谁被拒、名册怎么变、冷静期怎么算、有没有碰点数），
+// 不是源码字串。源码扫描只用在「路由鉴权契约」与「禁影子帐本」两处护栏。
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -317,9 +317,9 @@ function deps(cp: ReturnType<typeof fakeControlPlane>, now?: () => number) {
   return { sql: cp.sql, withTeamLock: mutexLock(cp.sql), newId: () => `id-${cp.requests.length + cp.members.length}`, now };
 }
 
-// ── 配置常量（可調，不硬編） ─────────────────────────────────────────────
+// ── 配置常量（可调，不硬编） ─────────────────────────────────────────────
 
-test("容量常量可調：默認 min 2／default 10／硬上限 200，env 可覆寫且夾在界內", async () => {
+test("容量常量可调：默认 min 2／default 10／硬上限 200，env 可覆写且夹在界内", async () => {
   await withEnv({ TEAM_MIN_MEMBERS: undefined, TEAM_DEFAULT_MAX_MEMBERS: undefined, TEAM_MAX_MEMBERS: undefined }, () => {
     assert.deepEqual(teamCapacity(), { minMembers: 2, defaultMaxMembers: 10, maxMembers: 200 });
   });
@@ -328,11 +328,11 @@ test("容量常量可調：默認 min 2／default 10／硬上限 200，env 可�
   });
   await withEnv({ TEAM_MAX_MEMBERS: "1", TEAM_MIN_MEMBERS: "5" }, () => {
     const capacity = teamCapacity();
-    assert.ok(capacity.maxMembers >= capacity.minMembers, "硬上限不得低於最小值");
+    assert.ok(capacity.maxMembers >= capacity.minMembers, "硬上限不得低于最小值");
   });
 });
 
-test("解散冷靜期常量可調（默認 48h）", async () => {
+test("解散冷静期常量可调（默认 48h）", async () => {
   await withEnv({ ...CONTROL_PLANE_ENV, TEAM_DISSOLVE_COOLOFF_HOURS: undefined }, async () => {
     const cp = fakeControlPlane({ settings: [{ team_user_id: 117, member_create_canvas: false, seats: 10, dissolve_scheduled_at: null, dissolved_at: null }] });
     const result = await scheduleTeamDissolution({ teamUserId: 117, actorUserId: 117 }, { ...deps(cp), now: () => 0 });
@@ -342,9 +342,9 @@ test("解散冷靜期常量可調（默認 48h）", async () => {
   });
 });
 
-// ── 純函式：角色授權與 owner 不變量 ─────────────────────────────────────
+// ── 纯函式：角色授权与 owner 不变量 ─────────────────────────────────────
 
-test("角色授權：owner 可改他人、admin 只能改 member 且不得製造 owner、member 不可改任何人", () => {
+test("角色授权：owner 可改他人、admin 只能改 member 且不得制造 owner、member 不可改任何人", () => {
   const roster = [
     { memberUserId: 900, role: "member" as const },
     { memberUserId: 901, role: "admin" as const },
@@ -356,22 +356,22 @@ test("角色授權：owner 可改他人、admin 只能改 member 且不得製造
   assert.equal(owner.role, "owner");
   assert.equal(admin.role, "admin");
   assert.equal(member.role, "member");
-  assert.equal(resolveTeamActor({ userId: 999, teamUserId: 117, roster }), null, "外人沒有治理角色");
+  assert.equal(resolveTeamActor({ userId: 999, teamUserId: 117, roster }), null, "外人没有治理角色");
 
   assert.equal(canManageRole(owner, { role: "admin", memberUserId: 901 }, "member"), true);
   assert.equal(canManageRole(owner, { role: "member", memberUserId: 900 }, "owner"), true);
   assert.equal(canManageRole(admin, { role: "member", memberUserId: 900 }, "admin"), true);
-  assert.equal(canManageRole(admin, { role: "member", memberUserId: 900 }, "owner"), false, "admin 不得製造 owner");
-  assert.equal(canManageRole(admin, { role: "admin", memberUserId: 901 }, "member"), false, "admin 不得動 admin");
+  assert.equal(canManageRole(admin, { role: "member", memberUserId: 900 }, "owner"), false, "admin 不得制造 owner");
+  assert.equal(canManageRole(admin, { role: "admin", memberUserId: 901 }, "member"), false, "admin 不得动 admin");
   assert.equal(canManageRole(member, { role: "member", memberUserId: 900 }, "admin"), false);
-  // 團隊主帳恆 owner，任何角色都不得改它（最後一個 owner）。
+  // 团队主帐恒 owner，任何角色都不得改它（最后一个 owner）。
   assert.equal(canManageRole(owner, { role: "owner", memberUserId: 117 }, "member"), false);
 
-  assert.equal(ownerCount(117, roster), 2, "owner = 主帳(1) + 名冊 owner(1)");
-  assert.ok(ownerCount(117, []) >= 1, "owner 集合恆非空");
+  assert.equal(ownerCount(117, roster), 2, "owner = 主帐(1) + 名册 owner(1)");
+  assert.ok(ownerCount(117, []) >= 1, "owner 集合恒非空");
 });
 
-test("建畫布權限純函式：owner/admin 恆可；member 依開關；非成員不受閘", () => {
+test("建画布权限纯函式：owner/admin 恒可；member 依开关；非成员不受闸", () => {
   assert.equal(canCreateSharedCanvas({ actor: { role: "owner" }, memberCreateCanvas: false }).allowed, true);
   assert.equal(canCreateSharedCanvas({ actor: { role: "admin" }, memberCreateCanvas: false }).allowed, true);
   const denied = canCreateSharedCanvas({ actor: { role: "member" }, memberCreateCanvas: false });
@@ -382,9 +382,9 @@ test("建畫布權限純函式：owner/admin 恆可；member 依開關；非成�
   assert.equal(canCreateSharedCanvas({ actor: null, memberCreateCanvas: false }).allowed, true);
 });
 
-// ── 斷言 1：不可移除最後一個 owner ──────────────────────────────────────
+// ── 断言 1：不可移除最后一个 owner ──────────────────────────────────────
 
-test("斷言①：最後一個 owner 不可移除／不可退出（團隊主帳 leave → 409 last_owner，且名冊不動）", async () => {
+test("断言①：最后一个 owner 不可移除／不可退出（团队主帐 leave → 409 last_owner，且名册不动）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [memberRow({ member_key_id: "key-a", member_user_id: 900, role: "member" })],
@@ -394,13 +394,13 @@ test("斷言①：最後一個 owner 不可移除／不可退出（團隊主帳 
     assert.equal(result.ok === false ? result.status : 0, 409);
     assert.equal(result.ok === false ? result.code : "", "last_owner");
     assert.match(result.ok === false ? result.message : "", /转移所有权或解散团队/);
-    assert.equal(cp.members.length, 1, "被拒的退出不得改名冊");
+    assert.equal(cp.members.length, 1, "被拒的退出不得改名册");
   });
 });
 
-test("斷言①（守衛分支）：對主帳 owner 的名冊列降級／移除一律 409 last_owner", async () => {
+test("断言①（守卫分支）：对主帐 owner 的名册列降级／移除一律 409 last_owner", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
-    // 名冊列直接指向主帳（defense in depth：即使上層放行也必須被 owner 不變量擋住）。
+    // 名册列直接指向主帐（defense in depth：即使上层放行也必须被 owner 不变量挡住）。
     const cp = fakeControlPlane({
       members: [memberRow({ member_key_id: "key-self", member_user_id: 117, role: "owner" })],
     });
@@ -408,11 +408,11 @@ test("斷言①（守衛分支）：對主帳 owner 的名冊列降級／移除�
     assert.equal(demote.ok === false ? demote.code : "", "last_owner");
     const removed = await removeTeamMember({ teamUserId: 117, actorUserId: 117, memberKeyId: "key-self" }, deps(cp));
     assert.equal(removed.ok === false ? removed.code : "", "last_owner");
-    assert.equal(cp.members.length, 1, "兩次被拒都不得動名冊");
+    assert.equal(cp.members.length, 1, "两次被拒都不得动名册");
   });
 });
 
-test("角色變更：owner 把 member 升 admin 落庫；admin 動 admin 被 403 且不動名冊", async () => {
+test("角色变更：owner 把 member 升 admin 落库；admin 动 admin 被 403 且不动名册", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -427,13 +427,13 @@ test("角色變更：owner 把 member 升 admin 落庫；admin 動 admin 被 403
     const forbidden = await setMemberRole({ teamUserId: 117, actorUserId: 901, memberKeyId: "key-b", role: "member" }, deps(cp));
     assert.equal(forbidden.ok, false);
     assert.equal(forbidden.ok === false ? forbidden.status : 0, 403);
-    assert.equal(cp.members.find((m) => m.member_user_id === 901)?.role, "admin", "被拒不得改動");
+    assert.equal(cp.members.find((m) => m.member_user_id === 901)?.role, "admin", "被拒不得改动");
   });
 });
 
-// ── 斷言 2：滿員不通過申請 ──────────────────────────────────────────────
+// ── 断言 2：满员不通过申请 ──────────────────────────────────────────────
 
-test("斷言②：滿員（名冊人數 ≥ 席位數）時加入申請不得通過，名冊與申請狀態都不動", async () => {
+test("断言②：满员（名册人数 ≥ 席位数）时加入申请不得通过，名册与申请状态都不动", async () => {
   await withEnv({ ...CONTROL_PLANE_ENV, TEAM_MIN_MEMBERS: undefined, TEAM_DEFAULT_MAX_MEMBERS: undefined, TEAM_MAX_MEMBERS: undefined }, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -460,12 +460,12 @@ test("斷言②：滿員（名冊人數 ≥ 席位數）時加入申請不得通
     assert.equal(result.ok === false ? result.status : 0, 409);
     assert.equal(result.ok === false ? result.code : "", "team_full");
     assert.match(result.ok === false ? result.message : "", /席位已满/);
-    assert.equal(cp.members.length, 2, "滿員不得登記新成員");
-    assert.equal(cp.requests[0].status, "pending", "滿員不得改申請狀態");
+    assert.equal(cp.members.length, 2, "满员不得登记新成员");
+    assert.equal(cp.requests[0].status, "pending", "满员不得改申请状态");
   });
 });
 
-test("未滿員時通過申請：名冊登記 role=member，申請轉 approved（幂等重放不再登記第二次）", async () => {
+test("未满员时通过申请：名册登记 role=member，申请转 approved（幂等重放不再登记第二次）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [memberRow({ member_key_id: "key-a", member_user_id: 900 })],
@@ -492,12 +492,12 @@ test("未滿員時通過申請：名冊登記 role=member，申請轉 approved�
 
     const replay = await decideJoinRequest({ teamUserId: 117, actorUserId: 117, requestId: "req-1", decision: "approve" }, deps(cp));
     assert.equal(replay.ok, true);
-    assert.equal(replay.ok === true ? replay.unchanged : false, true, "重放審批 = no-op");
-    assert.equal(cp.members.length, 2, "重放不得產生第二條名冊");
+    assert.equal(replay.ok === true ? replay.unchanged : false, true, "重放审批 = no-op");
+    assert.equal(cp.members.length, 2, "重放不得产生第二条名册");
   });
 });
 
-test("成員側審批被拒：名冊成員（member/admin）不得自行審批，member 不得改角色", async () => {
+test("成员侧审批被拒：名册成员（member/admin）不得自行审批，member 不得改角色", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -518,7 +518,7 @@ test("成員側審批被拒：名冊成員（member/admin）不得自行審批�
         },
       ],
     });
-    // admin 屬於該團隊，可以審批；member 不行。
+    // admin 属于该团队，可以审批；member 不行。
     const byMember = await decideJoinRequest({ teamUserId: 117, actorUserId: 901, requestId: "req-1", decision: "approve" }, deps(cp));
     assert.equal(byMember.ok === false ? byMember.status : 0, 403);
     const byAdmin = await decideJoinRequest({ teamUserId: 117, actorUserId: 900, requestId: "req-1", decision: "reject" }, deps(cp));
@@ -527,7 +527,7 @@ test("成員側審批被拒：名冊成員（member/admin）不得自行審批�
   });
 });
 
-test("申請加入：申請自己團隊被拒；已在別團隊被拒；重複申請幂等回同一條；駁回後可重開", async () => {
+test("申请加入：申请自己团队被拒；已在别团队被拒；重复申请幂等回同一条；驳回后可重开", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ members: [memberRow({ team_user_id: 555, member_key_id: "key-x", member_user_id: 902 })] });
     const self = await applyToJoinTeam({ teamUserId: 902, applicantUserId: 902, applicantMemberKeyId: "key-c" }, deps(cp));
@@ -537,20 +537,20 @@ test("申請加入：申請自己團隊被拒；已在別團隊被拒；重複�
     assert.equal(first.ok, true);
     assert.equal(first.ok === true ? first.created : true, true);
     const replay = await applyToJoinTeam({ teamUserId: 117, applicantUserId: 900, applicantMemberKeyId: "key-a" }, deps(cp));
-    assert.equal(replay.ok === true ? replay.created : true, false, "重複申請不產生第二條");
+    assert.equal(replay.ok === true ? replay.created : true, false, "重复申请不产生第二条");
     assert.equal(replay.ok === true ? replay.request.id : "", first.ok === true ? first.request.id : "x");
     assert.equal(cp.requests.length, 1);
 
-    // 駁回後重開：同一條回到 pending（不新增第二條）。
+    // 驳回后重开：同一条回到 pending（不新增第二条）。
     await decideJoinRequest({ teamUserId: 117, actorUserId: 117, requestId: first.ok === true ? first.request.id : "", decision: "reject" }, deps(cp));
     const reopened = await applyToJoinTeam({ teamUserId: 117, applicantUserId: 900, applicantMemberKeyId: "key-a" }, deps(cp));
     assert.equal(reopened.ok === true ? reopened.request.status : "", "pending");
     assert.equal(cp.requests.length, 1);
 
-    // 跨團隊：申請人已是別家（555）成員 → 不得再加入。
+    // 跨团队：申请人已是别家（555）成员 → 不得再加入。
     const cross = await applyToJoinTeam({ teamUserId: 118, applicantUserId: 902, applicantMemberKeyId: "key-x" }, deps(cp));
-    // 902 已歸屬 555：名冊唯一性下，加入 118 會被「已在別的團隊」擋（此處 118 名冊為空）。
-    assert.ok(cross.ok === false || cross.ok === true, "申請本身可受理");
+    // 902 已归属 555：名册唯一性下，加入 118 会被「已在别的团队」挡（此处 118 名册为空）。
+    assert.ok(cross.ok === false || cross.ok === true, "申请本身可受理");
     const cp2 = fakeControlPlane({
       members: [memberRow({ team_user_id: 555, member_key_id: "key-x", member_user_id: 902 })],
       requests: [
@@ -569,13 +569,13 @@ test("申請加入：申請自己團隊被拒；已在別團隊被拒；重複�
     });
     const decided = await decideJoinRequest({ teamUserId: 117, actorUserId: 117, requestId: "req-9", decision: "approve" }, deps(cp2));
     assert.equal(decided.ok === false ? decided.code : "", "member_already_in_team");
-    assert.equal(cp2.members.length, 1, "跨團隊不得登記");
+    assert.equal(cp2.members.length, 1, "跨团队不得登记");
   });
 });
 
-// ── 斷言 3：非 owner/admin 建畫布被拒 ───────────────────────────────────
+// ── 断言 3：非 owner/admin 建画布被拒 ───────────────────────────────────
 
-test("斷言③：member 且開關關閉 → 被拒（專用文案）；開關開啟／owner／admin／非成員 → 放行", async () => {
+test("断言③：member 且开关关闭 → 被拒（专用文案）；开关开启／owner／admin／非成员 → 放行", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -591,15 +591,15 @@ test("斷言③：member 且開關關閉 → 被拒（專用文案）；開關�
     assert.equal(denied.message, TEAM_CANVAS_FORBIDDEN_MESSAGE);
 
     assert.equal((await canMemberCreateSharedCanvas(901, { sql: cp.sql })).allowed, true, "admin 可建");
-    assert.equal((await canMemberCreateSharedCanvas(117, { sql: cp.sql })).allowed, true, "owner（主帳）可建");
-    assert.equal((await canMemberCreateSharedCanvas(999, { sql: cp.sql })).allowed, true, "非成員不受此閘");
+    assert.equal((await canMemberCreateSharedCanvas(117, { sql: cp.sql })).allowed, true, "owner（主帐）可建");
+    assert.equal((await canMemberCreateSharedCanvas(999, { sql: cp.sql })).allowed, true, "非成员不受此闸");
 
     cp.settings[0].member_create_canvas = true;
-    assert.equal((await canMemberCreateSharedCanvas(900, { sql: cp.sql })).allowed, true, "開關開啟後 member 可建");
+    assert.equal((await canMemberCreateSharedCanvas(900, { sql: cp.sql })).allowed, true, "开关开启后 member 可建");
   });
 });
 
-test("建畫布開關：只有 owner/admin 能改；member 被 403 且設定不變；重複設定幂等", async () => {
+test("建画布开关：只有 owner/admin 能改；member 被 403 且设定不变；重复设定幂等", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -620,9 +620,9 @@ test("建畫布開關：只有 owner/admin 能改；member 被 403 且設定不�
   });
 });
 
-// ── 斷言 4：48h 冷靜期內可撤回 ──────────────────────────────────────────
+// ── 断言 4：48h 冷静期内可撤回 ──────────────────────────────────────────
 
-test("斷言④：解散排程 48h 冷靜期內可撤回；過期不可撤回；執行幂等且只停用名冊", async () => {
+test("断言④：解散排程 48h 冷静期内可撤回；过期不可撤回；执行幂等且只停用名册", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ members: [memberRow({ member_key_id: "key-a", member_user_id: 900 })] });
     const start = 1_000_000_000_000;
@@ -632,21 +632,21 @@ test("斷言④：解散排程 48h 冷靜期內可撤回；過期不可撤回；
     assert.equal(scheduled.ok, true);
     const dueAt = scheduled.ok === true ? scheduled.dissolveScheduledAt : "";
     assert.equal(dueAt, new Date(start + 48 * HOUR_MS).toISOString());
-    // 重放排程：不重置冷靜期起點（幂等）。
+    // 重放排程：不重置冷静期起点（幂等）。
     const replay = await scheduleTeamDissolution({ teamUserId: 117, actorUserId: 117 }, { ...deps(cp), now: () => start + 10 * HOUR_MS });
     assert.equal(replay.ok === true ? replay.dissolveScheduledAt : "", dueAt);
     assert.equal(replay.ok === true ? replay.unchanged : false, true);
 
-    // 冷靜期內（+47h）撤回成功。
+    // 冷静期内（+47h）撤回成功。
     const lifecycle = await getTeamLifecycle(117, { ...deps(cp), now: () => start + 47 * HOUR_MS });
     assert.equal(lifecycle.due, false);
     assert.equal(lifecycle.remainingMs, HOUR_MS);
     const withdrawn = await withdrawTeamDissolution({ teamUserId: 117, actorUserId: 117 }, { ...deps(cp), now: () => start + 47 * HOUR_MS });
     assert.equal(withdrawn.ok, true);
     assert.equal(withdrawn.ok === true ? withdrawn.withdrawn : false, true);
-    assert.equal(cp.settings[0].dissolve_scheduled_at, null, "撤回後排程清空");
+    assert.equal(cp.settings[0].dissolve_scheduled_at, null, "撤回后排程清空");
 
-    // 再排程，冷靜期已過 → 不可撤回；未到期不得執行；到期才執行。
+    // 再排程，冷静期已过 → 不可撤回；未到期不得执行；到期才执行。
     await scheduleTeamDissolution({ teamUserId: 117, actorUserId: 117 }, { ...deps(cp), now: () => start });
     const late = await withdrawTeamDissolution({ teamUserId: 117, actorUserId: 117 }, { ...deps(cp), now: () => start + 49 * HOUR_MS });
     assert.equal(late.ok === false ? late.code : "", "cooloff_elapsed");
@@ -656,14 +656,14 @@ test("斷言④：解散排程 48h 冷靜期內可撤回；過期不可撤回；
     const executed = await executeTeamDissolution({ teamUserId: 117 }, { ...deps(cp), now: () => start + 48 * HOUR_MS });
     assert.equal(executed.ok === true ? executed.executed : false, true);
     assert.equal(executed.ok === true ? executed.membersDisabled : 0, 1);
-    assert.equal(cp.members[0].enabled, false, "解散後名冊成員停用（意圖層）");
+    assert.equal(cp.members[0].enabled, false, "解散后名册成员停用（意图层）");
     const again = await executeTeamDissolution({ teamUserId: 117 }, { ...deps(cp), now: () => start + 100 * HOUR_MS });
     assert.equal(again.ok === true ? again.executed : true, false);
     assert.equal(again.ok === true ? again.reason : "", "already_dissolved");
   });
 });
 
-test("解散／席位只有 owner 能動：admin 排程解散 → 403", async () => {
+test("解散／席位只有 owner 能动：admin 排程解散 → 403", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [memberRow({ member_key_id: "key-b", member_user_id: 901, role: "admin" })],
@@ -673,7 +673,7 @@ test("解散／席位只有 owner 能動：admin 排程解散 → 403", async ()
   });
 });
 
-test("成員退出：普通成員可退出（名冊移除）；退出不觸碰任何點數", async () => {
+test("成员退出：普通成员可退出（名册移除）；退出不触碰任何点数", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -685,13 +685,13 @@ test("成員退出：普通成員可退出（名冊移除）；退出不觸碰�
     assert.equal(left.ok, true);
     assert.equal(cp.members.length, 1);
     assert.equal(cp.members[0].member_user_id, 901, "共同 owner 仍在（owner 集合非空）");
-    assert.ok(!cp.queries.some((q) => /account_ledger|billing_operation|used_quota/.test(q)), "退出不得碰點數帳本");
+    assert.ok(!cp.queries.some((q) => /account_ledger|billing_operation|used_quota/.test(q)), "退出不得碰点数帐本");
   });
 });
 
-// ── 斷言 5：席位／審批全路徑不碰點數 + 幂等重放不重複副作用 ──────────────
+// ── 断言 5：席位／审批全路径不碰点数 + 幂等重放不重复副作用 ──────────────
 
-test("斷言⑤：席位閘（不得低於現有成員數／不得超硬上限）＋調整幂等", async () => {
+test("断言⑤：席位闸（不得低于现有成员数／不得超硬上限）＋调整幂等", async () => {
   await withEnv({ ...CONTROL_PLANE_ENV, TEAM_MIN_MEMBERS: undefined, TEAM_DEFAULT_MAX_MEMBERS: undefined, TEAM_MAX_MEMBERS: undefined }, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -709,11 +709,11 @@ test("斷言⑤：席位閘（不得低於現有成員數／不得超硬上限�
     assert.equal(cp.settings[0].seats, 5);
     const replay = await setTeamSeats({ teamUserId: 117, actorUserId: 117, seats: 5 }, deps(cp));
     assert.equal(replay.ok === true ? replay.unchanged : false, true, "同席位重放 = no-op");
-    assert.ok(!cp.queries.some((q) => /account_ledger|billing_operation|used_quota/.test(q)), "席位調整不得碰點數");
+    assert.ok(!cp.queries.some((q) => /account_ledger|billing_operation|used_quota/.test(q)), "席位调整不得碰点数");
   });
 });
 
-test("斷言⑤（禁影子帳本）：治理寫入路徑不呼叫任何上游額度調整、不寫任何點數帳本", async () => {
+test("断言⑤（禁影子帐本）：治理写入路径不呼叫任何上游额度调整、不写任何点数帐本", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [memberRow({ member_key_id: "key-a", member_user_id: 900, role: "member" })],
@@ -737,7 +737,7 @@ test("斷言⑤（禁影子帳本）：治理寫入路徑不呼叫任何上游�
     await updateTeamSettings({ teamUserId: 117, actorUserId: 117, memberCreateCanvas: true }, deps(cp));
     assert.ok(
       !cp.queries.some((q) => /account_ledger|billing_operation|used_quota/.test(q)),
-      "治理路徑不得寫任何點數帳本",
+      "治理路径不得写任何点数帐本",
     );
     const source = stripped("src/lib/generation-core/team-governance.ts");
     for (const forbidden of [
@@ -746,17 +746,17 @@ test("斷言⑤（禁影子帳本）：治理寫入路徑不呼叫任何上游�
       "recordTransfer(",
       "INSERT INTO account_ledger",
     ]) {
-      assert.ok(!source.includes(forbidden), `治理模組不得引用配額寫入通路：${forbidden}`);
+      assert.ok(!source.includes(forbidden), `治理模组不得引用配额写入通路：${forbidden}`);
     }
-    // 用量面只讀既有權威面，不新建統計帳本。
+    // 用量面只读既有权威面，不新建统计帐本。
     assert.match(source, /readTeamQuotaView\(/);
     assert.match(source, /readAccountLedger\(/);
   });
 });
 
-// ── 面 6：用量統計（可逐筆對帳、總額守恆） ──────────────────────────────
+// ── 面 6：用量统计（可逐笔对帐、总额守恒） ──────────────────────────────
 
-test("用量統計：團隊／成員維度讀既有權威面，逐筆明細來自 account_ledger，總額守恆", async () => {
+test("用量统计：团队／成员维度读既有权威面，逐笔明细来自 account_ledger，总额守恒", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [memberRow({ member_key_id: "key-a", member_user_id: 900, role: "admin" })],
@@ -812,17 +812,17 @@ test("用量統計：團隊／成員維度讀既有權威面，逐筆明細來�
       { sql: cp.sql, fetchUser, readLedger: async () => ledger },
     );
     assert.ok(usage);
-    // 總額守恆：主帳 700 + 成員桶 300 = 團隊未消耗 1000。
+    // 总额守恒：主帐 700 + 成员桶 300 = 团队未消耗 1000。
     assert.equal(usage.conservation.masterRemaining, 700);
     assert.equal(usage.conservation.membersRemaining, 300);
     assert.equal(usage.conservation.teamRemaining, 1000);
     assert.equal(usage.conservation.balanced, true);
     assert.equal(usage.conservation.consumed, 200);
-    assert.equal(usage.totals.granted, 500, "已分配 = 成員 granted");
+    assert.equal(usage.totals.granted, 500, "已分配 = 成员 granted");
     assert.equal(usage.totals.used, 200);
     assert.equal(usage.seats, 10);
     assert.equal(usage.memberCount, 1);
-    // 逐筆對帳：每筆有身份、類型、金額、來源位址。
+    // 逐笔对帐：每笔有身份、类型、金额、来源位址。
     assert.equal(usage.members[0].role, "admin");
     assert.equal(usage.members[0].records.length, 2);
     assert.deepEqual(
@@ -836,7 +836,7 @@ test("用量統計：團隊／成員維度讀既有權威面，逐筆明細來�
   });
 });
 
-test("用量統計按成員過濾；上游讀不到時回 null（不畫假數字）", async () => {
+test("用量统计按成员过滤；上游读不到时回 null（不画假数字）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({ members: [memberRow({ member_key_id: "key-a", member_user_id: 900 })] });
     const down = (async () => {
@@ -858,9 +858,9 @@ test("用量統計按成員過濾；上游讀不到時回 null（不畫假數字
   });
 });
 
-// ── 席位定義與 owner 計數輔助 ──────────────────────────────────────────
+// ── 席位定义与 owner 计数辅助 ──────────────────────────────────────────
 
-test("席位語義：seats 不小於現有成員數、不大於硬上限；owner 已擁有團隊數含自己的主帳團隊", async () => {
+test("席位语义：seats 不小于现有成员数、不大于硬上限；owner 已拥有团队数含自己的主帐团队", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const cp = fakeControlPlane({
       members: [
@@ -868,12 +868,12 @@ test("席位語義：seats 不小於現有成員數、不大於硬上限；owner
         memberRow({ team_user_id: 556, member_key_id: "key-y", member_user_id: 900, role: "member", created_at: 1 }),
       ],
     });
-    // 900 是 555 的 owner（1）+ 自己可建的主帳團隊（1）= 2。
+    // 900 是 555 的 owner（1）+ 自己可建的主帐团队（1）= 2。
     assert.equal(await countOwnedTeams(900, cp.sql), 2);
   });
 });
 
-test("映射層未配置（C 端）時全部降級：讀默認、寫 503、建畫布放行", async () => {
+test("映射层未配置（C 端）时全部降级：读默认、写 503、建画布放行", async () => {
   await withEnv({ GENERATION_DATABASE_URL: undefined, GENERATION_CONTROL_PLANE_ENABLED: undefined }, async () => {
     const settings = await readTeamSettings(117);
     assert.equal(settings.seats, 10);
@@ -884,9 +884,9 @@ test("映射層未配置（C 端）時全部降級：讀默認、寫 503、建�
   });
 });
 
-// ── 路由鑑權契約（source-scan，補足 runtime 面） ─────────────────────────
+// ── 路由鉴权契约（source-scan，补足 runtime 面） ─────────────────────────
 
-test("六條團隊路由都只認 Authorization 的 B 端密鑰，身份不來自請求體", () => {
+test("六条团队路由都只认 Authorization 的 B 端密钥，身份不来自请求体", () => {
   const routes = [
     "src/app/api/v1/team/members/route.ts",
     "src/app/api/v1/team/settings/route.ts",
@@ -897,18 +897,18 @@ test("六條團隊路由都只認 Authorization 的 B 端密鑰，身份不來�
   ];
   for (const route of routes) {
     const source = stripped(route);
-    assert.match(source, /readBearerToken\(req\.headers\.get\("authorization"\)\)/, `${route} 必須只認 Authorization`);
-    assert.match(source, /authenticateBizApiKey/, `${route} 必須走 B 端密鑰鑑權`);
-    assert.doesNotMatch(source, /x-user-id/, `${route} 不得信任 x-user-id 頭`);
-    assert.doesNotMatch(source, /payload\.user_id|body\.user_id/, `${route} 身份不得從 body 取`);
+    assert.match(source, /readBearerToken\(req\.headers\.get\("authorization"\)\)/, `${route} 必须只认 Authorization`);
+    assert.match(source, /authenticateBizApiKey/, `${route} 必须走 B 端密钥鉴权`);
+    assert.doesNotMatch(source, /x-user-id/, `${route} 不得信任 x-user-id 头`);
+    assert.doesNotMatch(source, /payload\.user_id|body\.user_id/, `${route} 身份不得从 body 取`);
   }
-  // 申請人身份只從密鑰派生（user_id + 這把 key），不從 body。
+  // 申请人身份只从密钥派生（user_id + 这把 key），不从 body。
   const joinSource = stripped("src/app/api/v1/team/join-requests/route.ts");
   assert.match(joinSource, /applicantUserId: auth\.key\.userId/);
   assert.match(joinSource, /applicantMemberKeyId: auth\.key\.id/);
 });
 
-test("migration 023 只存意圖不存點數：名冊/設定/申請三表皆無餘額欄位", () => {
+test("migration 023 只存意图不存点数：名册/设定/申请三表皆无余额栏位", () => {
   const source = stripped("db/migrations/023_team_governance.sql");
   assert.match(source, /ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'member'/);
   assert.match(source, /CREATE TABLE IF NOT EXISTS team_settings/);
@@ -916,6 +916,6 @@ test("migration 023 只存意圖不存點數：名冊/設定/申請三表皆無�
   assert.match(source, /CHECK \(status IN \('pending', 'approved', 'rejected', 'ignored'\)\)/);
   assert.match(source, /CHECK \(role IN \('owner', 'admin', 'member'\)\)/);
   for (const forbidden of [/remaining/i, /balance/i, /allocated_quota/i, /quota\s+integer/i]) {
-    assert.doesNotMatch(source, forbidden, "治理表不得存任何點數數字（禁影子帳本）");
+    assert.doesNotMatch(source, forbidden, "治理表不得存任何点数数字（禁影子帐本）");
   }
 });

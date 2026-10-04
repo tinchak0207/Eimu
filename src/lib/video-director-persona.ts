@@ -66,13 +66,13 @@ export const VIDEO_DIRECTOR_PERSONA_DESCRIPTION =
  *   报影片必须用对偶 video_quote，08-29 生产事故防呆，记忆
  *   video-quote-paired-tool-fix）。
  * - video_upload：L100 登记，视频素材上传。
- * - last_frame_video_chain：L151 登记，尾帧续生视频链（站點 /v1/videos/generations
+ * - last_frame_video_chain：L151 登记，尾帧续生视频链（站点 /v1/videos/generations
  *   计费链，seedance 实证）。
  * - image_quote：L76 登记，报价查询对偶（列图侧；域内只用于图片参考素材报价）。
  *
  * 2026-10-01 art-style 接线：新增「视觉资产生成/风格深研」六件（全在
  * harness-tool-registry HARNESS_TOOL_IDS，实现真源见该档 2026-08-31 片3/片6 段）：
- * image_generate（复用现成生图轮子，src/lib/agent-tool-contract.ts:182 → 站點
+ * image_generate（复用现成生图轮子，src/lib/agent-tool-contract.ts:182 → 站点
  * /v1/images/generations）、canvas_get_state / canvas_apply_ops（art_style 模板
  * 明列的回填画布工具）、style_dna_extract / style_aligned_batch /
  * asset_provenance_archive（风格深研三件）。此前这些 id 不属任何 Expert，被
@@ -102,7 +102,7 @@ export type VideoDirectorPersonaToolId = (typeof VIDEO_DIRECTOR_PERSONA_TOOL_IDS
  * blender-director,music-director,web-3d-awwwards,blender-agent-os} 逐一核对，
  * 无视频导演专属 SKILL.md（astra-ad-studio 仅种子包指引+SVG/HTML 交付链）。
  * 本档置空数组并声明：配方库落库（video-director/SKILL.md）后由收口片补挂，
- * 禁提前指幻影路径（记忆 subagent-spec-must-read-memory 幻影檔教训）。
+ * 禁提前指幻影路径（记忆 subagent-spec-must-read-memory 幻影档教训）。
  */
 export const VIDEO_DIRECTOR_PERSONA_SKILL_PATHS: readonly string[] = [];
 

@@ -1,19 +1,19 @@
-// PNG 工作流嵌入／提取（零依賴）。
+// PNG 工作流嵌入／提取（零依赖）。
 //
-// 格式：在整段合法 PNG（含 IEND chunk 與其 CRC）之後追加 trailing data：
-//   [JSON payload（UTF-8，該 JSON 即 workflow-recall 相容的工作流配置）]
-//   [magic：8 位元組 "WFSTUDIO"]
-//   [version：1 位元組，目前為 1]
-//   [payload 長度：4 位元組 unsigned big-endian]
+// 格式：在整段合法 PNG（含 IEND chunk 与其 CRC）之后追加 trailing data：
+//   [JSON payload（UTF-8，该 JSON 即 workflow-recall 相容的工作流配置）]
+//   [magic：8 位元组 "WFSTUDIO"]
+//   [version：1 位元组，目前为 1]
+//   [payload 长度：4 位元组 unsigned big-endian]
 //
-// 長度寫在尾端，提取時只需讀最後 13 個位元組就知道 payload 起點，
-// 不必整檔掃描；magic + PNG 簽名雙重校驗 + JSON 合法性校驗來擋壞檔誤判。
+// 长度写在尾端，提取时只需读最后 13 个位元组就知道 payload 起点，
+// 不必整档扫描；magic + PNG 签名双重校验 + JSON 合法性校验来挡坏档误判。
 //
-// 本檔**零依賴且可在瀏覽器端使用**（ReferenceImageUpload 等客戶端元件會
-// import extractWorkflowFromPng 讀取用戶拖進來的 PNG）。因此視覺渲染出口
-// （renderWorkflowDagPng，走 sharp 原生模組）刻意拆到 ./dag-png-server.ts：
-// 把 sharp 放進本檔會讓 webpack 把它拖進 browser bundle，build 直接失敗
-// （實錘：UnhandledSchemeError: Reading from "node:events" is not handled）。
+// 本档**零依赖且可在浏览器端使用**（ReferenceImageUpload 等客户端元件会
+// import extractWorkflowFromPng 读取用户拖进来的 PNG）。因此视觉渲染出口
+// （renderWorkflowDagPng，走 sharp 原生模组）刻意拆到 ./dag-png-server.ts：
+// 把 sharp 放进本档会让 webpack 把它拖进 browser bundle，build 直接失败
+// （实锤：UnhandledSchemeError: Reading from "node:events" is not handled）。
 
 
 export const WORKFLOW_PNG_MAGIC = "WFSTUDIO";
@@ -41,8 +41,8 @@ function hasPngSignature(png: Uint8Array): boolean {
 }
 
 /**
- * 把工作流 JSON 字串附加到合法 PNG 的檔尾（IEND 之後的 trailing data）。
- * 回傳一個新的 Uint8Array，原 PNG 位元組原封不動地作為前綴保留。
+ * 把工作流 JSON 字串附加到合法 PNG 的档尾（IEND 之后的 trailing data）。
+ * 回传一个新的 Uint8Array，原 PNG 位元组原封不动地作为前缀保留。
  */
 export function embedWorkflowIntoPng(png: Uint8Array, workflow: string): Uint8Array {
   const payload = new TextEncoder().encode(workflow);
@@ -61,8 +61,8 @@ export function embedWorkflowIntoPng(png: Uint8Array, workflow: string): Uint8Ar
 }
 
 /**
- * 從 PNG trailing data 提取工作流 JSON 字串。
- * 任何一個校驗不過（非 PNG、無 magic、版本不符、長度越界、payload 非合法 JSON）
+ * 从 PNG trailing data 提取工作流 JSON 字串。
+ * 任何一个校验不过（非 PNG、无 magic、版本不符、长度越界、payload 非合法 JSON）
  * 都回 null。
  */
 export function extractWorkflowFromPng(png: Uint8Array): string | null {

@@ -1,7 +1,7 @@
-// 席位 ↔ 配額分配（刀 3）真行為斷言測試：四條不變量逐字斷言。
+// 席位 ↔ 配额分配（刀 3）真行为断言测试：四条不变量逐字断言。
 //
-// 假件沿用 member-quota.test.ts 的形狀：假 new-api（users.quota 帳號桶）＋假控制面
-// SQL（team_member_quota / biz_api_key）。真行為 = 上游額度調整逐筆記錄。
+// 假件沿用 member-quota.test.ts 的形状：假 new-api（users.quota 帐号桶）＋假控制面
+// SQL（team_member_quota / biz_api_key）。真行为 = 上游额度调整逐笔记录。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -173,7 +173,7 @@ function mutexLock(handle: GenerationSql): TeamLock {
   };
 }
 
-/** 成員 A（user 900，key-a）已在團隊 117 名冊。 */
+/** 成员 A（user 900，key-a）已在团队 117 名册。 */
 function harness(options: { failAdjust?: (userId: number, delta: number) => boolean } = {}) {
   const cp = fakeControlPlane({
     keys: [{ id: "key-a", label: "成员A", user_id: 900 }],
@@ -197,9 +197,9 @@ function harness(options: { failAdjust?: (userId: number, delta: number) => bool
   };
 }
 
-// ── 不變量 ①：分配 = 轉移 ＋ 總額守恆 ──────────────────────────────────
+// ── 不变量 ①：分配 = 转移 ＋ 总额守恒 ──────────────────────────────────
 
-test("不變量①：席位数 × 每席位幣數 = 目標額度；主帳扣 Δ、成員加 Δ，全團隊總額守恆", async () => {
+test("不变量①：席位数 × 每席位币数 = 目标额度；主帐扣 Δ、成员加 Δ，全团队总额守恒", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     const before = api.quotaOf(117) + api.quotaOf(900);
@@ -219,18 +219,18 @@ test("不變量①：席位数 × 每席位幣數 = 目標額度；主帳扣 Δ�
     assert.equal(result.transferred, 200 * COIN);
     assert.equal(result.unchanged, false);
 
-    // 兩條腿逐筆對稱：只有 allocateMemberQuota 這一條通路在動上游額度。
+    // 两条腿逐笔对称：只有 allocateMemberQuota 这一条通路在动上游额度。
     assert.deepEqual(api.adjustments, [
       { userId: 117, delta: -200 * COIN },
       { userId: 900, delta: 200 * COIN },
     ]);
-    assert.equal(api.quotaOf(117), 800 * COIN, "主帳扣掉本次劃出");
-    assert.equal(api.quotaOf(900), 200 * COIN, "成員桶加上同額");
-    assert.equal(api.quotaOf(117) + api.quotaOf(900), before, "總額守恆：沒有印錢也沒有蒸發");
+    assert.equal(api.quotaOf(117), 800 * COIN, "主帐扣掉本次划出");
+    assert.equal(api.quotaOf(900), 200 * COIN, "成员桶加上同额");
+    assert.equal(api.quotaOf(117) + api.quotaOf(900), before, "总额守恒：没有印钱也没有蒸发");
   });
 });
 
-test("不變量①：成員消耗後分配仍守恆（主帳 + Σ成員桶 + Σ已用 = 常數）", async () => {
+test("不变量①：成员消耗后分配仍守恒（主帐 + Σ成员桶 + Σ已用 = 常数）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     const total = api.quotaOf(117);
@@ -240,7 +240,7 @@ test("不變量①：成員消耗後分配仍守恆（主帳 + Σ成員桶 + Σ�
       deps,
     );
     assert.equal(first.ok, true);
-    api.consume(900, 50 * COIN); // 成員用掉 50 币（內核扣費）
+    api.consume(900, 50 * COIN); // 成员用掉 50 币（内核扣费）
 
     const second = await applySeatAllocation(
       { teamUserId: 117, memberUserId: 900, seats: 3, perSeatCoins: 100 },
@@ -248,14 +248,14 @@ test("不變量①：成員消耗後分配仍守恆（主帳 + Σ成員桶 + Σ�
     );
     assert.equal(second.ok, true);
     if (!second.ok) return;
-    assert.equal(second.transferred, 100 * COIN, "從 200 币加到 300 币，只補 100 币差額");
+    assert.equal(second.transferred, 100 * COIN, "从 200 币加到 300 币，只补 100 币差额");
     assert.equal(api.quotaOf(117) + api.quotaOf(900) + 50 * COIN, total);
   });
 });
 
-// ── 不變量 ②：重放同請求不重複扣 ────────────────────────────────────────
+// ── 不变量 ②：重放同请求不重复扣 ────────────────────────────────────────
 
-test("不變量②：同請求重放是冪等 no-op（不再寫上游、不重複扣主帳）", async () => {
+test("不变量②：同请求重放是幂等 no-op（不再写上游、不重复扣主帐）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     const request = { teamUserId: 117, memberUserId: 900, seats: 4, perSeatCoins: 25 };
@@ -275,7 +275,7 @@ test("不變量②：同請求重放是冪等 no-op（不再寫上游、不重�
   });
 });
 
-test("不變量②：降低席位數 = 回收差額（同一操作的反向冪等）", async () => {
+test("不变量②：降低席位数 = 回收差额（同一操作的反向幂等）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     await applySeatAllocation({ teamUserId: 117, memberUserId: 900, seats: 5, perSeatCoins: 40 }, deps);
@@ -294,17 +294,17 @@ test("不變量②：降低席位數 = 回收差額（同一操作的反向冪�
   });
 });
 
-// ── 不變量 ③：目標不得低於已消耗 ────────────────────────────────────────
+// ── 不变量 ③：目标不得低于已消耗 ────────────────────────────────────────
 
-test("不變量③：席位目標低於該成員已消耗 → 409 target_below_used，且不動上游", async () => {
+test("不变量③：席位目标低于该成员已消耗 → 409 target_below_used，且不动上游", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
-    // 成員桶已有 300 币，其中已消耗 150 币。
+    // 成员桶已有 300 币，其中已消耗 150 币。
     await applySeatAllocation({ teamUserId: 117, memberUserId: 900, seats: 3, perSeatCoins: 100 }, deps);
     api.consume(900, 150 * COIN);
     const adjustmentsBefore = api.adjustments.length;
 
-    // 目標 = 1 席 × 100 币 = 100 币 < 已消耗 150 币。
+    // 目标 = 1 席 × 100 币 = 100 币 < 已消耗 150 币。
     const result = await applySeatAllocation(
       { teamUserId: 117, memberUserId: 900, seats: 1, perSeatCoins: 100 },
       deps,
@@ -318,7 +318,7 @@ test("不變量③：席位目標低於該成員已消耗 → 409 target_below_u
   });
 });
 
-test("不變量③：主帳手上餘額不足 → 402 insufficient_team_quota（不超賣）", async () => {
+test("不变量③：主帐手上余额不足 → 402 insufficient_team_quota（不超卖）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     const result = await applySeatAllocation(
@@ -333,9 +333,9 @@ test("不變量③：主帳手上餘額不足 → 402 insufficient_team_quota（
   });
 });
 
-// ── 不變量 ④：失敗回滾不留半邊 ──────────────────────────────────────────
+// ── 不变量 ④：失败回滚不留半边 ──────────────────────────────────────────
 
-test("不變量④：成員那條腿失敗即回滾 —— 主帳回到原值、成員桶為 0，不憑空印額度", async () => {
+test("不变量④：成员那条腿失败即回滚 —— 主帐回到原值、成员桶为 0，不凭空印额度", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness({ failAdjust: (userId, delta) => userId === 900 && delta > 0 });
 
@@ -347,18 +347,18 @@ test("不變量④：成員那條腿失敗即回滾 —— 主帳回到原值、
     assert.equal(result.ok, false);
     assert.equal(result.ok === false ? result.status : 0, 503);
     assert.equal(result.ok === false ? result.code : "", "member_quota_unavailable");
-    assert.equal(api.quotaOf(117), 1000 * COIN, "主帳必须被回滚到原值");
-    assert.equal(api.quotaOf(900), 0, "成员桶不得留下半邊");
+    assert.equal(api.quotaOf(117), 1000 * COIN, "主帐必须被回滚到原值");
+    assert.equal(api.quotaOf(900), 0, "成员桶不得留下半边");
     assert.deepEqual(api.adjustments, [
       { userId: 117, delta: -200 * COIN },
       { userId: 117, delta: 200 * COIN },
-    ], "先扣後加：第二條腿失敗 → 第一條腿被回滾");
+    ], "先扣后加：第二条腿失败 → 第一条腿被回滚");
   });
 });
 
-// ── 邊界與歸屬校驗 ──────────────────────────────────────────────────────
+// ── 边界与归属校验 ──────────────────────────────────────────────────────
 
-test("邊界：席位/每席位幣數/團隊非法各自被拒，且不動上游", async () => {
+test("边界：席位/每席位币数/团队非法各自被拒，且不动上游", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     const cases: { input: Parameters<typeof applySeatAllocation>[0]; status: number; code: string }[] = [
@@ -380,7 +380,7 @@ test("邊界：席位/每席位幣數/團隊非法各自被拒，且不動上游
   });
 });
 
-test("歸屬校驗：未入名冊的成員 → 404；歸屬別家團隊的成員 → 403，皆不動上游", async () => {
+test("归属校验：未入名册的成员 → 404；归属别家团队的成员 → 403，皆不动上游", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const { api, deps } = harness();
     const unknown = await applySeatAllocation(
@@ -400,7 +400,7 @@ test("歸屬校驗：未入名冊的成員 → 404；歸屬別家團隊的成員
   });
 });
 
-test("唯一通路：控制面未配置時 fail-closed（503），不落任何本地點數", async () => {
+test("唯一通路：控制面未配置时 fail-closed（503），不落任何本地点数", async () => {
   await withEnv(
     { GENERATION_DATABASE_URL: undefined, GENERATION_CONTROL_PLANE_ENABLED: undefined },
     async () => {

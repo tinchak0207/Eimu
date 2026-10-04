@@ -1,14 +1,14 @@
-// GET /api/agent/sessions/[id]/memory-trace —— 注入觀測點代理（契約 §3.6，R2 尺依賴）。
+// GET /api/agent/sessions/[id]/memory-trace —— 注入观测点代理（契约 §3.6，R2 尺依赖）。
 //
-// 【路徑決策】採「現成輪子逐行複用」，不建最小代理：repo→gateway 的 server-side
-// fetch 先例已在同目錄存在——`[id]/transcript/route.ts` 與 `[id]/memory/route.ts`
-// 都用 `src/lib/agent-gateway.ts` 的 `callAgentGateway`（Bearer 換服務端 sk-biz- key、
-// 10s 硬超時、JSON/文本透傳）＋ `resolveAgentCaller`（既有 agent key 認證）。
-// 本檔結構逐行複製自 transcript/route.ts，白名單只改一件事：上游路徑
-// `/agent/v1/sessions/${id}/memory-trace`（transcript 的 ?limit 透傳不屬於
-// memory-trace 契約欄位，隨路徑一併移除）。
+// 【路径决策】采「现成轮子逐行复用」，不建最小代理：repo→gateway 的 server-side
+// fetch 先例已在同目录存在——`[id]/transcript/route.ts` 与 `[id]/memory/route.ts`
+// 都用 `src/lib/agent-gateway.ts` 的 `callAgentGateway`（Bearer 换服务端 sk-biz- key、
+// 10s 硬超时、JSON/文本透传）＋ `resolveAgentCaller`（既有 agent key 认证）。
+// 本档结构逐行复制自 transcript/route.ts，白名单只改一件事：上游路径
+// `/agent/v1/sessions/${id}/memory-trace`（transcript 的 ?limit 透传不属于
+// memory-trace 契约栏位，随路径一并移除）。
 //
-// 真源是 gateway（它才知道本回合注入了哪些 doc id）：這裡不做本地組裝，原樣透傳。
+// 真源是 gateway（它才知道本回合注入了哪些 doc id）：这里不做本地组装，原样透传。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -16,7 +16,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 

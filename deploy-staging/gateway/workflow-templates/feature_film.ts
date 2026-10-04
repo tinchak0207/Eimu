@@ -3,7 +3,7 @@ import type { WorkflowTemplate } from "./types";
 export const featureFilmTemplate: WorkflowTemplate = 
   // ── 大片（工业级多镜头）──
   // feature_film 无前端 payload——tools/notes 照 novel_film 密度自写（配方级：
-  // 具体数值/工具技術名/可验证判据），每节 2-3 条，节点只动 tools/notes 白名单。
+  // 具体数值/工具技术名/可验证判据），每节 2-3 条，节点只动 tools/notes 白名单。
   {
     id: "feature_film",
     name: "大片",
@@ -118,11 +118,11 @@ export const featureFilmTemplate: WorkflowTemplate =
           "转场预埋 J/L-cut：声音先入或延后 0.5-1s，剪辑阶段直接按标记执行；单镜 3-8 秒为宜，超长拆段拼接",
         ],
       },
-      // R8（2026-09-10 暴君裁定）：shot1_gen 不再寫死 model=minimax-h3 / duration=5s——
-      // 該模型當前不可用且 5s≠agent 計劃時長，寫死 = 每個大片任務都被逼手動
-      // update_node。model 留空由 workflow-service.start 動態選可用視頻模型
-      //（/v1/model-status 判活）回填；duration_seconds 留空由 content 裡該鏡
-      // shot JSON 的 output.duration_seconds 對齊回填（傳 10s 就 10s，別回 5s）。
+      // R8（2026-09-10 暴君裁定）：shot1_gen 不再写死 model=minimax-h3 / duration=5s——
+      // 该模型当前不可用且 5s≠agent 计划时长，写死 = 每个大片任务都被逼手动
+      // update_node。model 留空由 workflow-service.start 动态选可用视频模型
+      //（/v1/model-status 判活）回填；duration_seconds 留空由 content 里该镜
+      // shot JSON 的 output.duration_seconds 对齐回填（传 10s 就 10s，别回 5s）。
       {
         role: "shot1_gen",
         kind: "config",

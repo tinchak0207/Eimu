@@ -61,11 +61,11 @@ test("lesson digest endpoint extracts lessons silently and fails closed", () => 
 
 test("frontend lesson-digest chain is offline (PRD D5): hook never calls /profile/lessons", () => {
   const hook = read("src/hooks/use-agent-chat.ts");
-  // 同步提炼链已下线（由每日批次取代）：前端不得再引用端點或殘留節流常量。
+  // 同步提炼链已下线（由每日批次取代）：前端不得再引用端点或残留节流常量。
   assert.doesNotMatch(hook, /fireAndForgetLessonDigest|LESSON_DIGEST|\/api\/agent\/profile\/lessons/);
-  // turn.done 的殭屍自愈時間錨點保留，刪提煉鏈不得誤傷。
+  // turn.done 的僵尸自愈时间锚点保留，删提炼链不得误伤。
   assert.match(hook, /evt\.name === "turn\.done"/);
   assert.match(hook, /lastTurnDoneAtRef\.current = Date\.now\(\);/);
-  // 端點本身保留（B 端與向後兼容），只斷前端觸發鏈路。
+  // 端点本身保留（B 端与向后兼容），只断前端触发链路。
   assert.match(read("src/app/api/agent/profile/lessons/route.ts"), /export async function POST/);
 });

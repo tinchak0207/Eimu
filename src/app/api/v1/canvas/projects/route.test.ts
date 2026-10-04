@@ -1,11 +1,11 @@
-// B 端 API key 的「列出本账号畫布项目」端點（GET /api/v1/canvas/projects）真行為測試。
+// B 端 API key 的「列出本账号画布项目」端点（GET /api/v1/canvas/projects）真行为测试。
 //
-// 驗的是「route 真的只回本 key 帳號的專案」而不是「route 存在」：
-//   · 未帶 key → 401（正負對照：帶 key 才進下一關）。
-//   · A 的 key 看不到 B 的專案（owner 隔離）——證人＝落盤後再用 B 的 key 讀回比對。
-//   · 正常路徑：回摘要欄位（id/title/createdAt/updatedAt/nodeCount），不回節點內容。
+// 验的是「route 真的只回本 key 帐号的专案」而不是「route 存在」：
+//   · 未带 key → 401（正负对照：带 key 才进下一关）。
+//   · A 的 key 看不到 B 的专案（owner 隔离）——证人＝落盘后再用 B 的 key 读回比对。
+//   · 正常路径：回摘要栏位（id/title/createdAt/updatedAt/nodeCount），不回节点内容。
 
-process.env.NODE_ENV = "test"; // 無物件儲存後端時允許記憶體降級（blob-backend 的既有契約）
+process.env.NODE_ENV = "test"; // 无物件储存后端时允许记忆体降级（blob-backend 的既有契约）
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -65,13 +65,13 @@ test.after(() => {
   __resetCanvasStoreForTests();
 });
 
-test("未帶 key：401，不回任何專案", async () => {
+test("未带 key：401，不回任何专案", async () => {
   const res = await GET(req());
   assert.equal(res.status, 401);
   assert.equal(((await res.json()) as { code?: string }).code, "missing_api_key");
 });
 
-test("owner 隔離：A 的 key 只看到自己的專案，看不到 B 的（結構性、無 leak）", async () => {
+test("owner 隔离：A 的 key 只看到自己的专案，看不到 B 的（结构性、无 leak）", async () => {
   await saveCanvasProject(USER_A, project("proj-a", "A 的画布", 3));
   await saveCanvasProject(USER_B, project("proj-b", "B 的画布", 5));
 
@@ -85,14 +85,14 @@ test("owner 隔離：A 的 key 只看到自己的專案，看不到 B 的（結�
   assert.equal(bodyA.success, true);
   assert.equal(bodyA.count, 1);
   assert.deepEqual(bodyA.projects.map((p) => p.id), ["proj-a"]);
-  // 摘要欄位齊全且不洩漏節點內容。
+  // 摘要栏位齐全且不泄漏节点内容。
   const summary = bodyA.projects[0];
   assert.equal(summary.title, "A 的画布");
   assert.equal(summary.nodeCount, 3);
   assert.equal(typeof summary.createdAt, "string");
   assert.equal(typeof summary.updatedAt, "string");
-  assert.equal("nodes" in summary, false, "摘要不得回節點內容");
-  assert.equal(JSON.stringify(bodyA).includes("B 的画布"), false, "A 的回包不得出現 B 的專案");
+  assert.equal("nodes" in summary, false, "摘要不得回节点内容");
+  assert.equal(JSON.stringify(bodyA).includes("B 的画布"), false, "A 的回包不得出现 B 的专案");
 
   const resB = await GET(req({ authorization: `Bearer ${KEY_B}` }));
   const bodyB = (await resB.json()) as { projects: Array<{ id: string }> };

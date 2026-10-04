@@ -31,7 +31,7 @@ const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  // 子頁只寫自己的標題，品牌尾巴由 template 統一補上；首頁用 absolute 取全名。
+  // 子页只写自己的标题，品牌尾巴由 template 统一补上；首页用 absolute 取全名。
   title: { default: SITE_TITLE, template: "%s | Eimu" },
   description: SITE_DESCRIPTION,
   keywords: [
@@ -72,9 +72,9 @@ export const metadata: Metadata = {
 };
 
 /**
- * 站點實體圖（2026-09-27 SEO 重構）：Organization＋WebSite＋SoftwareApplication
- * 用 @id 互相引用。Google 靠 Organization/WebSite 認出「Eimu 這個品牌＝eimu.dev」，
- * 否則品牌詞會和同名的個人作品集、Easy IMU 硬體混在一起。
+ * 站点实体图（2026-09-27 SEO 重构）：Organization＋WebSite＋SoftwareApplication
+ * 用 @id 互相引用。Google 靠 Organization/WebSite 认出「Eimu 这个品牌＝eimu.dev」，
+ * 否则品牌词会和同名的个人作品集、Easy IMU 硬体混在一起。
  */
 function getStructuredData() {
   const orgId = `${SITE_URL}/#organization`;
@@ -118,7 +118,7 @@ function getStructuredData() {
   return { "@context": "https://schema.org", "@graph": [organization, website, app] };
 }
 
-/** Next 15 將 viewport 欄位從 metadata 拆出獨立 export（含 themeColor）。 */
+/** Next 15 将 viewport 栏位从 metadata 拆出独立 export（含 themeColor）。 */
 export const viewport = {
   width: "device-width" as const,
   initialScale: 1,
@@ -137,24 +137,24 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased text-[0.9375rem] text-foreground flex min-h-dvh flex-col">
-        {/* 面板寬 pre-paint 同步套用（2026-09-24 暴君回報「Ctrl+Shift+R 聊天框
-            先佔幾乎半屏、秒縮回 30% 以下」）：用戶真拖過寬的 v2 存值必須在首個
-            paint 前落到 --ws-panel-w，否則冷載入＝首幀畫 CSS 默認 clamp（40vw
-            半屏），JS chunk 下載完水合後才縮回存值寬——useLayoutEffect 救不了，
-            它對「服務端 HTML 的首幀」而言已經太晚。next/script 的
-            beforeInteractive 同樣太晚：實裝是把內聯腳本 push 進 self.__next_s，
-            由 app-bootstrap（main-app chunk 執行時）才跑，與水合同期、在 paint
-            之後。唯一首幀前路徑＝HTML 解析期同步執行的內聯 <script>（與下方
-            boot 錯誤捕獲腳本同机制），放在 <body> 頂端、任何工作站標記之前。
-            校驗與 use-chat-panel.parseStoredPanelWidth 逐字同範圍（320–720
-            整數，v2 key；舊 key 垃圾值一律不認）。 */}
+        {/* 面板宽 pre-paint 同步套用（2026-09-24 暴君回报「Ctrl+Shift+R 聊天框
+            先占几乎半屏、秒缩回 30% 以下」）：用户真拖过宽的 v2 存值必须在首个
+            paint 前落到 --ws-panel-w，否则冷载入＝首帧画 CSS 默认 clamp（40vw
+            半屏），JS chunk 下载完水合后才缩回存值宽——useLayoutEffect 救不了，
+            它对「服务端 HTML 的首帧」而言已经太晚。next/script 的
+            beforeInteractive 同样太晚：实装是把内联脚本 push 进 self.__next_s，
+            由 app-bootstrap（main-app chunk 执行时）才跑，与水合同期、在 paint
+            之后。唯一首帧前路径＝HTML 解析期同步执行的内联 <script>（与下方
+            boot 错误捕获脚本同机制），放在 <body> 顶端、任何工作站标记之前。
+            校验与 use-chat-panel.parseStoredPanelWidth 逐字同范围（320–720
+            整数，v2 key；旧 key 垃圾值一律不认）。 */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var w=Number(localStorage.getItem("canvas-chat-panel-width.v2"));if(Number.isInteger(w)&&w>=320&&w<=720){document.documentElement.style.setProperty("--ws-panel-w",w+"px");}}catch(_){}})();`,
           }}
         />
-        {/* 啟動自愈：水合沒發生＝清 SW／快取後刷新一次。2026-10-01 收緊觸發：6 秒未水合且已有啟動錯誤才動手，
-            沒有錯誤就等到 15 秒——慢機／慢網水合本來就久，不能把「慢」誤判成「壞」、反手清空快取再重載（只會更慢）。 */}
+        {/* 启动自愈：水合没发生＝清 SW／快取后刷新一次。2026-10-01 收紧触发：6 秒未水合且已有启动错误才动手，
+            没有错误就等到 15 秒——慢机／慢网水合本来就久，不能把「慢」误判成「坏」、反手清空快取再重载（只会更慢）。 */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){
@@ -193,16 +193,16 @@ setTimeout(function(){heal(false)},6000);
         <AuthProvider>
           <PricingSync />
           <Navbar />
-          {/* 首頁應用式滿屏（2026-09-10 F6）：body 是 flex 縱向殼（Navbar 自然高
-              ＋ main 吃滿剩餘視口）。min-h-dvh 而非 h-dvh——視口過矮時 body 可
-              長高、整頁滾動。其他頁面是文檔流根節點，作為 flex item 只是全寬
-              自然高，行為等價 block。Toaster/PwaInstaller/Analytics 渲染 fixed
-              或 null，不參與 flex 佈局。 */}
+          {/* 首页应用式满屏（2026-09-10 F6）：body 是 flex 纵向壳（Navbar 自然高
+              ＋ main 吃满剩余视口）。min-h-dvh 而非 h-dvh——视口过矮时 body 可
+              长高、整页滚动。其他页面是文档流根节点，作为 flex item 只是全宽
+              自然高，行为等价 block。Toaster/PwaInstaller/Analytics 渲染 fixed
+              或 null，不参与 flex 布局。 */}
           <main className="flex min-h-0 flex-1 flex-col">{children}</main>
           <Toaster />
           <PwaInstaller />
-          {/* 首次觸達歸因採集（utm/referrer host/落地路徑 → eimu_first_touch cookie，90 天，
-              首觸不覆蓋）。渲染 null，不參與佈局。 */}
+          {/* 首次触达归因采集（utm/referrer host/落地路径 → eimu_first_touch cookie，90 天，
+              首触不覆盖）。渲染 null，不参与布局。 */}
           <AttributionCapture />
         </AuthProvider>
         <Analytics />

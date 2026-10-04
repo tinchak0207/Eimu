@@ -38,7 +38,7 @@ function resolveModelFromWorkflow(workflow: any, nodeId: string): string | null 
 
 export default tool({
   description:
-    "Update workflow node parameters (prompt, model, size, shot_size, camera_move, locked, etc). Marks the node and its downstream as stale.\n\npatch.content=平台素材URL（image/video/audio/film 節點）→ 節點直接標記成功、下游消費此內容，不觸發重新生成。",
+    "Update workflow node parameters (prompt, model, size, shot_size, camera_move, locked, etc). Marks the node and its downstream as stale.\n\npatch.content=平台素材URL（image/video/audio/film 节点）→ 节点直接标记成功、下游消费此内容，不触发重新生成。",
   args: {
     workflow_id: tool.schema.string().describe("workflow id from workflow_start"),
     node_id: tool.schema.string().describe("node id to update"),
@@ -48,8 +48,8 @@ export default tool({
       size: tool.schema.string().optional().describe("image size"),
       count: tool.schema.number().optional().describe("image count"),
       duration_seconds: tool.schema.number().min(10).optional().describe("video duration (seconds, >= 10s per §4b maximization rule)"),
-      shot_size: tool.schema.string().optional().describe("景別：特寫/近景/中景/全景/遠景"),
-      camera_move: tool.schema.string().optional().describe("運鏡：固定/推進/拉遠/搖鏡/跟拍"),
+      shot_size: tool.schema.string().optional().describe("景别：特写/近景/中景/全景/远景"),
+      camera_move: tool.schema.string().optional().describe("运镜：固定/推进/拉远/摇镜/跟拍"),
       locked: tool.schema.boolean().optional().describe("lock node result"),
       description: tool.schema.string().optional().describe("character/scene card description"),
       key_features: tool.schema.string().optional().describe("character/scene key features"),
@@ -69,8 +69,8 @@ export default tool({
         typeof err.message === "string" && err.message ? err.message : "update failed",
       );
     }
-    // 2026-08-30：更新成功後調 status 取回該節點，把真實解析模型（節點自身
-    // metadata.model 優先）一起回顯。status 拉取失敗只置 null，不阻塞。
+    // 2026-08-30：更新成功后调 status 取回该节点，把真实解析模型（节点自身
+    // metadata.model 优先）一起回显。status 拉取失败只置 null，不阻塞。
     let resolvedModel: string | null = null;
     try {
       const stRes = await fetch(
@@ -89,7 +89,7 @@ export default tool({
     } catch {
       resolvedModel = null; // 回显辅助，不阻塞
     }
-    // H12：精簡回執（原回整個 node + 全部 affected id ≈ 930 字噪音）。失敗路徑上方原樣回報。
+    // H12：精简回执（原回整个 node + 全部 affected id ≈ 930 字噪音）。失败路径上方原样回报。
     return ok(buildUpdateReceipt({ data, nodeId: node_id, patch: patch as Record<string, unknown>, resolvedModel }));
   },
 });

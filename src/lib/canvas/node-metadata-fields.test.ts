@@ -1,12 +1,12 @@
-// 節點 metadata 白名單通道契約（2026-09-25）。
+// 节点 metadata 白名单通道契约（2026-09-25）。
 //
-// 病灶（已實錘事故）：metadata 有**兩個獨立白名單清洗入口**——還原端 `layout.toNodeMetadata`
-// 與上行端 `compactMetadataForAgent`——鍵集合各自手工維護。漏在其中一處放行一個鍵，
-// 症狀是「功能當下完全沒反應」而不是報錯（`emitsEntity` 實錘：一進前端就被剝，
-// 整條自動落卡不可能觸發）。
+// 病灶（已实锤事故）：metadata 有**两个独立白名单清洗入口**——还原端 `layout.toNodeMetadata`
+// 与上行端 `compactMetadataForAgent`——键集合各自手工维护。漏在其中一处放行一个键，
+// 症状是「功能当下完全没反应」而不是报错（`emitsEntity` 实锤：一进前端就被剥，
+// 整条自动落卡不可能触发）。
 //
-// 本檔的斷言全部是**真實行為斷言**（真 `compactMetadataForAgent` → 真 `toNodeMetadata`
-// 往復、真值比對），不靠源碼字串。真源＝`./node-metadata-fields`。
+// 本档的断言全部是**真实行为断言**（真 `compactMetadataForAgent` → 真 `toNodeMetadata`
+// 往复、真值比对），不靠源码字串。真源＝`./node-metadata-fields`。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -26,9 +26,9 @@ import { toNodeMetadata } from "./layout";
 import { compactMetadataForAgent } from "@/hooks/canvas/canvas-chat-types";
 import type { CanvasNodeMetadata } from "./types";
 
-// ─────────────────────────────────────────── 樣本（每個耐久鍵一份）
+// ─────────────────────────────────────────── 样本（每个耐久键一份）
 
-/** AID 21 欄全形樣本（存活斷言只要求 shotNumber 有值、其餘逐欄字串）。 */
+/** AID 21 栏全形样本（存活断言只要求 shotNumber 有值、其余逐栏字串）。 */
 const SHOT = {
   shotNumber: "001",
   scriptContent: "正文",
@@ -53,7 +53,7 @@ const SHOT = {
   soundEffect: "",
 };
 
-/** 3D 場景卡六欄全形樣本。 */
+/** 3D 场景卡六栏全形样本。 */
 const SCENE_CARD = {
   turntable_url: "https://cdn.example.com/turntable.mp4",
   stills_urls: ["https://cdn.example.com/still.png"],
@@ -64,8 +64,8 @@ const SCENE_CARD = {
 };
 
 /**
- * 每個耐久鍵的樣本 metadata（**整包**輸入，含分族所需的同伴鍵）。
- * 值一律取「清洗後仍等於原值」的形，存活斷言才能用 deepEqual 直接比。
+ * 每个耐久键的样本 metadata（**整包**输入，含分族所需的同伴键）。
+ * 值一律取「清洗后仍等于原值」的形，存活断言才能用 deepEqual 直接比。
  */
 const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   content: { content: "正文" },
@@ -103,13 +103,13 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   cameraViewSvg: { cameraViewSvg: "<svg/>" },
   revision: { pipelineCard: "director", revision: 3 },
   sceneCard: { sceneCard: SCENE_CARD },
-  // P1-1（2026-09-29）兩鍵漏補樣本：本檔的契約是「新增耐久鍵必須同時補樣本」，
-  // 缺樣本＝該鍵永遠不被這條往復斷言覆蓋（守門件靜默失明）。
+  // P1-1（2026-09-29）两键漏补样本：本档的契约是「新增耐久键必须同时补样本」，
+  // 缺样本＝该键永远不被这条往复断言覆盖（守门件静默失明）。
   directorStageId: { directorStageId: "stage-1" },
   shotId: { shotId: "001" },
   storyboardShot: { storyboardShot: SHOT },
-  // 2026-09-30 單鏡旁白文本＋對白／旁白雙音軌（介面凍結四鍵；audioAnchorId 是相容錨，
-  // 其生產者規則＝dialogueAudioId || narrationAudioId，樣本取單軌形故值取對白軌）。
+  // 2026-09-30 单镜旁白文本＋对白／旁白双音轨（介面冻结四键；audioAnchorId 是相容锚，
+  // 其生产者规则＝dialogueAudioId || narrationAudioId，样本取单轨形故值取对白轨）。
   narration: { narration: "她推开门，雨声灌进走廊。" },
   dialogueAudioId: { dialogueAudioId: "https://cdn.example.com/line-007.mp3" },
   narrationAudioId: { narrationAudioId: "https://cdn.example.com/vo-007.mp3" },
@@ -126,7 +126,7 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   fontSize: { fontSize: 22 },
   gateConfirm: { gateConfirm: { request_id: "req-1", session_id: "sess-1", status: "pending" } },
   approval: { approval: { status: "approved" } },
-  // 2026-09-29 P1-2：集歸屬 ＋ 分鏡候選集（樣本一律取「清洗後仍等於原值」的形）。
+  // 2026-09-29 P1-2：集归属 ＋ 分镜候选集（样本一律取「清洗后仍等于原值」的形）。
   episodeId: { episodeId: "ep-1" },
   shotCandidates: {
     shotCandidates: {
@@ -143,8 +143,8 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
       selectedId: "c2",
     },
   },
-  // 2026-09-29 P1-9：任務版本史＋標籤＋星標選中（樣本取「清洗後仍等於原值」的形：
-  // version 已正規化成 ISO 8601 UTC、時序升序、selectedVersion 是成員、tags 在值域內）。
+  // 2026-09-29 P1-9：任务版本史＋标签＋星标选中（样本取「清洗后仍等于原值」的形：
+  // version 已正规化成 ISO 8601 UTC、时序升序、selectedVersion 是成员、tags 在值域内）。
   taskVersions: {
     taskVersions: {
       items: [
@@ -164,14 +164,14 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
 
 const hasOwn = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
 
-/** 真往復：真上行壓縮 → 真還原端清洗。 */
+/** 真往复：真上行压缩 → 真还原端清洗。 */
 function roundTrip(metadata: Record<string, unknown>): Record<string, unknown> {
   return toNodeMetadata(compactMetadataForAgent(metadata as unknown as CanvasNodeMetadata)) as Record<string, unknown>;
 }
 
-// ─────────────────────────────────────────── ① 往復合同（本檔的主斷言）
+// ─────────────────────────────────────────── ① 往复合同（本档的主断言）
 
-test("契約：每個耐久鍵經 toNodeMetadata(compactMetadataForAgent(m)) 後存活，或必須在顯式排除清單且帶理由", () => {
+test("契约：每个耐久键经 toNodeMetadata(compactMetadataForAgent(m)) 后存活，或必须在显式排除清单且带理由", () => {
   const exclusionByKey = new Map(AGENT_EXCLUDED_METADATA_FIELDS.map((e) => [e.key, e]));
   const problems: string[] = [];
   const survived: string[] = [];
@@ -179,129 +179,129 @@ test("契約：每個耐久鍵經 toNodeMetadata(compactMetadataForAgent(m)) 後
   for (const field of DURABLE_METADATA_FIELDS) {
     const sample = SAMPLE_METADATA_BY_KEY[field.key];
     if (!sample) {
-      problems.push(`${field.key}：真源有鍵但測試無樣本（新增耐久鍵必須同時補樣本）`);
+      problems.push(`${field.key}：真源有键但测试无样本（新增耐久键必须同时补样本）`);
       continue;
     }
     const restored = roundTrip(sample);
     const exclusion = exclusionByKey.get(field.key);
     if (hasOwn(restored, field.key)) {
       survived.push(field.key);
-      if (exclusion) problems.push(`${field.key}：排除清單謊報（實際存活）`);
+      if (exclusion) problems.push(`${field.key}：排除清单谎报（实际存活）`);
       try {
         assert.deepEqual(restored[field.key], sample[field.key]);
       } catch {
-        problems.push(`${field.key}：存活但值不等（清洗語義漂移）：${JSON.stringify(restored[field.key])}`);
+        problems.push(`${field.key}：存活但值不等（清洗语义漂移）：${JSON.stringify(restored[field.key])}`);
       }
     } else if (!exclusion) {
-      problems.push(`${field.key}：未存活且未列入顯式排除清單（雙白名單漏一端＝功能靜默消失）`);
+      problems.push(`${field.key}：未存活且未列入显式排除清单（双白名单漏一端＝功能静默消失）`);
     } else if (exclusion.reason.trim().length < 8) {
-      problems.push(`${field.key}：排除清單條目沒有可讀的理由`);
+      problems.push(`${field.key}：排除清单条目没有可读的理由`);
     }
   }
 
-  assert.deepEqual(problems, [], `metadata 白名單通道契約破口：\n${problems.join("\n")}`);
+  assert.deepEqual(problems, [], `metadata 白名单通道契约破口：\n${problems.join("\n")}`);
 
-  // 未存活集合必須逐字等於排除清單（不多不少）：防「把鍵全塞進排除清單」洗白。
+  // 未存活集合必须逐字等于排除清单（不多不少）：防「把键全塞进排除清单」洗白。
   const notSurvived = DURABLE_METADATA_FIELDS.map((f) => f.key).filter((k) => !survived.includes(k));
   assert.deepEqual(
     [...notSurvived].sort(),
     [...AGENT_EXCLUDED_METADATA_FIELD_KEYS].sort(),
-    "未存活的耐久鍵集合與顯式排除清單必須逐字一致",
+    "未存活的耐久键集合与显式排除清单必须逐字一致",
   );
 });
 
-test("排除清單：每條都有可讀理由＋證據＋機器可讀分類，且只登記耐久鍵", () => {
+test("排除清单：每条都有可读理由＋证据＋机器可读分类，且只登记耐久键", () => {
   const durableKeys = new Set(DURABLE_METADATA_FIELD_KEYS);
   const verdicts: readonly AgentExclusionVerdict[] = ["intentional", "suspected-gap", "dormant"];
   const problems: string[] = [];
   for (const exclusion of AGENT_EXCLUDED_METADATA_FIELDS) {
-    if (!durableKeys.has(exclusion.key)) problems.push(`${exclusion.key}：不是耐久鍵（幽靈排除條目）`);
-    if (exclusion.reason.trim().length < 8) problems.push(`${exclusion.key}：理由太短/為空`);
-    if (!exclusion.evidence.trim()) problems.push(`${exclusion.key}：沒有證據欄（無法覆核）`);
-    if (!verdicts.includes(exclusion.verdict)) problems.push(`${exclusion.key}：分類 ${exclusion.verdict} 不在值域`);
+    if (!durableKeys.has(exclusion.key)) problems.push(`${exclusion.key}：不是耐久键（幽灵排除条目）`);
+    if (exclusion.reason.trim().length < 8) problems.push(`${exclusion.key}：理由太短/为空`);
+    if (!exclusion.evidence.trim()) problems.push(`${exclusion.key}：没有证据栏（无法覆核）`);
+    if (!verdicts.includes(exclusion.verdict)) problems.push(`${exclusion.key}：分类 ${exclusion.verdict} 不在值域`);
   }
   assert.deepEqual(problems, [], problems.join("\n"));
-  // 本清單的分類分布（供報告引用；不作為通過條件，只保證非空）
+  // 本清单的分类分布（供报告引用；不作为通过条件，只保证非空）
   assert.ok(AGENT_EXCLUDED_METADATA_FIELDS.length > 0);
 });
 
-// ─────────────────────────────────────────── ② 缺鍵可檢測（注入案例，不改源碼）
+// ─────────────────────────────────────────── ② 缺键可检测（注入案例，不改源码）
 
-test("缺鍵可檢測：真源新增一個耐久鍵、B 未透傳且未排除 → 契約檢查器必須報 gap", () => {
+test("缺键可检测：真源新增一个耐久键、B 未透传且未排除 → 契约检查器必须报 gap", () => {
   const injectedKey = "brandNewDurableField";
   const injected: readonly DurableFieldSpec[] = [
     ...DURABLE_METADATA_FIELDS,
-    { key: injectedKey, cleaner: "string", note: "注入案例（模擬真源新增鍵）" },
+    { key: injectedKey, cleaner: "string", note: "注入案例（模拟真源新增键）" },
   ];
 
-  // ① 還原端是清單驅動的：注入清單後它真的放行該鍵（不是靠本檔的鍵清單）
+  // ① 还原端是清单驱动的：注入清单后它真的放行该键（不是靠本档的键清单）
   const aOnly = toNodeMetadata({ [injectedKey]: "v" }, injected) as Record<string, unknown>;
-  assert.equal(aOnly[injectedKey], "v", "還原端由真源清單導出：注入後放行");
+  assert.equal(aOnly[injectedKey], "v", "还原端由真源清单导出：注入后放行");
 
-  // ② 上行端（未改源碼）不透傳 → 往復真的丟失（破口是行為事實，不只是清單差集）
+  // ② 上行端（未改源码）不透传 → 往复真的丢失（破口是行为事实，不只是清单差集）
   const lost = toNodeMetadata(compactMetadataForAgent({ [injectedKey]: "v" } as unknown as CanvasNodeMetadata), injected);
-  assert.equal(hasOwn(lost, injectedKey), false, "上行端未同步 → 往復後該鍵真的消失");
+  assert.equal(hasOwn(lost, injectedKey), false, "上行端未同步 → 往复后该键真的消失");
 
-  // ③ 檢查器必須把這個案例判成 gap（＝契約測試會紅）
+  // ③ 检查器必须把这个案例判成 gap（＝契约测试会红）
   const gaps = findAgentChannelGaps(injected, AGENT_METADATA_FIELD_KEYS, AGENT_EXCLUDED_METADATA_FIELDS);
   assert.deepEqual(
     gaps.map((g) => g.key),
     [injectedKey],
-    "新增耐久鍵未同步時，檢查器必須報出該鍵（否則契約測試是死的）",
+    "新增耐久键未同步时，检查器必须报出该键（否则契约测试是死的）",
   );
 
-  // ④ 補進透傳清單（模擬正確同步）→ 歸零
+  // ④ 补进透传清单（模拟正确同步）→ 归零
   assert.deepEqual(findAgentChannelGaps(injected, [...AGENT_METADATA_FIELD_KEYS, injectedKey], AGENT_EXCLUDED_METADATA_FIELDS), []);
-  // ⑤ 或列入排除清單（帶理由）→ 歸零
+  // ⑤ 或列入排除清单（带理由）→ 归零
   assert.deepEqual(
     findAgentChannelGaps(injected, AGENT_METADATA_FIELD_KEYS, [
       ...AGENT_EXCLUDED_METADATA_FIELDS,
-      { key: injectedKey, reason: "刻意排除的理由", verdict: "intentional", evidence: "測試" },
+      { key: injectedKey, reason: "刻意排除的理由", verdict: "intentional", evidence: "测试" },
     ]),
     [],
   );
-  // ⑥ 排除但沒理由 → 仍算破口（不許靜默排除）
+  // ⑥ 排除但没理由 → 仍算破口（不许静默排除）
   const emptyReason = findAgentChannelGaps(injected, AGENT_METADATA_FIELD_KEYS, [
     ...AGENT_EXCLUDED_METADATA_FIELDS,
-    { key: injectedKey, reason: "   ", verdict: "intentional", evidence: "測試" },
+    { key: injectedKey, reason: "   ", verdict: "intentional", evidence: "测试" },
   ]);
   assert.deepEqual(emptyReason.map((g) => g.key), [injectedKey]);
 });
 
-test("真源清單自身無破口：真清單餵檢查器零 gap、零幽靈排除", () => {
+test("真源清单自身无破口：真清单喂检查器零 gap、零幽灵排除", () => {
   assert.deepEqual(
     findAgentChannelGaps(DURABLE_METADATA_FIELDS, AGENT_METADATA_FIELD_KEYS, AGENT_EXCLUDED_METADATA_FIELDS),
     [],
-    "A 放行的鍵必須全部『被 B 透傳』或『在排除清單且有理由』",
+    "A 放行的键必须全部『被 B 透传』或『在排除清单且有理由』",
   );
   assert.deepEqual(
     findStaleAgentExclusions(DURABLE_METADATA_FIELDS, AGENT_METADATA_FIELD_KEYS, AGENT_EXCLUDED_METADATA_FIELDS),
     [],
-    "排除清單不得含『其實已透傳』或『非耐久鍵』的條目",
+    "排除清单不得含『其实已透传』或『非耐久键』的条目",
   );
 });
 
-test("單向守門：B 透傳的每個鍵都必須是 A 的耐久鍵（B ⊄ A 也會造成往復丟失）", () => {
+test("单向守门：B 透传的每个键都必须是 A 的耐久键（B ⊄ A 也会造成往复丢失）", () => {
   const durable = new Set(DURABLE_METADATA_FIELD_KEYS);
   const orphan = AGENT_METADATA_FIELD_KEYS.filter((k) => !durable.has(k));
-  assert.deepEqual(orphan, [], `上行端透傳了還原端不放行的鍵（還原時必被剝）：${orphan.join(", ")}`);
+  assert.deepEqual(orphan, [], `上行端透传了还原端不放行的键（还原时必被剥）：${orphan.join(", ")}`);
 });
 
-// ─────────────────────────────────────────── ③ 真源清單 ↔ 實作的行為對齊
+// ─────────────────────────────────────────── ③ 真源清单 ↔ 实作的行为对齐
 
-test("A 端輸出鍵集＝真源耐久鍵清單（順序亦同）：未註冊清洗器的鍵會缺，此處即紅", () => {
-  // 全鍵樣本（pipelineCard 的分族只影響 B；A 逐鍵獨立放行）
+test("A 端输出键集＝真源耐久键清单（顺序亦同）：未注册清洗器的键会缺，此处即红", () => {
+  // 全键样本（pipelineCard 的分族只影响 B；A 逐键独立放行）
   const fullSink: Record<string, unknown> = {};
   for (const field of DURABLE_METADATA_FIELDS) Object.assign(fullSink, SAMPLE_METADATA_BY_KEY[field.key]);
   fullSink.pipelineCard = "tool";
   assert.deepEqual(
     Object.keys(toNodeMetadata(fullSink)),
     [...DURABLE_METADATA_FIELD_KEYS],
-    "真源清單與 toNodeMetadata 實際放行鍵（含鍵序）必須逐字一致",
+    "真源清单与 toNodeMetadata 实际放行键（含键序）必须逐字一致",
   );
 });
 
-test("B 端輸出鍵集＝真源透傳鍵清單（工具卡族／導演台族各一次，含分族條件）", () => {
+test("B 端输出键集＝真源透传键清单（工具卡族／导演台族各一次，含分族条件）", () => {
   const nonFamily = AGENT_METADATA_FIELDS.filter((f) => !f.requires);
   const base: Record<string, unknown> = {};
   for (const field of nonFamily) Object.assign(base, SAMPLE_METADATA_BY_KEY[field.key]);
@@ -314,48 +314,48 @@ test("B 端輸出鍵集＝真源透傳鍵清單（工具卡族／導演台族各
 
   assert.deepEqual(Object.keys(compactMetadataForAgent(toolSink as unknown as CanvasNodeMetadata) ?? {}), expectedTool);
   assert.deepEqual(Object.keys(compactMetadataForAgent(directorSink as unknown as CanvasNodeMetadata) ?? {}), expectedDirector);
-  // 兩族聯集＝完整透傳鍵清單（沒有哪個鍵兩族都到不了）
+  // 两族联集＝完整透传键清单（没有哪个键两族都到不了）
   assert.deepEqual([...new Set([...expectedTool, ...expectedDirector])].sort(), [...AGENT_METADATA_FIELD_KEYS].sort());
 });
 
-// ─────────────────────────────────────────── ④ 截斷預算（宣告 ↔ 行為）
+// ─────────────────────────────────────────── ④ 截断预算（宣告 ↔ 行为）
 
-test("截斷預算：宣告的門檻/保留字數與實作行為逐項一致（content 240→120、prompt 120）", () => {
+test("截断预算：宣告的门槛/保留字数与实作行为逐项一致（content 240→120、prompt 120）", () => {
   const budgetedKeys = AGENT_METADATA_FIELDS.filter((f) => f.transform === "content" || f.transform === "prompt").map((f) => f.key);
   assert.deepEqual(
     AGENT_TRUNCATION_BUDGETS.map((b) => b.key).sort(),
     [...budgetedKeys].sort(),
-    "每個帶截斷的鍵都必須有預算宣告（沒有宣告＝漂移點）",
+    "每个带截断的键都必须有预算宣告（没有宣告＝漂移点）",
   );
 
   const contentBudget = AGENT_TRUNCATION_BUDGETS.find((b) => b.key === "content");
   assert.ok(contentBudget && contentBudget.triggerAt !== null);
   const atLimit = "字".repeat(contentBudget.triggerAt);
   const overLimit = "字".repeat(contentBudget.triggerAt + 1);
-  assert.equal(compactMetadataForAgent({ content: atLimit })?.content, atLimit, "門檻內原樣不截");
+  assert.equal(compactMetadataForAgent({ content: atLimit })?.content, atLimit, "门槛内原样不截");
   const truncated = compactMetadataForAgent({ content: overLimit })?.content as string;
-  assert.equal(truncated, `${"字".repeat(contentBudget.keepChars)}…`, "超門檻＝保留字數＋省略號");
+  assert.equal(truncated, `${"字".repeat(contentBudget.keepChars)}…`, "超门槛＝保留字数＋省略号");
   assert.equal(truncated.length, contentBudget.keepChars + 1);
 
   const promptBudget = AGENT_TRUNCATION_BUDGETS.find((b) => b.key === "prompt");
   assert.ok(promptBudget && promptBudget.triggerAt === null);
   const longPrompt = "字".repeat(promptBudget.keepChars + 50);
-  assert.equal(compactMetadataForAgent({ prompt: longPrompt })?.prompt, "字".repeat(promptBudget.keepChars), "prompt 無條件截到保留字數");
+  assert.equal(compactMetadataForAgent({ prompt: longPrompt })?.prompt, "字".repeat(promptBudget.keepChars), "prompt 无条件截到保留字数");
 });
 
-test("分鏡欄族走 storyboard-contract 的壓縮（真值穿透：長欄被截但仍存活）", () => {
+test("分镜栏族走 storyboard-contract 的压缩（真值穿透：长栏被截但仍存活）", () => {
   const spec = AGENT_METADATA_FIELDS.find((f) => f.key === "storyboardShot");
   assert.ok(spec);
-  assert.equal(spec.transform, "storyboardShot", "分鏡欄族的壓縮下放在 storyboard-contract（欄位清單只准一份）");
+  assert.equal(spec.transform, "storyboardShot", "分镜栏族的压缩下放在 storyboard-contract（栏位清单只准一份）");
   const long = "字".repeat(12000);
   const restored = roundTrip({ storyboardShot: { ...SHOT, scriptContent: long } });
   const shot = restored.storyboardShot as Record<string, unknown> | undefined;
-  assert.ok(shot, "分鏡整族必須存活（漏一端＝刷新後空殼）");
+  assert.ok(shot, "分镜整族必须存活（漏一端＝刷新后空壳）");
   assert.equal(shot.shotNumber, "001");
-  assert.ok(typeof shot.scriptContent === "string" && (shot.scriptContent as string).length < long.length, "長欄真的被壓縮");
+  assert.ok(typeof shot.scriptContent === "string" && (shot.scriptContent as string).length < long.length, "长栏真的被压缩");
 });
 
-test("單鏡旁白＋雙音軌四鍵：真往復存活（漏一端＝刷新後音軌與錨消失，門禁 audio_anchor_present/dialogue_alignment 卡死）", () => {
+test("单镜旁白＋双音轨四键：真往复存活（漏一端＝刷新后音轨与锚消失，门禁 audio_anchor_present/dialogue_alignment 卡死）", () => {
   const restored = roundTrip({
     narration: "她推开门，雨声灌进走廊。",
     dialogueAudioId: "https://cdn.example.com/line-007.mp3",
@@ -368,13 +368,13 @@ test("單鏡旁白＋雙音軌四鍵：真往復存活（漏一端＝刷新後�
   assert.equal(restored.audioAnchorId, "https://cdn.example.com/line-007.mp3");
 });
 
-// ─────────────────────────────────────────── ⑤ 反向：排除清單不能吃掉活鍵
+// ─────────────────────────────────────────── ⑤ 反向：排除清单不能吃掉活键
 
-test("注入一個『已透傳卻被列進排除』的條目 → 檢查器報幽靈（防排除清單洗白）", () => {
+test("注入一个『已透传却被列进排除』的条目 → 检查器报幽灵（防排除清单洗白）", () => {
   const stale = findStaleAgentExclusions(DURABLE_METADATA_FIELDS, AGENT_METADATA_FIELD_KEYS, [
     ...AGENT_EXCLUDED_METADATA_FIELDS,
-    { key: "content", reason: "故意謊報：content 其實有透傳", verdict: "intentional", evidence: "測試" },
-    { key: "phantomField", reason: "根本不是耐久鍵", verdict: "intentional", evidence: "測試" },
+    { key: "content", reason: "故意谎报：content 其实有透传", verdict: "intentional", evidence: "测试" },
+    { key: "phantomField", reason: "根本不是耐久键", verdict: "intentional", evidence: "测试" },
   ]);
   assert.deepEqual(stale.map((e) => e.key), ["content", "phantomField"]);
 });

@@ -4,9 +4,9 @@ import { gatewayDispatchOps } from "../lib/canvas-flow"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
-// workflow_rollback — 人機共筆的回滾面：把某節點的內容還原到指定版本（省略 version = 上一版）。
-// 語義復用畫布 reducer 的 revert_node：只還原 title+metadata，座標/尺寸不動；回退本身也落一版
-// （reason="revert"），因此回退可再被回退（append-only，不覆蓋歷史）。
+// workflow_rollback — 人机共笔的回滚面：把某节点的内容还原到指定版本（省略 version = 上一版）。
+// 语义复用画布 reducer 的 revert_node：只还原 title+metadata，座标/尺寸不动；回退本身也落一版
+// （reason="revert"），因此回退可再被回退（append-only，不覆盖历史）。
 export default tool({
   description:
     "把某个节点的内容回滚到指定版本（版本史见 workflow_history / canvas_get_state 的 workflow_versions）。\n\n" +

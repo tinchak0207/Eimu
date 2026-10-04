@@ -88,12 +88,12 @@ function jsonResponse(status: number, payload: unknown): Response {
   });
 }
 
-test("isMetasoModel 只認 minimax-h3", () => {
+test("isMetasoModel 只认 minimax-h3", () => {
   assert.equal(isMetasoModel(MINIMAX_H3_MODEL_ID), true);
   assert.equal(isMetasoModel("gpt-image-2"), false);
 });
 
-test("D-3（2026-09-23）：上游真 400 被改寫成 502，原生硬停仍必須擋住重放（adapter → native → registry 全鏈）", async () => {
+test("D-3（2026-09-23）：上游真 400 被改写成 502，原生硬停仍必须挡住重放（adapter → native → registry 全链）", async () => {
   const originalFetch = globalThis.fetch;
   try {
     process.env.METASO_API_KEY = "mk-test-key";
@@ -105,18 +105,18 @@ test("D-3（2026-09-23）：上游真 400 被改寫成 502，原生硬停仍必�
     } catch (error) {
       thrown = error;
     }
-    assert.ok(thrown instanceof SupplierRequestError, "上游 400 必須拋 SupplierRequestError");
-    // 產品側狀態照舊改寫成 502（供應商側失敗 → 隔離/冷卻語義不動，本刀不改判）。
+    assert.ok(thrown instanceof SupplierRequestError, "上游 400 必须抛 SupplierRequestError");
+    // 产品侧状态照旧改写成 502（供应商侧失败 → 隔离/冷却语义不动，本刀不改判）。
     assert.equal((thrown as SupplierRequestError).status, 502);
-    // 原生記錄必須是上游真實狀態：否則確定性 400 會被硬停看成 502，重放到預算上限。
+    // 原生记录必须是上游真实状态：否则确定性 400 会被硬停看成 502，重放到预算上限。
     const record = createFailureRecord({ error: thrown });
-    assert.equal(record.native.status, 400, "native.status 必須是上游真實狀態，不是被改寫的 502");
+    assert.equal(record.native.status, 400, "native.status 必须是上游真实状态，不是被改写的 502");
     const replay = planGenerationAttemptReplay({ kind: "video_generate", lastAttemptNo: 0, nativeFailure: record.native });
-    assert.equal(replay.allowed, false, "確定性 400 不得被重放（D-3 修復前：allowed=true，會燒滿預算）");
+    assert.equal(replay.allowed, false, "确定性 400 不得被重放（D-3 修复前：allowed=true，会烧满预算）");
     assert.equal(replay.denialReason, "native_hard_stop");
     assert.equal(replay.hardStop?.status, 400);
 
-    // 對照組：暫時性 503（同樣被改寫成 502）仍必須可換道重放——硬停不得把暫時性一起擋掉。
+    // 对照组：暂时性 503（同样被改写成 502）仍必须可换道重放——硬停不得把暂时性一起挡掉。
     globalThis.fetch = (async () => jsonResponse(503, { error: { message: "temporarily unavailable" } })) as typeof fetch;
     let transient: unknown = null;
     try {
@@ -129,9 +129,9 @@ test("D-3（2026-09-23）：上游真 400 被改寫成 502，原生硬停仍必�
       lastAttemptNo: 0,
       nativeFailure: createFailureRecord({ error: transient }).native,
     });
-    assert.equal(transientReplay.allowed, true, "503 是暫時性，仍可換道重放");
+    assert.equal(transientReplay.allowed, true, "503 是暂时性，仍可换道重放");
 
-    // 同一類洗白（HTML 錯誤頁）：非 JSON 回應原本連狀態都丟成 502，真 400 一樣要擋。
+    // 同一类洗白（HTML 错误页）：非 JSON 回应原本连状态都丢成 502，真 400 一样要挡。
     globalThis.fetch = (async () => new Response("<html>400 Bad Request</html>", {
       status: 400,
       headers: { "Content-Type": "text/html" },
@@ -143,7 +143,7 @@ test("D-3（2026-09-23）：上游真 400 被改寫成 502，原生硬停仍必�
       htmlError = error;
     }
     const htmlNative = createFailureRecord({ error: htmlError }).native;
-    assert.equal(htmlNative.status, 400, "HTML 錯誤頁也要保留上游真實狀態");
+    assert.equal(htmlNative.status, 400, "HTML 错误页也要保留上游真实状态");
     assert.equal(
       planGenerationAttemptReplay({ kind: "video_generate", lastAttemptNo: 0, nativeFailure: htmlNative }).denialReason,
       "native_hard_stop",
@@ -154,7 +154,7 @@ test("D-3（2026-09-23）：上游真 400 被改寫成 502，原生硬停仍必�
   }
 });
 
-test("成功：create → 輪詢 queued/running → succeeded 出 URL", async () => {
+test("成功：create → 轮询 queued/running → succeeded 出 URL", async () => {
   const calls: Array<{ method: string; url: string }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -189,7 +189,7 @@ test("成功：create → 輪詢 queued/running → succeeded 出 URL", async ()
   }
 });
 
-test("create body 映射：resolution 720p→768P、duration、ratio、無參考圖", async () => {
+test("create body 映射：resolution 720p→768P、duration、ratio、无参考图", async () => {
   let captured: unknown = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -215,7 +215,7 @@ test("create body 映射：resolution 720p→768P、duration、ratio、無參考
   }
 });
 
-test("失敗：任務 failed 拋 SupplierRequestError 帶上游錯誤碼", async () => {
+test("失败：任务 failed 抛 SupplierRequestError 带上游错误码", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, _init?: RequestInit) => {
     if (String(url).endsWith("/v2/video_generation")) {
@@ -236,7 +236,7 @@ test("失敗：任務 failed 拋 SupplierRequestError 帶上游錯誤碼", async
   }
 });
 
-test("上游 429 透傳為 429", async () => {
+test("上游 429 透传为 429", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => jsonResponse(429, { error: { message: "rate limited" } })) as typeof fetch;
   try {
@@ -251,7 +251,7 @@ test("上游 429 透傳為 429", async () => {
   }
 });
 
-test("輸入校驗：duration 超出 4-15 直接 400", async () => {
+test("输入校验：duration 超出 4-15 直接 400", async () => {
   process.env.METASO_API_KEY = "mk-test-key";
   try {
     await assert.rejects(

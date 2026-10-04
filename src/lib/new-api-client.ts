@@ -103,8 +103,8 @@ export function clearStoredToken(): void {
 
 export function getStoredUser(): NewApiUser | null {
   if (typeof window === "undefined") return null;
-  // cookie 與 localStorage 都可能是歷史事故的殘留壞值：逐個候選解析，
-  // 第一個成功的自愈回寫兩層存儲（覆蓋損壞殘留），解析全敗才放棄。
+  // cookie 与 localStorage 都可能是历史事故的残留坏值：逐个候选解析，
+  // 第一个成功的自愈回写两层存储（覆盖损坏残留），解析全败才放弃。
   const candidates: string[] = [];
   const cookie = getCookieValue(USER_KEY);
   if (cookie) candidates.push(cookie);
@@ -119,7 +119,7 @@ export function getStoredUser(): NewApiUser | null {
         return user;
       }
     } catch {
-      // 壞候選，試下一個。
+      // 坏候选，试下一个。
     }
   }
   return null;
@@ -293,7 +293,7 @@ export async function fetchUserModels(
 }
 
 /** Fetch user's referral code */
-/** GET /api/user/invite：我方自簽邀請連結（取代 new-api aff 碼——OAuth 註冊從不帶 aff，舊碼從未生效）。 */
+/** GET /api/user/invite：我方自签邀请连结（取代 new-api aff 码——OAuth 注册从不带 aff，旧码从未生效）。 */
 export async function fetchInviteLink(
   token: string,
 ): Promise<{ success: boolean; data?: { code: string; url: string }; message?: string }> {

@@ -1,6 +1,6 @@
-# 基礎設施排障 Runbook
+# 基础设施排障 Runbook
 
-> AGENTS.md 的按需附件：排障/部署/VPS 操作時才讀，平時不載入。本檔只進排障筆記；行為規則歸 AGENTS.md，歷史歸檔歸 memory。
+> AGENTS.md 的按需附件：排障/部署/VPS 操作时才读，平时不载入。本档只进排障笔记；行为规则归 AGENTS.md，历史归档归 memory。
 
 ## VPS 访问（2026-08-21 起主用 SSH-over-443）
 
@@ -56,23 +56,23 @@
 - **验证**：`route.test.ts` 12/12 通过 + tsc 无错 + `vercel --prod` 部署
 - **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；DELETE 幂等化只吞 not_found。**（2026-09-28 更新）session 已持久化到 `/opt/agent-harness/agent-gateway.db`（`persistence.ts`），`getOwnedSession` 内存 miss 时 `hydrateFromDb`，网关重启不再让 session 404；上面「内存 Map、重启全丢」只是 08-20 当时的事实**
 
-## agent 模型註冊表：加/換底層模型 SOP（2026-08-29 治本）
+## agent 模型注册表：加/换底层模型 SOP（2026-08-29 治本）
 
-**唯一真源 = `/opt/agent-harness/agent-models.json`**（VPS）。加/換 agent 聊天模型 = 改這一個檔 + 跑兩條命令，禁止再手改 `opencode.json` 的 provider 或 gateway 硬編碼（那些現在是生成產物/回退默認）。
+**唯一真源 = `/opt/agent-harness/agent-models.json`**（VPS）。加/换 agent 聊天模型 = 改这一个档 + 跑两条命令，禁止再手改 `opencode.json` 的 provider 或 gateway 硬编码（那些现在是生成产物/回退默认）。
 
-- **檔案職責**：`agent-models.json`（providers + bindings: default/small_model/persona/fallbacks）；`/opt/agent-harness/gateway/gen-opencode.ts`（registry → 生成 `workspace/.opencode/opencode.json` 的 provider/model/small_model 三鍵，**deny 表等其餘鍵原樣保留**；`--check` 驗漂移）；`/opt/agent-harness/verify-models.ts`（逐模型實彈 ping 出全表）；gateway `personaModel()` 讀 registry（缺檔回退內聯默認，行為=08-29 遷移前）+ 抖動重試 attempt≥2 按 `bindings.fallbacks[persona]` 換模型（鏈取 `chain[(attempt-1) % len]`）
-- **加模型 5 分鐘配方**：
+- **档案职责**：`agent-models.json`（providers + bindings: default/small_model/persona/fallbacks）；`/opt/agent-harness/gateway/gen-opencode.ts`（registry → 生成 `workspace/.opencode/opencode.json` 的 provider/model/small_model 三键，**deny 表等其余键原样保留**；`--check` 验漂移）；`/opt/agent-harness/verify-models.ts`（逐模型实弹 ping 出全表）；gateway `personaModel()` 读 registry（缺档回退内联默认，行为=08-29 迁移前）+ 抖动重试 attempt≥2 按 `bindings.fallbacks[persona]` 换模型（链取 `chain[(attempt-1) % len]`）
+- **加模型 5 分钟配方**：
   ```bash
   SSHBIN=/var/lib/flatpak/runtime/org.freedesktop.Platform/x86_64/25.08/bd44a6230581917d04f89812a4c21090c304d390edb73995af1c2f9fd8abf4e8/files/bin/ssh
   $SSHBIN -i /home/lenovo/.ssh/new.pem -p 22443 ubuntu@43.172.85.76
-  # ① agent-models.json 的 providers 加一段（npm=@ai-sdk/openai-compatible + baseURL + apiKey + models；模型級選項如 reasoningEffort 寫在該 model 的 options，**opencode 1.18 variants 不透傳 options 的坑仍在**）
+  # ① agent-models.json 的 providers 加一段（npm=@ai-sdk/openai-compatible + baseURL + apiKey + models；模型级选项如 reasoningEffort 写在该 model 的 options，**opencode 1.18 variants 不透传 options 的坑仍在**）
   # ② bindings.persona / fallbacks 指到 "provider/model"
-  cd /opt/agent-harness && ~/.bun/bin/bun verify-models.ts        # ③ 實彈驗證新模型活著
+  cd /opt/agent-harness && ~/.bun/bin/bun verify-models.ts        # ③ 实弹验证新模型活著
   ~/.bun/bin/bun gen-opencode.ts                                   # ④ 生成 opencode.json
   sudo -n systemctl restart opencode-server agent-gateway          # ⑤ 生效
   ```
-- **failover 語義**：turn 零正文抖動重試時，attempt 2 起換 fallback 鏈上的模型（跨 provider，防「主/備同源全死」復發）；registry 異常 = 鏈只剩主模型（行為退回現狀，不會更壞）。N1 redrive 路徑始終用主模型。
-- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。**特別提醒：必須同時重啟 `opencode-server` 與 `agent-gateway` 雙服務（步驟 ⑤）**——若只重啟 opencode-server，gateway 的 `/event` SSE 連線會死鎖/懸掛長達 4 分鐘（直到底層 fetch 逾時前收不到任何 delta 幀），導致前端完全看不到思考與正文、誤判「過程被隱藏/卡在正在思考」、watchdog 誤判零文本引發重複重發。**（2026-09-28 根因與修復）**懸掛是 `opencode-client.ts` 的 `/event` fetch 沒有看門狗、要等 Bun 預設逾時（journal 實錘 5 分鐘）；已加 30s 無位元組即 abort 重連（opencode 每 ~10s 發 `server.heartbeat`）。該修復部署到 VPS 後，只重啟 opencode-server 最多 ~32s 盲窗，雙服務綁定重啟不再必要。
+- **failover 语义**：turn 零正文抖动重试时，attempt 2 起换 fallback 链上的模型（跨 provider，防「主/备同源全死」复发）；registry 异常 = 链只剩主模型（行为退回现状，不会更坏）。N1 redrive 路径始终用主模型。
+- **坑位**：改 registry 后 `gen-opencode.ts --check` 有漂移属正常（你刚改的），生成后重启即收敛；opencode.json 手改会被下次生成冲掉——deny 表调整要改 gen-opencode.ts 的保留逻辑之外那份现档（生成器不碰 permission 键，手改 permission 安全）。**特别提醒：必须同时重启 `opencode-server` 与 `agent-gateway` 双服务（步骤 ⑤）**——若只重启 opencode-server，gateway 的 `/event` SSE 连线会死锁/悬挂长达 4 分钟（直到底层 fetch 逾时前收不到任何 delta 帧），导致前端完全看不到思考与正文、误判「过程被隐藏/卡在正在思考」、watchdog 误判零文本引发重复重发。**（2026-09-28 根因与修复）**悬挂是 `opencode-client.ts` 的 `/event` fetch 没有看门狗、要等 Bun 预设逾时（journal 实锤 5 分钟）；已加 30s 无位元组即 abort 重连（opencode 每 ~10s 发 `server.heartbeat`）。该修复部署到 VPS 后，只重启 opencode-server 最多 ~32s 盲窗，双服务绑定重启不再必要。
 
 ## Adobe2API 定向排障附加规则
 

@@ -1,8 +1,8 @@
-// 語義節點（prompt / reference）純邏輯測試：
-//   - 連線接線語義：prompt 前綴注入、reference 圖+角色自動帶入
-//   - 去重合併（手動 @引用優先，連線自動帶入其次）
-//   - 節點創建預設（CANVAS_NODE_DEFAULT_SIZE 新型別條目）
-//   - 向後兼容：舊數據（無新欄位/未知角色）載入不炸、未知 type 退 text
+// 语义节点（prompt / reference）纯逻辑测试：
+//   - 连线接线语义：prompt 前缀注入、reference 图+角色自动带入
+//   - 去重合并（手动 @引用优先，连线自动带入其次）
+//   - 节点创建预设（CANVAS_NODE_DEFAULT_SIZE 新型别条目）
+//   - 向后兼容：旧数据（无新栏位/未知角色）载入不炸、未知 type 退 text
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CanvasNodeType, CANVAS_NODE_DEFAULT_SIZE } from "./types";
@@ -24,10 +24,10 @@ function conn(id: string, from: string, to: string): CanvasConnection {
   return { id, fromNodeId: from, toNodeId: to };
 }
 
-test("resolveGenerationInputs：連入的 prompt 節點文本成為前綴來源", () => {
+test("resolveGenerationInputs：连入的 prompt 节点文本成为前缀来源", () => {
   const nodes = [
     node("p1", CanvasNodeType.Prompt, { content: "电影感光效，35mm 胶片" }),
-    node("p2", CanvasNodeType.Prompt, { content: "  " }), // 空文本 → 跳過
+    node("p2", CanvasNodeType.Prompt, { content: "  " }), // 空文本 → 跳过
     node("p3", CanvasNodeType.Prompt, { content: "低饱和青橙调" }),
     node("t1", CanvasNodeType.Text, { content: "普通文本不注入" }),
     node("gen", CanvasNodeType.Image, {}),
@@ -38,12 +38,12 @@ test("resolveGenerationInputs：連入的 prompt 節點文本成為前綴來源"
   assert.equal(references.length, 0);
 });
 
-test("resolveGenerationInputs：連入的 reference 節點帶圖+角色；image/text 節點不自動帶入", () => {
+test("resolveGenerationInputs：连入的 reference 节点带图+角色；image/text 节点不自动带入", () => {
   const nodes = [
     node("r1", CanvasNodeType.Reference, { content: "https://img.example/char.png", referenceRole: "character" }),
-    node("r2", CanvasNodeType.Reference, { content: "https://img.example/style.png" }), // 未設角色 → general
+    node("r2", CanvasNodeType.Reference, { content: "https://img.example/style.png" }), // 未设角色 → general
     node("r3", CanvasNodeType.Reference, { content: "https://img.example/x.png", referenceRole: "bogus" }), // 非法角色 → general
-    node("r4", CanvasNodeType.Reference, { content: "" }), // 無圖 → 跳過
+    node("r4", CanvasNodeType.Reference, { content: "" }), // 无图 → 跳过
     node("i1", CanvasNodeType.Image, { content: "https://img.example/plain.png" }),
     node("gen", CanvasNodeType.Image, {}),
   ];
@@ -59,10 +59,10 @@ test("resolveGenerationInputs：連入的 reference 節點帶圖+角色；image/
   assert.deepEqual(references[0], { nodeId: "r1", url: "https://img.example/char.png", role: "character", name: "r1" });
   assert.equal(references[1].role, "general");
   assert.equal(references[2].role, "general");
-  assert.ok(!references.some((r) => r.url.includes("plain")), "普通 image 節點不應自動帶入");
+  assert.ok(!references.some((r) => r.url.includes("plain")), "普通 image 节点不应自动带入");
 });
 
-test("resolveGenerationInputs：data:image URL 亦可用；無入邊時空結果", () => {
+test("resolveGenerationInputs：data:image URL 亦可用；无入边时空结果", () => {
   const nodes = [
     node("r1", CanvasNodeType.Reference, { content: "data:image/png;base64,AAAA", referenceRole: "style" }),
     node("gen", CanvasNodeType.Image, {}),
@@ -75,31 +75,31 @@ test("resolveGenerationInputs：data:image URL 亦可用；無入邊時空結果
   assert.deepEqual(empty, { promptParts: [], references: [] });
 });
 
-test("composeGenerationPrompt：前綴在前正文在後；無前綴時原文返回", () => {
+test("composeGenerationPrompt：前缀在前正文在后；无前缀时原文返回", () => {
   assert.equal(composeGenerationPrompt([], "一只柴犬"), "一只柴犬");
   assert.equal(composeGenerationPrompt(["胶片质感"], "一只柴犬"), "胶片质感\n一只柴犬");
   assert.equal(composeGenerationPrompt(["A", "B"], "  一只柴犬  "), "A\nB\n一只柴犬");
-  assert.equal(composeGenerationPrompt(["只有前綴"], ""), "只有前綴");
-  assert.equal(composeGenerationPrompt(["  "], "正文"), "正文"); // 空白前綴視為無
+  assert.equal(composeGenerationPrompt(["只有前缀"], ""), "只有前缀");
+  assert.equal(composeGenerationPrompt(["  "], "正文"), "正文"); // 空白前缀视为无
 });
 
-test("mergeGenerationReferences：手動引用優先，nodeId / url 去重", () => {
+test("mergeGenerationReferences：手动引用优先，nodeId / url 去重", () => {
   const manual: CanvasGenerationReference[] = [
     { nodeId: "r1", url: "https://a.png", role: "character", name: "手动" },
     { nodeId: "i1", url: "https://b.png", role: "general", name: "普通图" },
   ];
   const wired: CanvasGenerationReference[] = [
-    { nodeId: "r1", url: "https://a.png", role: "character", name: "连线" }, // nodeId 撞 → 丟
+    { nodeId: "r1", url: "https://a.png", role: "character", name: "连线" }, // nodeId 撞 → 丢
     { nodeId: "r2", url: "https://c.png", role: "style", name: "风格" }, // 保留
-    { url: "https://b.png", role: "general", name: "同 URL" }, // 無 nodeId 但 url 撞 → 丟
+    { url: "https://b.png", role: "general", name: "同 URL" }, // 无 nodeId 但 url 撞 → 丢
   ];
   const merged = mergeGenerationReferences(manual, wired);
   assert.equal(merged.length, 3);
-  assert.equal(merged[0].name, "手动"); // 手動在前（顯式意圖優先）
+  assert.equal(merged[0].name, "手动"); // 手动在前（显式意图优先）
   assert.equal(merged[2].role, "style");
 });
 
-test("referenceImageUrlOf：image / reference 節點取圖；其他型別與非法 URL 為 null", () => {
+test("referenceImageUrlOf：image / reference 节点取图；其他型别与非法 URL 为 null", () => {
   assert.equal(referenceImageUrlOf(node("i", CanvasNodeType.Image, { content: "https://x.png" })), "https://x.png");
   assert.equal(referenceImageUrlOf(node("r", CanvasNodeType.Reference, { content: "data:image/png;base64,AA" })), "data:image/png;base64,AA");
   assert.equal(referenceImageUrlOf(node("t", CanvasNodeType.Text, { content: "https://x.png" })), null);
@@ -107,7 +107,7 @@ test("referenceImageUrlOf：image / reference 節點取圖；其他型別與非�
   assert.equal(referenceImageUrlOf(undefined), null);
 });
 
-test("節點創建預設：prompt / reference 有尺寸與標題預設（agent add_node 依賴）", () => {
+test("节点创建预设：prompt / reference 有尺寸与标题预设（agent add_node 依赖）", () => {
   assert.ok(CANVAS_NODE_DEFAULT_SIZE[CanvasNodeType.Prompt]);
   assert.ok(CANVAS_NODE_DEFAULT_SIZE[CanvasNodeType.Reference]);
   assert.equal(CANVAS_NODE_DEFAULT_SIZE[CanvasNodeType.Prompt].title, "提示词");
@@ -116,13 +116,13 @@ test("節點創建預設：prompt / reference 有尺寸與標題預設（agent a
   assert.equal(toNodeType("reference"), CanvasNodeType.Reference);
 });
 
-test("向後兼容：舊型別行為不變；未知 type 仍退 text", () => {
+test("向后兼容：旧型别行为不变；未知 type 仍退 text", () => {
   assert.equal(toNodeType("image"), CanvasNodeType.Image);
   assert.equal(toNodeType("text"), CanvasNodeType.Text);
-  assert.equal(toNodeType("不存在的型別"), CanvasNodeType.Text);
+  assert.equal(toNodeType("不存在的型别"), CanvasNodeType.Text);
 });
 
-test("事件正規化：canvas.node.created 保留 referenceRole，非法角色丟棄", () => {
+test("事件正规化：canvas.node.created 保留 referenceRole，非法角色丢弃", () => {
   const event = normalizeCanvasEvent({
     name: "canvas.node.created",
     data: {

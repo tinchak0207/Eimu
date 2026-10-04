@@ -1,30 +1,30 @@
 "use client";
 
-// 手機端（<sm）左側漢堡 → 整屏側欄（2026-10-03 對標 Grok 手機端側欄）。
+// 手机端（<sm）左侧汉堡 → 整屏侧栏（2026-10-03 对标 Grok 手机端侧栏）。
 //
-// 為什麼要有這支：手機端原本只有 logo 與餘額膠囊，歷史藏在助理頂欄一顆圖示的
-// 小浮層裡，全站導覽（技能／工作流／定價／狀態／幫助）在手機上根本沒有入口。
-// Grok 的側欄是一級公民：頭像＋方案副標／大圖示導覽列／Conversations 分節
-// （標題兩行＋相對日期＋當前高亮）／底部浮動玻璃條。這裡照它的骨架做。
+// 为什么要有这支：手机端原本只有 logo 与余额胶囊，历史藏在助理顶栏一颗图示的
+// 小浮层里，全站导览（技能／工作流／定价／状态／帮助）在手机上根本没有入口。
+// Grok 的侧栏是一级公民：头像＋方案副标／大图示导览列／Conversations 分节
+// （标题两行＋相对日期＋当前高亮）／底部浮动玻璃条。这里照它的骨架做。
 //
-// 兩件事跟 Grok 不同的地方，都是本專案的既有約束，不是抄漏：
-//   ① 會話列表直接複用既有 AgentSessionList（含兩行截斷／相對日期／空態／搜尋過濾），
-//      標題格式化用 AgentChatSurface 已 export 的 formatSessionLabel（唯一實作，
-//      不複製第二份）；但**只能動態 import**（見 loadFormatSessionLabel）：本側欄
-//      掛在 root layout 的 Navbar 下，靜態 import 會把整條 agent-chat 模組圖拉進
-//      全站每一頁。點某一列＝走既有深鏈 `/?agent=1&session=<id>`，不新造切換路徑。
-//   ② Navbar 在 root layout，拿不到首頁 AgentChatSurface 的 startNewSession；
-//      新對話 FAB 走既有入口 `/?agent=1`（首頁 agent 面）。找不到全域建號入口時
-//      這是規格允許的退化，已在回報寫明。
+// 两件事跟 Grok 不同的地方，都是本专案的既有约束，不是抄漏：
+//   ① 会话列表直接复用既有 AgentSessionList（含两行截断／相对日期／空态／搜寻过滤），
+//      标题格式化用 AgentChatSurface 已 export 的 formatSessionLabel（唯一实作，
+//      不复制第二份）；但**只能动态 import**（见 loadFormatSessionLabel）：本侧栏
+//      挂在 root layout 的 Navbar 下，静态 import 会把整条 agent-chat 模组图拉进
+//      全站每一页。点某一列＝走既有深链 `/?agent=1&session=<id>`，不新造切换路径。
+//   ② Navbar 在 root layout，拿不到首页 AgentChatSurface 的 startNewSession；
+//      新对话 FAB 走既有入口 `/?agent=1`（首页 agent 面）。找不到全域建号入口时
+//      这是规格允许的退化，已在回报写明。
 //
-// 地雷（mobile-agent-parity-traps-2026-10-03 地雷①）：Navbar 的祖先鏈有
-// `lg-bar` / `lg-float`（backdrop-filter / transform 會建立 fixed 後代的
-// containing block），留在 Navbar 子樹裡的 `position: fixed; inset: 0` 只會覆蓋
-// 那顆膠囊。所以側欄一律 createPortal 到 document.body。
+// 地雷（mobile-agent-parity-traps-2026-10-03 地雷①）：Navbar 的祖先链有
+// `lg-bar` / `lg-float`（backdrop-filter / transform 会建立 fixed 后代的
+// containing block），留在 Navbar 子树里的 `position: fixed; inset: 0` 只会覆盖
+// 那颗胶囊。所以侧栏一律 createPortal 到 document.body。
 //
-// 材質：底色為不透明純白（#fff），由面板內層 .mobile-sidebar-bg 承載，面板本體
-// 不掛 backdrop-filter；這裡不 import agent-chat.css（那支會被另一路 agent 改），
-// 字面配方寫進 mobile-sidebar.css。
+// 材质：底色为不透明纯白（#fff），由面板内层 .mobile-sidebar-bg 承载，面板本体
+// 不挂 backdrop-filter；这里不 import agent-chat.css（那支会被另一路 agent 改），
+// 字面配方写进 mobile-sidebar.css。
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -54,16 +54,16 @@ import {
 import { cn } from "@/lib/utils";
 import "./mobile-sidebar.css";
 
-/** 會話標題格式化（唯一實作在 AgentChatSurface，見其 formatSessionLabel）。 */
+/** 会话标题格式化（唯一实作在 AgentChatSurface，见其 formatSessionLabel）。 */
 type SessionLabelFormatter = (it: AgentSessionSummary) => string;
 
 /**
- * 動態取唯一實作——**不准**在這裡靜態 import AgentChatSurface（膨脹，2026-10-03）：
- * Navbar 在 root layout，靜態 import 會把整條 agent-chat 模組圖（AgentChatSurface
- * → AgentChatPanel → agent-chat.css → RerunDialog…）拉進全站每一頁的初次載入；
- * 原本只有首頁／助理面需要它。改成側欄真的要列會話時才 `await import` 取那「一個」
- * 函式，讓 webpack 把它切成非同步 chunk（只在使用者的側欄打開時下載）。
- * Promise 記憶化：同一 session 內重開側欄不重複請求同一模組。
+ * 动态取唯一实作——**不准**在这里静态 import AgentChatSurface（膨胀，2026-10-03）：
+ * Navbar 在 root layout，静态 import 会把整条 agent-chat 模组图（AgentChatSurface
+ * → AgentChatPanel → agent-chat.css → RerunDialog…）拉进全站每一页的初次载入；
+ * 原本只有首页／助理面需要它。改成侧栏真的要列会话时才 `await import` 取那「一个」
+ * 函式，让 webpack 把它切成非同步 chunk（只在使用者的侧栏打开时下载）。
+ * Promise 记忆化：同一 session 内重开侧栏不重复请求同一模组。
  */
 let formatSessionLabelPromise: Promise<SessionLabelFormatter> | null = null;
 function loadFormatSessionLabel(): Promise<SessionLabelFormatter> {
@@ -74,29 +74,29 @@ function loadFormatSessionLabel(): Promise<SessionLabelFormatter> {
 }
 
 /**
- * 僅在動態 import 失敗（實務上不可能：模組是同一份部署產物）時用的降級：
- * 只回網關標題或空字串，**不複製** formatSessionLabel 的時間合成邏輯
- * （唯一實作仍留在 AgentChatSurface，別讓它漂移成第二份）。
+ * 仅在动态 import 失败（实务上不可能：模组是同一份部署产物）时用的降级：
+ * 只回网关标题或空字串，**不复制** formatSessionLabel 的时间合成逻辑
+ * （唯一实作仍留在 AgentChatSurface，别让它漂移成第二份）。
  */
 function fallbackSessionLabel(it: AgentSessionSummary): string {
   return typeof it.title === "string" ? it.title.trim() : "";
 }
 
 /**
- * 讀既有 localStorage 存檔裡的 sessionId（`AGENT_CHAT_STORAGE_KEY` 的
- * `sessionId` 欄位）：只作側欄當前高亮的**後備**——首頁／助理面已把活躍會話同步進
- * 唯讀鏡像（@/lib/agent-current-session），有鏡像時優先用它；agent 面未掛載的頁面
- * （例如 /history）才走這裡。直接用既有 lib 的讀取函式，不新造第三套 session 狀態、
- * 不重寫 parser：loadPersisted 已照既有 sanitize 慣例吞掉 SSR／隱私模式／無存檔／
- * JSON 壞／schema 不符／逾 24h，一律回 null（絕不 throw）。
+ * 读既有 localStorage 存档里的 sessionId（`AGENT_CHAT_STORAGE_KEY` 的
+ * `sessionId` 栏位）：只作侧栏当前高亮的**后备**——首页／助理面已把活跃会话同步进
+ * 唯读镜像（@/lib/agent-current-session），有镜像时优先用它；agent 面未挂载的页面
+ * （例如 /history）才走这里。直接用既有 lib 的读取函式，不新造第三套 session 状态、
+ * 不重写 parser：loadPersisted 已照既有 sanitize 惯例吞掉 SSR／隐私模式／无存档／
+ * JSON 坏／schema 不符／逾 24h，一律回 null（绝不 throw）。
  */
 export function readPersistedSessionId(): string | null {
   return loadPersisted()?.sessionId ?? null;
 }
 
 /** QQ 官方加群分享页（手机端点击直达 QQ 加入群聊）。
- *  自 Navbar 搬來這裡：手機端入口移進側欄，Navbar 只剩桌面彈窗入口；
- *  QqLogo 由 Navbar import 使用（避免兩邊各存一份 SVG 路徑漂移）。 */
+ *  自 Navbar 搬来这里：手机端入口移进侧栏，Navbar 只剩桌面弹窗入口；
+ *  QqLogo 由 Navbar import 使用（避免两边各存一份 SVG 路径漂移）。 */
 export const QQ_GROUP_SHARE_URL =
   "https://qun.qq.com/universal-share/share?ac=1&authKey=9xurH8dNqoFL3AWNrbML8MG1zuxUY%2Blh2FnXaFJfMefKeuWvLYDkPmxv%2BF%2FxMn8&busi_data=eyJncm91cENvZGUiOiI5ODAxMjIxNzUiLCJ0b2tlbiI6IldYSHVmYXZzU0NmK05IMFVnNXM5cDE2amM0YzBjUGxhUHhvTUx5VDAwcmpXQUtKMWtNSk9HMnA1QmFXVTVHdlMiLCJ1aW4iOiIxNDY1Njg3MDc5In0%3D&data=NUunOBhKAsWIJULcoBA6QFyTGfPWRPd0kWwWxRnxURNQs18QrZFUb2LLJOLhQlOdOveuWXfmT64NqyzIiFtqLA&svctype=4&tempid=h5_group_info";
 
@@ -122,24 +122,24 @@ export interface MobileSidebarNavItem {
   label: string;
   icon: typeof History;
   /**
-   * 動作橋（2026-10-03 第三輪）：有值＝這一列渲染成 button 元素（不是 Link），
-   * 點擊把動作交給助理面（見 @/lib/agent-surface-actions）；助理面沒掛載時才退回
-   * href 導航。無值＝純 Link 導航列。有動作橋的列一律不做 active 高亮。
+   * 动作桥（2026-10-03 第三轮）：有值＝这一列渲染成 button 元素（不是 Link），
+   * 点击把动作交给助理面（见 @/lib/agent-surface-actions）；助理面没挂载时才退回
+   * href 导航。无值＝纯 Link 导航列。有动作桥的列一律不做 active 高亮。
    */
   action?: AgentSurfaceAction;
-  /** 永不冒充當前頁（如「直接生成」/ 的 href 就是首頁，否則在首頁會誤亮）。 */
+  /** 永不冒充当前页（如「直接生成」/ 的 href 就是首页，否则在首页会误亮）。 */
   neverActive?: boolean;
 }
 
 /**
- * 導覽列（第三輪瘦身：7 列 → 4 列）。手機端不需要的四頁（技能／工作流／狀態／
- * 幫助）下放成頁尾細字連結帶（見 MOBILE_SIDEBAR_FOOTER_LINKS），不讓它們變孤兒。
- * 留下的四列逐條附出處：
- *   直接生成 /            — src/app/page.tsx；動作橋 "exit"（助理面在時直接退出助理面）
- *   生成历史 /history      — src/app/history/page.tsx；純連結
- *   我的资产 /?agent=1     — 全站沒有獨立資產路由，資產面板住在首頁 agent 面
- *                            （AgentChatSurface 的「我的资产」）；動作橋 "assets"
- *   定价     /pricing      — src/app/pricing/page.tsx；純連結
+ * 导览列（第三轮瘦身：7 列 → 4 列）。手机端不需要的四页（技能／工作流／状态／
+ * 帮助）下放成页尾细字连结带（见 MOBILE_SIDEBAR_FOOTER_LINKS），不让它们变孤儿。
+ * 留下的四列逐条附出处：
+ *   直接生成 /            — src/app/page.tsx；动作桥 "exit"（助理面在时直接退出助理面）
+ *   生成历史 /history      — src/app/history/page.tsx；纯连结
+ *   我的资产 /?agent=1     — 全站没有独立资产路由，资产面板住在首页 agent 面
+ *                            （AgentChatSurface 的「我的资产」）；动作桥 "assets"
+ *   定价     /pricing      — src/app/pricing/page.tsx；纯连结
  */
 export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
   { href: "/", label: "直接生成", icon: SlidersHorizontal, action: "exit", neverActive: true },
@@ -149,8 +149,8 @@ export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
 ];
 
 /**
- * 被移出主導覽的四頁（第三輪）：降級為捲動區最底部的頁尾細字連結帶，
- * 不是 52px 導覽列、不佔列高預算。逐條對上既有路由檔。
+ * 被移出主导览的四页（第三轮）：降级为卷动区最底部的页尾细字连结带，
+ * 不是 52px 导览列、不占列高预算。逐条对上既有路由档。
  *   /skills /workflows /status /use-cases
  */
 export const MOBILE_SIDEBAR_FOOTER_LINKS: readonly { href: string; label: string }[] = [
@@ -160,38 +160,38 @@ export const MOBILE_SIDEBAR_FOOTER_LINKS: readonly { href: string; label: string
   { href: "/use-cases", label: "帮助" },
 ];
 
-/** 只認「不帶 query 的路徑連結」的 active 態；`/?agent=1` 這類入口不冒充當前頁。 */
+/** 只认「不带 query 的路径连结」的 active 态；`/?agent=1` 这类入口不冒充当前页。 */
 export function isSidebarNavActive(pathname: string, href: string): boolean {
   if (href.includes("?")) return false;
   return pathname === href;
 }
 
 export interface MobileSidebarPanelProps {
-  /** 當前路徑（由容器受控傳入，方便測試直接渲染純元件樹）。 */
+  /** 当前路径（由容器受控传入，方便测试直接渲染纯元件树）。 */
   pathname: string;
-  /** 已登入＝顯示名稱；未登入＝「未登录」。 */
+  /** 已登入＝显示名称；未登入＝「未登录」。 */
   userName: string;
-  /** 身份副標（Grok 的 Premium 位置）：已登入顯示 email／「已登录」，否則「未登录」。 */
+  /** 身份副标（Grok 的 Premium 位置）：已登入显示 email／「已登录」，否则「未登录」。 */
   userSubtitle: string;
-  /** 會話目錄：null＝載入中，[]＝已載入但為空。 */
+  /** 会话目录：null＝载入中，[]＝已载入但为空。 */
   sessions: AgentSessionSummary[] | null;
-  /** 當前會話（＝活躍會話的唯讀鏡像，見 @/lib/agent-current-session；agent 面未掛載
-   *  時退回既有 localStorage 存檔的 sessionId），null＝尚未建立／無存檔，
-   *  此時沒有任何一列算「當前」。 */
+  /** 当前会话（＝活跃会话的唯读镜像，见 @/lib/agent-current-session；agent 面未挂载
+   *  时退回既有 localStorage 存档的 sessionId），null＝尚未建立／无存档，
+   *  此时没有任何一列算「当前」。 */
   currentSessionId: string | null;
-  /** 標題格式化：唯一實作由容器動態載入 AgentChatSurface.loadFormatSessionLabel 注入，
-   *  不在此檔靜態 import（避免把 agent-chat 模組圖拉進全站）。 */
+  /** 标题格式化：唯一实作由容器动态载入 AgentChatSurface.loadFormatSessionLabel 注入，
+   *  不在此档静态 import（避免把 agent-chat 模组图拉进全站）。 */
   formatLabel: SessionLabelFormatter;
   query: string;
   onQueryChange: (value: string) => void;
-  /** 點某一列＝走既有深鏈（/?agent=1&session=<id>），非另造切換路徑。 */
+  /** 点某一列＝走既有深链（/?agent=1&session=<id>），非另造切换路径。 */
   onPickSession: (sessionId: string) => void;
-  /** 新對話（FAB 與空態 CTA 共用）＝既有入口 /?agent=1。 */
+  /** 新对话（FAB 与空态 CTA 共用）＝既有入口 /?agent=1。 */
   onStartNew: () => void;
   /**
-   * 動作橋派發（第三輪）：導覽列「直接生成／我的资产」與底部齒輪共用。
-   * 容器實作：先 onClose() 關側欄 → requestAgentSurfaceAction(action)；
-   * 助理面沒掛載（回 false）才 router.push(fallbackHref) 退回導航。
+   * 动作桥派发（第三轮）：导览列「直接生成／我的资产」与底部齿轮共用。
+   * 容器实作：先 onClose() 关侧栏 → requestAgentSurfaceAction(action)；
+   * 助理面没挂载（回 false）才 router.push(fallbackHref) 退回导航。
    */
   onSurfaceAction: (action: AgentSurfaceAction, fallbackHref: string) => void;
   onClose: () => void;
@@ -200,8 +200,8 @@ export interface MobileSidebarPanelProps {
 }
 
 /**
- * 純呈現層（零 hooks）：容器負責 portal／滾動鎖／焦點／資料載入，
- * 這裡只管長相與事件回呼，讓 node:test 能直接 renderToStaticMarkup 驗元素樹。
+ * 纯呈现层（零 hooks）：容器负责 portal／滚动锁／焦点／资料载入，
+ * 这里只管长相与事件回呼，让 node:test 能直接 renderToStaticMarkup 验元素树。
  */
 export function MobileSidebarPanel({
   pathname,
@@ -226,11 +226,11 @@ export function MobileSidebarPanel({
       aria-label="主导航"
       className="mobile-sidebar-panel"
     >
-      {/* 內層材質：絕對定位鋪滿，承載不透明純白底；面板本體不掛 backdrop-filter
-          （Safari 對 backdrop-filter＋transform 動畫有合成怪癖會吞掉位移）。
-          內容（header／捲動區／dock）各以 z-index 疊在它之上。 */}
+      {/* 内层材质：绝对定位铺满，承载不透明纯白底；面板本体不挂 backdrop-filter
+          （Safari 对 backdrop-filter＋transform 动画有合成怪癖会吞掉位移）。
+          内容（header／卷动区／dock）各以 z-index 叠在它之上。 */}
       <div className="mobile-sidebar-bg" aria-hidden="true" />
-      {/* 頂部身份：頭像＋名稱＋副標（Grok 的 avatar + handle + Premium）。 */}
+      {/* 顶部身份：头像＋名称＋副标（Grok 的 avatar + handle + Premium）。 */}
       <header className="relative z-[1] flex shrink-0 items-center gap-3 px-4 pb-1">
         <div className="lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -253,22 +253,22 @@ export function MobileSidebarPanel({
         </button>
       </header>
 
-      {/* 單一捲動容器：導覽＋「对话」清單＋退出/QQ 一起捲（清單不再自開第二條捲軸，
-          避免巢狀捲動）。底部浮動玻璃條改絕對定位浮在最下（.mobile-sidebar-dock），
-          這裡留出等高 padding-bottom，最後一列不會被蓋住。 */}
+      {/* 单一卷动容器：导览＋「对话」清单＋退出/QQ 一起卷（清单不再自开第二条卷轴，
+          避免巢状卷动）。底部浮动玻璃条改绝对定位浮在最下（.mobile-sidebar-dock），
+          这里留出等高 padding-bottom，最后一列不会被盖住。 */}
       <div className="mobile-sidebar-scroll relative z-[1] min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
-        {/* 導覽列（第三輪瘦身 4 列）：有動作橋的列渲染成 button（把動作交給助理面，
-            沒宿主才退回 href），純連結列維持 Link。標籤字級（text-ios-body＝17px）
-            掛在內層 span 的**純字串 className** 上，不進 cn()：cn＝twMerge(clsx(...))，
-            tailwind-merge 認不得自訂 token `text-ios-body`，會把它歸到 text-color
-            群組，然後被同一串後面的 `text-[rgba(…)]` 顏色 class 吃掉（實測 twMerge
-            直接移除該 class）——之前掛在 cn 的 anchor 上，17px 從未生效。
-            span 走純 className 就繞過這個合併陷阱（見 mobile-sidebar.test.ts 探針）。 */}
+        {/* 导览列（第三轮瘦身 4 列）：有动作桥的列渲染成 button（把动作交给助理面，
+            没宿主才退回 href），纯连结列维持 Link。标签字级（text-ios-body＝17px）
+            挂在内层 span 的**纯字串 className** 上，不进 cn()：cn＝twMerge(clsx(...))，
+            tailwind-merge 认不得自订 token `text-ios-body`，会把它归到 text-color
+            群组，然后被同一串后面的 `text-[rgba(…)]` 颜色 class 吃掉（实测 twMerge
+            直接移除该 class）——之前挂在 cn 的 anchor 上，17px 从未生效。
+            span 走纯 className 就绕过这个合并陷阱（见 mobile-sidebar.test.ts 探针）。 */}
         <nav aria-label="主导航链接" className="pt-1">
           <ul className="flex flex-col">
             {MOBILE_SIDEBAR_NAV.map(({ href, label, icon: Icon, action, neverActive }) => {
-              // 有動作橋的列不做 active 高亮；`neverActive`（如「直接生成」/ 就是首頁）
-              // 也永不冒充當前頁。
+              // 有动作桥的列不做 active 高亮；`neverActive`（如「直接生成」/ 就是首页）
+              // 也永不冒充当前页。
               const active = !neverActive && !action && isSidebarNavActive(pathname, href);
               const rowClass = cn(
                 "flex min-h-[52px] items-center gap-3.5 rounded-[14px] px-3 font-medium touch-manipulation transition-colors [-webkit-tap-highlight-color:transparent] motion-reduce:transition-none",
@@ -306,7 +306,7 @@ export function MobileSidebarPanel({
           </ul>
         </nav>
 
-        {/* 對話分節：標題＋搜尋框＋既有 AgentSessionList（兩行截斷／相對日期／空態）。 */}
+        {/* 对话分节：标题＋搜寻框＋既有 AgentSessionList（两行截断／相对日期／空态）。 */}
         <div className="flex flex-col pt-3">
           <p className="px-3 pb-1.5 text-ios-subhead font-semibold text-[rgba(0,0,0,0.45)]">
             对话
@@ -324,7 +324,7 @@ export function MobileSidebarPanel({
               />
             </div>
           </div>
-          {/* 清單隨內容自然撐高，不再自開捲軸（避免巢狀捲動）。 */}
+          {/* 清单随内容自然撑高，不再自开卷轴（避免巢状卷动）。 */}
           <div className="px-1 pb-2">
             <AgentSessionList
               sessions={sessions}
@@ -339,9 +339,9 @@ export function MobileSidebarPanel({
           </div>
         </div>
 
-        {/* 底部帳號動作：隨內容一起捲（浮動玻璃條另為絕對定位的 .mobile-sidebar-dock）。
-            「账号设置」「退出登录」已移除（2026-10-03 暴君裁定回歸 header，另一路在
-            手機端 header 顯出那兩顆）；帳號設置仍可經 dock 齒輪的 fallback 到達。 */}
+        {/* 底部帐号动作：随内容一起卷（浮动玻璃条另为绝对定位的 .mobile-sidebar-dock）。
+            「账号设置」「退出登录」已移除（2026-10-03 暴君裁定回归 header，另一路在
+            手机端 header 显出那两颗）；帐号设置仍可经 dock 齿轮的 fallback 到达。 */}
         <div className="pt-1">
           <div className="flex flex-col">
             <a
@@ -352,8 +352,8 @@ export function MobileSidebarPanel({
               <span className="truncate">加入 QQ 群</span>
             </a>
           </div>
-          {/* 被移出主導覽的四頁降級入口（第三輪）：頁尾細字連結帶，14px／可折行，
-              不是 52px 導覽列；只求不變孤兒，不佔列高預算。 */}
+          {/* 被移出主导览的四页降级入口（第三轮）：页尾细字连结带，14px／可折行，
+              不是 52px 导览列；只求不变孤儿，不占列高预算。 */}
           <nav
             aria-label="更多入口"
             className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pt-3 text-ios-footnote text-[rgba(0,0,0,0.42)]"
@@ -375,13 +375,13 @@ export function MobileSidebarPanel({
         </div>
       </div>
 
-      {/* 底部浮動玻璃條（齒輪／黑色新對話 FAB）：絕對定位浮在最下，不參與捲動。
-          「搜索」鈕已移除（2026-10-03）：與「对话」分節的搜尋框重複，該框是唯一入口。 */}
+      {/* 底部浮动玻璃条（齿轮／黑色新对话 FAB）：绝对定位浮在最下，不参与卷动。
+          「搜索」钮已移除（2026-10-03）：与「对话」分节的搜寻框重复，该框是唯一入口。 */}
       <div className="mobile-sidebar-dock">
         <div className="lg-bar flex items-center justify-between gap-2 rounded-full p-2">
-          {/* 齒輪＝情境感知（第三輪）：助理面在時叫動它的「助理设定」（我的技能＋
-              互動模式）；助理面沒掛載（回 false）才退回帳號設置 /settings/api-keys。
-              aria-label 契約維持「设置」。 */}
+          {/* 齿轮＝情境感知（第三轮）：助理面在时叫动它的「助理设定」（我的技能＋
+              互动模式）；助理面没挂载（回 false）才退回帐号设置 /settings/api-keys。
+              aria-label 契约维持「设置」。 */}
           <button
             type="button"
             onClick={() => onSurfaceAction("settings", "/settings/api-keys")}
@@ -409,14 +409,14 @@ export function MobileSidebarPanel({
 export interface MobileSidebarProps {
   open: boolean;
   onClose: () => void;
-  /** 關閉後焦點還原處（Navbar 的漢堡鈕）。 */
+  /** 关闭后焦点还原处（Navbar 的汉堡钮）。 */
   triggerRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /**
- * 容器：portal 到 document.body（地雷①）＋左滑入動畫＋遮罩／Esc／關閉鈕三條關閉
- * ＋body 滾動鎖（存原值再還原，與既有全出血鎖共存）＋開場焦點進側欄、關閉歸還
- * 漢堡鈕＋首次開啟載入會話目錄。
+ * 容器：portal 到 document.body（地雷①）＋左滑入动画＋遮罩／Esc／关闭钮三条关闭
+ * ＋body 滚动锁（存原值再还原，与既有全出血锁共存）＋开场焦点进侧栏、关闭归还
+ * 汉堡钮＋首次开启载入会话目录。
  */
 export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps) {
   const router = useRouter();
@@ -424,31 +424,31 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
   const narrow = useIsNarrow();
   const { user } = useAuth();
   const [sessions, setSessions] = useState<AgentSessionSummary[] | null>(null);
-  // 當前會話（當前高亮用）：開側欄時讀既有 localStorage 存檔，不用第三套狀態。
+  // 当前会话（当前高亮用）：开侧栏时读既有 localStorage 存档，不用第三套状态。
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  // 標題格式化：null＝唯一實作（AgentChatSurface）尚未動態載入完。
+  // 标题格式化：null＝唯一实作（AgentChatSurface）尚未动态载入完。
   const [formatLabel, setFormatLabel] = useState<SessionLabelFormatter | null>(null);
   const [query, setQuery] = useState("");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // 只有手機（<sm）才算開啟：漢堡本身 sm:hidden；桌面若在開啟中拉寬，自動關閉。
+  // 只有手机（<sm）才算开启：汉堡本身 sm:hidden；桌面若在开启中拉宽，自动关闭。
   const active = open && narrow;
 
-  // onClose 每次 Navbar render 都是新函式；用 ref 取值，effect 才不會被它反覆觸發
-  // （依賴擺 onClose 會讓 effect 每次重跑＝一開就被自己關掉）。
+  // onClose 每次 Navbar render 都是新函式；用 ref 取值，effect 才不会被它反覆触发
+  // （依赖摆 onClose 会让 effect 每次重跑＝一开就被自己关掉）。
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // 路由一變就收起：Navbar 在 root layout，側欄跨頁存活，不靠這個會在換頁後
-  // 留一層關不掉的整屏面板。
+  // 路由一变就收起：Navbar 在 root layout，侧栏跨页存活，不靠这个会在换页后
+  // 留一层关不掉的整屏面板。
   useEffect(() => {
     if (!open) return;
     onCloseRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // 首次開啟載入會話目錄（null＝載入中；失敗視為空）。
+  // 首次开启载入会话目录（null＝载入中；失败视为空）。
   useEffect(() => {
     if (!active || sessions !== null) return;
     let cancelled = false;
@@ -464,8 +464,8 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
     };
   }, [active, sessions]);
 
-  // 動態載入唯一標題格式化（見 loadFormatSessionLabel）：側欄沒開就不下載
-  // agent-chat chunk；Promise 記憶化，重開側欄不再請求。
+  // 动态载入唯一标题格式化（见 loadFormatSessionLabel）：侧栏没开就不下载
+  // agent-chat chunk；Promise 记忆化，重开侧栏不再请求。
   useEffect(() => {
     if (!active || formatLabel !== null) return;
     let cancelled = false;
@@ -474,23 +474,23 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
         if (!cancelled) setFormatLabel(() => fmt);
       })
       .catch(() => {
-        // 取不到唯一實作：維持降級格式化，不讓整個會話清單一起失敗。
+        // 取不到唯一实作：维持降级格式化，不让整个会话清单一起失败。
       });
     return () => {
       cancelled = true;
     };
   }, [active, formatLabel]);
 
-  // 當前會話高亮：優先用活躍會話的唯讀鏡像（見 @/lib/agent-current-session，
-  // 真源是 AgentChatSurface 的 sessionId）；非首頁（agent 面未掛載）鏡像為 null，
-  // 才退回讀既有存檔（壞 JSON／無存檔／逾 24h 一律 null）。
+  // 当前会话高亮：优先用活跃会话的唯读镜像（见 @/lib/agent-current-session，
+  // 真源是 AgentChatSurface 的 sessionId）；非首页（agent 面未挂载）镜像为 null，
+  // 才退回读既有存档（坏 JSON／无存档／逾 24h 一律 null）。
   useEffect(() => {
     if (!active) return;
     setCurrentSessionId(getCurrentAgentSession() ?? readPersistedSessionId());
   }, [active]);
 
-  // Esc 關閉＋滾動鎖＋焦點進出。存原 overflow 再還原：首頁全出血有自己的
-  // html/body 鎖，不能關掉側欄時把別人的鎖一起抹平。
+  // Esc 关闭＋滚动锁＋焦点进出。存原 overflow 再还原：首页全出血有自己的
+  // html/body 锁，不能关掉侧栏时把别人的锁一起抹平。
   useEffect(() => {
     if (!active) return;
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -510,7 +510,7 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
     };
   }, [active, triggerRef]);
 
-  // 收起時清掉搜尋詞：下次打開看到全量目錄，不是上一輪打一半的詞。
+  // 收起时清掉搜寻词：下次打开看到全量目录，不是上一轮打一半的词。
   useEffect(() => {
     if (!active) setQuery("");
   }, [active]);
@@ -526,8 +526,8 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
   };
 
   /**
-   * 動作橋派發（第三輪）：先關側欄（不擋住助理面的浮層），再呼叫助理面；
-   * 只有助理面沒掛載（回 false）才退回該列自己的 href。
+   * 动作桥派发（第三轮）：先关侧栏（不挡住助理面的浮层），再呼叫助理面；
+   * 只有助理面没挂载（回 false）才退回该列自己的 href。
    */
   const handleSurfaceAction = (action: AgentSurfaceAction, fallbackHref: string): void => {
     onClose();
@@ -568,7 +568,7 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
   );
 }
 
-/** 漢堡鈕（Navbar 手機端最左邊）：44×44，只在 <sm 出現（sm:hidden 契約）。 */
+/** 汉堡钮（Navbar 手机端最左边）：44×44，只在 <sm 出现（sm:hidden 契约）。 */
 export function MobileNavHamburger({
   onClick,
   expanded,

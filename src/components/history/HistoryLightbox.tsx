@@ -46,8 +46,8 @@ function entrySrc(entry: HistoryEntry): string | null {
 }
 
 /**
- * 音频產物 URL。音频不能當 <img> 的 src（餵進去只會是破圖），所以與 entrySrc
- * 分開取：只收「沒有圖/視頻、只有 audioUrl」的結果，避免把圖片記錄判成音頻。
+ * 音频产物 URL。音频不能当 <img> 的 src（喂进去只会是破图），所以与 entrySrc
+ * 分开取：只收「没有图/视频、只有 audioUrl」的结果，避免把图片记录判成音频。
  */
 function entryAudioSrc(entry: HistoryEntry): string | null {
   for (const result of entry.results) {
@@ -222,7 +222,7 @@ export function HistoryLightbox({
   if (!mounted || !isOpen || !entry) return null;
 
   const src = entrySrc(entry);
-  /** 純音頻記錄：src 為 null 時才取 audioUrl，有圖/視頻記錄不受影響。 */
+  /** 纯音频记录：src 为 null 时才取 audioUrl，有图/视频记录不受影响。 */
   const audioSrc = src ? null : entryAudioSrc(entry);
   const isAudioEntry = Boolean(audioSrc);
   const model = primaryModelId(entry);
@@ -352,8 +352,8 @@ export function HistoryLightbox({
               className="hist-lightbox-figure max-h-full max-w-full rounded-ios-2xl object-contain shadow-[0_30px_80px_rgba(0,0,0,0.32)]"
             />
           ) : audioSrc ? (
-            /* 音频條目：主區換成可播放面（autoPlay 由開啟燈箱的那次點擊提供使用者手勢，
-               瀏覽器不會擋）。關閉三件套（Esc／背景點擊／popstate）沿用既有監聽，未改。 */
+            /* 音频条目：主区换成可播放面（autoPlay 由开启灯箱的那次点击提供使用者手势，
+               浏览器不会挡）。关闭三件套（Esc／背景点击／popstate）沿用既有监听，未改。 */
             <div className="hist-lightbox-figure w-full max-w-lg rounded-ios-2xl bg-white/10 px-8 py-10 text-center shadow-[0_30px_80px_rgba(0,0,0,0.32)]">
               <span
                 className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/15 text-white/90"
@@ -425,8 +425,8 @@ export function HistoryLightbox({
               )}
             </div>
 
-            {/* 节点产物清单：DAG 每個節點跑完各自的產物與實付。後端沒有寫入
-                dagNodes 時整塊不渲染（而不是顯示一個空清單）。 */}
+            {/* 节点产物清单：DAG 每个节点跑完各自的产物与实付。后端没有写入
+                dagNodes 时整块不渲染（而不是显示一个空清单）。 */}
             {dagNodes && (
               <div className="mt-3">
                 <p className="text-ios-caption1 font-medium text-[rgba(255,255,255,0.82)]">节点产物</p>

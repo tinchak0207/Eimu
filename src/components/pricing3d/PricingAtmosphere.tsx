@@ -1,12 +1,12 @@
 "use client";
 
-/* ╁━ /pricing 整頁夢境：虹彩液態玻璃的夢幻空間（2026-09-26 暴君參考圖）╁━
-   - 底圖 = 參考圖本身（next/image priority + 內嵌模糊佔位）：HTML 一到，首幀就是這個世界，
-     沒有「先出卡片再換畫面」；四档是同一座夢境的四種天光（晨 → 夜 → 雨後虹 → 天亮），
-     切档硬剪接（調色層瞬切 + 一記白閃）。
-   - 活的部分全是 CSS（星閃 / 流星 / 氣泡 / 水面虹光），hydration 前就在動；
-     JS 只做兩件事：滑鼠視差（近快遠慢，站在桌邊的縱深）與量環段位置（夢境鋪到哪裡為止）。
-   只鋪在 pricing 內容區（PricingClient 根節點）裡，不越 navbar / 頁尾。 */
+/* ╁━ /pricing 整页梦境：虹彩液态玻璃的梦幻空间（2026-09-26 暴君参考图）╁━
+   - 底图 = 参考图本身（next/image priority + 内嵌模糊占位）：HTML 一到，首帧就是这个世界，
+     没有「先出卡片再换画面」；四档是同一座梦境的四种天光（晨 → 夜 → 雨后虹 → 天亮），
+     切档硬剪接（调色层瞬切 + 一记白闪）。
+   - 活的部分全是 CSS（星闪 / 流星 / 气泡 / 水面虹光），hydration 前就在动；
+     JS 只做两件事：滑鼠视差（近快远慢，站在桌边的纵深）与量环段位置（梦境铺到哪里为止）。
+   只铺在 pricing 内容区（PricingClient 根节点）里，不越 navbar / 页尾。 */
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
@@ -14,8 +14,8 @@ import dreamWorld from "./dream-world.jpg";
 import "./dream-world.css";
 import { WORLD_IDS, isWorldId, type WorldId } from "./worlds";
 
-/** 星星：決定性座標（SSR 與 hydration 一致），畫成兩張點陣底圖（兩層錯相閃爍）——
- *  34 顆各自一個合成層時，2560 寬 iGPU 掉 5–8fps。 */
+/** 星星：决定性座标（SSR 与 hydration 一致），画成两张点阵底图（两层错相闪烁）——
+ *  34 颗各自一个合成层时，2560 宽 iGPU 掉 5–8fps。 */
 function starField(offset: number): string {
   return Array.from({ length: 18 }, (_, k) => {
     const i = k * 2 + offset;
@@ -46,7 +46,7 @@ const BUBBLES = Array.from({ length: 8 }, (_, i) => ({
 export function PricingAtmosphere({ world }: { world: string }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const active: WorldId = isWorldId(world) ? world : "popular";
-  /* 剪接白閃只在「切档」時出現，首屏不閃。 */
+  /* 剪接白闪只在「切档」时出现，首屏不闪。 */
   const [cuts, setCuts] = useState(0);
   const firstWorld = useRef(active);
   useEffect(() => {
@@ -54,11 +54,11 @@ export function PricingAtmosphere({ world }: { world: string }) {
     setCuts((value) => value + 1);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* 滑鼠視差：底圖慢、氣泡快，寫 --mx/--my（-1..1），rAF 節流。觸控裝置不做。
-     效能（2026-10-01）：原本寫在頁面根（.p3d-page）上＝每次滑鼠移動整頁約 980 個元素重算樣式
-     （實測每秒 450ms style recalc）。只寫給真正用到的元素：底圖／氣泡兩層＋每張票面（虹彩細邊與全息鍍膜的
-     ::before/::after 從 .ppc-glass 繼承）。量化到 0.01（視差最大 38px×0.01＜0.4px，外加 CSS 過渡平滑），
-     慢移時不重寫。 */
+  /* 滑鼠视差：底图慢、气泡快，写 --mx/--my（-1..1），rAF 节流。触控装置不做。
+     效能（2026-10-01）：原本写在页面根（.p3d-page）上＝每次滑鼠移动整页约 980 个元素重算样式
+     （实测每秒 450ms style recalc）。只写给真正用到的元素：底图／气泡两层＋每张票面（虹彩细边与全息镀膜的
+     ::before/::after 从 .ppc-glass 继承）。量化到 0.01（视差最大 38px×0.01＜0.4px，外加 CSS 过渡平滑），
+     慢移时不重写。 */
   useEffect(() => {
     const atmo = rootRef.current;
     const root = atmo?.parentElement;
@@ -98,9 +98,9 @@ export function PricingAtmosphere({ world }: { world: string }) {
     };
   }, []);
 
-  /* 夢境的下緣 = 環段（含選片條與圓點）的底：量出來寫進 --p3d-dark-end，
-     以下的單價表／兌換碼／FAQ 白玻璃卡落回站內淺底。
-     --p3d-fold-top = 環段在文件中的頂（環段 min-height 撐到首屏底）。 */
+  /* 梦境的下缘 = 环段（含选片条与圆点）的底：量出来写进 --p3d-dark-end，
+     以下的单价表／兑换码／FAQ 白玻璃卡落回站内浅底。
+     --p3d-fold-top = 环段在文件中的顶（环段 min-height 撑到首屏底）。 */
   useEffect(() => {
     const atmo = rootRef.current;
     const page = atmo?.parentElement;
@@ -113,7 +113,7 @@ export function PricingAtmosphere({ world }: { world: string }) {
       const pageRect = page.getBoundingClientRect();
       atmo.style.setProperty("--p3d-dark-end", `${Math.round(ringRect.bottom - pageRect.top)}px`);
       ring.style.setProperty("--p3d-fold-top", `${Math.round(ringRect.top + window.scrollY)}px`);
-      /* 噴泉可往上衝到 navbar 底為止（--df-clip-top = 舞台頂到 navbar 底的距離）。 */
+      /* 喷泉可往上冲到 navbar 底为止（--df-clip-top = 舞台顶到 navbar 底的距离）。 */
       if (stage) {
         const ceiling = Math.max(pageRect.top, header ? header.getBoundingClientRect().bottom : pageRect.top);
         stage.style.setProperty("--df-clip-top", `${Math.max(0, Math.round(stage.getBoundingClientRect().top - ceiling - 4))}px`);

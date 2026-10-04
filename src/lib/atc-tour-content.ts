@@ -122,9 +122,9 @@ async function startAtcTour(force: boolean): Promise<void> {
   // F1-1：AI 助理已在用（面板已打开）→ 教学让位：不播、不写「看过」标记，
   // 下次挂载还能再教。此时播教学只会拿遮罩罩住正在进行的对话。
   if (!force && agentPanelVisible()) return;
-  // R9-4：輪播可能尚未 paint（.atc-step-selector 是 mount 後才掛的），
-  // 立即 return 會讓「圓環首次可見」的教學整場缺席。先短輪詢等它出現
-  // （最多 1s），等不到再放掉——不設單飛閘，讓下次掛載再試。
+  // R9-4：轮播可能尚未 paint（.atc-step-selector 是 mount 后才挂的），
+  // 立即 return 会让「圆环首次可见」的教学整场缺席。先短轮询等它出现
+  // （最多 1s），等不到再放掉——不设单飞闸，让下次挂载再试。
   if (!document.querySelector(".atc-step-selector")) {
     let appeared = false;
     for (let i = 0; i < 5 && !appeared; i += 1) {
@@ -311,7 +311,7 @@ async function startAtcTour(force: boolean): Promise<void> {
     tourLock.on();
     activeTour.drive();
 
-    /* F1-1 / R10-2 合併：AI 助理面板一打开就让位。旧版只观察已存在的
+    /* F1-1 / R10-2 合并：AI 助理面板一打开就让位。旧版只观察已存在的
        .agent-panel 的 transcript 子节点——但面板没打开时 DOM 里根本没有
        .agent-panel（AgentChatSurface 是 displayMode==="agent" 条件渲染），
        引导遮罩又拦住一切点击 → 面板永远打不开 → transcript 永远空 → 死锁。

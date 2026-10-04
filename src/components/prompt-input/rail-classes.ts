@@ -1,6 +1,6 @@
 /**
- * 三行控制 rail 類常量（Task 9 自 PromptInput 抽出）：GenerateControls /
- * EditPanel / UpscalePanel 的每一行控件共用同一套標籤欄／滑動欄／行骨架。
+ * 三行控制 rail 类常量（Task 9 自 PromptInput 抽出）：GenerateControls /
+ * EditPanel / UpscalePanel 的每一行控件共用同一套标签栏／滑动栏／行骨架。
  */
 /**
 * 三行控制共用同一条左侧标签栏，让画质／风格／示例读起来是同一层级。

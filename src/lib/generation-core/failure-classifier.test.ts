@@ -68,7 +68,7 @@ test("503 wrapping a legal_error body is still classified as content rejection",
 });
 
 test("502 wrapping Chinese quota-exhausted copy (hailuo 1008) fails fast as quota exhaustion", () => {
-  // 2026-08-29 事故原文：metaso 渠道 H3 欠費，上游回 502 + 中文文案。
+  // 2026-08-29 事故原文：metaso 渠道 H3 欠费，上游回 502 + 中文文案。
   const result = classifySupplierFailure(
     new SupplierRequestError("hailuo api error: metaso create failed: H3 积分余额不足 (1008)", 502),
     NOW,
@@ -76,7 +76,7 @@ test("502 wrapping Chinese quota-exhausted copy (hailuo 1008) fails fast as quot
   assert.equal(result.failureClass, "quota_exhausted");
   assert.equal(result.retryable, false);
   assert.equal(result.switchSupplier, true);
-  // INC-VIDEO-0927：欠費改冷卻（可自癒），不再永久 disabled。
+  // INC-VIDEO-0927：欠费改冷却（可自愈），不再永久 disabled。
   assert.equal(result.quarantineSupplier, false);
   assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
 });
@@ -90,8 +90,8 @@ test("402 English insufficient quota fails fast as quota exhaustion", () => {
   assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
 });
 
-test("cangyuansuanli 实战欠费文案（预扣费额度失败）归 quota_exhausted 且可自癒", () => {
-  // 2026-09-27 查證原文：cangyuansuanli seedance-2.0 欠費 →
+test("cangyuansuanli 实战欠费文案（预扣费额度失败）归 quota_exhausted 且可自愈", () => {
+  // 2026-09-27 查证原文：cangyuansuanli seedance-2.0 欠费 →
   // 「预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000」
   const result = classifySupplierFailure(
     new SupplierRequestError("预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000", 502),
@@ -111,8 +111,8 @@ test("bare 502 without quota copy is still a retryable overload (regression)", (
 });
 
 
-test("xiaoyxiao 欠費以 HTTP 401 回來仍歸 quota_exhausted，不得隔離帳號（INC-VIDEO-0927b）", () => {
-  // 2026-09-27 生產原文：401 {"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000"}
+test("xiaoyxiao 欠费以 HTTP 401 回来仍归 quota_exhausted，不得隔离帐号（INC-VIDEO-0927b）", () => {
+  // 2026-09-27 生产原文：401 {"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000"}
   const result = classifySupplierFailure(
     new SupplierRequestError(
       '{"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000","data":null}',

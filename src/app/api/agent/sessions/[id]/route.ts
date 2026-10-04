@@ -1,7 +1,7 @@
-// DELETE /api/agent/sessions/[id] —— 刪掉一個會話，釋放上游資源。
+// DELETE /api/agent/sessions/[id] —— 删掉一个会话，释放上游资源。
 //
-// 純代理：不本地校驗任何業務欄位，刪除結果（含閘道回的 4xx，例如找不到會話）
-// 原樣透傳給客戶端。
+// 纯代理：不本地校验任何业务栏位，删除结果（含闸道回的 4xx，例如找不到会话）
+// 原样透传给客户端。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -9,7 +9,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -17,7 +17,7 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
-/** gateway 響應原樣透傳：status 與 body 都不吞，好讓客戶端看到真實原因。 */
+/** gateway 响应原样透传：status 与 body 都不吞，好让客户端看到真实原因。 */
 function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
   if (resp.status >= 200 && resp.status < 300) {
     return NextResponse.json(resp.json ?? {}, { status: resp.status, headers: { "Cache-Control": "no-store" } });
@@ -28,10 +28,10 @@ function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
 }
 
 /**
- * DELETE 幂等化：閘道回 404 "session not found" 時視同刪除成功（目標已不存在）。
- * 網關 session 存在記憶體，進程重啟（如 CORS 修復部署）會讓舊 session 全數消失，
- * 前端 best-effort 清理舊存檔會打到這種 404 —— 若不吞掉，瀏覽器 console 持續噴
- * "Failed to load resource: 404" 噪音。只有 not_found 才吞；其他 4xx/5xx 原樣透傳。
+ * DELETE 幂等化：闸道回 404 "session not found" 时视同删除成功（目标已不存在）。
+ * 网关 session 存在记忆体，进程重启（如 CORS 修复部署）会让旧 session 全数消失，
+ * 前端 best-effort 清理旧存档会打到这种 404 —— 若不吞掉，浏览器 console 持续喷
+ * "Failed to load resource: 404" 噪音。只有 not_found 才吞；其他 4xx/5xx 原样透传。
  */
 function isGatewaySessionNotFound(resp: AgentGatewayResponse): boolean {
   const json = resp.json as { code?: unknown } | null;
@@ -55,16 +55,16 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
   } catch {
     return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
   }
-  // 已回收的 session 視同刪除成功（冪等），不再向瀏覽器噴 404 噪音。
+  // 已回收的 session 视同删除成功（幂等），不再向浏览器喷 404 噪音。
   if (isGatewaySessionNotFound(resp)) {
     return NextResponse.json({ success: true, already_gone: true }, { status: 200, headers: { "Cache-Control": "no-store" } });
   }
   return gatewayResponse(resp);
 }
 
-// GET /api/agent/sessions/[id] - 中繼閘道 GET /agent/v1/sessions/:id/messages，
-// 取回該會話的全量聊天歷史。純代理：opencode messages 陣列原樣透傳，
-// 本層不改形不落地；陣列/包裝物件與欄位映射的歸一化由前端負責。
+// GET /api/agent/sessions/[id] - 中继闸道 GET /agent/v1/sessions/:id/messages，
+// 取回该会话的全量聊天历史。纯代理：opencode messages 阵列原样透传，
+// 本层不改形不落地；阵列/包装物件与栏位映射的归一化由前端负责。
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const caller = await resolveAgentCaller(req);
   if (!caller.ok) {

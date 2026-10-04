@@ -118,7 +118,7 @@ test("generateViaExternalChannel reports missing credential honestly", async () 
     const channel = normalizeExternalChannel(VALID) as ExternalChannel;
     const outcome = await generateViaExternalChannel({ channel, modelId: "gpt-image-2", prompt: "x" });
     assert.equal(outcome.ok, false);
-    assert.match(outcome.failures[0] ?? "", /未設定/);
+    assert.match(outcome.failures[0] ?? "", /未设定/);
   } finally {
     if (previous === undefined) delete process.env.CUST_A_API_KEY;
     else process.env.CUST_A_API_KEY = previous;

@@ -4,12 +4,12 @@ import { mkdir, writeFile, rm } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import { ok, fail, resolveKey } from "../lib/client"
 
-// 配音時間軸（2026-08-31 片4）：台詞表 → 逐行真 TTS → ffprobe 實測時長 → 累計 offset 錨點。
-// 復用 tts_speak 的上游調法（gateway /agent/v1/tts，loopback，非平台 /v1——平台無 tts 端點）。
-// 誠實紀律：時長一律 ffprobe 實測，不信估算；上游不可用如實回 tts_unavailable，不編造音頻。
+// 配音时间轴（2026-08-31 片4）：台词表 → 逐行真 TTS → ffprobe 实测时长 → 累计 offset 锚点。
+// 复用 tts_speak 的上游调法（gateway /agent/v1/tts，loopback，非平台 /v1——平台无 tts 端点）。
+// 诚实纪律：时长一律 ffprobe 实测，不信估算；上游不可用如实回 tts_unavailable，不编造音频。
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
-// 靜態 ffprobe（johnvansickle build）：URL 直讀會段錯誤，必須先下載到本地檔再探。
+// 静态 ffprobe（johnvansickle build）：URL 直读会段错误，必须先下载到本地档再探。
 const FFPROBE = "/opt/agent-harness/bin/ffprobe"
 const RUN_DIR = "/opt/agent-harness/workspace/.run"
 
@@ -18,11 +18,11 @@ interface Line {
   text: string
 }
 
-/** 解析台詞表：JSON 行陣列（{role|character, text|content|line}）或純文字（每行一句，可「角色：內容」）。 */
+/** 解析台词表：JSON 行阵列（{role|character, text|content|line}）或纯文字（每行一句，可「角色：内容」）。 */
 function parseScript(raw: string): { lines: Line[]; error?: string } {
   const trimmed = raw.trim()
-  if (!trimmed) return { lines: [], error: "台詞表為空" }
-  // 先試 JSON
+  if (!trimmed) return { lines: [], error: "台词表为空" }
+  // 先试 JSON
   if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
     try {
       const j = JSON.parse(trimmed)
@@ -47,10 +47,10 @@ function parseScript(raw: string): { lines: Line[]; error?: string } {
       if (!lines.length) return { lines: [], error: "JSON 中未解析到任何含 text/content/line 的行" }
       return { lines }
     } catch {
-      return { lines: [], error: "JSON 解析失敗：請傳合法 JSON 行陣列，或用純文字（每行一句）" }
+      return { lines: [], error: "JSON 解析失败：请传合法 JSON 行阵列，或用纯文字（每行一句）" }
     }
   }
-  // 純文字：按行切，支持「角色：內容」「角色: 內容」「- 內容」
+  // 纯文字：按行切，支持「角色：内容」「角色: 内容」「- 内容」
   const lines: Line[] = []
   for (const ln of trimmed.split(/\r?\n/)) {
     const s = ln.replace(/^[-•*]\s*/, "").trim()
@@ -59,11 +59,11 @@ function parseScript(raw: string): { lines: Line[]; error?: string } {
     if (m && m[2].trim()) lines.push({ role: m[1].trim(), text: m[2].trim() })
     else lines.push({ role: "", text: s })
   }
-  if (!lines.length) return { lines: [], error: "未解析到任何台詞行" }
+  if (!lines.length) return { lines: [], error: "未解析到任何台词行" }
   return { lines }
 }
 
-/** ffprobe 實測本地音頻檔時長（秒）。失敗回 null，不編造。 */
+/** ffprobe 实测本地音频档时长（秒）。失败回 null，不编造。 */
 function probeDurationSec(file: string, signal?: AbortSignal): Promise<number | null> {
   return new Promise((resolve) => {
     let settled = false
@@ -105,20 +105,20 @@ function probeDurationSec(file: string, signal?: AbortSignal): Promise<number | 
 
 export default tool({
   description:
-    "配音時間軸（audio-first）：輸入台詞表（JSON 行陣列 [{role, text}] 或純文字每行一句，支持「角色：內容」），逐行調真 TTS 生成配音，ffprobe 實測每行時長，輸出帶累計 offset_ms 錨點的時間軸 JSON。用於「先配音後配畫」的短片/動畫時間軸錨點。\n\n【誠實】時長一律 ffprobe 實測，不信估算；TTS 上游不可用時回 tts_unavailable，不編造音頻 URL；單行探測失敗該行 duration_ms 標 null 並在 note 說明，不冒充。\n\n【成本】逐行按字符計價（當前極低，以每行返回的 cost_coins 為準，總和見 total_cost_coins）。max_lines 默認 20 防爆預算。speed 目前上游未接入語速控制，傳入不生效（如實標注）。",
+    "配音时间轴（audio-first）：输入台词表（JSON 行阵列 [{role, text}] 或纯文字每行一句，支持「角色：内容」），逐行调真 TTS 生成配音，ffprobe 实测每行时长，输出带累计 offset_ms 锚点的时间轴 JSON。用于「先配音后配画」的短片/动画时间轴锚点。\n\n【诚实】时长一律 ffprobe 实测，不信估算；TTS 上游不可用时回 tts_unavailable，不编造音频 URL；单行探测失败该行 duration_ms 标 null 并在 note 说明，不冒充。\n\n【成本】逐行按字符计价（当前极低，以每行返回的 cost_coins 为准，总和见 total_cost_coins）。max_lines 默认 20 防爆预算。speed 目前上游未接入语速控制，传入不生效（如实标注）。",
   args: {
     script: tool.schema
       .string()
       .min(1)
-      .describe("台詞表：JSON 行陣列字串 [{role, text}]（text/content/line 皆可，role/character/speaker 皆可），或純文字每行一句"),
-    voice: tool.schema.string().optional().describe("音色名（可選，透傳上游）"),
-    speed: tool.schema.number().min(0.5).max(2).optional().describe("語速（可選；當前上游未支持，傳入不生效，如實標注）"),
-    gap_ms: tool.schema.number().int().min(0).max(5000).optional().describe("行間靜默毫秒，默認 0（offset 純累加）"),
-    max_lines: tool.schema.number().int().min(1).max(50).optional().describe("行數上限，默認 20，超出截斷並在 truncated 標注"),
+      .describe("台词表：JSON 行阵列字串 [{role, text}]（text/content/line 皆可，role/character/speaker 皆可），或纯文字每行一句"),
+    voice: tool.schema.string().optional().describe("音色名（可选，透传上游）"),
+    speed: tool.schema.number().min(0.5).max(2).optional().describe("语速（可选；当前上游未支持，传入不生效，如实标注）"),
+    gap_ms: tool.schema.number().int().min(0).max(5000).optional().describe("行间静默毫秒，默认 0（offset 纯累加）"),
+    max_lines: tool.schema.number().int().min(1).max(50).optional().describe("行数上限，默认 20，超出截断并在 truncated 标注"),
   },
   async execute(args, context) {
     const { lines, error } = parseScript(args.script)
-    if (error) return fail("invalid_script", error, { title: "台詞表解析失敗" })
+    if (error) return fail("invalid_script", error, { title: "台词表解析失败" })
 
     const maxLines = args.max_lines ?? 20
     const truncated = lines.length > maxLines
@@ -129,7 +129,7 @@ export default tool({
     try {
       key = await resolveKey(context.sessionID, context.abort)
     } catch (e: any) {
-      return fail("key_unresolved", e?.message || "無法解析 API key", { title: "鑰匙解析失敗" })
+      return fail("key_unresolved", e?.message || "无法解析 API key", { title: "钥匙解析失败" })
     }
 
     const dir = `${RUN_DIR}/a4t-${Date.now()}-${randomBytes(4).toString("hex")}`
@@ -150,7 +150,7 @@ export default tool({
           text: line.text,
           offset_ms: offsetMs,
         }
-        // 1) 調 TTS（復用 tts_speak 上游調法）
+        // 1) 调 TTS（复用 tts_speak 上游调法）
         let ttsResp: Response
         try {
           ttsResp = await fetch(`${GATEWAY}/agent/v1/tts`, {
@@ -179,10 +179,10 @@ export default tool({
         }
         if (!ttsResp.ok || !data?.ok || !data.url) {
           const code = data?.error?.code || `http_${ttsResp.status}`
-          const hint = data?.error?.message || `TTS 請求失敗（HTTP ${ttsResp.status}）`
+          const hint = data?.error?.message || `TTS 请求失败（HTTP ${ttsResp.status}）`
           if (code === "tts_unavailable") {
             anyUnavailable = { code, hint }
-            // 上游整體不可用：後續行不再逐行撞牆，如實中斷
+            // 上游整体不可用：后续行不再逐行撞墙，如实中断
             entry.audio_url = null
             entry.duration_ms = null
             entry.error = code
@@ -199,7 +199,7 @@ export default tool({
         entry.cost_coins = data.cost_coins ?? 0
         totalCost += data.cost_coins ?? 0
 
-        // 2) 下載 mp3 到本地檔 → ffprobe 實測（URL 直探會段錯誤）
+        // 2) 下载 mp3 到本地档 → ffprobe 实测（URL 直探会段错误）
         let durationMs: number | null = null
         try {
           const audio = await fetch(data.url, { signal: context.abort ?? AbortSignal.timeout(30_000) })
@@ -216,10 +216,10 @@ export default tool({
             }
           }
         } catch {
-          /* durationMs 保持 null，誠實標注 */
+          /* durationMs 保持 null，诚实标注 */
         }
         entry.duration_ms = durationMs
-        if (durationMs === null) entry.duration_note = "ffprobe 探測失敗，未編造時長"
+        if (durationMs === null) entry.duration_note = "ffprobe 探测失败，未编造时长"
         else offsetMs += durationMs + gapMs
         timeline.push(entry)
       }
@@ -227,26 +227,26 @@ export default tool({
       rm(dir, { recursive: true, force: true }).catch(() => {})
     }
 
-    // 上游整體不可用：誠實失敗，不返回半成品時間軸冒充成功
+    // 上游整体不可用：诚实失败，不返回半成品时间轴冒充成功
     if (anyUnavailable && probedCount === 0) {
       return fail(anyUnavailable.code, anyUnavailable.hint, {
-        title: "配音上游暫缺",
-        note: "台詞已收到，但當前無法真實生成音軌；請如實告知用戶，勿編造音頻鏈接。",
+        title: "配音上游暂缺",
+        note: "台词已收到，但当前无法真实生成音轨；请如实告知用户，勿编造音频链接。",
       })
     }
 
-    const totalDurationMs = offsetMs - (timeline.length ? gapMs : 0) // 末行不補尾間隔
+    const totalDurationMs = offsetMs - (timeline.length ? gapMs : 0) // 末行不补尾间隔
     return ok(
       {
-        title: `配音時間軸：${timeline.length} 行（實測 ${probedCount} 行時長）`,
+        title: `配音时间轴：${timeline.length} 行（实测 ${probedCount} 行时长）`,
         timeline,
         total_duration_ms: Math.max(0, totalDurationMs),
         total_cost_coins: Math.round(totalCost * 1e6) / 1e6,
         lines_requested: lines.length,
         lines_processed: timeline.length,
         truncated,
-        speed_note: args.speed !== undefined ? "speed 已傳入但當前上游未支持語速控制，不生效" : null,
-        note: "逐行真 TTS + ffprobe 實測時長；offset_ms 為累計錨點（含 gap_ms）。duration_ms=null 的行探測失敗未編造。",
+        speed_note: args.speed !== undefined ? "speed 已传入但当前上游未支持语速控制，不生效" : null,
+        note: "逐行真 TTS + ffprobe 实测时长；offset_ms 为累计锚点（含 gap_ms）。duration_ms=null 的行探测失败未编造。",
       },
       { lines: timeline.length, total_duration_ms: Math.max(0, totalDurationMs) },
     )

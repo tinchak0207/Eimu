@@ -154,43 +154,43 @@ export function createGenerationWorkflow(
 // ─────────────────────────── 工作流跑批推送投影（2026-09-20 Phase 2）
 //
 // gateway（deploy-staging/gateway/workflow-gw.ts:190 pushWorkflowCompletion）在
-// 跑批收尾時把整條 workflow 的完成態 POST 給站點，站點要把它落成一條歷史記錄。
-// 本節就是那段投影：payload → HistoryEntry 的 workflow 欄位 + 兩個 DAG 陣列。
+// 跑批收尾时把整条 workflow 的完成态 POST 给站点，站点要把它落成一条历史记录。
+// 本节就是那段投影：payload → HistoryEntry 的 workflow 栏位 + 两个 DAG 阵列。
 //
-// 為什麼投影放在 lib 而不是 route 裡：route 只該做鑑權、I/O、回應；純資料轉換
-// 放 lib 才能在 `node --test` 直接測（本檔已被 generation-workflow.test.ts 覆蓋）。
+// 为什么投影放在 lib 而不是 route 里：route 只该做鉴权、I/O、回应；纯资料转换
+// 放 lib 才能在 `node --test` 直接测（本档已被 generation-workflow.test.ts 覆盖）。
 //
-// 為什麼 DAG 陣列「同時」回傳、既存進 workflow 又單獨回：workflow 欄位是歷史
-// 記錄的持久形狀（前端讀 dagNodes 畫縮圖），單獨回傳是給 route 立刻丟給
-// renderWorkflowDagPng 用，不必從 workflow 欄位再 cast 一次。
+// 为什么 DAG 阵列「同时」回传、既存进 workflow 又单独回：workflow 栏位是历史
+// 记录的持久形状（前端读 dagNodes 画缩图），单独回传是给 route 立刻丢给
+// renderWorkflowDagPng 用，不必从 workflow 栏位再 cast 一次。
 
-/** gateway 推送的節點形狀（欄位名與 workflow-gw.ts 的 map 逐字對齊）。 */
+/** gateway 推送的节点形状（栏位名与 workflow-gw.ts 的 map 逐字对齐）。 */
 export interface WorkflowRunPushNode {
   id: string;
   role?: string;
   kind?: string;
   title?: string;
   status?: string;
-  /** 節點產物（圖片/影片 URL、文本內容）；gateway 可能不給。 */
+  /** 节点产物（图片/影片 URL、文本内容）；gateway 可能不给。 */
   content?: string;
   costCoins?: number;
   error?: string;
   /**
-   * config 類節點的參數（`{...模板 defaults, ...agent 填的 content[role]}`，
-   * 見 workflow-engine.expandTemplate）。記憶庫要存「這條工作流用什麼參數跑」
-   * 靠的就是它——`content` 只有 text 節點有，光靠它抽不出 model/size/count。
+   * config 类节点的参数（`{...模板 defaults, ...agent 填的 content[role]}`，
+   * 见 workflow-engine.expandTemplate）。记忆库要存「这条工作流用什么参数跑」
+   * 靠的就是它——`content` 只有 text 节点有，光靠它抽不出 model/size/count。
    */
   metadata?: Record<string, unknown>;
 }
 
 /**
- * gateway 推送的連線形狀。**兩種都要吃**：
- *   - `{from, to}`          —— workflow-engine.expandTemplate 展開後的真形狀
- *                              （workflow-engine.ts:155 已把 role 換成 node.id）；
- *   - `{fromRole, toRole}`  —— 模板原始形狀（workflow-templates.ts 的
- *                              WorkflowConnectionSpec），agent 手動加的連線或
- *                              未來 gateway 改推模板層資料時會出現。
- * 兩種混在同一陣列也要各自處理，所以不能先看陣列形狀再整體分支。
+ * gateway 推送的连线形状。**两种都要吃**：
+ *   - `{from, to}`          —— workflow-engine.expandTemplate 展开后的真形状
+ *                              （workflow-engine.ts:155 已把 role 换成 node.id）；
+ *   - `{fromRole, toRole}`  —— 模板原始形状（workflow-templates.ts 的
+ *                              WorkflowConnectionSpec），agent 手动加的连线或
+ *                              未来 gateway 改推模板层资料时会出现。
+ * 两种混在同一阵列也要各自处理，所以不能先看阵列形状再整体分支。
  */
 export interface WorkflowRunPushConnection {
   from?: string;
@@ -209,41 +209,41 @@ export interface WorkflowRunPushPayload {
   totalCostCoins?: number;
   completedAt?: string;
   /**
-   * gateway 側 Jev 閘門的結論（`gateWorkflowMemory`）：這條值不值得進記憶庫。
-   * `false`＝別沉澱；缺省（舊版 gateway 或 Jev 掛掉）＝照機器判定走。
-   * 站點只消費結論，不持有 Jev 憑據。
+   * gateway 侧 Jev 闸门的结论（`gateWorkflowMemory`）：这条值不值得进记忆库。
+   * `false`＝别沉淀；缺省（旧版 gateway 或 Jev 挂掉）＝照机器判定走。
+   * 站点只消费结论，不持有 Jev 凭据。
    */
   memoryWorthPersisting?: boolean;
   /**
-   * 記憶庫 ownerKey（該跑批所屬用戶的），由 gateway 從 `state.apiKey` 算出。
+   * 记忆库 ownerKey（该跑批所属用户的），由 gateway 从 `state.apiKey` 算出。
    *
-   * 為什麼不由站點自行推導：站點只握有推送用的平台級 HARNESS_API_KEY，hash 它
-   * 得到的 ownerKey 與 agent 注入記憶用的 per-user key hash **不同**，記憶會寫進
-   * 一個 agent 永遠召不到的角落（實測：兩者 hash 不相等）。gateway 的
-   * `state.apiKey` 才是那位用戶的派生 key，兩端對同一把 key 做同一套 hash 才收斂。
+   * 为什么不由站点自行推导：站点只握有推送用的平台级 HARNESS_API_KEY，hash 它
+   * 得到的 ownerKey 与 agent 注入记忆用的 per-user key hash **不同**，记忆会写进
+   * 一个 agent 永远召不到的角落（实测：两者 hash 不相等）。gateway 的
+   * `state.apiKey` 才是那位用户的派生 key，两端对同一把 key 做同一套 hash 才收敛。
    *
-   * 形狀：24 字元小寫 hex（SHA-256 前 12 bytes）；非此形狀視為無效並回落舊路徑。
+   * 形状：24 字元小写 hex（SHA-256 前 12 bytes）；非此形状视为无效并回落旧路径。
    */
   memoryOwnerKeyHash?: string;
 }
 
-/** 投影結果：workflow 欄位（落盤用）＋兩個 DAG 陣列（渲染用）。 */
+/** 投影结果：workflow 栏位（落盘用）＋两个 DAG 阵列（渲染用）。 */
 export interface ProjectedWorkflowRun {
   workflow: GenerationWorkflowMetadata;
   dagNodes: DagNodeInput[];
   dagConnections: DagConnectionInput[];
 }
 
-// dag-renderer 是純模組（只依賴 dagre），沒有 Next.js / node 原生依賴，
-// 因此這裡可以值匯入而不破壞本檔「能被 node --test 直接 import」的前提。
-// （型別匯入集中在檔頭，此處只留說明。）
+// dag-renderer 是纯模组（只依赖 dagre），没有 Next.js / node 原生依赖，
+// 因此这里可以值汇入而不破坏本档「能被 node --test 直接 import」的前提。
+// （型别汇入集中在档头，此处只留说明。）
 
-/** 節點 id 清洗：只做「非空字串」這一道，id 由 gateway 生成、不進路徑。 */
+/** 节点 id 清洗：只做「非空字串」这一道，id 由 gateway 生成、不进路径。 */
 function cleanNodeId(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/** 節點投影：缺欄位就沿用 gateway 的語義（title 空字串、status 缺省 pending）。 */
+/** 节点投影：缺栏位就沿用 gateway 的语义（title 空字串、status 缺省 pending）。 */
 function projectNode(raw: WorkflowRunPushNode): DagNodeInput | null {
   const id = cleanNodeId(raw?.id);
   if (!id) return null;
@@ -252,10 +252,10 @@ function projectNode(raw: WorkflowRunPushNode): DagNodeInput | null {
     id,
     role,
     kind: typeof raw.kind === "string" && raw.kind.trim() ? raw.kind.trim() : "text",
-    // 標題缺省用 role：歷史卡的 DAG 縮圖上「沒有標題的方框」比「role 名」難認。
+    // 标题缺省用 role：历史卡的 DAG 缩图上「没有标题的方框」比「role 名」难认。
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : role,
-    // status 缺省 pending 而非 succeeded：gateway 推的是完成態，但缺值不代表成功，
-    // 對缺值說成功就是編造（渲染器只對 "failed" 畫紅框，pending 會是中性外框）。
+    // status 缺省 pending 而非 succeeded：gateway 推的是完成态，但缺值不代表成功，
+    // 对缺值说成功就是编造（渲染器只对 "failed" 画红框，pending 会是中性外框）。
     status: typeof raw.status === "string" && raw.status.trim() ? raw.status.trim() : "pending",
     ...(typeof raw.costCoins === "number" && Number.isFinite(raw.costCoins) ? { costCoins: raw.costCoins } : {}),
     ...(typeof raw.error === "string" && raw.error.trim() ? { error: raw.error.trim() } : {}),
@@ -263,16 +263,16 @@ function projectNode(raw: WorkflowRunPushNode): DagNodeInput | null {
 }
 
 /**
- * 連線正規化：把 `{from,to}` / `{fromRole,toRole}` 兩種形狀一律收斂成
+ * 连线正规化：把 `{from,to}` / `{fromRole,toRole}` 两种形状一律收敛成
  * `{from: nodeId, to: nodeId}`。
  *
- * role → nodeId 的映射表由節點陣列建（同一 role 取第一個，重複時記 warn 並
- * 只認首見——`workflow-engine.expandTemplate` 的 byRole 也是「後者覆蓋前者」，
- * 但多鏡展開後同 role 原則上只會有一顆；出現兩顆代表資料異常，取首見至少
- * 是穩定的）。
+ * role → nodeId 的映射表由节点阵列建（同一 role 取第一个，重复时记 warn 并
+ * 只认首见——`workflow-engine.expandTemplate` 的 byRole 也是「后者覆盖前者」，
+ * 但多镜展开后同 role 原则上只会有一颗；出现两颗代表资料异常，取首见至少
+ * 是稳定的）。
  *
- * 解析不出端點的連線直接丟棄（孤兒邊）——畫到 DAG 上會是一條接不到節點的線，
- * 渲染器本身也會略過，這裡丟掉是讓上游的計數誠實（不回一個含垃圾的陣列）。
+ * 解析不出端点的连线直接丢弃（孤儿边）——画到 DAG 上会是一条接不到节点的线，
+ * 渲染器本身也会略过，这里丢掉是让上游的计数诚实（不回一个含垃圾的阵列）。
  */
 export function normalizeWorkflowConnections(
   nodes: DagNodeInput[],
@@ -286,7 +286,7 @@ export function normalizeWorkflowConnections(
     if (byRole.has(node.role)) {
       if (!duplicateRoles.has(node.role)) {
         duplicateRoles.add(node.role);
-        console.warn(`[workflow] role "${node.role}" 對應多個節點，連線一律取首見節點。`);
+        console.warn(`[workflow] role "${node.role}" 对应多个节点，连线一律取首见节点。`);
       }
       continue;
     }
@@ -294,7 +294,7 @@ export function normalizeWorkflowConnections(
   }
   const nodeIds = new Set(nodes.map((node) => node.id));
 
-  /** 端點解析：先當 nodeId（from/to 形狀），再當 role（fromRole/toRole 形狀）。 */
+  /** 端点解析：先当 nodeId（from/to 形状），再当 role（fromRole/toRole 形状）。 */
   const endpoint = (idValue: unknown, roleValue: unknown): string | undefined => {
     const id = cleanNodeId(idValue);
     if (id && nodeIds.has(id)) return id;
@@ -319,8 +319,8 @@ export function normalizeWorkflowConnections(
 }
 
 /**
- * 把 gateway 跑批推送 payload 投影成 HistoryEntry 的 workflow 欄位 + DAG 陣列。
- * 純函式、絕不拋錯：呼叫端（route）負責先驗必要欄位。
+ * 把 gateway 跑批推送 payload 投影成 HistoryEntry 的 workflow 栏位 + DAG 阵列。
+ * 纯函式、绝不抛错：呼叫端（route）负责先验必要栏位。
  */
 export function projectWorkflowRunToHistory(payload: WorkflowRunPushPayload): ProjectedWorkflowRun {
   const rawNodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
@@ -348,24 +348,24 @@ export function projectWorkflowRunToHistory(payload: WorkflowRunPushPayload): Pr
   return { workflow, dagNodes, dagConnections };
 }
 
-/** 历史记录 id：由 workflowId 派生 = 同一條工作流重複推送只會落到同一條記錄。 */
+/** 历史记录 id：由 workflowId 派生 = 同一条工作流重复推送只会落到同一条记录。 */
 export function workflowHistoryEntryId(workflowId: string): string {
   return `workflow-${String(workflowId ?? "").trim()}`;
 }
 
 /**
- * 從跑批 payload 反推「這條工作流用什麼參數跑」的 config（記憶庫的 body 原料）。
+ * 从跑批 payload 反推「这条工作流用什么参数跑」的 config（记忆库的 body 原料）。
  *
- * 為什麼不能只讀一個欄位：gateway 把參數攤在節點上，沒有單一 config 物件——
- *   - **prompt** 在 text 節點的 `content`（workflow-service 把提示詞灌注進
- *     kind="text" 的節點，見 workflow-service.ts 的 nodeContent 組裝）；
- *   - **model/size/count/kind** 在 config 節點的 `metadata`（expandTemplate 的
- *     `{...defaults, ...content[role]}`，見 workflow-engine.ts:69）。
- * 抽的時候按 kind 分流，並以「第一個有值的為準」——同一模板可能有多個 text/config
- * 節點（多鏡展開會克隆 shotN_gen），取首個代表整條工作流的參數基調。
+ * 为什么不能只读一个栏位：gateway 把参数摊在节点上，没有单一 config 物件——
+ *   - **prompt** 在 text 节点的 `content`（workflow-service 把提示词灌注进
+ *     kind="text" 的节点，见 workflow-service.ts 的 nodeContent 组装）；
+ *   - **model/size/count/kind** 在 config 节点的 `metadata`（expandTemplate 的
+ *     `{...defaults, ...content[role]}`，见 workflow-engine.ts:69）。
+ * 抽的时候按 kind 分流，并以「第一个有值的为准」——同一模板可能有多个 text/config
+ * 节点（多镜展开会克隆 shotN_gen），取首个代表整条工作流的参数基调。
  *
- * `metadata` 只收純量（字串/數字/布林）與短陣列，避免把整包上游回包塞進記憶
- * body（body 硬上限 2000 字元，見 workflow-memory.ts）。
+ * `metadata` 只收纯量（字串/数字/布林）与短阵列，避免把整包上游回包塞进记忆
+ * body（body 硬上限 2000 字元，见 workflow-memory.ts）。
  */
 export function extractWorkflowRunConfig(
   nodes: readonly WorkflowRunPushNode[] | undefined,
@@ -376,8 +376,8 @@ export function extractWorkflowRunConfig(
   const promptNode = list.find((n) => n?.kind === "text" && cleanText(n?.content));
   if (promptNode && cleanText(promptNode.content)) config.prompt = cleanText(promptNode.content);
 
-  // config 節點的 metadata 攤平：`kind` 決定這是圖片還是影片配置，其餘欄位
-  //（model/size/count/duration_seconds/unit_price_*）原樣帶上。
+  // config 节点的 metadata 摊平：`kind` 决定这是图片还是影片配置，其余栏位
+  //（model/size/count/duration_seconds/unit_price_*）原样带上。
   const configNode = list.find((n) => n?.kind === "config" && isRecord(n?.metadata));
   if (configNode && isRecord(configNode.metadata)) {
     for (const [key, value] of Object.entries(configNode.metadata)) {
@@ -385,8 +385,8 @@ export function extractWorkflowRunConfig(
     }
   }
 
-  // 節點結構本身也是「這條工作流長什麼樣」的一部分：把 role:kind 序列記下來，
-  // 讓記憶庫能回答「這條有幾個鏡頭/幾道手續」而不必重讀 DAG。
+  // 节点结构本身也是「这条工作流长什么样」的一部分：把 role:kind 序列记下来，
+  // 让记忆库能回答「这条有几个镜头/几道手续」而不必重读 DAG。
   const shape = list
     .map((n) => {
       const role = cleanText(n?.role);
@@ -400,7 +400,7 @@ export function extractWorkflowRunConfig(
   return config;
 }
 
-/** 記憶 body 只收純量與短字串陣列；物件/長陣列會把 2000 字元預算吃光。 */
+/** 记忆 body 只收纯量与短字串阵列；物件/长阵列会把 2000 字元预算吃光。 */
 function scalarOrShortArray(value: unknown): boolean {
   if (typeof value === "string") return value.length <= 600;
   if (typeof value === "number" || typeof value === "boolean") return true;

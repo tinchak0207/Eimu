@@ -1,22 +1,22 @@
 "use client";
 
-// 分鏡卡主體（2026-09-16 刀 2 消費端，G3）。
-// 輪子來源：同目錄 Scene3dCardBody.tsx（欄位族渲染元件的結構/樣式慣例：欄位族取值 → 分層
-// 正文區 → 徽章行），欄位表來源 = `src/lib/storyboard-contract.ts` 的 21 欄 AID 逐字契約。
-// 白名單偏離僅四項：
-//   ①數據源 = node.metadata.storyboardShot（一鏡，21 欄）/ node.metadata.storyboardScene（場景外殼）
-//   ②文案簡體（與 NodeBody/Scene3dCardBody 同款）
-//   ③交互 = 只讀（與 Scene3dCardBody 同姿態）＋**音軌綁定/解除**入口
-//     （2026-09-30：`bindShotAudioTrack`/`clearShotAudioTrack` 的 UI 生產者；
-//     寫入路徑由宿主注入＝`onPatchMetadata`，未注入時整塊不渲染＝維持原唯讀）
-//   ④欄位分四組呈現（畫面/台词·音效/時空/摄影），非平鋪 21 行
+// 分镜卡主体（2026-09-16 刀 2 消费端，G3）。
+// 轮子来源：同目录 Scene3dCardBody.tsx（栏位族渲染元件的结构/样式惯例：栏位族取值 → 分层
+// 正文区 → 徽章行），栏位表来源 = `src/lib/storyboard-contract.ts` 的 21 栏 AID 逐字契约。
+// 白名单偏离仅四项：
+//   ①数据源 = node.metadata.storyboardShot（一镜，21 栏）/ node.metadata.storyboardScene（场景外壳）
+//   ②文案简体（与 NodeBody/Scene3dCardBody 同款）
+//   ③交互 = 只读（与 Scene3dCardBody 同姿态）＋**音轨绑定/解除**入口
+//     （2026-09-30：`bindShotAudioTrack`/`clearShotAudioTrack` 的 UI 生产者；
+//     写入路径由宿主注入＝`onPatchMetadata`，未注入时整块不渲染＝维持原唯读）
+//   ④栏位分四组呈现（画面/台词·音效/时空/摄影），非平铺 21 行
 //
-// 空值規則（逐字沿用 AID）：無內容欄位 = `""`。**空欄位不渲染該行**——`""` 的語義就是
-// 「本鏡無此內容」（空镜填 ""），畫成「—」或「（空）」是把「無內容」冒充成「有欄位」。
-// 整組皆空則整組不渲染（組標題也不留），但 `shotNumber` 永遠渲染（唯一鍵，契約保證非空）。
+// 空值规则（逐字沿用 AID）：无内容栏位 = `""`。**空栏位不渲染该行**——`""` 的语义就是
+// 「本镜无此内容」（空镜填 ""），画成「—」或「（空）」是把「无内容」冒充成「有栏位」。
+// 整组皆空则整组不渲染（组标题也不留），但 `shotNumber` 永远渲染（唯一键，契约保证非空）。
 //
-// 尺寸鐵律：正文 ≥13px（DESIGN.md §4「正文不小於 13px」）；只有 eyebrow/label 走 11px。
-// 渲染驗收權在暴君，本組件不做自我 UI 檢查。
+// 尺寸铁律：正文 ≥13px（DESIGN.md §4「正文不小于 13px」）；只有 eyebrow/label 走 11px。
+// 渲染验收权在暴君，本组件不做自我 UI 检查。
 
 import { useState } from "react";
 import { Camera, Clock, Film, Link2, Link2Off, MessageSquareText } from "lucide-react";
@@ -34,7 +34,7 @@ import {
   type StoryboardShotField,
 } from "@/lib/storyboard-contract";
 
-/** 一組 = 標題 + 該組欄位（順序 = 21 欄契約順序的子序列，組內不重排）。 */
+/** 一组 = 标题 + 该组栏位（顺序 = 21 栏契约顺序的子序列，组内不重排）。 */
 interface ShotFieldGroup {
   key: "picture" | "voice" | "spacetime" | "camera";
   label: string;
@@ -42,9 +42,9 @@ interface ShotFieldGroup {
 }
 
 /**
- * 四組切分。**並集必須恰為 `STORYBOARD_SHOT_FIELDS` 全 21 欄**（順序無關，但不得漏/多）——
- * 由 `storyboardShotGroups` 的契約測試釘死（新增欄位若忘了歸組 → 測試紅，不會靜默消失）。
- * `shotNumber` 不入組：它是鏡號，渲染在卡頭徽章，不當正文行。
+ * 四组切分。**并集必须恰为 `STORYBOARD_SHOT_FIELDS` 全 21 栏**（顺序无关，但不得漏/多）——
+ * 由 `storyboardShotGroups` 的契约测试钉死（新增栏位若忘了归组 → 测试红，不会静默消失）。
+ * `shotNumber` 不入组：它是镜号，渲染在卡头徽章，不当正文行。
  */
 export const SHOT_FIELD_GROUPS: readonly ShotFieldGroup[] = [
   {
@@ -71,7 +71,7 @@ export const SHOT_FIELD_GROUPS: readonly ShotFieldGroup[] = [
   },
 ];
 
-/** 分組標題的中文欄位名（逐字取 AID 提示词开发指南 §輸出 欄位表「含义」列）。 */
+/** 分组标题的中文栏位名（逐字取 AID 提示词开发指南 §输出 栏位表「含义」列）。 */
 export const SHOT_FIELD_LABEL: Record<StoryboardShotField, string> = {
   shotNumber: "镜号",
   scriptContent: "剧本原文",
@@ -109,8 +109,8 @@ export interface ShotGroupRows {
 }
 
 /**
- * 一鏡 → 分組列（純函數，供測試直測）：丟棄空值欄位；整組皆空則整組丟棄。
- * `storyboardShotGroups` 之名留給 React 分支，本函數是它的資料來源。
+ * 一镜 → 分组列（纯函数，供测试直测）：丢弃空值栏位；整组皆空则整组丢弃。
+ * `storyboardShotGroups` 之名留给 React 分支，本函数是它的资料来源。
  */
 export function storyboardShotRows(shot: StoryboardScriptShot): ShotGroupRows[] {
   const out: ShotGroupRows[] = [];
@@ -126,7 +126,7 @@ export function storyboardShotRows(shot: StoryboardScriptShot): ShotGroupRows[] 
   return out;
 }
 
-/** 已填欄數（21 欄中非空者）——卡頭顯示用，讓「空鏡」一眼可辨，不灌水成百分比。 */
+/** 已填栏数（21 栏中非空者）——卡头显示用，让「空镜」一眼可辨，不灌水成百分比。 */
 export function storyboardFilledCount(shot: StoryboardScriptShot): number {
   let n = 0;
   for (const field of STORYBOARD_SHOT_FIELDS) {
@@ -142,7 +142,7 @@ const GROUP_ICON = {
   camera: Camera,
 } as const;
 
-/** 內容捲動手勢（use-node-gestures 的 scrollDrag 三件套，由 NodeBody 顯式傳入）。 */
+/** 内容卷动手势（use-node-gestures 的 scrollDrag 三件套，由 NodeBody 显式传入）。 */
 interface ScrollGestures {
   onScrollAreaPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onScrollAreaPointerMove?: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -150,18 +150,18 @@ interface ScrollGestures {
 }
 
 /**
- * 音軌綁定的寫入出口（宿主注入）。省略＝不出綁定入口，卡片維持原唯讀姿態。
+ * 音轨绑定的写入出口（宿主注入）。省略＝不出绑定入口，卡片维持原唯读姿态。
  *
- * 宿主側的真實值＝`use-canvas-chat` 回傳的 `patchNodeMetadata`（`src/hooks/use-canvas-chat.ts:787`,
- * 型別 `src/hooks/canvas/canvas-chat-types.ts:235`）——本檔只收一個 `(patch) => void` 的窄介面，
- * 不 import 任何宿主 hook（維持 node-view 只依 props 的既有架構，零 context）。
+ * 宿主侧的真实值＝`use-canvas-chat` 回传的 `patchNodeMetadata`（`src/hooks/use-canvas-chat.ts:787`,
+ * 型别 `src/hooks/canvas/canvas-chat-types.ts:235`）——本档只收一个 `(patch) => void` 的窄介面，
+ * 不 import 任何宿主 hook（维持 node-view 只依 props 的既有架构，零 context）。
  */
 export interface ShotAudioBindingProps {
-  /** 節點 metadata 補丁出口（宿主既有寫入路徑；本檔不新開通道）。 */
+  /** 节点 metadata 补丁出口（宿主既有写入路径；本档不新开通道）。 */
   onPatchMetadata?: (patch: StoryboardShotAudioMetadata) => void;
 }
 
-/** 卡頭：eyebrow「分镜」+ 镜号徽章 + 已填欄數。 */
+/** 卡头：eyebrow「分镜」+ 镜号徽章 + 已填栏数。 */
 function ShotHeader({ shotNumber, filled }: { shotNumber: string; filled: number }) {
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -186,8 +186,8 @@ function ClapperboardEyebrow() {
 }
 
 /**
- * 引用資產：走 `parseReferenceAssets`（契約檔既有純函數，不另造解析器）→ 分類膠囊。
- * 解析不出結構（agent 沒照 `场景:[名] 角色:[名]` 協議填）時回落原文，不謊報已解析。
+ * 引用资产：走 `parseReferenceAssets`（契约档既有纯函数，不另造解析器）→ 分类胶囊。
+ * 解析不出结构（agent 没照 `场景:[名] 角色:[名]` 协议填）时回落原文，不谎报已解析。
  */
 function ReferenceAssetsRows({ raw }: { raw: string }) {
   const parsed = parseReferenceAssets(raw);
@@ -220,7 +220,7 @@ function ReferenceAssetsRows({ raw }: { raw: string }) {
   );
 }
 
-/** 旁白行（單鏡旁白文本；無旁白＝本鏡無此內容，該行不渲染——同 21 欄空值規則）。 */
+/** 旁白行（单镜旁白文本；无旁白＝本镜无此内容，该行不渲染——同 21 栏空值规则）。 */
 export function NarrationRow({ narration }: { narration: string }) {
   return (
     <div className="space-y-0.5">
@@ -231,10 +231,10 @@ export function NarrationRow({ narration }: { narration: string }) {
 }
 
 /**
- * 音軌狀態（對白軌／旁白軌，有／無）。
+ * 音轨状态（对白轨／旁白轨，有／无）。
  *
- * 只在該鏡**真的掛了任一軌音檔**時出現（沿用本檔空值鐵律：整鏡無音檔＝本鏡無此內容，
- * 畫一排「无」是把「無」冒充成「有欄位」）；一旦有音軌，兩軌並列顯示各自有／無。
+ * 只在该镜**真的挂了任一轨音档**时出现（沿用本档空值铁律：整镜无音档＝本镜无此内容，
+ * 画一排「无」是把「无」冒充成「有栏位」）；一旦有音轨，两轨并列显示各自有／无。
  */
 export function AudioTrackStatus({
   dialogueAudioId,
@@ -269,57 +269,57 @@ export function AudioTrackStatus({
   );
 }
 
-// ─────────────────────────────────────────── 音軌綁定／解除（2026-09-30）
+// ─────────────────────────────────────────── 音轨绑定／解除（2026-09-30）
 //
-// 病灶：音軌四鍵（`narration` 只讀文本 ＋ `dialogueAudioId`／`narrationAudioId`／
-// `audioAnchorId`）雖入了雙白名單，但純函式 `bindShotAudioTrack`/`clearShotAudioTrack`
-// （`@/lib/canvas/storyboard-shots`，音頻判準複用既有輪子 `usableAudioUrl`）**沒有呼叫端**
-// ——使用者根本無從綁定。本段只補**入口**，不新增第二套音軌狀態（顯示仍走上面的
-// `AudioTrackStatus`）、不新增第二套音頻判準（值一律餵純函式，不在本檔判副檔名）。
+// 病灶：音轨四键（`narration` 只读文本 ＋ `dialogueAudioId`／`narrationAudioId`／
+// `audioAnchorId`）虽入了双白名单，但纯函式 `bindShotAudioTrack`/`clearShotAudioTrack`
+// （`@/lib/canvas/storyboard-shots`，音频判准复用既有轮子 `usableAudioUrl`）**没有呼叫端**
+// ——使用者根本无从绑定。本段只补**入口**，不新增第二套音轨状态（显示仍走上面的
+// `AudioTrackStatus`）、不新增第二套音频判准（值一律喂纯函式，不在本档判副档名）。
 //
-// 寫入路徑：本檔**原本沒有任何寫入路徑**（只讀卡，見檔頭 ③）。節點 metadata 的唯一寫入
+// 写入路径：本档**原本没有任何写入路径**（只读卡，见档头 ③）。节点 metadata 的唯一写入
 // 出口是宿主的 `use-canvas-chat.patchNodeMetadata`（`src/hooks/use-canvas-chat.ts:787`），
-// 它經 CanvasEmbed → CanvasNodeView → NodeBody 用 props 顯式轉發（全庫無 canvas context/store）。
-// 故本檔以 `onPatchMetadata` 選配 prop 收這條出口：宿主注入＝出綁定入口；未注入＝整塊不渲染
-// （讀舊呼叫端／測試的既有渲染逐欄零改動）。**不注入就不出按鈕**——不畫一個按下去沒用的入口。
+// 它经 CanvasEmbed → CanvasNodeView → NodeBody 用 props 显式转发（全库无 canvas context/store）。
+// 故本档以 `onPatchMetadata` 选配 prop 收这条出口：宿主注入＝出绑定入口；未注入＝整块不渲染
+// （读旧呼叫端／测试的既有渲染逐栏零改动）。**不注入就不出按钮**——不画一个按下去没用的入口。
 //
-// 音檔來源：現場**無既有音源輪子**可複用（素材庫 `GET /api/canvas/assets` 只有 text|image
-// 兩種 kind；音頻產物散在各音頻節點的 `metadata.content`，本卡只拿到自己一顆 node，
-// 無兄弟節點存取權）→ 誠實退化為「貼上音檔 URL」輸入框（任務書允許的退化路徑）。
+// 音档来源：现场**无既有音源轮子**可复用（素材库 `GET /api/canvas/assets` 只有 text|image
+// 两种 kind；音频产物散在各音频节点的 `metadata.content`，本卡只拿到自己一颗 node，
+// 无兄弟节点存取权）→ 诚实退化为「贴上音档 URL」输入框（任务书允许的退化路径）。
 
-/** 音軌綁定／解除的結果（純函式回傳；`accepted:false` ＝**未寫入**，呼叫端不得動 metadata）。 */
+/** 音轨绑定／解除的结果（纯函式回传；`accepted:false` ＝**未写入**，呼叫端不得动 metadata）。 */
 export interface ShotAudioActionOutcome {
   accepted: boolean;
-  /** 要交給宿主 `patchNodeMetadata` 的 metadata patch（`accepted:true` 才有值）。 */
+  /** 要交给宿主 `patchNodeMetadata` 的 metadata patch（`accepted:true` 才有值）。 */
   patch?: StoryboardShotAudioMetadata;
-  /** 明確提示（成功／失敗都有人話，**不靜默**——本專案紀律）。 */
+  /** 明确提示（成功／失败都有人话，**不静默**——本专案纪律）。 */
   message: string;
 }
 
-/** 音軌中文名（提示語用；與 `AudioTrackStatus` 的「对白轨／旁白轨」同一套叫法）。 */
+/** 音轨中文名（提示语用；与 `AudioTrackStatus` 的「对白轨／旁白轨」同一套叫法）。 */
 function shotAudioRoleLabel(role: ShotAudioTrackRole): string {
   return role === "dialogue" ? "对白" : "旁白";
 }
 
-/** 該軌在 metadata 上的鍵名（解除時判「這一軌到底有沒有綁」用，不另造狀態）。 */
+/** 该轨在 metadata 上的键名（解除时判「这一轨到底有没有绑」用，不另造状态）。 */
 function shotAudioRoleKey(role: ShotAudioTrackRole): "dialogueAudioId" | "narrationAudioId" {
   return role === "dialogue" ? "dialogueAudioId" : "narrationAudioId";
 }
 
-/** 三支音軌 metadata 鍵（本檔唯一會顯式刪除的鍵集合；順序固定，回報/patch 穩定）。 */
+/** 三支音轨 metadata 键（本档唯一会显式删除的键集合；顺序固定，回报/patch 稳定）。 */
 const SHOT_AUDIO_METADATA_KEYS = ["dialogueAudioId", "narrationAudioId", "audioAnchorId"] as const;
 
 /**
- * 純函式的 patch → **可在合併式寫入路徑上生效的 patch**（本檔存在的唯一理由之一）。
+ * 纯函式的 patch → **可在合并式写入路径上生效的 patch**（本档存在的唯一理由之一）。
  *
- * 為什麼需要這一層：`patchNodeMetadata` 走 `dispatchCanvas({type:"patch_metadata"})`，reducer
- * 是**合併**語義（`canvas-reducer-adapter.ts:281` 的 `{ ...clearShotMediaLinks(before, …), ...patch }`）
- * ——**合併刪不掉鍵**。純函式靠「省略鍵」表達刪除（對一份新 metadata 而言正確），但直餵合併路徑
- * 會留下舊值（解除對白後 `dialogueAudioId` 還在，`audioAnchorId` 仍指向被解除的那一軌＝懸空錨，
- * 門禁 `audio_anchor_present` 照樣過）。故把「輸入有、patch 沒有」的鍵顯式寫成 `undefined`
- * （全庫既有同款手法：`use-canvas-chat.ts:768` 用 `errorDetails: undefined` 清錯誤詳情）。
- * 落盤耐久性由既有清洗器承擔：`layout.toNodeMetadata` 的 `string` 清洗器把 `undefined` 判為
- * 「省略該鍵」→ 重載/上行後鍵真的不在（不是留一個 `""` 空殼）。
+ * 为什么需要这一层：`patchNodeMetadata` 走 `dispatchCanvas({type:"patch_metadata"})`，reducer
+ * 是**合并**语义（`canvas-reducer-adapter.ts:281` 的 `{ ...clearShotMediaLinks(before, …), ...patch }`）
+ * ——**合并删不掉键**。纯函式靠「省略键」表达删除（对一份新 metadata 而言正确），但直喂合并路径
+ * 会留下旧值（解除对白后 `dialogueAudioId` 还在，`audioAnchorId` 仍指向被解除的那一轨＝悬空锚，
+ * 门禁 `audio_anchor_present` 照样过）。故把「输入有、patch 没有」的键显式写成 `undefined`
+ * （全库既有同款手法：`use-canvas-chat.ts:768` 用 `errorDetails: undefined` 清错误详情）。
+ * 落盘耐久性由既有清洗器承担：`layout.toNodeMetadata` 的 `string` 清洗器把 `undefined` 判为
+ * 「省略该键」→ 重载/上行后键真的不在（不是留一个 `""` 空壳）。
  */
 function withExplicitDeletions(
   metadata: CanvasNodeMetadata | undefined,
@@ -334,10 +334,10 @@ function withExplicitDeletions(
 }
 
 /**
- * 綁定一軌：算 patch ＋ 人話提示（純函式，供 UI 與測試共用；判定全權交給
- * `bindShotAudioTrack`，本檔不重寫音頻判準）。
- * 非可用音頻（`.png` 圖 URL／無副檔名裸 URL／空字串）→ `accepted:false`、**無 patch**、
- * 提示明說「不是可用的音频地址」。
+ * 绑定一轨：算 patch ＋ 人话提示（纯函式，供 UI 与测试共用；判定全权交给
+ * `bindShotAudioTrack`，本档不重写音频判准）。
+ * 非可用音频（`.png` 图 URL／无副档名裸 URL／空字串）→ `accepted:false`、**无 patch**、
+ * 提示明说「不是可用的音频地址」。
  */
 export function shotAudioBindOutcome(
   metadata: CanvasNodeMetadata | undefined,
@@ -356,11 +356,11 @@ export function shotAudioBindOutcome(
 }
 
 /**
- * 解除一軌：該軌鍵本來就不在（或空字串）→ `accepted:false` ＋提示「尚未绑定」——
- * **不寫一個什麼都沒改的 patch**（那會白推一格 undo 歷史）。
- * 判據是「該鍵有沒有值」的存在性檢查（與卡面「已绑定」徽章、`AudioTrackStatus` 同一把尺），
- * **不是第二套音頻有效性判準**：值合法與否仍由 `clearShotAudioTrack` 內的 `usableAudioUrl` 決定
- * （髒值照樣會被清掉，且順帶把錨重算回剩下的那一軌）。
+ * 解除一轨：该轨键本来就不在（或空字串）→ `accepted:false` ＋提示「尚未绑定」——
+ * **不写一个什么都没改的 patch**（那会白推一格 undo 历史）。
+ * 判据是「该键有没有值」的存在性检查（与卡面「已绑定」徽章、`AudioTrackStatus` 同一把尺），
+ * **不是第二套音频有效性判准**：值合法与否仍由 `clearShotAudioTrack` 内的 `usableAudioUrl` 决定
+ * （脏值照样会被清掉，且顺带把锚重算回剩下的那一轨）。
  */
 export function shotAudioClearOutcome(
   metadata: CanvasNodeMetadata | undefined,
@@ -381,12 +381,12 @@ export function shotAudioClearOutcome(
 }
 
 /**
- * 單軌控件：貼上 URL → 綁定／解除。
+ * 单轨控件：贴上 URL → 绑定／解除。
  *
- * 提示行用 `role="status"`（無障礙）+ `text-[13px]`（正文尺寸鐵律）；失敗走 `text-destructive`，
- * 成功走 `text-muted-foreground`——成功與失敗視覺可分，不靠顏色以外的猜測。
- * `data-canvas-interactive`＝畫布手勢層放行（`use-node-gestures.ts:97`），輸入框另停 pointerdown
- * （否則打字/選字會被當成拖節點）。
+ * 提示行用 `role="status"`（无障碍）+ `text-[13px]`（正文尺寸铁律）；失败走 `text-destructive`，
+ * 成功走 `text-muted-foreground`——成功与失败视觉可分，不靠颜色以外的猜测。
+ * `data-canvas-interactive`＝画布手势层放行（`use-node-gestures.ts:97`），输入框另停 pointerdown
+ * （否则打字/选字会被当成拖节点）。
  */
 function ShotAudioTrackControls({
   role,
@@ -475,7 +475,7 @@ function ShotAudioTrackControls({
   );
 }
 
-/** 一鏡分鏡卡（AID 21 欄，掛在 Group 節點的子節點）。 */
+/** 一镜分镜卡（AID 21 栏，挂在 Group 节点的子节点）。 */
 export function StoryboardShotBody({
   node,
   onPatchMetadata,
@@ -497,22 +497,22 @@ export function StoryboardShotBody({
   const groups = storyboardShotRows(shot);
   const filled = storyboardFilledCount(shot);
 
-  // ── 旁白文本 ＋ 對白／旁白雙音軌（2026-09-30）──
-  // 這四鍵**不在 21 欄編劇契約內**（屬製作階段 metadata），故不入 SHOT_FIELD_GROUPS
-  //（那張表與 21 欄逐字綁定），改以「台词 · 音效」組的附加列呈現。值經寬化袋子讀
-  //（四鍵已在 `types.ts` 的 `CanvasNodeMetadata` 宣告——2026-09-30 現場核對：`narration`/
-  // `dialogueAudioId`/`narrationAudioId`/`audioAnchorId` 逐鍵在案；此處仍走袋子讀，
-  // 與 `AudioTrackStatus` 消費端姿態一致，且容忍舊記憶「未宣告」的歷史口徑）。
+  // ── 旁白文本 ＋ 对白／旁白双音轨（2026-09-30）──
+  // 这四键**不在 21 栏编剧契约内**（属制作阶段 metadata），故不入 SHOT_FIELD_GROUPS
+  //（那张表与 21 栏逐字绑定），改以「台词 · 音效」组的附加列呈现。值经宽化袋子读
+  //（四键已在 `types.ts` 的 `CanvasNodeMetadata` 宣告——2026-09-30 现场核对：`narration`/
+  // `dialogueAudioId`/`narrationAudioId`/`audioAnchorId` 逐键在案；此处仍走袋子读，
+  // 与 `AudioTrackStatus` 消费端姿态一致，且容忍旧记忆「未宣告」的历史口径）。
   const audioMeta = (node.metadata ?? {}) as Record<string, unknown>;
   const narration = typeof audioMeta.narration === "string" ? audioMeta.narration.trim() : "";
   const dialogueAudioId = typeof audioMeta.dialogueAudioId === "string" ? audioMeta.dialogueAudioId.trim() : "";
   const narrationAudioId = typeof audioMeta.narrationAudioId === "string" ? audioMeta.narrationAudioId.trim() : "";
   const hasVoiceExtras = Boolean(narration || dialogueAudioId || narrationAudioId);
-  // 綁定入口也要求「台词 · 音效」組成組：宿主注入了寫入路徑時，即使本鏡一句台詞/旁白都沒有，
-  // 使用者仍須有地方綁音軌（否則入口隨空組一起消失＝沒入口）。
+  // 绑定入口也要求「台词 · 音效」组成组：宿主注入了写入路径时，即使本镜一句台词/旁白都没有，
+  // 使用者仍须有地方绑音轨（否则入口随空组一起消失＝没入口）。
   const showAudioControls = typeof onPatchMetadata === "function";
-  // 對話/音效皆空但旁白或音軌存在時，「台词 · 音效」組仍須成組（否則製作物憑空消失）；
-  // 插入位置照 SHOT_FIELD_GROUPS 的組序（voice 在 picture 之後、spacetime 之前）。
+  // 对话/音效皆空但旁白或音轨存在时，「台词 · 音效」组仍须成组（否则制作物凭空消失）；
+  // 插入位置照 SHOT_FIELD_GROUPS 的组序（voice 在 picture 之后、spacetime 之前）。
   if ((hasVoiceExtras || showAudioControls) && !groups.some((g) => g.key === "voice")) {
     const voiceLabel = SHOT_FIELD_GROUPS.find((g) => g.key === "voice")?.label ?? "台词 · 音效";
     const insertAt = groups.findIndex((g) => g.key === "spacetime" || g.key === "camera");
@@ -556,7 +556,7 @@ export function StoryboardShotBody({
               <>
                 {narration ? <NarrationRow narration={narration} /> : null}
                 <AudioTrackStatus dialogueAudioId={dialogueAudioId} narrationAudioId={narrationAudioId} />
-                {/* 綁定／解除入口：只在宿主注入 metadata 寫入出口時出現（未注入＝原唯讀態度） */}
+                {/* 绑定／解除入口：只在宿主注入 metadata 写入出口时出现（未注入＝原唯读态度） */}
                 {showAudioControls && onPatchMetadata ? (
                   <div className="space-y-2 rounded-lg bg-black/[0.03] p-2">
                     <ShotAudioTrackControls
@@ -581,10 +581,10 @@ export function StoryboardShotBody({
 }
 
 /**
- * 分鏡場景外殼（AID 根結構 `scenes[].sceneName`，掛在 **Group 節點**）。
- * 只渲染 `storyboardScene` 自帶的指標（sceneName + shotCount）——真值是子節點的
- * `storyboardShot`，本元件**不**去列子鏡：NodeBody 只拿到自己這顆 node，沒有兄弟節點
- * 存取權（列子鏡要向宿主 CanvasNodeView 傳 `batchChildren` 解析結果，屬跨檔改動）。
+ * 分镜场景外壳（AID 根结构 `scenes[].sceneName`，挂在 **Group 节点**）。
+ * 只渲染 `storyboardScene` 自带的指标（sceneName + shotCount）——真值是子节点的
+ * `storyboardShot`，本元件**不**去列子镜：NodeBody 只拿到自己这颗 node，没有兄弟节点
+ * 存取权（列子镜要向宿主 CanvasNodeView 传 `batchChildren` 解析结果，属跨档改动）。
  */
 export function StoryboardSceneBody({
   node,

@@ -200,9 +200,9 @@ class EimuAsrEngine:
             )
             raw = _raw_segments(segments)
             if not raw and self._config.vad_filter:
-                # 2026-10-02：Silero VAD 把「伴奏上的歌聲」整段判成非語音（OP 歌 152s
-                # 實測 VAD=0 段、關 VAD 有完整歌詞）→ 音樂素材恆報 no_speech。VAD 全空時
-                # 關 VAD 重轉一次，丟掉 no_speech_prob 高的段（純器樂前奏的幻覺字）。
+                # 2026-10-02：Silero VAD 把「伴奏上的歌声」整段判成非语音（OP 歌 152s
+                # 实测 VAD=0 段、关 VAD 有完整歌词）→ 音乐素材恒报 no_speech。VAD 全空时
+                # 关 VAD 重转一次，丢掉 no_speech_prob 高的段（纯器乐前奏的幻觉字）。
                 logger.info("VAD kept no speech; retrying without VAD (sung vocals over music)")
                 segments, info = model.transcribe(
                     samples,

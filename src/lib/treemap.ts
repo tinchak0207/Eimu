@@ -1,6 +1,6 @@
-// 通用矩形樹狀圖佈局（squarified treemap，Bruls/Huizing/van Wijk 1999）。
-// 純幾何計算，不含任何渲染邏輯——輸出的每個 rect 面積嚴格等於其 value 佔比 ×
-// 容器面積，因此可信地代表比例，不是視覺近似。
+// 通用矩形树状图布局（squarified treemap，Bruls/Huizing/van Wijk 1999）。
+// 纯几何计算，不含任何渲染逻辑——输出的每个 rect 面积严格等于其 value 占比 ×
+// 容器面积，因此可信地代表比例，不是视觉近似。
 
 export interface TreemapDatum {
   id: string;
@@ -24,9 +24,9 @@ function worstRatio(rowValues: number[], length: number): number {
 }
 
 /**
- * 佈局 [x, y, x+w, y+h] 內的矩形。value<=0 的項目會被丟棄（面積為零沒有意義）。
- * 內部把 value 正規化到面積刻度（sum(value) == w*h），因此回傳的每個 rect
- * 的 w*h 就是它在輸入資料裡的真實佔比面積，可以直接拿來核對百分比。
+ * 布局 [x, y, x+w, y+h] 内的矩形。value<=0 的项目会被丢弃（面积为零没有意义）。
+ * 内部把 value 正规化到面积刻度（sum(value) == w*h），因此回传的每个 rect
+ * 的 w*h 就是它在输入资料里的真实占比面积，可以直接拿来核对百分比。
  */
 export function squarify(data: TreemapDatum[], x: number, y: number, w: number, h: number): TreemapRect[] {
   const items = data.filter((item) => item.value > 0);

@@ -125,7 +125,7 @@ test("纯视频记录：entrySrc 认得 videoUrl（不再被判 skipped），条
 // ────────────────── 2026-10-04「永久 pending」族：取图逾时只让该张 skipped
 //
 // 取图等待原本无界：上游半开连线（headers 永不到达）时 fetch 永久 pending，
-// 批量导出（以及单张下载）没有终态。修復后 fetchImageResponse 用 AbortController
+// 批量导出（以及单张下载）没有终态。修复后 fetchImageResponse 用 AbortController
 // 主动 abort 并抛人话错误；批量导出的 fetchAsBlob 用同一个 catch 吞成 null（skipped），
 // 一次逾时不得炸掉整包 zip。以下以真实 exportHistoryZip 端到端断言（真 zip 产物）。
 
@@ -178,7 +178,7 @@ async function runZipExport(
 
   try {
     const result = await exportHistoryZip(entries, "out.zip", perImageTimeoutMs);
-    assert.ok(captured.blob, "exportHistoryZip 應把打包好的 zip blob 交給 createObjectURL");
+    assert.ok(captured.blob, "exportHistoryZip 应把打包好的 zip blob 交给 createObjectURL");
     const zip = await JSZip.loadAsync(new Uint8Array(await captured.blob.arrayBuffer()));
     const names = Object.keys(zip.files).sort();
     // 既有 export-zip 对未知副档名一律补 .png（.json 不在媒体白名单）→ 条目名是 manifest.json.png。

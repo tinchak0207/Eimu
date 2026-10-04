@@ -1,12 +1,12 @@
-// tier-pricing 的 admin 面：GET 回報現況（各 tier 的 model×resolution 單價、金鑰/租戶
-// tier 指派、基準幣價、版本），PATCH 在版本閘（expectedVersion 樂觀併發）下全量替換
+// tier-pricing 的 admin 面：GET 回报现况（各 tier 的 model×resolution 单价、金钥/租户
+// tier 指派、基准币价、版本），PATCH 在版本闸（expectedVersion 乐观并发）下全量替换
 // tier-pricing 文件。骨架照 admin/model-pricing/route.ts：requireAdminSession +
-// errorResponse(UNAUTHORIZED→401) + buildTierPricingPayload + 稽核記錄（diffJson），
-// PATCH 成功後用剛寫入的值建 payload，不重 list Blob。
+// errorResponse(UNAUTHORIZED→401) + buildTierPricingPayload + 稽核记录（diffJson），
+// PATCH 成功后用刚写入的值建 payload，不重 list Blob。
 //
-// 業務不變量：tier 幣價不得為 0。normalizeTierPricingDocument 會靜默丟棄
-// < PRICING_COIN_STEP 的幣價（等於把「想設 0 幣拿貨」悄悄還原成基準價），所以這裡在
-// normalize 之後、寫入之前，檢查原始 body 的 tier 幣價，違規就回 400 並列出 modelId。
+// 业务不变量：tier 币价不得为 0。normalizeTierPricingDocument 会静默丢弃
+// < PRICING_COIN_STEP 的币价（等于把「想设 0 币拿货」悄悄还原成基准价），所以这里在
+// normalize 之后、写入之前，检查原始 body 的 tier 币价，违规就回 400 并列出 modelId。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -27,7 +27,7 @@ import { readTierPricingDocument, writeTierPricingDocument } from "@/lib/tier-pr
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 interface TierPricingModelPayload {
   id: string;
@@ -35,7 +35,7 @@ interface TierPricingModelPayload {
   vendor: string;
   kind: "image" | "video" | "audio";
   resolutions: string[];
-  /** 該解析度的基準幣價（generation coins，圖片= 幣/張，影片= 幣/秒）。 */
+  /** 该解析度的基准币价（generation coins，图片= 币/张，影片= 币/秒）。 */
   baseCoins: Record<string, number>;
 }
 
@@ -55,8 +55,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * GET 與 PATCH（成功、409）共用的完整 payload。doc 用 fresh 讀：admin 要看的是最新版；
- * `known`（PATCH 成功後傳入剛寫入的值）跳過重讀——Blob list() 不保證寫後讀一致。
+ * GET 与 PATCH（成功、409）共用的完整 payload。doc 用 fresh 读：admin 要看的是最新版；
+ * `known`（PATCH 成功后传入刚写入的值）跳过重读——Blob list() 不保证写后读一致。
  */
 async function buildTierPricingPayload(known?: { doc: TierPricingDocument; version: string | null }) {
   const { doc, version } = known
@@ -98,8 +98,8 @@ function errorResponse(error: unknown) {
 }
 
 /**
- * 業務不變量：tier 幣價不得低於 PRICING_COIN_STEP（0 / 負值 = 想設「0 幣拿貨」）。
- * normalize 會靜默丟棄它，必須對 raw body 檢查，否則被無聲還原成基準價。
+ * 业务不变量：tier 币价不得低于 PRICING_COIN_STEP（0 / 负值 = 想设「0 币拿货」）。
+ * normalize 会静默丢弃它，必须对 raw body 检查，否则被无声还原成基准价。
  */
 function findInvalidTierPrices(rawTiers: unknown): string[] {
   if (!isRecord(rawTiers)) return [];
@@ -135,7 +135,7 @@ export async function PATCH(req: NextRequest) {
     if (!body || typeof body !== "object") {
       return NextResponse.json({ success: false, message: "请求体必须是 JSON 对象。" }, { status: 400 });
     }
-    // 全量替換語意下，漏送 tiers / assignments 等於清空該段——必須是顯式的物件。
+    // 全量替换语意下，漏送 tiers / assignments 等于清空该段——必须是显式的物件。
     if (typeof body.tiers !== "object" || body.tiers === null || Array.isArray(body.tiers)) {
       return NextResponse.json({ success: false, message: "tiers 必须是对象。" }, { status: 400 });
     }
@@ -151,14 +151,14 @@ export async function PATCH(req: NextRequest) {
 
     const doc = normalizeTierPricingDocument({ tiers: body.tiers, assignments: body.assignments });
 
-    // 丟更新防護：fresh 讀最新版本，不符即 409 並附最新完整 payload 讓 UI 重載。
+    // 丢更新防护：fresh 读最新版本，不符即 409 并附最新完整 payload 让 UI 重载。
     const { doc: previousDoc, version: currentVersion } = await readTierPricingDocument({ fresh: true });
     if (body.expectedVersion !== currentVersion) {
       return NextResponse.json(
         {
           ...(await buildTierPricingPayload()),
           success: false,
-          message: "分層价目已被其他会话更新，页面数据已刷新，请确认后重新保存。",
+          message: "分层价目已被其他会话更新，页面数据已刷新，请确认后重新保存。",
         },
         { status: 409 },
       );

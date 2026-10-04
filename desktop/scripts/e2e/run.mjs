@@ -1,12 +1,12 @@
 // desktop/scripts/e2e/run.mjs
 //
-// 逐條執行 cases.mjs 的測試清單，每條產出截圖 PNG ＋ JSON 結果，最後印總結。
+// 逐条执行 cases.mjs 的测试清单，每条产出截图 PNG ＋ JSON 结果，最后印总结。
 //
 // 用法：
 //   node desktop/scripts/e2e/run.mjs [--only name1,name2] [--out /tmp/dir]
-// 預設輸出 /tmp/eimu-e2e-<timestamp>/（不寫進 repo）。
+// 预设输出 /tmp/eimu-e2e-<timestamp>/（不写进 repo）。
 //
-// 退出碼：全部 pass = 0；有任何 fail = 1；harness 自身崩潰 = 2。
+// 退出码：全部 pass = 0；有任何 fail = 1；harness 自身崩溃 = 2。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -30,13 +30,13 @@ async function main() {
 
   const selected = args.only ? cases.filter((c) => args.only.includes(c.name)) : cases;
   if (!selected.length) {
-    console.error(`沒有符合的測試：--only ${args.only && args.only.join(",")}`);
+    console.error(`没有符合的测试：--only ${args.only && args.only.join(",")}`);
     process.exit(2);
   }
 
-  console.log(`Eimu 真殼 E2E 測試台`);
-  console.log(`輸出目錄：${outDir}`);
-  console.log(`選中 ${selected.length} 條：${selected.map((c) => c.name).join(", ")}\n`);
+  console.log(`Eimu 真壳 E2E 测试台`);
+  console.log(`输出目录：${outDir}`);
+  console.log(`选中 ${selected.length} 条：${selected.map((c) => c.name).join(", ")}\n`);
 
   const results = [];
   for (const c of selected) {
@@ -90,12 +90,12 @@ async function main() {
   };
   fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
 
-  console.log(`\n=== 總結 ${passed}/${results.length} pass ===`);
+  console.log(`\n=== 总结 ${passed}/${results.length} pass ===`);
   for (const r of summary.results) {
     const extra = r.screenshot ? `${r.screenshot} (${r.screenshotBytes} bytes)` : "";
     console.log(`  [${r.status.toUpperCase()}] ${r.name} ${r.durationMs}ms ${extra}${r.error ? " :: " + r.error : ""}`);
   }
-  console.log(`\n結果目錄：${outDir}`);
+  console.log(`\n结果目录：${outDir}`);
 
   process.exit(summary.failed > 0 ? 1 : 0);
 }

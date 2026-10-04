@@ -1,4 +1,4 @@
-// bridge-credential 的單元測試（node:test，不碰真憑證；一律用假值）。
+// bridge-credential 的单元测试（node:test，不碰真凭证；一律用假值）。
 "use strict";
 
 const assert = require("node:assert/strict");
@@ -14,7 +14,7 @@ const {
 
 const GOOD = { gatewayBaseUrl: "https://store.tinchak0207.xyz", apiKey: "sk-biz-test-not-a-real-key" };
 
-test("isHttpUrl: 只收 http(s)，拒 file/javascript/相對路徑", () => {
+test("isHttpUrl: 只收 http(s)，拒 file/javascript/相对路径", () => {
   assert.equal(isHttpUrl("https://a.example"), true);
   assert.equal(isHttpUrl("http://127.0.0.1:8081"), true);
   assert.equal(isHttpUrl("file:///etc/passwd"), false);
@@ -24,7 +24,7 @@ test("isHttpUrl: 只收 http(s)，拒 file/javascript/相對路徑", () => {
   assert.equal(isHttpUrl(null), false);
 });
 
-test("isUsableCredential: 缺欄位/空字串/非物件一律不可用", () => {
+test("isUsableCredential: 缺栏位/空字串/非物件一律不可用", () => {
   assert.equal(isUsableCredential(GOOD), true);
   assert.equal(isUsableCredential(undefined), false);
   assert.equal(isUsableCredential(null), false);
@@ -37,7 +37,7 @@ test("isUsableCredential: 缺欄位/空字串/非物件一律不可用", () => {
   assert.equal(isUsableCredential({ gatewayBaseUrl: GOOD.gatewayBaseUrl }), false);
 });
 
-test("parseCredentialStore: 壞 JSON 回 null，好 JSON 去空白", () => {
+test("parseCredentialStore: 坏 JSON 回 null，好 JSON 去空白", () => {
   assert.equal(parseCredentialStore("{ not json"), null);
   assert.equal(parseCredentialStore(""), null);
   assert.equal(parseCredentialStore(null), null);
@@ -49,7 +49,7 @@ test("parseCredentialStore: 壞 JSON 回 null，好 JSON 去空白", () => {
   );
 });
 
-test("isOwnerOnlyMode: 0600 可用，0644/0660 一律拒（win32 不適用）", () => {
+test("isOwnerOnlyMode: 0600 可用，0644/0660 一律拒（win32 不适用）", () => {
   assert.equal(isOwnerOnlyMode(0o100600, "linux"), true);
   assert.equal(isOwnerOnlyMode(0o100600, "darwin"), true);
   assert.equal(isOwnerOnlyMode(0o100644, "linux"), false);
@@ -58,7 +58,7 @@ test("isOwnerOnlyMode: 0600 可用，0644/0660 一律拒（win32 不適用）", 
   assert.equal(isOwnerOnlyMode(0o100644, "win32"), true);
 });
 
-test("readCredentialStore: 檔案不存在 ⇒ 靜默 null（橋本來就該 OFF，不告警）", () => {
+test("readCredentialStore: 档案不存在 ⇒ 静默 null（桥本来就该 OFF，不告警）", () => {
   const warnings = [];
   const result = readCredentialStore("/no/such/device-bridge.json", {
     statSync: () => {
@@ -70,7 +70,7 @@ test("readCredentialStore: 檔案不存在 ⇒ 靜默 null（橋本來就該 OFF
   assert.deepEqual(warnings, []);
 });
 
-test("readCredentialStore: 權限過寬 ⇒ 拒用並告警", () => {
+test("readCredentialStore: 权限过宽 ⇒ 拒用并告警", () => {
   const warnings = [];
   const result = readCredentialStore("/tmp/x/device-bridge.json", {
     platform: "linux",
@@ -82,7 +82,7 @@ test("readCredentialStore: 權限過寬 ⇒ 拒用並告警", () => {
   assert.deepEqual(warnings, ["credential_file_permissions_too_open"]);
 });
 
-test("readCredentialStore: 讀檔失敗／內容不合法 ⇒ 拒用並告警，且原因不含 apiKey", () => {
+test("readCredentialStore: 读档失败／内容不合法 ⇒ 拒用并告警，且原因不含 apiKey", () => {
   const warnings = [];
   assert.equal(
     readCredentialStore("/tmp/x/device-bridge.json", {
@@ -108,7 +108,7 @@ test("readCredentialStore: 讀檔失敗／內容不合法 ⇒ 拒用並告警，
   for (const w of warnings) assert.doesNotMatch(w, /sk-biz/);
 });
 
-test("readCredentialStore: 正常 0600 檔案 ⇒ 回憑證", () => {
+test("readCredentialStore: 正常 0600 档案 ⇒ 回凭证", () => {
   const result = readCredentialStore("/tmp/x/device-bridge.json", {
     platform: "linux",
     statSync: () => ({ mode: 0o100600 }),

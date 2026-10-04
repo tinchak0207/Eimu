@@ -5,7 +5,7 @@ export const NANO_BANANA_PRO_MODEL_ID = /** @type {const} */ ("gemini-3-image");
 export const NANO_BANANA_2_MODEL_ID = /** @type {const} */ ("gemini-3.1-flash-image");
 export const GPT_IMAGE_MODEL_ID = /** @type {const} */ ("gpt-image");
 export const GPT_IMAGE_15_MODEL_ID = /** @type {const} */ ("gpt-image-1.5");
-// GPT Image 2.5（2026-09-08 發佈）：走 adobe2api Firefly 家族映射（flare=快檔，sunburst=旗艦，上游代號 prism）
+// GPT Image 2.5（2026-09-08 发布）：走 adobe2api Firefly 家族映射（flare=快档，sunburst=旗舰，上游代号 prism）
 export const GPT_IMAGE_25_FLARE_MODEL_ID = /** @type {const} */ ("gpt-image-2.5-flare");
 export const GPT_IMAGE_25_SUNBURST_MODEL_ID = /** @type {const} */ ("gpt-image-2.5-sunburst");
 export const FLUX_2_MODEL_ID = /** @type {const} */ ("flux-2");
@@ -21,8 +21,8 @@ export const SEEDREAM_20_MODEL_ID = /** @type {const} */ ("seedream-2.0");
 export const SEEDREAM_50_PRO_MODEL_ID = /** @type {const} */ ("seedream-5.0-pro");
 export const SEEDREAM_50_LITE_MODEL_ID = /** @type {const} */ ("seedream-5.0-lite");
 
-// 服務類定價條目（非生成模型）：不加入 SUPPORTED_* 列表，因此不會出現在用戶端
-// 模型選單 /v1/models；只作為 admin 定價面板與對應計費 route 的定價鍵。
+// 服务类定价条目（非生成模型）：不加入 SUPPORTED_* 列表，因此不会出现在用户端
+// 模型选单 /v1/models；只作为 admin 定价面板与对应计费 route 的定价键。
 export const ADOBE_FIREFLY_FILL_MODEL_ID = /** @type {const} */ ("adobe-firefly-fill");
 export const PIXAI_EDIT_MODEL_ID = /** @type {const} */ ("pixai-edit");
 export const PIXAI_UPSCALE_MODEL_ID = /** @type {const} */ ("pixai-upscale");
@@ -65,9 +65,9 @@ export const LUMA_RAY3_HDR_MODEL_ID = /** @type {const} */ ("luma-ray-3-hdr");
 export const KLING_25_TURBO_MODEL_ID = /** @type {const} */ ("kling-2.5-turbo");
 export const MINIMAX_H3_MODEL_ID = /** @type {const} */ ("minimax-h3");
 
-// blender 節點能力標籤（片Y/片AA，2026-09-06）：capability model_id 即能力標籤
-// （NODES-PLAN §3.1，零路由欄位擴散）。不入 SUPPORTED_* 列表（同 TTS/AV 先例）：
-// C 端選單不可見，僅 supplier capability/adapter/定價鍵承載。
+// blender 节点能力标签（片Y/片AA，2026-09-06）：capability model_id 即能力标签
+// （NODES-PLAN §3.1，零路由栏位扩散）。不入 SUPPORTED_* 列表（同 TTS/AV 先例）：
+// C 端选单不可见，仅 supplier capability/adapter/定价键承载。
 export const BLENDER_RENDER_EEVEE_MODEL_ID = /** @type {const} */ ("blender-render-eevee");
 export const BLENDER_RENDER_CYCLES_MODEL_ID = /** @type {const} */ ("blender-render-cycles");
 export const BLENDER_NODE_MODEL_IDS = [BLENDER_RENDER_EEVEE_MODEL_ID, BLENDER_RENDER_CYCLES_MODEL_ID];
@@ -101,17 +101,17 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
   AGNES_IMAGE_25_FLASH_MODEL_ID,
 ];
 
-// 2026-09-27 暴君裁定「無供貨即下架」：以下 14 條視頻 model 全層零供貨（無任何
-// enabled AND is_current 的 video_generate capability；adobe2api 停視頻後亦無人承接），
-// 自公開/在售目錄移除（常數保留供 capability 歷史與 adobe2api 映射表引用）：
+// 2026-09-27 暴君裁定「无供货即下架」：以下 14 条视频 model 全层零供货（无任何
+// enabled AND is_current 的 video_generate capability；adobe2api 停视频后亦无人承接），
+// 自公开/在售目录移除（常数保留供 capability 历史与 adobe2api 映射表引用）：
 //   adobe-firefly-video / kling-2.5-turbo / kling-3.0 / kling-3.0-omni /
 //   luma-ray-2 / luma-ray-2-flash / luma-ray-3 / luma-ray-3-hdr /
 //   luma-ray-3.14 / luma-ray-3.14-hdr / runway-gen-4 / runway-gen-4.5 /
 //   veo-3.1 / veo-3.1-fast
-// 另 3 條經 xiaoyxiao 白名單核對後**無白名單檔位可承接**（不硬映射），一併下架：
-//   seedance-2.0-fast（先前依賴 sd-2.0-933-720-fast-原生真人，該檔位不在白名單）/
-//   seedance-2.0-mini（依賴 seedance2.0-mini-A，不在白名單）/
-//   seedance-2.5-30s（依賴 seedance-2.5-3010-特惠，不在白名單）
+// 另 3 条经 xiaoyxiao 白名单核对后**无白名单档位可承接**（不硬映射），一并下架：
+//   seedance-2.0-fast（先前依赖 sd-2.0-933-720-fast-原生真人，该档位不在白名单）/
+//   seedance-2.0-mini（依赖 seedance2.0-mini-A，不在白名单）/
+//   seedance-2.5-30s（依赖 seedance-2.5-3010-特惠，不在白名单）
 export const SUPPORTED_VIDEO_MODEL_IDS = [
   SEEDANCE_20_MODEL_ID,
   SEEDANCE_25_480P_MODEL_ID,
@@ -131,9 +131,9 @@ export const AVATAR_1_MODEL_ID = /** @type {const} */ ("avatar-1");
 export const LIPSYNC_1_MODEL_ID = /** @type {const} */ ("lipsync-1");
 export const SUPPORTED_AV_MODEL_IDS = [TTS_1_MODEL_ID, AVATAR_1_MODEL_ID, LIPSYNC_1_MODEL_ID];
 
-// 2026-09-27 暴君裁定「adobe2api 留圖、停視頻」：本表只列 adobe2api 仍承接的**圖像**
-// 模型；原視頻條目（veo/kling/seedance/firefly-video/luma/runway 全族）一併移除，
-// 對應 capability 由 seed 的 retireUnclaimedCapabilities 退役。
+// 2026-09-27 暴君裁定「adobe2api 留图、停视频」：本表只列 adobe2api 仍承接的**图像**
+// 模型；原视频条目（veo/kling/seedance/firefly-video/luma/runway 全族）一并移除，
+// 对应 capability 由 seed 的 retireUnclaimedCapabilities 退役。
 export const ADOBE2API_MODEL_IDS = [
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,

@@ -8,7 +8,7 @@ import { resolveModelRoute } from "./model-routing";
 
 /**
  * B 端 `routing_hint=hub`（routingClass hub_only）原意＝只走 hub.linux.do。hublinuxdo
- * 已併入 new-api（其內部渠道之一），控面能指定的最近粒度就是 new-api 那一步。
+ * 已并入 new-api（其内部渠道之一），控面能指定的最近粒度就是 new-api 那一步。
  */
 const HUB_ONLY_SUPPLIER_ID = routeSupplierId(NEWAPI_ROUTE_LABEL);
 
@@ -22,7 +22,7 @@ export async function acquireSupplierLease(input: {
   excludedFailureDomains?: string[];
   leaseMs: number;
 }, sql: GenerationSql = getGenerationSql()): Promise<SupplierLease | null> {
-  // 路由是閘門也是排序：不在該模型生效路由裡的 supplier 一律不可租；順序＝陣列順序。
+  // 路由是闸门也是排序：不在该模型生效路由里的 supplier 一律不可租；顺序＝阵列顺序。
   const route = await resolveModelRoute(input.job.modelId, sql);
   if (!route.supplierIds.length) return null;
   return sql.begin(async (tx) => {
@@ -137,23 +137,23 @@ export type SupplierUnavailability = {
 };
 
 /**
- * 解釋「為什麼沒有可用 supplier」。
+ * 解释「为什么没有可用 supplier」。
  *
- * 排障記錄（2026-08-05）：生圖失敗一律回 `overloaded / No eligible supplier
- * capacity is currently available.`，而實際成因至少有六種 —— 模型從未 seed、
- * capability 被停用、supplier 全部 disabled、全在 cooldown、賬號健康門檻不過、
- * 併發位打滿。這些的處置完全不同（跑 seed / 開渠道 / 等冷卻 / 修賬號 / 擴併發），
- * 但錯誤訊息把它們壓成同一句，只能靠人肉連進 DB 查。
+ * 排障记录（2026-08-05）：生图失败一律回 `overloaded / No eligible supplier
+ * capacity is currently available.`，而实际成因至少有六种 —— 模型从未 seed、
+ * capability 被停用、supplier 全部 disabled、全在 cooldown、账号健康门槛不过、
+ * 并发位打满。这些的处置完全不同（跑 seed / 开渠道 / 等冷却 / 修账号 / 扩并发），
+ * 但错误讯息把它们压成同一句，只能靠人肉连进 DB 查。
  *
- * 這個函數按「從最外層條件往內收」的順序逐段放寬 acquireSupplierLease 的
- * WHERE，第一個能查到行的層級就是真正的卡點。只在租約失敗後跑，不在熱路徑上。
+ * 这个函数按「从最外层条件往内收」的顺序逐段放宽 acquireSupplierLease 的
+ * WHERE，第一个能查到行的层级就是真正的卡点。只在租约失败后跑，不在热路径上。
  *
- * 排障記錄（2026-08-29）：舊版從不考慮 acquire 時的 attempt 排除鏈
- * （excludedSupplierIds / excludedFailureDomains），單供應商渠道在第一次 attempt
- * 失敗後必然被自己排除，診斷卻謊報「healthy but their concurrency limits are
- * full」（實錄 env:metaso 0/6 也敢說滿）。`excluded` 參數把排除鏈帶進來：若唯一
- * 的合格供應商都被排除，如實回報 supplier_excluded 並附最近一次上游失敗原文，
- * 讓 worker 快速失敗而不是空轉到 deadline。
+ * 排障记录（2026-08-29）：旧版从不考虑 acquire 时的 attempt 排除链
+ * （excludedSupplierIds / excludedFailureDomains），单供应商渠道在第一次 attempt
+ * 失败后必然被自己排除，诊断却谎报「healthy but their concurrency limits are
+ * full」（实录 env:metaso 0/6 也敢说满）。`excluded` 参数把排除链带进来：若唯一
+ * 的合格供应商都被排除，如实回报 supplier_excluded 并附最近一次上游失败原文，
+ * 让 worker 快速失败而不是空转到 deadline。
  */
 export async function diagnoseSupplierUnavailability(
   job: Pick<GenerationJob, "modelId" | "kind" | "ratio" | "resolution" | "routingClass">,
@@ -187,7 +187,7 @@ export async function diagnoseSupplierUnavailability(
     };
   }
 
-  // 變體（比例/解析度）是否被合約接受。
+  // 变体（比例/解析度）是否被合约接受。
   const variantOk = await sql<Row[]>`
     SELECT capability.id FROM supplier_capability capability
     WHERE capability.public_model_id = ${job.modelId} AND capability.kind = ${job.kind}
@@ -294,9 +294,9 @@ export async function diagnoseSupplierUnavailability(
     };
   }
 
-  // 排除鏈檢查（2026-08-29）：acquire 會排除本 job 已失敗過的 supplier / failure
-  // domain，這裡必須用同一把尺，否則單供應商渠道永遠謊報 capacity_saturated。
-  // 一個 supplier 可能掛多個賬號（查詢按賬號展開行），先按 supplier id 去重。
+  // 排除链检查（2026-08-29）：acquire 会排除本 job 已失败过的 supplier / failure
+  // domain，这里必须用同一把尺，否则单供应商渠道永远谎报 capacity_saturated。
+  // 一个 supplier 可能挂多个账号（查询按账号展开行），先按 supplier id 去重。
   const supplierDomainById = new Map<string, string | null>();
   for (const row of withHealthyAccount) {
     supplierDomainById.set(String(row.id), row.failure_domain === null ? null : String(row.failure_domain));
@@ -413,8 +413,8 @@ export async function reportSupplierFailure(
         ? null
         : failure.cooldownUntil;
     const supplierStatus = supplierCooldown ? "cooldown" : "degraded";
-    // H2：pricing_config 是我方本地配置錯，只冷卻該 capability，不得連坐 supplier
-    // （不記 health event、不動 supplier 健康/冷卻/賬號成功率）。
+    // H2：pricing_config 是我方本地配置错，只冷却该 capability，不得连坐 supplier
+    // （不记 health event、不动 supplier 健康/冷却/账号成功率）。
     const localConfigFailure = failure.failureClass === "pricing_config";
     if (!localConfigFailure) {
       await tx`
@@ -463,19 +463,19 @@ export async function reportSupplierFailure(
 }
 
 /**
- * 通用 cooldown 到期自動恢復（病灶 C，2026-08-30）。
+ * 通用 cooldown 到期自动恢复（病灶 C，2026-08-30）。
  *
- * reportSupplierFailure 把 supplier/account 設成 'cooldown' 後，只有成功路徑
- * （reportSupplierSuccess）能把健康狀態撿回來；一條渠道一旦長期無單，cooldown
- * 到期後永遠不會被恢復，等於一冷到底（實錄：cangyuansuanli 已充值仍被 cooldown/
- * disabled 擋住 4 筆 fast；adobe2api cooldown 到 09-08 全冷著）。
+ * reportSupplierFailure 把 supplier/account 设成 'cooldown' 后，只有成功路径
+ * （reportSupplierSuccess）能把健康状态捡回来；一条渠道一旦长期无单，cooldown
+ * 到期后永远不会被恢复，等于一冷到底（实录：cangyuansuanli 已充值仍被 cooldown/
+ * disabled 挡住 4 笔 fast；adobe2api cooldown 到 09-08 全冷著）。
  *
- * 這個定時掃描把「cooldown 已到期」的 supplier/account 保守恢復成 healthy。
- * supplier 保留歷史 health_score（LEAST(1, score*0.5+0.5)，不滿血），避免反覆
- * 熔斷後立刻滿血；supplier_account 無 health_score 列，只清狀態與 cooldown。
+ * 这个定时扫描把「cooldown 已到期」的 supplier/account 保守恢复成 healthy。
+ * supplier 保留历史 health_score（LEAST(1, score*0.5+0.5)，不满血），避免反覆
+ * 熔断后立刻满血；supplier_account 无 health_score 列，只清状态与 cooldown。
  *
- * disabled 是「隔離待人工 / 憑證（賬號）吊銷」語義（quarantineSupplier 設成
- * disabled），一律不自動恢復，只能靠後台人工放行 —— 恢復條件 WHERE
+ * disabled 是「隔离待人工 / 凭证（账号）吊销」语义（quarantineSupplier 设成
+ * disabled），一律不自动恢复，只能靠后台人工放行 —— 恢复条件 WHERE
  * health_status = 'cooldown' 天然排除 disabled。
  */
 export async function recoverExpiredCooldowns(sql: GenerationSql = getGenerationSql()): Promise<{ recovered: number }> {

@@ -9,17 +9,17 @@ import { assetItemKindOf, assetUrlFieldOf, deliverableKindLabel } from "./delive
 export const CHAT_ASSETS_PACK_ID = "chat-assets";
 
 /**
- * 「存图库」可承接的聊天条目：图／影片／音頻三種交付物。
+ * 「存图库」可承接的聊天条目：图／影片／音频三种交付物。
  * 种类值域与 deliverable-kind 注册表的 DeliverableKind 逐字一致
  * （image/video/audio），所以 item.kind 可直接当 deliverable 查表。
  */
 export type AgentChatLibraryItem = AgentImageItem | AgentVideoItem | AgentAudioItem;
 
 /**
- * 聊天产出 → 资产包 item 的纯函数（图／影片／音頻三态）。
+ * 聊天产出 → 资产包 item 的纯函数（图／影片／音频三态）。
  * 图：带真实配方（item.recipe.prompt 非空）存 kind:"recipe" 的配方资产；
  * 否则维持原 reference 逻辑（纯图引用）——图片分支逐字不变（既有输出契约）。
- * 影片／音頻：没有配方概念，kind 与 URL 承载栏位一律查 deliverable-kind 注册表
+ * 影片／音频：没有配方概念，kind 与 URL 承载栏位一律查 deliverable-kind 注册表
  * （image→imageUrl，video/audio→mediaUrl），title 用真实时间兜底（不编造内容）。
  */
 export function buildChatSaveItem(
@@ -49,7 +49,7 @@ export function buildChatSaveItem(
       createdAt: now,
     };
   }
-  // 影片／音頻：种类与 URL 栏位由注册表推导（单一真源）。
+  // 影片／音频：种类与 URL 栏位由注册表推导（单一真源）。
   const deliverable = item.kind;
   const urlField = assetUrlFieldOf(deliverable);
   return {

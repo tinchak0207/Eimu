@@ -14,7 +14,7 @@ export interface GenerateImageRequest {
   generateAudio?: boolean;
   loraModelVersionIds?: string[];
   referenceImages?: File[];
-  /** ControlNet 結構控制規格（pixai 渠道）。 */
+  /** ControlNet 结构控制规格（pixai 渠道）。 */
   controlNets?: ControlNetSpec[];
   workflow?: GenerationWorkflowMetadata;
 }

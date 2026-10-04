@@ -1,26 +1,26 @@
-# AGENT_OPTIMIZE_KEY 部署指引（隱形提示詞導演）
+# AGENT_OPTIMIZE_KEY 部署指引（隐形提示词导演）
 
-## 這個變數做什麼
-`generate-videos` 進上游前，先呼叫 VPS gateway 的 `/agent/v1/optimize-prompt`
-讓 deepseek 優化 prompt。Agent 層需要的服務端 key 從這個 env 讀。
+## 这个变数做什么
+`generate-videos` 进上游前，先呼叫 VPS gateway 的 `/agent/v1/optimize-prompt`
+让 deepseek 优化 prompt。Agent 层需要的服务端 key 从这个 env 读。
 
-## 值從哪裡來
-VPS 上 `/opt/agent-harness/.env` 的 `HARNESS_API_KEY`（`sk-biz-` 前綴，39 字元）。
-gateway 驗證任何 `sk-biz-*` key 時打 `eimu.dev/v1/models`，此 key 已在 harness 作業流程中通過該驗證。
+## 值从哪里来
+VPS 上 `/opt/agent-harness/.env` 的 `HARNESS_API_KEY`（`sk-biz-` 前缀，39 字元）。
+gateway 验证任何 `sk-biz-*` key 时打 `eimu.dev/v1/models`，此 key 已在 harness 作业流程中通过该验证。
 
-## 不設會怎樣
-Agent 層直接跳過（回原 prompt），自動降級到規則層（`invisible-prompt-director`）。
-**不影響生成，只少一層優化。** 上線前設好即可。
+## 不设会怎样
+Agent 层直接跳过（回原 prompt），自动降级到规则层（`invisible-prompt-director`）。
+**不影响生成，只少一层优化。** 上线前设好即可。
 
-## 設定位置
-- Vercel：`image_gen` 專案 → Settings → Environment Variables → `AGENT_OPTIMIZE_KEY`
-- 本機開發：`.env.local` 加 `AGENT_OPTIMIZE_KEY=sk-biz-...`
+## 设定位置
+- Vercel：`image_gen` 专案 → Settings → Environment Variables → `AGENT_OPTIMIZE_KEY`
+- 本机开发：`.env.local` 加 `AGENT_OPTIMIZE_KEY=sk-biz-...`
 
-## 驗證（Vercel 部署後）
+## 验证（Vercel 部署后）
 ```
 curl -X POST https://store.tinchak0207.xyz/agent/v1/optimize-prompt \
   -H "Authorization: Bearer <AGENT_OPTIMIZE_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"一只猫从窗户跳下来落在草地上"}'
 ```
-預期 200 + `{"ok":true,"prompt":"...","model":"deepseek-v4-flash-free"}`。
+预期 200 + `{"ok":true,"prompt":"...","model":"deepseek-v4-flash-free"}`。

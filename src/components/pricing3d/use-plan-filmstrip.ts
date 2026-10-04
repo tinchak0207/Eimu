@@ -1,25 +1,25 @@
 "use client";
 
-/* ╁━ 選片條：環與選片條是同一批卡的兩個狀態 ╁━
-   - 有輸入（拖曳 / 觸控板橫掃 / 箭頭 / 圓點 / 鍵盤）→ 解除 data-rest，卡回到環上轉（縱向滾輪分檔不轉環，見 PricingPlanCarousel）
-     （環的幾何、手勢、吸附、彈簧全由 PricingPlanCarousel 原樣負責，這裡一行不碰）；
-   - 輸入停止、彈簧落定後 → stage[data-rest="true"]：非正面卡由 CSS 覆蓋位姿，縮成底部一排
-     縮圖（pricing-plan-carousel.css 的選片條節）。
-   這裡只寫兩類東西：stage 的 data-rest 旗標，與每張非正面卡的選片條槽位 CSS 變數
-   （--strip-x / --strip-y / --strip-s）。paint() 每幀寫的 inline transform 不受影響。 */
+/* ╁━ 选片条：环与选片条是同一批卡的两个状态 ╁━
+   - 有输入（拖曳 / 触控板横扫 / 箭头 / 圆点 / 键盘）→ 解除 data-rest，卡回到环上转（纵向滚轮分档不转环，见 PricingPlanCarousel）
+     （环的几何、手势、吸附、弹簧全由 PricingPlanCarousel 原样负责，这里一行不碰）；
+   - 输入停止、弹簧落定后 → stage[data-rest="true"]：非正面卡由 CSS 覆盖位姿，缩成底部一排
+     缩图（pricing-plan-carousel.css 的选片条节）。
+   这里只写两类东西：stage 的 data-rest 旗标，与每张非正面卡的选片条槽位 CSS 变数
+   （--strip-x / --strip-y / --strip-s）。paint() 每帧写的 inline transform 不受影响。 */
 
 import { useEffect, type RefObject } from "react";
 
-/** 彈簧 SPRING_SETTLE（k 168、ζ 0.74）約 0.5 秒落定；多等一口氣再收成選片條。 */
+/** 弹簧 SPRING_SETTLE（k 168、ζ 0.74）约 0.5 秒落定；多等一口气再收成选片条。 */
 const REST_AFTER_MS = 620;
 const THUMB_H_WIDE = 72;
 const THUMB_H_COMPACT = 56;
 const THUMB_GAP = 10;
-/** 選片條中心離舞台底緣的距離（舞台下方預留高度在 CSS：.case-stage margin-bottom）。 */
+/** 选片条中心离舞台底缘的距离（舞台下方预留高度在 CSS：.case-stage margin-bottom）。 */
 const STRIP_DROP = 12;
 
 export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, front: number, count: number) {
-  /* 槽位：正面換人 / 檔數變化 / 舞台尺寸變化時重算。 */
+  /* 槽位：正面换人 / 档数变化 / 舞台尺寸变化时重算。 */
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -46,7 +46,7 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
     return () => observer.disconnect();
   }, [stageRef, front, count]);
 
-  /* 靜止旗標。 */
+  /* 静止旗标。 */
   useEffect(() => {
     const stage = stageRef.current;
     const section = stage?.closest<HTMLElement>(".pricing-plan-carousel") ?? null;
@@ -66,8 +66,8 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
 
     const isControl = (target: EventTarget | null) =>
       target instanceof Element && target.closest("[data-pricing-control]") !== null;
-    /* 按在選片條縮圖上：先不醒（醒了縮圖會立刻回到環上，點擊命中測試就落空）；
-       真的拖起來（> 6px）才醒，鬆手才讓 PricingPlanCarousel 的點擊收口把它轉到正面。 */
+    /* 按在选片条缩图上：先不醒（醒了缩图会立刻回到环上，点击命中测试就落空）；
+       真的拖起来（> 6px）才醒，松手才让 PricingPlanCarousel 的点击收口把它转到正面。 */
     let pending: { x: number; y: number } | null = null;
     const onDown = (event: PointerEvent) => {
       if (isControl(event.target)) return;
@@ -103,8 +103,8 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
     const onControlClick = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest(".case-arrow, .case-dot")) wake(true);
     };
-    /* 2026-10-01：頁面滾動不再轉環（改為滾輪分檔、不轉環的淡入換檔），滾動時也不再把卡叫回環上——
-       原本這裡一滾就解除 data-rest，非正面卡（封面照）在頁面滾動途中滿場亂飛。 */
+    /* 2026-10-01：页面滚动不再转环（改为滚轮分档、不转环的淡入换档），滚动时也不再把卡叫回环上——
+       原本这里一滚就解除 data-rest，非正面卡（封面照）在页面滚动途中满场乱飞。 */
 
     stage.addEventListener("pointerdown", onDown, { passive: true });
     stage.addEventListener("pointermove", onMove, { passive: true });

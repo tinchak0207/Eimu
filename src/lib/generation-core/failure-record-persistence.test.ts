@@ -25,7 +25,7 @@ function recordingMock(respond?: (sql: string) => unknown[]) {
   return { sql: tagged, calls };
 }
 
-/** 合成上游錯誤：巢狀 cause（三層）+ requestId + metadata + 原生 code/status。 */
+/** 合成上游错误：巢状 cause（三层）+ requestId + metadata + 原生 code/status。 */
 function syntheticUpstreamError() {
   const innermost = Object.assign(new Error("ECONNRESET while reading upstream body"), {
     code: "ECONNRESET",
@@ -47,7 +47,7 @@ function syntheticUpstreamError() {
   });
 }
 
-/** 手工寫出的期望原生值（oracle 來自測試自己的合成錯誤，不來自被測實現）。 */
+/** 手工写出的期望原生值（oracle 来自测试自己的合成错误，不来自被测实现）。 */
 function expectedNative(stack: string | undefined, middleStack: string | undefined, innerStack: string | undefined) {
   return {
     name: "SupplierRequestError",
@@ -84,15 +84,15 @@ function expectedNative(stack: string | undefined, middleStack: string | undefin
 
 function decodeWrittenFailureRecord(calls: Call[], table: string): FailureRecord {
   const update = calls.find((call) => call.sql.includes(`UPDATE ${table}`));
-  assert.ok(update, `應有 ${table} 的 UPDATE`);
+  assert.ok(update, `应有 ${table} 的 UPDATE`);
   const written = update.values.find(
     (value): value is FailureRecord => Boolean(value) && typeof value === "object" && "native" in (value as object),
   );
-  assert.ok(written, `${table} UPDATE 應帶入 failure_record_json`);
+  assert.ok(written, `${table} UPDATE 应带入 failure_record_json`);
   return written;
 }
 
-test("FG-01：失敗記錄落 attempt 後逐欄位等價（含巢狀 cause 遞迴層）", async () => {
+test("FG-01：失败记录落 attempt 后逐栏位等价（含巢状 cause 递回层）", async () => {
   const error = syntheticUpstreamError();
   const failure = classifySupplierFailure(error);
   const record = createFailureRecord({ error, explanation: explainFailure(failure) });
@@ -115,25 +115,25 @@ test("FG-01：失敗記錄落 attempt 後逐欄位等價（含巢狀 cause 遞�
   assert.deepEqual(
     written.native,
     expectedNative(error.stack, middleCause.stack, innerCause.stack),
-    "寫入的原生欄位必須逐欄位等價（含三層 cause）",
+    "写入的原生栏位必须逐栏位等价（含三层 cause）",
   );
   assert.equal(written.version, 1);
   assert.equal(typeof written.capturedAt, "string");
 
-  // 帳本路徑不受影響：UPDATE 仍吃未改寫的錯誤原文（產品欄位與原生分欄）。
+  // 帐本路径不受影响：UPDATE 仍吃未改写的错误原文（产品栏位与原生分栏）。
   const update = calls.find((call) => call.sql.includes("UPDATE generation_attempt"));
-  assert.ok(update?.values.includes(failure.detail), "failure_detail 仍寫入錯誤原文");
+  assert.ok(update?.values.includes(failure.detail), "failure_detail 仍写入错误原文");
   const columnFragment = update.sql;
   assert.match(columnFragment, /failure_record_json/);
   assert.match(columnFragment, /failure_detail/);
 });
 
-test("FG-01：落庫 → 讀回逐欄位等價（含遞迴層）；產品解釋未覆寫原生", async () => {
+test("FG-01：落库 → 读回逐栏位等价（含递回层）；产品解释未覆写原生", async () => {
   const error = syntheticUpstreamError();
   const failure = classifySupplierFailure(error);
   const record = createFailureRecord({ error, explanation: explainFailure(failure) });
 
-  // 寫入（走真實寫入函數，取回它交給 DB 的值）。
+  // 写入（走真实写入函数，取回它交给 DB 的值）。
   const writer = recordingMock(() => []);
   await failGenerationAttempt({
     jobId: "job-1",
@@ -147,7 +147,7 @@ test("FG-01：落庫 → 讀回逐欄位等價（含遞迴層）；產品解釋�
   }, writer.sql);
   const written = decodeWrittenFailureRecord(writer.calls, "generation_attempt");
 
-  // 讀回（走真實讀取函數；mock 原樣回吐 jsonb，等價於 DB 的 jsonb 往返）。
+  // 读回（走真实读取函数；mock 原样回吐 jsonb，等价于 DB 的 jsonb 往返）。
   const reader = recordingMock((query) => {
     if (query.includes("FROM generation_attempt")) {
       return [{
@@ -168,7 +168,7 @@ test("FG-01：落庫 → 讀回逐欄位等價（含遞迴層）；產品解釋�
   const summaries = await listGenerationAttemptsForJob("job-1", reader.sql);
   assert.equal(summaries.length, 1);
   const readBack = summaries[0].failureRecord;
-  assert.ok(readBack, "讀回必須拿到 FailureRecord");
+  assert.ok(readBack, "读回必须拿到 FailureRecord");
   assert.deepEqual(
     readBack.native,
     expectedNative(error.stack, (error as unknown as { cause: Error }).cause.stack, (error as unknown as { cause: { cause: Error } }).cause.cause.stack),
@@ -176,7 +176,7 @@ test("FG-01：落庫 → 讀回逐欄位等價（含遞迴層）；產品解釋�
   assert.equal(readBack.native.cause?.cause?.code, "ECONNRESET");
   assert.equal(readBack.native.cause?.cause?.status, 502);
 
-  // 產品解釋另存，不覆寫原生：解釋欄位與原生欄位同時存在且各自獨立。
+  // 产品解释另存，不覆写原生：解释栏位与原生栏位同时存在且各自独立。
   assert.equal(readBack.explanation?.failureClass, "content_rejected");
   assert.equal(readBack.native.message, "upstream rejected: content policy");
   assert.equal(readBack.native.code, "1008");
@@ -184,7 +184,7 @@ test("FG-01：落庫 → 讀回逐欄位等價（含遞迴層）；產品解釋�
   assert.notEqual(readBack.explanation?.humanMessage, readBack.native.message);
 });
 
-test("FG-01：終態失敗（job 級）同樣落版本化記錄，且帳本仍記未改寫原文", async () => {
+test("FG-01：终态失败（job 级）同样落版本化记录，且帐本仍记未改写原文", async () => {
   const error = syntheticUpstreamError();
   const failure = classifySupplierFailure(error);
   const record = createFailureRecord({ error, explanation: explainFailure(failure) });
@@ -208,24 +208,24 @@ test("FG-01：終態失敗（job 級）同樣落版本化記錄，且帳本仍�
     (error as unknown as { cause: { cause: Error } }).cause.cause.stack,
   ));
 
-  // append-only 帳本：job_failed 事件的 upstream_raw = 未改寫的錯誤原文。
+  // append-only 帐本：job_failed 事件的 upstream_raw = 未改写的错误原文。
   const eventInsert = calls.find((call) => call.sql.includes("INSERT INTO job_events"));
-  assert.ok(eventInsert, "應寫入 job_events");
-  assert.ok(eventInsert.values.includes(failure.detail), "upstream_raw 必須是錯誤原文");
-  assert.ok(!eventInsert.values.includes(failure.explanation?.humanMessage ?? "??"), "帳本不得寫入產品人話");
+  assert.ok(eventInsert, "应写入 job_events");
+  assert.ok(eventInsert.values.includes(failure.detail), "upstream_raw 必须是错误原文");
+  assert.ok(!eventInsert.values.includes(failure.explanation?.humanMessage ?? "??"), "帐本不得写入产品人话");
 });
 
-test("FG-01：版本閘——未知版本的 jsonb 不得被靜默讀成當前版本", async () => {
+test("FG-01：版本闸——未知版本的 jsonb 不得被静默读成当前版本", async () => {
   const error = syntheticUpstreamError();
   const record = createFailureRecord({ error });
 
   assert.deepEqual(mapFailureRecordColumn(record)?.native, record.native);
-  assert.equal(mapFailureRecordColumn({ ...record, version: 2 }), null, "未知版本必須拒絕解析");
+  assert.equal(mapFailureRecordColumn({ ...record, version: 2 }), null, "未知版本必须拒绝解析");
   assert.equal(mapFailureRecordColumn("not-json"), null);
   assert.equal(mapFailureRecordColumn(null), null);
   assert.equal(mapFailureRecordColumn(undefined), null);
 
-  // 讀回時若欄位壞掉/版本未知 → failureRecord 為 null，但產品欄位照常可讀（不影響既有消費面）。
+  // 读回时若栏位坏掉/版本未知 → failureRecord 为 null，但产品栏位照常可读（不影响既有消费面）。
   const reader = recordingMock((query) => {
     if (query.includes("FROM generation_attempt")) {
       return [{

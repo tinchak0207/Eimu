@@ -1,77 +1,77 @@
 #!/usr/bin/env python3
-"""modal_app.py — blender-modal POC 主輪子（Modal 官方 examples/blender_video 整複製 + 白名單）。
+"""modal_app.py — blender-modal POC 主轮子（Modal 官方 examples/blender_video 整复制 + 白名单）。
 
-輪子源：https://modal.com/docs/examples/blender_video（modal-examples 倉庫，MIT）。
-下方「WHEEL DIFF 白名單」列出全部偏離；未列出的骨架（單幀一函數、bytes 進出、
-map 分發、臨時目錄寫幀再回 bytes）與官方範例同構。
+轮子源：https://modal.com/docs/examples/blender_video（modal-examples 仓库，MIT）。
+下方「WHEEL DIFF 白名单」列出全部偏离；未列出的骨架（单帧一函数、bytes 进出、
+map 分发、临时目录写帧再回 bytes）与官方范例同构。
 
-片 AD（2026-09-06）：單幀函數 → `@app.cls` 類形態（容器暖復用，消冷容器
-著色器編譯重複支付——片 X 實錘每幀 ~20s 大頭在冷容器 EGL init+著色器編譯）。
+片 AD（2026-09-06）：单帧函数 → `@app.cls` 类形态（容器暖复用，消冷容器
+著色器编译重复支付——片 X 实锤每帧 ~20s 大头在冷容器 EGL init+著色器编译）。
 
-WHEEL DIFF 白名單（官方範例 → 本檔）：
+WHEEL DIFF 白名单（官方范例 → 本档）：
   1. app 名 "example-blender-video" → "blender-modal-poc"。
-  2. Image：python_version "3.11"+bpy==4.5.0 → "3.13"+bpy==5.2.1。**現場證據
-     推翻 spec 的默認**：PyPI 實測 bpy 5.2.1 僅 cp313 wheel（requires_python
-     ==3.13.*，manylinux_2_28 x86_64），3.11 無輪可裝；5.2.1 與本機橋同版，
-     5.2 API（BLENDER_EEVEE 唯一枚舉、channelbags、RT 旗標）直跑。apt 白名單：
-     xorg/libxkbcommon0 官方原樣保留，+ libegl1/libgl1（EGL headless，
-     本機橋片A實證路徑）。+ add_local_python_source("modal_common")（部署
-     邊界：本地 import 不自動上雲，Modal 1.5.5 要求顯式聲明）。
-  3. gpu="L40S" → env BLENDER_MODAL_GPU 可覆蓋，默認 "T4"（研究片U成本
-     裁定：smoke 幾分錢級；Eevee EGL 若敗升 L4 重判）。max_containers=10
-     官方原樣。timeout=120（spec 指定；官方未顯式聲明）。
-  4. 官方 render() 只吃 blend_file → render_frame(payload: dict) 同時支持
-     blend_bytes（官方輪原樣）與 scene_script（本機橋 /v1/execute 的 script
-     語義：bpy 內 exec、CWD 內寫 out/、mtime/存在性收 artifacts）。
-  5. 官方 configure_rendering（Cycles 專用）→ configure_eevee/configure_cycles：
-       - Eevee 主輪：BLENDER_EEVEE（5.2 唯一枚舉，TypeError 落回
-         BLENDER_EEVEE_NEXT 兼容 4.x，片M 候補清單同構）+ taa_render_samples=1
+  2. Image：python_version "3.11"+bpy==4.5.0 → "3.13"+bpy==5.2.1。**现场证据
+     推翻 spec 的默认**：PyPI 实测 bpy 5.2.1 仅 cp313 wheel（requires_python
+     ==3.13.*，manylinux_2_28 x86_64），3.11 无轮可装；5.2.1 与本机桥同版，
+     5.2 API（BLENDER_EEVEE 唯一枚举、channelbags、RT 旗标）直跑。apt 白名单：
+     xorg/libxkbcommon0 官方原样保留，+ libegl1/libgl1（EGL headless，
+     本机桥片A实证路径）。+ add_local_python_source("modal_common")（部署
+     边界：本地 import 不自动上云，Modal 1.5.5 要求显式声明）。
+  3. gpu="L40S" → env BLENDER_MODAL_GPU 可覆盖，默认 "T4"（研究片U成本
+     裁定：smoke 几分钱级；Eevee EGL 若败升 L4 重判）。max_containers=10
+     官方原样。timeout=120（spec 指定；官方未显式声明）。
+  4. 官方 render() 只吃 blend_file → render_frame(payload: dict) 同时支持
+     blend_bytes（官方轮原样）与 scene_script（本机桥 /v1/execute 的 script
+     语义：bpy 内 exec、CWD 内写 out/、mtime/存在性收 artifacts）。
+  5. 官方 configure_rendering（Cycles 专用）→ configure_eevee/configure_cycles：
+       - Eevee 主轮：BLENDER_EEVEE（5.2 唯一枚举，TypeError 落回
+         BLENDER_EEVEE_NEXT 兼容 4.x，片M 候补清单同构）+ taa_render_samples=1
          + use_raytracing=False（片M/片F 存活配方：samples=16@1280 全崩、
-         samples=1+RT off 全過）；
-       - Cycles 後備：官方同構（compute_device_type + get_devices + 全開 +
-         device 列印 debugging snippet 原樣），CUDA→OPTIX（L4/T4 均支援，
-         三方橋同款），samples 128→16（POC 成本紀律，白名單）。
-  6. 新增 _ensure_gpu_init()：gpu.init() EGL platform init——**片 AD 真雲
-     判決推翻其主路徑地位**：預建 EGL context 是 Eevee 渲染崩潰源非加速器
-     （三容器對照：無預建 rain 渲染成功 21s；預建×2 同場景 ~6s SIGSEGV；
-     本機橋片F 同構互證；速度零貢獻且冷容器上 gpu.init 本身耗 18.5s）。
-     默認關閉（Eevee 自建 context），BLENDER_MODAL_GPU_INIT=1 僅作診斷開關。
-     另 AD 雷區 #6b：`import gpu` 必須在 `import bpy` 之後（bpy wheel 的
-     gpu 模組由 bpy 導入路徑供給，裸導 No module named 'gpu' 真雲實錘）。
-  7. 回應形狀：官方回裸 PNG bytes → bridge_envelope（{ok, artifacts:
+         samples=1+RT off 全过）；
+       - Cycles 后备：官方同构（compute_device_type + get_devices + 全开 +
+         device 列印 debugging snippet 原样），CUDA→OPTIX（L4/T4 均支援，
+         三方桥同款），samples 128→16（POC 成本纪律，白名单）。
+  6. 新增 _ensure_gpu_init()：gpu.init() EGL platform init——**片 AD 真云
+     判决推翻其主路径地位**：预建 EGL context 是 Eevee 渲染崩溃源非加速器
+     （三容器对照：无预建 rain 渲染成功 21s；预建×2 同场景 ~6s SIGSEGV；
+     本机桥片F 同构互证；速度零贡献且冷容器上 gpu.init 本身耗 18.5s）。
+     默认关闭（Eevee 自建 context），BLENDER_MODAL_GPU_INIT=1 仅作诊断开关。
+     另 AD 雷区 #6b：`import gpu` 必须在 `import bpy` 之后（bpy wheel 的
+     gpu 模组由 bpy 导入路径供给，裸导 No module named 'gpu' 真云实锤）。
+  7. 回应形状：官方回裸 PNG bytes → bridge_envelope（{ok, artifacts:
      [{path,bytes,kind,b64}], scene_summary, stdout_tail, duration_ms,
-     queued, queue_position}，與本機橋 POST /v1/execute 200 同構；b64/
-     extra 欄 additive）。
-  8. 新增 web endpoint POST /render-frame（官方無）：HMAC 鑑權（Secret
-     blender-modal-hmac，簽名基底=剝 _sig 後的 canonical JSON，
-     modal_common.sign_hex 同一實現）。
-  9. 新增 @app.local_entrypoint() demo：內置確定性 turntable 場景
-     （modal_common.build_turntable_script，片M 全跨度配方、不觸
-     .fcurves 雷區）——官方範例依賴隨附 IceModal.blend，POC 免外帶資產。
+     queued, queue_position}，与本机桥 POST /v1/execute 200 同构；b64/
+     extra 栏 additive）。
+  8. 新增 web endpoint POST /render-frame（官方无）：HMAC 鉴权（Secret
+     blender-modal-hmac，签名基底=剥 _sig 后的 canonical JSON，
+     modal_common.sign_hex 同一实现）。
+  9. 新增 @app.local_entrypoint() demo：内置确定性 turntable 场景
+     （modal_common.build_turntable_script，片M 全跨度配方、不触
+     .fcurves 雷区）——官方范例依赖随附 IceModal.blend，POC 免外带资产。
  10. combine()：官方 glob+shell=True ffmpeg → image2 demuxer + list-form
-     argv（片L 實錘 glob/concat 對 PNG 有丟幀面；片M 配方；免 shell 注入），
-     fps 參數化（官方硬編 60）。
- 11. （片 AD）單幀函數 render_frame → 單一 `@app.cls` 類 Renderer，同類掛
-     `@modal.method()`（SDK .remote/.map 用）與 `@modal.fastapi_endpoint()`
-     （web 用）——形狀照抄官方 lifecycle guide（「For web functions, swap in
-     @modal.fastapi_endpoint()」）+ live wheel 1.5.5 認證（cls.pyi：cls() 吃
-     function 同款參數含 scaledown_window；partial_function.pyi：enter()/
-     method()）。同類雙修=同一暖容器池服務兩通道，暖身實現只有一份。
-       - `@modal.enter()` warm：只做 gpu.init()（毫秒級）。**不做暖身渲染**
-         （AD 兩實錘：①暖身渲染原樣重付首幀編譯成本 27s 純浪費；②同進程
-         跨場景切換渲染觸發 SIGSEGV n=1，片 X 同場景 10 連渲零崩）——冷啟
-         編譯由容器首幀付一次，之後同場景幀全部命中暖狀態；
-       - scaledown_window=60（鏈間請求間隔 ~1-3s 足夠保溫；空窗帳單上限
-         60s×T4≈$0.01/容器，成本紀律明示）；web 方法經 HMAC 才能觸發，
-         SDK 方法由 Modal 平台鑑權，secret 掛類級無外洩面。
- 12. （片 AD）場景快取：payload 場景輸入（scene_script/blend_bytes+
-     engine_hint）sha256 為鍵，命中時重用活 scene 只做 frame_set（跳過
-     open_mainfile/read_factory_settings+場景構建+材質著色器重編譯）；
-     重用前 StructRNA touch-test（scene.render.engine 存取）防片 X 雷區
-     #3「read_factory_settings 殺舊 Scene 引用」，死引用即降級重建；
-     換鍵先置 None 再 reset，舊引用絕不觸碰。
+     argv（片L 实锤 glob/concat 对 PNG 有丢帧面；片M 配方；免 shell 注入），
+     fps 参数化（官方硬编 60）。
+ 11. （片 AD）单帧函数 render_frame → 单一 `@app.cls` 类 Renderer，同类挂
+     `@modal.method()`（SDK .remote/.map 用）与 `@modal.fastapi_endpoint()`
+     （web 用）——形状照抄官方 lifecycle guide（「For web functions, swap in
+     @modal.fastapi_endpoint()」）+ live wheel 1.5.5 认证（cls.pyi：cls() 吃
+     function 同款参数含 scaledown_window；partial_function.pyi：enter()/
+     method()）。同类双修=同一暖容器池服务两通道，暖身实现只有一份。
+       - `@modal.enter()` warm：只做 gpu.init()（毫秒级）。**不做暖身渲染**
+         （AD 两实锤：①暖身渲染原样重付首帧编译成本 27s 纯浪费；②同进程
+         跨场景切换渲染触发 SIGSEGV n=1，片 X 同场景 10 连渲零崩）——冷启
+         编译由容器首帧付一次，之后同场景帧全部命中暖状态；
+       - scaledown_window=60（链间请求间隔 ~1-3s 足够保温；空窗帐单上限
+         60s×T4≈$0.01/容器，成本纪律明示）；web 方法经 HMAC 才能触发，
+         SDK 方法由 Modal 平台鉴权，secret 挂类级无外泄面。
+ 12. （片 AD）场景快取：payload 场景输入（scene_script/blend_bytes+
+     engine_hint）sha256 为键，命中时重用活 scene 只做 frame_set（跳过
+     open_mainfile/read_factory_settings+场景构建+材质著色器重编译）；
+     重用前 StructRNA touch-test（scene.render.engine 存取）防片 X 雷区
+     #3「read_factory_settings 杀旧 Scene 引用」，死引用即降级重建；
+     换键先置 None 再 reset，旧引用绝不触碰。
 
-禁區聲明：bridge/、src/、其他 deploy-staging/、skills/ 本片零接觸。
+禁区声明：bridge/、src/、其他 deploy-staging/、skills/ 本片零接触。
 """
 from __future__ import annotations
 
@@ -96,38 +96,38 @@ from modal_common import (
 
 app = modal.App("blender-modal-poc")
 
-# ---- 官方 rendering_image 同構，僅白名單 #2/#3
+# ---- 官方 rendering_image 同构，仅白名单 #2/#3
 rendering_image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("xorg", "libxkbcommon0", "libegl1", "libgl1")  # X11 (Unix GUI) deps + EGL headless
-    .uv_pip_install("bpy==5.2.1", "fastapi[standard]")  # fastapi 顯式裝：1.5.5 fastapi_endpoint 硬要求（ConflictError 實錘）
+    .uv_pip_install("bpy==5.2.1", "fastapi[standard]")  # fastapi 显式装：1.5.5 fastapi_endpoint 硬要求（ConflictError 实锤）
     .add_local_python_source("modal_common")
 )
 
-# 研究片U 裁定：T4 起步（幾分錢紀律）；Eevee EGL 若敗，BLENDER_MODAL_GPU=L4 重判
+# 研究片U 裁定：T4 起步（几分钱纪律）；Eevee EGL 若败，BLENDER_MODAL_GPU=L4 重判
 GPU = os.environ.get("BLENDER_MODAL_GPU", "T4")
 WITH_GPU = True
 
 EEVEE_SAMPLES = 1    # 片M/片F 存活配方
-CYCLES_SAMPLES = 16  # 官方 128 → POC 成本紀律（白名單 #5）
-EEVEE_ENGINE = "BLENDER_EEVEE"  # 5.2 唯一枚舉（片B/片M 實錘）
-SCALEDOWN_WINDOW = 60  # 白名單 #11：保溫窗（顯式聲明=成本上界明示）
+CYCLES_SAMPLES = 16  # 官方 128 → POC 成本纪律（白名单 #5）
+EEVEE_ENGINE = "BLENDER_EEVEE"  # 5.2 唯一枚举（片B/片M 实锤）
+SCALEDOWN_WINDOW = 60  # 白名单 #11：保温窗（显式声明=成本上界明示）
 
 _GPU_STATE = {"ready": False, "state": "unknown"}
 
 
 def _ensure_gpu_init() -> str:
-    """gpu.init() EGL platform init（默認關閉，BLENDER_MODAL_GPU_INIT=1 才啟用）。
+    """gpu.init() EGL platform init（默认关闭，BLENDER_MODAL_GPU_INIT=1 才启用）。
 
-    片 AD 真雲判決（2026-09-06，三容器對照）：**預建 EGL context 是 Eevee
-    渲染的崩潰源，不是加速器**——
-      - 容器1 gpu.init 失敗（無預建）→ rain_chase 1280x720 渲染成功 21s；
-      - 容器2/3 gpu.init 成功（預建）→ 同場景渲染 ~6s 處 SIGSEGV ×2；
-      - 本機橋片F 同構互證：橋（gpu.init 預建）負載下崩、直連 CLI（Eevee
-        自建 context）無事；
-      - 速度零貢獻：piece X（gpu.init 版）與容器1（無）每幀同為 ~20s，
-        且 gpu.init 本身在冷容器上耗 18.5s（純浪費）。
-    保留本函數僅為診斷開關（env 顯式開啟）；主路徑 Eevee 自建 context。
+    片 AD 真云判决（2026-09-06，三容器对照）：**预建 EGL context 是 Eevee
+    渲染的崩溃源，不是加速器**——
+      - 容器1 gpu.init 失败（无预建）→ rain_chase 1280x720 渲染成功 21s；
+      - 容器2/3 gpu.init 成功（预建）→ 同场景渲染 ~6s 处 SIGSEGV ×2；
+      - 本机桥片F 同构互证：桥（gpu.init 预建）负载下崩、直连 CLI（Eevee
+        自建 context）无事；
+      - 速度零贡献：piece X（gpu.init 版）与容器1（无）每帧同为 ~20s，
+        且 gpu.init 本身在冷容器上耗 18.5s（纯浪费）。
+    保留本函数仅为诊断开关（env 显式开启）；主路径 Eevee 自建 context。
     """
     if _GPU_STATE["ready"]:
         return _GPU_STATE["state"]
@@ -136,12 +136,12 @@ def _ensure_gpu_init() -> str:
         _GPU_STATE["ready"] = True
         return _GPU_STATE["state"]
     try:
-        import bpy  # noqa: F401 — 必須先於 gpu（雷區 #6b）
-        import gpu as bl_gpu  # Blender GPU module — headless 時走 EGL backend
+        import bpy  # noqa: F401 — 必须先于 gpu（雷区 #6b）
+        import gpu as bl_gpu  # Blender GPU module — headless 时走 EGL backend
 
         bl_gpu.init()
         _GPU_STATE["state"] = "egl"
-    except Exception as exc:  # noqa: BLE001 — 判決要輸出原文
+    except Exception as exc:  # noqa: BLE001 — 判决要输出原文
         _GPU_STATE["state"] = f"cpu:{exc}"
     _GPU_STATE["ready"] = True
     print(f"[gpu-init] {_GPU_STATE['state']}")
@@ -149,43 +149,43 @@ def _ensure_gpu_init() -> str:
 
 
 def configure_eevee(scene) -> None:
-    """片M 存活配方（本機 EGL 實彈全過）：samples=1 + raytracing off。"""
+    """片M 存活配方（本机 EGL 实弹全过）：samples=1 + raytracing off。"""
     scene.eevee.taa_render_samples = EEVEE_SAMPLES
     try:
-        scene.eevee.use_raytracing = False  # 5.2 新旗標；try/except 同片M
+        scene.eevee.use_raytracing = False  # 5.2 新旗标；try/except 同片M
     except AttributeError:
         pass
 
 
 def configure_cycles(scene) -> None:
-    """官方 configure_rendering 同構（白名單 #5：CUDA→OPTIX、samples 128→16）。"""
+    """官方 configure_rendering 同构（白名单 #5：CUDA→OPTIX、samples 128→16）。"""
     scene.cycles.samples = CYCLES_SAMPLES
     scene.cycles.device = "GPU"
-    import bpy  # 官方路徑：preferences 掛在 bpy.context，不在 scene 上
+    import bpy  # 官方路径：preferences 挂在 bpy.context，不在 scene 上
 
     cycles = bpy.context.preferences.addons["cycles"]
     cycles.preferences.compute_device_type = "OPTIX"
     cycles.preferences.get_devices()
     for device in cycles.preferences.devices:
         device.use = True
-    for dev in cycles.preferences.devices:  # 官方 debugging snippet 原樣
+    for dev in cycles.preferences.devices:  # 官方 debugging snippet 原样
         print(f"ID:{dev['id']} Name:{dev['name']} Type:{dev['type']} Use:{dev['use']}")
 
 
 def _resolve_engine(scene, engine_hint: str) -> str:
-    """engine 解析：hint 勝（同一腳本可雙跑）；未給則尊重 blend 內建。"""
+    """engine 解析：hint 胜（同一脚本可双跑）；未给则尊重 blend 内建。"""
     if engine_hint == "cycles":
         scene.render.engine = "CYCLES"
     elif engine_hint == "eevee":
         try:
             scene.render.engine = EEVEE_ENGINE
         except TypeError:
-            scene.render.engine = "BLENDER_EEVEE_NEXT"  # 4.x 兼容（片M 候補清單同構）
+            scene.render.engine = "BLENDER_EEVEE_NEXT"  # 4.x 兼容（片M 候补清单同构）
     return str(scene.render.engine)
 
 
 def _scene_key(scene_script: str | None, blend_bytes: bytes | None, engine_hint: str) -> str:
-    """白名單 #12：場景輸入指紋（快取鍵）。res/frame 不入鍵（逐幀便宜、按呼叫設）。"""
+    """白名单 #12：场景输入指纹（快取键）。res/frame 不入键（逐帧便宜、按呼叫设）。"""
     h = hashlib.sha256()
     h.update(b"v1|")
     h.update((scene_script or "").encode("utf-8"))
@@ -195,7 +195,7 @@ def _scene_key(scene_script: str | None, blend_bytes: bytes | None, engine_hint:
     return h.hexdigest()
 
 
-# ---- 白名單 #8：HMAC Secret（web 鑑權；類級掛載，SDK 方法由平台鑑權）
+# ---- 白名单 #8：HMAC Secret（web 鉴权；类级挂载，SDK 方法由平台鉴权）
 hmac_secret = modal.Secret.from_name("blender-modal-hmac")
 
 
@@ -204,23 +204,23 @@ hmac_secret = modal.Secret.from_name("blender-modal-hmac")
     gpu=GPU if WITH_GPU else None,
     secrets=[hmac_secret],
     max_containers=10,                  # 官方 free-tier 同值
-    timeout=120,                        # 白名單 #3
-    scaledown_window=SCALEDOWN_WINDOW,  # 白名單 #11
+    timeout=120,                        # 白名单 #3
+    scaledown_window=SCALEDOWN_WINDOW,  # 白名单 #11
 )
 class Renderer:
-    """暖復用渲染容器：容器進程內 bpy import/EGL context/著色器編譯天然驻留
-    （模組級+GPU 進程級狀態），本類把它顯式化：
-      - @modal.enter() 只做 GPU 狀態記錄（gpu.init 默認關閉，見 #6）——
-        **不做暖身渲染**，兩個實錘：
-        ①暖身渲染把首幀本要付的編譯成本原樣重付（320x180 cube 實測 27s，
-        純浪費）；②同進程跨場景切換渲染（小暖身場景→重 blend）觸發
-        SIGSEGV（AD 真雲 n=1；片 X 同場景 10 連渲零崩）——場景切換面
-        只留給場景快取 miss（必要路徑），絕不無故多製造一次。
-      - 場景快取（_scene_key）讓同場景後續幀跳過重建+重編譯；
-      - scaledown_window 讓 HTTP 鏈的逐幀請求落在同一暖容器上。
-    片 X 實證基線：同場景容器上逐幀 0.5-2.5s（smoke4 web 鏈 10/10 零崩）。"""
+    """暖复用渲染容器：容器进程内 bpy import/EGL context/著色器编译天然驻留
+    （模组级+GPU 进程级状态），本类把它显式化：
+      - @modal.enter() 只做 GPU 状态记录（gpu.init 默认关闭，见 #6）——
+        **不做暖身渲染**，两个实锤：
+        ①暖身渲染把首帧本要付的编译成本原样重付（320x180 cube 实测 27s，
+        纯浪费）；②同进程跨场景切换渲染（小暖身场景→重 blend）触发
+        SIGSEGV（AD 真云 n=1；片 X 同场景 10 连渲零崩）——场景切换面
+        只留给场景快取 miss（必要路径），绝不无故多制造一次。
+      - 场景快取（_scene_key）让同场景后续帧跳过重建+重编译；
+      - scaledown_window 让 HTTP 链的逐帧请求落在同一暖容器上。
+    片 X 实证基线：同场景容器上逐帧 0.5-2.5s（smoke4 web 链 10/10 零崩）。"""
 
-    # 類屬性槽（Modal 對自訂 __init__ 發 DeprecationError——改類屬性，實例首次賦值即遮蔽）
+    # 类属性槽（Modal 对自订 __init__ 发 DeprecationError——改类属性，实例首次赋值即遮蔽）
     _scene = None
     _scene_key: str | None = None
     warm_ms = 0
@@ -228,9 +228,9 @@ class Renderer:
 
     @modal.enter()
     def warm(self) -> None:
-        """容器啟動一次：GPU 狀態記錄（gpu.init 默認關閉=延遲自建，見
-        _ensure_gpu_init 判決；渲染冷啟大頭由首個真實請求付一次，之後
-        同場景幀全部命中暖狀態）。"""
+        """容器启动一次：GPU 状态记录（gpu.init 默认关闭=延迟自建，见
+        _ensure_gpu_init 判决；渲染冷启大头由首个真实请求付一次，之后
+        同场景帧全部命中暖状态）。"""
         t0 = time.monotonic()
         self.warm_state = _ensure_gpu_init()
         self.warm_ms = int((time.monotonic() - t0) * 1000)
@@ -238,10 +238,10 @@ class Renderer:
 
     def _ensure_scene(self, bpy, key: str, scene_script: str | None,
                       blend_bytes: bytes | None, engine_hint: str, logs: list):
-        """白名單 #12：場景快取（hit → frame_set 即用；miss → 重建）。
+        """白名单 #12：场景快取（hit → frame_set 即用；miss → 重建）。
 
-        雷區 #3 防線：重用前 touch-test；換鍵先置 None 再 reset——舊 Scene
-        引用在 reset 後絕不觸碰（StructRNA of type Scene has been removed）。
+        雷区 #3 防线：重用前 touch-test；换键先置 None 再 reset——旧 Scene
+        引用在 reset 后绝不触碰（StructRNA of type Scene has been removed）。
         """
         scene = self._scene
         if key == self._scene_key and scene is not None:
@@ -264,11 +264,11 @@ class Renderer:
             logs.append("scene:blend_bytes")
         elif scene_script:
             bpy.ops.wm.read_factory_settings(use_empty=True)
-            exec(compile(scene_script, "<modal-scene-script>", "exec"), {"__name__": "__main__"})  # noqa: S102 — 橋 /v1/execute 同語義
+            exec(compile(scene_script, "<modal-scene-script>", "exec"), {"__name__": "__main__"})  # noqa: S102 — 桥 /v1/execute 同语义
             logs.append("scene:rebuild")
             logs.append("scene:scene_script")
         else:
-            raise ValueError("payload 需 blend_b64 或 scene_script 擇一")
+            raise ValueError("payload 需 blend_b64 或 scene_script 择一")
 
         scene = bpy.context.scene
         engine = _resolve_engine(scene, engine_hint)
@@ -283,7 +283,7 @@ class Renderer:
 
     def _render_png_bytes(self, scene_script: str | None, blend_bytes: bytes | None,
                           frame: int, res: list | None, engine_hint: str) -> tuple[bytes, str]:
-        """單幀渲染核心：場景快取命中 → frame_set 即渲；未命中 → 重建後渲。"""
+        """单帧渲染核心：场景快取命中 → frame_set 即渲；未命中 → 重建后渲。"""
         import bpy
 
         logs: list[str] = [f"gpu_ctx={_ensure_gpu_init()}",
@@ -311,7 +311,7 @@ class Renderer:
         return png, tail(" | ".join(logs))
 
     def _render_one(self, payload: dict) -> dict:
-        """bridge 契約單幀渲染（web endpoint 與 @modal.method 共用的純方法）。"""
+        """bridge 契约单帧渲染（web endpoint 与 @modal.method 共用的纯方法）。"""
         t0 = time.monotonic()
         frame = int(payload.get("frame", 1))
         blend_b64 = payload.get("blend_b64")
@@ -331,7 +331,7 @@ class Renderer:
                 duration_ms=int((time.monotonic() - t0) * 1000),
                 extra={"frame": frame},
             )
-        except Exception as exc:  # noqa: BLE001 — 結構化錯誤面（橋 500 同構，additive）
+        except Exception as exc:  # noqa: BLE001 — 结构化错误面（桥 500 同构，additive）
             return bridge_envelope(
                 ok=False,
                 artifacts=[],
@@ -342,15 +342,15 @@ class Renderer:
 
     @modal.method()
     def render_frame(self, payload: dict) -> dict:
-        """白名單 #4/#7/#11：單幀一次調用（.remote/.map 用），bridge 契約同構回應。"""
+        """白名单 #4/#7/#11：单帧一次调用（.remote/.map 用），bridge 契约同构回应。"""
         return self._render_one(payload)
 
-    @modal.fastapi_endpoint(method="POST", label="blender-modal-poc-render")  # 1.5.5: web_endpoint 已死（2025-03-05 更名，硬 DeprecationError 實錘）
+    @modal.fastapi_endpoint(method="POST", label="blender-modal-poc-render")  # 1.5.5: web_endpoint 已死（2025-03-05 更名，硬 DeprecationError 实锤）
     def render_frame_web(self, payload: dict) -> dict:
-        """POST /render-frame：HMAC 驗簽（_sig 內嵌通道）→ 同容器單幀渲染。
+        """POST /render-frame：HMAC 验签（_sig 内嵌通道）→ 同容器单帧渲染。
 
-        簽名基底 = 剝 _sig 後 canonical JSON（sort_keys, 緊湊分隔符），
-        worker 端 modal_common.sign_hex 同一實現——同構驗證點。
+        签名基底 = 剥 _sig 后 canonical JSON（sort_keys, 紧凑分隔符），
+        worker 端 modal_common.sign_hex 同一实现——同构验证点。
         """
         t0 = time.monotonic()
         payload = dict(payload)
@@ -369,11 +369,11 @@ def _consteq(a: str, b: str) -> bool:
     return _hmac.compare_digest(a, b)
 
 
-# ---- 官方 combination_image 同構（白名單 #10）
+# ---- 官方 combination_image 同构（白名单 #10）
 @app.function(image=modal.Image.debian_slim().apt_install("ffmpeg").add_local_python_source("modal_common"),
               timeout=300)
 def combine(payload: dict) -> dict:
-    """PNG 序列→mp4：image2 demuxer + list-form argv（片L/片M 實錘配方）。"""
+    """PNG 序列→mp4：image2 demuxer + list-form argv（片L/片M 实锤配方）。"""
     import subprocess
     import tempfile
 
@@ -424,13 +424,13 @@ def demo(
     frames: int = 10,
     fps: int = 30,
     frame: int = 1,
-    mode: str = "still",  # "still" 單幀 | "chain" map 分發+合片
+    mode: str = "still",  # "still" 单帧 | "chain" map 分发+合片
 ):
-    """白名單 #9：內置確定性 turntable 場景 smoke（免外帶 .blend）。
+    """白名单 #9：内置确定性 turntable 场景 smoke（免外带 .blend）。
 
     modal run modal_app.py::demo --engine eevee --mode still --frame 1
     modal run modal_app.py::demo --engine eevee --mode chain --frames 10
-    注意：chain 以 map 分發；收工後容器保溫窗最長 60s（成本上界明示）。
+    注意：chain 以 map 分发；收工后容器保温窗最长 60s（成本上界明示）。
     """
     script = build_turntable_script(1, max(frames, 10), fps)
     renderer = Renderer()
@@ -449,7 +449,7 @@ def demo(
         print(f"wall_ms={int((time.monotonic() - t0) * 1000)}")
         return
 
-    # chain：map 分發（map：單 dict 參數逐個派發；starmap 只吃 tuple，實錘 TypeError）→ combine 合片
+    # chain：map 分发（map：单 dict 参数逐个派发；starmap 只吃 tuple，实锤 TypeError）→ combine 合片
     payloads = [{"scene_script": script, "frame": f, "engine_hint": engine, "res": [1280, 720]}
                 for f in range(1, frames + 1)]
     results = list(renderer.render_frame.map(payloads))

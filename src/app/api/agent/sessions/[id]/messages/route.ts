@@ -1,10 +1,10 @@
-// POST /api/agent/sessions/[id]/messages —— 送一條對話消息。
+// POST /api/agent/sessions/[id]/messages —— 送一条对话消息。
 //
-// 唯一本地校驗是 content 的形狀與長度：8,000 字是為了擋掉會把上游打爆的巨型消息，
-// 也順便擋掉空串（空消息沒有代理意義）。其餘原樣透傳給閘道。
+// 唯一本地校验是 content 的形状与长度：8,000 字是为了挡掉会把上游打爆的巨型消息，
+// 也顺便挡掉空串（空消息没有代理意义）。其余原样透传给闸道。
 //
-// 為什麼要先攔空串而不是透傳：gateway 對空消息也會回 4xx，但走一趟外網往返
-// 才發現純屬浪費 —— 本地 400 更快，也讓前端拿到同一個站內錯誤格式。
+// 为什么要先拦空串而不是透传：gateway 对空消息也会回 4xx，但走一趟外网往返
+// 才发现纯属浪费 —— 本地 400 更快，也让前端拿到同一个站内错误格式。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -12,7 +12,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const MAX_MESSAGE_LENGTH = 8_000;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
@@ -21,7 +21,7 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
-/** gateway 響應原樣透傳：status 與 body 都不吞，好讓客戶端看到真實原因。 */
+/** gateway 响应原样透传：status 与 body 都不吞，好让客户端看到真实原因。 */
 function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
   if (resp.status >= 200 && resp.status < 300) {
     return NextResponse.json(resp.json ?? {}, { status: resp.status, headers: { "Cache-Control": "no-store" } });
@@ -56,26 +56,26 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return fail(400, `消息内容过长，上限 ${MAX_MESSAGE_LENGTH} 字。`, "message_too_long");
   }
 
-  // 畫布摘要（PRD §4）：前端每次 send 都會帶上「畫布上現在有什麼」的純 metadata
-  // 摘要，閘道用它對齊上下文。這裡只做形狀與體積校驗後原樣透傳 ——
-  // 摘要的語義屬於閘道，代理層不該理解它，但也不能把它吞掉（吞掉的話
-  // 閘道 session 永遠拿不到 canvasSummary）。
+  // 画布摘要（PRD §4）：前端每次 send 都会带上「画布上现在有什么」的纯 metadata
+  // 摘要，闸道用它对齐上下文。这里只做形状与体积校验后原样透传 ——
+  // 摘要的语义属于闸道，代理层不该理解它，但也不能把它吞掉（吞掉的话
+  // 闸道 session 永远拿不到 canvasSummary）。
   const rawCanvasState = (body as { canvas_state?: unknown })?.canvas_state;
   let canvasState: unknown;
   if (rawCanvasState !== undefined && rawCanvasState !== null) {
     if (typeof rawCanvasState !== "object") {
       return fail(400, "画布摘要格式无效。", "invalid_canvas_state");
     }
-    // 體積上限：摘要是 metadata，正常在幾 KB 量級。超過 128KB 說明有人把
-    // 圖片 base64 塞進來了 —— 那不是摘要，直接拒掉而不是替他轉發。
+    // 体积上限：摘要是 metadata，正常在几 KB 量级。超过 128KB 说明有人把
+    // 图片 base64 塞进来了 —— 那不是摘要，直接拒掉而不是替他转发。
     if (JSON.stringify(rawCanvasState).length > 128 * 1024) {
       return fail(400, "画布摘要过大。", "canvas_state_too_large");
     }
     canvasState = rawCanvasState;
   }
 
-  // 隱形引導詞（2026-08-25 模板卡）：點模板卡時前端隨首條訊息上送，
-  // 閘道拼進 system 注入模型。同樣只做形狀/長度校驗後透傳——不吞不渲染。
+  // 隐形引导词（2026-08-25 模板卡）：点模板卡时前端随首条讯息上送，
+  // 闸道拼进 system 注入模型。同样只做形状/长度校验后透传——不吞不渲染。
   const rawDirective = (body as { session_directive?: unknown })?.session_directive;
   let sessionDirective: string | undefined;
   if (typeof rawDirective === "string" && rawDirective.trim().length > 0) {
@@ -85,8 +85,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     sessionDirective = rawDirective;
   }
 
-  // 客戶端環境上報（型別化白名單）：只做形狀/體積校驗後原樣透傳，語義與淨化全在閘道
-  // （sanitizeClientEnvironmentReport）；這裡只擋形狀明顯不對與超大的 payload。
+  // 客户端环境上报（型别化白名单）：只做形状/体积校验后原样透传，语义与净化全在闸道
+  // （sanitizeClientEnvironmentReport）；这里只挡形状明显不对与超大的 payload。
   const rawClientEnvironment = (body as { client_environment?: unknown })?.client_environment;
   let clientEnvironment: unknown;
   if (rawClientEnvironment !== undefined && rawClientEnvironment !== null) {

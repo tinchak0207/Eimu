@@ -1,8 +1,8 @@
 // 用户消息附件「图片真缩略」行为测试（2026-10-03）：
-//   - image/* 有票 → 渲染真 <img>，src 直连网关读回 URL（不是檔名 chip）；
+//   - image/* 有票 → 渲染真 <img>，src 直连网关读回 URL（不是档名 chip）；
 //   - 无票 / 铸票失败 → 降级文档卡，绝不渲染破图；
 //   - 铸票中 → 骨架占位，无 <img> 无文件名泄漏；
-//   - 非图片（pdf 等）→ 维持檔名 chip，且檔名与大小都渲染出来。
+//   - 非图片（pdf 等）→ 维持档名 chip，且档名与大小都渲染出来。
 // 用 react-dom/server 真渲染（node:test 无 DOM 先例见 canvas/creation-flow-panel.test.ts），
 // 断言落在真实输出 markup 上，不是源码字符串探针。
 
@@ -62,7 +62,7 @@ test("image 附件有票：渲染真 <img>，src 是网关读回 URL", () => {
   assert.ok(html.includes('alt="book-cover.png"'), "img alt 应是附件名");
   // 缩略壳：圆角+淡描边在，白图也有边界。
   assert.ok(html.includes("rounded-[18px]"), "缩略壳应有 18px 圆角");
-  assert.ok(!html.includes(formatBytes(IMG_REF.size!)), "真图缩略不应再渲染檔名 chip 的大小文本");
+  assert.ok(!html.includes(formatBytes(IMG_REF.size!)), "真图缩略不应再渲染档名 chip 的大小文本");
 });
 
 test("image 附件无票（铸票失败/无 session）：降级文档卡，绝不渲染破图", () => {
@@ -77,7 +77,7 @@ test("image 附件无票（铸票失败/无 session）：降级文档卡，绝�
     }),
   );
   assert.ok(!html.includes("<img"), `无票不应渲染 <img>，实际：${html}`);
-  assert.ok(html.includes("book-cover.png"), "降级卡应显示檔名");
+  assert.ok(html.includes("book-cover.png"), "降级卡应显示档名");
   assert.ok(html.includes(formatBytes(IMG_REF.size!)), "降级卡应显示人类可读大小");
 });
 
@@ -98,12 +98,12 @@ test("image 附件铸票中：骨架占位，无 <img>、无文件名泄漏", ()
   assert.ok(html.includes("animate-pulse"), "应渲染骨架块");
 });
 
-test("非图片附件（pdf）：维持檔名 chip，檔名与大小都渲染", () => {
+test("非图片附件（pdf）：维持档名 chip，档名与大小都渲染", () => {
   const html = renderToStaticMarkup(
     createElement(AgentAttachmentCards, { refs: [PDF_REF], sessionId: "s1" }),
   );
   assert.ok(!html.includes("<img"), `pdf 不应渲染 <img>，实际：${html}`);
-  assert.ok(html.includes("book.pdf"), "chip 应显示檔名");
+  assert.ok(html.includes("book.pdf"), "chip 应显示档名");
   assert.ok(html.includes("2.1 MB"), `chip 应显示大小，实际：${html}`);
 });
 
@@ -112,5 +112,5 @@ test("整卡组 SSR 初态（票未铸出）：image 附件也是文档卡降级
     createElement(AgentAttachmentCards, { refs: [IMG_REF], sessionId: "s1" }),
   );
   assert.ok(!html.includes("<img"), `票未就绪不应渲染 <img>，实际：${html}`);
-  assert.ok(html.includes("book-cover.png"), "降级卡应显示檔名");
+  assert.ok(html.includes("book-cover.png"), "降级卡应显示档名");
 });

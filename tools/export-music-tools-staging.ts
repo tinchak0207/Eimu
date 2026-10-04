@@ -1,31 +1,31 @@
 #!/usr/bin/env -S npx tsx
 //
-// music_gen 工具 VPS staging 稿機械導出器（MOE Wave1 片B，2026-09-08）。
+// music_gen 工具 VPS staging 稿机械导出器（MOE Wave1 片B，2026-09-08）。
 //
-// 範式同構 tools/export-blender-tools-staging.ts（片AJ 改制的機械導出，根治手工漂移）：
-// 讀真源全文 → 拼接環境適配（注釋頭 + 白名單 import 改寫）→ 寫 staging 目標檔。
-// 正文與真源逐行等價，白名單 diff 只有注釋頭與 import 行兩類。
+// 范式同构 tools/export-blender-tools-staging.ts（片AJ 改制的机械导出，根治手工漂移）：
+// 读真源全文 → 拼接环境适配（注释头 + 白名单 import 改写）→ 写 staging 目标档。
+// 正文与真源逐行等价，白名单 diff 只有注释头与 import 行两类。
 //
-// 為什麼導出多檔：src/lib/music-tools.ts import src/lib/music-lyria.ts（Lyria client）、
+// 为什么导出多档：src/lib/music-tools.ts import src/lib/music-lyria.ts（Lyria client）、
 // src/lib/music-flowmusic.ts（FlowMusic2API client）、src/lib/music-yue2.ts（YuE2 Modal client）
-// 與 src/lib/music-prompt-director.ts（確定性規則層），全部零依賴（僅 node 內建 + fetch），
-// VPS .opencode/lib 同目錄落位即閉包完整。
+// 与 src/lib/music-prompt-director.ts（确定性规则层），全部零依赖（仅 node 内建 + fetch），
+// VPS .opencode/lib 同目录落位即闭包完整。
 //
-// staging 目標目錄：deploy-staging/ 本片禁碰（另一 agent 在改）→ 落 staging/music-tools/，
-// VPS 同步落位（後續接線片執行，完整命令屆時補進 deploy 計劃）：
+// staging 目标目录：deploy-staging/ 本片禁碰（另一 agent 在改）→ 落 staging/music-tools/，
+// VPS 同步落位（后续接线片执行，完整命令届时补进 deploy 计划）：
 //   staging/music-tools/music_lyria.ts → /opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
 //   staging/music-tools/music_flowmusic.ts → /opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
 //   staging/music-tools/music_yue2.ts → /opt/agent-harness/workspace/.opencode/lib/music_yue2.ts
 //   staging/music-tools/music_prompt_director.ts → /opt/agent-harness/workspace/.opencode/lib/music_prompt_director.ts
 //   staging/music-tools/music_tools.ts → /opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
 //
-// 用法（真源改動後必跑）：
+// 用法（真源改动后必跑）：
 //   npx tsx tools/export-music-tools-staging.ts
-//   npx tsx tools/export-music-tools-staging.ts --check   # 只校驗不寫（CI/驗收用）
+//   npx tsx tools/export-music-tools-staging.ts --check   # 只校验不写（CI/验收用）
 //
-// 部署樹守門：--check 同時比對 deploy-staging/opencode-runtime/lib/；除部署檔內
-// `// <harness-only>` … `// </harness-only>` 界定的區塊（登記於下方 DEPLOY_TARGETS）外必須等價，
-// 否則非零退出——防止有人把 staging 導出物整檔覆蓋進部署樹而靜默刪掉 harness-only 功能。
+// 部署树守门：--check 同时比对 deploy-staging/opencode-runtime/lib/；除部署档内
+// `// <harness-only>` … `// </harness-only>` 界定的区块（登记于下方 DEPLOY_TARGETS）外必须等价，
+// 否则非零退出——防止有人把 staging 导出物整档覆盖进部署树而静默删掉 harness-only 功能。
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -44,56 +44,56 @@ const DIRECTOR_TARGET = join(TARGET_DIR, "music_prompt_director.ts");
 const TOOLS_TARGET = join(TARGET_DIR, "music_tools.ts");
 const CHECK = process.argv.includes("--check");
 
-// ── 白名單 diff ①：tools 真源 import "./music-lyria" → "./music_lyria"（VPS 落位檔名慣例）──
+// ── 白名单 diff ①：tools 真源 import "./music-lyria" → "./music_lyria"（VPS 落位档名惯例）──
 const TOOLS_IMPORT_LINE = 'from "./music-lyria"';
 const TOOLS_IMPORT_REPLACEMENT = 'from "./music_lyria"';
 
-// ── 白名單 diff ①b：tools 真源 import "./music-flowmusic" → "./music_flowmusic"（同慣例，2026-09-09）──
+// ── 白名单 diff ①b：tools 真源 import "./music-flowmusic" → "./music_flowmusic"（同惯例，2026-09-09）──
 const FLOWMUSIC_IMPORT_LINE = 'from "./music-flowmusic"';
 const FLOWMUSIC_IMPORT_REPLACEMENT = 'from "./music_flowmusic"';
 
-// ── 白名單 diff ①c：tools 真源 import "./music-prompt-director" → "./music_prompt_director"（同慣例，2026-09-12）──
+// ── 白名单 diff ①c：tools 真源 import "./music-prompt-director" → "./music_prompt_director"（同惯例，2026-09-12）──
 const DIRECTOR_IMPORT_LINE = 'from "./music-prompt-director"';
 const DIRECTOR_IMPORT_REPLACEMENT = 'from "./music_prompt_director"';
 
-// ── 白名單 diff ①d：tools 真源 import "./music-yue2" → "./music_yue2"（同慣例，2026-09-19）──
+// ── 白名单 diff ①d：tools 真源 import "./music-yue2" → "./music_yue2"（同惯例，2026-09-19）──
 const YUE2_IMPORT_LINE = 'from "./music-yue2"';
 const YUE2_IMPORT_REPLACEMENT = 'from "./music_yue2"';
 
-// ── 白名單 diff ②：注釋頭（落位說明 + 禁手改宣言）────────────────────────────
+// ── 白名单 diff ②：注释头（落位说明 + 禁手改宣言）────────────────────────────
 
 const LYRIA_HEADER = `/**
- * Lyria client VPS staging 稿（MOE Wave1 片B，2026-09-08 機械導出）。
+ * Lyria client VPS staging 稿（MOE Wave1 片B，2026-09-08 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-lyria.ts
- * 機械導出：真源全文逐行保留（端點/鑑權/prompt 組裝/錯誤鐵律/超時全在），
- * 零依賴、無 import，除本注釋頭外與真源逐行等價。
- * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-lyria.ts
+ * 机械导出：真源全文逐行保留（端点/鉴权/prompt 组装/错误铁律/超时全在），
+ * 零依赖、无 import，除本注释头外与真源逐行等价。
+ * 禁止手改本档——改真源后跑 \`npx tsx tools/export-music-tools-staging.ts\` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
- * env：GEMINI_STUDIO_API_KEY（generativelanguage lyria-3.5 generateContent，帶人聲整歌，付費）；
- *      GEMINI_API_KEY（無 studio key 時退回 Vertex lyria-002 :predict，純器樂 30s，degraded）。
+ * env：GEMINI_STUDIO_API_KEY（generativelanguage lyria-3.5 generateContent，带人声整歌，付费）；
+ *      GEMINI_API_KEY（无 studio key 时退回 Vertex lyria-002 :predict，纯器乐 30s，degraded）。
  */
 
 `;
 
 const TOOLS_HEADER = `/**
- * music_gen harness 工具 VPS staging 稿（MOE Wave1 片B，2026-09-08 機械導出）。
+ * music_gen harness 工具 VPS staging 稿（MOE Wave1 片B，2026-09-08 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-tools.ts
- * 機械導出：真源全文逐行保留（工具定義/ok-fail/resolveKey/ffprobe 時長/上傳通路
- * 全在），除「環境適配」外與真源逐行等價。
- * 白名單 diff 僅五處：① 本注釋頭；②③④⑤ 真源 \`from "./music-lyria"\` → \`from "./music_lyria"\`、
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-tools.ts
+ * 机械导出：真源全文逐行保留（工具定义/ok-fail/resolveKey/ffprobe 时长/上传通路
+ * 全在），除「环境适配」外与真源逐行等价。
+ * 白名单 diff 仅五处：① 本注释头；②③④⑤ 真源 \`from "./music-lyria"\` → \`from "./music_lyria"\`、
  * \`from "./music-flowmusic"\` → \`from "./music_flowmusic"\`、
- * \`from "./music-prompt-director"\` → \`from "./music_prompt_director"\` 與
- * \`from "./music-yue2"\` → \`from "./music_yue2"\`（同目錄落位檔名慣例）。
- * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
+ * \`from "./music-prompt-director"\` → \`from "./music_prompt_director"\` 与
+ * \`from "./music-yue2"\` → \`from "./music_yue2"\`（同目录落位档名惯例）。
+ * 禁止手改本档——改真源后跑 \`npx tsx tools/export-music-tools-staging.ts\` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
- * env：GATEWAY_URL（默認 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
- *      GEMINI_STUDIO_API_KEY（lyria-3.5 generateContent 主 key，音頻落盤經 gateway 會話上傳存儲）、
- *      GEMINI_API_KEY（Vertex lyria-002 降級）、FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD
- *      （FlowMusic 真鑑權探針 /api/tokens/1/refresh-credits 用；缺失時探針降級為 unreachable 提示）。
+ * env：GATEWAY_URL（默认 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
+ *      GEMINI_STUDIO_API_KEY（lyria-3.5 generateContent 主 key，音频落盘经 gateway 会话上传存储）、
+ *      GEMINI_API_KEY（Vertex lyria-002 降级）、FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD
+ *      （FlowMusic 真鉴权探针 /api/tokens/1/refresh-credits 用；缺失时探针降级为 unreachable 提示）。
  */
 
 `;
@@ -104,75 +104,75 @@ function exportFile(sourcePath: string, targetPath: string, header: string, tran
   if (CHECK) {
     const current = readFileSync(targetPath, "utf8");
     if (current === output) {
-      console.log(`EXPORT_CHECK_OK：${targetPath} 與機械導出產物 byte 等價`);
+      console.log(`EXPORT_CHECK_OK：${targetPath} 与机械导出产物 byte 等价`);
       return;
     }
-    console.error(`EXPORT_CHECK_FAIL：${targetPath} 與機械導出產物不一致（手工漂移或白名單變動），重跑不帶 --check 的導出。`);
+    console.error(`EXPORT_CHECK_FAIL：${targetPath} 与机械导出产物不一致（手工漂移或白名单变动），重跑不带 --check 的导出。`);
     process.exit(1);
   }
   writeFileSync(targetPath, output);
   console.log(`EXPORT_OK：${sourcePath} → ${targetPath}（${Buffer.byteLength(output)} bytes）`);
 }
 
-// ── 白名單 diff ③：注釋頭──────────────────────────────────────────────────────
+// ── 白名单 diff ③：注释头──────────────────────────────────────────────────────
 
 const FLOWMUSIC_HEADER = `/**
- * FlowMusic2API client VPS staging 稿（死線3 music_gen 通路換血，2026-09-09 機械導出）。
+ * FlowMusic2API client VPS staging 稿（死线3 music_gen 通路换血，2026-09-09 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-flowmusic.ts
- * 機械導出：真源全文逐行保留（端點/鑑權/clips 解析/下載/錯誤鐵律/超時全在），
- * 零依賴、無 import，除本注釋頭外與真源逐行等價。
- * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-flowmusic.ts
+ * 机械导出：真源全文逐行保留（端点/鉴权/clips 解析/下载/错误铁律/超时全在），
+ * 零依赖、无 import，除本注释头外与真源逐行等价。
+ * 禁止手改本档——改真源后跑 \`npx tsx tools/export-music-tools-staging.ts\` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
- * env：FLOWMUSIC2API_URL（服務地址，缺省禁用本通路）、FLOWMUSIC2API_KEY（Bearer）。
+ * env：FLOWMUSIC2API_URL（服务地址，缺省禁用本通路）、FLOWMUSIC2API_KEY（Bearer）。
  */
 
 `;
 
 const DIRECTOR_HEADER = `/**
- * Music Prompt Director VPS staging 稿（確定性規則層，2026-09-12 機械導出）。
+ * Music Prompt Director VPS staging 稿（确定性规则层，2026-09-12 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-prompt-director.ts
- * 機械導出：真源全文逐行保留（六層偵測/anti-slop/偽標籤剝除/mood 修剪/通路硬規則/
- * 補層/長度上限全在），零依賴、無 import，除本注釋頭外與真源逐行等價。
- * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-prompt-director.ts
+ * 机械导出：真源全文逐行保留（六层侦测/anti-slop/伪标签剥除/mood 修剪/通路硬规则/
+ * 补层/长度上限全在），零依赖、无 import，除本注释头外与真源逐行等价。
+ * 禁止手改本档——改真源后跑 \`npx tsx tools/export-music-tools-staging.ts\` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_prompt_director.ts
- * env：無（純函數，零依賴零副作用）。
+ * env：无（纯函数，零依赖零副作用）。
  */
 
 `;
 
 const YUE2_HEADER = `/**
- * YuE2 client VPS staging 稿（music_gen 第三通路，2026-09-19 機械導出）。
+ * YuE2 client VPS staging 稿（music_gen 第三通路，2026-09-19 机械导出）。
  *
- * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-yue2.ts
- * 機械導出：真源全文逐行保留（端點/鑑權/HMAC 簽名/契約欄位/錯誤鐵律/600s 超時全在），
- * 零依賴、無 import，除本注釋頭外與真源逐行等價。
- * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
+ * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-yue2.ts
+ * 机械导出：真源全文逐行保留（端点/鉴权/HMAC 签名/契约栏位/错误铁律/600s 超时全在），
+ * 零依赖、无 import，除本注释头外与真源逐行等价。
+ * 禁止手改本档——改真源后跑 \`npx tsx tools/export-music-tools-staging.ts\` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_yue2.ts
- * env：YUE2_MODAL_ENDPOINT（服務地址，缺省禁用本通路）、YUE2_HMAC_SECRET（HMAC 簽名密鑰）。
+ * env：YUE2_MODAL_ENDPOINT（服务地址，缺省禁用本通路）、YUE2_HMAC_SECRET（HMAC 签名密钥）。
  */
 
 `;
 
 mkdirSync(TARGET_DIR, { recursive: true });
 
-// music-flowmusic.ts：零 import，verbatim（僅加注釋頭）。
+// music-flowmusic.ts：零 import，verbatim（仅加注释头）。
 exportFile(FLOWMUSIC_SOURCE, FLOWMUSIC_TARGET, FLOWMUSIC_HEADER, (src) => src);
 
-// music-lyria.ts：零 import，verbatim（僅加注釋頭）。
+// music-lyria.ts：零 import，verbatim（仅加注释头）。
 exportFile(LYRIA_SOURCE, LYRIA_TARGET, LYRIA_HEADER, (src) => src);
 
-// music-yue2.ts：零 import，verbatim（僅加注釋頭）；tools 的第三通路 client。
+// music-yue2.ts：零 import，verbatim（仅加注释头）；tools 的第三通路 client。
 exportFile(YUE2_SOURCE, YUE2_TARGET, YUE2_HEADER, (src) => src);
 
-// music-prompt-director.ts：零 import，verbatim（僅加注釋頭）；tools 的規則層依賴。
+// music-prompt-director.ts：零 import，verbatim（仅加注释头）；tools 的规则层依赖。
 exportFile(DIRECTOR_SOURCE, DIRECTOR_TARGET, DIRECTOR_HEADER, (src) => src);
 
-// music-tools.ts：白名單正文 diff = 四條 import 行改寫（逐字替換，其餘原樣）。
+// music-tools.ts：白名单正文 diff = 四条 import 行改写（逐字替换，其余原样）。
 exportFile(TOOLS_SOURCE, TOOLS_TARGET, TOOLS_HEADER, (src) => {
   for (const [line, replacement] of [
     [TOOLS_IMPORT_LINE, TOOLS_IMPORT_REPLACEMENT],
@@ -181,7 +181,7 @@ exportFile(TOOLS_SOURCE, TOOLS_TARGET, TOOLS_HEADER, (src) => {
     [YUE2_IMPORT_LINE, YUE2_IMPORT_REPLACEMENT],
   ] as const) {
     if (!src.includes(line)) {
-      console.error(`EXPORT_FAIL：tools 真源未找到預期 import（真源結構變了，先改本腳本白名單再導出）：\n  ${line}`);
+      console.error(`EXPORT_FAIL：tools 真源未找到预期 import（真源结构变了，先改本脚本白名单再导出）：\n  ${line}`);
       process.exit(1);
     }
     src = src.replace(line, replacement);
@@ -190,29 +190,29 @@ exportFile(TOOLS_SOURCE, TOOLS_TARGET, TOOLS_HEADER, (src) => {
 });
 
 if (!CHECK) {
-  console.log("驗收：npx tsx tools/export-music-tools-staging.ts --check");
+  console.log("验收：npx tsx tools/export-music-tools-staging.ts --check");
 }
 
-// ── 部署樹漂移守門（2026-10-04 片 U2）────────────────────────────────────────
+// ── 部署树漂移守门（2026-10-04 片 U2）────────────────────────────────────────
 //
-// 為什麼需要：staging/music-tools/* 只是機械導出物（本腳本產物），deploy-staging/
-// opencode-runtime/lib/ 才是部署真源。有人照本檔文件頭把 staging 導出物 cp 進
-// deploy-staging/... 時，會靜默刪掉部署樹的 harness-only 功能（music-tools-impl.ts 的
-// source_audio 工作區路徑解析依賴 harness-only 模組 ./sandbox，真源無從導出）。
-// 故在此加守門：導出物與部署樹對應檔必須等價，唯一允許的例外＝部署檔內以
-// `// <harness-only>` … `// </harness-only>` 界定、且在此登記數量的區塊；例外區塊失蹤
-// （＝整檔被覆蓋）同樣視為漂移。例外之外的任何改行/多行/少行 → 非零退出並印出。
+// 为什么需要：staging/music-tools/* 只是机械导出物（本脚本产物），deploy-staging/
+// opencode-runtime/lib/ 才是部署真源。有人照本档文件头把 staging 导出物 cp 进
+// deploy-staging/... 时，会静默删掉部署树的 harness-only 功能（music-tools-impl.ts 的
+// source_audio 工作区路径解析依赖 harness-only 模组 ./sandbox，真源无从导出）。
+// 故在此加守门：导出物与部署树对应档必须等价，唯一允许的例外＝部署档内以
+// `// <harness-only>` … `// </harness-only>` 界定、且在此登记数量的区块；例外区块失踪
+// （＝整档被覆盖）同样视为漂移。例外之外的任何改行/多行/少行 → 非零退出并印出。
 
 const DEPLOY_LIB = join(root, "deploy-staging/opencode-runtime/lib");
 const HARNESS_OPEN = "// <harness-only>";
 const HARNESS_CLOSE = "// </harness-only>";
 
 type DeployTarget = {
-  /** staging 導出物（＝本腳本產物；--check 已保證其與導出結果 byte 等價）。 */
+  /** staging 导出物（＝本脚本产物；--check 已保证其与导出结果 byte 等价）。 */
   exported: string;
-  /** 部署樹對應檔。 */
+  /** 部署树对应档。 */
   deployed: string;
-  /** 允許的 harness-only 例外區塊數；0＝必須與導出物 byte 等價（verbatim 導出）。 */
+  /** 允许的 harness-only 例外区块数；0＝必须与导出物 byte 等价（verbatim 导出）。 */
   harnessOnlyRegions: number;
 };
 
@@ -221,12 +221,12 @@ const DEPLOY_TARGETS: readonly DeployTarget[] = [
   { exported: LYRIA_TARGET, deployed: join(DEPLOY_LIB, "music_lyria.ts"), harnessOnlyRegions: 0 },
   { exported: YUE2_TARGET, deployed: join(DEPLOY_LIB, "music_yue2.ts"), harnessOnlyRegions: 0 },
   { exported: DIRECTOR_TARGET, deployed: join(DEPLOY_LIB, "music_prompt_director.ts"), harnessOnlyRegions: 0 },
-  // music-tools-impl.ts：7 段 harness-only 例外（注釋頭、take-entropy import 改寫、
-  // source_audio 路徑解析區塊、工具/參數描述、呼叫端解析區塊、audioBase64 傳參）。
+  // music-tools-impl.ts：7 段 harness-only 例外（注释头、take-entropy import 改写、
+  // source_audio 路径解析区块、工具/参数描述、呼叫端解析区块、audioBase64 传参）。
   { exported: TOOLS_TARGET, deployed: join(DEPLOY_LIB, "music-tools-impl.ts"), harnessOnlyRegions: 7 },
 ];
 
-/** 掃出部署檔的 harness-only 例外行（含 marker 行本身），並驗證 marker 成對。 */
+/** 扫出部署档的 harness-only 例外行（含 marker 行本身），并验证 marker 成对。 */
 function scanHarnessOnly(lines: string[]): { exempt: boolean[]; regions: number; balanced: boolean } {
   const exempt = new Array<boolean>(lines.length).fill(false);
   let inside = false;
@@ -253,12 +253,12 @@ function scanHarnessOnly(lines: string[]): { exempt: boolean[]; regions: number;
   return { exempt, regions, balanced };
 }
 
-/** 行級 LCS diff：回傳兩側不匹配的連續區塊（hunk），用於逐塊判漂移。 */
+/** 行级 LCS diff：回传两侧不匹配的连续区块（hunk），用于逐块判漂移。 */
 function diffHunks(a: string[], b: string[]): Array<{ aFrom: number; aTo: number; bFrom: number; bTo: number }> {
   const n = a.length;
   const m = b.length;
   const w = m + 1;
-  const dp = new Int32Array((n + 1) * w); // dp[i][j] = a[i..] 與 b[j..] 的 LCS 長度
+  const dp = new Int32Array((n + 1) * w); // dp[i][j] = a[i..] 与 b[j..] 的 LCS 长度
   for (let i = n - 1; i >= 0; i--) {
     const row = i * w;
     const next = (i + 1) * w;
@@ -304,7 +304,7 @@ function checkDeployedDrift(): void {
     try {
       deployedText = readFileSync(t.deployed, "utf8");
     } catch {
-      failures.push(`${t.deployed} 不存在（部署樹缺檔；導出物 ${t.exported} 未落位）`);
+      failures.push(`${t.deployed} 不存在（部署树缺档；导出物 ${t.exported} 未落位）`);
       continue;
     }
 
@@ -314,28 +314,28 @@ function checkDeployedDrift(): void {
     const { exempt, regions, balanced } = scanHarnessOnly(deployedLines);
 
     if (!balanced) {
-      failures.push(`${t.deployed} harness-only marker 不成對（<harness-only> 與 </harness-only> 數量/嵌套錯誤）`);
+      failures.push(`${t.deployed} harness-only marker 不成对（<harness-only> 与 </harness-only> 数量/嵌套错误）`);
       targetFailed = true;
     }
     if (regions !== t.harnessOnlyRegions) {
       failures.push(
-        `${t.deployed} harness-only 例外區塊數不符：宣告 ${t.harnessOnlyRegions}、實際 ${regions}` +
+        `${t.deployed} harness-only 例外区块数不符：宣告 ${t.harnessOnlyRegions}、实际 ${regions}` +
           (regions < t.harnessOnlyRegions
-            ? "（例外區塊失蹤＝疑似被 staging 導出物整檔覆蓋，harness-only 功能已被刪）"
-            : "（多出未登記的例外，請更新本腳本 DEPLOY_TARGETS）"),
+            ? "（例外区块失踪＝疑似被 staging 导出物整档覆盖，harness-only 功能已被删）"
+            : "（多出未登记的例外，请更新本脚本 DEPLOY_TARGETS）"),
       );
       targetFailed = true;
     }
 
     const bad = diffHunks(exportedLines, deployedLines).filter((h) => {
       if (h.bTo > h.bFrom) {
-        // 部署樹多出/改動的非空行：必須整段落在已宣告的例外區塊內（空行無行為，容忍）。
+        // 部署树多出/改动的非空行：必须整段落在已宣告的例外区块内（空行无行为，容忍）。
         for (let k = h.bFrom; k < h.bTo; k++) {
           if (!exempt[k] && deployedLines[k].trim() !== "") return true;
         }
         return false;
       }
-      // 純刪除（部署樹掉了導出物的內容）：全空行，或緊鄰已宣告例外時放行。
+      // 纯删除（部署树掉了导出物的内容）：全空行，或紧邻已宣告例外时放行。
       let allBlank = true;
       for (let k = h.aFrom; k < h.aTo; k++) {
         if (exportedLines[k].trim() !== "") {
@@ -350,28 +350,28 @@ function checkDeployedDrift(): void {
     if (bad.length > 0) {
       targetFailed = true;
       for (const h of bad) {
-        console.error(`  · ${t.deployed} 未宣告漂移（部署樹第 ${h.bFrom + 1}-${h.bTo} 行）：`);
+        console.error(`  · ${t.deployed} 未宣告漂移（部署树第 ${h.bFrom + 1}-${h.bTo} 行）：`);
         for (let k = h.bFrom; k < h.bTo; k++) console.error(`      + ${deployedLines[k] ?? ""}`);
         for (let k = h.aFrom; k < h.aTo; k++) console.error(`      - ${exportedLines[k] ?? ""}`);
       }
-      failures.push(`${t.deployed} 出現 ${bad.length} 處未宣告漂移`);
+      failures.push(`${t.deployed} 出现 ${bad.length} 处未宣告漂移`);
     }
 
     if (!targetFailed) {
       console.log(
         t.harnessOnlyRegions === 0
-          ? `DEPLOY_DRIFT_OK：${t.deployed} 與導出物 byte 等價`
-          : `DEPLOY_DRIFT_OK：${t.deployed} 與導出物等價（僅 ${regions} 個已宣告 harness-only 區塊例外）`,
+          ? `DEPLOY_DRIFT_OK：${t.deployed} 与导出物 byte 等价`
+          : `DEPLOY_DRIFT_OK：${t.deployed} 与导出物等价（仅 ${regions} 个已宣告 harness-only 区块例外）`,
       );
     }
   }
 
   if (failures.length > 0) {
     console.error(
-      "\nDEPLOY_DRIFT_FAIL：部署樹與機械導出物不一致——疑似有人直接把 staging/music-tools/* 覆蓋到 " +
-        "deploy-staging/opencode-runtime/lib/（會刪掉 harness-only 功能，例如 music-tools-impl.ts 的 " +
-        "source_audio 工作區路徑解析）。請只改真源後重導出，或把新例外用 `// <harness-only>` … " +
-        "`// </harness-only>` 界定並登記到本腳本 DEPLOY_TARGETS。",
+      "\nDEPLOY_DRIFT_FAIL：部署树与机械导出物不一致——疑似有人直接把 staging/music-tools/* 覆盖到 " +
+        "deploy-staging/opencode-runtime/lib/（会删掉 harness-only 功能，例如 music-tools-impl.ts 的 " +
+        "source_audio 工作区路径解析）。请只改真源后重导出，或把新例外用 `// <harness-only>` … " +
+        "`// </harness-only>` 界定并登记到本脚本 DEPLOY_TARGETS。",
     );
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);

@@ -1,5 +1,5 @@
 /**
- * 模型卡三字段数据（吞併決策清單主線四首件）：擅长 strengths / 已知缺陷
+ * 模型卡三字段数据（吞并决策清单主线四首件）：擅长 strengths / 已知缺陷
  * knownDefects / 建议 usageTips。纯数据、纯加法——catalog.ts 在模块初始化时
  * 一次性挂到对应条目，消费端经 modelKnowledge(modelId) 读取，无数据的模型
  * 返回 null，卡片优雅降级。
@@ -93,19 +93,19 @@ export const MODEL_KNOWLEDGE: Record<string, ModelKnowledge> = {
   },
   [GPT_IMAGE_25_FLARE_MODEL_ID]: {
     strengths: [
-      "GPT Image 2.5 快檔：延遲約為 GPT Image 2 的一半，文字渲染與指令遵循延續家族水準",
-      "性價比與速度平衡，批量出圖與多輪迭代首選",
+      "GPT Image 2.5 快档：延迟约为 GPT Image 2 的一半，文字渲染与指令遵循延续家族水准",
+      "性价比与速度平衡，批量出图与多轮迭代首选",
     ],
-    knownDefects: ["極致細節與精修弱於 Sunburst 檔", "4K 放大細節仍需後期確認"],
-    usageTips: [{ text: "批量與迭代用 Flare，最終交付圖再上 Sunburst 的 2K/4K" }],
+    knownDefects: ["极致细节与精修弱于 Sunburst 档", "4K 放大细节仍需后期确认"],
+    usageTips: [{ text: "批量与迭代用 Flare，最终交付图再上 Sunburst 的 2K/4K" }],
   },
   [GPT_IMAGE_25_SUNBURST_MODEL_ID]: {
     strengths: [
-      "GPT Image 2.5 旗艦檔：細節、風格遵循與編輯精準度全家族最強",
-      "多輪編輯不易糊化，參考主體保持強",
+      "GPT Image 2.5 旗舰档：细节、风格遵循与编辑精准度全家族最强",
+      "多轮编辑不易糊化，参考主体保持强",
     ],
-    knownDefects: ["單價為 GPT Image 2 的三倍，批量任務改用 Flare"],
-    usageTips: [{ text: "成品精修、帶字交付圖、主題一致的多圖用 Sunburst" }],
+    knownDefects: ["单价为 GPT Image 2 的三倍，批量任务改用 Flare"],
+    usageTips: [{ text: "成品精修、带字交付图、主题一致的多图用 Sunburst" }],
   },
 
   // ── Google 图像（Nano Banana 系） ──

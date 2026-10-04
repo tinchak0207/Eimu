@@ -11,7 +11,7 @@ function makePack(overrides: Partial<AssetPack> = {}): AssetPack {
   const now = new Date().toISOString();
   return {
     id: "pack-1",
-    title: "測試包",
+    title: "测试包",
     items: [makeItem()],
     tags: [],
     createdAt: now,
@@ -22,7 +22,7 @@ function makePack(overrides: Partial<AssetPack> = {}): AssetPack {
 
 // ── resolveActivationFromPack ─────────────────────────────────
 
-test("resolveActivationFromPack：lora 單選鐵律——多 lora 只取第一個", () => {
+test("resolveActivationFromPack：lora 单选铁律——多 lora 只取第一个", () => {
   const pack = makePack({
     items: [
       makeItem({ kind: "lora", title: "lora1", loraVersionId: "lora-aaa" }),
@@ -31,29 +31,29 @@ test("resolveActivationFromPack：lora 單選鐵律——多 lora 只取第一�
   });
   const activation = resolveActivationFromPack(pack);
   assert.equal(activation.packId, "pack-1");
-  assert.equal(activation.title, "測試包");
+  assert.equal(activation.title, "测试包");
   assert.deepEqual(activation.loraModelVersionIds, ["lora-aaa"]);
 });
 
-test("resolveActivationFromPack：無 lora item 時省略 loraModelVersionIds", () => {
+test("resolveActivationFromPack：无 lora item 时省略 loraModelVersionIds", () => {
   const pack = makePack({ items: [makeItem({ kind: "prompt", content: "hi" })] });
   const activation = resolveActivationFromPack(pack);
   assert.equal(activation.loraModelVersionIds, undefined);
 });
 
-test("resolveActivationFromPack：prompt 取首個含 content 的 prompt/recipe item", () => {
+test("resolveActivationFromPack：prompt 取首个含 content 的 prompt/recipe item", () => {
   const pack = makePack({
     items: [
       makeItem({ kind: "prompt", title: "空", content: "" }),
       makeItem({ kind: "recipe", title: "配方", content: "六槽配方" }),
-      makeItem({ kind: "prompt", title: "後面的", content: "不該被選" }),
+      makeItem({ kind: "prompt", title: "后面的", content: "不该被选" }),
     ],
   });
   const activation = resolveActivationFromPack(pack);
   assert.equal(activation.prompt, "六槽配方");
 });
 
-test("resolveActivationFromPack：無 content/prompt item 時省略 prompt", () => {
+test("resolveActivationFromPack：无 content/prompt item 时省略 prompt", () => {
   const pack = makePack({ items: [makeItem({ kind: "reference", imageUrl: "https://a.img" })] });
   const activation = resolveActivationFromPack(pack);
   assert.equal(activation.prompt, undefined);
@@ -72,13 +72,13 @@ test("resolveActivationFromPack：referenceImageUrls 收 reference+image 且去�
   assert.deepEqual(activation.referenceImageUrls, ["https://a.img", "https://b.img"]);
 });
 
-test("resolveActivationFromPack：帶 digest 與完整 items 透傳", () => {
+test("resolveActivationFromPack：带 digest 与完整 items 透传", () => {
   const pack = makePack({
-    digest: "語義摘要",
+    digest: "语义摘要",
     items: [makeItem({ kind: "prompt", content: "hi" })],
   });
   const activation = resolveActivationFromPack(pack);
-  assert.equal(activation.digest, "語義摘要");
+  assert.equal(activation.digest, "语义摘要");
   assert.equal(activation.items.length, 1);
 });
 
@@ -89,7 +89,7 @@ test("buildAssetPackInjection：null/undefined → null", () => {
   assert.equal(buildAssetPackInjection(undefined as unknown as AssetPack | null), null);
 });
 
-test("buildAssetPackInjection：空包（無 items）→ null", () => {
+test("buildAssetPackInjection：空包（无 items）→ null", () => {
   const pack = makePack({ items: [] });
   assert.equal(buildAssetPackInjection(pack), null);
 });
@@ -100,7 +100,7 @@ test("buildAssetPackInjection：items 截至上限（5）", () => {
   const injection = buildAssetPackInjection(pack);
   assert.ok(injection);
   assert.equal(injection.active_assets.pack_id, "pack-1");
-  assert.equal(injection.active_assets.title, "測試包");
+  assert.equal(injection.active_assets.title, "测试包");
   assert.equal(injection.active_assets.items.length, ACTIVE_ASSET_ITEMS_LIMIT);
   assert.equal(injection.active_assets.items[0].title, "item-0");
 });
@@ -112,20 +112,20 @@ test("buildAssetPackInjection：digest 截 500", () => {
   assert.equal(injection.active_assets.digest?.length, 500);
 });
 
-test("buildAssetPackInjection：包有內容時結構正確（digest + items）", () => {
+test("buildAssetPackInjection：包有内容时结构正确（digest + items）", () => {
   const pack = makePack({ digest: "摘要", items: [makeItem({ kind: "prompt", content: "hi" })] });
   const injection = buildAssetPackInjection(pack);
   assert.deepEqual(injection, {
     active_assets: {
       pack_id: "pack-1",
-      title: "測試包",
+      title: "测试包",
       digest: "摘要",
       items: [makeItem({ kind: "prompt", content: "hi" })],
     },
   });
 });
 
-test("buildAssetPackInjection：無 digest 時省略 digest 欄位", () => {
+test("buildAssetPackInjection：无 digest 时省略 digest 栏位", () => {
   const pack = makePack({ items: [makeItem()] });
   const injection = buildAssetPackInjection(pack);
   assert.ok(injection);

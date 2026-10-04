@@ -1,11 +1,11 @@
-// context-slim plugin 真值測試（T1-3 microCompact ＋ T1-4 工具結果安全網）。
+// context-slim plugin 真值测试（T1-3 microCompact ＋ T1-4 工具结果安全网）。
 //
-// 真行為斷言：餵真實 messages 形狀（{info, parts}[]，Part 為 opencode ToolPart/TextPart）給
-// **plugin 的 experimental.chat.messages.transform hook 本體**，斷言就地改寫後的記憶體狀態、
-// 落盤檔內容逐位元相同、預覽切在換行邊界；不是源碼字串掃描。
+// 真行为断言：喂真实 messages 形状（{info, parts}[]，Part 为 opencode ToolPart/TextPart）给
+// **plugin 的 experimental.chat.messages.transform hook 本体**，断言就地改写后的记忆体状态、
+// 落盘档内容逐位元相同、预览切在换行边界；不是源码字串扫描。
 //
 // 跑法：bun test deploy-staging/vps-tools/context-slim.test.ts
-// 環境變數須在動態 import plugin 前設定（常數在模組載入時求值）。
+// 环境变数须在动态 import plugin 前设定（常数在模组载入时求值）。
 import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -24,7 +24,7 @@ afterAll(() => {
   rmSync(PERSIST_DIR, { recursive: true, force: true })
 })
 
-// ── 測試用的 messages 工廠（貼近 opencode 內部 {info,parts}[] 形狀）────────────
+// ── 测试用的 messages 工厂（贴近 opencode 内部 {info,parts}[] 形状）────────────
 
 const HOUR = 3_600_000
 
@@ -61,12 +61,12 @@ function asstMsg(parts: Part[], created: number): Msg {
   return { info: { role: "assistant", time: { created } }, parts }
 }
 
-/** 8 筆小工具結果（依序 tool-0..tool-7），最後 user 訊息時間可指定。 */
+/** 8 笔小工具结果（依序 tool-0..tool-7），最后 user 讯息时间可指定。 */
 function eightTools(lastUserCreated: number): { messages: Msg[]; outputs: string[] } {
   const outputs = Array.from({ length: 8 }, (_, i) => `OUTPUT-${i}-` + "x".repeat(50))
   const parts = outputs.map((o, i) => toolPart(`tool-${i}`, o, lastUserCreated + i * 1000))
   return {
-    messages: [userMsg(lastUserCreated, "請幫我連續做八件事"), asstMsg(parts, lastUserCreated + 1)],
+    messages: [userMsg(lastUserCreated, "请帮我连续做八件事"), asstMsg(parts, lastUserCreated + 1)],
     outputs,
   }
 }
@@ -89,13 +89,13 @@ function toolState(msg: Msg, idx: number) {
   return p.state as { output: string }
 }
 
-// ── loader 契約（2026-10-02 生產事故的守門真值斷言）────────────────────────────
+// ── loader 契约（2026-10-02 生产事故的守门真值断言）────────────────────────────
 
-describe("loader 契約：plugin 檔的每個 export 都必須是 function", () => {
-  // 起因：plugin/context-slim.ts 曾把常數與函式一起 export，opencode plugin loader
-  // 逐個 export 檢查、遇到非函式即整檔載入失敗（`Plugin export is not a function`），
-  // 導致 microCompact 與工具結果安全網在生產全是死的。此斷言在舊版即為紅。
-  test("plugin/context-slim.ts 的所有 export 皆為 function，且唯一 export 為 ContextSlim", async () => {
+describe("loader 契约：plugin 档的每个 export 都必须是 function", () => {
+  // 起因：plugin/context-slim.ts 曾把常数与函式一起 export，opencode plugin loader
+  // 逐个 export 检查、遇到非函式即整档载入失败（`Plugin export is not a function`），
+  // 导致 microCompact 与工具结果安全网在生产全是死的。此断言在旧版即为红。
+  test("plugin/context-slim.ts 的所有 export 皆为 function，且唯一 export 为 ContextSlim", async () => {
     const m = await import("../opencode-runtime/plugin/context-slim")
     const bad = Object.entries(m).filter(([, v]) => typeof v !== "function")
     expect(bad.map(([k]) => k)).toEqual([])
@@ -106,8 +106,8 @@ describe("loader 契約：plugin 檔的每個 export 都必須是 function", () 
 
 // ── 需求 A：microCompact ────────────────────────────────────────────────────
 
-describe("A microCompact：>1h 才清舊工具結果", () => {
-  test("(a) 最後 user 訊息 2 小時前 → 前 3 筆清成標記、後 5 筆原文保留、文字 part 逐位元不變", async () => {
+describe("A microCompact：>1h 才清旧工具结果", () => {
+  test("(a) 最后 user 讯息 2 小时前 → 前 3 笔清成标记、后 5 笔原文保留、文字 part 逐位元不变", async () => {
     const now = Date.now()
     const { messages, outputs } = eightTools(now - 2 * HOUR)
     const textBefore = JSON.stringify(messages[0].parts)
@@ -118,12 +118,12 @@ describe("A microCompact：>1h 才清舊工具結果", () => {
     expect(toolState(asst, 1).output).toBe(CLEARED_MARKER)
     expect(toolState(asst, 2).output).toBe(CLEARED_MARKER)
     for (let i = 3; i < 8; i++) expect(toolState(asst, i).output).toBe(outputs[i])
-    // 文字 part 逐位元不變（且整條 user 訊息不變）
+    // 文字 part 逐位元不变（且整条 user 讯息不变）
     expect(JSON.stringify(messages[0].parts)).toBe(textBefore)
     expect(JSON.stringify(messages[0])).toBe(JSON.stringify({ info: messages[0].info, parts: messages[0].parts }))
   })
 
-  test("(b) 最後 user 訊息 10 分鐘前 → 零改動", async () => {
+  test("(b) 最后 user 讯息 10 分钟前 → 零改动", async () => {
     const now = Date.now()
     const { messages, outputs } = eightTools(now - 10 * 60_000)
     const snapshot = JSON.stringify(messages)
@@ -133,7 +133,7 @@ describe("A microCompact：>1h 才清舊工具結果", () => {
     for (let i = 0; i < 8; i++) expect(toolState(messages[1], i).output).toBe(outputs[i])
   })
 
-  test("(c) 冪等：同一批連續跑兩次，第二次零額外改動", async () => {
+  test("(c) 幂等：同一批连续跑两次，第二次零额外改动", async () => {
     const now = Date.now()
     const { messages } = eightTools(now - 2 * HOUR)
     const first = await slimMessages(messages, { now })
@@ -144,7 +144,7 @@ describe("A microCompact：>1h 才清舊工具結果", () => {
     expect(JSON.stringify(messages)).toBe(afterFirst)
   })
 
-  test("(d) skill 類工具被豁免（不進清除計數）", async () => {
+  test("(d) skill 类工具被豁免（不进清除计数）", async () => {
     const now = Date.now()
     const parts = [
       toolPart("skill", "SKILL-OUT-" + "y".repeat(40), now - 2 * HOUR),
@@ -152,12 +152,12 @@ describe("A microCompact：>1h 才清舊工具結果", () => {
     ]
     const messages: Msg[] = [userMsg(now - 2 * HOUR), asstMsg(parts, now - 2 * HOUR + 1)]
     const res = await slimMessages(messages, { now })
-    // 4 筆中 skill 豁免 → 可壓縮 3 筆，keep=5 → 全保留
+    // 4 笔中 skill 豁免 → 可压缩 3 笔，keep=5 → 全保留
     expect(res.cleared).toBe(0)
     expect(toolState(messages[1], 0).output).toContain("SKILL-OUT-")
   })
 
-  test("(e) 未完成／error 狀態不動", async () => {
+  test("(e) 未完成／error 状态不动", async () => {
     const now = Date.now()
     const running = { type: "tool", tool: "tool-r", state: { status: "running", input: {}, time: { start: now } } }
     const errored = { type: "tool", tool: "tool-e", state: { status: "error", input: {}, error: "boom" } }
@@ -166,13 +166,13 @@ describe("A microCompact：>1h 才清舊工具結果", () => {
     await slimMessages(messages, { now })
     expect((running.state as { status: string }).status).toBe("running")
     expect((errored.state as { status: string }).status).toBe("error")
-    expect(toolState(messages[1], 2).output).toBe("C") // 僅 1 筆可壓縮 → 保留
+    expect(toolState(messages[1], 2).output).toBe("C") // 仅 1 笔可压缩 → 保留
   })
 })
 
-// ── 需求 B：工具結果預算安全網 ──────────────────────────────────────────────
+// ── 需求 B：工具结果预算安全网 ──────────────────────────────────────────────
 
-/** 產生含換行、總長 ≥ n 的內容（模擬原生沒截到的大輸出）。 */
+/** 产生含换行、总长 ≥ n 的内容（模拟原生没截到的大输出）。 */
 function bigContent(n: number): string {
   const line = "L" + "a".repeat(77) + "\n" // 79 chars/line
   let s = ""
@@ -187,8 +187,8 @@ function parsePersistedPath(out: string): string {
   return m[1]
 }
 
-describe("B 工具結果安全網：單筆上限與落盤", () => {
-  test("(a) 60,000 字元結果 → 改寫後 <50,000、含 <persisted-output、落盤逐位元相同、預覽切在換行邊界", async () => {
+describe("B 工具结果安全网：单笔上限与落盘", () => {
+  test("(a) 60,000 字元结果 → 改写后 <50,000、含 <persisted-output、落盘逐位元相同、预览切在换行边界", async () => {
     const now = Date.now()
     const original = bigContent(60_000)
     expect(original.length).toBeGreaterThan(59_000)
@@ -202,10 +202,10 @@ describe("B 工具結果安全網：單筆上限與落盤", () => {
 
     const file = parsePersistedPath(out)
     expect(existsSync(file)).toBe(true)
-    // 落盤內容與原文逐位元相同
+    // 落盘内容与原文逐位元相同
     expect(readFileSync(file, "utf8")).toBe(original)
 
-    // 預覽切在換行邊界：頭部是原文前綴且以 "\n" 收尾；尾部是原文後綴且其前一字元是 "\n"
+    // 预览切在换行边界：头部是原文前缀且以 "\n" 收尾；尾部是原文后缀且其前一字元是 "\n"
     const afterTag = out.slice(out.indexOf(">\n") + 2)
     const head = afterTag.slice(0, afterTag.indexOf("\n...[中略"))
     expect(head.length).toBeGreaterThan(0)
@@ -220,22 +220,22 @@ describe("B 工具結果安全網：單筆上限與落盤", () => {
     }
   })
 
-  test("(a2) 落盤檔名以內容 hash 定址（同內容同檔、冪等）", async () => {
+  test("(a2) 落盘档名以内容 hash 定址（同内容同档、幂等）", async () => {
     const now = Date.now()
     const original = bigContent(60_000)
     const messages: Msg[] = [userMsg(now), asstMsg([toolPart("bash", original, now)], now)]
     await slimMessages(messages, { now })
     const file1 = parsePersistedPath(toolState(messages[1], 0).output)
-    // 第二次：輸出已是 <persisted-output> → 安全網放行，不二次落盤
+    // 第二次：输出已是 <persisted-output> → 安全网放行，不二次落盘
     const res2 = await slimMessages(messages, { now })
     expect(res2.persisted).toBe(0)
     expect(parsePersistedPath(toolState(messages[1], 0).output)).toBe(file1)
   })
 
-  test("(b) 已是原生截斷參考句 → 未被二次處理", async () => {
+  test("(b) 已是原生截断参考句 → 未被二次处理", async () => {
     const now = Date.now()
     const native =
-      "…（內容已截斷）…\nFull output saved to: /opt/agent-harness/workspace/.opencode-state/tool-output/tool_01ABC\nUse Grep/Read with offset/limit to inspect the file."
+      "…（内容已截断）…\nFull output saved to: /opt/agent-harness/workspace/.opencode-state/tool-output/tool_01ABC\nUse Grep/Read with offset/limit to inspect the file."
     const messages: Msg[] = [userMsg(now), asstMsg([toolPart("bash", native, now)], now)]
     const snapshot = JSON.stringify(messages)
     const res = await slimMessages(messages, { now })
@@ -244,9 +244,9 @@ describe("B 工具結果安全網：單筆上限與落盤", () => {
     expect(toolState(messages[1], 0).output).toBe(native)
   })
 
-  test("(c) 單訊息聚合 >200,000 → 後續筆落盤（預算生效）", async () => {
+  test("(c) 单讯息聚合 >200,000 → 后续笔落盘（预算生效）", async () => {
     const now = Date.now()
-    // 每筆 45,000（<50k 單筆上限）共 5 筆 = 225,000 > 200,000 → 第 5 筆落盤，前 4 筆保留
+    // 每笔 45,000（<50k 单笔上限）共 5 笔 = 225,000 > 200,000 → 第 5 笔落盘，前 4 笔保留
     const parts = Array.from({ length: 5 }, (_, i) => bigContent(45_000))
     const messages: Msg[] = [
       userMsg(now),
@@ -261,19 +261,19 @@ describe("B 工具結果安全網：單筆上限與落盤", () => {
   })
 })
 
-// ── Hook 本體：就地改寫 output.messages ────────────────────────────────────
+// ── Hook 本体：就地改写 output.messages ────────────────────────────────────
 
-describe("hook 本體", () => {
-  test("transform 就地改寫 output.messages（同一陣列參照）", async () => {
+describe("hook 本体", () => {
+  test("transform 就地改写 output.messages（同一阵列参照）", async () => {
     const now = Date.now()
     const { messages } = eightTools(now - 2 * HOUR)
     const out = await runHook(messages)
-    expect(out.messages).toBe(messages) // 就地，不是換陣列
+    expect(out.messages).toBe(messages) // 就地，不是换阵列
     expect(toolState(messages[1], 0).output).toBe(CLEARED_MARKER)
     expect(toolState(messages[1], 7).output).toContain("OUTPUT-7-")
   })
 
-  test("hook 對畸形輸入不拋（原樣放行）", async () => {
+  test("hook 对畸形输入不抛（原样放行）", async () => {
     const hooks = await (ContextSlim as unknown as (ctx: unknown) => Promise<Record<string, unknown>>)({})
     const transform = hooks["experimental.chat.messages.transform"] as (i: unknown, o: unknown) => Promise<void>
     await expect(transform({}, {})).resolves.toBeUndefined()

@@ -1,8 +1,8 @@
-// mPay 付款直達入帳（控制面執行）：notify 驗簽通過 → 直接給下單用戶加額，不再生成兌換碼。
+// mPay 付款直达入帐（控制面执行）：notify 验签通过 → 直接给下单用户加额，不再生成兑换码。
 //
-// 為什麼：舊流程 notify 只發兌換碼，靠用戶回跳 /pricing 自動兌換。用戶付完關掉分頁
-// ＝錢已付、額度沒到（2026-09-19 實案同族事故）。綁了 userId 的訂單（見 mapay-order-param.ts）
-// 讓 notify 能直接入帳，把「用戶回跳」這條必要條件從錢路上摘掉。
+// 为什么：旧流程 notify 只发兑换码，靠用户回跳 /pricing 自动兑换。用户付完关掉分页
+// ＝钱已付、额度没到（2026-09-19 实案同族事故）。绑了 userId 的订单（见 mapay-order-param.ts）
+// 让 notify 能直接入帐，把「用户回跳」这条必要条件从钱路上摘掉。
 //
 // 记账（沿用管理员调额同一条路径，不另造第二套帐）：
 //   ① 先占位 mapay_credit（主键 out_trade_no）——上游 new-api 调额本身不幂等，
@@ -68,11 +68,11 @@ export interface MapayCreditInput {
   userId: number;
   planId: string;
   amountQuota: number;
-  /** 入帳口徑說明（寫進 mapay_credit.detail；如首充資格不符、按正價折算）。 */
+  /** 入帐口径说明（写进 mapay_credit.detail；如首充资格不符、按正价折算）。 */
   detail?: string;
 }
 
-// ─────────────────────────────────────────── 儲存介面
+// ─────────────────────────────────────────── 储存介面
 
 export interface MapayCreditStore {
   /** 占位：新插 pending（已存在则不动）。拿到回 true。 */
@@ -122,7 +122,7 @@ export async function runMapayCreditOnce(
     baseline = { ready: false, blocked: true, reason: reasonOf(error) };
   }
   if (baseline.blocked) {
-    // 基線不可得＝帳本權威寫不進去；不動上游（退回舊流程，不靜默發錢）。
+    // 基线不可得＝帐本权威写不进去；不动上游（退回旧流程，不静默发钱）。
     await deps.store
       .mark(input.orderId, "failed", `基线不可得：${baseline.reason ?? ""}`.slice(0, 500))
       .catch(() => {});
@@ -150,8 +150,8 @@ export async function runMapayCreditOnce(
   });
 
   if (baseline.ready) {
-    // 帳本行（recharge，來源＝現金通道）：冪等鍵 `redemption:<out_trade_no>` 擋重放，
-    // 帳本行缺失只記日誌、不回退發放（對帳報告負責）。
+    // 帐本行（recharge，来源＝现金通道）：幂等键 `redemption:<out_trade_no>` 挡重放，
+    // 帐本行缺失只记日志、不回退发放（对帐报告负责）。
     const ledger = await deps
       .recordLedger({ userId: input.userId, amountQuota, orderId: input.orderId })
       .catch((error) => ({ posted: false, reason: reasonOf(error) }));
@@ -168,7 +168,7 @@ let schemaReady: Promise<void> | null = null;
 
 async function ensureSchema(sql: GenerationSql): Promise<void> {
   if (!schemaReady) {
-    // 與 db/migrations/030_mapay_credit.sql 同一 DDL（幂等，首用即建）。
+    // 与 db/migrations/030_mapay_credit.sql 同一 DDL（幂等，首用即建）。
     schemaReady = (async () => {
       await sql`
         CREATE TABLE IF NOT EXISTS mapay_credit (
@@ -258,7 +258,7 @@ export async function runMapayCreditWithSql(
   return runMapayCreditOnce(productionMapayCreditDeps(sql), input);
 }
 
-// ─────────────────────────────────────────── Vercel 側簽名通道
+// ─────────────────────────────────────────── Vercel 侧签名通道
 
 export const MAPAY_CREDIT_RELAY_SIGNATURE_DOMAIN = "mapay-credit";
 const RELAY_PATH = "/image-control/api/internal/mapay-credit";
@@ -324,10 +324,10 @@ export function isMapayCreditSettled(outcome: MapayCreditOutcome): boolean {
 }
 
 /**
- * 入帳結果 → 發放通道（notify／return 共用，唯一決策表）：
- *   direct      錢已落地，不再生成兌換碼
- *   redemption  入帳通道明確不可用（failed/unavailable）→ 退回舊兌換碼流程
- *   hold        已占位但結果未定 → 不開第二條通道，交人工核對
+ * 入帐结果 → 发放通道（notify／return 共用，唯一决策表）：
+ *   direct      钱已落地，不再生成兑换码
+ *   redemption  入帐通道明确不可用（failed/unavailable）→ 退回旧兑换码流程
+ *   hold        已占位但结果未定 → 不开第二条通道，交人工核对
  */
 export type MapayDeliveryChannel = "direct" | "redemption" | "hold" | "none";
 

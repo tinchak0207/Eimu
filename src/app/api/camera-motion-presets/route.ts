@@ -1,13 +1,13 @@
 /**
- * GET /api/camera-motion-presets — 站內**公開只讀**運鏡預設庫列舉/檢索。
+ * GET /api/camera-motion-presets — 站内**公开只读**运镜预设库列举/检索。
  *
- * query：`q=<關鍵詞>`（子字串，命中 key/中文名/膠囊標籤/prompt/檢索詞）、
- * `tag=<檢索詞>`（精確命中 tags）。兩者可並用。
- * 回應：`{ presets, total, tags }`；`total` = 過濾後條數（本端點不分頁、全量回）；
- * `tags` = 全庫檢索詞去重 facet（與篩選無關）。
+ * query：`q=<关键词>`（子字串，命中 key/中文名/胶囊标签/prompt/检索词）、
+ * `tag=<检索词>`（精确命中 tags）。两者可并用。
+ * 回应：`{ presets, total, tags }`；`total` = 过滤后条数（本端点不分页、全量回）；
+ * `tags` = 全库检索词去重 facet（与筛选无关）。
  *
- * 公開面：**無需登入**、零寫入、不計費、不動任何帳本（沿用同 repo 公開只讀 route
- * 的 no-store 慣例；錯誤體沿用 `recipe-templates/route.ts` 的 fail() 形狀）。
+ * 公开面：**无需登入**、零写入、不计费、不动任何帐本（沿用同 repo 公开只读 route
+ * 的 no-store 惯例；错误体沿用 `recipe-templates/route.ts` 的 fail() 形状）。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,7 +18,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const noStore = { "Cache-Control": "no-store" } as const;
 

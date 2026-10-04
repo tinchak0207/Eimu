@@ -1,9 +1,9 @@
-// GET /api/admin/statistics — 管理側統計視圖的只讀端點（PRD REQ-C2）。
+// GET /api/admin/statistics — 管理侧统计视图的只读端点（PRD REQ-C2）。
 //
-// 這個端點只做三件事：驗管理員 session、驗窗口參數、回一份投影。
-// 所有數字都由 statistics-projection.ts 從既有帳本/能力表讀出，本路由不含任何 SQL、
-// 更不含任何寫入（計費、扣額、重試一律不碰）。模型三態不在這裡重算——管理頁直接
-// 消費既有的 /api/user/model-status（與 /v1/model-status 同一份判活），避免兩套判活。
+// 这个端点只做三件事：验管理员 session、验窗口参数、回一份投影。
+// 所有数字都由 statistics-projection.ts 从既有帐本/能力表读出，本路由不含任何 SQL、
+// 更不含任何写入（计费、扣额、重试一律不碰）。模型三态不在这里重算——管理页直接
+// 消费既有的 /api/user/model-status（与 /v1/model-status 同一份判活），避免两套判活。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -18,7 +18,7 @@ import { statisticsCsvFilename, statisticsToCsv } from "@/lib/generation-core/st
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(error: unknown, fallback: string) {
   if (error instanceof Error && error.message === "UNAUTHORIZED") {
@@ -58,12 +58,12 @@ export async function GET(req: NextRequest) {
       funnelDays = parsed;
     }
 
-    // 內部流量預設不計；只有明確 includeInternal=1/true 才計入。
+    // 内部流量预设不计；只有明确 includeInternal=1/true 才计入。
     const rawInclude = req.nextUrl.searchParams.get("includeInternal");
     const includeInternal = rawInclude === "1" || rawInclude === "true";
 
-    // 導出格式（P2-1／對稱差 D16）：`format=csv` 回同一個投影的 CSV（Excel 可直接開）。
-    // 只認 json／csv 兩種，其餘具名 400——避免拼錯 format 卻拿到一份 JSON 以為是導出檔。
+    // 导出格式（P2-1／对称差 D16）：`format=csv` 回同一个投影的 CSV（Excel 可直接开）。
+    // 只认 json／csv 两种，其余具名 400——避免拼错 format 却拿到一份 JSON 以为是导出档。
     const format = req.nextUrl.searchParams.get("format") ?? "json";
     if (format !== "json" && format !== "csv") {
       return NextResponse.json({ success: false, message: "format 只能是 json 或 csv。" }, { status: 400 });
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
 
     const projection = await buildStatisticsProjection({ days, funnelDays, includeInternal });
     if (format === "csv") {
-      // 導出檔與畫面上看到的數字**同一份投影**（統計頁不是第二個真相，導出檔也不是）。
+      // 导出档与画面上看到的数字**同一份投影**（统计页不是第二个真相，导出档也不是）。
       return new NextResponse(statisticsToCsv(projection), {
         status: 200,
         headers: {

@@ -80,7 +80,7 @@ export async function generateWithMetaso(
   if (!taskId.trim()) {
     throw new SupplierRequestError("Metaso create response is missing task_id.", 502);
   }
-  // INC-0831：上游任務已提交 → worker durably 落 attempt 行（task id + 對帳排程）。
+  // INC-0831：上游任务已提交 → worker durably 落 attempt 行（task id + 对帐排程）。
   input.onProviderTaskSubmitted?.(taskId.trim(), "metaso");
 
   const deadline = Date.now() + METASO_MAX_WAIT_MS;
@@ -139,8 +139,8 @@ export async function generateWithMetaso(
       // Best effort only: the task may have started between the last poll and timeout.
     }
   }
-  // INC-0831：超時不再單方面宣判失敗——帶上 task id 讓對帳循環接手查上游真相
-  //（上游任務在輪詢窗口外照樣會跑完）。
+  // INC-0831：超时不再单方面宣判失败——带上 task id 让对帐循环接手查上游真相
+  //（上游任务在轮询窗口外照样会跑完）。
   throw new SupplierRequestError(`Metaso video generation timed out after ${Math.round(METASO_MAX_WAIT_MS / 1000)}s.`, 504, undefined, undefined, undefined, taskId);
 }
 
@@ -179,8 +179,8 @@ async function metasoRequest(
   try {
     payload = await response.json();
   } catch {
-    // 同一類狀態洗白（D-3）：上游回 HTML 錯誤頁（常見於 400/5xx）時，真實狀態不能丟，
-    // 否則真 400 會以 502 進原生硬停判定。產品側 status 仍是 502（我方解析失敗）。
+    // 同一类状态洗白（D-3）：上游回 HTML 错误页（常见于 400/5xx）时，真实状态不能丢，
+    // 否则真 400 会以 502 进原生硬停判定。产品侧 status 仍是 502（我方解析失败）。
     throw new SupplierRequestError(
       `Metaso returned invalid JSON (HTTP ${response.status}).`,
       502,
@@ -196,8 +196,8 @@ async function metasoRequest(
       typeof payload === "object" && payload !== null && "error" in payload
         ? String((payload as { error: { message?: unknown } }).error?.message ?? payload)
         : `Metaso API request failed with HTTP ${response.status}.`;
-    // status 照既有語義改寫（供應商側失敗，隔離/冷卻行為不動；請勿在此改判）；
-    // upstreamStatus 原樣帶上上游真實狀態，供確定性 4xx 的原生硬停判讀
+    // status 照既有语义改写（供应商侧失败，隔离/冷却行为不动；请勿在此改判）；
+    // upstreamStatus 原样带上上游真实状态，供确定性 4xx 的原生硬停判读
     // （D-3：真 400 不得被 502 洗成「可重放」而被重放 20 次）。
     throw new SupplierRequestError(
       message,
@@ -216,9 +216,9 @@ async function metasoRequest(
 }
 
 /**
- * INC-0831 對帳輪詢：按 task id 查 metaso 任務真相（provider-reconciliation 用，
- * 只讀不改任何任務狀態）。響應解析與 generateWithMetaso 同源；查無 task 行時
- * 保守視為仍在跑（寧可凍結到對帳窗口耗盡，不假宣判失敗退款）。
+ * INC-0831 对帐轮询：按 task id 查 metaso 任务真相（provider-reconciliation 用，
+ * 只读不改任何任务状态）。响应解析与 generateWithMetaso 同源；查无 task 行时
+ * 保守视为仍在跑（宁可冻结到对帐窗口耗尽，不假宣判失败退款）。
  */
 export async function pollMetasoTask(
   supplier: SupplierRecord,

@@ -1,7 +1,7 @@
-// POST /api/agent/sessions/[id]/canvas-ops-result —— canvas.ops 執行結果回報。
+// POST /api/agent/sessions/[id]/canvas-ops-result —— canvas.ops 执行结果回报。
 //
-// 前端執行（或用戶拒絕）agent 下發的批量畫布操作後，把結果送回 gateway，
-// resolve 對應的 canvas_apply_ops 工具調用（否則 gateway 端 30s 超時）。
+// 前端执行（或用户拒绝）agent 下发的批量画布操作后，把结果送回 gateway，
+// resolve 对应的 canvas_apply_ops 工具调用（否则 gateway 端 30s 超时）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -9,7 +9,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 

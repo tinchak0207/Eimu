@@ -1,11 +1,11 @@
-# workflow-templates/ —— 後端工作流模板（一個模板一個檔）
+# workflow-templates/ —— 后端工作流模板（一个模板一个档）
 
-2026-09-20 逐模板拆檔。原本 6 個模板擠在 `workflow-templates.ts` 一個檔；
-現在一個模板一個檔，**加一條流水線只動一個檔**。
+2026-09-20 逐模板拆档。原本 6 个模板挤在 `workflow-templates.ts` 一个档；
+现在一个模板一个档，**加一条流水线只动一个档**。
 
-## 檔案對應
+## 档案对应
 
-| 模板 id | 檔案 |
+| 模板 id | 档案 |
 |---|---|
 | `single_image` | `single_image.ts` |
 | `character_sheet` | `character_sheet.ts` |
@@ -14,32 +14,32 @@
 | `feature_film` | `feature_film.ts` |
 | `novel_film` | `novel_film.ts` |
 
-型別在 `types.ts`；`WORKFLOW_TEMPLATES` 與 `getWorkflowTemplate` /
+型别在 `types.ts`；`WORKFLOW_TEMPLATES` 与 `getWorkflowTemplate` /
 `templatePlaceholderContent` / `listWorkflowTemplates` 在 `index.ts`。
-消費者（`workflow-service.ts`、`messages-gw.ts`、`subagent.ts`）一律
-`from "./workflow-templates"`，解析到本目錄的 `index.ts`。
+消费者（`workflow-service.ts`、`messages-gw.ts`、`subagent.ts`）一律
+`from "./workflow-templates"`，解析到本目录的 `index.ts`。
 
-## 並行修改契約
+## 并行修改契约
 
-- **一個 agent 只准改自己那一個模板檔**。
-- **`index.ts` 是共享檔，由 orchestrator 單獨一趟註冊**（import + 陣列一行）。
-- 節點 `kind` 用 `text | config | image | video | audio | film`；
-  節點 `role` 是模板內唯一鍵，連線用 `{ fromRole, toRole }`。
+- **一个 agent 只准改自己那一个模板档**。
+- **`index.ts` 是共享档，由 orchestrator 单独一趟注册**（import + 阵列一行）。
+- 节点 `kind` 用 `text | config | image | video | audio | film`；
+  节点 `role` 是模板内唯一键，连线用 `{ fromRole, toRole }`。
 
-## 部署警告（拆檔後首度部署必讀）
+## 部署警告（拆档后首度部署必读）
 
-部署機制是**逐檔 SFTP**（`.gateway-work/sftp-put-443.js`），沒有任何遞迴同步。
-目錄結構不會被自動帶上去，VPS 上必須：
+部署机制是**逐档 SFTP**（`.gateway-work/sftp-put-443.js`），没有任何递回同步。
+目录结构不会被自动带上去，VPS 上必须：
 
 1. `mkdir -p /opt/agent-harness/gateway/workflow-templates`
-2. 逐檔上傳（每個檔一次 SFTP 調用，上傳後比對 md5 `MATCH`）
-3. **刪除或改名舊的 `/opt/agent-harness/gateway/workflow-templates.ts`**——
-   extensionless 的 `./workflow-templates` 會優先命中 `.ts` 檔而非目錄，
-   舊檔留著會靜默掩蔽整個新目錄。
-4. 跑 `sudo /opt/agent-harness/deploy.sh`（內含 `bun build` 語法閘；
-   缺檔會在閘就失敗，不會帶病重啟）。
+2. 逐档上传（每个档一次 SFTP 调用，上传后比对 md5 `MATCH`）
+3. **删除或改名旧的 `/opt/agent-harness/gateway/workflow-templates.ts`**——
+   extensionless 的 `./workflow-templates` 会优先命中 `.ts` 档而非目录，
+   旧档留著会静默掩蔽整个新目录。
+4. 跑 `sudo /opt/agent-harness/deploy.sh`（内含 `bun build` 语法闸；
+   缺档会在闸就失败，不会带病重启）。
 
-## 驗證
+## 验证
 
 ```bash
 cd deploy-staging/gateway

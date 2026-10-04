@@ -7,12 +7,12 @@
  * 命中两类：
  *   - PWA standalone（display-mode: standalone / iOS navigator.standalone）：
  *     独立视窗的 storage 与系统浏览器隔离。
- *   - Electron 桌面殼：同样是独立 session，且視窗內沒有網址欄，在裡面輸入
- *     GitHub 憑證既無法複用瀏覽器既有登入態、使用者也無從確認自己站在哪個站上
- *     （2026-09-17 暴君實測回報）。
+ *   - Electron 桌面壳：同样是独立 session，且视窗内没有网址栏，在里面输入
+ *     GitHub 凭证既无法复用浏览器既有登入态、使用者也无从确认自己站在哪个站上
+ *     （2026-09-17 暴君实测回报）。
  *
- * 兩者的正確解法相同：走跨瀏覽器交接（PwaHandoffPanel + handoff ticket），
- * 授權在使用者真實瀏覽器完成，會話經一次性票據交回本環境。
+ * 两者的正确解法相同：走跨浏览器交接（PwaHandoffPanel + handoff ticket），
+ * 授权在使用者真实浏览器完成，会话经一次性票据交回本环境。
  */
 export function isStandalonePwa(): boolean {
   if (typeof window === "undefined") return false;
@@ -25,12 +25,12 @@ export function isStandalonePwa(): boolean {
 }
 
 /**
- * 當前是否為 Electron 桌面殼。殼與 PWA 分流用：兩者都算 standalone（登入一律走
- * 跨瀏覽器交接），但殼的導航政策會把 /api/auth/* 轉去系統瀏覽器，因此取得交接
- * 連結後可再主動跳一次，一次點擊就開好授權頁。
+ * 当前是否为 Electron 桌面壳。壳与 PWA 分流用：两者都算 standalone（登入一律走
+ * 跨浏览器交接），但壳的导航政策会把 /api/auth/* 转去系统浏览器，因此取得交接
+ * 连结后可再主动跳一次，一次点击就开好授权页。
  *
- * Electron 殼的 UA 一定帶 "Electron"；nodeIntegration 關閉時 window.process
- * 不可用，故以 UA 為準。
+ * Electron 壳的 UA 一定带 "Electron"；nodeIntegration 关闭时 window.process
+ * 不可用，故以 UA 为准。
  */
 export function isElectronShell(): boolean {
   return typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");

@@ -1,23 +1,23 @@
 /**
- * blender_* 三工具 opencode 形狀機械包裝器（staging 稿，片 AJ，2026-09-06）。
+ * blender_* 三工具 opencode 形状机械包装器（staging 稿，片 AJ，2026-09-06）。
  *
- * 行為真源 = blender-tools-impl.ts（由 tools/export-blender-tools-staging.ts 從
- * src/lib/blender-tools.ts 機械導出，BlenderToolDef 描述符形狀）。本檔把它包裝成
- * opencode tool()（形狀輪子 = src/vendor-bridges/opencode-tools/director_*.ts 的
- * tool({ description, args, execute }) + { title, output: JSON 字串 } 契約）。
- * 描述符 → schema 的映射是純機械翻譯：string→string、number→number、boolean→boolean、
- * enum→enum、required 缺省→optional；args 名/描述/enum 全部取自工具自帶定義，
- * 零二次維護面（真源改 args，包裝自動跟隨）。
+ * 行为真源 = blender-tools-impl.ts（由 tools/export-blender-tools-staging.ts 从
+ * src/lib/blender-tools.ts 机械导出，BlenderToolDef 描述符形状）。本档把它包装成
+ * opencode tool()（形状轮子 = src/vendor-bridges/opencode-tools/director_*.ts 的
+ * tool({ description, args, execute }) + { title, output: JSON 字串 } 契约）。
+ * 描述符 → schema 的映射是纯机械翻译：string→string、number→number、boolean→boolean、
+ * enum→enum、required 缺省→optional；args 名/描述/enum 全部取自工具自带定义，
+ * 零二次维护面（真源改 args，包装自动跟随）。
  *
- * VPS 落位（完整命令見同目錄 PATCH-PLAN.md）：
- *   本檔整份 → /opt/agent-harness/workspace/.opencode/lib/blender-tools-adapter.ts
- *   三個 3 行 adapter → .opencode/tools/blender_{exec,render,export_gltf}.ts：
+ * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
+ *   本档整份 → /opt/agent-harness/workspace/.opencode/lib/blender-tools-adapter.ts
+ *   三个 3 行 adapter → .opencode/tools/blender_{exec,render,export_gltf}.ts：
  *     import { wrapBlenderTool, blenderExecTool } from "../lib/blender-tools-adapter"
  *     export default wrapBlenderTool(blenderExecTool)
  *
- * 產物取回（片 AJ）：exec/render 成功 output 帶 artifact_base_url，agent 用
- * `${artifact_base_url}?path=${encodeURIComponent(artifact.path)}` 經橋取回字節；
- * 沙箱不自持檔案，禁止在沙箱 ls 等產物。
+ * 产物取回（片 AJ）：exec/render 成功 output 带 artifact_base_url，agent 用
+ * `${artifact_base_url}?path=${encodeURIComponent(artifact.path)}` 经桥取回字节；
+ * 沙箱不自持档案，禁止在沙箱 ls 等产物。
  */
 import { tool } from "@opencode-ai/plugin/tool"
 import { uploadBlob, blobPath } from "./img-composite"
@@ -53,10 +53,10 @@ export function wrapBlenderTool(def: BlenderToolDef) {
 }
 
 /**
- * 產物公網化（2026-09-29）：橋產物只有 127.0.0.1 取回地址，用戶看不到。
- * 成功結果裡的圖片／影片／glb 經橋取回後用 uploadBlob（sketch_lock／
- * background_remove 同款公網 blob 輪子）入庫，artifact 補 public_url。
- * 任一入庫失敗只標 publish_error，不影響原結果。
+ * 产物公网化（2026-09-29）：桥产物只有 127.0.0.1 取回地址，用户看不到。
+ * 成功结果里的图片／影片／glb 经桥取回后用 uploadBlob（sketch_lock／
+ * background_remove 同款公网 blob 轮子）入库，artifact 补 public_url。
+ * 任一入库失败只标 publish_error，不影响原结果。
  */
 const PUBLISH_TYPES: Record<string, string> = {
   png: "image/png",

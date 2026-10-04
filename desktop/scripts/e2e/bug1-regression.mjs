@@ -1,10 +1,10 @@
 // desktop/scripts/e2e/bug1-regression.mjs
 //
-// BUG-1 真殼回歸：不可解碼影片附件 → chip 永久卡在 uploading（降級路徑從未執行）。
+// BUG-1 真壳回归：不可解码影片附件 → chip 永久卡在 uploading（降级路径从未执行）。
 //
-// 新案例檔（不改 harness.mjs / run.mjs / cases.mjs / session-cases.mjs）。
-// 真殼 + CDP 啟動配方沿用 harness.mjs；前端跑「本機 dev server 上已修復的 bundle」，
-// 後端以 CDP Fetch 攔截 mock（不得部署、不得連 VPS/DB、不得呼叫付費上游）。
+// 新案例档（不改 harness.mjs / run.mjs / cases.mjs / session-cases.mjs）。
+// 真壳 + CDP 启动配方沿用 harness.mjs；前端跑「本机 dev server 上已修复的 bundle」，
+// 后端以 CDP Fetch 拦截 mock（不得部署、不得连 VPS/DB、不得呼叫付费上游）。
 //
 // 用法：
 //   node desktop/scripts/e2e/bug1-regression.mjs \
@@ -12,7 +12,7 @@
 //     --assets /tmp/bug1-e2e/assets \
 //     --out /tmp/bug1-e2e/run-<ts>
 //
-// 產物：outDir/BUG1-A18.json、BUG1-A18.png、BUG1-B7.json、BUG1-B7.png、summary.json
+// 产物：outDir/BUG1-A18.json、BUG1-A18.png、BUG1-B7.json、BUG1-B7.png、summary.json
 
 import fs from "node:fs";
 import path from "node:path";
@@ -33,11 +33,11 @@ const FILE_SEL = 'input[type="file"][accept*=".mp4"]';
 const SESSION_ID = "e2e-bug1-session";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ─────────────────────── 後端 mock（CDP Fetch 攔截；不觸網）
+// ─────────────────────── 后端 mock（CDP Fetch 拦截；不触网）
 
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
-// 網關是跨域（store.tinchak0207.xyz）：mock 回應必須帶 CORS 頭，否則瀏覽器會擋掉
-// 回應、把成功的直傳誤判成失敗（生產網關本身有 CORS）。
+// 网关是跨域（store.tinchak0207.xyz）：mock 回应必须带 CORS 头，否则浏览器会挡掉
+// 回应、把成功的直传误判成失败（生产网关本身有 CORS）。
 const jsonHeaders = [
   { name: "content-type", value: "application/json" },
   { name: "access-control-allow-origin", value: "*" },
@@ -88,18 +88,18 @@ async function installBackendMock(shell) {
         rec.kind = "list-sessions";
         return await fulfill(200, jsonHeaders, JSON.stringify({ sessions: [] }));
       }
-      // 2) SSE 票：回 503 讓 openConnection 快速失敗並退避（1s→2s→…），
-      //    避免 mock 事件流瞬間結束造成的重連風暴干擾附件觀察。
+      // 2) SSE 票：回 503 让 openConnection 快速失败并退避（1s→2s→…），
+      //    避免 mock 事件流瞬间结束造成的重连风暴干扰附件观察。
       if (/\/api\/agent\/sessions\/[^/]+\/sse-ticket$/.test(u.pathname)) {
         rec.kind = "sse-ticket";
         return await fulfill(503, jsonHeaders, JSON.stringify({ error: "e2e_no_sse" }));
       }
-      // 3) 上傳票（原檔直傳降級路徑要先鑄票）
+      // 3) 上传票（原档直传降级路径要先铸票）
       if (/\/api\/agent\/sessions\/[^/]+\/uploads-ticket$/.test(u.pathname)) {
         rec.kind = "uploads-ticket";
         return await fulfill(200, jsonHeaders, JSON.stringify({ ticket: "e2e-upload-ticket", expires_in_ms: 3600000 }));
       }
-      // 4) 附件上傳（衍生檔／抽幀）
+      // 4) 附件上传（衍生档／抽帧）
       if (/\/api\/agent\/sessions\/[^/]+\/attachments$/.test(u.pathname) && method === "POST") {
         rec.kind = "attachments";
         const names = parts.length ? parts : ["unknown"];
@@ -111,7 +111,7 @@ async function installBackendMock(shell) {
         }));
         return await fulfill(200, jsonHeaders, JSON.stringify({ attachments }));
       }
-      // 5) 原檔直傳網關（降級路徑的觀測點）
+      // 5) 原档直传网关（降级路径的观测点）
       if (/\/agent\/v1\/sessions\/[^/]+\/video-upload$/.test(u.pathname) && method === "POST") {
         rec.kind = "video-upload";
         const fname = parts[0] || "bad.mp4";
@@ -121,12 +121,12 @@ async function installBackendMock(shell) {
           JSON.stringify({ ok: true, path: `uploads/${SESSION_ID}/${fname}`, name: fname, size: 1500000, mime: "video/mp4" }),
         );
       }
-      // 6) SSE 本體：回空事件流（EventSource 會自行重連，不影響附件流程）
+      // 6) SSE 本体：回空事件流（EventSource 会自行重连，不影响附件流程）
       if (u.pathname === "/e2e-events") {
         rec.kind = "sse-stream";
         return await fulfill(200, [{ name: "content-type", value: "text/event-stream" }], "");
       }
-      // 其他 /api/agent/* 一律回空 JSON（best-effort 端點，不擋流程）
+      // 其他 /api/agent/* 一律回空 JSON（best-effort 端点，不挡流程）
       rec.kind = "misc";
       return await fulfill(200, jsonHeaders, JSON.stringify({}));
     } catch (e) {
@@ -147,7 +147,7 @@ async function installBackendMock(shell) {
   };
 }
 
-// ─────────────────────── 頁面探針 / 操作
+// ─────────────────────── 页面探针 / 操作
 
 async function probeComposer(shell) {
   return await shell.evaluate(() => {
@@ -185,8 +185,8 @@ async function waitComposer(shell, timeout = 60000) {
   await shell.page.waitForSelector("#agent-composer-input", { state: "visible", timeout });
 }
 
-/** 關掉進站宣傳片浮層（未登入新訪客會蓋在首頁上；會擋住後續點擊與截圖）。
- * 「跳过」→ 片尾卡 →「先逛逛」才是真正 onDismiss 關閉浮層。 */
+/** 关掉进站宣传片浮层（未登入新访客会盖在首页上；会挡住后续点击与截图）。
+ * 「跳过」→ 片尾卡 →「先逛逛」才是真正 onDismiss 关闭浮层。 */
 async function dismissPromo(shell, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   let clicked = false;
@@ -206,7 +206,7 @@ async function dismissPromo(shell, timeoutMs = 15000) {
     const skip = await tryClick("跳过");
     const browse = await tryClick("先逛逛");
     if (!skip && !browse) {
-      // 兩個按鈕都不在 → 浮層已關；連續兩拍確認（避免片尾卡延遲出現）。
+      // 两个按钮都不在 → 浮层已关；连续两拍确认（避免片尾卡延迟出现）。
       if (++goneFor >= 2) break;
       await shell.page.waitForTimeout(700);
     } else {
@@ -247,7 +247,7 @@ async function clearChips(shell) {
   }
 }
 
-/** 附件 chip 的元素截圖（比整頁更能看清終態；失敗回 null）。 */
+/** 附件 chip 的元素截图（比整页更能看清终态；失败回 null）。 */
 async function shotChipRow(shell, name) {
   const chip = shell.page.locator('[aria-label^="移除 "]').first();
   try {
@@ -270,7 +270,7 @@ async function attachFiles(shell, files) {
   const cdp = shell._e2eCdp;
   const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
   const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: FILE_SEL });
-  if (!nodeId) throw new Error("file input nodeId 為空");
+  if (!nodeId) throw new Error("file input nodeId 为空");
   await cdp.send("DOM.setFileInputFiles", { files: list, nodeId });
 }
 
@@ -301,7 +301,7 @@ function saveCase(name, obj) {
 }
 
 async function main() {
-  log(`BUG-1 真殼回歸（本機已修復前端 + mocked 後端）`);
+  log(`BUG-1 真壳回归（本机已修复前端 + mocked 后端）`);
   log(`origin=${origin}\nout=${outDir}\nassets=${assetsDir}`);
 
   const shell = await launchShell({ outDir: path.join(outDir, "shell"), origin });
@@ -317,7 +317,7 @@ async function main() {
     log(`boot: ${boot.url} textarea=${boot.hasTextarea} promoDismissed=${dismissedPromo}`);
     await shell.screenshot("boot");
 
-    // ───────── BUG1-A18：單一不可解碼 mp4 ─────────
+    // ───────── BUG1-A18：单一不可解码 mp4 ─────────
     {
       await clearChips(shell);
       const t0 = mock.mark();
@@ -337,7 +337,7 @@ async function main() {
       const pass = settled && notStuck && !!videoUpload.length;
       saveCase("BUG1-A18", {
         status: pass ? "pass" : "fail",
-        title: "不可解碼假 mp4 → 立即降級原檔直傳，chip 有終態不卡 uploading",
+        title: "不可解码假 mp4 → 立即降级原档直传，chip 有终态不卡 uploading",
         observations: {
           settled,
           chipStatuses: after.chips,
@@ -351,12 +351,12 @@ async function main() {
         },
         networkEvidence: evs.map((r) => ({ method: r.method, url: r.url, kind: r.kind, code: r.responseCode, postBytes: r.postBytes, parts: r.parts })),
         artifacts: { screenshot: shot.path, chipScreenshot: chipShot },
-        error: pass ? undefined : "A18 未達：chip 未進入終態或未見 video-upload 降級請求",
+        error: pass ? undefined : "A18 未达：chip 未进入终态或未见 video-upload 降级请求",
       });
       await clearChips(shell);
     }
 
-    // ───────── BUG1-B7：多檔含壞檔 ─────────
+    // ───────── BUG1-B7：多档含坏档 ─────────
     {
       await clearChips(shell);
       const t0 = mock.mark();
@@ -373,11 +373,11 @@ async function main() {
       const goodChips = after.chips.filter((c) => !c.isError && !/bad\.mp4/.test(c.text));
       const badChip = after.chips.find((c) => /bad\.mp4/.test(c.text)) || null;
       const noStuck = after.uploadingChips === 0;
-      // 好檔 2 個各走 attachments 一次（衍生檔）；壞檔 1 次 video-upload
+      // 好档 2 个各走 attachments 一次（衍生档）；坏档 1 次 video-upload
       const pass = settled && noStuck && goodChips.length >= 2 && attachments.length >= 2 && videoUpload.length >= 1 && !!badChip;
       saveCase("BUG1-B7", {
         status: pass ? "pass" : "fail",
-        title: "一次入隊 good-a/good-b/bad：好檔照常、壞檔降級直傳、無 chip 卡住",
+        title: "一次入队 good-a/good-b/bad：好档照常、坏档降级直传、无 chip 卡住",
         observations: {
           settled,
           chipStatuses: after.chips,
@@ -392,7 +392,7 @@ async function main() {
         },
         networkEvidence: evs.map((r) => ({ method: r.method, url: r.url, kind: r.kind, code: r.responseCode, postBytes: r.postBytes, parts: r.parts })),
         artifacts: { screenshot: shot.path, chipScreenshot: chipShot },
-        error: pass ? undefined : "B7 判準未全達（好檔未成功 / 壞檔未降級 / 仍有 chip 卡住）",
+        error: pass ? undefined : "B7 判准未全达（好档未成功 / 坏档未降级 / 仍有 chip 卡住）",
       });
       await clearChips(shell);
     }

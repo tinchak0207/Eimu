@@ -8,15 +8,15 @@ import { parseUserAttachmentBlock, AgentAttachmentCards } from "./AgentAttachmen
 import { AgentMarkdown } from "./AgentMarkdown";
 
 /**
- * REQ-D2：steer 状态 → 人话（与网關 steer-core.ts 的 SteerStatus 值域一一对应）。
- * 六态都必须说清「生效了没有」：queued=还没生效（本回合结束後生效），
+ * REQ-D2：steer 状态 → 人话（与网关 steer-core.ts 的 SteerStatus 值域一一对应）。
+ * 六态都必须说清「生效了没有」：queued=还没生效（本回合结束后生效），
  * injected=本回合内已生效，applied=下一回合已生效，aborted/failed=没生效，
- * uncertain（D2b）=**不知道**（投递已发出但没等到确认，网關永不自动重发）——
+ * uncertain（D2b）=**不知道**（投递已发出但没等到确认，网关永不自动重发）——
  * 不能说成「未生效」（那是假话：可能已经送达），更不能说成已生效。
  * position 只在排队时带来「你是第几条」的信息。
  *
  * 文案落点刻意留在本函数（既有 steer 徽章的唯一取用口，五态本来就住这里）；
- * src/lib/ui-strings.ts 是 D4 另有归属的檔案，本刀不动它。
+ * src/lib/ui-strings.ts 是 D4 另有归属的档案，本刀不动它。
  */
 function steerStatusLabel(status: AgentSteerStatus, position?: number): string {
   switch (status) {
@@ -41,7 +41,7 @@ export interface AgentMessageBubbleProps {
   sessionId?: string | null;
 }
 
-/** prefers-reduced-motion：串流游標閃爍與入場動畫都關掉，避免暈動。 */
+/** prefers-reduced-motion：串流游标闪烁与入场动画都关掉，避免晕动。 */
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
@@ -64,13 +64,13 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const hasAttachments = userParsed !== null && userParsed.refs.length > 0;
   const displayText = hasAttachments ? userParsed.cleanText : item.text;
 
-  // 文案（2026-09-20）：已結算＝「已思考 · N 秒」，還在想＝「正在思考…」，
-  // 無計時資料＝「已思考」——見下方 reasoningLabel。
-  // 單一 write path 語義不變：open 受控於 state（初值＝是否串流中），使用者點 summary
-  // 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層 re-render 只會
-  // 照著這個值渲染，不會把它打回收合——手動展開／收合優先於任何自動行為。
-  // 2026-09-27 暴君裁定 supersede：思考中展開、結算後自動收合成「已思考 · N 秒」
-  // 一行（展開的內部推理佔半屏）。使用者一旦手動點過 summary，自動收合就不再介入。
+  // 文案（2026-09-20）：已结算＝「已思考 · N 秒」，还在想＝「正在思考…」，
+  // 无计时资料＝「已思考」——见下方 reasoningLabel。
+  // 单一 write path 语义不变：open 受控于 state（初值＝是否串流中），使用者点 summary
+  // 造成的 toggle 由下面 handler 回写，之后串流 delta 更新或父层 re-render 只会
+  // 照著这个值渲染，不会把它打回收合——手动展开／收合优先于任何自动行为。
+  // 2026-09-27 暴君裁定 supersede：思考中展开、结算后自动收合成「已思考 · N 秒」
+  // 一行（展开的内部推理占半屏）。使用者一旦手动点过 summary，自动收合就不再介入。
   const reasoningStreaming = item.kind === "assistant" && item.streaming === true;
   const [reasoningOpen, setReasoningOpen] = useState(reasoningStreaming);
   const reasoningTouched = useRef(false);
@@ -78,7 +78,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
     if (!reasoningStreaming && !reasoningTouched.current) setReasoningOpen(false);
   }, [reasoningStreaming]);
 
-  // 思維鏈一鍵複製：summary 上的按鈕要 preventDefault，否則點擊會順帶收合 details。
+  // 思维链一键复制：summary 上的按钮要 preventDefault，否则点击会顺带收合 details。
   const [reasoningCopied, setReasoningCopied] = useState(false);
   const copyReasoning = async (e: MouseEvent) => {
     e.preventDefault();
@@ -89,22 +89,22 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
       setReasoningCopied(true);
       setTimeout(() => setReasoningCopied(false), 1500);
     } catch {
-      // clipboard 不可用（非安全上下文）時靜默失敗，用戶仍可手動選取複製。
+      // clipboard 不可用（非安全上下文）时静默失败，用户仍可手动选取复制。
     }
   };
 
-  // details 的 toggle 是唯一寫入口：使用者按 summary 造成的開／關在這裡被記下來。
+  // details 的 toggle 是唯一写入口：使用者按 summary 造成的开／关在这里被记下来。
   const onReasoningToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
     const next = e.currentTarget.open;
     setReasoningOpen((prev) => (prev === next ? prev : next));
   };
 
-  // 思維鏈收合行文案（2026-09-20 真功能，對齊預覽承諾的「已思考 · N 秒」）：
-  //   已結算（reasoningMs 有值）→ N 秒，至少 1 秒（瞬時完成也說「1 秒」，
-  //     不吐「0 秒」這種像壞掉的數字）；
-  //   還在想（streaming 且未結算）→ 正在思考…；
-  //   其餘（已完成但沒有計時資料，例如歷史回放重建的條目）→ 已思考，不編秒數。
-  // 只是一個字串，渲染在同一顆 span 裡，觸控區／chevron／copy 按鈕都不動。
+  // 思维链收合行文案（2026-09-20 真功能，对齐预览承诺的「已思考 · N 秒」）：
+  //   已结算（reasoningMs 有值）→ N 秒，至少 1 秒（瞬时完成也说「1 秒」，
+  //     不吐「0 秒」这种像坏掉的数字）；
+  //   还在想（streaming 且未结算）→ 正在思考…；
+  //   其余（已完成但没有计时资料，例如历史回放重建的条目）→ 已思考，不编秒数。
+  // 只是一个字串，渲染在同一颗 span 里，触控区／chevron／copy 按钮都不动。
   const reasoningMs = item.kind === "assistant" ? item.reasoningMs : undefined;
   const reasoningLabel =
     reasoningMs !== undefined
@@ -120,11 +120,11 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
     >
       <div
         className={cn(
-          // min-w-0 + overflow-wrap:anywhere：長 URL／程式碼／JSON 在氣泡內換行，不橫向溢出。
-          // 助理條目（正文與思維鏈）一律占滿整行，與工具卡／出圖卡同寬：85% 上限會讓
-          // 長文提早折行、右側空出一條，畫面像卡片沒排滿。用戶氣泡維持 85%——右對齊的
-          // 短氣泡才是對話的視覺語言。
-          // 助理正文走 Markdown 渲染，版式由塊級元素接管，不用 pre-wrap。
+          // min-w-0 + overflow-wrap:anywhere：长 URL／程式码／JSON 在气泡内换行，不横向溢出。
+          // 助理条目（正文与思维链）一律占满整行，与工具卡／出图卡同宽：85% 上限会让
+          // 长文提早折行、右侧空出一条，画面像卡片没排满。用户气泡维持 85%——右对齐的
+          // 短气泡才是对话的视觉语言。
+          // 助理正文走 Markdown 渲染，版式由块级元素接管，不用 pre-wrap。
           // agent-turn-text：手机正文阶梯锚点（agent-chat.css ≤639.98px → 17px/25px），
           // 桌面 text-[0.9375rem]/leading 一律不动。
           "agent-turn-text min-w-0 break-words [overflow-wrap:anywhere] text-[0.9375rem]",
@@ -134,19 +134,19 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             : "text-foreground leading-[1.55]",
         )}
       >
-        {/* 思維鏈默認收合（09-20 Grok 骨架落地），手動 toggle 優先於任何自動行為
-            （write path 語義見上方 reasoningOpen）。open 一律由 state 給值——
-            條件式會讓「串流結束」這類 prop 變化重新決定開關，把使用者展開的
-            區塊又收回去。 */}
+        {/* 思维链默认收合（09-20 Grok 骨架落地），手动 toggle 优先于任何自动行为
+            （write path 语义见上方 reasoningOpen）。open 一律由 state 给值——
+            条件式会让「串流结束」这类 prop 变化重新决定开关，把使用者展开的
+            区块又收回去。 */}
         {item.kind === "assistant" && item.reasoning ? (
           <details
             className="mb-1.5 [&_.brain-chevron]:transition-transform [&[open]>.brain-summary_.brain-chevron]:rotate-180"
             open={reasoningOpen}
             onToggle={onReasoningToggle}
           >
-            {/* 觸控目標 ≥44px：行動端沒有 hover，摘要行要按得到（詳情由內部 span 撐高）。
-                select-none 只鎖摘要行（避免拖選時把「思考過程」標籤一起圈走），
-                展開後的思維鏈內容可自由選取複製。 */}
+            {/* 触控目标 ≥44px：行动端没有 hover，摘要行要按得到（详情由内部 span 撑高）。
+                select-none 只锁摘要行（避免拖选时把「思考过程」标签一起圈走），
+                展开后的思维链内容可自由选取复制。 */}
             <summary onClick={() => { reasoningTouched.current = true; }} className="brain-summary block min-h-11 cursor-pointer touch-manipulation select-none [-webkit-tap-highlight-color:transparent]">
               <span className="flex min-h-11 items-center gap-1.5 text-ios-footnote font-medium text-muted-foreground">
                 <Brain className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
@@ -185,7 +185,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
           "​"
         )}
         {/* REQ-D2：回合中追加的指引（steer）状态徽章。
-            状态值域的权威是网關的 steer.status 帧（agent-chat-types 的
+            状态值域的权威是网关的 steer.status 帧（agent-chat-types 的
             AGENT_STEER_STATUSES），这里只翻译成人话——「排队中·本回合结束后生效」
             与「已注入本回合」必须一眼分得开，不许把排队说成已生效。 */}
         {item.kind === "user" && item.steer ? (
@@ -212,16 +212,16 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
         {hasAttachments && <AgentAttachmentCards refs={userParsed.refs} sessionId={sessionId} />}
         {/* 串流中的打字光标。纯视觉提示，屏读器宣告由 AgentChatPanel 的
             role="status" 区域负责。
-            2026-09-20 修：僅在有「可讀正文」時渲染——模型首個 delta 常常只是
-            "\n" 或空白，舊條件（length > 0）照樣放行，畫面上就是一個孤零零的
-            游標在奇怪的位置閃；改看 trim() 後長度，白字元撐不出游標。 */}
+            2026-09-20 修：仅在有「可读正文」时渲染——模型首个 delta 常常只是
+            "\n" 或空白，旧条件（length > 0）照样放行，画面上就是一个孤零零的
+            游标在奇怪的位置闪；改看 trim() 后长度，白字元撑不出游标。 */}
         {item.kind === "assistant" && item.streaming && displayText.trim().length > 0 && (
           <span
             className="agent-caret"
             aria-hidden="true"
             style={{
-              // 游標不破行：0 寬 inline-block 永不觸發換行，改用 outline 畫出 2px 游標，
-              // 緊貼最後一個字——長串流中游標不會孤零零掉去下一行行首。
+              // 游标不破行：0 宽 inline-block 永不触发换行，改用 outline 画出 2px 游标，
+              // 紧贴最后一个字——长串流中游标不会孤零零掉去下一行行首。
               width: 0,
               marginLeft: 0,
               background: "transparent",

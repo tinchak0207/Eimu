@@ -1,14 +1,14 @@
 "use client";
 
-// 歷史會話列表（2026-10-03 對標 Grok 側欄）：寬屏下拉與窄屏底部抽屜共用同一份
-// 列表內容——分節以下的列本身只有一種長相：標題（最多兩行截斷）＋相對日期，
-// 當前會話淺灰圓角高亮，整列可點。
+// 历史会话列表（2026-10-03 对标 Grok 侧栏）：宽屏下拉与窄屏底部抽屉共用同一份
+// 列表内容——分节以下的列本身只有一种长相：标题（最多两行截断）＋相对日期，
+// 当前会话浅灰圆角高亮，整列可点。
 //
-// 容器（寬屏 agent-pop 下拉 / 窄屏 agent-param-drawer 抽屜）與搜尋框由
-// AgentChatSurface 持有；這裡只管「載入中 / 空態 / 列」三態與過濾。
+// 容器（宽屏 agent-pop 下拉 / 窄屏 agent-param-drawer 抽屉）与搜寻框由
+// AgentChatSurface 持有；这里只管「载入中 / 空态 / 列」三态与过滤。
 //
-// 無 hooks（query 由外層受控傳入），所以測試可以直接呼叫元件取得元素樹、
-// 對列按鈕的 onClick 做行為斷言（見 agent-history-list.test.ts）。
+// 无 hooks（query 由外层受控传入），所以测试可以直接呼叫元件取得元素树、
+// 对列按钮的 onClick 做行为断言（见 agent-history-list.test.ts）。
 
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,10 +25,10 @@ function startOfLocalDay(timestamp: number): number {
 const WEEKDAYS_ZH = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"] as const;
 
 /**
- * Grok 側欄式相對日期（不用 ICU 的 relative 格式，逐档手写保證任何環境輸出一致）：
+ * Grok 侧栏式相对日期（不用 ICU 的 relative 格式，逐档手写保证任何环境输出一致）：
  *   今天   → HH:mm（24h）
  *   昨天   → 「昨天」
- *   7 天內 → 星期幾
+ *   7 天内 → 星期几
  *   更早（同年）→ M月D日
  *   跨年   → YYYY/M/D
  * now 可注入，便于测试。
@@ -43,7 +43,7 @@ export function formatSessionRelativeTime(timestamp: number, now: number = Date.
   }
   const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
   if (timestamp >= yesterdayStart) return "昨天";
-  // 今天起往前數 7 個自然日（含今天）都給星期幾；再早才落絕對日期。
+  // 今天起往前数 7 个自然日（含今天）都给星期几；再早才落绝对日期。
   const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
   const d = new Date(timestamp);
   if (timestamp >= weekStart) return WEEKDAYS_ZH[d.getDay()];
@@ -53,11 +53,11 @@ export function formatSessionRelativeTime(timestamp: number, now: number = Date.
 }
 
 /**
- * 搜尋過濾：對「顯示出來的那行標題」（含降級時間標籤）做大小寫不敏感的
- * 包含匹配。空串／全空白不過濾。client-side，歷史目錄量級用不著伺服器。
+ * 搜寻过滤：对「显示出来的那行标题」（含降级时间标签）做大小写不敏感的
+ * 包含匹配。空串／全空白不过滤。client-side，历史目录量级用不著伺服器。
  *
- * formatLabel 受注入（唯一實作在 AgentChatSurface——既有測試對它的源碼錨點
- * 鎖在那個檔，這裡不複製第二份邏輯防漂移）。
+ * formatLabel 受注入（唯一实作在 AgentChatSurface——既有测试对它的源码锚点
+ * 锁在那个档，这里不复制第二份逻辑防漂移）。
  */
 export function filterAgentSessions(
   list: AgentSessionSummary[],
@@ -86,11 +86,11 @@ const SESSION_STATUS_META: Record<
 export interface AgentSessionListProps {
   /** null = 未加载；[] = 已加载但为空。 */
   sessions: AgentSessionSummary[] | null;
-  /** null = 本輪還沒送出過、會話尚未建立（lazy 建號），此時沒有任何一列算「當前」。 */
+  /** null = 本轮还没送出过、会话尚未建立（lazy 建号），此时没有任何一列算「当前」。 */
   currentSessionId: string | null;
   switchingTo: string | null;
   startingNew: boolean;
-  /** 搜尋詞（受控，外層持有輸入框）；缺席＝不過濾。 */
+  /** 搜寻词（受控，外层持有输入框）；缺席＝不过滤。 */
   query?: string;
   /** 标题格式化（双轨：网关 title 优先，无标题降级时间标签）。唯一实现
       在 AgentChatSurface（既有测试的源码锚点锁在那），这里受注入。 */
@@ -122,8 +122,8 @@ export function AgentSessionList({
   const visible = query !== undefined ? filterAgentSessions(sessions, query, formatLabel) : sessions;
 
   if (visible.length === 0) {
-    // 搜尋無命中與「本來就沒有歷史」是兩種空：前者給一句了事，後者沿用既有
-    // 引導文案＋ inline 開新對話 CTA（2026-08-22 完美主義審視的文案不動）。
+    // 搜寻无命中与「本来就没有历史」是两种空：前者给一句了事，后者沿用既有
+    // 引导文案＋ inline 开新对话 CTA（2026-08-22 完美主义审视的文案不动）。
     if (sessions.length > 0) {
       return (
         <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
@@ -172,7 +172,7 @@ export function AgentSessionList({
                 {formatLabel(it)}
               </span>
               <span className="flex items-center gap-1.5 text-ios-footnote text-foreground/45">
-                {/* 行首状态点缩进日期行：列首寬度恆定不抖动，aria-hidden 视觉点
+                {/* 行首状态点缩进日期行：列首宽度恒定不抖动，aria-hidden 视觉点
                     + sr-only 状态文字。 */}
                 <span
                   aria-hidden="true"

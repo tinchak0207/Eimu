@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * 配方模板区（吞併决策主线一第三件）：内置模板 chips + 我的模板列表。
- * 2026-08-27 自 pro-workstation/RecipeTemplateSection.tsx 逐檔複製遷入 canvas-
- * workstation（專業工作站入口移除）；交互逻辑、确认卡、模板摊开路径一行不改。
+ * 配方模板区（吞并决策主线一第三件）：内置模板 chips + 我的模板列表。
+ * 2026-08-27 自 pro-workstation/RecipeTemplateSection.tsx 逐档复制迁入 canvas-
+ * workstation（专业工作站入口移除）；交互逻辑、确认卡、模板摊开路径一行不改。
  *
  * 模板不是黑盒封装：点击 chip 先出确认卡（确认卡先行，列出将被替换的字段），
  * 确认后六槽摊开进表单可改。内置模板与用户模板走同一条 applyRecipeTemplate

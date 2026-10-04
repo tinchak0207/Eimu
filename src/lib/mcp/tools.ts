@@ -1,21 +1,21 @@
 /**
- * MCP 工具表與執行層——**只做轉發與投影，零業務、零計費**。
+ * MCP 工具表与执行层——**只做转发与投影，零业务、零计费**。
  *
- * 硬規則（改本檔前先讀，這是本檔存在的理由）：
- * 1. **不重寫任何業務**。生成/查詢類工具「把參數原樣交給既有 `/api/v1/**` 端點」
- *    （帳本、冪等、配額預檢、退款、上游路由全在那些端點裡）；skill 族是對既有註冊表的
- *    唯讀投影；工作流族（`workflow_write/history/read/rollback`＋`canvas_get_state`）
- *    是既有編譯器/畫布端點的薄轉發（讀面只挑欄位投影）。本檔**沒有**任何金額、
- *    模型白名單、配額、扣費或編譯/回滾語義的判斷。
- * 2. **鑑權逐字複用**。工具自身不驗 key；呼叫者的 `Authorization` 頭原樣透傳，
- *    由同一支 `authenticateBizApiKey` 決定身分與計費主體（見 `src/app/api/mcp/route.ts`）。
- * 3. **私有 skill 永不外露**。只用 registry 的公開族函式（`listPublicSkills` 等），
- *    絕不調 `listMySkills` / `getMySkillById`，也不接受任何 owner 參數。
- * 4. **失敗不裝死也不炸**。上游 4xx/5xx、網路中斷一律回 `isError: true` 的工具結果
- *    （模型看得見原文、能自行修正）；只有「參數不合 schema」才是 JSON-RPC -32602。
+ * 硬规则（改本档前先读，这是本档存在的理由）：
+ * 1. **不重写任何业务**。生成/查询类工具「把参数原样交给既有 `/api/v1/**` 端点」
+ *    （帐本、幂等、配额预检、退款、上游路由全在那些端点里）；skill 族是对既有注册表的
+ *    唯读投影；工作流族（`workflow_write/history/read/rollback`＋`canvas_get_state`）
+ *    是既有编译器/画布端点的薄转发（读面只挑栏位投影）。本档**没有**任何金额、
+ *    模型白名单、配额、扣费或编译/回滚语义的判断。
+ * 2. **鉴权逐字复用**。工具自身不验 key；呼叫者的 `Authorization` 头原样透传，
+ *    由同一支 `authenticateBizApiKey` 决定身分与计费主体（见 `src/app/api/mcp/route.ts`）。
+ * 3. **私有 skill 永不外露**。只用 registry 的公开族函式（`listPublicSkills` 等），
+ *    绝不调 `listMySkills` / `getMySkillById`，也不接受任何 owner 参数。
+ * 4. **失败不装死也不炸**。上游 4xx/5xx、网路中断一律回 `isError: true` 的工具结果
+ *    （模型看得见原文、能自行修正）；只有「参数不合 schema」才是 JSON-RPC -32602。
  *
- * 傳輸選擇：轉發走**站內 HTTP**（`<origin>/api/v1/...`），不是 in-process 呼叫路由函式。
- * 理由寫在 `createHttpDispatcher` 的註解裡。
+ * 传输选择：转发走**站内 HTTP**（`<origin>/api/v1/...`），不是 in-process 呼叫路由函式。
+ * 理由写在 `createHttpDispatcher` 的注解里。
  */
 
 import { AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent-skills";
@@ -42,14 +42,14 @@ import {
   type McpToolDescriptor,
 } from "./protocol";
 
-// ─────────────────────────────────────────── JSON Schema（本檔用到的子集）
+// ─────────────────────────────────────────── JSON Schema（本档用到的子集）
 
 export type ToolSchemaType = "object" | "string" | "number" | "integer" | "boolean" | "array";
 
 /**
- * 只實作 protocol 需要的 JSON Schema 子集：type / properties / required /
+ * 只实作 protocol 需要的 JSON Schema 子集：type / properties / required /
  * additionalProperties / enum / minimum / maximum / minItems / maxItems / items。
- * **刻意不用 anyOf/oneOf**——驗證器與宣告是同一份 schema，不用兩套真源。
+ * **刻意不用 anyOf/oneOf**——验证器与宣告是同一份 schema，不用两套真源。
  */
 export type ToolInputSchema = {
   type: ToolSchemaType;
@@ -70,8 +70,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 依 schema 驗證工具參數。通過回 `null`，失敗回**第一條**人話錯誤訊息（含路徑）。
- * 純函式、不拋錯——拋與否由 `callTool` 決定，方便測試與路由各取所需。
+ * 依 schema 验证工具参数。通过回 `null`，失败回**第一条**人话错误讯息（含路径）。
+ * 纯函式、不抛错——抛与否由 `callTool` 决定，方便测试与路由各取所需。
  */
 export function validateToolArguments(schema: ToolInputSchema, args: unknown): string | null {
   return validateValue(schema, args, "arguments");
@@ -84,15 +84,15 @@ function validateValue(schema: ToolInputSchema, value: unknown, path: string): s
 
   switch (schema.type) {
     case "object": {
-      if (!isPlainObject(value)) return `${path} 必須是物件`;
+      if (!isPlainObject(value)) return `${path} 必须是物件`;
       for (const key of schema.required ?? []) {
-        if (value[key] === undefined) return `${path}.${key} 是必填參數`;
+        if (value[key] === undefined) return `${path}.${key} 是必填参数`;
       }
       for (const [key, item] of Object.entries(value)) {
         if (item === undefined) continue;
         const property = schema.properties?.[key];
         if (!property) {
-          if (schema.additionalProperties === false) return `${path}.${key} 不是本工具支援的參數`;
+          if (schema.additionalProperties === false) return `${path}.${key} 不是本工具支援的参数`;
           continue;
         }
         const problem = validateValue(property, item, `${path}.${key}`);
@@ -101,12 +101,12 @@ function validateValue(schema: ToolInputSchema, value: unknown, path: string): s
       return null;
     }
     case "array": {
-      if (!Array.isArray(value)) return `${path} 必須是陣列`;
+      if (!Array.isArray(value)) return `${path} 必须是阵列`;
       if (schema.minItems !== undefined && value.length < schema.minItems) {
-        return `${path} 至少需要 ${schema.minItems} 個元素`;
+        return `${path} 至少需要 ${schema.minItems} 个元素`;
       }
       if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-        return `${path} 最多 ${schema.maxItems} 個元素（收到 ${value.length} 個）`;
+        return `${path} 最多 ${schema.maxItems} 个元素（收到 ${value.length} 个）`;
       }
       if (schema.items) {
         for (let index = 0; index < value.length; index += 1) {
@@ -117,36 +117,36 @@ function validateValue(schema: ToolInputSchema, value: unknown, path: string): s
       return null;
     }
     case "string":
-      if (typeof value !== "string") return `${path} 必須是字串`;
+      if (typeof value !== "string") return `${path} 必须是字串`;
       return null;
     case "integer":
-      if (typeof value !== "number" || !Number.isInteger(value)) return `${path} 必須是整數`;
+      if (typeof value !== "number" || !Number.isInteger(value)) return `${path} 必须是整数`;
       break;
     case "number":
-      if (typeof value !== "number" || !Number.isFinite(value)) return `${path} 必須是數字`;
+      if (typeof value !== "number" || !Number.isFinite(value)) return `${path} 必须是数字`;
       break;
     case "boolean":
-      if (typeof value !== "boolean") return `${path} 必須是布林值`;
+      if (typeof value !== "boolean") return `${path} 必须是布林值`;
       return null;
   }
 
   if (typeof value === "number") {
-    if (schema.minimum !== undefined && value < schema.minimum) return `${path} 不得小於 ${schema.minimum}`;
-    if (schema.maximum !== undefined && value > schema.maximum) return `${path} 不得大於 ${schema.maximum}`;
+    if (schema.minimum !== undefined && value < schema.minimum) return `${path} 不得小于 ${schema.minimum}`;
+    if (schema.maximum !== undefined && value > schema.maximum) return `${path} 不得大于 ${schema.maximum}`;
   }
   return null;
 }
 
-// ─────────────────────────────────────────── 轉發層（可注入）
+// ─────────────────────────────────────────── 转发层（可注入）
 
 export interface McpDispatchRequest {
   method: "GET" | "POST";
-  /** 站內路徑，例如 `/api/v1/images/generations`（不含 origin、不含 query）。 */
+  /** 站内路径，例如 `/api/v1/images/generations`（不含 origin、不含 query）。 */
   path: string;
-  /** 呼叫者原始 `Authorization` 頭，逐字透傳。 */
+  /** 呼叫者原始 `Authorization` 头，逐字透传。 */
   authorization: string | null;
   traceId: string;
-  /** 工具名，只用於組冪等鍵，不進上游 body。 */
+  /** 工具名，只用于组幂等键，不进上游 body。 */
   toolName: string;
   body?: unknown;
 }
@@ -157,44 +157,44 @@ export interface McpDispatchResponse {
   text: string;
 }
 
-/** 轉發介面：工具測試注入假實作，生產用 `createHttpDispatcher`。 */
+/** 转发介面：工具测试注入假实作，生产用 `createHttpDispatcher`。 */
 export type McpDispatcher = (request: McpDispatchRequest) => Promise<McpDispatchResponse>;
 
 export interface McpToolContext {
-  /** 呼叫者的 `Authorization` 頭（原樣，不解析、不改寫）。 */
+  /** 呼叫者的 `Authorization` 头（原样，不解析、不改写）。 */
   authorization: string | null;
-  /** 貫穿本次 MCP 呼叫的 trace id（同時當上游 `X-Request-Id`）。 */
+  /** 贯穿本次 MCP 呼叫的 trace id（同时当上游 `X-Request-Id`）。 */
   traceId: string;
   dispatcher: McpDispatcher;
   /**
-   * 輪詢用睡眠；預設 `setTimeout`。**可注入**：測試傳 no-op，避免真的等秒
-   * （照 `openai-compat/generation.ts` 的 `input.sleep ?? defaultSleep` 慣例）。
+   * 轮询用睡眠；预设 `setTimeout`。**可注入**：测试传 no-op，避免真的等秒
+   * （照 `openai-compat/generation.ts` 的 `input.sleep ?? defaultSleep` 惯例）。
    */
   sleep?: (ms: number) => Promise<void>;
-  /** 時鐘；預設 `Date.now`。**可注入**：測試用假時鐘驅動 `run_agent` 的逾時路徑。 */
+  /** 时钟；预设 `Date.now`。**可注入**：测试用假时钟驱动 `run_agent` 的逾时路径。 */
   now?: () => number;
 }
 
-/** 轉發逾時：與 `/v1` 路由的 maxDuration 同量級，生圖/生視頻是長請求。 */
+/** 转发逾时：与 `/v1` 路由的 maxDuration 同量级，生图/生视频是长请求。 */
 const DISPATCH_TIMEOUT_MS = 280_000;
 
 /**
- * 生產用轉發器：對**自家站點**發 HTTP 請求打 `/api/v1/**`。
+ * 生产用转发器：对**自家站点**发 HTTP 请求打 `/api/v1/**`。
  *
- * 為什麼是站內 HTTP 而不是 in-process 呼叫路由函式（兩者都合法，這裡選前者）：
- * - `/api/v1/**` 在生產被 `next.config.mjs` 的 `beforeFiles` 改寫到控制面
- *   （`/image-control/api/v1/**`），**真正的帳本與 worker 在那邊**。站內 HTTP 讓 MCP
- *   與外部 API 客戶走**同一條**生產路徑（同一支閘、同一本帳），in-process 反而會
- *   繞過那層改寫、在控制面模式下打到站點自己的舊分支。
- * - 呼叫者的 `Authorization` 逐字透傳 ⇒ 計費主體與配額判斷與 `/v1` 完全一致。
+ * 为什么是站内 HTTP 而不是 in-process 呼叫路由函式（两者都合法，这里选前者）：
+ * - `/api/v1/**` 在生产被 `next.config.mjs` 的 `beforeFiles` 改写到控制面
+ *   （`/image-control/api/v1/**`），**真正的帐本与 worker 在那边**。站内 HTTP 让 MCP
+ *   与外部 API 客户走**同一条**生产路径（同一支闸、同一本帐），in-process 反而会
+ *   绕过那层改写、在控制面模式下打到站点自己的旧分支。
+ * - 呼叫者的 `Authorization` 逐字透传 ⇒ 计费主体与配额判断与 `/v1` 完全一致。
  *
- * 不變式：任何 log / 錯誤訊息都不得包含 `authorization` 的值（本函式只把它放進請求頭）。
+ * 不变式：任何 log / 错误讯息都不得包含 `authorization` 的值（本函式只把它放进请求头）。
  *
- * `origin` 兩種形態：
- * - **字串**：站點 origin，URL = `origin（去尾斜線） + path`（既有行為，逐字不變）。
- * - **函式**：`(path) => 完整絕對 URL`。route.ts 用它為**每個請求**挑轉發目標——
- *   公開站點 origin（Cloudflare 前置）與不掛 CF 的控制面 origin 不是同一個
- *   （見 `src/app/api/mcp/route.ts` 的 `resolveDispatchUrl`）。函式回傳值即最終 URL，
+ * `origin` 两种形态：
+ * - **字串**：站点 origin，URL = `origin（去尾斜线） + path`（既有行为，逐字不变）。
+ * - **函式**：`(path) => 完整绝对 URL`。route.ts 用它为**每个请求**挑转发目标——
+ *   公开站点 origin（Cloudflare 前置）与不挂 CF 的控制面 origin 不是同一个
+ *   （见 `src/app/api/mcp/route.ts` 的 `resolveDispatchUrl`）。函式回传值即最终 URL，
  *   本函式不再拼一次 path。
  */
 export function createHttpDispatcher(
@@ -206,9 +206,9 @@ export function createHttpDispatcher(
       ? origin
       : (path: string) => `${origin.replace(/\/+$/, "")}${path}`;
   return async (request) => {
-    // 生成型請求的 trace / 冪等鍵紀律收斂在 generation-request-headers（R5）：
-    // `X-Request-Id` 沿用本次 MCP 呼叫的 traceId（上游 getOrCreateTraceId 會原樣回聲），
-    // 冪等鍵與 traceId 綁定（同一次呼叫重送不重複扣費，不跨呼叫誤命中）。
+    // 生成型请求的 trace / 幂等键纪律收敛在 generation-request-headers（R5）：
+    // `X-Request-Id` 沿用本次 MCP 呼叫的 traceId（上游 getOrCreateTraceId 会原样回声），
+    // 幂等键与 traceId 绑定（同一次呼叫重送不重复扣费，不跨呼叫误命中）。
     const headers = buildGenerationRequestHeaders({
       traceId: request.traceId,
       idempotencyKey: mcpGenerationIdempotencyKey(request.toolName, request.traceId),
@@ -238,9 +238,9 @@ export function createHttpDispatcher(
   };
 }
 
-// ─────────────────────────────────────────── 工具定義
+// ─────────────────────────────────────────── 工具定义
 
-/** 只丟掉 `undefined`（`null`/空字串是呼叫者的真實意圖，不代他決定）。 */
+/** 只丢掉 `undefined`（`null`/空字串是呼叫者的真实意图，不代他决定）。 */
 function compact(input: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
@@ -264,12 +264,12 @@ function pickString(args: Record<string, unknown>, key: string): string | undefi
   return trimmed === "" ? undefined : trimmed;
 }
 
-// 生圖/改圖的模型 id（`generate_image` 的 `model` 上游是必填，schema 同步宣告為必填）。
+// 生图/改图的模型 id（`generate_image` 的 `model` 上游是必填，schema 同步宣告为必填）。
 const SKILL_FAMILIES = Object.keys(AGENT_SKILL_FAMILY_LABELS) as string[];
 const DEFAULT_SKILL_LIMIT = 30;
 const MAX_SKILL_LIMIT = 200;
 
-/** 媒體硬檢政策的鍵（單一真源＝`media-quality-gate` 的 `QUALITY_POLICIES`，不另抄一份）。 */
+/** 媒体硬检政策的键（单一真源＝`media-quality-gate` 的 `QUALITY_POLICIES`，不另抄一份）。 */
 const QUALITY_POLICY_IDS = Object.keys(QUALITY_POLICIES) as string[];
 
 function skillSummary(skill: AgentSkillView) {
@@ -293,7 +293,7 @@ interface ToolDefinition extends McpToolDescriptor {
   run(args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolCallResult>;
 }
 
-/** 一條轉發工具的全部資訊：目標端點 + body 投影（投影只做挑欄位，不改語義）。 */
+/** 一条转发工具的全部资讯：目标端点 + body 投影（投影只做挑栏位，不改语义）。 */
 interface ForwardSpec {
   method: "GET" | "POST";
   path: string | ((args: Record<string, unknown>) => string);
@@ -318,13 +318,13 @@ async function runForward(
 
   const text = truncateToolText(response.text);
   if (response.status >= 200 && response.status < 300) return textResult(text);
-  return textResult(`上游 ${spec.method} ${path} 回應 HTTP ${response.status}：\n${text}`, true);
+  return textResult(`上游 ${spec.method} ${path} 回应 HTTP ${response.status}：\n${text}`, true);
 }
 
 /**
- * 讀面轉發：錯誤語義與 `runForward` 逐字一致（上游非 2xx 回原文 isError），
- * 差別只在成功時把上游 JSON **投影**出需要的欄位（只挑欄位/過濾，不重算、不改語義——
- * 與 `runListSkills`/`runGetSkill` 同層）。投影或解析失敗一律回原文，絕不把上游回應弄丟。
+ * 读面转发：错误语义与 `runForward` 逐字一致（上游非 2xx 回原文 isError），
+ * 差别只在成功时把上游 JSON **投影**出需要的栏位（只挑栏位/过滤，不重算、不改语义——
+ * 与 `runListSkills`/`runGetSkill` 同层）。投影或解析失败一律回原文，绝不把上游回应弄丢。
  */
 async function runForwardProjected(
   spec: ForwardSpec,
@@ -345,7 +345,7 @@ async function runForwardProjected(
 
   const text = truncateToolText(response.text);
   if (response.status < 200 || response.status >= 300) {
-    return textResult(`上游 ${spec.method} ${path} 回應 HTTP ${response.status}：\n${text}`, true);
+    return textResult(`上游 ${spec.method} ${path} 回应 HTTP ${response.status}：\n${text}`, true);
   }
   try {
     return textResult(JSON.stringify(project(JSON.parse(response.text)), null, 2));
@@ -354,42 +354,42 @@ async function runForwardProjected(
   }
 }
 
-/** 畫布快照端點（B 端 key 經 `/api/agent/biz` 代理到 agent 閘道）的站內路徑。 */
+/** 画布快照端点（B 端 key 经 `/api/agent/biz` 代理到 agent 闸道）的站内路径。 */
 function canvasStatePath(args: Record<string, unknown>): string {
   const sessionId = pickString(args, "session_id") ?? "";
   return `/api/agent/biz/sessions/${encodeURIComponent(sessionId)}/canvas/state`;
 }
 
-/** 從閘道快照回應挑出 `state`（快照本體）；非物件回空物件。 */
+/** 从闸道快照回应挑出 `state`（快照本体）；非物件回空物件。 */
 function snapshotState(payload: unknown): Record<string, unknown> {
   if (!isPlainObject(payload)) return {};
   const state = (payload as { state?: unknown }).state;
   return isPlainObject(state) ? state : {};
 }
 
-// ─────────────────────────────────────────── Eimu agent 閘道（B 端密鑰 → /api/agent/biz 代理）
+// ─────────────────────────────────────────── Eimu agent 闸道（B 端密钥 → /api/agent/biz 代理）
 //
-// 這條線早已存在：`/api/agent/biz/[...path]` 用**呼叫者自己的 B 端密鑰**鑑權，換發成業主派生 key
-// 後轉發 VPS 閘道 `/agent/v1/<subPath>`，身分空間與網頁版 AI 助理完全相同（同 settings、
-// 同 orchestrator、beast_mode 為帳號級設定）。本節只把它投影到工具面，不重寫任何業務。
-// 硬限制：該代理的 JSON 路徑有 10s 逾時（`BIZ_PROXY_JSON_TIMEOUT_MS`），故 `run_agent`
-// 必須「送一輪快回、之後反覆輪詢」，絕不能在一個請求裡等完整回合。
+// 这条线早已存在：`/api/agent/biz/[...path]` 用**呼叫者自己的 B 端密钥**鉴权，换发成业主派生 key
+// 后转发 VPS 闸道 `/agent/v1/<subPath>`，身分空间与网页版 AI 助理完全相同（同 settings、
+// 同 orchestrator、beast_mode 为帐号级设定）。本节只把它投影到工具面，不重写任何业务。
+// 硬限制：该代理的 JSON 路径有 10s 逾时（`BIZ_PROXY_JSON_TIMEOUT_MS`），故 `run_agent`
+// 必须「送一轮快回、之后反覆轮询」，绝不能在一个请求里等完整回合。
 
-/** agent 會話站內路徑前綴（經 `/api/agent/biz` 代理到閘道 `/agent/v1/sessions`）。 */
+/** agent 会话站内路径前缀（经 `/api/agent/biz` 代理到闸道 `/agent/v1/sessions`）。 */
 const AGENT_SESSIONS_PATH = "/api/agent/biz/sessions";
-/** agent 帳號級設定路徑（含 beast_mode）。 */
+/** agent 帐号级设定路径（含 beast_mode）。 */
 const AGENT_SETTINGS_PATH = "/api/agent/biz/settings";
-/** `run_agent` 輪詢間隔；每次輪詢一律走簡化端點 `/sessions/{id}`（單次必須 <10s）。 */
+/** `run_agent` 轮询间隔；每次轮询一律走简化端点 `/sessions/{id}`（单次必须 <10s）。 */
 const RUN_AGENT_POLL_INTERVAL_MS = 2_000;
 const RUN_AGENT_DEFAULT_TIMEOUT_SECONDS = 180;
-/** 上限同時硬編在 schema（maximum）；執行層再夾一次當防禦。 */
+/** 上限同时硬编在 schema（maximum）；执行层再夹一次当防御。 */
 const RUN_AGENT_MAX_TIMEOUT_SECONDS = 300;
 
 function agentSessionPath(sessionId: string, suffix = ""): string {
   return `${AGENT_SESSIONS_PATH}/${encodeURIComponent(sessionId)}${suffix}`;
 }
 
-/** 預設睡眠（測試以 `ctx.sleep` 注入 no-op，不真的等秒）。 */
+/** 预设睡眠（测试以 `ctx.sleep` 注入 no-op，不真的等秒）。 */
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -402,15 +402,15 @@ function parseJsonLoose(text: string): unknown {
   }
 }
 
-/** 上游非 2xx：與 `runForward` 同語義的工具錯誤（附已消毒原文）。 */
+/** 上游非 2xx：与 `runForward` 同语义的工具错误（附已消毒原文）。 */
 function agentUpstreamFailure(method: string, path: string, response: McpDispatchResponse): McpToolCallResult {
   return textResult(
-    `上游 ${method} ${path} 回應 HTTP ${response.status}：\n${truncateToolText(response.text)}`,
+    `上游 ${method} ${path} 回应 HTTP ${response.status}：\n${truncateToolText(response.text)}`,
     true,
   );
 }
 
-/** 從 POST /sessions 回包取 `session_id`（形狀未實測：容忍頂層與 `session.session_id`，取不到回 undefined）。 */
+/** 从 POST /sessions 回包取 `session_id`（形状未实测：容忍顶层与 `session.session_id`，取不到回 undefined）。 */
 function extractSessionId(payload: unknown): string | undefined {
   if (!isPlainObject(payload)) return undefined;
   const direct = payload.session_id;
@@ -429,7 +429,7 @@ interface AgentMessage {
   created_at?: unknown;
 }
 
-/** 簡化 transcript 的 `messages`（非陣列/非物件一律略過，不假裝有內容）。 */
+/** 简化 transcript 的 `messages`（非阵列/非物件一律略过，不假装有内容）。 */
 function readAgentMessages(payload: unknown): AgentMessage[] {
   if (!isPlainObject(payload) || !Array.isArray(payload.messages)) return [];
   const out: AgentMessage[] = [];
@@ -444,20 +444,20 @@ function readAgentMessages(payload: unknown): AgentMessage[] {
   return out;
 }
 
-/** 上游 `message_count`（缺欄位回 null，由呼叫方回退成 `messages.length`）。 */
+/** 上游 `message_count`（缺栏位回 null，由呼叫方回退成 `messages.length`）。 */
 function readAgentMessageCount(payload: unknown): number | null {
   if (!isPlainObject(payload)) return null;
   const count = payload.message_count;
   return typeof count === "number" && Number.isFinite(count) ? count : null;
 }
 
-// ── artifacts 抽取（「透傳」的核心）：抽媒體 URL 的同時保留原文 reply ──
+// ── artifacts 抽取（「透传」的核心）：抽媒体 URL 的同时保留原文 reply ──
 
 const ARTIFACT_IMAGE_EXTENSION = /\.(webp|png|jpe?g)(?:[?#]|$)/i;
 const ARTIFACT_VIDEO_EXTENSION = /\.(mp4|webm|mov)(?:[?#]|$)/i;
 const ARTIFACT_URL_PATTERN = /https?:\/\/[^\s"'<>()[\]{}]+/g;
 const ARTIFACT_MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
-/** 既知媒體目錄：即使無副檔名也當產物（kind=file）。 */
+/** 既知媒体目录：即使无副档名也当产物（kind=file）。 */
 const ARTIFACT_MEDIA_PATH = "/image-data/files/";
 
 function artifactKind(url: string): "image" | "video" | "file" {
@@ -467,9 +467,9 @@ function artifactKind(url: string): "image" | "video" | "file" {
 }
 
 /**
- * 從回覆文字抽出成品媒體 URL：`/image-data/files/…` 的圖片/影片，以及 markdown 圖片
- * `![alt](url)`（作者已宣告是圖）。非媒體的普通連結不列入。保持出現順序、同 URL 去重，
- * kind 以「更明確者優先」（image/video 不被 file 覆蓋）。
+ * 从回覆文字抽出成品媒体 URL：`/image-data/files/…` 的图片/影片，以及 markdown 图片
+ * `![alt](url)`（作者已宣告是图）。非媒体的普通连结不列入。保持出现顺序、同 URL 去重，
+ * kind 以「更明确者优先」（image/video 不被 file 覆盖）。
  */
 function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image" | "video" | "file" }> {
   const found = new Map<string, "image" | "video" | "file">();
@@ -477,7 +477,7 @@ function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image"
     const url = raw.replace(/[.,;:!?]+$/, "");
     if (!/^https?:\/\//i.test(url)) return;
     const kind = artifactKind(url);
-    // 原始 URL 只收媒體（已知副檔名或 /image-data/files/）；markdown 圖片一律收。
+    // 原始 URL 只收媒体（已知副档名或 /image-data/files/）；markdown 图片一律收。
     if (!viaMarkdownImage && kind === "file" && !url.includes(ARTIFACT_MEDIA_PATH)) return;
     const resolved = viaMarkdownImage && kind === "file" ? "image" : kind;
     const existing = found.get(url);
@@ -490,13 +490,13 @@ function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image"
 }
 
 /**
- * 把任務交給 Eimu 的 agent orchestrator，並以**反覆輪詢**取回覆（單次請求一律 <10s）。
+ * 把任务交给 Eimu 的 agent orchestrator，并以**反覆轮询**取回覆（单次请求一律 <10s）。
  *
- * 完成判準：基線（送訊息前的 `message_count`）之後出現 role=assistant 且 text 非空的訊息。
- * （規格裡的判準②「`/sessions` 列表 status=idle 且已有新 assistant 訊息」與①等價——
- * 兩者都要求「已有新 assistant 訊息」，故以①為單一判準，不多打一次列表請求。）
+ * 完成判准：基线（送讯息前的 `message_count`）之后出现 role=assistant 且 text 非空的讯息。
+ * （规格里的判准②「`/sessions` 列表 status=idle 且已有新 assistant 讯息」与①等价——
+ * 两者都要求「已有新 assistant 讯息」，故以①为单一判准，不多打一次列表请求。）
  *
- * 逾時不丟錯：回 status:"running" 與目前最後一則回覆，讓呼叫方自行用 `get_agent_session` 續查。
+ * 逾时不丢错：回 status:"running" 与目前最后一则回覆，让呼叫方自行用 `get_agent_session` 续查。
  */
 async function runAgent(args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolCallResult> {
   const prompt = pickString(args, "prompt") ?? "";
@@ -528,7 +528,7 @@ async function runAgent(args: Record<string, unknown>, ctx: McpToolContext): Pro
     }
   }
 
-  // 基線：送訊息前的 message_count（判準靠它區分新舊回覆；讀不到就退回 0）。
+  // 基线：送讯息前的 message_count（判准靠它区分新旧回覆；读不到就退回 0）。
   const before = await ctx.dispatcher({
     method: "GET",
     path: agentSessionPath(sessionId),
@@ -539,7 +539,7 @@ async function runAgent(args: Record<string, unknown>, ctx: McpToolContext): Pro
   const baselinePayload = before.status >= 200 && before.status < 300 ? parseJsonLoose(before.text) : undefined;
   const baseline = readAgentMessageCount(baselinePayload) ?? readAgentMessages(baselinePayload).length;
 
-  // 送一輪（快回 accepted；確切 status/body 未實測，容忍 2xx 空 body）。
+  // 送一轮（快回 accepted；确切 status/body 未实测，容忍 2xx 空 body）。
   const sent = await ctx.dispatcher({
     method: "POST",
     path: agentSessionPath(sessionId, "/messages"),
@@ -552,7 +552,7 @@ async function runAgent(args: Record<string, unknown>, ctx: McpToolContext): Pro
     return agentUpstreamFailure("POST", agentSessionPath(sessionId, "/messages"), sent);
   }
 
-  // 輪詢：每 2s 一次簡化端點（絕不用 /messages——回包大又不保證 <10s）。
+  // 轮询：每 2s 一次简化端点（绝不用 /messages——回包大又不保证 <10s）。
   let reply = "";
   let fresh: AgentMessage[] = [];
   for (;;) {
@@ -627,7 +627,7 @@ async function runGetSkill(args: Record<string, unknown>): Promise<McpToolCallRe
   const id = pickString(args, "id") ?? "";
   const skill = await getSkillByIdPublic(id);
   if (!skill) {
-    return textResult(`未找到 id 為 ${id} 的公開技能（私有技能不在此面暴露）。`, true);
+    return textResult(`未找到 id 为 ${id} 的公开技能（私有技能不在此面暴露）。`, true);
   }
   return textResult(
     JSON.stringify(
@@ -875,7 +875,7 @@ function defineTools(): ToolDefinition[] {
       name: "list_canvas_projects",
       title: "列出画布项目",
       description: bilingual(
-        "列出本 API key 所属账号的畫布项目摘要（id／名称／创建与更新时间／节点数），按更新时间由新到旧。只回本密钥账号自己的项目，不回他人项目。拿到 project_id 后才能用 workflow_write 落图、用 workflow_rollback 回退——改画布产线前先调它找到目标项目。",
+        "列出本 API key 所属账号的画布项目摘要（id／名称／创建与更新时间／节点数），按更新时间由新到旧。只回本密钥账号自己的项目，不回他人项目。拿到 project_id 后才能用 workflow_write 落图、用 workflow_rollback 回退——改画布产线前先调它找到目标项目。",
         "List canvas projects owned by the current API key's account (id, title, timestamps, node count). Use the returned id as project_id for workflow_write / workflow_rollback.",
       ),
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -1003,7 +1003,7 @@ function defineTools(): ToolDefinition[] {
         runForward(
           {
             method: "POST",
-            // 帶 project_id → 落圖端點（編譯＋套用到 owner 畫布）；不帶 → 既有純編譯端點。
+            // 带 project_id → 落图端点（编译＋套用到 owner 画布）；不带 → 既有纯编译端点。
             path: (a) => (pickString(a, "project_id") ? "/api/v1/canvas/workflow" : "/api/v1/workflow/compile"),
             body: (a) => {
               const projectId = pickString(a, "project_id");
@@ -1104,7 +1104,7 @@ function defineTools(): ToolDefinition[] {
       name: "get_agent_settings",
       title: "读取 agent 设置",
       description: bilingual(
-        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野獸模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。",
+        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野兽模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。",
         "Read the account-level Eimu agent settings (including beast_mode). Read-only, no charge.",
       ),
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -1159,14 +1159,14 @@ function defineTools(): ToolDefinition[] {
           ctx,
         ),
     },
-    // ─────────────────────────────────────────── 閘門工具（2026-10-03 MCP 暴露）
+    // ─────────────────────────────────────────── 闸门工具（2026-10-03 MCP 暴露）
     //
-    // 這兩支是給外部 agent 對**自己的產物**做確定性自檢的閘門：不重寫任何業務，
-    // 只把參數原樣交給站內 `/api/harness/**` 端點（契約校驗真源＝expert-contract.ts，
-    // 媒體硬檢真源＝media-quality-gate.ts），回包原樣透傳。
-    // 刻意**不**放在 `/api/v1/**`：該前綴被 next.config.mjs 的 beforeFiles 整包代理給控面，
-    // 控面沒有這兩條 route ⇒ 直打會 404（2026-10-03 線上缺陷）。`/api/harness/**` 未被代理，
-    // 由本 Vercel 部署直接服務。漂移探針見 tools.test.ts 的「MCP 工具目標路由漂移」。
+    // 这两支是给外部 agent 对**自己的产物**做确定性自检的闸门：不重写任何业务，
+    // 只把参数原样交给站内 `/api/harness/**` 端点（契约校验真源＝expert-contract.ts，
+    // 媒体硬检真源＝media-quality-gate.ts），回包原样透传。
+    // 刻意**不**放在 `/api/v1/**`：该前缀被 next.config.mjs 的 beforeFiles 整包代理给控面，
+    // 控面没有这两条 route ⇒ 直打会 404（2026-10-03 线上缺陷）。`/api/harness/**` 未被代理，
+    // 由本 Vercel 部署直接服务。漂移探针见 tools.test.ts 的「MCP 工具目标路由漂移」。
     {
       name: "check_delivery_contract",
       title: "校验交付契约",
@@ -1270,7 +1270,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = defineTools();
 
 const TOOL_INDEX: Map<string, ToolDefinition> = new Map(TOOL_DEFINITIONS.map((tool) => [tool.name, tool]));
 
-/** `tools/list` 的回應內容（只暴露 descriptor，不外洩 run/schema 內部物件）。 */
+/** `tools/list` 的回应内容（只暴露 descriptor，不外泄 run/schema 内部物件）。 */
 export const MCP_TOOLS: readonly McpToolDescriptor[] = TOOL_DEFINITIONS.map((tool) => ({
   name: tool.name,
   title: tool.title,
@@ -1283,10 +1283,10 @@ export function listToolNames(): string[] {
 }
 
 /**
- * 執行一次 `tools/call`。
- * - 未知工具 → `isError: true` 的工具結果（**不是** -32600/-32601，模型看得懂並能自救）。
- * - 參數不合 schema → 拋 `McpRpcError(-32602)`，由 route 轉成 JSON-RPC 錯誤。
- * - 上游/網路失敗 → `isError: true` 的工具結果，附上游原文（已消毒、已截斷）。
+ * 执行一次 `tools/call`。
+ * - 未知工具 → `isError: true` 的工具结果（**不是** -32600/-32601，模型看得懂并能自救）。
+ * - 参数不合 schema → 抛 `McpRpcError(-32602)`，由 route 转成 JSON-RPC 错误。
+ * - 上游/网路失败 → `isError: true` 的工具结果，附上游原文（已消毒、已截断）。
  */
 export async function callTool(
   name: string,
@@ -1298,7 +1298,7 @@ export async function callTool(
     return textResult(`未知工具：${name}。可用工具请调用 tools/list。`, true);
   }
 
-  // MCP 允許省略 arguments；null 也當空物件（比照官方 SDK 的寬容度）。
+  // MCP 允许省略 arguments；null 也当空物件（比照官方 SDK 的宽容度）。
   const args = rawArguments === undefined || rawArguments === null ? {} : rawArguments;
   const problem = validateToolArguments(tool.inputSchema, args);
   if (problem) {
@@ -1310,12 +1310,12 @@ export async function callTool(
   } catch (error) {
     if (error instanceof McpRpcError) throw error;
     const message = error instanceof Error ? error.message : String(error);
-    // 只回訊息、不回 stack；dispatch 失敗的原文經消毒後可見。
+    // 只回讯息、不回 stack；dispatch 失败的原文经消毒后可见。
     return textResult(`工具 ${name} 执行失败：${truncateToolText(message, 2_000)}`, true);
   }
 }
 
-/** 供測試檢查 schema 與描述（不要拿它做生產邏輯）。 */
+/** 供测试检查 schema 与描述（不要拿它做生产逻辑）。 */
 export function __getToolSchemaForTests(name: string): ToolInputSchema | undefined {
   return TOOL_INDEX.get(name)?.inputSchema;
 }

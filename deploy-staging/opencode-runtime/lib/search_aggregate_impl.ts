@@ -1,18 +1,18 @@
 /**
- * search_aggregate harness 工具實作（跨平台聚合檢索，aggregate-search skill 的工具化）。
+ * search_aggregate harness 工具实作（跨平台聚合检索，aggregate-search skill 的工具化）。
  *
- * 零外部依賴：只用 node 內建模組（child_process spawn 傳 argv 陣列，禁 shell 拼接）。
- * 呼叫端（tools/search_aggregate.ts）負責 @opencode-ai/plugin 的 import；本檔不得引入。
+ * 零外部依赖：只用 node 内建模组（child_process spawn 传 argv 阵列，禁 shell 拼接）。
+ * 呼叫端（tools/search_aggregate.ts）负责 @opencode-ai/plugin 的 import；本档不得引入。
  *
- * 上游：Python 腳本逐檔複製自 ~/.agents/skills/aggregate-search/scripts/（未改寫），
- * 落位在 lib/aggregate-search/scripts/。腳本內的 BASE_DIR=dirname(dirname(__file__))
- * 假設自己位於 skill root 的 scripts/ 子目錄，故保留 scripts/ 子目錄層級，
- * 使 `sys.path.insert(BASE_DIR/scripts)`（reddit_miner）與 state 預設路徑語義不變。
+ * 上游：Python 脚本逐档复制自 ~/.agents/skills/aggregate-search/scripts/（未改写），
+ * 落位在 lib/aggregate-search/scripts/。脚本内的 BASE_DIR=dirname(dirname(__file__))
+ * 假设自己位于 skill root 的 scripts/ 子目录，故保留 scripts/ 子目录层级，
+ * 使 `sys.path.insert(BASE_DIR/scripts)`（reddit_miner）与 state 预设路径语义不变。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/search_aggregate_impl.ts
- * env：子進程只帶 PATH/HOME/LANG/LC_ALL（嚴禁整體 process.env 透傳；TAVILY_API_KEY /
- *      EXA_API_KEY 一律不傳——本工具不接 tavily）；HOME 與 AGGREGATE_SEARCH_STATE_DIR
- *      指向 os.tmpdir() 下的可寫臨時目錄，確保不會嘗試寫入唯讀的 lib/。
+ * env：子进程只带 PATH/HOME/LANG/LC_ALL（严禁整体 process.env 透传；TAVILY_API_KEY /
+ *      EXA_API_KEY 一律不传——本工具不接 tavily）；HOME 与 AGGREGATE_SEARCH_STATE_DIR
+ *      指向 os.tmpdir() 下的可写临时目录，确保不会尝试写入唯读的 lib/。
  */
 
 import { spawn } from "node:child_process"
@@ -23,28 +23,28 @@ import { mkdirSync, mkdtempSync } from "node:fs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-/** 腳本絕對路徑由模組自身位置推導（cwd / repo 相對路徑一律不用）。 */
+/** 脚本绝对路径由模组自身位置推导（cwd / repo 相对路径一律不用）。 */
 export const AGGREGATE_SEARCH_SCRIPT = join(HERE, "aggregate-search", "scripts", "search.py")
 
-/** 預設平台集（不含 reddit：reddit 單次可達 3 分鐘，非必要不加；本工具也不接 tavily）。 */
+/** 预设平台集（不含 reddit：reddit 单次可达 3 分钟，非必要不加；本工具也不接 tavily）。 */
 export const AGGREGATE_DEFAULT_PLATFORMS = "bilibili,github"
 
-/** 每平台預設結果數。 */
+/** 每平台预设结果数。 */
 export const AGGREGATE_DEFAULT_MAX = 8
 
-/** max 上限（超出靜默收斂到帽值）。 */
+/** max 上限（超出静默收敛到帽值）。 */
 export const AGGREGATE_MAX_CAP = 20
 
-/** 逾時：不含 reddit。 */
+/** 逾时：不含 reddit。 */
 export const AGGREGATE_TIMEOUT_MS = 45_000
 
-/** 逾時：平台集含 reddit（arctic-shift 很慢，實測 176s）。 */
+/** 逾时：平台集含 reddit（arctic-shift 很慢，实测 176s）。 */
 export const AGGREGATE_TIMEOUT_REDDIT_MS = 240_000
 
-/** 錯誤訊息攜帶原文的上限。 */
+/** 错误讯息携带原文的上限。 */
 const OUTPUT_EXCERPT_MAX_CHARS = 2000
 
-// ── plumbing（ok/fail 同構 web_search_impl.ts / music-tools.ts） ──────────────
+// ── plumbing（ok/fail 同构 web_search_impl.ts / music-tools.ts） ──────────────
 
 export type WebToolResult = { title: string; output: string }
 
@@ -67,7 +67,7 @@ export interface WebToolArgSpec {
 
 export interface WebToolContext {
   abort?: AbortSignal
-  /** 會話 id（本工具暫無會話資產落盤；adapter 機械透傳保留欄位）。 */
+  /** 会话 id（本工具暂无会话资产落盘；adapter 机械透传保留栏位）。 */
   sessionId?: string
 }
 
@@ -82,11 +82,11 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v : undefined
 }
 
-// ── 平台集 → 逾時推導 ────────────────────────────────────────────────────────
+// ── 平台集 → 逾时推导 ────────────────────────────────────────────────────────
 
 /**
- * 平台集是否含 reddit（"all"/"all,-xhs" 隱含；"-reddit" 顯式排除）。
- * 語義解析而非子字串比對，避免 "all,-reddit" 被誤判。
+ * 平台集是否含 reddit（"all"/"all,-xhs" 隐含；"-reddit" 显式排除）。
+ * 语义解析而非子字串比对，避免 "all,-reddit" 被误判。
  */
 export function platformsIncludeReddit(platforms: string): boolean {
   const tokens = platforms
@@ -98,25 +98,25 @@ export function platformsIncludeReddit(platforms: string): boolean {
   return tokens.includes("reddit")
 }
 
-/** 逾時推導：含 reddit → 240s；否則 45s。 */
+/** 逾时推导：含 reddit → 240s；否则 45s。 */
 export function resolveTimeoutMs(platforms: string): number {
   return platformsIncludeReddit(platforms) ? AGGREGATE_TIMEOUT_REDDIT_MS : AGGREGATE_TIMEOUT_MS
 }
 
 /**
- * 輸出內恆在的覆蓋範圍提示（本輪分流培訓的關鍵設計）：讓模型在使用當下就看見
- * 自己查的宇宙有多小，通用網頁意圖當場被糾正回 search_web。純加法欄位。
+ * 输出内恒在的覆盖范围提示（本轮分流培训的关键设计）：让模型在使用当下就看见
+ * 自己查的宇宙有多小，通用网页意图当场被纠正回 search_web。纯加法栏位。
  */
 export function aggregateCoverageNotice(platforms: string): string {
   return `本工具只查了 ${platforms}；不涵盖通用网页。人物／新闻／公司／概念类查询请改用 search_web。`
 }
 
-// ── 子進程 env 白名單 ────────────────────────────────────────────────────────
+// ── 子进程 env 白名单 ────────────────────────────────────────────────────────
 
 /**
- * 只傳必要 env：PATH/HOME/LANG/LC_ALL、AGGREGATE_SEARCH_STATE_DIR。
- * 嚴禁整體 process.env 透傳（避免其他密鑰外洩給子進程）；TAVILY_API_KEY / EXA_API_KEY
- * 一律不傳（本工具不接 tavily，通用網頁搜尋走 search_web）。
+ * 只传必要 env：PATH/HOME/LANG/LC_ALL、AGGREGATE_SEARCH_STATE_DIR。
+ * 严禁整体 process.env 透传（避免其他密钥外泄给子进程）；TAVILY_API_KEY / EXA_API_KEY
+ * 一律不传（本工具不接 tavily，通用网页搜寻走 search_web）。
  */
 export function buildChildEnv(source: NodeJS.ProcessEnv, homeDir: string): Record<string, string> {
   return {
@@ -128,7 +128,7 @@ export function buildChildEnv(source: NodeJS.ProcessEnv, homeDir: string): Recor
   }
 }
 
-// ── 子進程執行（argv 陣列，禁 shell 拼接） ───────────────────────────────────
+// ── 子进程执行（argv 阵列，禁 shell 拼接） ───────────────────────────────────
 
 export interface AggregateRunResult {
   code: number | null
@@ -140,8 +140,8 @@ export interface AggregateRunResult {
 }
 
 /**
- * spawn argv 陣列執行腳本。query 等使用者輸入一律作為單一 argv 元素傳入，
- * never 經過 shell（無注入面）。
+ * spawn argv 阵列执行脚本。query 等使用者输入一律作为单一 argv 元素传入，
+ * never 经过 shell（无注入面）。
  */
 export function runAggregateProcess(input: {
   scriptPath: string
@@ -164,7 +164,7 @@ export function runAggregateProcess(input: {
       try {
         child.kill("SIGKILL")
       } catch {
-        /* 子進程可能已結束 */
+        /* 子进程可能已结束 */
       }
     }, input.timeoutMs)
     child.stdout?.on("data", (d) => {
@@ -198,16 +198,16 @@ export function runAggregateProcess(input: {
 // ── search_aggregate 工具 ────────────────────────────────────────────────────
 
 export interface AggregateToolDeps {
-  /** 測試注入：覆寫腳本路徑（默認 AGGREGATE_SEARCH_SCRIPT）。 */
+  /** 测试注入：覆写脚本路径（默认 AGGREGATE_SEARCH_SCRIPT）。 */
   scriptPath?: string
-  /** 測試注入：覆寫逾時。 */
+  /** 测试注入：覆写逾时。 */
   timeoutMs?: number
-  /** 測試注入：覆寫 env 來源（默認 process.env）。 */
+  /** 测试注入：覆写 env 来源（默认 process.env）。 */
   envSource?: NodeJS.ProcessEnv
 }
 
 /**
- * 工具主體（execute 與測試共用）。deps 僅測試注入用，execute 傳空物件。
+ * 工具主体（execute 与测试共用）。deps 仅测试注入用，execute 传空物件。
  */
 export async function runAggregateTool(
   rawArgs: Record<string, unknown>,
@@ -241,7 +241,7 @@ export async function runAggregateTool(
 
   const run = await runAggregateProcess({
     scriptPath,
-    // 使用者輸入一律單一 argv 元素；flag 與值亦分開成陣列元素。
+    // 使用者输入一律单一 argv 元素；flag 与值亦分开成阵列元素。
     argv: [query, "--platform", platforms, "--max", String(max), "--json"],
     timeoutMs,
     env,
@@ -274,8 +274,8 @@ export async function runAggregateTool(
     )
   }
 
-  // 原樣透傳腳本 JSON：單一平台 ok:false 是設計正確行為，不因此判整體失敗。
-  // 但「全部平台都 ok:false」要另帶 hint，讓模型當場看到覆蓋範圍與替代工具。
+  // 原样透传脚本 JSON：单一平台 ok:false 是设计正确行为，不因此判整体失败。
+  // 但「全部平台都 ok:false」要另带 hint，让模型当场看到覆盖范围与替代工具。
   const rawPlatforms = (raw as { platforms?: unknown })?.platforms
   const allPlatformsFailed =
     Array.isArray(rawPlatforms) &&
@@ -337,5 +337,5 @@ export const aggregateSearchTool: WebToolDef = {
   },
 }
 
-/** registry 登記用 id（同 web_search 範式；註冊名以檔名 search_aggregate 為準）。 */
+/** registry 登记用 id（同 web_search 范式；注册名以档名 search_aggregate 为准）。 */
 export const AGGREGATE_SEARCH_HARNESS_TOOL_IDS = ["search_aggregate"] as const

@@ -14,9 +14,9 @@ import { runProviderReconciliation } from "./provider-reconciliation.ts";
 type Call = { sql: string; values: unknown[] };
 
 /**
- * INC-0831 對帳骨架回歸針：上游提交錨點 durably 落行、凍結/復活/終結的 CAS 邊界、
- * artifact canonical 冪等、對帳循環「確認失敗才退款/窗口耗盡凍結人工」兩條鐵律。
- * mock 依查詢內容分流（billing-projection.test.ts 同款），逐筆呼叫記錄供斷言。
+ * INC-0831 对帐骨架回归针：上游提交锚点 durably 落行、冻结/复活/终结的 CAS 边界、
+ * artifact canonical 幂等、对帐循环「确认失败才退款/窗口耗尽冻结人工」两条铁律。
+ * mock 依查询内容分流（billing-projection.test.ts 同款），逐笔呼叫记录供断言。
  */
 function mockSql(routes: Array<{ match: string; rows: Record<string, unknown>[] }> = []) {
   const calls: Call[] = [];
@@ -39,7 +39,7 @@ async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-/** 事件名是綁定參數：斷言 job_events INSERT 的 values 而非 SQL 字面量。 */
+/** 事件名是绑定参数：断言 job_events INSERT 的 values 而非 SQL 字面量。 */
 function emittedEvents(calls: Call[]): string[] {
   return calls
     .filter((call) => call.sql.includes("INSERT INTO job_events"))
@@ -48,7 +48,7 @@ function emittedEvents(calls: Call[]): string[] {
 
 // ───────────────────────── markProviderTaskSubmitted
 
-test("markProviderTaskSubmitted 落提交錨點：CAS 守衛齊全（同 id 冪等、狀態白名單）", async () => {
+test("markProviderTaskSubmitted 落提交锚点：CAS 守卫齐全（同 id 幂等、状态白名单）", async () => {
   const { sql, calls } = mockSql([{ match: "UPDATE generation_attempt", rows: [{ id: "att-1" }] }]);
   const ok = await markProviderTaskSubmitted(
     { jobId: "job-1", attemptId: "att-1", providerTaskId: "task_X", protocol: "newapi_video" },
@@ -57,17 +57,17 @@ test("markProviderTaskSubmitted 落提交錨點：CAS 守衛齊全（同 id 冪�
   assert.equal(ok, true);
   const update = calls.find((call) => call.sql.includes("UPDATE generation_attempt"));
   assert.ok(update, "should issue the anchor UPDATE");
-  // 同 task id 重寫允許（提交回調+失敗保險雙入口）、不同 task id 不覆蓋。
+  // 同 task id 重写允许（提交回调+失败保险双入口）、不同 task id 不覆盖。
   assert.ok(update.sql.includes("provider_task_id IS NULL OR provider_task_id ="));
-  // 只允許掛在還沒被判死的 attempt 上。
+  // 只允许挂在还没被判死的 attempt 上。
   assert.ok(update.sql.includes("status IN ('submitting', 'running', 'failed')"));
-  // 落行即排程：state=running + 首輪輪詢時間 + 對帳窗口。
+  // 落行即排程：state=running + 首轮轮询时间 + 对帐窗口。
   assert.ok(update.sql.includes("provider_state = 'running'"));
   assert.ok(update.sql.includes("provider_next_poll_at ="));
   assert.ok(update.sql.includes("provider_reconcile_deadline_at ="));
 });
 
-test("markProviderTaskSubmitted 行已易主/已被其他 task 佔用 → false（不視為錯誤）", async () => {
+test("markProviderTaskSubmitted 行已易主/已被其他 task 占用 → false（不视为错误）", async () => {
   const { sql } = mockSql([{ match: "UPDATE generation_attempt", rows: [] }]);
   const ok = await markProviderTaskSubmitted(
     { jobId: "job-1", attemptId: "att-1", providerTaskId: "task_Y", protocol: "metaso" },
@@ -76,9 +76,9 @@ test("markProviderTaskSubmitted 行已易主/已被其他 task 佔用 → false�
   assert.equal(ok, false);
 });
 
-// ───────────────────────── freeze / revive / fail 的 CAS 邊界
+// ───────────────────────── freeze / revive / fail 的 CAS 边界
 
-test("freezeGenerationJobForReconciliation：活躍 job 凍結成 submit_unknown、清租約、補排對帳、發事件", async () => {
+test("freezeGenerationJobForReconciliation：活跃 job 冻结成 submit_unknown、清租约、补排对帐、发事件", async () => {
   const { sql, calls } = mockSql([{ match: "UPDATE generation_job", rows: [{ id: "job-1" }] }]);
   const frozen = await freezeGenerationJobForReconciliation(
     { jobId: "job-1", workerId: "worker-a", reason: "deadline exceeded with outstanding provider task" },
@@ -89,13 +89,13 @@ test("freezeGenerationJobForReconciliation：活躍 job 凍結成 submit_unknown
   assert.ok(update, "job should be CAS-frozen to submit_unknown");
   assert.ok(update.sql.includes("lease_owner = NULL"));
   assert.ok(update.sql.includes("lease_owner ="));
-  // 已有排程的不覆蓋（COALESCE），沒排程的殘留立刻補排。
+  // 已有排程的不覆盖（COALESCE），没排程的残留立刻补排。
   assert.ok(calls.some((call) => call.sql.includes("provider_next_poll_at = COALESCE(provider_next_poll_at, now())")));
   assert.ok(emittedEvents(calls).includes("reconcile_frozen"));
   await flushAsync();
 });
 
-test("reviveGenerationJobWithArtifacts：CAS 只復活非活躍 job；CAS 落空返回 null", async () => {
+test("reviveGenerationJobWithArtifacts：CAS 只复活非活跃 job；CAS 落空返回 null", async () => {
   const { sql, calls } = mockSql([{ match: "UPDATE generation_job", rows: [{ id: "job-1" }] }]);
   const artifacts = [{
     id: "art-1", outputIndex: 0, url: "https://cdn/x.mp4", mimeType: "video/mp4",
@@ -118,7 +118,7 @@ test("reviveGenerationJobWithArtifacts：CAS 只復活非活躍 job；CAS 落空
   assert.equal(none, null);
 });
 
-test("failGenerationJobForReconciliation：只從凍結/活躍集合終結，發 reconcile_failed", async () => {
+test("failGenerationJobForReconciliation：只从冻结/活跃集合终结，发 reconcile_failed", async () => {
   const { sql, calls } = mockSql([{ match: "UPDATE generation_job", rows: [{ id: "job-1" }] }]);
   const terminated = await failGenerationJobForReconciliation(
     { jobId: "job-1", workerId: "reconcile:test", failureClass: "unknown", failureDetail: "upstream confirmed failure" },
@@ -131,9 +131,9 @@ test("failGenerationJobForReconciliation：只從凍結/活躍集合終結，發
   assert.ok(emittedEvents(calls).includes("reconcile_failed"));
 });
 
-// ───────────────────────── artifact canonical 冪等
+// ───────────────────────── artifact canonical 幂等
 
-test("recordArtifact：canonical 唯一鍵命中 → DO NOTHING 回既有行（inserted=false）", async () => {
+test("recordArtifact：canonical 唯一键命中 → DO NOTHING 回既有行（inserted=false）", async () => {
   const { sql, calls } = mockSql([
     { match: "INSERT INTO artifact", rows: [] },
     { match: "SELECT id FROM artifact", rows: [{ id: "canonical-row" }] },
@@ -168,13 +168,13 @@ test("recordArtifact：首次落列 → RETURNING 命中（inserted=true）", as
   assert.deepEqual(recorded, { id: "new-row", inserted: true });
 });
 
-// ───────────────────────── runProviderReconciliation 鐵律
+// ───────────────────────── runProviderReconciliation 铁律
 
 const CONTEXT_ROW: Record<string, unknown> = {
   attempt_id: "att-1",
   supplier_id: "sup-1",
-  // 真實 SQL 為 COALESCE(attempt.provider_protocol, supplier.adapter_type)，恆非空。
-  // V-06 起未知/缺失協議不再默認 newapi_video，夾具須與真實查詢形狀一致。
+  // 真实 SQL 为 COALESCE(attempt.provider_protocol, supplier.adapter_type)，恒非空。
+  // V-06 起未知/缺失协议不再默认 newapi_video，夹具须与真实查询形状一致。
   protocol: "newapi_video",
   id: "sup-1",
   label: "cangyuansuanli",
@@ -263,7 +263,7 @@ function claimRow(overrides: Record<string, unknown> = {}): Record<string, unkno
   };
 }
 
-test("runProviderReconciliation：窗口耗盡 → 退休輪詢、發 reconcile_exhausted、不退款不宣判", async () => {
+test("runProviderReconciliation：窗口耗尽 → 退休轮询、发 reconcile_exhausted、不退款不宣判", async () => {
   const { sql, calls } = mockSql([
     { match: "provider_reconcile_deadline_at IS NOT NULL", rows: [{ id: "att-1", job_id: "job-1" }] },
     { match: "FOR UPDATE SKIP LOCKED", rows: [] },
@@ -274,7 +274,7 @@ test("runProviderReconciliation：窗口耗盡 → 退休輪詢、發 reconcile_
   assert.equal(summary.delivered, 0);
   assert.equal(summary.confirmedFailed, 0);
   await flushAsync();
-  // 退休 = provider_next_poll_at = NULL（退出輪詢隊列），不碰 provider_state（真相仍未明）。
+  // 退休 = provider_next_poll_at = NULL（退出轮询队列），不碰 provider_state（真相仍未明）。
   const retire = calls.find((call) => call.sql.includes("provider_next_poll_at = NULL"));
   assert.ok(retire, "exhausted attempt must leave the poll queue");
   assert.ok(!retire.sql.includes("provider_state = 'failed'"));
@@ -283,7 +283,7 @@ test("runProviderReconciliation：窗口耗盡 → 退休輪詢、發 reconcile_
   assert.ok(!calls.some((call) => call.sql.includes("INSERT INTO billing_operation")), "no refund on exhausted window");
 });
 
-test("runProviderReconciliation：上游確認 FAILURE + job 凍結中且無其他未決 → fail + refund", async () => {
+test("runProviderReconciliation：上游确认 FAILURE + job 冻结中且无其他未决 → fail + refund", async () => {
   process.env.NEWAPI_BASE_URL = "https://kernel.test";
   process.env.NEWAPI_API_KEY = "test-key";
   const originalFetch = globalThis.fetch;
@@ -307,12 +307,12 @@ test("runProviderReconciliation：上游確認 FAILURE + job 凍結中且無其�
     assert.equal(summary.confirmedFailed, 1);
     assert.equal(summary.delivered, 0);
 
-    // attempt 行記錄上游真相（provider_state = failed + 結果 JSON），退出輪詢。
+    // attempt 行记录上游真相（provider_state = failed + 结果 JSON），退出轮询。
     const attemptUpdate = calls.find((call) => call.sql.includes("provider_state = 'failed'"));
     assert.ok(attemptUpdate, "attempt should record the upstream-confirmed failure");
     assert.ok(attemptUpdate.sql.includes("provider_next_poll_at = NULL"));
 
-    // job 終結（僅在無其他未決真相後）+ 冪等退款操作落地。
+    // job 终结（仅在无其他未决真相后）+ 幂等退款操作落地。
     const jobFail = calls.find((call) => call.sql.includes("SET status = 'failed'"));
     assert.ok(jobFail, "frozen job should be terminated after upstream-confirmed failure");
     assert.ok(
@@ -326,7 +326,7 @@ test("runProviderReconciliation：上游確認 FAILURE + job 凍結中且無其�
   }
 });
 
-test("runProviderReconciliation：job 仍活躍（非 submit_unknown）→ 不動刀不退款", async () => {
+test("runProviderReconciliation：job 仍活跃（非 submit_unknown）→ 不动刀不退款", async () => {
   process.env.NEWAPI_BASE_URL = "https://kernel.test";
   process.env.NEWAPI_API_KEY = "test-key";
   const originalFetch = globalThis.fetch;

@@ -1,21 +1,21 @@
-// mPay（epay 相容）訂單查詢客戶端——用支付商自己的資料獨立對帳「已付款 vs 已履約」。
+// mPay（epay 相容）订单查询客户端——用支付商自己的资料独立对帐「已付款 vs 已履约」。
 //
-// 為什麼需要它：我方後端帳本被實錘會吞單（2026-09-19 out_trade_no=IMGMU7UH9SFF9A21D，
-// 用戶實付 ¥9.93、handler 回 500、帳本零痕跡、數月無人發現）。用我方自己的表斷言「付了
-// 沒履約」是同源斷言（違反 AGENTS.md 禁同源斷言）；唯一獨立來源＝支付商後台/介面。
+// 为什么需要它：我方后端帐本被实锤会吞单（2026-09-19 out_trade_no=IMGMU7UH9SFF9A21D，
+// 用户实付 ¥9.93、handler 回 500、帐本零痕迹、数月无人发现）。用我方自己的表断言「付了
+// 没履约」是同源断言（违反 AGENTS.md 禁同源断言）；唯一独立来源＝支付商后台/介面。
 //
-// 已驗證契約（2026-10-04 生產實證，勿再猜）：
-//   GET <gateway>/api.php?act=order&pid=<PID>&key=<KEY>&out_trade_no=<商戶單號>   單筆查（按商戶單號）
-//   生產實測 act=order 不帶單號 → HTTP 200 {"code":0,"msg":"系统订单号 和 商户订单号 二选一"}
-//     ⇒ `act=order` 是「按單號單查」，**不是列表端點**（無法列舉；對帳只能由我方已知單號逐筆查）。
+// 已验证契约（2026-10-04 生产实证，勿再猜）：
+//   GET <gateway>/api.php?act=order&pid=<PID>&key=<KEY>&out_trade_no=<商户单号>   单笔查（按商户单号）
+//   生产实测 act=order 不带单号 → HTTP 200 {"code":0,"msg":"系统订单号 和 商户订单号 二选一"}
+//     ⇒ `act=order` 是「按单号单查」，**不是列表端点**（无法列举；对帐只能由我方已知单号逐笔查）。
 //   缺 pid → {"code":502,"message":"请输入商户ID"}
 //   缺 key → {"code":502,"message":"请输入商户通讯密钥"}
 //   pid/key 不匹配 → {"code":0,"msg":"没有找到商户信息"}
-// **成功碼 = 1**；**code=0 是失敗**（上面兩條 code=0 都是錯誤訊息，不是空成功）。
-// 因此本客戶端：① 成功判定＝`code===1` 或響應真的帶出訂單實體，**不得只看 code**——
-//   code:0 或任何帶錯誤 msg 而無訂單實體一律歸錯誤（不是「成功但 data 為空」）
-// ② 原始響應（pid/key 遮蔽後）落進日誌（契約取證）
-// ③ 單查不到（成功碼但零訂單）回 null＝「查無此單」，與「成功查到」不混同。
+// **成功码 = 1**；**code=0 是失败**（上面两条 code=0 都是错误讯息，不是空成功）。
+// 因此本客户端：① 成功判定＝`code===1` 或响应真的带出订单实体，**不得只看 code**——
+//   code:0 或任何带错误 msg 而无订单实体一律归错误（不是「成功但 data 为空」）
+// ② 原始响应（pid/key 遮蔽后）落进日志（契约取证）
+// ③ 单查不到（成功码但零订单）回 null＝「查无此单」，与「成功查到」不混同。
 
 import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
@@ -27,7 +27,7 @@ import { getMapayConfig, isMapayPaymentSuccessful, type MapayConfig } from "@/li
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 type EnvLike = Record<string, string | undefined>;
 
-/** 逾時 / 非 JSON / 非 0 code 的明確錯誤型別（呼叫端據此決定退避或告警，不吞成 null）。 */
+/** 逾时 / 非 JSON / 非 0 code 的明确错误型别（呼叫端据此决定退避或告警，不吞成 null）。 */
 export type MapayOrdersErrorKind =
   | "config_missing"
   | "timeout"
@@ -56,42 +56,42 @@ export class MapayOrdersError extends Error {
   }
 }
 
-/** 正規化後的 mPay 訂單（欄位名別名一律在此收斂，呼叫端不碰原始鍵）。 */
+/** 正规化后的 mPay 订单（栏位名别名一律在此收敛，呼叫端不碰原始键）。 */
 export interface MapayOrder {
   outTradeNo: string;
   tradeNo: string | null;
   money: number | null;
   status: string;
-  /** 支付商是否回報「已付款成功」。 */
+  /** 支付商是否回报「已付款成功」。 */
   paid: boolean;
   name: string | null;
   type: string | null;
-  /** 下單時間 ISO（可解析才有值）。 */
+  /** 下单时间 ISO（可解析才有值）。 */
   createdAt: string | null;
-  /** 支付時間 ISO（可解析才有值）。 */
+  /** 支付时间 ISO（可解析才有值）。 */
   paidAt: string | null;
-  /** 原始欄位（pid/key 已遮蔽；只作取證，勿當契約）。 */
+  /** 原始栏位（pid/key 已遮蔽；只作取证，勿当契约）。 */
   raw: Record<string, unknown>;
 }
 
 export interface MapayOrdersResult {
   orders: MapayOrder[];
-  /** 支付商回 success 但沒有任何訂單（「成功但 data 為空」——與「code 非 0」不同）。 */
+  /** 支付商回 success 但没有任何订单（「成功但 data 为空」——与「code 非 0」不同）。 */
   empty: boolean;
   code: number | string | null;
   message: string | null;
-  /** 本輪查詢的端點（act=order/query）。 */
+  /** 本轮查询的端点（act=order/query）。 */
   endpoint: "order" | "query";
 }
 
-/** gateway 基底 → api.php 位址。基底來自 env（getMapayConfig），不得硬編碼。 */
+/** gateway 基底 → api.php 位址。基底来自 env（getMapayConfig），不得硬编码。 */
 export function mapayApiUrl(gatewayUrl: string): string {
   const url = gatewayUrl.trim();
   if (/api\.php(?:$|\?)/.test(url)) return url;
   return new URL("api.php", url.endsWith("/") ? url : `${url}/`).toString();
 }
 
-/** pid/key 值在日誌中遮蔽，避免 secret 入 log（AGENTS.md 紅線）。 */
+/** pid/key 值在日志中遮蔽，避免 secret 入 log（AGENTS.md 红线）。 */
 export function redactMapaySecrets(text: string, config: Pick<MapayConfig, "pid" | "key">): string {
   let out = text;
   if (config.key) out = out.split(config.key).join("***");
@@ -117,7 +117,7 @@ function firstNumber(record: Record<string, unknown>, keys: string[]): number | 
   return null;
 }
 
-/** 容忍 `YYYY-MM-DD HH:mm:ss`、`YYYY/MM/DD HH:mm:ss`、秒/毫秒 epoch 與 ISO。 */
+/** 容忍 `YYYY-MM-DD HH:mm:ss`、`YYYY/MM/DD HH:mm:ss`、秒/毫秒 epoch 与 ISO。 */
 function parseMapayTime(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" || /^\d{10,13}$/.test(String(value))) {
@@ -136,7 +136,7 @@ function parseMapayTime(value: unknown): string | null {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-/** 單筆原始紀錄 → 正規化訂單。缺 out_trade_no 回 null（無法指認的列不收）。 */
+/** 单笔原始纪录 → 正规化订单。缺 out_trade_no 回 null（无法指认的列不收）。 */
 export function normalizeMapayOrder(raw: unknown): MapayOrder | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
@@ -160,7 +160,7 @@ export function normalizeMapayOrder(raw: unknown): MapayOrder | null {
   };
 }
 
-/** 從信封抽出訂單陣列：data 可能是陣列、單筆物件、或帶 list/orders/rows 的物件。 */
+/** 从信封抽出订单阵列：data 可能是阵列、单笔物件、或带 list/orders/rows 的物件。 */
 function extractOrderRecords(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
   if (data && typeof data === "object") {
@@ -168,13 +168,13 @@ function extractOrderRecords(data: unknown): unknown[] {
     for (const key of ["list", "orders", "rows", "items", "records"]) {
       if (Array.isArray(record[key])) return record[key] as unknown[];
     }
-    // 單筆查詢：data 直接是訂單物件。
+    // 单笔查询：data 直接是订单物件。
     if (firstString(record, ["out_trade_no", "outTradeNo"])) return [record];
   }
   return [];
 }
 
-/** 解析 epay 信封。回 null＝信封完全無法辨識（呼叫端當 non_json 之外的 upstream 錯誤）。 */
+/** 解析 epay 信封。回 null＝信封完全无法辨识（呼叫端当 non_json 之外的 upstream 错误）。 */
 export function parseMapayOrdersResponse(json: unknown): { orders: MapayOrder[]; empty: boolean; code: number | string | null; message: string | null } {
   if (!json || typeof json !== "object" || Array.isArray(json)) {
     return { orders: [], empty: true, code: null, message: null };
@@ -182,9 +182,9 @@ export function parseMapayOrdersResponse(json: unknown): { orders: MapayOrder[];
   const envelope = json as Record<string, unknown>;
   const code = (envelope.code ?? envelope.status ?? null) as number | string | null;
   const message = firstString(envelope, ["msg", "message", "info"]);
-  // 兩種形態都認：① 訂單包在容器鍵裡（列表或舊形態）② 單查時訂單欄位平鋪在信封根層
-  //   （2026-10-04 生產實證：act=order&out_trade_no= 的響應根層直接帶 out_trade_no/trade_no，
-  //   無 data/result/orders/list；此時信封本身即那一筆訂單）。
+  // 两种形态都认：① 订单包在容器键里（列表或旧形态）② 单查时订单栏位平铺在信封根层
+  //   （2026-10-04 生产实证：act=order&out_trade_no= 的响应根层直接带 out_trade_no/trade_no，
+  //   无 data/result/orders/list；此时信封本身即那一笔订单）。
   let records = extractOrderRecords(envelope.data ?? envelope.result ?? envelope.orders ?? envelope.list);
   if (records.length === 0 && firstString(envelope, ["out_trade_no", "outTradeNo", "trade_no", "tradeNo"])) {
     records = [envelope];
@@ -204,19 +204,19 @@ interface ClientDeps {
   env?: EnvLike;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
-  /** 日誌出口（默認 console.info）；測試注入以斷言已落原始響應。 */
+  /** 日志出口（默认 console.info）；测试注入以断言已落原始响应。 */
   logger?: (message: string) => void;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-/** 上游成功碼（生產實證：只有 1 是成功；code=0 是失敗）。 */
+/** 上游成功码（生产实证：只有 1 是成功；code=0 是失败）。 */
 const SUCCESS_CODES = new Set<number | string>([1, "1"]);
 
 /**
  * 信封是否代表「支付商成功受理」。**不得只看 code**：
- * code===1 是權威成功碼；此外只要響應真的帶出訂單實體也視為成功（有資料就是有資料，
- * 容忍上游版本差異）。code:0 或任何帶錯誤 msg 而無訂單實體 → false（呼叫端歸「上游錯誤」，
- * 不得當成「成功但 data 為空」）。
+ * code===1 是权威成功码；此外只要响应真的带出订单实体也视为成功（有资料就是有资料，
+ * 容忍上游版本差异）。code:0 或任何带错误 msg 而无订单实体 → false（呼叫端归「上游错误」，
+ * 不得当成「成功但 data 为空」）。
  */
 export function isMapayEnvelopeSuccess(parsed: { orders: MapayOrder[]; code: number | string | null }): boolean {
   if (SUCCESS_CODES.has(parsed.code as number | string)) return true;
@@ -224,9 +224,9 @@ export function isMapayEnvelopeSuccess(parsed: { orders: MapayOrder[]; code: num
 }
 
 /**
- * 「查無此單」的權威特徵（生產實證 2026-10-04）：HTTP 200 + code:0 +
- * msg「没有找到订单信息」。刻意**不**用「code===0 一律當查無此單」——code:0 也涵蓋
- * 「系统订单号 和 商户订单号 二选一」這類真錯誤（見 mapay-orders.test.ts 的釘子）。
+ * 「查无此单」的权威特征（生产实证 2026-10-04）：HTTP 200 + code:0 +
+ * msg「没有找到订单信息」。刻意**不**用「code===0 一律当查无此单」——code:0 也涵盖
+ * 「系统订单号 和 商户订单号 二选一」这类真错误（见 mapay-orders.test.ts 的钉子）。
  */
 export const MAPAY_ORDER_NOT_FOUND_MESSAGE = "没有找到订单信息";
 
@@ -245,8 +245,8 @@ function resolveConfig(deps: ClientDeps): MapayConfig {
 }
 
 /**
- * 本實例是否握有 mPay 憑證（不 throw）。有 → 直連支付商；無 → 轉投 Vercel 中繼。
- * 對帳器跑在控制面（無憑證），這條分流讓它仍能取得支付商資料。
+ * 本实例是否握有 mPay 凭证（不 throw）。有 → 直连支付商；无 → 转投 Vercel 中继。
+ * 对帐器跑在控制面（无凭证），这条分流让它仍能取得支付商资料。
  */
 function hasLocalConfig(deps: ClientDeps): boolean {
   try {
@@ -285,11 +285,11 @@ async function requestOrders(
     const name = error instanceof Error ? error.name : "";
     const message = error instanceof Error ? error.message : String(error);
     const kind = name === "TimeoutError" || name === "AbortError" ? "timeout" : "network";
-    throw new MapayOrdersError(kind, `mPay ${act} 查詢失敗（${kind}）：${message}`, { detail: message });
+    throw new MapayOrdersError(kind, `mPay ${act} 查询失败（${kind}）：${message}`, { detail: message });
   }
 
   const text = await response.text().catch(() => "");
-  // 原始響應（pid/key 遮蔽後）落日誌：首次生產執行即確立真實契約。
+  // 原始响应（pid/key 遮蔽后）落日志：首次生产执行即确立真实契约。
   logger(`[mapay-orders] act=${act} HTTP ${response.status} raw=${redactMapaySecrets(text.slice(0, 4000), config)}`);
 
   if (!response.ok) {
@@ -299,32 +299,32 @@ async function requestOrders(
     });
   }
   if (!text.trim()) {
-    throw new MapayOrdersError("non_json", `mPay ${act} 回應為空（非 JSON）`, { httpStatus: response.status });
+    throw new MapayOrdersError("non_json", `mPay ${act} 回应为空（非 JSON）`, { httpStatus: response.status });
   }
 
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch {
-    throw new MapayOrdersError("non_json", `mPay ${act} 回應非 JSON`, {
+    throw new MapayOrdersError("non_json", `mPay ${act} 回应非 JSON`, {
       httpStatus: response.status,
       detail: redactMapaySecrets(text.slice(0, 500), config),
     });
   }
 
   const parsed = parseMapayOrdersResponse(json);
-  // 單號單查的「查無此單」是正常結果（回 null＝not_found），不是通道錯誤。
-  // 只有 op=order 的呼叫端會開這個開關；批次/列舉路徑維持「code:0 一律拋錯」。
+  // 单号单查的「查无此单」是正常结果（回 null＝not_found），不是通道错误。
+  // 只有 op=order 的呼叫端会开这个开关；批次/列举路径维持「code:0 一律抛错」。
   if (options.notFoundAsEmpty && isMapayOrderNotFoundEnvelope(parsed)) {
     return { orders: [], empty: true, code: parsed.code, message: parsed.message, endpoint: act };
   }
-  // 成功判定：code===1 或真的帶出訂單實體。code:0（例「系统订单号 和 商户订单号 二选一」
-  // 「没有找到商户信息」）或任何無訂單實體的錯誤信封 = 上游錯誤，不是「空成功」。
+  // 成功判定：code===1 或真的带出订单实体。code:0（例「系统订单号 和 商户订单号 二选一」
+  // 「没有找到商户信息」）或任何无订单实体的错误信封 = 上游错误，不是「空成功」。
   if (!isMapayEnvelopeSuccess(parsed)) {
-    const codeText = parsed.code === null ? "無 code" : `code=${String(parsed.code)}`;
+    const codeText = parsed.code === null ? "无 code" : `code=${String(parsed.code)}`;
     throw new MapayOrdersError(
       "upstream",
-      `mPay ${act} 回 ${codeText}：${parsed.message ?? "無訂單資料，視為失敗（不當空成功）"}`,
+      `mPay ${act} 回 ${codeText}：${parsed.message ?? "无订单资料，视为失败（不当空成功）"}`,
       {
         httpStatus: response.status,
         upstreamCode: parsed.code,
@@ -335,23 +335,23 @@ async function requestOrders(
   return { orders: parsed.orders, empty: parsed.orders.length === 0, code: parsed.code, message: parsed.message, endpoint: act };
 }
 
-// ─────────────────────────────────────────── 跨實例中繼（本實例無憑證時）
+// ─────────────────────────────────────────── 跨实例中继（本实例无凭证时）
 
 /**
- * 域分隔前綴，必須與 Vercel 側路由 src/app/api/internal/mapay-orders 的
- * verifyBizKeySync signatureDomain 一致。不得沿用其他用途的前綴。
+ * 域分隔前缀，必须与 Vercel 侧路由 src/app/api/internal/mapay-orders 的
+ * verifyBizKeySync signatureDomain 一致。不得沿用其他用途的前缀。
  */
 export const MAPAY_ORDERS_RELAY_SIGNATURE_DOMAIN = "mapay-orders";
 const RELAY_PATH = "/api/internal/mapay-orders";
 const DEFAULT_RELAY_TIMEOUT_MS = 20_000;
 
 /**
- * 中繼位址：控制面沒有支付商憑證，只能問 Vercel（誰有憑證誰去問上游）。
+ * 中继位址：控制面没有支付商凭证，只能问 Vercel（谁有凭证谁去问上游）。
  *
- * 優先複用控制面既有的 GENERATION_BILLING_RELAY_URL（值＝Vercel 上的
- * /api/internal/generation-billing）取其 origin——不新增環境變數；
- * MAPAY_ORDERS_RELAY_ORIGIN 僅作可選覆寫（當 billing relay 位址不再是 Vercel 時）。
- * 秘密沿用兩側皆有的 GENERATION_BILLING_RELAY_SECRET（域分隔避免重放）。
+ * 优先复用控制面既有的 GENERATION_BILLING_RELAY_URL（值＝Vercel 上的
+ * /api/internal/generation-billing）取其 origin——不新增环境变数；
+ * MAPAY_ORDERS_RELAY_ORIGIN 仅作可选覆写（当 billing relay 位址不再是 Vercel 时）。
+ * 秘密沿用两侧皆有的 GENERATION_BILLING_RELAY_SECRET（域分隔避免重放）。
  */
 export function mapayOrdersRelayConfig(env: EnvLike = process.env as EnvLike): { url: string; secret: string } | null {
   let origin = (env.MAPAY_ORDERS_RELAY_ORIGIN ?? "").trim().replace(/\/+$/, "");
@@ -371,8 +371,8 @@ export function mapayOrdersRelayConfig(env: EnvLike = process.env as EnvLike): {
 }
 
 /**
- * 打一次 Vercel 中繼。回 null＝通道不可用（env 缺失／網路／非 2xx／形狀不符），
- * 由呼叫端收成「本實例無憑證且通道不可用」的 config_missing 錯誤——不假裝成功。
+ * 打一次 Vercel 中继。回 null＝通道不可用（env 缺失／网路／非 2xx／形状不符），
+ * 由呼叫端收成「本实例无凭证且通道不可用」的 config_missing 错误——不假装成功。
  */
 async function postMapayOrdersRelay(
   body: Record<string, unknown>,
@@ -424,11 +424,11 @@ async function relayFetchMapayOrders(
   );
   const result = data?.result;
   if (!result || typeof result !== "object") return null;
-  // 中繼端已用同一個 fetchMapayOrders 做過窗口過濾，這裡原樣採納，不二次過濾。
+  // 中继端已用同一个 fetchMapayOrders 做过窗口过滤，这里原样采纳，不二次过滤。
   return result as MapayOrdersResult;
 }
 
-/** 回 null＝找不到（支付商空 data）或通道不可用；用包裝型別區分，呼叫端據此決定語義。 */
+/** 回 null＝找不到（支付商空 data）或通道不可用；用包装型别区分，呼叫端据此决定语义。 */
 async function relayFetchMapayOrder(
   outTradeNo: string,
   deps: ClientDeps,
@@ -440,23 +440,23 @@ async function relayFetchMapayOrder(
 }
 
 /**
- * 拉取窗口內的支付商訂單（**歷史/中繼相容入口**）。
+ * 拉取窗口内的支付商订单（**历史/中继相容入口**）。
  *
- * 生產實證後：上游 `act=order` 是「按單號單查」，不帶單號會回 code:0（⇒ 本函式在真上游
- * 通常直接拋 upstream，這才是誠實行為——上游不支援列舉）。對帳器的權威取數已改為
- * `fetchMapayOrder` 逐筆查（見 mapay-order-reconciliation.ts），本函式只保留給跨實例中繼
- * 的 `op=orders` 相容路徑，並沿用客戶端時間過濾（時間戳不可解析的列保守保留）。
+ * 生产实证后：上游 `act=order` 是「按单号单查」，不带单号会回 code:0（⇒ 本函式在真上游
+ * 通常直接抛 upstream，这才是诚实行为——上游不支援列举）。对帐器的权威取数已改为
+ * `fetchMapayOrder` 逐笔查（见 mapay-order-reconciliation.ts），本函式只保留给跨实例中继
+ * 的 `op=orders` 相容路径，并沿用客户端时间过滤（时间戳不可解析的列保守保留）。
  */
 export async function fetchMapayOrders(
   window: { since?: Date | string; until?: Date | string } = {},
   deps: ClientDeps = {},
 ): Promise<MapayOrdersResult> {
-  // 本實例無憑證（對帳器跑在控制面）→ 轉投 Vercel 中繼；通道不可用則如實報 config_missing。
+  // 本实例无凭证（对帐器跑在控制面）→ 转投 Vercel 中继；通道不可用则如实报 config_missing。
   if (!hasLocalConfig(deps)) {
     const relayed = await relayFetchMapayOrders(window, deps);
     if (relayed) return relayed;
     throw new MapayOrdersError("config_missing", "Missing MaPay merchant credentials.", {
-      detail: "本實例沒有 mPay 憑證，且跨實例訂單查詢通道不可用。",
+      detail: "本实例没有 mPay 凭证，且跨实例订单查询通道不可用。",
     });
   }
 
@@ -475,7 +475,7 @@ export async function fetchMapayOrders(
   for (const order of result.orders) {
     const stamp = order.paidAt ?? order.createdAt;
     if (!stamp) {
-      kept.push(order); // 時間不可解析 → 保守保留（殘差由對帳器如實列出）
+      kept.push(order); // 时间不可解析 → 保守保留（残差由对帐器如实列出）
       continue;
     }
     const ms = new Date(stamp).getTime();
@@ -487,17 +487,17 @@ export async function fetchMapayOrders(
 }
 
 /**
- * 單筆查詢（**按商戶單號**）：走 `act=order&out_trade_no=<單號>`。
- * 成功碼但零訂單＝回 null（明確的「查無此單」，與「成功查到」不混同）；
- * 業務錯誤（code:0／502）照樣拋 MapayOrdersError，不吞成 null。
+ * 单笔查询（**按商户单号**）：走 `act=order&out_trade_no=<单号>`。
+ * 成功码但零订单＝回 null（明确的「查无此单」，与「成功查到」不混同）；
+ * 业务错误（code:0／502）照样抛 MapayOrdersError，不吞成 null。
  */
 export async function fetchMapayOrder(outTradeNo: string, deps: ClientDeps = {}): Promise<MapayOrder | null> {
-  // 本實例無憑證 → 轉投 Vercel 中繼（找不到回 null，通道不可用如實報 config_missing）。
+  // 本实例无凭证 → 转投 Vercel 中继（找不到回 null，通道不可用如实报 config_missing）。
   if (!hasLocalConfig(deps)) {
     const relayed = await relayFetchMapayOrder(outTradeNo, deps);
     if (relayed) return relayed.order;
     throw new MapayOrdersError("config_missing", "Missing MaPay merchant credentials.", {
-      detail: "本實例沒有 mPay 憑證，且跨實例訂單查詢通道不可用。",
+      detail: "本实例没有 mPay 凭证，且跨实例订单查询通道不可用。",
     });
   }
 

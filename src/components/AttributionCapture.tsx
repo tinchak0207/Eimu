@@ -12,14 +12,14 @@ import {
 } from "@/lib/first-touch-attribution";
 
 /**
- * 首次觸達歸因的採集點（掛在 root layout，任何入口頁都跑得到）。
+ * 首次触达归因的采集点（挂在 root layout，任何入口页都跑得到）。
  *
- * 只做一件事：訪客**第一次**進站時把 utm_source/utm_medium/utm_campaign、來源主機名、
- * 落地路徑寫進 `eimu_first_touch` cookie（90 天）。已有合法值＝不重寫（首觸時間戳與窗口固定）。
+ * 只做一件事：访客**第一次**进站时把 utm_source/utm_medium/utm_campaign、来源主机名、
+ * 落地路径写进 `eimu_first_touch` cookie（90 天）。已有合法值＝不重写（首触时间戳与窗口固定）。
  *
- * 為什麼放客戶端而不是 middleware：歸因原料（document.referrer 的原始值）只有瀏覽器有，
- * 而本站沒有 middleware；這裡與既有 PromoGate/PwaInstaller 同一種掛法，零新機制。
- * 任何失敗（cookie 被禁、隱私模式）都靜默吞掉——歸因不可得不得影響任何功能。
+ * 为什么放客户端而不是 middleware：归因原料（document.referrer 的原始值）只有浏览器有，
+ * 而本站没有 middleware；这里与既有 PromoGate/PwaInstaller 同一种挂法，零新机制。
+ * 任何失败（cookie 被禁、隐私模式）都静默吞掉——归因不可得不得影响任何功能。
  */
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -34,14 +34,14 @@ function readCookie(name: string): string | null {
 export function AttributionCapture() {
   useEffect(() => {
     try {
-      // 邀請碼：首個邀請勝出，與首觸互不影響（登入後由 /api/auth/me 交控面綁定）。
+      // 邀请码：首个邀请胜出，与首触互不影响（登入后由 /api/auth/me 交控面绑定）。
       const invite = new URLSearchParams(window.location.search).get(INVITE_PARAM)?.trim().toLowerCase();
       if (looksLikeInviteCode(invite) && !readCookie(INVITE_COOKIE)) {
         const secure = window.location.protocol === "https:" ? "; Secure" : "";
         document.cookie = `${INVITE_COOKIE}=${invite}; path=/; max-age=${FIRST_TOUCH_MAX_AGE_DAYS * 86_400}; SameSite=Lax${secure}`;
       }
     } catch {
-      // 同上：採集失敗不影響任何功能。
+      // 同上：采集失败不影响任何功能。
     }
     try {
       const value = resolveFirstTouchCookieValue(
@@ -58,7 +58,7 @@ export function AttributionCapture() {
       document.cookie =
         `${FIRST_TOUCH_COOKIE}=${value}; path=/; max-age=${FIRST_TOUCH_MAX_AGE_DAYS * 86_400}; SameSite=Lax${secure}`;
     } catch {
-      // 歸因採集失敗不影響任何功能。
+      // 归因采集失败不影响任何功能。
     }
   }, []);
   return null;

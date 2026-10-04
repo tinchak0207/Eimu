@@ -1,4 +1,4 @@
-// POST /v1/team/seats/order 路由真行為斷言測試（鑑權 / 拒單 / 不得以 0 元成立訂單）。
+// POST /v1/team/seats/order 路由真行为断言测试（鉴权 / 拒单 / 不得以 0 元成立订单）。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -71,7 +71,7 @@ test("真源已配置 → 200 可支付：回报价 + 待支付订单 + 收银�
   assert.equal(response.status, 200);
   const body = await bodyOf(response);
   assert.equal(body.success, true);
-  assert.equal(body.payment?.payable, true, "全链已接線：报价合法即可支付");
+  assert.equal(body.payment?.payable, true, "全链已接线：报价合法即可支付");
   assert.equal(body.payment?.wired, true);
   const pending = body.pending_order as { money?: string; param?: string; out_trade_no?: string } | undefined;
   assert.equal(pending?.money, "425.00", "85 元/席位 × 5 席（同源价表）");

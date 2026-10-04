@@ -36,7 +36,7 @@ test("GPT Image 2 follows the Adobe credit table at ten credits per coin", () =>
 });
 
 test("PixAI Tsubaki.2 keeps the recommendation tag; default engine is GPT Image 2", () => {
-  // 2026-09-05 暴君裁定：預設模型改 GPT Image 2；Tsubaki.2 保留「推荐」標籤。
+  // 2026-09-05 暴君裁定：预设模型改 GPT Image 2；Tsubaki.2 保留「推荐」标签。
   assert.equal(modelPromotionTag(PIXAI_TSUBAKI2_MODEL_ID), "推荐");
   assert.equal(MODEL_CONFIGS.fast.image_tinchak, "gpt-image-2");
   assert.equal(MODEL_CONFIGS.quality.image_tinchak, "gpt-image-2");

@@ -1,14 +1,14 @@
-// REQ-B2 團隊資產空間：API 路由守門件測試（源碼層契約）。
+// REQ-B2 团队资产空间：API 路由守门件测试（源码层契约）。
 //
-// 為什麼走源碼層：/api/project-assets 用 requireVerifiedUser（要打上游 /api/user/self 驗身分），
-// 離線測不起來；但兩條紅線是**順序與形狀**問題，源碼層斷言就能釘死，
-// 且與本倉既有守門件慣例一致（見 src/app/api/v1/assets/route.test.ts 的「零計費端點」節）。
-//   ① 不可見即不可用：掛用前必須先過可見性裁決，不可見回 403（不得先落庫再判）
-//   ② 不碰計費語義：作用域層不許出現 reserve / refund / quota 這類字眼
+// 为什么走源码层：/api/project-assets 用 requireVerifiedUser（要打上游 /api/user/self 验身分），
+// 离线测不起来；但两条红线是**顺序与形状**问题，源码层断言就能钉死，
+// 且与本仓既有守门件惯例一致（见 src/app/api/v1/assets/route.test.ts 的「零计费端点」节）。
+//   ① 不可见即不可用：挂用前必须先过可见性裁决，不可见回 403（不得先落库再判）
+//   ② 不碰计费语义：作用域层不许出现 reserve / refund / quota 这类字眼
 //
-// REQ-B2b 起，本檔新增的斷言一律標「變更探針，不計入已驗證」（TG-02）：
-// 掛用 copy-on-use 的**行為**斷言在 src/lib/asset-mount-copy.test.ts（真建副本、真刪來源、
-// 真冪等、真環路拒絕）；本檔只釘住路由/前端接線沒被拆掉。
+// REQ-B2b 起，本档新增的断言一律标「变更探针，不计入已验证」（TG-02）：
+// 挂用 copy-on-use 的**行为**断言在 src/lib/asset-mount-copy.test.ts（真建副本、真删来源、
+// 真幂等、真环路拒绝）；本档只钉住路由/前端接线没被拆掉。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -25,13 +25,13 @@ function code(relPath: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-test("项目资产路由：挂用前先过可见性裁決，不可见回 403 asset_not_visible", () => {
+test("项目资产路由：挂用前先过可见性裁决，不可见回 403 asset_not_visible", () => {
   const source = code(ROUTE_PATH);
   const decideAt = source.indexOf("resolveMountable(");
   const mountAt = source.indexOf("mountAssetWithCopy(");
   assert.ok(decideAt >= 0, "必须调用 resolveMountable");
   assert.ok(mountAt >= 0, "必须调用 mountAssetWithCopy（REQ-B2b：挂用＝copy-on-use）");
-  assert.ok(decideAt < mountAt, "可见性裁決必须早于落库（否则不可见资产会被静默挂上）");
+  assert.ok(decideAt < mountAt, "可见性裁决必须早于落库（否则不可见资产会被静默挂上）");
   assert.match(source, /403/);
   assert.match(source, /asset_not_visible/);
 });
@@ -50,7 +50,7 @@ test("分享路由：授权前必过 decideAssetShareGrant，越权回 403（不
   const grantAt = source.indexOf("grantAssetShare(");
   assert.ok(decideAt >= 0, "必须调用 decideAssetShareGrant");
   assert.ok(grantAt >= 0, "必须调用 grantAssetShare");
-  assert.ok(decideAt < grantAt, "权限裁決必须早于落库");
+  assert.ok(decideAt < grantAt, "权限裁决必须早于落库");
   assert.match(source, /403/);
   assert.match(source, /cross_user/);
 });
@@ -82,7 +82,7 @@ test("B2-1 碰撞禁静默成功：确定性键冲突分支回 409 且不得回 
   }
 });
 
-// ─────────────────────────────────────────── REQ-B2b：copy-on-use 的接線探針
+// ─────────────────────────────────────────── REQ-B2b：copy-on-use 的接线探针
 
 test("B2b 变更探针（不计入已验证）：路由回 localCopyId/localCopyIds，冲突类错误各有专属码", () => {
   // 行为断言在 asset-mount-copy.test.ts；这里只钉「回应形状与错误映射没被拆掉」。
@@ -105,7 +105,7 @@ test("B2b 变更探针（不计入已验证）：路由回 localCopyId/localCopy
 });
 
 test("B2b 变更探针（不计入已验证）：面板把副本 id 交给 onCopyChange，CanvasEmbed 接到 hook 的 applyMountCopyChange", () => {
-  // 这是本刀生效的硬接線：挂用拿到 localCopyIds 却不锁进 cardIds = 画面说已挂用、生成仍注入来源。
+  // 这是本刀生效的硬接线：挂用拿到 localCopyIds 却不锁进 cardIds = 画面说已挂用、生成仍注入来源。
   const panel = code(PANEL_PATH);
   assert.match(panel, /localCopyIds/, "面板必须读 localCopyIds（不是只读 localCopyId）");
   assert.match(panel, /onCopyChange\?\.\(\{\s*locked:/, "面板必须把副本 id 作为 locked 上报");

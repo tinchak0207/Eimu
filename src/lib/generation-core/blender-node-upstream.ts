@@ -1,31 +1,31 @@
 /**
- * blender_bridge 適配層：supplier 派發 → blender-bridge /v1/execute（片AA，2026-09-06）。
+ * blender_bridge 适配层：supplier 派发 → blender-bridge /v1/execute（片AA，2026-09-06）。
  *
- * 職責（片Y staging 稿 §B-3）：modelId→engine 選型、單幀渲染腳本構造（復用
- * blender-tools.ts buildChunkRenderScript 存活配方——samples=1＋RT off，片F/片M 實錘）、
- * POST {supplier.baseUrl}/v1/execute、bridge 產物收斂成 SupplierGenerationOutput。
- * 上層（分揀/入庫/對帳）不感知節點差異（NODES-PLAN §3.5）。
+ * 职责（片Y staging 稿 §B-3）：modelId→engine 选型、单帧渲染脚本构造（复用
+ * blender-tools.ts buildChunkRenderScript 存活配方——samples=1＋RT off，片F/片M 实锤）、
+ * POST {supplier.baseUrl}/v1/execute、bridge 产物收敛成 SupplierGenerationOutput。
+ * 上层（分拣/入库/对帐）不感知节点差异（NODES-PLAN §3.5）。
  *
- * 契約真源：bridge/blender-bridge/README.md
+ * 契约真源：bridge/blender-bridge/README.md
  *   POST /v1/execute {script, timeout_ms} →
  *     200 {ok:true, artifacts:[{path,bytes,kind}], scene_summary, stdout_tail, duration_ms, queued, queue_position}
  *     500 {ok:false, error, stdout_tail} ／ 429 {ok:false, error:"queue_full"}
  *
- * 同步 adapter 鐵律（片Y §3.6）：請求-回應內完成渲染，無異步 task_id 語義——
- * worker-service protocolOfAdapter 不加映射、不進 provider-reconciliation（L345 的
- * protocol 標記只在 onProviderTaskSubmitted 回調觸發，本 adapter 永不調用）；429/
- * 連線抖動＝瞬態交 worker 既有重試（片K 契約）；deadline 由橋 timeout_ms＋worker
- * 雙層超時覆蓋。
+ * 同步 adapter 铁律（片Y §3.6）：请求-回应内完成渲染，无异步 task_id 语义——
+ * worker-service protocolOfAdapter 不加映射、不进 provider-reconciliation（L345 的
+ * protocol 标记只在 onProviderTaskSubmitted 回调触发，本 adapter 永不调用）；429/
+ * 连线抖动＝瞬态交 worker 既有重试（片K 契约）；deadline 由桥 timeout_ms＋worker
+ * 双层超时覆盖。
  *
- * 產物回收（本機節點形態，片Y §3.5「回 path→本函數收斂」）：bridge artifacts 的
- * path 是相對 $BLENDER_WORK/out/ 的快照 diff 相對路徑（server.py scan_artifacts
- * os.path.relpath）。本機節點與 worker 同機 → 經 /v1/health 的 workdir 解析絕對
- * 路徑磁碟直讀首張 png → base64（上層 validateImageBuffer/Blob 通道零改動）。
- * 遠端節點（Modal，片X）回 bytes 的內嵌收斂歸片X 落位；png 缺席時保留 blend/glb
- * 站內路徑（/api/blender-artifact 既有讀取通道）。
+ * 产物回收（本机节点形态，片Y §3.5「回 path→本函数收敛」）：bridge artifacts 的
+ * path 是相对 $BLENDER_WORK/out/ 的快照 diff 相对路径（server.py scan_artifacts
+ * os.path.relpath）。本机节点与 worker 同机 → 经 /v1/health 的 workdir 解析绝对
+ * 路径磁碟直读首张 png → base64（上层 validateImageBuffer/Blob 通道零改动）。
+ * 远端节点（Modal，片X）回 bytes 的内嵌收敛归片X 落位；png 缺席时保留 blend/glb
+ * 站内路径（/api/blender-artifact 既有读取通道）。
  *
- * 錯誤鐵律：絕不拋原始 fetch 錯誤，一律包成 SupplierRequestError（429→rate_limited
- * 瞬態重試、5xx/連線→瞬態、橋結構化 500 的 error＋stdout_tail 原文透傳不吞）。
+ * 错误铁律：绝不抛原始 fetch 错误，一律包成 SupplierRequestError（429→rate_limited
+ * 瞬态重试、5xx/连线→瞬态、桥结构化 500 的 error＋stdout_tail 原文透传不吞）。
  */
 
 import { readFile } from "node:fs/promises";
@@ -34,14 +34,14 @@ import { buildChunkRenderScript } from "../blender-tools";
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
-/** blender-render-eevee / blender-render-cycles → bridge 腳本 engine 名（片Y §B-3）。 */
+/** blender-render-eevee / blender-render-cycles → bridge 脚本 engine 名（片Y §B-3）。 */
 export function blenderNodeEngine(modelId: string): "eevee" | "cycles" {
   if (modelId === "blender-render-cycles") return "cycles";
   if (modelId === "blender-render-eevee") return "eevee";
   throw new SupplierRequestError(`Blender node adapter does not serve model ${modelId}.`, 400);
 }
 
-/** 產物分揀（kind/path/bytes 形＝blender-delegate.ts BlenderArtifact 同款）。 */
+/** 产物分拣（kind/path/bytes 形＝blender-delegate.ts BlenderArtifact 同款）。 */
 interface BridgeArtifact {
   path: string;
   bytes: number;
@@ -67,7 +67,7 @@ interface BridgeHealth {
   concurrency?: number;
 }
 
-/** 橋自有 timeout 判定先行、客戶端其後＋寬限才中止（blender-tools.ts 同款口徑）。 */
+/** 桥自有 timeout 判定先行、客户端其后＋宽限才中止（blender-tools.ts 同款口径）。 */
 const CLIENT_ABORT_GRACE_MS = 10_000;
 
 function cleanBaseUrl(value: string): string {
@@ -91,10 +91,10 @@ function isArtifact(a: unknown): a is BridgeArtifact {
 }
 
 /**
- * 單幀渲染腳本（存活配方真源 blender-tools.ts buildChunkRenderScript，零複本）：
- * chunkStart=null ＝ 渲染當前幀單張 still（單幀 job 安全單位，片L 實錘橋內多幀必
- * native 崩）；eevee 檔自動套 samples=1＋RT off 存活預設；sceneBlendPath 缺省渲
- * 染橋當前場景（factory-startup），由 job workflow.metadata.scene_blend_path 指定。
+ * 单帧渲染脚本（存活配方真源 blender-tools.ts buildChunkRenderScript，零复本）：
+ * chunkStart=null ＝ 渲染当前帧单张 still（单帧 job 安全单位，片L 实锤桥内多帧必
+ * native 崩）；eevee 档自动套 samples=1＋RT off 存活预设；sceneBlendPath 缺省渲
+ * 染桥当前场景（factory-startup），由 job workflow.metadata.scene_blend_path 指定。
  */
 export function buildBlenderNodeFrameScript(input: { modelId: string; sceneBlendPath?: string; outputDirName: string }): string {
   return buildChunkRenderScript({
@@ -109,7 +109,7 @@ export function buildBlenderNodeFrameScript(input: { modelId: string; sceneBlend
   });
 }
 
-/** 橋 fetch 包裝：TimeoutError→408、連線失敗→503（SupplierRequestError 語義分類）。 */
+/** 桥 fetch 包装：TimeoutError→408、连线失败→503（SupplierRequestError 语义分类）。 */
 async function bridgeFetch(supplier: SupplierRecord, pathName: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -135,8 +135,8 @@ async function bridgeFetch(supplier: SupplierRecord, pathName: string, init: Req
 }
 
 /**
- * GET /v1/health：fail-fast 橋不可達＋取 workdir（產物相對路徑根；blenderRenderTool
- * bridgeHealth 同構——health workdir 是唯一權威，不假設 process.cwd()）。
+ * GET /v1/health：fail-fast 桥不可达＋取 workdir（产物相对路径根；blenderRenderTool
+ * bridgeHealth 同构——health workdir 是唯一权威，不假设 process.cwd()）。
  */
 async function bridgeHealth(supplier: SupplierRecord): Promise<BridgeHealth & { workdir: string }> {
   const response = await bridgeFetch(supplier, "/v1/health", { method: "GET" }, 10_000);
@@ -151,8 +151,8 @@ async function bridgeHealth(supplier: SupplierRecord): Promise<BridgeHealth & { 
 }
 
 /**
- * POST /v1/execute 同步調用。瞬態（429 queue_full／連線抖動）以 SupplierRequestError
- * 拋出交 worker 重試；橋結構化 500（error＋stdout_tail）原文透傳不吞。
+ * POST /v1/execute 同步调用。瞬态（429 queue_full／连线抖动）以 SupplierRequestError
+ * 抛出交 worker 重试；桥结构化 500（error＋stdout_tail）原文透传不吞。
  */
 async function bridgeExecute(supplier: SupplierRecord, script: string, timeoutMs: number): Promise<BridgeExecuteSuccess> {
   const response = await bridgeFetch(supplier, "/v1/execute", {
@@ -179,7 +179,7 @@ async function bridgeExecute(supplier: SupplierRecord, script: string, timeoutMs
   return body as unknown as BridgeExecuteSuccess;
 }
 
-/** 產物 → base64：workdir/out 相對路徑解析＋traversal 守衛（只認橋工作目錄內檔案）。 */
+/** 产物 → base64：workdir/out 相对路径解析＋traversal 守卫（只认桥工作目录内档案）。 */
 async function readArtifactBase64(supplier: SupplierRecord, workdir: string, artifact: BridgeArtifact): Promise<string> {
   const outRoot = path.resolve(workdir, "out");
   const absolute = path.resolve(outRoot, artifact.path);
@@ -199,19 +199,19 @@ async function readArtifactBase64(supplier: SupplierRecord, workdir: string, art
 }
 
 /**
- * blender_bridge supplier → 單幀渲染 → SupplierGenerationOutput。
+ * blender_bridge supplier → 单帧渲染 → SupplierGenerationOutput。
  * 分派入口：supplier-adapter.ts requestSupplier 的 blender_bridge 分支（片Y 稿 §B-2）。
  */
 export async function generateWithBlenderNode(
   supplier: SupplierRecord,
   input: SupplierGenerationInput,
 ): Promise<SupplierGenerationOutput> {
-  blenderNodeEngine(input.modelId); // 未知 modelId 直接 400，不虛跑
+  blenderNodeEngine(input.modelId); // 未知 modelId 直接 400，不虚跑
   const engine = blenderNodeEngine(input.modelId);
-  // health 先行：fail-fast 橋不可達＋拿 workdir（產物解析根）＋gpu/queue 證據。
+  // health 先行：fail-fast 桥不可达＋拿 workdir（产物解析根）＋gpu/queue 证据。
   const health = await bridgeHealth(supplier);
-  // 按 attempt 隔離產物目錄（橋快照 diff 按 job 起點掃 out/，目錄名帶 attemptId
-  // 讓 .blender-work/out/ 的每單產物可辨識；attemptId 是 DB uuid，只留安全字元）。
+  // 按 attempt 隔离产物目录（桥快照 diff 按 job 起点扫 out/，目录名带 attemptId
+  // 让 .blender-work/out/ 的每单产物可辨识；attemptId 是 DB uuid，只留安全字元）。
   const outputDirName = `node_${(input.attemptId || input.jobId || "job").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 60)}`;
   const sceneBlendPath =
     typeof input.workflow.metadata?.scene_blend_path === "string" && input.workflow.metadata.scene_blend_path.trim() !== ""
@@ -222,9 +222,9 @@ export async function generateWithBlenderNode(
   const result = await bridgeExecute(supplier, script, timeoutMs);
 
   const artifacts = result.artifacts.filter(isArtifact);
-  // 橋側佇列事實（README 成功回應欄位）：queued=是否排過隊、queue_position=入隊
-  // 瞬間 1-based 位次。health 輪詢與執行互搶 addon 幫浦（README 已知限制）採樣
-  // 不可靠，橋自報欄位才是佇列計入的權威證據 → 進 evidence 供驗收對賬。
+  // 桥侧伫列事实（README 成功回应栏位）：queued=是否排过队、queue_position=入队
+  // 瞬间 1-based 位次。health 轮询与执行互抢 addon 帮浦（README 已知限制）采样
+  // 不可靠，桥自报栏位才是伫列计入的权威证据 → 进 evidence 供验收对账。
   const queued = result.queued === true;
   const queuePosition = Number(result.queue_position ?? 0);
   const queueEvidence = { queued, queuePosition };
@@ -252,7 +252,7 @@ export async function generateWithBlenderNode(
       },
     };
   }
-  // png 缺席（只出了 blend/glb）：保留站內路徑走 /api/blender-artifact 既有通道。
+  // png 缺席（只出了 blend/glb）：保留站内路径走 /api/blender-artifact 既有通道。
   const fallback = artifacts.find((a) => a.kind === "blend") ?? artifacts.find((a) => a.kind === "glb");
   if (fallback) {
     return {

@@ -1,35 +1,35 @@
-// 從 index.ts 無損抽取（2026-09-19 第二階段 Wave1）：成片索引登記 G4——MASTERS_PUBLIC_BASE/registerMasterExport，原 index.ts 375–430 行。
+// 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave1）：成片索引登记 G4——MASTERS_PUBLIC_BASE/registerMasterExport，原 index.ts 375–430 行。
 import { createHash } from "node:crypto"
 import { type MasterExportResult, type MasterPresetId } from "./master"
 import { EXPORT_FINGERPRINT_VERSION } from "./material-fingerprint"
 import { resolveCanonicalIdentity, hashKey } from "./auth-gw.ts"
 import { memoryPostIngest } from "./memory-wiring.ts"
-// TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export 的 named import 報錯，已實測 2026-09-19）。
-// 依第一階段 subagent 佔位符法（記憶 gateway-index-refactor-stage1-0919）：declare 佔位可過 bun build；整合 subagent 統一換真 import 或於 index.ts 補 export。
-// ---- 成片索引登記（G4，2026-09-17）----------------------------------------
-// 成片導出成功後回呼控制面（/v1/internal/masters/ingest，同一 HMAC 簽名通道）落
+// TODO(整合)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build 对未 export 的 named import 报错，已实测 2026-09-19）。
+// 依第一阶段 subagent 占位符法（记忆 gateway-index-refactor-stage1-0919）：declare 占位可过 bun build；整合 subagent 统一换真 import 或于 index.ts 补 export。
+// ---- 成片索引登记（G4，2026-09-17）----------------------------------------
+// 成片导出成功后回呼控制面（/v1/internal/masters/ingest，同一 HMAC 签名通道）落
 // generation_job(kind='film_export', status='succeeded') + artifact(metadata_json.masterExport)。
-// 讀取端＝控制面 /v1/masters（B 端按屬主 userId 列舉）。
+// 读取端＝控制面 /v1/masters（B 端按属主 userId 列举）。
 
 export const MASTERS_PUBLIC_BASE = (process.env.MASTERS_PUBLIC_BASE || "https://store.tinchak0207.xyz").replace(/\/+$/, "")
 
-/** 導出成功（probe 過檔）才有資格調用：索引是「驗過的成片」清單，probe 未過檔不進。
- *  登記失敗**不**反悔導出——檔案已在盤上、靜態路由已可服務，只誠實記 note：
- *  缺索引的後果是 /v1/masters 查不到這條成片，不是成片不存在。 */
+/** 导出成功（probe 过档）才有资格调用：索引是「验过的成片」清单，probe 未过档不进。
+ *  登记失败**不**反悔导出——档案已在盘上、静态路由已可服务，只诚实记 note：
+ *  缺索引的后果是 /v1/masters 查不到这条成片，不是成片不存在。 */
 export async function registerMasterExport(key: string, sid: string, presetId: MasterPresetId, result: MasterExportResult): Promise<void> {
   try {
     if (!result.exported || !result.out_path) return
     const identity = await resolveCanonicalIdentity(key)
     if (identity.userId == null) {
-      result.notes.push("成片索引登記跳過：屬主 user_id 解析失敗（無法歸屬 tenant）")
+      result.notes.push("成片索引登记跳过：属主 user_id 解析失败（无法归属 tenant）")
       return
     }
     const file = Bun.file(result.out_path)
     if (!(await file.exists())) {
-      result.notes.push("成片索引登記跳過：導出檔案不在預期路徑")
+      result.notes.push("成片索引登记跳过：导出档案不在预期路径")
       return
     }
-    // sha256/byte_size 取導出檔實值（artifact 表 NOT NULL 欄，禁止拿 probe 缺值充數）
+    // sha256/byte_size 取导出档实值（artifact 表 NOT NULL 栏，禁止拿 probe 缺值充数）
     const buf = new Uint8Array(await file.arrayBuffer())
     const sha256 = createHash("sha256").update(buf).digest("hex")
     const byteSize = buf.byteLength
@@ -56,9 +56,9 @@ export async function registerMasterExport(key: string, sid: string, presetId: M
     const json = (res.json ?? {}) as { artifact_id?: unknown; job_deduped?: unknown }
     result.public_url = publicUrl
     result.master_artifact_id = typeof json.artifact_id === "string" ? json.artifact_id : null
-    if (json.job_deduped === true) result.notes.push("成片索引：同會話同素材指紋已有索引行（冪等命中，未重複登記）")
+    if (json.job_deduped === true) result.notes.push("成片索引：同会话同素材指纹已有索引行（幂等命中，未重复登记）")
   } catch (e) {
-    result.notes.push(`成片索引登記失敗：${e instanceof Error ? e.message : String(e)}（導出本身不受影響）`)
+    result.notes.push(`成片索引登记失败：${e instanceof Error ? e.message : String(e)}（导出本身不受影响）`)
   }
 }
 

@@ -1,21 +1,21 @@
 "use client";
 
-// CanvasLibraryPanel —— 雲端素材庫 + 提示詞庫右側滑入面板。
+// CanvasLibraryPanel —— 云端素材库 + 提示词库右侧滑入面板。
 //
-// 三個 tab：
-// - 提示词库：服務端聚合的公共提示詞（GET /api/canvas/prompts）。一次拉全量
-//   （服務端 500 上限），搜索（300ms debounce）/ 來源 / 標籤全在客戶端過濾，
-//   打字零網絡延遲；卡片可插入畫布、填入當前節點面板、存入個人素材庫。
-// - 风格库（2026-08-27 自專業工作站 CreatorResourcePanel 遷入）：kunpeng 161 條
-//   風格資產 + 2 條提示詞模板，本地靜態數據（src/lib/kunpeng-*），客戶端過濾，
-//   動作與提示詞卡對齊（插入畫布 / 填入當前節點 / 存入素材）。
-// - 我的素材：登入用戶的資產包（GET /api/assets）；未登入誠實顯示
-//   登入提示，不假裝可用。
+// 三个 tab：
+// - 提示词库：服务端聚合的公共提示词（GET /api/canvas/prompts）。一次拉全量
+//   （服务端 500 上限），搜索（300ms debounce）/ 来源 / 标签全在客户端过滤，
+//   打字零网络延迟；卡片可插入画布、填入当前节点面板、存入个人素材库。
+// - 风格库（2026-08-27 自专业工作站 CreatorResourcePanel 迁入）：kunpeng 161 条
+//   风格资产 + 2 条提示词模板，本地静态数据（src/lib/kunpeng-*），客户端过滤，
+//   动作与提示词卡对齐（插入画布 / 填入当前节点 / 存入素材）。
+// - 我的素材：登入用户的资产包（GET /api/assets）；未登入诚实显示
+//   登入提示，不假装可用。
 // - 镜头词库（2026-09-16 G7）：本地静态词库 src/lib/lens-language-library.ts
 //   （AID MIT 逐字 142 条 / 12 类）多选插入，走与提示词卡同一对插入回调。
 //
-// 視覺沿用 CanvasNodePromptPanel 的白底/暗色語彙；data-canvas-interactive +
-// 事件 stopPropagation 阻止畫布手勢吃掉面板操作；Escape / 關閉鈕收起。
+// 视觉沿用 CanvasNodePromptPanel 的白底/暗色语汇；data-canvas-interactive +
+// 事件 stopPropagation 阻止画布手势吃掉面板操作；Escape / 关闭钮收起。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, Search, Trash2, X } from "lucide-react";
@@ -39,15 +39,15 @@ import "@/components/canvas-workstation/panels/panels.css";
 export interface CanvasLibraryPanelProps {
   open: boolean;
   onClose: () => void;
-  /** 插入文字到畫布（新文本節點） */
+  /** 插入文字到画布（新文本节点） */
   onInsertText: (text: string, title?: string) => void;
-  /** 插入圖片到畫布（新圖片節點） */
+  /** 插入图片到画布（新图片节点） */
   onInsertImage: (url: string, title?: string) => void;
-  /** 把提示詞直接填進當前打開的節點面板（可選；無則隱藏該按鈕） */
+  /** 把提示词直接填进当前打开的节点面板（可选；无则隐藏该按钮） */
   onUsePrompt?: (prompt: string) => void;
-  /** 套用配方模板：把六槽配方（prompt 等）攤開進當前節點/輸入（可選；無則隱藏 tab） */
+  /** 套用配方模板：把六槽配方（prompt 等）摊开进当前节点/输入（可选；无则隐藏 tab） */
   onApplyRecipeTemplate?: (config: { prompt?: string; contextPrompt?: string; negativePrompt?: string; modelId?: string }, label: string) => void;
-  /** 當前登入態（配方模板 tab 的空態提示用） */
+  /** 当前登入态（配方模板 tab 的空态提示用） */
   isLoggedIn?: boolean;
 }
 
@@ -92,13 +92,13 @@ const ACTION_BTN_CLASS =
 const PRIMARY_BTN_CLASS =
   "rounded-md bg-primary px-2 py-1 text-ios-caption2 font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40";
 
-/** 畫布素材確定性資產包：id / 標題 固定，upsert 用（見「存入资产包」動作）。 */
+/** 画布素材确定性资产包：id / 标题 固定，upsert 用（见「存入资产包」动作）。 */
 const CANVAS_PACK_ID = "canvas-assets";
 const CANVAS_PACK_TITLE = "画布素材";
 
 /**
- * 把新 items 併入確定性「画布素材」包（id = CANVAS_PACK_ID）。
- * 讀現有包 → 同內容 prompt 去重 → PUT /api/assets 整包覆蓋。
+ * 把新 items 并入确定性「画布素材」包（id = CANVAS_PACK_ID）。
+ * 读现有包 → 同内容 prompt 去重 → PUT /api/assets 整包覆盖。
  */
 async function upsertCanvasPack(newItems: AssetPackItem[]): Promise<PromptSaveState> {
   const headers = authHeaders();
@@ -149,10 +149,10 @@ async function upsertCanvasPack(newItems: AssetPackItem[]): Promise<PromptSaveSt
 export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage: _onInsertImage, onUsePrompt, onApplyRecipeTemplate, isLoggedIn = false }: CanvasLibraryPanelProps) {
   const [tab, setTab] = useState<LibraryTab>("prompts");
 
-  // ── 配方模板（2026-08-27 自專業工作站遷入：useRecipeTemplates 原樣引用）
+  // ── 配方模板（2026-08-27 自专业工作站迁入：useRecipeTemplates 原样引用）
   const recipeTemplates = useRecipeTemplates();
 
-  // ── 提示詞庫狀態
+  // ── 提示词库状态
   const [promptsData, setPromptsData] = useState<{ prompts: LibraryPromptItem[]; sources: LibrarySourceMeta[] } | null>(null);
   const [promptsLoading, setPromptsLoading] = useState(false);
   const [promptsError, setPromptsError] = useState<string | null>(null);
@@ -162,14 +162,14 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   const [tagFilter, setTagFilter] = useState("");
   const [saveStates, setSaveStates] = useState<Record<string, PromptSaveState>>({});
 
-  // ── 风格库狀態（kunpeng 本地靜態數據，純客戶端過濾）
+  // ── 风格库状态（kunpeng 本地静态数据，纯客户端过滤）
   const [styleQuery, setStyleQuery] = useState("");
   const debouncedStyleQuery = useDebouncedValue(styleQuery);
   const [styleKind, setStyleKind] = useState<"" | "style" | "prompt">("");
   const [styleCategory, setStyleCategory] = useState("");
   const [styleSaveStates, setStyleSaveStates] = useState<Record<string, PromptSaveState>>({});
 
-  // ── 我的素材狀態（資產包視圖）
+  // ── 我的素材状态（资产包视图）
   const [assets, setAssets] = useState<AssetPack[] | null>(null);
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [assetsError, setAssetsError] = useState<string | null>(null);
@@ -190,7 +190,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // ── 提示詞庫載入（首次打開拉一次；重試按鈕再觸發）
+  // ── 提示词库载入（首次打开拉一次；重试按钮再触发）
   const loadPrompts = useCallback(async () => {
     setPromptsLoading(true);
     setPromptsError(null);
@@ -219,8 +219,8 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     }
   }, [open, tab, promptsData, promptsLoading, promptsError, loadPrompts]);
 
-  // ── 我的素材載入（每次打開/切到該 tab 重新拉，保證存入後可見）。
-  // 支援 ?q= 跨 pack 搜尋（title/tags/digest 由服務端過濾，空字串還原為拉全量）。
+  // ── 我的素材载入（每次打开/切到该 tab 重新拉，保证存入后可见）。
+  // 支援 ?q= 跨 pack 搜寻（title/tags/digest 由服务端过滤，空字串还原为拉全量）。
   const loadAssets = useCallback(async (query = "") => {
     setAssetsLoading(true);
     setAssetsError(null);
@@ -228,7 +228,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     try {
       const headers = authHeaders();
       if (!headers) {
-        // 未登入誠實顯示登入提示，不發註定 401 的請求。
+        // 未登入诚实显示登入提示，不发注定 401 的请求。
         setAssetsUnauthorized(true);
         setAssets(null);
         return;
@@ -254,12 +254,12 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     }
   }, []);
 
-  // 搜索词（300ms debounce）变化即按 q 重新拉取；空字串還原為全量。
+  // 搜索词（300ms debounce）变化即按 q 重新拉取；空字串还原为全量。
   useEffect(() => {
     if (open && tab === "assets") void loadAssets(debouncedAssetQuery);
   }, [open, tab, loadAssets, debouncedAssetQuery]);
 
-  // ── 提示詞客戶端過濾 + 標籤聚合
+  // ── 提示词客户端过滤 + 标签聚合
   const filteredPrompts = useMemo(() => {
     if (!promptsData) return [];
     const q = debouncedPromptQuery.trim().toLowerCase();
@@ -289,7 +289,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     return map;
   }, [promptsData]);
 
-  // ── 风格库客戶端過濾（kunpeng 161 條風格 + 2 條提示詞模板；類別 chips 沿用標籤聚合樣式）
+  // ── 风格库客户端过滤（kunpeng 161 条风格 + 2 条提示词模板；类别 chips 沿用标签聚合样式）
   const filteredStyles = useMemo(() => {
     const q = debouncedStyleQuery.trim().toLowerCase();
     return KUNPENG_STYLE_ASSETS.filter(
@@ -319,14 +319,14 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     [],
   );
 
-  // ── 动作：風格 / 模板存入资产包（確定性包 canvas-assets，同內容 prompt 去重）
+  // ── 动作：风格 / 模板存入资产包（确定性包 canvas-assets，同内容 prompt 去重）
   const saveStyleToAssets = useCallback(async (item: { id: string; title: string; text: string; tags: string[]; note: string }) => {
     setStyleSaveStates((prev) => ({ ...prev, [item.id]: "saving" }));
     const state = await upsertCanvasPack(nodeToAssetPackItems({ id: `kunpeng-${item.id}`, title: item.title, prompt: item.text }));
     setStyleSaveStates((prev) => ({ ...prev, [item.id]: state }));
   }, []);
 
-  // ── 資產包客戶端過濾（title / tags / digest）
+  // ── 资产包客户端过滤（title / tags / digest）
   const filteredAssets = useMemo(() => {
     if (!assets) return [];
     const q = debouncedAssetQuery.trim().toLowerCase();
@@ -339,14 +339,14 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     );
   }, [assets, debouncedAssetQuery]);
 
-  // ── 動作：提示詞存入资产包（確定性包 canvas-assets）
+  // ── 动作：提示词存入资产包（确定性包 canvas-assets）
   const saveToAssets = useCallback(async (p: LibraryPromptItem) => {
     setSaveStates((prev) => ({ ...prev, [p.id]: "saving" }));
     const state = await upsertCanvasPack(nodeToAssetPackItems({ id: `prompt-${p.id}`, title: p.title, prompt: p.prompt }));
     setSaveStates((prev) => ({ ...prev, [p.id]: state }));
   }, []);
 
-  // ── 動作：刪除資產包
+  // ── 动作：删除资产包
   const deleteAsset = useCallback(async (id: string) => {
     setDeletingIds((prev) => new Set(prev).add(id));
     setAssetActionError(null);
@@ -370,7 +370,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     }
   }, []);
 
-  // ── 動作：設為使用（active）— PUT /api/assets 該包 active:true（單一 active 由後端保證）
+  // ── 动作：设为使用（active）— PUT /api/assets 该包 active:true（单一 active 由后端保证）
   const setPackActive = useCallback(async (pack: AssetPack) => {
     setActivatingId(pack.id);
     setAssetActionError(null);
@@ -394,7 +394,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
     }
   }, []);
 
-  // 阻止事件冒泡到畫布
+  // 阻止事件冒泡到画布
   const stopPropagation = useCallback((e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.stopPropagation();
   }, []);
@@ -422,7 +422,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
       onPointerDown={stopPropagation}
       onClick={stopPropagation}
     >
-      {/* 頭部 */}
+      {/* 头部 */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">资源库</h2>
         <button
@@ -435,7 +435,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
         </button>
       </div>
 
-      {/* tab 切換 */}
+      {/* tab 切换 */}
       <div className="flex gap-1 border-b px-3 py-2">
         {(
           [
@@ -463,7 +463,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
         ))}
       </div>
 
-      {/* ── 提示詞庫 tab */}
+      {/* ── 提示词库 tab */}
       {tab === "prompts" && (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="space-y-2 border-b px-3 py-2.5">
@@ -588,7 +588,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
         </div>
       )}
 
-      {/* ── 风格库 tab（kunpeng 161 條風格 + 提示詞模板，本地數據零網絡） */}
+      {/* ── 风格库 tab（kunpeng 161 条风格 + 提示词模板，本地数据零网络） */}
       {tab === "styles" && (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="space-y-2 border-b px-3 py-2.5">
@@ -707,7 +707,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
         />
       )}
 
-      {/* ── 配方模板 tab（2026-08-27 自專業工作站遷入：RecipeTemplateSection 原樣掛載） */}
+      {/* ── 配方模板 tab（2026-08-27 自专业工作站迁入：RecipeTemplateSection 原样挂载） */}
       {tab === "recipes" && onApplyRecipeTemplate && (
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           <RecipeTemplateSection
@@ -720,7 +720,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
         </div>
       )}
 
-      {/* ── 我的素材 tab（資產包視圖：GET /api/assets） */}
+      {/* ── 我的素材 tab（资产包视图：GET /api/assets） */}
       {tab === "assets" && (
         <div className="flex min-h-0 flex-1 flex-col">
           {assetsUnauthorized ? (
@@ -813,7 +813,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   );
 }
 
-/** 風格库卡片：與提示詞卡同構（標題 / 徽章 / 描述 / 三動作），複用面板的 class 語彙。 */
+/** 风格库卡片：与提示词卡同构（标题 / 徽章 / 描述 / 三动作），复用面板的 class 语汇。 */
 function StyleTemplateCard({
   title,
   badge,

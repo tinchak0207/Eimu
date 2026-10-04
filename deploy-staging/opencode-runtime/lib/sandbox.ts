@@ -1,25 +1,25 @@
-// Agent 代碼/檔案存取沙箱與閘（2026-09-29 審計＋紅隊二輪修復）。
+// Agent 代码/档案存取沙箱与闸（2026-09-29 审计＋红队二轮修复）。
 //
-// 威脅模型：agent 跑用戶輸入，能調 bash/run_py（進 bwrap）與原生 read/write/edit/grep/... 及
-// 讀圖等帶 URL 的工具（原生工具跑在受信 opencode 進程，有全檔案系統＋全 env＋網路）。
-// 進程 env 有上游密鑰；workspace 多租戶（各用戶檔案在 uploads/<gateway-sessionId>/）；
-// gateway /internal/* 是 loopback 無鑑權。
+// 威胁模型：agent 跑用户输入，能调 bash/run_py（进 bwrap）与原生 read/write/edit/grep/... 及
+// 读图等带 URL 的工具（原生工具跑在受信 opencode 进程，有全档案系统＋全 env＋网路）。
+// 进程 env 有上游密钥；workspace 多租户（各用户档案在 uploads/<gateway-sessionId>/）；
+// gateway /internal/* 是 loopback 无鉴权。
 //
-// 紅隊二輪推翻了「只沙箱 bash」的思路——原生工具才是主攻面。本檔提供：
-//   1. checkAgentPath：**白名單**（realpath 解析後必須落在 workspace 子樹＋本會話 uploads），
-//      擋 C1（預設放行）、H3（symlink 逃逸）、L13（前綴比對）。
-//   2. 上傳歸屬：由 plugin 從 gateway 可信查得（setOwner），非「用戶提到即授權」（擋 H5）。
-//   3. assertSafeFetchUrl：擋私網/loopback/link-local/雲 metadata（擋 C2 SSRF）。
-//   4. bwrap 沙箱：清 env、斷網、unshare pid/ipc/uts、根唯讀、遮蔽內部/他租戶、/tmp 與 .run 按會話隔離（擋 L12）。
-//   5. redactSecrets / filterForeignUploads：工具輸出進上下文前的兜底。
+// 红队二轮推翻了「只沙箱 bash」的思路——原生工具才是主攻面。本档提供：
+//   1. checkAgentPath：**白名单**（realpath 解析后必须落在 workspace 子树＋本会话 uploads），
+//      挡 C1（预设放行）、H3（symlink 逃逸）、L13（前缀比对）。
+//   2. 上传归属：由 plugin 从 gateway 可信查得（setOwner），非「用户提到即授权」（挡 H5）。
+//   3. assertSafeFetchUrl：挡私网/loopback/link-local/云 metadata（挡 C2 SSRF）。
+//   4. bwrap 沙箱：清 env、断网、unshare pid/ipc/uts、根唯读、遮蔽内部/他租户、/tmp 与 .run 按会话隔离（挡 L12）。
+//   5. redactSecrets / filterForeignUploads：工具输出进上下文前的兜底。
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { createHash } from "node:crypto"
 import { lookup as dnsLookup } from "node:dns/promises"
 
-// WORKSPACE 預設為生產落點；允許 EIMU_WORKSPACE 覆寫**僅為測試隔離**（可用乾淨臨時根真跑
-// bwrap，見 vps-tools/eimu-shell.test.ts）。未設時與舊版逐字相同，不改變任何 argv／可見性語義。
+// WORKSPACE 预设为生产落点；允许 EIMU_WORKSPACE 覆写**仅为测试隔离**（可用干净临时根真跑
+// bwrap，见 vps-tools/eimu-shell.test.ts）。未设时与旧版逐字相同，不改变任何 argv／可见性语义。
 export const WORKSPACE = process.env.EIMU_WORKSPACE || "/opt/agent-harness/workspace"
 export const UPLOADS = path.join(WORKSPACE, "uploads")
 export const RUN_ROOT = path.join(WORKSPACE, ".run")
@@ -27,11 +27,11 @@ const BWRAP = "/usr/bin/bwrap"
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 
-// ── 會話 → 可信上傳歸屬（由 plugin 從 gateway /internal/session-key 查得後 setOwner）──
+// ── 会话 → 可信上传归属（由 plugin 从 gateway /internal/session-key 查得后 setOwner）──
 type Registry = { owner: Map<string, Set<string>> }
 const REG: Registry = ((globalThis as any).__eimuUploadRegistry2 ??= { owner: new Map<string, Set<string>>() })
 
-/** 以 gateway 可信結果設定本會話（opencode sessionID）擁有的 upload uuid 集合。 */
+/** 以 gateway 可信结果设定本会话（opencode sessionID）拥有的 upload uuid 集合。 */
 export function setOwner(sessionID: string, ownerUuids: string[]): void {
   if (!sessionID) return
   const set = new Set<string>()
@@ -46,12 +46,12 @@ export function hasOwner(sessionID: string): boolean {
   return REG.owner.has(sessionID)
 }
 
-/** 本會話可存取的 upload 目錄集合（無記錄＝空集，fail-closed）。 */
+/** 本会话可存取的 upload 目录集合（无记录＝空集，fail-closed）。 */
 export function allowedUploads(sessionID: string): Set<string> {
   return REG.owner.get(sessionID) ?? new Set<string>()
 }
 
-// ── 路徑安全解析：realpath 已存在的最長前綴，防 symlink 逃逸；不存在的尾段按字面接上 ──
+// ── 路径安全解析：realpath 已存在的最长前缀，防 symlink 逃逸；不存在的尾段按字面接上 ──
 function safeResolve(rawPath: string): string {
   const abs = path.resolve(WORKSPACE, rawPath && rawPath.trim() ? rawPath : ".")
   let existing = abs
@@ -73,15 +73,15 @@ function withinWorkspace(real: string): boolean {
   return real === WORKSPACE || real.startsWith(WORKSPACE + "/")
 }
 
-// workspace 內對 agent 關閉的區域（內部狀態/設定/DB/服務）。
+// workspace 内对 agent 关闭的区域（内部状态/设定/DB/服务）。
 const DENY_IN_WORKSPACE = [".local/share/opencode", ".opencode-state"]
 const DENY_OPENCODE_FILE_RE = /^\.opencode\/(opencode\.json[^/]*|opencode\.db[^/]*|[^/]*\.bak[^/]*|[^/]*redteam[^/]*|services(\/|$))/
 
 export type PathVerdict = { ok: true } | { ok: false; reason: string }
 
 /**
- * 白名單路徑閘：realpath 解析後必須落在 workspace 子樹；uploads 只放行本會話擁有的目錄；
- * 內部狀態/設定目錄一律拒。listing=true 時額外拒 uploads 根（防列出全租戶目錄）。
+ * 白名单路径闸：realpath 解析后必须落在 workspace 子树；uploads 只放行本会话拥有的目录；
+ * 内部状态/设定目录一律拒。listing=true 时额外拒 uploads 根（防列出全租户目录）。
  */
 export function checkAgentPath(rawPath: string | undefined, sessionID: string, opts: { listing?: boolean } = {}): PathVerdict {
   const real = safeResolve(rawPath ?? ".")
@@ -89,15 +89,15 @@ export function checkAgentPath(rawPath: string | undefined, sessionID: string, o
   const rel = real === WORKSPACE ? "" : path.relative(WORKSPACE, real)
   for (const d of DENY_IN_WORKSPACE) {
     if (rel === d || rel.startsWith(d + "/")) {
-      // 例外：opencode 截斷輸出落盤檔，agent 需按確切路徑回讀（不可列目錄）。
-      // read 類（listing=false）一律放行；grep/glob/list（listing=true）只放行「指向單一既有檔案」
-      // （截斷提示叫 agent「Use Grep to search the full content」，H10：此前 grep 被 listing 擋成 internal_state）。
+      // 例外：opencode 截断输出落盘档，agent 需按确切路径回读（不可列目录）。
+      // read 类（listing=false）一律放行；grep/glob/list（listing=true）只放行「指向单一既有档案」
+      // （截断提示叫 agent「Use Grep to search the full content」，H10：此前 grep 被 listing 挡成 internal_state）。
       if (rel.startsWith(".local/share/opencode/tool-output/")) {
         if (!opts.listing) return { ok: true }
         try {
           if (statSync(real).isFile()) return { ok: true }
         } catch {
-          /* 不存在/不可 stat → 按拒絕 */
+          /* 不存在/不可 stat → 按拒绝 */
         }
       }
       return { ok: false, reason: "internal_state" }
@@ -114,11 +114,11 @@ export function checkAgentPath(rawPath: string | undefined, sessionID: string, o
 }
 
 /**
- * 值是否「看似檔案路徑」——供同時可收 base64／URL／路徑的參數（music_gen.source_audio，
- * 2026-10-04 本地參考音檔接線）決定是否進 checkAgentPath。純 base64 字母表的值（含 + / =）
- * 不算路徑：避免對 MB 級 base64 逐段 realpath/existsSync 解析（性能）與無謂拒收；
- * data:/http(s) 前綴同樣不是檔案路徑（各自走 base64／明確報錯分支）。
- * 注意：本函數只做**分類**，不是路徑安全閘——真正放行/拒絕一律仍由 checkAgentPath 決定。
+ * 值是否「看似档案路径」——供同时可收 base64／URL／路径的参数（music_gen.source_audio，
+ * 2026-10-04 本地参考音档接线）决定是否进 checkAgentPath。纯 base64 字母表的值（含 + / =）
+ * 不算路径：避免对 MB 级 base64 逐段 realpath/existsSync 解析（性能）与无谓拒收；
+ * data:/http(s) 前缀同样不是档案路径（各自走 base64／明确报错分支）。
+ * 注意：本函数只做**分类**，不是路径安全闸——真正放行/拒绝一律仍由 checkAgentPath 决定。
  */
 export function looksLikeAgentPath(v: string): boolean {
   const s = (v ?? "").trim()
@@ -129,13 +129,13 @@ export function looksLikeAgentPath(v: string): boolean {
   return true
 }
 
-// ── SSRF 閘（C2）：擋私網/loopback/link-local/雲 metadata；只允許 http(s) 公網 ──
-// 各雲 metadata 主機名（Tencent/Ali/Azure 用主機名而非 169.254 字面量，字串黑名單必須顯式列）。
+// ── SSRF 闸（C2）：挡私网/loopback/link-local/云 metadata；只允许 http(s) 公网 ──
+// 各云 metadata 主机名（Tencent/Ali/Azure 用主机名而非 169.254 字面量，字串黑名单必须显式列）。
 const BLOCKED_HOST_RE =
   /^(localhost|.*\.local|.*\.internal|metadata(\.google)?\.internal|metadata\.tencentyun\.com|metadata\.aliyuncs\.com|metadata\.azure\.com)$/i
 function ipIsBlocked(host: string): boolean {
   let h = host.replace(/^\[|\]$/g, "").toLowerCase()
-  // IPv4-mapped IPv6（::ffff:127.0.0.1 或 ::ffff:7f00:1）→ 取出內嵌 IPv4 再判。
+  // IPv4-mapped IPv6（::ffff:127.0.0.1 或 ::ffff:7f00:1）→ 取出内嵌 IPv4 再判。
   const mapped = /^::ffff:(.+)$/i.exec(h)
   if (mapped) {
     const tail = mapped[1]
@@ -154,7 +154,7 @@ function ipIsBlocked(host: string): boolean {
   if (!m) return false
   const [a, b] = [Number(m[1]), Number(m[2])]
   if (a === 127 || a === 10 || a === 0) return true
-  if (a === 169 && b === 254) return true // link-local + 雲 metadata 169.254.169.254
+  if (a === 169 && b === 254) return true // link-local + 云 metadata 169.254.169.254
   if (a === 172 && b >= 16 && b <= 31) return true
   if (a === 192 && b === 168) return true
   if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
@@ -164,10 +164,10 @@ function ipIsBlocked(host: string): boolean {
 export class SsrfError extends Error {}
 
 /**
- * URL 是否安全可 fetch。先字面量預檢（含 IPv4-mapped IPv6、各雲 metadata 主機名），
- * 再用 getaddrinfo 正規化解析：`127.1`／十進位／十六進位 IP 字面量與「主機名→私網」
- * （如 metadata.tencentyun.com）都在此落網——解析口徑與工具實際 fetch 一致。
- * 註：解析在此、fetch 在工具內，rebind/redirect 逐跳復驗屬殘留（見 MEDIUM-1，需 fetch 層釘 IP）。
+ * URL 是否安全可 fetch。先字面量预检（含 IPv4-mapped IPv6、各云 metadata 主机名），
+ * 再用 getaddrinfo 正规化解析：`127.1`／十进位／十六进位 IP 字面量与「主机名→私网」
+ * （如 metadata.tencentyun.com）都在此落网——解析口径与工具实际 fetch 一致。
+ * 注：解析在此、fetch 在工具内，rebind/redirect 逐跳复验属残留（见 MEDIUM-1，需 fetch 层钉 IP）。
  */
 export async function assertSafeFetchUrl(raw: string): Promise<void> {
   let u: URL
@@ -183,7 +183,7 @@ export async function assertSafeFetchUrl(raw: string): Promise<void> {
   try {
     addrs = await dnsLookup(host, { all: true })
   } catch {
-    return // 解析不了＝當下打不到，交由工具自身 fetch 失敗處理，不誤擋合法公網。
+    return // 解析不了＝当下打不到，交由工具自身 fetch 失败处理，不误挡合法公网。
   }
   for (const a of addrs) if (ipIsBlocked(a.address)) throw new SsrfError("该链接解析到内网/本机/元数据地址，已拒绝。")
 }
@@ -195,7 +195,7 @@ function sessionSlug(sessionID: string): string {
   return createHash("sha256").update(sessionID || "anon").digest("hex").slice(0, 16)
 }
 
-/** 每會話私有 tmp/run 目錄（擋 L12 跨租戶 /tmp/.run）。 */
+/** 每会话私有 tmp/run 目录（挡 L12 跨租户 /tmp/.run）。 */
 export function sessionTmpDir(sessionID: string): string {
   return path.join(RUN_ROOT, sessionSlug(sessionID), "tmp")
 }
@@ -233,7 +233,7 @@ function maskArgs(): string[] {
       if (existsSync(p)) args.push("--ro-bind", p, p)
     }
   }
-  // .run 整體遮掉（其他會話的 tmp/run 不可見）；本會話的在 uploadArgs 之後單獨掛回。
+  // .run 整体遮掉（其他会话的 tmp/run 不可见）；本会话的在 uploadArgs 之后单独挂回。
   if (existsSync(RUN_ROOT)) args.push("--tmpfs", RUN_ROOT)
   return args
 }
@@ -252,7 +252,7 @@ export function sandboxAvailable(): boolean {
   return existsSync(BWRAP)
 }
 
-/** bwrap argv（不含 --chdir）＋已正規化的 cwd；launcher 與 sandboxPrefix 共用同一份真源。 */
+/** bwrap argv（不含 --chdir）＋已正规化的 cwd；launcher 与 sandboxPrefix 共用同一份真源。 */
 function sandboxArgv(opts: { sessionID: string; cwd?: string }): { argv: string[]; cwd: string } {
   const tmp = sessionTmpDir(opts.sessionID)
   const run = sessionRunDir(opts.sessionID)
@@ -278,7 +278,7 @@ function sandboxArgv(opts: { sessionID: string; cwd?: string }): { argv: string[
     "--bind", WORKSPACE, WORKSPACE,
     ...maskArgs(),
     ...uploadArgs(opts.sessionID),
-    // 本會話私有 tmp/run：掛回 /tmp 與 .run/<slug>（其餘會話已被 maskArgs tmpfs 蓋掉）。
+    // 本会话私有 tmp/run：挂回 /tmp 与 .run/<slug>（其余会话已被 maskArgs tmpfs 盖掉）。
     "--bind", tmp, "/tmp",
     "--bind", run, path.join(RUN_ROOT, sessionSlug(opts.sessionID), "run"),
     ...sandboxEnv(),
@@ -298,15 +298,15 @@ export function shQuote(s: string): string {
 const LAUNCHER_NAME = "sandbox-exec.sh"
 
 /**
- * launcher 落點：.run/<slug>/launcher/sandbox-exec.sh —— **刻意放在 run/ 之外**。
- * 沙箱內 .run 被 maskArgs 以 tmpfs 遮罩、只把 run/ 綁回去，所以本檔在沙箱內不存在，
- * 工具改不到它（若放在 run/ 內，agent 可改寫下一輪要執行的腳本＝逃逸後門）。
+ * launcher 落点：.run/<slug>/launcher/sandbox-exec.sh —— **刻意放在 run/ 之外**。
+ * 沙箱内 .run 被 maskArgs 以 tmpfs 遮罩、只把 run/ 绑回去，所以本档在沙箱内不存在，
+ * 工具改不到它（若放在 run/ 内，agent 可改写下一轮要执行的脚本＝逃逸后门）。
  */
 export function sessionLauncherPath(sessionID: string): string {
   return path.join(RUN_ROOT, sessionSlug(sessionID), "launcher", LAUNCHER_NAME)
 }
 
-/** shQuote 的逆運算掃描器：從 i 起讀一個單引號字串，支援 '\\'' 轉義。 */
+/** shQuote 的逆运算扫描器：从 i 起读一个单引号字串，支援 '\\'' 转义。 */
 function readShQuoted(s: string, i: number): { value: string; next: number } | null {
   if (s[i] !== "'") return null
   let out = ""
@@ -326,7 +326,7 @@ function readShQuoted(s: string, i: number): { value: string; next: number } | n
   return null
 }
 
-/** 反解 launcher 呼叫 `exec '<launcher>' '<cwd>' '<cmd>'`（模型複製回顯的第二形態）。 */
+/** 反解 launcher 呼叫 `exec '<launcher>' '<cwd>' '<cmd>'`（模型复制回显的第二形态）。 */
 function unwrapLauncherInvocation(command: string): string | null {
   const head = /^\s*exec\s+/.exec(command)
   if (!head) return null
@@ -347,16 +347,16 @@ function unwrapLauncherInvocation(command: string): string | null {
 const SELF_WRAP_RE = /(?:^|\s)exec\s+'(?:\/usr\/bin\/)?bwrap'|--die-with-parent/
 
 /**
- * 反解自家沙箱包裝層（2026-10-02 事故，子代理連環逾時的單一根因）。
+ * 反解自家沙箱包装层（2026-10-02 事故，子代理连环逾时的单一根因）。
  *
- * `tool.execute.before` 會把 args.command 改寫成包裝後的命令，而**改寫後的 args 就是
- * 落進工具輸入紀錄、再被回放進模型上下文的那一份**，模型看到後會把整段當命令本體重送：
- *   - 形態一（舊）：exec '<bwrap>' … /bin/bash -c '<命令>' → bwrap 包 bwrap，內層在已被
- *     外層 tmpfs 的 /opt 上重 bind、並引用舊會話 .run/<舊 slug>/{tmp,run}（新會話不存在）
- *     → `bwrap: Can't find source path`，子代理反覆試錯直到逾時被殺（DB 可見同調用重送 6×/16×）。
- *   - 形態二（現）：exec '<launcher>' '<cwd>' '<命令>'（見 wrapShellCommand）。
- * 兩種形態都剝回最內層原始命令再重新包一次，於是「複製回顯重送」正好等於使用者要的原始
- * 命令——巢狀在結構上不可能發生。只認自家簽名，一般命令零影響。
+ * `tool.execute.before` 会把 args.command 改写成包装后的命令，而**改写后的 args 就是
+ * 落进工具输入纪录、再被回放进模型上下文的那一份**，模型看到后会把整段当命令本体重送：
+ *   - 形态一（旧）：exec '<bwrap>' … /bin/bash -c '<命令>' → bwrap 包 bwrap，内层在已被
+ *     外层 tmpfs 的 /opt 上重 bind、并引用旧会话 .run/<旧 slug>/{tmp,run}（新会话不存在）
+ *     → `bwrap: Can't find source path`，子代理反覆试错直到逾时被杀（DB 可见同调用重送 6×/16×）。
+ *   - 形态二（现）：exec '<launcher>' '<cwd>' '<命令>'（见 wrapShellCommand）。
+ * 两种形态都剥回最内层原始命令再重新包一次，于是「复制回显重送」正好等于使用者要的原始
+ * 命令——巢状在结构上不可能发生。只认自家签名，一般命令零影响。
  */
 export function unwrapShellCommand(command: string): string {
   let cur = command
@@ -378,25 +378,25 @@ export function unwrapShellCommand(command: string): string {
 }
 
 /**
- * 建立 bwrap `--bind`／launcher 落點所需的宿主目錄。容忍已存在（recursive），
- * 不因單一失敗而炸（單一失敗交給後續 bwrap 以明確錯誤收場，不在此吞掉整條路徑）。
- * mode 0o700：.run 下每個會話目錄皆私有；此語義與原 writeSessionLauncher 的 launcher 目錄一致
- * （原 wrapShellCommand 的 tmp/run 迴圈未給 mode，兩者在此收斂為同一份實作）。
+ * 建立 bwrap `--bind`／launcher 落点所需的宿主目录。容忍已存在（recursive），
+ * 不因单一失败而炸（单一失败交给后续 bwrap 以明确错误收场，不在此吞掉整条路径）。
+ * mode 0o700：.run 下每个会话目录皆私有；此语义与原 writeSessionLauncher 的 launcher 目录一致
+ * （原 wrapShellCommand 的 tmp/run 回圈未给 mode，两者在此收敛为同一份实作）。
  */
 function ensureHostDir(dir: string): void {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
   } catch {
-    /* 交給後續 bwrap 報錯（fail-closed，不靜默成功） */
+    /* 交给后续 bwrap 报错（fail-closed，不静默成功） */
   }
 }
 
 /**
- * 確保 sandboxArgv 會 bind 的宿主來源（sessionTmpDir、sessionRunDir）與 launcher 目錄都存在。
- * **單一真源**：plugin 的 tool.execute.before 與 writeSessionLauncher 都呼叫本函式——誰產生
- * launcher／誰啟動 shell，誰就保證 launcher 執行時需要的宿主目錄都在（裸 shell 端點不經
- * tool.execute.before，先前因目錄邏輯只長在那裡而全數失敗）。
- * 必須在 sandboxArgv() 之前呼叫：maskArgs 依 RUN_ROOT 是否存在決定是否掛 `--tmpfs RUN_ROOT`。
+ * 确保 sandboxArgv 会 bind 的宿主来源（sessionTmpDir、sessionRunDir）与 launcher 目录都存在。
+ * **单一真源**：plugin 的 tool.execute.before 与 writeSessionLauncher 都呼叫本函式——谁产生
+ * launcher／谁启动 shell，谁就保证 launcher 执行时需要的宿主目录都在（裸 shell 端点不经
+ * tool.execute.before，先前因目录逻辑只长在那里而全数失败）。
+ * 必须在 sandboxArgv() 之前呼叫：maskArgs 依 RUN_ROOT 是否存在决定是否挂 `--tmpfs RUN_ROOT`。
  */
 export function ensureSessionDirs(sessionID: string): void {
   ensureHostDir(sessionTmpDir(sessionID))
@@ -405,18 +405,18 @@ export function ensureSessionDirs(sessionID: string): void {
 }
 
 /**
- * 寫出（或更新）本會話沙箱啟動器。內容只依賴會話與當下檔案系統狀態（上傳白名單可能在
- * 會話中途變動），故每次呼叫重寫；以 tmp+rename 原子替換，避免同會話並發 bash 讀到半截檔。
+ * 写出（或更新）本会话沙箱启动器。内容只依赖会话与当下档案系统状态（上传白名单可能在
+ * 会话中途变动），故每次呼叫重写；以 tmp+rename 原子替换，避免同会话并发 bash 读到半截档。
  */
 function writeSessionLauncher(opts: { sessionID: string; cwd?: string }): { file: string; cwd: string; argv: string[] } {
-  // 誰產生 launcher，誰保證 launcher 執行時需要的所有宿主目錄（tmp / run / launcher 目錄）都在。
+  // 谁产生 launcher，谁保证 launcher 执行时需要的所有宿主目录（tmp / run / launcher 目录）都在。
   ensureSessionDirs(opts.sessionID)
   const { argv, cwd } = sandboxArgv(opts)
   const file = sessionLauncherPath(opts.sessionID)
   const script =
     "#!/bin/sh\n" +
-    `# 自動生成（每次呼叫重寫）：會話 ${sessionSlug(opts.sessionID)} 的沙箱啟動器。\n` +
-    "# 沙箱內看不到本檔（.run 被 tmpfs 遮罩），故工具無法改寫它。\n" +
+    `# 自动生成（每次呼叫重写）：会话 ${sessionSlug(opts.sessionID)} 的沙箱启动器。\n` +
+    "# 沙箱内看不到本档（.run 被 tmpfs 遮罩），故工具无法改写它。\n" +
     `exec ${argv.map(shQuote).join(" ")} --chdir "$1" /bin/bash -c "$2"\n`
   const tmpFile = `${file}.${process.pid}.tmp`
   writeFileSync(tmpFile, script)
@@ -426,24 +426,24 @@ function writeSessionLauncher(opts: { sessionID: string; cwd?: string }): { file
 }
 
 /**
- * 方案 B（2026-10-02）用：只寫好本會話 launcher 並回傳其絕對路徑，不改寫任何命令。
- * 由 plugin 的 `shell.env` hook 呼叫——沙箱改在 **spawn 當下** 由頂層 shell 包裝器
- * （lib/eimu-shell）注入，args／模型上下文永遠只有原始命令。
+ * 方案 B（2026-10-02）用：只写好本会话 launcher 并回传其绝对路径，不改写任何命令。
+ * 由 plugin 的 `shell.env` hook 呼叫——沙箱改在 **spawn 当下** 由顶层 shell 包装器
+ * （lib/eimu-shell）注入，args／模型上下文永远只有原始命令。
  *
- * 註：launcher 內容用 `--chdir "$1"`（執行時由包裝器傳入的 cwd），故這裡的 cwd 不影響
- * 沙箱 argv（保留參數是為了與 wrapShellCommand 共用同一份 sandboxArgv 真源）。
+ * 注：launcher 内容用 `--chdir "$1"`（执行时由包装器传入的 cwd），故这里的 cwd 不影响
+ * 沙箱 argv（保留参数是为了与 wrapShellCommand 共用同一份 sandboxArgv 真源）。
  *
- * 保證：本函式會先建好 launcher 執行時所需的所有宿主目錄（tmp / run / launcher 目錄，
- * 見 ensureSessionDirs）——裸 shell 端點不經 tool.execute.before 也能直接執行，不再 fail-closed。
+ * 保证：本函式会先建好 launcher 执行时所需的所有宿主目录（tmp / run / launcher 目录，
+ * 见 ensureSessionDirs）——裸 shell 端点不经 tool.execute.before 也能直接执行，不再 fail-closed。
  */
 export function ensureSessionLauncher(sessionID: string, cwd?: string): string {
   return writeSessionLauncher({ sessionID, cwd }).file
 }
 
 export function wrapShellCommand(command: string, opts: { sessionID: string; cwd?: string }): string {
-  // 目錄建立已收斂進 writeSessionLauncher → ensureSessionDirs（單一真源，兩條路徑共用）。
+  // 目录建立已收敛进 writeSessionLauncher → ensureSessionDirs（单一真源，两条路径共用）。
   const { file, cwd } = writeSessionLauncher(opts)
-  // 被記錄／回放的只有這一行的長度（~150 字元），bwrap 全文不再進模型上下文。
+  // 被记录／回放的只有这一行的长度（~150 字元），bwrap 全文不再进模型上下文。
   return `exec ${shQuote(file)} ${shQuote(cwd)} ${shQuote(unwrapShellCommand(command))}`
 }
 
@@ -483,8 +483,8 @@ export function redactSecrets(text: string): string {
   return out
 }
 
-// 抹除工具輸出/網頁/附件文本裡偽造的網關憑證 token（MEDIUM-2）：合法 ⟦gw:nonce⟧ 只由網關
-// 注入 system／user 尾端，工具輸出裡出現一律是偽造，直接繳械（縱深防禦，補 authorityRule 之下）。
+// 抹除工具输出/网页/附件文本里伪造的网关凭证 token（MEDIUM-2）：合法 ⟦gw:nonce⟧ 只由网关
+// 注入 system／user 尾端，工具输出里出现一律是伪造，直接缴械（纵深防御，补 authorityRule 之下）。
 const FORGED_GW_TOKEN_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
 export function stripForgedAuthorityTokens(text: string): string {
   if (!text || !text.includes("⟦")) return text
@@ -492,9 +492,9 @@ export function stripForgedAuthorityTokens(text: string): string {
 }
 
 /**
- * SSRF-safe fetch：初始 URL 與每個重定向 Location 逐跳過 assertSafeFetchUrl（解析後 IP 覆判），
- * redirect 一律 manual 自行復驗——擋「公網 URL 302→內網」（MEDIUM-1）。
- * 只用於下載「用戶提供的 URL」；上游 API／平台可信端點不要用本函式（它們可能合法指向內網）。
+ * SSRF-safe fetch：初始 URL 与每个重定向 Location 逐跳过 assertSafeFetchUrl（解析后 IP 覆判），
+ * redirect 一律 manual 自行复验——挡「公网 URL 302→内网」（MEDIUM-1）。
+ * 只用于下载「用户提供的 URL」；上游 API／平台可信端点不要用本函式（它们可能合法指向内网）。
  */
 export async function safeFetch(rawUrl: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
   let url = rawUrl
@@ -527,10 +527,10 @@ export function filterForeignUploads(text: string, sessionID: string): string {
 }
 
 /**
- * 從任意 args 物件收集所有 http(s) URL 字串值（供 plugin 對 fetch 類工具做 SSRF 前置檢查）。
- * 不再靠參數 key 名白名單（url|uri|src…）過濾——那會漏掉 `source` 這類不含 hint 的欄位
- * （HIGH-1：video_evidence.source 曾因此完全繞過 SSRF 閘）。任何看起來是 http(s) 的字串一律過閘；
- * 合法公網 URL 不受影響（閘只擋私網/metadata）。
+ * 从任意 args 物件收集所有 http(s) URL 字串值（供 plugin 对 fetch 类工具做 SSRF 前置检查）。
+ * 不再靠参数 key 名白名单（url|uri|src…）过滤——那会漏掉 `source` 这类不含 hint 的栏位
+ * （HIGH-1：video_evidence.source 曾因此完全绕过 SSRF 闸）。任何看起来是 http(s) 的字串一律过闸；
+ * 合法公网 URL 不受影响（闸只挡私网/metadata）。
  */
 export function collectUrlArgs(args: unknown): string[] {
   const out: string[] = []

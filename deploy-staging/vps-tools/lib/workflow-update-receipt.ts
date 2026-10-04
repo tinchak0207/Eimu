@@ -1,5 +1,5 @@
-// workflow_update_node 精簡回執（H12）：舊回執 ~930 字（整個 node + 14 個 affected id）純噪音。
-// 成功只回 ok/node_id/status/affected_count/前 3 個 id/實際生效欄位/resolved_model；失敗路徑不經此函式、原樣回報。
+// workflow_update_node 精简回执（H12）：旧回执 ~930 字（整个 node + 14 个 affected id）纯噪音。
+// 成功只回 ok/node_id/status/affected_count/前 3 个 id/实际生效栏位/resolved_model；失败路径不经此函式、原样回报。
 
 export const AFFECTED_PREVIEW = 3
 
@@ -11,7 +11,7 @@ export function buildUpdateReceipt(input: {
 }): Record<string, unknown> {
   const { data, nodeId, patch, resolvedModel } = input
   const affected = Array.isArray(data.affected_node_ids) ? (data.affected_node_ids as unknown[]).map(String) : []
-  // 回顯「實際生效值」讓 agent 能核對 patch 是否落地（取自回傳 node.metadata，不取 patch 本身）。
+  // 回显「实际生效值」让 agent 能核对 patch 是否落地（取自回传 node.metadata，不取 patch 本身）。
   const meta = data.node?.metadata && typeof data.node.metadata === "object" ? data.node.metadata : {}
   const applied: Record<string, unknown> = {}
   for (const k of Object.keys(patch ?? {})) {

@@ -1,21 +1,21 @@
 // desktop/window-controls.js
 //
-// 0.3.0：自繪視窗控制鈕的殼側端點。
+// 0.3.0：自绘视窗控制钮的壳侧端点。
 //
-// 背景：KDE 深色原生標題列與淺色頁面衝突（吃掉一整條高度）且系統畫的
-// titleBarOverlay 按鈕形狀無法自訂，所以 0.3.0 移除 titleBarOverlay，改由
-// 遠端頁面自己畫「最小化／最大化／關閉」三顆鈕。本模組是殼提供給網頁的
-// 唯一視窗操作面，只做「動視窗」，不含業務邏輯。
+// 背景：KDE 深色原生标题列与浅色页面冲突（吃掉一整条高度）且系统画的
+// titleBarOverlay 按钮形状无法自订，所以 0.3.0 移除 titleBarOverlay，改由
+// 远端页面自己画「最小化／最大化／关闭」三颗钮。本模组是壳提供给网页的
+// 唯一视窗操作面，只做「动视窗」，不含业务逻辑。
 //
-// 抽成獨立模組的原因：main.js 與驗證 harness 共用同一份實作，讓「網頁按下
-// 去真的改變了視窗狀態」可以用真行為斷言（不是字串比對）。
+// 抽成独立模组的原因：main.js 与验证 harness 共用同一份实作，让「网页按下
+// 去真的改变了视窗状态」可以用真行为断言（不是字串比对）。
 //
-// 一律以 BrowserWindow.fromWebContents(event.sender) 取得目標視窗，不用全域
-// mainWindow：子視窗（微信登入彈窗）也載同一份 preload，動作必須落在發出
-// 請求的那個視窗上，否則子視窗的按鈕會去動主視窗。
+// 一律以 BrowserWindow.fromWebContents(event.sender) 取得目标视窗，不用全域
+// mainWindow：子视窗（微信登入弹窗）也载同一份 preload，动作必须落在发出
+// 请求的那个视窗上，否则子视窗的按钮会去动主视窗。
 //
-// 安全：僅登記四個固定 channel，參數一概忽略（不接受任何來自頁面的目標視窗
-// 或座標）。頁面無法藉此取得任何主進程能力。
+// 安全：仅登记四个固定 channel，参数一概忽略（不接受任何来自页面的目标视窗
+// 或座标）。页面无法藉此取得任何主进程能力。
 
 "use strict";
 
@@ -34,8 +34,8 @@ function windowFor(event) {
 }
 
 /**
- * 登記三個動作 channel（send）與一個狀態查詢（handle）。
- * 由 main.js 在 app ready 時呼叫一次即可（ipcMain 是 session 級、非視窗級）。
+ * 登记三个动作 channel（send）与一个状态查询（handle）。
+ * 由 main.js 在 app ready 时呼叫一次即可（ipcMain 是 session 级、非视窗级）。
  */
 function registerWindowControlsIpc(ipcMain) {
   ipcMain.on(CHANNELS.minimize, (event) => {
@@ -63,12 +63,12 @@ function registerWindowControlsIpc(ipcMain) {
 }
 
 /**
- * 把視窗的最大化狀態推給該視窗的頁面（channel `eimu-shell:state`）。
- * 主視窗必掛；子視窗也掛（子視窗不需要控制鈕，但掛著不會壞，且避免頁面
- * 自行訂閱後永遠收不到初始狀態更新的落差）。
+ * 把视窗的最大化状态推给该视窗的页面（channel `eimu-shell:state`）。
+ * 主视窗必挂；子视窗也挂（子视窗不需要控制钮，但挂著不会坏，且避免页面
+ * 自行订阅后永远收不到初始状态更新的落差）。
  *
- * 涵蓋 maximize/unmaximize 與 full-screen 進出：全螢幕時頁面也應把「還原」
- * 圖標換成「最大化」，所以兩者都視為 maximized=true。
+ * 涵盖 maximize/unmaximize 与 full-screen 进出：全萤幕时页面也应把「还原」
+ * 图标换成「最大化」，所以两者都视为 maximized=true。
  */
 function attachWindowStateBroadcast(win) {
   const send = () => {

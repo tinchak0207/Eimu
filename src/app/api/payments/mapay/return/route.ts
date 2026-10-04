@@ -11,7 +11,7 @@ import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/mapay-credit";
 import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function pricingUrl(req: NextRequest, params: Record<string, string>) {
   const url = new URL("/pricing", req.url);
@@ -34,8 +34,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(pricingUrl(req, { mapay: "pending" }));
   }
 
-  // param 有兩種：已登入下單的三段自簽值、未登入的舊格式（只有 planId）。
-  // 與 notify 同源：自定义档 custom:<coins> 也要能解析。
+  // param 有两种：已登入下单的三段自签值、未登入的旧格式（只有 planId）。
+  // 与 notify 同源：自定义档 custom:<coins> 也要能解析。
   const bound = resolveMapayOrderBinding(params.param);
 
   const plan = resolvePricingPlan(bound?.planId ?? params.param);
@@ -43,10 +43,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(pricingUrl(req, { mapay: "mismatch" }));
   }
 
-  // 已綁用戶：這裡也走同一條冪等入帳（不是只讀狀態）——用戶可能比網關回調先回到站點，
-  // 若此刻退回舊流程生成兌換碼，稍後 notify 的直達入帳就會疊成雙份額度。
-  // 入帳通道明確失敗（上游沒動）才退回兌換碼；通道不可用時只顯示「處理中」，
-  // 把發放權交給 notify（它記帳失敗時仍會發碼兜底），保證一張單只有一條發放通道。
+  // 已绑用户：这里也走同一条幂等入帐（不是只读状态）——用户可能比网关回调先回到站点，
+  // 若此刻退回旧流程生成兑换码，稍后 notify 的直达入帐就会叠成双份额度。
+  // 入帐通道明确失败（上游没动）才退回兑换码；通道不可用时只显示「处理中」，
+  // 把发放权交给 notify（它记帐失败时仍会发码兜底），保证一张单只有一条发放通道。
   if (bound) {
     const outcome = await creditMapayOrderViaRelay({
       orderId: params.out_trade_no,
@@ -55,9 +55,9 @@ export async function GET(req: NextRequest) {
     });
     const channel = mapayDeliveryFor(outcome);
 
-    // 回跳頁的通道選擇與 notify 有一處刻意不同：unavailable 一律顯示「處理中」、不放行兌換碼。
-    // 通道不可用可能是「請求已到控面但回應丟了」——那一刻上游可能已經加額，再發一張碼就會雙發；
-    // 發放權留給 notify（它會依占位狀態決定直達或發碼），回跳頁只保證一張單不會出現第二條通道。
+    // 回跳页的通道选择与 notify 有一处刻意不同：unavailable 一律显示「处理中」、不放行兑换码。
+    // 通道不可用可能是「请求已到控面但回应丢了」——那一刻上游可能已经加额，再发一张码就会双发；
+    // 发放权留给 notify（它会依占位状态决定直达或发码），回跳页只保证一张单不会出现第二条通道。
     if (channel === "hold" || channel === "none" || outcome === "unavailable") {
       console.warn("[mapay return] direct credit not settled, notify owns delivery", {
         out_trade_no: params.out_trade_no,
@@ -74,8 +74,8 @@ export async function GET(req: NextRequest) {
       });
       return NextResponse.redirect(pricingUrl(req, { mapay: "credited" }));
     }
-    // channel === "redemption"（=上游明確沒動，占位已終態 failed：notify 永不可能再直達加額）
-    // → 退回舊流程發碼，保證錢能落地。
+    // channel === "redemption"（=上游明确没动，占位已终态 failed：notify 永不可能再直达加额）
+    // → 退回旧流程发码，保证钱能落地。
     console.warn("[mapay return] direct credit declined, falling back to redemption", {
       out_trade_no: params.out_trade_no,
       user_id: bound.userId,

@@ -1,17 +1,17 @@
-// 分層價目（代理/分銷）的核心純邏輯。
+// 分层价目（代理/分销）的核心纯逻辑。
 //
-// 商業場景：代理以「拿貨價」進貨後向下游二次分銷時有自己的加成，平台不希望對每個
-// 下游即時改全局定價覆寫，而是按金鑰/租戶掛一個 tier（internal / reseller /
-// enterprise），每個 tier 各自對「model × resolution」覆寫幣單價。單價是**絕對幣價**
-// ——高於基準就是加成、低於基準就是拿貨價，一個數字同時涵蓋兩種語意。
+// 商业场景：代理以「拿货价」进货后向下游二次分销时有自己的加成，平台不希望对每个
+// 下游即时改全局定价覆写，而是按金钥/租户挂一个 tier（internal / reseller /
+// enterprise），每个 tier 各自对「model × resolution」覆写币单价。单价是**绝对币价**
+// ——高于基准就是加成、低于基准就是拿货价，一个数字同时涵盖两种语意。
 //
-// 優先順序（B 端計費）：tier 覆寫 → 基準價（generation coins 經全局 pricing-overrides
-// 後的 effective 價）。無 tier 或該 tier 未覆寫該 model×resolution → 直接用基準價，
-// C 端不吃這一層（C 端根本不走本模組）。
+// 优先顺序（B 端计费）：tier 覆写 → 基准价（generation coins 经全局 pricing-overrides
+// 后的 effective 价）。无 tier 或该 tier 未覆写该 model×resolution → 直接用基准价，
+// C 端不吃这一层（C 端根本不走本模组）。
 //
-// 本模組是純函式層：不碰 Blob、不碰 process.env，可直接在 node --test 下測。
-// 清洗規則複用 generation-model-catalog 的口徑（未知 modelId、未知 resolution、
-// 非 [PRICING_COIN_STEP, 100_000] 的幣價全部靜默丟棄），避免兩套定價清洗規則漂移。
+// 本模组是纯函式层：不碰 Blob、不碰 process.env，可直接在 node --test 下测。
+// 清洗规则复用 generation-model-catalog 的口径（未知 modelId、未知 resolution、
+// 非 [PRICING_COIN_STEP, 100_000] 的币价全部静默丢弃），避免两套定价清洗规则漂移。
 
 import {
   GENERATION_MODEL_CATALOG,
@@ -30,11 +30,11 @@ export function isTierId(value: unknown): value is TierId {
   return typeof value === "string" && (TIER_IDS as readonly string[]).includes(value);
 }
 
-/** tier → modelId → resolution → 幣單價（absolute coins）。 */
+/** tier → modelId → resolution → 币单价（absolute coins）。 */
 export type TierPriceTable = Record<string, Record<string, number>>;
 export type TierPricingTables = Partial<Record<TierId, TierPriceTable>>;
 
-/** 金鑰 id 直接命中，或 `user:<userId>`（租戶級）。 */
+/** 金钥 id 直接命中，或 `user:<userId>`（租户级）。 */
 export type TierAssignments = Record<string, TierId>;
 
 export interface TierPricingDocument {
@@ -51,10 +51,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 清洗任何不可信輸入（Blob 內容 / PATCH body）到 tier-pricing schema。規則與
- * normalizeModelPricingOverrides 一致：越界直接丟棄該欄位而非報錯。未知 tier、
- * 未知 modelId、不屬於該模型 resolutions 的解析度、非 [PRICING_COIN_STEP, 100_000]
- * 的幣價全部靜默丟棄；清洗後為空的 tier 條目不輸出。
+ * 清洗任何不可信输入（Blob 内容 / PATCH body）到 tier-pricing schema。规则与
+ * normalizeModelPricingOverrides 一致：越界直接丢弃该栏位而非报错。未知 tier、
+ * 未知 modelId、不属于该模型 resolutions 的解析度、非 [PRICING_COIN_STEP, 100_000]
+ * 的币价全部静默丢弃；清洗后为空的 tier 条目不输出。
  */
 export function normalizeTierPricingDocument(raw: unknown): TierPricingDocument {
   if (!isPlainObject(raw)) return { tiers: {}, assignments: {} };
@@ -97,17 +97,17 @@ export function normalizeTierAssignments(raw: unknown): TierAssignments {
   const assignments: TierAssignments = {};
   for (const [key, value] of Object.entries(raw)) {
     if (!key || !isTierId(value)) continue;
-    // defineProperty 而不是 assignment：JSON.parse 可能給我們 own "__proto__" key，
-    // 用 `assignments[key] = value` 會設定原型而非 own property。
+    // defineProperty 而不是 assignment：JSON.parse 可能给我们 own "__proto__" key，
+    // 用 `assignments[key] = value` 会设定原型而非 own property。
     Object.defineProperty(assignments, key, { value, enumerable: true, writable: true, configurable: true });
   }
   return assignments;
 }
 
 /**
- * 與 provider-config.imageGenerationCoins 相同的 resolution 推導：quality → 2k（模型
- * 沒有 2k 就取 default），fast → 1k（模型沒有 1k 取 default）。tier 表的 resolution
- * key 必須與計費實際走的 resolution 一致，查價才會命中。
+ * 与 provider-config.imageGenerationCoins 相同的 resolution 推导：quality → 2k（模型
+ * 没有 2k 就取 default），fast → 1k（模型没有 1k 取 default）。tier 表的 resolution
+ * key 必须与计费实际走的 resolution 一致，查价才会命中。
  */
 export function imageBillingResolution(
   modelId: string,
@@ -121,7 +121,7 @@ export function imageBillingResolution(
     : model?.resolutions.includes("1k") ? "1k" : defaultOutputResolution(modelId);
 }
 
-/** 查 tier 表的單位幣價。tier 缺省/未知、model 或 resolution 未被覆寫 → null（回基準）。 */
+/** 查 tier 表的单位币价。tier 缺省/未知、model 或 resolution 未被覆写 → null（回基准）。 */
 export function tierBillingCoins(
   tables: TierPricingTables,
   tier: TierId | undefined,
@@ -138,7 +138,7 @@ export function tierBillingCoins(
   return coins;
 }
 
-/** B 端圖片計費版本的 tier 單價查詢：mode → resolution 後再查表。 */
+/** B 端图片计费版本的 tier 单价查询：mode → resolution 后再查表。 */
 export function tierImageBillingCoins(
   tables: TierPricingTables,
   tier: TierId | undefined,
@@ -150,7 +150,7 @@ export function tierImageBillingCoins(
   return tierBillingCoins(tables, tier, modelId, resolution);
 }
 
-/** 金鑰優先、租戶（user:<userId>）次之；皆無 → undefined（基準價）。 */
+/** 金钥优先、租户（user:<userId>）次之；皆无 → undefined（基准价）。 */
 export function resolveTierAssignment(
   assignments: TierAssignments,
   keyId: string,
@@ -162,18 +162,18 @@ export function resolveTierAssignment(
 }
 
 export interface ResolvedBillingCoins {
-  /** 實際扣費用的單張幣價（tier 覆寫，否則基準）。 */
+  /** 实际扣费用的单张币价（tier 覆写，否则基准）。 */
   coins: number;
-  /** 命中的 tier；undefined = 無 tier/無覆寫，走基準。 */
+  /** 命中的 tier；undefined = 无 tier/无覆写，走基准。 */
   tier: TierId | undefined;
-  /** 實際計價的解析度（mode 推導）。 */
+  /** 实际计价的解析度（mode 推导）。 */
   resolution: OutputResolution;
 }
 
 /**
- * B 端 /v1 扣費的單價進入點：金鑰 tier → tier 覆寫，無覆寫就回
- * imageGenerationCoins（基準 generation coins）。這是 generations 路由實際呼叫的
- * 函式，contract 測試鎖的就是這一顆。
+ * B 端 /v1 扣费的单价进入点：金钥 tier → tier 覆写，无覆写就回
+ * imageGenerationCoins（基准 generation coins）。这是 generations 路由实际呼叫的
+ * 函式，contract 测试锁的就是这一颗。
  */
 export function resolveBillingCoinsPerImage(
   doc: TierPricingDocument,

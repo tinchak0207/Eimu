@@ -1,5 +1,5 @@
-// 渠道 overrides 的稽核紀錄查詢：GET 回傳最近 N 筆變更（誰、何時、diff、完整快照）。
-// 認證與 route.ts 同一套 requireAdminSession——沒有 session 就 401，不做任何弱化。
+// 渠道 overrides 的稽核纪录查询：GET 回传最近 N 笔变更（谁、何时、diff、完整快照）。
+// 认证与 route.ts 同一套 requireAdminSession——没有 session 就 401，不做任何弱化。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -7,7 +7,7 @@ import { listConfigChanges } from "@/lib/admin-audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;

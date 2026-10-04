@@ -1,12 +1,12 @@
-// /v1/team/lifecycle —— 團隊生命週期（面 4：解散冷靜期／退出）。
+// /v1/team/lifecycle —— 团队生命周期（面 4：解散冷静期／退出）。
 //
 //   GET  → { dissolved, dissolve_scheduled_at, due, remaining_ms, cooloff_hours }
-//   POST → { action: "dissolve" }   排程解散（owner；48h 冷靜期）
-//          { action: "withdraw" }   冷靜期內撤回（owner）
-//          { action: "leave" }      成員退出（最後一個 owner 不可直接退出）
+//   POST → { action: "dissolve" }   排程解散（owner；48h 冷静期）
+//          { action: "withdraw" }   冷静期内撤回（owner）
+//          { action: "leave" }      成员退出（最后一个 owner 不可直接退出）
 //
-// 冷靜期常量放 config（TEAM_DISSOLVE_COOLOFF_HOURS，默認 48）。執行解散只停用名冊，
-// 不動任何點數（成員桶已轉出的額度留在該 user，回收走 member-quota 的分配通路）。
+// 冷静期常量放 config（TEAM_DISSOLVE_COOLOFF_HOURS，默认 48）。执行解散只停用名册，
+// 不动任何点数（成员桶已转出的额度留在该 user，回收走 member-quota 的分配通路）。
 
 import { NextRequest, NextResponse } from "next/server";
 

@@ -1,9 +1,9 @@
 "use client";
 
-// 跨瀏覽器交接的「輪詢 → 認領」狀態機（2026-09-05 全閉環，2026-10-04 自
-// PwaHandoffPanel 逐行抽出為共用 hook）：standalone PWA / Electron 殼在使用者
-// 真實瀏覽器完成授權後，這裡以 2s 輪詢一次性 ticket，服務端回 delivered 便
-// POST claim 領回會話（服務端 Set-Cookie 種登入態），只 finish 一次。
+// 跨浏览器交接的「轮询 → 认领」状态机（2026-09-05 全闭环，2026-10-04 自
+// PwaHandoffPanel 逐行抽出为共用 hook）：standalone PWA / Electron 壳在使用者
+// 真实浏览器完成授权后，这里以 2s 轮询一次性 ticket，服务端回 delivered 便
+// POST claim 领回会话（服务端 Set-Cookie 种登入态），只 finish 一次。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearHandoffLogin } from "@/lib/github-login";
@@ -17,8 +17,8 @@ function extractTicket(loginUrl: string): string {
 }
 
 /**
- * @param loginUrl 交接授權連結（含 handoff ticket）；null 時不輪詢、不計逾時。
- * @param onSuccess claim 成功後呼叫一次（呼叫方刷新登入態）。
+ * @param loginUrl 交接授权连结（含 handoff ticket）；null 时不轮询、不计逾时。
+ * @param onSuccess claim 成功后呼叫一次（呼叫方刷新登入态）。
  */
 export function usePwaHandoffClaim(
   loginUrl: string | null,

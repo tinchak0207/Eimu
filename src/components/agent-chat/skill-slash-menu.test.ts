@@ -34,9 +34,9 @@ import { HARNESS_TOOL_IDS } from "../../lib/harness-tool-registry";
  * 打「/」直呼 Skill 的入框回归：真行为断言优先——闸门、查询词、写回、上下键、URL 编码、
  * 上游响应解析、竞态判定全部走**纯函数真进真出**（node:test 直跑，无 jsdom / 无 react 渲染库）。
  *
- * 末尾两条是**源碼探針**（不是 oracle）：DOM 交互（真键盘、真 pointer、浮层定位）本仓
- * 没有 jsdom 基建，只能用「字面仍在 + 该分支没有 handleSend」这种變更探針擋回归，
- * 真实交互待真浏览器验收——探針不算「已驗證」，别把它读成功能通过。
+ * 末尾两条是**源码探针**（不是 oracle）：DOM 交互（真键盘、真 pointer、浮层定位）本仓
+ * 没有 jsdom 基建，只能用「字面仍在 + 该分支没有 handleSend」这种变更探针挡回归，
+ * 真实交互待真浏览器验收——探针不算「已验证」，别把它读成功能通过。
  */
 
 const root = process.cwd();
@@ -101,7 +101,7 @@ test("选中一条技能＝把「/技能名 」写回输入框（指令形态替
   assert.equal(applySkillPick("", { name: "霍珀式夜光" }), "/霍珀式夜光 ");
   // 末尾留一格：紧接着打字就是这条技能的需求描述，而不是继续拼技能名。
   assert.ok(applySkillPick("/cin", { name: "x" }).endsWith(" "));
-  // 非指令形态（理论上菜单不開）不吃掉使用者已打的字：指令接在后面（同 D-24 prefill 规矩）。
+  // 非指令形态（理论上菜单不开）不吃掉使用者已打的字：指令接在后面（同 D-24 prefill 规矩）。
   assert.equal(applySkillPick("先看看这个", { name: "霍珀式夜光" }), "先看看这个 /霍珀式夜光 ");
   // 写回的是文字，绝不带换行——它不会被误当成 Enter 送出。
   assert.doesNotMatch(applySkillPick("/c", { name: "x" }), /\n/);
@@ -137,7 +137,7 @@ test("查询 URL：中文与 & 真编码，limit 随参数走，往返解析回�
   assert.equal(parsed.searchParams.get("limit"), String(SLASH_MENU_LIMIT));
   // 查询词里的 & 不许串成新的参数。
   assert.equal(parsed.searchParams.get("你"), null);
-  // 空查询词照样带 q（列舉形态），不是 omit。
+  // 空查询词照样带 q（列举形态），不是 omit。
   assert.equal(new URL(slashMenuUrl(" "), "https://x").searchParams.get("q"), "");
 });
 
@@ -165,7 +165,7 @@ test("解析上游 skills：畸形条目丢列、非数组回空、上限截断�
       { name: "没有 id" },
       { id: "no-name" },
       { id: "  ", name: "  " },
-      skillView({ id: "ok-2", name: "  第二條  ", oneLiner: undefined, family: undefined }),
+      skillView({ id: "ok-2", name: "  第二条  ", oneLiner: undefined, family: undefined }),
     ],
   });
   assert.deepEqual(
@@ -173,7 +173,7 @@ test("解析上游 skills：畸形条目丢列、非数组回空、上限截断�
     ["ok-1", "ok-2"],
     "有效条目一条不少、畸形一条不留",
   );
-  assert.equal(messy[1].name, "第二條", "前后空白裁掉");
+  assert.equal(messy[1].name, "第二条", "前后空白裁掉");
   assert.equal(messy[1].oneLiner, "", "缺字段给空串，不编造文案");
   assert.equal(messy[1].family, "");
 
@@ -231,10 +231,10 @@ test("debounce 常量在下限之上（≥150ms，本片取 160ms）", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* 源碼探針（變更探針，非 oracle）：DOM 交互待真瀏覽器驗收                */
+/* 源码探针（变更探针，非 oracle）：DOM 交互待真浏览器验收                */
 /* ------------------------------------------------------------------ */
 
-test("源碼探針：Esc 分支不送出不清理，关着菜单时的既有送出契约逐字未变", () => {
+test("源码探针：Esc 分支不送出不清理，关着菜单时的既有送出契约逐字未变", () => {
   const slashBlockStart = composer.indexOf("if (slashMenuOpen) {");
   assert.ok(slashBlockStart >= 0, "composer 必须有斜线菜单的键盘分支");
   const slashBlockEnd = composer.indexOf("// Enter 发送，Shift+Enter 换行。");
@@ -256,7 +256,7 @@ test("源碼探針：Esc 分支不送出不清理，关着菜单时的既有送�
 });
 
 /* ================================================================== */
-/* 「我的技能」併入斜線菜單（2026-09-27）：合併／分區／跨區索引／錯誤人話 */
+/* 「我的技能」并入斜线菜单（2026-09-27）：合并／分区／跨区索引／错误人话 */
 /* ================================================================== */
 
 /** 菜单一列（与 SlashMenuSkill 同构）。 */
@@ -264,7 +264,7 @@ function menuSkill(id: string, family = "cinema-auteur"): SlashMenuSkill {
   return { id, name: `技能-${id}`, oneLiner: `${id} 的一句话`, family };
 }
 
-test("两路合并：公开在上、我的在下；空 my 区不產生分区标题", () => {
+test("两路合并：公开在上、我的在下；空 my 区不产生分区标题", () => {
   const pub = [menuSkill("pub-1"), menuSkill("pub-2")];
   const sections = mergeSlashResults(pub, [menuSkill("mine-1")]);
   assert.deepEqual(
@@ -355,7 +355,7 @@ test("竞态判定：两路各自独立（一路作废不牵连另一路）", ()
   assert.equal(shouldAcceptSlashResponse(false, new AbortController().signal), false);
 });
 
-test("我的技能端点 URL：列舉固定路由，单条删除做真编码", () => {
+test("我的技能端点 URL：列举固定路由，单条删除做真编码", () => {
   assert.equal(slashMineUrl(), "/api/skills/mine");
   assert.equal(mineSkillUrl("user-cinema-abc12345"), "/api/skills/mine/user-cinema-abc12345");
   assert.equal(mineSkillUrl("a/b c"), "/api/skills/mine/a%2Fb%20c", "id 里的斜线/空格必须编码");
@@ -426,8 +426,8 @@ test("错误人话：各档都翻译成中文，且绝不回传原始 reason 原
     const text = humanizeSkillError(reason, status);
     assert.ok(text.length > 0, "必须给出一句话");
     assert.match(text, /[\u4e00-\u9fa5]/, "必须是中文人话");
-    assert.doesNotMatch(text, /[a-z_]+_[a-z_]+/, "不得出现后端 snake_case 代碼");
-    assert.doesNotMatch(text, /sensitive_content|api_key|sk-/i, "憑證類不得回傳原始代碼/命中種類");
+    assert.doesNotMatch(text, /[a-z_]+_[a-z_]+/, "不得出现后端 snake_case 代码");
+    assert.doesNotMatch(text, /sensitive_content|api_key|sk-/i, "凭证类不得回传原始代码/命中种类");
     assert.doesNotMatch(text, /invalid_skill|quota_exceeded|unauthorized|duplicate/);
     if (typeof reason === "string") {
       assert.ok(!text.includes(reason), "任何情况下都不得原样回传 reason");
@@ -439,36 +439,36 @@ test("错误人话：各档都翻译成中文，且绝不回传原始 reason 原
   assert.equal(
     humanizeSkillError("some_future_reason_we_do_not_know", 400),
     "操作没成功，请检查填写内容后重试。",
-    "不认识的代碼给通用人话，不转发原文",
+    "不认识的代码给通用人话，不转发原文",
   );
   assert.match(humanizeSkillError("network_error"), /网络/);
 });
 
-test("型別推導的 toolIds 全部來自真實 harness 註冊表（不在表裡的進不去）", () => {
+test("型别推导的 toolIds 全部来自真实 harness 注册表（不在表里的进不去）", () => {
   for (const kind of SKILL_OUTPUT_KINDS) {
     const ids = deriveToolIds(kind.id);
     assert.ok(ids.length > 0, `${kind.id} 必须推导出至少一个工具`);
     for (const id of ids) {
-      assert.ok(HARNESS_TOOL_IDS.has(id), `${kind.id} 推導的 ${id} 必須在 HARNESS_TOOL_IDS 內`);
+      assert.ok(HARNESS_TOOL_IDS.has(id), `${kind.id} 推导的 ${id} 必须在 HARNESS_TOOL_IDS 内`);
     }
   }
-  assert.deepEqual(deriveToolIds("not-a-kind"), [], "未知型別回空（呼叫端據此擋下送出，不猜）");
+  assert.deepEqual(deriveToolIds("not-a-kind"), [], "未知型别回空（呼叫端据此挡下送出，不猜）");
 });
 
-test("源碼探針：管理面用翻譯過的錯誤、刪除要二次確認、未登入不假成功", () => {
+test("源码探针：管理面用翻译过的错误、删除要二次确认、未登入不假成功", () => {
   const dialog = read("src/components/agent-chat/MySkillsDialog.tsx");
   assert.match(dialog, /登录后可以保存自己的技能/);
-  assert.match(dialog, /humanizeSkillError\(reason, res\.status\)/, "400/404 的 reason 必須過人話翻譯");
+  assert.match(dialog, /humanizeSkillError\(reason, res\.status\)/, "400/404 的 reason 必须过人话翻译");
   assert.doesNotMatch(
     dialog,
     /setError\(\s*(?:data\.)?reason\s*\)/,
-    "不得把後端 reason 原文直接當使用者文案",
+    "不得把后端 reason 原文直接当使用者文案",
   );
   assert.match(dialog, /确定删除？/, "删除要二次确认");
   assert.match(dialog, /method: "DELETE"/);
   assert.match(dialog, /method: "POST"/);
   assert.match(dialog, /\/api\/skills\/mine/);
-  // 入口只在既有設定彈層（不造第二個入口）。
+  // 入口只在既有设定弹层（不造第二个入口）。
   const settings = read("src/components/agent-chat/AgentSettingsPopover.tsx");
   assert.match(settings, /我的技能/);
   assert.match(settings, /<MySkillsDialog onClose=\{\(\) => setSkillsOpen\(false\)\} \/>/);

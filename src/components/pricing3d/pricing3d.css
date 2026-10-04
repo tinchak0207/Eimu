@@ -1,6 +1,6 @@
-/* ╁━ /pricing 夢境舞台：3D 宿主、正面卡、選片條、音效鈕、首屏墨色（夢境底圖在 dream-world.css）╁━ */
+/* ╁━ /pricing 梦境舞台：3D 宿主、正面卡、选片条、音效钮、首屏墨色（梦境底图在 dream-world.css）╁━ */
 
-/* ── 舞台下方預留選片條的高度（常駐，不因狀態切換跳版）── */
+/* ── 舞台下方预留选片条的高度（常驻，不因状态切换跳版）── */
 .pricing-plan-carousel .case-stage {
   --p3d-strip-room: 28px;
   margin-bottom: var(--p3d-strip-room);
@@ -12,14 +12,14 @@
   }
 }
 
-/* 舞台吃滿首屏：環段至少撐到首屏底（fold-top 由 PricingAtmosphere 量入；量到前不撐）。 */
+/* 舞台吃满首屏：环段至少撑到首屏底（fold-top 由 PricingAtmosphere 量入；量到前不撑）。 */
 .pricing-plan-carousel {
   min-height: calc(100svh - var(--p3d-fold-top, 100svh));
 }
 
-/* ── 3D 宿主：透明畫布疊在夢境底圖上，full-bleed 到內容區兩側（不越 navbar／頁尾）；
-   上緣多留一截給「衝出鏡頭」的塔，下緣含選片條區。pointer-events: none：手勢全歸
-   case-stage（環的手勢原樣），3D 只旁聽。畫布之上不疊任何半透明層。 */
+/* ── 3D 宿主：透明画布叠在梦境底图上，full-bleed 到内容区两侧（不越 navbar／页尾）；
+   上缘多留一截给「冲出镜头」的塔，下缘含选片条区。pointer-events: none：手势全归
+   case-stage（环的手势原样），3D 只旁听。画布之上不叠任何半透明层。 */
 .p3d-host {
   position: absolute;
   left: calc(50% - 50vw);
@@ -32,12 +32,12 @@
   transition: opacity 420ms var(--lg-ease, ease);
 }
 
-/* 低端機靜態場景圖（2026-10-01）：與畫布同框（透明底、同構圖，由 3D 引擎離線渲染），切档交叉淡入。 */
+/* 低端机静态场景图（2026-10-01）：与画布同框（透明底、同构图，由 3D 引擎离线渲染），切档交叉淡入。 */
 .p3d-still {
   position: absolute;
   inset: 0;
   opacity: 0;
-  /* 四張都常駐合成層：切档時不必當場解碼／柵格化／上傳（核顯上那一下會卡 ~280ms）。 */
+  /* 四张都常驻合成层：切档时不必当场解码／栅格化／上传（核显上那一下会卡 ~280ms）。 */
   will-change: opacity;
   transition: opacity 520ms var(--lg-ease, ease);
 }
@@ -68,9 +68,9 @@
   opacity: 1;
 }
 
-/* ── 正面卡 = 3D 卡堆本身：首屏就不放靜態封面（不做「先出一張卡、再換成 3D」），
-   只有價格玻璃層浮在夢境上；3D 到位時卡堆直接落進來。3D 不可用（data-pricing3d="off"：
-   省流量 / 低記憶體 / WebGL 失敗）或沒有 JS 時才退回封面。 */
+/* ── 正面卡 = 3D 卡堆本身：首屏就不放静态封面（不做「先出一张卡、再换成 3D」），
+   只有价格玻璃层浮在梦境上；3D 到位时卡堆直接落进来。3D 不可用（data-pricing3d="off"：
+   省流量 / 低记忆体 / WebGL 失败）或没有 JS 时才退回封面。 */
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-glow,
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-stage::after {
   opacity: 0;
@@ -87,8 +87,8 @@
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-surface,
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] > .case-side {
   opacity: 0;
-  /* 成為正面卡的那一刻立即隱去（2026-10-01）：原本跟著 .ppc-poster 的 420ms 淡出，換档時封面照在舞台中央
-     半透明閃一下（暴君「莫名其妙的東西跑出來」）。離開正面時仍走原本的淡入。 */
+  /* 成为正面卡的那一刻立即隐去（2026-10-01）：原本跟著 .ppc-poster 的 420ms 淡出，换档时封面照在舞台中央
+     半透明闪一下（暴君「莫名其妙的东西跑出来」）。离开正面时仍走原本的淡入。 */
   transition: none;
 }
 
@@ -96,11 +96,11 @@
   filter: none;
 }
 
-/* ── 選片條：環停下後，非正面卡縮成底部一排縮圖（同一批 DOM 卡的第二個狀態）──
-   !important 只為了壓過 paint() 每幀寫的 inline 位姿；解除 data-rest 的那一刻
-   inline 位姿立即生效（無過渡），卡回到環上跟手轉。 */
-/* 2026-09-26 第三輪：選片條的職責交給下方檔位梯（有名字、價格、張數、額度條），
-   靜止時非正面卡收進選片位後隱去，只在拖曳轉環時現身。 */
+/* ── 选片条：环停下后，非正面卡缩成底部一排缩图（同一批 DOM 卡的第二个状态）──
+   !important 只为了压过 paint() 每帧写的 inline 位姿；解除 data-rest 的那一刻
+   inline 位姿立即生效（无过渡），卡回到环上跟手转。 */
+/* 2026-09-26 第三轮：选片条的职责交给下方档位梯（有名字、价格、张数、额度条），
+   静止时非正面卡收进选片位后隐去，只在拖曳转环时现身。 */
 .pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] {
   transform: translate3d(var(--strip-x, 0px), var(--strip-y, 0px), 0) scale(var(--strip-s, 0.16)) !important;
   opacity: 0 !important;
@@ -125,17 +125,17 @@
   filter: brightness(1.08) saturate(1.08);
 }
 
-/* ── 滾輪分檔換檔（2026-10-01）：不轉環，正面卡交叉淡入；位姿瞬間到位，非正面卡不飛過畫面。 */
+/* ── 滚轮分档换档（2026-10-01）：不转环，正面卡交叉淡入；位姿瞬间到位，非正面卡不飞过画面。 */
 .pricing-plan-carousel .case-stage[data-switch="fade"] .case-slab {
   transition: opacity 320ms var(--lg-ease, ease) !important;
 }
 
-/* 離開正面的那張立即隱去（不縮成選片條縮圖再淡出——那一下在舞台下緣是個莫名的小方塊）。 */
+/* 离开正面的那张立即隐去（不缩成选片条缩图再淡出——那一下在舞台下缘是个莫名的小方块）。 */
 .pricing-plan-carousel .case-stage[data-switch="fade"] .case-slab[data-front="false"] {
   transition: none !important;
 }
 
-/* ── 音效開關（手機可關；偏好存 localStorage）── */
+/* ── 音效开关（手机可关；偏好存 localStorage）── */
 .p3d-sound {
   position: absolute;
   top: 10px;
@@ -156,18 +156,18 @@
   outline-offset: 2px;
 }
 
-/* ── 首屏墨色：天是珍珠淺藍，字一律深墨藍（不用純黑——與藍粉白同一色相）── */
+/* ── 首屏墨色：天是珍珠浅蓝，字一律深墨蓝（不用纯黑——与蓝粉白同一色相）── */
 .p3d-page {
   --p3d-ink: #1a2147;
   --p3d-ink-2: rgba(26, 33, 71, 0.74);
   --p3d-ink-3: rgba(26, 33, 71, 0.58);
   --p3d-pink: #ec4d92;
   --p3d-blue: #3b82ff;
-  /* 漸變文字專用的半飽和版本（2026-09-27 暴君「粉/蓝渐变的那个饱和度减半」）：
-     只給 background-clip:text 的文字用；--p3d-pink / --p3d-blue 原色保留給
-     背景暈染、圖示、進度條（那些沒被要求降飽和）。 */
-  --p3d-pink-soft: #c47595; /* #ec4d92 的 HSL 飽和度 80.7% → 40.4% */
-  --p3d-blue-soft: #6c8fce; /* #3b82ff 的 HSL 飽和度 100% → 50% */
+  /* 渐变文字专用的半饱和版本（2026-09-27 暴君「粉/蓝渐变的那个饱和度减半」）：
+     只给 background-clip:text 的文字用；--p3d-pink / --p3d-blue 原色保留给
+     背景晕染、图示、进度条（那些没被要求降饱和）。 */
+  --p3d-pink-soft: #c47595; /* #ec4d92 的 HSL 饱和度 80.7% → 40.4% */
+  --p3d-blue-soft: #6c8fce; /* #3b82ff 的 HSL 饱和度 100% → 50% */
   --p3d-line: rgba(58, 80, 160, 0.12);
 }
 
@@ -175,7 +175,7 @@
 .p3d-ink-2 { color: var(--p3d-ink-2); }
 .p3d-ink-3 { color: var(--p3d-ink-3); }
 
-/* 標題裡的關鍵詞：粉 → 藍的虹彩字（oklab 插值，不經過髒紫）。 */
+/* 标题里的关键词：粉 → 蓝的虹彩字（oklab 插值，不经过脏紫）。 */
 .p3d-hl {
   background: linear-gradient(in oklab 100deg, var(--p3d-pink-soft), var(--p3d-blue-soft));
   -webkit-background-clip: text;
@@ -205,7 +205,7 @@
   background: linear-gradient(90deg, var(--p3d-blue), transparent);
 }
 
-/* 夢境裡的圓形按鈕（關閉 / 音效）：白色液態玻璃泡 + 頂緣掠光。 */
+/* 梦境里的圆形按钮（关闭 / 音效）：白色液态玻璃泡 + 顶缘掠光。 */
 .p3d-page .p3d-roundbtn,
 .p3d-sound {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6));
@@ -230,7 +230,7 @@
 }
 
 
-/* ═══ 首屏以下：夢境化成珍珠白，面板是白色液態玻璃（虹彩細邊 + 頂緣高光 + 藍粉柔影）═══ */
+/* ═══ 首屏以下：梦境化成珍珠白，面板是白色液态玻璃（虹彩细边 + 顶缘高光 + 蓝粉柔影）═══ */
 .p3d-panel {
   position: relative;
   border-radius: 1.75rem;
@@ -243,7 +243,7 @@
   backdrop-filter: blur(22px) saturate(1.5);
 }
 
-/* 虹彩細邊：粉 → 白 → 藍的 1px 邊（mask 挖空，只留邊）。 */
+/* 虹彩细边：粉 → 白 → 蓝的 1px 边（mask 挖空，只留边）。 */
 .p3d-panel::before {
   content: "";
   position: absolute;
@@ -383,7 +383,7 @@
   color: var(--p3d-pink);
 }
 
-/* 首屏以下的主按鈕：深墨藍實心（DESIGN.md 主 CTA 同色系）+ 粉藍柔光。 */
+/* 首屏以下的主按钮：深墨蓝实心（DESIGN.md 主 CTA 同色系）+ 粉蓝柔光。 */
 .p3d-btn-light {
   display: inline-flex;
   align-items: center;

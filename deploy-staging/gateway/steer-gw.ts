@@ -1,22 +1,22 @@
-// steer-gw.ts —— REQ-D2（steer：回合中引導）的網關接線層。
+// steer-gw.ts —— REQ-D2（steer：回合中引导）的网关接线层。
 //
 // 四件事：
-//   1. 受理端點 POST /agent/v1/sessions/:id/steer（router.ts 轉發到 handleSteer）。
-//   2. 真注入：回合卡在 question 斷點（pendingQuestions 非空）時，steer 文本以
-//      「答覆」語義回灌 question 工具結果 —— opencode 在同一個 turn 內讀到它繼續跑，
-//      不終止回合、不另起用戶訊息。輪子＝questions-gw.settleQuestion（既有調用鏈，
-//      此處只換 answer 內容為用戶的引導語）。
-//   3. 誠實排隊：沒有 question 斷點時，opencode 物理上沒有「回合中注入」的入口
-//      （mid-turn prompt 只會被靜默排隊到本輪結束）。這裡不假裝生效——收進
-//      state.pendingSteers，本回合收尾時按 FIFO 拼成一條下一回合的指引投遞，
-//      過程中每一條的狀態都上報（queued → applied / aborted / failed），UI 必須看得見。
-//   4. 命令身份（REQ-D2b，2026-09-23）：受理前查 tombstone、**投遞前**落地 steer_id +
-//      凍結 payload_hash、終態即墓碑、重放一律回可辨識錯誤碼。兩條投遞腿（question 注入
-//      與隊列投遞）都必須帶同一身份——否則重連後同一條指引可以被投遞第二次。
-//      身份語義在 steer-identity.ts，持久層在 persistence.ts（steer_commands 表），
-//      恢復掃描在 steer-ledger-gw.ts。
+//   1. 受理端点 POST /agent/v1/sessions/:id/steer（router.ts 转发到 handleSteer）。
+//   2. 真注入：回合卡在 question 断点（pendingQuestions 非空）时，steer 文本以
+//      「答覆」语义回灌 question 工具结果 —— opencode 在同一个 turn 内读到它继续跑，
+//      不终止回合、不另起用户讯息。轮子＝questions-gw.settleQuestion（既有调用链，
+//      此处只换 answer 内容为用户的引导语）。
+//   3. 诚实排队：没有 question 断点时，opencode 物理上没有「回合中注入」的入口
+//      （mid-turn prompt 只会被静默排队到本轮结束）。这里不假装生效——收进
+//      state.pendingSteers，本回合收尾时按 FIFO 拼成一条下一回合的指引投递，
+//      过程中每一条的状态都上报（queued → applied / aborted / failed），UI 必须看得见。
+//   4. 命令身份（REQ-D2b，2026-09-23）：受理前查 tombstone、**投递前**落地 steer_id +
+//      冻结 payload_hash、终态即墓碑、重放一律回可辨识错误码。两条投递腿（question 注入
+//      与队列投递）都必须带同一身份——否则重连后同一条指引可以被投递第二次。
+//      身份语义在 steer-identity.ts，持久层在 persistence.ts（steer_commands 表），
+//      恢复扫描在 steer-ledger-gw.ts。
 //
-// 純決策在 steer-core.ts（零 import、可 node --test 直跑）；本檔只做 I/O 與接線。
+// 纯决策在 steer-core.ts（零 import、可 node --test 直跑）；本档只做 I/O 与接线。
 import type { SessionState } from "./types-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession } from "./sessions-core.ts"
@@ -34,16 +34,16 @@ import {
   type PendingSteer,
   type SteerStatus,
 } from "./steer-core.ts"
-// REQ-D2b（2026-09-23）：命令身份（持久 tombstone）——受理前查、投遞前落地、終態即墓碑。
+// REQ-D2b（2026-09-23）：命令身份（持久 tombstone）——受理前查、投递前落地、终态即墓碑。
 import { freezeSteerPayload, planSteerBegin, steerWireStatus, type SteerCommand } from "./steer-identity.ts"
 import { steerCommandFrames, steerLedger } from "./steer-ledger-gw.ts"
 
-// ─────────────────────────── 投遞縫（依賴反轉，與 director.ts 的 setDirectorEmitter 同款）
+// ─────────────────────────── 投递缝（依赖反转，与 director.ts 的 setDirectorEmitter 同款）
 //
-// 為什麼不直接 import messages-gw.handleSendMessage：opencode-event-handler → steer-gw
-// 是本刀新增的邊，再讓 steer-gw → messages-gw → opencode-client → opencode-event-handler
-// 繞成新環。改由組合根（index.ts）注入「投遞一條下一回合訊息」的能力——
-// 生產走 handleSendMessage（帶著記憶注入/計時/閘門全套既有語義），測試可注入假的。
+// 为什么不直接 import messages-gw.handleSendMessage：opencode-event-handler → steer-gw
+// 是本刀新增的边，再让 steer-gw → messages-gw → opencode-client → opencode-event-handler
+// 绕成新环。改由组合根（index.ts）注入「投递一条下一回合讯息」的能力——
+// 生产走 handleSendMessage（带著记忆注入/计时/闸门全套既有语义），测试可注入假的。
 
 export type SteerTurnDeliverer = (state: SessionState, text: string) => Promise<boolean>
 
@@ -53,7 +53,7 @@ export function setSteerTurnDeliverer(fn: SteerTurnDeliverer): void {
   driveTurn = fn
 }
 
-/** 隊列讀寫的唯一入口（缺席＝空，避免每個呼叫點都 ?? []）。 */
+/** 队列读写的唯一入口（缺席＝空，避免每个呼叫点都 ?? []）。 */
 function steerQueue(state: SessionState): PendingSteer[] {
   if (!Array.isArray(state.pendingSteers)) state.pendingSteers = []
   return state.pendingSteers
@@ -74,8 +74,8 @@ function emitSteerStatus(
   })
 }
 
-/** 一條排隊 steer 的狀態上報給它的全部 id（本體 + 別名）——同文去重命中的第二個
- *  徽章才有終態可收，否則它永遠停在「排队中」（D2-3 的反向假話）。 */
+/** 一条排队 steer 的状态上报给它的全部 id（本体 + 别名）——同文去重命中的第二个
+ *  徽章才有终态可收，否则它永远停在「排队中」（D2-3 的反向假话）。 */
 function emitSteerStatusForAll(
   state: SessionState,
   steer: PendingSteer,
@@ -85,7 +85,7 @@ function emitSteerStatusForAll(
   for (const id of steerFrameIds(steer)) emitSteerStatus(state, id, status, extra)
 }
 
-/** 重放拒絕的文案（每一條都說清「不會重複發送」，不含糊）。 */
+/** 重放拒绝的文案（每一条都说清「不会重复发送」，不含糊）。 */
 const STEER_REPLAY_MESSAGES: Record<string, string> = {
   steer_replay_settled: "这条引导已经有结果了，不会重复发送",
   steer_replay_in_flight: "这条引导已经在处理中，不会重复发送",
@@ -94,10 +94,10 @@ const STEER_REPLAY_MESSAGES: Record<string, string> = {
 }
 
 /**
- * 重放拒絕（D2b）：同一 steer_id 的第二次投遞——回**可辨識的錯誤碼**（絕不靜默接受成
- * 第二次投遞），同時把既有命令的當前誠實狀態補發給它的全部 id（重連後前端的徽章才不會
- * 停在舊狀態）。HTTP 409 是刻意的：語義是「你的訊息沒被吞，只是這條不需要再送」；
- * 前端以 code 區分（`steer_replay_*` 不落回正常送出腿，見 agent-chat-client.isSteerUnavailableError）。
+ * 重放拒绝（D2b）：同一 steer_id 的第二次投递——回**可辨识的错误码**（绝不静默接受成
+ * 第二次投递），同时把既有命令的当前诚实状态补发给它的全部 id（重连后前端的徽章才不会
+ * 停在旧状态）。HTTP 409 是刻意的：语义是「你的讯息没被吞，只是这条不需要再送」；
+ * 前端以 code 区分（`steer_replay_*` 不落回正常送出腿，见 agent-chat-client.isSteerUnavailableError）。
  */
 function rejectSteerReplay(
   state: SessionState,
@@ -111,8 +111,8 @@ function rejectSteerReplay(
   console.log(
     `[gateway] steer replay rejected (${code}): steer=${command.steerId} state=${command.state} session=${state.sessionId}`,
   )
-  // 回體刻意自帶 `status`（既有命令的上屏狀態）：前端據此把徽章糾正成事實，
-  // 而不是把它留成「未能送達」的猜測（見 agent-chat-client 的 steerReplayStatus）。
+  // 回体刻意自带 `status`（既有命令的上屏状态）：前端据此把徽章纠正成事实，
+  // 而不是把它留成「未能送达」的猜测（见 agent-chat-client 的 steerReplayStatus）。
   return Response.json(
     {
       error: { message: STEER_REPLAY_MESSAGES[code] ?? "这条引导已经处理过，不会重复发送", type: code, code },
@@ -123,23 +123,23 @@ function rejectSteerReplay(
   )
 }
 
-/** 回合在跑嗎（＝有可引導的當前回合）。lastTurnActiveAt 由 handleSendMessage 打點、
- *  session.idle 正常收尾清零（question 凍結分支不清）——正是「當前回合」的權威開關。 */
+/** 回合在跑吗（＝有可引导的当前回合）。lastTurnActiveAt 由 handleSendMessage 打点、
+ *  session.idle 正常收尾清零（question 冻结分支不清）——正是「当前回合」的权威开关。 */
 function turnInFlight(state: SessionState): boolean {
   return (state.lastTurnActiveAt ?? 0) > 0
 }
 
 /**
- * 真注入：回合卡在 question 斷點 → 把引導語當作答覆回灌，當前回合內生效。
- * 回傳被注入的 requestId 清單；空清單＝沒有斷點可用（呼叫端落回誠實排隊）。
+ * 真注入：回合卡在 question 断点 → 把引导语当作答覆回灌，当前回合内生效。
+ * 回传被注入的 requestId 清单；空清单＝没有断点可用（呼叫端落回诚实排队）。
  */
 async function injectIntoQuestionBreakpoint(state: SessionState, text: string): Promise<string[]> {
   const requestIds = [...state.pendingQuestions.keys()]
   if (requestIds.length === 0) return []
   const injected: string[] = []
   for (let i = 0; i < requestIds.length; i++) {
-    // 第一張卡吃用戶的引導語（這正是「追加指引」的落點）；同輪其餘卡照舊用
-    // 「已轉向新話題」的跳過語義收斂——一句引導語不該被當成多題的答案。
+    // 第一张卡吃用户的引导语（这正是「追加指引」的落点）；同轮其余卡照旧用
+    // 「已转向新话题」的跳过语义收敛——一句引导语不该被当成多题的答案。
     const answer = i === 0 ? text : undefined
     try {
       await settleQuestion(state, requestIds[i], answer)
@@ -152,26 +152,26 @@ async function injectIntoQuestionBreakpoint(state: SessionState, text: string): 
 }
 
 /**
- * POST /agent/v1/sessions/:id/steer  body { content, steer_id }（steer_id 必填，見下）
+ * POST /agent/v1/sessions/:id/steer  body { content, steer_id }（steer_id 必填，见下）
  *
- * 回傳形態（前端據此顯示，絕不含糊）：
+ * 回传形态（前端据此显示，绝不含糊）：
  *   200 { ok:true, status:"injected", steer_id, injected_into:[que_*], applied_in_turn:true }
  *   200 { ok:true, status:"queued", steer_id, position, deduped? }
- *   400 { ok:false, code:"steer_id_required" } —— 沒帶 steer_id（D-7 fail-closed，網關不自鑄）
- *   400 { ok:false, code:"steer_id_invalid" }  —— 帶了但不在值域 [A-Za-z0-9._-]{1,64} 內
- *   409 { ok:false, code:"no_active_turn" }   —— 沒在跑的回合，直接送普通訊息即可
- *   409 { ok:false, code:"turn_aborted" }     —— **用戶**停止了本回合，同上
- *   429 { ok:false, code:"steer_queue_full", limit } —— 超限誠實拒絕
+ *   400 { ok:false, code:"steer_id_required" } —— 没带 steer_id（D-7 fail-closed，网关不自铸）
+ *   400 { ok:false, code:"steer_id_invalid" }  —— 带了但不在值域 [A-Za-z0-9._-]{1,64} 内
+ *   409 { ok:false, code:"no_active_turn" }   —— 没在跑的回合，直接送普通讯息即可
+ *   409 { ok:false, code:"turn_aborted" }     —— **用户**停止了本回合，同上
+ *   429 { ok:false, code:"steer_queue_full", limit } —— 超限诚实拒绝
  *
- * D-6（2026-09-23）：`turn_aborted` 只代表用戶停止。內部空轉斷路器中止（turnAbortSource
- * ="system"）的窗口**照常受理**——那只是換一種方式續跑同一輪，指引不會失效（見下）。
+ * D-6（2026-09-23）：`turn_aborted` 只代表用户停止。内部空转断路器中止（turnAbortSource
+ * ="system"）的窗口**照常受理**——那只是换一种方式续跑同一轮，指引不会失效（见下）。
  *
- * D2b（2026-09-23）新增的重放拒絕（同一 steer_id 的第二次投遞，全部 HTTP 409、
- * 前端**不得**落回正常送出腿——否則就等於把同一條指引送了第二次）：
- *   409 { ok:false, code:"steer_replay_settled" }     已有終態結論（tombstone 命中）
- *   409 { ok:false, code:"steer_replay_in_flight" }   仍在途（未確認，永不自動重發）
- *   409 { ok:false, code:"steer_payload_mismatch" }   同 id 帶不同內容（在途被改寫）
- *   409 { ok:false, code:"steer_id_conflict" }        同 id 屬於別的會話
+ * D2b（2026-09-23）新增的重放拒绝（同一 steer_id 的第二次投递，全部 HTTP 409、
+ * 前端**不得**落回正常送出腿——否则就等于把同一条指引送了第二次）：
+ *   409 { ok:false, code:"steer_replay_settled" }     已有终态结论（tombstone 命中）
+ *   409 { ok:false, code:"steer_replay_in_flight" }   仍在途（未确认，永不自动重发）
+ *   409 { ok:false, code:"steer_payload_mismatch" }   同 id 带不同内容（在途被改写）
+ *   409 { ok:false, code:"steer_id_conflict" }        同 id 属于别的会话
  */
 export async function handleSteer(key: string, id: string, req: Request): Promise<Response> {
   const state = getOwnedSession(key, id)
@@ -189,15 +189,15 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
   if (rawContent.replace(/\s+/g, " ").trim().length > STEER_MAX_CHARS) {
     return jsonError(400, `指引过长（上限 ${STEER_MAX_CHARS} 字）`, "steer_too_long", "bad_request")
   }
-  // D-7（fail-closed，2026-09-23）：身份只認客戶端提供的那一個，網關**不得自鑄**。
-  // 自鑄＝每個沒帶 id 的請求都拿到一個全新的身份，「手動重送」於是永遠是第二條獨立命令，
-  // ARL-02 的不變量（同一條指引一生只投遞一次）就只在客戶端穩定帶同一 id 時才碰巧成立。
-  // 我方前端總會帶 id（use-agent-chat.newSteerId → agent-chat-client.steerAgentSession），
-  // 所以 fail-closed 對它零影響；不帶 id 的舊客戶端不會被靜默收成新命令，而是拿到明確的
-  // 400 與修法（沿用同一個 id 即可安全重送）。
-  // 為什麼是 400 而非 409：409 會被前端判成「沒有可引導的回合」而落回普通送出腿
-  //（steer 模式下普通送出＝打斷本輪），既與事實不符（回合其實在跑，D-6 已修），
-  // 也正好繞過本閘的用意。400 只會被當成一次誠實的提交失敗。
+  // D-7（fail-closed，2026-09-23）：身份只认客户端提供的那一个，网关**不得自铸**。
+  // 自铸＝每个没带 id 的请求都拿到一个全新的身份，「手动重送」于是永远是第二条独立命令，
+  // ARL-02 的不变量（同一条指引一生只投递一次）就只在客户端稳定带同一 id 时才碰巧成立。
+  // 我方前端总会带 id（use-agent-chat.newSteerId → agent-chat-client.steerAgentSession），
+  // 所以 fail-closed 对它零影响；不带 id 的旧客户端不会被静默收成新命令，而是拿到明确的
+  // 400 与修法（沿用同一个 id 即可安全重送）。
+  // 为什么是 400 而非 409：409 会被前端判成「没有可引导的回合」而落回普通送出腿
+  //（steer 模式下普通送出＝打断本轮），既与事实不符（回合其实在跑，D-6 已修），
+  // 也正好绕过本闸的用意。400 只会被当成一次诚实的提交失败。
   if (body.steer_id === undefined || body.steer_id === null) {
     return jsonError(
       400,
@@ -217,10 +217,10 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
   const steerId = body.steer_id
   const content = rawContent.replace(/\s+/g, " ").trim()
 
-  // ⓪ 重放閘（D2b）：**排在停止閘之前**。順序是刻意的——409 no_active_turn 的語義是
-  // 「改走正常送出」，而若這條指引其實已經送過（tombstone 命中）或還在途中（未確認），
-  // 改走正常送出就等於把它送第二次，正是本刀要禁的事故。所以先問身份層（持久層）：
-  // 同 id 一律拒絕，回可辨識錯誤碼，並口頭補一句「不會重複發送」。
+  // ⓪ 重放闸（D2b）：**排在停止闸之前**。顺序是刻意的——409 no_active_turn 的语义是
+  // 「改走正常送出」，而若这条指引其实已经送过（tombstone 命中）或还在途中（未确认），
+  // 改走正常送出就等于把它送第二次，正是本刀要禁的事故。所以先问身份层（持久层）：
+  // 同 id 一律拒绝，回可辨识错误码，并口头补一句「不会重复发送」。
   const frozen = freezeSteerPayload({
     steerId,
     sessionId: state.sessionId,
@@ -234,25 +234,25 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
     return rejectSteerReplay(state, replay.command, replay.code, replay.httpStatus)
   }
 
-  // 停止優先的閘（D2-1a 修復，D-6 校正）：不只看「回合在跑」，還要看「回合有沒有被
-  // **用戶**停掉」。abort 落地後到 idle 幀之間的那段窗口，lastTurnActiveAt 仍是舊值、
-  // pendingQuestions 可能還在——只憑 turnInFlight 就會放行，接著走①的注入腿把用戶的
-  // 引導語當「答覆」POST 進一個已經中止的回合，還回 applied_in_turn:true（假話）。
+  // 停止优先的闸（D2-1a 修复，D-6 校正）：不只看「回合在跑」，还要看「回合有没有被
+  // **用户**停掉」。abort 落地后到 idle 帧之间的那段窗口，lastTurnActiveAt 仍是旧值、
+  // pendingQuestions 可能还在——只凭 turnInFlight 就会放行，接著走①的注入腿把用户的
+  // 引导语当「答覆」POST 进一个已经中止的回合，还回 applied_in_turn:true（假话）。
   //
-  // D-6：閘門把中止來源一起交給純核心（abortIsUserStop 是停止優先的唯一判據）——
-  // 系統中止（空轉斷路器）窗口**照常受理**，因為那只是換一種方式續跑同一輪，排隊中的
-  // 指引本來就被刻意保留；舊版一律回「本轮已中止，引导不会再生效」是假話，還讓前端
-  // fallback 成普通送出（steer 模式下即打斷本輪），違背用戶選的「不打断」語義。
+  // D-6：闸门把中止来源一起交给纯核心（abortIsUserStop 是停止优先的唯一判据）——
+  // 系统中止（空转断路器）窗口**照常受理**，因为那只是换一种方式续跑同一轮，排队中的
+  // 指引本来就被刻意保留；旧版一律回「本轮已中止，引导不会再生效」是假话，还让前端
+  // fallback 成普通送出（steer 模式下即打断本轮），违背用户选的「不打断」语义。
   const gate = gateSteerAcceptance({
     turnInFlight: turnInFlight(state),
     turnAborted: state.turnAborted === true,
     turnAbortSource: state.turnAbortSource,
   })
   if (gate.kind === "reject") {
-    // 2026-10-02 觀測補口：被拒路徑從前**一行日誌都沒有**，所以「引導全部未能送達」
-    // 這種系統性症狀在生產上完全不可見（上一輪修復只能靠前端畫面反推）。這裡把閘門
-    // 的四個輸入原樣記下來，下一次同症狀可直接定位是打點沒打（lastTurnActiveAt=0）
-    // 還是用戶叫停（turnAborted）。
+    // 2026-10-02 观测补口：被拒路径从前**一行日志都没有**，所以「引导全部未能送达」
+    // 这种系统性症状在生产上完全不可见（上一轮修复只能靠前端画面反推）。这里把闸门
+    // 的四个输入原样记下来，下一次同症状可直接定位是打点没打（lastTurnActiveAt=0）
+    // 还是用户叫停（turnAborted）。
     console.warn(
       `[gateway] steer rejected (${gate.reason}): steer=${steerId} session=${state.sessionId} ` +
         `lastTurnActiveAt=${state.lastTurnActiveAt ?? 0} turnAborted=${state.turnAborted === true} ` +
@@ -265,10 +265,10 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
     return jsonError(409, message, gate.reason, gate.reason)
   }
 
-  // 身份落地（D2b，**投遞之前**）：steer_id + 凍結 payload_hash（含 content 與關聯
-  // turn/session 標識）先寫進 sessions.db 的 steer_commands 表，之後才碰上游。
-  // 為什麼順序不能顛倒：一旦投遞出去而進程在確認前中斷，唯一能阻止重放的東西就是
-  // 這條持久記錄——反過來先投遞再落地，中間那道裂縫正好就是事故現場。
+  // 身份落地（D2b，**投递之前**）：steer_id + 冻结 payload_hash（含 content 与关联
+  // turn/session 标识）先写进 sessions.db 的 steer_commands 表，之后才碰上游。
+  // 为什么顺序不能颠倒：一旦投递出去而进程在确认前中断，唯一能阻止重放的东西就是
+  // 这条持久记录——反过来先投递再落地，中间那道裂缝正好就是事故现场。
   const begun = steerLedger.begin({
     steerId,
     sessionId: state.sessionId,
@@ -279,26 +279,26 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
     now: Date.now(),
   })
   if (begun.kind === "rejected") {
-    // 上面查過一次仍有記錄＝查詢與落地之間的競態（同一 ms 重放）。同樣拒絕，不覆寫。
+    // 上面查过一次仍有记录＝查询与落地之间的竞态（同一 ms 重放）。同样拒绝，不覆写。
     return rejectSteerReplay(state, begun.command, begun.code, begun.httpStatus)
   }
 
-  // ① 真注入優先：回合卡在 question 斷點 → 這一條在本回合內生效。
-  // D-6：**中止輪（任何來源）都不得走注入腿**——中止輪殘留的 question 卡已經失效，
-  // 把引導語當「答覆」回灌再回 applied_in_turn:true，就是把 D2-1a 那顆假話換個地方說
-  //（該論據與中止來源無關）。系統中止窗口因此落到下面的誠實排隊腿：狀態如實回 queued，
-  // 指引留在隊列裡等本輪收尾照常投遞。
+  // ① 真注入优先：回合卡在 question 断点 → 这一条在本回合内生效。
+  // D-6：**中止轮（任何来源）都不得走注入腿**——中止轮残留的 question 卡已经失效，
+  // 把引导语当「答覆」回灌再回 applied_in_turn:true，就是把 D2-1a 那颗假话换个地方说
+  //（该论据与中止来源无关）。系统中止窗口因此落到下面的诚实排队腿：状态如实回 queued，
+  // 指引留在队列里等本轮收尾照常投递。
   const injectEligible = state.turnAborted !== true && state.pendingQuestions.size > 0
   if (injectEligible) {
-    // 注入＝第二條投遞腿，同樣帶身份：**先標 dispatched（投遞已發出、尚未確認）再注入**。
-    // 中斷點在注入與確認之間 → 重啟恢復落 uncertain，永不自動重發（否則重連後可被重放）。
+    // 注入＝第二条投递腿，同样带身份：**先标 dispatched（投递已发出、尚未确认）再注入**。
+    // 中断点在注入与确认之间 → 重启恢复落 uncertain，永不自动重发（否则重连后可被重放）。
     steerLedger.markDispatched(steerId, Date.now())
     const injectedInto = await injectIntoQuestionBreakpoint(state, content)
     if (injectedInto.length > 0) {
       console.log(
         `[gateway] steer injected into frozen turn: steer=${steerId} session=${state.sessionId} questions=${injectedInto.length}`,
       )
-      // 確認到達 → 終態 injected（凍結，遲到幀不得改寫）。
+      // 确认到达 → 终态 injected（冻结，迟到帧不得改写）。
       steerLedger.settle(steerId, "injected", Date.now())
       emitSteerStatus(state, steerId, "injected", { text: content })
       return Response.json({
@@ -309,17 +309,17 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
         injected_into: injectedInto,
       })
     }
-    // 斷點在投遞途中消失（競態）：命令停在 dispatched＝在途未確認。落回排隊腿時**不改狀態**
-    // ——對使用者仍是「排隊中」（steer-identity.steerWireStatus 把 dispatched 映回 queued），
-    // 而重啟恢復會把它落 uncertain；絕不假裝沒送過（那會讓重放合法化）。
+    // 断点在投递途中消失（竞态）：命令停在 dispatched＝在途未确认。落回排队腿时**不改状态**
+    // ——对使用者仍是「排队中」（steer-identity.steerWireStatus 把 dispatched 映回 queued），
+    // 而重启恢复会把它落 uncertain；绝不假装没送过（那会让重放合法化）。
   }
 
-  // ② 誠實排隊：入隊判定（順序／同 id 與同文去重／上限）走純核心。
+  // ② 诚实排队：入队判定（顺序／同 id 与同文去重／上限）走纯核心。
   const queue = steerQueue(state)
   const outcome = enqueueSteer(queue, rawContent, { now: Date.now(), id: steerId })
   if (outcome.kind === "rejected") {
-    // 未受理＝不得留下懸空的「在途」記錄（那會讓同一 id 之後永遠被 in_flight 擋住，
-    // 而它其實從沒進過投遞管線）。誠實落 failed 終態並記原因。
+    // 未受理＝不得留下悬空的「在途」记录（那会让同一 id 之后永远被 in_flight 挡住，
+    // 而它其实从没进过投递管线）。诚实落 failed 终态并记原因。
     steerLedger.settle(steerId, "failed", Date.now(), `not_accepted_${outcome.reason}`)
     if (outcome.reason === "queue_full") {
       console.log(`[gateway] steer rejected (queue full): session=${state.sessionId} limit=${STEER_MAX_QUEUE}`)
@@ -330,22 +330,22 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
         "steer_queue_full",
       )
     }
-    // empty/too_long 已在上面攔過（此處只剩競態），照實回 400。
+    // empty/too_long 已在上面拦过（此处只剩竞态），照实回 400。
     return jsonError(400, `指引无效（${outcome.reason}）`, `steer_${outcome.reason}`, "bad_request")
   }
   if (!outcome.deduped) {
     queue.push(outcome.steer)
     state.lastActivityAt = Date.now()
   } else if (outcome.steer.id !== steerId && !(outcome.steer.aliases ?? []).includes(steerId)) {
-    // 同文去重命中：本次的 id 記成別名，之後的終態幀兩個 id 都發——否則這個新徽章
-    // 永遠收不到終態（它的 id 不在隊列條目上），畫面停「排队中」＝反向假話。
+    // 同文去重命中：本次的 id 记成别名，之后的终态帧两个 id 都发——否则这个新徽章
+    // 永远收不到终态（它的 id 不在队列条目上），画面停「排队中」＝反向假话。
     outcome.steer.aliases = [...(outcome.steer.aliases ?? []), steerId]
-    // D2b：別名 id 同樣進 tombstone 覆蓋面（別名重放＝同一條邏輯 steer 的第二個徽章重放，
-    // 一樣不得被投遞第二次）。
+    // D2b：别名 id 同样进 tombstone 覆盖面（别名重放＝同一条逻辑 steer 的第二个徽章重放，
+    // 一样不得被投递第二次）。
     steerLedger.addAlias(outcome.steer.id, steerId)
   }
-  // 排隊中也要上報：UI 顯示「已排隊（本回合结束後生效）」而不是假裝已生效。
-  // 本體 id 與別名 id 一起上報（同文重複送達時，兩個徽章都必須看得見排隊位置）。
+  // 排队中也要上报：UI 显示「已排队（本回合结束后生效）」而不是假装已生效。
+  // 本体 id 与别名 id 一起上报（同文重复送达时，两个徽章都必须看得见排队位置）。
   for (const frameId of steerFrameIds(outcome.steer)) {
     emitSteerStatus(state, frameId, "queued", {
       position: outcome.position,
@@ -366,9 +366,9 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
 }
 
 /**
- * 停止閘（優先於 steer）：**用戶**按了停止 → 待投隊列全數作廢並上報 aborted。
- * 由 session-read.handleAbortSession 呼叫，位置在 abort 落地之後、收尾幀之前。
- * 注意：只有用戶停止走這裡；內部斷路器中止不呼叫本函數（見 D2-1b）。
+ * 停止闸（优先于 steer）：**用户**按了停止 → 待投队列全数作废并上报 aborted。
+ * 由 session-read.handleAbortSession 呼叫，位置在 abort 落地之后、收尾帧之前。
+ * 注意：只有用户停止走这里；内部断路器中止不呼叫本函数（见 D2-1b）。
  */
 export function dropPendingSteers(state: SessionState, reason: "aborted" = "aborted"): PendingSteer[] {
   const queue = steerQueue(state)
@@ -377,8 +377,8 @@ export function dropPendingSteers(state: SessionState, reason: "aborted" = "abor
   state.pendingSteers = []
   for (const steer of dropped) {
     emitSteerStatusForAll(state, steer, "aborted", { reason })
-    // D2b：終態即 tombstone——這條指引有結論了（未生效·已作廢），此後同 id 重放一律拒絕，
-    // 不會因為「用戶按了停止」而在重連後偷偷再投一次。
+    // D2b：终态即 tombstone——这条指引有结论了（未生效·已作废），此后同 id 重放一律拒绝，
+    // 不会因为「用户按了停止」而在重连后偷偷再投一次。
     steerLedger.settle(steer.id, "aborted", Date.now(), reason)
   }
   console.log(
@@ -388,34 +388,34 @@ export function dropPendingSteers(state: SessionState, reason: "aborted" = "abor
 }
 
 /**
- * 回合收尾鉤子（opencode-event-handler 的 session.idle 正常收尾路徑呼叫）。
+ * 回合收尾钩子（opencode-event-handler 的 session.idle 正常收尾路径呼叫）。
  *
- * 順序紀律：
- *   空隊列 → 零動作（無 steer 的回合與改動前逐位等價）。
- *   用戶停止（abortIsUserStop）→ 全數作廢（停止優先），不投遞。
- *   系統中止（空轉止損斷路器）→ **不丟**：它只是換一種方式續跑同一輪，
- *     用戶沒有叫停，指引不因此失效 → 照常拼批投遞（這是 D2-1b 的語義裁定）。
- *   逾時（deadline 已過）→ 落 failed 終態，不投遞（D2-3 誠實解，見下）。
- *   否則 → FIFO 拼批，走 handleSendMessage 投成下一回合；逐條上報 applied/failed。
+ * 顺序纪律：
+ *   空队列 → 零动作（无 steer 的回合与改动前逐位等价）。
+ *   用户停止（abortIsUserStop）→ 全数作废（停止优先），不投递。
+ *   系统中止（空转止损断路器）→ **不丢**：它只是换一种方式续跑同一轮，
+ *     用户没有叫停，指引不因此失效 → 照常拼批投递（这是 D2-1b 的语义裁定）。
+ *   逾时（deadline 已过）→ 落 failed 终态，不投递（D2-3 诚实解，见下）。
+ *   否则 → FIFO 拼批，走 handleSendMessage 投成下一回合；逐条上报 applied/failed。
  *
- * D2-3 選型理由（為什麼不是持久化隊列）：pendingSteers 的生命週期綁在「一個活的
- * 在途回合」上——網關重啟後上游 turn 已經沒有了，重放那個隊列等於替一個不存在的
- * 回合投遞（會多開一輪、用戶沒按送出）。所以選「隊列帶 deadline + 前端超時翻
- * 未能送達」：網關側對逾時條目補終態幀（queue_expired），前端側對「收不到任何
- * 終態幀」（含網關重啟這個必然收不到的場景）以同一個 TTL 自行翻終態，
- * 兩端都不會留下永久的「排队中」。
+ * D2-3 选型理由（为什么不是持久化队列）：pendingSteers 的生命周期绑在「一个活的
+ * 在途回合」上——网关重启后上游 turn 已经没有了，重放那个队列等于替一个不存在的
+ * 回合投递（会多开一轮、用户没按送出）。所以选「队列带 deadline + 前端超时翻
+ * 未能送达」：网关侧对逾时条目补终态帧（queue_expired），前端侧对「收不到任何
+ * 终态帧」（含网关重启这个必然收不到的场景）以同一个 TTL 自行翻终态，
+ * 两端都不会留下永久的「排队中」。
  *
- * D2b 補強：**持久化的是身份，不是隊列**。隊列照舊 volatile（理由同上），但每一條
- * 命令的 steer_id / payload_hash / 終態墓碑落在 steer_commands 表——投遞前 markDispatched、
- * 確認後 settle，重啟後未確認者一律 uncertain 且永不自動重發（見 steer-ledger-gw）。
- * 兩者分工：TTL 是 UI 時間兜底，身份層是防重複投遞的正解。
+ * D2b 补强：**持久化的是身份，不是队列**。队列照旧 volatile（理由同上），但每一条
+ * 命令的 steer_id / payload_hash / 终态墓碑落在 steer_commands 表——投递前 markDispatched、
+ * 确认后 settle，重启后未确认者一律 uncertain 且永不自动重发（见 steer-ledger-gw）。
+ * 两者分工：TTL 是 UI 时间兜底，身份层是防重复投递的正解。
  */
 export async function flushPendingSteers(state: SessionState): Promise<void> {
   const queue = steerQueue(state)
   if (queue.length === 0) return
   const userStopped = abortIsUserStop(state.turnAborted, state.turnAbortSource)
   const plan = planSteerFlush(queue, { turnAborted: userStopped, now: Date.now() })
-  // dropped 兩種來歷：aborted（用戶停止，停止優先）／expired（逾時，誠實落未生效）。
+  // dropped 两种来历：aborted（用户停止，停止优先）／expired（逾时，诚实落未生效）。
   for (const drop of plan.dropped) {
     const steer = queue.find((s) => s.id === drop.id)
     if (!steer) continue
@@ -424,8 +424,8 @@ export async function flushPendingSteers(state: SessionState): Promise<void> {
       steerLedger.settle(steer.id, "aborted", Date.now(), "aborted")
     } else {
       emitSteerStatusForAll(state, steer, "failed", { reason: "queue_expired" })
-      // 逾時＝不再投遞（TTL 的 UI 兜底語義），終態 tombstone 記 failed：與身份層的分工見
-      // steer-core.STEER_QUEUE_TTL_MS 註釋——TTL 說「等太久了」，身份層說「這條結案了」。
+      // 逾时＝不再投递（TTL 的 UI 兜底语义），终态 tombstone 记 failed：与身份层的分工见
+      // steer-core.STEER_QUEUE_TTL_MS 注释——TTL 说「等太久了」，身份层说「这条结案了」。
       steerLedger.settle(steer.id, "failed", Date.now(), "queue_expired")
     }
   }
@@ -433,15 +433,15 @@ export async function flushPendingSteers(state: SessionState): Promise<void> {
     state.pendingSteers = []
     return
   }
-  // 先清隊列再投遞：投遞本身會開新回合，若此刻又來一條 steer，它該進新回合的隊列。
+  // 先清队列再投递：投递本身会开新回合，若此刻又来一条 steer，它该进新回合的队列。
   state.pendingSteers = []
   const { text, ids } = plan.batch
-  // 保序取回要投遞的條目本體（ids 只是 id；別名要一起收終態幀，否則別名徽章永停排队中）。
+  // 保序取回要投递的条目本体（ids 只是 id；别名要一起收终态帧，否则别名徽章永停排队中）。
   const live = ids
     .map((id) => queue.find((s) => s.id === id))
     .filter((s): s is PendingSteer => s !== undefined)
   if (!driveTurn) {
-    // 未接線＝誠實失敗（不靜默丟，也不假裝生效）。組合根 index.ts 必接。
+    // 未接线＝诚实失败（不静默丢，也不假装生效）。组合根 index.ts 必接。
     for (const steer of live) {
       emitSteerStatusForAll(state, steer, "failed", { reason: "delivery_unwired" })
       steerLedger.settle(steer.id, "failed", Date.now(), "delivery_unwired")
@@ -449,10 +449,10 @@ export async function flushPendingSteers(state: SessionState): Promise<void> {
     console.error(`[gateway] steer flush: deliverer not wired — ${ids.length} steer(s) dropped session=${state.sessionId}`)
     return
   }
-  // ★ D2b 的關鍵一格：**投遞之前**先把這條命令標成 dispatched（持久）。
-  //   語義＝「投遞已發出、還沒等到確認」。若進程此刻中斷（或 driveTurn 卡到重啟），
-  //   重啟恢復只會把它落 uncertain 且**永不自動重發**——沒有這一格，重啟後這條指引
-  //   在持久層看起來還是「沒送過」，重放就合法了（waoowaoo ARL-02 要解的事故）。
+  // ★ D2b 的关键一格：**投递之前**先把这条命令标成 dispatched（持久）。
+  //   语义＝「投递已发出、还没等到确认」。若进程此刻中断（或 driveTurn 卡到重启），
+  //   重启恢复只会把它落 uncertain 且**永不自动重发**——没有这一格，重启后这条指引
+  //   在持久层看起来还是「没送过」，重放就合法了（waoowaoo ARL-02 要解的事故）。
   for (const steer of live) steerLedger.markDispatched(steer.id, Date.now())
   let delivered = false
   try {
@@ -463,7 +463,7 @@ export async function flushPendingSteers(state: SessionState): Promise<void> {
   const status: SteerStatus = delivered ? "applied" : "failed"
   for (const steer of live) {
     emitSteerStatusForAll(state, steer, status, delivered ? undefined : { reason: "delivery_failed" })
-    // 確認到達 → 終態凍結（applied／failed）。同一 id 此後重放一律被 tombstone 擋住。
+    // 确认到达 → 终态冻结（applied／failed）。同一 id 此后重放一律被 tombstone 挡住。
     steerLedger.settle(steer.id, delivered ? "applied" : "failed", Date.now(), delivered ? undefined : "delivery_failed")
   }
   console.log(

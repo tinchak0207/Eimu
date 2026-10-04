@@ -20,7 +20,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // 帶 hash 的靜態資源：network-first，成功就進快取，離線直接命中。
+  // 带 hash 的静态资源：network-first，成功就进快取，离线直接命中。
   if (request.destination === "script" || request.destination === "style" || request.destination === "font") {
     event.respondWith(
       fetch(request)
@@ -36,7 +36,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 文件導航一律放行網絡：緩存頁面殼會讓部署後的瀏覽器拿到舊 HTML/舊
-  // chunk 引用（2026-09-05 登錄修復多輪「改了沒生效」的根因），登錄站離線
-  // 無意義，不緩存導航。
+  // 文件导航一律放行网络：缓存页面壳会让部署后的浏览器拿到旧 HTML/旧
+  // chunk 引用（2026-09-05 登录修复多轮「改了没生效」的根因），登录站离线
+  // 无意义，不缓存导航。
 });

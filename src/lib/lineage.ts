@@ -1,23 +1,23 @@
-// 資產血統（REQ-D1）：純資料層——序列化形態、清洗收口、鏈條構建與兩態判定。
+// 资产血统（REQ-D1）：纯资料层——序列化形态、清洗收口、链条构建与两态判定。
 //
-// 裁決邊界（2026-09-22 暴君四刀，見 PRD REQ-D1）：
-//   * 血統只給人看：宿主是歷史記錄（HistoryEntry）與資產卡（CharacterCard）本體，
-//     嚴禁補進 compactMetadataForAgent（agent 不讀血統是裁決），也不進 canvas 節點 metadata。
-//   * 欄位族復用現成資產/歷史表示：`lineage: Array<{kind, assetId?, jobId?, nodeId?, at}>`，
-//     parents 上限 5，超過截尾並顯式標註截斷（`lineageTruncated: true` 兄弟欄，
-//     截斷資訊必須落在數據上，否則讀時 UI 無法區分「恰好 5 個」與「被砍過」）。
-//   * 已刪除 ≠ 來源不明，兩個態必須分開：parent 有把手但查無記錄 = 已刪除；
-//     本體完全沒有血統登記 = 來源不明。
+// 裁决边界（2026-09-22 暴君四刀，见 PRD REQ-D1）：
+//   * 血统只给人看：宿主是历史记录（HistoryEntry）与资产卡（CharacterCard）本体，
+//     严禁补进 compactMetadataForAgent（agent 不读血统是裁决），也不进 canvas 节点 metadata。
+//   * 栏位族复用现成资产/历史表示：`lineage: Array<{kind, assetId?, jobId?, nodeId?, at}>`，
+//     parents 上限 5，超过截尾并显式标注截断（`lineageTruncated: true` 兄弟栏，
+//     截断资讯必须落在数据上，否则读时 UI 无法区分「恰好 5 个」与「被砍过」）。
+//   * 已删除 ≠ 来源不明，两个态必须分开：parent 有把手但查无记录 = 已删除；
+//     本体完全没有血统登记 = 来源不明。
 //
-// 本檔零依賴（不 import 帶 node API 或端別專屬的模組），前端抽屜、後端寫入掛鉤
-// 與 tools/ 回溯補丁共用同一把尺。
+// 本档零依赖（不 import 带 node API 或端别专属的模组），前端抽屉、后端写入挂钩
+// 与 tools/ 回溯补丁共用同一把尺。
 
-// ─────────────────────────────────────────────── 欄位族
+// ─────────────────────────────────────────────── 栏位族
 
 export const LINEAGE_KIND_VALUES = ["reference", "derivation", "remix", "rerun"] as const;
 export type LineageKind = (typeof LINEAGE_KIND_VALUES)[number];
 
-/** 血統條目四種來源語義的 UI 標籤（詞表唯一 owner 是本檔）。 */
+/** 血统条目四种来源语义的 UI 标签（词表唯一 owner 是本档）。 */
 export const LINEAGE_KIND_LABEL: Record<LineageKind, string> = {
   reference: "参考",
   derivation: "衍生",
@@ -27,35 +27,35 @@ export const LINEAGE_KIND_LABEL: Record<LineageKind, string> = {
 
 export interface LineageLink {
   kind: LineageKind;
-  /** 資產把手：卡 id（`card-…`）、資產包歷史把手（`history-…`）或產物 artifact id。 */
+  /** 资产把手：卡 id（`card-…`）、资产包历史把手（`history-…`）或产物 artifact id。 */
   assetId?: string;
-  /** 任務把手：generation job / taskId。 */
+  /** 任务把手：generation job / taskId。 */
   jobId?: string;
-  /** 畫布節點把手：序列化形態預留（裁決④畫布不畫血統邊，本期掛鉤不產出）。 */
+  /** 画布节点把手：序列化形态预留（裁决④画布不画血统边，本期挂钩不产出）。 */
   nodeId?: string;
-  /** ISO 8601 時間戳。 */
+  /** ISO 8601 时间戳。 */
   at: string;
 }
 
-/** parents 上限（暴君裁決定數）：超過截尾並顯式標註截斷。 */
+/** parents 上限（暴君裁决定数）：超过截尾并显式标注截断。 */
 export const MAX_LINEAGE_PARENTS = 5;
 
-/** 宿主本體上承載血統的欄位族（HistoryEntry 與 CharacterCard 共用同形）。 */
+/** 宿主本体上承载血统的栏位族（HistoryEntry 与 CharacterCard 共用同形）。 */
 export interface LineageHostFields {
   lineage?: LineageLink[];
-  /** 顯式截斷標記：登記時曾有超過上限的直接來源被砍尾。 */
+  /** 显式截断标记：登记时曾有超过上限的直接来源被砍尾。 */
   lineageTruncated?: boolean;
 }
 
 const MAX_HANDLE_LENGTH = 160;
 
-// ─────────────────────────────────────────────── 清洗與序列化
+// ─────────────────────────────────────────────── 清洗与序列化
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** 把手清洗：非空、限長、不帶空白/控制字元（全站 id 形態都滿足；灌串的丟棄）。 */
+/** 把手清洗：非空、限长、不带空白/控制字元（全站 id 形态都满足；灌串的丢弃）。 */
 export function cleanLineageHandle(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -66,7 +66,7 @@ export function cleanLineageHandle(value: unknown): string | undefined {
   return trimmed;
 }
 
-/** `at` 只收 ISO 8601 可解析字串；缺省補當前時間（登記动作本身發生在「現在」）。 */
+/** `at` 只收 ISO 8601 可解析字串；缺省补当前时间（登记动作本身发生在「现在」）。 */
 function cleanLineageAt(value: unknown): string {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -79,7 +79,7 @@ export function isLineageKind(value: unknown): value is LineageKind {
   return typeof value === "string" && (LINEAGE_KIND_VALUES as readonly string[]).includes(value);
 }
 
-/** 單條血統：kind 非法丟整條；三個把手全缺也丟（無把手的血統既無法跳轉也無法判「已刪除」）。 */
+/** 单条血统：kind 非法丢整条；三个把手全缺也丢（无把手的血统既无法跳转也无法判「已删除」）。 */
 export function normalizeLineageLink(raw: unknown): LineageLink | null {
   if (!isRecord(raw)) return null;
   if (!isLineageKind(raw.kind)) return null;
@@ -96,15 +96,15 @@ export function normalizeLineageLink(raw: unknown): LineageLink | null {
   };
 }
 
-/** 血統條目的身份鍵：同 kind + 同把手 = 同一條（冪等合併的判據）。 */
+/** 血统条目的身份键：同 kind + 同把手 = 同一条（幂等合并的判据）。 */
 function linkKey(link: LineageLink): string {
   return `${link.kind}|${link.assetId ?? ""}|${link.jobId ?? ""}|${link.nodeId ?? ""}`;
 }
 
 /**
- * 清洗一組血統登記：逐條白名單 → 去重（保留首見）→ 上限截尾。
- * truncated 只在「有合法條目被上限砍掉」時為 true（重複不計），
- * 這是「顯式標註截斷」的數據面，UI 據它顯示「僅保留最近 5 個直接來源」。
+ * 清洗一组血统登记：逐条白名单 → 去重（保留首见）→ 上限截尾。
+ * truncated 只在「有合法条目被上限砍掉」时为 true（重复不计），
+ * 这是「显式标注截断」的数据面，UI 据它显示「仅保留最近 5 个直接来源」。
  */
 export function normalizeLineageLinks(raw: unknown): { parents: LineageLink[]; truncated: boolean } {
   if (!Array.isArray(raw)) return { parents: [], truncated: false };
@@ -126,7 +126,7 @@ export function normalizeLineageLinks(raw: unknown): { parents: LineageLink[]; t
   return { parents, truncated: overflow };
 }
 
-/** 讀宿主欄位族：完全未登記血統返回 null（＝來源不明），登記了返回清洗後結果。 */
+/** 读宿主栏位族：完全未登记血统返回 null（＝来源不明），登记了返回清洗后结果。 */
 export function readHostLineage(host: Partial<LineageHostFields> | null | undefined): {
   parents: LineageLink[];
   truncated: boolean;
@@ -137,11 +137,11 @@ export function readHostLineage(host: Partial<LineageHostFields> | null | undefi
 }
 
 /**
- * 把新生成的血統登記併進宿主欄位（寫入掛鉤與回溯補丁共用的冪等入口）：
- *   - 既有條目原樣保留（含其 at），新條目按 key 去重——重跑同一掛鉤不會雙登記；
- *   - 合併後統一過上限，溢出時顯式標註截斷；
- *   - 冪等：mergeLineageIntoHost(host, readHostLineage(host).parents) 與 host 等價。
- * 返回 null 表示沒有任何可寫內容（新舊皆空），調用方據此不落欄位。
+ * 把新生成的血统登记并进宿主栏位（写入挂钩与回溯补丁共用的幂等入口）：
+ *   - 既有条目原样保留（含其 at），新条目按 key 去重——重跑同一挂钩不会双登记；
+ *   - 合并后统一过上限，溢出时显式标注截断；
+ *   - 幂等：mergeLineageIntoHost(host, readHostLineage(host).parents) 与 host 等价。
+ * 返回 null 表示没有任何可写内容（新旧皆空），调用方据此不落栏位。
  */
 export function mergeLineageIntoHost(
   host: Partial<LineageHostFields> | null | undefined,
@@ -157,7 +157,7 @@ export function mergeLineageIntoHost(
   };
 }
 
-/** 序列化/反序列化往返（交付件要求形態可序列化；導出本期不做，口子留在這）。 */
+/** 序列化/反序列化往返（交付件要求形态可序列化；导出本期不做，口子留在这）。 */
 export function serializeLineageFields(host: Partial<LineageHostFields>): string {
   return JSON.stringify({
     ...(host.lineage ? { lineage: host.lineage } : {}),
@@ -178,21 +178,21 @@ export function parseLineageFields(text: string): LineageHostFields | null {
   }
 }
 
-// ─────────────────────────────────────────────── 生成管線把手提取
+// ─────────────────────────────────────────────── 生成管线把手提取
 
-/** 生成管線里帶血統線索的參考圖元數據（歷史 workflow.referenceImages 與 job workflow.references 的交集形態）。 */
+/** 生成管线里带血统线索的参考图元数据（历史 workflow.referenceImages 与 job workflow.references 的交集形态）。 */
 export interface LineageBearingReference {
   sourceResultId?: string | null;
   sourceGenerationId?: string | null;
 }
 
 /**
- * 掛鉤 a 的共用尺：從 job/歷史記錄的參考圖元數據提取 parents。
- *   - sourceGenerationId（參考圖出自另一條生成任務）→ derivation，jobId 指回源任務；
- *   - 僅 sourceResultId（直接引用某產物 artifact）→ reference，assetId 指回產物；
- *   - 裸上傳參考圖（兩個把手都沒有）不登記：沒有持久身份的來源無法跳轉，
- *     登記了只会製造永久「查無」的假鏈條。
- * at 用本次生成時間；去重合併統一交給 mergeLineageIntoHost。
+ * 挂钩 a 的共用尺：从 job/历史记录的参考图元数据提取 parents。
+ *   - sourceGenerationId（参考图出自另一条生成任务）→ derivation，jobId 指回源任务；
+ *   - 仅 sourceResultId（直接引用某产物 artifact）→ reference，assetId 指回产物；
+ *   - 裸上传参考图（两个把手都没有）不登记：没有持久身份的来源无法跳转，
+ *     登记了只会制造永久「查无」的假链条。
+ * at 用本次生成时间；去重合并统一交给 mergeLineageIntoHost。
  */
 export function parentsFromReferences(
   references: readonly LineageBearingReference[] | null | undefined,
@@ -210,19 +210,19 @@ export function parentsFromReferences(
   return links;
 }
 
-/** 歷史記錄自身可被血統引用的把手（抽屜解析與掛鉤 b 共用同一套鍵）。 */
+/** 历史记录自身可被血统引用的把手（抽屉解析与挂钩 b 共用同一套键）。 */
 export function historyEntryHandles(entry: {
   id: string;
   taskId?: string | null;
   results?: readonly { resultId?: string | null }[] | null;
 }): { jobId?: string; assetIds: string[] } {
-  // jobId 只認真任務 id：同步直出記錄的 entry.id 不是 job（沒有 generation_job 行），
-  // 冒充 jobId 會讓「已刪除」態對不上真正的任務記錄——它統一走 `history-${id}` 資產把手。
+  // jobId 只认真任务 id：同步直出记录的 entry.id 不是 job（没有 generation_job 行），
+  // 冒充 jobId 会让「已删除」态对不上真正的任务记录——它统一走 `history-${id}` 资产把手。
   const jobId = cleanLineageHandle(entry.taskId);
   const assetIds: string[] = [];
-  const asAsset = `history-${entry.id}`; // 資產包「存为资产」既有慣例（HistoryCard upsert id）。
+  const asAsset = `history-${entry.id}`; // 资产包「存为资产」既有惯例（HistoryCard upsert id）。
   if (cleanLineageHandle(asAsset)) assetIds.push(asAsset);
-  // 產物 artifact id 也是可被引用的把手（sourceResultId 指回的就是它）。
+  // 产物 artifact id 也是可被引用的把手（sourceResultId 指回的就是它）。
   for (const result of entry.results ?? []) {
     const resultId = cleanLineageHandle(result?.resultId);
     if (resultId && !assetIds.includes(resultId)) assetIds.push(resultId);
@@ -230,70 +230,70 @@ export function historyEntryHandles(entry: {
   return { ...(jobId ? { jobId } : {}), assetIds };
 }
 
-/** 把記錄的血統 parents 寫進宿主欄位族用的統一時間源（掛鉤 b/c 登記時刻）。 */
+/** 把记录的血统 parents 写进宿主栏位族用的统一时间源（挂钩 b/c 登记时刻）。 */
 export function lineageTimestamp(millis: number): string {
   const ms = Number.isFinite(millis) && millis > 0 ? millis : Date.now();
   return new Date(ms).toISOString();
 }
 
-// ─────────────────────────────────────────────── 鏈條構建（抽屜讀取端）
+// ─────────────────────────────────────────────── 链条构建（抽屉读取端）
 
-/** 池子為抽屜提供「把手 → 記錄」的解析與展示信息。 */
+/** 池子为抽屉提供「把手 → 记录」的解析与展示信息。 */
 export interface LineageRecordView extends LineageHostFields {
-  /** 該記錄自身的把手（判自引用與跳轉用）。 */
+  /** 该记录自身的把手（判自引用与跳转用）。 */
   selfHandles: { jobId?: string; assetId?: string };
-  /** 一行描述（prompt 前綴 / 卡名）。 */
+  /** 一行描述（prompt 前缀 / 卡名）。 */
   label: string;
-  /** 縮圖 URL（歷史結果圖 / 卡參考圖首張），無則 null。 */
+  /** 缩图 URL（历史结果图 / 卡参考图首张），无则 null。 */
   thumbnailUrl: string | null;
-  /** 時間（毫秒），無法解析時 null。 */
+  /** 时间（毫秒），无法解析时 null。 */
   timeMs: number | null;
 }
 
 export interface LineagePool {
-  /** 給一個血統把手，找回記錄；池查無返回 null（＝已刪除態的依據）。 */
+  /** 给一个血统把手，找回记录；池查无返回 null（＝已删除态的依据）。 */
   find(jobId: string | undefined, assetId: string | undefined): LineageRecordView | null;
 }
 
 export type LineageNodeStatus =
   | "root"
   | "resolved"
-  /** parent 有把手但記錄查無（曾有引用）＝已刪除。 */
+  /** parent 有把手但记录查无（曾有引用）＝已删除。 */
   | "deleted"
-  /** 該級存在但沒有血統登記（回溯補不回的存量）＝來源不明。 */
+  /** 该级存在但没有血统登记（回溯补不回的存量）＝来源不明。 */
   | "unknown-origin"
-  /** 鏈條指回自己（自引用守衛，不遞歸）。 */
+  /** 链条指回自己（自引用守卫，不递归）。 */
   | "self"
-  /** 鏈條成環（祖先裡已出現同一把手）。 */
+  /** 链条成环（祖先里已出现同一把手）。 */
   | "cycle"
-  /** 被深度/節點預算截斷。 */
+  /** 被深度/节点预算截断。 */
   | "pruned";
 
 export interface LineageTreeNode {
-  /** null = 根（正在看的那條記錄）。 */
+  /** null = 根（正在看的那条记录）。 */
   link: LineageLink | null;
   status: LineageNodeStatus;
   depth: number;
   label: string;
   thumbnailUrl: string | null;
   timeMs: number | null;
-  /** 該記錄登記的 parents 是否曾被上限砍尾。 */
+  /** 该记录登记的 parents 是否曾被上限砍尾。 */
   truncated: boolean;
-  /** 可跳轉目標（resolved/Deleted/pruned 節點带把手；self/unknown-origin 無從跳）。 */
+  /** 可跳转目标（resolved/Deleted/pruned 节点带把手；self/unknown-origin 无从跳）。 */
   jumpTo: { jobId?: string; assetId?: string } | null;
   children: LineageTreeNode[];
 }
 
-/** 默認展開層數（暴君裁決：3 層＋「繼續向上」）。 */
+/** 默认展开层数（暴君裁决：3 层＋「继续向上」）。 */
 export const LINEAGE_DEFAULT_DEPTH = 3;
-/** 「繼續向上」每次追加的層數。 */
+/** 「继续向上」每次追加的层数。 */
 export const LINEAGE_DEPTH_STEP = 3;
-/** 全鏈節點預算：防病態圖把抽屜卡死；超預算的子鏈標 pruned。 */
+/** 全链节点预算：防病态图把抽屉卡死；超预算的子链标 pruned。 */
 export const LINEAGE_MAX_NODES = 200;
 
 interface TreeBuildContext {
   pool: LineagePool;
-  /** 共享可變預算：必須跨兄弟鏈與遞歸共用同一個對象，快照式 spread 會把深鏈的耗計漏掉。 */
+  /** 共享可变预算：必须跨兄弟链与递归共用同一个对象，快照式 spread 会把深链的耗计漏掉。 */
   budget: { remaining: number };
   maxDepth: number;
 }
@@ -306,7 +306,7 @@ function handleKeysOf(handles: { jobId?: string; assetId?: string }): string[] {
 }
 
 function linkHandles(link: LineageLink): { jobId?: string; assetId?: string } {
-  // nodeId 本期不產出也不解析（畫布不畫血統邊；池裡也沒有節點記錄）。
+  // nodeId 本期不产出也不解析（画布不画血统边；池里也没有节点记录）。
   return {
     ...(link.jobId ? { jobId: link.jobId } : {}),
     ...(link.assetId ? { assetId: link.assetId } : {}),
@@ -361,7 +361,7 @@ function buildChildren(
     ctx.budget.remaining -= 1;
     const found = ctx.pool.find(handles.jobId, handles.assetId);
     if (!found) {
-      // 有把手、池查無、但血統登記確實在——曾有引用＝已刪除（與「來源不明」嚴格分開）。
+      // 有把手、池查无、但血统登记确实在——曾有引用＝已删除（与「来源不明」严格分开）。
       children.push({ link, status: "deleted", depth, label: kindLabel, thumbnailUrl: null, timeMs: linkTimeMs, truncated: false, jumpTo: cloneHandles(handles), children: [] });
       continue;
     }
@@ -370,9 +370,9 @@ function buildChildren(
     const nested = buildChildren(found, ctx, depth + 1, nextPath);
     children.push({
       link,
-      // 池找得到的祖先＝resolved（可看可跳）。它自己沒登記更高級鏈不降格本級——
-      // 「來源不明」只屬於兩種場合：宿主面板無登記（rootHasLineage=false），
-      // 或鏈中某級只有 kind 沒有把手（見上方的 unknown-origin 分支）。
+      // 池找得到的祖先＝resolved（可看可跳）。它自己没登记更高级链不降格本级——
+      // 「来源不明」只属于两种场合：宿主面板无登记（rootHasLineage=false），
+      // 或链中某级只有 kind 没有把手（见上方的 unknown-origin 分支）。
       status: "resolved",
       depth,
       label: found.label || kindLabel,
@@ -387,9 +387,9 @@ function buildChildren(
 }
 
 /**
- * 以一條記錄為根，沿 parents 向上建鏈條樹（抽屜的讀取端）。
- *   - 根沒登記血統 → children=[]，調用方據 `rootHasLineage=false` 顯示「來源不明」；
- *   - 自引用標 self；成環標 cycle；超 maxDepth/預算標 pruned——都不誤報「已刪除」。
+ * 以一条记录为根，沿 parents 向上建链条树（抽屉的读取端）。
+ *   - 根没登记血统 → children=[]，调用方据 `rootHasLineage=false` 显示「来源不明」；
+ *   - 自引用标 self；成环标 cycle；超 maxDepth/预算标 pruned——都不误报「已删除」。
  */
 export function buildLineageTree(
   root: LineageRecordView,
@@ -418,7 +418,7 @@ export function buildLineageTree(
   };
 }
 
-/** 把樹展平成可見行（缩進渲染用）：超出 visibleDepth 的鏈收合成一行「更深鏈條未展開」。 */
+/** 把树展平成可见行（缩进渲染用）：超出 visibleDepth 的链收合成一行「更深链条未展开」。 */
 export function flattenLineageTree(tree: LineageTreeNode, visibleDepth: number): LineageTreeNode[] {
   const rows: LineageTreeNode[] = [];
   const walk = (node: LineageTreeNode) => {
@@ -429,7 +429,7 @@ export function flattenLineageTree(tree: LineageTreeNode, visibleDepth: number):
         link: null,
         status: "pruned",
         depth: node.depth + 1,
-        label: "更深鏈條未展開",
+        label: "更深链条未展开",
         thumbnailUrl: null,
         timeMs: null,
         truncated: false,

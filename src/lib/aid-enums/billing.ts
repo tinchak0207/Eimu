@@ -1,10 +1,10 @@
 /**
- * AID 計費 enums（與本站 reserve / commit / refund 口徑對照用）。
+ * AID 计费 enums（与本站 reserve / commit / refund 口径对照用）。
  *
- * 輪子來源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
+ * 轮子来源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
  * 上游 commit：bbd2a58faffd6a0315af8f6a71902ca8adb5a308
- * 取得日：2026-09-15（GitHub raw；本次共抓取 AID 目錄樹列出的全部 51 個 enum 檔，0 失敗；本檔收錄其中 8 個）
- * 來源檔（8 個，路徑相對 repo 根）：
+ * 取得日：2026-09-15（GitHub raw；本次共抓取 AID 目录树列出的全部 51 个 enum 档，0 失败；本档收录其中 8 个）
+ * 来源档（8 个，路径相对 repo 根）：
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/billing/enums/BillingMode.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/billing/enums/ChargeType.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/billing/enums/MeterType.java
@@ -13,23 +13,23 @@
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/media/enums/MediaBillingStatus.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/rps/enums/ExtractBillingStatus.java
  *   - aid-interface/aid-interface-main/src/main/java/com/aid/billing/enums/BillingConstants.java
- * 逐字保留：每個 enum 的成員名（→ TS 物件鍵）、成員欄位值（value/desc/code/label/sortOrder 等
- *   一律按 AID 欄位名原樣輸出）、以及成員上方的 Javadoc 或 `//` 註解原文。中文 desc **一字未改、
- *   未翻譯、未做簡繁轉換、未「優化」**。鍵序＝AID 宣告序。
- * 白名單改寫（僅此三處，其餘逐行等價）：
- *   1. Java `enum` → TS `as const` 常數物件（＋由常數物件推導的值集合型別 `Aid<X>Value`）。
- *   2. 命名空間加前綴 `AID_`（`CreationModeEnum` → `AID_CREATION_MODE_ENUM`），避免與本站常數撞名。
- *   3. 無欄位的純名稱 enum（如 `MediaTaskStatus`）在 TS 以 `{ value: "<成員名>" }` 表示，
- *      以維持與其他 enum 一致的取值面（Java 側其值即 `name()`）。
- * 不搬入（如實聲明，非靜默省略）：
+ * 逐字保留：每个 enum 的成员名（→ TS 物件键）、成员栏位值（value/desc/code/label/sortOrder 等
+ *   一律按 AID 栏位名原样输出）、以及成员上方的 Javadoc 或 `//` 注解原文。中文 desc **一字未改、
+ *   未翻译、未做简繁转换、未「优化」**。键序＝AID 宣告序。
+ * 白名单改写（仅此三处，其余逐行等价）：
+ *   1. Java `enum` → TS `as const` 常数物件（＋由常数物件推导的值集合型别 `Aid<X>Value`）。
+ *   2. 命名空间加前缀 `AID_`（`CreationModeEnum` → `AID_CREATION_MODE_ENUM`），避免与本站常数撞名。
+ *   3. 无栏位的纯名称 enum（如 `MediaTaskStatus`）在 TS 以 `{ value: "<成员名>" }` 表示，
+ *      以维持与其他 enum 一致的取值面（Java 侧其值即 `name()`）。
+ * 不搬入（如实声明，非静默省略）：
  *   - AID 的 static 查表／工具方法（`getByValue` / `of` / `fromCode` / `isCrossGroupSwitch` 等）
- *     與 `isValid*`——本站此目錄只放純資料常數，無邏輯；查表由消費端自建或後續另案。
- *   - `BillingConstants` 的查表方法與 private 比例集合（邏輯，本站另有估算器）；
- *     其 public static final 純量常數逐字保留。
+ *     与 `isValid*`——本站此目录只放纯资料常数，无逻辑；查表由消费端自建或后续另案。
+ *   - `BillingConstants` 的查表方法与 private 比例集合（逻辑，本站另有估算器）；
+ *     其 public static final 纯量常数逐字保留。
  *
- * 本檔為純資料常數，無函式、無副作用。
+ * 本档为纯资料常数，无函式、无副作用。
  *
- * 收錄取捨（全 51 檔的處置表）見同目錄 `index.ts` 檔頭。
+ * 收录取舍（全 51 档的处置表）见同目录 `index.ts` 档头。
  */
 
 /** 计费模式枚举（AID `BillingMode`） */
@@ -38,7 +38,7 @@ export const AID_BILLING_MODE = {
   SKU: { code: "SKU", desc: "SKU规则计费" },
 } as const;
 
-/** `BillingMode` 的值集合（由常數物件推導）。 */
+/** `BillingMode` 的值集合（由常数物件推导）。 */
 export type AidBillingModeValue = (typeof AID_BILLING_MODE)[keyof typeof AID_BILLING_MODE]["code"];
 
 /** 计费业务类型：文本 / 图片 / 视频（AID `ChargeType`） */
@@ -48,7 +48,7 @@ export const AID_CHARGE_TYPE = {
   VIDEO: { code: "VIDEO", desc: "视频生成" },
 } as const;
 
-/** `ChargeType` 的值集合（由常數物件推導）。 */
+/** `ChargeType` 的值集合（由常数物件推导）。 */
 export type AidChargeTypeValue = (typeof AID_CHARGE_TYPE)[keyof typeof AID_CHARGE_TYPE]["code"];
 
 /** 统一计费口径枚举：决定金额计算公式的唯一分发依据。（AID `MeterType`） */
@@ -65,7 +65,7 @@ export const AID_METER_TYPE = {
   PER_CHAR: { value: "PER_CHAR" },
 } as const;
 
-/** `MeterType` 的值集合（由常數物件推導）。 */
+/** `MeterType` 的值集合（由常数物件推导）。 */
 export type AidMeterTypeValue = (typeof AID_METER_TYPE)[keyof typeof AID_METER_TYPE]["value"];
 
 /** 结算策略：描述任务完成后如何处理预扣与实际金额的差异。（AID `SettleMode`） */
@@ -76,10 +76,10 @@ export const AID_SETTLE_MODE = {
   REFUND_ONLY: { code: "REFUND_ONLY", desc: "差额退款" },
 } as const;
 
-/** `SettleMode` 的值集合（由常數物件推導）。 */
+/** `SettleMode` 的值集合（由常数物件推导）。 */
 export type AidSettleModeValue = (typeof AID_SETTLE_MODE)[keyof typeof AID_SETTLE_MODE]["code"];
 
-/** AID `TextSettleStatus`（文本差额结算状态：通过DB字段 text_settle_status 做CAS，防止并发重复退款。）之 public static final 純量常數。 */
+/** AID `TextSettleStatus`（文本差额结算状态：通过DB字段 text_settle_status 做CAS，防止并发重复退款。）之 public static final 纯量常数。 */
 export const AID_TEXT_SETTLE_STATUS = {
   /** 未开始（初始状态，新建任务默认值） */
   INIT: "INIT",
@@ -106,7 +106,7 @@ export const AID_MEDIA_BILLING_STATUS = {
   FAILED: { value: "FAILED" },
 } as const;
 
-/** `MediaBillingStatus` 的值集合（由常數物件推導）。 */
+/** `MediaBillingStatus` 的值集合（由常数物件推导）。 */
 export type AidMediaBillingStatusValue = (typeof AID_MEDIA_BILLING_STATUS)[keyof typeof AID_MEDIA_BILLING_STATUS]["value"];
 
 /** 资产提取任务计费状态枚举（AID `ExtractBillingStatus`） */
@@ -127,10 +127,10 @@ export const AID_EXTRACT_BILLING_STATUS = {
   FAILED: { value: "FAILED" },
 } as const;
 
-/** `ExtractBillingStatus` 的值集合（由常數物件推導）。 */
+/** `ExtractBillingStatus` 的值集合（由常数物件推导）。 */
 export type AidExtractBillingStatusValue = (typeof AID_EXTRACT_BILLING_STATUS)[keyof typeof AID_EXTRACT_BILLING_STATUS]["value"];
 
-/** AID `BillingConstants`（计费模块常量）之 public static final 純量常數。 */
+/** AID `BillingConstants`（计费模块常量）之 public static final 纯量常数。 */
 export const AID_BILLING_CONSTANTS = {
   /** 账户余额、冻结金额、消费与退款流水统一保留的小数位数。 */
   ACCOUNT_AMOUNT_SCALE: 4,

@@ -55,9 +55,9 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
     if (item.kind === "image") {
       images += 1;
     } else if (item.kind === "tool" && typeof item.costCoins === "number" && item.status !== "failed" && !isQuoteTool(item.tool)) {
-      // 報價類（image_quote / video_quote / quote_bundle…）回的是「估價」不是扣費；
-      // 網關把它們的 total_coins 也掛在 cost_coins 上。2026-09-29 e2e 實錘：只報了價、
-      // 一張沒出，進度條寫「已用 614 币」（帳戶實際 7 币）。失敗的工具同理不算花費。
+      // 报价类（image_quote / video_quote / quote_bundle…）回的是「估价」不是扣费；
+      // 网关把它们的 total_coins 也挂在 cost_coins 上。2026-09-29 e2e 实锤：只报了价、
+      // 一张没出，进度条写「已用 614 币」（帐户实际 7 币）。失败的工具同理不算花费。
       coins += item.costCoins;
     }
   }

@@ -6,7 +6,7 @@ const HISTORY_DESCRIPTION = "查看你在 Eimu 用 GPT Image 2、Nano Banana Pro
 
 export const metadata = {
   title: { absolute: HISTORY_TITLE },
-  // 個人頁（需登入）：不進索引，別浪費爬取預算。
+  // 个人页（需登入）：不进索引，别浪费爬取预算。
   robots: { index: false, follow: false },
   description: HISTORY_DESCRIPTION,
   openGraph: {

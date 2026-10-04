@@ -1,7 +1,7 @@
 // 新人礼首登弹窗的客户端契约：纯类型 + 纯函数，零服务端依赖（客户端 bundle 可安全 import）。
 //
 // 服务端（/api/auth/me）在既有 new-api 用户对象上 additive 挂一个 `welcomeGift` 字段，
-// 内容由控制面的 welcome-gift.ts 从具名常量推導（币数/张数/文案都不在客户端写死）。
+// 内容由控制面的 welcome-gift.ts 从具名常量推导（币数/张数/文案都不在客户端写死）。
 // 这里只做两件事：①解析这个字段（形状不对一律当「不弹」）②本设备已看过的辅助标记。
 //
 // 闸门权威在服务端：`status='applied' AND modal_seen_at IS NULL`（见 welcome-gift.ts
@@ -11,7 +11,7 @@
 /** 服务端随 /api/auth/me 回传的待展示新人礼（pending=false 表示无需弹窗）。 */
 export interface WelcomeGiftModal {
   pending: boolean;
-  /** 币数（服务端按 welcome-gift 具名常量推導）。 */
+  /** 币数（服务端按 welcome-gift 具名常量推导）。 */
   coins?: number;
   /** 折合标准图张数。 */
   images?: number;

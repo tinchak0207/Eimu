@@ -152,7 +152,7 @@ test("no user-facing surface uses a dead non-multiple-of-5 opacity modifier", ()
 });
 
 test("the image zoom overlay backdrop is a real arbitrary color", () => {
-  // 2026-09-10 燈箱抽成共用組件後，背板色真源在 ImageLightbox（成圖與參考圖共用）。
+  // 2026-09-10 灯箱抽成共用组件后，背板色真源在 ImageLightbox（成图与参考图共用）。
   const source = read("src/components/ImageLightbox.tsx");
   assert.match(source, /bg-\[rgba\(31,34,48,0\.74\)\]/);
   assert.doesNotMatch(source, /bg-\[#1f2230\]\/74/);

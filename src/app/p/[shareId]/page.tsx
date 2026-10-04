@@ -8,17 +8,17 @@ import { getSiteUrl } from "@/lib/site-url";
 import { formatModelLabel } from "@/lib/history-types";
 import { RemixButton } from "@/components/share/RemixButton";
 
-// 作品公開分享頁。
+// 作品公开分享页。
 //
-// 這頁是增長迴路的落點：看到好圖 → 一步復刻（做同款把提示詞/模型/比例注入助理輸入框）。
-// 三條硬規矩：
-//   ①預設不公開、可撤銷：沒有記錄就 404（isShareId 只擋畸形，存在性由存儲回答）。
-//   ②noindex：分享頁是給人看的，不進索引、不進 sitemap（等量起來再說）；canonical
-//     仍指向不帶歸因參數的乾淨路徑，避免 utm 自造重複頁。
-//   ③OG 圖就是作品本身：社交平台預覽直接顯示那張圖（imageUrl 沿用既有 blob owner）。
+// 这页是增长回路的落点：看到好图 → 一步复刻（做同款把提示词/模型/比例注入助理输入框）。
+// 三条硬规矩：
+//   ①预设不公开、可撤销：没有记录就 404（isShareId 只挡畸形，存在性由存储回答）。
+//   ②noindex：分享页是给人看的，不进索引、不进 sitemap（等量起来再说）；canonical
+//     仍指向不带归因参数的干净路径，避免 utm 自造重复页。
+//   ③OG 图就是作品本身：社交平台预览直接显示那张图（imageUrl 沿用既有 blob owner）。
 //
-// 為什麼 force-dynamic ＋ force-no-store：撤銷後必須當場 404，任何一層快取（路由段快取、
-// fetch Data Cache）都會讓「我已經撤銷了」變成謊話。
+// 为什么 force-dynamic ＋ force-no-store：撤销后必须当场 404，任何一层快取（路由段快取、
+// fetch Data Cache）都会让「我已经撤销了」变成谎话。
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,7 +26,7 @@ export const fetchCache = "force-no-store";
 
 type RouteParams = { params: Promise<{ shareId: string }> };
 
-/** 提示詞摘要：一行（社交預覽與頁面副標都吃同一份，兩處不會各說各話）。 */
+/** 提示词摘要：一行（社交预览与页面副标都吃同一份，两处不会各说各话）。 */
 function summarise(prompt: string, max = 80): string {
   const flat = prompt.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
@@ -37,7 +37,7 @@ export async function generateMetadata({ params }: RouteParams): Promise<Metadat
   const share = await getPublicShare(shareId);
 
   if (!share) {
-    // 不存在／已撤銷：仍然給 noindex（不要讓 404 的形狀被拿去當索引頁）。
+    // 不存在／已撤销：仍然给 noindex（不要让 404 的形状被拿去当索引页）。
     return {
       title: { absolute: "作品不存在 · Eimu" },
       robots: { index: false, follow: false },
@@ -49,7 +49,7 @@ export async function generateMetadata({ params }: RouteParams): Promise<Metadat
   const modelLabel = formatModelLabel(share.view.modelId) || "AI 生图";
   const promptSummary = share.view.prompt ? summarise(share.view.prompt, 60) : "";
   const title = promptSummary ? `${promptSummary} · Eimu` : `用 ${modelLabel} 生成的作品 · Eimu`;
-  // 作者隱藏提示詞時，預覽文案也不能把它說出來——description 只用模型名。
+  // 作者隐藏提示词时，预览文案也不能把它说出来——description 只用模型名。
   const description = share.view.prompt
     ? summarise(share.view.prompt, 120)
     : `一件用 ${modelLabel} 生成的 AI 作品，点一下用同样的参数做一张自己的。`;
@@ -58,7 +58,7 @@ export async function generateMetadata({ params }: RouteParams): Promise<Metadat
     title: { absolute: title },
     description,
     alternates: { canonical },
-    // 分享頁是給人轉發的，不是給爬蟲收的：先 noindex，等量起來再談。
+    // 分享页是给人转发的，不是给爬虫收的：先 noindex，等量起来再谈。
     robots: { index: false, follow: false },
     openGraph: {
       type: "article",
@@ -110,8 +110,8 @@ export default async function PublicSharePage({ params }: RouteParams) {
           <div className="lg:col-span-2">
             <div className="lg-card relative overflow-hidden rounded-ios-3xl p-2.5 sm:rounded-ios-4xl sm:p-3">
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-              {/* 作品本體：外部 blob URL（既有 owner 托管），用 <img> 直出——站上既有
-                  的同類畫面（血統抽屜、參考圖預覽）都是這樣，不經 /_next/image 白名單。 */}
+              {/* 作品本体：外部 blob URL（既有 owner 托管），用 <img> 直出——站上既有
+                  的同类画面（血统抽屉、参考图预览）都是这样，不经 /_next/image 白名单。 */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={view.imageUrl}

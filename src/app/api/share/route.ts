@@ -1,12 +1,12 @@
-// 作品公開分享：建立 / 列出 / 撤銷。
+// 作品公开分享：建立 / 列出 / 撤销。
 //
-// 三條規矩（都在純函式層有對應斷言，見 src/lib/share-remix.test.ts）：
-//   ①shareId 由 128-bit 隨機產生，不能由 artifact/entry id 推得。
-//   ②預設不公開——沒有點過分享就沒有記錄，/p/<shareId> 查無此頁。
-//   ③撤銷＝刪記錄，刪完同一條連結當場 404。
+// 三条规矩（都在纯函式层有对应断言，见 src/lib/share-remix.test.ts）：
+//   ①shareId 由 128-bit 随机产生，不能由 artifact/entry id 推得。
+//   ②预设不公开——没有点过分享就没有记录，/p/<shareId> 查无此页。
+//   ③撤销＝删记录，删完同一条连结当场 404。
 //
-// 圖片位元組沿用既有 artifact/blob owner（server-history-store 的 persistGeneratedImage），
-// 這裡不另造存儲、不搬圖片。
+// 图片位元组沿用既有 artifact/blob owner（server-history-store 的 persistGeneratedImage），
+// 这里不另造存储、不搬图片。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
@@ -25,7 +25,7 @@ import { createShare, listSharesForUser, revokeShare, setShareHidden } from "@/l
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
 
-/** 分享者自己的邀請碼（密鑰缺失＝不帶，分享照常）。 */
+/** 分享者自己的邀请码（密钥缺失＝不带，分享照常）。 */
 function ownInviteCode(userId: number): string | null {
   const secret = referralSecret();
   return secret ? inviteCodeFor(userId, secret) : null;
@@ -42,10 +42,10 @@ interface CreateBody {
 }
 
 /**
- * POST /api/share — 把一件自己的作品分享出去（或取回既有連結）。
+ * POST /api/share — 把一件自己的作品分享出去（或取回既有连结）。
  *
  * body `{ entryId, resultIndex?, hidePrompt? }`。
- * 幂等：同一件作品重複呼叫回同一條連結（使用者貼出去的連結不能被悄悄換掉）。
+ * 幂等：同一件作品重复呼叫回同一条连结（使用者贴出去的连结不能被悄悄换掉）。
  */
 export async function POST(req: NextRequest) {
   const auth = await requireVerifiedUser(req);
@@ -64,21 +64,21 @@ export async function POST(req: NextRequest) {
   let entries = await listGeneratedHistoryEntries(auth.user.id);
   let entry = entries.find((item) => item.id === entryId);
   if (!entry) {
-    // 助理圖卡「分享」是先 POST /api/history 補寫、緊接著建分享：落在另一個實例時，
-    // 該實例的歷史索引快取（3s）可能還是寫入前的版本。等快取過期重讀一次再判 404。
+    // 助理图卡「分享」是先 POST /api/history 补写、紧接著建分享：落在另一个实例时，
+    // 该实例的历史索引快取（3s）可能还是写入前的版本。等快取过期重读一次再判 404。
     await new Promise((resolve) => setTimeout(resolve, 3_200));
     entries = await listGeneratedHistoryEntries(auth.user.id);
     entry = entries.find((item) => item.id === entryId);
   }
-  // 不存在与不属于自己一律同一句话：不洩漏「這個 id 存在但不是你的」。
+  // 不存在与不属于自己一律同一句话：不泄漏「这个 id 存在但不是你的」。
   if (!entry) return fail(404, "找不到这件作品。");
 
   const requestedIndex = Number.isFinite(body.resultIndex) ? Number(body.resultIndex) : 0;
   const picked = shareableResult(entry, requestedIndex);
   if (!picked.ok) return fail(400, picked.reason);
 
-  // 結果只帶 base64 時（本地補錄、上游直回）先經既有 artifact owner 轉存成公開 URL；
-  // 分享頁只認 URL，不把幾 MB 的 base64 塞進記錄。
+  // 结果只带 base64 时（本地补录、上游直回）先经既有 artifact owner 转存成公开 URL；
+  // 分享页只认 URL，不把几 MB 的 base64 塞进记录。
   let imageUrl = picked.result.imageUrl ?? "";
   if (picked.needsPersist) {
     if (!picked.result.image) return fail(400, "这一项没有可分享的图片。");
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
   });
 }
 
-/** GET /api/share — 自己的分享清單（歷史卡據此顯示「已分享」與連結）。 */
+/** GET /api/share — 自己的分享清单（历史卡据此显示「已分享」与连结）。 */
 export async function GET(req: NextRequest) {
   const auth = await requireVerifiedUser(req);
   if (!auth.ok) return fail(auth.status, auth.message);
@@ -136,8 +136,8 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * PATCH /api/share — 改可見性（隱藏／恢復提示詞）。
- * body `{ shareId, hidePrompt }`。所有權只認驗證過的身份。
+ * PATCH /api/share — 改可见性（隐藏／恢复提示词）。
+ * body `{ shareId, hidePrompt }`。所有权只认验证过的身份。
  */
 export async function PATCH(req: NextRequest) {
   const auth = await requireVerifiedUser(req);
@@ -167,7 +167,7 @@ export async function PATCH(req: NextRequest) {
   });
 }
 
-/** DELETE /api/share — 撤銷。body `{ shareId }`。撤銷後 /p/<shareId> 立即 404。 */
+/** DELETE /api/share — 撤销。body `{ shareId }`。撤销后 /p/<shareId> 立即 404。 */
 export async function DELETE(req: NextRequest) {
   const auth = await requireVerifiedUser(req);
   if (!auth.ok) return fail(auth.status, auth.message);

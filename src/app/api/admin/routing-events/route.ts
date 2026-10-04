@@ -1,5 +1,5 @@
-// 路由遙測的 admin 讀取面：回傳最近的路由事件與按渠道聚合的統計。
-// sampleNote 如實標註統計窗口大小——聚合只覆蓋取回的這批事件，不是全歷史。
+// 路由遥测的 admin 读取面：回传最近的路由事件与按渠道聚合的统计。
+// sampleNote 如实标注统计窗口大小——聚合只覆盖取回的这批事件，不是全历史。
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
@@ -7,7 +7,7 @@ import { listRoutingEvents, summarizeModelBreakdown, summarizeRoutingEvents } fr
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const DEFAULT_LIMIT = 50;
 

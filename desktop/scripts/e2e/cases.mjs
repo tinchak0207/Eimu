@@ -1,10 +1,10 @@
 // desktop/scripts/e2e/cases.mjs
 //
-// run.mjs 讀取的測試清單。每個 case 自己負責啟動／關閉殼（及 dev server），
-// 回傳 { observations, artifacts }；斷言失敗就 throw。
+// run.mjs 读取的测试清单。每个 case 自己负责启动／关闭壳（及 dev server），
+// 回传 { observations, artifacts }；断言失败就 throw。
 //
-// 紅線：不修改 ~/.config/Eimu（只複製）；不發送 agent 訊息（避免付費上游）；
-//       任何 token/cookie 值不得寫進 observations（只記布林／長度／狀態碼）。
+// 红线：不修改 ~/.config/Eimu（只复制）；不发送 agent 讯息（避免付费上游）；
+//       任何 token/cookie 值不得写进 observations（只记布林／长度／状态码）。
 
 import fs from "node:fs";
 import os from "node:os";
@@ -22,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const REAL_PROFILE = path.join(os.homedir(), ".config", "Eimu");
 
-/** 讀取殼內頁面的 preload 契約狀態（不涉及任何憑證）。 */
+/** 读取壳内页面的 preload 契约状态（不涉及任何凭证）。 */
 async function probeShell(shell) {
   await shell.page.waitForLoadState("domcontentloaded").catch(() => {});
   return await shell.evaluate(() => ({
@@ -34,15 +34,15 @@ async function probeShell(shell) {
     eimuShellPlatform: window.eimuShell ? window.eimuShell.platform : null,
     nodeProcessType: typeof window.process,
     nodeRequireType: typeof window.require,
-    // 本地測試模式徽章（Navbar.tsx：LOCAL_TEST_MODE ? "本地测试" : ...）
+    // 本地测试模式徽章（Navbar.tsx：LOCAL_TEST_MODE ? "本地测试" : ...）
     hasLocalTestBadge: document.body ? document.body.innerText.includes("本地测试") : false,
-    // agent 輸入面（AgentComposer.tsx：textarea + aria-label="发送"）
+    // agent 输入面（AgentComposer.tsx：textarea + aria-label="发送"）
     composerTextareas: document.querySelectorAll("textarea").length,
     sendButtons: document.querySelectorAll('[aria-label="发送"]').length,
   }));
 }
 
-/** 只回傳布林／狀態碼，永不回傳 token 值。 */
+/** 只回传布林／状态码，永不回传 token 值。 */
 async function probeAuth(shell) {
   return await shell.evaluate(async () => {
     const cookieHas = document.cookie.includes("napi_token=");
@@ -85,7 +85,7 @@ export const cases = [
         const missing = EIMU_LOCAL_METHODS.filter((m) => !probe.eimuLocalMethods.includes(m));
         if (missing.length) throw new Error(`eimuLocal 缺方法：${missing.join(",")}`);
         if (probe.nodeProcessType !== "undefined" || probe.nodeRequireType !== "undefined") {
-          throw new Error(`Node 物件洩漏：process=${probe.nodeProcessType} require=${probe.nodeRequireType}`);
+          throw new Error(`Node 物件泄漏：process=${probe.nodeProcessType} require=${probe.nodeRequireType}`);
         }
         const shot = await shell.screenshot("shell-boot-eimulocal");
         return {
@@ -149,14 +149,14 @@ export const cases = [
       try {
         const ready = await waitForHttp(`http://127.0.0.1:${port}/`, { timeout: 240000 });
         if (!ready.ok) {
-          throw new Error(`next dev (port ${port}) 未就緒：${JSON.stringify(ready)}；log=${dev.logPath}`);
+          throw new Error(`next dev (port ${port}) 未就绪：${JSON.stringify(ready)}；log=${dev.logPath}`);
         }
         shell = await launchShell({ outDir, origin: `http://localhost:${port}` });
         const probe = await probeShell(shell);
         if (probe.eimuLocalType !== "object") {
-          throw new Error(`本地測試模式：window.eimuLocal typeof=${probe.eimuLocalType}`);
+          throw new Error(`本地测试模式：window.eimuLocal typeof=${probe.eimuLocalType}`);
         }
-        // 等 React 水合後再截（test mode 徽章在 Navbar）
+        // 等 React 水合后再截（test mode 徽章在 Navbar）
         await shell.page.waitForFunction(
           () => document.body && document.body.innerText.length > 0,
           undefined,
@@ -194,7 +194,7 @@ export const cases = [
         seedProfileFrom: profileExists ? REAL_PROFILE : undefined,
       });
       try {
-        // 導覽到 agent 頁（同源、非 /api/auth，殼的導航政策放行）。
+        // 导览到 agent 页（同源、非 /api/auth，壳的导航政策放行）。
         await shell.page.goto(`${shell.origin}/agent`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
         await shell.page.waitForTimeout(5000);
         const probe = await probeShell(shell);
@@ -204,9 +204,9 @@ export const cases = [
             profileExists,
             probe,
             composerReachable: probe.composerTextareas > 0,
-            // 明確不送出（避免觸發付費上游）；僅回報輸入面是否可達。
+            // 明确不送出（避免触发付费上游）；仅回报输入面是否可达。
             sentAgentMessage: false,
-            note: "未點擊發送：紅線禁止呼叫付費上游，僅驗輸入面可達性。",
+            note: "未点击发送：红线禁止呼叫付费上游，仅验输入面可达性。",
             network: shell.networkSummary(),
           },
           artifacts: { screenshot: shot },

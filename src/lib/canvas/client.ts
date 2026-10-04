@@ -1,9 +1,9 @@
-// 畫布專案 API 的前端封裝：/api/canvas/projects 的 list / save / delete。
+// 画布专案 API 的前端封装：/api/canvas/projects 的 list / save / delete。
 //
-// 認證頭跟站內其它端點一致：Bearer token + x-user-id 成對送出
+// 认证头跟站内其它端点一致：Bearer token + x-user-id 成对送出
 // （route.ts 走 requireVerifiedUser → authenticateImageUser，缺一半就 401）。
-// 這裡不 throw 認證錯，回 { ok:false, reason } —— 畫布是「順手存」的東西，
-// 沒登入時安靜降級成純本端畫布，而不是在畫布上彈一張擋路的錯誤卡。
+// 这里不 throw 认证错，回 { ok:false, reason } —— 画布是「顺手存」的东西，
+// 没登入时安静降级成纯本端画布，而不是在画布上弹一张挡路的错误卡。
 
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "../local-test-mode";
@@ -12,7 +12,7 @@ import { parseCanvasProjectSummaries, toCanvasProjectSummaryWire, type CanvasPro
 
 export type CanvasClientFailure =
   | "not_authenticated"
-  /** 團隊閘拒建共享畫布（服務端 code=member_canvas_forbidden）：保留服務端團隊文案，不降級成未登入。 */
+  /** 团队闸拒建共享画布（服务端 code=member_canvas_forbidden）：保留服务端团队文案，不降级成未登入。 */
   | "team_canvas_forbidden"
   | "network"
   | "server"
@@ -26,9 +26,9 @@ export interface CanvasClientResult<T> {
 }
 
 export function authHeaders(): Record<string, string> | null {
-  // LOCAL_TEST_MODE：與 agent-chat-client 同款假頭——站內代理的
-  // resolveAgentCaller 在該模式下直接換 B 端 key，不驗證這組頭。
-  // 缺這支 canvas 快照上行在本地測試會永遠靜默啞火。
+  // LOCAL_TEST_MODE：与 agent-chat-client 同款假头——站内代理的
+  // resolveAgentCaller 在该模式下直接换 B 端 key，不验证这组头。
+  // 缺这支 canvas 快照上行在本地测试会永远静默哑火。
   if (LOCAL_TEST_MODE) {
     return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
   }
@@ -61,9 +61,9 @@ async function request<T>(path: string, init: RequestInit, pick: (json: unknown)
       json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string"
         ? (json as { error: string }).error
         : "请求失败";
-    // 團隊閘拒建共享畫布（片P 刀 3）：**只認這個專屬 code**，露出服務端團隊文案，
-    // 不再被當成 not_authenticated 靜默降級成 offline。其他 401/403（無此 code）
-    // 維持原降級行為，逐字不變——不擴散。
+    // 团队闸拒建共享画布（片P 刀 3）：**只认这个专属 code**，露出服务端团队文案，
+    // 不再被当成 not_authenticated 静默降级成 offline。其他 401/403（无此 code）
+    // 维持原降级行为，逐字不变——不扩散。
     const code =
       json && typeof json === "object" && typeof (json as { code?: unknown }).code === "string"
         ? (json as { code: string }).code
@@ -78,7 +78,7 @@ async function request<T>(path: string, init: RequestInit, pick: (json: unknown)
   return { ok: true, data };
 }
 
-/** 讀全部畫布專案（服務端已按 updatedAt 由新到舊排序）。 */
+/** 读全部画布专案（服务端已按 updatedAt 由新到旧排序）。 */
 export async function listCanvasProjects(): Promise<CanvasClientResult<CanvasProject[]>> {
   return request<CanvasProject[]>("/api/canvas/projects", { method: "GET" }, (json) => {
     const arr = (json as { projects?: unknown })?.projects;
@@ -87,8 +87,8 @@ export async function listCanvasProjects(): Promise<CanvasClientResult<CanvasPro
 }
 
 /**
- * 歷史清單摘要（效能審計 P0-B）：只拿標題/時間/節點數，不再整包下載全部專案。
- * 舊服務端不認 `view=summary` 會回全量 `projects` → 這裡就地摘要（部署先後順序無關）。
+ * 历史清单摘要（效能审计 P0-B）：只拿标题/时间/节点数，不再整包下载全部专案。
+ * 旧服务端不认 `view=summary` 会回全量 `projects` → 这里就地摘要（部署先后顺序无关）。
  */
 export async function listCanvasProjectSummaries(): Promise<CanvasClientResult<CanvasProjectSummaryWire[]>> {
   return request<CanvasProjectSummaryWire[]>("/api/canvas/projects?view=summary", { method: "GET" }, (json) => {
@@ -99,7 +99,7 @@ export async function listCanvasProjectSummaries(): Promise<CanvasClientResult<C
   });
 }
 
-/** 讀單一畫布專案（打開歷史畫布用）。舊服務端回全量時就地挑出同 id 那張。 */
+/** 读单一画布专案（打开历史画布用）。旧服务端回全量时就地挑出同 id 那张。 */
 export async function fetchCanvasProject(id: string): Promise<CanvasClientResult<CanvasProject>> {
   return request<CanvasProject>(`/api/canvas/projects?id=${encodeURIComponent(id)}`, { method: "GET" }, (json) => {
     const project = (json as { project?: unknown })?.project;
@@ -109,7 +109,7 @@ export async function fetchCanvasProject(id: string): Promise<CanvasClientResult
   });
 }
 
-/** 存一個畫布專案（upsert by id）。 */
+/** 存一个画布专案（upsert by id）。 */
 export async function saveCanvasProject(project: CanvasProject): Promise<CanvasClientResult<true>> {
   return request<true>(
     "/api/canvas/projects",
@@ -118,7 +118,7 @@ export async function saveCanvasProject(project: CanvasProject): Promise<CanvasC
   );
 }
 
-/** 刪若干畫布專案。 */
+/** 删若干画布专案。 */
 export async function deleteCanvasProjects(ids: string[]): Promise<CanvasClientResult<number>> {
   return request<number>(
     "/api/canvas/projects",
@@ -130,7 +130,7 @@ export async function deleteCanvasProjects(ids: string[]): Promise<CanvasClientR
   );
 }
 
-/** 挑最近更新的一個專案。空清單回 null。 */
+/** 挑最近更新的一个专案。空清单回 null。 */
 export function pickLatestProject(projects: CanvasProject[]): CanvasProject | null {
   let latest: CanvasProject | null = null;
   let latestAt = -Infinity;
@@ -145,7 +145,7 @@ export function pickLatestProject(projects: CanvasProject[]): CanvasProject | nu
   return latest;
 }
 
-/** 觸發一次瀏覽器下載（匯出用）。 */
+/** 触发一次浏览器下载（汇出用）。 */
 export function downloadJson(filename: string, payload: unknown): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const href = URL.createObjectURL(blob);
@@ -156,7 +156,7 @@ export function downloadJson(filename: string, payload: unknown): void {
   URL.revokeObjectURL(href);
 }
 
-// ─────────────────────────────────────────── Wave C：agent 操作畫布的上行通道
+// ─────────────────────────────────────────── Wave C：agent 操作画布的上行通道
 
 /**
  * canvas-state 404 静默降级（罪状 2c）：会话已被网关回收后，画布每动一下
@@ -167,11 +167,11 @@ export function downloadJson(filename: string, payload: unknown): void {
  */
 const deadSnapshotSessions = new Set<string>();
 
-/** 壓縮畫布快照 → gateway（agent 的 canvas_get_state 讀這份）。失敗靜默：快照是盡力而為。 */
+/** 压缩画布快照 → gateway（agent 的 canvas_get_state 读这份）。失败静默：快照是尽力而为。 */
 export async function postCanvasSnapshot(sessionId: string, state: unknown): Promise<void> {
   if (deadSnapshotSessions.has(sessionId)) return; // 会话已死：不再上行，不产生 404 噪音。
   const headers = authHeaders();
-  if (!headers) return; // 未登入安靜降級，不送 401 請求。
+  if (!headers) return; // 未登入安静降级，不送 401 请求。
   headers["Content-Type"] = "application/json";
   try {
     const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
@@ -184,14 +184,14 @@ export async function postCanvasSnapshot(sessionId: string, state: unknown): Pro
     // 会话已被网关回收：静默降级，之后不再打这个端点。
     if (res.status === 404) deadSnapshotSessions.add(sessionId);
   } catch {
-    /* 盡力而為：斷網不打擾創作 */
+    /* 尽力而为：断网不打扰创作 */
   }
 }
 
-/** 會話畫布快照下行（resume 回填，2026-08-26）：GET 同一上行端點的閘道存檔。
- *  無快照（新會話/從未上行）或任何失敗回 null —— 與上行同哲學：盡力而為，不擋路。
- *  注意與上行刻意不同：不因「本端無 token」提前放棄 —— 權限判定是站內路由的職責
- *  （resolveAgentCaller），本端攔截會讓 LOCAL_TEST 與 token 恢復中的窗口永遠拿不到回填。 */
+/** 会话画布快照下行（resume 回填，2026-08-26）：GET 同一上行端点的闸道存档。
+ *  无快照（新会话/从未上行）或任何失败回 null —— 与上行同哲学：尽力而为，不挡路。
+ *  注意与上行刻意不同：不因「本端无 token」提前放弃 —— 权限判定是站内路由的职责
+ *  （resolveAgentCaller），本端拦截会让 LOCAL_TEST 与 token 恢复中的窗口永远拿不到回填。 */
 export async function fetchAgentCanvasSnapshot(sessionId: string): Promise<Record<string, unknown> | null> {
   if (deadSnapshotSessions.has(sessionId)) return null; // 会话已死：静默降级，不重复 404。
   const headers = authHeaders();
@@ -206,7 +206,7 @@ export async function fetchAgentCanvasSnapshot(sessionId: string): Promise<Recor
     if (!res.ok) return null;
     const json: unknown = await res.json();
     if (!json || typeof json !== "object") return null;
-    // 閘道把 POST 的 {state} 原樣存取：下行可能是 {state:{nodes…}} 或扁平 {nodes…}。
+    // 闸道把 POST 的 {state} 原样存取：下行可能是 {state:{nodes…}} 或扁平 {nodes…}。
     const body = json as Record<string, unknown>;
     const state =
       body.state && typeof body.state === "object" ? (body.state as Record<string, unknown>) : body;
@@ -217,14 +217,14 @@ export async function fetchAgentCanvasSnapshot(sessionId: string): Promise<Recor
   }
 }
 
-/** canvas.ops 執行結果回報 → gateway resolve 對應的 canvas_apply_ops 工具調用。 */
+/** canvas.ops 执行结果回报 → gateway resolve 对应的 canvas_apply_ops 工具调用。 */
 export async function postCanvasOpsResult(
   sessionId: string,
   requestId: string,
   result: { ok: boolean; error?: string; created_node_ids?: string[] },
 ): Promise<void> {
   const headers = authHeaders();
-  if (!headers) return; // 未登入不可能有 agent 會話在跑，安靜返回。
+  if (!headers) return; // 未登入不可能有 agent 会话在跑，安静返回。
   headers["Content-Type"] = "application/json";
   try {
     await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-ops-result`, {
@@ -235,11 +235,11 @@ export async function postCanvasOpsResult(
       keepalive: true,
     });
   } catch {
-    /* gateway 端 30s 超時兜底，不重試 */
+    /* gateway 端 30s 超时兜底，不重试 */
   }
 }
 
-/** 一稿多版位裁切結果（/api/canvas/format-crops execute:true 的 done 項）。 */
+/** 一稿多版位裁切结果（/api/canvas/format-crops execute:true 的 done 项）。 */
 export interface FormatCropOutput {
   id: string;
   dataUrl: string;
@@ -248,8 +248,8 @@ export interface FormatCropOutput {
 }
 
 /**
- * 一稿多版位：對一張圖跑 format-crops（execute:true），只回伺服器真正裁出的版位。
- * 擴圖版位（outpaint）無上游、伺服器回 skipped，這裡照實略過，不假裝出了圖。
+ * 一稿多版位：对一张图跑 format-crops（execute:true），只回伺服器真正裁出的版位。
+ * 扩图版位（outpaint）无上游、伺服器回 skipped，这里照实略过，不假装出了图。
  */
 export async function fetchFormatCrops(sourceImageUrl: string): Promise<CanvasClientResult<FormatCropOutput[]>> {
   const headers = authHeaders();

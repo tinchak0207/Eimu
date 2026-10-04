@@ -1,9 +1,9 @@
-// REQ-B2 團隊資產空間 API（項目資產庫）：
-//   GET    ?projectId=&q=&kind=&mounted=  → 該項目可見的資產列表（包 + 卡，帶掛用標記）+ sharesIn
-//   POST   { projectId, assetKind, assetId } → 掛用（copy-on-use：建本地副本 + 回 localCopyId；同鍵冪等）
-//   DELETE { projectId, assetKind, assetId } → 解除掛用（回該記錄的 localCopyId，前端據它解鎖）
-// 認證：requireVerifiedUser（與 /api/assets、/api/character-cards 同款，不信任 x-user-id）。
-// 紅線：不可見即不可用——掛用前必過 resolveMountable，不可見一律 403（不得靜默成功）。
+// REQ-B2 团队资产空间 API（项目资产库）：
+//   GET    ?projectId=&q=&kind=&mounted=  → 该项目可见的资产列表（包 + 卡，带挂用标记）+ sharesIn
+//   POST   { projectId, assetKind, assetId } → 挂用（copy-on-use：建本地副本 + 回 localCopyId；同键幂等）
+//   DELETE { projectId, assetKind, assetId } → 解除挂用（回该记录的 localCopyId，前端据它解锁）
+// 认证：requireVerifiedUser（与 /api/assets、/api/character-cards 同款，不信任 x-user-id）。
+// 红线：不可见即不可用——挂用前必过 resolveMountable，不可见一律 403（不得静默成功）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import {
@@ -21,7 +21,7 @@ import { isAssetLocalCopyId, toAssetKind } from "@/lib/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -52,9 +52,9 @@ export async function GET(req: NextRequest) {
         success: true,
         items,
         mountedCount: mounts.filter((m) => m.projectId === projectId).length,
-        // 顯式分享授權（本項目為來源的那些）：UI 顯示「已分享到 N 個項目」用。
+        // 显式分享授权（本项目为来源的那些）：UI 显示「已分享到 N 个项目」用。
         sharesOut: shares.filter((s) => s.fromProjectId === projectId && !s.revokedAt).length,
-        // REQ-B2b：授權**進來**本項目的分享（前端讀取閘判「分享進來」用，與寫入端同一把尺）。
+        // REQ-B2b：授权**进来**本项目的分享（前端读取闸判「分享进来」用，与写入端同一把尺）。
         sharesIn,
       },
       { status: 200, headers: { "Cache-Control": "no-store" } },
@@ -83,9 +83,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 不可見即不可用：不可見（別人項目的資產且未顯式分享）一律 403。
-    // 內部副本（copy-…）先擋：它是掛用機制的產物，再掛用只會生出「副本的副本」（D5 卡片膨脹），
-    // 故回可辨識的拒絕碼，而不是混進「不可見」那一句（誠實說原因）。
+    // 不可见即不可用：不可见（别人项目的资产且未显式分享）一律 403。
+    // 内部副本（copy-…）先挡：它是挂用机制的产物，再挂用只会生出「副本的副本」（D5 卡片膨胀），
+    // 故回可辨识的拒绝码，而不是混进「不可见」那一句（诚实说原因）。
     if (isAssetLocalCopyId(assetId)) {
       return fail(400, "内部副本不可挂用：请挂用它的来源资产（副本由挂用自动生成）", "asset_copy_internal");
     }
@@ -93,8 +93,8 @@ export async function POST(req: NextRequest) {
     if (!mountable) {
       return fail(403, "该资产在当前项目不可见（跨项目复用需先显式分享）", "asset_not_visible");
     }
-    // copy-on-use：建本地副本（內容本體）+ lineage 指回來源 → 再落冪等掛用記錄。
-    // 回應必帶 localCopyId/localCopyIds：前端要把副本鎖進 cardIds，否則畫面說「已掛用」但生成仍注入來源。
+    // copy-on-use：建本地副本（内容本体）+ lineage 指回来源 → 再落幂等挂用记录。
+    // 回应必带 localCopyId/localCopyIds：前端要把副本锁进 cardIds，否则画面说「已挂用」但生成仍注入来源。
     const result = await mountAssetWithCopy({ userId: caller.user.id, projectId, assetKind, assetId });
     return NextResponse.json(
       {
@@ -111,11 +111,11 @@ export async function POST(req: NextRequest) {
     );
   } catch (error) {
     if (error instanceof AssetMountConflictError) {
-      // 確定性鍵碰撞（別名）：這是衝突，不是「已掛用」——不得回 success:true 冒充冪等。
+      // 确定性键碰撞（别名）：这是冲突，不是「已挂用」——不得回 success:true 冒充幂等。
       return fail(409, "挂用键冲突：该确定性键已对应另一笔挂用，请勿复用同一资产 id", "asset_mount_conflict");
     }
     if (error instanceof AssetMountCopyConflictError) {
-      // 副本鍵被非副本資產佔用：同樣是衝突，不得冒充冪等重放（否則等於拿別人的資產當你的副本）。
+      // 副本键被非副本资产占用：同样是冲突，不得冒充幂等重放（否则等于拿别人的资产当你的副本）。
       return fail(409, error.message, "asset_copy_conflict");
     }
     if (error instanceof AssetMountCopyRejectedError) {
@@ -153,9 +153,9 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
-    // 解除＝解掛記錄 + 回收這次掛用親手落地的副本（D1/D5）：
-    // 回應必帶「該筆掛用實際鎖過的全部副本 id」（記錄優先，不靠當下推導），
-    // 前端據它把副本從 cardIds 解鎖——否則「已解除」只是記錄沒了、生成還在注入副本。
+    // 解除＝解挂记录 + 回收这次挂用亲手落地的副本（D1/D5）：
+    // 回应必带「该笔挂用实际锁过的全部副本 id」（记录优先，不靠当下推导），
+    // 前端据它把副本从 cardIds 解锁——否则「已解除」只是记录没了、生成还在注入副本。
     const result = await unmountAssetAndCopies({ userId: caller.user.id, projectId, assetKind, assetId });
     return NextResponse.json(
       {

@@ -11,8 +11,8 @@ import type { BillingRefundResult } from "./billing-ledger.ts";
 type Call = { sql: string; values: unknown[] };
 
 // 照 billing-ledger.test.ts 的 mock GenerationSql 模式。
-// cancelGenerationJob 全部語義壓在一條 CTE UPDATE 上：可取消態回傳
-// { id, previous_status }，否則空集（上層 route 映射 409 already_terminal）。
+// cancelGenerationJob 全部语义压在一条 CTE UPDATE 上：可取消态回传
+// { id, previous_status }，否则空集（上层 route 映射 409 already_terminal）。
 function mockSql(options: { cancellable: boolean; previousStatus: string }) {
   const calls: Call[] = [];
   const tagged = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -55,7 +55,7 @@ test("cancel of a terminal (succeeded) job is rejected -> route maps to 409 alre
   assert.ok(!calls.some((call) => call.sql.includes("INSERT INTO job_events")));
 });
 
-// ── 生產平面門面 cancelGenerationJobWithRefund（V-01）：cancel + 條件退款 ──
+// ── 生产平面门面 cancelGenerationJobWithRefund（V-01）：cancel + 条件退款 ──
 
 function facadeDeps(options: {
   cancelled: boolean;

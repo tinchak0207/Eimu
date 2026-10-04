@@ -1,4 +1,4 @@
-// uploads-media.ts — 附件上傳與檔名/類型/zip 安檢（自 index.ts 105-242 區逐行抽取，2026-09-19 Wave1）
+// uploads-media.ts — 附件上传与档名/类型/zip 安检（自 index.ts 105-242 区逐行抽取，2026-09-19 Wave1）
 import { mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
 import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, UPLOADS_DIR } from "./constants-gateway.ts"
@@ -13,9 +13,9 @@ export function sanitizeUploadName(raw: string): string | null {
 }
 
 /**
- * 在同名衝突時於落盤層原子改名（`name.mp3` → `name-2.mp3` → `name-3.mp3` …）。
- * 用 `open(..., "wx")` 原子佔位，避免兩次同檔並發 POST 的 check-then-write 競態
- * 造成後者覆蓋前者（P1：靜默丟檔）。回傳實際可寫入的檔名（已存在空檔被呼叫方覆寫）。
+ * 在同名冲突时于落盘层原子改名（`name.mp3` → `name-2.mp3` → `name-3.mp3` …）。
+ * 用 `open(..., "wx")` 原子占位，避免两次同档并发 POST 的 check-then-write 竞态
+ * 造成后者覆盖前者（P1：静默丢档）。回传实际可写入的档名（已存在空档被呼叫方覆写）。
  */
 export async function reserveUniqueUploadName(dir: string, safeName: string): Promise<string> {
   const ext = path.extname(safeName)
@@ -36,7 +36,7 @@ export async function reserveUniqueUploadName(dir: string, safeName: string): Pr
   return fallback
 }
 
-/** 附件靜態讀路由的 Content-Type 映射（按擴展名；未收錄一律 octet-stream）。 */
+/** 附件静态读路由的 Content-Type 映射（按扩展名；未收录一律 octet-stream）。 */
 export function contentTypeForExt(ext: string): string {
   const map: Record<string, string> = {
     ".png": "image/png",
@@ -65,7 +65,7 @@ export function contentTypeForExt(ext: string): string {
   return map[ext] ?? "application/octet-stream"
 }
 
-/** zip 內容安檢（紅隊加固 2026-08-22）：路徑穿越／絕對路徑／條目過多／解壓炸彈／嵌套 zip 一律拒。回 null=通過。 */
+/** zip 内容安检（红队加固 2026-08-22）：路径穿越／绝对路径／条目过多／解压炸弹／嵌套 zip 一律拒。回 null=通过。 */
 export function zipProbe(dest: string): string | null {
   const names = Bun.spawnSync(["unzip", "-Z1", dest], { stdout: "pipe", stderr: "ignore" })
   if (names.exitCode !== 0) return "invalid zip archive"
@@ -108,7 +108,7 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
       if (!safeName) {
         return jsonError(400, `disallowed file type: ${path.extname(file.name)}`, "bad_request", "bad_request")
       }
-      // 同名不覆蓋：原子佔位改得實際落盤名，清單與磁碟保持一致（P1）。
+      // 同名不覆盖：原子占位改得实际落盘名，清单与磁碟保持一致（P1）。
       const finalName = await reserveUniqueUploadName(uploadDir, safeName)
       const dest = path.join(uploadDir, finalName)
       if (!path.resolve(dest).startsWith(path.resolve(UPLOADS_DIR))) {

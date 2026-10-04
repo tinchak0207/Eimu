@@ -1,106 +1,106 @@
-// 成片（母帶）產物索引 —— 刀 4（2026-09-15，能力建設）。
+// 成片（母带）产物索引 —— 刀 4（2026-09-15，能力建设）。
 //
-// 目標（可測量終態）：成片成為可列舉、可回溯的一等產物——「這個項目/會話產過哪些成片」
-// 一次查得出，每條帶導出指紋、時長、解析度、來源。
+// 目标（可测量终态）：成片成为可列举、可回溯的一等产物——「这个项目/会话产过哪些成片」
+// 一次查得出，每条带导出指纹、时长、解析度、来源。
 //
-// ── 形狀選擇與理由（任務書要求回報） ───────────────────────────────────────────
-// **掛既有 `artifact` 表（`role='output'`）＋ `metadata_json` 命名空間鍵
+// ── 形状选择与理由（任务书要求回报） ───────────────────────────────────────────
+// **挂既有 `artifact` 表（`role='output'`）＋ `metadata_json` 命名空间键
 // `masterExport`；不建表、不建 migration、不加 role 值。**
 //
-// 1. 為何 role='output' 而非新 role：`artifact.role` CHECK 只有 `('reference','output')`
-//    （001:220）。成片在語義上就是「這個任務的產出物」，不是參考輸入——用 output 不是
-//    語義借用，是正用。新增 role 值要改 CHECK 約束 = 動 migration，且會讓
-//    `listCompletedGenerationArtifacts`（只認 role='output'）需要同步改，是白送的回歸面。
-// 2. 為何 metadata_json 而非新欄位：`metadata_json` 已是本倉既有的「任務型別專屬欄位」
-//    承載位——TTS 的 `voice_code`/`voice_source`（刀 3，見 tts-upstream.ts:149）、
-//    `endpointLabel`（artifact-service.ts:395）都走這裡，且已有明確的讀取端範式
-//    （`listCompletedGenerationArtifacts` 挑掉 `endpointLabel` 後把其餘欄位對外透出）。
-//    成片欄位照同一範式加一個**命名空間鍵**，語義自洽、零 migration。
-// 3. 為何用命名空間物件（`{masterExport: {...}}`）而非平鋪欄位：平鋪會與既有
-//    `endpointLabel`／TTS 欄位搶同一層鍵空間；日後任何一個 producer 寫入同名鍵即
-//    互相覆蓋。命名空間把「成片」收斂成一個可原子判定的標記——索引的篩選條件就是
-//    「這個鍵存在」（`jsonb_exists`），一個索引命中與否不依賴欄位拼寫的巧合。
-// 4. 為何 sessionId/projectId 放在**產物自己的 metadata** 而非 join
-//    `generation_job.workflow_json`：導出側 `masterExport(sessionId, …)`
-//    （vendor-bridges/gateway/master.ts:196）本來就知道 session，寫進產物是**事實轉錄**；
-//    而 `workflow_json` 目前根本不是每個提交路徑都塞 session（agent 路徑
-//    `agent-tool-adapter.ts:30` 只在 tenant 上落 session，video 提交不帶 workflow），
-//    靠它過濾等於把索引正確性押在一個沒有契約保證的欄位上。放在產物 metadata，
-//    過濾條件與寫入事實同源。
+// 1. 为何 role='output' 而非新 role：`artifact.role` CHECK 只有 `('reference','output')`
+//    （001:220）。成片在语义上就是「这个任务的产出物」，不是参考输入——用 output 不是
+//    语义借用，是正用。新增 role 值要改 CHECK 约束 = 动 migration，且会让
+//    `listCompletedGenerationArtifacts`（只认 role='output'）需要同步改，是白送的回归面。
+// 2. 为何 metadata_json 而非新栏位：`metadata_json` 已是本仓既有的「任务型别专属栏位」
+//    承载位——TTS 的 `voice_code`/`voice_source`（刀 3，见 tts-upstream.ts:149）、
+//    `endpointLabel`（artifact-service.ts:395）都走这里，且已有明确的读取端范式
+//    （`listCompletedGenerationArtifacts` 挑掉 `endpointLabel` 后把其余栏位对外透出）。
+//    成片栏位照同一范式加一个**命名空间键**，语义自洽、零 migration。
+// 3. 为何用命名空间物件（`{masterExport: {...}}`）而非平铺栏位：平铺会与既有
+//    `endpointLabel`／TTS 栏位抢同一层键空间；日后任何一个 producer 写入同名键即
+//    互相覆盖。命名空间把「成片」收敛成一个可原子判定的标记——索引的筛选条件就是
+//    「这个键存在」（`jsonb_exists`），一个索引命中与否不依赖栏位拼写的巧合。
+// 4. 为何 sessionId/projectId 放在**产物自己的 metadata** 而非 join
+//    `generation_job.workflow_json`：导出侧 `masterExport(sessionId, …)`
+//    （vendor-bridges/gateway/master.ts:196）本来就知道 session，写进产物是**事实转录**；
+//    而 `workflow_json` 目前根本不是每个提交路径都塞 session（agent 路径
+//    `agent-tool-adapter.ts:30` 只在 tenant 上落 session，video 提交不带 workflow），
+//    靠它过滤等于把索引正确性押在一个没有契约保证的栏位上。放在产物 metadata，
+//    过滤条件与写入事实同源。
 //
-// ── 邊界（誠實聲明，勿當缺漏） ─────────────────────────────────────────────────
-// - **本檔只做索引（讀）與 metadata 契約（寫的形狀）**，不含成片導出的執行路徑。
+// ── 边界（诚实声明，勿当缺漏） ─────────────────────────────────────────────────
+// - **本档只做索引（读）与 metadata 契约（写的形状）**，不含成片导出的执行路径。
 // - `artifact.job_id` 是 `NOT NULL REFERENCES generation_job(id)`（001:218）：
-//   落成片索引行的**前提是該成片有一條真實的 `generation_job` 行**。索引端不偽造、
-//   不為此建假 job；這是 producer（導出鏈）的義務，見回報「未盡事項」。
-// - 不吞 AID `aid_episode_editor` 的 `pending_video_*` 雙槽（審核用，本方無審核隊列）
-//   與阿里 MPS／騰訊 IMS 回調欄位；只借其**實體欄位語義**
-//   （`final_video_fingerprint`／`export_fingerprint`／`export_status` 的語義對應本檔
+//   落成片索引行的**前提是该成片有一条真实的 `generation_job` 行**。索引端不伪造、
+//   不为此建假 job；这是 producer（导出链）的义务，见回报「未尽事项」。
+// - 不吞 AID `aid_episode_editor` 的 `pending_video_*` 双槽（审核用，本方无审核队列）
+//   与阿里 MPS／腾讯 IMS 回调栏位；只借其**实体栏位语义**
+//   （`final_video_fingerprint`／`export_fingerprint`／`export_status` 的语义对应本档
 //   的 `exportFingerprint`／`probe.verified`）。
 //
-// 讀取端範式對齊：`src/lib/generation-core/artifact-service.ts`（recordArtifact 的 sql
-// 寫法）與 `status-query.ts`（可注入 `sql`、tenant 為必備過濾鍵、kebab 條件式 SQL）。
-// 寫入端契約對齊：`material-fingerprint.ts` 的 `computeExportFingerprint`（64 hex）。
+// 读取端范式对齐：`src/lib/generation-core/artifact-service.ts`（recordArtifact 的 sql
+// 写法）与 `status-query.ts`（可注入 `sql`、tenant 为必备过滤键、kebab 条件式 SQL）。
+// 写入端契约对齐：`material-fingerprint.ts` 的 `computeExportFingerprint`（64 hex）。
 
 import { getGenerationSql, type GenerationSql } from "./database";
 
 type Row = Record<string, unknown>;
 
 /**
- * `artifact.metadata_json` 裡的成片命名空間鍵。
- * 索引的存在性判準就是這個鍵——producer 寫入時必須用它（見 `buildMasterArtifactMetadata`）。
+ * `artifact.metadata_json` 里的成片命名空间键。
+ * 索引的存在性判准就是这个键——producer 写入时必须用它（见 `buildMasterArtifactMetadata`）。
  */
 export const MASTER_ARTIFACT_METADATA_KEY = "masterExport";
 
-/** 成片索引只認產出物；參考輸入（role='reference'）永不進索引。 */
+/** 成片索引只认产出物；参考输入（role='reference'）永不进索引。 */
 export const MASTER_ARTIFACT_ROLE = "output";
 
-/** `computeExportFingerprint` 的輸出長度（sha256 hex）。僅作查證提示，不作過濾條件。 */
+/** `computeExportFingerprint` 的输出长度（sha256 hex）。仅作查证提示，不作过滤条件。 */
 export const MASTER_EXPORT_FINGERPRINT_HEX_LENGTH = 64;
 
-/** 索引預設/上限（與 status-query 的分頁口徑同哲學：有界，不無界回吐）。 */
+/** 索引预设/上限（与 status-query 的分页口径同哲学：有界，不无界回吐）。 */
 export const MASTER_ARTIFACT_DEFAULT_LIMIT = 20;
 export const MASTER_ARTIFACT_MAX_LIMIT = 100;
 
-/** probe 摘要（導出側 `MasterExportResult.probe` 的持久化形狀）。 */
+/** probe 摘要（导出侧 `MasterExportResult.probe` 的持久化形状）。 */
 export interface MasterProbeSummary {
   codec: string;
   width: number;
   height: number;
   durationSec: number;
   sizeBytes: number | null;
-  /** true = probeRenderedVideo 全門通過（容器/解析度/時長/首幀）。 */
+  /** true = probeRenderedVideo 全门通过（容器/解析度/时长/首帧）。 */
   verified: boolean;
-  /** probe 失敗原文（probe_error）；通過時 null。 */
+  /** probe 失败原文（probe_error）；通过时 null。 */
   error: string | null;
 }
 
-/** 成片產物特有的可查證欄位（metadata_json.masterExport 的值）。 */
+/** 成片产物特有的可查证栏位（metadata_json.masterExport 的值）。 */
 export interface MasterArtifactMetadata {
-  /** 素材集合指紋（64 hex，`computeExportFingerprint` 輸出）。 */
+  /** 素材集合指纹（64 hex，`computeExportFingerprint` 输出）。 */
   exportFingerprint: string;
-  /** 指紋序列化口徑版本（對應 `EXPORT_FINGERPRINT_VERSION`）；舊資料可缺。 */
+  /** 指纹序列化口径版本（对应 `EXPORT_FINGERPRINT_VERSION`）；旧资料可缺。 */
   fingerprintVersion: number | null;
-  /** 導出預設 id（如 landscape_169）。**存 id 不存解析度表**——解析度一律以 probe 實測為準。 */
+  /** 导出预设 id（如 landscape_169）。**存 id 不存解析度表**——解析度一律以 probe 实测为准。 */
   preset: string;
-  /** 實測解析度（probe 值，非預設宣告值）。 */
+  /** 实测解析度（probe 值，非预设宣告值）。 */
   resolution: { width: number; height: number } | null;
-  /** 成片時長（秒，probe 實測優先）。 */
+  /** 成片时长（秒，probe 实测优先）。 */
   durationSec: number | null;
-  /** 導出當時的時間線版本號（回溯「哪一版時間線產出這條成片」）。 */
+  /** 导出当时的时间线版本号（回溯「哪一版时间线产出这条成片」）。 */
   timelineVersion: number | null;
-  /** 所屬會話（導出側已知，事實轉錄）。 */
+  /** 所属会话（导出侧已知，事实转录）。 */
   sessionId: string | null;
-  /** 所屬作品/項目（呼叫端有才帶）。 */
+  /** 所属作品/项目（呼叫端有才带）。 */
   projectId: string | null;
-  /** 封面幀 URL（導出側 withCover 產物）。 */
+  /** 封面帧 URL（导出侧 withCover 产物）。 */
   coverUrl: string | null;
-  /** 生產者標籤（如 "timeline_master"），供來源歸因。 */
+  /** 生产者标签（如 "timeline_master"），供来源归因。 */
   source: string | null;
   probe: MasterProbeSummary | null;
 }
 
-/** 索引查詢條件。全部可選；tenantId 為多租戶隔離鍵。 */
+/** 索引查询条件。全部可选；tenantId 为多租户隔离键。 */
 export interface MasterArtifactFilter {
   tenantId?: string | null;
   sessionId?: string | null;
@@ -109,16 +109,16 @@ export interface MasterArtifactFilter {
   offset?: number | null;
 }
 
-/** 索引對外列（每條 = 一條成片）。 */
+/** 索引对外列（每条 = 一条成片）。 */
 export interface MasterArtifactRecord {
   artifactId: string;
   jobId: string;
   tenantId: string;
-  /** 成片可播 URL（導出產物落公網目錄後回填）。 */
+  /** 成片可播 URL（导出产物落公网目录后回填）。 */
   deliveryUrl: string | null;
   objectKey: string | null;
   mimeType: string;
-  /** 位元組 sha256（與 exportFingerprint 不同：前者是檔案內容，後者是素材集合）。 */
+  /** 位元组 sha256（与 exportFingerprint 不同：前者是档案内容，后者是素材集合）。 */
   sha256: string;
   byteSize: number;
   createdAt: Date;
@@ -133,12 +133,12 @@ export interface MasterArtifactRecord {
   coverUrl: string | null;
   source: string | null;
   probe: MasterProbeSummary | null;
-  /** 來源歸因：產出該成片的 job 種類與模型。 */
+  /** 来源归因：产出该成片的 job 种类与模型。 */
   jobKind: string;
   modelId: string;
 }
 
-// ───────────────────────────────────────────────────── 寫入端：metadata 契約
+// ───────────────────────────────────────────────────── 写入端：metadata 契约
 
 export interface MasterArtifactMetadataInput {
   exportFingerprint: string;
@@ -154,16 +154,16 @@ export interface MasterArtifactMetadataInput {
   probe?: MasterProbeSummaryInput | null;
 }
 
-/** probe 摘要輸入（導出側 `MasterExportResult` 直譯；長度欄位名沿用其下劃線形）。 */
+/** probe 摘要输入（导出侧 `MasterExportResult` 直译；长度栏位名沿用其下划线形）。 */
 export interface MasterProbeSummaryInput {
   codec?: string | null;
   width?: number | null;
   height?: number | null;
-  /** 導出側欄位名為 `duration_sec`。 */
+  /** 导出侧栏位名为 `duration_sec`。 */
   duration_sec?: number | null;
-  /** 導出側欄位名為 `size`。 */
+  /** 导出侧栏位名为 `size`。 */
   size?: number | null;
-  /** probe_error；有值即未通過。 */
+  /** probe_error；有值即未通过。 */
   probe_error?: string | null;
 }
 
@@ -178,8 +178,8 @@ function nonEmptyString(value: unknown): string | null {
 }
 
 /**
- * 把導出側的 probe 結果轉成持久化摘要。
- * `verified` 的判準：有 probe 且沒有 probe_error（對齊 `masterExport.exported = probe !== null`）。
+ * 把导出侧的 probe 结果转成持久化摘要。
+ * `verified` 的判准：有 probe 且没有 probe_error（对齐 `masterExport.exported = probe !== null`）。
  */
 function normalizeProbe(input: MasterProbeSummaryInput | null | undefined): MasterProbeSummary | null {
   if (!input) return null;
@@ -187,7 +187,7 @@ function normalizeProbe(input: MasterProbeSummaryInput | null | undefined): Mast
   const width = finiteNumber(input.width);
   const height = finiteNumber(input.height);
   if (width === null || height === null) {
-    // 無實測解析度 = 沒有可查證的 probe 摘要；只保留失敗原文，不偽造數字。
+    // 无实测解析度 = 没有可查证的 probe 摘要；只保留失败原文，不伪造数字。
     return error
       ? { codec: "", width: 0, height: 0, durationSec: 0, sizeBytes: null, verified: false, error }
       : null;
@@ -204,20 +204,20 @@ function normalizeProbe(input: MasterProbeSummaryInput | null | undefined): Mast
 }
 
 /**
- * 組出可傳給 `recordArtifact({ metadata })` 的 metadata 物件。
+ * 组出可传给 `recordArtifact({ metadata })` 的 metadata 物件。
  *
- * 寫入側唯一入口：producer 不自行拼平鋪欄位，一律經此函式（鍵名與形狀的唯一真源）。
- * 空值欄位一律**不落鍵**（不寫 null），與 tts-upstream.ts:149 的條件展開同範式：
- * 「有值才寫」讓索引端的缺欄位與「本來沒有」不可混淆。
+ * 写入侧唯一入口：producer 不自行拼平铺栏位，一律经此函式（键名与形状的唯一真源）。
+ * 空值栏位一律**不落键**（不写 null），与 tts-upstream.ts:149 的条件展开同范式：
+ * 「有值才写」让索引端的缺栏位与「本来没有」不可混淆。
  */
 export function buildMasterArtifactMetadata(input: MasterArtifactMetadataInput): Record<string, unknown> {
   const exportFingerprint = nonEmptyString(input.exportFingerprint);
   if (!exportFingerprint) {
-    throw new TypeError("buildMasterArtifactMetadata: exportFingerprint 不能為空。");
+    throw new TypeError("buildMasterArtifactMetadata: exportFingerprint 不能为空。");
   }
   const preset = nonEmptyString(input.preset);
   if (!preset) {
-    throw new TypeError("buildMasterArtifactMetadata: preset 不能為空。");
+    throw new TypeError("buildMasterArtifactMetadata: preset 不能为空。");
   }
 
   const metadata: Record<string, unknown> = { exportFingerprint, preset };
@@ -253,13 +253,13 @@ export function buildMasterArtifactMetadata(input: MasterArtifactMetadataInput):
   return { [MASTER_ARTIFACT_METADATA_KEY]: metadata };
 }
 
-// ───────────────────────────────────────────────────── 讀取端：metadata 解析
+// ───────────────────────────────────────────────────── 读取端：metadata 解析
 
 /**
- * 容錯解析 `metadata_json.masterExport`。
- * 不是成片記錄（缺鍵／缺 exportFingerprint／缺 preset／型別不對）一律回 null——
- * 呼叫端據此把該列丟掉，不整份查詢作廢（normalize-and-drop 範式，同 project-store）。
- * 缺 `probe` 不是缺陷：導出可誠實地 probe 未過而仍留下紀錄（`verified:false` + error）。
+ * 容错解析 `metadata_json.masterExport`。
+ * 不是成片记录（缺键／缺 exportFingerprint／缺 preset／型别不对）一律回 null——
+ * 呼叫端据此把该列丢掉，不整份查询作废（normalize-and-drop 范式，同 project-store）。
+ * 缺 `probe` 不是缺陷：导出可诚实地 probe 未过而仍留下纪录（`verified:false` + error）。
  */
 export function readMasterArtifactMetadata(raw: unknown): MasterArtifactMetadata | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -289,8 +289,8 @@ export function readMasterArtifactMetadata(raw: unknown): MasterArtifactMetadata
       height: probeHeight ?? 0,
       durationSec: finiteNumber(rawProbe.durationSec) ?? 0,
       sizeBytes: finiteNumber(rawProbe.sizeBytes),
-      // 本檔的寫入端一律顯式寫入 verified，故此分支只影響 legacy/手寫列：
-      // 缺旗標時以「有 error 即未通過」推斷（對齊 masterExport 的 exported = probe !== null 語義）。
+      // 本档的写入端一律显式写入 verified，故此分支只影响 legacy/手写列：
+      // 缺旗标时以「有 error 即未通过」推断（对齐 masterExport 的 exported = probe !== null 语义）。
       verified: typeof rawProbe.verified === "boolean" ? rawProbe.verified : error === null,
       error,
     };
@@ -311,7 +311,7 @@ export function readMasterArtifactMetadata(raw: unknown): MasterArtifactMetadata
   };
 }
 
-/** 單列 → 索引列；非成片記錄（metadata 解析不過）回 null。匯出供單測直接鎖 shape。 */
+/** 单列 → 索引列；非成片记录（metadata 解析不过）回 null。汇出供单测直接锁 shape。 */
 export function mapMasterArtifactRow(row: Row): MasterArtifactRecord | null {
   const rawMetadata = typeof row.metadata_json === "string"
     ? (() => { try { return JSON.parse(row.metadata_json as string) as unknown; } catch { return null; } })()
@@ -346,7 +346,7 @@ export function mapMasterArtifactRow(row: Row): MasterArtifactRecord | null {
   };
 }
 
-// ───────────────────────────────────────────────────── 查詢層
+// ───────────────────────────────────────────────────── 查询层
 
 function clampLimit(raw: unknown): number {
   const value = Number(raw);
@@ -361,17 +361,17 @@ function clampOffset(raw: unknown): number {
 }
 
 /**
- * 列舉成片產物（預設 newest 優先）。
+ * 列举成片产物（预设 newest 优先）。
  *
- * 篩選口徑：
- *   - `role='output'` 且 `metadata_json` 帶成片命名空間鍵（`jsonb_exists`，比 `?` 運算子
- *     在參數化 SQL 下更無歧義）——這兩條一起構成了「這是成片」的判準；
- *   - tenant 為多租戶隔離鍵（金鑰只能看自己 tenant 的成片），與 status-query 同約定；
- *   - session／project 走產物自身 metadata（理由見檔頭 §4）：`jsonb -> key ->> field`，
- *     鍵名由常數綁定，避免路徑字面量與常數漂移。
+ * 筛选口径：
+ *   - `role='output'` 且 `metadata_json` 带成片命名空间键（`jsonb_exists`，比 `?` 运算子
+ *     在参数化 SQL 下更无歧义）——这两条一起构成了「这是成片」的判准；
+ *   - tenant 为多租户隔离键（金钥只能看自己 tenant 的成片），与 status-query 同约定；
+ *   - session／project 走产物自身 metadata（理由见档头 §4）：`jsonb -> key ->> field`，
+ *     键名由常数绑定，避免路径字面量与常数漂移。
  *
- * 不用 SQL 端做 metadata 形狀校驗（那是 `mapMasterArtifactRow` 的職責），
- * 避免「SQL 命中但 JS 丟棄」與「SQL 不命中」兩種空結果在下游無法區分。
+ * 不用 SQL 端做 metadata 形状校验（那是 `mapMasterArtifactRow` 的职责），
+ * 避免「SQL 命中但 JS 丢弃」与「SQL 不命中」两种空结果在下游无法区分。
  */
 export async function listMasterArtifacts(
   filter: MasterArtifactFilter = {},
@@ -410,9 +410,9 @@ export async function listMasterArtifacts(
 }
 
 /**
- * 成片總數（同一套篩選口徑）。
- * 與 `listMasterArtifacts` 分開查是為了讓分頁 has_more 不必先拉全量；
- * 兩者的 WHERE 必須逐條同步——改一處必須改另一處。
+ * 成片总数（同一套筛选口径）。
+ * 与 `listMasterArtifacts` 分开查是为了让分页 has_more 不必先拉全量；
+ * 两者的 WHERE 必须逐条同步——改一处必须改另一处。
  */
 export async function countMasterArtifacts(
   filter: MasterArtifactFilter = {},

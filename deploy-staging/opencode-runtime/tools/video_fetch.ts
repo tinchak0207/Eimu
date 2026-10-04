@@ -9,23 +9,23 @@ import {
   downloadDirectMedia,
 } from "../lib/video-fetch"
 
-// 影片抓取（薄包）：全部邏輯在 lib/video-fetch.ts（照抄競品 hypit packages/yt-dlp/src/*）。
-// 本檔只做參數轉譯與錯誤碼映射。
+// 影片抓取（薄包）：全部逻辑在 lib/video-fetch.ts（照抄竞品 hypit packages/yt-dlp/src/*）。
+// 本档只做参数转译与错误码映射。
 export default tool({
   description:
-    "影片抓取：把一個 **http(s) 連結**變成一個本機影片檔（video＋audio 一起抓、一起封裝）。" +
-    "**URL 抓取前必須先 action=prepare**：yt-dlp 是顯式準備的**釘版 Python 依賴**，不是機器剛好帶的二進位——" +
-    "它為追站點常改版而頻繁發版，未釘版會讓同一條連結在兩台機器抓出不同結果。" +
-    "action=prepare 會建**獨立環境**（venv，路徑含版本號）並安裝 pyproject 釘死的 yt-dlp 版本；action=fetch **絕不自行安裝**，" +
-    "未就緒時回 code=video_fetch_unavailable 並附 prepare 指令；action=status 只讀查環境與版本就緒狀態。" +
-    "只接受 http:/https: 連結（本機路徑不是連結；Windows 單字母 scheme 如 c:\\clip.mp4 會被當成 URL 而誤判，故明確排除）。" +
-    "落地檔名必須以 .mp4/.mkv/.webm/.mov 結尾（決定容器），並偏好 1080p H.264。",
+    "影片抓取：把一个 **http(s) 连结**变成一个本机影片档（video＋audio 一起抓、一起封装）。" +
+    "**URL 抓取前必须先 action=prepare**：yt-dlp 是显式准备的**钉版 Python 依赖**，不是机器刚好带的二进位——" +
+    "它为追站点常改版而频繁发版，未钉版会让同一条连结在两台机器抓出不同结果。" +
+    "action=prepare 会建**独立环境**（venv，路径含版本号）并安装 pyproject 钉死的 yt-dlp 版本；action=fetch **绝不自行安装**，" +
+    "未就绪时回 code=video_fetch_unavailable 并附 prepare 指令；action=status 只读查环境与版本就绪状态。" +
+    "只接受 http:/https: 连结（本机路径不是连结；Windows 单字母 scheme 如 c:\\clip.mp4 会被当成 URL 而误判，故明确排除）。" +
+    "落地档名必须以 .mp4/.mkv/.webm/.mov 结尾（决定容器），并偏好 1080p H.264。",
   args: {
     action: tool.schema
       .enum(["fetch", "prepare", "status"])
-      .describe("prepare=顯式準備釘版 yt-dlp 環境（建 venv＋安裝，可能數十秒）|fetch=抓取（需先 prepare）|status=只讀查環境與版本就緒狀態"),
-    url: tool.schema.string().optional().describe("action=fetch 必填；只接受 http/https 連結"),
-    to: tool.schema.string().optional().describe("action=fetch 必填；落地檔名，必須以 .mp4/.mkv/.webm/.mov 結尾"),
+      .describe("prepare=显式准备钉版 yt-dlp 环境（建 venv＋安装，可能数十秒）|fetch=抓取（需先 prepare）|status=只读查环境与版本就绪状态"),
+    url: tool.schema.string().optional().describe("action=fetch 必填；只接受 http/https 连结"),
+    to: tool.schema.string().optional().describe("action=fetch 必填；落地档名，必须以 .mp4/.mkv/.webm/.mov 结尾"),
   },
   async execute(args, context) {
     if (args.action === "status") {
@@ -57,10 +57,10 @@ export default tool({
           action: "prepare",
           version: videoDownloadEnvironment().version,
           executable,
-          title: "釘版 yt-dlp 已就緒",
+          title: "钉版 yt-dlp 已就绪",
         })
       } catch (e) {
-        return fail("video_fetch_prepare_failed", (e as Error).message || "準備失敗")
+        return fail("video_fetch_prepare_failed", (e as Error).message || "准备失败")
       }
     }
 
@@ -68,13 +68,13 @@ export default tool({
     if (!args.url || !isVideoUrl(args.url)) {
       return fail(
         "video_fetch_bad_url",
-        "action=fetch 需要 http(s) 的 url；本機路徑或 Windows 單字母 scheme（c:\\clip.mp4）不是連結",
+        "action=fetch 需要 http(s) 的 url；本机路径或 Windows 单字母 scheme（c:\\clip.mp4）不是连结",
       )
     }
     if (!args.to) {
-      return fail("video_fetch_bad_target", "action=fetch 需要 to（落地檔名，.mp4/.mkv/.webm/.mov）")
+      return fail("video_fetch_bad_target", "action=fetch 需要 to（落地档名，.mp4/.mkv/.webm/.mov）")
     }
-    // 直鏈媒體（.mp4 等、回 video/*）先走普通下載，不經 yt-dlp（見 lib downloadDirectMedia 註解）
+    // 直链媒体（.mp4 等、回 video/*）先走普通下载，不经 yt-dlp（见 lib downloadDirectMedia 注解）
     try {
       if (await downloadDirectMedia(args.url, args.to, { signal: context.abort })) {
         return ok({ action: "fetch", url: args.url, to: args.to, via: "direct", title: `已抓取 ${args.to}` })
@@ -87,7 +87,7 @@ export default tool({
     } catch (e) {
       return fail(
         "video_fetch_unavailable",
-        `${(e as Error).message}｜請先呼叫 video_fetch action=prepare（建獨立 venv 並安裝 pyproject 釘死的 yt-dlp 版本）`,
+        `${(e as Error).message}｜请先呼叫 video_fetch action=prepare（建独立 venv 并安装 pyproject 钉死的 yt-dlp 版本）`,
         { prepare: 'video_fetch { action: "prepare" }' },
       )
     }
@@ -95,7 +95,7 @@ export default tool({
       await downloadVideo(args.url, args.to, { signal: context.abort })
       return ok({ action: "fetch", url: args.url, to: args.to, title: `已抓取 ${args.to}` })
     } catch (e) {
-      return fail("video_fetch_failed", (e as Error).message || "抓取失敗")
+      return fail("video_fetch_failed", (e as Error).message || "抓取失败")
     }
   },
 })

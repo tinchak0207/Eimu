@@ -1,17 +1,17 @@
-// 影片抓取（fetch）——照抄競品 hypit 的實作；配方＝
+// 影片抓取（fetch）——照抄竞品 hypit 的实作；配方＝
 //   packages/yt-dlp/src/environment.ts  ＋  packages/yt-dlp/src/download.ts
 //
-// 設計註解（hypit download.ts:1-12 逐字，本檔照此精神）：
+// 设计注解（hypit download.ts:1-12 逐字，本档照此精神）：
 //   The tool is a pinned Python dependency prepared explicitly by `hypit media prepare-fetch`, not a
 //   binary the machine happens to carry. `yt-dlp` releases constantly because it is chasing sites that
 //   keep changing, so an unpinned copy makes the same link fetch differently on two machines.
 //
-// 我方落地差異（已在回報逐條列出）：
-//   1. 無 uv：prepare 走 `python3 -m venv` ＋ `pip install yt-dlp==<pin>`（同形狀：釘版、獨立環境、顯式、使用前斷言）。
-//      有 uv 時仍走 hypit 原路（uv sync --project --frozen）。
-//   2. ffmpeg 不在 PATH：可用性檢查先試 PATH 的 `ffmpeg`，再試 /opt/agent-harness/bin/ffmpeg；
-//      失敗訊息逐字保留 hypit 原文。
-//   3. 版本真源宣告在自帶的 lib/video-fetch-runtime/pyproject.toml（hypit 是獨立 runtime 套件）。
+// 我方落地差异（已在回报逐条列出）：
+//   1. 无 uv：prepare 走 `python3 -m venv` ＋ `pip install yt-dlp==<pin>`（同形状：钉版、独立环境、显式、使用前断言）。
+//      有 uv 时仍走 hypit 原路（uv sync --project --frozen）。
+//   2. ffmpeg 不在 PATH：可用性检查先试 PATH 的 `ffmpeg`，再试 /opt/agent-harness/bin/ffmpeg；
+//      失败讯息逐字保留 hypit 原文。
+//   3. 版本真源宣告在自带的 lib/video-fetch-runtime/pyproject.toml（hypit 是独立 runtime 套件）。
 
 import { safeFetch } from "./sandbox"
 import { execFile, spawnSync } from "node:child_process"
@@ -21,10 +21,10 @@ import { tmpdir } from "node:os"
 import { dirname, extname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-/** 釘版 runtime 專案（版本唯一真源在 pyproject.toml，environment() 以 regex 讀出，與 hypit 同形）。 */
+/** 钉版 runtime 专案（版本唯一真源在 pyproject.toml，environment() 以 regex 读出，与 hypit 同形）。 */
 const PROJECT = join(dirname(fileURLToPath(import.meta.url)), "video-fetch-runtime")
 const PROJECT_FILE = join(PROJECT, "pyproject.toml")
-/** host state root：venv 落在此（獨立環境，含版本號路徑）。 */
+/** host state root：venv 落在此（独立环境，含版本号路径）。 */
 const HOST_STATE_ROOT = "/opt/agent-harness/workspace/.opencode-state"
 const FFMPEG_CANDIDATES = ["ffmpeg", "/opt/agent-harness/bin/ffmpeg"]
 
@@ -49,7 +49,7 @@ export function videoDownloadEnvironment(): VideoDownloadEnvironment {
   return { project: PROJECT, version, environment, executable: join(environment, "bin", "yt-dlp") }
 }
 
-/** 使用前版本斷言：不符即拋，fetch 絕不觸發安裝。 */
+/** 使用前版本断言：不符即抛，fetch 绝不触发安装。 */
 export function requireVideoDownload(): string {
   const selected = videoDownloadEnvironment()
   const result = spawnSync(selected.executable, ["--ignore-config", "--version"], {
@@ -78,7 +78,7 @@ function hasUv(): boolean {
   return !probe.error && probe.status === 0
 }
 
-/** Explicit provisioning. uv owns dependency resolution and the environment; 無 uv 時用 venv+pip 同形狀。 */
+/** Explicit provisioning. uv owns dependency resolution and the environment; 无 uv 时用 venv+pip 同形状。 */
 export function prepareVideoDownload(): string {
   const selected = videoDownloadEnvironment()
   if (hasUv()) {
@@ -220,9 +220,9 @@ export async function downloadVideo(
   }
 }
 
-// 直鏈媒體快路徑（2026-09-29 e2e 實錘）：用戶貼 .mp4 直鏈時，yt-dlp 的 generic 抽取器會先把它當網頁抓，
-// 在 Cloudflare 後的站（含 eimu.dev 自家 showcase）回 SSL EOF／403 anti-bot，而同一 URL 普通 GET 就是 200 video/mp4。
-// 回 true＝已落地；回 false＝不是直鏈媒體（HTML 頁／非 2xx），交回 yt-dlp。
+// 直链媒体快路径（2026-09-29 e2e 实锤）：用户贴 .mp4 直链时，yt-dlp 的 generic 抽取器会先把它当网页抓，
+// 在 Cloudflare 后的站（含 eimu.dev 自家 showcase）回 SSL EOF／403 anti-bot，而同一 URL 普通 GET 就是 200 video/mp4。
+// 回 true＝已落地；回 false＝不是直链媒体（HTML 页／非 2xx），交回 yt-dlp。
 export async function downloadDirectMedia(
   url: string,
   target: string,

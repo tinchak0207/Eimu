@@ -1,31 +1,31 @@
-// 統計／用量導出（P2-1／對稱差 D16「用量/對帳導出 CSV/Excel」）。
+// 统计／用量导出（P2-1／对称差 D16「用量/对帐导出 CSV/Excel」）。
 //
-// 對標口徑（唯一）：`Dramagic對稱差-全站-0928.md:101` —— 對手有
-// 「Export details…download data in **Excel format**」，含總/團隊/子帳號/專案四層；
-// 我方有對帳（`account-reconciliation`）與統計投影，**無導出**。
-// 決策表 `Dramagic對稱差-決策表-0928.md:49` 裁定逐字：P2-1「**做**」。
+// 对标口径（唯一）：`Dramagic对称差-全站-0928.md:101` —— 对手有
+// 「Export details…download data in **Excel format**」，含总/团队/子帐号/专案四层；
+// 我方有对帐（`account-reconciliation`）与统计投影，**无导出**。
+// 决策表 `Dramagic对称差-决策表-0928.md:49` 裁定逐字：P2-1「**做**」。
 //
-// 本檔的立場（誠實邊界，別讓 CSV 變成第二個真相）：
-//   1. **只序列化既有投影**：數字全部來自 `StatisticsProjection`，本檔不查 DB、不算帳、
-//      不補任何缺失的數。投影是唯一真源（`statistics-projection.ts` 的檔頭已聲明）。
-//   2. **缺的層如實缺席**：對手的四層是「總／團隊／子帳號／專案」，我方投影目前只有
-//      日／模型／渠道三個切面 ⇒ `byScope` 恆為空陣列，**不偽造**團隊/專案列。
-//      這一欄是 P2-2（按生成物類別切分）與組織維度用量的**唯一延伸點**：
-//      新的切面只要往 `byScope` 塞桶，導出檔自動多一層，不必改本檔的欄位結構。
-//   3. **Excel 相容不是改個副檔名**：UTF-8 BOM（否則 Excel 開簡中欄位名會變亂碼）＋
-//      CRLF ＋ RFC4180 引號轉義（逗號／引號／換行）——三者缺一，使用者下載到的就是壞檔。
-//   4. **缺值留空，不填 0**：某桶沒有這個指標時該格是空字串。填 0 等於宣稱
-//      「這筆量是 0」，與「沒有這個數字」是兩件事（同 `skippedNonFiniteRows` 的立場）。
+// 本档的立场（诚实边界，别让 CSV 变成第二个真相）：
+//   1. **只序列化既有投影**：数字全部来自 `StatisticsProjection`，本档不查 DB、不算帐、
+//      不补任何缺失的数。投影是唯一真源（`statistics-projection.ts` 的档头已声明）。
+//   2. **缺的层如实缺席**：对手的四层是「总／团队／子帐号／专案」，我方投影目前只有
+//      日／模型／渠道三个切面 ⇒ `byScope` 恒为空阵列，**不伪造**团队/专案列。
+//      这一栏是 P2-2（按生成物类别切分）与组织维度用量的**唯一延伸点**：
+//      新的切面只要往 `byScope` 塞桶，导出档自动多一层，不必改本档的栏位结构。
+//   3. **Excel 相容不是改个副档名**：UTF-8 BOM（否则 Excel 开简中栏位名会变乱码）＋
+//      CRLF ＋ RFC4180 引号转义（逗号／引号／换行）——三者缺一，使用者下载到的就是坏档。
+//   4. **缺值留空，不填 0**：某桶没有这个指标时该格是空字串。填 0 等于宣称
+//      「这笔量是 0」，与「没有这个数字」是两件事（同 `skippedNonFiniteRows` 的立场）。
 
 import type { ConsumptionProjection, StatisticsProjection } from "./statistics-projection";
 
 /**
- * 導出**實際讀取的**投影面（不是整份投影）。
+ * 导出**实际读取的**投影面（不是整份投影）。
  *
- * 為什麼收窄：① 契約顯式化——本檔只依賴這四個欄位，別的地方改動不會靜默影響導出；
- * ② 用 indexed access 取得真實型別 ⇒ 欄位一旦在投影裡改名，路由呼叫端**編譯期**就紅，
- * 不會靜默吐出一個少了欄位的 CSV；③ 測試可以只造這四個欄位，不必造整份投影
- * （專案的健康度／漏斗／來源清單與導出無關）。
+ * 为什么收窄：① 契约显式化——本档只依赖这四个栏位，别的地方改动不会静默影响导出；
+ * ② 用 indexed access 取得真实型别 ⇒ 栏位一旦在投影里改名，路由呼叫端**编译期**就红，
+ * 不会静默吐出一个少了栏位的 CSV；③ 测试可以只造这四个栏位，不必造整份投影
+ * （专案的健康度／漏斗／来源清单与导出无关）。
  */
 export interface StatisticsCsvInput {
   window: StatisticsProjection["window"];
@@ -34,15 +34,15 @@ export interface StatisticsCsvInput {
   traffic: StatisticsProjection["traffic"];
 }
 
-/** UTF-8 BOM：Excel 靠它認出編碼（缺它→中文欄位名變亂碼）。 */
+/** UTF-8 BOM：Excel 靠它认出编码（缺它→中文栏位名变乱码）。 */
 export const STATISTICS_CSV_BOM = "\uFEFF";
 
 /**
- * 欄位名（**契約面，改動即破壞下游解析**）。
- * `section` ＝ 這列屬於哪個切面；`key`/`label` ＝ 桶的識別；其後為量化欄位。
- * `operations` 的語義要讀 `key`：消耗列＝帳本行數；`refunded` 的計數列（`*_jobs`／
- * `*_rows`）＝job 數或行數。**不做第二套欄位名**——同一個數字欄在不同切面承載計數，
- * 是靠 `key` 說清楚，不靠欄位數膨脹。
+ * 栏位名（**契约面，改动即破坏下游解析**）。
+ * `section` ＝ 这列属于哪个切面；`key`/`label` ＝ 桶的识别；其后为量化栏位。
+ * `operations` 的语义要读 `key`：消耗列＝帐本行数；`refunded` 的计数列（`*_jobs`／
+ * `*_rows`）＝job 数或行数。**不做第二套栏位名**——同一个数字栏在不同切面承载计数，
+ * 是靠 `key` 说清楚，不靠栏位数膨胀。
  */
 export const STATISTICS_CSV_HEADER = [
   "section",
@@ -54,32 +54,32 @@ export const STATISTICS_CSV_HEADER = [
   "record_ids",
 ] as const;
 
-/** 一個切面在導出檔裡的名字（＝sheet 的替代品，Excel 用篩選即可分開看）。 */
+/** 一个切面在导出档里的名字（＝sheet 的替代品，Excel 用筛选即可分开看）。 */
 export type StatisticsCsvSection =
-  /** 窗口事實與口徑備註（無量化值，只為讓檔案自帶出處）。 */
+  /** 窗口事实与口径备注（无量化值，只为让档案自带出处）。 */
   | "meta"
   | "total"
   | "day"
   | "model"
   | "channel"
-  /** 退款單列（口徑變了：退款不是消耗的一部分，見投影的 RefundedBucket）。 */
+  /** 退款单列（口径变了：退款不是消耗的一部分，见投影的 RefundedBucket）。 */
   | "refunded"
-  /** 帳本有行但找不到交付嘗試的淨消耗（不攤進任何渠道）。 */
+  /** 帐本有行但找不到交付尝试的净消耗（不摊进任何渠道）。 */
   | "unattributed"
-  /** 帳本有行但金額非有限值（不當 0 計）。 */
+  /** 帐本有行但金额非有限值（不当 0 计）。 */
   | "skipped_non_finite"
-  /** 組織維度（總/團隊/子帳號/專案）——**目前恆空**，見檔頭第 2 條。 */
+  /** 组织维度（总/团队/子帐号/专案）——**目前恒空**，见档头第 2 条。 */
   | "scope"
-  /** 生成物類別（P2-2／D8b）：分鏡影片／一般圖片／未歸類。 */
+  /** 生成物类别（P2-2／D8b）：分镜影片／一般图片／未归类。 */
   | "asset_kind";
 
-/** 多筆 id 塞一格時的分隔字元（Excel 單格可讀；不用逗號以免與 CSV 分隔衝突）。 */
+/** 多笔 id 塞一格时的分隔字元（Excel 单格可读；不用逗号以免与 CSV 分隔冲突）。 */
 export const STATISTICS_CSV_ID_SEPARATOR = "|";
 
 /**
- * RFC4180 單格轉義：
- *   - 含 `,`／`"`／`\r`／`\n` → 整格用 `"` 包住，內部 `"` 翻倍；
- *   - 其餘原樣輸出。
+ * RFC4180 单格转义：
+ *   - 含 `,`／`"`／`\r`／`\n` → 整格用 `"` 包住，内部 `"` 翻倍；
+ *   - 其余原样输出。
  * 非字串值走 `String()`；`null`／`undefined`／空字串 → **空字串**（缺值留空，不填 0）。
  */
 export function csvCell(value: unknown): string {
@@ -90,12 +90,12 @@ export function csvCell(value: unknown): string {
   return raw;
 }
 
-/** 一列（以 CRLF 結尾，符合 Excel 的期待）。 */
+/** 一列（以 CRLF 结尾，符合 Excel 的期待）。 */
 export function csvRow(cells: readonly unknown[]): string {
   return `${cells.map(csvCell).join(",")}\r\n`;
 }
 
-/** 缺值留空的守門：非有限值一律當「沒有這個數字」，不回 0。 */
+/** 缺值留空的守门：非有限值一律当「没有这个数字」，不回 0。 */
 function metric(value: unknown): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 }
@@ -124,15 +124,15 @@ function bucketRow(section: StatisticsCsvSection, bucket: {
 }
 
 /**
- * 投影 → CSV 全文（單表＋ `section` 欄，Excel 開啟後用篩選/pivot 即可分層看）。
+ * 投影 → CSV 全文（单表＋ `section` 栏，Excel 开启后用筛选/pivot 即可分层看）。
  *
- * 為什麼不做多 sheet：真實 .xlsx 需要寫 zip＋XML（新依賴），而「CSV/Excel 導出」的
- * 使用者價值是「能把數字拿去算」——單表 + 分面欄完全滿足，且零新依賴、可被任何工具吃。
+ * 为什么不做多 sheet：真实 .xlsx 需要写 zip＋XML（新依赖），而「CSV/Excel 导出」的
+ * 使用者价值是「能把数字拿去算」——单表 + 分面栏完全满足，且零新依赖、可被任何工具吃。
  */
 export function statisticsToCsv(projection: StatisticsCsvInput): string {
   const lines: string[] = [csvRow(STATISTICS_CSV_HEADER)];
 
-  // meta：窗口與口徑（讓檔案自帶出處，日後對帳不必回頭查網頁當下的參數）。
+  // meta：窗口与口径（让档案自带出处，日后对帐不必回头查网页当下的参数）。
   const metaRows: Array<[string, string]> = [
     ["days", String(projection.window.days)],
     ["generated_at", projection.window.generatedAt],
@@ -145,8 +145,8 @@ export function statisticsToCsv(projection: StatisticsCsvInput): string {
   for (const [key, value] of metaRows) lines.push(csvRow(["meta", key, value, "", "", "", ""]));
 
   const consumption = projection.consumption;
-  // 未配置控制面 DB ⇒ 投影本身已宣告 configured:false（不吐看起來正常的空報表），
-  // 這裡照抄它的誠實：沒有消耗面就**不出現任何消耗列**，而不是吐一排 0。
+  // 未配置控制面 DB ⇒ 投影本身已宣告 configured:false（不吐看起来正常的空报表），
+  // 这里照抄它的诚实：没有消耗面就**不出现任何消耗列**，而不是吐一排 0。
   if (consumption) {
     lines.push(csvRow([
       "total",
@@ -169,15 +169,15 @@ export function statisticsToCsv(projection: StatisticsCsvInput): string {
     for (const bucket of consumption.byDay) lines.push(csvRow(bucketRow("day", bucket)));
     for (const bucket of consumption.byModel) lines.push(csvRow(bucketRow("model", bucket)));
     for (const bucket of consumption.byChannel) lines.push(csvRow(bucketRow("channel", bucket)));
-    // 生成物類別切面（P2-2／D8b）：桶鍵即類別值域，label 已是中文（投影帶出來）。
-    // D8b 的角色／場景／道具在提交端還沒有落盤事實 ⇒ 不會出現這三列（見 usage-asset-kind.ts）；
-    // 出現的只有分鏡影片／一般圖片／未歸類——**未歸類不攤進任何一類**。
+    // 生成物类别切面（P2-2／D8b）：桶键即类别值域，label 已是中文（投影带出来）。
+    // D8b 的角色／场景／道具在提交端还没有落盘事实 ⇒ 不会出现这三列（见 usage-asset-kind.ts）；
+    // 出现的只有分镜影片／一般图片／未归类——**未归类不摊进任何一类**。
     for (const bucket of consumption.byAssetKind) lines.push(csvRow(bucketRow("asset_kind", bucket)));
-    // 這兩個桶在投影裡沒有 key/label（它們不是「按某個維度分桶」的結果），
-  // 導出時補上具名 key/label——空 key 的列對消費 CSV 的人等於沒說這是什麼。
+    // 这两个桶在投影里没有 key/label（它们不是「按某个维度分桶」的结果），
+  // 导出时补上具名 key/label——空 key 的列对消费 CSV 的人等于没说这是什么。
   lines.push(csvRow(bucketRow("refunded", { ...consumption.refunded, key: "refund", label: "已退款" })));
-    // 退款的 job 層計數（金額欄留空，只有計數）——這是人工對帳最需要的三個數：
-    // 涉及幾個 job、其中幾個全額退款、相抵為 0 的帳本行幾行。
+    // 退款的 job 层计数（金额栏留空，只有计数）——这是人工对帐最需要的三个数：
+    // 涉及几个 job、其中几个全额退款、相抵为 0 的帐本行几行。
     lines.push(csvRow([
       "refunded",
       "refund_jobs_total",
@@ -219,14 +219,14 @@ export function statisticsToCsv(projection: StatisticsCsvInput): string {
         "",
       ]));
     }
-    // 組織維度：投影尚未提供 ⇒ 一列都不寫（**不偽造團隊/專案列**）。這一行註解就是
-    // 「要補這一層，往投影的 byScope 塞桶」的指標；CSV 結構本身不必改。
+    // 组织维度：投影尚未提供 ⇒ 一列都不写（**不伪造团队/专案列**）。这一行注解就是
+    // 「要补这一层，往投影的 byScope 塞桶」的指标；CSV 结构本身不必改。
   }
 
   return STATISTICS_CSV_BOM + lines.join("");
 }
 
-/** 下載檔名（帶日期，避免同一資料夾多份 export 互相覆蓋）。 */
+/** 下载档名（带日期，避免同一资料夹多份 export 互相覆盖）。 */
 export function statisticsCsvFilename(projection: StatisticsProjection, now: Date = new Date()): string {
   const day = now.toISOString().slice(0, 10);
   return `statistics-${day}-${projection.window.days}d.csv`;

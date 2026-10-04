@@ -217,7 +217,7 @@ test("listStuckJobs attaches evidence with raw upstream errors and unsettled rea
   assert.ok(String(calls[0].sql).includes("job.updated_at < now()"));
 });
 
-test("OBS-1：已扣款結算失敗（succeeded＋commit failed）如實列為 terminal_unsettled，reason 不誤標成 refund_*", async () => {
+test("OBS-1：已扣款结算失败（succeeded＋commit failed）如实列为 terminal_unsettled，reason 不误标成 refund_*", async () => {
   const { sql, calls } = recordingMock(() => [
     {
       id: "job-unsettled-commit",
@@ -247,13 +247,13 @@ test("OBS-1：已扣款結算失敗（succeeded＋commit failed）如實列為 t
   const stuck = await listStuckJobs({ minutes: 30, sql });
   assert.equal(stuck.length, 1);
   assert.equal(stuck[0].cause, "terminal_unsettled");
-  assert.equal(stuck[0].evidence.reason, "commit_failed", "語義是結算失敗，不得被退款分支吞掉");
+  assert.equal(stuck[0].evidence.reason, "commit_failed", "语义是结算失败，不得被退款分支吞掉");
   assert.equal(
     stuck[0].evidence.commitLastError,
     "commit apply failed: upstream timeout",
-    "誠實帶出結算失敗的原始錯誤（人工對帳第一手證據）",
+    "诚实带出结算失败的原始错误（人工对帐第一手证据）",
   );
-  // 變更探針（不計入「已驗證」）：WHERE 確實多了 commit failed 分支；真實撈行需真庫，列 pending。
+  // 变更探针（不计入「已验证」）：WHERE 确实多了 commit failed 分支；真实捞行需真库，列 pending。
   assert.match(String(calls[0].sql), /commit_op\.status = 'failed'/);
 });
 

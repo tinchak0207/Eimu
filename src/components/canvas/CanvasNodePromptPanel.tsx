@@ -1,33 +1,33 @@
 "use client";
 
-// CanvasNodePromptPanel —— 節點內嵌可編輯生成面板。
+// CanvasNodePromptPanel —— 节点内嵌可编辑生成面板。
 //
-// 每個節點下方展開，就地編輯 prompt / 模型 / 比例 / 數量，點「生成」後
-// 結果作為相連子節點插回畫布。
+// 每个节点下方展开，就地编辑 prompt / 模型 / 比例 / 数量，点「生成」后
+// 结果作为相连子节点插回画布。
 //
-// 誠實原則（2026-08-15 修正）：模型清單來自站上真實供給
-// （PROVIDERS.image_tinchak.models + generationModel 顯示名），不再擺
-// dall-e-3 / midjourney 這種站上根本不路由的假選項；生成按鈕旁標「约 N 币」
-// 與扣費同源估價——花費喂到面前，暴君不用算帳。
+// 诚实原则（2026-08-15 修正）：模型清单来自站上真实供给
+// （PROVIDERS.image_tinchak.models + generationModel 显示名），不再摆
+// dall-e-3 / midjourney 这种站上根本不路由的假选项；生成按钮旁标「约 N 币」
+// 与扣费同源估价——花费喂到面前，暴君不用算帐。
 //
-// @引用（2026-08-16 升級，對標 infinite-canvas 的 @mention 體驗）：
-// - 輸入框改為 contentEditable：行首或空白後鍵入「@」喚起懸浮候選選單，
-//   錨定在 caret 像素位置（Range#getBoundingClientRect，換算畫布縮放後
-//   絕對定位於面板內），↑↓ 導航、Enter/點擊選中、Esc 關閉、續鍵過濾標題。
-// - 選中後插入原子 chip（contentEditable=false 的 inline span：16px 縮圖 +
-//   標題截 8 字，藍底圓角，帶 data-node-id）；Backspace 在 chip 後緣整塊刪除。
-// - chip 與「引用上游图片」縮圖列雙向同步：插入 chip 自動選取引用、chip
-//   全部消失自動取消；點縮圖列亦同步輸入框內 chip 的插入/移除。
-// - 生成時序列化：chip → `@图片N`（N = 該 chip 在 selectedReferenceIds 的
-//   序號+1），其餘文字原樣；onGenerate 契約不變。
-// - 貼上只取 text/plain；IME 組合輸入期間不解析 @ 選單。
+// @引用（2026-08-16 升级，对标 infinite-canvas 的 @mention 体验）：
+// - 输入框改为 contentEditable：行首或空白后键入「@」唤起悬浮候选选单，
+//   锚定在 caret 像素位置（Range#getBoundingClientRect，换算画布缩放后
+//   绝对定位于面板内），↑↓ 导航、Enter/点击选中、Esc 关闭、续键过滤标题。
+// - 选中后插入原子 chip（contentEditable=false 的 inline span：16px 缩图 +
+//   标题截 8 字，蓝底圆角，带 data-node-id）；Backspace 在 chip 后缘整块删除。
+// - chip 与「引用上游图片」缩图列双向同步：插入 chip 自动选取引用、chip
+//   全部消失自动取消；点缩图列亦同步输入框内 chip 的插入/移除。
+// - 生成时序列化：chip → `@图片N`（N = 该 chip 在 selectedReferenceIds 的
+//   序号+1），其余文字原样；onGenerate 契约不变。
+// - 贴上只取 text/plain；IME 组合输入期间不解析 @ 选单。
 //
-// 素材卡 @引用（2026-09-24 擴充，WS3）：@ 選單加開第二組候選——項目鎖定的角色/場景/
-// 風格/道具卡。選中插入紫色原子 chip（同幾何、異色票），生成時序列化成行內 token
-// `@[角色:霍辞渊]`（與圖片 chip 的 `@图片N` 走同一個 serializeEditor 分派，靠 dataset.cardId
-// 判定），讓「這一鏡要誰/哪個場景/用哪個道具」就地指名而不是靠整包前綴。
-// 兩個 chip 系統共用既有物理參數/事件監聽/caret 量測邏輯（本輪對此零改動）。
-// 編輯器下方另掛 ShotReferencePanel：純推導列出本鏡解析出的參考素材與未匹配 token。
+// 素材卡 @引用（2026-09-24 扩充，WS3）：@ 选单加开第二组候选——项目锁定的角色/场景/
+// 风格/道具卡。选中插入紫色原子 chip（同几何、异色票），生成时序列化成行内 token
+// `@[角色:霍辞渊]`（与图片 chip 的 `@图片N` 走同一个 serializeEditor 分派，靠 dataset.cardId
+// 判定），让「这一镜要谁/哪个场景/用哪个道具」就地指名而不是靠整包前缀。
+// 两个 chip 系统共用既有物理参数/事件监听/caret 量测逻辑（本轮对此零改动）。
+// 编辑器下方另挂 ShotReferencePanel：纯推导列出本镜解析出的参考素材与未匹配 token。
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Bot, Settings2, X } from "lucide-react";
@@ -45,35 +45,35 @@ import {
 } from "./ShotReferencePanel";
 import { cn } from "@/lib/utils";
 
-/** 上游可引用資源（由宿主從連線圖算出）。 */
+/** 上游可引用资源（由宿主从连线图算出）。 */
 export interface CanvasReferenceCandidate {
   nodeId: string;
   title: string;
   previewUrl: string;
 }
 
-/** @ 可引用的素材卡候選（角色/場景/風格/道具）。 */
+/** @ 可引用的素材卡候选（角色/场景/风格/道具）。 */
 export interface CanvasEntityCandidate {
   cardId: string;
   name: string;
   kind: CharacterCardKind;
-  /** 顯示用種類字（＝CHARACTER_CARD_KIND_LABEL[kind]）。 */
+  /** 显示用种类字（＝CHARACTER_CARD_KIND_LABEL[kind]）。 */
   kindLabel: string;
-  /** 預覽縮圖（卡的第一張參考圖；無則空字串）。 */
+  /** 预览缩图（卡的第一张参考图；无则空字串）。 */
   previewUrl: string;
 }
 
 /**
- * 純推導（本鏡參考素材清單，零請求零訂閱）：在既有 token/locked 推導上疊加第三種來源 shot。
+ * 纯推导（本镜参考素材清单，零请求零订阅）：在既有 token/locked 推导上叠加第三种来源 shot。
  *
- * 優先序 `token` > `shot` > `locked`（同一張卡只出現一次）：
- *   1. `token`：正文真的用 `@[種類:名]` 引用了（人明寫的最強意圖）；
- *   2. `shot`：本鏡節點 metadata 三欄（character/scene/prop）已指定，且未被 token 引用；
- *   3. `locked`：候選卡裡既沒被引用、也沒被指定的其餘卡（純提示「有哪些沒用到」）。
+ * 优先序 `token` > `shot` > `locked`（同一张卡只出现一次）：
+ *   1. `token`：正文真的用 `@[种类:名]` 引用了（人明写的最强意图）；
+ *   2. `shot`：本镜节点 metadata 三栏（character/scene/prop）已指定，且未被 token 引用；
+ *   3. `locked`：候选卡里既没被引用、也没被指定的其余卡（纯提示「有哪些没用到」）。
  *
- * `shotEntityCardIds` 中不在 `candidates` 的 id 靜默跳過（候選已過作用域裁決，不在裡面＝不可用），
- * 避免出現沒名字的空條目。`shotEntityCardIds` 缺省／空 → 回傳結果與既有三來源推導逐位元相同。
- * token/locked 條目直接沿用 `deriveShotReference` 的產物（物件與順序不重算）；unresolvedTokens 逐字不動。
+ * `shotEntityCardIds` 中不在 `candidates` 的 id 静默跳过（候选已过作用域裁决，不在里面＝不可用），
+ * 避免出现没名字的空条目。`shotEntityCardIds` 缺省／空 → 回传结果与既有三来源推导逐位元相同。
+ * token/locked 条目直接沿用 `deriveShotReference` 的产物（物件与顺序不重算）；unresolvedTokens 逐字不动。
  */
 export function deriveShotReferenceEntries(
   promptText: string,
@@ -123,9 +123,9 @@ export function deriveShotReferenceEntries(
 }
 
 /**
- * 純讀取：節點 metadata 三欄（character/scene/prop）的實體卡 id 聯集去重。
- * 宿主（CanvasEmbed）用它算出 `shotEntityCardIds` 供本面板；缺省／全空 → 空陣列。
- * 抽成模組級純函式以便直接行為斷言（CanvasEmbed 因 CSS import 無法在 node 測試內載入）。
+ * 纯读取：节点 metadata 三栏（character/scene/prop）的实体卡 id 联集去重。
+ * 宿主（CanvasEmbed）用它算出 `shotEntityCardIds` 供本面板；缺省／全空 → 空阵列。
+ * 抽成模组级纯函式以便直接行为断言（CanvasEmbed 因 CSS import 无法在 node 测试内载入）。
  */
 export function shotEntityCardIdsFromMetadata(
   metadata: Pick<CanvasNodeMetadata, "characterCardIds" | "sceneCardIds" | "propCardIds"> | undefined,
@@ -155,23 +155,23 @@ export interface CanvasNodePromptPanelProps {
     quality?: string;
     count?: number;
   }) => void;
-  /** 上游相連圖片節點（@引用候選）；空陣列 = 不顯示引用列。 */
+  /** 上游相连图片节点（@引用候选）；空阵列 = 不显示引用列。 */
   referenceCandidates?: CanvasReferenceCandidate[];
-  /** 已選為參考圖的節點 id。 */
+  /** 已选为参考图的节点 id。 */
   selectedReferenceIds?: string[];
-  /** 切換某個引用的選取狀態。 */
+  /** 切换某个引用的选取状态。 */
   onToggleReference?: (referenceNodeId: string) => void;
-  /** @ 可引用的素材卡（第二組候選）。 */
+  /** @ 可引用的素材卡（第二组候选）。 */
   entityCandidates?: CanvasEntityCandidate[];
-  /** 已被行內引用的卡 id（與 prompt 內 token 雙向同步）。 */
+  /** 已被行内引用的卡 id（与 prompt 内 token 双向同步）。 */
   selectedEntityIds?: string[];
-  /** 切換某張卡的引用狀態（插入/移除對應 token chip）。 */
+  /** 切换某张卡的引用状态（插入/移除对应 token chip）。 */
   onToggleEntity?: (cardId: string) => void;
-  /** 本鏡節點已指定的實體卡 id（真源＝節點 metadata 的三個卡 id 欄；供清單的 "shot" 來源）。 */
+  /** 本镜节点已指定的实体卡 id（真源＝节点 metadata 的三个卡 id 栏；供清单的 "shot" 来源）。 */
   shotEntityCardIds?: string[];
-  /** 生成中點「停止」時回呼；未提供則 isRunning 只顯示轉圈段、不顯示停止鈕。 */
+  /** 生成中点「停止」时回呼；未提供则 isRunning 只显示转圈段、不显示停止钮。 */
   onStop?: () => void;
-  /** 開啟提示詞庫；未提供則不渲染入口按鈕。 */
+  /** 开启提示词库；未提供则不渲染入口按钮。 */
   onOpenPromptLibrary?: () => void;
 }
 
@@ -185,13 +185,13 @@ const SIZE_OPTIONS = [
 
 const COUNT_OPTIONS = [1, 2, 3, 4];
 
-/** @ 只在行首或空白後觸發；query 不含空白與第二個 @。 */
+/** @ 只在行首或空白后触发；query 不含空白与第二个 @。 */
 const MENTION_PATTERN = /(^|\s)@([^\s@]*)$/;
-const MENTION_MENU_WIDTH = 224; // 對應 w-56，clamp 用
+const MENTION_MENU_WIDTH = 224; // 对应 w-56，clamp 用
 const CHIP_TITLE_MAX = 8;
 
-// 零寬字元（U+FEFF BOM / U+200B ZWSP）與 @偵測用 chip 佔位符（U+FFFC OBJECT
-// REPLACEMENT）。以 fromCharCode 構造，避免不可見字面量被編輯器/工具鏈吞掉。
+// 零宽字元（U+FEFF BOM / U+200B ZWSP）与 @侦测用 chip 占位符（U+FFFC OBJECT
+// REPLACEMENT）。以 fromCharCode 构造，避免不可见字面量被编辑器/工具链吞掉。
 const ZERO_WIDTH_RE = new RegExp(`[${String.fromCharCode(0xfeff)}${String.fromCharCode(0x200b)}]`, "g");
 const CHIP_DETECTION_PLACEHOLDER = String.fromCharCode(0xfffc);
 
@@ -201,12 +201,12 @@ function stripZeroWidth(value: string): string {
 
 interface MentionState {
   query: string;
-  /** 面板（root）座標系內的選單絕對定位（已換算畫布縮放）。 */
+  /** 面板（root）座标系内的选单绝对定位（已换算画布缩放）。 */
   left: number;
   top: number;
 }
 
-/** 站上真實圖片模型清單（濾掉影片模型）。 */
+/** 站上真实图片模型清单（滤掉影片模型）。 */
 function useImageModelOptions(): { id: string; label: string }[] {
   return useMemo(
     () =>
@@ -217,21 +217,21 @@ function useImageModelOptions(): { id: string; label: string }[] {
   );
 }
 
-// ---------- contentEditable 純 DOM 工具（不經 React 渲染，React 不管理輸入框子樹） ----------
+// ---------- contentEditable 纯 DOM 工具（不经 React 渲染，React 不管理输入框子树） ----------
 
-/** chip 元素判定：帶 data-node-id（上游圖片）或 data-card-id（素材卡）的元素即原子引用 chip。 */
+/** chip 元素判定：带 data-node-id（上游图片）或 data-card-id（素材卡）的元素即原子引用 chip。 */
 function isChipElement(node: Node): node is HTMLElement {
   return node instanceof HTMLElement && Boolean(node.dataset.nodeId || node.dataset.cardId);
 }
 
-/** 可忽略的文字節點（空字串或僅零寬字元）。 */
+/** 可忽略的文字节点（空字串或仅零宽字元）。 */
 function isIgnorableTextNode(node: Node): boolean {
   return node.nodeType === Node.TEXT_NODE && stripZeroWidth(node.textContent || "") === "";
 }
 
 /**
- * 遞迴序列化 contentEditable 子樹為純文字：
- * chip 交由 chipText 轉換；<br> 與塊級（div/p，瀏覽器換行產物）轉 \n。
+ * 递回序列化 contentEditable 子树为纯文字：
+ * chip 交由 chipText 转换；<br> 与块级（div/p，浏览器换行产物）转 \n。
  */
 function serializeChildren(root: Node, chipText: (chip: HTMLElement) => string): string {
   let out = "";
@@ -241,7 +241,7 @@ function serializeChildren(root: Node, chipText: (chip: HTMLElement) => string):
       return;
     }
     if (!(node instanceof HTMLElement)) return;
-    // chip 兩種：data-node-id（圖片）/ data-card-id（素材卡）——都用 chipText 轉換。
+    // chip 两种：data-node-id（图片）/ data-card-id（素材卡）——都用 chipText 转换。
     if (node.dataset.nodeId || node.dataset.cardId) {
       out += chipText(node);
       return;
@@ -258,9 +258,9 @@ function serializeChildren(root: Node, chipText: (chip: HTMLElement) => string):
 }
 
 /**
- * 生成用序列化：chip → `@图片N`（N = 在 selectedReferenceIds 的序號+1；不在清單則退回標題）。
- * 素材卡 chip（帶 data-card-id）改走 `@[種類:名稱]` 行內 token——分派在
- * serializeChipText 內靠 dataset.cardId 判定（純函式，見 ShotReferencePanel）。
+ * 生成用序列化：chip → `@图片N`（N = 在 selectedReferenceIds 的序号+1；不在清单则退回标题）。
+ * 素材卡 chip（带 data-card-id）改走 `@[种类:名称]` 行内 token——分派在
+ * serializeChipText 内靠 dataset.cardId 判定（纯函式，见 ShotReferencePanel）。
  */
 function serializeEditor(editor: HTMLElement, selectedIds: string[]): string {
   return stripZeroWidth(
@@ -278,7 +278,7 @@ function serializeEditor(editor: HTMLElement, selectedIds: string[]): string {
   );
 }
 
-/** @偵測用：取 caret 之前的文字；chip 以 U+FFFC 佔位，避免其字面文字（含 @）干擾正則。 */
+/** @侦测用：取 caret 之前的文字；chip 以 U+FFFC 占位，避免其字面文字（含 @）干扰正则。 */
 function detectionTextBeforeCaret(editor: HTMLElement): string {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) return "";
@@ -290,7 +290,7 @@ function detectionTextBeforeCaret(editor: HTMLElement): string {
   return stripZeroWidth(serializeChildren(pre.cloneContents(), () => CHIP_DETECTION_PLACEHOLDER));
 }
 
-/** 建立原子 chip：contentEditable=false inline span，16px 縮圖 + 標題截 8 字，藍底圓角。 */
+/** 建立原子 chip：contentEditable=false inline span，16px 缩图 + 标题截 8 字，蓝底圆角。 */
 function createChipElement(cand: CanvasReferenceCandidate): HTMLSpanElement {
   const chip = document.createElement("span");
   chip.contentEditable = "false";
@@ -315,9 +315,9 @@ function createChipElement(cand: CanvasReferenceCandidate): HTMLSpanElement {
 }
 
 /**
- * 建立素材卡原子 chip：幾何與 createChipElement 逐字相同（逐字複製，不精簡——
- * 2026-08-25「模板旋轉木馬」教訓：每精簡一處既有物理參數＝埋一顆雷），
- * 只換色票（紫）並多一個 kindLabel 小字；data-card-id/-kind 供序列化與刪除對賬。
+ * 建立素材卡原子 chip：几何与 createChipElement 逐字相同（逐字复制，不精简——
+ * 2026-08-25「模板旋转木马」教训：每精简一处既有物理参数＝埋一颗雷），
+ * 只换色票（紫）并多一个 kindLabel 小字；data-card-id/-kind 供序列化与删除对账。
  */
 function createEntityChipElement(cand: CanvasEntityCandidate): HTMLSpanElement {
   const chip = document.createElement("span");
@@ -347,7 +347,7 @@ function createEntityChipElement(cand: CanvasEntityCandidate): HTMLSpanElement {
   return chip;
 }
 
-/** caret 是否貼在某個 chip 後緣（Backspace 應整塊刪除該 chip）。 */
+/** caret 是否贴在某个 chip 后缘（Backspace 应整块删除该 chip）。 */
 function chipBeforeCaret(editor: HTMLElement): HTMLElement | null {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return null;
@@ -355,7 +355,7 @@ function chipBeforeCaret(editor: HTMLElement): HTMLElement | null {
   const { startContainer, startOffset } = range;
   if (!editor.contains(startContainer)) return null;
   if (startContainer.nodeType === Node.TEXT_NODE) {
-    if (startOffset > 0) return null; // caret 前仍有字元 → 走瀏覽器預設刪字
+    if (startOffset > 0) return null; // caret 前仍有字元 → 走浏览器预设删字
     return previousChipSibling(startContainer);
   }
   if (startContainer instanceof HTMLElement) {
@@ -375,7 +375,7 @@ function previousChipSibling(node: Node): HTMLElement | null {
   return current && isChipElement(current) ? current : null;
 }
 
-/** 把 caret 放到元素內容末尾。 */
+/** 把 caret 放到元素内容末尾。 */
 function placeCaretAtEnd(el: HTMLElement) {
   const range = document.createRange();
   range.selectNodeContents(el);
@@ -406,10 +406,10 @@ export function CanvasNodePromptPanel({
   onOpenPromptLibrary,
 }: CanvasNodePromptPanelProps) {
   const modelOptions = useImageModelOptions();
-  // 節點帶的模型若不在真實清單裡（歷史資料/影片模型），落回全局預設。
+  // 节点带的模型若不在真实清单里（历史资料/影片模型），落回全局预设。
   const safeInitialModel =
     initialModel && modelOptions.some((m) => m.id === initialModel) ? initialModel : DEFAULT_IMAGE_MODEL_ID;
-  // promptText 只作「可否生成」判斷；真正送出的文字在 handleGenerate 時從 DOM 現序列化。
+  // promptText 只作「可否生成」判断；真正送出的文字在 handleGenerate 时从 DOM 现序列化。
   const [promptText, setPromptText] = useState(initialPrompt);
   const [model, setModel] = useState(safeInitialModel);
   const [size, setSize] = useState(initialSize);
@@ -424,12 +424,12 @@ export function CanvasNodePromptPanel({
   const initializedRef = useRef(false);
   const blurTimerRef = useRef<number | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
-  /** 上一輪輸入框內出現過的 chip id 集合，供刪除對賬（chip 消失 → 取消選取）。 */
+  /** 上一轮输入框内出现过的 chip id 集合，供删除对账（chip 消失 → 取消选取）。 */
   const prevChipIdsRef = useRef<Set<string>>(new Set());
-  /** 上一輪輸入框內出現過的素材卡 id 集合，供刪除對賬（chip 消失 → 取消引用）。 */
+  /** 上一轮输入框内出现过的素材卡 id 集合，供删除对账（chip 消失 → 取消引用）。 */
   const prevEntityChipIdsRef = useRef<Set<string>>(new Set());
 
-  // 首掛載灌入 initialPrompt（純文字；歷史 prompt 不回填 chip）。
+  // 首挂载灌入 initialPrompt（纯文字；历史 prompt 不回填 chip）。
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || initializedRef.current) return;
@@ -437,17 +437,17 @@ export function CanvasNodePromptPanel({
     if (initialPrompt) editor.textContent = initialPrompt;
   }, [initialPrompt]);
 
-  // 卸載時清掉 blur 延時。
+  // 卸载时清掉 blur 延时。
   useEffect(() => () => {
     if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
   }, []);
 
-  // 鍵盤導航時把高亮項滾進可視區。
+  // 键盘导航时把高亮项滚进可视区。
   useEffect(() => {
     activeItemRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, mention]);
 
-  // 估價與扣費同源（imageGenerationCoins → generationCoins → admin 覆寫層）。
+  // 估价与扣费同源（imageGenerationCoins → generationCoins → admin 覆写层）。
   const estimatedCoins = useMemo(() => {
     try {
       const per = imageGenerationCoins(model, "fast");
@@ -459,13 +459,13 @@ export function CanvasNodePromptPanel({
 
   const modelLabel = modelOptions.find((m) => m.id === model)?.label ?? model;
 
-  // @ 候選：續鍵入過濾（兩組共用）；攤平成單一連續索引序列（↑↓ 跨組）。
+  // @ 候选：续键入过滤（两组共用）；摊平成单一连续索引序列（↑↓ 跨组）。
   const mentionRows = useMemo(
     () => (mention ? buildMentionRows(referenceCandidates, entityCandidates, mention.query) : []),
     [mention, referenceCandidates, entityCandidates],
   );
 
-  // 本鏡參考素材解析（純推導，零請求零訂閱）：token 命中 / 本鏡已指定 / 鎖定未引用 / 未匹配 token。
+  // 本镜参考素材解析（纯推导，零请求零订阅）：token 命中 / 本镜已指定 / 锁定未引用 / 未匹配 token。
   const shotReference = useMemo(
     () => deriveShotReferenceEntries(promptText, entityCandidates, shotEntityCardIds),
     [promptText, entityCandidates, shotEntityCardIds],
@@ -476,7 +476,7 @@ export function CanvasNodePromptPanel({
     setActiveIndex(0);
   };
 
-  /** 解析 caret 前文字，決定 @ 選單開/關與錨點（Range#getBoundingClientRect → 面板座標）。 */
+  /** 解析 caret 前文字，决定 @ 选单开/关与锚点（Range#getBoundingClientRect → 面板座标）。 */
   const syncMention = () => {
     const editor = editorRef.current;
     const root = rootRef.current;
@@ -499,11 +499,11 @@ export function CanvasNodePromptPanel({
       const rect = caret.getBoundingClientRect();
       if (rect.width || rect.height || rect.left || rect.top) anchor = rect;
     }
-    // 空行/空編輯器的 collapsed Range 會量出零矩形，退回輸入框外框。
+    // 空行/空编辑器的 collapsed Range 会量出零矩形，退回输入框外框。
     const anchorRect = anchor ?? editor.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
-    // 畫布可能整體 transform:scale：getBoundingClientRect 是縮放後座標，
-    // 面板內 absolute 定位吃版面座標，需除以縮放比。
+    // 画布可能整体 transform:scale：getBoundingClientRect 是缩放后座标，
+    // 面板内 absolute 定位吃版面座标，需除以缩放比。
     const scale = root.offsetWidth > 0 ? rootRect.width / root.offsetWidth : 1;
     const left = (anchorRect.left - rootRect.left) / scale;
     const top = (anchorRect.bottom - rootRect.top) / scale + 6;
@@ -513,11 +513,11 @@ export function CanvasNodePromptPanel({
   };
 
   /**
-   * 每次內容變更後的統一同步：
-   * 1) :empty 佔位符正規化（全刪後殘留 <br> 會令 :empty 失效）；
-   * 2) chip 刪除對賬——上輪存在、這輪消失且仍在已選清單 → onToggleReference 取消；
-   *    素材卡 chip 同構對賬 → onToggleEntity 取消引用；
-   * 3) 更新 promptText；4) 重算 @ 選單。
+   * 每次内容变更后的统一同步：
+   * 1) :empty 占位符正规化（全删后残留 <br> 会令 :empty 失效）；
+   * 2) chip 删除对账——上轮存在、这轮消失且仍在已选清单 → onToggleReference 取消；
+   *    素材卡 chip 同构对账 → onToggleEntity 取消引用；
+   * 3) 更新 promptText；4) 重算 @ 选单。
    */
   const syncFromEditor = () => {
     const editor = editorRef.current;
@@ -550,7 +550,7 @@ export function CanvasNodePromptPanel({
     syncMention();
   };
 
-  /** 在 caret（或末尾）插入 chip + 尾隨空格。純 DOM 操作，呼叫方負責後續 syncFromEditor。 */
+  /** 在 caret（或末尾）插入 chip + 尾随空格。纯 DOM 操作，呼叫方负责后续 syncFromEditor。 */
   const insertChipDom = (cand: CanvasReferenceCandidate) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -575,8 +575,8 @@ export function CanvasNodePromptPanel({
   };
 
   /**
-   * 在 caret（或末尾）插入素材卡 chip + 尾隨空格——與 insertChipDom 逐句同構
-   * （同一套 caret 定位/接續/回落末尾邏輯，只是 chip 工廠換成紫色卡片 chip）。
+   * 在 caret（或末尾）插入素材卡 chip + 尾随空格——与 insertChipDom 逐句同构
+   * （同一套 caret 定位/接续/回落末尾逻辑，只是 chip 工厂换成紫色卡片 chip）。
    */
   const insertEntityChipDom = (cand: CanvasEntityCandidate) => {
     const editor = editorRef.current;
@@ -601,7 +601,7 @@ export function CanvasNodePromptPanel({
     }
   };
 
-  /** 刪除 caret 前的 `@query` 觸發文字（選中候選後替換成 chip）。 */
+  /** 删除 caret 前的 `@query` 触发文字（选中候选后替换成 chip）。 */
   const removeMentionTextBeforeCaret = () => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -612,12 +612,12 @@ export function CanvasNodePromptPanel({
     const match = MENTION_PATTERN.exec(detectionTextBeforeCaret(editor));
     if (!match) return;
     const len = match[2].length + 1; // "@" + query
-    if (range.startOffset < len) return; // @query 跨節點的罕見情況：放棄刪字，只插 chip
+    if (range.startOffset < len) return; // @query 跨节点的罕见情况：放弃删字，只插 chip
     range.setStart(range.startContainer, range.startOffset - len);
     range.deleteContents();
   };
 
-  /** @ 選單選中：刪 @query → 插 chip → 同步 → 未選中則選取該引用。 */
+  /** @ 选单选中：删 @query → 插 chip → 同步 → 未选中则选取该引用。 */
   const insertReference = (cand: CanvasReferenceCandidate) => {
     removeMentionTextBeforeCaret();
     insertChipDom(cand);
@@ -626,7 +626,7 @@ export function CanvasNodePromptPanel({
     if (!selectedReferenceIds.includes(cand.nodeId)) onToggleReference?.(cand.nodeId);
   };
 
-  /** @ 選單選中（素材卡）：刪 @query → 插卡 chip → 同步 → 未引用則標記引用該卡。 */
+  /** @ 选单选中（素材卡）：删 @query → 插卡 chip → 同步 → 未引用则标记引用该卡。 */
   const insertEntityReference = (cand: CanvasEntityCandidate) => {
     removeMentionTextBeforeCaret();
     insertEntityChipDom(cand);
@@ -635,7 +635,7 @@ export function CanvasNodePromptPanel({
     if (!selectedEntityIds.includes(cand.cardId)) onToggleEntity?.(cand.cardId);
   };
 
-  /** 縮圖列雙入口：toggle 選取並同步輸入框 chip 插入/移除。 */
+  /** 缩图列双入口：toggle 选取并同步输入框 chip 插入/移除。 */
   const handleRowToggle = (cand: CanvasReferenceCandidate) => {
     const editor = editorRef.current;
     const active = selectedReferenceIds.includes(cand.nodeId);
@@ -647,14 +647,14 @@ export function CanvasNodePromptPanel({
         : [];
       if (chips.length > 0) {
         chips.forEach((el) => {
-          // 順帶吃掉 chip 尾隨的一個空格，避免殘留連續空白。
+          // 顺带吃掉 chip 尾随的一个空格，避免残留连续空白。
           const next = el.nextSibling;
           if (next && next.nodeType === Node.TEXT_NODE && (next.textContent || "").startsWith(" ")) {
             next.textContent = (next.textContent || "").slice(1);
           }
           el.remove();
         });
-        // 對賬會自動 onToggleReference 取消，這裡不再手動切換，避免雙重 toggle。
+        // 对账会自动 onToggleReference 取消，这里不再手动切换，避免双重 toggle。
         syncFromEditor();
       } else {
         onToggleReference?.(cand.nodeId);
@@ -675,7 +675,7 @@ export function CanvasNodePromptPanel({
   };
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // 鍵盤事件不冒泡到畫布（避免 Backspace/Delete 誤觸節點刪除等畫布快捷鍵）。
+    // 键盘事件不冒泡到画布（避免 Backspace/Delete 误触节点删除等画布快捷键）。
     e.stopPropagation();
     if (composingRef.current || e.nativeEvent.isComposing) return;
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -697,7 +697,7 @@ export function CanvasNodePromptPanel({
       if (e.key === "Enter") {
         e.preventDefault();
         const row = mentionRows[Math.min(activeIndex, mentionRows.length - 1)];
-        // 兩組候選共用同一個攤平索引：按列所屬組取回原候選再分派插入。
+        // 两组候选共用同一个摊平索引：按列所属组取回原候选再分派插入。
         if (row.group === "image") insertReference(referenceCandidates[row.sourceIndex]);
         else insertEntityReference(entityCandidates[row.sourceIndex]);
         return;
@@ -718,19 +718,19 @@ export function CanvasNodePromptPanel({
         return;
       }
     }
-    // caret 可能移動（方向鍵/Home/End），下一幀重算 @ 選單狀態與錨點。
+    // caret 可能移动（方向键/Home/End），下一帧重算 @ 选单状态与锚点。
     requestAnimationFrame(syncMention);
   };
 
-  /** 貼上只取 text/plain 純文字，不吃富文本。 */
+  /** 贴上只取 text/plain 纯文字，不吃富文本。 */
   const handleEditorPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault();
     const text = e.clipboardData.getData("text/plain");
     if (!text) return;
     const editor = editorRef.current;
     if (!editor) return;
-    // execCommand 雖標記棄用，但對 contentEditable 插字仍最穩且保留原生 undo；
-    // 成功時會觸發 input 事件 → onInput 自然同步。
+    // execCommand 虽标记弃用，但对 contentEditable 插字仍最稳且保留原生 undo；
+    // 成功时会触发 input 事件 → onInput 自然同步。
     let inserted = false;
     try {
       inserted = document.execCommand("insertText", false, text);
@@ -755,7 +755,7 @@ export function CanvasNodePromptPanel({
     }
   };
 
-  // 阻止事件冒泡到畫布
+  // 阻止事件冒泡到画布
   const stopPropagation = useCallback((e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.stopPropagation();
   }, []);
@@ -771,7 +771,7 @@ export function CanvasNodePromptPanel({
       onClick={stopPropagation}
     >
       <div className="overflow-hidden rounded-xl lg-card">
-        {/* @引用：上游圖片縮圖 chips（自動編號；與輸入框內 chip 雙向同步） */}
+        {/* @引用：上游图片缩图 chips（自动编号；与输入框内 chip 双向同步） */}
         {referenceCandidates.length > 0 && (
           <div className="border-b px-3 pb-2 pt-2.5">
             <p className="mb-1.5 text-ios-caption2 font-medium text-foreground/45">
@@ -785,7 +785,7 @@ export function CanvasNodePromptPanel({
                   <button
                     key={cand.nodeId}
                     type="button"
-                    // preventDefault 保住輸入框焦點與 caret，chip 才能插在游標處。
+                    // preventDefault 保住输入框焦点与 caret，chip 才能插在游标处。
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleRowToggle(cand)}
                     title={cand.title}
@@ -809,7 +809,7 @@ export function CanvasNodePromptPanel({
           </div>
         )}
 
-        {/* 編輯區：contentEditable，支持 @mention 原子 chip；React 不管理其子樹 */}
+        {/* 编辑区：contentEditable，支持 @mention 原子 chip；React 不管理其子树 */}
         <div className="p-3">
           <div
             ref={editorRef}
@@ -821,7 +821,7 @@ export function CanvasNodePromptPanel({
             data-placeholder="编辑提示词… 输入 @ 引用图片或素材卡"
             className={cn(
               "max-h-[180px] min-h-[88px] w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-input bg-black/5 p-2.5 text-sm leading-relaxed outline-none transition-colors focus:border-ios-blue",
-              // 佔位符：contentEditable 用 :empty::before 呈現（syncFromEditor 會清掉殘留 <br> 保住 :empty）。
+              // 占位符：contentEditable 用 :empty::before 呈现（syncFromEditor 会清掉残留 <br> 保住 :empty）。
               "empty:before:pointer-events-none empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]",
             )}
             onInput={() => {
@@ -837,20 +837,20 @@ export function CanvasNodePromptPanel({
               syncFromEditor();
             }}
             onBlur={() => {
-              // 延時關閉，讓選單項的 click 先落地。
+              // 延时关闭，让选单项的 click 先落地。
               if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
               blurTimerRef.current = window.setTimeout(closeMention, 120);
             }}
           />
         </div>
 
-        {/* 本镜参考素材：純推導（token 命中 / 鎖定未引用 / 未匹配 token），零空殼 */}
+        {/* 本镜参考素材：纯推导（token 命中 / 锁定未引用 / 未匹配 token），零空壳 */}
         <ShotReferencePanel entries={shotReference.entries} unresolvedTokens={shotReference.unresolvedTokens} />
 
-        {/* 參數與設置 */}
+        {/* 参数与设置 */}
         <div className="border-t px-3 py-2">
           <div className="flex items-center gap-2">
-            {/* 快速參數列 */}
+            {/* 快速参数列 */}
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
               <span className="truncate rounded-md bg-black/5 px-2 py-1 text-xs font-medium text-muted-foreground">
                 {modelLabel}
@@ -863,7 +863,7 @@ export function CanvasNodePromptPanel({
               </span>
             </div>
 
-            {/* 提示詞庫入口（宿主提供 onOpenPromptLibrary 才渲染） */}
+            {/* 提示词库入口（宿主提供 onOpenPromptLibrary 才渲染） */}
             {onOpenPromptLibrary && (
               <button
                 onClick={onOpenPromptLibrary}
@@ -891,7 +891,7 @@ export function CanvasNodePromptPanel({
             </button>
           </div>
 
-          {/* 展開的進階參數 */}
+          {/* 展开的进阶参数 */}
           {showSettings && (
             <div className="mt-2 grid grid-cols-3 gap-2 border-t pt-2">
               <div>
@@ -940,8 +940,8 @@ export function CanvasNodePromptPanel({
           )}
         </div>
 
-        {/* 生成按鈕（帶與扣費同源的估價；算不出就不顯示，不騙 0）；
-            生成中拆兩段：左段轉圈、右段紅色停止（onStop 存在才顯示） */}
+        {/* 生成按钮（带与扣费同源的估价；算不出就不显示，不骗 0）；
+            生成中拆两段：左段转圈、右段红色停止（onStop 存在才显示） */}
         <div className="border-t p-3">
           {isRunning ? (
             <div className="flex items-stretch gap-2">
@@ -974,8 +974,8 @@ export function CanvasNodePromptPanel({
         </div>
       </div>
 
-      {/* @ 候選懸浮選單：絕對定位於面板內，錨定 caret 像素位置；
-          兩組候選（图片 / 素材卡）共用同一個攤平索引序列，組標題在組邊界插入 */}
+      {/* @ 候选悬浮选单：绝对定位于面板内，锚定 caret 像素位置；
+          两组候选（图片 / 素材卡）共用同一个摊平索引序列，组标题在组边界插入 */}
       {mention && mentionRows.length > 0 && (
         <div
           role="listbox"
@@ -1010,7 +1010,7 @@ export function CanvasNodePromptPanel({
                       "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
                       isActive ? "bg-ios-purple/10 text-ios-purple" : "text-muted-foreground hover:bg-black/5",
                     )}
-                    // preventDefault 避免輸入框失焦（blur 會延時關閉選單）。
+                    // preventDefault 避免输入框失焦（blur 会延时关闭选单）。
                     onMouseDown={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -1067,7 +1067,7 @@ export function CanvasNodePromptPanel({
                       ? "bg-ios-blue/10 text-ios-blue"
                       : "text-muted-foreground hover:bg-black/5",
                   )}
-                  // preventDefault 避免輸入框失焦（blur 會延時關閉選單）。
+                  // preventDefault 避免输入框失焦（blur 会延时关闭选单）。
                   onMouseDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

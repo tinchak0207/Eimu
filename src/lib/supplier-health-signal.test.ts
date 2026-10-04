@@ -45,7 +45,7 @@ test("DB 抛错 → fail-open 空信号（不挡 model-status）", async () => {
   assert.equal(Object.keys(signal.availableByModel).length, 0);
 });
 
-test("H4：零樣本 → probe_only；近期成功 → high；陳舊成功 → low", async () => {
+test("H4：零样本 → probe_only；近期成功 → high；陈旧成功 → low", async () => {
   const { classifyEvidence } = await import("./supplier-health-signal.js");
   const now = Date.parse("2026-10-02T00:00:00Z");
   assert.equal(classifyEvidence(undefined, now), "probe_only");
@@ -54,7 +54,7 @@ test("H4：零樣本 → probe_only；近期成功 → high；陳舊成功 → l
   assert.equal(classifyEvidence({ successCount: 5, lastSuccessAt: "2026-09-20T00:00:00Z" }, now), "low");
 });
 
-test("H4：餘額為 0 的供應商 → 不可用（即使前置條件過），並帶 evidence", async () => {
+test("H4：余额为 0 的供应商 → 不可用（即使前置条件过），并带 evidence", async () => {
   __resetSupplierHealthSignalCacheForTests();
   const signal = await readSupplierHealthSignal(
     fakeSql([row({ zero_balance: true, success_count: 0, last_success_at: null })]),
@@ -65,7 +65,7 @@ test("H4：餘額為 0 的供應商 → 不可用（即使前置條件過），�
   assert.equal(signal.evidenceByModel?.["seedance-2.0:video_generate"]?.zeroBalance, true);
 });
 
-test("H4：available 保留且帶 evidence（向後相容）", async () => {
+test("H4：available 保留且带 evidence（向后相容）", async () => {
   __resetSupplierHealthSignalCacheForTests();
   const signal = await readSupplierHealthSignal(
     fakeSql([row({ success_count: "3", last_success_at: "2026-10-01T00:00:00Z" })]),

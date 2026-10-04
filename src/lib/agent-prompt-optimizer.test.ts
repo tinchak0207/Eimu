@@ -22,7 +22,7 @@ test("agent optimizer returns unchanged on fetch failure (bad origin)", async ()
   process.env.AGENT_OPTIMIZE_KEY = "sk-biz-testnotfound";
   process.env.AGENT_GATEWAY_ORIGIN = "https://localhost:1";
   try {
-    // 連不上 localhost:1 → 失敗回原 prompt，不 throw。
+    // 连不上 localhost:1 → 失败回原 prompt，不 throw。
     const r = await optimizeVideoPromptWithAgent("a cat on a windowsill");
     assert.equal(r.ok, false);
     assert.equal(r.usedAgent, false);
@@ -44,7 +44,7 @@ test("total optimizer falls back to rule layer when agent unavailable", async ()
     const r = await optimizeVideoPrompt("a cat on a windowsill");
     assert.equal(r.usedAgent, false);
     assert.equal(r.ok, true);
-    // 規則層補了品質尾巴。
+    // 规则层补了品质尾巴。
     assert.match(r.prompt, /no flicker/);
   } finally {
     if (prev !== undefined) process.env.AGENT_OPTIMIZE_KEY = prev;

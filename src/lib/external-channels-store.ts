@@ -1,7 +1,7 @@
-// external-channels 的 Blob-backed 持久化：B 端自定義上游的「改配置不用重新部署」
-// 開關。儲存紀律完全照 pricing-overrides.ts / tier-pricing-store.ts——不可變時間戳
-// 路徑名、走頁讀、15s 快取、last-known-good + 負向退避——所以 Blob 故障永遠不會卡住
-// 一張生成請求。**原始 credential 永不落 Blob**：channel 只存 credentialRef（環境變數名）。
+// external-channels 的 Blob-backed 持久化：B 端自定义上游的「改配置不用重新部署」
+// 开关。储存纪律完全照 pricing-overrides.ts / tier-pricing-store.ts——不可变时间戳
+// 路径名、走页读、15s 快取、last-known-good + 负向退避——所以 Blob 故障永远不会卡住
+// 一张生成请求。**原始 credential 永不落 Blob**：channel 只存 credentialRef（环境变数名）。
 
 import { randomBytes } from "node:crypto";
 import { del, get, list, put } from "@/lib/blob-backend";
@@ -104,8 +104,8 @@ export async function writeExternalChannelDocument(doc: ExternalChannelDocument)
 }
 
 /**
- * 永不拋錯。讀取失敗時服務 last-known-good（只有從未讀取成功的冷實例會拿到空文件）。
- * Blob 故障不會把已設好的外部上游靜默移除。
+ * 永不抛错。读取失败时服务 last-known-good（只有从未读取成功的冷实例会拿到空文件）。
+ * Blob 故障不会把已设好的外部上游静默移除。
  */
 export async function getRuntimeExternalChannelDocument(): Promise<ExternalChannelDocument> {
   if (Date.now() - lastReadFailureAt < FAILURE_BACKOFF_MS) {

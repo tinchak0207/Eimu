@@ -1,48 +1,48 @@
 /**
- * Blender 工具族（Astra 3D 導演工作站 P0-4，片C，2026-09-06）。
+ * Blender 工具族（Astra 3D 导演工作站 P0-4，片C，2026-09-06）。
  *
- * 三個工具：blender_exec / blender_render / blender_export_gltf。
- * 定義形狀同構 src/vendor-bridges/opencode-tools/director_*.ts 的
- * tool({ description, args, execute }) + ok()/fail() 契約（回 { title, output }，
- * output 為 JSON 字串）；因 @opencode-ai/plugin 與 zod 不在 src/lib 可解析範圍
- * （tsconfig exclude src/vendor-bridges，根 package.json 無此依賴），本檔以零依賴
- * 同構結構承載同名欄位，VPS .opencode/tools/ 落位時逐條譯成 tool.schema 調用、
- * execute 體原樣搬運即可。
+ * 三个工具：blender_exec / blender_render / blender_export_gltf。
+ * 定义形状同构 src/vendor-bridges/opencode-tools/director_*.ts 的
+ * tool({ description, args, execute }) + ok()/fail() 契约（回 { title, output }，
+ * output 为 JSON 字串）；因 @opencode-ai/plugin 与 zod 不在 src/lib 可解析范围
+ * （tsconfig exclude src/vendor-bridges，根 package.json 无此依赖），本档以零依赖
+ * 同构结构承载同名栏位，VPS .opencode/tools/ 落位时逐条译成 tool.schema 调用、
+ * execute 体原样搬运即可。
  *
- * 傳輸契約（與片 A 逐字共享，橋由片 A 施工；artifact 端點為片 AJ 追加）：
+ * 传输契约（与片 A 逐字共享，桥由片 A 施工；artifact 端点为片 AJ 追加）：
  *   GET  /v1/health → 200 {ok:true, blender_version, gpu:"egl"|"cpu", workdir}
  *   POST /v1/execute body {script:string, timeout_ms?:number} →
  *     200 {ok:true, artifacts:[{path,bytes,kind}], scene_summary:string, stdout_tail:string, duration_ms:number}
  *     500 {ok:false, error:string, stdout_tail:string}
- *   GET  /v1/artifact?path=<out/ 內相對路徑> → 200 binary（Content-Type 按副檔名白名單）
- * 橋位址 = env BLENDER_BRIDGE_URL（默認 http://127.0.0.1:8765）。
+ *   GET  /v1/artifact?path=<out/ 内相对路径> → 200 binary（Content-Type 按副档名白名单）
+ * 桥位址 = env BLENDER_BRIDGE_URL（默认 http://127.0.0.1:8765）。
  *
- * 產物取回（片 AJ，T1 斷點修復）：產物落在橋主機 out/，agent 沙箱（VPS）與橋主機
- * 異構、沙箱不自持檔案 → exec/render 成功 result 帶 artifact_base_url（=
- * ${bridgeUrl()}/v1/artifact，bridgeUrl 即 env BLENDER_BRIDGE_URL——VPS 側經
- * blender-bridge-tunnel 反向隧道指向橋主機，同一 base 即取回入口），agent 用
- * `${artifact_base_url}?path=${encodeURIComponent(artifact.path)}` 逐檔取回字節。
- * 禁止在沙箱 ls/find 等本機檔案。
+ * 产物取回（片 AJ，T1 断点修复）：产物落在桥主机 out/，agent 沙箱（VPS）与桥主机
+ * 异构、沙箱不自持档案 → exec/render 成功 result 带 artifact_base_url（=
+ * ${bridgeUrl()}/v1/artifact，bridgeUrl 即 env BLENDER_BRIDGE_URL——VPS 侧经
+ * blender-bridge-tunnel 反向隧道指向桥主机，同一 base 即取回入口），agent 用
+ * `${artifact_base_url}?path=${encodeURIComponent(artifact.path)}` 逐档取回字节。
+ * 禁止在沙箱 ls/find 等本机档案。
  *
- * 錯誤鐵律：橋未就緒/超時/非 200 一律返回結構化 fail()（含「桥未启动，请先启动
- * blender-bridge」指引），絕不 throw 原始 fetch 錯誤。
- * deny 例外暫存與橋接說明：docs/blender-bridge-notes.md。
- * 工具文案一律簡體（記憶 agent-gateway-copy-rules）。
+ * 错误铁律：桥未就绪/超时/非 200 一律返回结构化 fail()（含「桥未启动，请先启动
+ * blender-bridge」指引），绝不 throw 原始 fetch 错误。
+ * deny 例外暂存与桥接说明：docs/blender-bridge-notes.md。
+ * 工具文案一律简体（记忆 agent-gateway-copy-rules）。
  *
- * Blender 5.2 兼容 + 存活配方（2026-09-06 片M 修復，依 smoke P0-5 實錘
+ * Blender 5.2 兼容 + 存活配方（2026-09-06 片M 修复，依 smoke P0-5 实锤
  * 2026-09-06-blender-bridge-render-crash-survival-recipe）：
- *   ① slotted action：action.fcurves 已死 → channelbags 路徑（verify_keyframe.py 同構）。
- *   ② file_format="FFMPEG" enum 已死 → turntable 不再走橋內 muxer（in-process
- *      muxer 必崩出 48 字節 stub），改分塊 ≤10 幀 PNG + 工具層系統 ffmpeg 合成 H264。
- *   ③ Eevee previz 存活預設 samples=1 + RT off（負載越大橋內越易 native 崩；cycles 不受限）。
+ *   ① slotted action：action.fcurves 已死 → channelbags 路径（verify_keyframe.py 同构）。
+ *   ② file_format="FFMPEG" enum 已死 → turntable 不再走桥内 muxer（in-process
+ *      muxer 必崩出 48 字节 stub），改分块 ≤10 帧 PNG + 工具层系统 ffmpeg 合成 H264。
+ *   ③ Eevee previz 存活预设 samples=1 + RT off（负载越大桥内越易 native 崩；cycles 不受限）。
  *
- * export 註記（2026-09-06 片AA）：buildChunkRenderScript 供 generation-core 的
- * blender_bridge 適配層（supplier-adapter.ts generateWithBlenderNode）直接 import
- * 復用——單幀 still 路徑（chunkStart=null + turntable=false）即節點派發的安全單位，
- * 零複本零漂移（存活配方修復只落一處）。
+ * export 注记（2026-09-06 片AA）：buildChunkRenderScript 供 generation-core 的
+ * blender_bridge 适配层（supplier-adapter.ts generateWithBlenderNode）直接 import
+ * 复用——单帧 still 路径（chunkStart=null + turntable=false）即节点派发的安全单位，
+ * 零复本零漂移（存活配方修复只落一处）。
  */
 
-// ── 常量與類型 ──────────────────────────────────────────────────────────────
+// ── 常量与类型 ──────────────────────────────────────────────────────────────
 
 import { spawn } from "node:child_process"
 import * as fsp from "node:fs/promises"
@@ -52,12 +52,12 @@ import { findTemplateByFingerprint, fingerprintScript, saveSceneAssets } from ".
 const EXEC_DEFAULT_TIMEOUT_MS = 120_000
 const RENDER_DEFAULT_TIMEOUT_MS = 1_800_000
 const EXPORT_DEFAULT_TIMEOUT_MS = 300_000
-/** 橋自有 timeout_ms 判定先行；客戶端僅在其後 + 寬限值才中止，讓橋的結構化 500（帶 stdout_tail）優先到達。 */
+/** 桥自有 timeout_ms 判定先行；客户端仅在其后 + 宽限值才中止，让桥的结构化 500（带 stdout_tail）优先到达。 */
 const CLIENT_ABORT_GRACE_MS = 10_000
 const MAX_FRAME_SPAN = 2000
-/** 存活配方：橋內每請求渲染幀數上限（實錘：動畫 >10 幀必死，samples=1 全過）。 */
+/** 存活配方：桥内每请求渲染帧数上限（实锤：动画 >10 帧必死，samples=1 全过）。 */
 const RENDER_CHUNK_FRAMES = 10
-/** turntable PNG 序列合成系統 ffmpeg 路徑（可 env 覆蓋）。 */
+/** turntable PNG 序列合成系统 ffmpeg 路径（可 env 覆盖）。 */
 const FFMPEG_BIN = process.env.BLENDER_FFMPEG_BIN || "ffmpeg"
 
 export const BLENDER_BRIDGE_URL_DEFAULT = "http://127.0.0.1:8765"
@@ -67,9 +67,9 @@ export function bridgeUrl(): string {
 }
 
 /**
- * 產物取回入口（片 AJ）：橋主機與 agent 沙箱異構、沙箱不自持檔案，產物一律經
- * 橋 GET /v1/artifact 取回。取回 base = 橋地址（env BLENDER_BRIDGE_URL 已含
- * 隧道語義：VPS 側 127.0.0.1:8765 經 blender-bridge-tunnel 反向隧道達橋主機）。
+ * 产物取回入口（片 AJ）：桥主机与 agent 沙箱异构、沙箱不自持档案，产物一律经
+ * 桥 GET /v1/artifact 取回。取回 base = 桥地址（env BLENDER_BRIDGE_URL 已含
+ * 隧道语义：VPS 侧 127.0.0.1:8765 经 blender-bridge-tunnel 反向隧道达桥主机）。
  * 完整 URL = `${artifactBaseUrl()}?path=${encodeURIComponent(artifact.path)}`。
  */
 export function artifactBaseUrl(): string {
@@ -95,9 +95,9 @@ export type BlenderToolResult = { title: string; output: string }
 export interface BlenderToolContext {
   abort?: AbortSignal
   /**
-   * 呼叫者 userId（資產包 per-user 持久化；片 AG2 指紋接線）。
-   * 提供時 blender_exec 成功路徑自動 saveSceneAssets 入庫 + 執行前腳本指紋預查；
-   * 缺省維持舊契約（不入庫、不預查）。
+   * 呼叫者 userId（资产包 per-user 持久化；片 AG2 指纹接线）。
+   * 提供时 blender_exec 成功路径自动 saveSceneAssets 入库 + 执行前脚本指纹预查；
+   * 缺省维持旧契约（不入库、不预查）。
    */
   userId?: number
 }
@@ -116,7 +116,7 @@ export interface BlenderToolDef {
   execute: (args: Record<string, unknown>, context?: BlenderToolContext) => Promise<BlenderToolResult>
 }
 
-// ── plumbing（ok/fail 同構 director-common.ts；錯誤分類為橋契約專用） ────────
+// ── plumbing（ok/fail 同构 director-common.ts；错误分类为桥契约专用） ────────
 
 function ok(data: Record<string, unknown>): BlenderToolResult {
   const { title, ...rest } = data
@@ -141,7 +141,7 @@ function bridgeError(code: string, message: string): BridgeError {
   return new BridgeError(code, message)
 }
 
-/** 分類 fetch 底層錯誤 → 人話（含「桥未启动」指引）。絕不讓原始錯誤逃逸。 */
+/** 分类 fetch 底层错误 → 人话（含「桥未启动」指引）。绝不让原始错误逃逸。 */
 function classifyFetchError(e: unknown): BridgeError {
   const err = e as Error & { cause?: { code?: string; message?: string } }
   const causeCode = err?.cause?.code ?? ""
@@ -220,7 +220,7 @@ function toFail(e: unknown): BlenderToolResult {
   return fail("blender_tool_error", `blender 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
-/** GET /v1/health：拿橋 workdir（分塊 PNG / ffmpeg 產物的絕對路徑根）。 */
+/** GET /v1/health：拿桥 workdir（分块 PNG / ffmpeg 产物的绝对路径根）。 */
 async function bridgeHealth(
   context?: BlenderToolContext,
 ): Promise<{ blenderVersion: string; workdir: string }> {
@@ -298,7 +298,7 @@ async function ensureFfmpegAvailable(): Promise<void> {
   }
 }
 
-// ── 參數整理助手（同構 director-common.ts num/bool 口徑） ────────────────────
+// ── 参数整理助手（同构 director-common.ts num/bool 口径） ────────────────────
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v : undefined
@@ -313,7 +313,7 @@ function asBool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback
 }
 
-/** frames 參數："1-120" 區間 / "42" 單幀；缺省 null（渲染當前幀）。 */
+/** frames 参数："1-120" 区间 / "42" 单帧；缺省 null（渲染当前帧）。 */
 function parseFrames(raw: unknown): { start: number; end: number } | null | "invalid" {
   if (raw === undefined || raw === null || raw === "") return null
   const s = String(raw).trim()
@@ -332,7 +332,7 @@ function parseFrames(raw: unknown): { start: number; end: number } | null | "inv
   return "invalid"
 }
 
-/** output_name 白名單化：剝擴展名、禁路徑分隔符，防產物逃出橋工作目錄。 */
+/** output_name 白名单化：剥扩展名、禁路径分隔符，防产物逃出桥工作目录。 */
 function sanitizeOutputName(raw: unknown, fallback: string): string {
   const s = asString(raw)
   if (!s) return fallback
@@ -345,7 +345,7 @@ function sanitizeOutputName(raw: unknown, fallback: string): string {
   return cleaned || fallback
 }
 
-/** Python 字符串字面量轉義（嵌入 bpy 腳本的參數都過這裡）。 */
+/** Python 字符串字面量转义（嵌入 bpy 脚本的参数都过这里）。 */
 function pyStr(value: string): string {
   return '"' + value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n") + '"'
 }
@@ -358,29 +358,29 @@ function pyBool(b: boolean): string {
   return b ? "True" : "False"
 }
 
-// ── bpy 腳本模板（render / export 走同一 POST /v1/execute 通道） ─────────────
+// ── bpy 脚本模板（render / export 走同一 POST /v1/execute 通道） ─────────────
 
 /**
- * 單塊渲染腳本（每塊 ≤RENDER_CHUNK_FRAMES 幀）。
+ * 单块渲染脚本（每块 ≤RENDER_CHUNK_FRAMES 帧）。
  *
- * 存活配方（smoke P0-5 實錘，2026-09-06-blender-bridge-render-crash-survival-recipe）：
- *   - 橋內 Eevee 渲染負載越大越易 native 無聲崩（動畫>10 幀必死、samples=16 全崩）；
- *     samples=1 + RT off 全過 → 每請求只渲 ≤10 幀 PNG + previz 存活預設（cycles 檔不受此限）。
- *   - 橋契約一次 execute 一個腳本 → 分塊由工具層循環多次 execute；mp4 合成在工具層
- *     系統 ffmpeg 完成（橋內 in-process mp4 muxer 必崩出 48 字節 stub）。
- *   - 進程死=場景丟 → 每塊都重新 open_mainfile；turntable 的 pivot/關鍵幀按 FULL 區間
- *     每塊重建（從場景網格重算，確定性一致，塊間旋轉連續）。
- *   - CWD：橋以 $BLENDER_WORK 為 Blender 工作目錄 spawn，產物統一寫 out/<名>/frame_%04d.png
- *     （橋按 mtime 增量掃 out/ 回 artifacts）。
+ * 存活配方（smoke P0-5 实锤，2026-09-06-blender-bridge-render-crash-survival-recipe）：
+ *   - 桥内 Eevee 渲染负载越大越易 native 无声崩（动画>10 帧必死、samples=16 全崩）；
+ *     samples=1 + RT off 全过 → 每请求只渲 ≤10 帧 PNG + previz 存活预设（cycles 档不受此限）。
+ *   - 桥契约一次 execute 一个脚本 → 分块由工具层循环多次 execute；mp4 合成在工具层
+ *     系统 ffmpeg 完成（桥内 in-process mp4 muxer 必崩出 48 字节 stub）。
+ *   - 进程死=场景丢 → 每块都重新 open_mainfile；turntable 的 pivot/关键帧按 FULL 区间
+ *     每块重建（从场景网格重算，确定性一致，块间旋转连续）。
+ *   - CWD：桥以 $BLENDER_WORK 为 Blender 工作目录 spawn，产物统一写 out/<名>/frame_%04d.png
+ *     （桥按 mtime 增量扫 out/ 回 artifacts）。
  */
 export function buildChunkRenderScript(p: {
   sceneBlendPath?: string
   engine: string
   turntable: boolean
-  /** 本塊渲染幀起（null=渲染當前幀單張 still）。 */
+  /** 本块渲染帧起（null=渲染当前帧单张 still）。 */
   chunkStart: number | null
   chunkEnd: number
-  /** turntable 關鍵幀全跨度（旋轉 0→2π 映射 FULL_START→FULL_END，塊間一致）。 */
+  /** turntable 关键帧全跨度（旋转 0→2π 映射 FULL_START→FULL_END，块间一致）。 */
   fullStart: number
   fullEnd: number
   outputDirName: string
@@ -397,8 +397,8 @@ FULL_END = ${pyInt(p.fullEnd)}
 OUTPUT_DIR_NAME = ${pyStr(p.outputDirName)}
 
 def set_engine(scene, name):
-    # "BLENDER_EEVEE_NEXT" 僅存在於 Blender 4.2-4.x；5.2 起（4.2 已合并）唯一
-    # enum 是 "BLENDER_EEVEE"，舊名在 5.2 拋 TypeError 落回新名（兩名都敗才拋錯）。
+    # "BLENDER_EEVEE_NEXT" 仅存在于 Blender 4.2-4.x；5.2 起（4.2 已合并）唯一
+    # enum 是 "BLENDER_EEVEE"，旧名在 5.2 抛 TypeError 落回新名（两名都败才抛错）。
     candidates = ["BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"] if name == "eevee" else ["CYCLES"]
     for cand in candidates:
         try:
@@ -410,15 +410,15 @@ def set_engine(scene, name):
 
 def action_fcurves(act):
     # Blender 4.4+ slotted action：action.fcurves 已移除，走
-    # layers[*].strips[*].channelbags[*].fcurves（同構
-    # skills/blender-director/verify/verify_keyframe.py 已驗證寫法）。
+    # layers[*].strips[*].channelbags[*].fcurves（同构
+    # skills/blender-director/verify/verify_keyframe.py 已验证写法）。
     for layer in act.layers:
         for strip in layer.strips:
             for bag in strip.channelbags:
                 yield from bag.fcurves
 
 def apply_previz_survival_preset(scene):
-    # 存活預設：samples=1 + RT off（Eevee 負載越大橋內越易 native 崩，實錘矩陣見註釋頭）。
+    # 存活预设：samples=1 + RT off（Eevee 负载越大桥内越易 native 崩，实锤矩阵见注释头）。
     try:
         scene.eevee.taa_render_samples = 1
     except (TypeError, AttributeError):
@@ -460,7 +460,7 @@ if TURNTABLE:
 
 out_dir = os.path.join(os.getcwd(), "out", OUTPUT_DIR_NAME)
 os.makedirs(out_dir, exist_ok=True)
-# fps 走 sidecar 落盤（stdout_tail 會被 blender.log 佔滿擠掉 print，artifact 才硬）。
+# fps 走 sidecar 落盘（stdout_tail 会被 blender.log 占满挤掉 print，artifact 才硬）。
 meta_path = os.path.join(out_dir, "meta.json")
 if not os.path.exists(meta_path):
     with open(meta_path, "w") as fh:
@@ -497,7 +497,7 @@ print("GLTF_EXPORTED:" + OUTPUT_PATH)
 `
 }
 
-// ── 三個工具 ────────────────────────────────────────────────────────────────
+// ── 三个工具 ────────────────────────────────────────────────────────────────
 
 export const blenderExecTool: BlenderToolDef = {
   id: "blender_exec",
@@ -523,8 +523,8 @@ export const blenderExecTool: BlenderToolDef = {
       }
       const timeoutMs = asInt(rawArgs.timeout_ms, EXEC_DEFAULT_TIMEOUT_MS, 1_000, 3_600_000)
 
-      // 執行前腳本指紋預查（片 AG2）：命中既有 bpy_script 資產只在 result 加提示欄，
-      // 不阻斷、不跳過執行；無 userId / 資產庫異常時靜默跳過（best-effort）。
+      // 执行前脚本指纹预查（片 AG2）：命中既有 bpy_script 资产只在 result 加提示栏，
+      // 不阻断、不跳过执行；无 userId / 资产库异常时静默跳过（best-effort）。
       let templateHit: { pack_id: string; title: string; fingerprint: string; scene_summary?: string } | undefined
       if (context?.userId) {
         try {
@@ -538,14 +538,14 @@ export const blenderExecTool: BlenderToolDef = {
             }
           }
         } catch {
-          // 資產庫讀取失敗不影響 blender 執行主鏈
+          // 资产库读取失败不影响 blender 执行主链
         }
       }
 
       const data = await bridgeExecute(script, timeoutMs, context)
 
-      // 成功路徑自動入庫（片 AG2）：blend/glb 產物 + 腳本全文（指紋去重）進用戶
-      // blender-3d-assets 包；best-effort，入庫失敗不回滾執行結果。
+      // 成功路径自动入库（片 AG2）：blend/glb 产物 + 脚本全文（指纹去重）进用户
+      // blender-3d-assets 包；best-effort，入库失败不回滚执行结果。
       let assetsSaved: { added: number; deduped: number } | undefined
       if (context?.userId) {
         try {
@@ -557,7 +557,7 @@ export const blenderExecTool: BlenderToolDef = {
             assetsSaved = { added: saved.items.length, deduped: saved.deduped }
           }
         } catch {
-          // 資產庫寫入失敗不影響執行結果（產物仍在橋工作目錄）
+          // 资产库写入失败不影响执行结果（产物仍在桥工作目录）
         }
       }
 
@@ -633,12 +633,12 @@ export const blenderRenderTool: BlenderToolDef = {
       const outputBase = sanitizeOutputName(rawArgs.output_name, turntable ? "turntable" : "render")
       const sceneBlendPath = asString(rawArgs.scene_blend_path)
 
-      // 橋 spawn Blender 時 CWD=workdir，腳本產物寫 out/<dir>/，橋 artifacts 路徑相對 out/。
+      // 桥 spawn Blender 时 CWD=workdir，脚本产物写 out/<dir>/，桥 artifacts 路径相对 out/。
       const health = await bridgeHealth(context)
       const outDir = nodePath.join(health.workdir, "out")
 
-      // 存活配方（smoke P0-5 實錘）：每請求 ≤10 幀 PNG 分塊；turntable 的旋轉關鍵幀
-      // 按全跨度 keyframe（塊間從同一 blend 重建 pivot，旋轉連續）。cycles 檔不受 previz 預設限制。
+      // 存活配方（smoke P0-5 实锤）：每请求 ≤10 帧 PNG 分块；turntable 的旋转关键帧
+      // 按全跨度 keyframe（块间从同一 blend 重建 pivot，旋转连续）。cycles 档不受 previz 预设限制。
       const span = turntable ? frames ?? { start: 1, end: 96 } : frames
       const outputDirName = `${outputBase}_frames`
       let artifacts: BlenderArtifact[] = []
@@ -665,7 +665,7 @@ export const blenderRenderTool: BlenderToolDef = {
         stdoutTail = data.stdout_tail
         durationMs += data.duration_ms
         if (sceneFps === 0) {
-          // fps 從首塊 sidecar meta.json 讀（stdout_tail 被 blender.log 佔滿時 print 會被擠掉，artifact 才硬）。
+          // fps 从首块 sidecar meta.json 读（stdout_tail 被 blender.log 占满时 print 会被挤掉，artifact 才硬）。
           const meta = await fsp
             .readFile(nodePath.join(outDir, outputDirName, "meta.json"), "utf8")
             .then((t) => JSON.parse(t) as { fps?: number })
@@ -676,8 +676,8 @@ export const blenderRenderTool: BlenderToolDef = {
         }
       }
 
-      // 橋內 Eevee native 崩潰非確定性（smoke 實錘：每 ~12 幀可能死一次）→ 每塊重試
-      // 至多 2 次（橋崩後自動重啟、塊腳本自含重開 blend，重試乾淨）；仍敗按鐵律結構化停止。
+      // 桥内 Eevee native 崩溃非确定性（smoke 实锤：每 ~12 帧可能死一次）→ 每块重试
+      // 至多 2 次（桥崩后自动重启、块脚本自含重开 blend，重试干净）；仍败按铁律结构化停止。
       const renderChunkWithRetry = async (chunkStart: number, chunkEnd: number) => {
         let lastErr: unknown
         for (let attempt = 0; attempt <= 2; attempt++) {
@@ -709,7 +709,7 @@ export const blenderRenderTool: BlenderToolDef = {
 
       let mp4Artifact: BlenderArtifact | null = null
       if (turntable && span) {
-        // 橋內 in-process mp4 muxer 必崩（2/2 出 48 字節 stub）→ 工具層系統 ffmpeg 合成 H264。
+        // 桥内 in-process mp4 muxer 必崩（2/2 出 48 字节 stub）→ 工具层系统 ffmpeg 合成 H264。
         await ensureFfmpegAvailable()
         const fps = sceneFps || 24
         const mp4Abs = nodePath.join(outDir, `${outputBase}.mp4`)
@@ -842,12 +842,12 @@ export const blenderExportGltfTool: BlenderToolDef = {
   },
 }
 
-/** 三工具定義集（id 順序 = HARNESS_TOOL_ID_LIST 登記順序）。 */
+/** 三工具定义集（id 顺序 = HARNESS_TOOL_ID_LIST 登记顺序）。 */
 export const BLENDER_TOOLS: readonly BlenderToolDef[] = [
   blenderExecTool,
   blenderRenderTool,
   blenderExportGltfTool,
 ]
 
-/** harness-tool-registry.ts 登記用 id 元組（字母序，與 HARNESS_TOOL_ID_LIST 登記順序一致）。 */
+/** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。 */
 export const BLENDER_HARNESS_TOOL_IDS = ["blender_exec", "blender_export_gltf", "blender_render"] as const

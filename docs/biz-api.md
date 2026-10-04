@@ -62,7 +62,7 @@ Base URL `https://eimu.dev/v1`。`POST` 一律回 `202 + task_id`，取图靠轮
 8. 保存后点「测试渠道」验证连通；再在 new-api 里发一次生图请求，返回 `data[].url` 即成功。
 9. 如果 new-api 版本把 base URL 藏起来（「自定义代理地址」灰掉），在渠道里打开「**覆盖代理地址**」或「自定义 Base URL」开关再填第 5 步的值。
 
-## 接入信息（以下为接法 B：異步任務）
+## 接入信息（以下为接法 B：异步任务）
 
 | 项目 | 值 |
 | --- | --- |
@@ -321,7 +321,7 @@ curl https://eimu.dev/v1/skus/sku-multi-angle/runs \
 }
 ```
 
-`all_terminal: true`（或 `status: "completed"`）表示全部镜头已终结；部分成功语义下 `succeeded` 的镜头随时可经 `result_url` 取件。run 不占新表——`run_id` 即幂等键根，镜头任务的冪等键为 `skurun:<run_id>:<shot_index>`，聚合视图直接从任务事实源构建。
+`all_terminal: true`（或 `status: "completed"`）表示全部镜头已终结；部分成功语义下 `succeeded` 的镜头随时可经 `result_url` 取件。run 不占新表——`run_id` 即幂等键根，镜头任务的幂等键为 `skurun:<run_id>:<shot_index>`，聚合视图直接从任务事实源构建。
 
 ---
 

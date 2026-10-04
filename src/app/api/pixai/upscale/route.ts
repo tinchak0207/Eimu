@@ -45,7 +45,7 @@ async function handle(req: Request) {
     return NextResponse.json({ success: false, message: "Control plane not configured." }, { status: 503 });
   }
 
-  // 先灌最新定價覆寫，再按請求 size 的解析度算價扣費。
+  // 先灌最新定价覆写，再按请求 size 的解析度算价扣费。
   let raw: ArrayBuffer;
   try {
     raw = await req.arrayBuffer();
@@ -65,7 +65,7 @@ async function handle(req: Request) {
       if (typeof parsed.size === "string") requestedSize = parsed.size;
     }
   } catch {
-    // body 非 JSON ⇒ 無法解析檔位：具名拒絕（舊行為是「1k 兜底 + 原樣轉發」，等於靜默降級）。
+    // body 非 JSON ⇒ 无法解析档位：具名拒绝（旧行为是「1k 兜底 + 原样转发」，等于静默降级）。
     return NextResponse.json(
       { success: false, code: "upscale_request_body_invalid", message: "请求体必须是 JSON 对象。" },
       { status: 400 },
@@ -101,7 +101,7 @@ async function handle(req: Request) {
     return NextResponse.json({ success: false, message: auth.message }, { status: auth.status });
   }
 
-  // 錢走生產平面門面（V-08）：有帳本的實例留 billing_operation 列；失敗一律 402 同形。
+  // 钱走生产平面门面（V-08）：有帐本的实例留 billing_operation 列；失败一律 402 同形。
   const charged = await reserveSyncCharge({
     userId: auth.user.id,
     quota: requiredQuota,

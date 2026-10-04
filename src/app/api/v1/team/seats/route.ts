@@ -1,11 +1,11 @@
-// /v1/team/seats —— 席位數（面 5：席位上限閘與調整 API）。
+// /v1/team/seats —— 席位数（面 5：席位上限闸与调整 API）。
 //
-//   GET  → { seats, member_count, 容量常量, 可否再容納 }
+//   GET  → { seats, member_count, 容量常量, 可否再容纳 }
 //   POST → { seats: number }（owner 可改）
 //
-// 席位語義：seats = 團隊可容納人數，且 min_members ≤ 現有成員數 ≤ seats ≤ max_members。
-// 本片只做上限閘與調整，**不接支付**（按席位計價的下單是另一片，此處不碰計費）。
-// 調整只寫意圖（整數），不碰任何點數（禁影子帳本）。
+// 席位语义：seats = 团队可容纳人数，且 min_members ≤ 现有成员数 ≤ seats ≤ max_members。
+// 本片只做上限闸与调整，**不接支付**（按席位计价的下单是另一片，此处不碰计费）。
+// 调整只写意图（整数），不碰任何点数（禁影子帐本）。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -55,11 +55,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         max_members: capacity.maxMembers,
       },
       can_admit_more: roster.length < settings.seats,
-      // 誠實標註（刀 3）：席位目前只是意圖整數，未接計費——不能按席位購買/續費/扣款。
-      // 席位若要計價，既有下單入口是 GET /api/payments/mapay/checkout?plan=<id>
-      // （套餐目錄 src/lib/plans.ts，前端 src/components/PricingClient.tsx）；
-      // 到帳後成員額度分配的唯一通路是 member-quota.ts 的 allocateMemberQuota。
-      // 本端點刻意不做任何計費寫入（禁影子帳本）。
+      // 诚实标注（刀 3）：席位目前只是意图整数，未接计费——不能按席位购买/续费/扣款。
+      // 席位若要计价，既有下单入口是 GET /api/payments/mapay/checkout?plan=<id>
+      // （套餐目录 src/lib/plans.ts，前端 src/components/PricingClient.tsx）；
+      // 到帐后成员额度分配的唯一通路是 member-quota.ts 的 allocateMemberQuota。
+      // 本端点刻意不做任何计费写入（禁影子帐本）。
       billing_connected: false,
       billing_note:
         "席位当前仅为人数上限的意图整数，未接入计费（不支持按席位购买/续费）；购买与续费走 /pricing 套餐，额度分配走 B 端额度接口。",

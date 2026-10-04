@@ -1,9 +1,9 @@
-// `GET /v1/tts/voices`（P1-11／D33）與 `POST /v1/tts/generations` 的音色值域——真跑路由函式。
+// `GET /v1/tts/voices`（P1-11／D33）与 `POST /v1/tts/generations` 的音色值域——真跑路由函式。
 //
-// 認證走 BIZ_API_KEY_HASHES 兜底層（與 `/v1/images/generations` 測試同一套手法），
-// 不需要控制面 DB：本檔驗的都是「進 I/O 之前就該拒絕／該放行」的分支。
+// 认证走 BIZ_API_KEY_HASHES 兜底层（与 `/v1/images/generations` 测试同一套手法），
+// 不需要控制面 DB：本档验的都是「进 I/O 之前就该拒绝／该放行」的分支。
 //
-// 真執行器：`npx tsx --test src/app/api/v1/tts/voices/route.test.ts`
+// 真执行器：`npx tsx --test src/app/api/v1/tts/voices/route.test.ts`
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -41,56 +41,56 @@ function submitRequest(body: Record<string, unknown>): NextRequest {
   });
 }
 
-test("未帶憑證 → 401（與其他 /v1/* 同一道門）", async () => {
+test("未带凭证 → 401（与其他 /v1/* 同一道门）", async () => {
   reset();
   const res = await listVoicesRoute(listRequest(false));
   assert.equal(res.status, 401);
   assert.equal((await res.json()).error.code.startsWith("missing"), true);
 });
 
-test("ListVoices 語義：無參數全量回，每條帶 Id/Name/Gender/Description，且不吐 age", async () => {
+test("ListVoices 语义：无参数全量回，每条带 Id/Name/Gender/Description，且不吐 age", async () => {
   reset();
   const res = await listVoicesRoute(listRequest());
   assert.equal(res.status, 200);
   const payload = await res.json();
   assert.equal(payload.object, "list");
-  assert.equal(payload.data.length, VOICE_LIBRARY.length, "全量回（無分頁、無隱藏）");
+  assert.equal(payload.data.length, VOICE_LIBRARY.length, "全量回（无分页、无隐藏）");
   assert.equal(payload.default_voice, "zh-CN-XiaoxiaoNeural");
 
   const xiaoxiao = payload.data.find((v: { id: string }) => v.id === "zh-CN-XiaoxiaoNeural");
-  assert.ok(xiaoxiao, "實查清單裡的音色必須在回應中");
+  assert.ok(xiaoxiao, "实查清单里的音色必须在回应中");
   assert.equal(xiaoxiao.name.length > 0, true);
-  assert.equal(xiaoxiao.gender, "female", "Gender 是清單原值");
-  assert.equal(xiaoxiao.description.includes("Warm"), true, "Description 由清單原值組成");
+  assert.equal(xiaoxiao.gender, "female", "Gender 是清单原值");
+  assert.equal(xiaoxiao.description.includes("Warm"), true, "Description 由清单原值组成");
   assert.equal(xiaoxiao.route, "edge");
-  assert.ok(xiaoxiao.source.includes("edge_tts"), "每條帶實查來源，可複核");
+  assert.ok(xiaoxiao.source.includes("edge_tts"), "每条带实查来源，可复核");
 
-  // 誠實欄位：age 一概不出現（沒有真源），notes 明說。
+  // 诚实栏位：age 一概不出现（没有真源），notes 明说。
   assert.equal(payload.data.some((v: Record<string, unknown>) => "age" in v), false);
   assert.match(payload.notes.join(" "), /age/);
-  // 別名也必須可查（否則呼叫端不知道哪些 OpenAI 風格名能用）。
+  // 别名也必须可查（否则呼叫端不知道哪些 OpenAI 风格名能用）。
   const aliases = payload.data.filter((v: { id: string }) => v.id in VOICE_ALIASES).map((v: { id: string }) => v.id);
   assert.equal(aliases.length, Object.keys(VOICE_ALIASES).length);
 });
 
-test("提交端：未知 voice → 400 voice_unknown，且不建單（在任何 I/O 之前擋）", async () => {
+test("提交端：未知 voice → 400 voice_unknown，且不建单（在任何 I/O 之前挡）", async () => {
   reset();
   const res = await submitTts(submitRequest({ input: "你好", voice: "不存在的音色" }));
   assert.equal(res.status, 400);
   const payload = await res.json();
   assert.equal(payload.error.code, "voice_unknown");
-  assert.match(payload.error.message, /\/v1\/tts\/voices/, "錯誤訊息要指向可用音色清單");
+  assert.match(payload.error.message, /\/v1\/tts\/voices/, "错误讯息要指向可用音色清单");
 });
 
-test("提交端：合法 voice（清單內／別名／SF 形式）不被值域擋下；未帶 voice 亦不被擋（零回歸）", async () => {
+test("提交端：合法 voice（清单内／别名／SF 形式）不被值域挡下；未带 voice 亦不被挡（零回归）", async () => {
   reset();
-  // 無控制面 DB ⇒ 通過值域後會停在提交層（502 submit_failed）。
-  // 這正是要的證據：**通過值域的請求不會拿到 400 voice_unknown**。
+  // 无控制面 DB ⇒ 通过值域后会停在提交层（502 submit_failed）。
+  // 这正是要的证据：**通过值域的请求不会拿到 400 voice_unknown**。
   for (const body of [
     { input: "你好", voice: "zh-CN-YunxiNeural" },
     { input: "你好", voice: "alloy" },
     { input: "你好", voice: "FunAudioLLM/CosyVoice2-0.5B:alex" },
-    { input: "你好" }, // 未帶 ⇒ 既有 "default" 行為逐位不變
+    { input: "你好" }, // 未带 ⇒ 既有 "default" 行为逐位不变
   ]) {
     const res = await submitTts(submitRequest(body));
     const code = (await res.json())?.error?.code;
@@ -102,5 +102,5 @@ test("提交端：致命的是值域不是 shape——空 input 仍走既有的 
   reset();
   const res = await submitTts(submitRequest({ input: "  ", voice: "zh-CN-YunxiNeural" }));
   assert.equal(res.status, 400);
-  assert.equal((await res.json()).error.code, "missing_input", "既有順序不被本刀打亂");
+  assert.equal((await res.json()).error.code, "missing_input", "既有顺序不被本刀打乱");
 });

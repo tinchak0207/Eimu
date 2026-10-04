@@ -58,10 +58,10 @@ export function failureClassToApiErrorCode(cls: FailureClass): ApiErrorCode {
     case "empty_result":
     case "artifact_download":
       return "generation_failed";
-    // INC-0830-VIDEO：上游成功但我們解析不出輸出（我方協議解析 bug）。對客戶
-    // 語義同「試了但沒產出可用結果」，復用 generation_failed，不新增對外代碼。
+    // INC-0830-VIDEO：上游成功但我们解析不出输出（我方协议解析 bug）。对客户
+    // 语义同「试了但没产出可用结果」，复用 generation_failed，不新增对外代码。
     case "upstream_protocol":
-    // 我方計價配置錯（H2）：對客戶同樣是「試了但沒產出」，不暴露內部配置。
+    // 我方计价配置错（H2）：对客户同样是「试了但没产出」，不暴露内部配置。
     case "pricing_config":
       return "generation_failed";
     case "deadline_exceeded":

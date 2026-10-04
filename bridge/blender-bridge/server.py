@@ -118,7 +118,7 @@ _KIND_BY_EXT = {
     ".glb": "glb",
 }
 
-# /v1/artifact 副檔名 → Content-Type（只出渲染產物；.py/.log 一律 400）。
+# /v1/artifact 副档名 → Content-Type（只出渲染产物；.py/.log 一律 400）。
 _ARTIFACT_CONTENT_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -132,26 +132,26 @@ _ARTIFACT_CONTENT_TYPES = {
     ".json": "application/json",
 }
 
-# path 白名單：單段相對路徑（out/ 內允許一層子目錄檔案，如 render_frames/frame_0001.png）。
-# 禁 traversal：無 ".."、無絕對路徑、無反斜線、不以點開頭（同構
-# src/app/api/blender-artifact/route.ts 的 isSafeArtifactName，多允許一段子目錄）。
+# path 白名单：单段相对路径（out/ 内允许一层子目录档案，如 render_frames/frame_0001.png）。
+# 禁 traversal：无 ".."、无绝对路径、无反斜线、不以点开头（同构
+# src/app/api/blender-artifact/route.ts 的 isSafeArtifactName，多允许一段子目录）。
 _ARTIFACT_PATH_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(/[A-Za-z0-9][A-Za-z0-9._-]{0,120})?$"
 )
 
-# 死線②（片AN）：.asset-cache 資產字節通路白名單。repo 根 = server.py 上兩級
+# 死线②（片AN）：.asset-cache 资产字节通路白名单。repo 根 = server.py 上两级
 # （bridge/blender-bridge/server.py → image-app/），.asset-cache 就在 repo 根下。
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# path 形狀：首段必為 ".asset-cache"，其後 1-7 段普通路徑段（cmu 4 段
-# .asset-cache/cmu-mocap/data/001/01_01.bvh 也在界內）；段內禁 ".."/空白/反斜線，
-# traversal 由 regex + realpath 收容雙檔。out/ 白名單禁首段以點開頭，兩分支零交疊。
+# path 形状：首段必为 ".asset-cache"，其后 1-7 段普通路径段（cmu 4 段
+# .asset-cache/cmu-mocap/data/001/01_01.bvh 也在界内）；段内禁 ".."/空白/反斜线，
+# traversal 由 regex + realpath 收容双档。out/ 白名单禁首段以点开头，两分支零交叠。
 _ASSET_CACHE_PATH_RE = re.compile(
     r"^\.asset-cache(/[A-Za-z0-9][A-Za-z0-9._-]{0,120}){1,7}$"
 )
 
-# 資產副檔名白名單（評測規格死線②指定）：glb/gltf/fbx/bvh/json/blend/png/hdr/jpg。
-# 在 out/ 白名單基礎上追加 .fbx/.bvh/.hdr（.jpg/.jpeg 同族）。
+# 资产副档名白名单（评测规格死线②指定）：glb/gltf/fbx/bvh/json/blend/png/hdr/jpg。
+# 在 out/ 白名单基础上追加 .fbx/.bvh/.hdr（.jpg/.jpeg 同族）。
 _ASSET_CACHE_CONTENT_TYPES = dict(_ARTIFACT_CONTENT_TYPES)
 _ASSET_CACHE_CONTENT_TYPES.update({
     ".fbx": "application/octet-stream",
@@ -502,13 +502,13 @@ def handle_health():
 
 
 def handle_asset_cache_artifact(rel):
-    """死線②（片AN）：.asset-cache 資產字節分支。
+    """死线②（片AN）：.asset-cache 资产字节分支。
 
-    path 必為 ".asset-cache/<relpath>"（regex 白名單 + realpath 收容雙檔），
-    根 = REPO_ROOT/.asset-cache/。副檔名限資產白名單。回傳形狀同 handle_artifact。
+    path 必为 ".asset-cache/<relpath>"（regex 白名单 + realpath 收容双档），
+    根 = REPO_ROOT/.asset-cache/。副档名限资产白名单。回传形状同 handle_artifact。
     """
     if not _ASSET_CACHE_PATH_RE.match(rel) or ".." in rel:
-        return 400, None, "path 不合法（僅允許 .asset-cache/ 內相對路徑）"
+        return 400, None, "path 不合法（仅允许 .asset-cache/ 内相对路径）"
     ext = os.path.splitext(rel)[1].lower()
     content_type = _ASSET_CACHE_CONTENT_TYPES.get(ext)
     if not content_type:
@@ -537,9 +537,9 @@ def handle_asset_cache_artifact(rel):
 def handle_artifact(raw_path):
     """GET /v1/artifact?path=<relpath under out/> 或 .asset-cache/<relpath>。
 
-    兩分支（片 AJ out/ 產物 + 片 AN .asset-cache 資產字節）：各走各的 regex
-    白名單（禁 traversal）＋ realpath 收容檢查（防 symlink 逃逸），雙重保險。
-    回 binary + 按副檔名的 Content-Type。回傳 (status, bytes|dict)——
+    两分支（片 AJ out/ 产物 + 片 AN .asset-cache 资产字节）：各走各的 regex
+    白名单（禁 traversal）＋ realpath 收容检查（防 symlink 逃逸），双重保险。
+    回 binary + 按副档名的 Content-Type。回传 (status, bytes|dict)——
     dict 走 _json，bytes 走 binary。
     """
     rel = (raw_path or "").strip()
@@ -548,7 +548,7 @@ def handle_artifact(raw_path):
     if rel.startswith(".asset-cache/"):
         return handle_asset_cache_artifact(rel)
     if not _ARTIFACT_PATH_RE.match(rel) or ".." in rel:
-        return 400, None, "path 不合法（僅允許 out/ 內單段相對路徑）"
+        return 400, None, "path 不合法（仅允许 out/ 内单段相对路径）"
     ext = os.path.splitext(rel)[1].lower()
     content_type = _ARTIFACT_CONTENT_TYPES.get(ext)
     if not content_type:

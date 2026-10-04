@@ -15,7 +15,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 
-/** 去掉註解後再斷言，避免註釋裡引用的反例把測試帶跑。 */
+/** 去掉注解后再断言，避免注释里引用的反例把测试带跑。 */
 function code(relPath: string): string {
   return readFileSync(join(root, relPath), "utf8")
     .replace(/^\s*\/\/.*$/gm, "")

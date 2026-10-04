@@ -4,17 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { setStoredToken, type NewApiUser } from "@/lib/new-api-client";
 
 /**
- * 微信「掃碼即登入」（2026-09-30 暴君裁定：取消驗證碼，檢測到掃碼的用戶直接登入）。
+ * 微信「扫码即登入」（2026-09-30 暴君裁定：取消验证码，检测到扫码的用户直接登入）。
  *
- * 鏈路：/api/auth/wechat/start 簽一個一次性 state，並向 VPS mp-qr-server 換一張
- * 帶參數二維碼（scene=state）→ 使用者用微信掃 → 公眾號推 SCAN/subscribe 事件到
- * /api/auth/wechat/msg，EventKey 就是 state → 伺服器直接開號/登入並標記完成 →
- * 這裡輪詢 /api/auth/wechat/poll 拿到 token 落地。全程不需要使用者打任何字。
+ * 链路：/api/auth/wechat/start 签一个一次性 state，并向 VPS mp-qr-server 换一张
+ * 带参数二维码（scene=state）→ 使用者用微信扫 → 公众号推 SCAN/subscribe 事件到
+ * /api/auth/wechat/msg，EventKey 就是 state → 伺服器直接开号/登入并标记完成 →
+ * 这里轮询 /api/auth/wechat/poll 拿到 token 落地。全程不需要使用者打任何字。
  *
- * 輪詢：固定 1.5s，外加「回到這個分頁」即時補一槍——手機上人是切去微信掃完才回來，
- * 背景分頁的計時器會被瀏覽器節流，不補這一槍就要多等好幾秒才看到登入成功。
+ * 轮询：固定 1.5s，外加「回到这个分页」即时补一枪——手机上人是切去微信扫完才回来，
+ * 背景分页的计时器会被浏览器节流，不补这一枪就要多等好几秒才看到登入成功。
  *
- * /wechat-login 獨立頁與宣傳片結尾的登入小框共用這一個 hook（同一條鏈，不兩份）。
+ * /wechat-login 独立页与宣传片结尾的登入小框共用这一个 hook（同一条链，不两份）。
  */
 
 export type WechatScanPhase = "loading" | "waiting" | "done" | "error";
@@ -40,19 +40,19 @@ const POLL_MS = 1500;
 
 export interface WechatScanLogin {
   phase: WechatScanPhase;
-  /** 微信帶參數二維碼圖片 URL（mp.weixin.qq.com/cgi-bin/showqrcode）。 */
+  /** 微信带参数二维码图片 URL（mp.weixin.qq.com/cgi-bin/showqrcode）。 */
   qrUrl: string | null;
   error: string;
-  /** 二維碼剩餘有效秒數。 */
+  /** 二维码剩余有效秒数。 */
   secondsLeft: number;
-  /** 重新簽一張碼（過期／取碼失敗後）。 */
+  /** 重新签一张码（过期／取码失败后）。 */
   retry: () => void;
 }
 
 export function useWechatScanLogin(options: {
-  /** false 時不取碼、不輪詢（例如小框還沒切到微信那一頁）。 */
+  /** false 时不取码、不轮询（例如小框还没切到微信那一页）。 */
   enabled?: boolean;
-  /** token 已寫進本機（localStorage + cookie）之後呼叫。 */
+  /** token 已写进本机（localStorage + cookie）之后呼叫。 */
   onDone?: () => void;
 } = {}): WechatScanLogin {
   const { enabled = true, onDone } = options;
@@ -65,7 +65,7 @@ export function useWechatScanLogin(options: {
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
 
-  // 取碼：每次 attempt 變化簽一張新的。
+  // 取码：每次 attempt 变化签一张新的。
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -97,7 +97,7 @@ export function useWechatScanLogin(options: {
     };
   }, [enabled, attempt]);
 
-  // 輪詢登入結果。
+  // 轮询登入结果。
   useEffect(() => {
     if (!enabled || phase !== "waiting" || !ticket) return;
     let stopped = false;
@@ -120,13 +120,13 @@ export function useWechatScanLogin(options: {
           setError("二维码已过期，点一下重新获取");
           setPhase("error");
         } else if (res.status === 400 || res.status === 404) {
-          // state cookie 丟了（隱私模式/跨分頁）或碼不認得：這張碼已經等不到結果。
+          // state cookie 丢了（隐私模式/跨分页）或码不认得：这张码已经等不到结果。
           stopped = true;
           setError("登录会话已失效，点一下重新获取");
           setPhase("error");
         }
       } catch {
-        // 網路抖動：下一輪再試。
+        // 网路抖动：下一轮再试。
       } finally {
         inFlight = false;
       }
@@ -145,7 +145,7 @@ export function useWechatScanLogin(options: {
     };
   }, [enabled, phase, ticket]);
 
-  // 倒數：歸零就當過期（伺服器同樣 10 分鐘 TTL）。
+  // 倒数：归零就当过期（伺服器同样 10 分钟 TTL）。
   useEffect(() => {
     if (!enabled || phase !== "waiting") return;
     const timer = window.setInterval(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);

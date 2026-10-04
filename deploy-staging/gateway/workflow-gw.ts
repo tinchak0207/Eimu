@@ -1,4 +1,4 @@
-// workflow-gw.ts —— 自 index.ts 第二階段 Wave2 抽取：畫布工作流引擎（workflowService 單例＋5 hooks、stateForWorkflow、持久化鏡像 maps、recordWorkflowRefund、workflowWake 掃描器、workflowSnapshotOf/For、restoreWorkflowsFromSnapshot、F1 自動恢復 timer、assembleFilmNode、MODEL_STATUS_TTL/modelStatusCache/fetchModelStatusCached、resolveActiveModel、submitWorkflowNode、workflowServiceTemplates、生成管線、喚醒掃描 setInterval、handleWorkflowInternal），原 index.ts 1378–2666 行，逐行機械搬運。
+// workflow-gw.ts —— 自 index.ts 第二阶段 Wave2 抽取：画布工作流引擎（workflowService 单例＋5 hooks、stateForWorkflow、持久化镜像 maps、recordWorkflowRefund、workflowWake 扫描器、workflowSnapshotOf/For、restoreWorkflowsFromSnapshot、F1 自动恢复 timer、assembleFilmNode、MODEL_STATUS_TTL/modelStatusCache/fetchModelStatusCached、resolveActiveModel、submitWorkflowNode、workflowServiceTemplates、生成管线、唤醒扫描 setInterval、handleWorkflowInternal），原 index.ts 1378–2666 行，逐行机械搬运。
 import { mkdir } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import path from "node:path"
@@ -26,7 +26,7 @@ import { beastAgentField } from "./session-lifecycle.ts"
 import { emitAgentNotice, reportNodeTerminalState } from "./emit-helpers.ts"
 import { emitVideoDone } from "./events-translate.ts"
 
-/** H11 補完：workflow 路徑生成任務登記進 state.sessionTasks（與聊天路徑 attachCanvasTask 同表）。 */
+/** H11 补完：workflow 路径生成任务登记进 state.sessionTasks（与聊天路径 attachCanvasTask 同表）。 */
 export function registerWorkflowTask(
   state: { sessionTasks?: SessionState["sessionTasks"] },
   taskId: string,
@@ -45,26 +45,26 @@ export function registerWorkflowTask(
       submitted_at: prev?.submitted_at ?? Date.now(),
       ...(url ? { url } : prev?.url ? { url: prev.url } : {}),
     })
-  } catch { /* 登記失敗不得影響生成 */ }
+  } catch { /* 登记失败不得影响生成 */ }
 }
 import { hasEntityToken, resolveEntityTokens, sanitizeEntityReferences } from "./entity-resolve.ts"
-// TODO(整合 Wave2): 以下為「仍住 index.ts 且未在 16 個 export 內」符號的 declare 佔位（stage1 記憶 subagent 佔位符法，bun build 不查名可過）。
-// 整合階段換成真 import（bun build 硬查 named import，已實錘）。註：CommandResult 是 index.ts 既有基線錯誤（tsc-baseline-0919 第 12–18 行 TS2304 ×7），如實不補宣告。
-// ─────────────────────────── 畫布工作流引擎（暴君策略 v2）
+// TODO(整合 Wave2): 以下为「仍住 index.ts 且未在 16 个 export 内」符号的 declare 占位（stage1 记忆 subagent 占位符法，bun build 不查名可过）。
+// 整合阶段换成真 import（bun build 硬查 named import，已实锤）。注：CommandResult 是 index.ts 既有基线错误（tsc-baseline-0919 第 12–18 行 TS2304 ×7），如实不补宣告。
+// ─────────────────────────── 画布工作流引擎（暴君策略 v2）
 //
-// Deepseek 透過 workflow_* 工具填內容（參數/提示詞），本服務展開節點流並執行。
-// 執行提交（image/video）由 submitWorkflowNode 完成（帶 session key）。
+// Deepseek 透过 workflow_* 工具填内容（参数/提示词），本服务展开节点流并执行。
+// 执行提交（image/video）由 submitWorkflowNode 完成（带 session key）。
 
 export const workflowService = new WorkflowService({
   emit: (state, name, data) => {
     const target = (state as SessionState | undefined) ?? stateForWorkflow
     if (target) emitToSession(target, name, data)
-    // 0920：畫布事件同步落快照。此前這條出口只發 SSE 不寫 canvasStates，
-    // 前端刷新／重連後骨架全丟（GET /internal/canvas/snapshot 永遠 has_state:false，
-    // 實錘：模板判定即建骨架後快照仍空）。events-translate 的工具路徑早有此寫入，
-    // workflow 路徑漏了——同一寫入函式，不另造輪子。
-    // 2026-09-20 寫穿收口：擴到 connected/disconnected/generating，全部 canvas.node.*
-    // 幀發出即寫穿（updated/generating 在快照無節點時靜默跳過＝懶加載回灌兜底）。
+    // 0920：画布事件同步落快照。此前这条出口只发 SSE 不写 canvasStates，
+    // 前端刷新／重连后骨架全丢（GET /internal/canvas/snapshot 永远 has_state:false，
+    // 实锤：模板判定即建骨架后快照仍空）。events-translate 的工具路径早有此写入，
+    // workflow 路径漏了——同一写入函式，不另造轮子。
+    // 2026-09-20 写穿收口：扩到 connected/disconnected/generating，全部 canvas.node.*
+    // 帧发出即写穿（updated/generating 在快照无节点时静默跳过＝懒加载回灌兜底）。
     if (target) {
       try {
         if (name === "canvas.node.created") applyCanvasNodeCreated(target.sessionId, data)
@@ -84,16 +84,16 @@ export const workflowService = new WorkflowService({
         console.error(`[gateway] canvas snapshot write failed on ${name}:`, e)
       }
     }
-    // S6 規格1：節點終態（success/error）幀 → 60s 內面向用戶的主動匯報。
-    // 掛在 emit 轉發處：generate/rerun 兩條執行路徑共用此出口，一鉤全收。
+    // S6 规格1：节点终态（success/error）帧 → 60s 内面向用户的主动汇报。
+    // 挂在 emit 转发处：generate/rerun 两条执行路径共用此出口，一钩全收。
     if (target && name === "canvas.node.updated") {
-      // 修 2：節點失敗 → 退款留痕先行（匯報文案讀 billing 真值，須先記帳）。
-      // 修 3：節點幀 = 進度打點，刷新喚醒登記表的停滯時鐘。
+      // 修 2：节点失败 → 退款留痕先行（汇报文案读 billing 真值，须先记帐）。
+      // 修 3：节点帧 = 进度打点，刷新唤醒登记表的停滞时钟。
       const d = (data ?? {}) as { unit_id?: unknown; patch?: { status?: unknown } }
       const wfid = typeof d.unit_id === "string" ? d.unit_id : ""
-      // 2026-10-02 計費單一真源：節點失敗不再在此「按報價全額退」記帳（會與控面實扣不符，
-      // 評測實錘：harness 記退 390.005、控面零退款分錄）。退款留痕改在工作流終態
-      // （settleWorkflowCharges）按控面實扣差額記。
+      // 2026-10-02 计费单一真源：节点失败不再在此「按报价全额退」记帐（会与控面实扣不符，
+      // 评测实锤：harness 记退 390.005、控面零退款分录）。退款留痕改在工作流终态
+      // （settleWorkflowCharges）按控面实扣差额记。
       if (wfid && workflowWake.has(wfid)) workflowWake.get(wfid)!.lastProgressAt = Date.now()
       try {
         reportNodeTerminalState(target, data as Parameters<typeof reportNodeTerminalState>[1])
@@ -101,19 +101,19 @@ export const workflowService = new WorkflowService({
         console.error(`[gateway] S6 terminal report failed: ${e}`)
       }
     } else if (target && name.startsWith("canvas.") && workflowWake.size > 0) {
-      // 修 3：canvas.node.generating 等非終態幀同樣算進度（節點開跑也是推進）。
+      // 修 3：canvas.node.generating 等非终态帧同样算进度（节点开跑也是推进）。
       const d = (data ?? {}) as { unit_id?: unknown }
       const wfid = typeof d.unit_id === "string" ? d.unit_id : ""
       if (wfid && workflowWake.has(wfid)) workflowWake.get(wfid)!.lastProgressAt = Date.now()
     }
   },
-  // S5a：節點失敗人話化掛點（errorDetails 原文 + human_message 中文短句）。
+  // S5a：节点失败人话化挂点（errorDetails 原文 + human_message 中文短句）。
   humanize: humanMessageFor,
-  // S4（2026-08-27）：整圖幣耗估價掛點——canvas.plan 的 cost_hint 用。
-  // 同步簽名：讀快取目錄；快取缺失時觸發後台刷新，本次回 null（下個 plan 幀
-  // 就有值），不阻塞工作流搭建。與 /workflow/generate 門檻估算同一價目
-  //（image = 目錄單價 × 1 張/節點，video = 檔位價 5/10 幣/秒（R5-C），model
-  // 沿連線向上游 config 解析——與 estimateNodeCoins 完全同口徑）。
+  // S4（2026-08-27）：整图币耗估价挂点——canvas.plan 的 cost_hint 用。
+  // 同步签名：读快取目录；快取缺失时触发后台刷新，本次回 null（下个 plan 帧
+  // 就有值），不阻塞工作流搭建。与 /workflow/generate 门槛估算同一价目
+  //（image = 目录单价 × 1 张/节点，video = 档位价 5/10 币/秒（R5-C），model
+  // 沿连线向上游 config 解析——与 estimateNodeCoins 完全同口径）。
   estimateGraphCoins: (graph) => {
     let total = 0
     let sawAny = false
@@ -125,34 +125,34 @@ export const workflowService = new WorkflowService({
         total += secs * videoTierPerSecondSync(n, graph)
         continue
       }
-      if (n.kind !== "image") continue // audio/film 0 幣
+      if (n.kind !== "image") continue // audio/film 0 币
       const model = resolveNodeModel(n.id, n, graph)
       const v = priceCatalogCache?.prices[model]
-      if (typeof v !== "number") return null // 有估不出的節點：整圖 null，不編數
+      if (typeof v !== "number") return null // 有估不出的节点：整图 null，不编数
       total += v
     }
     if (!sawAny) return null
     return Math.round(total * 1e6) / 1e6
   },
-  // R8（2026-09-10 多鏡展開修復）：可用視頻模型動態選型掛點——大片 shotN_gen 不再
-  // 寫死 minimax-h3（當前不可用），start 時查 /v1/model-status 選可用視頻模型
-  //（輪子 = resolveActiveModel 同源判活；挑選邏輯與其 failover pool 同構：
-  // media_type=video + available，按 24h 成功率排序取最優）。選不出回 null
-  //（service 側回退引擎默認，submit 前仍有 F2 failover 兜底）。
+  // R8（2026-09-10 多镜展开修复）：可用视频模型动态选型挂点——大片 shotN_gen 不再
+  // 写死 minimax-h3（当前不可用），start 时查 /v1/model-status 选可用视频模型
+  //（轮子 = resolveActiveModel 同源判活；挑选逻辑与其 failover pool 同构：
+  // media_type=video + available，按 24h 成功率排序取最优）。选不出回 null
+  //（service 侧回退引擎默认，submit 前仍有 F2 failover 兜底）。
   pickDefaultVideoModel: async (): Promise<string | null> => {
     const session = stateForWorkflow
     const apiKey = session?.apiKey
     if (!apiKey) return null
     const models = await fetchModelStatusCached(apiKey)
     if (!models) return null
-    // 2026-10-02 MODEL-SELECT：只選有真實交付且斷路器非 open 者（video-model-select 單真源）。
+    // 2026-10-02 MODEL-SELECT：只选有真实交付且断路器非 open 者（video-model-select 单真源）。
     const picked = pickVideoModel(models as ModelStatusEntryLike[])
     if (!picked) return null
     console.log(`[gateway] R8 default video model picked: ${picked.id} (proven=${picked.proven})`)
     return picked.id
   },
-  // 工作流持久化掛點（對齊 canvas 快照的 markDirty 模式）：狀態每次變更
-  // （start/addNode/connect/generate 逐節點）鏡像進 owner session 並防抖落盤。
+  // 工作流持久化挂点（对齐 canvas 快照的 markDirty 模式）：状态每次变更
+  // （start/addNode/connect/generate 逐节点）镜像进 owner session 并防抖落盘。
   onDirty: (wf) => {
     const owner = (wf.owner as SessionState | undefined) ?? null
     if (!owner || !owner.sessionId) return
@@ -163,15 +163,15 @@ export const workflowService = new WorkflowService({
   runNode: async (node, upstream, graph) => {
     const session = stateForWorkflow
     if (!session) return { nodeId: node.id, ok: false, error: "no active session" }
-    // novel_film 配音環：真實 TTS 閉環（同步調用）；拼装（film）仍無上游。
+    // novel_film 配音环：真实 TTS 闭环（同步调用）；拼装（film）仍无上游。
     if (node.kind === "audio") {
-      // 配音環：真實 TTS 閉環。取台詞文本（node.metadata 或上游 text 節點），
-      // 同步調 TTS 上游；上游缺失時誠實報錯（不造假成功）。
+      // 配音环：真实 TTS 闭环。取台词文本（node.metadata 或上游 text 节点），
+      // 同步调 TTS 上游；上游缺失时诚实报错（不造假成功）。
       const meta = node.metadata as Record<string, unknown> | undefined
       const ttsText = String(meta?.text ?? meta?.content ?? meta?.prompt ?? "").trim()
       const probe = await probeTtsUpstream()
       if (!probe.available) {
-        return { nodeId: node.id, ok: false, error: `配音（TTS）上游暂不可用：${probe.note}。此环節已編排入工作流，但无法真实生成音轨；请对用户如实说明。` }
+        return { nodeId: node.id, ok: false, error: `配音（TTS）上游暂不可用：${probe.note}。此环节已编排入工作流，但无法真实生成音轨；请对用户如实说明。` }
       }
       const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
         method: "POST",
@@ -194,7 +194,7 @@ export const workflowService = new WorkflowService({
       return r
     }
     const r = await submitWorkflowNode(session, node, upstream, graph)
-    // 2026-10-02 MODEL-SELECT 回執：生成前若換過視頻模型，結果帶說明（metadata.model_swap 同步供 workflow_status 回顯）。
+    // 2026-10-02 MODEL-SELECT 回执：生成前若换过视频模型，结果带说明（metadata.model_swap 同步供 workflow_status 回显）。
     const swap = (node.metadata as Record<string, unknown>).model_swap as { from?: string; to?: string; reason?: string } | undefined
     if (swap && node.kind === "video") {
       ;(r as Record<string, unknown>).modelSwapNote = `视频模型已自动替换：${swap.from}（${swap.reason}）→ ${swap.to}`
@@ -203,12 +203,12 @@ export const workflowService = new WorkflowService({
     if (r.ok && r.content && node.kind === "video") void emitVideoDone(session, r.content, r.costCoins, node.id, "video")
     return r
   },
-  // 2026-09-24 協作確認閘掛點（詳見本檔 COLLABORATE_GATE_ROLES 節）。
-  // 檔位判定在 gateway（settings 是 gateway 的真源），engine 只收「停不停」。
+  // 2026-09-24 协作确认闸挂点（详见本档 COLLABORATE_GATE_ROLES 节）。
+  // 档位判定在 gateway（settings 是 gateway 的真源），engine 只收「停不停」。
   awaitingApproval: async (wf) => {
     const state = ((wf.owner ?? stateForWorkflow) as SessionState | null) ?? null
     if (!state) return null
-    // 只有協作檔停（決策 1/2）。auto/preset：這裡一句不問、零新增阻塞——護城河。
+    // 只有协作档停（决策 1/2）。auto/preset：这里一句不问、零新增阻塞——护城河。
     if (normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode !== "collaborate") return null
     const gate = resolveCollaborateGate(wf as Parameters<typeof resolveCollaborateGate>[0])
     if (!gate) return null
@@ -219,32 +219,32 @@ export const workflowService = new WorkflowService({
 
 // ── 跑批完成推送（2026-09-20 Phase 1）────────────────────────────────────
 //
-// 站點側需要知道「這條 workflow 跑完了」才能把結果接回交付視角；此前完成只
-// 活在 gateway 進程記憶體（WorkflowRunState 從不落盤），站點永遠無從得知。
-// 本函式是 gateway → 站點的單向推送出口。
+// 站点侧需要知道「这条 workflow 跑完了」才能把结果接回交付视角；此前完成只
+// 活在 gateway 进程记忆体（WorkflowRunState 从不落盘），站点永远无从得知。
+// 本函式是 gateway → 站点的单向推送出口。
 //
-// 設計取捨：
-//   - 觸發點掛 runWfGenerate 的 .then（generate 的終判出口），不掛
-//     workflow-service 內——那會逼 engine 反向依賴 gateway 的 fetch/env；
-//     service 已有 emit/onDirty 兩個掛點，第三個純為推送而設＝造輪子。
-//   - 失敗絕不阻塞主流程：整段 try/catch，catch 只記 log。推送是旁路，
-//     站點掛掉不能讓工作流收尾陪葬。
-//   - 5s AbortSignal.timeout：站點慢時 gateway 不等。
-//   - 只推 success/partial：未完成的狀態推過去只會讓站點把半成品當成品。
+// 设计取舍：
+//   - 触发点挂 runWfGenerate 的 .then（generate 的终判出口），不挂
+//     workflow-service 内——那会逼 engine 反向依赖 gateway 的 fetch/env；
+//     service 已有 emit/onDirty 两个挂点，第三个纯为推送而设＝造轮子。
+//   - 失败绝不阻塞主流程：整段 try/catch，catch 只记 log。推送是旁路，
+//     站点挂掉不能让工作流收尾陪葬。
+//   - 5s AbortSignal.timeout：站点慢时 gateway 不等。
+//   - 只推 success/partial：未完成的状态推过去只会让站点把半成品当成品。
 //   - 去重集合 workflowCompletionPushed：同一 workflowId 只推一次
-//     （gateway 重啟清空＝可接受，重啟後狀態已丟，本來就沒得推）。
-//   - 認證走 HARNESS_API_KEY（既有慣例：工具層打站點 /agent/v1/* 的 Bearer
-//     閘門，見 music-tools-impl / memory_recall_impl）；未配置時記 log 不推，
-//     不偽造請求。
+//     （gateway 重启清空＝可接受，重启后状态已丢，本来就没得推）。
+//   - 认证走 HARNESS_API_KEY（既有惯例：工具层打站点 /agent/v1/* 的 Bearer
+//     闸门，见 music-tools-impl / memory_recall_impl）；未配置时记 log 不推，
+//     不伪造请求。
 export const SITE_COMPLETION_URL = (
   process.env.SITE_COMPLETION_URL || "https://image.tinchak0207.xyz/api/workflow-completion"
 ).trim()
-/** 已推送過的 workflowId（含推送失敗——不重試，避免站點掛掉時反覆打）。 */
+/** 已推送过的 workflowId（含推送失败——不重试，避免站点挂掉时反覆打）。 */
 export const workflowCompletionPushed = new Set<string>()
 
 /**
- * 把工作流跑批完成投影並推送到站點。失敗只記 log，永不拋。
- * state 必須是 workflow 的 owner session（要 sessionId 做關聯鍵）。
+ * 把工作流跑批完成投影并推送到站点。失败只记 log，永不抛。
+ * state 必须是 workflow 的 owner session（要 sessionId 做关联键）。
  */
 export async function pushWorkflowCompletion(state: SessionState): Promise<void> {
   try {
@@ -254,11 +254,11 @@ export async function pushWorkflowCompletion(state: SessionState): Promise<void>
     const wf = workflowService.get(wfid)
     if (!wf) return
     const status = wf.status
-    // 未完成（building/running/failed/paused）不推送——只推真交付出去的結果。
+    // 未完成（building/running/failed/paused）不推送——只推真交付出去的结果。
     if (status !== "success" && status !== "partial") return
     workflowCompletionPushed.add(wfid)
-    // 投影：節點狀態/產物/單節點幣耗從 ActiveWorkflow 的三張旁表組回節點上
-    //（WorkflowRunState 是 graph + nodeStatus/nodeContent/nodeCost 的組合視圖）。
+    // 投影：节点状态/产物/单节点币耗从 ActiveWorkflow 的三张旁表组回节点上
+    //（WorkflowRunState 是 graph + nodeStatus/nodeContent/nodeCost 的组合视图）。
     const nodes = wf.graph.nodes.map((n) => ({
       id: n.id,
       role: n.role,
@@ -271,17 +271,17 @@ export async function pushWorkflowCompletion(state: SessionState): Promise<void>
     }))
     let totalCostCoins = 0
     for (const v of Object.values(wf.nodeCost)) if (typeof v === "number") totalCostCoins += v
-    // Jev 閘門（`gateWorkflowMemory`）：判「這條跑批值不值得進記憶庫」。
-    // 為什麼在 gateway 判而不是站點判：閘門分工（契約 §5）把判斷層放在 gateway，
-    // 且 `gateWorkflowMemory` 本來就住在 jev-gate.ts；站點只該收結論、不該持有
-    // Jev 憑據。判完把結論放進 payload，站點據此決定要不要沉澱記憶（見站點
-    // route 的 persistWorkflowMemory）。fail-open：Jev 掛掉回 true，不擋記憶。
+    // Jev 闸门（`gateWorkflowMemory`）：判「这条跑批值不值得进记忆库」。
+    // 为什么在 gateway 判而不是站点判：闸门分工（契约 §5）把判断层放在 gateway，
+    // 且 `gateWorkflowMemory` 本来就住在 jev-gate.ts；站点只该收结论、不该持有
+    // Jev 凭据。判完把结论放进 payload，站点据此决定要不要沉淀记忆（见站点
+    // route 的 persistWorkflowMemory）。fail-open：Jev 挂掉回 true，不挡记忆。
     const memoryWorthPersisting = await gateWorkflowMemory({
       domain: "workflow",
       name: wf.templateId,
-      // 判值只看「跑批的實質參數」：text 節點的提示詞 + config 節點的參數。
-      // 與站點側 extractWorkflowRunConfig 同語義（兩邊都得從節點攤平裡取，
-      // 因為 gateway 沒有單一 config 物件——參數是 expandTemplate 攤在節點上的）。
+      // 判值只看「跑批的实质参数」：text 节点的提示词 + config 节点的参数。
+      // 与站点侧 extractWorkflowRunConfig 同语义（两边都得从节点摊平里取，
+      // 因为 gateway 没有单一 config 物件——参数是 expandTemplate 摊在节点上的）。
       config: (() => {
         const out: Record<string, unknown> = {}
         for (const n of wf.graph.nodes) {
@@ -307,18 +307,18 @@ export async function pushWorkflowCompletion(state: SessionState): Promise<void>
       totalCostCoins: Math.round(totalCostCoins * 1e6) / 1e6,
       completedAt: new Date().toISOString(),
       memoryWorthPersisting,
-      // 記憶庫 ownerKey：**必須是這位用戶的**，否則寫進去的記憶 agent 召不回來。
+      // 记忆库 ownerKey：**必须是这位用户的**，否则写进去的记忆 agent 召不回来。
       //
-      // 為什麼要 gateway 算而不是站點自己推：站點只握有推送用的通用
-      // HARNESS_API_KEY（平台級），hash 它得到的 ownerKey 與 agent 注入記憶時
-      // 用的 per-user B key hash 不同 → 記憶落進一個誰都召不到的角落。
-      // 而 `state.apiKey` 正是這位用戶的派生 B key（站點
-      // getOrCreateAgentKeyForUser 簽發後帶進建號請求），agent 側
-      // deriveMemoryOwnerKey 對同一把 key 做同一套 hash → 兩端收斂。
+      // 为什么要 gateway 算而不是站点自己推：站点只握有推送用的通用
+      // HARNESS_API_KEY（平台级），hash 它得到的 ownerKey 与 agent 注入记忆时
+      // 用的 per-user B key hash 不同 → 记忆落进一个谁都召不到的角落。
+      // 而 `state.apiKey` 正是这位用户的派生 B key（站点
+      // getOrCreateAgentKeyForUser 签发后带进建号请求），agent 侧
+      // deriveMemoryOwnerKey 对同一把 key 做同一套 hash → 两端收敛。
       //
-      // 送 hash 而非原 key：站點不需要（也不該拿到）明文憑據，ownerKey 本身
-      // 就是公開可見的索引鍵（契約 §1）。算法與站點 hashMemoryOwnerKey 逐字
-      // 相同：UTF-8 → SHA-256 → 前 12 bytes → 小寫 hex（24 字元）。
+      // 送 hash 而非原 key：站点不需要（也不该拿到）明文凭据，ownerKey 本身
+      // 就是公开可见的索引键（契约 §1）。算法与站点 hashMemoryOwnerKey 逐字
+      // 相同：UTF-8 → SHA-256 → 前 12 bytes → 小写 hex（24 字元）。
       memoryOwnerKeyHash: createHash("sha256").update(state.apiKey, "utf8").digest().subarray(0, 12).toString("hex"),
     }
     const key = (process.env.HARNESS_API_KEY || "").trim()
@@ -343,27 +343,27 @@ export async function pushWorkflowCompletion(state: SessionState): Promise<void>
   }
 }
 
-// runNode 需要目前的 session（key）。workflow 端點都是帶 session 呼叫的，執行前設入。
+// runNode 需要目前的 session（key）。workflow 端点都是带 session 呼叫的，执行前设入。
 export let stateForWorkflow: SessionState | null = null
 
-// ---- 工作流持久化（2026-08-27 修復，與 canvasSnapshot 同構）----
-// 根因：workflow 狀態只在內存 Map（workflowService.workflows），gateway 重啟即丟，
-// 跑到一半的 8 環流水線徹底失聯；canvas 快照已持久化、工作流沒有——不一致。
-// 修復：ActiveWorkflow 的可恢復子集鏡像進 owner session 的 workflowSnapshot
-// 欄位（隨 session 防抖落盤），重啟懶加載時回灌 workflowService（running →
-// error「服務重啟中斷」，不偽造還在跑）。單 session 只鏡像最新工作流——
-// 同 session 反覆 start 屬異常路徑，覆蓋即止，不做多工作流列表。
-// 前置聲明：markDirty 引用 workflowOwnerBySession，const 提升安全（僅在請求
-// 處理時執行，遠晚於模組頂層求值）。
+// ---- 工作流持久化（2026-08-27 修复，与 canvasSnapshot 同构）----
+// 根因：workflow 状态只在内存 Map（workflowService.workflows），gateway 重启即丢，
+// 跑到一半的 8 环流水线彻底失联；canvas 快照已持久化、工作流没有——不一致。
+// 修复：ActiveWorkflow 的可恢复子集镜像进 owner session 的 workflowSnapshot
+// 栏位（随 session 防抖落盘），重启懒加载时回灌 workflowService（running →
+// error「服务重启中断」，不伪造还在跑）。单 session 只镜像最新工作流——
+// 同 session 反覆 start 属异常路径，覆盖即止，不做多工作流列表。
+// 前置声明：markDirty 引用 workflowOwnerBySession，const 提升安全（仅在请求
+// 处理时执行，远晚于模组顶层求值）。
 export const workflowOwnerBySession = new Map<string, string>() // sessionId -> workflowId
-// F1（2026-08-31）斷點續跑登記表：每進程每工作流只自動續跑一次，防循環重試。
+// F1（2026-08-31）断点续跑登记表：每进程每工作流只自动续跑一次，防循环重试。
 export const autoResumedWorkflows = new Set<string>()
 
 /**
- * H8（2026-10-02）：節點失敗文案必須帶 failure_class + 上游原文首句。
- * 舊文案把本地配置/解析錯與上游錯一律洗成「执行侧无可用供应商/上游渠道未能执行」，
- * orchestrator 據此對用戶說「瓶頸不在我們這邊」。現在 class 與原文原樣外露，
- * 歸因只准引用它們（見 AGENTS.md 4.8）。
+ * H8（2026-10-02）：节点失败文案必须带 failure_class + 上游原文首句。
+ * 旧文案把本地配置/解析错与上游错一律洗成「执行侧无可用供应商/上游渠道未能执行」，
+ * orchestrator 据此对用户说「瓶颈不在我们这边」。现在 class 与原文原样外露，
+ * 归因只准引用它们（见 AGENTS.md 4.8）。
  */
 export function firstSentence(raw: unknown, max = 160): string {
   const t = String(raw ?? "").trim()
@@ -377,31 +377,31 @@ export function formatNodeFailure(failureClass: unknown, raw: unknown, lead: str
   return `${lead} [failure_class=${cls}]${first ? `，原文：「${first}」` : "，原文：（无）"}${tail}`
 }
 
-// ── 修 2（2026-09-01）計費終態留痕 + billing 真值 ─────────────────────
-// 實測實錘（會話 f340fcab/8b7dc1fd）：批量 confirm approved 25.001/75.001 幣後
-// 節點失敗，ledger 零 refund 零 done，agent 卻對用戶說「未產生成功扣款」——
-// 話術無帳本依據。本表記每工作流的批准/退款真值：
-//   confirm approved 時記 confirmed；節點失敗時照抄 emitImageFailed 的
-//   event:"refunded" 輪子寫 ledger 終態行 + 刷餘額；workflow_status 工具結果
-//   注入 billing 對象，agent 話術只許引用真值。
+// ── 修 2（2026-09-01）计费终态留痕 + billing 真值 ─────────────────────
+// 实测实锤（会话 f340fcab/8b7dc1fd）：批量 confirm approved 25.001/75.001 币后
+// 节点失败，ledger 零 refund 零 done，agent 却对用户说「未产生成功扣款」——
+// 话术无帐本依据。本表记每工作流的批准/退款真值：
+//   confirm approved 时记 confirmed；节点失败时照抄 emitImageFailed 的
+//   event:"refunded" 轮子写 ledger 终态行 + 刷余额；workflow_status 工具结果
+//   注入 billing 对象，agent 话术只许引用真值。
 export interface WorkflowBillingTruth {
   confirmed_coins: number
   refunded_coins: number
   billing_status: "confirmed" | "refunded" | "settled"
-  /** H13：逐次批准額明細（confirmed_coins = 其總和）。 */
+  /** H13：逐次批准额明细（confirmed_coins = 其总和）。 */
   approvals?: number[]
-  /** 2026-10-02：控面實扣幣數（終態時由 settleWorkflowCharges 按控面 job 回填；單一真源）。 */
+  /** 2026-10-02：控面实扣币数（终态时由 settleWorkflowCharges 按控面 job 回填；单一真源）。 */
   charged_coins?: number
-  /** 實扣 - 報價（正＝多扣；孤兒鏡等）。 */
+  /** 实扣 - 报价（正＝多扣；孤儿镜等）。 */
   deviation_coins?: number
 }
 export const workflowBilling = new Map<string, WorkflowBillingTruth>()
 
 /**
- * H13（2026-10-02）：批准額累加而非覆寫。舊版每次 approve 直接 set 覆寫，同一 wf
- * 第二次 approve（1210.01）抹掉第一次（460），refund 只退最後一筆（750.005）→
- * 批准總額與退款不對稱。現在逐次累加 confirmed_coins，並記 approvals 逐次明細；
- * 已退款的 wf 再批准新一筆時退款額保留、狀態回 confirmed，終態再退「未退部分」。
+ * H13（2026-10-02）：批准额累加而非覆写。旧版每次 approve 直接 set 覆写，同一 wf
+ * 第二次 approve（1210.01）抹掉第一次（460），refund 只退最后一笔（750.005）→
+ * 批准总额与退款不对称。现在逐次累加 confirmed_coins，并记 approvals 逐次明细；
+ * 已退款的 wf 再批准新一笔时退款额保留、状态回 confirmed，终态再退「未退部分」。
  */
 export function recordWorkflowApproval(wfid: string, amount: number): WorkflowBillingTruth {
   const prev = workflowBilling.get(wfid)
@@ -417,12 +417,12 @@ export function recordWorkflowApproval(wfid: string, amount: number): WorkflowBi
   return next
 }
 
-/** 修 2：節點失敗 → 該工作流退款留痕（每工作流只記一次）+ 餘額刷新。 */
+/** 修 2：节点失败 → 该工作流退款留痕（每工作流只记一次）+ 余额刷新。 */
 export function recordWorkflowRefund(state: SessionState, wfid: string, chargedCoins = 0): void {
   const billing = workflowBilling.get(wfid)
   if (!billing) return
-  // H13：只退「已批准但尚未退」的部分；累加後 refunded 與 approve 總額對稱。
-  // 2026-10-02：chargedCoins＝控面實扣（終態傳入），退款＝批准額 − 實扣 − 已退；缺省 0＝舊語義（測試鎖）。
+  // H13：只退「已批准但尚未退」的部分；累加后 refunded 与 approve 总额对称。
+  // 2026-10-02：chargedCoins＝控面实扣（终态传入），退款＝批准额 − 实扣 − 已退；缺省 0＝旧语义（测试锁）。
   const toRefund = Math.round((billing.confirmed_coins - chargedCoins - billing.refunded_coins) * 1e6) / 1e6
   if (toRefund <= 0) return
   billing.refunded_coins = Math.round((billing.refunded_coins + toRefund) * 1e6) / 1e6
@@ -439,10 +439,10 @@ export function recordWorkflowRefund(state: SessionState, wfid: string, chargedC
   console.log(`[gateway] workflow refund recorded: wf=${wfid} coins=${toRefund} total_refunded=${billing.confirmed_coins} approvals=${JSON.stringify(billing.approvals ?? [])} session=${state.sessionId}`)
 }
 
-// ── 2026-10-02 e2e 成片評測三死線：控面為準的實扣結算 / 排隊換道 / 孤兒鏡取消 / 直推通報 ──
-/** 每工作流提交過的上游 job（供終態向控面結算實扣、停滯/放棄時取消）。 */
+// ── 2026-10-02 e2e 成片评测三死线：控面为准的实扣结算 / 排队换道 / 孤儿镜取消 / 直推通报 ──
+/** 每工作流提交过的上游 job（供终态向控面结算实扣、停滞/放弃时取消）。 */
 export const workflowJobs = new Map<string, Map<string, { nodeId: string; kind: "video" | "image" }>>()
-/** 排隊超過此時長提示並嘗試換同價通道（PM 死線：5 分鐘）。 */
+/** 排队超过此时长提示并尝试换同价通道（PM 死线：5 分钟）。 */
 export const QUEUE_SWITCH_MS = Number.parseInt(process.env.WORKFLOW_QUEUE_SWITCH_MS || "300000", 10) || 300_000
 
 export function wfidFromNodeId(nodeId: string): string {
@@ -450,7 +450,7 @@ export function wfidFromNodeId(nodeId: string): string {
   return m ? m[1] : ""
 }
 
-/** 取消控面 job（排隊/租約中全額退款，已在飛的由控面 reconcile 兜底）。永不拋。 */
+/** 取消控面 job（排队/租约中全额退款，已在飞的由控面 reconcile 兜底）。永不抛。 */
 export async function cancelPlatformJob(apiKey: string, taskId: string): Promise<{ cancelled: boolean; note: string }> {
   try {
     const res = await fetch(`${PLATFORM_BASE}/api/generation-jobs/${encodeURIComponent(taskId)}`, {
@@ -468,7 +468,7 @@ export async function cancelPlatformJob(apiKey: string, taskId: string): Promise
   }
 }
 
-/** 同價位（每秒幣價逐檔不高於當前）且活的備選視頻通道；無則 null（明確降級＝繼續排隊至預算耗盡後取消退款）。 */
+/** 同价位（每秒币价逐档不高于当前）且活的备选视频通道；无则 null（明确降级＝继续排队至预算耗尽后取消退款）。 */
 export async function pickSamePriceVideoAlternative(model: string, apiKey: string, node: CanvasNode): Promise<string | null> {
   try {
     const models = await fetchModelStatusCached(apiKey)
@@ -495,13 +495,13 @@ export interface WorkflowChargeReport {
   orphanCoins: number
   orphanJobs: string[]
   source: "control_plane" | "gateway_nodecost"
-  /** 成功但控面帳本尚未落帳的 job 數（>0＝實扣為下限，結算中）。 */
+  /** 成功但控面帐本尚未落帐的 job 数（>0＝实扣为下限，结算中）。 */
   unresolved: number
 }
 
 /**
- * 計費單一真源：向控面逐 job 查實扣（succeeded 的 cost_coins＝account_ledger consumption），
- * 孤兒＝成功扣費但節點最終沒用上的 job。回填 billing 真值並按「批准額 - 控面實扣」記退款留痕。
+ * 计费单一真源：向控面逐 job 查实扣（succeeded 的 cost_coins＝account_ledger consumption），
+ * 孤儿＝成功扣费但节点最终没用上的 job。回填 billing 真值并按「批准额 - 控面实扣」记退款留痕。
  */
 export async function settleWorkflowCharges(state: SessionState, wfid: string): Promise<WorkflowChargeReport> {
   const wf = workflowService.get(wfid)
@@ -515,8 +515,8 @@ export async function settleWorkflowCharges(state: SessionState, wfid: string): 
   if (jobs && jobs.size > 0) {
     for (const [taskId, j] of jobs) {
       try {
-        // 控面帳本投影有秒級延遲：job 剛 succeeded 時 cost_coins 可能還是 null/0（實測 12:01:52 查到 0、35s 後 130）。
-        // 對「成功但費用未落帳」的 job 重試至多 8 次×5s；仍未落帳＝結算中，不記退款、不偽造實扣。
+        // 控面帐本投影有秒级延迟：job 刚 succeeded 时 cost_coins 可能还是 null/0（实测 12:01:52 查到 0、35s 后 130）。
+        // 对「成功但费用未落帐」的 job 重试至多 8 次×5s；仍未落帐＝结算中，不记退款、不伪造实扣。
         let d: { status?: string; cost_coins?: number | null } = {}
         for (let attempt = 0; attempt < 8; attempt++) {
           const r = await fetch(`${PLATFORM_BASE}/v1/${j.kind === "video" ? "videos" : "images"}/${encodeURIComponent(taskId)}`, {
@@ -550,19 +550,19 @@ export async function settleWorkflowCharges(state: SessionState, wfid: string): 
   if (billing) {
     billing.charged_coins = charged
     billing.deviation_coins = Math.round((charged - billing.confirmed_coins) * 1e6) / 1e6
-    // 有 job 實扣尚未落帳時不記退款（否則把「還沒查到」當「沒扣」，退款偏大）；下一次結算補記。
+    // 有 job 实扣尚未落帐时不记退款（否则把「还没查到」当「没扣」，退款偏大）；下一次结算补记。
     if (unresolved === 0) recordWorkflowRefund(state, wfid, charged)
   }
   console.log(`[gateway] workflow charges settled: wf=${wfid} quoted=${billing?.confirmed_coins ?? "-"} charged=${charged} orphan=${orphanCoins}[${orphanJobs.join(",")}] source=${source}`)
   return { quoted: billing?.confirmed_coins ?? null, charged, orphanCoins, orphanJobs, source, unresolved }
 }
 
-/** 已直推過通報的 key（wfid:kind）。 */
+/** 已直推过通报的 key（wfid:kind）。 */
 export const workflowNoticeSent = new Set<string>()
 
 /**
- * 工作流終態/停滯直推通報（不經 LLM、不依賴 4096 喚醒）：SSE message.delta，含成片連結與控面實扣。
- * kind="final" 與 "stalled" 各發一次——停滯判死後仍跑完的工作流（評測 08:46 完成無人知）會再收到 final。
+ * 工作流终态/停滞直推通报（不经 LLM、不依赖 4096 唤醒）：SSE message.delta，含成片连结与控面实扣。
+ * kind="final" 与 "stalled" 各发一次——停滞判死后仍跑完的工作流（评测 08:46 完成无人知）会再收到 final。
  */
 export async function sendWorkflowNotice(state: SessionState, wfid: string, kind: "final" | "stalled"): Promise<void> {
   const key = `${wfid}:${kind}`
@@ -605,22 +605,22 @@ export async function sendWorkflowNotice(state: SessionState, wfid: string, kind
   }
 }
 
-// ── 修 3（2026-09-01）長任務交接：喚醒登記表 + 掃描器 ────��─────────��───
-// workflow_generate 提交後 turn 誠實結束；工作流到終態或停滯（15 分鐘無節點
-// 進度）時向原會話投 resume 喚醒（輪子 = handleResumeSession 的 prompt_async
-// 投遞 + turn 狀態重置）。掃描器是進程內唯一的 workflow 狀態觀察點——
-// workflowService.generate 的 promise 在 runWfGenerate 手裡，poller 摸不到
-// 內存工作流狀態，故掛 gateway 不掛 poller（最小改動路徑）。
+// ── 修 3（2026-09-01）长任务交接：唤醒登记表 + 扫描器 ────��─────────��───
+// workflow_generate 提交后 turn 诚实结束；工作流到终态或停滞（15 分钟无节点
+// 进度）时向原会话投 resume 唤醒（轮子 = handleResumeSession 的 prompt_async
+// 投递 + turn 状态重置）。扫描器是进程内唯一的 workflow 状态观察点——
+// workflowService.generate 的 promise 在 runWfGenerate 手里，poller 摸不到
+// 内存工作流状态，故挂 gateway 不挂 poller（最小改动路径）。
 export const workflowWake = new Map<string, { sessionId: string; lastProgressAt: number }>()
 export const WORKFLOW_STALL_MS = Number.parseInt(process.env.WORKFLOW_STALL_MS || "360000", 10) || 360_000
 export const WORKFLOW_WAKE_SCAN_MS = 60_000
 
-/** execute_command 工具回應形狀（waveform.ts/master.ts 同款；stage2 整合時改共用匯出）。 */
+/** execute_command 工具回应形状（waveform.ts/master.ts 同款；stage2 整合时改共用汇出）。 */
 interface CommandResult { stdout: string; stderr: string; exit_code: number }
 
-/** 畫布節點的寬鬆形狀（graph.nodes 是 unknown[]，消費端逐點收窄）。 */
+/** 画布节点的宽松形状（graph.nodes 是 unknown[]，消费端逐点收窄）。 */
 type CanvasNode = { id?: unknown; kind?: unknown; metadata?: Record<string, unknown> }
-/** 謂詞收窄形狀：graph.nodes 元素（id/role/kind/metadata）去除 undefined 的真子類型。 */
+/** 谓词收窄形状：graph.nodes 元素（id/role/kind/metadata）去除 undefined 的真子类型。 */
 type VideoUpstream = { id: string; role: string; kind: string; metadata: Record<string, unknown> }
 type AudioUpstream = VideoUpstream
 type ImageUpstream = VideoUpstream
@@ -635,7 +635,7 @@ export type PersistableWorkflow = {
   nodeCost: Record<string, number>
 }
 
-/** ActiveWorkflow → 可 JSON 化快照（Set 去重狀態不持久——恢復後全部視為已發過，避免重啟後重推前端）。 */
+/** ActiveWorkflow → 可 JSON 化快照（Set 去重状态不持久——恢复后全部视为已发过，避免重启后重推前端）。 */
 export function workflowSnapshotOf(wf: {
   workflowId: string
   templateId: string
@@ -656,20 +656,20 @@ export function workflowSnapshotOf(wf: {
   }
 }
 
-/** markDirty 用：取該 session 當前工作流的最新快照；工作流已不在內存 → 保留舊鏡像（清 null）。 */
+/** markDirty 用：取该 session 当前工作流的最新快照；工作流已不在内存 → 保留旧镜像（清 null）。 */
 export function workflowSnapshotFor(state: SessionState): Record<string, unknown> | undefined {
   const wfid = workflowOwnerBySession.get(state.sessionId)
   if (!wfid) return undefined
   const wf = workflowService.get(wfid)
-  if (!wf) return state.workflowSnapshot // 已被清掉：保留最後已知狀態
+  if (!wf) return state.workflowSnapshot // 已被清掉：保留最后已知状态
   return workflowSnapshotOf(wf)
 }
 
 /**
- * DB 快照 → ActiveWorkflow 回灌（hydrate 路徑，對齊 canvasSnapshot → canvasStates）。
- * 語義：中斷時正在 running 的節點標 error（reason「服務重啟中斷」）——重啟後的
- * status 回應必須是真實狀態，不偽造還在跑。emit 去重集合全量視為已發（重啟後
- * generate 補發只走漏網兜底，不對已恢復節點重播）。
+ * DB 快照 → ActiveWorkflow 回灌（hydrate 路径，对齐 canvasSnapshot → canvasStates）。
+ * 语义：中断时正在 running 的节点标 error（reason「服务重启中断」）——重启后的
+ * status 回应必须是真实状态，不伪造还在跑。emit 去重集合全量视为已发（重启后
+ * generate 补发只走漏网兜底，不对已恢复节点重播）。
  */
 export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   const snap = state.workflowSnapshot
@@ -678,7 +678,7 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   if (typeof s.workflowId !== "string" || !s.workflowId) return
   if (workflowService.get(s.workflowId)) {
     workflowOwnerBySession.set(state.sessionId, s.workflowId)
-    return // 已回灌過（冪等）
+    return // 已回灌过（幂等）
   }
   const graph = s.graph && typeof s.graph === "object" && Array.isArray((s.graph as { nodes?: unknown[] }).nodes) ? (s.graph as { nodes: unknown[]; connections?: unknown[] }) : null
   if (!graph) return
@@ -686,7 +686,7 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   const interrupted: string[] = []
   for (const [id, st] of Object.entries(s.nodeStatus ?? {})) {
     if (st === "running") {
-      // 服務重啟中斷：執行循環已死，這個節點不可能還在跑——誠實標錯，不偽造。
+      // 服务重启中断：执行循环已死，这个节点不可能还在跑——诚实标错，不伪造。
       nodeStatus[id] = "error"
       interrupted.push(id)
     } else if (st === "pending" || st === "success" || st === "error") {
@@ -701,26 +701,26 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
     nodeStatus,
     nodeContent: s.nodeContent && typeof s.nodeContent === "object" ? { ...s.nodeContent } : {},
     nodeCost: s.nodeCost && typeof s.nodeCost === "object" ? { ...s.nodeCost } : {},
-    owner: state, // 重新綁定恢復後的 session 物件（舊 owner 已隨重啟消失）
+    owner: state, // 重新绑定恢复后的 session 物件（旧 owner 已随重启消失）
     planEmitted: true,
     emittedNodes: new Set((graph.nodes as { id?: unknown }[]).map((n) => (typeof n?.id === "string" ? n.id : "")).filter(Boolean)),
     emittedConnections: new Set(((Array.isArray(graph.connections) ? graph.connections : []) as { from?: unknown; to?: unknown }[]).map((c) => `${c?.from}->${c?.to}`)),
   }
-  // 同步鏡像回 session：恢復後的快照（running→error 轉換）也要落盤，
-  // 否則下次重啟又會把同一批 error 節點當 running 再轉一次（結果冪等但狀態漂移）。
+  // 同步镜像回 session：恢复后的快照（running→error 转换）也要落盘，
+  // 否则下次重启又会把同一批 error 节点当 running 再转一次（结果幂等但状态漂移）。
   state.workflowSnapshot = workflowSnapshotOf(restored)
   workflowService.restore(restored as never)
   workflowOwnerBySession.set(state.sessionId, restored.workflowId)
-  dirtySessions.add(state.sessionId) // 恢復後的鏡像隨防抖落盤（running→error 轉換持久化）
+  dirtySessions.add(state.sessionId) // 恢复后的镜像随防抖落盘（running→error 转换持久化）
   console.log(`[gateway] workflow restored from db: ${restored.workflowId} (${restored.templateId}, ${interrupted.length} interrupted node(s) -> error)`)
-  // Q2/Q3（2026-08-27）：恢復不只寫日誌——中斷節點逐一翻面（畫布幽靈 running
-  // → error）+ 一條面向用戶的說明消息（含已成功產物 URL 清單與已扣費，孤兒
-  // 產物撈回）。emit 走 replayBuffer（emitToSession），前端 Last-Event-ID 續傳
-  // 也能收到；不依賴任何人在線。
+  // Q2/Q3（2026-08-27）：恢复不只写日志——中断节点逐一翻面（画布幽灵 running
+  // → error）+ 一条面向用户的说明消息（含已成功产物 URL 清单与已扣费，孤儿
+  // 产物捞回）。emit 走 replayBuffer（emitToSession），前端 Last-Event-ID 续传
+  // 也能收到；不依赖任何人在线。
   if (interrupted.length > 0) {
     for (const nodeId of interrupted) {
-      // 2026-10-02：重啟中斷的節點其上游 job 仍在控面排隊/在飛；F1 續跑會另提交新 job，舊 job 日後成功
-      // 就是孤兒鏡（重複扣費）。先取消（排隊中全額退款），並登記進 job 表，終態結算時如實對賬。
+      // 2026-10-02：重启中断的节点其上游 job 仍在控面排队/在飞；F1 续跑会另提交新 job，旧 job 日后成功
+      // 就是孤儿镜（重复扣费）。先取消（排队中全额退款），并登记进 job 表，终态结算时如实对账。
       const interruptedMeta = (graph.nodes as { id?: unknown; kind?: unknown; metadata?: Record<string, unknown> }[]).find((n) => n?.id === nodeId)
       const oldJob = typeof interruptedMeta?.metadata?.last_job_id === "string" ? interruptedMeta.metadata.last_job_id : ""
       if (oldJob) {
@@ -738,11 +738,11 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
         workflow_id: restored.workflowId,
         patch: interruptPatch,
       })
-      // 2026-09-20 寫穿：此處直發 emitToSession 繞過 workflowService emit hook，
-      // 快照同步在此補上（同一 patch 物件，冪等 last-write-wins）。
+      // 2026-09-20 写穿：此处直发 emitToSession 绕过 workflowService emit hook，
+      // 快照同步在此补上（同一 patch 物件，幂等 last-write-wins）。
       applyCanvasNodeUpdated(state.sessionId, { node_id: nodeId, patch: interruptPatch })
     }
-    // 孤兒產物撈回：快照裡 success 的 image/video 節點，產物 URL 聚合交付。
+    // 孤儿产物捞回：快照里 success 的 image/video 节点，产物 URL 聚合交付。
     const nodesById = new Map(
       (graph.nodes as { id?: unknown; kind?: unknown; title?: unknown }[]).map((n) => [
         typeof n?.id === "string" ? n.id : "",
@@ -770,11 +770,11 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
     ]
     emitToSession(state, "message.delta", { text: parts.join("\n") + "\n" })
   }
-  // F1（2026-08-31）斷點續跑：重啟時工作流還在跑（節點被中斷，或快照停在
-  // running 但進程已死=殭屍 running）→ 恢復後自動續跑。generate() 自帶 R5-B
-  // 重用語義：success 節點沿用產物不重跑不重扣，只補跑 error/pending。
-  // 每進程每工作流只觸發一次（autoResumedWorkflows），失敗不循環重試；延遲
-  // 1.5s 等 hydrate/SSE 重連先完成。paused/building 不自動續（等用戶決策）。
+  // F1（2026-08-31）断点续跑：重启时工作流还在跑（节点被中断，或快照停在
+  // running 但进程已死=僵尸 running）→ 恢复后自动续跑。generate() 自带 R5-B
+  // 重用语义：success 节点沿用产物不重跑不重扣，只补跑 error/pending。
+  // 每进程每工作流只触发一次（autoResumedWorkflows），失败不循环重试；延迟
+  // 1.5s 等 hydrate/SSE 重连先完成。paused/building 不自动续（等用户决策）。
   const resumeWorthy = interrupted.length > 0 || restored.status === "running"
   if (resumeWorthy && !autoResumedWorkflows.has(restored.workflowId)) {
     autoResumedWorkflows.add(restored.workflowId)
@@ -785,11 +785,11 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
     }
     const wfid = restored.workflowId
     setTimeout(() => {
-      // F1 修（2026-08-31）：stateForWorkflow 由 /internal/workflow/* 請求入口賦值，
-      // 離線恢復（重啟後無任何請求）時為 null → runNode 解析不到 session，image
-      // 節點全滅 "no active session"。timer 內先補本 session 指針再續跑。
+      // F1 修（2026-08-31）：stateForWorkflow 由 /internal/workflow/* 请求入口赋值，
+      // 离线恢复（重启后无任何请求）时为 null → runNode 解析不到 session，image
+      // 节点全灭 "no active session"。timer 内先补本 session 指针再续跑。
       stateForWorkflow = state
-      // 2026-10-02：續跑與 runWfGenerate 同樣登記喚醒 + 終態直推（此前 F1 續跑完成零通知——實測 wf_muqf0xbg_1）。
+      // 2026-10-02：续跑与 runWfGenerate 同样登记唤醒 + 终态直推（此前 F1 续跑完成零通知——实测 wf_muqf0xbg_1）。
       workflowWake.set(wfid, { sessionId: state.sessionId, lastProgressAt: Date.now() })
       void workflowService
         .generate(wfid)
@@ -804,12 +804,12 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   }
 }
 
-// R7-F（2026-08-29）：成片環後端——Kunpeng composeEngine 輪（gateway/editor/，
-// pengfeiqiao/kunpeng pin 872a58b，白名單記賬見 repo vendor/kunpeng/PATCHES.md）。
-// 沿連線收集上游 video 產物 → title 最前、shotN 升冪排序 → 下載 → setHarnessState
-// 注入 clips（真實時長由 ffprobe 逐段探得）→ exportSelectedMainClips（歸一化→
-// concat copy）→ probeRenderedVideo 校驗門 → 落公網目錄。拼接本身不另計費
-//（costCoins: 0），視頻段費用已在各 shot 節點確認。
+// R7-F（2026-08-29）：成片环后端——Kunpeng composeEngine 轮（gateway/editor/，
+// pengfeiqiao/kunpeng pin 872a58b，白名单记账见 repo vendor/kunpeng/PATCHES.md）。
+// 沿连线收集上游 video 产物 → title 最前、shotN 升幂排序 → 下载 → setHarnessState
+// 注入 clips（真实时长由 ffprobe 逐段探得）→ exportSelectedMainClips（归一化→
+// concat copy）→ probeRenderedVideo 校验门 → 落公网目录。拼接本身不另计费
+//（costCoins: 0），视频段费用已在各 shot 节点确认。
 export async function assembleFilmNode(
   node: { id?: string; kind: string; metadata: Record<string, unknown> },
   upstream: Map<string, string>,
@@ -823,7 +823,7 @@ export async function assembleFilmNode(
   const sources = allVideoUpstream
     .map((n) => ({ id: n.id, role: n.role, url: upstream.get(n.id) }))
     .filter((s): s is { id: string; role: string; url: string } => Boolean(s.url))
-  // 配音混流素材：上游 audio 節點（TTS mp3）的內容 URL，成片後自動混入音軌。
+  // 配音混流素材：上游 audio 节点（TTS mp3）的内容 URL，成片后自动混入音轨。
   const audioList = incoming
     .map((from) => graph?.nodes.find((n) => n.id === from))
     .filter((n): n is AudioUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "audio")
@@ -832,14 +832,14 @@ export async function assembleFilmNode(
   if (!sources.length) {
     return { nodeId, ok: false, error: "成片环没有已完成的镜头输入：请先完成各视频节点，再执行成片" }
   }
-  // P0-B 硬閘門（2026-08-31）：宣告的鏡頭數（上游 video 節點總數）必須等於實際拿到
-  // 產物的數量。缺一個都不能拼——修復本次事故「宣告4鏡頭、實際1鏡頭仍標success」。
+  // P0-B 硬闸门（2026-08-31）：宣告的镜头数（上游 video 节点总数）必须等于实际拿到
+  // 产物的数量。缺一个都不能拼——修复本次事故「宣告4镜头、实际1镜头仍标success」。
   if (sources.length < allVideoUpstream.length) {
     const missing = allVideoUpstream.filter((n) => !upstream.get(n.id)).map((n) => n.id)
     return {
       nodeId,
       ok: false,
-      error: `成片环鏡頭數量不足：宣告 ${allVideoUpstream.length} 個鏡頭，僅 ${sources.length} 個完成（缺：${missing.join("、")}）。请先完成全部鏡頭節點再执行成片`,
+      error: `成片环镜头数量不足：宣告 ${allVideoUpstream.length} 个镜头，仅 ${sources.length} 个完成（缺：${missing.join("、")}）。请先完成全部镜头节点再执行成片`,
     }
   }
   const orderOf = (id: string): number => {
@@ -866,8 +866,8 @@ export async function assembleFilmNode(
     let totalInputSec = 0
     for (let i = 0; i < sources.length; i += 1) {
       const clipPath = path.join(workDir, `clip_${i}.mp4`)
-      // 平台產物 URL 直接映射本盤路徑（store.tinchak0207.xyz = image-data-api 的公網面，
-      // VPS 內 fetch 公網回環慢且不穩）；非平台 URL 才走網絡下載。
+      // 平台产物 URL 直接映射本盘路径（store.tinchak0207.xyz = image-data-api 的公网面，
+      // VPS 内 fetch 公网回环慢且不稳）；非平台 URL 才走网络下载。
       const diskBase = "/opt/image-data-api/data"
       const m = sources[i].url.match(/^https:\/\/store\.tinchak0207\.xyz\/image-data\/files\/(.+)$/)
       if (m) {
@@ -937,13 +937,13 @@ export async function assembleFilmNode(
     })
     const outPath = await exportSelectedMainClips(clipIds)
     const probe = await probeRenderedVideo(ffmpeg, outPath)
-    // 校驗門：成片時長不得低於各段輸入時長總和的 90%（歸一化重編碼允許微小誤差）
+    // 校验门：成片时长不得低于各段输入时长总和的 90%（归一化重编码允许微小误差）
     const minSec = Math.floor(totalInputSec * 0.9)
     if (probe.durationSec < minSec) {
       return { nodeId, ok: false, error: `成片校验未通过：成片 ${probe.durationSec}s 低于输入总长 ${totalInputSec}s 的 90%` }
     }
-    // 配音混流（2026-08-30）：audioList 非空時把 TTS 音軌混進成片。禁 -shortest
-    //（不准截斷視頻）；混流任何一步失敗降級純視頻成片，message 註明，不整單報錯。
+    // 配音混流（2026-08-30）：audioList 非空时把 TTS 音轨混进成片。禁 -shortest
+    //（不准截断视频）；混流任何一步失败降级纯视频成片，message 注明，不整单报错。
     let mixedPath = outPath
     let mixNote = ""
     if (audioList.length > 0) {
@@ -952,18 +952,18 @@ export async function assembleFilmNode(
         let totalAudioSec = 0
         for (let i = 0; i < audioList.length; i += 1) {
           const aPath = path.join(workDir, `audio_${i}.mp3`)
-          // 平台產物 URL 直接映射本盤路徑（同鏡頭素材 fast-path 口徑）；其餘走網絡下載。
+          // 平台产物 URL 直接映射本盘路径（同镜头素材 fast-path 口径）；其余走网络下载。
           const mTts = audioList[i].match(/^https:\/\/store\.tinchak0207\.xyz\/agent\/v1\/audio\/([^/?#]+)$/)
           const mDisk = audioList[i].match(/^https:\/\/store\.tinchak0207\.xyz\/image-data\/files\/(.+)$/)
           if (mTts && !mTts[1].includes("..")) {
             const cp = await invoke<CommandResult>("execute_command", { command: `cp ${shq(path.join(TTS_AUDIO_DIR, mTts[1]))} ${shq(aPath)}`, timeoutMs: 30000 })
-            if (cp.exit_code !== 0) throw new Error("平台音頻本盤缺失")
+            if (cp.exit_code !== 0) throw new Error("平台音频本盘缺失")
           } else if (mDisk && !mDisk[1].includes("..")) {
             const cp = await invoke<CommandResult>("execute_command", { command: `cp ${shq(path.join("/opt/image-data-api/data", mDisk[1]))} ${shq(aPath)}`, timeoutMs: 30000 })
-            if (cp.exit_code !== 0) throw new Error("平台音頻本盤缺失")
+            if (cp.exit_code !== 0) throw new Error("平台音频本盘缺失")
           } else {
             const res = await fetch(audioList[i], { signal: AbortSignal.timeout(120_000) })
-            if (!res.ok) throw new Error(`音頻下載失敗（http ${res.status}）`)
+            if (!res.ok) throw new Error(`音频下载失败（http ${res.status}）`)
             await Bun.write(aPath, res)
           }
           audioPaths.push(aPath)
@@ -983,29 +983,29 @@ export async function assembleFilmNode(
             command: `${ffmpeg} -y -f concat -safe 0 -i ${shq(listPath)} -c:a aac ${shq(trackPath)}`,
             timeoutMs: 120000,
           })
-          if (merged.exit_code !== 0) throw new Error(`多軌合併失敗: ${(merged.stderr || "").slice(-200)}`)
+          if (merged.exit_code !== 0) throw new Error(`多轨合并失败: ${(merged.stderr || "").slice(-200)}`)
         }
         const mixedOut = path.join(workDir, "film-mixed.mp4")
         const mixed = await invoke<CommandResult>("execute_command", {
           command: `${ffmpeg} -y -i ${shq(outPath)} -i ${shq(trackPath)} -map 0:v -map 1:a -c:v copy -c:a aac -movflags +faststart ${shq(mixedOut)}`,
           timeoutMs: 300000,
         })
-        if (mixed.exit_code !== 0) throw new Error(`混流失敗: ${(mixed.stderr || "").slice(-200)}`)
+        if (mixed.exit_code !== 0) throw new Error(`混流失败: ${(mixed.stderr || "").slice(-200)}`)
         mixedPath = mixedOut
-        // P0-B（2026-08-31）：配音時長明顯短於成片時長 = 覆蓋不足，本次事故音軌只有
-        // 0.936 秒配 15.04 秒成片，混流「成功」但實質失能。不阻斷交付（降級不是硬
-        // 失敗，跟現有「混流失敗降級純視頻」的寬容度一致），僅把警訊寫進 mixNote。
+        // P0-B（2026-08-31）：配音时长明显短于成片时长 = 覆盖不足，本次事故音轨只有
+        // 0.936 秒配 15.04 秒成片，混流「成功」但实质失能。不阻断交付（降级不是硬
+        // 失败，跟现有「混流失败降级纯视频」的宽容度一致），仅把警讯写进 mixNote。
         if (totalAudioSec > 0 && totalAudioSec < probe.durationSec * 0.5) {
           mixNote = `配音时长（${totalAudioSec.toFixed(1)}s）明显短于成片时长（${probe.durationSec}s），已交付但音轨覆盖不足，请检查配音节点`
           console.log(`[workflow] assembleFilm audio too short: audio=${totalAudioSec}s film=${probe.durationSec}s`)
         }
       } catch (e) {
-        mixNote = "配音混流失敗，已交付無音軌版本"
+        mixNote = "配音混流失败，已交付无音轨版本"
         console.log(`[workflow] assembleFilm audio mix degraded: ${String((e as Error).message ?? e).slice(0, 200)}`)
       }
     }
-    // 2026-10-02 成片質檢門（e2e 評測：-38.5 LUFS 未正規化、結尾 1.3s 凍結照樣導出）：
-    // 響度正規化到 -16 LUFS + 修剪結尾凍結/黑幀；修不了則交付原片並在 message 如實註明。永不拋錯。
+    // 2026-10-02 成片质检门（e2e 评测：-38.5 LUFS 未正规化、结尾 1.3s 冻结照样导出）：
+    // 响度正规化到 -16 LUFS + 修剪结尾冻结/黑帧；修不了则交付原片并在 message 如实注明。永不抛错。
     try {
       const { qcAndFixFilm } = await import("./film-qc")
       const qc = await qcAndFixFilm(ffmpeg, mixedPath, path.join(workDir, "film-qc.mp4"))
@@ -1026,12 +1026,12 @@ export async function assembleFilmNode(
 }
 
 /**
- * 提交單一節點生成：image → /v1/images/generations；video → /v1/videos/generations。
- * 非同步提交後輪詢（202 → task_id → GET {id} → succeeded → result url）。
- * 回傳 OpenAI 相容結果 {ok, content(url), costCoins?}。
+ * 提交单一节点生成：image → /v1/images/generations；video → /v1/videos/generations。
+ * 非同步提交后轮询（202 → task_id → GET {id} → succeeded → result url）。
+ * 回传 OpenAI 相容结果 {ok, content(url), costCoins?}。
  */
-// INC-0830：沿連線找視頻節點上游連接的視頻 config 節點（kind=config 且 metadata.kind==="video"），
-// 取其 duration_seconds——模板把時長配在 config 節點上，submit 時與 meta/shot 同為時長真源。
+// INC-0830：沿连线找视频节点上游连接的视频 config 节点（kind=config 且 metadata.kind==="video"），
+// 取其 duration_seconds——模板把时长配在 config 节点上，submit 时与 meta/shot 同为时长真源。
 export function resolveConnectedVideoDuration(
   nodeId: string,
   graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
@@ -1048,8 +1048,8 @@ export function resolveConnectedVideoDuration(
   return undefined
 }
 
-// F2（2026-08-31）：model-status 15s TTL 快取——舊版每個節點提交前都重新打一次
-// /v1/model-status，長 workflow 節點多時等於每節點多一次探測延遲+一次上游打擾。
+// F2（2026-08-31）：model-status 15s TTL 快取——旧版每个节点提交前都重新打一次
+// /v1/model-status，长 workflow 节点多时等于每节点多一次探测延迟+一次上游打扰。
 export const MODEL_STATUS_TTL_MS = 15_000
 export let modelStatusCache: { at: number; models: Array<Record<string, unknown>> } | null = null
 
@@ -1068,12 +1068,12 @@ export async function fetchModelStatusCached(apiKey: string): Promise<Array<Reco
       return models
     }
   } catch {
-    // 探測不可達：沿用舊快取（fail-open），完全沒快取則回 null 由呼叫方決定
+    // 探测不可达：沿用旧快取（fail-open），完全没快取则回 null 由呼叫方决定
   }
   return modelStatusCache?.models ?? null
 }
 
-/** M4：近 24h 影片零交付判定（available>0 且 delivered>0 者為 0）。探測不可達回 null（fail-open）。 */
+/** M4：近 24h 影片零交付判定（available>0 且 delivered>0 者为 0）。探测不可达回 null（fail-open）。 */
 export async function videoZeroDelivery24h(apiKey: string): Promise<{ available: string[] } | null> {
   const models = await fetchModelStatusCached(apiKey)
   if (!models) return null
@@ -1085,11 +1085,11 @@ export async function videoZeroDelivery24h(apiKey: string): Promise<{ available:
 }
 
 /**
- * F2（2026-08-31）路由單真源 + 強制跨 provider failover：原邏輯發現模型
- * unavailable 就直接報錯要人手動換模型——這裡改成主動在同 media_type、不同
- * channel_id 的候選裡挑一個接著跑，找不到候選才誠實報錯（不編造成功）。
- * node.metadata.__triedChannels 記錄本節點已知死的渠道，跨重試/跨崩潰恢復
- * （隨 workflow 快照持久化）都不會再選回去。
+ * F2（2026-08-31）路由单真源 + 强制跨 provider failover：原逻辑发现模型
+ * unavailable 就直接报错要人手动换模型——这里改成主动在同 media_type、不同
+ * channel_id 的候选里挑一个接著跑，找不到候选才诚实报错（不编造成功）。
+ * node.metadata.__triedChannels 记录本节点已知死的渠道，跨重试/跨崩溃恢复
+ * （随 workflow 快照持久化）都不会再选回去。
  */
 export async function resolveActiveModel(
   model: string,
@@ -1098,14 +1098,14 @@ export async function resolveActiveModel(
   node: CanvasNode,
 ): Promise<{ model: string; switched: boolean; note?: string; exhausted?: boolean; error?: string }> {
   const models = await fetchModelStatusCached(apiKey)
-  if (!models) return { model, switched: false } // 探測端不可達：fail-open，行為與舊版一致
+  if (!models) return { model, switched: false } // 探测端不可达：fail-open，行为与旧版一致
   const entry = models.find((m) => (m as { id?: string }).id === model) as
     | { id: string; media_type?: string; availability?: string; channel_id?: string; note?: string; last_24h?: { success_rate?: number } }
     | undefined
-  // 2026-10-02 MODEL-SELECT：視頻不再只認 availability==="unavailable"——斷路器 open、
-  // 近 24h 足量單 0 交付也視為死模型，生成前換成 proven 最高者並留回執（node.metadata.model_swap）。
+  // 2026-10-02 MODEL-SELECT：视频不再只认 availability==="unavailable"——断路器 open、
+  // 近 24h 足量单 0 交付也视为死模型，生成前换成 proven 最高者并留回执（node.metadata.model_swap）。
   if (kind === "video") {
-    const reason = entry ? videoDisqualifyReason(entry as ModelStatusEntryLike) : "不在 model-status 目錄（无可用路由证据）"
+    const reason = entry ? videoDisqualifyReason(entry as ModelStatusEntryLike) : "不在 model-status 目录（无可用路由证据）"
     if (!reason) return { model, switched: false }
     const triedModels = new Set<string>(Array.isArray(node.metadata.__triedModels) ? (node.metadata.__triedModels as string[]) : [])
     triedModels.add(model)
@@ -1169,8 +1169,8 @@ export async function submitWorkflowNode(
   const meta = node.metadata
   const nodeId = (node as { id?: string }).id || ""
 
-  // 解析 prompt：優先 node.metadata，其次沿上游連線 BFS 找第一個有內容的 text 節點
-  // （大片模板：角色描述 text → 四視圖 config → 各視圖 image；image 的 prompt 繼承自角色描述）
+  // 解析 prompt：优先 node.metadata，其次沿上游连线 BFS 找第一个有内容的 text 节点
+  // （大片模板：角色描述 text → 四视图 config → 各视图 image；image 的 prompt 继承自角色描述）
   function collectUpstreamPrompt(startId: string, depth = 0): string {
     if (depth > 4) return ""
     const direct = graph?.connections.filter((c) => c.to === startId).map((c) => graph.nodes.find((n) => n.id === c.from)).filter(Boolean)
@@ -1184,14 +1184,14 @@ export async function submitWorkflowNode(
     }
     return ""
   }
-  // prompt 解析移到 model/size 之後（shot JSON 需要 model 做按族編譯）
+  // prompt 解析移到 model/size 之后（shot JSON 需要 model 做按族编译）
 
-  // 模型解析三級：節點自身 metadata.model → 沿上游 config 節點鏈（與 estimateNodeCoins 報價同口徑）→ 兜底。
-  // 視頻兜底必須是活路由模型（metaso/minimax-h3）；seedance-2.0 的唯一供應商 filmera 已 degraded，寫死即死單。
+  // 模型解析三级：节点自身 metadata.model → 沿上游 config 节点链（与 estimateNodeCoins 报价同口径）→ 兜底。
+  // 视频兜底必须是活路由模型（metaso/minimax-h3）；seedance-2.0 的唯一供应商 filmera 已 degraded，写死即死单。
   let model = typeof meta.model === "string" && meta.model ? meta.model : resolveNodeModel(nodeId, node, graph ?? { nodes: [], connections: [] })
-  if (node.kind === "video" && (!model || model === "pixai-tsubaki2")) model = VIDEO_FALLBACK_MODEL // 2026-10-02：不再寫死 minimax-h3（斷路器 open）；resolveActiveModel 再按交付證據校正
-  // F2（2026-08-31）：提交前主動查活性+跨 provider failover（取代舊的「探測到
-  // unavailable 就報錯」）。放在 shot 編譯之前——編譯要按實際會用的模型族來。
+  if (node.kind === "video" && (!model || model === "pixai-tsubaki2")) model = VIDEO_FALLBACK_MODEL // 2026-10-02：不再写死 minimax-h3（断路器 open）；resolveActiveModel 再按交付证据校正
+  // F2（2026-08-31）：提交前主动查活性+跨 provider failover（取代旧的「探测到
+  // unavailable 就报错」）。放在 shot 编译之前——编译要按实际会用的模型族来。
   const failoverResolved = await resolveActiveModel(model, node.kind === "video" ? "video" : "image", session.apiKey, node)
   if (failoverResolved.exhausted) {
     console.error(`[workflow] node ${nodeId} ${failoverResolved.error}`)
@@ -1200,10 +1200,10 @@ export async function submitWorkflowNode(
   if (failoverResolved.switched) {
     console.log(failoverResolved.note)
     model = failoverResolved.model
-    ;(node.metadata as Record<string, unknown>).model = model // 誠實紀律：後續重試/畫布顯示/計費都用實際路由到的模型
+    ;(node.metadata as Record<string, unknown>).model = model // 诚实纪律：后续重试/画布显示/计费都用实际路由到的模型
   }
   const size = typeof meta.size === "string" ? meta.size : "1024x1024"
-  // 結構化 shot JSON 優先：video 節點 prompt 來自 shot JSON 時按模型族編譯成模型最愛的格式。
+  // 结构化 shot JSON 优先：video 节点 prompt 来自 shot JSON 时按模型族编译成模型最爱的格式。
   let prompt = meta.prompt || meta.content || collectUpstreamPrompt(nodeId) || ""
   let shotSize = size
   let payloadDurationHint: number | undefined = undefined
@@ -1215,7 +1215,7 @@ export async function submitWorkflowNode(
     if (shotParams.aspect_ratio && typeof meta.size !== "string") shotSize = shotParams.aspect_ratio
   }
 
-  // 參考圖：上游中已完成且有 content 的 image 節點（角色圖/場景圖 → 影片參考）
+  // 参考图：上游中已完成且有 content 的 image 节点（角色图/场景图 → 影片参考）
   const refImages = graph
     ? graph.connections
         .filter((c) => c.to === nodeId)
@@ -1233,8 +1233,8 @@ export async function submitWorkflowNode(
     response_format: "url",
   }
   if (node.kind === "video") {
-    // INC-0830：時長三級解析 meta → shot → 連線的視頻 config；全部缺失時拒絕提交。
-    // 舊版靜默 `?? 5` 是 5 秒片事故根因之一：暴君指定 15s、上游照 5s 出、按條統一價照收。
+    // INC-0830：时长三级解析 meta → shot → 连线的视频 config；全部缺失时拒绝提交。
+    // 旧版静默 `?? 5` 是 5 秒片事故根因之一：暴君指定 15s、上游照 5s 出、按条统一价照收。
     const cfgDuration = resolveConnectedVideoDuration(nodeId, graph)
     const duration =
       typeof meta.duration_seconds === "number" && meta.duration_seconds > 0
@@ -1254,27 +1254,27 @@ export async function submitWorkflowNode(
     payload.reference = refImages[0]
   }
 
-  // 2026-09-25：行內實體 tag（`@[種類:名稱]`）展開——工作流節點提示詞裡的 token 到這裡才被
-  // 解析。此前閘道整包零 `reference_images` 通道，token 原封不動送上游＝「畫布沒有實體卡節點、
-  // 四視圖各生各的、臉不一致」的結構缺口。
+  // 2026-09-25：行内实体 tag（`@[种类:名称]`）展开——工作流节点提示词里的 token 到这里才被
+  // 解析。此前闸道整包零 `reference_images` 通道，token 原封不动送上游＝「画布没有实体卡节点、
+  // 四视图各生各的、脸不一致」的结构缺口。
   //
-  // 插入點刻意選在**最終 prompt 定案之後、payload.reference 寫入之後**：
-  //   ① video 分支的 prompt 可能已被上方 `compileShotPrompt` 重編（本檔 L866）——提早展開會被
-  //      重編打散（編譯器按模型族重排版面，token 片段會被當普通文本重排）；
-  //   ② 合併規則要用到 `payload.reference`（連線上游 image 節點那張，上面 video/image 兩分支
-  //      才寫入），在此處才能一次算完「卡參考圖 ∪ 既有 reference」；
-  //   ③ 放在 `if (!prompt)` 空提示詞守衛之前：零 token 時本塊整段跳過（原值、零 HTTP），
-  //      空 prompt 走原守衛報錯——既有語義逐字不變。
+  // 插入点刻意选在**最终 prompt 定案之后、payload.reference 写入之后**：
+  //   ① video 分支的 prompt 可能已被上方 `compileShotPrompt` 重编（本档 L866）——提早展开会被
+  //      重编打散（编译器按模型族重排版面，token 片段会被当普通文本重排）；
+  //   ② 合并规则要用到 `payload.reference`（连线上游 image 节点那张，上面 video/image 两分支
+  //      才写入），在此处才能一次算完「卡参考图 ∪ 既有 reference」；
+  //   ③ 放在 `if (!prompt)` 空提示词守卫之前：零 token 时本块整段跳过（原值、零 HTTP），
+  //      空 prompt 走原守卫报错——既有语义逐字不变。
   //
-  // 解析器是站點端點 `/api/biz/character-resolve` 的薄客戶端（不重寫解析）；零 token 零 HTTP；
-  // 任何失敗 fail-open（原 prompt + 空 refs），解析失敗永不阻斷生成。
-  // meta.prompt/meta.content 是 unknown（payload 袋）→ token 判定前先收斂成字串。
+  // 解析器是站点端点 `/api/biz/character-resolve` 的薄客户端（不重写解析）；零 token 零 HTTP；
+  // 任何失败 fail-open（原 prompt + 空 refs），解析失败永不阻断生成。
+  // meta.prompt/meta.content 是 unknown（payload 袋）→ token 判定前先收敛成字串。
   const promptForTokens = typeof prompt === "string" ? prompt : ""
   if (hasEntityToken(promptForTokens)) {
-    // 解析用這位使用者的 key（`session.apiKey`，同下方提交用的 Bearer）：卡庫按使用者隔離。
+    // 解析用这位使用者的 key（`session.apiKey`，同下方提交用的 Bearer）：卡库按使用者隔离。
     const resolved = await resolveEntityTokens(promptForTokens, refImages, undefined, { apiKey: session.apiKey })
     payload.prompt = resolved.prompt
-    // 卡的圖在前（resolved 內部已按控制面契約排序），既有單張 reference 併在後，去重、截 5。
+    // 卡的图在前（resolved 内部已按控制面契约排序），既有单张 reference 并在后，去重、截 5。
     const mergedRefs = sanitizeEntityReferences([
       ...resolved.reference_images,
       ...(typeof payload.reference === "string" ? [payload.reference] : []),
@@ -1287,13 +1287,13 @@ export async function submitWorkflowNode(
     return { nodeId: node.id, ok: false, error: "缺少提示词：上游文本节点未填写内容" }
   }
 
-  // F2（2026-08-31）：舊的「提交前探測 unavailable 就報錯」後置檢查已移到函式
-  // 前段的 resolveActiveModel（主動 failover，不再是單純報錯）——此處不再重複探測。
+  // F2（2026-08-31）：旧的「提交前探测 unavailable 就报错」后置检查已移到函式
+  // 前段的 resolveActiveModel（主动 failover，不再是单纯报错）——此处不再重复探测。
   let taskSubmitted = false
-  // INC-0830：輪詢響應裡的 attempts 明細（片A 加的 /v1/videos/{id} attempts 陣列）
-  // 就地快取——失敗時隨節點錯誤回帶，畫布錯誤卡能看到真話（上游成沒成、誰的鍋）。
-  // F1 修（2026-08-31）：聲明必須在函式級——原困在 poll 分支塊內，poll 預算耗盡後
-  // 的 taskSubmitted 兜底引用它 → ReferenceError → 誤判 non-retryable → 死錯。
+  // INC-0830：轮询响应里的 attempts 明细（片A 加的 /v1/videos/{id} attempts 阵列）
+  // 就地快取——失败时随节点错误回带，画布错误卡能看到真话（上游成没成、谁的锅）。
+  // F1 修（2026-08-31）：声明必须在函式级——原困在 poll 分支块内，poll 预算耗尽后
+  // 的 taskSubmitted 兜底引用它 → ReferenceError → 误判 non-retryable → 死错。
   let lastAttempt: Record<string, unknown> | undefined = undefined
   let submittedTaskId = ""
   let queuedSinceMs = 0
@@ -1309,33 +1309,33 @@ export async function submitWorkflowNode(
     if (res.status === 202 || (res.ok && (data?.task_id || data?.id))) {
       taskSubmitted = true
       const taskId = data?.task_id ?? data?.id
-      // INC-0830：把上游作業 id 記到節點 metadata.last_job_id——rerun 防重門與節點
-      // error 真相都消費它，agent 不再盲跑重複扣費（事故根因之三）。
+      // INC-0830：把上游作业 id 记到节点 metadata.last_job_id——rerun 防重门与节点
+      // error 真相都消费它，agent 不再盲跑重复扣费（事故根因之三）。
       try {
         ;(node.metadata as Record<string, unknown>).last_job_id = String(taskId)
       } catch {}
       submittedTaskId = String(taskId)
       {
-        // 2026-10-02：登記進工作流 job 表——終態向控面結算實扣、放棄/停滯時據此取消。
+        // 2026-10-02：登记进工作流 job 表——终态向控面结算实扣、放弃/停滞时据此取消。
         const jwf = workflowOwnerBySession.get(session.sessionId) ?? wfidFromNodeId(nodeId)
         if (jwf) {
           if (!workflowJobs.has(jwf)) workflowJobs.set(jwf, new Map())
           workflowJobs.get(jwf)!.set(submittedTaskId, { nodeId, kind: node.kind === "video" ? "video" : "image" })
         }
       }
-      // H11 補完：workflow 生成任務同樣登記進會話任務表（/internal/session-tasks、image_get_result 讀它）。
+      // H11 补完：workflow 生成任务同样登记进会话任务表（/internal/session-tasks、image_get_result 读它）。
       registerWorkflowTask(session, String(taskId), node.id, "queued")
       const pollEndpoint = node.kind === "video" ? `/videos/${taskId}` : `/images/${taskId}`
-      // 輪詢：間隔 3s；圖最多 120s、影片最多 300s（seedance 5 秒片可能排隊較久）
-      // 2026-08-21（PM 要求）：預算按真實耗時放寬——實測 image 60-90s、kling 8s 影片 >300s
-      // （Kling 標準模式約 2-6 分鐘）。video 200 次=600s，image 60 次=180s。
+      // 轮询：间隔 3s；图最多 120s、影片最多 300s（seedance 5 秒片可能排队较久）
+      // 2026-08-21（PM 要求）：预算按真实耗时放宽——实测 image 60-90s、kling 8s 影片 >300s
+      // （Kling 标准模式约 2-6 分钟）。video 200 次=600s，image 60 次=180s。
       const pollBudget = node.kind === "video" ? 200 : 60
       const startedAtMs = Date.now()
       const etaSeconds = node.kind === "video" ? 360 : 120
       const wfIdMatch = nodeId.match(/^(.+)-[^-]+-\d+$/)
       for (let i = 0; i < pollBudget; i++) {
         await new Promise((r) => setTimeout(r, 3000))
-        // 進度條：每 15s 推一次 elapsed/ETA（percent 封頂 95%，成功事件才是 100%）
+        // 进度条：每 15s 推一次 elapsed/ETA（percent 封顶 95%，成功事件才是 100%）
         if (i % 5 === 4) {
           const elapsedSec = Math.round((Date.now() - startedAtMs) / 1000)
           const percent = Math.min(95, Math.round((elapsedSec / etaSeconds) * 100))
@@ -1345,9 +1345,9 @@ export async function submitWorkflowNode(
             ...(wfIdMatch ? { workflow_id: wfIdMatch[1] } : {}),
             patch,
           })
-          // 2026-10-02：輪詢打點直發 emitToSession 繞過 emit hook，停滯時鐘不刷新 → 長排隊被誤判 stuck。
+          // 2026-10-02：轮询打点直发 emitToSession 绕过 emit hook，停滞时钟不刷新 → 长排队被误判 stuck。
           {
-            // 節點 id 形如 single_image-result-2（不含 wfid），故 wfIdMatch 對模板節點恆不命中；改按會話屬主工作流刷新。
+            // 节点 id 形如 single_image-result-2（不含 wfid），故 wfIdMatch 对模板节点恒不命中；改按会话属主工作流刷新。
             const pw = workflowOwnerBySession.get(session.sessionId) ?? (wfIdMatch ? wfIdMatch[1] : "")
             if (pw && workflowWake.has(pw)) workflowWake.get(pw)!.lastProgressAt = Date.now()
           }
@@ -1360,8 +1360,8 @@ export async function submitWorkflowNode(
         const pd = (await poll.json().catch(() => ({}))) as Record<string, any>
         const pdAttempts = (pd as { attempts?: unknown })?.attempts
         if (Array.isArray(pdAttempts) && pdAttempts.length > 0) lastAttempt = pdAttempts[pdAttempts.length - 1] as Record<string, unknown>
-        // 2026-10-02：上游「並發/容量飽和」是可等待的背壓（status 仍是 queued/running），不是硬失敗。
-        // 提前辨識，讓下方排隊換道塊接手；只有超過換道門檻或明確硬失敗才在後面翻面。
+        // 2026-10-02：上游「并发/容量饱和」是可等待的背压（status 仍是 queued/running），不是硬失败。
+        // 提前辨识，让下方排队换道块接手；只有超过换道门槛或明确硬失败才在后面翻面。
         const pdSig = pd as { failure_class?: unknown; failure_detail?: unknown; status?: unknown } | undefined
         const upstreamFailSignal =
           typeof pdSig?.failure_class === "string" && pdSig.failure_class
@@ -1371,8 +1371,8 @@ export async function submitWorkflowNode(
               : ""
         const saturationSignal = /capacity|saturat|overload|concurr|too many/i.test(upstreamFailSignal)
         const queueLike = pd?.status === "queued" || (saturationSignal && pd?.status !== "succeeded" && pd?.status !== "failed")
-        // 2026-10-02 排隊超 5 分鐘（或容量飽和同樣視為排隊）：提示 + 換同價位通道
-        //（無則明確降級＝續等至預算耗盡後取消退款）。
+        // 2026-10-02 排队超 5 分钟（或容量饱和同样视为排队）：提示 + 换同价位通道
+        //（无则明确降级＝续等至预算耗尽后取消退款）。
         if (node.kind === "video" && queueLike) {
           if (!queuedSinceMs) queuedSinceMs = Date.now()
           if (!queueHinted && Date.now() - queuedSinceMs > QUEUE_SWITCH_MS) {
@@ -1407,7 +1407,7 @@ export async function submitWorkflowNode(
         }
         if (pd?.status === "succeeded") {
           const rawUrl = pd?.data?.[0]?.url || pd?.result_url || pd?.url
-          // 結果可能是相對 /v1/images/{id}/result，轉成絕對公開 URL（沿用 resolveResultUrl 語義）
+          // 结果可能是相对 /v1/images/{id}/result，转成绝对公开 URL（沿用 resolveResultUrl 语义）
           const url = rawUrl
             ? /^https?:\/\//.test(rawUrl)
               ? rawUrl
@@ -1424,16 +1424,16 @@ export async function submitWorkflowNode(
           registerWorkflowTask(session, String(taskId), node.id, "failed")
           return { nodeId: node.id, ok: false, error: pd?.error?.message || "generation failed", lastAttempt }
         }
-        // R7-A（2026-08-29）失敗即翻面：供應商並發飽和時上游 job 會以 queued +
-        // failure_detail（如 "capacity_saturated: ..."）反覆重試、遲遲不到終態 failed；
-        // 舊邏輯只認 status==="failed"，明知上游已報失敗信號仍繼續發 running 進度幀，
-        // 直到輪詢預算耗盡才報假話術。收到失敗信號立即翻面，不再空轉。
+        // R7-A（2026-08-29）失败即翻面：供应商并发饱和时上游 job 会以 queued +
+        // failure_detail（如 "capacity_saturated: ..."）反覆重试、迟迟不到终态 failed；
+        // 旧逻辑只认 status==="failed"，明知上游已报失败信号仍继续发 running 进度帧，
+        // 直到轮询预算耗尽才报假话术。收到失败信号立即翻面，不再空转。
         const pdFail = pdSig
         const failSignal = upstreamFailSignal
         if (failSignal && pdFail?.status !== "succeeded") {
-          // 2026-10-02：容量/並發飽和是可等待背壓——在 WORKFLOW_QUEUE_SWITCH_MS 換道窗口內
-          // 不翻面，讓上方排隊塊在門檻到達時「換同價位通道＋5 分鐘提示」；超過窗口或已換過
-          // 道仍飽和才 fail-fast（fail-fast 路徑同樣 cancelPlatformJob 全額退款，快速止損語義不變）。
+          // 2026-10-02：容量/并发饱和是可等待背压——在 WORKFLOW_QUEUE_SWITCH_MS 换道窗口内
+          // 不翻面，让上方排队块在门槛到达时「换同价位通道＋5 分钟提示」；超过窗口或已换过
+          // 道仍饱和才 fail-fast（fail-fast 路径同样 cancelPlatformJob 全额退款，快速止损语义不变）。
           const withinSwitchWindow = queuedSinceMs > 0 && Date.now() - queuedSinceMs <= QUEUE_SWITCH_MS
           const alreadySwitched = Number(meta.__queueSwitches ?? 0) >= 1
           if (saturationSignal && withinSwitchWindow && !alreadySwitched) {
@@ -1444,7 +1444,7 @@ export async function submitWorkflowNode(
           }
           console.error(`[workflow] node ${nodeId} upstream failure signal (${pdFail?.status}): ${failSignal}`)
           registerWorkflowTask(session, String(taskId), node.id, "failed")
-          // 放棄即取消：否則 job 在控面繼續排隊、日後成功扣費＝孤兒鏡（評測 4ea050fe 多扣 130 幣根因）。
+          // 放弃即取消：否则 job 在控面继续排队、日后成功扣费＝孤儿镜（评测 4ea050fe 多扣 130 币根因）。
           if (pdFail?.status === "queued" || pdFail?.status === "running") await cancelPlatformJob(session.apiKey, String(taskId))
           return {
             nodeId: node.id,
@@ -1464,12 +1464,12 @@ export async function submitWorkflowNode(
         }
       }
     }
-    // 同步回圖兜底
+    // 同步回图兜底
     const url = data?.data?.[0]?.url || data?.result_url || data?.url
     if (res.ok && url) return { nodeId: node.id, ok: true, content: url, costCoins: data?.cost_coins }
     if (taskSubmitted) {
       console.error(`[workflow] node ${nodeId} poll timeout`)
-      // 放棄即取消（同上）：排隊中的 job 全額退款，避免遲到成功成孤兒鏡。
+      // 放弃即取消（同上）：排队中的 job 全额退款，避免迟到成功成孤儿镜。
       if (submittedTaskId) await cancelPlatformJob(session.apiKey, submittedTaskId)
       return {
         nodeId: node.id,
@@ -1486,60 +1486,60 @@ export async function submitWorkflowNode(
   }
 }
 
-// workflow 端點（不需 session）：列模板。
+// workflow 端点（不需 session）：列模板。
 export function workflowServiceTemplates(): Response {
   return Response.json({ ok: true, templates: workflowService.templates() })
 }
 
-// S4（2026-08-27）：已批准批量執行的 workflow 記錄（wfid → 批准時的估算額）。
-// 語義：confirm 通過是「批准這一整批按此預算開跑」，workflow 內逐節點執行
-// 不再重彈 confirm（預算單是事前告知，不取代逐筆扣費確認——但批量 confirm
-// 已經是逐筆扣費確認的總閘門，雙重彈卡反而是打擾）。workflow 刪除/重跑
-// 不清此記錄：同批重跑金額通常下降，重彈只會造成倒掛復辟。
+// S4（2026-08-27）：已批准批量执行的 workflow 记录（wfid → 批准时的估算额）。
+// 语义：confirm 通过是「批准这一整批按此预算开跑」，workflow 内逐节点执行
+// 不再重弹 confirm（预算单是事前告知，不取代逐笔扣费确认——但批量 confirm
+// 已经是逐笔扣费确认的总闸门，双重弹卡反而是打扰）。workflow 删除/重跑
+// 不清此记录：同批重跑金额通常下降，重弹只会造成倒挂复辟。
 export const workflowGenerateApproved = new Map<string, { amount: number; nodes: number }>()
 
-// 2026-08-29 整改（session 00c583ed 事故）：批量執行 confirm 的批准續跑註冊表。
-// 舊版 /workflow/generate 在 handler 內聯 while 輪詢等用戶批准（最長
-// CONFIRM_TIMEOUT_MS=15min），而 workflow_generate 工具層只有 10s AbortSignal——
-// 用戶批准慢於 10s 是常態，工具必報 workflow_unreachable，agent 誤判「後端
-// 不可達」棄模板轉手動逐鏡。改為非阻塞：彈卡 → 註冊回調 → 立即回
-// confirm_pending；settleConfirm(approved) 觸發 runWfGenerate。
+// 2026-08-29 整改（session 00c583ed 事故）：批量执行 confirm 的批准续跑注册表。
+// 旧版 /workflow/generate 在 handler 内联 while 轮询等用户批准（最长
+// CONFIRM_TIMEOUT_MS=15min），而 workflow_generate 工具层只有 10s AbortSignal——
+// 用户批准慢于 10s 是常态，工具必报 workflow_unreachable，agent 误判「后端
+// 不可达」弃模板转手动逐镜。改为非阻塞：弹卡 → 注册回调 → 立即回
+// confirm_pending；settleConfirm(approved) 触发 runWfGenerate。
 export const wfGenerateContinuations = new Map<string, { state: SessionState; wfid: string; nodes: number; amount: number }>()
 
-// ── 2026-09-24 協作確認閘（collaborate 檔專屬：劇本批准／資產確認／分鏡確認）────
+// ── 2026-09-24 协作确认闸（collaborate 档专属：剧本批准／资产确认／分镜确认）────
 //
-// 要修的洞：模板 directive 早就寫死「一步一確認」，但 `step.gate` 只是
+// 要修的洞：模板 directive 早就写死「一步一确认」，但 `step.gate` 只是
 // `metadata.gate` 字串 → 引擎在 expandTemplate 把它做成 `pipelineCard:"gate"` 的
-// 衍生卡（workflow-engine.ts:226-239），執行期只被算尺寸（workflow-service
-// emitNodeDelta），**沒有任何節點在此暫停**——用戶真話是「大哥你這個智能體，
-// 連資產圖都不讓我們確認嗎」。本閘把門禁卡從 prompt 裝飾升級成機制：
-// 交付物真的產出後，在批次間暫停並註冊 pending confirm（輪子＝
-// /internal/confirm-request 註冊 → settleConfirm 落帳/emit → 續跑；不新建暫停系統）。
+// 衍生卡（workflow-engine.ts:226-239），执行期只被算尺寸（workflow-service
+// emitNodeDelta），**没有任何节点在此暂停**——用户真话是「大哥你这个智能体，
+// 连资产图都不让我们确认吗」。本闸把门禁卡从 prompt 装饰升级成机制：
+// 交付物真的产出后，在批次间暂停并注册 pending confirm（轮子＝
+// /internal/confirm-request 注册 → settleConfirm 落帐/emit → 续跑；不新建暂停系统）。
 //
-// 三條硬邊界（決策定稿 2026-09-25 第 1/2/5 條）：
-//   ① 只在 interaction_mode === "collaborate" 生效；auto/preset 兩檔零改動
-//      （全自動＝一鍵一路跑完不問，護城河）。
-//   ② 停點只有這三個；final_cut（成片驗收）/promo 的門禁卡不在此列（決策第 1 條
-//      「其餘環節自動」），維持 prompt 層引導，不擴大硬閘範圍。
-//   ③ 確認不設超時（決策第 5 條：甲方核對一兩週是常態）——掛起期間 watchdog 與
-//      midturn-status 主動讓路（timers-gw.ts:142/:330 的 pendingConfirms 讓路），
-//      這是既有合法暫停語義，不需要新的保活機制。
+// 三条硬边界（决策定稿 2026-09-25 第 1/2/5 条）：
+//   ① 只在 interaction_mode === "collaborate" 生效；auto/preset 两档零改动
+//      （全自动＝一键一路跑完不问，护城河）。
+//   ② 停点只有这三个；final_cut（成片验收）/promo 的门禁卡不在此列（决策第 1 条
+//      「其余环节自动」），维持 prompt 层引导，不扩大硬闸范围。
+//   ③ 确认不设超时（决策第 5 条：甲方核对一两周是常态）——挂起期间 watchdog 与
+//      midturn-status 主动让路（timers-gw.ts:142/:330 的 pendingConfirms 让路），
+//      这是既有合法暂停语义，不需要新的保活机制。
 //
-// 為什麼判「交付物是否真的產出」而不是「門禁卡存在」：門禁卡在 start 就鋪好了，
-// 拿它當暫停條件＝建骨架當下就停，用戶會被問一個還不存在的資產。判據：
-//   - text/config 類交付（劇本/分鏡）：metadata.content 非空且不是佔位文案
-//     （templatePlaceholderContent 鋪的是「（待填：…）」——佔位不是交付物，
-//      拿它當「已產出」＝謊報可確認）。
-//   - 可執行類（資產圖）：nodeStatus === "success" 且有 nodeContent（真圖 URL）。
+// 为什么判「交付物是否真的产出」而不是「门禁卡存在」：门禁卡在 start 就铺好了，
+// 拿它当暂停条件＝建骨架当下就停，用户会被问一个还不存在的资产。判据：
+//   - text/config 类交付（剧本/分镜）：metadata.content 非空且不是占位文案
+//     （templatePlaceholderContent 铺的是「（待填：…）」——占位不是交付物，
+//      拿它当「已产出」＝谎报可确认）。
+//   - 可执行类（资产图）：nodeStatus === "success" 且有 nodeContent（真图 URL）。
 //
-// 為什麼批准綁「交付物指紋」而不是布林：批准是對**某個具體交付物**的批准。用戶
-// 回跳改圖／重生成資產後，指紋變 → 該門禁重新進入待批准（不讓舊批准替新交付物
-// 放行）。這同時就是決策 15「回跳後只重跑後續」的閘側語義：網關既有的
-// updateNode/rerunFrom 已把下游重置 pending＋清結果（workflow-service.ts:660-675、
-// :957-966），不需新建作廢機制。
+// 为什么批准绑「交付物指纹」而不是布林：批准是对**某个具体交付物**的批准。用户
+// 回跳改图／重生成资产后，指纹变 → 该门禁重新进入待批准（不让旧批准替新交付物
+// 放行）。这同时就是决策 15「回跳后只重跑后续」的闸侧语义：网关既有的
+// updateNode/rerunFrom 已把下游重置 pending＋清结果（workflow-service.ts:660-675、
+// :957-966），不需新建作废机制。
 export const COLLABORATE_GATE_ROLES: readonly string[] = ["script", "cast_card", "storyboard"]
 
-/** 停點中文名（confirm 卡與暫停回執的用戶可見前綴）。 */
+/** 停点中文名（confirm 卡与暂停回执的用户可见前缀）。 */
 export const COLLABORATE_GATE_LABELS: Record<string, string> = {
   script: "剧本批准",
   cast_card: "资产确认",
@@ -1547,32 +1547,32 @@ export const COLLABORATE_GATE_LABELS: Record<string, string> = {
 }
 
 /**
- * 已批准的停點：wfid → (role → 交付物指紋)。刻意**不持久化**（與 workflowBilling
- * 同為進程內真值）：gateway 重啟後重新問一次，寧可多問一次也不放過未確認的資產。
+ * 已批准的停点：wfid → (role → 交付物指纹)。刻意**不持久化**（与 workflowBilling
+ * 同为进程内真值）：gateway 重启后重新问一次，宁可多问一次也不放过未确认的资产。
  */
 export const workflowGateApprovals = new Map<string, Map<string, string>>()
 
 /**
- * 停點續跑註冊表（request_id → 待續跑的 workflow）。**刻意與 wfGenerateContinuations
- * 分開**：那條鏈的 approved 分支會連帶寫 workflowGenerateApproved ＋ workflowBilling
- *（confirmed_coins ← 批准額、refunded_coins ← 0）——拿它載確認閘會把真實退款真值
- * 抹成 0，而 billing 真值正是 agent 對用戶報帳的唯一依據（最恨被騙）。故另設一表，
- * settle 只觸發續跑，一毛錢不碰帳。
+ * 停点续跑注册表（request_id → 待续跑的 workflow）。**刻意与 wfGenerateContinuations
+ * 分开**：那条链的 approved 分支会连带写 workflowGenerateApproved ＋ workflowBilling
+ *（confirmed_coins ← 批准额、refunded_coins ← 0）——拿它载确认闸会把真实退款真值
+ * 抹成 0，而 billing 真值正是 agent 对用户报帐的唯一依据（最恨被骗）。故另设一表，
+ * settle 只触发续跑，一毛钱不碰帐。
  */
 export const wfGateContinuations = new Map<string, { state: SessionState; wfid: string; role: string; gateNodeId: string }>()
 
-/** 交付物指紋：內容前 16 位 sha256（內容可能含換行/中文，只取指紋比對，不外洩原文）。 */
+/** 交付物指纹：内容前 16 位 sha256（内容可能含换行/中文，只取指纹比对，不外泄原文）。 */
 function deliverableFingerprint(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 16)
 }
 
-/** 佔位文案判定（templatePlaceholderContent 的產物＝未填，不是交付物）。 */
+/** 占位文案判定（templatePlaceholderContent 的产物＝未填，不是交付物）。 */
 function isPlaceholderContent(content: string): boolean {
   return content.trim().startsWith("（待填：")
 }
 
 /**
- * 停點的交付物是否**真的產出**（可被用戶確認）。false＝還沒東西可確認，門禁不擋。
+ * 停点的交付物是否**真的产出**（可被用户确认）。false＝还没东西可确认，门禁不挡。
  */
 export function deliverableProduced(
   wf: { nodeStatus: Record<string, string>; nodeContent: Record<string, string> },
@@ -1590,7 +1590,7 @@ export function deliverableProduced(
   return { produced: true, fingerprint: deliverableFingerprint(content) }
 }
 
-/** 待批准的停點（按 COLLABORATE_GATE_ROLES 固定順序＝劇本→資產→分鏡，與圖序無關）。 */
+/** 待批准的停点（按 COLLABORATE_GATE_ROLES 固定顺序＝剧本→资产→分镜，与图序无关）。 */
 export function resolveCollaborateGate(wf: {
   workflowId: string
   graph: { nodes: { id: string; role: string; kind: string; metadata?: Record<string, unknown> }[] }
@@ -1603,24 +1603,24 @@ export function resolveCollaborateGate(wf: {
     const gate = wf.graph.nodes.find((n) => n.role === `${role}__gate`)
     if (!main || !gate) continue
     const { produced, fingerprint } = deliverableProduced(wf, main)
-    if (!produced) continue // 還沒交付物可確認：不擋（門禁不是無條件硬閘）
-    if (approved?.get(role) === fingerprint) continue // 這個交付物已批准
+    if (!produced) continue // 还没交付物可确认：不挡（门禁不是无条件硬闸）
+    if (approved?.get(role) === fingerprint) continue // 这个交付物已批准
     const gateText = typeof gate.metadata?.content === "string" ? gate.metadata.content.trim() : ""
     return { role, label: COLLABORATE_GATE_LABELS[role] ?? role, gateText, gateNodeId: gate.id, nodeId: main.id, fingerprint }
   }
   return null
 }
 
-/** 暫停回執文案（runWfGenerate 的 !ok 分支會把它原樣播給用戶/agent，必須是人話）。 */
+/** 暂停回执文案（runWfGenerate 的 !ok 分支会把它原样播给用户/agent，必须是人话）。 */
 export function collaboratePauseNotice(gate: { label: string }): string {
   return `已暂停流程，等待你确认「${gate.label}」。协作模式下，确认后系统自动从断点续跑（已完成的节点沿用产物，不重跑、不重复扣费）。`
 }
 
 /**
- * 註冊一次停點確認：pendingConfirms（讓 watchdog 讓路）＋續跑註冊表＋確認卡＋
- * 畫布門禁卡可操作標記。同一個 workflow 已有一張未決確認卡時**不重複發卡**
- *（F1 重啟續跑可能再次呼叫 generate），仍回 true＝維持暫停。
- * 回 false＝無法註冊（state 不存在），呼叫端不暫停（fail-open 不卡死流程）。
+ * 注册一次停点确认：pendingConfirms（让 watchdog 让路）＋续跑注册表＋确认卡＋
+ * 画布门禁卡可操作标记。同一个 workflow 已有一张未决确认卡时**不重复发卡**
+ *（F1 重启续跑可能再次呼叫 generate），仍回 true＝维持暂停。
+ * 回 false＝无法注册（state 不存在），呼叫端不暂停（fail-open 不卡死流程）。
  */
 export function requestCollaborateApproval(
   state: SessionState,
@@ -1628,13 +1628,13 @@ export function requestCollaborateApproval(
   gate: { role: string; label: string; gateText: string; gateNodeId: string },
 ): boolean {
   for (const c of wfGateContinuations.values()) {
-    if (c.wfid === wf.workflowId) return true // 已有未決卡：維持暫停，不重複彈
+    if (c.wfid === wf.workflowId) return true // 已有未决卡：维持暂停，不重复弹
   }
   const requestId = `wfgate_${wf.workflowId}_${gate.role}_${Date.now().toString(36)}`
-  // 無超時（決策 5）：timer 是 no-op——PendingConfirm.timer 是型別必需欄位，
-  // settleConfirm 會 clearTimeout 它，故不能省（同 /internal/confirm-request 的
-  // auto 分支形狀）。ledger 刻意不帶：這是「確認交付物」不是扣費，帶 ledger 會
-  // 寫一筆 0 幣帳目進帳本（假帳目）。
+  // 无超时（决策 5）：timer 是 no-op——PendingConfirm.timer 是型别必需栏位，
+  // settleConfirm 会 clearTimeout 它，故不能省（同 /internal/confirm-request 的
+  // auto 分支形状）。ledger 刻意不带：这是「确认交付物」不是扣费，带 ledger 会
+  // 写一笔 0 币帐目进帐本（假帐目）。
   state.pendingConfirms.set(requestId, { timer: setTimeout(() => {}, 0) })
   wfGateContinuations.set(requestId, { state, wfid: wf.workflowId, role: gate.role, gateNodeId: gate.gateNodeId })
   const description = `【协作确认·${gate.label}】${gate.gateText || "确认这一步的交付物后继续后续环节。"}`
@@ -1647,9 +1647,9 @@ export function requestCollaborateApproval(
 }
 
 /**
- * 畫布門禁卡狀態回寫（直發路徑繞過 workflowService 的 emit hook → 快照同步在此
- * 自補，同 events-translate/workflow-gw 既有直發點的寫穿寫法，冪等）。
- * 前端 NodeBody 據 metadata.gateConfirm 渲染「批准/退回」——門禁卡從純文字變可操作。
+ * 画布门禁卡状态回写（直发路径绕过 workflowService 的 emit hook → 快照同步在此
+ * 自补，同 events-translate/workflow-gw 既有直发点的写穿写法，幂等）。
+ * 前端 NodeBody 据 metadata.gateConfirm 渲染「批准/退回」——门禁卡从纯文字变可操作。
  */
 function markGateNodeState(
   state: SessionState,
@@ -1667,16 +1667,16 @@ function markGateNodeState(
 }
 
 /**
- * 停點裁決 → 解註冊。批准的記指紋（這個交付物算過了）並續跑；駁回=停下等用戶
- * 指定怎麼改（決策 4：不擅自重生成、不擅自花錢），工作流停在暫停態。
- * 回 true 表示這個 request_id 屬停點閘（呼叫端不需再看計費鏈）。
+ * 停点裁决 → 解注册。批准的记指纹（这个交付物算过了）并续跑；驳回=停下等用户
+ * 指定怎么改（决策 4：不擅自重生成、不擅自花钱），工作流停在暂停态。
+ * 回 true 表示这个 request_id 属停点闸（呼叫端不需再看计费链）。
  */
 export function resumeWorkflowGate(requestId: string, approved: boolean): boolean {
   const cont = wfGateContinuations.get(requestId)
   if (!cont) return false
   wfGateContinuations.delete(requestId)
   const wf = workflowService.get(cont.wfid)
-  // 卡片狀態回寫：不管批准或駁回都要落地，否則畫布門禁卡永遠停在「待確認」。
+  // 卡片状态回写：不管批准或驳回都要落地，否则画布门禁卡永远停在「待确认」。
   markGateNodeState(cont.state, cont.wfid, cont.gateNodeId, {
     request_id: requestId,
     session_id: cont.state.sessionId,
@@ -1691,11 +1691,11 @@ export function resumeWorkflowGate(requestId: string, approved: boolean): boolea
   approvedMap.set(cont.role, gate?.fingerprint ?? "")
   workflowGateApprovals.set(cont.wfid, approvedMap)
   console.log(`[gateway] collaborate gate approved: wf=${cont.wfid} gate=${cont.role} → resume`)
-  runWfGenerate(cont.state, cont.wfid) // 續跑輪子：generate 的 R5-B 語義只跑 pending/error 節點
+  runWfGenerate(cont.state, cont.wfid) // 续跑轮子：generate 的 R5-B 语义只跑 pending/error 节点
   return true
 }
 
-/** 取該 role 交付物的當前指紋（批准當下記帳用）。 */
+/** 取该 role 交付物的当前指纹（批准当下记帐用）。 */
 function resolveGateByRole(
   wf: { graph: { nodes: { id: string; role: string; kind: string; metadata?: Record<string, unknown> }[] }; nodeStatus: Record<string, string>; nodeContent: Record<string, string> },
   role: string,
@@ -1706,9 +1706,9 @@ function resolveGateByRole(
   return produced ? { fingerprint } : null
 }
 
-// 批量執行啟動器（含 S6 質詢凍結檢查）。兩個入口：/workflow/generate 免
-// confirm 直呼路徑，與 wfGenerateContinuations 批准回調——凍結語義收攏在此，
-// 兩個入口行為一致。
+// 批量执行启动器（含 S6 质询冻结检查）。两个入口：/workflow/generate 免
+// confirm 直呼路径，与 wfGenerateContinuations 批准回调——冻结语义收拢在此，
+// 两个入口行为一致。
 export function runWfGenerate(state: SessionState, wfid: string): void {
   const wf = workflowService.get(wfid)
   if (!wf) return
@@ -1723,12 +1723,12 @@ export function runWfGenerate(state: SessionState, wfid: string): void {
     console.log(`[gateway] S6 freeze: video workflow ${wfid} held during unanswered user question (session ${state.sessionId})`)
     return
   }
-  // 修 3：登記喚醒——掃描器據此在終態/停滯時向原會話投 resume（長任務交接）。
+  // 修 3：登记唤醒——扫描器据此在终态/停滞时向原会话投 resume（长任务交接）。
   workflowWake.set(wfid, { sessionId: state.sessionId, lastProgressAt: Date.now() })
   void workflowService.generate(wfid).then((r) => {
     if (!r.ok) {
-      // 預檢拒絕/早退路徑狀態未必到終態（如餘額預檢拒絕時 status 仍是
-      // building）——註銷喚醒登記，拒絕原因已在上方 message.delta 如實播出。
+      // 预检拒绝/早退路径状态未必到终态（如余额预检拒绝时 status 仍是
+      // building）——注销唤醒登记，拒绝原因已在上方 message.delta 如实播出。
       workflowWake.delete(wfid)
       console.warn(`[gateway] R5-C generate rejected: wf=${wfid} session=${state.sessionId} status=${r.status}`)
       const visible = /[\u4e00-\u9fff]/.test(r.status)
@@ -1737,22 +1737,22 @@ export function runWfGenerate(state: SessionState, wfid: string): void {
       emitToSession(state, "message.delta", { text: visible + "\n" })
       return
     }
-    // 修 2：全節點成功 → billing 真值置 settled（帳實相符的終態）。
+    // 修 2：全节点成功 → billing 真值置 settled（帐实相符的终态）。
     if (r.status === "success") {
       const billing = workflowBilling.get(wfid)
       if (billing) billing.billing_status = "settled"
     }
     console.log(`[gateway] workflow ${wfid} finished ok`)
-    // 2026-09-20 Phase 1：跑批完成推送站點。**這是 generate 的單一完成出口**
-    //（success/partial/failed 三分支全在此），且 rerun 不走此路徑（rerun 是
-    // 局部重跑，非整批完成）。fire-and-forget：pushWorkflowCompletion 自帶
-    // try/catch 不拋，此處不 await，工作流收尾不受站點延遲影響。
+    // 2026-09-20 Phase 1：跑批完成推送站点。**这是 generate 的单一完成出口**
+    //（success/partial/failed 三分支全在此），且 rerun 不走此路径（rerun 是
+    // 局部重跑，非整批完成）。fire-and-forget：pushWorkflowCompletion 自带
+    // try/catch 不抛，此处不 await，工作流收尾不受站点延迟影响。
     void pushWorkflowCompletion(state)
-    // 2026-10-02：終態直推（成片連結 + 控面實扣），不經 LLM/4096 喚醒；停滯判死後才跑完的也會收到。
+    // 2026-10-02：终态直推（成片连结 + 控面实扣），不经 LLM/4096 唤醒；停滞判死后才跑完的也会收到。
     void sendWorkflowNotice(state, wfid, "final")
-    // 2026-10-02：停滯掃描判死時已 delete 喚醒登記（評測 08:36:36），工作流之後才自行
-    // 跑完（08:46）時舊版只發 final 通報、不再喚 agent 收尾。重新登記，讓掃描器下一輪
-    // 以 final 喚醒 agent 補做匯報（sendWorkflowNotice 已去重，不會重複發 final 通報）。
+    // 2026-10-02：停滞扫描判死时已 delete 唤醒登记（评测 08:36:36），工作流之后才自行
+    // 跑完（08:46）时旧版只发 final 通报、不再唤 agent 收尾。重新登记，让扫描器下一轮
+    // 以 final 唤醒 agent 补做汇报（sendWorkflowNotice 已去重，不会重复发 final 通报）。
     if (!workflowWake.has(wfid)) {
       workflowWake.set(wfid, { sessionId: state.sessionId, lastProgressAt: Date.now() })
       console.log(`[gateway] workflow ${wfid} finished after stall-declared; re-registered wake for agent wrap-up`)
@@ -1760,10 +1760,10 @@ export function runWfGenerate(state: SessionState, wfid: string): void {
   })
 }
 
-/** 喚醒恢復等待上限：> 2026-10-02 實測 opencode-server OOM 後 85 秒恢復（08:36:33 掛、08:37:58 回）。 */
+/** 唤醒恢复等待上限：> 2026-10-02 实测 opencode-server OOM 后 85 秒恢复（08:36:33 挂、08:37:58 回）。 */
 export const WAKE_RECOVERY_WAIT_MS = Number.parseInt(process.env.WORKFLOW_WAKE_RECOVERY_MS || "180000", 10) || 180_000
 
-/** 連線被拒（opencode-server 重啟/OOM 斷線）判定——Bun fetch 拋 fetch failed 帶 code，Node 帶 cause.code。 */
+/** 连线被拒（opencode-server 重启/OOM 断线）判定——Bun fetch 抛 fetch failed 带 code，Node 带 cause.code。 */
 export function isConnectionRefused(e: unknown): boolean {
   const err = e as { code?: unknown; cause?: { code?: unknown }; message?: unknown } | undefined
   const code = typeof err?.code === "string" ? err.code : typeof err?.cause?.code === "string" ? err.cause.code : ""
@@ -1771,9 +1771,9 @@ export function isConnectionRefused(e: unknown): boolean {
 }
 
 /**
- * 2026-10-02：opencode-server 全域 OOM 斷線（127.0.0.1:4096）時輪詢 /config 至恢復。
- * 舊版喚醒退避總窗口僅 65 秒（0/5/15/45）< 實測 85 秒斷線 → 喚醒全 miss 永久丟失。
- * 改為：遇 ECONNREFUSED 時輪詢 /config 直到 200，上限 WAKE_RECOVERY_WAIT_MS（預設 180s）。
+ * 2026-10-02：opencode-server 全域 OOM 断线（127.0.0.1:4096）时轮询 /config 至恢复。
+ * 旧版唤醒退避总窗口仅 65 秒（0/5/15/45）< 实测 85 秒断线 → 唤醒全 miss 永久丢失。
+ * 改为：遇 ECONNREFUSED 时轮询 /config 直到 200，上限 WAKE_RECOVERY_WAIT_MS（预设 180s）。
  */
 export async function waitForOpencodeReady(maxMs = WAKE_RECOVERY_WAIT_MS, intervalMs = 3_000): Promise<boolean> {
   const deadline = Date.now() + maxMs
@@ -1782,14 +1782,14 @@ export async function waitForOpencodeReady(maxMs = WAKE_RECOVERY_WAIT_MS, interv
       const res = await fetch(`${OPENCODE_URL}/config`, { headers: opencodeHeaders(), signal: AbortSignal.timeout(5_000) })
       if (res.ok) return true
     } catch {
-      // 仍未起：繼續輪詢
+      // 仍未起：继续轮询
     }
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, intervalMs))
   }
 }
 
-/** 單次喚醒投遞（prompt_async）＋本輪狀態重置（逐行同 handleResumeSession 輪子）。 */
+/** 单次唤醒投递（prompt_async）＋本轮状态重置（逐行同 handleResumeSession 轮子）。 */
 async function postWorkflowWake(state: SessionState, wfid: string, content: string, attempt: number): Promise<void> {
   const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
@@ -1810,8 +1810,8 @@ async function postWorkflowWake(state: SessionState, wfid: string, content: stri
   state.watchdogRetried = false
   state.questionAnsweredThisTurn = false
   state.deathDeclared = false
-  // 2026-10-02 steer 誤判修復：workflow 喚醒輪同樣要打 lastTurnActiveAt
-  //（steer 受理閘唯一依據，漏點＝喚醒輪期間 steer 全被 409 誤判）。
+  // 2026-10-02 steer 误判修复：workflow 唤醒轮同样要打 lastTurnActiveAt
+  //（steer 受理闸唯一依据，漏点＝唤醒轮期间 steer 全被 409 误判）。
   state.lastTurnActiveAt = Date.now()
   markDirty(state)
   armWatchdogTimer(state)
@@ -1819,9 +1819,9 @@ async function postWorkflowWake(state: SessionState, wfid: string, content: stri
 }
 
 /**
- * 喚醒投遞（prompt_async）帶重試：4096 瞬斷（評測 08:36:40 ECONNREFUSED）不再一次即棄。
- * 退避 0/5/15/45s；遇 ECONNREFUSED 額外輪詢 /config 至恢復（上限 180s），恢復後補投一次；
- * 耗盡後直推通報兜底（sendWorkflowNotice 去重，已發則不重複）。
+ * 唤醒投递（prompt_async）带重试：4096 瞬断（评测 08:36:40 ECONNREFUSED）不再一次即弃。
+ * 退避 0/5/15/45s；遇 ECONNREFUSED 额外轮询 /config 至恢复（上限 180s），恢复后补投一次；
+ * 耗尽后直推通报兜底（sendWorkflowNotice 去重，已发则不重复）。
  */
 export async function dispatchWorkflowWake(state: SessionState, wfid: string, content: string, kind: "final" | "stalled"): Promise<void> {
   const delays = [0, 5_000, 15_000, 45_000]
@@ -1858,12 +1858,12 @@ export async function dispatchWorkflowWake(state: SessionState, wfid: string, co
   await sendWorkflowNotice(state, wfid, kind)
 }
 
-// ── 修 3：長任務喚醒掃描器（60s 一輪）────────────────────────────────
-// 終態（success/failed/partial/paused_insufficient_quota）或停滯（15 分鐘無
-// 節點進度）→ 向原會話投 resume 喚醒，文案含各節點終態摘要 + billing 真值，
-// 讓 agent 開一輪誠實匯報後收尾。turn 在途（ackTimer 掛著）時讓位——節點
-// 事件正在直播，agent 自己會匯報；下一輪掃描再試。投遞/狀態重置逐行同
-// handleResumeSession 的輪子（prompt_async + turn 重置 + 布哨）。
+// ── 修 3：长任务唤醒扫描器（60s 一轮）────────────────────────────────
+// 终态（success/failed/partial/paused_insufficient_quota）或停滞（15 分钟无
+// 节点进度）→ 向原会话投 resume 唤醒，文案含各节点终态摘要 + billing 真值，
+// 让 agent 开一轮诚实汇报后收尾。turn 在途（ackTimer 挂著）时让位——节点
+// 事件正在直播，agent 自己会汇报；下一轮扫描再试。投递/状态重置逐行同
+// handleResumeSession 的轮子（prompt_async + turn 重置 + 布哨）。
 setInterval(() => {
   for (const [wfid, w] of workflowWake) {
     const state = sessions.get(w.sessionId)
@@ -1880,18 +1880,18 @@ setInterval(() => {
     const terminal = wfStatus !== "running" && wfStatus !== "building" && wfStatus !== "pending"
     const stalled = !terminal && Date.now() - w.lastProgressAt > WORKFLOW_STALL_MS
     if (!terminal && !stalled) continue
-    // 2026-09-24：協作確認閘的暫停是**合法等待**（決策 5 不設超時），不是「跑完了」。
-    // 喚醒 agent 只會逼它對用戶謊報結果；批准後 runWfGenerate 會重新登記喚醒。
+    // 2026-09-24：协作确认闸的暂停是**合法等待**（决策 5 不设超时），不是「跑完了」。
+    // 唤醒 agent 只会逼它对用户谎报结果；批准后 runWfGenerate 会重新登记唤醒。
     if (wfStatus === "paused_awaiting_approval") continue
-    if (state.ackTimer != null) continue // turn 在途讓位，下一輪掃描再喚
-    // 停滯判死：卡在 running 的節點 patch 成畫布終態（error，與
-    // workflow-service/emitImageFailed 的節點失敗形狀對稱）+ 走修 2 退款留痕。
+    if (state.ackTimer != null) continue // turn 在途让位，下一轮扫描再唤
+    // 停滞判死：卡在 running 的节点 patch 成画布终态（error，与
+    // workflow-service/emitImageFailed 的节点失败形状对称）+ 走修 2 退款留痕。
     if (stalled) {
       const stallMin = Math.max(1, Math.round(WORKFLOW_STALL_MS / 60000))
       console.warn(`[gateway] workflow stall: wf=${wfid} no progress for ${stallMin}min, declaring stuck nodes dead`)
       for (const n of wf.graph.nodes) {
         if (wf.nodeStatus[n.id] !== "running") continue
-        // 判死的節點其上游 job 仍可能排隊→日後成功扣費成孤兒鏡：先取消（排隊中全額退款）。
+        // 判死的节点其上游 job 仍可能排队→日后成功扣费成孤儿镜：先取消（排队中全额退款）。
         const stuckJob = typeof n.metadata?.last_job_id === "string" ? n.metadata.last_job_id : ""
         if (stuckJob) void cancelPlatformJob(state.apiKey, stuckJob)
         const stallPatch = {
@@ -1904,16 +1904,16 @@ setInterval(() => {
           node_id: n.id,
           patch: stallPatch,
         })
-        // 2026-09-20 寫穿：直發路徑繞過 emit hook，快照同步在此補上（冪等）。
+        // 2026-09-20 写穿：直发路径绕过 emit hook，快照同步在此补上（幂等）。
         applyCanvasNodeUpdated(state.sessionId, { node_id: n.id, patch: stallPatch })
       }
       void sendWorkflowNotice(state, wfid, "stalled")
     }
     workflowWake.delete(wfid)
     void (async () => {
-      // 先向控面結算實扣（單一真源），喚醒文案才讀得到真值。
+      // 先向控面结算实扣（单一真源），唤醒文案才读得到真值。
       await settleWorkflowCharges(state, wfid).catch(() => null)
-      // 喚醒文案：節點終態摘要（用戶可見名稱）+ billing 真值，agent 只許照實轉述。
+      // 唤醒文案：节点终态摘要（用户可见名称）+ billing 真值，agent 只许照实转述。
       const money = workflowBilling.get(wfid)
       const moneyText = money
         ? `真实花费：报价 ${money.confirmed_coins} 币，控制面实扣 ${money.charged_coins ?? "未知"} 币${money.deviation_coins ? `（偏差 ${money.deviation_coins > 0 ? "+" : ""}${money.deviation_coins}）` : ""}，${money.refunded_coins > 0 ? `未使用部分已退 ${money.refunded_coins} 币` : "无退款"}（billing_status=${money.billing_status}）。`
@@ -1933,11 +1933,11 @@ setInterval(() => {
   }
 }, WORKFLOW_WAKE_SCAN_MS)
 
-// workflow 內部端點（loopback）：Deepseek 的 workflow_* 工具呼叫。
+// workflow 内部端点（loopback）：Deepseek 的 workflow_* 工具呼叫。
 export async function handleWorkflowInternal(req: Request, session: SessionState): Promise<Response> {
-  // S4 修復（2026-08-27）：S6 質詢凍結段引用了未定義的 `state`（本 handler
-  // 的參數名是 `session`）——/workflow/generate 一進 S6 分支即 ReferenceError 500。
-  // 別名對齊語義（session 即 SessionState），一行修復，不動 S6 邏輯本身。
+  // S4 修复（2026-08-27）：S6 质询冻结段引用了未定义的 `state`（本 handler
+  // 的参数名是 `session`）——/workflow/generate 一进 S6 分支即 ReferenceError 500。
+  // 别名对齐语义（session 即 SessionState），一行修复，不动 S6 逻辑本身。
   const state = session
   const url = new URL(req.url)
   const pathname = url.pathname
@@ -1961,12 +1961,12 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
   }
   if (pathname.endsWith("/workflow/start") && req.method === "POST") {
     const templateId = typeof body.template_id === "string" ? body.template_id : (typeof url.searchParams.get("template_id") === "string" ? url.searchParams.get("template_id") : null)
-    // P0 idempotent workflow_start（2026-08-31 卡片堆積事故）：gateway 重啟 →
-    // N1 redrive 重投上一條 prompt → agent 再次呼叫 workflow_start → 舊行為會
-    // 新建第二套全新 id 的節點堆上畫布（大量卡片重疊 + 連線亂麻 + 整屏閃爍）。
-    // 本檔既有設計已聲明「單 session 只鏡像最新工作流，反覆 start 屬異常路徑」，
-    // 這裡把它落成硬守衛：同 session 已有同模板且未 success 的工作流 → 復用，
-    // 不新建、不重發節點、不發歡迎詞；agent 據 reused/note 繼續推進或 rerun。
+    // P0 idempotent workflow_start（2026-08-31 卡片堆积事故）：gateway 重启 →
+    // N1 redrive 重投上一条 prompt → agent 再次呼叫 workflow_start → 旧行为会
+    // 新建第二套全新 id 的节点堆上画布（大量卡片重叠 + 连线乱麻 + 整屏闪烁）。
+    // 本档既有设计已声明「单 session 只镜像最新工作流，反覆 start 属异常路径」，
+    // 这里把它落成硬守卫：同 session 已有同模板且未 success 的工作流 → 复用，
+    // 不新建、不重发节点、不发欢迎词；agent 据 reused/note 继续推进或 rerun。
     const ownedWfId = workflowOwnerBySession.get(state.sessionId)
     if (ownedWfId && templateId) {
       const owned = workflowService.get(ownedWfId)
@@ -1981,33 +1981,33 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
         })
       }
     }
-    // S4：start 即發 canvas.plan（cost_hint 需目錄）——start 前同步預熱目錄
-    //（帶上限 5s，失敗/超時照走：cost_hint 保守回 null，不擋搭建）。
+    // S4：start 即发 canvas.plan（cost_hint 需目录）——start 前同步预热目录
+    //（带上限 5s，失败/超时照走：cost_hint 保守回 null，不挡搭建）。
     await Promise.race([
       catalogUnitCoins("pixai-tsubaki2", session.apiKey).catch(() => {}),
       new Promise((r) => setTimeout(r, 5000)),
     ])
     const rawContent = body.content && typeof body.content === "object" ? body.content : null
     const content = rawContent ?? (() => {
-      // query 參數回退：?content={"role":{"content":"..."}}（URL-encoded JSON）
+      // query 参数回退：?content={"role":{"content":"..."}}（URL-encoded JSON）
       const q = url.searchParams.get("content")
       if (!q) return {}
       try {
         const parsed = JSON.parse(q) as Record<string, unknown>
         return parsed && typeof parsed === "object" ? parsed : {}
       } catch {
-        return null // 顯式標記無效：走模板缺內容報錯，不偽造空物件
+        return null // 显式标记无效：走模板缺内容报错，不伪造空物件
       }
     })()
     if (content === null) return jsonError(400, "invalid content json (query or body)", "bad_request", "bad_request")
-    // R8（2026-09-10）：start 改 async（shotN_gen 動態選可用視頻模型需 await
-    // model-status 探測）——必須 await，否則「error in r」對 Promise 恆 false，
-    // 缺內容 400 守衛失效。
+    // R8（2026-09-10）：start 改 async（shotN_gen 动态选可用视频模型需 await
+    // model-status 探测）——必须 await，否则「error in r」对 Promise 恒 false，
+    // 缺内容 400 守卫失效。
     const r = await workflowService.start(templateId, content as never, session)
     if ("error" in r) return jsonError(400, r.error, "missing_content", "missing_content")
-    // R5-C（2026-08-28）：模板啟動成功即 emit 零 LLM 歡迎詞（毫秒級，不過模型）。
-    // 暴君規格：零內部話術、簡體、直接可執行。小說影視化模板用專屬文案；
-    // 其餘模板用通用引導。走 emitAgentNotice（message 通道，前端零改動）。
+    // R5-C（2026-08-28）：模板启动成功即 emit 零 LLM 欢迎词（毫秒级，不过模型）。
+    // 暴君规格：零内部话术、简体、直接可执行。小说影视化模板用专属文案；
+    // 其余模板用通用引导。走 emitAgentNotice（message 通道，前端零改动）。
     const wfId = typeof (r as { workflowId?: unknown }).workflowId === "string" ? (r as { workflowId: string }).workflowId : "?"
     const welcomeText =
       templateId === "novel_film"
@@ -2030,19 +2030,19 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     const r = workflowService.connect(typeof body.workflow_id === "string" ? body.workflow_id : "", typeof body.from === "string" ? body.from : "", typeof body.to === "string" ? body.to : "")
     return "error" in r ? jsonError(400, r.error, "bad_request", "bad_request") : Response.json({ ok: true, ...r })
   }
-  // workflow_disconnect 工具的 gateway 端路由（2026-08-30 補齊）——service 的
+  // workflow_disconnect 工具的 gateway 端路由（2026-08-30 补齐）——service 的
   // removeConnection（含 emittedConnections 去重清理 + canvas.node.disconnected
-  // 廣播 + dirty 持久化）早已存在，此前只缺這條分發路由，工具層一律 404，
-  // agent 無法拆換 cfg 組合。輪子 = 緊鄰的 connect 路由同構。
+  // 广播 + dirty 持久化）早已存在，此前只缺这条分发路由，工具层一律 404，
+  // agent 无法拆换 cfg 组合。轮子 = 紧邻的 connect 路由同构。
   if (pathname.endsWith("/workflow/disconnect") && req.method === "POST") {
     const r = workflowService.removeConnection(typeof body.workflow_id === "string" ? body.workflow_id : "", typeof body.from === "string" ? body.from : "", typeof body.to === "string" ? body.to : "")
     return "error" in r ? jsonError(400, r.error, "bad_request", "bad_request") : Response.json({ ok: true, ...r })
   }
   // workflow_update_node 工具的 gateway 端路由——service 的 updateNode（含 BFS 下游
-  // stale 標記 + canvas.node.updated 廣播 + dirty 持久化）早已存在，此前只缺這條
-  // 分發路由，工具層一律 404，agent 中期換模型不可得（2026-08-30 秦始皇北極熊
-  // 事故根因之一：舊 cfg minimax-h3 按 resolveNodeModel 首個 config 優先壓住新接
-  // 的 seedance cfg，rerun 永遠解析回 H3）。輪子 = 緊鄰的 connect 路由同構。
+  // stale 标记 + canvas.node.updated 广播 + dirty 持久化）早已存在，此前只缺这条
+  // 分发路由，工具层一律 404，agent 中期换模型不可得（2026-08-30 秦始皇北极熊
+  // 事故根因之一：旧 cfg minimax-h3 按 resolveNodeModel 首个 config 优先压住新接
+  // 的 seedance cfg，rerun 永远解析回 H3）。轮子 = 紧邻的 connect 路由同构。
   if (pathname.endsWith("/workflow/node/update") && req.method === "POST") {
     const r = workflowService.updateNode(
       typeof body.workflow_id === "string" ? body.workflow_id : "",
@@ -2057,30 +2057,30 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       try {
         restoreWorkflowsFromSnapshot(state)
       } catch {
-        // fall through：回灌失敗按 not found 誠實回報
+        // fall through：回灌失败按 not found 诚实回报
       }
     }
     const st = wf(wfid)
     if (!st) return jsonError(404, "workflow not found", "not_found", "not_found")
-    // 2026-08-30：工具回顯 resolved_model 依賴節點真實 metadata——service.status
-    // 只回摘要（無 metadata），在此補上 graph 裡的 metadata（工具層才能算出真實
-    // 解析模型，AI 無法自欺）。不讓 service 輪子動，gateway 端富化即可。
+    // 2026-08-30：工具回显 resolved_model 依赖节点真实 metadata——service.status
+    // 只回摘要（无 metadata），在此补上 graph 里的 metadata（工具层才能算出真实
+    // 解析模型，AI 无法自欺）。不让 service 轮子动，gateway 端富化即可。
     const statusData = workflowService.status(wfid!) as { nodes: { id: string }[] }
     const metaMap = new Map<string, unknown>(st.graph.nodes.map((n: { id: string; metadata: unknown }) => [n.id, n.metadata ?? {}]))
     statusData.nodes = statusData.nodes.map((n) => ({ ...n, metadata: metaMap.get(n.id) ?? {} }))
-    // 修 2：注入 billing 真值（批准額/退款額/狀態）——agent 計費話術的唯一依據。
+    // 修 2：注入 billing 真值（批准额/退款额/状态）——agent 计费话术的唯一依据。
     const billing = workflowBilling.get(wfid!)
     return Response.json({ ok: true, workflow: statusData, ...(billing ? { billing } : {}) })
   }
   if (pathname.endsWith("/workflow/status") && req.method === "POST") {
-    // 重啟後恢復路徑：session 剛 hydrate、workflow 尚未回灌時（快照在 session 上），
-    // 先回灌再查——status 永遠回真實狀態，不因恢復順序漏掉。
+    // 重启后恢复路径：session 刚 hydrate、workflow 尚未回灌时（快照在 session 上），
+    // 先回灌再查——status 永远回真实状态，不因恢复顺序漏掉。
     const wfid = typeof body.workflow_id === "string" ? body.workflow_id : ""
     if (!workflowService.get(wfid) && state.workflowSnapshot && (state.workflowSnapshot as { workflowId?: unknown }).workflowId === wfid) {
       try {
         restoreWorkflowsFromSnapshot(state)
       } catch {
-        // fall through：回灌失敗按 not found 誠實回報
+        // fall through：回灌失败按 not found 诚实回报
       }
     }
     const st = wf(wfid)
@@ -2088,7 +2088,7 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     const statusData = workflowService.status(wfid) as { nodes: { id: string }[] }
     const metaMap = new Map<string, unknown>(st.graph.nodes.map((n: { id: string; metadata: unknown }) => [n.id, n.metadata ?? {}]))
     statusData.nodes = statusData.nodes.map((n) => ({ ...n, metadata: metaMap.get(n.id) ?? {} }))
-    // 修 2：同 GET 路徑，注入 billing 真值。
+    // 修 2：同 GET 路径，注入 billing 真值。
     const billing = workflowBilling.get(wfid)
     return Response.json({ ok: true, workflow: statusData, ...(billing ? { billing } : {}) })
   }
@@ -2096,10 +2096,10 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     const wfid = typeof body.workflow_id === "string" ? body.workflow_id : ""
     if (!workflowService.get(wfid)) return jsonError(404, "workflow not found", "not_found", "not_found")
     const wf = workflowService.get(wfid)!
-    // H6（2026-10-02）：同步拒絕「已在跑」。舊世界 runWfGenerate 是後台 fire-and-forget，
-    // 引擎回 already running 時路由早已回 ok:true running/approved，agent 被假成功誤導
-    //（01:24 的 10s 改價重跑根本沒生效）。在彈確認卡/開跑之前如實回 ok:false。
-    // 改價（如 460→750）要重估重確認，必須等當前批次結束或先暫停後再 generate。
+    // H6（2026-10-02）：同步拒绝「已在跑」。旧世界 runWfGenerate 是后台 fire-and-forget，
+    // 引擎回 already running 时路由早已回 ok:true running/approved，agent 被假成功误导
+    //（01:24 的 10s 改价重跑根本没生效）。在弹确认卡/开跑之前如实回 ok:false。
+    // 改价（如 460→750）要重估重确认，必须等当前批次结束或先暂停后再 generate。
     if (workflowService.isGenerating(wfid)) {
       return Response.json(
         {
@@ -2112,10 +2112,10 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
         { status: 409 },
       )
     }
-    // M4（2026-10-02）機器閘：近 24h 影片零真實交付（有 available 影片模型但無一有 delivered>0，
-    // 與 video_quote.evidence_warning 同口徑）時，含影片節點的工作流不得直接開跑付費生成，
-    // 必須帶 override_zero_delivery=true + override_reason（引用用戶顯式同意）。
-    // 探測不可達（models=null）fail-open 與既有行為一致；無影片節點/已覆寫則不攔。
+    // M4（2026-10-02）机器闸：近 24h 影片零真实交付（有 available 影片模型但无一有 delivered>0，
+    // 与 video_quote.evidence_warning 同口径）时，含影片节点的工作流不得直接开跑付费生成，
+    // 必须带 override_zero_delivery=true + override_reason（引用用户显式同意）。
+    // 探测不可达（models=null）fail-open 与既有行为一致；无影片节点/已覆写则不拦。
     const hasVideoExec = wf.graph.nodes.some((n) => n.kind === "video")
     if (hasVideoExec) {
       const overrideOk = body.override_zero_delivery === true && typeof body.override_reason === "string" && body.override_reason.trim().length > 0
@@ -2137,25 +2137,25 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
         }
       }
     }
-    // S4 規格1（2026-08-27）：計費確認門檻改金額維度。舊世界 = 門檻倒掛：
-    // 6.25 幣的批量 workflow 零確認直接開跑，1 幣的單筆重試反而彈卡——因為
-    // confirm 只存在於工具層（image_* 單筆），workflow 批量執行完全繞過。
-    // 統一基準：估算總價 ≥ CONFIRM_THRESHOLD_COINS（默認 5 幣）→ gateway
-    // 直接向用戶彈 confirm.request，批准前不開跑（真拒絕窗口，不是同回合
-    // 報價）；< 門檻免擾自動跑。估算口徑與 quote_bundle / cost_hint 同源
-    //（目錄單價 × 數量 + 影片檔位價 5/10 幣/秒（R5-C））。估不出單價的節點計 0（目錄
-    // 不可達時寧可放行小額，也不無限期卡死工作流——單筆扣費仍有工具層
-    // confirm 兜底）。金額與本次估算寫回 workflow 記錄，避免重複批准：
-    // 批准後 workflowGenerateApproved.set(wfid)，同批執行不二次彈卡。
+    // S4 规格1（2026-08-27）：计费确认门槛改金额维度。旧世界 = 门槛倒挂：
+    // 6.25 币的批量 workflow 零确认直接开跑，1 币的单笔重试反而弹卡——因为
+    // confirm 只存在于工具层（image_* 单笔），workflow 批量执行完全绕过。
+    // 统一基准：估算总价 ≥ CONFIRM_THRESHOLD_COINS（默认 5 币）→ gateway
+    // 直接向用户弹 confirm.request，批准前不开跑（真拒绝窗口，不是同回合
+    // 报价）；< 门槛免扰自动跑。估算口径与 quote_bundle / cost_hint 同源
+    //（目录单价 × 数量 + 影片档位价 5/10 币/秒（R5-C））。估不出单价的节点计 0（目录
+    // 不可达时宁可放行小额，也不无限期卡死工作流——单笔扣费仍有工具层
+    // confirm 兜底）。金额与本次估算写回 workflow 记录，避免重复批准：
+    // 批准后 workflowGenerateApproved.set(wfid)，同批执行不二次弹卡。
     const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
     let estimatedTotal = 0
     for (const n of executableNodes) {
       const coins = await estimateNodeCoins(n, state.apiKey, wf.graph)
       if (coins !== null) estimatedTotal = Math.round((estimatedTotal + coins) * 1e6) / 1e6
     }
-    // R9 擴計畫重確認：節點數比上次批准的多（agent 中途加節點）= 新一筆帳，
-    // 必須按新總價重彈 confirm——2026-08-29 事故：批准時估 25 幣，中途長到
-    // 5 支影片實扣 145 幣無人再問。
+    // R9 扩计画重确认：节点数比上次批准的多（agent 中途加节点）= 新一笔帐，
+    // 必须按新总价重弹 confirm——2026-08-29 事故：批准时估 25 币，中途长到
+    // 5 支影片实扣 145 币无人再问。
     const approvedBatch = workflowGenerateApproved.get(wfid)
     // 2026-08-31 计费诚实修复：批准快照原本只比节点数不比金额——同一批节点数不变但
     // 参数改变（如时长/档位）导致估价暴涨时不会重新弹卡。金额较上次批准增长超 10%
@@ -2169,10 +2169,10 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
           : `（节点数较上次批准新增 ${executableNodes.length - approvedBatch.nodes} 个，重新确认）`
         : ""
       const description = `批量执行工作流（${executableNodes.length} 个生成节点，${wf.templateId}），预估花费 ${estimatedTotal} 币${growthNote}`
-      // 註冊後立即返回 confirm_pending（2026-08-29 整改：不再內聯阻塞輪詢——
-      // 舊版等批准最長 15 分鐘，工具層 10s 超時必炸，agent 據此誤判後端死亡）。
-      // 用戶批准 → settleConfirm → runWfGenerate 續跑；拒絕/過期 → 卡片自收，
-      // 工作流不動，agent 可用 workflow_status 复核後再議。
+      // 注册后立即返回 confirm_pending（2026-08-29 整改：不再内联阻塞轮询——
+      // 旧版等批准最长 15 分钟，工具层 10s 超时必炸，agent 据此误判后端死亡）。
+      // 用户批准 → settleConfirm → runWfGenerate 续跑；拒绝/过期 → 卡片自收，
+      // 工作流不动，agent 可用 workflow_status 复核后再议。
       emitToSession(state, "confirm.request", { request_id: requestId, amount_coins: estimatedTotal, description })
       const timer = setTimeout(() => {
         wfGenerateContinuations.delete(requestId)
@@ -2192,10 +2192,10 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       }
       return Response.json({ ok: true, status: "confirm_pending", request_id: requestId, note: `已弹出批量扣费确认卡（预估 ${estimatedTotal} 币），用户批准后自动开跑。批准后系统会自动唤醒你汇报结果与真实花费；禁止用 bash sleep 或反复 workflow_status 等待，本轮现在总结已知状态并结束回合。` })
     }
-    // S6 規格3：質詢凍結——最後一條用戶消息是質詢類且 assistant 尚未回覆
-    //（ack timer 還掛著 = turn 在途）期間，含視頻節點的工作流不自動開跑
-    //（圖片小額不凍結）。回答完成（session.idle）時 releasePendingVideoWorkflows
-    // 放行。凍結只掛 workflow generate 自動開跑；手動單節點 rerun 不攔。
+    // S6 规格3：质询冻结——最后一条用户消息是质询类且 assistant 尚未回覆
+    //（ack timer 还挂著 = turn 在途）期间，含视频节点的工作流不自动开跑
+    //（图片小额不冻结）。回答完成（session.idle）时 releasePendingVideoWorkflows
+    // 放行。冻结只挂 workflow generate 自动开跑；手动单节点 rerun 不拦。
     const hasVideoNode = wf.graph.nodes.some((n) => n.kind === "video")
     const interrogating =
       typeof state.lastUserMessage === "string" &&
@@ -2207,21 +2207,21 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       console.log(`[gateway] S6 freeze: video workflow ${wfid} held during unanswered user question (session ${state.sessionId})`)
       return Response.json({ ok: true, status: "frozen_pending_reply", note: "用户质询尚未答复，视频任务已暂缓；答复完成后自动继续" })
     }
-    // 後台執行：立即回 running，每個節點結果以 canvas.* 事件推送到畫布（agent 不阻塞等待）。
-    // R5-C（2026-08-28）：preflightBudget 拒絕（餘額缺口）時 generate 返回
-    // {ok:false, status:缺口文字}，但工具層早已收到 running——拒絕落在後台
-    // then 裡無人傳話，agent/用戶兩邊都看不到。拒絕時把帶缺口數字的 status
-    // 文本經 message 通道直接 emit 給用戶；工作流狀態未動（預檢在置 running
-    // 之前），畫布保持可重試。（R5-C emit 邏輯已收進 runWfGenerate，confirm
-    // 批准回調共用同一條路徑。）
+    // 后台执行：立即回 running，每个节点结果以 canvas.* 事件推送到画布（agent 不阻塞等待）。
+    // R5-C（2026-08-28）：preflightBudget 拒绝（余额缺口）时 generate 返回
+    // {ok:false, status:缺口文字}，但工具层早已收到 running——拒绝落在后台
+    // then 里无人传话，agent/用户两边都看不到。拒绝时把带缺口数字的 status
+    // 文本经 message 通道直接 emit 给用户；工作流状态未动（预检在置 running
+    // 之前），画布保持可重试。（R5-C emit 逻辑已收进 runWfGenerate，confirm
+    // 批准回调共用同一条路径。）
     runWfGenerate(state, wfid)
     return Response.json({ ok: true, status: "running", note: `工作流已提交后台执行（workflow_id=${wfid}）。完成后系统会自动唤醒你汇报结果与真实花费。禁止用 bash sleep 或反复 workflow_status 等待；本轮现在总结已知状态并结束回合。` })
   }
-  // S3（2026-08-27）：workflow_rerun_node 的 gateway 端處理器——此前根本不存在
-  // 這條路由（工具層呼叫 /internal/workflow/node/rerun 直接落 404）。語義與
-  // /workflow/generate 對齊：查快照回灌兜底 → 校驗 workflow/節點存在 →
-  // 後台重跑（節點+全部下游）→ 立即回 running。會話查找在 dispatcher 已完成
-  //（resolveSession 支持 opencode id 與 gateway id 兩種鍵）。
+  // S3（2026-08-27）：workflow_rerun_node 的 gateway 端处理器——此前根本不存在
+  // 这条路由（工具层呼叫 /internal/workflow/node/rerun 直接落 404）。语义与
+  // /workflow/generate 对齐：查快照回灌兜底 → 校验 workflow/节点存在 →
+  // 后台重跑（节点+全部下游）→ 立即回 running。会话查找在 dispatcher 已完成
+  //（resolveSession 支持 opencode id 与 gateway id 两种键）。
   if (pathname.endsWith("/workflow/node/rerun") && req.method === "POST") {
     const wfid = typeof body.workflow_id === "string" ? body.workflow_id : ""
     const rootNodeId = typeof body.node_id === "string" ? body.node_id : ""
@@ -2232,7 +2232,7 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       try {
         restoreWorkflowsFromSnapshot(state)
       } catch {
-        // fall through：回灌失敗按 not found 誠實回報
+        // fall through：回灌失败按 not found 诚实回报
       }
     }
     if (!workflowService.get(wfid)) return jsonError(404, "workflow not found", "not_found", "not_found")
@@ -2244,10 +2244,10 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     if (rootNode.kind === "text" || rootNode.kind === "config") {
       return jsonError(400, "text/config 节点是参考资料，无需重跑；请对 image/video/audio 节点调用 rerun", "bad_request", "bad_request")
     }
-    // INC-0830 rerun 防重門：節點曾提交過上游作業（metadata.last_job_id）時，
-    // 先查平台真相再決定放不放行——上游成功=拒絕重跑（除非 force:true 明示棄單），
-    // 還在跑=拒絕；查不到真相（作業已刪/查詢失敗）時放行並註明「真相不可得」。
-    // 事故根因之三：agent 看不到 job 狀態就 rerun，撞出 4 筆重複扣費。
+    // INC-0830 rerun 防重门：节点曾提交过上游作业（metadata.last_job_id）时，
+    // 先查平台真相再决定放不放行——上游成功=拒绝重跑（除非 force:true 明示弃单），
+    // 还在跑=拒绝；查不到真相（作业已删/查询失败）时放行并注明「真相不可得」。
+    // 事故根因之三：agent 看不到 job 状态就 rerun，撞出 4 笔重复扣费。
     const prevJobId = typeof rootNode.metadata?.last_job_id === "string" ? rootNode.metadata.last_job_id : ""
     if (prevJobId && (rootNode.kind === "video" || rootNode.kind === "image")) {
       const forceRerun = body.force === true
@@ -2284,8 +2284,8 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
         console.warn(`[workflow] rerun guard: job ${prevJobId} truth unavailable for ${rootNodeId}, allowing with caveat`)
       }
     }
-    // 後台執行（與 generate 同語義）：立即回 running，節點結果走 canvas.* 事件。
-    // stateForWorkflow 已在 handleWorkflowInternal 開頭設為本次 session。
+    // 后台执行（与 generate 同语义）：立即回 running，节点结果走 canvas.* 事件。
+    // stateForWorkflow 已在 handleWorkflowInternal 开头设为本次 session。
     const executionId = `rex_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     void workflowService.rerun(wfid, rootNodeId).then((r) => {
       if (!r.ok) console.error(`[workflow] rerun ${wfid}/${rootNodeId} finished: ${r.status}`)

@@ -1,39 +1,39 @@
 /**
- * Music Prompt Director — 規則層音樂提示詞導演。
+ * Music Prompt Director — 规则层音乐提示词导演。
  *
- * 用戶的短 prompt 在進上游之前被這層自動「導演化」：偵測六層風格公式
+ * 用户的短 prompt 在进上游之前被这层自动「导演化」：侦测六层风格公式
  * (GENRE + MOOD + INSTRUMENTATION + VOCAL + STRUCTURE + PRODUCTION) 的缺漏
- * 並補齊中性指令、把 `[BPM: 120]` 這類所有平台都不解析的偽裝參數改寫成散文、
- * 把空泛／缺陷詞換成庫內有依據的具體語彙、修剪超過兩個的 MOOD，最後依目標
- * 通路執行硬規則：flowmusic 剝除死掉的時間戳、無歌詞標籤時壓成單行並壓進
- * 220 runes（超限依 CORE_01 權重由低到高整層丟棄，仍超才硬截——硬截盡量用滿預算：
- * 先取前 cap runes，≥60% cap 有子句邊界才退、否則退到最後空白或就地切）；
- * lyria 保留官方時間戳、不設 220 上限；yue2 剝除時間戳（YuE2 不認時間戳結構控制）但
- * **保留 [Verse]/[Chorus] 段落標籤**（那是歌詞欄必需語法）、允許換行、上限 600 runes（超出按權重丟低優先層）。
- * 全程在後端發生，用戶無感。
+ * 并补齐中性指令、把 `[BPM: 120]` 这类所有平台都不解析的伪装参数改写成散文、
+ * 把空泛／缺陷词换成库内有依据的具体语汇、修剪超过两个的 MOOD，最后依目标
+ * 通路执行硬规则：flowmusic 剥除死掉的时间戳、无歌词标签时压成单行并压进
+ * 220 runes（超限依 CORE_01 权重由低到高整层丢弃，仍超才硬截——硬截尽量用满预算：
+ * 先取前 cap runes，≥60% cap 有子句边界才退、否则退到最后空白或就地切）；
+ * lyria 保留官方时间戳、不设 220 上限；yue2 剥除时间戳（YuE2 不认时间戳结构控制）但
+ * **保留 [Verse]/[Chorus] 段落标签**（那是歌词栏必需语法）、允许换行、上限 600 runes（超出按权重丢低优先层）。
+ * 全程在后端发生，用户无感。
  *
- * 知識來源：SunoForge v3.0 配方庫（repo `skills/music-director/files/`，MIT，
- * 上游 sanic732/SunoForge）＋本專案對生產通路 FlowMusic2API 的實測
- * （`DATA_FLOWMUSIC_2026-09.md`，2026-09-11，n=3×2 clips）。每個規則對應
- * 一項「某種音樂 prompt 為什麼會掛」的生產事實，註釋逐條引用來源檔行號。
+ * 知识来源：SunoForge v3.0 配方库（repo `skills/music-director/files/`，MIT，
+ * 上游 sanic732/SunoForge）＋本专案对生产通路 FlowMusic2API 的实测
+ * （`DATA_FLOWMUSIC_2026-09.md`，2026-09-11，n=3×2 clips）。每个规则对应
+ * 一项「某种音乐 prompt 为什么会挂」的生产事实，注释逐条引用来源档行号。
  *
- * 兩處刻意的「不建」——庫無依據就留空，禁止發明：
- *   1. 同義詞陷阱（homograph）表：庫的四檔裡沒有任何音樂域同義詞／雙義詞條目
- *      （grep 無 homograph/synonym/ambiguity 條目），故 HOMOGRAPH_FIXES 留空。
- *   2. 中文空泛詞（好聽／震撼…）：庫內無對應詞條或替換目標，未建替換表。
- *   3. 中文偵測詞表同理：六層偵測用庫內英文詞條＋DATA_FLOWMUSIC 的方括號
- *      段落標籤；純中文用詞偵測不到時，layers 如實回報 false 並補中性指令。
+ * 两处刻意的「不建」——库无依据就留空，禁止发明：
+ *   1. 同义词陷阱（homograph）表：库的四档里没有任何音乐域同义词／双义词条目
+ *      （grep 无 homograph/synonym/ambiguity 条目），故 HOMOGRAPH_FIXES 留空。
+ *   2. 中文空泛词（好听／震撼…）：库内无对应词条或替换目标，未建替换表。
+ *   3. 中文侦测词表同理：六层侦测用库内英文词条＋DATA_FLOWMUSIC 的方括号
+ *      段落标签；纯中文用词侦测不到时，layers 如实回报 false 并补中性指令。
  *
- * 零依賴（同 `music-lyria.ts` 慣例）：VPS 落位檔必須自足，本檔不 import 任何模組。
+ * 零依赖（同 `music-lyria.ts` 惯例）：VPS 落位档必须自足，本档不 import 任何模组。
  */
 
-/** 目標通路。`flowmusic` = 生產 FlowMusic2API；`lyria` = Google Lyria；`yue2` = YuE2（Modal，白盒樂譜）。 */
+/** 目标通路。`flowmusic` = 生产 FlowMusic2API；`lyria` = Google Lyria；`yue2` = YuE2（Modal，白盒乐谱）。 */
 export type MusicChannel = "flowmusic" | "lyria" | "yue2";
 
-/** 六層風格公式的槽位 id。 */
+/** 六层风格公式的槽位 id。 */
 export type MusicLayerId = "genre" | "mood" | "instrumentation" | "vocal" | "structure" | "production";
 
-/** 六層固定順序（＝組裝順序）。來源：CORE_01_STYLE.md:35-40 §1、:965-973 §13。 */
+/** 六层固定顺序（＝组装顺序）。来源：CORE_01_STYLE.md:35-40 §1、:965-973 §13。 */
 export const MUSIC_LAYER_IDS: readonly MusicLayerId[] = [
   "genre",
   "mood",
@@ -44,57 +44,57 @@ export const MUSIC_LAYER_IDS: readonly MusicLayerId[] = [
 ];
 
 export interface MusicDirectorOptions {
-  /** 目標通路。缺省 `"lyria"`（保守：不動時間戳；時間戳在 flowmusic 是死控件）。 */
+  /** 目标通路。缺省 `"lyria"`（保守：不动时间戳；时间戳在 flowmusic 是死控件）。 */
   channel?: MusicChannel;
-  /** 文本是否含歌詞／段落標籤。缺省自動偵測（判別式同 DATA_FLOWMUSIC_2026-09.md:113-115 §3 step 2）。 */
+  /** 文本是否含歌词／段落标签。缺省自动侦测（判别式同 DATA_FLOWMUSIC_2026-09.md:113-115 §3 step 2）。 */
   hasLyrics?: boolean;
-  /** 上游模型 id。規則庫對 model 家族無 prompt 控制差異（CORE_01／DATA_* 無此依據），收下不用。 */
+  /** 上游模型 id。规则库对 model 家族无 prompt 控制差异（CORE_01／DATA_* 无此依据），收下不用。 */
   modelId?: string;
-  /** 目標時長（秒）。≥120 時結構補層改用整曲措辭（DATA_FLOWMUSIC §4 實測成品 162–182s）。 */
+  /** 目标时长（秒）。≥120 时结构补层改用整曲措辞（DATA_FLOWMUSIC §4 实测成品 162–182s）。 */
   durationSeconds?: number;
 }
 
 export interface MusicDirectorResult {
-  /** 導演化後的 prompt（純函數決定性產物）。 */
+  /** 导演化后的 prompt（纯函数决定性产物）。 */
   prompt: string;
-  /** 用戶原 prompt 的六層偵測結果（如實回報，不因補齊而變 true）。 */
+  /** 用户原 prompt 的六层侦测结果（如实回报，不因补齐而变 true）。 */
   layers: Record<MusicLayerId, boolean>;
-  /** 實際改寫過的規則 id；沒改就是空陣列。 */
+  /** 实际改写过的规则 id；没改就是空阵列。 */
   applied: string[];
-  /** 偵測到但無法確定性修補的缺口（不得虛報）。 */
+  /** 侦测到但无法确定性修补的缺口（不得虚报）。 */
   warnings: string[];
-  /** 因長度上限被整層丟棄的層 id（補層與按層壓縮丟掉的核心子句層都算）。 */
+  /** 因长度上限被整层丢弃的层 id（补层与按层压缩丢掉的核心子句层都算）。 */
   truncated: MusicLayerId[];
-  /** 超限時按層壓縮、整句丟棄的子句數（含層子句與非層細節子句）。缺省＝未發生壓縮。 */
+  /** 超限时按层压缩、整句丢弃的子句数（含层子句与非层细节子句）。缺省＝未发生压缩。 */
   compressedClauses?: number;
-  /** 超限按層壓縮時整句丟棄的核心子句層 id（只含用戶原文本命中的層，供回執如實說明）。 */
+  /** 超限按层压缩时整句丢弃的核心子句层 id（只含用户原文本命中的层，供回执如实说明）。 */
   compressedLayers?: MusicLayerId[];
-  /** 壓縮後仍被迫在單一子句中途截斷（極端情形：一句就長過上限）。true 時尾端可能不完整。 */
+  /** 压缩后仍被迫在单一子句中途截断（极端情形：一句就长过上限）。true 时尾端可能不完整。 */
   hardTruncated?: boolean;
 }
 
 /**
- * 通路長度硬上限（runes = Unicode code points，Go 的 rune 語義）。
- * 來源：DATA_FLOWMUSIC_2026-09.md:94 §2 row ⑦、:117-121 §3 step 3-4（無歌詞標籤壓單行 220；
- * 帶 `歌词`／`lyrics`／段落標籤走保版面分支 3000）；:204 §5 checklist 4（壓在 ~220 內）。
+ * 通路长度硬上限（runes = Unicode code points，Go 的 rune 语义）。
+ * 来源：DATA_FLOWMUSIC_2026-09.md:94 §2 row ⑦、:117-121 §3 step 3-4（无歌词标签压单行 220；
+ * 带 `歌词`／`lyrics`／段落标签走保版面分支 3000）；:204 §5 checklist 4（压在 ~220 内）。
  */
 const CHANNEL_LIMITS = {
   flowmusicFlat: 220,
   flowmusicLayout: 3000,
   /**
-   * YuE2 style 欄上限 600 runes。依據（2026-09-28 本機 8GB 卡實測）：style 進 NAR prefill 的
-   * prefix，1353 字 style＋500 token ABC 在 NAR 階段 OOM；同單截到 600 字 → prefix 675、
-   * 峰值 7.10 GiB、52.4 秒成片。自譜成功單 prefix 皆 ≤846。凍結合約無字數條款，這是顯存預算。
+   * YuE2 style 栏上限 600 runes。依据（2026-09-28 本机 8GB 卡实测）：style 进 NAR prefill 的
+   * prefix，1353 字 style＋500 token ABC 在 NAR 阶段 OOM；同单截到 600 字 → prefix 675、
+   * 峰值 7.10 GiB、52.4 秒成片。自谱成功单 prefix 皆 ≤846。冻结合约无字数条款，这是显存预算。
    */
   yue2Style: 600,
 } as const;
 
-/** 整曲門檻（秒）：≥ 此值時結構補層講「整曲」。來源：DATA_FLOWMUSIC_2026-09.md:148-159 §4（成品 162–182s）。 */
+/** 整曲门槛（秒）：≥ 此值时结构补层讲「整曲」。来源：DATA_FLOWMUSIC_2026-09.md:148-159 §4（成品 162–182s）。 */
 const LONG_TRACK_SECONDS = 120;
 
 /**
- * 由低到高的丟棄權重：GENRE 承重排第一，其餘依 CORE_01 §13 組裝序遞減。
- * 來源：CORE_01_STYLE.md:42 §1 Layer 1「load-bearing, goes first」、:965-973 §13 ORDER OF OPERATIONS、
+ * 由低到高的丢弃权重：GENRE 承重排第一，其余依 CORE_01 §13 组装序递减。
+ * 来源：CORE_01_STYLE.md:42 §1 Layer 1「load-bearing, goes first」、:965-973 §13 ORDER OF OPERATIONS、
  * :1010-1016 §13 LENGTH DISCIPLINE「Front-loading matters more than word count」。
  */
 const LAYER_WEIGHT: Record<MusicLayerId, number> = {
@@ -106,33 +106,33 @@ const LAYER_WEIGHT: Record<MusicLayerId, number> = {
   production: 1,
 };
 
-/** 六層偵測詞條（庫內英文／羅馬化詞條；中文用詞無庫內依據，見檔首說明）。 */
+/** 六层侦测词条（库内英文／罗马化词条；中文用词无库内依据，见档首说明）。 */
 const GENRE_WORDS =
   "glam metal|heavy metal|metal|death metal|black metal|grunge|post-?punk|hardcore|punk|rockabilly|surf rock|math rock|alt-?rock|rock|nb-?rock|cool jazz|bebop|swing|jazz|delta blues|blues|bluegrass|americana|country|folk|soul|motown|funk|disco|r&b|rnb|boom bap|hip-?hop|trap|drill|phonk|rap|acid house|deep house|house|techno|trance|uk garage|garage|dubstep|drum and bass|dnb|dub|dancehall|reggae|ska|trip-?hop|downtempo|ambient|drone|shoegaze|dream pop|synthwave|vaporwave|retrowave|city pop|synth-?pop|k-?pop|j-?pop|electro|electronic|edm|idm|lo-?fi|bedroom pop|indie|alternative|emo|pop|baroque|classical|orchestral|cinematic|score|soundtrack|chamber|opera|choral|gospel|salsa|bossa nova|samba|tango|flamenco|cumbia|afrobeat|celtic|klezmer|gamelan|ballad|waltz|post-?rock|progressive|psychedelic|slowcore|neo-?soul|guofeng";
 
-/** MOOD 詞表＝CORE_01 §4 PALETTE 的 26 個主詞＋括號內同義詞。來源：CORE_01_STYLE.md:256-300 §4（PALETTE :261）。 */
+/** MOOD 词表＝CORE_01 §4 PALETTE 的 26 个主词＋括号内同义词。来源：CORE_01_STYLE.md:256-300 §4（PALETTE :261）。 */
 const MOOD_WORDS =
   "uplifting|positive|lifting|melancholic|melancholy|sad|contemplative|haunting|eerie|lingering|dark|gloomy|ominous|joyful|happy|celebratory|nostalgic|wistful|romantic|tender|intense|powerful|dramatic|dreamy|ethereal|floating|peaceful|calm|unhurried|anxious|tense|unsettled|euphoric|blissful|ecstatic|mysterious|enigmatic|aggressive|confrontational|playful|teasing|bittersweet|triumphant|victorious|somber|grave|intimate|defiant|rebellious|vulnerable|exposed|sultry|sensual|brooding|introspective|weary|reverent|devotional";
 
-/** INSTRUMENTATION 詞表＝CORE_01 §5 的主張（樂器名）＋DATA_VOCAB §6 目錄內的樂器項。 */
+/** INSTRUMENTATION 词表＝CORE_01 §5 的主张（乐器名）＋DATA_VOCAB §6 目录内的乐器项。 */
 const INSTRUMENT_WORDS =
   "nylon-string|acoustic guitar|electric guitar|guitars?|grand piano|upright piano|pianos?|rhodes|wurlitzer|harpsichord|accordion|keyboards?|keys|synths?|synthesizers?|moog|pads?|organs?|violins?|violas?|cellos?|double bass|upright bass|strings|harps?|flutes?|dizi|piccolo|clarinets?|oboes?|bassoons?|saxophones?|sax|flugelhorn|trumpets?|trombones?|french horn|horns?|brass|tuba|drum kit|drums|kicks?|snares?|hi-?hats?|toms?|cymbals?|percussion|congas|congas?|bongos|timbales|tabla|taiko|timpani|glockenspiel|marimba|vibraphone|xylophone|808|sub bass|bassline|bass|banjos?|mandolins?|ukulele|sitars?|kotos?|shakuhachi|guzheng|erhu|pipa|sarod|oud|didgeridoo|steel drums?|pedal steel|lap steel|choir|vocoder";
 
-/** VOCAL 詞表＝CORE_01 §6 的四要素（性別／音域／角色／唱法）＋DATA_FLOWMUSIC 的器樂聲明。 */
+/** VOCAL 词表＝CORE_01 §6 的四要素（性别／音域／角色／唱法）＋DATA_FLOWMUSIC 的器乐声明。 */
 const VOCAL_WORDS =
   "vocals?|vocalist|singers?|voices?|male|female|tenor|alto|soprano|baritones?|falsetto|choir|choral|harmonies|harmony|backing vocals|ad-?libs|duet|humming|whispered|spoken word|rapped|instrumental|no vocals|a cappella|acapella";
 
-/** STRUCTURE 偵測：方括號段落標籤（DATA_FLOWMUSIC 判別式）＋結構詞＋時間戳。 */
+/** STRUCTURE 侦测：方括号段落标签（DATA_FLOWMUSIC 判别式）＋结构词＋时间戳。 */
 const STRUCTURE_WORDS =
   "\\[(?:verse|chorus|bridge|intro|outro|pre-?chorus|hook|refrain|breakdown|drop|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)\\]|\\b(?:verses?|choruses|bridges?|intros?|outros?|pre-?chorus|hooks?|refrain|coda|middle eight|call and response|aaba|twelve-?bar|strophic|through-?composed|buildups?|build-?up|breakdowns?|drops?)\\b|\\b\\d{1,2}:\\d{2}\\b";
 
-/** PRODUCTION 偵測＝CORE_01 §9 的環境／混音語彙＋速度與調性的散文寫法。 */
+/** PRODUCTION 侦测＝CORE_01 §9 的环境／混音语汇＋速度与调性的散文写法。 */
 const PRODUCTION_WORDS =
   "\\b(?:produced|production|mixes?|mixing|master(?:ed|ing)?|reverbs?|delays?|echo(?:es)?|compression|compressed|sidechain|stereo|mono|width|tape|vinyl|analog(?:ue)?|valve|saturation|saturated|warm|polished|raw|gritty|spacious|punchy|minimal|dry|wet|close-?mic|room|hall|cathedral|studio|stage|live|concert|bpm|tempo|key of|front-?to-?back|hi-?fi|console|decay|headroom)\\b|\\b[a-g](?:\\s*#|\\s*b)?\\s*(?:major|minor)\\b";
 
 /**
- * 六層偵測用正則。層存在時保留用戶原話，缺漏時才補中性指令。
- * 來源：CORE_01_STYLE.md:29-100 §1（六層定義）、:965-973 §13（組裝序）。
+ * 六层侦测用正则。层存在时保留用户原话，缺漏时才补中性指令。
+ * 来源：CORE_01_STYLE.md:29-100 §1（六层定义）、:965-973 §13（组装序）。
  */
 const MUSIC_LAYER_PATTERNS: Record<MusicLayerId, RegExp> = {
   genre: new RegExp(`(?:${GENRE_WORDS})`, "i"),
@@ -143,20 +143,20 @@ const MUSIC_LAYER_PATTERNS: Record<MusicLayerId, RegExp> = {
   production: new RegExp(`(?:${PRODUCTION_WORDS})`, "i"),
 };
 
-/** MOOD 全域版（計數／修剪用）。 */
+/** MOOD 全域版（计数／修剪用）。 */
 const MOOD_WORD_GLOBAL = new RegExp(`\\b(?:${MOOD_WORDS})\\b`, "gi");
 
-/** 樂器全域版（計數用，CORE_03 §2 CHECK 3）。 */
+/** 乐器全域版（计数用，CORE_03 §2 CHECK 3）。 */
 const INSTRUMENT_GLOBAL = new RegExp(`\\b(?:${INSTRUMENT_WORDS})\\b`, "gi");
 
 /**
- * Anti-slop：空泛／缺陷詞 → 具體可採樣語彙。regex 只做標記，替換由 mapping 決定。
- * 語境相依的詞（distortion／shimmer／compressed）刻意不收：
- * CORE_03_DIAGNOSE.md:389-395 §4 註 1-3 說它們在搖滾／pad 語境是合法描述，只在「用來排除」時才是 trigger，
- * 無上下文無法確定性判定，故不替換。
+ * Anti-slop：空泛／缺陷词 → 具体可采样语汇。regex 只做标记，替换由 mapping 决定。
+ * 语境相依的词（distortion／shimmer／compressed）刻意不收：
+ * CORE_03_DIAGNOSE.md:389-395 §4 注 1-3 说它们在摇滚／pad 语境是合法描述，只在「用来排除」时才是 trigger，
+ * 无上下文无法确定性判定，故不替换。
  */
 const SLOP_WORDS: ReadonlyArray<[RegExp, string]> = [
-  // CORE_03_DIAGNOSE.md:359-404 §4 TRIGGER WORDS → WRITE INSTEAD 逐條
+  // CORE_03_DIAGNOSE.md:359-404 §4 TRIGGER WORDS → WRITE INSTEAD 逐条
   [/\bartifact(?:s)?\b/gi, "clean tone"],
   [/\bglitch(?:es)?\b/gi, "smooth, continuous"],
   [/\bclipping\b/gi, "balanced dynamics"],
@@ -169,38 +169,38 @@ const SLOP_WORDS: ReadonlyArray<[RegExp, string]> = [
   [/\bstatic\b/gi, "clean signal"],
   [/\blow quality\b/gi, "studio-grade"],
   [/\bamateur\b/gi, "professionally recorded"],
-  // CORE_03_DIAGNOSE.md:190-203 §3 row 1：品質模式標籤不存在 → 用描述表達
-  // （[QUALITY: MAX] 等由 rewritePseudoTags 直接刪除）
-  // DATA_VOCAB.md:48-56 §1 THE SUBSTITUTION HABIT 的替換習慣逐條
+  // CORE_03_DIAGNOSE.md:190-203 §3 row 1：品质模式标签不存在 → 用描述表达
+  // （[QUALITY: MAX] 等由 rewritePseudoTags 直接删除）
+  // DATA_VOCAB.md:48-56 §1 THE SUBSTITUTION HABIT 的替换习惯逐条
   [/\bgood production\b/gi, "warm, close-mic, lightly compressed"],
   [/\bnice guitar\b/gi, "jangly clean tone with spring reverb"],
   [/\bcool drums\b/gi, "tight, punchy, slightly behind the beat"],
   [/\bbig sound\b/gi, "wide stereo with long hall decay"],
   [/\bprofessional\b/gi, "balanced, controlled, commercially polished"],
-  // CORE_01_STYLE.md:303-313 §4：「epic」是 border case，trailer／cinematic 之外用 intense 表達
+  // CORE_01_STYLE.md:303-313 §4：「epic」是 border case，trailer／cinematic 之外用 intense 表达
   [/\bepic\b/gi, "intense"],
 ];
 
 /**
- * CORE_01 §4 的「看似情緒、其實沒有音樂資訊」的空詞。庫內未給具體替換目標
- * （只說「spend prompt weight and return nothing」），故不替換、只記 warnings。
+ * CORE_01 §4 的「看似情绪、其实没有音乐资讯」的空词。库内未给具体替换目标
+ * （只说「spend prompt weight and return nothing」），故不替换、只记 warnings。
  * `cool` 刻意不收：CORE_01_STYLE.md:187 §3 的 substitution table 用「1959 New York cool jazz」
- * 當流派名，同庫內雙義，無上下文無法確定性判定。
+ * 当流派名，同库内双义，无上下文无法确定性判定。
  */
 const EMPTY_WORDS: readonly string[] = ["nice", "great", "beautiful", "amazing", "wonderful", "good", "vibey"];
 
 /**
- * 偽標籤：`[Key: Value]` 形式的假參數。key 必須以字母開頭（排除 `[0:00]` 時間戳與
- * `[End - 2:15]` 這類舊式時間碼），value 到 `]` 為止。
- * 來源：CORE_01_STYLE.md:100-110 §1「Bracketed parameter syntax was never parsed by any covered platform」、
+ * 伪标签：`[Key: Value]` 形式的假参数。key 必须以字母开头（排除 `[0:00]` 时间戳与
+ * `[End - 2:15]` 这类旧式时间码），value 到 `]` 为止。
+ * 来源：CORE_01_STYLE.md:100-110 §1「Bracketed parameter syntax was never parsed by any covered platform」、
  * CORE_03_DIAGNOSE.md:105-109 §2 CHECK 6「the highest-volume defect in circulating prompts」。
  */
 const PSEUDO_TAG_PATTERN = /\[([A-Za-z][A-Za-z0-9_ -]*?)\s*:\s*([^\]]+)\]/g;
 
-/** 內容為 MAX 的品質模式假參數 key（整條刪除）。來源：CORE_03_DIAGNOSE.md:190-203 §3 row 1。 */
+/** 内容为 MAX 的品质模式假参数 key（整条删除）。来源：CORE_03_DIAGNOSE.md:190-203 §3 row 1。 */
 const MAX_MODE_KEYS: readonly string[] = ["is_max_mode", "quality", "realism", "real_instruments"];
 
-/** ENERGY 假標籤 → CORE_01 §4 的散文寫法（ENERGY, AS PROSE）。來源：CORE_01_STYLE.md:290-297 §4。 */
+/** ENERGY 假标签 → CORE_01 §4 的散文写法（ENERGY, AS PROSE）。来源：CORE_01_STYLE.md:290-297 §4。 */
 const ENERGY_PROSE: Record<string, string> = {
   low: "low energy, barely moving",
   medium: "steady mid-tempo drive",
@@ -210,7 +210,7 @@ const ENERGY_PROSE: Record<string, string> = {
   "low-high": "builds from near-silence to a wall",
 };
 
-/** 無冒號的死參數（CORE_03 §3 row 1／row 3 的 FIND 清單形式）。來源：CORE_03_DIAGNOSE.md:190-213 §3。 */
+/** 无冒号的死参数（CORE_03 §3 row 1／row 3 的 FIND 清单形式）。来源：CORE_03_DIAGNOSE.md:190-213 §3。 */
 const DEAD_PLAIN_TAGS: ReadonlyArray<[RegExp, string]> = [
   [/\[\s*wide stereo field\s*\]/gi, "wide stereo"],
   [/\[\s*sidechain\s*\]/gi, "pumping sidechain"],
@@ -218,17 +218,17 @@ const DEAD_PLAIN_TAGS: ReadonlyArray<[RegExp, string]> = [
 ];
 
 /**
- * flowmusic 死控件：時間戳。來源：DATA_FLOWMUSIC_2026-09.md:88 §2 row ③「DOES NOT WORK —
- * time codes vanish before the song tool」、:95 row ⑧（`:`,`,`,`.` 被換成空格）、
- * CORE_03_DIAGNOSE.md:257-265 §3 row 9（含舊式 `Intro (0–15s)`／`[End - 2:15]`）。
+ * flowmusic 死控件：时间戳。来源：DATA_FLOWMUSIC_2026-09.md:88 §2 row ③「DOES NOT WORK —
+ * time codes vanish before the song tool」、:95 row ⑧（`:`,`,`,`.` 被换成空格）、
+ * CORE_03_DIAGNOSE.md:257-265 §3 row 9（含旧式 `Intro (0–15s)`／`[End - 2:15]`）。
  */
 const TIMESTAMP_BRACKETED = /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*\]/gi;
 const TIMESTAMP_OLD_PARENTHETICAL = /\(\s*\d{1,2}(?:\s*[-–—]\s*\d{1,2})?\s*s\s*\)/gi;
 const TIMESTAMP_BARE = /\b\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?/g;
 
 /**
- * 歌詞標籤判別式（決定 flowmusic 走 220 單行分支還是 3000 保版面分支）。
- * 來源：DATA_FLOWMUSIC_2026-09.md:113-117 §3 step 2-3（`歌词`／`lyrics` 或
+ * 歌词标签判别式（决定 flowmusic 走 220 单行分支还是 3000 保版面分支）。
+ * 来源：DATA_FLOWMUSIC_2026-09.md:113-117 §3 step 2-3（`歌词`／`lyrics` 或
  * `[verse] [chorus] [bridge] [intro] [outro] [pre-chorus] [主歌] [副歌] [导歌] [桥段] [前奏] [尾奏]`）。
  */
 const LYRICS_MARKER_PATTERN = /(歌词|lyrics)/i;
@@ -236,8 +236,8 @@ const SECTION_TAG_PATTERN =
   /\[(?:verse|chorus|bridge|intro|outro|pre-?chorus|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)\]/i;
 
 /**
- * 缺層補中性指令——不替用戶決定流派／樂器／唱的人。
- * 措辭依 CORE_01_STYLE.md:965-973 §13 的六個決策問題（每層問什麼就補什麼指令）。
+ * 缺层补中性指令——不替用户决定流派／乐器／唱的人。
+ * 措辞依 CORE_01_STYLE.md:965-973 §13 的六个决策问题（每层问什么就补什么指令）。
  */
 const LAYER_FILLS: Record<MusicLayerId, string> = {
   genre: "Genre: name the tradition with its era or scene, first in the line.",
@@ -256,12 +256,12 @@ function replaceAll(prompt: string, table: ReadonlyArray<[RegExp, string]>): str
   return out;
 }
 
-/** runes = Unicode code points（Go rune 語義；DATA_FLOWMUSIC 的上限以 rune 計）。 */
+/** runes = Unicode code points（Go rune 语义；DATA_FLOWMUSIC 的上限以 rune 计）。 */
 function countRunes(text: string): number {
   return Array.from(text).length;
 }
 
-/** 每層缺漏時要補的句子；長曲的結構層講「整曲」。 */
+/** 每层缺漏时要补的句子；长曲的结构层讲「整曲」。 */
 function layerFill(id: MusicLayerId, durationSeconds?: number): string {
   const isLongTrack = durationSeconds !== undefined && durationSeconds >= LONG_TRACK_SECONDS;
   if (id === "structure" && isLongTrack) {
@@ -270,7 +270,7 @@ function layerFill(id: MusicLayerId, durationSeconds?: number): string {
   return LAYER_FILLS[id];
 }
 
-/** 偵測用戶原 prompt 的六層在場情形（回報用，不因補齊而變真）。 */
+/** 侦测用户原 prompt 的六层在场情形（回报用，不因补齐而变真）。 */
 function detectLayers(prompt: string): Record<MusicLayerId, boolean> {
   const layers = {} as Record<MusicLayerId, boolean>;
   for (const id of MUSIC_LAYER_IDS) {
@@ -279,24 +279,24 @@ function detectLayers(prompt: string): Record<MusicLayerId, boolean> {
   return layers;
 }
 
-/** 偽標籤 → 散文／刪除。來源：CORE_03_DIAGNOSE.md:190-251 §3 row 1／3／4／5／6／7。 */
+/** 伪标签 → 散文／删除。来源：CORE_03_DIAGNOSE.md:190-251 §3 row 1／3／4／5／6／7。 */
 function rewritePseudoTags(prompt: string): string {
   return prompt.replace(PSEUDO_TAG_PATTERN, (_match, rawKey: string, rawValue: string) => {
     const key = rawKey.trim().toLowerCase();
     const value = rawValue.trim();
-    // row 1：沒有隱藏品質模式，整條刪除
+    // row 1：没有隐藏品质模式，整条删除
     if (MAX_MODE_KEYS.includes(key) && /^max$/i.test(value)) return "";
-    // row 4：樂理參數落成 Style 內的散文，「120 BPM」「key of A minor」
+    // row 4：乐理参数落成 Style 内的散文，「120 BPM」「key of A minor」
     if (key === "bpm" || key === "tempo") return /\bbpm\b/i.test(value) ? value : `${value} BPM`;
     if (key === "key") return `key of ${value}`;
-    // row 5：情緒／能量／氛圍假標籤 → 詞本身就是意義，去括號與冒號
+    // row 5：情绪／能量／氛围假标签 → 词本身就是意义，去括号与冒号
     if (key === "energy") return ENERGY_PROSE[value.toLowerCase()] ?? `${value} energy`;
-    // row 6：`[Sound: Rain]` → 章節級 `[Rain]`
+    // row 6：`[Sound: Rain]` → 章节级 `[Rain]`
     if (key === "sound") return `[${value}]`;
-    // row 7：唱法方向 → 散文；唱的人是另一層，這裡只把 value 交還
+    // row 7：唱法方向 → 散文；唱的人是另一层，这里只把 value 交还
     if (key === "vocal" || key === "vocal style") return `${value} lead vocal`;
     if (key === "choir") return `${value} choir`;
-    // row 3：混音參數 → Style 內的散文
+    // row 3：混音参数 → Style 内的散文
     if (key === "eq") return `${value} mids`;
     if (key === "compression") return /^heavy/i.test(value) ? "heavily compressed" : `${value} compression`;
     if (key === "focus") return `${value} focus`;
@@ -305,7 +305,7 @@ function rewritePseudoTags(prompt: string): string {
   });
 }
 
-/** 修掉刪標籤／修剪留下的空子句分隔（`, ,`、行尾逗號）；只動標點，不動文字。 */
+/** 修掉删标签／修剪留下的空子句分隔（`, ,`、行尾逗号）；只动标点，不动文字。 */
 function tidySeparators(prompt: string): string {
   return prompt
     .replace(/([,;，；])\s*(?=[,;，；])/g, "$1")
@@ -314,7 +314,7 @@ function tidySeparators(prompt: string): string {
     .trim();
 }
 
-/** 找出庫內「沒有音樂資訊」的空詞（只回報，不替換）。來源：CORE_01_STYLE.md:303-313 §4。 */
+/** 找出库内「没有音乐资讯」的空词（只回报，不替换）。来源：CORE_01_STYLE.md:303-313 §4。 */
 function findEmptyWords(prompt: string): string[] {
   const found: string[] = [];
   for (const word of EMPTY_WORDS) {
@@ -323,7 +323,7 @@ function findEmptyWords(prompt: string): string[] {
   return found;
 }
 
-/** 收集 MOOD 在場詞（去重、依出現序）。來源：CORE_01_STYLE.md:261-288 §4 PALETTE。 */
+/** 收集 MOOD 在场词（去重、依出现序）。来源：CORE_01_STYLE.md:261-288 §4 PALETTE。 */
 function findMoodWords(prompt: string): string[] {
   const matches = prompt.match(MOOD_WORD_GLOBAL) ?? [];
   const seen: string[] = [];
@@ -335,9 +335,9 @@ function findMoodWords(prompt: string): string[] {
 }
 
 /**
- * 超過兩個的 MOOD 移除（保留前兩個出現的）。相容性判定（例如 dark + euphoric 會被平均掉）
- * 庫內沒有可用的相容／衝突對照表，故只能確定性修剪數量、把相容性留給 warnings。
- * 來源：CORE_01_STYLE.md:54-60 §1 Layer 2「Two moods maximum」、CORE_03_DIAGNOSE.md:94-99 §2 CHECK 4。
+ * 超过两个的 MOOD 移除（保留前两个出现的）。相容性判定（例如 dark + euphoric 会被平均掉）
+ * 库内没有可用的相容／冲突对照表，故只能确定性修剪数量、把相容性留给 warnings。
+ * 来源：CORE_01_STYLE.md:54-60 §1 Layer 2「Two moods maximum」、CORE_03_DIAGNOSE.md:94-99 §2 CHECK 4。
  */
 function trimExtraMoods(prompt: string, moods: readonly string[]): string {
   let out = prompt;
@@ -351,7 +351,7 @@ function trimExtraMoods(prompt: string, moods: readonly string[]): string {
     .trim();
 }
 
-/** flowmusic 保版面分支不適用：時間戳一律剝除（時間碼在上游消失），描述文字保留。 */
+/** flowmusic 保版面分支不适用：时间戳一律剥除（时间码在上游消失），描述文字保留。 */
 function stripTimestamps(prompt: string): string {
   return prompt
     .replace(TIMESTAMP_BRACKETED, " ")
@@ -363,14 +363,14 @@ function stripTimestamps(prompt: string): string {
     .trim();
 }
 
-/** 時間碼偵測（非全域，可安全 .test；含剝除後會留下的空括號）。 */
+/** 时间码侦测（非全域，可安全 .test；含剥除后会留下的空括号）。 */
 const TIMESTAMP_DETECT =
   /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*\]|\(\s*\d{1,2}(?:\s*[-–—]\s*\d{1,2})?\s*s\s*\)|\b\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?|\[\s*\]|（\s*）|\(\s*\)/;
 
 /**
- * 歌詞欄的時間碼剝除（供工具層對 flowmusic／yue2 的歌詞做與 style 相同的處理）。
- * 只動數字時間碼與其空括號，`[Verse]`／`[Chorus]` 等段落標籤原樣保留（yue2 上游必需語法）；
- * Lyria 認時間碼，呼叫方對該通路不要用本函式。回傳 hadTimestamp 供回執如實說明。
+ * 歌词栏的时间码剥除（供工具层对 flowmusic／yue2 的歌词做与 style 相同的处理）。
+ * 只动数字时间码与其空括号，`[Verse]`／`[Chorus]` 等段落标签原样保留（yue2 上游必需语法）；
+ * Lyria 认时间码，呼叫方对该通路不要用本函式。回传 hadTimestamp 供回执如实说明。
  */
 export function stripLyricsTimestamps(lyrics: string): { lyrics: string; hadTimestamp: boolean } {
   if (!TIMESTAMP_DETECT.test(lyrics)) return { lyrics, hadTimestamp: false };
@@ -378,13 +378,13 @@ export function stripLyricsTimestamps(lyrics: string): { lyrics: string; hadTime
     .split("\n")
     .map((line) => stripTimestamps(line))
     .join("\n")
-    // 剝除時間碼後留在段落標籤內的空白（`[Outro (0-15s)]` → `[Outro ]`）收乾淨。
+    // 剥除时间码后留在段落标签内的空白（`[Outro (0-15s)]` → `[Outro ]`）收干净。
     .replace(/\[\s*([^\]]*?)\s*\]/g, "[$1]")
     .replace(/\n{3,}/g, "\n\n");
   return { lyrics: cleaned, hadTimestamp: true };
 }
 
-/** flowmusic 平面分支：全文壓成一行（換行不帶語義，上游會壓平）。 */
+/** flowmusic 平面分支：全文压成一行（换行不带语义，上游会压平）。 */
 function collapseToSingleLine(prompt: string): string {
   return prompt
     .replace(/\s*\r?\n\s*/g, " ")
@@ -392,18 +392,18 @@ function collapseToSingleLine(prompt: string): string {
     .trim();
 }
 
-/** 歌詞標籤在場？（options.hasLyrics 明示時以明示為準）。 */
+/** 歌词标签在场？（options.hasLyrics 明示时以明示为准）。 */
 function hasLyricsMarker(prompt: string): boolean {
   return LYRICS_MARKER_PATTERN.test(prompt) || SECTION_TAG_PATTERN.test(prompt);
 }
 
-/** 首個子句是否就是流派（front-loading）。來源：CORE_03_DIAGNOSE.md:78-87 §2 CHECK 1、CORE_01_STYLE.md:42 §1。 */
+/** 首个子句是否就是流派（front-loading）。来源：CORE_03_DIAGNOSE.md:78-87 §2 CHECK 1、CORE_01_STYLE.md:42 §1。 */
 function isGenreFrontLoaded(prompt: string): boolean {
   const firstClause = prompt.split(/[,;.\n，；。]/)[0] ?? "";
   return MUSIC_LAYER_PATTERNS.genre.test(firstClause);
 }
 
-/** 樂器數量（去重、去從屬寫法如 horn ⊂ french horn）。來源：CORE_03_DIAGNOSE.md:89-93 §2 CHECK 3、CORE_01_STYLE.md:329-340 §5。 */
+/** 乐器数量（去重、去从属写法如 horn ⊂ french horn）。来源：CORE_03_DIAGNOSE.md:89-93 §2 CHECK 3、CORE_01_STYLE.md:329-340 §5。 */
 function countDistinctInstruments(prompt: string): number {
   const matches = (prompt.match(INSTRUMENT_GLOBAL) ?? []).map((match) => match.toLowerCase().replace(/s$/, ""));
   const distinct = matches.filter((match) => !matches.some((other) => other !== match && other.includes(match)));
@@ -411,33 +411,33 @@ function countDistinctInstruments(prompt: string): number {
 }
 
 /**
- * 硬截的預算下限：退讓後至少留 60% cap（用滿預算的硬性下限，防「一路退到首個
- * 邊界」把 mood／樂器／結構整段丟掉——2026-09-12 實錘：`Intro: soft pad.` 之後
- * 是無逗號長串時舊邏輯只留 15 runes＝7% 預算）。
+ * 硬截的预算下限：退让后至少留 60% cap（用满预算的硬性下限，防「一路退到首个
+ * 边界」把 mood／乐器／结构整段丢掉——2026-09-12 实锤：`Intro: soft pad.` 之后
+ * 是无逗号长串时旧逻辑只留 15 runes＝7% 预算）。
  */
 const MIN_KEEP_RATIO = 0.6;
 
-/** 子句邊界（硬截退讓點）＝中西文逗號／分號／句號／中文列舉頓號。 */
+/** 子句边界（硬截退让点）＝中西文逗号／分号／句号／中文列举顿号。 */
 const CLAUSE_BOUNDARIES: readonly string[] = [",", ";", ".", "，", "；", "。", "、"];
 
-/** 保版面分支多認一個換行邊界。 */
+/** 保版面分支多认一个换行边界。 */
 const LAYOUT_BOUNDARIES: readonly string[] = [...CLAUSE_BOUNDARIES, "\n"];
 
 /**
- * 承重欄位：速度與調性（含 key of X / X major|minor / 和弦級數寫法）。六層偵測把它歸進
- * PRODUCTION（低權重），但 220 壓縮時**必須保住**——2026-10-04 R1 實錘：無歌詞器樂分支被
- * 硬截後 BPM 76／A 小調／Am7–Dm7–G7–Cmaj7 全沒進模型，成品速度調性失控＝白做一版。
+ * 承重栏位：速度与调性（含 key of X / X major|minor / 和弦级数写法）。六层侦测把它归进
+ * PRODUCTION（低权重），但 220 压缩时**必须保住**——2026-10-04 R1 实锤：无歌词器乐分支被
+ * 硬截后 BPM 76／A 小调／Am7–Dm7–G7–Cmaj7 全没进模型，成品速度调性失控＝白做一版。
  */
 const TEMPO_KEY_PATTERN =
   /\b\d{2,3}\s*bpm\b|\bbpm\b|\btempo\b|\bkey of\b|\b[a-g](?:\s*#|\s*b)?\s*(?:major|minor)\b|\b(?:[a-g](?:m|maj|min|dim|aug|7|9|11|13)[0-9a-z]*)(?:\s*[-–—]\s*[a-g](?:m|maj|min|dim|aug|7|9|11|13)[0-9a-z]*)+/i;
 
-/** 子句切分（保留每段尾端分隔符，重建時可逐字還原）；分隔符同硬截退讓點。 */
+/** 子句切分（保留每段尾端分隔符，重建时可逐字还原）；分隔符同硬截退让点。 */
 const CLAUSE_SPLIT_PATTERN = /[^,;.，；。、\n]+[,;.，；。、\n]?/g;
 
-/** 未匹配任何層的細節子句（環境音／時長／樂手描述）＝中等權重：先於 STRUCTURE／PRODUCTION 被丟。 */
+/** 未匹配任何层的细节子句（环境音／时长／乐手描述）＝中等权重：先于 STRUCTURE／PRODUCTION 被丢。 */
 const UNMATCHED_CLAUSE_WEIGHT = 3;
 
-/** 子句權重：BPM／調性承重最高；其餘取命中層的 LAYER_WEIGHT（多層取最大）；未命中＝中權重。 */
+/** 子句权重：BPM／调性承重最高；其余取命中层的 LAYER_WEIGHT（多层取最大）；未命中＝中权重。 */
 function clauseWeight(clause: string): number {
   if (TEMPO_KEY_PATTERN.test(clause)) return 7;
   let best = 0;
@@ -447,7 +447,7 @@ function clauseWeight(clause: string): number {
   return best > 0 ? best : UNMATCHED_CLAUSE_WEIGHT;
 }
 
-/** 子句命中的最高權重層（回報「丟了哪幾層」用；未命中回 null）。 */
+/** 子句命中的最高权重层（回报「丢了哪几层」用；未命中回 null）。 */
 function clauseLayer(clause: string): MusicLayerId | null {
   let bestId: MusicLayerId | null = null;
   let bestWeight = 0;
@@ -460,13 +460,13 @@ function clauseLayer(clause: string): MusicLayerId | null {
   return bestId;
 }
 
-/** 把文本切成可由分隔符逐字還原的子句（空白子句丟棄）。 */
+/** 把文本切成可由分隔符逐字还原的子句（空白子句丢弃）。 */
 function splitClauses(text: string): string[] {
   const matched = text.match(CLAUSE_SPLIT_PATTERN) ?? [];
   return matched.filter((clause) => clause.trim() !== "");
 }
 
-/** 去掉頭尾殘留分隔／空白（只動標點空白，不動文字）。 */
+/** 去掉头尾残留分隔／空白（只动标点空白，不动文字）。 */
 function trimClauseEdges(text: string): string {
   return text
     .replace(/^[\s,;.，；。、\n]+/, "")
@@ -476,10 +476,10 @@ function trimClauseEdges(text: string): string {
 }
 
 /**
- * 超限時的「按層壓縮」（2026-10-04，修 R1 白工）：
- * 保住承重子句（GENRE／MOOD／INSTRUMENTATION 與 BPM／調性），由低到高整句丟棄低權重子句
- * （PRODUCTION → STRUCTURE → …），**絕不切在半句／半詞**。只有「單一子句本身就長過上限」
- * 這種無法兩全的極端情形才退回詞界硬截（回報 hardCapped）。
+ * 超限时的「按层压缩」（2026-10-04，修 R1 白工）：
+ * 保住承重子句（GENRE／MOOD／INSTRUMENTATION 与 BPM／调性），由低到高整句丢弃低权重子句
+ * （PRODUCTION → STRUCTURE → …），**绝不切在半句／半词**。只有「单一子句本身就长过上限」
+ * 这种无法两全的极端情形才退回词界硬截（回报 hardCapped）。
  */
 function compressByClause(
   text: string,
@@ -488,7 +488,7 @@ function compressByClause(
 ): { text: string; droppedLayers: MusicLayerId[]; droppedOther: number; clauseCompressed: boolean; hardCapped: boolean } {
   const clauses = splitClauses(text);
   if (clauses.length <= 1) {
-    // 沒有可整句丟棄的子句邊界：交給截斷器（詞界安全；仍不動半個單詞）。
+    // 没有可整句丢弃的子句边界：交给截断器（词界安全；仍不动半个单词）。
     return { text, droppedLayers: [], droppedOther: 0, clauseCompressed: false, hardCapped: countRunes(text) > limit };
   }
   let kept = clauses.map((clause, index) => ({ clause, index }));
@@ -500,7 +500,7 @@ function compressByClause(
     for (let index = 1; index < kept.length; index += 1) {
       const weight = clauseWeight(kept[index].clause);
       const pickWeight = clauseWeight(kept[pick].clause);
-      // 同權重丟後段（保留前段＝front-loading，CORE_01 §13）。
+      // 同权重丢后段（保留前段＝front-loading，CORE_01 §13）。
       if (weight < pickWeight || (weight === pickWeight && kept[index].index > kept[pick].index)) pick = index;
     }
     const layer = clauseLayer(kept[pick].clause);
@@ -518,16 +518,16 @@ function compressByClause(
   };
 }
 
-/** 去掉硬截尾端的殘留分隔（只動標點空白，不動文字）。 */
+/** 去掉硬截尾端的残留分隔（只动标点空白，不动文字）。 */
 function trimBoundaryTail(text: string): string {
   return text.replace(/[\s,;.，；。、]+$/, "");
 }
 
 /**
- * 硬截：盡量用滿預算。
- * ① 取前 cap runes；② 若 ≥60% cap 處存在子句邊界 → 退到該邊界（保語義完整）；
- * ③ 否則退到最後一個空白（拉丁文避免切斷單詞）；④ 無空白或空白退讓會低於
- * 60% cap 時就地在 cap 處切（CJK 長串不為找邊界大幅退讓）。
+ * 硬截：尽量用满预算。
+ * ① 取前 cap runes；② 若 ≥60% cap 处存在子句边界 → 退到该边界（保语义完整）；
+ * ③ 否则退到最后一个空白（拉丁文避免切断单词）；④ 无空白或空白退让会低于
+ * 60% cap 时就地在 cap 处切（CJK 长串不为找边界大幅退让）。
  */
 function truncateAtBoundary(text: string, limit: number, allowNewline: boolean): string {
   const chars = Array.from(text);
@@ -555,26 +555,26 @@ function truncateAtBoundary(text: string, limit: number, allowNewline: boolean):
 
 interface AssembledPrompt {
   prompt: string;
-  /** 實際留在 prompt 裡的補層 id。 */
+  /** 实际留在 prompt 里的补层 id。 */
   kept: MusicLayerId[];
-  /** 因上限被整層丟棄的補層 id。 */
+  /** 因上限被整层丢弃的补层 id。 */
   truncated: MusicLayerId[];
-  /** 超限按層壓縮核心時、整句丟棄的層 id。 */
+  /** 超限按层压缩核心时、整句丢弃的层 id。 */
   compressed: MusicLayerId[];
-  /** 超限按層壓縮時、整句丟棄的非層細節子句數。 */
+  /** 超限按层压缩时、整句丢弃的非层细节子句数。 */
   compressedOther: number;
-  /** 是否真的走了按層壓縮（整句丟棄）而非直接硬截。 */
+  /** 是否真的走了按层压缩（整句丢弃）而非直接硬截。 */
   clauseCompressed: boolean;
-  /** 是否在丟無可丟之後仍超限、走了子句邊界硬截。 */
+  /** 是否在丢无可丢之后仍超限、走了子句边界硬截。 */
   hardCapped: boolean;
 }
 
 /**
- * 依上限組裝：超限時先依 CORE_01 權重由低到高整層丟棄補層；仍超則對核心文本
- * **按層壓縮**（整句丟低權重子句、保 BPM／調性與承重層，絕不切半句）；只有單一子句
- * 本身就長過上限才退回詞界硬截。
- * 來源：CORE_01_STYLE.md:42 §1（genre 承重）、:965-973 §13（組裝序＝權重序）、
- * DATA_FLOWMUSIC_2026-09.md:94 §2 row ⑦（上限存在）、:204 §5 checklist 4（壓在 ~220 內）。
+ * 依上限组装：超限时先依 CORE_01 权重由低到高整层丢弃补层；仍超则对核心文本
+ * **按层压缩**（整句丢低权重子句、保 BPM／调性与承重层，绝不切半句）；只有单一子句
+ * 本身就长过上限才退回词界硬截。
+ * 来源：CORE_01_STYLE.md:42 §1（genre 承重）、:965-973 §13（组装序＝权重序）、
+ * DATA_FLOWMUSIC_2026-09.md:94 §2 row ⑦（上限存在）、:204 §5 checklist 4（压在 ~220 内）。
  */
 function assembleWithLimit(
   core: string,
@@ -609,7 +609,7 @@ function assembleWithLimit(
     compressedOther = byClause.droppedOther;
     clauseCompressed = byClause.clauseCompressed;
     text = byClause.text;
-    // 單一子句仍長過上限＝無法兩全，退回詞界安全硬截（盡量不切斷單詞；如實標記）。
+    // 单一子句仍长过上限＝无法两全，退回词界安全硬截（尽量不切断单词；如实标记）。
     if (byClause.hardCapped) {
       text = truncateAtBoundary(text, limit, allowNewline);
       hardCapped = true;
@@ -619,9 +619,9 @@ function assembleWithLimit(
 }
 
 /**
- * 優化一段音樂 prompt。純函數、無副作用、同步執行——零成本零延遲。
- * 輸入已 trim 過。與 `invisible-prompt-director` 的規則層同構：偵測槽位 →
- * anti-slop → 偽標籤剝除 → mood 修剪 → 通路硬規則 → 補層 → 長度上限。
+ * 优化一段音乐 prompt。纯函数、无副作用、同步执行——零成本零延迟。
+ * 输入已 trim 过。与 `invisible-prompt-director` 的规则层同构：侦测槽位 →
+ * anti-slop → 伪标签剥除 → mood 修剪 → 通路硬规则 → 补层 → 长度上限。
  */
 export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptions = {}): MusicDirectorResult {
   const channel = options.channel ?? "lyria";
@@ -634,7 +634,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   const applied: string[] = [];
   const warnings: string[] = [];
 
-  // 1. anti-slop：缺陷詞／空泛片語 → 具體語彙；沒有替換目標的空詞只回報。
+  // 1. anti-slop：缺陷词／空泛片语 → 具体语汇；没有替换目标的空词只回报。
   const slopped = replaceAll(user, SLOP_WORDS);
   if (slopped !== user) applied.push("anti-slop");
   for (const word of findEmptyWords(slopped)) {
@@ -643,14 +643,14 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     );
   }
 
-  // 2. 偽標籤剝除：假參數改寫成散文或刪除（所有平台都不解析）。
+  // 2. 伪标签剥除：假参数改写成散文或删除（所有平台都不解析）。
   const detagged = replaceAll(slopped, DEAD_PLAIN_TAGS);
   const tagRewritten = rewritePseudoTags(detagged);
   const rewroteTags = tagRewritten !== slopped;
   const untagged = rewroteTags ? tidySeparators(tagRewritten) : detagged;
   if (rewroteTags) applied.push("strip-pseudo-tags");
 
-  // 3. MOOD ≤2：多的移除，並如實回報（相容性庫內無對照表，只能報數量）。
+  // 3. MOOD ≤2：多的移除，并如实回报（相容性库内无对照表，只能报数量）。
   const moods = findMoodWords(untagged);
   let shaped = untagged;
   if (moods.length > 2) {
@@ -661,7 +661,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     );
   }
 
-  // 4. 通路硬規則。
+  // 4. 通路硬规则。
   let core = shaped;
   let limit: number | null = null;
   let allowNewline = true;
@@ -670,10 +670,10 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     if (stripped !== core) applied.push("strip-timestamps");
     core = stripped;
     if (options.hasLyrics ?? hasLyricsMarker(core)) {
-      // 保版面分支：換行與標點保留，上限 3000 runes。
+      // 保版面分支：换行与标点保留，上限 3000 runes。
       limit = CHANNEL_LIMITS.flowmusicLayout;
     } else {
-      // 平面分支：壓成單行，上限 220 runes。
+      // 平面分支：压成单行，上限 220 runes。
       const collapsed = collapseToSingleLine(core);
       if (collapsed !== core) applied.push("collapse-single-line");
       core = collapsed;
@@ -681,20 +681,20 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
       limit = CHANNEL_LIMITS.flowmusicFlat;
     }
   } else if (channel === "yue2") {
-    // YuE2 硬規則（依凍結合約的能力邊界，2026-09-18）：
-    //  ① 時間戳剝除：`[0:00 - 0:10]` 只有 Lyria 認，YuE2 不支援時間戳結構控制 → 剝掉
-    //     （用同一個 stripTimestamps，只吃數字時間碼與舊式 (0-15s)）。
-    //  ② [Verse]/[Chorus] 段落標籤**保留**：那是 YuE2 歌詞欄的必需語法，不是偽標籤，
-    //     stripTimestamps 不動它（它只認數字時間碼），標籤原樣穿過。
-    //  ③ style 是散文描述：允許換行，不做 collapse-single-line、不套 220 平面分支。
-    //  ④ 上限 yue2Style＝600 runes 顯存預算（依據見 CHANNEL_LIMITS 註釋）。
+    // YuE2 硬规则（依冻结合约的能力边界，2026-09-18）：
+    //  ① 时间戳剥除：`[0:00 - 0:10]` 只有 Lyria 认，YuE2 不支援时间戳结构控制 → 剥掉
+    //     （用同一个 stripTimestamps，只吃数字时间码与旧式 (0-15s)）。
+    //  ② [Verse]/[Chorus] 段落标签**保留**：那是 YuE2 歌词栏的必需语法，不是伪标签，
+    //     stripTimestamps 不动它（它只认数字时间码），标签原样穿过。
+    //  ③ style 是散文描述：允许换行，不做 collapse-single-line、不套 220 平面分支。
+    //  ④ 上限 yue2Style＝600 runes 显存预算（依据见 CHANNEL_LIMITS 注释）。
     const stripped = stripTimestamps(core);
     if (stripped !== core) applied.push("strip-timestamps");
     core = stripped;
     limit = CHANNEL_LIMITS.yue2Style;
   }
 
-  // 5. 缺層補中性指令（不替用戶決定流派／樂器／唱的人），再依上限組裝。
+  // 5. 缺层补中性指令（不替用户决定流派／乐器／唱的人），再依上限组装。
   const fills: Array<{ id: MusicLayerId; text: string }> = [];
   for (const id of MUSIC_LAYER_IDS) {
     if (!layers[id]) fills.push({ id, text: layerFill(id, options.durationSeconds) });
@@ -717,7 +717,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     );
   }
 
-  // 6. 偵測到但無法確定性修補的缺口（如實回報，不虛報）。
+  // 6. 侦测到但无法确定性修补的缺口（如实回报，不虚报）。
   if (layers.genre && !isGenreFrontLoaded(user)) {
     warnings.push(
       "front-loading: genre is present but not in the opening clause (CORE_03_DIAGNOSE §2 CHECK 1; CORE_01_STYLE §1 Layer 1)",

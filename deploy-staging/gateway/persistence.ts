@@ -1,23 +1,23 @@
 /**
- * persistence.ts — 服務端會話持久化（bun:sqlite，零新依賴）
+ * persistence.ts — 服务端会话持久化（bun:sqlite，零新依赖）
  *
- * 架構決策（2026-08-21）：
- * 1. 訊息歷史的權威擁有者是 opencode serve（它自己的存儲在 gateway 重啟後仍完整存在）。
- *    gateway 不複製 messages 進自己的 DB —— 那會製造第二份會漂移的歷史副本。
- *    gateway 需要持久化的只有自己擁有的那部分狀態：
+ * 架构决策（2026-08-21）：
+ * 1. 讯息历史的权威拥有者是 opencode serve（它自己的存储在 gateway 重启后仍完整存在）。
+ *    gateway 不复制 messages 进自己的 DB —— 那会制造第二份会漂移的历史副本。
+ *    gateway 需要持久化的只有自己拥有的那部分状态：
  *      - 身分映射：gateway sessionId ↔ opencode session id ↔ owner key
- *      - SSE replayBuffer（最近 REPLAY_BUFFER_SIZE 幀，斷線/重啟後前端 Last-Event-ID 續傳用）
- *      - 事件翻譯去重狀態（messageRole / suppressedParts 等有界集合）
- *      - 一次性注入標記（vettingInjected / userMemory）
- *      - 畫布摘要（canvasSummary）
- *      - 摘要壓縮水位（compact.lastCount）
- * 2. 存儲選 bun:sqlite（bun 內建）：單文件 /opt/agent-harness/gateway/sessions.db、
- *    WAL 模式、同步 API（getOwnedSession 是同步函數，lazy reload 不用改異步簽名）。
- * 3. 寫入時機：dirty 標記 + 3s 防抖 flush（index.ts 持有 flush 循環），關鍵轉換點
- *    （建立/刪除）同步寫；SIGTERM 時補一次 flush。重啟最多丟 3s 內的 replay 幀，
- *    訊息本身永遠安全在 opencode。
- * 4. 失敗語義 fail-open：DB 不可用時只記日誌、退回純內存行為（與舊版一致），
- *    絕不讓持久化故障殺死 gateway。
+ *      - SSE replayBuffer（最近 REPLAY_BUFFER_SIZE 帧，断线/重启后前端 Last-Event-ID 续传用）
+ *      - 事件翻译去重状态（messageRole / suppressedParts 等有界集合）
+ *      - 一次性注入标记（vettingInjected / userMemory）
+ *      - 画布摘要（canvasSummary）
+ *      - 摘要压缩水位（compact.lastCount）
+ * 2. 存储选 bun:sqlite（bun 内建）：单文件 /opt/agent-harness/gateway/sessions.db、
+ *    WAL 模式、同步 API（getOwnedSession 是同步函数，lazy reload 不用改异步签名）。
+ * 3. 写入时机：dirty 标记 + 3s 防抖 flush（index.ts 持有 flush 循环），关键转换点
+ *    （建立/删除）同步写；SIGTERM 时补一次 flush。重启最多丢 3s 内的 replay 帧，
+ *    讯息本身永远安全在 opencode。
+ * 4. 失败语义 fail-open：DB 不可用时只记日志、退回纯内存行为（与旧版一致），
+ *    绝不让持久化故障杀死 gateway。
  */
 
 import { Database } from "bun:sqlite"
@@ -25,9 +25,9 @@ import { MergedReplayFrame } from "./replay-frame.ts"
 import type { SteerCommand, SteerLedgerStore } from "./steer-identity.ts"
 import { redactForLog } from "./analytics-meta.ts"
 
-// ---- 型別 ----
+// ---- 型别 ----
 
-/** 可持久化的 SessionState 子集（結構化 duck-type，避免與 index.ts 循環 import）。 */
+/** 可持久化的 SessionState 子集（结构化 duck-type，避免与 index.ts 循环 import）。 */
 export interface PersistableState {
   sessionId: string
   apiKey: string
@@ -44,27 +44,27 @@ export interface PersistableState {
   suppressedParts: Set<string>
   canvasSummary?: unknown
   canvasSummaryAt?: number
-  /** 畫布持久快照（canvas.node.* 事件套用後的節點/連線），重啟後回灌 canvasStates。 */
+  /** 画布持久快照（canvas.node.* 事件套用后的节点/连线），重启后回灌 canvasStates。 */
   canvasSnapshot?: { nodes?: unknown[]; connections?: unknown[]; [k: string]: unknown }
-  /** 工作流持久快照（與 canvasSnapshot 同構）：ActiveWorkflow 的可恢復子集
-   *  （模板 id、節點流、節點狀態/結果/成本），重啟後回灌 workflows Map。 */
+  /** 工作流持久快照（与 canvasSnapshot 同构）：ActiveWorkflow 的可恢复子集
+   *  （模板 id、节点流、节点状态/结果/成本），重启后回灌 workflows Map。 */
   workflowSnapshot?: Record<string, unknown>
   vettingInjected: boolean
   userMemory?: { user_profile: Record<string, unknown>; lessons: string[] }
   profileOnboardingPending?: boolean
   compact?: { lastCount: number; at: number }
-  /** N1（2026-08-27）：in-flight turn 打點——turn 開始時寫入、正常結束清零；
-   *  gateway 重啟後恢復會話時據此判斷是否要自動重投 lastPromptBody。 */
+  /** N1（2026-08-27）：in-flight turn 打点——turn 开始时写入、正常结束清零；
+   *  gateway 重启后恢复会话时据此判断是否要自动重投 lastPromptBody。 */
   lastTurnActiveAt?: number
-  /** 會話摘要標題（2026-09-12）：opencode 首條用戶消息後異步生成，gateway
-   *  在 session.idle 鉤子抓取後鏡像進 state 並隨防抖落盤；null/undef=尚未生成。 */
+  /** 会话摘要标题（2026-09-12）：opencode 首条用户消息后异步生成，gateway
+   *  在 session.idle 钩子抓取后镜像进 state 并随防抖落盘；null/undef=尚未生成。 */
   sessionTitle?: string | null
-  /** 2026-10-02：模板偏離 token（網關簽發、單次核銷、TTL 15 分）。落持久層＝跨
-   *  agent-gateway 重啟存活（否則用戶批准過的偏離出口會被重啟關上）。 */
+  /** 2026-10-02：模板偏离 token（网关签发、单次核销、TTL 15 分）。落持久层＝跨
+   *  agent-gateway 重启存活（否则用户批准过的偏离出口会被重启关上）。 */
   tplDeviateToken?: { token: string; at: number } | null
 }
 
-/** DB row 的 data 欄位 JSON 形狀（Map/Set 均序列化為陣列）。 */
+/** DB row 的 data 栏位 JSON 形状（Map/Set 均序列化为阵列）。 */
 interface PersistedData {
   eventCounter: number
   replayBuffer: { id: number; frame: string; merge?: { name: string; ids: number[]; lens: number[] }; strippable?: boolean }[]
@@ -85,9 +85,9 @@ interface PersistedData {
   profileOnboardingPending?: boolean
   compact?: { lastCount: number; at: number }
   lastTurnActiveAt?: number
-  /** 會話摘要標題鏡像（2026-09-12）：null=尚未生成（佔位標題已在抓取側歸一化掉）。 */
+  /** 会话摘要标题镜像（2026-09-12）：null=尚未生成（占位标题已在抓取侧归一化掉）。 */
   title?: string | null
-  /** 2026-10-02：模板偏離 token 鏡像（shape 防護在 hydrateRow，壞形狀一律還原為 null）。 */
+  /** 2026-10-02：模板偏离 token 镜像（shape 防护在 hydrateRow，坏形状一律还原为 null）。 */
   tplDeviateToken?: { token: string; at: number } | null
 }
 
@@ -100,12 +100,12 @@ export interface PersistedRow {
   data: PersistedData
 }
 
-// 注意：DB 路徑在模組載入時固定。bun test 會並行跑多個測試檔且共用本模組單例；
-// 若在 initPersistence() 重新讀 env，各檔會互相把 db 連線指向不同檔案（隔離競態，
-// 實測會打斷 steer-ledger-db 的持久層斷言）。故維持單一路徑、全進程共享。
+// 注意：DB 路径在模组载入时固定。bun test 会并行跑多个测试档且共用本模组单例；
+// 若在 initPersistence() 重新读 env，各档会互相把 db 连线指向不同档案（隔离竞态，
+// 实测会打断 steer-ledger-db 的持久层断言）。故维持单一路径、全进程共享。
 const DB_PATH = process.env.SESSIONS_DB_PATH || "/opt/agent-harness/gateway/sessions.db"
 
-/** 目前使用的 DB 檔路徑（診斷／測試讀回用；唯讀）。 */
+/** 目前使用的 DB 档路径（诊断／测试读回用；唯读）。 */
 export function currentDbPath(): string {
   return DB_PATH
 }
@@ -125,32 +125,32 @@ const textEncoder = new TextEncoder()
 
 // ---- 初始化 ----
 
-// ---- schema 版本化遷移（2026-10-02）----
-// 設計取自 Claude Code 的 `CURRENT_MIGRATION_VERSION` ＋ `runMigrations()`（main.tsx:326-352）
-// 與各 migrateXxx 檔「失敗只記 event、不 throw」的容錯（migrateEnableAllProjectMcpServersToSettings.ts:109-117）
-// ——只取設計概念，未複製其程式碼。
-// 我方差異（理由寫明）：
-//   * 版本載體＝SQLite `PRAGMA user_version`（不另立 config 檔；DB 自帶版本，備份/複製時版本跟著走）。
-//   * 版本只推進到**連續成功**處：SQL schema 有順序依賴，跳過失敗版會讓後續版跑在未升級的 schema 上；
-//     故失敗時**不越過它**，但**不 throw**——記結構化事件（journal ＋ 回傳 failures）後繼續嘗試後續
-//     版本（各版自身冪等、互不依賴），最後把 user_version 寫到連續成功的最後一版。fail-open 與本檔
-//     全局策略一致：遷移故障不得殺死 gateway。
-//   * 每個 migration 內部一律 `IF NOT EXISTS`／先檢查後動，故可安全重複執行（idempotent）。
+// ---- schema 版本化迁移（2026-10-02）----
+// 设计取自 Claude Code 的 `CURRENT_MIGRATION_VERSION` ＋ `runMigrations()`（main.tsx:326-352）
+// 与各 migrateXxx 档「失败只记 event、不 throw」的容错（migrateEnableAllProjectMcpServersToSettings.ts:109-117）
+// ——只取设计概念，未复制其程式码。
+// 我方差异（理由写明）：
+//   * 版本载体＝SQLite `PRAGMA user_version`（不另立 config 档；DB 自带版本，备份/复制时版本跟著走）。
+//   * 版本只推进到**连续成功**处：SQL schema 有顺序依赖，跳过失败版会让后续版跑在未升级的 schema 上；
+//     故失败时**不越过它**，但**不 throw**——记结构化事件（journal ＋ 回传 failures）后继续尝试后续
+//     版本（各版自身幂等、互不依赖），最后把 user_version 写到连续成功的最后一版。fail-open 与本档
+//     全局策略一致：迁移故障不得杀死 gateway。
+//   * 每个 migration 内部一律 `IF NOT EXISTS`／先检查后动，故可安全重复执行（idempotent）。
 //
-// ⚠ 新增欄位的同步清單（現場清點，2026-10-02；漏一處即已踩過的雷）：
-//   一個「持久化到 sessions.data JSON」的新欄位必須同步改：
-//     A. PersistableState 介面（本檔）——記憶體狀態的持久化子集
-//     B. PersistedData 介面（本檔）——落盤 JSON 形狀
-//     C. serialize()（本檔）——寫盤白名單；漏加＝永遠不落盤
-//     D. hydrateRow()（本檔）——讀回還原；漏加＝重啟後旗標丟失（2026-10-02 replay strippable 已踩）
-//     E. PERSISTED_DATA_KEYS（本檔）——集合式守門清單，與 C 的輸出鍵集逐項相等
-//     F. types-gateway.ts 的 SessionState（不在本檔）——持久化欄位的上游宣告
-//     G. 若是**頂層 DB 欄**（非 data JSON 內）→ 另需在 baselineSchema 加欄，並新增一筆
-//        `ALTER TABLE ... ADD COLUMN` 的 migration（版本 +1）；舊庫才不會缺欄
-//     H. 命名別名：state 欄位與 JSON 欄位名不同處（如 sessionTitle ↔ title）兩邊必須各自對齊
-//     I. 只改單欄的 helper（如 setRowTitle）需評估是否也要處理新欄位
-//   守門測試：persistence-schema.test.ts 斷言 serialize() 輸出鍵集 == PERSISTED_DATA_KEYS，
-//   且每個落盤鍵在 hydrateRow() 輸出都能找到（含別名映射）——只改 A/C 忘改 D/E 即失敗。
+// ⚠ 新增栏位的同步清单（现场清点，2026-10-02；漏一处即已踩过的雷）：
+//   一个「持久化到 sessions.data JSON」的新栏位必须同步改：
+//     A. PersistableState 介面（本档）——记忆体状态的持久化子集
+//     B. PersistedData 介面（本档）——落盘 JSON 形状
+//     C. serialize()（本档）——写盘白名单；漏加＝永远不落盘
+//     D. hydrateRow()（本档）——读回还原；漏加＝重启后旗标丢失（2026-10-02 replay strippable 已踩）
+//     E. PERSISTED_DATA_KEYS（本档）——集合式守门清单，与 C 的输出键集逐项相等
+//     F. types-gateway.ts 的 SessionState（不在本档）——持久化栏位的上游宣告
+//     G. 若是**顶层 DB 栏**（非 data JSON 内）→ 另需在 baselineSchema 加栏，并新增一笔
+//        `ALTER TABLE ... ADD COLUMN` 的 migration（版本 +1）；旧库才不会缺栏
+//     H. 命名别名：state 栏位与 JSON 栏位名不同处（如 sessionTitle ↔ title）两边必须各自对齐
+//     I. 只改单栏的 helper（如 setRowTitle）需评估是否也要处理新栏位
+//   守门测试：persistence-schema.test.ts 断言 serialize() 输出键集 == PERSISTED_DATA_KEYS，
+//   且每个落盘键在 hydrateRow() 输出都能找到（含别名映射）——只改 A/C 忘改 D/E 即失败。
 
 export const SCHEMA_VERSION = 3
 
@@ -167,7 +167,7 @@ export interface MigrationReport {
   failures: { version: number; name: string; error: string }[]
 }
 
-/** 讀 `PRAGMA user_version`（SQLite 內建版本載體）；壞掉/缺欄一律視為 0。 */
+/** 读 `PRAGMA user_version`（SQLite 内建版本载体）；坏掉/缺栏一律视为 0。 */
 export function readUserVersion(database: Database): number {
   try {
     const row = database.query("PRAGMA user_version").get() as { user_version?: number } | null
@@ -182,9 +182,9 @@ function writeUserVersion(database: Database, version: number): void {
 }
 
 /**
- * v1 baseline：完整初始 schema（全部 `IF NOT EXISTS`）。新庫與舊庫共用——舊庫已有部分表時
- * 只補缺的，**不動既有資料**，故對 2026-10-02 前已上線的生產庫（user_version=0 但表已存在）
- * 亦安全。此函數亦是把原本散在 initPersistence 的 DDL 收攏後的唯一建表處。
+ * v1 baseline：完整初始 schema（全部 `IF NOT EXISTS`）。新库与旧库共用——旧库已有部分表时
+ * 只补缺的，**不动既有资料**，故对 2026-10-02 前已上线的生产库（user_version=0 但表已存在）
+ * 亦安全。此函数亦是把原本散在 initPersistence 的 DDL 收拢后的唯一建表处。
  */
 function baselineSchema(database: Database): void {
   database.exec(`
@@ -198,8 +198,8 @@ function baselineSchema(database: Database): void {
     )
   `)
   database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_opencode ON sessions(opencode_session_id)")
-  // 用戶級 settings（2026-08-29）：key 維度，owner_key 與 sessions.owner_key
-  // 同一個 key（歸一化方式一致——都是 gateway 收到的原樣 Bearer key）。
+  // 用户级 settings（2026-08-29）：key 维度，owner_key 与 sessions.owner_key
+  // 同一个 key（归一化方式一致——都是 gateway 收到的原样 Bearer key）。
   database.exec(`
     CREATE TABLE IF NOT EXISTS user_settings (
       owner_key  TEXT PRIMARY KEY,
@@ -207,9 +207,9 @@ function baselineSchema(database: Database): void {
       updated_at INTEGER NOT NULL
     )
   `)
-  // 刀 F（2026-09-15）：in-flight rework run 持久化（重啟存活）。復用同一 bun:sqlite
-  // 實例（同一 DB 層、非自造第二套持久層）——重啟時啟動掃描據此判斷孤兒，
-  // finishRun 終態即刪。child_oc 為探針目標，run_id 主鍵保冪等。
+  // 刀 F（2026-09-15）：in-flight rework run 持久化（重启存活）。复用同一 bun:sqlite
+  // 实例（同一 DB 层、非自造第二套持久层）——重启时启动扫描据此判断孤儿，
+  // finishRun 终态即删。child_oc 为探针目标，run_id 主键保幂等。
   database.exec(`
     CREATE TABLE IF NOT EXISTS subagent_reworks (
       run_id     TEXT PRIMARY KEY,
@@ -224,27 +224,27 @@ function baselineSchema(database: Database): void {
       updated_at INTEGER NOT NULL
     )
   `)
-  // 刀 2（2026-09-15）：機器 critic pass 的每會話一次性旗標。同 subagent_reworks 慣例：
-  // 復用同一 bun:sqlite 實例（非自造第二套持久層），session_id 主鍵保冪等；寫入即
-  // 「本會話已用掉唯一一次 machine critic pass」，重啟後仍成立（防重啟繞過 ≤1 上限）。
+  // 刀 2（2026-09-15）：机器 critic pass 的每会话一次性旗标。同 subagent_reworks 惯例：
+  // 复用同一 bun:sqlite 实例（非自造第二套持久层），session_id 主键保幂等；写入即
+  // 「本会话已用掉唯一一次 machine critic pass」，重启后仍成立（防重启绕过 ≤1 上限）。
   database.exec(`
     CREATE TABLE IF NOT EXISTS critic_passes (
       session_id TEXT PRIMARY KEY,
       created_at INTEGER NOT NULL
     )
   `)
-  // REQ-D2b（2026-09-23）：steer 命令身份（tombstone）持久化。**復用同一 bun:sqlite 實例**
-  // （同一 DB 檔、同一連線，非自造第二套持久層，與 subagent_reworks / critic_passes 同慣例）。
+  // REQ-D2b（2026-09-23）：steer 命令身份（tombstone）持久化。**复用同一 bun:sqlite 实例**
+  // （同一 DB 档、同一连线，非自造第二套持久层，与 subagent_reworks / critic_passes 同惯例）。
   //
-  // 為什麼要它：F-D2 的去重住在記憶體 pendingSteers（上限 3），重啟即失——同一條指引
-  // 可以被投遞第二次。這裡在**投遞之前**凍結 steer_id + payload_hash（含 content 與
-  // turn/session 標識），終態即 tombstone。
+  // 为什么要它：F-D2 的去重住在记忆体 pendingSteers（上限 3），重启即失——同一条指引
+  // 可以被投递第二次。这里在**投递之前**冻结 steer_id + payload_hash（含 content 与
+  // turn/session 标识），终态即 tombstone。
   //
-  // tombstone 生命週期（刻意設計，勿「順手清理」）：
-  //   * 本表**不提供 delete**：沒有 deleteSteerCommand、也不進 sweepStaleRows。
-  //   * deleteSessionRow（clear/刪會話）只動 sessions 表 → tombstone 逐條存活。
-  //   * 終態 row 永不刪除：刪掉它就等於把「這條已經投遞過」的記憶抹去，重啟後又能重放。
-  //     代價是表單調成長（每會話 ≤ 用戶實際發過的指引條數），由 idx_steer_commands_session 支撐查詢。
+  // tombstone 生命周期（刻意设计，勿「顺手清理」）：
+  //   * 本表**不提供 delete**：没有 deleteSteerCommand、也不进 sweepStaleRows。
+  //   * deleteSessionRow（clear/删会话）只动 sessions 表 → tombstone 逐条存活。
+  //   * 终态 row 永不删除：删掉它就等于把「这条已经投递过」的记忆抹去，重启后又能重放。
+  //     代价是表单调成长（每会话 ≤ 用户实际发过的指引条数），由 idx_steer_commands_session 支撑查询。
   database.exec(`
     CREATE TABLE IF NOT EXISTS steer_commands (
       steer_id     TEXT PRIMARY KEY,
@@ -262,13 +262,13 @@ function baselineSchema(database: Database): void {
     )
   `)
   database.exec("CREATE INDEX IF NOT EXISTS idx_steer_commands_session ON steer_commands(session_id)")
-  // D7（2026-10-02）：品質量測基座。此前 critic_passes 只存 session_id/created_at、無 verdict，
-  // subagent_reworks 終局刪除無終身計數、無重問率——「品質」在系統裡完全不可觀測
-  // （ARCH-V4-DESIGN D7；LESSONS L8）。三張表皆復用同一 bun:sqlite 實例（不造第二套持久層）。
-  //   * critic_verdicts：每次審核的判決（pass/reject/unknown、判詞、judge 模型）。score 暫 null
-  //     （rubric 尚未存在；不偽造數字），留欄位給後續 rubric 上線。
-  //   * expert_lessons：失敗模式永久留存（交付閘門缺欄、審核退回等），供按 agent 累積。
-  //   * deliveries：交付事件（成功落盤的產物），重問率＝同 (session, agent, label) 再次出現的比例。
+  // D7（2026-10-02）：品质量测基座。此前 critic_passes 只存 session_id/created_at、无 verdict，
+  // subagent_reworks 终局删除无终身计数、无重问率——「品质」在系统里完全不可观测
+  // （ARCH-V4-DESIGN D7；LESSONS L8）。三张表皆复用同一 bun:sqlite 实例（不造第二套持久层）。
+  //   * critic_verdicts：每次审核的判决（pass/reject/unknown、判词、judge 模型）。score 暂 null
+  //     （rubric 尚未存在；不伪造数字），留栏位给后续 rubric 上线。
+  //   * expert_lessons：失败模式永久留存（交付闸门缺栏、审核退回等），供按 agent 累积。
+  //   * deliveries：交付事件（成功落盘的产物），重问率＝同 (session, agent, label) 再次出现的比例。
   database.exec(`
     CREATE TABLE IF NOT EXISTS critic_verdicts (
       id           TEXT PRIMARY KEY,
@@ -314,29 +314,29 @@ function baselineSchema(database: Database): void {
 }
 
 /**
- * v2：會話目錄查詢索引。`listSessionRows` 用 `WHERE owner_key = ? ORDER BY updated_at DESC`，
- * 舊 schema 只有 opencode_session_id 的唯一索引，目錄查詢全表掃描。純索引、不動任何資料。
+ * v2：会话目录查询索引。`listSessionRows` 用 `WHERE owner_key = ? ORDER BY updated_at DESC`，
+ * 旧 schema 只有 opencode_session_id 的唯一索引，目录查询全表扫描。纯索引、不动任何资料。
  */
 function sessionsOwnerUpdatedIndex(database: Database): void {
   database.exec("CREATE INDEX IF NOT EXISTS idx_sessions_owner_updated ON sessions(owner_key, updated_at DESC)")
 }
 
 /**
- * v3（2026-10-03）：「評審可計量」——把 critic 閘門從布林＋詞表升級為可入庫的數值＋代碼強制閾值
- * ＋人工標籤 join。基座（critic_verdicts 表 / delivery-gate.ts 詞表）已存在，本版只補缺的兩件事：
- *   * critic_verdicts 增 `score_source`（分數來源：measured｜model_self｜human；無分數時 null）。
- *     語義釘死：數值閾值**只對 measured 生效**，模型自評（model_self）／人工標籤（human）永不構成
- *     驗收 oracle（禁同源斷言）。沒有獨立量測來源時 score 與 score_source 皆維持 null，不填 0 假值。
- *   * human_labels 新表：人工 accept/reject 標籤，join 進 qualitySignalStats 的 acceptRate。
- * 為什麼獨立在 v3 而非改 v1 baseline：v1 已發佈，舊庫 user_version>=1 時 v1 不再重跑；
- * 新表/新欄必須靠新版本遷移補上（否則舊庫永遠缺欄）。全部 idempotent（PRAGMA 先檢查、IF NOT EXISTS）。
+ * v3（2026-10-03）：「评审可计量」——把 critic 闸门从布林＋词表升级为可入库的数值＋代码强制阈值
+ * ＋人工标签 join。基座（critic_verdicts 表 / delivery-gate.ts 词表）已存在，本版只补缺的两件事：
+ *   * critic_verdicts 增 `score_source`（分数来源：measured｜model_self｜human；无分数时 null）。
+ *     语义钉死：数值阈值**只对 measured 生效**，模型自评（model_self）／人工标签（human）永不构成
+ *     验收 oracle（禁同源断言）。没有独立量测来源时 score 与 score_source 皆维持 null，不填 0 假值。
+ *   * human_labels 新表：人工 accept/reject 标签，join 进 qualitySignalStats 的 acceptRate。
+ * 为什么独立在 v3 而非改 v1 baseline：v1 已发布，旧库 user_version>=1 时 v1 不再重跑；
+ * 新表/新栏必须靠新版本迁移补上（否则旧库永远缺栏）。全部 idempotent（PRAGMA 先检查、IF NOT EXISTS）。
  */
 function qualityMeasurableSchema(database: Database): void {
   const cols = database.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]
   if (!cols.some((c) => c.name === "score_source")) {
     database.exec("ALTER TABLE critic_verdicts ADD COLUMN score_source TEXT")
   }
-  // 人工標籤：一筆 = 一個交付被人工接受或拒絕。run_id 為主鍵後綴，同 run 重複標註＝覆寫。
+  // 人工标签：一笔 = 一个交付被人工接受或拒绝。run_id 为主键后缀，同 run 重复标注＝覆写。
   database.exec(`
     CREATE TABLE IF NOT EXISTS human_labels (
       id         TEXT PRIMARY KEY,
@@ -352,7 +352,7 @@ function qualityMeasurableSchema(database: Database): void {
   database.exec("CREATE INDEX IF NOT EXISTS idx_human_labels_run ON human_labels(run_id)")
 }
 
-/** 有序遷移清單。新增版本一律 append（version 必須連續遞增；已發佈版本禁止改動其 up 內容）。 */
+/** 有序迁移清单。新增版本一律 append（version 必须连续递增；已发布版本禁止改动其 up 内容）。 */
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "baseline-session-and-quality-schema", up: baselineSchema },
   { version: 2, name: "sessions-owner-updated-index", up: sessionsOwnerUpdatedIndex },
@@ -360,12 +360,12 @@ export const MIGRATIONS: Migration[] = [
 ]
 
 /**
- * 依序跑完所有未套用的 migration（idempotent、逐版執行）。
- * - 先確保審計表 `schema_migrations` 存在（遷移清單之外，最先建立）。
- * - 只跑 `version > from` 的版本；已套用者跳過（重複呼叫不再變更）。
- * - 單一 migration 失敗：不 throw，記結構化事件（journal ＋ failures）後**繼續嘗試後續版本**；
- *   user_version 只推進到「連續成功」的最後一版（不跳版，見檔頭理由）。
- * - 回傳 MigrationReport 供測試與啟動日誌取用。
+ * 依序跑完所有未套用的 migration（idempotent、逐版执行）。
+ * - 先确保审计表 `schema_migrations` 存在（迁移清单之外，最先建立）。
+ * - 只跑 `version > from` 的版本；已套用者跳过（重复呼叫不再变更）。
+ * - 单一 migration 失败：不 throw，记结构化事件（journal ＋ failures）后**继续尝试后续版本**；
+ *   user_version 只推进到「连续成功」的最后一版（不跳版，见档头理由）。
+ * - 回传 MigrationReport 供测试与启动日志取用。
  */
 export function runMigrations(database: Database): MigrationReport {
   database.exec(`
@@ -421,10 +421,10 @@ export function initPersistence(): void {
 // ---- 序列化 / 反序列化 ----
 
 /**
- * 持久化 `data` JSON 的欄位全集——**新增欄位必須同步更新的集合式守門清單**。
- * 這份清單與 `serialize()` 的輸出鍵集逐項相等；`hydrateRow()` 對每個鍵都必須還原
- * （別名映射見 persistence-schema.test.ts）。哪一天有人只改了 serialize 忘了清單/還原，
- * 測試會直接紅。完整「新欄位需同步改哪幾處」清單見檔頭 runMigrations 上方註解。
+ * 持久化 `data` JSON 的栏位全集——**新增栏位必须同步更新的集合式守门清单**。
+ * 这份清单与 `serialize()` 的输出键集逐项相等；`hydrateRow()` 对每个键都必须还原
+ * （别名映射见 persistence-schema.test.ts）。哪一天有人只改了 serialize 忘了清单/还原，
+ * 测试会直接红。完整「新栏位需同步改哪几处」清单见档头 runMigrations 上方注解。
  */
 export const PERSISTED_DATA_KEYS = [
   "eventCounter",
@@ -446,7 +446,7 @@ export const PERSISTED_DATA_KEYS = [
   "profileOnboardingPending",
   "compact",
   "lastTurnActiveAt",
-  "title", // 別名：記憶體 sessionTitle ↔ 落盤 title（見 hydrateRow）
+  "title", // 别名：记忆体 sessionTitle ↔ 落盘 title（见 hydrateRow）
   "tplDeviateToken",
 ] as const
 
@@ -481,8 +481,8 @@ export function serialize(state: PersistableState): PersistedData {
 }
 
 /**
- * 從 DB row 重建完整 SessionState（含所有活躍結構的空容器）。
- * 回傳物件形狀與 index.ts 的 SessionState 完全一致（clients/pending* 為空）。
+ * 从 DB row 重建完整 SessionState（含所有活跃结构的空容器）。
+ * 回传物件形状与 index.ts 的 SessionState 完全一致（clients/pending* 为空）。
  */
 export function hydrateRow(row: PersistedRow): Record<string, unknown> {
   const d = row.data ?? ({} as PersistedData)
@@ -501,7 +501,7 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     ),
     lastActivityAt: typeof d.lastActivityAt === "number" ? d.lastActivityAt : row.updatedAt,
     partTextEmitted: new Map(d.partTextEmitted ?? []),
-    // S2b：出站剝離器狀態——回合級 ephemeral，不持久化（重啟後新回合重建）。
+    // S2b：出站剥离器状态——回合级 ephemeral，不持久化（重启后新回合重建）。
     partStripState: new Map(),
     announcedUrls: new Set(d.announcedUrls ?? []),
     toolStatusSeen: new Set(d.toolStatusSeen ?? []),
@@ -521,8 +521,8 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     compact: d.compact,
     lastTurnActiveAt: typeof d.lastTurnActiveAt === "number" ? d.lastTurnActiveAt : 0,
     sessionTitle: typeof d.title === "string" && d.title ? d.title : null,
-    // 2026-10-02：模板偏離 token 形狀防護——非物件/缺 token 字串 → null；
-    // at 非有限數 → 以當下時刻起算（保守：不因壞 at 讓 token 永不過期）。
+    // 2026-10-02：模板偏离 token 形状防护——非物件/缺 token 字串 → null；
+    // at 非有限数 → 以当下时刻起算（保守：不因坏 at 让 token 永不过期）。
     tplDeviateToken: (() => {
       const t = d.tplDeviateToken
       if (!t || typeof t !== "object") return null
@@ -568,8 +568,8 @@ export function saveSession(state: PersistableState): void {
          data = excluded.data`,
     ).run(state.sessionId, state.apiKey, state.opencodeSessionId, now, now, JSON.stringify(serialize(state)))
   } catch (e) {
-    // UNIQUE(opencode_session_id) 衝突 = 舊 row 殘留同 opencode id（如重啟競態），
-    // 先刪舊 row 再重試一次；再失敗就降級放棄本幀寫入。
+    // UNIQUE(opencode_session_id) 冲突 = 旧 row 残留同 opencode id（如重启竞态），
+    // 先删旧 row 再重试一次；再失败就降级放弃本帧写入。
     try {
       db.query("DELETE FROM sessions WHERE opencode_session_id = ? AND id != ?").run(state.opencodeSessionId, state.sessionId)
       const now = Date.now()
@@ -609,9 +609,9 @@ export function loadSessionByOpencodeId(opencodeSessionId: string): PersistedRow
 }
 
 
-// 會話目錄：當前 key 的全部會話 row（按 updated_at 降序）。給
-// GET /agent/v1/sessions 列表端點用；data 只解 lastActivityAt 一個字段，
-// 不做完整 hydrate（目錄不需要整包狀態）。
+// 会话目录：当前 key 的全部会话 row（按 updated_at 降序）。给
+// GET /agent/v1/sessions 列表端点用；data 只解 lastActivityAt 一个字段，
+// 不做完整 hydrate（目录不需要整包状态）。
 export function listSessionRows(apiKey: string): PersistedRow[] {
   if (!db) return []
   try {
@@ -642,8 +642,8 @@ export function listSessionRows(apiKey: string): PersistedRow[] {
 
 
 /**
- * 目錄回填用：只改 data JSON 的 title 欄（讀-改-寫同 parseRow/listSessionRows
- * 的 JS 序列化鏈，不動 updated_at 以免打亂列表排序）。fail-open 同全局策略。
+ * 目录回填用：只改 data JSON 的 title 栏（读-改-写同 parseRow/listSessionRows
+ * 的 JS 序列化链，不动 updated_at 以免打乱列表排序）。fail-open 同全局策略。
  */
 export function setRowTitle(id: string, title: string): void {
   if (!db) return
@@ -654,7 +654,7 @@ export function setRowTitle(id: string, title: string): void {
     try {
       data = JSON.parse(row.data) as PersistedData
     } catch {
-      return // data 壞損的行不強寫，交由降級路徑
+      return // data 坏损的行不强写，交由降级路径
     }
     data.title = title
     db.query("UPDATE sessions SET data = ? WHERE id = ?").run(JSON.stringify(data), id)
@@ -672,19 +672,19 @@ export function deleteSessionRow(id: string): void {
   }
 }
 
-// ---- 用戶級 Settings（2026-08-29，key 維度）----
-// 存儲模式與 canvasSummary/userMemory 同構（JSON data 欄位），但歸屬維度是
-// owner_key（用戶級，跨會話共享），重啟不丟。shape 校驗在 index.ts，這裡只存取。
+// ---- 用户级 Settings（2026-08-29，key 维度）----
+// 存储模式与 canvasSummary/userMemory 同构（JSON data 栏位），但归属维度是
+// owner_key（用户级，跨会话共享），重启不丢。shape 校验在 index.ts，这里只存取。
 
 export interface UserSettings {
   interrupt_mode: string
   persona: string
   cost_mode: string
-  /** 野獸模式（MOE 改革，2026-09-08）：settings 布林，dispatch 時快照進 subagent run。 */
+  /** 野兽模式（MOE 改革，2026-09-08）：settings 布林，dispatch 时快照进 subagent run。 */
   beast_mode?: boolean
 }
 
-/** 讀取 key 維度 settings；無記錄回 null（呼叫端套默認值）。fail-open 同全局策略。 */
+/** 读取 key 维度 settings；无记录回 null（呼叫端套默认值）。fail-open 同全局策略。 */
 export function loadUserSettings(ownerKey: string): UserSettings | null {
   if (!db || !ownerKey) return null
   try {
@@ -697,7 +697,7 @@ export function loadUserSettings(ownerKey: string): UserSettings | null {
   }
 }
 
-/** 寫入 key 維度 settings（UPSERT）。 */
+/** 写入 key 维度 settings（UPSERT）。 */
 export function saveUserSettings(ownerKey: string, s: UserSettings): void {
   if (!db || !ownerKey) return
   try {
@@ -724,7 +724,7 @@ export interface ReworkRecord {
   updatedAt: number
 }
 
-/** 寫入/更新一條 rework run 記錄（run_id 主鍵 UPSERT）。fail-open 同全局策略。 */
+/** 写入/更新一条 rework run 记录（run_id 主键 UPSERT）。fail-open 同全局策略。 */
 export function saveReworkRecord(r: {
   runId: string; parentGw: string; parentOc: string; childOc: string
   agent: string; label: string; beast: boolean; asyncMode: boolean; reworkCount: number
@@ -755,7 +755,7 @@ export function saveReworkRecord(r: {
   }
 }
 
-/** 讀取全部 in-flight rework 記錄（啟動掃描用）。fail-open 回空陣列。 */
+/** 读取全部 in-flight rework 记录（启动扫描用）。fail-open 回空阵列。 */
 export function loadReworkRecords(): ReworkRecord[] {
   if (!db) return []
   try {
@@ -776,7 +776,7 @@ export function loadReworkRecords(): ReworkRecord[] {
   }
 }
 
-/** 刪除一條 rework 記錄（終態即清；冪等，run 不存在也成功）。fail-open。 */
+/** 删除一条 rework 记录（终态即清；幂等，run 不存在也成功）。fail-open。 */
 export function deleteReworkRecord(runId: string): void {
   if (!db || !runId) return
   try {
@@ -786,9 +786,9 @@ export function deleteReworkRecord(runId: string): void {
   }
 }
 
-// ---- 刀 2（2026-09-15）：機器 critic pass 每會話一次性旗標 ----
+// ---- 刀 2（2026-09-15）：机器 critic pass 每会话一次性旗标 ----
 
-/** 標記該會話已用掉 machine critic pass（session_id 主鍵，重複呼叫冪等）。fail-open。 */
+/** 标记该会话已用掉 machine critic pass（session_id 主键，重复呼叫幂等）。fail-open。 */
 export function markCriticPass(sessionId: string): void {
   if (!db || !sessionId) return
   try {
@@ -801,7 +801,7 @@ export function markCriticPass(sessionId: string): void {
   }
 }
 
-/** 該會話是否已用過 machine critic pass。fail-open 回 false（呼叫端另有內存旗標兜底）。 */
+/** 该会话是否已用过 machine critic pass。fail-open 回 false（呼叫端另有内存旗标兜底）。 */
 export function hasCriticPass(sessionId: string): boolean {
   if (!db || !sessionId) return false
   try {
@@ -813,7 +813,7 @@ export function hasCriticPass(sessionId: string): boolean {
   }
 }
 
-/** 清一條 pass 旗標（會話拆除時用；冪等）。fail-open。 */
+/** 清一条 pass 旗标（会话拆除时用；幂等）。fail-open。 */
 export function deleteCriticPass(sessionId: string): void {
   if (!db || !sessionId) return
   try {
@@ -823,16 +823,16 @@ export function deleteCriticPass(sessionId: string): void {
   }
 }
 
-// ---- D7（2026-10-02）：品質量測基座存取。全部 fail-open（量測不得影響交付主流程）----
+// ---- D7（2026-10-02）：品质量测基座存取。全部 fail-open（量测不得影响交付主流程）----
 
 /**
- * critic 分數來源（v3，2026-10-03）。
- *   * `measured`：存在**獨立於被測模型**的量測來源（如對成品跑硬檢）→ 唯一可套用數值閾值者。
- *   * `model_self`：同族模型自評 → 只作便宜、快、可當篩子的訊號，永不構成驗收 oracle（禁同源斷言）。
- *   * `human`：人工接受/拒絕 → 外生標籤，另存 human_labels，不是數值量測。
- * 沒有分數時 score 為 null、不得填 0 假值。score_source 是「這列分數訊號的來源」：
- * `model_self`／`human` 允許與 null score 並存（分類判決本就沒有數值）；`measured` 則必須有數值，
- * 否則不落來源（宣告了量測就必須有數字，不得製造假量測）。
+ * critic 分数来源（v3，2026-10-03）。
+ *   * `measured`：存在**独立于被测模型**的量测来源（如对成品跑硬检）→ 唯一可套用数值阈值者。
+ *   * `model_self`：同族模型自评 → 只作便宜、快、可当筛子的讯号，永不构成验收 oracle（禁同源断言）。
+ *   * `human`：人工接受/拒绝 → 外生标签，另存 human_labels，不是数值量测。
+ * 没有分数时 score 为 null、不得填 0 假值。score_source 是「这列分数讯号的来源」：
+ * `model_self`／`human` 允许与 null score 并存（分类判决本就没有数值）；`measured` 则必须有数值，
+ * 否则不落来源（宣告了量测就必须有数字，不得制造假量测）。
  */
 export type CriticScoreSource = "measured" | "model_self" | "human"
 
@@ -843,11 +843,11 @@ function d7Id(prefix: string): string {
 }
 
 /**
- * 記一筆審核判決（critic_verdicts）。score 未量測時傳 null，不得填 0 假值。
- * v3：支援 `scoreSource` 記錄分數**來源**。反偽造不變式：
- *   * 有 score 但沒標來源 → 來源留 null（不猜，不把自評冒充量測）；
- *   * 標 `measured` 卻沒有數值 → 來源強制 null（宣告了量測就必須有數值，否則不落 provenance）；
- *   * `model_self` / `human` 允許與 null score 並存（分類判決沒有數值），但永不通過數值閾值。
+ * 记一笔审核判决（critic_verdicts）。score 未量测时传 null，不得填 0 假值。
+ * v3：支援 `scoreSource` 记录分数**来源**。反伪造不变式：
+ *   * 有 score 但没标来源 → 来源留 null（不猜，不把自评冒充量测）；
+ *   * 标 `measured` 却没有数值 → 来源强制 null（宣告了量测就必须有数值，否则不落 provenance）；
+ *   * `model_self` / `human` 允许与 null score 并存（分类判决没有数值），但永不通过数值阈值。
  */
 export function saveCriticVerdict(v: {
   sessionId: string
@@ -886,7 +886,7 @@ export function saveCriticVerdict(v: {
   }
 }
 
-/** 讀一筆審核判決（診斷／驗收用；唯讀）。查無回 null。 */
+/** 读一笔审核判决（诊断／验收用；唯读）。查无回 null。 */
 export function getCriticVerdictByRun(runId: string): {
   verdict: string
   score: number | null
@@ -914,9 +914,9 @@ export function getCriticVerdictByRun(runId: string): {
 }
 
 /**
- * 記一筆人工驗收標籤（human_labels）。`label` ∈ accept|reject。
- * 冪等：同 run_id 重複標註＝INSERT OR REPLACE（最後一次為準，不長第二列）。
- * 這是「評審外生」的落點：人工接受/拒絕 join 進 qualitySignalStats 的 acceptRate。
+ * 记一笔人工验收标签（human_labels）。`label` ∈ accept|reject。
+ * 幂等：同 run_id 重复标注＝INSERT OR REPLACE（最后一次为准，不长第二列）。
+ * 这是「评审外生」的落点：人工接受/拒绝 join 进 qualitySignalStats 的 acceptRate。
  */
 export function saveHumanLabel(h: {
   sessionId: string
@@ -944,7 +944,7 @@ export function saveHumanLabel(h: {
   }
 }
 
-/** 讀某 run 的人工標籤（診斷／驗收用；唯讀）。查無回 null。 */
+/** 读某 run 的人工标签（诊断／验收用；唯读）。查无回 null。 */
 export function getHumanLabelByRun(
   runId: string,
 ): { label: string; agent: string | null; note: string | null } | null {
@@ -961,7 +961,7 @@ export function getHumanLabelByRun(
   }
 }
 
-/** 永久留存一個失敗模式（expert_lessons）。 */
+/** 永久留存一个失败模式（expert_lessons）。 */
 export function saveExpertLesson(l: {
   sessionId: string
   agent: string
@@ -990,7 +990,7 @@ export function saveExpertLesson(l: {
   }
 }
 
-/** 記一筆交付事件（deliveries）。重問率＝同 (session, agent, label) 重複出現的比例。 */
+/** 记一笔交付事件（deliveries）。重问率＝同 (session, agent, label) 重复出现的比例。 */
 export function saveDelivery(d: {
   sessionId: string
   runId?: string
@@ -1019,20 +1019,20 @@ export function saveDelivery(d: {
   }
 }
 
-/** D7 量測讀數：品質訊號數量與重問率（供 EVAL 直接用；唯讀）。 */
+/** D7 量测读数：品质讯号数量与重问率（供 EVAL 直接用；唯读）。 */
 export function qualitySignalStats(): {
   criticVerdicts: number
   rejects: number
   expertLessons: number
   deliveries: number
   reaskRate: number
-  /** 人工標籤數（每列 = 一個已標註交付）。 */
+  /** 人工标签数（每列 = 一个已标注交付）。 */
   labeledDeliveries: number
-  /** accept / labeledDeliveries；零標籤時 null（不得回 0 假值——零樣本的比例未定義）。 */
+  /** accept / labeledDeliveries；零标签时 null（不得回 0 假值——零样本的比例未定义）。 */
   acceptRate: number | null
-  /** 有數值分數的樣本數（score IS NOT NULL）。 */
+  /** 有数值分数的样本数（score IS NOT NULL）。 */
   scoreSamples: number
-  /** 有分數樣本的平均；零樣本時 null（不得回 0 假值）。 */
+  /** 有分数样本的平均；零样本时 null（不得回 0 假值）。 */
   meanScore: number | null
 } {
   const empty = {
@@ -1059,10 +1059,10 @@ export function qualitySignalStats(): {
         )
         .get() as { n: number } | null
     )?.n ?? 0
-    // 人工接受/拒絕：一列一交付，比例只在有樣本時定義。
+    // 人工接受/拒绝：一列一交付，比例只在有样本时定义。
     const hl = (db.query("SELECT COUNT(*) AS n FROM human_labels").get() as { n: number } | null)?.n ?? 0
     const acc = (db.query("SELECT COUNT(*) AS n FROM human_labels WHERE label = 'accept'").get() as { n: number } | null)?.n ?? 0
-    // score 樣本：COUNT(score)/AVG(score) 天然忽略 NULL。零樣本 → AVG 為 NULL，不得回 0。
+    // score 样本：COUNT(score)/AVG(score) 天然忽略 NULL。零样本 → AVG 为 NULL，不得回 0。
     const sc = db.query("SELECT COUNT(score) AS n, AVG(score) AS avg FROM critic_verdicts").get() as
       | { n: number; avg: number | null }
       | null
@@ -1086,10 +1086,10 @@ export function qualitySignalStats(): {
 }
 
 // ---- REQ-D2b（2026-09-23）：steer 命令身份（tombstone）存取 ----
-// 純語義（狀態機／payload 凍結／受理判定）在 steer-identity.ts；本節只做 SQLite 存取，
-// 實作 SteerLedgerStore 縫（見 steer-identity.createSteerLedger）。
-// **刻意不提供刪除函數**：終態 row 就是 tombstone，刪掉它＝重啟後同一條指引又能被投遞
-// （見 initPersistence 的建表註釋）。clear/刪會話（deleteSessionRow）與 sweepStaleRows
+// 纯语义（状态机／payload 冻结／受理判定）在 steer-identity.ts；本节只做 SQLite 存取，
+// 实作 SteerLedgerStore 缝（见 steer-identity.createSteerLedger）。
+// **刻意不提供删除函数**：终态 row 就是 tombstone，删掉它＝重启后同一条指引又能被投递
+// （见 initPersistence 的建表注释）。clear/删会话（deleteSessionRow）与 sweepStaleRows
 // 都不碰本表。
 
 interface SteerCommandRow {
@@ -1112,7 +1112,7 @@ function parseSteerRow(row: SteerCommandRow): SteerCommand {
     const parsed = JSON.parse(row.alias_ids) as unknown
     if (Array.isArray(parsed)) aliases = parsed.filter((x): x is string => typeof x === "string")
   } catch {
-    aliases = [] // 壞損的別名欄不影響主鍵身份（寧可少認別名，不可拒真身）
+    aliases = [] // 坏损的别名栏不影响主键身份（宁可少认别名，不可拒真身）
   }
   return {
     steerId: row.steer_id,
@@ -1133,14 +1133,14 @@ const STEER_ROW_COLS =
   "steer_id, session_id, owner_key, alias_ids, payload_hash, payload, state, created_at, dispatched_at, settled_at, reason"
 
 /**
- * 讀一條命令：先按主鍵，再按別名 id（同文去重時第二個 id 是同一個邏輯 steer，
- * 它的重放同樣必須命中 tombstone）。
+ * 读一条命令：先按主键，再按别名 id（同文去重时第二个 id 是同一个逻辑 steer，
+ * 它的重放同样必须命中 tombstone）。
  *
- * D-7b（2026-09-23）修掉的假命中：別名查詢原本是 `alias_ids LIKE '%"<id>"%'`，而 steer id
- * 的字元集（steer-core.STEER_ID_PATTERN）**含底線 `_`**——`_` 是 LIKE 的單字元通配符，
- * 於是查 `steer-p_q` 會命中別人的別名 `steer-pXq`：一顆與本請求無關的假 409（不會重複
- * 投遞，但把「不存在」說成了「已存在」）。改成 JSON 陣列的元素級**精確等值**比對
- * （json_each）：不靠轉義、也不靠「id 不含引號」這類外部假設，任何 id 都不會誤命中他人。
+ * D-7b（2026-09-23）修掉的假命中：别名查询原本是 `alias_ids LIKE '%"<id>"%'`，而 steer id
+ * 的字元集（steer-core.STEER_ID_PATTERN）**含底线 `_`**——`_` 是 LIKE 的单字元通配符，
+ * 于是查 `steer-p_q` 会命中别人的别名 `steer-pXq`：一颗与本请求无关的假 409（不会重复
+ * 投递，但把「不存在」说成了「已存在」）。改成 JSON 阵列的元素级**精确等值**比对
+ * （json_each）：不靠转义、也不靠「id 不含引号」这类外部假设，任何 id 都不会误命中他人。
  */
 export function loadSteerCommand(steerId: string): SteerCommand | null {
   if (!db || !steerId) return null
@@ -1149,8 +1149,8 @@ export function loadSteerCommand(steerId: string): SteerCommand | null {
     if (row) return parseSteerRow(row)
     const byAlias = db
       .query(
-        // CASE 保序：json_valid 為假時不求值 json_each——壞損的別名欄只讓「自己」不被認作別名
-        // （與 parseSteerRow 同一個政策：寧可少認別名，不可讓一行壞資料炸掉整次查詢）。
+        // CASE 保序：json_valid 为假时不求值 json_each——坏损的别名栏只让「自己」不被认作别名
+        // （与 parseSteerRow 同一个政策：宁可少认别名，不可让一行坏资料炸掉整次查询）。
         `SELECT ${STEER_ROW_COLS} FROM steer_commands
           WHERE CASE WHEN json_valid(steer_commands.alias_ids)
                      THEN EXISTS (SELECT 1 FROM json_each(steer_commands.alias_ids) WHERE json_each.value = ?)
@@ -1164,7 +1164,7 @@ export function loadSteerCommand(steerId: string): SteerCommand | null {
   }
 }
 
-/** 讀一個會話的命令全表（重啟恢復掃描用；按建立時間升序＝投遞順序）。 */
+/** 读一个会话的命令全表（重启恢复扫描用；按建立时间升序＝投递顺序）。 */
 export function loadSteerCommandsForSession(sessionId: string): SteerCommand[] {
   if (!db || !sessionId) return []
   try {
@@ -1179,9 +1179,9 @@ export function loadSteerCommandsForSession(sessionId: string): SteerCommand[] {
 }
 
 /**
- * 寫入/更新一條命令（steer_id 主鍵 UPSERT）。fail-open 同全局策略。
- * 注意：寫入即「身份已凍結」，即使後續流程失敗也不回滾——寧可留下未終結的記錄
- * （重啟恢復會把它落 uncertain），不可留下「查不到＝可重放」的漏洞。
+ * 写入/更新一条命令（steer_id 主键 UPSERT）。fail-open 同全局策略。
+ * 注意：写入即「身份已冻结」，即使后续流程失败也不回滚——宁可留下未终结的记录
+ * （重启恢复会把它落 uncertain），不可留下「查不到＝可重放」的漏洞。
  */
 export function saveSteerCommand(c: SteerCommand): void {
   if (!db || !c.steerId) return
@@ -1220,7 +1220,7 @@ export function saveSteerCommand(c: SteerCommand): void {
   }
 }
 
-/** persistence.ts 對 steer-identity 的 SteerLedgerStore 縫實作（生產側唯一接線）。 */
+/** persistence.ts 对 steer-identity 的 SteerLedgerStore 缝实作（生产侧唯一接线）。 */
 export const steerCommandStore: SteerLedgerStore = {
   read: loadSteerCommand,
   readBySession: loadSteerCommandsForSession,
@@ -1228,9 +1228,9 @@ export const steerCommandStore: SteerLedgerStore = {
 }
 
 /**
- * 清掉長期無活動的 DB rows（gateway 不在內存、updated_at 超過 maxIdleMs）。
- * 回傳被刪的 { sessionId, opencodeSessionId }，呼叫端負責 best-effort 清理
- * upstream opencode session 與 uploads 目錄。
+ * 清掉长期无活动的 DB rows（gateway 不在内存、updated_at 超过 maxIdleMs）。
+ * 回传被删的 { sessionId, opencodeSessionId }，呼叫端负责 best-effort 清理
+ * upstream opencode session 与 uploads 目录。
  */
 export function sweepStaleRows(maxIdleMs: number): { sessionId: string; opencodeSessionId: string }[] {
   if (!db) return []

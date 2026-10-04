@@ -1,8 +1,8 @@
 /**
- * planning-core — 自 vendor agentPlanning.ts 拆出的純核（白名單④重命名移植）。
- * LLM 呼叫點切除，二期 quickChat 替換點；其餘逐行等價。
+ * planning-core — 自 vendor agentPlanning.ts 拆出的纯核（白名单④重命名移植）。
+ * LLM 呼叫点切除，二期 quickChat 替换点；其余逐行等价。
  *
- * 2026-09-03 暴君裁定白名單偏離：ACTION_KEYWORDS 加繁體變體，函數體不動。
+ * 2026-09-03 暴君裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
  */
 import { nanoid } from 'nanoid';
 import type {
@@ -41,7 +41,7 @@ interface RawShot {
 interface RawPlan { name?: string; summary?: string; shots?: RawShot[] }
 
 
-/* ── 白名單切除：DirectorConsultMessage / DirectorAgentCommand——LLM 呼叫點切除，二期 quickChat 替換點 ── */
+/* ── 白名单切除：DirectorConsultMessage / DirectorAgentCommand——LLM 呼叫点切除，二期 quickChat 替换点 ── */
 const CAMERA_MOVES = new Set<DirectorCameraMove>([
   'static', 'push', 'pull', 'truck-left', 'truck-right', 'crane-up', 'crane-down',
   'pan-left', 'pan-right', 'tilt-up', 'tilt-down', 'orbit', 'arc-left', 'arc-right',
@@ -59,40 +59,40 @@ const ACTIONS = new Set<DirectorActionId>([
   'hand-over', 'receive', 'step-back', 'step-forward', 'glance', 'inspect', 'knock',
 ]);
 
-/* 2026-09-03 暴君裁定白名單偏離：ACTION_KEYWORDS 加繁體變體，函數體不動。
-   逐詞對照 vendor 簡體原詞補同義繁寫（繁體緊跟原詞；同形詞如 展卷/步行/跪下 不重複），禁止發明新詞/新動作。 */
+/* 2026-09-03 暴君裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
+   逐词对照 vendor 简体原词补同义繁写（繁体紧跟原词；同形词如 展卷/步行/跪下 不重复），禁止发明新词/新动作。 */
 const ACTION_KEYWORDS: Array<{ action: DirectorActionId; pattern: RegExp }> = [
-  { action: 'sew', pattern: /走针|走針|落针|落針|缝制|縫製|缝纫|縫紉|刺绣|刺繡|针线|針線|针尖.*布料|針尖.*布料|穿刺布料|针穿|針穿|丝线绷紧|絲線繃緊/ },
-  { action: 'read', pattern: /阅读|閱讀|展卷|看卷|竹简上读|竹簡上讀|读它们|讀它們|山海图.*(?:读|看)|山海圖.*(?:讀|看)/ },
-  { action: 'write', pattern: /书写|書寫|写字|寫字|记录|記錄|落笔|落筆/ },
-  { action: 'look-up', pattern: /抬眼|抬头|抬頭|仰头|仰頭/ },
-  { action: 'look-down', pattern: /低头|低頭|垂眼|俯视|俯視/ },
-  { action: 'look-at', pattern: /看向|注视|注視|凝视|凝視|望向|目光.*移|盯着|盯著/ },
-  { action: 'look-back', pattern: /回头|回頭|回望/ },
-  { action: 'turn', pattern: /转身|轉身|转向|轉向/ },
-  { action: 'open-door', pattern: /开门|開門|推门而入|推門而入/ },
-  { action: 'close-door', pattern: /关门|關門/ },
+  { action: 'sew', pattern: /走针|走针|落针|落针|缝制|缝制|缝纫|缝纫|刺绣|刺绣|针线|针线|针尖.*布料|针尖.*布料|穿刺布料|针穿|针穿|丝线绷紧|丝线绷紧/ },
+  { action: 'read', pattern: /阅读|阅读|展卷|看卷|竹简上读|竹简上读|读它们|读它们|山海图.*(?:读|看)|山海图.*(?:读|看)/ },
+  { action: 'write', pattern: /书写|书写|写字|写字|记录|记录|落笔|落笔/ },
+  { action: 'look-up', pattern: /抬眼|抬头|抬头|仰头|仰头/ },
+  { action: 'look-down', pattern: /低头|低头|垂眼|俯视|俯视/ },
+  { action: 'look-at', pattern: /看向|注视|注视|凝视|凝视|望向|目光.*移|盯着|盯著/ },
+  { action: 'look-back', pattern: /回头|回头|回望/ },
+  { action: 'turn', pattern: /转身|转身|转向|转向/ },
+  { action: 'open-door', pattern: /开门|开门|推门而入|推门而入/ },
+  { action: 'close-door', pattern: /关门|关门/ },
   { action: 'stand-up', pattern: /起身|站起/ },
-  { action: 'stop', pattern: /停下|顿住|頓住|停顿|停頓|悬停|懸停|静止|靜止/ },
+  { action: 'stop', pattern: /停下|顿住|顿住|停顿|停顿|悬停|悬停|静止|静止/ },
   { action: 'sit', pattern: /坐下|落座/ },
-  { action: 'run', pattern: /跑|冲|衝|逃/ },
+  { action: 'run', pattern: /跑|冲|冲|逃/ },
   { action: 'fast-walk', pattern: /快走|疾走/ },
-  { action: 'walk', pattern: /走进|走進|走向|走到|进入|進入|离开|離開|步行/ },
+  { action: 'walk', pattern: /走进|走进|走向|走到|进入|进入|离开|离开|步行/ },
   { action: 'reach', pattern: /伸手|探手|手伸向|靠近.*手/ },
-  { action: 'point', pattern: /指向|指着|指著|手指.*滑动|手指.*滑動|划过|劃過/ },
-  { action: 'pick-up', pattern: /拿起|拾起|捡起|撿起/ },
-  { action: 'put-down', pattern: /放下|搁下|擱下/ },
-  { action: 'hold', pattern: /握住|托住|捧着|捧著|拿着|拿著|握紧|握緊/ },
-  { action: 'nod', pattern: /点头|點頭/ },
-  { action: 'shake-head', pattern: /摇头|搖頭/ },
-  { action: 'wave', pattern: /挥手|揮手|招手/ },
-  { action: 'raise-hand', pattern: /举手|舉手|抬手/ },
-  { action: 'hug', pattern: /拥抱|擁抱|抱住/ },
-  { action: 'face-to-face', pattern: /对视|對視|面对面|面對面/ },
+  { action: 'point', pattern: /指向|指着|指著|手指.*滑动|手指.*滑动|划过|划过/ },
+  { action: 'pick-up', pattern: /拿起|拾起|捡起|捡起/ },
+  { action: 'put-down', pattern: /放下|搁下|搁下/ },
+  { action: 'hold', pattern: /握住|托住|捧着|捧著|拿着|拿著|握紧|握紧/ },
+  { action: 'nod', pattern: /点头|点头/ },
+  { action: 'shake-head', pattern: /摇头|摇头/ },
+  { action: 'wave', pattern: /挥手|挥手|招手/ },
+  { action: 'raise-hand', pattern: /举手|举手|抬手/ },
+  { action: 'hug', pattern: /拥抱|拥抱|抱住/ },
+  { action: 'face-to-face', pattern: /对视|对视|面对面|面对面/ },
   { action: 'kneel', pattern: /跪下|跪地/ },
   { action: 'crouch', pattern: /蹲下|俯身/ },
   { action: 'fall', pattern: /跌倒|摔倒|倒地/ },
-  { action: 'speak', pattern: /说[：{]|說[：{]|回答|开口|開口|台词|台詞|问道|問道/ },
+  { action: 'speak', pattern: /说[：{]|说[：{]|回答|开口|开口|台词|台词|问道|问道/ },
 ];
 
 const ACTION_PRIORITY: Partial<Record<DirectorActionId, number>> = {
@@ -296,7 +296,7 @@ function buildPlans(rawPlans: RawPlan[], base: DirectorPlan, elements: DirectorE
   });
 }
 
-// 測試閘導出（spec 片1+2 測試要求直接呼叫 fallbackPlans；vendor 原為私有，除此之外逐行等價）
+// 测试闸导出（spec 片1+2 测试要求直接呼叫 fallbackPlans；vendor 原为私有，除此之外逐行等价）
 export function fallbackPlans(base: DirectorPlan, elements: DirectorElement[], prompt: string): DirectorPlan[] {
   const hintsByShot = inferPromptActionsByShot(prompt, elements, base.shots.length);
   const shotActions = (index: number) => (hintsByShot[index] ?? []).map((hint) => ({ ...hint, startSec: Math.max(0.1, hint.startSec ?? 0.1) }));
@@ -328,9 +328,9 @@ function adaptBaseForMotion(base: DirectorPlan, rawPlan: RawPlan): DirectorPlan 
 
 
 
-/* ── 白名單切除：generateDirectorMotionDraftProposals / generateDirectorPlanProposals——LLM 呼叫點切除，二期 quickChat 替換點 ── */
+/* ── 白名单切除：generateDirectorMotionDraftProposals / generateDirectorPlanProposals——LLM 呼叫点切除，二期 quickChat 替换点 ── */
 function planDuration(plan: DirectorPlan): number {
   return plan.shots.reduce((sum, shot) => sum + shot.durationSec, 0);
 }
 
-/* ── 白名單切除：consultDirectorPlan——LLM 呼叫點切除，二期 quickChat 替換點 ── */
+/* ── 白名单切除：consultDirectorPlan——LLM 呼叫点切除，二期 quickChat 替换点 ── */

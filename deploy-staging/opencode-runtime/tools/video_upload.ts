@@ -19,9 +19,9 @@ export default tool({
     }
     let payload: Record<string, string>;
     if (localPath) {
-      // 2026-10-02 更正：本工具跑在 opencode-server 服務內（PrivateTmp），**看不到** agent 沙箱私有的
-      // /tmp（那是 <workspace>/.run/<slug>/tmp 被 bind 進沙箱的）；三方 /tmp 互不可見。跨邊界交接一律
-      // 用 workspace 內同絕對路徑（見 lib/agent-paths.ts）。讀成 base64 交給網關，網關不碰 agent FS。
+      // 2026-10-02 更正：本工具跑在 opencode-server 服务内（PrivateTmp），**看不到** agent 沙箱私有的
+      // /tmp（那是 <workspace>/.run/<slug>/tmp 被 bind 进沙箱的）；三方 /tmp 互不可见。跨边界交接一律
+      // 用 workspace 内同绝对路径（见 lib/agent-paths.ts）。读成 base64 交给网关，网关不碰 agent FS。
       let buf: Buffer;
       try {
         buf = await readFile(localPath);

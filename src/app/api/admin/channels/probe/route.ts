@@ -1,8 +1,8 @@
-// 渠道連通性探測：對支持 OpenAI 風格 /models 的渠道發一次帶授權的 GET。
-// 絕不觸發真實出圖——那是 image-upstream-probe 的職責（會扣費）。
+// 渠道连通性探测：对支持 OpenAI 风格 /models 的渠道发一次带授权的 GET。
+// 绝不触发真实出图——那是 image-upstream-probe 的职责（会扣费）。
 //
-// 誠實原則：某些渠道沒有 /models 端點，硬探只會恆紅騙人，
-// 所以明確回報「不支持探測」而不是假裝探測失敗。
+// 诚实原则：某些渠道没有 /models 端点，硬探只会恒红骗人，
+// 所以明确回报「不支持探测」而不是假装探测失败。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readAdminPools } from "@/lib/admin-pool-store";
@@ -11,7 +11,7 @@ import { describeEnvChannels } from "@/lib/sub2api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const PROBEABLE_ENV_CHANNEL_IDS = new Set(["env:sub2api", "env:primary", "env:fallback"]);
 const UNPROBEABLE_CHANNEL_IDS = new Set<string>([]);

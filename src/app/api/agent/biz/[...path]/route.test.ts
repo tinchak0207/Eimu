@@ -13,11 +13,11 @@ import { join } from "node:path";
 
 const root = process.cwd();
 
-/** 去掉註解後再斷言，避免註釋裡引用的反例把測試帶跑。 */
+/** 去掉注解后再断言，避免注释里引用的反例把测试带跑。 */
 function code(relPath: string): string {
   return readFileSync(join(root, relPath), "utf8")
-    // 先剝行註釋再剝塊註釋：行註釋裡出現 "/*"（如 /agent/v1/*）時，
-    // 先剝塊註釋會把它當成塊註釋開頭，一路吞到下一個 */，誤刪真代碼。
+    // 先剥行注释再剥块注释：行注释里出现 "/*"（如 /agent/v1/*）时，
+    // 先剥块注释会把它当成块注释开头，一路吞到下一个 */，误删真代码。
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/\/\*[\s\S]*?\*\//g, "");
 }

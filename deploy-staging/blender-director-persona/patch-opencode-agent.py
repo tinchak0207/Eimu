@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""opencode.json 合併補丁稿（Astra P1-4 片J）——把 agent.director 條目併入 VPS
-live config，**冪等、非破壞**：已存在 director 條目且內容一致則 no-op OK；
-不一致則 FAIL（防覆蓋人工修改）。禁整檔覆蓋（live 表含 permission.bash deny
-真源、model、45+ 鍵）。跑法（上線日，經 vps.py）：
+"""opencode.json 合并补丁稿（Astra P1-4 片J）——把 agent.director 条目并入 VPS
+live config，**幂等、非破坏**：已存在 director 条目且内容一致则 no-op OK；
+不一致则 FAIL（防覆盖人工修改）。禁整档覆盖（live 表含 permission.bash deny
+真源、model、45+ 键）。跑法（上线日，经 vps.py）：
   vps.py put deploy-staging/blender-director-persona/patch-opencode-agent.py /tmp/patch-director-agent.py
   vps.py run "sudo python3 /tmp/patch-director-agent.py"
 """

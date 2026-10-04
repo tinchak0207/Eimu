@@ -196,7 +196,7 @@ updated: "2026-10-03"
       understood and re-emitted; supply the **full** tagged block to get it
       near-verbatim.
 
-  SUSPEND on this path (mark as “此通路無效” wherever the recipes teach them):
+  SUSPEND on this path (mark as “此通路无效” wherever the recipes teach them):
     · **Timed structure `[0:00 - 0:10] …`** — no time-code control exists between
       here and the song tool, and it did not constrain length.
     · **“A short lyric seed is sung exactly as written.”** A seed is expanded

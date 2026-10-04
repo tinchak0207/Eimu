@@ -22,19 +22,19 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-// 與 /v1/images/generations 同區：逐項提交要串行打控制面 DB（建任務+預留計費）。
+// 与 /v1/images/generations 同区：逐项提交要串行打控制面 DB（建任务+预留计费）。
 export const preferredRegion = "sfo1";
 
 /**
- * POST /v1/batches — B 端批量生成（圖片/視頻混合）。
+ * POST /v1/batches — B 端批量生成（图片/视频混合）。
  *
- * 每項帶 kind（image/video；缺省時由 duration_seconds/generate_audio 判別，
- * 再缺省視為 image），欄位與 /v1/images/generations、/v1/videos/generations
- * 的請求體一致。逐項驗證：單項失敗不炸整批，回應逐項標 accepted/errors。
- * 每項都走同一條 submitGenerationCommand 提交/計費路徑（帶 batch_id/batch_index），
- * 併發由平台 scheduler 池化治理——max_in_flight 只是聲明性欄位。
- * 冪等：batch 級 Idempotency-Key 重複提交回同一批（崩潰後重放會補齊未提交項，
- * 已提交項靠確定性 item 冪等鍵去重，不重複扣費）。
+ * 每项带 kind（image/video；缺省时由 duration_seconds/generate_audio 判别，
+ * 再缺省视为 image），栏位与 /v1/images/generations、/v1/videos/generations
+ * 的请求体一致。逐项验证：单项失败不炸整批，回应逐项标 accepted/errors。
+ * 每项都走同一条 submitGenerationCommand 提交/计费路径（带 batch_id/batch_index），
+ * 并发由平台 scheduler 池化治理——max_in_flight 只是声明性栏位。
+ * 幂等：batch 级 Idempotency-Key 重复提交回同一批（崩溃后重放会补齐未提交项，
+ * 已提交项靠确定性 item 幂等键去重，不重复扣费）。
  */
 
 type OpenAIErrorType =
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
   const requestId = Math.random().toString(36).slice(2);
   const traceId = getOrCreateTraceId(req);
 
-  // ── 认证（與單任務端點同一套） ─────────────────────────────
+  // ── 认证（与单任务端点同一套） ─────────────────────────────
   const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
   if (!auth.ok) {
     const type: OpenAIErrorType =
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
   }
   const { requests, maxInFlight } = validated;
 
-  // 管理員改價需立即對扣費生效：與單任務端點同一個計費共同上游。
+  // 管理员改价需立即对扣费生效：与单任务端点同一个计费共同上游。
   await syncModelPricing();
 
   if (!generationControlPlaneEnabled()) {
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 冪等建立批記錄 ─────────────────────────────────────────
+  // ── 幂等建立批记录 ─────────────────────────────────────────
   const tenantId = `biz:${apiKey.id}`;
   const requestHash = batchRequestHash(requests);
   let batch;
@@ -142,9 +142,9 @@ export async function POST(req: NextRequest) {
     return errorResponse(503, "Generation control plane is temporarily unavailable.", "api_error", "control_plane_unavailable", traceId);
   }
 
-  // ── 逐項提交（同一條 submitGenerationCommand 路徑） ─────────
-  // 冪等重放：先撈出這批已存在的任務，已提交項直接回既有 task_id，
-  // 只對缺失項補提交（崩潰恢復）；全部邏輯與首次提交同一條路。
+  // ── 逐项提交（同一条 submitGenerationCommand 路径） ─────────
+  // 幂等重放：先捞出这批已存在的任务，已提交项直接回既有 task_id，
+  // 只对缺失项补提交（崩溃恢复）；全部逻辑与首次提交同一条路。
   const priorJobs = created ? [] : await listGenerationBatchJobs(batch.id);
   const priorByIndex = new Map(priorJobs.map((job) => [job.batchIndex ?? 0, job]));
 
@@ -204,7 +204,7 @@ export async function POST(req: NextRequest) {
         });
         continue;
       }
-      // 模型可用性閘：該項建單/扣費前拒絕，逐項誠實回報（其餘項照常提交）。
+      // 模型可用性闸：该项建单/扣费前拒绝，逐项诚实回报（其余项照常提交）。
       if (error instanceof GenerationModelUnavailableError) {
         failedItems.push({
           index,
@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 逐項失敗快照落盤：聚合視圖與對賬要能按 index 對回拒絕原因。
+  // 逐项失败快照落盘：聚合视图与对账要能按 index 对回拒绝原因。
   const failedRecords: BatchFailedItemRecord[] = failedItems.map((item) => ({
     index: item.index,
     code: item.error.code,

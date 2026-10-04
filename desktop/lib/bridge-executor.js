@@ -1,25 +1,25 @@
 // desktop/lib/bridge-executor.js
 //
-// W6b：device bridge 的「四個唯讀工具執行器」——自 device-bridge-client.js 抽出的
-// 可測模組（純邏輯 + **注入 fs**）。device-bridge-client.js 只負責連線與編排
-// （register/heartbeat/poll/result）；真正的檔案存取與安全閘全收斂在本檔，故危險
-// 路徑可被 node:test 直接執行（device-bridge-client.js 的舊版執行器零測試）。
+// W6b：device bridge 的「四个唯读工具执行器」——自 device-bridge-client.js 抽出的
+// 可测模组（纯逻辑 + **注入 fs**）。device-bridge-client.js 只负责连线与编排
+// （register/heartbeat/poll/result）；真正的档案存取与安全闸全收敛在本档，故危险
+// 路径可被 node:test 直接执行（device-bridge-client.js 的旧版执行器零测试）。
 //
-// 安全邊界（與 local-worker.js 同語義，單一授權來源）：
-//  1. 工具白名單＝list_dir/read_file/grep/stat（無寫/刪/執行）。
-//  2. 路徑先 realpath 解 symlink，再過 policy.isSensitivePath（denylist，掃所有路徑段）。
-//  3. allowlist **必填**：授權根為空集 ⇒ 一律拒（no_authorized_roots）。授權來源與
-//     local-worker.js 是**同一份** authorizedRoots（使用者由 pickFiles 顯式挑選的根），
-//     不另造第二套授權機制。空集**不得**退回「只驗 denylist」。
-//  4. 拒絕檔案系統根路徑（path_is_root），避免整盤掃描。
-//  5. grep 逐檔先 stat 再決定是否讀取；單檔上限 = min(雲端下發 max_file_bytes,
-//     本機 MAX_GREP_FILE_BYTES)，超過者**跳過並計數**（避免整檔入記憶體）。
-//  6. grep/list_dir 自報 `sensitive_path_touched`／`excluded_sensitive_count`（H2 契約：
-//     遞迴/列舉碰到敏感段即計數；雲端 sensitiveResultProblem 據此整筆拒絕）。
+// 安全边界（与 local-worker.js 同语义，单一授权来源）：
+//  1. 工具白名单＝list_dir/read_file/grep/stat（无写/删/执行）。
+//  2. 路径先 realpath 解 symlink，再过 policy.isSensitivePath（denylist，扫所有路径段）。
+//  3. allowlist **必填**：授权根为空集 ⇒ 一律拒（no_authorized_roots）。授权来源与
+//     local-worker.js 是**同一份** authorizedRoots（使用者由 pickFiles 显式挑选的根），
+//     不另造第二套授权机制。空集**不得**退回「只验 denylist」。
+//  4. 拒绝档案系统根路径（path_is_root），避免整盘扫描。
+//  5. grep 逐档先 stat 再决定是否读取；单档上限 = min(云端下发 max_file_bytes,
+//     本机 MAX_GREP_FILE_BYTES)，超过者**跳过并计数**（避免整档入记忆体）。
+//  6. grep/list_dir 自报 `sensitive_path_touched`／`excluded_sensitive_count`（H2 契约：
+//     递回/列举碰到敏感段即计数；云端 sensitiveResultProblem 据此整笔拒绝）。
 //
-// 注入介面（測試可替換）：fs 需提供 realpathSync(.native)、existsSync、statSync、
-// readdirSync、readFileSync、openSync/readSync/closeSync；roots 為回傳授權根陣列的
-// 函式（或直接給陣列）。
+// 注入介面（测试可替换）：fs 需提供 realpathSync(.native)、existsSync、statSync、
+// readdirSync、readFileSync、openSync/readSync/closeSync；roots 为回传授权根阵列的
+// 函式（或直接给阵列）。
 
 "use strict";
 
@@ -28,19 +28,19 @@ const os = require("node:os");
 const nodeFs = require("node:fs");
 const policy = require("./policy.js");
 const proto = require("./bridge-protocol.js");
-// 第二道防線（W6c）：本機獨立複核的權限決策（硬 denylist／safety-check／規則／模式）。
-// 與 gateway 同一條判定序（見 permission-rules.js 檔頭）；本檔只負責在**執行前**
-// 以本機自身狀態（模式／規則／授權根／home）再判一次，雲端被繞過也擋得住。
+// 第二道防线（W6c）：本机独立复核的权限决策（硬 denylist／safety-check／规则／模式）。
+// 与 gateway 同一条判定序（见 permission-rules.js 档头）；本档只负责在**执行前**
+// 以本机自身状态（模式／规则／授权根／home）再判一次，云端被绕过也挡得住。
 const permissionRules = require("./permission-rules.js");
 
 const MAX_LIST_DEFAULT = 200;
 const MAX_GREP_FILES = 5000;
 const MAX_GREP_DEPTH = 12;
 /**
- * 單檔讀取上限（grep 逐檔）：超過即跳過，避免整檔入記憶體。
- * 本機自有天花板**不得比雲端契約寬鬆**：等於 `proto.MAX_FILE_READ_BYTES`（1MB），
- * 且執行時取 `min(args.max_file_bytes, 本值)`——雲端下發更小值時以雲端值為準，
- * 下發更大值（或直接呼叫執行器繞過淨化）時一律被本值夾住。
+ * 单档读取上限（grep 逐档）：超过即跳过，避免整档入记忆体。
+ * 本机自有天花板**不得比云端契约宽松**：等于 `proto.MAX_FILE_READ_BYTES`（1MB），
+ * 且执行时取 `min(args.max_file_bytes, 本值)`——云端下发更小值时以云端值为准，
+ * 下发更大值（或直接呼叫执行器绕过净化）时一律被本值夹住。
  */
 const MAX_GREP_FILE_BYTES = proto.MAX_FILE_READ_BYTES;
 const GREP_LINE_MAX = 400;
@@ -54,21 +54,21 @@ class BridgeError extends Error {
   }
 }
 
-/** 是否為檔案系統根（POSIX "/"、Windows "C:\"）。根必拒，禁整盤掃描。 */
+/** 是否为档案系统根（POSIX "/"、Windows "C:\"）。根必拒，禁整盘扫描。 */
 function isFsRoot(abs) {
   if (typeof abs !== "string" || abs.length === 0) return false;
   return path.parse(abs).root === abs;
 }
 
 /**
- * 建立一個執行器實例。
+ * 建立一个执行器实例。
  *
- * 第二道防線注入點（形狀同 roots，可傳值或函式；值注入須為字串/陣列）：
- *   - `mode`  當前權限模式（"off"|"ask"|"auto"|"full"）。未提供時回退 `"auto"`
- *     （升級前行為：授權根內自動；硬 denylist／safety-check 仍生效），刻意**不**
- *     改用 `"ask"` 以免讓未接權限模式的既有呼叫端全部變成待授權。
- *   - `rules` 規則集（陣列或 {deny,ask,allow} 物件）。
- *   - `home`  家目錄（僅供硬 denylist 展開 `~`／mode=full 判定）。
+ * 第二道防线注入点（形状同 roots，可传值或函式；值注入须为字串/阵列）：
+ *   - `mode`  当前权限模式（"off"|"ask"|"auto"|"full"）。未提供时回退 `"auto"`
+ *     （升级前行为：授权根内自动；硬 denylist／safety-check 仍生效），刻意**不**
+ *     改用 `"ask"` 以免让未接权限模式的既有呼叫端全部变成待授权。
+ *   - `rules` 规则集（阵列或 {deny,ask,allow} 物件）。
+ *   - `home`  家目录（仅供硬 denylist 展开 `~`／mode=full 判定）。
  *
  * @param {{fs?: object, roots?: string[]|(() => string[]), mode?: string|(() => string), rules?: unknown|(() => unknown), home?: string|(() => string)}} [options]
  */
@@ -78,7 +78,7 @@ function createBridgeExecutor(options = {}) {
     typeof options.roots === "function"
       ? options.roots
       : () => (Array.isArray(options.roots) ? options.roots : []);
-  // 注入點一律驗型別（教訓：跨界傳錯型別會被下游守衛靜默降級，只失效不報錯）。
+  // 注入点一律验型别（教训：跨界传错型别会被下游守卫静默降级，只失效不报错）。
   const modeProvider =
     typeof options.mode === "function"
       ? options.mode
@@ -92,22 +92,22 @@ function createBridgeExecutor(options = {}) {
       ? options.home
       : () => (typeof options.home === "string" ? options.home : undefined);
 
-  /** 當前家目錄（未注入＝os.homedir()）。 */
+  /** 当前家目录（未注入＝os.homedir()）。 */
   const currentHome = () => {
     const h = homeProvider();
     return typeof h === "string" && h.length > 0 ? h : os.homedir();
   };
 
-  // ── 對話內就地授權（consent）的「已同意根」支持 ─────────────────────────
-  // 雲端在對話中取得使用者同意（once/session/permanent）後，會在其後每次 invoke
-  // 隨 DeviceRequestMessage.consent 重送（冪等）。裝置端第二道防線只看自己的
-  // mode/rules/roots，**不知道**雲端剛發生的授權 ⇒ mode=ask 下永遠回 needs_authorization
-  // （實機缺陷）。修法：把本次請求的 grantedRoots 併入（a）allowlist 與（b）有效規則
-  // 的 allow 桶；硬 denylist／safety-check 仍在最前，grantedRoots **不得**繞過。
+  // ── 对话内就地授权（consent）的「已同意根」支持 ─────────────────────────
+  // 云端在对话中取得使用者同意（once/session/permanent）后，会在其后每次 invoke
+  // 随 DeviceRequestMessage.consent 重送（幂等）。装置端第二道防线只看自己的
+  // mode/rules/roots，**不知道**云端刚发生的授权 ⇒ mode=ask 下永远回 needs_authorization
+  // （实机缺陷）。修法：把本次请求的 grantedRoots 并入（a）allowlist 与（b）有效规则
+  // 的 allow 桶；硬 denylist／safety-check 仍在最前，grantedRoots **不得**绕过。
   //
-  // fail-closed：grantedRoots 非陣列／元素非非空字串 → 該元素略過（不當空陣列清空既有授權）。
+  // fail-closed：grantedRoots 非阵列／元素非非空字串 → 该元素略过（不当空阵列清空既有授权）。
 
-  /** 正規化 grantedRoots：僅保留非空字串、去重（undefined／型別錯＝空）。 */
+  /** 正规化 grantedRoots：仅保留非空字串、去重（undefined／型别错＝空）。 */
   function normalizeGrantedRoots(grantedRoots) {
     if (!Array.isArray(grantedRoots)) return [];
     const out = [];
@@ -120,7 +120,7 @@ function createBridgeExecutor(options = {}) {
     return out;
   }
 
-  /** 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（順序保留 roots 在前，維持既有斷言）。 */
+  /** 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（顺序保留 roots 在前，维持既有断言）。 */
   function effectiveRoots(grantedRoots) {
     const base = rootsProvider();
     const arr = Array.isArray(base) ? base.slice() : [];
@@ -130,7 +130,7 @@ function createBridgeExecutor(options = {}) {
     return arr;
   }
 
-  /** 有效規則 ＝ 既有 rules ∪ grantedRoots.map(allowRuleForRoot)（物件或陣列型皆支援）。 */
+  /** 有效规则 ＝ 既有 rules ∪ grantedRoots.map(allowRuleForRoot)（物件或阵列型皆支援）。 */
   function withGrantedAllowRules(base, grantedRoots) {
     const granted = normalizeGrantedRoots(grantedRoots);
     if (granted.length === 0) return base;
@@ -149,7 +149,7 @@ function createBridgeExecutor(options = {}) {
     return { allow: extra };
   }
 
-  /** 解 symlink；不存在時對父目錄解 symlink 再接回 basename（輸出檔常用）。 */
+  /** 解 symlink；不存在时对父目录解 symlink 再接回 basename（输出档常用）。 */
   function resolveReal(p) {
     const realpath = (fs.realpathSync && fs.realpathSync.native) || fs.realpathSync;
     try {
@@ -164,12 +164,12 @@ function createBridgeExecutor(options = {}) {
   }
 
   /**
-   * 第二道防線：以本機自身狀態（模式／規則／授權根／home）獨立複核。
-   * 判定序全部來自 permission-rules.evaluatePermission（硬 denylist → safety-check
-   * → 規則 deny/ask/allow → 模式 → 預設 ask）。雲端即使被繞過或規則被篡改，這裡仍
-   * 以同一語義拒絕。不執行時的錯誤碼（供 gateway 流程對上）：
+   * 第二道防线：以本机自身状态（模式／规则／授权根／home）独立复核。
+   * 判定序全部来自 permission-rules.evaluatePermission（硬 denylist → safety-check
+   * → 规则 deny/ask/allow → 模式 → 预设 ask）。云端即使被绕过或规则被篡改，这里仍
+   * 以同一语义拒绝。不执行时的错误码（供 gateway 流程对上）：
    *   - deny → `permission_denied`（403）
-   *   - ask  → `needs_authorization`（403，對上凍結契約的授權流程）
+   *   - ask  → `needs_authorization`（403，对上冻结契约的授权流程）
    */
   function enforcePermission(tool, raw, resolved, grantedRoots) {
     const mode = modeProvider();
@@ -193,19 +193,19 @@ function createBridgeExecutor(options = {}) {
   }
 
   /**
-   * 硬 denylist 複核（模式／規則無關，一律拒）：供列舉／遞迴剪枝使用。
-   * 檔名樣式（`*.pem`、`.env`…）在 policy denylist 之外，這裡補上，避免
-   * grep/list_dir 在授權根內把硬 denylist 檔名曝露或讀入。
+   * 硬 denylist 复核（模式／规则无关，一律拒）：供列举／递回剪枝使用。
+   * 档名样式（`*.pem`、`.env`…）在 policy denylist 之外，这里补上，避免
+   * grep/list_dir 在授权根内把硬 denylist 档名曝露或读入。
    */
   function isHardDeniedPath(p) {
     return permissionRules.isHardDenied({ raw: p, resolved: p, home: currentHome() }, currentHome());
   }
 
   /**
-   * 檢查路徑已授權且非敏感；回傳其 realpath。
-   * 順序：bad_path → 根拒絕 → policy denylist → allowlist（空集＝全拒）
-   *       → 第二道防線（permission-rules）→ 存在性。
-   * 既有檢查（policy denylist／allowlist 必填）在前且一行不放寬；第二道防線為純加嚴。
+   * 检查路径已授权且非敏感；回传其 realpath。
+   * 顺序：bad_path → 根拒绝 → policy denylist → allowlist（空集＝全拒）
+   *       → 第二道防线（permission-rules）→ 存在性。
+   * 既有检查（policy denylist／allowlist 必填）在前且一行不放宽；第二道防线为纯加严。
    */
   function requireLocalPath(raw, tool = "read_file", grantedRoots) {
     if (typeof raw !== "string" || raw.length === 0 || raw.includes("\0")) {
@@ -213,23 +213,23 @@ function createBridgeExecutor(options = {}) {
     }
     const abs = resolveReal(raw);
     if (isFsRoot(abs)) throw new BridgeError("path_is_root", 403, abs);
-    // 解 symlink 後再跑 denylist —— policy 是字串判定，跟不了 symlink（同 local-worker）。
+    // 解 symlink 后再跑 denylist —— policy 是字串判定，跟不了 symlink（同 local-worker）。
     if (policy.isSensitivePath(abs)) throw new BridgeError("sensitive_path", 403);
-    // 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（對話內已同意的根）。
+    // 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（对话内已同意的根）。
     const roots = effectiveRoots(grantedRoots);
     if (roots.length === 0) {
-      // H1：allowlist 必填。空集＝全拒，不得退回「只驗 denylist」。
+      // H1：allowlist 必填。空集＝全拒，不得退回「只验 denylist」。
       throw new BridgeError("no_authorized_roots", 403);
     }
     if (!policy.isPathAllowed(abs, roots)) throw new BridgeError("not_authorized", 403);
-    // 第二道防線（執行前獨立複核）：以本機真值判 deny/ask/allow；grantedRoots 產生
-    // allow 規則，使「已同意」的根走 rule_allow 放行（未同意者仍 needs_authorization）。
+    // 第二道防线（执行前独立复核）：以本机真值判 deny/ask/allow；grantedRoots 产生
+    // allow 规则，使「已同意」的根走 rule_allow 放行（未同意者仍 needs_authorization）。
     enforcePermission(tool, raw, abs, grantedRoots);
     if (!fs.existsSync(abs)) throw new BridgeError("not_found", 404);
     return abs;
   }
 
-  // ── 四個唯讀工具（無寫/刪/執行）────────────────────────────────────────
+  // ── 四个唯读工具（无写/删/执行）────────────────────────────────────────
 
   function toolListDir(args, grantedRoots) {
     const abs = requireLocalPath(args.path, "list_dir", grantedRoots);
@@ -242,8 +242,8 @@ function createBridgeExecutor(options = {}) {
     for (const d of all) {
       if (entries.length >= max) break;
       const full = path.join(abs, d.name);
-      // 敏感檔名/目錄名不進回傳（與 grep 遞迴剪枝同語義）；計數後回報給雲端。
-      // 第二道防線補位：policy 之外的硬 denylist 檔名（`*.pem`、`.env`…）同樣不曝露。
+      // 敏感档名/目录名不进回传（与 grep 递回剪枝同语义）；计数后回报给云端。
+      // 第二道防线补位：policy 之外的硬 denylist 档名（`*.pem`、`.env`…）同样不曝露。
       if (policy.isSensitivePath(full) || isHardDeniedPath(full)) {
         excludedSensitive += 1;
         continue;
@@ -255,7 +255,7 @@ function createBridgeExecutor(options = {}) {
         size = s.size;
         mtimeMs = s.mtimeMs;
       } catch {
-        /* 權限/競態：略過後設欄位 */
+        /* 权限/竞态：略过后设栏位 */
       }
       const type = d.isDirectory() ? "dir" : d.isSymbolicLink() ? "symlink" : d.isFile() ? "file" : "other";
       entries.push({ name: d.name, type, size, mtime_ms: mtimeMs });
@@ -264,7 +264,7 @@ function createBridgeExecutor(options = {}) {
       path: abs,
       entries,
       count: entries.length,
-      // H2 契約面第二層：裝置自報遞迴/列舉時是否碰到敏感段（雲端據此整筆拒絕）。
+      // H2 契约面第二层：装置自报递回/列举时是否碰到敏感段（云端据此整笔拒绝）。
       sensitive_path_touched: excludedSensitive > 0,
       excluded_sensitive_count: excludedSensitive,
     };
@@ -294,9 +294,9 @@ function createBridgeExecutor(options = {}) {
   }
 
   /**
-   * 遞迴收集檔案。敏感段（含目錄）直接剪枝：不進收集、也不讀取，並累計
-   * `stats.excludedSensitive`（雲端據此判定裝置是否碰到敏感段）。
-   * 不跟 symlink（防逃逸）；上限 GREP_MAX_FILES 檔、GREP_MAX_DEPTH 層。
+   * 递回收集档案。敏感段（含目录）直接剪枝：不进收集、也不读取，并累计
+   * `stats.excludedSensitive`（云端据此判定装置是否碰到敏感段）。
+   * 不跟 symlink（防逃逸）；上限 GREP_MAX_FILES 档、GREP_MAX_DEPTH 层。
    */
   function collectFiles(startAbs, st, out, depth, maxDepth, stats) {
     if (out.length >= MAX_GREP_FILES || depth > maxDepth) return;
@@ -316,14 +316,14 @@ function createBridgeExecutor(options = {}) {
       if (d.isSymbolicLink()) continue; // 不跟 symlink，防逃逸
       const full = path.join(startAbs, d.name);
       if (policy.isSensitivePath(full) || isHardDeniedPath(full)) {
-        stats.excludedSensitive += 1; // 敏感段剪枝（H2：敏感檔被排除）
+        stats.excludedSensitive += 1; // 敏感段剪枝（H2：敏感档被排除）
         continue;
       }
       let s;
       try {
         s = fs.statSync(full);
       } catch {
-        continue; // 略過無法 stat 的項
+        continue; // 略过无法 stat 的项
       }
       collectFiles(full, s, out, depth + 1, maxDepth, stats);
     }
@@ -334,7 +334,7 @@ function createBridgeExecutor(options = {}) {
     const st = fs.statSync(abs);
     if (!st.isDirectory() && !st.isFile()) throw new BridgeError("not_searchable", 400);
     const maxMatches = Number.isInteger(args.max_matches) ? args.max_matches : 100;
-    // H2 輸入側契約：逐檔讀入上限 = min(雲端下發 max_file_bytes, 本機上限)。
+    // H2 输入侧契约：逐档读入上限 = min(云端下发 max_file_bytes, 本机上限)。
     const maxFileBytes =
       Number.isInteger(args.max_file_bytes) && args.max_file_bytes > 0
         ? Math.min(args.max_file_bytes, MAX_GREP_FILE_BYTES)
@@ -343,7 +343,7 @@ function createBridgeExecutor(options = {}) {
     try {
       re = new RegExp(args.pattern);
     } catch {
-      re = null; // 非法正則 → 退回字面 contains
+      re = null; // 非法正则 → 退回字面 contains
     }
     const files = [];
     const stats = { excludedSensitive: 0 };
@@ -356,7 +356,7 @@ function createBridgeExecutor(options = {}) {
         stats.excludedSensitive += 1;
         continue;
       }
-      // M3：先 stat 再決定是否讀取；超過單檔上限即跳過並計數（不整檔入記憶體）。
+      // M3：先 stat 再决定是否读取；超过单档上限即跳过并计数（不整档入记忆体）。
       let size = null;
       try {
         size = fs.statSync(f).size;
@@ -390,7 +390,7 @@ function createBridgeExecutor(options = {}) {
       count: matches.length,
       files_scanned: filesScanned,
       skipped_large_files: skippedLargeFiles,
-      // H2 契約面第二層：自報遞迴時是否碰到敏感段（雲端 sensitiveResultProblem 據此整筆拒）。
+      // H2 契约面第二层：自报递回时是否碰到敏感段（云端 sensitiveResultProblem 据此整笔拒）。
       sensitive_path_touched: stats.excludedSensitive > 0,
       excluded_sensitive_count: stats.excludedSensitive,
     };
@@ -409,8 +409,8 @@ function createBridgeExecutor(options = {}) {
   }
 
   /**
-   * 執行工具。第三參數 opts.grantedRoots（可選）：本次請求可用的「已在對話內同意的根」，
-   * 併入 allowlist 與第二道防線的 allow 規則；硬 denylist／safety-check 不受影響。
+   * 执行工具。第三参数 opts.grantedRoots（可选）：本次请求可用的「已在对话内同意的根」，
+   * 并入 allowlist 与第二道防线的 allow 规则；硬 denylist／safety-check 不受影响。
    */
   async function executeTool(tool, args, opts) {
     const grantedRoots = opts && typeof opts === "object" ? opts.grantedRoots : undefined;

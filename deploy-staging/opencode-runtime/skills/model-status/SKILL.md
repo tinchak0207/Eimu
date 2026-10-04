@@ -1,35 +1,35 @@
 ---
 name: model-status
-description: 生成模型可用性探測與近 24h 真實表現。調用 image_generate / image_edit / image_upscale 前確認目標模型可用（工具已內建強制探測，不可用會直接失敗）；當需要「選一個可用模型」或「模型失敗找替代」時，主動查 /v1/model-status 的 availability + last_24h.success_rate，避免把請求發給不可用或近期高失敗的模型。
+description: 生成模型可用性探测与近 24h 真实表现。调用 image_generate / image_edit / image_upscale 前确认目标模型可用（工具已内建强制探测，不可用会直接失败）；当需要「选一个可用模型」或「模型失败找替代」时，主动查 /v1/model-status 的 availability + last_24h.success_rate，避免把请求发给不可用或近期高失败的模型。
 ---
 
-# model-status（生成模型可用性 + 近 24h 表現）
+# model-status（生成模型可用性 + 近 24h 表现）
 
-## 守則（強制）
+## 守则（强制）
 
-image_generate / image_edit / image_upscale 工具已內建「調用前自動探測」：目標模型不可用會直接失敗並提示換模型；近 24h 樣本 ≥5 且成功率 <50% 也會直接失敗並建議換。**不要重複探測**。
+image_generate / image_edit / image_upscale 工具已内建「调用前自动探测」：目标模型不可用会直接失败并提示换模型；近 24h 样本 ≥5 且成功率 <50% 也会直接失败并建议换。**不要重复探测**。
 
-當你需要「選一個可用模型」或「某模型生成失敗後找替代」時，主動查可用性：
+当你需要「选一个可用模型」或「某模型生成失败后找替代」时，主动查可用性：
 
-GET https://image.tinchak0207.xyz/v1/model-status（Authorization: Bearer <sk-biz-* key>，工具鏈 platformFetch 自動持有）
+GET https://image.tinchak0207.xyz/v1/model-status（Authorization: Bearer <sk-biz-* key>，工具链 platformFetch 自动持有）
 
-回傳 models[] 每項：
+回传 models[] 每项：
 - id / media_type（image|video）/ endpoint（/v1/images/generations 或 /v1/videos/generations）
 - functions（generate / edit / upscale）
 - availability（available | unavailable | unknown）+ note（unavailable/unknown 的原因）
-- last_24h（可選）：最近 24 小時真實生圖表現 `{jobs, delivered, failed, success_rate, refunded}`——success_rate 是 0~1 的小數。無此字段 = 近 24h 無樣本。
+- last_24h（可选）：最近 24 小时真实生图表现 `{jobs, delivered, failed, success_rate, refunded}`——success_rate 是 0~1 的小数。无此字段 = 近 24h 无样本。
 
-## 選模型規則
+## 选模型规则
 
-- 生圖：media_type=image 且 availability=available → POST /v1/images/generations
+- 生图：media_type=image 且 availability=available → POST /v1/images/generations
 - 生影片：media_type=video 且 available → POST /v1/videos/generations
-- 改圖：functions 含 edit → /v1/images/edits
+- 改图：functions 含 edit → /v1/images/edits
 - 放大：functions 含 upscale → /v1/upscale
-- unavailable → 換下一個同類型 available 模型；全部不可用 → 告知用戶「生成服務暫時不可用」
-- unknown（如 sensenova 不支持探測）→ 可嘗試，失敗即換模型
-- **多個模型都 available 時，優先選 last_24h.success_rate 高的**（樣本 ≥5 才可信；jobs <5 說明數據不足，不下結論）
-- **last_24h 樣本 ≥5 且 success_rate <50% 的模型要主動提醒用戶**：「這個模型探測可用，但最近 24 小時真實成功率只有 X%，建議換 Y」——可用性探測只證明渠道連通，不證明能穩定出圖
+- unavailable → 换下一个同类型 available 模型；全部不可用 → 告知用户「生成服务暂时不可用」
+- unknown（如 sensenova 不支持探测）→ 可尝试，失败即换模型
+- **多个模型都 available 时，优先选 last_24h.success_rate 高的**（样本 ≥5 才可信；jobs <5 说明数据不足，不下结论）
+- **last_24h 样本 ≥5 且 success_rate <50% 的模型要主动提醒用户**：「这个模型探测可用，但最近 24 小时真实成功率只有 X%，建议换 Y」——可用性探测只证明渠道连通，不证明能稳定出图
 
 ## 快取
 
-響應 60 秒內有效（probe.cached）。同一輪工作流複用，不必每次重探。
+响应 60 秒内有效（probe.cached）。同一轮工作流复用，不必每次重探。

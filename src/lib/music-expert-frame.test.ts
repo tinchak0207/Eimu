@@ -163,9 +163,9 @@ test("OFF：readBeastMode({})=false，委派 prompt 不含宪法文本", () => {
   assert.ok(r.prompt.includes("风格契约（Lyria prompt）："));
   // 宪法特征句一个字不多（繁体宪法原文不出现在 OFF 输出）
   assert.equal(r.prompt.includes("诚实铁律"), false);
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("ON：readBeastMode({beast_mode:true})=true，宪法落位稿原文注入 prompt 头", () => {
@@ -179,10 +179,10 @@ test("ON：readBeastMode({beast_mode:true})=true，宪法落位稿原文注入 p
   if (!r.ok) return;
   // 与落位稿逐字对账（默认 loader = fs 读 EXPERT_CONSTITUTION_PATH）
   const constitution = readFileSync(nodePath.resolve(process.cwd(), EXPERT_CONSTITUTION_PATH), "utf8");
-  assert.ok(constitution.includes("誠實鐵律"));
+  assert.ok(constitution.includes("诚实铁律"));
   assert.ok(r.prompt.startsWith(constitution), "宪法原文必须逐字注入 prompt 头");
   assert.ok(r.prompt.includes("音乐导演委托单"));
-  assert.ok(r.prompt.indexOf("Expert 憲法") < r.prompt.indexOf("音乐导演委托单"));
+  assert.ok(r.prompt.indexOf("Expert 宪法") < r.prompt.indexOf("音乐导演委托单"));
 });
 
 test("ON：宪法经 loadConstitution DI 注入头部（范式同 resolveArtifactUrl/uploadOverride）", () => {

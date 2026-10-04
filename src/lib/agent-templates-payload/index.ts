@@ -1,14 +1,14 @@
 /**
- * 助理起手模板——執行 payload 入口（2026-09-12 首屏減重拆分，2026-09-20 逐模板拆檔）。
+ * 助理起手模板——执行 payload 入口（2026-09-12 首屏减重拆分，2026-09-20 逐模板拆档）。
  *
- * 本目錄是大段 prompt 文案（slots 六槽、initialPrompt、directive、步驟
- * promptNotes/deliverable/inputFrom/gate/requiredTools）的唯一真源；每個模板
- * 一個檔（`<slug>.ts`），改一條流水線只動一個檔。
- * 客戶端禁止對本目錄做模組頂層靜態 import——會把 11.9 萬中文字元再灌回
- * app/page chunk；動態 import 落點在使用處/回調（ImagePlayground
- * handleUseAgentTemplate、SSR 路由與 node tools 可直接靜態 import）。
- * 新增/增刪步驟必須與顯示檔（agent-templates/）同序同數，hydrateAgentTemplate
- * 防呆會拋錯。
+ * 本目录是大段 prompt 文案（slots 六槽、initialPrompt、directive、步骤
+ * promptNotes/deliverable/inputFrom/gate/requiredTools）的唯一真源；每个模板
+ * 一个档（`<slug>.ts`），改一条流水线只动一个档。
+ * 客户端禁止对本目录做模组顶层静态 import——会把 11.9 万中文字元再灌回
+ * app/page chunk；动态 import 落点在使用处/回调（ImagePlayground
+ * handleUseAgentTemplate、SSR 路由与 node tools 可直接静态 import）。
+ * 新增/增删步骤必须与显示档（agent-templates/）同序同数，hydrateAgentTemplate
+ * 防呆会抛错。
  */
 
 import type { AgentPipelineStepFull, AgentTemplateFull, AgentTemplatePayload } from "./types";
@@ -43,7 +43,7 @@ export {
   shortdramaVisualAssetsPayload,
 };
 
-/** 模板 id → 執行 payload。新增模板時這裡加一行（與顯示檔 id 對齊）。 */
+/** 模板 id → 执行 payload。新增模板时这里加一行（与显示档 id 对齐）。 */
 export const AGENT_TEMPLATE_PAYLOADS: Record<string, AgentTemplatePayload> = {
   "agent-novel-film-pipeline": novelFilmPipelinePayload,
   "agent-novel-ip-visual-pack": novelIpVisualPackPayload,
@@ -56,15 +56,15 @@ export const AGENT_TEMPLATE_PAYLOADS: Record<string, AgentTemplatePayload> = {
 };
 
 /**
- * 顯示卡 + payload → 執行完整模板。缺 payload 或步數漂移立即拋錯——
- * 寧可點擊報錯，也不許模板文案憑空消失或錯位（誠實原則）。
+ * 显示卡 + payload → 执行完整模板。缺 payload 或步数漂移立即抛错——
+ * 宁可点击报错，也不许模板文案凭空消失或错位（诚实原则）。
  */
 export function hydrateAgentTemplate(card: AgentTemplate): AgentTemplateFull {
   const payload = AGENT_TEMPLATE_PAYLOADS[card.id];
-  if (!payload) throw new Error(`模板 ${card.id} 缺少執行 payload（agent-templates-payload/）`);
+  if (!payload) throw new Error(`模板 ${card.id} 缺少执行 payload（agent-templates-payload/）`);
   if (payload.steps.length !== card.pipeline.steps.length) {
     throw new Error(
-      `模板 ${card.id} 步驟數漂移：顯示 ${card.pipeline.steps.length} vs payload ${payload.steps.length}`,
+      `模板 ${card.id} 步骤数漂移：显示 ${card.pipeline.steps.length} vs payload ${payload.steps.length}`,
     );
   }
   const steps = card.pipeline.steps.map((step, i) => ({ ...step, ...payload.steps[i] }));
@@ -77,14 +77,14 @@ export function hydrateAgentTemplate(card: AgentTemplate): AgentTemplateFull {
   };
 }
 
-/** 按 id 取執行完整模板（SSR/tools 入口）。 */
+/** 按 id 取执行完整模板（SSR/tools 入口）。 */
 export function getAgentTemplateFull(id: string): AgentTemplateFull {
   const card = AGENT_TEMPLATES.find((t) => t.id === id);
   if (!card) throw new Error(`未知模板 id: ${id}`);
   return hydrateAgentTemplate(card);
 }
 
-/** 執行側全量清單：節點工具/SSR 用；客戶端組件請用 hydrate 單筆动态載入。 */
+/** 执行侧全量清单：节点工具/SSR 用；客户端组件请用 hydrate 单笔动态载入。 */
 export const AGENT_TEMPLATES_FULL: AgentTemplateFull[] = AGENT_TEMPLATES.map(hydrateAgentTemplate);
 
 /**

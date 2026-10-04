@@ -1,12 +1,12 @@
 /**
- * vision-tools.ts 測試（beast-army R2，2026-09-10；R2c 中控遷移同步）。
+ * vision-tools.ts 测试（beast-army R2，2026-09-10；R2c 中控迁移同步）。
  *
- * node:test + fetch mock（不真連）；覆蓋：
- *   1. 缺 NEWAPI_API_KEY fail-fast（人話報錯、不發請求）
- *   2. 上游非 2xx 錯誤帶原文 body（誠實鐵律）
- *   3. 成功路徑解析：verdict/dimensions/venom 提取、請求形狀（Bearer header、
- *      image_url data URL、chat payload）、圍欄 JSON 容忍
- *   4. 非圖路徑人話報錯（.m4a 拒絕、缺參數、二選一衝突、未知 aspect、文件不存在）
+ * node:test + fetch mock（不真连）；覆盖：
+ *   1. 缺 NEWAPI_API_KEY fail-fast（人话报错、不发请求）
+ *   2. 上游非 2xx 错误带原文 body（诚实铁律）
+ *   3. 成功路径解析：verdict/dimensions/venom 提取、请求形状（Bearer header、
+ *      image_url data URL、chat payload）、围栏 JSON 容忍
+ *   4. 非图路径人话报错（.m4a 拒绝、缺参数、二选一冲突、未知 aspect、文件不存在）
  */
 
 import test, { beforeEach, afterEach } from "node:test";
@@ -22,7 +22,7 @@ import {
   visionAnalyzeTool,
 } from "./vision-tools.ts";
 
-// ── fetch mock 腳手架（同構 music-lyria.test.ts） ────────────────────────────
+// ── fetch mock 脚手架（同构 music-lyria.test.ts） ────────────────────────────
 
 type MockResponse = { status: number; body: string; headers?: Record<string, string> };
 
@@ -57,7 +57,7 @@ afterEach(() => {
   else process.env.NEWAPI_VISION_MODEL = originalEnvModel;
 });
 
-// 1x1 紅色 PNG（合法 PNG bytes）。
+// 1x1 红色 PNG（合法 PNG bytes）。
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -80,9 +80,9 @@ const GOOD_REVIEW = JSON.stringify({
   venom: "这不是海报，这是美图秀秀的忏悔录。",
 });
 
-// ── prompt 組裝（確定性拼接） ─────────────────────────────────────────────────
+// ── prompt 组装（确定性拼接） ─────────────────────────────────────────────────
 
-test("buildVisionPrompt：三個 aspect 模板確定性拼接＋hint 附加", () => {
+test("buildVisionPrompt：三个 aspect 模板确定性拼接＋hint 附加", () => {
   const aesthetic = buildVisionPrompt("aesthetic");
   assert.match(aesthetic, /毒蛇艺术总监/);
   assert.match(aesthetic, /构图/);
@@ -101,23 +101,23 @@ test("buildVisionPrompt：三個 aspect 模板確定性拼接＋hint 附加", ()
 
 // ── 缺 key fail-fast ─────────────────────────────────────────────────────────
 
-test("缺 NEWAPI_API_KEY fail-fast：人話報錯且不發請求", async () => {
+test("缺 NEWAPI_API_KEY fail-fast：人话报错且不发请求", async () => {
   delete process.env.NEWAPI_API_KEY;
   installFetchMock(() => ({ status: 200, body: chatOkBody(GOOD_REVIEW) }));
 
   await assert.rejects(
-    () => callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "審" }),
+    () => callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "审" }),
     (e: Error) => {
       assert.match(e.message, /NEWAPI_API_KEY 未设置/);
       return true;
     },
   );
-  assert.equal(mockCalls.length, 0, "缺 key 時不應發出任何請求");
+  assert.equal(mockCalls.length, 0, "缺 key 时不应发出任何请求");
 });
 
-// ── 缺 key fail-fast（工具層） ────────────────────────────────────────────────
+// ── 缺 key fail-fast（工具层） ────────────────────────────────────────────────
 
-test("工具層缺 key fail-fast：invalid 參數優先，但參數對時 key 錯誤先於讀圖", async () => {
+test("工具层缺 key fail-fast：invalid 参数优先，但参数对时 key 错误先于读图", async () => {
   delete process.env.NEWAPI_API_KEY;
   installFetchMock(() => ({ status: 200, body: chatOkBody(GOOD_REVIEW) }));
 
@@ -129,13 +129,13 @@ test("工具層缺 key fail-fast：invalid 參數優先，但參數對時 key �
   assert.equal(mockCalls.length, 0);
 });
 
-// ── 上游非 2xx 帶原文 ────────────────────────────────────────────────────────
+// ── 上游非 2xx 带原文 ────────────────────────────────────────────────────────
 
-test("中控非 2xx：錯誤帶 HTTP 狀態與原文 body", async () => {
+test("中控非 2xx：错误带 HTTP 状态与原文 body", async () => {
   installFetchMock(() => ({ status: 503, body: '{"error":{"code":"model_not_found","message":"分组 default 下模型 gemini-3-flash 无可用渠道"}}' }));
 
   await assert.rejects(
-    () => callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "審" }),
+    () => callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "审" }),
     (e: Error) => {
       assert.match(e.message, /HTTP 503/);
       assert.match(e.message, /无可用渠道/);
@@ -144,11 +144,11 @@ test("中控非 2xx：錯誤帶 HTTP 狀態與原文 body", async () => {
   );
 });
 
-test("中控 200 但無文本候選：帶原文報錯", async () => {
+test("中控 200 但无文本候选：带原文报错", async () => {
   installFetchMock(() => ({ status: 200, body: '{"choices":[{"message":{"role":"assistant","content":""}}]}' }));
 
   await assert.rejects(
-    () => callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "審" }),
+    () => callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "审" }),
     (e: Error) => {
       assert.match(e.message, /没有文本候选/);
       return true;
@@ -156,12 +156,12 @@ test("中控 200 但無文本候選：帶原文報錯", async () => {
   );
 });
 
-// ── 成功路徑：解析＋請求形狀 ──────────────────────────────────────────────────
+// ── 成功路径：解析＋请求形状 ──────────────────────────────────────────────────
 
-test("成功路徑：verdict/dimensions/venom 解析＋請求形狀（Bearer/image_url data URL/chat payload）", async () => {
+test("成功路径：verdict/dimensions/venom 解析＋请求形状（Bearer/image_url data URL/chat payload）", async () => {
   installFetchMock(() => ({ status: 200, body: chatOkBody(GOOD_REVIEW) }));
 
-  const { review, channel } = await callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "審" });
+  const { review, channel } = await callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "审" });
   assert.equal(channel, "newapi");
   assert.equal(review.verdict, 3);
   assert.equal(review.dimensions.length, 6);
@@ -181,20 +181,20 @@ test("成功路徑：verdict/dimensions/venom 解析＋請求形狀（Bearer/ima
   const img = content.find((p) => p.type === "image_url") as { image_url: { url: string } };
   assert.equal(img.image_url.url, `data:image/png;base64,${PNG_BASE64}`);
   const txt = content.find((p) => p.type === "text") as { text: string };
-  assert.equal(txt.text, "審");
+  assert.equal(txt.text, "审");
   assert.equal(payload.max_tokens, 4096);
 });
 
-test("env NEWAPI_VISION_MODEL 覆蓋默認模型（中控註冊新模型零代碼切換）", async () => {
+test("env NEWAPI_VISION_MODEL 覆盖默认模型（中控注册新模型零代码切换）", async () => {
   process.env.NEWAPI_VISION_MODEL = "gemini-3-pro-future";
   installFetchMock(() => ({ status: 200, body: chatOkBody(GOOD_REVIEW) }));
 
-  await callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "審" });
+  await callNewapiVision({ base64: PNG_BASE64, mime: "image/png", prompt: "审" });
   const payload = JSON.parse(mockCalls[0].init.body as string) as { model: string };
   assert.equal(payload.model, "gemini-3-pro-future");
 });
 
-test("工具成功路徑：execute 返回 verdict＋逐維點評＋最毒總結＋channel=newapi（本地路徑）", async () => {
+test("工具成功路径：execute 返回 verdict＋逐维点评＋最毒总结＋channel=newapi（本地路径）", async () => {
   const os = await import("node:os");
   const fsp = await import("node:fs/promises");
   const path = await import("node:path");
@@ -218,7 +218,7 @@ test("工具成功路徑：execute 返回 verdict＋逐維點評＋最毒總結�
   }
 });
 
-test("圍欄 JSON 容忍：```json 圍欄與前後雜訊可解析", () => {
+test("围栏 JSON 容忍：```json 围栏与前后杂讯可解析", () => {
   const fenced = "评审结论如下：\n```json\n" + GOOD_REVIEW + "\n```\n以上。";
   const review = parseVisionReview(fenced);
   assert.equal(review.verdict, 3);
@@ -232,9 +232,9 @@ test("extractChatText：choices[0].message.content 提取", () => {
   assert.equal(extractChatText({}), "");
 });
 
-// ── 非圖路徑人話報錯 ─────────────────────────────────────────────────────────
+// ── 非图路径人话报错 ─────────────────────────────────────────────────────────
 
-test("非圖路徑（.m4a）：讀取前人話報錯，不發上游請求", async () => {
+test("非图路径（.m4a）：读取前人话报错，不发上游请求", async () => {
   const os = await import("node:os");
   const fsp = await import("node:fs/promises");
   const path = await import("node:path");
@@ -247,13 +247,13 @@ test("非圖路徑（.m4a）：讀取前人話報錯，不發上游請求", asyn
     assert.equal(parsed.ok, false);
     assert.equal(parsed.error.code, "invalid_image");
     assert.match(parsed.error.hint, /不是图片文件|音频/);
-    assert.equal(mockCalls.length, 0, "非圖類不應發上游請求");
+    assert.equal(mockCalls.length, 0, "非图类不应发上游请求");
   } finally {
     await fsp.rm(tmp, { force: true });
   }
 });
 
-test("參數衛生：缺來源／二選一衝突／未知 aspect／文件不存在", async () => {
+test("参数卫生：缺来源／二选一冲突／未知 aspect／文件不存在", async () => {
   installFetchMock(() => ({ status: 500, body: "should not be called" }));
 
   const missing = await visionAnalyzeTool.execute({});
@@ -271,10 +271,10 @@ test("參數衛生：缺來源／二選一衝突／未知 aspect／文件不存�
   assert.equal(nf.ok, false);
   assert.equal(nf.error.code, "image_not_found");
   assert.match(nf.error.hint, /不存在/);
-  assert.equal(mockCalls.length, 0, "全部參數錯誤不應發上游請求");
+  assert.equal(mockCalls.length, 0, "全部参数错误不应发上游请求");
 });
 
-test("readImageSource：URL 非圖 content-type 報錯；data URL 解碼", async () => {
+test("readImageSource：URL 非图 content-type 报错；data URL 解码", async () => {
   installFetchMock(() => ({
     status: 200,
     body: "fake-audio",

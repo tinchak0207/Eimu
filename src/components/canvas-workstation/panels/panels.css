@@ -213,7 +213,7 @@
   line-height: 1.55;
 }
 
-/* ── LoRA 庫（2026-08-27 自 pro-workstation/workstation-part-01.css 复制迁入；
+/* ── LoRA 库（2026-08-27 自 pro-workstation/workstation-part-01.css 复制迁入；
    LoraLibraryPanel 面板本体的其余样式都是 Tailwind 原子类，只有这三条是
    自定义 class：卡片双列网格 + 两行截断。 ── */
 

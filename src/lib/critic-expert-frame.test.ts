@@ -113,7 +113,7 @@ test("persona 组装唯一出口与委托单入口存在（审核域 delegate �
 
 // ── 2. registry critic 行栏值（裁定字面一一对应）─────────────────────────────
 
-test("registry critic 行：id/label/toolIds/skillPaths/taskTypes/契约/token 帽钉死＋不設 provisioned（激活行同構）", () => {
+test("registry critic 行：id/label/toolIds/skillPaths/taskTypes/契约/token 帽钉死＋不设 provisioned（激活行同构）", () => {
   const def = EXPERT_REGISTRY.critic;
   assert.ok(def, "critic 必须注册");
   assert.equal(def.id, "critic");
@@ -125,7 +125,7 @@ test("registry critic 行：id/label/toolIds/skillPaths/taskTypes/契约/token �
   assert.deepEqual([...def.deliverableContract.requiredFields], ["verdict", "issues", "evidence", "qc"]);
   assert.equal(def.deliverableContract.qcSignatureRequired, true);
   assert.equal(def.replyTokenCap, CRITIC_REPLY_SUMMARY_TOKEN_CAP);
-  // 翻正钉：与七个可路由兄弟逐栏同构 = 完全不設 provisioned 键
+  // 翻正钉：与七个可路由兄弟逐栏同构 = 完全不设 provisioned 键
   //（同 director3d/music/Wave2 五域激活行先例 "provisioned" in def === false；
   // 设 provisioned:false 不算同构，digest/routeExpert 只认键之有无语义）。
   assert.equal("provisioned" in def, false, "critic 必须是激活行（09-15 翻正部署片删 provisioned，不设该键）");
@@ -162,10 +162,10 @@ test("digest 含 critic 行且无未启用标注（可路由语义在场），�
   // 翻正核心钉：digest 不得再出现「（未启用）」——round3b 实案证明这四个字
   // 就是 orchestrator 拒派 critic 的直接病源（observations.md 观测 2）。
   assert.ok(!criticLine!.includes("未启用"), "激活行不得标注未启用（翻正后 digest 禁再挡路由）");
-  // 可路由语义在場：四个 taskTypes 逐字进摘要（orchestrator 按此写 expert="critic" spec）。
+  // 可路由语义在场：四个 taskTypes 逐字进摘要（orchestrator 按此写 expert="critic" spec）。
   assert.ok(
     criticLine!.includes("任务类型 review / audit / critique / quality_gate"),
-    `critic 行路由键逐字在場：${criticLine}`,
+    `critic 行路由键逐字在场：${criticLine}`,
   );
   assert.ok(criticLine!.includes("工具 search_web"), "critic 行带工具白名单");
   assert.ok(criticLine!.includes("配方库 未配置"), "空配方库照实现惯例写「未配置」（与 video-director/editor/screenwriter 激活行同款）");
@@ -280,8 +280,8 @@ test("OFF：readBeastMode({})=false，审核委派 prompt 不含宪法特征句"
   if (!r.ok) return;
   assert.ok(r.prompt.includes("审核官委托单"));
   assert.ok(r.prompt.includes("被审对象："));
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("ON：宪法经 loadConstitution DI 注入头部（样本串，不读真档）", () => {

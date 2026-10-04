@@ -14,11 +14,11 @@
  * 从注册表摘除 → DELETE 子 opencode 会话防堆积。单子代理 15 分钟硬顶，到点 done
  * status=error。
  *
- * 模型路由（2026-08-31 補）：子代理不再吃 opencode 預設模型，而是繼承父會話
- * persona 的主模型 + registry fallbacks 鏈（與主路徑 personaModelForAttempt 同源）。
- * 上游模型錯誤（opencode APIError 形狀 {name, data:{message}}）時自動換下一個模型
- * 重投；錯誤原文經 opencodeErrorMessage 透傳進 done，不再被 .message 直讀吞掉
- * （2026-08-31 事故：shuai 輸出審核 DataInspectionFailed 被顯示成「子代理上游错误」）。
+ * 模型路由（2026-08-31 补）：子代理不再吃 opencode 预设模型，而是继承父会话
+ * persona 的主模型 + registry fallbacks 链（与主路径 personaModelForAttempt 同源）。
+ * 上游模型错误（opencode APIError 形状 {name, data:{message}}）时自动换下一个模型
+ * 重投；错误原文经 opencodeErrorMessage 透传进 done，不再被 .message 直读吞掉
+ * （2026-08-31 事故：shuai 输出审核 DataInspectionFailed 被显示成「子代理上游错误」）。
  *
  * 并发上限：每个父会话最多 3 个活跃子代理，第 4 个 dispatch 返回 busy 文案，
  * 工具原样转给主代理。
@@ -26,26 +26,26 @@
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-// 刀 2B/刀 3（2026-09-19）：Jev 權威閘——spec 注入隔離＋expert 路由＋sync 資格。
-// 量級瘦身 A：spec 模板機器注入（playbook 2.0 起模板不進 orchestrator 上下文）。
+// 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
+// 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
 import { guardExpertContent, musicFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, workflowTemplateDirective } from "./jev-gate"
-// 任務狀態枚舉真源（0920 收口）：running/ok/error/stopped 以此為準，禁散布裸字串。
+// 任务状态枚举真源（0920 收口）：running/ok/error/stopped 以此为准，禁散布裸字串。
 import type { TaskStatus } from "./types-gateway.ts"
-// 0920：模板判定即建骨架（不等 Expert）——workflowService 是純 service 模組，
-// workflow-gw 不 import subagent，無循環風險。
+// 0920：模板判定即建骨架（不等 Expert）——workflowService 是纯 service 模组，
+// workflow-gw 不 import subagent，无循环风险。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw"
 import { templatePlaceholderContent } from "./workflow-templates"
-// 2026-10-02：派工時把「畫布模板空位」當系統事實注入子代理任務書（專家看不到畫布，
-// 只能憑印象另起爐灶 → 模板被架空）。buildTemplateSlotsFact 為純讀函式，無值回 null
-// （此路徑輸出與注入前逐字元等價）。reverse import 與 canvas-cascade-state→subagent 的既有
-// 循環同型，兩端均在呼叫期使用綁定（非模組頂層求值），bun ESM 循環安全。
+// 2026-10-02：派工时把「画布模板空位」当系统事实注入子代理任务书（专家看不到画布，
+// 只能凭印象另起炉灶 → 模板被架空）。buildTemplateSlotsFact 为纯读函式，无值回 null
+// （此路径输出与注入前逐字元等价）。reverse import 与 canvas-cascade-state→subagent 的既有
+// 循环同型，两端均在呼叫期使用绑定（非模组顶层求值），bun ESM 循环安全。
 import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
-// FIX-A（2026-10-02）：子代理工具結果的媒體成品出卡——共用主路徑的成品 URL 提取器與
+// FIX-A（2026-10-02）：子代理工具结果的媒体成品出卡——共用主路径的成品 URL 提取器与
 // emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
-// 循環與 canvas-cascade-state↔subagent 同型，兩端均在呼叫期使用綁定，bun ESM 循環安全。
+// 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
 import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone } from "./events-translate.ts"
-// 片 C（2026-09-15）：Expert 交付契約的機器強制點。純函數模組，零 gateway 內部依賴。
-// 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 時機器化重派一次。
+// 片 C（2026-09-15）：Expert 交付契约的机器强制点。纯函数模组，零 gateway 内部依赖。
+// 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 时机器化重派一次。
 import {
   checkDelivery,
   formatDeliveryGateNotice,
@@ -60,15 +60,15 @@ import {
   REWORK_FAIL_MARK,
   ORPHANED_GATE_MARK,
   DELIVERY_CONTRACTS,
-  // 2026-10-03：數值閾值判定的代碼強制入口（純函數；政策＝CRITIC_SCORE_THRESHOLD_POLICY）。
+  // 2026-10-03：数值阈值判定的代码强制入口（纯函数；政策＝CRITIC_SCORE_THRESHOLD_POLICY）。
   evaluateCriticScoreThreshold,
   CRITIC_SCORE_THRESHOLD_POLICY,
   type CriticScoreSample,
   type DeliveryGateResult,
   type CriticPassTarget,
 } from "./delivery-gate"
-// 刀 F（2026-09-15）：in-flight rework run 持久化 + 啟動孤兒治理（復用 persistence.ts
-// 同一 bun:sqlite 層，非自造第二套持久層）。finishRun 終態刪、startRework 成功寫。
+// 刀 F（2026-09-15）：in-flight rework run 持久化 + 启动孤儿治理（复用 persistence.ts
+// 同一 bun:sqlite 层，非自造第二套持久层）。finishRun 终态删、startRework 成功写。
 import {
   saveReworkRecord,
   loadReworkRecords,
@@ -76,37 +76,37 @@ import {
   markCriticPass,
   hasCriticPass,
   deleteCriticPass,
-  // D7（2026-10-02）：品質量測基座寫入（fail-open；量測不得影響交付）。
+  // D7（2026-10-02）：品质量测基座写入（fail-open；量测不得影响交付）。
   saveCriticVerdict,
   saveExpertLesson,
   saveDelivery,
   type ReworkRecord,
 } from "./persistence"
-// 2026-10-03：事後產物硬檢（確定性量測；gateway 側移植，見 media-quality.ts 檔頭）。
-// 只回技術分（非審美）；量測失敗一律 null，絕不讓交付主流程受阻。
+// 2026-10-03：事后产物硬检（确定性量测；gateway 侧移植，见 media-quality.ts 档头）。
+// 只回技术分（非审美）；量测失败一律 null，绝不让交付主流程受阻。
 import { measureMediaScore, MEDIA_QUALITY_MEASURED_MARK, type MeasuredMediaResult } from "./media-quality.ts"
 
-// P2b（2026-09-11）刀1：任務書首行自動補「预期 N 分钟」死線行。
-// 任何派遣若首行沒有「预期 N」，補上 5 分鐘 → R1 parseSyncDeadlineMs 得
-// min(2*5,4)=4 分鐘 = 240s 同步硬死線，主會話不再被無死線子代理長期鎖住。
-// 已自帶「预期/預期 N」的任務書原樣不動（避免雙補）。
+// P2b（2026-09-11）刀1：任务书首行自动补「预期 N 分钟」死线行。
+// 任何派遣若首行没有「预期 N」，补上 5 分钟 → R1 parseSyncDeadlineMs 得
+// min(2*5,4)=4 分钟 = 240s 同步硬死线，主会话不再被无死线子代理长期锁住。
+// 已自带「预期/预期 N」的任务书原样不动（避免双补）。
 const SPEC_DEADLINE_LINE = "\n预期 5 分钟（超 2x 杀线）。\n"
 
 const MAX_ACTIVE_PER_PARENT = 3
 const HARD_TIMEOUT_MS = 15 * 60 * 1000 // 单子代理硬顶
-// R6（2026-09-10）：async 子代理無工具輪詢死線頂著，軍團研究/創作任務合法更長，
-// 硬頂放寬到 30 分鐘；超時同樣走 finishRun(error) → 喚醒父會話如實匯報。
+// R6（2026-09-10）：async 子代理无工具轮询死线顶著，军团研究/创作任务合法更长，
+// 硬顶放宽到 30 分钟；超时同样走 finishRun(error) → 唤醒父会话如实汇报。
 const ASYNC_HARD_TIMEOUT_MS = 30 * 60 * 1000
 const SUMMARY_MAX_CHARS = 600
-// 2026-10-02 能力片：ok 摘要（最後一則有文字的 assistant 訊息）的明確字數上限。子代理末則
-// 文字可能上萬字，若不設上限會讓 subagent.done 的 SSE 幀與注入父會話的喚醒文案膨脹——與本輪
-// 「控制上下文與工具結果大小」的目標直接矛盾（同輪工具結果已設 50,000 字上限，摘要口徑 4000）。
-// 超過即在換行邊界截斷並附「已截斷」提示；全文仍走既有落盤指標，不丟資訊。
+// 2026-10-02 能力片：ok 摘要（最后一则有文字的 assistant 讯息）的明确字数上限。子代理末则
+// 文字可能上万字，若不设上限会让 subagent.done 的 SSE 帧与注入父会话的唤醒文案膨胀——与本轮
+// 「控制上下文与工具结果大小」的目标直接矛盾（同轮工具结果已设 50,000 字上限，摘要口径 4000）。
+// 超过即在换行边界截断并附「已截断」提示；全文仍走既有落盘指标，不丢资讯。
 export const SUBAGENT_SUMMARY_MAX_CHARS = 4000
-// E 片（2026-09-12）缺陷一：行內 600 字帽保留，但完整結果先落盤再 DELETE 子會話。
-// 09-12 實案：數千字作曲規格文檔在行內被截到「m16 属…」，子會話隨即被 DELETE，
-// 全文不可恢復；同一次上游 502 的長死因也被切掉。落盤根 = gateway WORKSPACE_DIR
-// （index.ts:570 同值；gateway 進程 WorkingDirectory=/opt/agent-harness/gateway，
+// E 片（2026-09-12）缺陷一：行内 600 字帽保留，但完整结果先落盘再 DELETE 子会话。
+// 09-12 实案：数千字作曲规格文档在行内被截到「m16 属…」，子会话随即被 DELETE，
+// 全文不可恢复；同一次上游 502 的长死因也被切掉。落盘根 = gateway WORKSPACE_DIR
+// （index.ts:570 同值；gateway 进程 WorkingDirectory=/opt/agent-harness/gateway，
 // workspace 真身 /opt/agent-harness/workspace，opencode server 的 --dir 就是它）。
 const SUBAGENT_OUTPUT_REL = "outputs/subagent"
 const SUBAGENT_OUTPUT_DIR = "/opt/agent-harness/workspace/outputs/subagent"
@@ -114,22 +114,22 @@ const PERSIST_TAIL = "[gateway 落盘: 完整结果未截断]"
 const COMPLETED_TTL_MS = 10 * 60 * 1000 // status 轮询窗口，过期即弃
 export const SUBAGENT_BUSY_MESSAGE = "已有 3 个子代理在跑，等一个完成再派"
 
-// R1（2026-09-11）：同步 dispatch 硬 deadline 解析。任務書首行/正文自帶估時
-// 「预期 N 分钟 / 預期 N 分鐘」（容忍中英、容忍小數）→ deadline = min(2N, 4) 分鐘；
-// 解析不到 → 預設 180 秒。評測 P0：spec 自寫「预期 4 分钟」而同步派發無任何死線，
-// 主會話被鎖 651 秒、正文 0 字。
+// R1（2026-09-11）：同步 dispatch 硬 deadline 解析。任务书首行/正文自带估时
+// 「预期 N 分钟 / 预期 N 分钟」（容忍中英、容忍小数）→ deadline = min(2N, 4) 分钟；
+// 解析不到 → 预设 180 秒。评测 P0：spec 自写「预期 4 分钟」而同步派发无任何死线，
+// 主会话被锁 651 秒、正文 0 字。
 const SYNC_DEADLINE_DEFAULT_MS = 180_000
 const SYNC_DEADLINE_MAX_MS = 4 * 60_000
 function parseSyncDeadlineMs(prompt: string): number {
-  const m = /[预預]\s*期\s*([0-9]+(?:\.[0-9]+)?)\s*(?:分钟|分鐘|min(?:ute)?s?)/i.exec(prompt || "")
+  const m = /[预预]\s*期\s*([0-9]+(?:\.[0-9]+)?)\s*(?:分钟|分钟|min(?:ute)?s?)/i.exec(prompt || "")
   if (!m) return SYNC_DEADLINE_DEFAULT_MS
   const n = Number.parseFloat(m[1])
   if (!Number.isFinite(n) || n <= 0) return SYNC_DEADLINE_DEFAULT_MS
   return Math.min(n * 2 * 60_000, SYNC_DEADLINE_MAX_MS)
 }
 
-/** ok 摘要截斷（2026-10-02 能力片）：超過 SUBAGENT_SUMMARY_MAX_CHARS 時在換行邊界斷開
- *  （換行太靠前 <60% 則硬切），回傳保留文字與被截字元數。純函數。 */
+/** ok 摘要截断（2026-10-02 能力片）：超过 SUBAGENT_SUMMARY_MAX_CHARS 时在换行边界断开
+ *  （换行太靠前 <60% 则硬切），回传保留文字与被截字元数。纯函数。 */
 function truncateSummaryText(text: string): { text: string; truncated: number } {
   if (typeof text !== "string" || text.length <= SUBAGENT_SUMMARY_MAX_CHARS) {
     return { text: typeof text === "string" ? text : "", truncated: 0 }
@@ -146,9 +146,9 @@ interface SubagentModelRef {
   modelID: string
 }
 
-// 2026-10-02 能力片：子代理回傳契約收斂的用量計數（設計取自 Claude Code 同步子代理
-// 回傳 {totalToolUseCount,totalDurationMs,totalTokens} 形態，未複製其程式碼）。
-// 只隨 subagent.done 以新欄位輸出，既有 id/status/summary 語義一字不動。
+// 2026-10-02 能力片：子代理回传契约收敛的用量计数（设计取自 Claude Code 同步子代理
+// 回传 {totalToolUseCount,totalDurationMs,totalTokens} 形态，未复制其程式码）。
+// 只随 subagent.done 以新栏位输出，既有 id/status/summary 语义一字不动。
 export interface SubagentUsage {
   tool_calls: number
   duration_ms: number
@@ -162,8 +162,8 @@ interface SubagentRun {
   opencodeSessionId: string
   label: string
   startedAt: number
-  // 0920 停止閘：新增 "stopped"——用戶／orchestrator 主動停止**不是失敗**，
-  // 此前複用 error 導致卡片顯示「失败」（實錘：停止成功卻被假判定為失敗）。
+  // 0920 停止闸：新增 "stopped"——用户／orchestrator 主动停止**不是失败**，
+  // 此前复用 error 导致卡片显示「失败」（实锤：停止成功却被假判定为失败）。
   status: TaskStatus
   summary?: string
   error?: string
@@ -175,13 +175,13 @@ interface SubagentRun {
   messageRole: Map<string, string>
   // partID → 已发字符数（message.part.updated 全量补发时只发未发后缀）
   partEmitted: Map<string, number>
-  // 野獸模式快照：dispatch 時取自父會話 settings；重試換模重投沿用同一快照。
+  // 野兽模式快照：dispatch 时取自父会话 settings；重试换模重投沿用同一快照。
   beastMode: boolean
-  // R8 修復片2（2026-09-10）：Expert 路由輸入端。dispatch 入口按 expert-ids.json
-  // 白名單校驗後寫入（僅 beast_mode ON 生效）；dispatchAttempt 把它帶進 prompt_async
-  // body 的 agent 欄（opencode 已驗證支持），子會話即掛對應 Expert 的裁剪工具表。
+  // R8 修复片2（2026-09-10）：Expert 路由输入端。dispatch 入口按 expert-ids.json
+  // 白名单校验后写入（仅 beast_mode ON 生效）；dispatchAttempt 把它带进 prompt_async
+  // body 的 agent 栏（opencode 已验证支持），子会话即挂对应 Expert 的裁剪工具表。
   agent?: string
-  // R6（2026-09-10）：async=true → 投遞後立即返回，終態時 deps.wakeParent 喚醒父會話。
+  // R6（2026-09-10）：async=true → 投递后立即返回，终态时 deps.wakeParent 唤醒父会话。
   asyncMode: boolean
   // partID → 类型（"text" | "reasoning"）：delta 事件自身不带类型，靠先行的
   // message.part.updated 登记（raw capture 实锤 part.updated -> delta -> delta）。
@@ -190,68 +190,68 @@ interface SubagentRun {
   // step-start/unknown part 的 partID：其 delta 照旧丢弃（对齐主路径
   // suppressedParts 丢弃语义；只放行 reasoning 与正文两类）。
   suppressedParts: Set<string>
-  // 修 3（2026-10-02）：message.part.updated 帶完整 text，按 partID 保存最新全文；
-  // 逾時/中止（partial 落盤）時 join 成正文。有界 Map（同 suppressedParts 口徑）。
+  // 修 3（2026-10-02）：message.part.updated 带完整 text，按 partID 保存最新全文；
+  // 逾时/中止（partial 落盘）时 join 成正文。有界 Map（同 suppressedParts 口径）。
   partText: Map<string, string>
-  // 修 3：本 run 落盤標記 partial（persistRunOutput 據此把「状态」寫成 partial）。
+  // 修 3：本 run 落盘标记 partial（persistRunOutput 据此把「状态」写成 partial）。
   partialPersist?: boolean
-  // 2026-10-02 能力片：子代理用量計數（summarizeChild 從 opencode message 列表算出）。
-  // 只在 summarizeChild 路徑賦值；逾時/錯誤/重派回收路徑為 undefined（done 不帶 usage 欄）。
+  // 2026-10-02 能力片：子代理用量计数（summarizeChild 从 opencode message 列表算出）。
+  // 只在 summarizeChild 路径赋值；逾时/错误/重派回收路径为 undefined（done 不带 usage 栏）。
   usage?: SubagentUsage
   timeoutTimer?: ReturnType<typeof setTimeout>
-  // R1（2026-09-11）：同步 dispatch 硬 deadline 計時器。到點只把「超時」這一事實
-  // 兌現給主會話（寫進 completed，工具輪詢立刻取件解鎖），run 不殺——降為 async
-  // 續跑，完成後照樣走既有 wakeParent 回填通路。
+  // R1（2026-09-11）：同步 dispatch 硬 deadline 计时器。到点只把「超时」这一事实
+  // 兑现给主会话（写进 completed，工具轮询立刻取件解锁），run 不杀——降为 async
+  // 续跑，完成后照样走既有 wakeParent 回填通路。
   deadlineTimer?: ReturnType<typeof setTimeout>
-  // D5（2026-10-02）：心跳 + 逾時前部分交付計時器（見 armHeartbeat）。摘除時必須清。
+  // D5（2026-10-02）：心跳 + 逾时前部分交付计时器（见 armHeartbeat）。摘除时必须清。
   heartbeatTimer?: ReturnType<typeof setInterval>
   earlyPartialTimer?: ReturnType<typeof setTimeout>
-  // 片 D（2026-09-15）：交付閘門機器化重派狀態。reworkCount=已重派次數（硬帽 1，
-  // 防無限迴圈燒錢）；reworking=重派投遞在途護欄（舊子會話殘影事件不得提前收尾）；
-  // reworkFailure=重派投遞失敗原因（非空=重派從未真正跑過，done 不得偽稱 reworked）。
+  // 片 D（2026-09-15）：交付闸门机器化重派状态。reworkCount=已重派次数（硬帽 1，
+  // 防无限回圈烧钱）；reworking=重派投递在途护栏（旧子会话残影事件不得提前收尾）；
+  // reworkFailure=重派投递失败原因（非空=重派从未真正跑过，done 不得伪称 reworked）。
   reworkCount: number
   reworking?: boolean
   reworkFailure?: string
-  // 刀 F（2026-09-15）：啟動掃描重建的孤兒 run 標記——finishRun 見其 true 直接走誠實
-  // 收尾（delivery_gate.orphaned + 前綴 wake），不重派、不幽靈續 watch、不偽稱 reworked。
+  // 刀 F（2026-09-15）：启动扫描重建的孤儿 run 标记——finishRun 见其 true 直接走诚实
+  // 收尾（delivery_gate.orphaned + 前缀 wake），不重派、不幽灵续 watch、不伪称 reworked。
   orphaned?: boolean
-  // 刀 2（2026-09-15）：本 run 是 gateway 在收盤判定點**機器派遣**的 critic（非 orchestrator
-  // 決定）。終態處置分岔：verdict 通過 → 僅 journal 留痕、抑制 wake（不擾會話、不新增空轉
-  // turn）；判退回 → 以前綴 CRITIC_REJECT_MARK 走既有 wakeParent 把判決送回父會話。
+  // 刀 2（2026-09-15）：本 run 是 gateway 在收盘判定点**机器派遣**的 critic（非 orchestrator
+  // 决定）。终态处置分岔：verdict 通过 → 仅 journal 留痕、抑制 wake（不扰会话、不新增空转
+  // turn）；判退回 → 以前缀 CRITIC_REJECT_MARK 走既有 wakeParent 把判决送回父会话。
   machineCriticPass?: boolean
-  // 刀 2：機器 pass 的 critic run 專用——其終態 verdict 判讀結果（false=通過）。
+  // 刀 2：机器 pass 的 critic run 专用——其终态 verdict 判读结果（false=通过）。
   machineCriticRejected?: boolean
-  // 2026-10-03：機器 critic run 被派時所審的那批 Expert 交付（跨 finishRun 需要它們的
-  // 正文抽取可量測媒體 URL）。只在 maybeRunMachineCriticPass 建立 run 時賦值一次。
+  // 2026-10-03：机器 critic run 被派时所审的那批 Expert 交付（跨 finishRun 需要它们的
+  // 正文抽取可量测媒体 URL）。只在 maybeRunMachineCriticPass 建立 run 时赋值一次。
   criticReviewed?: CriticPassTarget[]
-  // 0920 暴君裁定（停止閘）：用戶／orchestrator 主動停止。置位後：
-  //   ① killSwitch 已 abort+DELETE 子會話；② 所有事件與重投路徑一律早退
-  //   （stopCheck 見 stopped 即 return），含換模重試與交付閘門重派；
-  //   ③ finishRun 歸屬 "stopped"，**不做 wakeParent**（停止不該把父會話再喚起來）。
+  // 0920 暴君裁定（停止闸）：用户／orchestrator 主动停止。置位后：
+  //   ① killSwitch 已 abort+DELETE 子会话；② 所有事件与重投路径一律早退
+  //   （stopCheck 见 stopped 即 return），含换模重试与交付闸门重派；
+  //   ③ finishRun 归属 "stopped"，**不做 wakeParent**（停止不该把父会话再唤起来）。
   stopped?: boolean
   stoppedBy?: "user" | "orchestrator"
   stoppedAt?: number
 }
 
 interface SubagentResult {
-  // 0920 停止閘：新增 "stopped"——人工取消不是失敗（停止成功卻顯示「失败」＝假判定）。
+  // 0920 停止闸：新增 "stopped"——人工取消不是失败（停止成功却显示「失败」＝假判定）。
   status: Exclude<TaskStatus, "running">
   summary: string
   error?: string
   finishedAt: number
-  // 異步模式（2026-09-10 R6）：dispatch async=true 時 finishRun 摘除 run 後
-  // 直接喚醒父會話；label 留給喚醒文案取用。
+  // 异步模式（2026-09-10 R6）：dispatch async=true 时 finishRun 摘除 run 后
+  // 直接唤醒父会话；label 留给唤醒文案取用。
   label?: string
-  // R1（2026-09-11）：同步 deadline 超時的「部分結果」語義（工具側/前端契約欄位）。
+  // R1（2026-09-11）：同步 deadline 超时的「部分结果」语义（工具侧/前端契约栏位）。
   partial?: boolean
   reason?: string
-  // D4（2026-10-02）：所屬父會話（gateway session id）。此前 completed 記錄無歸屬，
-  // 「latest／最近 3 筆」查不到本會話的已完成 run。新寫入必帶；舊記錄無此欄＝不列入。
+  // D4（2026-10-02）：所属父会话（gateway session id）。此前 completed 记录无归属，
+  // 「latest／最近 3 笔」查不到本会话的已完成 run。新写入必带；旧记录无此栏＝不列入。
   parent?: string
 }
 
 interface SubagentDeps {
-  // 现有出口：emitToSession(state, name, data)（replayBuffer/clients/enqueue 全在裡面）
+  // 现有出口：emitToSession(state, name, data)（replayBuffer/clients/enqueue 全在里面）
   emitToSession: (state: any, name: string, data: unknown) => void
   // 父会话解析：gateway id → state；miss 再按 opencode id 查
   resolveSession: (id: string) => any
@@ -259,17 +259,17 @@ interface SubagentDeps {
   openCodeUrl: string
   openCodeHeaders: () => Record<string, string>
   // 主路径 opencodeErrorMessage 原样注入：opencode 错误是 {name, data:{message}}
-  // 形状，直读 .message 恒 undefined（主路徑註解已警告過的坑）。
+  // 形状，直读 .message 恒 undefined（主路径注解已警告过的坑）。
   describeError: (err: unknown) => string
-  // 父會話 persona 主模型 + fallbacks 鏈（與主路徑 personaModelForAttempt 同源）。
+  // 父会话 persona 主模型 + fallbacks 链（与主路径 personaModelForAttempt 同源）。
   subagentModelChain: (parentState: any) => SubagentModelRef[]
-  // 野獸模式（MOE 改革，2026-09-08）：父會話 settings.beast_mode；ON 時任務書頭部
-  // 注入 Expert 憲法（gateway/expert/expert-constitution.md）。OFF/缺欄 = 原文零改動。
+  // 野兽模式（MOE 改革，2026-09-08）：父会话 settings.beast_mode；ON 时任务书头部
+  // 注入 Expert 宪法（gateway/expert/expert-constitution.md）。OFF/缺栏 = 原文零改动。
   beastMode: (parentState: any) => boolean
-  // 異步完成喚醒（2026-09-10 R6）：子代理終態時由 gateway 注入的出口，把結果
-  // 摘要投進父會話消息流並續 turn（輪子=index.ts wakeSessionForSubagent，對齊
-  // workflow 喚醒掃描器的 prompt_async 輪廓：turn 計數重置＋watchdog 布哨＋冪等守衛）。
-  // 未注入（舊 index.ts 配新 subagent.ts）時 async dispatch 自動降級同步語義。
+  // 异步完成唤醒（2026-09-10 R6）：子代理终态时由 gateway 注入的出口，把结果
+  // 摘要投进父会话消息流并续 turn（轮子=index.ts wakeSessionForSubagent，对齐
+  // workflow 唤醒扫描器的 prompt_async 轮廓：turn 计数重置＋watchdog 布哨＋幂等守卫）。
+  // 未注入（旧 index.ts 配新 subagent.ts）时 async dispatch 自动降级同步语义。
   wakeParent: (parentState: any, run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string }) => void
 }
 
@@ -278,36 +278,36 @@ let deps: SubagentDeps | undefined
 const byParent = new Map<string, SubagentRun[]>()
 // 子 opencode session id → run（全局 tap 按 sessionID 命中）
 const byChildOc = new Map<string, SubagentRun>()
-// FIX-B（2026-10-02）：子會話→父會話映射的耐久性。byChildOc 在 run 收尾（finishRun/
-// stopSubagentRun/換模）會被 delete，但 poller 可能在子代理結束後才把成品經 /internal/emit
-// 用子會話 id 發出 → subagentParentState 解析不到父會話 → 404 → 卡丟失。於綁定點
-// （dispatchAttempt）額外寫一張有界（≤200）TTL（2h）表，byChildOc 未命中時回退查。
-// **只在綁定處寫**，不改任何 byChildOc.has()/delete() 語義（subagent_stop/status 依賴它們）。
+// FIX-B（2026-10-02）：子会话→父会话映射的耐久性。byChildOc 在 run 收尾（finishRun/
+// stopSubagentRun/换模）会被 delete，但 poller 可能在子代理结束后才把成品经 /internal/emit
+// 用子会话 id 发出 → subagentParentState 解析不到父会话 → 404 → 卡丢失。于绑定点
+// （dispatchAttempt）额外写一张有界（≤200）TTL（2h）表，byChildOc 未命中时回退查。
+// **只在绑定处写**，不改任何 byChildOc.has()/delete() 语义（subagent_stop/status 依赖它们）。
 const RECENT_CHILD_PARENT_CAP = 200
 const RECENT_CHILD_PARENT_TTL_MS = 2 * 60 * 60 * 1000
 const recentChildParent = new Map<string, { parentGatewaySessionId: string; parentOpencodeSessionId: string; at: number }>()
 // 子代理 id → 结果（工具轮询取件；TTL 后清）
 const completed = new Map<string, SubagentResult>()
 
-// ── 刀 2（2026-09-15）：machine critic pass 狀態 ─────────────────────────────────
-// 待審交付：父 gateway session id → 本窗口內已終態的 Expert 交付（尚未送審）。
-// 由 finishRun 在 Expert 正常終態時登記；machine pass 消耗後清空。純內存（有界：
-// 每次 pass 至多取 CRITIC_PASS_MAX_TARGETS；登記側亦封頂）。
+// ── 刀 2（2026-09-15）：machine critic pass 状态 ─────────────────────────────────
+// 待审交付：父 gateway session id → 本窗口内已终态的 Expert 交付（尚未送审）。
+// 由 finishRun 在 Expert 正常终态时登记；machine pass 消耗后清空。纯内存（有界：
+// 每次 pass 至多取 CRITIC_PASS_MAX_TARGETS；登记侧亦封顶）。
 const pendingCriticTargets = new Map<string, CriticPassTarget[]>()
-// 本輪是否已有 critic 派遣（含在途）。值 = 登記時的父會話 turnGen。
-// **語義釘死為「本輪」**：判據比較「登記 turnGen === 當前 turnGen」，新一輪自動失效
-// ——避免 orchestrator 早輪派過一次 critic 就永久豁免機器兜底（本刀要的就是兜底常在）。
-// orchestrator 自派（handleSubagentDispatch expert="critic"）與機器 pass 派遣皆登記於此。
-// 有界 Map 防無界增長。
+// 本轮是否已有 critic 派遣（含在途）。值 = 登记时的父会话 turnGen。
+// **语义钉死为「本轮」**：判据比较「登记 turnGen === 当前 turnGen」，新一轮自动失效
+// ——避免 orchestrator 早轮派过一次 critic 就永久豁免机器兜底（本刀要的就是兜底常在）。
+// orchestrator 自派（handleSubagentDispatch expert="critic"）与机器 pass 派遣皆登记于此。
+// 有界 Map 防无界增长。
 const criticDispatchedByParent = new Map<string, number>()
-// M2/M3（2026-10-02）：每父會話交付簿——music-first 前置斷言（music 交付事件）＋
-// 返工內容鎖（上一份交付物落盤路徑）。有界 Map，每父會話 ≤20 筆。
+// M2/M3（2026-10-02）：每父会话交付簿——music-first 前置断言（music 交付事件）＋
+// 返工内容锁（上一份交付物落盘路径）。有界 Map，每父会话 ≤20 笔。
 const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string }>>()
-// 本會話是否已用掉 machine critic pass（內存鏡像；權威在 persistence.critic_passes）。
+// 本会话是否已用掉 machine critic pass（内存镜像；权威在 persistence.critic_passes）。
 const criticPassUsed = new Set<string>()
 const CRITIC_PENDING_CAP = 16
-// 修 1（2026-10-02）：被並發上限擠掉的 critic 待審目標入隊（per-parent）。
-// 此前直接丟棄 → critic 從未跑；槽位釋放時由 maybeDrainCriticQueue 補跑。有界。
+// 修 1（2026-10-02）：被并发上限挤掉的 critic 待审目标入队（per-parent）。
+// 此前直接丢弃 → critic 从未跑；槽位释放时由 maybeDrainCriticQueue 补跑。有界。
 const criticRetryQueue = new Map<string, CriticPassTarget[]>()
 
 export function initSubagent(d: SubagentDeps): void {
@@ -332,11 +332,11 @@ export function subagentParentApiKey(opencodeSessionId: string): string | undefi
 }
 
 /**
- * 死线③同構（2026-09-19 片頭曲 404 實錘）：子代理 opencode session 不在主
- * sessions 表，/internal/media/upload 等「session_id 解析」型端點查無記錄 →
- * 工具側上傳全掛（音軌生成成功卻 404 session not found）。子會話仍活躍時
- * 經此解析父會話 SessionState；父會話已被逐出/收尾則回 undefined，由呼叫方
- * 維持 404 原語義。uploadAudio 落盤歸屬父會話（同用戶，存儲口徑不變）。
+ * 死线③同构（2026-09-19 片头曲 404 实锤）：子代理 opencode session 不在主
+ * sessions 表，/internal/media/upload 等「session_id 解析」型端点查无记录 →
+ * 工具侧上传全挂（音轨生成成功却 404 session not found）。子会话仍活跃时
+ * 经此解析父会话 SessionState；父会话已被逐出/收尾则回 undefined，由呼叫方
+ * 维持 404 原语义。uploadAudio 落盘归属父会话（同用户，存储口径不变）。
  */
 export function subagentParentState(opencodeSessionId: string): any | undefined {
   const run = byChildOc.get(opencodeSessionId)
@@ -346,8 +346,8 @@ export function subagentParentState(opencodeSessionId: string): any | undefined 
       deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
     )
   }
-  // FIX-B（2026-10-02）：run 已收尾（byChildOc 已刪）但 poller 仍可能用子會話 id 晚到取件
-  // → 回退查有界 TTL 表（lazy prune 過期項），解析方式與上面逐字相同。
+  // FIX-B（2026-10-02）：run 已收尾（byChildOc 已删）但 poller 仍可能用子会话 id 晚到取件
+  // → 回退查有界 TTL 表（lazy prune 过期项），解析方式与上面逐字相同。
   pruneRecentChildParent(Date.now())
   const rec = recentChildParent.get(opencodeSessionId)
   if (!rec) return undefined
@@ -361,17 +361,17 @@ function parentStateOf(run: SubagentRun): any {
   )
 }
 
-// ── 0920 暴君裁定：子代理停止閘（此前「一出就刹不住車」）─────────────────────
-// 病灶（三處結構性缺失，全在本次修復）：
-//   ① 用戶終止按鈕打 /agent/v1/sessions/:id/abort → 只殺**主會話**在途 turn，
-//      子代理（各自獨立子會話）完全不受影響，跑完照樣 wakeParent 把父會話**重新
-//      喚起來**——用戶視角＝「按了終止，它又自己活了」。
-//   ② orchestrator 沒有任何停止子代理的工具（只有 dispatch/status）。
-//   ③ 換模重試（retryWithNextModel）與交付閘門重派（startRework）都會另建子會話，
-//      沒有「已停止」這道閘，停止後仍會被重投路徑復活。
-// 本閘：stopped 一置，所有事件處理與重投路徑早退，finishRun 歸屬 "stopped" 且不喚醒。
+// ── 0920 暴君裁定：子代理停止闸（此前「一出就刹不住车」）─────────────────────
+// 病灶（三处结构性缺失，全在本次修复）：
+//   ① 用户终止按钮打 /agent/v1/sessions/:id/abort → 只杀**主会话**在途 turn，
+//      子代理（各自独立子会话）完全不受影响，跑完照样 wakeParent 把父会话**重新
+//      唤起来**——用户视角＝「按了终止，它又自己活了」。
+//   ② orchestrator 没有任何停止子代理的工具（只有 dispatch/status）。
+//   ③ 换模重试（retryWithNextModel）与交付闸门重派（startRework）都会另建子会话，
+//      没有「已停止」这道闸，停止后仍会被重投路径复活。
+// 本闸：stopped 一置，所有事件处理与重投路径早退，finishRun 归属 "stopped" 且不唤醒。
 
-/** 停止單一 run：標記 + abort/DELETE 子會話 + 摘註冊表 + 記 completed（工具輪詢可解鎖）。 */
+/** 停止单一 run：标记 + abort/DELETE 子会话 + 摘注册表 + 记 completed（工具轮询可解锁）。 */
 export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", reason: string): void {
   if (run.status !== "running") return
   run.stopped = true
@@ -380,18 +380,18 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
   if (run.deadlineTimer) clearTimeout(run.deadlineTimer)
   const text = reason || `已停止子代理「${run.label}」`
-  // 修 3（2026-10-02）：中止＝先落盤 partial（已累積文字，檔名規則同終態），再做
-  // stopped 收尾——此前中止零產物、工作全丟（實錘：C2 與查重代理被一併殺掉）。
+  // 修 3（2026-10-02）：中止＝先落盘 partial（已累积文字，档名规则同终态），再做
+  // stopped 收尾——此前中止零产物、工作全丢（实锤：C2 与查重代理被一并杀掉）。
   run.partialPersist = true
   const persist = persistRunOutput(run, "timeout", partialBodyOf(run), text)
   const summary = persist.relPath ? `${persist.pointer}${text}` : text
-  // 先落一條 done（不經 finishRun——那條路會走交付閘門/喚醒，停止語義不適用）。
-  // 0920 停止閘：人工／orchestrator 停止不是失敗，標 "stopped"，前端的 "已中止"。
+  // 先落一条 done（不经 finishRun——那条路会走交付闸门/唤醒，停止语义不适用）。
+  // 0920 停止闸：人工／orchestrator 停止不是失败，标 "stopped"，前端的 "已中止"。
   run.status = "stopped" satisfies TaskStatus
   run.error = text
   run.summary = summary
   removeFromRegistries(run)
-  // 修 1：停止也釋放槽位——補跑被擠掉的 critic。
+  // 修 1：停止也释放槽位——补跑被挤掉的 critic。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id)
   completed.set(run.id, { status: "stopped" satisfies TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
@@ -402,8 +402,8 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
     } catch (e) {
       console.error(`[gateway] subagent stop emit failed: id=${run.id}`, e)
     }
-    // 刻意**不喚醒**父會話：停止＝結束，不是新任務。喚醒會讓 orchestrator 又起一輪
-    // （並可能再派新 subagent），正是用戶抱怨的「刹不住」。
+    // 刻意**不唤醒**父会话：停止＝结束，不是新任务。唤醒会让 orchestrator 又起一轮
+    // （并可能再派新 subagent），正是用户抱怨的「刹不住」。
   }
   if (isOpenCodeSessionId(run.opencodeSessionId) && deps) {
     void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/abort`, {
@@ -422,7 +422,7 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   )
 }
 
-/** 停止一個父會話名下全部在跑子代理（用戶終止按鈕 / orchestrator 一鍵清場）。回停掉幾個。 */
+/** 停止一个父会话名下全部在跑子代理（用户终止按钮 / orchestrator 一键清场）。回停掉几个。 */
 export function stopSubagentsForParent(parentGatewaySessionId: string, by: "user" | "orchestrator", reason = ""): number {
   const list = byParent.get(parentGatewaySessionId) ?? []
   const running = list.filter((r) => r.status === "running" && !r.stopped)
@@ -430,7 +430,7 @@ export function stopSubagentsForParent(parentGatewaySessionId: string, by: "user
   return running.length
 }
 
-/** 停止或恢復單一 run（orchestrator 工具用；id 可為 gateway run id 或 label 前綴）。回 run 或 undefined。 */
+/** 停止或恢复单一 run（orchestrator 工具用；id 可为 gateway run id 或 label 前缀）。回 run 或 undefined。 */
 export function findRunningRun(parentGatewaySessionId: string, idOrLabel: string): SubagentRun | undefined {
   const list = (byParent.get(parentGatewaySessionId) ?? []).filter((r) => r.status === "running" && !r.stopped)
   const exact = list.find((r) => r.id === idOrLabel)
@@ -452,7 +452,7 @@ function pruneCompleted(): void {
   }
 }
 
-// FIX-B：記住子會話→父會話綁定（有界）；byChildOc 收尾刪除後仍能解析父 state 供晚到取件。
+// FIX-B：记住子会话→父会话绑定（有界）；byChildOc 收尾删除后仍能解析父 state 供晚到取件。
 function rememberChildParent(childId: string, run: SubagentRun): void {
   recentChildParent.set(childId, {
     parentGatewaySessionId: run.parentGatewaySessionId,
@@ -466,7 +466,7 @@ function rememberChildParent(childId: string, run: SubagentRun): void {
   }
 }
 
-// FIX-B：lazy prune 過期項（TTL 2h），隨每次回退查詢順手清（只在 subagentParentState miss 時呼叫）。
+// FIX-B：lazy prune 过期项（TTL 2h），随每次回退查询顺手清（只在 subagentParentState miss 时呼叫）。
 function pruneRecentChildParent(now: number): void {
   for (const [k, v] of recentChildParent) {
     if (now - v.at > RECENT_CHILD_PARENT_TTL_MS) recentChildParent.delete(k)
@@ -488,20 +488,20 @@ function removeFromRegistries(run: SubagentRun): void {
 }
 
 /**
- * 2026-10-03（v3 接線）：開關 `CRITIC_SCORE_ENFORCE`。真值＝**必須字面 "1"**。
- * 刻意不接受 "true"/"on"/"yes"：本閘門一旦啟用，measured 低分會被當成「退回」，
- * 經既有重派鏈讓上游 Expert 重跑＝再一次模型呼叫＝花錢，故用最不易誤開的形式。
- * 未設／其他值 → false：與接線前**逐位元組相同**（零 I/O、零 await、零重派）。
+ * 2026-10-03（v3 接线）：开关 `CRITIC_SCORE_ENFORCE`。真值＝**必须字面 "1"**。
+ * 刻意不接受 "true"/"on"/"yes"：本闸门一旦启用，measured 低分会被当成「退回」，
+ * 经既有重派链让上游 Expert 重跑＝再一次模型呼叫＝花钱，故用最不易误开的形式。
+ * 未设／其他值 → false：与接线前**逐位元组相同**（零 I/O、零 await、零重派）。
  */
 export function criticScoreEnforcementEnabled(): boolean {
   return process.env.CRITIC_SCORE_ENFORCE === "1"
 }
 
 /**
- * 純函數（可單測）：measured 樣本 + 開關 → 是否以數值閾值強制退回。
- * 三條件缺一不可：開關 true；來源＝policy.enforcedSource（measured）；分數 < reworkBelow。
- * 無分數（null）／model_self／human → 一律 false（未知≠失敗；模型自評非驗收 oracle）。
- * 判定邏輯全在 evaluateCriticScoreThreshold（唯一真源），本函數只加 env 閘門、不另立閾值。
+ * 纯函数（可单测）：measured 样本 + 开关 → 是否以数值阈值强制退回。
+ * 三条件缺一不可：开关 true；来源＝policy.enforcedSource（measured）；分数 < reworkBelow。
+ * 无分数（null）／model_self／human → 一律 false（未知≠失败；模型自评非验收 oracle）。
+ * 判定逻辑全在 evaluateCriticScoreThreshold（唯一真源），本函数只加 env 闸门、不另立阈值。
  */
 export function shouldForceCriticRejectByScore(
   sample: CriticScoreSample,
@@ -512,10 +512,10 @@ export function shouldForceCriticRejectByScore(
 }
 
 /**
- * 2026-10-03：對機器 critic run 所審 Expert 交付做**事後產物硬檢**，只算不寫。
- * 全程 try/catch，永不 throw；量測回 null（開關 OFF／ffprobe 不可用／無媒體／量測失敗）
- * → 回 null，呼叫端據此維持 null 分數（未知≠通過，絕不填 0/滿分冒充）。寫入交由呼叫端
- * 一次性完成（persistMeasuredVerdict），避免第二套寫入路徑。
+ * 2026-10-03：对机器 critic run 所审 Expert 交付做**事后产物硬检**，只算不写。
+ * 全程 try/catch，永不 throw；量测回 null（开关 OFF／ffprobe 不可用／无媒体／量测失败）
+ * → 回 null，呼叫端据此维持 null 分数（未知≠通过，绝不填 0/满分冒充）。写入交由呼叫端
+ * 一次性完成（persistMeasuredVerdict），避免第二套写入路径。
  */
 async function measureReviewedMedia(run: SubagentRun): Promise<MeasuredMediaResult | null> {
   try {
@@ -528,7 +528,7 @@ async function measureReviewedMedia(run: SubagentRun): Promise<MeasuredMediaResu
   }
 }
 
-/** 以同一 runId 覆寫 critic_verdicts 的 measured 分欄（唯一寫入形狀＝persistence.saveCriticVerdict）。 */
+/** 以同一 runId 覆写 critic_verdicts 的 measured 分栏（唯一写入形状＝persistence.saveCriticVerdict）。 */
 function persistMeasuredVerdict(run: SubagentRun, measured: MeasuredMediaResult, criticVerdictText: string): void {
   try {
     saveCriticVerdict({
@@ -536,13 +536,13 @@ function persistMeasuredVerdict(run: SubagentRun, measured: MeasuredMediaResult,
       runId: run.id,
       agent: run.agent,
       label: run.label,
-      // verdict 沿用 critic 判讀（硬檢不翻判方向，只補數值分；兩者不混為一談）。
+      // verdict 沿用 critic 判读（硬检不翻判方向，只补数值分；两者不混为一谈）。
       verdict: run.machineCriticRejected ? "reject" : "pass",
       score: measured.score,
-      // measured 有數值才算（saveCriticVerdict 內另有「measured 無數值→來源強制 null」不變式）。
+      // measured 有数值才算（saveCriticVerdict 内另有「measured 无数值→来源强制 null」不变式）。
       scoreSource: "measured",
       judgeModel: "hardcheck/ffprobe",
-      // 量測細節置前（保留 provenance），其後附 critic 判詞（saveCriticVerdict 統一截 4000）。
+      // 量测细节置前（保留 provenance），其后附 critic 判词（saveCriticVerdict 统一截 4000）。
       verdictText: `${MEDIA_QUALITY_MEASURED_MARK}${measured.detail}\n\n${criticVerdictText}`,
     })
     console.log(
@@ -554,9 +554,9 @@ function persistMeasuredVerdict(run: SubagentRun, measured: MeasuredMediaResult,
 }
 
 /**
- * 2026-10-03：fire-and-forget 旁路（**僅在閘門關閉時使用**）。量測成功 → 以同一 runId
- * 覆寫 critic_verdicts 的 measured 分欄（供觀測）；失敗 → 不寫。終態收尾**不被阻斷**。
- * 閘門開啟時改走 finishRun 內的 await 路徑（量測結果要先參與判決），本函數不再被呼叫。
+ * 2026-10-03：fire-and-forget 旁路（**仅在闸门关闭时使用**）。量测成功 → 以同一 runId
+ * 覆写 critic_verdicts 的 measured 分栏（供观测）；失败 → 不写。终态收尾**不被阻断**。
+ * 闸门开启时改走 finishRun 内的 await 路径（量测结果要先参与判决），本函数不再被呼叫。
  */
 async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: string): Promise<void> {
   const measured = await measureReviewedMedia(run)
@@ -565,17 +565,17 @@ async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: st
 }
 
 /** 收尾：登记结果、摘除注册表、向父会话发 done、DELETE 子会话防堆积。
- *  2026-10-03：改 async——僅在「critic-score 閘門開啟且本 run 是機器 critic」時才會 await
- *  一次量測（要在判決前拿到 measured 分）。閘門未設時無任何 await：副作用與時序與接線前
- *  完全相同（呼叫端皆忽略回傳值）。 */
+ *  2026-10-03：改 async——仅在「critic-score 闸门开启且本 run 是机器 critic」时才会 await
+ *  一次量测（要在判决前拿到 measured 分）。闸门未设时无任何 await：副作用与时序与接线前
+ *  完全相同（呼叫端皆忽略回传值）。 */
 async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, error?: string): Promise<void> {
   if (run.status !== "running") return // 幂等：idle 与超时硬顶可能竞态
-  // 0920 停止閘：停止已由 stopSubagentRun 收尾（已 done/已摘表）；此處不得再走
-  // 交付閘門或 wakeParent——否則停止後仍會把父會話喚醒重跑（「刹不住」病灶①）。
+  // 0920 停止闸：停止已由 stopSubagentRun 收尾（已 done/已摘表）；此处不得再走
+  // 交付闸门或 wakeParent——否则停止后仍会把父会话唤醒重跑（「刹不住」病灶①）。
   if (run.stopped) return
   run.status = status
-  // E 片（2026-09-12）缺陷一：**先落盤完整全文/死因全文，再走摘要與 DELETE**。行內
-  // 摘要仍只給 600 字（semantics 不變），但前綴掛落盤指針 → 父會話可 read 全文。
+  // E 片（2026-09-12）缺陷一：**先落盘完整全文/死因全文，再走摘要与 DELETE**。行内
+  // 摘要仍只给 600 字（semantics 不变），但前缀挂落盘指针 → 父会话可 read 全文。
   const persist = persistRunOutput(run, status, fullText, error)
   if (status === "ok" && run.agent && !run.stopped) {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
@@ -584,11 +584,11 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
   }
-  // 2026-10-02 能力片：ok 摘要＝最後一則有文字的 assistant 訊息（語義取自 Claude Code
-  // 子代理回傳契約）+ 一行用量計數；**不是**「全文前 N 字」。子代理末則文字可能上萬字，
-  // 為避免 done 幀與注入父會話的喚醒文案膨脹（與本輪控上下文/工具結果大小的目標一致），
-  // 以 SUBAGENT_SUMMARY_MAX_CHARS 在換行邊界截斷並附「已截斷」提示；全文落盤照舊保留
-  // （persist.pointer / PERSIST_TAIL 不變）。error 摘要維持原 600 字死因帽（既有語義零回歸）。
+  // 2026-10-02 能力片：ok 摘要＝最后一则有文字的 assistant 讯息（语义取自 Claude Code
+  // 子代理回传契约）+ 一行用量计数；**不是**「全文前 N 字」。子代理末则文字可能上万字，
+  // 为避免 done 帧与注入父会话的唤醒文案膨胀（与本轮控上下文/工具结果大小的目标一致），
+  // 以 SUBAGENT_SUMMARY_MAX_CHARS 在换行边界截断并附「已截断」提示；全文落盘照旧保留
+  // （persist.pointer / PERSIST_TAIL 不变）。error 摘要维持原 600 字死因帽（既有语义零回归）。
   const okTrunc = status === "ok" ? truncateSummaryText(fullText) : null
   const inline =
     error && status === "error"
@@ -597,7 +597,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
         ? okTrunc.text
         : fullText
   const truncNote =
-    okTrunc && okTrunc.truncated > 0 ? `\n\n[已截斷 ${okTrunc.truncated} 字元；完整結果見落盤指標]` : ""
+    okTrunc && okTrunc.truncated > 0 ? `\n\n[已截断 ${okTrunc.truncated} 字元；完整结果见落盘指标]` : ""
   const usageNote =
     status === "ok" && run.usage
       ? `\n\n[子代理用量] 工具调用 ${run.usage.tool_calls} 次 · 耗时 ${Math.round(run.usage.duration_ms / 1000)}s · token ${run.usage.tokens}`
@@ -605,21 +605,21 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   let summary = `${persist.pointer}${inline}${truncNote}${usageNote}`
   run.summary = summary
   run.error = error
-  // 片 C（2026-09-15）刀2：交付閘門。病灶＝7 個 Expert 的 `*_DELIVERABLES` 契約只寫在
-  // prompt/digest 裡，gateway 全域零強制點，漏交付（09-15 實案 music.audio_url 空）照樣
-  // status:"ok" 放行。此處為唯一機械強制點：
-  //   - **不改 status 語義**（ok 仍为 ok；交付缺口不是上游錯誤，混進 error 會讓既有
-  //     「換模重試/超時」判讀全亂）；
-  //   - 只在 summary 前綴加顯式標記 → 三個出口（subagent.done payload、completed 取件、
-  //     wakeParent 喚醒）自動全帶（三處都用下面這個 summary 變數）；
-  //   - subagent.done payload 加**新欄位** delivery_gate（ok 時不加，既有欄語義不動）。
-  // 判據用**未截斷全文 fullText**（不是 600 字摘要——摘要會把欄位名切掉→假陰性）。
-  // 只在 ok + beastMode + agent 有值時跑：非 Expert 通用子代理零回歸。
-  // 邊界：只驗欄位名存在性，不驗值/品質（見 delivery-gate.ts 檔頭）。
+  // 片 C（2026-09-15）刀2：交付闸门。病灶＝7 个 Expert 的 `*_DELIVERABLES` 契约只写在
+  // prompt/digest 里，gateway 全域零强制点，漏交付（09-15 实案 music.audio_url 空）照样
+  // status:"ok" 放行。此处为唯一机械强制点：
+  //   - **不改 status 语义**（ok 仍为 ok；交付缺口不是上游错误，混进 error 会让既有
+  //     「换模重试/超时」判读全乱）；
+  //   - 只在 summary 前缀加显式标记 → 三个出口（subagent.done payload、completed 取件、
+  //     wakeParent 唤醒）自动全带（三处都用下面这个 summary 变数）；
+  //   - subagent.done payload 加**新栏位** delivery_gate（ok 时不加，既有栏语义不动）。
+  // 判据用**未截断全文 fullText**（不是 600 字摘要——摘要会把栏位名切掉→假阴性）。
+  // 只在 ok + beastMode + agent 有值时跑：非 Expert 通用子代理零回归。
+  // 边界：只验栏位名存在性，不验值/品质（见 delivery-gate.ts 档头）。
   let deliveryGate: { ok: boolean; missing: string[]; reworked?: boolean; stillFailing?: boolean; orphaned?: boolean } | undefined
-  // 刀 F（2026-09-15）：孤兒治理路徑——啟動掃描重建的 in-flight rework run（watcher 已死、
-  // 不續 watch），done 帶 delivery_gate.orphaned:true，summary 已含 ORPHANED_GATE_MARK 前綴
-  // （呼叫端 error 字串帶入）；status 由呼叫端傳 "error"，走既有單終態守衛 + 單次 wake。
+  // 刀 F（2026-09-15）：孤儿治理路径——启动扫描重建的 in-flight rework run（watcher 已死、
+  // 不续 watch），done 带 delivery_gate.orphaned:true，summary 已含 ORPHANED_GATE_MARK 前缀
+  // （呼叫端 error 字串带入）；status 由呼叫端传 "error"，走既有单终态守卫 + 单次 wake。
   if (run.orphaned === true) {
     const miss = run.agent && DELIVERY_CONTRACTS[run.agent] ? DELIVERY_CONTRACTS[run.agent].requiredFields.slice() : []
     deliveryGate = { ok: false, missing: miss, reworked: true, stillFailing: true, orphaned: true }
@@ -628,11 +628,11 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     )
   } else if (status === "ok" && run.beastMode === true && run.agent) {
     const verdict = checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS)
-    // 片 D（2026-09-15）：FAIL → 機器化重派一次（同 Expert 同任務＋修正指令注回，硬帽
-    // reworkCount=1）。觸發條件＝閘門區塊外條件（ok+beastMode+agent）加 FAIL 判定，
-    // 非 Expert/已失敗收場零污染；status==="ok" 是必要條件——上游 error/超時不進重派鏈。
-    // 提前 return：本輪**不終態**（回退 status、不發 done/不 completed.set/不 wake），
-    // run 留在註冊表由 startRework 接棒；終態只屬重派鏈的最後一次 finishRun（spec 6 冪等）。
+    // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
+    // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
+    // 非 Expert/已失败收场零污染；status==="ok" 是必要条件——上游 error/超时不进重派链。
+    // 提前 return：本轮**不终态**（回退 status、不发 done/不 completed.set/不 wake），
+    // run 留在注册表由 startRework 接棒；终态只属重派链的最后一次 finishRun（spec 6 幂等）。
     if (!verdict.ok && run.reworkCount === 0 && !run.reworkFailure && !run.stopped) {
       run.reworkCount = 1
       run.reworking = true
@@ -641,7 +641,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       console.warn(
         `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=FAIL missing=${verdict.missing.join(",")} — 触发机器化重派`,
       )
-      // D7（2026-10-02）：失敗模式永久留存（此前 subagent_reworks 終局刪除、無終身計數）。
+      // D7（2026-10-02）：失败模式永久留存（此前 subagent_reworks 终局删除、无终身计数）。
       saveExpertLesson({
         sessionId: run.parentGatewaySessionId,
         agent: run.agent ?? "unknown",
@@ -655,13 +655,13 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     }
     if (!verdict.ok) {
       if (run.reworkFailure) {
-        // 重派投递从未成功（如 opencode 不可达）：重派没跑过，done 不偽稱 reworked——
-        // 維持片 C 原「未達標」標記語義，僅綴一行失敗事實。
+        // 重派投递从未成功（如 opencode 不可达）：重派没跑过，done 不伪称 reworked——
+        // 维持片 C 原「未达标」标记语义，仅缀一行失败事实。
         summary = `${formatDeliveryGateNotice(run.agent, verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing }
       } else {
-        // 重派後復檢仍 FAIL：標記升級「重派後仍未達標」，交由既有喚醒鏈如實回報。
-        // status 欄語義不動（仍 ok——重派是補救嘗試，不保證成功，也不把缺口洗成錯誤）。
+        // 重派后复检仍 FAIL：标记升级「重派后仍未达标」，交由既有唤醒链如实回报。
+        // status 栏语义不动（仍 ok——重派是补救尝试，不保证成功，也不把缺口洗成错误）。
         summary = `${formatDeliveryGateNotice(run.agent, verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing, reworked: true, stillFailing: true }
       }
@@ -670,28 +670,28 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
         `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=FAIL${run.reworkCount > 0 ? " (rework exhausted)" : ""} missing=${verdict.missing.join(",")}`,
       )
     } else if (run.reworkCount > 0) {
-      // 重派後復檢 PASS：done 帶 reworked 旗標（正常 summary，無前綴）；既有欄不動。
+      // 重派后复检 PASS：done 带 reworked 旗标（正常 summary，无前缀）；既有栏不动。
       deliveryGate = { ok: true, missing: [], reworked: true }
       console.log(`[gateway] delivery gate: id=${run.id} agent=${run.agent} status=PASS (reworked)`)
     } else {
-      // PASS 也留一行：證明閘門確實在跑（否則「零命中」無法與「未接線」區分）。
+      // PASS 也留一行：证明闸门确实在跑（否则「零命中」无法与「未接线」区分）。
       console.log(`[gateway] delivery gate: id=${run.id} agent=${run.agent} status=PASS`)
     }
   }
-  // 刀 2（2026-09-15）：機器 pass 的 critic run 終態處置。verdict 判讀（保守：判不出＝退回）
-  // 決定是否走既有 wakeParent 把判決送回父會話；判退回時 summary 前綴 CRITIC_REJECT_MARK，
-  // orchestrator 據此依 playbook 第 16-18 條重派原 Expert 修正（原 Expert 若再失敗，其自帶
-  // 的 rework 鏈硬帽 1 次仍然生效）。
+  // 刀 2（2026-09-15）：机器 pass 的 critic run 终态处置。verdict 判读（保守：判不出＝退回）
+  // 决定是否走既有 wakeParent 把判决送回父会话；判退回时 summary 前缀 CRITIC_REJECT_MARK，
+  // orchestrator 据此依 playbook 第 16-18 条重派原 Expert 修正（原 Expert 若再失败，其自带
+  // 的 rework 链硬帽 1 次仍然生效）。
   if (run.machineCriticPass === true && status === "ok") {
-    // 2026-10-03（v3 接線）：閘門開啟時，**先**對本 critic 所審交付取得 measured 樣本，
-    // 再與既有詞表判讀併成同一條「拒/過」決策。閘門未設＝不做任何 I/O、不 await，
-    // 落到下方既有 fire-and-forget 旁路 → 行為與接線前逐位元組相同。
+    // 2026-10-03（v3 接线）：闸门开启时，**先**对本 critic 所审交付取得 measured 样本，
+    // 再与既有词表判读并成同一条「拒/过」决策。闸门未设＝不做任何 I/O、不 await，
+    // 落到下方既有 fire-and-forget 旁路 → 行为与接线前逐位元组相同。
     const scoreEnforced = criticScoreEnforcementEnabled()
     let measured: MeasuredMediaResult | null = null
     if (scoreEnforced) measured = await measureReviewedMedia(run)
-    // 既有決策（詞表判讀 criticVerdictRejected）＋新的數值閾值併入同一處：
-    // 來源只在真有量測時才是 "measured"，無量測給 null → 恆不 enforce
-    // （未知≠失敗；model_self/human 非驗收 oracle）。
+    // 既有决策（词表判读 criticVerdictRejected）＋新的数值阈值并入同一处：
+    // 来源只在真有量测时才是 "measured"，无量测给 null → 恒不 enforce
+    // （未知≠失败；model_self/human 非验收 oracle）。
     const forcedByScore = shouldForceCriticRejectByScore(
       { value: measured?.score ?? null, source: measured ? "measured" : null },
       scoreEnforced,
@@ -702,7 +702,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
         `[gateway] critic-score-gate: measured 技术分=${measured!.score} < ${CRITIC_SCORE_THRESHOLD_POLICY.reworkBelow} → 判退回（沿用既有重派链；critic_run=${run.id}）`,
       )
     }
-    // 修 1（2026-10-02）：PASS 也以前綴標記判決方向，讓 summary/emit/wake 三出口一致回灌。
+    // 修 1（2026-10-02）：PASS 也以前缀标记判决方向，让 summary/emit/wake 三出口一致回灌。
     if (!run.machineCriticRejected) {
       summary = `${CRITIC_PASS_MARK}机器审核判定「通过」，无退回项（逐项核验见落盘全文）。\n${summary}`
       run.summary = summary
@@ -715,10 +715,10 @@ ${summary}`
         `[gateway] machine critic pass: verdict=REJECT — 送回父会话 session=${run.parentGatewaySessionId} critic_run=${run.id}`,
       )
     }
-    // D7（2026-10-02）／v3（2026-10-03）：判決落庫（此前 critic_passes 只有 session_id/created_at）。
-    // 無量測 → score=null、source=model_self（同族模型自評，只作便宜篩子，永不通過數值閾值）。
-    // 有量測 → score+source="measured"、judge_model=hardcheck/ffprobe（獨立於被測模型的量測
-    // 來源，才可被 evaluateCriticScoreThreshold enforce）。絕不填 0 假值、不從文字硬解析假分數。
+    // D7（2026-10-02）／v3（2026-10-03）：判决落库（此前 critic_passes 只有 session_id/created_at）。
+    // 无量测 → score=null、source=model_self（同族模型自评，只作便宜筛子，永不通过数值阈值）。
+    // 有量测 → score+source="measured"、judge_model=hardcheck/ffprobe（独立于被测模型的量测
+    // 来源，才可被 evaluateCriticScoreThreshold enforce）。绝不填 0 假值、不从文字硬解析假分数。
     saveCriticVerdict({
       sessionId: run.parentGatewaySessionId,
       runId: run.id,
@@ -749,15 +749,15 @@ ${summary}`
         detail: typeof fullText === "string" ? fullText : "",
       })
     }
-    // 閘門關閉時維持既有 fire-and-forget 旁路：量測成功 → 以同一 runId 覆寫上面的 model_self
-    // 列（供觀測）；失敗不寫。閘門開啟時上面已 await 出 measured 並落庫，此處不再重複量測/寫入。
+    // 闸门关闭时维持既有 fire-and-forget 旁路：量测成功 → 以同一 runId 覆写上面的 model_self
+    // 列（供观测）；失败不写。闸门开启时上面已 await 出 measured 并落库，此处不再重复量测/写入。
     if (!scoreEnforced) {
       void applyMeasuredMediaVerdict(run, typeof fullText === "string" ? fullText : "")
     }
   }
-  // 刀 2（2026-09-15）：Expert 交付登記為待審對象（machine critic pass 的輸入）。
-  // 條件全成立才登記：正常終態（非孤兒路徑）、ok、beast、agent 在契約域內、非 critic 自身
-  // （critic run 不得再觸發本 pass —— 防遞歸）。非 Expert／通用子代理零登記＝零回歸。
+  // 刀 2（2026-09-15）：Expert 交付登记为待审对象（machine critic pass 的输入）。
+  // 条件全成立才登记：正常终态（非孤儿路径）、ok、beast、agent 在契约域内、非 critic 自身
+  // （critic run 不得再触发本 pass —— 防递归）。非 Expert／通用子代理零登记＝零回归。
   if (
     run.orphaned !== true &&
     status === "ok" &&
@@ -768,18 +768,18 @@ ${summary}`
   ) {
     const list = pendingCriticTargets.get(run.parentGatewaySessionId) ?? []
     list.push({ agent: run.agent, label: run.label, runId: run.id, text: typeof fullText === "string" ? fullText : "" })
-    // 有界：只留最近 CRITIC_PENDING_CAP 份（機器 pass 一次最多送審 CRITIC_PASS_MAX_TARGETS）。
+    // 有界：只留最近 CRITIC_PENDING_CAP 份（机器 pass 一次最多送审 CRITIC_PASS_MAX_TARGETS）。
     if (list.length > CRITIC_PENDING_CAP) list.splice(0, list.length - CRITIC_PENDING_CAP)
     pendingCriticTargets.set(run.parentGatewaySessionId, list)
   }
 
   const asyncMode = run.asyncMode === true
   removeFromRegistries(run)
-  // 修 1：本 run 釋放了一個槽位——若該父會話有被並發上限擠掉的 critic 待跑，補跑。
+  // 修 1：本 run 释放了一个槽位——若该父会话有被并发上限挤掉的 critic 待跑，补跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
-  deleteReworkRecord(run.id) // 刀 F：終態即清持久記錄（冪等；非 rework run 無記錄=no-op）
+  deleteReworkRecord(run.id) // 刀 F：终态即清持久记录（幂等；非 rework run 无记录=no-op）
   completed.set(run.id, { status, summary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
-  // D7（2026-10-02）：交付事件落庫——重問率＝同 (session, agent, label) 再次交付的比例。
+  // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
   if (status === "ok" && run.agent) {
     saveDelivery({
       sessionId: run.parentGatewaySessionId,
@@ -796,18 +796,18 @@ ${summary}`
       id: run.id,
       status,
       summary,
-      // 片 C（2026-09-15）：新增欄位，不動既有 id/status/summary 語義；ok 時不加。
+      // 片 C（2026-09-15）：新增栏位，不动既有 id/status/summary 语义；ok 时不加。
       ...(deliveryGate ? { delivery_gate: deliveryGate } : {}),
-      // 2026-10-02 能力片：用量計數（僅 summarizeChild 路徑有值；新欄位，不動既有鍵）。
+      // 2026-10-02 能力片：用量计数（仅 summarizeChild 路径有值；新栏位，不动既有键）。
       ...(run.usage ? { usage: run.usage } : {}),
     })
-    // R6 異步完成喚醒：async dispatch 的終態（成功與失敗皆喚）在 emit 幀之外
-    // 直接續父會話 turn（輪子=deps.wakeParent）。finishRun 幂等守衛保喚醒不重複；
-    // deps.wakeParent 內部再帶 ackTimer 在途讓位，雙保險。同步模式不喚（工具還在
-    // 輪詢取件，喚醒反而插話）。
+    // R6 异步完成唤醒：async dispatch 的终态（成功与失败皆唤）在 emit 帧之外
+    // 直接续父会话 turn（轮子=deps.wakeParent）。finishRun 幂等守卫保唤醒不重复；
+    // deps.wakeParent 内部再带 ackTimer 在途让位，双保险。同步模式不唤（工具还在
+    // 轮询取件，唤醒反而插话）。
     if (asyncMode && run.machineCriticPass === true) {
-      // 修 1（2026-10-02）：verdict（PASS 與 REJECT）一律以正常完成儀式回灌父會話——
-      // PASS 不再只寫 journal（實錘：判決從未送達，orchestrator 兩小時後手動 read 才發現）。
+      // 修 1（2026-10-02）：verdict（PASS 与 REJECT）一律以正常完成仪式回灌父会话——
+      // PASS 不再只写 journal（实锤：判决从未送达，orchestrator 两小时后手动 read 才发现）。
       try {
         deps!.wakeParent(state, { id: run.id, label: run.label, status, summary, error })
       } catch (e) {
@@ -834,7 +834,7 @@ ${summary}`
     `[gateway] subagent done: id=${run.id} label="${run.label}" parent=${run.parentGatewaySessionId} status=${status}`,
   )
   // 防堆积：best-effort abort（硬顶路径 turn 可能还在跑）+ DELETE 子会话。
-  // E 片（2026-09-12）缺陷二防禦：拼 URL 前先驗 ses 前綴，不符跳過並記一行日誌。
+  // E 片（2026-09-12）缺陷二防御：拼 URL 前先验 ses 前缀，不符跳过并记一行日志。
   if (deps) {
     if (isOpenCodeSessionId(run.opencodeSessionId)) {
       const abortUrl = `${deps.openCodeUrl}/session/${run.opencodeSessionId}/abort`
@@ -855,16 +855,16 @@ ${summary}`
 }
 
 /**
- * 片 D（2026-09-15）：交付閘門 FAIL 後的機器化重派（bounded auto-rework，上限 1 次）。
- * **輪子復用**：與 retryWithNextModel 同範式——新子會話一律走 dispatchAttempt（內部
- * 自動繼承憲法頭注入、modelChain 當前模型、run.agent Expert 欄），禁自造第二套派遣邏輯。
- * 注入語義：run.prompt 尾部**追加**系統性修正指令（buildReworkDirective 逐字點名缺欄），
- * 原任務內容原樣帶過去；agent/beastMode/asyncMode 語義全部不動。
- * 計時器：重派＝新的完整硬頂預算（拆舊裝新）——不重裝則長任務剩餘預算≈0，重派段必然
- * 撞硬頂轉 status=error，把「重派後仍未達標」的誠實標記路徑搶先污染成超時錯誤。
- * 同步 deadlineTimer 不動：其「主會話放行轉后台」語義屬首輪工具側契約，重派段沿用。
- * 投遞失敗：孤兒會話 best-effort 清理、run 位回舊會話、記 reworkFailure，再進 finishRun
- * 回退到片 C 標記放行（不偽稱 reworked、不動 status）。
+ * 片 D（2026-09-15）：交付闸门 FAIL 后的机器化重派（bounded auto-rework，上限 1 次）。
+ * **轮子复用**：与 retryWithNextModel 同范式——新子会话一律走 dispatchAttempt（内部
+ * 自动继承宪法头注入、modelChain 当前模型、run.agent Expert 栏），禁自造第二套派遣逻辑。
+ * 注入语义：run.prompt 尾部**追加**系统性修正指令（buildReworkDirective 逐字点名缺栏），
+ * 原任务内容原样带过去；agent/beastMode/asyncMode 语义全部不动。
+ * 计时器：重派＝新的完整硬顶预算（拆旧装新）——不重装则长任务剩余预算≈0，重派段必然
+ * 撞硬顶转 status=error，把「重派后仍未达标」的诚实标记路径抢先污染成超时错误。
+ * 同步 deadlineTimer 不动：其「主会话放行转后台」语义属首轮工具侧契约，重派段沿用。
+ * 投递失败：孤儿会话 best-effort 清理、run 位回旧会话、记 reworkFailure，再进 finishRun
+ * 回退到片 C 标记放行（不伪称 reworked、不动 status）。
  */
 async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstText: string): Promise<void> {
   if (!deps) return
@@ -874,18 +874,18 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
   const hardMs = run.asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
   run.timeoutTimer = setTimeout(() => {
     console.warn(`[gateway] subagent hard timeout in rework (${Math.round(hardMs / 60000)}min): id=${run.id} label="${run.label}"`)
-    // 修 3：重派段逾時同樣先落盤 partial。
+    // 修 3：重派段逾时同样先落盘 partial。
     run.partialPersist = true
     run.reworking = false
     finishRun(run, "error", partialBodyOf(run), `子代理超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
   }, hardMs)
-  // D5（2026-10-02）：重派段同樣有心跳／逾時前部分交付。
+  // D5（2026-10-02）：重派段同样有心跳／逾时前部分交付。
   armHeartbeat(run, hardMs)
   const failure = await dispatchAttempt(run)
   if (failure) {
     run.reworking = false
-    // dispatchAttempt 可能已建的新會話（prompt_async 失敗路徑已摘 byChildOc 映射）：
-    // best-effort 刪掉孤兒，再把 run 的子會話位回撥到舊會話，讓收尾清理對準真身。
+    // dispatchAttempt 可能已建的新会话（prompt_async 失败路径已摘 byChildOc 映射）：
+    // best-effort 删掉孤儿，再把 run 的子会话位回拨到旧会话，让收尾清理对准真身。
     if (isOpenCodeSessionId(run.opencodeSessionId) && run.opencodeSessionId !== oldChild) {
       void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}`, {
         method: "DELETE",
@@ -899,7 +899,7 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
     finishRun(run, "ok", firstText)
     return
   }
-  // 新會話註冊成功後才摘舊映射（先立後破：run.id 在 status 端點的 byChildOc 視圖無空窗）。
+  // 新会话注册成功后才摘旧映射（先立后破：run.id 在 status 端点的 byChildOc 视图无空窗）。
   if (oldChild && byChildOc.get(oldChild) === run) byChildOc.delete(oldChild)
   if (isOpenCodeSessionId(oldChild)) {
     void fetch(`${deps.openCodeUrl}/session/${oldChild}/abort`, {
@@ -914,8 +914,8 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
     }).catch(() => {})
   }
   run.reworking = false
-  // 刀 F（2026-09-15）：重派子會話註冊成功＝孤兒風險窗口開啓，落一條持久記錄；終態由
-  // finishRun 清除。啟動掃描據 child_oc 探 opencode，判斷續檢還是誠實治理。
+  // 刀 F（2026-09-15）：重派子会话注册成功＝孤儿风险窗口开启，落一条持久记录；终态由
+  // finishRun 清除。启动扫描据 child_oc 探 opencode，判断续检还是诚实治理。
   saveReworkRecord({
     runId: run.id,
     parentGw: run.parentGatewaySessionId,
@@ -932,7 +932,7 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
   )
 }
 
-/** 檔名安全化：去空白、替換 / \ : * ? " < > |；保留中文；去前導點防路徑逃逸。 */
+/** 档名安全化：去空白、替换 / \ : * ? " < > |；保留中文；去前导点防路径逃逸。 */
 function safeLabelForFile(label: string): string {
   const cleaned = (label || "")
     .replace(/[/\\:*?"<>|]/g, "_")
@@ -950,13 +950,13 @@ interface PersistOutcome {
 }
 
 /**
- * E 片（2026-09-12）缺陷一：完整結果/死因落盤（在 DELETE 子會話之前呼叫）。
- * 內容 = `# label` + runId/狀態/模型/耗時/子會話元信息 + **未截斷**正文（無正文時
- * 如實寫死因事實，不偽造）+ 尾註 PERSIST_TAIL。644、與 opencode(agentsvc) 讀取權限
- * 相容。**落盤失敗不得讓收尾失敗**：全程 try/catch，失敗 console.error 帶 runId，
- * 指針改成誠實的失敗前綴（不吞錯、不裝成功）。
+ * E 片（2026-09-12）缺陷一：完整结果/死因落盘（在 DELETE 子会话之前呼叫）。
+ * 内容 = `# label` + runId/状态/模型/耗时/子会话元信息 + **未截断**正文（无正文时
+ * 如实写死因事实，不伪造）+ 尾注 PERSIST_TAIL。644、与 opencode(agentsvc) 读取权限
+ * 相容。**落盘失败不得让收尾失败**：全程 try/catch，失败 console.error 带 runId，
+ * 指针改成诚实的失败前缀（不吞错、不装成功）。
  */
-/** 修 3：join 本 run 已累積的文字 part（message.part.updated 存完整 text）作 partial 正文。 */
+/** 修 3：join 本 run 已累积的文字 part（message.part.updated 存完整 text）作 partial 正文。 */
 function partialBodyOf(run: SubagentRun): string {
   const parts: string[] = []
   for (const t of run.partText.values()) {
@@ -965,10 +965,10 @@ function partialBodyOf(run: SubagentRun): string {
   return parts.join("\n").trim()
 }
 
-/** D5（2026-10-02）：心跳與逾時前部分交付。
- *  證據：硬逾時 22 次、會話實錄「40 分鐘無任何存活訊號」、中止即全丟（REPORT A8）。
- *  心跳間隔（60s）無文獻依據，屬待調參數（MCP progress / A2A 任務狀態機為機制類別依據）。
- *  心跳不得抛錯、不得改變 run 狀態；計時器 unref，不阻擋進程退出。 */
+/** D5（2026-10-02）：心跳与逾时前部分交付。
+ *  证据：硬逾时 22 次、会话实录「40 分钟无任何存活讯号」、中止即全丢（REPORT A8）。
+ *  心跳间隔（60s）无文献依据，属待调参数（MCP progress / A2A 任务状态机为机制类别依据）。
+ *  心跳不得抛错、不得改变 run 状态；计时器 unref，不阻挡进程退出。 */
 function armHeartbeat(run: SubagentRun, hardMs: number): void {
   const hbMs = Number.parseInt(process.env.SUBAGENT_HEARTBEAT_MS || "", 10) || 60_000
   const earlyMs = Number.parseInt(process.env.SUBAGENT_EARLY_PARTIAL_MS || "", 10) || 120_000
@@ -995,7 +995,7 @@ function armHeartbeat(run: SubagentRun, hardMs: number): void {
       if (run.status !== "running" || run.stopped) return
       const body = partialBodyOf(run)
       if (!body.trim()) return
-      // 早於硬頂落盤快照，不改變 run 狀態；run 真完成時 finishRun 以全文覆寫同一檔。
+      // 早于硬顶落盘快照，不改变 run 状态；run 真完成时 finishRun 以全文覆写同一档。
       persistRunOutput(run, "timeout", body, "（逾时前部分产物快照；run 仍在续跑，完成后覆写同一档）", true)
       console.warn(`[gateway] subagent early partial persisted: id=${run.id} label="${run.label}" chars=${body.length}`)
     }, hardMs - earlyMs)
@@ -1022,7 +1022,7 @@ function persistRunOutput(
   try {
     mkdirSync(SUBAGENT_OUTPUT_DIR, { recursive: true })
     const model = run.modelChain[run.attempt - 1]
-    // 修 3：partial 落盤時「状态」標 partial（檔名規則與終態一致）。
+    // 修 3：partial 落盘时「状态」标 partial（档名规则与终态一致）。
     const effStatus = forcePartial || run.partialPersist ? "partial" : status
     const meta = [
       `# ${run.label}`,
@@ -1038,9 +1038,9 @@ function persistRunOutput(
     const abs = join(SUBAGENT_OUTPUT_DIR, fileName)
     writeFileSync(abs, `${meta}${content}\n\n---\n\n${PERSIST_TAIL}\n`, { encoding: "utf8", mode: 0o644 })
     try {
-      chmodSync(abs, 0o644) // 明確 644：不受進程 umask 影響
+      chmodSync(abs, 0o644) // 明确 644：不受进程 umask 影响
     } catch {
-      /* chmod 失敗不影響可讀性（mode 已帶） */
+      /* chmod 失败不影响可读性（mode 已带） */
     }
     const pointer = run.partialPersist
       ? `[部分结果已落盘（partial）：${rel}（${content.length} 字）] `
@@ -1054,18 +1054,18 @@ function persistRunOutput(
 }
 
 /**
- * E 片（2026-09-12）缺陷二防禦：凡拼進 opencode session URL 的 id 必須是 `ses` 開頭
- * 字串。09-12 實錘：子代理 run id（UUID）被塞進 opencode 的 session 位（session.error
+ * E 片（2026-09-12）缺陷二防御：凡拼进 opencode session URL 的 id 必须是 `ses` 开头
+ * 字串。09-12 实锤：子代理 run id（UUID）被塞进 opencode 的 session 位（session.error
  * code=tool_error message=Expected a string starting with "ses", got "0e160b80-…"）。
- * 不符就跳過該呼叫並 console.error 一行（不靜默、不硬送半截 URL）。
+ * 不符就跳过该呼叫并 console.error 一行（不静默、不硬送半截 URL）。
  */
 function isOpenCodeSessionId(id: unknown): id is string {
   return typeof id === "string" && id.startsWith("ses")
 }
 
-/** 2026-10-02 能力片：子代理文字區塊。設計取自 Claude Code 子代理回傳契約——
- *  取「最後一則有文字的 assistant 訊息」的 text 區塊；loop 可能停在純 tool_use 的
- *  assistant 訊息，此時回退到最近一則有文字的（未複製其程式碼）。 */
+/** 2026-10-02 能力片：子代理文字区块。设计取自 Claude Code 子代理回传契约——
+ *  取「最后一则有文字的 assistant 讯息」的 text 区块；loop 可能停在纯 tool_use 的
+ *  assistant 讯息，此时回退到最近一则有文字的（未复制其程式码）。 */
 function textBlocksOfMessage(m: { parts?: Array<{ type?: string; text?: string }> } | undefined): string {
   return (m?.parts ?? [])
     .filter((p) => p?.type === "text" && typeof p.text === "string")
@@ -1085,9 +1085,9 @@ function lastAssistantTextWithFallback(
   return ""
 }
 
-/** 用量計數：tool part 計數 ＋ token（最後一則 assistant 的 input/output/cache）
- *  ＋耗時。token 口徑 = input+output+cache.read+cache.write（對齊 Claude Code
- *  getTokenCountFromUsage 的 input+cache_creation+cache_read+output 形態，未複製程式碼）。 */
+/** 用量计数：tool part 计数 ＋ token（最后一则 assistant 的 input/output/cache）
+ *  ＋耗时。token 口径 = input+output+cache.read+cache.write（对齐 Claude Code
+ *  getTokenCountFromUsage 的 input+cache_creation+cache_read+output 形态，未复制程式码）。 */
 function computeSubagentUsage(
   msgs: Array<{ info?: { role?: string; tokens?: unknown }; parts?: Array<{ type?: string }> }>,
   startedAt: number,
@@ -1116,10 +1116,10 @@ function computeSubagentUsage(
 }
 
 /** 子会话 idle：取最后一条 assistant 文本作 summary。 */
-async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（2026-09-15）：重派投遞在途——run 此刻仍掛在舊子會話 id 上（新會話尚未註冊），
-  // 舊會話殘影事件（如重複 idle）不得把尚在重派鏈中的 run 提前收尾。
+async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（2026-09-15）：重派投递在途——run 此刻仍挂在旧子会话 id 上（新会话尚未注册），
+  // 旧会话残影事件（如重复 idle）不得把尚在重派链中的 run 提前收尾。
   if (run.reworking) return
-  // E 片（2026-09-12）缺陷二防禦：無合法子會話 id 就不拼 URL，如實收尾（死因落盤）。
+  // E 片（2026-09-12）缺陷二防御：无合法子会话 id 就不拼 URL，如实收尾（死因落盘）。
   if (!isOpenCodeSessionId(run.opencodeSessionId)) {
     console.error(
       `[gateway] subagent summarize skipped: id=${run.id} label="${run.label}" reason=invalid opencode session id "${String(run.opencodeSessionId)}"`,
@@ -1139,8 +1139,8 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
         parts?: Array<{ type?: string; text?: string }>
       }>
       if (Array.isArray(msgs)) {
-        // 2026-10-02 能力片：語義結果＝最後一則有文字的 assistant 訊息（loop 可能停在
-        // 純 tool_use 訊息，回退到最近有文字的一則）；非「全文前 600 字」。
+        // 2026-10-02 能力片：语义结果＝最后一则有文字的 assistant 讯息（loop 可能停在
+        // 纯 tool_use 讯息，回退到最近有文字的一则）；非「全文前 600 字」。
         text = lastAssistantTextWithFallback(msgs)
         run.usage = computeSubagentUsage(msgs, run.startedAt)
       }
@@ -1152,10 +1152,10 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
     finishRun(run, "ok", text)
     return
   }
-  // 09-18 修復（七路全滅實錘）：上游渠道瞬斷時 opencode 吞掉 stream error、子會話以
-  // 「正常 idle + 零 assistant 文本」收尾——session.error 事件根本不會出現，下面的
-  // 換模重試鏈因此從不觸發，attempt 永遠停在 1/5。此處補上對稱觸發點：零文本且鏈上
-  // 還有備選模型 → 視同渠道故障換模重投；耗盡才如實 finishRun error（語義不變）。
+  // 09-18 修复（七路全灭实锤）：上游渠道瞬断时 opencode 吞掉 stream error、子会话以
+  // 「正常 idle + 零 assistant 文本」收尾——session.error 事件根本不会出现，下面的
+  // 换模重试链因此从不触发，attempt 永远停在 1/5。此处补上对称触发点：零文本且链上
+  // 还有备选模型 → 视同渠道故障换模重投；耗尽才如实 finishRun error（语义不变）。
   if (run.attempt < run.modelChain.length) {
     const nextAttempt = run.attempt + 1
     const oldChild = run.opencodeSessionId
@@ -1163,7 +1163,7 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
       `[gateway] subagent empty-output (attempt ${run.attempt}/${run.modelChain.length}): id=${run.id} label="${run.label}" — 疑似上游渠道故障，换模重投`,
     )
     run.attempt = nextAttempt
-    // 與 session.error 換模路徑同款清理：舊子會話摘除 + best-effort DELETE + 映射重置。
+    // 与 session.error 换模路径同款清理：旧子会话摘除 + best-effort DELETE + 映射重置。
     if (isOpenCodeSessionId(oldChild)) {
       byChildOc.delete(oldChild)
       void fetch(`${deps!.openCodeUrl}/session/${oldChild}`, {
@@ -1183,9 +1183,9 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
 }
 
 /**
- * 建子会话并投递任务书（attempt = run.attempt 對應 modelChain 里的模型）。
- * 成功回 undefined；失敗回可讀原因（調用方決定 finishRun 還是換模重試）。
- * 注意：成功後 run.opencodeSessionId 已更新並重新註冊 byChildOc。
+ * 建子会话并投递任务书（attempt = run.attempt 对应 modelChain 里的模型）。
+ * 成功回 undefined；失败回可读原因（调用方决定 finishRun 还是换模重试）。
+ * 注意：成功后 run.opencodeSessionId 已更新并重新注册 byChildOc。
  */
 async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   let childId: string | undefined
@@ -1204,7 +1204,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
     childId = undefined
   }
   if (!childId) return "会话创建失败（opencode 不可达）"
-  // E 片（2026-09-12）缺陷二防禦：opencode 回的 id 必須是 ses 前綴字串才拿去拼 URL。
+  // E 片（2026-09-12）缺陷二防御：opencode 回的 id 必须是 ses 前缀字串才拿去拼 URL。
   if (!isOpenCodeSessionId(childId)) {
     console.error(
       `[gateway] subagent dispatch aborted: id=${run.id} label="${run.label}" reason=opencode returned invalid session id "${String(childId)}"`,
@@ -1213,44 +1213,44 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   }
   run.opencodeSessionId = childId
   byChildOc.set(childId, run)
-  // FIX-B：綁定點同時寫入耐久映射（只在此寫，不動 byChildOc 的 delete/has 語義）。
+  // FIX-B：绑定点同时写入耐久映射（只在此写，不动 byChildOc 的 delete/has 语义）。
   rememberChildParent(childId, run)
 
   const model = run.modelChain[run.attempt - 1]
-  // 野獸模式 ON：任務書頭部注入 Expert 憲法（誠實鐵律/工具域斷路/配方優先/
-  // 記憶紀律/停止上報）。憲法檔不可讀時保留任務書原文並附損壞標記——任務書
-  // 本身已自包含，不因憲法缺席而丟任務；標記讓父會話能如實上報注入未生效。
+  // 野兽模式 ON：任务书头部注入 Expert 宪法（诚实铁律/工具域断路/配方优先/
+  // 记忆纪律/停止上报）。宪法档不可读时保留任务书原文并附损坏标记——任务书
+  // 本身已自包含，不因宪法缺席而丢任务；标记让父会话能如实上报注入未生效。
   let constitutionNote = ""
   if (run.beastMode) {
     try {
-      // R7（2026-09-10）：剝離憲法檔頭開發者元數據（HTML 註釋 version/source/gate）
-      // ——gate 聲明原樣進任務書會讓子代理反推「無處聲明當前 ON」（09-10 實錘）。
-      // 當前狀態聲明由 gateway 動態生成，不進檔案。
+      // R7（2026-09-10）：剥离宪法档头开发者元数据（HTML 注释 version/source/gate）
+      // ——gate 声明原样进任务书会让子代理反推「无处声明当前 ON」（09-10 实锤）。
+      // 当前状态声明由 gateway 动态生成，不进档案。
       const raw = readFileSync(`${import.meta.dir}/expert/expert-constitution.md`, "utf8")
       const constitution = raw.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trimStart().trimEnd()
       if (constitution) {
-        constitutionNote = `【野獸模式：已啟用】以下 Expert 憲法由系統注入，這是本次派遣的真實狀態，全部條款立即生效，無需質疑任何 gate。\n\n${constitution}\n\n---\n\n`
+        constitutionNote = `【野兽模式：已启用】以下 Expert 宪法由系统注入，这是本次派遣的真实状态，全部条款立即生效，无需质疑任何 gate。\n\n${constitution}\n\n---\n\n`
       }
     } catch (e) {
-      constitutionNote = `【憲法注入失敗】Expert 憲法檔不可讀（${e instanceof Error ? e.message : String(e)}），本次派遣未注入憲法。\n\n`
+      constitutionNote = `【宪法注入失败】Expert 宪法档不可读（${e instanceof Error ? e.message : String(e)}），本次派遣未注入宪法。\n\n`
     }
   }
-  // 刀 G（2026-09-15）：契約欄機器注入——Expert+beast 時把契約欄清單作為固定段追加到
-  // 子代理 prompt **尾部**（recency 最高）。真源=已載入的 DELIVERY_CONTRACTS（禁手抄）。
-  // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回歸。重派鏈的
-  // run.prompt 已含 buildReworkDirective（自我標註「自动重派」），此段與之共存於尾部不衝突。
+  // 刀 G（2026-09-15）：契约栏机器注入——Expert+beast 时把契约栏清单作为固定段追加到
+  // 子代理 prompt **尾部**（recency 最高）。真源=已载入的 DELIVERY_CONTRACTS（禁手抄）。
+  // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回归。重派链的
+  // run.prompt 已含 buildReworkDirective（自我标注「自动重派」），此段与之共存于尾部不冲突。
   const contractDirective = run.beastMode === true ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
-  // 2026-10-02：模板空位事實注入。父 sessionId 用 run.parentGatewaySessionId（派工發起端
-  // 的 gateway 會話 id，= canvasStates 的 key；**禁用子會話 opencodeSessionId**，那會指到
-  // 子會話畫布桶）。有值才插，無值時輸出與注入前逐字元等價。
+  // 2026-10-02：模板空位事实注入。父 sessionId 用 run.parentGatewaySessionId（派工发起端
+  // 的 gateway 会话 id，= canvasStates 的 key；**禁用子会话 opencodeSessionId**，那会指到
+  // 子会话画布桶）。有值才插，无值时输出与注入前逐字元等价。
   const tplFact = buildTemplateSlotsFact(run.parentGatewaySessionId, getTemplateDeviateToken(run.parentGatewaySessionId) ?? undefined)
-  const templateSlotsNote = tplFact ? `【畫布模板·系統事實】\n${tplFact}\n\n` : ""
+  const templateSlotsNote = tplFact ? `【画布模板·系统事实】\n${tplFact}\n\n` : ""
   const body: Record<string, unknown> = { parts: [{ type: "text", text: `${constitutionNote}${run.prompt}${templateSlotsNote}${contractDirective}` }] }
   if (model) body.model = model
-  // R8 修復片2（2026-09-10）：Expert agent 欄（prompt_async 吃 agent 欄；
-  // POST /session 不支持，08-08 實錘）。帶上 = 子會話掛對應 Expert agent
-  // （工具表裁剪到該域）；缺省 = default build 零變化。換模重試
-  // （retryWithNextModel）走本函數，agent 自然繼承。
+  // R8 修复片2（2026-09-10）：Expert agent 栏（prompt_async 吃 agent 栏；
+  // POST /session 不支持，08-08 实锤）。带上 = 子会话挂对应 Expert agent
+  // （工具表裁剪到该域）；缺省 = default build 零变化。换模重试
+  // （retryWithNextModel）走本函数，agent 自然继承。
   if (run.agent) body.agent = run.agent
   try {
     const res = await fetch(`${deps!.openCodeUrl}/session/${childId}/prompt_async`, {
@@ -1270,15 +1270,15 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   return undefined
 }
 
-/** 上游錯誤後的換模重試：新子會話 + 鏈上下一個模型重投任務書。 */
+/** 上游错误后的换模重试：新子会话 + 链上下一个模型重投任务书。 */
 async function retryWithNextModel(run: SubagentRun, lastError: string): Promise<void> {
-  // 0920 停止閘：已停止的 run 不得被換模重投復活（病灶③）。
+  // 0920 停止闸：已停止的 run 不得被换模重投复活（病灶③）。
   if (run.stopped || run.status !== "running") {
     console.log(`[gateway] subagent retry skipped (stopped): id=${run.id} label="${run.label}"`)
     return
   }
   const failure = await dispatchAttempt(run)
-  if (!failure) return // 重投成功：事件流繼續，等 idle/error 收尾
+  if (!failure) return // 重投成功：事件流继续，等 idle/error 收尾
   console.error(`[gateway] subagent retry dispatch failed: id=${run.id} ${failure}`)
   finishRun(run, "error", "", `子代理出错：${lastError}（换模重投也失败：${failure}）`)
 }
@@ -1288,16 +1288,16 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
   if (!deps) return
   const run = byChildOc.get(opencodeSessionId)
   if (!run) return
-  // 0920 停止閘：停止後子會話已 DELETE，殘影事件一律丟棄（否則又推進卡片狀態、
-  // 甚至觸發換模重投把 run 復活）。
+  // 0920 停止闸：停止后子会话已 DELETE，残影事件一律丢弃（否则又推进卡片状态、
+  // 甚至触发换模重投把 run 复活）。
   if (run.stopped) return
   try {
-    // 上游错误（session.error 或任意带 properties.error 的事件）→ 換模重試或 done error。
+    // 上游错误（session.error 或任意带 properties.error 的事件）→ 换模重试或 done error。
     const err = event?.properties?.error
     if (event?.type === "session.error" || err != null) {
       const msg = err != null ? deps.describeError(err) : "子代理上游错误"
-      // 只有上游模型錯誤（opencode APIError 形狀 {name, data:{message}}）才換模重試；
-      // tool_error/Aborted 不是渠道問題，換模無意義，維持原語義直接收尾。
+      // 只有上游模型错误（opencode APIError 形状 {name, data:{message}}）才换模重试；
+      // tool_error/Aborted 不是渠道问题，换模无意义，维持原语义直接收尾。
       const isUpstreamApiError =
         Boolean(err) && typeof err === "object" && typeof (err as { data?: { message?: unknown } }).data?.message === "string"
       if (isUpstreamApiError && run.attempt < run.modelChain.length) {
@@ -1306,9 +1306,9 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           `[gateway] subagent upstream error (attempt ${run.attempt}/${run.modelChain.length}): id=${run.id} label="${run.label}" error=${msg} — 换模重投`,
         )
         run.attempt = nextAttempt
-        // 舊子會話摘除 + best-effort 清理；per-child 映射重置，避免新會話被髒狀態誤判。
+        // 旧子会话摘除 + best-effort 清理；per-child 映射重置，避免新会话被脏状态误判。
         byChildOc.delete(opencodeSessionId)
-        // E 片（2026-09-12）缺陷二防禦：ses 前綴不符就不拼 URL（跳過並記錄）。
+        // E 片（2026-09-12）缺陷二防御：ses 前缀不符就不拼 URL（跳过并记录）。
         if (isOpenCodeSessionId(opencodeSessionId)) {
           void fetch(`${deps.openCodeUrl}/session/${opencodeSessionId}`, {
             method: "DELETE",
@@ -1330,10 +1330,10 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
       console.error(
         `[gateway] subagent failed: id=${run.id} label="${run.label}" attempt=${run.attempt}/${Math.max(run.modelChain.length, 1)} error=${msg}`,
       )
-      // 0919 誠實歸因（video-director 試產事故）：shuai 預扣費閘的「预扣费额度失败,
-      // 用户剩余额度…」原文直出時，orchestrator 在 model-not-found 噪音裡把欠費
-      // 誤讀成「模型不可用」再轉述給用戶。欠費死因補一句歸因：未提交、未扣費、
-      // 無產物、充值前重試無效——錯誤分類給機器，因果說明給讀它的模型。
+      // 0919 诚实归因（video-director 试产事故）：shuai 预扣费闸的「预扣费额度失败,
+      // 用户剩余额度…」原文直出时，orchestrator 在 model-not-found 噪音里把欠费
+      // 误读成「模型不可用」再转述给用户。欠费死因补一句归因：未提交、未扣费、
+      // 无产物、充值前重试无效——错误分类给机器，因果说明给读它的模型。
       const deadAccountNote = /预扣费额度失败|insufficient[ _-]?(account[ _-]?)?(balance|credit)|余额不足|欠费/i.test(String(msg))
         ? "（归因：上游渠道账户余额不足即欠费，不是模型不可用；本次调用未提交、未扣费、无产物，充值前重试不会成功）"
         : ""
@@ -1353,8 +1353,8 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           run.messageRole.set(mid, role)
           boundMap(run.messageRole, 200)
         }
-        // 壓縮復讀機修復（2026-10-02）：compaction 摘要訊息 role 也是 assistant，
-        // 標成非 assistant 後 subagent.delta 不再把摘要草稿當子代理正文上屏。
+        // 压缩复读机修复（2026-10-02）：compaction 摘要讯息 role 也是 assistant，
+        // 标成非 assistant 后 subagent.delta 不再把摘要草稿当子代理正文上屏。
         if (mid && role === "assistant" && info?.summary === true) {
           run.messageRole.set(mid, "compaction")
           boundMap(run.messageRole, 200)
@@ -1386,12 +1386,12 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
       case "message.part.updated": {
         const part = event?.properties?.part
         if (!part) break
-        // FIX-A（2026-10-02）：子代理工具結果的媒體成品 → 父會話出卡。野獸模式下音樂/影片
-        // 只能在 Expert 子代理裡產生，而其 tool part 此前整類被丟棄 ⇒ 子代理做出的影片/音樂
-        // 永遠不出卡（暴君抱怨「影片／音樂不主動彈出」的真主因）。只認 completed；去重交給
+        // FIX-A（2026-10-02）：子代理工具结果的媒体成品 → 父会话出卡。野兽模式下音乐/影片
+        // 只能在 Expert 子代理里产生，而其 tool part 此前整类被丢弃 ⇒ 子代理做出的影片/音乐
+        // 永远不出卡（暴君抱怨「影片／音乐不主动弹出」的真主因）。只认 completed；去重交给
         // emitVideoDone/emitAudioDone 的 state.announcedUrls（同一 part 可能多次 updated、
-        // completed 可能重複觸發）。刻意**不處理 image**：子代理（如 video-director）會產大量
-        // 中間關鍵幀，一併發 image.done 會把聊天框灌爆——只放行成片類媒體，刻意的不對稱。
+        // completed 可能重复触发）。刻意**不处理 image**：子代理（如 video-director）会产大量
+        // 中间关键帧，一并发 image.done 会把聊天框灌爆——只放行成片类媒体，刻意的不对称。
         if (part.type === "tool" && part.state?.status === "completed") {
           const media = collectToolOutputMediaUrls(parseToolOutput(part.state.output))
           for (const c of media.video) void emitVideoDone(parentState, c.url, c.cost_coins, undefined, "video")
@@ -1407,10 +1407,10 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
         const id = typeof part.id === "string" ? part.id : ""
         if (!id) break
         // S3（2026-09-11）：part 建立那一刻（text 还是空串）就登记类型——空文本会走
-        // 下面的早退分支，登记必须放在早退之前，否则其 delta 全部丢 kind（實彈實錘）。
+        // 下面的早退分支，登记必须放在早退之前，否则其 delta 全部丢 kind（实弹实锤）。
         run.partKind.set(id, part.type)
         boundMap(run.partKind, 200)
-        // 修 3：保存 text part 最新全文（part.updated 帶完整 text），供逾時/中止 partial 落盤。
+        // 修 3：保存 text part 最新全文（part.updated 带完整 text），供逾时/中止 partial 落盘。
         if (part.type === "text" && typeof part.text === "string") {
           run.partText.set(id, part.text)
           boundMap(run.partText, 200)
@@ -1444,48 +1444,48 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
   }
 }
 
-// ── 刀 2（2026-09-15）：machine critic pass —— gateway 自己在收盤判定點派 critic ────────────
-// 四輪實錄：playbook 第 18 條「必須派 critic」四輪在場、orchestrator 四輪零派遣（r3c 逐字
-// 「I won't re-dispatch anything…synthesis is my job」）。純 prompt 路線已證死 → 不叫模型派。
+// ── 刀 2（2026-09-15）：machine critic pass —— gateway 自己在收盘判定点派 critic ────────────
+// 四轮实录：playbook 第 18 条「必须派 critic」四轮在场、orchestrator 四轮零派遣（r3c 逐字
+// 「I won't re-dispatch anything…synthesis is my job」）。纯 prompt 路线已证死 → 不叫模型派。
 //
-// 掛點＝父會話 session.idle 正常收尾分支（index.ts），調本函數。設計鐵律：
-//   · 派遣輪子**復用 dispatchAttempt**（同 handleSubagentDispatch 範式：建子會話 + agent 欄
-//     + 憲法頭 + 契約欄注入 + modelChain），禁自造第二套派遣/輪詢。
-//   · async 語義沿用：終態由 finishRun → deps.wakeParent 回件（通過抑制喚醒、退回送判決）。
-//   · 有界：每會話 ≤1 次（persistence.critic_passes 持久旗標 + 內存鏡像）；critic run 自身
-//     agent==="critic" 永不入待審清單（finishRun 登記側已豁免）= 不遞歸。
-//   · 零預算外洩：只在「本來就有 Expert 交付」時跑；同輪已有 critic 派遣 → 不重派。
-//   · 並發上限讓位：父會話已滿 3 路（如 async 子代仍在跑）→ 本輪放棄、不記旗標，下輪 idle 再試。
+// 挂点＝父会话 session.idle 正常收尾分支（index.ts），调本函数。设计铁律：
+//   · 派遣轮子**复用 dispatchAttempt**（同 handleSubagentDispatch 范式：建子会话 + agent 栏
+//     + 宪法头 + 契约栏注入 + modelChain），禁自造第二套派遣/轮询。
+//   · async 语义沿用：终态由 finishRun → deps.wakeParent 回件（通过抑制唤醒、退回送判决）。
+//   · 有界：每会话 ≤1 次（persistence.critic_passes 持久旗标 + 内存镜像）；critic run 自身
+//     agent==="critic" 永不入待审清单（finishRun 登记侧已豁免）= 不递归。
+//   · 零预算外泄：只在「本来就有 Expert 交付」时跑；同轮已有 critic 派遣 → 不重派。
+//   · 并发上限让位：父会话已满 3 路（如 async 子代仍在跑）→ 本轮放弃、不记旗标，下轮 idle 再试。
 
 /**
- * 收盤判定點呼叫：條件成立 → 機器派遣一次 critic pass。回 true = 已派出。
- * 冪等/有界全部在內部（見上方註解）。任何失敗只留一行 log，絕不影響收盤路徑。
+ * 收盘判定点呼叫：条件成立 → 机器派遣一次 critic pass。回 true = 已派出。
+ * 幂等/有界全部在内部（见上方注解）。任何失败只留一行 log，绝不影响收盘路径。
  */
 export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared = false): boolean {
   try {
     if (!deps || !parentState?.sessionId) return false
 
-    // ① 待審清單（finishRun 對 Expert 正常終態登記）。空 → 零動作（非 beast/無 Expert 交付）。
+    // ① 待审清单（finishRun 对 Expert 正常终态登记）。空 → 零动作（非 beast/无 Expert 交付）。
     const parentId = String(parentState.sessionId)
     const targets = pendingCriticTargets.get(parentId) ?? []
     if (targets.length === 0) return false
 
-    // ② 每會話 ≤1 次：內存鏡像 or 持久旗標（重啟後仍生效）。
+    // ② 每会话 ≤1 次：内存镜像 or 持久旗标（重启后仍生效）。
     const alreadyPassed = criticPassUsed.has(parentId) || hasCriticPass(parentId)
 
-    // ③ 純函數判據（四態單測對象）。
+    // ③ 纯函数判据（四态单测对象）。
     const ok = shouldTriggerCriticPass({
       beastMode: deps.beastMode(parentState) === true,
       expertDeliveries: targets.length,
       criticDispatched: criticDispatchedByParent.get(parentId) === (parentState.turnGen ?? 0),
-      unreviewedDeclared: unreviewedDeclared === true, // 逃生閥由呼叫端（index.ts 掃本輪正文）判定
+      unreviewedDeclared: unreviewedDeclared === true, // 逃生阀由呼叫端（index.ts 扫本轮正文）判定
       alreadyPassed,
     })
     if (!ok) return false
 
-    // ④ 修 1（2026-10-02）：並發上限滿時**不再丟棄**——待審目標入隊（per-parent），
-    // 任一子代理完成釋放槽位時由 maybeDrainCriticQueue 補跑。此前 return false 直接
-    // 丟棄（實錘：四次被擠掉；唯一一次跑到時 verdict 亦未回灌）。
+    // ④ 修 1（2026-10-02）：并发上限满时**不再丢弃**——待审目标入队（per-parent），
+    // 任一子代理完成释放槽位时由 maybeDrainCriticQueue 补跑。此前 return false 直接
+    // 丢弃（实锤：四次被挤掉；唯一一次跑到时 verdict 亦未回灌）。
     const list = byParent.get(parentId) ?? []
     if (list.length >= MAX_ACTIVE_PER_PARENT) {
       criticRetryQueue.set(parentId, targets.slice(-CRITIC_PASS_MAX_TARGETS))
@@ -1495,15 +1495,15 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       )
       return false
     }
-    // 修 1：正常派出（槽位有餘）時清殘留隊列，避免稍後 drain 重複派遣。
+    // 修 1：正常派出（槽位有余）时清残留队列，避免稍后 drain 重复派遣。
     criticRetryQueue.delete(parentId)
 
-    // ⑤ spec：被審清單 + 各 Expert 契約欄（真源 DELIVERY_CONTRACTS）+ 固定審核指令。
+    // ⑤ spec：被审清单 + 各 Expert 契约栏（真源 DELIVERY_CONTRACTS）+ 固定审核指令。
     const batch = targets.slice(-CRITIC_PASS_MAX_TARGETS)
     const spec = buildCriticPassSpec(batch, DELIVERY_CONTRACTS)
     if (!spec) return false
 
-    // ⑥ modelChain 同源（父會話 persona 主模型 + registry fallbacks）。
+    // ⑥ modelChain 同源（父会话 persona 主模型 + registry fallbacks）。
     let chain: SubagentModelRef[] = []
     try {
       chain = deps.subagentModelChain(parentState) ?? []
@@ -1519,17 +1519,17 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       label: "机器审核",
       startedAt: Date.now(),
       status: "running",
-      // 首行補死線行（與 handleSubagentDispatch 同款；本 spec 首行非「预期 N」故會補）。
+      // 首行补死线行（与 handleSubagentDispatch 同款；本 spec 首行非「预期 N」故会补）。
       prompt: SPEC_DEADLINE_LINE + spec,
       modelChain: chain,
       attempt: 1,
       reworkCount: 0,
-      beastMode: true, // 已過 beastMode 判據
+      beastMode: true, // 已过 beastMode 判据
       agent: "critic",
-      asyncMode: typeof deps.wakeParent === "function", // async 語義沿用；deps 未注入則降級同步
+      asyncMode: typeof deps.wakeParent === "function", // async 语义沿用；deps 未注入则降级同步
       machineCriticPass: true,
-      // 2026-10-03：把被審的那批交付正文帶進 run，供終態事后硬檢抽取媒體 URL（見
-      // applyMeasuredMediaVerdict）。此處 batch 即將被 pendingCriticTargets.delete 清掉。
+      // 2026-10-03：把被审的那批交付正文带进 run，供终态事后硬检抽取媒体 URL（见
+      // applyMeasuredMediaVerdict）。此处 batch 即将被 pendingCriticTargets.delete 清掉。
       criticReviewed: batch,
       messageRole: new Map(),
       partEmitted: new Map(),
@@ -1538,39 +1538,39 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       partText: new Map(),
     }
 
-    // 註冊進 byParent：與 handleSubagentDispatch 同語義——critic run 佔一個並發位、
-    // finishRun 的 removeFromRegistries 才能正確摘除本 run（否則殘留註冊表泄漏）。
+    // 注册进 byParent：与 handleSubagentDispatch 同语义——critic run 占一个并发位、
+    // finishRun 的 removeFromRegistries 才能正确摘除本 run（否则残留注册表泄漏）。
     const parentRuns = byParent.get(parentId) ?? []
     parentRuns.push(run)
     byParent.set(parentId, parentRuns)
 
-    // 先記旗標與派遣位（同步），再投遞；投遞失敗則回滾旗標（不白吃唯一一次配額）。
+    // 先记旗标与派遣位（同步），再投递；投递失败则回滚旗标（不白吃唯一一次配额）。
     criticPassUsed.add(parentId)
     markCriticPass(parentId)
     criticDispatchedByParent.set(parentId, parentState.turnGen ?? 0)
     boundMap(criticDispatchedByParent, 500)
-    // 已消耗：清待審清單（本會話不再有第二次 pass）。
+    // 已消耗：清待审清单（本会话不再有第二次 pass）。
     pendingCriticTargets.delete(parentId)
 
     const asyncMode = run.asyncMode === true
     const hardMs = asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
     run.timeoutTimer = setTimeout(() => {
       console.warn(`[gateway] subagent hard timeout (${Math.round(hardMs / 60000)}min): id=${run.id} label="${run.label}"`)
-      // 修 3（2026-10-02）：逾時先落盤已累積的 partial 文字，再 error 收尾（不讓已有工作不可追）。
+      // 修 3（2026-10-02）：逾时先落盘已累积的 partial 文字，再 error 收尾（不让已有工作不可追）。
       run.partialPersist = true
       finishRun(run, "error", partialBodyOf(run), `子代理超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
     }, hardMs)
-    // D5（2026-10-02）：機器 critic run 亦有心跳／逾時前部分交付。
+    // D5（2026-10-02）：机器 critic run 亦有心跳／逾时前部分交付。
     armHeartbeat(run, hardMs)
 
-    // ⑦ 復用既有輪子投遞（async 語義：立即返回，終態 wake）。
+    // ⑦ 复用既有轮子投递（async 语义：立即返回，终态 wake）。
     void (async () => {
       const failure = await dispatchAttempt(run)
       if (failure) {
         criticPassUsed.delete(parentId)
         criticDispatchedByParent.delete(parentId)
         console.error(`[gateway] machine critic pass dispatch failed: session=${parentId} ${failure}`)
-        // 回滾持久旗標：投遞從未成功＝配額未消耗（不白吃唯一一次），清掉記錄讓下輪重試。
+        // 回滚持久旗标：投递从未成功＝配额未消耗（不白吃唯一一次），清掉记录让下轮重试。
         deleteCriticPass(parentId)
         return
       }
@@ -1587,8 +1587,8 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
   }
 }
 
-/** 修 1：槽位釋放後補跑被並發上限擠掉的 machine critic pass（per-parent 隊列）。
- *  複用 maybeRunMachineCriticPass 的完整判據與派遣輪子（不另造第二套）。 */
+/** 修 1：槽位释放后补跑被并发上限挤掉的 machine critic pass（per-parent 队列）。
+ *  复用 maybeRunMachineCriticPass 的完整判据与派遣轮子（不另造第二套）。 */
 function maybeDrainCriticQueue(parentId: string): void {
   const queued = criticRetryQueue.get(parentId)
   if (!queued || queued.length === 0 || !deps) return
@@ -1604,9 +1604,9 @@ function maybeDrainCriticQueue(parentId: string): void {
 }
 
 /**
- * 會話拆除時清 machine critic pass 的內存狀態（待審清單 / 派遣登記 / 內存已用旗標）。
- * 持久旗標（persistence.critic_passes）刻意不清：idle reap 後同 id revive 仍受「每會話 ≤1 次」
- * 約束；真刪除時 row 隨會話生命週期結束自然無害（無查詢點）。
+ * 会话拆除时清 machine critic pass 的内存状态（待审清单 / 派遣登记 / 内存已用旗标）。
+ * 持久旗标（persistence.critic_passes）刻意不清：idle reap 后同 id revive 仍受「每会话 ≤1 次」
+ * 约束；真删除时 row 随会话生命周期结束自然无害（无查询点）。
  */
 export function forgetCriticPassState(parentId: string): void {
   if (!parentId) return
@@ -1616,9 +1616,9 @@ export function forgetCriticPassState(parentId: string): void {
   criticRetryQueue.delete(parentId)
 }
 /**
- * 刀 1（2026-09-19）：待審 Expert 交付快照（Jev 空殼欄初篩餵料）。
- * 只讀鏡像——不清空、不影響 machine critic pass 的消耗語義（淺拷貝陣列，
- * text 引用共享：呼叫方只讀）。無待審 → 空陣列。
+ * 刀 1（2026-09-19）：待审 Expert 交付快照（Jev 空壳栏初筛喂料）。
+ * 只读镜像——不清空、不影响 machine critic pass 的消耗语义（浅拷贝阵列，
+ * text 引用共享：呼叫方只读）。无待审 → 空阵列。
  */
 export function snapshotPendingCriticTargets(parentId: string): Array<{ agent: string; label: string; runId: string; text: string }> {
   if (!parentId) return []
@@ -1628,9 +1628,9 @@ export function snapshotPendingCriticTargets(parentId: string): Array<{ agent: s
  * POST /internal/subagent/dispatch — body { sessionId, label, prompt, async? }。
  * sessionId 接受 gateway id 或父 opencode id（与 /internal/workflow 同语义）。
  * 返回 { ok: true, subagent_id } 供工具轮询 /internal/subagent/status。
- * R6（2026-09-10）：async=true → 投遞後立即返回 running，子代理終態時
- * deps.wakeParent 自動喚醒父會話匯總（默認 false=同步語義零回歸；deps 未注入
- * wakeParent 時 async 請求按同步處理，不裸奔）。
+ * R6（2026-09-10）：async=true → 投递后立即返回 running，子代理终态时
+ * deps.wakeParent 自动唤醒父会话汇总（默认 false=同步语义零回归；deps 未注入
+ * wakeParent 时 async 请求按同步处理，不裸奔）。
  */
 export async function handleSubagentDispatch(req: Request): Promise<Response> {
   if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
@@ -1642,29 +1642,29 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     expert?: string
   }
   const label = typeof body.label === "string" ? body.label.trim() : ""
-  // P2b 刀1：prompt 需可被自動補行改寫。
+  // P2b 刀1：prompt 需可被自动补行改写。
   let prompt = typeof body.prompt === "string" ? body.prompt : ""
   if (!body.sessionId || !label || !prompt) {
-    // D2（2026-10-02）：空字串錯誤碼是反模式（歷史 717 次）——失敗一律帶 code 與缺哪欄。
+    // D2（2026-10-02）：空字串错误码是反模式（历史 717 次）——失败一律带 code 与缺哪栏。
     const missing = [!body.sessionId ? "sessionId" : "", !label ? "label" : "", !prompt ? "prompt" : ""].filter(Boolean)
     return Response.json(
       { ok: false, code: "missing_required_args", error: `sessionId/label/prompt 均为必填；缺少：${missing.join("、")}`, missing },
       { status: 400 },
     )
   }
-  // P2b 刀1：首行自動補死線行。已寫「预期/預期 N」= 原樣不動（避免雙補）。
-  // 字符集與 R1 parseSyncDeadlineMs 對齊（简/繁皆認），確保不重複補。
-  if (!/^\s*[预預]\s*期\s*\d/.test(prompt)) {
+  // P2b 刀1：首行自动补死线行。已写「预期/预期 N」= 原样不动（避免双补）。
+  // 字符集与 R1 parseSyncDeadlineMs 对齐（简/繁皆认），确保不重复补。
+  if (!/^\s*[预预]\s*期\s*\d/.test(prompt)) {
     prompt = SPEC_DEADLINE_LINE + prompt
   }
   const parent = deps.resolveSession(body.sessionId)
   if (!parent) {
     return Response.json({ ok: false, code: "session_not_found", error: "父会话不存在或已过期" }, { status: 404 })
   }
-  // R6：async 開關。顯式 true 且 wakeParent 已注入才走異步；否則一律同步（默認路徑零變化）。
-  // 刀3（2026-09-19）：async 三條件機器化（playbook 1.9 起 LLM 不再自判）——
-  // beast 下明確要求 sync（async:false）時，Jev 判「非單一快速事實查詢」→ 自動
-  // 轉 async 並記 SYNC_DOWNGRADED；Jev 掛 → 放行 sync（fail-open＝現狀行為）。
+  // R6：async 开关。显式 true 且 wakeParent 已注入才走异步；否则一律同步（默认路径零变化）。
+  // 刀3（2026-09-19）：async 三条件机器化（playbook 1.9 起 LLM 不再自判）——
+  // beast 下明确要求 sync（async:false）时，Jev 判「非单一快速事实查询」→ 自动
+  // 转 async 并记 SYNC_DOWNGRADED；Jev 挂 → 放行 sync（fail-open＝现状行为）。
   let asyncMode = body.async === true && typeof deps.wakeParent === "function"
   if (!asyncMode && body.async === false && typeof deps.wakeParent === "function") {
     const eligible = await syncDispatchEligible(prompt)
@@ -1674,15 +1674,15 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     }
   }
 
-  // R8 修復片2（2026-09-10）＋刀3 權威化（2026-09-19）：Expert 路由。
-  // 僅 beast_mode ON 時生效（OFF 時 expert 靜默丟棄 = 零 OFF 回歸）。
-  // 刀3 教義（2026-09-19 立、2026-10-02 暴君修正）：「派誰」不是 LLM 的決策——
-  //   ① expert 欄可省略：省略時 Jev 選域（高信心才派，否則通用子代理）；
-  //   ② LLM 點名 expert＝最終裁決：Jev 高信心不同意只記 ROUTE_DISSENT，不改派
-  //     （原 ROUTE_OVERRIDE 已廢除——曾把點名 video-director 的預覽轉存強改派
-  //     editor，改派後域內無鑑權工具全 401；表面詞彙無法反映工具持有面）；
-  //   ③ Jev 掛 → fail-open 用點名值（行為＝部署前）。
-  // 白名單校驗照舊（Jev 建議也過 expert-ids.json；域外/未知 → 拒絕 400）。
+  // R8 修复片2（2026-09-10）＋刀3 权威化（2026-09-19）：Expert 路由。
+  // 仅 beast_mode ON 时生效（OFF 时 expert 静默丢弃 = 零 OFF 回归）。
+  // 刀3 教义（2026-09-19 立、2026-10-02 暴君修正）：「派谁」不是 LLM 的决策——
+  //   ① expert 栏可省略：省略时 Jev 选域（高信心才派，否则通用子代理）；
+  //   ② LLM 点名 expert＝最终裁决：Jev 高信心不同意只记 ROUTE_DISSENT，不改派
+  //     （原 ROUTE_OVERRIDE 已废除——曾把点名 video-director 的预览转存强改派
+  //     editor，改派后域内无鉴权工具全 401；表面词汇无法反映工具持有面）；
+  //   ③ Jev 挂 → fail-open 用点名值（行为＝部署前）。
+  // 白名单校验照旧（Jev 建议也过 expert-ids.json；域外/未知 → 拒绝 400）。
   let expertId = ""
   const beastOn = deps.beastMode(parent)
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
@@ -1692,13 +1692,13 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       allowed = (JSON.parse(readFileSync(`${import.meta.dir}/expert/expert-ids.json`, "utf8")) as { experts?: unknown })?.experts
     } catch (e) {
       return Response.json(
-        { ok: false, code: "expert_registry_unavailable", error: `expert 清單不可讀（gateway/expert/expert-ids.json：${e instanceof Error ? e.message : String(e)}）` },
+        { ok: false, code: "expert_registry_unavailable", error: `expert 清单不可读（gateway/expert/expert-ids.json：${e instanceof Error ? e.message : String(e)}）` },
         { status: 503 },
       )
     }
     if (!Array.isArray(allowed)) {
       return Response.json(
-        { ok: false, code: "expert_registry_unavailable", error: "expert 清單不可讀（gateway/expert/expert-ids.json 形狀錯誤：缺 experts 陣列）" },
+        { ok: false, code: "expert_registry_unavailable", error: "expert 清单不可读（gateway/expert/expert-ids.json 形状错误：缺 experts 阵列）" },
         { status: 503 },
       )
     }
@@ -1706,19 +1706,19 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     if (rawExpert && !allowedList.includes(rawExpert)) {
       return Response.json({ ok: false, code: "unknown_expert", error: `未知 expert：${rawExpert}`, allowed: allowedList }, { status: 400 })
     }
-    // 刀3 權威路由（Jev 失敗回 null → fail-open 用點名值/空）。
+    // 刀3 权威路由（Jev 失败回 null → fail-open 用点名值/空）。
     const routed = (await routeExpertAuthoritative(prompt, rawExpert)) ?? {
       expertId: rawExpert,
       source: rawExpert ? ("provided" as const) : ("none" as const),
     }
     if (routed.expertId && !allowedList.includes(routed.expertId)) {
-      // Jev 建議域外（不該發生：criteria 就是七域＋other；防禦性回退到點名值）。
+      // Jev 建议域外（不该发生：criteria 就是七域＋other；防御性回退到点名值）。
       expertId = rawExpert
     } else {
       expertId = routed.expertId
     }
-    // H9（2026-10-02）：內容 vs expert 域一致性守衛（確定性，Jev 掛也生效）。
-    // 在 critic 登記之前執行——被降級的研究任務不得頂掉機器 critic pass 的觸發判據。
+    // H9（2026-10-02）：内容 vs expert 域一致性守卫（确定性，Jev 挂也生效）。
+    // 在 critic 登记之前执行——被降级的研究任务不得顶掉机器 critic pass 的触发判据。
     {
       const g = guardExpertContent(prompt, expertId)
       if (g.reason) {
@@ -1726,7 +1726,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         expertId = g.expertId
       }
     }
-    // M2：music-first 機器前置斷言（依賴音樂的任務須等 music 交付事件）。
+    // M2：music-first 机器前置断言（依赖音乐的任务须等 music 交付事件）。
     {
       const delivered = deliveredByParent.get(parent.sessionId) ?? []
       const musicInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "music" && r.status === "running")
@@ -1739,29 +1739,29 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         return Response.json({ ok: false, code: "music_first", error: reason, blocked: "music_first" }, { status: 409 })
       }
     }
-    // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本輪已有 critic 審核動作，
-    // 機器 pass 的觸發判據據此豁免（不重複派遣）。登記有界 Map。
+    // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本轮已有 critic 审核动作，
+    // 机器 pass 的触发判据据此豁免（不重复派遣）。登记有界 Map。
     if (expertId === "critic") {
       criticDispatchedByParent.set(parent.sessionId, parent.turnGen ?? 0)
       boundMap(criticDispatchedByParent, 500)
     }
   }
 
-  // 刀 2B（2026-09-19）：派遣 spec 消毒（權威）。研究結論/網頁內容嵌 spec 是活的
-  // 間接注入通道（手冊模板二【研究輸入】逐字嵌 prompt）。Jev 判攔截線以上 →
-  // spec 頭注入機器隔離聲明（不攔派遣、只廢掉注入指令的效力）。
+  // 刀 2B（2026-09-19）：派遣 spec 消毒（权威）。研究结论/网页内容嵌 spec 是活的
+  // 间接注入通道（手册模板二【研究输入】逐字嵌 prompt）。Jev 判拦截线以上 →
+  // spec 头注入机器隔离声明（不拦派遣、只废掉注入指令的效力）。
   {
     const quarantine = await quarantineSpec(`dispatch:${label || "unlabeled"}`, prompt)
     if (quarantine) prompt = `${quarantine}\n${prompt}`
   }
 
-  // 量級瘦身 A（2026-09-19）：spec 模板機器注入。三軍模板（研究/創作/毒蛇評審，
-  // playbook 1.8 逐字遷出至 spec-templates.json）按 Jev 任務分類自動追加到任務書
-  // 頭部——orchestrator 只寫任務意圖，配方由機器持有。Jev 掛 → 不注入（fail-open，
-  // 子代理照原 spec 跑；模板缺檔同理跳過，只留 log）。
-  // 0920 暴君裁定：模板選擇接 System One——同一請求批次取回工作流模板判定，
-  // 命中製作類（confidence≥0.8）即把骨架硬注入任務書頭（先於軍團模板），
-  // 讓「沒人負責選模板」不再可能（事故：60s 百合 OP MV 裸跑＝無角色卡約束）。
+  // 量级瘦身 A（2026-09-19）：spec 模板机器注入。三军模板（研究/创作/毒蛇评审，
+  // playbook 1.8 逐字迁出至 spec-templates.json）按 Jev 任务分类自动追加到任务书
+  // 头部——orchestrator 只写任务意图，配方由机器持有。Jev 挂 → 不注入（fail-open，
+  // 子代理照原 spec 跑；模板缺档同理跳过，只留 log）。
+  // 0920 暴君裁定：模板选择接 System One——同一请求批次取回工作流模板判定，
+  // 命中制作类（confidence≥0.8）即把骨架硬注入任务书头（先于军团模板），
+  // 让「没人负责选模板」不再可能（事故：60s 百合 OP MV 裸跑＝无角色卡约束）。
   {
     let templateInjected = false
     try {
@@ -1772,15 +1772,15 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         console.log(
           `[gateway] jev_gate: WORKFLOW_TEMPLATE injected template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} label="${label}" expert=${expertId || "-"}`,
         )
-        // 0920 暴君裁定（第二版）：模板判定完成即建骨架彈上畫布——不等 Expert
-        // 去調 workflow_start（實錘：Expert 根本沒調，右邊永遠空白，「太慢了」）。
-        // 建構用佔位內容滿足後端「每個 text role 非空」的驗證；Expert 之後同模板
-        // 呼叫 workflow_start 走 P0 冪等守衛復用同一支 wf，再用 workflow_update_node
-        // 回填真內容。失敗一律 fail-open（Expert 仍可自行建立，行為＝部署前）。
+        // 0920 暴君裁定（第二版）：模板判定完成即建骨架弹上画布——不等 Expert
+        // 去调 workflow_start（实锤：Expert 根本没调，右边永远空白，「太慢了」）。
+        // 建构用占位内容满足后端「每个 text role 非空」的验证；Expert 之后同模板
+        // 呼叫 workflow_start 走 P0 幂等守卫复用同一支 wf，再用 workflow_update_node
+        // 回填真内容。失败一律 fail-open（Expert 仍可自行建立，行为＝部署前）。
         try {
-          // 修 4（2026-10-02）：per-session 骨架去重——本會話整個生命週期最多一個骨架。
-          // 先查該父會話是否已有 workflowSnapshot（持久鏡像）或已登記 owner wf：有則
-          // 復用同一個 workflowId，不新建不覆蓋（此前同一會話建 14 個 wf 只留最後一個=孤兒）。
+          // 修 4（2026-10-02）：per-session 骨架去重——本会话整个生命周期最多一个骨架。
+          // 先查该父会话是否已有 workflowSnapshot（持久镜像）或已登记 owner wf：有则
+          // 复用同一个 workflowId，不新建不覆盖（此前同一会话建 14 个 wf 只留最后一个=孤儿）。
           const snap = (parent as { workflowSnapshot?: { workflowId?: unknown } }).workflowSnapshot
           const snapWfId = snap && typeof snap.workflowId === "string" ? snap.workflowId : undefined
           const priorWfId = workflowOwnerBySession.get(parent.sessionId) ?? snapWfId
@@ -1794,7 +1794,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
             if ("workflowId" in r && typeof r.workflowId === "string") {
               workflowOwnerBySession.set(parent.sessionId, r.workflowId)
               console.log(
-                `[gateway] jev_gate: WORKFLOW_SKELETON built template=${meta.template.templateId} wf=${r.workflowId} session=${parent.sessionId} (判定即彈，不等 Expert)`,
+                `[gateway] jev_gate: WORKFLOW_SKELETON built template=${meta.template.templateId} wf=${r.workflowId} session=${parent.sessionId} (判定即弹，不等 Expert)`,
               )
             } else {
               console.log(`[gateway] workflow skeleton skipped (start error): ${"error" in r ? r.error : "unknown"}`)
@@ -1805,7 +1805,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         }
       }
       if (meta.specKey && typeof tpl[meta.specKey] === "string" && tpl[meta.specKey]) {
-        prompt = `【系統注入·軍團模板】以下模板骨架由網關按任務類型自動注入，與你的任務書同效；〔括號〕欄由你填。\n\n${tpl[meta.specKey]}\n\n---\n\n【任務書原文】\n${prompt}`
+        prompt = `【系统注入·军团模板】以下模板骨架由网关按任务类型自动注入，与你的任务书同效；〔括号〕栏由你填。\n\n${tpl[meta.specKey]}\n\n---\n\n【任务书原文】\n${prompt}`
         templateInjected = true
       }
     } catch (e) {
@@ -1814,8 +1814,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     if (templateInjected) console.log(`[gateway] spec template injected: label="${label}"`)
   }
 
-  // M3（2026-10-02）：返工 spec 內容鎖。偵測到返工任務 → 注入「只改 X 欄、其餘逐字沿用
-  // <原稿路徑>＋交付附 diff」（原稿路徑＝同 label/同 expert 最近一份落盤交付物）。
+  // M3（2026-10-02）：返工 spec 内容锁。侦测到返工任务 → 注入「只改 X 栏、其余逐字沿用
+  // <原稿路径>＋交付附 diff」（原稿路径＝同 label/同 expert 最近一份落盘交付物）。
   if (isReworkSpec(prompt)) {
     const delivered = deliveredByParent.get(parent.sessionId) ?? []
     const prior = [...delivered].reverse().find((d) => d.relPath && (d.label === label.slice(0, 20) || (expertId && d.agent === expertId)))
@@ -1834,8 +1834,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     })
   }
 
-  // 模型链：父會話 persona 主模型 + registry fallbacks（空鏈 = 吃 opencode 預設，
-  // 僅在 registry 缺失的極端情況發生，此時無鏈可換）。
+  // 模型链：父会话 persona 主模型 + registry fallbacks（空链 = 吃 opencode 预设，
+  // 仅在 registry 缺失的极端情况发生，此时无链可换）。
   let chain: SubagentModelRef[] = []
   try {
     chain = deps.subagentModelChain(parent) ?? []
@@ -1854,7 +1854,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     prompt,
     modelChain: chain,
     attempt: 1,
-    // 片 D（2026-09-15）：交付閘門重派計數，硬帽 1 次。
+    // 片 D（2026-09-15）：交付闸门重派计数，硬帽 1 次。
     reworkCount: 0,
     beastMode: deps.beastMode(parent),
     agent: expertId || undefined,
@@ -1873,14 +1873,14 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   const hardMs = asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
   run.timeoutTimer = setTimeout(() => {
     console.warn(`[gateway] subagent hard timeout (${Math.round(hardMs / 60000)}min): id=${run.id} label="${run.label}"`)
-    // 修 3（2026-10-02）：逾時先落盤已累積的 partial 文字，再 error 收尾（不讓已有工作不可追）。
+    // 修 3（2026-10-02）：逾时先落盘已累积的 partial 文字，再 error 收尾（不让已有工作不可追）。
     run.partialPersist = true
     finishRun(run, "error", partialBodyOf(run), `子代理超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
   }, hardMs)
-  // D5（2026-10-02）：心跳 + 逾時前 2 分鐘部分交付。
+  // D5（2026-10-02）：心跳 + 逾时前 2 分钟部分交付。
   armHeartbeat(run, hardMs)
 
-  // 投递任务书（第一次 attempt；後續上游錯誤換模重試走 retryWithNextModel）
+  // 投递任务书（第一次 attempt；后续上游错误换模重试走 retryWithNextModel）
   const failure = await dispatchAttempt(run)
   if (failure) {
     // 投递失败：死因随 502 同步返回工具（主会话当场知道），R6 唤醒不再补发，
@@ -1895,11 +1895,11 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     `[gateway] subagent dispatched: id=${run.id} label="${run.label}" parent=${parent.sessionId} child=${run.opencodeSessionId}${asyncMode ? " mode=async" : ""}`,
   )
   if (!asyncMode) {
-    // R1（2026-09-11）：同步 dispatch 硬 deadline。到點先讓主會話解鎖（工具輪詢
-    // /internal/subagent/status 讀 completed 即取件，實測 <30s 收到 ok:false/TIMEOUT），
-    // **子代理 run 不殺**：翻 asyncMode 讓它後台續跑，完成後走既有 wakeParent 回填。
+    // R1（2026-09-11）：同步 dispatch 硬 deadline。到点先让主会话解锁（工具轮询
+    // /internal/subagent/status 读 completed 即取件，实测 <30s 收到 ok:false/TIMEOUT），
+    // **子代理 run 不杀**：翻 asyncMode 让它后台续跑，完成后走既有 wakeParent 回填。
     const deadlineMs = parseSyncDeadlineMs(run.prompt)
-    // P2b：arm 時刻記一條，deadline 解析結果可被日誌直接觀測（V3 不必等 240s）。
+    // P2b：arm 时刻记一条，deadline 解析结果可被日志直接观测（V3 不必等 240s）。
     console.log(
       `[gateway] subagent sync deadline armed: id=${run.id} label="${run.label}" deadline=${Math.round(deadlineMs / 1000)}s prompt_head="${run.prompt.slice(0, 24).replace(/\n/g, "\\n")}"`,
     )
@@ -1922,9 +1922,9 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         reason: "timeout",
         parent: run.parentGatewaySessionId,
       })
-      // E 片（2026-09-12）：超時放行這一刻的事實也落盤（無正文 → 寫死因事實）。此刻
-      // 盤上不是交付物，**不掛「完整结果已落盘」指針**（掛了會誤導）；run 後續真完成
-      // 時 finishRun 用全文覆寫同一檔並帶指針。
+      // E 片（2026-09-12）：超时放行这一刻的事实也落盘（无正文 → 写死因事实）。此刻
+      // 盘上不是交付物，**不挂「完整结果已落盘」指针**（挂了会误导）；run 后续真完成
+      // 时 finishRun 用全文覆写同一档并带指针。
       const partialPersist = persistRunOutput(run, "timeout", "", human)
       if (partialPersist.relPath) {
         console.log(`[gateway] subagent partial persisted: id=${run.id} path=${partialPersist.relPath}`)
@@ -1935,7 +1935,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     }, deadlineMs)
   }
   if (asyncMode) {
-    // R6 異步：投遞成功立即返回，主會話 turn 可正常結束；完成後 wakeParent 喚醒。
+    // R6 异步：投递成功立即返回，主会话 turn 可正常结束；完成后 wakeParent 唤醒。
     return Response.json({
       ok: true,
       subagent_id: run.id,
@@ -1948,8 +1948,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   return Response.json({ ok: true, subagent_id: run.id })
 }
 
-/** D4（2026-10-02）：本會話最近 N 筆 run（運行中＋已完成，按時間倒序）。
- *  completed 記錄自 2026-10-02 起帶 parent 歸屬；舊記錄無 parent＝不列入（誠實：不假裝知道歸屬）。 */
+/** D4（2026-10-02）：本会话最近 N 笔 run（运行中＋已完成，按时间倒序）。
+ *  completed 记录自 2026-10-02 起带 parent 归属；旧记录无 parent＝不列入（诚实：不假装知道归属）。 */
 function recentRunsForParent(
   parentKey: string,
   limit: number,
@@ -1974,14 +1974,14 @@ function recentRunsForParent(
     .map(({ at: _at, ...rest }) => rest)
 }
 
-/** D4：`latest` 別名 → 本會話最近一次 run 的 id（無記錄回 undefined）。 */
+/** D4：`latest` 别名 → 本会话最近一次 run 的 id（无记录回 undefined）。 */
 function resolveLatestRunId(parentKey: string): string | undefined {
   return recentRunsForParent(parentKey, 1)[0]?.id
 }
 
 /** POST /internal/subagent/status — body { session_id, subagent_id }。工具轮询取件。
- *  R6：async 派遣的主會話也可用同一端點主動查詢狀態（subagent_status 工具）。
- *  D4（2026-10-02）：支援 `latest` 別名；not_found 附最近 3 筆 run 供改用。 */
+ *  R6：async 派遣的主会话也可用同一端点主动查询状态（subagent_status 工具）。
+ *  D4（2026-10-02）：支援 `latest` 别名；not_found 附最近 3 笔 run 供改用。 */
 export async function handleSubagentStatus(req: Request): Promise<Response> {
   pruneCompleted()
   const body = (await req.json().catch(() => ({}))) as { session_id?: string; subagent_id?: string }
@@ -1991,7 +1991,7 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       {
         ok: false,
         code: "missing_required_args",
-        error: 'subagent_id 必填：可傳完整 run id、"latest"（本會話最近一次）或 label 前綴。示例：{"subagent_id":"latest"}',
+        error: 'subagent_id 必填：可传完整 run id、"latest"（本会话最近一次）或 label 前缀。示例：{"subagent_id":"latest"}',
       },
       { status: 400 },
     )
@@ -2031,22 +2031,22 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       return Response.json({
         ok: true,
         done: false,
-        // D4（2026-10-02）：回帶實際命中的 run id——`latest`／label 前綴查詢時，
-        // 呼叫端必須知道解析到哪一個 run，否則拿到狀態卻無 id 可用。
+        // D4（2026-10-02）：回带实际命中的 run id——`latest`／label 前缀查询时，
+        // 呼叫端必须知道解析到哪一个 run，否则拿到状态却无 id 可用。
         subagent_id: run.id,
         label: run.label,
         elapsed_ms: Date.now() - run.startedAt,
       })
     }
   }
-  // 刀1（2026-09-20 百合番OP寶藏 PRD）：not_found ≠ 沒跑過——run 記錄會過期（completed
-  // 清理/gateway 重啟），但 E 片落盤檔是持久的。按 run id 前 8 碼掃 outputs/subagent，
-  // 命中即在 404 回應帶 artifact_path，orchestrator 直接驗收盤上檔案，不重派不空等
-  // （實錘案例：裝配方案 23:19 落盤、喚醒丟失、用戶空等近 1 小時）。
-  // 修 2（2026-10-02）：label 精確查詢——此前按 label 查在跑代理一律 not_found，
-  // orchestrator 只能從 busy 拒絕訊息反推並發數並誤判批次失聯（重派造成重複生成）。
-  // 完整 run id 已在上面精確命中；此處以 label 前綴比對：單筆回該 run、多筆回候選清單、
-  // 僅真正零命中才落到 artifact/404。
+  // 刀1（2026-09-20 百合番OP宝藏 PRD）：not_found ≠ 没跑过——run 记录会过期（completed
+  // 清理/gateway 重启），但 E 片落盘档是持久的。按 run id 前 8 码扫 outputs/subagent，
+  // 命中即在 404 回应带 artifact_path，orchestrator 直接验收盘上档案，不重派不空等
+  // （实锤案例：装配方案 23:19 落盘、唤醒丢失、用户空等近 1 小时）。
+  // 修 2（2026-10-02）：label 精确查询——此前按 label 查在跑代理一律 not_found，
+  // orchestrator 只能从 busy 拒绝讯息反推并发数并误判批次失联（重派造成重复生成）。
+  // 完整 run id 已在上面精确命中；此处以 label 前缀比对：单笔回该 run、多笔回候选清单、
+  // 仅真正零命中才落到 artifact/404。
   const cands: Array<{ runId: string; label: string; status: string; running: boolean; elapsed_ms?: number }> = []
   for (const run of byChildOc.values()) {
     if (run.id !== wantId && run.label.startsWith(wantId)) {
@@ -2074,7 +2074,7 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       ok: true,
       multiple: true,
       candidates: cands.map((c) => ({ runId: c.runId, label: c.label, status: c.status })),
-      note: "label 前綴命中多筆，請用完整 runId 或更精確 label 重查。",
+      note: "label 前缀命中多笔，请用完整 runId 或更精确 label 重查。",
     })
   }
   const artifact = findPersistedArtifact(wantId)
@@ -2087,11 +2087,11 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       artifact_path: artifact.relPath,
       artifact_bytes: artifact.bytes,
       artifact_mtime: artifact.mtimeMs,
-      note: "run 記錄已過期但產物已落盤：直接 read 上述路徑驗收，勿重派。",
+      note: "run 记录已过期但产物已落盘：直接 read 上述路径验收，勿重派。",
     })
   }
-  // D4（2026-10-02）：not_found 不再是一句死話——附最近 3 筆 run（id/狀態/label），
-  // 讓 orchestrator 直接改用正確 id，或改傳 "latest"，而不是重派造成重複生成。
+  // D4（2026-10-02）：not_found 不再是一句死话——附最近 3 笔 run（id/状态/label），
+  // 让 orchestrator 直接改用正确 id，或改传 "latest"，而不是重派造成重复生成。
   const recent = recentRunsForParent(parentKey, 3)
   return Response.json(
     {
@@ -2109,20 +2109,20 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
 }
 
 /**
- * 0920 停止閘：orchestrator 的停止入口（/internal/subagent/stop）。
+ * 0920 停止闸：orchestrator 的停止入口（/internal/subagent/stop）。
  * body { session_id, subagent_id?, all? }：
- *   - subagent_id 有值 → 停那一個（gateway run id 或 label 前綴）
- *   - 否則（或 all:true）→ 停該會話名下全部在跑子代理
- * 停止語義：標記 stopped → abort+DELETE 子會話 → 摘註冊表 → 不喚醒父會話。
- * 為何不喚醒：停止＝結束，喚醒會讓 orchestrator 又起一輪（可能再派新 subagent），
- * 正是用戶抱怨的「一出就刹不住車」。
+ *   - subagent_id 有值 → 停那一个（gateway run id 或 label 前缀）
+ *   - 否则（或 all:true）→ 停该会话名下全部在跑子代理
+ * 停止语义：标记 stopped → abort+DELETE 子会话 → 摘注册表 → 不唤醒父会话。
+ * 为何不唤醒：停止＝结束，唤醒会让 orchestrator 又起一轮（可能再派新 subagent），
+ * 正是用户抱怨的「一出就刹不住车」。
  */
 export async function handleSubagentStop(req: Request): Promise<Response> {
   pruneCompleted()
   const body = (await req.json().catch(() => ({}))) as { session_id?: string; subagent_id?: string; all?: boolean }
   const sid = body.session_id?.trim()
   if (!sid) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填" }, { status: 400 })
-  // session_id 接受 gateway id 或父 opencode id——與 status/dispatch 同語義。
+  // session_id 接受 gateway id 或父 opencode id——与 status/dispatch 同语义。
   const parent = deps?.resolveSession(sid) ?? deps?.findSessionByOpenCodeId(sid)
   const parentKey = parent?.sessionId ?? sid
   if (body.subagent_id && body.all !== true) {
@@ -2145,9 +2145,9 @@ export async function handleSubagentStop(req: Request): Promise<Response> {
 }
 
 /**
- * D1（2026-10-02）：工具層重複呼叫斷路器的強制收尾端點。
- * 由 .opencode/plugin/eimu-guard.ts 在「同一 (session, tool, 正規化 args) 第 N+5 次」時呼叫：
- * 中止該會話當前生成並回灌一則系統說明。**輪詢類工具不觸發**（2026-10-02 使用者裁定：保留輪詢）。
+ * D1（2026-10-02）：工具层重复呼叫断路器的强制收尾端点。
+ * 由 .opencode/plugin/eimu-guard.ts 在「同一 (session, tool, 正规化 args) 第 N+5 次」时呼叫：
+ * 中止该会话当前生成并回灌一则系统说明。**轮询类工具不触发**（2026-10-02 使用者裁定：保留轮询）。
  * body { session_id, tool, count }。
  */
 export async function handleLoopBreaker(req: Request): Promise<Response> {
@@ -2179,7 +2179,7 @@ export async function handleLoopBreaker(req: Request): Promise<Response> {
   return Response.json({ ok: true, aborted: Boolean(ocId), session_id: state?.sessionId ?? sid })
 }
 
-/** 刀1：掃 outputs/subagent/<runId前8碼>-*.md，取最新一筆（同前綴理論唯一，兜底取 mtime 最大）。 */
+/** 刀1：扫 outputs/subagent/<runId前8码>-*.md，取最新一笔（同前缀理论唯一，兜底取 mtime 最大）。 */
 function findPersistedArtifact(subagentId: string): { relPath: string; bytes: number; mtimeMs: number; status: string; label: string } | null {
   const prefix = subagentId.replace(/-/g, "").slice(0, 8)
   if (!/^[0-9a-f]{8}$/i.test(prefix)) return null
@@ -2189,7 +2189,7 @@ function findPersistedArtifact(subagentId: string): { relPath: string; bytes: nu
       .map((f) => {
         const abs = join(SUBAGENT_OUTPUT_DIR, f)
         const st = statSync(abs)
-        // 檔頭 meta 行是機器寫的（persistRunOutput），status/label 直接抽，不讀全文。
+        // 档头 meta 行是机器写的（persistRunOutput），status/label 直接抽，不读全文。
         const head = readFileSync(abs, "utf8").slice(0, 400)
         const status = /^- 状态: (.+)$/m.exec(head)?.[1]?.trim() ?? "unknown"
         const label = /^# (.+)$/m.exec(head)?.[1]?.trim() ?? ""
@@ -2198,20 +2198,20 @@ function findPersistedArtifact(subagentId: string): { relPath: string; bytes: nu
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
     return hits[0] ?? null
   } catch {
-    return null // 目錄不可讀/不存在 → 維持原 404 行為（fail-open）
+    return null // 目录不可读/不存在 → 维持原 404 行为（fail-open）
   }
 }
 
-// ── 刀 F（2026-09-15）：rework 鏈重啟存活——啟動掃描治理 in-flight rework 孤兒 ──────────
-// 病灶：rework 在途時 gateway 被重啟（round3 13:03:37），SubagentRun/watchers 純記憶體隨舊
-// 進程死亡 → 子 opencode 會話孤兒 RUNNING（算力白燒）、父會話永挂無 done/無 wake。
-// 治法：startRework 落一條 subagent_reworks 記錄（child_oc 探針目標），finishRun 終態刪。
-// 啟動時掃殘留記錄，探 opencode 子會話真況：
-//   · 已完成 → 拉正文重跑閘門復檢，走既有 finishRun 正常鏈 done/wake（單終態守衛復用）。
-//   · 仍 RUNNING 且 watcher 死 → **不幽靈續 watch**，按誠實路徑：finishRun(orphaned) 內部
-//     abort+DELETE 子會話 + done delivery_gate.orphaned + 帶前綴 wake 父會話一次。
-// 冪等：記錄終態即刪，殘留=真孤兒；wake 單次由 finishRun status 守衛 + wakeParent ackTimer
-// 讓位保證，與正常鏈不雙 wake。
+// ── 刀 F（2026-09-15）：rework 链重启存活——启动扫描治理 in-flight rework 孤儿 ──────────
+// 病灶：rework 在途时 gateway 被重启（round3 13:03:37），SubagentRun/watchers 纯记忆体随旧
+// 进程死亡 → 子 opencode 会话孤儿 RUNNING（算力白烧）、父会话永挂无 done/无 wake。
+// 治法：startRework 落一条 subagent_reworks 记录（child_oc 探针目标），finishRun 终态删。
+// 启动时扫残留记录，探 opencode 子会话真况：
+//   · 已完成 → 拉正文重跑闸门复检，走既有 finishRun 正常链 done/wake（单终态守卫复用）。
+//   · 仍 RUNNING 且 watcher 死 → **不幽灵续 watch**，按诚实路径：finishRun(orphaned) 内部
+//     abort+DELETE 子会话 + done delivery_gate.orphaned + 带前缀 wake 父会话一次。
+// 幂等：记录终态即删，残留=真孤儿；wake 单次由 finishRun status 守卫 + wakeParent ackTimer
+// 让位保证，与正常链不双 wake。
 
 function runFromReworkRecord(rec: ReworkRecord): SubagentRun {
   return {
@@ -2243,8 +2243,8 @@ interface ChildProbe {
   text: string
 }
 
-/** 探 opencode 子會話：HTTP 非 ok/404 → 不存在；取最後一條 assistant 的 completed 判終態、
- *  其 text parts 作正文。time.completed===null = turn 仍 RUNNING（對齊驗屍配方）。 */
+/** 探 opencode 子会话：HTTP 非 ok/404 → 不存在；取最后一条 assistant 的 completed 判终态、
+ *  其 text parts 作正文。time.completed===null = turn 仍 RUNNING（对齐验尸配方）。 */
 async function probeChildSession(childOc: string): Promise<ChildProbe> {
   if (!deps || !isOpenCodeSessionId(childOc)) return { exists: false, completed: false, text: "" }
   try {
@@ -2268,14 +2268,14 @@ async function probeChildSession(childOc: string): Promise<ChildProbe> {
       .trim()
     return { exists: true, completed, text }
   } catch {
-    // 探測失敗（opencode 短暫不可達）保守回 exists:false，讓本輪先不處理——但呼叫端
-    // 對 !exists 走孤兒誠實收尾。為避免 opencode 抖動誤殺，僅在明確 HTTP 非 ok 才標 !exists；
-    // 網絡異常在此回 exists:true/completed:false（視為仍 RUNNING），下一輪重啟再評。
+    // 探测失败（opencode 短暂不可达）保守回 exists:false，让本轮先不处理——但呼叫端
+    // 对 !exists 走孤儿诚实收尾。为避免 opencode 抖动误杀，仅在明确 HTTP 非 ok 才标 !exists；
+    // 网络异常在此回 exists:true/completed:false（视为仍 RUNNING），下一轮重启再评。
     return { exists: true, completed: false, text: "" }
   }
 }
 
-/** gateway 啟動一次性調用：治理 rework 孤兒（見上方註解塊）。 */
+/** gateway 启动一次性调用：治理 rework 孤儿（见上方注解块）。 */
 export async function recoverReworkRunsOnStartup(): Promise<void> {
   if (!deps) return
   const recs = loadReworkRecords()
@@ -2287,21 +2287,21 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
       run = runFromReworkRecord(rec)
       const probe = await probeChildSession(rec.childOc)
       if (probe.exists && probe.completed) {
-        // 已完成：拉正文走既有 finishRun（reworkCount>=1 → 不重派，PASS→reworked / FAIL→升級標記）。
-        console.log(`[gateway] rework recovery: id=${run.id} child=${rec.childOc} 已完成 — 拉正文復檢閘門`)
+        // 已完成：拉正文走既有 finishRun（reworkCount>=1 → 不重派，PASS→reworked / FAIL→升级标记）。
+        console.log(`[gateway] rework recovery: id=${run.id} child=${rec.childOc} 已完成 — 拉正文复检闸门`)
         if (probe.text) finishRun(run, "ok", probe.text)
         else finishRun(run, "error", "", "子代理运行结束但没有产出文本")
       } else {
-        // 仍 RUNNING 或子會話已消失：不續 watch，誠實收尾。finishRun 內部 abort+DELETE 子會話
-        // （!exists 時 404 no-op）+ 單次 wake（error 路徑，wake「失败原因」帶前綴）。
+        // 仍 RUNNING 或子会话已消失：不续 watch，诚实收尾。finishRun 内部 abort+DELETE 子会话
+        // （!exists 时 404 no-op）+ 单次 wake（error 路径，wake「失败原因」带前缀）。
         const why = probe.exists ? "仍 RUNNING 且 watcher 已死" : "子会话已不存在"
-        console.error(`[gateway] rework recovery: id=${run.id} child=${rec.childOc} ${why} — abort+DELETE 誠實收尾`)
+        console.error(`[gateway] rework recovery: id=${run.id} child=${rec.childOc} ${why} — abort+DELETE 诚实收尾`)
         run.orphaned = true
         finishRun(run, "error", "", `${ORPHANED_GATE_MARK} gateway 进程在重派途中重启，子会话未被续 watch；已按诚实路径终止（abort+DELETE），未复原交付结果。`)
       }
     } catch (e) {
       console.error(`[gateway] rework recovery failed: id=${rec.runId} child=${rec.childOc}`, e)
-      deleteReworkRecord(rec.runId) // 處理異常也要清記錄，防下次啟動重複幽靈治理
+      deleteReworkRecord(rec.runId) // 处理异常也要清记录，防下次启动重复幽灵治理
     }
   }
 }

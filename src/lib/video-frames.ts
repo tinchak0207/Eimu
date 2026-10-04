@@ -5,13 +5,13 @@
 //   - 上限：时长 600 秒、文件 100 MB，超过就拒收并说明（不静默截断）。
 //   - 理由：4 帧够覆盖内容变化，又压得住 Groq 眼睛的成本。
 //
-// 2026-09-28 取樣語義對齊（照競品 hypit 的實作語義，不自行發明）：
-//   - `intervalSamples`（對應 --every）：從 start 起、遞增 every、**不含 end**，every 下限 0.001 秒。
-//   - `tileSampleTimes`（對應 --frames）：等距**中點**（不是端點），至少 2 幀。
-//   - `tileFrameCount` / `TILE_COLUMNS` / `TILE_CELL_WIDTH`：預設格數與拼板常數逐字照競品。
-//   - `frameFileName`：`frame-<秒>_<毫秒>s.jpg`（檔名用請求時間，不是解碼到的真實來源時間）。
-//   - 上限政策同競品精神：瀏覽器端因記憶體必須有上限（MAX_SEQUENCE_FRAMES=600），但到頂**明確拒絕**，
-//     絕不靜默截斷；競品本身對幀數無上限（它跑在伺服器端）。
+// 2026-09-28 取样语义对齐（照竞品 hypit 的实作语义，不自行发明）：
+//   - `intervalSamples`（对应 --every）：从 start 起、递增 every、**不含 end**，every 下限 0.001 秒。
+//   - `tileSampleTimes`（对应 --frames）：等距**中点**（不是端点），至少 2 帧。
+//   - `tileFrameCount` / `TILE_COLUMNS` / `TILE_CELL_WIDTH`：预设格数与拼板常数逐字照竞品。
+//   - `frameFileName`：`frame-<秒>_<毫秒>s.jpg`（档名用请求时间，不是解码到的真实来源时间）。
+//   - 上限政策同竞品精神：浏览器端因记忆体必须有上限（MAX_SEQUENCE_FRAMES=600），但到顶**明确拒绝**，
+//     绝不静默截断；竞品本身对帧数无上限（它跑在伺服器端）。
 //
 // 本文件保持纯逻辑（不依赖 DOM/浏览器 API），可用 node:test 测；
 // 真正触碰 <video>/<canvas> 的部分放在本文件末尾的 extractVideoFrames()，
@@ -668,7 +668,7 @@ export async function waitForMetadata(
   video: HTMLVideoElement,
   timeoutMs: number = METADATA_WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  // 终态快查：已解碼就直接成功（不再重挂监听）。
+  // 终态快查：已解码就直接成功（不再重挂监听）。
   if (video.readyState >= 1) return;
   // 终态快查：元素已经死了（MEDIA_ERR_* / src 不支援）就直接失败，
   // 不重挂监听——否则第二次等待会永久 pending。

@@ -7,8 +7,8 @@ process.env.TYPESAFE_API_KEY = readFileSync(".env.jev", "utf8").trim().split("="
 
 const r = await jevAsk(
   JSON.stringify({
-    delivery: "交付了 146 BPM 七段結構的片頭曲；段落秒數 3.04/9.12/6.08/10.95/7.30/10.95 小節",
-    brief: "需要七段落於小節線上",
+    delivery: "交付了 146 BPM 七段结构的片头曲；段落秒数 3.04/9.12/6.08/10.95/7.30/10.95 小节",
+    brief: "需要七段落于小节线上",
   }),
   {
     field_substance: {
@@ -29,7 +29,7 @@ const r = await jevAsk(
     expert_route: {
       type: "choice",
       instructions: "Which expert should handle this delivery review?",
-      criteria: { music: "作曲/編曲", editor: "剪輯", screenwriter: "劇本", other: "none of the above" },
+      criteria: { music: "作曲/编曲", editor: "剪辑", screenwriter: "剧本", other: "none of the above" },
     },
   },
 );

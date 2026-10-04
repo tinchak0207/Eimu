@@ -1,15 +1,15 @@
-// workflow-dsl/schema.ts — AI 畫筆的緊湊宣告式 DSL：型別定義與手寫校驗。
+// workflow-dsl/schema.ts — AI 画笔的紧凑宣告式 DSL：型别定义与手写校验。
 //
-// 角色（暴君裁定 2026-09-02）：畫布圖為唯一運行時真相；AI 不直接吐 CanvasAgentOp，
-// 而是吐本檔定義的 WorkflowDslSource，由 compile.ts 編譯成既有 8-op DSL。
-// 契約真源 = src/lib/canvas/types.ts 的 CanvasAgentOp（L239-247）；
-// 欄位語義對齊 src/lib/agent-templates.ts 的 AgentPipelineStep。
+// 角色（暴君裁定 2026-09-02）：画布图为唯一运行时真相；AI 不直接吐 CanvasAgentOp，
+// 而是吐本档定义的 WorkflowDslSource，由 compile.ts 编译成既有 8-op DSL。
+// 契约真源 = src/lib/canvas/types.ts 的 CanvasAgentOp（L239-247）；
+// 栏位语义对齐 src/lib/agent-templates.ts 的 AgentPipelineStep。
 //
-// 零新依賴：repo 無 zod，校驗全手寫。錯誤文案一律簡體中文（gateway 文案鐵律），
-// 且每條 message 自帶修復提示（教學式報錯，2026-09-02 暴君追加）——
-// agent 不用翻文檔就能改對；簡短建議另放可選 hint 欄位。
+// 零新依赖：repo 无 zod，校验全手写。错误文案一律简体中文（gateway 文案铁律），
+// 且每条 message 自带修复提示（教学式报错，2026-09-02 暴君追加）——
+// agent 不用翻文档就能改对；简短建议另放可选 hint 栏位。
 
-/** 校驗議題：step = 步驟 id（檔級問題缺省）、field = 欄位名、message = 簡體中文問題+修復提示、hint = 簡短修復建議（可選，2026-09-02 教學式報錯追加）。 */
+/** 校验议题：step = 步骤 id（档级问题缺省）、field = 栏位名、message = 简体中文问题+修复提示、hint = 简短修复建议（可选，2026-09-02 教学式报错追加）。 */
 export interface WorkflowValidationIssue {
   step?: string;
   field?: string;
@@ -17,41 +17,41 @@ export interface WorkflowValidationIssue {
   hint?: string;
 }
 
-/** 單步宣告：id 為檔內符號名，其餘欄位皆可選（缺省語義見註釋）。 */
+/** 单步宣告：id 为档内符号名，其余栏位皆可选（缺省语义见注释）。 */
 export interface WorkflowDslStep {
-  /** 符合 ^[a-z][a-z0-9_]{0,47}$，檔內唯一；決定確定性節點 id 的一部分。 */
+  /** 符合 ^[a-z][a-z0-9_]{0,47}$，档内唯一；决定确定性节点 id 的一部分。 */
   id: string;
-  /** 卡面標題 1..40 字。 */
+  /** 卡面标题 1..40 字。 */
   title: string;
   /** 缺省 "image"。director = 3D 白模预演步（导演台节点，2026-09-03）。 */
   kind?: "image" | "text" | "video" | "audio" | "director";
   /** ≤4000 字。 */
   prompt?: string;
-  /** 依賴步驟 id（=畫布連線 dep→step），編譯時去重。 */
+  /** 依赖步骤 id（=画布连线 dep→step），编译时去重。 */
   needs?: string[];
   model?: string;
   /** /^\d+x\d+$/ 格式。 */
   size?: string;
-  /** 整數 1..8。 */
+  /** 整数 1..8。 */
   count?: number;
-  /** 門禁步（人工批准後才續跑）。 */
+  /** 门禁步（人工批准后才续跑）。 */
   gate?: boolean;
-  /** 必須 ∈ HARNESS_TOOL_IDS（src/lib/harness-tool-registry.ts；在校驗順序的 tool 段檢查，見 compile.ts）。 */
+  /** 必须 ∈ HARNESS_TOOL_IDS（src/lib/harness-tool-registry.ts；在校验顺序的 tool 段检查，见 compile.ts）。 */
   tool?: string;
-  /** 透傳進節點 metadata 的自由欄位；序列化 ≤4KB。 */
+  /** 透传进节点 metadata 的自由栏位；序列化 ≤4KB。 */
   meta?: Record<string, unknown>;
 }
 
-/** 一份工作流源碼：steps 1..24。 */
+/** 一份工作流源码：steps 1..24。 */
 export interface WorkflowDslSource {
-  /** 命名空間 ^[a-z][a-z0-9_-]{0,47}$。 */
+  /** 命名空间 ^[a-z][a-z0-9_-]{0,47}$。 */
   workflow: string;
   /** ≤60 字。 */
   title?: string;
   steps: WorkflowDslStep[];
 }
 
-// ─────────────────────────── 模式與邊界（compile/decompile 共用）
+// ─────────────────────────── 模式与边界（compile/decompile 共用）
 
 export const WORKFLOW_NS_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
 export const STEP_ID_PATTERN = /^[a-z][a-z0-9_]{0,47}$/;
@@ -62,12 +62,12 @@ export const META_MAX_BYTES = 4096;
 
 const STEP_KINDS = new Set(["image", "text", "video", "audio", "director"]);
 
-// ─────────────────────────── 校驗
+// ─────────────────────────── 校验
 
 /**
- * 校驗未知來源的 DSL 源碼（JSON 反序列化產物視為 unknown）。
- * 只做結構與格式檢查（型別/長度/正則/meta 大小）；跨步驟語義
- * （id 唯一、needs 引用、拓撲、tool 成員）歸 compile.ts 的編譯期校驗。
+ * 校验未知来源的 DSL 源码（JSON 反序列化产物视为 unknown）。
+ * 只做结构与格式检查（型别/长度/正则/meta 大小）；跨步骤语义
+ * （id 唯一、needs 引用、拓扑、tool 成员）归 compile.ts 的编译期校验。
  */
 export function validateWorkflowDsl(raw: unknown): { ok: true; source: WorkflowDslSource } | { ok: false; errors: WorkflowValidationIssue[] } {
   const errors: WorkflowValidationIssue[] = [];

@@ -1,13 +1,13 @@
-// POST /v1/skus/:id/runs — SKU 下單：輸入 → 鏡頭計劃展開 → 逐鏡頭提交。
+// POST /v1/skus/:id/runs — SKU 下单：输入 → 镜头计划展开 → 逐镜头提交。
 //
-// 與 /v1/images/generations 完全同構的 B 端契約：biz key 鑑權、限流頭、
-// trace_id、OpenAI 風格錯誤體、冪等（Idempotency-Key 頭 = run 根，
-// 逐鏡頭確定性冪等鍵）。提交全部走 submitGenerationCommand——不自建第二套
-// 提交/計費/調度。
+// 与 /v1/images/generations 完全同构的 B 端契约：biz key 鉴权、限流头、
+// trace_id、OpenAI 风格错误体、幂等（Idempotency-Key 头 = run 根，
+// 逐镜头确定性幂等键）。提交全部走 submitGenerationCommand——不自建第二套
+// 提交/计费/调度。
 //
-// body 兩種形態：
-//  1. 單輪：SKU 輸入物件（頂層可帶保留欄位 model / callback_url）。
-//  2. 表格批量：{ "inputs": [輸入物件, ...] }（或直接頂層數組），每項一輪 run。
+// body 两种形态：
+//  1. 单轮：SKU 输入物件（顶层可带保留栏位 model / callback_url）。
+//  2. 表格批量：{ "inputs": [输入物件, ...] }（或直接顶层数组），每项一轮 run。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, isModelAllowedForKey } from "@/lib/biz-api-keys";
@@ -31,7 +31,7 @@ import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-// 與 /v1/images/generations 同區：逐鏡頭提交要串行打控制面 DB（建任務+預留計費）。
+// 与 /v1/images/generations 同区：逐镜头提交要串行打控制面 DB（建任务+预留计费）。
 export const preferredRegion = "sfo1";
 
 type OpenAIErrorType =
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const requestId = Math.random().toString(36).slice(2);
   const traceId = getOrCreateTraceId(req);
 
-  // ── 認證（與單任務端點同一套） ─────────────────────────────
+  // ── 认证（与单任务端点同一套） ─────────────────────────────
   const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
   if (!auth.ok) {
     const type: OpenAIErrorType =
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return errorResponse(404, "SKU 不存在，请调用 GET /v1/skus 查看目录。", "invalid_request_error", "sku_not_found", traceId);
   }
 
-  // ── 請求體解析（單輪 / 表格批量） ──────────────────────────
+  // ── 请求体解析（单轮 / 表格批量） ──────────────────────────
   let body: Record<string, unknown> | unknown[];
   try {
     body = (await req.json()) as Record<string, unknown> | unknown[];
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     );
   }
 
-  // 保留欄位（信封層）：model 覆蓋 / callback_url 透傳。
+  // 保留栏位（信封层）：model 覆盖 / callback_url 透传。
   const envelope: Record<string, unknown> = Array.isArray(body) ? {} : (body as Record<string, unknown>);
   const rawModelOverride = typeof envelope.model === "string" && envelope.model ? envelope.model : "";
   const callbackUrl =
@@ -151,10 +151,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       ? envelope.callback_url.trim()
       : null;
 
-  // ── 模型解析（覆蓋或缺省） ─────────────────────────────────
+  // ── 模型解析（覆盖或缺省） ─────────────────────────────────
   const rawModelId = rawModelOverride || sku.defaultModelId;
   const modelId = (resolveGenerationModelId(rawModelId) ?? rawModelId).trim();
-  // v1 SKU 全部 image kind；video SKU 落地時按 shot.kind 分派校驗。
+  // v1 SKU 全部 image kind；video SKU 落地时按 shot.kind 分派校验。
   if (!isSupportedImageModel(modelId)) {
     return errorResponse(
       400,
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return errorResponse(403, "当前密钥无权调用模型 " + modelId + "。", "permission_error", "model_not_permitted", traceId);
   }
 
-  // 管理員改價需立即對扣費生效：與單任務端點同一個計費共同上游。
+  // 管理员改价需立即对扣费生效：与单任务端点同一个计费共同上游。
   await syncModelPricing();
 
   if (!generationControlPlaneEnabled()) {
@@ -181,7 +181,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     );
   }
 
-  // ── run_id（冪等根） ───────────────────────────────────────
+  // ── run_id（幂等根） ───────────────────────────────────────
   const headerRun = req.headers.get("idempotency-key");
   let baseRunId: string;
   if (headerRun !== null && headerRun !== "") {
@@ -194,7 +194,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     baseRunId = generateRunId();
   }
 
-  // ── 逐輪展開 + 發射 ────────────────────────────────────────
+  // ── 逐轮展开 + 发射 ────────────────────────────────────────
   const dispatcher = resolveSkuDispatcher();
   const tenantId = "biz:" + apiKey.id;
   const dispatchContext = { tenantId, apiKeyId: apiKey.id, billingUserId: apiKey.userId };
@@ -314,7 +314,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         run_url: "/v1/skus/runs/" + baseRunId,
       };
 
-  // 單輪輸入且驗證失敗：直接 400（客戶端錯誤應立即修正，不是異步失敗）。
+  // 单轮输入且验证失败：直接 400（客户端错误应立即修正，不是异步失败）。
   if (!multi && runResponses.length === 0 && failedInputs.length > 0) {
     const failure = failedInputs[0];
     return errorResponse(

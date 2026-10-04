@@ -1,34 +1,34 @@
 /**
- * sceneCard × 相機軌跡 → 視頻生成融合層（Astra 3D 導演工作站 P2 視頻嵌合，片AC，2026-09-06）。
+ * sceneCard × 相机轨迹 → 视频生成融合层（Astra 3D 导演工作站 P2 视频嵌合，片AC，2026-09-06）。
  *
- * 只調用片 Z 成品（禁改契約）：
+ * 只调用片 Z 成品（禁改契约）：
  * - blender-to-video-bridge.buildSceneFrameReferenceCard：sceneCard stills → GenerationReference
- * - camera-trajectory-to-prompt.describeCameraTrajectory：軌跡 → 六槽 Camera 槽描述詞
+ * - camera-trajectory-to-prompt.describeCameraTrajectory：轨迹 → 六槽 Camera 槽描述词
  *
- * 職責 = 寬容解析（unknown → 契約形 | null）＋融合。任何形狀不合/缺欄回 null，
- * 呼叫方以 null 短路 = 零行為變化（絕不因髒欄位阻斷視頻生成）。
+ * 职责 = 宽容解析（unknown → 契约形 | null）＋融合。任何形状不合/缺栏回 null，
+ * 呼叫方以 null 短路 = 零行为变化（绝不因脏栏位阻断视频生成）。
  *
- * 軌跡來源裁定（片 AC）：sceneCard 六欄不含軌跡（片 Z 裁定不動雙白名單契約）——
- * 軌跡由調用方顯式傳遞：agent 工具調用時從會話上下文（3D 導演回傳摘要的 L1 move id）
- * 填入 camera_trajectory；C 端請求 body 同名欄位直傳。不從 canvas 節點反查（造解引用 =
- * 新增 gateway 依賴，違最小侵入）。
+ * 轨迹来源裁定（片 AC）：sceneCard 六栏不含轨迹（片 Z 裁定不动双白名单契约）——
+ * 轨迹由调用方显式传递：agent 工具调用时从会话上下文（3D 导演回传摘要的 L1 move id）
+ * 填入 camera_trajectory；C 端请求 body 同名栏位直传。不从 canvas 节点反查（造解引用 =
+ * 新增 gateway 依赖，违最小侵入）。
  */
 
 import { buildSceneFrameReferenceCard, type SceneFrameReferenceCard } from "./blender-to-video-bridge";
 import { describeCameraTrajectory, type CameraTrajectory } from "./camera-trajectory-to-prompt";
 import type { Scene3dCardMetadata } from "./canvas/types";
 
-/** 融合產物：DirectorOptions 直通對（sceneCard/cameraTrajectory）＋參考卡＋Camera 詞。 */
+/** 融合产物：DirectorOptions 直通对（sceneCard/cameraTrajectory）＋参考卡＋Camera 词。 */
 export interface SceneVideoFusion {
   sceneCard: Scene3dCardMetadata;
   cameraTrajectory: CameraTrajectory;
-  /** sceneCard stills → 參考卡（i2v 首/尾幀通道 cap 2；previz 檔 compositionOnly）。 */
+  /** sceneCard stills → 参考卡（i2v 首/尾帧通道 cap 2；previz 档 compositionOnly）。 */
   frameCard: SceneFrameReferenceCard;
-  /** 軌跡 → 完整 Camera 槽描述詞（含 "Camera: " 前綴；不可翻譯時為空串）。 */
+  /** 轨迹 → 完整 Camera 槽描述词（含 "Camera: " 前缀；不可翻译时为空串）。 */
   cameraDirective: string;
 }
 
-/** sceneCard 寬容解析：物件且 stills_urls 為字串陣列才收（六欄其餘欄位由 bridge notes 兜底）。 */
+/** sceneCard 宽容解析：物件且 stills_urls 为字串阵列才收（六栏其余栏位由 bridge notes 兜底）。 */
 export function parseSceneCard(value: unknown): Scene3dCardMetadata | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const card = value as Record<string, unknown>;
@@ -38,7 +38,7 @@ export function parseSceneCard(value: unknown): Scene3dCardMetadata | null {
   return value as Scene3dCardMetadata;
 }
 
-/** 相機軌跡寬容解析：moves / keyframes / summary 任一在場即可翻譯（camera-trajectory-to-prompt 契約）。 */
+/** 相机轨迹宽容解析：moves / keyframes / summary 任一在场即可翻译（camera-trajectory-to-prompt 契约）。 */
 export function parseCameraTrajectory(value: unknown): CameraTrajectory | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const trajectory = value as CameraTrajectory;
@@ -49,8 +49,8 @@ export function parseCameraTrajectory(value: unknown): CameraTrajectory | null {
 }
 
 /**
- * 融合入口：sceneCard＋cameraTrajectory 同時在場（且形狀合法）才產融合物件，
- * 缺一 = null（與 invisible-prompt-director 的 cameraRule 門控同構：兩者在場才生效）。
+ * 融合入口：sceneCard＋cameraTrajectory 同时在场（且形状合法）才产融合物件，
+ * 缺一 = null（与 invisible-prompt-director 的 cameraRule 门控同构：两者在场才生效）。
  */
 export function fuseSceneVideo(sceneCard: unknown, cameraTrajectory: unknown): SceneVideoFusion | null {
   const card = parseSceneCard(sceneCard);

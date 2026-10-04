@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
 import { listStuckJobs } from "@/lib/generation-core/job-events";
 
-// P1.5 probe 偵查面：滯留名單 + 死因分類（pending_billing 未受理 / running 輪詢斷 /
-// billing_unknown / 終態未投影）。鑑權沿用 admin 後台門禁，不造新輪子。
-// 自檢永不模擬成功：名單為空就返回空陣列，不偽造健康。
+// P1.5 probe 侦查面：滞留名单 + 死因分类（pending_billing 未受理 / running 轮询断 /
+// billing_unknown / 终态未投影）。鉴权沿用 admin 后台门禁，不造新轮子。
+// 自检永不模拟成功：名单为空就返回空阵列，不伪造健康。
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 export async function GET(req: NextRequest) {
   try {

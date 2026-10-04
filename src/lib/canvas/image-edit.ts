@@ -1,13 +1,13 @@
-// 畫布圖片編輯核心：裁剪 / 切图 / 抠除 / 旋转 / 角度 的像素操作。
+// 画布图片编辑核心：裁剪 / 切图 / 抠除 / 旋转 / 角度 的像素操作。
 //
-// 分層：純數學（computeSplitRects / computeSplitRectsFromLines / findLineSpot /
-// clampCropRect / rotatedSize / buildAnglePrompt）可被 node:test 直測；
-// 瀏覽器段（loadImageBitmap / *ToDataUrl）依賴 DOM canvas，只在 client 元件裡
-// 呼叫。輸出一律 PNG dataURL——編輯結果作為新子節點落回畫布，不改原節點
-// （非破壞性）。「角度」模式不產出像素，只組裝生圖指令交由宿主 AI 重繪。
+// 分层：纯数学（computeSplitRects / computeSplitRectsFromLines / findLineSpot /
+// clampCropRect / rotatedSize / buildAnglePrompt）可被 node:test 直测；
+// 浏览器段（loadImageBitmap / *ToDataUrl）依赖 DOM canvas，只在 client 元件里
+// 呼叫。输出一律 PNG dataURL——编辑结果作为新子节点落回画布，不改原节点
+// （非破坏性）。「角度」模式不产出像素，只组装生图指令交由宿主 AI 重绘。
 //
-// CORS：直接 fetch 失敗（跨域擋掉）時 fallback 到 /api/canvas/image-proxy
-// 以同源身份代讀。dataURL 不經網路直接解。
+// CORS：直接 fetch 失败（跨域挡掉）时 fallback 到 /api/canvas/image-proxy
+// 以同源身份代读。dataURL 不经网路直接解。
 
 export interface PixelRect {
   x: number;
@@ -16,13 +16,13 @@ export interface PixelRect {
   height: number;
 }
 
-/** 裁剪框最小邊長（px）：小於這個尺寸的裁剪沒有意義且容易誤觸。 */
+/** 裁剪框最小边长（px）：小于这个尺寸的裁剪没有意义且容易误触。 */
 const MIN_CROP_SIZE = 8;
 
 /**
- * 網格切圖：rows×cols 均分，除不盡的餘數像素全部併給最後一行/列。
- * 保證：所有矩形面積和 = 原圖面積、互不重疊、邊界嚴絲合縫。
- * 輸出順序：先行後列（第 0 行左→右，再第 1 行……）。
+ * 网格切图：rows×cols 均分，除不尽的余数像素全部并给最后一行/列。
+ * 保证：所有矩形面积和 = 原图面积、互不重叠、边界严丝合缝。
+ * 输出顺序：先行后列（第 0 行左→右，再第 1 行……）。
  */
 export function computeSplitRects(width: number, height: number, rows: number, cols: number): PixelRect[] {
   const r = Math.max(1, Math.floor(rows));
@@ -46,8 +46,8 @@ export function computeSplitRects(width: number, height: number, rows: number, c
 }
 
 /**
- * 線位規整：四捨五入為整數像素 → 過濾出開區間 (0, size) 內的值 → 去重 → 升冪。
- * 兩條小數線捨入撞在同一像素時只留一條，杜絕 0 寬/0 高的切片。
+ * 线位规整：四舍五入为整数像素 → 过滤出开区间 (0, size) 内的值 → 去重 → 升幂。
+ * 两条小数线舍入撞在同一像素时只留一条，杜绝 0 宽/0 高的切片。
  */
 function normalizeLines(lines: number[], size: number): number[] {
   const seen = new Set<number>();
@@ -62,9 +62,9 @@ function normalizeLines(lines: number[], size: number): number[] {
 }
 
 /**
- * 由切割線位置算矩形：xs/ys 為 0<坐標<寬/高 的線位置（已排序去重；防禦性地
- * 再做一次規整），輸出 (xs.length+1)*(ys.length+1) 個矩形，覆蓋完整不重疊。
- * 輸出順序與 computeSplitRects 一致：先行後列（第 0 行左→右，再第 1 行……）。
+ * 由切割线位置算矩形：xs/ys 为 0<坐标<宽/高 的线位置（已排序去重；防御性地
+ * 再做一次规整），输出 (xs.length+1)*(ys.length+1) 个矩形，覆盖完整不重叠。
+ * 输出顺序与 computeSplitRects 一致：先行后列（第 0 行左→右，再第 1 行……）。
  */
 export function computeSplitRectsFromLines(width: number, height: number, xs: number[], ys: number[]): PixelRect[] {
   const xEdges = [0, ...normalizeLines(xs, width), width];
@@ -84,8 +84,8 @@ export function computeSplitRectsFromLines(width: number, height: number, xs: nu
 }
 
 /**
- * 在現有線與邊界之間找最大空隙的中點（放新線）；並列最大取靠前者。
- * 全部空隙 < minGap（預設 16px：拖動 clamp 兩側各留 8px 的最小可活動空間）回 null。
+ * 在现有线与边界之间找最大空隙的中点（放新线）；并列最大取靠前者。
+ * 全部空隙 < minGap（预设 16px：拖动 clamp 两侧各留 8px 的最小可活动空间）回 null。
  */
 export function findLineSpot(size: number, lines: number[], minGap = 16): number | null {
   const cuts = [0, ...normalizeLines(lines, size), size];
@@ -101,7 +101,7 @@ export function findLineSpot(size: number, lines: number[], minGap = 16): number
   return best >= minGap && spot !== null ? spot : null;
 }
 
-/** 裁剪框 clamp 到圖片範圍內，寬高至少 MIN_CROP_SIZE（貼邊時往內縮）。 */
+/** 裁剪框 clamp 到图片范围内，宽高至少 MIN_CROP_SIZE（贴边时往内缩）。 */
 export function clampCropRect(rect: PixelRect, imgWidth: number, imgHeight: number): PixelRect {
   const width = Math.min(Math.max(MIN_CROP_SIZE, rect.width), imgWidth);
   const height = Math.min(Math.max(MIN_CROP_SIZE, rect.height), imgHeight);
@@ -110,17 +110,17 @@ export function clampCropRect(rect: PixelRect, imgWidth: number, imgHeight: numb
   return { x, y, width, height };
 }
 
-/** 旋轉後尺寸：90/270 交換寬高，0/180 不變。deg 只認 0|90|180|270。 */
+/** 旋转后尺寸：90/270 交换宽高，0/180 不变。deg 只认 0|90|180|270。 */
 export function rotatedSize(width: number, height: number, deg: number): { width: number; height: number } {
   const d = ((Math.round(deg) % 360) + 360) % 360;
   return d === 90 || d === 270 ? { width: height, height: width } : { width, height };
 }
 
 /**
- * 「角度」模式的中文生圖指令組裝（純字串，可直測）。
- * yawDeg：正=向右、負=向左；pitchDeg：正=俯視、負=仰視；
- * distance：相機距離倍率（>1 拉遠、<1 拉近、=1 不動）。
- * 三者皆為零位時退化為「保持當前相機角度重繪」。
+ * 「角度」模式的中文生图指令组装（纯字串，可直测）。
+ * yawDeg：正=向右、负=向左；pitchDeg：正=俯视、负=仰视；
+ * distance：相机距离倍率（>1 拉远、<1 拉近、=1 不动）。
+ * 三者皆为零位时退化为「保持当前相机角度重绘」。
  */
 export function buildAnglePrompt(yawDeg: number, pitchDeg: number, distance: number): string {
   const yaw = Math.round(yawDeg);
@@ -134,9 +134,9 @@ export function buildAnglePrompt(yawDeg: number, pitchDeg: number, distance: num
   return `将镜头${parts.join("、")}，保持主体与风格一致重绘此图`;
 }
 
-// ─────────────────────────────────────────── 瀏覽器端（依賴 DOM）
+// ─────────────────────────────────────────── 浏览器端（依赖 DOM）
 
-/** 經同源代理的 URL。 */
+/** 经同源代理的 URL。 */
 function proxiedUrl(url: string): string {
   return `/api/canvas/image-proxy?url=${encodeURIComponent(url)}`;
 }
@@ -148,8 +148,8 @@ async function blobFromUrl(url: string): Promise<Blob> {
 }
 
 /**
- * 載圖：dataURL 直解；https 先直接 fetch（同源或帶 CORS 頭的 CDN 走這條），
- * 跨域被擋（fetch throw TypeError）→ fallback 走 /api/canvas/image-proxy。
+ * 载图：dataURL 直解；https 先直接 fetch（同源或带 CORS 头的 CDN 走这条），
+ * 跨域被挡（fetch throw TypeError）→ fallback 走 /api/canvas/image-proxy。
  */
 export async function loadImageBitmap(url: string): Promise<ImageBitmap> {
   let blob: Blob;
@@ -160,7 +160,7 @@ export async function loadImageBitmap(url: string): Promise<ImageBitmap> {
     try {
       blob = await blobFromUrl(url);
     } catch (error) {
-      // TypeError = CORS/網路層被擋；HTTP 錯誤（上面 throw 的 Error）也再給代理一次機會。
+      // TypeError = CORS/网路层被挡；HTTP 错误（上面 throw 的 Error）也再给代理一次机会。
       try {
         blob = await blobFromUrl(proxiedUrl(url));
       } catch {
@@ -186,7 +186,7 @@ function makeCanvas(width: number, height: number): { canvas: HTMLCanvasElement;
   return { canvas, ctx };
 }
 
-/** 裁剪 → PNG dataURL。rect 以原圖像素座標計。 */
+/** 裁剪 → PNG dataURL。rect 以原图像素座标计。 */
 export function cropToDataUrl(bmp: ImageBitmap, rect: PixelRect): string {
   const r = clampCropRect(rect, bmp.width, bmp.height);
   const { canvas, ctx } = makeCanvas(r.width, r.height);
@@ -194,12 +194,12 @@ export function cropToDataUrl(bmp: ImageBitmap, rect: PixelRect): string {
   return canvas.toDataURL("image/png");
 }
 
-/** 網格切圖 → N 張 PNG dataURL（附各自的原圖矩形）。 */
+/** 网格切图 → N 张 PNG dataURL（附各自的原图矩形）。 */
 export function splitToDataUrls(bmp: ImageBitmap, rows: number, cols: number): { dataUrl: string; rect: PixelRect }[] {
   return splitRectsToDataUrls(bmp, computeSplitRects(bmp.width, bmp.height, rows, cols));
 }
 
-/** 自定義矩形切圖：把任意矩形集（如 computeSplitRectsFromLines 的輸出）各切成一張 PNG dataURL。 */
+/** 自定义矩形切图：把任意矩形集（如 computeSplitRectsFromLines 的输出）各切成一张 PNG dataURL。 */
 export function splitRectsToDataUrls(bmp: ImageBitmap, rects: PixelRect[]): { dataUrl: string; rect: PixelRect }[] {
   return rects.map((rect) => {
     const { canvas, ctx } = makeCanvas(rect.width, rect.height);
@@ -208,7 +208,7 @@ export function splitRectsToDataUrls(bmp: ImageBitmap, rects: PixelRect[]): { da
   });
 }
 
-/** 旋轉（0/90/180/270）+ 翻轉（水平/垂直）→ PNG dataURL。 */
+/** 旋转（0/90/180/270）+ 翻转（水平/垂直）→ PNG dataURL。 */
 export function rotateFlipToDataUrl(bmp: ImageBitmap, deg: number, flipH: boolean, flipV: boolean): string {
   const d = ((Math.round(deg) % 360) + 360) % 360;
   const size = rotatedSize(bmp.width, bmp.height, d);
@@ -221,8 +221,8 @@ export function rotateFlipToDataUrl(bmp: ImageBitmap, deg: number, flipH: boolea
 }
 
 /**
- * 抠除：maskCanvas（與原圖同尺寸、被塗區 alpha>0）指定的像素變透明。
- * destination-out：mask 不透明處把底圖挖掉，輸出帶透明通道的 PNG。
+ * 抠除：maskCanvas（与原图同尺寸、被涂区 alpha>0）指定的像素变透明。
+ * destination-out：mask 不透明处把底图挖掉，输出带透明通道的 PNG。
  */
 export function eraseMaskToDataUrl(bmp: ImageBitmap, maskCanvas: HTMLCanvasElement): string {
   const { canvas, ctx } = makeCanvas(bmp.width, bmp.height);
@@ -233,9 +233,9 @@ export function eraseMaskToDataUrl(bmp: ImageBitmap, maskCanvas: HTMLCanvasEleme
 }
 
 /**
- * 塗抹 mask → AI 重繪用的遮罩 PNG：與原圖同尺寸（width×height），
- * 塗抹過的像素（alpha>0，含半透明筆刷與抗鋸齒邊緣）二值化為純白不透明，
- * 其餘完全透明。輸出交由宿主的 inpaint 生成鏈路。
+ * 涂抹 mask → AI 重绘用的遮罩 PNG：与原图同尺寸（width×height），
+ * 涂抹过的像素（alpha>0，含半透明笔刷与抗锯齿边缘）二值化为纯白不透明，
+ * 其余完全透明。输出交由宿主的 inpaint 生成链路。
  */
 export function maskToDataUrl(maskCanvas: HTMLCanvasElement, width: number, height: number): string {
   const { canvas, ctx } = makeCanvas(width, height);

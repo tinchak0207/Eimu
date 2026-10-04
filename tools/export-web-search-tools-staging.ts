@@ -1,27 +1,27 @@
 #!/usr/bin/env -S npx tsx
 //
-// web_search 工具 VPS staging 稿機械導出器（beast 軍團 R1，2026-09-10）。
+// web_search 工具 VPS staging 稿机械导出器（beast 军团 R1，2026-09-10）。
 //
-// 範式同構 tools/export-music-tools-staging.ts（MOE Wave1 片B 的機械導出）：
-// 讀真源全文 → 拼接環境適配（注釋頭 + 白名單改寫）→ 寫 staging 目標檔。
-// 正文與真源逐行等價，白名單 diff 只有注釋頭與 import 行兩類。
+// 范式同构 tools/export-music-tools-staging.ts（MOE Wave1 片B 的机械导出）：
+// 读真源全文 → 拼接环境适配（注释头 + 白名单改写）→ 写 staging 目标档。
+// 正文与真源逐行等价，白名单 diff 只有注释头与 import 行两类。
 //
-// 為什麼導出三檔：src/lib/web-search-tools.ts（真源，零依賴）在 VPS 落位
-// lib/web_search_impl.ts；opencode 形狀包裝器逐行同構 VPS lib/music-tools-adapter.ts
-// （白名單 diff 僅名稱/導入源，範本內嵌於本腳本）；tools/web_search.ts 薄入口
-// 同構 tools/music_gen.ts 模式。
+// 为什么导出三档：src/lib/web-search-tools.ts（真源，零依赖）在 VPS 落位
+// lib/web_search_impl.ts；opencode 形状包装器逐行同构 VPS lib/music-tools-adapter.ts
+// （白名单 diff 仅名称/导入源，范本内嵌于本脚本）；tools/web_search.ts 薄入口
+// 同构 tools/music_gen.ts 模式。
 //
-// staging 落位（VPS 同步落位命令見檔尾）：
-//   staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（純真源 verbatim）
-//   staging/web-search-tools/search_web.ts      → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，註冊名=檔名）
+// staging 落位（VPS 同步落位命令见档尾）：
+//   staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）
+//   staging/web-search-tools/search_web.ts      → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名）
 //
-// 命名域鐵律（2026-09-10 VPS 八輪對照實錘）：opencode 1.18.14 保留 websearch/web_search
-// 工具命名域，自訂工具檔名撞名即被物理移除（ws_probe HAVE / web_search NOT_HAVE，
-// 同檔內容僅檔名不同）；薄入口內聯 wrap 構形（同 R2 vision_analyze.ts）為已驗證可載入形。
+// 命名域铁律（2026-09-10 VPS 八轮对照实锤）：opencode 1.18.14 保留 websearch/web_search
+// 工具命名域，自订工具档名撞名即被物理移除（ws_probe HAVE / web_search NOT_HAVE，
+// 同档内容仅档名不同）；薄入口内联 wrap 构形（同 R2 vision_analyze.ts）为已验证可载入形。
 //
-// 用法（真源改動後必跑）：
+// 用法（真源改动后必跑）：
 //   npx tsx tools/export-web-search-tools-staging.ts
-//   npx tsx tools/export-web-search-tools-staging.ts --check   # 只校驗不寫（CI/驗收用）
+//   npx tsx tools/export-web-search-tools-staging.ts --check   # 只校验不写（CI/验收用）
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -34,55 +34,55 @@ const ADAPTER_TARGET = join(TARGET_DIR, "web_search_tools_adapter.ts");
 const THIN_TARGET = join(TARGET_DIR, "search_web.ts");
 const CHECK = process.argv.includes("--check");
 
-// ── 白名單 diff ①：注釋頭（落位說明 + 禁手改宣言）────────────────────────────
+// ── 白名单 diff ①：注释头（落位说明 + 禁手改宣言）────────────────────────────
 
 const IMPL_HEADER = `/**
- * web_search harness 工具 VPS staging 稿（beast 軍團 R1，2026-09-10 機械導出）。
+ * web_search harness 工具 VPS staging 稿（beast 军团 R1，2026-09-10 机械导出）。
  *
- * 本檔由 tools/export-web-search-tools-staging.ts 從行為真源 src/lib/web-search-tools.ts
- * 機械導出：真源全文逐行保留（工具定義/ok-fail/Tavily 通路/錯誤鐵律/超時全在），
- * 零依賴、無 import，除本注釋頭外與真源逐行等價。
- * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-web-search-tools-staging.ts\` 重導出。
+ * 本档由 tools/export-web-search-tools-staging.ts 从行为真源 src/lib/web-search-tools.ts
+ * 机械导出：真源全文逐行保留（工具定义/ok-fail/Tavily 通路/错误铁律/超时全在），
+ * 零依赖、无 import，除本注释头外与真源逐行等价。
+ * 禁止手改本档——改真源后跑 \`npx tsx tools/export-web-search-tools-staging.ts\` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts
- * env：TAVILY_API_KEY（Tavily Search API 鑑權，寫 /opt/agent-harness/.env 與
- *      .env.opencode 雙檔）。
+ * env：TAVILY_API_KEY（Tavily Search API 鉴权，写 /opt/agent-harness/.env 与
+ *      .env.opencode 双档）。
  */
 
 `;
 
 const ADAPTER_HEADER = `/**
- * web_search 工具 opencode 形狀機械包裝器（beast 軍團 R1，2026-09-10）。
+ * web_search 工具 opencode 形状机械包装器（beast 军团 R1，2026-09-10）。
  *
- * 形狀輪子 = lib/music-tools-adapter.ts 的 wrapMusicTool（逐行同構，白名單
- * diff 僅：名稱/導入源兩處；WebToolContext 契約含 sessionId 透傳欄，與
- * MusicToolContext 同口徑，會話資產落盤本工具暫未用到、欄位機械保留）。
- * 行為真源 = lib/web_search_impl.ts（staging/web-search-tools/web_search_impl.ts 落位稿，
- * 描述符形狀 WebToolDef，描述符 → schema 映射純機械翻譯零二次維護面）。
+ * 形状轮子 = lib/music-tools-adapter.ts 的 wrapMusicTool（逐行同构，白名单
+ * diff 仅：名称/导入源两处；WebToolContext 契约含 sessionId 透传栏，与
+ * MusicToolContext 同口径，会话资产落盘本工具暂未用到、栏位机械保留）。
+ * 行为真源 = lib/web_search_impl.ts（staging/web-search-tools/web_search_impl.ts 落位稿，
+ * 描述符形状 WebToolDef，描述符 → schema 映射纯机械翻译零二次维护面）。
  */
 
 `;
 
 const THIN_HEADER = `/**
- * web_search 薄入口（beast 軍團 R1，2026-09-10；同構 tools/music_gen.ts 模式）。
+ * web_search 薄入口（beast 军团 R1，2026-09-10；同构 tools/music_gen.ts 模式）。
  */
 
 `;
 
-// ── 白名單 diff ②：薄入口內聯 wrap（同構 R2 vision_analyze.ts 已驗證構形，2026-09-10）──
-// 實錘：opencode 1.18.14 對「@opencode-ai/plugin import 放在 lib 二層檔」的工具
-// （music_gen/blender 三件/web_search 兩輪試驗）不掛載工具表；唯一實證可載入的新工具
-// 構形 = 薄入口內直接 import tool() 並內聯 wrap、lib 檔純零依賴 verbatim（vision_analyze
-// HAVE 實錘）。故薄入口帶內聯 wrap，impl 回歸純真源。
+// ── 白名单 diff ②：薄入口内联 wrap（同构 R2 vision_analyze.ts 已验证构形，2026-09-10）──
+// 实锤：opencode 1.18.14 对「@opencode-ai/plugin import 放在 lib 二层档」的工具
+// （music_gen/blender 三件/web_search 两轮试验）不挂载工具表；唯一实证可载入的新工具
+// 构形 = 薄入口内直接 import tool() 并内联 wrap、lib 档纯零依赖 verbatim（vision_analyze
+// HAVE 实锤）。故薄入口带内联 wrap，impl 回归纯真源。
 
 const THIN_TEMPLATE = `import { tool } from "@opencode-ai/plugin/tool"
 import { webSearchTool, type WebToolDef, type WebToolContext } from "../lib/web_search_impl"
 
 /**
- * wrap：描述符 WebToolDef → opencode schema 純機械翻譯（逐行同構
- * lib/music-tools-adapter.ts 的 wrapMusicTool，白名單 diff 僅名稱；
- * WebToolContext 契約含 sessionId 透傳欄，與 MusicToolContext 同口徑）。
- * 禁止手改行為——改真源後重導出並重新落位 web_search_impl.ts 與本檔。
+ * wrap：描述符 WebToolDef → opencode schema 纯机械翻译（逐行同构
+ * lib/music-tools-adapter.ts 的 wrapMusicTool，白名单 diff 仅名称；
+ * WebToolContext 契约含 sessionId 透传栏，与 MusicToolContext 同口径）。
+ * 禁止手改行为——改真源后重导出并重新落位 web_search_impl.ts 与本档。
  */
 function wrapWebTool(def: WebToolDef) {
   return tool({
@@ -114,10 +114,10 @@ function writeFile(targetPath: string, output: string): void {
   if (CHECK) {
     const current = readFileSync(targetPath, "utf8");
     if (current === output) {
-      console.log(`EXPORT_CHECK_OK：${targetPath} 與機械導出產物 byte 等價`);
+      console.log(`EXPORT_CHECK_OK：${targetPath} 与机械导出产物 byte 等价`);
       return;
     }
-    console.error(`EXPORT_CHECK_FAIL：${targetPath} 與機械導出產物不一致（手工漂移或範本變動），重跑不帶 --check 的導出。`);
+    console.error(`EXPORT_CHECK_FAIL：${targetPath} 与机械导出产物不一致（手工漂移或范本变动），重跑不带 --check 的导出。`);
     process.exit(1);
   }
   writeFileSync(targetPath, output);
@@ -126,15 +126,15 @@ function writeFile(targetPath: string, output: string): void {
 
 mkdirSync(TARGET_DIR, { recursive: true });
 
-// web-search-tools.ts：零 import，verbatim（僅加注釋頭；純真源，wrap 內聯在薄入口）。
+// web-search-tools.ts：零 import，verbatim（仅加注释头；纯真源，wrap 内联在薄入口）。
 writeFile(IMPL_TARGET, IMPL_HEADER + readFileSync(SOURCE, "utf8") + "\n");
 
-// 薄入口：範本常量 + 注釋頭。
+// 薄入口：范本常量 + 注释头。
 writeFile(THIN_TARGET, THIN_HEADER + THIN_TEMPLATE);
 
 if (!CHECK) {
-  console.log("驗收：npx tsx tools/export-web-search-tools-staging.ts --check");
-  console.log("VPS 落位（scp 後 sudo install 落位）：");
-  console.log("  staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（純真源 verbatim）");
-  console.log("  staging/web-search-tools/search_web.ts → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，註冊名=檔名 search_web）");
+  console.log("验收：npx tsx tools/export-web-search-tools-staging.ts --check");
+  console.log("VPS 落位（scp 后 sudo install 落位）：");
+  console.log("  staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）");
+  console.log("  staging/web-search-tools/search_web.ts → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名 search_web）");
 }

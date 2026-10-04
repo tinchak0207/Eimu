@@ -1,26 +1,26 @@
-// 歷史種類篩選的 URL 白名單與解析（純推導，零元件／零樣式依賴）。
+// 历史种类筛选的 URL 白名单与解析（纯推导，零元件／零样式依赖）。
 //
-// 為什麼不直接寫在 HistoryClient.tsx：那支檔 `import "@/components/history/history.css"`，
-// node:test 下 tsx 會把 CSS 當 JS 編譯而報錯，導致「合法種類值」這條契約無法做真值斷言。
-// 把推導抽到這裡，元件與測試讀同一份清單；新增一種交付物時只要在
-// /lib/deliverable-kind 註冊表加一行，這裡與 UI 自動跟上，不必再改歷史頁。
+// 为什么不直接写在 HistoryClient.tsx：那支档 `import "@/components/history/history.css"`，
+// node:test 下 tsx 会把 CSS 当 JS 编译而报错，导致「合法种类值」这条契约无法做真值断言。
+// 把推导抽到这里，元件与测试读同一份清单；新增一种交付物时只要在
+// /lib/deliverable-kind 注册表加一行，这里与 UI 自动跟上，不必再改历史页。
 import { DELIVERABLE_KIND_IDS } from "@/lib/deliverable-kind";
 import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/history-types";
 import type { HistoryEntryKind } from "@/lib/history-types";
 
 /**
- * URL 種類參數（PARAM.kind）與種類篩選器認的合法值。
- * 真源＝交付物註冊表（image/video/audio）∪ 非交付種類（workflow），此處逐值投影，不手寫。
+ * URL 种类参数（PARAM.kind）与种类筛选器认的合法值。
+ * 真源＝交付物注册表（image/video/audio）∪ 非交付种类（workflow），此处逐值投影，不手写。
  */
 export const ENTRY_KIND_VALUES: readonly HistoryEntryKind[] = [
   ...DELIVERABLE_KIND_IDS,
   ...NON_DELIVERABLE_ENTRY_KINDS,
 ];
 
-/** 種類檔位：某一具體種類，或「全部」。 */
+/** 种类档位：某一具体种类，或「全部」。 */
 export type EntryKindFilter = HistoryEntryKind | "all";
 
-/** URL 白名單解析：只放行 ENTRY_KIND_VALUES；空字串／非法值一律視為「全部」。 */
+/** URL 白名单解析：只放行 ENTRY_KIND_VALUES；空字串／非法值一律视为「全部」。 */
 export function parseEntryKind(value: string | null): EntryKindFilter {
   const trimmed = value?.trim();
   return trimmed && (ENTRY_KIND_VALUES as readonly string[]).includes(trimmed)

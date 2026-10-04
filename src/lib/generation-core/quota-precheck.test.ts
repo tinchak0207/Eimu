@@ -23,8 +23,8 @@ const CONTROL_PLANE_ENV = {
 };
 
 /**
- * 402 統一契約（暴君 2026-09-28 裁決，破壞性變更已核准）：type 與 code 同碼，
- * 文案逐字（含充值入口）。測試獨立抄寫這份文案，不從實現取——實現改字即爆紅。
+ * 402 统一契约（暴君 2026-09-28 裁决，破坏性变更已核准）：type 与 code 同码，
+ * 文案逐字（含充值入口）。测试独立抄写这份文案，不从实现取——实现改字即爆红。
  */
 const BALANCE_MESSAGE = "余额不足，本次未扣费。充值：https://eimu.dev/pricing";
 
@@ -68,10 +68,10 @@ function neverReader(calls: number[] = []): GatewayUserReader {
 }
 
 /**
- * 預檢 SQL mock：記錄每一次查詢。
- * - `team_member_quota`（成員名冊，按 user_id 判成員）→ memberRows。
- * - 其餘任何查詢 → decoyRows：G1 之後預檢不該再有任何其他查詢，一旦有人把
- *   012 token 映射查詢加回來，queries 會記到、下面的負向斷言即紅。
+ * 预检 SQL mock：记录每一次查询。
+ * - `team_member_quota`（成员名册，按 user_id 判成员）→ memberRows。
+ * - 其余任何查询 → decoyRows：G1 之后预检不该再有任何其他查询，一旦有人把
+ *   012 token 映射查询加回来，queries 会记到、下面的负向断言即红。
  */
 function mockPrecheckSql(memberRows: Row[] = [], decoyRows: Row[] = []) {
   const queries: string[] = [];
@@ -85,7 +85,7 @@ function mockPrecheckSql(memberRows: Row[] = [], decoyRows: Row[] = []) {
   return { sql: tagged, queries };
 }
 
-/** 012 映射表殘留列（表還在、代碼已拔除）：只當「不被查詢」的誘餌。 */
+/** 012 映射表残留列（表还在、代码已拔除）：只当「不被查询」的诱饵。 */
 const LEGACY_TOKEN_MAPPING_ROW = { biz_key_id: "key-1", token_id: 42, token_key_preview: "" };
 
 function memberRow(overrides: Row = {}): Row {
@@ -93,7 +93,7 @@ function memberRow(overrides: Row = {}): Row {
     id: "member-1",
     team_user_id: 115,
     member_key_id: "key-1",
-    // 成員 = new-api 另一個 user（配額桶在 user 層）；成員 key 的 billingUserId 就是它。
+    // 成员 = new-api 另一个 user（配额桶在 user 层）；成员 key 的 billingUserId 就是它。
     member_user_id: 115,
     display_name: "成员A",
     enabled: true,
@@ -101,14 +101,14 @@ function memberRow(overrides: Row = {}): Row {
   };
 }
 
-/** 去註釋後的預檢源碼（負向斷言只看代碼，不看歷史註釋）。 */
+/** 去注释后的预检源码（负向断言只看代码，不看历史注释）。 */
 function precheckCode(): string {
   return readFileSync(join(process.cwd(), "src/lib/generation-core/quota-precheck.ts"), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-// ── 開關解析 ──────────────────────────────────────────────────────────────
+// ── 开关解析 ──────────────────────────────────────────────────────────────
 
 test("surgery switch parses strictly: only literal 1 enables", () => {
   assert.equal(surgeryQuotaPrecheckEnabled({}), false);
@@ -119,7 +119,7 @@ test("surgery switch parses strictly: only literal 1 enables", () => {
   assert.equal(surgeryQuotaPrecheckEnabled({ [SURGERY_QUOTA_PRECHECK_ENV]: " 1 " }), true);
 });
 
-// ── 預檢三態 ──────────────────────────────────────────────────────────────
+// ── 预检三态 ──────────────────────────────────────────────────────────────
 
 test("precheck verdict available when users.quota covers the required amount (boundary inclusive)", async () => {
   const calls: number[] = [];
@@ -166,7 +166,7 @@ test("precheck verdict unreachable on gateway error, missing user, timeout, or u
   assert.equal(timedOut.verdict, "unreachable");
   assert.ok(timedOut.reason.includes("timed out"));
 
-  // user_id=0 是「無從計費」應急通道：fail-closed 且不發請求。
+  // user_id=0 是「无从计费」应急通道：fail-closed 且不发请求。
   const calls: number[] = [];
   const noUser = await checkQuotaAvailable(
     { billingUserId: 0, requiredQuota: 250_000 },
@@ -176,7 +176,7 @@ test("precheck verdict unreachable on gateway error, missing user, timeout, or u
   assert.deepEqual(calls, []);
 });
 
-// ── 閘門兩態 ──────────────────────────────────────────────────────────────
+// ── 闸门两态 ──────────────────────────────────────────────────────────────
 
 test("gate OFF = incumbent path verbatim: original amount, zero extra IO", async () => {
   await withEnv({ [SURGERY_QUOTA_PRECHECK_ENV]: undefined }, async () => {
@@ -206,27 +206,27 @@ test("gate ON with zero-amount submission passes through without IO (TTS today)"
   });
 });
 
-// ── G1（2026-09-23 裁定）：無 token 映射的 key 不再 fail-closed ─────────────
+// ── G1（2026-09-23 裁定）：无 token 映射的 key 不再 fail-closed ─────────────
 //
-// 舊行為：biz_key 無 012 映射 → 503 control_plane_unavailable（fail-closed），
-// 後果是「09-17 之後簽發的任何 key 首次使用必 503」的地雷類別。
-// 新行為：映射依賴整段拔除，無映射的 key 與有映射的 key 逐位同路——只按 user
-// 額度閘（額度足 → 0 額快車道放行；不足 → 既有 402 契約）。
+// 旧行为：biz_key 无 012 映射 → 503 control_plane_unavailable（fail-closed），
+// 后果是「09-17 之后签发的任何 key 首次使用必 503」的地雷类别。
+// 新行为：映射依赖整段拔除，无映射的 key 与有映射的 key 逐位同路——只按 user
+// 额度闸（额度足 → 0 额快车道放行；不足 → 既有 402 契约）。
 
-test("(a) 無 token 映射 + user 額度足 → 放行（0 額快車道，不再 503）", async (t) => {
+test("(a) 无 token 映射 + user 额度足 → 放行（0 额快车道，不再 503）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const errorLog = t.mock.method(console, "error", () => {});
     t.mock.method(console, "log", () => {});
     const calls: number[] = [];
-    // decoyRows 擺著 012 映射列：若預檢還查映射表就會拿到它，本測試即暴露。
+    // decoyRows 摆著 012 映射列：若预检还查映射表就会拿到它，本测试即暴露。
     const { sql, queries } = mockPrecheckSql([], [LEGACY_TOKEN_MAPPING_ROW]);
     const decision = await enforceQuotaGate(
       { bizKeyId: "key-without-mapping", billingUserId: 87, baseBillingAmount: 250_000 },
       { fetchUser: userReader(582_377_145, calls), sql },
     );
-    assert.deepEqual(decision, { ok: true, billingAmount: 0 }, "無映射的 key 必須照常走 user 額度並放行");
-    assert.deepEqual(calls, [87], "必須真的讀了 user 額度（舊行為是不發請求直接 503）");
-    assert.equal(queries.length, 1, "預檢只剩成員名冊一跳");
+    assert.deepEqual(decision, { ok: true, billingAmount: 0 }, "无映射的 key 必须照常走 user 额度并放行");
+    assert.deepEqual(calls, [87], "必须真的读了 user 额度（旧行为是不发请求直接 503）");
+    assert.equal(queries.length, 1, "预检只剩成员名册一跳");
     assert.ok(queries[0].includes("team_member_quota"));
     assert.ok(queries.every((q) => !q.includes("biz_key_newapi_token")), "不得再查 012 映射表");
     const logged = errorLog.mock.calls.map((call) => call.arguments.join(" ")).join("\n");
@@ -235,7 +235,7 @@ test("(a) 無 token 映射 + user 額度足 → 放行（0 額快車道，不再
   });
 });
 
-test("(b) 無 token 映射 + user 額度不足 → 402 統一契約（文案逐字）", async (t) => {
+test("(b) 无 token 映射 + user 额度不足 → 402 统一契约（文案逐字）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const { sql } = mockPrecheckSql([], [LEGACY_TOKEN_MAPPING_ROW]);
@@ -248,16 +248,16 @@ test("(b) 無 token 映射 + user 額度不足 → 402 統一契約（文案逐�
       assert.equal(decision.status, 402);
       assert.equal(decision.type, "insufficient_balance");
       assert.equal(decision.code, "insufficient_balance");
-      assert.equal(decision.message, BALANCE_MESSAGE, "402 文案逐字（統一契約）");
+      assert.equal(decision.message, BALANCE_MESSAGE, "402 文案逐字（统一契约）");
     }
   });
 });
 
-test("(c) 有映射的 key 行為逐位不變（舊三態回歸：放行/402/回落）", async (t) => {
+test("(c) 有映射的 key 行为逐位不变（旧三态回归：放行/402/回落）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     t.mock.method(console, "error", () => {});
-    // 「有映射」在解耦後只剩下 DB 有那一列的事實；預檢決策必須與無映射逐位相等。
+    // 「有映射」在解耦后只剩下 DB 有那一列的事实；预检决策必须与无映射逐位相等。
     const run = async (decoy: Row[]) => {
       const { sql, queries } = mockPrecheckSql([], decoy);
       const pass = await enforceQuotaGate(
@@ -279,13 +279,13 @@ test("(c) 有映射的 key 行為逐位不變（舊三態回歸：放行/402/回
     const mapped = await run([LEGACY_TOKEN_MAPPING_ROW]);
 
     assert.deepEqual(unmapped.pass, { ok: true, billingAmount: 0 });
-    assert.deepEqual(mapped.pass, unmapped.pass, "有映射 vs 無映射：放行面逐位相等");
-    assert.deepEqual(mapped.short, unmapped.short, "有映射 vs 無映射：402 面逐位相等");
+    assert.deepEqual(mapped.pass, unmapped.pass, "有映射 vs 无映射：放行面逐位相等");
+    assert.deepEqual(mapped.short, unmapped.short, "有映射 vs 无映射：402 面逐位相等");
     assert.deepEqual(mapped.short.ok === false ? mapped.short.message : "", BALANCE_MESSAGE);
-    assert.deepEqual(mapped.down, unmapped.down, "有映射 vs 無映射：回落面逐位相等");
+    assert.deepEqual(mapped.down, unmapped.down, "有映射 vs 无映射：回落面逐位相等");
     assert.deepEqual(mapped.down, { ok: true, billingAmount: 250_000 });
     for (const { queries } of [unmapped, mapped]) {
-      assert.ok(queries.every((q) => !q.includes("biz_key_newapi_token")), "任何一態都不得查映射表");
+      assert.ok(queries.every((q) => !q.includes("biz_key_newapi_token")), "任何一态都不得查映射表");
     }
   });
 });
@@ -299,7 +299,7 @@ test("gate ON with sufficient quota skips the blocking reserve (billingAmount = 
       { fetchUser: userReader(582_377_145), sql },
     );
     assert.deepEqual(decision, { ok: true, billingAmount: 0 });
-    // 一跳：成員名冊（未登記成員 = 不受成員配額執法）；映射表已不再被查。
+    // 一跳：成员名册（未登记成员 = 不受成员配额执法）；映射表已不再被查。
     assert.equal(queries.length, 1);
     assert.ok(queries[0].includes("team_member_quota"));
   });
@@ -347,13 +347,13 @@ test("gate ON with unusable billing user (user_id=0) falls back without a gatewa
     );
     assert.deepEqual(decision, { ok: true, billingAmount: 250_000 });
     assert.deepEqual(calls, []);
-    assert.equal(queries.length, 1, "只剩成員名冊一跳");
+    assert.equal(queries.length, 1, "只剩成员名册一跳");
   });
 });
 
-// ── (e) 負向釘：映射 fail-closed 路徑與映射模組不得回來 ────────────────────
+// ── (e) 负向钉：映射 fail-closed 路径与映射模组不得回来 ────────────────────
 
-test("(e) 負向釘：預檢源碼不得再有 012 映射 fail-closed 路徑，映射模組檔已刪", () => {
+test("(e) 负向钉：预检源码不得再有 012 映射 fail-closed 路径，映射模组档已删", () => {
   const source = precheckCode();
   for (const forbidden of [
     "biz_key_newapi_token",
@@ -363,22 +363,22 @@ test("(e) 負向釘：預檢源碼不得再有 012 映射 fail-closed 路徑，�
     "migration 012 contract",
     "tokenId",
   ]) {
-    assert.ok(!source.includes(forbidden), `預檢代碼不得再出現 ${forbidden}`);
+    assert.ok(!source.includes(forbidden), `预检代码不得再出现 ${forbidden}`);
   }
-  // 503 control_plane_unavailable 只准留在受管成員分支（B1-v2 不變量），且必須在
-  // 成員判定之後 —— 映射面不得再有 fail-closed 出口（舊出口在成員判定之前）。
+  // 503 control_plane_unavailable 只准留在受管成员分支（B1-v2 不变量），且必须在
+  // 成员判定之后 —— 映射面不得再有 fail-closed 出口（旧出口在成员判定之前）。
   const memberLookupAt = source.indexOf("?? findMemberByUserId)(input.billingUserId");
-  assert.ok(memberLookupAt > 0, "應能定位成員判定呼叫點");
+  assert.ok(memberLookupAt > 0, "应能定位成员判定呼叫点");
   const exits = [...source.matchAll(/\.\.\.CONTROL_PLANE_UNAVAILABLE/g)].map((m) => m.index ?? -1);
-  assert.ok(exits.length >= 1, "成員分支的 503 fail-closed 必須保留（B1-v2 不變量）");
-  for (const at of exits) assert.ok(at > memberLookupAt, "503 出口必須在成員判定之後（映射面不得再有）");
-  // 映射模組本體已刪（DB 表與 migration 012 只作歷史留存）。
+  assert.ok(exits.length >= 1, "成员分支的 503 fail-closed 必须保留（B1-v2 不变量）");
+  for (const at of exits) assert.ok(at > memberLookupAt, "503 出口必须在成员判定之后（映射面不得再有）");
+  // 映射模组本体已删（DB 表与 migration 012 只作历史留存）。
   assert.throws(() => readFileSync(join(process.cwd(), "src/lib/generation-core/biz-key-token-mapping.ts"), "utf8"));
 });
 
-// ── 成員點數配額（REQ-B1，user 層）：消耗面先判成員 user 額度再走既有計費戶檢查 ──
+// ── 成员点数配额（REQ-B1，user 层）：消耗面先判成员 user 额度再走既有计费户检查 ──
 
-/** 成員 user 配額桶的權威讀數（new-api users.quota / used_quota）。 */
+/** 成员 user 配额桶的权威读数（new-api users.quota / used_quota）。 */
 function memberQuotaReader(
   snapshot: { granted: number; used: number; remaining: number; unlimited?: boolean } | null,
   calls: number[] = [],
@@ -398,7 +398,7 @@ function memberQuotaReader(
   };
 }
 
-test("成員額度不足 → 402 契約碼不變，文案與主帳不足明確區分", async (t) => {
+test("成员额度不足 → 402 契约码不变，文案与主帐不足明确区分", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const order: string[] = [];
@@ -407,7 +407,7 @@ test("成員額度不足 → 402 契約碼不變，文案與主帳不足明確�
     const decision = await enforceQuotaGate(
       { bizKeyId: "key-1", billingUserId: 115, baseBillingAmount: 250_000 },
       {
-        // 上游有回應，但成員 user 那桶只剩 100_000 —— 必須以「成員額度不足」拒單。
+        // 上游有回应，但成员 user 那桶只剩 100_000 —— 必须以「成员额度不足」拒单。
         fetchUser: userReader(582_377_145),
         sql,
         readMemberQuota: memberQuotaReader(
@@ -420,18 +420,18 @@ test("成員額度不足 → 402 契約碼不變，文案與主帳不足明確�
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 402);
-      // 碼統一（客戶端只認一套 402），文案保留成員專屬指引——不叫成員去充值頁。
+      // 码统一（客户端只认一套 402），文案保留成员专属指引——不叫成员去充值页。
       assert.equal(decision.type, "insufficient_balance");
       assert.equal(decision.code, "insufficient_balance");
       assert.equal(decision.message, MEMBER_QUOTA_INSUFFICIENT_MESSAGE);
       assert.notEqual(decision.message, BALANCE_MESSAGE);
     }
-    assert.deepEqual(order, ["member"], "成員額度不足時必須已判過成員額度");
-    assert.deepEqual(calls, [115], "成員讀數按 user_id 讀（成員 key 的計費 user）");
+    assert.deepEqual(order, ["member"], "成员额度不足时必须已判过成员额度");
+    assert.deepEqual(calls, [115], "成员读数按 user_id 读（成员 key 的计费 user）");
   });
 });
 
-test("先判成員額度再走既有計費戶檢查：次序可證，且計費戶不足用既有文案", async (t) => {
+test("先判成员额度再走既有计费户检查：次序可证，且计费户不足用既有文案", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const order: string[] = [];
@@ -440,7 +440,7 @@ test("先判成員額度再走既有計費戶檢查：次序可證，且計費�
     const decision = await enforceQuotaGate(
       { bizKeyId: "key-1", billingUserId: 115, baseBillingAmount: 250_000 },
       {
-        // 成員桶充足（剩 500 幣），計費戶只剩 0.2 幣 → 既有「餘額不足」文案。
+        // 成员桶充足（剩 500 币），计费户只剩 0.2 币 → 既有「余额不足」文案。
         fetchUser: (async (userId: number) => {
           calls.push(userId);
           order.push("billing");
@@ -458,14 +458,14 @@ test("先判成員額度再走既有計費戶檢查：次序可證，且計費�
     if (!decision.ok) {
       assert.equal(decision.status, 402);
       assert.equal(decision.code, "insufficient_balance");
-      assert.equal(decision.message, BALANCE_MESSAGE, "主帳不足 = 統一契約文案，逐字");
+      assert.equal(decision.message, BALANCE_MESSAGE, "主帐不足 = 统一契约文案，逐字");
     }
-    assert.deepEqual(order, ["member", "billing"], "先成員額度、後既有計費戶檢查");
+    assert.deepEqual(order, ["member", "billing"], "先成员额度、后既有计费户检查");
     assert.deepEqual(calls, [115]);
   });
 });
 
-test("成員額度與計費戶都充足 → 0 額快車道（billingAmount = 0）", async (t) => {
+test("成员额度与计费户都充足 → 0 额快车道（billingAmount = 0）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const { sql } = mockPrecheckSql([memberRow()]);
@@ -481,7 +481,7 @@ test("成員額度與計費戶都充足 → 0 額快車道（billingAmount = 0�
   });
 });
 
-test("受管成員的額度讀不到／unlimited → 503 fail-closed，不靜默放行", async (t) => {
+test("受管成员的额度读不到／unlimited → 503 fail-closed，不静默放行", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const errorLog = t.mock.method(console, "error", () => {});
     const { sql } = mockPrecheckSql([memberRow()]);
@@ -505,7 +505,7 @@ test("受管成員的額度讀不到／unlimited → 503 fail-closed，不靜默
   });
 });
 
-test("成員額度被停用 → 402（同契約碼，文案指向團隊主帳號）", async (t) => {
+test("成员额度被停用 → 402（同契约码，文案指向团队主帐号）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const { sql } = mockPrecheckSql([memberRow({ enabled: false })]);
@@ -526,7 +526,7 @@ test("成員額度被停用 → 402（同契約碼，文案指向團隊主帳號
   });
 });
 
-test("成員額度讀數帶超時：慢上游不卡任務路徑，超時即 fail-closed", async (t) => {
+test("成员额度读数带超时：慢上游不卡任务路径，超时即 fail-closed", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const errorLog = t.mock.method(console, "error", () => {});
     const { sql } = mockPrecheckSql([memberRow()]);
@@ -551,7 +551,7 @@ test("成員額度讀數帶超時：慢上游不卡任務路徑，超時即 fail
   });
 });
 
-test("未登記為成員的 key 完全不讀成員額度（零回歸：行為與手術前逐位等價）", async (t) => {
+test("未登记为成员的 key 完全不读成员额度（零回归：行为与手术前逐位等价）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const memberCalls: number[] = [];
@@ -565,6 +565,6 @@ test("未登記為成員的 key 完全不讀成員額度（零回歸：行為與
       },
     );
     assert.deepEqual(decision, { ok: true, billingAmount: 0 });
-    assert.deepEqual(memberCalls, [], "非成員 key 不得新增任何成員額度讀取");
+    assert.deepEqual(memberCalls, [], "非成员 key 不得新增任何成员额度读取");
   });
 });

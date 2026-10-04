@@ -16,7 +16,7 @@ export interface HistoryFilterBarProps {
   onExportCsv: () => void;
   onExportJson: () => void;
   onChange: (query: HistoryQuery) => void;
-  /** 父级定位/伸縮（桌面端工具栏一行内的 order/flex/对齐）。 */
+  /** 父级定位/伸缩（桌面端工具栏一行内的 order/flex/对齐）。 */
   className?: string;
 }
 
@@ -74,11 +74,11 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
   }, [keyword, query, onChange]);
 
   /**
-   * 交付物種類 → 圖示。註冊表（/lib/deliverable-kind）是零依賴純函數檔，不帶 React 節點，
-   * 故映射留在這裡；label 一律取註冊表（spec.label），不在本檔手寫。
+   * 交付物种类 → 图示。注册表（/lib/deliverable-kind）是零依赖纯函数档，不带 React 节点，
+   * 故映射留在这里；label 一律取注册表（spec.label），不在本档手写。
    *
-   * icon 映射在渲染期建立（不放在模組頂層）：node:test 走 classic runtime，
-   * 頂層 JSX 會在本檔被 import 時就執行，早於測試補的全局 React 樁而報
+   * icon 映射在渲染期建立（不放在模组顶层）：node:test 走 classic runtime，
+   * 顶层 JSX 会在本档被 import 时就执行，早于测试补的全局 React 桩而报
    * "React is not defined"。
    */
   const kindIcons: Partial<Record<DeliverableKind, React.ReactNode>> = {
@@ -86,9 +86,9 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
     video: <Video className="h-3.5 w-3.5" />,
     audio: <Music className="h-3.5 w-3.5" />,
   };
-  /** 新交付物種類尚未補圖示時的兜底：仍要渲染該 chip，不得略過、不得崩。 */
+  /** 新交付物种类尚未补图示时的兜底：仍要渲染该 chip，不得略过、不得崩。 */
   const fallbackKindIcon = <Boxes className="h-3.5 w-3.5" />;
-  /** 非交付種類（workflow）的 chip 文案與圖示；交付物文案由註冊表提供，只有這裡需手寫。 */
+  /** 非交付种类（workflow）的 chip 文案与图示；交付物文案由注册表提供，只有这里需手写。 */
   const nonDeliverableLabels: Record<NonDeliverableEntryKind, string> = { workflow: "工作流" };
   const nonDeliverableIcons: Record<NonDeliverableEntryKind, React.ReactNode> = {
     workflow: <Workflow className="h-3.5 w-3.5" />,

@@ -9,8 +9,8 @@ const CHECKIN_DISABLED_MESSAGE = "签到功能未启用";
 const CHECKIN_REWARD_MIN_QUOTA = 1 * QUOTA_PER_COIN;
 const CHECKIN_REWARD_MAX_QUOTA = 3 * QUOTA_PER_COIN;
 const ENABLE_CHECKIN_COOLDOWN_MS = 10 * 60 * 1000;
-// 控面外呼硬超時：簽到鏈路串行打 /api/user/checkin 與 /api/option/，任何一跳
-// hang 死都會佔滿函數時限；控面正常應答遠低於 5s，超時即快速失敗。
+// 控面外呼硬超时：签到链路串行打 /api/user/checkin 与 /api/option/，任何一跳
+// hang 死都会占满函数时限；控面正常应答远低于 5s，超时即快速失败。
 const CHECKIN_UPSTREAM_TIMEOUT_MS = 5_000;
 
 // 自动开启签到失败后的冷却时间戳：10 分钟内不再重试，避免每次签到查询都对网关连发注定失败的请求。

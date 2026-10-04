@@ -1,10 +1,10 @@
-// `src/lib/openai-compat/generation.ts` 的**橋接行為斷言**（純單元，注入時鐘與替身）。
+// `src/lib/openai-compat/generation.ts` 的**桥接行为断言**（纯单元，注入时钟与替身）。
 //
-// 驗四件事：
-//   ① 輪詢只在「任務終態」或「截止時間」結束，瞬斷（5xx/非 2xx）不得被當終態；
-//   ② 截止時間到 → 回 unsettled（呼叫端才可能回 504，且任務未被取消）；
-//   ③ 取件優先走既有 blob 後端，後端不可用才 fallback 到 HTTP（兩條路都真的讀到位元組）；
-//   ④ 等待上限的環境旋鈕不吃非法值（0/負/NaN 不得把等待變成 0）。
+// 验四件事：
+//   ① 轮询只在「任务终态」或「截止时间」结束，瞬断（5xx/非 2xx）不得被当终态；
+//   ② 截止时间到 → 回 unsettled（呼叫端才可能回 504，且任务未被取消）；
+//   ③ 取件优先走既有 blob 后端，后端不可用才 fallback 到 HTTP（两条路都真的读到位元组）；
+//   ④ 等待上限的环境旋钮不吃非法值（0/负/NaN 不得把等待变成 0）。
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -112,7 +112,7 @@ test("提交：透传 biz key 与幂等键，回 task id", async () => {
   });
 });
 
-test("提交：上游 4xx 的三欄原樣透傳（不重新分类）", async () => {
+test("提交：上游 4xx 的三栏原样透传（不重新分类）", async () => {
   const fetcher = (async () =>
     Response.json(
       {

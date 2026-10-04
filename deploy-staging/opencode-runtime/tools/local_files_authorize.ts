@@ -1,17 +1,17 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import { ok, fail } from "../lib/client";
 
-// local_files_authorize — 本機檔案橋（W6）的**授權落地工具**。
+// local_files_authorize — 本机档案桥（W6）的**授权落地工具**。
 //
-// 當 local_files 回傳 action_required=authorize_local_files（error.code=needs_authorization）
-// 時，模型必須先把三段式選項逐字列給使用者、等他**明確選一個**，才能呼叫本工具把規則落下去。
-// 本工具只做一件事：把使用者選定的 {scope, root} 原樣 POST 給閘道 /internal/device/authorize。
-// 不得自行決定 scope，尤其不得未經同意升級成 permanent。
+// 当 local_files 回传 action_required=authorize_local_files（error.code=needs_authorization）
+// 时，模型必须先把三段式选项逐字列给使用者、等他**明确选一个**，才能呼叫本工具把规则落下去。
+// 本工具只做一件事：把使用者选定的 {scope, root} 原样 POST 给闸道 /internal/device/authorize。
+// 不得自行决定 scope，尤其不得未经同意升级成 permanent。
 //
-// 契約（凍結，與 gateway device-bridge.ts 一對一）：
+// 契约（冻结，与 gateway device-bridge.ts 一对一）：
 //   POST /internal/device/authorize?session_id=…  body {scope, root, tool?}
 //   200: { ok: true, applied: {scope, root}, rules: [...], persist_on_device?: true }
-//   錯誤: { ok:false, error:{ code, message } }  code ∈ bad_request|session_unknown|
+//   错误: { ok:false, error:{ code, message } }  code ∈ bad_request|session_unknown|
 //         root_not_absolute|root_too_broad|denylisted_root
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
@@ -19,8 +19,8 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 const SCOPES = ["once", "session", "permanent"] as const;
 
 /**
- * 授權端點錯誤碼 → 面向使用者的繁中引導語。
- * 其餘碼（internal_error 等）原樣帶出閘道 message。
+ * 授权端点错误码 → 面向使用者的繁中引导语。
+ * 其余码（internal_error 等）原样带出闸道 message。
  */
 const GUIDANCE: Record<string, string> = {
   bad_request: "授权请求格式不正确，请确认 scope 与 root 后再试。",

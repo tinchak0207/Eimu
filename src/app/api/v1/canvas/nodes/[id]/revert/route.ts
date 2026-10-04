@@ -1,18 +1,18 @@
-// 節點版本回退（B 端 API key 版）：POST /api/v1/canvas/nodes/[id]/revert
+// 节点版本回退（B 端 API key 版）：POST /api/v1/canvas/nodes/[id]/revert
 // body: { projectId: string; version?: number }
-//   - version 有值＝回退到該版；省略＝回退到「上一版」。
+//   - version 有值＝回退到该版；省略＝回退到「上一版」。
 //
-// 這條是站內 `/api/canvas/nodes/[id]/revert`（user session 鑑權）的 B 端孿生兄弟：
-// 目的是讓 MCP 的 workflow_rollback（B 端 key 身分）能真的跑通，而不必偽造 session。
-// 兩件事刻意逐字沿用既有輪子，這裡不另寫一套：
-//   ① 鑑權輪子＝/api/v1/workflow/compile 的 `authenticateBizApiKey`＋`readBearerToken`（B key 真源）。
-//   ② 套用輪子＝站內 revert route 的同一組 `node-versions` 函式（append/apply/create/list/select）
-//      與 `mutateCanvasProject`——語義（只還原 title＋metadata、座標不動、回退本身也落一版）逐字相同。
+// 这条是站内 `/api/canvas/nodes/[id]/revert`（user session 鉴权）的 B 端孪生兄弟：
+// 目的是让 MCP 的 workflow_rollback（B 端 key 身分）能真的跑通，而不必伪造 session。
+// 两件事刻意逐字沿用既有轮子，这里不另写一套：
+//   ① 鉴权轮子＝/api/v1/workflow/compile 的 `authenticateBizApiKey`＋`readBearerToken`（B key 真源）。
+//   ② 套用轮子＝站内 revert route 的同一组 `node-versions` 函式（append/apply/create/list/select）
+//      与 `mutateCanvasProject`——语义（只还原 title＋metadata、座标不动、回退本身也落一版）逐字相同。
 //
-// **owner 校驗**：`mutateCanvasProject(auth.key.userId, projectId, …)`——畫布專案儲存以
-// `canvas/<userId>/…` 為命名空間，別人的 projectId 在本 user 命名空間裡根本不存在，
-// 因此「A 用戶的 key 改不到 B 用戶的畫布」是**結構性**成立的（找不到即 404，不區分
-// 「不存在/無權」以防枚舉）。B 端 key 只代表「允許的服務身分」，不代表可跨越 user 邊界。
+// **owner 校验**：`mutateCanvasProject(auth.key.userId, projectId, …)`——画布专案储存以
+// `canvas/<userId>/…` 为命名空间，别人的 projectId 在本 user 命名空间里根本不存在，
+// 因此「A 用户的 key 改不到 B 用户的画布」是**结构性**成立的（找不到即 404，不区分
+// 「不存在/无权」以防枚举）。B 端 key 只代表「允许的服务身分」，不代表可跨越 user 边界。
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { readBearerToken } from "@/lib/biz-api-keys";
@@ -28,9 +28,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** Next 15 的動態段是異步的，params 必須 await。 */
+/** Next 15 的动态段是异步的，params 必须 await。 */
 type RouteContext = { params: Promise<{ id: string }> };
 
 function fail(status: number, message: string, code: string): NextResponse {
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
   }
   const projectId = typeof body?.projectId === "string" ? body.projectId : "";
   if (!id || !projectId) return fail(400, "缺少节点 id 或 projectId", "invalid_payload");
-  // version 可省略（回上一版）；有值必須是正整數。
+  // version 可省略（回上一版）；有值必须是正整数。
   const version =
     body?.version === undefined
       ? undefined
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
   if (version === null) return fail(400, "version 必须是从 1 起的整数", "invalid_version");
 
   try {
-    // owner 命名空間＝auth.key.userId；跨 owner 的 projectId 在此找不到 → null → 404。
+    // owner 命名空间＝auth.key.userId；跨 owner 的 projectId 在此找不到 → null → 404。
     const updated = await mutateCanvasProject(auth.key.userId, projectId, (project) => {
       const node = project.nodes.find((n) => n.id === id);
       if (!node) return null;

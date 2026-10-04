@@ -82,10 +82,10 @@ export function enhancePrompt(userPrompt: string, preset: StylePreset): string {
  */
 export function suggestPreset(prompt: string): StylePreset {
   const lower = prompt.toLowerCase();
-  if (/商品|產品|包裝|瓶|盒/.test(lower)) return "product";
-  if (/動漫|卡通|二次元|插畫/.test(lower)) return "anime";
-  if (/海報|宣傳|廣告|banner/.test(lower)) return "poster";
-  if (/街拍|街頭|城市|urban/.test(lower)) return "street";
-  if (/水彩|手繪|插圖/.test(lower)) return "watercolor";
+  if (/商品|产品|包装|瓶|盒/.test(lower)) return "product";
+  if (/动漫|卡通|二次元|插画/.test(lower)) return "anime";
+  if (/海报|宣传|广告|banner/.test(lower)) return "poster";
+  if (/街拍|街头|城市|urban/.test(lower)) return "street";
+  if (/水彩|手绘|插图/.test(lower)) return "watercolor";
   return "realistic";
 }

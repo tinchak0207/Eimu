@@ -5,13 +5,13 @@ import { Check, Loader2, RotateCw } from "lucide-react";
 import type { WechatScanLogin } from "@/hooks/use-wechat-scan-login";
 
 /**
- * 微信掃碼即登入的二維碼面（/wechat-login 頁與宣傳片結尾登入小框共用）。
- * 不再有驗證碼：掃到就登入（2026-09-30 暴君裁定）。
+ * 微信扫码即登入的二维码面（/wechat-login 页与宣传片结尾登入小框共用）。
+ * 不再有验证码：扫到就登入（2026-09-30 暴君裁定）。
  *
- * 提示語按「人手上是什麼」分三種——同一支手機沒法用微信掃自己螢幕上的碼：
- * - 微信內建瀏覽器：長按二維碼 → 識別圖中二維碼（微信原生支援）；
- * - 其他手機瀏覽器：長按存圖 → 微信扫一扫 → 右上角相冊選它；
- * - 電腦：手機微信掃一掃。
+ * 提示语按「人手上是什么」分三种——同一支手机没法用微信扫自己萤幕上的码：
+ * - 微信内建浏览器：长按二维码 → 识别图中二维码（微信原生支援）；
+ * - 其他手机浏览器：长按存图 → 微信扫一扫 → 右上角相册选它；
+ * - 电脑：手机微信扫一扫。
  */
 
 type Device = "wechat" | "mobile" | "desktop";
@@ -43,7 +43,7 @@ export function WechatScanQr({ login, size = 200 }: { login: WechatScanLogin; si
         style={{ width: size, height: size }}
       >
         {phase === "waiting" && qrUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- 微信 showqrcode 外鏈圖，長按要能存圖/識別
+          // eslint-disable-next-line @next/next/no-img-element -- 微信 showqrcode 外链图，长按要能存图/识别
           <img src={qrUrl} alt="微信扫码登录二维码" width={size} height={size} className="h-full w-full" />
         ) : phase === "done" ? (
           <div className="flex flex-col items-center gap-2 text-[#07C160]">

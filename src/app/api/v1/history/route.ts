@@ -14,7 +14,7 @@ import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import type { GenerationJobStatus } from "@/lib/generation-core/types";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function errorResponse(status: number, message: string, code: string, traceId: string, key?: BizApiKey) {
   let response: Response = NextResponse.json(
@@ -40,9 +40,9 @@ const HISTORY_STATUSES: GenerationJobStatus[] = [
 ];
 
 /**
- * GET /v1/history — 該金鑰最近的任務歷史（含狀態、模型、時間），支援 limit / offset。
+ * GET /v1/history — 该金钥最近的任务历史（含状态、模型、时间），支援 limit / offset。
  *
- * 只回 auth.key 對應 tenant 的 job；查不到 DB 時回空清單（診斷面，不 500）。
+ * 只回 auth.key 对应 tenant 的 job；查不到 DB 时回空清单（诊断面，不 500）。
  */
 export async function GET(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
       ? statuses
       : null;
   if (rawStatus && !filtered) {
-    return errorResponse(400, `status 需為以下其一：${HISTORY_STATUSES.join("、")}。`, "invalid_status", traceId, auth.key);
+    return errorResponse(400, `status 需为以下其一：${HISTORY_STATUSES.join("、")}。`, "invalid_status", traceId, auth.key);
   }
 
   const { limit, offset } = clampPagination(url.searchParams.get("limit"), url.searchParams.get("offset"));

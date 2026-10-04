@@ -1,4 +1,4 @@
-// Image Studio HTTP client —— 純函式 + 可注入 fetch，供 MCP server 主體與 smoke 測試共用。
+// Image Studio HTTP client —— 纯函式 + 可注入 fetch，供 MCP server 主体与 smoke 测试共用。
 
 export interface TaskArtifact {
   id?: string;
@@ -51,13 +51,13 @@ export async function requestJson(
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new Error(`上游回傳非 JSON 回應: ${text.slice(0, 300)}`);
+    throw new Error(`上游回传非 JSON 回应: ${text.slice(0, 300)}`);
   }
 }
 
 export function taskOf(payload: unknown): TaskResponse {
   if (!isJsonObject(payload) || typeof payload.id !== "string") {
-    throw new Error("回應缺少 task 物件");
+    throw new Error("回应缺少 task 物件");
   }
   return payload as unknown as TaskResponse;
 }
@@ -100,7 +100,7 @@ export async function pollTaskUntilDone(
       return task;
     }
     if (Date.now() >= deadline) {
-      throw new Error(`等待 ${pathPrefix}/${taskId} 超過 ${pollTimeoutMs}ms 仍未終結（目前 ${task.status}）`);
+      throw new Error(`等待 ${pathPrefix}/${taskId} 超过 ${pollTimeoutMs}ms 仍未终结（目前 ${task.status}）`);
     }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
@@ -115,8 +115,8 @@ export interface GenerationOutcome {
 }
 
 /**
- * 送出生成請求並輪詢至終結，回傳 MCP tool 可序列化的 outcome。
- * 路徑為 /images/generations 或 /videos/generations（不含 /api/v1 前綴）。
+ * 送出生成请求并轮询至终结，回传 MCP tool 可序列化的 outcome。
+ * 路径为 /images/generations 或 /videos/generations（不含 /api/v1 前缀）。
  */
 export async function generateAndWait(
   config: ClientConfig,
@@ -150,7 +150,7 @@ export async function generateAndWait(
   };
 }
 
-/** 直接把 outcome 收斂成 MCP 的 tool 回傳。失敗時標 isError。 */
+/** 直接把 outcome 收敛成 MCP 的 tool 回传。失败时标 isError。 */
 export function toolResult(outcome: GenerationOutcome): {
   content: { type: "text"; text: string }[];
   isError?: boolean;

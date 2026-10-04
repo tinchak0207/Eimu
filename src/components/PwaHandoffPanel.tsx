@@ -3,7 +3,7 @@
 // PWA standalone GitHub 登录交接面板：在常用浏览器完成授权，本面板轮询
 // 一次性 ticket，delivered 后 claim 领回会话（服务端 Set-Cookie 种登录态）。
 // 仅 standalone PWA 内由登录入口触发，不影响普通浏览器登录链路。
-// 轮询/claim 状态机已抽到 usePwaHandoffClaim（2026-10-04），本檔只畫界面。
+// 轮询/claim 状态机已抽到 usePwaHandoffClaim（2026-10-04），本档只画界面。
 
 import { useToast } from "@/hooks/use-toast";
 import { usePwaHandoffClaim } from "@/hooks/use-pwa-handoff-claim";

@@ -11,7 +11,7 @@ const source = readFileSync(
   "utf8",
 );
 
-/** 去掉註解後再斷言，避免註解裡引用的反例把測試帶跑。 */
+/** 去掉注解后再断言，避免注解里引用的反例把测试带跑。 */
 function code(): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")

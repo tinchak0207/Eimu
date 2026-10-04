@@ -1,18 +1,18 @@
 "use client";
 
-// CreationFlowPanel —— 作品 / 劇集面板（2026-09-16 G2）。
+// CreationFlowPanel —— 作品 / 剧集面板（2026-09-16 G2）。
 //
-// 修的是 PRD「刀 1 全鏈生效定義」的第 2 環：「canvas 面板可見」。
-// 資料鏈完全復用既有出口，本檔不新增任何型別或儲存：
-//   hook `projectType` / `currentStep` / `episodes`（刀 1 三欄，唯一寫入口 setProjectMeta）
-//   ＋ `summarizeCreationFlow`（純資料層，`src/lib/canvas/creation-flow-panel.ts`）。
+// 修的是 PRD「刀 1 全链生效定义」的第 2 环：「canvas 面板可见」。
+// 资料链完全复用既有出口，本档不新增任何型别或储存：
+//   hook `projectType` / `currentStep` / `episodes`（刀 1 三栏，唯一写入口 setProjectMeta）
+//   ＋ `summarizeCreationFlow`（纯资料层，`src/lib/canvas/creation-flow-panel.ts`）。
 //
-// 掛法照 角色/場景卡面板（同層 `ce-embed-leftpop` 左側彈層 + 頂欄 chip 開關），
-// 不新建頁面樹。視覺沿用 lg-sheet 材料 + ios-* 字級（DESIGN.md：正文 ≥13px）。
+// 挂法照 角色/场景卡面板（同层 `ce-embed-leftpop` 左侧弹层 + 顶栏 chip 开关），
+// 不新建页面树。视觉沿用 lg-sheet 材料 + ios-* 字级（DESIGN.md：正文 ≥13px）。
 //
-// 誠實邊界：**不顯示「完成進度 N/M」百分比**——本站沒有「一鏡完成」的建模欄位，
-// 把「已落畫布鏡數 / 場景計畫鏡數」寫成「完成度」就是灌水（D2 缺口的正確解法是
-// 呈現真實計數，不是造一個好看的百分比）。
+// 诚实边界：**不显示「完成进度 N/M」百分比**——本站没有「一镜完成」的建模栏位，
+// 把「已落画布镜数 / 场景计画镜数」写成「完成度」就是灌水（D2 缺口的正确解法是
+// 呈现真实计数，不是造一个好看的百分比）。
 
 import type {
   CreationFlowSummary,
@@ -22,57 +22,57 @@ import type {
 } from "@/lib/canvas/creation-flow-panel";
 import { CREATION_STEPS } from "@/lib/creation-flow-steps";
 
-/** 主按鈕文案（依動作面；`none` 不渲染，故不入表）。簡體，照本面板既有文案體例。 */
+/** 主按钮文案（依动作面；`none` 不渲染，故不入表）。简体，照本面板既有文案体例。 */
 const NEXT_ACTION_LABEL: Record<Exclude<CreationNextSurface, "none">, string> = {
   agent: "交给 AI 助理",
   "canvas-generation": "打开分镜处理",
 };
 
 /**
- * 「补齐配音」（`id === "shot-audio"`）的主動作文案：**先試算費用**（乾跑，不扣費），
- * 確認鍵才真跑。與其他 id 的 `NEXT_ACTION_LABEL` 分開，因為它不是「打開某個面」而是生成。
+ * 「补齐配音」（`id === "shot-audio"`）的主动作文案：**先试算费用**（干跑，不扣费），
+ * 确认键才真跑。与其他 id 的 `NEXT_ACTION_LABEL` 分开，因为它不是「打开某个面」而是生成。
  */
 const VOICEOVER_QUOTE_LABEL = "补齐配音（先试算费用）";
 
 /**
- * 配音流程的顯示狀態（**主體是宿主 CanvasEmbedOverlays 的 state**；本面板只負責印出來）。
+ * 配音流程的显示状态（**主体是宿主 CanvasEmbedOverlays 的 state**；本面板只负责印出来）。
  *
- * 幣數欄位一律由**伺服器回應**填寫：`estimatedCoins`＝乾跑報價、`costCoins`＝真跑實扣。
- * 面板端零計算（成本公式是伺服器的事）。
+ * 币数栏位一律由**伺服器回应**填写：`estimatedCoins`＝干跑报价、`costCoins`＝真跑实扣。
+ * 面板端零计算（成本公式是伺服器的事）。
  */
 export interface VoiceoverFlowView {
   status: "idle" | "quoting" | "quoted" | "applying" | "applied" | "refused" | "error";
-  /** 台詞行數（伺服器回）。 */
+  /** 台词行数（伺服器回）。 */
   lineCount?: number;
-  /** 總字數（伺服器回）。 */
+  /** 总字数（伺服器回）。 */
   totalChars?: number;
-  /** 乾跑報價幣數（伺服器回）。 */
+  /** 干跑报价币数（伺服器回）。 */
   estimatedCoins?: number;
-  /** 真跑實扣幣數（伺服器回）。 */
+  /** 真跑实扣币数（伺服器回）。 */
   costCoins?: number;
-  /** 失敗／被拒原因（伺服器回或傳輸錯誤；如實顯示，不美化）。 */
+  /** 失败／被拒原因（伺服器回或传输错误；如实显示，不美化）。 */
   reason?: string;
 }
 
 export interface CreationFlowPanelProps {
   summary: CreationFlowSummary;
   /**
-   * 由當前現況推導的**唯一下一步**（一步一跳；`deriveNextStep`，2026-09-30）。
-   * `id === "unknown"`（資料不足以判斷）或 `surface === "none"`（終態）時不渲染——
-   * 不給假動作。缺席＝本面板不顯示引導。
+   * 由当前现况推导的**唯一下一步**（一步一跳；`deriveNextStep`，2026-09-30）。
+   * `id === "unknown"`（资料不足以判断）或 `surface === "none"`（终态）时不渲染——
+   * 不给假动作。缺席＝本面板不显示引导。
    */
   nextStep?: NextCreationStep;
   /**
-   * 主動作：依 `surface` 導向既有入口（宿主提供，面板不自己找路）。
-   * 「补齐配音」需要知道**是哪一個 next step**（同為 `canvas-generation` 的還有補圖／補影），
-   * 故補上第二個可選參數 `id`；既有呼叫端只讀 `surface`，行為不變。
+   * 主动作：依 `surface` 导向既有入口（宿主提供，面板不自己找路）。
+   * 「补齐配音」需要知道**是哪一个 next step**（同为 `canvas-generation` 的还有补图／补影），
+   * 故补上第二个可选参数 `id`；既有呼叫端只读 `surface`，行为不变。
    */
   onNextAction?: (surface: CreationNextSurface, id?: CreationNextStepId) => void;
-  /** 配音流程狀態（宿主 state；缺席＝本面板不渲染配音報價區）。 */
+  /** 配音流程状态（宿主 state；缺席＝本面板不渲染配音报价区）。 */
   voiceover?: VoiceoverFlowView;
-  /** 確認鍵：使用者同意報價後才真跑（`dryRun: false`）。 */
+  /** 确认键：使用者同意报价后才真跑（`dryRun: false`）。 */
   onVoiceoverConfirm?: () => void;
-  /** 關閉面板（點標題列關閉鈕）。 */
+  /** 关闭面板（点标题列关闭钮）。 */
   onClose: () => void;
 }
 
@@ -125,17 +125,17 @@ export function CreationFlowPanel({
         </button>
       </div>
 
-      {/* 下一步（一步一跳）：同一時刻只渲染一個，且排在面板內容最前＝打開就看到。
-          由當前現況推導（不讀任何持久化標記）；unknown＝資料不足以判斷、none＝終態，
-          兩者都不渲染，不給假動作。主按鈕導向既有入口（宿主提供 `onNextAction`）。 */}
+      {/* 下一步（一步一跳）：同一时刻只渲染一个，且排在面板内容最前＝打开就看到。
+          由当前现况推导（不读任何持久化标记）；unknown＝资料不足以判断、none＝终态，
+          两者都不渲染，不给假动作。主按钮导向既有入口（宿主提供 `onNextAction`）。 */}
       {nextStep && nextStep.id !== "unknown" && nextStep.surface !== "none" ? (
         <div className="border-b bg-ios-blue/5 px-3 py-2.5">
           <p className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-ios-blue/70">
             下一步
           </p>
           <p className="mt-1.5 text-[13px] font-medium leading-snug text-foreground">{nextStep.label}</p>
-          {/* 补齐配音：主動作＝先乾跑試算（不扣費），報價與行數/字數如實顯示，
-              使用者按確認鍵才真跑。失敗／被拒一律顯示原因，不假成功。 */}
+          {/* 补齐配音：主动作＝先干跑试算（不扣费），报价与行数/字数如实显示，
+              使用者按确认键才真跑。失败／被拒一律显示原因，不假成功。 */}
           {nextStep.id === "shot-audio" ? (
             <>
               {voiceover?.status === "quoting" ? (
@@ -219,7 +219,7 @@ export function CreationFlowPanel({
               </div>
               {stepIndex >= 0 && (
                 <>
-                  {/* 7 步骨架：純位置指示（哪一步），不是進度百分比 */}
+                  {/* 7 步骨架：纯位置指示（哪一步），不是进度百分比 */}
                   <div className="mt-2 flex items-center gap-1" aria-hidden>
                     {CREATION_STEPS.map((step, i) => (
                       <span

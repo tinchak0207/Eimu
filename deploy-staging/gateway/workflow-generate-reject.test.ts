@@ -1,5 +1,5 @@
-// H6：/workflow/generate 在工作流已執行中時必須如實回 ok:false（already_running），
-// 不得回 approved/running 假成功，也不得彈新確認卡。
+// H6：/workflow/generate 在工作流已执行中时必须如实回 ok:false（already_running），
+// 不得回 approved/running 假成功，也不得弹新确认卡。
 // 跑法：timeout 120 bun run deploy-staging/gateway/workflow-generate-reject.test.ts
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -29,7 +29,7 @@ async function run(): Promise<void> {
   const r = gw.workflowService.startFast("shortdrama_visual", templatePlaceholderContent("shortdrama_visual") as never, state)
   if (!("workflowId" in r)) throw new Error("startFast failed")
   const wfid = r.workflowId
-  // 模擬引擎已有執行循環在跑
+  // 模拟引擎已有执行循环在跑
   ;(gw.workflowService as unknown as { generateLoops: Set<string> }).generateLoops.add(wfid)
   const res = await gw.handleWorkflowInternal(
     new Request("http://x/internal/workflow/generate", { method: "POST", body: JSON.stringify({ workflow_id: wfid }) }),
@@ -41,14 +41,14 @@ async function run(): Promise<void> {
   assert.equal(j.reason, "already_running")
   assert.notEqual(j.status, "approved")
   assert.notEqual(j.status, "running")
-  assert.equal(state.pendingConfirms.size, 0, "不得彈新確認卡")
+  assert.equal(state.pendingConfirms.size, 0, "不得弹新确认卡")
   assert.equal(gw.workflowService.isGenerating(wfid), true)
-  console.log("  ✓ H6 already_running 如實拒絕")
+  console.log("  ✓ H6 already_running 如实拒绝")
   process.exit(0)
 }
 
 if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
-  test("workflow-generate-reject", { skip: "需 bun 執行" }, () => {})
+  test("workflow-generate-reject", { skip: "需 bun 执行" }, () => {})
 } else {
   run().catch((e) => { console.error(e); process.exit(1) })
 }

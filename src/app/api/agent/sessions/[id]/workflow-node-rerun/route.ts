@@ -1,8 +1,8 @@
-// POST /api/agent/sessions/[id]/workflow-node-rerun —— 畫布錯誤卡「重试」的
+// POST /api/agent/sessions/[id]/workflow-node-rerun —— 画布错误卡「重试」的
 // workflow 重跑代理。此前前端 handleRerun 打的 /api/internal/workflow/node/rerun
-// 在站點不存在（無路由無 rewrite，生產 404），真路由是網關 loopback-only 的
-// /internal/workflow/node/rerun，外部不可達——站點必須代撥：body 原樣透傳，
-// session 歸屬校驗用畫面同款 resolveAgentCaller（key 只能動自己的會話）。
+// 在站点不存在（无路由无 rewrite，生产 404），真路由是网关 loopback-only 的
+// /internal/workflow/node/rerun，外部不可达——站点必须代拨：body 原样透传，
+// session 归属校验用画面同款 resolveAgentCaller（key 只能动自己的会话）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -10,7 +10,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -52,9 +52,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     return fail(400, "workflow_id 与 node_id 必填。", "invalid_request");
   }
 
-  // 網關 /internal/* 是 loopback-only；站點經 agent-gateway 隧道（帶 server key）
-  // 打 /agent/v1 家族等價路由。gateway 的 workflow handler 用 endsWith 匹配，
-  // 掛載塊用 query 拿 session_id（Bun Request body 只能讀一次，body 留給 handler）。
+  // 网关 /internal/* 是 loopback-only；站点经 agent-gateway 隧道（带 server key）
+  // 打 /agent/v1 家族等价路由。gateway 的 workflow handler 用 endsWith 匹配，
+  // 挂载块用 query 拿 session_id（Bun Request body 只能读一次，body 留给 handler）。
   let resp: AgentGatewayResponse;
   try {
     resp = await callAgentGateway(`/agent/v1/sessions/${id}/workflow/node/rerun?session_id=${encodeURIComponent(id)}`, {

@@ -1,25 +1,25 @@
-// 同步直通路由的生產平面計費門面（V-07／V-08，2026-09-28）。
+// 同步直通路由的生产平面计费门面（V-07／V-08，2026-09-28）。
 //
-// 背景：/v1/images/edits（pixai 分支）、/v1/upscale、/v1/template-generations 與
-// /api/pixai/{edit,upscale,template-generations} 是「同步直通上游」——沒有 worker、
-// 沒有 durable job。它們原本直接呼叫 configuredGenerationBillingAdapter()／
-// image-billing 扣退款，不留 billing_operation 列：退款失敗只剩一行日誌，
-// reconcileGenerationBilling／retryStrandedRefundOperations 救不回來。
+// 背景：/v1/images/edits（pixai 分支）、/v1/upscale、/v1/template-generations 与
+// /api/pixai/{edit,upscale,template-generations} 是「同步直通上游」——没有 worker、
+// 没有 durable job。它们原本直接呼叫 configuredGenerationBillingAdapter()／
+// image-billing 扣退款，不留 billing_operation 列：退款失败只剩一行日志，
+// reconcileGenerationBilling／retryStrandedRefundOperations 救不回来。
 //
-// 本門面讓這些路由的錢走 billing-ledger（唯一計費實作）：
-//   reserveSyncCharge  → 建一條「同步 job」列（kind 合法、tenant 前綴 sync:，
-//                        狀態 submitting＋租約，絕不進 queued）＋reserve op，
-//                        經 reserveSyncGenerationBilling 做 claim／外部扣款／帳本雙寫。
-//   commitSyncCharge   → 上游交付後：commit 實耗、未交付部分先落 pending refund op、
-//                        job → succeeded；回傳「回應之後再執行」的外部退款。
-//   refundSyncCharge   → 上游失敗：先落 pending refund op、job → failed；回傳外部退款。
-// 外部退款失敗不吞：console.error，op 留在帳本（pending/unknown/failed），
-// failed 終態由 reconcileGenerationBilling 每輪補退，succeeded 部分退款由
-// retryStrandedRefundOperations 補退。
+// 本门面让这些路由的钱走 billing-ledger（唯一计费实作）：
+//   reserveSyncCharge  → 建一条「同步 job」列（kind 合法、tenant 前缀 sync:，
+//                        状态 submitting＋租约，绝不进 queued）＋reserve op，
+//                        经 reserveSyncGenerationBilling 做 claim／外部扣款／帐本双写。
+//   commitSyncCharge   → 上游交付后：commit 实耗、未交付部分先落 pending refund op、
+//                        job → succeeded；回传「回应之后再执行」的外部退款。
+//   refundSyncCharge   → 上游失败：先落 pending refund op、job → failed；回传外部退款。
+// 外部退款失败不吞：console.error，op 留在帐本（pending/unknown/failed），
+// failed 终态由 reconcileGenerationBilling 每轮补退，succeeded 部分退款由
+// retryStrandedRefundOperations 补退。
 //
-// 沒有 GENERATION_DATABASE_URL 的實例（Vercel 站點副本：/api/pixai/* 在那裡執行）
-// 沒有帳本可寫——門面退回「直接經 billing adapter 扣退款」並如實標 ledger=false、
-// 退款失敗 console.error。這是既有行為的保留，不是帳本化；見回報的阻塞點。
+// 没有 GENERATION_DATABASE_URL 的实例（Vercel 站点副本：/api/pixai/* 在那里执行）
+// 没有帐本可写——门面退回「直接经 billing adapter 扣退款」并如实标 ledger=false、
+// 退款失败 console.error。这是既有行为的保留，不是帐本化；见回报的阻塞点。
 
 import { createHash, randomUUID } from "node:crypto";
 import { configuredGenerationBillingAdapter, type GenerationBillingAdapter } from "./billing-relay";
@@ -35,26 +35,26 @@ import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { getGenerationJob, mapGenerationJob } from "./job-repository";
 import type { FailureClass, GenerationJob } from "./types";
 
-/** 同步 job 的租約：路由 maxDuration 300s＋餘裕。過期 → 既有 lease recovery 標 submit_unknown（錢凍結、probe 可見）。 */
+/** 同步 job 的租约：路由 maxDuration 300s＋余裕。过期 → 既有 lease recovery 标 submit_unknown（钱冻结、probe 可见）。 */
 const SYNC_LEASE_MS = 6 * 60_000;
 
 export type SyncChargeKind = "image_edit" | "image_generate";
 
 export interface SyncChargeInput {
-  /** new-api users.id；0 = 應急 env key 沒帶 userId，無從計費。 */
+  /** new-api users.id；0 = 应急 env key 没带 userId，无从计费。 */
   userId: number;
-  /** 本次預扣的 quota 總額（已乘 n）。 */
+  /** 本次预扣的 quota 总额（已乘 n）。 */
   quota: number;
-  /** 日誌與 job 追溯用的動作名，如 "images/edits"。 */
+  /** 日志与 job 追溯用的动作名，如 "images/edits"。 */
   action: string;
-  /** 定價鍵（pixai-edit／pixai-upscale／pixai-template）。 */
+  /** 定价键（pixai-edit／pixai-upscale／pixai-template）。 */
   modelId: string;
   kind: SyncChargeKind;
   source: "biz" | "web";
-  /** 原 tenant（biz:<keyId>／web:<userId>）；同步 job 落 `sync:` 前綴，不混進客戶的任務列表。 */
+  /** 原 tenant（biz:<keyId>／web:<userId>）；同步 job 落 `sync:` 前缀，不混进客户的任务列表。 */
   tenantId: string;
   apiKeyId?: string | null;
-  /** 只用於日誌（env 應急 key 的告警沿用原口徑）。 */
+  /** 只用于日志（env 应急 key 的告警沿用原口径）。 */
   keyId?: string;
   prompt?: string;
   requestedCount?: number;
@@ -63,10 +63,10 @@ export interface SyncChargeInput {
 }
 
 export interface SyncCharge {
-  /** 帳本 job id（ledger=true）或 relay 冪等鍵（ledger=false）；未扣費時為空字串。 */
+  /** 帐本 job id（ledger=true）或 relay 幂等键（ledger=false）；未扣费时为空字串。 */
   jobId: string;
   userId: number;
-  /** 已扣的 quota；0 = 未扣（零價或無從計費的 key）。 */
+  /** 已扣的 quota；0 = 未扣（零价或无从计费的 key）。 */
   reservedQuota: number;
   requestedCount: number;
   action: string;
@@ -81,12 +81,12 @@ export type SyncChargeResult =
 export interface SyncChargeDeps {
   sql?: GenerationSql;
   adapter?: GenerationBillingAdapter;
-  /** 測試注入；缺省看 GENERATION_DATABASE_URL。 */
+  /** 测试注入；缺省看 GENERATION_DATABASE_URL。 */
   databaseConfigured?: boolean;
   executorId?: string;
 }
 
-/** 回應送出後才跑的外部退款（放進 next/server 的 after）。永不拋錯。 */
+/** 回应送出后才跑的外部退款（放进 next/server 的 after）。永不抛错。 */
 export type SyncSettlement = () => Promise<void>;
 
 const NOOP_SETTLEMENT: SyncSettlement = async () => undefined;
@@ -112,7 +112,7 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "Billing failed.";
 }
 
-/** 上游 HTTP 狀態 → failure_class（只用於 job 列的誠實歸類，不影響客戶回應）。 */
+/** 上游 HTTP 状态 → failure_class（只用于 job 列的诚实归类，不影响客户回应）。 */
 export function syncFailureClass(status: number): FailureClass {
   if (status === 429) return "rate_limited";
   if (status === 401 || status === 403) return "authentication";
@@ -127,8 +127,8 @@ function warnFallbackOnce(action: string): void {
   if (fallbackWarned) return;
   fallbackWarned = true;
   console.warn(
-    `[sync-charge] GENERATION_DATABASE_URL 未配置：同步計費（首見 action=${action}）走 billing adapter 直扣，`
-    + "不留 billing_operation 列（本實例無帳本）。",
+    `[sync-charge] GENERATION_DATABASE_URL 未配置：同步计费（首见 action=${action}）走 billing adapter 直扣，`
+    + "不留 billing_operation 列（本实例无帐本）。",
   );
 }
 
@@ -166,8 +166,8 @@ async function createSyncJob(input: SyncChargeInput, sql: GenerationSql): Promis
 }
 
 /**
- * 同步路由的預扣。失敗一律回 402 insufficient_quota（與舊 chargeBizRequest 同形同碼）。
- * quota<=0 或 userId=0（env 應急 key）不扣、不建 job，沿用原口徑。
+ * 同步路由的预扣。失败一律回 402 insufficient_quota（与旧 chargeBizRequest 同形同码）。
+ * quota<=0 或 userId=0（env 应急 key）不扣、不建 job，沿用原口径。
  */
 export async function reserveSyncCharge(input: SyncChargeInput, deps: SyncChargeDeps = {}): Promise<SyncChargeResult> {
   const requestedCount = Math.max(1, input.requestedCount ?? 1);
@@ -188,7 +188,7 @@ export async function reserveSyncCharge(input: SyncChargeInput, deps: SyncCharge
     try {
       job = await createSyncJob(input, sql);
     } catch (error) {
-      // 建單失敗時錢還沒動：回落直扣保可用性（與 quota-precheck「不可達回落」同一取捨），如實記錄。
+      // 建单失败时钱还没动：回落直扣保可用性（与 quota-precheck「不可达回落」同一取舍），如实记录。
       console.error(`[sync-charge] ledger job creation failed action=${input.action}; falling back to direct billing`, error);
     }
     if (job) {
@@ -207,7 +207,7 @@ export async function reserveSyncCharge(input: SyncChargeInput, deps: SyncCharge
     warnFallbackOnce(input.action);
   }
 
-  // 無帳本實例：relay 要求 job_id 長度 8..128，且用它做冪等鍵（沿用舊格式）。
+  // 无帐本实例：relay 要求 job_id 长度 8..128，且用它做幂等键（沿用旧格式）。
   const jobId = `pixai-${input.action.replace(/[^a-z0-9]+/gi, "-")}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   try {
     await adapter.reserve({ jobId, operation: "reserve", userId: input.userId, amount: input.quota });
@@ -244,7 +244,7 @@ function ledgerRefund(charge: SyncCharge, amount: number, deps: SyncChargeDeps, 
       if (result !== "applied") {
         console.error(
           `[sync-charge] refund ${result} action=${charge.action} userId=${charge.userId} quota=${amount} job=${charge.jobId}`
-          + "——op 留在 billing_operation，由 reconcile／stranded-refund 通道或人工對帳接手",
+          + "——op 留在 billing_operation，由 reconcile／stranded-refund 通道或人工对帐接手",
         );
       }
     } catch (error) {
@@ -257,9 +257,9 @@ function ledgerRefund(charge: SyncCharge, amount: number, deps: SyncChargeDeps, 
 }
 
 /**
- * 上游交付後結算。`delivered` = 實際拿到的產出數；未交付部分按張退
- * （沿用舊口徑 round(quota/n*(n-delivered))）。帳本寫入在這裡同步完成，
- * 外部退款由回傳的 settlement 在回應後執行。永不拋錯（客戶已拿到結果）。
+ * 上游交付后结算。`delivered` = 实际拿到的产出数；未交付部分按张退
+ * （沿用旧口径 round(quota/n*(n-delivered))）。帐本写入在这里同步完成，
+ * 外部退款由回传的 settlement 在回应后执行。永不抛错（客户已拿到结果）。
  */
 export async function commitSyncCharge(
   charge: SyncCharge,
@@ -275,8 +275,8 @@ export async function commitSyncCharge(
   try {
     const job = await getGenerationJob(charge.jobId, sql);
     if (!job) throw new Error(`Sync job ${charge.jobId} not found.`);
-    // 先 commit 實耗、再落 pending refund、最後才標 succeeded：reconcile 對 succeeded
-    // job 會補 commit 全額，順序反過來會把未交付部分也記成實耗。
+    // 先 commit 实耗、再落 pending refund、最后才标 succeeded：reconcile 对 succeeded
+    // job 会补 commit 全额，顺序反过来会把未交付部分也记成实耗。
     const consumed = job.billingAmount - unused;
     if (consumed > 0) await commitGenerationBilling(job, consumed, sql);
     if (unused > 0) await recordPendingGenerationRefund(job, unused, sql);
@@ -296,8 +296,8 @@ export async function commitSyncCharge(
 }
 
 /**
- * 上游失敗：全額退。帳本（pending refund op + job failed）同步落地，外部退款由
- * 回傳的 settlement 在回應後執行。永不拋錯（不蓋掉更有用的上游錯誤）。
+ * 上游失败：全额退。帐本（pending refund op + job failed）同步落地，外部退款由
+ * 回传的 settlement 在回应后执行。永不抛错（不盖掉更有用的上游错误）。
  */
 export async function refundSyncCharge(
   charge: SyncCharge,
@@ -323,7 +323,7 @@ export async function refundSyncCharge(
     `;
     emitJobEvent({ jobId: job.id, event: JOB_EVENT.jobFailed, actor: executorOf(deps), upstreamRaw: detail, detail: { reason: "sync_upstream_failed", action: charge.action, httpStatus: failure.status, failureClass } }, sql);
   } catch (error) {
-    // 帳本沒寫成也照樣嘗試外部退款：refundGenerationBilling 會自行補建 refund op。
+    // 帐本没写成也照样尝试外部退款：refundGenerationBilling 会自行补建 refund op。
     console.error(`[sync-charge] failure bookkeeping failed action=${charge.action} job=${charge.jobId}`, error);
   }
   return ledgerRefund(charge, charge.reservedQuota, deps, sql);

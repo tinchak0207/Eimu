@@ -1,13 +1,13 @@
 /**
- * director 工具層共用模塊（片4，2026-09-02）：16 個 director_* 工具的公共面。
- * 兩部分：
+ * director 工具层共用模块（片4，2026-09-02）：16 个 director_* 工具的公共面。
+ * 两部分：
  * 1) 工具 plumbing：GATEWAY loopback fetch、resolveKey Bearer、ok()/fail()、extractError、
- *    directorFetch（session_id 一律走 query，Bun Request body 只能讀一次——片3 坑④）。
- *    範式逐行照 timeline_ops.ts；lib/client.ts 的 ok/fail/resolveKey 邏輯在此內聯
- *    （lib/ 必須在 tools/ 之外且無跨目錄依賴，VPS 落位結構如此）。
- * 2) kunpeng 純函數鏡像：directorTools.ts 的 num/bool/vecFromParams/hasVecParams/
- *    resolveShot/resolveAction/elementState/absoluteFrame + 各守衛文案（簡體照搬）。
- *    gateway 只收「文檔操作」op，工具層負責全部語義守衛與形狀規格化。
+ *    directorFetch（session_id 一律走 query，Bun Request body 只能读一次——片3 坑④）。
+ *    范式逐行照 timeline_ops.ts；lib/client.ts 的 ok/fail/resolveKey 逻辑在此内联
+ *    （lib/ 必须在 tools/ 之外且无跨目录依赖，VPS 落位结构如此）。
+ * 2) kunpeng 纯函数镜像：directorTools.ts 的 num/bool/vecFromParams/hasVecParams/
+ *    resolveShot/resolveAction/elementState/absoluteFrame + 各守卫文案（简体照搬）。
+ *    gateway 只收「文档操作」op，工具层负责全部语义守卫与形状规格化。
  */
 import nanoid from "./director/nanoid"
 import type { DirectorActionClip, DirectorElement, DirectorPlan, DirectorSequenceShot, DirectorElementState, Vec3 } from "./director/types"
@@ -32,7 +32,7 @@ export async function resolveKey(sessionID: string, signal?: AbortSignal): Promi
       if (typeof body?.api_key === "string" && body.api_key) return body.api_key
     }
   } catch {
-    // gateway 無法解析 → fallback
+    // gateway 无法解析 → fallback
   }
   const fallback = process.env.HARNESS_API_KEY
   if (!fallback) throw new Error("无法解析 API key：gateway 无此 session 记录且无 HARNESS_API_KEY")
@@ -49,7 +49,7 @@ export function fail(code: string, hint: string, extra?: Record<string, unknown>
   return { title: (title as string) ?? "失败", output: JSON.stringify({ ok: false, error: { code, hint }, ...rest }) }
 }
 
-/** gateway 錯誤體兩種形狀：409/404/400 為 {error:{message,type,code}}；director 錯誤 message 欄位 */
+/** gateway 错误体两种形状：409/404/400 为 {error:{message,type,code}}；director 错误 message 栏位 */
 export function extractError(data: Record<string, unknown>, status: number): string {
   const e = data?.error
   if (typeof e === "string" && e) return e
@@ -65,7 +65,7 @@ export interface DirectorGatewayError {
   message: string
 }
 
-/** 呼叫 gateway director 六路由；session_id 走 query；錯誤統一拋 DirectorGatewayError */
+/** 呼叫 gateway director 六路由；session_id 走 query；错误统一抛 DirectorGatewayError */
 export async function directorFetch(
   sessionID: string,
   verb: string,
@@ -100,13 +100,13 @@ export async function directorFetch(
   return data
 }
 
-/** DirectorGatewayError → fail()：gateway 文案已含行動指引（簡體，片3 實彈驗證過），原樣透傳不加工 */
+/** DirectorGatewayError → fail()：gateway 文案已含行动指引（简体，片3 实弹验证过），原样透传不加工 */
 export function directorFail(e: unknown): { title: string; output: string } {
   const err = e as Error & { status?: number; code?: string }
   return fail(err?.code ?? "director_error", err?.message || "gateway 不可达")
 }
 
-// ── 2) kunpeng directorTools.ts 純函數鏡像（逐行等價） ─────────────────────
+// ── 2) kunpeng directorTools.ts 纯函数镜像（逐行等价） ─────────────────────
 
 export function num(value: unknown, fallback: number, min = -Infinity, max = Infinity): number {
   const parsed = Number(value)
@@ -129,7 +129,7 @@ export function hasVecParams(params: Record<string, unknown>, prefix: string): b
   return [`${prefix}_x`, `${prefix}_y`, `${prefix}_z`].some((key) => params[key] !== undefined)
 }
 
-/** 從 GET /state 回包取活動方案（路由形參數；找不到=wheel requireDirector 文案） */
+/** 从 GET /state 回包取活动方案（路由形参数；找不到=wheel requireDirector 文案） */
 export function activePlanOf(state: Record<string, unknown>): DirectorPlan | null {
   const project = state.project as DirectorSceneFileLite | undefined
   if (!project) return null
@@ -138,7 +138,7 @@ export function activePlanOf(state: Record<string, unknown>): DirectorPlan | nul
   return plans.find((item) => item.id === activeId) ?? plans[0] ?? null
 }
 
-/** kunpeng directorStore.ts L247 newElementId 逐字等價（gateway addElement 不生成 id，必須工具層給） */
+/** kunpeng directorStore.ts L247 newElementId 逐字等价（gateway addElement 不生成 id，必须工具层给） */
 export function newElementId(): string {
   return `el-${nanoid(8)}`
 }
@@ -149,7 +149,7 @@ export interface DirectorSceneFileLite {
   [key: string]: unknown
 }
 
-/** kunpeng resolveShot：顯式 shot_id 優先，否則 active_shot_id，否則首鏡頭 */
+/** kunpeng resolveShot：显式 shot_id 优先，否则 active_shot_id，否则首镜头 */
 export function resolveShot(state: Record<string, unknown>, plan: DirectorPlan, shotId?: unknown): DirectorSequenceShot {
   const id = String(shotId ?? "")
   const activeShotId = state.active_shot_id as string | null | undefined
@@ -183,7 +183,7 @@ export function absoluteFrame(shot: DirectorSequenceShot, localSec: number): num
   return Math.round((shot.startSec + localSec) * FPS)
 }
 
-/** 工程幀 → 絕對秒（wheel project_frame 語義：Math.round(localSec*FPS) 反解） */
+/** 工程帧 → 绝对秒（wheel project_frame 语义：Math.round(localSec*FPS) 反解） */
 export function projectFrameToSec(plan: DirectorPlan, projectFrame: unknown): number {
   return Math.round(num(projectFrame, 0, 0, Math.round(planDuration(plan) * FPS))) / FPS
 }
@@ -198,7 +198,7 @@ export function newCkfId(): string {
   return `ckf-${nanoid(7)}`
 }
 
-/** guard throw → fail()：本地守衛 throw（無 status）= 參數/語義錯；gateway 錯透傳 */
+/** guard throw → fail()：本地守卫 throw（无 status）= 参数/语义错；gateway 错透传 */
 export function guardFail(e: unknown): { title: string; output: string } {
   if (e instanceof Error && !(e as { status?: number }).status) {
     return fail("director_invalid_args", e.message)
@@ -206,15 +206,15 @@ export function guardFail(e: unknown): { title: string; output: string } {
   return directorFail(e)
 }
 
-/** 幀數參數 → 秒（wheel FPS=24 慣例，addShot/updateShot duration_frames 同口徑） */
+/** 帧数参数 → 秒（wheel FPS=24 惯例，addShot/updateShot duration_frames 同口径） */
 export function framesToSec(frames: number): number {
   return frames / FPS
 }
 
-// ── 3) R1 驗屍修復輔助（2026-09-03）──────────────────────────────────────────
+// ── 3) R1 验尸修复辅助（2026-09-03）──────────────────────────────────────────
 
-/** 2026-09-03 驗屍修復 R1-#5：動作 project_frame 越界錯誤帶範圍
- * （該動作的絕對工程幀區間 + 鏡頭內幀區間，從動作 startSec/durationSec 換算，24fps） */
+/** 2026-09-03 验尸修复 R1-#5：动作 project_frame 越界错误带范围
+ * （该动作的绝对工程帧区间 + 镜头内帧区间，从动作 startSec/durationSec 换算，24fps） */
 export function actionFrameRangeHint(projectFrame: number, shotStartSec: number, actionStartSec: number, actionDurationSec: number): string {
   const frame = Math.round(projectFrame)
   const start = Math.round((shotStartSec + actionStartSec) * FPS)
@@ -224,7 +224,7 @@ export function actionFrameRangeHint(projectFrame: number, shotStartSec: number,
   return `project_frame ${frame} 不在该动作片段范围内（该动作 project_frame ${start}-${end}，即镜头内 ${inStart}-${inEnd}）`
 }
 
-/** R1-#5：鏡頭級 project_frame 越界錯誤帶範圍（攝影機 K 幀用） */
+/** R1-#5：镜头级 project_frame 越界错误带范围（摄影机 K 帧用） */
 export function shotFrameRangeHint(projectFrame: number, shotStartSec: number, shotDurationSec: number): string {
   const frame = Math.round(projectFrame)
   const start = Math.round(shotStartSec * FPS)

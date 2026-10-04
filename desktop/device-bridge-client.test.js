@@ -1,11 +1,11 @@
 // desktop/device-bridge-client.test.js
 //
-// W6b 客戶端編排層測試：不連真閘道（stub global.fetch）。覆蓋兩條先前無測試的路徑：
-//   - H1：無授權根 ⇒ 執行器一律拒；startDeviceBridge 直接拒絕服務。
-//   - M4：錯誤回報必須帶 consent_token（否則閘道 result 先 consume 一律 not_found）。
+// W6b 客户端编排层测试：不连真闸道（stub global.fetch）。覆盖两条先前无测试的路径：
+//   - H1：无授权根 ⇒ 执行器一律拒；startDeviceBridge 直接拒绝服务。
+//   - M4：错误回报必须带 consent_token（否则闸道 result 先 consume 一律 not_found）。
 // 跑法：npx --yes tsx --test desktop/device-bridge-client.test.js
-// 註：本檔在純 node 下可 require（electron 未就緒時 require("electron") 只回路徑字串，
-//     模組頂層不呼叫任何 electron API）。
+// 注：本档在纯 node 下可 require（electron 未就绪时 require("electron") 只回路径字串，
+//     模组顶层不呼叫任何 electron API）。
 
 "use strict";
 
@@ -18,7 +18,7 @@ const path = require("node:path");
 const client = require("./device-bridge-client.js");
 const localWorker = require("./local-worker.js");
 
-/** stub global.fetch，回傳收到的請求並固定回 {ok:true}。 */
+/** stub global.fetch，回传收到的请求并固定回 {ok:true}。 */
 async function withFetchStub(fn) {
   const calls = [];
   const orig = global.fetch;
@@ -33,7 +33,7 @@ async function withFetchStub(fn) {
   }
 }
 
-test("H1(e2e): 無授權根 ⇒ handleRequest 執行被拒且回報帶票", async () => {
+test("H1(e2e): 无授权根 ⇒ handleRequest 执行被拒且回报带票", async () => {
   const { handleRequest, runtime } = client.__test;
   runtime.deviceId = "dev-1";
   runtime.connectionId = "conn-1";
@@ -41,7 +41,7 @@ test("H1(e2e): 無授權根 ⇒ handleRequest 執行被拒且回報帶票", asyn
   try {
     const f = path.join(tmp, "a.txt");
     nodeFs.writeFileSync(f, "hi");
-    assert.equal(localWorker.authorizedRoots.size, 0, "測試前提：授權根為空");
+    assert.equal(localWorker.authorizedRoots.size, 0, "测试前提：授权根为空");
     await withFetchStub(async (calls) => {
       await handleRequest({ request_id: "r1", consent_token: "tok-1", tool: "read_file", args: { path: f } });
       assert.equal(calls.length, 1);
@@ -54,13 +54,13 @@ test("H1(e2e): 無授權根 ⇒ handleRequest 執行被拒且回報帶票", asyn
   }
 });
 
-test("H1: 無授權根 ⇒ startDeviceBridge 拒絕服務（no_authorized_roots）", async () => {
+test("H1: 无授权根 ⇒ startDeviceBridge 拒绝服务（no_authorized_roots）", async () => {
   const snap = await client.startDeviceBridge({ enabled: true, credentialProvider: () => "cred" });
   assert.equal(snap.status, "no_authorized_roots");
   client.stopDeviceBridge();
 });
 
-test("M4: 錯誤回報（tool_not_allowed）帶 consent_token", async () => {
+test("M4: 错误回报（tool_not_allowed）带 consent_token", async () => {
   const { handleRequest, runtime } = client.__test;
   runtime.deviceId = "dev-2";
   runtime.connectionId = "conn-2";
@@ -72,7 +72,7 @@ test("M4: 錯誤回報（tool_not_allowed）帶 consent_token", async () => {
   });
 });
 
-test("M4: 錯誤回報（consent_token_expired）帶 consent_token", async () => {
+test("M4: 错误回报（consent_token_expired）带 consent_token", async () => {
   const { handleRequest, runtime } = client.__test;
   runtime.deviceId = "dev-3";
   runtime.connectionId = "conn-3";
@@ -84,11 +84,11 @@ test("M4: 錯誤回報（consent_token_expired）帶 consent_token", async () =>
   });
 });
 
-// ── W6c：register 帶 mode/rules（加性；未提供＝不下發，維持既有呼叫端行為）──────
+// ── W6c：register 带 mode/rules（加性；未提供＝不下发，维持既有呼叫端行为）──────
 
 /**
- * stub：register 成功，poll 卡住（永不結算，避免長輪詢迴圈在測試中空轉）。
- * 只攔 register 的 body 以斷言；不連真閘道。
+ * stub：register 成功，poll 卡住（永不结算，避免长轮询回圈在测试中空转）。
+ * 只拦 register 的 body 以断言；不连真闸道。
  */
 async function withRegisterStub(fn) {
   const calls = [];
@@ -102,7 +102,7 @@ async function withRegisterStub(fn) {
         json: async () => ({ ok: true, device_id: "d1", connection_id: "c1", heartbeat_interval_ms: 60000 }),
       });
     }
-    if (/\/poll$/.test(u)) return new Promise(() => {}); // 不結算
+    if (/\/poll$/.test(u)) return new Promise(() => {}); // 不结算
     return Promise.resolve({ status: 200, json: async () => ({ ok: true }) });
   };
   try {
@@ -124,7 +124,7 @@ function mkRoot() {
   return nodeFs.realpathSync(nodeFs.mkdtempSync(path.join(os.tmpdir(), "eimu-bridge-reg-")));
 }
 
-test("register: 提供 modeProvider/rulesProvider ⇒ body 帶 mode 與 rules", async () => {
+test("register: 提供 modeProvider/rulesProvider ⇒ body 带 mode 与 rules", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   localWorker.authorizeRoots([root]);
@@ -137,12 +137,12 @@ test("register: 提供 modeProvider/rulesProvider ⇒ body 帶 mode 與 rules", 
         modeProvider: () => "auto",
         rulesProvider: () => [{ effect: "allow", tool: "read_file" }],
       });
-      // snapshot 透傳 mode（供 bridge.status()）；在 stop 前斷言。
+      // snapshot 透传 mode（供 bridge.status()）；在 stop 前断言。
       assert.equal(client.getDeviceBridgeState().mode, "auto");
       return calls;
     });
     const reg = calls.find((c) => /\/register$/.test(c.url));
-    assert.ok(reg, "必須發出 register");
+    assert.ok(reg, "必须发出 register");
     assert.equal(reg.body.mode, "auto");
     assert.deepEqual(reg.body.rules, [{ effect: "allow", tool: "read_file" }]);
   } finally {
@@ -151,7 +151,7 @@ test("register: 提供 modeProvider/rulesProvider ⇒ body 帶 mode 與 rules", 
   }
 });
 
-test("register: 未提供 modeProvider/rulesProvider ⇒ 不下發 mode/rules 欄位（既有行為不變）", async () => {
+test("register: 未提供 modeProvider/rulesProvider ⇒ 不下发 mode/rules 栏位（既有行为不变）", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   localWorker.authorizeRoots([root]);
@@ -175,7 +175,7 @@ test("register: 未提供 modeProvider/rulesProvider ⇒ 不下發 mode/rules �
   }
 });
 
-test("register: modeProvider 回非法值 ⇒ 不下發 mode（注入點驗值，不硬塞壞值）", async () => {
+test("register: modeProvider 回非法值 ⇒ 不下发 mode（注入点验值，不硬塞坏值）", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   localWorker.authorizeRoots([root]);
@@ -198,11 +198,11 @@ test("register: modeProvider 回非法值 ⇒ 不下發 mode（注入點驗值�
   }
 });
 
-// ── roots 上報（缺陷回歸）：register body 必須真的帶 roots ──────────────────
-// 教訓：只斷言「有呼叫 register」抓不到漏傳欄位（見 2026-10-04-fetch-receiver-test-green-prod-broken）。
-// 這裡斷言請求 body 的**內容**：body.roots 逐值等於注入的 rootsProvider() 回傳。
+// ── roots 上报（缺陷回归）：register body 必须真的带 roots ──────────────────
+// 教训：只断言「有呼叫 register」抓不到漏传栏位（见 2026-10-04-fetch-receiver-test-green-prod-broken）。
+// 这里断言请求 body 的**内容**：body.roots 逐值等于注入的 rootsProvider() 回传。
 
-test("register: body 必須帶 roots，且值等於注入的 rootsProvider() 回傳", async () => {
+test("register: body 必须带 roots，且值等于注入的 rootsProvider() 回传", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   const injected = [root];
@@ -217,8 +217,8 @@ test("register: body 必須帶 roots，且值等於注入的 rootsProvider() 回
       return calls;
     });
     const reg = calls.find((c) => /\/register$/.test(c.url));
-    assert.ok(reg, "必須發出 register");
-    assert.ok(Array.isArray(reg.body.roots), "register body 必須含 roots 陣列（漏傳即閘道 no_authorized_root）");
+    assert.ok(reg, "必须发出 register");
+    assert.ok(Array.isArray(reg.body.roots), "register body 必须含 roots 阵列（漏传即闸道 no_authorized_root）");
     assert.deepEqual(reg.body.roots, injected);
   } finally {
     localWorker.authorizedRoots.clear();
@@ -226,7 +226,7 @@ test("register: body 必須帶 roots，且值等於注入的 rootsProvider() 回
   }
 });
 
-test("register(邊界): rootsProvider 回空陣列 ⇒ 拒絕服務且不發出任何 register", async () => {
+test("register(边界): rootsProvider 回空阵列 ⇒ 拒绝服务且不发出任何 register", async () => {
   localWorker.authorizedRoots.clear();
   const calls = await withRegisterStub(async (calls) => {
     const snap = await client.startDeviceBridge({
@@ -235,17 +235,17 @@ test("register(邊界): rootsProvider 回空陣列 ⇒ 拒絕服務且不發出�
       credentialProvider: () => "cred-fake",
       rootsProvider: () => [],
     });
-    assert.equal(snap.status, "no_authorized_roots", "空 roots 一律拒服務（H1 不變）");
+    assert.equal(snap.status, "no_authorized_roots", "空 roots 一律拒服务（H1 不变）");
     return calls;
   });
   assert.equal(
     calls.some((c) => /\/register$/.test(c.url)),
     false,
-    "空 roots 不得註冊（不誤送空授權集）",
+    "空 roots 不得注册（不误送空授权集）",
   );
 });
 
-test("register: 授權根變更 → 重註冊時 body 帶『新的』roots", async () => {
+test("register: 授权根变更 → 重注册时 body 带『新的』roots", async () => {
   localWorker.authorizedRoots.clear();
   const rootA = mkRoot();
   const rootB = mkRoot();
@@ -257,7 +257,7 @@ test("register: 授權根變更 → 重註冊時 body 帶『新的』roots", asy
         credentialProvider: () => "cred-fake",
         rootsProvider: () => [rootA],
       });
-      // stop→start（與 local-worker startNow 同路徑）：換 roots 必須重註冊。
+      // stop→start（与 local-worker startNow 同路径）：换 roots 必须重注册。
       client.stopDeviceBridge();
       await client.startDeviceBridge({
         enabled: true,
@@ -268,9 +268,9 @@ test("register: 授權根變更 → 重註冊時 body 帶『新的』roots", asy
       return calls;
     });
     const regs = calls.filter((c) => /\/register$/.test(c.url));
-    assert.equal(regs.length, 2, "應有兩次 register（stop→start 重註冊）");
+    assert.equal(regs.length, 2, "应有两次 register（stop→start 重注册）");
     assert.deepEqual(regs[0].body.roots, [rootA]);
-    assert.deepEqual(regs[1].body.roots, [rootA, rootB], "重註冊必須帶新的 roots");
+    assert.deepEqual(regs[1].body.roots, [rootA, rootB], "重注册必须带新的 roots");
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(rootA, { recursive: true, force: true });
@@ -278,18 +278,18 @@ test("register: 授權根變更 → 重註冊時 body 帶『新的』roots", asy
   }
 });
 
-// ── 穩定 deviceId（缺陷回歸）：同一次安裝重註冊必須帶同一個 device_id ──────────
-// 症狀：register 不帶 device_id ⇒ 閘道每次重連都 randomId("dev") 配「新的」deviceId
-// ⇒ 同一 tenant 的 devices 表在 heartbeat TTL 內累積多筆 online ⇒ pickDeviceForTenant
-// 回 device_ambiguous，或把請求送到已死那台 ⇒ 同一殼內第二發 invoke 起吃滿 30s 的
+// ── 稳定 deviceId（缺陷回归）：同一次安装重注册必须带同一个 device_id ──────────
+// 症状：register 不带 device_id ⇒ 闸道每次重连都 randomId("dev") 配「新的」deviceId
+// ⇒ 同一 tenant 的 devices 表在 heartbeat TTL 内累积多笔 online ⇒ pickDeviceForTenant
+// 回 device_ambiguous，或把请求送到已死那台 ⇒ 同一壳内第二发 invoke 起吃满 30s 的
 // `device_request_timeout`。
 //
-// 正解在裝置端（閘道「多台 ambiguous 不猜」是刻意的安全語義，不動）：同一安裝回報
-// **穩定** deviceId，讓重註冊取代同一筆 `deviceKey(tenant, deviceId)` 紀錄。
-// 契約：main.js 產生並持久化一枚 stable id（settings.json 白名單欄位
-// deviceBridgeDeviceId），經 deviceIdProvider 注入 client；register body 帶 device_id。
+// 正解在装置端（闸道「多台 ambiguous 不猜」是刻意的安全语义，不动）：同一安装回报
+// **稳定** deviceId，让重注册取代同一笔 `deviceKey(tenant, deviceId)` 纪录。
+// 契约：main.js 产生并持久化一枚 stable id（settings.json 白名单栏位
+// deviceBridgeDeviceId），经 deviceIdProvider 注入 client；register body 带 device_id。
 
-/** 假 settings store：模擬 settings.json 白名單欄位的讀寫（不碰真檔）。 */
+/** 假 settings store：模拟 settings.json 白名单栏位的读写（不碰真档）。 */
 function fakeSettingsStore(initial) {
   let value = initial;
   let writes = 0;
@@ -308,25 +308,25 @@ function fakeSettingsStore(initial) {
   };
 }
 
-test("deviceId: 無既有值 ⇒ 產生一次並寫入；同 store 再讀不重生", () => {
+test("deviceId: 无既有值 ⇒ 产生一次并写入；同 store 再读不重生", () => {
   const store = fakeSettingsStore(undefined);
   const a = client.resolveStableDeviceId(store);
   assert.equal(typeof a, "string");
-  assert.ok(a.length > 0, "產生的 deviceId 必須非空");
-  assert.equal(store.value, a, "必須寫回 store（持久化）");
-  assert.equal(store.writes, 1, "只寫一次");
+  assert.ok(a.length > 0, "产生的 deviceId 必须非空");
+  assert.equal(store.value, a, "必须写回 store（持久化）");
+  assert.equal(store.writes, 1, "只写一次");
   const b = client.resolveStableDeviceId(store);
   assert.equal(b, a, "第二次回同一 id");
-  assert.equal(store.writes, 1, "第二次不重生、不再寫");
+  assert.equal(store.writes, 1, "第二次不重生、不再写");
 });
 
-test("deviceId: store 已有合法值 ⇒ 直接沿用（不重生、不覆寫）", () => {
+test("deviceId: store 已有合法值 ⇒ 直接沿用（不重生、不覆写）", () => {
   const store = fakeSettingsStore("dev_existing0001");
   assert.equal(client.resolveStableDeviceId(store), "dev_existing0001");
-  assert.equal(store.writes, 0, "已有值不得寫入");
+  assert.equal(store.writes, 0, "已有值不得写入");
 });
 
-test("deviceId: store 壞值（空字串／非字串）⇒ 視為無值，重生一次", () => {
+test("deviceId: store 坏值（空字串／非字串）⇒ 视为无值，重生一次", () => {
   const empty = fakeSettingsStore("   ");
   const id = client.resolveStableDeviceId(empty);
   assert.ok(id.length > 0 && id !== "   ");
@@ -334,7 +334,7 @@ test("deviceId: store 壞值（空字串／非字串）⇒ 視為無值，重生
   assert.equal(empty.writes, 1);
 });
 
-test("register: body 必須帶非空 device_id（注入 deviceIdProvider）", async () => {
+test("register: body 必须带非空 device_id（注入 deviceIdProvider）", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   localWorker.authorizeRoots([root]);
@@ -350,20 +350,20 @@ test("register: body 必須帶非空 device_id（注入 deviceIdProvider）", as
       return calls;
     });
     const reg = calls.find((c) => /\/register$/.test(c.url));
-    assert.ok(reg, "必須發出 register");
-    assert.equal(reg.body.device_id, stable, "register body 必須帶注入的 device_id");
-    assert.ok(String(reg.body.device_id).length > 0, "device_id 必須非空");
+    assert.ok(reg, "必须发出 register");
+    assert.equal(reg.body.device_id, stable, "register body 必须带注入的 device_id");
+    assert.ok(String(reg.body.device_id).length > 0, "device_id 必须非空");
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("register: 兩次連續啟動（stop→start）送同一個 device_id，且不重生", async () => {
+test("register: 两次连续启动（stop→start）送同一个 device_id，且不重生", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   localWorker.authorizeRoots([root]);
-  // 模擬 main.js：provider 每次向「同一份」持久化 store 取 id。
+  // 模拟 main.js：provider 每次向「同一份」持久化 store 取 id。
   const store = fakeSettingsStore(undefined);
   const deviceIdProvider = () => client.resolveStableDeviceId(store);
   try {
@@ -383,20 +383,20 @@ test("register: 兩次連續啟動（stop→start）送同一個 device_id，且
       });
       return calls.filter((c) => /\/register$/.test(c.url));
     });
-    assert.equal(regs.length, 2, "stop→start 應有兩次 register");
-    assert.ok(regs[0].body.device_id, "第一次 register 必須帶 device_id");
-    assert.equal(regs[0].body.device_id, regs[1].body.device_id, "兩次 register 必須是同一個 device_id");
-    assert.equal(regs[0].body.device_id, store.value, "送出的 id 必須是持久化 store 的值");
-    assert.equal(store.writes, 1, "兩次啟動只產生一次（不重生）");
+    assert.equal(regs.length, 2, "stop→start 应有两次 register");
+    assert.ok(regs[0].body.device_id, "第一次 register 必须带 device_id");
+    assert.equal(regs[0].body.device_id, regs[1].body.device_id, "两次 register 必须是同一个 device_id");
+    assert.equal(regs[0].body.device_id, store.value, "送出的 id 必须是持久化 store 的值");
+    assert.equal(store.writes, 1, "两次启动只产生一次（不重生）");
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-// 邊界：deviceIdProvider 回非法值 ⇒ 不下發 device_id 欄位（與 mode 注入點同規矩：
-// 型別/值錯一律視為未設定，不硬塞壞值；閘道屆時自行配 id，維持既有回退）。
-test("register(邊界): deviceIdProvider 回空字串 ⇒ 不下發 device_id", async () => {
+// 边界：deviceIdProvider 回非法值 ⇒ 不下发 device_id 栏位（与 mode 注入点同规矩：
+// 型别/值错一律视为未设定，不硬塞坏值；闸道届时自行配 id，维持既有回退）。
+test("register(边界): deviceIdProvider 回空字串 ⇒ 不下发 device_id", async () => {
   localWorker.authorizedRoots.clear();
   const root = mkRoot();
   localWorker.authorizeRoots([root]);
@@ -420,12 +420,12 @@ test("register(邊界): deviceIdProvider 回空字串 ⇒ 不下發 device_id", 
 });
 
 // ---------------------------------------------------------------------------
-// 對話內就地授權（consent）：接收並落地（session 記憶／permanent 落盤／once 單次）
-// 用注入假 deps 測（runtime 直接設為測試夾具），不連真閘道。
+// 对话内就地授权（consent）：接收并落地（session 记忆／permanent 落盘／once 单次）
+// 用注入假 deps 测（runtime 直接设为测试夹具），不连真闸道。
 // ---------------------------------------------------------------------------
 const { handleRequest: handleConsentRequest } = client.__test;
 
-/** 建立 consent 測試夾具：parent（同意根，含 sub）＋ other（其他已授權根）。 */
+/** 建立 consent 测试夹具：parent（同意根，含 sub）＋ other（其他已授权根）。 */
 async function withConsentEnv(fn) {
   const parent = mkRoot();
   const other = mkRoot();
@@ -469,7 +469,7 @@ async function withConsentEnv(fn) {
   }
 }
 
-test("① consent permanent：同請求與後續請求對 X 內路徑皆放行（mode=ask）", async () => {
+test("① consent permanent：同请求与后续请求对 X 内路径皆放行（mode=ask）", async () => {
   await withConsentEnv(async ({ parent, sub, runtime }) => {
     await withFetchStub(async (calls) => {
       await handleConsentRequest({
@@ -480,20 +480,20 @@ test("① consent permanent：同請求與後續請求對 X 內路徑皆放行�
         consent: { scope: "permanent", roots: [parent] },
       });
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].body.error, undefined, `意外的錯誤：${calls[0].body.error}`);
-      assert.ok(calls[0].body.result, "應回結果");
+      assert.equal(calls[0].body.error, undefined, `意外的错误：${calls[0].body.error}`);
+      assert.ok(calls[0].body.result, "应回结果");
     });
-    assert.deepEqual(runtime.consentRoots, [parent], "permanent 根應進記憶體");
-    // 後續請求（無 consent）：仍放行
+    assert.deepEqual(runtime.consentRoots, [parent], "permanent 根应进记忆体");
+    // 后续请求（无 consent）：仍放行
     await withFetchStub(async (calls) => {
       await handleConsentRequest({ request_id: "c2", consent_token: "t2", tool: "list_dir", args: { path: sub } });
-      assert.equal(calls[0].body.error, undefined, `意外的錯誤：${calls[0].body.error}`);
+      assert.equal(calls[0].body.error, undefined, `意外的错误：${calls[0].body.error}`);
       assert.ok(calls[0].body.result);
     });
   });
 });
 
-test("② consent once：只對該請求放行，下一則（無 consent）回 needs_authorization", async () => {
+test("② consent once：只对该请求放行，下一则（无 consent）回 needs_authorization", async () => {
   await withConsentEnv(async ({ parent, sub, runtime }) => {
     await withFetchStub(async (calls) => {
       await handleConsentRequest({
@@ -503,10 +503,10 @@ test("② consent once：只對該請求放行，下一則（無 consent）回 n
         args: { path: sub },
         consent: { scope: "once", roots: [parent] },
       });
-      assert.equal(calls[0].body.error, undefined, `once 應放行本請求：${calls[0].body.error}`);
+      assert.equal(calls[0].body.error, undefined, `once 应放行本请求：${calls[0].body.error}`);
       assert.ok(calls[0].body.result);
     });
-    assert.deepEqual(runtime.consentRoots, [], "once 不得進記憶體");
+    assert.deepEqual(runtime.consentRoots, [], "once 不得进记忆体");
     await withFetchStub(async (calls) => {
       await handleConsentRequest({ request_id: "o2", consent_token: "t2", tool: "list_dir", args: { path: sub } });
       assert.match(String(calls[0].body.error), /needs_authorization/);
@@ -514,7 +514,7 @@ test("② consent once：只對該請求放行，下一則（無 consent）回 n
   });
 });
 
-test("③ consent：X 之外的路徑在 mode=ask 仍 needs_authorization（不放寬）", async () => {
+test("③ consent：X 之外的路径在 mode=ask 仍 needs_authorization（不放宽）", async () => {
   await withConsentEnv(async ({ parent, other, runtime }) => {
     runtime.consentRoots = [parent];
     await withFetchStub(async (calls) => {
@@ -524,7 +524,7 @@ test("③ consent：X 之外的路徑在 mode=ask 仍 needs_authorization（不�
   });
 });
 
-test("⑤ consent permanent 呼叫 persistConsentRoots；session/once 不得落盤", async () => {
+test("⑤ consent permanent 呼叫 persistConsentRoots；session/once 不得落盘", async () => {
   await withConsentEnv(async ({ parent, sub, runtime }) => {
     const persisted = [];
     runtime.persistConsentRoots = (roots) => persisted.push(roots.slice());
@@ -537,7 +537,7 @@ test("⑤ consent permanent 呼叫 persistConsentRoots；session/once 不得落�
         consent: { scope: "session", roots: [parent] },
       });
     });
-    assert.equal(persisted.length, 0, "session 不得落盤");
+    assert.equal(persisted.length, 0, "session 不得落盘");
     await withFetchStub(async () => {
       await handleConsentRequest({
         request_id: "p2",
@@ -547,7 +547,7 @@ test("⑤ consent permanent 呼叫 persistConsentRoots；session/once 不得落�
         consent: { scope: "once", roots: [parent] },
       });
     });
-    assert.equal(persisted.length, 0, "once 不得落盤");
+    assert.equal(persisted.length, 0, "once 不得落盘");
     await withFetchStub(async () => {
       await handleConsentRequest({
         request_id: "p3",
@@ -557,11 +557,11 @@ test("⑤ consent permanent 呼叫 persistConsentRoots；session/once 不得落�
         consent: { scope: "permanent", roots: [parent] },
       });
     });
-    assert.deepEqual(persisted, [[parent]], "permanent 必須落盤一次");
+    assert.deepEqual(persisted, [[parent]], "permanent 必须落盘一次");
   });
 });
 
-test("⑦ consent 形狀不合（字串／未知 scope／roots 非陣列）不拋、不得放行任何東西", async () => {
+test("⑦ consent 形状不合（字串／未知 scope／roots 非阵列）不抛、不得放行任何东西", async () => {
   await withConsentEnv(async ({ parent, sub, runtime }) => {
     const bads = [
       "permanent",
@@ -585,11 +585,11 @@ test("⑦ consent 形狀不合（字串／未知 scope／roots 非陣列）不�
         assert.match(String(calls[0].body.error), /needs_authorization/, JSON.stringify(bad));
       });
     }
-    assert.deepEqual(runtime.consentRoots, [], "壞形狀不得寫入任何同意根");
+    assert.deepEqual(runtime.consentRoots, [], "坏形状不得写入任何同意根");
   });
 });
 
-test("⑥ register：body 含 home；roots 含同意根；rules 含對應 allow 規則", async () => {
+test("⑥ register：body 含 home；roots 含同意根；rules 含对应 allow 规则", async () => {
   const grant = mkRoot();
   localWorker.authorizedRoots.clear();
   const base = path.join(grant, "base");
@@ -607,15 +607,15 @@ test("⑥ register：body 含 home；roots 含同意根；rules 含對應 allow 
       return calls;
     });
     const reg = calls.find((c) => /\/register$/.test(c.url));
-    assert.ok(reg, "必須有 register");
-    assert.equal(reg.body.home, os.homedir(), "register 必須帶 home");
-    assert.ok(reg.body.roots.includes(grant), "roots 必須含同意根");
-    assert.ok(reg.body.roots.includes(base), "roots 必須含既有已設定根");
-    assert.ok(reg.body.rules && Array.isArray(reg.body.rules.allow), "rules.allow 必為陣列");
+    assert.ok(reg, "必须有 register");
+    assert.equal(reg.body.home, os.homedir(), "register 必须带 home");
+    assert.ok(reg.body.roots.includes(grant), "roots 必须含同意根");
+    assert.ok(reg.body.roots.includes(base), "roots 必须含既有已设定根");
+    assert.ok(reg.body.rules && Array.isArray(reg.body.rules.allow), "rules.allow 必为阵列");
     const wanted = `//${grant.replace(/^\/+/, "")}/**`;
     assert.ok(
       reg.body.rules.allow.some((r) => r && r.effect === "allow" && r.tool === "*" && r.specifier === wanted),
-      `rules.allow 應含 ${wanted}`,
+      `rules.allow 应含 ${wanted}`,
     );
   } finally {
     localWorker.authorizedRoots.clear();

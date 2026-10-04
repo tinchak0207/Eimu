@@ -1,38 +1,38 @@
 /**
- * Agent 提示詞契約檢查器（吞 AID 產品層單向差，刀 3-③，2026-09-15）。
+ * Agent 提示词契约检查器（吞 AID 产品层单向差，刀 3-③，2026-09-15）。
  *
- * 職責：把 AID §二「通用硬性規則」的第 1／2／4 條（純 JSON、字符串內引號用
- * 「」、必填欄位不省）做成**機械檢查**——運營改完提示詞/模型換版後，當場就能
- * 判定輸出是否仍合契約，不靠人眼讀。
+ * 职责：把 AID §二「通用硬性规则」的第 1／2／4 条（纯 JSON、字符串内引号用
+ * 「」、必填栏位不省）做成**机械检查**——运营改完提示词/模型换版后，当场就能
+ * 判定输出是否仍合契约，不靠人眼读。
  *
- * 寫法範式 = src/lib/expert-contract.ts（純函數、結構化錯誤、**絕不 throw**、
- * 繁體注釋、violation 逐條帶人話 detail）。本檔零副作用、無外部依賴。
+ * 写法范式 = src/lib/expert-contract.ts（纯函数、结构化错误、**绝不 throw**、
+ * 繁体注释、violation 逐条带人话 detail）。本档零副作用、无外部依赖。
  *
- * 檢查項（rule 名即回報鍵）：
- *   - `no_markdown_fence`：文本含 ``` 圍欄（AID 硬規則 1 的直接觸發面）。
- *   - `pure_json`：contract 為 json 模式時，去圍欄後首字符必須 `{`/`[`、
+ * 检查项（rule 名即回报键）：
+ *   - `no_markdown_fence`：文本含 ``` 围栏（AID 硬规则 1 的直接触发面）。
+ *   - `pure_json`：contract 为 json 模式时，去围栏后首字符必须 `{`/`[`、
  *     尾字符 `}`/`]`，且整段可 JSON.parse（任一不成立即 violation）。
- *   - `chinese_quotes_in_values`：字符串值內出現未轉義英文雙引號——以掃描器
- *     判定：每個字符串結束引號之後的下一個非空白字符必須是 `,`／`:`／`}`／`]`
- *     或文本結束；不是即代表該值被內嵌引號截斷（正是 AID 描述的「破壞 JSON
- *     結構」失敗），提示改用「」。
- *   - `required_fields`：contract.fields 中 `required: true` 的欄位名必須出現
- *     在解析後結果的頂層（json 模式且解析成功時才檢查）。
- *   - `frozen_constants`：contract.frozenConstants 每一項必須在文本中出現。
+ *   - `chinese_quotes_in_values`：字符串值内出现未转义英文双引号——以扫描器
+ *     判定：每个字符串结束引号之后的下一个非空白字符必须是 `,`／`:`／`}`／`]`
+ *     或文本结束；不是即代表该值被内嵌引号截断（正是 AID 描述的「破坏 JSON
+ *     结构」失败），提示改用「」。
+ *   - `required_fields`：contract.fields 中 `required: true` 的栏位名必须出现
+ *     在解析后结果的顶层（json 模式且解析成功时才检查）。
+ *   - `frozen_constants`：contract.frozenConstants 每一项必须在文本中出现。
  *
- * 口徑（釘死，勿改）：未命中一律回 violation、永不拋異常；json 模式解析失敗時
- * 只報 `pure_json` 一條（後續解析型檢查無對象，不猜）。
+ * 口径（钉死，勿改）：未命中一律回 violation、永不抛异常；json 模式解析失败时
+ * 只报 `pure_json` 一条（后续解析型检查无对象，不猜）。
  */
 
 import type { AgentPromptContract } from "./agent-prompt-contracts";
 
-/** 契約違規一筆（rule = 檢查項名，detail = 人話死因與修法）。 */
+/** 契约违规一笔（rule = 检查项名，detail = 人话死因与修法）。 */
 export interface ContractViolation {
   rule: string;
   detail: string;
 }
 
-/** 去除 markdown 代碼圍欄（```json ... ``` / ``` ... ```，只剝最外層一對）。 */
+/** 去除 markdown 代码围栏（```json ... ``` / ``` ... ```，只剥最外层一对）。 */
 function stripFences(text: string): string {
   const trimmed = text.trim();
   const fence = /^```[A-Za-z0-9_-]*\s*\n([\s\S]*?)\n?```$/;
@@ -40,7 +40,7 @@ function stripFences(text: string): string {
   return m ? m[1] : trimmed;
 }
 
-/** json 模式下的首尾字符判定（去圍欄後）。 */
+/** json 模式下的首尾字符判定（去围栏后）。 */
 function hasJsonBoundaries(s: string): boolean {
   if (s.length === 0) return false;
   const head = s.charAt(0);
@@ -49,12 +49,12 @@ function hasJsonBoundaries(s: string): boolean {
 }
 
 /**
- * 字符串掃描器：找出「值內含未轉義英文雙引號」的位置。
+ * 字符串扫描器：找出「值内含未转义英文双引号」的位置。
  *
- * 演算法：逐字符走，遇 `"` 進/出字符串態；在出字符串態（讀到結束引號）時，
- * 檢查下一個非空白字符是否為結構字符 `,` `:` `}` `]` 或已到文本末尾。不是
- * 結構字符 = 該引號不是合法的字符串終止（原文裡值中混入了 `"`）。
- * 同時把 `\` 轉義跳過（`\"` 是合法轉義，不算違規）。
+ * 演算法：逐字符走，遇 `"` 进/出字符串态；在出字符串态（读到结束引号）时，
+ * 检查下一个非空白字符是否为结构字符 `,` `:` `}` `]` 或已到文本末尾。不是
+ * 结构字符 = 该引号不是合法的字符串终止（原文里值中混入了 `"`）。
+ * 同时把 `\` 转义跳过（`\"` 是合法转义，不算违规）。
  */
 function findUnescapedQuotesInValues(text: string): string[] {
   const bad: string[] = [];
@@ -68,11 +68,11 @@ function findUnescapedQuotesInValues(text: string): string[] {
       continue;
     }
     if (ch === "\\") {
-      i += 2; // 跳過轉義序列（\" \\ \n ...）
+      i += 2; // 跳过转义序列（\" \\ \n ...）
       continue;
     }
     if (ch === '"') {
-      // 出字符串態：下一個非空白字符必須是結構字符或文本末尾。
+      // 出字符串态：下一个非空白字符必须是结构字符或文本末尾。
       let j = i + 1;
       while (j < text.length && /\s/.test(text.charAt(j))) j += 1;
       const next = j < text.length ? text.charAt(j) : "";
@@ -81,7 +81,7 @@ function findUnescapedQuotesInValues(text: string): string[] {
         const start = Math.max(0, i - 20);
         const snippet = text.slice(start, Math.min(text.length, j + 8));
         bad.push(
-          `第 ${i + 1} 字符处的字符串结束位置后面紧跟「${next}」而非 , : } ]：值内混入了未轉義英文雙引號（片段「…${snippet}…」）。字符串值內引號一律用中文「」，例如 "name": "他说「你好」"。`,
+          `第 ${i + 1} 字符处的字符串结束位置后面紧跟「${next}」而非 , : } ]：值内混入了未转义英文双引号（片段「…${snippet}…」）。字符串值内引号一律用中文「」，例如 "name": "他说「你好」"。`,
         );
       }
       inString = false;
@@ -94,51 +94,51 @@ function findUnescapedQuotesInValues(text: string): string[] {
 }
 
 /**
- * 契約檢查（唯一出口）：文本 + 契約 → 違規清單（空陣列 = 全合契約）。
- * 純函數零副作用，絕不 throw（對齊 expert-contract.ts 錯誤鐵律）。
+ * 契约检查（唯一出口）：文本 + 契约 → 违规清单（空阵列 = 全合契约）。
+ * 纯函数零副作用，绝不 throw（对齐 expert-contract.ts 错误铁律）。
  */
 export function checkJsonOutput(text: string, contract: AgentPromptContract): ContractViolation[] {
   const violations: ContractViolation[] = [];
   try {
     const raw = typeof text === "string" ? text : "";
 
-    // ── no_markdown_fence（原文全形掃描）
+    // ── no_markdown_fence（原文全形扫描）
     if (raw.includes("```")) {
       violations.push({
         rule: "no_markdown_fence",
-        detail: "文本含 ``` 代碼圍欄：純 JSON 輸出前後禁止任何 markdown 圍欄，整段必須直接以 { 或 [ 開頭。",
+        detail: "文本含 ``` 代码围栏：纯 JSON 输出前后禁止任何 markdown 围栏，整段必须直接以 { 或 [ 开头。",
       });
     }
 
     const body = stripFences(raw);
 
-    // ── frozen_constants（每項必須逐字出現；json 模式與 structured_text 模式同檢查）
+    // ── frozen_constants（每项必须逐字出现；json 模式与 structured_text 模式同检查）
     for (const constant of contract.frozenConstants) {
       if (!body.includes(constant)) {
         violations.push({
           rule: "frozen_constants",
-          detail: `契約常量「${constant}」未在文本中出現：占位符名／欄位名／協議標記屬不可動常量，動了就斷鏈路（AID 硬規則 5：改提示詞不改契約）。`,
+          detail: `契约常量「${constant}」未在文本中出现：占位符名／栏位名／协议标记属不可动常量，动了就断链路（AID 硬规则 5：改提示词不改契约）。`,
         });
       }
     }
 
     const isJsonMode = contract.outputMode === "json";
     if (!isJsonMode) {
-      // structured_text（尚無機器契約）：只做常量存在性檢查，不冒充 JSON 檢查。
+      // structured_text（尚无机器契约）：只做常量存在性检查，不冒充 JSON 检查。
       return violations;
     }
 
-    // ── pure_json（去圍欄後：首尾字符 + 可解析）
+    // ── pure_json（去围栏后：首尾字符 + 可解析）
     if (!hasJsonBoundaries(body)) {
       const head = body.charAt(0) || "（空）";
       const tail = body.length > 0 ? body.charAt(body.length - 1) : "（空）";
       violations.push({
         rule: "pure_json",
-        detail: `去圍欄後首字符為「${head}」、尾字符為「${tail}」：JSON 模式要求首字符 { 或 [、尾字符 } 或 ]，前後禁止任何說明文字。`,
+        detail: `去围栏后首字符为「${head}」、尾字符为「${tail}」：JSON 模式要求首字符 { 或 [、尾字符 } 或 ]，前后禁止任何说明文字。`,
       });
     }
 
-    // 字符串值內未轉義引號（原文掃描；解析成功與否都能命中）
+    // 字符串值内未转义引号（原文扫描；解析成功与否都能命中）
     const quoteIssues = findUnescapedQuotesInValues(body);
     for (const detail of quoteIssues) {
       violations.push({ rule: "chinese_quotes_in_values", detail });
@@ -152,14 +152,14 @@ export function checkJsonOutput(text: string, contract: AgentPromptContract): Co
       parseFailed = true;
       violations.push({
         rule: "pure_json",
-        detail: `JSON.parse 失敗：${(e as Error)?.message ?? String(e)}。整段回覆必須是合法 JSON（禁註釋、禁尾逗號、值內引號用「」）。`,
+        detail: `JSON.parse 失败：${(e as Error)?.message ?? String(e)}。整段回覆必须是合法 JSON（禁注释、禁尾逗号、值内引号用「」）。`,
       });
     }
 
-    // 解析失敗時後續欄位型檢查無對象，如實停在此處（不猜）。
+    // 解析失败时后续栏位型检查无对象，如实停在此处（不猜）。
     if (parseFailed) return violations;
 
-    // ── required_fields（必填欄位必須出現在解析後頂層）
+    // ── required_fields（必填栏位必须出现在解析后顶层）
     const required = contract.fields.filter((f) => f.required).map((f) => f.name);
     if (required.length > 0) {
       const top =
@@ -168,21 +168,21 @@ export function checkJsonOutput(text: string, contract: AgentPromptContract): Co
           : undefined;
       const missing = required.filter((name) => top === undefined || !(name in top));
       if (missing.length > 0) {
-        const seen = top === undefined ? "（頂層不是物件）" : Object.keys(top).join("、") || "（無）";
+        const seen = top === undefined ? "（顶层不是物件）" : Object.keys(top).join("、") || "（无）";
         violations.push({
           rule: "required_fields",
-          detail: `必填欄位缺失：${missing.join("、")}。契約必填欄位缺失即判失敗（不要的內容寫「无」或空數組，不省略欄位）。回覆實際頂層鍵：${seen}。`,
+          detail: `必填栏位缺失：${missing.join("、")}。契约必填栏位缺失即判失败（不要的内容写「无」或空数组，不省略栏位）。回覆实际顶层键：${seen}。`,
         });
       }
     }
 
     return violations;
   } catch (e) {
-    // 兜底：檢查器自身異常也如實回報（不拋），避免吞錯造成假通過。
+    // 兜底：检查器自身异常也如实回报（不抛），避免吞错造成假通过。
     return [
       {
         rule: "checker_error",
-        detail: `契約檢查器異常（如實上報，勿吞）：${(e as Error)?.message ?? String(e)}`,
+        detail: `契约检查器异常（如实上报，勿吞）：${(e as Error)?.message ?? String(e)}`,
       },
     ];
   }

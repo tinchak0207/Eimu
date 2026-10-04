@@ -2,21 +2,21 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { readImageSource, VisionToolError } from "../lib/vision_impl"
 import { checkAgentPath } from "../lib/sandbox"
 
-// 原生「中性讀圖」工具（2026-09-29 審計修復；2026-10-02 改為把原圖交給當前模型自己看）。
+// 原生「中性读图」工具（2026-09-29 审计修复；2026-10-02 改为把原图交给当前模型自己看）。
 //
-// 背景：舊路徑是 agent 走 bash 跑 skills/read-image/read_image.py，該腳本要 NEWAPI_API_KEY
-// ＋外網。審計把 agent 的 bash/run_py 關進無秘密、無網路的沙箱後，那條 bash 路徑必然失效
-// （這正是防秘密外洩與 SSRF 的代價）。讀圖是常用能力，故上移為原生工具。
+// 背景：旧路径是 agent 走 bash 跑 skills/read-image/read_image.py，该脚本要 NEWAPI_API_KEY
+// ＋外网。审计把 agent 的 bash/run_py 关进无秘密、无网路的沙箱后，那条 bash 路径必然失效
+// （这正是防秘密外泄与 SSRF 的代价）。读图是常用能力，故上移为原生工具。
 //
-// 2026-10-02 起不再「另找一個視覺模型代看後回文字」：圖以 attachments 形式隨工具結果進
-// 當前模型自己的上下文（多模態模型直接看；無視覺模型由 gateway 端誠實告知不支援）。
-// 與 vision_analyze 的分工：vision_analyze 是「毒蛇評審」（打分＋逐維點評），本工具只負責
-// 把原圖帶進上下文。
+// 2026-10-02 起不再「另找一个视觉模型代看后回文字」：图以 attachments 形式随工具结果进
+// 当前模型自己的上下文（多模态模型直接看；无视觉模型由 gateway 端诚实告知不支援）。
+// 与 vision_analyze 的分工：vision_analyze 是「毒蛇评审」（打分＋逐维点评），本工具只负责
+// 把原图带进上下文。
 //
-// 路徑閘：只允許本會話可見範圍（uploads/<本會話 uuid>、workspace 內產物、/tmp）；
-// 讀圖前用 checkAgentPath 驗，擋跨租戶與系統路徑。注意 owner 集合由 plugin 的
-// ensureSession 從 gateway 水合（PATH_TOOLS 必須列本工具，否則此閘拿空集合一律拒）。
-// 公網 URL 亦可（下載在受信進程內）。
+// 路径闸：只允许本会话可见范围（uploads/<本会话 uuid>、workspace 内产物、/tmp）；
+// 读图前用 checkAgentPath 验，挡跨租户与系统路径。注意 owner 集合由 plugin 的
+// ensureSession 从 gateway 水合（PATH_TOOLS 必须列本工具，否则此闸拿空集合一律拒）。
+// 公网 URL 亦可（下载在受信进程内）。
 
 export default tool({
   description:

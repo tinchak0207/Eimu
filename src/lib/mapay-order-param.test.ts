@@ -56,13 +56,13 @@ test("resolveMapayOrderBinding: only a well-signed param is bound; everything el
   const bound = buildMapayOrderParam("pro", 117, SECRET);
   assert.deepEqual(resolveMapayOrderBinding(bound, ENV), { planId: "pro", userId: 117 });
 
-  // 舊格式（未登入下單）＝未綁
+  // 旧格式（未登入下单）＝未绑
   for (const legacy of ["popular", "custom:20000", null, undefined]) {
     assert.equal(resolveMapayOrderBinding(legacy, ENV), null, `expected unbound for ${JSON.stringify(legacy)}`);
   }
-  // 驗簽失敗／篡改 userId＝未綁（走舊流程，絕不把額度記到錯的人頭上）
+  // 验签失败／篡改 userId＝未绑（走旧流程，绝不把额度记到错的人头上）
   assert.equal(resolveMapayOrderBinding(bound.replace(".117.", ".118."), ENV), null);
   assert.equal(resolveMapayOrderBinding(buildMapayOrderParam("pro", 117, "other"), ENV), null);
-  // 密鑰未配置＝未綁
+  // 密钥未配置＝未绑
   assert.equal(resolveMapayOrderBinding(bound, {}), null);
 });

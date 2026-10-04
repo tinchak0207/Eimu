@@ -1,36 +1,36 @@
 #!/usr/bin/env python3
 """
-Laya 判定服務（ONNX 輕量版）— jev-gate.ts 的開源兜底後端。
+Laya 判定服务（ONNX 轻量版）— jev-gate.ts 的开源兜底后端。
 
-與 server.py（torch 版）的差異：**為 VPS 3.7GB 小機而生**。
+与 server.py（torch 版）的差异：**为 VPS 3.7GB 小机而生**。
 - torch 版 RSS ~2.84GB（PyTorch runtime + fp32 模型），VPS 塞不下；
-  ONNX 版實測 **1.61GB**（onnxruntime + tokenizers 直讀，無 torch）。
-- 校準與 torch 版逐位吻合（2026-09-20 實錘：同序列 logits 一致到小數後 5 位；
-  注入分離 攻擊 0.99 / benign 0.001–0.02）。
+  ONNX 版实测 **1.61GB**（onnxruntime + tokenizers 直读，无 torch）。
+- 校准与 torch 版逐位吻合（2026-09-20 实锤：同序列 logits 一致到小数后 5 位；
+  注入分离 攻击 0.99 / benign 0.001–0.02）。
 
-契約（與 server.py 完全一致）：
+契约（与 server.py 完全一致）：
     POST /predict  {"state": <any>, "questions": {<qid>: {...}}}
       -> {"answers": {<qid>: {"type":"noul","noul":0.97} | {"type":"choice",...} | {"type":"score",...}}}
     GET  /healthz  -> 200 {"ok":true,...}
 
-模型檔（與本檔同目錄）：
-- laya_ml_fp32_v18.onnx  multilingual checkpoint 的 fp32 ONNX 匯出（opset 18）
-- multilingual-tokenizer.json  mmBERT tokenizer（**必須配 multilingual**；root 的
-  英文 tokenizer餵它=校準全毀，2026-09-20 實錘 benign 被判 0.999）
+模型档（与本档同目录）：
+- laya_ml_fp32_v18.onnx  multilingual checkpoint 的 fp32 ONNX 汇出（opset 18）
+- multilingual-tokenizer.json  mmBERT tokenizer（**必须配 multilingual**；root 的
+  英文 tokenizer喂它=校准全毁，2026-09-20 实锤 benign 被判 0.999）
 
-匯出配方（升級 laya 版本時重跑）：見 export-onnx.md。
+汇出配方（升级 laya 版本时重跑）：见 export-onnx.md。
 
-關鍵實現細節（都是 2026-09-20 踩過的雷）：
+关键实现细节（都是 2026-09-20 踩过的雷）：
 - graph_optimization_level=ORT_DISABLE_ALL + enable_mem_pattern=False：
-  預設優化會複製一份 fp32 圖 → RSS 從 1.6GB 漲到 3.2GB。
-- special token ids 硬編碼 2/1/4/0（<bos>/<eos>/<mask>/<pad>）：
-  tokenizers 的 token_to_id("<s>") 回 vocab 內另一個同文字串（204），
-  必須用 transformers 語義的 added_tokens 位。抽 tokenizer.json 的
-  added_tokens[0..4] 亦可，這裡直接釘死並加啟動自檢。
-- int8/fp16 量化都會打壞 multilingual 校準（benign→0.99+），只能 fp32。
+  预设优化会复制一份 fp32 图 → RSS 从 1.6GB 涨到 3.2GB。
+- special token ids 硬编码 2/1/4/0（<bos>/<eos>/<mask>/<pad>）：
+  tokenizers 的 token_to_id("<s>") 回 vocab 内另一个同文字串（204），
+  必须用 transformers 语义的 added_tokens 位。抽 tokenizer.json 的
+  added_tokens[0..4] 亦可，这里直接钉死并加启动自检。
+- int8/fp16 量化都会打坏 multilingual 校准（benign→0.99+），只能 fp32。
 
-執行：python3 server_onnx.py（env LAYA_PORT=8082）
-依賴：onnxruntime、tokenizers（見 requirements-onnx.txt）
+执行：python3 server_onnx.py（env LAYA_PORT=8082）
+依赖：onnxruntime、tokenizers（见 requirements-onnx.txt）
 """
 
 import json
@@ -51,7 +51,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(BASE, "laya_ml_fp32_v18.onnx")
 TOKENIZER = os.path.join(BASE, "multilingual-tokenizer.json")
 
-# transformers 語義的 special ids（mmBERT added_tokens 0..4：<pad>/<eos>/<bos>/<unk>/<mask>）
+# transformers 语义的 special ids（mmBERT added_tokens 0..4：<pad>/<eos>/<bos>/<unk>/<mask>）
 CLS_ID, SEP_ID, MASK_ID, PAD_ID = 2, 1, 4, 0
 
 _session = None
@@ -64,12 +64,12 @@ def _load():
     so = ort.SessionOptions()
     so.intra_op_num_threads = int(os.environ.get("LAYA_THREADS", "2"))
     so.inter_op_num_threads = 1
-    # 雷：預設圖優化會複製整份 fp32 圖（RSS 1.6→3.2GB），必須全關
+    # 雷：预设图优化会复制整份 fp32 图（RSS 1.6→3.2GB），必须全关
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
     so.enable_mem_pattern = False
     _session = ort.InferenceSession(MODEL, so, providers=["CPUExecutionProvider"])
     _tok = Tokenizer.from_file(TOKENIZER)
-    # 啟動自檢：tokenizer 的 added_tokens 特殊位必須與硬編碼一致
+    # 启动自检：tokenizer 的 added_tokens 特殊位必须与硬编码一致
     for expect, tid in (("<pad>", PAD_ID), ("<eos>", SEP_ID), ("<bos>", CLS_ID), ("<mask>", MASK_ID)):
         got = _tok.token_to_id(expect)
         if got != tid:
@@ -104,7 +104,7 @@ class _TokShim:
 
 
 def _run_one(state, internal_q):
-    """單題前向：build_sequence → ONNX → softmax（與 laya Agent.system_one 同構）。"""
+    """单题前向：build_sequence → ONNX → softmax（与 laya Agent.system_one 同构）。"""
     sess, raw_tok = get_runtime()
     tok = _TokShim(raw_tok)
     max_len, head_max_len = 1024, 256  # multilingual cfg（rl_agent_config.json）
@@ -138,7 +138,7 @@ def _to_internal(qdef):
 
 
 def system_one(state, questions):
-    """與 laya Agent.predict 同構的回答組裝（choice/score/noul）。"""
+    """与 laya Agent.predict 同构的回答组装（choice/score/noul）。"""
     answers = {}
     for qid, qdef in questions.items():
         internal = _to_internal(qdef)
@@ -204,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "questions required"})
                 return
             if not isinstance(state, str):
-                pass  # dict/list 交給 serialize_state 處理
+                pass  # dict/list 交给 serialize_state 处理
             self._send(200, system_one(state, questions))
         except Exception as exc:
             print(f"[laya-server-onnx] predict error: {type(exc).__name__}: {exc}", flush=True)

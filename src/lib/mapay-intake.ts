@@ -27,7 +27,7 @@ import { parseSeatOrderParam, seatOrderEntitlementCoins } from "@/lib/team-seat-
 import { fulfillSeatOrder } from "@/lib/team-seat-fulfillment";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
-// ─────────────────────────────────────────── 常量／型別
+// ─────────────────────────────────────────── 常量／型别
 
 export type MapayIntakeState = "received" | "fulfilled" | "parked";
 export type MapayIntakeDelivery = "direct_credit" | "redemption_code";
@@ -85,7 +85,7 @@ let schemaReady: Promise<void> | null = null;
 
 async function ensureSchema(sql: GenerationSql): Promise<void> {
   if (!schemaReady) {
-    // 與 db/migrations/037_mapay_order_intake.sql 同一 DDL（幂等，首用即建）。
+    // 与 db/migrations/037_mapay_order_intake.sql 同一 DDL（幂等，首用即建）。
     schemaReady = (async () => {
       await sql`
         CREATE TABLE IF NOT EXISTS mapay_order_intake (
@@ -230,7 +230,7 @@ type ResolvedIntake =
   | { kind: "unbound"; userId: null; planId: string; amountQuota: null; detail?: string; plan: MapayRedemptionPlan };
 
 /**
- * 由存证行重算入帐口徑（与 /api/internal/mapay-credit 同一段解析逻辑）：
+ * 由存证行重算入帐口径（与 /api/internal/mapay-credit 同一段解析逻辑）：
  * seat: 走席位；静态/custom 套餐走标价；首充按同源裁决函数。**额度一律服务端重算**。
  */
 async function resolveIntake(sql: GenerationSql, row: MapayIntakeRecord): Promise<ResolvedIntake | { error: string }> {
@@ -404,11 +404,11 @@ export async function sweepMapayIntakeOnce(
   return result;
 }
 
-// ─────────────────────────────────────────── Vercel 側簽名通道
-// 本節逐行複製 mapay-credit.ts 的 HMAC relay 骨架（signBizKeySync 簽名通道），
-// 白名單只改三处：signatureDomain → "mapay-intake"、relay 目标路由 →
-// /image-control/api/internal/mapay-intake、payload 欄位。
-// 簽名/時間戳/header/錯誤處理/超時一律照抄，不得精簡。
+// ─────────────────────────────────────────── Vercel 侧签名通道
+// 本节逐行复制 mapay-credit.ts 的 HMAC relay 骨架（signBizKeySync 签名通道），
+// 白名单只改三处：signatureDomain → "mapay-intake"、relay 目标路由 →
+// /image-control/api/internal/mapay-intake、payload 栏位。
+// 签名/时间戳/header/错误处理/超时一律照抄，不得精简。
 
 export const MAPAY_INTAKE_RELAY_SIGNATURE_DOMAIN = "mapay-intake";
 const RELAY_PATH = "/image-control/api/internal/mapay-intake";

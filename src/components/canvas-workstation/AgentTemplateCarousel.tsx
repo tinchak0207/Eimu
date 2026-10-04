@@ -17,8 +17,8 @@ interface AgentTemplateCarouselProps {
 /** 卡面转角相对环角的压缩比。1 = 严格贴合圆周切线，但边卡会侧得几乎只剩一条线；
  *  0.82 是「还能看清是什么图」和「有空间纵深」之间的平衡（coverflow 的经典做法）。*/
 const TILT = 0.82;
-/** 環半徑放大（2026-08-25 暴君裁定：在 CaseShowcase 的 ×2 基礎上再翻倍 = ×4），
-    不改任何卡片寬高；遠景的留白與中心卡的視覺重量因此更乾淨。 */
+/** 环半径放大（2026-08-25 暴君裁定：在 CaseShowcase 的 ×2 基础上再翻倍 = ×4），
+    不改任何卡片宽高；远景的留白与中心卡的视觉重量因此更干净。 */
 const RADIUS_SCALE = 4;
 /** 转角上限。夹住之后没有一张卡面会翻过 90°，所以永远不会出现背面。 */
 const TILT_MAX = 80;
@@ -74,7 +74,7 @@ function nearestAngleFor(index: number, current: number, step: number) {
   return base + Math.round((current - base) / 360) * 360;
 }
 
-/** GLSL 的 smoothstep：兩端導數為 0，所以是「平台 → 斷崖 → 平台」而不是單調衰減。 */
+/** GLSL 的 smoothstep：两端导数为 0，所以是「平台 → 断崖 → 平台」而不是单调衰减。 */
 function smoothstep(edge0: number, edge1: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -98,15 +98,15 @@ function computeFrame(phi: number) {
   const align = Math.max(0, Math.cos(tiltRad - (LIGHT_DEG * Math.PI) / 180));
   const sheen = 0.22 + 0.78 * Math.pow(align, 3);
 
-  /* ── 側壁寬度：為什麼是 tan 而不是 sin ──
-     一塊厚 T 的板轉 θ 之後，投影輪廓寬 = W·cosθ + T·sinθ。也就是側面出現在
-     **正面投影之外**，輪廓因此變寬。上一版把側面畫在卡面「裡面」（scaleX），
-     輪廓永遠等於正面投影 —— 那正是「從側面看還是像一張紙」的數學原因，
-     不是漸層調得不夠好。
+  /* ── 侧壁宽度：为什么是 tan 而不是 sin ──
+     一块厚 T 的板转 θ 之后，投影轮廓宽 = W·cosθ + T·sinθ。也就是侧面出现在
+     **正面投影之外**，轮廓因此变宽。上一版把侧面画在卡面「里面」（scaleX），
+     轮廓永远等于正面投影 —— 那正是「从侧面看还是像一张纸」的数学原因，
+     不是渐层调得不够好。
 
-     這條帶子和卡面一起吃了 rotateY 的 cosθ 壓縮，所以要在卡面座標裡給
-     T·tanθ，投影出來才剛好是 T·sinθ。tan 在 θ→90° 發散，夾在 1.5（≈56°）:
-     再側的卡不透明度只剩 0.07，本來就看不見。 */
+     这条带子和卡面一起吃了 rotateY 的 cosθ 压缩，所以要在卡面座标里给
+     T·tanθ，投影出来才刚好是 T·sinθ。tan 在 θ→90° 发散，夹在 1.5（≈56°）:
+     再侧的卡不透明度只剩 0.07，本来就看不见。 */
   const wall = Math.min(Math.abs(Math.tan(tiltRad)), 1.5) * GLASS;
 
   return {
@@ -115,10 +115,10 @@ function computeFrame(phi: number) {
     lift: (-LIFT * (1 - cos)) / 2,
     tilt,
     depth,
-    /* 靜止時：正面 1.0、相鄰 ±60° 落在 0.21、背面 0.07 —— 側卡不搶鏡頭（原始需求）。
-       但 pow(depth, 7) 在 30° 就掉到 0.64：拖動途中兩張卡同時半透明疊在淺色背景上
-       → 整片發灰，正是使用者截圖裡那張慘白的卡。smoothstep 給的是**平台加斷崖**，
-       0~30° 幾乎不掉（30° → 0.90），45° 才開始讓位，60° 準時交棒。 */
+    /* 静止时：正面 1.0、相邻 ±60° 落在 0.21、背面 0.07 —— 侧卡不抢镜头（原始需求）。
+       但 pow(depth, 7) 在 30° 就掉到 0.64：拖动途中两张卡同时半透明叠在浅色背景上
+       → 整片发灰，正是使用者截图里那张惨白的卡。smoothstep 给的是**平台加断崖**，
+       0~30° 几乎不掉（30° → 0.90），45° 才开始让位，60° 准时交棒。 */
     opacity: 0.07 + 0.93 * smoothstep(0.34, 1, Math.max(0, 2 * depth - 1)),
     /* 模糊量化到 0.5px：filter 每次变化都要重新栅格化这一层。 */
     blur: Math.round((1 - depth) * 8) / 2,
@@ -126,14 +126,14 @@ function computeFrame(phi: number) {
     sheen,
     /** ×卡宽：高光带随倾角横向扫过 */
     sheenXF: (tilt / TILT_MAX) * 0.55,
-    /** ×卡宽：側壁在卡面座標裡的寬度。rotateY(+θ) 时右缘转离视线 → 露出左侧面。 */
+    /** ×卡宽：侧壁在卡面座标里的宽度。rotateY(+θ) 时右缘转离视线 → 露出左侧面。 */
     sideLF: tilt > 0 ? wall : 0,
     sideRF: tilt < 0 ? wall : 0,
     /* 迎光侧的棱线。左切面同时是迎光侧，所以左棱更亮。 */
     rimL: tilt > 0 ? 0.20 + 0.42 * Math.abs(Math.sin(tiltRad)) : 0.12 * (1 - Math.abs(Math.sin(tiltRad))),
     rimR: tilt < 0 ? 0.14 + 0.28 * Math.abs(Math.sin(tiltRad)) : 0.07 * (1 - Math.abs(Math.sin(tiltRad))),
-    /* ×卡宽：照片沉在玻璃背面，侧看时反向错开。錯開量必須小於 .case-photo 的
-       scale 餘量（1.075 → 每側 3.75%），否則側看時照片邊緣會露出容器底。 */
+    /* ×卡宽：照片沉在玻璃背面，侧看时反向错开。错开量必须小于 .case-photo 的
+       scale 余量（1.075 → 每侧 3.75%），否则侧看时照片边缘会露出容器底。 */
     parallaxF: -Math.sin(tiltRad) * GLASS * 0.25,
   };
 }
@@ -408,8 +408,8 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
   const glowRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
-  /* 每張卡的 GL draw()。玻璃是靜物，但玻璃上的**光**要跟著轉動走，所以由這個
-     本來就在跑的手勢迴圈推它重畫 —— 事件驅動，GL 那邊不自己開 rAF。 */
+  /* 每张卡的 GL draw()。玻璃是静物，但玻璃上的**光**要跟著转动走，所以由这个
+     本来就在跑的手势回圈推它重画 —— 事件驱动，GL 那边不自己开 rAF。 */
   const glDrawRefs = useRef<Array<((tiltDeg: number) => void) | null>>([]);
   const glTiltRefs = useRef<number[]>([]);
 
@@ -524,8 +524,8 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
 
       s.transform = `translate3d(${(radius * f.xF).toFixed(2)}px, ${f.lift.toFixed(2)}px, ${(radius * f.zF).toFixed(2)}px) rotateY(${f.tilt.toFixed(2)}deg)`;
       s.opacity = f.opacity.toFixed(3);
-      /* 景深模糊移到 .case-face（正面那一疊）。留在 .case-slab 上的話，側壁作為
-         溢出子節點會被 filter 的作用範圍裁掉 —— 而側壁是厚度的唯一證據。 */
+      /* 景深模糊移到 .case-face（正面那一叠）。留在 .case-slab 上的话，侧壁作为
+         溢出子节点会被 filter 的作用范围裁掉 —— 而侧壁是厚度的唯一证据。 */
       s.zIndex = String(f.zIndex);
       s.pointerEvents = f.depth > 0.4 ? "auto" : "none";
       s.setProperty("--case-depth", f.depth.toFixed(3));
@@ -539,9 +539,9 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       s.setProperty("--case-rim-r", f.rimR.toFixed(3));
       s.setProperty("--case-parallax", `${(cardW * f.parallaxF).toFixed(2)}px`);
 
-      /* 把傾角推進 shader：高光滑過玻璃、受光側的邊變厚，都是這個值在驅動。
-         門檻 0.4° + 只重畫看得見的兩三張（depth > 0.5）—— 拖動時 GPU 上的
-         實際負擔是一到兩張卡，不是六張。 */
+      /* 把倾角推进 shader：高光滑过玻璃、受光侧的边变厚，都是这个值在驱动。
+         门槛 0.4° + 只重画看得见的两三张（depth > 0.5）—— 拖动时 GPU 上的
+         实际负担是一到两张卡，不是六张。 */
       const glDraw = glDrawRefs.current[i];
       if (glDraw && f.depth > 0.5 && Math.abs(f.tilt - (glTiltRefs.current[i] ?? 999)) > 0.4) {
         glTiltRefs.current[i] = f.tilt;
@@ -719,7 +719,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
   }, []);
 
   /* 案例数量变化后每格角度改变：环回到第一张，避免旧角度在新格距下错位落格。
-     模板环 cases 是 props 直傳，數量變化時同樣需要重置。 */
+     模板环 cases 是 props 直传，数量变化时同样需要重置。 */
   useEffect(() => {
     if (COUNT === prevCountRef.current) return;
     prevCountRef.current = COUNT;
@@ -771,12 +771,12 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
     return () => window.removeEventListener("scroll", onScroll);
   }, [drive]);
 
-  /* 触控板横扫 / Shift+滚轮。2026-09-12 性能審計（09-11 OOM note）：改
-     { passive: true } 並移除 preventDefault——非 passive 的 wheel 監聽會把
-     stage 上的滾輪事件卡在主線程，拖累合成器滾動。仍只在橫向分量占優時
-     drive() 轉卡，縱向一律放行。已知缺口：橫掃時防頁面橫向漂移/滑動導航
-     需要 stage 上的 overscroll-behavior-x CSS，那在共用樣式檔（本片禁改），
-     待後續片補。教学演示期间（atc-tour-locking）同样短路转卡。 */
+  /* 触控板横扫 / Shift+滚轮。2026-09-12 性能审计（09-11 OOM note）：改
+     { passive: true } 并移除 preventDefault——非 passive 的 wheel 监听会把
+     stage 上的滚轮事件卡在主线程，拖累合成器滚动。仍只在横向分量占优时
+     drive() 转卡，纵向一律放行。已知缺口：横扫时防页面横向漂移/滑动导航
+     需要 stage 上的 overscroll-behavior-x CSS，那在共用样式档（本片禁改），
+     待后续片补。教学演示期间（atc-tour-locking）同样短路转卡。 */
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -840,11 +840,11 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       stageRef.current.releasePointerCapture(event.pointerId);
     }
 
-    /* 2026-08-25 點擊根因修復：setPointerCapture 會把後續 pointer 事件（含衍生
-       click）重定向到舞台——卡片的 onClick 在多數瀏覽器根本收不到，這就是
-       「點卡進不去」反覆修不掉的原因。改成 pointerup 收口：手指沒動過 =
-       一次點擊，對釋放點做命中測試找到卡，激活邏輯原地執行。
-       movedRef 先置 true：若瀏覽器仍補發 click，onCardClick 會直接閉嘴。 */
+    /* 2026-08-25 点击根因修复：setPointerCapture 会把后续 pointer 事件（含衍生
+       click）重定向到舞台——卡片的 onClick 在多数浏览器根本收不到，这就是
+       「点卡进不去」反覆修不掉的原因。改成 pointerup 收口：手指没动过 =
+       一次点击，对释放点做命中测试找到卡，激活逻辑原地执行。
+       movedRef 先置 true：若浏览器仍补发 click，onCardClick 会直接闭嘴。 */
     if (!movedRef.current) {
       const hit = document.elementFromPoint(event.clientX, event.clientY);
       const slab = hit instanceof Element ? hit.closest(".case-slab") : null;
@@ -892,10 +892,10 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       {/* 2026-08-25 用户裁定：零文案。页头标题/胶囊、底部标题+痛点+启动按钮+
           「查看初始提示词」全部删除——卡面已带全部信息，正面卡点击即启动。 */}
 
-      {/* 2026-09-24 用戶版面方案·刀1：包一層緊貼 stage 的定位宿主。
-          根 section 是滿版 flex 置中容器（頂到視口底），控制行若 absolute
-          於根，bottom:16px 會落在卡外之下；wrap 高 = stage 高，卡片幾何
-          （stage = 1.2×cardH）全部由既有 JS measure() 驅動，此層零邏輯。 */}
+      {/* 2026-09-24 用户版面方案·刀1：包一层紧贴 stage 的定位宿主。
+          根 section 是满版 flex 置中容器（顶到视口底），控制行若 absolute
+          于根，bottom:16px 会落在卡外之下；wrap 高 = stage 高，卡片几何
+          （stage = 1.2×cardH）全部由既有 JS measure() 驱动，此层零逻辑。 */}
       <div className="atc-stage-wrap">
       <div
         ref={stageRef}
@@ -921,39 +921,39 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
             style={STATIC_FRAMES[index]}
             onClick={() => onCardClick(index)}
           >
-            {/* ── 側壁：厚度的唯一真證據 ──
-                必須是 .case-face 的**兄弟**而不是子節點：它要伸出正面之外才能
-                把輪廓撐寬（一塊厚 T 的板轉 θ，投影寬 = W·cosθ + T·sinθ），
-                而 .case-face 帶 filter，filter 會把溢出的子節點裁掉。 */}
+            {/* ── 侧壁：厚度的唯一真证据 ──
+                必须是 .case-face 的**兄弟**而不是子节点：它要伸出正面之外才能
+                把轮廓撑宽（一块厚 T 的板转 θ，投影宽 = W·cosθ + T·sinθ），
+                而 .case-face 带 filter，filter 会把溢出的子节点裁掉。 */}
             <div className="case-side case-side-l" aria-hidden="true" />
             <div className="case-side case-side-r" aria-hidden="true" />
 
-            {/* ── 液態玻璃層：整張卡由 shader 成像 ──
-                必須是 .case-slab 的**直接子節點**，兩個理由：
-                ① 它的輪廓要外凸、起伏、伸出側壁，全都落在卡框之外，掛進帶
-                   filter 的 .case-face 會被裁成直邊 —— 那就又是圓角矩形。
-                ② 元件靠 host.parentElement 讀卡片的版面尺寸與四角半徑。
-                就緒後它會給 .case-slab 掛上 data-glass="on"，把下面那一疊
-                矩形的 HTML 圖層收掉。 */}
-            {/* 模板卡：海報區 = 模範級 AI 成片封面照 + 領域漸變疊底（保證文字可讀）
-                + 大字水印 + 模板名稱與流水線步驟鏈。2026-08-26：純漸變 placeholder
-                換成真實 AI 成片素材（八卡各一條模範作品封面帧）。 */}
+            {/* ── 液态玻璃层：整张卡由 shader 成像 ──
+                必须是 .case-slab 的**直接子节点**，两个理由：
+                ① 它的轮廓要外凸、起伏、伸出侧壁，全都落在卡框之外，挂进带
+                   filter 的 .case-face 会被裁成直边 —— 那就又是圆角矩形。
+                ② 元件靠 host.parentElement 读卡片的版面尺寸与四角半径。
+                就绪后它会给 .case-slab 挂上 data-glass="on"，把下面那一叠
+                矩形的 HTML 图层收掉。 */}
+            {/* 模板卡：海报区 = 模范级 AI 成片封面照 + 领域渐变叠底（保证文字可读）
+                + 大字水印 + 模板名称与流水线步骤链。2026-08-26：纯渐变 placeholder
+                换成真实 AI 成片素材（八卡各一条模范作品封面帧）。 */}
             <div className="case-face">
               <div className="case-media">
                 <div className="case-photo">
                   {item.showcaseImage ? (
                     <div className={cn("absolute inset-0 bg-gradient-to-br", item.accent)}>
-                      {/* 素材影片（2026-08-26 用戶裁定：卡面必須是真影片）：8 秒靜音循環。
-                          poster = 封面帧 webp（影片未載入/還在緩衝時不空白）；
-                          muted+playsInline+preload=metadata 才允許自動播放，
-                          aria-hidden（純視覺層）。 */}
-                      {/* 2026-09-12 性能審計落地（09-11 OOM note 待修①）：只有正面卡掛
-                          <video>——換卡由 paint() 的 setFront 觸發本圖層重渲染，新正面卡
-                          挂载即 autoPlay（play），離去卡卸載整個元素（等價 pause+卸 src
-                          還解碼器），8 路軟解 → 1 路。啟停完全鉤進既有 data-front 變更點，
-                          不新增事件監聽。非正面卡走下面現成的封面帧兜底路徑。 */}
+                      {/* 素材影片（2026-08-26 用户裁定：卡面必须是真影片）：8 秒静音循环。
+                          poster = 封面帧 webp（影片未载入/还在缓冲时不空白）；
+                          muted+playsInline+preload=metadata 才允许自动播放，
+                          aria-hidden（纯视觉层）。 */}
+                      {/* 2026-09-12 性能审计落地（09-11 OOM note 待修①）：只有正面卡挂
+                          <video>——换卡由 paint() 的 setFront 触发本图层重渲染，新正面卡
+                          挂载即 autoPlay（play），离去卡卸载整个元素（等价 pause+卸 src
+                          还解码器），8 路软解 → 1 路。启停完全钩进既有 data-front 变更点，
+                          不新增事件监听。非正面卡走下面现成的封面帧兜底路径。 */}
                       {item.showcaseVideo && index === front && (
-                        /* eslint-disable-next-line jsx-a11y/media-has-caption, @next/next/no-img-element -- 靜態 public 資產背景層 */
+                        /* eslint-disable-next-line jsx-a11y/media-has-caption, @next/next/no-img-element -- 静态 public 资产背景层 */
                         <video
                           src={item.showcaseVideo}
                           poster={item.showcaseImage}
@@ -966,10 +966,10 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                           className="absolute inset-0 h-full w-full object-cover"
                         />
                       )}
-                      {/* 靜態兜底：封面帧 webp。原為「無影片時的兜底」，2026-09-12 起
-                          兼作「非正面卡」的常態渲染路徑。object-cover 鋪滿。 */}
+                      {/* 静态兜底：封面帧 webp。原为「无影片时的兜底」，2026-09-12 起
+                          兼作「非正面卡」的常态渲染路径。object-cover 铺满。 */}
                       {(!item.showcaseVideo || index !== front) && (
-                        /* eslint-disable-next-line @next/next/no-img-element -- 靜態 public 資產，case-photo 是背景層不走 next/image */
+                        /* eslint-disable-next-line @next/next/no-img-element -- 静态 public 资产，case-photo 是背景层不走 next/image */
                         <img
                           src={item.showcaseImage}
                           alt=""
@@ -977,8 +977,8 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                           className="absolute inset-0 h-full w-full object-cover"
                         />
                       )}
-                      {/* 2026-08-26 用戶裁定：真影片素材上不再疊領域大字水印——
-                          那是無素材時代的 placeholder 裝飾，疊在真成片上就是噪音。 */}
+                      {/* 2026-08-26 用户裁定：真影片素材上不再叠领域大字水印——
+                          那是无素材时代的 placeholder 装饰，叠在真成片上就是噪音。 */}
                     </div>
                   ) : (
                   <div className={cn("absolute inset-0 bg-gradient-to-br", item.accent)}>
@@ -987,14 +987,14 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                     </span>
                   </div>
                   )}
-                  {/* 卡面頁眉（2026-09-29 改錨卡頂）：左標題/副標、右按鈕，中央讓給成片。
-                      （2026-08-27 回滾：eyebrow/tagline/珠鏈是錯誤 scope 的改動，
-                      用戶指定的是畫布節點卡，不是 carousel 卡面。） */}
+                  {/* 卡面页眉（2026-09-29 改锚卡顶）：左标题/副标、右按钮，中央让给成片。
+                      （2026-08-27 回滚：eyebrow/tagline/珠链是错误 scope 的改动，
+                      用户指定的是画布节点卡，不是 carousel 卡面。） */}
                   <div className="atc-info">
                     <div className="atc-title">{item.name}</div>
-                    {/* P0-1 劇本入口曝光（2026-09-28）：只在 novel_film 正面卡上補一行
-                        「有文本就丟進來」的提示。零新輪子——沿用 atc-info 既有排版與
-                        卡面字影規範，純文案加一行，不碰輪播幾何/手勢/事件。 */}
+                    {/* P0-1 剧本入口曝光（2026-09-28）：只在 novel_film 正面卡上补一行
+                        「有文本就丢进来」的提示。零新轮子——沿用 atc-info 既有排版与
+                        卡面字影规范，纯文案加一行，不碰轮播几何/手势/事件。 */}
                     {item.harnessTemplateId === "novel_film" && (
                       <div className="atc-script-entry">{text("templates.scriptEntry.hint")}</div>
                     )}
@@ -1015,9 +1015,9 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                   </div>
                 </div>
               </div>
-              {/* 最外緣那條掠射亮線。厚玻璃正對鏡頭時唯一「白」的地方就是這裡
-                  （Fresnel≈1），只有 1px，沒有任何面積 —— 上一版給了它 43px 的
-                  面積，做出來的是塑膠相框。 */}
+              {/* 最外缘那条掠射亮线。厚玻璃正对镜头时唯一「白」的地方就是这里
+                  （Fresnel≈1），只有 1px，没有任何面积 —— 上一版给了它 43px 的
+                  面积，做出来的是塑胶相框。 */}
               <div className="case-edge" aria-hidden="true" />
               <div className="case-surface" aria-hidden="true">
                 <div className="case-sheen" />
@@ -1061,14 +1061,14 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
           <ChevronRight className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
-      </div>{/* end .atc-stage-wrap：分頁控制行收進卡內的定位宿主（2026-09-24 刀1） */}
+      </div>{/* end .atc-stage-wrap：分页控制行收进卡内的定位宿主（2026-09-24 刀1） */}
 
-      {/* 這裡曾經掛著 SVG 位移滤镜 #case-liquid-edge，已移除。
-          它是使用者看到的「明顯分層」的成因：feMorphology 的結構元素是**矩形**，
-          用它侵蝕一個圓角矩形，得到的遮罩帶方角；再把這塊「銳利核心」蓋回一份
-          位移過的副本上，兩者的交界就是畫面裡那個硬邊直角框。stdDeviation="3"
-          遠不足以糊掉它。邊緣折射現在由 CaseGlassWebGL 用真 Snell 折射計算，
-          幾何厚度由 .case-side 撐出輪廓 —— 兩者都不需要拿矩形核去切圓角。 */}
+      {/* 这里曾经挂著 SVG 位移滤镜 #case-liquid-edge，已移除。
+          它是使用者看到的「明显分层」的成因：feMorphology 的结构元素是**矩形**，
+          用它侵蚀一个圆角矩形，得到的遮罩带方角；再把这块「锐利核心」盖回一份
+          位移过的副本上，两者的交界就是画面里那个硬边直角框。stdDeviation="3"
+          远不足以糊掉它。边缘折射现在由 CaseGlassWebGL 用真 Snell 折射计算，
+          几何厚度由 .case-side 撑出轮廓 —— 两者都不需要拿矩形核去切圆角。 */}
 
     </section>
   );

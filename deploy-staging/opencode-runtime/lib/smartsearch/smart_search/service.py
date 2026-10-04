@@ -1201,7 +1201,7 @@ def _provider_configured(provider: str) -> bool:
     if provider == "openai-compatible":
         return bool(config.openai_compatible_api_url and config.openai_compatible_api_key)
     if provider == "context7":
-        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+        return True  # keyless-patch: 免 Key 通路，provider 启用即算配置
     if provider == "exa":
         return bool(config.exa_api_key)
     if provider == "zhipu":
@@ -1211,15 +1211,15 @@ def _provider_configured(provider: str) -> bool:
     if provider == "tavily":
         return _tavily_is_enabled()
     if provider == "jina":
-        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+        return True  # keyless-patch: 免 Key 通路，provider 启用即算配置
     if provider == "zhipu-mcp-reader":
         return bool(config.zhipu_mcp_api_key)
     if provider == "firecrawl":
-        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+        return True  # keyless-patch: 免 Key 通路，provider 启用即算配置
     if provider == "tinyfish":
         return bool(config.tinyfish_api_key)
     if provider == "anysearch":
-        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+        return True  # keyless-patch: 免 Key 通路，provider 启用即算配置
     if provider == "sciverse":
         return bool(config.sciverse_api_token)
     if provider == "main-search":
@@ -2719,9 +2719,9 @@ async def call_tavily_search(query: str, max_results: int = 6) -> list[dict] | N
 async def call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | None:
     if not config.provider_enabled("firecrawl"):
         return None
-    api_key = config.firecrawl_api_key or ""  # keyless-patch: 允許匿名呼叫
+    api_key = config.firecrawl_api_key or ""  # keyless-patch: 允许匿名呼叫
     endpoint = f"{config.firecrawl_api_url.rstrip('/')}/search"
-    headers = {"Content-Type": "application/json"}  # keyless-patch: 無 key 時不送 Authorization
+    headers = {"Content-Type": "application/json"}  # keyless-patch: 无 key 时不送 Authorization
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     body = {"query": query, "limit": limit}
@@ -2758,9 +2758,9 @@ async def call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | Non
 async def call_firecrawl_scrape(url: str, ctx=None) -> str | None:
     if not config.provider_enabled("firecrawl"):
         return None
-    api_key = config.firecrawl_api_key or ""  # keyless-patch: 允許匿名呼叫
+    api_key = config.firecrawl_api_key or ""  # keyless-patch: 允许匿名呼叫
     endpoint = f"{config.firecrawl_api_url.rstrip('/')}/scrape"
-    headers = {"Content-Type": "application/json"}  # keyless-patch: 無 key 時不送 Authorization
+    headers = {"Content-Type": "application/json"}  # keyless-patch: 无 key 时不送 Authorization
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     for attempt in range(config.retry_max_attempts):
@@ -4429,7 +4429,7 @@ async def zhipu_search(
 async def context7_library(name: str, query: str = "") -> dict[str, Any]:
     if disabled := _provider_disabled_result("context7"):
         return disabled
-    api_key = config.context7_api_key or ""  # keyless-patch: 允許匿名呼叫
+    api_key = config.context7_api_key or ""  # keyless-patch: 允许匿名呼叫
     provider = Context7Provider(config.context7_base_url, api_key, config.context7_timeout)
     activity.progress("provider_request", "context7")
     raw = await provider.library(name, query)
@@ -4445,7 +4445,7 @@ async def context7_library(name: str, query: str = "") -> dict[str, Any]:
 async def context7_docs(library_id: str, query: str) -> dict[str, Any]:
     if disabled := _provider_disabled_result("context7"):
         return disabled
-    api_key = config.context7_api_key or ""  # keyless-patch: 允許匿名呼叫
+    api_key = config.context7_api_key or ""  # keyless-patch: 允许匿名呼叫
     provider = Context7Provider(config.context7_base_url, api_key, config.context7_timeout)
     activity.progress("provider_request", "context7")
     raw = await provider.docs(library_id, query)

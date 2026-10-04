@@ -1,15 +1,15 @@
-// 從 index.ts 無損抽取（2026-09-19 第二階段 Wave2）：Phase 0 觀測——per-turn 分段延遲打點
+// 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave2）：Phase 0 观测——per-turn 分段延迟打点
 // （TURN_METRICS_RING/beginTurnMetrics/noteTurnPromptDispatch/noteTurnDeferred/markTurnFirst/
-// noteTurnUsage/finishTurnMetrics）、event-loop lag 取樣（含模組級 startEventLoopLagSampler()
-// 副作用呼叫，原樣搬）、percentile/stageStats/turnMetricsSnapshot（原 index.ts 4378–4592 行）。
+// noteTurnUsage/finishTurnMetrics）、event-loop lag 取样（含模组级 startEventLoopLagSampler()
+// 副作用呼叫，原样搬）、percentile/stageStats/turnMetricsSnapshot（原 index.ts 4378–4592 行）。
 import type { SessionState, TurnMetricsEnd, TurnMetricsSnapshot } from "./types-gateway.ts"
 import { redactForLog, type LogSafeText } from "./analytics-meta.ts"
 
-// ── journal 出口（2026-10-02）：型別層簽核 ＋ 遮罩 ──────────────────────
-// 本檔所有落 console/journal 的行都只走這兩個函數（禁止直接 console.*）。參數型別是
-// `LogSafeText`（= never，見 analytics-meta.ts）——呼叫端必須傳 redactForLog() 的產物
-// （或明示 `as LogSafeText` 自負），否則編譯不過。這把「secret 進 journalctl」從
-// 靠自覺變成靠簽核。設計取自 Claude Code analytics brand type（未複製其程式碼）。
+// ── journal 出口（2026-10-02）：型别层签核 ＋ 遮罩 ──────────────────────
+// 本档所有落 console/journal 的行都只走这两个函数（禁止直接 console.*）。参数型别是
+// `LogSafeText`（= never，见 analytics-meta.ts）——呼叫端必须传 redactForLog() 的产物
+// （或明示 `as LogSafeText` 自负），否则编译不过。这把「secret 进 journalctl」从
+// 靠自觉变成靠签核。设计取自 Claude Code analytics brand type（未复制其程式码）。
 function journalLine(line: LogSafeText): void {
   console.log(line)
 }
@@ -17,23 +17,23 @@ function journalError(line: LogSafeText): void {
   console.error(line)
 }
 
-// ── Phase 0 觀測（2026-09-18）：per-turn 分段延遲打點 ────────────────────
-// 純觀測、行為中性：不新增/改寫任何 SSE 幀（前端 reducer 契約零改動），不動
-// prompt 內容/重試邏輯/逾時常數。目的＝把「一個 turn 的 109 秒花在哪」由推斷
-// 變成量測：
-//   ① journal 單行 `[gateway] turn.metrics {json}`（journalctl | grep 可用）
-//   ② 記憶體 ring（最近 200 筆）→ GET /agent/v1/metrics 出各階段 p50/p95/p99
-//   ③ event-loop lag 每秒取樣 → 檢驗「記憶體壓力造成 event loop 抖動」假設
-// 生命週期安全：每 session 至多一份在途檔（掛在 SessionState 的 volatile 欄位）；
-// turn.done 收檔、用戶中止由 handleAbortSession 收檔、被下一輪取代由
-// beginTurnMetrics 以 superseded 補收——不掛任何計時器、不持有跨 turn 引用，
-// 故無計時器洩漏；全部打點函數對「檔不存在」直接靜默返回，永不拋錯。
+// ── Phase 0 观测（2026-09-18）：per-turn 分段延迟打点 ────────────────────
+// 纯观测、行为中性：不新增/改写任何 SSE 帧（前端 reducer 契约零改动），不动
+// prompt 内容/重试逻辑/逾时常数。目的＝把「一个 turn 的 109 秒花在哪」由推断
+// 变成量测：
+//   ① journal 单行 `[gateway] turn.metrics {json}`（journalctl | grep 可用）
+//   ② 记忆体 ring（最近 200 笔）→ GET /agent/v1/metrics 出各阶段 p50/p95/p99
+//   ③ event-loop lag 每秒取样 → 检验「记忆体压力造成 event loop 抖动」假设
+// 生命周期安全：每 session 至多一份在途档（挂在 SessionState 的 volatile 栏位）；
+// turn.done 收档、用户中止由 handleAbortSession 收档、被下一轮取代由
+// beginTurnMetrics 以 superseded 补收——不挂任何计时器、不持有跨 turn 引用，
+// 故无计时器泄漏；全部打点函数对「档不存在」直接静默返回，永不抛错。
 
 export const TURN_METRICS_RING = 200
 export const turnMetricsRing: TurnMetricsSnapshot[] = []
 
-/** 本輪計時檔起點；t_accept = handleSendMessage 進入時刻（呼叫方帶入）。
- *  既有在途檔（上一輪未收尾）先以 superseded 收檔，保證每 session 至多一份。 */
+/** 本轮计时档起点；t_accept = handleSendMessage 进入时刻（呼叫方带入）。
+ *  既有在途档（上一轮未收尾）先以 superseded 收档，保证每 session 至多一份。 */
 export function beginTurnMetrics(state: SessionState, tAccept: number): void {
   try {
     if (state.turnMetrics) finishTurnMetrics(state, "superseded")
@@ -60,8 +60,8 @@ export function beginTurnMetrics(state: SessionState, tAccept: number): void {
   }
 }
 
-/** prompt_async 投遞成功打點（呼叫方只在 res.ok 後呼叫）。首次=attempt 1，
- *  同一 turn 的 failover/jitter 重投每次遞增 attempt 並刷新實際使用的模型。 */
+/** prompt_async 投递成功打点（呼叫方只在 res.ok 后呼叫）。首次=attempt 1，
+ *  同一 turn 的 failover/jitter 重投每次递增 attempt 并刷新实际使用的模型。 */
 export function noteTurnPromptDispatch(state: SessionState, providerID?: string | null, modelID?: string | null): void {
   const m = state.turnMetrics
   if (!m) return
@@ -73,13 +73,13 @@ export function noteTurnPromptDispatch(state: SessionState, providerID?: string 
   if (modelID) m.modelID = modelID
 }
 
-/** compaction 閘擋住本輪 prompt 的時刻（prompt_deferred_ms 起算點）。 */
+/** compaction 闸挡住本轮 prompt 的时刻（prompt_deferred_ms 起算点）。 */
 export function noteTurnDeferred(state: SessionState): void {
   const m = state.turnMetrics
   if (m && m.deferredAt === null) m.deferredAt = Date.now()
 }
 
-/** 本輪首個里程碑（reasoning/text/tool/plan）——只記第一次，之後靜默。 */
+/** 本轮首个里程碑（reasoning/text/tool/plan）——只记第一次，之后静默。 */
 export function markTurnFirst(state: SessionState, kind: "reasoning" | "text" | "tool" | "plan"): void {
   const m = state.turnMetrics
   if (!m) return
@@ -91,14 +91,14 @@ export function markTurnFirst(state: SessionState, kind: "reasoning" | "text" | 
   } else if (kind === "tool") {
     if (m.t_first_tool === null) m.t_first_tool = now
   } else if (m.t_first_plan === null) {
-    // turn.plan（兩段式首字第一段）：與 d_first_text_ms 分開記——**禁止拿計畫
-    // 冒充正文**，兩欄各自獨立、互不寫入。
+    // turn.plan（两段式首字第一段）：与 d_first_text_ms 分开记——**禁止拿计画
+    // 冒充正文**，两栏各自独立、互不写入。
     m.t_first_plan = now
   }
 }
 
-/** context tokens / cache 讀寫：取自 message.updated 事件自帶的 info.tokens（零額外
- *  往返、零延遲）。opencode 未帶此欄位時一律保持 null——不為拿它加額外請求。 */
+/** context tokens / cache 读写：取自 message.updated 事件自带的 info.tokens（零额外
+ *  往返、零延迟）。opencode 未带此栏位时一律保持 null——不为拿它加额外请求。 */
 export function noteTurnUsage(state: SessionState, info: unknown): void {
   const m = state.turnMetrics
   if (!m || !info || typeof info !== "object") return
@@ -115,8 +115,8 @@ export function noteTurnUsage(state: SessionState, info: unknown): void {
   }
 }
 
-/** 收檔：算衍生階段差、入 ring、印 journal 單行。end=superseded（被下一輪取代、
- *  從未收尾）時 t_done 留 null——不謊報結束時間。 */
+/** 收档：算衍生阶段差、入 ring、印 journal 单行。end=superseded（被下一轮取代、
+ *  从未收尾）时 t_done 留 null——不谎报结束时间。 */
 export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): void {
   const m = state.turnMetrics
   if (!m) return
@@ -156,17 +156,17 @@ export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): voi
     if (turnMetricsRing.length > TURN_METRICS_RING) {
       turnMetricsRing.splice(0, turnMetricsRing.length - TURN_METRICS_RING)
     }
-    // snap 的 provider/model 等欄位雖為識別字，仍可能夾帶上游回傳的自由文字；一律先遮罩再落盤。
+    // snap 的 provider/model 等栏位虽为识别字，仍可能夹带上游回传的自由文字；一律先遮罩再落盘。
     journalLine(redactForLog(`[gateway] turn.metrics ${JSON.stringify(snap)}`))
   } catch (e) {
     journalError(redactForLog(`[gateway] turn.metrics finish failed: session=${state.sessionId} ${e}`))
   }
 }
 
-// ── event-loop lag 取樣（Phase 0 ③）────────────────────────────────────
-// 每秒量一次 timer drift（performance.now() 對比預期到點時間）：drift 大 =
-// event loop 被同步工作/記憶體壓力卡住。performance.now() 是 Bun/Node 共有
-// 的單調毫秒時鐘。取樣只進 ring，不影響任何請求路徑。
+// ── event-loop lag 取样（Phase 0 ③）────────────────────────────────────
+// 每秒量一次 timer drift（performance.now() 对比预期到点时间）：drift 大 =
+// event loop 被同步工作/记忆体压力卡住。performance.now() 是 Bun/Node 共有
+// 的单调毫秒时钟。取样只进 ring，不影响任何请求路径。
 export const EVENT_LOOP_LAG_INTERVAL_MS = 1000
 export const EVENT_LOOP_LAG_RING = 300
 export const eventLoopLagSamples: number[] = []
@@ -182,14 +182,14 @@ export function startEventLoopLagSampler(): void {
       }
       expected = at + EVENT_LOOP_LAG_INTERVAL_MS
     } catch {
-      // 取樣失敗不影響 gateway：本次跳過。
+      // 取样失败不影响 gateway：本次跳过。
     }
   }, EVENT_LOOP_LAG_INTERVAL_MS)
 }
 
 startEventLoopLagSampler()
 
-// ── 聚合視圖（GET /agent/v1/metrics）────────────────────────────────────
+// ── 聚合视图（GET /agent/v1/metrics）────────────────────────────────────
 export function percentile(sorted: number[], p: number): number | null {
   if (sorted.length === 0) return null
   const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
@@ -201,8 +201,8 @@ export function stageStats(values: number[]): { n: number; p50: number | null; p
   return { n: sorted.length, p50: percentile(sorted, 50), p95: percentile(sorted, 95), p99: percentile(sorted, 99) }
 }
 
-/** 每階段統計：d_* = 自 t_accept 起算的累積延遲；prompt_deferred_ms = compaction
- *  閘等待（0 = 本輪沒被擋）。n = 有觀測到該里程碑的樣本數。 */
+/** 每阶段统计：d_* = 自 t_accept 起算的累积延迟；prompt_deferred_ms = compaction
+ *  闸等待（0 = 本轮没被挡）。n = 有观测到该里程碑的样本数。 */
 export function turnMetricsSnapshot(): Record<string, unknown> {
   const stages: Record<string, { n: number; p50: number | null; p95: number | null; p99: number | null }> = {}
   const fields = [

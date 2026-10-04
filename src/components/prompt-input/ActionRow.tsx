@@ -14,9 +14,9 @@ interface ActionRowProps {
   onModeChange: (mode: PromptInputMode) => void;
   fillAvailableHeight: boolean;
   stylePreset: StylePreset;
-  /** 父层 handleStyleChange 原名下發：清除已套用风格走同一条写入路径。 */
+  /** 父层 handleStyleChange 原名下发：清除已套用风格走同一条写入路径。 */
   handleStyleChange: (preset: StylePreset) => void;
-  /** 父层 handlePrimaryAction 原名下發：generate/edit/upscale 三模式共用一颗 CTA。 */
+  /** 父层 handlePrimaryAction 原名下发：generate/edit/upscale 三模式共用一颗 CTA。 */
   handlePrimaryAction: () => void;
   /** 生成中的人工终止回调（generate 模式 isLoading 时显示「停止」次级按钮）。 */
   onCancelGenerate?: () => void;
@@ -30,7 +30,7 @@ interface ActionRowProps {
 }
 
 /**
- * 底部動作列（Task 9 自 PromptInput 抽出）：改图/放大/AI 助理三颗同语法 toggle、
+ * 底部动作列（Task 9 自 PromptInput 抽出）：改图/放大/AI 助理三颗同语法 toggle、
  * 已套用风格 pill、CTA。agent 面无底行：收起/返回由聊天面
  * Header 的 onExit 按钮承担。
  * 不参与模式切换动画，始终原地不动（高度差由控件区 flex-1 吸收）。

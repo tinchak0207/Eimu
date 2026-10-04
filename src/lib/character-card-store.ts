@@ -1,9 +1,9 @@
-// 角色/場景卡雲端持久化（Blob）。
+// 角色/场景卡云端持久化（Blob）。
 //
-// 存儲選型：對齊 canvas/project-store.ts 的既有模式——每用戶一份 index 文件、
-// 每次寫入落到新路徑 + 修剪舊世代（避免 Blob cacheControlMaxAge 60s 下限造成
-// 「剛存讀不到」）、單用戶寫入串行（write queue）、無 Blob 時記憶體降級。
-// 冷啟動量小（每用戶上限 100 張卡），不建 SQL/新基建。
+// 存储选型：对齐 canvas/project-store.ts 的既有模式——每用户一份 index 文件、
+// 每次写入落到新路径 + 修剪旧世代（避免 Blob cacheControlMaxAge 60s 下限造成
+// 「刚存读不到」）、单用户写入串行（write queue）、无 Blob 时记忆体降级。
+// 冷启动量小（每用户上限 100 张卡），不建 SQL/新基建。
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
@@ -12,7 +12,7 @@ import type { CharacterCard } from "./character-cards";
 
 const CARD_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
-/** 每用戶卡片上限（寫入時截尾；REQ-B2b 掛用建副本前先驗容量，超限誠實拒絕而非靜默丟卡）。 */
+/** 每用户卡片上限（写入时截尾；REQ-B2b 挂用建副本前先验容量，超限诚实拒绝而非静默丢卡）。 */
 export const MAX_CARDS_PER_USER = 100;
 const INDEX_CACHE_TTL_MS = 3_000;
 
@@ -108,20 +108,20 @@ async function writeCards(userId: number, cards: CharacterCard[]): Promise<void>
   const stale = previous.slice(INDEX_GENERATIONS_KEPT - 1);
   if (stale.length) {
     await del(stale.map((b) => b.url)).catch((error) => {
-      console.error("[character-cards] 清理舊索引失敗。", error);
+      console.error("[character-cards] 清理旧索引失败。", error);
     });
   }
 }
 
-// ─────────────────────────────────────────── 對外接口
+// ─────────────────────────────────────────── 对外接口
 
-/** 讀全部卡（updatedAt 由新到舊）。 */
+/** 读全部卡（updatedAt 由新到旧）。 */
 export async function listCharacterCards(userId: number): Promise<CharacterCard[]> {
   const cards = await readCards(userId);
   return cards.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
-/** 儲存/覆蓋一張卡（upsert by id）。非法卡靜默丟棄。 */
+/** 储存/覆盖一张卡（upsert by id）。非法卡静默丢弃。 */
 export async function saveCharacterCard(userId: number, card: CharacterCard): Promise<void> {
   const normalized = normalizeCharacterCard(card);
   if (!normalized) return;
@@ -132,7 +132,7 @@ export async function saveCharacterCard(userId: number, card: CharacterCard): Pr
   });
 }
 
-/** 刪除若干卡。返回實際刪除數。 */
+/** 删除若干卡。返回实际删除数。 */
 export async function deleteCharacterCards(userId: number, ids: string[]): Promise<number> {
   const targets = new Set(ids.filter(Boolean));
   if (!targets.size) return 0;
@@ -145,7 +145,7 @@ export async function deleteCharacterCards(userId: number, ids: string[]): Promi
   });
 }
 
-/** 僅測試：重置進程內狀態。 */
+/** 仅测试：重置进程内状态。 */
 export function __resetCharacterCardStoreForTests(): void {
   memoryStore.clear();
   indexCache.clear();

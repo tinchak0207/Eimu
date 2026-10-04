@@ -1,17 +1,17 @@
-// 語義縮放（Semantic Zoom，2026-09-30）純函式層：
+// 语义缩放（Semantic Zoom，2026-09-30）纯函式层：
 //
-//   - nextLod：縮放倍率 k → 渲染抽象層級（LOD），帶遲滯，停在門檻附近不來回跳。
-//       LOD 1 導演鳥瞰（k 小）：只看 4 個階段色塊＋進度/審核，節點與連線不掛載。
-//       LOD 2 製片協作（預設）：現狀不變。
-//       LOD 3 工程透析（k 大）：卡片世界幾何不變，卡內疊工程條，可開透析面板。
-//   - classifyStage：節點 → 四階段（01 劇本大綱 / 02 視覺資產·選角 / 03 鏡頭管線 / 04 成品交付）。
-//     只讀既有 metadata，不新增任何鍵（雙白名單鐵律）；Group 殼不計數。
-//   - summarizeStages：各階段計數＋世界座標 bbox（供 HUD 點擊飛到該階段）。
-//   - fitStageViewport：bbox → 視口（k 夾在協作層區間，點擊即落 LOD 2）。
-//   - lodBlend：k → 連續轉場係數（gather 聚合 / xray 透析）。**k 是唯一真源**：
-//       離散 LOD 只管掛載與指針，視覺轉場全是 k 的連續函數，可被滾輪「刷」、可逆。
-//   - interpolateViewport：相機飛行插值（世界中心線性 + k 對數插值，縮放速度感均勻）。
-//   - gatherOffsets / hudSlots / engineeringFocusViewport：聚合位移、鳥瞰卡槽位、透析落點。
+//   - nextLod：缩放倍率 k → 渲染抽象层级（LOD），带迟滞，停在门槛附近不来回跳。
+//       LOD 1 导演鸟瞰（k 小）：只看 4 个阶段色块＋进度/审核，节点与连线不挂载。
+//       LOD 2 制片协作（预设）：现状不变。
+//       LOD 3 工程透析（k 大）：卡片世界几何不变，卡内叠工程条，可开透析面板。
+//   - classifyStage：节点 → 四阶段（01 剧本大纲 / 02 视觉资产·选角 / 03 镜头管线 / 04 成品交付）。
+//     只读既有 metadata，不新增任何键（双白名单铁律）；Group 壳不计数。
+//   - summarizeStages：各阶段计数＋世界座标 bbox（供 HUD 点击飞到该阶段）。
+//   - fitStageViewport：bbox → 视口（k 夹在协作层区间，点击即落 LOD 2）。
+//   - lodBlend：k → 连续转场系数（gather 聚合 / xray 透析）。**k 是唯一真源**：
+//       离散 LOD 只管挂载与指针，视觉转场全是 k 的连续函数，可被滚轮「刷」、可逆。
+//   - interpolateViewport：相机飞行插值（世界中心线性 + k 对数插值，缩放速度感均匀）。
+//   - gatherOffsets / hudSlots / engineeringFocusViewport：聚合位移、鸟瞰卡槽位、透析落点。
 
 import { CanvasNodeType, type CanvasNode, type CanvasViewport } from "./types";
 
@@ -19,9 +19,9 @@ export type CanvasLod = 1 | 2 | 3;
 export type CanvasStageId = 1 | 2 | 3 | 4;
 
 /**
- * 遲滯門檻：進入與退出分開，中間是緩衝帶。
- * 工程層刻意放在 100% 以上（2026-10-01 暴君回饋）：模板/適應視圖常落在 80–100%，
- * 工程層若從 80% 起跳，日常協作就會意外長出工程條（黑邊）並多掛一堆元素（卡）。
+ * 迟滞门槛：进入与退出分开，中间是缓冲带。
+ * 工程层刻意放在 100% 以上（2026-10-01 暴君回馈）：模板/适应视图常落在 80–100%，
+ * 工程层若从 80% 起跳，日常协作就会意外长出工程条（黑边）并多挂一堆元素（卡）。
  */
 export const LOD_THRESHOLDS = {
   enterOverview: 0.37,
@@ -30,7 +30,7 @@ export const LOD_THRESHOLDS = {
   exitEngineering: 1.05,
 } as const;
 
-/** 縮放控制「鸟瞰/协作/工程」三段按鈕的目標倍率。 */
+/** 缩放控制「鸟瞰/协作/工程」三段按钮的目标倍率。 */
 export const LOD_TARGET_SCALE: Record<CanvasLod, number> = { 1: 0.3, 2: 0.6, 3: 1.5 };
 
 export const LOD_LABEL: Record<CanvasLod, string> = { 1: "鸟瞰", 2: "协作", 3: "工程" };
@@ -43,9 +43,9 @@ export const CANVAS_STAGES: readonly { id: CanvasStageId; code: string; label: s
 ];
 
 /**
- * k → 下一個 LOD（帶遲滯）。
- * 進 LOD1 需 k<0.37、退出需 k>0.43；進 LOD3 需 k>1.15、退出需 k<1.05。
- * allowEngineering=false（窄螢幕）時上限 2。
+ * k → 下一个 LOD（带迟滞）。
+ * 进 LOD1 需 k<0.37、退出需 k>0.43；进 LOD3 需 k>1.15、退出需 k<1.05。
+ * allowEngineering=false（窄萤幕）时上限 2。
  */
 export function nextLod(prev: CanvasLod, k: number, opts: { allowEngineering?: boolean } = {}): CanvasLod {
   const cap: CanvasLod = opts.allowEngineering === false ? 2 : 3;
@@ -60,27 +60,27 @@ export function nextLod(prev: CanvasLod, k: number, opts: { allowEngineering?: b
   return lod > cap ? cap : lod;
 }
 
-/** 首幀（無前值）：以協作層為起點推一次。 */
+/** 首帧（无前值）：以协作层为起点推一次。 */
 export function initialLod(k: number, opts: { allowEngineering?: boolean } = {}): CanvasLod {
   return nextLod(2, k, opts);
 }
 
-/** 帶分鏡歸屬指針 = 屬於鏡頭管線。 */
+/** 带分镜归属指针 = 属于镜头管线。 */
 function hasShotPointer(node: CanvasNode): boolean {
   const m = node.metadata;
   return !!(m?.shotId || m?.directorStageId || m?.shotCandidates || m?.storyboardShot);
 }
 
 /**
- * 節點 → 階段。判定順序（先中先得，確定性）：
- *   1. Group → null（殼層不計數）
- *   2. pipelineCard tool|gate|step_head → 03（工具/門禁/步驟頭是管線本體）
+ * 节点 → 阶段。判定顺序（先中先得，确定性）：
+ *   1. Group → null（壳层不计数）
+ *   2. pipelineCard tool|gate|step_head → 03（工具/门禁/步骤头是管线本体）
  *   3. deliverable → 04
  *   4. Video / Audio → 04
  *   5. CharacterCard / SceneCard / Reference / Scene3d → 02
- *   6. Text / Prompt / Config / Director（含 pipelineCard director|note、storyboardScene、純文本 storyboardShot）→ 01
- *   7. Image：無分鏡指針且帶 entityCardId / referenceRole → 02；其餘 → 03
- *   8. 其他未知類型：有分鏡指針 → 03，否則 01
+ *   6. Text / Prompt / Config / Director（含 pipelineCard director|note、storyboardScene、纯文本 storyboardShot）→ 01
+ *   7. Image：无分镜指针且带 entityCardId / referenceRole → 02；其余 → 03
+ *   8. 其他未知类型：有分镜指针 → 03，否则 01
  */
 export function classifyStage(node: CanvasNode): CanvasStageId | null {
   const m = node.metadata;
@@ -116,7 +116,7 @@ export interface CanvasStageBBox {
   height: number;
 }
 
-/** 鳥瞰卡縮圖：真實產出（圖片或影片首幀），不造假圖。 */
+/** 鸟瞰卡缩图：真实产出（图片或影片首帧），不造假图。 */
 export interface CanvasStagePreview {
   url: string;
   kind: "image" | "video";
@@ -131,21 +131,21 @@ export interface CanvasStageSummary {
   running: number;
   failed: number;
   pendingReview: number;
-  /** 世界座標外框；total=0 時為 null。 */
+  /** 世界座标外框；total=0 时为 null。 */
   bbox: CanvasStageBBox | null;
-  /** 世界座標質心（各節點中心的平均）；total=0 時為 null。聚合轉場的收束點。 */
+  /** 世界座标质心（各节点中心的平均）；total=0 时为 null。聚合转场的收束点。 */
   centroid: { x: number; y: number } | null;
-  /** 成功產出的縮圖（最多 4，按位置由上而下、由左而右）。 */
+  /** 成功产出的缩图（最多 4，按位置由上而下、由左而右）。 */
   previews: CanvasStagePreview[];
-  /** 階段 1 摘錄：第一個文本節點正文前 60 字（無則缺席）。 */
+  /** 阶段 1 摘录：第一个文本节点正文前 60 字（无则缺席）。 */
   excerpt?: string;
-  /** 第一個「非空且未全部完成」的階段＝進行中（全域至多一個）。 */
+  /** 第一个「非空且未全部完成」的阶段＝进行中（全域至多一个）。 */
   current: boolean;
   /** 非空且全部完成。 */
   complete: boolean;
-  /** 第一個待審節點 id（CTA「需要你审核」飛到它）；無待審則缺席。 */
+  /** 第一个待审节点 id（CTA「需要你审核」飞到它）；无待审则缺席。 */
   firstPendingNodeId?: string;
-  /** 逐節點狀態珠（按位置排序，最多 BEAD_LIMIT 顆）：無產出縮圖時用點陣一眼看清進度。 */
+  /** 逐节点状态珠（按位置排序，最多 BEAD_LIMIT 颗）：无产出缩图时用点阵一眼看清进度。 */
   beads: CanvasStageBead[];
 }
 
@@ -156,11 +156,11 @@ export const BEAD_LIMIT = 64;
 const GENERATIVE_TYPES: ReadonlySet<CanvasNodeType> = new Set([CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio]);
 
 /**
- * 節點狀態珠（也是階段完成度的唯一口徑）：
- *   · 待審優先（門禁/素材待裁決）；
- *   · 生成類（圖/影/音）只有 status=success 才算完成；
- *   · 非生成類（劇本文本、提示詞、參考、設定卡…）本身就是交付物：存在且未失敗/未運行即算完成
- *     ——否則沒有 status 的提示詞節點會讓「剧本大纲」永遠卡在進行中。
+ * 节点状态珠（也是阶段完成度的唯一口径）：
+ *   · 待审优先（门禁/素材待裁决）；
+ *   · 生成类（图/影/音）只有 status=success 才算完成；
+ *   · 非生成类（剧本文本、提示词、参考、设定卡…）本身就是交付物：存在且未失败/未运行即算完成
+ *     ——否则没有 status 的提示词节点会让「剧本大纲」永远卡在进行中。
  */
 export function beadOf(node: CanvasNode): CanvasStageBead {
   if (isPendingReview(node)) return "review";
@@ -171,7 +171,7 @@ export function beadOf(node: CanvasNode): CanvasStageBead {
   return GENERATIVE_TYPES.has(node.type) ? "idle" : "done";
 }
 
-/** 待審：門禁卡 gateConfirm 待裁決，或素材卡 approval 待審。 */
+/** 待审：门禁卡 gateConfirm 待裁决，或素材卡 approval 待审。 */
 function isPendingReview(node: CanvasNode): boolean {
   const m = node.metadata;
   return m?.gateConfirm?.status === "pending" || m?.approval?.status === "pending";
@@ -184,7 +184,7 @@ function isMediaUrl(value: string | undefined): value is string {
   return !!value && (value.startsWith("http") || value.startsWith("data:") || value.startsWith("blob:"));
 }
 
-/** 節點 → 縮圖（只收成功的真實產出）。 */
+/** 节点 → 缩图（只收成功的真实产出）。 */
 function previewOf(node: CanvasNode): CanvasStagePreview | null {
   const m = node.metadata;
   if (m?.status !== undefined && m.status !== "success") return null;
@@ -269,7 +269,7 @@ export function summarizeStages(nodes: readonly CanvasNode[]): CanvasStageSummar
   });
 }
 
-/** 全域進度（鳥瞰標題列「整体 62% · 待审 3」）。 */
+/** 全域进度（鸟瞰标题列「整体 62% · 待审 3」）。 */
 export function overallProgress(stages: readonly CanvasStageSummary[]): { percent: number; pendingReview: number } {
   let total = 0;
   let done = 0;
@@ -283,8 +283,8 @@ export function overallProgress(stages: readonly CanvasStageSummary[]): { percen
 }
 
 /**
- * 聚合位移：節點中心 → 所屬階段質心的世界向量（g=1 時節點收束到質心）。
- * 靜態量（只依節點列表），轉場每幀只變 CSS 變數 --lod-g，不重算。
+ * 聚合位移：节点中心 → 所属阶段质心的世界向量（g=1 时节点收束到质心）。
+ * 静态量（只依节点列表），转场每帧只变 CSS 变数 --lod-g，不重算。
  */
 export function gatherOffsets(
   nodes: readonly CanvasNode[],
@@ -305,12 +305,12 @@ export function gatherOffsets(
   return out;
 }
 
-/** 飛到某階段時 k 的夾取區間：≥0.5 保證落 LOD 2，≤0.8 不越過工程層門檻。 */
+/** 飞到某阶段时 k 的夹取区间：≥0.5 保证落 LOD 2，≤0.8 不越过工程层门槛。 */
 export const STAGE_FIT_MIN_SCALE = 0.5;
 export const STAGE_FIT_MAX_SCALE = 0.8;
 const STAGE_FIT_PADDING = 0.9;
 
-/** bbox → 視口：盡量整段入鏡、置中；k 夾在協作層區間（放不下就以 bbox 中心為準）。 */
+/** bbox → 视口：尽量整段入镜、置中；k 夹在协作层区间（放不下就以 bbox 中心为准）。 */
 export function fitStageViewport(bbox: CanvasStageBBox, size: { width: number; height: number }): CanvasViewport {
   const fitK =
     bbox.width > 0 && bbox.height > 0
@@ -322,19 +322,19 @@ export function fitStageViewport(bbox: CanvasStageBBox, size: { width: number; h
   return { x: size.width / 2 - cx * k, y: size.height / 2 - cy * k, k };
 }
 
-/** 節點是否有可透析的工程資料（任務 id / 工具輸入輸出 / 模型）。 */
+/** 节点是否有可透析的工程资料（任务 id / 工具输入输出 / 模型）。 */
 export function hasEngineeringData(node: CanvasNode): boolean {
   const m = node.metadata;
   return !!(m?.imageTaskId || m?.toolInput || m?.toolOutput || m?.model);
 }
 
-// ─────────────────────────────────────────── 連續轉場（k 是唯一真源）
+// ─────────────────────────────────────────── 连续转场（k 是唯一真源）
 
 export function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-/** Hermite smoothstep；e0 > e1 時反向（k 越小越接近 1）。 */
+/** Hermite smoothstep；e0 > e1 时反向（k 越小越接近 1）。 */
 export function smoothstep(e0: number, e1: number, x: number): number {
   const t = clamp01((x - e0) / (e1 - e0));
   return t * t * (3 - 2 * t);
@@ -350,35 +350,35 @@ export function easeInOutCubic(t: number): number {
   return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
 
-/** 聚合帶：k 0.50 → 0.36（鳥瞰 LOD1 進入門檻 0.37 之前收束完成）。 */
+/** 聚合带：k 0.50 → 0.36（鸟瞰 LOD1 进入门槛 0.37 之前收束完成）。 */
 export const GATHER_RANGE = { start: 0.5, end: 0.36 } as const;
-/** 透析帶：k 1.10 → 1.35（LOD3 進入門檻 1.15 落在帶內，掛載時工程條已開始滑出）。 */
+/** 透析带：k 1.10 → 1.35（LOD3 进入门槛 1.15 落在带内，挂载时工程条已开始滑出）。 */
 export const XRAY_RANGE = { start: 1.1, end: 1.35 } as const;
 
 function logRamp(from: number, to: number, k: number): number {
-  // `+ 0`：把 0/負數 產生的 -0 正規化成 +0。
+  // `+ 0`：把 0/负数 产生的 -0 正规化成 +0。
   return clamp01((Math.log(k) - Math.log(from)) / (Math.log(to) - Math.log(from))) + 0;
 }
 
-/** 相機飛行預設 easing：比 cubic 起步快，不在帶前空轉。 */
+/** 相机飞行预设 easing：比 cubic 起步快，不在带前空转。 */
 export function easeInOutSine(t: number): number {
   return -(Math.cos(Math.PI * clamp01(t)) - 1) / 2;
 }
 
-/** k → 轉場係數。gather=1 ＝完全鳥瞰；xray=1 ＝完全透析。兩帶不重疊。 */
+/** k → 转场系数。gather=1 ＝完全鸟瞰；xray=1 ＝完全透析。两带不重叠。 */
 export function lodBlend(k: number): { gather: number; xray: number } {
   return {
-    // 帶內線性（對 log k）：平滑交給相機飛行的 easing＋帶內減速；smoothstep 會把形變擠在帶中段一閃而過。
+    // 带内线性（对 log k）：平滑交给相机飞行的 easing＋带内减速；smoothstep 会把形变挤在带中段一闪而过。
     gather: logRamp(GATHER_RANGE.start, GATHER_RANGE.end, k),
     xray: logRamp(XRAY_RANGE.start, XRAY_RANGE.end, k),
   };
 }
 
 /**
- * 聚合態下節點的視覺參數（g＝lodBlend.gather 原值）。
- * 節點的整段戲都在 phase A（g 0→0.6）演完，與徽章浮現同步：
- *   move（位移係數）/ scale 走 easeInOut；opacity 到 A 段後 45% 才開始淡——
- *   節點要「飛進徽章」而不是原地消失，否則中段會出現只剩兩顆小徽章的空鏡。
+ * 聚合态下节点的视觉参数（g＝lodBlend.gather 原值）。
+ * 节点的整段戏都在 phase A（g 0→0.6）演完，与徽章浮现同步：
+ *   move（位移系数）/ scale 走 easeInOut；opacity 到 A 段后 45% 才开始淡——
+ *   节点要「飞进徽章」而不是原地消失，否则中段会出现只剩两颗小徽章的空镜。
  */
 export function gatherVisuals(g: number): { move: number; scale: number; opacity: number; blur: number } {
   const a = clamp01(g / 0.6);
@@ -392,10 +392,10 @@ export function gatherVisuals(g: number): { move: number; scale: number; opacity
 }
 
 /**
- * 相機插值：視口中心的世界點線性插值、k 走對數插值（每幀縮放比例恆定，
- * 不會「前段猛縮、後段拖」）；t=0/1 精確落在起訖。
+ * 相机插值：视口中心的世界点线性插值、k 走对数插值（每帧缩放比例恒定，
+ * 不会「前段猛缩、后段拖」）；t=0/1 精确落在起讫。
  */
-/** 形變帶（log k 區間）在相機飛行中的時間權重：帶內每單位 log k 花 BAND_TIME_WEIGHT 倍時間。 */
+/** 形变带（log k 区间）在相机飞行中的时间权重：带内每单位 log k 花 BAND_TIME_WEIGHT 倍时间。 */
 const BAND_TIME_WEIGHT = 6;
 const WARP_SAMPLES = 96;
 
@@ -404,9 +404,9 @@ function inMorphBand(k: number): boolean {
 }
 
 /**
- * 相機飛行的「帶內減速」時間重映射：飛行參數 u 對 log k 線性，但穿過聚合帶/透析帶時放慢，
- * 讓形變佔據飛行的大半時間，而不是在 easeInOut 最快的中段 100ms 內一閃而過（硬切感的根因）。
- * 回傳 u∈[0,1]（給 interpolateViewport）；k 不變或未穿帶時等於輸入。
+ * 相机飞行的「带内减速」时间重映射：飞行参数 u 对 log k 线性，但穿过聚合带/透析带时放慢，
+ * 让形变占据飞行的大半时间，而不是在 easeInOut 最快的中段 100ms 内一闪而过（硬切感的根因）。
+ * 回传 u∈[0,1]（给 interpolateViewport）；k 不变或未穿带时等于输入。
  */
 export function warpFlightProgress(fromK: number, toK: number, e: number): number {
   const t = clamp01(e);
@@ -443,8 +443,8 @@ export function interpolateViewport(
   const c1x = (hw - to.x) / to.k;
   const c1y = (hh - to.y) / to.k;
   const k = Math.exp(Math.log(from.k) + (Math.log(to.k) - Math.log(from.k)) * e);
-  // 錨點插值（不是世界中心線性插值）：放大時錨＝目的中心，它在螢幕上沿直線勻速走到視口中心；
-  // 縮小時錨＝起點中心，它沿直線勻速離開中心。世界中心線性插值會讓目標在螢幕上先偏後折（飛行抖一下）。
+  // 锚点插值（不是世界中心线性插值）：放大时锚＝目的中心，它在萤幕上沿直线匀速走到视口中心；
+  // 缩小时锚＝起点中心，它沿直线匀速离开中心。世界中心线性插值会让目标在萤幕上先偏后折（飞行抖一下）。
   let cx: number;
   let cy: number;
   if (to.k >= from.k) {
@@ -459,7 +459,7 @@ export function interpolateViewport(
   return { x: hw - cx * k, y: hh - cy * k, k };
 }
 
-/** 以視口中心為錨縮放到 k（三段按鈕的目標視口）。 */
+/** 以视口中心为锚缩放到 k（三段按钮的目标视口）。 */
 export function zoomAroundCenter(vp: CanvasViewport, k: number, size: { width: number; height: number }): CanvasViewport {
   const cx = size.width / 2;
   const cy = size.height / 2;
@@ -468,7 +468,7 @@ export function zoomAroundCenter(vp: CanvasViewport, k: number, size: { width: n
   return { x: cx - wx * k, y: cy - wy * k, k };
 }
 
-/** 把某世界點置於視口中心、倍率 k。 */
+/** 把某世界点置于视口中心、倍率 k。 */
 export function centerViewport(world: { x: number; y: number }, k: number, size: { width: number; height: number }): CanvasViewport {
   return { x: size.width / 2 - world.x * k, y: size.height / 2 - world.y * k, k };
 }
@@ -481,9 +481,9 @@ export interface HudRect {
 }
 
 /**
- * 鳥瞰卡尺寸與安全區：右側讓出縮放控件軌（44px 寬＋右距 16＋呼吸 28），
- * 頂部讓出畫布頂部薄條（標題膠囊、預算條）。
- * 兩種排法：安全區夠寬＝一行四張（row，232×268）；不夠（畫布與對話並排的常態）＝2×2（grid）。
+ * 鸟瞰卡尺寸与安全区：右侧让出缩放控件轨（44px 宽＋右距 16＋呼吸 28），
+ * 顶部让出画布顶部薄条（标题胶囊、预算条）。
+ * 两种排法：安全区够宽＝一行四张（row，232×268）；不够（画布与对话并排的常态）＝2×2（grid）。
  */
 export const HUD_CARD = {
   width: 232,
@@ -531,15 +531,15 @@ export function hudLayout(size: { width: number; height: number }, count = CANVA
   };
 }
 
-/** 鳥瞰卡槽位（螢幕座標）＝ hudLayout(...).slots。 */
+/** 鸟瞰卡槽位（萤幕座标）＝ hudLayout(...).slots。 */
 export function hudSlots(size: { width: number; height: number }, count = CANVAS_STAGES.length): HudRect[] {
   return hudLayout(size, count).slots;
 }
 
 /**
- * 透析落點：卡片置中於「面板左側的可見區」（free＝視口座標的左右界；缺省＝整個視口的左 2/3），
- * k 取「卡寬佔可見區 80%」與「不低於當前、至少 1」的較小者，下限 0.86（透析面板開著時宿主強制全透析，不依賴 LOD3）。
- * 窄畫布（與對話並排）時面板會吃掉大半寬度，固定左 1/3 會讓卡片被面板蓋住。
+ * 透析落点：卡片置中于「面板左侧的可见区」（free＝视口座标的左右界；缺省＝整个视口的左 2/3），
+ * k 取「卡宽占可见区 80%」与「不低于当前、至少 1」的较小者，下限 0.86（透析面板开著时宿主强制全透析，不依赖 LOD3）。
+ * 窄画布（与对话并排）时面板会吃掉大半宽度，固定左 1/3 会让卡片被面板盖住。
  */
 export function engineeringFocusViewport(
   node: Pick<CanvasNode, "position" | "width" | "height">,
@@ -558,9 +558,9 @@ export function engineeringFocusViewport(
 }
 
 /**
- * 視口移動中的量化倍率（2026-10-01 效能）：按 6% 對數格取整。
- * 用途：會被整棵子樹繼承的反向補償變數、memo 節點的 scale prop——移動中只在跨格時變，
- * 不必每幀重算樣式/重渲染；誤差 ≤3%（埠/把手/字級肉眼不可辨）。停手時呼叫端改用精確值。
+ * 视口移动中的量化倍率（2026-10-01 效能）：按 6% 对数格取整。
+ * 用途：会被整棵子树继承的反向补偿变数、memo 节点的 scale prop——移动中只在跨格时变，
+ * 不必每帧重算样式/重渲染；误差 ≤3%（埠/把手/字级肉眼不可辨）。停手时呼叫端改用精确值。
  */
 const SCALE_QUANT_STEP = Math.log(1.06);
 export function quantizeScale(k: number): number {

@@ -1,9 +1,9 @@
 "use client";
 
-// node-view/NodeBody —— 節點正文渲染（原 CanvasNodeView renderBody + renderPlaceholder）。
-// switch node.type：圖/視頻/音頻 → 媒體；文本/提示詞 → 雙擊直編；角色/場景卡/配置 → 長文捲動區。
-// 圖片走「直鏈 → 同源代理 → 破圖」三段鏈路（imgError/useProxy 狀態隨正文走）。
-// 手勢不在此檔：捲動區的 pointer 手勢由 use-node-gestures 提供、顯式 props 傳入
+// node-view/NodeBody —— 节点正文渲染（原 CanvasNodeView renderBody + renderPlaceholder）。
+// switch node.type：图/视频/音频 → 媒体；文本/提示词 → 双击直编；角色/场景卡/配置 → 长文卷动区。
+// 图片走「直链 → 同源代理 → 破图」三段链路（imgError/useProxy 状态随正文走）。
+// 手势不在此档：卷动区的 pointer 手势由 use-node-gestures 提供、显式 props 传入
 // （不引入 context，避免 memo 失效）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,8 +22,8 @@ function isUrl(value: string): boolean {
   return value.startsWith("http") || value.startsWith("data:");
 }
 
-/** B3：縮略圖降採樣——小尺寸顯示時走 next/image 優化器（僅 Blob 存儲域，
- *  next.config 已放行），省流量提幀率；其餘 URL 原樣。競品沒有這條。 */
+/** B3：缩略图降采样——小尺寸显示时走 next/image 优化器（仅 Blob 存储域，
+ *  next.config 已放行），省流量提帧率；其余 URL 原样。竞品没有这条。 */
 function thumbUrl(url: string, displayWidth: number): string {
   if (!url.startsWith("https://") || displayWidth >= 300) return url;
   try {
@@ -66,13 +66,13 @@ function formatProgress(progress: number): string {
 }
 
 /**
- * 門禁卡裁決（2026-09-24 協作確認閘）：網關在協作檔的三個停點把 pending confirm
- * 回寫到卡上（metadata.gateConfirm），這裡讓用戶在畫布上直接批准/退回——不必再回
- * 對話裡找確認卡。裁決走**既有**站點轉發 /api/agent/sessions/{id}/confirm
- *（與對話確認卡同一條網關鏈路：settleConfirm → 續跑），不另開通路、不新增後端。
- * 卡面狀態真值＝metadata.gateConfirm.status（網關回寫）；本地只在送出期間鎖按鈕，
- * 成功後維持鎖定、等網關回寫翻面——前端不搶先宣稱「已批准」（同 AgentConfirmCard
- * 的鎖定語義：沒收到 confirm.resolved 前不算數）。
+ * 门禁卡裁决（2026-09-24 协作确认闸）：网关在协作档的三个停点把 pending confirm
+ * 回写到卡上（metadata.gateConfirm），这里让用户在画布上直接批准/退回——不必再回
+ * 对话里找确认卡。裁决走**既有**站点转发 /api/agent/sessions/{id}/confirm
+ *（与对话确认卡同一条网关链路：settleConfirm → 续跑），不另开通路、不新增后端。
+ * 卡面状态真值＝metadata.gateConfirm.status（网关回写）；本地只在送出期间锁按钮，
+ * 成功后维持锁定、等网关回写翻面——前端不抢先宣称「已批准」（同 AgentConfirmCard
+ * 的锁定语义：没收到 confirm.resolved 前不算数）。
  */
 function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
   const [busy, setBusy] = useState<false | "approve" | "reject">(false);
@@ -89,7 +89,7 @@ function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
           body: JSON.stringify({ request_id: confirm.request_id, approved }),
         });
         if (!res.ok) {
-          // 失敗如實說，不假裝已裁決（已處理過的同一筆會回「已處理過」——也是真話）。
+          // 失败如实说，不假装已裁决（已处理过的同一笔会回「已处理过」——也是真话）。
           const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
           setError(typeof body?.error === "string" && body.error ? body.error : "提交失败，请到对话里确认");
           setBusy(false);
@@ -149,31 +149,31 @@ function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
 
 export interface NodeBodyProps {
   node: CanvasNode;
-  /** 當前縮放：決定縮圖降採樣檔位 */
+  /** 当前缩放：决定缩图降采样档位 */
   scale: number;
-  /** 批次收起態封面：主圖子節點的圖片 URL（宿主從 batchPrimaryImageId 解出） */
+  /** 批次收起态封面：主图子节点的图片 URL（宿主从 batchPrimaryImageId 解出） */
   batchPrimaryImageUrl?: string;
   batchExpanded?: boolean;
-  /** A12：失敗節點就地重試（沿用保存的生成參數）。 */
+  /** A12：失败节点就地重试（沿用保存的生成参数）。 */
   onRetry?: (nodeId: string) => void;
-  /** A4：空圖片節點「生成图片」入口。 */
+  /** A4：空图片节点「生成图片」入口。 */
   onEditPrompt: (nodeId: string) => void;
-  /** A11：文本節點就地編輯提交（雙擊正文觸發）。 */
+  /** A11：文本节点就地编辑提交（双击正文触发）。 */
   onUpdateText?: (nodeId: string, text: string) => void;
   /**
-   * 影片節點動作（2026-09-28）：「截帧」= 取當前播放時刻一幀；「序列帧」= 等距中點抽一組。
-   * 宿主負責呼叫 /api/canvas/video-frames 拿計畫、用既有 extractFramesAtTimes 抽像素、落成圖片節點。
-   * atSec 由本元件從同一個 <video> 元素的 currentTime 讀出（播放位置只有這裡知道）。
+   * 影片节点动作（2026-09-28）：「截帧」= 取当前播放时刻一帧；「序列帧」= 等距中点抽一组。
+   * 宿主负责呼叫 /api/canvas/video-frames 拿计画、用既有 extractFramesAtTimes 抽像素、落成图片节点。
+   * atSec 由本元件从同一个 <video> 元素的 currentTime 读出（播放位置只有这里知道）。
    */
   onExtractVideoFrames?: (nodeId: string, action: "current" | "sequence", atSec?: number) => void;
-  /** 取幀進行中：按鈕停用（防重複提交）。 */
+  /** 取帧进行中：按钮停用（防重复提交）。 */
   extractingVideoFrames?: boolean;
   /**
-   * 分鏡音軌綁定的 metadata 寫入出口（宿主注入＝`use-canvas-chat` 的 `patchNodeMetadata`）。
-   * `nodeId` 由本層綁定（同 `onUpdateText` 慣例）後轉給分鏡卡；省略＝分鏡卡不出綁定入口。
+   * 分镜音轨绑定的 metadata 写入出口（宿主注入＝`use-canvas-chat` 的 `patchNodeMetadata`）。
+   * `nodeId` 由本层绑定（同 `onUpdateText` 惯例）后转给分镜卡；省略＝分镜卡不出绑定入口。
    */
   onPatchMetadata?: (nodeId: string, patch: StoryboardShotAudioMetadata) => void;
-  /** 內容捲動手勢（use-node-gestures 的 scrollDrag 三件套，綁在正文捲動區上）。 */
+  /** 内容卷动手势（use-node-gestures 的 scrollDrag 三件套，绑在正文卷动区上）。 */
   onScrollAreaPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onScrollAreaPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
   onScrollAreaPointerEnd: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -197,27 +197,27 @@ export function NodeBody({
   const [imgError, setImgError] = useState(false);
   /** 是否已试过同源代理兜底（直链失败后切代理；代理也失败才落 imgError）。 */
   const [useProxy, setUseProxy] = useState(false);
-  // A11：就地編輯態（null = 未在編輯）
+  // A11：就地编辑态（null = 未在编辑）
   const [editingText, setEditingText] = useState<string | null>(null);
-  /** 影片節點：本體那個 <video> 的引用，只為讀 currentTime（「截帧」的取樣時刻）。 */
+  /** 影片节点：本体那个 <video> 的引用，只为读 currentTime（「截帧」的取样时刻）。 */
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // 圖片 URL 變更時重置錯誤狀態，重新走「直鏈 → 代理 → 破圖」鏈路
+  // 图片 URL 变更时重置错误状态，重新走「直链 → 代理 → 破图」链路
   useEffect(() => {
     setImgError(false);
     setUseProxy(false);
   }, [node.metadata?.content]);
 
-  /** 圖片加載失敗：先切到同源代理試一次，代理也失敗才宣告破圖。 */
+  /** 图片加载失败：先切到同源代理试一次，代理也失败才宣告破图。 */
   const handleImgError = useCallback(() => {
     setUseProxy((prev) => {
-      if (!prev) return true; // 首次失敗 → 切代理
-      setImgError(true); // 代理也失敗 → 破圖
+      if (!prev) return true; // 首次失败 → 切代理
+      setImgError(true); // 代理也失败 → 破图
       return prev;
     });
   }, []);
 
-  /** 破圖後手動重試：清掉錯誤標記，重新從直鏈開始加載。 */
+  /** 破图后手动重试：清掉错误标记，重新从直链开始加载。 */
   const handleRetryImage = useCallback(() => {
     setImgError(false);
     setUseProxy(false);
@@ -269,7 +269,7 @@ export function NodeBody({
         </div>
       );
     }
-    // reference 節點空態：等待填入圖片（agent 建的空殼或數據異常）。
+    // reference 节点空态：等待填入图片（agent 建的空壳或数据异常）。
     if (node.type === CanvasNodeType.Reference && statusValue === "idle") {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
@@ -278,7 +278,7 @@ export function NodeBody({
         </div>
       );
     }
-    // A4：空圖片節點是生成落地位——給一個顯眼入口，點開面板就地生成回填。
+    // A4：空图片节点是生成落地位——给一个显眼入口，点开面板就地生成回填。
     if (node.type === CanvasNodeType.Image && statusValue === "idle") {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
@@ -298,7 +298,7 @@ export function NodeBody({
         </div>
       );
     }
-    // idle：骨架屏取代死白 —— 卡片一出生就有結構感，不是一塊「待处理」空白。
+    // idle：骨架屏取代死白 —— 卡片一出生就有结构感，不是一块「待处理」空白。
     return (
       <div className="flex flex-1 flex-col justify-center gap-2.5 p-4" aria-label={statusLabel}>
         <div className="h-3 w-3/4 animate-pulse rounded-full bg-black/5 motion-reduce:animate-none" />
@@ -311,8 +311,8 @@ export function NodeBody({
 
   const renderBody = () => {
     const metadata = node.metadata;
-    // 批次收起態封面：主圖頂上，本體內容讓位（展開一鍵可回）。
-    // 只在節點自己沒有圖片內容時接管，避免蓋掉圖生圖來源圖。
+    // 批次收起态封面：主图顶上，本体内容让位（展开一键可回）。
+    // 只在节点自己没有图片内容时接管，避免盖掉图生图来源图。
     const ownImage =
       (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && metadata?.content && isUrl(metadata.content);
     if (batchPrimaryImageUrl && batchExpanded === false && !ownImage) {
@@ -320,7 +320,7 @@ export function NodeBody({
         return renderBrokenImage(handleRetryImage);
       }
       return (
-        // eslint-disable-next-line @next/next/no-img-element -- 節點批次主圖（blob:/data:/本站 proxy 來源），next/image 無法優化且會綁死節點拖曳縮放版面
+        // eslint-disable-next-line @next/next/no-img-element -- 节点批次主图（blob:/data:/本站 proxy 来源），next/image 无法优化且会绑死节点拖曳缩放版面
         <img
           src={useProxy && batchPrimaryImageUrl.startsWith("http") ? proxySrc(batchPrimaryImageUrl) : batchPrimaryImageUrl}
           alt={`${node.title} 主图`}
@@ -331,13 +331,13 @@ export function NodeBody({
         />
       );
     }
-    // 分鏡實體（2026-09-16 G3 消費端）：`storyboardShot` 是欄位族專用標記（同 sceneCard/
-    // director 的處置）。**位置在批次收起封面之後、type 分發之前**，兩個理由：
-    //   ①資料形狀由 metadata 決定，不由節點型別決定——契約檔（storyboard-contract.ts:13）只說
-    //     「子節點 = 一鏡」，未約束其 type；agent 經 canvas_apply_ops 寫入時 type 可以是
-    //     text/image/group 任一，綁 type 分支必漏渲染。
-    //   ②放在批次封面早退之後 → 既有批次節點（batchPrimaryImageUrl + 收起）行為零改動。
-    // 快照壓縮與讀取白名單已在刀 2 同步，本處只補渲染端（禁動雙白名單）。
+    // 分镜实体（2026-09-16 G3 消费端）：`storyboardShot` 是栏位族专用标记（同 sceneCard/
+    // director 的处置）。**位置在批次收起封面之后、type 分发之前**，两个理由：
+    //   ①资料形状由 metadata 决定，不由节点型别决定——契约档（storyboard-contract.ts:13）只说
+    //     「子节点 = 一镜」，未约束其 type；agent 经 canvas_apply_ops 写入时 type 可以是
+    //     text/image/group 任一，绑 type 分支必漏渲染。
+    //   ②放在批次封面早退之后 → 既有批次节点（batchPrimaryImageUrl + 收起）行为零改动。
+    // 快照压缩与读取白名单已在刀 2 同步，本处只补渲染端（禁动双白名单）。
     if (metadata?.storyboardShot) {
       return (
         <StoryboardShotBody
@@ -357,9 +357,9 @@ export function NodeBody({
           const content = metadata?.content;
           if (content && isUrl(content)) {
             if (node.type === CanvasNodeType.Video) {
-              // 影片節點動作「截帧／序列帧」（2026-09-28）：按鈕貼在畫面左上（原生 controls 佔底部），
-              // 樣式沿用既有節點內動作（reference 角色 select / 批次指示器同款黑底白字膠囊）。
-              // 回呼未提供 = 不渲染（誠實原則：不長出必定失敗的按鈕）。
+              // 影片节点动作「截帧／序列帧」（2026-09-28）：按钮贴在画面左上（原生 controls 占底部），
+              // 样式沿用既有节点内动作（reference 角色 select / 批次指示器同款黑底白字胶囊）。
+              // 回呼未提供 = 不渲染（诚实原则：不长出必定失败的按钮）。
               return (
                 <div className="relative h-full w-full">
                   <video
@@ -411,7 +411,7 @@ export function NodeBody({
             }
             const rawContent = content.startsWith("data:") ? content : thumbUrl(content, node.width * scale);
             return (
-              // eslint-disable-next-line @next/next/no-img-element -- 節點內容圖（data:/縮圖/本站 proxy 來源），next/image 無法優化且會綁死節點拖曳縮放版面
+              // eslint-disable-next-line @next/next/no-img-element -- 节点内容图（data:/缩图/本站 proxy 来源），next/image 无法优化且会绑死节点拖曳缩放版面
               <img
                 src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
                 alt={node.title}
@@ -429,8 +429,8 @@ export function NodeBody({
         // 卡身顶部补完整步骤名，画布上任何缩放级别都不丢上下文。
         // 2026-08-27 美化：步骤序号用小圆徽章（与 carousel 卡面珠链呼应），
         // 非纯文字前缀。
-        // Reference 早退（無步驟語義）；Image 與 Video 生成卡都鋪步驟名橫條
-        // （2026-08-30 起視頻步生成卡為 Video 類型，同樣帶 stepName trace）。
+        // Reference 早退（无步骤语义）；Image 与 Video 生成卡都铺步骤名横条
+        // （2026-08-30 起视频步生成卡为 Video 类型，同样带 stepName trace）。
         if (node.type === CanvasNodeType.Reference) return media;
         const trace = metadata as unknown as Record<string, unknown> | undefined;
         const stepName = trace?.stepName;
@@ -499,8 +499,8 @@ export function NodeBody({
       case CanvasNodeType.Prompt: {
         const text = metadata?.content ?? metadata?.prompt;
         const fontSize = typeof metadata?.fontSize === "number" ? metadata.fontSize : 14.5;
-        // prompt 節點 = 提示詞備忘：雙擊直編（與文本節點同款交互），文案不同。
-        // 流水線文本生成卡（2026-08-30）：空態不再是「未填寫」而是等 agent 回填。
+        // prompt 节点 = 提示词备忘：双击直编（与文本节点同款交互），文案不同。
+        // 流水线文本生成卡（2026-08-30）：空态不再是「未填写」而是等 agent 回填。
         const metaRecord = metadata as Record<string, unknown> | undefined;
         const isPipelineGenCard = typeof metaRecord?.stepIndex === "number";
         const emptyHint =
@@ -509,9 +509,9 @@ export function NodeBody({
             : isPipelineGenCard && node.type === CanvasNodeType.Text
               ? "等待 agent 回填产出"
               : "（未填写内容，双击编辑）";
-        // 後端骨架 text 節點（如「镜头 1 脚本」）也會帶產出合同：複用步驟頭卡膠囊樣式。
+        // 后端骨架 text 节点（如「镜头 1 脚本」）也会带产出合同：复用步骤头卡胶囊样式。
         const deliverableText = metadata?.deliverable?.trim();
-        // A11：雙擊直編。textarea 蓋滿正文區，blur/Ctrl+Enter 提交、Esc 取消。
+        // A11：双击直编。textarea 盖满正文区，blur/Ctrl+Enter 提交、Esc 取消。
         if (editingText !== null) {
           return (
             <textarea
@@ -539,10 +539,10 @@ export function NodeBody({
             />
           );
         }
-        // 流水線結構卡（agent-template-canvas 鋪的）：走 Liquid Glass 分層正文
+        // 流水线结构卡（agent-template-canvas 铺的）：走 Liquid Glass 分层正文
         // （eyebrow 小标 + 正文 + 语义色胶囊 + Lucide 图标），不再纯文本堆行。
-        // note（配方卡，後端 derived notes）：正文 = content 多行配方文本，
-        // 無 toolId/IO 行——與 tool/gate 卡同族分層樣式。
+        // note（配方卡，后端 derived notes）：正文 = content 多行配方文本，
+        // 无 toolId/IO 行——与 tool/gate 卡同族分层样式。
         const pipelineCard = metadata?.pipelineCard;
         if (pipelineCard === "tool" || pipelineCard === "gate" || pipelineCard === "note") {
           return (
@@ -658,17 +658,17 @@ export function NodeBody({
         // content 文本（模板步骤头卡的「产出：」合同）与结构化行可并存；
         // 只有 content 也照常渲染——空配置才落骨架。
         const content = metadata?.content?.trim() ?? "";
-        // 後端 workflow 骨架節點的產出合同/驗收門禁（SSE 放行，2026-09-20）：
-        // 複用步驟頭卡的膠囊樣式（Package 綠膠囊 + 全文），門禁走灰小字行。
+        // 后端 workflow 骨架节点的产出合同/验收门禁（SSE 放行，2026-09-20）：
+        // 复用步骤头卡的胶囊样式（Package 绿胶囊 + 全文），门禁走灰小字行。
         const deliverableText = metadata?.deliverable?.trim();
-        // gate 兩種形態（types.ts 註解）：string = 後端骨架門禁全文；boolean true =
-        // workflow-dsl 的「需人工批准」旗標（compile.ts md.gate = true），顯示通用文案。
+        // gate 两种形态（types.ts 注解）：string = 后端骨架门禁全文；boolean true =
+        // workflow-dsl 的「需人工批准」旗标（compile.ts md.gate = true），显示通用文案。
         const gateText =
           typeof metadata?.gate === "string" ? metadata.gate.trim() : metadata?.gate === true ? "此步骤需要人工批准后才继续" : undefined;
-        // 流水線步驟頭卡（agent-template-canvas 鋪的）：Liquid Glass 分層正文
+        // 流水线步骤头卡（agent-template-canvas 铺的）：Liquid Glass 分层正文
         // ——「产出」green tint 胶囊（Package 图标）+ deliverable 全文 + 输入来源行。
-        // 後端骨架 Config 節點帶 metadata.deliverable/gate（2026-09-20 SSE 放行）時
-        // 走同一分層（膠囊樣式逐行複用），不另造卡型。
+        // 后端骨架 Config 节点带 metadata.deliverable/gate（2026-09-20 SSE 放行）时
+        // 走同一分层（胶囊样式逐行复用），不另造卡型。
         if (metadata?.pipelineCard === "step_head" || deliverableText || gateText) {
           const deliverable = deliverableText || (metadata?.content ?? "").replace(/^产出：/, "");
           return (
@@ -707,7 +707,7 @@ export function NodeBody({
           );
         }
         if (rows.length === 0 && !content) {
-          // 配置未到齊 = 讀取中的骨架，不是死掉的「（未配置）」。
+          // 配置未到齐 = 读取中的骨架，不是死掉的「（未配置）」。
           return renderPlaceholder(status, metadata);
         }
         return (
@@ -719,7 +719,7 @@ export function NodeBody({
             className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-1.5 overflow-auto p-3"
           >
             {rows.map((row) => (
-              // 值緊貼標籤左對齊（2026-09-27）：右對齊時節點半截出視口，值被裁掉像空欄位。
+              // 值紧贴标签左对齐（2026-09-27）：右对齐时节点半截出视口，值被裁掉像空栏位。
               <div key={row.label} className="flex items-baseline gap-3">
                 <span className="w-12 shrink-0 text-ios-caption1 font-medium text-muted-foreground">{row.label}</span>
                 <span className="min-w-0 max-sm:text-ios-subhead truncate font-mono text-ios-footnote text-foreground">
@@ -734,10 +734,10 @@ export function NodeBody({
         );
       }
       case CanvasNodeType.Director: {
-        // 導演台節點（gateway director.done 攔截同步）：主區為 three.js 即時 3D 白模
-        // 視口（片B，WebGL 失敗降級 SVG 示意）；缺 directorSessionId 的舊節點保底走
-        // 原 SVG img 形狀。徽章區/方案名現狀保留。長文捲動手勢與角色/場景卡同款
-        //（canvas-node-scroll + scrollDrag 三件套；viewport 自帶 data-canvas-interactive 隔離）。
+        // 导演台节点（gateway director.done 拦截同步）：主区为 three.js 即时 3D 白模
+        // 视口（片B，WebGL 失败降级 SVG 示意）；缺 directorSessionId 的旧节点保底走
+        // 原 SVG img 形状。徽章区/方案名现状保留。长文卷动手势与角色/场景卡同款
+        //（canvas-node-scroll + scrollDrag 三件套；viewport 自带 data-canvas-interactive 隔离）。
         const topView = svgToDataUrl(metadata?.topViewSvg);
         const cameraView = svgToDataUrl(metadata?.cameraViewSvg);
         const schematic = topView ?? cameraView;
@@ -827,14 +827,14 @@ export function NodeBody({
         );
       }
       case CanvasNodeType.Scene3d: {
-        // 3D 場景卡（Astra PRD P1-3）：主體=turntable 視頻+stills 網格+資產下載，
-        // 全部封裝在 Scene3dCardBody（複製 Video 分支輪子），此處只做型別分發。
+        // 3D 场景卡（Astra PRD P1-3）：主体=turntable 视频+stills 网格+资产下载，
+        // 全部封装在 Scene3dCardBody（复制 Video 分支轮子），此处只做型别分发。
         return <Scene3dCardBody node={node} />;
       }
       case CanvasNodeType.Group: {
-        // 分鏡場景外殼（G3，2026-09-16）：Group 節點帶 metadata.storyboardScene 時，
-        // 正文顯示場景名 + 鏡數（真值在子節點的 storyboardShot，此處只是指針）；
-        // 無此欄位的既有 Group 節點維持原虛線框佔位（行為零改動）。
+        // 分镜场景外壳（G3，2026-09-16）：Group 节点带 metadata.storyboardScene 时，
+        // 正文显示场景名 + 镜数（真值在子节点的 storyboardShot，此处只是指针）；
+        // 无此栏位的既有 Group 节点维持原虚线框占位（行为零改动）。
         if (metadata?.storyboardScene) {
           return (
             <StoryboardSceneBody

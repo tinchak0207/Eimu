@@ -1,14 +1,14 @@
-// /v1/images/generations 的參考圖與行內實體 tag 真行為斷言（不是源碼字串守門件）：
-//   零回歸  → 無 token、無參考圖時 prompt 逐位元不變，提交命令的 workflow 展開是**空物件**；
-//   真行為  → `@[角色:Kael]` 命中真卡庫 → token 就地換成卡的 prompt 片段、卡的圖進 workflow.references；
-//   未命中  → token 原樣保留（fail-open）＋ warning，不報錯、不吞內容；
-//   上限    → 6 張 reference_images → 400 invalid_reference_images（不靜默截斷），5 張放行；
-//   負控制  → 同一個 token 餵空卡庫 → 不展開（證明上面那條的展開來自卡庫，不是解析器恆真）。
+// /v1/images/generations 的参考图与行内实体 tag 真行为断言（不是源码字串守门件）：
+//   零回归  → 无 token、无参考图时 prompt 逐位元不变，提交命令的 workflow 展开是**空物件**；
+//   真行为  → `@[角色:Kael]` 命中真卡库 → token 就地换成卡的 prompt 片段、卡的图进 workflow.references；
+//   未命中  → token 原样保留（fail-open）＋ warning，不报错、不吞内容；
+//   上限    → 6 张 reference_images → 400 invalid_reference_images（不静默截断），5 张放行；
+//   负控制  → 同一个 token 喂空卡库 → 不展开（证明上面那条的展开来自卡库，不是解析器恒真）。
 //
-// 全鏈路單進程可測、零 mock：認證走 BIZ_API_KEY_HASHES 兜底層；卡庫在無
-// BLOB_READ_WRITE_TOKEN 時落 character-card-store 的 memoryStore（**真 store**，非 mock）。
-// route 層只覆蓋「進 I/O 之前就該拒絕」的分支（400 / 501）——durable 分支的提交 payload
-// 需要真控制面 DB，由 orchestrator 的端到端驗收覆蓋（本檔不偽造）。
+// 全链路单进程可测、零 mock：认证走 BIZ_API_KEY_HASHES 兜底层；卡库在无
+// BLOB_READ_WRITE_TOKEN 时落 character-card-store 的 memoryStore（**真 store**，非 mock）。
+// route 层只覆盖「进 I/O 之前就该拒绝」的分支（400 / 501）——durable 分支的提交 payload
+// 需要真控制面 DB，由 orchestrator 的端到端验收覆盖（本档不伪造）。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -97,7 +97,7 @@ test.after(() => {
   __resetCharacterCardStoreForTests();
 });
 
-// ─────────────────────────────────────────── 1. 零回歸
+// ─────────────────────────────────────────── 1. 零回归
 
 test("零回归：无 token、无参考图 → prompt 逐位元不变，提交命令的 workflow 展开是空对象（不加 workflow 键）", async () => {
   const prompt = "一只戴墨镜的猫，霓虹雨夜，cinematic";

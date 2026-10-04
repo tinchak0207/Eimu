@@ -1,7 +1,7 @@
 "use client";
 
-// 畫布小地圖。桌面：標準大小；行動端（<768px）：緊湊版（更小、隱藏標題、
-// 關閉鈕 ≥44px），避免佔據小螢幕 —— 整個地圖本身就是 ≥44px 的跳轉目標。
+// 画布小地图。桌面：标准大小；行动端（<768px）：紧凑版（更小、隐藏标题、
+// 关闭钮 ≥44px），避免占据小萤幕 —— 整个地图本身就是 ≥44px 的跳转目标。
 
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";

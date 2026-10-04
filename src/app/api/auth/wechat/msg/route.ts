@@ -16,11 +16,11 @@ import { buildWechatUsername } from "@/lib/wechat-identity";
 export const preferredRegion = "sfo1";
 
 /**
- * 測試號/訂閱號接口配置 URL：https://eimu.dev/api/auth/wechat/msg
- * GET：微信伺服器驗證（回 echostr）。
- * POST：被動回覆在部分場景不被微信接受（體感「不說話/暫時無法提供服務」），
- * 此處一律回 200 空；兌換結果與所有提示改走**客服消息接口**主動推送
- * （VPS mp-qr-server /send-text，測試號權限 50 萬/日），100% 顯示。
+ * 测试号/订阅号接口配置 URL：https://eimu.dev/api/auth/wechat/msg
+ * GET：微信伺服器验证（回 echostr）。
+ * POST：被动回覆在部分场景不被微信接受（体感「不说话/暂时无法提供服务」），
+ * 此处一律回 200 空；兑换结果与所有提示改走**客服消息接口**主动推送
+ * （VPS mp-qr-server /send-text，测试号权限 50 万/日），100% 显示。
  */
 export async function GET(req: NextRequest) {
   const token = getWechatOfficialToken();
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** VPS 客服消息推送（best-effort，失敗不阻塞兌換）。 */
+/** VPS 客服消息推送（best-effort，失败不阻塞兑换）。 */
 async function pushCustomText(openid: string, content: string): Promise<void> {
   const base = process.env.WECHAT_MP_QR_SERVER?.trim();
   if (!base) return;
@@ -51,24 +51,24 @@ async function pushCustomText(openid: string, content: string): Promise<void> {
       signal: AbortSignal.timeout(6000),
     });
   } catch (err) {
-    console.warn("[wechat/msg] 客服消息失敗:", err instanceof Error ? err.message : err);
+    console.warn("[wechat/msg] 客服消息失败:", err instanceof Error ? err.message : err);
   }
 }
 
-/** 異步兌換：開號/登入 → 標記完成 → 客服消息推送結果。 */
+/** 异步兑换：开号/登入 → 标记完成 → 客服消息推送结果。 */
 async function redeemAsync(openid: string, record: WechatLoginState): Promise<void> {
   const seed = process.env.WECHAT_CALLBACK_SECRET?.trim() || "wechat-official";
   try {
     const result = await loginWechatPeer(openid, seed);
     const completed = await completeWechatLogin(record.code, openid, result.token, result.user);
     console.log(
-      `[wechat/msg] 兌換${completed ? "成功" : "失敗(非 pending)"} openid=${buildWechatUsername(openid)} code=${record.code}`,
+      `[wechat/msg] 兑换${completed ? "成功" : "失败(非 pending)"} openid=${buildWechatUsername(openid)} code=${record.code}`,
     );
     if (completed) {
       await pushCustomText(openid, "登录成功，可以返回浏览器了。");
     }
   } catch (err) {
-    console.error("[wechat/msg] 兌換異常:", err);
+    console.error("[wechat/msg] 兑换异常:", err);
     await pushCustomText(openid, "登录失败，请刷新网页重新扫码后再试。");
   }
 }
@@ -76,13 +76,13 @@ async function redeemAsync(openid: string, record: WechatLoginState): Promise<vo
 export async function POST(req: NextRequest) {
   const token = getWechatOfficialToken();
   if (!token) {
-    console.warn("[wechat/msg] WECHAT_OFFICIAL_TOKEN 未配置，拒絕請求");
+    console.warn("[wechat/msg] WECHAT_OFFICIAL_TOKEN 未配置，拒绝请求");
     return new NextResponse("not configured", { status: 503 });
   }
-  // 這個端點收到的掃碼事件＝直接發 session，理應驗簽（否則可偽造 SCAN 事件）。
-  // 2026-09-30 先只記錄不擋：用 `vercel env pull` 拿到的 token 簽的 GET 被線上判
-  // 403，無法證明真實推送的簽名會過；硬擋可能讓所有微信登入失效。等日誌證實真實
-  // 推送 signature_ok=true 後再改成 403 擋下。
+  // 这个端点收到的扫码事件＝直接发 session，理应验签（否则可伪造 SCAN 事件）。
+  // 2026-09-30 先只记录不挡：用 `vercel env pull` 拿到的 token 签的 GET 被线上判
+  // 403，无法证明真实推送的签名会过；硬挡可能让所有微信登入失效。等日志证实真实
+  // 推送 signature_ok=true 后再改成 403 挡下。
   const sp = req.nextUrl.searchParams;
   const signatureOk = verifyWechatSignature(token, sp.get("signature"), sp.get("timestamp"), sp.get("nonce"));
   console.log(`[wechat/msg] POST signature_ok=${signatureOk}`);
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
 
   let record: WechatLoginState | null = null;
 
-  // 掃碼事件：新關注 subscribe（臨時碼帶 qrscene_ 前綴）/ 老用戶 SCAN
+  // 扫码事件：新关注 subscribe（临时码带 qrscene_ 前缀）/ 老用户 SCAN
   if (msg.msgType === "event" && (msg.event === "subscribe" || msg.event === "SCAN")) {
     const raw = msg.eventKey || "";
     const scene = raw.startsWith("qrscene_") ? raw.slice("qrscene_".length) : raw;
@@ -110,19 +110,19 @@ export async function POST(req: NextRequest) {
       void pushCustomText(msg.fromUserName, "登录会话已过期，请刷新网页重新获取二维码。");
       return new NextResponse("", { status: 200 });
     }
-    console.log(`[wechat/msg] 掃碼事件 ${msg.event} scene=${scene}`);
+    console.log(`[wechat/msg] 扫码事件 ${msg.event} scene=${scene}`);
     waitUntil(redeemAsync(msg.fromUserName, record));
     void pushCustomText(msg.fromUserName, "正在登录，请稍候，登录成功后页面会自动跳转。");
     return new NextResponse("", { status: 200 });
   }
 
-  // text 訊息：驗證碼通道已取消（2026-09-30 暴君裁定：掃到即登入，少一個阻塞）。
-  // 有人照舊習慣發字過來，就告訴他正確做法，不再兌換任何碼。
+  // text 讯息：验证码通道已取消（2026-09-30 暴君裁定：扫到即登入，少一个阻塞）。
+  // 有人照旧习惯发字过来，就告诉他正确做法，不再兑换任何码。
   if (msg.msgType === "text") {
     void pushCustomText(msg.fromUserName, "现在无需验证码：直接用微信扫网页上的二维码即可登录。");
     return new NextResponse("", { status: 200 });
   }
 
-  // 其他類型（語音/圖片等）不回覆
+  // 其他类型（语音/图片等）不回覆
   return new NextResponse("", { status: 200 });
 }

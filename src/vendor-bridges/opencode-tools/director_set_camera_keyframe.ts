@@ -37,7 +37,7 @@ export default tool({
       const projectSec = projectFrameToSec(activePlan, args.project_frame)
       const timeSec = projectSec - shot.startSec
       if (timeSec < -1 / 24 || timeSec > shot.durationSec + 1 / 24) {
-        // 2026-09-03 驗屍修復 R1-#5：錯誤 hint 帶範圍（該鏡頭的工程幀區間）
+        // 2026-09-03 验尸修复 R1-#5：错误 hint 带范围（该镜头的工程帧区间）
         return fail("director_invalid_args", shotFrameRangeHint(Number(args.project_frame), shot.startSec, shot.durationSec))
       }
       const frames = [...(shot.cameraKeyframes ?? [])]

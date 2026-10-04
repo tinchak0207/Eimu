@@ -52,7 +52,7 @@ export interface GenerationWorkerOptions {
   jobLeaseMs?: number;
   supplierLeaseMs?: number;
   pollMs?: number;
-  /** 主循環同時在飛的任務數上限。供應商級併發由 supplier_lease 三層 concurrency_limit 把關，兩層取小值生效。 */
+  /** 主循环同时在飞的任务数上限。供应商级并发由 supplier_lease 三层 concurrency_limit 把关，两层取小值生效。 */
   maxInFlight?: number;
   sql?: GenerationSql;
 }
@@ -62,22 +62,22 @@ function backoffMs(attemptCount: number): number {
 }
 
 /**
- * INC-0831：supplier adapter_type → 對帳協議標記。V-06 起查 supply-registry：
- * 異步協議＝自身，同步協議＝其顯式 `reconcileVia`，未知協議拋錯（不再 default 成 newapi_video）。
+ * INC-0831：supplier adapter_type → 对帐协议标记。V-06 起查 supply-registry：
+ * 异步协议＝自身，同步协议＝其显式 `reconcileVia`，未知协议抛错（不再 default 成 newapi_video）。
  */
 function protocolOfAdapter(adapterType: SupplierRecord["adapterType"]): ProviderProtocol {
   return reconcileProtocolOf(adapterType);
 }
 
 /**
- * 生產平面成本閘 + 供給提交（V-03，docs/architecture/planes.md §4）。
+ * 生产平面成本闸 + 供给提交（V-03，docs/architecture/planes.md §4）。
  *
- * 取得供給租約後、呼叫供給 adapter 前執行付費視頻成本閘（原住在
- * openai-video-upstream.ts:158，只擋 openai_video）。只對 video_generate 生效：
- * - 閘看的 adapter＝真正會被呼叫的 adapter（resolveSupplyAdapter，含 kernel／new-api 分流）；
- * - `openai_video`（paidVideoFailClosed）一律過閘，白名單外拒收——與搬遷前一致；
- * - 其他協議只在上游 model 落入白名單時套價檢，metaso/filmera 等既有路徑放行不審。
- * 拒收＝SupplierRequestError(400)，在 fetch 之前拋出（零上游支出），走既有失敗路徑。
+ * 取得供给租约后、呼叫供给 adapter 前执行付费视频成本闸（原住在
+ * openai-video-upstream.ts:158，只挡 openai_video）。只对 video_generate 生效：
+ * - 闸看的 adapter＝真正会被呼叫的 adapter（resolveSupplyAdapter，含 kernel／new-api 分流）；
+ * - `openai_video`（paidVideoFailClosed）一律过闸，白名单外拒收——与搬迁前一致；
+ * - 其他协议只在上游 model 落入白名单时套价检，metaso/filmera 等既有路径放行不审。
+ * 拒收＝SupplierRequestError(400)，在 fetch 之前抛出（零上游支出），走既有失败路径。
  */
 export async function submitWithSupplyCostGate(
   supplier: SupplierRecord,
@@ -98,16 +98,16 @@ export async function submitWithSupplyCostGate(
   return generateWithSupplier(supplier, input);
 }
 
-// 病灶 D（2026-08-30）：排隊期退避不再撞穿 3 分鐘 deadline。
-// - WINDOW：deadline 只剩 <30s 才順延（避免無意義地提前續）。
-// - STEP：每次順延 +5min（extendGenerationQueueDeadline 相對 now 增量）。
-// - CAP：排隊總預算相對 started_at 封頂 20min，超過就不再順延，讓
-//   deadline_exceeded 正常殺單 —— 純無供應商的死路不會無限掛單。
+// 病灶 D（2026-08-30）：排队期退避不再撞穿 3 分钟 deadline。
+// - WINDOW：deadline 只剩 <30s 才顺延（避免无意义地提前续）。
+// - STEP：每次顺延 +5min（extendGenerationQueueDeadline 相对 now 增量）。
+// - CAP：排队总预算相对 started_at 封顶 20min，超过就不再顺延，让
+//   deadline_exceeded 正常杀单 —— 纯无供应商的死路不会无限挂单。
 const QUEUE_EXTENSION_WINDOW_MS = 30_000;
 const QUEUE_EXTENSION_STEP_MS = 5 * 60_000;
 const QUEUE_EXTENSION_CAP_MS = 20 * 60_000;
 
-/** 可恢復的等容量狀態才允許排隊順延；純死路（供應商被排除/全 disabled/未 seed 等）不延。 */
+/** 可恢复的等容量状态才允许排队顺延；纯死路（供应商被排除/全 disabled/未 seed 等）不延。 */
 const RECOVERABLE_QUEUE_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new Set([
   "suppliers_cooldown",
   "capacity_saturated",
@@ -115,26 +115,26 @@ const RECOVERABLE_QUEUE_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new
 ]);
 
 /**
- * 開工後的生成預算（2026-09-27 INC-VIDEO-0927）。
+ * 开工后的生成预算（2026-09-27 INC-VIDEO-0927）。
  *
- * 影片上游實測比圖片慢一個量級：napi 單次 attempt 最長 993.9s（16.6 分鐘）、
- * 30 秒檔成功單均 868s；adapter 內輪詢窗口原本只有 540s（9 分鐘），
- * 已實錄 1 筆 "openai-video upstream generation timed out after 540s
- * (last status: in_progress)" —— 慢而健康的上游被我們的窗口誤殺。
- * 影片類（video_generate / avatar / lipsync 同為異步影片族）放寬到 25 分鐘
- * （含成品下載與持久化），其餘維持 15 分鐘。
+ * 影片上游实测比图片慢一个量级：napi 单次 attempt 最长 993.9s（16.6 分钟）、
+ * 30 秒档成功单均 868s；adapter 内轮询窗口原本只有 540s（9 分钟），
+ * 已实录 1 笔 "openai-video upstream generation timed out after 540s
+ * (last status: in_progress)" —— 慢而健康的上游被我们的窗口误杀。
+ * 影片类（video_generate / avatar / lipsync 同为异步影片族）放宽到 25 分钟
+ * （含成品下载与持久化），其余维持 15 分钟。
  */
 const GENERATION_BUDGET_MS = 15 * 60_000;
 const VIDEO_GENERATION_BUDGET_MS = 25 * 60_000;
 
-/** 按任務類型取開工後生成預算（純函數，供測試直接斷言）。 */
+/** 按任务类型取开工后生成预算（纯函数，供测试直接断言）。 */
 export function generationBudgetMs(kind: GenerationKind): number {
   return kind === "video_generate" || kind === "avatar" || kind === "lipsync"
     ? VIDEO_GENERATION_BUDGET_MS
     : GENERATION_BUDGET_MS;
 }
 
-/** 排隊順延決策：deadline 快到期 + 未超排隊上限 + 處在可恢復狀態。純邏輯，供測試直接斷言。 */
+/** 排队顺延决策：deadline 快到期 + 未超排队上限 + 处在可恢复状态。纯逻辑，供测试直接断言。 */
 export function shouldExtendQueueDeadline(input: {
   diagnosisReason: SupplierUnavailabilityReason;
   deadlineAt: Date;
@@ -153,12 +153,12 @@ export function shouldExtendQueueDeadline(input: {
 }
 
 /**
- * 欠費無替補即時失敗（2026-09-28 漫劇評測實錘）：唯一視頻渠道回 401＋insufficient_user_quota
- * 時，registry 只認原生 402 為硬停，job 被放回佇列；帳號進 30 分鐘 cooldown 後再無可租
- * 供應商，單子以 overloaded 空轉到 25 分鐘 deadline 才死——用戶等 25 分鐘只拿到「超時」。
- * 本 job 上一次失敗已判定欠費，且診斷顯示沒有別的可用供應商（全被排除／冷卻／不健康）
- * → 立即失敗＋退款，讓上游如實說「渠道余额不足」。容量滿（capacity_saturated）不算：
- * 那代表還有別的健康供應商在忙，值得等。純邏輯，供測試直接斷言。
+ * 欠费无替补即时失败（2026-09-28 漫剧评测实锤）：唯一视频渠道回 401＋insufficient_user_quota
+ * 时，registry 只认原生 402 为硬停，job 被放回伫列；帐号进 30 分钟 cooldown 后再无可租
+ * 供应商，单子以 overloaded 空转到 25 分钟 deadline 才死——用户等 25 分钟只拿到「超时」。
+ * 本 job 上一次失败已判定欠费，且诊断显示没有别的可用供应商（全被排除／冷却／不健康）
+ * → 立即失败＋退款，让上游如实说「渠道余额不足」。容量满（capacity_saturated）不算：
+ * 那代表还有别的健康供应商在忙，值得等。纯逻辑，供测试直接断言。
  */
 const EXHAUSTED_SUPPLY_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new Set([
   "supplier_excluded",
@@ -174,9 +174,9 @@ export function shouldFailFastOnExhaustedSupply(input: {
 }
 
 /**
- * 無替補時以「真因」終結的 failure_class（H-fix 2026-10-02）：quota_exhausted（欠費）與
- * pricing_config（上游定價/本地配置錯，重試同供應商必同錯）都不該空轉到 deadline、
- * 更不該被標成 overloaded。回傳 null 表示仍值得排隊等。
+ * 无替补时以「真因」终结的 failure_class（H-fix 2026-10-02）：quota_exhausted（欠费）与
+ * pricing_config（上游定价/本地配置错，重试同供应商必同错）都不该空转到 deadline、
+ * 更不该被标成 overloaded。回传 null 表示仍值得排队等。
  */
 export function failFastClassForExhaustedSupply(input: {
   lastFailureClass: string | null;
@@ -187,7 +187,7 @@ export function failFastClassForExhaustedSupply(input: {
   return null;
 }
 
-/** 病灶 D：把 extend 實際寫入 DB 的 deadline 同步回內存 job.deadlineAt，消除語義漂移。 */
+/** 病灶 D：把 extend 实际写入 DB 的 deadline 同步回内存 job.deadlineAt，消除语义漂移。 */
 export function applyExtendedDeadline(job: GenerationJob, extendedTo: Date | null): void {
   if (extendedTo) job.deadlineAt = extendedTo;
 }
@@ -208,18 +208,18 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
   const prompt = decryptGenerationPrompt(job.promptCiphertext);
   let completed = job.completedCount;
   const heartbeat = setInterval(() => {
-    // 心跳失敗只是暫時寫不進 DB，租約到期會自然回收，不值得殺整個進程。
+    // 心跳失败只是暂时写不进 DB，租约到期会自然回收，不值得杀整个进程。
     void heartbeatGenerationJob(job.id, workerId, options.jobLeaseMs, sql).catch((error) => {
-      console.error(`[generation-worker] 心跳寫入失敗（非致命） job=${job.id}`, error);
+      console.error(`[generation-worker] 心跳写入失败（非致命） job=${job.id}`, error);
     });
   }, Math.max(1_000, Math.floor(options.jobLeaseMs / 3)));
 
   try {
     while (completed < job.requestedCount) {
       if (Date.now() >= job.deadlineAt.getTime()) {
-        // INC-0831 鐵律：deadline 只代表「我們的等待預算」用完，不代表上游失敗。
-        // 有在飛上游任務 → 凍結進對帳（submit_unknown），錢不動，真相由
-        // provider-reconciliation 查出來再結算；沒有在飛任務 → 走原誠實失敗+退款。
+        // INC-0831 铁律：deadline 只代表「我们的等待预算」用完，不代表上游失败。
+        // 有在飞上游任务 → 冻结进对帐（submit_unknown），钱不动，真相由
+        // provider-reconciliation 查出来再结算；没有在飞任务 → 走原诚实失败+退款。
         if (await jobHasUnresolvedProviderTask(job.id, sql)) {
           await freezeGenerationJobForReconciliation({
             jobId: job.id,
@@ -234,9 +234,9 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });
         return;
       }
-      // 人工取消檢查：job 已 cancelled（或租約易主）→ 停止後續 attempt，
-      // 在飛產出丟棄、不調 completeGenerationJob；錢由 reconcileGenerationBilling
-      // 對終態 job 按已完成張數 commit、退還差額兜底。
+      // 人工取消检查：job 已 cancelled（或租约易主）→ 停止后续 attempt，
+      // 在飞产出丢弃、不调 completeGenerationJob；钱由 reconcileGenerationBilling
+      // 对终态 job 按已完成张数 commit、退还差额兜底。
       const currentJob = await getGenerationJob(job.id, sql);
       if (!currentJob || currentJob.status === "cancelled" || currentJob.leaseOwner !== workerId) {
         return;
@@ -251,21 +251,21 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         leaseMs: options.supplierLeaseMs,
       }, sql);
       if (supplierLease) {
-        // R7-D：排隊 3 分鐘 deadline 只保護等容量階段；真的租到供應商開工了，
-        // 立即按 started_at 展期到生成總預算（慢而健康的影片單不被誤殺）。
-        // 病灶 D：extend 返回實際寫入的 deadline，同步回內存 job.deadlineAt，
-        // 否則內存仍停在 claim 時的 3 分鐘快照，長任務會被誤殺。
-        // INC-VIDEO-0927：預算按 kind 分級（影片 25 分鐘，其餘 15 分鐘）。
+        // R7-D：排队 3 分钟 deadline 只保护等容量阶段；真的租到供应商开工了，
+        // 立即按 started_at 展期到生成总预算（慢而健康的影片单不被误杀）。
+        // 病灶 D：extend 返回实际写入的 deadline，同步回内存 job.deadlineAt，
+        // 否则内存仍停在 claim 时的 3 分钟快照，长任务会被误杀。
+        // INC-VIDEO-0927：预算按 kind 分级（影片 25 分钟，其余 15 分钟）。
         const extendedTo = await extendGenerationDeadlineJob(job, workerId, generationBudgetMs(job.kind), sql).catch(() => null);
         applyExtendedDeadline(job, extendedTo);
       }
       if (!supplierLease) {
-        // 診斷為什麼沒租到：同一句 "overloaded" 底下至少有六種完全不同的成因，
-        // 處置也完全不同。診斷只在失敗後跑一次，不在熱路徑上。
-        // 診斷自身失敗不能蓋掉重試邏輯，所以兜一個保守的說法。
-        // 排除鏈（2026-08-29）：把本 job 已失敗過的 supplier / failure domain 與
-        // 最近一次上游失敗原文帶進診斷，否則單供應商渠道第一次 attempt 失敗後
-        // 必然被自己排除，診斷會謊報「healthy but limits full」。僅失敗路徑多查一次。
+        // 诊断为什么没租到：同一句 "overloaded" 底下至少有六种完全不同的成因，
+        // 处置也完全不同。诊断只在失败后跑一次，不在热路径上。
+        // 诊断自身失败不能盖掉重试逻辑，所以兜一个保守的说法。
+        // 排除链（2026-08-29）：把本 job 已失败过的 supplier / failure domain 与
+        // 最近一次上游失败原文带进诊断，否则单供应商渠道第一次 attempt 失败后
+        // 必然被自己排除，诊断会谎报「healthy but limits full」。仅失败路径多查一次。
         const jobAttempts = await listGenerationAttemptsForJob(job.id, sql).catch(() => []);
         const lastFailureDetail = [...jobAttempts]
           .reverse()
@@ -294,11 +294,11 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           await emitJobRoutingEvent({ job, attempts: attemptsAfterFail, outcome: "exhausted", refunded: true });
           return;
         }
-        // 病灶 D：排隊期退避撞穿 deadline —— 無 lease 反覆 claim→釋放直到 3 分鐘
-        // deadline 到期被 deadline_exceeded 殺單（實錄 12 筆 video job，attempt_count=0）。
-        // 當 deadline 快到期且處在「可恢復」的等容量狀態（cooldown 未到 / 併發滿 /
-        // 賬號暫掛）時順延一次；純死路（suppliers_disabled / supplier_excluded /
-        // 未 seed 等）不延，超過 started_at 起的 20min 排隊上限也不延。
+        // 病灶 D：排队期退避撞穿 deadline —— 无 lease 反覆 claim→释放直到 3 分钟
+        // deadline 到期被 deadline_exceeded 杀单（实录 12 笔 video job，attempt_count=0）。
+        // 当 deadline 快到期且处在「可恢复」的等容量状态（cooldown 未到 / 并发满 /
+        // 账号暂挂）时顺延一次；纯死路（suppliers_disabled / supplier_excluded /
+        // 未 seed 等）不延，超过 started_at 起的 20min 排队上限也不延。
         if (shouldExtendQueueDeadline({
           diagnosisReason: diagnosis.reason,
           deadlineAt: job.deadlineAt,
@@ -318,14 +318,14 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         return;
       }
       const supplierHeartbeat = setInterval(() => {
-        // 心跳失敗只是暫時寫不進 DB，租約到期會自然回收，不值得殺整個進程。
+        // 心跳失败只是暂时写不进 DB，租约到期会自然回收，不值得杀整个进程。
         void heartbeatSupplierLease(supplierLease.id, workerId, options.supplierLeaseMs, sql).catch((error) => {
-          console.error(`[generation-worker] 供應商租約心跳失敗（非致命） lease=${supplierLease.id}`, error);
+          console.error(`[generation-worker] 供应商租约心跳失败（非致命） lease=${supplierLease.id}`, error);
         });
       }, Math.max(1_000, Math.floor(options.supplierLeaseMs / 3)));
       const startedAt = Date.now();
       let attemptId: string | null = null;
-      // 剛失敗那次 attempt 的序號（FG-02/03：重放裁決的唯一狀態輸入，非呼叫方預算）。
+      // 刚失败那次 attempt 的序号（FG-02/03：重放裁决的唯一状态输入，非呼叫方预算）。
       let attemptNo: number | null = null;
       try {
         const attempt = await beginGenerationAttempt({
@@ -337,9 +337,9 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         }, sql);
         attemptId = attempt.id;
         attemptNo = attempt.attemptNo;
-        // INC-0830-VIDEO / INC-0831：適配器在上游提交完成、取得 provider task id 的瞬間
-        // 回調 → 先 durably 萬 attempt 行（task id + 對帳排程；事故根治點：只發事件
-        // 不落行 = 輪詢斷掉後 task id 無人認領），再落 attempt_submitted 事件（遙測）。
+        // INC-0830-VIDEO / INC-0831：适配器在上游提交完成、取得 provider task id 的瞬间
+        // 回调 → 先 durably 万 attempt 行（task id + 对帐排程；事故根治点：只发事件
+        // 不落行 = 轮询断掉后 task id 无人认领），再落 attempt_submitted 事件（遥测）。
         const onProviderTaskSubmitted = (providerTaskId: string, protocol: ProviderProtocol): void => {
           void markProviderTaskSubmitted({
             jobId: job.id,
@@ -347,7 +347,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             providerTaskId,
             protocol,
           }, sql).catch((error) => {
-            console.error(`[generation-worker] provider task id 落庫失敗（對帳靠失敗路徑兜底） job=${job.id} task=${providerTaskId}`, error);
+            console.error(`[generation-worker] provider task id 落库失败（对帐靠失败路径兜底） job=${job.id} task=${providerTaskId}`, error);
           });
           emitJobEvent({
             jobId: job.id,
@@ -396,7 +396,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           providerHttpStatus: output.httpStatus,
           latencyMs,
           evidence: output.evidence,
-          // INC-0831：canonical artifact 早已存在（重放/晚到命中冪等鍵）→ 只記 attempt，不重複計數。
+          // INC-0831：canonical artifact 早已存在（重放/晚到命中幂等键）→ 只记 attempt，不重复计数。
           advanceOutput: stored.inserted,
         }, sql);
         // INC-0830-VIDEO：attempt 成功事件（append-only）。
@@ -430,10 +430,10 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         completed += 1;
       } catch (error) {
         const failure = classifySupplierFailure(error);
-        // FG-01：先把上游原生錯誤逐字捕獲成版本化記錄（與產品解釋分欄存放），
-        // 之後所有落庫路徑共用同一份 record —— 解釋永不覆寫原生欄位。
+        // FG-01：先把上游原生错误逐字捕获成版本化记录（与产品解释分栏存放），
+        // 之后所有落库路径共用同一份 record —— 解释永不覆写原生栏位。
         const failureRecord = createFailureRecord({ error, explanation: explainFailure(failure) });
-        // INC-0830-VIDEO：適配器拋錯時帶出的上游任務 id，回填 attempt 行。
+        // INC-0830-VIDEO：适配器抛错时带出的上游任务 id，回填 attempt 行。
         const failedProviderTaskId = error instanceof SupplierRequestError ? error.providerTaskId : undefined;
         if (attemptId) {
           await failGenerationAttempt({
@@ -448,8 +448,8 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             retryAfterAt: failure.cooldownUntil,
             latencyMs: Date.now() - startedAt,
           }, sql);
-          // INC-0831：失敗路徑的 task id 保險回填（提交回調寫入失敗時的兜底；
-          // 同 id 冪等，不同 id 不覆蓋）。之後該 attempt 立即進對帳隊列。
+          // INC-0831：失败路径的 task id 保险回填（提交回调写入失败时的兜底；
+          // 同 id 幂等，不同 id 不覆盖）。之后该 attempt 立即进对帐队列。
           if (failedProviderTaskId) {
             await markProviderTaskSubmitted({
               jobId: job.id,
@@ -458,10 +458,10 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
               protocol: protocolOfAdapter(supplierLease.supplier.adapterType),
               firstPollDelayMs: 60_000,
             }, sql).catch((reconcileError) => {
-              console.error(`[generation-worker] 失敗路徑 task id 回填失敗 job=${job.id} task=${failedProviderTaskId}`, reconcileError);
+              console.error(`[generation-worker] 失败路径 task id 回填失败 job=${job.id} task=${failedProviderTaskId}`, reconcileError);
             });
           }
-          // attempt 失敗事件：upstream_raw = 錯誤原文（不改寫），供 probe 直查死因。
+          // attempt 失败事件：upstream_raw = 错误原文（不改写），供 probe 直查死因。
           emitJobEvent({
             jobId: job.id,
             event: JOB_EVENT.attemptFailed,
@@ -481,12 +481,12 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           accountId: supplierLease.supplier.account.id,
           capabilityId: supplierLease.supplier.capabilityId,
         }, failure, sql);
-        // FG-02/03（2026-09-23）：自動重放許可**只**由封閉 operation registry 裁決
-        // （operation-registry.ts）。產品分類（retryable/switchSupplier）不再參與——
-        // 分類是關鍵字詞表猜的，餵給錢的決策就是「解釋決定再花一次錢」。
-        // 原生硬停（402/400/422/451：確定性失敗，同一個請求換渠道也不可能成功）由 registry
-        // 政策宣告，輸入是 FailureRecord.native 的原始 HTTP 狀態，不是產品 category。
-        // 402 例外來自暴君 2026-08-29 裁定（fail-fast，立刻誠實失敗＋退款）；改判須暴君點名。
+        // FG-02/03（2026-09-23）：自动重放许可**只**由封闭 operation registry 裁决
+        // （operation-registry.ts）。产品分类（retryable/switchSupplier）不再参与——
+        // 分类是关键字词表猜的，喂给钱的决策就是「解释决定再花一次钱」。
+        // 原生硬停（402/400/422/451：确定性失败，同一个请求换渠道也不可能成功）由 registry
+        // 政策宣告，输入是 FailureRecord.native 的原始 HTTP 状态，不是产品 category。
+        // 402 例外来自暴君 2026-08-29 裁定（fail-fast，立刻诚实失败＋退款）；改判须暴君点名。
         const replay = planGenerationAttemptReplay({
           kind: job.kind,
           lastAttemptNo: attemptNo,
@@ -506,8 +506,8 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
               hard_stop_status: replay.hardStop?.status ?? null,
             },
           }, sql);
-          // INC-0831 鐵律：上游已提交的任務不因任何裁決被判死。先凍結進對帳
-          //（錢不動），reconciliation 查出上游確認失敗才退款。
+          // INC-0831 铁律：上游已提交的任务不因任何裁决被判死。先冻结进对帐
+          //（钱不动），reconciliation 查出上游确认失败才退款。
           if (failedProviderTaskId) {
             await freezeGenerationJobForReconciliation({
               jobId: job.id,
@@ -568,9 +568,9 @@ export async function runGenerationWorkerOnce(options: GenerationWorkerOptions =
 }
 
 /**
- * 維護閉環單次執行（Vercel cron 入口用）：runGenerationWorkerOnce 只派單不含維護，
- * cron 進程必須另跑這組（租約回收/計費結算/provider 對帳/健康巡檢），
- * 否則長駐 worker 關停期間對帳就斷糧（INC-0831 教訓：真相查詢不能只有一條心跳）。
+ * 维护闭环单次执行（Vercel cron 入口用）：runGenerationWorkerOnce 只派单不含维护，
+ * cron 进程必须另跑这组（租约回收/计费结算/provider 对帐/健康巡检），
+ * 否则长驻 worker 关停期间对帐就断粮（INC-0831 教训：真相查询不能只有一条心跳）。
  */
 export async function runGenerationMaintenanceOnce(options: GenerationWorkerOptions = {}): Promise<void> {
   const sql = options.sql ?? getGenerationSql();
@@ -580,8 +580,8 @@ export async function runGenerationMaintenanceOnce(options: GenerationWorkerOpti
   await recoverExpiredGenerationLeases(sql);
   await reconcileGenerationBilling({ executorId, sql });
   await projectGatePathBilling({ executorId, sql });
-  // INC-0831：provider 對帳循環——按 task id 查上游真相，晚到成品落地、
-  // 確認失敗才退款、窗口耗盡凍結人工。
+  // INC-0831：provider 对帐循环——按 task id 查上游真相，晚到成品落地、
+  // 确认失败才退款、窗口耗尽冻结人工。
   await runProviderReconciliation({ executorId, sql });
   await runAccountMaintenanceOnce(sql);
   await refreshAdobeSupplierHealth(sql);
@@ -590,11 +590,11 @@ export async function runGenerationMaintenanceOnce(options: GenerationWorkerOpti
 }
 
 /**
- * REQ-E1a/E1b 帳本維護（充值入帳同步 + 跨層對帳）。
+ * REQ-E1a/E1b 帐本维护（充值入帐同步 + 跨层对帐）。
  *
- * 節奏刻意與 30s 記帳循環解耦：對帳每個身份一次上游 GET，30s 跑一輪會打爆 new-api。
- * 默認 10 分鐘一次（ACCOUNT_MAINTENANCE_INTERVAL_MS 可調）；兩件事都只讀+冪等寫入，
- * 任何失敗只 console.error（沿用既有告警通道），絕不擋任務路徑。
+ * 节奏刻意与 30s 记帐循环解耦：对帐每个身份一次上游 GET，30s 跑一轮会打爆 new-api。
+ * 默认 10 分钟一次（ACCOUNT_MAINTENANCE_INTERVAL_MS 可调）；两件事都只读+幂等写入，
+ * 任何失败只 console.error（沿用既有告警通道），绝不挡任务路径。
  */
 const ACCOUNT_MAINTENANCE_INTERVAL_MS_DEFAULT = 10 * 60_000;
 let lastAccountMaintenanceAt = 0;
@@ -611,27 +611,27 @@ export async function runAccountMaintenanceOnce(
   try {
     const recharges = await ingestRedeemedRecharges({}, { sql });
     console.log(
-      `[account-ledger] 充值入帳掃描 scanned=${recharges.scanned} charged=${recharges.charged} ` +
-        `基線前已補記=${recharges.chargedBaselineAbsorbed} 未使用=${recharges.skippedUnused} ` +
-        `基線前漏記=${recharges.skippedBeforeBaseline} ` +
-        `訂閱碼=${recharges.skippedSubscription} errors=${recharges.errors.length}`,
+      `[account-ledger] 充值入帐扫描 scanned=${recharges.scanned} charged=${recharges.charged} ` +
+        `基线前已补记=${recharges.chargedBaselineAbsorbed} 未使用=${recharges.skippedUnused} ` +
+        `基线前漏记=${recharges.skippedBeforeBaseline} ` +
+        `订阅码=${recharges.skippedSubscription} errors=${recharges.errors.length}`,
     );
   } catch (error) {
-    console.error("[account-ledger] 充值入帳失敗（繼續）", error);
+    console.error("[account-ledger] 充值入帐失败（继续）", error);
   }
-  // REQ-D3：訂閱兌換碼 → 期次發放（讀同一份上游兌換記錄；帶 SKU 標記的碼只走這條，
-  // 永久充值通道已明確跳過它們）。注意本掃描**不**做「到期清零」——過期是讀取時 lazy
-  // 判定的，這裡只處理「有人兌換了訂閱碼」這一個事件。
+  // REQ-D3：订阅兑换码 → 期次发放（读同一份上游兑换记录；带 SKU 标记的码只走这条，
+  // 永久充值通道已明确跳过它们）。注意本扫描**不**做「到期清零」——过期是读取时 lazy
+  // 判定的，这里只处理「有人兑换了订阅码」这一个事件。
   try {
     const subscriptions = await ingestSubscriptionRedemptions({}, { sql });
     console.log(
-      `[subscription] 訂閱發放掃描 scanned=${subscriptions.scanned} granted=${subscriptions.granted} ` +
-        `已發放=${subscriptions.skippedAlreadyGranted} 未使用=${subscriptions.skippedUnused} ` +
-        `基線前=${subscriptions.skippedBeforeBaseline} 未註冊SKU=${subscriptions.unknownSku} ` +
+      `[subscription] 订阅发放扫描 scanned=${subscriptions.scanned} granted=${subscriptions.granted} ` +
+        `已发放=${subscriptions.skippedAlreadyGranted} 未使用=${subscriptions.skippedUnused} ` +
+        `基线前=${subscriptions.skippedBeforeBaseline} 未注册SKU=${subscriptions.unknownSku} ` +
         `errors=${subscriptions.errors.length}`,
     );
   } catch (error) {
-    console.error("[subscription] 訂閱發放失敗（繼續）", error);
+    console.error("[subscription] 订阅发放失败（继续）", error);
   }
   try {
     const referral = await runReferralRewardsWithSql(sql);
@@ -639,7 +639,7 @@ export async function runAccountMaintenanceOnce(
       console.log(`[referral] granted=${referral.granted} skipped=${referral.skipped} failed=${referral.failed}${referral.aborted ? " aborted" : ""}`);
     }
   } catch (error) {
-    console.error("[referral] 邀請獎勵失敗（繼續）", error);
+    console.error("[referral] 邀请奖励失败（继续）", error);
   }
   // 新人礼兜底：开发者建了 biz key 但用 API、不会再登录网站，/api/auth/me 的补发打不到他们。
   // 这里对「持有 biz key ∧ 未领过新人礼 ∧ 没成功出图」的外部用户自动补发（复用 grantWelcomeGift），
@@ -656,7 +656,7 @@ export async function runAccountMaintenanceOnce(
     const mail = await runLifecycleEmailsWithSql(sql);
     console.log(`[lifecycle-email] sent=${mail.sent} failed=${mail.failed}${mail.skipped ? ` skipped=${mail.skipped}` : ""}${mail.aborted ? ` aborted=${mail.aborted}` : ""}`);
   } catch (error) {
-    console.error("[lifecycle-email] 生命週期郵件失敗（繼續）", error);
+    console.error("[lifecycle-email] 生命周期邮件失败（继续）", error);
   }
   try {
     const report = await reconcileAccountBalances({}, { sql });
@@ -666,7 +666,7 @@ export async function runAccountMaintenanceOnce(
         `unknown=${report.totals.unknown} alerts=${report.alerts.length}`,
     );
   } catch (error) {
-    console.error("[account-reconcile] 跨層對帳失敗（繼續）", error);
+    console.error("[account-reconcile] 跨层对帐失败（继续）", error);
   }
   return true;
 }
@@ -674,11 +674,11 @@ export async function runAccountMaintenanceOnce(
 export async function runGenerationWorker(options: GenerationWorkerOptions = {}): Promise<void> {
   const sql = options.sql ?? getGenerationSql();
   const pollMs = options.pollMs ?? Number(process.env.GENERATION_WORKER_POLL_MS ?? 1_000);
-  // 併發池：舊主循環「租一單同步等到上游跑完再租下一單」，突發任務在第 N 單上
-  // 疊加前 N-1 單的上游時長（實錄：metaso 9 連發中控時延 70s→355s 線性增長）。
-  // 上游併發上限由 supplier/account/capability 三層 concurrency_limit 在
-  // acquireSupplierLease 內把關（SKIP LOCKED，超限走 overloaded 退避重投），
-  // 這裡只約束全進程同時在飛的單數，兩層取小值生效。
+  // 并发池：旧主循环「租一单同步等到上游跑完再租下一单」，突发任务在第 N 单上
+  // 叠加前 N-1 单的上游时长（实录：metaso 9 连发中控时延 70s→355s 线性增长）。
+  // 上游并发上限由 supplier/account/capability 三层 concurrency_limit 在
+  // acquireSupplierLease 内把关（SKIP LOCKED，超限走 overloaded 退避重投），
+  // 这里只约束全进程同时在飞的单数，两层取小值生效。
   const maxInFlight = Math.max(1, options.maxInFlight ?? Number(process.env.GENERATION_WORKER_CONCURRENCY ?? 6));
   let stopping = false;
   const stop = () => { stopping = true; };
@@ -686,8 +686,8 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
   process.once("SIGTERM", stop);
   let lastMaintenance = 0;
   const billingExecutorId = `billing:${process.env.HOSTNAME ?? "local"}:${process.pid}`;
-  // filmera token 輪換持久化：內存換新後原子寫回 env 文件，
-  // worker 重啟不丟失 refresh_token 鏈（否則每次重啟都退回舊 token → 401 死鎖）。
+  // filmera token 轮换持久化：内存换新后原子写回 env 文件，
+  // worker 重启不丢失 refresh_token 链（否则每次重启都退回旧 token → 401 死锁）。
   const envPath = process.env.FILMERA_ENV_PATH ?? "/opt/image-control-plane/.env.control-plane";
   onFilmeraTokenRotated(async (next) => {
     try {
@@ -695,26 +695,26 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
       const lines = text.split("\n").filter((l) => !l.startsWith("FILMERA_AUTH_TOKEN=") && !l.startsWith("FILMERA_REFRESH_TOKEN="));
       lines.push(`FILMERA_AUTH_TOKEN=${next.accessToken}`);
       lines.push(`FILMERA_REFRESH_TOKEN=${next.refreshToken}`);
-      // bind-mount 單文件掛載不支援 rename 覆蓋（EBUSY），直接原地寫入。
-      // 寫入期間理論上有瞬間不完整窗口，但 env 只在容器啟動時讀取，可接受。
+      // bind-mount 单文件挂载不支援 rename 覆盖（EBUSY），直接原地写入。
+      // 写入期间理论上有瞬间不完整窗口，但 env 只在容器启动时读取，可接受。
       await writeFile(envPath, lines.join("\n"), "utf8");
       process.env.FILMERA_AUTH_TOKEN = next.accessToken;
       process.env.FILMERA_REFRESH_TOKEN = next.refreshToken;
     } catch (error) {
-      console.warn("[generation-worker] filmera token 持久化失敗（僅內存生效）", error instanceof Error ? error.message : String(error));
+      console.warn("[generation-worker] filmera token 持久化失败（仅内存生效）", error instanceof Error ? error.message : String(error));
     }
   });
   const inFlight = new Set<Promise<void>>();
   const dispatch = (job: GenerationJob): void => {
-    // finally 的清理改掛 task.finally()：promise 先落 const 才能自引用，
-    // settle 後再從 inFlight 摘除，語義與原 finally 塊等價（catch 已吞異常）。
+    // finally 的清理改挂 task.finally()：promise 先落 const 才能自引用，
+    // settle 后再从 inFlight 摘除，语义与原 finally 块等价（catch 已吞异常）。
     const task = (async () => {
       try {
         await executeClaimedGenerationJob(job, { ...options, sql });
       } catch (error) {
-        // executeGenerationJob 內部已把可預期失敗落成 attempt/fail 鏈；
-        // 這裡只兜真正意外的異常，不能讓一單炸掉整個池。
-        console.error("[generation-worker] 任務執行意外失敗（繼續輪詢）", error);
+        // executeGenerationJob 内部已把可预期失败落成 attempt/fail 链；
+        // 这里只兜真正意外的异常，不能让一单炸掉整个池。
+        console.error("[generation-worker] 任务执行意外失败（继续轮询）", error);
       }
     })();
     inFlight.add(task);
@@ -727,25 +727,25 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         await recoverExpiredGenerationLeases(sql);
         await reconcileGenerationBilling({ executorId: billingExecutorId, sql });
         await projectGatePathBilling({ executorId: billingExecutorId, sql });
-        // INC-0831：provider 對帳循環——按 task id 查上游真相，晚到成品落地、
-        // 確認失敗才退款、窗口耗盡凍結人工。與租約回收同節奏（30s）。
+        // INC-0831：provider 对帐循环——按 task id 查上游真相，晚到成品落地、
+        // 确认失败才退款、窗口耗尽冻结人工。与租约回收同节奏（30s）。
         await runProviderReconciliation({ executorId: billingExecutorId, sql }).catch((error) => {
-          console.error("[generation-worker] provider reconciliation failed（繼續）", error);
+          console.error("[generation-worker] provider reconciliation failed（继续）", error);
         });
-        // REQ-E1a/E1b：充值入帳同步 + 跨層對帳（內部自帶節奏門檻，非每輪執行）。
+        // REQ-E1a/E1b：充值入帐同步 + 跨层对帐（内部自带节奏门槛，非每轮执行）。
         await runAccountMaintenanceOnce(sql);
         await refreshAdobeSupplierHealth(sql);
         await refreshFilmeraSupplierHealth(sql);
-        // 病灶 C：cooldown 到期自動恢復（disabled 不自動恢復）。每 30s 與健康循環
-        // 一起掃一次，把「cooldown 已到期」的 supplier/account 撿回 healthy。
+        // 病灶 C：cooldown 到期自动恢复（disabled 不自动恢复）。每 30s 与健康循环
+        // 一起扫一次，把「cooldown 已到期」的 supplier/account 捡回 healthy。
         await recoverExpiredCooldowns(sql);
-        // mPay 落地存證自癒（2026-10-04）：把「已收到但沒履約」的單用既有冪等路徑重投。
-        // 原本只掛在 /api/cron/generation-worker 上，而那條端點在兩個平面都沒有人呼叫
-        // （Vercel 側無 GENERATION_DATABASE_URL ⇒ 閘門前就 early return；VPS 無 cron/timer），
-        // 等於沒接線。改掛本長駐迴圈；函式自帶 10 分鐘陳舊門檻與 limit，30s 一輪只是便宜掃描。
-        // 失敗不得影響本區塊其餘維護工作 ⇒ 自帶 catch。
+        // mPay 落地存证自愈（2026-10-04）：把「已收到但没履约」的单用既有幂等路径重投。
+        // 原本只挂在 /api/cron/generation-worker 上，而那条端点在两个平面都没有人呼叫
+        // （Vercel 侧无 GENERATION_DATABASE_URL ⇒ 闸门前就 early return；VPS 无 cron/timer），
+        // 等于没接线。改挂本长驻回圈；函式自带 10 分钟陈旧门槛与 limit，30s 一轮只是便宜扫描。
+        // 失败不得影响本区块其余维护工作 ⇒ 自带 catch。
         await sweepMapayIntakeOnce(sql).catch((error) => {
-          console.error("[generation-worker] mapay intake sweep failed（繼續）", error);
+          console.error("[generation-worker] mapay intake sweep failed（继续）", error);
         });
         lastMaintenance = now;
       }
@@ -753,17 +753,17 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         const job = await claimGenerationJob({ ...options, sql });
         if (job) {
           dispatch(job);
-          // 池未滿且仍有積壓：立刻繼續租，讓同一批突發一次拉滿，不空轉等下一個 poll。
+          // 池未满且仍有积压：立刻继续租，让同一批突发一次拉满，不空转等下一个 poll。
           continue;
         }
       }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     } catch (error) {
-      // 迭代失敗（暫時性，繼續輪詢）
-      console.error("[generation-worker] 迭代失敗（暫時性，繼續輪詢）", error);
+      // 迭代失败（暂时性，继续轮询）
+      console.error("[generation-worker] 迭代失败（暂时性，继续轮询）", error);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   }
-  // 停機：不再派新單，等在飛任務收尾（執行鏈自帶租約心跳與退款兜底）。
+  // 停机：不再派新单，等在飞任务收尾（执行链自带租约心跳与退款兜底）。
   await Promise.allSettled(inFlight);
 }

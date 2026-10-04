@@ -1,11 +1,11 @@
-// steer-identity.test.ts —— REQ-D2b（steer 持久命令身份＋uncertain 態＋tombstone）的
-// 純核心具名測試。這裡的每一條都是**真實行為斷言**（真函數、真輸入→真輸出）；
-// 唯一的外部 oracle 是 GNU coreutils 的 sha256sum（獨立於本檔的 JS 實作，防同源斷言）。
+// steer-identity.test.ts —— REQ-D2b（steer 持久命令身份＋uncertain 态＋tombstone）的
+// 纯核心具名测试。这里的每一条都是**真实行为断言**（真函数、真输入→真输出）；
+// 唯一的外部 oracle 是 GNU coreutils 的 sha256sum（独立于本档的 JS 实作，防同源断言）。
 //
-// 持久層（bun:sqlite）與真實 HTTP 受理端在 steer-ledger-db.test.ts（bun 直跑，
-// tsx 載不動 bun:sqlite），本檔只釘語義。
+// 持久层（bun:sqlite）与真实 HTTP 受理端在 steer-ledger-db.test.ts（bun 直跑，
+// tsx 载不动 bun:sqlite），本档只钉语义。
 //
-// 跑法（必帶超時）：
+// 跑法（必带超时）：
 //   timeout 240 npx tsx --test deploy-staging/gateway/steer-identity.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,7 +27,7 @@ import {
 
 const NOW = 1_760_000_000_000;
 
-/** 記憶體替身 store（介面與 persistence.steerCommandStore 逐字同形）。 */
+/** 记忆体替身 store（介面与 persistence.steerCommandStore 逐字同形）。 */
 function memStore(): SteerLedgerStore & { rows: Map<string, SteerCommand> } {
   const rows = new Map<string, SteerCommand>();
   return {
@@ -35,7 +35,7 @@ function memStore(): SteerLedgerStore & { rows: Map<string, SteerCommand> } {
     read(steerId) {
       const direct = rows.get(steerId);
       if (direct) return direct;
-      // 別名命中（生產側由 SQL 的 alias_ids LIKE 完成，語義相同）。
+      // 别名命中（生产侧由 SQL 的 alias_ids LIKE 完成，语义相同）。
       for (const row of rows.values()) if (row.aliasIds.includes(steerId)) return row;
       return null;
     },
@@ -61,37 +61,37 @@ function beginInput(over: Partial<Parameters<ReturnType<typeof createSteerLedger
   };
 }
 
-// ─────────────── ① 狀態機：六態（上屏）／七態（持久）流轉合法、終態凍結 ───────────────
+// ─────────────── ① 状态机：六态（上屏）／七态（持久）流转合法、终态冻结 ───────────────
 
-test("狀態機流轉表：queued→dispatched→applied/injected/failed/uncertain/aborted 合法，終態零出邊", () => {
-  // 值域本身是契約（前端 AGENT_STEER_STATUSES 與上屏狀態逐字對齊）。
+test("状态机流转表：queued→dispatched→applied/injected/failed/uncertain/aborted 合法，终态零出边", () => {
+  // 值域本身是契约（前端 AGENT_STEER_STATUSES 与上屏状态逐字对齐）。
   assert.deepEqual(
     [...STEER_COMMAND_STATES],
     ["queued", "dispatched", "applied", "injected", "failed", "uncertain", "aborted"],
   );
   assert.deepEqual([...STEER_TERMINAL_STATES], ["applied", "injected", "failed", "uncertain", "aborted"]);
 
-  // 主線：queued → dispatched → 五個終態（applied/injected/failed/uncertain/aborted）。
+  // 主线：queued → dispatched → 五个终态（applied/injected/failed/uncertain/aborted）。
   assert.equal(isLegalSteerTransition("queued", "dispatched"), true);
   for (const t of ["applied", "injected", "failed", "uncertain", "aborted"] as const) {
-    assert.equal(isLegalSteerTransition("dispatched", t), true, `dispatched → ${t} 必須合法`);
+    assert.equal(isLegalSteerTransition("dispatched", t), true, `dispatched → ${t} 必须合法`);
   }
-  // 未投遞就能落終態（停止優先／逾時／重啟前未投遞）：queued → failed/aborted/uncertain。
+  // 未投递就能落终态（停止优先／逾时／重启前未投递）：queued → failed/aborted/uncertain。
   for (const t of ["failed", "aborted", "uncertain"] as const) {
-    assert.equal(isLegalSteerTransition("queued", t), true, `queued → ${t} 必須合法`);
+    assert.equal(isLegalSteerTransition("queued", t), true, `queued → ${t} 必须合法`);
   }
-  // 終態零出邊＝凍結（含 uncertain 不得被遲到幀改寫）。
+  // 终态零出边＝冻结（含 uncertain 不得被迟到帧改写）。
   for (const from of STEER_TERMINAL_STATES) {
-    assert.deepEqual([...STEER_STATE_TRANSITIONS[from]], [], `${from} 是終態，不得有出邊`);
+    assert.deepEqual([...STEER_STATE_TRANSITIONS[from]], [], `${from} 是终态，不得有出边`);
     for (const to of STEER_COMMAND_STATES) {
-      assert.equal(isLegalSteerTransition(from, to), false, `${from} → ${to} 必須非法`);
+      assert.equal(isLegalSteerTransition(from, to), false, `${from} → ${to} 必须非法`);
     }
   }
-  // 不得跳過 dispatched 直接自稱已投遞成功語義之外的亂跳。
-  assert.equal(isLegalSteerTransition("queued", "queued"), false, "同態不是合法流轉（ledger 另有冪等分支）");
+  // 不得跳过 dispatched 直接自称已投递成功语义之外的乱跳。
+  assert.equal(isLegalSteerTransition("queued", "queued"), false, "同态不是合法流转（ledger 另有幂等分支）");
   assert.equal(isLegalSteerTransition("dispatched", "dispatched"), false);
 
-  // 上屏映射：dispatched 是內部在途態，對使用者仍是「排隊中」（尚未確認就不許說已生效）。
+  // 上屏映射：dispatched 是内部在途态，对使用者仍是「排队中」（尚未确认就不许说已生效）。
   assert.equal(steerWireStatus("queued"), "queued");
   assert.equal(steerWireStatus("dispatched"), "queued");
   assert.equal(steerWireStatus("applied"), "applied");
@@ -104,9 +104,9 @@ test("狀態機流轉表：queued→dispatched→applied/injected/failed/uncerta
   assert.equal(isSteerTerminalState("garbage"), false);
 });
 
-// ─────────────── ② payload 凍結：內容 + turn/session 標識都進哈希 ───────────────
+// ─────────────── ② payload 冻结：内容 + turn/session 标识都进哈希 ───────────────
 
-test("payload 凍結：hash 與獨立實作（sha256sum）逐字相等，且對內容/turn/session 敏感", () => {
+test("payload 冻结：hash 与独立实作（sha256sum）逐字相等，且对内容/turn/session 敏感", () => {
   const frozen = freezeSteerPayload({
     steerId: "steer-aaa-1",
     sessionId: "ses_1",
@@ -114,12 +114,12 @@ test("payload 凍結：hash 與獨立實作（sha256sum）逐字相等，且對�
     turnGen: 3,
     content: "先改成冷色调",
   });
-  // 獨立 oracle：GNU coreutils 的 sha256sum（不是本檔的 node:crypto 實作）。
+  // 独立 oracle：GNU coreutils 的 sha256sum（不是本档的 node:crypto 实作）。
   const external = execFileSync("sha256sum", { input: frozen.canonical, encoding: "utf8" }).split(/\s+/)[0];
-  assert.equal(frozen.payloadHash, external, "payload hash 必須等於獨立工具對同一 canonical 字串的結果");
+  assert.equal(frozen.payloadHash, external, "payload hash 必须等于独立工具对同一 canonical 字串的结果");
   assert.match(frozen.payloadHash, /^[0-9a-f]{64}$/);
 
-  // 決定性：同輸入同哈希（重放比對才成立）。
+  // 决定性：同输入同哈希（重放比对才成立）。
   const again = freezeSteerPayload({
     steerId: "steer-aaa-1",
     sessionId: "ses_1",
@@ -129,8 +129,8 @@ test("payload 凍結：hash 與獨立實作（sha256sum）逐字相等，且對�
   });
   assert.equal(again.payloadHash, frozen.payloadHash);
 
-  // 敏感度：content / session / opencode session / turn 任一改變 → 不同哈希
-  //（身份覆蓋「內容與關聯 turn/session 標識」＝同一 id 帶不同內容必被認出）。
+  // 敏感度：content / session / opencode session / turn 任一改变 → 不同哈希
+  //（身份覆盖「内容与关联 turn/session 标识」＝同一 id 带不同内容必被认出）。
   const variants = [
     { content: "把节奏放慢一点" },
     { sessionId: "ses_2" },
@@ -140,23 +140,23 @@ test("payload 凍結：hash 與獨立實作（sha256sum）逐字相等，且對�
   const base = { steerId: "steer-aaa-1", sessionId: "ses_1", opencodeSessionId: "oc_1", turnGen: 3, content: "先改成冷色调" };
   for (const patch of variants) {
     const h = freezeSteerPayload({ ...base, ...patch }).payloadHash;
-    assert.notEqual(h, frozen.payloadHash, `改了 ${Object.keys(patch)[0]} 之後哈希必須變`);
+    assert.notEqual(h, frozen.payloadHash, `改了 ${Object.keys(patch)[0]} 之后哈希必须变`);
   }
-  // steerId 不進哈希（它是主鍵身份，不是 payload 的一部分）——同內容同 turn 必同哈希。
+  // steerId 不进哈希（它是主键身份，不是 payload 的一部分）——同内容同 turn 必同哈希。
   assert.equal(
     freezeSteerPayload({ ...base, steerId: "steer-bbb-9" }).payloadHash,
     frozen.payloadHash,
   );
-  // canonical 形態：鍵序固定（sha256sum 對照的前提），且不含時間（重試不得算出第二種哈希）。
+  // canonical 形态：键序固定（sha256sum 对照的前提），且不含时间（重试不得算出第二种哈希）。
   assert.equal(
     canonicalSteerPayload(base),
     '{"content":"先改成冷色调","session_id":"ses_1","opencode_session_id":"oc_1","turn_gen":3}',
   );
 });
 
-// ─────────────── ③ 受理判定：同 id 重放一律可辨識拒絕 ───────────────
+// ─────────────── ③ 受理判定：同 id 重放一律可辨识拒绝 ───────────────
 
-test("受理判定：終態→replay_settled、在途→replay_in_flight、同 id 改內容→payload_mismatch、跨會話→id_conflict", () => {
+test("受理判定：终态→replay_settled、在途→replay_in_flight、同 id 改内容→payload_mismatch、跨会话→id_conflict", () => {
   const settled: SteerCommand = {
     steerId: "s1",
     sessionId: "ses_1",
@@ -185,53 +185,53 @@ test("受理判定：終態→replay_settled、在途→replay_in_flight、同 i
     httpStatus: 409,
     command: { ...settled, state: "uncertain" },
   });
-  // 同 id 但在途 + 內容/hash 不同：拒絕（還會被投遞的指令不得被改寫）。
+  // 同 id 但在途 + 内容/hash 不同：拒绝（还会被投递的指令不得被改写）。
   assert.equal(
     planSteerBegin({ ...settled, state: "dispatched" }, { steerId: "s1", sessionId: "ses_1", payloadHash: "h2" })?.code,
     "steer_payload_mismatch",
   );
-  // 已終態 + 內容/hash 不同：仍然回「已有結論」（終態判定優先於 payload 比對）——
-  // 實錘：重啟後 turnGen 由 DB 恢復為 0，同一條指引的正常重放會漂移出不同 hash，
-  // 若先比 payload 就會把「已結案」誤報成「內容不同」。
+  // 已终态 + 内容/hash 不同：仍然回「已有结论」（终态判定优先于 payload 比对）——
+  // 实锤：重启后 turnGen 由 DB 恢复为 0，同一条指引的正常重放会漂移出不同 hash，
+  // 若先比 payload 就会把「已结案」误报成「内容不同」。
   assert.equal(planSteerBegin(settled, { steerId: "s1", sessionId: "ses_1", payloadHash: "h2" })?.code, "steer_replay_settled");
-  // 同 id 屬別 session：拒絕。
+  // 同 id 属别 session：拒绝。
   assert.equal(
     planSteerBegin(settled, { steerId: "s1", sessionId: "ses_2", payloadHash: "h1" })?.code,
     "steer_id_conflict",
   );
-  // 全新 id：放行（null＝沒有既有記錄）。
+  // 全新 id：放行（null＝没有既有记录）。
   assert.equal(planSteerBegin(null, { steerId: "s9", sessionId: "ses_1", payloadHash: "h1" }), null);
 });
 
-// ─────────────── ④ ledger：投遞前落地、終態凍結、別名覆蓋、重啟落 uncertain ───────────────
+// ─────────────── ④ ledger：投递前落地、终态冻结、别名覆盖、重启落 uncertain ───────────────
 
-test("ledger 受理：begin 立刻落地（投遞前），同 id 重放被拒且不覆寫既有記錄", () => {
+test("ledger 受理：begin 立刻落地（投递前），同 id 重放被拒且不覆写既有记录", () => {
   const store = memStore();
   const ledger = createSteerLedger(store);
 
   const first = ledger.begin(beginInput());
   assert.equal(first.kind, "accepted");
   assert.equal(first.kind === "accepted" ? first.command.state : "", "queued");
-  assert.equal(store.rows.size, 1, "begin 必須立刻寫入持久層（投遞之前的身份落地）");
+  assert.equal(store.rows.size, 1, "begin 必须立刻写入持久层（投递之前的身份落地）");
   const row = store.rows.get("steer-aaa-1")!;
   assert.equal(row.payloadHash, freezeSteerPayload({ steerId: "steer-aaa-1", sessionId: "ses_1", opencodeSessionId: "oc_1", turnGen: 3, content: "先改成冷色调" }).payloadHash);
   assert.equal(row.ownerKey, "sk-test");
-  assert.equal(row.dispatchedAt, undefined, "還沒投遞：不得有 dispatchedAt");
+  assert.equal(row.dispatchedAt, undefined, "还没投递：不得有 dispatchedAt");
 
-  // 同 id 重放（同內容）：in_flight 拒絕（它還活著），不得長出第二條、不得覆寫。
+  // 同 id 重放（同内容）：in_flight 拒绝（它还活著），不得长出第二条、不得覆写。
   const replay = ledger.begin(beginInput({ now: NOW + 500 }));
   assert.equal(replay.kind, "rejected");
   assert.equal(replay.kind === "rejected" ? replay.code : "", "steer_replay_in_flight");
   assert.equal(store.rows.size, 1);
-  assert.equal(store.rows.get("steer-aaa-1")!.at, NOW, "既有記錄不得被重放覆寫（at 不變）");
+  assert.equal(store.rows.get("steer-aaa-1")!.at, NOW, "既有记录不得被重放覆写（at 不变）");
 
-  // 同 id 改內容（重放帶了改寫過的正文）：payload_mismatch，仍不覆寫。
+  // 同 id 改内容（重放带了改写过的正文）：payload_mismatch，仍不覆写。
   const edited = ledger.begin(beginInput({ content: "完全不同的说法", now: NOW + 600 }));
   assert.equal(edited.kind === "rejected" ? edited.code : "", "steer_payload_mismatch");
   assert.equal(store.rows.get("steer-aaa-1")!.payloadHash, row.payloadHash);
 });
 
-test("ledger 生命週期：dispatched → applied 後終態凍結；uncertain 不得被遲到幀改寫", () => {
+test("ledger 生命周期：dispatched → applied 后终态冻结；uncertain 不得被迟到帧改写", () => {
   const store = memStore();
   const ledger = createSteerLedger(store);
   ledger.begin(beginInput());
@@ -239,40 +239,40 @@ test("ledger 生命週期：dispatched → applied 後終態凍結；uncertain �
   assert.equal(ledger.markDispatched("steer-aaa-1", NOW + 10).kind, "settled");
   assert.equal(store.rows.get("steer-aaa-1")!.state, "dispatched");
   assert.equal(store.rows.get("steer-aaa-1")!.dispatchedAt, NOW + 10);
-  // 重入 dispatch＝冪等成功（注入腿落回排隊腿時會再標一次），不得當成非法流轉。
+  // 重入 dispatch＝幂等成功（注入腿落回排队腿时会再标一次），不得当成非法流转。
   assert.equal(ledger.markDispatched("steer-aaa-1", NOW + 11).kind, "settled");
-  assert.equal(store.rows.get("steer-aaa-1")!.dispatchedAt, NOW + 10, "第二次標記不得改寫既有時刻");
+  assert.equal(store.rows.get("steer-aaa-1")!.dispatchedAt, NOW + 10, "第二次标记不得改写既有时刻");
 
   const applied = ledger.settle("steer-aaa-1", "applied", NOW + 20);
   assert.equal(applied.kind, "settled");
   assert.equal(store.rows.get("steer-aaa-1")!.state, "applied");
   assert.equal(store.rows.get("steer-aaa-1")!.settledAt, NOW + 20);
-  // 終態再改（遲到的 failed/injected 幀）→ 拒絕且不寫盤。
+  // 终态再改（迟到的 failed/injected 帧）→ 拒绝且不写盘。
   const late = ledger.settle("steer-aaa-1", "failed", NOW + 30, "late_frame");
   assert.equal(late.kind, "refused");
   assert.equal(late.kind === "refused" ? late.reason : "", "terminal");
   assert.equal(store.rows.get("steer-aaa-1")!.state, "applied");
-  assert.equal(store.rows.get("steer-aaa-1")!.settledAt, NOW + 20, "凍結後時刻也不得變");
+  assert.equal(store.rows.get("steer-aaa-1")!.settledAt, NOW + 20, "冻结后时刻也不得变");
 
-  // 未知 id 不憑空造記錄。
+  // 未知 id 不凭空造记录。
   const ghost = ledger.settle("steer-nope", "applied", NOW);
   assert.equal(ghost.kind === "refused" ? ghost.reason : "", "unknown");
   assert.equal(store.rows.size, 1);
 
-  // uncertain 專項：落 uncertain 之後任何遲到幀（applied/injected/queued）都動不了它。
+  // uncertain 专项：落 uncertain 之后任何迟到帧（applied/injected/queued）都动不了它。
   const store2 = memStore();
   const ledger2 = createSteerLedger(store2);
   ledger2.begin(beginInput({ steerId: "steer-u-1" }));
   ledger2.markDispatched("steer-u-1", NOW + 1);
   assert.equal(ledger2.settle("steer-u-1", "uncertain", NOW + 2, "restart_unconfirmed").kind, "settled");
   for (const late of ["applied", "injected", "failed", "aborted"] as const) {
-    assert.equal(ledger2.settle("steer-u-1", late, NOW + 3).kind, "refused", `uncertain 不得被 ${late} 改寫`);
+    assert.equal(ledger2.settle("steer-u-1", late, NOW + 3).kind, "refused", `uncertain 不得被 ${late} 改写`);
   }
   assert.equal(ledger2.markDispatched("steer-u-1", NOW + 4).kind, "refused");
   assert.equal(store2.rows.get("steer-u-1")!.state, "uncertain");
 });
 
-test("別名 id：同文去重的第二個 id 記進同一條記錄，其重放同樣被 tombstone 擋住", () => {
+test("别名 id：同文去重的第二个 id 记进同一条记录，其重放同样被 tombstone 挡住", () => {
   const store = memStore();
   const ledger = createSteerLedger(store);
   ledger.begin(beginInput({ steerId: "steer-main", content: "先改成冷色调" }));
@@ -280,14 +280,14 @@ test("別名 id：同文去重的第二個 id 記進同一條記錄，其重放�
   const row = store.rows.get("steer-main")!;
   assert.deepEqual(row.aliasIds, ["steer-alias"]);
 
-  // 別名重放（同內容）：命中同一條記錄 → 在途拒絕；不得長出第二顆記錄。
+  // 别名重放（同内容）：命中同一条记录 → 在途拒绝；不得长出第二颗记录。
   const replay = ledger.begin(beginInput({ steerId: "steer-alias", content: "先改成冷色调", now: NOW + 5 }));
   assert.equal(replay.kind === "rejected" ? replay.code : "", "steer_replay_in_flight");
   assert.equal(store.rows.size, 1);
-  // 別名也查得到（生產側由 alias_ids LIKE 完成）。
+  // 别名也查得到（生产侧由 alias_ids LIKE 完成）。
   assert.equal(ledger.get("steer-alias")?.steerId, "steer-main");
 
-  // 終態化之後：本體與別名兩條 id 的重放都是 settled（tombstone 覆蓋全 id）。
+  // 终态化之后：本体与别名两条 id 的重放都是 settled（tombstone 覆盖全 id）。
   ledger.markDispatched("steer-main", NOW + 6);
   ledger.settle("steer-main", "applied", NOW + 7);
   assert.equal(ledger.begin(beginInput({ steerId: "steer-main", content: "先改成冷色调" })).kind === "rejected" ? "ok" : "", "ok");
@@ -295,19 +295,19 @@ test("別名 id：同文去重的第二個 id 記進同一條記錄，其重放�
   assert.equal(ledger.get("steer-main")?.state, "applied");
 });
 
-test("重啟恢復：未終結一律落 uncertain（永不自動重發），已終態者紋絲不動", () => {
+test("重启恢复：未终结一律落 uncertain（永不自动重发），已终态者纹丝不动", () => {
   const store = memStore();
   const ledger = createSteerLedger(store);
-  // A：投遞後未確認（dispatched）——重啟恢復的主角。
+  // A：投递后未确认（dispatched）——重启恢复的主角。
   ledger.begin(beginInput({ steerId: "steer-A" }));
   ledger.markDispatched("steer-A", NOW + 1);
-  // B：進程中斷於投遞前（仍 queued）。
+  // B：进程中断于投递前（仍 queued）。
   ledger.begin(beginInput({ steerId: "steer-B", content: "再把节奏放慢一点" }));
-  // C：已有結論（applied 終態）——恢復掃描不得碰它。
+  // C：已有结论（applied 终态）——恢复扫描不得碰它。
   ledger.begin(beginInput({ steerId: "steer-C", content: "结尾补一个品牌镜头" }));
   ledger.markDispatched("steer-C", NOW + 2);
   ledger.settle("steer-C", "applied", NOW + 3);
-  // D：別的會話——不得被本會話的恢復牽連。
+  // D：别的会话——不得被本会话的恢复牵连。
   ledger.begin(beginInput({ steerId: "steer-D", sessionId: "ses_2" }));
   ledger.markDispatched("steer-D", NOW + 4);
 
@@ -315,27 +315,27 @@ test("重啟恢復：未終結一律落 uncertain（永不自動重發），已�
   assert.deepEqual(
     flipped.map((c) => c.steerId).sort(),
     ["steer-A", "steer-B"],
-    "只有未終結的命令會被翻轉",
+    "只有未终结的命令会被翻转",
   );
   const byId = (id: string) => store.rows.get(id)!;
-  assert.equal(byId("steer-A").state, "uncertain", "投遞後未確認 → uncertain（不是 applied/queued）");
+  assert.equal(byId("steer-A").state, "uncertain", "投递后未确认 → uncertain（不是 applied/queued）");
   assert.equal(byId("steer-A").reason, "restart_unconfirmed");
-  assert.equal(byId("steer-B").state, "uncertain", "投遞前中斷 → 同樣 uncertain（隊列 volatile，永不自動重發）");
+  assert.equal(byId("steer-B").state, "uncertain", "投递前中断 → 同样 uncertain（队列 volatile，永不自动重发）");
   assert.equal(byId("steer-B").reason, "restart_never_dispatched");
-  assert.equal(byId("steer-C").state, "applied", "已終態者不受恢復影響");
-  assert.equal(byId("steer-D").state, "dispatched", "別的會話不被牽連");
-  assert.equal(flipped.every((c) => c.settledAt === NOW + 100), true, "恢復即終態落地時刻");
+  assert.equal(byId("steer-C").state, "applied", "已终态者不受恢复影响");
+  assert.equal(byId("steer-D").state, "dispatched", "别的会话不被牵连");
+  assert.equal(flipped.every((c) => c.settledAt === NOW + 100), true, "恢复即终态落地时刻");
 
-  // 恢復是冪等的：第二次零動作（全部已終態）。
+  // 恢复是幂等的：第二次零动作（全部已终态）。
   assert.deepEqual(ledger.recoverSession("ses_1", NOW + 200), []);
 
-  // 恢復後的重放（同一 id）被拒絕且是可辨識碼——這就是「不得被重送」的持久保證。
+  // 恢复后的重放（同一 id）被拒绝且是可辨识码——这就是「不得被重送」的持久保证。
   const replayA = ledger.begin(beginInput({ steerId: "steer-A" }));
   assert.equal(replayA.kind === "rejected" ? replayA.code : "", "steer_replay_settled");
   assert.equal(byId("steer-A").state, "uncertain", "重放不得把 uncertain 改成 queued 再送一次");
 });
 
-test("零記錄＝零動作：空 store 的恢復不產生任何幀（無 steer 會話與改動前逐位等價）", () => {
+test("零记录＝零动作：空 store 的恢复不产生任何帧（无 steer 会话与改动前逐位等价）", () => {
   const ledger = createSteerLedger(memStore());
   assert.deepEqual(ledger.recoverSession("ses_none", NOW), []);
   assert.deepEqual(ledger.listBySession("ses_none"), []);

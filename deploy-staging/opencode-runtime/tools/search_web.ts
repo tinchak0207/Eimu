@@ -1,15 +1,15 @@
 /**
- * web_search 薄入口（beast 軍團 R1，2026-09-10；同構 tools/music_gen.ts 模式）。
+ * web_search 薄入口（beast 军团 R1，2026-09-10；同构 tools/music_gen.ts 模式）。
  */
 
 import { tool } from "@opencode-ai/plugin/tool"
 import { webSearchTool, type WebToolDef, type WebToolContext } from "../lib/web_search_impl"
 
 /**
- * wrap：描述符 WebToolDef → opencode schema 純機械翻譯（逐行同構
- * lib/music-tools-adapter.ts 的 wrapMusicTool，白名單 diff 僅名稱；
- * WebToolContext 契約含 sessionId 透傳欄，與 MusicToolContext 同口徑）。
- * 禁止手改行為——改真源後重導出並重新落位 web_search_impl.ts 與本檔。
+ * wrap：描述符 WebToolDef → opencode schema 纯机械翻译（逐行同构
+ * lib/music-tools-adapter.ts 的 wrapMusicTool，白名单 diff 仅名称；
+ * WebToolContext 契约含 sessionId 透传栏，与 MusicToolContext 同口径）。
+ * 禁止手改行为——改真源后重导出并重新落位 web_search_impl.ts 与本档。
  */
 function wrapWebTool(def: WebToolDef) {
   return tool({

@@ -1,38 +1,38 @@
 import { SupplierRequestError } from "./failure-classifier";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput } from "./types";
 
-// new-api 原生視頻任務內核封裝（P1「任務語義歸一 new-api」核心刀，2026-08-28）。
+// new-api 原生视频任务内核封装（P1「任务语义归一 new-api」核心刀，2026-08-28）。
 //
-// new-api v1.0.0-rc.21 原生異步視頻 relay（路由與回應形狀對照上游源碼實測，
-// 見 surgery/newapi-kernel-intel.md；渠道 8 metaso-hailuo-bridge 已 relay 出真片）：
-//   POST {base}/video/generations            提交 → OpenAI video 形狀 {id, task_id, ...}
-//   GET  {base}/video/generations/{task_id}  查詢 → {code:"success", data:{status, fail_reason, result_url, ...}}
-// 提交經 new-api 後，上游輪詢/取消/配額退款由 new-api task 框架內核承擔；控制面只做
-// 提交 + 對外輪詢。adapter 在請求內完成輪詢（worker 不做輪詢，與 metaso/filmera 同架構約定）。
+// new-api v1.0.0-rc.21 原生异步视频 relay（路由与回应形状对照上游源码实测，
+// 见 surgery/newapi-kernel-intel.md；渠道 8 metaso-hailuo-bridge 已 relay 出真片）：
+//   POST {base}/video/generations            提交 → OpenAI video 形状 {id, task_id, ...}
+//   GET  {base}/video/generations/{task_id}  查询 → {code:"success", data:{status, fail_reason, result_url, ...}}
+// 提交经 new-api 后，上游轮询/取消/配额退款由 new-api task 框架内核承担；控制面只做
+// 提交 + 对外轮询。adapter 在请求内完成轮询（worker 不做轮询，与 metaso/filmera 同架构约定）。
 //
-// 開關：NEWAPI_VIDEO_KERNEL=1（或 true）→ video 任務走本檔；未設/0 → 現行 metaso 直調橋
-//（分流在 supplier-adapter.ts 的 generateWithSupplier）。影子期兩路並存，直調橋退役是 P2。
+// 开关：NEWAPI_VIDEO_KERNEL=1（或 true）→ video 任务走本档；未设/0 → 现行 metaso 直调桥
+//（分流在 supplier-adapter.ts 的 generateWithSupplier）。影子期两路并存，直调桥退役是 P2。
 //
-// 已知語義缺口（vs metaso 直調橋）：new-api hailuo task 適配器的 VideoRequest 無 ratio
-// 欄位，aspect ratio 無法透傳（成片取上游默認比例）；first/last frame 參考圖靠
-// TaskSubmitReq.metadata 透傳，依賴部署版本支援 metadata passthrough（rc.21 需影子實測）。
+// 已知语义缺口（vs metaso 直调桥）：new-api hailuo task 适配器的 VideoRequest 无 ratio
+// 栏位，aspect ratio 无法透传（成片取上游默认比例）；first/last frame 参考图靠
+// TaskSubmitReq.metadata 透传，依赖部署版本支援 metadata passthrough（rc.21 需影子实测）。
 
 const NEWAPI_REQUEST_TIMEOUT_MS = 30_000;
-// 與 metaso 直調橋同節奏：5s 輪詢、540s 上限（平台 600s 上限留餘量）。env 可調（測試/調優用），
-// 呼叫時讀取（模組載入後仍可改 env，測試提速輪詢用）。
+// 与 metaso 直调桥同节奏：5s 轮询、540s 上限（平台 600s 上限留余量）。env 可调（测试/调优用），
+// 呼叫时读取（模组载入后仍可改 env，测试提速轮询用）。
 function pollIntervalMs(): number {
   return Number(process.env.NEWAPI_VIDEO_POLL_INTERVAL_MS ?? 5_000);
 }
 function maxWaitMs(): number {
   return Number(process.env.NEWAPI_VIDEO_MAX_WAIT_MS ?? 540_000);
 }
-// 提交回應寫出與 new-api tasks 落庫之間存在毫秒級窗口（adaptor 先寫 JSON 回應、後 task.Insert），
-// 剛提交就查詢可能短暫 task_not_exist；寬限期內視為未就緒，繼續輪詢。
+// 提交回应写出与 new-api tasks 落库之间存在毫秒级窗口（adaptor 先写 JSON 回应、后 task.Insert），
+// 刚提交就查询可能短暂 task_not_exist；宽限期内视为未就绪，继续轮询。
 const NEWAPI_TASK_GRACE_MS = 30_000;
 
-// 與 metaso-upstream.ts 的 METASO_RESOLUTION 同映射：控制面 resolution → MiniMax 橋方言值。
-// metadata.resolution 走 new-api hailuo 適配器的 UnmarshalMetadata 透傳，覆蓋 size 解析結果；
-// size 同時給出（含 "720"/"1080" 字樣）以兼容無 metadata passthrough 的部署版本。
+// 与 metaso-upstream.ts 的 METASO_RESOLUTION 同映射：控制面 resolution → MiniMax 桥方言值。
+// metadata.resolution 走 new-api hailuo 适配器的 UnmarshalMetadata 透传，覆盖 size 解析结果；
+// size 同时给出（含 "720"/"1080" 字样）以兼容无 metadata passthrough 的部署版本。
 const RESOLUTION_BY_INPUT: Record<string, string> = { "720p": "768P", "1080p": "2K" };
 const SIZE_BY_INPUT: Record<string, string> = { "720p": "1280x720", "1080p": "1920x1080" };
 
@@ -57,7 +57,7 @@ function kernelApiKey(): string {
   return key;
 }
 
-// new-api 查詢回應的 data 是 tasks 表 DTO（dto.TaskDto）：status 為 Go TaskStatus 枚舉
+// new-api 查询回应的 data 是 tasks 表 DTO（dto.TaskDto）：status 为 Go TaskStatus 枚举
 // NOT_START/SUBMITTED/QUEUED/IN_PROGRESS/FAILURE/SUCCESS/UNKNOWN。
 interface NewApiTaskData {
   task_id?: unknown;
@@ -93,8 +93,8 @@ function statusError(payload: Record<string, unknown>, httpStatus: number): Supp
       : typeof (payload.error as { message?: unknown } | undefined)?.message === "string"
         ? String((payload.error as { message?: unknown }).message)
         : `new-api video API request failed with HTTP ${httpStatus}.`;
-  // status 照既有語義改寫（供應商側失敗，隔離/冷卻行為不動；請勿在此改判）；
-  // upstreamStatus 原樣帶上上游真實狀態，供確定性 4xx 的原生硬停判讀
+  // status 照既有语义改写（供应商侧失败，隔离/冷却行为不动；请勿在此改判）；
+  // upstreamStatus 原样带上上游真实状态，供确定性 4xx 的原生硬停判读
   // （D-3：真 400 不得被 502 洗成「可重放」而被重放 20 次）。
   const status = httpStatus === 429 ? 429 : httpStatus === 401 || httpStatus === 403 ? 401 : 502;
   return new SupplierRequestError(message, status, null, undefined, undefined, undefined, httpStatus);
@@ -128,7 +128,7 @@ async function newApiRequest(baseUrl: string, path: string, apiKey: string, init
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new SupplierRequestError("new-api video API returned a non-object response.", 502);
   }
-  // 非 2xx 不在此拋出：輪詢層要能檢視 payload.code（task_not_exist 落庫寬限期判斷需要原文）。
+  // 非 2xx 不在此抛出：轮询层要能检视 payload.code（task_not_exist 落库宽限期判断需要原文）。
   return { payload: payload as Record<string, unknown>, ok: response.ok, status: response.status };
 }
 
@@ -149,10 +149,10 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
     throw new SupplierRequestError("Video first/last-frame mode accepts at most two images.", 400);
   }
 
-  // 提交體按 new-api TaskSubmitReq（hailuo 適配器）形狀構造：model 用控制面模型 id
-  //（minimax-h3），渠道映射（channel 8 model_mapping → MiniMax-H3）與渠道選擇由 new-api
-  // Distribute 內核承擔——內核路徑不依賴 supplier 表。metadata 只裝透傳欄位，
-  // 不整包轉發 workflow.metadata（controlNets 等控制面私有鍵不得外洩）。
+  // 提交体按 new-api TaskSubmitReq（hailuo 适配器）形状构造：model 用控制面模型 id
+  //（minimax-h3），渠道映射（channel 8 model_mapping → MiniMax-H3）与渠道选择由 new-api
+  // Distribute 内核承担——内核路径不依赖 supplier 表。metadata 只装透传栏位，
+  // 不整包转发 workflow.metadata（controlNets 等控制面私有键不得外泄）。
   const metadata: Record<string, unknown> = { resolution: RESOLUTION_BY_INPUT[resolution] };
   if (references[0]) metadata.first_frame_image = references[0].url;
   if (references[1]) metadata.last_frame_image = references[1].url;
@@ -174,8 +174,8 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
   if (!taskId) {
     throw new SupplierRequestError("new-api video submit response is missing task_id.", 502);
   }
-  // INC-0831：上游任務已提交 → worker durably 落 attempt 行（task id + 對帳排程）。
-  // 只發事件不落行 = 中控打掉上游成功任務的事故重演。
+  // INC-0831：上游任务已提交 → worker durably 落 attempt 行（task id + 对帐排程）。
+  // 只发事件不落行 = 中控打掉上游成功任务的事故重演。
   input.onProviderTaskSubmitted?.(taskId, "newapi_video");
 
   const submittedAt = Date.now();
@@ -183,10 +183,10 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
   while (Date.now() < deadline) {
     const { payload, ok, status: httpStatus } = await newApiRequest(baseUrl, `/video/generations/${encodeURIComponent(taskId)}`, apiKey);
     const code = typeof payload.code === "string" ? payload.code : "";
-    // 查詢回應包裹在 {code:"success", data:TaskDto}；非 success code 一律是錯誤
-    //（含 HTTP 4xx 的 {code:"task_not_exist",...} 形狀）。
+    // 查询回应包裹在 {code:"success", data:TaskDto}；非 success code 一律是错误
+    //（含 HTTP 4xx 的 {code:"task_not_exist",...} 形状）。
     if (code !== "success") {
-      // 落庫窗口內的 task_not_exist 視為未就緒（見 NEWAPI_TASK_GRACE_MS 註釋）。
+      // 落库窗口内的 task_not_exist 视为未就绪（见 NEWAPI_TASK_GRACE_MS 注释）。
       if (code === "task_not_exist" && Date.now() - submittedAt < NEWAPI_TASK_GRACE_MS) {
         await new Promise((resolve) => setTimeout(resolve, pollIntervalMs()));
         continue;
@@ -202,8 +202,8 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
     const status = String(data.status ?? "").trim();
 
     if (status === "SUCCESS") {
-      // 結果 URL 正規位置是 TaskDto.result_url（new-api 由 private_data.result_url 投影）；
-      // 兼容舊部署直接回 private_data.result_url 的形狀。
+      // 结果 URL 正规位置是 TaskDto.result_url（new-api 由 private_data.result_url 投影）；
+      // 兼容旧部署直接回 private_data.result_url 的形状。
       const outputUrl = normalizeOutputUrl(data.result_url) ?? normalizeOutputUrl(readPrivateDataResultUrl(data.private_data));
       if (!outputUrl) {
         throw new SupplierRequestError("new-api succeeded video task is missing result_url.", 502, undefined, JSON.stringify(payload).slice(0, 2000), "upstream_protocol", taskId);
@@ -224,25 +224,25 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
 
     if (status === "FAILURE") {
       const failReason = typeof data.fail_reason === "string" && data.fail_reason.trim() ? data.fail_reason.trim() : "unknown failure";
-      // 上游錯誤原文透傳（fail_reason 不改寫），排障不用盲猜。
+      // 上游错误原文透传（fail_reason 不改写），排障不用盲猜。
       throw new SupplierRequestError(`new-api video task failed: ${failReason}`, 502, undefined, undefined, undefined, taskId);
     }
 
-    // SUCCESS/FAILURE 之外一律視為仍在跑（含 UNKNOWN——上游枚舉擴張時保守繼續輪詢，
-    // 由總時限兜底），與 new-api 更新器「未知上游狀態 → IN_PROGRESS」的默認一致。
+    // SUCCESS/FAILURE 之外一律视为仍在跑（含 UNKNOWN——上游枚举扩张时保守继续轮询，
+    // 由总时限兜底），与 new-api 更新器「未知上游状态 → IN_PROGRESS」的默认一致。
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs()));
   }
 
-  // 無客戶端取消路由（rc.21 視頻路由面只有提交/查詢）；超時後上游任務由 new-api 內核
-  // 繼續跑完並自行結算/退款。INC-0831：帶上 task id 讓對帳循環接手查真相，
-  // 控制面不再單方面按超時宣判失敗。
+  // 无客户端取消路由（rc.21 视频路由面只有提交/查询）；超时后上游任务由 new-api 内核
+  // 继续跑完并自行结算/退款。INC-0831：带上 task id 让对帐循环接手查真相，
+  // 控制面不再单方面按超时宣判失败。
   throw new SupplierRequestError(`new-api video generation timed out after ${Math.round(maxWaitMs() / 1000)}s.`, 504, undefined, undefined, undefined, taskId);
 }
 
 /**
- * INC-0831 對帳輪詢：按 provider task id 查上游真相（provider-reconciliation 用，
- * 只讀不改任何任務狀態）。響應形狀解析與 generateWithNewApiVideo 同源。
- * 網絡類錯誤拋出（調用端按退避重排）；上游確認的 SUCCESS/FAILURE 返回結構化真相。
+ * INC-0831 对帐轮询：按 provider task id 查上游真相（provider-reconciliation 用，
+ * 只读不改任何任务状态）。响应形状解析与 generateWithNewApiVideo 同源。
+ * 网络类错误抛出（调用端按退避重排）；上游确认的 SUCCESS/FAILURE 返回结构化真相。
  */
 export async function pollNewApiVideoTask(providerTaskId: string): Promise<ProviderTaskPollResult> {
   const baseUrl = kernelBaseUrl();
@@ -250,8 +250,8 @@ export async function pollNewApiVideoTask(providerTaskId: string): Promise<Provi
   const { payload, ok, status: httpStatus } = await newApiRequest(baseUrl, `/video/generations/${encodeURIComponent(providerTaskId)}`, apiKey);
   const code = typeof payload.code === "string" ? payload.code : "";
   if (code !== "success") {
-    // 對帳距提交已遠（首輪 ≥60s），task_not_exist 視為上游不認得該任務——保守視為
-    // 仍在跑等下輪，寧可凍結到窗口耗盡也不假宣判失敗退款。
+    // 对帐距提交已远（首轮 ≥60s），task_not_exist 视为上游不认得该任务——保守视为
+    // 仍在跑等下轮，宁可冻结到窗口耗尽也不假宣判失败退款。
     if (code === "task_not_exist") return { state: "running" };
     if (ok) return { state: "running" };
     throw statusError(payload, httpStatus);

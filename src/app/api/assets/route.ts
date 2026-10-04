@@ -1,19 +1,19 @@
-// 資產包 API：list / upsert / delete。
-// 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
+// 资产包 API：list / upsert / delete。
+// 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 //
-// item kind 契約（由 src/lib/deliverable-kind.ts 註冊表推導，asset-pack-store 收口）：
-//   * 資產專屬：prompt / reference / lora / recipe / scene_3d / bpy_script；
-//   * 交付物媒體：image（有 imageUrl）/ video（有 mediaUrl）/ audio（有 mediaUrl）。
-//   video/audio 缺 mediaUrl 的 item 會在 normalizeAssetPack 被 drop（本路由只收乾淨包）。
+// item kind 契约（由 src/lib/deliverable-kind.ts 注册表推导，asset-pack-store 收口）：
+//   * 资产专属：prompt / reference / lora / recipe / scene_3d / bpy_script；
+//   * 交付物媒体：image（有 imageUrl）/ video（有 mediaUrl）/ audio（有 mediaUrl）。
+//   video/audio 缺 mediaUrl 的 item 会在 normalizeAssetPack 被 drop（本路由只收干净包）。
 //
-// P0-2 資產團隊維度（寫入端閘）：PUT 接受 `scope.owner === "team"` —— 照
+// P0-2 资产团队维度（写入端闸）：PUT 接受 `scope.owner === "team"` —— 照
 // `src/lib/canvas/team-canvas-gate.ts` 的既有模式：用 `lookupTeamMembershipViaRelay`
-// 驗成員身份，並以**relay 回的權威 teamId 蓋章**（客戶端送來的 teamId 一律不採信）。
-//   * relay 回 null（未配置／逾時／查不到）→ **fail-open 降級個人**（不拒、不寫進別人的團隊），
-//     與畫布閘的「查不到成員身份 → 降級個人命名空間」同語義。
-//   * 宣告 team 但客戶端送的 teamId 與權威值不符 → 降級個人（**不**寫進別人的團隊）。
-//   * 非 team 宣告（personal / project）→ 完全不查 relay，零額外開銷、既有語義逐位不變。
-// 本路由不碰任何計費/配額（RBAC 與團隊配額由後續刀接手）。
+// 验成员身份，并以**relay 回的权威 teamId 盖章**（客户端送来的 teamId 一律不采信）。
+//   * relay 回 null（未配置／逾时／查不到）→ **fail-open 降级个人**（不拒、不写进别人的团队），
+//     与画布闸的「查不到成员身份 → 降级个人命名空间」同语义。
+//   * 宣告 team 但客户端送的 teamId 与权威值不符 → 降级个人（**不**写进别人的团队）。
+//   * 非 team 宣告（personal / project）→ 完全不查 relay，零额外开销、既有语义逐位不变。
+// 本路由不碰任何计费/配额（RBAC 与团队配额由后续刀接手）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import {
@@ -28,7 +28,7 @@ import { decideTeamAssetScope, lookupAssetsTeamMembership } from "@/lib/asset-te
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
@@ -65,22 +65,22 @@ export async function PUT(req: NextRequest) {
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
-  // 清洗 + 歸屬欄位（存檔端的唯一收口；team 的權威蓋章在下面的閘）。
+  // 清洗 + 归属栏位（存档端的唯一收口；team 的权威盖章在下面的闸）。
   const cleaned = normalizeAssetPack(body);
   if (!cleaned) {
     return fail(400, "资产包数据无效（需要 id / title，items 每项需要合法 kind / title）", "invalid_payload");
   }
 
-  // P0-2：team 宣告的寫入端閘——以 relay 權威 teamId 蓋章；查不到成員身份（fail-open）
-  // 或客戶端送的 teamId 與權威值不符 → 降級個人（不拒、不寫進別人的團隊）。
-  // 歸屬欄位**一律由本閘重新落定**（清洗出的 scope 只是「宣告」，不是權威）。
+  // P0-2：team 宣告的写入端闸——以 relay 权威 teamId 盖章；查不到成员身份（fail-open）
+  // 或客户端送的 teamId 与权威值不符 → 降级个人（不拒、不写进别人的团队）。
+  // 归属栏位**一律由本闸重新落定**（清洗出的 scope 只是「宣告」，不是权威）。
   let normalized: AssetPack = cleaned;
   if (cleaned.scope?.owner === "team") {
     const membership = await lookupAssetsTeamMembership(caller.user.id);
     const decision = decideTeamAssetScope({ declaredTeamId: cleaned.scope.teamId, membership });
     const { scope: _dropped, ...rest } = cleaned;
-    // decision.ok → 蓋章（authoritative teamId）；否則降級個人（**剝掉** scope 欄，
-    // personal 恆省略欄位，不寫 `{owner:"personal"}` 冒充已設定）。
+    // decision.ok → 盖章（authoritative teamId）；否则降级个人（**剥掉** scope 栏，
+    // personal 恒省略栏位，不写 `{owner:"personal"}` 冒充已设定）。
     normalized = decision.ok
       ? { ...cleaned, scope: decision.scope }
       : (rest as AssetPack);

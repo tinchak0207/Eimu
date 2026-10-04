@@ -1,7 +1,7 @@
-// POST /api/agent/sessions/[id]/confirm —— 回覆一次工具調用確認。
+// POST /api/agent/sessions/[id]/confirm —— 回覆一次工具调用确认。
 //
-// request_id 與 approved 是閘道的強約束欄位：缺一或類型不對直接 400，
-// 不把它們透傳給閘道去踩 4xx —— 省一輪外網往返，錯誤也更直白。
+// request_id 与 approved 是闸道的强约束栏位：缺一或类型不对直接 400，
+// 不把它们透传给闸道去踩 4xx —— 省一轮外网往返，错误也更直白。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
@@ -9,7 +9,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -17,7 +17,7 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
-/** gateway 響應原樣透傳：status 與 body 都不吞，好讓客戶端看到真實原因。 */
+/** gateway 响应原样透传：status 与 body 都不吞，好让客户端看到真实原因。 */
 function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
   if (resp.status >= 200 && resp.status < 300) {
     return NextResponse.json(resp.json ?? {}, { status: resp.status, headers: { "Cache-Control": "no-store" } });

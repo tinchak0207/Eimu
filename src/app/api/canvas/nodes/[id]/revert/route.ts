@@ -1,10 +1,10 @@
-// 節點版本回退：POST /api/canvas/nodes/[id]/revert
+// 节点版本回退：POST /api/canvas/nodes/[id]/revert
 // body: { projectId: string; version?: number }
-//   - version 有值＝回退到該版
+//   - version 有值＝回退到该版
 //   - 省略＝回退到「上一版」（最新版的前一版）
 //
-// 回退本身也落一版（reason "revert"）——版本歷史 append-only，回退可再被回退。
-// 只還原 title＋metadata，座標/尺寸不動（版本＝內容歷史，不是版面歷史）。
+// 回退本身也落一版（reason "revert"）——版本历史 append-only，回退可再被回退。
+// 只还原 title＋metadata，座标/尺寸不动（版本＝内容历史，不是版面历史）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
@@ -19,9 +19,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-/** Next 15 的動態段是異步的，params 必須 await。 */
+/** Next 15 的动态段是异步的，params 必须 await。 */
 type RouteContext = { params: Promise<{ id: string }> };
 
 function fail(status: number, message: string, code: string): NextResponse {
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
   }
   const projectId = typeof body?.projectId === "string" ? body.projectId : "";
   if (!id || !projectId) return fail(400, "缺少节点 id 或 projectId", "invalid_payload");
-  // version 可省略（回上一版）；有值必須是正整數。
+  // version 可省略（回上一版）；有值必须是正整数。
   const version =
     body?.version === undefined
       ? undefined

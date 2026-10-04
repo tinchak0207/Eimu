@@ -1,7 +1,7 @@
-// 分鏡內容變更 → 舊關聯媒體失效（W2）行為測試。
+// 分镜内容变更 → 旧关联媒体失效（W2）行为测试。
 //
-// 全部是**真函式行為斷言**：真算失效鍵、真把它套到 metadata 上、再看**實際存活的關聯**
-// 是哪幾個——不含源碼字串掃描（那種只算變更探針，不計入已驗證）。
+// 全部是**真函式行为断言**：真算失效键、真把它套到 metadata 上、再看**实际存活的关联**
+// 是哪几个——不含源码字串扫描（那种只算变更探针，不计入已验证）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -12,8 +12,8 @@ import {
   type StoryboardShotMediaView,
 } from "./storyboard-invalidation";
 
-/** 一顆分鏡節點的媒體相關 metadata：畫面內容在 `storyboardShot`（21 欄），
- * 畫師 prompt／旁白／三個關聯鍵在頂層。所有關聯都有值＝「這一格已備妥媒體」。
+/** 一颗分镜节点的媒体相关 metadata：画面内容在 `storyboardShot`（21 栏），
+ * 画师 prompt／旁白／三个关联键在顶层。所有关联都有值＝「这一格已备妥媒体」。
  */
 function shotMeta(over: StoryboardShotMediaView = {}): StoryboardShotMediaView {
   return {
@@ -33,7 +33,7 @@ function shotMeta(over: StoryboardShotMediaView = {}): StoryboardShotMediaView {
   };
 }
 
-test("改 dialogue：dialogueAudioId 被清，未變更的關聯（narrationAudioId／shotCandidates）留著", () => {
+test("改 dialogue：dialogueAudioId 被清，未变更的关联（narrationAudioId／shotCandidates）留著", () => {
   const before = shotMeta();
   const patch: StoryboardShotMediaView = { storyboardShot: { dialogue: "hello there!" } };
 
@@ -41,16 +41,16 @@ test("改 dialogue：dialogueAudioId 被清，未變更的關聯（narrationAudi
   assert.deepEqual([...keys], ["dialogueAudioId", "audioAnchorId"]);
 
   const after = clearShotMediaLinks(before, keys);
-  // 真的清掉了台詞配音關聯
+  // 真的清掉了台词配音关联
   assert.ok(!("dialogueAudioId" in after));
-  // 未變更的關聯一個都不能被清（防過度失效）
+  // 未变更的关联一个都不能被清（防过度失效）
   assert.equal(after.narrationAudioId, "nar-audio-1");
   assert.equal(after.shotCandidates, before.shotCandidates);
-  // 畫面沒改 → 影像關聯不動
+  // 画面没改 → 影像关联不动
   assert.ok("shotCandidates" in after);
 });
 
-test("改 narration：narrationAudioId 被清，dialogueAudioId 與 shotCandidates 留著", () => {
+test("改 narration：narrationAudioId 被清，dialogueAudioId 与 shotCandidates 留著", () => {
   const before = shotMeta();
   const patch: StoryboardShotMediaView = { narration: "narration v2" };
 
@@ -59,14 +59,14 @@ test("改 narration：narrationAudioId 被清，dialogueAudioId 與 shotCandidat
 
   const after = clearShotMediaLinks(before, keys);
   assert.ok(!("narrationAudioId" in after));
-  // 台詞沒改 → 台詞配音關聯必須還在（關鍵反例）
+  // 台词没改 → 台词配音关联必须还在（关键反例）
   assert.equal(after.dialogueAudioId, "dlg-audio-1");
   assert.ok("shotCandidates" in after);
 });
 
-test("未變更的關聯不得被清：同值重送的 patch → 空集，全部關聯原封不動", () => {
+test("未变更的关联不得被清：同值重送的 patch → 空集，全部关联原封不动", () => {
   const before = shotMeta();
-  // dialogue 與 before 完全相同 ＝ 未變更（照對手 changed 的「值真的不同」判據）
+  // dialogue 与 before 完全相同 ＝ 未变更（照对手 changed 的「值真的不同」判据）
   const patch: StoryboardShotMediaView = { storyboardShot: { dialogue: "hello there" } };
 
   const keys = invalidatedShotMediaLinks(before, patch);
@@ -74,7 +74,7 @@ test("未變更的關聯不得被清：同值重送的 patch → 空集，全部
 
   const after = clearShotMediaLinks(before, keys);
   for (const key of SHOT_MEDIA_LINK_KEYS) {
-    assert.ok(key in after, `${key} 不該被清`);
+    assert.ok(key in after, `${key} 不该被清`);
   }
   assert.equal(after.dialogueAudioId, "dlg-audio-1");
   assert.equal(after.narrationAudioId, "nar-audio-1");
@@ -82,7 +82,7 @@ test("未變更的關聯不得被清：同值重送的 patch → 空集，全部
   assert.equal(after.shotCandidates, before.shotCandidates);
 });
 
-test("只改 shotSize 這類不影響媒體的欄位：任何關聯都不被清", () => {
+test("只改 shotSize 这类不影响媒体的栏位：任何关联都不被清", () => {
   const before = shotMeta();
   const patch: StoryboardShotMediaView = { storyboardShot: { shotSize: "CU" } };
 
@@ -91,11 +91,11 @@ test("只改 shotSize 這類不影響媒體的欄位：任何關聯都不被清"
 
   const after = clearShotMediaLinks(before, keys);
   for (const key of SHOT_MEDIA_LINK_KEYS) {
-    assert.ok(key in after, `${key} 不該被清`);
+    assert.ok(key in after, `${key} 不该被清`);
   }
 });
 
-test("改 visualDescription：影像關聯（shotCandidates）失效，音頻關聯全留", () => {
+test("改 visualDescription：影像关联（shotCandidates）失效，音频关联全留", () => {
   const before = shotMeta();
   const patch: StoryboardShotMediaView = {
     storyboardShot: { visualDescription: "close-up on the hand" },
@@ -111,7 +111,7 @@ test("改 visualDescription：影像關聯（shotCandidates）失效，音頻關
   assert.equal(after.audioAnchorId, "anchor-1");
 });
 
-test("改畫師 prompt（節點 metadata.prompt）：影像關聯失效", () => {
+test("改画师 prompt（节点 metadata.prompt）：影像关联失效", () => {
   const before = shotMeta();
   const patch: StoryboardShotMediaView = { prompt: "painter prompt v2" };
 
@@ -119,11 +119,11 @@ test("改畫師 prompt（節點 metadata.prompt）：影像關聯失效", () => 
   assert.deepEqual([...keys], ["shotCandidates"]);
 });
 
-test("patch 顯式帶新 dialogueAudioId：該鍵不被清（讓路給明確綁定），audioAnchorId 仍失效", () => {
+test("patch 显式带新 dialogueAudioId：该键不被清（让路给明确绑定），audioAnchorId 仍失效", () => {
   const before = shotMeta();
   const patch: StoryboardShotMediaView = {
     storyboardShot: { dialogue: "hello there!" },
-    dialogueAudioId: "dlg-audio-2", // 呼叫端明確要換新配音
+    dialogueAudioId: "dlg-audio-2", // 呼叫端明确要换新配音
   };
 
   const keys = invalidatedShotMediaLinks(before, patch);
@@ -131,28 +131,28 @@ test("patch 顯式帶新 dialogueAudioId：該鍵不被清（讓路給明確綁�
   assert.ok(!keys.includes("dialogueAudioId"));
 });
 
-test("空 patch／undefined patch：空集（沒有內容變更就沒有失效）", () => {
+test("空 patch／undefined patch：空集（没有内容变更就没有失效）", () => {
   const before = shotMeta();
   assert.deepEqual([...invalidatedShotMediaLinks(before, {})], []);
   assert.deepEqual([...invalidatedShotMediaLinks(before, undefined)], []);
   assert.deepEqual([...invalidatedShotMediaLinks(undefined, {})], []);
 });
 
-test("清關聯是純函式：回新物件、不改輸入、未變更時等值", () => {
+test("清关联是纯函式：回新物件、不改输入、未变更时等值", () => {
   const before = shotMeta();
   const keys = invalidatedShotMediaLinks(before, { storyboardShot: { dialogue: "changed" } });
   const after = clearShotMediaLinks(before, keys);
 
   assert.notEqual(after, before);
-  // 輸入沒被突變
+  // 输入没被突变
   assert.equal(before.dialogueAudioId, "dlg-audio-1");
   assert.equal(before.audioAnchorId, "anchor-1");
-  // 未失效的鍵逐字保留
+  // 未失效的键逐字保留
   assert.equal(after.storyboardShot, before.storyboardShot);
   assert.equal(after.prompt, "painter prompt v1");
 });
 
-test("攤平形狀（內容欄在頂層）與巢狀 storyboardShot 同語義", () => {
+test("摊平形状（内容栏在顶层）与巢状 storyboardShot 同语义", () => {
   const nested = shotMeta();
   const flat: StoryboardShotMediaView = {
     dialogue: "hello there",
@@ -167,7 +167,7 @@ test("攤平形狀（內容欄在頂層）與巢狀 storyboardShot 同語義", (
   assert.deepEqual([...nestedKeys], [...flatKeys]);
 });
 
-test("invalidateShotMediaLinksFromPatch：一次算出失效後的 metadata", () => {
+test("invalidateShotMediaLinksFromPatch：一次算出失效后的 metadata", () => {
   const before = shotMeta();
   const after = invalidateShotMediaLinksFromPatch(before, { narration: "narration v2" });
 
@@ -175,6 +175,6 @@ test("invalidateShotMediaLinksFromPatch：一次算出失效後的 metadata", ()
   assert.ok(!("audioAnchorId" in after));
   assert.equal(after.dialogueAudioId, "dlg-audio-1");
   assert.ok("shotCandidates" in after);
-  // 輸入不動
+  // 输入不动
   assert.equal(before.narrationAudioId, "nar-audio-1");
 });

@@ -1,10 +1,10 @@
 "use client";
 
-// /admin 第四分頁「路由调度」：模型路由（控面真實調度序，可調序/增刪，見
-// AdminModelRoutesPanel）→ 環境真相 → 舊同步兜底路徑的渠道總表與隊列預覽 → 路由事件。
-// 舊兜底兩節資料來自 /api/admin/channels（Blob overrides），只作用於
-// /api/generate-images 舊同步路徑，不影響主任務（/api/generation-jobs）調度。
-// 本組件只搬運 host 與開關，絕不接觸任何密鑰。
+// /admin 第四分页「路由调度」：模型路由（控面真实调度序，可调序/增删，见
+// AdminModelRoutesPanel）→ 环境真相 → 旧同步兜底路径的渠道总表与队列预览 → 路由事件。
+// 旧兜底两节资料来自 /api/admin/channels（Blob overrides），只作用于
+// /api/generate-images 旧同步路径，不影响主任务（/api/generation-jobs）调度。
+// 本组件只搬运 host 与开关，绝不接触任何密钥。
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -46,7 +46,7 @@ interface EventsPayload {
   sampleNote: string;
 }
 
-/** 同時容忍裸 payload 與 { success, data } 包裝——以 marker 欄位辨識形狀。 */
+/** 同时容忍裸 payload 与 { success, data } 包装——以 marker 栏位辨识形状。 */
 function unwrap<T>(body: unknown, marker: string): T | null {
   if (!body || typeof body !== "object") return null;
   const record = body as Record<string, unknown>;
@@ -182,8 +182,8 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
 
   const setPriority = (channel: ChannelDescriptor, raw: string) => {
     if (raw === "") {
-      // 清空輸入＝回到基準優先級（移除 priority 覆寫）。兩欄皆空的殼條目一併刪除，
-      // 否則 {} 殘殼會讓 dirty 比對誤報「有未保存修改」。
+      // 清空输入＝回到基准优先级（移除 priority 覆写）。两栏皆空的壳条目一并删除，
+      // 否则 {} 残壳会让 dirty 比对误报「有未保存修改」。
       setDraft((current) => {
         const entry = { ...current[channel.id] };
         delete entry.priority;
@@ -220,7 +220,7 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
       const response = await fetch("/api/admin/channels", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        // expectedVersion：樂觀併發控制；版本不符時服務端回 409 並附最新配置。
+        // expectedVersion：乐观并发控制；版本不符时服务端回 409 并附最新配置。
         body: JSON.stringify({ overrides: draft, expectedVersion: data.overridesVersion }),
       });
       const body = (await response.json().catch(() => null)) as unknown;

@@ -6,12 +6,12 @@
  * 逐行镜像轮子真源 src/lib/music-expert-frame.test.ts（禁自造轮子铁律）。
  * 覆盖：
  *   1. persona 形状：每个 TOOL_IDS id 对 harness-tool-registry 源码行号断言
- *      （防幻影工具）；与 registry 佔位行契约对账
+ *      （防幻影工具）；与 registry 占位行契约对账
  *   2. 委托单：白名单收敛 / 未知键丢弃 / 数值栏位取整 / 结构化报错
  *   3. 宪法注入：OFF 一个字不多 / ON 样本串注入（DI，不读真档）/
  *      载入失败结构化报错拒绝裸奔
  *   4. 交付物：合法通过 / 缺 qc 拒 / 篡改签名拒 / no_output
- *   5. routeExpert：provisioned 行不可路由（佔位语义不回归）
+ *   5. routeExpert：provisioned 行不可路由（占位语义不回归）
  */
 
 import test from "node:test";
@@ -91,7 +91,7 @@ test("persona 工具白名单：每个 id 都真实存在于 harness-tool-regist
   for (const toolId of SCREENWRITER_PERSONA_TOOL_IDS) {
     assert.ok(
       HARNESS_TOOL_ID_LIST.includes(toolId),
-      `persona 工具 "${toolId}" 不在 harness-tool-registry 真源內（幻影工具）`,
+      `persona 工具 "${toolId}" 不在 harness-tool-registry 真源内（幻影工具）`,
     );
   }
 });
@@ -99,12 +99,12 @@ test("persona 工具白名单：每个 id 都真实存在于 harness-tool-regist
 test("persona 工具白名单 id 与 harness 真源行号逐一对账（源码断言防漂移）", () => {
   // 行号考古（现场实测，2026-09-08）：doc_struct L69 / canvas_apply_ops L37 /
   // script_scene_parse L86 / story_sequence_consistency L87 / storyboard_qc_17 L88 /
-  // world_bible_extract L114 / image_quote L76。registry 佔位行注释的
+  // world_bible_extract L114 / image_quote L76。registry 占位行注释的
   // L88/L89/L115 与现场有 1 行偏移，以现场为准（已在交付回报如实记录）。
-  // 2026-09-28 行号整体位移（+10 档头诚实註記、world_bible_extract 再 +7 因新增 4 支
+  // 2026-09-28 行号整体位移（+10 档头诚实注记、world_bible_extract 再 +7 因新增 4 支
   // 影片工具）：这是**登记面自愿增行**造成的位移，不是 id 被搬走；数值按现场重测更新，
   // 判定语义（id 在登记表里的位置 = 防重排/防幻影）不变。
-  // 2026-10-03：人机共笔三件（workflow_write/history/rollback）登记 + 档头註記更新，
+  // 2026-10-03：人机共笔三件（workflow_write/history/rollback）登记 + 档头注记更新，
   // 再次自愿增行 → 全表 +2（world_bible_extract 另 +6，因新 id 排在它之前）。同样按现场重测。
   const lines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
   const lineOf = (id: string): number =>
@@ -127,12 +127,12 @@ test("persona 工具白名单 id 与 harness 真源行号逐一对账（源码�
   }
 });
 
-test("persona 与 registry 佔位行对账：registry 六件 toolIds 是 persona 白名单子集；SKILL_PATHS 为空（skill 待补）", () => {
+test("persona 与 registry 占位行对账：registry 六件 toolIds 是 persona 白名单子集；SKILL_PATHS 为空（skill 待补）", () => {
   const registryRow = EXPERT_REGISTRY.screenwriter;
   for (const toolId of registryRow.toolIds) {
     assert.ok(
       (SCREENWRITER_PERSONA_TOOL_IDS as readonly string[]).includes(toolId),
-      `registry 佔位行工具 "${toolId}" 不在 persona 白名单內`,
+      `registry 占位行工具 "${toolId}" 不在 persona 白名单内`,
     );
   }
   assert.deepEqual(SCREENWRITER_PERSONA_SKILL_PATHS, []);
@@ -231,9 +231,9 @@ test("OFF：readBeastMode({})=false，委派 prompt 不含宪法特征句", () =
   assert.ok(r.prompt.includes("故事内核："));
   // 宪法特征句一个字不多（繁体宪法原文不出现在 OFF 输出）
   assert.equal(r.prompt.includes("诚实铁律"), false);
-  assert.equal(r.prompt.includes("誠實鐵律"), false);
-  assert.equal(r.prompt.includes("以下五條是硬約束"), false);
-  assert.equal(r.prompt.includes("Expert 憲法"), false);
+  assert.equal(r.prompt.includes("诚实铁律"), false);
+  assert.equal(r.prompt.includes("以下五条是硬约束"), false);
+  assert.equal(r.prompt.includes("Expert 宪法"), false);
 });
 
 test("ON：宪法经 loadConstitution DI 注入头部（样本串，不读真档）", () => {
@@ -268,7 +268,7 @@ test("ON：beastMode 布林由 caller 传入（readBeastMode true → 默认 loa
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.ok(r.prompt.startsWith(constitution), "宪法原文必须逐字注入 prompt 头");
-  assert.ok(r.prompt.indexOf("Expert 憲法") < r.prompt.indexOf("编剧分镜委托单"));
+  assert.ok(r.prompt.indexOf("Expert 宪法") < r.prompt.indexOf("编剧分镜委托单"));
 });
 
 test("ON：宪法载入失败结构化报错（constitution_unavailable，拒绝裸奔不静默降级）", () => {

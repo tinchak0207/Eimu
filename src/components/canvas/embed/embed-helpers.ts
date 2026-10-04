@@ -1,17 +1,17 @@
 /**
- * embed-helpers —— CanvasEmbed 純函數 / UI types / 常量（自 CanvasEmbed.tsx L72-212 機械搬遷，符號名不變）。
- * 生成/超分認證走 Bearer + x-user-id（與 playground 同款 getStoredToken）。
+ * embed-helpers —— CanvasEmbed 纯函数 / UI types / 常量（自 CanvasEmbed.tsx L72-212 机械搬迁，符号名不变）。
+ * 生成/超分认证走 Bearer + x-user-id（与 playground 同款 getStoredToken）。
  */
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
 import type { CanvasImageEditMode } from "../CanvasImageEditorDialog";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-request-headers";
 
-/** 同一批節點進場的間隔（ms）。 */
+/** 同一批节点进场的间隔（ms）。 */
 export const ENTER_STAGGER_MS = 110;
-/** B1 視口裁剪的螢幕外緩衝（px）。 */
+/** B1 视口裁剪的萤幕外缓冲（px）。 */
 export const CULL_MARGIN_PX = 280;
-/** 拖圖/多檔導入的階梯錯位（px）。 */
+/** 拖图/多档导入的阶梯错位（px）。 */
 export const IMPORT_STAGGER = 40;
 
 export function toDvh(height: string): string {
@@ -31,7 +31,7 @@ export function formatRelative(updatedAt: string): string {
   return new Date(ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-/** 節點的可下載/可編輯圖片 URL（僅 http(s)/data:）；image 與 reference 節點。 */
+/** 节点的可下载/可编辑图片 URL（仅 http(s)/data:）；image 与 reference 节点。 */
 export function imageUrlOf(node: CanvasNode | undefined): string | null {
   const content = node?.metadata?.content;
   if (!content) return null;
@@ -70,9 +70,9 @@ export function triggerDownload(blob: Blob, filename: string) {
 }
 
 /**
- * 生成/超分認證頭（Bearer + x-user-id）。R5：生成型呼叫可傳 `withTraceId=true`
- * 多帶一個 `X-Request-Id`，讓這條請求在其下游（route → 控制面）有一致的 trace id；
- * 非生成的畫布/資產查詢呼叫維持不帶（預設 false，逐位不變）。
+ * 生成/超分认证头（Bearer + x-user-id）。R5：生成型呼叫可传 `withTraceId=true`
+ * 多带一个 `X-Request-Id`，让这条请求在其下游（route → 控制面）有一致的 trace id；
+ * 非生成的画布/资产查询呼叫维持不带（预设 false，逐位不变）。
  */
 export function buildAuthHeaders(withTraceId = false): Record<string, string> | null {
   const token = getStoredToken();
@@ -83,7 +83,7 @@ export function buildAuthHeaders(withTraceId = false): Record<string, string> | 
   return headers;
 }
 
-/** 本地圖片檔 → 壓縮 dataURL（browser-image-compression，1600px/1.5MB 上限）。 */
+/** 本地图片档 → 压缩 dataURL（browser-image-compression，1600px/1.5MB 上限）。 */
 export async function fileToDataUrl(file: File): Promise<{ dataUrl: string; width: number; height: number }> {
   const { default: imageCompression } = await import("browser-image-compression");
   const compressed = await imageCompression(file, { maxWidthOrHeight: 1600, maxSizeMB: 1.5, useWebWorker: true });
@@ -97,7 +97,7 @@ export async function fileToDataUrl(file: File): Promise<{ dataUrl: string; widt
   return { dataUrl, ...size };
 }
 
-/** 環路檢查：from→to 加入後是否成環（to 沿出邊可達 from）。 */
+/** 环路检查：from→to 加入后是否成环（to 沿出边可达 from）。 */
 export function wouldCreateCycle(connections: CanvasConnection[], fromId: string, toId: string): boolean {
   const out = new Map<string, string[]>();
   for (const c of connections) out.set(c.fromNodeId, [...(out.get(c.fromNodeId) ?? []), c.toNodeId]);
@@ -134,6 +134,6 @@ export interface PortDragState {
 export interface CreateMenuState {
   position: { x: number; y: number };
   world: CanvasPosition;
-  /** 連線拖放到空白時：建完自動與該節點連線。 */
+  /** 连线拖放到空白时：建完自动与该节点连线。 */
   connectFrom?: { nodeId: string; side: "left" | "right" };
 }

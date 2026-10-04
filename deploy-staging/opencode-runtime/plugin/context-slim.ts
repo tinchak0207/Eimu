@@ -1,19 +1,19 @@
-// context-slim plugin（2026-10-02）：上下文經濟第二層——microCompact（T1-3）＋工具結果預算安全網（T1-4）。
+// context-slim plugin（2026-10-02）：上下文经济第二层——microCompact（T1-3）＋工具结果预算安全网（T1-4）。
 //
-// **loader 契約（2026-10-02 生產事故）**：opencode 自動載入 .opencode/plugin/*.ts 時逐個
-//   export 檢查，遇到非函式 export 即整檔載入失敗（`Plugin export is not a function`）。
-//   本檔因此**只准有一個 export**，且必須是 Plugin 函式——實際邏輯與常數全部放在
-//   lib/context-slim-core.ts（lib/ 不會被當 plugin 自動載入）。新增常數／函式請加在 core，
-//   切勿在本檔再 export 任何東西。
+// **loader 契约（2026-10-02 生产事故）**：opencode 自动载入 .opencode/plugin/*.ts 时逐个
+//   export 检查，遇到非函式 export 即整档载入失败（`Plugin export is not a function`）。
+//   本档因此**只准有一个 export**，且必须是 Plugin 函式——实际逻辑与常数全部放在
+//   lib/context-slim-core.ts（lib/ 不会被当 plugin 自动载入）。新增常数／函式请加在 core，
+//   切勿在本档再 export 任何东西。
 //
-// 舊版事故：常數（CLEARED_MARKER／TOOL_RESULT_* 等）與函式（slimMessages 等）原本就掛在本檔
-//   的 export 上，使本 plugin 在生產根本沒被載入——microCompact 與安全網在生產是死的。
+// 旧版事故：常数（CLEARED_MARKER／TOOL_RESULT_* 等）与函式（slimMessages 等）原本就挂在本档
+//   的 export 上，使本 plugin 在生产根本没被载入——microCompact 与安全网在生产是死的。
 //
-// hook 形狀（@opencode-ai/plugin 1.17.1 型別、1.18.14 執行）：
+// hook 形状（@opencode-ai/plugin 1.17.1 型别、1.18.14 执行）：
 //   "experimental.chat.messages.transform"?: (input: {}, output: { messages: { info: Message; parts: Part[] }[] }) => Promise<void>
-//   主聊天路徑 trigger(..., {}, { messages: C }) 後緊接 toModelMessagesEffect(C, ...)，就地改寫即影響送上游內容。
+//   主聊天路径 trigger(..., {}, { messages: C }) 后紧接 toModelMessagesEffect(C, ...)，就地改写即影响送上游内容。
 //
-// 純記憶體改寫：不動 DB、不發任何上游請求（零 API 成本）。任何錯誤都 try/catch 原樣放行。
+// 纯记忆体改写：不动 DB、不发任何上游请求（零 API 成本）。任何错误都 try/catch 原样放行。
 
 import type { Plugin } from "@opencode-ai/plugin"
 import { CONTEXT_SLIM_ENABLED, slimMessages } from "../lib/context-slim-core"

@@ -15,21 +15,21 @@ import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
 import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 
 export const runtime = "nodejs";
-export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
-// 下單頁是 window.open 開的頂層導航，拿不到 localStorage 的 Bearer；唯一能帶上來的
-// 憑證是登入寫的 napi_token cookie（見 new-api-client.ts）。用它反查 userId 走控面
-// 穩定令牌表（authoritative），不是信前端自稱的 id。
+// 下单页是 window.open 开的顶层导航，拿不到 localStorage 的 Bearer；唯一能带上来的
+// 凭证是登入写的 napi_token cookie（见 new-api-client.ts）。用它反查 userId 走控面
+// 稳定令牌表（authoritative），不是信前端自称的 id。
 //
-// 這個反查只是**增值**：未登入／反查失敗／超時一律退回舊格式（param = plan.id），
-// 舊流程一字不動。故預算壓到 2.5s，不讓它拖慢下單。首充專享檔唯一例外——那檔沒有
-// 「看不懂身分也照賣」的選項（限一次的優惠），查不出身分＝不符合資格。
+// 这个反查只是**增值**：未登入／反查失败／超时一律退回旧格式（param = plan.id），
+// 旧流程一字不动。故预算压到 2.5s，不让它拖慢下单。首充专享档唯一例外——那档没有
+// 「看不懂身分也照卖」的选项（限一次的优惠），查不出身分＝不符合资格。
 const ORDER_BINDING_BUDGET_MS = 2_500;
 
-/** 登入 cookie 名（與 new-api-client.ts 的 TOKEN_KEY 同名；服務端只讀不寫）。 */
+/** 登入 cookie 名（与 new-api-client.ts 的 TOKEN_KEY 同名；服务端只读不写）。 */
 const TOKEN_COOKIE = "napi_token";
 
-/** 登入 cookie → userId（控面穩定令牌表反查）。未登入／查不到／超時／通道掛 → null。 */
+/** 登入 cookie → userId（控面稳定令牌表反查）。未登入／查不到／超时／通道挂 → null。 */
 async function resolveUserId(req: NextRequest): Promise<number | null> {
   const token = req.cookies.get(TOKEN_COOKIE)?.value?.trim();
   if (!token) return null;
@@ -43,7 +43,7 @@ async function resolveUserId(req: NextRequest): Promise<number | null> {
       }),
     ]);
   } catch (error) {
-    // 反查失敗不擋下單（退回舊格式，用戶照樣能付）；日誌絕不印 token。
+    // 反查失败不挡下单（退回旧格式，用户照样能付）；日志绝不印 token。
     console.warn("[mapay checkout] order binding skipped", error instanceof Error ? error.message : String(error));
     return null;
   } finally {
@@ -52,8 +52,8 @@ async function resolveUserId(req: NextRequest): Promise<number | null> {
 }
 
 /**
- * 已登入 → `${planId}.${userId}.${hmac8}`（notify 可據此直接入帳）；
- * 未登入／查不到／沒有簽名密鑰 → null（呼叫方沿用舊格式）。
+ * 已登入 → `${planId}.${userId}.${hmac8}`（notify 可据此直接入帐）；
+ * 未登入／查不到／没有签名密钥 → null（呼叫方沿用旧格式）。
  */
 function boundOrderParam(planId: string, userId: number | null): string | null {
   const secret = mapayOrderSecret();
@@ -62,10 +62,10 @@ function boundOrderParam(planId: string, userId: number | null): string | null {
 }
 
 /**
- * 首充專享檔的資格閘：只有確認有資格（控面帳本判準）才放行。
- * 未登入／確定沒資格／資格查不到（通道不可用）一律拒——那檔是 4 倍划
- * 算的一次性優惠，寧可少賣一次，也不能給不該給的人（fail-closed）。
- * 錢那頭還有第二道閘：notify 入帳時資格不符只按正價折算（見 first-charge.ts）。
+ * 首充专享档的资格闸：只有确认有资格（控面帐本判准）才放行。
+ * 未登入／确定没资格／资格查不到（通道不可用）一律拒——那档是 4 倍划
+ * 算的一次性优惠，宁可少卖一次，也不能给不该给的人（fail-closed）。
+ * 钱那头还有第二道闸：notify 入帐时资格不符只按正价折算（见 first-charge.ts）。
  */
 async function firstChargeAllowed(userId: number | null): Promise<boolean> {
   if (!userId) return false;
@@ -73,10 +73,10 @@ async function firstChargeAllowed(userId: number | null): Promise<boolean> {
 }
 
 /**
- * 席位訂單收銀台：`?plan=seat:<team>:<tier>:<cycle>:<seats>` → mapay 收款頁。
- * 金額與 out_trade_no 全來自同源價表/決定性推導（與下單端 pending_order 一字不差；
- * 同請求重放永遠是同一張單）；只有團隊主帳本人（登入 cookie 反查 userId ＝訂單團隊）
- * 可發起支付。複用 mapay 既有簽名與欄位口徑（buildMapayCheckoutFields），不造第二套支付。
+ * 席位订单收银台：`?plan=seat:<team>:<tier>:<cycle>:<seats>` → mapay 收款页。
+ * 金额与 out_trade_no 全来自同源价表/决定性推导（与下单端 pending_order 一字不差；
+ * 同请求重放永远是同一张单）；只有团队主帐本人（登入 cookie 反查 userId ＝订单团队）
+ * 可发起支付。复用 mapay 既有签名与栏位口径（buildMapayCheckoutFields），不造第二套支付。
  */
 async function seatCheckout(req: NextRequest, identity: SeatOrderIdentity) {
   const userId = await resolveUserId(req);
@@ -125,7 +125,7 @@ async function seatCheckout(req: NextRequest, identity: SeatOrderIdentity) {
 export async function GET(req: NextRequest) {
   const planId = req.nextUrl.searchParams.get("plan") ?? "";
 
-  // 席位訂單（`seat:` 前綴）走席位收銀台分支；其餘維持既有 plan 流程一字不動。
+  // 席位订单（`seat:` 前缀）走席位收银台分支；其余维持既有 plan 流程一字不动。
   const seatIdentity = parseSeatOrderParam(planId);
   if (seatIdentity) {
     return seatCheckout(req, seatIdentity);
@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "套餐不存在" }, { status: 400 });
   }
 
-  // 反查一次，綁單與首充資格閘共用（同一趟控面往返，不重複打）。
+  // 反查一次，绑单与首充资格闸共用（同一趟控面往返，不重复打）。
   const userId = await resolveUserId(req);
 
   if (plan.id === FIRST_CHARGE_PLAN_ID && !(await firstChargeAllowed(userId))) {

@@ -1,100 +1,100 @@
-// 解說劇型別與旁白音色（P1-5／對稱差 D7）。
+// 解说剧型别与旁白音色（P1-5／对称差 D7）。
 //
-// 對標口徑（唯一）：`Dramagic對稱差-全站-0928.md:92` 逐字——
-// 對手有「AI Short drama」「AI **Commentary** Drama」兩種型別，且
+// 对标口径（唯一）：`Dramagic对称差-全站-0928.md:92` 逐字——
+// 对手有「AI Short drama」「AI **Commentary** Drama」两种型别，且
 // 「There is a **narration voice configuration** item」；我方「零命中」。
-// 決策表 `Dramagic對稱差-決策表-0928.md:37`：P1-5「**做**」。
+// 决策表 `Dramagic对称差-决策表-0928.md:37`：P1-5「**做**」。
 //
-// ── 輪子已在，本刀只做「接線」──────────────────────────────────────────────
-// `AID_SCRIPT_TYPE_ENUM`（`src/lib/aid-enums/creation.ts:122-127`，逐字轉錄自
-// AID `ScriptTypeEnum.java`）**早就定義了本站需要的兩型**：
-//     PLOT:      { value: "plot",      desc: "剧情演绎" }   ← 普通劇（AI Short drama 對位）
-//     MONOLOGUE: { value: "monologue", desc: "真人解说漫" }  ← **解說劇**（AI Commentary Drama 對位）
-// 但全 repo 對它的引用**只有 aid-enums 自己的 index 與測試**（實查：
-// `grep -rn AID_SCRIPT_TYPE_ENUM src | grep -v aid-enums/` 為空）⇒ 有型別、無接線，
-// 這正是 D7 說「零命中」的形狀。**故本刀不另立型別詞表**（另立＝第二套真相），
-// 而是把已有的 `AID_SCRIPT_TYPE_ENUM` 接成專案級一等欄位 ＋ 旁白音色綁定。
+// ── 轮子已在，本刀只做「接线」──────────────────────────────────────────────
+// `AID_SCRIPT_TYPE_ENUM`（`src/lib/aid-enums/creation.ts:122-127`，逐字转录自
+// AID `ScriptTypeEnum.java`）**早就定义了本站需要的两型**：
+//     PLOT:      { value: "plot",      desc: "剧情演绎" }   ← 普通剧（AI Short drama 对位）
+//     MONOLOGUE: { value: "monologue", desc: "真人解说漫" }  ← **解说剧**（AI Commentary Drama 对位）
+// 但全 repo 对它的引用**只有 aid-enums 自己的 index 与测试**（实查：
+// `grep -rn AID_SCRIPT_TYPE_ENUM src | grep -v aid-enums/` 为空）⇒ 有型别、无接线，
+// 这正是 D7 说「零命中」的形状。**故本刀不另立型别词表**（另立＝第二套真相），
+// 而是把已有的 `AID_SCRIPT_TYPE_ENUM` 接成专案级一等栏位 ＋ 旁白音色绑定。
 //
-// ── 為什麼旁白音色也要在這裡判（而不只是存一個字串）────────────────────────
-// 旁白音色是**要真的拿去合成語音**的：提交端 `POST /v1/tts/generations` 的 `voice`
+// ── 为什么旁白音色也要在这里判（而不只是存一个字串）────────────────────────
+// 旁白音色是**要真的拿去合成语音**的：提交端 `POST /v1/tts/generations` 的 `voice`
 // 值域收在 `voice-library.ts`（`normalizeVoiceId`，未知一律 400 `voice_unknown`）。
-// 若本檔只存一個自由字串，就會出現「專案設定裡寫著某音色，合成時拿到 400」的假設定。
-// 故本檔的值域判據**直接複用 `normalizeVoiceId`**（同一把尺，不重寫第二份規則）。
+// 若本档只存一个自由字串，就会出现「专案设定里写著某音色，合成时拿到 400」的假设定。
+// 故本档的值域判据**直接复用 `normalizeVoiceId`**（同一把尺，不重写第二份规则）。
 //
-// ── 三條不變量（照 D7 的產品語義）──────────────────────────────────────────
-//   1. **型別與音色是一組**：只有 `monologue`（解說劇）才允許／需要旁白音色；
-//      `plot`（劇情演繹）帶旁白音色＝設定衝突（解說劇才靠旁白推進）。
-//      衝突**如實回報**（`narrationVoiceConflict`），不靜默忽略、也不靜默清掉。
-//   2. **缺省＝零改動**：不帶 scriptType 的專案逐位不變（舊專案形狀不變）。
-//   3. **`voice` 未指定時不編造**：`narrationVoice` 缺席＝用上游預設
-//      （`DEFAULT_TTS_VOICE`），不假裝綁了某一顆。
+// ── 三条不变量（照 D7 的产品语义）──────────────────────────────────────────
+//   1. **型别与音色是一组**：只有 `monologue`（解说剧）才允许／需要旁白音色；
+//      `plot`（剧情演绎）带旁白音色＝设定冲突（解说剧才靠旁白推进）。
+//      冲突**如实回报**（`narrationVoiceConflict`），不静默忽略、也不静默清掉。
+//   2. **缺省＝零改动**：不带 scriptType 的专案逐位不变（旧专案形状不变）。
+//   3. **`voice` 未指定时不编造**：`narrationVoice` 缺席＝用上游预设
+//      （`DEFAULT_TTS_VOICE`），不假装绑了某一颗。
 //
-// 葉模組：只 import 純常數（aid-enums）與 voice-library 的判據，不碰 DB／`node:*`。
+// 叶模组：只 import 纯常数（aid-enums）与 voice-library 的判据，不碰 DB／`node:*`。
 
 import { AID_SCRIPT_TYPE_ENUM } from "@/lib/aid-enums/creation";
 import { normalizeVoiceId } from "@/lib/voice-library";
 
-/** 劇本型別（＝AID `ScriptTypeEnum` 的值集合：`plot`｜`monologue`）。 */
+/** 剧本型别（＝AID `ScriptTypeEnum` 的值集合：`plot`｜`monologue`）。 */
 export type CanvasScriptType = (typeof AID_SCRIPT_TYPE_ENUM)[keyof typeof AID_SCRIPT_TYPE_ENUM]["value"];
 
 /**
- * 專案可選的劇本型別（**宣告序＝AID 原序**，UI 下拉直接吃這個陣列）。
- * 解說劇＝`monologue`（AID 原文 desc「真人解说漫」）。
+ * 专案可选的剧本型别（**宣告序＝AID 原序**，UI 下拉直接吃这个阵列）。
+ * 解说剧＝`monologue`（AID 原文 desc「真人解说漫」）。
  */
 export const CANVAS_SCRIPT_TYPES = [
   AID_SCRIPT_TYPE_ENUM.PLOT.value,
   AID_SCRIPT_TYPE_ENUM.MONOLOGUE.value,
 ] as const satisfies readonly CanvasScriptType[];
 
-/** 解說劇的型別值（D7 的 AI Commentary Drama 對位）——旁白音色只在這一型有效。 */
+/** 解说剧的型别值（D7 的 AI Commentary Drama 对位）——旁白音色只在这一型有效。 */
 export const COMMENTARY_SCRIPT_TYPE: CanvasScriptType = AID_SCRIPT_TYPE_ENUM.MONOLOGUE.value;
 
-/** 型別的中文標籤（**desc 逐字取自 AID，未改寫、未簡繁轉換**）。 */
+/** 型别的中文标签（**desc 逐字取自 AID，未改写、未简繁转换**）。 */
 export const CANVAS_SCRIPT_TYPE_LABELS: Readonly<Record<CanvasScriptType, string>> = {
   [AID_SCRIPT_TYPE_ENUM.PLOT.value]: AID_SCRIPT_TYPE_ENUM.PLOT.desc,
   [AID_SCRIPT_TYPE_ENUM.MONOLOGUE.value]: AID_SCRIPT_TYPE_ENUM.MONOLOGUE.desc,
 };
 
-/** 執行期判據（agent 載荷與 Blob 讀回的值都不可信，一律過此）。 */
+/** 执行期判据（agent 载荷与 Blob 读回的值都不可信，一律过此）。 */
 export function isCanvasScriptType(value: unknown): value is CanvasScriptType {
   return typeof value === "string" && (CANVAS_SCRIPT_TYPES as readonly string[]).includes(value);
 }
 
-/** 這一型是不是解說劇（＝需要旁白的那一型）。 */
+/** 这一型是不是解说剧（＝需要旁白的那一型）。 */
 export function isCommentaryScriptType(value: unknown): boolean {
   return value === COMMENTARY_SCRIPT_TYPE;
 }
 
 /**
- * 專案級解說劇設定的清洗結果。
- * 語義：**逐欄獨立、非法即省略該鍵**（與 `CanvasProjectMetaPatch` 既有範式一致——
- * 某欄非法只丟該欄，不整包作廢；省略＝不動該欄）。
+ * 专案级解说剧设定的清洗结果。
+ * 语义：**逐栏独立、非法即省略该键**（与 `CanvasProjectMetaPatch` 既有范式一致——
+ * 某栏非法只丢该栏，不整包作废；省略＝不动该栏）。
  */
 export interface ProjectNarration {
-  /** 劇本型別；缺席＝未宣告（舊專案語義）。 */
+  /** 剧本型别；缺席＝未宣告（旧专案语义）。 */
   scriptType?: CanvasScriptType;
-  /** 旁白音色 id（必須是 `voice-library` 認可的值）；缺席＝用上游預設。 */
+  /** 旁白音色 id（必须是 `voice-library` 认可的值）；缺席＝用上游预设。 */
   narrationVoice?: string;
 }
 
-/** 清洗一組解說劇設定（逐欄白名單；`undefined`／非法一律不落鍵）。 */
+/** 清洗一组解说剧设定（逐栏白名单；`undefined`／非法一律不落键）。 */
 export function normalizeProjectNarration(input: {
   scriptType?: unknown;
   narrationVoice?: unknown;
 }): ProjectNarration {
   const out: ProjectNarration = {};
   if (isCanvasScriptType(input?.scriptType)) out.scriptType = input.scriptType;
-  // 音色走**既有語音庫的同一把尺**（未知＝不落鍵，不製造半形綁定）。
+  // 音色走**既有语音库的同一把尺**（未知＝不落键，不制造半形绑定）。
   const voice = normalizeVoiceId(input?.narrationVoice);
   if (voice) out.narrationVoice = voice;
   return out;
 }
 
 /**
- * 設定衝突如實回報（**不代用戶決定**）：
- *   - 非解說劇（`plot` 或未宣告）卻綁了旁白音色 ⇒ 該設定不會生效；
- *   - 解說劇但**沒有**旁白音色 ⇒ 不是錯誤（會走上游預設音色），僅提示未指定。
- * 回傳人類可讀的中文訊息陣列（空陣列＝無衝突）；呼叫端據此提示，不得靜默吞掉。
+ * 设定冲突如实回报（**不代用户决定**）：
+ *   - 非解说剧（`plot` 或未宣告）却绑了旁白音色 ⇒ 该设定不会生效；
+ *   - 解说剧但**没有**旁白音色 ⇒ 不是错误（会走上游预设音色），仅提示未指定。
+ * 回传人类可读的中文讯息阵列（空阵列＝无冲突）；呼叫端据此提示，不得静默吞掉。
  */
 export function narrationVoiceConflicts(settings: {
   scriptType?: unknown;
@@ -109,9 +109,9 @@ export function narrationVoiceConflicts(settings: {
 }
 
 /**
- * 旁白音色**此刻真正會被使用**的那一顆（給 UI／API 明示，不讓呼叫端猜）：
- * 解說劇 → 綁定的音色，未綁定＝null（＝上游預設，由呼叫端填 `DEFAULT_TTS_VOICE` 顯示）。
- * 非解說劇 → null（綁了也不會用；衝突由 `narrationVoiceConflicts` 具名回報）。
+ * 旁白音色**此刻真正会被使用**的那一颗（给 UI／API 明示，不让呼叫端猜）：
+ * 解说剧 → 绑定的音色，未绑定＝null（＝上游预设，由呼叫端填 `DEFAULT_TTS_VOICE` 显示）。
+ * 非解说剧 → null（绑了也不会用；冲突由 `narrationVoiceConflicts` 具名回报）。
  */
 export function effectiveNarrationVoice(settings: {
   scriptType?: unknown;

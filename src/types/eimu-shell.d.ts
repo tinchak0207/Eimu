@@ -1,22 +1,22 @@
 /**
- * Eimu 桌面殼注入的極窄橋接 API（contextBridge）。
+ * Eimu 桌面壳注入的极窄桥接 API（contextBridge）。
  *
- * 只有 Electron 薄殼（loadURL https://www.eimu.dev）會在頁面注入 `window.eimuShell`；
- * 普通瀏覽器（含 PWA）沒有這個物件 ⇒ 視窗控制鈕一律不渲染（避免死鈕）。
- * 外殼原生視窗控制鈕已移除，網頁自繪的理由見 WindowControls.tsx 頂註。
+ * 只有 Electron 薄壳（loadURL https://www.eimu.dev）会在页面注入 `window.eimuShell`；
+ * 普通浏览器（含 PWA）没有这个物件 ⇒ 视窗控制钮一律不渲染（避免死钮）。
+ * 外壳原生视窗控制钮已移除，网页自绘的理由见 WindowControls.tsx 顶注。
  */
 export interface EimuShellApi {
-  /** 宿主平台標識（外殼傳入，例如 "linux"／"win32"／"darwin"）。 */
+  /** 宿主平台标识（外壳传入，例如 "linux"／"win32"／"darwin"）。 */
   platform: string;
-  /** 最小化整個視窗。 */
+  /** 最小化整个视窗。 */
   minimize(): void;
-  /** 最大化／還原切換。 */
+  /** 最大化／还原切换。 */
   toggleMaximize(): void;
-  /** 關閉整個視窗。 */
+  /** 关闭整个视窗。 */
   close(): void;
-  /** 目前是否最大化（外殼真相，非頁面推測）。 */
+  /** 目前是否最大化（外壳真相，非页面推测）。 */
   isMaximized(): Promise<boolean>;
-  /** 訂閱最大化狀態變化，回傳退訂函式（卸載時務必呼叫）。 */
+  /** 订阅最大化状态变化，回传退订函式（卸载时务必呼叫）。 */
   onMaximizeChange(callback: (maximized: boolean) => void): () => void;
 }
 

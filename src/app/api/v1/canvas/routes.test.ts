@@ -1,14 +1,14 @@
-// B 端 API key 畫布產線寫入通道的真行為測試。
+// B 端 API key 画布产线写入通道的真行为测试。
 //
-// 驗的是「route 真的落到既有實現」而不是「route 存在」：
-//   · 未帶 key → 401（正負對照：帶 key 才進下一關）。
-//   · 帶 key 但跨 owner → 404，且被害者的畫布一字未動（讀回真專案比對）。
-//   · 正常路徑：回退真的改了節點內容並 append 一版；套用 ops 真的在專案留下編譯器
-//     確定性 id 的節點（oracle = 編譯器自己的 workflowNodeId，獨立於本 route）。
+// 验的是「route 真的落到既有实现」而不是「route 存在」：
+//   · 未带 key → 401（正负对照：带 key 才进下一关）。
+//   · 带 key 但跨 owner → 404，且被害者的画布一字未动（读回真专案比对）。
+//   · 正常路径：回退真的改了节点内容并 append 一版；套用 ops 真的在专案留下编译器
+//     确定性 id 的节点（oracle = 编译器自己的 workflowNodeId，独立于本 route）。
 //
-// 證人（獨立來源）：`readCanvasProject` 讀回的是落盤後的專案，不是 route 的回包字串。
+// 证人（独立来源）：`readCanvasProject` 读回的是落盘后的专案，不是 route 的回包字串。
 
-process.env.NODE_ENV = "test"; // 無物件儲存後端時允許記憶體降級（blob-backend 的既有契約）
+process.env.NODE_ENV = "test"; // 无物件储存后端时允许记忆体降级（blob-backend 的既有契约）
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -52,7 +52,7 @@ function req(url: string, init: { headers?: Record<string, string>; body?: unkno
 
 const nodeParams = (id: string) => ({ params: Promise.resolve({ id }) });
 
-/** 只有一個文本節點、帶兩版內容歷史的畫布（回退測試用）。 */
+/** 只有一个文本节点、带两版内容历史的画布（回退测试用）。 */
 function projectWithVersions(id: string): CanvasProject {
   return {
     id,
@@ -100,9 +100,9 @@ test.after(() => {
   __resetCanvasStoreForTests();
 });
 
-// ─────────────────────────────────────────── ① 未帶 key 被拒
+// ─────────────────────────────────────────── ① 未带 key 被拒
 
-test("未帶 key：回退與套用 ops 兩條 B 端通道一律 401，且不觸任何畫布", async () => {
+test("未带 key：回退与套用 ops 两条 B 端通道一律 401，且不触任何画布", async () => {
   const revert = await revertPOST(req("/api/v1/canvas/nodes/n1/revert", { body: { projectId: "p" } }), nodeParams("n1"));
   assert.equal(revert.status, 401);
   assert.equal(((await revert.json()) as { code?: string }).code, "missing_api_key");
@@ -112,13 +112,13 @@ test("未帶 key：回退與套用 ops 兩條 B 端通道一律 401，且不觸�
   assert.equal(((await apply.json()) as { code?: string }).code, "missing_api_key");
 });
 
-// ─────────────────────────────────────────── ② 帶 key 但跨 owner 被拒
+// ─────────────────────────────────────────── ② 带 key 但跨 owner 被拒
 
-test("跨 owner：A 的 key 改不到 B 的畫布（404），且 B 的畫布一字未動", async () => {
+test("跨 owner：A 的 key 改不到 B 的画布（404），且 B 的画布一字未动", async () => {
   await saveCanvasProject(USER_B, projectWithVersions("proj-b"));
   await saveCanvasProject(USER_B, emptyProject("proj-b-empty"));
 
-  // 回退：A 帶 B 的 projectId
+  // 回退：A 带 B 的 projectId
   const revert = await revertPOST(
     req("/api/v1/canvas/nodes/n1/revert", { headers: AUTH_A, body: { projectId: "proj-b", version: 1 } }),
     nodeParams("n1"),
@@ -126,7 +126,7 @@ test("跨 owner：A 的 key 改不到 B 的畫布（404），且 B 的畫布一�
   assert.equal(revert.status, 404);
   assert.equal(((await revert.json()) as { code?: string }).code, "revert_target_missing");
 
-  // 套用 ops：A 帶 B 的 projectId
+  // 套用 ops：A 带 B 的 projectId
   const apply = await workflowPOST(
     req("/api/v1/canvas/workflow", {
       headers: AUTH_A,
@@ -136,17 +136,17 @@ test("跨 owner：A 的 key 改不到 B 的畫布（404），且 B 的畫布一�
   assert.equal(apply.status, 404);
   assert.equal(((await apply.json()) as { code?: string }).code, "canvas_project_not_found");
 
-  // 被害者畫布不變（真讀回比對，不是看 route 回包）
+  // 被害者画布不变（真读回比对，不是看 route 回包）
   const victim = await readCanvasProject(USER_B, "proj-b");
-  assert.equal(victim?.nodes[0]?.title, "新标题", "B 的節點標題不得被 A 的回退改動");
+  assert.equal(victim?.nodes[0]?.title, "新标题", "B 的节点标题不得被 A 的回退改动");
   assert.equal(victim?.nodeVersions?.length, 2, "B 的版本史不得被追加");
   const victimEmpty = await readCanvasProject(USER_B, "proj-b-empty");
-  assert.equal(victimEmpty?.nodes.length, 0, "B 的空畫布不得被 A 套入節點");
+  assert.equal(victimEmpty?.nodes.length, 0, "B 的空画布不得被 A 套入节点");
 });
 
-// ─────────────────────────────────────────── ③ 正常路徑：回退
+// ─────────────────────────────────────────── ③ 正常路径：回退
 
-test("正常路徑：A 回退自己的節點到 v1，落地標題回舊值並 append 一版 reason=revert", async () => {
+test("正常路径：A 回退自己的节点到 v1，落地标题回旧值并 append 一版 reason=revert", async () => {
   await saveCanvasProject(USER_A, projectWithVersions("proj-a"));
 
   const res = await revertPOST(
@@ -161,13 +161,13 @@ test("正常路徑：A 回退自己的節點到 v1，落地標題回舊值並 ap
   assert.equal(payload.versions[2].reason, "revert");
 
   const stored = await readCanvasProject(USER_A, "proj-a");
-  assert.equal(stored?.nodes[0]?.title, "旧标题", "落盤後的節點標題必須是舊版");
+  assert.equal(stored?.nodes[0]?.title, "旧标题", "落盘后的节点标题必须是旧版");
   assert.equal(stored?.nodeVersions?.length, 3, "回退本身也落一版");
 });
 
-// ─────────────────────────────────────────── ④ 正常路徑：套用 ops（端到端編譯→落圖）
+// ─────────────────────────────────────────── ④ 正常路径：套用 ops（端到端编译→落图）
 
-test("正常路徑：A 用 DSL 寫入自己的畫布，專案真的出現編譯器確定性 id 的節點與連線", async () => {
+test("正常路径：A 用 DSL 写入自己的画布，专案真的出现编译器确定性 id 的节点与连线", async () => {
   await saveCanvasProject(USER_A, emptyProject("proj-a2"));
 
   const source = {
@@ -186,16 +186,16 @@ test("正常路徑：A 用 DSL 寫入自己的畫布，專案真的出現編譯�
 
   const stored = await readCanvasProject(USER_A, "proj-a2");
   const ids = (stored?.nodes ?? []).map((n) => n.id);
-  // oracle = 編譯器自己的確定性 id 函式（獨立於本 route）
-  assert.ok(ids.includes(workflowNodeId("demo", "script")), `缺 script 節點：${JSON.stringify(ids)}`);
-  assert.ok(ids.includes(workflowNodeId("demo", "shot1")), `缺 shot1 節點：${JSON.stringify(ids)}`);
-  assert.equal(stored?.connections.length, 1, "needs 應落一條連線");
-  assert.ok((stored?.nodeVersions?.length ?? 0) >= 2, "新增節點應各落一版內容");
+  // oracle = 编译器自己的确定性 id 函式（独立于本 route）
+  assert.ok(ids.includes(workflowNodeId("demo", "script")), `缺 script 节点：${JSON.stringify(ids)}`);
+  assert.ok(ids.includes(workflowNodeId("demo", "shot1")), `缺 shot1 节点：${JSON.stringify(ids)}`);
+  assert.equal(stored?.connections.length, 1, "needs 应落一条连线");
+  assert.ok((stored?.nodeVersions?.length ?? 0) >= 2, "新增节点应各落一版内容");
 });
 
-// ─────────────────────────────────────────── ⑤ 編譯失敗不落圖
+// ─────────────────────────────────────────── ⑤ 编译失败不落图
 
-test("DSL 非法：422 workflow_dsl_invalid，畫布不動（失敗語義與純編譯端點一致）", async () => {
+test("DSL 非法：422 workflow_dsl_invalid，画布不动（失败语义与纯编译端点一致）", async () => {
   await saveCanvasProject(USER_A, emptyProject("proj-a3"));
   const res = await workflowPOST(
     req("/api/v1/canvas/workflow", { headers: AUTH_A, body: { projectId: "proj-a3", source: { workflow: "demo", steps: [] } } }),
@@ -203,5 +203,5 @@ test("DSL 非法：422 workflow_dsl_invalid，畫布不動（失敗語義與純�
   assert.equal(res.status, 422);
   assert.equal(((await res.json()) as { code?: string }).code, "workflow_dsl_invalid");
   const stored = await readCanvasProject(USER_A, "proj-a3");
-  assert.equal(stored?.nodes.length, 0, "非法 DSL 不得落任何節點");
+  assert.equal(stored?.nodes.length, 0, "非法 DSL 不得落任何节点");
 });

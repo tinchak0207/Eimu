@@ -36,7 +36,7 @@ function baseAsserts(descriptor: EnvChannelDescriptor) {
   assert.equal(descriptor.usesBillingGateway, false);
 }
 
-test("registry 條目映射：configured + enabled 時有 endpoint 與 supportedModels", () => {
+test("registry 条目映射：configured + enabled 时有 endpoint 与 supportedModels", () => {
   const descriptor = registryChannelToDescriptor(CHANNEL, ENV);
   baseAsserts(descriptor);
   assert.equal(descriptor.configured, true);
@@ -48,7 +48,7 @@ test("registry 條目映射：configured + enabled 時有 endpoint 與 supported
   assert.deepEqual(descriptor.endpoint!.supportedModels, ["gpt-image-2", "gemini-3-image"]);
 });
 
-test("registry 條目映射：base URL 尾斜線被清掉、key 空白被清洗", () => {
+test("registry 条目映射：base URL 尾斜线被清掉、key 空白被清洗", () => {
   const descriptor = registryChannelToDescriptor(CHANNEL, {
     ...ENV,
     TESTCHANNEL_BASE_URL: "https://relay.example/v1/ ",
@@ -58,52 +58,52 @@ test("registry 條目映射：base URL 尾斜線被清掉、key 空白被清洗"
   assert.equal(descriptor.endpoint!.apiKey, "relay-key");
 });
 
-test("registry 條目映射：enabledEnv 缺 key 或清洗後非 true 時 defaultEnabled = false", () => {
+test("registry 条目映射：enabledEnv 缺 key 或清洗后非 true 时 defaultEnabled = false", () => {
   // 缺 key：configured = false → defaultEnabled = false。
   const noKey = registryChannelToDescriptor(CHANNEL, { TESTCHANNEL_BASE_URL: "https://relay.example/v1" });
   assert.equal(noKey.configured, false);
   assert.equal(noKey.defaultEnabled, false);
   assert.equal(noKey.endpoint, null);
-  // enabled env 非 true（沿用 sub2apiSwitchedOn 的清洗語意："1"/"yes" 不算 true）。
+  // enabled env 非 true（沿用 sub2apiSwitchedOn 的清洗语意："1"/"yes" 不算 true）。
   for (const value of ["false", "", " true ", "true\n", "True", "\uFEFFTRUE"]) {
     const descriptor = registryChannelToDescriptor(CHANNEL, { ...ENV, TESTCHANNEL_ENABLED: value });
     const expected = value.trim().replace(/^\uFEFF+/, "").toLowerCase() === "true";
-    assert.equal(descriptor.defaultEnabled, expected, `${JSON.stringify(value)} 應為 ${expected}`);
+    assert.equal(descriptor.defaultEnabled, expected, `${JSON.stringify(value)} 应为 ${expected}`);
   }
 });
 
-test("registry 條目映射：enabledEnv = null 時只看 configured", () => {
+test("registry 条目映射：enabledEnv = null 时只看 configured", () => {
   const descriptor = registryChannelToDescriptor({ ...CHANNEL, enabledEnv: null }, ENV);
   assert.equal(descriptor.configured, true);
   assert.equal(descriptor.defaultEnabled, true);
 });
 
-test("純映射函數的優先級/白名單推導：sitePriority 進 ENV_CHANNEL_PRIORITIES、env:label 進 overridableChannelIds", () => {
-  // 用同一份條目推導站點隊列的兩個登記點——真實 REGISTRY_CHANNELS 為空時，
-  // 這裡驗證的是「條目存在時一定會被登記」的推導規則。
+test("纯映射函数的优先级/白名单推导：sitePriority 进 ENV_CHANNEL_PRIORITIES、env:label 进 overridableChannelIds", () => {
+  // 用同一份条目推导站点队列的两个登记点——真实 REGISTRY_CHANNELS 为空时，
+  // 这里验证的是「条目存在时一定会被登记」的推导规则。
   const prioritiesFromRegistry = Object.fromEntries([[CHANNEL.label, CHANNEL.sitePriority]]);
   assert.equal(prioritiesFromRegistry[CHANNEL.label], 25);
-  // 真實 config 為空：現有渠道不受影響。
+  // 真实 config 为空：现有渠道不受影响。
   assert.ok(!Object.prototype.hasOwnProperty.call(ENV_CHANNEL_PRIORITIES, "testchannel"));
   for (const id of ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback"]) {
-    assert.ok(overridableChannelIds().includes(id), `${id} 應保留在 overridableChannelIds`);
+    assert.ok(overridableChannelIds().includes(id), `${id} 应保留在 overridableChannelIds`);
   }
 });
 
-test("describeEnvChannels：registry 條目插在 sub2api 之後、primary 之前（舊六渠道不受影響）", () => {
+test("describeEnvChannels：registry 条目插在 sub2api 之后、primary 之前（旧六渠道不受影响）", () => {
   const channels = describeEnvChannels({ ...ENV, SUB2API_ENABLED: "true" });
   const labels = channels.map((channel) => channel.label);
   assert.deepEqual(
     labels.filter((label) => ["adobe2api", "sub2api", "primary", "fallback", "filmera", "pixai"].includes(label)),
     ["adobe2api", "sub2api", "primary", "fallback", "filmera", "pixai"],
   );
-  // registry 條目（若 config 有登記）會以 descriptor 形式出現在清單裡；
-  // 目前 config 標記區為空 → describeEnvChannels 輸出的正是舊六渠道，零回歸。
+  // registry 条目（若 config 有登记）会以 descriptor 形式出现在清单里；
+  // 目前 config 标记区为空 → describeEnvChannels 输出的正是旧六渠道，零回归。
   const testDescriptor = channels.find((channel) => channel.label === "testchannel");
   assert.equal(testDescriptor, undefined);
 });
 
-test("describeEnvChannels：未配置的 registry 渠道不產生 endpoint（配置前完全隱形）", () => {
+test("describeEnvChannels：未配置的 registry 渠道不产生 endpoint（配置前完全隐形）", () => {
   const channels = describeEnvChannels({});
   const registryLabels = new Set(REGISTRY_CHANNELS.map((channel) => channel.label));
   for (const channel of channels) {

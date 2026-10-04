@@ -1,9 +1,9 @@
-// SSE 事件的最終一致性收斂（settle 對賬）—— 自 use-canvas-chat.ts 的
-// handleCanvasEvent 內聯閉包搬遷（2026-08-16 根因修復的邏輯，語義逐行保留）。
+// SSE 事件的最终一致性收敛（settle 对账）—— 自 use-canvas-chat.ts 的
+// handleCanvasEvent 内联闭包搬迁（2026-08-16 根因修复的逻辑，语义逐行保留）。
 //
-// gateway 對「上游無 task_id」的工具結果只發 image.done、不發
-// canvas.node.updated，畫布節點會永久卡 loading。這裡用 image.done 的
-// url 把節點落地：task_id 配對優先，回合結束時按序配對兜底。
+// gateway 对「上游无 task_id」的工具结果只发 image.done、不发
+// canvas.node.updated，画布节点会永久卡 loading。这里用 image.done 的
+// url 把节点落地：task_id 配对优先，回合结束时按序配对兜底。
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
@@ -15,30 +15,30 @@ import type { CanvasAction } from "./canvas-reducer-adapter";
 
 /** useCanvasEventSettler 需要的共享物件（皆由主 hook 提供）。 */
 export interface UseCanvasEventSettlerParams {
-  /** 畫布狀態的最新值鏡像 ref（render 期間同步賦值）—— settle 讀它拿當前節點。 */
+  /** 画布状态的最新值镜像 ref（render 期间同步赋值）—— settle 读它拿当前节点。 */
   canvasRef: { current: CanvasReducerState };
-  /** 進度節流表：node_id → 計時器（落地時作廢排隊中的進度幀）。 */
+  /** 进度节流表：node_id → 计时器（落地时作废排队中的进度帧）。 */
   progressTimerRef: { current: Map<string, number> };
-  /** 進度節流表：node_id → 最新待送事件。 */
+  /** 进度节流表：node_id → 最新待送事件。 */
   progressPendingRef: { current: Map<string, AgentSseEvent> };
   dispatchCanvas: (action: CanvasAction) => void;
 }
 
 /**
- * 前端超時兜底：loading 節點超過此時長（15 分鐘）且從未收到任何成功/失敗幀
- * （poller 掛了、SSE 斷了、事件丟了——任何一環都可能），節點自行置
- * 「疑似失敗，可重試」，寧可誤報也不讓用戶對著永遠轉圈的節點乾等。
+ * 前端超时兜底：loading 节点超过此时长（15 分钟）且从未收到任何成功/失败帧
+ * （poller 挂了、SSE 断了、事件丢了——任何一环都可能），节点自行置
+ * 「疑似失败，可重试」，宁可误报也不让用户对著永远转圈的节点干等。
  */
 const LOADING_SUSPECT_TIMEOUT_MS = 15 * 60 * 1000;
 const SUSPECT_SCAN_INTERVAL_MS = 60 * 1000;
 
-/** settle 對賬域：image.done 佇列 + task_id/按序配對落地。 */
+/** settle 对账域：image.done 伫列 + task_id/按序配对落地。 */
 export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
   const { canvasRef, progressTimerRef, progressPendingRef, dispatchCanvas } = params;
 
-  // 最終一致性收斂：image.done 的 URL 佇列，供 settleStaleNodes 對賬用。
+  // 最终一致性收敛：image.done 的 URL 伫列，供 settleStaleNodes 对账用。
   const imageDoneQueueRef = useRef<AgentImageDone[]>([]);
-  // 節點進入 loading 態的本地時刻（node_id → epoch ms），超時兜底用。
+  // 节点进入 loading 态的本地时刻（node_id → epoch ms），超时兜底用。
   const loadingSinceRef = useRef<Map<string, number>>(new Map());
 
   const isPendingSettledNode = useCallback((n: CanvasNode): boolean =>
@@ -47,8 +47,8 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
     (!n.metadata?.status || n.metadata.status === "loading"), []);
 
   const settleNodeWithUrl = useCallback((nodeId: string, url: string, costCoins?: number) => {
-    // 落地與 canvas.node.updated 同語義：該節點排隊中的進度幀作廢；
-    // 結果落地不可撤（與 gateway 的 updated 事件一致，不推歷史快照）。
+    // 落地与 canvas.node.updated 同语义：该节点排队中的进度帧作废；
+    // 结果落地不可撤（与 gateway 的 updated 事件一致，不推历史快照）。
     loadingSinceRef.current.delete(nodeId);
     const t = progressTimerRef.current.get(nodeId);
     if (t !== undefined) {
@@ -72,7 +72,7 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
     });
   }, [dispatchCanvas, progressTimerRef, progressPendingRef]);
 
-  /** 失敗落地：節點置 error 態 + 人話 errorDetails（NodeBody 已有 error 渲染）。 */
+  /** 失败落地：节点置 error 态 + 人话 errorDetails（NodeBody 已有 error 渲染）。 */
   const settleNodeWithFailure = useCallback(
     (nodeId: string, reason: string) => {
       loadingSinceRef.current.delete(nodeId);
@@ -99,9 +99,9 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
   );
 
   /**
-   * image.failed 收斂（與 settleCandidateNode 對稱）：task_id 精確配對優先，
-   * 沒配上就按序配對第一個 pending 節點——失敗幀絕不能因為配不上就丟掉，
-   * 那正是「永遠生成中」黑洞的形狀。
+   * image.failed 收敛（与 settleCandidateNode 对称）：task_id 精确配对优先，
+   * 没配上就按序配对第一个 pending 节点——失败帧绝不能因为配不上就丢掉，
+   * 那正是「永远生成中」黑洞的形状。
    */
   const settleFailedNode = useCallback(
     (failed: AgentImageFailed) => {
@@ -143,7 +143,7 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
     const pending = canvasRef.current.nodes.filter(isPendingSettledNode);
     if (pending.length === 0) return;
     const settled = new Set<string>();
-    // 第一輪：task_id 精確配對。
+    // 第一轮：task_id 精确配对。
     for (const node of pending) {
       const taskId = node.metadata?.imageTaskId;
       if (!taskId) continue;
@@ -154,20 +154,20 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
         settled.add(node.id);
       }
     }
-    // 第二輪：剩餘節點按序配對（gateway 建節點與發 image.done 同順序）。
+    // 第二轮：剩余节点按序配对（gateway 建节点与发 image.done 同顺序）。
     for (const node of pending) {
       if (settled.has(node.id)) continue;
       const hit = queue.shift();
       if (!hit) break;
       settleNodeWithUrl(node.id, hit.url, hit.cost_coins);
     }
-    // 回合已結束：殘留的 url 不再跨回合污染（節點都不存在了，url 無家可歸）。
+    // 回合已结束：残留的 url 不再跨回合污染（节点都不存在了，url 无家可归）。
     imageDoneQueueRef.current.length = 0;
   }, [canvasRef, isPendingSettledNode, settleNodeWithUrl]);
 
-  // 超時兜底：掃描 loading 節點的本地計時，超過 15 分鐘置「疑似失敗，可重試」。
-  // 這是最後一道防線——poller 掛掉、SSE 斷線丟幀、任何一環啞掉時，用戶仍能在
-  // 15 分鐘內得到確定性的錯誤終態，而不是無限轉圈。
+  // 超时兜底：扫描 loading 节点的本地计时，超过 15 分钟置「疑似失败，可重试」。
+  // 这是最后一道防线——poller 挂掉、SSE 断线丢帧、任何一环哑掉时，用户仍能在
+  // 15 分钟内得到确定性的错误终态，而不是无限转圈。
   useEffect(() => {
     const timer = window.setInterval(() => {
       const since = loadingSinceRef.current;

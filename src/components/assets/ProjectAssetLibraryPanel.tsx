@@ -1,15 +1,15 @@
 "use client";
 
-// REQ-B2 團隊資產空間：項目資產庫面板（列表 + 搜尋/篩選 + 掛用入口 + 顯式分享）。
+// REQ-B2 团队资产空间：项目资产库面板（列表 + 搜寻/筛选 + 挂用入口 + 显式分享）。
 //
-// 最小可用面：資產包與資產卡（角色/場景/風格）同列一張清單，每列帶歸屬與可見性標記，
-// 可一鍵掛用/解除；項目歸屬的資產可在此顯式分享到別的項目（唯一的跨項目授權入口）。
-// 視覺沿用畫布彈層語彙（lg-sheet / rounded-ios-2xl / ios 字級），不另造樣式體系。
-// 未登入安靜顯示登入提示（同 CanvasLibraryPanel 的資產 tab 慣例）。
+// 最小可用面：资产包与资产卡（角色/场景/风格）同列一张清单，每列带归属与可见性标记，
+// 可一键挂用/解除；项目归属的资产可在此显式分享到别的项目（唯一的跨项目授权入口）。
+// 视觉沿用画布弹层语汇（lg-sheet / rounded-ios-2xl / ios 字级），不另造样式体系。
+// 未登入安静显示登入提示（同 CanvasLibraryPanel 的资产 tab 惯例）。
 //
-// 文案紀律：本元件零硬編用戶可見字串，全部經 `text()` 取自 src/lib/ui-strings.ts
-// （守門件 src/lib/ui-strings.test.ts 去註解後禁 CJK）。伺服器回傳的 kindLabel（資產包/角色/…）
-// 與用戶資產名/標籤是資料，原樣顯示。
+// 文案纪律：本元件零硬编用户可见字串，全部经 `text()` 取自 src/lib/ui-strings.ts
+// （守门件 src/lib/ui-strings.test.ts 去注解后禁 CJK）。伺服器回传的 kindLabel（资产包/角色/…）
+// 与用户资产名/标签是资料，原样显示。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,13 +26,13 @@ import type { AssetKind, AssetLibraryItem, AssetVisibility } from "@/lib/asset-s
 export interface ProjectAssetLibraryPanelProps {
   open: boolean;
   onClose: () => void;
-  /** 當前項目 id；null = 畫布尚未建號（此時只有個人資產可見，掛用不可用）。 */
+  /** 当前项目 id；null = 画布尚未建号（此时只有个人资产可见，挂用不可用）。 */
   projectId: string | null;
-  /** 未登入態提示（父層已知登入態時傳入，避免多餘請求）。 */
+  /** 未登入态提示（父层已知登入态时传入，避免多余请求）。 */
   isLoggedIn?: boolean;
   /**
-   * REQ-B2b：掛用/解除後的**副本 id 變更**回報（父層據此把副本鎖進／解鎖出 cardIds）。
-   * 這是本刀生效的硬接線——不回報＝畫面說「已掛用」但生成仍注入來源 id。
+   * REQ-B2b：挂用/解除后的**副本 id 变更**回报（父层据此把副本锁进／解锁出 cardIds）。
+   * 这是本刀生效的硬接线——不回报＝画面说「已挂用」但生成仍注入来源 id。
    */
   onCopyChange?: (change: { locked: string[]; unlocked: string[] }) => void | Promise<void>;
 }
@@ -102,7 +102,7 @@ export function ProjectAssetLibraryPanel({
       kind: kindFilter,
       mountedOnly,
     });
-    if (seq !== requestSeq.current) return; // 舊回應不覆蓋新查詢
+    if (seq !== requestSeq.current) return; // 旧回应不覆盖新查询
     setLoading(false);
     if (!res.ok || !res.data) {
       setError(res.message ?? text("assets.error.loadFailed"));
@@ -125,12 +125,12 @@ export function ProjectAssetLibraryPanel({
       if (item.mounted) {
         const res = await unmountProjectAsset({ projectId, assetKind: item.assetKind, assetId: item.assetId });
         setBusy(null);
-        // CanvasClientResult.ok 不是判別聯合：ok 之後 data 仍可能 undefined，一起擋。
+        // CanvasClientResult.ok 不是判别联合：ok 之后 data 仍可能 undefined，一起挡。
         if (!res.ok || !res.data) {
           setNotice(res.message ?? text("assets.error.action"));
           return;
         }
-        // 解除＝連副本一起解鎖（否則畫面說「已解除」、生成還在注入副本）。
+        // 解除＝连副本一起解锁（否则画面说「已解除」、生成还在注入副本）。
         if (res.data.localCopyIds.length > 0) {
           await onCopyChange?.({ locked: [], unlocked: res.data.localCopyIds });
         }
@@ -144,7 +144,7 @@ export function ProjectAssetLibraryPanel({
         setNotice(res.message ?? text("assets.error.action"));
         return;
       }
-      // copy-on-use 的落地點：副本 id 鎖進 cardIds（生成注入讀的就是這批）。
+      // copy-on-use 的落地点：副本 id 锁进 cardIds（生成注入读的就是这批）。
       if (res.data.localCopyIds.length > 0) {
         await onCopyChange?.({ locked: res.data.localCopyIds, unlocked: [] });
       }

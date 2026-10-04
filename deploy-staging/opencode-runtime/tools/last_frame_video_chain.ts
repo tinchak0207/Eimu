@@ -1,14 +1,14 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, platformFetch, classifyError, registerTask } from "../lib/client"
 
-// 首尾帧视频链（2026-08-31 片4）：關鍵幀清單 → 逐鏡提交視頻 job（站點計費鏈）→ 輪詢 → 按鏡 mp4。
-// 【契約實證】站點 B 端 /v1/videos/generations 的 VideoRequestBody 只收
+// 首尾帧视频链（2026-08-31 片4）：关键帧清单 → 逐镜提交视频 job（站点计费链）→ 轮询 → 按镜 mp4。
+// 【契约实证】站点 B 端 /v1/videos/generations 的 VideoRequestBody 只收
 // {model, prompt, n, size, duration_seconds, generate_audio, response_format, callback_url}，
-// 無 first_frame/last_frame/reference 欄位（站點與控制面兩層 route 皆如此，已逐行核對）。
-// 上游 newapi/metaso adapter 雖支持 workflow.references 首尾幀，但只有 web /api/generation-jobs
-// （multipart + 用戶 session 鑰匙）會填充，B 端 sk-biz 計費鏈路徑拿不到。
-// 故本工具嚴守「不繞過計費鏈」：提交走 /v1/videos/generations，首尾幀如實降級為文生視頻，
-// 並在每個鏡標注 frames_passed:false + 降級原因，絕不假稱幀已透傳。
+// 无 first_frame/last_frame/reference 栏位（站点与控制面两层 route 皆如此，已逐行核对）。
+// 上游 newapi/metaso adapter 虽支持 workflow.references 首尾帧，但只有 web /api/generation-jobs
+// （multipart + 用户 session 钥匙）会填充，B 端 sk-biz 计费链路径拿不到。
+// 故本工具严守「不绕过计费链」：提交走 /v1/videos/generations，首尾帧如实降级为文生视频，
+// 并在每个镜标注 frames_passed:false + 降级原因，绝不假称帧已透传。
 
 interface Shot {
   first_frame_url?: string
@@ -24,7 +24,7 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
   try {
     j = JSON.parse(raw)
   } catch {
-    return { shots: [], error: "shots 必須是 JSON 陣列字串" }
+    return { shots: [], error: "shots 必须是 JSON 阵列字串" }
   }
   const arr = Array.isArray(j) ? j : [j]
   const shots: Shot[] = []
@@ -36,7 +36,7 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
     const last = typeof o.last_frame_url === "string" ? o.last_frame_url.trim() : undefined
     if (!prompt && !first && !last) continue
     shots.push({
-      prompt: prompt || "（無文字提示，僅幀參考——但 B 端不支持幀，將如實標注）",
+      prompt: prompt || "（无文字提示，仅帧参考——但 B 端不支持帧，将如实标注）",
       first_frame_url: first || undefined,
       last_frame_url: last || undefined,
       duration_seconds: typeof o.duration_seconds === "number" ? o.duration_seconds : undefined,
@@ -44,11 +44,11 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
       size: typeof o.size === "string" ? o.size.trim() : undefined,
     })
   }
-  if (!shots.length) return { shots: [], error: "未解析到任何含 prompt/幀 URL 的鏡" }
+  if (!shots.length) return { shots: [], error: "未解析到任何含 prompt/帧 URL 的镜" }
   return { shots }
 }
 
-/** 構造單鏡提交體（站點 B 端實際契約字段；幀字段不放入——放了會被丟棄，寧可不放並如實說明）。 */
+/** 构造单镜提交体（站点 B 端实际契约字段；帧字段不放入——放了会被丢弃，宁可不放并如实说明）。 */
 function buildBody(shot: Shot, defModel: string, defSize: string, defDur: number): Record<string, unknown> {
   return {
     model: shot.model || defModel,
@@ -79,8 +79,8 @@ async function pollJob(
     if (lastStatus === "succeeded") {
       const url = data?.data?.[0]?.url ?? data?.data?.[0]?.videoUrl ?? null
       let cost = typeof data.cost_coins === "number" ? data.cost_coins : null
-      // 計費 commit 行可能在 succeeded 響應後才落庫（實測競態）：cost 缺失時延遲重讀一次，
-      // 仍取不到才誠實回 null（不編造金額）。
+      // 计费 commit 行可能在 succeeded 响应后才落库（实测竞态）：cost 缺失时延迟重读一次，
+      // 仍取不到才诚实回 null（不编造金额）。
       if (cost === null) {
         await new Promise((r) => setTimeout(r, 3000))
         const res2 = await platformFetch(`/videos/${encodeURIComponent(id)}`, { method: "GET" }, sessionID, signal)
@@ -95,7 +95,7 @@ async function pollJob(
     }
     await new Promise((r) => setTimeout(r, 4000))
   }
-  return { status: lastStatus, costCoins: null, videoUrl: null, error: `輪詢超時（${Math.round(deadlineMs / 1000)}s），job 可能仍在跑，用 GET /v1/videos/${id} 續查` }
+  return { status: lastStatus, costCoins: null, videoUrl: null, error: `轮询超时（${Math.round(deadlineMs / 1000)}s），job 可能仍在跑，用 GET /v1/videos/${id} 续查` }
 }
 
 export default tool({
@@ -108,7 +108,7 @@ export default tool({
     duration_seconds: tool.schema.number().int().min(4).max(15).optional().describe("默认时长秒（镜未指定时用）"),
     dry_run: tool.schema.boolean().optional().describe("true=只构造提交体与预算估算，不发射、零扣费（默认 false）"),
     submit_only: tool.schema.boolean().optional().describe("true=提交后立即返回 job ids 不等完成（长任务不阻塞工具）"),
-    budget_max_coins: tool.schema.number().min(0).optional().describe("真发射预算上限（幣），默认 50；估价超限即拒发"),
+    budget_max_coins: tool.schema.number().min(0).optional().describe("真发射预算上限（币），默认 50；估价超限即拒发"),
     max_shots: tool.schema.number().int().min(1).max(12).optional().describe("镜数上限，默认 8，超出截断并标 truncated"),
     poll_timeout_ms: tool.schema.number().int().min(10000).max(600000).optional().describe("单镜轮询上限毫秒，默认 300000"),
   },
@@ -140,7 +140,7 @@ export default tool({
         if (m?.id && cps && typeof cps === "object") rateTable[m.id] = cps as Record<string, number>
       }
     } catch {
-      /* 取不到目录：估价回退保守 10 幣/秒 */
+      /* 取不到目录：估价回退保守 10 币/秒 */
     }
     const estimateShot = (body: Record<string, unknown>): number => {
       const mid = String(body.model)
@@ -195,7 +195,7 @@ export default tool({
     if (totalEstimate > budgetMax) {
       return fail(
         "budget_exceeded",
-        `估价 ${Math.round(totalEstimate * 1e4) / 1e4} 幣 > 预算上限 ${budgetMax} 幣（模型档可能偏贵或镜数过多）。请先 dry_run 核对、换更便宜模型/减镜数/缩短时长，或明确调高 budget_max_coins。未提交任何 job、零扣费。`,
+        `估价 ${Math.round(totalEstimate * 1e4) / 1e4} 币 > 预算上限 ${budgetMax} 币（模型档可能偏贵或镜数过多）。请先 dry_run 核对、换更便宜模型/减镜数/缩短时长，或明确调高 budget_max_coins。未提交任何 job、零扣费。`,
         { title: "预算冲突", total_est_coins: totalEstimate, budget_max_coins: budgetMax, frame_contract: frameFinding },
       )
     }
@@ -232,9 +232,9 @@ export default tool({
       }
       if (submitOnly) {
         results.push({ ...base, status: "submitted", poll_url: `/v1/videos/${jobId}`, elapsed_ms: Date.now() - t0 })
-        // 註冊給 poller 自動輪詢；best-effort，失敗不影響主流程（registerTask 本體已吞錯回 {ok:false}）。
-        // 只在 submit_only 分支註冊：輪詢分支已拿到終態，再註冊會讓 poller 對已完成 job 再輪一次並多發 resume。
-        // cost_coins 不帶：submit 當下尚無真實扣費，poller 用平台回傳值或退回估算。
+        // 注册给 poller 自动轮询；best-effort，失败不影响主流程（registerTask 本体已吞错回 {ok:false}）。
+        // 只在 submit_only 分支注册：轮询分支已拿到终态，再注册会让 poller 对已完成 job 再轮一次并多发 resume。
+        // cost_coins 不带：submit 当下尚无真实扣费，poller 用平台回传值或退回估算。
         if (jobId) void registerTask(jobId, context.sessionID, "video", context.abort, { model: work[i].model })
         continue
       }

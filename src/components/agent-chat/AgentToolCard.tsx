@@ -22,26 +22,26 @@ import { AgentParamDisclosure } from "./AgentParamDisclosure";
 export interface AgentToolCardProps {
   item: AgentToolCallItem;
   /**
-   * 本機檔案授權回傳（缺陷 C）：使用者點選三選一後，帶 scope＋root 走授權。
-   * 未接線時按鈕保持 disabled（與 imageActions 同款漸進增強契約）。
+   * 本机档案授权回传（缺陷 C）：使用者点选三选一后，带 scope＋root 走授权。
+   * 未接线时按钮保持 disabled（与 imageActions 同款渐进增强契约）。
    */
   onAuthorize?: (scope: AgentToolAuthScope, root?: string) => void | Promise<void>;
 }
 
 type RowIcon = ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
 
-/* ─────────────────── 工具类型图标（2026-09-20 對版預覽） ───────────────────
+/* ─────────────────── 工具类型图标（2026-09-20 对版预览） ───────────────────
  *
- * 行首那個圖標說「這是哪一類動作」（工具類型），不再兼職說狀態：
- * 狀態只由行尾的 Loader2/Check + 狀態詞承擔（見 STATUS_META）。
- * 兩件事擠進同一個圖標＝使用者分不出「跑完了」和「這是搜尋工具」。
+ * 行首那个图标说「这是哪一类动作」（工具类型），不再兼职说状态：
+ * 状态只由行尾的 Loader2/Check + 状态词承担（见 STATUS_META）。
+ * 两件事挤进同一个图标＝使用者分不出「跑完了」和「这是搜寻工具」。
  *
- * 判定順序＝優先序，第一個命中者勝出；全表挑不到就 Wrench（不假造類型）。
+ * 判定顺序＝优先序，第一个命中者胜出；全表挑不到就 Wrench（不假造类型）。
  */
 
 /**
- * 內建工具的精確映射：這些 id 太短，片段規則會互相誤吃
- * （todoread 含 read、image_edit 含 edit），所以精確點名。
+ * 内建工具的精确映射：这些 id 太短，片段规则会互相误吃
+ * （todoread 含 read、image_edit 含 edit），所以精确点名。
  */
 const TOOL_ROW_EXACT: Record<string, RowIcon> = {
   bash: Wrench, // 终端命令
@@ -93,7 +93,7 @@ export function toolRowIcon(tool: string): RowIcon {
 }
 
 interface ToolRowStatusMeta {
-  /** 行尾状态词（對版預覽語彙：运行中… / 完成 / 失败）。 */
+  /** 行尾状态词（对版预览语汇：运行中… / 完成 / 失败）。 */
   word: string;
   /** 状态词着色：运行＝ios-blue、完成＝灰、失败＝唯一红。 */
   wordTone: string;
@@ -107,7 +107,7 @@ interface ToolRowStatusMeta {
 // 「已完成」不再上车：工具行说的是这一刻在不在跑/跑完没有，不是工单状态。
 const STATUS_META: Record<AgentToolCallItem["status"], ToolRowStatusMeta> = {
   running: { word: "运行中…", wordTone: "text-ios-blue", Icon: Loader2, iconTone: "text-ios-blue/70" },
-  // 中继態：任務已提交、成品未到（artifact_pending）。金色胶囊已下线（0920 裁定），
+  // 中继态：任务已提交、成品未到（artifact_pending）。金色胶囊已下线（0920 裁定），
   // pending 与 running 同为「还在跑」：ios-blue 转圈，等 image/video/audio.done
   // 或 image.failed 才转 ok/failed。
   pending: { word: "运行中…", wordTone: "text-ios-blue", Icon: Loader2, iconTone: "text-ios-blue/70" },
@@ -115,7 +115,7 @@ const STATUS_META: Record<AgentToolCallItem["status"], ToolRowStatusMeta> = {
   // 失败没有状态图标：红色状态词 + 行下的错误原文（error）已经说清楚，
   // 再来一个红叉是同一句话说三遍。
   failed: { word: "失败", wordTone: "text-ios-red" },
-  // 需要授权（缺陷 C）：action 態——不是成功也不是失败。锁图标（不转圈）＋蓝字，
+  // 需要授权（缺陷 C）：action 态——不是成功也不是失败。锁图标（不转圈）＋蓝字，
   // 卡片下方列出三选一供点击；绝不显示「完成」。
   needs_auth: { word: "需要授权", wordTone: "text-ios-blue", Icon: Lock, iconTone: "text-ios-blue/70" },
 };
@@ -131,7 +131,7 @@ function formatCoins(n: number): string {
  * 原始函数名不消失，只是收进展开抽屉（AgentParamDisclosure 的 toolName）。
  */
 const TOOL_TITLES: Record<string, string> = {
-  // ── 內建 ──
+  // ── 内建 ──
   bash: "终端命令",
   read: "读取文件",
   write: "写入文件",
@@ -153,7 +153,7 @@ const TOOL_TITLES: Record<string, string> = {
   // ── 子代理 ──
   subagent_dispatch: "派遣子代理",
   subagent_status: "查看子代理状态",
-  // ── 研究與理解 ──
+  // ── 研究与理解 ──
   search_web: "搜索网络",
   vision_analyze: "分析图片",
   doc_struct: "解析文档结构",
@@ -161,7 +161,7 @@ const TOOL_TITLES: Record<string, string> = {
   script_scene_parse: "解析剧本分场",
   storyboard_qc_17: "分镜 17 项体检",
   story_sequence_consistency: "故事连贯性检查",
-  // ── 生圖與圖片處理 ──
+  // ── 生图与图片处理 ──
   image_generate: "生成图片",
   image_edit: "编辑图片",
   image_upscale: "放大图片",
@@ -202,11 +202,11 @@ const TOOL_TITLES: Record<string, string> = {
   video_upload: "上传视频",
   last_frame_video_chain: "首尾帧续接视频",
   keyframe_render: "生成关键帧",
-  // ── 音樂與語音 ──
+  // ── 音乐与语音 ──
   music_gen: "生成音乐",
   tts_speak: "语音合成",
   audio_first_timeline: "音频优先时间线",
-  // ── 剪輯與時間線 ──
+  // ── 剪辑与时间线 ──
   timeline_query: "读取时间线",
   timeline_ops: "时间线操作",
   timeline_rhythm: "时间线节奏分析",
@@ -225,7 +225,7 @@ const TOOL_TITLES: Record<string, string> = {
   workflow_rerun_node: "重跑节点",
   workflow_generate: "执行节点生成",
   workflow_status: "查看工作流状态",
-  // ── 3D／Blender／導演台 ──
+  // ── 3D／Blender／导演台 ──
   blender_exec: "执行 Blender 脚本",
   blender_render: "Blender 渲染",
   blender_export_gltf: "导出 glTF 模型",
@@ -246,7 +246,7 @@ const TOOL_TITLES: Record<string, string> = {
   director_upsert_action: "更新分镜动作",
   director_project_control: "项目控制",
   director_prepare_export: "准备导出",
-  // ── 資產與交付 ──
+  // ── 资产与交付 ──
   asset_search: "搜索资产",
   asset_get: "读取资产",
   asset_activate: "启用资产",
@@ -313,7 +313,7 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
   // 图标转圈：running（工具自身在执行）与 pending（任务已提交、成品在路上）
   // 都是「还在跑」，都转 —— 停在静止图标上等于谎报已结束。转不转由语义表的
   // pending 色调（进行中）裁决，不再各自字面比较。
-  // needs_auth 例外：它是 action 態（等用户选），不是还在跑，锁图标不转圈。
+  // needs_auth 例外：它是 action 态（等用户选），不是还在跑，锁图标不转圈。
   const spinning = taskStatusTone(item.status).tone === "pending" && item.status !== "needs_auth";
   // 执行中进度：只有 running 且网关回了 tool.progress 才有。终态后忽略（不冒充还在跑）。
   // pending 没有进度帧（进度是工具内部的计数，提交出去后由成品事件定案），不得假造。
@@ -402,13 +402,13 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
         renderRow({ open: false })
       )}
 
-      {/* 逐镜/逐项进度：真实分母才画条，细 3px 灰轨 + 蓝色填充（與預覽同款，
+      {/* 逐镜/逐项进度：真实分母才画条，细 3px 灰轨 + 蓝色填充（与预览同款，
           reduced-motion 由 globals.css 兜住）。role=progressbar 带真实
           valuenow/valuemax，不虚报。计数只在这里说，行尾状态词只说「运行中…」。 */}
       {progress && (
         <div className="ml-[22px] flex flex-col gap-1">
-          {/* 進度標籤是閘道文字（可能是模型名／長英文串）：無換行策略時
-              一個長 token 就把這一區撐出面板寬度（2026-09-20 根因清剿）。 */}
+          {/* 进度标签是闸道文字（可能是模型名／长英文串）：无换行策略时
+              一个长 token 就把这一区撑出面板宽度（2026-09-20 根因清剿）。 */}
           <p className="break-words text-ios-caption1 leading-[1.4] text-muted-foreground [overflow-wrap:anywhere]">
             {progress.label ?? "处理中"} · 已完成 {progress.done}/{progress.total}
           </p>
@@ -432,15 +432,15 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。 */}
       {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。
-          錯誤原文是上游字串（常含 URL／JSON 鍵值）：必須能任意換行，
-          否則一個長 token 直接撐破行寬（2026-09-20 根因清剿）。 */}
+          错误原文是上游字串（常含 URL／JSON 键值）：必须能任意换行，
+          否则一个长 token 直接撑破行宽（2026-09-20 根因清剿）。 */}
       {taskStatusTone(item.status).isFailure && item.error && (
         <p className="ml-[22px] break-words rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive [overflow-wrap:anywhere]">
           {item.error}
         </p>
       )}
 
-      {/* 需要授权（缺陷 C）：把 needs_authorization 渲染成 action 態，列出三选一供点击。
+      {/* 需要授权（缺陷 C）：把 needs_authorization 渲染成 action 态，列出三选一供点击。
           三件事必须同时成立：① 语义说「需要授权」而非「完成」；② 明说尚未读到文件；
           ③ 三个 scope 选项可点，点击带 scope＋root 走授权。 */}
       {item.status === "needs_auth" && (
@@ -491,7 +491,7 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
         </div>
       )}
 
-      {/* 二進位读取（缺陷 D）：绝不把亂碼当成功内容呈現——明说是二进制、指向下载路径。
+      {/* 二进位读取（缺陷 D）：绝不把乱码当成功内容呈现——明说是二进制、指向下载路径。
           truncated 依「实际读到 bytes vs 文件 size」对比，不虚报未截断。 */}
       {item.binary && (
         <div className="ml-[22px] flex flex-col gap-1 rounded-[12px] bg-amber-500/[0.10] p-2.5">

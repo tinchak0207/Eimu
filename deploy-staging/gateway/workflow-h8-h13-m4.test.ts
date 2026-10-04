@@ -1,4 +1,4 @@
-// H8/H13/M4：失敗文案帶 failure_class+原文、帳務累加對稱、零交付機器閘。
+// H8/H13/M4：失败文案带 failure_class+原文、帐务累加对称、零交付机器闸。
 // 跑法：timeout 120 bun run deploy-staging/gateway/workflow-h8-h13-m4.test.ts
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -22,7 +22,7 @@ async function run(): Promise<void> {
   assert.match(msg, /原文：「执行侧无可用供应商，请稍后重试」/)
   assert.ok(!msg.includes("第二句"))
   assert.match(gw.formatNodeFailure(undefined, "", "生成失败"), /failure_class=unknown.*（无）/)
-  console.log("  ✓ H8 文案帶 class+原文首句")
+  console.log("  ✓ H8 文案带 class+原文首句")
 
   // H13
   gw.recordWorkflowApproval("wfA", 460)
@@ -36,13 +36,13 @@ async function run(): Promise<void> {
   gw.recordWorkflowRefund(state, "wfA")
   assert.equal(gw.workflowBilling.get("wfA")!.refunded_coins, 1210.005)
   assert.equal(gw.workflowBilling.get("wfA")!.billing_status, "refunded")
-  // 退款後再批准一筆：累加，refunded 保留，再退只退新增部分
+  // 退款后再批准一笔：累加，refunded 保留，再退只退新增部分
   const c = gw.recordWorkflowApproval("wfA", 100)
   assert.equal(c.confirmed_coins, 1310.005)
   assert.equal(c.billing_status, "confirmed")
   gw.recordWorkflowRefund(state, "wfA")
   assert.equal(gw.workflowBilling.get("wfA")!.refunded_coins, 1310.005)
-  console.log("  ✓ H13 approve 累加、refund 對稱")
+  console.log("  ✓ H13 approve 累加、refund 对称")
 
   // M4
   const models = [
@@ -58,7 +58,7 @@ async function run(): Promise<void> {
   const wfid = r.workflowId
   const call = async (extra: Record<string, unknown> = {}) =>
     gw.handleWorkflowInternal(new Request("http://x/internal/workflow/generate", { method: "POST", body: JSON.stringify({ workflow_id: wfid, ...extra }) }), s2)
-  // 避免真開跑：模擬已在跑，覆寫放行後會被 already_running 擋下（證明已越過 M4 閘）
+  // 避免真开跑：模拟已在跑，覆写放行后会被 already_running 挡下（证明已越过 M4 闸）
   const blocked = await call()
   const bj = (await blocked.json()) as Record<string, unknown>
   assert.equal(blocked.status, 409)
@@ -70,15 +70,15 @@ async function run(): Promise<void> {
   ;(gw.workflowService as unknown as { generateLoops: Set<string> }).generateLoops.add(wfid)
   const passed = await call({ override_zero_delivery: true, override_reason: "用户说照跑" })
   assert.equal(((await passed.json()) as Record<string, unknown>).reason, "already_running")
-  // 有交付證據則不攔（model-status 有 TTL 快取，改驗同形狀判定的另一面：無 available 影片 → null 不攔）
+  // 有交付证据则不拦（model-status 有 TTL 快取，改验同形状判定的另一面：无 available 影片 → null 不拦）
   assert.deepEqual(await gw.videoZeroDelivery24h("sk-m4-zero"), { available: ["v1"] })
   globalThis.fetch = realFetch
-  console.log("  ✓ M4 零交付機器閘")
+  console.log("  ✓ M4 零交付机器闸")
   process.exit(0)
 }
 
 if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
-  test("workflow-h8-h13-m4", { skip: "需 bun 執行" }, () => {})
+  test("workflow-h8-h13-m4", { skip: "需 bun 执行" }, () => {})
 } else {
   run().catch((e) => { console.error(e); process.exit(1) })
 }
