@@ -1326,13 +1326,19 @@ function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; 
 
 /**
  * 凍結 body → 既有 `sanitizeToolArgs` 的 args 白名單（欄位名映射，語義沿用既有淨化）。
- * 只放行凍結契約列出的欄位：path / pattern / max_bytes / limit。夾制全在 sanitizeToolArgs。
+ * 只放行凍結契約列出的欄位：path / pattern / max_bytes / limit（+ list_dir 的 max_entries）。
+ * 夾制全在 sanitizeToolArgs。
  */
 function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, unknown>): Record<string, unknown> {
   const path = typeof body.path === "string" ? body.path : ""
   switch (tool) {
-    case "list_dir":
-      return { path }
+    case "list_dir": {
+      const args: Record<string, unknown> = { path }
+      // 凍結欄位名 max_entries：裝置端既有參數（bridge-executor 已讀 args.max_entries），
+      // 1..2000 夾制仍在 sanitizeToolArgs；缺省時不下發，裝置沿用既有 MAX_LIST_DEFAULT。
+      if (body.max_entries !== undefined) args.max_entries = body.max_entries
+      return args
+    }
     case "read_file": {
       const args: Record<string, unknown> = { path }
       if (body.limit !== undefined) args.limit = body.limit
