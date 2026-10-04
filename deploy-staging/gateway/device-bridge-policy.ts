@@ -174,6 +174,31 @@ function lexicalSegments(p: unknown): string[] | null {
 }
 
 /**
+ * 同 lexicalSegments，但**保留原大小寫**（授權回執顯示用）。
+ * 絕對／相對、`..` 逃逸、Windows 前綴的判定逐條同 lexicalSegments，唯一差別是不 toLowerCase。
+ * 既有判定（isPathWithinRoot／matchRuleSpecifier／denylist）一律走 lexicalSegments（小寫），
+ * 本函式不參與任何放行判斷，故不改變大小寫不敏感語義。
+ */
+function lexicalSegmentsPreserveCase(p: unknown): string[] | null {
+  if (typeof p !== "string") return null
+  const s = stripWindowsPrefix(p.trim().replace(/\\/g, "/"))
+  if (s.length === 0) return null
+  const isAbs = s.startsWith("/") || /^[a-zA-Z]:(\/|$)/.test(s)
+  if (!isAbs) return null
+  const out: string[] = []
+  for (const part of s.split("/")) {
+    if (part === "" || part === ".") continue
+    if (part === "..") {
+      if (out.length === 0) return null // 逃逸到根之上 → 不可信
+      out.pop()
+      continue
+    }
+    out.push(part)
+  }
+  return out
+}
+
+/**
  * candidate 是否落在 root 之內（含相等）。
  * 以「段」逐段比對，天生杜絕前綴混淆（`/home/u/project-evil` 不匹配 `/home/u/project`）。
  * root 為檔案系統根、相對路徑、`..` 逃逸 → false（fail-closed）。
@@ -482,6 +507,22 @@ export function expandToAbsolute(p: unknown, home?: string | null): string | nul
   return "/" + segs.join("/")
 }
 
+/**
+ * 同 expandToAbsolute（`~`→home、反斜線→`/`、丟 `.`／`..`），但**保留原大小寫**。
+ * 授權端點（authorize）回執的 `applied.root` 與規則 specifier 用本函式，讓使用者看到自己
+ * 輸入的真實大小寫；規則**比對**仍走 expandToAbsolute／lexicalSegments（小寫），語義不變。
+ */
+export function expandToAbsolutePreserveCase(p: unknown, home?: string | null): string | null {
+  if (typeof p !== "string" || p.trim().length === 0) return null
+  const expanded = expandTilde(p.trim(), home)
+  if (expanded === null) return null
+  const segs = lexicalSegmentsPreserveCase(expanded)
+  if (!segs || segs.length === 0) return null
+  if (/^[a-zA-Z]:/.test(expanded)) return `${expanded[0]}:/${segs.slice(1).join("/")}`
+  if (!expanded.startsWith("/")) return null
+  return "/" + segs.join("/")
+}
+
 interface ParsedSpecifier {
   kind: "absolute" | "anywhere"
   base?: string
@@ -697,24 +738,40 @@ export function authorizationRootProblem(root: unknown, home: string | null | un
 }
 
 /**
- * 建議授權的根：取被存取路徑**之上、最接近的目錄**（檔案→父目錄；已是單段則回該段）。
- * 無法歸一化 → null（呼叫端應退回請求路徑）。
+ * 建議授權的根。
+ *  - `isDirectory=false`（read_file／stat；預設）：取被存取路徑**之上最接近的目錄**
+ *    （檔案→父目錄；已是單段則回該段）。
+ *  - `isDirectory=true`（list_dir／grep，被存取者本身是目錄）：建議**該目錄本身**，
+ *    避免對 `…/Downloads` 建議其父目錄（家目錄）而引導使用者永久授權整個家目錄。
+ *
+ * **夾制**：建議值若等於家目錄、等於檔案系統根、或落在 authorizationRootProblem 會判
+ * `root_too_broad` 的範圍，則退回「被存取路徑本身（檔案則其父目錄）」，且**不得回 null**
+ * （null 會讓呼叫端退化成請求路徑，使用者更無從判斷）。
+ * 無法歸一化（相對路徑／`~` 且無 home）→ null（呼叫端據此不可建議）。
  */
-export function suggestAuthorizationRoot(p: unknown, home?: string | null): string | null {
+export function suggestAuthorizationRoot(p: unknown, home?: string | null, isDirectory: boolean = false): string | null {
+  // 檔案系統根本身沒有任何「更窄的目錄」可建議；原樣回（呼叫端授權時仍會被 root_too_broad 擋）。
+  if (isFilesystemRoot(p)) return typeof p === "string" ? p.trim().replace(/\\/g, "/") : null
   const abs = expandToAbsolute(p, home)
   if (!abs) return null
   const segs = lexicalSegments(abs)
   if (!segs || segs.length === 0) return null
-  if (segs.length === 1) return "/" + segs[0]
-  return "/" + segs.slice(0, -1).join("/")
+  const selfDir = "/" + segs.join("/")
+  const parentDir = segs.length >= 2 ? "/" + segs.slice(0, -1).join("/") : selfDir
+  const base = isDirectory ? selfDir : parentDir
+  if (isFilesystemRoot(base) || authorizationRootProblem(base, home, "ask") === "root_too_broad") {
+    return isDirectory ? selfDir : parentDir
+  }
+  return base
 }
 
 /**
  * 授權規則的 specifier：以 `//` 明確標示檔案系統絕對根 ＋ `/**` 遞迴，
  * 使規則不依賴 configDir 語義（自動授權的根永遠是絕對、含其下）。
+ * 保留傳入 root 的大小寫（回執一致）；比對端照舊大小寫不敏感。
  */
 export function authorizationRuleSpecifier(root: string): string {
-  const abs = expandToAbsolute(root, null)
+  const abs = expandToAbsolutePreserveCase(root, null)
   const body = (abs ?? root).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "")
   return `//${body}/**`
 }

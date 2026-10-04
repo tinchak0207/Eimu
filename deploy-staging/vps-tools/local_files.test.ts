@@ -86,14 +86,15 @@ describe("local_files：模型唯一的說明與 args 契約", () => {
 
 // ── 錯誤碼 → 引導語 ───────────────────────────────────────────────────
 describe("local_files：錯誤碼映射成面向使用者的繁中引導語", () => {
-  test("no_device_registered → 桌面版設定授權引導；不呼叫 status", async () => {
+  test("no_device_registered → 桌面版／對話內授權引導；不呼叫 status", async () => {
     withInvokeError("no_device_registered", 404)
     const r = parse(await localFiles.execute({ op: "list_dir", path: "/x" } as any, ctx))
     expect(r.ok).toBe(false)
     expect(r.error.code).toBe("no_device_registered")
     expect(r.error.hint).toContain("桌面版")
-    expect(r.error.hint).toContain("設定")
-    expect(r.error.hint).toContain("本機檔案")
+    expect(r.error.hint).toContain("授權")
+    expect(r.error.hint).toContain("對話")
+    expect(r.error.hint).not.toContain("設定") // 設定→本機檔案 頁面已移除，引導不得再指向它
     expect(statusCalls().length).toBe(0)
   })
 

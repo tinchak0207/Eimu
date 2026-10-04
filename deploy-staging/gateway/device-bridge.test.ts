@@ -25,10 +25,13 @@ import {
   isToolAllowed,
   clampReadSize,
   clampFileBytes,
+  matchRuleSpecifier,
   recursiveRootProblem,
   sanitizeAuthorizedRoots,
   sensitiveResultProblem,
+  suggestAuthorizationRoot,
   truncateWithMarker,
+  type PermissionRule,
 } from "./device-bridge-policy.ts"
 import {
   DeviceBridge,
@@ -38,6 +41,7 @@ import {
   finalizeDeviceResult,
   sanitizeToolArgs,
   handleDeviceBridgeRoutes,
+  handleInternalDeviceAuthorize,
   handleInternalDeviceInvoke,
   handleInternalDeviceStatus,
   type InternalDeviceRouteDeps,
@@ -958,4 +962,133 @@ test("內部路由不放寬既有 denylist／白名單：op 白名單與 policy 
   for (const t of tools) assert.equal(isToolAllowed(t), true, t)
   assert.equal(isToolAllowed("write_file"), false)
   assert.equal(isToolAllowed("delete"), false)
+})
+
+// ───────── 對話內授權送達裝置（consent）＋ once 自動核銷（2026-10-04）─────────
+//
+// 真機缺口：對話中 authorize(session/permanent) 只寫進閘道記憶體，裝置完全不知道 ⇒ 授權
+// 永不收斂；once 又因 opencode 的 local_files 從不下發 authorization_token 而結構性死路。
+// 以下用「真 invoke → 真 poll 拿 message」斷言 message.consent 的有無與內容（非原始碼掃描）。
+
+const CONSENT_HOME = "/home/u"
+
+function authorizeReq(body: Record<string, unknown>, sid = "sess_ok") {
+  return new Request(`http://gw.internal/internal/device/authorize?session_id=${sid}`, { method: "POST", body: JSON.stringify(body) })
+}
+
+/** 取一發 invoke 下發給裝置的 message；assert 收到請求。 */
+async function takeMessage(bridge: DeviceBridge, deviceId: string, connectionId: string) {
+  const polled = await bridge.poll({ tenant: "u:1", deviceId, connectionId, waitMs: 2_000 })
+  if (!polled.ok || !polled.request) throw new Error("expected a request")
+  return polled.request
+}
+
+/** 收尾：回一筆結果讓 invoke 落地，避免 pending 拖尾。 */
+function finish(bridge: DeviceBridge, deviceId: string, connectionId: string, msg: { request_id: string; consent_token: string }) {
+  bridge.submitResult({
+    tenant: "u:1",
+    deviceId,
+    connectionId,
+    requestId: msg.request_id,
+    consentToken: msg.consent_token,
+    result: { path: "/x", text: "ok" },
+  })
+}
+
+test("consent: authorize(session) 後，下一發 invoke 的 message 帶 consent（scope=session、roots 含該根）", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
+  const ares = await handleInternalDeviceAuthorize(authorizeReq({ scope: "session", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
+  assert.equal(ares.status, 200)
+
+  const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
+  const msg = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  const consent = (msg as { consent?: { scope: string; roots: string[] } }).consent
+  assert.deepEqual(consent, { scope: "session", roots: [`${CONSENT_HOME}/project`] })
+  finish(bridge, reg.deviceId, reg.connectionId, msg)
+  await pending
+})
+
+test("consent: authorize(permanent) 同理（scope=permanent）；session＋permanent 混用取 permanent、roots 取全部", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
+  await handleInternalDeviceAuthorize(authorizeReq({ scope: "permanent", root: `${CONSENT_HOME}/docs` }), internalDeps(bridge))
+  const p1 = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/docs/a.txt` } })
+  const m1 = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  assert.deepEqual((m1 as { consent?: unknown }).consent, { scope: "permanent", roots: [`${CONSENT_HOME}/docs`] })
+  finish(bridge, reg.deviceId, reg.connectionId, m1)
+  await p1
+
+  // 追加 session 於另一個根：roots 應含兩根，scope 仍 permanent。
+  await handleInternalDeviceAuthorize(authorizeReq({ scope: "session", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
+  const p2 = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/docs/a.txt` } })
+  const m2 = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  const consent = (m2 as { consent?: { scope: string; roots: string[] } }).consent
+  assert.equal(consent?.scope, "permanent")
+  assert.deepEqual(consent?.roots?.slice().sort(), [`${CONSENT_HOME}/docs`, `${CONSENT_HOME}/project`].sort())
+  finish(bridge, reg.deviceId, reg.connectionId, m2)
+  await p2
+})
+
+test("consent: 無任何授權記錄時，message 不得出現 consent 欄位（裝置不得無條件落盤）", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "full", home: CONSENT_HOME })
+  const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
+  const msg = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  assert.equal("consent" in msg, false)
+  finish(bridge, reg.deviceId, reg.connectionId, msg)
+  await pending
+})
+
+test("once: 無 token 自動核銷（第一發放行、message.consent=once；第二發不再放行）", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
+  const ares = await handleInternalDeviceAuthorize(authorizeReq({ scope: "once", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
+  const { token } = (await ares.json()) as { token: string }
+  assert.equal(typeof token, "string")
+
+  const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
+  const msg = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  assert.deepEqual((msg as { consent?: unknown }).consent, { scope: "once", roots: [`${CONSENT_HOME}/project`] })
+  finish(bridge, reg.deviceId, reg.connectionId, msg)
+  const first = await pending
+  assert.equal(first.ok, true, "自動核銷＝本次放行")
+
+  const second = await bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
+  assert.equal(second.ok, false)
+  assert.equal((second as { code: string }).code, "needs_authorization")
+})
+
+test("suggestAuthorizationRoot: 夾制四案例（家目錄／檔案系統根／root_too_broad／home=null）", () => {
+  // 0) 主修：list_dir 目錄 ⇒ 建議目錄本身（不再建議過寬的家目錄）
+  assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, true), `${CONSENT_HOME}/downloads`)
+  // 不加 isDirectory（read_file/stat 語義）時仍建議父目錄（此處父目錄＝家目錄）
+  assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, false), CONSENT_HOME)
+  // 1) 建議值等於家目錄 → 回被存取路徑本身，不得 null
+  assert.equal(suggestAuthorizationRoot(CONSENT_HOME, CONSENT_HOME, true), CONSENT_HOME)
+  // 2) 被存取路徑為檔案系統根 → 回根本身，不得 null
+  assert.equal(suggestAuthorizationRoot("/", CONSENT_HOME, true), "/")
+  // 3) 建議值落在 root_too_broad 範圍（單段 /home）→ 回該路徑本身，不得 null
+  assert.equal(suggestAuthorizationRoot("/home", CONSENT_HOME, true), "/home")
+  // 4) home=null：仍以路徑語義給建議（目錄→本身；檔案→父目錄）；無法歸一化才 null
+  assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/downloads`, null, true), `${CONSENT_HOME}/downloads`)
+  assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/downloads/a.txt`, null, false), `${CONSENT_HOME}/downloads`)
+  assert.equal(suggestAuthorizationRoot("relative/x", null, true), null)
+})
+
+test("authorize: 回執保留原大小寫；該規則仍大小寫不敏感命中（真 invoke 放行）", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
+  const res = await handleInternalDeviceAuthorize(authorizeReq({ scope: "permanent", root: `${CONSENT_HOME}/Downloads` }), internalDeps(bridge))
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { applied: { root: string }; rules: PermissionRule[]; persist_on_device?: boolean }
+  assert.equal(body.applied.root, `${CONSENT_HOME}/Downloads`, "回執須保留原大小寫")
+  assert.equal(body.persist_on_device, true)
+  assert.equal(matchRuleSpecifier(body.rules[0].specifier!, `${CONSENT_HOME}/downloads/a.txt`, { home: CONSENT_HOME }), true)
+
+  // 真行為：小寫路徑的 invoke 仍被該規則放行（下發出去＝未被 needs_authorization 攔）。
+  const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/downloads/a.txt` } })
+  const msg = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  finish(bridge, reg.deviceId, reg.connectionId, msg)
+  await pending
 })

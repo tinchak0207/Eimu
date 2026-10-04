@@ -49,6 +49,7 @@ import {
   clampReadSize,
   evaluatePermission,
   expandToAbsolute,
+  expandToAbsolutePreserveCase,
   isDeviceBridgeMode,
   isHardDeniedPath,
   isSensitivePath,
@@ -262,6 +263,30 @@ export class OnceGrantStore {
     return { ok: true }
   }
 
+  /**
+   * 自動核銷：呼叫端（opencode 的 local_files）**從不下發** authorization_token，故在規則
+   * 未放行時主動找一筆相符的一次性許可並核銷——`root` 含 `path`、`tool` 相符（或未綁定）、
+   * 未過期、未使用。命中即標記已用並回該許可的根；找不到回 `{ ok:false }`（呼叫端維持
+   * needs_authorization）。語義與 `consume` 一致：**用一次即失效**，不得重複放行。
+   */
+  consumeMatching(expected: OnceGrantBinding, now: number = Date.now()): { ok: true; root: string } | { ok: false } {
+    const path = expandToAbsolute(expected.path, null) ?? expected.path
+    if (isHardDeniedPath(expected.path)) return { ok: false }
+    for (const [token, rec] of this.grants) {
+      if (rec.used) continue
+      if (rec.expiresAt <= now) {
+        this.grants.delete(token)
+        continue
+      }
+      if (rec.tenant !== expected.tenant) continue
+      if (!(rec.tool === null || rec.tool === expected.tool)) continue
+      if (!pathWithin(rec.root, path)) continue
+      rec.used = true
+      return { ok: true, root: rec.root }
+    }
+    return { ok: false }
+  }
+
   size(): number {
     return this.grants.size
   }
@@ -330,6 +355,9 @@ export interface DeviceRequestMessage {
   consent_token: string
   issued_at: number
   expires_at: number
+  /** 使用者在對話中授權（authorize 端點）產生的同意記錄，供裝置端落地。
+   *  session/permanent 會隨其後每次 invoke 重送（冪等）；once 只出現在核銷成功的那一則。 */
+  consent?: { scope: "once" | "session" | "permanent"; roots: string[] }
 }
 
 export type InvokeResult =
@@ -491,6 +519,12 @@ export class DeviceBridge {
   readonly grants = new OnceGrantStore()
   /** session 級規則（記憶體，key＝tenant；只存在本進程，**不持久化到共享庫**）。 */
   private readonly sessionRules = new Map<string, PermissionRule[]>()
+  /**
+   * 對話內授權的**同意記錄**（key＝tenant）：session/permanent 各記一筆，供 invoke 隨訊息
+   * 送到裝置落地（裝置端只認自己的 mode/rules/roots，不知道雲端對話發生了什麼）。
+   * 去重、上限 64。`once` **不進此表**（走 OnceGrantStore 的一次性核銷）。
+   */
+  private readonly sessionConsent = new Map<string, { scope: "session" | "permanent"; root: string }[]>()
 
   constructor(private readonly opts: { requestTimeoutMs?: number; consentTtlMs?: number; heartbeatTtlMs?: number } = {}) {}
 
@@ -528,6 +562,22 @@ export class DeviceBridge {
   /** 清掉某 tenant 的 session 規則（測試／會話結束用）。 */
   clearSessionRules(tenant: string): void {
     this.sessionRules.delete(tenant)
+  }
+  /** 記錄一筆對話內授權同意（session/permanent）；同 {scope,root} 去重，上限 64。 */
+  addSessionConsent(tenant: string, entry: { scope: "session" | "permanent"; root: string }): void {
+    const list = this.sessionConsent.get(tenant) ?? []
+    if (list.some((e) => e.scope === entry.scope && e.root === entry.root)) return
+    if (list.length >= 64) return
+    list.push(entry)
+    this.sessionConsent.set(tenant, list)
+  }
+  /** 該 tenant 目前的同意記錄（唯讀快照）。 */
+  private tenantConsent(tenant: string): { scope: "session" | "permanent"; root: string }[] {
+    return this.sessionConsent.get(tenant) ?? []
+  }
+  /** 清掉某 tenant 的同意記錄（測試／會話結束用）。 */
+  clearSessionConsent(tenant: string): void {
+    this.sessionConsent.delete(tenant)
   }
   /** 挑代表裝置（唯讀；與 describeTenantDevices 同一語義）。 */
   private representativeDevice(tenant: string, now: number): DeviceRecord | undefined {
@@ -772,10 +822,14 @@ export class DeviceBridge {
 
     // W6b：決策引擎（硬 denylist → safety → 規則 → 模式）。只有明確配置的裝置才啟用；
     // 未配置＝沿用升級前行為（此處不介入）。denylist 已在 sanitizeToolArgs 內先擋。
+    let consent: DeviceRequestMessage["consent"] | undefined
     if (rec.permissionsEnabled) {
       const path = typeof cleaned.args.path === "string" ? cleaned.args.path : ""
+      const explicitToken = input.authorizationToken !== undefined && input.authorizationToken !== null
       let granted = false
-      if (input.authorizationToken !== undefined && input.authorizationToken !== null) {
+      /** once 自動核銷成功的許可根（僅在無顯式 token 且規則未放行時產生）。 */
+      let onceRoot: string | null = null
+      if (explicitToken) {
         granted = this.grants.consume(input.authorizationToken, { tenant: input.tenant, tool, path }, now).ok
       }
       if (!granted) {
@@ -792,12 +846,40 @@ export class DeviceBridge {
           return { ok: false, code, message: `path denied by policy (${verdict.reason})` }
         }
         if (verdict.decision === "ask") {
-          const root = suggestAuthorizationRoot(path, rec.home) ?? path
-          return {
-            ok: false,
-            code: "needs_authorization",
-            message: "此路徑尚未授權。",
-            needsAuthorization: { root, reason: mapAskReason(verdict.reason), options: AUTHORIZATION_OPTIONS },
+          // once 自動核銷：opencode 的 local_files 從不下發 authorization_token ⇒ once 結構性
+          // 死路。顯式 token 已在上方優先處理；此處只處理「完全沒帶 token」的情形：主動找一筆
+          // {tenant, tool, path} 相符、未使用的一次性許可核銷，成功即本次放行。找不到仍維持
+          // needs_authorization（且 denylist／safety 的 deny 已先返回，不放寬）。
+          if (!explicitToken) {
+            const match = this.grants.consumeMatching({ tenant: input.tenant, tool, path }, now)
+            if (match.ok) {
+              granted = true
+              onceRoot = match.root
+            }
+          }
+          if (!granted) {
+            const isDirectory = tool === "list_dir" || tool === "grep"
+            const root = suggestAuthorizationRoot(path, rec.home, isDirectory) ?? path
+            return {
+              ok: false,
+              code: "needs_authorization",
+              message: "此路徑尚未授權。",
+              needsAuthorization: { root, reason: mapAskReason(verdict.reason), options: AUTHORIZATION_OPTIONS },
+            }
+          }
+        }
+      }
+      // 組同意記錄（隨本則 message 送到裝置落地）：once 核銷優先；否則送 session/permanent
+      // 的累積同意（roots 取全部、scope 取 permanent 若存在否則 session，裝置端 permanent 落盤
+      // 語義更保守）。沒有任何記錄＝不帶此欄位（裝置端不得無條件落盤）。
+      if (onceRoot !== null) {
+        consent = { scope: "once", roots: [onceRoot] }
+      } else {
+        const records = this.tenantConsent(input.tenant)
+        if (records.length > 0) {
+          consent = {
+            scope: records.some((r) => r.scope === "permanent") ? "permanent" : "session",
+            roots: [...new Set(records.map((r) => r.root))],
           }
         }
       }
@@ -814,6 +896,7 @@ export class DeviceBridge {
       issued_at: now,
       expires_at: now + Math.min(timeoutMs, this.consentTtlMs()),
     }
+    if (consent) message.consent = consent
 
     return await new Promise<InvokeResult>((resolve) => {
       const pending: PendingRequest = {
@@ -1386,10 +1469,14 @@ export async function handleInternalDeviceAuthorize(req: Request, deps: Internal
     const status = problem === "root_not_absolute" ? 400 : 403
     return internalDeviceError(status, problem, `authorization root rejected: ${problem}`)
   }
-  const absRoot = expandToAbsolute(body.root, home)!
+  const absRoot = expandToAbsolutePreserveCase(body.root, home)!
   const ruleTool: PermissionTool = toolRaw === "*" || toolRaw === undefined ? "*" : (toolRaw as DeviceBridgeTool)
   const rule: PermissionRule = { effect: "allow", tool: ruleTool, specifier: authorizationRuleSpecifier(absRoot) }
-  if (scope === "session" || scope === "permanent") bridge.addSessionRule(tenant, rule)
+  if (scope === "session" || scope === "permanent") {
+    bridge.addSessionRule(tenant, rule)
+    // 另存同意記錄：invoke 會把它隨 DeviceRequestMessage.consent 送到裝置端落地。
+    bridge.addSessionConsent(tenant, { scope, root: absRoot })
+  }
 
   const state = bridge.permissionStateForTenant(tenant)
   const payload: Record<string, unknown> = { ok: true, applied: { scope, root: absRoot }, rules: state.rules }
