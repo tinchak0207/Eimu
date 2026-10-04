@@ -52,6 +52,7 @@ import {
   expandToAbsolutePreserveCase,
   isDeviceBridgeMode,
   isHardDeniedPath,
+  isPathWithinRoot,
   isSensitivePath,
   isToolAllowed,
   recursiveRootProblem,
@@ -65,6 +66,7 @@ import {
   type PermissionRule,
   type PermissionTool,
 } from "./device-bridge-policy.ts"
+import { SessionConsentStore } from "./device-bridge-session-consent.ts"
 
 // ── 開關／時序常數 ──────────────────────────────────────────────────────
 
@@ -562,7 +564,10 @@ export class DeviceBridge {
   private readonly pollWaiters = new Set<PollWaiter>()
   readonly tokens = new ConsentTokenStore()
   readonly grants = new OnceGrantStore()
-  /** session 級規則（記憶體，key＝tenant；只存在本進程，**不持久化到共享庫**）。 */
+  /**
+   * session 級規則（記憶體，key＝tenant；**不持久化到共享庫**）。gateway 重啟後由落盤的
+   * 會話同意（`consentStore`）重建，見 `hydratePersistedConsent`。
+   */
   private readonly sessionRules = new Map<string, PermissionRule[]>()
   /**
    * 對話內授權的**同意記錄**（key＝tenant）：session/permanent 各記一筆，供 invoke 隨訊息
@@ -570,8 +575,24 @@ export class DeviceBridge {
    * 去重、上限 64。`once` **不進此表**（走 OnceGrantStore 的一次性核銷）。
    */
   private readonly sessionConsent = new Map<string, { scope: "session" | "permanent"; root: string }[]>()
+  /**
+   * 會話同意的**行程外**落點（session 同意跨 gateway 重啟續存；見
+   * device-bridge-session-consent.ts）。production singleton 注入；未注入（測試／嵌入）
+   * ＝純行程內語義（舊行為）。
+   */
+  private readonly consentStore: SessionConsentStore | null
 
-  constructor(private readonly opts: { requestTimeoutMs?: number; consentTtlMs?: number; heartbeatTtlMs?: number } = {}) {}
+  constructor(
+    private readonly opts: {
+      requestTimeoutMs?: number
+      consentTtlMs?: number
+      heartbeatTtlMs?: number
+      sessionConsentStore?: SessionConsentStore | null
+    } = {},
+  ) {
+    this.consentStore = opts.sessionConsentStore ?? null
+    this.hydratePersistedConsent()
+  }
 
   private requestTimeoutMs(): number {
     return this.opts.requestTimeoutMs ?? DEVICE_REQUEST_TIMEOUT_MS
@@ -608,13 +629,43 @@ export class DeviceBridge {
   clearSessionRules(tenant: string): void {
     this.sessionRules.delete(tenant)
   }
-  /** 記錄一筆對話內授權同意（session/permanent）；同 {scope,root} 去重，上限 64。 */
-  addSessionConsent(tenant: string, entry: { scope: "session" | "permanent"; root: string }): void {
+  /** 記憶體內記一筆同意（同 {scope,root} 去重，上限 64）；不做任何落盤。 */
+  private applyConsent(tenant: string, scope: "session" | "permanent", root: string): void {
     const list = this.sessionConsent.get(tenant) ?? []
-    if (list.some((e) => e.scope === entry.scope && e.root === entry.root)) return
+    if (list.some((e) => e.scope === scope && e.root === root)) return
     if (list.length >= 64) return
-    list.push(entry)
+    list.push({ scope, root })
     this.sessionConsent.set(tenant, list)
+  }
+  /**
+   * 記錄一筆對話內授權同意（session/permanent）；同 {scope,root} 去重，上限 64。
+   * session/permanent 另**落 gateway 本地單檔**（跨重啟續存）；`once` 不走本函式。
+   * `tool` 供重啟後精確重建規則（缺省＝`*`，與 authorize 端點未指定 tool 的語義一致）。
+   */
+  addSessionConsent(
+    tenant: string,
+    entry: { scope: "session" | "permanent"; root: string; tool?: PermissionTool },
+  ): void {
+    this.applyConsent(tenant, entry.scope, entry.root)
+    this.consentStore?.record({ tenant, root: entry.root, scope: entry.scope, tool: entry.tool ?? "*" })
+  }
+  /**
+   * 啟動時載入落盤的會話同意並**重建規則與同意記錄**：gateway 重啟（部署）後，已
+   * session 授權的目錄不再回 needs_authorization。載入項已在 store 內經安全複核
+   * （denylist／檔案系統根／敏感一律丟棄）。
+   */
+  private hydratePersistedConsent(): void {
+    const store = this.consentStore
+    if (!store) return
+    for (const entry of store.load()) {
+      const specifier = authorizationRuleSpecifier(entry.root)
+      const rules = this.sessionRules.get(entry.tenant) ?? []
+      // 同 specifier 只重建一條（session 與 permanent 同根時避免重複規則）。
+      if (!rules.some((r) => r.specifier === specifier && r.tool === entry.tool)) {
+        this.addSessionRule(entry.tenant, { effect: "allow", tool: entry.tool, specifier })
+      }
+      this.applyConsent(entry.tenant, entry.scope, entry.root)
+    }
   }
   /** 該 tenant 目前的同意記錄（唯讀快照）。 */
   private tenantConsent(tenant: string): { scope: "session" | "permanent"; root: string }[] {
@@ -915,17 +966,19 @@ export class DeviceBridge {
         }
       }
       // 組同意記錄（隨本則 message 送到裝置落地）：once 核銷優先；否則送 session/permanent
-      // 的累積同意（roots 取全部、scope 取 permanent 若存在否則 session，裝置端 permanent 落盤
-      // 語義更保守）。沒有任何記錄＝不帶此欄位（裝置端不得無條件落盤）。
+      // 的累積同意。**依本請求路徑落在哪種 scope 的根決定下發 scope**，且 roots 只取該
+      // scope 的：絕不把 session 同意以 permanent 名義送到裝置（否則裝置會把 session 根
+      // 永久落盤＝把同意升級；spec 硬禁）。沒有任何記錄＝不帶此欄位（裝置端不得無條件落盤）。
       if (onceRoot !== null) {
         consent = { scope: "once", roots: [onceRoot] }
       } else {
         const records = this.tenantConsent(input.tenant)
         if (records.length > 0) {
-          consent = {
-            scope: records.some((r) => r.scope === "permanent") ? "permanent" : "session",
-            roots: [...new Set(records.map((r) => r.root))],
-          }
+          const reqPath = typeof cleaned.args.path === "string" ? cleaned.args.path : ""
+          const withinPermanent = records.some((r) => r.scope === "permanent" && isPathWithinRoot(reqPath, r.root))
+          const sendScope: "session" | "permanent" = withinPermanent ? "permanent" : "session"
+          const roots = [...new Set(records.filter((r) => r.scope === sendScope).map((r) => r.root))]
+          if (roots.length > 0) consent = { scope: sendScope, roots }
         }
       }
     }
@@ -1102,8 +1155,8 @@ export class DeviceBridge {
   }
 }
 
-/** 閘道進程單例（記憶體狀態）。 */
-export const deviceBridge = new DeviceBridge()
+/** 閘道進程單例（記憶體狀態；session 同意另落本地單檔以跨重啟續存）。 */
+export const deviceBridge = new DeviceBridge({ sessionConsentStore: new SessionConsentStore() })
 
 // ── 唯讀查詢（環境事實層用）──────────────────────────────────────────────
 
@@ -1529,7 +1582,8 @@ export async function handleInternalDeviceAuthorize(req: Request, deps: Internal
   if (scope === "session" || scope === "permanent") {
     bridge.addSessionRule(tenant, rule)
     // 另存同意記錄：invoke 會把它隨 DeviceRequestMessage.consent 送到裝置端落地。
-    bridge.addSessionConsent(tenant, { scope, root: absRoot })
+    // 帶 tool 以便 gateway 重啟後從落盤檔精確重建規則；session/permanent 會落 gateway 本地檔。
+    bridge.addSessionConsent(tenant, { scope, root: absRoot, tool: ruleTool })
   }
 
   const state = bridge.permissionStateForTenant(tenant)

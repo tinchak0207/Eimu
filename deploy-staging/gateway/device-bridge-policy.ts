@@ -748,13 +748,20 @@ export function authorizationRootProblem(root: unknown, home: string | null | un
  * `root_too_broad` 的範圍，則退回「被存取路徑本身（檔案則其父目錄）」，且**不得回 null**
  * （null 會讓呼叫端退化成請求路徑，使用者更無從判斷）。
  * 無法歸一化（相對路徑／`~` 且無 home）→ null（呼叫端據此不可建議）。
+ *
+ * **大小寫（2026-10-04 修）**：本函式回傳值會被（a）顯示在授權卡、（b）使用者據以呼叫
+ * authorize 端點、（c）成為下發給裝置的授權根／規則 specifier ⇒ 必須**保留使用者路徑
+ * 的原始大小寫**。裝置端（Linux，大小寫敏感）`policy.isPathAllowed` 做的是逐字比對，
+ * 若這裡折成小寫（舊版 `expandToAbsolute`＋`lexicalSegments`），含大寫段的路徑
+ * （`~/Desktop`、`~/Downloads`）授權後一律 `not_authorized`。夾制判定仍走
+ * `authorizationRootProblem`（內部折小寫），安全語義不變。
  */
 export function suggestAuthorizationRoot(p: unknown, home?: string | null, isDirectory: boolean = false): string | null {
   // 檔案系統根本身沒有任何「更窄的目錄」可建議；原樣回（呼叫端授權時仍會被 root_too_broad 擋）。
   if (isFilesystemRoot(p)) return typeof p === "string" ? p.trim().replace(/\\/g, "/") : null
-  const abs = expandToAbsolute(p, home)
+  const abs = expandToAbsolutePreserveCase(p, home)
   if (!abs) return null
-  const segs = lexicalSegments(abs)
+  const segs = lexicalSegmentsPreserveCase(abs)
   if (!segs || segs.length === 0) return null
   const selfDir = "/" + segs.join("/")
   const parentDir = segs.length >= 2 ? "/" + segs.slice(0, -1).join("/") : selfDir
