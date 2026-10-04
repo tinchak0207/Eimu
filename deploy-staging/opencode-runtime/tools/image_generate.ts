@@ -85,9 +85,32 @@ async function videoCostFromCatalog(
 }
 
 /**
+ * 驗證 `data:image/...;base64,...` 參考圖（2026-10-04 修）：只放行 image/* 的 base64 data URI，
+ * 且 base64 必須能解出非空位元組（round-trip 比對，容忍空白與 padding）。不合法回報錯訊息，
+ * 合法回 null。此前的 `/^(https?:|data:image)/` 前綴檢查會讓 `data:image/png;base64,@@@` 或
+ * `data:text/html;base64,...` 直接放行，壞資料送上游只換來一句籠統失敗。
+ */
+function validateDataImage(src: string, index: number): string | null {
+  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/.exec(src)
+  if (!m) {
+    return `第 ${index} 张参考图 data URI 不合法：应为 data:image/<类型>;base64,<数据>（目前只支持 base64 编码的图片）。`
+  }
+  const payload = m[2].replace(/\s+/g, "")
+  if (!payload) {
+    return `第 ${index} 张参考图 data URI 的 base64 数据为空。`
+  }
+  const bytes = Buffer.from(payload, "base64")
+  const normalized = payload.replace(/=+$/, "")
+  if (bytes.length === 0 || bytes.toString("base64").replace(/=+$/, "") !== normalized) {
+    return `第 ${index} 张参考图 base64 解码失败（不是合法的 base64 数据），请检查后重传。`
+  }
+  return null
+}
+
+/**
  * 參考圖正規化（A1 2026-09-25；2026-10-04 修：本機／工作區路徑改走公開媒體上傳輪子）。
- * 把 args.reference_images 每個元素轉成上游吃得下的字串（≤5 張）：
- * - `http(s)://` / `data:image` → 原樣放行。
+ * 把 args.reference_images 每個元素轉成上游吃得下的字串（≤5 張，超過明確報錯不截斷）：
+ * - `http(s)://` → 原樣放行；`data:image/...;base64,...` → 先驗格式與 base64 可解再放行。
  * - 看似路徑 → 先過沙箱白名單閘 checkAgentPath（realpath 落 workspace 子樹、uploads 只放行
  *   本會話），再複用 publicImageUrl（= image_edit 同一條輪子：readLocalImageBytes →
  *   網關 /internal/media/upload）讀位元組換成公網 URL。
@@ -102,14 +125,30 @@ async function normalizeReferenceImages(
   signal?: AbortSignal,
 ): Promise<{ ok: true; images: string[] } | { ok: false; message: string }> {
   const images: string[] = []
-  const items = (raw ?? []).slice(0, MAX_REFERENCE_IMAGES)
+  // 超過上限不靜默截斷（2026-10-04 修）：靜默丟掉第 6 張以後＝「參考圖與出圖無關」的假成功。
+  const provided = raw ?? []
+  if (provided.length > MAX_REFERENCE_IMAGES) {
+    return {
+      ok: false,
+      message: `参考图最多 ${MAX_REFERENCE_IMAGES} 张，本次收到 ${provided.length} 张（未截断、未提交）。请精简到 ${MAX_REFERENCE_IMAGES} 张以内后重试。`,
+    }
+  }
+  const items = provided
   for (let i = 0; i < items.length; i++) {
     const src = typeof items[i] === "string" ? (items[i] as string).trim() : ""
     // 空字串也算一項「提供但不可用」的參考圖：如實報錯，不靜默丟（丟圖＝出圖與參考無關）。
     if (!src) {
       return { ok: false, message: `第 ${i + 1} 张参考图为空字符串，请传 http(s) URL、data:image/...;base64,... 或工作区内的本地绝对路径。` }
     }
-    if (/^(https?:|data:image)/i.test(src)) {
+    // data:image/...;base64,... 必須先驗格式與 base64 可解（2026-10-04 修）：壞 base64 照送
+    // 只會讓上游回一句籠統錯誤，這裡當場說清楚，且不得把解不開的資料當成有效參考圖。
+    if (/^data:/i.test(src)) {
+      const invalid = validateDataImage(src, i + 1)
+      if (invalid) return { ok: false, message: invalid }
+      images.push(src)
+      continue
+    }
+    if (/^https?:/i.test(src)) {
       images.push(src)
       continue
     }
@@ -145,7 +184,12 @@ async function normalizeReferenceImages(
       }
       images.push(url)
     } catch (e: any) {
-      return { ok: false, message: `第 ${i + 1} 张参考图处理失败（${src}）：${e?.message || String(e)}` }
+      const msg = e?.message || String(e)
+      // 傳目錄時 readFileSync 會拋裸 EISDIR（2026-10-04 修）：換成人話，不把 errno 丟給用戶。
+      if (/EISDIR|illegal operation on a directory/i.test(msg)) {
+        return { ok: false, message: `第 ${i + 1} 张参考图路径是目录、不是图片文件：${src}。请传入具体图片文件路径。` }
+      }
+      return { ok: false, message: `第 ${i + 1} 张参考图处理失败（${src}）：${msg}` }
     }
   }
   return { ok: true, images }
