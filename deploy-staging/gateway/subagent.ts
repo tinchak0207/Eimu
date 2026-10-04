@@ -63,8 +63,9 @@ import {
   // 2026-10-03：数值阈值判定的代码强制入口（纯函数；政策＝CRITIC_SCORE_THRESHOLD_POLICY）。
   evaluateCriticScoreThreshold,
   CRITIC_SCORE_THRESHOLD_POLICY,
-  // 2026-10-04 F6：done 摘要从源头过用户可见白名单（内审/契约内部文字不上桌）。
-  scrubSubagentWakeText,
+  // 2026-10-04 F10：done 摘要从源头过用户可见白名单（内审/契约内部文字不上桌）。
+  // F10 起与 sse-core 咽喉点、index.ts 唤醒路径共用同一纯函数 scrubSubagentPayload。
+  scrubSubagentPayload,
   type CriticScoreSample,
   type DeliveryGateResult,
   type CriticPassTarget,
@@ -116,7 +117,7 @@ function subagentLivenessPollMs(): number {
   return Number.isFinite(n) && n >= 3_000 ? n : SUBAGENT_LIVENESS_POLL_DEFAULT_MS
 }
 // 用户可见层文案（简体、无栏名/runId/token/内部路径）：经 finishRun → wakeParent 的
-// scrubSubagentWakeText 白名单后上桌。
+// scrubSubagentPayload 白名单后上桌。
 const SUBAGENT_STALE_MESSAGE =
   "这一路子代理中途断开了（长时间没有任何进展），结果没有取回。已中断这一路并通知主流程，请重新派一次。"
 const SUMMARY_MAX_CHARS = 600
@@ -854,7 +855,7 @@ ${summary}`
   // （subagent.done 帧 / completed 取件 / wakeParent 唤醒）本来共用同一 summary 变数，这里
   // 换成清洗后的版本即三处同时干净；咽喉点（sse-core.emitToSession）与唤醒路径（index.ts）
   // 复用同一纯函数做下游兜底，此处是让出口天生干净的第一层。
-  const visibleSummary = scrubSubagentWakeText(summary)
+  const visibleSummary = scrubSubagentPayload(summary)
   run.summary = visibleSummary
   // 修 1：本 run 释放了一个槽位——若该父会话有被并发上限挤掉的 critic 待跑，补跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
@@ -1110,7 +1111,7 @@ function unrefTimer(t: ReturnType<typeof setTimeout> | ReturnType<typeof setInte
 // earlyPartial 计时器的生命周期互相牵连）；unref，不阻挡进程退出；finishRun 的
 // status 幂等守卫保证不会与硬顶/收尾路径双终态。
 // 命中 stale 的处置：走既有 finishRun(error) → subagent.done + wakeParent（唤醒文案过
-// 用户可见白名单 scrubSubagentWakeText），父会话据此收束/重派。
+// 用户可见白名单 scrubSubagentPayload），父会话据此收束/重派。
 let livenessTimer: ReturnType<typeof setInterval> | undefined
 
 function startLivenessWatch(): void {

@@ -21,7 +21,7 @@ import { normalizeUserSettings } from "./sessions-http.ts"
 import { PORT, HEARTBEAT_INTERVAL_MS, CONFIRM_RESOLVED_TTL_MS, SESSION_IDLE_TTL_MS, SESSION_SWEEP_DAYS, SESSION_REAP_INTERVAL_MS, UPLOADS_DIR, OPENCODE_URL } from "./constants-gateway.ts"
 // 2026-10-04（内审剧场拆除片 F3-A）：子代理唤醒文案白名单——把内审栏名/审核身份/用量计数/
 // 内部路径剥离后再过桥（纯函数在 delivery-gate.ts，因本档是服务入口、import 即起服务）。
-import { scrubSubagentWakeText } from "./delivery-gate.ts"
+import { scrubSubagentPayload } from "./delivery-gate.ts"
 // 2026-10-02：子代理唤醒同样需要「opencode-server OOM/重启后恢复等待」——轮子与 workflow 唤醒同源（workflow-gw）。
 import { waitForOpencodeReady, isConnectionRefused } from "./workflow-gw.ts"
 
@@ -198,7 +198,7 @@ async function wakeSessionForSubagent(
     // F3-A：run.summary 整包曾把 verdict/issues/evidence/qc、审核官·runId、用量计数、
     // 内部落盘路径与源码行号一并送进用户可见消息；此处只让「完成内容/成品在哪/落差」过桥。
     const rawPayload = run.status === "ok" ? run.summary : run.error || run.summary || "未知原因"
-    const payload = scrubSubagentWakeText(rawPayload) || "（这一路没有可读的成品或落差信息。）"
+    const payload = scrubSubagentPayload(rawPayload) || "（这一路没有可读的成品或落差信息。）"
     const content =
       `【子代理${verdict}·系统自动唤醒】「${safeLabel}」这一路已${verdict}。` +
       (run.status === "ok" ? `\n完成内容 / 成品或落差：${payload}` : `\n未完成原因：${payload}`) +
