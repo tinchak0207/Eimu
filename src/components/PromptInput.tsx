@@ -60,6 +60,11 @@ interface PromptInputProps {
   onEditResult?: (url: string) => void;
   onUpscaleResult?: (url: string) => void;
   /**
+   * 改图/放大未登入送出时的登录入口。上层传 standalone-aware 的实现
+   * （Electron 殼 / PWA 走跨浏览器交接）；不传时退回 hook 内的同窗口跳转。
+   */
+  onNeedLogin?: () => void;
+  /**
    * D-12：助理动过的参数回流到工作台控件。聊天区就地长在这张卡片里，
    * 所以这条回流不再经过 ImagePlayground 的整页翻面，直接从这里往上抛。
    */
@@ -193,6 +198,7 @@ export function PromptInput({
   displayMode,
   onEditResult,
   onUpscaleResult,
+  onNeedLogin,
   onParamsReflected,
   agentSeed = "",
   initialAgentSessionId = "",
@@ -271,7 +277,7 @@ export function PromptInput({
     setEditResultUrl,
     editBusy,
     handleEditSubmit,
-  } = usePixaiEdit({ prompt: input, isLoggedIn, onEditResult, suppress });
+  } = usePixaiEdit({ prompt: input, isLoggedIn, onEditResult, suppress, onNeedLogin });
   const {
     upscaleSource,
     setUpscaleSource,
@@ -285,7 +291,7 @@ export function PromptInput({
     setUpscaleResultUrl,
     upscaleBusy,
     handleUpscaleSubmit,
-  } = usePixaiUpscale({ isLoggedIn, onUpscaleResult, suppress });
+  } = usePixaiUpscale({ isLoggedIn, onUpscaleResult, suppress, onNeedLogin });
 
   const selectedModel = generationModel(modelId);
   const isVideo = selectedModel?.kind === "video";

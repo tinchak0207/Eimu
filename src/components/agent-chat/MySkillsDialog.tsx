@@ -26,6 +26,9 @@ import { createPortal } from "react-dom";
 import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { tryAuthHeaders } from "@/lib/agent-chat-client";
+import { useAuth } from "@/hooks/use-auth";
+import { useGithubLoginHandoff } from "@/hooks/use-github-login-handoff";
+import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { parseFamilyLabels, slashMenuUrl } from "./SkillSlashMenu";
 
 /* ------------------------------------------------------------------ */
@@ -252,6 +255,17 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
 
   // 換代保護：關窗後遲到的響應不得 setState。
   const aliveRef = useRef(true);
+
+  // standalone PWA / Electron 桌面殼：GitHub 登入態帶不進來，走跨瀏覽器交接。
+  const { handoffUrl, startLogin, closeHandoff } = useGithubLoginHandoff();
+  const { refresh } = useAuth();
+
+  // 穩定引用：交接面板的輪詢 effect 以 onSuccess 為依賴，inline 箭頭會讓
+  // effect 隨每次 re-render 重建、2 秒輪詢永遠開不出第一槍。
+  const handleHandoffSuccess = useCallback(() => {
+    closeHandoff();
+    void refresh();
+  }, [closeHandoff, refresh]);
 
   const loadFamilies = useCallback(async () => {
     try {
@@ -502,10 +516,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  // 與站內登入同一條鏈路（同視窗跳轉，登入完回到原頁）。
-                  window.location.href = "/api/auth/github/start";
-                }}
+                onClick={() => void startLogin("github")}
                 className="cursor-pointer rounded-full bg-ios-blue px-3 py-1 text-ios-caption1 font-medium text-white transition-colors hover:bg-ios-blue/90"
               >
                 去登录
@@ -736,6 +747,16 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
           ) : null}
         </div>
       </div>
+
+      {/* 交接面與卡片同一個 portal / stacking context（本對話框自行 portal，
+          面板再 portal 出去會被卡片蓋住）：成功後關掉交接面並刷新登入態。 */}
+      {handoffUrl ? (
+        <PwaHandoffPanel
+          loginUrl={handoffUrl}
+          onSuccess={handleHandoffSuccess}
+          onClose={closeHandoff}
+        />
+      ) : null}
     </div>,
     document.body,
   ) : null;

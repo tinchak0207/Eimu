@@ -4,7 +4,9 @@ import { useCallback, useState } from "react";
 import { Github } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useWechatScanLogin } from "@/hooks/use-wechat-scan-login";
+import { useGithubLoginHandoff } from "@/hooks/use-github-login-handoff";
 import { WechatScanQr } from "@/components/WechatScanQr";
+import { PromoHandoffNotice } from "@/components/promo/PromoHandoffNotice";
 
 /**
  * 宣傳片結尾送出時，從送出鈕上方長出來的登入小對話框（2026-09-27 暴君裁定）。
@@ -16,9 +18,10 @@ import { WechatScanQr } from "@/components/WechatScanQr";
  * 都還在原地。
  *
  * 兩條登入鏈路都是站上現成的（不重寫）：
- * ①GitHub＝同窗口跳轉 `/api/auth/github/start`——popup 在套殼/內嵌 webview 會
- *   變成停在 about:blank 的死窗（2026-09-05 教訓）；跳走前那句話已寫進
- *   sessionStorage，回來落 / 自動補送。
+ * ①GitHub＝同窗口跳轉 `/api/auth/github/start`；但在 standalone PWA / Electron
+ *   桌面殼裡登入態帶不進來（2026-10-04），改走跨瀏覽器交接：取得 handoff 連結後
+ *   原地換成 PromoHandoffNotice，授權在系統瀏覽器完成、這裡輪詢領回會話。跳走前
+ *   那句話已寫進 sessionStorage，回來落 / 自動補送。
  * ②微信＝小框原地換成掃碼二維碼（2026-09-30：取消驗證碼、掃到即登入；不再開
  *   `/wechat-login` 新分頁——手機上新分頁＝人切去微信掃完回來找不到原頁、那句話
  *   也就沒人補送）。輪詢拿到 token → refresh → 補送。
@@ -71,9 +74,14 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
 
   const wechat = useWechatScanLogin({ enabled: view === "wechat", onDone: () => void finish() });
 
-  const startGithub = useCallback(() => {
-    window.location.href = "/api/auth/github/start";
-  }, []);
+  const { handoffUrl, startLogin, closeHandoff } = useGithubLoginHandoff();
+
+  // 穩定引用：交接面的輪詢 effect 以 onSuccess 為依賴，若每次 re-render 都給新
+  // 函式，effect 會被反覆重建、2 秒輪詢永遠等不到第一槍（宿主高頻 re-render 時
+  // 登入就永遠續不上）。
+  const handleHandoffDone = useCallback(() => {
+    void finish();
+  }, [finish]);
 
   return (
     <div
@@ -85,7 +93,13 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
       {/* 指向下方送出鈕的小尖角：位置＝對話框水平中心，鈕在畫面正中間那條線上。 */}
       <div className="pointer-events-none absolute -bottom-[6px] left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] bg-[inherit] shadow-[3px_3px_8px_rgba(45,49,66,0.10)]" />
 
-      {view === "wechat" ? (
+      {handoffUrl ? (
+        <PromoHandoffNotice
+          loginUrl={handoffUrl}
+          onSuccess={handleHandoffDone}
+          onBack={closeHandoff}
+        />
+      ) : view === "wechat" ? (
         <>
           <p className="text-ios-subhead font-semibold text-foreground">微信扫码，扫到就开拍</p>
           <div className="mt-3">
@@ -111,7 +125,7 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
           <div className="mt-3 flex flex-col gap-2">
             <button
               type="button"
-              onClick={startGithub}
+              onClick={() => void startLogin("github")}
               className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1f2328] text-ios-footnote font-semibold text-white lg-transition hover:bg-[#16181c] active:scale-[0.99]"
             >
               <Github className="h-[17px] w-[17px]" aria-hidden="true" />

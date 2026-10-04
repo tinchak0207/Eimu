@@ -21,10 +21,19 @@ export function isStandalonePwa(): boolean {
       ? window.matchMedia("(display-mode: standalone)").matches
       : false;
   const iosStandalone = (navigator as { standalone?: boolean }).standalone === true;
-  // Electron 殼的 UA 一定帶 "Electron"；nodeIntegration 關閉時 window.process
-  // 不可用，故以 UA 為準。
-  const isElectronShell = navigator.userAgent.includes("Electron");
-  return standaloneMedia || iosStandalone || isElectronShell;
+  return standaloneMedia || iosStandalone || isElectronShell();
+}
+
+/**
+ * 當前是否為 Electron 桌面殼。殼與 PWA 分流用：兩者都算 standalone（登入一律走
+ * 跨瀏覽器交接），但殼的導航政策會把 /api/auth/* 轉去系統瀏覽器，因此取得交接
+ * 連結後可再主動跳一次，一次點擊就開好授權頁。
+ *
+ * Electron 殼的 UA 一定帶 "Electron"；nodeIntegration 關閉時 window.process
+ * 不可用，故以 UA 為準。
+ */
+export function isElectronShell(): boolean {
+  return typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 }
 
 export interface HandoffLogin {

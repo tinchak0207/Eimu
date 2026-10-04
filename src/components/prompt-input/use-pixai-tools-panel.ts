@@ -53,6 +53,7 @@ export function usePixaiEdit({
   isLoggedIn,
   onEditResult,
   suppress,
+  onNeedLogin,
 }: {
   /** 描述框正文：改图提示词与空文案校验都用它。 */
   prompt: string;
@@ -60,6 +61,8 @@ export function usePixaiEdit({
   onEditResult?: (url: string) => void;
   /** D-24 提示抑制下發（useAgentHint 回傳）：三條送出路徑閉包共享同一個。 */
   suppress: () => void;
+  /** 未登入送出時的登入入口（standalone PWA / Electron 殼走交接）；不傳則退回同窗口跳轉。 */
+  onNeedLogin?: () => void;
 }) {
   const { token, user } = useAuth();
   const { toast } = useToast();
@@ -81,7 +84,7 @@ export function usePixaiEdit({
       return;
     }
     if (!LOCAL_TEST_MODE && !isLoggedIn) {
-      redirectToGithub();
+      (onNeedLogin ?? redirectToGithub)();
       return;
     }
     const tokenValue = token ?? "";
@@ -130,11 +133,14 @@ export function usePixaiUpscale({
   isLoggedIn,
   onUpscaleResult,
   suppress,
+  onNeedLogin,
 }: {
   isLoggedIn?: boolean;
   onUpscaleResult?: (url: string) => void;
   /** D-24 提示抑制下發（useAgentHint 回傳）：三條送出路徑閉包共享同一個。 */
   suppress: () => void;
+  /** 未登入送出時的登入入口（standalone PWA / Electron 殼走交接）；不傳則退回同窗口跳轉。 */
+  onNeedLogin?: () => void;
 }) {
   const { token, user } = useAuth();
   const { toast } = useToast();
@@ -152,7 +158,7 @@ export function usePixaiUpscale({
       return;
     }
     if (!LOCAL_TEST_MODE && !isLoggedIn) {
-      redirectToGithub();
+      (onNeedLogin ?? redirectToGithub)();
       return;
     }
     const tokenValue = token ?? "";

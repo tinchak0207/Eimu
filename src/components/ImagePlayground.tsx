@@ -815,6 +815,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     isLoading={isLoading}
                     onCancelGenerate={handleCancelGenerate}
                     isLoggedIn={LOCAL_TEST_MODE ? true : isLoggedIn}
+                    onNeedLogin={redirectToGithub}
                     suggestions={initialSuggestions}
                     stylePreset={stylePreset}
                     onStyleChange={setStylePreset}
