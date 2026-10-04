@@ -1,22 +1,22 @@
 #!/bin/bash
-# eimu-shell — opencode 的頂層 shell 包裝器（方案 B，2026-10-02）。
+# eimu-shell — opencode 的顶层 shell 包装器（方案 B，2026-10-02）。
 #
-# 設計（借用 Claude Code 的形態，非抄碼）：沙箱在 **spawn 當下** 由本包裝器注入，
-# 命令（args）從不被改寫，所以 opencode 寫進 part state／DB／下一輪上下文的永遠是原始命令。
-# 舊方案（plugin 在 tool.execute.before 改寫 args.command）已移除——那會把包裝後的字串
-# 帶進模型上下文。
+# 设计（借用 Claude Code 的形态，非抄码）：沙箱在 **spawn 当下** 由本包装器注入，
+# 命令（args）从不被改写，所以 opencode 写进 part state／DB／下一轮上下文的永远是原始命令。
+# 旧方案（plugin 在 tool.execute.before 改写 args.command）已移除——那会把包装后的字串
+# 带进模型上下文。
 #
-# 掛法：opencode.json 的 top-level `"shell"` 指向本檔（見 release 白名單落點）。
+# 挂法：opencode.json 的 top-level `"shell"` 指向本档（见 release 白名单落点）。
 #
-# 契約（三態，逐一對應驗收 (a)(b)(c)）：
-#   (a) EIMU_LAUNCHER 未設 → 完全透明：exec /bin/bash "$@"（等同 /bin/bash）。
-#   (b) EIMU_LAUNCHER 指向可執行檔且本次為 `-c <cmd>` 形態（使用者命令）→
+# 契约（三态，逐一对应验收 (a)(b)(c)）：
+#   (a) EIMU_LAUNCHER 未设 → 完全透明：exec /bin/bash "$@"（等同 /bin/bash）。
+#   (b) EIMU_LAUNCHER 指向可执行档且本次为 `-c <cmd>` 形态（使用者命令）→
 #       exec "$EIMU_LAUNCHER" "$PWD" "$2"，由 launcher 自己 bwrap + --chdir "$1" /bin/bash -c "$2"。
-#   (c) EIMU_LAUNCHER 已設但不可用（路徑不存在／不可執行）→ fail-closed：拒絕執行並以非零退出，
-#       **絕不回退成無沙箱的 /bin/bash**（否則等於靜默脫沙箱）。
+#   (c) EIMU_LAUNCHER 已设但不可用（路径不存在／不可执行）→ fail-closed：拒绝执行并以非零退出，
+#       **绝不回退成无沙箱的 /bin/bash**（否则等于静默脱沙箱）。
 #
-# 透明性鐵律：opencode 內部可能把本檔當一般 shell 用（Shell.preferred 等）——只要不是
-# `-c <cmd>` 形態，或 EIMU_LAUNCHER 未設，一律 exec /bin/bash "$@"，行為與原 shell 逐字相同。
+# 透明性铁律：opencode 内部可能把本档当一般 shell 用（Shell.preferred 等）——只要不是
+# `-c <cmd>` 形态，或 EIMU_LAUNCHER 未设，一律 exec /bin/bash "$@"，行为与原 shell 逐字相同。
 set -u
 
 if [ "${1:-}" = "-c" ] && [ "$#" -ge 2 ] && [ -n "${EIMU_LAUNCHER:-}" ]; then
