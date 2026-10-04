@@ -449,3 +449,85 @@ test("第二道防線：grep/list_dir 不會曝露或讀入硬 denylist 檔（.e
     rmrf(root);
   }
 });
+
+// ---------------------------------------------------------------------------
+// grantedRoots（對話內就地授權）：mode=ask 下已同意的根放行；未同意仍 needs_authorization；
+// 硬 denylist 不得被繞過。
+// ---------------------------------------------------------------------------
+test("grantedRoots：mode=ask 下，已同意的根（同/子路徑）走 rule_allow 放行", async () => {
+  const parent = makeTempRoot();
+  try {
+    const sub = path.join(parent, "sub");
+    nodeFs.mkdirSync(sub);
+    nodeFs.writeFileSync(path.join(sub, "a.txt"), "hi");
+    // 既有 allowlist 只有 sub（使用者 pickFiles 挑的根）；同意根是 parent（對話內授權）。
+    const ex = createBridgeExecutor({ fs: nodeFs, roots: [sub], mode: "ask", home: parent });
+    // 未同意：sub 雖在 allowlist，mode=ask ⇒ needs_authorization
+    await assert.rejects(
+      ex.executeTool("list_dir", { path: sub }),
+      (err) => err && err.code === "needs_authorization",
+    );
+    // 同意 parent 後：sub 內放行（當次請求即生效）
+    const ok = await ex.executeTool("list_dir", { path: sub }, { grantedRoots: [parent] });
+    assert.ok(Array.isArray(ok.entries));
+    // parent 本身亦在同意根內 ⇒ 放行
+    const ok2 = await ex.executeTool("list_dir", { path: parent }, { grantedRoots: [parent] });
+    assert.equal(ok2.path, parent);
+  } finally {
+    rmrf(parent);
+  }
+});
+
+test("grantedRoots：未同意的其他已授權路徑仍 needs_authorization（不放寬）", async () => {
+  const parent = makeTempRoot();
+  const other = makeTempRoot();
+  try {
+    const sub = path.join(parent, "sub");
+    nodeFs.mkdirSync(sub);
+    const ex = createBridgeExecutor({ fs: nodeFs, roots: [sub, other], mode: "ask", home: parent });
+    await assert.rejects(
+      ex.executeTool("list_dir", { path: other }, { grantedRoots: [parent] }),
+      (err) => err && err.code === "needs_authorization",
+    );
+  } finally {
+    rmrf(parent);
+    rmrf(other);
+  }
+});
+
+test("grantedRoots：硬 denylist（~/.ssh/id_rsa）即使同意根含家目錄祖先仍 deny", async () => {
+  const home = makeTempRoot();
+  try {
+    const ssh = path.join(home, ".ssh");
+    nodeFs.mkdirSync(ssh);
+    nodeFs.writeFileSync(path.join(ssh, "id_rsa"), "-----BEGIN KEY-----");
+    const ex = createBridgeExecutor({ fs: nodeFs, roots: [home], mode: "ask", home });
+    await assert.rejects(
+      ex.executeTool("read_file", { path: path.join(ssh, "id_rsa") }, { grantedRoots: [home] }),
+      (err) => err && (err.code === "sensitive_path" || err.code === "permission_denied"),
+    );
+  } finally {
+    rmrf(home);
+  }
+});
+
+test("grantedRoots：非陣列／非字串元素 fail-closed（不當空陣列清空既有授權）", async () => {
+  const root = makeTempRoot();
+  try {
+    const f = path.join(root, "a.txt");
+    nodeFs.writeFileSync(f, "hi");
+    const ex = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "ask", home: root });
+    // 既有 root 仍有效（allowlist 未因 grantedRoots 型別錯被清空）⇒ 走第二道防線回 needs_authorization
+    await assert.rejects(
+      ex.executeTool("read_file", { path: f }, { grantedRoots: "not-an-array" }),
+      (err) => err && err.code === "needs_authorization",
+    );
+    // 空陣列亦同
+    await assert.rejects(
+      ex.executeTool("read_file", { path: f }, { grantedRoots: [] }),
+      (err) => err && err.code === "needs_authorization",
+    );
+  } finally {
+    rmrf(root);
+  }
+});

@@ -98,6 +98,57 @@ function createBridgeExecutor(options = {}) {
     return typeof h === "string" && h.length > 0 ? h : os.homedir();
   };
 
+  // ── 對話內就地授權（consent）的「已同意根」支持 ─────────────────────────
+  // 雲端在對話中取得使用者同意（once/session/permanent）後，會在其後每次 invoke
+  // 隨 DeviceRequestMessage.consent 重送（冪等）。裝置端第二道防線只看自己的
+  // mode/rules/roots，**不知道**雲端剛發生的授權 ⇒ mode=ask 下永遠回 needs_authorization
+  // （實機缺陷）。修法：把本次請求的 grantedRoots 併入（a）allowlist 與（b）有效規則
+  // 的 allow 桶；硬 denylist／safety-check 仍在最前，grantedRoots **不得**繞過。
+  //
+  // fail-closed：grantedRoots 非陣列／元素非非空字串 → 該元素略過（不當空陣列清空既有授權）。
+
+  /** 正規化 grantedRoots：僅保留非空字串、去重（undefined／型別錯＝空）。 */
+  function normalizeGrantedRoots(grantedRoots) {
+    if (!Array.isArray(grantedRoots)) return [];
+    const out = [];
+    for (const r of grantedRoots) {
+      if (typeof r !== "string") continue;
+      const t = r.trim();
+      if (t.length === 0) continue;
+      if (!out.includes(t)) out.push(t);
+    }
+    return out;
+  }
+
+  /** 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（順序保留 roots 在前，維持既有斷言）。 */
+  function effectiveRoots(grantedRoots) {
+    const base = rootsProvider();
+    const arr = Array.isArray(base) ? base.slice() : [];
+    for (const g of normalizeGrantedRoots(grantedRoots)) {
+      if (!arr.includes(g)) arr.push(g);
+    }
+    return arr;
+  }
+
+  /** 有效規則 ＝ 既有 rules ∪ grantedRoots.map(allowRuleForRoot)（物件或陣列型皆支援）。 */
+  function withGrantedAllowRules(base, grantedRoots) {
+    const granted = normalizeGrantedRoots(grantedRoots);
+    if (granted.length === 0) return base;
+    const extra = [];
+    for (const g of granted) {
+      const rule = permissionRules.allowRuleForRoot(g);
+      if (rule) extra.push(rule);
+    }
+    if (extra.length === 0) return base;
+    if (Array.isArray(base)) return base.concat(extra);
+    if (base && typeof base === "object") {
+      const out = { ...base };
+      out.allow = Array.isArray(base.allow) ? base.allow.concat(extra) : extra.slice();
+      return out;
+    }
+    return { allow: extra };
+  }
+
   /** 解 symlink；不存在時對父目錄解 symlink 再接回 basename（輸出檔常用）。 */
   function resolveReal(p) {
     const realpath = (fs.realpathSync && fs.realpathSync.native) || fs.realpathSync;
@@ -120,17 +171,18 @@ function createBridgeExecutor(options = {}) {
    *   - deny → `permission_denied`（403）
    *   - ask  → `needs_authorization`（403，對上凍結契約的授權流程）
    */
-  function enforcePermission(tool, raw, resolved) {
+  function enforcePermission(tool, raw, resolved, grantedRoots) {
     const mode = modeProvider();
     const effectiveMode = typeof mode === "string" && mode.length > 0 ? mode : "auto";
     const rules = rulesProvider();
+    const mergedRules = withGrantedAllowRules(rules === undefined ? undefined : rules, grantedRoots);
     const verdict = permissionRules.evaluatePermission({
       tool,
       rawPath: raw,
       resolvedPath: resolved,
       mode: effectiveMode,
-      rules: rules === undefined ? undefined : rules,
-      authorizedRoots: rootsProvider(),
+      rules: mergedRules === undefined ? undefined : mergedRules,
+      authorizedRoots: effectiveRoots(grantedRoots),
       home: currentHome(),
     });
     if (verdict.decision === "allow") return;
@@ -155,7 +207,7 @@ function createBridgeExecutor(options = {}) {
    *       → 第二道防線（permission-rules）→ 存在性。
    * 既有檢查（policy denylist／allowlist 必填）在前且一行不放寬；第二道防線為純加嚴。
    */
-  function requireLocalPath(raw, tool = "read_file") {
+  function requireLocalPath(raw, tool = "read_file", grantedRoots) {
     if (typeof raw !== "string" || raw.length === 0 || raw.includes("\0")) {
       throw new BridgeError("bad_path", 400);
     }
@@ -163,22 +215,24 @@ function createBridgeExecutor(options = {}) {
     if (isFsRoot(abs)) throw new BridgeError("path_is_root", 403, abs);
     // 解 symlink 後再跑 denylist —— policy 是字串判定，跟不了 symlink（同 local-worker）。
     if (policy.isSensitivePath(abs)) throw new BridgeError("sensitive_path", 403);
-    const roots = rootsProvider();
-    if (!Array.isArray(roots) || roots.length === 0) {
+    // 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（對話內已同意的根）。
+    const roots = effectiveRoots(grantedRoots);
+    if (roots.length === 0) {
       // H1：allowlist 必填。空集＝全拒，不得退回「只驗 denylist」。
       throw new BridgeError("no_authorized_roots", 403);
     }
     if (!policy.isPathAllowed(abs, roots)) throw new BridgeError("not_authorized", 403);
-    // 第二道防線（執行前獨立複核）：以本機真值判 deny/ask/allow。
-    enforcePermission(tool, raw, abs);
+    // 第二道防線（執行前獨立複核）：以本機真值判 deny/ask/allow；grantedRoots 產生
+    // allow 規則，使「已同意」的根走 rule_allow 放行（未同意者仍 needs_authorization）。
+    enforcePermission(tool, raw, abs, grantedRoots);
     if (!fs.existsSync(abs)) throw new BridgeError("not_found", 404);
     return abs;
   }
 
   // ── 四個唯讀工具（無寫/刪/執行）────────────────────────────────────────
 
-  function toolListDir(args) {
-    const abs = requireLocalPath(args.path, "list_dir");
+  function toolListDir(args, grantedRoots) {
+    const abs = requireLocalPath(args.path, "list_dir", grantedRoots);
     const st = fs.statSync(abs);
     if (!st.isDirectory()) throw new BridgeError("not_a_directory", 400);
     const max = Number.isInteger(args.max_entries) ? args.max_entries : MAX_LIST_DEFAULT;
@@ -216,8 +270,8 @@ function createBridgeExecutor(options = {}) {
     };
   }
 
-  function toolReadFile(args) {
-    const abs = requireLocalPath(args.path, "read_file");
+  function toolReadFile(args, grantedRoots) {
+    const abs = requireLocalPath(args.path, "read_file", grantedRoots);
     const st = fs.statSync(abs);
     if (!st.isFile()) throw new BridgeError("not_a_file", 400);
     const offset = Number.isInteger(args.offset) && args.offset > 0 ? args.offset : 0;
@@ -275,8 +329,8 @@ function createBridgeExecutor(options = {}) {
     }
   }
 
-  function toolGrep(args) {
-    const abs = requireLocalPath(args.path, "grep");
+  function toolGrep(args, grantedRoots) {
+    const abs = requireLocalPath(args.path, "grep", grantedRoots);
     const st = fs.statSync(abs);
     if (!st.isDirectory() && !st.isFile()) throw new BridgeError("not_searchable", 400);
     const maxMatches = Number.isInteger(args.max_matches) ? args.max_matches : 100;
@@ -342,8 +396,8 @@ function createBridgeExecutor(options = {}) {
     };
   }
 
-  function toolStat(args) {
-    const abs = requireLocalPath(args.path, "stat");
+  function toolStat(args, grantedRoots) {
+    const abs = requireLocalPath(args.path, "stat", grantedRoots);
     const st = fs.statSync(abs);
     return {
       path: abs,
@@ -354,16 +408,21 @@ function createBridgeExecutor(options = {}) {
     };
   }
 
-  async function executeTool(tool, args) {
+  /**
+   * 執行工具。第三參數 opts.grantedRoots（可選）：本次請求可用的「已在對話內同意的根」，
+   * 併入 allowlist 與第二道防線的 allow 規則；硬 denylist／safety-check 不受影響。
+   */
+  async function executeTool(tool, args, opts) {
+    const grantedRoots = opts && typeof opts === "object" ? opts.grantedRoots : undefined;
     switch (tool) {
       case "list_dir":
-        return toolListDir(args);
+        return toolListDir(args, grantedRoots);
       case "read_file":
-        return toolReadFile(args);
+        return toolReadFile(args, grantedRoots);
       case "grep":
-        return toolGrep(args);
+        return toolGrep(args, grantedRoots);
       case "stat":
-        return toolStat(args);
+        return toolStat(args, grantedRoots);
       default:
         throw new BridgeError("tool_not_allowed", 403, String(tool));
     }

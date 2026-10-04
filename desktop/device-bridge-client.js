@@ -38,10 +38,11 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const os = require("node:os");
 
 const proto = require("./lib/bridge-protocol.js");
 const { createBridgeExecutor, BridgeError } = require("./lib/bridge-executor.js");
-const { PERMISSION_MODES } = require("./lib/permission-rules.js");
+const { PERMISSION_MODES, allowRuleForRoot } = require("./lib/permission-rules.js");
 const localWorker = require("./local-worker.js");
 
 const PREFIX = "/agent/v1/device-bridge";
@@ -90,7 +91,68 @@ function resolveStableDeviceId(store) {
   return id;
 }
 
-// 單一授權來源：直接讀 local-worker 的 authorizedRoots（pickFiles 顯式挑選）。
+// ── 對話內就地授權（consent）─────────────────────────────────────────────
+// 協議（凍結欄位名）：DeviceRequestMessage.consent = { scope: "once"|"session"|"permanent",
+// roots: string[] }。三態語義：
+//   once      — 只對**這一則**請求有效，不記憶、不落盤。
+//   session   — 本殼執行期間有效（記憶體累積、去重）。
+//   permanent — 落盤（重啟仍有效；由注入的 persistConsentRoots 併入 settings）。
+// 雲端對 session/permanent 會在其後每次 invoke 冪等重送 ⇒ 裝置端去重。
+// 形狀不合／未知 scope／roots 非陣列 → 當作**沒有 consent**（fail-closed，不拋、不放行）。
+
+/** 正規化根清單：僅非空絕對路徑字串、去重（fail-closed，非絕對一律略過）。 */
+function normalizeConsentRootList(roots) {
+  if (!Array.isArray(roots)) return [];
+  const out = [];
+  for (const r of roots) {
+    if (typeof r !== "string") continue;
+    const t = r.trim();
+    if (t.length === 0 || !t.startsWith("/")) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** 解析 request.consent；形狀不合／未知 scope／roots 空 → null（視為無同意）。 */
+function parseConsent(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const scope = raw.scope;
+  if (scope !== "once" && scope !== "session" && scope !== "permanent") return null;
+  const roots = normalizeConsentRootList(raw.roots);
+  if (roots.length === 0) return null;
+  return { scope, roots };
+}
+
+/** 聯集（a ∪ b），保留 a 的順序、去重。 */
+function unionRoots(a, b) {
+  const out = Array.isArray(a) ? a.slice() : [];
+  for (const r of Array.isArray(b) ? b : []) {
+    if (!out.includes(r)) out.push(r);
+  }
+  return out;
+}
+
+/**
+ * 由同意根推出 allow 規則（與閘道 authorizationRuleSpecifier 同形），併入既有 rules。
+ * 既有 rules 可為 undefined／陣列／{deny,ask,allow}；不改變既有規則，只加 allow 桶。
+ */
+function withConsentAllowRules(base, consentRoots) {
+  const extra = [];
+  for (const root of Array.isArray(consentRoots) ? consentRoots : []) {
+    const rule = allowRuleForRoot(root);
+    if (rule) extra.push(rule);
+  }
+  if (extra.length === 0) return base;
+  if (Array.isArray(base)) return base.concat(extra);
+  if (base && typeof base === "object") {
+    const out = { ...base };
+    out.allow = Array.isArray(base.allow) ? base.allow.concat(extra) : extra.slice();
+    return out;
+  }
+  return { allow: extra };
+}
+
+
 // 不另造第二套授權機制；空集 ⇒ bridge 拒絕服務（見 startDeviceBridge）。
 // W6c：mode/rules 為第二道防線的輸入，即時讀 runtime（由 startDeviceBridge 注入，
 // 未注入＝null/undefined，執行器回退 "auto" 以維持既有呼叫端行為）。
@@ -127,6 +189,16 @@ const runtime = {
   // 穩定安裝識別（缺陷修復）：register body.device_id。由 startDeviceBridge 從
   // deviceIdProvider 取值存入；null＝未設定（不下發，回退閘道自行配 id）。
   installDeviceId: null,
+  // 對話內就地授權（缺陷修復）：記憶體累積的同意根（session/permanent 收到的根，
+  // 去重）。once 不進此處。register 時與 runtime.roots 聯集下發；handleRequest 時
+  // 作為 grantedRoots 併入 allowlist 與第二道防線。
+  consentRoots: [],
+  // 注入點（型別錯＝視為未設定，不得把 undefined 當空陣列而清空既有授權）：
+  //   persistConsentRoots — 收到 permanent 時落盤（由 main.js 併入 settings 並寫回）。
+  //   auditConsent        — 每接受一個**新的**同意根追加一行本機稽核（無 token/apiKey）。
+  //   consentRootsProvider— 啟動時讀取已落盤的永久同意根（供 register 與放行）。
+  persistConsentRoots: null,
+  auditConsent: null,
 };
 
 function snapshot() {
@@ -223,9 +295,38 @@ async function handleRequest(request) {
   const clean = proto.sanitizeToolArgs(request.tool, request.args);
   if (!clean.ok) return submitError(requestId, consentToken, `${clean.code}: ${clean.message}`);
 
+  // 對話內就地授權：解析本請求的 consent（形狀不合／未知 scope ＝ 當沒有，不得拋）。
+  // session/permanent 的根累積進記憶體（去重）；permanent 另呼叫 persistConsentRoots 落盤。
+  // once 只對本請求有效（不進記憶體、不落盤）。任一注入缺失＝只影響落盤/稽核，不影響放行。
+  const consent = parseConsent(request.consent);
+  if (consent && consent.scope !== "once") {
+    for (const root of consent.roots) {
+      if (runtime.consentRoots.includes(root)) continue;
+      runtime.consentRoots.push(root);
+      if (typeof runtime.auditConsent === "function") {
+        try {
+          runtime.auditConsent({ scope: consent.scope, root });
+        } catch {
+          /* 稽核失敗不得影響執行 */
+        }
+      }
+    }
+    if (consent.scope === "permanent" && typeof runtime.persistConsentRoots === "function") {
+      try {
+        runtime.persistConsentRoots(consent.roots.slice());
+      } catch {
+        /* 落盤失敗＝永久授權本輪仍有效，不阻塞本次執行 */
+      }
+    }
+  }
+  const grantedRoots = unionRoots(
+    runtime.consentRoots,
+    consent && consent.scope === "once" ? consent.roots : [],
+  );
+
   let result;
   try {
-    result = await executor.executeTool(request.tool, clean.args);
+    result = await executor.executeTool(request.tool, clean.args, { grantedRoots });
   } catch (err) {
     const code = err && err.code ? err.code : "device_op_failed";
     return submitError(requestId, consentToken, `${code}: ${err && err.message ? err.message : "tool failed"}`);
@@ -260,12 +361,22 @@ async function registerOnce() {
   // 「空陣列」同視為空集，且裝置身分由 deviceKey(tenant,deviceId) 決定、與 roots 無關，
   // 不會被誤判成「無裝置」）——明確空陣列比省欄位更能讓閘道端對帳。
   const body = {};
+  // home（缺陷修復）：register 從不送 home ⇒ 閘道 authorizationRootProblem 的
+  // `root_too_broad`（家目錄本身不可授權）判不出來。下發 os.homedir() 讓它生效。
+  body.home = os.homedir();
   // 穩定安裝識別（缺陷修復）：帶上即「同裝置重註冊＝換連線、舊連線作廢」，閘道以
   // deviceKey(tenant,deviceId) 取代同一筆紀錄，不會累積多台 online（見檔頭 helper 註解）。
   if (typeof runtime.installDeviceId === "string" && runtime.installDeviceId) body.device_id = runtime.installDeviceId;
   if (runtime.mode !== null && runtime.mode !== undefined) body.mode = runtime.mode;
-  if (runtime.rules !== undefined) body.rules = runtime.rules;
-  if (Array.isArray(runtime.roots)) body.roots = runtime.roots;
+  // roots/rules ＝ 已設定（使用者挑的根／既有規則）∪ 對話內同意根（及其 allow 規則）。
+  // 只做聯集，不改變既有 rootsProvider 來源；無同意時逐值等於既有下發內容。
+  const consentRoots = Array.isArray(runtime.consentRoots) ? runtime.consentRoots : [];
+  if (runtime.rules !== undefined || consentRoots.length > 0) {
+    body.rules = withConsentAllowRules(runtime.rules, consentRoots);
+  }
+  if (Array.isArray(runtime.roots) || consentRoots.length > 0) {
+    body.roots = unionRoots(Array.isArray(runtime.roots) ? runtime.roots : [], consentRoots);
+  }
   const reg = await postOk(`${PREFIX}/register`, body);
   runtime.deviceId = typeof reg.device_id === "string" ? reg.device_id : null;
   runtime.connectionId = typeof reg.connection_id === "string" ? reg.connection_id : null;
@@ -371,7 +482,7 @@ async function connect() {
 
 /**
  * 啟動 device bridge（預設不啟動：enabled !== true 即停在 "off"）。
- * @param {{gatewayBaseUrl?:string, credentialProvider?:()=>Promise<string|null>|string|null, enabled?:boolean, rootsProvider?:()=>string[], modeProvider?:()=>("off"|"ask"|"auto"|"full"), rulesProvider?:()=>unknown, onStatus?:(s:object)=>void}} opts
+ * @param {{gatewayBaseUrl?:string, credentialProvider?:()=>Promise<string|null>|string|null, enabled?:boolean, rootsProvider?:()=>string[], modeProvider?:()=>("off"|"ask"|"auto"|"full"), rulesProvider?:()=>unknown, deviceIdProvider?:()=>string, consentRootsProvider?:()=>string[], persistConsentRoots?:(roots:string[])=>void, auditConsent?:(entry:{scope:string,root:string})=>void, onStatus?:(s:object)=>void}} opts
  * @returns {Promise<object>} 狀態快照
  */
 async function startDeviceBridge(opts = {}) {
@@ -415,6 +526,20 @@ async function startDeviceBridge(opts = {}) {
     }
   }
 
+  // 對話內就地授權（缺陷修復）：注入點一律驗型別（同 modeProvider 規矩，型別錯＝未設定）。
+  // consentRootsProvider 提供**已落盤**的永久同意根（重啟後 register/放行仍有效）；
+  // persistConsentRoots 於收到 permanent 時落盤；auditConsent 選配（本機稽核，不含機密）。
+  runtime.persistConsentRoots = typeof opts.persistConsentRoots === "function" ? opts.persistConsentRoots : null;
+  runtime.auditConsent = typeof opts.auditConsent === "function" ? opts.auditConsent : null;
+  runtime.consentRoots = [];
+  if (typeof opts.consentRootsProvider === "function") {
+    try {
+      runtime.consentRoots = normalizeConsentRootList(opts.consentRootsProvider());
+    } catch {
+      runtime.consentRoots = [];
+    }
+  }
+
   if (!runtime.enabled) {
     setStatus("off");
     return snapshot();
@@ -422,8 +547,10 @@ async function startDeviceBridge(opts = {}) {
 
   // H1：allowlist 必填。無授權根（使用者尚未 pickFiles 挑過任何根）⇒ 整條 bridge
   // 拒絕服務並回明確狀態，**不得**退回「只驗 denylist」。這是正確且刻意的結果。
-  const roots = typeof opts.rootsProvider === "function" ? opts.rootsProvider() : Array.from(localWorker.authorizedRoots);
-  if (!Array.isArray(roots) || roots.length === 0) {
+  // 有效根 ＝ rootsProvider() ∪ 已落盤的同意根（永久授權在重啟後仍能服務）。
+  const baseRoots = typeof opts.rootsProvider === "function" ? opts.rootsProvider() : Array.from(localWorker.authorizedRoots);
+  const roots = unionRoots(Array.isArray(baseRoots) ? baseRoots : [], runtime.consentRoots);
+  if (roots.length === 0) {
     runtime.credential = null;
     setStatus("no_authorized_roots", "no_authorized_roots");
     return snapshot();
@@ -505,5 +632,8 @@ module.exports = {
     resolveReal: executor.resolveReal,
     runtime,
     BridgeError,
+    parseConsent,
+    withConsentAllowRules,
+    normalizeConsentRootList,
   },
 };

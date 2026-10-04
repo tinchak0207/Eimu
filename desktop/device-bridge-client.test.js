@@ -114,6 +114,9 @@ async function withRegisterStub(fn) {
     client.__test.runtime.rules = undefined;
     client.__test.runtime.roots = null;
     client.__test.runtime.installDeviceId = null;
+    client.__test.runtime.consentRoots = [];
+    client.__test.runtime.persistConsentRoots = null;
+    client.__test.runtime.auditConsent = null;
   }
 }
 
@@ -413,5 +416,209 @@ test("register(邊界): deviceIdProvider 回空字串 ⇒ 不下發 device_id", 
   } finally {
     localWorker.authorizedRoots.clear();
     nodeFs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 對話內就地授權（consent）：接收並落地（session 記憶／permanent 落盤／once 單次）
+// 用注入假 deps 測（runtime 直接設為測試夾具），不連真閘道。
+// ---------------------------------------------------------------------------
+const { handleRequest: handleConsentRequest } = client.__test;
+
+/** 建立 consent 測試夾具：parent（同意根，含 sub）＋ other（其他已授權根）。 */
+async function withConsentEnv(fn) {
+  const parent = mkRoot();
+  const other = mkRoot();
+  const sub = path.join(parent, "sub");
+  nodeFs.mkdirSync(sub);
+  nodeFs.writeFileSync(path.join(sub, "a.txt"), "hi");
+  const r = client.__test.runtime;
+  const saved = {
+    mode: r.mode,
+    roots: r.roots,
+    consentRoots: r.consentRoots,
+    persist: r.persistConsentRoots,
+    audit: r.auditConsent,
+    deviceId: r.deviceId,
+    connectionId: r.connectionId,
+  };
+  localWorker.authorizedRoots.clear();
+  localWorker.authorizeRoots([sub, other]);
+  r.mode = "ask";
+  r.roots = null;
+  r.consentRoots = [];
+  r.persistConsentRoots = null;
+  r.auditConsent = null;
+  r.deviceId = "dev-consent";
+  r.connectionId = "conn-consent";
+  try {
+    return await fn({ parent, sub, other, runtime: r });
+  } finally {
+    localWorker.authorizedRoots.clear();
+    Object.assign(r, {
+      mode: saved.mode,
+      roots: saved.roots,
+      consentRoots: saved.consentRoots,
+      persistConsentRoots: saved.persist,
+      auditConsent: saved.audit,
+      deviceId: saved.deviceId,
+      connectionId: saved.connectionId,
+    });
+    nodeFs.rmSync(parent, { recursive: true, force: true });
+    nodeFs.rmSync(other, { recursive: true, force: true });
+  }
+}
+
+test("① consent permanent：同請求與後續請求對 X 內路徑皆放行（mode=ask）", async () => {
+  await withConsentEnv(async ({ parent, sub, runtime }) => {
+    await withFetchStub(async (calls) => {
+      await handleConsentRequest({
+        request_id: "c1",
+        consent_token: "t1",
+        tool: "list_dir",
+        args: { path: sub },
+        consent: { scope: "permanent", roots: [parent] },
+      });
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].body.error, undefined, `意外的錯誤：${calls[0].body.error}`);
+      assert.ok(calls[0].body.result, "應回結果");
+    });
+    assert.deepEqual(runtime.consentRoots, [parent], "permanent 根應進記憶體");
+    // 後續請求（無 consent）：仍放行
+    await withFetchStub(async (calls) => {
+      await handleConsentRequest({ request_id: "c2", consent_token: "t2", tool: "list_dir", args: { path: sub } });
+      assert.equal(calls[0].body.error, undefined, `意外的錯誤：${calls[0].body.error}`);
+      assert.ok(calls[0].body.result);
+    });
+  });
+});
+
+test("② consent once：只對該請求放行，下一則（無 consent）回 needs_authorization", async () => {
+  await withConsentEnv(async ({ parent, sub, runtime }) => {
+    await withFetchStub(async (calls) => {
+      await handleConsentRequest({
+        request_id: "o1",
+        consent_token: "t1",
+        tool: "list_dir",
+        args: { path: sub },
+        consent: { scope: "once", roots: [parent] },
+      });
+      assert.equal(calls[0].body.error, undefined, `once 應放行本請求：${calls[0].body.error}`);
+      assert.ok(calls[0].body.result);
+    });
+    assert.deepEqual(runtime.consentRoots, [], "once 不得進記憶體");
+    await withFetchStub(async (calls) => {
+      await handleConsentRequest({ request_id: "o2", consent_token: "t2", tool: "list_dir", args: { path: sub } });
+      assert.match(String(calls[0].body.error), /needs_authorization/);
+    });
+  });
+});
+
+test("③ consent：X 之外的路徑在 mode=ask 仍 needs_authorization（不放寬）", async () => {
+  await withConsentEnv(async ({ parent, other, runtime }) => {
+    runtime.consentRoots = [parent];
+    await withFetchStub(async (calls) => {
+      await handleConsentRequest({ request_id: "x1", consent_token: "t1", tool: "list_dir", args: { path: other } });
+      assert.match(String(calls[0].body.error), /needs_authorization/);
+    });
+  });
+});
+
+test("⑤ consent permanent 呼叫 persistConsentRoots；session/once 不得落盤", async () => {
+  await withConsentEnv(async ({ parent, sub, runtime }) => {
+    const persisted = [];
+    runtime.persistConsentRoots = (roots) => persisted.push(roots.slice());
+    await withFetchStub(async () => {
+      await handleConsentRequest({
+        request_id: "p1",
+        consent_token: "t1",
+        tool: "list_dir",
+        args: { path: sub },
+        consent: { scope: "session", roots: [parent] },
+      });
+    });
+    assert.equal(persisted.length, 0, "session 不得落盤");
+    await withFetchStub(async () => {
+      await handleConsentRequest({
+        request_id: "p2",
+        consent_token: "t2",
+        tool: "list_dir",
+        args: { path: sub },
+        consent: { scope: "once", roots: [parent] },
+      });
+    });
+    assert.equal(persisted.length, 0, "once 不得落盤");
+    await withFetchStub(async () => {
+      await handleConsentRequest({
+        request_id: "p3",
+        consent_token: "t3",
+        tool: "list_dir",
+        args: { path: sub },
+        consent: { scope: "permanent", roots: [parent] },
+      });
+    });
+    assert.deepEqual(persisted, [[parent]], "permanent 必須落盤一次");
+  });
+});
+
+test("⑦ consent 形狀不合（字串／未知 scope／roots 非陣列）不拋、不得放行任何東西", async () => {
+  await withConsentEnv(async ({ parent, sub, runtime }) => {
+    const bads = [
+      "permanent",
+      { scope: "god", roots: [parent] },
+      { scope: "permanent", roots: "not-array" },
+      { scope: "permanent" },
+      { scope: "permanent", roots: [123, "relative/x"] },
+      { scope: "once" },
+      null,
+      42,
+    ];
+    for (const bad of bads) {
+      await withFetchStub(async (calls) => {
+        await handleConsentRequest({
+          request_id: "m1",
+          consent_token: "t1",
+          tool: "list_dir",
+          args: { path: sub },
+          consent: bad,
+        });
+        assert.match(String(calls[0].body.error), /needs_authorization/, JSON.stringify(bad));
+      });
+    }
+    assert.deepEqual(runtime.consentRoots, [], "壞形狀不得寫入任何同意根");
+  });
+});
+
+test("⑥ register：body 含 home；roots 含同意根；rules 含對應 allow 規則", async () => {
+  const grant = mkRoot();
+  localWorker.authorizedRoots.clear();
+  const base = path.join(grant, "base");
+  nodeFs.mkdirSync(base);
+  localWorker.authorizeRoots([base]);
+  try {
+    const calls = await withRegisterStub(async (calls) => {
+      await client.startDeviceBridge({
+        enabled: true,
+        gatewayBaseUrl: "http://127.0.0.1:1",
+        credentialProvider: () => "cred-fake",
+        rootsProvider: () => Array.from(localWorker.authorizedRoots),
+        consentRootsProvider: () => [grant],
+      });
+      return calls;
+    });
+    const reg = calls.find((c) => /\/register$/.test(c.url));
+    assert.ok(reg, "必須有 register");
+    assert.equal(reg.body.home, os.homedir(), "register 必須帶 home");
+    assert.ok(reg.body.roots.includes(grant), "roots 必須含同意根");
+    assert.ok(reg.body.roots.includes(base), "roots 必須含既有已設定根");
+    assert.ok(reg.body.rules && Array.isArray(reg.body.rules.allow), "rules.allow 必為陣列");
+    const wanted = `//${grant.replace(/^\/+/, "")}/**`;
+    assert.ok(
+      reg.body.rules.allow.some((r) => r && r.effect === "allow" && r.tool === "*" && r.specifier === wanted),
+      `rules.allow 應含 ${wanted}`,
+    );
+  } finally {
+    localWorker.authorizedRoots.clear();
+    nodeFs.rmSync(grant, { recursive: true, force: true });
   }
 });

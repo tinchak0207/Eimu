@@ -440,8 +440,25 @@ function isSafetyCheckPath(p) {
 function normalizeRules(rules) {
   const buckets = { deny: [], ask: [], allow: [] };
   if (rules === null || rules === undefined) return buckets;
+  // 已解析的規則物件（`{effect, tool, specifier}`）：直接採用（供裝置端把
+  // allowRuleForRoot 的物件規則併入既有規則集，與閘道 PermissionRule 同形）。
+  const pushObject = (entry) => {
+    if (!entry || typeof entry !== "object") return;
+    if (typeof entry.tool !== "string" || entry.tool.length === 0) return;
+    if (!RULE_EFFECTS.includes(entry.effect)) return;
+    let specifier = null;
+    if (entry.specifier !== undefined && entry.specifier !== null) {
+      if (typeof entry.specifier !== "string" || entry.specifier.length === 0) return;
+      specifier = entry.specifier;
+    }
+    buckets[entry.effect].push({ effect: entry.effect, tool: entry.tool, specifier });
+  };
   if (Array.isArray(rules)) {
     for (const entry of rules) {
+      if (entry && typeof entry === "object") {
+        pushObject(entry);
+        continue;
+      }
       const parsed = parseRule(entry);
       // 扁平陣列必須自帶 effect；無 effect 者不套用（不猜測、不意外放行）。
       if (!parsed || !parsed.tool || !parsed.effect) continue;
@@ -454,6 +471,10 @@ function normalizeRules(rules) {
       const list = rules[effect];
       if (!Array.isArray(list)) continue;
       for (const entry of list) {
+        if (entry && typeof entry === "object") {
+          pushObject({ ...entry, effect });
+          continue;
+        }
         const parsed = parseRule(entry);
         if (!parsed || !parsed.tool) continue;
         // 物件桶別為準（entry 內若自帶 effect 一律以桶為準）。
@@ -534,9 +555,13 @@ function evaluatePermission(opts = {}) {
 
   const rules = normalizeRules(opts.rules);
 
+  // 工具名比對：`*` 為萬用（與閘道 device-bridge-policy.ts toolMatches 同語義）。
+  // allowRuleForRoot 產生的規則固定用 tool:"*"（授權根對四個唯讀工具皆放行）。
+  const toolMatches = (ruleTool) => ruleTool === "*" || ruleTool === tool;
+
   // 3. 規則 deny（任一候選命中即命中）
   for (const rule of rules.deny) {
-    if (rule.tool !== tool) continue;
+    if (!toolMatches(rule.tool)) continue;
     if (candidates.some((c) => matchSpecifier(rule.specifier, c, ctx))) {
       return { decision: "deny", reason: REASONS.RULE_DENY, rule: { ...rule } };
     }
@@ -544,7 +569,7 @@ function evaluatePermission(opts = {}) {
 
   // 4. 規則 ask
   for (const rule of rules.ask) {
-    if (rule.tool !== tool) continue;
+    if (!toolMatches(rule.tool)) continue;
     if (candidates.some((c) => matchSpecifier(rule.specifier, c, ctx))) {
       return { decision: "ask", reason: REASONS.RULE_ASK, rule: { ...rule } };
     }
@@ -552,7 +577,7 @@ function evaluatePermission(opts = {}) {
 
   // 5. 規則 allow（所有候選皆命中才放行）
   for (const rule of rules.allow) {
-    if (rule.tool !== tool) continue;
+    if (!toolMatches(rule.tool)) continue;
     if (candidates.length > 0 && candidates.every((c) => matchSpecifier(rule.specifier, c, ctx))) {
       return { decision: "allow", reason: REASONS.RULE_ALLOW, rule: { ...rule } };
     }
@@ -622,6 +647,30 @@ function suggestRoot(resolvedPath, opts = {}) {
   return parentDisplay;
 }
 
+/**
+ * 產生「已同意授權根」的放行規則（**純函式**，與閘道 `authorizationRuleSpecifier`
+ * 同形：`//<root 去頭尾斜線>/**`）。用途：對話內就地授權（session/permanent）後，
+ * 裝置端第二道防線（mode=ask）必須認得雲端已放行的根；規則以 `tool:"*"` 對四個
+ * 唯讀工具一體放行，路徑以 `//`（檔案系統絕對）＋`/**`（含其下）表達，裝置端既有
+ * `matchSpecifier` 語義即可命中。
+ *
+ * fail-closed：非字串／非絕對（不以 `/` 開頭且非 Windows 磁碟）/ 過寬（去頭尾斜線後
+ * 為空，即 `/`）→ 回 `null`（呼叫端須略過，**不得**當成 `//**` 而意外全放行）。
+ *
+ * @param {string} root 授權根（絕對路徑；可含尾斜線）
+ * @returns {{effect:"allow", tool:"*", specifier:string}|null}
+ */
+function allowRuleForRoot(root) {
+  if (typeof root !== "string") return null;
+  const trimmed = root.trim();
+  if (trimmed.length === 0) return null;
+  const isAbsolute = trimmed.startsWith("/") || /^[A-Za-z]:[\\/]/.test(trimmed);
+  if (!isAbsolute) return null;
+  const body = trimmed.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  if (body.length === 0 || body === ".") return null; // `/`／空＝過寬
+  return { effect: "allow", tool: "*", specifier: `//${body}/**` };
+}
+
 module.exports = {
   RULE_EFFECTS,
   PERMISSION_MODES,
@@ -634,6 +683,7 @@ module.exports = {
   isSafetyCheckPath,
   evaluatePermission,
   suggestRoot,
+  allowRuleForRoot,
   // 低階工具導出供測試與跨模組複用（不改變語義）
   _internals: { toMatchPath, globMatches, matchSpecifier, pathWithin },
 };

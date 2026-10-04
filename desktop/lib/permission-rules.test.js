@@ -568,3 +568,50 @@ test("sanity：清單非空且決策必為三值之一", () => {
   const r = evalP({ rawPath: "/tmp/a.txt" });
   assert.ok(["allow", "deny", "ask"].includes(r.decision));
 });
+// ---------------------------------------------------------------------------
+// allowRuleForRoot（對話內就地授權）：產生與閘道 authorizationRuleSpecifier 同形的規則
+// ---------------------------------------------------------------------------
+test("allowRuleForRoot：與閘道 authorizationRuleSpecifier 同形（//<root>/**）", () => {
+  assert.deepEqual(pr.allowRuleForRoot("/home/u/Downloads/"), {
+    effect: "allow",
+    tool: "*",
+    specifier: "//home/u/Downloads/**",
+  });
+  assert.deepEqual(pr.allowRuleForRoot("  /home/u/Downloads  "), {
+    effect: "allow",
+    tool: "*",
+    specifier: "//home/u/Downloads/**",
+  });
+});
+
+test("allowRuleForRoot：規則以既有 matchSpecifier 語義命中該根及其下（不及其外）", () => {
+  const rule = pr.allowRuleForRoot("/home/u/Downloads");
+  const ctx = { home: HOME, settingsRoot: SETTINGS_ROOT };
+  const hit = (p) => pr._internals.matchSpecifier(rule.specifier, pr._internals.toMatchPath(p, HOME), ctx);
+  assert.equal(hit("/home/u/Downloads"), true);
+  assert.equal(hit("/home/u/Downloads/a/b.txt"), true);
+  assert.equal(hit("/home/u/Other/a.txt"), false);
+  assert.equal(hit("/home/u/Downloadsevil/a"), false);
+});
+
+test("allowRuleForRoot：fail-closed（非字串／相對／過寬根 → null，不得變 //** 全放行）", () => {
+  assert.equal(pr.allowRuleForRoot(123), null);
+  assert.equal(pr.allowRuleForRoot(""), null);
+  assert.equal(pr.allowRuleForRoot("relative/path"), null);
+  assert.equal(pr.allowRuleForRoot("/"), null);
+  assert.equal(pr.allowRuleForRoot("//"), null);
+});
+
+test("規則 tool 為 * 時對所有工具生效（與閘道 toolMatches 同語義）", () => {
+  const r = evalP({
+    tool: "list_dir",
+    rawPath: "/data/x",
+    resolvedPath: "/data/x",
+    rules: { allow: [{ effect: "allow", tool: "*", specifier: "//data/**" }] },
+  });
+  assert.equal(r.decision, "allow");
+  assert.equal(r.reason, REASONS.RULE_ALLOW);
+  // 非萬用工具名仍只對同名工具生效
+  const r2 = evalP({ tool: "list_dir", rawPath: "/data/x", rules: { allow: [{ effect: "allow", tool: "Read", specifier: "//data/**" }] } });
+  assert.equal(r2.decision, "ask");
+});

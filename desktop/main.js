@@ -112,6 +112,8 @@ let mainWindow = null;
 //   - deviceBridgeGatewayBaseUrl: string  使用者顯式設定的閘道位址（可選）
 //   - deviceBridgeDeviceId: string        本安裝的穩定裝置識別（非機密，可下發閘道；
 //                                         缺＝首次啟動產生一次並寫回，之後沿用不重生）
+//   - deviceBridgeConsentRoots: string[]  對話內「permanent」就地授權的根（去重、絕對、
+//                                         上限 64）：落盤後重啟仍有效，register 時與 roots 聯集下發
 // **不**持久化 apiKey：憑證只從 <userData>/device-bridge.json（0600）讀，
 // 頁面不可寫（見上方 bridge 註解與 lib/bridge-credential.js）。
 function settingsFilePath() {
@@ -138,6 +140,20 @@ function readSettings() {
   // 穩定安裝裝置識別（缺陷修復）：非機密、可下發閘道；空/非字串一律忽略（呼叫端會重生）。
   if (typeof parsed.deviceBridgeDeviceId === "string" && parsed.deviceBridgeDeviceId.trim()) {
     out.deviceBridgeDeviceId = parsed.deviceBridgeDeviceId.trim().slice(0, 128);
+  }
+  // 對話內就地授權（缺陷修復）：permanent 同意根的落盤欄位。string[]、去重、僅絕對路徑、
+  // 上限 64（非機密，僅路徑；不含 token/apiKey）。非法項一律略過（fail-closed）。
+  if (Array.isArray(parsed.deviceBridgeConsentRoots)) {
+    const roots = [];
+    for (const r of parsed.deviceBridgeConsentRoots) {
+      if (typeof r !== "string") continue;
+      const t = r.trim();
+      if (t.length === 0 || !t.startsWith("/")) continue;
+      if (roots.includes(t)) continue;
+      if (roots.length >= 64) break;
+      roots.push(t);
+    }
+    if (roots.length > 0) out.deviceBridgeConsentRoots = roots;
   }
   return out;
 }
@@ -427,11 +443,40 @@ if (!gotLock) {
     const resolveGatewayBaseUrl = () =>
       process.env.EIMU_GATEWAY_BASE_URL || settings.deviceBridgeGatewayBaseUrl || bridgeCredential?.gatewayBaseUrl;
 
+    // 對話內就地授權（缺陷修復）：permanent 同意根落盤（併入既有設定並 writeSettings）；
+    // register/放行時以已落盤同意根為來源。稽核選配：每接受一個新的同意根追加一行
+    // 本機稽核（ISO 時間 + scope + root；**永不**寫 token/apiKey），供使用者自查。
+    const persistConsentRoots = (roots) => {
+      const list = Array.isArray(settings.deviceBridgeConsentRoots) ? settings.deviceBridgeConsentRoots.slice() : [];
+      for (const r of Array.isArray(roots) ? roots : []) {
+        if (typeof r !== "string" || !r.startsWith("/") || list.includes(r) || list.length >= 64) continue;
+        list.push(r);
+      }
+      settings.deviceBridgeConsentRoots = list;
+      writeSettings(settings);
+    };
+    const auditConsent = (entry) => {
+      try {
+        const line = `${new Date().toISOString()} ${entry && entry.scope ? entry.scope : "unknown"} ${entry && entry.root ? entry.root : ""}\n`;
+        fs.appendFileSync(path.join(app.getPath("userData"), "device-bridge-audit.log"), line, { mode: 0o600 });
+      } catch {
+        /* 稽核失敗不得影響 bridge */
+      }
+    };
+
     // 生命週期編排（可重入）在 local-worker.createBridgeController：這裡只做依賴注入。
     // 好處：「授權根變更→以新 roots 重註冊」可在純 node 下以間諜 client 驗（*.test.js），
     // 不必啟動 Electron（本檔頂層呼叫 app API，無法在 node 下 require）。
     const bridgeController = localWorker.createBridgeController({
-      startBridge: (opts) => startDeviceBridge({ ...opts, deviceIdProvider: () => stableDeviceId }),
+      startBridge: (opts) =>
+        startDeviceBridge({
+          ...opts,
+          deviceIdProvider: () => stableDeviceId,
+          consentRootsProvider: () =>
+            Array.isArray(settings.deviceBridgeConsentRoots) ? settings.deviceBridgeConsentRoots : [],
+          persistConsentRoots,
+          auditConsent,
+        }),
       stopBridge: () => stopDeviceBridge(),
       getClientState: () => getDeviceBridgeState(),
       readEnabled: () => settings.deviceBridgeEnabled === true,
