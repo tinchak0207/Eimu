@@ -9,10 +9,11 @@ import {
   platformFetch,
   siteFetch,
   probeModelAvailable,
-  uploadImageBytes,
+  publicImageUrl,
   ok,
   fail,
 } from "../lib/client"
+import { checkAgentPath, looksLikeAgentPath } from "../lib/sandbox"
 
 /**
  * 生圖尺寸白名單（R9-C, 2026-09-30）：真源＝站點 GET /v1/openapi.json 的
@@ -84,10 +85,16 @@ async function videoCostFromCatalog(
 }
 
 /**
- * 參考圖正規化（A1, 2026-09-25）：把 args.reference_images 每個元素轉成上游吃得下的字串。
- * - 已是 http(s) / data:image → 原樣傳。
- * - 其餘（本機絕對路徑、聊天附件路徑）→ 上傳平台 /uploads，取公網 url；url 空則退回 mediaId。
- * 保序、上限 5；兩者皆空 → { ok:false }（呼叫端回 fail("upload_failed")，不靜默丟圖）。
+ * 參考圖正規化（A1 2026-09-25；2026-10-04 修：本機／工作區路徑改走公開媒體上傳輪子）。
+ * 把 args.reference_images 每個元素轉成上游吃得下的字串（≤5 張）：
+ * - `http(s)://` / `data:image` → 原樣放行。
+ * - 看似路徑 → 先過沙箱白名單閘 checkAgentPath（realpath 落 workspace 子樹、uploads 只放行
+ *   本會話），再複用 publicImageUrl（= image_edit 同一條輪子：readLocalImageBytes →
+ *   網關 /internal/media/upload）讀位元組換成公網 URL。
+ * - 其餘（含 media: 句柄）→ fail-loud。
+ * 任一項失敗 → { ok:false }（呼叫端回 fail("upload_failed")），**不靜默丟圖**
+ * （丟掉參考圖＝出的圖與參考無關，屬靜默假成功）。大小上限沿用 publicImageUrl 的
+ * MAX_UPLOAD_BYTES（20MB），超限明確報錯，不截斷。
  */
 async function normalizeReferenceImages(
   raw: string[] | undefined,
@@ -95,22 +102,51 @@ async function normalizeReferenceImages(
   signal?: AbortSignal,
 ): Promise<{ ok: true; images: string[] } | { ok: false; message: string }> {
   const images: string[] = []
-  for (const item of (raw ?? []).slice(0, MAX_REFERENCE_IMAGES)) {
-    const src = typeof item === "string" ? item.trim() : ""
-    if (!src) continue
+  const items = (raw ?? []).slice(0, MAX_REFERENCE_IMAGES)
+  for (let i = 0; i < items.length; i++) {
+    const src = typeof items[i] === "string" ? (items[i] as string).trim() : ""
+    // 空字串也算一項「提供但不可用」的參考圖：如實報錯，不靜默丟（丟圖＝出圖與參考無關）。
+    if (!src) {
+      return { ok: false, message: `第 ${i + 1} 张参考图为空字符串，请传 http(s) URL、data:image/...;base64,... 或工作区内的本地绝对路径。` }
+    }
     if (/^(https?:|data:image)/i.test(src)) {
       images.push(src)
       continue
     }
-    const up = await uploadImageBytes(src, sessionID, signal)
-    const ref = (up?.url || up?.mediaId || "").trim()
-    if (!ref) {
+    if (!looksLikeAgentPath(src)) {
       return {
         ok: false,
-        message: `參考圖上傳失敗（${src}）：平台未回傳可用位址，請改用公網 URL 或 data:image 重試。`,
+        message: `第 ${i + 1} 张参考图无法识别：${src}。只接受 http(s) URL、data:image/...;base64,... 或工作区内的本地绝对路径。`,
       }
     }
-    images.push(ref)
+    // 看似路徑 → 必須經沙箱白名單閘（不得繞過、不得讀工作區外的檔）。
+    const verdict = checkAgentPath(src, sessionID)
+    if (!verdict.ok) {
+      const reasonText: Record<string, string> = {
+        outside_workspace: "路径不在创作工作区内",
+        internal_state: "路径是平台内部状态目录，不对创作任务开放",
+        internal_config: "路径是平台内部配置文件，不对创作任务开放",
+        uploads_root: "不能指向全部上传目录",
+        foreign_upload: "该附件不属于当前会话",
+      }
+      return {
+        ok: false,
+        message: `第 ${i + 1} 张参考图路径被沙箱拒绝（${reasonText[verdict.reason] ?? verdict.reason}）：${src}。只能读取本会话可见的文件（推荐 uploads/<session>/ 下的附件），或改传 http(s) URL / data:image。`,
+      }
+    }
+    try {
+      // 複用 image_edit durable 鏈的同一輪子：讀位元組 → 網關 /internal/media/upload → 公網 URL。
+      const url = await publicImageUrl(src, sessionID, signal)
+      if (!url) {
+        return {
+          ok: false,
+          message: `第 ${i + 1} 张参考图（${src}）入库后未拿到公网 URL，请改用公网 URL 或 data:image 重试。`,
+        }
+      }
+      images.push(url)
+    } catch (e: any) {
+      return { ok: false, message: `第 ${i + 1} 张参考图处理失败（${src}）：${e?.message || String(e)}` }
+    }
   }
   return { ok: true, images }
 }
@@ -200,7 +236,9 @@ export default tool({
       .array(tool.schema.string())
       .max(5)
       .optional()
-      .describe("參考圖（最多 5 張）。可用：平台公網 URL、`data:image/...;base64,...`、或本機絕對路徑。"),
+      .describe(
+        "参考图（最多 5 张）：公网 http(s) URL、`data:image/...;base64,...`、或本地绝对路径（含工作区路径，如附件落盘的 uploads/<session>/...）。本地/工作区路径会先经沙箱校验（只能读本会话可见的文件），再自动上传换成公网 URL 送给上游。任一张路径越权、文件不存在或超过 20MB 会直接报错（不会静默丢弃参考图）。",
+      ),
   },
   async execute(args, context) {
     const model = args.model ?? "gpt-image-2"
