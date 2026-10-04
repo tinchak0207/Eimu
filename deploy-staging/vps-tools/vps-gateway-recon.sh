@@ -9,7 +9,10 @@ SSH_KEY=/home/lenovo/.ssh/new.pem
 SSH_CMD=(ssh -i "$SSH_KEY" -p 22443 -o ConnectTimeout=10 ubuntu@43.172.85.76)
 VPS_DIR=/opt/agent-harness/gateway
 LOCAL_DIR="$(cd "$(dirname "$0")/../gateway" && pwd)"
-TMP_DIR=$(mktemp -d /tmp/vps-recon.XXXXXX)
+# 臨時 worktree 落點可覆寫：本機 /tmp 是 12G tmpfs 且常近滿（mktemp/worktree 會失敗），
+# gateway-release.sh 的 recon 一律帶 RECON_TMPDIR=/var/tmp；trap 保證兩種落點都清乾淨。
+RECON_TMPDIR="${RECON_TMPDIR:-/tmp}"
+TMP_DIR=$(mktemp -d "$RECON_TMPDIR/vps-recon.XXXXXX")
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 # 1. 拉取 VPS 生產源碼（排除備份/依賴/測試/執行時狀態；root-owned 需 sudo tar）
@@ -24,7 +27,7 @@ fi
 #    比對「生產 vs HEAD」會在正常要發佈新 commit 時一律誤判為漂移，進而逼人 --skip-recon 繞過閘門。
 #    正確語義是「生產是否仍等於我們上次發出去的那一版」——相等＝沒有手改生產，可以安全發佈新工作。
 GIT_DIR=$(git -C "$LOCAL_DIR" rev-parse --show-toplevel)
-WORKTREE=$(mktemp -d /tmp/vps-recon-head.XXXXXX)
+WORKTREE=$(mktemp -d "$RECON_TMPDIR/vps-recon-head.XXXXXX")
 trap 'rm -rf "$TMP_DIR" "$WORKTREE"' EXIT
 BASE="${RECON_BASE:-HEAD}"
 git -C "$GIT_DIR" worktree add --quiet --detach "$WORKTREE" "$BASE" || { echo "RECON_FAIL: 無法解析基準 $BASE"; exit 2; }
