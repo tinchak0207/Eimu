@@ -1,12 +1,12 @@
-# ⚠️ 這份清單必須維持「黑名單制」。**不要**改回 `/*` + `!/dir/` 的根目錄白名單：
-# Vercel 端會把被 `/*` 忽略的目錄整棵剪掉、不再下探，寫 `!/src/` 或 `!/src/**` 都救不回來
-#（2026-10-02 實錘：遠端建置的 /vercel/path0 只剩根層檔案，src/、public/、db/、worker/ 全缺，
-#  next.config.mjs 因此找不到 ./src/lib/control-plane-proxy-routes.mjs，前端連 build 都進不去。
-#  同一份清單用 gitignore 語義的 ignore npm 套件判「不忽略」，本地驗不出來，只能靠遠端實測守）。
-# 建議發佈走乾淨 worktree（只有 tracked 檔，天生無雜物）；下面這段是「從主工作區直接發佈」的兜底。
+# ⚠️ 这份清单必须维持「黑名单制」。**不要**改回 `/*` + `!/dir/` 的根目录白名单：
+# Vercel 端会把被 `/*` 忽略的目录整棵剪掉、不再下探，写 `!/src/` 或 `!/src/**` 都救不回来
+#（2026-10-02 实锤：远端建置的 /vercel/path0 只剩根层档案，src/、public/、db/、worker/ 全缺，
+#  next.config.mjs 因此找不到 ./src/lib/control-plane-proxy-routes.mjs，前端连 build 都进不去。
+#  同一份清单用 gitignore 语义的 ignore npm 套件判「不忽略」，本地验不出来，只能靠远端实测守）。
+# 建议发布走干净 worktree（只有 tracked 档，天生无杂物）；下面这段是「从主工作区直接发布」的兜底。
 
-# ── 根層逐項排除（＝白名單的等價表達：除下列清單外，根層其餘項目全部排除）──
-# 新增根層目錄/檔案若「建置或執行期」需要（站點會 process.cwd()+路徑讀它），把對應那行刪掉。
+# ── 根层逐项排除（＝白名单的等价表达：除下列清单外，根层其余项目全部排除）──
+# 新增根层目录/档案若「建置或执行期」需要（站点会 process.cwd()+路径读它），把对应那行删掉。
 /.agent-notes/
 /.agent-runs/
 /.agents-fix/
@@ -188,23 +188,23 @@
 /workbuddy-linux/
 /始皇帝的北境征途.mp4
 
-# ── 路徑樣式排除（與根層無關，原樣保留）──
+# ── 路径样式排除（与根层无关，原样保留）──
 # Vercel CLI only falls back to .gitignore when this file does NOT exist.
 # Because this file exists, every exclusion the deployment needs must be listed here.
 # Paths are gitignore syntax: a leading "/" anchors to the repo root.
 # Do NOT drop the leading slash on /docs/ or /output/ — unanchored "docs/" would
 # also match the real Next.js route src/app/docs/.
 
-（歷史：2026-10-01 曾改成 `/*` + `!/dir/` 根目錄白名單；2026-10-02 因 Vercel 剪目錄行為回退為黑名單。）
+（历史：2026-10-01 曾改成 `/*` + `!/dir/` 根目录白名单；2026-10-02 因 Vercel 剪目录行为回退为黑名单。）
 
-（node_modules 整棵排除：remote build 自己 install；本地 prebuilt 走另一條路。）
+（node_modules 整棵排除：remote build 自己 install；本地 prebuilt 走另一条路。）
 node_modules/@swc/*
 
 # Prebuilt deployments need the traced .next runtime files referenced by
 # .vercel/output/functions/*/.vc-config.json. Keep only stale snapshots ignored.
 /.next.bak-*/
-# 本地 build 快取：remote build 會自己重建，帶上只是把 410MB 上傳量灌爆
-# （實錘：整包 410.7MB 超過 Vercel 100MB 單檔上限而失敗）。
+# 本地 build 快取：remote build 会自己重建，带上只是把 410MB 上传量灌爆
+# （实锤：整包 410.7MB 超过 Vercel 100MB 单档上限而失败）。
 /.next/
 /out/
 /build
@@ -212,9 +212,9 @@ node_modules/@swc/*
 # local tooling binaries (tools/bin/cloudflared.exe alone is ~52 MB)
 /tools/
 
-# Electron 桌面打包產物（AppImage 112MB + nsis 90MB）。它們是發行物不是站點
-# 資產，且單檔超 Vercel 100MB 上限會讓整個部署失敗——desktop/.gitignore 早有
-# dist/，但 .vercelignore 存在時 Vercel 不讀 .gitignore，必須在這裡再列一次。
+# Electron 桌面打包产物（AppImage 112MB + nsis 90MB）。它们是发行物不是站点
+# 资产，且单档超 Vercel 100MB 上限会让整个部署失败——desktop/.gitignore 早有
+# dist/，但 .vercelignore 存在时 Vercel 不读 .gitignore，必须在这里再列一次。
 /desktop/dist/
 /desktop/**/release/
 
@@ -266,13 +266,13 @@ node_modules/@swc/*
 *.tsbuildinfo
 .env*
 
-# kunpeng 鋪片工作區（未追蹤半成品；主應用零引用，上傳會炸 Vercel lint/type 門禁）
+# kunpeng 铺片工作区（未追踪半成品；主应用零引用，上传会炸 Vercel lint/type 门禁）
 /src/vendor-bridges/
 
 # Blender headless bridge runtime (live socket breaks CLI file collection)
 /.blender-work/
 
-# kunpeng 片R 預驗收補漏（968K 噪音目錄，主應用零引用）
+# kunpeng 片R 预验收补漏（968K 噪音目录，主应用零引用）
 /bridge/
 /skills/
 /deploy-staging/
@@ -282,11 +282,11 @@ node_modules/@swc/*
 /eval-anime-mv-0911/
 /eval-visual-replay/
 
-# 200MB 級本機影片產物（promo-video 渲染中會被即時寫入；eimu-promo.mp4 107MB
-# 超過 Vercel 100MB 單檔上限，上傳必失敗）。.gitignore 已列但 .vercelignore
-# 存在時 Vercel 不讀 .gitignore，必須在此再列一次。
+# 200MB 级本机影片产物（promo-video 渲染中会被即时写入；eimu-promo.mp4 107MB
+# 超过 Vercel 100MB 单档上限，上传必失败）。.gitignore 已列但 .vercelignore
+# 存在时 Vercel 不读 .gitignore，必须在此再列一次。
 /artifacts/
 /promo-video/out/
 
-# 宣傳片渲染的 CJK 字型（23MB，站點完全用不到；.vercelignore 存在時 Vercel 不讀 .gitignore）
+# 宣传片渲染的 CJK 字型（23MB，站点完全用不到；.vercelignore 存在时 Vercel 不读 .gitignore）
 /promo-video/fonts/

@@ -1,6 +1,6 @@
 -- 029_api_rejection.sql
--- B 端 /v1/* 拒絕遙測：被拒（鑑權／餘額／參數）的請求不進 generation_job，這裡補一條足跡。
--- 只記 key 前 8 位，不記 prompt、不記完整 key、不記 email；寫入失敗不得影響請求本身。
+-- B 端 /v1/* 拒绝遥测：被拒（鉴权／余额／参数）的请求不进 generation_job，这里补一条足迹。
+-- 只记 key 前 8 位，不记 prompt、不记完整 key、不记 email；写入失败不得影响请求本身。
 CREATE TABLE IF NOT EXISTS api_rejection (
   id         bigserial PRIMARY KEY,
   user_id    bigint,
@@ -12,6 +12,6 @@ CREATE TABLE IF NOT EXISTS api_rejection (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 按人／按時間查流失：報告與後續漏斗卡都走這兩條。
+-- 按人／按时间查流失：报告与后续漏斗卡都走这两条。
 CREATE INDEX IF NOT EXISTS api_rejection_created_idx ON api_rejection (created_at);
 CREATE INDEX IF NOT EXISTS api_rejection_user_idx ON api_rejection (user_id, created_at);

@@ -16,7 +16,7 @@
 !db
 !bridge
 !skills
-# 運行時讀檔（EXPERT_CONSTITUTION_PATH 等）與 next build 型別檢查會碰到的測試匯入。
+# 运行时读档（EXPERT_CONSTITUTION_PATH 等）与 next build 型别检查会碰到的测试汇入。
 !deploy-staging/expert-gateway
 !deploy-staging/gateway
 

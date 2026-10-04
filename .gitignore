@@ -27,7 +27,7 @@
 # misc
 .DS_Store
 *.pem
-# 例外：vendored certifi 的 CA bundle 是套件資料檔，必須隨 vendor 一起進版控／部署
+# 例外：vendored certifi 的 CA bundle 是套件资料档，必须随 vendor 一起进版控／部署
 !deploy-staging/opencode-runtime/lib/smartsearch/certifi/cacert.pem
 
 # debug
@@ -69,7 +69,7 @@ tools/.deploy-bizkey.sh
 .env*.local
 workbuddy-linux/
 
-# 敏感/運行時雜訊（勿入庫）
+# 敏感/运行时杂讯（勿入库）
 .pixai-refresh/
 pixai-pool/
 .vercel-cli-data/
@@ -78,7 +78,7 @@ pixai-pool/
 .env*
 !deploy/vps/control-plane.env.example
 
-# 本地工具 HOME / 快取 / 快照（曾整包入庫 160MB+，禁止再入）
+# 本地工具 HOME / 快取 / 快照（曾整包入库 160MB+，禁止再入）
 /.tmp-home/
 /.vercel.bak-link/
 /.dsh-ssh/
@@ -95,10 +95,10 @@ pixai-pool/
 /marketing-battle-pack/
 /eval-daming-film/
 
-# 本機憑證備份（.env 同源，永不入庫）
+# 本机凭证备份（.env 同源，永不入库）
 .credentials.bak.yaml
 
-# ── 一次性診斷/評測/暫存（2026-09-04 commit 瘦身）──
+# ── 一次性诊断/评测/暂存（2026-09-04 commit 瘦身）──
 .zcode/
 .tmp-*/
 eval-*/
@@ -110,7 +110,7 @@ chapters.tsv
 # Blender headless sandbox workdir (bridge/blender-bridge)
 .blender-work/
 
-# ── 根目錄暴露面清理（2026-09-06）：log/測試/redteam/內部資料永不入庫 ──
+# ── 根目录暴露面清理（2026-09-06）：log/测试/redteam/内部资料永不入库 ──
 *.log
 *.err
 .redteam-*
@@ -126,7 +126,7 @@ redteam-*
 /.vercel.bak-owner/
 /deploy-staging/blender-modal/out/
 /deploy-staging/blender-director-persona/__pycache__/
-# 帳號池數據（含明文帳密+token，永不入庫）
+# 帐号池数据（含明文帐密+token，永不入库）
 /pixai-pool-new.json
 /IMG_*.jpg
 /dreamina_output.webp
@@ -141,47 +141,47 @@ redteam-*
 .av-implementation-spec.md
 .tmp-*
 
-# asset cache (mocap/shake 數據快取，不入庫)
+# asset cache (mocap/shake 数据快取，不入库)
 .asset-cache/
 
-# 評測證據大檔留本地（22MB PNG/mp4），只入 REPORT.md
+# 评测证据大档留本地（22MB PNG/mp4），只入 REPORT.md
 
-# 憑證與 VPS 同步工作目錄（含 key，嚴禁入庫）
+# 凭证与 VPS 同步工作目录（含 key，严禁入库）
 /.flowmusic-creds.json
 /staging/
 /deploy-staging/*
-# 例外：gateway/ 子目錄是純程式碼真源（生產 index.ts 快照＋記憶模組，PRD D7），不含憑證
+# 例外：gateway/ 子目录是纯程式码真源（生产 index.ts 快照＋记忆模组，PRD D7），不含凭证
 !/deploy-staging/gateway/
-# 例外：laya-server/ 是 Jev 兜底判定服務純程式碼（server.py/Dockerfile），不含憑證與權重
+# 例外：laya-server/ 是 Jev 兜底判定服务纯程式码（server.py/Dockerfile），不含凭证与权重
 !/deploy-staging/laya-server/
-# 例外：vps-tools/ 是 VPS 運維工具純程式碼（gateway 對賬腳本等），不含憑證
+# 例外：vps-tools/ 是 VPS 运维工具纯程式码（gateway 对账脚本等），不含凭证
 !/deploy-staging/vps-tools/
-# 例外：opencode-runtime/ 是 /opt/agent-harness/workspace/.opencode 手維護子集（tools/lib/skills/plugin
-# ＋設定檔）的單一真源；vendored 的 node_modules/services 與執行時 opencode.db 已排除（見該目錄 .gitignore）
+# 例外：opencode-runtime/ 是 /opt/agent-harness/workspace/.opencode 手维护子集（tools/lib/skills/plugin
+# ＋设定档）的单一真源；vendored 的 node_modules/services 与执行时 opencode.db 已排除（见该目录 .gitignore）
 !/deploy-staging/opencode-runtime/
-# 例外：poller/ 是 /opt/agent-harness/poller（生產常駐輪詢程式）的唯一真源；此前無 repo 真源導致
-# 影片命名空間 bug 存活至今（2026-10-02 修）。純程式碼，不含憑證
+# 例外：poller/ 是 /opt/agent-harness/poller（生产常驻轮询程式）的唯一真源；此前无 repo 真源导致
+# 影片命名空间 bug 存活至今（2026-10-02 修）。纯程式码，不含凭证
 !/deploy-staging/poller/
-# 例外：flowmusic2api/ 是 FlowMusic 帳號池服務的 P1/P2 憑證鏈修復補丁＋看門狗的真源；
-# 此前補丁只在本機 /tmp、看門狗只在 VPS（同 agent-poller 的無真源陷阱）。
-# 純程式碼/補丁/測試，不含憑證
+# 例外：flowmusic2api/ 是 FlowMusic 帐号池服务的 P1/P2 凭证链修复补丁＋看门狗的真源；
+# 此前补丁只在本机 /tmp、看门狗只在 VPS（同 agent-poller 的无真源陷阱）。
+# 纯程式码/补丁/测试，不含凭证
 !/deploy-staging/flowmusic2api/
 *.bak-*
 
-# ── 影片產物（本機渲染輸出，200MB 級，2026-09-27 commit 瘦身）──
-# artifacts/：宣傳片 mp4/webm 與 vote-kit 交付物；promo-video/out/：分段渲染 segN.mkv/stills/score.wav。
-# 兩者都是可重跑的本機產物，源碼（promo-video/audio.py、render.mjs、index.html）照常入庫。
+# ── 影片产物（本机渲染输出，200MB 级，2026-09-27 commit 瘦身）──
+# artifacts/：宣传片 mp4/webm 与 vote-kit 交付物；promo-video/out/：分段渲染 segN.mkv/stills/score.wav。
+# 两者都是可重跑的本机产物，源码（promo-video/audio.py、render.mjs、index.html）照常入库。
 /artifacts/
 /promo-video/out/
-# 宣傳片渲染用的 CJK 字型（兩支 NotoSerifSC OTF 共 23MB）：本機工具鏈的輸入，
-# 不是產品資產，且體積等同半個倉庫 ⇒ 不入庫（重跑渲染前先自行放回 promo-video/fonts/）。
+# 宣传片渲染用的 CJK 字型（两支 NotoSerifSC OTF 共 23MB）：本机工具链的输入，
+# 不是产品资产，且体积等同半个仓库 ⇒ 不入库（重跑渲染前先自行放回 promo-video/fonts/）。
 /promo-video/fonts/
 
-# ── 產品發展史（史官編撰，本地留存，不入庫）──
+# ── 产品发展史（史官编撰，本地留存，不入库）──
 /PRODUCT-HISTORY.md
 
-# ── 論文（本地寫作／投稿工作區，不入庫）──
-# docs/paper/：manuscript.md（含 evidence-and-submission-notes）與 latex/（TMLR 模板
-# tmlr.sty／.bst、body/abstract/appendices 源碼，以及 .aux/.log/.out/.pdf build 產物）。
-# 投稿材料不隨產品倉庫流通，整包留本機。
+# ── 论文（本地写作／投稿工作区，不入库）──
+# docs/paper/：manuscript.md（含 evidence-and-submission-notes）与 latex/（TMLR 模板
+# tmlr.sty／.bst、body/abstract/appendices 源码，以及 .aux/.log/.out/.pdf build 产物）。
+# 投稿材料不随产品仓库流通，整包留本机。
 /docs/paper/

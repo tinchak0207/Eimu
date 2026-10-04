@@ -1,15 +1,15 @@
--- 016: provider reconciliation（INC-0831 中控打掉上游成功任務事故的架構級整改）。
+-- 016: provider reconciliation（INC-0831 中控打掉上游成功任务事故的架构级整改）。
 --
--- 事故閉環：cangyuansuanli 10 筆視頻任務上游全部成功，中控輪詢超時後走
--- failGenerationJob(deadline_exceeded) + refund，成品 URL 從此無人認領。
--- 根因：provider task id 沒有對帳閉環——task id 落了 attempt 行（甚至落了事件），
--- 但沒有任何循環再按 task id 去問上游「你好了沒」。
+-- 事故闭环：cangyuansuanli 10 笔视频任务上游全部成功，中控轮询超时后走
+-- failGenerationJob(deadline_exceeded) + refund，成品 URL 从此无人认领。
+-- 根因：provider task id 没有对帐闭环——task id 落了 attempt 行（甚至落了事件），
+-- 但没有任何循环再按 task id 去问上游「你好了没」。
 --
--- 本遷移把「上游任務」變成可恢復的 durable execution：
---   1. generation_attempt 增加對帳欄位（provider_state / 排程 / 租約 / 次數 / 原文）。
---   2. artifact (job_id, output_index) 唯一化：晚到成品冪等落地，同一輸出永不重複列。
---   3. 存量 failed/submit_unknown 且帶 task id 的 attempt 全部回填進對帳隊列
---      （含本次事故的 10 筆 cangyuansuanli 任務——上游 CDN URL 若仍在即可救回）。
+-- 本迁移把「上游任务」变成可恢复的 durable execution：
+--   1. generation_attempt 增加对帐栏位（provider_state / 排程 / 租约 / 次数 / 原文）。
+--   2. artifact (job_id, output_index) 唯一化：晚到成品幂等落地，同一输出永不重复列。
+--   3. 存量 failed/submit_unknown 且带 task id 的 attempt 全部回填进对帐队列
+--      （含本次事故的 10 笔 cangyuansuanli 任务——上游 CDN URL 若仍在即可救回）。
 
 ALTER TABLE generation_attempt
   ADD COLUMN IF NOT EXISTS provider_state text NOT NULL DEFAULT 'unknown',
@@ -31,18 +31,18 @@ BEGIN
   END IF;
 END $$;
 
--- 對帳掃描主路徑：到期未輪詢、仍 unknown/running 的上游任務。
+-- 对帐扫描主路径：到期未轮询、仍 unknown/running 的上游任务。
 CREATE INDEX IF NOT EXISTS generation_attempt_reconcile_due_idx
   ON generation_attempt (provider_next_poll_at)
   WHERE provider_state IN ('unknown', 'running') AND provider_next_poll_at IS NOT NULL;
 
--- 按 task id 對賬的直查路徑（probe / 人工排障 / 事故復盤）。
+-- 按 task id 对账的直查路径（probe / 人工排障 / 事故复盘）。
 CREATE INDEX IF NOT EXISTS generation_attempt_provider_task_idx
   ON generation_attempt (provider_task_id)
   WHERE provider_task_id IS NOT NULL;
 
--- 存量回填：已提交過上游（有 task id）但被舊中控判死/掛 unknown 的 attempt，
--- 全部納入對帳窗口（24h）。provider_next_poll_at=now() → 部署後第一個 maintenance 立刻開工。
+-- 存量回填：已提交过上游（有 task id）但被旧中控判死/挂 unknown 的 attempt，
+-- 全部纳入对帐窗口（24h）。provider_next_poll_at=now() → 部署后第一个 maintenance 立刻开工。
 UPDATE generation_attempt
 SET provider_state = 'running',
     provider_next_poll_at = now(),
@@ -51,9 +51,9 @@ WHERE provider_task_id IS NOT NULL
   AND status IN ('failed', 'submit_unknown');
 
 -- ---------------------------------------------------------------------------
--- artifact 輸出唯一性：先清歷史重複（保留最早一行為 canonical），再加 partial
--- unique index。之後 recordArtifact 走 ON CONFLICT DO NOTHING，同一輸出
--- （worker 先到 or 對帳晚到）永遠只有一行。
+-- artifact 输出唯一性：先清历史重复（保留最早一行为 canonical），再加 partial
+-- unique index。之后 recordArtifact 走 ON CONFLICT DO NOTHING，同一输出
+-- （worker 先到 or 对帐晚到）永远只有一行。
 -- ---------------------------------------------------------------------------
 DELETE FROM artifact a
 USING artifact b
