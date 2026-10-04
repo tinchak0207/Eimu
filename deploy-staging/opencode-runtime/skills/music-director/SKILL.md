@@ -51,6 +51,14 @@ FlowMusic2API 通路的硬约束（实测，详见该 DATA 档）：**无歌词�
 
 与 Suno 社群伪标签（`[BPM:120]`、`[Reverb:30%]` 等所有平台都不解析的神话构造）的区分照旧：**凡该通路 DATA 档没实测到的控件一律不写**。
 
+### 六层 style 公式（顺序即优先级；2026-10-04 G1/G3 实测校正）
+
+写 style prompt 按此顺序，**决定性参数必须落在最前 1/3**：
+
+`GENRE`（流派/年代或场景，放最前）→ **决定性参数**（`BPM`、调性 `key`、和弦进行、段落结构，如 `96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge`）→ `MOOD`（≤2 个相容情绪词）→ `INSTRUMENTATION`（2-3 件主导乐器＋演奏法）→ `VOCAL`（谁唱/怎么唱）→ `PRODUCTION`（年代/混音/空间等**修饰性**描述，放最后、可被裁）。
+
+为什么：FlowMusic2API 回吐的 `clips[].sound_prompt` 是上游自己的摘要，**只逐字保留前段**；把 BPM／调性／结构写在尾部会整层丢失（2026-10-04 G1 实测样本 B：`key of C major` 整丢、STRUCTURE 整层丢，仅句尾 BPM 被搬到回吐串末尾；样本 A 的调性在串中部则逐字保留）。规则层 `directMusicPrompt` 对 flowmusic 另做一次**决定性参数前置**（回执 `prompt_director.applied` 出现 `front-load-params`），但**把 agent 自己的写法写对**才是第一道保险。长度压缩（超限）优先丢 `PRODUCTION` 的混音/空间修饰子句，保住 `GENRE` 与决定性参数。
+
 ### 时长硬约束前置揭露（硬规则，2026-10-04）
 
 **当前通路没有精确时长控制**：YuE2 无 30s 短档、成品长度由模型决定（回执 `duration_seconds` 为上游自报实测值）；FlowMusic2API 成品实测 162–182s、`duration_hint` 不改变长度（`clip30` 不是真短档）；Lyria 直连的时间戳只控结构不控总长。免费 `probe=true` 体检口径也一致——它只报各通路 status／`can_generate_vocal_song`／`capability` 备注（YuE2 可用时给单首时长上限，或说明上游未回报预算），**不保证精确秒数**，不能拿它当「能压到你要的秒数」的证据。

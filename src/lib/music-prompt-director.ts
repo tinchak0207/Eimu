@@ -5,8 +5,10 @@
  * (GENRE + MOOD + INSTRUMENTATION + VOCAL + STRUCTURE + PRODUCTION) 的缺漏
  * 并补齐中性指令、把 `[BPM: 120]` 这类所有平台都不解析的伪装参数改写成散文、
  * 把空泛／缺陷词换成库内有依据的具体语汇、修剪超过两个的 MOOD，最后依目标
- * 通路执行硬规则：flowmusic 剥除死掉的时间戳、无歌词标签时压成单行并压进
- * 220 runes（超限依 CORE_01 权重由低到高整层丢弃，仍超才硬截——硬截尽量用满预算：
+ * 通路执行硬规则：flowmusic 剥除死掉的时间戳、**把决定性参数（BPM／调性／和弦
+ * 进行／段落结构）整句前移到 GENRE 之后**（上游 sound_prompt 摘要只保前段，
+ * 2026-10-04 G1/G3）、无歌词标签时压成单行并压进 220 runes
+ * （超限先丢低权重描述性修饰子句，仍超才硬截——硬截尽量用满预算：
  * 先取前 cap runes，≥60% cap 有子句边界才退、否则退到最后空白或就地切）；
  * lyria 保留官方时间戳、不设 220 上限；yue2 剥除时间戳（YuE2 不认时间戳结构控制）但
  * **保留 [Verse]/[Chorus] 段落标签**（那是歌词栏必需语法）、允许换行、上限 600 runes（超出按权重丢低优先层）。
@@ -33,7 +35,12 @@ export type MusicChannel = "flowmusic" | "lyria" | "yue2";
 /** 六层风格公式的槽位 id。 */
 export type MusicLayerId = "genre" | "mood" | "instrumentation" | "vocal" | "structure" | "production";
 
-/** 六层固定顺序（＝组装顺序）。来源：CORE_01_STYLE.md:35-40 §1、:965-973 §13。 */
+/**
+ * 六层固定顺序（＝侦测与权重序）。来源：CORE_01_STYLE.md:35-40 §1、:965-973 §13。
+ * 实送 flowmusic 的**有效排布**另经 frontLoadDecidingParams 前置决定性参数：
+ * GENRE → 决定性参数（BPM／key／和弦进行／段落结构）→ MOOD → INSTRUMENTATION → VOCAL
+ * → PRODUCTION（混音／空间修饰，放最后可被裁）。
+ */
 export const MUSIC_LAYER_IDS: readonly MusicLayerId[] = [
   "genre",
   "mood",
@@ -524,6 +531,14 @@ const BPM_PATTERN = /\b\d{2,3}\s*bpm\b|\bbpm\b|\btempo\b/i;
 const KEY_PATTERN = /\bkey of\b|\b[a-g](?:\s*#|\s*b)?\s*(?:major|minor)\b/i;
 
 /**
+ * 段落结构子句（决定性参数之一）：段落如何展开的散文写法（verses／chorus／bridge／
+ * call and response／build-up …）与方括号段落标签。与 STRUCTURE_WORDS 的差别＝刻意
+ * 不含时间戳（时间轴顺序敏感，且本前置只对 flowmusic 生效）。
+ */
+const SECTION_DECIDING_PATTERN =
+  /\b(?:verses?|chorus(?:es)?|bridges?|intros?|outros?|pre-?chorus|hooks?|refrain|coda|middle eight|call[- ]and[- ]response|aaba|twelve-?bar|strophic|through-?composed|buildups?|build-?up|breakdowns?|drops?|section by section)\b|\[(?:verse|chorus|bridge|intro|outro|pre-?chorus|hook|refrain|breakdown|drop|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)\]/i;
+
+/**
  * 无人声宣告＝承重子句（2026-10-04 F2 实锤）：压缩时若被当低权重 vocal 子句丢掉，
  * 纯器乐请求可能被上游补上人声，而回执只说「丢掉：vocal」。故它的子句权重高于 BPM／调性，
  * 并另有一条「从尾端整体抽出、压缩后接回」的保命路径（见 directMusicPrompt 步骤 5）。
@@ -549,11 +564,16 @@ const CLAUSE_SPLIT_PATTERN = /[^,;.，；。、\n]+[,;.，；。、\n]?/g;
 /** 未匹配任何层的细节子句（环境音／时长／乐手描述）＝中等权重：先于 STRUCTURE／PRODUCTION 被丢。 */
 const UNMATCHED_CLAUSE_WEIGHT = 3;
 
-/** 子句权重：BPM／调性承重最高；其余取命中层的 LAYER_WEIGHT（多层取最大）；未命中＝中权重。 */
+/**
+ * 子句权重：决定性参数（BPM／调性／和弦进行／段落结构）承重最高；其余取命中层的
+ * LAYER_WEIGHT（多层取最大）；未命中＝中权重。压缩据此优先丢低权重的描述性修饰子句
+ * （混音／空间／年代感），而不是用户给定的风格参数（2026-10-04 G3）。
+ */
 function clauseWeight(clause: string): number {
   // 无人声宣告承重最高（高于 BPM／调性）：压缩必须保住它，否则纯器乐请求会被上游补人声。
   if (INSTRUMENTAL_DECLARATION_PATTERN.test(clause)) return 8;
-  if (TEMPO_KEY_PATTERN.test(clause)) return 7;
+  // 决定性参数（速度／调性／和弦进行／段落结构）＝承重：压缩不得把它们当低权重层丢掉。
+  if (TEMPO_KEY_PATTERN.test(clause) || SECTION_DECIDING_PATTERN.test(clause)) return 7;
   let best = 0;
   for (const id of MUSIC_LAYER_IDS) {
     if (MUSIC_LAYER_PATTERNS[id].test(clause)) best = Math.max(best, LAYER_WEIGHT[id]);
@@ -587,6 +607,42 @@ function trimClauseEdges(text: string): string {
     .replace(/[\s,;.，；。、\n]+$/, "")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+}
+
+/**
+ * 决定性参数前置（2026-10-04 G3 交付，仅 flowmusic）：FlowMusic 上游回吐的
+ * `sound_prompt` 摘要只逐字保留前段——把 BPM／调性／和弦进行／段落结构写在尾部
+ * 会整层丢失（G1 实测样本 B：`key of C major` 整丢、STRUCTURE 整层丢，只有句尾的
+ * BPM 被搬到回吐串末尾；样本 A 亦见规则层补的 STRUCTURE 被丢）。
+ *
+ * 故在组装前把「决定性参数子句」整句前移，紧随居首的 GENRE 子句之后（让它们落在
+ * 实送文本的前 1/3，进入上游摘要逐字保留的区间）；描述性修饰子句（混音／空间／
+ * 年代感等 PRODUCTION 描述）留在后方，仍可被长度压缩或上游摘要裁掉。
+ *
+ * 只重排整句、逐字不改；首子句（genre front-loading 承重位）永不移动；无参数可移
+ * 或参数已在最前时原样返回（不制造无谓的标点归一化）。
+ */
+function frontLoadDecidingParams(text: string): string {
+  const clauses = splitClauses(text);
+  if (clauses.length <= 2) return text;
+  const isDeciding = (clause: string) =>
+    TEMPO_KEY_PATTERN.test(clause) || SECTION_DECIDING_PATTERN.test(clause);
+  const [head, ...tail] = clauses;
+  const params = tail.filter(isDeciding);
+  // 无决定性参数可移，或它们本就全在 head 之后（顺序未变）→ 不重排。
+  if (params.length === 0 || params.length === tail.length) return text;
+  const rest = tail.filter((clause) => !isDeciding(clause));
+  const ordered = [head, ...params, ...rest];
+  // 被前移的参数可能原是全文最后一句（无尾部分隔符）——移位后它不再居末，
+  // 补一个逗号防与后句黏连（正常情形子句自带分隔符，逐字不变）。
+  const joined = ordered
+    .map((clause, index) =>
+      index < ordered.length - 1 && !/[,;.，；。、]\s*$/.test(clause)
+        ? `${clause.replace(/\s+$/, "")}, `
+        : clause,
+    )
+    .join("");
+  return trimClauseEdges(joined);
 }
 
 /**
@@ -814,6 +870,17 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     if (stripped !== core) applied.push("strip-timestamps");
     core = stripped;
     limit = CHANNEL_LIMITS.yue2Style;
+  }
+
+  // 4.5 决定性参数前置（仅 flowmusic，2026-10-04 G3）：把 BPM／调性／和弦进行／段落
+  // 结构整句前移到居首的 GENRE 之后，避免它们落在尾段被上游的 sound_prompt 摘要整层
+  // 丢弃（G1 实测：key of C major 整丢、STRUCTURE 整层丢，仅句尾 BPM 被搬到回吐串末尾）。
+  if (channel === "flowmusic") {
+    const frontLoaded = frontLoadDecidingParams(core);
+    if (frontLoaded !== core) {
+      core = frontLoaded;
+      applied.push("front-load-params");
+    }
   }
 
   // 5. 缺层补中性指令（不替用户决定流派／乐器／唱的人），再依上限组装。
