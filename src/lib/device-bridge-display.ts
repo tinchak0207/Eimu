@@ -247,19 +247,19 @@ export interface LocalFileModeSpec {
 }
 
 export const LOCAL_FILE_MODES: readonly LocalFileModeSpec[] = [
-  { id: "off", icon: "power", title: "關閉", subtitle: "agent 不能讀取本機檔案。" },
-  { id: "ask", icon: "message-circle-question", title: "每次詢問", subtitle: "每次讀取前先問你。" },
+  { id: "off", icon: "power", title: "关闭", subtitle: "agent 不能读取本机档案。" },
+  { id: "ask", icon: "message-circle-question", title: "每次询问", subtitle: "每次读取前先问你。" },
   {
     id: "auto",
     icon: "folder-check",
-    title: "授權範圍內自動",
-    subtitle: "已授權資料夾內自動讀取，範圍外會先問你。",
+    title: "授权范围内自动",
+    subtitle: "已授权资料夹内自动读取，范围外会先问你。",
   },
   {
     id: "full",
     icon: "globe",
-    title: "完全訪問",
-    subtitle: "整個家目錄可讀；敏感位置（~/.ssh、~/.aws、私鑰等）一律不讀。",
+    title: "完全访问",
+    subtitle: "整个家目录可读；敏感位置（~/.ssh、~/.aws、私钥等）一律不读。",
   },
 ] as const;
 

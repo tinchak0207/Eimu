@@ -863,7 +863,7 @@ export class DeviceBridge {
             return {
               ok: false,
               code: "needs_authorization",
-              message: "此路徑尚未授權。",
+              message: "此路径尚未授权。",
               needsAuthorization: { root, reason: mapAskReason(verdict.reason), options: AUTHORIZATION_OPTIONS },
             }
           }
@@ -1142,7 +1142,7 @@ function needsAuthorizationResponse(info: NeedsAuthorizationInfo): Response {
       ok: false,
       error: {
         code: "needs_authorization",
-        message: "此路徑尚未授權。",
+        message: "此路径尚未授权。",
         root: info.root,
         reason: info.reason,
         options: info.options,

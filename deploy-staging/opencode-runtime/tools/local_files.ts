@@ -51,14 +51,14 @@ export function nameGlobMatcher(nameGlob: string): (name: string) => boolean {
  */
 const GUIDANCE: Record<string, string> = {
   no_device_registered:
-    "你的帳號還沒在桌面版登入並開啟本機檔案橋。請開啟桌面版並授權要讀取的資料夾，或在對話中直接同意授權。",
-  device_offline: "桌面版目前沒連上。請開啟（或重新開啟）桌面版並保持開著，再試一次。",
+    "你的帐号还没在桌面版登入并开启本机档案桥。请开启桌面版并授权要读取的资料夹，或在对话中直接同意授权。",
+  device_offline: "桌面版目前没连上。请开启（或重新开启）桌面版并保持开着，再试一次。",
   path_not_authorized:
-    "這個路徑不在你已授權的資料夾內。請在對話中同意授權這個資料夾，或在桌面版授權要讀取的資料夾。",
-  device_ambiguous: "你的帳號有多台裝置同時在線，請只保留一台。",
-  device_timeout: "裝置沒有在時間內回應，請確認桌面版仍在執行。",
+    "这个路径不在你已授权的资料夹内。请在对话中同意授权这个资料夹，或在桌面版授权要读取的资料夹。",
+  device_ambiguous: "你的帐号有多台装置同时在线，请只保留一台。",
+  device_timeout: "装置没有在时间内回应，请确认桌面版仍在执行。",
   sensitive_path:
-    "該路徑屬於敏感位置（憑證、私鑰等）的硬性禁止範圍，不會讀取、也**不能授權**；請改用其他路徑。",
+    "该路径属于敏感位置（凭证、私钥等）的硬性禁止范围，不会读取、也**不能授权**；请改用其他路径。",
 };
 
 /** 需要補「目前授權根」的錯誤碼（裝置離線／路徑未授權時，使用者最需要看到可授權的範圍）。 */
@@ -70,14 +70,14 @@ const CODES_WITH_ROOTS = new Set(["device_offline", "path_not_authorized"]);
  * `local_files_authorize`；不得升級（尤其不得自行選 permanent）。
  */
 const AUTHORIZATION_OPTIONS = [
-  { scope: "once", label: "允許一次" },
-  { scope: "session", label: "本會話允許此目錄" },
-  { scope: "permanent", label: "永久允許（加入本機授權清單）" },
+  { scope: "once", label: "允许一次" },
+  { scope: "session", label: "本会话允许此目录" },
+  { scope: "permanent", label: "永久允许（加入本机授权清单）" },
 ] as const;
 
 /** 給模型的明確指令：先問使用者，不得自行決定。 */
 const AUTHORIZATION_INSTRUCTION =
-  "把上面三個選項原樣列給使用者，等他回答後再呼叫 local_files_authorize；不要自行決定。";
+  "把上面三个选项原样列给使用者，等他回答后再呼叫 local_files_authorize；不要自行决定。";
 
 /**
  * 讀取本會話租戶目前已授權的資料夾清單。任何失敗（網路/非 JSON）回 null，
@@ -101,70 +101,70 @@ async function fetchAuthorizedRoots(sessionID: string): Promise<string[] | null>
 
 export default tool({
   description:
-    "讀取**使用者自己電腦上**的檔案（本機檔案橋）。這不是雲端工作區、也不是站內素材庫；" +
-    "檔案實際躺在使用者的電腦裡，只能讀取他**明確授權過的資料夾**（在對話中同意授權，或在桌面版授權），" +
-    "範圍外一律被拒。四個 op：list_dir＝列出目錄內容；read_file＝讀取單一檔案內容（有大小上限，過長會截斷）；" +
-    "grep＝在檔案內容裡搜尋文字；stat＝取得單一檔案或目錄的資訊（大小、時間、型別）。" +
-    "當使用者說「看一下我 Downloads 裡的東西」「讀我電腦上那個檔案」「幫我在本機某個資料夾找…」時用本工具。" +
-    "若回傳顯示裝置未連線或路徑未授權，請把回傳裡的引導語**照實轉達**給使用者（例如請他在對話中同意授權、或在桌面版授權資料夾），" +
+    "读取**使用者自己电脑上**的档案（本机档案桥）。这不是云端工作区、也不是站内素材库；" +
+    "档案实际躺在使用者的电脑里，只能读取他**明确授权过的资料夹**（在对话中同意授权，或在桌面版授权），" +
+    "范围外一律被拒。四个 op：list_dir＝列出目录内容；read_file＝读取单一档案内容（有大小上限，过长会截断）；" +
+    "grep＝在档案内容里搜寻文字；stat＝取得单一档案或目录的资讯（大小、时间、型别）。" +
+    "当使用者说「看一下我 Downloads 里的东西」「读我电脑上那个档案」「帮我在本机某个资料夹找…」时用本工具。" +
+    "若回传显示装置未连线或路径未授权，请把回传里的引导语**照实转达**给使用者（例如请他在对话中同意授权、或在桌面版授权资料夹），" +
     "不要只回「我做不到」。" +
-    "若回傳 action_required=authorize_local_files（error.code=needs_authorization），代表這個路徑還沒授權：" +
-    "**不要**當成失敗，必須把回傳的 options 三段式選項**逐字**列給使用者（允許一次／本會話允許此目錄／永久允許），" +
-    "等他明確選一個之後，再用 local_files_authorize 帶入**他選的那個 scope 原樣**授權；" +
-    "不得自行替他決定，尤其**不得未經同意選 permanent**。" +
-    "若錯誤碼是 sensitive_path，那是硬性禁止位置，**不能授權**，不要引導使用者去授權它。" +
-    "【列出檔名的硬規矩】" +
-    "① 列出的 name 一律**逐字原樣照抄**：不得簡繁轉換、不得改寫、不得省略括號／空白／大小寫，" +
-    "任何字都不得自行美化或補充。" +
-    "② 使用者說「列出**所有** X（例如所有 .pdf）」時，必須用 op=list_dir 帶 name_glob（例：*.pdf）讓機制過濾，" +
-    "並以回傳的 count 當作數量**直接引用**——**不得自己數**，也不得憑印象增刪清單。" +
-    "③ 若回傳帶 incomplete=true，必須**明白告訴使用者清單不完整**（把 note 照實轉達），" +
-    "不得把不完整清單當成全部交付。" +
-    "④ needs_authorization 的三段式 options 必須**連標點原樣**照抄，尤其「永久允許（加入本機授權清單）」" +
-    "的全形括號與字句不可改成破折號或半形括號。",
+    "若回传 action_required=authorize_local_files（error.code=needs_authorization），代表这个路径还没授权：" +
+    "**不要**当成失败，必须把回传的 options 三段式选项**逐字**列给使用者（允许一次／本会话允许此目录／永久允许），" +
+    "等他明确选一个之后，再用 local_files_authorize 带入**他选的那个 scope 原样**授权；" +
+    "不得自行替他决定，尤其**不得未经同意选 permanent**。" +
+    "若错误码是 sensitive_path，那是硬性禁止位置，**不能授权**，不要引导使用者去授权它。" +
+    "【列出档名的硬规矩】" +
+    "① 列出的 name 一律**逐字原样照抄**：不得简繁转换、不得改写、不得省略括号／空白／大小写，" +
+    "任何字都不得自行美化或补充。" +
+    "② 使用者说「列出**所有** X（例如所有 .pdf）」时，必须用 op=list_dir 带 name_glob（例：*.pdf）让机制过滤，" +
+    "并以回传的 count 当作数量**直接引用**——**不得自己数**，也不得凭印象增删清单。" +
+    "③ 若回传带 incomplete=true，必须**明白告诉使用者清单不完整**（把 note 照实转达），" +
+    "不得把不完整清单当成全部交付。" +
+    "④ needs_authorization 的三段式 options 必须**连标点原样**照抄，尤其「永久允许（加入本机授权清单）」" +
+    "的全形括号与字句不可改成破折号或半形括号。",
   args: {
     op: tool.schema
       .enum(["list_dir", "read_file", "grep", "stat"])
       .describe(
-        "要執行的本機檔案操作：list_dir（列目錄）、read_file（讀單檔內容）、grep（在內容中搜尋）、stat（取單一檔案/目錄資訊）。",
+        "要执行的本机档案操作：list_dir（列目录）、read_file（读单档内容）、grep（在内容中搜寻）、stat（取单一档案/目录资讯）。",
       ),
     path: tool.schema
       .string()
-      .describe("使用者電腦上的絕對路徑，必須位於他在桌面版已授權的資料夾內。"),
+      .describe("使用者电脑上的绝对路径，必须位于他在桌面版已授权的资料夹内。"),
     name_glob: tool.schema
       .string()
       .optional()
       .describe(
-        "僅 op=list_dir 適用：在雲端以檔名樣式過濾（支援 * 與 ?，例：*.pdf、*.txt、報告*）。" +
-          "只比對檔名（basename）、大小寫敏感；不可含 /。要「列出所有 X」時必須用它，並引用回傳的 count 當數量。",
+        "仅 op=list_dir 适用：在云端以档名样式过滤（支援 * 与 ?，例：*.pdf、*.txt、报告*）。" +
+          "只比对档名（basename）、大小写敏感；不可含 /。要「列出所有 X」时必须用它，并引用回传的 count 当数量。",
       ),
     pattern: tool.schema
       .string()
       .optional()
-      .describe("grep 的搜尋樣式（關鍵字或正規表達式）。僅 op=grep 時需要。"),
+      .describe("grep 的搜寻样式（关键字或正规表达式）。仅 op=grep 时需要。"),
     max_bytes: tool.schema
       .number()
       .optional()
-      .describe("grep 時單一檔案的讀取位元組上限（超過即略過該檔）。僅 op=grep 適用。"),
+      .describe("grep 时单一档案的读取位元组上限（超过即略过该档）。仅 op=grep 适用。"),
     limit: tool.schema
       .number()
       .optional()
-      .describe("read_file 的最大讀取位元組數，超過會截斷並標記。僅 op=read_file 適用。"),
+      .describe("read_file 的最大读取位元组数，超过会截断并标记。仅 op=read_file 适用。"),
   },
   async execute(args, context) {
     const op = args.op;
     if (!(DEVICE_OPS as readonly string[]).includes(op)) {
-      return fail("bad_request", `不支援的本機檔案操作：${String(op)}（僅限 list_dir/read_file/grep/stat）。`);
+      return fail("bad_request", `不支援的本机档案操作：${String(op)}（仅限 list_dir/read_file/grep/stat）。`);
     }
 
     // name_glob 只在雲端 runtime 過濾，**不下發**給閘道／裝置（凍結契約欄位不得增改）。
     const nameGlob = typeof args.name_glob === "string" ? args.name_glob : "";
     const useGlob = nameGlob.length > 0;
     if (useGlob && op !== "list_dir") {
-      return fail("bad_request", `name_glob 僅支援 op=list_dir，不能用於 ${op}。`);
+      return fail("bad_request", `name_glob 仅支援 op=list_dir，不能用于 ${op}。`);
     }
     if (useGlob && nameGlob.includes("/")) {
-      return fail("bad_request", "name_glob 只比對檔名（basename），不可包含路徑分隔符號（/）。");
+      return fail("bad_request", "name_glob 只比对档名（basename），不可包含路径分隔符号（/）。");
     }
 
     // 只放行凍結契約欄位；undefined 不下發，讓閘道用自己的預設上限。
@@ -187,7 +187,7 @@ export default tool({
         },
       );
     } catch (e) {
-      return fail("internal_error", `無法連上本機檔案閘道：${(e as Error).message}`);
+      return fail("internal_error", `无法连上本机档案闸道：${(e as Error).message}`);
     }
 
     const data = (await res.json().catch(() => ({}))) as Record<string, any>;
@@ -199,7 +199,7 @@ export default tool({
       // ⚠ denylist 不走這條（閘道回硬 deny／sensitive_path），故這裡不得引導授權 denylist。
       if (code === "needs_authorization") {
         return ok({
-          title: "需要授權",
+          title: "需要授权",
           action_required: "authorize_local_files",
           op,
           path: args.path,
@@ -213,7 +213,7 @@ export default tool({
       const rawMessage =
         typeof err.message === "string" && err.message
           ? err.message
-          : `讀取本機檔案失敗（HTTP ${res.status}）。`;
+          : `读取本机档案失败（HTTP ${res.status}）。`;
 
       const guidance = GUIDANCE[code];
       if (!guidance) return fail(code, rawMessage);
@@ -223,8 +223,8 @@ export default tool({
         const roots = await fetchAuthorizedRoots(context.sessionID);
         if (roots) {
           message += roots.length
-            ? ` 目前已授權的資料夾：${roots.join("、")}`
-            : " 目前尚未授權任何資料夾。";
+            ? ` 目前已授权的资料夹：${roots.join("、")}`
+            : " 目前尚未授权任何资料夹。";
         }
       }
       return fail(code, message);
@@ -261,21 +261,21 @@ export default tool({
         if (useGlob && (truncated || capHit)) {
           payload.incomplete = true;
           payload.note =
-            `清單不完整：裝置只回傳 ${total} 項` +
-            (truncated ? "（內容超過單次傳輸上限）" : "（已達單次列舉上限）") +
-            `，可能還有符合「${nameGlob}」的項目未列出；請縮小目錄範圍或改列子目錄後再試。`;
+            `清单不完整：装置只回传 ${total} 项` +
+            (truncated ? "（内容超过单次传输上限）" : "（已达单次列举上限）") +
+            `，可能还有符合「${nameGlob}」的项目未列出；请缩小目录范围或改列子目录后再试。`;
         } else if (useGlob) {
           payload.note =
-            `檔名符合「${nameGlob}」的項目共 ${count} 項（裝置回傳 ${total} 項）。` +
-            "列出時請逐字照抄 name，不得改寫、轉換或省略。";
+            `档名符合「${nameGlob}」的项目共 ${count} 项（装置回传 ${total} 项）。` +
+            "列出时请逐字照抄 name，不得改写、转换或省略。";
         }
       } else if (useGlob) {
         // 內容過大被閘道截斷、拿不到 entries 陣列：不得靜默給清單。
         payload.incomplete = true;
-        payload.note = `清單不完整：裝置回傳內容過大被截斷，無法完整列出符合「${nameGlob}」的項目；請縮小目錄範圍後再試。`;
+        payload.note = `清单不完整：装置回传内容过大被截断，无法完整列出符合「${nameGlob}」的项目；请缩小目录范围后再试。`;
       }
     } else if (truncated) {
-      payload.note = "內容超過單次讀取上限，已截斷；如需更多內容請縮小範圍或分段讀取。";
+      payload.note = "内容超过单次读取上限，已截断；如需更多内容请缩小范围或分段读取。";
     }
     return ok(payload);
   },
