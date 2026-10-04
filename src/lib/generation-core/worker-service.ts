@@ -45,6 +45,7 @@ import { onFilmeraTokenRotated } from "./filmera-upstream";
 import { refreshFilmeraSupplierHealth } from "./filmera-health";
 import { readFile, writeFile } from "node:fs/promises";
 import { emitJobRoutingEvent } from "../routing-telemetry";
+import { sweepMapayIntakeOnce } from "@/lib/mapay-intake";
 
 export interface GenerationWorkerOptions {
   workerId?: string;
@@ -738,6 +739,14 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         // 病灶 C：cooldown 到期自動恢復（disabled 不自動恢復）。每 30s 與健康循環
         // 一起掃一次，把「cooldown 已到期」的 supplier/account 撿回 healthy。
         await recoverExpiredCooldowns(sql);
+        // mPay 落地存證自癒（2026-10-04）：把「已收到但沒履約」的單用既有冪等路徑重投。
+        // 原本只掛在 /api/cron/generation-worker 上，而那條端點在兩個平面都沒有人呼叫
+        // （Vercel 側無 GENERATION_DATABASE_URL ⇒ 閘門前就 early return；VPS 無 cron/timer），
+        // 等於沒接線。改掛本長駐迴圈；函式自帶 10 分鐘陳舊門檻與 limit，30s 一輪只是便宜掃描。
+        // 失敗不得影響本區塊其餘維護工作 ⇒ 自帶 catch。
+        await sweepMapayIntakeOnce(sql).catch((error) => {
+          console.error("[generation-worker] mapay intake sweep failed（繼續）", error);
+        });
         lastMaintenance = now;
       }
       if (inFlight.size < maxInFlight) {

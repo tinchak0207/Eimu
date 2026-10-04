@@ -223,6 +223,18 @@ export function isMapayEnvelopeSuccess(parsed: { orders: MapayOrder[]; code: num
   return parsed.orders.length > 0;
 }
 
+/**
+ * 「查無此單」的權威特徵（生產實證 2026-10-04）：HTTP 200 + code:0 +
+ * msg「没有找到订单信息」。刻意**不**用「code===0 一律當查無此單」——code:0 也涵蓋
+ * 「系统订单号 和 商户订单号 二选一」這類真錯誤（見 mapay-orders.test.ts 的釘子）。
+ */
+export const MAPAY_ORDER_NOT_FOUND_MESSAGE = "没有找到订单信息";
+
+export function isMapayOrderNotFoundEnvelope(parsed: { code: number | string | null; message?: string | null }): boolean {
+  if (parsed.code !== 0 && parsed.code !== "0") return false;
+  return (parsed.message ?? "").includes(MAPAY_ORDER_NOT_FOUND_MESSAGE);
+}
+
 function resolveConfig(deps: ClientDeps): MapayConfig {
   if (deps.config) return deps.config;
   try {
@@ -249,6 +261,7 @@ async function requestOrders(
   act: "order" | "query",
   extraParams: Record<string, string>,
   deps: ClientDeps,
+  options: { notFoundAsEmpty?: boolean } = {},
 ): Promise<MapayOrdersResult> {
   const config = resolveConfig(deps);
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -300,6 +313,11 @@ async function requestOrders(
   }
 
   const parsed = parseMapayOrdersResponse(json);
+  // 單號單查的「查無此單」是正常結果（回 null＝not_found），不是通道錯誤。
+  // 只有 op=order 的呼叫端會開這個開關；批次/列舉路徑維持「code:0 一律拋錯」。
+  if (options.notFoundAsEmpty && isMapayOrderNotFoundEnvelope(parsed)) {
+    return { orders: [], empty: true, code: parsed.code, message: parsed.message, endpoint: act };
+  }
   // 成功判定：code===1 或真的帶出訂單實體。code:0（例「系统订单号 和 商户订单号 二选一」
   // 「没有找到商户信息」）或任何無訂單實體的錯誤信封 = 上游錯誤，不是「空成功」。
   if (!isMapayEnvelopeSuccess(parsed)) {
@@ -483,6 +501,6 @@ export async function fetchMapayOrder(outTradeNo: string, deps: ClientDeps = {})
     });
   }
 
-  const result = await requestOrders("order", { out_trade_no: outTradeNo }, deps);
+  const result = await requestOrders("order", { out_trade_no: outTradeNo }, deps, { notFoundAsEmpty: true });
   return result.orders.find((order) => order.outTradeNo === outTradeNo) ?? result.orders[0] ?? null;
 }
