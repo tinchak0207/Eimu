@@ -185,3 +185,6 @@ redteam-*
 # tmlr.sty／.bst、body/abstract/appendices 源码，以及 .aux/.log/.out/.pdf build 产物）。
 # 投稿材料不随产品仓库流通，整包留本机。
 /docs/paper/
+
+# 本地评测工作台（音乐基准：venv/音档/结果，11GB；不入库，需入库者自行 -f）
+/bench/
