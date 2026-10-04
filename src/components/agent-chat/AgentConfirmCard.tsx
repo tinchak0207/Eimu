@@ -81,7 +81,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
       />
       {interpret && (
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(122,73,255,0.14)] text-[#7C4DFF]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ios-purple/[0.14] text-ios-purple">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
@@ -153,7 +153,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           disabled={locked}
           className={cn(
             "flex min-h-11 items-center justify-center gap-1.5 rounded-full px-4 text-ios-footnote font-medium",
-            "text-muted-foreground transition-all duration-200 hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95",
+            "text-muted-foreground transition-all duration-200 hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
             "disabled:cursor-not-allowed disabled:opacity-50",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",

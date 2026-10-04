@@ -575,7 +575,7 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
           // 2026-10-03 手機端：窄屏補 44px 觸控高度（max-sm:min-h-11），桌面維持原行高。
           // 只加最小高度、不改寬/字級/位移——hover 與展開零 layout shift，items-center 保垂直置中。
           "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
-          "transition-colors hover:text-[#7d6ee0] active:opacity-70",
+          "transition-colors hover:text-ios-purple active:opacity-70",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           "disabled:cursor-not-allowed disabled:opacity-40",
           // 絕對定位盒走 shrink-to-fit；含塊是工具行 flex。w-max＋nowrap 鎖死單行不斷行。
@@ -741,7 +741,7 @@ export function LocalFileModeMenuView({
         className={cn(
           // 與同排「+」「↑」「思考級別」同一套無框語彙：只換顏色/透明度，零 layout shift。
           "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
-          "transition-colors hover:text-[#7d6ee0] active:opacity-70",
+          "transition-colors hover:text-ios-purple active:opacity-70",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           "disabled:cursor-not-allowed disabled:opacity-40",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
@@ -1856,7 +1856,7 @@ function AgentComposerComponent({
               // 打不到包在 relative 容器裡的這顆鈕。工具行 items-center 已在，加高不跑置中。
               "flex h-9 w-9 max-sm:h-11 max-sm:w-11 shrink-0 items-center justify-center rounded-full text-foreground/50",
               "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-              "transition-colors hover:text-[#7d6ee0] active:scale-[0.92] focus:outline-none focus-visible:text-[#7d6ee0]",
+              "transition-colors hover:text-ios-purple active:scale-[0.92] focus:outline-none focus-visible:text-ios-purple",
               "disabled:cursor-not-allowed disabled:text-foreground/25",
             )}
           >

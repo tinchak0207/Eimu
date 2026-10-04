@@ -235,7 +235,7 @@ export function CanvasNodeView({
       case CanvasNodeType.Config:
         return { label: "产出", Icon: FileText, cls: "bg-[rgba(88,86,214,0.12)] text-[#5856D6]", bar: "bg-[#5856D6]" };
       case CanvasNodeType.Text:
-        if (node.metadata?.pipelineCard === "tool") return { label: "工具", Icon: Wrench, cls: "bg-[rgba(0,122,255,0.12)] text-ios-blue", bar: "bg-ios-blue" };
+        if (node.metadata?.pipelineCard === "tool") return { label: "工具", Icon: Wrench, cls: "bg-ios-blue/[0.12] text-ios-blue", bar: "bg-ios-blue" };
         if (node.metadata?.pipelineCard === "gate") return { label: "门禁", Icon: ShieldCheck, cls: "bg-[rgba(255,149,0,0.14)] text-[#B96A00]", bar: "bg-[#B96A00]" };
         if (node.metadata?.pipelineCard === "note") return { label: "配方", Icon: Lightbulb, cls: "bg-[rgba(255,204,0,0.16)] text-[#8A6D00]", bar: "bg-[#C79A00]" };
         return { label: "文本", Icon: Type, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };

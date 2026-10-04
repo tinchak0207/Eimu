@@ -453,7 +453,7 @@ export function CanvasEmbedOverlays({
                         {CHARACTER_CARD_KIND_LABEL[card.kind]}
                       </span>
                       {card.variantOf && (
-                        <span className="shrink-0 rounded-full bg-[rgba(0,122,255,0.12)] px-1.5 py-0.5 text-ios-caption2 text-[#007AFF]">
+                        <span className="shrink-0 rounded-full bg-ios-blue/[0.12] px-1.5 py-0.5 text-ios-caption2 text-[#007AFF]">
                           變體
                         </span>
                       )}

@@ -66,10 +66,15 @@ export function AgentSettingsPopover() {
   }, []);
 
   // 开着时点外面就收——与历史记录 dropdown 同一条规矩（pointerdown + contains）。
+  // 例外：「我的技能」对话框已 portal 到 document.body（2026-10-04），不再是 rootRef 子树，
+  // 点它内部会被 contains 误判为「点外面」；沿用同一套 contains 语义，以 data-my-skills-dialog
+  // 作等效的内部判定，命中即放行、不收弹层。
   useEffect(() => {
     if (!open) return;
     const onDocPointerDown = (ev: PointerEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) {
+      const el = ev.target instanceof Element ? ev.target : null;
+      if (el?.closest("[data-my-skills-dialog]")) return;
+      if (rootRef.current && !rootRef.current.contains(el)) {
         setOpen(false);
       }
     };
@@ -158,8 +163,8 @@ export function AgentSettingsPopover() {
           </div>
         </div>
       )}
-      {/* 管理面：無公開市集，只有「我自己的技能」。渲染在 rootRef 內，
-          點對話框不會被設定彈層的 outside-click 當成「點外面」而收掉。 */}
+      {/* 管理面：無公開市集，只有「我自己的技能」。對話框自行 portal 到 document.body，
+          點它內部由上面的 outside-click 以 data-my-skills-dialog 放行、不收設定彈層。 */}
       {skillsOpen && <MySkillsDialog onClose={() => setSkillsOpen(false)} />}
     </div>
   );

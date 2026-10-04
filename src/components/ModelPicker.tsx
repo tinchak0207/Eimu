@@ -122,7 +122,7 @@ function ModelKnowledgeCard({ modelId, knowledge, onApplyTipParams, onSelectMode
                           onSelectModel();
                           onApplyTipParams(tip.params as ModelUsageTipParams);
                         }}
-                        className="shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.12)] px-2.5 py-1 text-[12px] font-semibold text-[#007AFF] transition-all duration-200 hover:bg-[rgba(0,122,255,0.22)] active:scale-95"
+                        className="shrink-0 cursor-pointer rounded-full bg-ios-blue/[0.12] px-2.5 py-1 text-[12px] font-semibold text-[#007AFF] transition-all duration-200 hover:bg-[rgba(0,122,255,0.22)] active:scale-95"
                       >
                         一键带入
                       </button>

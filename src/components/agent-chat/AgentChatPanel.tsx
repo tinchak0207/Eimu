@@ -151,7 +151,7 @@ export function AgentBackToBottomButton({
       onClick={onClick}
       className={cn(
         "agent-back-to-bottom lg-float absolute bottom-3 right-4 z-20 flex h-11 w-11 items-center justify-center rounded-full text-foreground/60",
-        "transition-opacity duration-[140ms] hover:text-foreground active:scale-95",
+        "transition-opacity duration-150 hover:text-foreground active:scale-95",
         "touch-manipulation [-webkit-tap-highlight-color:transparent] sm:hidden",
         scrolledUp ? "opacity-100" : "pointer-events-none opacity-0",
       )}

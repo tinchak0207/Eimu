@@ -59,7 +59,7 @@ const PRIMARY_BUTTON_CLASS = cn(
 
 const GHOST_BUTTON_CLASS = cn(
   "flex min-h-11 items-center justify-center gap-1.5 rounded-full px-4 text-ios-footnote font-medium",
-  "text-muted-foreground transition-all duration-200 hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95",
+  "text-muted-foreground transition-all duration-200 hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95",
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
   "disabled:cursor-not-allowed disabled:opacity-50",
   "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",

@@ -125,7 +125,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
                   "text-ios-footnote font-medium transition-colors duration-200",
                   "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
                   active
-                    ? "bg-[rgba(0,122,255,0.12)] text-[#007AFF]"
+                    ? "bg-ios-blue/[0.12] text-[#007AFF]"
                     : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
                 )}
               >

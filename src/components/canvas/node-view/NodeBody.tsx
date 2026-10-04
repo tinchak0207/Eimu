@@ -440,7 +440,7 @@ export function NodeBody({
           <div className="flex h-full flex-col">
             <div className="flex shrink-0 items-center gap-1.5 border-b border-black/5 bg-black/[0.03] px-3 py-1.5 text-ios-caption1 font-medium text-foreground/60">
               {!Number.isNaN(stepIndex) && (
-                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.12)] text-[10.5px] font-semibold leading-none text-ios-blue">
+                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-[10.5px] font-semibold leading-none text-ios-blue">
                   {stepIndex + 1}
                 </span>
               )}

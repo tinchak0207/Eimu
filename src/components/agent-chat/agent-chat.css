@@ -212,10 +212,9 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* 所有可点项 ≥44×44：状态行重试、历史、放弃、错误重试、
+  /* 所有可点项 ≥44×44：状态行重试、放弃、错误重试、
      composer 工具行的两颗圆形钮（直接子级，避开附件 chip 里的小移除钮）。 */
   .agent-retry,
-  .agent-meta-link,
   .agent-draft-discard,
   .agent-surface-retry,
   .agent-composer-toolbar > button {
@@ -261,7 +260,6 @@
      （行内/区块 code、Markdown 表格、steer 徽章、子代理报告徽章）一律抬到 14px 地板。 */
   .agent-chat-surface .text-ios-caption2,
   .agent-pop .text-ios-caption2,
-  .agent-chat-surface .text-\[0\.6875rem\],
   .agent-chat-surface .text-\[0\.75rem\],
   .agent-chat-surface .text-\[0\.8125rem\] {
     font-size: 14px;

@@ -18,7 +18,7 @@ export interface AgentSubagentReportCardProps {
 const STATUS_META: Record<AgentSubagentReportItem["status"], { label: string; badge: string }> = {
   // 2026-09-20 色彩纪律：状态徽章一律灰阶文字，ios-green 只作为完成 ✓ 的点缀，
   // 红色只留给失败（ios-red 僅錯誤），其余状态不再有第二套彩色标签。
-  ok: { label: "已完成", badge: "bg-black/[0.05] text-muted-foreground" },
+  ok: { label: "完成", badge: "bg-black/[0.05] text-muted-foreground" },
   error: { label: "失败", badge: "bg-ios-red/10 text-ios-red" },
   // 中止：诚实标「已中止」，不留 running 假状态，也不谎报失败。
   interrupted: { label: "已中止", badge: "bg-black/[0.05] text-muted-foreground" },
@@ -41,7 +41,7 @@ function AgentSubagentReportCardComponent({ item }: AgentSubagentReportCardProps
   const preview = reportPreview(item.text);
 
   return (
-    <div className="agent-rise relative flex w-full flex-col gap-1 overflow-hidden rounded-[16px] bg-black/[0.03] px-3 py-2">
+    <div className="agent-rise relative flex w-full flex-col gap-1 overflow-hidden rounded-[18px] bg-black/[0.03] px-3 py-2">
       {/* 顶缘 specular 亮线：面板上缘的一线高光，纯装饰不吃事件。 */}
       <div
         aria-hidden="true"
@@ -52,17 +52,18 @@ function AgentSubagentReportCardComponent({ item }: AgentSubagentReportCardProps
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={bodyId}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-md text-left transition-colors hover:bg-black/[0.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-md text-left transition-colors hover:bg-white/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
       >
         <Bot className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
-        <span className="shrink-0 text-ios-footnote font-semibold text-foreground">{item.label}</span>
+        {/* 标签让位 + 45% 上限沿用 AgentSubagentBar 的配方；本卡无跑马灯全文约束，故用截断。 */}
+        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-ios-footnote font-semibold text-foreground">{item.label}</span>
         {/* 预览截断；全文在展开区，不硬切。 */}
         <span className="min-w-0 flex-1 truncate text-ios-footnote text-muted-foreground">
           {preview || "（无输出）"}
         </span>
         <span
           className={cn(
-            "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold",
+            "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-ios-caption2 font-semibold",
             meta.badge,
           )}
         >
@@ -80,7 +81,7 @@ function AgentSubagentReportCardComponent({ item }: AgentSubagentReportCardProps
           aria-hidden="true"
         />
       </button>
-      {/* 展开区：grid-rows 0fr→1fr 的既有折叠语言（与子任务详情面板同款）。 */}
+      {/* 展开区：grid-rows 0fr→1fr 的既有折叠语言（与工具卡家族同一套 grid-rows 0fr→1fr 折叠语汇）。 */}
       <div
         id={bodyId}
         className={cn(

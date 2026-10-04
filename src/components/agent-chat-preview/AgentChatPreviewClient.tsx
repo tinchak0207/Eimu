@@ -156,7 +156,7 @@ function GhostIconButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="flex h-11 w-11 items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95"
+      className="flex h-11 w-11 items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95"
     >
       {children}
     </button>
@@ -251,7 +251,7 @@ function ToolRow({ tool }: { tool: DemoTool }) {
               className="h-3.5 w-3.5 shrink-0 animate-spin text-ios-blue/70"
               aria-hidden="true"
             />
-            <span className="shrink-0 text-ios-footnote text-ios-blue">运行中</span>
+            <span className="shrink-0 text-ios-footnote text-ios-blue">运行中…</span>
           </>
         ) : null}
         {tool.status === "done" ? (
@@ -313,20 +313,20 @@ function SubagentGroup() {
                 </span>
                 {sa.status === "running" ? (
                   <>
-                    <span className="shrink-0 text-ios-footnote text-ios-blue">运行中</span>
-                    <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-ios-blue" />
+                    <span className="shrink-0 text-ios-footnote text-ios-blue">运行中…</span>
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ios-blue" />
                   </>
                 ) : null}
                 {sa.status === "done" ? (
                   <>
                     <span className="shrink-0 text-ios-footnote text-foreground/45">完成</span>
-                    <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-foreground/60" />
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/60" />
                   </>
                 ) : null}
                 {sa.status === "waiting" ? (
                   <>
                     <span className="shrink-0 text-ios-footnote text-foreground/45">等待</span>
-                    <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-black/20" />
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-black/20" />
                   </>
                 ) : null}
               </div>
@@ -809,7 +809,7 @@ function AgentChatPreviewClientComponent() {
                             <button
                               type="button"
                               onClick={() => setPlanIndex((i) => 1 - i)}
-                              className="flex min-h-11 items-center rounded-full px-4 text-ios-footnote text-muted-foreground transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75"
+                              className="flex min-h-11 items-center rounded-full px-4 text-ios-footnote text-muted-foreground transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75"
                             >
                               换个方案
                             </button>

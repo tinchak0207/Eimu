@@ -12,7 +12,7 @@ import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 // subagent.done 独占裁决），所以回合结束后在跑的子任务照常渲染在此，
 // 本组件不看 turnActive、也不该看。
 // 2026-09-20 暴君裁定（Grok 级无底色细行）：「查看全部 N 个子任务」折叠头改
-//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 7px 圆点。
+//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 6px 圆点。
 // 2026-09-19 暴君裁定（子任务 UI 去重）：
 //   折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI 合并为一份内联列表；
 //   默认展开、可收合（SubagentMenu 弹层整体下线）。
@@ -38,9 +38,10 @@ const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
 };
 
 // 行尾状态词（2026-09-20 對版預覽）：与工具行同一套字面——用户看到的
-// 是「运行中／完成／失败」，不是工单状态「已完成」。
+// 是「运行中…／完成／失败」，不是工单状态「已完成」。
+// 字面以 AgentToolCard 的狀態詞（STATUS_META）為單一真源；此處僅鏡射。
 const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
-  running: "运行中",
+  running: "运行中…",
   ok: "完成",
   error: "失败",
   stopped: "已停止",

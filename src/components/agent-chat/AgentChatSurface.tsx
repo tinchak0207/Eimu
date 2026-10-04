@@ -986,7 +986,7 @@ export function AgentChatSurface({
               aria-expanded={showAssets}
               aria-label="我的资产"
               title="我的资产"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <Boxes className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -999,7 +999,7 @@ export function AgentChatSurface({
               aria-expanded={showHistory}
               aria-label="对话历史"
               title="对话历史"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <History className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -1013,7 +1013,7 @@ export function AgentChatSurface({
               disabled={startingNew}
               aria-label="开新对话"
               title="开新对话（当前对话保留在历史里）"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden disabled:cursor-wait"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden disabled:cursor-wait"
             >
               {startingNew ? (
                 <Loader2 className="h-[1.125rem] w-[1.125rem] animate-spin text-ios-blue" aria-hidden="true" />
@@ -1027,7 +1027,7 @@ export function AgentChatSurface({
                 onClick={onExit}
                 aria-label="直接生成"
                 title="直接生成：自己选模型和参数出图"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
               >
                 <SlidersHorizontal className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
               </button>
@@ -1041,7 +1041,7 @@ export function AgentChatSurface({
               onClick={openSettings}
               aria-label="设置"
               title="助理设定"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <Settings className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -1127,6 +1127,8 @@ export function AgentChatSurface({
                 )
               ) : (
                   <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
+                    {/* DESIGN.md §5：每张 sheet 都要有一条顶缘高光线。 */}
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
                     <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
                       <AgentSessionList
                         sessions={historyList}
@@ -1149,6 +1151,8 @@ export function AgentChatSurface({
             <div ref={assetPanelRef} className="relative max-sm:contents">
               {showAssets && (
                 <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-[18px] p-1.5">
+                  {/* DESIGN.md §5：每张 sheet 都要有一条顶缘高光线。 */}
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
                   <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
                   <div className="relative px-2.5 pb-1">
                     <Search className="pointer-events-none absolute left-[13px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />

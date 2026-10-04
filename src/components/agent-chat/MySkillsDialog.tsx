@@ -22,6 +22,7 @@
 
 import { SKILL_OUTPUT_KIND_OPTIONS } from "@/lib/agent-skills/output-kinds";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { tryAuthHeaders } from "@/lib/agent-chat-client";
@@ -452,9 +453,17 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
     setForm((prev) => (prev ? { ...prev, ...delta } : prev));
   }, []);
 
-  return (
+  // portal 到 document.body（2026-10-04 FIX-2）：
+  // 本對話框原由 AgentSettingsPopover 直接（非 portal）渲染，因而落在
+  // ImagePlayground → CanvasChatWorkstation → .canvas-chat-panel
+  // （fixed z-60; overflow:hidden）這個堆疊脈絡裡 ⇒ z-[90] 在 canvas 態被宿主面板蓋掉、
+  // 且 overflow:hidden 會把 fixed 對話框裁在面板框內（真瀏覽器 elementsFromPoint 已複現）。
+  // 搬出樹後 fixed 滿屏與 z-[90] 才生效。SSR 安全照站內既有 portal 配方
+  // （AgentChatSurface 窄屏歷史抽屜、AgentComposer 思考級別面板）：typeof document 守衛，
+  // server render 階段不執行 createPortal。呼叫端 AgentSettingsPopover:163 維持不動。
+  return typeof document !== "undefined" ? createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-label="我的技能"
@@ -727,6 +736,7 @@ export function MySkillsDialog({ onClose }: MySkillsDialogProps) {
           ) : null}
         </div>
       </div>
-    </div>
-  );
+    </div>,
+    document.body,
+  ) : null;
 }
