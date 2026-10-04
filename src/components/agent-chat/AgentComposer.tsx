@@ -600,6 +600,13 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
         寬度＝內容自適應（w-max）：四列只有級別名＋勾，不寫死 w-52 造成空曠或裁切。
         底緣保護：max-h + 內部可滾（overscroll-contain），空間不足時面板自己滾，底部不被裁掉。
         首frame coords 未量到＝visibility:hidden 佔位量尺寸，paint 前 place() 定位，不閃。
+        z-[85]（2026-10-04 修「打不開／被遮蔽」）：本面板 portal 到 body，就脫離了所屬助理
+        容器的堆疊脈絡——首頁／助理頁的聊天面板殼 `.canvas-chat-panel` 是 fixed z-60、
+        navbar 是 sticky z-80，而面板原本 z-50 ⇒ 浮層確實渲染了、卻整片被宿主面板蓋掉
+        （實測 elementsFromPoint 在浮層中心取到的是頁面內容，不是浮層自己的選項鈕）。
+        85 ＝ 壓過宿主面板(60)與 navbar(80)、又留在所有模態遮罩(89 起：宣傳片 120、
+        參數抽屜 .agent-param-scrim 90)之下——模態開著時浮層本就不該浮在最上。同樹內的
+        歷史／設定彈層維持 z-50 不動：它們沒有 portal，仍在宿主面板的堆疊脈絡內。
       */}
       {open && typeof document !== "undefined"
         ? createPortal(
@@ -612,7 +619,7 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
                 left: coords?.left ?? 0,
                 visibility: coords ? "visible" : "hidden",
               }}
-              className="agent-pop fixed z-50 w-max min-w-0 max-h-[min(60dvh,18rem)] overflow-y-auto overscroll-contain rounded-[18px] p-1"
+              className="agent-pop fixed z-[85] w-max min-w-0 max-h-[min(60dvh,18rem)] overflow-y-auto overscroll-contain rounded-[18px] p-1"
             >
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
               {AGENT_THINKING_LEVELS.map((lv) => (
