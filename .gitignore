@@ -179,3 +179,9 @@ redteam-*
 
 # ── 產品發展史（史官編撰，本地留存，不入庫）──
 /PRODUCT-HISTORY.md
+
+# ── 論文（本地寫作／投稿工作區，不入庫）──
+# docs/paper/：manuscript.md（含 evidence-and-submission-notes）與 latex/（TMLR 模板
+# tmlr.sty／.bst、body/abstract/appendices 源碼，以及 .aux/.log/.out/.pdf build 產物）。
+# 投稿材料不隨產品倉庫流通，整包留本機。
+/docs/paper/

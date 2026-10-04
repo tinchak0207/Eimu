@@ -153,7 +153,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
             aria-expanded={plusOpen}
             aria-haspopup="menu"
             aria-label="余额操作"
-            className="flex w-7 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 sm:hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="flex w-6 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 sm:hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
             {/* 2026-09-05 暴君裁定：「+」是充值/签到入口，恆為加號——
                 簽到完成態只反映在菜單項裡，不侵占入口圖標。 */}

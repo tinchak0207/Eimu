@@ -25,7 +25,7 @@ const ICON = "h-3.5 w-3.5 max-sm:h-3 max-sm:w-3";
 
 /** 三顆鈕共用的極簡玻璃態：與 header 既有極簡圖標鈕同一階（h-9 w-9、icon h-3.5）。 */
 const BASE_BUTTON =
-  "flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.82)] active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 max-sm:h-7 max-sm:w-7";
+  "flex h-9 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.82)] active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 max-sm:h-7 max-sm:w-7";
 
 export interface WindowControlsProps {
   className?: string;

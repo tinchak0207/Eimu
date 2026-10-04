@@ -428,7 +428,7 @@ export function Navbar({ className }: NavbarProps) {
           {/* Right side */}
           <div
             className={cn(
-              "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-2 lg:gap-3",
+              "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1 sm:gap-1 lg:gap-1.5",
               "app-region-no-drag",
               isLoggedIn && user
                 ? ""
@@ -449,7 +449,7 @@ export function Navbar({ className }: NavbarProps) {
                     「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
                   aria-label="历史"
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
@@ -460,7 +460,7 @@ export function Navbar({ className }: NavbarProps) {
                     导航栏摆个入口会把人带离卡片，正好是使用者不要的那种交互。 */}
                 <Link
                   href="/docs"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
                   aria-label="文档"
                 >
                   <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
@@ -475,7 +475,7 @@ export function Navbar({ className }: NavbarProps) {
                       aria-label="API 密钥"
                       title="API 密钥"
                       className={cn(
-                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-9",
+                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8",
                         FLAT_CHROME,
                       )}
                     >
@@ -514,7 +514,7 @@ export function Navbar({ className }: NavbarProps) {
                     鎖在 lg:inline 不出現。 */}
                 <div
                   className={cn(
-                    "flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex",
+                    "flex shrink-0 items-center gap-1 rounded-full py-1 pl-1.5 pr-0.5 lg:pl-2 sm:flex",
                     FLAT_CHROME,
                   )}
                 >
