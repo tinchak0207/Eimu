@@ -1,6 +1,6 @@
 ---
 name: music-director
-description: 音乐 Expert 配方库。触发时机：配乐／主题曲／MV 主题歌／插入曲生成任务（歌曲、器乐 BGM、歌词、音乐 prompt 工程）。音乐生成类请求必载本库，禁止凭记忆写音乐 prompt。
+description: 音乐/歌曲/配乐/BGM/歌词任务必载配方库（含 Expert 派工 spec 与交付契约口径）。触发：做一首歌、写歌/作曲/作词、配乐、器乐 BGM、主题曲/片头曲 OP/插入曲、MV 歌曲、哼唱、翻唱/改编、音乐 prompt；或把音乐裁到 N 秒、选版本、出音乐交付契约、做音乐通路体检。给你通路优先序与时长硬约束、六层 style 公式、12 档 CORE/DATA、多版本偏好闸、乐谱编辑/翻唱、交付契约字段。生成前必载，禁止凭记忆写音乐 prompt。
 ---
 
 # Music Director — SunoForge v3.0 配方库

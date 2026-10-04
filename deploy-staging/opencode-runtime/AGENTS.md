@@ -53,7 +53,7 @@
 | 写真/人像摄影 | `skill nuyoah-xiezhen-prompt`（§2 六槽英文规则） | — |
 | 参考图反推 | 先用 `read_image` 工具提取可见事实，再 `skill nuyoah-image-reverse-prompt` | — |
 | 广告/UGC/产品 shot 提示词 | `skill ai-ad-prompt-guide` | — |
-| 作曲/配乐/主题曲/MV 主题歌（音乐 prompt） | `skill music-director`（六层 style 公式 GENRE→MOOD→INSTRUMENTATION→VOCAL→STRUCTURE→PRODUCTION） | — |
+| 作曲/配乐/主题曲/MV 主题歌/片头曲 OP/插曲/器乐 BGM/作词/哼唱/翻唱改编（音乐 prompt 与音乐单派工口径） | `skill music-director`（先载取口径：通路优先序＋时长硬约束前置揭露＋六层 style 公式 GENRE→MOOD→INSTRUMENTATION→VOCAL→STRUCTURE→PRODUCTION＋多版本偏好闸＋交付契约字段；纯音乐体检/交付装配单也先载） | — |
 | 选模型/模型失败找替代 | GET /v1/model-status（15s 快取内复用，不要重探） | — |
 | 配音/台词语音（TTS） | `tts_speak` 工具（上游暂缺时诚实报错） | — |
 | 剪辑/时间线调整（拆分/修剪/变速/重排/删除/锁定/分组/转场/加轨） | `timeline_query(what=state)` 摸底拿真实 clip_id → `timeline_ops` 批量原子执行 → 回读返回的 diff 确认 | run_py+ffmpeg 单次直剪（仅当用户只要一个现成片段文件、无多步剪辑语境） |

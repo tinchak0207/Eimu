@@ -125,6 +125,49 @@ function toFail(e: unknown): MusicToolResult {
   return fail("music_tool_error", `music_gen 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
+// ── prompt 链落档（2026-10-04 G1「提示词链可逐字对帐」）────────────────────────
+//
+// 背景（真实证据）：R3 判据 5 取不到 `prompt_used`——「我们送上游的 prompt」与
+// 「上游实际吃的 sound_prompt」只活在 music_gen 回执里，而回执所在 part 未必落进
+// opencode 库（子代理会话可能不落库：ses_ef89dfbb… 在库中不存在）。此处把两者逐次
+// 追加进 workspace **既有 outputs 树**下一行 JSON，使链可复算：
+//   送出的 style prompt（prompt_sent＝director 后的 prompt_used）
+//   ↔ 上游回吐的 clips[].sound_prompt（upstream_sound_prompts）。
+//
+// 只落 prompt 与结构（sha256/长度/段落标签），绝不落任何 key/token；
+// best-effort——落档失败静默，绝不影响生成交付。
+const MUSIC_PROMPT_CHAIN_REL = "outputs/music-prompt-chain.jsonl"
+
+/** prompt 链落档路径（workspace 既有 outputs 树；workspace 根口径同 lib/sandbox.ts）。 */
+export function musicPromptChainPath(): string {
+  const ws = (process.env.EIMU_WORKSPACE ?? "").trim() || "/opt/agent-harness/workspace"
+  return nodePath.join(ws, MUSIC_PROMPT_CHAIN_REL)
+}
+
+/** 文本指纹与长度（落档只带结构；chars＝UTF-16 长度，runes＝码点长度）。 */
+function textFingerprint(text: string): { sha256: string; chars: number; runes: number } {
+  return {
+    sha256: createHash("sha256").update(text, "utf8").digest("hex"),
+    chars: text.length,
+    runes: Array.from(text).length,
+  }
+}
+
+/**
+ * 追加一行 prompt 链记录（best-effort）。成功返回落档相对路径，失败返回 null——
+ * 落档失败绝不冒泡到生成交付。
+ */
+async function appendMusicPromptChain(record: Record<string, unknown>): Promise<string | null> {
+  try {
+    const target = musicPromptChainPath()
+    await fsp.mkdir(nodePath.dirname(target), { recursive: true })
+    await fsp.appendFile(target, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`, "utf8")
+    return MUSIC_PROMPT_CHAIN_REL
+  } catch {
+    return null
+  }
+}
+
 // ── YuE2 失败回落 FlowMusic（2026-09-19，片 G）───────────────────────────────
 
 /** 回落原因摘要上限（截断防上游长原文把 LLM 可见回执撑爆）。 */
@@ -1107,8 +1150,45 @@ export const musicGenTool: MusicToolDef = {
         )
       }
 
+      // prompt 链落档（2026-10-04 G1，best-effort）：把「送上游的 prompt」（＝director
+      // 后的 finalPrompt，即回执 prompt_used）与「上游回吐的 sound_prompt」逐次写进
+      // workspace 既有 outputs/music-prompt-chain.jsonl，使链在回执 part 未必落库时仍可复算。
+      const lyricsForLog = lyricsForChannel(activeChannel)
+      const lyricsEchoForLog = (generated as { lyricsEcho?: string }).lyricsEcho
+      const promptChainRef = await appendMusicPromptChain({
+        session_id: context?.sessionId ?? null,
+        channel: activeChannel === "yue2" ? "yue2_modal" : activeChannel === "flowmusic" ? "flowmusic2api" : "lyria_gemini",
+        model,
+        duration_hint: durationHintRaw,
+        // 站 1：agent 自己交给 music_gen 的原始 style prompt（director 前）。
+        prompt_input: prompt,
+        prompt_input_fingerprint: textFingerprint(prompt),
+        // 站 2/3：规则层输出（实送上游文本；＝回执 prompt_used）。
+        prompt_sent: finalPrompt,
+        prompt_sent_fingerprint: textFingerprint(finalPrompt),
+        director: {
+          channel: directorChannel,
+          applied: directed.applied,
+          warnings: directed.warnings,
+          truncated: directed.truncated,
+          layers: directed.layers,
+          compressed_layers: directed.compressedLayers ?? null,
+          hard_truncated: directed.hardTruncated ?? false,
+        },
+        // 歌词只落结构（指纹＋段落标签），不落正文。
+        lyrics: {
+          ...textFingerprint(lyricsForLog),
+          sections: Array.from(new Set(lyricsForLog.match(/\[[^\]]+\]/g) ?? [])),
+        },
+        lyrics_echo: lyricsEchoForLog ? textFingerprint(lyricsEchoForLog) : null,
+        // 站 4：上游 clips[].sound_prompt（逐候选；缺省 null）。
+        upstream_sound_prompts: audios.map((a) => a.sound_prompt ?? null),
+        upstream_titles: audios.map((a) => a.title ?? null),
+      })
+
       return ok({
         title: "音乐生成完成",
+        ...(promptChainRef ? { prompt_chain_ref: promptChainRef } : {}),
         ...(url ? { url, path_source: "gateway_uploads" } : { audio_base64: generated.audioBase64, upload: uploadCode }),
         ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),
         ...(audios.length > 0 ? { audios } : {}),
