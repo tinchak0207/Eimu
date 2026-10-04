@@ -6,7 +6,7 @@
 // 版面由呈現端決定（字級恆定螢幕尺寸，放大＝同一張卡裝得下更多段落）。
 
 import { CanvasNodeType, errorDetailsText, type CanvasNode } from "@/lib/canvas/types";
-import { REFERENCE_IMAGE_ROLES } from "../../pro-workstation/workstation-constants";
+import { REFERENCE_IMAGE_ROLES } from "../../../lib/reference-image-roles";
 import { STATUS_LABEL, TYPE_LABEL } from "./constants";
 import { SHOT_FIELD_LABEL } from "./StoryboardShotBody";
 

@@ -28,7 +28,7 @@ export type ReferenceImageRole =
 /**
  * ReferenceImageRole 的唯一運行時清單（2026-08-22 補）：
  * 角色枚舉的 owner 就是本檔案；畫布 reference 節點、API 校驗一律引用這裡，
- * 不另立第二套枚舉。標籤文案在 workstation-constants.REFERENCE_IMAGE_ROLES。
+ * 不另立第二套枚舉。標籤文案在 reference-image-roles.REFERENCE_IMAGE_ROLES。
  */
 export const REFERENCE_IMAGE_ROLE_VALUES: readonly ReferenceImageRole[] = [
   "style",

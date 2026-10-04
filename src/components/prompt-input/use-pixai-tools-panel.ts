@@ -5,12 +5,12 @@ import type { ChangeEvent } from "react";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   PixaiError,
+  type PickedImage,
   resolveToPayload,
   runEdit,
   runUpscale,
   uploadMedia,
 } from "@/components/pixai-tools/shared";
-import type { PickedImage } from "@/components/pixai-tools/PixaiSourceInput";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 

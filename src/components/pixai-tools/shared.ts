@@ -22,6 +22,14 @@ export interface PixaiImageSource {
   mimeType?: string;
 }
 
+export interface PickedImage {
+  /** 生成时需要的图片来源描述。 */
+  source: PixaiImageSource;
+  /** 本地/远程预览 url。上传文件是 URL.createObjectURL，历史图是原 url。 */
+  previewUrl: string;
+  label: string;
+}
+
 export interface PixaiSourcePayload {
   base64: string;
   mimeType: string;

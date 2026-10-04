@@ -19,7 +19,7 @@ import {
   skipStepOnMissingAnchor,
   tourSide,
 } from "@/lib/tour-mobile";
-import { runCursorDemo } from "@/components/pro-workstation/workstation-cursor-demo";
+import { runCursorDemo } from "@/lib/cursor-demo";
 
 export const ATC_TOUR_STORAGE_KEY = "atc-tour-v1";
 

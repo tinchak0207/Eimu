@@ -22,7 +22,7 @@ import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
 import type { CanvasEntityCandidate } from "./CanvasNodePromptPanel";
 import { cn } from "@/lib/utils";
 import { CanvasNodeType, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
-import { REFERENCE_IMAGE_ROLES } from "../pro-workstation/workstation-constants";
+import { REFERENCE_IMAGE_ROLES } from "../../lib/reference-image-roles";
 import { toReferenceImageRole } from "@/lib/image-types";
 import type { ReferenceImageRole } from "@/lib/image-types";
 import { STATUS_LABEL, TYPE_LABEL, RESIZE_HANDLES } from "./node-view/constants";
@@ -422,7 +422,7 @@ export function CanvasNodeView({
               )}
             </span>
           )}
-          <span className={cn(typeBadge.cls, "shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-none")}>
+          <span className={cn(typeBadge.cls, "shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-ios-caption2 font-medium leading-none")}>
             <TypeBadgeIcon className="h-3 w-3" aria-hidden="true" />
             {typeBadge.label}
           </span>
@@ -431,7 +431,7 @@ export function CanvasNodeView({
           {node.type !== CanvasNodeType.Director && (
             <span
               className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium",
+                "shrink-0 rounded-full px-2 py-0.5 text-ios-caption1 font-medium",
                 status === "idle" && "bg-black/5 text-muted-foreground",
                 status === "success" && "bg-ios-green/15 text-[#248A3D]",
                 status === "loading" && "bg-ios-blue/10 text-ios-blue",
@@ -587,12 +587,12 @@ export function CanvasNodeView({
           </div>
         </div>
         {showCostBadge && (
-          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12.5px] font-medium text-white">
+          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-ios-caption1 font-medium text-white">
             {node.metadata?.cost_coins} 币
           </span>
         )}
         {showCostHintBadge && (
-          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12.5px] font-medium text-white tabular-nums">
+          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-ios-caption1 font-medium text-white tabular-nums">
             预估 {node.metadata?.cost_hint} 币
           </span>
         )}
