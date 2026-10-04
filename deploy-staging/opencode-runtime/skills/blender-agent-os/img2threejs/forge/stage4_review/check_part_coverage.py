@@ -130,7 +130,7 @@ def main() -> int:
     parts = [p for p in manifest.get("parts", []) if isinstance(p, dict) and p.get("name")]
     if not parts:
         print("FAIL  model exposes no named parts at all — nothing is selectable or separable")
-        print("      the factory must name its meshes; see the assembly contract in SKILL.md")
+        print("      the factory must name its meshes; see the assembly contract in RECIPE.md")
         return 0 if args.warn_only else 1
 
     by_norm: dict[str, list[str]] = {}

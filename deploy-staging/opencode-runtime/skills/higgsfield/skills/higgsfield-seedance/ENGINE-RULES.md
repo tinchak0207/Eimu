@@ -9,7 +9,7 @@ dialects couldn't see them.
 
 | Profile | Format | Where |
 |---------|--------|-------|
-| `EN-director` | English prose prompt, six-slot formula, MCSLA-compatible | `SKILL.md` (this skill) |
+| `EN-director` | English prose prompt, six-slot formula, MCSLA-compatible | `RECIPE.md` (this skill) |
 | `ZH-house` | Chinese house format (镜头-block shotlists, ≤1,800 chars) | team `shotlist-builder` (external corpus); ZH rules enforced by `../../scripts/seedance_lint.py` |
 | `bilingual-JSON` | JSON API persona emitting paired `{"lang":"en"}` + `{"lang":"zh"}` prompts | `../../docs/Seedance 2 Skill.md` |
 

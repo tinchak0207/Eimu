@@ -60,7 +60,7 @@ keyframe**（配合 `EMPTY_CamTarget_[Shot]` 做_track-to_约束）。标准落�
 | `aerial` | 高空 location 下降接近主体 |
 | `lowangle` / `overshoulder` / `pov` / `static` | 静态机位：单帧 pose，不 keyframe |
 
-对应配方：`recipes/camera-cinematography/SKILL.md`（运镜表一节同构）。
+对应配方：`recipes/camera-cinematography/RECIPE.md`（运镜表一节同构）。
 
 ## 2. 动作种子（motionTemplates.ts）→ bpy 骨架 keyframe
 
@@ -120,7 +120,7 @@ Vec3 是**欧拉角（度）**。代表性模板的译法（其余同构，值 p
 
 ### 2.3 JointName → bpy 骨骼对照（mannequin 拓扑）
 
-L1 十关节（types.ts `JointName`）对应标准 humanoid rig（`recipes/rigging/SKILL.md`
+L1 十关节（types.ts `JointName`）对应标准 humanoid rig（`recipes/rigging/RECIPE.md`
 的 `ARM_Character` 层级，rigify/rename 后按此对号）：
 
 | L1 JointName | bpy 骨骼（rigify 命名） | 轴语义（L1） |
@@ -135,7 +135,7 @@ L1 十关节（types.ts `JointName`）对应标准 humanoid rig（`recipes/riggi
 
 步态参数直迁（walk 组：amplitude 28°/38°，swing=sin(p·2π·cycles)，cycles=1.35·D；
 run 组：hip 52°、knee 18+75°、elbow -75°、spine 13°，cycles=2.3·D）→ bpy 每步
-两个接触帧 keyframe，循环收尾复制首帧（`recipes/animation/SKILL.md` 循环验证节）。
+两个接触帧 keyframe，循环收尾复制首帧（`recipes/animation/RECIPE.md` 循环验证节）。
 
 ## 3. 路径种子（pathCurve.ts）→ bpy 路径/控制柄
 
@@ -164,8 +164,8 @@ L1 关键帧的路径模型与 bpy fcurve/Bezier 完全同构：
 | 位移 | suggestedDistance（米） | 1 Blender 单位 = 1 米（`unit_settings.scale_length=1`），直迁 |
 
 > 换算标注：L1→bpy 映射 = three.js Y-up → Blender Z-up 标准变换（x 不变，y↑变 z，
-> z 变 -y）。**本表是初值参考，落帧后必须按 `recipes/camera-cinematography/SKILL.md`
-> 起幅/中点/落幅三帧检查，并过 `recipes/qa-review/SKILL.md` 门禁。**
+> z 变 -y）。**本表是初值参考，落帧后必须按 `recipes/camera-cinematography/RECIPE.md`
+> 起幅/中点/落幅三帧检查，并过 `recipes/qa-review/RECIPE.md` 门禁。**
 
 ## 5. 直迁工作流（agent 操作序）
 

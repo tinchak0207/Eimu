@@ -1,6 +1,6 @@
 # Seedance 2.5 — The AI-VFX Pipeline
 
-`SKILL.md` in this directory is the **dialect** — modes, reference-role grammar, staging,
+`RECIPE.md` in this directory is the **dialect** — modes, reference-role grammar, staging,
 bracket syntax. This file is the **pipeline**: how a whole VFX shot actually gets built
 when the job is "replace a 3D/compositing pipeline with generation", and what the failures
 look like on the way.
@@ -11,9 +11,9 @@ followed by the same shots built with no plate at all. The doctrine below is wha
 that build.
 
 > **This is a production layer, not a second dialect.** Everything here is written *in*
-> the grammar of `SKILL.md`. The block scaffold (`SCENE CONTEXT → … → POSITIVE LOCKS`),
+> the grammar of `RECIPE.md`. The block scaffold (`SCENE CONTEXT → … → POSITIVE LOCKS`),
 > FOV-in-degrees, distributed style, the CAMERA-3rd-position rule and the prompt-craft
-> laws are house doctrine in `../higgsfield-seedance/SKILL.md` and carry across to 2.5
+> laws are house doctrine in `../higgsfield-seedance/RECIPE.md` and carry across to 2.5
 > unchanged. Do not restate them here — read them there.
 
 ## QUICK FACTS
@@ -118,7 +118,7 @@ build, silhouette and wardrobe; the close-up becomes the only place a face can b
 from. One source of truth for identity, at the only resolution where identity is actually
 resolved.
 
-This composes with, and does not replace, the reference-role discipline in `SKILL.md` —
+This composes with, and does not replace, the reference-role discipline in `RECIPE.md` —
 the crop reduces what the model *can* misread; the role sentence tells it what to read.
 
 ---
@@ -160,7 +160,7 @@ Two locks earn their place next to it:
   `do not shrink, resize or move the dragon` — otherwise the model solves the proportion
   by shrinking the wrong subject.
 
-> This is the 2.5 form of the scale-drift lock in `../higgsfield-seedance/SKILL.md`
+> This is the 2.5 form of the scale-drift lock in `../higgsfield-seedance/RECIPE.md`
 > § Positive Locks. There the counter is a standing sentence; here, with 30 image
 > references available, it is a dedicated asset — which is stronger, because a proportion
 > shown cannot be paraphrased.
@@ -219,7 +219,7 @@ give away two shots as different places. State what the new angle does *not* con
 ("this side is completely sealed solid rock: no second opening, no daylight gap, no
 waterfall anywhere in frame"), because the model will happily invent a second exit rather
 than commit to a dead end. That instinct is environment invention, drift source #1 in
-`../higgsfield-seedance/SKILL.md` § Positive Locks.
+`../higgsfield-seedance/RECIPE.md` § Positive Locks.
 
 ---
 
@@ -244,7 +244,7 @@ Three operating facts fall out of that routing, and none of them are true of `vi
 four seconds to match the reference. Anything longer and the AI starts guessing."* In
 `omni_reference` the duration is a real parameter, so an over-long setting is an
 instruction to invent footage past the end of the plate. `video_edit`, by contrast,
-ignores `duration` entirely and bills by the master's length (`SKILL.md` § The Higgsfield
+ignores `duration` entirely and bills by the master's length (`RECIPE.md` § The Higgsfield
 Parameter Surface).
 
 **2. The source clip must be at least 4 seconds long.** `[FIELD]` This is not an arbitrary
@@ -264,8 +264,8 @@ unchanged."*
 |---|---|
 | Swap a subject / add an element while inheriting the plate's performance frame-for-frame, plate ≥ 4 s | `omni_reference` + video reference, duration = source |
 | Change one scoped thing inside a master whose timeline must survive untouched (a wall's light colour from 4–7 s, remove the music) | `video_edit` — `MODE-PLAYBOOKS.md` § Video editing |
-| Rebuild the shot from the ground up, old clip as motion guidance only | `omni_reference` — `SKILL.md` § The Mode Router, rule 2 |
-| Plate is Seedance **2.0** work (4K needed, platform start/end frame, genre hint) | `../higgsfield-seedance-vfx/SKILL.md` |
+| Rebuild the shot from the ground up, old clip as motion guidance only | `omni_reference` — `RECIPE.md` § The Mode Router, rule 2 |
+| Plate is Seedance **2.0** work (4K needed, platform start/end frame, genre hint) | `../higgsfield-seedance-vfx/RECIPE.md` |
 
 ### The performance-inheritance clause
 
@@ -306,7 +306,7 @@ every time. No amount of re-rolling creates an anchor that was never filmed.
 
 1. Screenshot a frame of the location out of the plate.
 2. Use it as the **starting frame** — declared in the prompt, not as a mode
-   (`SKILL.md` § First-Last Frame and Multi-Keyframe Control).
+   (`RECIPE.md` § First-Last Frame and Multi-Keyframe Control).
 3. Write the action from scratch, since nothing is being inherited any more.
 4. Stitch the i2v shot to the v2v shot in the edit.
 
@@ -348,7 +348,7 @@ travels through the body, in what direction, at what rate:
 > wave, the loose skin and neck spikes wobbling with the rotation, flinging spray outward
 > in a spinning radial cloud"*
 
-This is the same law as `../higgsfield-seedance/SKILL.md` § Prompt-Craft Laws — write the
+This is the same law as `../higgsfield-seedance/RECIPE.md` § Prompt-Craft Laws — write the
 visible — applied to motion specifically. **Motion physics is the load-bearing clause in a
 VFX shot**: always specify the physical movement rather than the adjective for it.
 
@@ -403,7 +403,7 @@ describe the face at the level of what the body is actually doing — what the c
 going through, **what he says**, **how the voice sounds**, and **what his hands are doing**.
 The build's cave monologue works because it specifies the swallow, the twitching fingers,
 the aborted false start, the shaken-out hands, the trembling exhale, and only then the
-sprint. Beat-level acting direction lives in `../higgsfield-acting/SKILL.md`; this is the
+sprint. Beat-level acting direction lives in `../higgsfield-acting/RECIPE.md`; this is the
 2.5 note that it must be written *out*, because there is no reference doing it for you.
 
 **The voice lock.** `[FIELD]` 2.5 locks the **voice** together with the appearance in the
@@ -445,11 +445,11 @@ all — is that a studio would quote **at least $50,000** for it.
 
 ## Related
 
-- `SKILL.md` — the 2.5 dialect: modes, reference roles, staging, bracket syntax, limits
+- `RECIPE.md` — the 2.5 dialect: modes, reference roles, staging, bracket syntax, limits
 - `MODE-PLAYBOOKS.md` — `video_edit` and `video_extension` order forms, storyboards, blockouts, transitions
-- `../higgsfield-seedance/SKILL.md` — house prompt doctrine: block scaffold, FOV anchors, distributed style, prompt-craft laws, positive locks
+- `../higgsfield-seedance/RECIPE.md` — house prompt doctrine: block scaffold, FOV anchors, distributed style, prompt-craft laws, positive locks
 - `../higgsfield-seedance/HELL-GRIND.md` — the feature-film pipeline (asset construction at film scale, iteration discipline)
-- `../higgsfield-seedance-vfx/SKILL.md` — the **2.0** video-to-video lane (4K, `mode=std`)
-- `../higgsfield-character-design/SKILL.md` — what goes on the sheet before any model runs
-- `../higgsfield-acting/SKILL.md` — performance construction for the emotion beats
+- `../higgsfield-seedance-vfx/RECIPE.md` — the **2.0** video-to-video lane (4K, `mode=std`)
+- `../higgsfield-character-design/RECIPE.md` — what goes on the sheet before any model runs
+- `../higgsfield-acting/RECIPE.md` — performance construction for the emotion beats
 - `../../image-models.md` — full specs for Nano Banana 2, Seedream 5.0, GPT Image 2, Soul Cinema

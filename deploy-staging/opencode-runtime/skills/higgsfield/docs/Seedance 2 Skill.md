@@ -4,7 +4,7 @@ description: "Seedance 2.0 video prompt director. Converts plain-text scene desc
 ---
 
 > **⚠ This document is the `bilingual-JSON` output *profile*, not the canonical
-> Seedance skill.** The canonical skill is `skills/higgsfield-seedance/SKILL.md`
+> Seedance skill.** The canonical skill is `skills/higgsfield-seedance/RECIPE.md`
 > (the `EN-director` profile); the shared engine-rule core that all profiles —
 > `EN-director`, `ZH-house`, `bilingual-JSON` — obey lives in
 > `skills/higgsfield-seedance/ENGINE-RULES.md`. The § ENGINE RULES section below

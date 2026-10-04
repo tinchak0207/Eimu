@@ -6,7 +6,7 @@ skill it ships with. This file is the part of that system the repo did not alrea
 
 **What this file is not.** The CINEDANCE prompt doctrine — block scaffold, FOV degrees,
 optics decision tree, positive locks, cut vocabulary, context isolation, tag naming — is
-already the `[OFFICIAL]` doctrine in `SKILL.md` § Official Prompt Architecture, harvested
+already the `[OFFICIAL]` doctrine in `RECIPE.md` § Official Prompt Architecture, harvested
 from the same source family. It is not restated here. Neither are the engine rules
 (`ENGINE-RULES.md`) or the tutorial patterns (`PRODUCTION-PATTERNS.md`).
 
@@ -15,8 +15,8 @@ generated, how a scene's geography is locked across every shot in it, how dialog
 constructed, and how the iteration loop is run so a shot converges instead of burning
 credits. Every rule in the source brief exists because a shot failed without it.
 
-> **Read with:** `SKILL.md` (the prompt grammar), `ENGINE-RULES.md` (the hard constraints),
-> `../higgsfield-acting/SKILL.md` (the performance layer this pipeline assumes), and
+> **Read with:** `RECIPE.md` (the prompt grammar), `ENGINE-RULES.md` (the hard constraints),
+> `../higgsfield-acting/RECIPE.md` (the performance layer this pipeline assumes), and
 > `../../templates/seedance/global-style-prefix.md` (the Style Prefix this pipeline glues to
 > every prompt).
 
@@ -61,7 +61,7 @@ scene and stops reacting to new light.
 
 **Sheets read best with a large portrait in 3/4 view** — face turned slightly, not straight-on.
 
-> Complements `../higgsfield-soul/SKILL.md` § Character Sheet Creation (the Soul-ID route to
+> Complements `../higgsfield-soul/RECIPE.md` § Character Sheet Creation (the Soul-ID route to
 > the same goal) and `../../templates/ad-asset-prep.md` (asset prep generally). The headless
 > front panel and the boring-on-purpose rule are the Hell Grind additions.
 
@@ -106,7 +106,7 @@ but the core never changes.
 character who paces the room, sat down on a sofa, does not calm down — the same energy moves
 into swaying, finger-tapping, and jagged gestures.
 
-Full system: `../higgsfield-acting/SKILL.md`.
+Full system: `../higgsfield-acting/RECIPE.md`.
 
 ### Location sheets
 
@@ -140,7 +140,7 @@ or the grade.
 ```
 
 **Location references get an explicit ban on inheritance.** This is the Environment role in
-`SKILL.md` § Reference Roles, stated in the model's own working vocabulary.
+`RECIPE.md` § Reference Roles, stated in the model's own working vocabulary.
 
 **One dictionary of names for the whole project.** All assets live under tags — `@roco`,
 `@loc_cave_front` — and the same tags are used everywhere: in documents, in prompts, in the
@@ -184,7 +184,7 @@ Rules for reading and writing the map:
 - **Give a static dialogue a corner of the room, not the whole room.** The less space the
   model has, the less choice it has about where to put the characters.
 
-> **Relationship to the Spatial Layout Block** (`SKILL.md` § Spatial Layout Block): that block
+> **Relationship to the Spatial Layout Block** (`RECIPE.md` § Spatial Layout Block): that block
 > is per-shot and *includes the people* — screen position, occupancy, orientation, contact
 > points. GEO is per-**scene**, excludes the people, and is pasted unchanged across every shot
 > in the scene. Use both: GEO fixes the room, the Spatial Layout Block fixes who is standing
@@ -251,7 +251,7 @@ Counted objects belong in POSITIVE LOCKS, phrased as what **is** in the frame.
 
 ## Two extra blocks in the skeleton
 
-The Hell Grind skeleton is `SKILL.md` § Block order plus three blocks it names explicitly:
+The Hell Grind skeleton is `RECIPE.md` § Block order plus three blocks it names explicitly:
 
 | Block | Contents |
 |---|---|
@@ -293,7 +293,7 @@ choice, consistent with the harvest corpus's 12-of-13 music ban; see
 - **Keep each beat light: up to three sentences per beat.** Overload a beat and the model
   smears it.
 - **Length is not the enemy — an overloaded beat is.** Hell Grind's prompts ran **3,000–4,000
-  words**. This sits at the top of the harvest corpus's register ladder (`SKILL.md` § Field
+  words**. This sits at the top of the harvest corpus's register ladder (`RECIPE.md` § Field
   calibration) and confirms it: structure replaces the word cap in the block-scaffold regime.
 - **Actions only in positive form.** The model ignores "does NOT fall on his back" — or does
   the opposite. Write "falls on his stomach."
@@ -302,7 +302,7 @@ choice, consistent with the harvest corpus's 12-of-13 music ban; see
 - **Never write age, in any language.** The content filter becomes markedly stricter the
   moment it reads a minor. Give the **role, the clothes, the action** instead. This is the
   production reason behind engine rule 1 (`ENGINE-RULES.md`) — and it **overrides** the
-  `@TAG:` line's `age + role/build` form in `SKILL.md` § Tag naming: write role and build,
+  `@TAG:` line's `age + role/build` form in `RECIPE.md` § Tag naming: write role and build,
   drop the age.
 - **Keep a ban dictionary** of words the model punishes, and grow it as you find them:
 
@@ -311,7 +311,7 @@ choice, consistent with the harvest corpus's 12-of-13 music ban; see
 | dark | low key |
 | jolting | rapid motion |
 
-  Same mechanism as the homograph trap in `SKILL.md` § Ambiguous verbs — a word the model
+  Same mechanism as the homograph trap in `RECIPE.md` § Ambiguous verbs — a word the model
   reads as something other than what you meant. Log the substitution when you find one, the
   same way you log a homograph.
 
@@ -413,8 +413,8 @@ Three more that separate a living shot from a dead one:
    and talk over it. **The strongest accent of a scene is the moment they stop that work**
    because of what they just heard.
 
-Muscle-level control beyond this: `../higgsfield-facs/SKILL.md`. The craft layer:
-`../higgsfield-acting/SKILL.md`.
+Muscle-level control beyond this: `../higgsfield-facs/RECIPE.md`. The craft layer:
+`../higgsfield-acting/RECIPE.md`.
 
 ---
 
@@ -425,7 +425,7 @@ Generate in **batches, scene by scene**.
 - **Every iteration is surgical: one line changes, everything else stays word for word.** A
   prompt is a working mechanism — rewrite it fully and you lose the parts that worked.
 - **Everything goes into the log**: prompt version, what changed, verdict. Without the log you
-  cannot repeat a good shot. (`../higgsfield-recall/SKILL.md` is this repo's ledger; log the
+  cannot repeat a good shot. (`../higgsfield-recall/RECIPE.md` is this repo's ledger; log the
   outcome there.)
 - **The ten-to-fifteen rule.** If a shot has not come together in 10–15 iterations, **the
   problem is not the wording.** Simplify the *shot*: split it in two, remove an action, change
@@ -443,7 +443,7 @@ Generate in **batches, scene by scene**.
   character shuffled next to it and froze. The fix: **the action opens the prompt** — "he is
   ALREADY mid-swing, the door ALREADY cracking" — and the approach to the door becomes a
   separate shot. (The production form of the states-not-transitions rule; see
-  `../higgsfield-acting/SKILL.md` § States, not transitions.)
+  `../higgsfield-acting/RECIPE.md` § States, not transitions.)
 - **A crowd is one "character" asset** with a range of heights and clothes. One or two lead
   extras get their own assets for close-ups. On medium shots, **state the number directly** —
   "20+" — otherwise the model gives you three people in one take and a hundred in the next.
@@ -467,7 +467,7 @@ feet and his head at once. A guardian that reads as a large man, or fits comfort
 next to a standing human = failed shot.
 ```
 
-  This is the concrete form of the human-height-comparison rule in `SKILL.md` § Measurable-
+  This is the concrete form of the human-height-comparison rule in `RECIPE.md` § Measurable-
   language rules — with two additions: the human anchor must be **in the frame**, and the
   prompt names what a **failed** shot looks like.
 
@@ -493,12 +493,12 @@ down to a team of one.
 
 ## Related
 
-- `SKILL.md` — the prompt grammar this pipeline fills in
+- `RECIPE.md` — the prompt grammar this pipeline fills in
 - `ENGINE-RULES.md` — the hard rendering constraints
 - `PRODUCTION-PATTERNS.md` — tutorial-demonstrated patterns from the same source family
-- `../higgsfield-acting/SKILL.md` — the performance system the CHARACTER ACTING block encodes
-- `../higgsfield-soul/SKILL.md` — Soul ID character sheets and multi-character consistency
-- `../higgsfield-shotlist-director/SKILL.md` — the connected-shotlist form of "one dictionary
+- `../higgsfield-acting/RECIPE.md` — the performance system the CHARACTER ACTING block encodes
+- `../higgsfield-soul/RECIPE.md` — Soul ID character sheets and multi-character consistency
+- `../higgsfield-shotlist-director/RECIPE.md` — the connected-shotlist form of "one dictionary
   of names for the whole project"
-- `../higgsfield-recall/SKILL.md` — the iteration log
+- `../higgsfield-recall/RECIPE.md` — the iteration log
 - `../../templates/seedance/global-style-prefix.md` — the Style Prefix pasted into every prompt

@@ -1,3 +1,4 @@
+import type { SessionState } from "./types-gateway.ts"
 // 從 index.ts 無損抽取（2026-09-19 第二階段 Wave1）：出站文本剝離（S2b/R4-A/R5-C，原 index.ts 736–888 行）。
 // 2026-09-21 拆分：本檔只留純剝離邏輯（零 gateway 模組 import，node:test 可直跑）；
 // emitSanitizedDelta 出口（依賴 sse-core/metrics/events-translate）移居
@@ -117,6 +118,22 @@ export function detectUserScript(text: string): UserScript {
 export function resolveUserScript(prev: UserScript | undefined, userText: string | undefined): UserScript {
   const cur = detectUserScript(userText ?? "")
   return cur !== "unknown" ? cur : (prev ?? "unknown")
+}
+
+// ── 2026-10-04（T2）：會話黏性書寫體（唯一黏性判準，出站正文與守衛文案共用）──
+// 原住 outbound-emit.ts，僅供出站正文 strip 用；T 的守衛文案卻各處直呼非黏性
+// detectUserScript(最新消息)，導致「繁體會話夾一句英文/短句/中性訊息」時守衛文案
+// 掉回簡體。Hack-H2 §2.4 反例。此處移入純邏輯檔並 export，讓守衛與正文對同一
+// state 得到同一答案（同一個 WeakMap 決策），復用既有 resolveUserScript，不另造判定。
+const userScriptBySession = new WeakMap<SessionState, { msg: string | undefined; script: UserScript }>()
+/** 會話黏性書寫體：按 state.lastUserMessage 判定；本句無判定力時沿用上次；直到有判定力才更新。 */
+export function sessionUserScript(state: SessionState): UserScript {
+  const msg = state.lastUserMessage
+  const rec = userScriptBySession.get(state)
+  if (rec && rec.msg === msg) return rec.script
+  const script = resolveUserScript(rec?.script, msg)
+  userScriptBySession.set(state, { msg, script })
+  return script
 }
 
 /** 該書寫體下出口是否做 R5-C 繁→簡：只有繁體用戶不轉（簡體/未判定保 R5-C 舊行為）。 */

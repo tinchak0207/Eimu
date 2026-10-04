@@ -8,7 +8,7 @@ description: >
   set of product images into one identity-locked, product-specific generation prompt.
   Includes the verbatim GLOBAL IDENTITY LOCK copy/paste prompt, the prompt-conversion
   meta-prompt, and two worked examples (hat, golf dress). Best run with Nano Banana Pro,
-  Nano Banana 2, or GPT Image 2.0. Consulted from parent SKILL.md when the user wants a
+  Nano Banana 2, or GPT Image 2.0. Consulted from parent RECIPE.md when the user wants a
   product reference sheet, an identity-locked product prompt, or asset prep for static
   ads / Marketing Studio / Soul workflows.
 user-invocable: false
@@ -345,9 +345,9 @@ into:
 - **Static ads** — as the product reference in `static-ads-workflow.md`
   (Mode A reference swap).
 - **Marketing Studio video** — register it as a product so generations hold
-  product fidelity (see `../higgsfield-marketing-studio/SKILL.md` § 6).
+  product fidelity (see `../higgsfield-marketing-studio/RECIPE.md` § 6).
 - **Soul / character work** — the same identity-lock discipline applies to
-  character turnaround sheets (see `../higgsfield-soul/SKILL.md`
+  character turnaround sheets (see `../higgsfield-soul/RECIPE.md`
   § Character Sheet Creation).
 
 ## 8. Source acknowledgment

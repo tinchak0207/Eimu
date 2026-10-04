@@ -7,7 +7,7 @@ description: >
   production cost). This tail is isolated from the parent because it carries the most
   connector-dependent material (the Meta Ads integration) and the most estimate-based
   material (the traditional-cost model), both of which need heavy "not verified / user-
-  overridable" framing. Consulted from parent SKILL.md § 7 when the user reaches the
+  overridable" framing. Consulted from parent RECIPE.md § 7 when the user reaches the
   publish or report stage of the campaign pipeline.
 user-invocable: false
 metadata:
@@ -167,4 +167,4 @@ connector-dependent and unverified rather than asserted as fact, and (2) the
 traditional-production dollar figures are presented as a user-overridable
 estimate with a mandatory methodology disclaimer rather than as authoritative
 or Higgsfield-sourced numbers. The live-spend pull defers to
-`../higgsfield-marketing-studio/SKILL.md` § 12.
+`../higgsfield-marketing-studio/RECIPE.md` § 12.

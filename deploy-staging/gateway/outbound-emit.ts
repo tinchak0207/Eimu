@@ -11,19 +11,10 @@ import { PART_TEXT_TRACK_CAP } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
 import { markTurnFirst } from "./metrics-gw.ts"
 import { boundMap } from "./events-translate.ts"
-import { stripOutboundFeed, resolveUserScript, shouldT2sForUserScript, type PartStripState, type UserScript } from "./outbound-sanitize.ts"
+import { stripOutboundFeed, shouldT2sForUserScript, sessionUserScript, type PartStripState } from "./outbound-sanitize.ts"
 
-// R9-B（2026-09-30）：會話用戶書寫體（黏性，volatile）。按 lastUserMessage 判定，
-// 無判定力的短回覆（「A」「好」）沿用上次；只在消息變化時重算。
-const userScriptBySession = new WeakMap<SessionState, { msg: string | undefined; script: UserScript }>()
-function sessionUserScript(state: SessionState): UserScript {
-  const msg = state.lastUserMessage
-  const rec = userScriptBySession.get(state)
-  if (rec && rec.msg === msg) return rec.script
-  const script = resolveUserScript(rec?.script, msg)
-  userScriptBySession.set(state, { msg, script })
-  return script
-}
+// R9-B（2026-09-30）：會話用戶書寫體（黏性）改由 outbound-sanitize.ts 提供
+// （2026-10-04 T2：移出以便守衛文案共用同一黏性判準）。此處只剩 TODO 註記。
 // TODO(index.ts 接線): markTurnFirst(index.ts ≈4441)/boundMap(index.ts ≈2720) 補 export 後改真 import
 
 /** 統一出口：經剝離器後發 message.delta（無安全文本時靜默）。 */
@@ -41,9 +32,15 @@ export function emitSanitizedDelta(state: SessionState, partId: string | undefin
   }
   const safe = stripOutboundFeed(st, chunk)
   // S1：英文正文被壓制時，以一幀中文提示替代（每 turn 一次，不刷屏）。
+  // 2026-10-04 T2 語言鏡像：提示文案依會話黏性書寫體出對應版本（複用 sessionUserScript）。
   if (st.sawEnglish && !state.englishNoticeSent) {
     state.englishNoticeSent = true
-    emitToSession(state, "turn.status", { text: "已自动略去一段英文内部思考，中文回复不受影响" })
+    emitToSession(state, "turn.status", {
+      text:
+        sessionUserScript(state) === "hant"
+          ? "已自動略去一段英文內部思考，中文回覆不受影響"
+          : "已自动略去一段英文内部思考，中文回复不受影响",
+    })
   }
   if (safe) {
     emitToSession(state, "message.delta", { text: safe }, { strippable: true })

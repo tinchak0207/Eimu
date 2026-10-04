@@ -7,14 +7,14 @@ look so 25 separately-generated scenes read as one piece.
 Regime note: the verbatim prefix is the **connected-shotlist** shape
 `[FIELD — 13-project harvest]`. A *standalone* block-scaffold prompt does the
 opposite — it opens on SCENE CONTEXT and distributes style into home blocks
-(`../../skills/higgsfield-seedance/SKILL.md` § Distributed style — the
+(`../../skills/higgsfield-seedance/RECIPE.md` § Distributed style — the
 standalone-block rule).
 
 ## When to use this template
 
 Any multi-scene Seedance production where every clip must share a look —
 commercials, short films, branded content. It is the top layer of the
-[`higgsfield-shotlist-director`](../../skills/higgsfield-shotlist-director/SKILL.md)
+[`higgsfield-shotlist-director`](../../skills/higgsfield-shotlist-director/RECIPE.md)
 artifact: prepended to every per-scene prompt's copy-block, and shown once in a
 collapsible block at the top of the shotlist HTML.
 
@@ -50,7 +50,7 @@ Notes on the fields:
 - **Color `60:30:10`** — dominant / secondary / accent ratio; name the three
   colours in the per-scene Scene block, not here.
 - **Audio: diegetic-only** — the prompt body names only real-world SFX; layer any
-  score in post. See `../../skills/higgsfield-audio/SKILL.md` § Seedance 2.0 and
+  score in post. See `../../skills/higgsfield-audio/RECIPE.md` § Seedance 2.0 and
   the diegetic-only convention.
 - **Texture lines are look declarations, not quality pleas** — "180° shutter
   motion blur" in the Camera line and any grain named in Color are *declared
@@ -65,7 +65,7 @@ Notes on the fields:
   lighting, no flicker"). What is banned is `negative:` list syntax or a bare
   freestanding negation list — Seedance has no negative-embedding architecture
   and parses those as scene description. See
-  `../../skills/higgsfield-seedance/SKILL.md` § Prompt-Craft Laws → No negative
+  `../../skills/higgsfield-seedance/RECIPE.md` § Prompt-Craft Laws → No negative
   prompts in the prompt body.
 
 ## Field specimens — what production prefixes actually lock
@@ -119,9 +119,9 @@ belongs in the global block instead — fold it up and re-render.
 
 ## Related
 
-- `../../skills/higgsfield-shotlist-director/SKILL.md` — the connected shotlist
+- `../../skills/higgsfield-shotlist-director/RECIPE.md` — the connected shotlist
   this prefix sits at the top of
-- `../../skills/higgsfield-seedance/SKILL.md` § Prompt-Craft Laws — the per-prompt
+- `../../skills/higgsfield-seedance/RECIPE.md` § Prompt-Craft Laws — the per-prompt
   grammar the prefix wraps
-- `../../skills/higgsfield-cinema/SKILL.md` § Manual Style — project-level style
+- `../../skills/higgsfield-cinema/RECIPE.md` § Manual Style — project-level style
   control for Cinema Studio (sibling concept, different surface)

@@ -31,13 +31,13 @@ selection time.
   they run white seamless — see `../image-models.md` § Seedream 5.0 Pro.) This bullet is the canonical home of the
   grey rule; the sheet workflows in
   `../skills/higgsfield-gpt-image-2/reference-sheet-workflow.md` and
-  `../skills/higgsfield-soul/SKILL.md` § Character Sheet Creation point here.
+  `../skills/higgsfield-soul/RECIPE.md` § Character Sheet Creation point here.
 - **3/4-angle locations beat flat head-on** — they give the camera depth to move
   through, so motion tests survive more often. See § Location plates below for
   the empty-plate rule.
 - **One clean subject per sheet** — a single, unambiguous thing to lock onto.
   (The one deliberate exception: crowd work, where you *want* a multi-character
-  VARIETY lineup sheet — see `../skills/higgsfield-soul/SKILL.md`
+  VARIETY lineup sheet — see `../skills/higgsfield-soul/RECIPE.md`
   § Variety Sheets.)
 
 Higher win rate compounds: cheaper iteration, fewer regenerations, more keeper
@@ -57,7 +57,7 @@ Close-up (locks the face) **+** full-body front/back (locks the build), on a
 **grey background**, generated in **Soul Cinema** for the best photoreal skin
 texture. One clear face + one full body is the hard floor per character — never
 ship a character on a single image ("so Seedance doesn't have to guess").
-See `../skills/higgsfield-soul/SKILL.md` § Character Sheet Creation.
+See `../skills/higgsfield-soul/RECIPE.md` § Character Sheet Creation.
 
 ### 3. Lock one face — erase the duplicate
 
@@ -91,7 +91,7 @@ combine into one prompt. Keep the face, skin, and background unchanged.
 
 Every GPT Image edit softens Soul-grade skin toward flat "AI slop." The fast
 manual fix is a layer-mask composite — see
-`../skills/higgsfield-soul/SKILL.md` § Two-Tool Refinement Pipeline (the
+`../skills/higgsfield-soul/RECIPE.md` § Two-Tool Refinement Pipeline (the
 layer-mask composite worked example).
 
 ### 6. Multi-state variants — bake the state in on purpose
@@ -116,7 +116,7 @@ Frame 1 face portrait · Frame 2 **ghost-mannequin outfit display** ("garments
 hold the natural shape of an invisible body — no head, no hands, no skin
 visible") so wardrobe is its own decoupled panel · Frame 3 back view — thin
 white dividers, equal frames. (The repo's canonical ghost-mannequin recipe:
-`../skills/higgsfield-soul/SKILL.md` § Split-Panel Outfit-Change Sheet.)
+`../skills/higgsfield-soul/RECIPE.md` § Split-Panel Outfit-Change Sheet.)
 
 ### 7. Prop sheets (objects skip the motion test)
 
@@ -151,7 +151,7 @@ generation** [DEMO]. Two plate disciplines:
 Generate location plates in **Soul Cinema** (see § Which model makes the
 sheet below); in video prompts a location plate is typically declared
 "STYLE REFERENCE ONLY, not a fixed keyframe" —
-`../skills/higgsfield-seedance/SKILL.md` § Reference Roles.
+`../skills/higgsfield-seedance/RECIPE.md` § Reference Roles.
 
 ### 8b. Reverse-angle plates + master-plate exposure normalization
 
@@ -186,9 +186,9 @@ prompts auto-attach the right images:
 ```
 
 Full slot→role discipline:
-`../skills/higgsfield-seedance/SKILL.md` § Reference Roles. This glossary is the
+`../skills/higgsfield-seedance/RECIPE.md` § Reference Roles. This glossary is the
 second layer of the connected shotlist —
-`../skills/higgsfield-shotlist-director/SKILL.md`.
+`../skills/higgsfield-shotlist-director/RECIPE.md`.
 
 ## Which model makes the sheet
 
@@ -213,10 +213,10 @@ input image, the sharper the final video."**
 
 ## Related
 
-- `../skills/higgsfield-soul/SKILL.md` — character sheets + the anti-slop composite
-- `../skills/higgsfield-gpt-image-2/SKILL.md` + `…/reference-sheet-workflow.md` +
+- `../skills/higgsfield-soul/RECIPE.md` — character sheets + the anti-slop composite
+- `../skills/higgsfield-gpt-image-2/RECIPE.md` + `…/reference-sheet-workflow.md` +
   `…/static-ads-workflow.md` — product/prop sheets, location editing
-- `../skills/higgsfield-shotlist-director/SKILL.md` — where these locked assets
+- `../skills/higgsfield-shotlist-director/RECIPE.md` — where these locked assets
   feed the connected shotlist
 - `../DISCIPLINE.md` — the acceptance-rate philosophy "win rate" is the upstream
   face of

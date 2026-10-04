@@ -38,6 +38,11 @@ ROOT = Path(__file__).resolve().parent.parent  # scripts/ → repo root
 INDEX = ROOT / "INDEX.md"
 QUICK_FACTS_THRESHOLD = 400  # lines; matches the "large sub-skill" cutoff
 
+# Sub-skill entrypoint filename(s). The 2026-10-04 harness rename收敛 collapsed
+# every nested SKILL.md to RECIPE.md; accept RECIPE.md (preferred) and SKILL.md
+# (compat) so the index can never silently collapse to a single file.
+SKILL_ENTRY_FILENAMES = ("RECIPE.md", "SKILL.md")
+
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 INDEX_MAX_LEVEL = 3  # INDEX.md lists h1-h3; anchor validation covers all levels
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -86,8 +91,15 @@ def headings(text: str) -> list[tuple[int, str]]:
 
 
 def skill_files() -> list[Path]:
-    return sorted(p for p in ROOT.rglob("SKILL.md")
-                  if ".git" not in p.parts)
+    """Every skill entrypoint file, at most one per directory (RECIPE.md wins
+    over SKILL.md), sorted. Replaces bare rglob("SKILL.md")."""
+    seen: dict[Path, Path] = {}
+    for name in SKILL_ENTRY_FILENAMES:  # RECIPE.md first so it wins the dedupe
+        for p in ROOT.rglob(name):
+            if ".git" in p.parts:
+                continue
+            seen.setdefault(p.parent, p)
+    return sorted(seen.values())
 
 
 def quick_facts_problems(path: Path) -> list[str]:

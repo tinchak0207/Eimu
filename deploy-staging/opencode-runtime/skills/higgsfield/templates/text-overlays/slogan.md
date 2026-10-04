@@ -35,5 +35,5 @@ readable.
 - `subtitle.md` (sibling template) — for dialogue/spoken-line text
 - `speech-bubble.md` (sibling template) — for character-attributed
   dialogue text
-- `../../skills/higgsfield-seedance/SKILL.md` § Filter Model — text-
+- `../../skills/higgsfield-seedance/RECIPE.md` § Filter Model — text-
   rendering failure modes that filter against the readability clause

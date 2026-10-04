@@ -50,17 +50,17 @@ Final frame: [composition at last frame].
 ## What goes in each field
 
 - **Identity** matches a Soul ID character handle (see
-  `../../skills/higgsfield-soul/SKILL.md` § Character Anchor Block
+  `../../skills/higgsfield-soul/RECIPE.md` § Character Anchor Block
   for the 10-attribute per-character structure this template consumes)
 - **Screen position** pairs qualitative anchor + percentage notation
-  per `../../skills/higgsfield-seedance/SKILL.md` § Frame Coordinate
+  per `../../skills/higgsfield-seedance/RECIPE.md` § Frame Coordinate
   System (vocab.md § Editing Syntax bracket notation ships in v3.7.7
   sub-phase 2f)
 - **Contact points** prevent the character-floating failure mode
   catalogued in `../../skills/higgsfield-seedance/FAILURE-MODES.md`
 - **Cross-character relationships** prevent character-swap and
   axis-crossing failures — see § Spatial Layout Block in the seedance
-  SKILL.md for the structural rationale
+  RECIPE.md for the structural rationale
 
 ## BAD / GOOD / GREAT
 
@@ -91,8 +91,8 @@ copy and adjust per cut rather than re-specifying.
   blocking note this template consumes
 - `worked-example-two-character.md` (sibling) — concrete end-to-end
   fill of this template structure
-- `../../skills/higgsfield-soul/SKILL.md` § Character Anchor Block —
+- `../../skills/higgsfield-soul/RECIPE.md` § Character Anchor Block —
   the 10-attribute per-character structure
-- `../../skills/higgsfield-seedance/SKILL.md` § Frame Coordinate
+- `../../skills/higgsfield-seedance/RECIPE.md` § Frame Coordinate
   System + § Spatial Layout Block — the vocabulary + block this
   template uses

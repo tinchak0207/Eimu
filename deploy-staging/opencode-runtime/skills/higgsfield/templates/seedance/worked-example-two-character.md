@@ -67,7 +67,7 @@ Final frame: Roco one step closer, Lulu's back touching the fence,
 
 - Every `multi-character-anchor.md` field filled — including cross-
   character relationships (distance + eyeline + crossing rule +
-  negative space) per § Spatial Layout Block in the seedance SKILL.md
+  negative space) per § Spatial Layout Block in the seedance RECIPE.md
   + [vocab.md](../../vocab.md) § Composition Vocabulary → Crossing
   rule + § Negative space
 - One dominant camera motion (slow dolly-in) — no compound moves per
@@ -81,9 +81,9 @@ Final frame: Roco one step closer, Lulu's back touching the fence,
 
 - `multi-character-anchor.md` — the template this example fills
 - `top-down-map.md` — pre-visualize before filling the template
-- `../../skills/higgsfield-soul/SKILL.md` § Character Anchor Block —
+- `../../skills/higgsfield-soul/RECIPE.md` § Character Anchor Block —
   per-character 10-attribute structure
-- `../../skills/higgsfield-seedance/SKILL.md` § Spatial Layout Block —
+- `../../skills/higgsfield-seedance/RECIPE.md` § Spatial Layout Block —
   the prompt-body block this example assembles
 - `../../production-benchmarks.md` § Per-character iteration anchor —
   budget anchors for the Soul ID generation pass that built Roco and

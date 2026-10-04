@@ -130,7 +130,7 @@ const EXPERT_DESCRIPTION_SUFFIX = "（Expert：僅經 subagent_dispatch expert �
 /** digest 頭（R7 provenance 規範：HTML 註釋，注入端 stripProvenanceHeader 剝離）。 */
 const DIGEST_PROVENANCE_HEADER =
   "<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 現值生成" +
-  "（buildExpertRegistryDigest 逐字輸出；由 tools/export-expert-agents.ts 機械生成）。" +
+  "（buildExpertRegistryDigest 逐字輸出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 機械生成）。" +
   "生成日期 2026-09-11（R4：摘要行擴充配方库 + 交付契约，registry 改行後須重生成上傳）。 -->";
 
 /** 域工具全集 = 全部 Expert toolIds 去重聯集（registry 插入序）。 */
@@ -199,10 +199,42 @@ function buildAgentsJson(universeTools: readonly string[]): string {
   return `${JSON.stringify(agents, null, 2)}\n`;
 }
 
+/**
+ * Harness 路徑映射（2026-10-04 引用修復片）：registry 的 skillPaths 是 **repo 根樹**
+ * 相對路徑——EDITOR_PERSONA_SKILL_PATHS 由 editor-timeline-activation.test.ts 對
+ * process.cwd() 做 fs 存在性斷言 ⇒ 語義就是 repo 根樹，常量不得改（改了 = 對 repo
+ * 根樹的合法引用失真）。但同一份 EXPERT_REGISTRY 亦被烘焙成 VPS harness 執行時讀取的
+ * 靜態 digest（gateway plan-gw.ts / messages-gw.ts readFileSync），而 harness 樹
+ * `.opencode/skills/**` 已把 nested SKILL.md 收斂改名為 RECIPE.md（一級 20 個 SKILL.md
+ * 保留）。因此 digest 生成時把「harness 樹裡已被改名的 nested 路徑」逐條映射成真實
+ * harness 路徑；一級 skills/editor/SKILL.md 與其它未改名域路徑不動。
+ * 明確表（key = registry 現值，value = harness 真實路徑；非字串模糊替換）——新增
+ * harness 改名時同步補一行，勿用 sed/正則自動生成。
+ */
+const HARNESS_SKILL_PATH_MAP: Readonly<Record<string, string>> = {
+  "skills/editor/assembly/SKILL.md": ".opencode/skills/editor/assembly/RECIPE.md",
+  "skills/editor/audio-first/SKILL.md": ".opencode/skills/editor/audio-first/RECIPE.md",
+  "skills/editor/rhythm/SKILL.md": ".opencode/skills/editor/rhythm/RECIPE.md",
+  "skills/editor/look/SKILL.md": ".opencode/skills/editor/look/RECIPE.md",
+  "skills/editor/mix/SKILL.md": ".opencode/skills/editor/mix/RECIPE.md",
+  "skills/editor/qc-master/SKILL.md": ".opencode/skills/editor/qc-master/RECIPE.md",
+};
+
+/** 把 buildExpertRegistryDigest() 輸出的 repo 路徑逐條換成 harness 真實路徑。
+ * 只替換表中的完整路徑 token（精確匹配，不做前綴/正則模糊替換）；表外路徑原樣。 */
+function applyHarnessSkillPathMap(digest: string): string {
+  let out = digest;
+  for (const [repoPath, harnessPath] of Object.entries(HARNESS_SKILL_PATH_MAP)) {
+    out = out.split(repoPath).join(harnessPath);
+  }
+  return out;
+}
+
 function buildDigestTxt(): string {
   // 無檔尾換行：剝頭（stripProvenanceHeader 只 trimStart）後與 buildExpertRegistryDigest()
-  // 輸出逐字 byte 相等，注入幀零多餘空白。
-  return `${DIGEST_PROVENANCE_HEADER}\n${buildExpertRegistryDigest()}`;
+  // 輸出逐字 byte 相等（唯 nested 已改名路徑經 HARNESS_SKILL_PATH_MAP 映射為 harness 真路徑），
+  // 注入幀零多餘空白。
+  return `${DIGEST_PROVENANCE_HEADER}\n${applyHarnessSkillPathMap(buildExpertRegistryDigest())}`;
 }
 
 function buildExpertIdsJson(): string {

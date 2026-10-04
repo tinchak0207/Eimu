@@ -306,7 +306,7 @@ intercom, the rustle of bedsheets — present but pulled low in the mix.
 Continuation mode picks up at the final frame of the prior clip — the
 last-frame anchor opens the prompt, the identity block re-pastes verbatim,
 the new beat (the composure breaking) is the only new content. The five
-Continuation rules in `skills/higgsfield-seedance/SKILL.md` § Continuation
+Continuation rules in `skills/higgsfield-seedance/RECIPE.md` § Continuation
 Prompt Formula apply.
 
 ---
@@ -562,7 +562,7 @@ Apply Live Concert preset for lighting energy.
 > **Genre vs. Seedance prompt mode:** this section collects examples of the
 > *Transformation genre* — clips where the visible content of the shot is a
 > state change. Distinct from the *Transformation prompt mode* in
-> `skills/higgsfield-seedance/SKILL.md`, which is a Seedance-specific
+> `skills/higgsfield-seedance/RECIPE.md`, which is a Seedance-specific
 > construction pattern for that kind of clip. Examples here use various models;
 > for a Seedance 2.0 worked example using the Transformation prompt mode, see
 > the Awakening II / Seedance 2.0 entry below.
@@ -630,7 +630,7 @@ Transformation prompt mode requires an explicit midpoint — the seams
 pulling, the fissures of light — without which the model either snap-cuts
 between start and end or renders an ambiguous blur. The arc is one
 continuous take inside a single 8-second clip. See
-`skills/higgsfield-seedance/SKILL.md` § Transformation for the construction
+`skills/higgsfield-seedance/RECIPE.md` § Transformation for the construction
 pattern.
 
 ---

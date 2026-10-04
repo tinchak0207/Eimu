@@ -45,9 +45,9 @@ description: 音樂 Expert 配方庫。觸發時機：配樂／主題曲／MV �
 | FlowMusic2API | env `FLOWMUSIC2API_URL` 已配置（YuE2 未配置時的主通路） | `DATA_FLOWMUSIC_2026-09.md` | **無效**：上游把 `:` 換成空格、無任何結構控制、成品長度不受約束 |
 | Gemini Lyria 直連 | 未配置時回落 | `DATA_GOOGLE_2026-07.md` | 有效（官方控件） |
 
-YuE2 通路的硬約束（2026-09-19 收錄）：**白盒 ABC 樂譜**——回執帶 `score_abc` 欄（ABC 記譜法：`K:` 調號、`Q:` 節拍、`V: Vocal` 聲部音符序列），是 Expert 交付契約 `melody_notation` 的**真源**（有它勿自行編造音名序列，直接引用其 Vocal 聲部；`score_abc` 為 null 時才自行標注）。**無 30s 短檔**：`duration_hint=clip30` 會被工具層直接拒（如實報錯，不靜默生成整歌；要短檔走別的通路）。**失敗自動回落 FlowMusic**（工具層行為，回執會標明；Expert 不用手動換通路重試）。**一次一請求**：生成是分鐘級，禁連發多請求；style prompt 上限 3000 runes。
+YuE2 通路的硬約束（2026-09-19 收錄）：**白盒 ABC 樂譜**——回執帶 `score_abc` 欄（ABC 記譜法：`K:` 調號、`Q:` 節拍、`V: Vocal` 聲部音符序列），是 Expert 交付契約 `melody_notation` 的**真源**（有它勿自行編造音名序列，直接引用其 Vocal 聲部；`score_abc` 為 null 時才自行標注）。**無 30s 短檔**：`duration_hint=clip30` 會被工具層直接拒（如實報錯，不靜默生成整歌；要短檔走別的通路）。**失敗自動回落 FlowMusic**（工具層行為，回執會標明；Expert 不用手動換通路重試）。**一次一請求**：生成是分鐘級，禁連發多請求；style prompt 上限 **600 runes**（實作 `CHANNEL_LIMITS.yue2Style`；超限依 CORE_01 權重由低到高整層丟棄，回執的 `truncated` 如實回報丟了哪些層）。
 
-FlowMusic2API 通路的硬約束（實測，詳見該 DATA 檔）：**無歌詞標籤時 style prompt 被壓成單行、上限 220 runes**；帶 `[Verse]/[Chorus]` 標籤的歌詞走保版面分支（標籤保留，但上游會自行加寫段落、產出 A/B 兩版，不是你寫什麼就唱什麼）；BPM／調性／`Instrumental only, no vocals.` 實測有效。`duration_hint=clip30` 不是真短檔（上游 `lyria-fast` 與 `lyria` 規格全等，整歌實測 162–182s）。
+FlowMusic2API 通路的硬約束（實測，詳見該 DATA 檔）：**無歌詞標籤時 style prompt 被壓成單行、上限 220 runes**；帶 `[Verse]/[Chorus]` 標籤的歌詞走保版面分支（標籤保留，**2026-10-03 實測為近乎逐字保留、零擴寫**：489→487 字、段落標籤全保留，一次呼叫出 181 秒完整版雙 take——同詞同 style、僅編曲／演唱不同）；BPM／調性／`Instrumental only, no vocals.` 實測有效。`duration_hint=clip30` 不是真短檔（上游 `lyria-fast` 與 `lyria` 規格全等，整歌實測 162–182s）。
 
 與 Suno 社群偽標籤（`[BPM:120]`、`[Reverb:30%]` 等所有平台都不解析的神話構造）的區分照舊：**凡該通路 DATA 檔沒實測到的控件一律不寫**。
 

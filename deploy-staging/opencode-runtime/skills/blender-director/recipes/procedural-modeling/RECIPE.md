@@ -134,5 +134,5 @@ Test at parameter extremes:
 
 | Topic | Reference | Load When |
 |-------|-----------|-----------|
-| Geo nodes patterns | `../geometry-nodes/SKILL.md` | Node setup |
-| Environment integration | `../environment-artist/SKILL.md` | Scene placement |
+| Geo nodes patterns | `../geometry-nodes/RECIPE.md` | Node setup |
+| Environment integration | `../environment-artist/RECIPE.md` | Scene placement |

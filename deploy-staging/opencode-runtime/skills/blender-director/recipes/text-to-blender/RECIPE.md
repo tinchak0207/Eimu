@@ -119,7 +119,7 @@ Before any work, verify:
 
 ## Intent → sub-skill routing table
 
-For each intent the user expresses, load (via `Read`) the matching sub-skill's `SKILL.md` and follow its patterns. Multiple intents = chain multiple sub-skills.
+For each intent the user expresses, load (via `Read`) the matching sub-skill's `RECIPE.md` and follow its patterns. Multiple intents = chain multiple sub-skills.
 
 | User intent (paraphrased) | Load these sub-skills | Order |
 |--------------------------|----------------------|-------|

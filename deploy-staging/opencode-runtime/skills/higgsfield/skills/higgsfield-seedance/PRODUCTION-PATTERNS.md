@@ -7,7 +7,7 @@ Patterns)
 Patterns shown **working on screen** in Higgsfield's own Seedance-4K film
 tutorial and its blog breakdown. Demonstrated, not spec-guaranteed: each one
 produced the claimed result in the tutorial's footage, but none of them is a
-model parameter. Read alongside `SKILL.md` § Official Prompt Architecture —
+model parameter. Read alongside `RECIPE.md` § Official Prompt Architecture —
 the Block Scaffold (the `[OFFICIAL]` doctrine these patterns are applied
 inside) and § Reference Roles (the semantic-role taxonomy the vocabulary
 below plugs into).
@@ -35,7 +35,7 @@ lineup sheet with several distinct characters (a 4-elf lineup in the demo),
 attach it once, and relabel it in-prompt as a `VARIETY reference` — the model
 then samples a diverse crowd from the sheet instead of cloning one face.
 
-These phrases map onto `SKILL.md` § Reference Roles: `100% matches` is the
+These phrases map onto `RECIPE.md` § Reference Roles: `100% matches` is the
 Character/Prop role stated in the model's own working vocabulary;
 `STYLE REFERENCE ONLY` is the Environment role; `VARIETY reference` is a
 crowd-specific extension the four-role taxonomy doesn't otherwise name.
@@ -44,7 +44,7 @@ crowd-specific extension the four-role taxonomy doesn't otherwise name.
 
 ## Coordinate Blocking
 
-Extends `SKILL.md` § Frame Coordinate System with two demonstrated notations:
+Extends `RECIPE.md` § Frame Coordinate System with two demonstrated notations:
 
 - **Size as % of frame width** (alongside frame-area occupancy):
   `"@TRUCK a tiny speck under 4% of frame width at x38% y44%"` — position and
@@ -77,9 +77,9 @@ Demonstrated multishot control stack:
   `MATCH CUT` between graphically-rhymed frames.
 
 This is the cut-format ladder and the 4-mechanism extreme-FOV stack
-(`SKILL.md` § Official Prompt Architecture — the Block Scaffold) applied
+(`RECIPE.md` § Official Prompt Architecture — the Block Scaffold) applied
 together; per-segment timing must still sum to the declared duration
-(`SKILL.md` § Output Format → Runtime arithmetic).
+(`RECIPE.md` § Output Format → Runtime arithmetic).
 
 ---
 

@@ -77,7 +77,7 @@
 
 Notation conventions for time-based and editorial structure inside prompts.
 
-- **`[0-Ns]` bracket notation** — time-range prefix for shot phases inside a single continuous shot. Example: `[0-3s] subject enters frame, [3-7s] camera pushes in`. Used for per-second beats inside single-shot continuous motion (see `skills/higgsfield-seedance/SKILL.md` § Single-vs-multi-shot decision).
+- **`[0-Ns]` bracket notation** — time-range prefix for shot phases inside a single continuous shot. Example: `[0-3s] subject enters frame, [3-7s] camera pushes in`. Used for per-second beats inside single-shot continuous motion (see `skills/higgsfield-seedance/RECIPE.md` § Single-vs-multi-shot decision).
 - **`Establishing → phrase → reaction` arrow notation** — editorial-flow notation for multi-cut dialogue or beat sequences. Reads as "establishing shot, then phrase/dialogue, then reaction shot." Compact prompt-side shorthand for a three-beat cut structure.
 
 ### Motion Hierarchy
@@ -253,7 +253,7 @@ Lighting described as a physical event in the scene rather than as a stylistic a
 
 The scene-physics framing replaces stylistic adjectives (`moody`, `dramatic`, `cinematic`) with named physical mechanisms that compose. The model can render the named mechanisms; it can only approximate the adjectives.
 
-> When *integrating* a preserved real subject or an added creature into a new plate (video-to-video), color matching alone reads as "pasted in." Match key direction, environmental bounce, optics/atmospheric haze, and edge grounding together — the full recipe is in `skills/higgsfield-seedance-vfx/SKILL.md` § Lighting integration.
+> When *integrating* a preserved real subject or an added creature into a new plate (video-to-video), color matching alone reads as "pasted in." Match key direction, environmental bounce, optics/atmospheric haze, and edge grounding together — the full recipe is in `skills/higgsfield-seedance-vfx/RECIPE.md` § Lighting integration.
 
 ---
 
@@ -303,7 +303,7 @@ the named expressions are what the substrate produces.
 These eight channels are the **behavioral** decomposition of emotion. The
 **anatomical** decomposition — named facial muscles as FACS Action Unit codes
 (AU6 cheek raiser, AU12 lip-corner puller) for muscle-level Seedance control —
-is its sibling, in `skills/higgsfield-facs/SKILL.md`. Channels say what the body
+is its sibling, in `skills/higgsfield-facs/RECIPE.md`. Channels say what the body
 *does*; AUs say which *muscles* move.
 
 ---
@@ -396,7 +396,7 @@ is contextual to which surface is being addressed.
   Seedance Skill when typed in a user request, then mapped to the appropriate scene
   element (per `docs/Seedance 2 Skill.md:178` § Image reference system).
 
-**Per-slot role convention** — production practice locks a stable role assignment per `@Image` slot, kept identical across every prompt in a shot list: `@Image1 = character identity`, `@Image2 = costume`, `@Image3 = environment + lighting`, `@Image4 = composition`, `@Video1 = motion`, `@Video2 = camera movement`, `@Audio1 = rhythm + atmosphere`. The convention is team-side discipline, not model-enforced; the payoff is reference-stability across long shot lists (see `skills/higgsfield-seedance/SKILL.md` § Per-Image Role Convention).
+**Per-slot role convention** — production practice locks a stable role assignment per `@Image` slot, kept identical across every prompt in a shot list: `@Image1 = character identity`, `@Image2 = costume`, `@Image3 = environment + lighting`, `@Image4 = composition`, `@Video1 = motion`, `@Video2 = camera movement`, `@Audio1 = rhythm + atmosphere`. The convention is team-side discipline, not model-enforced; the payoff is reference-stability across long shot lists (see `skills/higgsfield-seedance/RECIPE.md` § Per-Image Role Convention).
 
 ---
 
@@ -457,7 +457,7 @@ Film-grammar clause for whether characters may cross positions on-screen within 
 
 ### Coordinate notation
 
-Paired qualitative + percentage spatial anchors for in-frame placement. `Character A stands in the right third, x-position 70%, y-position 50%, frame occupancy 25%`. The qualitative term gives the film-language hook; the percentage gives the precision target. See `skills/higgsfield-seedance/SKILL.md` § Frame Coordinate System for the full coordinate system + caveats.
+Paired qualitative + percentage spatial anchors for in-frame placement. `Character A stands in the right third, x-position 70%, y-position 50%, frame occupancy 25%`. The qualitative term gives the film-language hook; the percentage gives the precision target. See `skills/higgsfield-seedance/RECIPE.md` § Frame Coordinate System for the full coordinate system + caveats.
 
 ---
 
@@ -465,8 +465,8 @@ Paired qualitative + percentage spatial anchors for in-frame placement. `Charact
 
 Terminology imported from traditional film production into AI-cinema practice — names for disciplines that recur in production workflow.
 
-- **Script supervising** — the traditional-film-production discipline of tracking every character's state (injuries, clothing, props, hair) across shots so continuity holds across cuts. Imported into AI-cinema via per-state character anchor sheets: a character with five stages (e.g., initial / fight-injuries / partially-transformed / almost-fully / completely-transformed) gets five distinct Soul ID sheets, one per stage. See `skills/higgsfield-soul/SKILL.md` § Multi-Form State Tracking.
-- **State lock** — the per-shot directive that names the character's current emotional or physical state (calm, exhausted, injured, soaked, in motion) inside the Character Anchor Block. Distinct from `pose` (physical configuration) and `facial expression` (emotional register): state lock names the persistent condition that should hold across the shot's duration. See `skills/higgsfield-soul/SKILL.md` § Character Anchor Block.
+- **Script supervising** — the traditional-film-production discipline of tracking every character's state (injuries, clothing, props, hair) across shots so continuity holds across cuts. Imported into AI-cinema via per-state character anchor sheets: a character with five stages (e.g., initial / fight-injuries / partially-transformed / almost-fully / completely-transformed) gets five distinct Soul ID sheets, one per stage. See `skills/higgsfield-soul/RECIPE.md` § Multi-Form State Tracking.
+- **State lock** — the per-shot directive that names the character's current emotional or physical state (calm, exhausted, injured, soaked, in motion) inside the Character Anchor Block. Distinct from `pose` (physical configuration) and `facial expression` (emotional register): state lock names the persistent condition that should hold across the shot's duration. See `skills/higgsfield-soul/RECIPE.md` § Character Anchor Block.
 
 ---
 

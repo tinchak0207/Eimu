@@ -22,6 +22,10 @@
 // 用法（真源改動後必跑）：
 //   npx tsx tools/export-music-tools-staging.ts
 //   npx tsx tools/export-music-tools-staging.ts --check   # 只校驗不寫（CI/驗收用）
+//
+// 部署樹守門：--check 同時比對 deploy-staging/opencode-runtime/lib/；除部署檔內
+// `// <harness-only>` … `// </harness-only>` 界定的區塊（登記於下方 DEPLOY_TARGETS）外必須等價，
+// 否則非零退出——防止有人把 staging 導出物整檔覆蓋進部署樹而靜默刪掉 harness-only 功能。
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -188,3 +192,190 @@ exportFile(TOOLS_SOURCE, TOOLS_TARGET, TOOLS_HEADER, (src) => {
 if (!CHECK) {
   console.log("驗收：npx tsx tools/export-music-tools-staging.ts --check");
 }
+
+// ── 部署樹漂移守門（2026-10-04 片 U2）────────────────────────────────────────
+//
+// 為什麼需要：staging/music-tools/* 只是機械導出物（本腳本產物），deploy-staging/
+// opencode-runtime/lib/ 才是部署真源。有人照本檔文件頭把 staging 導出物 cp 進
+// deploy-staging/... 時，會靜默刪掉部署樹的 harness-only 功能（music-tools-impl.ts 的
+// source_audio 工作區路徑解析依賴 harness-only 模組 ./sandbox，真源無從導出）。
+// 故在此加守門：導出物與部署樹對應檔必須等價，唯一允許的例外＝部署檔內以
+// `// <harness-only>` … `// </harness-only>` 界定、且在此登記數量的區塊；例外區塊失蹤
+// （＝整檔被覆蓋）同樣視為漂移。例外之外的任何改行/多行/少行 → 非零退出並印出。
+
+const DEPLOY_LIB = join(root, "deploy-staging/opencode-runtime/lib");
+const HARNESS_OPEN = "// <harness-only>";
+const HARNESS_CLOSE = "// </harness-only>";
+
+type DeployTarget = {
+  /** staging 導出物（＝本腳本產物；--check 已保證其與導出結果 byte 等價）。 */
+  exported: string;
+  /** 部署樹對應檔。 */
+  deployed: string;
+  /** 允許的 harness-only 例外區塊數；0＝必須與導出物 byte 等價（verbatim 導出）。 */
+  harnessOnlyRegions: number;
+};
+
+const DEPLOY_TARGETS: readonly DeployTarget[] = [
+  { exported: FLOWMUSIC_TARGET, deployed: join(DEPLOY_LIB, "music_flowmusic.ts"), harnessOnlyRegions: 0 },
+  { exported: LYRIA_TARGET, deployed: join(DEPLOY_LIB, "music_lyria.ts"), harnessOnlyRegions: 0 },
+  { exported: YUE2_TARGET, deployed: join(DEPLOY_LIB, "music_yue2.ts"), harnessOnlyRegions: 0 },
+  { exported: DIRECTOR_TARGET, deployed: join(DEPLOY_LIB, "music_prompt_director.ts"), harnessOnlyRegions: 0 },
+  // music-tools-impl.ts：7 段 harness-only 例外（注釋頭、take-entropy import 改寫、
+  // source_audio 路徑解析區塊、工具/參數描述、呼叫端解析區塊、audioBase64 傳參）。
+  { exported: TOOLS_TARGET, deployed: join(DEPLOY_LIB, "music-tools-impl.ts"), harnessOnlyRegions: 7 },
+];
+
+/** 掃出部署檔的 harness-only 例外行（含 marker 行本身），並驗證 marker 成對。 */
+function scanHarnessOnly(lines: string[]): { exempt: boolean[]; regions: number; balanced: boolean } {
+  const exempt = new Array<boolean>(lines.length).fill(false);
+  let inside = false;
+  let regions = 0;
+  let balanced = true;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === HARNESS_OPEN) {
+      if (inside) balanced = false;
+      inside = true;
+      exempt[i] = true;
+      regions += 1;
+      continue;
+    }
+    if (t === HARNESS_CLOSE) {
+      if (!inside) balanced = false;
+      inside = false;
+      exempt[i] = true;
+      continue;
+    }
+    exempt[i] = inside;
+  }
+  if (inside) balanced = false;
+  return { exempt, regions, balanced };
+}
+
+/** 行級 LCS diff：回傳兩側不匹配的連續區塊（hunk），用於逐塊判漂移。 */
+function diffHunks(a: string[], b: string[]): Array<{ aFrom: number; aTo: number; bFrom: number; bTo: number }> {
+  const n = a.length;
+  const m = b.length;
+  const w = m + 1;
+  const dp = new Int32Array((n + 1) * w); // dp[i][j] = a[i..] 與 b[j..] 的 LCS 長度
+  for (let i = n - 1; i >= 0; i--) {
+    const row = i * w;
+    const next = (i + 1) * w;
+    for (let j = m - 1; j >= 0; j--) {
+      dp[row + j] = a[i] === b[j] ? dp[next + j + 1] + 1 : Math.max(dp[next + j], dp[row + j + 1]);
+    }
+  }
+  const hunks: Array<{ aFrom: number; aTo: number; bFrom: number; bTo: number }> = [];
+  let i = 0;
+  let j = 0;
+  let cur: { aFrom: number; aTo: number; bFrom: number; bTo: number } | null = null;
+  const flush = (): void => {
+    if (cur) {
+      cur.aTo = i;
+      cur.bTo = j;
+      hunks.push(cur);
+      cur = null;
+    }
+  };
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      flush();
+      i += 1;
+      j += 1;
+      continue;
+    }
+    if (!cur) cur = { aFrom: i, aTo: i, bFrom: j, bTo: j };
+    if (j >= m) i += 1;
+    else if (i >= n) j += 1;
+    else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) i += 1;
+    else j += 1;
+  }
+  flush();
+  return hunks;
+}
+
+function checkDeployedDrift(): void {
+  const failures: string[] = [];
+
+  for (const t of DEPLOY_TARGETS) {
+    const exportedText = readFileSync(t.exported, "utf8");
+    let deployedText: string;
+    try {
+      deployedText = readFileSync(t.deployed, "utf8");
+    } catch {
+      failures.push(`${t.deployed} 不存在（部署樹缺檔；導出物 ${t.exported} 未落位）`);
+      continue;
+    }
+
+    let targetFailed = false;
+    const exportedLines = exportedText.split("\n");
+    const deployedLines = deployedText.split("\n");
+    const { exempt, regions, balanced } = scanHarnessOnly(deployedLines);
+
+    if (!balanced) {
+      failures.push(`${t.deployed} harness-only marker 不成對（<harness-only> 與 </harness-only> 數量/嵌套錯誤）`);
+      targetFailed = true;
+    }
+    if (regions !== t.harnessOnlyRegions) {
+      failures.push(
+        `${t.deployed} harness-only 例外區塊數不符：宣告 ${t.harnessOnlyRegions}、實際 ${regions}` +
+          (regions < t.harnessOnlyRegions
+            ? "（例外區塊失蹤＝疑似被 staging 導出物整檔覆蓋，harness-only 功能已被刪）"
+            : "（多出未登記的例外，請更新本腳本 DEPLOY_TARGETS）"),
+      );
+      targetFailed = true;
+    }
+
+    const bad = diffHunks(exportedLines, deployedLines).filter((h) => {
+      if (h.bTo > h.bFrom) {
+        // 部署樹多出/改動的非空行：必須整段落在已宣告的例外區塊內（空行無行為，容忍）。
+        for (let k = h.bFrom; k < h.bTo; k++) {
+          if (!exempt[k] && deployedLines[k].trim() !== "") return true;
+        }
+        return false;
+      }
+      // 純刪除（部署樹掉了導出物的內容）：全空行，或緊鄰已宣告例外時放行。
+      let allBlank = true;
+      for (let k = h.aFrom; k < h.aTo; k++) {
+        if (exportedLines[k].trim() !== "") {
+          allBlank = false;
+          break;
+        }
+      }
+      if (allBlank) return false;
+      return !(exempt[h.bFrom] === true || (h.bFrom > 0 && exempt[h.bFrom - 1] === true));
+    });
+
+    if (bad.length > 0) {
+      targetFailed = true;
+      for (const h of bad) {
+        console.error(`  · ${t.deployed} 未宣告漂移（部署樹第 ${h.bFrom + 1}-${h.bTo} 行）：`);
+        for (let k = h.bFrom; k < h.bTo; k++) console.error(`      + ${deployedLines[k] ?? ""}`);
+        for (let k = h.aFrom; k < h.aTo; k++) console.error(`      - ${exportedLines[k] ?? ""}`);
+      }
+      failures.push(`${t.deployed} 出現 ${bad.length} 處未宣告漂移`);
+    }
+
+    if (!targetFailed) {
+      console.log(
+        t.harnessOnlyRegions === 0
+          ? `DEPLOY_DRIFT_OK：${t.deployed} 與導出物 byte 等價`
+          : `DEPLOY_DRIFT_OK：${t.deployed} 與導出物等價（僅 ${regions} 個已宣告 harness-only 區塊例外）`,
+      );
+    }
+  }
+
+  if (failures.length > 0) {
+    console.error(
+      "\nDEPLOY_DRIFT_FAIL：部署樹與機械導出物不一致——疑似有人直接把 staging/music-tools/* 覆蓋到 " +
+        "deploy-staging/opencode-runtime/lib/（會刪掉 harness-only 功能，例如 music-tools-impl.ts 的 " +
+        "source_audio 工作區路徑解析）。請只改真源後重導出，或把新例外用 `// <harness-only>` … " +
+        "`// </harness-only>` 界定並登記到本腳本 DEPLOY_TARGETS。",
+    );
+    for (const f of failures) console.error(`  - ${f}`);
+    process.exit(1);
+  }
+}
+
+checkDeployedDrift();

@@ -55,12 +55,12 @@ description: 剪輯域 Expert 配方庫總入口。觸發時機：時間線編�
 
 | 子目錄 | 主題 | 對應工具鏈 |
 |---|---|---|
-| `assembly/SKILL.md` | 素材入軌與時間線編排 | `video_upload` → `editing_manifest` → `timeline_query` → `timeline_ops` → `timeline_restore` |
-| `audio-first/SKILL.md` | 旁白先行時間線 | `audio_first_timeline` → `timeline_ops` → `timeline_lint` |
-| `rhythm/SKILL.md` | 節奏卡點與體檢 | `timeline_query` → `timeline_rhythm` → `timeline_ops` → `timeline_rhythm` |
-| `look/SKILL.md` | 風格與調色 | `timeline_style` → `timeline_lint` |
-| `mix/SKILL.md` | 混音與 ducking | `timeline_mix` → `timeline_lint` |
-| `qc-master/SKILL.md` | 質檢閘與母帶導出 | `timeline_lint` → `timeline_master` |
+| `assembly/RECIPE.md` | 素材入軌與時間線編排 | `video_upload` → `editing_manifest` → `timeline_query` → `timeline_ops` → `timeline_restore` |
+| `audio-first/RECIPE.md` | 旁白先行時間線 | `audio_first_timeline` → `timeline_ops` → `timeline_lint` |
+| `rhythm/RECIPE.md` | 節奏卡點與體檢 | `timeline_query` → `timeline_rhythm` → `timeline_ops` → `timeline_rhythm` |
+| `look/RECIPE.md` | 風格與調色 | `timeline_style` → `timeline_lint` |
+| `mix/RECIPE.md` | 混音與 ducking | `timeline_mix` → `timeline_lint` |
+| `qc-master/RECIPE.md` | 質檢閘與母帶導出 | `timeline_lint` → `timeline_master` |
 
 ## 授權
 

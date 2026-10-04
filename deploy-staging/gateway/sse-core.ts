@@ -10,6 +10,7 @@ import { markTurnFirst } from "./metrics-gw.ts"
 import { appendReplayFrame, MergedReplayFrame, isStrippableReplayEntry } from "./replay-frame.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
 import { hydratePendingQuestions } from "./questions-gw.ts"
+import { sessionUserScript } from "./outbound-sanitize.ts"
 // TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export 的 named import 報錯，已實測 2026-09-19）。
 // 依第一階段 subagent 佔位符法（記憶 gateway-index-refactor-stage1-0919）：declare 佔位可過 bun build；整合 subagent 統一換真 import 或於 index.ts 補 export。
 // ---- SSE helpers (gateway -> frontend) ----
@@ -39,7 +40,13 @@ export function emitToSession(state: SessionState, name: string, data: unknown, 
   if (state.deathDeclared && isRevivalFrame(name)) {
     state.deathDeclared = false
     console.log(`[gateway] death declaration retracted: revival frame ${name} arrived — session=${state.sessionId}`)
-    emitToSession(state, "turn.status", { text: "刚才的「后端无响应」是误判，任务已自动恢复，请继续等待本轮结果" })
+    // 2026-10-04 T2 語言鏡像：撤回宣告屬守衛家族固定文案，依會話黏性書寫體出對應版本。
+    emitToSession(state, "turn.status", {
+      text:
+        sessionUserScript(state) === "hant"
+          ? "剛才的「後端無回應」是誤判，任務已自動恢復，請繼續等待本輪結果"
+          : "刚才的「后端无响应」是误判，任务已自动恢复，请继续等待本轮结果",
+    })
   }
   // Agent-produced output counts as activity: a long generate with no client
   // polling must not look idle to the reaper while it is still working.

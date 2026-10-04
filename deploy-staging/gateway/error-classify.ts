@@ -15,6 +15,7 @@
 //     按「緊鄰形態（正則會命中）/視窗形態（不會命中）」拆成兩條，人話逐字相同。
 //   - 表尾保留原 RETRYABLE_NODE_ERROR 正則逐字作兜底條目（無人話）：命中前 27
 //     條但含關鍵字的訊息（如 "submit 503"、中文「超时」）保持改前 (true, "")。
+import type { UserScript } from "./outbound-sanitize.ts"
 export type ErrorClass =
   | "rate_limit"
   | "capacity"
@@ -286,6 +287,44 @@ export const ERROR_RULES: ErrorRule[] = [
   },
 ]
 
+// ── 2026-10-04 T2：錯誤人話家族繁體鏡像 ──────────────────────────────────
+// Hack-H2 §2.3 指認：ERROR_RULES 的 human 欄是**用戶可見固定文案**（經
+// humanize-gw → events-translate 的 human_message 出口），簡體用戶得到簡體、
+// 繁體用戶同樣得到簡體＝語言漂移。此處按規則 name 建一張繁體並列表（鍵＝name），
+// 由 humanForError 按書寫體選表——**不動 0920 凍結的 ERROR_RULES 本體**（順序即
+// 優先序，改本體有回歸風險），只加一張同構的鏡像表，與 T 既有「逐條顯式變體」同機制。
+// 文案＝字級繁化（保留原措辭，僅替換簡體字形，與 T 的 HANT 字串風格一致）。
+export const ERROR_HUMAN_HANT: Record<string, string> = {
+  "tls-cert-chain": "上游模型服務的網絡連接不穩定（證書校驗/連接中斷），系統已自動換渠道重試，無需你做任何操作。",
+  "task-not-found": "這個任務 ID 在平台查不到（ID 不完整或已過期）。不要憑記憶猜 ID：調用 image_get_result 不帶參數即可取回本輪全部真實任務 ID 與 URL。",
+  "input-too-long": "輸入內容太長，超出了模型單次可讀的上限。我會在本輪結束後自動壓縮上下文再繼續；若反覆出現，建議讓我分章/分段處理。",
+  "upstream-compliance-rejection": "上游內容安全審查拒絕了這次生成（451），這是永久拒絕：同一提示詞重試大概率同樣被拒。建議調整提示詞中可能觸發審查的表述後重新生成，或更換其他模型。",
+  "no-supplier-capability": "該模型當前沒有可用上游供給（可能不支持此尺寸或比例），請更換模型或調整尺寸後重試",
+  "timeout-legacy": "上游響應超時，請稍後重試",
+  "timeout-variants": "上游響應超時，請稍後重試",
+  "poll-502-adjacent": "上游繪圖服務超時（poll 502），節點可在畫布上重試",
+  "poll-502-window": "上游繪圖服務超時（poll 502），節點可在畫布上重試",
+  "poll-503-504-adjacent": "上游繪圖服務異常（poll 503/504），節點可在畫布上重試",
+  "poll-503-504-window": "上游繪圖服務異常（poll 503/504），節點可在畫布上重試",
+  "poll-timeout": "上游繪圖服務超時（poll 超時），節點可在畫布上重試",
+  "url-invalid": "圖片地址無效（既不是可抓取的 URL，也不是可讀的本地文件），屬參數問題而非上游故障，重試無效：請傳 http(s)/data URL、本地絕對路徑或 media: 圖片 ID。",
+  "http-502-exact": "上游網關錯誤（502 Bad Gateway），請稍後重試",
+  "bad-gateway-text": "上游網關錯誤（502 Bad Gateway），請稍後重試",
+  "http-503-exact": "上游服務暫不可用（503），請稍後重試",
+  "service-unavailable-text": "上游服務暫不可用（503），請稍後重試",
+  "http-504-exact": "上游網關超時（504），請稍後重試",
+  "gateway-timeout-plain": "上游網關超時（504），請稍後重試",
+  "gateway-timeout-variants": "上游網關超時（504），請稍後重試",
+  "conn-reset-core": "上游連接中斷（網絡錯誤），請稍後重試",
+  "socket-hang-up-variant": "上游連接中斷（網絡錯誤），請稍後重試",
+  "rate-limit": "上游過載或限流，請稍後重試",
+  "quota-exhausted": "上游渠道帳戶餘額不足（欠費）：本次調用未提交、未扣費、無產物。這不是模型不可用——充值前重試不會成功，請聯繫維護方",
+  "auth-failed": "上游供給認證失敗，請聯繫維護方",
+  "aborted-core": "本輪已中止",
+  "aborted-variants": "本輪已中止",
+  "dead-model": "上游渠道暫無此模型，正在自動切換線路重試",
+}
+
 /** 統一錯誤分類入口：命中規則表 → {class, retryable, human}；未命中 → unknown/不重試/空人話。 */
 export function classifyUpstreamError(message: string): ClassifiedError {
   if (!message) return { class: "unknown", retryable: false, human: "" }
@@ -308,11 +347,15 @@ export function isRetryableNodeError(message: string | null | undefined): boolea
 }
 
 /** 人話查表（原 humanize-gw humanizeSupplierError 的單表等價物）：首條命中規則
- *  的人話即結果；無人話條目（兜底關鍵字）或未命中 → 空串。 */
-export function humanForError(message: string): string {
+ *  的人話即結果；無人話條目（兜底關鍵字）或未命中 → 空串。
+ *  2026-10-04 T2：script==="hant" 時改用 ERROR_HUMAN_HANT 的繁體鏡像（未收錄則回簡體本體）。 */
+export function humanForError(message: string, script?: UserScript): string {
   if (!message) return ""
   for (const r of ERROR_RULES) {
-    if (r.pattern.test(message)) return r.human ?? ""
+    if (r.pattern.test(message)) {
+      if (script === "hant") return ERROR_HUMAN_HANT[r.name] ?? r.human ?? ""
+      return r.human ?? ""
+    }
   }
   return ""
 }

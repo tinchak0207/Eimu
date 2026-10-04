@@ -32,7 +32,7 @@ assembly contract, and review evidence that distinguishes real structure from a 
   with separate slide, frame, magazine, trigger-guard, control, barrel, and internal-mechanism
   contracts; it does not reuse the knife topology.
 - **Structure-first guidance** — documented rules for named, explodable and selectable parts, plus
-  correct layout scaling for exploded views in `SKILL.md` and
+  correct layout scaling for exploded views in `RECIPE.md` and
   `grimoire/build/geometry_patterns.md`.
 
 ### Changed

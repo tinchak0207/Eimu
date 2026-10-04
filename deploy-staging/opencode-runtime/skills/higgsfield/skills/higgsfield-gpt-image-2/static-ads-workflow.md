@@ -8,7 +8,7 @@ description: >
   the fractional-coordinate zone notation, brand-neutral wireframe intermediation,
   safe-zone top/bottom-10% rule, brand-vs-structure separation rule, and three worked
   template patterns (iMessage conversation, scarcity countdown, ingredient spotlight).
-  Consulted from parent SKILL.md § 3 footer plus § 10 cross-surface workflow context
+  Consulted from parent RECIPE.md § 3 footer plus § 10 cross-surface workflow context
   when the user wants to recreate a winning ad with their brand's products and copy.
 user-invocable: false
 metadata:
@@ -20,9 +20,9 @@ metadata:
 
 # Static Ads Workflow
 
-Cross-surface satellite for the [Higgsfield GPT Image 2.0](SKILL.md) sub-skill. Documents the ad-recreation workflow Adil established: take an uploaded ad format reference image, derive its layout structure as a fractional-coordinate zone grid, generate a brand-neutral wireframe at the target aspect ratio, and render the user's brand identity plus products plus copy through GPT Image 2.0 using the wireframe as a structural template.
+Cross-surface satellite for the [Higgsfield GPT Image 2.0](RECIPE.md) sub-skill. Documents the ad-recreation workflow Adil established: take an uploaded ad format reference image, derive its layout structure as a fractional-coordinate zone grid, generate a brand-neutral wireframe at the target aspect ratio, and render the user's brand identity plus products plus copy through GPT Image 2.0 using the wireframe as a structural template.
 
-This is the production-knowledge layer beneath the parent SKILL.md's general-purpose prompt-craft. When the user wants to recreate a winning ad format with their brand, route here; when the user wants any other kind of GPT Image 2.0 prompt, the parent SKILL.md three-format taxonomy covers it.
+This is the production-knowledge layer beneath the parent RECIPE.md's general-purpose prompt-craft. When the user wants to recreate a winning ad format with their brand, route here; when the user wants any other kind of GPT Image 2.0 prompt, the parent RECIPE.md three-format taxonomy covers it.
 
 Translated from Adil Aliyev's `static-ads.md` source corpus per the v3.7.13 / v3.7.15 / v3.7.16 translation precedent.
 
@@ -134,7 +134,7 @@ In practice: render a simple block layout at the target aspect ratio with each z
 
 Keep the top 10% and bottom 10% of the frame free from text, logos, icons, buttons, and UI elements — photographic content such as hands, arms, or product edges entering the frame is fine. This applies to every prompt in every mode — no exceptions.
 
-The HARD-RULE volume here is justified by the platform UI reality the rule responds to: Instagram and TikTok's UI overlays consume the top and bottom ~10% of the frame. Text or buttons placed in those zones get obscured by the platform chrome at delivery time. The rule isn't craft opinion; it's verifiable surface fact about how social platforms render image ads in their feeds. Cross-reference [parent SKILL.md](SKILL.md) § 3 (Format A → JSON layout precision) for the general-purpose layout discipline this safe-zone rule specializes.
+The HARD-RULE volume here is justified by the platform UI reality the rule responds to: Instagram and TikTok's UI overlays consume the top and bottom ~10% of the frame. Text or buttons placed in those zones get obscured by the platform chrome at delivery time. The rule isn't craft opinion; it's verifiable surface fact about how social platforms render image ads in their feeds. Cross-reference [parent SKILL.md](RECIPE.md) § 3 (Format A → JSON layout precision) for the general-purpose layout discipline this safe-zone rule specializes.
 
 ---
 
@@ -190,7 +190,7 @@ frame is fine.
 
 Safe zones apply to every prompt in every mode — no exceptions, per § 3.
 
-For the general-purpose JSON layout discipline underlying both modes, see [parent SKILL.md](SKILL.md) § 3 Format A craft patterns. The ad-recreation specialization here is the brand-vs-structure separation, which Adil's general-purpose director doesn't apply at this level of explicit rule.
+For the general-purpose JSON layout discipline underlying both modes, see [parent SKILL.md](RECIPE.md) § 3 Format A craft patterns. The ad-recreation specialization here is the brand-vs-structure separation, which Adil's general-purpose director doesn't apply at this level of explicit rule.
 
 ### Mode C — Edit an existing still (location / scene editing)
 
@@ -220,7 +220,7 @@ way, see that template.
 
 Three production-grade template patterns from Adil's static-ads corpus. Each template is a single-paragraph prompt with bracketed placeholders for copy plus brand-specific values. When constructing the internal prompt template from an uploaded ad, match the style and specificity of these examples — every layout element, colour, typographic treatment, and structural detail should be specified.
 
-For the simpler JSON shape (non-ad-recreation contexts), see [parent SKILL.md](SKILL.md) § 3 Worked example. These three templates are the ad-recreation specialization.
+For the simpler JSON shape (non-ad-recreation contexts), see [parent SKILL.md](RECIPE.md) § 3 Worked example. These three templates are the ad-recreation specialization.
 
 ### 5.1 — iMessage / DM Conversation
 
@@ -247,7 +247,7 @@ camera and audio icons either side. No brand logo overlay. Should look exactly l
 screenshot a friend would text you. [ASPECT RATIO] aspect ratio.
 ```
 
-What this template demonstrates: realistic-screenshot framing as the ad delivery vehicle (the format hides the ad-ness by mimicking a familiar UI). The negative direction "Do NOT use polished ad layouts" cuts against GPT Image 2.0's default tendency toward composed commercial framing. Note the dense per-element specification — every UI chrome element (back arrow, info button, "iMessage" label, "Delivered" indicator, camera + audio icons) is named explicitly, leaning into the parent SKILL.md § 1 layout-precision capability.
+What this template demonstrates: realistic-screenshot framing as the ad delivery vehicle (the format hides the ad-ness by mimicking a familiar UI). The negative direction "Do NOT use polished ad layouts" cuts against GPT Image 2.0's default tendency toward composed commercial framing. Note the dense per-element specification — every UI chrome element (back arrow, info button, "iMessage" label, "Delivered" indicator, camera + audio icons) is named explicitly, leaning into the parent RECIPE.md § 1 layout-precision capability.
 
 ### 5.2 — Scarcity / Countdown Urgency
 
@@ -302,8 +302,8 @@ What this template demonstrates: educational / clean-label register (confident, 
 
 When this satellite's workflow doesn't apply, route to:
 
-- **General-purpose GPT Image 2.0 prompts** → [parent SKILL.md](SKILL.md). The three-format taxonomy (Format A JSON / Format B prose / Format C meta-prompt) covers everything that isn't ad-format recreation.
-- **Marketing Studio video ad workflows** → [higgsfield-marketing-studio](../higgsfield-marketing-studio/SKILL.md). When the user wants a 4-15s ad video rather than a static image ad.
+- **General-purpose GPT Image 2.0 prompts** → [parent SKILL.md](RECIPE.md). The three-format taxonomy (Format A JSON / Format B prose / Format C meta-prompt) covers everything that isn't ad-format recreation.
+- **Marketing Studio video ad workflows** → [higgsfield-marketing-studio](../higgsfield-marketing-studio/RECIPE.md). When the user wants a 4-15s ad video rather than a static image ad.
 - **Brand-kit-aware DTC ad image generation (Higgsfield-native)** → [the Marketing Studio cross-surface-workflow.md](../higgsfield-marketing-studio/cross-surface-workflow.md) § 3 covers `ms_image` / "DTC Ads" — Higgsfield's native image-generation surface for ad work. When brand-kit consistency across many images matters more than the reference-ad-recreation pattern this satellite documents.
 - **The broader cross-surface workflow for end-to-end ad campaigns** → [the Marketing Studio cross-surface-workflow.md](../higgsfield-marketing-studio/cross-surface-workflow.md) § 2 documents Adil's full four-surface recipe (GPT Image 2.0 → Soul Cinema → Nano Banana Pro → Marketing Studio) for end-to-end campaign production. The brand-identity reuse pattern there is the parallel to the brand-vs-structure separation rule documented in this satellite's § 4.
 
@@ -311,7 +311,7 @@ When this satellite's workflow doesn't apply, route to:
 
 ## 7. Source acknowledgment
 
-Coverage in this satellite is translated from source material by Adil Aliyev — author of `static-ads.md` (sibling source to `gpt-image-2-director.md` translated into the parent SKILL.md). Source: `static-ads.md` (~20 KB, 316 lines).
+Coverage in this satellite is translated from source material by Adil Aliyev — author of `static-ads.md` (sibling source to `gpt-image-2-director.md` translated into the parent RECIPE.md). Source: `static-ads.md` (~20 KB, 316 lines).
 
 ### Per-claim translation calibration
 
@@ -329,4 +329,4 @@ Per-source disposition: the v3.7.16 Phase 0 verification notes (internal build n
 
 Per-element translation rules: the v3.7.16 Phase 1 inventory notes (internal build notes) § 1B-B (per-element ADOPT / DOWNGRADE table).
 
-Parent sub-skill: [SKILL.md](SKILL.md) covers `gpt-image-2-director` source corpus translation per § 1B-A — read that for the general-purpose three-format prompt taxonomy that this satellite specializes for ad recreation.
+Parent sub-skill: [SKILL.md](RECIPE.md) covers `gpt-image-2-director` source corpus translation per § 1B-A — read that for the general-purpose three-format prompt taxonomy that this satellite specializes for ad recreation.

@@ -3,7 +3,7 @@
 Paste-ready Seedance 2.0 prompt template for close-up facial acting driven by
 **FACS Action Unit codes** — one AU set per beat. Full method, the AU reference
 table, and the emotion→AU recipes live in
-`../../skills/higgsfield-facs/SKILL.md`.
+`../../skills/higgsfield-facs/RECIPE.md`.
 
 ## When to use this template
 
@@ -45,7 +45,7 @@ Beat 3 ([Y-Zs]): [AU codes] (...)
 
 ## What goes in each field
 
-- **AU codes** — from `../../skills/higgsfield-facs/SKILL.md` § AU Code Reference.
+- **AU codes** — from `../../skills/higgsfield-facs/RECIPE.md` § AU Code Reference.
   Specify **codes-only** (`AU12`) for terse beat lists, or **codes + short
   anatomical description** for any unit the model keeps dropping — test both.
 - **Emotion → AUs** — for "which code for anger/fear/sadness," see
@@ -61,11 +61,11 @@ Beat 3 ([Y-Zs]): [AU codes] (...)
 
 ## See also
 
-- `../../skills/higgsfield-facs/SKILL.md` — full FACS method, AU table, emotion
+- `../../skills/higgsfield-facs/RECIPE.md` — full FACS method, AU table, emotion
   recipes, worked examples, the not-a-guarantee provenance rule
-- `../../skills/higgsfield-audio/SKILL.md` § Audio as a Conditioning Input —
+- `../../skills/higgsfield-audio/RECIPE.md` § Audio as a Conditioning Input —
   `[AUDIO: Xs]` dialogue + lip-sync
-- `../../skills/higgsfield-soul/SKILL.md` § Micro-Expressions — named expressions
+- `../../skills/higgsfield-soul/RECIPE.md` § Micro-Expressions — named expressions
   that decompose to AU combos
 - `single-character-position.md` (sibling template) — when blocking, not the
   face, is the content

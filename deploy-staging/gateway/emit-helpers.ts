@@ -6,6 +6,8 @@ import { TURN_MAX_RETRIES } from "./constants-gateway.ts"
 import { boundSet } from "./events-translate.ts"
 import { workflowBilling } from "./workflow-gw.ts"
 import { armErrorStallTimer } from "./timers-gw.ts"
+// 2026-10-04 T2：上游錯誤人話依會話黏性書寫體出對應版本。
+import { sessionUserScript } from "./outbound-sanitize.ts"
 // TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地後換成真 import（bun build 硬查 named import）。
 /**
  * opencode errors are shaped { name, data: { message } } -- NOT { code, message }.
@@ -51,7 +53,7 @@ export function emitSessionError(state: SessionState, code: string, message: str
   // 重試耗盡的誠實收尾（isDeadAccountError 分流）依賴「最後一次」的留存。
   if (code !== "tool_error" && code !== "MessageAbortedError") state.turnUpstreamError = message
   // S5a：供應商/上游錯誤人話化——原文 message 保留，映射命中時加 human_message。
-  const human = humanizeSupplierError(message)
+  const human = humanizeSupplierError(message, sessionUserScript(state))
     // 2026-08-27 代理池轮换：LLM 上游的 RegionError/FreeUsageLimit 是瞬态错误
   // （轮换 IP 命中被地区屏蔽/限流的节点），下一次请求大概率换节点就好了。
   // 归零 turnTextChars 让 session.idle 的抖动重试路径自动重发 prompt。

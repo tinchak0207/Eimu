@@ -75,7 +75,7 @@ def release_level(commits: tuple[str, ...]) -> ReleaseLevel | None:
 def parse_version(skill_text: str) -> Version:
     match = VERSION_PATTERN.search(skill_text)
     if match is None:
-        raise ValueError("SKILL.md must contain one semantic version front-matter field")
+        raise ValueError("RECIPE.md must contain one semantic version front-matter field")
     return Version(*(int(value) for value in match.groups()))
 
 
@@ -121,13 +121,13 @@ def apply_release(request: ReleaseRequest) -> ReleasePlan | None:
     level = release_level(request.commits)
     if level is None:
         return None
-    skill_path = request.root / "SKILL.md"
+    skill_path = request.root / "RECIPE.md"
     readme_path = request.root / "README.md"
     changelog_path = request.root / "CHANGELOG.md"
     skill_text = skill_path.read_text(encoding="utf-8")
     current = parse_version(skill_text)
     plan = ReleasePlan(current=current, next=current.bump(level), level=level, commits=request.commits)
-    updated_skill = replace_once(VERSION_PATTERN, skill_text, f"version: {plan.next}", "SKILL.md")
+    updated_skill = replace_once(VERSION_PATTERN, skill_text, f"version: {plan.next}", "RECIPE.md")
     readme_text = readme_path.read_text(encoding="utf-8")
     updated_readme = replace_once(BADGE_PATTERN, readme_text, f"version-{plan.next}-green.svg", "README.md")
     changelog_text = changelog_path.read_text(encoding="utf-8")

@@ -34,7 +34,7 @@ These rules apply to every Higgsfield response. They are written as a pre-delive
 
 1. **Routing line present.** First line of response names which sub-skills you routed to (e.g. "Routing to higgsfield-prompt + higgsfield-camera for an Atmosphere push-in"). One line, then the work. Missing routing line = response is incomplete; add it.
 
-2. **Routed sub-skills opened and read in this conversation.** Match the user's ask to the routing table below, open the matching sub-skill files with the read tool, and READ them. Root `SKILL.md` and `skills/higgsfield-prompt/SKILL.md` are mandatory at minimum on any prompt request. Grepped snippets do not satisfy this rule. Full reads do. If your only access to root `SKILL.md` or `skills/higgsfield-prompt/SKILL.md` in this conversation came from grep results, you have not satisfied this rule — open the file. Platform vocabulary, preset names, and model parameters must come from the files because this platform's lineup changes between releases.
+2. **Routed sub-skills opened and read in this conversation.** Match the user's ask to the routing table below, open the matching sub-skill files with the read tool, and READ them. Root `SKILL.md` and `skills/higgsfield-prompt/RECIPE.md` are mandatory at minimum on any prompt request. Grepped snippets do not satisfy this rule. Full reads do. If your only access to root `SKILL.md` or `skills/higgsfield-prompt/RECIPE.md` in this conversation came from grep results, you have not satisfied this rule — open the file. Platform vocabulary, preset names, and model parameters must come from the files because this platform's lineup changes between releases.
 
 3. **Named vocabulary verified, not invented.** Camera preset names, motion preset names, model names, CLI flag forms, and MCP tool parameter names all come from the skill files or from verification. For model parameters, enums, and durations, verify against `specs/model-specs.yaml` first — it is generated from a dated `models_explore` snapshot (see `snapshot_date` inside the file); if the snapshot is stale (>30 days), verify live instead (`higgsfield model get <model>` for CLI param schemas; `models_explore` for MCP). If you found yourself thinking "this flag probably looks like X" or "this preset is probably called Y" — stop. Read the file or run the verification command. Plausibility is not validity. Do not substitute generic video-prompt vocabulary for named Higgsfield presets; do not invent model versions, camera presets, or motion-preset names. If the user names one you don't see in the skill files, say so and ask for clarification.
 
@@ -42,11 +42,11 @@ These rules apply to every Higgsfield response. They are written as a pre-delive
 
 5. **Shared negative constraints appended.** Pull positive-phrasing prevention phrases from `skills/shared/negative-constraints.md`. Do not paraphrase from training; use the exact phrasing from the file. (Kling 3.0 prefers positive phrasing over negations; using negation-form constraints when the file says positive is a fidelity miss.)
 
-6. **Preflight surfaced when applicable.** If execution intent is signaled (CLI / MCP / bundled-skills mentioned) AND a video-class or high-cost model is named OR a budget concern is named, surface the two-step preflight (`model get` / `models_explore` for schema, then cost estimate). See `skills/higgsfield-stack/SKILL.md` § Preflight discipline.
+6. **Preflight surfaced when applicable.** If execution intent is signaled (CLI / MCP / bundled-skills mentioned) AND a video-class or high-cost model is named OR a budget concern is named, surface the two-step preflight (`model get` / `models_explore` for schema, then cost estimate). See `skills/higgsfield-stack/RECIPE.md` § Preflight discipline.
 
 7. **Aspect ratio is an enum, not a free-form value.** Check the model's allowed ratios against `specs/model-specs.yaml` before writing them into the header; if the snapshot is stale (>30 days), verify live via schema (`models_explore` / `model get`). Example of why this matters: Seedance 2.0 supports native 21:9, Kling 3.0 does not. Anamorphic / 2.35:1 / 2.39:1 are *style register* vocabulary for the Look line, not output ratios. See `vocab.md` § Aspect Ratio: output spec vs. style register.
 
-8. **Prompt under 200 words — short-form regime only.** Soft cap from MCSLA section. Going over is a signal you're padding rather than locking — tighten. **Regime exception:** block-scaffold production prompts (`skills/higgsfield-seedance/SKILL.md` § Official Prompt Architecture) replace the word cap with structural lint — harvested production Seedance briefs run 218–2,059-word medians depending on register `[FIELD — 13-project community harvest, 2026-07-18]`. The cap governs single-shot MCSLA prompts; a block-scaffold prompt over 200 words is not a rule-8 violation.
+8. **Prompt under 200 words — short-form regime only.** Soft cap from MCSLA section. Going over is a signal you're padding rather than locking — tighten. **Regime exception:** block-scaffold production prompts (`skills/higgsfield-seedance/RECIPE.md` § Official Prompt Architecture) replace the word cap with structural lint — harvested production Seedance briefs run 218–2,059-word medians depending on register `[FIELD — 13-project community harvest, 2026-07-18]`. The cap governs single-shot MCSLA prompts; a block-scaffold prompt over 200 words is not a rule-8 violation.
 
 **If any of items 1–8 are missing or unverified, the response is incomplete. Complete them before sending, not after.**
 
@@ -87,7 +87,7 @@ Rules:
 If the user provides a clear creative intent ("write me a prompt for a car chase at night")
 with no specific constraints, **generate immediately** using these sensible defaults:
 
-> **Fast Path still requires reading `skills/higgsfield-prompt/SKILL.md` first — Fast Path means skip clarifying questions, NOT skip the file read.**
+> **Fast Path still requires reading `skills/higgsfield-prompt/RECIPE.md` first — Fast Path means skip clarifying questions, NOT skip the file read.**
 
 | Parameter | Default |
 |-----------|---------|
@@ -101,13 +101,13 @@ Do not ask clarifying questions. Deliver a ready-to-paste prompt. Mention the de
 used so the user can adjust if they want something different.
 
 > **Seedance exception:** Seedance 2.0 never gets a silently defaulted runtime
-> (`skills/higgsfield-seedance/SKILL.md` — always ask, never default). On Fast
+> (`skills/higgsfield-seedance/RECIPE.md` — always ask, never default). On Fast
 > Path that means: if the user named no duration, route video to Kling 3.0;
 > pick Seedance 2.0 only when the request names a duration — or when the user
 > asked for Seedance by name, in which case state the assumed runtime as the
 > first adjustable default in the delivery.
 
-> If you did not read `skills/higgsfield-prompt/SKILL.md` earlier in this conversation, read it now before writing the prompt.
+> If you did not read `skills/higgsfield-prompt/RECIPE.md` earlier in this conversation, read it now before writing the prompt.
 
 ### Full Path — Production Requests
 
@@ -118,7 +118,7 @@ budget constraints, client work), **confirm before generating:**
 - **Generation type**: Image / Video / App (one-click)
 - **Video duration**: model-dependent enum — check the model's `duration` values in `specs/model-specs.yaml` before offering choices (e.g. Seedance 2.0 4–15s, Veo 3.1 4/6/8s; image-to-video clips trend short)
 - **Aspect ratio**: 16:9 / 9:16 / 1:1 / 4:5 / 4:3 / 21:9-where-supported (default: 16:9) — enums per model in `specs/model-specs.yaml` (HARD RULE 7); anamorphic / 2.35:1 / 2.39:1 are **Look-line style register**, never output ratios
-- **Model preference** (or ask Claude to recommend — see `skills/higgsfield-models/SKILL.md`)
+- **Model preference** (or ask Claude to recommend — see `skills/higgsfield-models/RECIPE.md`)
 
 **Optional (skip if user already provided):**
 - Visual style: Cinematic / VHS / Super 8MM / Anamorphic / Abstract
@@ -201,8 +201,8 @@ The routing table says *where*; this says *how much*. Loads are cumulative — e
 
 | Situation | Load |
 |-----------|------|
-| Simple creative prompt (Fast Path) | root `SKILL.md` + `skills/higgsfield-prompt/SKILL.md` — nothing else |
-| Any Seedance prompt | + `skills/higgsfield-seedance/SKILL.md` (+ the matching `templates/seedance/` file when the request is technique-shaped) |
+| Simple creative prompt (Fast Path) | root `SKILL.md` + `skills/higgsfield-prompt/RECIPE.md` — nothing else |
+| Any Seedance prompt | + `skills/higgsfield-seedance/RECIPE.md` (+ the matching `templates/seedance/` file when the request is technique-shaped) |
 | Multi-scene / sequence / script breakdown | + `higgsfield-shotlist-director` + `higgsfield-pipeline` |
 | Model choice unclear or contested | + `higgsfield-models` + `specs/` (the generated spec for the output type) |
 | User reports a generation result | + `higgsfield-recall` (ledger write) |
@@ -258,7 +258,7 @@ prompts for slogan / subtitle / speech-bubble overlays:
 
 ### Build the Prompt Using the MCSLA Formula
 
-Full MCSLA definition and prompt structure → `skills/higgsfield-prompt/SKILL.md`
+Full MCSLA definition and prompt structure → `skills/higgsfield-prompt/RECIPE.md`
 
 Quick summary — five layers, every prompt:
 
@@ -313,8 +313,8 @@ and credit budgets.
 **The 5-second rule:** when the user reports a result, ask at most ONE
 question ("keep or reject — what failed?") and write the row yourself with
 one `scripts/higgsfield_memory.py log-gen` command. Never ask twice; never present a
-form. Full workflow: `skills/higgsfield-recall/SKILL.md` § Log the Generation
-Result. Ratios and budgeting: `skills/higgsfield-assist/SKILL.md`.
+form. Full workflow: `skills/higgsfield-recall/RECIPE.md` § Log the Generation
+Result. Ratios and budgeting: `skills/higgsfield-assist/RECIPE.md`.
 
 ---
 
@@ -379,7 +379,7 @@ Result. Ratios and budgeting: `skills/higgsfield-assist/SKILL.md`.
 | `higgsfield-stack` | User mentions the Higgsfield CLI / MCP connector / bundled skills, or asks how this skill coexists with those execution surfaces |
 
 > Full vocabulary in `vocab.md`
-> Full motion preset library in `skills/higgsfield-motion/SKILL.md`
+> Full motion preset library in `skills/higgsfield-motion/RECIPE.md`
 > Model comparison in `model-guide.md`
 > Example prompts in `prompt-examples.md`
 > Shared negative constraints in `skills/shared/negative-constraints.md`

@@ -25,7 +25,7 @@ This document is the connection layer between Marketing Studio and the image-sid
 
 This doc documents that recipe AND names the Higgsfield-native `ms_image` ("DTC Ads") surface as an alternative upstream that Adil didn't use in his demos but is available on the platform [Phase 0: Probe 0.3-a].
 
-This is NOT standalone surface documentation. For Soul Cinema depth, see `../higgsfield-soul/SKILL.md`. For Marketing Studio depth, see this directory's `SKILL.md`. For GPT Image 2.0 and Nano Banana Pro depth, those are deferred to future arcs — see §8. This doc just describes how the surfaces fit together.
+This is NOT standalone surface documentation. For Soul Cinema depth, see `../higgsfield-soul/RECIPE.md`. For Marketing Studio depth, see this directory's `RECIPE.md`. For GPT Image 2.0 and Nano Banana Pro depth, those are deferred to future arcs — see §8. This doc just describes how the surfaces fit together.
 
 ---
 
@@ -52,7 +52,7 @@ Stage 1 of the recipe — brand-identity assets — has two valid paths through 
 
 GPT Image 2.0, Soul Cinema, and Nano Banana Pro used in combination. GPT Image 2.0 for logos and posters; Soul Cinema for clothing mockups; Nano Banana Pro for multi-view item sheets and logo refinements. Demonstrated end-to-end in SRT-2. See §§ 3.1–3.5 below for the verbatim production prompts Adil used.
 
-In v3.7.16, the GPT Image 2.0 layer of Path A acquires its own sub-skill at [skills/higgsfield-gpt-image-2/](../higgsfield-gpt-image-2/SKILL.md) — three-format prompt taxonomy (Format A JSON / Format B prose / Format C meta-prompt) covering UI mockups, single-subject scenes, and theme-only auto-derive prompts. For ad-format recreation specifically (a specialization of GPT Image 2.0 use), see the companion [static-ads-workflow.md satellite](../higgsfield-gpt-image-2/static-ads-workflow.md). Soul Cinema (for items specifically) and Nano Banana Pro remain deferred to future arcs.
+In v3.7.16, the GPT Image 2.0 layer of Path A acquires its own sub-skill at [skills/higgsfield-gpt-image-2/](../higgsfield-gpt-image-2/RECIPE.md) — three-format prompt taxonomy (Format A JSON / Format B prose / Format C meta-prompt) covering UI mockups, single-subject scenes, and theme-only auto-derive prompts. For ad-format recreation specifically (a specialization of GPT Image 2.0 use), see the companion [static-ads-workflow.md satellite](../higgsfield-gpt-image-2/static-ads-workflow.md). Soul Cinema (for items specifically) and Nano Banana Pro remain deferred to future arcs.
 
 ### 3.b — Path B (`ms_image` / "DTC Ads")
 
@@ -86,7 +86,7 @@ Per [Phase 0: Probe 0.3-a] in v3.7.13 (`models_explore(action='search', query='m
 
 **Reference media:** up to 14 image-role items per generation.
 
-**Pricing:** not separately documented for `ms_image` in Phase 0 evidence. For cost verification, use `transactions(limit=200)` post-hoc as documented in SKILL.md § 12.
+**Pricing:** not separately documented for `ms_image` in Phase 0 evidence. For cost verification, use `transactions(limit=200)` post-hoc as documented in RECIPE.md § 12.
 
 #### 3.b.iii — When to recommend `ms_image` over GPT Image 2.0
 
@@ -96,7 +96,7 @@ Per [Phase 0: Probe 0.3-a] in v3.7.13 (`models_explore(action='search', query='m
 - **Batch generation of 5–20 ads per call** — `batch_size: 5` through `batch_size: 20` is `ms_image`'s natural surface; GPT Image 2.0's single-image-per-call model doesn't batch.
 - **Ad-format style selection from a curated library** — when the user wants to pick from Higgsfield's platform-managed ad-format library rather than describe the format in prose / JSON. `style_id` is the entry point; no GPT Image 2.0 equivalent.
 
-For everything else — UI mockups, infographics, single-image cinematic scenes, theme-only meta-prompts, ad-format recreation from a reference image — GPT Image 2.0 (see [skills/higgsfield-gpt-image-2/](../higgsfield-gpt-image-2/SKILL.md)) is the better fit.
+For everything else — UI mockups, infographics, single-image cinematic scenes, theme-only meta-prompts, ad-format recreation from a reference image — GPT Image 2.0 (see [skills/higgsfield-gpt-image-2/](../higgsfield-gpt-image-2/RECIPE.md)) is the better fit.
 
 #### 3.b.iv — Naming reminder + live-enumeration discipline
 
@@ -109,11 +109,11 @@ show_marketing_studio(action='list', type='brand_kit')
 # and the equivalent for style enumeration
 ```
 
-This reuses the v3.7.13 live-enumeration discipline pattern established in [SKILL.md](SKILL.md) § 4 for hooks + settings — same discipline applied wherever IDs drift over time and are not appropriate to hardcode in static documentation.
+This reuses the v3.7.13 live-enumeration discipline pattern established in [SKILL.md](RECIPE.md) § 4 for hooks + settings — same discipline applied wherever IDs drift over time and are not appropriate to hardcode in static documentation.
 
 #### 3.b.v — Source-corpus reconciliation #12
 
-Adil's source corpus — `marketing-studio-director.md` (262 lines, 9 video presets + prompt grammar), `higgsfield-content-factory.md` (997 lines, 5-stage MCP-orchestration pipeline), and the three SRT video demonstrations — does not document `ms_image` at all. Phase 0 search across both source SKILL.md files returned **zero hits** for `ms_image`, `dtc ads`, `dtc_ads`, or `marketing_studio_image`.
+Adil's source corpus — `marketing-studio-director.md` (262 lines, 9 video presets + prompt grammar), `higgsfield-content-factory.md` (997 lines, 5-stage MCP-orchestration pipeline), and the three SRT video demonstrations — does not document `ms_image` at all. Phase 0 search across both source RECIPE.md files returned **zero hits** for `ms_image`, `dtc ads`, `dtc_ads`, or `marketing_studio_image`.
 
 The `ms_image` coverage in §§ 3.b.i–3.b.iv is sourced entirely from [Phase 0: Probe 0.3-a] (v3.7.13 live-MCP introspection of the `models_explore` endpoint) plus this doc's prior brief at L51–59. Per v3.7.16 § 1C source-evidence discipline: content stays within the parameter schema + naming rule + capability summary derived from the schema; no worked examples (we have none — no source corpus, no demo evidence), no sample UUIDs (no observed instances), no pricing claims for `ms_image` specifically (no separate pricing signal), no specific ad-format style names (no style enumeration in Probe 0.3-a evidence — `style_id` is required but the enumeration is platform-managed; see § 3.b.iv live-enumeration discipline).
 
@@ -333,7 +333,7 @@ What makes this example work: shorter than the clothing items because eyewear is
 
 ## 4. Locations stage (Soul Cinema)
 
-Soul Cinema doubles as a location-generation surface in Adil's recipe. Locations get pre-generated as image references and passed to Marketing Studio in the additional `medias[]` slot (see `SKILL.md` §6).
+Soul Cinema doubles as a location-generation surface in Adil's recipe. Locations get pre-generated as image references and passed to Marketing Studio in the additional `medias[]` slot (see `RECIPE.md` §6).
 
 Demonstrated locations:
 - Lip balm: desert sand with flowers bursting from sand [SRT-3:00:12:00 area, fed PDF item 6's Hyper Motion-style render in SRT-3:~00:11:30]
@@ -341,7 +341,7 @@ Demonstrated locations:
 - TV Spot: monochrome city street, train station backdrop [SRT-3:00:18:00 area]
 - Urban pedestrian overpass + dark underground parking garage [PDF item 6 location parts 1 and 2 — Pro Virtual Try-On Liquid Scan Transition]
 
-The PDF doesn't include the Soul Cinema location prompts themselves — only the Marketing Studio prompts that reference them. For Soul Cinema generation depth (Soul ID, Character Anchor Block, Two-Tool Refinement Pipeline), see `../higgsfield-soul/SKILL.md`.
+The PDF doesn't include the Soul Cinema location prompts themselves — only the Marketing Studio prompts that reference them. For Soul Cinema generation depth (Soul ID, Character Anchor Block, Two-Tool Refinement Pipeline), see `../higgsfield-soul/RECIPE.md`.
 
 In Marketing Studio, custom locations flow through the standard `medias[]` array alongside the product image:
 
@@ -364,7 +364,7 @@ Nano Banana Pro is Adil's go-to for two kinds of work:
 
 **Packaging:** premium packaging design with brand-kit awareness. Demonstrated in SRT-2:~00:33:00 for the Quantum Cosmos packaging concept.
 
-Packaging output flows into Marketing Studio's Unboxing preset via the additional-asset slot (see `SKILL.md` §6):
+Packaging output flows into Marketing Studio's Unboxing preset via the additional-asset slot (see `RECIPE.md` §6):
 
 ```
 medias=[
@@ -431,10 +431,10 @@ Once you have brand-identity assets (Stage 1), locations (Stage 2 if needed), an
 
 This satellite doc doesn't duplicate the Marketing Studio depth. For:
 
-- The 9 presets and per-preset register notes — see `SKILL.md` §3
-- The 4 reference-media slots and the call shape (`avatars` and `medias` are sibling top-level arrays, NOT nested in `params`) — see `SKILL.md` §6
-- The full `marketing_studio_video` parameter schema — see `SKILL.md` §7
-- 8 production-grade worked examples covering 5 of the 9 presets (Pro VTO ×2, UGC ×1, Hyper Motion ×1, Wild Card ×2, TV Spot ×2) — see `SKILL.md` §10
+- The 9 presets and per-preset register notes — see `RECIPE.md` §3
+- The 4 reference-media slots and the call shape (`avatars` and `medias` are sibling top-level arrays, NOT nested in `params`) — see `RECIPE.md` §6
+- The full `marketing_studio_video` parameter schema — see `RECIPE.md` §7
+- 8 production-grade worked examples covering 5 of the 9 presets (Pro VTO ×2, UGC ×1, Hyper Motion ×1, Wild Card ×2, TV Spot ×2) — see `RECIPE.md` §10
 
 ---
 
@@ -442,10 +442,10 @@ This satellite doc doesn't duplicate the Marketing Studio depth. For:
 
 Adil's HIGGS clothing brand build (the SRT-2 demonstration) is the canonical end-to-end recipe. Trace through all four stages:
 
-1. **Brand-identity (Stage 1, PDF items 1–5):** T-shirt, Jacket, Shoes, Pants, Sunglasses mockups generated via Soul Cinema (items 1, 2, 4, 5) + Nano Banana Pro (item 3, multi-view shoe sheet). Full prompts embedded in §3 above. Each item established as a registered product entity in Higgsfield's product library — see `SKILL.md` §6 for the registration paths.
+1. **Brand-identity (Stage 1, PDF items 1–5):** T-shirt, Jacket, Shoes, Pants, Sunglasses mockups generated via Soul Cinema (items 1, 2, 4, 5) + Nano Banana Pro (item 3, multi-view shoe sheet). Full prompts embedded in §3 above. Each item established as a registered product entity in Higgsfield's product library — see `RECIPE.md` §6 for the registration paths.
 2. **Locations (Stage 2, not in PDF):** Custom backdrops generated in Soul Cinema per scene needs. The urban pedestrian overpass + dark underground parking garage that PDF item 6 (Liquid Scan Transition) references were generated this way. Visible in SRT-2:~00:11:30 demo. Soul Cinema prompts not in the PDF; for Soul Cinema location-generation depth, see `higgsfield-soul`.
 3. **Packaging (Stage 3, PDF item 14):** Quantum Cosmos branded packaging via Nano Banana Pro for the Unboxing preset. Full prompt embedded in §5 above.
-4. **Final ad videos (Stage 4, PDF items 6–13):** 8 production videos across 5 Marketing Studio presets — Pro Virtual Try-On Liquid Scan (PDF 6), UGC Try-On 5 Clips (PDF 7), Logo Hyper Motion (PDF 8), Pro Virtual Try-On Skateboard (PDF 9), Wild Card Levitation (PDF 10), Wild Card Portal Cuts (PDF 11), TV Spot v1 (PDF 12), TV Spot v2 (PDF 13). Full prompts embedded in `SKILL.md` §10.
+4. **Final ad videos (Stage 4, PDF items 6–13):** 8 production videos across 5 Marketing Studio presets — Pro Virtual Try-On Liquid Scan (PDF 6), UGC Try-On 5 Clips (PDF 7), Logo Hyper Motion (PDF 8), Pro Virtual Try-On Skateboard (PDF 9), Wild Card Levitation (PDF 10), Wild Card Portal Cuts (PDF 11), TV Spot v1 (PDF 12), TV Spot v2 (PDF 13). Full prompts embedded in `RECIPE.md` §10.
 
 ### What the recipe deferred (5 of 9 presets unused)
 
@@ -457,7 +457,7 @@ Adil's SRT-2 session demonstrated 5 of the 9 Marketing Studio presets. These 5 d
 - **Product Review** — preset 5
 - **UGC Virtual Try On** — preset 8 (PDF item 7 covers something close — "UGC Try-On 5 Clips" — but uses the basic UGC preset, not UGC VTO specifically)
 
-For those preset registers, the source corpus's prose-craft layer (`marketing-studio-director.md` per-preset rules, summarized in `SKILL.md` §3) is the primary guidance. The lack of worked examples in this session isn't a gap in Marketing Studio — it's a scope choice in Adil's specific demo.
+For those preset registers, the source corpus's prose-craft layer (`marketing-studio-director.md` per-preset rules, summarized in `RECIPE.md` §3) is the primary guidance. The lack of worked examples in this session isn't a gap in Marketing Studio — it's a scope choice in Adil's specific demo.
 
 ---
 
@@ -467,13 +467,13 @@ Honest table of what's covered today vs. what's deferred:
 
 | Surface | Coverage in our skill (as of v3.7.16) |
 |---|---|
-| Marketing Studio video (`marketing_studio_video`) | **In-scope** — covered in this directory's `SKILL.md` |
+| Marketing Studio video (`marketing_studio_video`) | **In-scope** — covered in this directory's `RECIPE.md` |
 | Cross-surface workflow (this doc) | **In-scope** — connection layer between MS and image-side surfaces |
-| Soul Cinema (image gen + locations) | **In-scope** — depth in `../higgsfield-soul/SKILL.md` (Soul ID + Character Anchor Block + Two-Tool Refinement Pipeline) |
-| GPT Image 2.0 (image gen) | **Shipped in v3.7.16** — translated to `../higgsfield-gpt-image-2/SKILL.md` (three-format prompt taxonomy: Format A JSON / Format B prose / Format C meta-prompt). Translates `gpt-image-2-director` source corpus per the v3.7.13 marketing-studio precedent. |
+| Soul Cinema (image gen + locations) | **In-scope** — depth in `../higgsfield-soul/RECIPE.md` (Soul ID + Character Anchor Block + Two-Tool Refinement Pipeline) |
+| GPT Image 2.0 (image gen) | **Shipped in v3.7.16** — translated to `../higgsfield-gpt-image-2/RECIPE.md` (three-format prompt taxonomy: Format A JSON / Format B prose / Format C meta-prompt). Translates `gpt-image-2-director` source corpus per the v3.7.13 marketing-studio precedent. |
 | Nano Banana Pro (image gen) | **Referenced, not covered** — Nano Banana Pro sibling-director hunt deferred indefinitely |
 | `ms_image` ("DTC Ads") | **Expanded in §3.b (v3.7.16)** — Phase 0 architectural option β rescope: full sub-skill deferred (Adil source corpus has zero coverage of `ms_image` — see § 3.b.v source-corpus reconciliation #12), §3 expanded into §3.a / §3.b.i–v structure with capability summary + parameter schema + recommendation heuristic + naming reminder + source-corpus reconciliation. |
-| `marketing_studio_image` (basic MS image) | **Referenced (`SKILL.md` §2), not covered** — out of scope; lower-capability than `ms_image` |
+| `marketing_studio_image` (basic MS image) | **Referenced (`RECIPE.md` §2), not covered** — out of scope; lower-capability than `ms_image` |
 | Static-image cross-surface (e.g., reference-swap ad recreation) | **Shipped in v3.7.16** — translated to `../higgsfield-gpt-image-2/static-ads-workflow.md` satellite (fractional-coordinate zones, brand-neutral wireframe intermediation, safe-zone top/bottom-10% rule, brand-vs-structure separation, three template patterns: iMessage / Scarcity Countdown / Ingredient Spotlight). |
 | Cinematic prompt-pattern vocabulary (Camera Contract, Motion Physics Anchor, etc.) | **Shipped in v3.7.15** — translated to `vocab.md` § Camera Movement Terminology (Camera Contract, Motion Physics Anchor, Lens Behavior Sequence) + § Composition Vocabulary (Negative-prompt reinforcement, Spatial Zoning, Negative space expansion). 4 of 5 pillars added as new subsections; Negative Space extended from existing L338 coverage with negative-prompt reinforcement pattern + Spatial Zoning binding. |
 
@@ -483,6 +483,6 @@ The full deferral list with reasoning is in the v3.7.13 CHANGELOG's Scope acknow
 
 ## 9. Source acknowledgment
 
-Adil's documented production recipe is the substrate for this workflow doc; full attribution and source corpus citation in `SKILL.md` §13.
+Adil's documented production recipe is the substrate for this workflow doc; full attribution and source corpus citation in `RECIPE.md` §13.
 
 One addition specific to this doc: the `ms_image` ("DTC Ads") surface (correction #12) was surfaced by [Phase 0: Probe 0.3-a] as net-new intel beyond what Adil's source corpus documents. Verification trail in the v3.7.13 Phase 0 probes notes (internal build notes).

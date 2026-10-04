@@ -1,4 +1,4 @@
-# 验证脚本（按 recipes/scene-assembly/SKILL.md + rendering/SKILL.md 核心步骤提取，非配方本体）
+# 验证脚本（按 recipes/scene-assembly/RECIPE.md + rendering/RECIPE.md 核心步骤提取，非配方本体）
 # 阶段①blockout：集合结构 + 灰盒比例 + 相机 + 灯光 + Eevee 验证帧
 # 跑法：blender --background --factory-startup --python verify_blockout.py
 import os

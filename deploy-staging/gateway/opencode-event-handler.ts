@@ -5,7 +5,7 @@
 // 依賴解析：Wave1/已建模組真 import；仍住 index.ts 未 export 的符號 declare 佔位（stage1 記憶 subagent 佔位符法）。
 import { sessions, markDirty, findSessionByOpenCodeId } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
-import { flushOtherPartTails, takeTurnEndTail } from "./outbound-sanitize.ts"
+import { flushOtherPartTails, takeTurnEndTail, sessionUserScript } from "./outbound-sanitize.ts"
 import { emitSanitizedDelta } from "./outbound-emit.ts"
 import { opencodeHeaders, scheduleTitleFetch, revertDeadTail } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
@@ -48,7 +48,14 @@ export function markSystemWakeMessage(state: SessionState, messageID: unknown, t
   if (typeof messageID !== "string" || !isSystemWakeText(text)) return false
   if (state.messageRole.get(messageID) !== "user") return false // 已標過/非 user 訊息 → 不重發
   state.messageRole.set(messageID, "system")
-  emitToSession(state, "turn.status", { text: "子代理已完成，系統自動喚醒主代理匯總中…" })
+  // 2026-10-04 T2 反向洩漏修復：此文案原為繁體硬編，簡體用戶會吃到繁體；改依會話
+  // 黏性書寫體出對應版本（繁體本體保留）。
+  emitToSession(state, "turn.status", {
+    text:
+      sessionUserScript(state) === "hant"
+        ? "子代理已完成，系統自動喚醒主代理匯總中…"
+        : "子代理已完成，系统自动唤醒主代理汇总中…",
+  })
   return true
 }
 
@@ -196,13 +203,24 @@ export function handleOpencodeEvent(event: any): void {
               ) {
                 if (capVerdict.kind === "soft") {
                   console.warn(`[gateway] reasoning-cap: first-gen soft budget used — session=${state.sessionId}`)
-                  emitToSession(state, "turn.status", { text: "首轮规划较长，已提示模型立即给出结论并开始行动。" })
+                  // 2026-10-04 語言漂移：守衛文案鏡像**會話黏性**書寫體（繁體用戶不得收簡體；
+                  // 繁體會話夾英文/短句不改判）。
+                  emitToSession(state, "turn.status", {
+                    text:
+                      sessionUserScript(state) === "hant"
+                        ? "首輪規劃較長，已提示模型立即給出結論並開始行動。"
+                        : "首轮规划较长，已提示模型立即给出结论并开始行动。",
+                  })
                 } else {
                   resetReasoningCap(state)
                   console.warn(`[gateway] reasoning-cap: no-action reasoning exceeded — session=${state.sessionId}`)
                   triggerIdleStepBreaker(
                     state,
-                    buildReasoningNudge({ hasTool: state.turnToolStarted === true, tail: capVerdict.tail }),
+                    buildReasoningNudge({
+                      hasTool: state.turnToolStarted === true,
+                      tail: capVerdict.tail,
+                      script: sessionUserScript(state),
+                    }),
                   )
                 }
               }
@@ -399,7 +417,13 @@ export function handleOpencodeEvent(event: any): void {
           for (const [, stripSt] of state.partStripState) {
             if (stripSt.sawEnglish) {
               state.englishNoticeSent = true
-              emitToSession(state, "turn.status", { text: "已自动略去一段英文内部思考，中文回复不受影响" })
+              // 2026-10-04 T2 語言鏡像：英文剝離提示依會話黏性書寫體出對應版本。
+              emitToSession(state, "turn.status", {
+                text:
+                  sessionUserScript(state) === "hant"
+                    ? "已自動略去一段英文內部思考，中文回覆不受影響"
+                    : "已自动略去一段英文内部思考，中文回复不受影响",
+              })
               break
             }
           }

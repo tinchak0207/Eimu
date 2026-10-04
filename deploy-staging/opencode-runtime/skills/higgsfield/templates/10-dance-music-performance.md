@@ -85,7 +85,7 @@ hips swaying side to side; halfway across he throws a loose finger-snap;
 finishes with a light quarter-spin on the ball of his foot.
 ```
 
-This is the dance case of `../skills/higgsfield-seedance/SKILL.md` § Voice
+This is the dance case of `../skills/higgsfield-seedance/RECIPE.md` § Voice
 Rewrite (describe physics, not labels). Keep each move observable (which foot,
 which direction, what the hands do) — not interpretive ("grooves", "vibes").
 
@@ -102,7 +102,7 @@ beat throughout. Steps land on the downbeats, the spin releases on the drop.
 ```
 
 Full beat-sync mechanics (the 3-sentence mapping, the first-15s extraction trap,
-combining with `@Image`/`@Video` references): `../skills/higgsfield-audio/SKILL.md`
+combining with `@Image`/`@Video` references): `../skills/higgsfield-audio/RECIPE.md`
 § Audio as a Conditioning Input. Keep the prompt body diegetic-only and layer the
 final music in post.
 

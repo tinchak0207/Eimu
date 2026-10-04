@@ -17,6 +17,8 @@ import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
+// 2026-10-04 T2 語言鏡像：看門狗/心跳等守衛家族固定文案依會話黏性書寫體出對應版本。
+import { sessionUserScript } from "./outbound-sanitize.ts"
 // TODO(整合 Wave3)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build
 // 對未 export 的 named import 報錯，已實測 2026-09-19）。依第一階段佔位符法（記憶
 // gateway-index-refactor-stage1-0919）：declare 佔位可過 bun build；整合 subagent 統一換真 import。
@@ -90,13 +92,17 @@ export function armHeartbeatTimer(state: SessionState): void {
         if (!c2 || (c2.turnGen ?? 0) !== gen || turnHasActivity(c2) || c2.heartbeatSent) return
         c2.heartbeatSent = true
         console.log(`[gateway] N1 heartbeat sent (post-ack): session=${c2.sessionId} gen=${gen}`)
-        emitToSession(c2, "turn.status", { text: "仍在等待模型响应，请稍候…" })
+        emitToSession(c2, "turn.status", {
+          text: sessionUserScript(c2) === "hant" ? "仍在等待模型回應，請稍候…" : "仍在等待模型响应，请稍候…",
+        })
       }, deferMs)
       return
     }
     cur.heartbeatSent = true
     console.log(`[gateway] N1 heartbeat sent: session=${cur.sessionId} gen=${gen}`)
-    emitToSession(cur, "turn.status", { text: "仍在等待模型响应，请稍候…" })
+    emitToSession(cur, "turn.status", {
+      text: sessionUserScript(cur) === "hant" ? "仍在等待模型回應，請稍候…" : "仍在等待模型响应，请稍候…",
+    })
     // 不發 turn.done：turn 仍在途，前端維持輸入中。
     // S7：persona=thoughtful 時本延遲 ×1.5（投遞時按 settings 計算，不改全局常量）。
   }, HEARTBEAT_DELAY_MS * personaPatienceMul(state))
@@ -150,7 +156,9 @@ export function armMidturnStallTimer(state: SessionState): void {
       cur.midturnStallRetried = true
       cur.recoveryRound = true
       console.warn(`[gateway] R5-C midturn-stall: zero frames for ${Math.round((Date.now() - last) / 1000)}s (gen=${gen}), alerting + single re-dispatch — session=${cur.sessionId}`)
-      emitToSession(cur, "turn.status", { text: "处理似乎卡住了，我重新尝试一下，请稍候" })
+      emitToSession(cur, "turn.status", {
+        text: sessionUserScript(cur) === "hant" ? "處理似乎卡住了，我重新嘗試一下，請稍候" : "处理似乎卡住了，我重新尝试一下，请稍候",
+      })
       const body = cur.lastPromptBody
       if (!body) {
         armMidturnStallTimer(cur)
@@ -179,7 +187,10 @@ export function armMidturnStallTimer(state: SessionState): void {
     // ── 第二咬：重投後仍零幀——如實收尾 ──
     console.warn(`[gateway] R5-C midturn-stall: still frozen after re-dispatch (gen=${gen}), closing turn honestly — session=${cur.sessionId}`)
     emitToSession(cur, "message.delta", {
-      text: "重新尝试后仍没有进展，我先停止等待。刚才完成的部分不会丢，稍后重新发送消息即可继续。\n",
+      text:
+        sessionUserScript(cur) === "hant"
+          ? "重新嘗試後仍沒有進展，我先停止等待。剛才完成的部分不會丟，稍後重新發送訊息即可繼續。\n"
+          : "重新尝试后仍没有进展，我先停止等待。刚才完成的部分不会丢，稍后重新发送消息即可继续。\n",
     })
     emitToSession(cur, "turn.done", {})
     cur.lastTurnActiveAt = 0
@@ -358,7 +369,9 @@ export function armWatchdogTimer(state: SessionState): void {
       cur.watchdogRetried = true
       cur.recoveryRound = true // R5-C：恢復輪標記，收尾兜底結語用
       console.warn(`[gateway] watchdog: turn not started (gen=${gen}), notifying user and retrying once — session=${cur.sessionId}`)
-      emitToSession(cur, "turn.status", { text: "处理似乎卡住了，我重新尝试一下，请稍候" })
+      emitToSession(cur, "turn.status", {
+        text: sessionUserScript(cur) === "hant" ? "處理似乎卡住了，我重新嘗試一下，請稍候" : "处理似乎卡住了，我重新尝试一下，请稍候",
+      })
       // 防重複：重投前實時核對 turn 仍零動靜（告警幀發送期間模型可能恰好開口）。
       if (turnHasActivity(cur)) return
       const body = cur.lastPromptBody
@@ -387,11 +400,17 @@ export function armWatchdogTimer(state: SessionState): void {
             // 修 1：死亡宣告置位——此後若仍有內容幀到達（上游慢復活），
             // emitToSession 會先發撤回幀。
             emitToSession(cur, "message.delta", {
-              text: "自动重试后 LLM 后端仍无响应（服务端问题，不是你的操作）。已停止等待。请稍后重试发送同一条消息，若持续失败请联系管理员。\n",
+              text:
+                sessionUserScript(cur) === "hant"
+                  ? "自動重試後 LLM 後端仍無回應（服務端問題，不是你的操作）。已停止等待。請稍後重試發送同一則訊息，若持續失敗請聯繫管理員。\n"
+                  : "自动重试后 LLM 后端仍无响应（服务端问题，不是你的操作）。已停止等待。请稍后重试发送同一条消息，若持续失败请联系管理员。\n",
             })
             // N1 規格2：終局之後補一條明確指引（一次性；此路徑每 turn 只進一次）。
             emitToSession(cur, "message.delta", {
-              text: "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
+              text:
+                sessionUserScript(cur) === "hant"
+                  ? "你剛才的訊息可能未處理完成，稍後重新發送即可繼續。\n"
+                  : "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
             })
             emitToSession(cur, "turn.done", {})
             // 2026-10-02 steer 誤判修復：終局宣告＝本輪真的結束，清 in-flight 打點。
@@ -412,11 +431,17 @@ export function armWatchdogTimer(state: SessionState): void {
     // 宣告死亡 10 秒後 retry 輸出照灌），第一條內容幀觸發撤回幀，用戶明確
     // 知道剛才是誤判、任務已恢復；「宣告死亡 + 靜默还魂」不再並存。
     emitToSession(cur, "message.delta", {
-      text: "自动重试后 LLM 后端仍无响应（服务端问题，不是你的操作）。已停止等待。请稍后重试发送同一条消息，若持续失败请联系管理员。\n",
+      text:
+        sessionUserScript(cur) === "hant"
+          ? "自動重試後 LLM 後端仍無回應（服務端問題，不是你的操作）。已停止等待。請稍後重試發送同一則訊息，若持續失敗請聯繫管理員。\n"
+          : "自动重试后 LLM 后端仍无响应（服务端问题，不是你的操作）。已停止等待。请稍后重试发送同一条消息，若持续失败请联系管理员。\n",
     })
     // N1 規格2：終局之後補一條明確指引（一次性；第二咬每 turn ��進一次）。
     emitToSession(cur, "message.delta", {
-      text: "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
+      text:
+        sessionUserScript(cur) === "hant"
+          ? "你剛才的訊息可能未處理完成，稍後重新發送即可繼續。\n"
+          : "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
     })
     emitToSession(cur, "turn.done", {}) // 收尾：別讓前端永遠掛著「輸入中」
     cur.deathDeclared = true // 同上：終局話術發完才置位，避免自己的宣告觸發撤回幀
@@ -449,7 +474,12 @@ export function armErrorStallTimer(state: SessionState): void {
       // ── 第一咬：誠實告警（每 turn 一條），續盯。
       cur.errorStallAlerted = true
       console.warn(`[gateway] error-stall watchdog: upstream error, turn unfinished after ${TURN_ERROR_WATCHDOG_MS}ms (gen=${gen}) — session=${cur.sessionId}`)
-      emitToSession(cur, "turn.status", { text: "上游刚才报错了，我还在盯着处理；若持续没有进展，我会告诉你并停止等待" })
+      emitToSession(cur, "turn.status", {
+        text:
+          sessionUserScript(cur) === "hant"
+            ? "上游剛才報錯了，我還在盯著處理；若持續沒有進展，我會告訴你並停止等待"
+            : "上游刚才报错了，我还在盯着处理；若持续没有进展，我会告诉你并停止等待",
+      })
       if ((cur.turnGen ?? 0) === gen && !cur.turnAborted) armErrorStallTimer(cur)
       return
     }
@@ -461,7 +491,10 @@ export function armErrorStallTimer(state: SessionState): void {
     }
     console.warn(`[gateway] error-stall watchdog: still stalled after alert (gen=${gen}), closing turn honestly — session=${cur.sessionId}`)
     emitToSession(cur, "message.delta", {
-      text: "上游连续报错且自动重试未能恢复，我停止等待了。请稍后重新发送上一条消息即可继续；若内容较长，建议让我分章/分段处理。\n",
+      text:
+        sessionUserScript(cur) === "hant"
+          ? "上游連續報錯且自動重試未能恢復，我停止等待了。請稍後重新發送上則訊息即可繼續；若內容較長，建議讓我分章/分段處理。\n"
+          : "上游连续报错且自动重试未能恢复，我停止等待了。请稍后重新发送上一条消息即可继续；若内容较长，建议让我分章/分段处理。\n",
     })
     emitToSession(cur, "turn.done", {}) // 收尾：別讓前端永遠掛著「輸入中」
   }, TURN_ERROR_WATCHDOG_MS)

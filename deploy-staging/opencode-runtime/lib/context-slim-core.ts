@@ -64,8 +64,30 @@ const PREVIEW_TAIL_CHARS = intEnv("TOOL_RESULT_PREVIEW_TAIL_CHARS", 1_000)
 
 /** 原生截斷參考句（opencode tool_output 超限時寫入訊息的字串）。 */
 const NATIVE_TRUNCATED_RE = /Full output saved to:/
-/** 本安全網自己寫入的參考。 */
-const PERSISTED_RE = /<persisted-output\b/
+/**
+ * 本安全網參考句的「結構形狀」：`<persisted-output path="…" total-chars="N"`。
+ * 這兩個欄位是本檔模板（含極簡退路式）必定產生的組合。
+ */
+const PERSISTED_REF_SHAPE_RE = /<persisted-output\s+path="([^"]+)"\s+total-chars="\d+"/
+/** 本檔內容定址檔名格式（`tool-<sha256 前 16 hex>.txt`）。 */
+const PERSISTED_FILE_NAME_RE = /^tool-[0-9a-f]{16}\.txt$/
+
+/**
+ * 判定「這是不是本安全網自己寫的 <persisted-output> 參考句」。
+ * 舊版只做子字串比對（/<persisted-output\b/），導致**任何提及**該字面的輸出（被 cat 的
+ * 本檔原始碼、舊 log、工具回傳）永久免落盤與免壓縮 ⇒ context 膨脹且可被內容偽造。
+ * 收窄為結構化判定，必須同時滿足：
+ *   ① 形狀符合本檔模板（path="…" 緊接 total-chars="N"）；
+ *   ② path 落在本次落盤目錄之下，且檔名是內容定址格式（排除 /etc/passwd 之類偽造路徑）。
+ */
+function isOwnPersistedRef(out: string, persistDir: string): boolean {
+  const m = PERSISTED_REF_SHAPE_RE.exec(out)
+  if (!m) return false
+  const refPath = m[1]
+  const rel = path.relative(path.resolve(persistDir), path.resolve(refPath))
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false
+  return PERSISTED_FILE_NAME_RE.test(path.basename(refPath))
+}
 
 // ── 型別（寬鬆定義：現場可能是 SDK 型別或內部結構，只碰必要欄位）─────────────
 
@@ -132,6 +154,8 @@ export async function slimMessages(
   const keep = Math.max(1, opts.keep ?? MICROCOMPACT_KEEP)
   const exempt = opts.exemptTools ?? MICROCOMPACT_EXEMPT_TOOLS
   const result: SlimResult = { cleared: 0, persisted: 0, paths: [] }
+  // 本輪被安全網改寫過的 state：microCompact 同輪不得再清除（同輪自殺不可接受）。
+  const persistedThisRound = new Set<object>()
 
   if (!Array.isArray(messages)) return result
 
@@ -146,13 +170,15 @@ export async function slimMessages(
         if (!st || st.status !== "completed" || typeof st.output !== "string") continue
         const out = st.output
 
-        // 已清除／已是參考句：放行，不二次處理；但仍計入預算（避免合成誤判）。
-        if (out === CLEARED_MARKER || out.includes(CLEARED_MARKER)) {
+        // 已清除：放行，不二次處理；但仍計入預算（避免合成誤判）。
+        // 判定必須「整串等於」標記：用 includes 會讓任何「提及」標記的輸出（被 cat 的原始碼／舊 log）
+        // 永久免落盤，與 <persisted-output> 的子字串誤判同病。
+        if (out === CLEARED_MARKER) {
           running += out.length
           continue
         }
         // 原生已截斷：安全網放行（不二次落盤）。
-        if (NATIVE_TRUNCATED_RE.test(out) || PERSISTED_RE.test(out)) {
+        if (NATIVE_TRUNCATED_RE.test(out) || isOwnPersistedRef(out, persistDir)) {
           running += out.length
           continue
         }
@@ -172,9 +198,11 @@ export async function slimMessages(
           running += out.length
           continue
         }
-        st.output = replacement
-        running += replacement.length
+        st.output = replacement.ref
+        running += replacement.ref.length
         result.persisted++
+        result.paths.push(replacement.path)
+        persistedThisRound.add(st)
       }
     }
   } catch {
@@ -203,7 +231,11 @@ export async function slimMessages(
             if (exempt.has(toolName)) continue
             const out = st.output
             if (out.length === 0) continue
-            if (out.includes(CLEARED_MARKER)) continue // 冪等：已清除的再計數
+            if (out === CLEARED_MARKER) continue // 冪等：整串等於標記的已清除項不再計數（includes 會被「提及」偽造）
+            // 參考句是模型取回完整內容的唯一路徑指針，清除即永久斷鏈 ⇒ 不納入可壓縮集（與安全網放行對稱）。
+            if (isOwnPersistedRef(out, persistDir)) continue
+            // 本輪剛由安全網落盤者，同輪不得再清除。
+            if (persistedThisRound.has(st)) continue
             eligible.push({ st })
           }
         }
@@ -222,8 +254,12 @@ export async function slimMessages(
   return result
 }
 
-/** 落盤並回傳 <persisted-output> 參考句；失敗回 null。 */
-async function persistAndPreview(content: string, persistDir: string, maxChars: number): Promise<string | null> {
+/** 落盤並回傳 <persisted-output> 參考句與實際檔路徑；失敗回 null。 */
+async function persistAndPreview(
+  content: string,
+  persistDir: string,
+  maxChars: number,
+): Promise<{ ref: string; path: string } | null> {
   try {
     const file = path.join(persistDir, contentFileName(content))
     await mkdir(persistDir, { recursive: true })
@@ -237,7 +273,8 @@ async function persistAndPreview(content: string, persistDir: string, maxChars: 
       `${head}\n...[中略 ${omitted} 字元，完整內容見上述 path]...\n${tail}\n` +
       `</persisted-output>`
     // 保險：參考句本身必須遠小於上限，否則退回極簡式。
-    return ref.length < maxChars ? ref : `<persisted-output path="${file}" total-chars="${content.length}"/>\n`
+    const chosen = ref.length < maxChars ? ref : `<persisted-output path="${file}" total-chars="${content.length}"/>\n`
+    return { ref: chosen, path: file }
   } catch {
     return null
   }

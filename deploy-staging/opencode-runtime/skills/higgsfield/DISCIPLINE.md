@@ -36,7 +36,7 @@ phase produces an artifact the next phase consumes.
 
 **When to apply:** Stateful loops where intermediate artifacts need user confirmation.
 
-**Demonstrated in:** `skills/higgsfield-pipeline/SKILL.md` §
+**Demonstrated in:** `skills/higgsfield-pipeline/RECIPE.md` §
 Pipelines A-E — stage-based artifact handoff; Pipeline Pitfall 1
 encodes the don't-skip-ahead rule explicitly.
 
@@ -47,7 +47,7 @@ what / with what camera / mood — before composing.
 
 **When to apply:** Sub-skills authoring prompts from free-form briefs.
 
-**Demonstrated in:** `skills/higgsfield-prompt/SKILL.md` § The
+**Demonstrated in:** `skills/higgsfield-prompt/RECIPE.md` § The
 Pre-Prompt Checklist — 5-question inventory before writing.
 
 ### Iteration-is-craft
@@ -62,7 +62,7 @@ budgeting or planning conversation; any post-clip diagnostic.
 
 **Demonstrated in:** `production-benchmarks.md` § Acceptance-rate
 anchors (quadruple-confirmed 1.0% / 1.5% rates) + `skills/higgsfield-
-prompt/SKILL.md` § The Iteration Rule — Change One Variable at a Time.
+prompt/RECIPE.md` § The Iteration Rule — Change One Variable at a Time.
 
 ### Lock-before-generate
 
@@ -74,9 +74,9 @@ the iteration loop tests against.
 **When to apply:** Any multi-shot or multi-character output; any work
 that needs to hold consistency across cuts.
 
-**Demonstrated in:** `skills/higgsfield-soul/SKILL.md` § Character
+**Demonstrated in:** `skills/higgsfield-soul/RECIPE.md` § Character
 Anchor Block (10-attribute pre-shot lock) + `skills/higgsfield-
-seedance/SKILL.md` § Frame Coordinate System + § Per-Image Role
+seedance/RECIPE.md` § Frame Coordinate System + § Per-Image Role
 Convention.
 
 ### Plausibility-over-verification
@@ -117,8 +117,8 @@ any Higgsfield workflow. Corrections are superseding rows (`amend-gen`),
 never edits — history is append-only.
 
 **Demonstrated in:** `db/ledger/README.md` (schema + controlled
-vocabularies) + `skills/higgsfield-recall/SKILL.md` § Log the Generation
-Result (agent-side hook) + `skills/higgsfield-assist/SKILL.md` § Quote
+vocabularies) + `skills/higgsfield-recall/RECIPE.md` § Log the Generation
+Result (agent-side hook) + `skills/higgsfield-assist/RECIPE.md` § Quote
 From the Ledger, Not From Vibes (read path).
 
 ## Tier 2 — Output Discipline
@@ -131,7 +131,7 @@ unobservable attributes. Visual markers carry across regenerations.
 
 **When to apply:** Any prompt for image or video generation.
 
-**Demonstrated in:** `skills/higgsfield-prompt/SKILL.md` §
+**Demonstrated in:** `skills/higgsfield-prompt/RECIPE.md` §
 Seedance 2.0 Engine Constraints → Age-blind character rule.
 
 ### Triple-Redundant Runtime
@@ -141,7 +141,7 @@ labels — all three must agree, per-shot labels must sum to total.
 
 **When to apply:** Multi-shot or time-anchored output.
 
-**Demonstrated in:** `skills/higgsfield-seedance/SKILL.md` §
+**Demonstrated in:** `skills/higgsfield-seedance/RECIPE.md` §
 Runtime arithmetic for multi-shot prompts.
 
 ### Single-Variable Iteration
@@ -151,7 +151,7 @@ iteration makes diagnosis impossible.
 
 **When to apply:** Iteration on close-but-not-right generations.
 
-**Demonstrated in:** `skills/higgsfield-prompt/SKILL.md` § The
+**Demonstrated in:** `skills/higgsfield-prompt/RECIPE.md` § The
 Iteration Rule — Change One Variable at a Time + 6-Pass Diagnostic.
 
 ### Systematic-vs-Stochastic Fork (Iterate or Batch)
@@ -171,7 +171,7 @@ honest as the `reject_reason` labels feeding it.
 **When to apply:** Any close-but-not-right generation with enough logged
 history to read the verdict.
 
-**Demonstrated in:** `skills/higgsfield-prompt/SKILL.md` § Before You
+**Demonstrated in:** `skills/higgsfield-prompt/RECIPE.md` § Before You
 Iterate + § Batch-and-Select; `scripts/higgsfield_memory.py` `compute_ratio` /
 `fork_verdict`; `db/ledger/README.md` § The fork.
 
@@ -194,7 +194,7 @@ discipline to itself.
 **When to apply:** Diagnosing a rejected still (image or single frame)
 you can actually see; opt-in, not every log.
 
-**Demonstrated in:** `skills/higgsfield-troubleshoot/SKILL.md` §
+**Demonstrated in:** `skills/higgsfield-troubleshoot/RECIPE.md` §
 Vision-Grounded Diagnosis; `scripts/higgsfield_memory.py`
 `compute_vision_agreement`; `db/ledger/README.md` § `vision_reason`.
 
@@ -227,7 +227,7 @@ positioning).
 
 **Demonstrated in:** `image-models.md` § Nano Banana Pro Workflow
 positioning (two-tool pipeline routing baked in) + `skills/
-higgsfield-soul/SKILL.md` § Two-Tool Refinement Pipeline (~600 + ~200
+higgsfield-soul/RECIPE.md` § Two-Tool Refinement Pipeline (~600 + ~200
 generations anchor baked into pipeline framing).
 
 ### Anti-Bombast
@@ -277,7 +277,7 @@ stage produces an artifact the next stage consumes. Common shapes:
 
 **When to apply:** Orchestrating multiple generation stages.
 
-**Demonstrated in:** `skills/higgsfield-pipeline/SKILL.md` § The
+**Demonstrated in:** `skills/higgsfield-pipeline/RECIPE.md` § The
 Master Production Chain + § Pipelines A-E.
 
 ### Closing-Block-Baked-Into-Every-Prompt
@@ -300,7 +300,7 @@ Step N is approved. Skipping surfaces drift downstream.
 
 **When to apply:** Numbered sequence where each step depends on the prior step's artifact.
 
-**Demonstrated in:** `skills/higgsfield-cinema/SKILL.md` § The
+**Demonstrated in:** `skills/higgsfield-cinema/RECIPE.md` § The
 10-Step Cinema Studio 2.5 Workflow.
 
 ### Pre-Delivery Discipline

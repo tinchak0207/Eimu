@@ -141,7 +141,14 @@ export function clampRecallK(value: unknown, fallback: number = RECALL_K_DEFAULT
   return Math.max(1, Math.min(Math.floor(n), RECALL_K_MAX))
 }
 
-/** §7 query 形狀：本回合用戶消息前 200 字元 + 上一輪 assistant 文本前 200 字元。 */
+/**
+ * §7 query 形狀：本回合用戶消息前 200 字元 + 上一輪 assistant 文本前 200 字元。
+ *
+ * 2026-10-04 D7 警告（**呼叫端注意**）：第二輸入（assistant 文本）在 beast 派遣回合
+ * 拿到的是「派工／工具敘述」頭段，拼進 BM25 會把 top-3 拉向工作流／派工語料（實錘：
+ * 音樂追問召回 3 條 2 條無關）。生產呼叫端 `memory-wiring.scheduleMemoryRecallPrefetch`
+ * 已不再傳入 assistant 頭段（見該處 D7 註釋）；本函式簽名保留以兼容既有呼叫端。
+ */
 export function buildRecallQuery(userText: string, lastAssistantText?: string | null): string {
   const head = String(userText ?? "").slice(0, 200)
   const tail = String(lastAssistantText ?? "").slice(0, 200)

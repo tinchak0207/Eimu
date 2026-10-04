@@ -13,7 +13,7 @@ Shipped in 1.1.0:
 - Gates: stage2_spec/validate_sculpt_spec.py detail-inventory gate (count + component/material linkage + gloss/fastener checks) and character track gate (anatomy + character feature targets); both backward compatible.
 - References: intake/detail_inventory.md, character/reconstruction.md, character/likeness_maximization.md; build/geometry_patterns.md detail + character recipes; intake/validation_rubric.md character suitability branch.
 - Scripts: stage1_intake/build_detail_inventory.py, stage1_intake/extract_landmarks.py, stage1_intake/solve_camera_pose.py, stage1_intake/delight_albedo.py, stage3_build/bake_projected_texture.py.
-- Tests: 16 pass (8 new covering the schema, gates, backward compat, and new scripts). SKILL.md + README updated; version bumped to 1.1.0.
+- Tests: 16 pass (8 new covering the schema, gates, backward compat, and new scripts). RECIPE.md + README updated; version bumped to 1.1.0.
 
 Not yet implemented (follow-up, do not assume present):
 - stage3_build/generate_threejs_factory.py humanoid rig + face-landmark placement + detail-emission hooks.
@@ -271,7 +271,7 @@ Modified files:
 - `forge/stage3_build/orchestrate_passes.py` (register proportion-lock / feature-placement passes for character domain)
 - `forge/stage1_intake/probe_image.py` (hint detail-scan when complexity high)
 - `forge/tests/test_pipeline.py` (new coverage)
-- `SKILL.md`, `README.md` (document both tracks, bump version)
+- `RECIPE.md`, `README.md` (document both tracks, bump version)
 
 ## 8. Phased roadmap
 
@@ -284,7 +284,7 @@ Modified files:
 | P5 | 1.2.0 | character feature gates + proportion-lock/feature-placement passes | face/proportion/pose scored; one case passes stylized bar |
 | P6 | 1.3.0 | likeness-max: `stage1_intake/solve_camera_pose.py` + `stage1_intake/delight_albedo.py` + `stage3_build/bake_projected_texture.py` + parametric template fit | render camera-matches the photo; de-lit reference projected onto the fitted mesh; front-face likeness visibly higher than stylized baseline |
 | P7 | 1.3.0 | optional `generativeAssist` mode (flagged, non-default) + confidence reporting for unseen regions | import-and-refine path works end-to-end and is clearly labelled non-procedural |
-| P8 | 1.3.0 | docs + demos + version bump | SKILL.md/README updated, high-likeness character demo, no emoji |
+| P8 | 1.3.0 | docs + demos + version bump | RECIPE.md/README updated, high-likeness character demo, no emoji |
 
 ## 9. Testing strategy
 

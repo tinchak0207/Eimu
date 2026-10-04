@@ -1,6 +1,6 @@
 # Seedance 2.5 — Mode Playbooks
 
-The long-form templates for the modes and techniques that `SKILL.md` routes to. Every
+The long-form templates for the modes and techniques that `RECIPE.md` routes to. Every
 template here is `[OFFICIAL — Dreamina]` (ByteDance's *Seedance 2.5 Prompt Guide* and
 *User Guide*), normalized to this repo's house conventions: positive phrasing, no age
 words, reference roles always paired with exclusions.
@@ -11,7 +11,7 @@ Read only the section the task needs.
 |---|---|
 | Change something inside an existing video | § Video editing |
 | Add footage after (or before) an existing video | § Video extension |
-| First/last frames, keyframe stages | `SKILL.md` § First-Last Frame and Multi-Keyframe Control |
+| First/last frames, keyframe stages | `RECIPE.md` § First-Last Frame and Multi-Keyframe Control |
 | A storyboard grid drives shot order | § Storyboard grids |
 | A 3D previz / white-model drives the shot | § Blockout references |
 | A batch of stills becomes one edited video | § One-click video |
@@ -142,7 +142,7 @@ background music, ambience, and visuals from @Video 1.
 
 ### Written-scope editing (the annotation substitute)
 
-Dreamina's mark-based editor is not on the Higgsfield surface (`SKILL.md` § Dreamina-Only),
+Dreamina's mark-based editor is not on the Higgsfield surface (`RECIPE.md` § Dreamina-Only),
 so precision comes from the sentence instead. The vendor's own written form is:
 
 ```
@@ -290,7 +290,7 @@ Two boundaries hold: the vendor disclaims strict storyboard alignment — the gr
 a "high-level plot reference", and the mapping raises adherence rather than
 guaranteeing it (timestamps allocate a budget; they are not frame-accurate edit
 points). When true per-panel strictness is required, that is the **multi-keyframe
-channel** (`SKILL.md` § First/last frame and multi-keyframe control), not a grid.
+channel** (`RECIPE.md` § First/last frame and multi-keyframe control), not a grid.
 Slot position, by contrast, is not worth fighting over: the same A/B day measured
 board-first vs board-last with identical order adherence — upload order is a
 tie-breaker, not semantics (SD25-PE confirmed).
@@ -508,7 +508,7 @@ finish written into its own name.
 
 ## Related
 
-- `SKILL.md` — the mode router, reference-role grammar, staging, limits
-- `../higgsfield-seedance/SKILL.md` — Seedance 2.0 director and the shared prompt-craft laws
+- `RECIPE.md` — the mode router, reference-role grammar, staging, limits
+- `../higgsfield-seedance/RECIPE.md` — Seedance 2.0 director and the shared prompt-craft laws
 - `../higgsfield-seedance/ENGINE-RULES.md` — hard rendering constraints shared across the family
-- `../higgsfield-pipeline/SKILL.md` — assembling generated pieces into a longer cut
+- `../higgsfield-pipeline/RECIPE.md` — assembling generated pieces into a longer cut

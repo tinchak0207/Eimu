@@ -138,4 +138,4 @@ Before retopo handoff provide:
 | Topic | Reference | Load When |
 |-------|-----------|-----------|
 | Brush settings | `references/brush-guide.md` | Detail pass |
-| Bake workflow | `../texture-workflow/SKILL.md` | Game asset handoff |
+| Bake workflow | `../texture-workflow/RECIPE.md` | Game asset handoff |

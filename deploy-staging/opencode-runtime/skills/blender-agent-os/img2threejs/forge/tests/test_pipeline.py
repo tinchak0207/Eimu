@@ -2,7 +2,7 @@
 """End-to-end integration tests for the Three.js Object Sculptor pipeline.
 
 Pure stdlib. Runs each CLI script as a subprocess and asserts the gate behavior
-described in SKILL.md / references. Also generates a tiny real PNG (struct+zlib)
+described in RECIPE.md / references. Also generates a tiny real PNG (struct+zlib)
 to exercise the image-consuming scripts without any third-party deps.
 
 Run: python3 forge/tests/test_pipeline.py   (from skill root)

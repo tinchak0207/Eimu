@@ -34,6 +34,20 @@ ROOT_SKILL_PATH = REPO_ROOT / "SKILL.md"
 SKILLS_DIR = REPO_ROOT / "skills"
 FONT_DIR = REPO_ROOT / "assets" / "fonts"
 
+# Sub-skill entrypoint filename(s). The 2026-10-04 harness rename收敛 collapsed
+# every nested SKILL.md to RECIPE.md; accept RECIPE.md (preferred) and SKILL.md
+# (compat) so the sub-skill discovery never silently returns an empty list.
+SKILL_ENTRY_FILENAMES = ("RECIPE.md", "SKILL.md")
+
+
+def skill_entry_path(d: Path):
+    """Entrypoint file for sub-skill directory *d*, or None if it has none."""
+    for name in SKILL_ENTRY_FILENAMES:
+        p = d / name
+        if p.exists():
+            return p
+    return None
+
 
 # -- Exit-code matrix (v3.7.16+) --------------------------------------------
 EXIT_OK = 0
@@ -114,9 +128,10 @@ def read_root_metadata():
 
 
 def discover_sub_skills():
-    """Filesystem walk of skills/*/SKILL.md. Returns ordered list of sub-skill names.
+    """Filesystem walk of skills/*/[RECIPE|SKILL].md. Returns ordered list of
+    sub-skill names.
 
-    Excludes shared/ (utility directory, no SKILL.md). Order is deterministic
+    Excludes shared/ (utility directory, no entrypoint). Order is deterministic
     (alphabetical by directory name). Per-sub-skill descriptions are looked up
     in SUB_SKILL_DESCRIPTIONS below, NOT extracted from frontmatter (which
     carries routing-trigger language, not editorial summaries).
@@ -127,7 +142,7 @@ def discover_sub_skills():
             continue
         if d.name == "shared":
             continue
-        if not (d / "SKILL.md").exists():
+        if skill_entry_path(d) is None:
             continue
         out.append(d.name)
     return out

@@ -4,7 +4,7 @@ A timed camera move (crash zoom, push-in, reveal pull-back) only pays off if it 
 right frame. Seedance's internal timing drifts, so you anchor the move **twice**: once by
 meaning (the spoken line or a visible action) and once by number (a second mark). This file is
 how you get the number and phrase both anchors. Referenced from
-[`../SKILL.md`](../SKILL.md) § Timed camera moves synced to dialogue.
+[`../RECIPE.md`](../RECIPE.md) § Timed camera moves synced to dialogue.
 
 ## Measure `T` from the source clip
 
@@ -50,11 +50,11 @@ the semantic anchor is the ground truth; the numeric one is insurance.
   line instead of after it.
 - **Recompute on every runtime change.** If the user changes the total duration, every numeric
   `T` shifts — recompute and tell them the new mark. A prepended intro pushes the whole source
-  back; do the `total − intro = surviving window` subtraction (`../SKILL.md` § Duration
+  back; do the `total − intro = surviving window` subtraction (`../RECIPE.md` § Duration
   discipline) before promising a line will land.
 - **Lip-sync fit.** A line that runs ~6s cannot sit in a 5s surviving window. Check the line
   length against the window before delivering.
 
 Dialogue generation, the `[AUDIO: Xs]` script block, lip-sync, and the first-15s audio
-extraction trap are documented in [`../../higgsfield-audio/SKILL.md`](../../higgsfield-audio/SKILL.md)
+extraction trap are documented in [`../../higgsfield-audio/RECIPE.md`](../../higgsfield-audio/RECIPE.md)
 § Audio as a Conditioning Input.

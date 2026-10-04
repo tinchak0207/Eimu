@@ -9,7 +9,7 @@
  * 220 runes（超限依 CORE_01 權重由低到高整層丟棄，仍超才硬截——硬截盡量用滿預算：
  * 先取前 cap runes，≥60% cap 有子句邊界才退、否則退到最後空白或就地切）；
  * lyria 保留官方時間戳、不設 220 上限；yue2 剝除時間戳（YuE2 不認時間戳結構控制）但
- * **保留 [Verse]/[Chorus] 段落標籤**（那是歌詞欄必需語法）、允許換行、上限 3000 runes。
+ * **保留 [Verse]/[Chorus] 段落標籤**（那是歌詞欄必需語法）、允許換行、上限 600 runes（超出按權重丟低優先層）。
  * 全程在後端發生，用戶無感。
  *
  * 知識來源：SunoForge v3.0 配方庫（repo `skills/music-director/files/`，MIT，
@@ -63,8 +63,14 @@ export interface MusicDirectorResult {
   applied: string[];
   /** 偵測到但無法確定性修補的缺口（不得虛報）。 */
   warnings: string[];
-  /** 因長度上限被整層丟棄的層 id。 */
+  /** 因長度上限被整層丟棄的層 id（補層與按層壓縮丟掉的核心子句層都算）。 */
   truncated: MusicLayerId[];
+  /** 超限時按層壓縮、整句丟棄的子句數（含層子句與非層細節子句）。缺省＝未發生壓縮。 */
+  compressedClauses?: number;
+  /** 超限按層壓縮時整句丟棄的核心子句層 id（只含用戶原文本命中的層，供回執如實說明）。 */
+  compressedLayers?: MusicLayerId[];
+  /** 壓縮後仍被迫在單一子句中途截斷（極端情形：一句就長過上限）。true 時尾端可能不完整。 */
+  hardTruncated?: boolean;
 }
 
 /**
@@ -357,6 +363,27 @@ function stripTimestamps(prompt: string): string {
     .trim();
 }
 
+/** 時間碼偵測（非全域，可安全 .test；含剝除後會留下的空括號）。 */
+const TIMESTAMP_DETECT =
+  /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*\]|\(\s*\d{1,2}(?:\s*[-–—]\s*\d{1,2})?\s*s\s*\)|\b\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?|\[\s*\]|（\s*）|\(\s*\)/;
+
+/**
+ * 歌詞欄的時間碼剝除（供工具層對 flowmusic／yue2 的歌詞做與 style 相同的處理）。
+ * 只動數字時間碼與其空括號，`[Verse]`／`[Chorus]` 等段落標籤原樣保留（yue2 上游必需語法）；
+ * Lyria 認時間碼，呼叫方對該通路不要用本函式。回傳 hadTimestamp 供回執如實說明。
+ */
+export function stripLyricsTimestamps(lyrics: string): { lyrics: string; hadTimestamp: boolean } {
+  if (!TIMESTAMP_DETECT.test(lyrics)) return { lyrics, hadTimestamp: false };
+  const cleaned = lyrics
+    .split("\n")
+    .map((line) => stripTimestamps(line))
+    .join("\n")
+    // 剝除時間碼後留在段落標籤內的空白（`[Outro (0-15s)]` → `[Outro ]`）收乾淨。
+    .replace(/\[\s*([^\]]*?)\s*\]/g, "[$1]")
+    .replace(/\n{3,}/g, "\n\n");
+  return { lyrics: cleaned, hadTimestamp: true };
+}
+
 /** flowmusic 平面分支：全文壓成一行（換行不帶語義，上游會壓平）。 */
 function collapseToSingleLine(prompt: string): string {
   return prompt
@@ -395,6 +422,101 @@ const CLAUSE_BOUNDARIES: readonly string[] = [",", ";", ".", "，", "；", "。"
 
 /** 保版面分支多認一個換行邊界。 */
 const LAYOUT_BOUNDARIES: readonly string[] = [...CLAUSE_BOUNDARIES, "\n"];
+
+/**
+ * 承重欄位：速度與調性（含 key of X / X major|minor / 和弦級數寫法）。六層偵測把它歸進
+ * PRODUCTION（低權重），但 220 壓縮時**必須保住**——2026-10-04 R1 實錘：無歌詞器樂分支被
+ * 硬截後 BPM 76／A 小調／Am7–Dm7–G7–Cmaj7 全沒進模型，成品速度調性失控＝白做一版。
+ */
+const TEMPO_KEY_PATTERN =
+  /\b\d{2,3}\s*bpm\b|\bbpm\b|\btempo\b|\bkey of\b|\b[a-g](?:\s*#|\s*b)?\s*(?:major|minor)\b|\b(?:[a-g](?:m|maj|min|dim|aug|7|9|11|13)[0-9a-z]*)(?:\s*[-–—]\s*[a-g](?:m|maj|min|dim|aug|7|9|11|13)[0-9a-z]*)+/i;
+
+/** 子句切分（保留每段尾端分隔符，重建時可逐字還原）；分隔符同硬截退讓點。 */
+const CLAUSE_SPLIT_PATTERN = /[^,;.，；。、\n]+[,;.，；。、\n]?/g;
+
+/** 未匹配任何層的細節子句（環境音／時長／樂手描述）＝中等權重：先於 STRUCTURE／PRODUCTION 被丟。 */
+const UNMATCHED_CLAUSE_WEIGHT = 3;
+
+/** 子句權重：BPM／調性承重最高；其餘取命中層的 LAYER_WEIGHT（多層取最大）；未命中＝中權重。 */
+function clauseWeight(clause: string): number {
+  if (TEMPO_KEY_PATTERN.test(clause)) return 7;
+  let best = 0;
+  for (const id of MUSIC_LAYER_IDS) {
+    if (MUSIC_LAYER_PATTERNS[id].test(clause)) best = Math.max(best, LAYER_WEIGHT[id]);
+  }
+  return best > 0 ? best : UNMATCHED_CLAUSE_WEIGHT;
+}
+
+/** 子句命中的最高權重層（回報「丟了哪幾層」用；未命中回 null）。 */
+function clauseLayer(clause: string): MusicLayerId | null {
+  let bestId: MusicLayerId | null = null;
+  let bestWeight = 0;
+  for (const id of MUSIC_LAYER_IDS) {
+    if (MUSIC_LAYER_PATTERNS[id].test(clause) && LAYER_WEIGHT[id] > bestWeight) {
+      bestId = id;
+      bestWeight = LAYER_WEIGHT[id];
+    }
+  }
+  return bestId;
+}
+
+/** 把文本切成可由分隔符逐字還原的子句（空白子句丟棄）。 */
+function splitClauses(text: string): string[] {
+  const matched = text.match(CLAUSE_SPLIT_PATTERN) ?? [];
+  return matched.filter((clause) => clause.trim() !== "");
+}
+
+/** 去掉頭尾殘留分隔／空白（只動標點空白，不動文字）。 */
+function trimClauseEdges(text: string): string {
+  return text
+    .replace(/^[\s,;.，；。、\n]+/, "")
+    .replace(/[\s,;.，；。、\n]+$/, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * 超限時的「按層壓縮」（2026-10-04，修 R1 白工）：
+ * 保住承重子句（GENRE／MOOD／INSTRUMENTATION 與 BPM／調性），由低到高整句丟棄低權重子句
+ * （PRODUCTION → STRUCTURE → …），**絕不切在半句／半詞**。只有「單一子句本身就長過上限」
+ * 這種無法兩全的極端情形才退回詞界硬截（回報 hardCapped）。
+ */
+function compressByClause(
+  text: string,
+  limit: number,
+  allowNewline: boolean,
+): { text: string; droppedLayers: MusicLayerId[]; droppedOther: number; clauseCompressed: boolean; hardCapped: boolean } {
+  const clauses = splitClauses(text);
+  if (clauses.length <= 1) {
+    // 沒有可整句丟棄的子句邊界：交給截斷器（詞界安全；仍不動半個單詞）。
+    return { text, droppedLayers: [], droppedOther: 0, clauseCompressed: false, hardCapped: countRunes(text) > limit };
+  }
+  let kept = clauses.map((clause, index) => ({ clause, index }));
+  const droppedLayers: MusicLayerId[] = [];
+  let droppedOther = 0;
+  const joinKept = () => trimClauseEdges(kept.map((entry) => entry.clause).join(""));
+  while (countRunes(joinKept()) > limit && kept.length > 1) {
+    let pick = 0;
+    for (let index = 1; index < kept.length; index += 1) {
+      const weight = clauseWeight(kept[index].clause);
+      const pickWeight = clauseWeight(kept[pick].clause);
+      // 同權重丟後段（保留前段＝front-loading，CORE_01 §13）。
+      if (weight < pickWeight || (weight === pickWeight && kept[index].index > kept[pick].index)) pick = index;
+    }
+    const layer = clauseLayer(kept[pick].clause);
+    if (layer) droppedLayers.push(layer);
+    else droppedOther += 1;
+    kept = kept.filter((_entry, index) => index !== pick);
+  }
+  const compressed = joinKept();
+  return {
+    text: compressed,
+    droppedLayers,
+    droppedOther,
+    clauseCompressed: true,
+    hardCapped: countRunes(compressed) > limit,
+  };
+}
 
 /** 去掉硬截尾端的殘留分隔（只動標點空白，不動文字）。 */
 function trimBoundaryTail(text: string): string {
@@ -435,16 +557,24 @@ interface AssembledPrompt {
   prompt: string;
   /** 實際留在 prompt 裡的補層 id。 */
   kept: MusicLayerId[];
-  /** 因上限被整層丟棄的層 id。 */
+  /** 因上限被整層丟棄的補層 id。 */
   truncated: MusicLayerId[];
+  /** 超限按層壓縮核心時、整句丟棄的層 id。 */
+  compressed: MusicLayerId[];
+  /** 超限按層壓縮時、整句丟棄的非層細節子句數。 */
+  compressedOther: number;
+  /** 是否真的走了按層壓縮（整句丟棄）而非直接硬截。 */
+  clauseCompressed: boolean;
   /** 是否在丟無可丟之後仍超限、走了子句邊界硬截。 */
   hardCapped: boolean;
 }
 
 /**
- * 依上限組裝：超限時依 CORE_01 權重由低到高整層丟棄，仍超才硬截。
+ * 依上限組裝：超限時先依 CORE_01 權重由低到高整層丟棄補層；仍超則對核心文本
+ * **按層壓縮**（整句丟低權重子句、保 BPM／調性與承重層，絕不切半句）；只有單一子句
+ * 本身就長過上限才退回詞界硬截。
  * 來源：CORE_01_STYLE.md:42 §1（genre 承重）、:965-973 §13（組裝序＝權重序）、
- * DATA_FLOWMUSIC_2026-09.md:94 §2 row ⑦（上限存在）。
+ * DATA_FLOWMUSIC_2026-09.md:94 §2 row ⑦（上限存在）、:204 §5 checklist 4（壓在 ~220 內）。
  */
 function assembleWithLimit(
   core: string,
@@ -457,8 +587,12 @@ function assembleWithLimit(
     [core, ...parts.map((part) => part.text)].filter(Boolean).join(" ");
   let text = join(kept);
   const truncated: MusicLayerId[] = [];
+  const compressed: MusicLayerId[] = [];
+  let compressedOther = 0;
+  let clauseCompressed = false;
+  let hardCapped = false;
   if (limit === null) {
-    return { prompt: text, kept: kept.map((fill) => fill.id), truncated, hardCapped: false };
+    return { prompt: text, kept: kept.map((fill) => fill.id), truncated, compressed, compressedOther, clauseCompressed, hardCapped };
   }
   while (countRunes(text) > limit && kept.length > 0) {
     let lowest = 0;
@@ -470,14 +604,18 @@ function assembleWithLimit(
     text = join(kept);
   }
   if (countRunes(text) > limit) {
-    return {
-      prompt: truncateAtBoundary(text, limit, allowNewline),
-      kept: kept.map((fill) => fill.id),
-      truncated,
-      hardCapped: true,
-    };
+    const byClause = compressByClause(text, limit, allowNewline);
+    compressed.push(...byClause.droppedLayers);
+    compressedOther = byClause.droppedOther;
+    clauseCompressed = byClause.clauseCompressed;
+    text = byClause.text;
+    // 單一子句仍長過上限＝無法兩全，退回詞界安全硬截（盡量不切斷單詞；如實標記）。
+    if (byClause.hardCapped) {
+      text = truncateAtBoundary(text, limit, allowNewline);
+      hardCapped = true;
+    }
   }
-  return { prompt: text, kept: kept.map((fill) => fill.id), truncated, hardCapped: false };
+  return { prompt: text, kept: kept.map((fill) => fill.id), truncated, compressed, compressedOther, clauseCompressed, hardCapped };
 }
 
 /**
@@ -563,8 +701,20 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   }
   const assembled = assembleWithLimit(core, fills, limit, allowNewline);
   for (const id of assembled.kept) applied.push(`fill-${id}`);
+  if (assembled.clauseCompressed) {
+    applied.push(`compress-${limit}-by-layer`);
+  }
   if (assembled.hardCapped) {
     applied.push(`truncate-${limit}-hard`);
+  }
+  if (assembled.clauseCompressed) {
+    const droppedLayers = [...new Set(assembled.compressed)];
+    warnings.push(
+      `长度压缩：提示词超出本通路 ${limit} runes 硬上限，已按层权重整句丢弃低优先子句` +
+        (droppedLayers.length > 0 ? `（${droppedLayers.join("、")}）` : "") +
+        (assembled.compressedOther > 0 ? `及 ${assembled.compressedOther} 条非层细节子句` : "") +
+        `，优先保住流派／情绪／编制与 BPM／调性；为保完整可读不做半句截断。`,
+    );
   }
 
   // 6. 偵測到但無法確定性修補的缺口（如實回報，不虛報）。
@@ -585,6 +735,13 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     layers,
     applied,
     warnings,
-    truncated: assembled.truncated,
+    truncated: [...new Set([...assembled.truncated, ...assembled.compressed])],
+    ...(assembled.clauseCompressed
+      ? {
+          compressedClauses: assembled.compressed.length + assembled.compressedOther,
+          compressedLayers: [...new Set(assembled.compressed)],
+        }
+      : {}),
+    ...(assembled.hardCapped ? { hardTruncated: true } : {}),
   };
 }

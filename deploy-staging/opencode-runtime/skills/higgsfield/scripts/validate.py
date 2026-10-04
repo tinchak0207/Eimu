@@ -25,6 +25,34 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # scripts/ → repo root
+
+# Sub-skill entrypoint filename(s). The 2026-10-04 harness rename收敛 collapsed
+# every nested SKILL.md to RECIPE.md; accept RECIPE.md (preferred) and SKILL.md
+# (compat) so a rename can never make a glob silently return empty.
+SKILL_ENTRY_FILENAMES = ("RECIPE.md", "SKILL.md")
+
+
+def skill_entry_path(d: Path):
+    """Entrypoint file for sub-skill directory *d*, or None if it has none."""
+    for name in SKILL_ENTRY_FILENAMES:
+        p = d / name
+        if p.exists():
+            return p
+    return None
+
+
+def iter_skill_entry_files(root: Path, skip_git: bool = False):
+    """Every skill entrypoint file under *root*, at most one per directory
+    (RECIPE.md wins over SKILL.md), sorted. Replaces bare rglob("SKILL.md")."""
+    seen = {}
+    for name in SKILL_ENTRY_FILENAMES:  # RECIPE.md first so it wins the dedupe
+        for p in root.rglob(name):
+            if skip_git and ".git" in p.parts:
+                continue
+            seen.setdefault(p.parent, p)
+    return sorted(seen.values())
+
+
 SPECS_DIR = ROOT / "specs"
 SPECS_JSON = SPECS_DIR / "model-specs.json"
 SNAPSHOT_MAX_AGE_DAYS = 30
@@ -87,7 +115,7 @@ EXTERNAL_CITATIONS = {
     "cinema-worldbuilder.md", "screenwriter-skill.md",
     # Adil Aliyev source-corpus siblings cited as translation provenance
     # (note: `higgsfield-content-factory.md` cites the EXTERNAL source skill,
-    # not this repo's skills/higgsfield-content-factory/SKILL.md):
+    # not this repo's skills/higgsfield-content-factory/RECIPE.md):
     "marketing-studio-director.md", "higgsfield-content-factory.md",
     "cinematic-motion-language.md",
 }
@@ -373,7 +401,7 @@ def check_dispatcher_parity():
         return
     disk_skills = sorted(
         d.name for d in skills_dir.iterdir()
-        if d.is_dir() and d.name != "shared" and (d / "SKILL.md").exists()
+        if d.is_dir() and d.name != "shared" and skill_entry_path(d) is not None
     )
     skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
     referenced = set(re.findall(r"higgsfield-[a-z0-9-]+", skill_text))
@@ -659,7 +687,7 @@ def check_description_coverage():
         return
     skills_dir = ROOT / "skills"
     on_disk = {d.name for d in skills_dir.iterdir()
-               if d.is_dir() and d.name != "shared" and (d / "SKILL.md").exists()}
+               if d.is_dir() and d.name != "shared" and skill_entry_path(d) is not None}
     described = set(SUB_SKILL_DESCRIPTIONS)
     missing = sorted(on_disk - described)
     orphans = sorted(described - on_disk)
@@ -908,9 +936,9 @@ def main():
           + (" (--strict)" if args.strict else ""))
     print(f"Root: {ROOT}\n")
 
-    # ── 1. Find all SKILL.md files ──────────────────────────────────────────
+    # ── 1. Find all skill entrypoint files (RECIPE.md preferred) ────────────
     print("[ SKILL.md FILES ]")
-    skill_files = list(ROOT.rglob("SKILL.md"))
+    skill_files = iter_skill_entry_files(ROOT)
     print(f"  Found {len(skill_files)} SKILL.md files")
 
     for sf in sorted(skill_files):

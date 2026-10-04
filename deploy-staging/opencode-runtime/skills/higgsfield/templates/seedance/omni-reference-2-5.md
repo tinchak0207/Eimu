@@ -3,7 +3,7 @@
 The paste-ready skeleton for a **Seedance 2.5 `omni_reference`** generation — several
 characters, props, scenes, motion, and audio references combined into one staged clip.
 
-Doctrine: `../../skills/higgsfield-seedance-2-5/SKILL.md`. Long-form mode templates
+Doctrine: `../../skills/higgsfield-seedance-2-5/RECIPE.md`. Long-form mode templates
 (editing, extension, one-click, transitions, blockouts): the same directory's
 `MODE-PLAYBOOKS.md`.
 
@@ -15,7 +15,7 @@ Doctrine: `../../skills/higgsfield-seedance-2-5/SKILL.md`. Long-form mode templa
 - Any 2.5 job that is *not* plain `t2v` and *not* an edit/extension order
 
 For a single-subject clip with one reference and one continuous action, skip the structure and
-use the core formula in `SKILL.md` § The Core Prompt Formula — this template is for the case
+use the core formula in `RECIPE.md` § The Core Prompt Formula — this template is for the case
 where material mapping is the risk.
 
 ## Platform settings (not prompt text)
@@ -180,8 +180,8 @@ scissors' position, and bouquet ownership consistent throughout.
 
 ## Related
 
-- `../../skills/higgsfield-seedance-2-5/SKILL.md` — the dialect this template implements
+- `../../skills/higgsfield-seedance-2-5/RECIPE.md` — the dialect this template implements
 - `../../skills/higgsfield-seedance-2-5/MODE-PLAYBOOKS.md` — edit / extend / one-click / transitions
 - `multi-character-anchor.md` — the 2.0 form of cross-character anchoring
 - `global-style-prefix.md` — the connected-shotlist style prefix
-- `../../skills/higgsfield-acting/SKILL.md` — what to write when a stage needs performance
+- `../../skills/higgsfield-acting/RECIPE.md` — what to write when a stage needs performance

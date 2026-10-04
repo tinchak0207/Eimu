@@ -35,8 +35,8 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 - **何时做**：接到委托单/分镜表后的第一件事。只关心比例、位置、导航路径，不碰材质细节。
 - **先查资产库**：动手前先 `asset_search` 查 blender-3d-assets 包与用户资产包（免费），同形/同构场景或可复用道具直接 `asset_activate` 取出，查空才自造。（生效条件：agent.director 条目併入 VPS opencode.json 且 persona 白名单放行 asset_search/asset_get 后可用；主指令 AGENTS.md §1 路由行已先上线。）
 - **配方档**：
-  - `recipes/scene-assembly/SKILL.md` — 集合结构（COL_Layout/COL_Blockout/…）、灰盒规则、性能卫生
-  - `recipes/set-dressing/SKILL.md` — 布局锁定后的叙事道具簇与密度规则
+  - `recipes/scene-assembly/RECIPE.md` — 集合结构（COL_Layout/COL_Blockout/…）、灰盒规则、性能卫生
+  - `recipes/set-dressing/RECIPE.md` — 布局锁定后的叙事道具簇与密度规则
 - **阶段完成判据**：
   - [ ] 集合层级按命名规范建立（见 `recipes/references/naming-conventions.md`）
   - [ ] 灰盒比例正确、相机可达路径畅通
@@ -46,7 +46,7 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 
 - **何时做**：blockout 判据达成后。把每个镜头的机位/焦距/构图定死，动画前锁机位。
 - **配方档**：
-  - `recipes/camera-cinematography/SKILL.md` — 焦距指南、构图清单、运镜表、DoF
+  - `recipes/camera-cinematography/RECIPE.md` — 焦距指南、构图清单、运镜表、DoF
   - L1 种子数据直迁：机位/运镜初值优先从 director-engine 种子映射（见 `seed-mapping.md`），再按配方精调
 - **阶段完成判据**：
   - [ ] 每镜头 `CAM_[Shot]_[Angle]` 命名、入 `COL_Cameras`
@@ -57,7 +57,7 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 
 - **何时做**：机位锁定后。Eevee 快稿先打三灯定氛围；品质档再进 HDRI/体积。
 - **配方档**：
-  - `recipes/lighting/SKILL.md` — 三点布光、色温表、HDRI、恐怖光、体积光
+  - `recipes/lighting/RECIPE.md` — 三点布光、色温表、HDRI、恐怖光、体积光
 - **阶段完成判据**：
   - [ ] 每盏灯有动机，命名 `LGT_[角色]_[描述]`，入 `COL_Lights`
   - [ ] Eevee 预览帧（写 `$BLENDER_WORK/out/`）下主体剪影可读、色温一致
@@ -67,8 +67,8 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 
 - **何时做**：需要角色/物体运动时。绑定在前，keyframe 在后；循环动作先验循环接缝。
 - **配方档**：
-  - `recipes/rigging/SKILL.md` — 骨架命名/层级、IK vs FK、权重、形变测试
-  - `recipes/animation/SKILL.md` — 摆块→样条→打磨流程、循环验证、NLA
+  - `recipes/rigging/RECIPE.md` — 骨架命名/层级、IK vs FK、权重、形变测试
+  - `recipes/animation/RECIPE.md` — 摆块→样条→打磨流程、循环验证、NLA
   - L1 种子直迁：动作关键帧初值从 director-engine 模板映射（`seed-mapping.md`：MOTION_TEMPLATES → bpy 5-KF 布局；JointName → bpy 骨骼；pathCurve → Bezier 控制柄）
 - **阶段完成判据**：
   - [ ] 骨骼命名一致（`L_arm_upper` 式），无绑定姿态缩放
@@ -79,11 +79,11 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 
 - **何时做**：前三阶段判据全过。快稿走 Eevee，最终走 Cycles。
 - **配方档**：
-  - `recipes/rendering/SKILL.md` — 引擎选择、采样表、通道、色彩管理（AgX）、转台模板
-  - `recipes/compositing/SKILL.md` — 美板堆叠/调色/交付输出（需合成时）
-  - `recipes/lookdev/SKILL.md` — 品质档外观验证循环（Cycles 档）
-  - `recipes/qa-review/SKILL.md` — 交付前门禁（截图实证 + 裁决模板）
-  - `recipes/export-pipeline/SKILL.md` — 资产需出库时（FBX/GLTF/USD）
+  - `recipes/rendering/RECIPE.md` — 引擎选择、采样表、通道、色彩管理（AgX）、转台模板
+  - `recipes/compositing/RECIPE.md` — 美板堆叠/调色/交付输出（需合成时）
+  - `recipes/lookdev/RECIPE.md` — 品质档外观验证循环（Cycles 档）
+  - `recipes/qa-review/RECIPE.md` — 交付前门禁（截图实证 + 裁决模板）
+  - `recipes/export-pipeline/RECIPE.md` — 资产需出库时（FBX/GLTF/USD）
 - **阶段完成判据**：
   - [ ] 渲染帧写 `$BLENDER_WORK/out/`，色彩管理已设（AgX）
   - [ ] 生产渲染前有采样测试

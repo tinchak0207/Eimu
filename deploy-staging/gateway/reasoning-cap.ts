@@ -140,12 +140,30 @@ export function peekReasoningTail(st: ReasoningCapState): string {
  *  - hasTool=true（本輪已動作過）→ 收束結論＋續發下一步工具（或收尾）。
  *  - hasTool=false（首回合尚無動作）→ 給出第一個工具調用。
  * tail 非空時附上「保留的推理摘要」，讓模型沿用而非從零重推。
+ *
+ * 2026-10-04 語言漂移修復：此 nudge 會併入重投的用戶訊息、出現在會話 transcript
+ * （M1 實錄「你已连续长时间只推理…」為簡體）。文案按呼叫端傳入的用戶書寫體鏡像：
+ * 繁體用戶給繁體、其餘（簡體／未判定）給簡體（逐字沿用舊文案）。
  */
-export function buildReasoningNudge(opts: { hasTool: boolean; tail?: string }): string {
-  const head = opts.hasTool
-    ? "\n\n（系统提示：你已连续长时间只推理。请立刻收束：①用一句话给出当前结论；②发出下一个工具调用（继续未完成的步骤；若已可收尾，直接给出最终答复）。不要再展开推理。"
-    : "\n\n（系统提示：你已连续长时间只推理、尚未发出任何工具调用，推理被中止。请立刻：①用一句话给出当前结论；②发出第一个工具调用（例如查余额 / 派 subagent / 发第一条指令）。不要再展开推理。"
+export type NudgeScript = "hant" | "hans" | "unknown"
+
+const NUDGE_HEAD_ACTIVE: Record<"hans" | "hant", string> = {
+  hans: "\n\n（系统提示：你已连续长时间只推理。请立刻收束：①用一句话给出当前结论；②发出下一个工具调用（继续未完成的步骤；若已可收尾，直接给出最终答复）。不要再展开推理。",
+  hant: "\n\n（系統提示：你已連續長時間只推理。請立刻收束：①用一句話給出當前結論；②發出下一個工具調用（繼續未完成的步驟；若已可收尾，直接給出最終答覆）。不要再展開推理。",
+}
+const NUDGE_HEAD_FIRST: Record<"hans" | "hant", string> = {
+  hans: "\n\n（系统提示：你已连续长时间只推理、尚未发出任何工具调用，推理被中止。请立刻：①用一句话给出当前结论；②发出第一个工具调用（例如查余额 / 派 subagent / 发第一条指令）。不要再展开推理。",
+  hant: "\n\n（系統提示：你已連續長時間只推理、尚未發出任何工具調用，推理被中止。請立刻：①用一句話給出當前結論；②發出第一個工具調用（例如查餘額 / 派 subagent / 發第一條指令）。不要再展開推理。",
+}
+const NUDGE_KEPT_PREFIX: Record<"hans" | "hant", string> = {
+  hans: "\n【保留的推理摘要，直接沿用，勿重复推演】",
+  hant: "\n【保留的推理摘要，直接沿用，勿重複推演】",
+}
+
+export function buildReasoningNudge(opts: { hasTool: boolean; tail?: string; script?: NudgeScript }): string {
+  const script: "hans" | "hant" = opts.script === "hant" ? "hant" : "hans"
+  const head = opts.hasTool ? NUDGE_HEAD_ACTIVE[script] : NUDGE_HEAD_FIRST[script]
   const tail = (opts.tail ?? "").trim()
-  const kept = tail ? `\n【保留的推理摘要，直接沿用，勿重复推演】${tail}` : ""
+  const kept = tail ? `${NUDGE_KEPT_PREFIX[script]}${tail}` : ""
   return `${head}${kept}）`
 }

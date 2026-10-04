@@ -18,6 +18,8 @@ import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.
 import { emitSessionError } from "./emit-helpers.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
+// 2026-10-04 T2：失敗原因人話依會話黏性書寫體出對應版本。
+import { sessionUserScript } from "./outbound-sanitize.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
@@ -529,7 +531,7 @@ function emitImageFailed(
     t.status = "failed"
   }
   // S5a：失敗原因人話化（原文保留），SSE 幀與畫布 errorDetails 補 human_message。
-  const human = humanMessageFor(reason, undefined)
+  const human = humanMessageFor(reason, undefined, sessionUserScript(state))
   emitToSession(state, "image.failed", { task_id, reason, refunded, human_message: human })
   const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
   if (unitId) {

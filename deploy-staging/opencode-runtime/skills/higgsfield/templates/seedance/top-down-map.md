@@ -39,7 +39,7 @@ spatial reassembly.
 - An HTML artifact rendering the top-down floor plan visually
 - A paste-ready blocking note formatted for direct copy into the
   Seedance prompt body's Spatial Layout Block (see
-  `../../skills/higgsfield-seedance/SKILL.md` § Spatial Layout Block
+  `../../skills/higgsfield-seedance/RECIPE.md` § Spatial Layout Block
   for the block structure that consumes this output)
 
 ## BAD / GOOD / GREAT
@@ -80,9 +80,9 @@ signage) that must hold scale across cuts.
 
 ## See also
 
-- `../../skills/higgsfield-seedance/SKILL.md` § Frame Coordinate System
+- `../../skills/higgsfield-seedance/RECIPE.md` § Frame Coordinate System
   — coordinate vocabulary the blocking note uses
-- `../../skills/higgsfield-seedance/SKILL.md` § Spatial Layout Block —
+- `../../skills/higgsfield-seedance/RECIPE.md` § Spatial Layout Block —
   the prompt-body block that consumes the blocking note
 - `../../skills/higgsfield-seedance/FAILURE-MODES.md` § Spatial-
   awareness failures — failure class this template prevents

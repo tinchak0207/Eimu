@@ -1,4 +1,4 @@
-# 验证脚本（按 recipes/animation/SKILL.md + seed-mapping.md §2 核心步骤提取，非配方本体）
+# 验证脚本（按 recipes/animation/RECIPE.md + seed-mapping.md §2 核心步骤提取，非配方本体）
 # 阶段④骨架动画 keyframe：骨架 + 5-KF 布局（times 0/0.18/0.5/0.82/1）+ 关节旋转 + Eevee 出 2 帧
 # 跑法：blender --background --factory-startup --python verify_keyframe.py
 import math

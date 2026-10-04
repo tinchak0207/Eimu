@@ -1,17 +1,17 @@
-<!-- source: Eimu 内部实测（2026-09-11，VPS /opt/flowmusic2api 上游 genz27/FlowMusic2API MIT）｜license: first-party internal（自有实测数据，非第三方转载）｜ingested: 2026-09-11 | 下游 Expert must-load，覆盖 DATA_GOOGLE 在本通路的适用性 -->
+<!-- source: Eimu 内部实测（2026-09-11，VPS /opt/flowmusic2api 上游 genz27/FlowMusic2API MIT；2026-10-03 复测歌词逐字保留）｜license: first-party internal（自有实测数据，非第三方转载）｜ingested: 2026-09-11｜re-measured: 2026-10-03 | 下游 Expert must-load，覆盖 DATA_GOOGLE 在本通路的适用性 -->
 ---
 file_id: DATA_FLOWMUSIC
 version: "1.0"
 layer: data
-valid_as_of: "2026-09-11"
+valid_as_of: "2026-10-03"
 expires: "Reverse-engineered wrapper (FlowMusic2API) over a closed hosted agent (flowmusic.app). Either can change prompt handling without notice — re-measure before trusting this file after 2026-12"
 scope: flowmusic2api · lyria_3.5_via_flowmusic · prompt_control_effectiveness · lyrics_handling · wire_transformations
-key_concepts: [flowmusic2api, flowmusic_app, producer_standard, sound_prompt, lyrics_expansion, instrumental_marker, bpm_control, timestamp_control, comma_style, wire_mangling, two_clips_ab]
+key_concepts: [flowmusic2api, flowmusic_app, producer_standard, sound_prompt, lyrics_verbatim, instrumental_marker, bpm_control, timestamp_control, comma_style, wire_mangling, two_clips_takes]
 depends_on: [CORE_00_ENTRY, CORE_01_STYLE, CORE_02_LYRICS]
 used_by: [CORE_00_ENTRY, CORE_01_STYLE, CORE_02_LYRICS, CORE_03_DIAGNOSE]
 rag_priority: critical
 authority: "ON THE FLOWMUSIC2API PATH THIS FILE OVERRIDES DATA_GOOGLE (timestamp/structure claims do not transfer)"
-updated: "2026-09-11"
+updated: "2026-10-03"
 ---
 
 # 🟣 EIMU — FLOWMUSIC2API PATH DATA
@@ -22,6 +22,11 @@ updated: "2026-09-11"
 > (`genz27/FlowMusic2API`, MIT) sitting on a **closed conversational agent**
 > (flowmusic.app) that also rewrites prompts server-side. Treat n=3 as
 > directional evidence, not a specification. Re-measure if the path misbehaves.
+
+> ↩️ **2026-10-03 re-measure.** One **full tagged-lyric** call (489 chars) confirmed
+> §2 ②/⑥: the lyric came back **near-verbatim (489→487, all tags kept)** and the
+> single call yielded a 181 s full-length double take. The n=3 *seed-expansion*
+> rows below stay as measured on 2026-09-11.
 
 > 🔴 **Scope rule.** The production music path (VPS `FLOWMUSIC2API_URL`, model
 > `lyria`) is **not** the Gemini API surface. Timed structural control
@@ -84,19 +89,19 @@ updated: "2026-09-11"
 | # | Control | Verdict on this path | Evidence |
 |---|---|---|---|
 | ① | Six-layer comma style line (genre-first) | **WORKS** — clauses are honoured and come back as a normalised comma list | `[实测]` in: `cinematic orchestral, tense and driving, strings and taiko drums, … , 60 BPM, key of D minor, …` → `sound_prompt`: `cinematic orchestral, tense and driving strings, taiko drums, key of D minor, sparse low drone intro, main ostinato theme, 60 bpm` |
-| ② | `[Verse]` / `[Chorus]` section tags | **WORKS as a schema, not as a contract** — tags are adopted and re-emitted, but the agent **expands** the lyric | `[实测]` supplied 4 lines with `[Verse]`/`[Chorus]`; returned lyrics keep all 4 lines verbatim in **both** clips *plus* new `[Intro] [Verse 1] [Verse 2] [Bridge] [Outro]`; the two clips' extra lines differ (A/B variants) |
+| ② | `[Verse]` / `[Chorus]` section tags | **WORKS; the lyric is controllable when you supply the full tagged block** — tags are adopted and re-emitted verbatim | `[实测 2026-09-11]` a **4-line seed** keeps all 4 lines in both clips *plus* new `[Intro] [Verse 1] [Verse 2] [Bridge] [Outro]` (the agent expands a *seed*; the two clips' extra lines differ). `[实测 2026-10-03]` a **full** 8-section tagged lyric (489 chars) returned **489→487 chars, zero expansion, all tags preserved** — supply the whole lyric and it is what gets sung |
 | ③ | `[0:00 - 0:10]` timestamps | **DOES NOT WORK (do not rely on it)** — time codes vanish before the song tool; length is not constrained | `[实测]` timestamps in prompt → `sound_prompt` contains no time code, only the prose (`sparse low drone intro, main ostinato theme`); track came back **177.4 s / 176.0 s** although the prompt described only 0:00–0:40. `[读码]` no timestamp field exists upstream + the wrapper replaces `:` with a space on this branch |
 | ④ | `Instrumental only, no vocals.` | **WORKS** — becomes an explicit marker, no vocals written | `[实测]` lyrics returned as exactly `[Instrumental]` (14 chars) on both clips; audio 177 s |
 | ⑤ | Explicit BPM (e.g. `60 BPM`) | **WORKS** — survives verbatim into the song tool, and the rendered tempo matches | `[实测]` `60 BPM`→`sound_prompt "...60 bpm"` / `160 BPM`→`"...160 bpm"`; onset-envelope comb analysis (90 s, high-passed, local ffmpeg+stdlib) gave the 60 BPM harmonic family for the 60 BPM clip and the 160 BPM family for the 160 BPM clip (§4) |
 | ⑤b | Explicit key (e.g. `key of D minor`) | **SURVIVES** (echoed into `sound_prompt`) | `[实测]` `key of D minor` / `key of G major` both echoed verbatim. **Whether the audio is truly in that key is `[未验]`** — no pitch analysis was run |
 | ⑤c | Tempo *word* vs number | `[未验]` — only numeric BPM was tested | — |
-| ⑥ | Lyrics embedded in `content` | **DELIVERED, but not verbatim-only** — our lines are kept as anchors, the agent adds sections and emits two different variants | `[实测]` see ②; both clips' `lyrics` come back on `clips[].lyrics`, and the delivered audio is ~162 s for a 4-line seed |
-| ⑦ | Long style prompt (>220 chars) | **TRUNCATED unless a lyrics marker is present** | `[读码]` cap = 220 runes; cap = 3000 runes when the text contains `歌词`/`lyrics` or a section tag |
+| ⑥ | Lyrics embedded in `content` | **DELIVERED verbatim when the full tagged lyric is supplied** (a short *seed* still gets expanded) | `[实测]` see ②; the rendition text is on `clips[].lyrics`; a 4-line seed → ~162 s with extra sections, a full tagged lyric → 181 s, near-verbatim |
+| ⑦ | Long style prompt (>220 chars) | **TRUNCATED unless a lyrics marker is present** | `[读码]` cap = 220 runes; cap = 3000 runes when the text contains `歌词`/`lyrics` or a section tag. (These are the **FlowMusic wire caps**; YuE2's separate style-column cap is 600 runes — see the SKILL YuE2 section, not this file.) |
 | ⑧ | Punctuation as a delimiter | **UNSAFE** — on the no-lyrics branch `, . ; : ( )` are replaced by spaces | `[读码]` `strings.NewReplacer(","," ","."," ",":"," ", …)`; corroborated (not proven) by ③ |
 | ⑨ | Image-to-music / reference audio | `[未验]` — never attempted, no evidence either way | — |
 
-  One-line summary: **① ④ ⑤ work, ② works but the agent rewrites around it,
-  ③ is dead on this path, ⑥ is “anchors, not transcript”.**
+  One-line summary: **① ② ④ ⑤ work, ③ is dead on this path, ⑥ is verbatim if
+  you supply the full tagged lyric (a short seed still gets expanded).**
 
 ═══════════════════════════════════════════════════════════════════
 §3. WIRE TRANSFORMATIONS (what happens to your prompt before it is sent)
@@ -136,7 +141,9 @@ updated: "2026-09-11"
 
   Path: VPS `127.0.0.1:8000/v1/chat/completions`, `model=lyria`, `stream=false`,
   account credits 10575, all three returned `HTTP 200` in 33.4 s / 35.8 s / 40.1 s.
-  Every prompt returned **2 clips** (A/B variants) with distinct `clip_id`s.
+  Every prompt returned **2 clips** with distinct `clip_id`s — two takes of the
+  same request; on a short seed their added lines differ, on a full tagged lyric
+  the lyrics are identical (2026-10-03).
 
   Run 1 — `60 BPM` + `[0:00 - 0:10]`/`[0:10 - 0:40]` timestamps, instrumental:
     sent    `cinematic orchestral, tense and driving, strings and taiko drums,
@@ -186,13 +193,15 @@ updated: "2026-09-11"
     · Numeric BPM and explicit key — both reach the song tool and the tempo at
       least is audible.
     · Writing lyrics as clearly delimited sections. The tag vocabulary is
-      understood and re-emitted.
+      understood and re-emitted; supply the **full** tagged block to get it
+      near-verbatim.
 
   SUSPEND on this path (mark as “此通路無效” wherever the recipes teach them):
     · **Timed structure `[0:00 - 0:10] …`** — no time-code control exists between
       here and the song tool, and it did not constrain length.
-    · **“The lyrics you write are what gets sung, verbatim.”** They are anchors:
-      the agent appends sections and returns two different variants. Read
+    · **“A short lyric seed is sung exactly as written.”** A seed is expanded
+      and the two clips may differ; a **full tagged lyric block** is instead
+      near-verbatim (2026-10-03: 489→487, all tags kept). Read
       `clips[].lyrics` back before claiming what was delivered.
     · Anything that depends on a **short/preview render** (no such mode upstream).
 
@@ -200,7 +209,7 @@ updated: "2026-09-11"
     1. Read `clips[].sound_prompt` — if the style clause you care about is missing
        there, the render did not see it; fix the prompt, do not blame the model.
     2. Read `clips[].lyrics` — that is the rendition's text, not your input.
-    3. Treat the 2 clips as A/B variants; pick by ear, do not assume they match.
+    3. The 2 clips are two takes of one request; on a full tagged lyric the lyrics match, on a short seed the added lines differ — pick by ear.
     4. Keep the no-lyrics style prompt under ~220 characters.
 
 ═══════════════════════════════════════════════════════════════════

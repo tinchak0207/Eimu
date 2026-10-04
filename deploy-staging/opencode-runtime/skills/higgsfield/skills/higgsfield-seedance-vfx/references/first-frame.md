@@ -4,7 +4,7 @@ Video credits are the expensive part of a footage transform. When the *look* is 
 a new creature, an unfamiliar relight, an environment you haven't tried — lock it as a **still
 first**, then animate from that still. You approve a single image cheaply, then hand it to
 Seedance as the start frame so the video inherits the look instead of re-rolling it. Referenced
-from [`../SKILL.md`](../SKILL.md) § First / start-frame workflow.
+from [`../RECIPE.md`](../RECIPE.md) § First / start-frame workflow.
 
 ## When to do it
 
@@ -21,7 +21,7 @@ from [`../SKILL.md`](../SKILL.md) § First / start-frame workflow.
    start on) from the user's clip. This is the plate you're transforming.
 2. **Generate the transformed still.** Use an image model that takes the source frame plus any
    reference as input:
-   - `../../higgsfield-gpt-image-2/SKILL.md` (GPT Image 2) or Nano Banana Pro — good at holding a
+   - `../../higgsfield-gpt-image-2/RECIPE.md` (GPT Image 2) or Nano Banana Pro — good at holding a
      real face while adding an element or swapping the world around it.
    - Prompt it with the *same* preserve/change split as the video prompt: lock identity, face,
      wardrobe, framing; apply only the one change. Attach the `@creature`/texture reference here
@@ -34,7 +34,7 @@ from [`../SKILL.md`](../SKILL.md) § First / start-frame workflow.
    (`../../specs/model-specs.json`). The video prompt then describes **motion + camera only** from
    that frame — do not re-describe what the still already shows, or you give the model two
    competing inputs for one subject (the I2V subject-drift trap; see
-   `../../higgsfield-seedance/SKILL.md`).
+   `../../higgsfield-seedance/RECIPE.md`).
 
 ## Upload mechanics
 
@@ -43,7 +43,7 @@ from [`../SKILL.md`](../SKILL.md) § First / start-frame workflow.
   through the widget, then reference them by their assigned handles.
 - Reference handles are assigned by upload order (`@Image1`, `@Image2`, …). Keep a stable
   role-per-slot convention across the still and the video prompt so the model knows which
-  reference carries which property (see `../../higgsfield-seedance/SKILL.md` § Reference Roles /
+  reference carries which property (see `../../higgsfield-seedance/RECIPE.md` § Reference Roles /
   Per-Image Role Convention).
 
 ## Why pin the frame, not the roll
@@ -51,5 +51,5 @@ from [`../SKILL.md`](../SKILL.md) § First / start-frame workflow.
 Seedance 2.0 exposes **no seed parameter**, so re-running an approved draft is a fresh roll — a
 new performance, new camera micro-trajectory, new timing. The durable way to carry an approved
 *look* into the final render is to pin the **start frame**, not to "approve cheap, re-render at
-quality." Full treatment: `../../higgsfield-seedance/SKILL.md` § Drafts Validate the Prompt, Not
+quality." Full treatment: `../../higgsfield-seedance/RECIPE.md` § Drafts Validate the Prompt, Not
 the Take.

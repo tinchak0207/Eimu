@@ -10,6 +10,10 @@ import { gateUserInput, classifyDispatchMeta } from "./jev-gate"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { templatePlaceholderContent } from "./workflow-templates"
 import { jsonError } from "./gw-lib.ts"
+// 2026-10-04 修 T/D 語言漂移：守衛的用戶可見文案鏡像用戶書寫體（複用出站語言工具，
+// 不另造判斷機制）。T2：改用黏性 sessionUserScript（與出站正文同一判準），本句有判定
+// 力時以本句為準（resolveUserScript），否則沿用會話語言——修 Hack-H2 §2.4 黏性反例。
+import { sessionUserScript, resolveUserScript } from "./outbound-sanitize.ts"
 import { SYSTEM_PAYLOAD_TAIL_DEDUPE, MEMORY_SHARED_ENABLED } from "./constants-gateway.ts"
 import { sessions, markDirty, getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
@@ -659,7 +663,20 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   }
   const skeletonTask = beastOn && !userTemplateAttached ? buildTemplateSkeletonForPrompt(state, content) : Promise.resolve()
   if (await gateUserInput(`user:${state.sessionId}`, content)) {
-    return jsonError(400, "该请求包含无法执行的指令注入内容", "injection_blocked", "bad_request")
+    // 2026-10-04 修 M2（語言漂移）：守衛文案按**會話黏性書寫體**鏡像——繁體用戶不得
+    // 收到簡體；語言中立／簡體一律回簡體（＝現行文案）。本句（content）仍有判定力時
+    // 以本句為準（繁體會話中間夾一句英文/短句不改判，見 resolveUserScript 語義）。
+    // 硬攔截意圖與 gateUserInput 邏輯一律不動，只改「用戶可見字串」。同時把死路一條
+    // 的錯誤改成可重試說明（同為方案 a：保留硬攔）。
+    const hant = resolveUserScript(sessionUserScript(state), content) === "hant"
+    return jsonError(
+      400,
+      hant
+        ? "此請求含有一句無法執行的指令注入內容，已被安全閘阻擋（其餘需求未處理）。請刪去該句後重新送出。"
+        : "该请求含有一句无法执行的指令注入内容，已被安全闸拦截（其余需求未处理）。请删去该句后重新发送。",
+      "injection_blocked",
+      "bad_request",
+    )
   }
   void skeletonTask
   // ── 契約 §4/§7 每回合召回前綴（2026-09-15 PRD P0-4）─────────────────────
@@ -1030,7 +1047,14 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   state.turnSubagentStarts = 0
   // R1（2026-09-11）刀2：回合起始 ack。評測 P0：發送後 45 秒才出現第一個事件、
   // 651 秒死寂期正文 0 字。turn 起點即應一聲，用戶 5 秒內有反饋。
-  emitToSession(state, "turn.status", { text: "已收到，正在解析任務…" })
+  // 2026-10-04 T2 反向洩漏修復：此文案原為繁體硬編，簡體用戶會吃到繁體；改依會話
+  // 黏性書寫體（本句 content 有判定力時以本句為準）出對應版本。
+  emitToSession(state, "turn.status", {
+    text:
+      resolveUserScript(sessionUserScript(state), content) === "hant"
+        ? "已收到，正在解析任務…"
+        : "已收到，正在解析任务…",
+  })
   // 兩段式首字（2026-09-18）：受理當下即 fire-and-forget 打一行計畫。位置刻意在此
   // ——① 在 `if (compactionJob)` 判斷之前（被壓縮閘擋住的回合也拿得到計畫，那正是
   // 最需要它的場景）；② 在 prompt_async 之前且非阻塞（d_prompt_ms 維持 20–156ms）；

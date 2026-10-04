@@ -424,7 +424,18 @@ export async function scheduleMemoryRecallPrefetch(state: SessionState): Promise
   if (memoryRecallInflight.has(state.sessionId)) return
   memoryRecallInflight.add(state.sessionId)
   try {
-    const query = buildRecallQuery(state.lastUserMessage ?? "", state.turnAssistantHead ?? "")
+    // 2026-10-04 修 D7（召回 query 污染）：**只以用戶本句組查詢，不拼上一輪 assistant 頭段**。
+    // 實錘（eval-music-beast-1004）：音樂追問那輪召回 3 條有 2 條無關（multi-agent-production
+    // 子代理批次、workflow-templates 大片模板），更切題的 leitmotif-reveal-mapping（純音樂
+    // query 打分 10.19）反落榜。根因＝beast 派遣回合的 assistant 開頭是「派工／工具敘述」，
+    // 拼進 BM25 把 top-3 拉向工作流語料。故本輪不傳 turnAssistantHead（函式簽名保留、
+    // 既有測試不受影響）。turnAssistantHead 累積邏輯暫留（無害），未一併移除以縮小改動面。
+    const query = buildRecallQuery(state.lastUserMessage ?? "")
+    // 2026-10-04 T2 修 Hack-H2 §四（召回 query 退化邊界）：query 為空/純空白時
+    //（首則消息、或內部觸發輪 lastUserMessage 尚未寫入），不落一筆空 prefix 條目
+    // ——否則下一輪 takeMemoryRecallPrefix 會消費到空條目且不再補算，該輪召回靜默失效。
+    // 退化時直接跳過本次 prefetch（如實：不假裝 0 命中），下一輪以真實 query 補算。
+    if (!query.trim()) return
     const docs = await memorySharedCorpus.get("shared")
     // 上限可設定（env MEMORY_RECALL_K）且一律夾 ≤ RECALL_K_MAX；預設維持 §7 產品決策 top-3。
     const k = clampRecallK(process.env.MEMORY_RECALL_K, RECALL_K_DEFAULT)

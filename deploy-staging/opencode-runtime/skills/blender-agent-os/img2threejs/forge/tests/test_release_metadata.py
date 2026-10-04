@@ -13,7 +13,7 @@ SCRIPT = ROOT / "scripts" / "release_metadata.py"
 
 class ReleaseMetadataTests(unittest.TestCase):
     def write_project(self, directory: Path) -> tuple[Path, Path]:
-        (directory / "SKILL.md").write_text("---\nversion: 1.4.1\n---\n", encoding="utf-8")
+        (directory / "RECIPE.md").write_text("---\nversion: 1.4.1\n---\n", encoding="utf-8")
         (directory / "README.md").write_text(
             "[![Version](https://img.shields.io/badge/version-1.4.1-green.svg)](CHANGELOG.md)\n",
             encoding="utf-8",
@@ -57,7 +57,7 @@ class ReleaseMetadataTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["version"], "1.5.0")
-            self.assertIn("version: 1.5.0", (project / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertIn("version: 1.5.0", (project / "RECIPE.md").read_text(encoding="utf-8"))
             self.assertIn("version-1.5.0-green.svg", (project / "README.md").read_text(encoding="utf-8"))
             changelog = (project / "CHANGELOG.md").read_text(encoding="utf-8")
             self.assertIn("## [1.5.0] — 2026-07-26", changelog)
@@ -67,13 +67,13 @@ class ReleaseMetadataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             project, commits = self.write_project(Path(temporary_directory))
             commits.write_text("docs: clarify usage\x1echore: refresh metadata\x1e", encoding="utf-8")
-            before = (project / "SKILL.md").read_text(encoding="utf-8")
+            before = (project / "RECIPE.md").read_text(encoding="utf-8")
 
             result = self.run_release(project, commits)
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)["release"])
-            self.assertEqual((project / "SKILL.md").read_text(encoding="utf-8"), before)
+            self.assertEqual((project / "RECIPE.md").read_text(encoding="utf-8"), before)
 
     def test_dry_run_reports_the_next_version_without_writing_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

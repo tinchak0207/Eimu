@@ -125,7 +125,7 @@ character in a neon-lit cityscape. Reference video drives all motion; prompt set
 → Kling 3.0 Motion Control
 ```
 
-> For the Higgsfield UI workflow and motion-reference input checklist, see `../higgsfield-motion/SKILL.md` → "Kling 3.0 Motion Control — When and How to Run It" and "Motion Reference Input Checklist".
+> For the Higgsfield UI workflow and motion-reference input checklist, see `../higgsfield-motion/RECIPE.md` → "Kling 3.0 Motion Control — When and How to Run It" and "Motion Reference Input Checklist".
 
 ---
 
@@ -275,8 +275,8 @@ Example use case: A watercolor-style fantasy warrior emerging from mist.
 
 > **Sourcing:** The 9-image / 3-video / 3-audio limit is per official Seedance launch
 > materials from ByteDance (`seed.bytedance.com`). Single canonical citation for the
-> term; the four brief mentions of "Rule of 12" elsewhere (in `higgsfield-audio/SKILL.md`,
-> `higgsfield-models/SKILL.md`, and twice more in this file below) are uses of this
+> term; the four brief mentions of "Rule of 12" elsewhere (in `higgsfield-audio/RECIPE.md`,
+> `higgsfield-models/RECIPE.md`, and twice more in this file below) are uses of this
 > now-sourced term.
 
 The defining feature of Seedance 2.0 is its multimodal input system. Every generation can accept up to **12 total assets**:
@@ -458,7 +458,7 @@ Size:      ≤10 MB per file
 > across all attached clips is also ≤15.2s** — three individually-legal 6s
 > clips get rejected (captured 400 errors). Higgsfield's own proxy enforcement
 > is **unverified**; if a multi-clip attach fails, the total cap is the first
-> suspect. Sourcing detail: `../higgsfield-audio/SKILL.md` § Audio by Model →
+> suspect. Sourcing detail: `../higgsfield-audio/RECIPE.md` § Audio by Model →
 > Seedance 2.0.
 
 **Negative prompts:** NOT SUPPORTED. Use positive constraints only:
@@ -1103,7 +1103,7 @@ Best use cases:
 **Higgsfield integration:**
 - UI surface: `higgsfield.ai/ai/image?model=imagegen_2_0`
 - Internal slug: `imagegen_2_0`
-- Featured-model status: surfaced via Cinema Studio image-mode picker (see `../higgsfield-cinema/SKILL.md` line 1804 area for the Featured-models routing — selecting GPT Image 2 inside Cinema Studio means Style Settings + Camera Settings panels are not available; the shell remains but creative control reverts to prompt-only)
+- Featured-model status: surfaced via Cinema Studio image-mode picker (see `../higgsfield-cinema/RECIPE.md` line 1804 area for the Featured-models routing — selecting GPT Image 2 inside Cinema Studio means Style Settings + Camera Settings panels are not available; the shell remains but creative control reverts to prompt-only)
 
 **Compare to GPT Image 1.5:** Photorealism leap, text-rendering leap, native 4K (vs 1536×1024), ~2× speed on standard mode, plus O-series reasoning capability. Same OpenAI provenance — generational jump, not sidegrade.
 

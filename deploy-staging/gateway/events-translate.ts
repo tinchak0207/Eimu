@@ -3,7 +3,11 @@
 import { readFileSync, readdirSync, statSync, appendFileSync } from "node:fs"
 import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
-import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
+import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IDLE_STEP_NUDGE_HANT, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
+// 2026-10-04 語言漂移：守衛家族文案（空轉止損 nudge／deny 守衛等）鏡像**會話黏性**
+// 書寫體。T 首輪用非黏性 detectUserScript（看當前句），繁體會話夾一句英文/短句即掉
+// 回簡體（Hack-H2 §2.4）；改用與出站正文同一黏性判準 sessionUserScript。
+import { sessionUserScript, type UserScript } from "./outbound-sanitize.ts"
 import { sessions, markDirty } from "./sessions-core.ts"
 import { opencodeFetch, revertDeadTail } from "./opencode-client.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
@@ -508,6 +512,7 @@ export function emitCanvasResult(
 export function toolErrorPayload(
   parsed: { error?: unknown } | null,
   fallbackMessage: string,
+  script?: UserScript,
 ): { code: string; message: string; human_message: string } {
   let code = "tool_failed"
   let message = fallbackMessage
@@ -526,7 +531,7 @@ export function toolErrorPayload(
       if (typeof o.code === "string" && o.code) code = o.code
     }
   }
-  return { code, message, human_message: humanMessageFor(message, code) }
+  return { code, message, human_message: humanMessageFor(message, code, script) }
 }
 
 /**
@@ -583,17 +588,30 @@ export function denyGlobToRegExp(glob: string): RegExp {
   return new RegExp(`^${body}$`)
 }
 
-/** 替代寫法提示（按命中規則類型給一句可操作的話；出站文案一律簡體）。 */
-export function denyHintFor(pattern: string): string {
-  if (pattern === "*|*") return "BRE 交替 \\| 含禁止符 |。改用宽匹配后自行筛选（如 grep -n \"第.*章\"），或改用 run_py 工具写脚本处理"
-  if (pattern === "*&&*" || pattern === "*||*" || pattern === "*;*") return "执行环境只允许单条命令。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
-  if (pattern === "*>*" || pattern === "*>>*" || pattern === "*<*") return "执行环境禁止重定向/输入改向。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
-  return "请改用允许的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具写脚本"
+/** 替代寫法提示（按命中規則類型給一句可操作的話；出站文案一律簡體）。
+ *  2026-10-04 T2：script==="hant" 時出繁體鏡像（這四句是 deny 守衛的用戶可見固定文案）。 */
+export function denyHintFor(pattern: string, script?: UserScript): string {
+  const hant = script === "hant"
+  if (pattern === "*|*")
+    return hant
+      ? "BRE 交替 \\| 含禁止符 |。改用寬匹配後自行篩選（如 grep -n \"第.*章\"），或改用 run_py 工具寫腳本處理"
+      : "BRE 交替 \\| 含禁止符 |。改用宽匹配后自行筛选（如 grep -n \"第.*章\"），或改用 run_py 工具写脚本处理"
+  if (pattern === "*&&*" || pattern === "*||*" || pattern === "*;*")
+    return hant
+      ? "執行環境只允許單條命令。拆成多次單命令調用，或改用 run_py 工具寫腳本一次完成"
+      : "执行环境只允许单条命令。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
+  if (pattern === "*>*" || pattern === "*>>*" || pattern === "*<*")
+    return hant
+      ? "執行環境禁止重定向/輸入改向。拆成多次單命令調用，或改用 run_py 工具寫腳本一次完成"
+      : "执行环境禁止重定向/输入改向。拆成多次单命令调用，或改用 run_py 工具写脚本一次完成"
+  return hant
+    ? "請改用允許的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具寫腳本"
+    : "请改用允许的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具写脚本"
 }
 
 /** 對 deny glob 求匹配；命中多條時取最具體的（非 * 字面量最長者），跳過全捕 *。
  *  patterns 可注入（測試直接餵真實 opencode.json 解析出的表）；省略時走 60s 快取載入。 */
-export function bashDenyAttribution(cmd: string, patterns?: string[]): { pattern: string; hint: string } | null {
+export function bashDenyAttribution(cmd: string, patterns?: string[], script?: UserScript): { pattern: string; hint: string } | null {
   if (!cmd) return null
   let best: { pattern: string; score: number } | null = null
   for (const p of patterns ?? loadBashDenyPatterns()) {
@@ -603,7 +621,7 @@ export function bashDenyAttribution(cmd: string, patterns?: string[]): { pattern
     if (!best || score > best.score) best = { pattern: p, score }
   }
   if (!best) return null
-  return { pattern: best.pattern, hint: denyHintFor(best.pattern) }
+  return { pattern: best.pattern, hint: denyHintFor(best.pattern, script) }
 }
 
 // ── 需求1（2026-10-02）：拒絕決策的 provenance ──
@@ -1008,15 +1026,20 @@ if (status === "pending" || status === "running") {
     const toolErr = needsAuthorization
       ? {
           code: "needs_authorization",
-          message: authReason || "此路径尚未授权。",
-          human_message: firstNonEmptyString(parsedErrorRecord?.human_message) || "读取此路径需要你的授权，请选择授权范围。",
+          // 2026-10-04 T2：本機檔案授權閘＝守衛家族固定文案，依會話黏性書寫體出對應版本。
+          message: authReason || (sessionUserScript(state) === "hant" ? "此路徑尚未授權。" : "此路径尚未授权。"),
+          human_message:
+            firstNonEmptyString(parsedErrorRecord?.human_message) ||
+            (sessionUserScript(state) === "hant"
+              ? "讀取此路徑需要你的授權，請選擇授權範圍。"
+              : "读取此路径需要你的授权，请选择授权范围。"),
           action_required: "authorize_local_files",
           ...(authRoot ? { root: authRoot } : {}),
           ...(authReason ? { reason: authReason } : {}),
           ...(Array.isArray(authOptionsRaw) ? { options: authOptionsRaw } : {}),
         }
       : !ok
-        ? toolErrorPayload(parsed, "tool failed")
+        ? toolErrorPayload(parsed, "tool failed", sessionUserScript(state))
         : null
     // artifact_pending：已提交、成品未到——回包给了 task_id 但还没有成品 url。
     const artifactPending =
@@ -1170,7 +1193,11 @@ if (status === "pending" || status === "running") {
     let isQuestionFreezeAbort = false
     if (toolName === "question" && /\baborted?\b/i.test(message)) {
       isQuestionFreezeAbort = true
-      message = "本回合已暂停，等待你在问题卡上选择后继续"
+      // 2026-10-04 T2：question 凍結＝守衛家族固定文案，依會話黏性書寫體出對應版本。
+      message =
+        sessionUserScript(state) === "hant"
+          ? "本回合已暫停，等待你在問題卡上選擇後繼續"
+          : "本回合已暂停，等待你在问题卡上选择后继续"
     }
     // 0920 暴君欽點：abort 類工具錯誤一律不發卡——①真用戶按停：UI 收尾由
     // turn.done 表達（與 emitSessionError 的 MessageAbortedError 早退同構，09-18）；
@@ -1199,11 +1226,20 @@ if (status === "pending" || status === "running") {
         st.input && typeof st.input === "object" && typeof (st.input as { command?: unknown }).command === "string"
           ? (st.input as { command: string }).command
           : ""
-      denyInfo = bashDenyAttribution(cmd)
+      denyInfo = bashDenyAttribution(cmd, undefined, sessionUserScript(state))
       // 需求1（2026-10-02）：結構化 provenance（向下相容，僅新增欄位）。
       denyProv = bashDenyProvenance(cmd, undefined, message)
-      message = `此操作不在允许范围内，已跳过${deniedOperationLabel(toolName, st.input)}${
-        denyInfo ? `。命中规则：${denyInfo.pattern}；替代写法：${denyInfo.hint}` : ""
+      // 2026-10-04 T2 語言鏡像：deny 守衛固定文案＋替代寫法提示（hint）依會話黏性
+      // 書寫體出對應版本（pattern 為規則 glob 原文，非文案，不譯）。
+      const denyHant = sessionUserScript(state) === "hant"
+      message = `${
+        denyHant ? "此操作不在允許範圍內，已跳過" : "此操作不在允许范围内，已跳过"
+      }${deniedOperationLabel(toolName, st.input)}${
+        denyInfo
+          ? denyHant
+            ? `。命中規則：${denyInfo.pattern}；替代寫法：${denyInfo.hint}`
+            : `。命中规则：${denyInfo.pattern}；替代写法：${denyInfo.hint}`
+          : ""
       }`
       // 持久稽核：每次拒絕落一筆結構化記錄。
       if (denyProv) {
@@ -1227,7 +1263,7 @@ if (status === "pending" || status === "running") {
       error: {
         code: isQuestionFreezeAbort ? "question_freeze" : "tool_error",
         message,
-        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message, undefined),
+        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message, undefined, sessionUserScript(state)),
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
         ...(denyProv ? { deny_provenance: denyProv } : {}),
       },
@@ -1269,7 +1305,10 @@ export function finalizeIdleStep(state: SessionState): void {
   }
 }
 
-export function triggerIdleStepBreaker(state: SessionState, nudgeText: string = IDLE_STEP_NUDGE): void {
+export function triggerIdleStepBreaker(
+  state: SessionState,
+  nudgeText: string = sessionUserScript(state) === "hant" ? IDLE_STEP_NUDGE_HANT : IDLE_STEP_NUDGE,
+): void {
   const body = state.lastPromptBody
   if (!body) return
   state.idleNudgeSent = true

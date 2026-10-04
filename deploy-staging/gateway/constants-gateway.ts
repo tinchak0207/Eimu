@@ -17,6 +17,9 @@ export const TURN_RETRY_DELAY_MS = Number.parseInt(process.env.TURN_RETRY_DELAY_
 export const IDLE_STEP_ABORT_THRESHOLD = 3
 export const IDLE_STEP_NUDGE =
   "\n\n（系统提示：上一次生成空转被中止。请立刻发出工具调用开始动作，不要再展开推理。）"
+// 2026-10-04 語言漂移：同一守衛文案的繁體鏡像（繁體用戶會話用；其餘沿用上方簡體）。
+export const IDLE_STEP_NUDGE_HANT =
+  "\n\n（系統提示：上一次生成空轉被中止。請立刻發出工具調用開始動作，不要再展開推理。）"
 // S6 規格2：用戶消息 ack 上限。R4 實測 30s 檔 ack 落地 33-40s+（timer 30s 起
 // 算於 prompt_async 投遞後，再疊加投遞/事件轉譯延遲）——壓到 15s，保證含
 // 鏈路延遲也在 30s 線內。環境變量可覆蓋。

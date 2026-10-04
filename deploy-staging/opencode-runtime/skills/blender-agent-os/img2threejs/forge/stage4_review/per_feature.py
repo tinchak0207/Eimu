@@ -6,7 +6,7 @@ module verifies EACH declared feature independently against its own
 threshold and fails the pass when a *gating* feature is missing or below
 its threshold — even if the global score passed.
 
-Operationalizes SKILL.md's rule: "fail a pass if an identity-defining
+Operationalizes RECIPE.md's rule: "fail a pass if an identity-defining
 feature is wrong even when the global score looks fine."
 
 Pure-logic module: it consumes already-computed per-feature scores and

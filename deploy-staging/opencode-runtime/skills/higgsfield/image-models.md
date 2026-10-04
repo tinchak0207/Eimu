@@ -38,7 +38,7 @@ Two economics notes that follow from it:
   sheet re-rolls everything that was already right.
 
 Sheet-construction laws (grey background, the two-close-up creature sheet, the face-lock
-crop, the size-ref frame) live in `skills/higgsfield-character-design/SKILL.md`
+crop, the size-ref frame) live in `skills/higgsfield-character-design/RECIPE.md`
 § Sheet Construction Laws; the full production pipeline is
 `skills/higgsfield-seedance-2-5/VFX-PIPELINE.md`.
 
@@ -297,7 +297,7 @@ When NBP is generating location-anchored shots, three patterns recur in producti
 
 **Workflow positioning:**
 
-NBP is the strongest single image model on the platform for sharpness, multi-element composition, and text rendering. For **high-investment characters** that will appear across many shots, the two-tool pipeline outperforms NBP alone: Soul Cinema for initial character generation + GPT Image 2 for refinement editing. See `skills/higgsfield-soul/SKILL.md` § Two-Tool Refinement Pipeline for the split-by-task discipline and the ~600 + ~200 = ~800 generations anchor from the Hell Grind production.
+NBP is the strongest single image model on the platform for sharpness, multi-element composition, and text rendering. For **high-investment characters** that will appear across many shots, the two-tool pipeline outperforms NBP alone: Soul Cinema for initial character generation + GPT Image 2 for refinement editing. See `skills/higgsfield-soul/RECIPE.md` § Two-Tool Refinement Pipeline for the split-by-task discipline and the ~600 + ~200 = ~800 generations anchor from the Hell Grind production.
 
 ---
 

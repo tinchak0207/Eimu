@@ -70,9 +70,9 @@ Three uses are legal and are used on purpose across this repo:
 
 | Legal use | What it is | Where the repo does it |
 |-----------|-----------|------------------------|
-| **Look choice** | The stock or texture is the piece's declared register, named in the Style / Look slot with what it belongs to | `../higgsfield-prompt/SKILL.md` § Genre Router (a Music Video lead opens on "16mm grain"); `../../vocab.md` § Film Stock Emulation; `../higgsfield-cinema/SKILL.md` film-stock axis |
+| **Look choice** | The stock or texture is the piece's declared register, named in the Style / Look slot with what it belongs to | `../higgsfield-prompt/RECIPE.md` § Genre Router (a Music Video lead opens on "16mm grain"); `../../vocab.md` § Film Stock Emulation; `../higgsfield-cinema/RECIPE.md` film-stock axis |
 | **Optics as content** | A named optical event, happening to a named element, at a named moment | `../higgsfield-seedance/PRODUCTION-PATTERNS.md` § Prompted Imperfection as Realism (heat-haze swim, a brief focus hunt before lock) and its targeted motion blur as artifact concealment |
-| **Plate matching** | Grain, blur and focus falloff matched to an existing plate so a composited element does not read pasted-in | `../higgsfield-seedance-vfx/SKILL.md` § Lighting integration; `../higgsfield-seedance-2-5/VFX-PIPELINE.md` § Reverse-angle locations |
+| **Plate matching** | Grain, blur and focus falloff matched to an existing plate so a composited element does not read pasted-in | `../higgsfield-seedance-vfx/RECIPE.md` § Lighting integration; `../higgsfield-seedance-2-5/VFX-PIPELINE.md` § Reverse-angle locations |
 
 What degrades is the fourth use: the token dropped in bare, attached to nothing,
 trailing the prompt as a general plea for realism.

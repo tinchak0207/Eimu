@@ -36,7 +36,7 @@ Each entry below uses the same four fields:
 
 When a generation fails, scan the section headers for the matching
 symptom first. If nothing matches, the failure may belong in
-`SKILL.md` § When the User Is Already in a Failure Loop instead —
+`RECIPE.md` § When the User Is Already in a Failure Loop instead —
 that section covers filter rejections rather than render failures.
 
 ---
@@ -132,10 +132,10 @@ profile.
 2. Replace sensual-register adjectives with neutral equivalents
    (`sultry` → `composed`; `seductive` → `direct`).
 3. Move the rephrased prompt through the preflight linter in
-   `SKILL.md` § Pre-flight Linter to catch other risk tokens.
+   `RECIPE.md` § Pre-flight Linter to catch other risk tokens.
 
 Do not regenerate the same prompt unchanged — same text trips the
-same classifier. See `SKILL.md` § When the User Is Already in a
+same classifier. See `RECIPE.md` § When the User Is Already in a
 Failure Loop for the anti-loop discipline.
 
 ---
@@ -206,7 +206,7 @@ one direction: chain 2–3 connected actions along the same vector (walks
 to the window, pulls the curtain aside, leans into the glass). If the
 story calls for a there-and-back, that is two shots, not one prompt. For
 camera moves, name the endpoint — state what the frame shows when the
-move finishes. Full treatment: `SKILL.md` § Prompt-Craft Laws →
+move finishes. Full treatment: `RECIPE.md` § Prompt-Craft Laws →
 Motion-prompt laws.
 
 ---
@@ -245,7 +245,7 @@ the model, and state the mouth state of every face that is visible:
    unmarked mouth in frame is a mouth the model may decide is talking.
    State the rest state as something that *is* true — "lips at rest",
    "jaw closed, breath lifting the chest", "eyes on the speaker, mouth
-   still" — never as a negation (`SKILL.md` § Prompt-Craft Laws → No
+   still" — never as a negation (`RECIPE.md` § Prompt-Craft Laws → No
    negative prompts in the prompt body). Note that "listens without
    speaking" reads positive but carries *without*, so it trips the same
    law; prefer the forms above.
@@ -389,7 +389,7 @@ state the motions in clear sequence with timing — `Camera rises from
 0-3s, holds, then pushes in from 4-8s` — so the model can render
 them as discrete phases rather than simultaneous axes.
 
-See `SKILL.md` § Single-vs-multi-shot decision for the multi-shot
+See `RECIPE.md` § Single-vs-multi-shot decision for the multi-shot
 split mechanics.
 
 ---
@@ -417,7 +417,7 @@ the action description. State explicitly:
 - The direction-of-travel for any motion (`The character walks
   around the couch from screen-left to screen-right`).
 
-See `SKILL.md` § Spatial Layout Block for the full block structure
+See `RECIPE.md` § Spatial Layout Block for the full block structure
 and § Frame Coordinate System for the per-subject coordinate
 vocabulary.
 
@@ -463,29 +463,29 @@ majority of preventable failures before credit burn.
 
 ## Cross-references
 
-- `SKILL.md` § Filter Model — read-this-first for filter rejection
+- `RECIPE.md` § Filter Model — read-this-first for filter rejection
   vs render failure distinction
-- `SKILL.md` § Voice Rewrite — language-level rewriting for filter
+- `RECIPE.md` § Voice Rewrite — language-level rewriting for filter
   passes (adjacent to § NSFW false-positive in this file)
-- `SKILL.md` § When the User Is Already in a Failure Loop —
+- `RECIPE.md` § When the User Is Already in a Failure Loop —
   filter-loop recovery (sibling to this catalog for the
   render-failure side)
-- `SKILL.md` § Spatial Layout Block — block structure that prevents
+- `RECIPE.md` § Spatial Layout Block — block structure that prevents
   spatial-awareness failures
-- `SKILL.md` § Frame Coordinate System — coordinate vocabulary that
+- `RECIPE.md` § Frame Coordinate System — coordinate vocabulary that
   the spatial layout block uses
-- `SKILL.md` § Single-vs-multi-shot decision — multi-shot split
+- `RECIPE.md` § Single-vs-multi-shot decision — multi-shot split
   mechanics referenced from § Multi-motion camera overload
 - `HELL-GRIND.md` § Dialogue construction — the audio-block phrasing
   and the `INNER (unspoken)` marker that § Filler-babble on a short
   dialogue line depends on
-- `../higgsfield-troubleshoot/SKILL.md` § Sequence & Continuation
+- `../higgsfield-troubleshoot/RECIPE.md` § Sequence & Continuation
   Failure Atlas — symptom → single-repair-variable table for
   chained/continuation defects (this catalog covers single-clip
   render failures; the atlas covers the joins)
-- `../higgsfield-soul/SKILL.md` § Character Sheet Creation —
+- `../higgsfield-soul/RECIPE.md` § Character Sheet Creation —
   upstream character-anchoring discipline that prevents character-
   drift failures
-- `../higgsfield-pipeline/SKILL.md` § Master Production Chain —
+- `../higgsfield-pipeline/RECIPE.md` § Master Production Chain —
   upstream production workflow that establishes the frame-level
   review discipline named in this catalog
