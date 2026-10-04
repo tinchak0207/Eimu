@@ -202,4 +202,8 @@ export const ALLOWED_UPLOAD_EXTS = new Set([
   ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".json",
   ".csv", ".xml", ".yaml", ".yml", ".png", ".jpg", ".jpeg",
   ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".zip",
+  // 音頻附件（本地參考素材：翻唱 source_audio 等）。與 two-phase-upload.ts 的
+  // ALLOWED_UPLOAD_CONTENT_TYPES（audio/mpeg|wav|mp4|aac）對齊，另補 flac/ogg
+  // （contentTypeForExt 本就有對應 mime）。只增音頻，不放寬其他型別。
+  ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg",
 ])

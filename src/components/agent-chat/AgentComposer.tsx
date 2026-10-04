@@ -169,6 +169,13 @@ const ACCEPTED_TYPES = [
   ".mp4",
   ".mov",
   ".zip",
+  // 音頻附件（本地參考素材）：與閘道 ALLOWED_UPLOAD_EXTS 音頻項對齊。
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".aac",
+  ".flac",
+  ".ogg",
 ].join(",");
 
 type PendingAttachmentStatus = "extracting" | "uploading" | "ready" | "error";

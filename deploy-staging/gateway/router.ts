@@ -16,7 +16,7 @@ import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGet
 import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle } from "./persistence.ts"
 import { fetchOpencodeTitle } from "./opencode-client.ts"
 import { openEventStream } from "./sse-core.ts"
-import { handleAttachmentUpload, sanitizeUploadName, contentTypeForExt } from "./uploads-media.ts"
+import { handleAttachmentUpload, sanitizeUploadName, reserveUniqueUploadName, contentTypeForExt } from "./uploads-media.ts"
 import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
 import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker } from "./subagent.ts"
@@ -365,12 +365,14 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
           }
           const uploadDir = path.join(UPLOADS_DIR, sessionId)
           await mkdir(uploadDir, { recursive: true })
-          const dest = path.join(uploadDir, safeName)
+          // 同名不覆蓋：與 attachments 端點同款原子改名，清單回傳實際落盤名。
+          const finalName = await reserveUniqueUploadName(uploadDir, safeName)
+          const dest = path.join(uploadDir, finalName)
           if (!path.resolve(dest).startsWith(path.resolve(UPLOADS_DIR))) {
             return jsonError(400, "invalid path", "bad_request", "bad_request")
           }
           await Bun.write(dest, await file.arrayBuffer())
-          return Response.json({ ok: true, path: `uploads/${sessionId}/${safeName}`, name: safeName, size: file.size, mime: file.type || "video/mp4" })
+          return Response.json({ ok: true, path: `uploads/${sessionId}/${finalName}`, name: finalName, size: file.size, mime: file.type || "video/mp4" })
         } catch (e) {
           console.error("[gateway] video-upload error:", e)
           return jsonError(500, "video upload failed", "server_error", "server_error")

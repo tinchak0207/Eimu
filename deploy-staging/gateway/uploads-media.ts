@@ -1,5 +1,5 @@
 // uploads-media.ts — 附件上傳與檔名/類型/zip 安檢（自 index.ts 105-242 區逐行抽取，2026-09-19 Wave1）
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
 import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, UPLOADS_DIR } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
@@ -10,6 +10,30 @@ export function sanitizeUploadName(raw: string): string | null {
   const ext = path.extname(safe).toLowerCase()
   if (!ALLOWED_UPLOAD_EXTS.has(ext)) return null
   return safe
+}
+
+/**
+ * 在同名衝突時於落盤層原子改名（`name.mp3` → `name-2.mp3` → `name-3.mp3` …）。
+ * 用 `open(..., "wx")` 原子佔位，避免兩次同檔並發 POST 的 check-then-write 競態
+ * 造成後者覆蓋前者（P1：靜默丟檔）。回傳實際可寫入的檔名（已存在空檔被呼叫方覆寫）。
+ */
+export async function reserveUniqueUploadName(dir: string, safeName: string): Promise<string> {
+  const ext = path.extname(safeName)
+  const base = ext ? safeName.slice(0, -ext.length) : safeName
+  for (let i = 1; i <= 100; i++) {
+    const candidate = i === 1 ? safeName : `${base}-${i}${ext}`
+    try {
+      const fh = await open(path.join(dir, candidate), "wx")
+      await fh.close()
+      return candidate
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e
+    }
+  }
+  const fallback = `${base}-${Date.now()}${ext}`
+  const fh = await open(path.join(dir, fallback), "wx")
+  await fh.close()
+  return fallback
 }
 
 /** 附件靜態讀路由的 Content-Type 映射（按擴展名；未收錄一律 octet-stream）。 */
@@ -84,19 +108,21 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
       if (!safeName) {
         return jsonError(400, `disallowed file type: ${path.extname(file.name)}`, "bad_request", "bad_request")
       }
-      const dest = path.join(uploadDir, safeName)
+      // 同名不覆蓋：原子佔位改得實際落盤名，清單與磁碟保持一致（P1）。
+      const finalName = await reserveUniqueUploadName(uploadDir, safeName)
+      const dest = path.join(uploadDir, finalName)
       if (!path.resolve(dest).startsWith(path.resolve(UPLOADS_DIR))) {
         return jsonError(400, "invalid path", "bad_request", "bad_request")
       }
       await Bun.write(dest, await file.arrayBuffer())
-      if (safeName.toLowerCase().endsWith(".zip")) {
+      if (finalName.toLowerCase().endsWith(".zip")) {
         const probe = zipProbe(dest)
         if (probe !== null) {
           await rm(dest, { force: true })
           return jsonError(400, `zip rejected: ${probe}`, "bad_request", "bad_request")
         }
       }
-      results.push({ name: safeName, path: `uploads/${state.sessionId}/${safeName}`, size: file.size })
+      results.push({ name: finalName, path: `uploads/${state.sessionId}/${finalName}`, size: file.size })
     }
     return Response.json({ attachments: results })
   } catch (e) {
