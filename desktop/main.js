@@ -33,6 +33,7 @@ const { app, BrowserWindow, shell, session, dialog, Menu, screen, ipcMain } = re
 const path = require("node:path");
 const fs = require("node:fs");
 const localWorker = require("./local-worker.js");
+const { PERMISSION_MODES } = require("./lib/permission-rules.js");
 const { startDeviceBridge, stopDeviceBridge, getDeviceBridgeState } = require("./device-bridge-client.js");
 const { readCredentialStore } = require("./lib/bridge-credential.js");
 const {
@@ -78,7 +79,7 @@ if (E2E_ENABLED && process.env.EIMU_APP_ORIGIN) {
 // （持久化設定 deviceBridgeEnabled，或以 EIMU_DEVICE_BRIDGE=1 操作者覆寫）
 // 且已有授權根、能取得憑證才連。開啟狀態以視窗標題可見化，並把狀態推給頁面
 // （window.eimuLocal.onBridgeStatus 訂閱 eimu-local:bridge-state）。
-let bridgeState = { enabled: false, state: "off", roots: [], deviceId: null };
+let bridgeState = { enabled: false, state: "off", roots: [], deviceId: null, mode: "ask" };
 // 控制器已把客戶端的 "reconnecting" 正規化為 "connecting"，故這裡收 connecting。
 const BRIDGE_ACTIVE = new Set(["online", "connecting"]);
 
@@ -107,6 +108,7 @@ let mainWindow = null;
 // ── 使用者設定持久化（<userData>/settings.json）─────────────────────────
 // 只讀寫白名單欄位：
 //   - deviceBridgeEnabled: boolean        使用者是否開啟本機檔案授權
+//   - deviceBridgeMode: "off"|"ask"|"auto"|"full"  權限模式（W6c；非法值忽略回預設）
 //   - deviceBridgeGatewayBaseUrl: string  使用者顯式設定的閘道位址（可選）
 // **不**持久化 apiKey：憑證只從 <userData>/device-bridge.json（0600）讀，
 // 頁面不可寫（見上方 bridge 註解與 lib/bridge-credential.js）。
@@ -124,6 +126,10 @@ function readSettings() {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
   if (typeof parsed.deviceBridgeEnabled === "boolean") out.deviceBridgeEnabled = parsed.deviceBridgeEnabled;
+  // W6c：模式白名單驗證（enum 之外一律忽略，由呼叫端回預設 "ask"）。
+  if (typeof parsed.deviceBridgeMode === "string" && PERMISSION_MODES.includes(parsed.deviceBridgeMode)) {
+    out.deviceBridgeMode = parsed.deviceBridgeMode;
+  }
   if (typeof parsed.deviceBridgeGatewayBaseUrl === "string") {
     out.deviceBridgeGatewayBaseUrl = parsed.deviceBridgeGatewayBaseUrl;
   }
@@ -415,6 +421,15 @@ if (!gotLock) {
         settings.deviceBridgeEnabled = v === true;
         writeSettings(settings);
       },
+      // W6c：權限模式持久化（deviceBridgeMode 白名單欄位；非法值於 readSettings 已忽略）。
+      readMode: () => settings.deviceBridgeMode,
+      writeMode: (m) => {
+        settings.deviceBridgeMode = m;
+        writeSettings(settings);
+      },
+      // 規則來源目前無使用者設定面（契約已預留）：回 undefined ⇒ 不下發 rules 欄位。
+      // 第二道防線仍以硬 denylist／safety-check／模式生效。
+      rulesProvider: () => undefined,
       getGatewayBaseUrl: resolveGatewayBaseUrl,
       credentialProvider: () => (bridgeCredential ? bridgeCredential.apiKey : null),
       onStatusChange: (s) => broadcastBridgeStatus(s),
@@ -427,14 +442,26 @@ if (!gotLock) {
     // W6b 啟動：以持久化設定（或 EIMU_DEVICE_BRIDGE=1 操作者覆寫）決定「已開啟意圖」。
     // env 覆寫保留既有 E2E／操作者路徑，且**不**寫回設定檔。無授權根時控制器停在
     // no_authorized_roots；之後 pickFiles 授權新根會自動以新 roots 重註冊（見 local-worker）。
+    //
+    // W6c 權限模式優先序：EIMU_DEVICE_BRIDGE_MODE（env，供 E2E／操作者）
+    //   > settings.deviceBridgeMode > "ask"。模式 off ⇒ 等於不開啟（不啟動）。
     const envBridgeOverride = process.env.EIMU_DEVICE_BRIDGE === "1";
-    bridgeController.setEnabledSilently(envBridgeOverride || settings.deviceBridgeEnabled === true);
-    if (envBridgeOverride || settings.deviceBridgeEnabled === true) {
+    const envMode = process.env.EIMU_DEVICE_BRIDGE_MODE;
+    const resolvedMode = PERMISSION_MODES.includes(envMode)
+      ? envMode
+      : PERMISSION_MODES.includes(settings.deviceBridgeMode)
+        ? settings.deviceBridgeMode
+        : "ask";
+    bridgeController.setModeSilently(resolvedMode);
+    const wantEnabled =
+      (envBridgeOverride || settings.deviceBridgeEnabled === true) && resolvedMode !== "off";
+    bridgeController.setEnabledSilently(wantEnabled);
+    if (wantEnabled) {
       void bridgeController.restart().catch(() => {
         /* 啟動失敗不得影響殼啟動 */
       });
     } else {
-      broadcastBridgeStatus(bridgeController.status()); // 讓頁面收到初始 off 狀態
+      broadcastBridgeStatus(bridgeController.status()); // 讓頁面收到初始狀態（off 或 mode=off）
     }
 
     // 0.3.0：自繪視窗控制鈕的 IPC（preload 暴露的 window.eimuShell 之主進程側）。

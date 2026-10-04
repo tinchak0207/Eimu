@@ -33,7 +33,7 @@ import { handleQuota } from "./quota-ledger.ts"
 import { handleCanvasStateRead, handleTimelineRoutes, handleConfirmStatus, handleResumeSession, handleSessionKey, handleSessionTasks, handleOptimizePrompt, handleExtractLessons } from "./internal-http.ts"
 import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSearch, MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // W6a（2026-10-04）：裝置橋雲端側（本機 daemon 出站註冊／取件）。總開關 EIMU_DEVICE_BRIDGE，預設 OFF。
-import { deviceBridgeEnabled, handleDeviceBridgeRoutes, handleInternalDeviceInvoke, handleInternalDeviceStatus } from "./device-bridge.ts"
+import { deviceBridgeEnabled, handleDeviceBridgeRoutes, handleInternalDeviceAuthorize, handleInternalDeviceInvoke, handleInternalDeviceStatus } from "./device-bridge.ts"
 // TODO(整合 Wave3)：以下符號同波在建（questions-gw/session-read/quota-ledger/internal-http/
 // memory-wiring.ts），bun build 對 named import 硬查（未 export 即報錯），故先 declare 佔位
 // （第一階段佔位符法，記憶 gateway-index-refactor-stage1-0919）；整合 subagent 統一換真 import。
@@ -206,6 +206,10 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       }
       if (req.method === "GET" && pathname === "/internal/device/status") {
         return handleInternalDeviceStatus(req, { resolveTenant: internalDeviceResolveTenant })
+      }
+      // W6b（2026-10-04）：對話中授權本機路徑（once／session／permanent）。loopback-only。
+      if (req.method === "POST" && pathname === "/internal/device/authorize") {
+        return handleInternalDeviceAuthorize(req, { resolveTenant: internalDeviceResolveTenant })
       }
       // 子代理运行时：派发 + 工具轮询取件（loopback，鉴权同其他 internal 端点）。
       if (req.method === "POST" && pathname === "/internal/subagent/dispatch") {

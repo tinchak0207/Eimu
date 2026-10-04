@@ -302,3 +302,419 @@ export function truncateWithMarker(text: unknown, max: unknown): TruncatedText {
   const marker = `\n…[truncated ${originalBytes - kept.length} bytes]`
   return { text: decoded + marker, truncated: true, originalBytes, keptBytes: kept.length }
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// 權限決策引擎（W6b, 2026-10-04）—— Claude Code 式三桶規則 ＋ 模式檔次。
+//
+// 為什麼是純函式：判定必須可被兩端（雲端閘道、本機 daemon）以同一份向量表逐條
+// 斷言；同一輸入必得同一輸出（無 I/O、無時間、無隨機）。模式／規則的來源（register
+// 的 body、session 授權）在 device-bridge.ts 接線，本檔只做判定。
+//
+// 判定序（**固定，不得調換**）：
+//   0. mode === "off" → deny（任何 invoke 一律拒，不進入授權流程）
+//   1. 硬 denylist（`isHardDeniedPath` ∪ 既有 `isSensitivePath`）→ deny，先於一切
+//   2. 檔案系統根 → deny（遞迴整碟／非具體授權目標）
+//   3. safety-check 檔案／目錄 → ask（**先於規則**；session/permanent 規則不得自動放行）
+//   4. 規則 deny（bucket denylist ⇒ 首命中）
+//   5. 規則 ask
+//   6. 規則 allow
+//   7. 模式語義（ask／auto／full）
+//   8. 預設 ask
+//
+// 三桶互斥優先序由 4→6 保證：deny 壓過 ask 壓過 allow；掃描各桶時「各取首命中」。
+// ══════════════════════════════════════════════════════════════════════════
+
+/** 規則的效果桶（三桶，判定序 deny → ask → allow）。 */
+export type PermissionEffect = "allow" | "deny" | "ask"
+/** 規則的作用工具；`*` 為通配。 */
+export type PermissionTool = DeviceBridgeTool | "*"
+/** session 級權限規則（`tool` 或 `tool(specifier)` 的形式化落點）。 */
+export interface PermissionRule {
+  effect: PermissionEffect
+  tool: PermissionTool
+  /** `tool(specifier)` 的 specifier；缺＝`tool(*)` ≡ 該工具任意路徑。 */
+  specifier?: string
+}
+
+/** 判定結果。`reason` 為人類可讀（並供 needs_authorization 映射）。 */
+export type PermissionDecision = "allow" | "deny" | "ask"
+export type PermissionReason =
+  | "mode_off"
+  | "denylist"
+  | "filesystem_root"
+  | "safety_check"
+  | "rule_deny"
+  | "rule_ask"
+  | "rule_allow"
+  | "mode_ask"
+  | "authorized_root"
+  | "home"
+  | "outside_roots"
+  | "default_ask"
+
+export interface PermissionVerdict {
+  decision: PermissionDecision
+  reason: PermissionReason
+  /** 命中的規則（四桶之一命中時才有）。 */
+  rule?: PermissionRule
+}
+
+/** per-device 模式（隨 register 上報）。預設語義為 `ask`。 */
+export type DeviceBridgeMode = "off" | "ask" | "auto" | "full"
+export const DEVICE_BRIDGE_MODES = ["off", "ask", "auto", "full"] as const
+
+export function isDeviceBridgeMode(v: unknown): v is DeviceBridgeMode {
+  return typeof v === "string" && (DEVICE_BRIDGE_MODES as readonly string[]).includes(v)
+}
+
+/** session 規則數量上限（避免註冊表／會話被灌爆）。 */
+export const MAX_PERMISSION_RULES = 64
+
+// ── 硬 denylist（全域，任何模式／規則不得繞）─────────────────────────────
+//
+// 為什麼獨立於既有 `isSensitivePath`：既有清單是「Claude Code 洩漏源碼的敏感清單照抄」，
+// 偏瀏覽器 profile；硬 denylist 是**我方補上的全域不可繞集合**（私鑰、憑證、雲端
+// 設定、系統影子檔、行程環境），份額內所有樣式在任何模式（含 full）與任何 allow
+// 規則下都必須 deny。兩者取**聯集**參與判定（既有 isSensitivePath 只加不減）。
+
+/** 敏感目錄段（任一層級出現即硬拒）。含 `~/.config`（整個設定目錄）。 */
+const HARD_DENY_DIR_SEGMENTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config"])
+
+/** 連續段序列（正規化後比對）：`~/.local/share/keyrings`、`/etc/shadow`、`/etc/sudoers`。 */
+const HARD_DENY_SEQUENCES: readonly (readonly string[])[] = [
+  [".local", "share", "keyrings"],
+  ["etc", "shadow"],
+  ["etc", "sudoers"],
+]
+
+/** 精確 basename（防前綴混淆：`.env.bak` 不因本集合命中，但 `^\.env\.` 樣式會命中）。 */
+const HARD_DENY_BASENAMES = new Set([".git-credentials", ".netrc", ".pgpass", ".bash_history", ".env"])
+
+/** basename 樣式（已轉小寫後比對）：私鑰／憑證／service account／dotenv 家族。 */
+const HARD_DENY_BASENAME_PATTERNS: readonly RegExp[] = [
+  /\.pem$/,
+  /\.key$/,
+  /\.p12$/,
+  /^id_rsa/,
+  /^id_ed25519/,
+  /credential/,
+  /secret/,
+  /service-account.*\.json$/,
+  /^\.env\./,
+]
+
+/**
+ * 全域硬 denylist：任何模式（含 full）與任何 allow 規則**都不得繞過**。
+ * 語義與 isSensitivePath 同款 fail-closed：
+ *  - 非字串／空字串 → true（呼叫端不得據此放行）。
+ *  - 反斜線正規成 `/`、全部轉小寫、掃描所有段。
+ *  - 另涵蓋 `/proc/<pid>/environ`（行程環境）。
+ */
+export function isHardDeniedPath(p: unknown): boolean {
+  if (typeof p !== "string" || p.trim().length === 0) return true
+  const normalized = p.replace(/\\/g, "/").toLowerCase()
+  const segs = splitSegments(normalized)
+  if (segs.length === 0) return false
+  const base = segs[segs.length - 1]
+  if (HARD_DENY_BASENAMES.has(base)) return true
+  for (const pat of HARD_DENY_BASENAME_PATTERNS) if (pat.test(base)) return true
+  for (const seg of segs) if (HARD_DENY_DIR_SEGMENTS.has(seg)) return true
+  for (const seq of HARD_DENY_SEQUENCES) if (containsSequence(segs, seq)) return true
+  if (segs.includes("proc") && base === "environ") return true
+  return false
+}
+
+// ── safety check（auto-edit 安全網；一律 ask，規則不得自動放行）────────────
+//
+// 照抄 Claude Code 的 DANGEROUS_FILES／DANGEROUS_DIRECTORIES：這些是 shell／git／
+// agent 自身的設定與狀態檔，改動（含被模型引導的讀取脈絡）風險最高，故強制詢問、
+// 不可由 session/permanent 授權自動放行。**硬 denylist 仍先於本節**（deny > ask）。
+export const DANGEROUS_FILES: ReadonlySet<string> = new Set([
+  ".gitconfig",
+  ".gitmodules",
+  ".bashrc",
+  ".bash_profile",
+  ".zshrc",
+  ".zprofile",
+  ".profile",
+  ".ripgreprc",
+  ".mcp.json",
+  ".claude.json",
+])
+
+export const DANGEROUS_DIRECTORIES: ReadonlySet<string> = new Set([".git", ".vscode", ".idea", ".claude"])
+
+/** 是否為 safety-check 檔案／目錄（一律 ask；判定先於規則）。 */
+export function isSafetyCheckPath(p: unknown): boolean {
+  if (typeof p !== "string" || p.trim().length === 0) return false
+  const segs = splitSegments(p.replace(/\\/g, "/").toLowerCase())
+  if (segs.length === 0) return false
+  if (DANGEROUS_FILES.has(segs[segs.length - 1])) return true
+  for (const seg of segs) if (DANGEROUS_DIRECTORIES.has(seg)) return true
+  return false
+}
+
+// ── 路徑展開／規則 specifier 比對 ────────────────────────────────────────
+
+function expandTilde(s: string, home: string | null | undefined): string | null {
+  const norm = s.replace(/\\/g, "/")
+  if (norm === "~" || norm.startsWith("~/")) {
+    if (!home) return null
+    const h = home.replace(/\\/g, "/").replace(/\/+$/, "")
+    const rest = norm.length > 1 ? "/" + norm.slice(2).replace(/^\/+/, "") : ""
+    return h + rest
+  }
+  return norm
+}
+
+/**
+ * 把路徑展開成歸一化的絕對路徑（`~`→home、反斜線→`/`、丟 `.`／`..`、全小寫）。
+ * 相對路徑／無法展開／`..` 逃逸根之上 → null（呼叫端一律當「不可信」）。
+ */
+export function expandToAbsolute(p: unknown, home?: string | null): string | null {
+  if (typeof p !== "string" || p.trim().length === 0) return null
+  const expanded = expandTilde(p.trim(), home)
+  if (expanded === null) return null
+  const segs = lexicalSegments(expanded)
+  if (!segs || segs.length === 0) return null
+  if (/^[a-z]:/.test(expanded)) return `${expanded[0].toLowerCase()}:/${segs.slice(1).join("/")}`
+  if (!expanded.startsWith("/")) return null
+  return "/" + segs.join("/")
+}
+
+interface ParsedSpecifier {
+  kind: "absolute" | "anywhere"
+  base?: string
+  pattern?: string
+  recursive: boolean
+}
+
+/**
+ * 解析規則 specifier 的路徑前綴語義（照 Claude Code）：
+ *   - `//path` → 檔案系統根絕對（去一個 `/` 後當絕對路徑）。
+ *   - `~/path` → 家目錄。
+ *   - `/path`  → 相對於**設定檔所在目錄**（未提供 configDir 時退回絕對路徑）。
+ *   - 無前綴 / `./x` → 任意位置（gitignore 式比對）。
+ *   - 尾端 `/**` → 該目錄**含其下**（遞迴）。
+ */
+export function parseRuleSpecifier(specifier: string, opts: { home?: string | null; configDir?: string } = {}): ParsedSpecifier | null {
+  if (typeof specifier !== "string") return null
+  let s = specifier.trim().replace(/\\/g, "/")
+  if (s.length === 0) return null
+  let recursive = false
+  if (s.endsWith("/**")) {
+    recursive = true
+    s = s.slice(0, -3)
+  } else if (s.length > 1 && s.endsWith("/")) {
+    recursive = true
+    s = s.replace(/\/+$/, "")
+  }
+  if (s.startsWith("//")) return { kind: "absolute", base: s.slice(1), recursive }
+  if (s === "~" || s.startsWith("~/")) {
+    if (!opts.home) return null
+    const h = opts.home.replace(/\\/g, "/").replace(/\/+$/, "")
+    const rest = s.length > 1 ? s.slice(2) : ""
+    return { kind: "absolute", base: h + (rest ? "/" + rest.replace(/^\/+/, "") : ""), recursive }
+  }
+  if (s.startsWith("/")) {
+    const base = opts.configDir ? opts.configDir.replace(/\/+$/, "") + s : s
+    return { kind: "absolute", base, recursive }
+  }
+  return { kind: "anywhere", pattern: s.replace(/^\.\//, ""), recursive }
+}
+
+function globToRegex(glob: string): RegExp {
+  const esc = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")
+  return new RegExp("^" + esc + "$")
+}
+
+/**
+ * 單一 specifier 是否命中單一路徑（specifier 的四種前綴語義 ＋ `/**` 遞迴）。
+ * 全部轉小寫比對；段級相等杜絕前綴混淆。
+ */
+export function matchRuleSpecifier(
+  specifier: string,
+  targetPath: string,
+  opts: { home?: string | null; configDir?: string } = {},
+): boolean {
+  const parsed = parseRuleSpecifier(specifier, opts)
+  if (!parsed) return false
+  const abs = expandToAbsolute(targetPath, opts.home)
+  if (!abs) return false
+  if (parsed.kind === "absolute") {
+    const base = parsed.base!
+    if (parsed.recursive) return isPathWithinRoot(abs, base)
+    const a = lexicalSegments(abs)
+    const b = lexicalSegments(base)
+    if (!a || !b) return false
+    return a.length === b.length && a.every((x, i) => x === b[i])
+  }
+  const t = abs
+  const pat = parsed.pattern!.toLowerCase()
+  const base = t.split("/").filter(Boolean).pop() ?? ""
+  if (pat.includes("*") || pat.includes("?")) {
+    const re = globToRegex(pat)
+    return re.test(t) || re.test(base)
+  }
+  return base === pat || t === pat || t.endsWith("/" + pat)
+}
+
+function toolMatches(ruleTool: PermissionTool, tool: PermissionTool): boolean {
+  return ruleTool === "*" || ruleTool === tool
+}
+
+/** specifier 缺／空 → 該工具任意路徑（`Tool()`／`Tool(*)` ≡ `Tool`）。 */
+function ruleMatchesPath(rule: PermissionRule, paths: readonly string[], opts: { home?: string | null; configDir?: string }): boolean {
+  if (rule.specifier === undefined || rule.specifier === "") return true
+  return paths.some((p) => matchRuleSpecifier(rule.specifier!, p, opts))
+}
+
+// ── 規則淨化 ────────────────────────────────────────────────────────────
+
+/**
+ * 淨化（未信任的）規則陣列：只留合法 effect／tool，specifier 只留非空字串，
+ * 去重、限量。未知工具／效果的規則**丟棄**（不是報錯）——規則集寧缺勿濫。
+ */
+export function sanitizePermissionRules(raw: unknown): PermissionRule[] {
+  if (!Array.isArray(raw)) return []
+  const out: PermissionRule[] = []
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue
+    const r = item as Record<string, unknown>
+    const effect = r.effect
+    if (effect !== "allow" && effect !== "deny" && effect !== "ask") continue
+    const toolRaw = r.tool
+    let tool: PermissionTool
+    if (toolRaw === "*") tool = "*"
+    else if (isToolAllowed(toolRaw)) tool = toolRaw
+    else continue
+    const rule: PermissionRule = { effect, tool }
+    if (typeof r.specifier === "string" && r.specifier.trim().length > 0) rule.specifier = r.specifier.trim()
+    if (out.some((x) => x.effect === rule.effect && x.tool === rule.tool && (x.specifier ?? "") === (rule.specifier ?? ""))) continue
+    out.push(rule)
+    if (out.length >= MAX_PERMISSION_RULES) break
+  }
+  return out
+}
+
+// ── 判定函式 ────────────────────────────────────────────────────────────
+
+export interface PermissionQuery {
+  tool: PermissionTool
+  /** 被存取的路徑（可為 `~` 形式）。 */
+  resolvedPath: string
+  mode?: DeviceBridgeMode | string
+  /** session 規則（未淨化；函式內淨化）。 */
+  rules?: unknown
+  authorizedRoots?: unknown
+  home?: string | null
+  /** symlink 解析後的真實路徑；與 resolvedPath **任一命中即算命中**。 */
+  realPath?: string
+  /** `/path` 前綴語義的設定檔所在目錄（未提供時退回首碼 `/` 的絕對路徑）。 */
+  configDir?: string
+}
+
+/**
+ * 決策函式：**硬 denylist → safety-check → 規則 deny/ask/allow → 模式 → 預設 ask**。
+ * 固定順序見檔頭註釋；任何規則或模式都不得繞過硬 denylist 與 safety-check。
+ */
+export function evaluatePermission(q: PermissionQuery): PermissionVerdict {
+  const mode: DeviceBridgeMode = isDeviceBridgeMode(q.mode) ? q.mode : "ask"
+  const rawPaths = [typeof q.resolvedPath === "string" ? q.resolvedPath : ""]
+  if (typeof q.realPath === "string" && q.realPath.length > 0) rawPaths.push(q.realPath)
+  const nonEmpty = rawPaths.filter((p) => p.length > 0)
+
+  // 0. mode off：一律拒，不進入授權流程。
+  if (mode === "off") return { decision: "deny", reason: "mode_off" }
+
+  // 1. 硬 denylist（聯集既有 isSensitivePath，只加不減）→ deny，先於一切。
+  if (nonEmpty.length === 0) return { decision: "deny", reason: "denylist" }
+  for (const p of nonEmpty) {
+    if (isHardDeniedPath(p) || isSensitivePath(p)) return { decision: "deny", reason: "denylist" }
+  }
+
+  // 2. 檔案系統根 → deny（遞迴整碟／非具體授權目標）。
+  if (nonEmpty.some((p) => isFilesystemRoot(expandTilde(p, q.home) ?? p))) return { decision: "deny", reason: "filesystem_root" }
+
+  // 3. safety-check → ask（先於規則；session/permanent 不得自動放行）。
+  if (nonEmpty.some((p) => isSafetyCheckPath(p))) return { decision: "ask", reason: "safety_check" }
+
+  // 4-6. 三桶規則，判定序 deny → ask → allow，各取首命中。
+  const rules = sanitizePermissionRules(q.rules)
+  const shared = { home: q.home, configDir: q.configDir }
+  const eligible = rules.filter((r) => toolMatches(r.tool, q.tool) && ruleMatchesPath(r, nonEmpty, shared))
+  const deny = eligible.find((r) => r.effect === "deny")
+  if (deny) return { decision: "deny", reason: "rule_deny", rule: deny }
+  const ask = eligible.find((r) => r.effect === "ask")
+  if (ask) return { decision: "ask", reason: "rule_ask", rule: ask }
+  const allow = eligible.find((r) => r.effect === "allow")
+  if (allow) return { decision: "allow", reason: "rule_allow", rule: allow }
+
+  // 7. 模式語義。
+  if (mode === "ask") return { decision: "ask", reason: "mode_ask" }
+  const absPaths = nonEmpty.map((p) => expandToAbsolute(p, q.home)).filter((x): x is string => x !== null)
+  if (mode === "auto") {
+    const roots = sanitizeAuthorizedRoots(q.authorizedRoots)
+    if (absPaths.some((p) => roots.some((r) => isPathWithinRoot(p, r)))) return { decision: "allow", reason: "authorized_root" }
+    return { decision: "ask", reason: "outside_roots" }
+  }
+  if (mode === "full") {
+    const homeAbs = q.home ? expandToAbsolute(q.home, null) : null
+    if (homeAbs && absPaths.some((p) => isPathWithinRoot(p, homeAbs))) return { decision: "allow", reason: "home" }
+    return { decision: "ask", reason: "outside_roots" }
+  }
+
+  // 8. 預設 ask。
+  return { decision: "ask", reason: "default_ask" }
+}
+
+// ── 授權根（authorize 端點用）────────────────────────────────────────────
+
+export type AuthorizationRootProblem = "root_not_absolute" | "root_too_broad" | "denylisted_root"
+
+/**
+ * 檢核「建議授權的根」是否可用；回 null＝可用，否則回拒收原因。
+ *  - `root_not_absolute`：相對路徑／`~` 無法展開。
+ *  - `denylisted_root`：根落在硬 denylist 或既有敏感集合內（denylist 沒有「授權」選項）。
+ *  - `root_too_broad`：`/`、`/home`、使用者家目錄本身（除非 mode=full）、空根。
+ */
+export function authorizationRootProblem(root: unknown, home: string | null | undefined, mode: DeviceBridgeMode | string = "ask"): AuthorizationRootProblem | null {
+  if (typeof root !== "string" || root.trim().length === 0) return "root_not_absolute"
+  if (isFilesystemRoot(root)) return "root_too_broad"
+  const abs = expandToAbsolute(root, home)
+  if (!abs) return "root_not_absolute"
+  if (isFilesystemRoot(abs)) return "root_too_broad"
+  if (isHardDeniedPath(abs) || isSensitivePath(abs)) return "denylisted_root"
+  const segs = lexicalSegments(abs) ?? []
+  if (segs.length === 0) return "root_too_broad"
+  if (segs.length === 1 && segs[0] === "home") return "root_too_broad"
+  if (home) {
+    const h = expandToAbsolute(home, null)
+    const hs = h ? lexicalSegments(h) : null
+    if (hs && hs.length === segs.length && hs.every((x, i) => x === segs[i]) && mode !== "full") return "root_too_broad"
+  }
+  return null
+}
+
+/**
+ * 建議授權的根：取被存取路徑**之上、最接近的目錄**（檔案→父目錄；已是單段則回該段）。
+ * 無法歸一化 → null（呼叫端應退回請求路徑）。
+ */
+export function suggestAuthorizationRoot(p: unknown, home?: string | null): string | null {
+  const abs = expandToAbsolute(p, home)
+  if (!abs) return null
+  const segs = lexicalSegments(abs)
+  if (!segs || segs.length === 0) return null
+  if (segs.length === 1) return "/" + segs[0]
+  return "/" + segs.slice(0, -1).join("/")
+}
+
+/**
+ * 授權規則的 specifier：以 `//` 明確標示檔案系統絕對根 ＋ `/**` 遞迴，
+ * 使規則不依賴 configDir 語義（自動授權的根永遠是絕對、含其下）。
+ */
+export function authorizationRuleSpecifier(root: string): string {
+  const abs = expandToAbsolute(root, null)
+  const body = (abs ?? root).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "")
+  return `//${body}/**`
+}

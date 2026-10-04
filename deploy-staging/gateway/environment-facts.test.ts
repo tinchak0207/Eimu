@@ -23,9 +23,11 @@ import {
   renderCapabilityCutoffFact,
   renderEnvironmentSection,
   resolveLocalBridgeState,
+  resolveLocalFilePolicy,
   sanitizeClientEnvironmentReport,
   type CollectEnvironmentInputs,
   type LocalBridgeState,
+  type LocalFilePolicyFacts,
 } from "./environment-facts.ts"
 
 const REAL_TABLE = fileURLToPath(new URL("./expert/opencode-agents.json", import.meta.url))
@@ -228,6 +230,72 @@ test("渲染：localBridge 的 unknown / off 不得被写成否定句（未知�
   assert.doesNotMatch(offLine, /没有|不存在|不可用/)
   // 兩者不得混為一談
   assert.notEqual(unknownLine, offLine)
+})
+
+// W6b：本機檔案權限事實（模式 ＋ 已授權根 ＋ ask 契約）。先前零覆蓋，本段補上。
+test("resolveLocalFilePolicy：明確給定優先；總開關關／缺 userId／查詢拋錯 ⇒ null（不猜）", () => {
+  const explicit: LocalFilePolicyFacts = { mode: "auto", authorizedRoots: ["/home/u/project"] }
+  // 明確給定時不查裝置橋（即使查詢必炸也回 explicit）。
+  assert.deepEqual(
+    resolveLocalFilePolicy({
+      userId: 42,
+      deviceBridgeOn: () => true,
+      deviceBridgePolicy: () => {
+        throw new Error("must not be called")
+      },
+      localFilePolicy: explicit,
+    }),
+    explicit,
+  )
+  assert.equal(resolveLocalFilePolicy({ localFilePolicy: null }), null)
+  // 總開關關 ⇒ null（即使有 userId／查詢可回值）。
+  assert.equal(
+    resolveLocalFilePolicy({
+      userId: 42,
+      deviceBridgeOn: () => false,
+      deviceBridgePolicy: () => explicit,
+    }),
+    null,
+  )
+  // 缺 userId ⇒ null。
+  assert.equal(
+    resolveLocalFilePolicy({ deviceBridgeOn: () => true, deviceBridgePolicy: () => explicit }),
+    null,
+  )
+  // 查詢拋錯 ⇒ null（fail-safe，不讓環境組裝整個掛掉）。
+  assert.equal(
+    resolveLocalFilePolicy({
+      userId: 42,
+      deviceBridgeOn: () => true,
+      deviceBridgePolicy: () => {
+        throw new Error("E_QUERY")
+      },
+    }),
+    null,
+  )
+})
+
+test("本機檔案權限事實：有值才渲染該行，含 mode 與已授權根；null 時整行不出現", () => {
+  const policy: LocalFilePolicyFacts = { mode: "auto", authorizedRoots: ["/home/u/project", "/home/u/docs"] }
+  const line = renderEnvironmentSection(collect({ localFilePolicy: policy }))
+    .split("\n")
+    .find((l) => l.startsWith("- 本机文件权限："))
+  assert.ok(line, "有 localFilePolicy 時必須渲染本机文件权限行")
+  assert.match(line, /mode=auto/)
+  assert.match(line, /\/home\/u\/project/)
+  assert.match(line, /\/home\/u\/docs/)
+  // null（無在線裝置／讀不到）⇒ 不得渲染該行（寧可不說，不畫假狀態）。
+  const none = renderEnvironmentSection(collect({ localFilePolicy: null }))
+  assert.doesNotMatch(none, /本机文件权限/)
+  // 未知（未注入、總開關預設關）亦然。
+  assert.doesNotMatch(renderEnvironmentSection(collect()), /本机文件权限/)
+})
+
+test("穩定度：本機檔案權限事實每輪可變（授權根/模式在對話中改）⇒ 一律 turn，不得黏着", () => {
+  const policy: LocalFilePolicyFacts = { mode: "full", authorizedRoots: [] }
+  // 隔離 localBridge（其非 unknown 值本身即判 turn，會蓋過本項）。
+  assert.equal(environmentSectionStability(collect({ localFilePolicy: policy, localBridge: "unknown" })), "turn")
+  assert.equal(environmentSectionStability(collect({ localFilePolicy: null, localBridge: "unknown" })), "session")
 })
 
 test("一致性探針（防漂移）：環境段宣告的斷路工具 ⊇ registry-digest 全部域工具；豁免項不被切", () => {

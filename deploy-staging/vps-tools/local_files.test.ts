@@ -234,3 +234,69 @@ describe("local_files：成功路徑帶出 result / truncated / bytes", () => {
     }
   })
 })
+
+// ── needs_authorization：對話內授權引導（新契約，2026-10-04）────────────
+describe("local_files：needs_authorization 回結構化授權引導（不當失敗）", () => {
+  const needsAuth = (reason = "outside_roots") =>
+    jsonResponse({
+      ok: false,
+      error: {
+        code: "needs_authorization",
+        message: "此路徑尚未授權。",
+        root: "/home/u/Downloads",
+        reason,
+        options: [{ scope: "once" }, { scope: "session" }, { scope: "permanent" }],
+      },
+    })
+
+  test("回 ok=true 結構化結果：op/path/root/reason 與三段式逐字文案、指令句", async () => {
+    handler = () => needsAuth()
+    const r = parse(await localFiles.execute({ op: "list_dir", path: "/home/u/Downloads/x" } as any, ctx))
+    expect(r.ok).toBe(true)
+    expect(r.action_required).toBe("authorize_local_files")
+    expect(r.op).toBe("list_dir")
+    expect(r.path).toBe("/home/u/Downloads/x")
+    expect(r.root).toBe("/home/u/Downloads")
+    expect(r.reason).toBe("outside_roots")
+    expect(r.options.map((o: any) => o.scope)).toEqual(["once", "session", "permanent"])
+    expect(r.options.map((o: any) => o.label)).toEqual([
+      "允許一次",
+      "本會話允許此目錄",
+      "永久允許（加入本機授權清單）",
+    ])
+    expect(r.instruction).toBe(
+      "把上面三個選項原樣列給使用者，等他回答後再呼叫 local_files_authorize；不要自行決定。",
+    )
+    // 不打 status（授權引導不需要目前根清單）
+    expect(statusCalls().length).toBe(0)
+    expect(invokeCalls().length).toBe(1)
+  })
+
+  test("結果不得含任何『自動允許／自動授權』暗示；指令句要求等他回答、不要自行決定", async () => {
+    handler = () => needsAuth("mode_ask")
+    const r = parse(await localFiles.execute({ op: "read_file", path: "/home/u/D/a.txt" } as any, ctx))
+    const blob = JSON.stringify(r)
+    for (const w of ["自動允許", "auto_allow", "自動授權", "已授權"]) expect(blob).not.toContain(w)
+    expect(r.instruction).toContain("等他回答")
+    expect(r.instruction).toContain("不要自行決定")
+  })
+
+  test("description 講明 needs_authorization 的正確行為與不得自行選 permanent", () => {
+    const d: string = localFiles.description
+    expect(d).toContain("needs_authorization")
+    expect(d).toContain("逐字")
+    expect(d).toContain("等他明確選一個")
+    expect(d).toContain("不得未經同意選 permanent")
+  })
+
+  test("reason=denylist 不走 needs_authorization：sensitive_path 回硬錯且說不能授權", async () => {
+    withInvokeError("sensitive_path", 403)
+    const r = parse(await localFiles.execute({ op: "read_file", path: "/home/u/.ssh/id_rsa" } as any, ctx))
+    expect(r.ok).toBe(false)
+    expect(r.action_required).toBeUndefined()
+    expect(r.error.code).toBe("sensitive_path")
+    expect(r.error.hint).toContain("硬性禁止")
+    expect(r.error.hint).toContain("不能授權")
+    expect(statusCalls().length).toBe(0)
+  })
+})

@@ -15,6 +15,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { createBridgeExecutor, isFsRoot, MAX_GREP_FILE_BYTES } = require("./bridge-executor.js");
+const { HARD_DENY_PATTERNS, SAFETY_CHECK_FILES, SAFETY_CHECK_DIRS } = require("./permission-rules.js");
+const policy = require("./policy.js");
 
 function makeTempRoot() {
   return nodeFs.realpathSync(nodeFs.mkdtempSync(path.join(os.tmpdir(), "eimu-bridge-exec-")));
@@ -303,6 +305,146 @@ test("list_dir/stat: 授權根內正常運作", async () => {
     const st = await ex.executeTool("stat", { path: path.join(root, "a.txt") });
     assert.equal(st.type, "file");
     assert.equal(st.size, 1);
+  } finally {
+    rmrf(root);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 第二道防線（W6c）：permission-rules.evaluatePermission 在執行前獨立複核
+// 即使 gateway 端放行（餵 allow 規則 ＋ mode=full）本機仍自行拒絕。
+// ---------------------------------------------------------------------------
+
+/** 給定設定（home=授權根）＋一個「放行一切」的 allow 規則的執行器。 */
+function defenseExecutor(home, mode = "full") {
+  return createBridgeExecutor({
+    fs: nodeFs,
+    roots: [home],
+    mode,
+    // 工具級規則在 matchSpecifier 會回 false，故用 `//**`（任意絕對路徑）確保 allow 真的命中。
+    rules: { allow: ["read_file(//**)"] },
+    home,
+  });
+}
+
+/** 依 HARD_DENY_PATTERN 的 kind 構造一條命中用路徑。 */
+function hardDenyCasePath(p, home) {
+  if (p.kind === "home-dir") return `${home}/${p.pattern.slice(2)}/x.txt`;
+  if (p.kind === "home-file") return `${home}/${p.pattern.slice(2)}`;
+  if (p.kind === "abs-file") return p.pattern;
+  if (p.kind === "abs-glob") return "/proc/1234/environ";
+  if (p.kind === "basename-glob") return `${home}/proj/${p.pattern.replace(/\*/g, "x")}`;
+  return `${home}/proj/${p.pattern}`; // basename-exact
+}
+
+test("第二道防線：硬 denylist 逐樣式，gateway 放行（allow 規則＋mode=full）仍 deny", () => {
+  const home = makeTempRoot();
+  try {
+    const ex = defenseExecutor(home, "full");
+    assert.ok(HARD_DENY_PATTERNS.length >= 20, "硬 denylist 應有完整樣式");
+    for (const p of HARD_DENY_PATTERNS) {
+      const casePath = hardDenyCasePath(p, home);
+      assert.throws(
+        () => ex.enforcePermission("read_file", casePath, casePath),
+        (err) => err && err.code === "permission_denied",
+        `${p.kind}: ${p.pattern} → ${casePath}`,
+      );
+    }
+  } finally {
+    rmrf(home);
+  }
+});
+
+test("第二道防線：safety-check 檔案/目錄逐條，gateway 放行仍 ask（needs_authorization）", () => {
+  const home = makeTempRoot();
+  try {
+    const ex = defenseExecutor(home, "full");
+    for (const f of SAFETY_CHECK_FILES) {
+      const p = `${home}/${f}`;
+      assert.throws(
+        () => ex.enforcePermission("read_file", p, p),
+        (err) => err && err.code === "needs_authorization",
+        `safety file: ${f}`,
+      );
+    }
+    for (const d of SAFETY_CHECK_DIRS) {
+      const p = `${home}/${d}/x.txt`;
+      assert.throws(
+        () => ex.enforcePermission("read_file", p, p),
+        (err) => err && err.code === "needs_authorization",
+        `safety dir: ${d}`,
+      );
+    }
+  } finally {
+    rmrf(home);
+  }
+});
+
+test("第二道防線（執行路徑）：授權根內硬 denylist 檔（x.pem）即使 mode=full 也被拒", async () => {
+  const root = makeTempRoot();
+  try {
+    const pem = path.join(root, "x.pem");
+    nodeFs.writeFileSync(pem, "-----BEGIN KEY-----");
+    const ex = defenseExecutor(root, "full");
+    // policy.isSensitivePath 不含 *.pem ⇒ 必須由第二道防線攔下（證明不是靠第一層）。
+    assert.equal(policy.isSensitivePath(pem), false, "前提：policy denylist 不擋 *.pem");
+    await assert.rejects(ex.executeTool("read_file", { path: pem }), (err) => err && err.code === "permission_denied");
+  } finally {
+    rmrf(root);
+  }
+});
+
+test("第二道防線（執行路徑）：授權根內 .bashrc ⇒ needs_authorization（ask，不執行）", async () => {
+  const root = makeTempRoot();
+  try {
+    const bashrc = path.join(root, ".bashrc");
+    nodeFs.writeFileSync(bashrc, "export X=1\n");
+    const ex = defenseExecutor(root, "auto");
+    await assert.rejects(ex.executeTool("read_file", { path: bashrc }), (err) => err && err.code === "needs_authorization");
+  } finally {
+    rmrf(root);
+  }
+});
+
+test("第二道防線（模式語義）：mode=ask 對一般檔也 ask；mode=auto 授權根內放行", async () => {
+  const root = makeTempRoot();
+  try {
+    const f = path.join(root, "normal.txt");
+    nodeFs.writeFileSync(f, "hi");
+    const askEx = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "ask" });
+    await assert.rejects(askEx.executeTool("read_file", { path: f }), (err) => err && err.code === "needs_authorization");
+
+    const autoEx = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "auto" });
+    const r = await autoEx.executeTool("read_file", { path: f });
+    assert.equal(r.text, "hi");
+  } finally {
+    rmrf(root);
+  }
+});
+
+test("第二道防線（模式語義）：mode=off 一律拒（deny，先於一切）", async () => {
+  const root = makeTempRoot();
+  try {
+    const f = path.join(root, "normal.txt");
+    nodeFs.writeFileSync(f, "hi");
+    const ex = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "off" });
+    await assert.rejects(ex.executeTool("read_file", { path: f }), (err) => err && err.code === "permission_denied");
+  } finally {
+    rmrf(root);
+  }
+});
+
+test("第二道防線：grep/list_dir 不會曝露或讀入硬 denylist 檔（.env）", async () => {
+  const root = makeTempRoot();
+  try {
+    nodeFs.writeFileSync(path.join(root, "ok.txt"), "NEEDLE\n");
+    nodeFs.writeFileSync(path.join(root, ".env"), "NEEDLE=secret\n");
+    const ex = createBridgeExecutor({ fs: nodeFs, roots: [root], mode: "auto" });
+    const g = ex.toolGrep({ path: root, pattern: "NEEDLE" });
+    assert.equal(g.matches.some((m) => m.path.endsWith(".env")), false, "硬 denylist 檔不得被讀入");
+    assert.ok(g.excluded_sensitive_count >= 1, "應自報排除硬 denylist 檔");
+    const ld = ex.toolListDir({ path: root });
+    assert.equal(ld.entries.some((e) => e.name === ".env"), false, "硬 denylist 檔不得曝露於 list_dir");
   } finally {
     rmrf(root);
   }

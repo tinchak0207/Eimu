@@ -22,7 +22,8 @@ import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { WORKSPACE_DIR, UPLOADS_DIR } from "./constants-gateway.ts"
-import { deviceBridgeEnabled, deviceBridgeRuntimeState, type DeviceBridgeRuntimeState } from "./device-bridge.ts"
+import { deviceBridgeEnabled, deviceBridgePolicyState, deviceBridgeRuntimeState, type DeviceBridgeRuntimeState } from "./device-bridge.ts"
+import type { DeviceBridgeMode } from "./device-bridge-policy.ts"
 
 // ── 型別 ────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,15 @@ import { deviceBridgeEnabled, deviceBridgeRuntimeState, type DeviceBridgeRuntime
  * 來源由裝置橋那一包接：`resolveLocalBridgeState`（下方）依總開關與唯讀查詢推導。
  */
 export type LocalBridgeState = "off" | "no_authorized_roots" | "credentials_unavailable" | "online" | "unknown"
+
+/**
+ * W6b：本機檔案權限事實（模式 ＋ 已授權根清單）。來源＝在線裝置的 register 上報
+ * （伺服器側推導，不接受客戶端自報）。`mode` 決定 `ask`／`auto`／`full` 下何時需要授權。
+ */
+export interface LocalFilePolicyFacts {
+  mode: DeviceBridgeMode
+  authorizedRoots: string[]
+}
 
 // ── 客戶端環境上報（型別化白名單，防「前端注入 prompt」）──────────────────
 //
@@ -132,6 +142,11 @@ export interface RuntimeEnvironment {
   workspace: WorkspaceFacts
   /** 本機檔案通道狀態；本包預設 unknown，來源由裝置橋那一包接。 */
   localBridge: LocalBridgeState
+  /**
+   * W6b：本機檔案權限模式與已授權根（在線裝置推導）；null＝無在線裝置／總開關未開。
+   * 只加事實，不改既有段落語義。
+   */
+  localFilePolicy?: LocalFilePolicyFacts | null
   /** 客戶端上報的本機環境事實（淨化後）；null＝客戶端未上報（全部語義 unknown）。 */
   client: ClientEnvironmentReport | null
 }
@@ -155,6 +170,10 @@ export interface CollectEnvironmentInputs {
   deviceBridgeState?: (userId: number | null) => DeviceBridgeRuntimeState
   /** 總開關查詢（依賴注入，測試用）；預設 device-bridge.deviceBridgeEnabled。 */
   deviceBridgeOn?: () => boolean
+  /** W6b：權限模式與授權根查詢（依賴注入，測試用）；預設 device-bridge.deviceBridgePolicyState。 */
+  deviceBridgePolicy?: (userId: number | null) => LocalFilePolicyFacts | null
+  /** W6b：明確指定權限事實（測試用）；給定時不查裝置橋。 */
+  localFilePolicy?: LocalFilePolicyFacts | null
   /** 明確指定 localBridge（測試用）；給定時不查裝置橋。 */
   localBridge?: LocalBridgeState
   /** 客戶端上報（未淨化，來自訊息 body 的 client_environment）；缺＝null（全部語義 unknown）。 */
@@ -229,6 +248,29 @@ export function resolveLocalBridgeState(inputs: {
     return deriveLocalBridgeState(query(inputs.userId))
   } catch {
     return "unknown"
+  }
+}
+
+/**
+ * W6b：判定本回合的本機檔案權限事實（模式 ＋ 已授權根）。順序與 localBridge 同款：
+ * 明確給定（測試）優先；總開關未開／無 userId／查詢失敗 ⇒ null（讀不到不下結論）。
+ * 失敗不擲出（fail-safe 回 null）。
+ */
+export function resolveLocalFilePolicy(inputs: {
+  userId?: number | null
+  deviceBridgeOn?: () => boolean
+  deviceBridgePolicy?: (userId: number | null) => LocalFilePolicyFacts | null
+  localFilePolicy?: LocalFilePolicyFacts | null
+}): LocalFilePolicyFacts | null {
+  if (inputs.localFilePolicy !== undefined) return inputs.localFilePolicy ?? null
+  const isOn = inputs.deviceBridgeOn ?? deviceBridgeEnabled
+  if (!isOn()) return null
+  if (inputs.userId === undefined || inputs.userId === null) return null
+  const query = inputs.deviceBridgePolicy ?? deviceBridgePolicyState
+  try {
+    return query(inputs.userId)
+  } catch {
+    return null
   }
 }
 
@@ -360,6 +402,8 @@ export function collectRuntimeEnvironment(inputs: CollectEnvironmentInputs): Run
     workspace,
     // 明確給定（測試）優先；否則由裝置橋接線推導（env 未開 ⇒ off；取不到 userId ⇒ unknown）。
     localBridge: inputs.localBridge ?? resolveLocalBridgeState(inputs),
+    // W6b：權限模式與授權根（只加事實；未開／讀不到 ⇒ null，不渲染該行）。
+    localFilePolicy: resolveLocalFilePolicy(inputs),
     // 客戶端可控上報一律經 sanitize 白名單；非物件／全欄位無效 ⇒ null（語義 unknown）。
     client: sanitizeClientEnvironmentReport(inputs.clientEnvironmentReport),
   }
@@ -386,6 +430,8 @@ export type EnvironmentStability = "static" | "session" | "turn"
  */
 export function environmentSectionStability(env: RuntimeEnvironment): EnvironmentStability {
   if (env.localBridge !== "unknown") return "turn"
+  // W6b：授權根／模式每輪可變（使用者對話中授權）⇒ 一旦有值即 turn，不得黏著。
+  if (env.localFilePolicy) return "turn"
   const client = env.client
   if (client) {
     if (client.localCapabilities && Object.keys(client.localCapabilities).length > 0) return "turn"
@@ -400,6 +446,27 @@ function renderWorkspaceExistence(exists: boolean | "unknown"): string {
   if (exists === true) return "存在"
   if (exists === false) return "不存在"
   return "未知"
+}
+
+/** W6b：本機檔案權限模式與授權根的散文事實（只陳述事實，不帶指令語氣）。 */
+function renderLocalFilePolicy(p: LocalFilePolicyFacts): string {
+  const roots = p.authorizedRoots.length > 0 ? p.authorizedRoots.join("、") : "无"
+  let contract: string
+  switch (p.mode) {
+    case "ask":
+      contract = "该模式下任何未授权路径都会回 needs_authorization，须先经授权（once/session/permanent）后重试。"
+      break
+    case "auto":
+      contract = "该模式下已授权根内直接可用，根外回 needs_authorization。"
+      break
+    case "full":
+      contract = "该模式下家目录内直接可用；硬 denylist 路径一律拒绝，safety 文件仍会询问。"
+      break
+    case "off":
+      contract = "该模式下本机文件工具一律拒绝。"
+      break
+  }
+  return `mode=${p.mode}；已授权根（${p.authorizedRoots.length}）：${roots}。${contract}`
 }
 
 function renderLocalBridge(state: LocalBridgeState): string {
@@ -513,6 +580,8 @@ export function renderEnvironmentSection(env: RuntimeEnvironment): string {
     lines.push(`- 客户端渲染主机：${renderClientRenderHost(client.renderHost)}。`)
   }
   lines.push(`- 本机文件通道：${renderLocalBridge(env.localBridge)}。`)
+  // W6b：本機檔案權限模式與已授權根（只加事實；無在線裝置／讀不到時不渲染該行）。
+  if (env.localFilePolicy) lines.push(`- 本机文件权限：${renderLocalFilePolicy(env.localFilePolicy)}`)
 
   return lines.join("\n")
 }

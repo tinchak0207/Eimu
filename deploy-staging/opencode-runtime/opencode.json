@@ -374,7 +374,8 @@
         "question": true,
         "subagent_stop": true,
         "task": false,
-        "local_files": true
+        "local_files": true,
+        "local_files_authorize": true
       }
     },
     "director3d": {
@@ -477,7 +478,8 @@
         "workflow_update_node": false,
         "world_bible_extract": false,
         "task": false,
-        "local_files": true
+        "local_files": true,
+        "local_files_authorize": true
       }
     },
     "music": {
@@ -684,7 +686,8 @@
         "workflow_update_node": false,
         "world_bible_extract": false,
         "task": false,
-        "local_files": true
+        "local_files": true,
+        "local_files_authorize": true
       }
     },
     "editor": {
@@ -780,7 +783,8 @@
         "workflow_update_node": false,
         "world_bible_extract": false,
         "task": false,
-        "local_files": true
+        "local_files": true,
+        "local_files_authorize": true
       }
     },
     "screenwriter": {

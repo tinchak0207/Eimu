@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, FolderOpen, History, KeyRound, LogOut, Users } from "lucide-react";
+import { BookOpen, History, KeyRound, LogOut, Users } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -499,14 +499,6 @@ export function Navbar({ className }: NavbarProps) {
                       <Link href="/settings/team" className="cursor-pointer">
                         <Users className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
                         团队管理
-                      </Link>
-                    </DropdownMenuItem>
-                    {/* 本机文件（2026-10-04）：让桌面版 agent 读取本机已授权文件夹的开关页，
-                        与上面 B 端密钥语义无关，故排在密钥/团队之后、通知之前。 */}
-                    <DropdownMenuItem asChild>
-                      <Link href="/settings/local-files" className="cursor-pointer">
-                        <FolderOpen className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
-                        本機檔案
                       </Link>
                     </DropdownMenuItem>
                     {/* 站内通知：机制在、只此一个真业务（新人礼到账）；入口从 header 图示列搬进本菜单。

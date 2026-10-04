@@ -24,9 +24,14 @@
 "use strict";
 
 const path = require("node:path");
+const os = require("node:os");
 const nodeFs = require("node:fs");
 const policy = require("./policy.js");
 const proto = require("./bridge-protocol.js");
+// 第二道防線（W6c）：本機獨立複核的權限決策（硬 denylist／safety-check／規則／模式）。
+// 與 gateway 同一條判定序（見 permission-rules.js 檔頭）；本檔只負責在**執行前**
+// 以本機自身狀態（模式／規則／授權根／home）再判一次，雲端被繞過也擋得住。
+const permissionRules = require("./permission-rules.js");
 
 const MAX_LIST_DEFAULT = 200;
 const MAX_GREP_FILES = 5000;
@@ -57,7 +62,15 @@ function isFsRoot(abs) {
 
 /**
  * 建立一個執行器實例。
- * @param {{fs?: object, roots?: string[]|(() => string[])}} [options]
+ *
+ * 第二道防線注入點（形狀同 roots，可傳值或函式；值注入須為字串/陣列）：
+ *   - `mode`  當前權限模式（"off"|"ask"|"auto"|"full"）。未提供時回退 `"auto"`
+ *     （升級前行為：授權根內自動；硬 denylist／safety-check 仍生效），刻意**不**
+ *     改用 `"ask"` 以免讓未接權限模式的既有呼叫端全部變成待授權。
+ *   - `rules` 規則集（陣列或 {deny,ask,allow} 物件）。
+ *   - `home`  家目錄（僅供硬 denylist 展開 `~`／mode=full 判定）。
+ *
+ * @param {{fs?: object, roots?: string[]|(() => string[]), mode?: string|(() => string), rules?: unknown|(() => unknown), home?: string|(() => string)}} [options]
  */
 function createBridgeExecutor(options = {}) {
   const fs = options.fs || nodeFs;
@@ -65,6 +78,25 @@ function createBridgeExecutor(options = {}) {
     typeof options.roots === "function"
       ? options.roots
       : () => (Array.isArray(options.roots) ? options.roots : []);
+  // 注入點一律驗型別（教訓：跨界傳錯型別會被下游守衛靜默降級，只失效不報錯）。
+  const modeProvider =
+    typeof options.mode === "function"
+      ? options.mode
+      : () => (typeof options.mode === "string" ? options.mode : undefined);
+  const rulesProvider =
+    typeof options.rules === "function"
+      ? options.rules
+      : () => (options.rules !== undefined ? options.rules : undefined);
+  const homeProvider =
+    typeof options.home === "function"
+      ? options.home
+      : () => (typeof options.home === "string" ? options.home : undefined);
+
+  /** 當前家目錄（未注入＝os.homedir()）。 */
+  const currentHome = () => {
+    const h = homeProvider();
+    return typeof h === "string" && h.length > 0 ? h : os.homedir();
+  };
 
   /** 解 symlink；不存在時對父目錄解 symlink 再接回 basename（輸出檔常用）。 */
   function resolveReal(p) {
@@ -81,10 +113,49 @@ function createBridgeExecutor(options = {}) {
   }
 
   /**
-   * 檢查路徑已授權且非敏感；回傳其 realpath。
-   * 順序：bad_path → 根拒絕 → denylist → allowlist（空集＝全拒）→ 存在性。
+   * 第二道防線：以本機自身狀態（模式／規則／授權根／home）獨立複核。
+   * 判定序全部來自 permission-rules.evaluatePermission（硬 denylist → safety-check
+   * → 規則 deny/ask/allow → 模式 → 預設 ask）。雲端即使被繞過或規則被篡改，這裡仍
+   * 以同一語義拒絕。不執行時的錯誤碼（供 gateway 流程對上）：
+   *   - deny → `permission_denied`（403）
+   *   - ask  → `needs_authorization`（403，對上凍結契約的授權流程）
    */
-  function requireLocalPath(raw) {
+  function enforcePermission(tool, raw, resolved) {
+    const mode = modeProvider();
+    const effectiveMode = typeof mode === "string" && mode.length > 0 ? mode : "auto";
+    const rules = rulesProvider();
+    const verdict = permissionRules.evaluatePermission({
+      tool,
+      rawPath: raw,
+      resolvedPath: resolved,
+      mode: effectiveMode,
+      rules: rules === undefined ? undefined : rules,
+      authorizedRoots: rootsProvider(),
+      home: currentHome(),
+    });
+    if (verdict.decision === "allow") return;
+    if (verdict.decision === "deny") {
+      throw new BridgeError("permission_denied", 403, verdict.reason);
+    }
+    throw new BridgeError("needs_authorization", 403, verdict.reason);
+  }
+
+  /**
+   * 硬 denylist 複核（模式／規則無關，一律拒）：供列舉／遞迴剪枝使用。
+   * 檔名樣式（`*.pem`、`.env`…）在 policy denylist 之外，這裡補上，避免
+   * grep/list_dir 在授權根內把硬 denylist 檔名曝露或讀入。
+   */
+  function isHardDeniedPath(p) {
+    return permissionRules.isHardDenied({ raw: p, resolved: p, home: currentHome() }, currentHome());
+  }
+
+  /**
+   * 檢查路徑已授權且非敏感；回傳其 realpath。
+   * 順序：bad_path → 根拒絕 → policy denylist → allowlist（空集＝全拒）
+   *       → 第二道防線（permission-rules）→ 存在性。
+   * 既有檢查（policy denylist／allowlist 必填）在前且一行不放寬；第二道防線為純加嚴。
+   */
+  function requireLocalPath(raw, tool = "read_file") {
     if (typeof raw !== "string" || raw.length === 0 || raw.includes("\0")) {
       throw new BridgeError("bad_path", 400);
     }
@@ -98,6 +169,8 @@ function createBridgeExecutor(options = {}) {
       throw new BridgeError("no_authorized_roots", 403);
     }
     if (!policy.isPathAllowed(abs, roots)) throw new BridgeError("not_authorized", 403);
+    // 第二道防線（執行前獨立複核）：以本機真值判 deny/ask/allow。
+    enforcePermission(tool, raw, abs);
     if (!fs.existsSync(abs)) throw new BridgeError("not_found", 404);
     return abs;
   }
@@ -105,7 +178,7 @@ function createBridgeExecutor(options = {}) {
   // ── 四個唯讀工具（無寫/刪/執行）────────────────────────────────────────
 
   function toolListDir(args) {
-    const abs = requireLocalPath(args.path);
+    const abs = requireLocalPath(args.path, "list_dir");
     const st = fs.statSync(abs);
     if (!st.isDirectory()) throw new BridgeError("not_a_directory", 400);
     const max = Number.isInteger(args.max_entries) ? args.max_entries : MAX_LIST_DEFAULT;
@@ -116,7 +189,8 @@ function createBridgeExecutor(options = {}) {
       if (entries.length >= max) break;
       const full = path.join(abs, d.name);
       // 敏感檔名/目錄名不進回傳（與 grep 遞迴剪枝同語義）；計數後回報給雲端。
-      if (policy.isSensitivePath(full)) {
+      // 第二道防線補位：policy 之外的硬 denylist 檔名（`*.pem`、`.env`…）同樣不曝露。
+      if (policy.isSensitivePath(full) || isHardDeniedPath(full)) {
         excludedSensitive += 1;
         continue;
       }
@@ -143,7 +217,7 @@ function createBridgeExecutor(options = {}) {
   }
 
   function toolReadFile(args) {
-    const abs = requireLocalPath(args.path);
+    const abs = requireLocalPath(args.path, "read_file");
     const st = fs.statSync(abs);
     if (!st.isFile()) throw new BridgeError("not_a_file", 400);
     const offset = Number.isInteger(args.offset) && args.offset > 0 ? args.offset : 0;
@@ -187,7 +261,7 @@ function createBridgeExecutor(options = {}) {
       if (out.length >= MAX_GREP_FILES) return;
       if (d.isSymbolicLink()) continue; // 不跟 symlink，防逃逸
       const full = path.join(startAbs, d.name);
-      if (policy.isSensitivePath(full)) {
+      if (policy.isSensitivePath(full) || isHardDeniedPath(full)) {
         stats.excludedSensitive += 1; // 敏感段剪枝（H2：敏感檔被排除）
         continue;
       }
@@ -202,7 +276,7 @@ function createBridgeExecutor(options = {}) {
   }
 
   function toolGrep(args) {
-    const abs = requireLocalPath(args.path);
+    const abs = requireLocalPath(args.path, "grep");
     const st = fs.statSync(abs);
     if (!st.isDirectory() && !st.isFile()) throw new BridgeError("not_searchable", 400);
     const maxMatches = Number.isInteger(args.max_matches) ? args.max_matches : 100;
@@ -224,7 +298,7 @@ function createBridgeExecutor(options = {}) {
     let filesScanned = 0;
     let skippedLargeFiles = 0;
     outer: for (const f of files) {
-      if (policy.isSensitivePath(f)) {
+      if (policy.isSensitivePath(f) || isHardDeniedPath(f)) {
         stats.excludedSensitive += 1;
         continue;
       }
@@ -269,7 +343,7 @@ function createBridgeExecutor(options = {}) {
   }
 
   function toolStat(args) {
-    const abs = requireLocalPath(args.path);
+    const abs = requireLocalPath(args.path, "stat");
     const st = fs.statSync(abs);
     return {
       path: abs,
@@ -295,7 +369,7 @@ function createBridgeExecutor(options = {}) {
     }
   }
 
-  return { executeTool, requireLocalPath, resolveReal, toolListDir, toolReadFile, toolGrep, toolStat };
+  return { executeTool, requireLocalPath, resolveReal, enforcePermission, toolListDir, toolReadFile, toolGrep, toolStat };
 }
 
 module.exports = {

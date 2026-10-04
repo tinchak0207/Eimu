@@ -6,13 +6,30 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
   type MutableRefObject,
 } from "react";
-import { ArrowUp, Brain, Check, ChevronDown, Loader2, Navigation, Plus, Square, X } from "lucide-react";
+import {
+  ArrowUp,
+  Brain,
+  Check,
+  ChevronDown,
+  FolderCheck,
+  Globe,
+  HardDrive,
+  Loader2,
+  MessageCircleQuestion,
+  Navigation,
+  Plus,
+  Power,
+  Square,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   AGENT_THINKING_LEVEL_HINTS,
@@ -30,6 +47,17 @@ import {
 } from "@/lib/agent-chat-client";
 import { MAX_VIDEO_BYTES, uploadVideoDirect } from "@/lib/agent-uploads";
 import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
+import {
+  LOCAL_FILE_MODES,
+  createDeviceBridgeController,
+  describeLocalFileMode,
+  getDeviceBridgeApi,
+  modeFromStatus,
+  supportsSetMode,
+  type DeviceBridgeController,
+  type LocalFileMode,
+  type LocalFileModeIcon,
+} from "@/lib/device-bridge-display";
 import {
   FRAME_COUNT,
   extractFramesFromFile,
@@ -498,6 +526,203 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 本機檔案權限模式菜單（2026-10-04）：與相鄰的 ThinkingLevelMenu 同一套無框語彙，
+ * 工具行流內、「+」右邊緊跟思考級別（同一顆工具列的兩顆同族控件）。
+ *
+ * 收起態＝模式圖示＋模式名＋小 chevron，零框零底零影；展開態＝四檔清單
+ * （圖示＋標題＋副標＋右端勾），底下補一行「已授權 N 個資料夾」。
+ *
+ * 模式文案的唯一真源是 `@/lib/device-bridge-display` 的 LOCAL_FILE_MODES；
+ * 本檔不得另寫一份字串。
+ *
+ * 漸進增強（比照 local-media-worker / device-bridge-display 的既有慣例）：
+ *   · 無 window.eimuLocal（純瀏覽器）⇒ 整顆控件回 null，不渲染（不是報錯）。
+ *   · 舊桌面產物（bridge.setMode 不存在）⇒ 可見但 disabled，副標提示「需更新桌面版」。
+ *   · 舊 status 沒有 mode 欄位 ⇒ 由 enabled/roots 推導（modeFromStatus），不假裝真值。
+ *
+ * 授權入口不在這裡：控件只負責切模式與顯示已授權數量；「授權哪些資料夾」在對話流程問。
+ */
+const LOCAL_FILE_MODE_ICONS: Record<LocalFileModeIcon, LucideIcon> = {
+  power: Power,
+  "message-circle-question": MessageCircleQuestion,
+  "folder-check": FolderCheck,
+  globe: Globe,
+};
+
+export interface LocalFileModeMenuViewProps {
+  open: boolean;
+  onToggleOpen: () => void;
+  onPick: (mode: LocalFileMode) => void;
+  /** 舊產物（bridge.setMode 不存在）＝false ⇒ disabled。 */
+  supported: boolean;
+  /** status 是否已讀到；false 時不把任何一檔畫成「已選中」。 */
+  known: boolean;
+  mode: LocalFileMode;
+  rootsCount: number;
+  busy: boolean;
+}
+
+/** 純展示層（受控）：文案／圖示由純函式與 LOCAL_FILE_MODES 算好，本層只畫。 */
+export function LocalFileModeMenuView({
+  open,
+  onToggleOpen,
+  onPick,
+  supported,
+  known,
+  mode,
+  rootsCount,
+  busy,
+}: LocalFileModeMenuViewProps) {
+  const currentSpec = LOCAL_FILE_MODES.find((m) => m.id === mode) ?? LOCAL_FILE_MODES[0];
+  const current = describeLocalFileMode(mode);
+  const CurrentIcon = known ? LOCAL_FILE_MODE_ICONS[currentSpec.icon] : HardDrive;
+  const label = known ? current.title : "本機檔案";
+  const disabled = !supported;
+
+  return (
+    // 定位鏈與 ThinkingLevelMenu 相同：chip 容器**不得**掛 relative，否則面板會貼著
+    // 這顆小盒往上開、下半壓在輸入框上（containing block 必須回到 composer 根）。
+    <div
+      className="shrink-0 ml-1"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          onToggleOpen();
+        }
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggleOpen}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`本機檔案權限：${label}`}
+        title={disabled ? "本機檔案權限：需更新桌面版" : `本機檔案權限：${label}`}
+        className={cn(
+          // 與同排「+」「↑」「思考級別」同一套無框語彙：只換顏色/透明度，零 layout shift。
+          "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
+          "transition-colors hover:text-[#7d6ee0] active:opacity-70",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "disabled:cursor-not-allowed disabled:opacity-40",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+        )}
+      >
+        <CurrentIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
+        <span className="whitespace-nowrap text-ios-footnote font-medium">{label}</span>
+        {disabled && <span className="whitespace-nowrap text-ios-caption2 text-foreground/40">需更新桌面版</span>}
+        <ChevronDown
+          className={cn("h-3.5 w-3.5 shrink-0 opacity-60 transition-transform", open && "rotate-180")}
+          aria-hidden="true"
+        />
+      </button>
+      {open && !disabled && (
+        <div
+          role="listbox"
+          aria-label="本機檔案權限"
+          // 定位語彙逐字對齊同檔 ThinkingLevelMenu / SkillSlashMenu：
+          // absolute bottom-full left-1.5 mb-2，貼控件正上方、不進流＝零 layout shift。
+          className="lg-float absolute bottom-full left-1.5 z-50 mb-2 w-max min-w-0 rounded-ios-xl p-1"
+        >
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+          {LOCAL_FILE_MODES.map((spec) => {
+            const Icon = LOCAL_FILE_MODE_ICONS[spec.icon];
+            const selected = known && spec.id === mode;
+            return (
+              <button
+                key={spec.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                disabled={busy}
+                onClick={() => onPick(spec.id)}
+                className={cn(
+                  "flex w-full items-start gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
+                  "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                  selected && "bg-ios-blue/[0.10]",
+                )}
+              >
+                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/50" aria-hidden="true" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
+                    {spec.title}
+                  </span>
+                  {/* 副標＝本檔第二真源；僅本控件顯示，逐字取 LOCAL_FILE_MODES。 */}
+                  <span className="mt-0.5 max-w-[15rem] text-ios-caption2 leading-snug text-foreground/50">
+                    {spec.subtitle}
+                  </span>
+                </span>
+                {selected && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />}
+              </button>
+            );
+          })}
+          {/* 已授權數量：只「檢視」；授權入口在對話裡（本控件不做選擇資料夾按鈕）。 */}
+          <p className="mt-1 border-t border-black/[0.06] px-2.5 pb-1.5 pt-2 text-ios-caption2 text-foreground/45">
+            {rootsCount > 0 ? `已授權 ${rootsCount} 個資料夾` : "尚未授權任何資料夾"}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 薄殼：建立 controller、訂閱它（useSyncExternalStore）、把純函式吐出的語義交給展示層。
+ * 純瀏覽器（無 window.eimuLocal）時 controller 快照 available:false ⇒ 本層回 null（漸進增強）。
+ */
+function LocalFileModeMenu() {
+  const controllerRef = useRef<DeviceBridgeController | null>(null);
+  if (controllerRef.current === null) controllerRef.current = createDeviceBridgeController(getDeviceBridgeApi);
+  const controller = controllerRef.current;
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    controller.init();
+    // 卸載時取消訂閱 onBridgeStatus（dispose 內含 unsubscribe）。
+    return () => controller.dispose();
+  }, [controller]);
+
+  const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getServerSnapshot);
+
+  // 開著時點外面就收——與 ThinkingLevelMenu / 歷史 dropdown 同一條 pointerdown + contains 規矩。
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [open]);
+
+  // SSR／hydration 首畫格：getServerSnapshot 一律 available:false ⇒ 伺服器與首畫格都回 null。
+  if (!snap.available) return null;
+
+  const supported = supportsSetMode(getDeviceBridgeApi());
+  const resolution = modeFromStatus(snap.status);
+  const rootsCount = Array.isArray(snap.status?.roots) ? snap.status.roots.length : 0;
+
+  return (
+    <div ref={rootRef} className="contents">
+      <LocalFileModeMenuView
+        open={open}
+        onToggleOpen={() => setOpen((v) => !v)}
+        onPick={(mode) => {
+          setOpen(false);
+          void controller.setMode(mode);
+        }}
+        supported={supported}
+        known={resolution.known}
+        mode={resolution.mode}
+        rootsCount={rootsCount}
+        busy={snap.busy}
+      />
     </div>
   );
 }
@@ -1319,6 +1544,8 @@ function AgentComposerComponent({
         </div>
         {/* 思考级别菜单：工具行流內、「+」右邊（暴君 2026-10-03 三選一定案）。 */}
         <ThinkingLevelMenu disabled={!canAttach} />
+        {/* 本機檔案權限模式：同一工具行、同一無框語彙的第二顆控件（純瀏覽器自隱）。 */}
+        <LocalFileModeMenu />
       </div>
 
       {onStop && !canSend && !sending ? (

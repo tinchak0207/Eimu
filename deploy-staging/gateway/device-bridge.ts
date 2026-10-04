@@ -43,15 +43,26 @@ import { memoryEnvBool } from "./constants-gateway.ts"
 import { hashKey, resolveCanonicalIdentity } from "./auth-gw.ts"
 import {
   MAX_READ_BYTES,
+  authorizationRootProblem,
+  authorizationRuleSpecifier,
   clampFileBytes,
   clampReadSize,
+  evaluatePermission,
+  expandToAbsolute,
+  isDeviceBridgeMode,
+  isHardDeniedPath,
   isSensitivePath,
   isToolAllowed,
   recursiveRootProblem,
   sanitizeAuthorizedRoots,
+  sanitizePermissionRules,
   sensitiveResultProblem,
+  suggestAuthorizationRoot,
   truncateWithMarker,
+  type DeviceBridgeMode,
   type DeviceBridgeTool,
+  type PermissionRule,
+  type PermissionTool,
 } from "./device-bridge-policy.ts"
 
 // ── 開關／時序常數 ──────────────────────────────────────────────────────
@@ -67,6 +78,8 @@ export const DEVICE_HEARTBEAT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_B
 export const DEVICE_REQUEST_TIMEOUT_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_REQUEST_TIMEOUT_MS || "30000", 10) || 30_000
 /** 同意票 TTL（>= 請求逾時，否則票比請求先死）。 */
 export const DEVICE_CONSENT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_CONSENT_TTL_MS || "45000", 10) || 45_000
+/** 一次性授權許可（scope=once）TTL。 */
+export const DEVICE_ONCE_GRANT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_ONCE_GRANT_TTL_MS || "120000", 10) || 120_000
 /** 輪詢長連線上界（<= 閘道 idleTimeout 255s）。 */
 export const DEVICE_POLL_MAX_WAIT_MS = 25_000
 
@@ -75,6 +88,9 @@ export type DeviceBridgeErrorCode =
   | "tool_not_allowed"
   | "sensitive_path"
   | "path_not_authorized"
+  | "permission_denied"
+  | "mode_off"
+  | "needs_authorization"
   | "device_offline"
   | "device_connection_stale"
   | "device_request_timeout"
@@ -86,9 +102,38 @@ export type DeviceBridgeErrorCode =
   | "consent_token_replayed"
 
 export type ConsentTokenError = Extract<DeviceBridgeErrorCode, `consent_token_${string}`>
+export type OnceGrantError =
+  | "authorization_token_not_found"
+  | "authorization_token_expired"
+  | "authorization_token_mismatch"
+  | "authorization_token_replayed"
 
 function randomId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`
+}
+
+/**
+ * 把 evaluatePermission 的 ask 成因映射成 needs_authorization 的 reason。
+ * 凍結四值為 safety_check／outside_roots／mode_ask（＋ denylist 不進此路徑）；
+ * 規則明確 ask 另用 `rule_ask`（擴充值，消費端遇到未知值應走預設）。
+ */
+function mapAskReason(reason: string): string {
+  switch (reason) {
+    case "safety_check":
+      return "safety_check"
+    case "outside_roots":
+      return "outside_roots"
+    case "rule_ask":
+      return "rule_ask"
+    default:
+      return "mode_ask"
+  }
+}
+
+const AUTHORIZATION_SCOPES = ["once", "session", "permanent"] as const
+type AuthorizationScope = (typeof AUTHORIZATION_SCOPES)[number]
+function isAuthorizationScope(v: unknown): v is AuthorizationScope {
+  return typeof v === "string" && (AUTHORIZATION_SCOPES as readonly string[]).includes(v)
 }
 
 // ── 同意票（逐次、單用、綁定）──────────────────────────────────────────
@@ -161,6 +206,79 @@ export class ConsentTokenStore {
   }
 }
 
+// ── 一次性授權許可（scope=once）──────────────────────────────────────────
+//
+// 為什麼獨立於同意票：同意票管「一次下發的工作」，授權許可管「一次路徑授權」。
+// authorize(scope=once) 產生一枚許可；下一次 invoke 帶 `authorization_token` 使用它，
+// 用一次即失效（重放被拒）。綁定 tenant＋（可選 tool）＋root（路徑必須落在 root 之下）。
+
+export interface OnceGrantRecord {
+  token: string
+  tenant: string
+  root: string
+  tool: PermissionTool | null
+  expiresAt: number
+  used: boolean
+}
+
+export interface OnceGrantBinding {
+  tenant: string
+  tool: string
+  path: string
+}
+
+export class OnceGrantStore {
+  private readonly grants = new Map<string, OnceGrantRecord>()
+
+  mint(binding: { tenant: string; root: string; tool?: PermissionTool | null }, ttlMs: number, now: number = Date.now()): string {
+    const token = randomId("ag")
+    this.grants.set(token, {
+      token,
+      tenant: binding.tenant,
+      root: binding.root,
+      tool: binding.tool ?? null,
+      expiresAt: now + Math.max(1, Math.floor(ttlMs)),
+      used: false,
+    })
+    return token
+  }
+
+  consume(token: unknown, expected: OnceGrantBinding, now: number = Date.now()): { ok: true } | { ok: false; code: OnceGrantError } {
+    if (typeof token !== "string" || token.length === 0) return { ok: false, code: "authorization_token_not_found" }
+    const rec = this.grants.get(token)
+    if (!rec) return { ok: false, code: "authorization_token_not_found" }
+    if (rec.expiresAt <= now) {
+      this.grants.delete(token)
+      return { ok: false, code: "authorization_token_expired" }
+    }
+    const toolOk = rec.tool === null || rec.tool === expected.tool
+    const path = expandToAbsolute(expected.path, null) ?? expected.path
+    const rootOk = isHardDeniedPath(expected.path) ? false : pathWithin(rec.root, path)
+    if (rec.tenant !== expected.tenant || !toolOk || !rootOk) {
+      return { ok: false, code: "authorization_token_mismatch" }
+    }
+    if (rec.used) return { ok: false, code: "authorization_token_replayed" }
+    rec.used = true
+    return { ok: true }
+  }
+
+  size(): number {
+    return this.grants.size
+  }
+}
+
+/** 路徑是否落在 root 之內（含相等）；兩者皆先歸一化，相對路徑一律 false。 */
+function pathWithin(root: string, path: string): boolean {
+  const r = expandToAbsolute(root, null)
+  const p = expandToAbsolute(path, null)
+  if (!r || !p) return false
+  const rs = r.split("/").filter(Boolean)
+  const ps = p.split("/").filter(Boolean)
+  if (rs.length === 0 || ps.length < rs.length) return false
+  for (let i = 0; i < rs.length; i++) if (rs[i] !== ps[i]) return false
+  return true
+}
+
 // ── 裝置註冊表 ─────────────────────────────────────────────────────────
 
 export interface DeviceRecord {
@@ -176,9 +294,34 @@ export interface DeviceRecord {
    * （fail-closed；裝置需在 register 帶 `roots` 才啟用）。
    */
   authorizedRoots: string[]
+  /**
+   * W6b：本機檔案權限模式（per-device，隨 register 上報；預設 `ask`）。
+   * 只有 `permissionsEnabled===true`（呼叫端**明確**送了 mode 或 rules）時，新的決策
+   * 引擎才生效；未送時維持升級前行為（denylist ＋ 遞迴根夾制），保證既有呼叫端不受影響。
+   */
+  mode: DeviceBridgeMode
+  /** 是否啟用新決策引擎（呼叫端明確送了 mode／rules）。false＝沿用升級前行為。 */
+  permissionsEnabled: boolean
+  /** register 帶入的裝置級規則（session 級規則另存 `sessionRules`）。 */
+  rules: PermissionRule[]
+  /** 裝置自報的家目錄（full 模式的放行範圍、`~` 展開用）；未上報＝null。 */
+  home: string | null
   registeredAt: number
   lastSeenAt: number
 }
+
+/** needs_authorization 的附帶資訊（供 HTTP 邊界組 body）。 */
+export interface NeedsAuthorizationInfo {
+  root: string
+  reason: string
+  options: { scope: "once" | "session" | "permanent" }[]
+}
+
+export const AUTHORIZATION_OPTIONS: { scope: "once" | "session" | "permanent" }[] = [
+  { scope: "once" },
+  { scope: "session" },
+  { scope: "permanent" },
+]
 
 export interface DeviceRequestMessage {
   request_id: string
@@ -191,7 +334,7 @@ export interface DeviceRequestMessage {
 
 export type InvokeResult =
   | { ok: true; requestId: string; tool: DeviceBridgeTool; result: Record<string, unknown>; truncated: boolean; bytes: number }
-  | { ok: false; code: DeviceBridgeErrorCode; message: string; requestId?: string }
+  | { ok: false; code: DeviceBridgeErrorCode; message: string; requestId?: string; needsAuthorization?: NeedsAuthorizationInfo }
 
 /**
  * 依租戶挑一台裝置（內部路由的**尋址**步驟）。語義刻意保守、**不猜**：
@@ -249,7 +392,7 @@ function asIntInRange(v: unknown, min: number, max: number): number | null {
 export function sanitizeToolArgs(
   tool: DeviceBridgeTool,
   raw: unknown,
-  opts?: { authorizedRoots?: unknown },
+  opts?: { authorizedRoots?: unknown; deferRecursiveRootCheck?: boolean },
 ): SanitizeOk | SanitizeErr {
   if (typeof raw !== "object" || raw === null) {
     return { ok: false, code: "bad_request", message: "args must be an object" }
@@ -257,12 +400,15 @@ export function sanitizeToolArgs(
   const r = raw as Record<string, unknown>
   const p = asString(r.path)
   if (!p) return { ok: false, code: "bad_request", message: "args.path is required" }
-  if (isSensitivePath(p)) return { ok: false, code: "sensitive_path", message: "path is denied by policy" }
+  // W6b：硬 denylist（全域不可繞；只加嚴既有敏感判定）。任何模式／規則都不得放行。
+  if (isHardDeniedPath(p) || isSensitivePath(p)) return { ok: false, code: "sensitive_path", message: "path is denied by policy" }
 
   switch (tool) {
     case "list_dir": {
-      const problem = recursiveRootProblem(p, opts?.authorizedRoots)
-      if (problem) return { ok: false, code: "path_not_authorized", message: `list_dir root denied: ${problem}` }
+      if (!opts?.deferRecursiveRootCheck) {
+        const problem = recursiveRootProblem(p, opts?.authorizedRoots)
+        if (problem) return { ok: false, code: "path_not_authorized", message: `list_dir root denied: ${problem}` }
+      }
       const args: Record<string, unknown> = { path: p }
       if (r.max_entries !== undefined) {
         const n = asIntInRange(r.max_entries, 1, 2000)
@@ -283,8 +429,10 @@ export function sanitizeToolArgs(
     case "grep": {
       const pattern = asString(r.pattern)
       if (!pattern) return { ok: false, code: "bad_request", message: "args.pattern is required" }
-      const problem = recursiveRootProblem(p, opts?.authorizedRoots)
-      if (problem) return { ok: false, code: "path_not_authorized", message: `grep root denied: ${problem}` }
+      if (!opts?.deferRecursiveRootCheck) {
+        const problem = recursiveRootProblem(p, opts?.authorizedRoots)
+        if (problem) return { ok: false, code: "path_not_authorized", message: `grep root denied: ${problem}` }
+      }
       // max_file_bytes：H2 輸入側契約——逐檔讀入上限（裝置端遵守）。
       const args: Record<string, unknown> = { path: p, pattern, max_matches: 100, max_file_bytes: clampFileBytes(r.max_file_bytes) }
       if (r.max_matches !== undefined) {
@@ -326,6 +474,9 @@ export class DeviceBridge {
   private readonly queue = new Map<string, string[]>()
   private readonly pollWaiters = new Set<() => void>()
   readonly tokens = new ConsentTokenStore()
+  readonly grants = new OnceGrantStore()
+  /** session 級規則（記憶體，key＝tenant；只存在本進程，**不持久化到共享庫**）。 */
+  private readonly sessionRules = new Map<string, PermissionRule[]>()
 
   constructor(private readonly opts: { requestTimeoutMs?: number; consentTtlMs?: number; heartbeatTtlMs?: number } = {}) {}
 
@@ -345,16 +496,66 @@ export class DeviceBridge {
     return this.devices.get(this.deviceKey(tenant, deviceId))
   }
 
+  // ── W6b：session 規則與權限狀態 ──────────────────────────────────────
+  private tenantRules(tenant: string): PermissionRule[] {
+    return this.sessionRules.get(tenant) ?? []
+  }
+  /** 裝置級規則 ＋ 該 tenant 的 session 規則（順序：裝置在前，session 在後）。 */
+  private allRulesFor(rec: DeviceRecord): PermissionRule[] {
+    return [...rec.rules, ...this.tenantRules(rec.tenant)]
+  }
+  /** 加一條 session 規則（authorize scope=session/permanent 用）。 */
+  addSessionRule(tenant: string, rule: PermissionRule): void {
+    const list = this.sessionRules.get(tenant) ?? []
+    if (list.length >= 64) return
+    list.push(rule)
+    this.sessionRules.set(tenant, list)
+  }
+  /** 清掉某 tenant 的 session 規則（測試／會話結束用）。 */
+  clearSessionRules(tenant: string): void {
+    this.sessionRules.delete(tenant)
+  }
+  /** 挑代表裝置（唯讀；與 describeTenantDevices 同一語義）。 */
+  private representativeDevice(tenant: string, now: number): DeviceRecord | undefined {
+    const mine = [...this.devices.values()].filter((r) => r.tenant === tenant)
+    if (mine.length === 0) return undefined
+    const picked = this.pickDeviceForTenant(tenant, now)
+    if (picked.ok) return mine.find((r) => r.deviceId === picked.deviceId) ?? mine[0]
+    return mine.slice().sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.deviceId.localeCompare(b.deviceId))[0]
+  }
+  /** 某租戶目前的權限狀態（mode ＋ 合併規則）；無裝置時回預設 ask 與該 tenant session 規則。 */
+  permissionStateForTenant(tenant: string, now: number = Date.now()): { mode: DeviceBridgeMode; rules: PermissionRule[] } {
+    const rep = this.representativeDevice(tenant, now)
+    if (!rep) return { mode: "ask", rules: [...this.tenantRules(tenant)] }
+    return { mode: rep.mode, rules: this.allRulesFor(rep) }
+  }
+  /** 某租戶代表裝置自報的家目錄（authorize 的 too_broad 判定用）；無＝null。 */
+  homeForTenant(tenant: string, now: number = Date.now()): string | null {
+    return this.representativeDevice(tenant, now)?.home ?? null
+  }
+
   /**
    * 註冊：綁定 tenant(userId) ↔ deviceId ↔ connectionId。同裝置重註冊＝換連線（舊連線作廢）。
    * `roots`＝使用者已授權的絕對路徑根（H2 遞迴夾制用）；未帶／全非法＝空集 ⇒ grep/list_dir 全拒。
    */
-  register(input: { tenant: string; userId: number | null; apiKeyHash: string; deviceId?: string; roots?: unknown; now?: number }): {
+  register(input: {
+    tenant: string
+    userId: number | null
+    apiKeyHash: string
+    deviceId?: string
+    roots?: unknown
+    mode?: unknown
+    rules?: unknown
+    home?: unknown
+    now?: number
+  }): {
     deviceId: string
     connectionId: string
     heartbeatIntervalMs: number
     pollUrl: string
     authorizedRoots: string[]
+    mode: DeviceBridgeMode
+    permissionsEnabled: boolean
   } {
     const now = input.now ?? Date.now()
     const deviceId = input.deviceId && input.deviceId.trim() ? input.deviceId.trim().slice(0, 128) : randomId("dev")
@@ -362,6 +563,13 @@ export class DeviceBridge {
     const prev = this.devices.get(key)
     if (prev) this.byConnection.delete(prev.connectionId)
     const connectionId = randomId("conn")
+    // 相容策略：只有呼叫端**明確**給了 mode 或 rules 才啟用新決策引擎；否則維持升級前
+    // 行為（denylist ＋ 遞迴根夾制）。缺省 mode 的「語義預設」仍為 `ask`（status 回報）。
+    const modeRaw = input.mode
+    const rules = sanitizePermissionRules(input.rules)
+    const permissionsEnabled = isDeviceBridgeMode(modeRaw) || rules.length > 0
+    const mode: DeviceBridgeMode = isDeviceBridgeMode(modeRaw) ? modeRaw : "ask"
+    const home = typeof input.home === "string" && input.home.trim() ? input.home.trim() : null
     this.devices.set(key, {
       deviceId,
       tenant: input.tenant,
@@ -369,6 +577,10 @@ export class DeviceBridge {
       apiKeyHash: input.apiKeyHash,
       connectionId,
       authorizedRoots: sanitizeAuthorizedRoots(input.roots),
+      mode,
+      permissionsEnabled,
+      rules,
+      home,
       registeredAt: now,
       lastSeenAt: now,
     })
@@ -379,6 +591,8 @@ export class DeviceBridge {
       heartbeatIntervalMs: 30_000,
       pollUrl: "/agent/v1/device-bridge/poll",
       authorizedRoots: this.devices.get(key)!.authorizedRoots,
+      mode,
+      permissionsEnabled,
     }
   }
 
@@ -473,6 +687,8 @@ export class DeviceBridge {
     tool: unknown
     args?: unknown
     timeoutMs?: number
+    /** scope=once 的一次性授權許可（authorize 端點簽發）。 */
+    authorizationToken?: unknown
   }): Promise<InvokeResult> {
     if (!isToolAllowed(input.tool)) {
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(input.tool)}` }
@@ -481,7 +697,13 @@ export class DeviceBridge {
     // H2：遞迴型工具（grep/list_dir）的根夾制需要裝置的授權根，故先取記錄讀授權集
     // （這一步只讀授權集，不是「裝置在線」判定；denylist 仍先於在線檢查）。
     const rec = this.getDevice(input.tenant, input.deviceId)
-    const cleaned = sanitizeToolArgs(tool, input.args, { authorizedRoots: rec?.authorizedRoots })
+    const configured = rec?.permissionsEnabled === true
+    const cleaned = sanitizeToolArgs(tool, input.args, {
+      authorizedRoots: rec?.authorizedRoots,
+      // 啟用決策引擎時，遞迴根的授權判斷交給 evaluatePermission（模式語義）；
+      // 未啟用＝沿用升級前的遞迴根夾制。
+      deferRecursiveRootCheck: configured,
+    })
     if (!cleaned.ok) {
       // gateway tsconfig 為 strict:false（boolean 字面量判別式不窄化），顯式轉型。
       const err = cleaned as SanitizeErr
@@ -491,6 +713,39 @@ export class DeviceBridge {
     const now = Date.now()
     if (!rec) return { ok: false, code: "device_offline", message: "device not registered" }
     if (!this.isOnline(rec, now)) return { ok: false, code: "device_offline", message: "device heartbeat expired" }
+
+    // W6b：決策引擎（硬 denylist → safety → 規則 → 模式）。只有明確配置的裝置才啟用；
+    // 未配置＝沿用升級前行為（此處不介入）。denylist 已在 sanitizeToolArgs 內先擋。
+    if (rec.permissionsEnabled) {
+      const path = typeof cleaned.args.path === "string" ? cleaned.args.path : ""
+      let granted = false
+      if (input.authorizationToken !== undefined && input.authorizationToken !== null) {
+        granted = this.grants.consume(input.authorizationToken, { tenant: input.tenant, tool, path }, now).ok
+      }
+      if (!granted) {
+        const verdict = evaluatePermission({
+          tool,
+          resolvedPath: path,
+          mode: rec.mode,
+          rules: this.allRulesFor(rec),
+          authorizedRoots: rec.authorizedRoots,
+          home: rec.home,
+        })
+        if (verdict.decision === "deny") {
+          const code: DeviceBridgeErrorCode = verdict.reason === "denylist" ? "sensitive_path" : "permission_denied"
+          return { ok: false, code, message: `path denied by policy (${verdict.reason})` }
+        }
+        if (verdict.decision === "ask") {
+          const root = suggestAuthorizationRoot(path, rec.home) ?? path
+          return {
+            ok: false,
+            code: "needs_authorization",
+            message: "此路徑尚未授權。",
+            needsAuthorization: { root, reason: mapAskReason(verdict.reason), options: AUTHORIZATION_OPTIONS },
+          }
+        }
+      }
+    }
 
     const requestId = randomId("req")
     const token = this.tokens.mint({ deviceId: rec.deviceId, tool, requestId }, this.consentTtlMs(), now)
@@ -604,6 +859,21 @@ export class DeviceBridge {
   }
 
   /**
+   * W6b：某 userId 目前在線（最近心跳）裝置的權限模式與授權根（環境事實層用）。
+   * 無在線裝置 → null（呼叫端不得猜）。**唯讀、零副作用**。
+   */
+  policyStateFor(userId: number | null, now: number = Date.now()): { mode: DeviceBridgeMode; authorizedRoots: string[] } | null {
+    let best: DeviceRecord | undefined
+    for (const rec of this.devices.values()) {
+      if (rec.userId !== userId) continue
+      if (!this.isOnline(rec, now)) continue
+      if (!best || rec.lastSeenAt > best.lastSeenAt) best = rec
+    }
+    if (!best) return null
+    return { mode: best.mode, authorizedRoots: [...best.authorizedRoots] }
+  }
+
+  /**
    * 依租戶挑一台裝置（內部路由尋址）。**不做任何動作、不改狀態**。
    * 見 `PickDeviceResult` 的五態語義。
    */
@@ -686,6 +956,26 @@ export function deviceBridgeRuntimeState(
   return { enabled: true, ...snapshot }
 }
 
+/** W6b：本機檔案權限模式與授權根的執行期快照（環境事實層用）。 */
+export interface DeviceBridgePolicyState {
+  mode: DeviceBridgeMode
+  authorizedRoots: string[]
+}
+
+/**
+ * 回答「某個 userId 目前在線裝置的本機檔案權限模式與授權根清單」。純讀、零副作用。
+ * 總開關未開／userId 未知／無在線裝置 → null（呼叫端不得猜）。
+ */
+export function deviceBridgePolicyState(
+  userId: number | null,
+  opts: { bridge?: DeviceBridge; env?: NodeJS.ProcessEnv; now?: number } = {},
+): DeviceBridgePolicyState | null {
+  if (!deviceBridgeEnabled(opts.env ?? process.env)) return null
+  if (userId === null || userId === undefined) return null
+  const bridge = opts.bridge ?? deviceBridge
+  return bridge.policyStateFor(userId, opts.now)
+}
+
 // ── HTTP 路由（僅在 deviceBridgeEnabled() 為真時由 router 呼叫）──────────
 
 interface DeviceBridgeRouteCtx {
@@ -704,6 +994,23 @@ async function readJsonBody(req: Request): Promise<Record<string, unknown> | nul
 
 function errorResponse(status: number, code: DeviceBridgeErrorCode | string, message: string): Response {
   return Response.json({ ok: false, error: { code, message } }, { status })
+}
+
+/** needs_authorization：**HTTP 200**（授權發生在對話裡，不是錯誤頁；見凍結契約）。 */
+function needsAuthorizationResponse(info: NeedsAuthorizationInfo): Response {
+  return Response.json(
+    {
+      ok: false,
+      error: {
+        code: "needs_authorization",
+        message: "此路徑尚未授權。",
+        root: info.root,
+        reason: info.reason,
+        options: info.options,
+      },
+    },
+    { status: 200 },
+  )
 }
 
 /**
@@ -733,7 +1040,16 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
 
   switch (ctx.pathname) {
     case "/agent/v1/device-bridge/register": {
-      const reg = deviceBridge.register({ tenant, userId: identity.userId, apiKeyHash, deviceId: deviceId || undefined, roots: body.roots })
+      const reg = deviceBridge.register({
+        tenant,
+        userId: identity.userId,
+        apiKeyHash,
+        deviceId: deviceId || undefined,
+        roots: body.roots,
+        mode: body.mode,
+        rules: body.rules,
+        home: body.home,
+      })
       return Response.json({
         ok: true,
         device_id: reg.deviceId,
@@ -741,6 +1057,8 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
         heartbeat_interval_ms: reg.heartbeatIntervalMs,
         poll_url: reg.pollUrl,
         authorized_roots: reg.authorizedRoots,
+        mode: reg.mode,
+        permissions_enabled: reg.permissionsEnabled,
       })
     }
     case "/agent/v1/device-bridge/heartbeat": {
@@ -781,10 +1099,16 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
     }
     case "/agent/v1/device-bridge/invoke": {
       if (!deviceId) return errorResponse(400, "bad_request", "device_id is required")
-      const out = await deviceBridge.invoke({ tenant, deviceId, tool: body.tool, args: body.args })
+      const out = await deviceBridge.invoke({ tenant, deviceId, tool: body.tool, args: body.args, authorizationToken: body.authorization_token })
       if (!out.ok) {
-        const err = out as { ok: false; code: DeviceBridgeErrorCode; message: string; requestId?: string }
-        const status = err.code === "tool_not_allowed" || err.code === "sensitive_path" || err.code === "path_not_authorized" ? 403 : err.code === "device_offline" ? 404 : 400
+        const err = out as { ok: false; code: DeviceBridgeErrorCode; message: string; requestId?: string; needsAuthorization?: NeedsAuthorizationInfo }
+        if (err.code === "needs_authorization" && err.needsAuthorization) return needsAuthorizationResponse(err.needsAuthorization)
+        const status =
+          err.code === "tool_not_allowed" || err.code === "sensitive_path" || err.code === "path_not_authorized" || err.code === "permission_denied" || err.code === "mode_off"
+            ? 403
+            : err.code === "device_offline"
+              ? 404
+              : 400
         return Response.json({ ok: false, error: { code: err.code, message: err.message }, request_id: err.requestId }, { status })
       }
       return Response.json(out)
@@ -846,6 +1170,13 @@ function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; 
       return { status: 403, code: "sensitive_path" }
     case "path_not_authorized":
       return { status: 403, code: "path_not_authorized" }
+    case "permission_denied":
+      return { status: 403, code: "permission_denied" }
+    case "mode_off":
+      return { status: 403, code: "mode_off" }
+    case "needs_authorization":
+      // 一般由此前的專屬分支處理（HTTP 200）；保留在此作型別閉合（不應走到）。
+      return { status: 200, code: "needs_authorization" }
     case "device_offline":
     case "device_connection_stale":
       return { status: 404, code: "device_offline" }
@@ -911,9 +1242,11 @@ export async function handleInternalDeviceInvoke(req: Request, deps: InternalDev
     return internalDeviceError(perr.code === "device_ambiguous" ? 409 : 404, perr.code, perr.message)
   }
 
-  const out = await bridge.invoke({ tenant, deviceId: (pick as { ok: true; deviceId: string }).deviceId, tool, args })
+  const out = await bridge.invoke({ tenant, deviceId: (pick as { ok: true; deviceId: string }).deviceId, tool, args, authorizationToken: body.authorization_token })
   if (!out.ok) {
-    const oerr = out as { ok: false; code: DeviceBridgeErrorCode; message: string }
+    const oerr = out as { ok: false; code: DeviceBridgeErrorCode; message: string; needsAuthorization?: NeedsAuthorizationInfo }
+    // needs_authorization：HTTP 200（授權發生在對話裡），body 形狀照凍結契約。
+    if (oerr.code === "needs_authorization" && oerr.needsAuthorization) return needsAuthorizationResponse(oerr.needsAuthorization)
     const mapped = mapInternalDeviceError(oerr.code)
     return internalDeviceError(mapped.status, mapped.code, oerr.message)
   }
@@ -944,8 +1277,72 @@ export async function handleInternalDeviceStatus(req: Request, deps: InternalDev
   }
   if (!tenant) return internalDeviceError(404, "session_unknown", "session_id could not be resolved to an owner")
   const desc = bridge.describeTenantDevices(tenant)
+  const perm = bridge.permissionStateForTenant(tenant)
   return Response.json({
     ok: true,
-    device: desc ? { online: desc.online, roots: desc.roots, last_heartbeat_ms: desc.lastHeartbeatMs } : null,
+    device: desc
+      ? { online: desc.online, roots: desc.roots, last_heartbeat_ms: desc.lastHeartbeatMs, mode: perm.mode, rules: perm.rules }
+      : null,
   })
+}
+
+/**
+ * POST /internal/device/authorize?session_id=… — 對話中授權本機路徑（loopback-only）。
+ *
+ * scope：
+ *   - `once`：不落規則，簽一枚一次性許可（帶 TTL）並回 `token`；
+ *     下一次 invoke 帶 `authorization_token` 使用，用一次即失效。
+ *   - `session`：加進該 session 的規則集（記憶體，隨 session 生命週期；本進程內）。
+ *   - `permanent`：gateway **不持久化**，回 `persist_on_device:true`，由裝置端落地；
+ *     gateway 只把它加進當前 session 規則集。
+ * **一律不在 gateway 端持久化規則到共享庫**（避免跨租戶洩漏）。
+ *
+ * 錯誤碼：bad_request／session_unknown／root_not_absolute／root_too_broad／denylisted_root。
+ */
+export async function handleInternalDeviceAuthorize(req: Request, deps: InternalDeviceRouteDeps): Promise<Response> {
+  const bridge = deps.bridge ?? deviceBridge
+  const sessionId = new URL(req.url).searchParams.get("session_id") ?? ""
+  if (!sessionId) return internalDeviceError(400, "bad_request", "session_id is required")
+  const body = await readJsonBody(req)
+  if (body === null) return internalDeviceError(400, "bad_request", "invalid json body")
+  const scope = body.scope
+  if (!isAuthorizationScope(scope)) return internalDeviceError(400, "bad_request", "scope must be once|session|permanent")
+  const toolRaw = body.tool
+  if (toolRaw !== undefined && toolRaw !== "*" && !isToolAllowed(toolRaw)) {
+    return internalDeviceError(400, "bad_request", "tool must be a device-bridge tool or *")
+  }
+  if (typeof body.root !== "string" || body.root.trim().length === 0) {
+    return internalDeviceError(400, "bad_request", "root is required")
+  }
+
+  let tenant: string | null = null
+  try {
+    tenant = await deps.resolveTenant(sessionId)
+  } catch {
+    tenant = null
+  }
+  if (!tenant) return internalDeviceError(404, "session_unknown", "session_id could not be resolved to an owner")
+
+  const home = bridge.homeForTenant(tenant)
+  const mode = bridge.permissionStateForTenant(tenant).mode
+  const problem = authorizationRootProblem(body.root, home, mode)
+  if (problem) {
+    const status = problem === "root_not_absolute" ? 400 : 403
+    return internalDeviceError(status, problem, `authorization root rejected: ${problem}`)
+  }
+  const absRoot = expandToAbsolute(body.root, home)!
+  const ruleTool: PermissionTool = toolRaw === "*" || toolRaw === undefined ? "*" : (toolRaw as DeviceBridgeTool)
+  const rule: PermissionRule = { effect: "allow", tool: ruleTool, specifier: authorizationRuleSpecifier(absRoot) }
+  if (scope === "session" || scope === "permanent") bridge.addSessionRule(tenant, rule)
+
+  const state = bridge.permissionStateForTenant(tenant)
+  const payload: Record<string, unknown> = { ok: true, applied: { scope, root: absRoot }, rules: state.rules }
+  if (scope === "once") {
+    payload.token = bridge.grants.mint(
+      { tenant, root: absRoot, tool: toolRaw === undefined || toolRaw === "*" ? null : (toolRaw as DeviceBridgeTool) },
+      DEVICE_ONCE_GRANT_TTL_MS,
+    )
+  }
+  if (scope === "permanent") payload.persist_on_device = true
+  return Response.json(payload)
 }

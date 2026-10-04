@@ -33,6 +33,11 @@ export interface BridgeStatus {
   roots: string[];
   deviceId: string | null;
   lastError?: string;
+  /**
+   * 本機檔案權限模式（2026-10-04 凍結契約）。**舊桌面產物沒有此欄位** ⇒ UI 不得
+   * 假設它存在，一律走 modeFromStatus 的推導。
+   */
+  mode?: LocalFileMode;
 }
 
 export interface PickFilesOpts {
@@ -46,6 +51,11 @@ export interface DeviceBridgeApi {
     status(): Promise<BridgeStatus>;
     enable(): Promise<BridgeStatus>;
     disable(): Promise<BridgeStatus>;
+    /**
+     * 切權限模式（2026-10-04 契約新增）。**舊桌面產物沒有此方法** ⇒ 一律先過
+     * `supportsSetMode()` 再呼叫，並在沒有它時走 enable/disable 的降級路徑。
+     */
+    setMode?(mode: LocalFileMode): Promise<BridgeStatus>;
   };
   onBridgeStatus(cb: (status: BridgeStatus) => void): () => void;
   pickFiles(opts: PickFilesOpts): Promise<string[]>;
@@ -216,6 +226,100 @@ export function bridgeToneClass(tone: BridgeTone): string {
   }
 }
 
+// ─────────────────────────── 本機檔案權限模式（四檔；文案＝單一真源）
+
+/**
+ * 四檔權限模式（凍結契約）。**此處是文案的唯一真源**：UI 不得另寫一份字串，
+ * 一律經 `LOCAL_FILE_MODES` / `describeLocalFileMode()` 取用。
+ *
+ * 模式語義逐字採用產品規格，不得改寫。
+ */
+export type LocalFileMode = "off" | "ask" | "auto" | "full";
+
+/** 圖示語義名。本檔零外部 import（不引 lucide）——UI 依此名映射到具體圖示元件。 */
+export type LocalFileModeIcon = "power" | "message-circle-question" | "folder-check" | "globe";
+
+export interface LocalFileModeSpec {
+  id: LocalFileMode;
+  icon: LocalFileModeIcon;
+  title: string;
+  subtitle: string;
+}
+
+export const LOCAL_FILE_MODES: readonly LocalFileModeSpec[] = [
+  { id: "off", icon: "power", title: "關閉", subtitle: "agent 不能讀取本機檔案。" },
+  { id: "ask", icon: "message-circle-question", title: "每次詢問", subtitle: "每次讀取前先問你。" },
+  {
+    id: "auto",
+    icon: "folder-check",
+    title: "授權範圍內自動",
+    subtitle: "已授權資料夾內自動讀取，範圍外會先問你。",
+  },
+  {
+    id: "full",
+    icon: "globe",
+    title: "完全訪問",
+    subtitle: "整個家目錄可讀；敏感位置（~/.ssh、~/.aws、私鑰等）一律不讀。",
+  },
+] as const;
+
+export const LOCAL_FILE_MODE_IDS: readonly LocalFileMode[] = LOCAL_FILE_MODES.map((m) => m.id);
+
+/** tone 只給標題上色（收斂在最寬鬆的一檔用 warn 提示）。 */
+const LOCAL_FILE_MODE_TONES: Record<LocalFileMode, BridgeTone> = {
+  off: "off",
+  ask: "info",
+  auto: "ok",
+  full: "warn",
+};
+
+export function isLocalFileMode(value: unknown): value is LocalFileMode {
+  return typeof value === "string" && (LOCAL_FILE_MODE_IDS as readonly string[]).includes(value);
+}
+
+export interface LocalFileModeDisplay {
+  title: string;
+  subtitle: string;
+  tone: BridgeTone;
+}
+
+/** mode → 文案／色調（純函式）。未知值回退 off，不 throw（契約漂移時寧可保守）。 */
+export function describeLocalFileMode(mode: LocalFileMode): LocalFileModeDisplay {
+  const spec = LOCAL_FILE_MODES.find((m) => m.id === mode) ?? LOCAL_FILE_MODES[0];
+  return { title: spec.title, subtitle: spec.subtitle, tone: LOCAL_FILE_MODE_TONES[spec.id] };
+}
+
+export interface LocalFileModeResolution {
+  mode: LocalFileMode;
+  /** true＝由 enabled/roots 推導（殼沒回報真值 mode 欄位）；false＝殼回報的真值。 */
+  derived: boolean;
+  /** false＝status 尚未讀到（null）；mode 僅為佔位，UI 不得顯示成「已選中」。 */
+  known: boolean;
+}
+
+/**
+ * 從 bridge status 得到模式。真值優先；**舊產物沒有 mode 欄位**時推導：
+ *   !enabled → off；enabled && roots 非空 → auto；enabled && roots 空 → ask。
+ * 推導結果一律帶 `derived: true`，讓 UI／回報能標明「這是推導不是真值」。
+ */
+export function modeFromStatus(status: BridgeStatus | null): LocalFileModeResolution {
+  if (!status) return { mode: "off", derived: true, known: false };
+  if (isLocalFileMode(status.mode)) return { mode: status.mode, derived: false, known: true };
+  const roots = Array.isArray(status.roots) ? status.roots : [];
+  if (!status.enabled) return { mode: "off", derived: true, known: true };
+  return roots.length > 0
+    ? { mode: "auto", derived: true, known: true }
+    : { mode: "ask", derived: true, known: true };
+}
+
+/** 舊桌面產物沒有 `bridge.setMode` ⇒ 選擇器可見但須 disabled（不得 throw）。 */
+export function supportsSetMode(api: unknown): boolean {
+  if (!isRecord(api)) return false;
+  const bridge = api.bridge;
+  if (!isRecord(bridge)) return false;
+  return typeof bridge.setMode === "function";
+}
+
 // ─────────────────────────── 無框架狀態機（互動可測；元件只是它的薄殼）
 
 export interface DeviceBridgeSnapshot {
@@ -245,6 +349,13 @@ export interface DeviceBridgeController {
   refresh(): Promise<void>;
   /** 開／關授權橋接。 */
   setEnabled(enabled: boolean): Promise<void>;
+  /**
+   * 切本機檔案權限模式（2026-10-04 新增；既有方法語義不動）。
+   *   · 有 bridge.setMode → 直接切（非 off 且殼回報未 enabled 時補一次 enable）。
+   *   · 無 bridge.setMode（舊產物）→ off 走 disable()、非 off 走 enable() 的降級。
+   * 失敗一律收斂成 notice，不 throw。
+   */
+  setMode(mode: LocalFileMode): Promise<void>;
   /** 選資料夾（挑完即授權該路徑）並重讀 status。回傳已授權路徑（失敗回空陣列）。 */
   pickDirectory(): Promise<string[]>;
   /** 卸載時呼叫：取消訂閱、標記 disposed，之後不再 notify。 */
@@ -329,6 +440,31 @@ export function createDeviceBridgeController(getApi: () => unknown = getDeviceBr
     }
   };
 
+  /**
+   * 切權限模式。有 setMode 走它；沒有（舊產物）就 off→disable、非 off→enable 降級。
+   * 非 off 且切完仍 !enabled 時補一次 enable（契約：其他檔若未啟用則同時啟用）。
+   */
+  const setMode = async (mode: LocalFileMode): Promise<void> => {
+    const a = api();
+    if (!a) return;
+    patch({ busy: true, notice: null });
+    try {
+      let next: BridgeStatus;
+      if (typeof a.bridge.setMode === "function") {
+        next = await a.bridge.setMode(mode);
+        if (mode !== "off" && !next.enabled) next = await a.bridge.enable();
+      } else if (mode === "off") {
+        next = await a.bridge.disable();
+      } else {
+        next = await a.bridge.enable();
+      }
+      if (disposed) return;
+      patch({ status: next, loading: false, busy: false });
+    } catch (e) {
+      if (!disposed) patch({ busy: false, notice: errText(e) });
+    }
+  };
+
   const pickDirectory = async (): Promise<string[]> => {
     const a = api();
     if (!a) return [];
@@ -390,6 +526,7 @@ export function createDeviceBridgeController(getApi: () => unknown = getDeviceBr
     init,
     refresh,
     setEnabled,
+    setMode,
     pickDirectory,
     dispose,
   };

@@ -83,3 +83,112 @@ test("M4: 錯誤回報（consent_token_expired）帶 consent_token", async () =>
     assert.match(String(calls[0].body.error), /consent_token_expired/);
   });
 });
+
+// ── W6c：register 帶 mode/rules（加性；未提供＝不下發，維持既有呼叫端行為）──────
+
+/**
+ * stub：register 成功，poll 卡住（永不結算，避免長輪詢迴圈在測試中空轉）。
+ * 只攔 register 的 body 以斷言；不連真閘道。
+ */
+async function withRegisterStub(fn) {
+  const calls = [];
+  const orig = global.fetch;
+  global.fetch = (url, init) => {
+    const u = String(url);
+    calls.push({ url: u, body: init && init.body ? JSON.parse(init.body) : null });
+    if (/\/register$/.test(u)) {
+      return Promise.resolve({
+        status: 200,
+        json: async () => ({ ok: true, device_id: "d1", connection_id: "c1", heartbeat_interval_ms: 60000 }),
+      });
+    }
+    if (/\/poll$/.test(u)) return new Promise(() => {}); // 不結算
+    return Promise.resolve({ status: 200, json: async () => ({ ok: true }) });
+  };
+  try {
+    return await fn(calls);
+  } finally {
+    global.fetch = orig;
+    client.stopDeviceBridge();
+    client.__test.runtime.mode = null;
+    client.__test.runtime.rules = undefined;
+  }
+}
+
+function mkRoot() {
+  return nodeFs.realpathSync(nodeFs.mkdtempSync(path.join(os.tmpdir(), "eimu-bridge-reg-")));
+}
+
+test("register: 提供 modeProvider/rulesProvider ⇒ body 帶 mode 與 rules", async () => {
+  localWorker.authorizedRoots.clear();
+  const root = mkRoot();
+  localWorker.authorizeRoots([root]);
+  try {
+    const calls = await withRegisterStub(async (calls) => {
+      await client.startDeviceBridge({
+        enabled: true,
+        gatewayBaseUrl: "http://127.0.0.1:1",
+        credentialProvider: () => "cred-fake",
+        modeProvider: () => "auto",
+        rulesProvider: () => [{ effect: "allow", tool: "read_file" }],
+      });
+      // snapshot 透傳 mode（供 bridge.status()）；在 stop 前斷言。
+      assert.equal(client.getDeviceBridgeState().mode, "auto");
+      return calls;
+    });
+    const reg = calls.find((c) => /\/register$/.test(c.url));
+    assert.ok(reg, "必須發出 register");
+    assert.equal(reg.body.mode, "auto");
+    assert.deepEqual(reg.body.rules, [{ effect: "allow", tool: "read_file" }]);
+  } finally {
+    localWorker.authorizedRoots.clear();
+    nodeFs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("register: 未提供 modeProvider/rulesProvider ⇒ 不下發 mode/rules 欄位（既有行為不變）", async () => {
+  localWorker.authorizedRoots.clear();
+  const root = mkRoot();
+  localWorker.authorizeRoots([root]);
+  try {
+    const calls = await withRegisterStub(async (calls) => {
+      await client.startDeviceBridge({
+        enabled: true,
+        gatewayBaseUrl: "http://127.0.0.1:1",
+        credentialProvider: () => "cred-fake",
+      });
+      return calls;
+    });
+    const reg = calls.find((c) => /\/register$/.test(c.url));
+    assert.ok(reg);
+    assert.equal(Object.prototype.hasOwnProperty.call(reg.body, "mode"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(reg.body, "rules"), false);
+    assert.equal(client.getDeviceBridgeState().mode, null);
+  } finally {
+    localWorker.authorizedRoots.clear();
+    nodeFs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("register: modeProvider 回非法值 ⇒ 不下發 mode（注入點驗值，不硬塞壞值）", async () => {
+  localWorker.authorizedRoots.clear();
+  const root = mkRoot();
+  localWorker.authorizeRoots([root]);
+  try {
+    const calls = await withRegisterStub(async (calls) => {
+      await client.startDeviceBridge({
+        enabled: true,
+        gatewayBaseUrl: "http://127.0.0.1:1",
+        credentialProvider: () => "cred-fake",
+        modeProvider: () => "bogus",
+      });
+      return calls;
+    });
+    const reg = calls.find((c) => /\/register$/.test(c.url));
+    assert.equal(Object.prototype.hasOwnProperty.call(reg.body, "mode"), false);
+    assert.equal(client.getDeviceBridgeState().mode, null);
+  } finally {
+    localWorker.authorizedRoots.clear();
+    nodeFs.rmSync(root, { recursive: true, force: true });
+  }
+});

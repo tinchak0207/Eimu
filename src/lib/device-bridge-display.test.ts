@@ -12,13 +12,19 @@ import assert from "node:assert/strict";
 import {
   BRIDGE_UNAVAILABLE_LABEL,
   BRIDGE_UNKNOWN_LABEL,
+  LOCAL_FILE_MODES,
   bridgeToneClass,
   createDeviceBridgeController,
   describeBridgeAvailability,
   describeBridgeStatus,
+  describeLocalFileMode,
   isDeviceBridgeApi,
+  isLocalFileMode,
+  modeFromStatus,
+  supportsSetMode,
   type BridgeStatus,
   type DeviceBridgeApi,
+  type LocalFileMode,
   type PickFilesOpts,
 } from "./device-bridge-display.ts";
 
@@ -42,37 +48,54 @@ interface ApiOptions {
   onPick?: (opts: PickFilesOpts) => void;
   picked?: string[];
   pickReject?: unknown;
+  /** 加 bridge.setMode（模擬新桌面產物）；不給＝舊產物（只有 enable/disable）。 */
+  hasSetMode?: boolean;
+  setModeResult?: (mode: LocalFileMode) => BridgeStatus;
 }
 
 interface FakeApi extends DeviceBridgeApi {
-  calls: { status: number; enable: number; disable: number; pick: PickFilesOpts[]; unsub: number };
+  calls: {
+    status: number;
+    enable: number;
+    disable: number;
+    pick: PickFilesOpts[];
+    unsub: number;
+    setMode: LocalFileMode[];
+  };
   emit: (s: BridgeStatus) => void;
 }
 
 function makeApi(opts: ApiOptions = {}): FakeApi {
-  const calls: FakeApi["calls"] = { status: 0, enable: 0, disable: 0, pick: [], unsub: 0 };
+  const calls: FakeApi["calls"] = { status: 0, enable: 0, disable: 0, pick: [], unsub: 0, setMode: [] };
   let cbs: Array<(s: BridgeStatus) => void> = [];
   const queue = [...(opts.statuses ?? [])];
   const next = () => queue.shift() ?? status({ state: "online", enabled: true });
+  const bridge: FakeApi["bridge"] = {
+    async status() {
+      calls.status += 1;
+      return next();
+    },
+    async enable() {
+      calls.enable += 1;
+      opts.onEnable?.();
+      return status({ enabled: true, state: "no_authorized_roots" });
+    },
+    async disable() {
+      calls.disable += 1;
+      opts.onDisable?.();
+      return status({ enabled: false, state: "off" });
+    },
+  };
+  if (opts.hasSetMode) {
+    bridge.setMode = async (mode: LocalFileMode) => {
+      calls.setMode.push(mode);
+      return opts.setModeResult?.(mode) ?? status({ enabled: mode !== "off", state: "online", mode });
+    };
+  }
   const api: FakeApi = {
     calls,
     emit: (s) => cbs.forEach((cb) => cb(s)),
-    bridge: {
-      async status() {
-        calls.status += 1;
-        return next();
-      },
-      async enable() {
-        calls.enable += 1;
-        opts.onEnable?.();
-        return status({ enabled: true, state: "no_authorized_roots" });
-      },
-      async disable() {
-        calls.disable += 1;
-        opts.onDisable?.();
-        return status({ enabled: false, state: "off" });
-      },
-    },
+    bridge,
     onBridgeStatus(cb) {
       cbs.push(cb);
       const custom = opts.onStatus?.(cb);
@@ -258,6 +281,157 @@ test("操作失敗轉成 notice，不 throw（enable reject / pickFiles reject�
   const picked = await ctl.pickDirectory();
   assert.deepEqual(picked, []);
   assert.equal(ctl.getSnapshot().notice, "E_DENIED");
+  assert.equal(ctl.getSnapshot().busy, false);
+  ctl.dispose();
+});
+
+// ─────────────────────────── 4. 本機檔案權限模式（四檔純函式；單一真源）
+
+test("LOCAL_FILE_MODES：四檔 id 順序與文案逐字（單一真源）", () => {
+  assert.deepEqual(
+    LOCAL_FILE_MODES.map((m) => m.id),
+    ["off", "ask", "auto", "full"],
+  );
+  assert.deepEqual(
+    LOCAL_FILE_MODES.map((m) => [m.icon, m.title, m.subtitle]),
+    [
+      ["power", "關閉", "agent 不能讀取本機檔案。"],
+      ["message-circle-question", "每次詢問", "每次讀取前先問你。"],
+      ["folder-check", "授權範圍內自動", "已授權資料夾內自動讀取，範圍外會先問你。"],
+      ["globe", "完全訪問", "整個家目錄可讀；敏感位置（~/.ssh、~/.aws、私鑰等）一律不讀。"],
+    ],
+  );
+});
+
+test("describeLocalFileMode：四檔 tone 分流；未知值保守回退 off", () => {
+  assert.deepEqual(describeLocalFileMode("off"), { title: "關閉", subtitle: "agent 不能讀取本機檔案。", tone: "off" });
+  assert.deepEqual(describeLocalFileMode("ask"), { title: "每次詢問", subtitle: "每次讀取前先問你。", tone: "info" });
+  assert.deepEqual(describeLocalFileMode("auto"), {
+    title: "授權範圍內自動",
+    subtitle: "已授權資料夾內自動讀取，範圍外會先問你。",
+    tone: "ok",
+  });
+  assert.deepEqual(describeLocalFileMode("full"), {
+    title: "完全訪問",
+    subtitle: "整個家目錄可讀；敏感位置（~/.ssh、~/.aws、私鑰等）一律不讀。",
+    tone: "warn",
+  });
+  assert.equal(describeLocalFileMode("wat" as never).title, "關閉");
+});
+
+test("modeFromStatus：status 有真值 mode ⇒ derived:false", () => {
+  assert.deepEqual(modeFromStatus(status({ enabled: true, state: "online", mode: "full" })), {
+    mode: "full",
+    derived: false,
+    known: true,
+  });
+  // 真值優先於「能推導出的值」：即使 enabled 且 roots 非空（會推成 auto），仍以 full 為準。
+  assert.deepEqual(modeFromStatus(status({ enabled: true, state: "online", roots: ["/a"], mode: "ask" })), {
+    mode: "ask",
+    derived: false,
+    known: true,
+  });
+});
+
+test("modeFromStatus：舊 status 無 mode 欄位 ⇒ 由 enabled/roots 推導並標 derived:true", () => {
+  // !enabled → off
+  assert.deepEqual(modeFromStatus(status({ enabled: false, state: "off" })), {
+    mode: "off",
+    derived: true,
+    known: true,
+  });
+  // enabled && roots 空 → ask
+  assert.deepEqual(modeFromStatus(status({ enabled: true, state: "no_authorized_roots", roots: [] })), {
+    mode: "ask",
+    derived: true,
+    known: true,
+  });
+  // enabled && roots 非空 → auto
+  assert.deepEqual(modeFromStatus(status({ enabled: true, state: "online", roots: ["/a", "/b"] })), {
+    mode: "auto",
+    derived: true,
+    known: true,
+  });
+  // roots 非陣列（契約漂移）不炸
+  assert.equal(modeFromStatus({ ...status({ enabled: true }), roots: undefined as never }).mode, "ask");
+});
+
+test("modeFromStatus：status=null ⇒ known:false（UI 不得顯示成已選中）", () => {
+  assert.deepEqual(modeFromStatus(null), { mode: "off", derived: true, known: false });
+});
+
+test("isLocalFileMode：只認四檔字面，其餘為 false", () => {
+  for (const m of ["off", "ask", "auto", "full"] as const) assert.equal(isLocalFileMode(m), true);
+  for (const bad of ["", "OFF", "always", null, undefined, 3]) assert.equal(isLocalFileMode(bad), false);
+});
+
+test("supportsSetMode：有 bridge.setMode 才真；舊產物／純瀏覽器為假，不 throw", () => {
+  assert.equal(supportsSetMode(makeApi({ hasSetMode: true })), true);
+  assert.equal(supportsSetMode(makeApi()), false, "舊產物（無 setMode）必須判假");
+  assert.equal(supportsSetMode(undefined), false);
+  assert.equal(supportsSetMode(null), false);
+  assert.equal(supportsSetMode({}), false);
+  assert.equal(supportsSetMode({ bridge: { status: () => {} } }), false);
+});
+
+// ─────────────────────────── 5. controller.setMode（降級可測）
+
+test("controller.setMode：有 setMode 直接切，且非 off 未啟用時補一次 enable", async () => {
+  const api = makeApi({ hasSetMode: true, setModeResult: () => status({ enabled: false, state: "off", mode: "ask" }) });
+  const ctl = createDeviceBridgeController(() => api);
+  ctl.init();
+  await tick();
+  await ctl.setMode("ask");
+  assert.deepEqual(api.calls.setMode, ["ask"]);
+  assert.equal(api.calls.enable, 1, "非 off 且殼回報未啟用 → 補 enable");
+  assert.equal(ctl.getSnapshot().status?.enabled, true);
+  ctl.dispose();
+});
+
+test("controller.setMode：切 off 不補 enable", async () => {
+  const api = makeApi({ hasSetMode: true, setModeResult: () => status({ enabled: false, state: "off", mode: "off" }) });
+  const ctl = createDeviceBridgeController(() => api);
+  ctl.init();
+  await tick();
+  await ctl.setMode("off");
+  assert.deepEqual(api.calls.setMode, ["off"]);
+  assert.equal(api.calls.enable, 0);
+  assert.equal(ctl.getSnapshot().status?.mode, "off");
+  ctl.dispose();
+});
+
+test("controller.setMode：舊產物（無 setMode）→ off 走 disable、非 off 走 enable", async () => {
+  const api = makeApi(); // 無 hasSetMode ⇒ 舊產物
+  const ctl = createDeviceBridgeController(() => api);
+  ctl.init();
+  await tick();
+  await ctl.setMode("full");
+  assert.equal(api.calls.enable, 1);
+  assert.equal(api.calls.disable, 0);
+  assert.deepEqual(api.calls.setMode, []);
+  await ctl.setMode("off");
+  assert.equal(api.calls.disable, 1);
+  ctl.dispose();
+});
+
+test("controller.setMode：無 eimuLocal 時 no-op 不 throw", async () => {
+  const ctl = createDeviceBridgeController(() => undefined);
+  ctl.init();
+  await ctl.setMode("full");
+  assert.equal(ctl.getSnapshot().available, false);
+  ctl.dispose();
+});
+
+test("controller.setMode：setMode reject ⇒ 收斂成 notice，不 throw", async () => {
+  const api = makeApi({ hasSetMode: true });
+  api.bridge.setMode = async () => {
+    throw new Error("E_MODE_REJECTED");
+  };
+  const ctl = createDeviceBridgeController(() => api);
+  ctl.init();
+  await tick();
+  await ctl.setMode("full");
+  assert.equal(ctl.getSnapshot().notice, "E_MODE_REJECTED");
   assert.equal(ctl.getSnapshot().busy, false);
   ctl.dispose();
 });

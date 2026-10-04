@@ -25,6 +25,7 @@ const { spawn } = require("node:child_process");
 
 const policy = require("./lib/policy.js");
 const { LocalError } = policy;
+const { PERMISSION_MODES } = require("./lib/permission-rules.js");
 
 const CHANNELS = {
   capabilities: "eimu-local:capabilities",
@@ -32,11 +33,13 @@ const CHANNELS = {
   probe: "eimu-local:probe",
   extractFrames: "eimu-local:extract-frames",
   transcode: "eimu-local:transcode",
-  // W6c：device bridge 的使用者介面（本機檔案授權）。invoke 三個 + 一個 event。
+  // W6c：device bridge 的使用者介面（本機檔案授權）。invoke 四個 + 一個 event。
   authorizedRoots: "eimu-local:authorized-roots",
   bridgeStatus: "eimu-local:bridge-status",
   bridgeEnable: "eimu-local:bridge-enable",
   bridgeDisable: "eimu-local:bridge-disable",
+  // W6c：權限模式設定（off/ask/auto/full），持久化並重啟橋讓新 mode 生效。
+  bridgeSetMode: "eimu-local:bridge-set-mode",
   // 主進程 → 頁面的狀態推送（preload 的 onBridgeStatus 訂閱此 channel）。
   bridgeEvent: "eimu-local:bridge-state",
 };
@@ -462,6 +465,8 @@ async function handleTranscode(event, filePath, opts) {
  *   stopBridge:()=>object|void,                    // 通常是 device-bridge-client.stopDeviceBridge
  *   getClientState?:()=>object,                    // 客戶端狀態快照（status/deviceId/lastError）
  *   readEnabled?:()=>boolean, writeEnabled?:(v:boolean)=>void,  // 使用者設定的持久化
+ *   readMode?:()=>string|undefined, writeMode?:(m:string)=>void, // 權限模式持久化
+ *   rulesProvider?:()=>unknown,                     // 規則（下發閘道＋第二道防線共用）
  *   getGatewayBaseUrl?:()=>string|undefined,
  *   credentialProvider?:()=>string|null,
  *   onStatusChange?:(status:object)=>void          // 狀態推送（main 推給所有視窗）
@@ -475,12 +480,19 @@ function createBridgeController(deps = {}) {
   const stopBridge = deps.stopBridge;
   const getClientState = typeof deps.getClientState === "function" ? deps.getClientState : () => ({});
   const writeEnabled = typeof deps.writeEnabled === "function" ? deps.writeEnabled : () => {};
+  const readMode = typeof deps.readMode === "function" ? deps.readMode : () => undefined;
+  const writeMode = typeof deps.writeMode === "function" ? deps.writeMode : () => {};
+  const rulesProvider = typeof deps.rulesProvider === "function" ? deps.rulesProvider : () => undefined;
   const getGatewayBaseUrl = typeof deps.getGatewayBaseUrl === "function" ? deps.getGatewayBaseUrl : () => undefined;
   const credentialProvider = typeof deps.credentialProvider === "function" ? deps.credentialProvider : () => null;
   const onStatusChange = typeof deps.onStatusChange === "function" ? deps.onStatusChange : () => {};
 
   // 使用者「是否已開啟本機檔案授權」的意圖（與客戶端是否真的連上無關）。
   let userEnabled = false;
+  // 權限模式（off/ask/auto/full）。預設 ask（契約預設值）；由持久化設定／env 還原。
+  const normalizeMode = (m) =>
+    typeof m === "string" && PERMISSION_MODES.includes(m) ? m : "ask";
+  let userMode = normalizeMode(readMode());
 
   const currentRoots = () => Array.from(authorizedRoots);
 
@@ -499,12 +511,12 @@ function createBridgeController(deps = {}) {
     return BRIDGE_STATES.has(raw) ? raw : "error";
   };
 
-  /** 凍結契約的狀態形狀：{ enabled, state, roots, deviceId, lastError? }。 */
+  /** 凍結契約的狀態形狀：{ enabled, state, roots, deviceId, mode, lastError? }。 */
   function snapshot() {
-    if (!userEnabled) return { enabled: false, state: "off", roots: currentRoots(), deviceId: null };
+    if (!userEnabled) return { enabled: false, state: "off", roots: currentRoots(), deviceId: null, mode: userMode };
     // 已開啟意圖但尚無授權根：不啟動，狀態一律 no_authorized_roots（不誤報客戶端狀態）。
     if (currentRoots().length === 0) {
-      return { enabled: true, state: "no_authorized_roots", roots: [], deviceId: null };
+      return { enabled: true, state: "no_authorized_roots", roots: [], deviceId: null, mode: userMode };
     }
     const cs = getClientState() || {};
     const out = {
@@ -512,6 +524,7 @@ function createBridgeController(deps = {}) {
       state: normalizeState(typeof cs.status === "string" ? cs.status : "off"),
       roots: currentRoots(),
       deviceId: typeof cs.deviceId === "string" ? cs.deviceId : null,
+      mode: userMode,
     };
     if (cs.lastError) out.lastError = String(cs.lastError);
     return out;
@@ -530,9 +543,15 @@ function createBridgeController(deps = {}) {
     return {
       gatewayBaseUrl: getGatewayBaseUrl(),
       enabled: true,
-      credentialProvider: credentialProvider(),
+      // 傳**函式本身**，不傳呼叫結果：client 只在 typeof === "function" 時呼叫它
+      // （device-bridge-client.js startDeviceBridge 的 typeof 檢），且刻意先判
+      // roots 再讀憑證——提早呼叫會讓無授權根時也白讀憑證檔。
+      credentialProvider,
       // roots 即時讀同一份 authorizedRoots；不另造授權機制。
       rootsProvider: currentRoots,
+      // W6c：權限模式即時讀（setMode 後重啟即生效）；rules 由注入的 provider 決定。
+      modeProvider: () => userMode,
+      rulesProvider,
       // 客戶端每次狀態變化（connecting/online/reconnecting…）都以當前快照推送。
       onStatus: () => emit(snapshot()),
     };
@@ -548,6 +567,43 @@ function createBridgeController(deps = {}) {
     }
     await startBridge(startOptions());
     return snapshot();
+  }
+
+  /** 停橋並記住「使用者關閉」（等同 disable 的核心）。mode 不動。 */
+  function applyDisable() {
+    userEnabled = false;
+    writeEnabled(false);
+    try {
+      stopBridge();
+    } catch {
+      /* noop */
+    }
+    return emit({ enabled: false, state: "off", roots: currentRoots(), deviceId: null, mode: userMode });
+  }
+
+  /**
+   * 設定權限模式（off/ask/auto/full）：
+   *   1. 驗值：非法值丟 E_BAD_ARGS（**不打網路、不改狀態**，含不寫入持久化）。
+   *   2. 持久化 writeMode（比照 writeEnabled 的注入方式）。
+   *   3. off ＝ 停橋（等同 disable）；其餘＝若未啟用則啟用，並以 stop→start 重註冊
+   *      讓新模式在 register 生效（**複用**既有「授權根變更→重註冊」同一條 startNow）。
+   */
+  async function setMode(mode) {
+    if (typeof mode !== "string" || !PERMISSION_MODES.includes(mode)) {
+      throw new LocalError("E_BAD_ARGS", `非法權限模式：${String(mode)}`);
+    }
+    userMode = mode;
+    writeMode(mode);
+    if (mode === "off") {
+      return applyDisable();
+    }
+    userEnabled = true;
+    writeEnabled(true);
+    if (currentRoots().length === 0) {
+      // 無授權根 ⇒ 不啟動；前端引導 pickFiles，授權後 onRootsAuthorized 會自動接上。
+      return emit(snapshot());
+    }
+    return emit(await startNow());
   }
 
   return {
@@ -568,19 +624,20 @@ function createBridgeController(deps = {}) {
 
     async disable() {
       // 記住「使用者關閉」；停止客戶端並清除其憑證/計時器。
-      userEnabled = false;
-      writeEnabled(false);
-      try {
-        stopBridge();
-      } catch {
-        /* noop */
-      }
-      return emit({ enabled: false, state: "off", roots: currentRoots(), deviceId: null });
+      return applyDisable();
     },
+
+    /** 設定權限模式（見上方 setMode 說明）。 */
+    setMode,
 
     /** 啟動時由持久化設定／env 覆寫還原意圖；不寫回設定檔（避免把 env 覆寫寫死）。 */
     setEnabledSilently(v) {
       userEnabled = v === true;
+    },
+
+    /** 啟動時還原權限模式；不寫回設定檔（env 覆寫不落地）。非法值回預設 ask。 */
+    setModeSilently(m) {
+      userMode = normalizeMode(m);
     },
 
     /** whenReady 依已還原的意圖啟動/重啟；未啟用＝不動。 */
@@ -619,8 +676,10 @@ async function handleAuthorizedRoots(event) {
 
 async function handleBridgeStatus(event) {
   assertTrustedSender(event);
-  // 未接線時仍回一致的 off 形狀（前端可安全呼叫）。
-  if (!bridgeController) return { enabled: false, state: "off", roots: Array.from(authorizedRoots), deviceId: null };
+  // 未接線時仍回一致的 off 形狀（前端可安全呼叫）。mode 預設 ask（契約預設）。
+  if (!bridgeController) {
+    return { enabled: false, state: "off", roots: Array.from(authorizedRoots), deviceId: null, mode: "ask" };
+  }
   return bridgeController.status();
 }
 
@@ -632,6 +691,11 @@ async function handleBridgeEnable(event) {
 async function handleBridgeDisable(event) {
   assertTrustedSender(event);
   return await requireBridgeController().disable();
+}
+
+async function handleBridgeSetMode(event, mode) {
+  assertTrustedSender(event);
+  return await requireBridgeController().setMode(mode);
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +729,7 @@ function registerLocalWorker(options = {}) {
   ipcMain.handle(CHANNELS.bridgeStatus, wrap(handleBridgeStatus));
   ipcMain.handle(CHANNELS.bridgeEnable, wrap(handleBridgeEnable));
   ipcMain.handle(CHANNELS.bridgeDisable, wrap(handleBridgeDisable));
+  ipcMain.handle(CHANNELS.bridgeSetMode, wrap(handleBridgeSetMode));
 }
 
 module.exports = {
@@ -688,5 +753,6 @@ module.exports = {
     handleBridgeStatus,
     handleBridgeEnable,
     handleBridgeDisable,
+    handleBridgeSetMode,
   },
 };

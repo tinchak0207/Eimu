@@ -29,11 +29,12 @@ const CHANNELS = {
   probe: "eimu-local:probe",
   extractFrames: "eimu-local:extract-frames",
   transcode: "eimu-local:transcode",
-  // W6c：device bridge（本機檔案授權）——三個 invoke + 一個 event，逐一明列。
+  // W6c：device bridge（本機檔案授權）——四個 invoke + 一個 event，逐一明列。
   authorizedRoots: "eimu-local:authorized-roots",
   bridgeStatus: "eimu-local:bridge-status",
   bridgeEnable: "eimu-local:bridge-enable",
   bridgeDisable: "eimu-local:bridge-disable",
+  bridgeSetMode: "eimu-local:bridge-set-mode",
   bridgeEvent: "eimu-local:bridge-state",
 };
 
@@ -78,13 +79,15 @@ contextBridge.exposeInMainWorld("eimuLocal", {
   // W6c：目前已授權的根目錄（絕對路徑 realpath）。由 pickFiles 累積。
   authorizedRoots: () => call(CHANNELS.authorizedRoots),
 
-  // W6c：device bridge（讓雲端 agent 讀本機**已授權**檔案）。三個具名方法各自對應
+  // W6c：device bridge（讓雲端 agent 讀本機**已授權**檔案）。具名方法各自對應
   // 一個固定 channel；真正的啟停與授權判斷在主進程 local-worker.js／main.js。
-  // 契約：status/enable/disable 皆回 { enabled, state, roots, deviceId, lastError? }。
+  // 契約：status/enable/disable/setMode 皆回 { enabled, state, roots, deviceId, mode, lastError? }。
   bridge: {
     status: () => call(CHANNELS.bridgeStatus),
     enable: () => call(CHANNELS.bridgeEnable),
     disable: () => call(CHANNELS.bridgeDisable),
+    // W6c：設定權限模式（"off"|"ask"|"auto"|"full"）。非法值由主進程回 E_BAD_ARGS。
+    setMode: (mode) => call(CHANNELS.bridgeSetMode, typeof mode === "string" ? mode : ""),
   },
 
   // W6c：訂閱 bridge 狀態變化，回傳取消訂閱函式（比照 eimuShell.onMaximizeChange）。

@@ -28,11 +28,27 @@ const GUIDANCE: Record<string, string> = {
     "這個路徑不在你已授權的資料夾內。請到桌面版 → 設定 → 本機檔案，選擇要授權的資料夾。",
   device_ambiguous: "你的帳號有多台裝置同時在線，請只保留一台。",
   device_timeout: "裝置沒有在時間內回應，請確認桌面版仍在執行。",
-  sensitive_path: "該路徑屬於敏感位置（憑證、私鑰等），不會讀取。",
+  sensitive_path:
+    "該路徑屬於敏感位置（憑證、私鑰等）的硬性禁止範圍，不會讀取、也**不能授權**；請改用其他路徑。",
 };
 
 /** 需要補「目前授權根」的錯誤碼（裝置離線／路徑未授權時，使用者最需要看到可授權的範圍）。 */
 const CODES_WITH_ROOTS = new Set(["device_offline", "path_not_authorized"]);
+
+/**
+ * `needs_authorization` 時給模型的**三段式選項逐字文案**。
+ * 模型必須把 label 原樣列給使用者，等他選定後，把該項的 scope 原封不動傳給
+ * `local_files_authorize`；不得升級（尤其不得自行選 permanent）。
+ */
+const AUTHORIZATION_OPTIONS = [
+  { scope: "once", label: "允許一次" },
+  { scope: "session", label: "本會話允許此目錄" },
+  { scope: "permanent", label: "永久允許（加入本機授權清單）" },
+] as const;
+
+/** 給模型的明確指令：先問使用者，不得自行決定。 */
+const AUTHORIZATION_INSTRUCTION =
+  "把上面三個選項原樣列給使用者，等他回答後再呼叫 local_files_authorize；不要自行決定。";
 
 /**
  * 讀取本會話租戶目前已授權的資料夾清單。任何失敗（網路/非 JSON）回 null，
@@ -62,7 +78,12 @@ export default tool({
     "grep＝在檔案內容裡搜尋文字；stat＝取得單一檔案或目錄的資訊（大小、時間、型別）。" +
     "當使用者說「看一下我 Downloads 裡的東西」「讀我電腦上那個檔案」「幫我在本機某個資料夾找…」時用本工具。" +
     "若回傳顯示裝置未連線或路徑未授權，請把回傳裡的引導語**照實轉達**給使用者（例如請他開啟桌面版並到設定授權資料夾），" +
-    "不要只回「我做不到」。",
+    "不要只回「我做不到」。" +
+    "若回傳 action_required=authorize_local_files（error.code=needs_authorization），代表這個路徑還沒授權：" +
+    "**不要**當成失敗，必須把回傳的 options 三段式選項**逐字**列給使用者（允許一次／本會話允許此目錄／永久允許），" +
+    "等他明確選一個之後，再用 local_files_authorize 帶入**他選的那個 scope 原樣**授權；" +
+    "不得自行替他決定，尤其**不得未經同意選 permanent**。" +
+    "若錯誤碼是 sensitive_path，那是硬性禁止位置，**不能授權**，不要引導使用者去授權它。",
   args: {
     op: tool.schema
       .enum(["list_dir", "read_file", "grep", "stat"])
@@ -115,6 +136,22 @@ export default tool({
     if (!res.ok || !data?.ok) {
       const err = (data?.error ?? {}) as Record<string, unknown>;
       const code = typeof err.code === "string" && err.code ? err.code : "internal_error";
+
+      // 路徑尚未授權（凍結契約）：回結構化結果，讓模型當場引導使用者三選一。
+      // ⚠ denylist 不走這條（閘道回硬 deny／sensitive_path），故這裡不得引導授權 denylist。
+      if (code === "needs_authorization") {
+        return ok({
+          title: "需要授權",
+          action_required: "authorize_local_files",
+          op,
+          path: args.path,
+          root: typeof err.root === "string" ? err.root : "",
+          reason: typeof err.reason === "string" ? err.reason : "",
+          options: AUTHORIZATION_OPTIONS,
+          instruction: AUTHORIZATION_INSTRUCTION,
+        });
+      }
+
       const rawMessage =
         typeof err.message === "string" && err.message
           ? err.message

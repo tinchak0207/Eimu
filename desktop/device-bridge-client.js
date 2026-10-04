@@ -39,6 +39,7 @@
 
 const proto = require("./lib/bridge-protocol.js");
 const { createBridgeExecutor, BridgeError } = require("./lib/bridge-executor.js");
+const { PERMISSION_MODES } = require("./lib/permission-rules.js");
 const localWorker = require("./local-worker.js");
 
 const PREFIX = "/agent/v1/device-bridge";
@@ -48,7 +49,13 @@ const DEFAULT_HEARTBEAT_MS = 30000;
 
 // 單一授權來源：直接讀 local-worker 的 authorizedRoots（pickFiles 顯式挑選）。
 // 不另造第二套授權機制；空集 ⇒ bridge 拒絕服務（見 startDeviceBridge）。
-const executor = createBridgeExecutor({ roots: () => Array.from(localWorker.authorizedRoots) });
+// W6c：mode/rules 為第二道防線的輸入，即時讀 runtime（由 startDeviceBridge 注入，
+// 未注入＝null/undefined，執行器回退 "auto" 以維持既有呼叫端行為）。
+const executor = createBridgeExecutor({
+  roots: () => Array.from(localWorker.authorizedRoots),
+  mode: () => (runtime.mode === undefined ? undefined : runtime.mode),
+  rules: () => runtime.rules,
+});
 
 const runtime = {
   running: false,
@@ -68,6 +75,9 @@ const runtime = {
   reconnectTimer: null,
   lastError: null,
   onStatus: null,
+  // W6c 權限模式與規則（register 下發；未提供＝null/undefined，不下發欄位）。
+  mode: null,
+  rules: undefined,
 };
 
 function snapshot() {
@@ -76,6 +86,7 @@ function snapshot() {
     enabled: runtime.enabled,
     deviceId: runtime.deviceId,
     heartbeatIntervalMs: runtime.heartbeatIntervalMs,
+    mode: runtime.mode,
     lastError: runtime.lastError,
   };
 }
@@ -190,7 +201,12 @@ function stopHeartbeat() {
 }
 
 async function registerOnce() {
-  const reg = await postOk(`${PREFIX}/register`, {});
+  // W6c：register body 帶上權限模式與規則（未設定＝不下發欄位，維持既有呼叫端行為）。
+  // 閘道契約：mode ∈ off/ask/auto/full，缺＝ask；rules 為三桶/扁平規則陣列。
+  const body = {};
+  if (runtime.mode !== null && runtime.mode !== undefined) body.mode = runtime.mode;
+  if (runtime.rules !== undefined) body.rules = runtime.rules;
+  const reg = await postOk(`${PREFIX}/register`, body);
   runtime.deviceId = typeof reg.device_id === "string" ? reg.device_id : null;
   runtime.connectionId = typeof reg.connection_id === "string" ? reg.connection_id : null;
   if (!runtime.deviceId || !runtime.connectionId) throw new BridgeError("register_failed", 200);
@@ -295,7 +311,7 @@ async function connect() {
 
 /**
  * 啟動 device bridge（預設不啟動：enabled !== true 即停在 "off"）。
- * @param {{gatewayBaseUrl?:string, credentialProvider?:()=>Promise<string|null>|string|null, enabled?:boolean, rootsProvider?:()=>string[], onStatus?:(s:object)=>void}} opts
+ * @param {{gatewayBaseUrl?:string, credentialProvider?:()=>Promise<string|null>|string|null, enabled?:boolean, rootsProvider?:()=>string[], modeProvider?:()=>("off"|"ask"|"auto"|"full"), rulesProvider?:()=>unknown, onStatus?:(s:object)=>void}} opts
  * @returns {Promise<object>} 狀態快照
  */
 async function startDeviceBridge(opts = {}) {
@@ -303,6 +319,27 @@ async function startDeviceBridge(opts = {}) {
   if (opts.gatewayBaseUrl) runtime.gatewayBaseUrl = String(opts.gatewayBaseUrl).replace(/\/+$/, "");
   if (typeof opts.onStatus === "function") runtime.onStatus = opts.onStatus;
   runtime.enabled = opts.enabled === true;
+
+  // W6c：注入點一律驗型別（教訓：跨界傳錯型別會被下游守衛靜默降級）。
+  // modeProvider 必須是 function 且回白名單值；否則視為未設定（不下發、執行器回退 auto）。
+  runtime.mode = null;
+  runtime.rules = undefined;
+  if (typeof opts.modeProvider === "function") {
+    try {
+      const m = opts.modeProvider();
+      runtime.mode = typeof m === "string" && PERMISSION_MODES.includes(m) ? m : null;
+    } catch {
+      runtime.mode = null;
+    }
+  }
+  if (typeof opts.rulesProvider === "function") {
+    try {
+      const r = opts.rulesProvider();
+      runtime.rules = r === undefined || r === null ? undefined : r;
+    } catch {
+      runtime.rules = undefined;
+    }
+  }
 
   if (!runtime.enabled) {
     setStatus("off");

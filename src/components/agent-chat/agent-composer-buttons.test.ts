@@ -14,6 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 // 觸控 placeholder 的真行為斷言（決策純函數）＋ SSR 真渲染斷言用的元件本體。
 import {
   AgentComposer,
+  LocalFileModeMenuView,
   PLAIN_UPLOAD_TIMEOUT_MS,
   PLACEHOLDER_SAFETY_PX,
   UploadTimeoutError,
@@ -22,6 +23,7 @@ import {
   resolveBasePlaceholder,
   withUploadDeadline,
 } from "./AgentComposer";
+import { createDeviceBridgeController, supportsSetMode, type BridgeStatus } from "@/lib/device-bridge-display";
 
 /**
  * AgentComposer 输入区三颗按钮的回归锁：IME 组字守卫、送出连点锁、中止进行中态。
@@ -375,4 +377,186 @@ test("uploadPlainFile 组合探针：deadline 包住 uploadAgentAttachments，�
     /job\.catch\(\(err\) => \{\s*const message = err instanceof Error \? err\.message : "上传失败。";\s*patchAttachment\(id, \{ status: "error", errorMessage: message \}\);/,
     "job.catch 必须把逾时错误落成带人话的 error chip（不得静默消失）",
   );
+});
+
+// ═══════════════════════════ 本機檔案權限模式控件（2026-10-04）═══════════════════════════
+//
+// 分兩層驗：
+//   1. 展示層（LocalFileModeMenuView）以真 SSR 渲染釘四檔文案／選中態／舊產物 disabled。
+//   2. 薄殼的資料路徑：注入假 window.eimuLocal，用 shell 實際走的預設讀法
+//      （createDeviceBridgeController() → getDeviceBridgeApi → globalThis.eimuLocal）
+//      驗 init 讀 status／切檔叫 setMode／舊產物 disable 降級／卸載取消訂閱。
+// oracle：期望字串由本測試自備（獨立於實作模組），不從 LOCAL_FILE_MODES 取。
+
+type GlobalWithLocal = typeof globalThis & { eimuLocal?: unknown };
+
+function setEimuLocal(api: unknown): void {
+  const g = globalThis as GlobalWithLocal;
+  if (api === undefined) delete g.eimuLocal;
+  else g.eimuLocal = api;
+}
+
+interface ModeFake {
+  calls: { setMode: string[]; enable: number; disable: number; unsub: number; status: number };
+  api: unknown;
+}
+
+function makeModeApi(hasSetMode: boolean): ModeFake {
+  const calls: ModeFake["calls"] = { setMode: [], enable: 0, disable: 0, unsub: 0, status: 0 };
+  const mkStatus = (mode: string): BridgeStatus => ({
+    enabled: mode !== "off",
+    state: mode === "off" ? "off" : "online",
+    roots: ["/home/me/docs"],
+    deviceId: "dev-1",
+    mode: mode as BridgeStatus["mode"],
+  });
+  const bridge: Record<string, unknown> = {
+    async status() {
+      calls.status += 1;
+      return mkStatus("ask");
+    },
+    async enable() {
+      calls.enable += 1;
+      return mkStatus("auto");
+    },
+    async disable() {
+      calls.disable += 1;
+      return mkStatus("off");
+    },
+  };
+  if (hasSetMode) {
+    bridge.setMode = async (mode: string) => {
+      calls.setMode.push(mode);
+      return mkStatus(mode);
+    };
+  }
+  const api = {
+    bridge,
+    onBridgeStatus() {
+      return () => {
+        calls.unsub += 1;
+      };
+    },
+    async pickFiles() {
+      return [] as string[];
+    },
+  };
+  return { calls, api };
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test("本機檔案權限控件（展示層）：四檔標題／副標逐字可見＋當前檔右端一勾", () => {
+  const markup = renderToStaticMarkup(
+    createElement(LocalFileModeMenuView, {
+      open: true,
+      onToggleOpen: () => {},
+      onPick: () => {},
+      supported: true,
+      known: true,
+      mode: "ask",
+      rootsCount: 2,
+      busy: false,
+    }),
+  );
+  // 四檔標題逐字（oracle 由測試自備）。
+  for (const title of ["關閉", "每次詢問", "授權範圍內自動", "完全訪問"]) {
+    assert.ok(markup.includes(title), `四檔必須含標題「${title}」`);
+  }
+  // 四檔副標逐字（含 full 的敏感路徑警告）。
+  for (const sub of [
+    "agent 不能讀取本機檔案。",
+    "每次讀取前先問你。",
+    "已授權資料夾內自動讀取，範圍外會先問你。",
+    "整個家目錄可讀；敏感位置（~/.ssh、~/.aws、私鑰等）一律不讀。",
+  ]) {
+    assert.ok(markup.includes(sub), `四檔必須含副標「${sub}」`);
+  }
+  // 恰好一列被標記為選中（ask），且帶勾圖示。
+  assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1, "只能有一列選中");
+  assert.match(markup, /lucide-check/, "選中列右端一顆勾");
+  // 已授權數量（檢視用，非授權入口）。
+  assert.ok(markup.includes("已授權 2 個資料夾"), "應顯示已授權資料夾數量");
+  // 不得出現「選擇資料夾」之類的授權入口按鈕。
+  assert.ok(!markup.includes("選擇資料夾") && !markup.includes("选择文件夹"), "控件不得內建授權入口");
+});
+
+test("本機檔案權限控件（展示層）：roots 空顯示『尚未授權任何資料夾』", () => {
+  const markup = renderToStaticMarkup(
+    createElement(LocalFileModeMenuView, {
+      open: true,
+      onToggleOpen: () => {},
+      onPick: () => {},
+      supported: true,
+      known: true,
+      mode: "off",
+      rootsCount: 0,
+      busy: false,
+    }),
+  );
+  assert.ok(markup.includes("尚未授權任何資料夾"), "空 roots 必須明說尚未授權");
+});
+
+test("本機檔案權限控件（展示層）：舊產物 supported=false ⇒ disabled＋『需更新桌面版』，不崩", () => {
+  const markup = renderToStaticMarkup(
+    createElement(LocalFileModeMenuView, {
+      open: true, // 即便被要求開，disabled 態也不得長出清單
+      onToggleOpen: () => {},
+      onPick: () => {},
+      supported: false,
+      known: true,
+      mode: "auto",
+      rootsCount: 0,
+      busy: false,
+    }),
+  );
+  assert.match(markup, /disabled=""/, "舊產物時控件必須 disabled");
+  assert.ok(markup.includes("需更新桌面版"), "舊產物時必須提示需更新桌面版");
+  assert.ok(!markup.includes('role="option"'), "disabled 態不得展開四檔清單");
+});
+
+test("純瀏覽器（無 eimuLocal）：AgentComposer SSR 不渲染本機檔案權限控件（漸進增強、非報錯）", () => {
+  setEimuLocal(undefined);
+  const markup = renderToStaticMarkup(createElement(AgentComposer, { disabled: false, onSend: () => {} }));
+  assert.ok(!markup.includes("本機檔案權限"), "無 eimuLocal 時控件不得渲染");
+  assert.ok(markup.includes("思考级别"), "既有思考級別控件仍在（沒被建壞）");
+});
+
+test("薄殼資料路徑：注入假 eimuLocal ⇒ init 讀 status、切檔呼叫 setMode、卸載取消訂閱", async () => {
+  const { api, calls } = makeModeApi(true);
+  setEimuLocal(api);
+  try {
+    assert.equal(supportsSetMode(api), true);
+    const ctl = createDeviceBridgeController(); // 預設讀法＝globalThis.eimuLocal（與 shell 一致）
+    ctl.init();
+    await tick();
+    assert.equal(ctl.getSnapshot().available, true);
+    assert.equal(ctl.getSnapshot().status?.mode, "ask");
+    await ctl.setMode("full");
+    assert.deepEqual(calls.setMode, ["full"], "切檔必須呼叫 bridge.setMode");
+    assert.equal(ctl.getSnapshot().status?.mode, "full");
+    ctl.dispose();
+    assert.equal(calls.unsub, 1, "卸載必須取消 onBridgeStatus 訂閱");
+  } finally {
+    setEimuLocal(undefined);
+  }
+});
+
+test("薄殼資料路徑：舊產物（無 setMode）⇒ supportsSetMode false，off 走 disable 降級", async () => {
+  const { api, calls } = makeModeApi(false);
+  setEimuLocal(api);
+  try {
+    assert.equal(supportsSetMode(api), false);
+    const ctl = createDeviceBridgeController();
+    ctl.init();
+    await tick();
+    await ctl.setMode("off");
+    assert.equal(calls.disable, 1, "舊產物 off 必須降級走 disable()");
+    assert.deepEqual(calls.setMode, []);
+    await ctl.setMode("auto");
+    assert.equal(calls.enable, 1, "舊產物非 off 必須降級走 enable()");
+    ctl.dispose();
+  } finally {
+    setEimuLocal(undefined);
+  }
 });
