@@ -472,7 +472,7 @@ export function CanvasChatWorkstation({
               "flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full",
               "bg-[rgba(0,122,255,0.10)] text-[#007AFF] transition-all duration-200",
               "hover:bg-[rgba(0,122,255,0.16)] active:scale-[0.94]",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
               "[-webkit-tap-highlight-color:transparent]",
               isLoading && "animate-pulse",
             )}

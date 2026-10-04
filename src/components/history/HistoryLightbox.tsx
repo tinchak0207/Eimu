@@ -243,7 +243,7 @@ export function HistoryLightbox({
       // transparent, leaving every white-on-dark control in this lightbox
       // rendering as white-on-whatever-was-behind-it (i.e. invisible on the
       // light page). rgba() as a bracket value bypasses the scale lookup.
-      className="hist-lightbox-enter fixed inset-0 z-50 flex min-h-[100dvh] w-screen flex-col bg-[rgba(31,34,48,0.74)] backdrop-blur-md"
+      className="hist-lightbox-enter fixed inset-0 z-[95] flex min-h-[100dvh] w-screen flex-col bg-[rgba(31,34,48,0.74)] backdrop-blur-md"
       onClick={onClose}
     >
       <div

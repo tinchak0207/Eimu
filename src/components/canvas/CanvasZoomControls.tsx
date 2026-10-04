@@ -251,7 +251,7 @@ function CanvasZoomControls({
           >
             <ClipboardCheck className="h-4 w-4" />
             {reviewPendingCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ios-red px-1 text-[9px] font-semibold leading-none text-white tabular-nums">
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ios-red px-1 text-ios-caption2 font-semibold leading-none text-white tabular-nums">
                 {reviewPendingCount > 9 ? "9+" : reviewPendingCount}
               </span>
             )}

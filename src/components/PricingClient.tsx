@@ -587,7 +587,7 @@ export function PricingClient() {
                 onChange={(e) => setRedeemCode(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleRedeem()}
                 placeholder="输入兑换码"
-                className="min-w-0 rounded-full border-0 bg-white/80 px-4 py-2.5 text-ios-footnote text-[color:var(--p3d-ink)] ring-1 ring-inset ring-[rgba(58,80,160,0.14)] placeholder:text-[color:var(--p3d-ink-3)] focus:outline-none focus:ring-2 focus:ring-[rgba(59,130,255,0.45)] [background-image:none]"
+                className="min-w-0 rounded-full border-0 bg-white/80 px-4 py-2.5 text-ios-footnote text-[color:var(--p3d-ink)] ring-1 ring-inset ring-[rgba(58,80,160,0.14)] placeholder:text-[color:var(--p3d-ink-3)] focus:outline-none focus:ring-2 focus:ring-ring/45 [background-image:none]"
               />
               <button type="button" onClick={handleRedeem} disabled={redeemLoading || !redeemCode.trim()} className="p3d-btn-light disabled:opacity-50">
                 {redeemLoading ? "兑换中" : "兑换"}

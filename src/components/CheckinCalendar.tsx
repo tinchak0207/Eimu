@@ -170,7 +170,7 @@ export function CheckinCalendar({ className }: CheckinCalendarProps) {
         ? createPortal(
             // /38 不在 Tailwind 默认透明度刻度上，静默编译成空——遮罩其实是全透明的。
             // rgba() 任意值才真正生效（与历史灯箱同一修法）。
-            <div className="fixed inset-0 z-50 flex min-h-[100dvh] items-end justify-center bg-[rgba(31,34,48,0.74)] px-2.5 pb-3 backdrop-blur-md sm:items-center sm:p-6">
+            <div className="fixed inset-0 z-[90] flex min-h-[100dvh] items-end justify-center bg-[rgba(31,34,48,0.74)] px-2.5 pb-3 backdrop-blur-md sm:items-center sm:p-6">
           <section
             role="dialog"
             aria-modal="true"

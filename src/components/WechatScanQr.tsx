@@ -48,7 +48,7 @@ export function WechatScanQr({ login, size = 200 }: { login: WechatScanLogin; si
         ) : phase === "done" ? (
           <div className="flex flex-col items-center gap-2 text-[#07C160]">
             <Check className="h-10 w-10" strokeWidth={2.4} aria-hidden="true" />
-            <span className="text-[14px] font-semibold text-foreground">登录成功</span>
+            <span className="text-ios-subhead font-semibold text-foreground">登录成功</span>
           </div>
         ) : phase === "error" ? (
           <button

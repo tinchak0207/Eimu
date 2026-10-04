@@ -90,7 +90,7 @@ export default function AuthCompletePage() {
         <button
           type="button"
           onClick={() => { window.location.href = "/api/auth/github/start"; }}
-          className="mt-1 rounded-xl bg-[rgba(0,0,0,0.85)] px-4 py-2.5 text-[14px] font-semibold text-white active:opacity-80"
+          className="mt-1 rounded-xl bg-[rgba(0,0,0,0.85)] px-4 py-2.5 text-ios-footnote font-semibold text-white active:opacity-80"
         >
           重试登录
         </button>

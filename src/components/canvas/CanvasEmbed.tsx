@@ -1364,7 +1364,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
 
         {/* 連線模式提示 */}
         {(connecting || portDrag) && (
-          <div className="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-ios-blue/90 px-3 py-1.5 text-[12.5px] font-medium text-white shadow-md">
+          <div className="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-ios-blue/90 px-3 py-1.5 text-ios-caption1 font-medium text-white shadow-md">
             {portDrag ? "拖到目标节点成线 · 松手在空白处新建节点" : "点击目标节点完成连线 · Esc 取消"}
           </div>
         )}
@@ -1392,7 +1392,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         {actionError && (
           <div
             role="alert"
-            className="pointer-events-auto absolute bottom-4 left-1/2 z-30 flex max-w-[85%] -translate-x-1/2 items-center gap-2 rounded-full bg-black/90 px-4 py-2 text-[12.5px] font-medium text-white shadow-lg"
+            className="pointer-events-auto absolute bottom-4 left-1/2 z-30 flex max-w-[85%] -translate-x-1/2 items-center gap-2 rounded-full bg-black/90 px-4 py-2 text-ios-caption1 font-medium text-white shadow-lg"
           >
             <span className="min-w-0 truncate">{actionError}</span>
             <button type="button" onClick={() => setActionError(null)} aria-label="关闭提示" className="shrink-0 opacity-80 hover:opacity-100">

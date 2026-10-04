@@ -418,31 +418,6 @@
    而且 .case-glow 是舞台的第一个子节点，nth-child(1) 根本选不到第一张卡。
    现在公式只有一份，首帧和水合后逐帧用的是同一个函数。 */
 
-/* ── 焦点卡的说明面板 ──
-   六张卡各带一份 结果注释 + CTA + 提示词折叠 会让环长得没法看，
-   而且转动中改变高度。所以这三样收进环下方这块静止的平面里，
-   环只负责视觉，面板负责阅读和动作。 */
-.case-panel {
-  margin: 0 auto;
-  max-width: 46rem;
-  text-align: center;
-}
-
-.case-panel-swap {
-  animation: case-panel-in 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-@keyframes case-panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(7px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 /* ── 控制行：箭头 + 圆点。常显，不藏在 hover 后面（触屏没有 hover）。 ── */
 .case-arrow {
   display: inline-flex;
@@ -533,8 +508,7 @@
    环本身保留（是布局，不是动效），但取消所有逐帧插值和入场动画：
    点箭头/圆点是瞬时切换。滚动驱动的旋转在组件里一并关掉。 */
 @media (prefers-reduced-motion: reduce) {
-  .case-glow,
-  .case-panel-swap {
+  .case-glow {
     transition-duration: 1ms !important;
     animation: none !important;
   }

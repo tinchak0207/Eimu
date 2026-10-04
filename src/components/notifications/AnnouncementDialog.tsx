@@ -71,7 +71,7 @@ export function AnnouncementDialog({
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute right-3 top-3 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-[rgba(255,255,255,0.70)] text-[rgba(0,0,0,0.55)] shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-[rgba(255,255,255,0.70)] text-[rgba(0,0,0,0.55)] shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>

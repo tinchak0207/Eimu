@@ -69,7 +69,7 @@ export function WelcomeGiftDialog({
           type="button"
           onClick={onLater}
           aria-label="关闭"
-          className="absolute right-3 top-3 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-[rgba(255,255,255,0.70)] text-[rgba(0,0,0,0.55)] shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-[rgba(255,255,255,0.70)] text-[rgba(0,0,0,0.55)] shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
@@ -86,14 +86,14 @@ export function WelcomeGiftDialog({
           <button
             type="button"
             onClick={onLater}
-            className="flex h-11 cursor-pointer items-center justify-center rounded-ios-2xl px-5 text-ios-subhead font-medium text-[rgba(0,0,0,0.60)] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:h-10"
+            className="flex h-11 cursor-pointer items-center justify-center rounded-ios-2xl px-5 text-ios-subhead font-medium text-[rgba(0,0,0,0.60)] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:h-10"
           >
             稍后
           </button>
           <button
             type="button"
             onClick={onStart}
-            className="flex h-11 cursor-pointer items-center justify-center rounded-ios-2xl bg-[#007AFF] px-5 text-ios-subhead font-semibold text-white shadow-sm transition-colors hover:bg-[#0069DB] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:h-10"
+            className="flex h-11 cursor-pointer items-center justify-center rounded-ios-2xl bg-[#007AFF] px-5 text-ios-subhead font-semibold text-white shadow-sm transition-colors hover:bg-[#0069DB] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:h-10"
           >
             马上生成第一张
           </button>

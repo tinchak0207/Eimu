@@ -40,7 +40,7 @@ export default function WechatLoginPage() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[#f5f5f7] px-4">
-      <div className="w-[380px] max-w-full rounded-[20px] bg-white p-7 text-center shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
+      <div className="lg-card w-[380px] max-w-full rounded-ios-lg p-7 text-center">
         <span className="mx-auto mb-3 flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-[#07C160]">
           <MessageCircle size={26} color="#fff" aria-hidden="true" />
         </span>

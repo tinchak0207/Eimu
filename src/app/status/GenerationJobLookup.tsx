@@ -103,7 +103,7 @@ export function GenerationJobLookup() {
 
       <form
         onSubmit={handleSubmit}
-        className="mt-4 rounded-md border border-[#dfe3e8] bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-6"
+        className="lg-card mt-4 rounded-ios-2xl p-5 sm:p-6"
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm">
@@ -148,7 +148,7 @@ export function GenerationJobLookup() {
       ) : null}
 
       {state.phase === "success" ? (
-        <div className="mt-4 rounded-md border border-[#dfe3e8] bg-white p-5 text-sm sm:p-6">
+        <div className="lg-card mt-4 rounded-ios-2xl p-5 text-sm sm:p-6">
           <dl className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
             <div>
               <dt className="text-xs font-medium text-[#7a8490]">状态</dt>

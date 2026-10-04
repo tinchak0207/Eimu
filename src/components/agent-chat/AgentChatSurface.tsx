@@ -1078,6 +1078,8 @@ export function AgentChatSurface({
                         aria-label="对话历史"
                         className="agent-param-drawer agent-pop"
                       >
+                      {/* DESIGN.md §5：每张 sheet 都要有一条顶缘高光线。 */}
+                      <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
                       {/* 抓手是可见的可抓性提示；真正的关闭靠右上角按钮与点遮罩。 */}
                       <span className="agent-param-drawer-grip" aria-hidden="true" />
                       <div className="flex items-center gap-2 px-4 pb-2">

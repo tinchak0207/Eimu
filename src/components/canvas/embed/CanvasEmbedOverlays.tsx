@@ -429,7 +429,7 @@ export function CanvasEmbedOverlays({
           }}
         >
           <div className="border-b px-3 py-2.5">
-            <p className="text-[12.5px] font-semibold text-foreground">实体卡（角色 / 场景 / 风格 / 道具 / 音频）</p>
+            <p className="text-ios-caption1 font-semibold text-foreground">实体卡（角色 / 场景 / 风格 / 道具 / 音频）</p>
             <p className="mt-0.5 text-ios-caption2 leading-snug text-foreground/45">
               锁定后本画布所有生成自动携带（提示词前缀 + 参考图 + 负面词）
             </p>
@@ -447,7 +447,7 @@ export function CanvasEmbedOverlays({
                   className="flex items-center gap-2 border-b px-3 py-2.5 last:border-b-0"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-foreground">
+                    <p className="flex items-center gap-1.5 truncate text-ios-caption1 font-medium text-foreground">
                       <span className="truncate">{card.name}</span>
                       <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
                         {CHARACTER_CARD_KIND_LABEL[card.kind]}
@@ -473,8 +473,8 @@ export function CanvasEmbedOverlays({
                     onClick={() => canvas.toggleCharacterCard(card.id)}
                     className={
                       active
-                        ? "shrink-0 cursor-pointer rounded-lg bg-ios-green/10 px-2 py-1 text-[11.5px] font-medium text-[#248A3D] hover:bg-ios-green/20"
-                        : "shrink-0 cursor-pointer rounded-lg bg-black/5 px-2 py-1 text-[11.5px] font-medium text-muted-foreground hover:bg-black/10"
+                        ? "shrink-0 cursor-pointer rounded-lg bg-ios-green/10 px-2 py-1 text-ios-caption1 font-medium text-[#248A3D] hover:bg-ios-green/20"
+                        : "shrink-0 cursor-pointer rounded-lg bg-black/5 px-2 py-1 text-ios-caption1 font-medium text-muted-foreground hover:bg-black/10"
                     }
                   >
                     {active ? "解锁" : "锁定"}
@@ -484,7 +484,7 @@ export function CanvasEmbedOverlays({
                     type="button"
                     aria-label={`溯源卡 ${card.name}`}
                     onClick={() => setLineageCardId(card.id)}
-                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-foreground/45 hover:bg-black/5 hover:text-[#007AFF]"
+                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-ios-caption1 text-foreground/45 hover:bg-black/5 hover:text-[#007AFF]"
                   >
                     溯源
                   </button>
@@ -492,7 +492,7 @@ export function CanvasEmbedOverlays({
                     type="button"
                     aria-label={`删除卡 ${card.name}`}
                     onClick={() => void canvas.removeCharacterCard(card.id)}
-                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-foreground/45 hover:bg-black/5 hover:text-destructive"
+                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-ios-caption1 text-foreground/45 hover:bg-black/5 hover:text-destructive"
                   >
                     删除
                   </button>
@@ -615,7 +615,7 @@ export function CanvasEmbedOverlays({
                   )}
                   aria-hidden="true"
                 />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{n.title}</span>
+                <span className="min-w-0 flex-1 truncate text-ios-caption1 text-muted-foreground">{n.title}</span>
               </button>
             ))
           )}

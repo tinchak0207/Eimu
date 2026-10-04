@@ -79,7 +79,7 @@ export function DesktopDownloadButton({ variant, className }: DesktopDownloadBut
         aria-label="下载桌面版"
         title="下载桌面版"
         className={cn(
-          "hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] xl:flex sm:h-9 sm:w-9",
+          "hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 xl:flex sm:h-9 sm:w-9",
           className,
         )}
       >

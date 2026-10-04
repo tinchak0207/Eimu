@@ -142,7 +142,7 @@ function LineageRow({
           onClick={() => onOpenNode(node)}
           aria-label={node.link ? text("lineage.openSource") : text("lineage.openRecord")}
           title={text("lineage.jumpTitle")}
-          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] transition-colors hover:bg-black/5 hover:text-[#007AFF] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] transition-colors hover:bg-black/5 hover:text-[#007AFF] focus:outline-none focus:ring-2 focus:ring-ring/20"
         >
           <CornerUpLeft className="h-3.5 w-3.5" />
         </button>
@@ -213,7 +213,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50" role="presentation">
+    <div className="fixed inset-0 z-[90]" role="presentation">
       <div className="absolute inset-0 bg-[rgba(31,34,48,0.45)] backdrop-blur-md" onClick={onClose} />
       <aside
         role="dialog"
@@ -237,7 +237,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
                 type="button"
                 onClick={backOneLevel}
                 aria-label={text("lineage.back")}
-                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-ring/20"
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
@@ -246,7 +246,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
               type="button"
               onClick={onClose}
               aria-label={text("common.close")}
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               <X className="h-4 w-4" />
             </button>
@@ -283,7 +283,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
             <button
               type="button"
               onClick={() => setVisibleDepth((depth) => Math.min(MAX_VISIBLE_DEPTH, depth + LINEAGE_DEPTH_STEP))}
-              className="w-full cursor-pointer rounded-ios-xl bg-[rgba(0,122,255,0.10)] px-4 py-2.5 text-ios-footnote font-medium text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+              className="w-full cursor-pointer rounded-ios-xl bg-[rgba(0,122,255,0.10)] px-4 py-2.5 text-ios-footnote font-medium text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.16)] focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               {text("lineage.expandMore", { depth: visibleDepth })}
             </button>

@@ -229,7 +229,7 @@ export function AdminRelayChannels() {
       </section>
 
       {editing !== undefined && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#20242c]/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={editing ? "编辑渠道" : "新增渠道"}>
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#20242c]/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={editing ? "编辑渠道" : "新增渠道"}>
           <form onSubmit={save} className="max-h-[calc(100vh-32px)] w-full max-w-lg overflow-y-auto rounded-lg bg-white shadow-2xl">
             <div className="sticky top-0 flex items-center justify-between border-b border-black/10 bg-white px-5 py-4">
               <h2 className="font-semibold">{editing ? "编辑渠道" : "新增渠道"}</h2>

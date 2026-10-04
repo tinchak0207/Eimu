@@ -398,7 +398,7 @@ export function HistoryClient() {
           <div className="flex items-center justify-between gap-3 lg:contents">
             <Link
               href="/"
-              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-ios-body font-semibold text-[rgba(0,0,0,0.85)] lg-transition hover:text-[rgba(0,0,0,0.62)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-ios-body font-semibold text-[rgba(0,0,0,0.85)] lg-transition hover:text-[rgba(0,0,0,0.62)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <ArrowLeft className="h-4 w-4" />
               生成历史
@@ -422,7 +422,7 @@ export function HistoryClient() {
                     className={cn(
                       "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1.5",
                       "text-ios-footnote font-medium transition-colors duration-200",
-                      "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+                      "focus:outline-none focus:ring-2 focus:ring-ring/20",
                       selectionMode ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
                     )}
                   >
@@ -472,7 +472,7 @@ export function HistoryClient() {
                 className={cn(
                   "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1.5",
                   "text-ios-footnote font-medium transition-colors duration-200",
-                  "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+                  "focus:outline-none focus:ring-2 focus:ring-ring/20",
                   selectionMode ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
                 )}
               >

@@ -69,7 +69,7 @@ export function HistoryEmptyState({ reason, message, onClearFilters, onRetry }: 
           <button
             type="button"
             onClick={onClearFilters}
-            className="mt-1 cursor-pointer rounded-full bg-[rgba(0,0,0,0.06)] px-5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] transition-all hover:bg-[rgba(0,0,0,0.10)] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="mt-1 cursor-pointer rounded-full bg-[rgba(0,0,0,0.06)] px-5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] transition-all hover:bg-[rgba(0,0,0,0.10)] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             清除筛选
           </button>
@@ -79,7 +79,7 @@ export function HistoryEmptyState({ reason, message, onClearFilters, onRetry }: 
           <button
             type="button"
             onClick={onRetry}
-            className="mt-1 cursor-pointer rounded-full bg-[#007AFF] px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="mt-1 cursor-pointer rounded-full bg-[#007AFF] px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             重试
           </button>

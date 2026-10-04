@@ -105,8 +105,8 @@ export function PwaHandoffPanel({ loginUrl, onSuccess, onClose }: PwaHandoffPane
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-black/5 bg-white/95 p-5 shadow-2xl backdrop-blur-xl">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-4">
+      <div className="lg-sheet w-full max-w-sm rounded-ios-2xl p-5">
         <h2 className="text-[17px] font-semibold text-[rgba(0,0,0,0.85)]">登录</h2>
         <p className="mt-2 text-[13px] leading-relaxed text-[rgba(0,0,0,0.6)]">
           复制链接到常用浏览器完成登录，回来后自动登录。
@@ -130,14 +130,14 @@ export function PwaHandoffPanel({ loginUrl, onSuccess, onClose }: PwaHandoffPane
             href={loginUrl}
             target="_blank"
             rel="noreferrer"
-            className="flex-1 rounded-xl bg-[rgba(0,0,0,0.85)] px-4 py-2.5 text-center text-[14px] font-semibold text-white active:opacity-80"
+            className="flex-1 rounded-xl bg-[rgba(0,0,0,0.85)] px-4 py-2.5 text-center text-ios-footnote font-semibold text-white active:opacity-80"
           >
             去浏览器打开
           </a>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-black/[0.06] px-4 py-2.5 text-[14px] font-medium text-[rgba(0,0,0,0.72)] active:opacity-70"
+            className="rounded-xl bg-black/[0.06] px-4 py-2.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.72)] active:opacity-70"
           >
             关闭
           </button>

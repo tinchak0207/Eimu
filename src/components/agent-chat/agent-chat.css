@@ -246,20 +246,25 @@
     font-size: 18px;
     line-height: 26px;
   }
-  /* 13px 层（计划卡 / 工具卡 / 子代理列 / 批量进度 / notice / 思考列）→ 15px。 */
+  /* 13px 层（计划卡 / 工具卡 / 子代理列 / 批量进度 / notice / 思考列）→ 15px。
+     [data-my-skills-dialog] 与 .agent-pop 同级：管理面 createPortal 到 body，
+     DOM 已不在 .agent-chat-surface 子树内，锚点必须单列。 */
   .agent-chat-surface .text-ios-footnote,
-  .agent-pop .text-ios-footnote {
+  .agent-pop .text-ios-footnote,
+  [data-my-skills-dialog] .text-ios-footnote {
     font-size: 15px;
   }
   /* 12px 层（会话列表日期行 / 工具卡次要行等）→ 14px。 */
   .agent-chat-surface .text-ios-caption1,
-  .agent-pop .text-ios-caption1 {
+  .agent-pop .text-ios-caption1,
+  [data-my-skills-dialog] .text-ios-caption1 {
     font-size: 14px;
   }
   /* 手机端不得出现 <14px 的文字：11px caption2 与 12/13px 正文小字
      （行内/区块 code、Markdown 表格、steer 徽章、子代理报告徽章）一律抬到 14px 地板。 */
   .agent-chat-surface .text-ios-caption2,
   .agent-pop .text-ios-caption2,
+  [data-my-skills-dialog] .text-ios-caption2,
   .agent-chat-surface .text-\[0\.75rem\],
   .agent-chat-surface .text-\[0\.8125rem\] {
     font-size: 14px;

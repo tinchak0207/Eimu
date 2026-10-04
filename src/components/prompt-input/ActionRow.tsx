@@ -76,7 +76,7 @@ export function ActionRow({
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "edit"
-                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.25)]"
+                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-ring/25"
                   : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
               )}
             >
@@ -88,7 +88,7 @@ export function ActionRow({
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "upscale"
-                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.25)]"
+                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-ring/25"
                   : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
               )}
             >
@@ -107,7 +107,7 @@ export function ActionRow({
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "agent"
-                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.25)]"
+                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-ring/25"
                   : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
               )}
             >

@@ -247,7 +247,7 @@ export function MobileSidebarPanel({
           type="button"
           onClick={onClose}
           aria-label="关闭导航"
-          className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.56)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.85)] active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+          className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.56)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.85)] active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
         >
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -284,7 +284,7 @@ export function MobileSidebarPanel({
                       onClick={() => onSurfaceAction(action, href)}
                       data-agent-action={action}
                       data-fallback-href={href}
-                      className={cn(rowClass, "w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]")}
+                      className={cn(rowClass, "w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30")}
                     >
                       <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
                       <span className="truncate text-ios-body">{label}</span>
@@ -356,7 +356,7 @@ export function MobileSidebarPanel({
               不是 52px 導覽列；只求不變孤兒，不佔列高預算。 */}
           <nav
             aria-label="更多入口"
-            className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pt-3 text-[14px] text-[rgba(0,0,0,0.42)]"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pt-3 text-ios-footnote text-[rgba(0,0,0,0.42)]"
           >
             {MOBILE_SIDEBAR_FOOTER_LINKS.map((item, index) => (
               <span key={item.href} className="flex items-center gap-x-2">
@@ -388,7 +388,7 @@ export function MobileSidebarPanel({
             data-agent-action="settings"
             data-fallback-href="/settings/api-keys"
             aria-label="设置"
-            className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.62)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] [-webkit-tap-highlight-color:transparent]"
+            className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.62)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [-webkit-tap-highlight-color:transparent]"
           >
             <Settings className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -396,7 +396,7 @@ export function MobileSidebarPanel({
             type="button"
             onClick={onStartNew}
             aria-label="新对话"
-            className="flex h-12 w-12 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black text-white transition-transform hover:scale-[1.03] active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.45)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+            className="flex h-12 w-12 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black text-white transition-transform hover:scale-[1.03] active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
           >
             <SquarePen className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -586,7 +586,7 @@ export function MobileNavHamburger({
       aria-label="打开导航"
       aria-haspopup="dialog"
       aria-expanded={expanded}
-      className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.62)] lg-transition active:bg-black/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden [-webkit-tap-highlight-color:transparent]"
+      className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.62)] lg-transition active:bg-black/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:hidden [-webkit-tap-highlight-color:transparent]"
     >
       <Menu className="h-5 w-5" aria-hidden="true" />
     </button>

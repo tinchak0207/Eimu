@@ -208,7 +208,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
           ))}
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.45)] focus-visible:ring-offset-2"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
           >
             开始生成
             <ArrowUpRight className="h-4 w-4" />
@@ -443,7 +443,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
 
         <Link
           href="/"
-          className="lg-float mb-5 inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg-transition hover:text-[rgba(0,0,0,0.82)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+          className="lg-float mb-5 inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg-transition hover:text-[rgba(0,0,0,0.82)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           返回生成器
@@ -459,7 +459,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
           </p>
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.45)] focus-visible:ring-offset-2"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
           >
             开始生成
             <ArrowUpRight className="h-4 w-4" />

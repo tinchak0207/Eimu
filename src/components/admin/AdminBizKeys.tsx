@@ -355,7 +355,7 @@ export function AdminBizKeys() {
 
       {/* 签发表单 */}
       {creating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-md border border-black/10 bg-white shadow-xl">
             <header className="flex items-center justify-between border-b border-black/10 px-5 py-3.5">
               <h3 className="text-sm font-semibold">签发 B 端密钥</h3>
@@ -486,7 +486,7 @@ export function AdminBizKeys() {
 
       {/* 明文密钥只显示这一次 */}
       {issuedKey && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-md border border-black/10 bg-white shadow-xl">
             <header className="border-b border-black/10 px-5 py-3.5">
               <h3 className="text-sm font-semibold">「{issuedKey.label}」的密钥已签发</h3>
@@ -541,7 +541,7 @@ export function AdminBizKeys() {
 
       {/* 开专用计费账户 */}
       {provisioning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-md border border-black/10 bg-white shadow-xl">
             <header className="flex items-center justify-between border-b border-black/10 px-5 py-3.5">
               <h3 className="text-sm font-semibold">新建专用 B 端计费账户</h3>

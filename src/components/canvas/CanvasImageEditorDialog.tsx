@@ -555,7 +555,7 @@ export function CanvasImageEditorDialog({
                 type="button"
                 onClick={() => setMode(tab.id)}
                 className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] font-medium transition-colors",
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ios-caption1 font-medium transition-colors",
                   activeMode === tab.id ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -583,7 +583,7 @@ export function CanvasImageEditorDialog({
           )}
           {loadError && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
-              <p className="text-[13.5px] leading-relaxed text-white/80">{loadError}</p>
+              <p className="text-ios-footnote leading-relaxed text-white/80">{loadError}</p>
               <button
                 type="button"
                 onClick={() => {
@@ -797,7 +797,7 @@ export function CanvasImageEditorDialog({
                       type="button"
                       onClick={() => applySplitQuick(axis, n)}
                       className={cn(
-                        "h-7 w-7 rounded-md text-[12.5px] font-medium transition-colors",
+                        "h-7 w-7 rounded-md text-ios-caption1 font-medium transition-colors",
                         current === n ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10",
                       )}
                     >
@@ -893,7 +893,7 @@ export function CanvasImageEditorDialog({
                   value={inpaintInstruction}
                   onChange={(e) => setInpaintInstruction(e.target.value)}
                   placeholder="把涂抹区域改成什么…"
-                  className="h-8 min-w-44 flex-1 rounded-lg border border-input bg-white px-2.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ios-blue"
+                  className="h-8 min-w-44 flex-1 rounded-lg border border-input bg-white px-2.5 text-ios-caption1 text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ios-blue"
                 />
               ) : (
                 <span className="text-ios-caption1 text-foreground/45">涂抹区域将变为透明</span>
@@ -902,16 +902,16 @@ export function CanvasImageEditorDialog({
           )}
           {activeMode === "rotate" && (
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setDeg((d) => (d + 270) % 360)} className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground hover:bg-black/10">
+              <button type="button" onClick={() => setDeg((d) => (d + 270) % 360)} className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-ios-caption1 font-medium text-muted-foreground hover:bg-black/10">
                 <RotateCcw className="h-3.5 w-3.5" /> 左转 90°
               </button>
-              <button type="button" onClick={() => setDeg((d) => (d + 90) % 360)} className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground hover:bg-black/10">
+              <button type="button" onClick={() => setDeg((d) => (d + 90) % 360)} className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-ios-caption1 font-medium text-muted-foreground hover:bg-black/10">
                 <RotateCw className="h-3.5 w-3.5" /> 右转 90°
               </button>
-              <button type="button" onClick={() => setFlipH((v) => !v)} aria-pressed={flipH} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium", flipH ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10")}>
+              <button type="button" onClick={() => setFlipH((v) => !v)} aria-pressed={flipH} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-ios-caption1 font-medium", flipH ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10")}>
                 <FlipHorizontal2 className="h-3.5 w-3.5" /> 水平翻转
               </button>
-              <button type="button" onClick={() => setFlipV((v) => !v)} aria-pressed={flipV} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium", flipV ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10")}>
+              <button type="button" onClick={() => setFlipV((v) => !v)} aria-pressed={flipV} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-ios-caption1 font-medium", flipV ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10")}>
                 <FlipVertical2 className="h-3.5 w-3.5" /> 垂直翻转
               </button>
               <span className="text-ios-caption1 tabular-nums text-foreground/45">当前 {deg}°</span>
@@ -979,7 +979,7 @@ export function CanvasImageEditorDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-muted-foreground hover:bg-black/5"
+            className="rounded-lg px-4 py-2 text-ios-footnote font-medium text-muted-foreground hover:bg-black/5"
           >
             取消
           </button>
@@ -987,7 +987,7 @@ export function CanvasImageEditorDialog({
             type="button"
             onClick={handleConfirm}
             disabled={!bmp || busy || (activeMode === "mask" && effectiveMaskOutput === "inpaint" && inpaintInstruction.trim() === "")}
-            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-[13.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-ios-footnote font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
             {activeMode === "split"

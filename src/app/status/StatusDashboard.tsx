@@ -159,7 +159,7 @@ export function StatusDashboard({ initialEndpoints }: Props) {
               return (
                 <article
                   key={endpoint.key}
-                  className="rounded-md border border-[#dfe3e8] bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-6"
+                  className="lg-card rounded-ios-2xl p-5 sm:p-6"
                 >
                   <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">

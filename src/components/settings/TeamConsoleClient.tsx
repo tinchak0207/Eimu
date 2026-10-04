@@ -316,7 +316,7 @@ export function TeamConsoleClient() {
                 onChange={(event) => setKeyDraft(event.target.value)}
                 placeholder="sk-biz-…"
                 aria-label="B 端密钥"
-                className="min-w-0 flex-1 rounded-ios-xl border border-[rgba(0,0,0,0.10)] bg-[rgba(255,255,255,0.72)] px-4 py-3 font-mono text-ios-footnote text-[rgba(0,0,0,0.80)] outline-none transition-colors placeholder:text-[rgba(0,0,0,0.30)] focus:border-[rgba(0,122,255,0.45)] focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+                className="min-w-0 flex-1 rounded-ios-xl border border-[rgba(0,0,0,0.10)] bg-[rgba(255,255,255,0.72)] px-4 py-3 font-mono text-ios-footnote text-[rgba(0,0,0,0.80)] outline-none transition-colors placeholder:text-[rgba(0,0,0,0.30)] focus:border-[rgba(0,122,255,0.45)] focus:ring-2 focus:ring-ring/20"
               />
               <SmallButton tone="primary" onClick={connect} disabled={!keyDraft.trim()}>
                 <KeyRound className="h-3 w-3" aria-hidden="true" />
@@ -575,7 +575,7 @@ export function TeamConsoleClient() {
               保存席位数
             </SmallButton>
           </div>
-          <p className="mt-3 rounded-ios-xl px-4 py-3 text-ios-caption1 leading-relaxed text-[#8a6410] lg-tint-gold">
+          <p className="mt-3 rounded-ios-xl px-4 py-3 text-ios-footnote leading-relaxed text-[#8a6410] lg-tint-gold">
             席位目前只是<b>人数上限的意图整数</b>：尚未接入计费，不能按席位购买、续费或扣款。购买与续费仍走
             <Link href="/pricing" className="mx-1 text-[#007AFF] hover:underline">套餐页</Link>
             （充值进团队主账号余额后，成员额度分配走 B 端接口）。
@@ -653,7 +653,7 @@ export function TeamConsoleClient() {
                   </div>
                 ))}
               </div>
-              <p className={cn("mt-3 text-ios-caption1", usage.conservation.balanced ? "text-[#1a7a3a]" : "text-[#b3271c]")}>
+              <p className={cn("mt-3 text-ios-footnote", usage.conservation.balanced ? "text-[#1a7a3a]" : "text-[#b3271c]")}>
                 余额守恒：{usage.conservation.balanced ? "平衡" : "不平衡"} · {usage.conservation.formula}
               </p>
               {usage.members.length > 0 && (

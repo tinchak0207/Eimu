@@ -138,7 +138,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md"
       onClick={onClose}
     >
       <div
@@ -162,7 +162,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             <X className="h-4 w-4" />
           </button>
@@ -215,7 +215,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
               className={cn(
                 "mt-3 flex w-full cursor-pointer items-center justify-between gap-2 rounded-ios-xl px-3 py-3 text-left transition-colors",
                 "bg-[rgba(0,0,0,0.04)] hover:bg-[rgba(0,0,0,0.07)]",
-                "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+                "focus:outline-none focus:ring-2 focus:ring-ring/20",
                 (!share || busy) && "cursor-default opacity-70",
               )}
             >
@@ -259,7 +259,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
                 className={cn(
                   "rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-medium text-white",
                   "shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200",
-                  "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.30)]",
+                  "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/30",
                   share ? "cursor-pointer" : "cursor-default opacity-60 active:scale-100",
                 )}
               >

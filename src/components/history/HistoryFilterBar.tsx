@@ -147,14 +147,14 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
           onChange={(event) => setKeyword(event.target.value)}
           placeholder="搜索提示词或模型…"
           aria-label="搜索历史记录"
-          className="w-full rounded-ios-xl border-0 bg-[rgba(0,0,0,0.05)] py-2.5 pl-9 pr-20 text-ios-footnote text-[rgba(0,0,0,0.85)] placeholder:text-[rgba(0,0,0,0.46)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)] [background-image:none]"
+          className="w-full rounded-ios-xl border-0 bg-[rgba(0,0,0,0.05)] py-2.5 pl-9 pr-20 text-ios-footnote text-[rgba(0,0,0,0.85)] placeholder:text-[rgba(0,0,0,0.46)] focus:outline-none focus:ring-2 focus:ring-ring/20 [background-image:none]"
         />
         {keyword && (
           <button
             type="button"
             onClick={() => setKeyword("")}
             aria-label="清除搜索"
-            className="absolute right-11 top-1/2 flex h-6 w-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.62)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="absolute right-11 top-1/2 flex h-6 w-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.62)] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             <X className="h-3 w-3" />
           </button>
@@ -169,7 +169,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
           className={cn(
             "absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full",
             "transition-all duration-200",
-            "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+            "focus:outline-none focus:ring-2 focus:ring-ring/20",
             expanded || activeFilters
               ? "bg-ios-blue/[0.12] text-[#007AFF]"
               : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
@@ -177,7 +177,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
         >
           <Filter className="h-3.5 w-3.5" />
           {activeFilters > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ios-blue/[0.12] px-1 text-[10px] font-medium tabular-nums text-[#007AFF]">
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ios-blue/[0.12] px-1 text-ios-caption2 font-medium tabular-nums text-[#007AFF]">
               {activeFilters}
             </span>
           )}
@@ -222,7 +222,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
           <button
             type="button"
             onClick={() => onChange({})}
-            className="shrink-0 cursor-pointer rounded-full px-2.5 py-1.5 text-ios-footnote text-[rgba(0,0,0,0.58)] transition-colors hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="shrink-0 cursor-pointer rounded-full px-2.5 py-1.5 text-ios-footnote text-[rgba(0,0,0,0.58)] transition-colors hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             清除筛选
           </button>
@@ -282,7 +282,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
             <button
               type="button"
               onClick={onExportCsv}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               <Sheet className="h-3.5 w-3.5" />
               导出 CSV
@@ -290,7 +290,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
             <button
               type="button"
               onClick={onExportJson}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               <FileJson className="h-3.5 w-3.5" />
               导出 JSON

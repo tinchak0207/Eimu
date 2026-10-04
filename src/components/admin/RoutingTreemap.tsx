@@ -112,7 +112,7 @@ export function RoutingTreemap({ data }: { data: ModelBreakdown[] }) {
                       title={`${modelBaseName(model.modelId)} · ${innerRect.id} · ${innerRect.value} 条`}
                     >
                       {innerRect.w > 70 && innerRect.h > 28 && (
-                        <span className="px-1 text-[10px] font-semibold leading-tight text-white drop-shadow-sm">
+                        <span className="px-1 text-ios-caption2 font-semibold leading-tight text-white drop-shadow-sm">
                           {innerRect.id}
                           <br />
                           {innerRect.value}

@@ -228,7 +228,7 @@ export function CanvasStageOverview({
               >
                 <Icon className="h-3.5 w-3.5 shrink-0 text-foreground/55" strokeWidth={2} />
                 <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{stage.code}</span>
-                <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{stage.label}</span>
+                <span className="min-w-0 truncate text-ios-caption1 font-semibold text-foreground">{stage.label}</span>
               </div>
             )}
             {/* 卡片本體：固定槽位尺寸，殼縮小時被裁切；B 段後半淡入。 */}
@@ -434,7 +434,7 @@ function BeadGrid({ beads, total, icon: Icon }: { beads: CanvasStageBead[]; tota
           <span key={i} className={cn("h-[7px] w-[7px] rounded-full", BEAD_CLASS[b])} />
         ))}
       </div>
-      {overflow > 0 && <span className="mt-2 text-[10.5px] tabular-nums text-muted-foreground">另有 {overflow} 个</span>}
+      {overflow > 0 && <span className="mt-2 text-ios-caption2 tabular-nums text-muted-foreground">另有 {overflow} 个</span>}
     </div>
   );
 }

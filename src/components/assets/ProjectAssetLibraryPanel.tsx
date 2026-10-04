@@ -222,7 +222,7 @@ export function ProjectAssetLibraryPanel({
     >
       <div className="flex items-start gap-2 border-b px-3 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold text-foreground">{text("assets.title")}</p>
+          <p className="text-ios-caption1 font-semibold text-foreground">{text("assets.title")}</p>
           <p className="mt-0.5 text-ios-caption2 leading-snug text-foreground/45">{text("assets.subtitle")}</p>
         </div>
         <button
@@ -250,7 +250,7 @@ export function ProjectAssetLibraryPanel({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={text("assets.searchPlaceholder")}
-            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-foreground/35"
+            className="min-w-0 flex-1 bg-transparent text-ios-caption1 text-foreground outline-none placeholder:text-foreground/35"
           />
         </label>
         {KIND_FILTERS.map(({ value, key }) => (
@@ -307,7 +307,7 @@ export function ProjectAssetLibraryPanel({
               <div key={key} className="border-b px-3 py-2.5 last:border-b-0">
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
+                    <p className="flex items-center gap-1.5 text-ios-caption1 font-medium text-foreground">
                       <span className="truncate">{item.title}</span>
                       <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
                         {item.kindLabel}
@@ -325,7 +325,7 @@ export function ProjectAssetLibraryPanel({
                     disabled={busy === key}
                     onClick={() => void toggleMount(item)}
                     className={cn(
-                      "shrink-0 cursor-pointer rounded-lg px-2 py-1 text-[11.5px] font-medium disabled:opacity-50",
+                      "shrink-0 cursor-pointer rounded-lg px-2 py-1 text-ios-caption1 font-medium disabled:opacity-50",
                       item.mounted
                         ? "bg-ios-green/10 text-[#248A3D] hover:bg-ios-green/20"
                         : "bg-black/5 text-muted-foreground hover:bg-black/10",

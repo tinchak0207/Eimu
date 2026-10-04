@@ -528,7 +528,7 @@ export function PromptInput({
             textareaHidden && "hidden",
             textareaDissolving && "dust-exit",
             textareaReforming && "dust-enter",
-            dragActive && "rounded-ios-2xl ring-2 ring-[rgba(0,122,255,0.45)] bg-[rgba(0,122,255,0.04)]",
+            dragActive && "rounded-ios-2xl ring-2 ring-ring/45 bg-[rgba(0,122,255,0.04)]",
           )}
         >
           {dragActive && (
@@ -546,7 +546,7 @@ export function PromptInput({
             onPaste={handlePaste}
             placeholder={displayMode === "edit" ? "描述想改成什么样子…" : "描述你的想法。例如：让这瓶香水出现在落日海滩，自然光线，质感高级。"}
             rows={5}
-            className="min-h-[180px] rounded-ios-2xl border-0 bg-[rgba(0,0,0,0.04)] px-5 py-4 pb-14 text-[16px] leading-6 text-[rgba(0,0,0,0.85)] placeholder:text-[rgba(0,0,0,0.44)] focus:bg-[rgba(0,122,255,0.04)] focus:ring-2 focus:ring-[rgba(0,122,255,0.20)] resize-none transition-all duration-200 [background-image:none]"
+            className="min-h-[180px] rounded-ios-2xl border-0 bg-[rgba(0,0,0,0.04)] px-5 py-4 pb-14 text-[16px] leading-6 text-[rgba(0,0,0,0.85)] placeholder:text-[rgba(0,0,0,0.44)] focus:bg-[rgba(0,122,255,0.04)] focus:ring-2 focus:ring-ring/20 resize-none transition-all duration-200 [background-image:none]"
           />
           {displayMode === "generate" && referenceImagesSupported && (
             <ReferenceImageUpload

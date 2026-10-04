@@ -309,7 +309,7 @@ export function ApiKeysClient() {
 
       {/* 创建对话框 */}
       {creating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
           <div className="lg-sheet animate-lg-appear relative w-full max-w-md overflow-hidden rounded-ios-3xl p-6">
             <Specular />
             <header className="flex items-center justify-between">
@@ -333,7 +333,7 @@ export function ApiKeysClient() {
                   onChange={(event) => setLabel(event.target.value)}
                   maxLength={60}
                   placeholder="默认：DSH 插件"
-                  className="mt-2 w-full rounded-ios-xl border border-[rgba(0,0,0,0.10)] bg-[rgba(255,255,255,0.72)] px-4 py-3 text-ios-body text-[rgba(0,0,0,0.80)] outline-none transition-colors placeholder:text-[rgba(0,0,0,0.30)] focus:border-[rgba(0,122,255,0.45)] focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+                  className="mt-2 w-full rounded-ios-xl border border-[rgba(0,0,0,0.10)] bg-[rgba(255,255,255,0.72)] px-4 py-3 text-ios-body text-[rgba(0,0,0,0.80)] outline-none transition-colors placeholder:text-[rgba(0,0,0,0.30)] focus:border-[rgba(0,122,255,0.45)] focus:ring-2 focus:ring-ring/20"
                 />
               </label>
               <p className="mt-3 rounded-ios-xl bg-[rgba(0,0,0,0.04)] px-4 py-3 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
@@ -365,7 +365,7 @@ export function ApiKeysClient() {
 
       {/* 明文密钥只显示这一次 */}
       {issued && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
           <div className="lg-sheet animate-lg-appear relative w-full max-w-lg overflow-hidden rounded-ios-3xl p-6 sm:max-w-xl">
             <Specular />
             <header>

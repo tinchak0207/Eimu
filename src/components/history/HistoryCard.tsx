@@ -75,7 +75,7 @@ function CardAction({
         // backing chip whatsoever. rgba() bracket values always compile.
         "bg-[rgba(255,255,255,0.72)] backdrop-blur-[22px] transition-all duration-200",
         "hover:bg-[rgba(255,255,255,0.92)] hover:-translate-y-[1px] active:scale-[0.94]",
-        "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+        "focus:outline-none focus:ring-2 focus:ring-ring/20",
         disabled && "cursor-default opacity-60 hover:translate-y-0 hover:bg-[rgba(255,255,255,0.72)] active:scale-100",
         tone === "danger" && "text-[#FF3B30]",
         tone === "gold" && active && "text-[#FFB300]",
@@ -197,7 +197,7 @@ function HistoryCardComponent({
         }}
         aria-label={inProgress ? "生成中" : selectionMode ? (selected ? "取消选中" : "选中这张") : isAudio ? "打开音频" : "查看大图"}
         className={cn(
-          "block w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.20)]",
+          "block w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/20",
           inProgress ? "cursor-default" : src && !imageFailed ? "cursor-zoom-in" : "cursor-pointer",
         )}
       >
@@ -320,7 +320,7 @@ function HistoryCardComponent({
           aria-pressed={selected}
           className={cn(
             "absolute left-3 top-3 z-20 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full",
-            "transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+            "transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring/20",
             selected
               ? "bg-[#007AFF] text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)]"
               : "bg-[rgba(255,255,255,0.78)] text-transparent backdrop-blur-[22px] hover:bg-[rgba(255,255,255,0.92)]",

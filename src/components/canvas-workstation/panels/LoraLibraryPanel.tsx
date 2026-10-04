@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, Clock3, Heart, Maximize2, Search, X } from "lucide-react";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { cn } from "@/lib/utils";
@@ -442,25 +443,29 @@ export function LoraLibraryPanel({ value, onChange }: LoraLibraryPanelProps) {
         </p>
       )}
 
-      {previewItem ? (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xl" role="dialog" aria-modal="true" aria-label={`预览 ${previewItem.title}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewItem(null); }}>
-          <div className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-ios-3xl lg-sheet">
-            <button type="button" onClick={() => setPreviewItem(null)} className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white" aria-label="关闭预览"><X className="h-5 w-5" /></button>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={previewItem.thumb} alt={previewItem.title} className="min-h-0 w-full flex-1 object-contain" />
-            <div className="flex flex-wrap items-center gap-3 border-t border-black/10 px-4 py-3">
-              <strong className="min-w-0 flex-1 text-[16px] text-foreground">{previewItem.title}</strong>
-              <button type="button" onClick={() => void persistPreference(previewItem, { favorite: !preferenceByVersion.get(previewItem.versionId)?.favorite })} className="flex min-h-11 items-center gap-2 rounded-ios-xl bg-ios-pink/10 px-4 text-ios-subhead font-bold text-ios-pink">
-                <Heart className={cn("h-4 w-4", preferenceByVersion.get(previewItem.versionId)?.favorite && "fill-current")} />
-                {preferenceByVersion.get(previewItem.versionId)?.favorite ? "已收藏" : "收藏"}
-              </button>
-              <button type="button" onClick={() => { toggleLora(previewItem); setPreviewItem(null); }} className="min-h-11 rounded-ios-xl bg-ios-blue px-5 text-ios-subhead font-bold text-white">
-                {value?.versionId === previewItem.versionId ? "取消选择" : "使用这个 LoRA"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {previewItem
+        ? typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xl" role="dialog" aria-modal="true" aria-label={`预览 ${previewItem.title}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewItem(null); }}>
+              <div className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-ios-3xl lg-sheet">
+                <button type="button" onClick={() => setPreviewItem(null)} className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white" aria-label="关闭预览"><X className="h-5 w-5" /></button>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewItem.thumb} alt={previewItem.title} className="min-h-0 w-full flex-1 object-contain" />
+                <div className="flex flex-wrap items-center gap-3 border-t border-black/10 px-4 py-3">
+                  <strong className="min-w-0 flex-1 text-[16px] text-foreground">{previewItem.title}</strong>
+                  <button type="button" onClick={() => void persistPreference(previewItem, { favorite: !preferenceByVersion.get(previewItem.versionId)?.favorite })} className="flex min-h-11 items-center gap-2 rounded-ios-xl bg-ios-pink/10 px-4 text-ios-subhead font-bold text-ios-pink">
+                    <Heart className={cn("h-4 w-4", preferenceByVersion.get(previewItem.versionId)?.favorite && "fill-current")} />
+                    {preferenceByVersion.get(previewItem.versionId)?.favorite ? "已收藏" : "收藏"}
+                  </button>
+                  <button type="button" onClick={() => { toggleLora(previewItem); setPreviewItem(null); }} className="min-h-11 rounded-ios-xl bg-ios-blue px-5 text-ios-subhead font-bold text-white">
+                    {value?.versionId === previewItem.versionId ? "取消选择" : "使用这个 LoRA"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

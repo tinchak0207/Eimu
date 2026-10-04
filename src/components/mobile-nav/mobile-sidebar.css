@@ -99,14 +99,21 @@
 /* ── 側欄內字級地板（2026-10-03，只作用 ≤639.98px）─────────────────────
    側欄內共用的 AgentSessionList 不在 `.agent-chat-surface` / `.agent-pop` 作用域
    （那是助理面與寬屏下拉的字級階梯所在，見 agent-chat.css 的窄屏塊），它的
-   13px 日期行（`text-ios-footnote`）在側欄裡仍走原 token。本輪定的手機地板是
-   14px：在側欄作用域內把 footnote 層抬到 14px。
-   同一個 13px 層在側欄裡還有身份副標（email／「已登录」），一併抬到地板，避免
-   側欄殘留 <14px 文字。只覆寫 font-size（line-height 沿用 token 的 18px，零版面
-   位移），**不動** agent-chat/AgentSessionList.tsx 的基礎 class（助理面與寬屏
-   下拉不受影響）。`.mobile-sidebar-panel` 只在 <sm 掛載，仍包 media 確保桌面一字不動。 */
+   13px 日期行（`text-ios-footnote`）與 12px 空狀態／按鈕行（`text-ios-caption1`）
+   在側欄裡仍走原 token。本輪定的手機地板是 14px：在側欄作用域內把 footnote、
+   caption1、caption2 三層一律抬到 14px，避免側欄殘留 <14px 文字（AgentSessionList
+   的「正在加载历史会话…／没有匹配的对话／还没有历史对话／开始新对话」正是
+   caption1 漏出、手機端仍為 12px 的實例）。任意值逃生口（`text-[0.75rem]`／
+   `text-[0.8125rem]`）比照 agent-chat.css 的窄屏塊一併納入，避免 12／13px 小字換
+   寫法後繞過地板。只覆寫 font-size（line-height 沿用 token，零版面位移），
+   **不動** agent-chat/AgentSessionList.tsx 的基礎 class（助理面與寬屏下拉不受影響）。
+   `.mobile-sidebar-panel` 只在 <sm 掛載，仍包 media 確保桌面一字不動。 */
 @media (max-width: 639.98px) {
-  .mobile-sidebar-panel .text-ios-footnote {
+  .mobile-sidebar-panel .text-ios-footnote,
+  .mobile-sidebar-panel .text-ios-caption1,
+  .mobile-sidebar-panel .text-ios-caption2,
+  .mobile-sidebar-panel .text-\[0\.75rem\],
+  .mobile-sidebar-panel .text-\[0\.8125rem\] {
     font-size: 14px;
   }
 }

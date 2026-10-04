@@ -151,7 +151,7 @@ function Segment({
         {index + 1}
       </span>
       <div className="mb-1.5 flex items-baseline gap-2">
-        <p className={cn("text-[12.5px] font-semibold tracking-wide", muted ? "text-muted-foreground" : "text-foreground")}>{title}</p>
+        <p className={cn("text-ios-caption1 font-semibold tracking-wide", muted ? "text-muted-foreground" : "text-foreground")}>{title}</p>
         {source && <span className="text-[11px] text-muted-foreground">{source}</span>}
       </div>
       {children}

@@ -241,7 +241,7 @@ export const ReferenceImageUpload = memo(
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[rgba(0,0,0,0.52)]"><X className="h-3.5 w-3.5" /></span>
               </button>
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(0,0,0,0.52)] to-transparent p-1.5">
-                <p className="truncate text-[10px] font-medium text-white/90">{image.name}</p>
+                <p className="truncate text-ios-caption2 font-medium text-white/90">{image.name}</p>
               </div>
                 </div>
               ))}

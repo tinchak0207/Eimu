@@ -390,7 +390,7 @@ export function AssetReviewPanel({
     >
       <div className="flex items-start gap-2 border-b px-3 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold text-foreground">资产审查</p>
+          <p className="text-ios-caption1 font-semibold text-foreground">资产审查</p>
           <p className="mt-0.5 text-ios-caption2 leading-snug text-foreground/45">
             逐张看、逐张改；批准动作整批一次
           </p>
@@ -417,7 +417,7 @@ export function AssetReviewPanel({
       {/* 檔位橫幅（決策 1/2）：全自動檔只是說明，不新增任何阻塞 */}
       <p
         className={cn(
-          "border-b px-3 py-1.5 text-ios-caption2 leading-snug",
+          "border-b px-3 py-1.5 text-ios-footnote leading-snug",
           behavior.stops ? "bg-[rgba(255,149,0,0.10)] text-[#B25E00]" : "bg-black/[0.03] text-foreground/45",
         )}
       >
@@ -439,7 +439,7 @@ export function AssetReviewPanel({
             const active = activeCardIds.includes(card.id);
             return (
               <div key={card.id} className="border-b px-3 py-2.5 last:border-b-0">
-                <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-foreground">
+                <p className="flex items-center gap-1.5 truncate text-ios-caption1 font-medium text-foreground">
                   <span className="truncate">{card.name}</span>
                   <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
                     {CHARACTER_CARD_KIND_LABEL[card.kind]}
@@ -544,7 +544,7 @@ export function AssetReviewPanel({
                       onChange={(event) => setRejectReason(event.target.value)}
                       rows={2}
                       placeholder="哪里不对？想怎么改？（会存档，不会自动重生成）"
-                      className="w-full rounded-lg border border-black/10 bg-white/70 px-2 py-1.5 text-[11.5px] text-foreground outline-none placeholder:text-foreground/35 focus:border-[rgba(0,122,255,0.45)]"
+                      className="w-full rounded-lg border border-black/10 bg-white/70 px-2 py-1.5 text-ios-caption1 text-foreground outline-none placeholder:text-foreground/35 focus:border-[rgba(0,122,255,0.45)]"
                     />
                     <div className="mt-1 flex gap-1.5">
                       <button
@@ -596,7 +596,7 @@ export function AssetReviewPanel({
           onClick={() => void handleApproveAll()}
           disabled={cards.length === 0}
           className={cn(
-            "flex items-center gap-1 rounded-lg bg-[#007AFF] px-2.5 py-1.5 text-[11.5px] font-medium text-white",
+            "flex items-center gap-1 rounded-lg bg-[#007AFF] px-2.5 py-1.5 text-ios-caption1 font-medium text-white",
             cards.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-[#0066D6]",
           )}
         >
@@ -608,7 +608,7 @@ export function AssetReviewPanel({
           onClick={() => exportAssetReviewCsv(cards)}
           disabled={cards.length === 0}
           className={cn(
-            "flex items-center gap-1 rounded-lg bg-black/5 px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground",
+            "flex items-center gap-1 rounded-lg bg-black/5 px-2.5 py-1.5 text-ios-caption1 font-medium text-muted-foreground",
             cards.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-black/10",
           )}
         >
@@ -620,7 +620,7 @@ export function AssetReviewPanel({
           onClick={() => void handleExportZip()}
           disabled={cards.length === 0}
           className={cn(
-            "flex items-center gap-1 rounded-lg bg-black/5 px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground",
+            "flex items-center gap-1 rounded-lg bg-black/5 px-2.5 py-1.5 text-ios-caption1 font-medium text-muted-foreground",
             cards.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-black/10",
           )}
         >

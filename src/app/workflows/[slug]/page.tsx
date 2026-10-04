@@ -173,7 +173,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
           ))}
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.45)] focus-visible:ring-offset-2"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
           >
             打开工作台，用「{card.name}」开工
             <ArrowUpRight className="h-4 w-4" />

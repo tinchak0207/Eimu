@@ -125,7 +125,7 @@ function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
             e.stopPropagation();
             void decide(true);
           }}
-          className="rounded-full bg-primary px-3 py-1 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-full bg-primary px-3 py-1 text-ios-caption1 font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy === "approve" ? "已提交…" : "批准 · 继续"}
         </button>
@@ -137,7 +137,7 @@ function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
             e.stopPropagation();
             void decide(false);
           }}
-          className="rounded-full bg-black/5 px-3 py-1 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-full bg-black/5 px-3 py-1 text-ios-caption1 font-medium text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy === "reject" ? "已提交…" : "退回 · 要改"}
         </button>
@@ -290,11 +290,11 @@ export function NodeBody({
               e.stopPropagation();
               onEditPrompt(node.id);
             }}
-            className="rounded-full bg-primary px-3.5 py-1.5 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-85"
+            className="rounded-full bg-primary px-3.5 py-1.5 text-ios-caption1 font-medium text-primary-foreground transition-opacity hover:opacity-85"
           >
             生成图片
           </button>
-          <span className="text-[11.5px] text-muted-foreground">结果将直接填入此节点</span>
+          <span className="text-ios-caption1 text-muted-foreground">结果将直接填入此节点</span>
         </div>
       );
     }
@@ -440,7 +440,7 @@ export function NodeBody({
           <div className="flex h-full flex-col">
             <div className="flex shrink-0 items-center gap-1.5 border-b border-black/5 bg-black/[0.03] px-3 py-1.5 text-ios-caption1 font-medium text-foreground/60">
               {!Number.isNaN(stepIndex) && (
-                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-[10.5px] font-semibold leading-none text-ios-blue">
+                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-ios-caption2 font-semibold leading-none text-ios-blue">
                   {stepIndex + 1}
                 </span>
               )}
@@ -479,14 +479,14 @@ export function NodeBody({
               </span>
             )}
             {description.trim() ? (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-muted-foreground"><EntityText text={description} /></p>
+              <p className="whitespace-pre-wrap break-words text-ios-footnote leading-relaxed text-muted-foreground"><EntityText text={description} /></p>
             ) : (
               <span className="text-ios-caption1 text-muted-foreground">（未填写描述）</span>
             )}
             {features.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {features.map((f) => (
-                  <span key={f} className="rounded-full bg-ios-blue/10 px-2 py-0.5 text-[11.5px] text-ios-blue">
+                  <span key={f} className="rounded-full bg-ios-blue/10 px-2 py-0.5 text-ios-caption1 text-ios-blue">
                     {f}
                   </span>
                 ))}
@@ -573,7 +573,7 @@ export function NodeBody({
                     </div>
                   )}
                   {!metadata?.toolInput && !metadata?.toolOutput && (
-                    <span className="inline-flex items-center rounded-full bg-black/5 px-2 py-0.5 text-[11.5px] font-medium leading-none text-muted-foreground">
+                    <span className="inline-flex items-center rounded-full bg-black/5 px-2 py-0.5 text-ios-caption1 font-medium leading-none text-muted-foreground">
                       平台原生工具
                     </span>
                   )}
@@ -628,7 +628,7 @@ export function NodeBody({
           >
             {deliverableText ? (
               <>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#248A3D]">
                   <Package className="h-3 w-3" aria-hidden="true" />
                   产出
                 </span>
@@ -679,7 +679,7 @@ export function NodeBody({
               onPointerCancel={onScrollAreaPointerEnd}
               className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-2.5 overflow-auto p-3"
             >
-              <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#248A3D]">
                 <Package className="h-3 w-3" aria-hidden="true" />
                 产出
               </span>
@@ -721,14 +721,14 @@ export function NodeBody({
             {rows.map((row) => (
               // 值緊貼標籤左對齊（2026-09-27）：右對齊時節點半截出視口，值被裁掉像空欄位。
               <div key={row.label} className="flex items-baseline gap-3">
-                <span className="w-12 shrink-0 text-[12.5px] font-medium text-muted-foreground">{row.label}</span>
+                <span className="w-12 shrink-0 text-ios-caption1 font-medium text-muted-foreground">{row.label}</span>
                 <span className="min-w-0 max-sm:text-ios-subhead truncate font-mono text-ios-footnote text-foreground">
                   {row.value}
                 </span>
               </div>
             ))}
             {content && (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground"><EntityText text={content} /></p>
+              <p className="whitespace-pre-wrap break-words text-ios-footnote leading-relaxed text-foreground"><EntityText text={content} /></p>
             )}
           </div>
         );
@@ -809,16 +809,16 @@ export function NodeBody({
             )}
             <div className="flex flex-wrap items-center gap-1">
               {typeof metadata?.shotCount === "number" && (
-                <span className="rounded-full bg-[rgba(90,200,250,0.14)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#0E7FA8]">
+                <span className="rounded-full bg-[rgba(90,200,250,0.14)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#0E7FA8]">
                   {metadata.shotCount} 镜头
                 </span>
               )}
               {metadata?.healthOk === true ? (
-                <span className="rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+                <span className="rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#248A3D]">
                   分镜健康
                 </span>
               ) : metadata?.healthOk === false ? (
-                <span className="rounded-full bg-[rgba(255,149,0,0.14)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#B96A00]">
+                <span className="rounded-full bg-[rgba(255,149,0,0.14)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#B96A00]">
                   待修正
                 </span>
               ) : null}

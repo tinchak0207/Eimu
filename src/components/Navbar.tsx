@@ -381,7 +381,7 @@ export function Navbar({ className }: NavbarProps) {
             />
             <Link
               href="/"
-              className="flex min-w-0 shrink items-center gap-2 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:gap-2.5"
+              className="flex min-w-0 shrink items-center gap-2 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:gap-2.5"
               aria-label="回到首页"
             >
               {/* Eimu app icon。手機端同樣走極簡態：icon.png 四角是透明的，
@@ -410,7 +410,7 @@ export function Navbar({ className }: NavbarProps) {
               onClick={() => setQqOpen(true)}
               aria-label="交流群"
               title="交流群"
-              className={`hidden min-w-0 shrink cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex lg:px-3 ${FLAT_CHROME}`}
+              className={`hidden min-w-0 shrink cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:inline-flex lg:px-3 ${FLAT_CHROME}`}
             >
               <QqLogo className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">交流群</span>
@@ -449,7 +449,7 @@ export function Navbar({ className }: NavbarProps) {
                     「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
                   aria-label="历史"
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
@@ -460,7 +460,7 @@ export function Navbar({ className }: NavbarProps) {
                     导航栏摆个入口会把人带离卡片，正好是使用者不要的那种交互。 */}
                 <Link
                   href="/docs"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
                   aria-label="文档"
                 >
                   <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
@@ -475,14 +475,14 @@ export function Navbar({ className }: NavbarProps) {
                       aria-label="API 密钥"
                       title="API 密钥"
                       className={cn(
-                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9",
+                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-9",
                         FLAT_CHROME,
                       )}
                     >
                       <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" sideOffset={8} className="z-[90]">
+                  <DropdownMenuContent align="end" sideOffset={8}>
                     <DropdownMenuItem onSelect={() => void copyApiKey()} className="cursor-pointer">
                       <KeyRound className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
                       {copyingKey ? "复制中…" : "复制 API 密钥"}

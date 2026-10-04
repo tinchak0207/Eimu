@@ -87,11 +87,11 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
 
       {view === "wechat" ? (
         <>
-          <p className="text-[14px] font-semibold text-foreground">微信扫码，扫到就开拍</p>
+          <p className="text-ios-subhead font-semibold text-foreground">微信扫码，扫到就开拍</p>
           <div className="mt-3">
             <WechatScanQr login={wechat} size={168} />
           </div>
-          <p className="mt-2.5 text-center text-[12.5px]">
+          <p className="mt-2.5 text-center text-ios-caption1">
             <button
               type="button"
               onClick={() => setView("choose")}
@@ -103,8 +103,8 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
         </>
       ) : (
         <>
-          <p className="text-[14px] font-semibold text-foreground">登录后开拍</p>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+          <p className="text-ios-subhead font-semibold text-foreground">登录后开拍</p>
+          <p className="mt-1 text-ios-caption1 leading-relaxed text-muted-foreground">
             你刚说的那句已经存好了，登录完成就开一个新对话、直接送进产线。
           </p>
 
@@ -112,7 +112,7 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
             <button
               type="button"
               onClick={startGithub}
-              className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1f2328] text-[13.5px] font-semibold text-white lg-transition hover:bg-[#16181c] active:scale-[0.99]"
+              className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1f2328] text-ios-footnote font-semibold text-white lg-transition hover:bg-[#16181c] active:scale-[0.99]"
             >
               <Github className="h-[17px] w-[17px]" aria-hidden="true" />
               使用 GitHub 登录
@@ -120,14 +120,14 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
             <button
               type="button"
               onClick={() => setView("wechat")}
-              className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#07C160] text-[13.5px] font-semibold text-white lg-transition hover:bg-[#06AD56] active:scale-[0.99]"
+              className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#07C160] text-ios-footnote font-semibold text-white lg-transition hover:bg-[#06AD56] active:scale-[0.99]"
             >
               <WechatLogo className="h-[18px] w-[18px]" />
               使用微信登录
             </button>
           </div>
 
-          <p className="mt-2.5 text-center text-[11.5px] text-muted-foreground">
+          <p className="mt-2.5 text-center text-ios-caption1 text-muted-foreground">
             <button
               type="button"
               onClick={onDismiss}
