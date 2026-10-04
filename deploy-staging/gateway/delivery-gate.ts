@@ -32,6 +32,10 @@ import { readFileSync } from "node:fs"
 // 「评审可计量」（v3，2026-10-03）：分数来源型别的真源在 persistence.ts（栏位所在）。type-only
 // import 在编译期即被抹除，不会把 persistence 的执行期模组（bun:sqlite）拉进本纯函数模组。
 import type { CriticScoreSource } from "./persistence.ts"
+// 2026-10-04（内审剧场拆除片 F3-B）：成品证据判定复用既有媒体 URL 抽取轮子
+// （media-quality.extractMediaTargets，副档名口径与 events-translate 同源），不造第二份副档名表。
+// 该模组只依赖 node 内建（child_process/fs/os/path），不含 bun:sqlite，不会把本纯函数模组拖进 DB runtime。
+import { extractMediaTargets } from "./media-quality.ts"
 
 /** 单一 Expert 的交付契约（与 src/lib/expert-registry.ts deliverableContract 同形）。 */
 export interface ExpertDeliveryContract {
@@ -241,6 +245,12 @@ export interface CriticPassInput {
   beastMode: boolean
   /** 待审份数（本窗口内契约域内已完成、且尚未送审的 Expert 交付）。 */
   expertDeliveries: number
+  /**
+   * 其中带**真实成品证据**（交付正文含真实媒体 URL）的份数（2026-10-04 F3-B）。
+   * 缺省 undefined ＝ 呼叫端未提供（退回旧行为）；提供时须 >0 才可能触发——
+   * probe／报告类交付（无成品 URL）一律不进入成品契约内审。
+   */
+  deliverableEvidence?: number
   /** 本轮是否已有 critic 派遣（含在途）。 */
   criticDispatched: boolean
   /** 最终文本是否自行声明「未经独立审核」。 */
@@ -257,6 +267,9 @@ export interface CriticPassInput {
 export function shouldTriggerCriticPass(input: CriticPassInput): boolean {
   if (input.beastMode !== true) return false
   if (!(input.expertDeliveries > 0)) return false
+  // 2026-10-04 F3-B：有 Expert 交付 ≠ 有成品。无真实媒体产物的交付（probe／报告／空壳）
+  // 不得触发成品契约内审；呼叫端有提供证据计数时，0 份成品即一票否决。
+  if (input.deliverableEvidence !== undefined && !(input.deliverableEvidence > 0)) return false
   if (input.criticDispatched === true) return false
   if (input.unreviewedDeclared === true) return false
   if (input.alreadyPassed === true) return false
@@ -282,10 +295,39 @@ function contractFieldsOf(agent: string, contracts: DeliveryContracts): string[]
 }
 
 /**
+ * 2026-10-04（F3-B）：该交付正文是否带**真实成品证据**——正文含至少一个可量测的媒体 URL
+ * （audio_url／image/video 产物；判定复用 media-quality.extractMediaTargets 的既有副档名口径）。
+ *
+ * 病灶（eval-music-r2/EVAL-A-text.md 第四节 A/三·A）：一张「先不要生成，只做通路体检」的
+ * 免费单被成品契约内审判「退回」，触发 4 路返工 + ~15 万 token，全程 0 成品。根因＝触发判据
+ * 只看「有 Expert 交付」，不看「有没有真产物」。本函式把「成品」钉死为可机械判定的媒体 URL。
+ */
+export function hasRealDeliverable(text: unknown): boolean {
+  const s = typeof text === "string" ? text : ""
+  if (!s) return false
+  // 既有轮子 URL_RE 的全形边界只挡「，。、;；」，不挡「（）」；实测成品行常写成
+  // `…onq516.m4a（60.000 秒）`——URL 尾巴吞进全形括号导致副档名判定失败（真成品被漏判）。
+  // 先把紧贴的全形括号隔离成空格，再喂既有轮子（不另造副档名表）。
+  return extractMediaTargets(s.replace(/[（）【】「」《》]/g, (m) => ` ${m} `)).length > 0
+}
+
+/** 2026-10-04（F3-B）：待审清单里带真实成品证据的份数（shouldTriggerCriticPass 的输入来源）。 */
+export function countDeliverableEvidence(targets: CriticPassTarget[]): number {
+  if (!Array.isArray(targets)) return 0
+  let n = 0
+  for (const t of targets) if (hasRealDeliverable(t?.text)) n++
+  return n
+}
+
+/**
  * 纯函数：组 machine critic pass 的 critic spec。
  * = 固定审核指令（逐栏核验值是否空壳／跨档一致性／引用真伪／四栏输出）
  * + 逐份（Expert id / label / 该 Expert 契约栏清单 / 交付正文）。
  * 契约栏真源 = 传入 contracts（生产传 DELIVERY_CONTRACTS，禁手抄第二份）。
+ *
+ * 2026-10-04（F3-B）：**成品证据前置**——先滤掉不带真实媒体产物的交付（probe／报告／空壳），
+ * 只审真成品。全被滤空 → 回空字串；呼叫端（subagent.ts maybeRunMachineCriticPass）在
+ * `if (!spec) return false` 处据此零派遣、零旗标消耗——这就是「非成品交付不触发成品内审」的活闸门。
  * 空 targets → 回空字串（呼叫端据此零派遣）。
  */
 export function buildCriticPassSpec(
@@ -293,6 +335,8 @@ export function buildCriticPassSpec(
   contracts: DeliveryContracts,
 ): string {
   if (!Array.isArray(targets) || targets.length === 0) return ""
+  const reviewed = targets.filter((t) => hasRealDeliverable(t?.text))
+  if (reviewed.length === 0) return ""
   const head = [
     `${CRITIC_PASS_MARK}你被**系统直接派遣**（不经 orchestrator 决策）做一次独立审核。`,
     "",
@@ -312,12 +356,12 @@ export function buildCriticPassSpec(
     "",
     "被审正文若标记「已截断」，你只能就所见部分下判，不得对截断外内容断言。你只审不产：禁止改写或补产被审内容。",
     "",
-    `【被审交付共 ${targets.length} 份】`,
+    `【被审交付共 ${reviewed.length} 份（已滤除无成品的探活/报告类交付）】`,
   ].join("\n")
 
   const blocks: string[] = []
   let used = 0
-  for (const t of targets) {
+  for (const t of reviewed) {
     const fields = contractFieldsOf(t.agent, contracts)
     const budget = Math.min(CRITIC_PASS_PER_TARGET_CHARS, Math.max(0, CRITIC_PASS_TOTAL_CHARS - used))
     const raw = typeof t.text === "string" ? t.text : ""
@@ -445,4 +489,85 @@ export function buildReworkDirective(
     `该 Expert（${agent}）交付契约共 ${total} 栏：${fieldList}。`,
     "本次为同一任务的修正重派：原任务内容与其余要求全部保持不变，请在上一轮交付基础上补齐上述缺失栏位，重新交付完整结果。",
   ].join("\n")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 子代理唤醒文案白名单（2026-10-04「机器内审剧场」拆除片 F3-A）
+//
+// 病灶（eval-music-r2/EVAL-A-text.md 第四节 B）：wakeSessionForSubagent 把子代理
+// `run.summary` 整包塞进唤醒讯息，实测含 `verdict：退回`／`issues：…`／`evidence：…`／
+// `qc：…` 栏名、`审核官（Critic）· 独立审核 runId 7d71c731-…`、
+// `[子代理用量] 工具调用 15 次 · 耗时 421s · token 63162`、
+// `[完整结果已落盘：outputs/subagent/<uuid>.md（3909 字）]` 内部落盘路径、
+// `.opencode/lib/music-tools-impl.ts` L512–518 源档行号。这些以 role=system/assistant
+// 落进 API /messages，属「用户可见文字」。
+//
+// 本函式＝过桥白名单：只允许「完成了什么 / 成品在哪（用户可读 URL）/ 有什么落差」通过；
+// 内部栏名、审核身份、用量计数、内部路径与行号一律剥离，内审判词降级为产品语言
+// （「已复核过」「有落差」）。纯函式、无副作用，便于直接探针直呼（index.ts 是服务入口，
+// import 即起服务，故本函式落在本纯模组）。
+// ─────────────────────────────────────────────────────────────────────────
+
+/** 内部判决标记 → 产品语言（先整段替换掉判词与内部指令，避免逐字外泄）。 */
+const WAKE_MARK_REWRITES: Array<[RegExp, string]> = [
+  [/【独立审核·退回】[^\n]*/g, "（这一路经复核有落差，需修正。）"],
+  [/【独立审核·机器派遣】[^\n]*/g, "（已复核过，无落差。）"],
+  [/【交付闸门·重派后仍未达标】[^\n]*/g, "（这一路修正后仍有落差，需再修。）"],
+  [/【交付闸门·未达标】[^\n]*/g, "（这一路交付有落差，需修正。）"],
+  [/【交付闸门·进程中断未复原】[^\n]*/g, "（这一路任务中断未完成，需补派。）"],
+]
+
+/** 整行丢弃：内部栏名行 / 审核身份行 / 内部源档行号行 / 落盘指针行。 */
+const WAKE_DROP_LINE_RES: RegExp[] = [
+  /^\[子代理用量\]/,
+  /^\[已截断/,
+  /^\s*\[(?:完整|部分)结果(?:已落盘|落盘失败)/,
+  /\b(?:verdict|issues|evidence|qc)\s*[:：]/i,
+  /(审核官|\bCritic\b|独立审核|runId\s*[:：]?\s*[A-Za-z0-9])/i,
+  /(?:\.opencode|gateway)\/[\w./-]+\.(?:ts|js|mjs|py)/,
+]
+
+/** 残余 token 清洗（栏名、用量计数、runId/UUID、内部路径、行号）。 */
+const WAKE_TOKEN_RES: Array<[RegExp, string]> = [
+  [/\b(?:verdict|issues|evidence|qc)\s*[:：]\s*/gi, ""],
+  [/\btoken\s*[:：]?\s*\d+/gi, ""],
+  [/工具调用\s*\d+\s*次/g, ""],
+  [/耗时\s*\d+\s*(?:s|秒)/g, ""],
+  [/runId\s*[:：]?\s*[A-Za-z0-9._-]+/gi, ""],
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, ""],
+  [/(?:^|[\s(（])(?:outputs|runs)\/[^\s，。；、）)】"'`]+/g, ""],
+  [/(?:\.opencode|gateway)\/[^\s，。；、）)】"'`]+/g, ""],
+  [/\bL\d+(?:\s*[–—~-]\s*L?\d+)?\b/g, ""],
+  [/（\d+\s*字）/g, ""],
+  [/\[(?:完整|部分)结果(?:已落盘|落盘失败)[^\]]*\]\s*/g, ""],
+]
+
+/**
+ * 纯函数：子代理唤醒/落盘摘要 → 用户可见文字白名单。
+ * 输入 run.summary（或 run.error）；输出只含成品与落差，内部字段/身份/计数/路径全消失。
+ * 无可用内容 → 回空字串（呼叫端给中性兜底句）。
+ */
+export function scrubSubagentWakeText(raw: unknown): string {
+  if (typeof raw !== "string" || raw.length === 0) return ""
+  let s = raw.replace(/\r\n?/g, "\n")
+
+  // 1) 落盘指针 / 截断提示 / 用量计数：结构段先行剥离（指针无换行，只删 token 不删整行）。
+  s = s.replace(/\[(?:完整|部分)结果(?:已落盘|落盘失败)[^\]]*\]\s*/g, "")
+  s = s.replace(/\n*\[已截断[^\]]*\]\s*/g, "\n")
+  s = s.replace(/\n*\[子代理用量\][^\n]*/g, "")
+
+  // 2) 内部判决标记：整段替换为产品语言（判词与内部重派指令随行带走）。
+  for (const [re, rep] of WAKE_MARK_REWRITES) s = s.replace(re, rep)
+
+  // 3) 逐行：丢掉仍带内部栏名/审核身份/内部路径行号的行。
+  s = s
+    .split("\n")
+    .filter((line) => !WAKE_DROP_LINE_RES.some((re) => re.test(line)))
+    .join("\n")
+
+  // 4) 残余 token 清洗。
+  for (const [re, rep] of WAKE_TOKEN_RES) s = s.replace(re, rep)
+
+  // 5) 收尾：压空行、trim。
+  return s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
 }

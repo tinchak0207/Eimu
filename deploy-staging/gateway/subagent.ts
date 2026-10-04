@@ -942,6 +942,22 @@ function safeLabelForFile(label: string): string {
   return cleaned || "subagent"
 }
 
+/** 用户可见的子代理名称映射（2026-10-04 F4）：内部审核身份的标签（「机器审核」等）与夹带
+ *  内部栏名的标签一律降级为产品语言，禁止出现在任何用户可见文字里（死线：内审不上桌）。
+ *  只用于文案；落盘文件名仍走 safeLabelForFile（不改文件名，避免破坏落盘契约与指针）。 */
+const USER_FACING_LABEL_MAP: Record<string, string> = {
+  "机器审核": "复核",
+  "机器复核": "复核",
+  "独立审核": "复核",
+  "审核官": "复核",
+}
+function userFacingSubagentLabel(label: string): string {
+  const l = (label || "").trim()
+  if (USER_FACING_LABEL_MAP[l]) return USER_FACING_LABEL_MAP[l]
+  if (/机器审核|独立审核|审核官|critic|verdict|issues|evidence|\bqc\b/i.test(l)) return "复核"
+  return l || "子代理"
+}
+
 interface PersistOutcome {
   pointer: string
   relPath?: string
@@ -979,11 +995,12 @@ function armHeartbeat(run: SubagentRun, hardMs: number): void {
     const state = deps?.resolveSession(run.parentGatewaySessionId) ?? deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
     if (!state) return
     const elapsed = Math.round((Date.now() - run.startedAt) / 1000)
-    const body = partialBodyOf(run).replace(/\s+/g, " ")
-    const snippet = body ? body.slice(-120) : "（尚无正文产出）"
     try {
+      // 2026-10-04 F4：心跳不得夹带子代理内部交付正文——契约栏名清单（verdict/issues/
+      // evidence/qc）、「FAILED＋原因」、闸门核对说明会随 snippet 逐字外泄给用户。
+      // 只留用户可读的状态句；标签经用户可见映射（「机器审核」→「复核」）。
       deps?.emitToSession(state, "turn.status", {
-        text: `子代理「${run.label}」仍在运行（已 ${elapsed}s）… 最近：${snippet}`,
+        text: `子代理「${userFacingSubagentLabel(run.label)}」仍在运行（已 ${elapsed}s）`,
       })
     } catch {
       /* 心跳失败不影响主流程 */
@@ -1516,7 +1533,7 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       parentGatewaySessionId: parentId,
       parentOpencodeSessionId: String(parentState.opencodeSessionId ?? ""),
       opencodeSessionId: "",
-      label: "机器审核",
+      label: "复核",
       startedAt: Date.now(),
       status: "running",
       // 首行补死线行（与 handleSubagentDispatch 同款；本 spec 首行非「预期 N」故会补）。
@@ -2170,7 +2187,8 @@ export async function handleLoopBreaker(req: Request): Promise<Response> {
   }
   if (state) {
     deps.emitToSession(state, "turn.status", {
-      text: `检测到工具「${body.tool ?? "?"}」以完全相同参数重复调用 ${body.count ?? 0} 次，已强制结束本轮：请改变参数或停止该动作。`,
+      // 2026-10-04 F4：去内部化——不贴内部工具名（工具面属后厨），只说用户视角的后果与出路。
+      text: `同一个动作被以完全相同的参数重复了 ${body.count ?? 0} 次，已结束本轮以免空转；请换个做法，或告诉我新的方向。`,
     })
   }
   console.warn(

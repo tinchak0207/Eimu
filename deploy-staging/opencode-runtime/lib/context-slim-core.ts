@@ -22,7 +22,8 @@
 // 纯记忆体改写：不动 DB、不发任何上游请求（零 API 成本）。任何错误都 try/catch 原样放行。
 
 import { createHash } from "node:crypto"
-import { mkdir, writeFile } from "node:fs/promises"
+import { constants as fsConstants, existsSync, realpathSync } from "node:fs"
+import { mkdir, open } from "node:fs/promises"
 import path from "node:path"
 import { WORKSPACE } from "./sandbox"
 
@@ -64,29 +65,87 @@ const PREVIEW_TAIL_CHARS = intEnv("TOOL_RESULT_PREVIEW_TAIL_CHARS", 1_000)
 
 /** 原生截断参考句（opencode tool_output 超限时写入讯息的字串）。 */
 const NATIVE_TRUNCATED_RE = /Full output saved to:/
-/**
- * 本安全网参考句的「结构形状」：`<persisted-output path="…" total-chars="N"`。
- * 这两个栏位是本档模板（含极简退路式）必定产生的组合。
- */
-const PERSISTED_REF_SHAPE_RE = /<persisted-output\s+path="([^"]+)"\s+total-chars="\d+"/
+/** 从原生参考句取回落盘路径（"Full output saved to: <path>"，到此行为止的第一个非空白字串）。 */
+const NATIVE_PATH_RE = /Full output saved to:\s*([^\s"'<>]+)/
+/** 完整多行参考句：整串必须恰好是一个多行 `<persisted-output>…</persisted-output>` 区块（锚定＋单一化）。 */
+const PERSISTED_REF_FULL_RE =
+  /^\s*<persisted-output\s+path="([^"]+)"\s+total-chars="(\d+)"[^>]*>[\s\S]*<\/persisted-output>\s*$/
+/** 极简退路式参考句：整串恰好是一个自闭合 `<persisted-output …/>`。 */
+const PERSISTED_REF_SELF_RE =
+  /^\s*<persisted-output\s+path="([^"]+)"\s+total-chars="(\d+)"[^>]*\/>\s*$/
 /** 本档内容定址档名格式（`tool-<sha256 前 16 hex>.txt`）。 */
 const PERSISTED_FILE_NAME_RE = /^tool-[0-9a-f]{16}\.txt$/
+
+/** 解析整串是否为**单一**自有参考句；是则回传其 path，否则 null。 */
+function parseOwnPersistedRef(out: string): string | null {
+  const full = PERSISTED_REF_FULL_RE.exec(out)
+  if (full) return full[1]
+  const self = PERSISTED_REF_SELF_RE.exec(out)
+  if (self) return self[1]
+  return null
+}
+
+/** 以 realpath 解析一个稳定根（解析失败则退回绝对化），不依赖单次呼叫的 persistDir。 */
+function resolveRoot(base: string): string {
+  try {
+    return realpathSync(base)
+  } catch {
+    return path.resolve(base)
+  }
+}
+
+/** real 是否落在 root 子树之下（不含 root 自身）。 */
+function isUnder(real: string, root: string): boolean {
+  const rel = path.relative(root, real)
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)
+}
 
 /**
  * 判定「这是不是本安全网自己写的 <persisted-output> 参考句」。
  * 旧版只做子字串比对（/<persisted-output\b/），导致**任何提及**该字面的输出（被 cat 的
  * 本档原始码、旧 log、工具回传）永久免落盘与免压缩 ⇒ context 膨胀且可被内容伪造。
- * 收窄为结构化判定，必须同时满足：
- *   ① 形状符合本档模板（path="…" 紧接 total-chars="N"）；
- *   ② path 落在本次落盘目录之下，且档名是内容定址格式（排除 /etc/passwd 之类伪造路径）。
+ * 收窄为结构化判定（H2/H3），必须同时满足：
+ *   ① 形状符合本档模板，且**整串就是这一个区块**（锚定＋单一化）：头／中／尾缀注入，
+ *      或「合法前缀＋任意尾随内容」的一律不算；
+ *   ② 档名是内容定址格式，路径为绝对路径且无 `..` 跳脱；
+ *   ③ 档案真实存在（挡孤儿／幻影指针），且其 realpath 落在稳定根（本次 persistDir、
+ *      预设 persistDir、WORKSPACE）之下；或落在稳定的内容定址目录结构
+ *      `…/outputs/tool-results/tool-<hash>.txt` 之下（目录搬迁但结构保留时仍认，H3）。
  */
 function isOwnPersistedRef(out: string, persistDir: string): boolean {
-  const m = PERSISTED_REF_SHAPE_RE.exec(out)
+  const refPath = parseOwnPersistedRef(out)
+  if (refPath === null) return false
+  if (!path.isAbsolute(refPath)) return false
+  if (refPath.split(/[\\/]/).includes("..")) return false
+  if (!PERSISTED_FILE_NAME_RE.test(path.basename(refPath))) return false
+  let real: string
+  try {
+    if (!existsSync(refPath)) return false
+    real = realpathSync(refPath)
+  } catch {
+    return false
+  }
+  for (const root of [persistDir, TOOL_RESULT_PERSIST_DIR, WORKSPACE]) {
+    if (root && isUnder(real, resolveRoot(root))) return true
+  }
+  // 稳定结构退路：任意根下的 `outputs/tool-results/tool-<hash>.txt`（H3）。
+  return path.basename(path.dirname(real)) === "tool-results" && PERSISTED_FILE_NAME_RE.test(path.basename(real))
+}
+
+/**
+ * 原生截断参考句（H4）：`Full output saved to: <path>` 且该档真实存在才算「带真实落盘路径的
+ * 参考句」。任何这类参考句都不得被 microCompact 清除（清掉＝模型失去唯一取回路）。
+ */
+function isNativeTruncatedRef(out: string): boolean {
+  const m = NATIVE_PATH_RE.exec(out)
   if (!m) return false
-  const refPath = m[1]
-  const rel = path.relative(path.resolve(persistDir), path.resolve(refPath))
-  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false
-  return PERSISTED_FILE_NAME_RE.test(path.basename(refPath))
+  const p = m[1]
+  if (!path.isAbsolute(p)) return false
+  try {
+    return existsSync(p) && !!realpathSync(p)
+  } catch {
+    return false
+  }
 }
 
 // ── 型别（宽松定义：现场可能是 SDK 型别或内部结构，只碰必要栏位）─────────────
@@ -156,6 +215,8 @@ export async function slimMessages(
   const result: SlimResult = { cleared: 0, persisted: 0, paths: [] }
   // 本轮被安全网改写过的 state：microCompact 同轮不得再清除（同轮自杀不可接受）。
   const persistedThisRound = new Set<object>()
+  // 本轮尝试落盘但失败的 state（H5）：该笔既无档可回，同轮就不得再被 microCompact 清掉。
+  const failedPersist = new Set<object>()
 
   if (!Array.isArray(messages)) return result
 
@@ -195,6 +256,8 @@ export async function slimMessages(
         const replacement = await persistAndPreview(out, persistDir, toolResultMax)
         if (replacement === null) {
           // 落盘失败：放弃该笔改写，原样放行（不中断会话）。
+          // H5：记住该笔曾 attempt 落盘失败，microCompact 同轮不得清除（否则无档可回、静默遗失）。
+          failedPersist.add(st)
           running += out.length
           continue
         }
@@ -233,8 +296,13 @@ export async function slimMessages(
             if (out.length === 0) continue
             if (out === CLEARED_MARKER) continue // 幂等：整串等于标记的已清除项不再计数（includes 会被「提及」伪造）
             // 参考句是模型取回完整内容的唯一路径指针，清除即永久断链 ⇒ 不纳入可压缩集（与安全网放行对称）。
+            // ① 自产 <persisted-output> 指针（H2 判定）；
+            // ② 原生 `Full output saved to: <path>` 且该档真实存在（H4）；
+            // ③ 本轮 attempt 落盘但失败者（H5：无档可回，宁可留着也不断链）；
+            // ④ 本轮刚由安全网落盘者，同轮不得再清除。
             if (isOwnPersistedRef(out, persistDir)) continue
-            // 本轮刚由安全网落盘者，同轮不得再清除。
+            if (isNativeTruncatedRef(out)) continue
+            if (failedPersist.has(st)) continue
             if (persistedThisRound.has(st)) continue
             eligible.push({ st })
           }
@@ -261,10 +329,29 @@ async function persistAndPreview(
   maxChars: number,
 ): Promise<{ ref: string; path: string } | null> {
   try {
-    const file = path.join(persistDir, contentFileName(content))
     await mkdir(persistDir, { recursive: true })
-    // 同 hash 已存在时覆写为相同内容＝仍幂等（内容定址）。
-    await writeFile(file, content, "utf8")
+    // 规范化落盘目录：解析 symlink，后续一律在真实目录内操作（父目录逃逸防护）。
+    let realDir: string
+    try {
+      realDir = realpathSync(persistDir)
+    } catch {
+      realDir = path.resolve(persistDir)
+    }
+    const file = path.join(realDir, contentFileName(content))
+    // H1：档名由内容 hash 决定，攻击者可在目录内预植同名 symlink，让 writeFile 跟随写穿到
+    // persistDir 之外（任意档覆写）。一律以 O_NOFOLLOW 打开最终档（不跟随 symlink）；
+    // 命中 symlink 即抛 ELOOP → 落盘失败 fail-open，目标档不被触碰。
+    // 同 hash 已存在（且为普通档）时覆写为相同内容＝仍幂等（内容定址）。
+    const fh = await open(
+      file,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+      0o600,
+    )
+    try {
+      await fh.writeFile(content, "utf8")
+    } finally {
+      await fh.close()
+    }
     const head = cutAtNewlineHead(content, PREVIEW_HEAD_CHARS)
     const tail = cutAtNewlineTail(content, PREVIEW_TAIL_CHARS)
     const omitted = content.length - head.length - tail.length

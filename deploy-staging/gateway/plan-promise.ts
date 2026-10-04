@@ -13,7 +13,9 @@ export type PlanPromiseState = {
 export function unfulfilledPlanNotice(st: PlanPromiseState): string | null {
   const ex = st.planExperts ?? []
   if (ex.length === 0 || (st.turnSubagentStarts ?? 0) > 0) return null
-  return `提示：开场计划提到由「${ex.join("、")}」参与，但本轮并未实际派出专家，内容由我直接完成；如需专家深度参与请告诉我。`
+  // 2026-10-04 F4：去内部路由决策——不在用户可见文字里交代「开场计划点名了谁、谁没被派出」
+  // （那是后厨调度对账），只说结果语言。
+  return `本轮由我直接完成；如需专家深度参与，请告诉我。`
 }
 
 /** C 方案（2026-10-02）收盘：把「计画点名专家且整轮零派遣」记进 state，供下一轮注入。

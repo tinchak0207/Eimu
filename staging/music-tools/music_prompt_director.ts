@@ -230,13 +230,31 @@ const DEAD_PLAIN_TAGS: ReadonlyArray<[RegExp, string]> = [
 ];
 
 /**
+ * 明文噪声：markdown 变体里混进来的 JSON 参数、HTML 标签、代码围篱。上游不解析，
+ * 占长度预算还可能污染生成。刻意不删 markdown 标题／粗体与 URL（语义争议大、误伤风险高，
+ * 那类留给 warnings 而非确定性删除）。
+ */
+const MARKUP_NOISE: ReadonlyArray<[RegExp, string]> = [
+  [/```[A-Za-z0-9_+-]*/g, " "],
+  [/<[^>\n]{1,80}>/g, " "],
+  [/\{[^{}\n]{0,200}\}/g, " "],
+];
+
+/**
  * flowmusic 死控件：时间戳。来源：DATA_FLOWMUSIC_2026-09.md:88 §2 row ③「DOES NOT WORK —
  * time codes vanish before the song tool」、:95 row ⑧（`:`,`,`,`.` 被换成空格）、
  * CORE_03_DIAGNOSE.md:257-265 §3 row 9（含旧式 `Intro (0–15s)`／`[End - 2:15]`）。
  */
-const TIMESTAMP_BRACKETED = /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*\]/gi;
+const TIMESTAMP_BRACKETED = /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:[.:]\d{1,2})?(?:\s*[-–—]\s*\d{1,2}:\d{2}(?:[.:]\d{1,2})?)?\s*\]/gi;
 const TIMESTAMP_OLD_PARENTHETICAL = /\(\s*\d{1,2}(?:\s*[-–—]\s*\d{1,2})?\s*s\s*\)/gi;
-const TIMESTAMP_BARE = /\b\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?/g;
+const TIMESTAMP_BARE = /\b\d{1,2}:\d{2}(?:[.:]\d{1,2})?(?:\s*[-–—]\s*\d{1,2}:\d{2}(?:[.:]\d{1,2})?)?/g;
+/** 非全域侦测版（`/g` 的 `.test` 会带 lastIndex 状态，侦测一律用这些）。 */
+const TIMESTAMP_BRACKETED_DETECT = /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:[.:]\d{1,2})?(?:\s*[-–—]\s*\d{1,2}:\d{2}(?:[.:]\d{1,2})?)?\s*\]/i;
+const TIMESTAMP_OLD_PARENTHETICAL_DETECT = /\(\s*\d{1,2}(?:\s*[-–—]\s*\d{1,2})?\s*s\s*\)/i;
+/** 整行恰为裸时间码（歌词剥除只删这种「独立成行」的，正文里的 0:12／3:45 不动）。 */
+const TIMESTAMP_BARE_LINE = /^\s*\d{1,2}:\d{2}(?:[.:]\d{1,2})?(?:\s*[-–—]\s*\d{1,2}:\d{2}(?:[.:]\d{1,2})?)?\s*$/;
+/** 控制字元（保留 \t \n \r）：NUL 等混入 prompt 会污染上游，送前确定性清除。 */
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
 /**
  * 歌词标签判别式（决定 flowmusic 走 220 单行分支还是 3000 保版面分支）。
@@ -244,8 +262,16 @@ const TIMESTAMP_BARE = /\b\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?/g;
  * `[verse] [chorus] [bridge] [intro] [outro] [pre-chorus] [主歌] [副歌] [导歌] [桥段] [前奏] [尾奏]`）。
  */
 const LYRICS_MARKER_PATTERN = /(歌词|lyrics)/i;
+/**
+ * 段落标签判别：`[Verse]` 与带序号的 `[Verse 1]`／带描述的 `[Chorus: big]` 都算
+ * （对齐上游 FlowMusic 的歌词判准；旧版只认裸 `[Verse]` 会让带序号标签误走 220 平面分支被切）。
+ */
 const SECTION_TAG_PATTERN =
-  /\[(?:verse|chorus|bridge|intro|outro|pre-?chorus|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)\]/i;
+  /\[(?:verse|chorus|bridge|intro|outro|pre-?chorus|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)\b[^\]]*\]/i;
+
+/** 伪标签里 key 是段落结构名（`[Verse 1: …]`／`[Chorus: …]`）＝结构语法，不是伪参数，原样保留。 */
+const SECTION_TAG_KEY_PATTERN =
+  /^(?:verse|chorus|bridge|intro|outro|pre-?chorus|hook|refrain|breakdown|drop|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)\b/i;
 
 /**
  * 缺层补中性指令——不替用户决定流派／乐器／唱的人。
@@ -291,11 +317,51 @@ function detectLayers(prompt: string): Record<MusicLayerId, boolean> {
   return layers;
 }
 
+/** 「最终 prompt 实际还在场什么」的如实判读结果。 */
+export interface RetainedPromptInfo {
+  /** 依最终字串命中的层（不是依层名推断）。 */
+  layers: MusicLayerId[];
+  /** 最终字串里真的还有 BPM／速度措辞？ */
+  tempo: boolean;
+  /** 最终字串里真的还有调性？ */
+  key: boolean;
+  /** 最终字串里真的还有无人声宣告？ */
+  instrumentalDeclaration: boolean;
+}
+
+/**
+ * 依最终 prompt 的**实际字串**反推「还在场」的层与承重元素——回执诚实性用。
+ * 判定一律 grep 字符串（BPM／key 真的在串里才算「保住」），不看层名，
+ * 杜绝「宣称保住 X 但输出里没有 X」（2026-10-04 F2 回执说谎根因）。
+ */
+export function describeRetainedLayers(prompt: string): RetainedPromptInfo {
+  return {
+    layers: MUSIC_LAYER_IDS.filter((id) => MUSIC_LAYER_PATTERNS[id].test(prompt)),
+    tempo: BPM_PATTERN.test(prompt),
+    key: KEY_PATTERN.test(prompt),
+    instrumentalDeclaration: INSTRUMENTAL_DECLARATION_PATTERN.test(prompt),
+  };
+}
+
+/** 「实际保留」的简体中文清单（无人声宣告在场时不再单列 vocal 层，以免与人声混淆）。 */
+export function describeRetainedParts(prompt: string): string[] {
+  const retained = describeRetainedLayers(prompt);
+  const layers = retained.layers.filter((id) => !(id === "vocal" && retained.instrumentalDeclaration));
+  return [
+    ...layers.map((id) => MUSIC_LAYER_LABELS[id]),
+    ...(retained.tempo ? ["速度"] : []),
+    ...(retained.key ? ["调性"] : []),
+    ...(retained.instrumentalDeclaration ? ["无人声宣告"] : []),
+  ];
+}
+
 /** 伪标签 → 散文／删除。来源：CORE_03_DIAGNOSE.md:190-251 §3 row 1／3／4／5／6／7。 */
 function rewritePseudoTags(prompt: string): string {
   return prompt.replace(PSEUDO_TAG_PATTERN, (_match, rawKey: string, rawValue: string) => {
     const key = rawKey.trim().toLowerCase();
     const value = rawValue.trim();
+    // 段落标签（`[Verse 1: gentle piano]`／`[Chorus: big]`）是结构语法不是伪参数，整条原样保留。
+    if (SECTION_TAG_KEY_PATTERN.test(rawKey.trim())) return _match;
     // row 1：没有隐藏品质模式，整条删除
     if (MAX_MODE_KEYS.includes(key) && /^max$/i.test(value)) return "";
     // row 4：乐理参数落成 Style 内的散文，「120 BPM」「key of A minor」
@@ -317,10 +383,10 @@ function rewritePseudoTags(prompt: string): string {
   });
 }
 
-/** 修掉删标签／修剪留下的空子句分隔（`, ,`、行尾逗号）；只动标点，不动文字。 */
+/** 修掉删标签／修剪留下的空子句分隔（`,,,`、`, ,`、行尾逗号）；只动标点，不动文字。 */
 function tidySeparators(prompt: string): string {
   return prompt
-    .replace(/([,;，；])\s*(?=[,;，；])/g, "$1")
+    .replace(/([,;，；])(?:\s*[,;，；])+/g, "$1")
     .replace(/[,;，；]\s*$/, "")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
@@ -375,24 +441,44 @@ function stripTimestamps(prompt: string): string {
     .trim();
 }
 
-/** 时间码侦测（非全域，可安全 .test；含剥除后会留下的空括号）。 */
-const TIMESTAMP_DETECT =
-  /\[\s*(?:end\s*[-–—]\s*)?\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*\]|\(\s*\d{1,2}(?:\s*[-–—]\s*\d{1,2})?\s*s\s*\)|\b\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?|\[\s*\]|（\s*）|\(\s*\)/;
+/**
+ * 单行歌词的时间码剥除：只吃被 `[ ]`／`( )` 包住的数字时间码（与剥后留下的空括号）。
+ * **不碰正文里的数字时间**（`we left at 0:12 that night`／`3:45 AM` 原样），
+ * 也不套拉丁标点前的空白收敛（`散开 ，曙光` 的空格保留）。
+ */
+function stripLyricsLine(line: string): string {
+  return line
+    .replace(TIMESTAMP_BRACKETED, " ")
+    .replace(TIMESTAMP_OLD_PARENTHETICAL, " ")
+    .replace(/\[\s*\]|（\s*）|\(\s*\)/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
 
 /**
  * 歌词栏的时间码剥除（供工具层对 flowmusic／yue2 的歌词做与 style 相同的处理）。
- * 只动数字时间码与其空括号，`[Verse]`／`[Chorus]` 等段落标签原样保留（yue2 上游必需语法）；
- * Lyria 认时间码，呼叫方对该通路不要用本函式。回传 hadTimestamp 供回执如实说明。
+ * 只动被 `[ ]`／`( )` 包住的数字时间码、其空括号，以及「整行恰为裸时间码」的行；
+ * `[Verse]`／`[Chorus]` 等段落标签原样保留（yue2 上游必需语法）；Lyria 认时间码，呼叫方对该通路不要用本函式。
+ * `hadTimestamp` ＝ **实际发生了剥除**（不是「侦测到时间码字样」）——避免回执谎报剥了没剥的东西。
  */
 export function stripLyricsTimestamps(lyrics: string): { lyrics: string; hadTimestamp: boolean } {
-  if (!TIMESTAMP_DETECT.test(lyrics)) return { lyrics, hadTimestamp: false };
-  const cleaned = lyrics
-    .split("\n")
-    .map((line) => stripTimestamps(line))
+  let removed = false;
+  const lines = lyrics.split("\n").map((line) => {
+    if (TIMESTAMP_BARE_LINE.test(line)) {
+      removed = true;
+      return "";
+    }
+    if (!TIMESTAMP_BRACKETED_DETECT.test(line) && !TIMESTAMP_OLD_PARENTHETICAL_DETECT.test(line)) return line;
+    removed = true;
+    return stripLyricsLine(line);
+  });
+  if (!removed) return { lyrics, hadTimestamp: false };
+  const cleaned = lines
     .join("\n")
     // 剥除时间码后留在段落标签内的空白（`[Outro (0-15s)]` → `[Outro ]`）收干净。
     .replace(/\[\s*([^\]]*?)\s*\]/g, "[$1]")
-    .replace(/\n{3,}/g, "\n\n");
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\n+|\n+$/g, "");
   return { lyrics: cleaned, hadTimestamp: true };
 }
 
@@ -443,6 +529,32 @@ const LAYOUT_BOUNDARIES: readonly string[] = [...CLAUSE_BOUNDARIES, "\n"];
 const TEMPO_KEY_PATTERN =
   /\b\d{2,3}\s*bpm\b|\bbpm\b|\btempo\b|\bkey of\b|\b[a-g](?:\s*#|\s*b)?\s*(?:major|minor)\b|\b(?:[a-g](?:m|maj|min|dim|aug|7|9|11|13)[0-9a-z]*)(?:\s*[-–—]\s*[a-g](?:m|maj|min|dim|aug|7|9|11|13)[0-9a-z]*)+/i;
 
+/** 速度散文写法（回执判定「速度是否真的留在最终串里」用）。 */
+const BPM_PATTERN = /\b\d{2,3}\s*bpm\b|\bbpm\b|\btempo\b/i;
+
+/** 调性散文写法（key of X／X major|minor）。 */
+const KEY_PATTERN = /\bkey of\b|\b[a-g](?:\s*#|\s*b)?\s*(?:major|minor)\b/i;
+
+/**
+ * 无人声宣告＝承重子句（2026-10-04 F2 实锤）：压缩时若被当低权重 vocal 子句丢掉，
+ * 纯器乐请求可能被上游补上人声，而回执只说「丢掉：vocal」。故它的子句权重高于 BPM／调性，
+ * 并另有一条「从尾端整体抽出、压缩后接回」的保命路径（见 directMusicPrompt 步骤 5）。
+ */
+const INSTRUMENTAL_DECLARATION_PATTERN = /instrumental only|no vocals/i;
+
+/** 追加在 prompt 尾端的无人声宣告（buildToolPrompt 的固定写法；容许与前文无标点直接相连）。 */
+const INSTRUMENTAL_DECLARATION_TAIL = /\s*(Instrumental only,?\s*no vocals\.?)\s*$/i;
+
+/** 层 id → 简体中文标签（回执人话用）。 */
+export const MUSIC_LAYER_LABELS: Readonly<Record<MusicLayerId, string>> = {
+  genre: "流派",
+  mood: "情绪",
+  instrumentation: "编制",
+  vocal: "人声",
+  structure: "结构",
+  production: "制作",
+};
+
 /** 子句切分（保留每段尾端分隔符，重建时可逐字还原）；分隔符同硬截退让点。 */
 const CLAUSE_SPLIT_PATTERN = /[^,;.，；。、\n]+[,;.，；。、\n]?/g;
 
@@ -451,6 +563,8 @@ const UNMATCHED_CLAUSE_WEIGHT = 3;
 
 /** 子句权重：BPM／调性承重最高；其余取命中层的 LAYER_WEIGHT（多层取最大）；未命中＝中权重。 */
 function clauseWeight(clause: string): number {
+  // 无人声宣告承重最高（高于 BPM／调性）：压缩必须保住它，否则纯器乐请求会被上游补人声。
+  if (INSTRUMENTAL_DECLARATION_PATTERN.test(clause)) return 8;
   if (TEMPO_KEY_PATTERN.test(clause)) return 7;
   let best = 0;
   for (const id of MUSIC_LAYER_IDS) {
@@ -637,7 +751,9 @@ function assembleWithLimit(
  */
 export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptions = {}): MusicDirectorResult {
   const channel = options.channel ?? "lyria";
-  const user = rawPrompt.trim();
+  // 控制字元先清（NUL/VT 等混入 prompt 会污染上游；保留 \t \n \r）——所有通路受益。
+  const sanitized = rawPrompt.replace(CONTROL_CHARS, " ");
+  const user = sanitized.trim();
   const layers = detectLayers(user);
   if (!user) {
     return { prompt: user, layers, applied: [], warnings: [], truncated: [] };
@@ -645,6 +761,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
 
   const applied: string[] = [];
   const warnings: string[] = [];
+  if (sanitized !== rawPrompt) applied.push("strip-control-chars");
 
   // 1. anti-slop：缺陷词／空泛片语 → 具体语汇；没有替换目标的空词只回报。
   const slopped = replaceAll(user, SLOP_WORDS);
@@ -655,11 +772,13 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     );
   }
 
-  // 2. 伪标签剥除：假参数改写成散文或删除（所有平台都不解析）。
+  // 2. 伪标签剥除＋明文噪声（JSON/HTML/代码围篱）剥除：假参数改写成散文或删除。
   const detagged = replaceAll(slopped, DEAD_PLAIN_TAGS);
-  const tagRewritten = rewritePseudoTags(detagged);
-  const rewroteTags = tagRewritten !== slopped;
-  const untagged = rewroteTags ? tidySeparators(tagRewritten) : detagged;
+  const denoised = replaceAll(detagged, MARKUP_NOISE);
+  if (denoised !== detagged) applied.push("strip-markup");
+  const tagRewritten = rewritePseudoTags(denoised);
+  const rewroteTags = tagRewritten !== denoised;
+  const untagged = rewroteTags || denoised !== detagged ? tidySeparators(tagRewritten) : detagged;
   if (rewroteTags) applied.push("strip-pseudo-tags");
 
   // 3. MOOD ≤2：多的移除，并如实回报（相容性库内无对照表，只能报数量）。
@@ -681,7 +800,10 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     const stripped = stripTimestamps(core);
     if (stripped !== core) applied.push("strip-timestamps");
     core = stripped;
-    if (options.hasLyrics ?? hasLyricsMarker(core)) {
+    // 保版面判准＝明示有歌词，**或**文本自带歌词／段落标签（含 `[Verse 1]`／`[Chorus: …]`）。
+    // 旧版写 `??`：生产恒传 Boolean(lyrics)，明示 false 时右侧永不触发＝自动侦测成死码，
+    // 文件教 agent「写 [Verse] 走 3000」却实际走 220 被切（2026-10-04 组 9-7）。
+    if (options.hasLyrics || hasLyricsMarker(core)) {
       // 保版面分支：换行与标点保留，上限 3000 runes。
       limit = CHANNEL_LIMITS.flowmusicLayout;
     } else {
@@ -711,7 +833,24 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   for (const id of MUSIC_LAYER_IDS) {
     if (!layers[id]) fills.push({ id, text: layerFill(id, options.durationSeconds) });
   }
-  const assembled = assembleWithLimit(core, fills, limit, allowNewline);
+  // 无人声宣告是承重子句（2026-10-04 F2）：它常被 buildToolPrompt 直接接在用户文本尾端、
+  // 与正文融成同一子句，按权重丢子句仍可能把它一起硬截掉。故这里先把它整体抽出，
+  // 压缩预算扣掉它，压缩后再原样接回——保证「纯器乐」宣告不会在压缩中蒸发。
+  let protectedDeclaration = "";
+  let body = core;
+  if (limit !== null) {
+    const declaration = core.match(INSTRUMENTAL_DECLARATION_TAIL);
+    if (declaration) {
+      protectedDeclaration = declaration[1].trim();
+      body = core.slice(0, core.length - declaration[0].length);
+    }
+  }
+  const bodyLimit =
+    limit === null ? null : Math.max(0, limit - (protectedDeclaration ? countRunes(protectedDeclaration) + 1 : 0));
+  const assembled = assembleWithLimit(body, fills, bodyLimit, allowNewline);
+  if (protectedDeclaration) {
+    assembled.prompt = assembled.prompt ? `${assembled.prompt} ${protectedDeclaration}` : protectedDeclaration;
+  }
   for (const id of assembled.kept) applied.push(`fill-${id}`);
   if (assembled.clauseCompressed) {
     applied.push(`compress-${limit}-by-layer`);
@@ -719,13 +858,21 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   if (assembled.hardCapped) {
     applied.push(`truncate-${limit}-hard`);
   }
-  if (assembled.clauseCompressed) {
+  // 压缩 warning 由**实际被丢的层**与**最终 prompt 的实际内容**反推，绝不写死成功句
+  // （2026-10-04 F2：旧版在 genre 被丢、句子被硬截时仍宣称「保住了流派…不做半句截断」）。
+  if (assembled.clauseCompressed || assembled.hardCapped) {
     const droppedLayers = [...new Set(assembled.compressed)];
+    const dropDesc =
+      droppedLayers.length > 0 || assembled.compressedOther > 0
+        ? "，已按层权重整句丢弃低优先子句" +
+          (droppedLayers.length > 0 ? `（涉及层：${droppedLayers.join("、")}）` : "") +
+          (assembled.compressedOther > 0 ? `及 ${assembled.compressedOther} 条非层细节子句` : "")
+        : "，且已无更低优先级的整句子句可丢";
+    const keptText = describeRetainedParts(assembled.prompt);
     warnings.push(
-      `长度压缩：提示词超出本通路 ${limit} runes 硬上限，已按层权重整句丢弃低优先子句` +
-        (droppedLayers.length > 0 ? `（${droppedLayers.join("、")}）` : "") +
-        (assembled.compressedOther > 0 ? `及 ${assembled.compressedOther} 条非层细节子句` : "") +
-        `，优先保住流派／情绪／编制与 BPM／调性；为保完整可读不做半句截断。`,
+      `长度压缩：提示词超出本通路 ${limit} runes 硬上限${dropDesc}。` +
+        `最终 prompt 实际保留：${keptText.length > 0 ? keptText.join("、") : "（无完整子句）"}。` +
+        (assembled.hardCapped ? "单一子句仍超限，尾端已硬截，结尾可能不完整。" : "未做半句截断。"),
     );
   }
 
@@ -741,6 +888,24 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
       `instrumentation: ${instrumentCount} instruments named — two or three hero instruments plus one texture word (CORE_01_STYLE §5; CORE_03_DIAGNOSE §2 CHECK 3)`,
     );
   }
+  // 速度／调性矛盾或非法值（2026-10-04 F2 实测 5-3/5-4/5-5）：原样送出会互相打架，如实警告不静默。
+  const bpmValues = [
+    ...new Set((shaped.match(/\b(\d{2,3})\s*bpm\b/gi) ?? []).map((match) => match.replace(/\s*bpm/i, "").trim())),
+  ];
+  if (bpmValues.length > 1) {
+    warnings.push(
+      `production: ${bpmValues.length} conflicting BPM values present (${bpmValues.join(", ")}) — keep a single tempo (CORE_01_STYLE §9; CORE_03_DIAGNOSE §2 CHECK 6)`,
+    );
+  }
+  const keyPhrases = [...shaped.matchAll(/\bkey of ([^,;.，；。]{1,24})/gi)].map((match) => match[1].trim());
+  const invalidKeys = [
+    ...new Set(keyPhrases.filter((key) => !/^[A-Ga-g](?:\s*(?:#|b|sharp|flat))?\s*(?:major|minor|maj|min)?$/i.test(key))),
+  ];
+  if (invalidKeys.length > 0) {
+    warnings.push(
+      `production: unrecognized key spelling (${invalidKeys.join(", ")}) — name the key as "key of A minor" (CORE_01_STYLE §9; CORE_03_DIAGNOSE §2 CHECK 6)`,
+    );
+  }
 
   return {
     prompt: assembled.prompt,
@@ -748,7 +913,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     applied,
     warnings,
     truncated: [...new Set([...assembled.truncated, ...assembled.compressed])],
-    ...(assembled.clauseCompressed
+    ...(assembled.clauseCompressed || assembled.hardCapped
       ? {
           compressedClauses: assembled.compressed.length + assembled.compressedOther,
           compressedLayers: [...new Set(assembled.compressed)],

@@ -10,6 +10,7 @@ import { markTurnFirst } from "./metrics-gw.ts"
 import { appendReplayFrame, MergedReplayFrame, isStrippableReplayEntry } from "./replay-frame.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
 import { hydratePendingQuestions } from "./questions-gw.ts"
+import { t2sVisibleData } from "./outbound-sanitize.ts"
 // TODO(整合)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build 对未 export 的 named import 报错，已实测 2026-09-19）。
 // 依第一阶段 subagent 占位符法（记忆 gateway-index-refactor-stage1-0919）：declare 占位可过 bun build；整合 subagent 统一换真 import 或于 index.ts 补 export。
 // ---- SSE helpers (gateway -> frontend) ----
@@ -79,14 +80,20 @@ export function emitToSession(state: SessionState, name: string, data: unknown, 
   // 直接 emit 两条 canvas.node.updated 路径（成功+失败）全收，兼容两种载荷形状。
   if (name === "canvas.node.updated") trackTurnNodeTerminal(state, data)
   state.eventCounter += 1
-  const frame = encoder.encode(serializeSse(name, data, state.eventCounter))
+  // 2026-10-04 F5：出站文字单一咽喉点——凡用户可见文字在离开进程前过一次 T2S。
+  // 模型正文两条路径（emitSanitizedDelta / R9-B 尾行）已带 strippable 且在
+  // stripOutboundFeed/stripOutboundFlush 里过一次 T2S，此处跳过以免对代码栅栏
+  // 二次转换；其余全部（reasoning.delta、网关固定文案、结构化帧白名单字段、
+  // subagent/timers/messages 等所有经本函数出口的帧）在此收口为简体。
+  const outData = name === "message.delta" && (opts?.strippable ?? false) ? data : t2sVisibleData(data)
+  const frame = encoder.encode(serializeSse(name, outData, state.eventCounter))
   // 2026-10-02：只有模型产生的文字帧可被 N2 strip 剥除（见 stripStaleTurnTextFromReplay）。
   // 网关主动发出的 message.delta（工作流终态通报、进度汇报、诚实收尾等）默认耐久，
   // 必须能被晚重连的 client 取回——它们只是与模型正文共用事件名，不是模型输出。
   // reasoning.delta 只可能来自模型，维持可剥。
   const strippable = opts?.strippable ?? name === "reasoning.delta"
   // 2026-10-01：文字帧在 replay 层合并（见 replay-frame.ts），直播仍逐帧。
-  appendReplayFrame(state.replayBuffer, name, data, state.eventCounter, frame, strippable)
+  appendReplayFrame(state.replayBuffer, name, outData, state.eventCounter, frame, strippable)
   if (state.replayBuffer.length > REPLAY_BUFFER_SIZE) {
     state.replayBuffer.splice(0, state.replayBuffer.length - REPLAY_BUFFER_SIZE)
   }

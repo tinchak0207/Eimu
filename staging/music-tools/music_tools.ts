@@ -87,7 +87,7 @@ import {
   type GenerateYue2TrackResult,
   type Yue2CotMode,
 } from "./music_yue2"
-import { directMusicPrompt, stripLyricsTimestamps } from "./music_prompt_director"
+import { describeRetainedParts, directMusicPrompt, stripLyricsTimestamps } from "./music_prompt_director"
 import {
   buildMusicPreferenceQuestion,
   type MusicTakeFeature,
@@ -1108,15 +1108,21 @@ export const musicGenTool: MusicToolDef = {
       const notes: string[] = []
       if (strippedLyrics.hadTimestamp && activeChannel !== "lyria") {
         notes.push(
-          "歌词里的时间码（如 [0:00 - 0:10]）这次没有送进模型——当前通路不认时间码，已按段落标签处理（[Verse]/[Chorus] 等原样保留），歌词文字没有改动。",
+          "歌词里的时间码（如 [0:00 - 0:10]）这次没有送进模型——当前通路不认时间码，已按段落标签处理（[Verse]/[Chorus] 等原样保留），除时间码外的歌词文字未改动。",
         )
       }
-      if (directed.compressedClauses !== undefined) {
+      // 压缩是事实，回执必须由**实际被丢的层**与**最终 prompt_used 的实际内容**反推，
+      // 不得写死成功句（2026-10-04 F2：旧版在 genre 被丢、句子被硬截时仍宣称「保住了流派…没有截半句」）。
+      if (directed.compressedClauses !== undefined || directed.hardTruncated) {
         const dropped = directed.compressedLayers ?? []
+        const kept = describeRetainedParts(finalPrompt)
         notes.push(
-          "风格描述超出了当前通路的长度上限，已按优先级整段丢掉了不重要的子句" +
-            (dropped.length > 0 ? `（丢掉：${dropped.join("、")}）` : "") +
-            "，保住了流派／情绪／编制与速度／调性；没有把句子截成半截。",
+          "风格描述超出了当前通路的长度上限" +
+            (dropped.length > 0
+              ? `，已按优先级整段丢掉了不重要的子句（丢掉的核心子句层：${dropped.join("、")}）`
+              : "，且已无更低优先级的整句子句可丢") +
+            `，最终 prompt 里保住：${kept.length > 0 ? kept.join("、") : "（无完整子句）"}。` +
+            (directed.hardTruncated ? "结尾为硬截，可能被切成半句。" : "其余为整句处理，没有把句子截成半截。"),
         )
       }
 
@@ -1166,6 +1172,11 @@ export const musicGenTool: MusicToolDef = {
           warnings: directed.warnings,
           truncated: directed.truncated,
           layers: directed.layers,
+          // 压缩事实一并透传（2026-10-04 F2）：agent 才判得出是「整句丢子句」还是「被迫硬截」，
+          // 不再只能从 truncated 猜。缺省＝null/false（未压缩）。
+          compressedClauses: directed.compressedClauses ?? null,
+          compressedLayers: directed.compressedLayers ?? null,
+          hardTruncated: directed.hardTruncated ?? false,
         },
         reference_image_count:
           activeChannel === "lyria" && !lyriaVertex ? imagesBase64.filter((i) => i !== "").length : 0,
