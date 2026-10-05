@@ -205,6 +205,36 @@ export async function emitImageDone(
   void emitQuotaChanged(state)
 }
 
+/**
+ * 2026-10-05：把「已经到手的成片类成品」登记进会话任务表。
+ * 为什么需要：任务表此前只由 image_* 的 attachCanvasTask 写（task_id）与 poller 的
+ * emitCanvasResult 更新；非 image 工具（music_gen / video_upload / run_py）回的是成品
+ * URL 而非 task_id，任何路径都不登记 ⇒ 卡片发了（用户看得见）、任务表仍是空的——父模型
+ * 呼叫 image_get_result / delivery_assets 一律查不到这批成品。此处是唯一咽喉点：每张
+ * video.done / audio.done 卡片都在此登记，主会话/子代理/poller 三条入口自动全覆盖。
+ * 键＝task_id 优先，缺 task_id 时用 URL 本身（该键只用于去重覆盖，不出现在
+ * /internal/session-tasks 的回传值里）。刻意**不含 image**：子代理会产大量中间关键帧，
+ * 一并登记会灌爆清单（与 FIX-A「新图片一律不出卡」的既有不对称一致）。
+ */
+export function registerSessionArtifact(
+  state: SessionState,
+  entry: { url: string; kind: string; label?: string; task_id?: string },
+): void {
+  if (!entry.url) return
+  const key = entry.task_id || entry.url
+  const prev = state.sessionTasks.get(key)
+  state.sessionTasks.set(key, {
+    ...(prev ?? {}),
+    ...(entry.task_id ? { task_id: entry.task_id } : {}),
+    ...(entry.label ? { label: entry.label } : {}),
+    status: "succeeded",
+    url: entry.url,
+    kind: entry.kind,
+    submitted_at: prev?.submitted_at ?? Date.now(),
+  })
+  boundMap(state.sessionTasks, TOOL_STATUS_DEDUP_CAP)
+}
+
 export async function emitVideoDone(
   state: SessionState,
   url: string,
@@ -216,6 +246,7 @@ export async function emitVideoDone(
   if (state.announcedUrls.has(url)) return
   state.announcedUrls.add(url)
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
+  registerSessionArtifact(state, { url, kind: media_kind === "film" ? "film" : "video", task_id })
   // 影片/成片 content 已是绝对公开 URL，无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   emitToSession(state, "video.done", { url, cost_coins, task_id, media_kind })
   void appendLedgerFor(state, {
@@ -239,6 +270,7 @@ export async function emitAudioDone(
   if (state.announcedUrls.has(url)) return
   state.announcedUrls.add(url)
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
+  registerSessionArtifact(state, { url, kind: "audio", task_id })
   // 音频 content 已是绝对公开 URL（平台 uploads），无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   emitToSession(state, "audio.done", { url, cost_coins, task_id, media_kind })
   void appendLedgerFor(state, {

@@ -98,7 +98,12 @@ export interface SessionState {
   canvasUnitByCall: Map<string, string>
   canvasUnitByTask: Map<string, string>
   // 0831：本轮生成任务登记（权威 task_id 来源，供 /internal/session-tasks 读）。
-  sessionTasks: Map<string, { task_id: string; label?: string; status: string; url?: string; submitted_at: number }>
+  // 2026-10-05：task_id 可省略＝该笔是「已到手的成品」（无 job id，如 music_gen 直回 URL）；
+  //             kind 为成品类型（video/audio/film）。
+  sessionTasks: Map<
+    string,
+    { task_id?: string; label?: string; status: string; url?: string; submitted_at: number; kind?: string }
+  >
   // 意图审查政策只在 session 首次 send 时注入（system 栏位），之后不再重复，
   // 避免每次讯息都带同一段 system 造成 token 膨胀。
   // D1 修复（2026-09-15 PRD P0-4）：本旗标同时是 L0/L1 记忆块的注入闸——

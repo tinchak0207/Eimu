@@ -65,6 +65,7 @@ export const AGENT_EVENT_NAMES = [
   "subagent.started",
   "subagent.delta",
   "subagent.done",
+  "subagent.tool",
   "question.request",
   "question.replied",
   "question.rejected",
@@ -424,6 +425,21 @@ export interface AgentSubagentDone {
   summary?: string;
 }
 
+/**
+ * 子代理内部的工具状态（2026-10-05 网关新帧）。补足「子代理在跑什么」——
+ * 此前子代理跑长工具期间前端只有跑马灯，用户误以为卡死。
+ * 同一 call_id 只在状态变化时由网关发帧；delta/done 的契约不变。
+ */
+export interface AgentSubagentTool {
+  /** 子代理 run id，与 subagent.started/delta/done 同源。 */
+  id: string;
+  /** 工具调用 id：同一调用的状态更新靠它归并。 */
+  call_id: string;
+  /** 工具名原文（渲染时经 toolDisplayName() 转人话，不在前端造假名）。 */
+  tool: string;
+  status: "running" | "ok" | "failed";
+}
+
 // ─────────────────────────── 判别联合
 
 interface WithEventId {
@@ -464,6 +480,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "subagent.started"; data: AgentSubagentStarted }
     | { name: "subagent.delta"; data: AgentSubagentDelta }
     | { name: "subagent.done"; data: AgentSubagentDone }
+    | { name: "subagent.tool"; data: AgentSubagentTool }
     | { name: "question.request"; data: AgentQuestionRequest }
     | { name: "question.replied"; data: AgentQuestionReplied }
     | { name: "steer.status"; data: AgentSteerStatusEvent }
@@ -944,6 +961,23 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       if (!id || !status) return null;
       return { name, event_id: eventId, data: { id, status, summary: str(d.summary) } };
     }
+    case "subagent.tool": {
+      const id = str(d.id);
+      const callId = str(d.call_id);
+      const tool = str(d.tool);
+      // id / call_id / tool 必须是非空字串，status 必须是合同三值之一；
+      // 任一不满足整帧丢弃（既有「宁缺勿假·非法帧一律丢弃」纪律）。
+      const status =
+        d.status === "running"
+          ? ("running" as const)
+          : d.status === "ok"
+            ? ("ok" as const)
+            : d.status === "failed"
+              ? ("failed" as const)
+              : undefined;
+      if (!id || !callId || !tool || !status) return null;
+      return { name, event_id: eventId, data: { id, call_id: callId, tool, status } };
+    }
     case "question.request": {
       const requestId = str(d.request_id);
       const questions = parseQuestionItems(d.questions);
@@ -1255,6 +1289,18 @@ export interface AgentSubagentItem extends TranscriptItemBase {
   text?: string;
   status: "running" | "ok" | "error" | "stopped";
   summary?: string;
+  /**
+   * 子代理内部的工具活动（2026-10-05 subagent.tool 帧回填）。只保留最近几条，
+   * 用途是让用户看到「它正在跑什么」——running 的排前面，settled 的留一条做上下文。
+   */
+  tools?: AgentSubagentToolEntry[];
+}
+
+/** 子代理工具活动的渲染条目（由 AgentSubagentTool 帧归并而成）。 */
+export interface AgentSubagentToolEntry {
+  callId: string;
+  tool: string;
+  status: "running" | "ok" | "failed";
 }
 
 /**

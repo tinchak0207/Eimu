@@ -184,7 +184,7 @@ setInterval(() => {
 // 可被 subagent_status 工具查询，不重复注入。
 async function wakeSessionForSubagent(
   parentState: any,
-  run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string },
+  run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string; artifacts?: Array<{ kind: string; url: string }> },
 ): Promise<void> {
   if (!parentState) {
     console.warn("[gateway] subagent wake skipped: parent session gone")
@@ -198,11 +198,24 @@ async function wakeSessionForSubagent(
     // F3-A：run.summary 整包曾把 verdict/issues/evidence/qc、审核官·runId、用量计数、
     // 内部落盘路径与源码行号一并送进用户可见消息；此处只让「完成内容/成品在哪/落差」过桥。
     const rawPayload = run.status === "ok" ? run.summary : run.error || run.summary || "未知原因"
-    const payload = scrubSubagentPayload(rawPayload) || "（这一路没有可读的成品或落差信息。）"
+    // 2026-10-05 修复（成品交付链下半场）：artifacts 清单刻意不过 scrubSubagentPayload——
+    // 它是成品 URL，不是内审产物，过清洗会被误删。子代理被硬顶/超时打死、或收尾摘要没写
+    // URL 时，父模型据此仍能拿到「这一路已经产出了什么」，不再误判零产物并重复派工。
+    const artifactLines = (run.artifacts ?? [])
+      .slice(0, 20)
+      .map((a) => `- ${a.kind === "audio" ? "音频" : a.kind === "film" ? "成片" : "视频"}：${a.url}`)
+      .join("\n")
+    const artifactsBlock = artifactLines
+      ? `\n这一路已经产出的成品（可直接取用，不要因为本路失败或超时就把它们当没做过）：\n${artifactLines}`
+      : ""
+    const payload =
+      scrubSubagentPayload(rawPayload) ||
+      (artifactsBlock ? "（本路没回文字摘要。）" : "（这一路没有可读的成品或落差信息。）")
     const content =
       `【子代理${verdict}·系统自动唤醒】「${safeLabel}」这一路已${verdict}。` +
       (run.status === "ok" ? `\n完成内容 / 成品或落差：${payload}` : `\n未完成原因：${payload}`) +
-      `\n请基于以上真实结果立即继续推进（汇总/补派/返工），并简报当前进度。若尚有其他子代理在跑，可用 subagent_status 工具查询并在简报里说明还剩几路在跑；注意：最终成品未交付前，禁止宣称「已全部完成」，禁止结束回合等待用户——没有可推进动作时也要说明下一步计划。`
+      `\n请基于以上真实结果立即继续推进（汇总/补派/返工），并简报当前进度。若尚有其他子代理在跑，可用 subagent_status 工具查询并在简报里说明还剩几路在跑；注意：最终成品未交付前，禁止宣称「已全部完成」，禁止结束回合等待用户——没有可推进动作时也要说明下一步计划。` +
+      `${artifactsBlock}`
     // 刀 1（2026-09-19）：唤醒摘要收集（Jev 测谎题的事实面；有界 16 条，session.idle 消费）。
     state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
     const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }

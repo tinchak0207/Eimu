@@ -43,7 +43,7 @@ import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascad
 // FIX-A（2026-10-02）：子代理工具结果的媒体成品出卡——共用主路径的成品 URL 提取器与
 // emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
 // 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
-import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone } from "./events-translate.ts"
+import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask } from "./events-translate.ts"
 // 片 C（2026-09-15）：Expert 交付契约的机器强制点。纯函数模组，零 gateway 内部依赖。
 // 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 时机器化重派一次。
 import {
@@ -274,6 +274,12 @@ interface SubagentRun {
   //   「有在途工具」＝合法的长期静默（长生成），活性检测必须放行，不得误杀。
   lastActivityAt: number
   pendingTools: Set<string>
+  // 2026-10-05 修复（成品交付链下半场）：本 run 的工具结果里已观测到的成片类成品。
+  // 子代理被 30 分钟硬顶/上游错误打死、或收尾摘要里没写 URL 时，父会话仍能拿到
+  // 「这一路已经产出了什么」——此前唯一证据是用户屏幕上的卡片，父模型据此误判零产物重派。
+  artifacts: Array<{ kind: string; url: string; task_id?: string; cost_coins?: number }>
+  // 2026-10-05：子代理工具状态帧（subagent.tool）的每 callID 已发状态，防重复刷帧。
+  toolStatusEmitted: Map<string, string>
   // 片 D（2026-09-15）：交付闸门机器化重派状态。reworkCount=已重派次数（硬帽 1，
   // 防无限回圈烧钱）；reworking=重派投递在途护栏（旧子会话残影事件不得提前收尾）；
   // reworkFailure=重派投递失败原因（非空=重派从未真正跑过，done 不得伪称 reworked）。
@@ -316,6 +322,8 @@ interface SubagentResult {
   // D4（2026-10-02）：所属父会话（gateway session id）。此前 completed 记录无归属，
   // 「latest／最近 3 笔」查不到本会话的已完成 run。新写入必带；旧记录无此栏＝不列入。
   parent?: string
+  // 2026-10-05 修复（成品交付链下半场）：本 run 已观测到的成片类成品（见 SubagentRun.artifacts）。
+  artifacts?: Array<{ kind: string; url: string; task_id?: string; cost_coins?: number }>
 }
 
 interface SubagentDeps {
@@ -338,7 +346,7 @@ interface SubagentDeps {
   // 摘要投进父会话消息流并续 turn（轮子=index.ts wakeSessionForSubagent，对齐
   // workflow 唤醒扫描器的 prompt_async 轮廓：turn 计数重置＋watchdog 布哨＋幂等守卫）。
   // 未注入（旧 index.ts 配新 subagent.ts）时 async dispatch 自动降级同步语义。
-  wakeParent: (parentState: any, run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string }) => void
+  wakeParent: (parentState: any, run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string; artifacts?: Array<{ kind: string; url: string; task_id?: string; cost_coins?: number }> }) => void
 }
 
 let deps: SubagentDeps | undefined
@@ -860,7 +868,7 @@ ${summary}`
   // 修 1：本 run 释放了一个槽位——若该父会话有被并发上限挤掉的 critic 待跑，补跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id) // 刀 F：终态即清持久记录（幂等；非 rework run 无记录=no-op）
-  completed.set(run.id, { status, summary: visibleSummary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
+  completed.set(run.id, { status, summary: visibleSummary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, artifacts: run.artifacts?.length ? run.artifacts : undefined })
   // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
   if (status === "ok" && run.agent) {
     saveDelivery({
@@ -891,7 +899,7 @@ ${summary}`
       // 修 1（2026-10-02）：verdict（PASS 与 REJECT）一律以正常完成仪式回灌父会话——
       // PASS 不再只写 journal（实锤：判决从未送达，orchestrator 两小时后手动 read 才发现）。
       try {
-        deps!.wakeParent(state, { id: run.id, label: run.label, status, summary: visibleSummary, error })
+        deps!.wakeParent(state, { id: run.id, label: run.label, status, summary: visibleSummary, error, artifacts: run.artifacts })
       } catch (e) {
         console.error(`[gateway] subagent wake failed: id=${run.id}`, e)
       }
@@ -906,6 +914,7 @@ ${summary}`
           status,
           summary: visibleSummary,
           error,
+          artifacts: run.artifacts,
         })
       } catch (e) {
         console.error(`[gateway] subagent wake failed: id=${run.id}`, e)
@@ -1553,6 +1562,26 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               run.pendingTools.delete(callId)
             }
           }
+          // 2026-10-05：向父会话发子代理工具状态帧。此前网关从不发这类帧 → 长工具
+          // （音乐生成 150-180s）期间前端只看到一段可能空白的跑马灯，用户以为卡死。
+          // 只在状态**变化**时发一次（同一 part 会多次 updated）；payload 契约与前端
+          // agent-chat-types.ts 的 AgentSubagentTool 对齐：
+          //   { id: 子代理 run id, call_id, tool, status: "running"|"ok"|"failed" }
+          // 工具名原样送（前端用既有 toolDisplayName() 转人话），不在此造中文、
+          // 不送 state.title/input（可能含内部路径与命令原文，属于泄漏面）。
+          if (callId && st) {
+            const frameStatus = st === "pending" || st === "running" ? "running" : st === "completed" ? "ok" : "failed"
+            if (run.toolStatusEmitted.get(callId) !== frameStatus) {
+              run.toolStatusEmitted.set(callId, frameStatus)
+              boundMap(run.toolStatusEmitted, 200)
+              deps.emitToSession(parentState, "subagent.tool", {
+                id: run.id,
+                call_id: callId,
+                tool: typeof part.tool === "string" ? part.tool : "tool",
+                status: frameStatus,
+              })
+            }
+          }
         }
         // FIX-A（2026-10-02）：子代理工具结果的媒体成品 → 父会话出卡。野兽模式下音乐/影片
         // 只能在 Expert 子代理里产生，而其 tool part 此前整类被丢弃 ⇒ 子代理做出的影片/音乐
@@ -1561,9 +1590,30 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
         // completed 可能重复触发）。刻意**不处理 image**：子代理（如 video-director）会产大量
         // 中间关键帧，一并发 image.done 会把聊天框灌爆——只放行成片类媒体，刻意的不对称。
         if (part.type === "tool" && part.state?.status === "completed") {
-          const media = collectToolOutputMediaUrls(parseToolOutput(part.state.output))
-          for (const c of media.video) void emitVideoDone(parentState, c.url, c.cost_coins, undefined, "video")
-          for (const c of media.audio) void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio")
+          const parsedOut = parseToolOutput(part.state.output)
+          // 2026-10-05：子代理的生成任务必须登记进**父会话**任务表。此前这里只把媒体升格成
+          // 卡片、task_id 整类丢弃 ⇒ 父模型用 image_get_result（读 /internal/session-tasks）
+          // 查不到自己子代理提交过的任何 job（「每个预览卡都是成品、模型自己都不知道」）。
+          // attachCanvasTask 只在 parentState.canvasUnitByCall 命中时才有画布副作用；子代理
+          // 的 callID 不在父会话表里 ⇒ 此处等价于「只登记任务」。
+          const childCallId =
+            typeof part.callID === "string" ? part.callID : typeof part.id === "string" ? part.id : ""
+          if (parsedOut && typeof parsedOut.task_id === "string" && parsedOut.task_id) {
+            attachCanvasTask(parentState, childCallId, parsedOut.task_id)
+          }
+          const media = collectToolOutputMediaUrls(parsedOut)
+          for (const c of media.video) {
+            if (!run.artifacts.some((a) => a.url === c.url)) {
+              run.artifacts.push({ kind: "video", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
+            }
+            void emitVideoDone(parentState, c.url, c.cost_coins, undefined, "video")
+          }
+          for (const c of media.audio) {
+            if (!run.artifacts.some((a) => a.url === c.url)) {
+              run.artifacts.push({ kind: "audio", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
+            }
+            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio")
+          }
         }
         if (part.type !== "text" && part.type !== "reasoning") {
           // step-start 与未知类型不可达前端：记 partID，其 delta 一并丢弃
@@ -1708,6 +1758,8 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       partText: new Map(),
       lastActivityAt: Date.now(),
       pendingTools: new Set(),
+      artifacts: [],
+      toolStatusEmitted: new Map(),
     }
 
     // 注册进 byParent：与 handleSubagentDispatch 同语义——critic run 占一个并发位、
@@ -2048,6 +2100,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     partText: new Map(),
     lastActivityAt: Date.now(),
     pendingTools: new Set(),
+    artifacts: [],
+    toolStatusEmitted: new Map(),
   }
   list.push(run)
   byParent.set(parent.sessionId, list)
@@ -2421,6 +2475,8 @@ function runFromReworkRecord(rec: ReworkRecord): SubagentRun {
     reworkCount: rec.reworkCount || 1,
     lastActivityAt: Date.now(),
     pendingTools: new Set(),
+    artifacts: [],
+    toolStatusEmitted: new Map(),
   }
 }
 

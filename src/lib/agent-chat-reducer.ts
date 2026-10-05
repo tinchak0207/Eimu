@@ -581,6 +581,30 @@ function reduceSubagentDelta(
   return { ...state, items: [...items, item], turnActive: true };
 }
 
+// 2026-10-05：subagent.tool 帧 → 归并进对应子代理条目的 tools。
+// 同一 call_id 覆盖状态（网关只在状态变化时发帧，此处仍按 callId 归并以防重连补发）；
+// done 之后的迟到帧不再改写已定案的卡（与 delta 同纪律）；只留最近 6 条。
+const SUBAGENT_TOOL_CAP = 6;
+
+function reduceSubagentTool(
+  state: AgentChatState,
+  event: AgentSseEvent & { name: "subagent.tool" },
+): AgentChatState {
+  const { id, call_id, tool, status } = event.data;
+  const items = state.items.slice();
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind !== "subagent" || it.subagentId !== id) continue;
+    if (it.status !== "running") return state;
+    const prev = it.tools ?? [];
+    const idx = prev.findIndex((t) => t.callId === call_id);
+    const next = idx >= 0 ? prev.map((t, j) => (j === idx ? { callId: call_id, tool, status } : t)) : [...prev, { callId: call_id, tool, status }];
+    items[i] = { ...it, tools: next.slice(-SUBAGENT_TOOL_CAP) };
+    return { ...state, items, turnActive: true };
+  }
+  return state;
+}
+
 function reduceSubagentDone(
   state: AgentChatState,
   event: AgentSseEvent & { name: "subagent.done" },
@@ -946,6 +970,8 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceSubagentDelta(base, event);
     case "subagent.done":
       return reduceSubagentDone(base, event);
+    case "subagent.tool":
+      return reduceSubagentTool(base, event);
     default:
       // canvas.* 等由别处（useCanvasChat）消费的事件，reducer 只推 lastEventId。
       return base;

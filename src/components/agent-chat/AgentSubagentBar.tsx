@@ -3,8 +3,9 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentSubagentItem } from "@/lib/agent-chat-types";
+import type { AgentSubagentItem, AgentSubagentToolEntry } from "@/lib/agent-chat-types";
 import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
+import { toolDisplayName } from "./AgentToolCard";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
 // 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁）。0921 契约：
@@ -53,6 +54,26 @@ const STATUS_WORD_TONE: Record<AgentSubagentItem["status"], string> = {
   ok: "text-foreground/45",
   error: "text-ios-red",
   stopped: "text-foreground/45",
+};
+
+// 子代理工具活动细行（2026-10-05 subagent.tool 帧）：沿用本档色彩纪律——
+// 状态点与状态词同款字面（运行中…／完成／失败），点比父行（1.5）小一档以体现层级。
+const TOOL_STATUS_DOT: Record<AgentSubagentToolEntry["status"], string> = {
+  running: "bg-ios-blue",
+  ok: "bg-foreground/40",
+  failed: "bg-ios-red",
+};
+
+const TOOL_STATUS_WORD: Record<AgentSubagentToolEntry["status"], string> = {
+  running: "运行中…",
+  ok: "完成",
+  failed: "失败",
+};
+
+const TOOL_STATUS_WORD_TONE: Record<AgentSubagentToolEntry["status"], string> = {
+  running: "text-ios-blue",
+  ok: "text-foreground/45",
+  failed: "text-ios-red",
 };
 
 /**
@@ -132,43 +153,70 @@ interface SubagentCardProps {
   item: AgentSubagentItem;
 }
 
+/**
+ * 子代理工具活动区（2026-10-05）：只在子代理运行中渲染，让用户看到「它在跑什么」。
+ * 可见行 = 所有 running 条目；一条都没有时取最后一条 settled（「刚做完 X，正在想」）。
+ * 行数上限 3，避免长卡；不发明「还有 N 条」这类控件。
+ */
+function SubagentToolLines({ entries }: { entries: AgentSubagentToolEntry[] }) {
+  const running = entries.filter((t) => t.status === "running");
+  const visible = (running.length > 0 ? running : entries.slice(-1)).slice(0, 3);
+  if (visible.length === 0) return null;
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 pb-1 pl-7">
+      {visible.map((t) => (
+        <div key={t.callId} className="flex min-w-0 items-center gap-1.5 text-ios-footnote text-muted-foreground">
+          <span className={cn("h-1 w-1 shrink-0 rounded-full", TOOL_STATUS_DOT[t.status])} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{toolDisplayName(t.tool)}</span>
+          <span className={cn("shrink-0 whitespace-nowrap", TOOL_STATUS_WORD_TONE[t.status])}>
+            {TOOL_STATUS_WORD[t.status]}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SubagentCard({ item }: SubagentCardProps) {
   return (
-    <div className="agent-rise flex min-h-11 min-w-0 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
-      <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
-      {/* 标签（闸道给的短标签）：旧写法 shrink-0 没有任何宽度上限＝长标签
-         既不缩也不截，直接把整行撑出面板宽度（2026-09-20 根因清剿）。
-          这里刻意用「让位 + 换行」而不是省略号：running 行的活动流必须是
-          完整逐字滑窗（测试钉著 running 标记不得出现省略号截断），标签若也走
-          截断语汇会与活动流的「全文可见」语义打架；max-w-[45%] + min-w-0 +
-          overflow-wrap:anywhere 保证它永远不会撑破宽度。 */}
-      <span className="min-w-0 max-w-[45%] text-ios-footnote font-medium text-foreground/80 [overflow-wrap:anywhere]">
-        {item.label}
-      </span>
-      {/* running：跑马灯末行（活动流＝含 reasoning 的所有增量，尾巴跟随快吐字观感）；
-          settled：静态摘要。 */}
-      {item.status === "running" ? (
-        <MarqueeLine text={item.activity || item.text || item.lastLine || "正在输出…"} />
-      ) : (
-        <span className="min-w-0 flex-1 truncate text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]">
-          {item.summary ?? item.lastLine}
+    <div className="flex min-w-0 w-full flex-col">
+      <div className="agent-rise flex min-h-11 min-w-0 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
+        <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+        {/* 标签（闸道给的短标签）：旧写法 shrink-0 没有任何宽度上限＝长标签
+           既不缩也不截，直接把整行撑出面板宽度（2026-09-20 根因清剿）。
+            这里刻意用「让位 + 换行」而不是省略号：running 行的活动流必须是
+            完整逐字滑窗（测试钉著 running 标记不得出现省略号截断），标签若也走
+            截断语汇会与活动流的「全文可见」语义打架；max-w-[45%] + min-w-0 +
+            overflow-wrap:anywhere 保证它永远不会撑破宽度。 */}
+        <span className="min-w-0 max-w-[45%] text-ios-footnote font-medium text-foreground/80 [overflow-wrap:anywhere]">
+          {item.label}
         </span>
-      )}
-      {/* 状态词（无胶囊）：whitespace-nowrap 保证不被长工具名挤出行
-          （工具名那一侧自己 truncate 让位）。 */}
-      <span
-        className={cn(
-          "shrink-0 whitespace-nowrap text-ios-footnote tabular-nums",
-          STATUS_WORD_TONE[item.status],
+        {/* running：跑马灯末行（活动流＝含 reasoning 的所有增量，尾巴跟随快吐字观感）；
+            settled：静态摘要。 */}
+        {item.status === "running" ? (
+          <MarqueeLine text={item.activity || item.text || item.lastLine || "正在输出…"} />
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]">
+            {item.summary ?? item.lastLine}
+          </span>
         )}
-      >
-        {STATUS_WORD[item.status]}
-      </span>
-      {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
-      <span
-        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
-        aria-label={STATUS_LABEL[item.status]}
-      />
+        {/* 状态词（无胶囊）：whitespace-nowrap 保证不被长工具名挤出行
+            （工具名那一侧自己 truncate 让位）。 */}
+        <span
+          className={cn(
+            "shrink-0 whitespace-nowrap text-ios-footnote tabular-nums",
+            STATUS_WORD_TONE[item.status],
+          )}
+        >
+          {STATUS_WORD[item.status]}
+        </span>
+        {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
+        <span
+          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
+          aria-label={STATUS_LABEL[item.status]}
+        />
+      </div>
+      {item.status === "running" && <SubagentToolLines entries={item.tools ?? []} />}
     </div>
   );
 }

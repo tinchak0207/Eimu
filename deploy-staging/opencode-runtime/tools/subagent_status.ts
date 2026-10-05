@@ -9,6 +9,7 @@ export default tool({
     "`subagent_id` 传 subagent_dispatch 返回的完整 run id；也可传 `latest` 取得本会话最近一次 run（不必记住 id）。也支持 label 前缀，命中多笔会回候选清单（此时请用完整 runId 重查）。",
     "返回运行中（done=false，含已耗时）或终态（done=true，ok=summary / error=死因）。结果在网关侧保留 10 分钟，过期会报「不存在或已过期」并附最近 3 笔 run 供你改用；已落盘的产物会附 artifact_path，直接 read 验收，不要重派。",
     "若只是等后台子代理完成，可结束本轮由自动唤醒回灌；也可按需轮询——轮询不会被禁用，但同一 id 连续同参数轮询超过阈值会收到「改变参数或停止」的工具层提示。",
+    "终态记录会带 `artifacts`（该子代理已产出的成品 URL 清单），失败/超时也带——先读它再决定要不要重派。",
   ].join("\n"),
   args: {
     subagent_id: tool.schema
@@ -66,10 +67,14 @@ export default tool({
         })
       }
       if (data.done) {
+        const artifacts = Array.isArray(data.artifacts) ? data.artifacts : undefined
         if (data.status === "ok") {
-          return ok({ title: "子代理已完成", status: "ok", summary: data.summary ?? "" })
+          return ok({ title: "子代理已完成", status: "ok", summary: data.summary ?? "", ...(artifacts ? { artifacts } : {}) })
         }
-        return fail("subagent_error", data.error || data.summary || "子代理失败", { done: true })
+        return fail("subagent_error", data.error || data.summary || "子代理失败", {
+          done: true,
+          ...(artifacts ? { artifacts } : {}),
+        })
       }
       return ok({
         title: "子代理运行中",

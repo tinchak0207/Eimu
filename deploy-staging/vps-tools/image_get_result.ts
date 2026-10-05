@@ -6,6 +6,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
 interface TaskEntry {
   task_id: string
+  kind?: string
   label?: string
   status: "queued" | "running" | "succeeded" | "failed"
   url?: string
@@ -15,10 +16,16 @@ interface TaskEntry {
 /**
  * 向网关回环取本轮 session 的全部任务清单。
  * 契约（网关侧 POST /internal/session-tasks，由另一 agent 同步实装）：
- *   { ok: boolean, tasks: Array<{ task_id; label?; status; url?; submitted_at }> }
+ *   { ok: boolean, tasks: Array<{ task_id; kind?; label?; status; url?; submitted_at }> }
  * 端点尚未上线／网路错 → 回空阵列，不让工具整个炸掉。
+ * 注意：tasks 里可能含「没有 job id 的成品条目」（kind 标 video/audio/film、status: "succeeded"、
+ * 直接给 url）；这类条目不要去打 /images/{id} 查，直接用它的 url。
+ * 回传的 reachable 区分「端点没回应」与「端点回应了但清单为空」——两种情况不共用一句话。
  */
-async function listTasks(sessionID: string, signal?: AbortSignal): Promise<TaskEntry[]> {
+async function listTasks(
+  sessionID: string,
+  signal?: AbortSignal,
+): Promise<{ tasks: TaskEntry[]; reachable: boolean }> {
   try {
     const resp = await fetch(`${GATEWAY}/internal/session-tasks`, {
       method: "POST",
@@ -28,12 +35,14 @@ async function listTasks(sessionID: string, signal?: AbortSignal): Promise<TaskE
     })
     if (resp.ok) {
       const body = await resp.json().catch(() => ({}))
-      if (Array.isArray(body?.tasks)) return body.tasks as TaskEntry[]
+      if (Array.isArray(body?.tasks)) return { tasks: body.tasks as TaskEntry[], reachable: true }
+      // 200 但载荷不符契约：端点在、形状不对，算可达但空——别谎报「未回应」。
+      return { tasks: [], reachable: true }
     }
   } catch {
-    // gateway loopback unavailable -> empty list
+    // 网络层失败／超时：端点确实没回应。
   }
-  return []
+  return { tasks: [], reachable: false }
 }
 
 const isFullUuid = (id: string): boolean => id.length >= 36 && id.includes("-")
@@ -91,24 +100,27 @@ function renderResult(body: any, id: string, correctedFrom?: string) {
 
 export default tool({
   description:
-    "查询生图/生影片结果（succeeded 后用，免费不扣费）。带 task_id 查单笔；不带 task_id 可取回本轮全部任务清单（真实 task_id 与 URL）。task_id 不完整时会依清单前缀自动纠错。禁止凭记忆猜 ID：不确定就不带参数先取清单。任务仍在进行时回 result_not_ready，harness 会自动续接。",
+    "查询生图/生影片结果（succeeded 后用，免费不扣费）。带 task_id 查单笔；不带 task_id 可取回本轮全部任务清单（真实 task_id 与 URL）。task_id 不完整时会依清单前缀自动纠错。禁止凭记忆猜 ID：不确定就不带参数先取清单。任务仍在进行时回 result_not_ready，harness 会自动续接。清单里可能含没有 job id 的成品条目（kind 标 video/audio/film、status: \"succeeded\"、直接给 url）：这类不要打 /images/{id} 查询，直接用它给的 url。",
   args: {
     task_id: tool.schema.string().optional().describe("generate 回传的任务 ID；省略则回本轮全部任务清单"),
   },
   async execute(args, context) {
     try {
-      const tasks = await listTasks(context.sessionID, context.abort)
-      const listNote =
-        tasks.length === 0
-          ? "任务清单暂不可用（网关回环 /internal/session-tasks 未回应）。"
-          : ""
+      const { tasks, reachable } = await listTasks(context.sessionID, context.abort)
+      // 2026-10-05：此前「端点不可达」与「清单为空」共用同一句话，模型被误导成「网关坏了」
+      // 而放弃用工具自救（生产实录）。两种情况必须说清楚。
+      const listNote = reachable
+        ? ""
+        : "任务清单端点未回应（网关回环不可用）；"
 
       // 零参数 → 回本轮全部任务清单
       if (!args.task_id) {
         if (tasks.length === 0) {
           return fail(
             "no_tasks",
-            listNote + "请以 generate 回传的完整 task_id 查询，或稍后重试。",
+            reachable
+              ? "本轮任务清单为空（网关已回应：本会话目前没有登记任何任务或成品）。若成品已出现在对话里，请改用 delivery_assets 取交付清单。"
+              : "任务清单端点未回应（网关回环不可用）。请以 generate 回传的完整 task_id 查询，或稍后重试。",
             { title: "尚无任务" },
           )
         }
