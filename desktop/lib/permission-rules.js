@@ -45,11 +45,18 @@ const RULE_EFFECTS = Object.freeze(["deny", "ask", "allow"]);
 /**
  * 权限模式（我方定义，非 Claude Code 的 default/acceptEdits/…；语义见本任务 spec）：
  *   off  — 一律拒
- *   ask  — 根内也问
+ *   ask  — 授权根内的读取放行；根外读、以及任何写入问
  *   auto — 授权根内自动、根外问
  *   full — 家目录内自动、家目录外问（硬 denylist 仍拒）
  */
 const PERMISSION_MODES = Object.freeze(["off", "ask", "auto", "full"]);
+
+/**
+ * 只读工具白名单（模式 ask 下可自动放行的工具）：**新增写入型工具时不得加进来**
+ * ——不在白名单的工具在 ask 档一律回 ask（「读取预设允许、写入询问」）。
+ * 与云端 deploy-staging/gateway/device-bridge-policy.ts 的 READ_ONLY_BRIDGE_TOOLS 逐项一致。
+ */
+const READ_ONLY_TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat"]);
 
 /** 决策理由（结构化，非自由字串；正对应 Claude PermissionDecisionReason 的精神）。 */
 const REASONS = Object.freeze({
@@ -60,6 +67,7 @@ const REASONS = Object.freeze({
   RULE_ALLOW: "rule_allow",
   MODE_OFF: "mode_off",
   MODE_ASK: "mode_ask",
+  MODE_ASK_READ: "mode_ask_read_in_root",
   MODE_AUTO: "mode_auto",
   MODE_FULL: "mode_full",
   DEFAULT_ASK: "default_ask",
@@ -585,7 +593,18 @@ function evaluatePermission(opts = {}) {
 
   // 6. 模式语义
   if (mode === "off") return { decision: "deny", reason: REASONS.MODE_OFF };
-  if (mode === "ask") return { decision: "ask", reason: REASONS.MODE_ASK };
+  if (mode === "ask") {
+    // 最低档：授权根内的**读取型**工具直接放行（不再逐次问）；根外照旧问。
+    // 写入型工具不在 READ_ONLY_TOOLS 内 ⇒ 一律 ask。与闸道 device-bridge-policy.ts 同语义。
+    const readOnly = READ_ONLY_TOOLS.includes(tool);
+    if (readOnly && candidates.length > 0) {
+      const roots = normalizeRoots(opts.authorizedRoots, home);
+      if (candidates.every((c) => roots.some((r) => pathWithin(c, r)))) {
+        return { decision: "allow", reason: REASONS.MODE_ASK_READ };
+      }
+    }
+    return { decision: "ask", reason: REASONS.MODE_ASK };
+  }
 
   if (mode === "auto") {
     const roots = normalizeRoots(opts.authorizedRoots, home);

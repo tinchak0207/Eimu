@@ -259,7 +259,12 @@ export interface LocalFileModeSpec {
 
 export const LOCAL_FILE_MODES: readonly LocalFileModeSpec[] = [
   { id: "off", icon: "power", title: "关闭", subtitle: "agent 不能读取本机档案。" },
-  { id: "ask", icon: "message-circle-question", title: "每次询问", subtitle: "每次读取前先问你。" },
+  {
+    id: "ask",
+    icon: "message-circle-question",
+    title: "读取允许，写入询问",
+    subtitle: "已授权资料夹内直接读取；范围外或要写入时才问你。",
+  },
   {
     id: "auto",
     icon: "folder-check",

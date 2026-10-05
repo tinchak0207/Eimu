@@ -14,6 +14,12 @@
 export const DEVICE_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat"] as const
 export type DeviceBridgeTool = (typeof DEVICE_BRIDGE_TOOLS)[number]
 
+/**
+ * 只读工具白名单（模式 ask 下可自动放行的工具）：**新增写入型工具时不得加进来**——
+ * 不在白名单的工具在 ask 档一律回 ask（「读取预设允许、写入询问」）。
+ */
+export const READ_ONLY_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat"] as const
+
 /** 单次回传内容硬上限。避免把整个档案灌进模型上下文。 */
 export const MAX_READ_BYTES = 256 * 1024
 /** 未指定 limit 时的预设读取量。 */
@@ -372,6 +378,7 @@ export type PermissionReason =
   | "rule_ask"
   | "rule_allow"
   | "mode_ask"
+  | "mode_ask_read_in_root"
   | "authorized_root"
   | "home"
   | "outside_roots"
@@ -692,8 +699,20 @@ export function evaluatePermission(q: PermissionQuery): PermissionVerdict {
   if (allow) return { decision: "allow", reason: "rule_allow", rule: allow }
 
   // 7. 模式语义。
-  if (mode === "ask") return { decision: "ask", reason: "mode_ask" }
   const absPaths = nonEmpty.map((p) => expandToAbsolute(p, q.home)).filter((x): x is string => x !== null)
+  // `ask`（最低档）：授权根内的**读取型**工具直接放行，不再逐次问；根外照旧问。
+  // 写入型工具（若将来加入）不在 READ_ONLY_BRIDGE_TOOLS 内 ⇒ 一律回 ask。
+  // 判定与装置端 desktop/lib/permission-rules.js 逐项一致。
+  if (mode === "ask") {
+    const readOnly = (READ_ONLY_BRIDGE_TOOLS as readonly string[]).includes(q.tool)
+    if (readOnly && absPaths.length > 0) {
+      const roots = sanitizeAuthorizedRoots(q.authorizedRoots)
+      if (absPaths.some((p) => roots.some((r) => isPathWithinRoot(p, r)))) {
+        return { decision: "allow", reason: "mode_ask_read_in_root" }
+      }
+    }
+    return { decision: "ask", reason: "mode_ask" }
+  }
   if (mode === "auto") {
     const roots = sanitizeAuthorizedRoots(q.authorizedRoots)
     if (absPaths.some((p) => roots.some((r) => isPathWithinRoot(p, r)))) return { decision: "allow", reason: "authorized_root" }
