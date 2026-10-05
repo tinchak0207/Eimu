@@ -9,9 +9,10 @@
  * 两平台可以不同（不同平台的打包时程／机器受限，不强制同步）。top-level `version`
  * 只是「已存在的最新版本」的标记，供外部标注与排序，**不是**两平台共用版号。
  *
- * 现况：两平台皆 0.3.3，2026-10-04 同批发行（Linux 含网页端「壳内不再显示任何下载
- * 入口」的改动，下载入口改由 DesktopDownloadButton 在 window.eimuShell 存在时自我隐藏）。
- * Windows 安装器已改成品牌化 assisted 精灵（自绘侧栏／中文文案／无原生安装模式页）。
+ * 现况：Linux 0.3.4、Windows 0.3.3。Linux 于 2026-10-05 重打为 0.3.4（见下 linux 段注释）；
+ * Windows 仍是 0.3.3 旧壳，重打包待办。两平台 2026-10-04 同批发行的「壳内不再显示任何下载
+ * 入口（改由 DesktopDownloadButton 在 window.eimuShell 存在时自我隐藏）」与「Windows 安装器
+ * 品牌化 assisted 精灵（自绘侧栏／中文文案／无原生安装模式页）」等改动仍在。
  *
  * 托管（2026-10-05 迁移）：产物不再放 Vercel Blob——原 store `GFy3GwthV6OA8bB7` 被
  * 平台封锁（每条 URL 均 403 `Your store is blocked`），发行档改由自家 nginx 直发于
@@ -21,7 +22,7 @@
  *
  * Linux 范式（2026-10-05 换）：`AppImage` → `tar.gz`。AppImage 在多数现代发行版要先补
  * libfuse2（或 `--appimage-extract`）才能执行，解压即可跑的 tar.gz 更直接。归档顶层目录
- * 名＝档名去后缀（`Eimu-0.3.3-linux-x86_64/`），内容＝electron-builder 的 `linux-unpacked`
+ * 名＝档名去后缀（`Eimu-0.3.4-linux-x86_64/`），内容＝electron-builder 的 `linux-unpacked`
  * （即 `tar` target 的既有范式，未自创结构）。**顶层目录必须是这个具名目录，不能是 `.`**：
  * 早一版用 `tar -C linux-unpacked .` 打出裸 `./` 根条目，解压时会把「解压目标目录」本身
  * chmod 成 755——`tar xzf … -C ~` 会把使用者家目录（常见 700）改掉。现已重打并实测
@@ -29,18 +30,17 @@
  */
 export const DESKTOP_RELEASES = {
   // 已存在的最新版本（＝两平台目前较新者），非两平台共用版号。
-  version: "0.3.3",
+  version: "0.3.4",
   linux: {
-    // 该平台产物版本：0.3.3。2026-10-05 由 electron-builder（`linux.target: tar.gz`）重打包，
-    // 除了分发面迁到 VPS，这一版还含「本机档案权限」修复（装置票 `sk-dev-` 链路：网页换票 →
-    // 窄 IPC → 壳当 Bearer）。当日早先上传的那份 123349078 B 没有这段——权限三个选项因此
-    // 全等（壳根本没凭证），已就地替换；同一版号的产物以本档 sha256 为准。
-    // 解压后执行档名是 `eimu-desktop`（不是目录名 Eimu），顶层目录 `Eimu-0.3.3-linux-x86_64/`。
-    version: "0.3.3",
-    url: "https://store.tinchak0207.xyz/downloads/desktop/Eimu-0.3.3-linux-x86_64.tar.gz",
-    size: 119677001,
+    // 该平台产物版本：0.3.4。2026-10-05 重打为 0.3.4：含最低权限档语义变更（读取预设允许、
+    // 写入询问）＋装置票修复（`sk-dev-` 短效票：网页换票 → 窄 IPC → 壳当 Bearer；授权根落盘）。
+    // size/sha256 为上传后实测值。
+    // 解压后执行档名是 `eimu-desktop`（不是目录名 Eimu），顶层目录 `Eimu-0.3.4-linux-x86_64/`。
+    version: "0.3.4",
+    url: "https://store.tinchak0207.xyz/downloads/desktop/Eimu-0.3.4-linux-x86_64.tar.gz",
+    size: 119677139,
     ext: "tar.gz",
-    sha256: "ef037ed1b798246a79e7c9cd5f645316f1b7e156187e65de1900471fc2f1d360",
+    sha256: "de5c6a328a207d004d3a3e8ab0bbe71acbde038ab0dfd01b3619dacd59f39c86",
   },
   windows: {
     // 该平台产物版本：0.3.3，于 2026-10-04 同批重建并上传（2026-10-05 原档原样迁到 VPS，
