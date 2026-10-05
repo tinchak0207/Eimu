@@ -5,7 +5,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync, readdirSync } from "node:fs"
 import { loadUserSettings, listSessionRows } from "./persistence"
-import { gateUserInput, classifyDispatchMeta } from "./jev-gate"
+import { gateUserInput, classifyDispatchMeta, classifyBeastStages } from "./jev-gate"
 // 0920：首条讯息即建模板骨架（不等模型思考/不等 Expert）——见下方 PROMPT_SKELETON。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { templatePlaceholderContent } from "./workflow-templates"
@@ -507,17 +507,14 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
   },
 }
 
-/** 按本轮用户讯息判当前阶段（确定性关键词，非 LLM）：只注入对应模组，不全量灌。
- *  dispatch-verify 为常态操作协议，恒注入；research 为 creation 的前置（研究先行）。 */
-export function selectBeastStages(content: string): BeastStage[] {
-  const c = content || ""
-  const picks = new Set<BeastStage>(["dispatch-verify"])
-  const research = /研究|调研|调研|分析|竞品|竞品|市场|市场|榜单|榜单|资料|资料|调查|调查|搜索|搜寻|reference|research/i.test(c)
-  const creation = /创作|创作|生成|画|画|图片|图片|影片|视频|视频|分镜|分镜|剪辑|剪辑|音乐|音乐|配音|角色|场景|场景|mv|成片|大片|宣传|宣传|设计|设计|出图|出图|重做|返工|做一|做一个|帮我|帮我/i.test(c)
-  const critique = /验收|验收|评审|评审|审核|审核|检查|检查|复核|复核|qc|退回|评测|评测|打分|verdict|质量|质量/i.test(c)
-  if (research || creation) picks.add("research")
-  if (creation) picks.add("creation")
-  if (critique) picks.add("critique")
+/** 按本轮用户讯息判当前阶段：Jev System One 机器判（2026-10-05 起，取代原关键词正则）。
+ *  dispatch-verify 为常态操作协议恒注入；research 为 creation 的前置（研究先行）。
+ *  Jev 挂／未配置 → 全阶段 fail-open（判定层故障不该让编排静默少注入阶段知识）。 */
+export async function selectBeastStages(content: string): Promise<BeastStage[]> {
+  const jev = await classifyBeastStages(content)
+  console.log(`[beast-frame] jev_stages: ${jev ? jev.join(",") : "null→all(fail-open)"}`)
+  if (!jev) return BEAST_STAGE_ORDER
+  const picks = new Set<BeastStage>(["dispatch-verify", ...jev])
   return BEAST_STAGE_ORDER.filter((s) => picks.has(s))
 }
 
@@ -848,7 +845,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         if (BEAST_FRAME_V2) {
           // A13 新架构：stable 核心 ＋ 按阶段注入的模组 ＋ 注册表摘要（＋选用 skill 列表）。
           // 旧单体帧（手册全文＋三优先序）仅在 BEAST_FRAME_V2=0 时回退使用。
-          const stages = BEAST_STAGE_ALL ? BEAST_STAGE_ORDER : selectBeastStages(content)
+          const stages = BEAST_STAGE_ALL ? BEAST_STAGE_ORDER : await selectBeastStages(content)
           const mods: BeastFrameModule[] = BEAST_FRAME_V3
             ? [BEAST_STABLE_CORE_V3, BEAST_PHASE_SKILL_POINTERS]
             : [BEAST_STABLE_CORE, ...stages.map((s) => BEAST_STAGE_MODULES[s])]

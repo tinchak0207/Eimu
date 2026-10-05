@@ -458,6 +458,35 @@ export async function classifySpecTemplate(prompt: string): Promise<JevSpecTempl
   return "creation"
 }
 
+/** 野兽帧阶段键（与 messages-gw 的 BeastStage 同字面；本档不 import 该档以免循环依赖）。 */
+export type JevBeastStageKey = "research" | "creation" | "critique"
+
+/**
+ * 野兽帧阶段判定（System One；取代原关键词正则）。
+ *
+ * 事故（2026-10-05）：阶段判定原是确定性关键词正则，「来一首00年代周杰伦风格的歌」一个词
+ * 都没命中创作表（表里有「音乐」没有「歌」，也没有「来一首」）→ 只注入 dispatch-verify，
+ * 研究段与创作段整个缺席，编排塌成单 Expert，「先调研再交专家」的行为消失（生产日志
+ * `[beast-frame] v2 stages=dispatch-verify`）。
+ *
+ * 复用已校准的两个 noul 问题（research／critique，阈值 0.6，与 `classifySpecTemplate` 同源）：
+ * 两者皆否＝生产轮 → 返回全三阶段（研究是创作的硬前置、验收是交付的硬前提，生产轮三者全相关）；
+ * 只有纯研究轮与纯评审轮才收窄。Jev 挂／未配置／格式异常 → null，呼叫端 fail-open 注入全阶段，
+ * 绝不因判定层故障而静默少注入（少注入正是本事故的形态）。
+ */
+export async function classifyBeastStages(task: string): Promise<JevBeastStageKey[] | null> {
+  const t = (task ?? "").slice(0, 3000)
+  if (!t) return null
+  const answers = await jevSystemOne(JSON.stringify({ task: t }), { ...TEMPLATE_QUESTIONS })
+  if (!answers) return null
+  const r = answers.research
+  const c = answers.critique
+  if (typeof r?.noul !== "number" || typeof c?.noul !== "number") return null
+  if (r.noul > 0.6 && r.noul >= c.noul) return ["research"]
+  if (c.noul > 0.6) return ["critique"]
+  return ["research", "creation", "critique"]
+}
+
 // ── 记忆库第五类型 `workflow`（2026-09-20）：入库闸 ────────────────────────
 // 分工铁律：**内容由机器抽取**（repo `src/lib/workflow-memory.ts`
 // `extractWorkflowMemoryBody`：六槽 config JSON 序列化），**Jev 只当闸门**
@@ -523,11 +552,18 @@ export async function gateWorkflowMemory(doc: WorkflowMemoryDoc): Promise<boolea
 }
 
 
-// ── H9/M2/M3（2026-10-02）：确定性守卫（不依赖 Jev，Jev 挂也生效）────────────
-// 全部为纯函式，subagent.ts 派遣组装处呼叫；测试见 dispatch-guards.test.ts。
+// ── H9/M2/M3（2026-10-02）：派遣守卫 ──────────────────────────────────────
+// 2026-10-05 改造：三条守卫的**语义判定**交 System One（`classifyDispatchGuards`，一次
+// 批次取回），正则降为「Jev 不可用时」的降级路径。起因＝野兽帧阶段判定用关键词正则
+// 漏判（「来一首歌」一个词都没命中）导致编排塌成单 Expert；凡「需要懂意图」的地方
+// 一律先问 Jev。**事实型检查仍是确定性的**（spec 是否附音讯档＝AUDIO_REF_RE，属证据
+// 不属判断），不交给模型。
+// 呼叫端传 jev* 判决；省略/传 null ＝ Jev 不可用 → 回退既有正则（保住最低防线，
+// 行为与部署前逐位等价）。测试见 dispatch-guards.test.ts。
 
-const RESEARCH_RE = /调研|调研|研究|调查|调查|搜索|搜寻|搜集|搜集|收集资料|收集资料|资料整理|趋势|趋势|research|investigat|survey|参考资料|参考资料|competitor|竞品|竞品/i
-const REVIEW_RE = /审核|审核|评审|评审|验收|验收|审查|审查|审阅|审阅|质检|质检|verdict|critique|review|audit|返工判|退回|毒蛇|拷问|拷问/i
+// 降级路径（仅 Jev 不可用时使用）：语义判定以 classifyDispatchGuards 的 Jev 判决为准。
+const RESEARCH_RE = /调研|研究|调查|搜索|搜寻|搜集|收集资料|资料整理|趋势|research|investigat|survey|参考资料|competitor|竞品/i
+const REVIEW_RE = /审核|评审|验收|审查|审阅|质检|verdict|critique|review|audit|返工判|退回|毒蛇|拷问/i
 
 export interface ExpertGuardResult {
   /** 最终 expert id（""＝通用子代理）。 */
@@ -537,16 +573,71 @@ export interface ExpertGuardResult {
 }
 
 /**
+ * 派遣守卫批次判定（System One，一次呼叫取回三题；Jev 范式＝加题不加延迟）。
+ * 任一题 Jev 挂／格式异常 → 该题回 null，呼叫端回退确定性正则。
+ */
+export interface JevDispatchGuards {
+  /** 任务书属研究/调研/知识整理（非生产、非评审）→ critic 域降级判据。 */
+  research: boolean | null
+  /** 任务书属返工（改既有交付物的指定栏位）而非从零新作。 */
+  rework: boolean | null
+  /** 完成任务书是否必须先有 music 产出（要用它的时长/节拍/段落去做剪辑或对齐）。 */
+  musicDependency: boolean | null
+}
+
+export async function classifyDispatchGuards(spec: string): Promise<JevDispatchGuards> {
+  const task = (spec ?? "").slice(0, 4000)
+  const empty: JevDispatchGuards = { research: null, rework: null, musicDependency: null }
+  if (!task) return empty
+  const answers = await jevSystemOne(JSON.stringify({ task }), {
+    guard_research: {
+      type: "noul",
+      instructions:
+        "Is the task described in `task` primarily research/investigation/knowledge-gathering (searching, studying references, collecting evidence), rather than either producing an asset or reviewing an existing deliverable?",
+    },
+    guard_rework: {
+      type: "noul",
+      instructions:
+        "Does the task described in `task` ask to revise/rework an EXISTING deliverable (change a specific field of a previous output, keeping the rest as-is), rather than create something new from scratch?",
+    },
+    guard_music_dependency: {
+      type: "noul",
+      instructions:
+        "Does completing the task described in `task` require a music/song output to already exist — i.e. its duration, beats or section structure must be known in order to cut, edit or sync against it? Answer no when the task is research/analysis, when the spec already supplies an audio file or explicit timing, or when the task produces the music itself.",
+    },
+  })
+  if (!answers) return empty
+  const verdict = (key: string): boolean | null => {
+    const v = answers[key]
+    return typeof v?.noul === "number" ? v.noul > 0.5 : null
+  }
+  return {
+    research: verdict("guard_research"),
+    rework: verdict("guard_rework"),
+    musicDependency: verdict("guard_music_dependency"),
+  }
+}
+
+/**
  * H9 内容守卫。2026-10-02 暴君裁定修正：跨域关键词翻转已移除——关键词计数无法反映
  * 各域工具持有面（「转存/上传」词汇曾把点名 video-director 的任务翻成 editor，域内
  * 无鉴权工具全 401），点名域一律保留。仅存 critic 研究降级（critic 是昂贵审核域，
  * 研究任务降通用子代理不会让任务无路可走）。
+ * 2026-10-05：研究与否改由 Jev 判（jevResearch）；省略/null ＝ Jev 不可用 → 回退正则。
  */
-export function guardExpertContent(prompt: string, expertId: string): ExpertGuardResult {
+export function guardExpertContent(
+  prompt: string,
+  expertId: string,
+  jevResearch?: boolean | null,
+): ExpertGuardResult {
   const text = (prompt ?? "").slice(0, 4000)
   if (!expertId || !text) return { expertId, reason: "" }
   if (expertId === "critic") {
-    if (RESEARCH_RE.test(text) && !REVIEW_RE.test(text)) {
+    const research =
+      jevResearch === undefined || jevResearch === null
+        ? RESEARCH_RE.test(text) && !REVIEW_RE.test(text)
+        : jevResearch === true
+    if (research) {
       return { expertId: "", reason: "critic 只审已存在成品；研究/调研任务改派通用子代理" }
     }
     return { expertId, reason: "" }
@@ -554,15 +645,17 @@ export function guardExpertContent(prompt: string, expertId: string): ExpertGuar
   return { expertId, reason: "" }
 }
 
+// 降级路径（仅 Jev 不可用时使用）：依赖判定以 classifyDispatchGuards 的 Jev 判决为准。
 const MUSIC_DEP_RE =
-  /(按|依|根据|根据|对齐|对齐|卡|踩|跟随|跟随|配合|基于|基于|以|对准|对准)[^。\n]{0,14}(音乐|音乐|曲|节拍|节拍|BPM|beat|旋律|歌)|节拍|节拍|卡点|卡点|踩点|踩点|\bBPM\b|\bbeat/i
+  /(按|依|根据|对齐|卡|踩|跟随|配合|基于|以|对准)[^。\n]{0,14}(音乐|曲|节拍|BPM|beat|旋律|歌)|节拍|卡点|踩点|\bBPM\b|\bbeat/i
 // M2 收紧（2026-10-02）：纯提「秒数/段落/BPM/节拍」不足以构成生产性依赖，
 // 需再命中剪辑/时间线类「生产动词」才算「依赖音乐产出」。
-const MUSIC_PROD_DEP_RE = /剪辑|剪辑|剪片|时间轴|时间轴|拍点对齐|拍点对齐|混音|配乐同步|配乐同步|对拍|对拍/i
+const MUSIC_PROD_DEP_RE = /剪辑|剪片|时间轴|拍点对齐|混音|配乐同步|对拍/i
 // M2 豁免（2026-10-02）：研究/分析性质（非生产交付）且 task 明说不依赖音乐 → 放行。
-const MUSIC_RESEARCH_RE = /研究|调研|调研|知识库|知识库|预研|预研/i
-const MUSIC_NO_DEP_RE = /不依赖音乐|不依赖音乐|无音乐依赖|无音乐依赖|完全不依赖|完全不依赖|纯技法|纯技法|与音乐无关|与音乐无关/i
-const AUDIO_REF_RE = /\.(mp3|wav|m4a|flac|aac|ogg)\b|audio_url|音[频频]路径|音[频频]路径|已有音[乐乐]|用户(上传|提供)的?音/i
+const MUSIC_RESEARCH_RE = /研究|调研|知识库|预研/i
+const MUSIC_NO_DEP_RE = /不依赖音乐|无音乐依赖|完全不依赖|纯技法|与音乐无关/i
+// 事实型证据（非判断）：spec 已附音讯档＝音乐已存在，不交给模型判。
+const AUDIO_REF_RE = /\.(mp3|wav|m4a|flac|aac|ogg)\b|audio_url|音[频频]路径|已有音[乐乐]|用户(上传|提供)的?音/i
 const MUSIC_DEP_EXPERTS = new Set(["video-director", "editor", "motion-director"])
 
 export interface MusicFirstState {
@@ -577,27 +670,44 @@ export interface MusicFirstState {
  * 在 music 交付事件前一律挡下并回原因。spec 已带音讯档证据（副档名/audio_url）→ 放行（音乐已有）。
  * 回 null＝放行；字串＝挡下原因（原样回给 orchestrator）。
  */
-export function musicFirstBlockReason(prompt: string, expertId: string, state: MusicFirstState): string | null {
+export function musicFirstBlockReason(
+  prompt: string,
+  expertId: string,
+  state: MusicFirstState,
+  jevMusicDependency?: boolean | null,
+): string | null {
   const text = (prompt ?? "").slice(0, 6000)
   if (!text || expertId === "music" || expertId === "critic" || expertId === "screenwriter") return null
-  const depByExpert = MUSIC_DEP_EXPERTS.has(expertId)
-  const depByText = MUSIC_DEP_RE.test(text) && MUSIC_PROD_DEP_RE.test(text)
-  if (!(depByText && (depByExpert || /分镜|分镜|镜头|镜头|剪辑|剪辑|storyboard|shot/i.test(text)))) return null
+  // 2026-10-05：依赖判定交 Jev；省略/null ＝ Jev 不可用 → 回退确定性规则（降级路径）。
+  const depends =
+    jevMusicDependency === undefined || jevMusicDependency === null
+      ? (() => {
+          const depByExpert = MUSIC_DEP_EXPERTS.has(expertId)
+          const depByText = MUSIC_DEP_RE.test(text) && MUSIC_PROD_DEP_RE.test(text)
+          if (!(depByText && (depByExpert || /分镜|镜头|剪辑|storyboard|shot/i.test(text)))) return false
+          // 豁免：研究/分析性质（非生产交付）且明说不依赖音乐 → 放行。
+          if (MUSIC_RESEARCH_RE.test(text) && MUSIC_NO_DEP_RE.test(text)) return false
+          return true
+        })()
+      : jevMusicDependency === true
+  if (!depends) return null
   if (state.musicDelivered || AUDIO_REF_RE.test(text)) return null
-  // 豁免：研究/分析性质（非生产交付）且明说不依赖音乐 → 放行。
-  // 真正的剪辑/影片产出任务（editor/video-director/motion-director 且在做剪辑）不适用。
-  if (MUSIC_RESEARCH_RE.test(text) && MUSIC_NO_DEP_RE.test(text)) return null
   if (state.musicInFlight) {
     return "【机器闸·music-first】本任务依赖音乐（时长/节拍/段落），但 music 尚未交付。请先等 music 的完成事件，再以实际成曲（时长、节拍、段落）为准派本任务；禁止与音乐并发。"
   }
   return "【机器闸·music-first】本任务依赖音乐（时长/节拍/段落），但本会话没有任何 music 交付，spec 也未附音讯档。请先派 music expert 并等其交付事件，或在 spec 内附已有音讯档路径，再重派本任务。"
 }
 
-const REWORK_RE = /返工|重写|重写|重做|重派|修正|修改|修订|修订|改一下|只改|rework|redo|revise/i
+// 降级路径（仅 Jev 不可用时使用）。
+const REWORK_RE = /返工|重写|重做|重派|修正|修改|修订|改一下|只改|rework|redo|revise/i
 
-/** M3：判断任务书是否为返工（改既有交付物）。 */
-export function isReworkSpec(prompt: string): boolean {
-  return REWORK_RE.test((prompt ?? "").slice(0, 1500))
+/**
+ * M3：判断任务书是否为返工（改既有交付物）。
+ * 2026-10-05：改由 Jev 判（jevRework）；省略/null ＝ Jev 不可用 → 回退既有正则。
+ */
+export function isReworkSpec(prompt: string, jevRework?: boolean | null): boolean {
+  if (jevRework === undefined || jevRework === null) return REWORK_RE.test((prompt ?? "").slice(0, 1500))
+  return jevRework === true
 }
 
 /**

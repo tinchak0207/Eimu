@@ -28,7 +28,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSyn
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
-import { guardExpertContent, musicFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, workflowTemplateDirective } from "./jev-gate"
+import { guardExpertContent, musicFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, type JevDispatchGuards } from "./jev-gate"
 // 任务状态枚举真源（0920 收口）：running/ok/error/stopped 以此为准，禁散布裸字串。
 import type { TaskStatus } from "./types-gateway.ts"
 // 0920：模板判定即建骨架（不等 Expert）——workflowService 是纯 service 模组，
@@ -1856,6 +1856,9 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   //   ③ Jev 挂 → fail-open 用点名值（行为＝部署前）。
   // 白名单校验照旧（Jev 建议也过 expert-ids.json；域外/未知 → 拒绝 400）。
   let expertId = ""
+  // 2026-10-05：派遣守卫的语义判定（研究与否／是否返工／是否依赖 music）一次批次问 Jev；
+  // 非 beast 派遣不花这次呼叫（保持 OFF 零变化），此时各守卫走既有正则降级路径。
+  let dispatchGuards: JevDispatchGuards = { research: null, rework: null, musicDependency: null }
   const beastOn = deps.beastMode(parent)
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
   if (beastOn) {
@@ -1889,10 +1892,12 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     } else {
       expertId = routed.expertId
     }
-    // H9（2026-10-02）：内容 vs expert 域一致性守卫（确定性，Jev 挂也生效）。
+    // 2026-10-05：三题一呼（Jev 范式：加题不加延迟）；Jev 挂 → 各守卫回退既有正则。
+    dispatchGuards = await classifyDispatchGuards(prompt)
+    // H9（2026-10-02）：内容 vs expert 域一致性守卫。
     // 在 critic 登记之前执行——被降级的研究任务不得顶掉机器 critic pass 的触发判据。
     {
-      const g = guardExpertContent(prompt, expertId)
+      const g = guardExpertContent(prompt, expertId, dispatchGuards.research)
       if (g.reason) {
         console.log(`[gateway] jev_gate: EXPERT_GUARD ${expertId || "-"} -> ${g.expertId || "generic"} label="${label}" reason=${g.reason}`)
         expertId = g.expertId
@@ -1902,10 +1907,15 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     {
       const delivered = deliveredByParent.get(parent.sessionId) ?? []
       const musicInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "music" && r.status === "running")
-      const reason = musicFirstBlockReason(prompt, expertId, {
-        musicInFlight,
-        musicDelivered: delivered.some((d) => d.agent === "music"),
-      })
+      const reason = musicFirstBlockReason(
+        prompt,
+        expertId,
+        {
+          musicInFlight,
+          musicDelivered: delivered.some((d) => d.agent === "music"),
+        },
+        dispatchGuards.musicDependency,
+      )
       if (reason) {
         console.log(`[gateway] jev_gate: MUSIC_FIRST_BLOCKED label="${label}" expert=${expertId || "-"} inflight=${musicInFlight}`)
         return Response.json({ ok: false, code: "music_first", error: reason, blocked: "music_first" }, { status: 409 })
@@ -1988,7 +1998,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
 
   // M3（2026-10-02）：返工 spec 内容锁。侦测到返工任务 → 注入「只改 X 栏、其余逐字沿用
   // <原稿路径>＋交付附 diff」（原稿路径＝同 label/同 expert 最近一份落盘交付物）。
-  if (isReworkSpec(prompt)) {
+  if (isReworkSpec(prompt, dispatchGuards.rework)) {
     const delivered = deliveredByParent.get(parent.sessionId) ?? []
     const prior = [...delivered].reverse().find((d) => d.relPath && (d.label === label.slice(0, 20) || (expertId && d.agent === expertId)))
     prompt = `${reworkLockDirective(prior?.relPath ?? "")}\n\n---\n\n${prompt}`
