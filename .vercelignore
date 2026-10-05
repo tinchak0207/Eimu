@@ -290,3 +290,6 @@ node_modules/@swc/*
 
 # 宣传片渲染的 CJK 字型（23MB，站点完全用不到；.vercelignore 存在时 Vercel 不读 .gitignore）
 /promo-video/fonts/
+
+# 开源发布素材包（2026-10-05）：未追踪目录，不得随站点部署上传／对外可下载
+open-source/

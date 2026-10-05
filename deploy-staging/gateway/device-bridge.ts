@@ -19,6 +19,14 @@
 // validateApiKey + resolveCanonicalKey；本档再用 auth-gw 的 resolveCanonicalIdentity
 // 取 userId（正典化缓存命中，几乎零成本），绑定 userId ↔ deviceId ↔ connection。
 //
+// 2026-10-05（W7a）：**装置端多一条短效票路径**。桌面壳载入的是远端页面、壳内不可能有
+// 也不该有长期 key，旧设计「使用者自己把 0600 key 档放进 userData」对真实使用者等于
+// 功能不存在（实测停在 credentials_unavailable）。新增：已登录页面经站内服务端
+// 向 `POST /agent/v1/device-bridge/token`（Bearer sk-biz-*）换一张 `sk-dev-…`
+// 短效票，经窄 IPC 交给壳当 Bearer 打 register/heartbeat/poll/result。票由 router 核销后
+// 以 `ctx.deviceIdentity` 传进来，tenant 与 sk-biz 路径**逐字同源**；0600 档仍保留为
+// 操作者后备。票绝不落盘、绝不入 log。
+//
 // ── 安全模型 ────────────────────────────────────────────────────────────
 //   1. 工具面收敛成最小集合 list_dir/read_file/grep/stat（无写/删/执行）。
 //   2. 伺服器侧 denylist（device-bridge-policy.isSensitivePath）：路径敏感一律拒，
@@ -40,7 +48,12 @@
 // 本档只准动 deploy-staging/gateway/ 之下；未部署、未接 VPS。
 
 import { memoryEnvBool } from "./constants-gateway.ts"
-import { hashKey, resolveCanonicalIdentity } from "./auth-gw.ts"
+import {
+  DEVICE_TICKET_TTL_MS,
+  hashKey,
+  issueDeviceTicket,
+  resolveCanonicalIdentity,
+} from "./auth-gw.ts"
 import {
   MAX_READ_BYTES,
   authorizationRootProblem,
@@ -85,6 +98,12 @@ export const DEVICE_CONSENT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRI
 export const DEVICE_ONCE_GRANT_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_BRIDGE_ONCE_GRANT_TTL_MS || "120000", 10) || 120_000
 /** 轮询长连线上界（<= 闸道 idleTimeout 255s）。 */
 export const DEVICE_POLL_MAX_WAIT_MS = 25_000
+/**
+ * 铸票端点回给页面／壳的闸道基址真源（壳必须打到**真正伺服装置桥的那台主机**；
+ * 2026-10-05 实测 `image.tinchak0207.xyz` 的 /agent/healthz 是 404、`store.` 才 200，
+ * 故此处不给客户端自己猜）。
+ */
+export const DEVICE_GATEWAY_BASE_URL = (process.env.EIMU_DEVICE_GATEWAY_BASE_URL || "https://store.tinchak0207.xyz").replace(/\/+$/, "")
 
 export type DeviceBridgeErrorCode =
   | "bad_request"
@@ -1218,6 +1237,11 @@ export function deviceBridgePolicyState(
 interface DeviceBridgeRouteCtx {
   rawKey: string
   pathname: string
+  /**
+   * 短效装置票（`sk-dev-…`）已由 router 核销好的身分。有值时**不再**打正典化端点
+   * （票本身就绑定了当初铸票那一把 sk-biz 的正典身分，tenant 逐字一致）。
+   */
+  deviceIdentity?: { tenant: string; userId: number | null; keyHash: string }
 }
 
 async function readJsonBody(req: Request): Promise<Record<string, unknown> | null> {
@@ -1265,9 +1289,12 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
   }
   if (req.method !== "POST") return errorResponse(405, "method_not_allowed", "POST only")
 
-  const identity = await resolveCanonicalIdentity(ctx.rawKey)
-  const apiKeyHash = await hashKey(ctx.rawKey)
-  const tenant = identity.userId != null ? `u:${identity.userId}` : `k:${apiKeyHash}`
+  // 两条鉴权路径（router 已分派好）：
+  //   ① 短效装置票（ctx.deviceIdentity 已由 router 核销）：直接采用，不打网路。
+  //   ② 既有 Bearer sk-biz-*（云端 agent／操作者）：走正典化，行为逐行不变。
+  const identity = ctx.deviceIdentity ?? (await resolveCanonicalIdentity(ctx.rawKey))
+  const apiKeyHash = ctx.deviceIdentity?.keyHash ?? (await hashKey(ctx.rawKey))
+  const tenant = ctx.deviceIdentity?.tenant ?? (identity.userId != null ? `u:${identity.userId}` : `k:${apiKeyHash}`)
 
   const body = await readJsonBody(req)
   if (body === null) return errorResponse(400, "bad_request", "invalid json body")
@@ -1276,6 +1303,21 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
   const connectionId = typeof body.connection_id === "string" ? body.connection_id : ""
 
   switch (ctx.pathname) {
+    case "/agent/v1/device-bridge/token": {
+      // 铸一张短效装置票给**已登录的页面／桌面壳**（页面→站内服务端→此处，Bearer 是
+      // 服务端持有的 sk-biz-*）。票本身即身分凭据，故只以 sk-biz 路径可达：
+      // router 刻意不把 sk-dev 分派到本端点（禁止以票铸票）。
+      if (ctx.deviceIdentity) {
+        return errorResponse(401, "unauthorized", "device ticket cannot mint another device ticket")
+      }
+      const token = issueDeviceTicket({ tenant, userId: identity.userId, keyHash: apiKeyHash })
+      return Response.json({
+        ok: true,
+        token,
+        expires_in_sec: Math.floor(DEVICE_TICKET_TTL_MS / 1000),
+        gateway_base_url: DEVICE_GATEWAY_BASE_URL,
+      })
+    }
     case "/agent/v1/device-bridge/register": {
       const reg = deviceBridge.register({
         tenant,

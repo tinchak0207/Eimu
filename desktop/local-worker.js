@@ -40,6 +40,11 @@ const CHANNELS = {
   bridgeDisable: "eimu-local:bridge-disable",
   // W6c：权限模式设定（off/ask/auto/full），持久化并重启桥让新 mode 生效。
   bridgeSetMode: "eimu-local:bridge-set-mode",
+  // W7a（2026-10-05）：页面（已登录）交给主进程的**短效装置票**（register/heartbeat/
+  // poll/result 的 Bearer）。取代「使用者手放 0600 key 档」这条对真实使用者不可行的路。
+  bridgeSetCredential: "eimu-local:bridge-set-credential",
+  // 主进程 → 页面：我这边没有任何可用凭证，请（重新）铸一张票推过来。
+  bridgeCredentialRequired: "eimu-local:credential-required",
   // 主进程 → 页面的状态推送（preload 的 onBridgeStatus 订阅此 channel）。
   bridgeEvent: "eimu-local:bridge-state",
 };
@@ -54,7 +59,54 @@ const MAX_STDERR_BYTES = 64 * 1024;
 // 使用者逐次挑选后累积的授权集（真实绝对路径，已解 symlink）。
 const authorizedRoots = new Set();
 
+// W7a：页面推来的短效装置票（`sk-dev-…`）。**只活在主进程记忆体**——不落盘、不入
+// settings、不入 log（票是凭据）。过期由 expiresAt 判定，过期即视为没有。
+let bridgeCredential = null;
+
+/** 票前缀（与闸道 auth-gw DEVICE_TICKET_PREFIX 同一字面值；壳不 import 闸道码）。 */
+const DEVICE_TICKET_PREFIX = "sk-dev-";
+/** 接受的最大票期（秒）：闸道铸 600s，这里夹上界防页面推一张「准永久」票。 */
+const MAX_CREDENTIAL_TTL_SEC = 3600;
+
+/**
+ * 验收页面推来的 credential：只收 `{token, gatewayBaseUrl, expiresInSec}`，
+ * token 必须 `sk-dev-` 开头、gatewayBaseUrl 必须 http(s)、expiresInSec 正有限且夹上界。
+ * 形状不合一律 throw E_BAD_ARGS（**不打网路、不改状态、不落任何东西**）。
+ * @returns {{token:string, gatewayBaseUrl:string, expiresAt:number}}
+ */
+function sanitizeBridgeCredential(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new LocalError("E_BAD_ARGS", "装置凭证必须是物件");
+  }
+  const token = typeof input.token === "string" ? input.token.trim() : "";
+  if (!token.startsWith(DEVICE_TICKET_PREFIX) || token.length <= DEVICE_TICKET_PREFIX.length) {
+    throw new LocalError("E_BAD_ARGS", "装置凭证必须是以 sk-dev- 开头的短效票");
+  }
+  const base = typeof input.gatewayBaseUrl === "string" ? input.gatewayBaseUrl.trim() : "";
+  if (!/^https?:\/\//.test(base)) {
+    throw new LocalError("E_BAD_ARGS", "装置凭证需要 http(s) 的 gatewayBaseUrl");
+  }
+  const ttl = Number(input.expiresInSec);
+  if (!Number.isFinite(ttl) || ttl <= 0) {
+    throw new LocalError("E_BAD_ARGS", "装置凭证需要正的 expiresInSec");
+  }
+  const sec = Math.min(Math.floor(ttl), MAX_CREDENTIAL_TTL_SEC);
+  return { token, gatewayBaseUrl: base.replace(/\/+$/, ""), expiresAt: Date.now() + sec * 1000 };
+}
+
+/** 目前可用的票（过期即清掉并回 null）。 */
+function currentBridgeCredential() {
+  if (!bridgeCredential) return null;
+  if (bridgeCredential.expiresAt <= Date.now()) {
+    bridgeCredential = null;
+    return null;
+  }
+  return bridgeCredential;
+}
+
 let appHosts = new Set();
+/** 授权根落盘钩子（main.js 注入；未注入＝维持「重启即忘」的旧行为）。 */
+let persistRootsHook = null;
 // device bridge 生命周期控制器（由 main.js 于 registerLocalWorker 注入；见下方
 // createBridgeController）。null＝尚未接线，bridge.* 的查询会回 off、启停会拒绝。
 let bridgeController = null;
@@ -315,9 +367,21 @@ function e2ePickOverride() {
  * 授权使用者挑选的路径（唯一授权来源 authorizeRoots → authorizedRoots），并在
  * 有新根被接受时通知 bridge 控制器以**当前授权根**重注册（已启用才动作）。
  * 回传实际被接受的项目（input=原样、real=已解 symlink）。
+ *
+ * W7a（2026-10-05）：接受的根**同时落盘**（由 main.js 注入 persistRoots 写进
+ * settings.json 白名单栏位）。旧行为是纯记忆体，App 一重启就空 ⇒ 桥回
+ * no_authorized_roots、使用者每次重启都得重挑资料夹。落盘失败只记一行 warn，
+ * 不影响 pickFiles 回传、也不影响本次授权（退回「重启即忘」的旧行为）。
  */
 function applyPickAuthorization(paths) {
   const accepted = authorizeRoots(paths);
+  if (accepted.length > 0 && typeof persistRootsHook === "function") {
+    try {
+      persistRootsHook(Array.from(authorizedRoots));
+    } catch (err) {
+      console.warn(`[eimu-local] 授权根落盘失败：${err && err.code ? err.code : "error"}`);
+    }
+  }
   const restarted = notifyRootsAuthorized(accepted); // promise 供测试等待；生产端忽略
   return { accepted, restarted };
 }
@@ -485,6 +549,11 @@ function createBridgeController(deps = {}) {
   const rulesProvider = typeof deps.rulesProvider === "function" ? deps.rulesProvider : () => undefined;
   const getGatewayBaseUrl = typeof deps.getGatewayBaseUrl === "function" ? deps.getGatewayBaseUrl : () => undefined;
   const credentialProvider = typeof deps.credentialProvider === "function" ? deps.credentialProvider : () => null;
+  // W7a：短效票来源（页面推来）。未接线＝null ⇒ 客户端回退 credentialProvider（0600 档）。
+  const tokenProvider = typeof deps.tokenProvider === "function" ? deps.tokenProvider : () => null;
+  // 客户端发现没票时回调一次 → 主进程转推给页面索取（页面重铸后再推）。
+  const onCredentialRequired =
+    typeof deps.onCredentialRequired === "function" ? deps.onCredentialRequired : () => {};
   const onStatusChange = typeof deps.onStatusChange === "function" ? deps.onStatusChange : () => {};
 
   // 使用者「是否已开启本机档案授权」的意图（与客户端是否真的连上无关）。
@@ -547,6 +616,10 @@ function createBridgeController(deps = {}) {
       // （device-bridge-client.js startDeviceBridge 的 typeof 检），且刻意先判
       // roots 再读凭证——提早呼叫会让无授权根时也白读凭证档。
       credentialProvider,
+      // W7a：票来源（传函式本身，比照 credentialProvider 的注入规矩）。客户端优先用它，
+      // 没票才回退上面的 credentialProvider；两者皆无＝credentials_unavailable。
+      tokenProvider,
+      onCredentialRequired,
       // roots 即时读同一份 authorizedRoots；不另造授权机制。
       rootsProvider: currentRoots,
       // W6c：权限模式即时读（setMode 后重启即生效）；rules 由注入的 provider 决定。
@@ -654,6 +727,19 @@ function createBridgeController(deps = {}) {
       if (!userEnabled || currentRoots().length === 0) return snapshot();
       return emit(await startNow());
     },
+
+    /**
+     * W7a：接受页面推来的短效装置票（已过 sanitizeBridgeCredential）。
+     * 票换新后**必须 stop→start 重注册**，否则旧的凭证仍活在既有连线上
+     * （client 的 runtime.credential 只在启动时读一次）。
+     * 失败（非法形状）由呼叫端（IPC handler）在进本函式前就挡掉。
+     */
+    async setCredential(credential) {
+      const next = sanitizeBridgeCredential(credential);
+      bridgeCredential = next;
+      if (userEnabled && currentRoots().length > 0) return emit(await startNow());
+      return emit(snapshot());
+    },
   };
 }
 
@@ -698,18 +784,47 @@ async function handleBridgeSetMode(event, mode) {
   return await requireBridgeController().setMode(mode);
 }
 
+/**
+ * W7a：页面推来短效装置票。验来源 → 验票形状（sanitizeBridgeCredential，非法即
+ * E_BAD_ARGS，不打网路、不改状态）→ 交给控制器落下并（必要时）重注册。
+ */
+async function handleBridgeSetCredential(event, credential) {
+  assertTrustedSender(event);
+  return await requireBridgeController().setCredential(credential);
+}
+
 // ---------------------------------------------------------------------------
 // 注册
 // ---------------------------------------------------------------------------
 
 /**
  * 注册 IPC handlers。main.js 于 app.whenReady 呼叫一次。
- * @param {{appHosts?: Set<string>|string[], bridgeController?: object}} options
+ * @param {{appHosts?: Set<string>|string[], bridgeController?: object,
+ *          loadPersistedRoots?:()=>string[], persistRoots?:(roots:string[])=>void}} options
  */
 function registerLocalWorker(options = {}) {
   if (registered) return;
   if (options.appHosts) setAppHosts(options.appHosts);
   if (options.bridgeController) setBridgeController(options.bridgeController);
+  if (typeof options.persistRoots === "function") persistRootsHook = options.persistRoots;
+  // W7a：还原上次的授权根。**逐条重过同一套闸**（authorizeRoots：realpath ＋
+  // isSensitivePath），不因为「是上次存的」就跳过检查——落盘档被窜改也进不来。
+  // 单条失败（路径已删/已变敏感）只略过该条，不得让整个启动挂掉。
+  if (typeof options.loadPersistedRoots === "function") {
+    let saved = [];
+    try {
+      saved = options.loadPersistedRoots() || [];
+    } catch {
+      saved = [];
+    }
+    for (const r of Array.isArray(saved) ? saved : []) {
+      try {
+        authorizeRoots([r]);
+      } catch {
+        /* 略过不合规/已消失的根 */
+      }
+    }
+  }
   registered = true;
 
   const wrap = (fn) => async (event, ...args) => {
@@ -730,6 +845,7 @@ function registerLocalWorker(options = {}) {
   ipcMain.handle(CHANNELS.bridgeEnable, wrap(handleBridgeEnable));
   ipcMain.handle(CHANNELS.bridgeDisable, wrap(handleBridgeDisable));
   ipcMain.handle(CHANNELS.bridgeSetMode, wrap(handleBridgeSetMode));
+  ipcMain.handle(CHANNELS.bridgeSetCredential, wrap(handleBridgeSetCredential));
 }
 
 module.exports = {
@@ -740,6 +856,9 @@ module.exports = {
   // 共用的授权来源：device-bridge-client.js 直接读同一份集合（不另造第二套机制）。
   authorizedRoots,
   authorizeRoots,
+  // W7a：短效票（页面推来）的形状检查与即时读取；main.js / 控制器共用同一份。
+  sanitizeBridgeCredential,
+  currentBridgeCredential,
   __test: {
     requireAuthorizedInput,
     runProcess,
@@ -754,5 +873,6 @@ module.exports = {
     handleBridgeEnable,
     handleBridgeDisable,
     handleBridgeSetMode,
+    handleBridgeSetCredential,
   },
 };

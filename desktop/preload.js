@@ -35,6 +35,9 @@ const CHANNELS = {
   bridgeEnable: "eimu-local:bridge-enable",
   bridgeDisable: "eimu-local:bridge-disable",
   bridgeSetMode: "eimu-local:bridge-set-mode",
+  // W7a：页面（已登录）推来的短效装置票（`sk-dev-…`）与其索取信号。
+  bridgeSetCredential: "eimu-local:bridge-set-credential",
+  bridgeCredentialRequired: "eimu-local:credential-required",
   bridgeEvent: "eimu-local:bridge-state",
 };
 
@@ -88,6 +91,14 @@ contextBridge.exposeInMainWorld("eimuLocal", {
     disable: () => call(CHANNELS.bridgeDisable),
     // W6c：设定权限模式（"off"|"ask"|"auto"|"full"）。非法值由主进程回 E_BAD_ARGS。
     setMode: (mode) => call(CHANNELS.bridgeSetMode, typeof mode === "string" ? mode : ""),
+    /**
+     * W7a：把站内（已登录）换来的**短效装置票**交给主进程当 Bearer。
+     * 形状 `{ token: "sk-dev-…", gatewayBaseUrl: "https://…", expiresInSec: number }`；
+     * 主进程会验来源、验形状，票只活记忆体（不落盘、不入 log）。
+     * 旧桌面产物没有本方法 ⇒ 页面务必先特性侦测再呼叫。
+     */
+    setCredential: (credential) =>
+      call(CHANNELS.bridgeSetCredential, credential && typeof credential === "object" ? credential : null),
   },
 
   // W6c：订阅 bridge 状态变化，回传取消订阅函式（比照 eimuShell.onMaximizeChange）。
@@ -96,6 +107,17 @@ contextBridge.exposeInMainWorld("eimuLocal", {
     const listener = (_event, payload) => cb(payload && typeof payload === "object" ? payload : {});
     ipcRenderer.on(CHANNELS.bridgeEvent, listener);
     return () => ipcRenderer.removeListener(CHANNELS.bridgeEvent, listener);
+  },
+
+  /**
+   * W7a：主进程说「我这边没有可用凭证」——页面应（重新）铸一张票再 setCredential。
+   * 回传取消订阅函式。旧桌面产物没有本方法 ⇒ 页面先特性侦测。
+   */
+  onCredentialRequired: (cb) => {
+    if (typeof cb !== "function") return () => {};
+    const listener = (_event, payload) => cb(payload && typeof payload === "object" ? payload : {});
+    ipcRenderer.on(CHANNELS.bridgeCredentialRequired, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.bridgeCredentialRequired, listener);
   },
 });
 

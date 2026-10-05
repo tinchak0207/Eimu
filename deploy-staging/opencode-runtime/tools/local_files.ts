@@ -112,6 +112,7 @@ export default tool({
     "**不要**当成失败，必须把回传的 options 三段式选项**逐字**列给使用者（允许一次／本会话允许此目录／永久允许），" +
     "等他明确选一个之后，再用 local_files_authorize 带入**他选的那个 scope 原样**授权；" +
     "不得自行替他决定，尤其**不得未经同意选 permanent**。" +
+    "他若选「允许一次」：local_files_authorize 的结果会带 authorization_token，**紧接着**那一次 local_files 呼叫必须把它原样带进 authorization_token 栏位，用一次即失效（不带＝这一次还是读不到）。" +
     "若错误码是 sensitive_path，那是硬性禁止位置，**不能授权**，不要引导使用者去授权它。" +
     "【列出档名的硬规矩】" +
     "① 列出的 name 一律**逐字原样照抄**：不得简繁转换、不得改写、不得省略括号／空白／大小写，" +
@@ -165,6 +166,13 @@ export default tool({
       .describe(
         "read_file 的起始位元组位移（非负整数），用于分段续读大档：回传 has_more=true 时，把 offset 设为回传的 next_offset 再读。仅 op=read_file 适用。",
       ),
+    authorization_token: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "一次性授权票（scope=once）。**只有当 local_files_authorize 的结果里带 authorization_token 时**才原样带进来，" +
+          "用在紧接着的那一次读取；用完即失效，不得重复使用、不得自行编造。使用者选 session/permanent 时不带此栏位。",
+      ),
   },
   async execute(args, context) {
     const op = args.op;
@@ -192,6 +200,11 @@ export default tool({
     // 带 name_glob（＝要「列出所有」）时把 list_dir 的 max_entries 拉到装置既有上限 2000，
     // 以免预设 200 笔上限造成静默漏列；不超过装置上限，也不改装置端上限。
     if (useGlob) body.max_entries = DEVICE_LIST_MAX_ENTRIES;
+    // 一次性授权票（scope=once）：闸道 invoke 的既有契约已吃 `authorization_token`
+    // （见 handleInternalDeviceInvoke）。只有授权结果真带了票才原样下发，绝不自造。
+    if (typeof args.authorization_token === "string" && args.authorization_token.trim()) {
+      body.authorization_token = args.authorization_token.trim();
+    }
 
     let res: Response;
     try {

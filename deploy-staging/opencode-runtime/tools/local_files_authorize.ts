@@ -102,6 +102,15 @@ export default tool({
     };
     if (typeof data.persist_on_device === "boolean") payload.persist_on_device = data.persist_on_device;
     if (data.rules !== undefined) payload.rules = data.rules;
+    // once（2026-10-05 修正）：闸道对 scope=once 会回一枚一次性许可票，**原样带回**给模型，
+    // 它下一次 local_files 呼叫要带 `authorization_token`。旧码漏传此栏位，使 once 只能靠
+    // 闸道 consumeMatching 兜底（闸道注释亦称之为「结构性死路」）。票是短效凭据，
+    // 只走工具结果、**绝不**进 log／memory／commit。
+    if (scope === "once" && typeof data.token === "string" && data.token) {
+      payload.authorization_token = data.token;
+      payload.note =
+        "已授权一次。**紧接着**那一次 local_files 呼叫必须把 authorization_token 原样带进去；用一次即失效。";
+    }
     return ok(payload);
   },
 });

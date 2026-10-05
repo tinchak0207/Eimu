@@ -46,7 +46,12 @@ const { PERMISSION_MODES, allowRuleForRoot } = require("./lib/permission-rules.j
 const localWorker = require("./local-worker.js");
 
 const PREFIX = "/agent/v1/device-bridge";
-const DEFAULT_GATEWAY_BASE_URL = "https://image.tinchak0207.xyz";
+// 真闸道域名（2026-10-05 修正）：`image.tinchak0207.xyz` 的 /agent/healthz 是 404，
+// `/agent/v1/device-bridge/register` 也 404 —— 装置桥其实挂在 `store.tinchak0207.xyz`
+// （healthz 200、无鉴权 register 401）。旧值让「有凭证但没带 gatewayBaseUrl」的壳
+// 打到不存在的端点，等于永远连不上。页面换票路径会把闸道回的真值覆写进来，
+// 这里只是操作者/后备路径的预设值。
+const DEFAULT_GATEWAY_BASE_URL = "https://store.tinchak0207.xyz";
 const DEFAULT_POLL_WAIT_MS = 20000; // <= 闸道 DEVICE_POLL_MAX_WAIT_MS(25000)
 const DEFAULT_HEARTBEAT_MS = 30000;
 
@@ -559,14 +564,45 @@ async function startDeviceBridge(opts = {}) {
   runtime.roots = roots;
 
   let credential = null;
+  // W7a（2026-10-05）短效装置票优先：页面（已登录）经窄 IPC 推来 `sk-dev-…`，
+  // 壳拿它当 Bearer。票是**记忆体**的东西、分钟级到期、闸道重启即失效（＝可撤销），
+  // 取代「使用者手放 0600 key 档」这条对真实使用者不可行的路。票无效／没票才回退
+  // 既有 credentialProvider（0600 档），两者皆无 = 今日行为（停在 credentials_unavailable
+  // 并主动向页面索取一次）。
+  let ticketInfo = null;
   try {
-    credential = typeof opts.credentialProvider === "function" ? await opts.credentialProvider() : null;
+    const cand = typeof opts.tokenProvider === "function" ? opts.tokenProvider() : null;
+    if (cand && typeof cand.token === "string" && cand.token.startsWith("sk-dev-")) {
+      const exp = Number(cand.expiresAt);
+      if (Number.isFinite(exp) && exp > Date.now()) ticketInfo = cand;
+    }
   } catch {
-    credential = null;
+    ticketInfo = null;
+  }
+  if (ticketInfo) {
+    if (typeof ticketInfo.gatewayBaseUrl === "string" && /^https?:\/\//.test(ticketInfo.gatewayBaseUrl)) {
+      runtime.gatewayBaseUrl = ticketInfo.gatewayBaseUrl.replace(/\/+$/, "");
+    }
+    credential = ticketInfo.token;
+  } else {
+    try {
+      credential = typeof opts.credentialProvider === "function" ? await opts.credentialProvider() : null;
+    } catch {
+      credential = null;
+    }
   }
   if (typeof credential !== "string" || credential.trim().length === 0) {
     runtime.credential = null;
     setStatus("credentials_unavailable", "credentials_unavailable");
+    // 主动向页面索取一张票（页面重新铸票后会再推一次）。失败/无订阅端点一律吞掉，
+    // 不得因为「没人给票」而抛错或疯狂重连。
+    if (typeof opts.onCredentialRequired === "function") {
+      try {
+        opts.onCredentialRequired({ reason: "credentials_unavailable" });
+      } catch {
+        /* noop */
+      }
+    }
     return snapshot();
   }
 

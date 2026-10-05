@@ -10,7 +10,7 @@ import { mkdir } from "node:fs/promises"
 import type { MemoryDocLite } from "./types-gateway.ts"
 import { WORKSPACE_DIR, TTS_AUDIO_DIR, UPLOADS_DIR, VIDEO_UPLOAD_MAX_BYTES, VIDEO_UPLOAD_EXTS } from "./constants-gateway.ts"
 import { jsonError, getBearer } from "./gw-lib.ts"
-import { isLoopback, validateApiKey, resolveCanonicalKey, resolveCanonicalIdentity, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS } from "./auth-gw.ts"
+import { isLoopback, validateApiKey, resolveCanonicalKey, resolveCanonicalIdentity, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS, DEVICE_TICKET_PREFIX, redeemDeviceTicket } from "./auth-gw.ts"
 import { sessions, markDirty, getOwnedSession, resolveSession, issueSseTicket, redeemSseTicket, handleDeleteSession } from "./sessions-core.ts"
 import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
 import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle } from "./persistence.ts"
@@ -395,6 +395,22 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
 
     // Public routes: require a valid Bearer sk-biz-* key
     const rawKey = getBearer(req)
+    // W7a（2026-10-05）：装置桥的**短效票**路径。桌面壳拿不到 sk-biz-*（页面是远端内容），
+    // 旧设计只剩「使用者手放 0600 key 档」⇒ 对真实使用者等于功能不存在。票由
+    // `POST /agent/v1/device-bridge/token`（下面 sk-biz 闸门之后）铸造，此处只核销。
+    // 三条硬纪律：① 只放行 device-bridge 四个端点，**`/token` 本身不得以票铸票**；
+    // ② 票无效/过期一律 401（不泄露存在性）；③ 完全不动下方 sk-biz-* 路径的行为与顺序。
+    if (
+      rawKey &&
+      rawKey.startsWith(DEVICE_TICKET_PREFIX) &&
+      pathname !== "/agent/v1/device-bridge/token" &&
+      pathname.startsWith("/agent/v1/device-bridge/") &&
+      deviceBridgeEnabled()
+    ) {
+      const deviceIdentity = redeemDeviceTicket(rawKey)
+      if (!deviceIdentity) return jsonError(401, "invalid device ticket", "unauthorized", "unauthorized")
+      return handleDeviceBridgeRoutes(req, { rawKey, pathname, deviceIdentity })
+    }
     if (!rawKey || !rawKey.startsWith("sk-biz-")) {
       return jsonError(401, "missing or invalid API key", "unauthorized", "unauthorized")
     }

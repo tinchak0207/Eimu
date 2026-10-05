@@ -56,8 +56,19 @@ export interface DeviceBridgeApi {
      * `supportsSetMode()` 再呼叫，并在没有它时走 enable/disable 的降级路径。
      */
     setMode?(mode: LocalFileMode): Promise<BridgeStatus>;
+    /**
+     * 交一张**短效装置票**给壳（2026-10-05 契约新增，W7a）。**旧桌面产物没有此方法**
+     * ⇒ 一律先过 `shouldPushDeviceCredential()`（见 device-bridge-credential.ts）再呼叫。
+     * 票只活主进程记忆体，绝不落盘。
+     */
+    setCredential?(credential: { token: string; gatewayBaseUrl: string; expiresInSec: number }): Promise<BridgeStatus>;
   };
   onBridgeStatus(cb: (status: BridgeStatus) => void): () => void;
+  /**
+   * 主进程说「我这边没有可用凭证，请（重新）铸一张票推过来」（2026-10-05 新增）。
+   * **旧桌面产物没有** ⇒ 先特性侦测。
+   */
+  onCredentialRequired?(cb: () => void): () => void;
   pickFiles(opts: PickFilesOpts): Promise<string[]>;
 }
 
@@ -312,6 +323,19 @@ export function modeFromStatus(status: BridgeStatus | null): LocalFileModeResolu
     : { mode: "ask", derived: true, known: true };
 }
 
+/**
+ * 下一次重推短效票的延迟（毫秒）：提前 60s 刷新，夹在 [30s, 10min]。
+ * 下界防「TTL 很短时变成忙回圈」，上界防「票过期前没来得及换」。纯函式（本档零 IO）。
+ */
+export function credentialRefreshDelayMs(expiresInSec: number): number {
+  const ttlMs =
+    Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec * 1000 : DEFAULT_DEVICE_TICKET_TTL_SEC * 1000;
+  return Math.min(Math.max(ttlMs - 60_000, 30_000), 10 * 60_000);
+}
+
+/** 上游没给票期时的退路（秒）——与闸道预设 600s 同值。 */
+export const DEFAULT_DEVICE_TICKET_TTL_SEC = 600;
+
 /** 旧桌面产物没有 `bridge.setMode` ⇒ 选择器可见但须 disabled（不得 throw）。 */
 export function supportsSetMode(api: unknown): boolean {
   if (!isRecord(api)) return false;
@@ -381,10 +405,24 @@ function errText(e: unknown): string {
  * 建立 controller。`getApi` 每次读取当下全域（测试可注入假件）。
  * 一律不 throw：任何失败都转成 snapshot.notice，不中断 UI。
  */
-export function createDeviceBridgeController(getApi: () => unknown = getDeviceBridgeApi): DeviceBridgeController {
+export function createDeviceBridgeController(
+  getApi: () => unknown = getDeviceBridgeApi,
+  opts: {
+    /**
+     * 换一张短效装置票并推给壳（W7a）。由呼叫端注入**有 IO 的那一支**
+     * （`device-bridge-credential.ts` 的 fetchAndPushDeviceCredential），本档维持零 IO。
+     * 回传实际推成功的票（含 expiresInSec）以便排下一次刷新；没推成回 null。
+     * 未注入＝完全不碰凭证（纯浏览器与旧桌面产物都不该被呼叫）。
+     */
+    pushCredential?: () => Promise<{ expiresInSec: number } | null>;
+  } = {},
+): DeviceBridgeController {
+  const pushCredential = typeof opts.pushCredential === "function" ? opts.pushCredential : null;
   let disposed = false;
   const listeners = new Set<() => void>();
   let unsubscribeStatus: (() => void) | null = null;
+  let unsubscribeCredentialRequired: (() => void) | null = null;
+  let credentialTimer: ReturnType<typeof setTimeout> | null = null;
   let initialized = false;
 
   const api = (): DeviceBridgeApi | null => {
@@ -482,6 +520,35 @@ export function createDeviceBridgeController(getApi: () => unknown = getDeviceBr
     }
   };
 
+  /**
+   * W7a：把「什么时候该推票」做完——挂载时推一次、主进程索取时推一次、到期前推一次。
+   * 实际换票动作在注入的 pushCredential 里；任何失败都只是「这次没票」，不 throw、
+   * 不改任何既有状态（桥没票时的行为本来就是安全的 credentials_unavailable）。
+   */
+  const pushCredentialOnce = async (): Promise<void> => {
+    if (!pushCredential || disposed) return;
+    let pushed: { expiresInSec: number } | null = null;
+    try {
+      pushed = await pushCredential();
+    } catch {
+      pushed = null;
+    }
+    if (disposed) return;
+    if (pushed && Number.isFinite(pushed.expiresInSec) && pushed.expiresInSec > 0) {
+      scheduleCredentialRefresh(pushed.expiresInSec);
+    }
+  };
+
+  const scheduleCredentialRefresh = (expiresInSec: number): void => {
+    if (disposed || !pushCredential) return;
+    if (credentialTimer) clearTimeout(credentialTimer);
+    const delay = credentialRefreshDelayMs(expiresInSec);
+    credentialTimer = setTimeout(() => {
+      credentialTimer = null;
+      void pushCredentialOnce();
+    }, delay);
+  };
+
   const init = (): void => {
     if (initialized || disposed) return;
     initialized = true;
@@ -499,12 +566,38 @@ export function createDeviceBridgeController(getApi: () => unknown = getDeviceBr
     } catch {
       unsubscribeStatus = null;
     }
+    // 票只推给「支持 setCredential 且注入过推票动作」的壳（旧桌面产物一律不碰）。
+    if (pushCredential && typeof a.bridge.setCredential === "function") {
+      try {
+        unsubscribeCredentialRequired =
+          typeof a.onCredentialRequired === "function"
+            ? a.onCredentialRequired(() => {
+                void pushCredentialOnce();
+              })
+            : null;
+      } catch {
+        unsubscribeCredentialRequired = null;
+      }
+      void pushCredentialOnce();
+    }
     void refresh();
   };
 
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
+    if (credentialTimer) {
+      clearTimeout(credentialTimer);
+      credentialTimer = null;
+    }
+    if (unsubscribeCredentialRequired) {
+      try {
+        unsubscribeCredentialRequired();
+      } catch {
+        /* 幂等：取消订阅失败不影响卸载 */
+      }
+      unsubscribeCredentialRequired = null;
+    }
     if (unsubscribeStatus) {
       try {
         unsubscribeStatus();

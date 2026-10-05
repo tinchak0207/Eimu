@@ -52,6 +52,7 @@ import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
 import {
   LOCAL_FILE_MODES,
   createDeviceBridgeController,
+  describeBridgeAvailability,
   describeLocalFileMode,
   getDeviceBridgeApi,
   modeFromStatus,
@@ -60,6 +61,7 @@ import {
   type LocalFileMode,
   type LocalFileModeIcon,
 } from "@/lib/device-bridge-display";
+import { fetchAndPushDeviceCredential } from "@/lib/device-bridge-credential";
 import {
   FRAME_COUNT,
   extractFramesFromFile,
@@ -808,15 +810,31 @@ export function LocalFileModeMenuView({
 
 /**
  * 薄壳：建立 controller、订阅它（useSyncExternalStore）、把纯函式吐出的语义交给展示层。
- * 纯浏览器（无 window.eimuLocal）时 controller 快照 available:false ⇒ 本层回 null（渐进增强）。
+ * 纯浏览器（无 `window.eimuLocal`）时 controller 快照 `available:false` ⇒ 本层**不再静默
+ * 消失**，改渲染一行「此功能需要桌面版」（2026-10-05 修正：`describeBridgeAvailability`
+ * 本来是死码，使用者只看到控件不见、连一句解释都没有）。
+ *
+ * W7a（2026-10-05）：壳支持 `bridge.setCredential` 时，本层挂载即向站内换一张短效装置票
+ * 并推给壳（换票动作在有 IO 的 `device-bridge-credential.ts`；本档只把动作注入 controller）。
  */
 function LocalFileModeMenu() {
   const controllerRef = useRef<DeviceBridgeController | null>(null);
-  if (controllerRef.current === null) controllerRef.current = createDeviceBridgeController(getDeviceBridgeApi);
+  if (controllerRef.current === null) {
+    controllerRef.current = createDeviceBridgeController(getDeviceBridgeApi, {
+      pushCredential: async () => {
+        const pushed = await fetchAndPushDeviceCredential(getDeviceBridgeApi());
+        return pushed ? { expiresInSec: pushed.expiresInSec } : null;
+      },
+    });
+  }
   const controller = controllerRef.current;
   const [open, setOpen] = useState(false);
+  // SSR／hydration：伺服器没有 window，无法判定「是不是桌面壳」。等挂载后才敢下结论，
+  // 否则壳内首画格会闪一行「需要桌面版」（与 DesktopDownloadButton 的 checked 同一条规矩）。
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     controller.init();
     // 卸载时取消订阅 onBridgeStatus（dispose 内含 unsubscribe）。
     return () => controller.dispose();
@@ -835,8 +853,19 @@ function LocalFileModeMenu() {
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
   }, [open]);
 
-  // SSR／hydration 首画格：getServerSnapshot 一律 available:false ⇒ 伺服器与首画格都回 null。
-  if (!snap.available) return null;
+  // 判定未完成（SSR／首画格）一律不渲染，避免闪错。
+  if (!mounted) return null;
+
+  if (!snap.available) {
+    // 纯浏览器：给一句人话，而不是让控件凭空消失（不是报错，是渐进增强的说明）。
+    const availability = describeBridgeAvailability(getDeviceBridgeApi());
+    return (
+      <div className="shrink-0 ml-1 flex items-center gap-1 text-foreground/40" title={availability.description}>
+        <HardDrive className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
+        <span className="whitespace-nowrap text-ios-footnote">{availability.label}</span>
+      </div>
+    );
+  }
 
   const supported = supportsSetMode(getDeviceBridgeApi());
   const resolution = modeFromStatus(snap.status);

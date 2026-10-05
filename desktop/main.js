@@ -105,6 +105,22 @@ function broadcastBridgeStatus(status) {
 
 let mainWindow = null;
 
+/**
+ * W7a：向所有视窗索取一张短效装置票。桥没有可用凭证时由控制器回调触发一次；
+ * 页面（已登录）铸票后经 `bridge.setCredential` 推回来。
+ * 刻意**不含任何提示文字或错误**：纯信号，不泄露「有没有凭证」给非页面方。
+ */
+function broadcastCredentialRequired() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      win.webContents.send(localWorker.CHANNELS.bridgeCredentialRequired, { reason: "credentials_unavailable" });
+    } catch {
+      /* 单一视窗传送失败不影响其他视窗 */
+    }
+  }
+}
+
 // ── 使用者设定持久化（<userData>/settings.json）─────────────────────────
 // 只读写白名单栏位：
 //   - deviceBridgeEnabled: boolean        使用者是否开启本机档案授权
@@ -114,8 +130,12 @@ let mainWindow = null;
 //                                         缺＝首次启动产生一次并写回，之后沿用不重生）
 //   - deviceBridgeConsentRoots: string[]  对话内「permanent」就地授权的根（去重、绝对、
 //                                         上限 64）：落盘后重启仍有效，register 时与 roots 联集下发
-// **不**持久化 apiKey：凭证只从 <userData>/device-bridge.json（0600）读，
-// 页面不可写（见上方 bridge 注解与 lib/bridge-credential.js）。
+//   - deviceBridgeAuthorizedRoots: string[] 使用者以 pickFiles 挑选的授权根（W7a，去重、
+//                                         绝对、上限 64）：旧行为只存记忆体、App 一重启就空，
+//                                         使用者每次重启都得重挑资料夹。载入时逐条重过
+//                                         local-worker 的同一套闸（realpath＋敏感路径）。
+// **不**持久化 apiKey：操作者后备凭证只从 <userData>/device-bridge.json（0600）读；
+// 使用者路径的短效票（sk-dev-…）由页面经 IPC 推来，**只活记忆体、绝不落盘**（W7a）。
 function settingsFilePath() {
   return path.join(app.getPath("userData"), "settings.json");
 }
@@ -154,6 +174,20 @@ function readSettings() {
       roots.push(t);
     }
     if (roots.length > 0) out.deviceBridgeConsentRoots = roots;
+  }
+  // W7a：使用者 pickFiles 挑过的授权根（同一套形状约束；载入后的安全复核在
+  // local-worker.registerLocalWorker 里逐条重过，不在此处假装已验）。
+  if (Array.isArray(parsed.deviceBridgeAuthorizedRoots)) {
+    const roots = [];
+    for (const r of parsed.deviceBridgeAuthorizedRoots) {
+      if (typeof r !== "string") continue;
+      const t = r.trim();
+      if (t.length === 0 || !t.startsWith("/")) continue;
+      if (roots.includes(t)) continue;
+      if (roots.length >= 64) break;
+      roots.push(t);
+    }
+    if (roots.length > 0) out.deviceBridgeAuthorizedRoots = roots;
   }
   return out;
 }
@@ -495,12 +529,33 @@ if (!gotLock) {
       rulesProvider: () => undefined,
       getGatewayBaseUrl: resolveGatewayBaseUrl,
       credentialProvider: () => (bridgeCredential ? bridgeCredential.apiKey : null),
+      // W7a：页面推来的短效票优先（主进程记忆体）。票换新由控制器 stop→start 重注册，
+      // 所以这里必须即时读、不能快取。
+      tokenProvider: () => localWorker.currentBridgeCredential(),
+      // 客户端发现没票/票过期：转推给所有视窗，页面（已登录）重铸一张再推回来。
+      onCredentialRequired: () => broadcastCredentialRequired(),
       onStatusChange: (s) => broadcastBridgeStatus(s),
     });
 
     // W3／W6c：注册本机媒体工人（preload 暴露的 window.eimuLocal 之主进程侧，含
     // device bridge 四个新 API）。每个 handler 自行验 senderFrame origin 与逐次路径授权。
-    localWorker.registerLocalWorker({ appHosts: APP_HOSTS, bridgeController });
+    // W7a：授权根与永久同意根一样落盘（deviceBridgeAuthorizedRoots），重启后不必重挑；
+    // 载入时逐条重过同一套闸（见 local-worker.registerLocalWorker）。
+    localWorker.registerLocalWorker({
+      appHosts: APP_HOSTS,
+      bridgeController,
+      loadPersistedRoots: () =>
+        Array.isArray(settings.deviceBridgeAuthorizedRoots) ? settings.deviceBridgeAuthorizedRoots : [],
+      persistRoots: (roots) => {
+        const list = [];
+        for (const r of Array.isArray(roots) ? roots : []) {
+          if (typeof r !== "string" || !r.startsWith("/") || list.includes(r) || list.length >= 64) continue;
+          list.push(r);
+        }
+        settings.deviceBridgeAuthorizedRoots = list;
+        writeSettings(settings);
+      },
+    });
 
     // W6b 启动：以持久化设定（或 EIMU_DEVICE_BRIDGE=1 操作者覆写）决定「已开启意图」。
     // env 覆写保留既有 E2E／操作者路径，且**不**写回设定档。无授权根时控制器停在

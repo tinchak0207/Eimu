@@ -38,6 +38,40 @@ export function redeemUploadTicket(ticket: string, sessionId: string): boolean {
   return rec.sessionId === sessionId
 }
 
+// ── 装置桥短效凭证「device ticket」（2026-10-05，W7a）─────────────────────
+// 问题：装置桥挂在 Bearer sk-biz-* 之后，但桌面壳载入的是**远端页面**、壳内没有也不该有
+// 长期 key（页面能写进主进程＝多开一条 remote→local 信任路径）。结果是使用者装了桌面版
+// 也永远停在 credentials_unavailable——功能对真实使用者不存在（2026-10-05 实测）。
+// 解法（与 SSE ticket 同构、同一条纪律）：由**已登录的页面**向站内服务端换一张短效、
+// 只够打装置桥四个端点的票，经窄 IPC 交给壳当 Bearer。TTL 分钟级、行程内记忆体（网关
+// 重启即全失效＝可撤销）、绝不落盘、绝不入 log。
+//
+// 刻意可重放至过期：壳要连续用同一张票打 register/heartbeat/poll/result，一次性票会
+// 在第一发 heartbeat 就死。
+export const DEVICE_TICKET_TTL_MS = Number.parseInt(process.env.EIMU_DEVICE_TICKET_TTL_MS || "600000", 10) || 600_000
+/** 票前缀。**不得**与 sk-biz- 相交（router 用前缀区分两条鉴权路径）。 */
+export const DEVICE_TICKET_PREFIX = "sk-dev-"
+export const deviceTickets = new Map<string, { tenant: string; userId: number | null; keyHash: string; expiresAt: number }>()
+
+export function issueDeviceTicket(entry: { tenant: string; userId: number | null; keyHash: string }): string {
+  const ticket = `${DEVICE_TICKET_PREFIX}${crypto.randomUUID().replace(/-/g, "")}`
+  deviceTickets.set(ticket, { ...entry, expiresAt: Date.now() + DEVICE_TICKET_TTL_MS })
+  return ticket
+}
+
+/** 验票并回它绑定的身分；过期顺手删条目、无效/过期回 null（呼叫端一律 401，不泄露存在性）。 */
+export function redeemDeviceTicket(
+  ticket: string,
+): { tenant: string; userId: number | null; keyHash: string } | null {
+  const rec = deviceTickets.get(ticket)
+  if (!rec) return null
+  if (rec.expiresAt <= Date.now()) {
+    deviceTickets.delete(ticket)
+    return null
+  }
+  return { tenant: rec.tenant, userId: rec.userId, keyHash: rec.keyHash }
+}
+
 export const keyCache = new Map<string, { ok: boolean; expiresAt: number }>()
 export const encoder = new TextEncoder()
 export const decoder = new TextDecoder()
