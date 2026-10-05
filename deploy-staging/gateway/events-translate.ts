@@ -1094,7 +1094,16 @@ if (status === "pending" || status === "running") {
           quoteSummary = parsedObj.summary
         } else {
           const bits: string[] = []
-          if (typeof parsedObj.total_coins === "number") bits.push(`合计 ${parsedObj.total_coins} 币`)
+          // 余额查询（balance_only）没有合计：工具刻意用 total_coins=null 表达「不适用」而非 0 币。
+          // 空明细求和出的 confirmed_subtotal_coins 会是 0，照旧显示就变成「已定价小计 0 币」，
+          // 用户问余额却看到一句可读成报价的数字——正是该工具注释要挡的误读，故此处据余额报数。
+          const balanceOnly =
+            parsedObj.mode === "balance_only" ||
+            (parsedObj.total_coins === null && typeof parsedObj.balance_coins === "number")
+          if (balanceOnly) {
+            if (typeof parsedObj.balance_coins === "number")
+              bits.push(`余额 ${Math.round(parsedObj.balance_coins * 100) / 100} 币`)
+          } else if (typeof parsedObj.total_coins === "number") bits.push(`合计 ${parsedObj.total_coins} 币`)
           else if (typeof parsedObj.confirmed_subtotal_coins === "number")
             bits.push(`已定价小计 ${parsedObj.confirmed_subtotal_coins} 币`)
           if (typeof parsedObj.unknown_price_count === "number" && parsedObj.unknown_price_count > 0)
