@@ -2262,6 +2262,9 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       ...(done.error ? { error: done.error } : {}),
       ...(done.partial ? { partial: true } : {}),
       ...(done.reason ? { reason: done.reason } : {}),
+      // 2026-10-05：终态记录带本 run 已产出的成品（subagent_status 工具会透传给模型；
+      // 失败/超时也带，让 orchestrator 先读成品再决定要不要重派，不再误判零产物重派）。
+      ...(done.artifacts?.length ? { artifacts: done.artifacts } : {}),
     })
   }
   for (const run of byChildOc.values()) {
