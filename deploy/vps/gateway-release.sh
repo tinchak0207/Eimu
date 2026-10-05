@@ -174,6 +174,8 @@ usage() {
   release [--sha C] [--files F...] [--skip-recon] [--dry-run] [--force]
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
                           → md5 manifest → 原子切 symlink → drain 闸门 + deploy.sh 闸门 → 验证
+                          ⚠️ --files 不可用于本 gateway：release 目录必须是完整档案集，
+                             只放改动档会让目录缺 index.ts（切换前会被起跑闸拦下）。
                           --force：跳过重启前 drain（仍有在途会话时也立即重启）
   rollback [--dry-run] [--force]
                           回滚：切 symlink 回上一个 release → drain + 同一道 deploy.sh 闸门 → 验证
@@ -432,6 +434,18 @@ MANIFEST_MD5="$(md5sum "$REL_DIR/manifest.md5" | cut -d' ' -f1)"
   echo "MANIFEST_MD5=$MANIFEST_MD5"
   echo "SOURCE=git-archive"
 } > "$REL_DIR/meta.env"
+
+# 起跑闸（2026-10-05 事故后加）：release 目录必须是**完整树**——入口点 index.ts 必须在。
+# 事故：用 `--files` 精准发布只把 3 个改动档放进新 release 目录，symlink 已经切过去、
+# 直到 deploy.sh 的 bun build 才以 ModuleNotFound 拦下重启 ⇒ 生产停在「symlink 指向只有
+# 8 档的目录、进程靠内存里的旧码还活着」的半截状态，此刻任何按需模块解析都会炸。
+# 切换前拦：不切 symlink、不动服务，磁盘上只留一个废弃 release 目录。
+if [ ! -f "$REL_DIR/files/index.ts" ]; then
+  echo "PARTIAL_RELEASE_MISSING_ENTRYPOINT: $REL_DIR/files 缺 index.ts。" >&2
+  echo "  本 gateway 的 release 目录＝完整档案集，--files 精准发布无法满足（列全所有依赖也不现实）。" >&2
+  echo "  请改用完整快照发布（不带 --files）；本次未切换 symlink、未重启服务。" >&2
+  exit 1
+fi
 
 # 原子切换：先建 next symlink，再 mv -T 一次性 rename 覆盖（同档案系统）
 sudo ln -sfn "$REL_DIR/files" "$HARNESS_ROOT/.gateway-link.next"

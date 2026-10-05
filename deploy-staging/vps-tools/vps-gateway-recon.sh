@@ -5,8 +5,12 @@
 # 铁律：部署 VPS 前必跑本脚本；输出 DIFF 的档案必须先 diff 收编进 git 才准 scp。
 set -euo pipefail
 
-SSH_KEY=/home/lenovo/.ssh/new.pem
-SSH_CMD=(ssh -i "$SSH_KEY" -p 22443 -o ConnectTimeout=10 ubuntu@43.172.85.76)
+# 连线可覆写（预设＝原 22443 直连，行为逐位不变）：22443 连续 2-3 次即被 ISP RST，
+# 多次连线的发布流程改走 SSH-over-443 隧道（127.0.0.1:22222）更稳。
+SSH_KEY="${VPS_SSH_KEY:-/home/lenovo/.ssh/new.pem}"
+SSH_PORT="${VPS_SSH_PORT:-22443}"
+SSH_TARGET="${VPS_SSH_TARGET:-ubuntu@43.172.85.76}"
+SSH_CMD=(ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET")
 VPS_DIR=/opt/agent-harness/gateway
 LOCAL_DIR="$(cd "$(dirname "$0")/../gateway" && pwd)"
 # 临时 worktree 落点可覆写：本机 /tmp 是 12G tmpfs 且常近满（mktemp/worktree 会失败），
