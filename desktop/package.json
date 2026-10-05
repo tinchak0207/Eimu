@@ -1,7 +1,7 @@
 {
   "name": "eimu-desktop",
   "productName": "Eimu",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "Eimu 桌面客户端",
   "author": "Eimu",
@@ -42,12 +42,12 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop"
+        "url": "https://store.tinchak0207.xyz/downloads/desktop"
       }
     ],
     "linux": {
       "target": [
-        "AppImage"
+        "tar.gz"
       ],
       "artifactName": "${productName}-${version}-linux-x86_64.${ext}",
       "category": "Graphics",
