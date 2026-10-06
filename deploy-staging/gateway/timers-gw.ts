@@ -206,12 +206,20 @@ export function clearQuestionHeartbeat(state: SessionState): void {
   clearQuestionAssumeTimer(state)
 }
 
-// ── 片AJ（2026-09-07）：question 卡 3 分钟超时按推荐方案代答 ──
+// ── 片AJ（2026-09-07）：question 卡 3 分钟超时自动应答 ──
 // 背景（片AB 评测 T4 实锤）：无人值守跑批时 question 卡在确认门前无限挂死。
-// 语义：3 分钟未回覆 → 各题取第一选项（agent 约定推荐选项放第一位）组成代答
-// 文案并标注 assumed，转发核心复用 settleQuestion（双 URL 兜底 + ok 后记账 +
-// question.replied 前端变已决）。best-effort：上游失败照 settleQuestion 既有
-// 形态收尾，不重试不抛出（reconcile/新消息路径接管）。confirm（花钱决策）不在此列。
+// 语义（2026-10-06 缺陷 A2 修正）：超时自动应答**不得**充当「照第一项执行」的
+// 授权。旧实现取各题第一选项拼成「已代答第一项继续：〈label〉」，读起来就是
+// 「照第一项做」——而 agent 自建的「开工确认」卡首项恰恰是付费开工（实测首项
+// ＝「按计划开跑（推荐）」，代答后子代理真跑了付费 music_gen，未经用户同意）。
+// 旧注释「confirm（花钱决策）不在此列」只覆盖 platform 侧 kind:"confirm" 的卡，
+// agent 自建确认卡走 question 通道照旧走到这里，该假设不成立——限权必须落在本
+// 函数内。现在超时投递一段**限权指令**：如实声明用户未回复并标 assumed，禁止在
+// 无用户同意下启动任何付费生成／上传／下单，只允许继续不花钱的步骤；选项仅作
+// 参考并列且不构成授权。仍要 settle（不能挂住 turn，这正是本机制存在的理由），
+// 转发核心复用 settleQuestion（双 URL 兜底 + ok 后记账 + question.replied 前端
+// 变已决）。best-effort：上游失败照 settleQuestion 既有形态收尾，不重试不抛出
+//（reconcile/新消息路径接管）。
 export function clearQuestionAssumeTimer(state: SessionState): void {
   if (state.questionAssumeTimer) {
     clearTimeout(state.questionAssumeTimer)
@@ -231,18 +239,30 @@ export function armQuestionAssumeTimer(state: SessionState): void {
 
 export async function autoAssumeQuestions(state: SessionState): Promise<void> {
   if (state.pendingQuestions.size === 0) return
+  // 只取首项是为了拼「照第一项做」的旧语义；现在只作参考列出，故如实收全部
+  // 选项，避免只列首项＝变相把首项打成「唯一/推荐项」。
   const labels: string[] = []
   for (const pending of state.pendingQuestions.values()) {
     for (const q of pending.questions) {
-      const label = q.options?.[0]?.label
-      if (label) labels.push(label)
+      for (const opt of q.options ?? []) {
+        if (opt.label) labels.push(opt.label)
+      }
     }
   }
-  // 0919 断点③修复：话术不得冒充「推荐方案」——gateway 没有任何管道知道哪个
-  // 选项是模型推荐的（options 无推荐标记栏位），盲取 options[0] 标成推荐＝
-  // 撒谎。改为如实标「代答了首项」；agent 侧 prompt 契约本就要求预设答案
-  // 放第一项（AGENTS.md §3.6），首项是事实上的预设，但称呼必须诚实。
-  const answerText = `（用户 3 分钟未回复，已代答第一项继续：${labels.length ? labels.join("；") : "无选项，按默认方案"}。后续结果请标注 assumed）`
+  // 2026-10-06 缺陷 A2 根因：旧话术「已代答第一项继续：〈label〉」把首项 label
+  // 拼成「照第一项做」的授权，而首项完全可能是付费开工（实测首项＝「按计划开跑
+  //（推荐）」）——代答一出，子代理真去跑了付费 music_gen。话术必须是一段限权
+  // 指令：声明用户未回复、标 assumed、禁止未获同意就启动付费动作，只许继续不花
+  // 钱的事；选项只作参考列出并明示「未选择任何一项」，不再构成授权。
+  const optionsNote = labels.length
+    ? `原卡提供的选项（仅列出供你了解用户可选的方向，本次没有选择其中任何一项、不构成授权）：${labels.join("；")}。`
+    : "原卡没有提供可选项。"
+  const answerText =
+    "（用户 3 分钟未回复，本条为超时自动代答，不是用户同意的答复，assumed。）限权指令：" +
+    "① 在用户明确同意之前，不得启动任何付费生成、付费上传、下单或其他会产生费用的动作；" +
+    "② 可以继续不花钱的步骤（读资料、整理方案、给出分析或草稿结论）；" +
+    "③ 若继续推进必须依赖付费动作，请停下，把当前结论与待办列清楚，等用户回来决定。" +
+    optionsNote
   const count = state.pendingQuestions.size
   for (const requestId of [...state.pendingQuestions.keys()]) {
     try {
