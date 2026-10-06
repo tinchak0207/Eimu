@@ -486,16 +486,21 @@ function parseDeclaredSectionCount(prompt: string): number | null {
  * ② 标签形 `BPM: 146`／`BPM：146`（非方括号，不会被伪标签改写）；③ 前缀冒号形 `Tempo: 146`／`tempo：146`
  * （含 tempo 这一全球通用的速度词）；④ 前缀空格形 `BPM 146`／`tempo 146`。③④ 不是方括号伪标签，
  * rewritePseudoTags 不会改写，旧版因此静默跳过（2026-10-06 对抗验收）。值放宽到 1-4 位整数＋可选小数
- * （`87.5 BPM` 不再静默跳过）。多形状同时命中时取**文本中先出现**的那个（与既有「取首值」语义一致）；
+ * （`87.5 BPM` 不再静默跳过），并接受**紧贴数字**的负号（`-?\d`）：负号只有与数字相邻才算符号，
+ * 带空格的是范围连字符——故 `-10 BPM` 取到 **-10**（无效输入，交判定层跳过），
+ * 而 `range 120 - 140 BPM` 取到 **140**（正常的区间写法，不因连字符误判）。
+ * 多形状同时命中时取**文本中先出现**的那个（与既有「取首值」语义一致）；
  * 同一起点先取后缀形。`tempo`／`bpm` 后不接数字（如 `tempo: slow`）不匹配。全角数字先归一。
  */
 function parseBpm(prompt: string): number | null {
   const text = widenFullWidthDigits(prompt);
   const patterns = [
-    /\b(\d{1,4}(?:\.\d+)?)\s*bpm\b/gi,
-    /\bbpm\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi,
-    /\b(?:bpm|tempo)\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi,
-    /\b(?:bpm|tempo)\s+(\d{1,4}(?:\.\d+)?)/gi,
+    // 后缀形的负号必须放在 `\b` 之前：`\b(-?\d…)` 的 `\b` 落在 `-` 与数字之间，
+    // 负号会被排除在匹配起点外（`-10 BPM` 只会取到 `10`）。`-?\b\d…` 才能把紧贴数字的负号纳入。
+    /(-?\b\d{1,4}(?:\.\d+)?)\s*bpm\b/gi,
+    /\bbpm\s*[:：]\s*(-?\d{1,4}(?:\.\d+)?)/gi,
+    /\b(?:bpm|tempo)\s*[:：]\s*(-?\d{1,4}(?:\.\d+)?)/gi,
+    /\b(?:bpm|tempo)\s+(-?\d{1,4}(?:\.\d+)?)/gi,
   ];
   let bestIndex = Number.POSITIVE_INFINITY;
   let bestValue: number | null = null;
@@ -518,7 +523,8 @@ function parseBpm(prompt: string): number | null {
  *
  * 判据：
  *  ① bpm-section-alignment：有 BPM 与段落秒数时，逐段算 `秒数 ÷ (60/BPM×4)`（一小节＝四拍），
- *     非整数即失败，detail 逐段列出「第 N 段 Ms ÷ Xs = Y 小节（非整数）」。
+ *     非整数即失败，detail 逐段列出「第 N 段 Ms ÷ Xs = Y 小节（非整数）」；BPM 取到但为
+ *     0／负值写法＝无效输入，走跳过（ok:true，detail 写明原因），不判对齐也不凭空判失败。
  *  ② section-count：声明的段数与实际给出的段落时长个数不符即失败。
  *
  * 只判定：**不因失败修改 prompt**（时长是否在拍上是创作方/上游的事，规则层只如实回报）。
@@ -528,6 +534,11 @@ export function evaluatePromptChecks(
   options: Pick<MusicDirectorOptions, "sectionSeconds" | "declaredSectionCount"> = {},
 ): PromptCheck[] {
   const bpm = parseBpm(prompt);
+  // BPM「取到但不合法」（0 或紧贴数字的负号写法）＝无效输入，必须走跳过：不得拿去算小节
+  // （0 ⇒ barSeconds = Infinity ⇒ bars ≈ 0 ⇒ 被误判「全部落在小节线上」（假通过）；
+  //  -N ⇒ barSeconds 为负 ⇒ 每段都被判非整数，与真实的「不在小节线上」无关＝凭空判失败）。
+  // 非有限值已由 parseBpm 的 Number.isFinite 挡掉，此处补 0 与负值这一路。
+  const bpmInvalid = bpm !== null && !(bpm > 0);
   const sectionSeconds =
     options.sectionSeconds && options.sectionSeconds.length > 0
       ? options.sectionSeconds.filter((value) => Number.isFinite(value))
@@ -537,7 +548,14 @@ export function evaluatePromptChecks(
 
   // ① 小节对齐
   let alignment: PromptCheck;
-  if (bpm === null || !hasSections) {
+  if (bpmInvalid) {
+    // 输入不可用（BPM 不合法）⇒ 跳过；既不判成「全部落在小节线上」，也不凭空判失败。
+    alignment = {
+      kind: "bpm-section-alignment",
+      ok: true,
+      detail: "BPM 不合法（0 或负值），跳过小节对齐判定。",
+    };
+  } else if (bpm === null || !hasSections) {
     alignment = {
       kind: "bpm-section-alignment",
       ok: true,
