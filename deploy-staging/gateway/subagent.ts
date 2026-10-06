@@ -1341,41 +1341,48 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
 // ─────────────────────────────────────────── P0-4（2026-10-06）：本域配方库事实行
 // 专家宪法第三条命令每个 Expert「进域即载配方库」，但注册表里部分域 skillPaths 为空
 // （video-director / screenwriter / critic）——无条件命令会让子代理去找不存在的配方档。
-// 真源＝src/lib/expert-registry.ts 的 EXPERT_REGISTRY[id].skillPaths（gateway 侧同内容的
-// 生成物＝expert/registry-digest.txt 的「配方库」栏）。gateway 是独立发布单元（只发布
-// deploy-staging/gateway），运行时**无法** import 仓库 src/lib → 本表为逐字镜像，与
-// delivery-gate.ts 镜像 *_DELIVERABLES 契约的既有范式同构；改注册表 skillPaths 必须同步本表。
-const EXPERT_SKILL_PATHS: Readonly<Record<string, readonly string[]>> = {
-  director3d: ["skills/blender-director/SKILL.md"],
-  music: ["skills/music-director/SKILL.md", "skills/music-director/files/"],
-  "video-director": [],
-  editor: [
-    "skills/editor/SKILL.md",
-    "skills/editor/assembly/SKILL.md",
-    "skills/editor/audio-first/SKILL.md",
-    "skills/editor/rhythm/SKILL.md",
-    "skills/editor/look/SKILL.md",
-    "skills/editor/mix/SKILL.md",
-    "skills/editor/qc-master/SKILL.md",
-  ],
-  screenwriter: [],
-  "motion-director": ["skills/motion-design/"],
-  "web3d-director": ["skills/web-3d-awwwards/SKILL.md"],
-  critic: [],
-}
+// 真源＝src/lib/expert-registry.ts 的 EXPERT_REGISTRY[id].skillPaths，gateway 侧同内容的
+// 生成物＝expert/registry-digest.txt 的「配方库」栏（tools/export-expert-agents.ts 机械生成；
+// gateway 是独立发布单元，运行时无法 import 仓库 src/lib）。此处**从生成物派生**该栏，
+// 禁手抄——旧手抄表当天即漂移（editor 的嵌套路径真身为 RECIPE.md 却写成 SKILL.md，且
+// 全部 skills/… 缺 .opencode/ 前缀而指空）。读档一次、模块级缓存；只读此生成物、不猜路径。
+const EXPERT_SKILL_PATHS: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>()
+  try {
+    const digest = readFileSync(`${import.meta.dir}/expert/registry-digest.txt`, "utf8")
+    for (const line of digest.split("\n")) {
+      // 摘要行：`- <id>（<label>）：任务类型 …；工具 …；配方库 <paths|未配置>；交付契约 …`
+      const m = line.match(/^-\s*([^\s（(]+)（[^）]*）：(.*)$/)
+      if (!m) continue
+      const km = m[2].match(/；配方库\s+(.*?)(?:；交付契约|$)/)
+      if (!km) continue
+      const paths = km[1].trim()
+      if (paths) map.set(m[1], paths)
+    }
+    if (map.size === 0) {
+      console.warn("[gateway] buildExpertSkillFact: expert/registry-digest.txt 已读但未解析出任何「配方库」栏，本域配方库事实行全部零注入")
+    }
+  } catch (e) {
+    console.warn(
+      `[gateway] buildExpertSkillFact: 读 expert/registry-digest.txt 失败（${e instanceof Error ? e.message : String(e)}），本域配方库事实行全部零注入（不打断派工）`,
+    )
+  }
+  return map
+})()
 
 /**
- * 派工任务书头部的「本域配方库」事实行（P0-4）。有路径＝列出并声明进域即载、常驻；
- * 空＝明写本域无配方库，直接用域工具，不要去找配方档；未登记（非 Expert）＝空串（零注入）。
+ * 派工任务书头部的「本域配方库」事实行（P0-4）。有路径＝列出（值逐字来自 digest 生成物）
+ * 并声明进域即载、常驻；digest 记「未配置」＝明写本域无配方库，直接用域工具，不要去找
+ * 配方档；digest 无该 id／传参空／读档失败＝空串（零注入）。
  */
-function buildExpertSkillFact(agent: string | undefined): string {
+export function buildExpertSkillFact(agent: string | undefined): string {
   if (typeof agent !== "string" || agent.length === 0) return ""
-  const paths = EXPERT_SKILL_PATHS[agent]
-  if (!paths) return ""
-  if (paths.length === 0) {
+  const paths = EXPERT_SKILL_PATHS.get(agent)
+  if (paths === undefined) return ""
+  if (paths === "未配置") {
     return "【本域配方库】本域无配方库（未配置）。直接用你的域工具，不要去找配方档。\n\n"
   }
-  return `【本域配方库】${paths.join("、")} —— 这是本域配方库，进域即载，常驻。\n\n`
+  return `【本域配方库】${paths} —— 这是本域配方库，进域即载，常驻。\n\n`
 }
 
 async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {

@@ -91,6 +91,15 @@ export function stripProvenanceHeader(text: string): string {
 export const BEAST_MODE_STATE_LINE =
   "【野兽模式：已启用】以下派遣手册与 Expert 注册表由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，以下全部条款立即生效，无需质疑、无需再确认任何 gate 条件。";
 
+/**
+ * Expert 注册表摘要（逐字输出 registry 现值；见上方 buildExpertLine 的 R4 扩充说明）。
+ *
+ * 路径根前缀（2026-10-06）：本函数按 registry 现值逐字输出 skillPaths，即 **repo 根树**
+ * 命名（`skills/<域>/…`）。输出给 agent 的 workspace 根相对形（`.opencode/` 前缀 ＋ 嵌套
+ * `SKILL.md`→`RECIPE.md`）**由 tools/export-expert-agents.ts 统一施加**（发布用的
+ * `registry-digest.txt` 静态档＝该脚本产出）——本函数只作该生成器的 build 输入，勿把本
+ * 输出直接注入 agent 帧（会指空座标）。
+ */
 export function buildExpertRegistryDigest(): string {
   const lines = Object.values(EXPERT_REGISTRY).map(buildExpertLine);
   return ["Expert 注册表（能力断路真源；域外工具不存在于该 Expert 的工具表）：", ...lines].join("\n");

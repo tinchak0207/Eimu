@@ -7,7 +7,20 @@
 // 能力断路只落地 4/25（orchestrator 只关 blender×3+music_gen，21 个域工具仍开），
 // 且 Expert 端零工具限制。本脚本把「手工编 opencode.json agent 工具表」换成机械导出：
 // 真源 EXPERT_REGISTRY（src/lib/expert-registry.ts）→ 白名单栏位改写 → 写
-// deploy-staging/expert-gateway/ 三产物。registry 改行后重跑即再生，根治手工漂移。
+// deploy-staging/expert-gateway/ 四产物（构建物，gitignore）。registry 改行后重跑即再生，
+// 根治手工漂移。2026-10-06 引用修复片起：① registry-digest.txt / expert-ids.json /
+// expert-delivery-contracts.json **三产物同时写**被 git 追踪的发布副本
+// deploy-staging/gateway/expert/（gateway-release.sh 打包的是它），消除人手 cp 漏档/半截；
+// ② digest 的 skillPath 从 6 条手工 map 改为一条规则（.opencode/ 前缀 + 嵌套 SKILL.md→RECIPE.md）；
+// ③ 加 skillPath 存在性护栏（发布树 = deploy-staging/opencode-runtime/），registry 漂移当场炸。
+//
+// 2026-10-06 修正（四产物双写 → 三产物双写）：**opencode-agents.json 不双写**——只写构建目录
+// deploy-staging/expert-gateway/，**禁止覆盖**被 git 追踪的 deploy-staging/gateway/expert/
+// opencode-agents.json。理由（实测，见 buildAgentsJson 上方长注释）：该档是**运行期消费的
+// 宣告真源**，其内容＝environment-facts 对每个 agent 断言的【能力断路·物理事实】；生成器的
+// 「全集 − 该 Expert 自有工具 → 全 false」补集规则在全集含共享基建工具时会**过度禁用**，
+// 与人工调和过的物理闸 deploy-staging/opencode-runtime/opencode.json 不一致（重生成版每个
+// Expert 多报 19 条假断言，含 read_image / local_files_authorize / character_card_* 等）。
 //
 // 产物（opencode 1.18.14 agent 定义语义；tools:false = 该 agent 工具表物理移除，
 // 未列 = 默认开；先例记忆 beast-gateway-tooltable-circuit-break-0908）：
@@ -63,13 +76,21 @@ import { buildExpertRegistryDigest } from "../src/lib/orchestrator-beast-frame";
 import { HARNESS_TOOL_ID_LIST } from "../src/lib/harness-tool-registry";
 
 const root = process.cwd();
+/** 生成器主输出目录（gitignore，构建物）。 */
 const OUT_DIR = join(root, "deploy-staging", "expert-gateway");
-const TARGETS = {
-  agents: join(OUT_DIR, "opencode-agents.json"),
-  digest: join(OUT_DIR, "registry-digest.txt"),
-  ids: join(OUT_DIR, "expert-ids.json"),
-  contracts: join(OUT_DIR, "expert-delivery-contracts.json"),
-} as const;
+/** 被 git 追踪的发布副本：gateway-release.sh 由 `git archive <sha> deploy-staging/gateway`
+ * 打包，网关运行时读的就是这份（expert/registry-digest.txt 等）。此前靠人手 cp，屡次漏档/
+ * 半截（2026-10-06 实测 opencode-agents.json 两目录已漂移）——registry-digest.txt /
+ * expert-ids.json / expert-delivery-contracts.json 三者统一写两份，消除「生成专家资产后
+ * 手工同步」这一步（2026-10-06 引用修复片）。
+ * **例外：opencode-agents.json 不写本目录**（禁止覆盖被追踪的人工调和真源）——见 PRODUCTS
+ * 与 buildAgentsJson 上方长注释。 */
+const SYNC_DIR = join(root, "deploy-staging", "gateway", "expert");
+/** 双写目录对（仅用于「三个纯派生产物」）：构建目录 + git 追踪的发布副本。 */
+const OUT_DIRS = [OUT_DIR, SYNC_DIR] as const;
+/** 发布树根（本机存在；对应 VPS /opt/agent-harness/workspace/.opencode，即 agent 的 cwd
+ * 之下那一层）。skillPath 漂移护栏的存在性断言根。 */
+const HARNESS_RUNTIME_ROOT = join(root, "deploy-staging", "opencode-runtime");
 const CHECK = process.argv.includes("--check");
 
 // ── 工具全集来源（--tools-file > fallback 近似全集）──────────────────────────
@@ -135,7 +156,7 @@ const EXPERT_DESCRIPTION_SUFFIX = "（Expert：仅经 subagent_dispatch expert �
  * 重生成后跑（本档沿用「registry 改行后须重生成上传」的既有纪律）。 */
 const DIGEST_PROVENANCE_HEADER =
   "<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 现值生成" +
-  "（buildExpertRegistryDigest 逐字输出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 机械生成）。" +
+  "（buildExpertRegistryDigest 逐字输出，全部 skillPath 经本脚本统一规则映射为 workspace 根相对形：前缀 .opencode/，嵌套 SKILL.md→RECIPE.md；由 tools/export-expert-agents.ts 机械生成）。" +
   `生成日期 ${new Date().toISOString().slice(0, 10)}（registry 改行后须重生成上传）。 -->`;
 
 /** 域工具全集 = 全部 Expert toolIds 去重联集（registry 插入序）。 */
@@ -157,6 +178,14 @@ const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflo
  * orchestrator 显式 local_files:true，必须保持默认开（不得被断路）。 */
 const ORCHESTRATOR_DISABLED_SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status"])
 
+/** orchestrator 额外物理禁用的内建工具（2026-10-06 收编：b637b681 提示词审计时直接手改
+ * gateway/expert/opencode-agents.json 加了 "task": false，但未回写本生成器 ⇒ 生成器与发布副本
+ * 漂移、--check 永红。此处收编为生成器的显式常量，使机械导出能复现该裁剪）。
+ * task = opencode 通用子代理工具；对 orchestrator 关闭——派工唯一通路是 subagent_dispatch。
+ * builtin 不在工具档清单内（universe 不含），须显式列进 map 才会物理禁用；否则默认开。
+ * environment-facts 从本档 map 推导 orchestrator 的【能力断路·物理事实】，缺此行 = 宣告面少一件。 */
+const ORCHESTRATOR_DISABLED_BUILTIN_TOOLS = new Set(["task"])
+
 /** orchestrator 保留的「Expert 域工具」例外（2026-10-01 art-style 接线回归修复）：
  * image_generate 原为无归属工具（orchestrator 默认开、设计刻意保留直调生图）；
  * 并入 video-director 域以接通 art_style 模板后进入 DOMAIN_TOOLS 联集，orchestrator
@@ -165,6 +194,39 @@ const ORCHESTRATOR_DISABLED_SHARED_TOOLS = new Set(["workflow_start", "workflow_
  * 这组 Expert 开/orchestrator 也开）。 */
 const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set(["image_generate"]);
 
+/**
+ * opencode-agents.json —— **不双写、禁止盲目覆盖发布副本**（2026-10-06 修正）。
+ *
+ * 为什么不能直接写 deploy-staging/gateway/expert/opencode-agents.json：
+ *  1. 它是**运行期消费的宣告真源**：deploy-staging/gateway/environment-facts.ts:195 读它，
+ *     :531 / :559 把结果直接注入每个 agent 的提示：「【能力断路·物理事实】真源
+ *     expert/opencode-agents.json 已物理移除以下 N 个工具，直接调用会失败：…」。
+ *     故这份档的内容＝**每轮对模型断言的事实**，不是可随手重生成的派生物。
+ *  2. 被追踪的那版与物理闸 deploy-staging/opencode-runtime/opencode.json **一致**，而本生成器
+ *     的补集规则输出**不一致**。实测（物理 false 数 / HEAD 生成 false 数 / 本生成器 fallback
+ *     输出 false 数）：
+ *       agent          | 物理  | HEAD  | 生成器 | HEAD 多报 | 生成器 多报
+ *       director3d     |  95   |  91   |  110   |    0      |   19
+ *       music          |  97   |  93   |  112   |    0      |   19
+ *       video-director |  95   |  85   |  104   |    0      |   19
+ *       editor         |  88   |  84   |  103   |    0      |   19
+ *       screenwriter   |  92   |  88   |  107   |    0      |   19
+ *       motion-director|  95   |  91   |  110   |    0      |   19
+ *       web3d-director |  97   |  93   |  112   |    0      |   19
+ *       critic         | 104   |  94   |  113   |    0      |   19
+ *     即 HEAD 版**没有任何一条**是物理为开却宣告为关；生成器版每个 Expert 多出 **19 条**这种
+ *     假断言——多出来的含 `read_image`、`local_files_authorize`、`character_card_list/save`
+ *     等共享基建工具。整个产品是图像/视频生成，把 `read_image` 对全部 Expert 宣告为「已物理
+ *     移除」显然是错的。改用 VPS 真实工具清单（118 个，`ls .opencode/tools/`）重导仍多报 19 条。
+ *  3. 根因：本生成器的补集规则（全集 − 该 Expert 自有工具 → 全 false）在**全集含共享基建工具**
+ *     时会过度禁用；而 opencode-runtime/opencode.json 是**人工调过**的、含 SHARED_TOOLS 豁免的
+ *     物理真源。故补集规则的输出**不可直接当这个档的真源**（不是「换准确全集」能解的问题，
+ *     是规则本身不适用于这份档）。
+ *
+ * 结论：本生成器只把 opencode-agents.json 写进构建目录 OUT_DIR（供部署片对照/取用）；
+ * 被追踪的 gateway/expert/opencode-agents.json 是人工调和真源，**保持 HEAD 不动**，如需变更
+ * 必须人工对照 opencode-runtime/opencode.json 逐键调和后手改。
+ */
 function buildAgentsJson(universeTools: readonly string[]): string {
   // tools map 只写 false 项（opencode 语义：未列 = 默认开）；键序 = 来源清单插入序，确定性输出。
   const toolsFalse = (ids: readonly string[]): Record<string, boolean> => {
@@ -187,6 +249,7 @@ function buildAgentsJson(universeTools: readonly string[]): string {
     tools: {
       ...toolsFalse(DOMAIN_TOOLS.filter((id) => !ORCHESTRATOR_KEPT_DOMAIN_TOOLS.has(id))),
       ...toolsFalse([...ORCHESTRATOR_DISABLED_SHARED_TOOLS]),
+      ...toolsFalse([...ORCHESTRATOR_DISABLED_BUILTIN_TOOLS]),
       question: true,
     },
   };
@@ -204,42 +267,85 @@ function buildAgentsJson(universeTools: readonly string[]): string {
   return `${JSON.stringify(agents, null, 2)}\n`;
 }
 
-/**
- * Harness 路径映射（2026-10-04 引用修复片）：registry 的 skillPaths 是 **repo 根树**
- * 相对路径——EDITOR_PERSONA_SKILL_PATHS 由 editor-timeline-activation.test.ts 对
- * process.cwd() 做 fs 存在性断言 ⇒ 语义就是 repo 根树，常量不得改（改了 = 对 repo
- * 根树的合法引用失真）。但同一份 EXPERT_REGISTRY 亦被烘焙成 VPS harness 执行时读取的
- * 静态 digest（gateway plan-gw.ts / messages-gw.ts readFileSync），而 harness 树
- * `.opencode/skills/**` 已把 nested SKILL.md 收敛改名为 RECIPE.md（一级 20 个 SKILL.md
- * 保留）。因此 digest 生成时把「harness 树里已被改名的 nested 路径」逐条映射成真实
- * harness 路径；一级 skills/editor/SKILL.md 与其它未改名域路径不动。
- * 明确表（key = registry 现值，value = harness 真实路径；非字串模糊替换）——新增
- * harness 改名时同步补一行，勿用 sed/正则自动生成。
- */
-const HARNESS_SKILL_PATH_MAP: Readonly<Record<string, string>> = {
-  "skills/editor/assembly/SKILL.md": ".opencode/skills/editor/assembly/RECIPE.md",
-  "skills/editor/audio-first/SKILL.md": ".opencode/skills/editor/audio-first/RECIPE.md",
-  "skills/editor/rhythm/SKILL.md": ".opencode/skills/editor/rhythm/RECIPE.md",
-  "skills/editor/look/SKILL.md": ".opencode/skills/editor/look/RECIPE.md",
-  "skills/editor/mix/SKILL.md": ".opencode/skills/editor/mix/RECIPE.md",
-  "skills/editor/qc-master/SKILL.md": ".opencode/skills/editor/qc-master/RECIPE.md",
-};
+/** agent 的工作目录是 workspace 根（生产 session `directory=/opt/agent-harness/workspace`），
+ * 技能树实际在 workspace/.opencode/skills/ 下——故任何注入给 agent 的座标都必须以此为前缀。 */
+const WORKSPACE_ROOT_PREFIX = ".opencode/";
 
-/** 把 buildExpertRegistryDigest() 输出的 repo 路径逐条换成 harness 真实路径。
- * 只替换表中的完整路径 token（精确匹配，不做前缀/正则模糊替换）；表外路径原样。 */
-function applyHarnessSkillPathMap(digest: string): string {
-  let out = digest;
-  for (const [repoPath, harnessPath] of Object.entries(HARNESS_SKILL_PATH_MAP)) {
-    out = out.split(repoPath).join(harnessPath);
+/**
+ * registry 的 skillPaths 是 **repo 根树**命名（`skills/<域>/SKILL.md`，由
+ * editor-persona 的 fs 存在性断言钉死、常量不得改）。进 harness digest 前统一施**一条规则**
+ * 映射成 workspace 根相对形（2026-10-06 引用修复片：取代旧的 6 条手工 HARNESS_SKILL_PATH_MAP）：
+ *   ① 统一加 `.opencode/` 前缀（agent 的 cwd = workspace 根）；
+ *   ② 嵌套 `SKILL.md`（`skills/<域>/<子…>/SKILL.md`）改名 `RECIPE.md`；顶层
+ *      `skills/<域>/SKILL.md` 保留 `SKILL.md`。
+ *      （真树实测 deploy-staging/opencode-runtime/skills/：depth-2 的 SKILL.md 共 20 个全保留，
+ *       更深层 SKILL.md 数量 0、全部是 RECIPE.md 共 151 个。）
+ * 目录引用（`skills/motion-design/`、`skills/music-director/files/`）只加前缀，不改名。
+ * 前缀幂等：已带 `.opencode/` 的输入原样保留。
+ */
+function toWorkspaceRelSkillPath(repoPath: string): string {
+  const segs = repoPath.split("/");
+  if (segs.length > 3 && segs[segs.length - 1] === "SKILL.md") {
+    segs[segs.length - 1] = "RECIPE.md";
   }
-  return out;
+  const renamed = segs.join("/");
+  return renamed.startsWith(WORKSPACE_ROOT_PREFIX) ? renamed : `${WORKSPACE_ROOT_PREFIX}${renamed}`;
+}
+
+/** digest 正文里 `skills/…` 只出现在「配方库」栏（toolIds/taskTypes 皆非路径），
+ * 逐 token 按规则映射即可；结束符排除逗号/分号/括弧/空白，避免吞掉相邻栏。 */
+const SKILL_PATH_TOKEN = /skills\/[^\s,；、）)]+/g;
+
+/** 把 buildExpertRegistryDigest() 输出里的每条 registry skillPath token 换成 workspace 根相对形。 */
+function applyWorkspaceRelSkillPaths(digest: string): string {
+  return digest.replace(SKILL_PATH_TOKEN, (token) => toWorkspaceRelSkillPath(token));
+}
+
+/** 全部输出 skillPath（去重保序，供漂移护栏逐条断言）。 */
+function collectOutputSkillPaths(): string[] {
+  return dedupePreserveOrder(
+    Object.values(EXPERT_REGISTRY).flatMap((expert) =>
+      [...expert.skillPaths].map(toWorkspaceRelSkillPath),
+    ),
+  );
+}
+
+/**
+ * 漂移护栏（2026-10-06 引用修复片，本片重点＝打生成源）：生成时对每条输出 skillPath 做
+ * fs 存在性断言，根取发布树 deploy-staging/opencode-runtime/（＝生产 .opencode 树，本机在）。
+ * registry 一漂移、注入的座标就会指空，过去静默生成——现在当场炸：
+ *   - 缺失 + `--check`：EXPORT_CHECK_FAIL 并 exit 1；
+ *   - 缺失 + 正常模式：EXPORT_WARN 并列出缺失清单（不中断写盘，供人对照修 registry/发布树）；
+ *   - 发布树不存在（fresh clone / 未检出该目录）：降级为 WARN（degraded），不崩。
+ */
+function verifySkillPathExistence(): {
+  ok: boolean;
+  missing: string[];
+  degraded: boolean;
+  reason?: string;
+} {
+  const paths = collectOutputSkillPaths();
+  if (!existsSync(HARNESS_RUNTIME_ROOT)) {
+    return {
+      ok: true,
+      missing: [],
+      degraded: true,
+      reason: `发布树 ${HARNESS_RUNTIME_ROOT} 不存在（fresh clone 或未检出），无法做存在性断言`,
+    };
+  }
+  const missing = paths.filter((p) => {
+    const rel = p.startsWith(WORKSPACE_ROOT_PREFIX)
+      ? p.slice(WORKSPACE_ROOT_PREFIX.length)
+      : p;
+    return !existsSync(join(HARNESS_RUNTIME_ROOT, rel));
+  });
+  return { ok: missing.length === 0, missing, degraded: false };
 }
 
 function buildDigestTxt(): string {
   // 无档尾换行：剥头（stripProvenanceHeader 只 trimStart）后与 buildExpertRegistryDigest()
-  // 输出逐字 byte 相等（唯 nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径），
-  // 注入帧零多余空白。
-  return `${DIGEST_PROVENANCE_HEADER}\n${applyHarnessSkillPathMap(buildExpertRegistryDigest())}`;
+  // 输出逐字 byte 相等（唯 skillPath 经规则映射为 workspace 根相对形），注入帧零多余空白。
+  return `${DIGEST_PROVENANCE_HEADER}\n${applyWorkspaceRelSkillPaths(buildExpertRegistryDigest())}`;
 }
 
 function buildExpertIdsJson(): string {
@@ -265,11 +371,27 @@ function buildDeliveryContractsJson(): string {
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
-const PRODUCTS: Array<[string, (universeTools: readonly string[]) => string]> = [
-  [TARGETS.agents, buildAgentsJson],
-  [(TARGETS.digest), () => buildDigestTxt()],
-  [(TARGETS.ids), () => buildExpertIdsJson()],
-  [(TARGETS.contracts), () => buildDeliveryContractsJson()],
+const AGENTS_JSON = "opencode-agents.json";
+/** 双写产物（两个目录各一份、须逐字节等价）：纯派生、被 git 追踪且运行期读，无人工调和成分。
+ * opencode-agents.json **不在其列**（只写构建目录 OUT_DIR，理由见 buildAgentsJson 上方长注释）。 */
+const DOUBLE_WRITE_FILES = [
+  "registry-digest.txt",
+  "expert-ids.json",
+  "expert-delivery-contracts.json",
+] as const;
+
+/** 产物定义：文件名 → 构建函式 + 写入目录集。dirs = [OUT_DIR] 者不双写。 */
+interface Product {
+  file: string;
+  build: (universeTools: readonly string[]) => string;
+  dirs: readonly string[];
+}
+
+const PRODUCTS: Product[] = [
+  { file: AGENTS_JSON, build: buildAgentsJson, dirs: [OUT_DIR] },
+  { file: "registry-digest.txt", build: () => buildDigestTxt(), dirs: OUT_DIRS },
+  { file: "expert-ids.json", build: () => buildExpertIdsJson(), dirs: OUT_DIRS },
+  { file: "expert-delivery-contracts.json", build: () => buildDeliveryContractsJson(), dirs: OUT_DIRS },
 ];
 
 function main(): void {
@@ -280,6 +402,23 @@ function main(): void {
       "EXPORT_WARN：未传 --tools-file，使用近似工具全集" +
         `（HARNESS_TOOL_ID_LIST ${HARNESS_TOOL_ID_LIST.length} 个 + 已知 VPS 额外 ${KNOWN_VPS_EXTRA_TOOLS.length} 个）。` +
         "近似全集，部署时应用 --tools-file 重导（部署片从 VPS ls .opencode/tools/ 生成清单）。",
+    );
+  }
+
+  // 漂移护栏（本片重点）：skillPath 存在性断言——注册表一漂移、注入座标就指空。
+  const guard = verifySkillPathExistence();
+  if (guard.degraded) {
+    console.warn(`EXPORT_WARN：skillPath 漂移护栏降级——${guard.reason}；跳过存在性断言。`);
+  } else if (!guard.ok) {
+    const list = guard.missing.map((p) => `  - ${p}`).join("\n");
+    if (CHECK) {
+      console.error(
+        `EXPORT_CHECK_FAIL：registry skillPath 在发布树 ${HARNESS_RUNTIME_ROOT} 下不存在（注入的指路座标会指空）：\n${list}\n  请修 registry 现值或发布树，再重跑。`,
+      );
+      process.exit(1);
+    }
+    console.warn(
+      `EXPORT_WARN：下列 registry skillPath 在发布树 ${HARNESS_RUNTIME_ROOT} 下不存在（agent 会指空座标，请修 registry 或发布树）：\n${list}`,
     );
   }
 
@@ -295,33 +434,51 @@ function main(): void {
 
   if (CHECK) {
     const mismatches: string[] = [];
-    for (const [target, build] of PRODUCTS) {
-      if (!existsSync(target)) {
-        mismatches.push(`${target}（产物缺失）`);
-        continue;
+    for (const product of PRODUCTS) {
+      const expected = product.build(universe.tools);
+      for (const dir of product.dirs) {
+        const target = join(dir, product.file);
+        if (!existsSync(target)) {
+          mismatches.push(`${target}（产物缺失）`);
+          continue;
+        }
+        if (readFileSync(target, "utf8") !== expected) mismatches.push(target);
       }
-      if (readFileSync(target, "utf8") !== build(universe.tools)) mismatches.push(target);
     }
     if (mismatches.length > 0) {
       console.error(
-        `EXPORT_CHECK_FAIL：staging 产物与机械导出产物不一致（手工漂移或真源变动）：\n  ${mismatches.join("\n  ")}\n  重跑不带 --check 的导出再生。`,
+        `EXPORT_CHECK_FAIL：产物与机械导出不一致（手工漂移或真源变动）：\n  ${mismatches.join("\n  ")}\n  重跑不带 --check 的导出再生。`,
       );
       process.exit(1);
     }
-      console.log(
-        `EXPORT_CHECK_OK：四产物与机械导出 byte 等价（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未归属 Expert 的全集工具 ${unowned} 个保持默认开）`,
-      );
+    console.log(
+      `EXPORT_CHECK_OK：双写产物（${DOUBLE_WRITE_FILES.join(" / ")}）在 expert-gateway 与 gateway/expert 两份与机械导出 byte 等价（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未归属 Expert 的全集工具 ${unowned} 个保持默认开）`,
+    );
+    console.log(
+      `EXPORT_NOTE：${AGENTS_JSON} **未纳入本 --check 的双写校验**——它只写构建目录 ${join(OUT_DIR, AGENTS_JSON)}（该副本已按机械导出比对）；被 git 追踪的 ${join(SYNC_DIR, AGENTS_JSON)} 是与物理闸 deploy-staging/opencode-runtime/opencode.json 调和过的人工真源，**有意排除在双写之外**，本命令不校验其内容（禁止盲目覆盖）。`,
+    );
     process.exit(0);
   }
 
-  mkdirSync(OUT_DIR, { recursive: true });
-  for (const [target, build] of PRODUCTS) {
-    const output = build(universe.tools);
-    writeFileSync(target, output);
-    console.log(`EXPORT_OK：${target}（${Buffer.byteLength(output)} bytes）`);
+  // 正常模式：声明 opencode-agents.json 的双写范围（防未来有人再把 SYNC_DIR 写回去）。
+  console.warn(
+    `EXPORT_WARN：${AGENTS_JSON} 只写构建目录 ${join(OUT_DIR, AGENTS_JSON)}；被 git 追踪的 ` +
+      `${join(SYNC_DIR, AGENTS_JSON)} 是与物理 deploy-staging/opencode-runtime/opencode.json 调和过的` +
+      "人工真源，**禁止盲目覆盖**（生成器的补集规则会过度禁用共享基建工具——read_image / local_files_authorize / " +
+      "character_card_* 等，并给每个 Expert 多报 19 条假断言）。",
+  );
+
+  for (const product of PRODUCTS) {
+    const output = product.build(universe.tools);
+    for (const dir of product.dirs) {
+      mkdirSync(dir, { recursive: true });
+      const target = join(dir, product.file);
+      writeFileSync(target, output);
+      console.log(`EXPORT_OK：${target}（${Buffer.byteLength(output)} bytes）`);
+    }
   }
   console.log(
-    `导出依据：域工具 ${DOMAIN_TOOLS.length} 个（registry 联集）/ 工具全集 ${universe.tools.length} 个（${universe.source}）/ registry ${Object.keys(EXPERT_REGISTRY).length} 行。`,
+    `导出依据：域工具 ${DOMAIN_TOOLS.length} 个（registry 联集）/ 工具全集 ${universe.tools.length} 个（${universe.source}）/ registry ${Object.keys(EXPERT_REGISTRY).length} 行；skillPath 护栏 ${guard.degraded ? "降级" : guard.ok ? "PASS" : "WARN"}。`,
   );
 }
 

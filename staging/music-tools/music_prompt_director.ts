@@ -424,13 +424,27 @@ export function describeRetainedParts(prompt: string): string[] {
  * 只认**≥2 个由 / 、 , 分隔的十进制数**，避免把单个数字误当段落时长。
  */
 const SECTION_SECONDS_LABELED_PATTERN =
-  /(?:section(?:s)?\s*(?:durations?|lengths?)|段落(?:时长|长度)|段长|小节)\s*[:：]\s*((?:\d+(?:\.\d+)?)(?:\s*[/、,，]\s*\d+(?:\.\d+)?)+)/i;
+  /(?:section(?:s)?\s*(?:durations?|lengths?)|段落(?:时长|长度)|段长|小节)\s*[:：]\s*((?:-?\d+(?:\.\d+)?)(?:\s*[/、,，]\s*-?\d+(?:\.\d+)?)+)/i;
+// 尾单位的文字交替接 `(?![A-Za-z])`：`secs?` 会吃掉 `sections` 的前缀 `sec`，把 `7 sections`
+// 误当段落秒数；负向先行断言挡住「单位其实是更长的英文单词前缀」的情形（不能用 `\b`，
+// 后面可能是 CJK `小节`／`秒`，`\b` 在 CJK 边界语义不可靠）。
 const SECTION_SECONDS_UNITED_PATTERN =
-  /((?:\d+(?:\.\d+)?)(?:\s*[/、,，]\s*\d+(?:\.\d+)?)+)\s*(?:小节|bars?|measures?|seconds?|secs?|秒)/i;
+  /((?:-?\d+(?:\.\d+)?)(?:\s*[/、,，]\s*-?\d+(?:\.\d+)?)+)\s*(?:小节|bars?|measures?|seconds?|secs?|秒)(?![A-Za-z])/i;
 
-/** 从文本的「段落时长声明」取秒数列表（侦测不到回 null）。 */
+/**
+ * 全角数字／小数点归一到 ASCII（`０-９`→`0-9`、`．`→`.`）。
+ * **只在解析器内部的副本上做**——直接改 prompt 本体等于污染送上游的内容。
+ */
+function widenFullWidthDigits(text: string): string {
+  return text
+    .replace(/[\uFF10-\uFF19]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/\uFF0E/g, ".");
+}
+
+/** 从文本的「段落时长声明」取秒数列表（侦测不到回 null）。负号进捕获组，负值留给判定层当异常。 */
 function parseSectionSeconds(prompt: string): number[] | null {
-  const match = prompt.match(SECTION_SECONDS_LABELED_PATTERN) ?? prompt.match(SECTION_SECONDS_UNITED_PATTERN);
+  const text = widenFullWidthDigits(prompt);
+  const match = text.match(SECTION_SECONDS_LABELED_PATTERN) ?? text.match(SECTION_SECONDS_UNITED_PATTERN);
   if (!match) return null;
   const values = match[1]
     .split(/[/、,，]/)
@@ -474,12 +488,27 @@ function parseDeclaredSectionCount(prompt: string): number | null {
   return null;
 }
 
-/** BPM 侦测：沿用既有的真实形状 `146 BPM`（`[BPM: 146]` 由 rewritePseudoTags 改写成 `146 BPM`）。取首值。 */
+/**
+ * BPM 侦测：两条形状——① 后缀形 `146 BPM`（`[BPM: 146]` 由 rewritePseudoTags 改写成它）；
+ * ② 标签形 `BPM: 146`／`BPM：146`（非方括号，不会被伪标签改写）。值放宽到 1-4 位整数＋可选小数
+ * （`87.5 BPM` 不再静默跳过）。两形状都命中时取**文本中先出现**的那个（与既有「取首值」语义一致）；
+ * 同一起点先取后缀形。全角数字先归一。
+ */
 function parseBpm(prompt: string): number | null {
-  const matches = prompt.match(/\b(\d{2,3})\s*bpm\b/gi);
-  if (!matches || matches.length === 0) return null;
-  const value = Number(matches[0].replace(/\s*bpm/i, "").trim());
-  return Number.isFinite(value) ? value : null;
+  const text = widenFullWidthDigits(prompt);
+  const patterns = [/\b(\d{1,4}(?:\.\d+)?)\s*bpm\b/gi, /\bbpm\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi];
+  let bestIndex = Number.POSITIVE_INFINITY;
+  let bestValue: number | null = null;
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (!match || match.index >= bestIndex) continue;
+    const value = Number(match[1]);
+    if (Number.isFinite(value)) {
+      bestIndex = match.index;
+      bestValue = value;
+    }
+  }
+  return bestValue;
 }
 
 /**
@@ -520,7 +549,10 @@ export function evaluatePromptChecks(
     for (let index = 0; index < sectionSeconds.length; index += 1) {
       const seconds = sectionSeconds[index];
       const bars = seconds / barSeconds;
-      if (Math.abs(bars - Math.round(bars)) > 1e-6) {
+      if (seconds < 0) {
+        // 负号已进捕获组：负时长是不可成立的声明，直接判异常（不静默当正数看）。
+        offBeat.push(`第 ${index + 1} 段 ${seconds}s 为负值（段落时长不可为负）`);
+      } else if (Math.abs(bars - Math.round(bars)) > 1e-6) {
         offBeat.push(`第 ${index + 1} 段 ${seconds}s ÷ ${barSeconds.toFixed(4)}s = ${bars.toFixed(3)} 小节（非整数）`);
       }
     }
@@ -1011,6 +1043,8 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   const user = sanitized.trim();
   const layers = detectLayers(user);
   if (!user) {
+    // 保持判定对象＝`user`（此处为空串）：空输入在 `untagged` 计算出之前就早退，且没有
+    // 任何声明可判——evaluatePromptChecks 只会按 options 走、对空文本回跳过，无空转可言。
     return { prompt: user, layers, applied: [], warnings: [], truncated: [], checks: evaluatePromptChecks(user, options) };
   }
 
@@ -1179,8 +1213,10 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     applied,
     warnings,
     truncated: [...new Set([...assembled.truncated, ...assembled.compressed])],
-    // P0-11：结构化校验账随回执一并输出（判定对象＝提交文本的声明＋ options 结构化输入，只判定不改 prompt）。
-    checks: evaluatePromptChecks(user, options),
+    // P0-11：结构化校验账随回执一并输出。判定对象＝**伪标签改写后的提交侧文本** `untagged`
+    // （原始 `user` 里 `[BPM: 146]` 还没变成可读的 `146 BPM`，判定必然空转；而最终
+    // `assembled.prompt` 会被截断/压缩，反而制造新的假跳过）。
+    checks: evaluatePromptChecks(untagged, options),
     ...(assembled.clauseCompressed || assembled.hardCapped
       ? {
           compressedClauses: assembled.compressed.length + assembled.compressedOther,
