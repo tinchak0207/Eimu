@@ -421,15 +421,17 @@ export function describeRetainedParts(prompt: string): string[] {
  * 段落时长列表的侦测式（输入缺结构化 sectionSeconds 时退回文本侦测）：
  * ① 带标签：`段落时长: 3.04、9.12 …`／`section durations: 3.04, 9.12`／`ssection: …`；
  * ② 带尾单位：`3.04/9.12/6.08 小节`／`3.04, 9.12 bars`／`… seconds`。
- * 只认**≥2 个由 / 、 , 分隔的十进制数**，避免把单个数字误当段落时长。
+ * 只认**≥2 个由 / 、 , ／ 分隔的十进制数**，避免把单个数字误当段落时长。
+ * 分隔符类含全角斜线 `／`（U+FF0F）：同类的 `，`／`、` 早已在内，属归一化补全——
+ * 缺它会让 `2／4 seconds` 整串落空、两条都静默「跳过（缺 段落时长）」（2026-10-06 对抗验收）。
  */
 const SECTION_SECONDS_LABELED_PATTERN =
-  /(?:section(?:s)?\s*(?:durations?|lengths?)|段落(?:时长|长度)|段长|小节)\s*[:：]\s*((?:-?\d+(?:\.\d+)?)(?:\s*[/、,，]\s*-?\d+(?:\.\d+)?)+)/i;
+  /(?:section(?:s)?\s*(?:durations?|lengths?)|段落(?:时长|长度)|段长|小节)\s*[:：]\s*((?:-?\d+(?:\.\d+)?)(?:\s*[/、,／，]\s*-?\d+(?:\.\d+)?)+)/i;
 // 尾单位的文字交替接 `(?![A-Za-z])`：`secs?` 会吃掉 `sections` 的前缀 `sec`，把 `7 sections`
 // 误当段落秒数；负向先行断言挡住「单位其实是更长的英文单词前缀」的情形（不能用 `\b`，
 // 后面可能是 CJK `小节`／`秒`，`\b` 在 CJK 边界语义不可靠）。
 const SECTION_SECONDS_UNITED_PATTERN =
-  /((?:-?\d+(?:\.\d+)?)(?:\s*[/、,，]\s*-?\d+(?:\.\d+)?)+)\s*(?:小节|bars?|measures?|seconds?|secs?|秒)(?![A-Za-z])/i;
+  /((?:-?\d+(?:\.\d+)?)(?:\s*[/、,／，]\s*-?\d+(?:\.\d+)?)+)\s*(?:小节|bars?|measures?|seconds?|secs?|秒)(?![A-Za-z])/i;
 
 /**
  * 全角数字／小数点归一到 ASCII（`０-９`→`0-9`、`．`→`.`）。
@@ -447,7 +449,7 @@ function parseSectionSeconds(prompt: string): number[] | null {
   const match = text.match(SECTION_SECONDS_LABELED_PATTERN) ?? text.match(SECTION_SECONDS_UNITED_PATTERN);
   if (!match) return null;
   const values = match[1]
-    .split(/[/、,，]/)
+    .split(/[/、,／，]/)
     .map((token) => Number(token.trim()))
     .filter((value) => Number.isFinite(value));
   return values.length > 0 ? values : null;
@@ -533,8 +535,11 @@ function parseBpm(prompt: string): number | null {
  *
  * 判据：
  *  ① bpm-section-alignment：有 BPM 与段落秒数时，逐段算 `秒数 ÷ (60/BPM×4)`（一小节＝四拍），
- *     非整数即失败，detail 逐段列出「第 N 段 Ms ÷ Xs = Y 小节（非整数）」；BPM 取到但为
- *     0／负值写法＝无效输入，走跳过（ok:true，detail 写明原因），不判对齐也不凭空判失败。
+ *     非整数即失败，detail 逐段列出「第 N 段 Ms ÷ Xs = Y 小节（非整数）」。
+ *     **判定域边界（2026-10-06 第五轮收窄）**：只判 BPM ∈ [20, 400] 且段落秒数 ∈ (0, 3600] 的域；
+ *     域外一律走跳过（ok:true，detail 写明「不判」）——极小／极大 BPM 与天文秒数会让容差
+ *     退化成恒真（0.00001 BPM ⇒ bars≈0；>2^53 秒 ⇒ IEEE754 舍入成偶整数），此时启发式
+ *     没有收敛点，老实说判不动，而不是装作判得动。
  *  ② section-count：声明的段数与实际给出的段落时长个数不符即失败。
  *
  * 只判定：**不因失败修改 prompt**（时长是否在拍上是创作方/上游的事，规则层只如实回报）。
@@ -544,25 +549,36 @@ export function evaluatePromptChecks(
   options: Pick<MusicDirectorOptions, "sectionSeconds" | "declaredSectionCount"> = {},
 ): PromptCheck[] {
   const bpm = parseBpm(prompt);
-  // BPM「取到但为 0」＝无效输入，必须走跳过：0 ⇒ barSeconds = Infinity ⇒ bars ≈ 0 ⇒
-  // 被误判「全部落在小节线上」（假通过）。解析只认无符号 1-4 位数字，故 `!(bpm > 0)` 现只会被
-  // 字面 `0 BPM` 触发；非有限值已由 parseBpm 的 Number.isFinite 挡掉。
-  const bpmInvalid = bpm !== null && !(bpm > 0);
+  // ── 收窄判定域（2026-10-06 第五轮，终止轮）────────────────────────────────────
+  // 前四轮都在「补写法」（补零值→小数与浮点又漏；每补一处冒一处新误判），证明这个启发式
+  // **没有收敛点**。正确的收法是收窄它声称能判的域：域内判得动就判，域外老实说「不判」。
+  // ① BPM 可信域 [20, 400]：域外（含 0／负／极小／极大）一律走跳过。极小正 BPM（如 0.00001）
+  //    令 barSeconds 成天文数字、bars≈0，会被绝对容差判成「落在第 0 小节」假通过；
+  //    原 `!(bpm > 0)` 只挡字面 0，`0 < bpm ≲ 5e-5` 整段裸奔。范围判据一并取代它。
+  const bpmOutOfRange = bpm !== null && (bpm < 20 || bpm > 400);
   const sectionSeconds =
     options.sectionSeconds && options.sectionSeconds.length > 0
       ? options.sectionSeconds.filter((value) => Number.isFinite(value))
       : parseSectionSeconds(prompt);
   const declaredCount = options.declaredSectionCount ?? parseDeclaredSectionCount(prompt);
   const hasSections = sectionSeconds !== null && sectionSeconds.length > 0;
+  const barSeconds = bpm !== null && bpm > 0 ? (60 / bpm) * 4 : Number.NaN;
+  // ② 段落秒数可信域 (0, 3600]（barSeconds 非有限同属判不动）：域外走跳过。天文秒数超过 2^53
+  //    后被 IEEE754 舍入成偶整数，bars 假成整数（10000000000000001 ⇒ 假通过）。
+  //    语义区分：≤0 是**不合规声明**（该判 ok:false，见下 loop）；>3600 是**判不动**（跳过）。
+  const secondsOutOfRange =
+    sectionSeconds !== null &&
+    sectionSeconds.length > 0 &&
+    (sectionSeconds.some((value) => value > 3600) || !Number.isFinite(barSeconds));
 
   // ① 小节对齐
   let alignment: PromptCheck;
-  if (bpmInvalid) {
-    // 输入不可用（BPM 不合法）⇒ 跳过；既不判成「全部落在小节线上」，也不凭空判失败。
+  if (bpmOutOfRange) {
+    // BPM 落在可信域外 ⇒ 判不动；既不判成「全部落在小节线上」，也不凭空判失败。
     alignment = {
       kind: "bpm-section-alignment",
       ok: true,
-      detail: "BPM 不合法（0），跳过小节对齐判定。",
+      detail: "BPM 超出可信范围（20–400），跳过小节对齐判定。",
     };
   } else if (bpm === null || !hasSections) {
     alignment = {
@@ -570,16 +586,24 @@ export function evaluatePromptChecks(
       ok: true,
       detail: `未提供 BPM/段落时长，跳过（缺${bpm === null ? " BPM" : ""}${!hasSections ? " 段落时长" : ""}）`,
     };
+  } else if (secondsOutOfRange) {
+    alignment = {
+      kind: "bpm-section-alignment",
+      ok: true,
+      detail: "段落时长超出可信范围或不可判定，跳过小节对齐判定。",
+    };
   } else {
-    const barSeconds = (60 / bpm) * 4;
     const offBeat: string[] = [];
     for (let index = 0; index < sectionSeconds.length; index += 1) {
       const seconds = sectionSeconds[index];
       const bars = seconds / barSeconds;
       if (seconds <= 0) {
         // 零长度与负值同规：零时长 bars=0 会被 Math.round 判成「落在小节线上」假通过。
+        // 这是**不合规声明**（该判失败），与域外「判不动」（跳过）语义不同，勿合并。
         offBeat.push(`第 ${index + 1} 段 ${seconds}s 非正（段落时长不可为 0 或负）`);
-      } else if (Math.abs(bars - Math.round(bars)) > 1e-6) {
+      } else if (Math.abs(bars - Math.round(bars)) > Math.max(1, bars) * 1e-3) {
+        // 容差改**相对**（约千分之一小节）：绝对 1e-6 在 bars 稍大时把「人写三位小数四舍五入」
+        // 的合规时长判成非整数（87.5 BPM 配 2.743/5.486 差 5.2e-5 被误判）。
         offBeat.push(`第 ${index + 1} 段 ${seconds}s ÷ ${barSeconds.toFixed(4)}s = ${bars.toFixed(3)} 小节（非整数）`);
       }
     }
