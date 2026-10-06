@@ -18,6 +18,7 @@ import { agentGatewayOrigin } from "@/lib/agent-gateway";
 import { readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent-user-key";
+import { sanitizeUpstreamBody } from "@/lib/upstream-sanitizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,13 @@ async function proxy(req: NextRequest, context: RouteContext, method: "GET" | "P
       return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
     }
     // 直接把上游流交给 Response —— 绝不在这里读 body（缓冲会杀死事件流）。
+    // 但非 2xx 是错误体（非事件流），照常缓冲脱敏后再回。
+    if (!events.ok) {
+      return new Response(sanitizeUpstreamBody(await events.text()), {
+        status: events.status,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    }
     return new Response(events.body, {
       status: events.status,
       headers: {
@@ -130,7 +138,9 @@ async function proxy(req: NextRequest, context: RouteContext, method: "GET" | "P
     return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
   }
   const text = await upstream.text();
-  return new Response(text, {
+  // 非 2xx 原样回上游 body ＝把闸道后端的内部文案（SQL 栏位名／内部头名）带给插件。
+  // 成功体逐位透传，只有错误路径走结构脱敏（红队 2026-10-05 实测）。
+  return new Response(upstream.ok ? text : sanitizeUpstreamBody(text), {
     status: upstream.status,
     headers: {
       "Content-Type": upstream.headers.get("content-type") ?? "application/json",

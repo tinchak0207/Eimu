@@ -135,8 +135,8 @@ export function AdminModelRoutesPanel() {
         <div>
           <h3 className="font-semibold">模型路由（真实调度顺序）</h3>
           <p className="mt-1 text-xs text-black/40">
-            从左到右依次尝试。改动立即生效、无需部署；「恢复默认」回到 model-routes.config.ts。
-            newapi 一步内部的渠道顺序在 new-api 后台调整。
+            从左到右依次尝试。改动立即生效、无需部署；「恢复默认」回到系统默认顺序。
+            部分渠道由上游统一调度，其内部顺序不由本页控制。
           </p>
         </div>
         <button type="button" onClick={() => void load()} title="刷新" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-black/10 text-black/50 hover:bg-black/5">
@@ -184,7 +184,7 @@ export function AdminModelRoutesPanel() {
                           return (
                             <li key={label} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${pending ? "border-[#2878d0]/30 bg-[#2878d0]/10 text-[#2878d0]" : meta.className}`}>
                               <span className="text-black/35">{index + 1}</span>
-                              <span className="font-mono font-semibold" title={label === "newapi" ? "内部顺序在 new-api 后台调整" : undefined}>{label}</span>
+                              <span className="font-mono font-semibold" title={label === "newapi" ? "该渠道由上游统一调度" : undefined}>{label}</span>
                               {!pending && meta.text !== "可用" && <span>· {meta.text}</span>}
                               <button type="button" onClick={() => move(route, index, -1)} disabled={index === 0} aria-label={`${label} 上移`} className="disabled:opacity-25"><ArrowUp className="h-3 w-3" /></button>
                               <button type="button" onClick={() => move(route, index, 1)} disabled={index === draft.length - 1} aria-label={`${label} 下移`} className="disabled:opacity-25"><ArrowDown className="h-3 w-3" /></button>

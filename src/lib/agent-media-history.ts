@@ -6,6 +6,7 @@ import type {
 } from "@/lib/agent-chat-types";
 import type { HistoryEntry } from "@/lib/history-types";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { PROVIDER_KEY } from "@/lib/provider-key";
 
 /**
  * 助理产物（图／影片／音乐）→ 历史记录。
@@ -62,7 +63,7 @@ export function agentHistoryEntryForMedia(item: AgentMediaItem): HistoryEntry {
       ...taskFields,
       results: [
         {
-          provider: "image_tinchak",
+          provider: PROVIDER_KEY,
           modelId,
           image: null,
           imageUrl: item.url,

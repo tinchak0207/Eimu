@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
+import { sanitizeUpstreamValue } from "@/lib/proxy";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
 export const preferredRegion = "sfo1";
@@ -131,7 +132,12 @@ async function callNativeCheckin(req: NextRequest, method: "GET" | "POST", body?
     signal: AbortSignal.timeout(CHECKIN_UPSTREAM_TIMEOUT_MS),
   });
   const data = await readJson(response);
-  return NextResponse.json(normalizeCheckin(data, method), { status: response.status });
+  // 上游失败时 data.message 可能是内部 SQL／栏位名（红队 2026-10-05 实测
+  // `Scan error: column used_quota does not exist`）；出站前统一脱敏，错误负载连键名一起洗。
+  const safe = sanitizeUpstreamValue(normalizeCheckin(data, method), {
+    cleanKeys: !response.ok,
+  }) as UpstreamCheckinResult;
+  return NextResponse.json(safe, { status: response.status });
 }
 
 async function handleCheckin(req: NextRequest, method: "GET" | "POST") {

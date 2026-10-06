@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/react";
-import { AuthProvider } from "@/hooks/use-auth";
-import { Navbar } from "@/components/Navbar";
-import { PricingSync } from "@/components/PricingSync";
-import { PwaInstaller } from "@/components/PwaInstaller";
-import { AttributionCapture } from "@/components/AttributionCapture";
-import { Toaster } from "@/components/ui/toaster";
+import AuthProvider from "@/hooks/use-auth";
+import Navbar from "@/components/Navbar";
+import PricingSync from "@/components/PricingSync";
+import PwaInstaller from "@/components/PwaInstaller";
+import AttributionCapture from "@/components/AttributionCapture";
+import Toaster from "@/components/ui/toaster";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 import {
   SITE_DESCRIPTION,

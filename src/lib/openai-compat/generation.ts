@@ -16,6 +16,7 @@
 // 等待上限：见 `MAX_WAIT_MS`。超时不取消任务（任务仍在控制面后台跑），由呼叫端回 504
 // 并把 task id 交给客户。
 import { get as blobGet } from "@/lib/blob-backend";
+import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
 import { type OpenAICompatErrorType, type OpenAIErrorFields, readUpstreamError } from "./errors";
 
 /** 站内 durable 提交入口（控制面代理路径）。 */
@@ -214,13 +215,17 @@ async function readTaskSnapshot(
             ...(typeof item.mimeType === "string" ? { mimeType: item.mimeType } : {}),
           }))
       : [];
+    const rawMessage =
+      typeof payload.error?.message === "string" && payload.error.message
+        ? payload.error.message
+        : "生成失败，未出图（未扣费）。";
     return {
       status,
       artifacts,
-      message:
-        typeof payload.error?.message === "string" && payload.error.message
-          ? payload.error.message
-          : "生成失败，未出图（未扣费）。",
+      // 控面任务 API 的错误 message 可能夹带内部实作细节；`/openai/v1/*` 是
+      // DURABLE_PASS_THROUGH 路径（middleware 层受 Edge 25s 首字节硬限无法代收），
+      // 故在此（生成源）洗，正常业务文案原样保留。
+      message: sanitizeUpstreamMessage(rawMessage) ?? "生成失败，未出图（未扣费）。",
       code: typeof payload.error?.code === "string" && payload.error.code ? payload.error.code : "",
     };
   } catch {

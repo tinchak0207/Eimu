@@ -13,6 +13,7 @@
 
 import type { GenerationWorkflowMetadata } from "./image-types";
 import { QUOTA_PER_COIN } from "./quota-constants";
+import { PROVIDER_KEY } from "./provider-key";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
 // 交付物种类真源（./deliverable-kind，零依赖纯函数档）：
@@ -369,7 +370,7 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
         // 为不新增字段，现改由注册表统一——见 deliverable-kind.ts。
         const mediaType = isDeliverableKind(item.mediaType) ? item.mediaType : undefined;
         return [{
-          provider: nonEmptyString(item.provider) ?? "image_tinchak",
+          provider: nonEmptyString(item.provider) ?? PROVIDER_KEY,
           modelId,
           image: typeof item.image === "string" && item.image ? item.image : null,
           imageUrl: nonEmptyString(item.imageUrl) ?? null,

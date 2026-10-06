@@ -18,6 +18,8 @@ import {
 } from "@/lib/asset-library";
 import { AssetMountConflictError, AssetMountLimitError } from "@/lib/asset-scope-store";
 import { isAssetLocalCopyId, toAssetKind } from "@/lib/asset-scope";
+import { readCanvasProject } from "@/lib/canvas/project-store";
+import { listCanvasProjectsForCaller } from "@/lib/canvas/team-canvas-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,12 +29,28 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
+/**
+ * 项目归属闸（2026-10-05 红队）：GET 要求 projectId 却忽略其值——传任意值都回同一批，
+ * 是潜在 IDOR 温床。projectId 必须是呼叫者自有画布，或是其可见（团队成员）的团队画布。
+ * 先查个人画布（便宜、不打 relay），未命中再查「个人＋团队」可见集（与 /api/canvas/projects
+ * 同一把尺，不另立规则）；两者皆无 ⇒ 非自有／不存在，403。挂用写入路径仍照旧走
+ * resolveMountable 的资产可见性闸（本处只补读路径的项目归属）。
+ */
+async function projectVisibleToCaller(userId: number, projectId: string): Promise<boolean> {
+  if (await readCanvasProject(userId, projectId)) return true;
+  const visible = await listCanvasProjectsForCaller(userId);
+  return visible.some((project) => project.id === projectId);
+}
+
 export async function GET(req: NextRequest) {
   const caller = await requireVerifiedUser(req);
   if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
 
   const projectId = (req.nextUrl.searchParams.get("projectId") ?? "").trim();
   if (!projectId) return fail(400, "缺少 projectId", "invalid_payload");
+  if (!(await projectVisibleToCaller(caller.user.id, projectId))) {
+    return fail(403, "画布不存在或不属于你", "project_not_visible");
+  }
   const rawKind = req.nextUrl.searchParams.get("kind");
   const kind = rawKind && rawKind !== "all" ? toAssetKind(rawKind) : "all";
   if (kind === null) return fail(400, "kind 只能是 pack / card / all", "invalid_payload");

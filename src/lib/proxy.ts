@@ -11,6 +11,27 @@ interface ProxyOptions {
 
 type RouteContext = { params: Promise<Record<string, string>> };
 
+// 脱敏实作已抽到 `@/lib/upstream-sanitizer`（纯函式、零依赖，Edge middleware 可引用）；
+// 本档 re-export 以维持既有 import 面（各路由 import from "@/lib/proxy"）。
+// 方法论、指纹清单与历史破口见该档头部注释。
+import {
+  SANITIZED_MESSAGE,
+  containsInternalLeak,
+  isErrorShapedPayload,
+  sanitizeUpstreamBody,
+  sanitizeUpstreamMessage,
+  sanitizeUpstreamValue,
+  stripInternalSuccessKeys,
+} from "@/lib/upstream-sanitizer";
+
+export {
+  SANITIZED_MESSAGE,
+  containsInternalLeak,
+  sanitizeUpstreamBody,
+  sanitizeUpstreamMessage,
+  sanitizeUpstreamValue,
+};
+
 export function makeProxy(opts: ProxyOptions = {}) {
   return async function handler(
     req: NextRequest,
@@ -53,7 +74,14 @@ export function makeProxy(opts: ProxyOptions = {}) {
     try {
       const upstream = await fetch(url, fetchOpts);
       const data = await upstream.json();
-      const response = NextResponse.json(data, { status: upstream.status });
+      // 出站前统一脱敏（见上方 INTERNAL_LEAK_*）。判为错误形状时额外洗键名：
+      // 非 2xx，或 HTTP 200 但 payload 形状是错误（内部头名/栏位名键本身就是泄漏面）。
+      // 成功体功能面不变（只洗值），但再套同一道**栏位闸**清内部基础设施键名
+      // （`stripInternalSuccessKeys`，与 middleware 共用；红队 2026-10-05：成功信封曾原样穿过）。
+      const errorShaped = !upstream.ok || isErrorShapedPayload(data);
+      const sanitized = sanitizeUpstreamValue(data, { cleanKeys: errorShaped });
+      const payload = errorShaped ? sanitized : stripInternalSuccessKeys(sanitized).value;
+      const response = NextResponse.json(payload, { status: upstream.status });
 
       if (req.method === "GET" && upstream.ok) {
         if (opts.public && opts.revalidate !== undefined && !auth) {

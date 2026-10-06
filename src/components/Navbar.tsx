@@ -62,7 +62,7 @@ function describeAuthError(code: string): string {
   return "登录流程被打断，请重新点登录。";
 }
 
-export function Navbar({ className }: NavbarProps) {
+export default function Navbar({ className }: NavbarProps) {
   const { user, isLoggedIn, logout, refresh } = useAuth();
   const { toast } = useToast();
   // 2026-09-24 首秒零回缩：导览列退缩只属首页（助理工作站面）。--ws-navbar-inset

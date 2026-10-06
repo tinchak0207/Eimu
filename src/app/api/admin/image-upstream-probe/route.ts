@@ -5,6 +5,7 @@ import { buildModelQueue } from "@/lib/channel-registry";
 import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
 import { getRuntimeGatewayPools } from "@/lib/admin-pool-store";
 import { resolveUpstreamModelId } from "@/lib/provider-config";
+import { sanitizeUpstreamMessage } from "@/lib/proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,9 +60,13 @@ async function generate(endpoint: GatewayEndpoint, modelId: string) {
     imageKind: image?.b64_json ? "base64" : image?.url ? "url" : null,
     // The raw upstream error body has never actually been inspected for the primary/
     // fallback 403s — status alone was assumed to mean "bad key" without evidence.
+    // 但原样回上游 errorBody 会把内部栏位名／SQL 文案带给浏览器（红队 2026-10-05）：
+    // 出站前过同一颗指纹，命中即换通用文案（正常错误文案不受影响）。
     errorBody: response.ok
       ? undefined
-      : (typeof payload?.error === "string" ? payload.error : JSON.stringify(payload?.error ?? rawText)).slice(0, 500),
+      : sanitizeUpstreamMessage(
+          (typeof payload?.error === "string" ? payload.error : JSON.stringify(payload?.error ?? rawText)).slice(0, 500),
+        ) ?? undefined,
   };
 }
 

@@ -10,18 +10,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  AGENT_EXCLUDED_METADATA_FIELDS,
-  AGENT_EXCLUDED_METADATA_FIELD_KEYS,
   AGENT_METADATA_FIELDS,
   AGENT_METADATA_FIELD_KEYS,
-  AGENT_TRUNCATION_BUDGETS,
   DURABLE_METADATA_FIELDS,
   DURABLE_METADATA_FIELD_KEYS,
+  type DurableFieldSpec,
+} from "./node-metadata-fields";
+// 审计/排除清单与截断预算已移出打包档（内部判定与档名:行号不进客户端 bundle）。
+import {
+  AGENT_EXCLUDED_METADATA_FIELDS,
+  AGENT_EXCLUDED_METADATA_FIELD_KEYS,
+  AGENT_TRUNCATION_BUDGETS,
   findAgentChannelGaps,
   findStaleAgentExclusions,
   type AgentExclusionVerdict,
-  type DurableFieldSpec,
-} from "./node-metadata-fields";
+} from "./node-metadata-audit";
 import { toNodeMetadata } from "./layout";
 import { compactMetadataForAgent } from "@/hooks/canvas/canvas-chat-types";
 import type { CanvasNodeMetadata } from "./types";

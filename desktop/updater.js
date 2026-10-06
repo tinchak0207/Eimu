@@ -4,12 +4,21 @@
 //
 // 为什么用 electron-updater 而不是自写更新器：
 //   - AppImage 自我替换、NSIS 安装编排都有现成且经过检验的实作；
-//   - 产物托管在 Vercel Blob 的固定目录，透过 electron-builder 产出的
-//     app-update.yml（由 build.publish 生成）取得 feed，不硬编 URL。
+//   - 产物托管在自家 nginx 的固定目录（`${build.publish.url}`，2026-10-05 前是
+//     Vercel Blob，该 store 被平台封锁后迁到 store.tinchak0207.xyz/downloads/desktop），
+//     透过 electron-builder 产出的 app-update.yml（由 build.publish 生成）取得 feed，
+//     不硬编 URL。
 //
-// 差分下载（differential download）在本主机不生效：多段 HTTP Range 请求
-// 会被忽略，electron-updater 会自动退回全量下载。这是可接受的；日后若把
-// 产物改放自家 nginx（支援多段 Range），差分下载就会自动生效，无需改码。
+// 平台能力（2026-10-05 现况）：
+//   - Windows（NSIS）：installer 自带 app-update.yml 的 feed，全链路可用。
+//   - Linux：0.3.3 起发行范式由 AppImage 换成 tar.gz，electron-updater 没有 tar.gz
+//     对应的 updater（无 APPIMAGE 环境变数时 AppImageUpdater 会直接略过检查），
+//     故 Linux 侧自动更新目前不生效——更新走「重新下载 tar.gz」。这里不加特判，
+//     让 electron-updater 自己安静略过，比自造一支更新器可控。
+//
+// 差分下载（differential download）2026-10-05 起生效：先前托管在 Vercel Blob，多段
+// HTTP Range 请求会被忽略，electron-updater 自动退回全量下载；改放自家 nginx（原生
+// 支援 Range）之后差分下载自动启用，无需改码——正是原先预留的那一步。
 //
 // 安全边界：本模组只在 app.isPackaged 为真时才检查更新；开发模式（electron .）
 // 一律 no-op，避免本机开发时打生产 feed。feed 覆写仅供 E2E 用
@@ -133,8 +142,10 @@ function initUpdater(options = {}) {
 
 /**
  * 套用已下载的更新并重启。
- *   - AppImage：electron-updater 自我替换后重启；
  *   - Windows：执行新下载的安装档。
+ *   - Linux（tar.gz 发行）：不会走到这里——无 APPIMAGE 环境变数时 electron-updater
+ *     不下载任何东西，也就不会发 update-ready；万一被呼叫，quitAndInstall 会抛错，
+ *     下面已捕获并只记 log。
  * 开发模式 no-op。
  */
 function applyUpdate() {

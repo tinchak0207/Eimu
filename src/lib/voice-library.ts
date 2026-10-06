@@ -31,7 +31,7 @@
 export type VoiceGender = "female" | "male";
 
 /** 实际会走的上游路线。 */
-export type VoiceRoute = "siliconflow" | "edge";
+export type VoiceRoute = "primary" | "fallback";
 
 export interface VoiceEntry {
   /** 传给 `POST /v1/tts/generations` 的 `voice` 值（＝对手语音库的 `Id`）。 */
@@ -48,15 +48,15 @@ export interface VoiceEntry {
   source: string;
 }
 
-const EDGE_LIST_SOURCE = "/opt/edge-tts/venv/bin/python -m edge_tts --list-voices（zh-* 逐字转录，2026-09-29 实查）";
-const SF_ROUTE_SOURCE = "/opt/edge-tts/tts-proxy.js:39-41（voice 不含 \":\" 时改写成 ${model}:alex）＋ :15-16 SF_DEFAULT_MODEL";
+const EDGE_LIST_SOURCE = "上游语音清单实查（zh-* 逐字转录，2026-09-29）";
+const SF_ROUTE_SOURCE = "上游 TTS proxy 实查（voice 改写规则＋默认模型，2026-09-29）";
 
 /** 主路（SiliconFlow）唯一可证实的预设音色：`<model>:<preset>` 形式，preset 由 proxy 写死 `alex`。 */
 const SILICONFLOW_DEFAULT: VoiceEntry = {
   id: "FunAudioLLM/CosyVoice2-0.5B:alex",
   name: "CosyVoice2 · alex（主路预设）",
-  description: "SiliconFlow CosyVoice2 预设音色；呼叫端未给 \"model:preset\" 形式时实际使用的就是这一颗",
-  route: "siliconflow",
+  description: "主路 CosyVoice2 预设音色；呼叫端未给 \"model:preset\" 形式时实际使用的就是这一颗",
+  route: "primary",
   source: SF_ROUTE_SOURCE,
 };
 
@@ -65,20 +65,20 @@ const SILICONFLOW_DEFAULT: VoiceEntry = {
  * `description` ＝ `ContentCategories`（＋ `VoicePersonalities`），原值不改写。
  */
 const EDGE_VOICES: readonly VoiceEntry[] = [
-  { id: "zh-CN-XiaoxiaoNeural", name: "晓晓（普通话·女）", gender: "female", description: "News, Novel；Warm（温暖）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-XiaoyiNeural", name: "晓伊（普通话·女）", gender: "female", description: "Cartoon, Novel；Lively（活泼）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-YunjianNeural", name: "云健（普通话·男）", gender: "male", description: "Sports, Novel；Passion（激情）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-YunxiNeural", name: "云希（普通话·男）", gender: "male", description: "Novel；Lively, Sunshine（活泼阳光）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-YunxiaNeural", name: "云夏（普通话·男）", gender: "male", description: "Cartoon, Novel；Cute（可爱）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-YunyangNeural", name: "云扬（普通话·男）", gender: "male", description: "News；Professional, Reliable（专业可靠）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-liaoning-XiaobeiNeural", name: "晓北（辽宁方言·女）", gender: "female", description: "Dialect；Humorous（幽默）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-CN-shaanxi-XiaoniNeural", name: "晓妮（陕西方言·女）", gender: "female", description: "Dialect；Bright（明亮）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-HK-HiuGaaiNeural", name: "晓佳（粤语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-HK-HiuMaanNeural", name: "晓曼（粤语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-HK-WanLungNeural", name: "云龙（粤语·男）", gender: "male", description: "General；Friendly, Positive（友好积极）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-TW-HsiaoChenNeural", name: "晓臻（台湾华语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-TW-HsiaoYuNeural", name: "晓雨（台湾华语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "edge", source: EDGE_LIST_SOURCE },
-  { id: "zh-TW-YunJheNeural", name: "云哲（台湾华语·男）", gender: "male", description: "General；Friendly, Positive（友好积极）", route: "edge", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-XiaoxiaoNeural", name: "晓晓（普通话·女）", gender: "female", description: "News, Novel；Warm（温暖）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-XiaoyiNeural", name: "晓伊（普通话·女）", gender: "female", description: "Cartoon, Novel；Lively（活泼）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-YunjianNeural", name: "云健（普通话·男）", gender: "male", description: "Sports, Novel；Passion（激情）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-YunxiNeural", name: "云希（普通话·男）", gender: "male", description: "Novel；Lively, Sunshine（活泼阳光）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-YunxiaNeural", name: "云夏（普通话·男）", gender: "male", description: "Cartoon, Novel；Cute（可爱）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-YunyangNeural", name: "云扬（普通话·男）", gender: "male", description: "News；Professional, Reliable（专业可靠）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-liaoning-XiaobeiNeural", name: "晓北（辽宁方言·女）", gender: "female", description: "Dialect；Humorous（幽默）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-CN-shaanxi-XiaoniNeural", name: "晓妮（陕西方言·女）", gender: "female", description: "Dialect；Bright（明亮）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-HK-HiuGaaiNeural", name: "晓佳（粤语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-HK-HiuMaanNeural", name: "晓曼（粤语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-HK-WanLungNeural", name: "云龙（粤语·男）", gender: "male", description: "General；Friendly, Positive（友好积极）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-TW-HsiaoChenNeural", name: "晓臻（台湾华语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-TW-HsiaoYuNeural", name: "晓雨（台湾华语·女）", gender: "female", description: "General；Friendly, Positive（友好积极）", route: "fallback", source: EDGE_LIST_SOURCE },
+  { id: "zh-TW-YunJheNeural", name: "云哲（台湾华语·男）", gender: "male", description: "General；Friendly, Positive（友好积极）", route: "fallback", source: EDGE_LIST_SOURCE },
 ];
 
 /**
@@ -104,9 +104,9 @@ export const VOICE_ALIASES: Readonly<Record<string, string>> = {
 const ALIAS_ENTRIES: readonly VoiceEntry[] = Object.entries(VOICE_ALIASES).map(([alias, target]) => ({
   id: alias,
   name: `${alias}（OpenAI 风格别名 → ${target}）`,
-  route: "edge" as const,
+  route: "fallback" as const,
   description: `别名：上游会把 "${alias}" 换成 ${target}`,
-  source: "/opt/edge-tts/tts-proxy.js:18-26（VOICE_ALIASES 逐字转录）",
+  source: "上游 TTS proxy 实查（VOICE_ALIASES 逐字转录，2026-09-29）",
 }));
 
 /**

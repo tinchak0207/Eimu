@@ -1,18 +1,11 @@
 import type { MetadataRoute } from "next";
 import { getSiteUrl } from "@/lib/site-url";
 
-// 非内容路由：API、后台、需登入的个人页、登入回跳与内部预览页。
-// /agent 只是跳回首页的旧书签路由，/agent-chat-preview 是内部工具。
-const PRIVATE_PATHS = [
-  "/api/",
-  "/admin/",
-  "/history",
-  "/settings/",
-  "/auth/",
-  "/wechat-login",
-  "/agent",
-  "/agent-chat-preview",
-];
+// 只留一条通用规则：/api/ 属非内容路由（爬它只是浪费 crawl budget）。
+// 2026-10-05 红队：原本逐条列举 /admin、/settings、/auth、/agent… 等于在 robots.txt
+// 里反向给出「哪些路径是敏感的」侦察字典；已全部移除，不再对外枚举敏感路径。
+// 后台/登入等页面本身有鉴权闸，不靠 robots 挡。
+const NON_CONTENT_PATHS = ["/api/"];
 
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const siteUrl = await getSiteUrl();
@@ -40,12 +33,12 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
         userAgent: "*",
         allow: "/",
         // Block non-content routes from crawl budget waste.
-        disallow: PRIVATE_PATHS,
+        disallow: NON_CONTENT_PATHS,
       },
       {
         userAgent: aiCrawlers,
         allow: "/",
-        disallow: PRIVATE_PATHS,
+        disallow: NON_CONTENT_PATHS,
       },
     ],
     sitemap: `${siteUrl}/sitemap.xml`,

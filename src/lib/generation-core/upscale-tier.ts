@@ -90,8 +90,7 @@ export const PIXAI_BRIDGE_UPSCALE_RATIO_SIZES: Readonly<
   "3:4": { "1k": [768, 1024], "2k": [1152, 1536] },
 };
 
-const UPSCALE_SOURCE =
-  "/opt/pixai-bridge/app.py:171-179 (RATIO_SIZES) + :230-232 (size→w/h) + :251-252 (upscale→int)，2026-09-29 独读实查";
+const UPSCALE_SOURCE = "上游图像放大桥比例／尺寸表逐字转录实查";
 
 /**
  * 档位的「输出长边保证」。输入＝真实比例表的两个端点，乘上 factor 后取极值，
@@ -171,9 +170,9 @@ export const UPSCALE_TIER_THRESHOLDS_PX: Readonly<Record<UpscaleTier, number>> =
 export const UPSCALE_INPUT_MAX_BYTES = 25 * 1024 * 1024;
 export const UPSCALE_OUTPUT_MAX_BYTES = 25 * 1024 * 1024;
 export const UPSCALE_INPUT_MAX_BYTES_SOURCE =
-  "imagesite-nginx /opt/imagesite/nginx/conf.d/default.conf:382 (location ^~ /image-control/ client_max_body_size 25m)";
+  "站点边缘网关 /image-control/ 路由的 client_max_body_size 25m（2026-09-29 实查）";
 export const UPSCALE_OUTPUT_MAX_BYTES_SOURCE =
-  "generation-core/artifact-service.ts ARTIFACT_MAX_DOWNLOAD_BYTES (上游结果抓回的单档硬上限)";
+  "产物抓回服务的单档下载硬上限 ARTIFACT_MAX_DOWNLOAD_BYTES（25 MiB）";
 
 // ── 具名错误码（规格要求：不支援必须具名拒绝，不得静默降级）───────────────────
 
@@ -204,29 +203,34 @@ export class UpscaleTierError extends Error {
 // ── 档位可用性（4K 未校准 ⇒ 默认 fail-closed，env 开关在校准后开启）──────────
 
 /**
- * 4K 上游语义是否已由真单校准。默认关闭：`factor=4` 零现场证据，
- * 未知值被上游静默忽略／降级的风险已在 P1-3 的 `VIDEO_POST_PRODUCTION_UPSTREAM` 上吃过一次。
+ * 4K 上游语义是否已由真单校准——**由调用端注入，本档不读 env**。
+ *
+ * 为什么不在本档读 env：本档经 generation-model-catalog/capabilities 进客户端
+ * bundle，若在此读 `process.env.UPSCALE_4K_UPSTREAM` 会把内部 env 名泄漏到公开
+ * JS 产物（红队 2026-10-05）。env 读取移到服务端专用档 upscale-4k-flag.ts；
+ * 服务端提交端把结果注入 `fourKEnabled`，客户端与共享投射拿不到该开关、恒为
+ * false——与既有行为一致（非 NEXT_PUBLIC env 在客户端本就不可见，默认关闭）。
  */
-export function upscaleFourKUpstreamEnabled(): boolean {
-  const value = (process.env.UPSCALE_4K_UPSTREAM ?? "").trim().toLowerCase();
-  return value === "1" || value === "true";
-}
-
-/** 档位是否可提交：白名单内＋上游语义已校准。 */
-export function isUpscaleTierServable(tier: UpscaleTier): boolean {
+export function isUpscaleTierServable(tier: UpscaleTier, fourKEnabled: boolean = false): boolean {
   const contract = UPSCALE_TIER_CONTRACTS[tier];
-  if (contract.semantics === "upstream-factor-unverified") return upscaleFourKUpstreamEnabled();
+  if (contract.semantics === "upstream-factor-unverified") return fourKEnabled;
   return true;
 }
 
 /** 可提交档位（声明序）。`declared` 省略＝以档位全集为声明面。 */
-export function servableUpscaleTiers(declared: readonly UpscaleTier[] = UPSCALE_TIERS): readonly UpscaleTier[] {
-  return declared.filter(isUpscaleTierServable);
+export function servableUpscaleTiers(
+  declared: readonly UpscaleTier[] = UPSCALE_TIERS,
+  fourKEnabled: boolean = false,
+): readonly UpscaleTier[] {
+  return declared.filter((tier) => isUpscaleTierServable(tier, fourKEnabled));
 }
 
 /** 一键预设档位＝最高可提交档位（4K 校准开启后免改码自动变 4K，这就是「一键超分到 4K」）。 */
-export function defaultUpscaleTier(declared: readonly UpscaleTier[] = UPSCALE_TIERS): UpscaleTier {
-  const servable = servableUpscaleTiers(declared);
+export function defaultUpscaleTier(
+  declared: readonly UpscaleTier[] = UPSCALE_TIERS,
+  fourKEnabled: boolean = false,
+): UpscaleTier {
+  const servable = servableUpscaleTiers(declared, fourKEnabled);
   return servable.length ? servable[servable.length - 1] : "1k";
 }
 
@@ -314,13 +318,14 @@ function tierResolution(tier: UpscaleTier, defaulted: boolean): UpscaleTierResol
 export function resolveUpscaleTier(
   requested?: unknown,
   declared: readonly UpscaleTier[] = UPSCALE_TIERS,
+  fourKEnabled: boolean = false,
 ): UpscaleTierResolution {
   const interpreted = interpretUpscaleSize(requested);
   if (interpreted.kind === "pixels") {
-    return tierResolution(defaultUpscaleTier(declared), true);
+    return tierResolution(defaultUpscaleTier(declared, fourKEnabled), true);
   }
   if (interpreted.kind === "empty") {
-    return tierResolution(defaultUpscaleTier(declared), true);
+    return tierResolution(defaultUpscaleTier(declared, fourKEnabled), true);
   }
   if (interpreted.kind === "unknown") {
     return {
@@ -331,7 +336,7 @@ export function resolveUpscaleTier(
     };
   }
   const contract = UPSCALE_TIER_CONTRACTS[interpreted.tier];
-  if (contract.semantics === "upstream-factor-unverified" && !upscaleFourKUpstreamEnabled()) {
+  if (contract.semantics === "upstream-factor-unverified" && !fourKEnabled) {
     return {
       ok: false,
       code: "upscale_4k_upstream_unverified",
@@ -339,7 +344,7 @@ export function resolveUpscaleTier(
       message: `档位 ${interpreted.tier} 的上游参数化已备（size="${contract.bridgeSize}"、factor=${contract.factor}、`
         + `保底长边 ${contract.minOutputLongEdgePx}px），但 factor 的输出色语义尚未由真单校准`
         + `（semantics=${contract.semantics}）；为避免「付费买到 2K 标成 4K」的假交付，本次拒绝提交。`
-        + `校准后设 UPSCALE_4K_UPSTREAM=1 开启。`,
+        + `校准后由服务端开启该档位开关。`,
     };
   }
   return tierResolution(interpreted.tier, false);
@@ -461,8 +466,11 @@ export function resolveUpscaleSubmission(options: {
   declaredTiers?: readonly UpscaleTier[];
   input: unknown;
   modelId?: string;
+  /** 4K 上游校准开关；由**服务端提交端**注入（见档头说明），缺省 false。 */
+  fourKEnabled?: boolean;
 }): NormalizedUpscaleSubmission {
   const declared = options.declaredTiers ?? UPSCALE_TIERS;
+  const fourKEnabled = options.fourKEnabled === true;
   const raw = (options.input && typeof options.input === "object" && !Array.isArray(options.input))
     ? options.input as Record<string, unknown>
     : {};

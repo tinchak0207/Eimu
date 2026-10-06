@@ -39,6 +39,7 @@ import {
   type ModelMode,
 } from "@/lib/provider-config";
 import { resolveAdobe2ApiModelId } from "@/lib/generation-core/adobe2api-upstream";
+import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
 import { QUOTA_PER_COIN } from "@/lib/new-api-client";
 import {
   aspectRatioFromImageSize,
@@ -463,6 +464,14 @@ async function requestImageGeneration(
 export async function POST(req: NextRequest) {
   const requestId = Math.random().toString(36).slice(2);
   const requestStartedAt = Date.now();
+  // 非法 JSON／破损 multipart 是客户端输入错误：解析失败回 400，不得落到未捕捉的 500，
+  // 也不得把解析器内部细节外泄（红队 2026-10-05 实测 `-d 'not-json'` 原本回 500 空 body）。
+  let parsedImageRequest: Awaited<ReturnType<typeof readGenerateImageRequest>>;
+  try {
+    parsedImageRequest = await readGenerateImageRequest(req);
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
   const {
     prompt,
     modelId,
@@ -472,7 +481,18 @@ export async function POST(req: NextRequest) {
     aspectRatio: requestedAspectRatio,
     outputResolution: requestedOutputResolution,
     loraModelVersionIds,
-  } = await readGenerateImageRequest(req);
+  } = parsedImageRequest;
+  // 请求体校验前移（红队 2026-10-05）：body 可能不是物件、prompt/modelId 可能缺栏或非字串。
+  // 必须在任何对 prompt 调 `.trim()`（buildWorkflowPrompt）／算价／建档之前拦住，
+  // 否则 `undefined.trim()` 会落到未捕捉的 500 空 body（`{}`／`[]` 实测）。回 400 不含内部细节。
+  if (
+    typeof prompt !== "string" ||
+    !prompt.trim() ||
+    typeof modelId !== "string" ||
+    !isSupportedImageModel(modelId)
+  ) {
+    return NextResponse.json({ error: "Invalid request parameters" }, { status: 400 });
+  }
   const aspectRatio = resolveSupportedAspectRatio(
     modelId,
     requestedAspectRatio ?? workflow?.aspectRatio ?? aspectRatioFromImageSize(workflow?.imageSize),
@@ -491,10 +511,6 @@ export async function POST(req: NextRequest) {
     ? resolveImageSize(workflow)
     : imageSizeForAspectRatio(aspectRatio);
   const finalPrompt = buildWorkflowPrompt(prompt, workflow);
-
-  if (!prompt || !modelId || !isSupportedImageModel(modelId)) {
-    return NextResponse.json({ error: "Invalid request parameters" }, { status: 400 });
-  }
 
   // Both kicked off before authenticating: neither shares data with auth, and both
   // swallow their own errors (pools -> [], overrides -> last-known-good), so neither can
@@ -759,7 +775,9 @@ export async function POST(req: NextRequest) {
           break;
         }
         if (error instanceof UnsupportedEndpointInputError) {
-          failureReasons.push(error.message);
+          // 本路径是 DURABLE_PASS_THROUGH（middleware 不缓冲），失败体的脱敏只能在**生成源**
+          // 做：上游 message 可能夹带内部文案，出站前先过 sanitize（正常业务文案原样保留）。
+          failureReasons.push(sanitizeUpstreamMessage(error.message) ?? error.message);
           continue;
         }
         recordEndpointFailure(endpoint);

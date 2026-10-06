@@ -6,7 +6,7 @@ import {
   ReferenceImage,
   ReferenceImageRole,
 } from "@/lib/image-types";
-import { initializeProviderRecord, type ModelMode, ProviderKey } from "@/lib/provider-config";
+import { initializeProviderRecord, normalizeProviderKey, PROVIDER_KEY, type ModelMode, ProviderKey } from "@/lib/provider-config";
 import {
   generationModel,
   type AspectRatio,
@@ -145,7 +145,7 @@ function mapStoredHistoryEntry(entry: StoredHistoryEntry): PersistedGenerationEn
     prompt: entry.prompt,
     generatedAt: entry.generatedAt,
     results: entry.results.map((result) => ({
-      provider: result.provider as ProviderKey,
+      provider: normalizeProviderKey(result.provider),
       modelId: result.modelId,
       image: result.image ?? null,
         imageUrl: result.imageUrl ?? null,
@@ -290,7 +290,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
           setImages((prev) => [
             ...prev,
             {
-              provider: "image_tinchak" as ProviderKey,
+              provider: PROVIDER_KEY,
               slotId: `${task.taskId}:resumed`,
               image: null,
               imageUrl: data.imageUrl ?? null,
@@ -303,11 +303,11 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
             },
           ]);
         } catch (err) {
-          setFailedProviders((prev) => [...prev, "image_tinchak"]);
+          setFailedProviders((prev) => [...prev, PROVIDER_KEY]);
           setErrors((prev) => [
             ...prev,
             {
-              provider: "image_tinchak" as ProviderKey,
+              provider: PROVIDER_KEY,
               message: err instanceof Error ? err.message : "生成任务失败",
             },
           ]);
@@ -350,7 +350,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
       source: "server",
       workflow: task.submittedConfig.workflow,
       results: task.results.map((result) => ({
-        provider: "image_tinchak",
+        provider: PROVIDER_KEY,
         modelId: task.modelId,
         image: null,
         imageUrl: task.kind === "video_generate" ? null : result.url,
@@ -369,7 +369,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
         taskCanvasHydratedRef.current = true;
         setActivePrompt(latest.prompt ?? "");
         setImages(latest.results.map((result) => ({
-          provider: "image_tinchak",
+          provider: PROVIDER_KEY,
           slotId: `${latest.taskId}:${result.resultId}`,
           image: null,
           imageUrl: latest.kind === "video_generate" ? null : result.url,
@@ -396,7 +396,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     setActivePrompt(current.prompt);
     setImages(
       current.results.map((result) => ({
-        provider: result.provider,
+        provider: normalizeProviderKey(result.provider),
         image: result.image,
         imageUrl: result.imageUrl,
         videoUrl: result.videoUrl,

@@ -115,14 +115,43 @@ export function CanvasChatWorkstation({
           2026-09-20 拆覆盖层（暴君批准的 agent-chat-preview 视觉）：面板壳不再
           压纯白实底——壳退为形状宿主（圆角＋阴影），让内层 PromptInput 的
           section.lg-card 自己的玻璃材质（0.72 白玻璃＋blur＋顶缘 specular 亮线）
-          透出来，画布在背后可折射。08-25「白壳唯一卡」裁定由 09-20 预览裁定取代。 */}
+          透出来，画布在背后可折射。08-25「白壳唯一卡」裁定由 09-20 预览裁定取代。
+
+          以下规则的理由（原以 CSS 注释写在样板字串内，会随 SSR/JS 对外下发，
+          2026-10-05 移进本 JS 注释，样式本身一字未改）：
+          · --ws-panel-w 是面板宽度单一真相源：纯 CSS 默认＝SSR 首帧终态；
+            JS 只在 localStorage 有存值或拖宽进行中覆写成显式 px（写入端在
+            use-chat-panel 的 useLayoutEffect）。消费端＝.canvas-chat-panel width、
+            overlay 的 --ce-dock-left、Navbar 的 --ws-navbar-inset fallback。
+          · @keyframes canvas-ws-panel-in 未接线（全站无规则引用），入场动画只有
+            canvas-ws-fade 与 canvas-ws-fab-in，两者已全收进 settled 闸。
+          · backdrop 高度由 #global-navbar 写进 --site-header-offset；其渐层与
+            body::after 同配方（暴君裁定 09-20：进助理应看见同款渐层）。
+          · 入场渐显/dock 偏移过度/面板宽度过度/FAB 入场弹现 一律只在 settled 后
+            生效（html[data-ws-settled]，工作站 settled 后写）＝首秒零回缩。
+          · Navbar 退缩过度原挂在 <nav> 的 tailwind 类别上＝每次载入都播「全宽
+            320ms 退缩」回缩动画（病灶①），移进本档并只在 data-ws-settled 下生效。
+          · 面板吃满天花板（暴君裁定 2026-09-24）；navbar 改由 --ws-navbar-inset
+            右退让位（见组件顶部 useEffect 与 Navbar.tsx）。2026-10-03 暴君
+            「桌面端两个大组件顶部没对齐，以右边为基准」：面板顶 0.75rem → 0.5rem，
+            max-height 同步改 1.25rem。
+          · 壳退为形状宿主：底色/边框交给内层 section.lg-card 的玻璃材质，画布在
+            背后可折射；--agent-pop-top 吃 Navbar 实测的 --site-header-offset。
+          · 收起态 FAB（暴君裁定 2026-08-25；2026-08-27 尺寸锁死修复：面板基础规则
+            的拉伸定位 + width/height:auto 会让 FAB 在移动端撑满整屏）；此态壳自身
+            给玻璃外观（无 lg-card 内层可依赖）；canvas-ws-was-rail 由工作站于
+            settled 当帧侦测（见 tsx）。
+          · 面板态聊天区滚动收进 transcript 内部（暴君终裁 2026-09-24：一律吃满
+            全高，旧 :has() 分流作废）。
+          · 卡片减法阴影（用户版面方案 2026-09-24）；卡面 0.72 实白 → 0.56
+            （暴君 2026-10-01「背景像水泥砖」，让首页环境光透进来）。
+          · 2026-10-03 暴君「桌面端按钮 y 座标没对齐，以右边为基准」：≥768px 卡片顶
+            内距收回 4px、消掉 Tailwind space-y-4 的幽灵外距，图示列顶对齐基准线 39px。
+          · prefers-reduced-motion 选择器权重要盖得过 settled 闸规则。
+          · 手机端（≤767px）agent 态 = 全萤幕聊天（暴君裁定 2026-09-05）；2026-10-01
+            暴君「AI 助理背景没覆满全屏」：面板从视口 0 铺到底；展开态内容全 fixed，
+            故锁死整页滚动只留 transcript 自己滚；FAB 态靠左上角。 */}
       <style>{`
-            /* ─── 面板宽度单一真相源（2026-09-24 首秒零回缩）───
-               纯 CSS 默认＝SSR 首帧即新用户终态（无任何 JS 追写）；JS 只在
-               localStorage 有存值或拖宽进行中把 --ws-panel-w 覆写成显式 px
-               （写入端在 use-chat-panel 的 useLayoutEffect，<html> 内联样式
-               压过本 :root 规则）。消费端：.canvas-chat-panel 的 width、
-               overlay 的 --ce-dock-left、Navbar 的 --ws-navbar-inset fallback。 */
             :root {
               --ws-panel-w: clamp(22.5rem, 40vw, 45rem);
             }
@@ -131,25 +160,16 @@ export function CanvasChatWorkstation({
               to { opacity: 1; }
             }
             @keyframes canvas-ws-panel-in {
-              /* 未接线（2026-09-24 首秒零回缩考古）：全站无任何规则引用本
-                 keyframes，入场动画实际只有 canvas-ws-fade 与 canvas-ws-fab-in，
-                 两者已全部收进 settled 闸。保留宣告仅作历史记录，不会播放。 */
               from { opacity: 0; transform: translateX(-18px) scale(0.985); }
               to { opacity: 1; transform: none; }
             }
             .canvas-ws-backdrop {
               position: fixed;
-              /* 站点 header 留在上面。助理是进站预设面，这层从视口顶盖下来时
-                 充值／帐号入口就没了。高度由 #global-navbar 写进 --site-header-offset。 */
               top: var(--site-header-offset, 4.25rem);
               right: 0;
               bottom: 0;
               left: 0;
               z-index: 40;
-              /* 环境光渐层与 body::after 同一配方（Trans 蓝/粉光晕＋160deg 底色）。
-                 此层的职责是遮盖首页文档流内容；旧版 #F2F2F7 实底把首页的彩色
-                 环境光一并抹平（暴君裁定 09-20：进助理应看见同款渐层），
-                 改铺同款渐层后遮盖不变、底色不再消失。 */
               background:
                 radial-gradient(ellipse 130% 90% at 15% 5%,
                   rgba(85, 205, 252, 0.10) 0%,
@@ -169,9 +189,6 @@ export function CanvasChatWorkstation({
                   #f5fbff 100%
                 );
             }
-            /* 入场渐显只在 settled 后生效（2026-09-24 首秒零回缩）：首次载入
-               backdrop 直出终态（其渐层与 body::after 逐字同配方，延迟触发亦
-               不可见）；pro→agent 翻面时本元素是新挂载的，class 在场即照常渐显。 */
             .canvas-ws-backdrop.canvas-ws-settled {
               animation: canvas-ws-fade 0.32s ease-out;
             }
@@ -188,15 +205,9 @@ export function CanvasChatWorkstation({
               justify-content: center;
               overflow: hidden;
             }
-            /* dock 偏移的过度只在 settled 后开启：拖宽/rail 切换跟手，
-               载入首帧（left 已是终值）零动画。 */
             .canvas-ws-overlay.canvas-ws-settled {
               transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
-            /* Navbar 退缩过度（2026-09-24 首秒零回缩）：原先挂在 <nav> 的
-               tailwind 类别上＝每次载入都播「全宽 320ms 退缩」回缩动画（病灶①），
-               移进本档并只在 html[data-ws-settled]（工作站 settled 后写）下生效。
-               非首页无本 style 块＝header 在任何态都零过度，天然正确。 */
             html[data-ws-settled] #global-navbar nav {
               transition: margin-left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
                 width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -204,46 +215,24 @@ export function CanvasChatWorkstation({
             .canvas-chat-panel {
               position: fixed;
               z-index: 60;
-              /* 2026-09-24 暴君裁定：面板吃满天花板——不再从导览列下缘起算；
-                 navbar 改由 --ws-navbar-inset 右退让位（见组件顶部 useEffect 与
-                 Navbar.tsx）。bottom 留 0.75rem，max-height 是 bottom 定界外的双保险。
-                 2026-10-03 暴君「桌面端两个大组件顶部没对齐，以右边为基准」：
-                 右侧导览岛顶 = 8px（header 的 pt-2），故面板顶 0.75rem → 0.5rem，
-                 max-height 同步改 1.25rem——两面同高起跑，且面板仍吃满天花板。 */
               top: 0.5rem;
               bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
               left: var(--site-shell-left, 0.75rem);
-              /* 宽度读单一真相源：:root 默认 clamp 或 JS（use-chat-panel）在
-                 有存值/拖宽时覆写的显式 px。首帧即终态，无 inline style、
-                 无 hydration 追写。 */
               width: var(--ws-panel-w);
               display: flex;
               flex-direction: column;
               min-height: 0;
               max-height: calc(100dvh - 1.25rem - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
-              /* 壳退为形状宿主：底色/边框交给内层 section.lg-card 的玻璃材质
-                 （0.72 白玻璃＋blur＋specular 亮线），画布在背后可折射。 */
               background: transparent;
               border-radius: 1.875rem;
               overflow: hidden;
-              /* header 弹窗（历史/资产/设定）水平置中用的顶部偏移。
-                 2026-09-24 收敛：这些弹层是 fixed 于视口水平置中（left-1/2），
-                 navbar 右退后胶囊仍横跨视口中段（z-80 压 z-50 弹层），所以顶部
-                 仍须落在导览列下缘＋0.75rem——但不再用 3.25rem 魔法数，改吃
-                 Navbar 实测的 --site-header-offset，与面板吃顶后的新基准一致。 */
               --agent-pop-top: calc(env(safe-area-inset-top, 0px) + var(--site-header-offset, 4.25rem) + 0.75rem);
             }
-            /* 面板宽度过度只在 settled 后开启（首秒零回缩）：载入首帧宽度已是
-               终值零动画；rail↔expanded 切换与拖宽（含 navbar/overlay 同拍）
-               在闸开后照常过度。 */
             .canvas-chat-panel.canvas-ws-settled {
               transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
             .canvas-chat-rail {
-              /* 收起态 = 聊天气泡 FAB（2026-08-25 暴君裁定；2026-08-27 尺寸锁死修复：
-                 面板基础规则的 top/bottom/right 拉伸定位 + width/height:auto 会让
-                 FAB 在移动端撑满整屏成一个大白椭圆，完全不可用——四边与尺寸全部显式固定）。 */
               top: calc(var(--site-header-offset, 4.25rem) + 0.75rem);
               bottom: auto !important;
               right: auto !important;
@@ -253,7 +242,6 @@ export function CanvasChatWorkstation({
               min-width: 0 !important;
               max-width: none !important;
               overflow: hidden;
-              /* FAB 态壳自身给玻璃外观（此态无 lg-card 内层可依赖）。 */
               background: rgba(255, 255, 255, 0.72);
               border: 1px solid rgba(0, 0, 0, 0.08);
               border-radius: 999px;
@@ -261,9 +249,6 @@ export function CanvasChatWorkstation({
               -webkit-backdrop-filter: blur(40px) saturate(180%);
               backdrop-filter: blur(40px) saturate(180%);
             }
-            /* FAB 入场弹现（首秒零回缩闸）：只在 settled 后、且不是「旧持久值
-               rail 直接首帧载入」时播——用户动作收合是过度，载入直出是终态。
-               canvas-ws-was-rail 由工作站于 settled 当帧侦测（见 tsx）。 */
             .canvas-chat-rail.canvas-ws-settled:not(.canvas-ws-was-rail) {
               animation: canvas-ws-fab-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
             }
@@ -280,11 +265,6 @@ export function CanvasChatWorkstation({
               overscroll-behavior: contain;
               background: transparent;
             }
-            /* 面板态聊天区：scroll 容器变纵向 flex、不再自己滚，滚动收进
-               transcript 内部（agent 面的固定高在 46dvh 抽屉里会溢出被裁）。
-               2026-09-24 暴君终裁：聊天态与空态一律吃满全高，空态内容置中由
-               transcript 内部 justify-center 负责（旧 :has() 分流作废）。
-               justify-content: center 保留：满高时无感，置中卡靠它。 */
             .canvas-chat-scroll.canvas-chat-scroll-fill {
               display: flex;
               flex-direction: column;
@@ -300,27 +280,11 @@ export function CanvasChatWorkstation({
               overflow: hidden;
               margin: 0;
               border-radius: 1.875rem;
-              /* 2026-09-24 用户版面方案（卡片减法阴影）：压掉全域 lg-card 的
-                 重阴影与四边渐变边框——「深阴影会让它显得过时，边框撑浮感就够」；
-                 只覆写 box-shadow/border，lg-card 的玻璃材质（backdrop-filter）
-                 原样保留。 */
               box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
               border: 1px solid oklch(0% 0 0 / 6%);
-              /* 2026-10-01 暴君「背景像水泥砖」：卡面 0.72 实白 → 0.56，让首页环境光透进来；
-                 对话正文对比度由 lg-card 的 blur40 + saturate 托底。 */
               background: rgba(255, 255, 255, 0.56);
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
-            /* 2026-10-03 暴君「桌面端按钮 y 座标没对齐，以右边为基准」：
-               右侧导览岛（顶 8px、高 62px）上按钮列的中心 = 39px 就是基准线。
-               卡片 sm:p-6 的 24px 顶内距之外，描述框在 agent 态是用 class="hidden"
-               （display:none）而非 [hidden] 属性，Tailwind space-y-4 的
-               "> :not([hidden]) ~ :not([hidden])" 照样把 16px 外距套给下一列
-               ——两者合计把 AgentChatSurface 的图示列推到 y=57（中心 79），比基准低 40。
-               这里把卡片顶内距收回 4px、消掉那段幽灵外距，图示列顶 =
-               8(卡顶) + 1(卡框) + 4 + 4(AgentChatSurface 自带 pt-1) = 17px（中心 39）。
-               只在 ≥768px（= 工作站展开面板的桌面态）与 ≥xl 首页生效；≤767px 由下方
-               媒体查询全萤幕接管，手机版布局一字不动。 */
             @media (min-width: 768px) {
               .canvas-chat-scroll-fill > section.lg-card {
                 padding-top: 0.25rem;
@@ -342,7 +306,6 @@ export function CanvasChatWorkstation({
             }
             .canvas-chat-resize:hover { background: linear-gradient(to right, transparent, rgba(0, 122, 255, 0.25)); }
             @media (prefers-reduced-motion: reduce) {
-              /* 选择器权重要盖得过 settled 闸规则（.x.canvas-ws-settled = 0,2,0）。 */
               .canvas-ws-overlay,
               .canvas-ws-overlay.canvas-ws-settled { animation: none; transition: none; }
               .canvas-ws-backdrop,
@@ -354,14 +317,8 @@ export function CanvasChatWorkstation({
               html[data-ws-settled] #global-navbar nav { transition: none; }
             }
             @media (max-width: 767px) {
-              /* 2026-09-05 暴君裁定：手机端 agent 态 = 全萤幕聊天，
-                 手机用户没有操作画布的需求——画布 overlay/模板库直接不渲染。 */
               .canvas-ws-overlay { display: none; }
               .canvas-ws-backdrop { display: none; }
-              /* 2026-10-01 暴君「AI 助理背景没覆满全屏、主页莫名能滚」：
-                 面板从视口 0 铺到底（导览胶囊 z-80 浮在玻璃卡上），卡片去圆角/
-                 边框/阴影成全出血底；导览列高度与安全区改由卡片内距吸收，
-                 图示列紧贴胶囊下缘。弹层顶＝导览列下缘＋图示列高。 */
               .canvas-chat-panel {
                 left: 0;
                 right: 0;
@@ -385,14 +342,11 @@ export function CanvasChatWorkstation({
                 padding-left: 0.75rem;
                 padding-right: 0.75rem;
               }
-              /* 助理展开态全部内容都是 fixed，文档流没有可看的东西——锁死整页滚动，
-                 只留 transcript 自己滚（overscroll-contain 已在组件上）。 */
               html:has(.canvas-chat-panel:not(.canvas-chat-rail)),
               html:has(.canvas-chat-panel:not(.canvas-chat-rail)) body {
                 overflow: hidden;
                 overscroll-behavior: none;
               }
-              /* FAB 态手机位置：靠左上角（导航栏下方）。 */
               .canvas-chat-rail {
                 top: calc(var(--site-header-offset, 4.25rem) + 0.75rem);
                 left: 0.5rem;

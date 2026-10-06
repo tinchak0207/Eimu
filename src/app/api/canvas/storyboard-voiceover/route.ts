@@ -48,6 +48,7 @@ import { resolveTaskCostCoins, taskStatus } from "@/lib/generation-core/task-res
 import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
 import { TTS_1_MODEL_ID } from "@/lib/image-model-ids";
 import { requireVerifiedUser } from "@/lib/server-user";
+import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -123,7 +124,9 @@ function createSiteTtsLineClient(options: {
           return { audioUrl: artifactUrl, durationMs: null, costCoins };
         }
         if (status === "failed" || status === "cancelled" || status === "refunded" || status === "unknown") {
-          const detail = job.failureDetail ? `：${job.failureDetail.slice(0, 200)}` : "";
+          // DURABLE_PASS_THROUGH 路径：middleware 不缓冲，脱敏只能在生成源做。
+          const rawDetail = job.failureDetail ? job.failureDetail.slice(0, 200) : "";
+          const detail = rawDetail ? `：${sanitizeUpstreamMessage(rawDetail) ?? rawDetail}` : "";
           return { audioUrl: null, error: `任务终态 ${status}${detail}` };
         }
         if (Date.now() >= deadline) {
@@ -132,7 +135,10 @@ function createSiteTtsLineClient(options: {
         await sleep(TTS_POLL_INTERVAL_MS);
       }
     } catch (error) {
-      return { audioUrl: null, error: error instanceof Error ? error.message : String(error) };
+      // DURABLE_PASS_THROUGH 路径（middleware 受 Edge 25s 首字节硬限不代收）：
+      // 生成源兜底脱敏，异常讯息可能夹带内部细节（栏位名／内部头名）。
+      const raw = error instanceof Error ? error.message : String(error);
+      return { audioUrl: null, error: sanitizeUpstreamMessage(raw) ?? "配音生成失败，请稍后再试。" };
     }
   };
 }

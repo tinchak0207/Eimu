@@ -191,16 +191,7 @@ export default function DocsMcpPage() {
           >
             GitHub
           </a>
-          。另有一份{" "}
-          <a
-            href="/docs/eimu-competition-report.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-[#007AFF] lg-transition hover:underline"
-          >
-            作品报告 PDF
-          </a>{" "}
-          供下载，各条生成链路的实时健康度见{" "}
+          。各条生成链路的实时健康度见{" "}
           <a href="/status" className="font-semibold text-[#007AFF] lg-transition hover:underline">
             状态页
           </a>

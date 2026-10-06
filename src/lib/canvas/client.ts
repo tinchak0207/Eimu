@@ -29,7 +29,7 @@ export function authHeaders(): Record<string, string> | null {
   // LOCAL_TEST_MODE：与 agent-chat-client 同款假头——站内代理的
   // resolveAgentCaller 在该模式下直接换 B 端 key，不验证这组头。
   // 缺这支 canvas 快照上行在本地测试会永远静默哑火。
-  if (LOCAL_TEST_MODE) {
+  if (process.env.NODE_ENV !== "production" && LOCAL_TEST_MODE) {
     return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
   }
   const token = getStoredToken();

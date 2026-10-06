@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { runGenerationMaintenanceOnce, runGenerationWorkerOnce } from "@/lib/generation-core/worker-service";
 import { runMapayOrderReconciliationOnce } from "@/lib/generation-core/mapay-order-reconciliation";
@@ -8,24 +9,66 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
+/** 配置的 cron 密钥（trim 后）；未配置＝空字串。 */
+function cronSecret(): string {
+  return (process.env.CRON_SECRET ?? "").trim();
+}
+
+/**
+ * 常数时间比对（写法照 src/app/api/admin/image-upstream-probe/route.ts 的既有先例）。
+ * 任一为空或长度不等一律不匹配——绝不只看「头存在」。
+ */
+function secretEquals(provided: string, expected: string): boolean {
+  if (!provided || !expected || provided.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+
+type CronAuthResult = { ok: true; label: string } | { ok: false; status: number; error: string };
+
+/**
+ * cron 鉴权（fail-closed）：
+ * - 生产：`Authorization: Bearer <CRON_SECRET>`（Vercel Cron 的官方形态；设了 CRON_SECRET 后
+ *   Vercel 会自动带上），或 `x-vercel-cron-id: <CRON_SECRET>`（同一密钥，常数时间比对）。
+ * - 本机开发：显式 `ALLOW_LOCAL_CRON=1` 开关。
+ * - **禁止用 Host 推断本机**（2026-10-05 红队修复）：Host 是攻击者可控头，
+ *   旧逻辑 `Host: localhost.evil.com` 即可穿过；且旧逻辑对 x-vercel-cron-id 只看存在性。
+ * - CRON_SECRET 未配置时拒绝执行并回明确错误（不得退化成放行）。
+ */
+function authorizeCron(req: NextRequest): CronAuthResult {
+  if ((process.env.ALLOW_LOCAL_CRON ?? "").trim() === "1") {
+    return { ok: true, label: "local-dev" };
+  }
+
+  const expected = cronSecret();
+  if (!expected) {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        "cron_auth_not_configured: CRON_SECRET is required (Authorization: Bearer <CRON_SECRET> or x-vercel-cron-id: <CRON_SECRET>); ALLOW_LOCAL_CRON=1 is the only local-dev bypass. Refusing to run.",
+    };
+  }
+
+  const authHeader = req.headers.get("authorization") ?? "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (secretEquals(bearer, expected)) return { ok: true, label: "bearer" };
+
+  const cronId = req.headers.get("x-vercel-cron-id") ?? "";
+  if (secretEquals(cronId, expected)) return { ok: true, label: "cron-id" };
+
+  return { ok: false, status: 401, error: "Unauthorized: valid cron credentials required." };
+}
+
 /**
  * Generation worker cron：每分钟执行一次，claim 待处理与过期任务、执行生成、处理失败退款。
- * 
- * Vercel Cron 配置：vercel.json → "crons": [{"path": "/api/cron/generation-worker", "schedule": "* * * * *"}]
- * 
- * 授权：仅允许 Vercel Cron（x-vercel-cron-id header）或本地开发（localhost）。
+ *
+ * 授权：见 authorizeCron（Bearer CRON_SECRET / x-vercel-cron-id=CRON_SECRET / 显式 ALLOW_LOCAL_CRON=1）。
+ * 手动/外部触发（如 VPS crontab）用 `Authorization: Bearer ${CRON_SECRET}` 或 `x-vercel-cron-id: ${CRON_SECRET}` 即可。
  */
 export async function GET(req: NextRequest) {
-  // Vercel Cron 身份验证
-  const cronId = req.headers.get("x-vercel-cron-id");
-  const host = req.headers.get("host") ?? "";
-  const isLocalDev = host.includes("localhost") || host.includes("127.0.0.1");
-  
-  if (!cronId && !isLocalDev) {
-    return NextResponse.json(
-      { error: "Unauthorized: missing x-vercel-cron-id" },
-      { status: 401 }
-    );
+  const auth = authorizeCron(req);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   // Control plane 未启用时直接返回（不报错，避免 cron 噪音）
@@ -39,7 +82,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const processed = await runGenerationWorkerOnce({
-      workerId: `cron-${cronId ?? "local"}`,
+      workerId: `cron-${auth.label}`,
       jobLeaseMs: 5 * 60 * 1000, // 5 分钟租约
       supplierLeaseMs: 2 * 60 * 1000, // 2 分钟 supplier 租约
     });
@@ -48,7 +91,7 @@ export async function GET(req: NextRequest) {
     // 长驻 worker 关停期间由 cron 每分钟补位，对帐不能只有一条心跳。
     let maintenance: { ok: true } | { ok: false; error: string };
     try {
-      await runGenerationMaintenanceOnce({ workerId: `cron-${cronId ?? "local"}` });
+      await runGenerationMaintenanceOnce({ workerId: `cron-${auth.label}` });
       maintenance = { ok: true };
     } catch (maintenanceError) {
       // 维护失败不影响本轮派单结果；对帐下一分钟再试。
@@ -101,7 +144,7 @@ export async function GET(req: NextRequest) {
       maintenance,
       mapay_reconciliation: mapayReconciliation,
       mapay_intake_sweep: mapayIntakeSweep,
-      cron_id: cronId ?? "local",
+      cron_auth: auth.label,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

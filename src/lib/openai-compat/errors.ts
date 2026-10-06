@@ -14,6 +14,7 @@ import {
   guardBizApiKey,
   type BizOpenAIErrorType,
 } from "@/lib/biz-openai-error";
+import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
 
 export { guardBizApiKey };
 export type OpenAICompatErrorType = BizOpenAIErrorType;
@@ -89,7 +90,11 @@ export async function readUpstreamError(
   }
   const error = (payload as { error?: unknown } | null)?.error;
   const record = typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null;
-  const message = typeof record?.message === "string" && record.message.trim() ? record.message : fallback.message;
+  const rawMessage = typeof record?.message === "string" && record.message.trim() ? record.message : fallback.message;
+  // 上游 message 可能夹带内部实作细节（SQL 栏位名／内部头名／扫描错误）。本函数是
+  // `/openai/v1/*`（DURABLE_PASS_THROUGH 路径）唯一的错误出口，middleware 层因 Edge
+  // 25s 首字节硬限无法代收，故**必须在生成源洗**（正常业务文案原样保留）。
+  const message = sanitizeUpstreamMessage(rawMessage) ?? fallback.message;
   const code = typeof record?.code === "string" && record.code.trim() ? record.code : fallback.code;
   const type = isOpenAICompatErrorType(record?.type) ? record.type : typeForStatus(upstream.status);
   return { status: upstream.status, message, type, code };

@@ -36,7 +36,7 @@ const LOCAL_TEST_AUTH_USER: NewApiUser = {
   used_quota: 0,
 };
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const localTestMode = LOCAL_TEST_MODE;
   const [user, setUser] = useState<NewApiUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -45,10 +45,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const clearWelcomeGift = useCallback(() => setWelcomeGift(null), []);
 
   useEffect(() => {
-    if (!localTestMode) return;
-    setUser(LOCAL_TEST_AUTH_USER);
-    setToken("local-test-token");
-    setIsLoading(false);
+    // 生产构建下条件被 SWC 对 process.env.NODE_ENV 的常量折叠＋DCE 整块剔除，
+    // 「local-test-token」字面量因而不进产物（红队 2026-10-05 要求）；
+    // 本机 dev（NODE_ENV=development）行为不变。
+    if (process.env.NODE_ENV !== "production" && localTestMode) {
+      setUser(LOCAL_TEST_AUTH_USER);
+      setToken("local-test-token");
+      setIsLoading(false);
+    }
   }, [localTestMode]);
 
   const refresh = useCallback(async () => {
@@ -135,6 +139,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  if (!ctx) throw new Error("useAuth 必须在登录上下文中使用");
   return ctx;
 }

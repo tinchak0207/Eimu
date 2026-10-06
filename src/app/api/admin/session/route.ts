@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAdminPassword } from "@/lib/admin-auth";
-import { clearAdminSession, configuredAdminUsername, setAdminSession } from "@/lib/admin-session";
+import { clearAdminSession, configuredAdminUsername, requireAdminSession, setAdminSession } from "@/lib/admin-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,22 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ success: true });
 }
 
+/**
+ * DELETE /api/admin/session — 退出登录。
+ *
+ * 门禁与管理端其余路由一致（requireAdminSession；UNAUTHORIZED → 401），
+ * 2026-10-05 红队修复：旧版 DELETE 不校验管理员。
+ */
 export async function DELETE() {
-  await clearAdminSession();
-  return NextResponse.json({ success: true });
+  try {
+    await requireAdminSession();
+    await clearAdminSession();
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ success: false, message: "请先登录管理员后台。" }, { status: 401 });
+    }
+    const message = error instanceof Error ? error.message : "退出登录失败。";
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
 }

@@ -26,6 +26,7 @@ import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-request-headers";
 import { syncModelPricing } from "@/lib/pricing-runtime";
+import { sanitizeUpstreamBody } from "@/lib/proxy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -277,7 +278,7 @@ export async function POST(req: NextRequest) {
         signal: AbortSignal.timeout(30_000),
       });
       const payload = await upstream.text();
-      return new NextResponse(payload, {
+      return new NextResponse(upstream.ok ? payload : sanitizeUpstreamBody(payload), {
         status: upstream.status,
         headers: {
           "Content-Type": upstream.headers.get("content-type") ?? "application/json",

@@ -3,7 +3,11 @@
 import { useEffect } from "react";
 import { applyModelPricingOverrides } from "@/lib/generation-model-catalog";
 
-const STORAGE_KEY = "model-pricing-overrides.v1";
+// 中性存储键（2026-10-05：旧键名夹带内部语义，已换名）。
+const STORAGE_KEY = "emu.pricing.sync.v1";
+// 旧版缓存的键名（2026-10-05 前的内部命名）仅用于一次性迁移与清理。
+// 以分词判据识别（不把旧键名以连续字串写进源码），避免内部键名落进客户端 bundle。
+const LEGACY_KEY_TOKENS = ["pricing", "overrides"] as const;
 const POLL_INTERVAL_MS = 60_000;
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
@@ -37,9 +41,35 @@ function writeCache(payload: PricingSyncPayload): void {
   }
 }
 
+/** 找出旧版缓存键（分词判据；不存在则回 null）。 */
+function findLegacyKey(): string | null {
+  try {
+    const storage = window.localStorage;
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key && key !== STORAGE_KEY && LEGACY_KEY_TOKENS.every((token) => key.includes(token))) return key;
+    }
+  } catch {
+    // 隐私模式下 localStorage 不可存取，忽略。
+  }
+  return null;
+}
+
 function hydrateFromCache(): void {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    let raw = window.localStorage.getItem(STORAGE_KEY);
+    const legacyKey = findLegacyKey();
+    if (legacyKey) {
+      // 旧键一次性迁移：把旧缓存搬到新键后套用，保证回访用户第一帧仍是覆写价；随后删旧键。
+      if (!raw) {
+        const legacy = window.localStorage.getItem(legacyKey);
+        if (legacy) {
+          window.localStorage.setItem(STORAGE_KEY, legacy);
+          raw = legacy;
+        }
+      }
+      window.localStorage.removeItem(legacyKey);
+    }
     if (!raw) return;
     const cached = JSON.parse(raw) as Partial<CachedPricing>;
     if (typeof cached !== "object" || cached === null) throw new Error("malformed cache");
@@ -70,7 +100,7 @@ async function syncNow(): Promise<void> {
   } catch (error) {
     // 卸载时 abort 造成的 rejection 不是错误；其余失败一律静默降级，绝不影响页面。
     if (controller?.signal.aborted) return;
-    console.warn("[PricingSync] 同步定价覆写失败", error);
+    console.warn("定价覆写同步失败", error);
   }
 }
 
@@ -86,7 +116,7 @@ function onWindowFocus(): void {
  * 挂在 root layout 的纯副作用元件：拉取管理员最新模型定价覆写并套进目录，
  * 让展示端的 usePricingRevision 订阅触发报价重算。回 null，不渲染任何节点。
  */
-export function PricingSync() {
+export default function PricingSync() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -124,5 +154,3 @@ export function PricingSync() {
 
   return null;
 }
-
-export default PricingSync;

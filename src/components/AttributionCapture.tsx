@@ -31,7 +31,7 @@ function readCookie(name: string): string | null {
   return null;
 }
 
-export function AttributionCapture() {
+export default function AttributionCapture() {
   useEffect(() => {
     try {
       // 邀请码：首个邀请胜出，与首触互不影响（登入后由 /api/auth/me 交控面绑定）。

@@ -12,6 +12,13 @@
 // 两者方向相反。若复用 makeProxy，使用者可以把任意 key 打到闸道，等于绕过
 // 本站的帐号体系白嫖上游额度。
 
+import {
+  isErrorShapedPayload,
+  sanitizeUpstreamMessage,
+  sanitizeUpstreamValue,
+  stripInternalSuccessKeys,
+} from "@/lib/upstream-sanitizer";
+
 export const AGENT_GATEWAY_DEFAULT_ORIGIN = "https://store.tinchak0207.xyz";
 
 /** 10 秒硬超时：对话代理不该把请求挂死。 */
@@ -91,5 +98,35 @@ export async function callAgentGateway(
       json = null;
     }
   }
-  return { status: response.status, json, text };
+  if (response.ok) {
+    // HTTP 200 也可能是错误体（例：{"success":false,"New-Api-User":"7","model_ratio":5}）——
+    // 「只看 response.ok 就透传」会漏掉这路泄漏（红队 2026-10-05 Hack 实测：键名原样外泄）。
+    // 判据见 upstream-sanitizer 的 isErrorShapedPayload；判为错误形状则键名与值一并清洗。
+    if (json !== null && isErrorShapedPayload(json)) {
+      const safeJson = sanitizeUpstreamValue(json, { cleanKeys: true });
+      return {
+        status: response.status,
+        json: safeJson,
+        text: JSON.stringify(safeJson),
+      };
+    }
+    // 正常成功体是功能面：逐位透传，不套清洗（呼叫方靠 json 取值）；但内部基础设施
+    // 键名过同一道栏位闸（`stripInternalSuccessKeys`，与 middleware／proxy 共用 helper，
+    // 避免下次再分叉）。命中才改写；未命中回原 json/text 参照，字节不变。
+    if (json !== null) {
+      const { value, changed } = stripInternalSuccessKeys(json);
+      if (changed) {
+        return { status: response.status, json: value, text: JSON.stringify(value) };
+      }
+    }
+    return { status: response.status, json, text };
+  }
+  // 非 2xx：闸道／其后端会把内部实作细节（SQL 栏位名、内部头名、扫描错误）放进错误体。
+  // 各 agent 路由把这个 body 原样回给浏览器（`resp.json`／`resp.text`）＝一条对外泄漏路。
+  // 在**唯一**的出入点清洗，避免逐路由手写（红队 2026-10-05 实测）。
+  return {
+    status: response.status,
+    json: json === null ? null : sanitizeUpstreamValue(json, { cleanKeys: true }),
+    text: sanitizeUpstreamMessage(text) ?? text,
+  };
 }

@@ -10,13 +10,12 @@ const nextConfig = {
   // Vercel 远程构建跳过 lint＋型别检查（每次省约 60s）；本机 `npm run build` 照常把关。
   eslint: { ignoreDuringBuilds: process.env.VERCEL === "1" },
   typescript: { ignoreBuildErrors: process.env.VERCEL === "1" },
-  // 建置期版本指纹，供 /api/version 取证用（唯一消费者，不影响其他 bundle）。
-  // 必要性：VERCEL_GIT_COMMIT_SHA 只在 build 阶段保证存在、runtime 不保证；而 route 内
-  // new Date() 是「请求时间」不是「建置时间」。两者都会误导「生产跑的是哪一版」的取证，
-  // 故在此（=config 求值时 = build 时）冻结成常数，由 Next 内联进 server bundle。
+  // 建置期「新鲜度指纹」，供 /api/version 取证用（唯一消费者，不影响其他 bundle）。
+  // 必要性：route 内 new Date() 是「请求时间」不是「建置时间」，会误导「生产跑的是哪一版」
+  // 的取证，故在此（=config 求值时 = build 时）冻结成常数，由 Next 内联进 server bundle。
+  // 安全（红队 2026-10-05）：不再冻结 BUILD_COMMIT_SHA／BUILD_COMMIT_REF——git SHA 会
+  // 让对手精确对到版本打已知 CVE，且 /api/version 已不再回传；建置时间足以答「新鲜度」。
   env: {
-    BUILD_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA ?? "",
-    BUILD_COMMIT_REF: process.env.VERCEL_GIT_COMMIT_REF ?? "",
     BUILD_TIMESTAMP: new Date().toISOString(),
   },
   images: {
@@ -83,9 +82,17 @@ const nextConfig = {
       { source: "/v1/:path*", destination: "/api/v1/:path*" },
       // Gatus does not support path-based UI hosting, so the app renders the
       // /status page and proxies only its read-only status API.
+      //
+      // 收窄（红队 2026-10-05 Hack 实测）：原为 `/status/api/:path*` → 上游 nginx 把
+      // `/gatus-api/*` rewrite 成 Gatus `/api/v1/*`，而 deploy/gatus/config/config.yaml
+      // 没有 security 段 ⇒ 免登录即可打 Gatus 整个管理 API（/status/api/config、
+      // /status/api/endpoints…），公开面远大于页面实际所需。
+      // 页面唯一消费者是 StatusDashboard.tsx 的 `/status/api/endpoints/statuses`
+      // （page.tsx 的 SSR 直连上游，不过此 rewrite），故只放行这一条精确路径；
+      // 其余 /status/api/* 落回 Next 档案系统即 404。
         {
-          source: "/status/api/:path*",
-          destination: "https://store.tinchak0207.xyz/gatus-api/:path*",
+          source: "/status/api/endpoints/statuses",
+          destination: "https://store.tinchak0207.xyz/gatus-api/endpoints/statuses",
         },
       ],
     };

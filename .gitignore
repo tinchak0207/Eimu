@@ -188,3 +188,8 @@ redteam-*
 
 # 本地评测工作台（音乐基准：venv/音档/结果，11GB；不入库，需入库者自行 -f）
 /bench/
+
+# 开源发布素材包（2026-10-05）：eimu-music-agent 的 LICENSE/NOTICE/README/figs/eval，
+# 29MB、54 档，属对外发布物料而非 App 运行时代码 —— 不入 App repo（.vercelignore 另有同名排除，
+# 防止哪天被 git add 后被 CLI 部署一起上传）。
+/open-source/

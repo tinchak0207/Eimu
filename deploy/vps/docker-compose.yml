@@ -56,6 +56,9 @@ services:
       - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # [downloads 2026-10-05] Eimu 桌面版安装包静态目录（宿主 ./nginx/downloads），
+      # 供 conf.d 内 `location ^~ /downloads/` 直发，见 nginx/default.conf。
+      - ./nginx/downloads:/usr/share/nginx/downloads:ro
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     networks:

@@ -6,7 +6,7 @@ import { imageGenerationCoins, modelDisplayName } from "@/lib/provider-config";
 import { generationCapabilities, generationCoins } from "@/lib/generation-model-catalog";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
-import { getSiteUrlFromRequest } from "@/lib/site-url";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
@@ -71,7 +71,10 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
   // （agent / MCP list_models 读的就是这张表）。读取失败 → 空 map，全量照列。
   const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
 
-  const siteUrl = getSiteUrlFromRequest(req);
+  // 对外文档／openapi 链接一律用设定的公开域名（getSiteUrlFromEnv），不用请求 Host：
+  // 生产上 /v1 由控制面容器执行，请求 Host 会是内部绑定地址（红队实测回
+  // `x_docs_url: https://0.0.0.0:3000/docs`），那既是死链也是内部拓扑指纹。
+  const siteUrl = getSiteUrlFromEnv();
   const created = Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000);
 
   const data = SUPPORTED_GENERATION_MODEL_IDS.filter(

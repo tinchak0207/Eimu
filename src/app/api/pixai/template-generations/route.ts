@@ -7,6 +7,7 @@ import { authenticateImageUser } from "@/lib/image-billing";
 import { refundSyncCharge, commitSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
 import { QUOTA_PER_COIN } from "@/lib/new-api-client";
 import { PIXAI_TEMPLATE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { sanitizeUpstreamBody } from "@/lib/proxy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -102,8 +103,10 @@ async function handle(req: Request) {
 
   if (!response.ok) {
     const text = await response.text();
-    after(await refundSyncCharge(charged.charge, { status: response.status, detail: text.slice(0, 2000) }));
-    return new NextResponse(text, {
+    // 错误路径不得原样透传上游 body；成功路径仍逐位透传。
+    const safe = sanitizeUpstreamBody(text);
+    after(await refundSyncCharge(charged.charge, { status: response.status, detail: safe.slice(0, 2000) }));
+    return new NextResponse(safe, {
       status: response.status < 500 ? response.status : 502,
       headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" },
     });

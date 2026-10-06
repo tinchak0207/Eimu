@@ -324,6 +324,14 @@ export function CanvasEmbedOverlays({
 
   return (
     <>
+      {/* 样式理由（原以 CSS 注释写在样板字串内，会随 SSR/JS 对外下发，2026-10-05
+          移进本 JS 注释，样式本身一字未改）：
+          · 材质（背景/阴影/模糊）改由 lg-float 供给；这里只留尺寸与排版。
+          · 工作站态避让改由宿主完成：ImagePlayground 把整个 overlay 向右 dock
+            （--ce-dock-left = 面板宽 + 12px），画布全域随之右移，顶栏与左侧弹层
+            不再各自加 --ce-chrome-left（避免双重位移）。行动端面板在底部，宿主把
+            overlay 复位成全屏，这里只保留顶栏右缘约束让 chips 能换行。
+          · 行动端 chips 收敛：一排放得下，不再炸成两行大药丸。 */}
       <style>{`
         .ce-embed-root { height: ${height}; }
         @supports (height: 1dvh) { .ce-embed-root { height: ${toDvh(height)}; } }
@@ -332,7 +340,6 @@ export function CanvasEmbedOverlays({
           .ce-embed-root.ce-compact { height: min(72dvh, 620px) !important; }
         }
 
-        /* 材质（背景/阴影/模糊）改由 lg-float 供给；这里只留尺寸与排版。 */
         .ce-embed-bar-btn {
           touch-action: manipulation;
           -webkit-tap-highlight-color: transparent;
@@ -369,13 +376,8 @@ export function CanvasEmbedOverlays({
           .ce-embed-topbar, .ce-embed-leftpop { transition: none; }
         }
 
-        /* 工作站态避让改由宿主完成：ImagePlayground 把整个 overlay 向右 dock
-           （--ce-dock-left = 面板宽 + 12px），画布全域随之右移，顶栏与左侧弹层
-           不再各自加 --ce-chrome-left（避免双重位移）。行动端面板在底部，
-           宿主把 overlay 复位成全屏，这里只保留顶栏右缘约束让 chips 能换行。 */
         @media (max-width: 767px) {
           .ce-embed-topbar { right: 0.75rem; }
-          /* 行动端 chips 收敛：一排放得下，不再炸成两行大药丸。 */
           .ce-embed-topbar .ce-embed-bar-btn {
             min-width: 0;
             min-height: 2.125rem;

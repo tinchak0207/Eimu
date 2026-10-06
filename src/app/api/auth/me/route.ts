@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { MOCK_MODE, mockGetSelf } from "@/lib/mock";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
+import { sanitizeUpstreamMessage } from "@/lib/proxy";
 import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 import { ensureWelcomeGiftOnLogin } from "@/lib/welcome-gift-login";
 import {
@@ -244,7 +245,12 @@ export async function GET(req: NextRequest) {
         hasUserIdHeader: Boolean(userIdHeader),
       });
       return NextResponse.json(
-        { success: false, message: upstream.status === 401 ? "session_expired" : data?.message ?? "获取用户信息失败" },
+        {
+          success: false,
+          message: upstream.status === 401
+            ? "session_expired"
+            : sanitizeUpstreamMessage(data?.message) ?? "获取用户信息失败",
+        },
         { status: upstream.status === 401 ? 401 : 502 },
       );
     }

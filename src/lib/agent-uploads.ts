@@ -43,7 +43,7 @@ export async function mintUploadsTicket(sessionId: string): Promise<AgentUploads
   // LOCAL_TEST_MODE：与 agent-chat-client.ts 的 authHeaders 同款假头——站内代理的
   // resolveAgentCaller 在该模式下直接换 B 端 key，不验证这组头。缺这支本地重放
   // （导演台白模上传 → 铸票 → 拼公网 URL）会在登入检查处假性失败。
-  if (LOCAL_TEST_MODE) {
+  if (process.env.NODE_ENV !== "production" && LOCAL_TEST_MODE) {
     return mintTicketRequest(sessionId, { Authorization: "Bearer local-test-token", "x-user-id": "0" });
   }
   const token = getStoredToken();

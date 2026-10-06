@@ -1,4 +1,7 @@
-export type ProviderKey = "image_tinchak";
+export type { ProviderKey } from "./provider-key";
+export { PROVIDER_KEY, normalizeProviderKey } from "./provider-key";
+import { PROVIDER_KEY, type ProviderKey } from "./provider-key";
+
 export type ModelMode = "fast" | "quality";
 
 import {
@@ -59,7 +62,7 @@ export function resolveUpstreamModelId(requestedModelId: string, endpointModelId
 }
 
 export const PROVIDERS = {
-  image_tinchak: {
+  [PROVIDER_KEY]: {
     displayName: "图像工作室",
     iconPath: "/provider-icons/openai.svg",
     color: "from-slate-200 to-white",
@@ -77,14 +80,14 @@ export const PROVIDERS = {
 
 export const MODEL_CONFIGS: Record<ModelMode, Record<ProviderKey, string>> = {
   fast: {
-    image_tinchak: DEFAULT_IMAGE_MODEL_ID,
+    [PROVIDER_KEY]: DEFAULT_IMAGE_MODEL_ID,
   },
   quality: {
-    image_tinchak: DEFAULT_IMAGE_MODEL_ID,
+    [PROVIDER_KEY]: DEFAULT_IMAGE_MODEL_ID,
   },
 };
 
-export const PROVIDER_ORDER: ProviderKey[] = ["image_tinchak"];
+export const PROVIDER_ORDER: ProviderKey[] = [PROVIDER_KEY];
 
 export const initializeProviderRecord = <T>(defaultValue?: T) =>
   Object.fromEntries(PROVIDER_ORDER.map((key) => [key, defaultValue])) as Record<

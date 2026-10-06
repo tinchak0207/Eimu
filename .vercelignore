@@ -293,3 +293,14 @@ node_modules/@swc/*
 
 # 开源发布素材包（2026-10-05）：未追踪目录，不得随站点部署上传／对外可下载
 open-source/
+
+# [2026-10-05 补漏] 根层大目录漏列 = 整树部署被上传拖死。实测：从主工作区
+# `vercel deploy --prod` 走到 "Uploading (1.5GB/5.8GB)" 后连续 `Upload aborted`
+# （Vercel 按内容去重，报的是「自上次部署以来的新增量」，所以目录长大一次就炸一次）。
+# 这些目录是本地评测工作台／评测产出，主应用与建置期零引用（bench 仅被一支
+# *.test.ts 的字串提到，而 **/*.test.ts 本就不上传）。改走干净 worktree 发布也可规避，
+# 但那要求工作树无未提交在制品；根因还是在清单里补齐。
+/bench/
+/eval-music-improved-1004/
+/eval-music-besteffort-1004/
+/eval-music-beast-1004/

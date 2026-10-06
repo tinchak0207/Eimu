@@ -39,6 +39,21 @@ export async function POST(req: NextRequest) {
 }
 
 /**
+ * GET 的 cron 凭证：`Authorization: Bearer ${CRON_SECRET}`，常数时间比对。
+ *
+ * fail-closed（2026-10-05 红队修复）：旧写法 `if (cronSecret && provided !== cronSecret)`
+ * 在 CRON_SECRET 未配置时整段鉴权被跳过（无凭证 GET 实际进入 runCallbackWorkerOnce）；
+ * 且用 `!==` 非常数时间。现在未配置密钥、头缺失或比对失败一律 401。
+ */
+function cronAuthorized(req: NextRequest): boolean {
+  const expected = (process.env.CRON_SECRET ?? "").trim();
+  const authHeader = req.headers.get("authorization") ?? "";
+  const actual = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!expected || expected.length !== actual.length) return false;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
+}
+
+/**
  * 每分钟触发的 cron 入口，带 Authorization: Bearer ${CRON_SECRET}。
  *
  * **不要把 `crons` 加回 vercel.json。** 两个独立原因：
@@ -50,12 +65,10 @@ export async function POST(req: NextRequest) {
  *
  * 真正的触发来自 VPS crontab，每分钟打控制面自己的这个路由（见
  * /usr/local/bin/drain-callback-outbox.sh），用 `x-internal-worker-secret` 走 POST。
+ * GET 与 POST 现在同为 fail-closed：对应密钥未配置时不放行。
  */
 export async function GET(req: NextRequest) {
-  const cronSecret = (process.env.CRON_SECRET ?? "").trim();
-  const authHeader = req.headers.get("authorization") ?? "";
-  const provided = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (cronSecret && provided !== cronSecret) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const workerId = `callback-worker-cron:${req.headers.get("x-vercel-id") ?? "local"}:${Date.now()}`;

@@ -6,7 +6,7 @@
 // 结果作为相连子节点插回画布。
 //
 // 诚实原则（2026-08-15 修正）：模型清单来自站上真实供给
-// （PROVIDERS.image_tinchak.models + generationModel 显示名），不再摆
+// （PROVIDERS.primary.models + generationModel 显示名），不再摆
 // dall-e-3 / midjourney 这种站上根本不路由的假选项；生成按钮旁标「约 N 币」
 // 与扣费同源估价——花费喂到面前，暴君不用算帐。
 //
@@ -210,7 +210,7 @@ interface MentionState {
 function useImageModelOptions(): { id: string; label: string }[] {
   return useMemo(
     () =>
-      PROVIDERS.image_tinchak.models
+      PROVIDERS.primary.models
         .filter((id) => generationModel(id)?.kind !== "video")
         .map((id) => ({ id, label: generationModel(id)?.displayName ?? id })),
     [],

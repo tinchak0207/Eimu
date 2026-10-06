@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-export function PwaInstaller() {
+export default function PwaInstaller() {
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") return;

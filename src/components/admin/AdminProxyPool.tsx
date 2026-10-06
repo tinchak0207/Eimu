@@ -25,7 +25,7 @@ interface PoolData {
 }
 
 const REASON_TEXT: Record<string, string> = {
-  "not-running-on-control-plane": "此实例不运行在 VPS 控制面上，无法直连 adobe2api。请在控制面部署的站点查看代理池状态。",
+  "relay-not-configured": "本实例未配置到主站的内部中继通道，无法读取代理池状态。",
 };
 
 function badgeTone(status: string): string {
@@ -100,7 +100,7 @@ export function AdminProxyPool() {
         <div>
           <h2 className="text-lg font-semibold">代理池</h2>
           <p className="mt-1 text-sm text-black/45">
-            adobe2api 出口代理实时状态，每 10 秒自动刷新。
+            出口代理实时状态，每 10 秒自动刷新。
             {refreshedAt !== null && <span className="ml-1 text-black/35">上次更新 {new Date(refreshedAt).toLocaleTimeString("zh-CN", { hour12: false })}</span>}
           </p>
         </div>

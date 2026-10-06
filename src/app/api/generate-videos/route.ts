@@ -187,7 +187,14 @@ async function requestVideo(
 export async function POST(req: NextRequest) {
   const requestId = Math.random().toString(36).slice(2);
   const startedAt = Date.now();
-  const parsed = await readVideoRequest(req);
+  // 非法 JSON／破损 multipart 是客户端输入错误：解析失败回 400，不得落到未捕捉的 500，
+  // 也不得把解析器内部细节外泄（红队 2026-10-05）。
+  let parsed: Awaited<ReturnType<typeof readVideoRequest>>;
+  try {
+    parsed = await readVideoRequest(req);
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
   const prompt = parsed.prompt.trim();
   // 宽容解析：`seedance 2.0`（显示名风格分隔符）归一成 `seedance-2.0`，同一模型不因写法被拒。
   const modelId = resolveGenerationModelId(parsed.modelId.trim()) ?? parsed.modelId.trim();

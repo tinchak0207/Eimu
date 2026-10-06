@@ -2,6 +2,7 @@ import type { AgentImageItem } from "@/lib/agent-chat-types";
 import type { HistoryEntry } from "@/lib/history-types";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { firstShareableIndex } from "@/lib/share-remix";
+import { PROVIDER_KEY } from "@/lib/provider-key";
 
 /**
  * 助理出图 → 历史记录（分享的前置）。
@@ -24,7 +25,7 @@ export function agentHistoryEntry(item: AgentImageItem): HistoryEntry {
     entryKind: "image",
     modelId,
     ...(item.taskId ? { taskId: item.taskId } : {}),
-    results: [{ provider: "image_tinchak", modelId, image: null, imageUrl: item.url, ...(item.taskId ? { taskId: item.taskId } : {}) }],
+    results: [{ provider: PROVIDER_KEY, modelId, image: null, imageUrl: item.url, ...(item.taskId ? { taskId: item.taskId } : {}) }],
   };
 }
 

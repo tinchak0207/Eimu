@@ -4,6 +4,8 @@
 
 import { NextResponse } from "next/server";
 import { authenticateImageUser } from "@/lib/image-billing";
+import { sanitizeUpstreamBody } from "@/lib/proxy";
+import { isErrorShapedPayload, sanitizeErrorShapedPayload } from "@/lib/upstream-sanitizer";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -63,7 +65,24 @@ export async function POST(req: Request) {
   }
 
   const text = await response.text();
-  return new NextResponse(text, {
+  if (!response.ok) {
+    // 错误路径不得原样透传上游 body；成功路径仍逐位透传（前端认 mediaId 等功能字段）。
+    return new NextResponse(sanitizeUpstreamBody(text), {
+      status: response.status,
+      headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" },
+    });
+  }
+  // 上游也会用 HTTP 200 包错误体（例：{"success":false,"message":"Scan error used_quota"}）——
+  // 只看 `response.ok` 会漏掉这路。改按 payload 形状判定：错误形状则值级脱敏（不动键名、
+  // 不碰数字功能字段），正常成功体逐位透传。
+  let safeText = text;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (isErrorShapedPayload(parsed)) safeText = sanitizeErrorShapedPayload(text);
+  } catch {
+    // 非 JSON：原样透传。
+  }
+  return new NextResponse(safeText, {
     status: response.status,
     headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" },
   });

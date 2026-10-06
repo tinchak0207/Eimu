@@ -15,7 +15,7 @@ export const AGENT_PARAM_LABELS: ReadonlyArray<{
 ];
 
 export interface UseAgentParamReflectOptions {
-  /** 现行模型 id（快照 baseline 用，即调用方的 selectedModels.image_tinchak）。 */
+  /** 现行模型 id（快照 baseline 用，即调用方的 selectedModels.primary）。 */
   modelId: string;
   aspectRatio: AspectRatio;
   outputResolution: OutputResolution;

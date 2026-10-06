@@ -147,7 +147,6 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/lora-preferences": "lora-user-state 以 generationDatabaseConfigured() 闸，Vercel 走 Blob",
   "/api/mcp": "biz-api-key-store 以 bizKeyDatabaseEnabled() 闸 DB，Vercel 走 Blob 镜像＋BIZ_API_KEY_HASHES 兜底",
   "/api/media-download": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB；只做上游媒体 fetch 代理，不触库",
-  "/api/models": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/notifications": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/notifications/active-modal": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/notifications/announcements/[id]": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
@@ -160,7 +159,6 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/payments/mapay/return": "只用 creditMapayOrderViaRelay 打控面",
   "/api/payments/mapay/health": "只读付款对帐探针；需控制面 DB＋支付商凭证，Vercel 本地副本 generationDatabaseConfigured()=false 回 configured=false＋HTTP 503（不假装 healthy）；gatus 探针直打控面 origin 的 /image-control 同路径",
   "/api/pixai/upload": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
-  "/api/pricing": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/project-assets": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/project-assets/shares": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/recipe-templates": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
@@ -187,7 +185,6 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/user/self/groups": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/user/topup/info": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/user/topup/self": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
-  "/api/version": "只读 generationControlPlaneEnabled()/generationDatabaseConfigured() 布林值作取证，不触库",
   "/api/workflow-completion": "agent-memory-store 以 dbAvailable()（getGenerationSql 包 try/catch）判定，Vercel 走 Blob/记忆体；server-history-store 只取 artifact-service 纯函式",
 };
 

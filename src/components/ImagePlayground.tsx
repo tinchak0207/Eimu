@@ -20,6 +20,7 @@ import { useIsNarrow } from "@/hooks/use-is-narrow";
 import {
   MODEL_CONFIGS,
   PROVIDERS,
+  PROVIDER_KEY,
   ProviderKey,
 } from "@/lib/provider-config";
 import {
@@ -87,7 +88,7 @@ import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 /** 卡片的四个面。第四个面 agent 与 edit / upscale 同级，见 PromptInput。 */
 type PlaygroundMode = PromptInputMode;
 
-export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) {
+export default function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
   // D-1 + D-24 状态B：agent 是卡片的第四个面，和 edit / upscale 同一层级的 toggle。
@@ -155,10 +156,10 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
   const [selectedModels, setSelectedModels] = useState(MODEL_CONFIGS.fast);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(() => defaultAspectRatio(MODEL_CONFIGS.fast.image_tinchak));
-  const [outputResolution, setOutputResolution] = useState<OutputResolution>(() => defaultOutputResolution(MODEL_CONFIGS.fast.image_tinchak));
-  const [durationSeconds, setDurationSeconds] = useState<number | undefined>(() => defaultDuration(MODEL_CONFIGS.fast.image_tinchak));
-  const [generateAudio, setGenerateAudio] = useState(() => defaultGenerateAudio(MODEL_CONFIGS.fast.image_tinchak));
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(() => defaultAspectRatio(MODEL_CONFIGS.fast.primary));
+  const [outputResolution, setOutputResolution] = useState<OutputResolution>(() => defaultOutputResolution(MODEL_CONFIGS.fast.primary));
+  const [durationSeconds, setDurationSeconds] = useState<number | undefined>(() => defaultDuration(MODEL_CONFIGS.fast.primary));
+  const [generateAudio, setGenerateAudio] = useState(() => defaultGenerateAudio(MODEL_CONFIGS.fast.primary));
   const [stylePreset, setStylePreset] = useState<StylePreset>("none");
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
 // PixAI edit/upscale results are delivered straight to the result canvas on
@@ -616,7 +617,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    */
   const handleModelChange = useCallback((modelId: string) => {
     const normalized = normalizeGenerationConfig(modelId).config;
-    setSelectedModels((current) => ({ ...current, image_tinchak: modelId }));
+    setSelectedModels((current) => ({ ...current, primary: modelId }));
     setAspectRatio(normalized.aspectRatio);
     setOutputResolution(normalized.outputResolution);
     setDurationSeconds(normalized.durationSeconds);
@@ -634,7 +635,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     userSetOutputResolution,
     userSetModel,
   } = useAgentParamReflect({
-    modelId: selectedModels.image_tinchak,
+    modelId: selectedModels.primary,
     aspectRatio,
     outputResolution,
     handleModelChange,
@@ -646,17 +647,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    * 模型不支持参考图时清空并说明原因。
    */
   useEffect(() => {
-    if (generationModel(selectedModels.image_tinchak)?.referenceImages) return;
+    if (generationModel(selectedModels.primary)?.referenceImages) return;
     if (referenceImages.length === 0) return;
     setReferenceImages([]);
-  }, [selectedModels.image_tinchak, referenceImages.length]);
+  }, [selectedModels.primary, referenceImages.length]);
 
   const handlePromptSubmit = useCallback(async (rawPrompt: string) => {
     if (!LOCAL_TEST_MODE && (!isLoggedIn || !user)) {
       redirectToGithub();
       return;
     }
-    const requiredCoins = generationCoins(selectedModels.image_tinchak, {
+    const requiredCoins = generationCoins(selectedModels.primary, {
       resolution: outputResolution,
       durationSeconds,
       generateAudio,
@@ -678,9 +679,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     }
     const finalPrompt = enhancePrompt(rawPrompt, stylePreset);
     setProgressStartedAt(Date.now());
-    setProgressDurationMs(etaDurationForModel(selectedModels.image_tinchak));
+    setProgressDurationMs(etaDurationForModel(selectedModels.primary));
     setShowProgress(true);
-    await startGeneration(finalPrompt, ["image_tinchak"], { image_tinchak: selectedModels.image_tinchak }, {
+    await startGeneration(finalPrompt, [PROVIDER_KEY], { primary: selectedModels.primary }, {
       referenceImages,
       qualityMode: outputResolution === "1k" ? "fast" : "quality",
       aspectRatio,
@@ -728,7 +729,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
 
   const revealGeneratedResult = !showProgress;
   const resultView = useMemo(() => {
-    const key: ProviderKey = "image_tinchak";
+    const key: ProviderKey = PROVIDER_KEY;
     const imageItem = images.find((img) => img.provider === key);
     // agent 模式只产图片（kotone-bridge 回传的是静态图）。右侧空态与展示都
     // 该按图片走，不能继承普通模式的影片模型选择——否则右侧空态显示
@@ -829,8 +830,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onGenerateAudioChange={setGenerateAudio}
                     referenceImages={referenceImages}
                     onReferenceImagesChange={setReferenceImages}
-                    models={PROVIDERS.image_tinchak.models}
-                    modelId={selectedModels.image_tinchak}
+                    models={PROVIDERS.primary.models}
+                    modelId={selectedModels.primary}
                     onModelChange={userSetModel}
                     mode={mode}
                     onModeChange={handleModeChange}
@@ -873,7 +874,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                 <div id="generation-result" className={cn("flex min-w-0 flex-col xl:min-h-0", inCanvasWorkstation && "hidden")}>
                   <ImageDisplay
                     modelId={resultView.modelId}
-                    provider="image_tinchak"
+                    provider={PROVIDER_KEY}
                     image={resultView.image}
                     imageUrl={resultView.imageUrl}
                     videoUrl={resultView.videoUrl}

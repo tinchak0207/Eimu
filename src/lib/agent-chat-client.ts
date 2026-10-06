@@ -232,7 +232,7 @@ function extractMessage(data: unknown, status: number): string {
 function authHeaders(reason: string): Record<string, string> {
   // LOCAL_TEST_MODE：本机视觉重放/截图用，送假凭证即可——站内代理的
   // resolveAgentCaller 在该模式下直接换 B 端 key，不验证这组头。
-  if (LOCAL_TEST_MODE) {
+  if (process.env.NODE_ENV !== "production" && LOCAL_TEST_MODE) {
     return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
   }
   const token = getStoredToken();
@@ -248,7 +248,7 @@ function authHeaders(reason: string): Record<string, string> {
  *  「只有一半凭证就报错」语义区分开：无 UI 的旁生请求不该因登录态
  *  缺失而制造噪音。 */
 export function tryAuthHeaders(): Record<string, string> | null {
-  if (LOCAL_TEST_MODE) {
+  if (process.env.NODE_ENV !== "production" && LOCAL_TEST_MODE) {
     return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
   }
   const token = getStoredToken();

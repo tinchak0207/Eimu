@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ImagePlayground } from "@/components/ImagePlayground";
+import ImagePlayground from "@/components/ImagePlayground";
 import { getAllSuggestions } from "@/lib/suggestions";
 import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/site-copy";
 import { getSiteUrlFromEnv } from "@/lib/site-url";

@@ -4,6 +4,7 @@ import { mergeLineageIntoHost, parentsFromReferences } from "./lineage";
 import type { LineageLink } from "./lineage";
 import type { HistoryEntry } from "./history-types";
 import { displayGenerationPrompt } from "./web-task-prompt";
+import { PROVIDER_KEY } from "./provider-key";
 
 export function generationJobHistoryEntry(job: GenerationJob): HistoryEntry {
   const task = generationTaskProjection(job, { includePrompt: true });
@@ -37,7 +38,7 @@ export function generationJobHistoryEntry(job: GenerationJob): HistoryEntry {
     ...(lineage?.lineage ? { lineage: lineage.lineage } : {}),
     ...(lineage?.lineageTruncated ? { lineageTruncated: true } : {}),
     results: task.results.map((result) => ({
-      provider: "image_tinchak",
+      provider: PROVIDER_KEY,
       modelId: task.modelId,
       image: null,
       imageUrl: task.kind === "video_generate" ? null : result.url,
