@@ -498,21 +498,19 @@ function parseDeclaredSectionCount(prompt: string): number | null {
  * ② 标签形 `BPM: 146`／`BPM：146`（非方括号，不会被伪标签改写）；③ 前缀冒号形 `Tempo: 146`／`tempo：146`
  * （含 tempo 这一全球通用的速度词）；④ 前缀空格形 `BPM 146`／`tempo 146`。③④ 不是方括号伪标签，
  * rewritePseudoTags 不会改写，旧版因此静默跳过（2026-10-06 对抗验收）。值放宽到 1-4 位整数＋可选小数
- * （`87.5 BPM` 不再静默跳过），并接受**紧贴数字**的负号（`-?\d`）：负号只有与数字相邻才算符号，
- * 带空格的是范围连字符——故 `-10 BPM` 取到 **-10**（无效输入，交判定层跳过），
- * 而 `range 120 - 140 BPM` 取到 **140**（正常的区间写法，不因连字符误判）。
+ * （`87.5 BPM` 不再静默跳过）。
+ * 不做负号捕获：捕获负号会把减号区间（`120-140 BPM`）误当负值，代价大于收益。带符号的写法本就属
+ * 无意义输入，按无符号判即可。
  * 多形状同时命中时取**文本中先出现**的那个（与既有「取首值」语义一致）；
  * 同一起点先取后缀形。`tempo`／`bpm` 后不接数字（如 `tempo: slow`）不匹配。全角数字先归一。
  */
 function parseBpm(prompt: string): number | null {
   const text = widenFullWidthDigits(prompt);
   const patterns = [
-    // 后缀形的负号必须放在 `\b` 之前：`\b(-?\d…)` 的 `\b` 落在 `-` 与数字之间，
-    // 负号会被排除在匹配起点外（`-10 BPM` 只会取到 `10`）。`-?\b\d…` 才能把紧贴数字的负号纳入。
-    /(-?\b\d{1,4}(?:\.\d+)?)\s*bpm\b/gi,
-    /\bbpm\s*[:：]\s*(-?\d{1,4}(?:\.\d+)?)/gi,
-    /\b(?:bpm|tempo)\s*[:：]\s*(-?\d{1,4}(?:\.\d+)?)/gi,
-    /\b(?:bpm|tempo)\s+(-?\d{1,4}(?:\.\d+)?)/gi,
+    /\b(\d{1,4}(?:\.\d+)?)\s*bpm\b/gi,
+    /\bbpm\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi,
+    /\b(?:bpm|tempo)\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi,
+    /\b(?:bpm|tempo)\s+(\d{1,4}(?:\.\d+)?)/gi,
   ];
   let bestIndex = Number.POSITIVE_INFINITY;
   let bestValue: number | null = null;
@@ -546,10 +544,9 @@ export function evaluatePromptChecks(
   options: Pick<MusicDirectorOptions, "sectionSeconds" | "declaredSectionCount"> = {},
 ): PromptCheck[] {
   const bpm = parseBpm(prompt);
-  // BPM「取到但不合法」（0 或紧贴数字的负号写法）＝无效输入，必须走跳过：不得拿去算小节
-  // （0 ⇒ barSeconds = Infinity ⇒ bars ≈ 0 ⇒ 被误判「全部落在小节线上」（假通过）；
-  //  -N ⇒ barSeconds 为负 ⇒ 每段都被判非整数，与真实的「不在小节线上」无关＝凭空判失败）。
-  // 非有限值已由 parseBpm 的 Number.isFinite 挡掉，此处补 0 与负值这一路。
+  // BPM「取到但为 0」＝无效输入，必须走跳过：0 ⇒ barSeconds = Infinity ⇒ bars ≈ 0 ⇒
+  // 被误判「全部落在小节线上」（假通过）。解析只认无符号 1-4 位数字，故 `!(bpm > 0)` 现只会被
+  // 字面 `0 BPM` 触发；非有限值已由 parseBpm 的 Number.isFinite 挡掉。
   const bpmInvalid = bpm !== null && !(bpm > 0);
   const sectionSeconds =
     options.sectionSeconds && options.sectionSeconds.length > 0
@@ -565,7 +562,7 @@ export function evaluatePromptChecks(
     alignment = {
       kind: "bpm-section-alignment",
       ok: true,
-      detail: "BPM 不合法（0 或负值），跳过小节对齐判定。",
+      detail: "BPM 不合法（0），跳过小节对齐判定。",
     };
   } else if (bpm === null || !hasSections) {
     alignment = {
@@ -579,9 +576,9 @@ export function evaluatePromptChecks(
     for (let index = 0; index < sectionSeconds.length; index += 1) {
       const seconds = sectionSeconds[index];
       const bars = seconds / barSeconds;
-      if (seconds < 0) {
-        // 负号已进捕获组：负时长是不可成立的声明，直接判异常（不静默当正数看）。
-        offBeat.push(`第 ${index + 1} 段 ${seconds}s 为负值（段落时长不可为负）`);
+      if (seconds <= 0) {
+        // 零长度与负值同规：零时长 bars=0 会被 Math.round 判成「落在小节线上」假通过。
+        offBeat.push(`第 ${index + 1} 段 ${seconds}s 非正（段落时长不可为 0 或负）`);
       } else if (Math.abs(bars - Math.round(bars)) > 1e-6) {
         offBeat.push(`第 ${index + 1} 段 ${seconds}s ÷ ${barSeconds.toFixed(4)}s = ${bars.toFixed(3)} 小节（非整数）`);
       }
