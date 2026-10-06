@@ -37,6 +37,23 @@ import {
 /** 契约 §4：private active docs 注入上限。 */
 export const MEMORY_INJECTION_MAX_PRIVATE_DOCS = 8;
 
+/**
+ * 偏好类记忆判定——逐行等价复刻 gateway `deploy-staging/gateway/memory-wiring.ts:63-67`
+ * 的 `isPreferenceMemoryDoc`（slug 前缀 `pref-`/`preference-`，或 domain 命中
+ * pref/preference/preferences/user/profile/feedback）。repo 侧没有该判定，故照抄。
+ *
+ * 为什么在这里截断而不是把全量交给网关：网关 `memory-wiring.ts:107` 会
+ * **先** `slice(0, MEMORY_PRIVATE_DOCS_MAX)` **再**按本判定分区（`:110-123`），
+ * 若上游把字母序的原始清单整批送过去，偏好档仍会在网关截断处被专案档挤掉——
+ * 优先级修复必须在「截断发生之前」完成。故此处先按偏好优先重排、再截 8，
+ * 使送出的 8 条已是偏好优先序，网关的二次 cap 与分区都不会再丢偏好档。
+ */
+export function isPreferenceMemoryDoc(d: { domain?: unknown; slug?: unknown }): boolean {
+  const slug = typeof d.slug === "string" ? d.slug : "";
+  const domain = typeof d.domain === "string" ? d.domain : "";
+  return /^pref(erence)?[-_]/i.test(slug) || /^(pref|preference|preferences|user|profile|feedback)$/i.test(domain);
+}
+
 export interface MemoryInjectionPayload {
   memory_docs: AgentMemoryDoc[];
   memory_index_md: string;
@@ -119,7 +136,7 @@ export async function deriveMemoryOwnerKey(
  * 组装注入 payload（契约 §4 两栏）。
  *
  * - `memory_docs`：store 现成 `listMemoryDocs({ scope: "private", ownerKey })`
- *   的 active docs（已含 body、驼峰栏位不动），按 store 排序截 ≤8；
+ *   的 active docs（已含 body、驼峰栏位不动），**偏好档优先**重排后截 ≤8；
  *   缺 ownerKey（无此键 → 无此账户的私有记忆可注入）时回 `[]`。
  * - `memory_index_md`：`await readMemoryIndexMd("shared")`，不截断。
  * - 任何失败（blob 不可达等）→ 对应栏空值，不抛。
@@ -133,7 +150,15 @@ export async function buildMemoryInjectionPayload(
   if (owner) {
     try {
       const docs = await listMemoryDocs({ scope: "private", ownerKey: owner });
-      memoryDocs = docs.slice(0, MEMORY_INJECTION_MAX_PRIVATE_DOCS);
+      // 偏好档优先于专案档再截 8：store 的排序真源是 domain.localeCompare
+      // （agent-memory-store.ts:431），字母序靠后的 pref-* 会被纯 slice 丢掉，
+      // 网关的事后分区（memory-wiring.ts:110-123）救不回来（截断已先发生）。
+      // 故此处同序重排（偏好在前、其余在后，组内保持 store 原序）后再 cap。
+      const ordered = [
+        ...docs.filter(isPreferenceMemoryDoc),
+        ...docs.filter((d) => !isPreferenceMemoryDoc(d)),
+      ];
+      memoryDocs = ordered.slice(0, MEMORY_INJECTION_MAX_PRIVATE_DOCS);
     } catch {
       memoryDocs = []; // 私有库不可达：不注入，不阻塞
     }

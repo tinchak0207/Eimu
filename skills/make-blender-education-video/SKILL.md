@@ -1,6 +1,6 @@
 ---
 name: make-blender-education-video
-description: Create high-detail, fact-checked English cinematic educational animations in Blender for science, engineering, architecture, construction, manufacturing, machines, infrastructure, energy, medicine, biology, computing, and other complex systems. Use for Blender-based explainer videos that require authoritative research or supplied sources, reusable topic-specific GitHub workflows and assets, a user-provided visual reference or defined style, a realistic or stylized 3D scene, burned-in subtitles, one representative approval frame before full rendering, and verified 4K delivery.
+description: Create high-detail, fact-checked English cinematic educational animations in Blender for science, engineering, architecture, construction, manufacturing, machines, infrastructure, energy, medicine, biology, computing, and other complex systems. Use for Blender-based explainer videos that require authoritative research or supplied sources, reusable topic-specific GitHub workflows and assets, a user-provided visual reference or defined style, a realistic or stylized 3D scene, burned-in subtitles, one representative approval frame before full rendering, and verified high-resolution delivery.
 ---
 <!--
 来源（轮子）: https://github.com/sunxiayi/make-blender-education-video-skill
@@ -17,9 +17,9 @@ Blender 5.2 雷区（仅 Blender 类配方适用）：① BLENDER_EEVEE_NEXT 已
 
 Create an English cinematic explainer that teaches a correct mental model and meets an explicit visual-quality reference.
 
-## Prerequisite: Blender must be installed
+## Prerequisite: the Blender toolchain must be reachable
 
-Blender is a hard prerequisite for this skill. Before creating scenes, running Blender Python, or rendering any frame, verify that Blender is installed, launches successfully, and exposes a usable executable path. If it is missing, stop production and ask the user to download and install Blender from the official download page: <https://www.blender.org/download/>. Downloading the application alone is not sufficient; resume only after Blender is installed and runnable. Report the detected Blender version before proceeding.
+Blender rendering runs through this harness's Blender toolchain (`blender_exec`, `blender_render`, `blender_export_gltf`, backed by the Blender bridge). Before creating scenes, running Blender Python, or rendering any frame, confirm the toolchain is reachable and reports a Blender version. If the toolchain is unavailable, report the environment gap honestly and look for a viable alternative path before escalating to the user; never stop production merely by asking the user to install Blender themselves. Report the detected Blender version before proceeding.
 
 ## Non-negotiable output
 
@@ -32,7 +32,7 @@ Blender is a hard prerequisite for this skill. Before creating scenes, running B
 - Animate the subject and the process for real in Blender. Every narrated process shot must show a meaningful frame-to-frame change in the relevant material, object, mechanism, flow, or system state, including the cause and visible effect. Camera movement alone does not count as process animation.
 - Never substitute a still image, slideshow, repeated frame, Ken Burns pan/zoom, 2.5D drift, or crossfade montage for an animation that is supposed to explain manufacturing, operation, construction, transformation, biological change, transport, or another dynamic process. Brief still holds are allowed only for establishing context, transitions, or emphasis; they must not carry the process explanation.
 - Burn English subtitles into the final picture using the required subtitle style below unless the user explicitly opts out of subtitles or captions.
-- Default to 16:9, 4K, and 30 fps unless the user requests different delivery specifications.
+- Default delivery to 16:9, 1920x1080, and 30 fps unless the user requests different specifications. Match the resolution to the delivery target; use 4K (3840x2160) only when the user explicitly asks for it.
 - Never speed up, slow down, time-stretch, or time-compress generated narration, including micro-adjustments made only to fit shot boundaries. Treat native-speed narration as timing authority: regenerate it at the intended original speed when needed, then rearrange, extend, or retime the picture edit and rebuild subtitle timings around the resulting waveform.
 - Treat physical plausibility as a hard approval requirement. Every salient object, material, interface, and motion shown in a literal scene must have a real-world counterpart or authoritative reference at the depicted scale. Reject decorative or conceptual stand-ins that could be mistaken for literal equipment, material, or process behavior.
 - Never represent microscopic fibers, molecules, forces, field lines, flow, or other invisible phenomena as macroscopic solid rods, tubes, wires, or particles inside an otherwise literal scene. When such teaching imagery is necessary, isolate it in a clearly disclosed conceptual inset or scale-transition shot.
@@ -63,7 +63,7 @@ Also confirm any choice that changes factual content, such as jurisdiction, cons
 
 Resolve this skill's installed directory as an absolute path before invoking bundled scripts. Do not assume the current working directory is the skill directory.
 
-After the intake and before production, verify the installed Blender version and executable path again, then verify that Python 3.9 or newer, FFmpeg, and FFprobe are available. Confirm that FFmpeg provides the required H.264 or H.265 encoder and ASS/libass subtitle filter. Verify that the Kokoro-82M runtime can load `hexgrad/Kokoro-82M` and synthesize the selected English voice at native speed. Record the exact Kokoro-82M model revision and voice used. If a dependency is missing, report it before creating scenes or renders; do not substitute another TTS engine. Never attempt Blender production through a web substitute when the local Blender prerequisite is unmet. Confirm that the selected subtitle font is installed; if Arial is unavailable, use a metrically suitable sans-serif substitute and visually recheck wrapping and safe margins.
+After the intake and before production, verify the Blender toolchain is still reachable, then verify that Python 3.9 or newer, FFmpeg, and FFprobe are available. Confirm that FFmpeg provides the required H.264 or H.265 encoder and ASS/libass subtitle filter. Verify that the Kokoro-82M runtime can load `hexgrad/Kokoro-82M` and synthesize the selected English voice at native speed. Record the exact Kokoro-82M model revision and voice used. If a dependency is missing, report it before creating scenes or renders; do not substitute another TTS engine. Never attempt Blender production through a web substitute when the Blender toolchain is unavailable. Confirm that the selected subtitle font is installed; if Arial is unavailable, use a metrically suitable sans-serif substitute and visually recheck wrapping and safe margins.
 
 ## Follow the workflow
 
@@ -113,7 +113,7 @@ Use Blender Python, Geometry Nodes, or instancing for repeated or dense structur
 
 ### 7. Render exactly one approval frame and stop
 
-Apply [visual-quality.md](references/visual-quality.md). Render exactly one representative 4K frame containing the hardest material, finest readable detail, darkest region, brightest highlight, and intended depth of field. Do not require a label, legend, chapter card, or teaching overlay in the approval frame. Include optional scene text only when the user explicitly requested it. Include one sample burned-in subtitle unless the user explicitly opted out of subtitles/captions.
+Apply [visual-quality.md](references/visual-quality.md). Render exactly one representative frame at the target delivery resolution containing the hardest material, finest readable detail, darkest region, brightest highlight, and intended depth of field. Do not require a label, legend, chapter card, or teaching overlay in the approval frame. Include optional scene text only when the user explicitly requested it. Include one sample burned-in subtitle unless the user explicitly opted out of subtitles/captions.
 
 Show the frame to the user and ask: **"Would you like to modify the style, level of detail, composition, lighting, or subtitle treatment before I create the full video?"** If the user explicitly requested optional scene text, also ask about its treatment. Wait for an explicit response.
 
@@ -158,7 +158,7 @@ Unless the user explicitly opted out of subtitles/captions, author captions as A
 - one line when readable and no more than two lines;
 - natural sentence case, synchronized to the spoken phrase.
 
-At 3840x2160, start with 92 px Arial, a 5 px dark outline, a 2 px shadow, 120 px horizontal margins, and a 90 px bottom margin. Adjust only when required for legibility while preserving the same visual treatment.
+At 1920x1080, start with 46 px Arial, a 3 px dark outline, a 1 px shadow, 60 px horizontal margins, and a 45 px bottom margin. Scale these values proportionally when the delivery resolution differs. Adjust only when required for legibility while preserving the same visual treatment.
 
 ### 10. Assemble and verify
 
@@ -176,7 +176,8 @@ python3 /ABS/PATH/TO/SKILL/scripts/compose_tutorial.py \
   --video /ABS/PATH/picture-master.mp4 \
   --narration /ABS/PATH/narration.wav \
   --captions /ABS/PATH/captions.ass \
-  --output /ABS/PATH/final-4k.mp4 \
+  --output /ABS/PATH/final.mp4 \
+  --resolution 1920x1080 \
   --audio-language eng \
   --codec h264 --preset slow --crf 14 --fps 30
 ```
@@ -186,10 +187,11 @@ If the user explicitly opted out of subtitles/captions, replace `--captions ...`
 Run structural and full-decode QA:
 
 ```bash
-python3 /ABS/PATH/TO/SKILL/scripts/verify_output.py /ABS/PATH/final-4k.mp4 \
+python3 /ABS/PATH/TO/SKILL/scripts/verify_output.py /ABS/PATH/final.mp4 \
   --expected-codec h264 --expected-fps 30 \
+  --expected-resolution 1920x1080 \
   --expected-duration EXPECTED_SECONDS \
-  --report /ABS/PATH/final-4k.qa.json
+  --report /ABS/PATH/final.qa.json
 ```
 
 Extract entry, intermediate, and exit frames from every process shot and inspect them as a temporal sequence; a single representative contact sheet is insufficient for motion QA. Verify that the subject or process state changes independently of camera motion, that the stated cause precedes its effect, and that the end state prepares the next shot. Reject any process shot that is only a still, repeated frame, pan, zoom, orbit, crossfade, or lighting change.
@@ -207,7 +209,7 @@ Do not call the film complete while any narrated process is represented only by 
 - `scripts/init_blender_education_project.py`: create a non-destructive project and copy templates.
 - `scripts/assemble_picture.py`: create a frame-exact BT.709 picture master.
 - `scripts/compose_tutorial.py`: combine picture, narration, burned-in subtitles, and optional user-requested overlays.
-- `scripts/verify_output.py`: verify 4K geometry, codec, tags, timing, audio, frames, and full decode.
+- `scripts/verify_output.py`: verify resolution geometry, codec, tags, timing, audio, frames, and full decode.
 - `assets/timeline_manifest.template.json`: starting point for edit decisions.
 - `assets/narration_plan.template.json`: starting point for English narration and claim status.
 - `assets/github_resource_review.template.json`: record GitHub candidates, compatibility, provenance, license, and safety decisions.

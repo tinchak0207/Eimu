@@ -7,8 +7,15 @@
  * 正文逐字复制，仅做「接入格式转换 + 外部工具引用剔除/映射」两类白名单改写
  * （逐条清单见各段注释与完工报告；完整对账结论见 KUNPENG_SKILL_AUDIT）。
  *
- * 接入方式：沿现有 agent-templates 的 directive 链路（模板卡点击 →
- * sessionDirective 随首条消息上送 → 网关拼进 system 注入），不建第二条注入通道。
+ * 【未接线·on-demand 资产（2026-10-06 P0-10）】本档 buildKunpengKnowledgeInjection()
+ * 当前**未接**入任何运行时注入链路，零生产消费者；全库仅 kunpeng-assets.test.ts 引用。
+ * 线上真链路是：模板卡 → 客户端上送 body.session_directive → 网关
+ * `deploy-staging/gateway/messages-gw.ts:701-702` sanitize 后存 state.sessionDirective
+ * → `:740-754` 以 dangerousUncachedSystemSection("directive-i") 拼进 system；该链路的
+ * 文案真源是 `src/lib/agent-templates-payload/`（本档不在其中，也未被其 import）。
+ * 若要启用本档：须在上述注入点显式接线（messages-gw.ts:751-754 的 directiveLines，或
+ * buildMemoryInjectionBlocks），并配一条真路径行为证据；在那之前勿假设它已在船——53KB
+ * 每轮常驻会严重膨胀上下文（违 B4）。
  * 文案一律简体中文。
  */
 
@@ -944,7 +951,8 @@ export const KUNPENG_SEEDANCE_RECONCILIATION = {
 
 /**
  * 组装完整注入文本：来源声明 + 各知识段落。
- * 沿 agent-templates.directive 同一链路（sessionDirective → 网关 system 注入）。
+ * 【未接线·仅测试引用（2026-10-06 P0-10）】**未接入**运行时注入链路，全库仅
+ * kunpeng-assets.test.ts 调用。真链路与接线点见本档头注释（messages-gw.ts:701-754）。
  */
 export function buildKunpengKnowledgeInjection(): string {
   const header = `以下是鲲鹏创作知识库（来源：${KUNPENG_SOURCE.sourceName} @ ${KUNPENG_SOURCE.sourceCommit}，${KUNPENG_SOURCE.license} License）。这些规则与现有生成规范并存：与本站现有规范冲突时，以本站规范为准，kunpeng 规则作为补充。`;

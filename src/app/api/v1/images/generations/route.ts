@@ -256,8 +256,12 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     return errorResponse(400, `n 需为 1 到 ${MAX_N} 之间的整数。`, "invalid_request_error", "invalid_n", traceId);
   }
 
-  // OpenAI 用 hd/standard，本站内部用 quality/fast。
-  const qualityMode: ModelMode = body.quality === "hd" || body.quality === "high" ? "quality" : "fast";
+  // OpenAI 用 hd/standard，本站内部用 quality/fast：两套词汇都收，统一收敛到
+  // 内部 ModelMode。`quality` 是本站在用词汇（MCP 工具即宣告此值），必须与
+  // `hd`/`high` 同档，否则按描述传 quality 会被静默降级到 fast。
+  const rawQuality = typeof body.quality === "string" ? body.quality.toLowerCase() : "";
+  const qualityMode: ModelMode =
+    rawQuality === "quality" || rawQuality === "hd" || rawQuality === "high" ? "quality" : "fast";
 
   // 提交解析度（2026-09-30）：显式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k；
   // 未宣告该档位的模型具名拒（不静默降级）。≤3072 的既有尺寸沿用旧品质规则，行为不变。

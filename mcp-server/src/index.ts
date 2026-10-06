@@ -25,7 +25,7 @@ async function run(): Promise<void> {
 
   server.tool(
     "list_models",
-    "列出 Image Studio 支援的模型（影像与影片），含端点与订阅价格资讯",
+    "列出 Image Studio 支持的模型（图像与视频），含端点与订阅价格资讯",
     {},
     async () => {
       const payload = await requestJson(`${config.apiBase}/models`, { method: "GET" }, config.apiKey);
@@ -35,13 +35,16 @@ async function run(): Promise<void> {
 
   server.tool(
     "generate_image",
-    "以 prompt 生成图片。非同步任务，内部会等待完成后回传成品 URL。",
+    "以 prompt 生成图片。异步任务，内部会等待完成后返回成品 URL。",
     {
-      model: z.string().describe("模型 id，例如 gpt-image-2 / nano-banana-3"),
+      model: z.string().describe("模型 id，例如 gpt-image-2 / gemini-3.1-flash-image"),
       prompt: z.string().describe("生成提示词"),
-      n: z.number().int().min(1).max(10).optional().describe("一次生成的数量，预设 1"),
-      size: z.string().optional().describe("影像尺寸，例如 1024x1024"),
-      quality: z.enum(["fast", "quality"]).optional().describe("品质模式，预设 fast"),
+      n: z.number().int().min(1).max(10).optional().describe("一次生成的数量，默认 1"),
+      size: z.string().optional().describe("图像尺寸，例如 1024x1024"),
+      quality: z
+        .enum(["fast", "quality"])
+        .optional()
+        .describe("品质档位：quality 为品质档，fast 为速度档，默认 fast；同时兼容 OpenAI 写法的 hd/high（等同 quality）"),
     },
     async ({ model, prompt, n, size, quality }) => {
       const body: Record<string, unknown> = { model, prompt };
@@ -54,14 +57,14 @@ async function run(): Promise<void> {
 
   server.tool(
     "generate_video",
-    "以 prompt 生成影片。非同步任务，内部会等待完成后回传成品 URL。",
+    "以 prompt 生成视频。异步任务，内部会等待完成后返回成品 URL。",
     {
-      model: z.string().describe("影片模型 id，例如 veo-3-1 / kling-3-0"),
-      prompt: z.string().describe("影片提示词"),
-      n: z.number().int().min(1).max(4).optional().describe("一次生成的数量，预设 1"),
+      model: z.string().describe("视频模型 id，例如 seedance-2.0 / minimax-h3"),
+      prompt: z.string().describe("视频提示词"),
+      n: z.number().int().min(1).max(4).optional().describe("一次生成的数量，默认 1"),
       size: z.string().optional().describe("画面比例或尺寸，例如 16:9 或 1920x1080"),
       duration_seconds: z.number().int().min(1).max(30).optional().describe("秒数"),
-      generate_audio: z.boolean().optional().describe("是否生成音讯"),
+      generate_audio: z.boolean().optional().describe("是否生成音频"),
     },
     async ({ model, prompt, n, size, duration_seconds, generate_audio }) => {
       const body: Record<string, unknown> = { model, prompt };
@@ -75,8 +78,8 @@ async function run(): Promise<void> {
 
   server.tool(
     "get_image_task",
-    "查询一个影像生成任务的目前状态（不等待完成）",
-    { task_id: z.string().describe("影像任务 id") },
+    "查询一个图像生成任务的当前状态（不等待完成）",
+    { task_id: z.string().describe("图像任务 id") },
     async ({ task_id }) => {
       const payload = await requestJson(`${config.apiBase}/images/${task_id}`, { method: "GET" }, config.apiKey);
       return { content: [{ type: "text", text: safeJsonText(payload) }] };

@@ -2,7 +2,7 @@
 // 预算常量、注入块组装、trace 三件、召回 prefetch、批次 deps 与 ticker、三个内部端点。
 // 逐行搬运自 /home/lenovo/Desktop/image-app/deploy-staging/gateway/index.ts，仅加 export 前缀＋本档头＋单行 import。
 // 注意：memoryBatch 单例与 ticker setInterval 是模组级副作用，原样搬运（载入即生效）。
-import { CorpusCache, recallTop, buildRecallQuery, renderRecallPrefix, clampRecallK, clipToUtf8Bytes, utf8ByteLength, RECALL_K_DEFAULT, RECALL_K_MAX, type RecallableDoc } from "./memory-recall"
+import { CorpusCache, recallTop, buildRecallQuery, renderRecallPrefix, clampRecallK, clipToUtf8Bytes, utf8ByteLength, memoryAgeDays, memoryFreshnessWarning, RECALL_K_DEFAULT, RECALL_K_MAX, type RecallableDoc } from "./memory-recall"
 import { MEMORY_SIGNATURE_HEADER, signMemoryBytes, signEmptyMemoryBody, createMemoryBatch, type MemorySessionRecord } from "./memory-batch"
 import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_RECALL_ENABLED, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
 import { bindingRef } from "./model-registry"
@@ -112,8 +112,15 @@ export function buildMemoryInjectionBlocks(
     const pushDoc = (d: (typeof docs)[number]) => {
       const domain = typeof d.domain === "string" && d.domain ? d.domain : "general"
       const slug = typeof d.slug === "string" && d.slug ? d.slug : "doc"
+      // P1（2026-10-06）：L0 私有块补新鲜度标示——复用召回路径同一人话函式
+      // （memory-recall.ts 的 memoryAgeDays/memoryFreshnessWarning，>1 天才加、强调「时间点
+      // 观察非活状态、file:line 可能过时、断言前先验现场」）。updatedAt 已随 doc 透传
+      // （MemoryDocLite 索引签名），零额外取数；今/昨/无时间资料 → 警示为空、不加噪音。
+      const freshness = memoryFreshnessWarning(memoryAgeDays(d.updatedAt))
       // §4 索引行格式：`- [domain] slug — description` + 正文缩排。
-      l0Parts.push(`- [${domain}] ${slug} — ${String(d.description ?? "")}\n   ${String(d.body ?? "")}`)
+      l0Parts.push(
+        `- [${domain}] ${slug} — ${String(d.description ?? "")}\n   ${String(d.body ?? "")}${freshness ? `\n${freshness.trimEnd()}` : ""}`,
+      )
       privateDocs.push(typeof d.id === "string" && d.id ? d.id : slug)
     }
     prefDocs.forEach(pushDoc)

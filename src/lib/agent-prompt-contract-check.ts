@@ -1,6 +1,12 @@
 /**
  * Agent 提示词契约检查器（吞 AID 产品层单向差，刀 3-③，2026-09-15）。
  *
+ * 【未接线·仅测试引用（2026-10-06 P0-10）】本档当前**未接**入运行时；全库仅
+ * agent-prompt-contracts.test.ts 与 editor-timeline-activation.test.ts 引用，零生产消费者
+ * ——「运营当场就能判定」目前不成立。若要启用：接线点在 Expert 回执入口——`src/lib/*-delegate.ts`
+ * 的 collect*DeliverableFromToolResult（如 editor-delegate.ts:353、music-delegate.ts:329），
+ * 接入后须配一条真路径行为证据。
+ *
  * 职责：把 AID §二「通用硬性规则」的第 1／2／4 条（纯 JSON、字符串内引号用
  * 「」、必填栏位不省）做成**机械检查**——运营改完提示词/模型换版后，当场就能
  * 判定输出是否仍合契约，不靠人眼读。

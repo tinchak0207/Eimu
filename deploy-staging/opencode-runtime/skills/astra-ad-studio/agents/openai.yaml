@@ -1,4 +1,4 @@
 interface:
   display_name: "Astra Ad Studio"
-  short_description: "Create finished ads directly inside Codex"
+  short_description: "Create finished ads directly in the current workspace"
   default_prompt: "Use $astra-ad-studio to create three finished ad concepts for my product."

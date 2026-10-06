@@ -36,6 +36,7 @@
       "style_dna_extract": false,
       "style_aligned_batch": false,
       "asset_provenance_archive": false,
+      "task": false,
       "question": true
     }
   },

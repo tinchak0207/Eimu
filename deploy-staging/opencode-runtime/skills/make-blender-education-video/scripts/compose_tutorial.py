@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely assemble a 4K Blender cinematic education video."""
+"""Safely assemble a Blender cinematic education video."""
 
 from __future__ import annotations
 
@@ -50,6 +50,14 @@ FFPROBE = find_tool(
         "ffprobe",
     ],
 )
+
+
+def parse_resolution(value: str) -> tuple[int, int]:
+    try:
+        width, height = (int(part) for part in value.lower().split("x", 1))
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"Invalid resolution {value!r}; expected WxH, e.g. 1920x1080.")
+    return (width, height)
 
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -161,7 +169,7 @@ def narration_filter(measurements: dict[str, str] | None, normalize: bool) -> st
     )
 
 
-def shallow_output_check(path: Path, codec: str, fps: int) -> None:
+def shallow_output_check(path: Path, codec: str, fps: int, resolution: tuple[int, int]) -> None:
     info = probe(path, count_frames=False)
     videos = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
     audios = [s for s in info.get("streams", []) if s.get("codec_type") == "audio"]
@@ -171,8 +179,9 @@ def shallow_output_check(path: Path, codec: str, fps: int) -> None:
     expected_codec = "hevc" if codec == "h265" else "h264"
     if video.get("codec_name") != expected_codec:
         raise SystemExit(f"Temporary output codec is {video.get('codec_name')}, expected {expected_codec}.")
-    if (video.get("width"), video.get("height")) != (3840, 2160):
-        raise SystemExit("Temporary output is not 3840x2160.")
+    expected_width, expected_height = resolution
+    if (video.get("width"), video.get("height")) != (expected_width, expected_height):
+        raise SystemExit(f"Temporary output is not {expected_width}x{expected_height}.")
     rate = video.get("avg_frame_rate", "0/1")
     numerator, denominator = (float(part) for part in rate.split("/", 1))
     observed_fps = numerator / denominator if denominator else 0
@@ -195,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--overlay", type=Path, help="Optional ASS title, section, and teaching cards")
     parser.add_argument("--output", type=Path, required=True, help="Final .mp4 path")
+    parser.add_argument("--resolution", type=parse_resolution, default=(1920, 1080), help="Delivery WxH (default 1920x1080).")
     parser.add_argument("--codec", choices=["h264", "h265"], default="h265")
     parser.add_argument(
         "--preset",
@@ -292,9 +302,10 @@ def main() -> int:
                 staged_overlay = temp_dir / "teaching_overlay.ass"
                 shutil.copy2(overlay, staged_overlay)
 
+            out_width, out_height = args.resolution
             video_filters = [
-                "scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos",
-                "pad=3840:2160:(ow-iw)/2:(oh-ih)/2:color=0x090D12",
+                f"scale={out_width}:{out_height}:force_original_aspect_ratio=decrease:flags=lanczos",
+                f"pad={out_width}:{out_height}:(ow-iw)/2:(oh-ih)/2:color=0x090D12",
                 "setsar=1",
                 f"fps={args.fps}",
             ]
@@ -404,7 +415,7 @@ def main() -> int:
 
         if not temp_output.is_file() or temp_output.stat().st_size < 1024:
             raise SystemExit("Encoder did not create a plausible temporary output.")
-        shallow_output_check(temp_output, args.codec, args.fps)
+        shallow_output_check(temp_output, args.codec, args.fps, args.resolution)
         os.replace(temp_output, output)
     finally:
         if temp_output.exists():
@@ -426,6 +437,8 @@ def main() -> int:
             args.codec,
             "--expected-fps",
             str(args.fps),
+            "--expected-resolution",
+            f"{args.resolution[0]}x{args.resolution[1]}",
             "--expected-duration",
             f"{video_duration:.6f}",
             "--report",

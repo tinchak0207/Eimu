@@ -1,8 +1,8 @@
 {
   "version": 1,
   "canvas": {
-    "width": 3840,
-    "height": 2160,
+    "width": 1920,
+    "height": 1080,
     "fps": 30,
     "total_frames": 900,
     "background": "0x090D12",

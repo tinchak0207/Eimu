@@ -123,7 +123,10 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
   {
     id: "image_generate",
     domain: "generation",
-    description: "Submit an image generation command to the existing generation-core owner.",
+    description:
+      "Submit an image or video generation command to the existing generation-core owner (kind=image|video, default image). " +
+      "Video only accepts the >=10s tiers (seedance-2.0 10-15s, seedance-2.5 10-30s); an image size must come from the site whitelist. " +
+      "Async: the harness auto-continues the task, so never poll for the result.",
     inputSchema: {
       type: "object",
       required: ["prompt"],
@@ -199,7 +202,10 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
   {
     id: "canvas_get_state",
     domain: "canvas",
-    description: "Read the current snapshot through the existing canvas state owner.",
+    description:
+      "Read the current canvas snapshot (nodes/connections/selection/viewport summary) through the existing canvas state owner. " +
+      "When the summary carries `dsl` (the reversible WorkflowDslSource[] declaration), edit that dsl and send it back with workflow_write to add/remove/edit workflow steps. " +
+      "When it carries `workflow_versions`, that is the per-node version history for workflow_history / workflow_rollback.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     outputArtifact: {
       kind: "canvas_snapshot",
@@ -214,11 +220,12 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
     domain: "canvas",
     description:
       "Dispatch existing CanvasAgentOp operations and await the frontend result callback. " +
-      "INSERTION RECIPE: to add a step/role/node, put add_node AND connect_nodes in the SAME batch, wiring the new node into the existing template graph " +
-      '(at least one inbound edge from an existing node), e.g. {"type":"add_node","node":{"id":"n1","type":"config","metadata":{"role":"额外步骤：配音"}}}, ' +
-      '{"type":"connect_nodes","connections":[{"fromNodeId":"<existing id>","toNodeId":"n1"}]}. ' +
-      "FAN-IN IS LEGAL: connecting several existing upstream nodes into one node (cross-lane fan-in) needs no prior delete_connections. " +
-      "Parallel duplicate generation is blocked: a new node that shares (type, role) with an open template slot, or an un-wired floating node, is rejected with the exact wiring fix. " +
+      "USE workflow_write FOR WORKFLOW EDITS: to change a production-line step's content or structure (nodes present in `dsl`), read `dsl`, edit `steps` and send the whole thing back with workflow_write (idempotent). " +
+      "Use canvas_apply_ops only for what a DSL cannot express (node position/size/hand-wired connections). " +
+      "NEVER hand-assemble add_node + connect_nodes to build a whole production-line structure (it bypasses the compiler and breaks reversibility). " +
+      "TEMPLATE INSERTION: when the canvas carries a user template (node ids prefixed tpl-), write generation into the template's existing -gen node via update_node {metadata.prompt/model/size} then run_generation on that id. " +
+      "To add one step/role, put add_node AND connect_nodes in the SAME batch, wiring the new node into the existing graph (at least one inbound edge from an existing node; cross-lane fan-in is legal and needs no prior delete_connections). " +
+      "A new node sharing (type, role) with an open template slot, or an un-wired floating generation node, is rejected with the exact wiring fix (code=TEMPLATE_SLOT_OPEN) — add the wiring and retry, do not route around it. " +
       "DEVIATION: deviate_from_template=true is ignored unless accompanied by deviate_token issued by the gateway after the user actually approved via the question tool.",
     inputSchema: {
       type: "object",

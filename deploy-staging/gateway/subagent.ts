@@ -1338,6 +1338,46 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
  * 成功回 undefined；失败回可读原因（调用方决定 finishRun 还是换模重试）。
  * 注意：成功后 run.opencodeSessionId 已更新并重新注册 byChildOc。
  */
+// ─────────────────────────────────────────── P0-4（2026-10-06）：本域配方库事实行
+// 专家宪法第三条命令每个 Expert「进域即载配方库」，但注册表里部分域 skillPaths 为空
+// （video-director / screenwriter / critic）——无条件命令会让子代理去找不存在的配方档。
+// 真源＝src/lib/expert-registry.ts 的 EXPERT_REGISTRY[id].skillPaths（gateway 侧同内容的
+// 生成物＝expert/registry-digest.txt 的「配方库」栏）。gateway 是独立发布单元（只发布
+// deploy-staging/gateway），运行时**无法** import 仓库 src/lib → 本表为逐字镜像，与
+// delivery-gate.ts 镜像 *_DELIVERABLES 契约的既有范式同构；改注册表 skillPaths 必须同步本表。
+const EXPERT_SKILL_PATHS: Readonly<Record<string, readonly string[]>> = {
+  director3d: ["skills/blender-director/SKILL.md"],
+  music: ["skills/music-director/SKILL.md", "skills/music-director/files/"],
+  "video-director": [],
+  editor: [
+    "skills/editor/SKILL.md",
+    "skills/editor/assembly/SKILL.md",
+    "skills/editor/audio-first/SKILL.md",
+    "skills/editor/rhythm/SKILL.md",
+    "skills/editor/look/SKILL.md",
+    "skills/editor/mix/SKILL.md",
+    "skills/editor/qc-master/SKILL.md",
+  ],
+  screenwriter: [],
+  "motion-director": ["skills/motion-design/"],
+  "web3d-director": ["skills/web-3d-awwwards/SKILL.md"],
+  critic: [],
+}
+
+/**
+ * 派工任务书头部的「本域配方库」事实行（P0-4）。有路径＝列出并声明进域即载、常驻；
+ * 空＝明写本域无配方库，直接用域工具，不要去找配方档；未登记（非 Expert）＝空串（零注入）。
+ */
+function buildExpertSkillFact(agent: string | undefined): string {
+  if (typeof agent !== "string" || agent.length === 0) return ""
+  const paths = EXPERT_SKILL_PATHS[agent]
+  if (!paths) return ""
+  if (paths.length === 0) {
+    return "【本域配方库】本域无配方库（未配置）。直接用你的域工具，不要去找配方档。\n\n"
+  }
+  return `【本域配方库】${paths.join("、")} —— 这是本域配方库，进域即载，常驻。\n\n`
+}
+
 async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   let childId: string | undefined
   try {
@@ -1385,6 +1425,9 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
     } catch (e) {
       constitutionNote = `【宪法注入失败】Expert 宪法档不可读（${e instanceof Error ? e.message : String(e)}），本次派遣未注入宪法。\n\n`
     }
+    // P0-4（2026-10-06）：宪法之后追一行本域配方库事实行（宪法第三条命令「进域即载配方库」，
+    // 对 skillPaths 为空的域必须如实说「无」，否则子代理去找不存在的配方档）。非 Expert→空串。
+    constitutionNote += buildExpertSkillFact(run.agent)
   }
   // 刀 G（2026-09-15）：契约栏机器注入——Expert+beast 时把契约栏清单作为固定段追加到
   // 子代理 prompt **尾部**（recency 最高）。真源=已载入的 DELIVERY_CONTRACTS（禁手抄）。

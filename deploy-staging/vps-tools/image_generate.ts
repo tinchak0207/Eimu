@@ -1,3 +1,13 @@
+/**
+ * image_generate VPS 测试支线稿（2026-10-06 机械导出）。
+ *
+ * 行为真源＝deploy-staging/opencode-runtime/tools/image_generate.ts
+ * （部署真源：deploy/vps/opencode-release.sh SRC_SUBDIR=deploy-staging/opencode-runtime、
+ * SCOPE 含 tools；vps-opencode-recon.sh 亦以 opencode-runtime 为 LOCAL_DIR 对账生产）。
+ * 本档＝真源全文逐行复制，唯一 diff＝本注释头。禁止手改本档——改真源后同一步骤覆盖本档。
+ * （vps-tools/ 不参与部署，本档仅供本地测试跑道引用与检索，不构成第二份模型面定义。）
+ */
+
 import { tool } from "@opencode-ai/plugin/tool"
 import {
   priceForAsync,
@@ -9,10 +19,11 @@ import {
   platformFetch,
   siteFetch,
   probeModelAvailable,
-  uploadImageBytes,
+  publicImageUrl,
   ok,
   fail,
 } from "../lib/client"
+import { checkAgentPath, looksLikeAgentPath } from "../lib/sandbox"
 
 /**
  * 生图尺寸白名单（R9-C, 2026-09-30）：真源＝站点 GET /v1/openapi.json 的
@@ -84,10 +95,39 @@ async function videoCostFromCatalog(
 }
 
 /**
- * 参考图正规化（A1, 2026-09-25）：把 args.reference_images 每个元素转成上游吃得下的字串。
- * - 已是 http(s) / data:image → 原样传。
- * - 其余（本机绝对路径、聊天附件路径）→ 上传平台 /uploads，取公网 url；url 空则退回 mediaId。
- * 保序、上限 5；两者皆空 → { ok:false }（呼叫端回 fail("upload_failed")，不静默丢图）。
+ * 验证 `data:image/...;base64,...` 参考图（2026-10-04 修）：只放行 image/* 的 base64 data URI，
+ * 且 base64 必须能解出非空位元组（round-trip 比对，容忍空白与 padding）。不合法回报错讯息，
+ * 合法回 null。此前的 `/^(https?:|data:image)/` 前缀检查会让 `data:image/png;base64,@@@` 或
+ * `data:text/html;base64,...` 直接放行，坏资料送上游只换来一句笼统失败。
+ */
+function validateDataImage(src: string, index: number): string | null {
+  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/.exec(src)
+  if (!m) {
+    return `第 ${index} 张参考图 data URI 不合法：应为 data:image/<类型>;base64,<数据>（目前只支持 base64 编码的图片）。`
+  }
+  const payload = m[2].replace(/\s+/g, "")
+  if (!payload) {
+    return `第 ${index} 张参考图 data URI 的 base64 数据为空。`
+  }
+  const bytes = Buffer.from(payload, "base64")
+  const normalized = payload.replace(/=+$/, "")
+  if (bytes.length === 0 || bytes.toString("base64").replace(/=+$/, "") !== normalized) {
+    return `第 ${index} 张参考图 base64 解码失败（不是合法的 base64 数据），请检查后重传。`
+  }
+  return null
+}
+
+/**
+ * 参考图正规化（A1 2026-09-25；2026-10-04 修：本机／工作区路径改走公开媒体上传轮子）。
+ * 把 args.reference_images 每个元素转成上游吃得下的字串（≤5 张，超过明确报错不截断）：
+ * - `http(s)://` → 原样放行；`data:image/...;base64,...` → 先验格式与 base64 可解再放行。
+ * - 看似路径 → 先过沙箱白名单闸 checkAgentPath（realpath 落 workspace 子树、uploads 只放行
+ *   本会话），再复用 publicImageUrl（= image_edit 同一条轮子：readLocalImageBytes →
+ *   网关 /internal/media/upload）读位元组换成公网 URL。
+ * - 其余（含 media: 句柄）→ fail-loud。
+ * 任一项失败 → { ok:false }（呼叫端回 fail("upload_failed")），**不静默丢图**
+ * （丢掉参考图＝出的图与参考无关，属静默假成功）。大小上限沿用 publicImageUrl 的
+ * MAX_UPLOAD_BYTES（20MB），超限明确报错，不截断。
  */
 async function normalizeReferenceImages(
   raw: string[] | undefined,
@@ -95,22 +135,72 @@ async function normalizeReferenceImages(
   signal?: AbortSignal,
 ): Promise<{ ok: true; images: string[] } | { ok: false; message: string }> {
   const images: string[] = []
-  for (const item of (raw ?? []).slice(0, MAX_REFERENCE_IMAGES)) {
-    const src = typeof item === "string" ? item.trim() : ""
-    if (!src) continue
-    if (/^(https?:|data:image)/i.test(src)) {
+  // 超过上限不静默截断（2026-10-04 修）：静默丢掉第 6 张以后＝「参考图与出图无关」的假成功。
+  const provided = raw ?? []
+  if (provided.length > MAX_REFERENCE_IMAGES) {
+    return {
+      ok: false,
+      message: `参考图最多 ${MAX_REFERENCE_IMAGES} 张，本次收到 ${provided.length} 张（未截断、未提交）。请精简到 ${MAX_REFERENCE_IMAGES} 张以内后重试。`,
+    }
+  }
+  const items = provided
+  for (let i = 0; i < items.length; i++) {
+    const src = typeof items[i] === "string" ? (items[i] as string).trim() : ""
+    // 空字串也算一项「提供但不可用」的参考图：如实报错，不静默丢（丢图＝出图与参考无关）。
+    if (!src) {
+      return { ok: false, message: `第 ${i + 1} 张参考图为空字符串，请传 http(s) URL、data:image/...;base64,... 或工作区内的本地绝对路径。` }
+    }
+    // data:image/...;base64,... 必须先验格式与 base64 可解（2026-10-04 修）：坏 base64 照送
+    // 只会让上游回一句笼统错误，这里当场说清楚，且不得把解不开的资料当成有效参考图。
+    if (/^data:/i.test(src)) {
+      const invalid = validateDataImage(src, i + 1)
+      if (invalid) return { ok: false, message: invalid }
       images.push(src)
       continue
     }
-    const up = await uploadImageBytes(src, sessionID, signal)
-    const ref = (up?.url || up?.mediaId || "").trim()
-    if (!ref) {
+    if (/^https?:/i.test(src)) {
+      images.push(src)
+      continue
+    }
+    if (!looksLikeAgentPath(src)) {
       return {
         ok: false,
-        message: `参考图上传失败（${src}）：平台未回传可用位址，请改用公网 URL 或 data:image 重试。`,
+        message: `第 ${i + 1} 张参考图无法识别：${src}。只接受 http(s) URL、data:image/...;base64,... 或工作区内的本地绝对路径。`,
       }
     }
-    images.push(ref)
+    // 看似路径 → 必须经沙箱白名单闸（不得绕过、不得读工作区外的档）。
+    const verdict = checkAgentPath(src, sessionID)
+    if (!verdict.ok) {
+      const reasonText: Record<string, string> = {
+        outside_workspace: "路径不在创作工作区内",
+        internal_state: "路径是平台内部状态目录，不对创作任务开放",
+        internal_config: "路径是平台内部配置文件，不对创作任务开放",
+        uploads_root: "不能指向全部上传目录",
+        foreign_upload: "该附件不属于当前会话",
+      }
+      return {
+        ok: false,
+        message: `第 ${i + 1} 张参考图路径被沙箱拒绝（${reasonText[verdict.reason] ?? verdict.reason}）：${src}。只能读取本会话可见的文件（推荐 uploads/<session>/ 下的附件），或改传 http(s) URL / data:image。`,
+      }
+    }
+    try {
+      // 复用 image_edit durable 链的同一轮子：读位元组 → 网关 /internal/media/upload → 公网 URL。
+      const url = await publicImageUrl(src, sessionID, signal)
+      if (!url) {
+        return {
+          ok: false,
+          message: `第 ${i + 1} 张参考图（${src}）入库后未拿到公网 URL，请改用公网 URL 或 data:image 重试。`,
+        }
+      }
+      images.push(url)
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      // 传目录时 readFileSync 会抛裸 EISDIR（2026-10-04 修）：换成人话，不把 errno 丢给用户。
+      if (/EISDIR|illegal operation on a directory/i.test(msg)) {
+        return { ok: false, message: `第 ${i + 1} 张参考图路径是目录、不是图片文件：${src}。请传入具体图片文件路径。` }
+      }
+      return { ok: false, message: `第 ${i + 1} 张参考图处理失败（${src}）：${msg}` }
+    }
   }
   return { ok: true, images }
 }
@@ -200,7 +290,9 @@ export default tool({
       .array(tool.schema.string())
       .max(5)
       .optional()
-      .describe("参考图（最多 5 张）。可用：平台公网 URL、`data:image/...;base64,...`、或本机绝对路径。"),
+      .describe(
+        "参考图（最多 5 张）：公网 http(s) URL、`data:image/...;base64,...`、或本地绝对路径（含工作区路径，如附件落盘的 uploads/<session>/...）。本地/工作区路径会先经沙箱校验（只能读本会话可见的文件），再自动上传换成公网 URL 送给上游。任一张路径越权、文件不存在或超过 20MB 会直接报错（不会静默丢弃参考图）。",
+      ),
   },
   async execute(args, context) {
     const model = args.model ?? "gpt-image-2"

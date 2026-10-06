@@ -1,6 +1,12 @@
 /**
  * Agent 提示词契约目录（吞 AID 产品层单向差，刀 3-③，2026-09-15）。
  *
+ * 【未接线·仅测试引用（2026-10-06 P0-10）】本档当前**未接**入运行时；全库仅
+ * agent-prompt-contracts.test.ts 与 editor-timeline-activation.test.ts 引用，零生产消费者。
+ * 若要启用：接线点在 Expert 回执入口——`src/lib/*-delegate.ts` 的
+ * collect*DeliverableFromToolResult（本就 JSON.parse 后逐键查验那一层，如
+ * editor-delegate.ts:353、music-delegate.ts:329），接入后须配一条真路径行为证据。
+ *
  * 结构范式参考：gzxx-2025/aid-server（MIT，copyright 光子讯息(杭州)科技有限公司）
  * `doc/提示词开发指南.md`（27 份契约：用途／输入（占位符表）／输出（形态＋顶层键＋
  * 栏位表）／开发要点／AI 生成指引 + 五条通用硬规则）。**本档只借用结构范式，

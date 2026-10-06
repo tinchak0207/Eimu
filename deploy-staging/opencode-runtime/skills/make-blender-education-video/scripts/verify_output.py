@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify codec, 4K geometry, timing, audio mapping, metadata, and decode."""
+"""Verify codec, resolution geometry, timing, audio mapping, metadata, and decode."""
 
 from __future__ import annotations
 
@@ -52,11 +52,20 @@ def add_check(checks: list[dict[str, Any]], name: str, ok: bool, observed: Any, 
     checks.append({"name": name, "ok": bool(ok), "observed": observed, "expected": expected})
 
 
+def parse_resolution(value: str) -> tuple[int, int]:
+    try:
+        width, height = (int(part) for part in value.lower().split("x", 1))
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"Invalid resolution {value!r}; expected WxH, e.g. 1920x1080.")
+    return (width, height)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Deep-QA a rendered Blender cinematic explainer.")
     parser.add_argument("file", type=Path)
     parser.add_argument("--expected-codec", choices=["auto", "h264", "h265"], default="auto")
     parser.add_argument("--expected-fps", type=float, default=30.0)
+    parser.add_argument("--expected-resolution", type=parse_resolution, default=(1920, 1080), help="Expected WxH delivery resolution (default 1920x1080).")
     parser.add_argument("--expected-duration", type=float)
     parser.add_argument("--duration-tolerance", type=float, default=0.20)
     parser.add_argument("--skip-decode", action="store_true")
@@ -90,7 +99,7 @@ def main() -> int:
 
     video = videos[0] if videos else {}
     audio = audios[0] if audios else {}
-    add_check(checks, "resolution", (video.get("width"), video.get("height")) == (3840, 2160), [video.get("width"), video.get("height")], [3840, 2160])
+    add_check(checks, "resolution", (video.get("width"), video.get("height")) == args.expected_resolution, [video.get("width"), video.get("height")], list(args.expected_resolution))
     observed_fps = ratio(video.get("avg_frame_rate") or video.get("r_frame_rate"))
     add_check(checks, "frame_rate", math.isfinite(observed_fps) and abs(observed_fps - args.expected_fps) <= 0.01, observed_fps, args.expected_fps)
 

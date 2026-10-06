@@ -6,12 +6,23 @@
  * prompt 架构浓缩成可执行规则，agent 收到用户短描述后照此生成优化稿。
  * 用户可能是什么都不懂的暴君，只输入一句话 —— 规则负责自动补齐一切。
  *
- * 知识来源：OSideMedia/higgsfield-ai-prompt-skill（MIT），
- * skills/higgsfield-seedance/{SKILL,HELL-GRIND,ENGINE-RULES}.md、
- * skills/higgsfield-prompt/SKILL.md、templates/seedance/global-style-prefix.md。
+ * 知识来源：OSideMedia/higgsfield-ai-prompt-skill（MIT）。原文引用的 5 个仓库相对
+ * 路径（skills/higgsfield-seedance/{SKILL,HELL-GRIND,ENGINE-RULES}.md、
+ * skills/higgsfield-prompt/SKILL.md、templates/seedance/global-style-prefix.md）
+ * 经 2026-10-06 P0-10 逐个 ls 确认**全部不存在**——内容已并入本档（下方 prompt 与
+ * KUNPENG_SEEDANCE_SUPPLEMENT 即其浓缩），历史路径作废。现存同源副本随 harness 落在
+ * 部署树（只读追源用）：
+ * deploy-staging/opencode-runtime/skills/higgsfield/skills/higgsfield-seedance/{RECIPE,HELL-GRIND,ENGINE-RULES}.md
+ * （SKILL.md 因 skill 递归扫描收敛已改名 RECIPE.md）、
+ * deploy-staging/opencode-runtime/skills/higgsfield/skills/higgsfield-prompt/RECIPE.md、
+ * deploy-staging/opencode-runtime/skills/higgsfield/templates/seedance/global-style-prefix.md。
  *
  * ⚠️ 这份必须与 VPS gateway `/agent/v1/optimize-prompt` 的 `OPTIMIZE_DIRECTOR_PREFIX`
- * （/opt/agent-harness/gateway/index.ts）保持一致。改一份就要同步另一份。
+ * 保持一致：仓库副本 deploy-staging/gateway/internal-http.ts（VPS 落位
+ * /opt/agent-harness/gateway/internal-http.ts）。改一份就要同步另一份。
+ * P0-9（2026-10-06）：该副本曾漏掉本档的 KUNPENG_SEEDANCE_SUPPLEMENT（生产视频 prompt
+ * 拿不到 kunpeng 6 条硬规则），已补齐为逐字副本；gateway 为独立发布单元无法 import 本档，
+ * 故此处为「双份副本 + 同步」关系，非单一真源 import。
  *
  * 2026-08-27 补充段落：kunpeng Seedance 规则（pengfeiqiao/kunpeng @ 872a58b，MIT）
  * 作为补充引入——与上方 Higgsfield 规则逐条对账后只补差异（VO 行/多主体定义/

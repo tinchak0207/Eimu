@@ -82,7 +82,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   // （B key 正典化为属主派生 key 后再 hash，与 gateway 注入/批次同空间）。
   const memoryLibrary = await buildMemoryInjectionPayload(await deriveMemoryOwnerKey(caller.key));
 
-  if (!memoryInjection && !activeAssets) {
+  // 早退只在「画像/教训、资产包、私有记忆库」三者都空时才成立——与网关
+  // memory-patch 自身的落库闸（router.ts:486-490：`profile 非空 || docs 非空 ||
+  // index 非空` 才写）同口径。旧判据漏掉 memoryLibrary，导致「有私有记忆库、
+  // 但画像/教训与资产包为空」的老用户在 resume 时永远召不回记忆。
+  const hasMemoryLibrary =
+    memoryLibrary.memory_docs.length > 0 || memoryLibrary.memory_index_md.trim().length > 0;
+  if (!memoryInjection && !activeAssets && !hasMemoryLibrary) {
     return NextResponse.json({ patched: false, has_profile: false });
   }
 

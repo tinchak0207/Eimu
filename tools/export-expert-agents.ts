@@ -127,11 +127,16 @@ const ORCHESTRATOR_DESCRIPTION =
 /** Expert 描述后缀（R8 修复片 1 裁定文案）。 */
 const EXPERT_DESCRIPTION_SUFFIX = "（Expert：仅经 subagent_dispatch expert 栏路由）";
 
-/** digest 头（R7 provenance 规范：HTML 注释，注入端 stripProvenanceHeader 剥离）。 */
+/** digest 头（R7 provenance 规范：HTML 注释，注入端 stripProvenanceHeader 剥离）。
+ * 生成日期＝跑本导出器当天（2026-10-06：由硬编 "2026-09-11" 改为动态取当日）——
+ * 硬编会让档头日期与内容永久不符且重跑不刷新；取当日即「重跑即刷新」。
+ * 选当日而非 git HEAD commit date 的理由：档头语义本就是「生成日期」，且本档要在无 git 的
+ * 部署机上也能跑（不引入 VCS 依赖）；代价是 --check 隔日会因日期滚动报警，故 --check 应在同日
+ * 重生成后跑（本档沿用「registry 改行后须重生成上传」的既有纪律）。 */
 const DIGEST_PROVENANCE_HEADER =
   "<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 现值生成" +
   "（buildExpertRegistryDigest 逐字输出，nested 已改名路径经 HARNESS_SKILL_PATH_MAP 映射为 harness 真路径；由 tools/export-expert-agents.ts 机械生成）。" +
-  "生成日期 2026-09-11（R4：摘要行扩充配方库 + 交付契约，registry 改行后须重生成上传）。 -->";
+  `生成日期 ${new Date().toISOString().slice(0, 10)}（registry 改行后须重生成上传）。 -->`;
 
 /** 域工具全集 = 全部 Expert toolIds 去重联集（registry 插入序）。 */
 const DOMAIN_TOOLS: string[] = dedupePreserveOrder(

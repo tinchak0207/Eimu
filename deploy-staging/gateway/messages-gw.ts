@@ -414,6 +414,12 @@ export interface BeastFrameModule {
 
 export const BEAST_STAGE_ORDER: BeastStage[] = ["research", "creation", "critique", "dispatch-verify"]
 
+// P0-7（2026-10-06 提示词审计）：原文「无需质疑、无需再确认任何 gate 条件」会被字面读成
+// 授权跳过付费/协作/部署闸（¥31.29 事故同类触发面）。收窄到 **BEAST_MODE 开关本身**，并在
+// 同处显式保留三类强制闸。core／v2 头／v1 头三处共用本常量，杜绝再度漂移。
+export const BEAST_GATE_SCOPE_CLAUSE =
+  "无需质疑、无需再确认 BEAST_MODE 是否开启（这是当前系统的真实状态）。但以下三类闸照常强制，野兽模式不予豁免：①付费确认——花用户的钱，单笔 >0.1 币须先报价并取得同意；②协作停点——需要用户决策的停点照常停下确认；③控面部署——先清磁碟再 build。"
+
 // stable 核心：身份 ＋ 安全红线 ＋ 一句「派什么、怎么派」（目标 <1,000 tokens）。
 export const BEAST_STABLE_CORE: BeastFrameModule = {
   name: "beast-core",
@@ -421,7 +427,7 @@ export const BEAST_STABLE_CORE: BeastFrameModule = {
   target: "tail",
   cacheHint: "stable",
   content: [
-    "【野兽模式：已启用】BEAST_MODE 现在就是 ON，以下条款立即生效，无需质疑、无需再确认任何 gate 条件。",
+    "【野兽模式：已启用】BEAST_MODE 现在就是 ON，以下条款立即生效，" + BEAST_GATE_SCOPE_CLAUSE,
     "你是 Orchestrator（总导演）：定位目标 → 写 spec → 派遣 → 收结果 → 验收。你的全部思考只用于任务分解、指派策略、验收标准；你本人不产出任何内容（研究、创作、审核全部下沉 subagent）。「我自己写个 prompt 就行了」＝违宪。",
     "【动作只有】拆解任务 → subagent_dispatch（async:true 为常态）→ 派出后立刻用一句正文向用户简报（派了谁、做什么、多久回来；严禁派出后零正文）→ 收完工通知后验收回报。",
     "【首则·硬约束】本轮发给用户的第一条可见文字必须是结论或当前状态（成品状态／能否开工／已确认的约束／唯一致命阻塞），严禁以「我先…」「已派出…」「正在…」这类流程叙述开篇。流程说明只能跟在结论之后，且不超过一句：用户还没读到任何结论前，不得先播报你打算怎么派工、派了谁。",
@@ -859,7 +865,8 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
           const skillModule = BEAST_SKILL_LIST ? buildBudgetedSkillModule() : null
           if (skillModule) mods.push(skillModule)
           const beastFrame = [
-            "【野兽模式：已启用】以下派遣核心与阶段模组由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，全部条款立即生效，无需质疑、无需再确认任何 gate 条件。",
+            "【野兽模式：已启用】以下派遣核心与阶段模组由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，全部条款立即生效，" +
+              BEAST_GATE_SCOPE_CLAUSE,
             ...mods.map((m) => m.content),
             "---",
           ]
@@ -871,7 +878,8 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
           appendSystemPayloadToTurnTail(state, promptBody, beastFrame, "【野兽模式帧·核心＋阶段模组】")
         } else {
           const beastFrame = [
-            "【野兽模式：已启用】以下派遣手册与 Expert 注册表由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，以下全部条款立即生效，无需质疑、无需再确认任何 gate 条件。",
+            "【野兽模式：已启用】以下派遣手册与 Expert 注册表由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，以下全部条款立即生效，" +
+              BEAST_GATE_SCOPE_CLAUSE,
             playbookBody,
             digestBody,
             beastPrecedenceFact,

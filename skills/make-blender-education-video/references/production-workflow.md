@@ -17,7 +17,7 @@ Use `brief/`, `sources/`, `scene/`, `renders/`, `audio/`, `overlays/`, `review/`
 1. Confirm duration, audience, learning outcome, visual reference or style description, and research approach.
 2. Review topic-specific GitHub candidates, licenses, provenance, compatibility, and proposed use.
 3. Approve the English learning outcome, scope, claim ledger, storyboard, and visual grammar.
-4. Approve exactly one 4K style frame containing a representative subtitle unless the user explicitly opted out of subtitles/captions. Labels, legends, chapter cards, and teaching overlays are never required in this frame; include them only when the user explicitly requested them. This approves visual treatment only, never motion design or animation quality.
+4. Approve exactly one style frame at the target delivery resolution containing a representative subtitle unless the user explicitly opted out of subtitles/captions. Labels, legends, chapter cards, and teaching overlays are never required in this frame; include them only when the user explicitly requested them. This approves visual treatment only, never motion design or animation quality.
 5. Pass final evidence, visual, subtitle, audio, metadata, sync, and decode QA.
 
 Do not render a motion sample or any full-video frames before the user explicitly approves the single style frame. If the user requests style changes, render one replacement frame and ask again. After approval, do not use the approved still as a video source or infer that static storytelling is approved; create genuine subject and process animation.
@@ -63,7 +63,7 @@ Use `compose_tutorial.py` to combine picture, narration, burned-in subtitles, an
 
 ## QA
 
-Use `verify_output.py` to require one video and one audio stream, 3840×2160, requested constant frame rate, correct codec tag and pixel format, BT.709 metadata, AAC 48 kHz stereo, expected duration, correct frame count, synchronized streams, and clean full decode.
+Use `verify_output.py` to require one video and one audio stream, the target delivery resolution (1920×1080 by default), requested constant frame rate, correct codec tag and pixel format, BT.709 metadata, AAC 48 kHz stereo, expected duration, correct frame count, synchronized streams, and clean full decode.
 
 Create entry/middle/exit frame triplets for every narrated process shot, plus a contact sheet at chapter boundaries. Confirm that the subject state changes across the triplet even when camera motion is ignored, and that cause precedes effect. Reject still-image pans, zooms, orbits, parallax passes, crossfade montages, repeated frames, and light-only changes when they carry a process explanation.
 

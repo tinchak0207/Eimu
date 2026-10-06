@@ -81,7 +81,7 @@ Do not count camera transforms, focus pulls, light changes, crossfades, or shade
 
 ## Approve before scaling
 
-Render exactly one 4K style frame containing the hardest material, finest readable detail, darkest region, brightest highlight, and intended depth of field. Labels, legends, chapter cards, and teaching overlays are never required; omit them unless the user explicitly requested them. Include one sample burned-in subtitle unless the user explicitly opted out of subtitles/captions. A request for “no text in the picture,” no labels, or no legend does not remove the subtitle. Inspect at 100% and thumbnail size.
+Render exactly one style frame at the target delivery resolution containing the hardest material, finest readable detail, darkest region, brightest highlight, and intended depth of field. Labels, legends, chapter cards, and teaching overlays are never required; omit them unless the user explicitly requested them. Include one sample burned-in subtitle unless the user explicitly opted out of subtitles/captions. A request for “no text in the picture,” no labels, or no legend does not remove the subtitle. Inspect at 100% and thumbnail size.
 
 Show that frame to the user and ask whether to modify the style, detail, composition, lighting, or subtitle treatment. Ask about scene-text treatment only when the user explicitly requested it. If revisions are requested, render one replacement frame. Do not render any motion sample, frame sequence, chapter, or full video until the user explicitly approves the current frame.
 

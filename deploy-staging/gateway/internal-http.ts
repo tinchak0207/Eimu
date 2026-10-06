@@ -326,6 +326,11 @@ export async function handleSessionTasks(req: Request): Promise<Response> {
  * 共通核心全文编译进 system prompt，一次读完，不需 agent 多步思考。
  */
 
+// ⚠️ P0-9（2026-10-06）：本常量与仓库 src/lib/agent-prompt-director.ts 的
+// PROMPT_DIRECTOR_SYSTEM_PROMPT ＋ KUNPENG_SEEDANCE_SUPPLEMENT **逐字等价**（gateway 是独立
+// 发布单元，运行时无法 import 仓库 src/，见 memory-recall.ts 顶注「禁止 import 仓库 src/」）。
+// 改任一份必须同步另一份；源头的 kunpeng Seedance 6 条硬规则（2026-08-27 补丁）曾在此缺席，
+// 生产视频 prompt 因此拿不到它们——本副本现已补齐。
 // 金矿工业级规则全文。用户输入可能只是「帮我生成浩克对战蜘蛛侠的电影」这种
 // 一句话抽象请求——规则负责把它变成可用 production prompt。
 export const OPTIMIZE_DIRECTOR_PREFIX = `You are a professional video and image prompt director trained on the Higgsfield Hell Grind 95-minute feature film pipeline and Seedance 2.0 production prompt rules.
@@ -361,6 +366,15 @@ WHEN THE USER IS VAGUE (they will be — they are a non-expert):
 - If they described a shot type (battle, chase, dialogue, horror, product), use the strongest expected structure for that type.
 
 Translate any Chinese user input to English in the output prompt.
+SEEDANCE SUPPLEMENTARY RULES (from kunpeng, MIT — additive only; when they conflict with the rules above, the rules above win):
+- Chinese storyboard format is valid for Seedance-native (multi-reference) submissions: 分镜场景设定在：{地点} @图片一 / 分镜具体动作描述：/ 镜头{编号} {时长}s 时间: {时间}。 [{景别}/{运镜}] {画面描述} {人物/物体@图片N}. Use it when the user submits Chinese storyboard-style input or reference images; otherwise keep the English six-slot formula.
+- Reference-image citation: use @图片一/@图片二… Chinese positional numbers only (never filenames, never @人一/@物一). The first uploaded image is always the scene reference. Every uploaded image MUST have a matching @图片N citation.
+- VO lines ({人物}@图片N（VO）：content) are ONLY for narration or inner voice-over. On-screen dialogue/singing goes into the shot line with the line wrapped in {}. SFX use <>, music uses （）, subtitles use 【】.
+- Multi-subject scenes must define unique labels and use them throughout: 将@图片N中的[2-3个稳定静态特征]定义为<主体N>; end with 禁止出现外形着装完全一致的人物，禁止同款分身/双胞胎.
+- Character reference images: single-person standalone photos only — never three-view/multi-view sheets (they cause twin/ID-drift).
+- Audio does not occupy image numbers; reference voice by text only: 用@音频一的音色用{方言}唱/说：{内容}.
+- realPersonMode=true must be set when real-person reference assets are used.
+- Official tail constraints (verbatim): 保持无字幕，不要生成Logo和水印。人物面部稳定不变形，动作自然流畅。表演克制真实，情绪有层次递进，无瞪眼嘶吼等夸张程式化表情。
 
 USER:`
 export async function handleOptimizePrompt(key: string, req: Request): Promise<Response> {
