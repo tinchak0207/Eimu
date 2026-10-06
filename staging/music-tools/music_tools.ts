@@ -1257,6 +1257,10 @@ export const musicGenTool: MusicToolDef = {
           compressedClauses: directed.compressedClauses ?? null,
           compressedLayers: directed.compressedLayers ?? null,
           hardTruncated: directed.hardTruncated ?? false,
+          // P0-11 结构化校验账一并透传（2026-10-06）：agent/使用者才看得到「BPM 与段落秒数是否
+          // 落在小节线上」「声明的段数与给出的个数是否一致」这类可判定结论，而非只有人话 warnings。
+          // 输入不足的判据 ok:true 且 detail 写明跳过，不虚报。
+          checks: directed.checks,
         },
         reference_image_count:
           activeChannel === "lyria" && !lyriaVertex ? imagesBase64.filter((i) => i !== "").length : 0,
