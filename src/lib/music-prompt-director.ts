@@ -467,24 +467,36 @@ function parseChineseNumber(token: string): number | null {
   return tens * 10 + ones;
 }
 
-/** 从文本侦测「声明的段落数」（`7 sections`／`七段落`／`7 段`）；侦测不到回 null。 */
+/**
+ * 从文本侦测「声明的段落数」（`7 sections`／`七段落`／`7 段`）；侦测不到回 null。
+ * 先做全角数字归一（复用 widenFullWidthDigits）：`３ sections`／`７ 段` 与本节其他解析器同口径，
+ * 否则段数写作全角时静默跳过判定（2026-10-06 对抗验收）。数字分支与 `段`／`sections?` 两路都走归一后文本。
+ */
 function parseDeclaredSectionCount(prompt: string): number | null {
-  const digit = prompt.match(/(\d{1,3})\s*(?:sections?|段)/i);
+  const text = widenFullWidthDigits(prompt);
+  const digit = text.match(/(\d{1,3})\s*(?:sections?|段)/i);
   if (digit) return Number(digit[1]);
-  const chinese = prompt.match(/([一二两三四五六七八九十]{1,3})\s*段/);
+  const chinese = text.match(/([一二两三四五六七八九十]{1,3})\s*段/);
   if (chinese) return parseChineseNumber(chinese[1]);
   return null;
 }
 
 /**
- * BPM 侦测：两条形状——① 后缀形 `146 BPM`（`[BPM: 146]` 由 rewritePseudoTags 改写成它）；
- * ② 标签形 `BPM: 146`／`BPM：146`（非方括号，不会被伪标签改写）。值放宽到 1-4 位整数＋可选小数
- * （`87.5 BPM` 不再静默跳过）。两形状都命中时取**文本中先出现**的那个（与既有「取首值」语义一致）；
- * 同一起点先取后缀形。全角数字先归一。
+ * BPM 侦测：四条形状——① 后缀形 `146 BPM`（`[BPM: 146]` 由 rewritePseudoTags 改写成它）；
+ * ② 标签形 `BPM: 146`／`BPM：146`（非方括号，不会被伪标签改写）；③ 前缀冒号形 `Tempo: 146`／`tempo：146`
+ * （含 tempo 这一全球通用的速度词）；④ 前缀空格形 `BPM 146`／`tempo 146`。③④ 不是方括号伪标签，
+ * rewritePseudoTags 不会改写，旧版因此静默跳过（2026-10-06 对抗验收）。值放宽到 1-4 位整数＋可选小数
+ * （`87.5 BPM` 不再静默跳过）。多形状同时命中时取**文本中先出现**的那个（与既有「取首值」语义一致）；
+ * 同一起点先取后缀形。`tempo`／`bpm` 后不接数字（如 `tempo: slow`）不匹配。全角数字先归一。
  */
 function parseBpm(prompt: string): number | null {
   const text = widenFullWidthDigits(prompt);
-  const patterns = [/\b(\d{1,4}(?:\.\d+)?)\s*bpm\b/gi, /\bbpm\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi];
+  const patterns = [
+    /\b(\d{1,4}(?:\.\d+)?)\s*bpm\b/gi,
+    /\bbpm\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi,
+    /\b(?:bpm|tempo)\s*[:：]\s*(\d{1,4}(?:\.\d+)?)/gi,
+    /\b(?:bpm|tempo)\s+(\d{1,4}(?:\.\d+)?)/gi,
+  ];
   let bestIndex = Number.POSITIVE_INFINITY;
   let bestValue: number | null = null;
   for (const pattern of patterns) {
