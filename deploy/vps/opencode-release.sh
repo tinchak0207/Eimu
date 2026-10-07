@@ -21,6 +21,7 @@
 # 不变量（与 gateway 同）：只发布已 commit 的快照；发布前强制 recon 漂移闸；发布前备份；
 #   落地后必须看服务真的起来才算数。
 set -euo pipefail
+export LC_ALL=C
 
 SSH_KEY="${OC_SSH_KEY:-$HOME/.ssh/new.pem}"
 SSH_TARGET="${OC_SSH_TARGET:-ubuntu@43.172.85.76}"
@@ -157,8 +158,8 @@ cmd_plan() {
   log "== plan @ $(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")：commit 端 $(wc -l < "$tmp/exp") 档 =="
 
   for c in "${CONFIGS[@]}"; do echo "$c"; done > "$tmp/conf.txt"
-  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && echo \"\$c\"; done; } | sort" > "$tmp/actual.txt"
-  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' -exec md5sum {} + 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && sudo md5sum \"\$c\"; done; } | sort -k2" > "$tmp/actual.md5"
+  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && echo \"\$c\"; done; } | LC_ALL=C sort" > "$tmp/actual.txt"
+  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' -exec md5sum {} + 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && sudo md5sum \"\$c\"; done; } | LC_ALL=C sort -k2" > "$tmp/actual.md5"
   ( cd "$tmp/stage"
     # 档名可能含空白（例：skills/higgsfield/docs/Seedance 2 Skill.md）——用 NUL
     # 分隔（-print0 / sort -z / xargs -0），否则 `md5sum $(cat 清单)` 会被
@@ -221,6 +222,7 @@ cmd_release() {
 
   remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" "$WORKSPACE_DIR" "$r_agents" "$FORCE" <<'REMOTE'
 set -euo pipefail
+export LC_ALL=C
 VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; tag="$7"; sha="$8"; r_tar="$9"; r_exp="${10}"; WORKSPACE_DIR="${11}"; r_agents="${12:-}"; DRAIN_FORCE="${13:-0}"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
@@ -250,7 +252,10 @@ sudo find "${SCOPE[@]/#/$VPS_DIR/}" -type f ! -path '*/__pycache__/*' 2>/dev/nul
   | sed "s|^$VPS_DIR/||" | sort > /tmp/oc-actual.txt
 for c in "${CONFIGS[@]}"; do sudo test -f "$VPS_DIR/$c" && echo "$c" >> /tmp/oc-actual.txt; done
 sort -o /tmp/oc-actual.txt /tmp/oc-actual.txt
-comm -13 "$r_exp" /tmp/oc-actual.txt > /tmp/oc-extras.txt || true
+if ! comm --check-order -13 "$r_exp" /tmp/oc-actual.txt > /tmp/oc-extras.txt; then
+  echo "EXTRAS_COMPARE_FAILED 文件清单比较失败，停止发布，不删除任何文件"
+  exit 1
+fi
 n=0
 while IFS= read -r f; do [ -n "$f" ] && { sudo rm -f "$VPS_DIR/$f"; n=$((n+1)); }; done < /tmp/oc-extras.txt
 echo "REMOVED $n 个生产多出档"
