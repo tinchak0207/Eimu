@@ -110,7 +110,15 @@ export function buildAgentCanvasSnapshot(input: AgentCanvasSnapshotInput): Recor
       position: n.position,
       width: n.width,
       height: n.height,
-      ...(compactMetadataForAgent(n.metadata) ? { metadata: compactMetadataForAgent(n.metadata) } : {}),
+      ...(n.metadata ? {
+        metadata: {
+          ...compactMetadataForAgent(n.metadata),
+          // This is also the durable restore source. Token-budget summaries may shorten
+          // text for the model, but storage and operation receipts need the complete value.
+          ...(typeof n.metadata.content === "string" ? { content: n.metadata.content } : {}),
+          ...(typeof n.metadata.prompt === "string" ? { prompt: n.metadata.prompt } : {}),
+        },
+      } : {}),
     })),
     connections,
     selectedNodeIds,

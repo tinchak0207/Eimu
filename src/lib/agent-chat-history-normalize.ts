@@ -27,7 +27,6 @@ import type {
   AgentAssistantTextItem,
   AgentImageItem,
   AgentAudioItem,
-  AgentSubagentReportItem,
   AgentToolCallItem,
   AgentTranscriptItem,
   AgentUserTurnItem,
@@ -126,76 +125,6 @@ function toolErrorText(raw: unknown): string | undefined {
     if (msg) return msg;
   }
   return undefined;
-}
-
-// ─────────────────────────── 系统注入讯息识别（归因错觉病灶）
-
-// gateway 机制上必须以 user role 注入会话的三类讯息（唤醒/重试提示/召回前缀），
-// 历史路径若一律画成用户气泡，用户事后翻记录会看到自己「说过」从没说过的话。
-// 识别标记全部对齐后端真源（deploy-staging/gateway）：index.ts wakeSessionForSubagent、
-// opencode-event-handler.ts turn failover、memory-recall.ts renderRecallPrefix。
-
-/** 子代理唤醒讯息骨架（真源 gateway/index.ts wakeSessionForSubagent，勿改后端）。 */
-const SUBAGENT_WAKE_RE =
-  /^【子代理(完成|失败)·系统自动唤醒】subagent\s+([0-9A-Za-z]+)（label="([^"]*)"）已(?:完成|失败)。(?:结果摘要|失败原因)：/;
-
-/** 唤醒讯息尾部固定的续跑指令行（给模型的指令，不是产出内容）。 */
-const SUBAGENT_WAKE_TAIL = "请基于以上真实结果继续推进";
-
-/**
- * 解析子代理唤醒讯息。命中回 {status, subagentId, label, text(产出正文)}；
- * 标记对但骨架漂移（label 含引号等）走兜底尽力提取——总之绝不冒充用户气泡。
- */
-function parseSubagentWake(text: string): { status: "ok" | "error"; subagentId: string; label: string; text: string } | null {
-  if (!text.startsWith("【子代理完成·系统自动唤醒】") && !text.startsWith("【子代理失败·系统自动唤醒】")) return null;
-  const m = SUBAGENT_WAKE_RE.exec(text);
-  if (m === null) {
-    const status: "ok" | "error" = text.startsWith("【子代理失败") ? "error" : "ok";
-    const subagentId = /subagent\s+([0-9A-Za-z]+)/.exec(text)?.[1] ?? "";
-    const label = /label="([^"]*)"/.exec(text)?.[1] ?? "";
-    return { status, subagentId, label, text };
-  }
-  const status: "ok" | "error" = m[1] === "完成" ? "ok" : "error";
-  let body = text.slice(m[0].length);
-  const cut = body.indexOf(SUBAGENT_WAKE_TAIL);
-  if (cut >= 0) body = body.slice(0, cut);
-  return { status, subagentId: m[2] ?? "", label: m[3] ?? "", text: body.trim() };
-}
-
-/** 记忆召回知识块标记行开头（真源 gateway/memory-recall.ts RECALL_HEADER）。 */
-const RECALL_BLOCK_MARKER = "[相关领域知识";
-
-/** 知识块内容行：`- [domain] slug` 条目行或缩两格的 body 延续行。 */
-function isRecallBodyLine(l: string): boolean {
-  return /^- \[[^\]]*\]\s*\S/.test(l) || /^ {2,}\S/.test(l);
-}
-
-/**
- * 从用户文本剥离 gateway 注入的记忆召回知识块。位置无关（头/尾皆处理）：
- * messages-gw.ts 现场实际是前缀注入（`prefix + "\n\n" + 用户正文`），
- * 旧规格描述的「尾部追加」也一并覆盖。找不到标记原样返回。
- * 块 = 标记行 + 若干条目/body 行，直到空行接非块内容或文本结束。
- */
-function stripRecallBlock(text: string): string {
-  const lines = text.split("\n");
-  const head = lines.findIndex((l) => l.trim().startsWith(RECALL_BLOCK_MARKER));
-  if (head < 0) return text;
-  const out = lines.slice(0, head);
-  let i = head + 1;
-  for (; i < lines.length; i += 1) {
-    const l = lines[i] ?? "";
-    const next = lines[i + 1];
-    const isBlockGap = l.length === 0 && next !== undefined && isRecallBodyLine(next);
-    if (isRecallBodyLine(l) || isBlockGap) continue;
-    break; // 块结束：此行起属于用户正文（前缀注入的分隔空行也在此消掉）
-  }
-  // 尾部注入：块吞到文本结束（或只剩残留空行）→ 前文的收尾空行一并吃掉。
-  const atTail = i >= lines.length || lines.slice(i).every((l) => l.trim().length === 0);
-  if (i < lines.length && !atTail) out.push(...lines.slice(i));
-  let res = out.join("\n");
-  if (head === 0) res = res.replace(/^(?:[ \t]*\n)+/, ""); // 前缀剥离：吃掉残留空行
-  if (atTail) res = res.replace(/(?:[ \t]*\n)+$/, "");
-  return res;
 }
 
 /** 内部框架段标题行（live 路径真源 gateway/outbound-sanitize.ts + e2e 实锤的 Progress Summary）。 */
@@ -301,6 +230,13 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
           continue;
         }
         if (type === "text") {
+          // 来源由 gateway 写入，不能凭正文标题猜测：用户可能正在引用同一段指令。
+          // ignored 原文仍属于用户；synthetic 执行副本只供模型，不冒充用户气泡。
+          const source = asRecord(asRecord(part.metadata)?.gateway)?.source;
+          if (source === "system-injection" || (part.synthetic === true && source !== "user-original")) {
+            drop("system-injection");
+            continue;
+          }
           const t = asString(part.text);
           if (t && t.trim().length > 0) texts.push(t);
           continue;
@@ -327,42 +263,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         drop(type);
       }
       const text = texts.join("\n");
-
-      // ① 子代理唤醒讯息：机制上必须走 user role，但它是系统注入，不是用户
-      // 说的话——渲染成 subagent_result 产出卡（前端已有
-      // AgentSubagentReportCard），绝不画成用户气泡。占 order seq 保时序，
-      // 不占 userCount（不是用户轮，user id 续号不受污染）。
-      const wake = parseSubagentWake(text);
-      if (wake !== null) {
-        order += 1;
-        const item: AgentSubagentReportItem = {
-          kind: "subagent_result",
-          id: `subagent-report-h${order}`,
-          seq: order,
-          subagentId: wake.subagentId,
-          label: wake.label,
-          status: wake.status,
-          text: wake.text,
-        };
-        items.push(item);
-        continue;
-      }
-
-      // ② 系统重试提示（上游错误后 gateway 的续跑指令）：整条不显示。
-      const trimmed = text.trim();
-      if (trimmed.startsWith("（系统提示：") && trimmed.endsWith("）")) {
-        drop("system-hint");
-        continue;
-      }
-
-      // ③ 记忆召回知识块（gateway 每回合注入的语料前缀）：从用户文本剥掉，
-      // 只留用户真正说的话。剥完空文本且无附件 → 整条不留。
-      const userText = stripRecallBlock(text);
-      if (userText !== text && userText.trim().length === 0 && attachments.length === 0) {
-        drop("recall-block");
-        continue;
-      }
-      if (userText.length === 0 && attachments.length === 0) continue; // 全丢光的空轮不留言
+      if (text.length === 0 && attachments.length === 0) continue; // 全丢光的空轮不留言
       order += 1;
       userCount += 1;
       const item: AgentUserTurnItem = {
@@ -371,7 +272,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         // 插入沿同一计数续号，不撞 React key。
         id: `user-${userCount - 1}`,
         seq: order,
-        text: userText,
+        text,
       };
       if (attachments.length > 0) item.attachments = attachments;
       items.push(item);

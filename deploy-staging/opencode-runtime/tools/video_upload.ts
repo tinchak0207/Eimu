@@ -2,15 +2,16 @@ import { tool } from "@opencode-ai/plugin/tool";
 import { readFile } from "node:fs/promises";
 import { ok, fail } from "../lib/client";
 import { LOCAL_PATH_HINT, explainMissingPath } from "../lib/agent-paths";
+import { checkAgentPath } from "../lib/sandbox";
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 const MAX_BYTES = 200 * 1024 * 1024;
 
 export default tool({
   description:
-    "把影片/音频入库平台存储（免费），返回平台公网 URL（https://store.tinchak0207.xyz/image-data/files/uploads/...）。两种来源二选一：(1) path——你 ffmpeg 剪/合成出来的本地成片绝对路径（**限 workspace 内**；沙箱私有 /tmp 工具端看不到，传了必失败。工具会读成字节上传，免起 HTTP server、免 file:// 500）；(2) url——外部影片/音频 URL（服务端下载，外部 URL 常被 Cloudflare 403 挡，一律先入库再注入）。拿到平台 URL 后用 workflow_add_node（metadata.content）或 workflow_update_node（patch.content）注入节点，或直接交付此公网 URL 给用户出卡。",
+    "把视频、音频、图片或完整交付文档入库平台存储（免费），返回用户可下载的公网 URL。文档支持 .md/.txt/.json/.csv/.pdf：先把完整最新版写入 workspace 文件，再用 path 上传；禁止用本地路径、file:// 或摘要冒充下载交付。两种来源二选一：(1) path——workspace 内本地文件的绝对路径（沙箱私有 /tmp 工具端看不到）；(2) url——外部视频/音频/图片 URL（服务端下载，上限200MB）。媒体可将返回 URL 注入工作流节点，文档直接用 Markdown 下载链接交付用户。",
   args: {
-    path: tool.schema.string().optional().describe(`本地影片/音频文件的绝对路径（如 <workspace>/out/final.mp4），上限 200MB，仅接受视频/音频扩展名。与 url 二选一，给了 path 就优先用 path。${LOCAL_PATH_HINT}`),
+    path: tool.schema.string().optional().describe(`本地媒体或完整交付文档的绝对路径；文档支持 .md/.txt/.json/.csv/.pdf，上限200MB。与 url 二选一，给了 path 就优先用 path。${LOCAL_PATH_HINT}`),
     url: tool.schema.string().optional().describe("外部影片/音频 URL（video/* 或 audio/*，上限 200MB，服务端下载 120s 超时）。与 path 二选一。"),
   },
   async execute({ path: localPath, url }, context) {
@@ -19,6 +20,8 @@ export default tool({
     }
     let payload: Record<string, string>;
     if (localPath) {
+      const access = checkAgentPath(localPath, context.sessionID);
+      if (!access.ok) return fail("path_denied", `文件路径不允许上传：${access.reason}`);
       // 2026-10-02 更正：本工具跑在 opencode-server 服务内（PrivateTmp），**看不到** agent 沙箱私有的
       // /tmp（那是 <workspace>/.run/<slug>/tmp 被 bind 进沙箱的）；三方 /tmp 互不可见。跨边界交接一律
       // 用 workspace 内同绝对路径（见 lib/agent-paths.ts）。读成 base64 交给网关，网关不碰 agent FS。
@@ -57,7 +60,8 @@ export default tool({
       url: data.url,
       bytes: data.bytes,
       content_type: data.content_type,
-      note: "已入库平台存储（免费）。用 workflow_add_node（metadata.content）或 workflow_update_node（patch.content）把此 URL 注入节点，或直接交付此公网 URL 给用户。",
+      sha256: data.sha256,
+      note: "完整文件已入库平台存储（免费）。文档用 Markdown 下载链接交付此 URL；媒体可注入工作流节点。",
     });
   },
 });

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { Suspense, useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { ImageDisplay } from "@/components/ImageDisplay";
 import { PromptInput, type PromptInputMode } from "@/components/PromptInput";
 import { FaqSection } from "@/components/FaqSection";
@@ -87,6 +88,20 @@ import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 
 /** 卡片的四个面。第四个面 agent 与 edit / upscale 同级，见 PromptInput。 */
 type PlaygroundMode = PromptInputMode;
+
+/** 查询交接独立订阅：客户端历史导航也能接住，静态首页只让这一空组件等待查询。 */
+function AgentQueryHandoff({ onApply }: { onApply: (params: URLSearchParams) => void }) {
+  const searchParams = useSearchParams();
+  const query = searchParams.toString();
+  useEffect(() => {
+    const params = new URLSearchParams(query);
+    onApply(params);
+    if (params.get("agent") === "1") {
+      window.history.replaceState(window.history.state, "", window.location.pathname);
+    }
+  }, [query, onApply]);
+  return null;
+}
 
 export default function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
@@ -386,17 +401,19 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // D-18 交接：/history 的「交给 AI 助理继续做」带 ?agent=1&q= 回首页。
   // 那些页面不像这张卡片能就地翻面，只能带着话跳过来；落地后直接开在 agent 面。
   // 读完就把 query 从地址栏抹掉（replaceState，不进历史）：留着它刷新会重复注入。
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("agent") !== "1") return;
+  const applyAgentQuery = useCallback((params: URLSearchParams) => {
+    // 清 query 只消费入口，不清当前会话；空 prop 让同一深链再次到来仍可触发恢复。
+    if (params.get("agent") !== "1") {
+      setInitialAgentSessionId("");
+      return;
+    }
     // URL 里塞进来的东西不可信，截一下长度，别让它撑爆输入区。
     setAgentSeed((params.get("q") ?? "").slice(0, 500));
     // 会话深链：只接受 UUID 形状（36 位十六进制+连字符），别的值当没带。
     const sessionParam = params.get("session") ?? "";
-    if (/^[0-9a-f-]{36}$/i.test(sessionParam)) setInitialAgentSessionId(sessionParam);
+    setInitialAgentSessionId(/^[0-9a-f-]{36}$/i.test(sessionParam) ? sessionParam : "");
     setMode("agent");
     setDisplayMode("agent");
-    window.history.replaceState(null, "", window.location.pathname);
   }, []);
 
   // 交接语只属于它被交给的那一次对话：离开 agent 面就作废。
@@ -769,6 +786,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
 
   return (
     <>
+      <Suspense fallback={null}>
+        <AgentQueryHandoff onApply={applyAgentQuery} />
+      </Suspense>
       {/* 这一层不参与模式转场：dust 动画的范围只有卡片中间那块控制区
           （在 PromptInput 里）。上一版让整页跟著翻面，等于为了开个聊天区
           把首页整块换掉——使用者要的是卡片换一面，不是换个网站。 */}

@@ -76,6 +76,13 @@ export function storeCanvasState(
   sweepCanvasStates()
   const updatedAt = Date.now()
   canvasStates.set(canvasKeyFor(sessionId), { state: stateValue, updatedAt })
+  const owner = resolveSession(sessionId) ?? subagentParentState(sessionId)
+  if (owner) markDirty(owner)
+  for (const pending of pendingCanvasOps.values()) {
+    if (pending.sessionKey === canvasKeyFor(sessionId) && pending.receipt?.ok === true && canvasOpsMatchState(pending.ops, stateValue)) {
+      pending.settle(pending.receipt)
+    }
+  }
   return { ok: true, bytes, updatedAt }
 }
 
@@ -232,10 +239,58 @@ export interface CanvasOpsResult {
 
 interface PendingCanvasOps {
   sessionKey: string
+  ops: unknown[]
+  receipt?: CanvasOpsResult
   settle: (result: CanvasOpsResult) => void
 }
 
 const pendingCanvasOps = new Map<string, PendingCanvasOps>()
+
+// Receipt proves delivery only. Persistent writes must appear in the same session's
+// uploaded snapshot, under the exact fields consumed by the frontend reducer.
+function canvasOpsMatchState(ops: unknown[], stateValue: unknown): boolean {
+  const state = stateValue as PersistableCanvasState | null
+  const nodes = Array.isArray(state?.nodes) ? state.nodes : []
+  const connections = Array.isArray(state?.connections) ? state.connections : []
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  // Fold assertions, not canvas state: a later write to the same field supersedes
+  // the earlier assertion, while untouched metadata keys still have to match.
+  const expectedNodes = new Map<unknown, { exists: boolean; fields: Record<string, unknown>; metadata: Record<string, unknown> }>()
+  for (const raw of ops) {
+    const op = raw as Record<string, any>
+    if (op.type === "add_node") {
+      expectedNodes.set(op.node?.id, { exists: true, fields: { type: op.node?.type }, metadata: { ...op.node?.metadata } })
+    } else if (op.type === "update_node") {
+      const expected = expectedNodes.get(op.id) ?? { exists: true, fields: {}, metadata: {} }
+      if (!expected.exists) continue // A deleted node stays absent until an explicit add.
+      for (const [key, value] of Object.entries(op.patch ?? {})) {
+        if (key === "metadata") Object.assign(expected.metadata, value)
+        else if (key === "title") expected.fields[key] = typeof value === "string" ? value.slice(0, 120) : value
+        else if (key === "width") expected.fields[key] = typeof value === "number" ? Math.max(120, value) : value
+        else if (key === "height") expected.fields[key] = typeof value === "number" ? Math.max(90, value) : value
+        else expected.fields[key] = value
+      }
+      expectedNodes.set(op.id, expected)
+    } else if (op.type === "delete_nodes" && Array.isArray(op.ids)) {
+      for (const id of op.ids) expectedNodes.set(id, { exists: false, fields: {}, metadata: {} })
+    }
+  }
+  for (const [id, expected] of expectedNodes) {
+    const node = nodes.find((n) => n.id === id)
+    if (!expected.exists) {
+      if (node) return false
+      continue
+    }
+    if (!node || !Object.entries(expected.fields).every(([key, value]) => same(node[key], value)) ||
+      !Object.entries(expected.metadata).every(([key, value]) => same((node.metadata as Record<string, unknown> | undefined)?.[key], value))) return false
+  }
+  return ops.every((raw) => {
+    const op = raw as Record<string, any>
+    if (op.type === "connect_nodes") return Array.isArray(op.connections) && op.connections.every((c: Record<string, unknown>) => connections.some((n) => n.fromNodeId === c.fromNodeId && n.toNodeId === c.toNodeId))
+    if (op.type === "delete_connections") return Array.isArray(op.ids) && op.ids.every((id: unknown) => !connections.some((c) => c.id === id))
+    return true // Selection, viewport and generation initiation are transient actions.
+  })
+}
 
 // ---- 用户批准凭据＋偏离模板 token（2026-10-02）----
 // 模型自宣告 deviate_from_template=true 等于没守；改成网关签发 token：只有「本 session 内
@@ -604,11 +659,13 @@ export function dispatchCanvasOps(
   const request_id = `cop_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      const acknowledged = pendingCanvasOps.get(request_id)?.receipt?.ok === true
       pendingCanvasOps.delete(request_id)
-      reject(Object.assign(new Error("canvas ops timeout"), { code: "OPS_TIMEOUT", request_id }))
+      reject(Object.assign(new Error(acknowledged ? "画布回执已到，但同会话快照未包含请求写入的节点字段；操作未证实生效" : "canvas ops timeout"), { code: acknowledged ? "OPS_NOT_APPLIED" : "OPS_TIMEOUT", request_id }))
     }, timeoutMs)
     pendingCanvasOps.set(request_id, {
       sessionKey: state.sessionId,
+      ops,
       settle: (result) => {
         clearTimeout(timer)
         pendingCanvasOps.delete(request_id)
@@ -623,7 +680,8 @@ export function resolveCanvasOps(sessionId: string, requestId: string, result: C
   const pending = pendingCanvasOps.get(requestId)
   if (!pending) return false
   if (pending.sessionKey !== canvasKeyFor(sessionId)) return false
-  pending.settle(result)
+  pending.receipt = result
+  if (!result.ok || canvasOpsMatchState(pending.ops, getCanvasState(sessionId)?.state)) pending.settle(result)
   return true
 }
 

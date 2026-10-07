@@ -7,7 +7,7 @@ import type { PendingSteer } from "./steer-core.ts"
  *  文字成员刻意写成 `{ type: string; text: string }`（非字面量 "text"），
  *  让既有只会产文字 part 的呼叫端与测试型别继续可赋值。 */
 export type GatewayPromptPart =
-  | { type: string; text: string }
+  | { type: string; text: string; synthetic?: boolean; ignored?: boolean; metadata?: Record<string, unknown> }
   | { type: "file"; mime: string; filename: string; url: string }
 
 export interface PendingConfirm {

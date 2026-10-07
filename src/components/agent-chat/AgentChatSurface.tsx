@@ -157,10 +157,10 @@ export interface AgentChatSurfaceProps {
    */
   initialPrompt?: string;
   /**
-   * 会话深链（wish 插件 ?agent=1&session=<uuid>）：挂载时直开该会话。
+   * 会话深链（wish 插件 ?agent=1&session=<uuid>）：入口变化时恢复该会话。
    * 09-12：autoStart 已撤（建号权在发送按钮），挂载本来即空态不建号——这里
    * 只是把落点从「空态」换成 switchSession 目标会话；
-   * 目标不存在/已被回收则静默退回空态（开新＝清空，不再预建），不弹错打断落地体验。
+   * 目标不存在/已被回收时保留当前会话，由 switchSession 显示失败原因。
    */
   initialSessionId?: string;
   /** inline 变体的退出去向（回工作台）。page 变体不用。 */
@@ -523,20 +523,13 @@ export function AgentChatSurface({
   }, [switchingTo, switchSession]);
   const didAutoFreshStartRef = useRef(false);
 
-  // 深链落地：mount 时切到 URL 指定的会话（wish 插件 ?agent=1&session=<uuid>）。
-  // 只试一次；失败（会话不存在/已被回收/网关重启丢会话）静默退回开新会话——
-  // 落地体验不该被一条死链接卡住，切换失败的具体原因由 switchSession 自己记录。
-  const didApplyDeepLinkRef = useRef(false);
+  // 深链每次交接都恢复目标；旧请求竞态由 hook 的 connectSeqRef 守卫。
+  // 清 query 不开新会话，恢复失败也不抹掉已有内容与失败反馈。
   useEffect(() => {
-    if (!initialSessionId || didApplyDeepLinkRef.current) return;
-    didApplyDeepLinkRef.current = true;
-    void (async () => {
-      const ok = await switchSession(initialSessionId);
-      if (!ok) await startNewSession();
-    })();
-    // 深链只属于挂载那一刻；switchSession / startNewSession 引用稳定。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSessionId]);
+    if (!initialSessionId) return;
+    didAutoFreshStartRef.current = true;
+    void switchSession(initialSessionId);
+  }, [initialSessionId, switchSession]);
 
   /** 开新对话：旧会话留在历史里可切回；成功后收 dropdown 并让历史目录重拉。 */
   const onStartNewSession = useCallback(async (): Promise<void> => {

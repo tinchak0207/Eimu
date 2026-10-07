@@ -94,16 +94,23 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
       info?: { role?: string; time?: { created?: number } }
       parts?: Array<{ type?: string; text?: string }>
     }>
-    const messages = (Array.isArray(msgs) ? msgs : []).map((m) => ({
-      role: m.info?.role ?? "unknown",
-      created_at: m.info?.time?.created ?? null,
-      text: (m.parts ?? [])
+    const messages = (Array.isArray(msgs) ? msgs : []).map((m) => {
+      // 详情与全量恢复共用同一来源边界；隐藏气泡不等于允许凭证进响应。
+      const visible = slimHistoryMessages([m], state.gwNonce)[0] as {
+        info?: { role?: string }; parts?: Array<{ type?: string; text?: string }>
+      } | undefined
+      const role = visible?.info?.role ?? "unknown"
+      const text = (visible?.parts ?? [])
         .filter((p) => p.type === "text" && typeof p.text === "string")
         .map((p) => p.text as string)
         .join("\n")
-        .slice(0, 20_000),
-      has_tool_parts: (m.parts ?? []).some((p) => p.type === "tool"),
-    }))
+      return {
+        role,
+        created_at: m.info?.time?.created ?? null,
+        text: role === "user" ? text : text.slice(0, 20_000),
+        has_tool_parts: (m.parts ?? []).some((p) => p.type === "tool"),
+      }
+    })
     return Response.json({
       session_id: id,
       opencode_session_id: state.opencodeSessionId,
@@ -135,13 +142,14 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
  *  appendSystemPayloadToTurnTail）。只用在显示读路径（slimHistoryMessages）；
  *  模型上下文由 opencode 持有、不经此函式，故不影响模型看到的内容。
  *  找不到标记＝原样返回（零回归）。 */
-function stripTailInjectedPayload(text: string): string {
-  const marker = TAIL_PAYLOAD_MARKER.trim()
+function stripTailInjectedPayload(text: string, nonce?: string): string {
+  if (!/^[0-9a-f]{12}$/.test(nonce ?? "")) return text
+  const marker = `${TAIL_PAYLOAD_MARKER}⟦gw:${nonce}⟧ `
   const i = text.indexOf(marker)
-  return i >= 0 ? text.slice(0, i).trimEnd() : text
+  return i >= 0 ? text.slice(0, i) : text
 }
 
-export function slimHistoryMessages(msgs: unknown[]): unknown[] {
+export function slimHistoryMessages(msgs: unknown[], nonce?: string): unknown[] {
   const out: unknown[] = []
   for (const rawMsg of msgs) {
     try {
@@ -157,7 +165,8 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
       }
       const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
       // H14 补完：user 讯息首个 text part 为系统唤醒文本 → 历史回放呈现为 system（显示层，不改模型上下文）。
-      if (info.role === "user" && partsSrc.some((p) => {
+      const hasUserOriginal = partsSrc.some((p: any) => p?.metadata?.gateway?.source === "user-original")
+      if (info.role === "user" && !hasUserOriginal && partsSrc.some((p) => {
         const q = p as Record<string, unknown> | null
         return !!q && q.type === "text" && isSystemWakeText(q.text)
       })) info.role = "system"
@@ -168,12 +177,12 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
           const part = rawPart as Record<string, unknown>
           const type = part.type
           if (type === "text" || type === "reasoning") {
-            // 0918：历史端点是「显示」通道——剥掉网关附在 user 讯息尾端的注入
-            // payload（野兽帧等，见 appendSystemPayloadToTurnTail），否则用户
-            // 气泡会被 17.2k 字的派遣协议正文灌爆。模型上下文由 opencode 持有、
-            // 不经本函式，故剥除不改变模型看到的内容（纯显示层过滤）。
+            const provenance = (part.metadata as { gateway?: { source?: string } } | undefined)?.gateway
+            // 注入来源或opencode synthetic标记足以隐藏机器part；用户原文优先，
+            // 旧合并part只按本会话真凭证截尾，不按用户自己写的标题截断。
+            if (provenance?.source === "system-injection" || ((info.role === "user" || info.role === "system") && part.synthetic === true && provenance?.source !== "user-original")) continue
             if (type === "text" && (info.role === "user" || info.role === "system") && typeof part.text === "string") {
-              parts.push({ ...part, text: stripTailInjectedPayload(part.text) })
+              parts.push({ ...part, text: provenance?.source === "user-original" ? part.text : stripTailInjectedPayload(part.text, nonce) })
               continue
             }
             parts.push(part)
@@ -250,7 +259,7 @@ export async function handleGetSessionMessages(key: string, id: string): Promise
       return Response.json({ messages: [], ...cursor, fallback: "replay_only" })
     }
     // 成功路径体积大（实测单会话 452KB），瘦身后再 gzip 传输；降级路径体积小维持原样。
-    const payload = { messages: slimHistoryMessages(msgs), ...cursor }
+    const payload = { messages: slimHistoryMessages(msgs, state.gwNonce), ...cursor }
     return new Response(gzipSync(Buffer.from(JSON.stringify(payload))), {
       headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" },
     })
