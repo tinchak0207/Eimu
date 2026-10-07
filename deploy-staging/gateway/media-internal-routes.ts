@@ -4,7 +4,6 @@
 // 8165–8285（confirm）、8410–8483（emitImageFailed＋handleInternalEmit）。
 import path from "node:path"
 import { mkdir } from "node:fs/promises"
-import { createHash } from "node:crypto"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
 import { estimateTtsCoins } from "./pricing-and-validation"
@@ -63,9 +62,8 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
     const fname = typeof body.filename === "string" ? body.filename : ""
     const srcExt = path.extname(fname).toLowerCase() || ".mp4"
     contentType = contentTypeForExt(srcExt)
-    const isDocument = new Set([".md", ".txt", ".json", ".csv", ".pdf"]).has(srcExt)
-    if (!isDocument && !contentType.startsWith("video/") && !contentType.startsWith("audio/") && !contentType.startsWith("image/")) {
-      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（接受视频/音频/图片，以及 .md/.txt/.json/.csv/.pdf 文档）` }, { status: 415 })
+    if (!contentType.startsWith("video/") && !contentType.startsWith("audio/") && !contentType.startsWith("image/")) {
+      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片）` }, { status: 415 })
     }
     outExt = srcExt.replace(/^\./, "")
   } else if (typeof body.url === "string" && body.url.trim()) {
@@ -128,7 +126,7 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
   }
   const publicUrl = `https://store.tinchak0207.xyz/image-data/files/uploads/${name}`
   console.log(`[gateway] media upload: session=${sessionId} bytes=${total} type=${contentType} -> ${publicUrl}`)
-  return Response.json({ ok: true, url: publicUrl, bytes: total, content_type: contentType, sha256: createHash("sha256").update(buf).digest("hex") })
+  return Response.json({ ok: true, url: publicUrl, bytes: total, content_type: contentType })
 }
 
 // POST /internal/canvas/dispatch-ops — opencode canvas_* 工具的下发入口。
@@ -163,10 +161,7 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
     const { request_id, result } = await dispatchCanvasOps(state, v.ops, label, timeoutMs)
     return Response.json({ ok: true, request_id, result })
   } catch (e) {
-    const err = e as { code?: string; request_id?: string; message?: string }
-    if (err?.code === "OPS_NOT_APPLIED") {
-      return Response.json({ ok: false, code: err.code, request_id: err.request_id ?? null, error: err.message }, { status: 409 })
-    }
+    const err = e as { code?: string; request_id?: string }
     if (err?.code === "OPS_TIMEOUT") {
       return Response.json(
         { ok: false, code: "OPS_TIMEOUT", request_id: err.request_id ?? null, error: "前端未在时限内回执画布操作结果" },

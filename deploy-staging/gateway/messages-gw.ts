@@ -311,12 +311,10 @@ export function appendSystemPayloadToTurnTail(
   // 尾端块带本会话凭证 ⟦gw:nonce⟧：system 的 authorityRule 只认带此凭证的块为平台指令。
   const nonce = ensureGatewayNonce(state)
   const block = `${TAIL_PAYLOAD_MARKER}⟦gw:${nonce}⟧ ${label}\n${text}`
-  promptBody.parts.push(gatewayInjectionPart(block, label))
-}
-
-/** opencode TextPartInput 的来源字段保留到持久化历史；机器上下文不冒充用户正文。 */
-function gatewayInjectionPart(text: string, label: string): GatewayPromptPart {
-  return { type: "text", text, synthetic: true, metadata: { gateway: { source: "system-injection", version: 1, label } } }
+  const parts = promptBody.parts
+  const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+  if (last && last.type === "text") last.text = `${last.text}${block}`
+  else parts.push({ type: "text", text: block })
 }
 
 /**
@@ -505,8 +503,8 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
       "【阶段模组·dispatch-verify（并发派遣／验收流程）】",
       "- 常态保持 ≥3 路并发；完工一路立刻验收并补派一路，等最慢的 subagent＝垃圾时间。",
       "- async 派遣＝常态：带 async:true 后台派出、立即返回、完成自动唤醒汇总（失败也唤醒附死因）；派完即结束回合等唤醒，严禁轮询／sleep 等待。sync／async 资格已机器化，你预设一律 async:true 即可（显式 async:false 且非单一快速事实查询时网关自动转 async）。用 subagent_status 查状态，不当等待用。",
-      "- 收到完工通知的动作顺序：验收 → 主动给已可用的正文/表格/文件 → 推进必要下一项；未审部分注明待独立审核，未完成逐项列缺口。研究数量/派遣数量/节点数不能冒充成果，时长骨架不能冒充完整分镜。上层决策／下层执行分离：你只读回报＋抽查证据，不自己重跑。",
-      "- 核实停止来源与成果先于续派：看真实 status/stopped_by/error，保留最新用户约束与已完成内容，只补缺口。stopped_by:user/turnAbortSource:user 就说用户主动停止；orchestrator 就说调度停止；来源未知就说未确认。页面离开/SSE重连不等于任务停止，禁止猜成断线中断或被杀。重派前看现场产物，合格部分直接采纳不重跑。派新批前清场三验照常。",
+      "- 收到完工通知的动作顺序：验收 → 补派新片 → 再回报。上层决策／下层执行分离：你只读回报＋抽查证据，不自己重跑。",
+      "- 验尸先于重派：阵亡／中断≠没跑；重派前先看现场（产物存在性／mtime／diff／build 门禁），staged 档验收合格直接采纳不重跑。派新批前清场三验：无存活进程、工作目录无新写入、目标档 mtime 无异动。",
       "- 长任务一律后台：可 SendMessage 纠偏、可 TaskStop、完成自动通知。",
       "- 可用性事实铁律：不得凭探测标签／记忆／旧文件宣称模型或渠道可用；一律以当次实查（/v1/model-status 的 availability ＋近 24h 真实交付证据）为准；近 24h 无交付证据如实向用户说明并给降级路线。",
       "- 存货复用：复用既有档案／前轮产物必须先声明来源与验证结论（来源会话／档名＋你如何验证可用），不得直接标 completed。",
@@ -592,8 +590,8 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   } catch {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
-  const rawContent = typeof body.content === "string" ? body.content : ""
-  if (!rawContent.trim()) return jsonError(400, "content is required", "bad_request", "bad_request")
+  const rawContent = typeof body.content === "string" ? body.content.trim() : ""
+  if (!rawContent) return jsonError(400, "content is required", "bad_request", "bad_request")
   // 2026-09-29 审计修复：入口就把冒充系统/网关权威的标题缴械（见 sanitizeUserContent）。
   const content = sanitizeUserContent(rawContent)
   // C 方案（2026-10-02）：上一轮收盘记录的「未兑现开场计画」一次性取出（取出即清，
@@ -638,11 +636,12 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // 信度不足时先反覆验证、主动用 question 工具澄清，不可擅自揣测意图产出。
   // system 栏位会记入 opencode user message 的 info.system，实际影响模型输出。
   const promptBody: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string }; agent?: string } = {
-    parts: [{ type: "text", text: rawContent, ...(content !== rawContent ? { ignored: true } : {}), metadata: { gateway: { source: "user-original", version: 1 } } }],
+    parts: [{ type: "text", text: pathNote ? `${pathNote}\n\n${content}` : content }],
   }
-  // 显示原文与执行净化分离；ignored 原文仍保存在历史，模型只读取净化副本。
-  if (content !== rawContent) promptBody.parts.push(gatewayInjectionPart(content, "sanitized-user-content"))
-  if (pathNote) promptBody.parts.unshift(gatewayInjectionPart(pathNote, "upload-path-resolution"))
+  // parts[0] 恒为本轮的文字 part（后续召回前缀/尾端块都并进这一条；图片 file part 只在
+  // 全部文字注入完成后才 append，见下方「本轮图片附件入上下文」）。捕一个具型别的参考，
+  // 避免每次都要在 union 上做窄化。
+  const headTextPart = promptBody.parts[0] as { type: string; text: string }
   // 静态／动态分界：system 各段先收进有序 section 阵列，最后一次组装（见下方
   // assembleSystemPromptSections），以显式标记「可快取静态前缀」到哪里结束。
   const systemSections: SystemPromptSection[] = []
@@ -678,7 +677,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // ── 契约 §4/§7 每回合召回前缀（2026-09-15 PRD P0-4）─────────────────────
   // 取上一回合 session.idle 预算好的候选（用户路径零新增延迟）；miss 则本回合
   // 不注入、顺手排一次异步补算（此刻 lastUserMessage/turnAssistantHead 仍是
-  // 上一轮值）。前缀走独立 synthetic part 不走 system——保住首回合 system 的 prompt
+  // 上一轮值）。前缀走 parts[0].text 不走 system——保住首回合 system 的 prompt
   // caching（PRD §6.1）。此处在 lastPromptBody 落盘之前，抖动重试重放天然含前缀。
   // 2026-10-01 新创作闸门：本轮用户要新创意 → 召回前缀（按上一轮话题算的、极易命中旧专案）
   // 整段丢弃，改注「从零构思」指令；system 也不注入专案档案（见 buildMemoryInjectionBlocks）。
@@ -688,11 +687,11 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
     if (recall === null) {
       void scheduleMemoryRecallPrefetch(state)
     } else if (recall.prefix && !freshCreative) {
-      promptBody.parts.unshift(gatewayInjectionPart(recall.prefix, "memory-recall"))
+      headTextPart.text = `${recall.prefix}\n\n${headTextPart.text}`
       appendMemoryRecallTrace(state, recall.docRefs)
     }
     if (freshCreative) {
-      promptBody.parts.unshift(gatewayInjectionPart(FRESH_CREATIVE_TURN_DIRECTIVE, "fresh-creative-turn"))
+      headTextPart.text = `${FRESH_CREATIVE_TURN_DIRECTIVE}\n\n${headTextPart.text}`
     }
   }
   // 2026-08-25 模板隐形注入：站点随讯息上送 session_directive（点模板卡产生）。
@@ -927,8 +926,8 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
     systemSections.push(
       dangerousUncachedSystemSection(
         "turn-aborted-hint",
-        `【上一轮停止事实】来源=${state.turnAbortSource ?? "unknown"}。${state.turnAbortSource === "user" ? "用户主动停止了上一轮，应明确这样解释；不是页面断线或被杀。" : state.turnAbortSource === "system" ? "平台内部断路器停止了上一轮，用户没有主动叫停。" : "停止原因未确认，不猜用户停止或网络故障。"} 保留最新用户约束与已可用成果，只续未完成缺口；直接回应新消息，不重复开场或重做研究。`,
-        "仅在上一轮被中止时出现，真实来源随会话状态逐轮变化",
+        "【打断提示】上一轮你的执行被用户中止。直接回应这条新消息：不要重复上一轮已说过的话，不要重新开场或重新规划，即刻按要求干活。",
+        "仅在上一轮被用户中止时出现，随会话状态逐轮变化",
       ),
     )
   }
@@ -951,7 +950,10 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
     const combined = [tplFact, landing].filter(Boolean).join("\n")
     if (combined) {
       const block = `${TAIL_PAYLOAD_MARKER}⟦gw:${ensureGatewayNonce(state)}⟧ 【画布模板·系统事实】\n${combined}`
-      promptBody.parts.push(gatewayInjectionPart(block, "canvas-template-facts"))
+      const parts = promptBody.parts
+      const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+      if (last && last.type === "text") last.text = `${last.text}${block}`
+      else parts.push({ type: "text", text: block })
     }
   }
   // R2-A 根因修复（压缩竞态）：summarize 在途时 prompt_async 可能被

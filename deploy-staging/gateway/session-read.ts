@@ -11,11 +11,6 @@ import { stopSubagentsForParent } from "./subagent"
 // REQ-D2 停止优先：中止＝待投 steer 全数作废（steer-gw 不 import 本档，无循环）。
 import { dropPendingSteers } from "./steer-gw.ts"
 
-type TranscriptPart =
-  | { type: "text"; text: string; synthetic?: boolean; ignored?: boolean; metadata?: Record<string, unknown> }
-  | { type: "file"; mime: string; filename?: string; url: string }
-  | { type: "tool"; tool: string; input: unknown }
-
 
 // Force-stop the in-flight assistant turn on the opencode side. This is a real
 // system-level cancel (not a soft "please stop" prompt): the running turn is
@@ -38,32 +33,17 @@ export async function handleTranscript(key: string, id: string, req: Request): P
   } catch {
     return jsonError(502, "upstream unavailable", "upstream_error", "upstream_error")
   }
-  const out: Array<{ role: string; parts: TranscriptPart[] }> = []
+  const out: Array<{ role: string; parts: Array<{ type: "text"; text: string } | { type: "tool"; tool: string; input: unknown }> }> = []
   if (Array.isArray(msgs)) {
     const tail = msgs.slice(-limit)
     for (const m of tail) {
       let role = m?.info?.role === "user" ? "user" : "assistant"
-      const hasUserOriginal = Array.isArray(m?.parts) && m.parts.some((p: any) => p?.metadata?.gateway?.source === "user-original")
-      if (role === "user" && !hasUserOriginal && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))) role = "system"
-      const parts: TranscriptPart[] = []
+      if (role === "user" && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))) role = "system"
+      const parts: Array<{ type: "text"; text: string } | { type: "tool"; tool: string; input: unknown }> = []
       if (Array.isArray(m?.parts)) {
         for (const p of m.parts) {
           if (p?.type === "text" && typeof p.text === "string") {
-            const provenance = p.metadata?.gateway
-            // 只认持久化来源，不能用“像系统标题”来删除用户原文。
-            // 注入文本不出 transcript 响应，避免内部凭证进入客户端。
-            if (provenance?.source === "system-injection" || (role === "user" && p.synthetic === true && provenance?.source !== "user-original")) continue
-            let text = p.text
-            if (role === "user" && provenance?.source !== "user-original" && /^[0-9a-f]{12}$/.test(state.gwNonce ?? "")) {
-              // 旧版本合并尾注：只有本会话的真实凭证能证明这是网关注入。
-              // 无来源的新创作标题/普通引用原样保留，绝不按标题通用截断。
-              const signedTail = `\n\n---\n【系统注入·尾端】⟦gw:${state.gwNonce}⟧ `
-              const boundary = text.indexOf(signedTail)
-              if (boundary >= 0) text = text.slice(0, boundary)
-            }
-            if (text) parts.push({ type: "text", text, ...(p.synthetic === true ? { synthetic: true } : {}), ...(p.ignored === true ? { ignored: true } : {}), ...(p.metadata && typeof p.metadata === "object" ? { metadata: p.metadata } : {}) })
-          } else if (p?.type === "file" && typeof p.mime === "string" && typeof p.url === "string") {
-            parts.push({ type: "file", mime: p.mime, url: p.url, ...(typeof p.filename === "string" ? { filename: p.filename } : {}) })
+            parts.push({ type: "text", text: p.text })
           } else if (p?.type === "tool" && typeof p.tool === "string") {
             parts.push({ type: "tool", tool: p.tool, input: p.state?.input ?? null })
           }

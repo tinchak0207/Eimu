@@ -30,19 +30,6 @@ export function validateCanvasOps(ops: unknown): { ok: true; ops: unknown[] } | 
     if (typeof type !== "string" || !CANVAS_OP_TYPES.has(type)) {
       return { ok: false, message: `invalid op type: ${String(type)}` }
     }
-    if (type === "update_node") {
-      const value = op as { id?: unknown; patch?: unknown }
-      if (typeof value.id !== "string" || !value.id || !value.patch || typeof value.patch !== "object" || Array.isArray(value.patch)) {
-        return { ok: false, message: "update_node requires id and patch object" }
-      }
-      const patch = value.patch as Record<string, unknown>
-      const allowed = new Set(["title", "position", "width", "height", "metadata"])
-      const unknown = Object.keys(patch).filter((key) => !allowed.has(key))
-      if (unknown.length) return { ok: false, message: `update_node.patch unsupported fields: ${unknown.join(", ")}; content/prompt/status must be under patch.metadata` }
-      if ("metadata" in patch && (!patch.metadata || typeof patch.metadata !== "object" || Array.isArray(patch.metadata))) {
-        return { ok: false, message: "update_node.patch.metadata must be an object" }
-      }
-    }
   }
   return { ok: true, ops }
 }
