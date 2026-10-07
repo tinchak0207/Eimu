@@ -396,7 +396,7 @@ export const BEAST_PHASE_SKILL_POINTERS: BeastFrameModule = {
   cacheHint: "stable",
   content: [
     "【阶段知识·按需载入（skill）】完整阶段知识已抽成四个 opencode skill，**不再随本帧注入**。动手前必须先用 `skill` 工具载入对应者，载入后按其正文执行；不要凭记忆推测阶段规则：",
-    "- `beast-research`：存在会改变交付方向、可行性或安全边界的缺失事实，需派研究／调研／分析／竞品任务时载入；完整创意约束的原创文字任务直接创作。",
+    "- `beast-research`：派遣研究／调研／分析／竞品任务，或写创作 spec 前建知识高地时载入。",
     "- `beast-creation`：撰写 Expert 派遣 spec、拆创作任务、选模板／模型、写任务书时载入。",
     "- `beast-critique`：验收任何交付物、核对数字／契约栏、跨档抽查、派遣 critic 时载入。",
     "- `beast-dispatch-verify`：派出／补派／杀线子代理、查状态、处理逾时或死亡时载入（操作协议，建议常载）。",
@@ -457,8 +457,8 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
     target: "tail",
     cacheHint: "stable",
     content: [
-      "【阶段模组·research（消除关键不确定性）】",
-      "- 只有缺失事实会改变交付方向、可行性或安全边界时才派研究，spec 写清唯一问题及其影响。复杂任务与高品质要求不自动触发外查；完整创意约束、允许自主定故事的原创文字任务直接派创作。已有研究可用就复用；时长/角色数变更只修创作规格，不重新研究。专业知识与独立 critic 义务保留。",
+      "【阶段模组·research（研究先行）】",
+      "- 任何非平凡任务，开工前必须先派窄领域研究 subagent 建立知识高地——研究产出直接成为创作 subagent 的配方。没有研究就开工＝裸奔。",
       "- 研究是决策输入，不是创作素材：研究结论只准用于你自己的取舍判断（选题材／定规格），禁止以「以下是研究发现／你必须吸收」打包逐字转贴进 Expert spec。",
       "- 禁止跨 Expert 字面同源：spec 中不得出现会被两个以上 Expert 照抄的成句（结构名／论断句／修辞标签）；共同约束只写规格参数（时长／格式／栏位／契约栏名）。违规判据：最终交付物出现与研究档逐字相同的成句（专有名词与契约栏名除外）＝本条违反，重写 spec 并重派受影响 Expert。",
       "- 弹药嵌入原则：短素材（<100 行）全文逐字进 spec；长素材（≥100 行）嵌核心节＋档案指针（供追源即可，VPS 无此树不追）；依赖本机档案树／studio 树的素材只嵌可独立执行的检查清单（规则精华），引用方式＝模板内「素材源」标注。",
@@ -472,7 +472,7 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
     content: [
       "【阶段模组·creation（创作／派工 spec）】",
       "- 世界第一标尺：「有点好看」不是终点；每个领域以人类历史最高水准严格要求，没有人会这么认真、就是要这么认真。",
-      "- 标准作战范式：仅对会改变交付的关键不确定性派研究 → 创作 → 交叉契合／风险映射 → 多毒蛇并发评审（verdict<7 必返工）→ 返工打磨 → 成片终审；独立工作 async 并发。完整创意约束的原创文字任务直接创作，不为凑并发增派无用工作。",
+      "- 标准作战范式：研究先行 → 以研究结论为配方创作 → 交叉契合／风险映射 → 多毒蛇并发评审（verdict<7 必返工）→ 返工打磨 → 成片终审；全 async 并发派。",
       "- 三军模板（研究／创作／毒蛇评审）与弹药配方不再进你的上下文：网关在 subagent_dispatch 时按任务类型自动把对应模板骨架＋弹药追加进子代理任务书头部；你只写任务意图 spec，不需要知道模板内容，派完即忘。",
       "- spec 七件套（标尺非闸门，漏项先派再补）：①预期时间（首行 预期 N 分钟，网关自动兜底，超 2x 杀线）；②轮子源档＋白名单（cp 哪个档、只准改哪些栏位、哪些一行不许动）；③必读记忆节（memory_summary 路径＋2-5 个 note 档名各一句为何相关，引用前先验档存在）；④配方命令（copy-paste 贴进 spec，不让 subagent 考古）；⑤时间预算＋2x 杀线；⑥文件所有权（拥有 X／Y／Z、禁碰 A／B／C）；⑦止损条款（同错重试 2 次即停并回报事实）。",
       "- 每个 subagent 的 spec 必须内嵌该领域专业知识与验收标准（研究结论＝弹药），目标让 100 个不同领域专家拼命找不到问题。",
@@ -503,7 +503,7 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
     cacheHint: "stable",
     content: [
       "【阶段模组·dispatch-verify（并发派遣／验收流程）】",
-      "- 有独立工作就并发，任务数由交付需要决定；只有一路必要创作就派一路，禁止为凑 ≥3 路制造研究、拆碎成果或重复派工。",
+      "- 常态保持 ≥3 路并发；完工一路立刻验收并补派一路，等最慢的 subagent＝垃圾时间。",
       "- async 派遣＝常态：带 async:true 后台派出、立即返回、完成自动唤醒汇总（失败也唤醒附死因）；派完即结束回合等唤醒，严禁轮询／sleep 等待。sync／async 资格已机器化，你预设一律 async:true 即可（显式 async:false 且非单一快速事实查询时网关自动转 async）。用 subagent_status 查状态，不当等待用。",
       "- 收到完工通知的动作顺序：验收 → 主动给已可用的正文/表格/文件 → 推进必要下一项；未审部分注明待独立审核，未完成逐项列缺口。研究数量/派遣数量/节点数不能冒充成果，时长骨架不能冒充完整分镜。上层决策／下层执行分离：你只读回报＋抽查证据，不自己重跑。",
       "- 核实停止来源与成果先于续派：看真实 status/stopped_by/error，保留最新用户约束与已完成内容，只补缺口。stopped_by:user/turnAbortSource:user 就说用户主动停止；orchestrator 就说调度停止；来源未知就说未确认。页面离开/SSE重连不等于任务停止，禁止猜成断线中断或被杀。重派前看现场产物，合格部分直接采纳不重跑。派新批前清场三验照常。",
@@ -516,7 +516,7 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
 }
 
 /** 按本轮用户讯息判当前阶段：Jev System One 机器判（2026-10-05 起，取代原关键词正则）。
- *  dispatch-verify 为常态操作协议恒注入；research 仅在有关键事实缺口时使用。
+ *  dispatch-verify 为常态操作协议恒注入；research 为 creation 的前置（研究先行）。
  *  Jev 挂／未配置 → 全阶段 fail-open（判定层故障不该让编排静默少注入阶段知识）。 */
 export async function selectBeastStages(content: string): Promise<BeastStage[]> {
   const jev = await classifyBeastStages(content)
