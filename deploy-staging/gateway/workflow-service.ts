@@ -519,7 +519,9 @@ export class WorkflowService {
     }
     workflowCounter += 1
     const workflowId = `wf_${Date.now().toString(36)}_${workflowCounter}`
-    const graph = template ? expandTemplate(templateId!, template, content) : { nodes: [], connections: [] }
+    // 2026-10-08 DSL 读面：传 workflowId 让 expandTemplate 主卡带 workflow_ns/stepId/stepIndex
+    //（前端 DSL 反推器只认这三键；模板产线不带 → canvas_get_state 的 dsl 永远空）。
+    const graph = template ? expandTemplate(templateId!, template, content, workflowId) : { nodes: [], connections: [] }
     // config 节点补默认参数（与 submitWorkflowNode 的默认一致），画布上永远显示得出参数
     for (const n of graph.nodes) {
       if (n.kind === "config") {

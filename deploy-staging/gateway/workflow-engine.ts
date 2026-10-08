@@ -8,6 +8,10 @@
 
 // 2026-08-27 novel_film 8 䅉：audio = 配音原语（TTS 上游未接前仍可编排，执行诚实报错）、
 // film = 成片原语（拼接+混音，同上）。前端 canvas/types 已有 Audio 节点型别。
+//
+// 2026-10-08 DSL 读面接通：expandTemplate 的主卡（模板/克隆实例）带 workflow_ns/stepId/
+// stepIndex 三键，供前端 DSL 反推器（src/lib/workflow-dsl/decompile.ts）读到模板产线——
+// 衍生卡（tool/note/gate）不带（辅助卡不进 DSL）。
 export type WorkflowNodeKind = "text" | "config" | "image" | "video" | "audio" | "film"
 
 export interface WorkflowNode {
@@ -64,6 +68,16 @@ type DerivableNodeSpec = {
 }
 
 /**
+ * stepId 卫生化（对齐 src/lib/workflow-dsl/schema.ts STEP_ID_PATTERN ^[a-z][a-z0-9_]{0,47}$）：
+ * 非 [a-z0-9_] 字元（含 role 里的 `-`）换 `_`、转小写、截 48；首字符非小写字母补 `s_`。
+ * 与 decompile.ts 的 sanitizeWorkflowNs 同哲学，本档内自持（引擎档不 import 前端 lib）。
+ */
+function sanitizeStepId(raw: string): string {
+  const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]+/g, "_").slice(0, 48)
+  return /^[a-z]/.test(cleaned) ? cleaned : `s_${cleaned}`.slice(0, 48)
+}
+
+/**
  * 展开模板：把模板节点实例化成具体节点。
  * role 出现在 contentOverrides 时，merge 进节点 metadata（Deepseek 的 prompt/model 等）。
  * multiShot 模板：可由 Deepseek 透过 add_node 追加同 role 的新实例（id 加 -N 后缀）。
@@ -74,6 +88,11 @@ type DerivableNodeSpec = {
  *   char_view1 / scene_img 参考连接与 shot1_gen 同构。
  * 暴君裁定（2026-09-10）：「垃圾后端没执行好，后端要改」——推翻 08-31 SKILL 的
  *   「agent 手动 add_node 克隆」旧范式，多链展开是后端责任。
+ *
+ * workflowId（2026-10-08 DSL 读面接通，可选）：传入时主卡（模板实例 + R8 克隆实例）metadata
+ * 额外带 workflow_ns/stepId/stepIndex 三键——前端 DSL 反推器只认这三键的节点，模板产线
+ * 不带则 dsl 永远空、读面死锁。键写在 content merge 之后（引擎管辖的身分键，不被
+ * Deepseek content 覆盖）。衍生卡（tool/note/gate）是辅助卡，一律不带。未传则零行为差异。
  */
 export function expandTemplate(
   templateId: string,
@@ -84,6 +103,7 @@ export function expandTemplate(
     multiShot?: boolean
   },
   content: TemplateContent,
+  workflowId?: string,
 ): WorkflowGraph {
   // 节点 id → 其模板规格（含 tools/notes/gate 衍生材料；克隆链的规格经 spread 继承原型）
   const specByNodeId = new Map<string, DerivableNodeSpec>()
@@ -115,6 +135,13 @@ export function expandTemplate(
     }
     const nodeId = `${templateId}-${spec.role}-${i}`
     registerRoleNode(spec.role, nodeId)
+    // DSL 读面键（2026-10-08）：主卡带 workflow_ns/stepId/stepIndex 供前端反推 dsl。
+    // 最后写：身分键由引擎管辖，不让 content 覆盖。workflowId 缺席（旧调用点）→ 不写，零回归。
+    if (workflowId) {
+      filled.workflow_ns = workflowId
+      filled.stepId = sanitizeStepId(`${spec.role}_${i}`)
+      filled.stepIndex = i
+    }
     return {
       id: nodeId,
       role: spec.role,
@@ -172,6 +199,14 @@ export function expandTemplate(
             const nodeId = `${templateId}-${spec.role}-${nodes.length}`
             // 同主回圈：克隆节点也登记 role→nodeId（参考图 post-pass 会看到同名 role 的多个实例）
             registerRoleNode(spec.role, nodeId)
+            // 同主回圈：DSL 读面键——克隆 spec 不在 template.nodes 里没有模板下标，
+            // 序号取节点产出序（= nodeId 后缀），保「stepId 后缀与节点 id 后缀一致」。
+            if (workflowId) {
+              const nodeSeq = nodes.length
+              filled.workflow_ns = workflowId
+              filled.stepId = sanitizeStepId(`${spec.role}_${nodeSeq}`)
+              filled.stepIndex = nodeSeq
+            }
             // 同主回圈：克隆节点也登记规格——tools/notes/gate 经 spread 从原型继承，供衍生卡展开。
             specByNodeId.set(nodeId, spec)
             nodes.push({

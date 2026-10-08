@@ -35,6 +35,7 @@ import type { ShotlistEntry } from "./screenwriter-delegate";
 export type ExpertId =
   | "director3d"
   | "music"
+  | "lyricist"
   // ↓ Wave2a 五域占位（provisioned 不可路由，persona 片验证后转正）
   | "video-director"
   | "editor"
@@ -48,6 +49,7 @@ export type ExpertId =
 export const EXPERT_IDS = [
   "director3d",
   "music",
+  "lyricist",
   "video-director",
   "editor",
   "screenwriter",
@@ -255,3 +257,6 @@ export function blenderArtifactToEvidence(a: BlenderArtifact): ExpertDeliverable
   if (positiveNumber(a.bytes)) evidence.bytes = Math.round(a.bytes);
   return evidence;
 }
+
+/** 原创歌词交付：正文原样保留，摘要限制不适用于 lyrics。 */
+export type LyricistDeliverablePayload = { title: string; lyrics: string; hook: string; prosody_notes: string; qc: string; [key: string]: unknown };

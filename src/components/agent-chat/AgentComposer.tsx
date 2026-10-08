@@ -13,6 +13,8 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type MutableRefObject,
+  type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -419,65 +421,31 @@ export function nextSendBusy(
 
 let attachmentSeq = 0;
 
+interface PanelCoords {
+  top: number;
+  left: number;
+}
+
 /**
- * 思考级别菜单（2026-10-03）：工具行同排、「+」右边的极简控件（暴君 2026-10-03
- * 三次退回悬浮形态后三选一定案，2026-10-03 二次定案改为无框语汇）。收起态＝
- * lucide `Brain` 图标 + 级别字（低/中/高/极限）+ 小 chevron，零框零底零影，
- * 与同排「+」「↑」同一套无框语言；展开态＝极简四列（级别名 + 当前档右端勾，
- * 说明文字挂每列 title），不再有长说明行。
+ * 浮层锚定（共用件）：把面板定在触发钮**正下方**、左缘与钮左缘对齐，回传 portal
+ * 用的 fixed 视窗座标。
  *
- * 状态归属：沿用设定既有的 localStorage 缓存 + 网关持久化链路——
- *   · 读：显式级别记录（agent-thinking-level-v1）优先，无记录由 settings 反推（resolve）。
- *   · 写：writeCachedAgentThinkingLevel（跨重载保留）+ saveAgentSettings(三栏 patch)
- *     （既有唯一写入者；interrupt_mode 由合并语义原样保留）。不另开 store。
+ * 用 portal + fixed 而非容器内 absolute 的原因：助理页 surface 根带
+ * `overflow-hidden`、composer 根带 `backdrop-filter`（＝fixed 后代的 containing
+ * block），留在树内的定位会被祖先裁掉/改锚。
  *
- * 交互：真 button 元素（Tab 可达 / Enter / Space 可开），Esc 关，焦点环走 --ring 主题，
- * 点击外部收起（与历史 dropdown / 设定弹层同一条 outside-click 规矩）。
+ * coords 为 null ＝ 首 frame 尚未量到尺寸（面板以 visibility:hidden 占位量完再入座，
+ * 在 paint 前完成故不闪）；未展开时清回 null。下方装不下才翻到钮上方；四边内收 8px。
  */
-function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
-  // SSR 与首帧一律「中」：localStorage 只在挂载后读，避免 hydration 不一致。
-  const [level, setLevel] = useState<AgentThinkingLevel>("medium");
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  // 展开面板搬到 createPortal(document.body)：另持一个 ref 供 outside-click 与定位量测。
+function useAnchoredPanel(
+  open: boolean,
+  triggerRef: RefObject<HTMLDivElement | null>,
+): { panelRef: RefObject<HTMLDivElement | null>; coords: PanelCoords | null } {
   const panelRef = useRef<HTMLDivElement | null>(null);
-  // 面板 fixed 座标（相对视窗）。null ＝尚未量到，首frame 以 visibility:hidden 占位量尺寸。
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const [coords, setCoords] = useState<PanelCoords | null>(null);
 
-  useEffect(() => {
-    // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到显示「中」。
-    setLevel(resolveAgentThinkingLevel(readCachedAgentSettings()));
-  }, []);
-
-  // 开着时点外面就收——与历史 dropdown / 设定弹层同一条规矩（pointerdown + contains）。
-  // 面板在 portal（document.body）内、不在 rootRef 子树，所以两棵树都要算「里面」。
-  useEffect(() => {
-    if (!open) return;
-    const onDocPointerDown = (ev: PointerEvent): void => {
-      const target = ev.target as Node;
-      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDocPointerDown);
-    return () => document.removeEventListener("pointerdown", onDocPointerDown);
-  }, [open]);
-
-  /*
-   * 面板定位（2026-10-04 改版）：以触发钮 rect 为锚，fixed 开在按钮**正下方**、左缘对齐。
-   *
-   * 为什么是 portal + fixed，而不是晶片容器内 absolute top-full（原定写法）：
-   * 助理页＝PromptInput 卡片内的 AgentChatSurface，其 inline 态根节点带
-   * `overflow-hidden`，而 composer 根带 `backdrop-filter`（lg-float）＝fixed 子元素的
-   * containing block。absolute／fixed 留在树内都会被祖先裁掉——本机 Playwright 实测
-   * （1280×900，composer 贴 surface 底缘）：面板只从 surface 底部露出约 8px，其余全被
-   * overflow-hidden 切掉、点不到。搬到 document.body 的 portal 才不受该裁切，
-   * 也才能保证面板四边都在视窗内。
-   *
-   * 定位规则：预设在钮下方（top = 钮底 + 8px）；下方装不下（面板高＋边距超过视窗）才
-   * 翻到钮上方——「必要的翻转」，不是预设。左右以钮左缘对齐，靠到右边界时往内收。
-   */
   const place = useCallback((): void => {
-    const trigger = rootRef.current;
+    const trigger = triggerRef.current;
     if (!trigger) return;
     const r = trigger.getBoundingClientRect();
     const panel = panelRef.current;
@@ -495,9 +463,9 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
     let left = r.left; // 左缘与按钮左缘对齐
     if (pw > 0) left = Math.min(left, Math.max(MARGIN, vw - MARGIN - pw));
     setCoords({ top, left });
-  }, []);
+  }, [triggerRef]);
 
-  // 开面板：先量尺寸再入座（useLayoutEffect 在 paint 前跑，不会闪）。
+  // 先量尺寸再入座（useLayoutEffect 在 paint 前跑，不会闪）。
   useLayoutEffect(() => {
     if (!open) {
       setCoords(null);
@@ -522,6 +490,144 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
       vv?.removeEventListener("scroll", onMove);
     };
   }, [open, place]);
+
+  return { panelRef, coords };
+}
+
+/**
+ * 浮层面板（共用件）：工具行两颗下拉共享的唯一面板实作（材质／圆角／内距／层级／
+ * 高光线只有这一份）。
+ *
+ * 材质 `agent-pop` ＋ `rounded-[18px] p-1.5` ＋ 顶缘 specular 高光线，素材来源＝历史
+ * 下拉（`AgentChatSurface.tsx` 约 1129 行）与设定弹层（`AgentSettingsPopover.tsx` 约
+ * 102 行）；`z-[85]` ＝ 压过宿主聊天壳 `.canvas-chat-panel`(z-60) 与 navbar(z-80)、
+ * 又留在所有模态遮罩（89 起）之下。
+ *
+ * 动效用 tailwindcss-animate 的 `animate-in fade-in-0 slide-in-from-top-1`，**不得**
+ * 换 `agent-pop-in`：它的 keyframes 带 `translateX(-50%)`（给 left-1/2 置中弹层用的），
+ * 会把锚定面板整体左移半个宽度、内容滑出框外（已发生过的生产事故）。
+ */
+function AnchoredMenuPanel({
+  panelRef,
+  coords,
+  ariaLabel,
+  children,
+}: {
+  panelRef: RefObject<HTMLDivElement | null>;
+  coords: PanelCoords | null;
+  ariaLabel: string;
+  children: ReactNode;
+}) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="listbox"
+      aria-label={ariaLabel}
+      style={{
+        top: coords?.top ?? 0,
+        left: coords?.left ?? 0,
+        visibility: coords ? "visible" : "hidden",
+      }}
+      className="agent-pop fixed z-[85] w-max min-w-0 max-h-[min(60dvh,18rem)] overflow-y-auto overscroll-contain rounded-[18px] p-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out motion-reduce:animate-none"
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * 选项列（共用件）：工具行两颗下拉的唯一列实作。
+ * 结构＝可选前置图示 → 标题＋说明行（两行都直接可见）→ 选中时右端勾。
+ * `titleAttr` 挂原生 title（原生长说明的补充，可省）。
+ */
+function MenuOptionRow({
+  icon: Icon,
+  title,
+  subtitle,
+  selected,
+  disabled,
+  onClick,
+  titleAttr,
+}: {
+  icon?: LucideIcon;
+  title: string;
+  subtitle: string;
+  selected: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  titleAttr?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      disabled={disabled}
+      onClick={onClick}
+      title={titleAttr}
+      className={cn(
+        "flex w-full items-start gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
+        "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        selected && "bg-ios-blue/[0.10]",
+      )}
+    >
+      {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/50" aria-hidden="true" />}
+      <span className="flex min-w-0 flex-col">
+        <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">{title}</span>
+        <span className="mt-0.5 max-w-[15rem] text-ios-caption2 leading-snug text-foreground/50">
+          {subtitle}
+        </span>
+      </span>
+      {selected && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />}
+    </button>
+  );
+}
+
+/**
+ * 思考级别菜单（2026-10-03）：工具行同排、「+」右边的极简控件（暴君 2026-10-03
+ * 三次退回悬浮形态后三选一定案，2026-10-03 二次定案改为无框语汇）。收起态＝
+ * lucide `Brain` 图标 + 级别字（低/中/高/极限）+ 小 chevron，零框零底零影，
+ * 与同排「+」「↑」同一套无框语言；展开态＝与「本机文件权限」共用同一套浮层
+ * （AnchoredMenuPanel + MenuOptionRow），列语汇＝标题＋说明行。
+ *
+ * 状态归属：沿用设定既有的 localStorage 缓存 + 网关持久化链路——
+ *   · 读：显式级别记录（agent-thinking-level-v1）优先，无记录由 settings 反推（resolve）。
+ *   · 写：writeCachedAgentThinkingLevel（跨重载保留）+ saveAgentSettings(三栏 patch)
+ *     （既有唯一写入者；interrupt_mode 由合并语义原样保留）。不另开 store。
+ *
+ * 交互：真 button 元素（Tab 可达 / Enter / Space 可开），Esc 关，焦点环走 --ring 主题，
+ * 点击外部收起（与历史 dropdown / 设定弹层同一条 outside-click 规矩）。
+ */
+function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
+  // SSR 与首帧一律「中」：localStorage 只在挂载后读，避免 hydration 不一致。
+  const [level, setLevel] = useState<AgentThinkingLevel>("medium");
+  const [open, setOpen] = useState(false);
+  // 触发钮容器：面板锚定量测与 outside-click 判定的锚。
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // 展开面板已 portal 到 document.body（见 AnchoredMenuPanel），座标由此共用 hook 量测。
+  const { panelRef, coords } = useAnchoredPanel(open, rootRef);
+
+  useEffect(() => {
+    // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到显示「中」。
+    setLevel(resolveAgentThinkingLevel(readCachedAgentSettings()));
+  }, []);
+
+  // 开着时点外面就收——与历史 dropdown / 设定弹层同一条规矩（pointerdown + contains）。
+  // 面板在 portal（document.body）内、不在 rootRef 子树，所以两棵树都要算「里面」。
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      const target = ev.target as Node;
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [open, panelRef]);
 
   // Esc 收起（语义与旧版一致：只收起，不选、不清输入框）。焦点在按钮（rootRef 内）时
   // 走 root 的 onKeyDown；焦点若落进 portal 的选项，root 收不到，故另挂一支 window keydown。
@@ -557,10 +663,7 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   return (
     // 工具行同排、「+」右边（暴君 2026-10-03 三选一定案）：控件进工具行流内，
     // 右边紧跟「+」，与「+」和「↑」同一条基线。
-    // 面板锚定改版（2026-10-04）：展开面板已搬到 createPortal(document.body) + fixed，
-    // 以本容器的 getBoundingClientRect() 定位（rootRef 只当锚点量测与 outside-click 判定）。
-    // 旧禁令「面板 absolute bottom-full 贴 composer 根、此容器不得 relative」整条作废——
-    // 它只服务 upward 开法；现在面板在按钮下方、且必须离开被 overflow-hidden 裁切的树。
+    // rootRef 只当锚点量测与 outside-click 判定；面板已 portal 到 body（见 AnchoredMenuPanel）。
     <div ref={rootRef} onKeyDown={onKeyDown} className="shrink-0 ml-0.5">
       <button
         type="button"
@@ -596,71 +699,21 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
           aria-hidden="true"
         />
       </button>
-      {/*
-        展开面板：createPortal 到 document.body + fixed 定位（座标由 place() 以按钮 rect
-        算出，预设在按钮**正下方**、左缘与按钮左缘对齐）。搬出树才不被助理页
-        .agent-chat-surface（inline 态带 overflow-hidden）裁掉；不进流＝零 layout shift。
-        **不得**用 agent-pop-in：它的 keyframes 带 translateX(-50%)（给「left-1/2 置中弹层」
-        用的），配 left 会把整个面板左移半个宽度、内容滑出面板外——那正是生产上「级别名跑到
-        面板左缘之外、四列只剩说明行」的根因。
-        样式逐字复用助理页既有浮层语汇：agent-pop 弹层材质 + rounded-[18px] + p-1 + 顶缘
-        specular 高光线（来源＝历史下拉 AgentChatSurface.tsx:1129、设定弹层
-        AgentSettingsPopover.tsx:102）。选 agent-pop 而非 lg-float 的理由：①本面板已 portal
-        到 body，agent-chat.css 的 ≤639.98px 手机字级阶梯正是以 `.agent-pop`（「DOM 已搬离
-        根容器」的弹层）为锚点，选它手机字才抬到 15px 地板；②面板浮在输入框之外的页面内容
-        上，0.96 白比 lg-float 的 0.56 白好读。
-        宽度＝内容自适应（w-max）：四列只有级别名＋勾，不写死 w-52 造成空旷或裁切。
-        底缘保护：max-h + 内部可滚（overscroll-contain），空间不足时面板自己滚，底部不被裁掉。
-        首frame coords 未量到＝visibility:hidden 占位量尺寸，paint 前 place() 定位，不闪。
-        z-[85]（2026-10-04 修「打不开／被遮蔽」）：本面板 portal 到 body，就脱离了所属助理
-        容器的堆叠脉络——首页／助理页的聊天面板壳 `.canvas-chat-panel` 是 fixed z-60、
-        navbar 是 sticky z-80，而面板原本 z-50 ⇒ 浮层确实渲染了、却整片被宿主面板盖掉
-        （实测 elementsFromPoint 在浮层中心取到的是页面内容，不是浮层自己的选项钮）。
-        85 ＝ 压过宿主面板(60)与 navbar(80)、又留在所有模态遮罩(89 起：宣传片 120、
-        参数抽屉 .agent-param-scrim 90)之下——模态开著时浮层本就不该浮在最上。同树内的
-        历史／设定弹层维持 z-50 不动：它们没有 portal，仍在宿主面板的堆叠脉络内。
-      */}
-      {open && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={panelRef}
-              role="listbox"
-              aria-label="思考级别"
-              style={{
-                top: coords?.top ?? 0,
-                left: coords?.left ?? 0,
-                visibility: coords ? "visible" : "hidden",
-              }}
-              className="agent-pop fixed z-[85] w-max min-w-0 max-h-[min(60dvh,18rem)] overflow-y-auto overscroll-contain rounded-[18px] p-1"
-            >
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-              {AGENT_THINKING_LEVELS.map((lv) => (
-                <button
-                  key={lv}
-                  type="button"
-                  role="option"
-                  aria-selected={lv === level}
-                  onClick={() => pick(lv)}
-                  /* 极简：说明行删掉，说明字串改挂 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。 */
-                  title={AGENT_THINKING_LEVEL_HINTS[lv]}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
-                    "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                    lv === level && "bg-ios-blue/[0.10]",
-                  )}
-                >
-                  <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
-                    {AGENT_THINKING_LEVEL_LABELS[lv]}
-                  </span>
-                  {lv === level && (
-                    <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
-                  )}
-                </button>
-              ))}
-            </div>,
-            document.body,
-          )
-        : null}
+      {open && (
+        <AnchoredMenuPanel panelRef={panelRef} coords={coords} ariaLabel="思考级别">
+          {AGENT_THINKING_LEVELS.map((lv) => (
+            <MenuOptionRow
+              key={lv}
+              // 标题＋说明行两行都直接可见；说明真源＝AGENT_THINKING_LEVEL_HINTS，同时挂 title。
+              title={AGENT_THINKING_LEVEL_LABELS[lv]}
+              subtitle={AGENT_THINKING_LEVEL_HINTS[lv]}
+              titleAttr={AGENT_THINKING_LEVEL_HINTS[lv]}
+              selected={lv === level}
+              onClick={() => pick(lv)}
+            />
+          ))}
+        </AnchoredMenuPanel>
+      )}
     </div>
   );
 }
@@ -719,11 +772,37 @@ export function LocalFileModeMenuView({
   const label = known ? current.title : "本机文件";
   const disabled = !supported;
 
+  // 触发钮容器（chip）：面板锚定量测与 outside-click 判定的锚。
+  const triggerRef = useRef<HTMLDivElement | null>(null);
+  // 面板已 portal 到 document.body；只在展开且可用时才量座标。
+  const { panelRef, coords } = useAnchoredPanel(open && !disabled, triggerRef);
+
+  // 面板 portal 后不在本子树：落在 portal 选项上的点击／按键，chip 容器都收不到，
+  // 故 outside-click 与 Esc 另挂 document／window，且「触发钮或面板」皆算里面
+  // （否则点面板自己的选项会被判成点外面）。本监听只在 open 时存在，调 onToggleOpen 即关。
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      const target = ev.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      onToggleOpen();
+    };
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === "Escape") onToggleOpen();
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDocPointerDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onToggleOpen, panelRef]);
+
   return (
-    // 定位链（本控件仍走旧写法）：面板 absolute bottom-full，containing block ＝
-    // composer 根（此 chip 容器不挂 relative）。相邻 ThinkingLevelMenu 已改为容器
-    // relative + top-full 开在按钮下方，两者定位语汇不同，勿再宣称「相同」。
+    // 与相邻 ThinkingLevelMenu 用同一套浮层：useAnchoredPanel + AnchoredMenuPanel +
+    // MenuOptionRow（面板与选项列只存在一份实作）。triggerRef 仅供锚定与 outside-click 判定。
     <div
+      ref={triggerRef}
       className="shrink-0 ml-1"
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
@@ -758,51 +837,24 @@ export function LocalFileModeMenuView({
         />
       </button>
       {open && !disabled && (
-        <div
-          role="listbox"
-          aria-label="本机文件权限"
-          // 定位语汇沿用旧写法（与同档 SkillSlashMenu 同款）：absolute bottom-full left-1.5 mb-2，
-          // 贴控件正上方、不进流＝零 layout shift（ThinkingLevelMenu 已改开按钮下方，勿再对齐它）。
-          className="lg-float absolute bottom-full left-1.5 z-50 mb-2 w-max min-w-0 rounded-ios-xl p-1"
-        >
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-          {LOCAL_FILE_MODES.map((spec) => {
-            const Icon = LOCAL_FILE_MODE_ICONS[spec.icon];
-            const selected = known && spec.id === mode;
-            return (
-              <button
-                key={spec.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                disabled={busy}
-                onClick={() => onPick(spec.id)}
-                className={cn(
-                  "flex w-full items-start gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
-                  "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                  selected && "bg-ios-blue/[0.10]",
-                )}
-              >
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/50" aria-hidden="true" />
-                <span className="flex min-w-0 flex-col">
-                  <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
-                    {spec.title}
-                  </span>
-                  {/* 副标＝本档第二真源；仅本控件显示，逐字取 LOCAL_FILE_MODES。 */}
-                  <span className="mt-0.5 max-w-[15rem] text-ios-caption2 leading-snug text-foreground/50">
-                    {spec.subtitle}
-                  </span>
-                </span>
-                {selected && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />}
-              </button>
-            );
-          })}
+        <AnchoredMenuPanel panelRef={panelRef} coords={coords} ariaLabel="本机文件权限">
+          {LOCAL_FILE_MODES.map((spec) => (
+            <MenuOptionRow
+              key={spec.id}
+              icon={LOCAL_FILE_MODE_ICONS[spec.icon]}
+              // 文案真源＝LOCAL_FILE_MODES，本档不另写一份字串。
+              title={spec.title}
+              subtitle={spec.subtitle}
+              selected={known && spec.id === mode}
+              disabled={busy}
+              onClick={() => onPick(spec.id)}
+            />
+          ))}
           {/* 已授权数量：只「检视」；授权入口在对话里（本控件不做选择资料夹按钮）。 */}
           <p className="mt-1 border-t border-black/[0.06] px-2.5 pb-1.5 pt-2 text-ios-caption2 text-foreground/45">
             {rootsCount > 0 ? `已授权 ${rootsCount} 个文件夹` : "尚未授权任何文件夹"}
           </p>
-        </div>
+        </AnchoredMenuPanel>
       )}
     </div>
   );
@@ -842,16 +894,9 @@ function LocalFileModeMenu() {
 
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getServerSnapshot);
 
-  // 开著时点外面就收——与 ThinkingLevelMenu / 历史 dropdown 同一条 pointerdown + contains 规矩。
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocPointerDown = (ev: PointerEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDocPointerDown);
-    return () => document.removeEventListener("pointerdown", onDocPointerDown);
-  }, [open]);
+  // 开著时点外面就收：面板已 portal 到 body，判定搬进 LocalFileModeMenuView（它同时
+  // 认得触发钮与面板两棵树）——本层若再挂一支只看自己子树的 pointerdown，点面板选项
+  // 会被误判成「点外面」。
 
   // 判定未完成（SSR／首画格）一律不渲染，避免闪错。
   if (!mounted) return null;
@@ -872,7 +917,7 @@ function LocalFileModeMenu() {
   const rootsCount = Array.isArray(snap.status?.roots) ? snap.status.roots.length : 0;
 
   return (
-    <div ref={rootRef} className="contents">
+    <div className="contents">
       <LocalFileModeMenuView
         open={open}
         onToggleOpen={() => setOpen((v) => !v)}

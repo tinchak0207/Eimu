@@ -94,6 +94,10 @@ const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, Ca
  * 门禁卡（验收条件）→ 生成卡（短名，携带 promptNotes/deliverable 给 agent）。
  * 旧的 deliverable 拆项卡与 promptNotes 逐条卡（提示词凑数）已删——
  * 它们归入生成卡 metadata，画布上只留「用户一眼看懂流水线」的结构卡。
+ *
+ * 2026-10-08 生成卡补 workflow_ns/stepId 键（workflow_ns=tpl_<ts> 同次铺设共享，
+ * 两条同名模板产线 ns 不撞）：让 workflow-dsl/decompile 能把模板产线读成 DSL
+ * （族2 → 族3 化）；辅助卡（head/tool/gate）刻意不带，被 decompile 排除是设计。
  */
 function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPipelineFull): TemplateCanvasLayout {
   const config = recipeTemplateToRecallConfig(template);
@@ -214,6 +218,10 @@ function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPi
           : { prompt: promptFromNotes(step) }),
         count: 1,
         workflow_id: template.id,
+        // 族2 → 族3 化键（2026-10-08）：同次铺设共享 tpl_<ts> 命名空间 + 步骤键，
+        // decompile 反推与 compile 收编都靠它们（见 workflow-dsl/decompile.ts 档头）。
+        workflow_ns: `tpl_${ts}`,
+        stepId: `step_${i}`,
         ...(template.harnessTemplateId ? { harnessTemplateId: template.harnessTemplateId } : {}),
         stepIndex: i,
         stepName: step.name,
@@ -280,7 +288,12 @@ export function templateToCanvasLayout(template: TemplateCanvasInput): TemplateC
       ...(config.qualityProfile ? { quality: config.qualityProfile } : {}),
       count: 1,
       workflow_id: template.id,
-    },
+      // 同 pipelineToCanvasLayout 生成卡：族2 → 族3 化键（2026-10-08），旧两层兜底
+      // 产线也能被 decompile 读成 DSL。
+      workflow_ns: `tpl_${ts}`,
+      stepId: "gen",
+      stepIndex: 0,
+    } as CanvasNode["metadata"] & Record<string, unknown>,
   };
 
   return { nodes: [...slotNodes, imageNode], connections };

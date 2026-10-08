@@ -28,7 +28,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSyn
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
-import { guardExpertContent, musicFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, type JevDispatchGuards } from "./jev-gate"
+import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, type JevDispatchGuards } from "./jev-gate"
 // 任务状态枚举真源（0920 收口）：running/ok/error/stopped 以此为准，禁散布裸字串。
 import type { TaskStatus } from "./types-gateway.ts"
 // 0920：模板判定即建骨架（不等 Expert）——workflowService 是纯 service 模组，
@@ -83,6 +83,7 @@ import {
   saveCriticVerdict,
   saveExpertLesson,
   saveDelivery,
+  loadSessionDeliveries,
   type ReworkRecord,
 } from "./persistence"
 // 2026-10-03：事后产物硬检（确定性量测；gateway 侧移植，见 media-quality.ts 档头）。
@@ -243,6 +244,8 @@ interface SubagentRun {
   // 白名单校验后写入（仅 beast_mode ON 生效）；dispatchAttempt 把它带进 prompt_async
   // body 的 agent 栏（opencode 已验证支持），子会话即挂对应 Expert 的裁剪工具表。
   agent?: string
+  /** 按现有任务分类记录真实研究 run，供研究先行派遣前置检查。 */
+  researchTask?: boolean
   // R6（2026-09-10）：async=true → 投递后立即返回，终态时 deps.wakeParent 唤醒父会话。
   asyncMode: boolean
   // partID → 类型（"text" | "reasoning"）：delta 事件自身不带类型，靠先行的
@@ -322,6 +325,8 @@ interface SubagentResult {
   // D4（2026-10-02）：所属父会话（gateway session id）。此前 completed 记录无归属，
   // 「latest／最近 3 笔」查不到本会话的已完成 run。新写入必带；旧记录无此栏＝不列入。
   parent?: string
+  researchTask?: boolean
+  researchRelPath?: string
   // 2026-10-05 修复（成品交付链下半场）：本 run 已观测到的成片类成品（见 SubagentRun.artifacts）。
   artifacts?: Array<{ kind: string; url: string; task_id?: string; cost_coins?: number }>
 }
@@ -378,7 +383,7 @@ const pendingCriticTargets = new Map<string, CriticPassTarget[]>()
 const criticDispatchedByParent = new Map<string, number>()
 // M2/M3（2026-10-02）：每父会话交付簿——music-first 前置断言（music 交付事件）＋
 // 返工内容锁（上一份交付物落盘路径）。有界 Map，每父会话 ≤20 笔。
-const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string }>>()
+const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string; contractOk?: boolean }>>()
 // 本会话是否已用掉 machine critic pass（内存镜像；权威在 persistence.critic_passes）。
 const criticPassUsed = new Set<string>()
 const CRITIC_PENDING_CAP = 16
@@ -662,7 +667,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const persist = persistRunOutput(run, status, fullText, error)
   if (status === "ok" && run.agent && !run.stopped) {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
-    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "" })
+    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS).ok : undefined })
     if (arr.length > 20) arr.shift()
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
@@ -672,7 +677,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   // 为避免 done 帧与注入父会话的唤醒文案膨胀（与本轮控上下文/工具结果大小的目标一致），
   // 以 SUBAGENT_SUMMARY_MAX_CHARS 在换行边界截断并附「已截断」提示；全文落盘照旧保留
   // （persist.pointer / PERSIST_TAIL 不变）。error 摘要维持原 600 字死因帽（既有语义零回归）。
-  const okTrunc = status === "ok" ? truncateSummaryText(fullText) : null
+  const okTrunc = status === "ok" && run.agent !== "lyricist" ? truncateSummaryText(fullText) : null
   const inline =
     error && status === "error"
       ? error.slice(0, SUMMARY_MAX_CHARS)
@@ -709,7 +714,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     console.warn(
       `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=ORPHANED (进程中断未复原) missing=${miss.join(",")}`,
     )
-  } else if (status === "ok" && run.beastMode === true && run.agent) {
+  } else if (status === "ok" && (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent) {
     const verdict = checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS)
     // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
     // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
@@ -868,13 +873,13 @@ ${summary}`
   // 修 1：本 run 释放了一个槽位——若该父会话有被并发上限挤掉的 critic 待跑，补跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id) // 刀 F：终态即清持久记录（幂等；非 rework run 无记录=no-op）
-  completed.set(run.id, { status, summary: visibleSummary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, artifacts: run.artifacts?.length ? run.artifacts : undefined })
+  completed.set(run.id, { status, summary: visibleSummary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, researchTask: run.researchTask, researchRelPath: run.researchTask && !run.partialPersist ? persist.relPath : undefined, artifacts: run.artifacts?.length ? run.artifacts : undefined })
   // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
-  if (status === "ok" && run.agent) {
+  if (status === "ok" && (run.agent || run.researchTask) && !run.partialPersist) {
     saveDelivery({
       sessionId: run.parentGatewaySessionId,
       runId: run.id,
-      agent: run.agent,
+      agent: run.researchTask ? "research" : run.agent,
       label: run.label,
       relPath: persist.relPath,
       contractOk: deliveryGate ? deliveryGate.ok : undefined,
@@ -1440,7 +1445,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   // 子代理 prompt **尾部**（recency 最高）。真源=已载入的 DELIVERY_CONTRACTS（禁手抄）。
   // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回归。重派链的
   // run.prompt 已含 buildReworkDirective（自我标注「自动重派」），此段与之共存于尾部不冲突。
-  const contractDirective = run.beastMode === true ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
+  const contractDirective = (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
   // 2026-10-02：模板空位事实注入。父 sessionId 用 run.parentGatewaySessionId（派工发起端
   // 的 gateway 会话 id，= canvasStates 的 key；**禁用子会话 opencodeSessionId**，那会指到
   // 子会话画布桶）。有值才插，无值时输出与注入前逐字元等价。
@@ -1906,6 +1911,56 @@ export function snapshotPendingCriticTargets(parentId: string): Array<{ agent: s
  * deps.wakeParent 自动唤醒父会话汇总（默认 false=同步语义零回归；deps 未注入
  * wakeParent 时 async 请求按同步处理，不裸奔）。
  */
+type ResearchPredecessor = { runId: string; agent: string; label: string; relPath: string }
+const RESEARCH_PRECEDED_EXPERTS = ["screenwriter", "video-director", "director3d", "motion-director", "web3d-director"]
+
+function readCompletedPredecessor(record: ResearchPredecessor): string | null {
+  if (!record.relPath.startsWith(`${SUBAGENT_OUTPUT_REL}/`)) return null
+  const file = record.relPath.slice(SUBAGENT_OUTPUT_REL.length + 1)
+  if (file.includes("/") || file.includes("\\") || !file.startsWith(`${record.runId}-`)) return null
+  try {
+    const stored = readFileSync(join(SUBAGENT_OUTPUT_DIR, file), "utf8")
+    if (!stored.includes(`- runId: \`${record.runId}\`\n`) || !stored.includes("- 状态: ok\n")) return null
+    const body = stored.split("- 内容: 子代理最后一条 assistant 文本全文\n")[1]?.split(`\n\n---\n\n${PERSIST_TAIL}`)[0] ?? ""
+    return body.trim() ? body : null
+  } catch { return null }
+}
+
+async function researchPredecessors(parent: any): Promise<{ records: ResearchPredecessor[]; available: boolean }> {
+  const records = loadSessionDeliveries(parent.sessionId).filter((r) => readCompletedPredecessor(r) !== null)
+  if (records.filter((r) => r.agent === "research").length >= MAX_ACTIVE_PER_PARENT || records.some((r) => RESEARCH_PRECEDED_EXPERTS.includes(r.agent))) return { records, available: true }
+  // 旧通用研究没有D7交付行：仅从同父OpenCode真实dispatch工具返回绑定runId，
+  // 再读该run的完整终态产物。用户正文/自称路径/URL/派遣ok均不能提供完成证据。
+  try {
+    const res = await fetch(`${deps!.openCodeUrl}/session/${parent.opencodeSessionId}/message`, { headers: deps!.openCodeHeaders(), signal: AbortSignal.timeout(10000) })
+    if (!res.ok) return { records, available: false }
+    const msgs = await res.json()
+    if (!Array.isArray(msgs)) return { records, available: false }
+    const files = readdirSync(SUBAGENT_OUTPUT_DIR)
+    for (const m of msgs) {
+      if (m.info?.role !== "assistant") continue
+      for (const p of m.parts ?? []) {
+        if (p.type !== "tool" || p.tool !== "subagent_dispatch" || p.state?.status !== "completed") continue
+        let out: any
+        try { out = typeof p.state.output === "string" ? JSON.parse(p.state.output) : p.state.output } catch { continue }
+        const runId = out?.subagent_id
+        if (typeof runId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(runId) || records.some((r) => r.runId === runId)) continue
+        const file = files.find((f) => f.startsWith(`${runId}-`) && f.endsWith(".md"))
+        if (!file) continue
+        const input = p.state.input
+        if (!input || typeof input.prompt !== "string") continue
+        const record = { runId, agent: typeof input.expert === "string" ? input.expert : "", label: String(out.label ?? input.label ?? ""), relPath: `${SUBAGENT_OUTPUT_REL}/${file}` }
+        if (readCompletedPredecessor(record) === null) continue
+        if (!record.agent && (await classifyDispatchGuards(input.prompt)).research === true) record.agent = "research"
+        if (record.agent !== "research" && !RESEARCH_PRECEDED_EXPERTS.includes(record.agent)) continue
+        records.push(record)
+        saveDelivery({ sessionId: parent.sessionId, ...record })
+      }
+    }
+    return { records, available: true }
+  } catch { return { records, available: false } }
+}
+
 export async function handleSubagentDispatch(req: Request): Promise<Response> {
   if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
   const body = (await req.json().catch(() => ({}))) as {
@@ -1963,7 +2018,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   let dispatchGuards: JevDispatchGuards = { research: null, rework: null, musicDependency: null }
   const beastOn = deps.beastMode(parent)
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
-  if (beastOn) {
+  if (beastOn || rawExpert === "lyricist" || rawExpert === "music") {
     let allowed: unknown
     try {
       allowed = (JSON.parse(readFileSync(`${import.meta.dir}/expert/expert-ids.json`, "utf8")) as { experts?: unknown })?.experts
@@ -2023,6 +2078,14 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         return Response.json({ ok: false, code: "music_first", error: reason, blocked: "music_first" }, { status: 409 })
       }
     }
+    // 先词后曲复用真实交付簿：未过歌词契约不可作为前置成果。
+    const lyrics = (deliveredByParent.get(parent.sessionId) ?? []).filter((d) => d.agent === "lyricist" && d.contractOk && d.relPath && prompt.includes(d.relPath));
+    const lyricsInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "lyricist" && r.status === "running");
+    const lyricsReason = lyricsFirstBlockReason(expertId, { lyricsDelivered: lyrics.length > 0, lyricsInFlight }, dispatchGuards.lyricsDependency);
+    if (lyricsReason) return Response.json({ ok: false, code: "lyrics_first", error: lyricsReason, blocked: "lyrics_first" }, { status: 409 });
+    if (expertId === "music" && lyrics.length && dispatchGuards.lyricsDependency !== false) {
+      prompt += `\n\n【已交付歌词来源】${lyrics.at(-1)!.relPath}。先 read 完整文件；歌词创作方法采用 .opencode/skills/fang-wenshan/SKILL.md。发现具体正文问题时引用唱句及影响，回交 lyricist 定向修订。ok:true、交付字段、qc 与上游评分卡均不能代替作品验收；公开版没有 lyrics/catalog，不能宣称完成全库查重。交接完整正文与文件路径，music 不从摘要重写歌词。用户提供完整原词且未要求精修时原样谱曲；没有真实旋律时，可唱性评分仅为文字自评。`;
+    }
     // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本轮已有 critic 审核动作，
     // 机器 pass 的触发判据据此豁免（不重复派遣）。登记有界 Map。
     if (expertId === "critic") {
@@ -2046,11 +2109,30 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 0920 暴君裁定：模板选择接 System One——同一请求批次取回工作流模板判定，
   // 命中制作类（confidence≥0.8）即把骨架硬注入任务书头（先于军团模板），
   // 让「没人负责选模板」不再可能（事故：60s 百合 OP MV 裸跑＝无角色卡约束）。
-  {
+  let researchTask = dispatchGuards.research === true
+  if (expertId !== "lyricist") {
     let templateInjected = false
     try {
       const tpl = JSON.parse(readFileSync(`${import.meta.dir}/spec-templates.json`, "utf8")) as Record<string, string>
       const meta = await classifyDispatchMeta(prompt)
+      researchTask = researchTask || meta.specKey === "research"
+      // 研究先行是创作前置，不能只靠模型读到规则后自觉执行。复用真实run及落盘，
+      // 不把派遣成功、URL列表或提示词的“已完成研究”当成前置成果。
+      if (beastOn && meta.specKey === "creation" && meta.template && RESEARCH_PRECEDED_EXPERTS.includes(expertId) && !researchTask) {
+        const runningResearch = (byParent.get(parent.sessionId) ?? []).filter((r) => r.researchTask && r.status === "running" && !r.stopped)
+        const prior = await researchPredecessors(parent)
+        if (!prior.available) return Response.json({ ok: false, code: "research_evidence_unavailable", error: "已有研究/创作的同会话持久证据暂时读不到；请保留现有产物，待证据恢复后继续，不要重做研究。" }, { status: 503 })
+        const research = prior.records.filter((r) => r.agent === "research" && (readCompletedPredecessor(r) ?? "").split("\n").some((line) => line.trim() && !/^\s*(?:[-*]\s*)?(?:https?:\/\/\S+|\[[^\]]*\]\(https?:\/\/[^)]+\))\s*$/.test(line)))
+        const continuing = isReworkSpec(prompt, dispatchGuards.rework) && prior.records.some((r) => r.agent === expertId && readCompletedPredecessor(r) !== null)
+        if (!continuing && (research.length < MAX_ACTIVE_PER_PARENT || runningResearch.length > 0)) {
+          return Response.json({
+            ok: false, code: "research_first", blocked: "research_first",
+            error: "研究是创作必经阶段。请先并发派遣至少三路窄领域研究，钻研前人作品并交付可读正文；当前研究尚未收齐，不能先派创作。已有真实研究不要重跑；完成后读取完整正文再编写创作规格。",
+            completed_research: research.map((r) => ({ id: r.runId, label: r.label, path: r.relPath })),
+            running_research: runningResearch.map((r) => ({ id: r.id, label: r.label })),
+          }, { status: 409 })
+        }
+      }
       if (meta.template) {
         prompt = `${workflowTemplateDirective(meta.template.templateId, meta.template.confidence)}\n\n---\n\n${prompt}`
         console.log(
@@ -2142,6 +2224,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     reworkCount: 0,
     beastMode: deps.beastMode(parent),
     agent: expertId || undefined,
+    researchTask,
     asyncMode,
     messageRole: new Map(),
     partEmitted: new Map(),

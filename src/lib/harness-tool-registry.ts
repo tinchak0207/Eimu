@@ -14,10 +14,10 @@
  * character_card_list / character_card_save / director_manage_group / memory_recall /
  * search_web / subagent_status / subagent_stop / vision_analyze。
  * 另有族前缀未逐支登记：subagent_*（现 3 支：dispatch/status/stop）。
- * workflow_*：2026-10-03 人机共笔三件（write/history/rollback）加入后本档登 11 支；
- * **诚实标注**：VPS 现场并未同步——2026-10-03 现场实测仅 8 支（无 write/history/rollback），
- * 本档登记的是「已定形可引用」，不是「现场可跑」。补齐清单留给下一轮稽核，
- * 不在此一次灌满（登记面一旦掺水就失去判定价值）。
+ * workflow_*：人机共笔三件（write/history/rollback）加入后本档登 11 支；
+ * **诚实标注**（2026-10-08 更新）：此前 10-03 实测「现场仅 8 支、缺 write/history/rollback」
+ * 的落差已消除——write 于 10-05 12:39 UTC 随 558492e418fd 落位，2026-10-08 现场
+ * 实测 11 支全齐，登记面与 VPS 现场一致。
  *
  * 实装判定（2026-08-31 源码逐档核对，非实弹调用）：
  * - image_upscale：真调用 POST {API_BASE}/upscale，站点路由

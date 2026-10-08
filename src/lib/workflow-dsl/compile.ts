@@ -129,7 +129,10 @@ function buildStepMetadata(source: WorkflowDslSource, step: WorkflowDslStep, ste
   md.stepIndex = stepIndex; // 拓扑序（1 起）
   md.status = "idle";
   if (isPresent(step.meta)) {
-    for (const [key, value] of Object.entries(step.meta)) md[key] = value; // meta 透传
+    for (const [key, value] of Object.entries(step.meta)) {
+      if (key === "_origin_node_id") continue; // decompile 运输键：只供收编匹配，不写入产物节点 metadata
+      md[key] = value; // meta 透传
+    }
   }
   return md;
 }
@@ -337,11 +340,24 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
       // patch 禁含 position/width/height/moved——人拖位置自动保留（canvas-reducer-adapter update_node 语义）。
       ops.push({ type: "update_node", id: nodeId, patch: { title: step.title, metadata } });
       updated++;
-    } else {
-      // 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition。
-      ops.push({ type: "add_node", node: { id: nodeId, type: kindToNodeType(step.kind), title: step.title, metadata } });
-      added++;
+      continue;
     }
+    // ③ 收编第三路（decompile 运输键 _origin_node_id，2026-10-08 读面解锁）：画布上存在
+    // id 与之精确相等的节点 ⇒ 视为命中走 update_node 收编。匹配优先级：①确定性 id
+    // （workflow_ns+stepId 杂凑，上面的 existing）> ②workflow_id 卫生归属（删除语义段）>
+    // ③_origin_node_id。buildStepMetadata 无条件写 workflow_ns/stepId/stepIndex ⇒ 存量
+    // 节点收编即键回填、从此族3化。nodeIds 覆写为原节点 id ⇒ 连线发射与「已存在连线」
+    // 判定都指向画布真节点。
+    const originNodeId = typeof step.meta?._origin_node_id === "string" ? step.meta._origin_node_id : undefined;
+    if (originNodeId !== undefined && originNodeId.length > 0 && currentById.has(originNodeId)) {
+      ops.push({ type: "update_node", id: originNodeId, patch: { title: step.title, metadata } });
+      updated++;
+      nodeIds.set(step.id, originNodeId);
+      continue;
+    }
+    // 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition。
+    ops.push({ type: "add_node", node: { id: nodeId, type: kindToNodeType(step.kind), title: step.title, metadata } });
+    added++;
   }
 
   // 连线：needs 边 dep→step；current 已有同 from/to → 跳过；新的合并成一条 connect_nodes（在全部 add_node 之后）。

@@ -13,6 +13,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 export default tool({
   description:
     "把整份工作流声明（DSL）编译成画布操作并原子落图——「像改代码一样改工作流」的写入口。用法：先 canvas_get_state 读当前 dsl（工作流的可逆声明），按需增删改 steps，整份 source 交回本工具。\n\n" +
+    "**冷启动（画布没有 dsl 时）**：不必先读到 dsl 才能用本工具。两种情况都能交：①收编——按画布现有产线节点写 steps（每步对应一颗现有节点，meta 可带 _origin_node_id 指定原节点 id），交回后编译器把现有节点收编进 DSL 管理（幂等更新+键回填，不建平行节点）；②新建——按用户意图直接写整份新产线 source 交回。\n\n" +
     "source 形状：{ workflow: \"<小写字母开头 [a-z0-9_-]>\"， title?: string， steps: [ { id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? } ] }。\n" +
     "· id：小写字母开头 [a-z0-9_]，档内唯一；决定画布节点 id（同 id 同节点，重复交=幂等更新）。\n" +
     "· kind：image（默认）| text | video | audio | director。\n" +

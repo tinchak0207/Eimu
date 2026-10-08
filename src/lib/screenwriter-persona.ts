@@ -5,10 +5,10 @@
  * no-reinvention-copy-verbatim）：身份/工具白名单/SKILL 挂载/委托单入参+回传
  * 契约/回复 token 帽/组装唯一出口六段全部同构。白名单差异仅三处：
  *   ① 域常量换编剧版（SCREENWRITER_PERSONA_ID="screenwriter"、工具白名单
- *      六个编剧域 harness 工具 + image_quote，id 面已在 harness-tool-registry
- *      考古登记在案——script_scene_parse L86 / story_sequence_consistency L87 /
- *      storyboard_qc_17 L88 / doc_struct L69 / world_bible_extract L114 /
- *      canvas_apply_ops L37 / image_quote L76，行号以现场为准）；
+ *      七个编剧域 harness 工具 + image_quote，id 面已在 harness-tool-registry
+ *      考古登记在案——canvas_apply_ops L49 / canvas_get_state L52 / doc_struct L81 /
+ *      image_quote L88 / script_scene_parse L98 / story_sequence_consistency L99 /
+ *      storyboard_qc_17 L100 / world_bible_extract L138，行号以现场为准）；
  *   ② 委托单/回传契约 import 自 screenwriter-delegate.ts（编剧版委派组装，
  *      交付物三栏 beats/shotlist/qc）；
  *   ③ SKILL 挂载：skills/ 无编剧域配方库，SKILL_PATH 为空（skill 待补，
@@ -56,15 +56,17 @@ export const SCREENWRITER_PERSONA_DESCRIPTION =
  * 编剧分镜可调用的工具白名单（MOE Wave2b 钉死；禁给全工具面——编剧分镜
  * 不需要画图/跑 Blender/渲染视频）。
  *
- * 六个编剧域工具 + image_quote 报价查询，id 全部在 harness-tool-registry
- * 登记在案（行号考古见档头 ①；registry 占位行 toolIds 为考古六件，
- * image_quote 为 persona 常量补充，与 blender/music 版同款）。
+ * 七个编剧域工具 + image_quote 报价查询（含 2026-10-08 读面解锁补入的
+ * canvas_get_state），id 全部在 harness-tool-registry 登记在案（行号考古见
+ * 档头 ①；registry 占位行 toolIds 直接引本常量，image_quote 为 persona 常量
+ * 补充，与 blender/music 版同款）。
  */
 export const SCREENWRITER_PERSONA_TOOL_IDS = [
   "script_scene_parse",
   "storyboard_qc_17",
   "story_sequence_consistency",
   "canvas_apply_ops",
+  "canvas_get_state",
   "doc_struct",
   "world_bible_extract",
   "image_quote",

@@ -85,6 +85,9 @@ import {
 } from "./critic-persona";
 import { CRITIC_DELIVERABLES } from "./critic-delegate";
 
+import { LYRICIST_PERSONA_LABEL, LYRICIST_PERSONA_DESCRIPTION, LYRICIST_PERSONA_TOOL_IDS, LYRICIST_PERSONA_SKILL_PATHS, LYRICIST_REPLY_SUMMARY_TOKEN_CAP } from "./lyricist-persona";
+import { LYRICIST_DELIVERABLES } from "./lyricist-delegate";
+
 // ─────────────────────────────────────────── 野兽模式 toggle
 
 /** 设定键（settings 记录中的栏位名；缺栏位 = OFF = 现状零迁移）。 */
@@ -145,6 +148,16 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
       qcSignatureRequired: true,
     },
     replyTokenCap: DIRECTOR_REPLY_SUMMARY_TOKEN_CAP,
+  },
+  lyricist: {
+    id: "lyricist",
+    label: LYRICIST_PERSONA_LABEL,
+    description: LYRICIST_PERSONA_DESCRIPTION,
+    toolIds: LYRICIST_PERSONA_TOOL_IDS,
+    skillPaths: LYRICIST_PERSONA_SKILL_PATHS,
+    taskTypes: ["lyrics", "lyric", "lyricist", "songwriting", "作词", "歌词", "填词"],
+    deliverableContract: { requiredFields: LYRICIST_DELIVERABLES, qcSignatureRequired: true },
+    replyTokenCap: LYRICIST_REPLY_SUMMARY_TOKEN_CAP,
   },
   music: {
     id: "music",

@@ -826,14 +826,19 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // R5 修复片（2026-09-11）：优先序声明——野兽帧＋派遣手册优先于 workspace/AGENTS.md，
         // 消除「你负责扩写／亲自操作 workflow_*」（AGENTS.md）vs「你本人不产出任何内容」
         // （派遣手册第〇节）的语义分歧（R8 审计 E7；1204 秒零工具调用病灶实证）。
+        // 2026-10-08 收窄：断言只列实际被物理断的三支（start/update_node/status），
+        // 画布产线读写（canvas_get_state/workflow_write/history/rollback）不受限。
         const beastPrecedenceFact =
-          "【优先序·野兽模式】本帧与《派遣手册》优先于 workspace/AGENTS.md。AGENTS.md 中「你负责扩写／你亲自写 prompt／你亲自操作 workflow_* 工具」等指示，在野兽模式下由你派遣的 Expert 执行；内容生产（写分镜 prompt、生成图片影片）你一律不亲手做。你的动作只有：拆解任务 → subagent_dispatch（async:true 为常态；expert 栏为建议栏——窄域生产任务建议点名，点名值即最终裁决；研究／分析／调研任务留空，网关对未知 id 回 400）→ 派出后立刻用一句正文向用户简报 → 收完工通知后汇总回报。AGENTS.md 的安全红线与文案规范继续有效。回合结束前必须自查：只要最终成品尚未交付（或在途子代理尚未全部唤醒汇总），本轮正文的最后一句必须是明确的进行时状态（「X 路子代理正在执行，完成后自动续报」），禁止以「已全部完成／随时可以开始／Ready to proceed」等收束语结尾——最终成品未落地时说「完成」＝对用户说谎。"
+          "【优先序·野兽模式】本帧与《派遣手册》优先于 workspace/AGENTS.md。AGENTS.md 中「你负责扩写／你亲自写 prompt／你亲自操作 workflow_start / workflow_update_node / workflow_status」等指示，在野兽模式下由你派遣的 Expert 执行；内容生产（写分镜 prompt、生成图片影片）你一律不亲手做。你的动作只有：拆解任务 → subagent_dispatch（async:true 为常态；expert 栏为建议栏——窄域生产任务建议点名，点名值即最终裁决；研究／分析／调研任务留空，网关对未知 id 回 400）→ 派出后立刻用一句正文向用户简报 → 收完工通知后汇总回报。AGENTS.md 的安全红线与文案规范继续有效。回合结束前必须自查：只要最终成品尚未交付（或在途子代理尚未全部唤醒汇总），本轮正文的最后一句必须是明确的进行时状态（「X 路子代理正在执行，完成后自动续报」），禁止以「已全部完成／随时可以开始／Ready to proceed」等收束语结尾——最终成品未落地时说「完成」＝对用户说谎。"
         // 0920 暴君裁定：模板优先·机器判。事故＝60s 百合 OP MV 裸跑（无角色设定卡/
         // 美术卡等约束环节）＝业余；根因＝模板选择无人负责（orchestrator 无 workflow_*）。
         // 修法＝模板选择接 System One 机器判定并在派遣时硬注入 Expert 任务书；
         // 本帧只声明职责：你在简报里要交代用了哪个模板、跳过了哪些环节与原因。
+        // 2026-10-08 收窄（DSL 读面死锁修复）：「没有 workflow_*」一揽子断言把模型全部
+        // 劝退——实际被物理断的只有 workflow_start/update_node/status 三支，
+        // workflow_write/history/rollback 与 canvas_get_state 是开着的，须明示写回路径。
         const beastTemplateFact =
-          "【模板优先·机器判】制作类任务（MV／影片／多镜／成片／长片／角色／场景／OP）禁止无模板裸跑——模板是产品的真实生产线，角色设定卡／美术卡／分镜门禁等约束环节是防业余化的栏位（没有它们＝业余水平）。模板选择由系统（System One）机器判定，派遣时网关会把「生产骨架＝模板 X」自动写进 Expert 任务书；你没有 workflow_* 工具（工具面事实见 system 的【环境事实·运行时】段，此处不再各自宣告），模板骨架由 Expert 用 workflow_start 建立。你的职责：①在派遣简报里明说用哪个模板；②Expert 若跳过某环节，交付里必须有「跳过 X 环，原因 Y」，你要在汇总里照抄如实呈现，不得静默略过。"
+          "【模板优先·机器判】制作类任务（MV／影片／多镜／成片／长片／角色／场景／OP）禁止无模板裸跑——模板是产品的真实生产线，角色设定卡／美术卡／分镜门禁等约束环节是防业余化的栏位（没有它们＝业余水平）。模板选择由系统（System One）机器判定，派遣时网关会把「生产骨架＝模板 X」自动写进 Expert 任务书；你没有 workflow_start / workflow_update_node / workflow_status 工具（工具面事实见 system 的【环境事实·运行时】段，此处不再各自宣告）——模板骨架与节点级执行图的建立/改参/查态由 Expert 执行；画布产线的读写不受此限：读画布与产线声明用 canvas_get_state（含 dsl），改产线/收编节点用 workflow_write，版本用 workflow_history / workflow_rollback，均直调。你的职责：①在派遣简报里明说用哪个模板；②Expert 若跳过某环节，交付里必须有「跳过 X 环，原因 Y」，你要在汇总里照抄如实呈现，不得静默略过。"
         if (!playbookBody || !digestBody) {
           return jsonError(
             503,

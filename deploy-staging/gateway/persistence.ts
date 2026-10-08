@@ -1019,6 +1019,17 @@ export function saveDelivery(d: {
   }
 }
 
+/** 同父会话的真实交付记录，研究前置与续跑复用既有产物，不另造准备状态。 */
+export function loadSessionDeliveries(sessionId: string): Array<{ runId: string; agent: string; label: string; relPath: string }> {
+  if (!db || !sessionId) return []
+  try {
+    return db.query("SELECT run_id AS runId, agent, label, rel_path AS relPath FROM deliveries WHERE session_id = ? AND run_id IS NOT NULL AND rel_path IS NOT NULL ORDER BY created_at").all(sessionId) as Array<{ runId: string; agent: string; label: string; relPath: string }>
+  } catch (e) {
+    degrade(e, "loadSessionDeliveries")
+    return []
+  }
+}
+
 /** D7 量测读数：品质讯号数量与重问率（供 EVAL 直接用；唯读）。 */
 export function qualitySignalStats(): {
   criticVerdicts: number

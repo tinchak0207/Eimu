@@ -52,11 +52,11 @@
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
 | 工作流某个节点不满意/连错线 | 改参数 `workflow_update_node`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行）→ 只重跑该节点 `workflow_rerun_node`；断开错连 `workflow_disconnect` | — |
-| 画布产线：改步骤/加环节/改依赖/退回旧版（像改代码一样改工作流） | `canvas_get_state`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行）读 `dsl`（产线的**可逆声明**）→ 改 `steps` → `workflow_write` 整份交回（全图校验→原子落图，人拖过的位置不动）；退回某步内容：`workflow_history` 查该节点版本 → `workflow_rollback` 指定 version | **改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（已断路，经 `subagent_dispatch` 派对应域 Expert 执行；`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。 |
+| 画布产线：改步骤/加环节/改依赖/退回旧版（像改代码一样改工作流） | `canvas_get_state`（直调）读 `dsl`（产线的**可逆声明**）→ 改 `steps` → `workflow_write` 整份交回（全图校验→原子落图，人拖过的位置不动）；退回某步内容：`workflow_history` 查该节点版本 → `workflow_rollback` 指定 version | **改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（已断路，经 `subagent_dispatch` 派对应域 Expert 执行；`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。 |
 
 > **`workflow_*` 前缀横跨两个真相世界，不可混用**：
 > - **world2 后端执行图**（打 `/internal/workflow/*`）：`workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate`／`workflow_status`／`workflow_update_node`／`workflow_rerun_node`／`workflow_disconnect`——「某节点不满意／连错线」走这族（其中 `workflow_start`／`workflow_status`／`workflow_update_node` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余直调）。
-> - **world1 画布产线**（画布上看得到的产线，节点 id 形如 `wf-…`／`tpl-…`）：改步骤／加环节／改依赖／退版走 DSL 三件——`canvas_get_state`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行）读 `dsl` → `workflow_write`；退版 `workflow_history` → `workflow_rollback`。**虽挂 `workflow_` 前缀，属 world1，别拿 world2 的 `add_node` 去改它。**
+> - **world1 画布产线**（画布上看得到的产线，节点 id 形如 `wf-…`／`tpl-…`）：改步骤／加环节／改依赖／退版走 DSL 三件——`canvas_get_state`（直调）读 `dsl` → `workflow_write`；退版 `workflow_history` → `workflow_rollback`。**虽挂 `workflow_` 前缀，属 world1，别拿 world2 的 `add_node` 去改它。**画布无 dsl（模板骨架产线/未收编节点）时也可直接 workflow_write：按画布现状写整份 source 交回即完成收编，无需先有 dsl。
 > - **改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。
 > - **节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（已断路，经 `subagent_dispatch` 派对应域 Expert 执行；`update_node`／`connect_nodes`／`delete_connections`）。
 > - **禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。
@@ -66,8 +66,8 @@
 
 | 你要做什么 | 工具链（照抄，别换） |
 |---|---|
-| 改步骤内容或结构（**单步微调也算**） | `canvas_get_state`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行）读 `dsl` → 改 `steps` → **`workflow_write`** 整份交回 |
-| **退回某步旧内容** | `canvas_get_state`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行）／**`workflow_history`** 拿节点与版本 → **`workflow_rollback`** 指定 version |
+| 改步骤内容或结构（**单步微调也算**） | `canvas_get_state`（直调）读 `dsl` → 改 `steps` → **`workflow_write`** 整份交回 |
+| **退回某步旧内容** | `canvas_get_state`（直调）／**`workflow_history`** 拿节点与版本 → **`workflow_rollback`** 指定 version |
 | 只动位置／尺寸／手调连线，或节点不在 `dsl` 里 | `canvas_apply_ops`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行；`update_node`／`connect_nodes`／`delete_connections`） |
 | **禁** | 手拼 `add_node`＋`connect_nodes` 搭整条产线 |
 

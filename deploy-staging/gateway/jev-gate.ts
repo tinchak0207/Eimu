@@ -254,7 +254,8 @@ export async function quarantineSpec(tag: string, prompt: string): Promise<strin
 // （ROUTE_OVERRIDE）。Jev 挂 → 一律用点名值（fail-open，行为＝部署前）。
 
 const ROUTE_CRITERIA: Record<string, string> = {
-  music: "作曲/编曲/配器/歌词音乐性",
+  lyricist: "原创歌词/填词/歌词精修（只交歌词，不生成音频）",
+  music: "作曲/编曲/配器/音频制作（使用现成完整歌词，不负责原创填词）",
   screenwriter: "剧本/分场/台词/长文本改编",
   editor: "剪辑/时间线/配音/上传",
   "video-director": "影片分镜/镜头设计/生成影片提示",
@@ -290,7 +291,7 @@ export async function routeExpertAuthoritative(prompt: string, provided: string)
     route: {
       type: "choice",
       instructions:
-        "Which expert id should handle the task described in `task`? Choose by domain: composer/lyrics→music; script/dialogue/long-text adaptation→screenwriter; editing/timeline/dubbing/upload→editor; storyboard/shot design/video prompts→video-director; 3D/blender scenes→director3d; action/choreography/motion design→motion-director; web 3D delivery→web3d-director; reviewing/auditing an EXISTING deliverable→critic; research/investigation/analysis with no artifact to review→research; anything else→other.",
+        "Which expert id should handle the task described in `task`? Choose by domain: lyrics/lyric writing/lyric revision→lyricist; composition/arrangement/audio production→music; script/dialogue/long-text adaptation→screenwriter; editing/timeline/dubbing/upload→editor; storyboard/shot design/video prompts→video-director; 3D/blender scenes→director3d; action/choreography/motion design→motion-director; web 3D delivery→web3d-director; reviewing/auditing an EXISTING deliverable→critic; research/investigation/analysis with no artifact to review→research; anything else→other.",
       criteria: ROUTE_CRITERIA,
     },
   })
@@ -583,6 +584,8 @@ export interface JevDispatchGuards {
   rework: boolean | null
   /** 完成任务书是否必须先有 music 产出（要用它的时长/节拍/段落去做剪辑或对齐）。 */
   musicDependency: boolean | null
+  /** 原创有词歌曲尚未有现成完整歌词。 */
+  lyricsDependency?: boolean | null
 }
 
 export async function classifyDispatchGuards(spec: string): Promise<JevDispatchGuards> {
@@ -600,6 +603,10 @@ export async function classifyDispatchGuards(spec: string): Promise<JevDispatchG
       instructions:
         "Does the task described in `task` ask to revise/rework an EXISTING deliverable (change a specific field of a previous output, keeping the rest as-is), rather than create something new from scratch?",
     },
+    guard_lyrics_dependency: {
+      type: "noul",
+      instructions: "Does this task produce a vocal SONG needing original lyrics that are not already supplied in full? Answer no for instrumental/BGM, composition to complete user-provided lyrics, or composing from an explicitly approved lyricist artifact. A reference song, title, theme, or a few sample lines is NOT complete lyrics. Answer yes for a vocal song requested from scratch, requests to write new lyrics, or a dependency on a lyricist still in progress.",
+    },
     guard_music_dependency: {
       type: "noul",
       instructions:
@@ -615,6 +622,7 @@ export async function classifyDispatchGuards(spec: string): Promise<JevDispatchG
     research: verdict("guard_research"),
     rework: verdict("guard_rework"),
     musicDependency: verdict("guard_music_dependency"),
+    lyricsDependency: verdict("guard_lyrics_dependency"),
   }
 }
 
@@ -677,7 +685,7 @@ export function musicFirstBlockReason(
   jevMusicDependency?: boolean | null,
 ): string | null {
   const text = (prompt ?? "").slice(0, 6000)
-  if (!text || expertId === "music" || expertId === "critic" || expertId === "screenwriter") return null
+  if (!text || expertId === "music" || expertId === "critic" || expertId === "screenwriter" || expertId === "lyricist") return null
   // 2026-10-05：依赖判定交 Jev；省略/null ＝ Jev 不可用 → 回退确定性规则（降级路径）。
   const depends =
     jevMusicDependency === undefined || jevMusicDependency === null
@@ -721,4 +729,12 @@ export function reworkLockDirective(originalPath: string): string {
     "2. 角色性别/年龄/身份、故事主线、场景设定属内容白名单，未被点名即不得变动。",
     `3. 交付正文末尾必须附【与原稿 diff】：逐条列出改动栏位＋改前/改后；diff 以外的任何差异＝违规。`,
   ].join("\n")
+}
+
+/** 歌曲先词后曲；现成完整歌词与纯器乐由语义守卫明确豁免。 */
+export function lyricsFirstBlockReason(expertId: string, state: { lyricsDelivered: boolean; lyricsInFlight: boolean }, dependency: boolean | null | undefined): string | null {
+  if (expertId !== "music" || dependency === false) return null;
+  if (state.lyricsInFlight) return "【机器闸·lyrics-first】lyricist 尚在创作。等待其完整交付并验收，read 成稿全文后再派 music；禁止先生成音频后补词。";
+  if (dependency === true && !state.lyricsDelivered) return "【机器闸·lyrics-first】原创歌曲尚缺完整歌词。先派 lyricist，验收并把全文交给 music。用户已有完整原词或纯器乐任务无需派歌词专家，请在任务书保留真实素材与来源。";
+  return null;
 }
