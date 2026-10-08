@@ -368,6 +368,24 @@ do_deploy() {
     fi
   fi
 
+  # 4b. 删除 APP_DIR 中 HEAD 已不存在的残留档（2026-10-08：同步只覆盖不删除 ⇒ 历史删档
+  #     在控面 app/ 留存，Next.js build 编译到旧档当场失败——实测 39 档残留含已删的
+  #     pro-workstation/，其旧类型错阻断整次 build）。范围严格限定 present=ARCHIVE_PATHS，
+  #     Dockerfile/.dockerignore 不在此列（另行安装），不碰 app/ 下其它既有档。
+  local head_lst="$WORK/head.lst" vps_lst="$WORK/vps.lst" stale_lst="$WORK/stale.lst"
+  (cd "$STAGE" && find . -type f | sed 's|^\./||' | sort) >"$head_lst"
+  rsh "cd $(printf '%q' "$APP_DIR") && find ${present[*]} -type f 2>/dev/null | sort" >"$vps_lst"
+  comm -23 "$vps_lst" "$head_lst" >"$stale_lst"
+  local stale_n; stale_n="$(grep -c . "$stale_lst" || true)"
+  if ((stale_n > 0)); then
+    log "REMOVED $stale_n 个残留档（HEAD 已不存在）"
+    sed 's/^/  /' "$stale_lst" >&2
+    rsh "cd $(printf '%q' "$APP_DIR") && xargs -r -d '\n' sudo -n rm -f --" <"$stale_lst"
+    rsh "cd $(printf '%q' "$APP_DIR") && find ${present[*]} -type d -empty -delete 2>/dev/null || true"
+  else
+    log "REMOVED 0 个残留档"
+  fi
+
   hdr "compose build ${SERVICES[*]}"
   local t0 t1
   t0="$(date +%s)"
