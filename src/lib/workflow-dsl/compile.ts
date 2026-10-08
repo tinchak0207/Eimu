@@ -178,6 +178,26 @@ function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIs
   }
   if (errors.length > 0) return { errors, topoOrder: null };
 
+  // _origin_node_id 同档唯一（复制粘贴步骤忘改该键时，两个步骤会抢同一个画布节点：
+  // 后写者覆盖前者的 title/stepId，且 needs 若互指同一节点会发出自环连线——静默图损坏）
+  const originOwner = new Map<string, string>();
+  for (const step of steps) {
+    const origin = typeof step.meta?._origin_node_id === "string" ? step.meta._origin_node_id : "";
+    if (origin.length === 0) continue;
+    const owner = originOwner.get(origin);
+    if (owner !== undefined) {
+      errors.push({
+        step: step.id,
+        field: "meta._origin_node_id",
+        message: `步骤 ${step.id} 与步骤 ${owner} 的 meta._origin_node_id 都是 "${origin}"，两个步骤抢同一个画布节点 ⇒ 编译会把两者写进同一节点并产生自环连线（后写者覆盖前者）；把本步的 _origin_node_id 改成一个专属节点 id，或直接删掉该键让它新增平行节点`,
+        hint: "该键是 canvas_get_state 的 dsl 原样带回的来源节点 id；复制步骤时必须一并改掉，不可两步骤共用",
+      });
+    } else {
+      originOwner.set(origin, step.id);
+    }
+  }
+  if (errors.length > 0) return { errors, topoOrder: null };
+
   // Kahn 拓扑（环是根因，先修环再谈 tool，故有环时不再并行回报 tool 错）
   const needsMap = new Map<string, string[]>();
   for (const step of steps) needsMap.set(step.id, [...new Set(step.needs ?? [])]);
@@ -347,7 +367,8 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
     // （workflow_ns+stepId 杂凑，上面的 existing）> ②workflow_id 卫生归属（删除语义段）>
     // ③_origin_node_id。buildStepMetadata 无条件写 workflow_ns/stepId/stepIndex ⇒ 存量
     // 节点收编即键回填、从此族3化。nodeIds 覆写为原节点 id ⇒ 连线发射与「已存在连线」
-    // 判定都指向画布真节点。
+    // 判定都指向画布真节点。同档内 _origin_node_id 的唯一性已由 validateGraph 保证
+    // （撞键在编译前即 ok:false），此处不重复校验。
     const originNodeId = typeof step.meta?._origin_node_id === "string" ? step.meta._origin_node_id : undefined;
     if (originNodeId !== undefined && originNodeId.length > 0 && currentById.has(originNodeId)) {
       ops.push({ type: "update_node", id: originNodeId, patch: { title: step.title, metadata } });
