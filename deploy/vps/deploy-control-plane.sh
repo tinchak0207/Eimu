@@ -269,6 +269,15 @@ postcheck() {
     out="${out:-no response}"; sleep 3
   done
   if grep -q ' 200' <<<"$out"; then log "OK   healthz ${out# *}"; else log "FAIL healthz：${out}"; ok=1; fi
+  # 控面自代理回圈探针（2026-10-08 事故）：src/middleware.ts 只要 GENERATION_CONTROL_PLANE_PROXY_ORIGIN
+  # 非空就把 /api/v1/* 代回该 origin；若控面容器自己带着这个变数，origin 即本机 ⇒ 回圈 ⇒ nginx 回
+  # 400 Request Header Or Cookie Too Large，全 B 端面不可用——而 healthz（不在代理路径表内）照样 200，
+  # 上面那条闸完全看不见。故此处必须探一条**代理路径表内**的路径：预期 401（鉴权门）。
+  out="$(rsh "sudo -n docker exec $API_CTR wget -S -O /dev/null -T 10 http://127.0.0.1:3000/api/v1/models 2>&1 | grep -m1 'HTTP/'")" || true
+  case "$out" in
+    *" 401"*|*" 200"*) log "OK   /api/v1/models 代理面可达（${out#* }）" ;;
+    *) log "FAIL /api/v1/models → ${out:-无回应}（400＝控面 middleware 自代理回圈：查 compose 是否给 generation-api 设了 GENERATION_CONTROL_PLANE_PROXY_ORIGIN）"; ok=1 ;;
+  esac
   # 经 nginx 的对外探测：容器内 healthz 绿不代表入口活著（09-28 nginx 重启回圈时容器内仍是 200）。
   code="$(curl -s -o /dev/null -m 15 -w '%{http_code}' "$PUBLIC_HEALTHZ" || true)"
   if [[ $code == 200 ]]; then log "OK   public $PUBLIC_HEALTHZ 200"; else log "FAIL public $PUBLIC_HEALTHZ → ${code:-无回应}"; ok=1; fi
