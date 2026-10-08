@@ -8,6 +8,16 @@
     ],
     "qcSignatureRequired": true
   },
+  "lyricist": {
+    "requiredFields": [
+      "title",
+      "lyrics",
+      "hook",
+      "prosody_notes",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
   "music": {
     "requiredFields": [
       "emotion_contract",

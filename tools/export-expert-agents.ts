@@ -16,7 +16,8 @@
 //
 // 2026-10-06 修正（四产物双写 → 三产物双写）：**opencode-agents.json 不双写**——只写构建目录
 // deploy-staging/expert-gateway/，**禁止覆盖**被 git 追踪的 deploy-staging/gateway/expert/
-// opencode-agents.json。理由（实测，见 buildAgentsJson 上方长注释）：该档是**运行期消费的
+// opencode-agents.json 的完整工具表。syncLyricistBindings 仅同步 lyricist prompt，不重建其他
+// 声明与工具表。理由（实测，见 buildAgentsJson 上方长注释）：该档是**运行期消费的
 // 宣告真源**，其内容＝environment-facts 对每个 agent 断言的【能力断路·物理事实】；生成器的
 // 「全集 − 该 Expert 自有工具 → 全 false」补集规则在全集含共享基建工具时会**过度禁用**，
 // 与人工调和过的物理闸 deploy-staging/opencode-runtime/opencode.json 不一致（重生成版每个
@@ -74,6 +75,7 @@ import { join } from "node:path";
 import { EXPERT_REGISTRY } from "../src/lib/expert-registry";
 import { buildExpertRegistryDigest } from "../src/lib/orchestrator-beast-frame";
 import { HARNESS_TOOL_ID_LIST } from "../src/lib/harness-tool-registry";
+import { LYRICIST_PERSONA_PROMPT, LYRICIST_LITERARY_ACCEPTANCE_DIRECTIVE } from "../src/lib/lyricist-persona";
 
 const root = process.cwd();
 /** 生成器主输出目录（gitignore，构建物）。 */
@@ -261,6 +263,7 @@ function buildAgentsJson(universeTools: readonly string[]): string {
     agents[expert.id] = {
       mode: "all",
       description: `${expert.description}${EXPERT_DESCRIPTION_SUFFIX}`,
+      ...(expert.id === "lyricist" ? { prompt: LYRICIST_PERSONA_PROMPT } : {}),
       tools: toolsFalse(foreign),
     };
   }
@@ -394,6 +397,52 @@ const PRODUCTS: Product[] = [
   { file: "expert-delivery-contracts.json", build: () => buildDeliveryContractsJson(), dirs: OUT_DIRS },
 ];
 
+/** 只同步歌词域绑定；保留人工调和的全部工具表与其他 Expert 声明。 */
+function syncLyricistBindings(): string[] {
+  const mismatches: string[] = [];
+  const sync = (path: string, expected: string): void => {
+    if (readFileSync(path, "utf8") === expected) return;
+    if (CHECK) mismatches.push(path);
+    else {
+      writeFileSync(path, expected);
+      console.log(`EXPORT_OK：${path}（歌词域绑定）`);
+    }
+  };
+  const replaceHandoff = (text: string): string => text.replace(
+    /【歌词文学接收与谱曲交接】[^\n]*/g,
+    LYRICIST_LITERARY_ACCEPTANCE_DIRECTIVE,
+  );
+  const runtimePath = join(HARNESS_RUNTIME_ROOT, "opencode.json");
+  const runtime = JSON.parse(readFileSync(runtimePath, "utf8"));
+  if (!runtime.agent?.lyricist) throw new Error("EXPORT_FAIL：缺少 lyricist 运行期声明，禁止自动重建工具表");
+  const currentPrompt: string = runtime.agent.lyricist.prompt;
+  const roleStart = currentPrompt.indexOf("【你的角色：歌词专家");
+  const basePrompt = roleStart < 0 ? currentPrompt.split("\n\n")[0] : currentPrompt.slice(0, roleStart).trimEnd();
+  runtime.agent.lyricist.prompt = `${basePrompt}\n\n【你的角色：歌词专家】${LYRICIST_PERSONA_PROMPT}\n\n${LYRICIST_LITERARY_ACCEPTANCE_DIRECTIVE}`;
+  for (const agent of Object.values(runtime.agent) as { prompt?: string }[]) {
+    if (typeof agent.prompt === "string") agent.prompt = replaceHandoff(agent.prompt);
+  }
+  sync(runtimePath, `${JSON.stringify(runtime, null, 2)}\n`);
+  const declarationPath = join(SYNC_DIR, AGENTS_JSON);
+  const declarations = JSON.parse(readFileSync(declarationPath, "utf8"));
+  if (!declarations.lyricist) throw new Error("EXPORT_FAIL：缺少 lyricist 能力声明，禁止覆盖其他 Expert");
+  declarations.lyricist.prompt = LYRICIST_PERSONA_PROMPT;
+  sync(declarationPath, `${JSON.stringify(declarations, null, 2)}\n`);
+  const musicSkillPath = join(HARNESS_RUNTIME_ROOT, "skills", "music-director", "SKILL.md");
+  sync(musicSkillPath, replaceHandoff(readFileSync(musicSkillPath, "utf8")));
+  const playbookPath = join(SYNC_DIR, "orchestrator-dispatch-playbook.md");
+  const playbook = replaceHandoff(readFileSync(playbookPath, "utf8")).replace(
+    "验收核对文学转化、情绪推进、主旨、韵律和可唱性。",
+    "创作方法采用 fang-wenshan 上游技能，评分卡是自评，作品验收须阅读正文。",
+  );
+  sync(playbookPath, playbook);
+  const assetsPath = join(root, "src", "lib", "expert-gateway-assets.json");
+  const assets = JSON.parse(readFileSync(assetsPath, "utf8"));
+  assets.orchestrator_dispatch_playbook = playbook;
+  sync(assetsPath, `${JSON.stringify(assets, null, 2)}\n`);
+  return mismatches;
+}
+
 function main(): void {
   const universe = loadUniverse();
 
@@ -433,7 +482,7 @@ function main(): void {
   const unowned = universe.tools.filter((id) => !DOMAIN_TOOLS.includes(id)).length;
 
   if (CHECK) {
-    const mismatches: string[] = [];
+    const mismatches: string[] = syncLyricistBindings();
     for (const product of PRODUCTS) {
       const expected = product.build(universe.tools);
       for (const dir of product.dirs) {
@@ -455,7 +504,7 @@ function main(): void {
       `EXPORT_CHECK_OK：双写产物（${DOUBLE_WRITE_FILES.join(" / ")}）在 expert-gateway 与 gateway/expert 两份与机械导出 byte 等价（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未归属 Expert 的全集工具 ${unowned} 个保持默认开）`,
     );
     console.log(
-      `EXPORT_NOTE：${AGENTS_JSON} **未纳入本 --check 的双写校验**——它只写构建目录 ${join(OUT_DIR, AGENTS_JSON)}（该副本已按机械导出比对）；被 git 追踪的 ${join(SYNC_DIR, AGENTS_JSON)} 是与物理闸 deploy-staging/opencode-runtime/opencode.json 调和过的人工真源，**有意排除在双写之外**，本命令不校验其内容（禁止盲目覆盖）。`,
+      `EXPORT_NOTE：${AGENTS_JSON} 完整工具表只写构建目录 ${join(OUT_DIR, AGENTS_JSON)}（该副本已按机械导出比对）；被追踪的 ${join(SYNC_DIR, AGENTS_JSON)} 保留人工调和工具表，只校验 lyricist prompt 与歌词域镜像，禁止整表覆盖。`,
     );
     process.exit(0);
   }
@@ -477,6 +526,7 @@ function main(): void {
       console.log(`EXPORT_OK：${target}（${Buffer.byteLength(output)} bytes）`);
     }
   }
+  syncLyricistBindings();
   console.log(
     `导出依据：域工具 ${DOMAIN_TOOLS.length} 个（registry 联集）/ 工具全集 ${universe.tools.length} 个（${universe.source}）/ registry ${Object.keys(EXPERT_REGISTRY).length} 行；skillPath 护栏 ${guard.degraded ? "降级" : guard.ok ? "PASS" : "WARN"}。`,
   );

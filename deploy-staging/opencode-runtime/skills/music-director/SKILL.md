@@ -1,11 +1,15 @@
 ---
 name: music-director
-description: 音乐/歌曲/配乐/BGM/歌词任务必载配方库（含 Expert 派工 spec 与交付契约口径）。触发：做一首歌、写歌/作曲/作词、配乐、器乐 BGM、主题曲/片头曲 OP/插入曲、MV 歌曲、哼唱、翻唱/改编、音乐 prompt；或把音乐裁到 N 秒、选版本、出音乐交付契约、做音乐通路体检。给你通路优先序与时长硬约束、六层 style 公式、12 档 CORE/DATA、多版本偏好闸、乐谱编辑/翻唱、交付契约字段。生成前必载，禁止凭记忆写音乐 prompt。
+description: 音乐/歌曲/配乐/BGM/音乐生成任务必载配方库（含 Expert 派工 spec 与交付契约口径）。触发：做一首歌、歌曲制作/作曲/编曲、配乐、器乐 BGM、主题曲/片头曲 OP/插入曲、MV 歌曲、哼唱、翻唱/改编、音乐 prompt；或把音乐裁到 N 秒、选版本、出音乐交付契约、做音乐通路体检。给你通路优先序与时长硬约束、六层 style 公式、12 档 CORE/DATA、多版本偏好闸、乐谱编辑/翻唱、交付契约字段。生成前必载，禁止凭记忆写音乐 prompt。
 ---
 
 # Music Director — SunoForge v3.0 配方库
 
 本目录是音乐域 Expert 的 must-load 配方库，主体为 SunoForge v3.0（MIT）12 档 verbatim 入库（`files/`，不翻译不修改）。目标生成平台为 Google Lyria 3.5（暴君裁定路线），配方同时覆盖 Suno／Flow Music／ElevenMusic／Stable Audio 等。
+
+歌词文学创作与精修由 `lyricist` Expert 专职负责，入口为 `.opencode/skills/lyricist/SKILL.md`；仅歌词请求不载本库、不生成音频。完整原创歌曲先完成并验收歌词，再由 music 作曲编曲。用户已有完整原词按授权原样使用；纯器乐无需歌词专家。`files/CORE_02_LYRICS.md` 仅用于成稿的演唱标签与平台格式适配，不替代歌词专家，也不授权改写或压缩正文；第三方原文保持不变。
+
+【歌词文学接收与谱曲交接】歌词创作采用 .opencode/skills/fang-wenshan/SKILL.md 的上游方法。原创歌词交给 music 前 read 完整歌词；发现具体正文问题时引用唱句及影响，回交 lyricist 定向修订。ok:true、交付字段、qc 与上游评分卡均不能代替作品验收；公开版没有 lyrics/catalog，不能宣称完成全库查重。交接完整正文与文件路径，music 不从摘要重写歌词。用户提供完整原词且未要求精修时原样谱曲；没有真实旋律时，可唱性评分仅为文字自评。
 
 ## 12 档结构（5 CORE 规则层 + 7 DATA 事实层）
 

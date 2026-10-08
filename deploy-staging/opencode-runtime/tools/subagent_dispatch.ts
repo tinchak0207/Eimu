@@ -39,7 +39,7 @@ export default tool({
       .string()
       .optional()
       .describe(
-        "Expert id（仅野兽模式生效）：director3d=3D导演 / music=音乐导演 / video-director=视频导演 / editor=剪辑师 / screenwriter=编剧分镜 / motion-director=动态设计 / web3d-director=Web3D导演。指定后子代理以该 Expert 身分执行（仅持该域工具）。非野兽模式或省略时=通用子代理。",
+        "Expert id（lyricist/music 在野兽模式关闭时也生效）：director3d=3D导演 / music=音乐导演 / lyricist=歌词专家 / video-director=视频导演 / editor=剪辑师 / screenwriter=编剧分镜 / motion-director=动态设计 / web3d-director=Web3D导演。指定后子代理以该 Expert 身分执行（仅持该域工具）。野兽模式关闭时仍可指定 lyricist/music，其他域或省略时=通用子代理。",
       ),
     async: tool.schema
       .boolean()

@@ -106,3 +106,12 @@ note: 版本沿革、修订编号与事故起源一律移至同目录 CHANGELOG.
 - 禁 headless 交互登入（Adobe/Google 等）；不重放含动态 state 的授权 URL。遇到「browser or app may be not secure」立即停止该路径。
 - 外部副作用先确认再执行；Compliance ACK 不代暴君接受。
 - 覆盖任何远端档前必 diff 两端。
+
+## 原创歌词派遣
+
+【歌词创作路由】用户只要歌词/作词/填词/歌词精修，必须用 subagent_dispatch(expert:"lyricist")，单步任务也一样；不调用 music_gen。完整歌曲需要原创歌词时先派 lyricist，收到完成后 read 完整落盘文件并按歌词 skill 验收，再把全文和来源路径交给 music 作曲编曲；二者不可并发，不能先生成音频后补词。用户已提供完整原词且未要求精修时直接交给 music 原样谱曲；纯器乐/BGM不派歌词专家。这条规则在野兽模式开启或关闭时均生效。
+
+lyricist 的交付字段为 title / lyrics / hook / prosody_notes / qc，必须附完整文件路径；创作方法采用 fang-wenshan 上游技能，评分卡是自评，作品验收须阅读正文。收到摘要后 read 全文，不从摘要拼接或改写歌词；面向用户直接交完整歌词，过程说明的 token 帽不裁掉产物。
+
+
+【歌词文学接收与谱曲交接】歌词创作采用 .opencode/skills/fang-wenshan/SKILL.md 的上游方法。原创歌词交给 music 前 read 完整歌词；发现具体正文问题时引用唱句及影响，回交 lyricist 定向修订。ok:true、交付字段、qc 与上游评分卡均不能代替作品验收；公开版没有 lyrics/catalog，不能宣称完成全库查重。交接完整正文与文件路径，music 不从摘要重写歌词。用户提供完整原词且未要求精修时原样谱曲；没有真实旋律时，可唱性评分仅为文字自评。

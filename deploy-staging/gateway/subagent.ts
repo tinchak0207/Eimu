@@ -28,7 +28,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSyn
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
-import { guardExpertContent, musicFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, type JevDispatchGuards } from "./jev-gate"
+import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, type JevDispatchGuards } from "./jev-gate"
 // 任务状态枚举真源（0920 收口）：running/ok/error/stopped 以此为准，禁散布裸字串。
 import type { TaskStatus } from "./types-gateway.ts"
 // 0920：模板判定即建骨架（不等 Expert）——workflowService 是纯 service 模组，
@@ -378,7 +378,7 @@ const pendingCriticTargets = new Map<string, CriticPassTarget[]>()
 const criticDispatchedByParent = new Map<string, number>()
 // M2/M3（2026-10-02）：每父会话交付簿——music-first 前置断言（music 交付事件）＋
 // 返工内容锁（上一份交付物落盘路径）。有界 Map，每父会话 ≤20 笔。
-const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string }>>()
+const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string; contractOk?: boolean }>>()
 // 本会话是否已用掉 machine critic pass（内存镜像；权威在 persistence.critic_passes）。
 const criticPassUsed = new Set<string>()
 const CRITIC_PENDING_CAP = 16
@@ -662,7 +662,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const persist = persistRunOutput(run, status, fullText, error)
   if (status === "ok" && run.agent && !run.stopped) {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
-    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "" })
+    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS).ok : undefined })
     if (arr.length > 20) arr.shift()
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
@@ -672,7 +672,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   // 为避免 done 帧与注入父会话的唤醒文案膨胀（与本轮控上下文/工具结果大小的目标一致），
   // 以 SUBAGENT_SUMMARY_MAX_CHARS 在换行边界截断并附「已截断」提示；全文落盘照旧保留
   // （persist.pointer / PERSIST_TAIL 不变）。error 摘要维持原 600 字死因帽（既有语义零回归）。
-  const okTrunc = status === "ok" ? truncateSummaryText(fullText) : null
+  const okTrunc = status === "ok" && run.agent !== "lyricist" ? truncateSummaryText(fullText) : null
   const inline =
     error && status === "error"
       ? error.slice(0, SUMMARY_MAX_CHARS)
@@ -709,7 +709,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     console.warn(
       `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=ORPHANED (进程中断未复原) missing=${miss.join(",")}`,
     )
-  } else if (status === "ok" && run.beastMode === true && run.agent) {
+  } else if (status === "ok" && (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent) {
     const verdict = checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS)
     // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
     // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
@@ -1440,7 +1440,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   // 子代理 prompt **尾部**（recency 最高）。真源=已载入的 DELIVERY_CONTRACTS（禁手抄）。
   // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回归。重派链的
   // run.prompt 已含 buildReworkDirective（自我标注「自动重派」），此段与之共存于尾部不冲突。
-  const contractDirective = run.beastMode === true ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
+  const contractDirective = (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
   // 2026-10-02：模板空位事实注入。父 sessionId 用 run.parentGatewaySessionId（派工发起端
   // 的 gateway 会话 id，= canvasStates 的 key；**禁用子会话 opencodeSessionId**，那会指到
   // 子会话画布桶）。有值才插，无值时输出与注入前逐字元等价。
@@ -1963,7 +1963,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   let dispatchGuards: JevDispatchGuards = { research: null, rework: null, musicDependency: null }
   const beastOn = deps.beastMode(parent)
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
-  if (beastOn) {
+  if (beastOn || rawExpert === "lyricist" || rawExpert === "music") {
     let allowed: unknown
     try {
       allowed = (JSON.parse(readFileSync(`${import.meta.dir}/expert/expert-ids.json`, "utf8")) as { experts?: unknown })?.experts
@@ -2023,6 +2023,14 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         return Response.json({ ok: false, code: "music_first", error: reason, blocked: "music_first" }, { status: 409 })
       }
     }
+    // 先词后曲复用真实交付簿：未过歌词契约不可作为前置成果。
+    const lyrics = (deliveredByParent.get(parent.sessionId) ?? []).filter((d) => d.agent === "lyricist" && d.contractOk && d.relPath && prompt.includes(d.relPath));
+    const lyricsInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "lyricist" && r.status === "running");
+    const lyricsReason = lyricsFirstBlockReason(expertId, { lyricsDelivered: lyrics.length > 0, lyricsInFlight }, dispatchGuards.lyricsDependency);
+    if (lyricsReason) return Response.json({ ok: false, code: "lyrics_first", error: lyricsReason, blocked: "lyrics_first" }, { status: 409 });
+    if (expertId === "music" && lyrics.length && dispatchGuards.lyricsDependency !== false) {
+      prompt += `\n\n【已交付歌词来源】${lyrics.at(-1)!.relPath}。先 read 完整文件；歌词创作方法采用 .opencode/skills/fang-wenshan/SKILL.md。发现具体正文问题时引用唱句及影响，回交 lyricist 定向修订。ok:true、交付字段、qc 与上游评分卡均不能代替作品验收；公开版没有 lyrics/catalog，不能宣称完成全库查重。交接完整正文与文件路径，music 不从摘要重写歌词。用户提供完整原词且未要求精修时原样谱曲；没有真实旋律时，可唱性评分仅为文字自评。`;
+    }
     // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本轮已有 critic 审核动作，
     // 机器 pass 的触发判据据此豁免（不重复派遣）。登记有界 Map。
     if (expertId === "critic") {
@@ -2046,7 +2054,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 0920 暴君裁定：模板选择接 System One——同一请求批次取回工作流模板判定，
   // 命中制作类（confidence≥0.8）即把骨架硬注入任务书头（先于军团模板），
   // 让「没人负责选模板」不再可能（事故：60s 百合 OP MV 裸跑＝无角色卡约束）。
-  {
+  if (expertId !== "lyricist") {
     let templateInjected = false
     try {
       const tpl = JSON.parse(readFileSync(`${import.meta.dir}/spec-templates.json`, "utf8")) as Record<string, string>
