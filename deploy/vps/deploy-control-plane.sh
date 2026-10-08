@@ -40,6 +40,11 @@ ARCHIVE_PATHS=(src public worker tools db bridge skills
   deploy-staging/expert-gateway deploy-staging/gateway
   package.json package-lock.json next.config.mjs next-env.d.ts tsconfig.json
   tailwind.config.ts postcss.config.mjs components.json)
+# HEAD 实存的白名单路径（do_plan 填）。**必须全局**：do_deploy 的 4b 残留清理也用它，
+# 若像以前那样只在 do_plan 里 local，do_deploy 读到的就是未定义数组 —— bash 5 在 set -u 下
+# 对未定义数组的 "${a[*]}" 静默展开为空（不报错），find 少了路径参数就退回 `find .`，
+# 整份 app/ 被判成残留删除（2026-10-08 事故，3572 档）。
+PRESENT=()
 # 目的路径（VPS app/ 相对）→ repo 路径；未列者同名
 declare -A SRC_OF=([Dockerfile]=deploy/vps/Dockerfile [.dockerignore]=.dockerignore)
 
@@ -141,6 +146,7 @@ hist_md5s() {
 HEAD_SHA=""; SHORT=""
 NEW_FILES=(); OVER_FILES=(); OK_FILES=(); BLOCKED_FILES=(); BLOCKED_MD5=()
 USE_RSYNC=0
+ALLOW_BULK=0   # 4b 残留清理的安全闸旁路（--allow-bulk-remove）；默认 0＝差集异常即中止
 
 do_plan() {
   HEAD_SHA="$(git rev-parse HEAD)"; SHORT="$(git rev-parse --short=8 HEAD)"
@@ -149,18 +155,18 @@ do_plan() {
   # 1. git archive HEAD → stage
   STAGE="$(mktemp -d /tmp/cp-deploy-stage.XXXXXX)"
   WORK="$(mktemp -d /tmp/cp-deploy-work.XXXXXX)"
-  local present=() p
+  PRESENT=(); local p
   for p in "${ARCHIVE_PATHS[@]}"; do
-    if git cat-file -e "HEAD:$p" 2>/dev/null; then present+=("$p"); else log "略过（HEAD 无此路径）：$p"; fi
+    if git cat-file -e "HEAD:$p" 2>/dev/null; then PRESENT+=("$p"); else log "略过（HEAD 无此路径）：$p"; fi
   done
-  git archive --format=tar HEAD -- "${present[@]}" | tar -x -C "$STAGE"
+  git archive --format=tar HEAD -- "${PRESENT[@]}" | tar -x -C "$STAGE"
   git show "HEAD:deploy/vps/Dockerfile" >"$STAGE/Dockerfile"
   git show "HEAD:.dockerignore" >"$STAGE/.dockerignore"
   log "stage：$(find "$STAGE" -type f | wc -l) 档，$(du -sh "$STAGE" | cut -f1)"
 
   # 2. working tree 相对 HEAD 的未提交改动（只警告）
   local dirty
-  dirty="$(git status --porcelain -- "${present[@]}" deploy/vps/Dockerfile .dockerignore)"
+  dirty="$(git status --porcelain -- "${PRESENT[@]}" deploy/vps/Dockerfile .dockerignore)"
   if [[ -n "$dirty" ]]; then
     warn "下列部署路径在 working tree 有未提交改动（部署的是 HEAD，这些改动不会上线）："
     printf '%s\n' "$dirty" | sed 's/^/  /' >&2
@@ -301,6 +307,7 @@ do_deploy() {
   while (($#)); do
     case "$1" in
       --allow-overwrite) [[ $# -ge 2 ]] || die "--allow-overwrite 需要路径"; allow+=("$2"); shift 2 ;;
+      --allow-bulk-remove) ALLOW_BULK=1; shift ;;
       *) die "未知参数：$1" ;;
     esac
   done
@@ -370,21 +377,47 @@ do_deploy() {
 
   # 4b. 删除 APP_DIR 中 HEAD 已不存在的残留档（2026-10-08：同步只覆盖不删除 ⇒ 历史删档
   #     在控面 app/ 留存，Next.js build 编译到旧档当场失败——实测 39 档残留含已删的
-  #     pro-workstation/，其旧类型错阻断整次 build）。范围严格限定 present=ARCHIVE_PATHS，
+  #     pro-workstation/，其旧类型错阻断整次 build）。范围严格限定 PRESENT=ARCHIVE_PATHS，
   #     Dockerfile/.dockerignore 不在此列（另行安装），不碰 app/ 下其它既有档。
+  #
+  #     三重防护（2026-10-08 事故：3572 档被误删，app/ 被清空）：
+  #       ① scope 逐项 %q 转义后带进远程 find —— 禁 ${arr[*]} 裸展开（那会塌成单参数，
+  #          find 少了路径参数就退回 `find .`，输出 `./` 前缀全量清单）；
+  #       ② 两侧一律「去 ./ 前缀 + LC_ALL=C sort」—— 前缀或 collation 不同会让 comm 零交集；
+  #       ③ 安全闸：任一侧清单为空、或差集 > 200 档、或 > HEAD 档数 10% ⇒ 中止不删。
   local head_lst="$WORK/head.lst" vps_lst="$WORK/vps.lst" stale_lst="$WORK/stale.lst"
-  (cd "$STAGE" && find . -type f | sed 's|^\./||' | sort) >"$head_lst"
-  rsh "cd $(printf '%q' "$APP_DIR") && find ${present[*]} -type f 2>/dev/null | sort" >"$vps_lst"
-  comm -23 "$vps_lst" "$head_lst" >"$stale_lst"
-  local stale_n; stale_n="$(grep -c . "$stale_lst" || true)"
+  local scope_q head_n vps_n stale_n
+  scope_q="$(printf '%q ' "${PRESENT[@]}")"
+  [[ -n "$scope_q" ]] || die "PRESENT 为空（HEAD 白名单路径全不存在？），拒绝执行残留清理"
+  (cd "$STAGE" && LC_ALL=C find $scope_q -type f 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort) >"$head_lst"
+  rsh "cd $(printf '%q' "$APP_DIR") && LC_ALL=C find $scope_q -type f 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort" >"$vps_lst"
+  head_n="$(grep -c . "$head_lst" || true)"; vps_n="$(grep -c . "$vps_lst" || true)"
+  # comm 的排序判准是**它自己**的 LC_COLLATE（不是 sort 的）⇒ 这里也必须 LC_ALL=C，
+  # 否则会喷 "not in sorted order" 并默默算出错差集（2026-10-08 离线 fixture 实测）。
+  local comm_err; comm_err="$WORK/comm.err"
+  LC_ALL=C comm -23 "$vps_lst" "$head_lst" 2>"$comm_err" >"$stale_lst"
+  if [[ -s "$comm_err" ]]; then
+    sed 's/^/  /' "$comm_err" >&2
+    die "comm 报错（清单不同序）＝比对不可信，拒绝删除（未改 VPS）"
+  fi
+  stale_n="$(grep -c . "$stale_lst" || true)"
+  log "残留清理范围：HEAD $head_n 档／VPS $vps_n 档 ⇒ 差集 $stale_n"
+  ((head_n > 0 && vps_n > 0)) || die "清单为空（head=$head_n vps=$vps_n）＝比对失效，拒绝删除（未改 VPS）"
   if ((stale_n > 0)); then
+    if ((stale_n > 200 || stale_n * 10 > head_n)) && [[ $ALLOW_BULK == 0 ]]; then
+      sed 's/^/  /' "$stale_lst" >&2
+      die "差集 $stale_n 档超过安全阈值（HEAD $head_n 档）＝疑似比对失效，已中止且未删任何档；确认无误会再加 --allow-bulk-remove 重跑"
+    fi
     log "REMOVED $stale_n 个残留档（HEAD 已不存在）"
     sed 's/^/  /' "$stale_lst" >&2
     rsh "cd $(printf '%q' "$APP_DIR") && xargs -r -d '\n' sudo -n rm -f --" <"$stale_lst"
-    rsh "cd $(printf '%q' "$APP_DIR") && find ${present[*]} -type d -empty -delete 2>/dev/null || true"
+    rsh "cd $(printf '%q' "$APP_DIR") && LC_ALL=C find $scope_q -type d -empty -delete 2>/dev/null || true"
   else
     log "REMOVED 0 个残留档"
   fi
+  # 灾后哨兵：同步步骤刚铺过 HEAD 全量，本步骤不该动到本体
+  rsh "[ -f $(printf '%q' "$APP_DIR/Dockerfile") ] && [ -d $(printf '%q' "$APP_DIR/src") ]" \
+    || die "残留清理后缺 Dockerfile 或 src/＝本步骤误删本体（已中止；重跑 deploy 会由同步步骤恢复 app/）"
 
   hdr "compose build ${SERVICES[*]}"
   local t0 t1
