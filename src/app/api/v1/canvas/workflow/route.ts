@@ -13,6 +13,10 @@
 //      add_node/update_node/connect_nodes/… 与版本落版语义全在该 reducer）。
 //   ④ 持久化＝`mutateCanvasProject`＋`fromCanvasProject`/`toCanvasProject`（既有落盘白名单）。
 //
+// **`applied` 口径**：只计节点 op（add_node／update_node）；连线不算入 applied，要看
+// `summary.connected`（本次 needs 边新增的连线数）。纯连线变更（无节点 op）⇒ applied=0
+// 但 summary.connected>0，这是刻意的口径，不设特例。
+//
 // **owner 校验**：`readCanvasProject`/`mutateCanvasProject(auth.key.userId, projectId, …)`。
 // 画布专案储存以 `canvas/<userId>/…` 为命名空间——别人的 projectId 在本 user 命名空间
 // 不存在 ⇒ 404（不区分「不存在/无权」，防枚举）。B 端 key 只代表允许的服务身分，
@@ -129,10 +133,12 @@ export async function POST(req: NextRequest) {
   const createdNodeIds = ops
     .filter((op): op is Extract<CanvasAgentOp, { type: "add_node" }> => op.type === "add_node")
     .map((op) => op.node.id);
+  // applied 只计节点 op（add_node／update_node）；连线数看 summary.connected（见档头口径）。
+  const appliedNodeOps = ops.filter((op) => op.type === "add_node" || op.type === "update_node").length;
   return NextResponse.json(
     {
       success: true,
-      applied: ops.length,
+      applied: appliedNodeOps,
       created_node_ids: createdNodeIds,
       summary: result.summary,
       label: typeof label === "string" ? label : null,
