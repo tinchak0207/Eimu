@@ -66,6 +66,7 @@ import {
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
+import { ProjectSidebar } from "@/components/projects/ProjectSidebar";
 import { templateToCanvasLayout } from "@/components/canvas-workstation/agent-template-canvas";
 import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/DirectorMiniViewport";
 // 2026-09-12 首屏减重拆分：AGENT_TEMPLATES 只含卡面显示 metadata；
@@ -76,6 +77,7 @@ import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
 import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
+import { useCreativeProjects } from "@/hooks/use-creative-projects";
 
 // 2026-08-27 专业工作站入口移除：AI 工作站（agent 模式）已吸收其独有机制
 // （LoRA 库 / 配方模板 / kunpeng 风格库），旧工作站不再被动态 import。
@@ -199,6 +201,33 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     canvasHostRef.current?.feedCanvasEvent(event);
   }, []);
   const handleCanvasSummary = useCallback(() => canvasHostRef.current?.summarize(), []);
+
+  // P0-W4：会话 ↔ 项目**写入**路径。此前全仓零呼叫点——侧栏里任何项目永远显示
+  // 0 条聊天，所有会话都掉进「未分类」。这里只补「新会话在已有当前项目下诞生时
+  // 挂上去」这一条写入；读路径（侧栏自己订阅 store）与本元件其余行为一律不动。
+  //
+  // 用 ref 取最新值，让下面 linkSessionToActiveProject / handleAgentSessionChange
+  // 保持稳定身份：否则 activeProjectId 一变，AgentChatSurface 的 onSessionChange
+  // effect（[sessionId, onSessionChange]）会重跑，把「切项目」误当「开新会话」
+  // 而把当前会话搬进项目。
+  const { activeProjectId, attachChat, findProjectIdBySession } = useCreativeProjects();
+  const projectAttachRef = useRef({ activeProjectId, attachChat, findProjectIdBySession });
+  projectAttachRef.current = { activeProjectId, attachChat, findProjectIdBySession };
+
+  // 同一 sessionId 只挂一次（防写风暴）；attachChat 失败只记一次、不重试循环。
+  const attachedChatSessionsRef = useRef<Set<string>>(new Set());
+  const linkSessionToActiveProject = useCallback((sessionId: string | null) => {
+    const ctx = projectAttachRef.current;
+    // 判定①当前项目为空 → 不写（首页快枪路径零副作用）；判定②会话为空串 → 不写。
+    if (!ctx.activeProjectId || !sessionId) return;
+    // 判定③该会话已属别的项目 → 跳过（不抢归属，恢复的旧会话靠这条挡住）。
+    // 防写风暴：同一 id 只尝试挂一次。
+    if (attachedChatSessionsRef.current.has(sessionId)) return;
+    if (ctx.findProjectIdBySession(sessionId) !== null) return;
+    attachedChatSessionsRef.current.add(sessionId);
+    void ctx.attachChat(ctx.activeProjectId, sessionId);
+  }, []);
+
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   // Bug1a：模板库退场旗标随「进入新对话」复位。session id 变了 = 开新聊天 =
   // 画布已被清空，模板库必须再次出现（「开启新聊天就代表 Canvas 进入模板展示态」）；
@@ -216,7 +245,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateDismissed(false);
     }
     setCurrentSessionId(nextSessionId);
-  }, []);
+    // P0-W4：新会话拿到 id 后挂到当前项目（模板卡 :282 / 留旧开新 :488 两条
+    // 开新路径的 id 都经这里回流；会话切换同样走这里）。判定与去重见
+    // linkSessionToActiveProject。
+    linkSessionToActiveProject(nextSessionId);
+  }, [linkSessionToActiveProject]);
   const canvasHost = useCanvasChat(currentSessionId);
   canvasHostRef.current = canvasHost;
 
@@ -824,6 +857,18 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   isLoading={isLoading}
                   canvasHost={canvasHost}
                   {...(showAgentTemplateGallery ? { overlayContent: <AgentTemplateCarousel templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} /> } : {})}
+                  /* 项目侧栏（P0-W2）：点顶栏「项目」钮＝同一槽位换内容（桌面）或推入
+                     抽屉（手机）。onPickChat 走既有 switchSessionRef 真切会话；
+                     onClose（CanvasChatWorkstation 给的 close）＝切回聊天。 */
+                  projectPanel={(close) => (
+                    <ProjectSidebar
+                      currentSessionId={currentSessionId}
+                      onPickChat={(sessionId) => {
+                        void switchSessionRef.current?.(sessionId);
+                      }}
+                      onClose={close}
+                    />
+                  )}
                 >
                   {(chatHeaderExtra) => (
                     <>

@@ -55,6 +55,11 @@ export function parseStoredPanelWidth(raw: string | null): number | null {
  */
 export function useChatPanel() {
   const [chatPanelState, setChatPanelState] = useState<"expanded" | "rail">("expanded");
+  // 面板内容模式（2026-10-09 P0-W2）：同一槽位（.canvas-chat-panel，宽度仍吃
+  // --ws-panel-w）在「聊天内容」与「项目侧栏」之间换内容。**附加栏位**——不改既有
+  // 栏位语义，宽度单一真相源 --ws-panel-w 的写入逻辑（下方 useLayoutEffect）一字不动。
+  // 不持久化：每次进站回到聊天，对应「退出＝切回聊天」。
+  const [panelMode, setPanelMode] = useState<"chat" | "projects">("chat");
   // 初始态＝同步读同一个校验过的 v2（SSR 端 typeof window 守卫回 null）。
   // 这里不能留 null 等 useLayoutEffect 回填：null 会让 mount 时的写入 effect
   // removeProperty 掉 pre-paint 脚本刚设好的显式宽——跳变只是换了方向。
@@ -110,5 +115,7 @@ export function useChatPanel() {
     setChatPanelWidth,
     chatPanelDragRef,
     chatPanelRef,
+    panelMode,
+    setPanelMode,
   };
 }

@@ -1,11 +1,21 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
-import { MessageCircle } from "lucide-react";
+import { FolderKanban, MessageCircle } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
+import { useIsNarrow } from "@/hooks/use-is-narrow";
 import { cn } from "@/lib/utils";
 import { CHAT_PANEL_MAX_WIDTH, CHAT_PANEL_MIN_WIDTH, useChatPanel } from "./use-chat-panel";
+// 手机端项目侧栏的推入抽屉直接复用 MobileSidebar 那套轮子（scrim／panel／
+// mobile-sidebar-panel-in 动画／prefers-reduced-motion 分支），不新造 CSS。
+import "../mobile-nav/mobile-sidebar.css";
+
+/** 项目侧栏走「推入抽屉」还是「槽位内嵌」的断点：与工作站自身的手机端切换
+ *  （CanvasChatWorkstation 的 @media max-width:767px）对齐——≤767px 面板本就是
+ *  满屏，塞进去等于没侧栏，故改走推入抽屉。 */
+const PROJECT_DRAWER_QUERY = "(max-width: 767px)";
 
 // CanvasEmbed 维持 dynamic 懒载入：它是画布工作站的天然 chunk 边界，
 // 只有 inCanvasWorkstation 为真（overlay 真的渲染）时才拉 chunk。
@@ -27,6 +37,11 @@ export interface CanvasChatWorkstationProps {
    * 两态决定，经 render prop 回传给内容接线——面板状态是本组件的私有域。
    */
   children: (chatHeaderExtra: ReactNode) => ReactNode;
+  /**
+   * 项目面板内容（P0-W2，2026-10-09）：给 close 回调；缺省＝不渲染项目面板，
+   * 顶栏的「项目」入口钮也不出现。**可选**，不破坏既有呼叫端。
+   */
+  projectPanel?: (close: () => void) => ReactNode;
 }
 
 /**
@@ -42,8 +57,49 @@ export function CanvasChatWorkstation({
   canvasHost,
   overlayContent,
   children,
+  projectPanel,
 }: CanvasChatWorkstationProps) {
-  const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef, chatPanelRef } = useChatPanel();
+  const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef, chatPanelRef, panelMode, setPanelMode } = useChatPanel();
+
+  // 项目入口钮与抽屉（P0-W2）：
+  //  · 桌面（>767px）：点钮＝同一槽位换内容（panelMode: chat → projects），宽度仍
+  //    吃 --ws-panel-w，Navbar 的 --ws-navbar-inset 与画布布局零改动。
+  //  · 手机（≤767px）：面板本就是满屏，走 MobileSidebar 的推入抽屉形态（portal 到
+  //    body），不塞进聊天面板。
+  //  · 无论哪种形态，聊天内容都保持挂载（下方用 display:none 隐藏），AgentChatSurface
+  //    不卸载＝SSE 会话／输入框内容／滚动位置零丢失；退出只切回 panelMode="chat"。
+  const projectsNarrow = useIsNarrow(PROJECT_DRAWER_QUERY);
+  const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
+  // 项目面板只在工作站态（agent 面）有意义：入口钮本身也只长在 AgentChatSurface 顶栏。
+  const showProjectsPanel = inCanvasWorkstation && panelMode === "projects" && Boolean(projectPanel);
+  const closeProjectsPanel = () => setPanelMode("chat");
+  const openProjects = () => {
+    if (projectsNarrow) setMobileProjectsOpen(true);
+    else setPanelMode("projects");
+  };
+  // 离开工作站（切到直接生成等）＝项目面板作废，切回聊天、收起抽屉——否则回来时
+  // 会停在一个「聊天被藏、项目区不渲染」的空面板态。setPanelMode 是 useState 的稳定引用。
+  useEffect(() => {
+    if (inCanvasWorkstation) return;
+    setPanelMode("chat");
+    setMobileProjectsOpen(false);
+  }, [inCanvasWorkstation, setPanelMode]);
+
+  // 顶栏「项目」入口钮：与 AgentChatSurface 现有 5 颗钮同一份样式配方（逐字 cp）。
+  // 刻意不加 max-sm:hidden——手机端 5 颗既有钮是 max-sm:hidden，若它也被藏，
+  // 窄屏就没有任何项目入口；保留它＝手机端唯一可见的顶栏钮（开推入抽屉）。
+  const projectEntryButton = (
+    <button
+      type="button"
+      onClick={openProjects}
+      aria-label="项目"
+      title="项目：把作品与对话收进项目"
+      aria-expanded={showProjectsPanel || mobileProjectsOpen}
+      className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+    >
+      <FolderKanban className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
+    </button>
+  );
 
   // 2026-09-24 暴君裁定「header 往右退缩，让 AI 助理占上来，吃满天花板」＋
   // 同刀「首秒零回缩」根治：expanded 态的退缩量不再由 JS 回写像素——
@@ -434,11 +490,25 @@ export function CanvasChatWorkstation({
             <MessageCircle className="h-5 w-5" aria-hidden="true" />
           </button>
         )}
-        <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}>
-          {/* 2026-09-05 暴君裁定：header 的「收起对话面板」钮删掉，退出只走右边 X；
-              chatHeaderExtra 不再产出（render prop 签名保留，传 undefined）。 */}
-          {children(undefined)}
+        <div
+          className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}
+          // 项目面板态：聊天内容**保持挂载**只隐藏（display:none），AgentChatSurface
+          // 不卸载＝SSE 会话／输入框内容／滚动位置零丢失（2026-10-09 P0-W2）。
+          style={showProjectsPanel ? { display: "none" } : undefined}
+        >
+          {/* 2026-09-05 暴君裁定：header 的「收起对话面板」钮删掉，退出只走右边 X。
+              2026-10-09 P0-W2：同一 chatHeaderExtra 通道改回傳「项目」入口钮——它落在
+              AgentChatSurface 顶栏右簇（headerExtra，见 AgentChatSurface.tsx:1206），
+              AgentChatSurface 一行都不用改。projectPanel 缺省时不产出钮。 */}
+          {children(projectPanel ? projectEntryButton : undefined)}
         </div>
+        {/* 项目侧栏（桌面 ≥768px）：同一 .canvas-chat-panel 槽位换内容，宽度仍吃
+            --ws-panel-w；壳沿用聊天卡同款材质（.canvas-chat-scroll-fill > section.lg-card）。 */}
+        {showProjectsPanel && (
+          <div className="canvas-chat-scroll canvas-chat-scroll-fill min-w-0 flex-1">
+            <section className="lg-card flex min-h-0 flex-col">{projectPanel!(closeProjectsPanel)}</section>
+          </div>
+        )}
         {/* 面板右缘拖宽手柄（320–720px，2026-09-24 用户版面方案放宽上限） */}
         <div
           className={inCanvasWorkstation && chatPanelState === "expanded" ? "canvas-chat-resize" : "hidden"}
@@ -464,6 +534,32 @@ export function CanvasChatWorkstation({
           aria-hidden="true"
         />
       </div>
+      {/* 手机端项目侧栏＝推入抽屉（2026-10-09 P0-W2）：逐行复用 MobileSidebar 的
+          scrim／panel／mobile-sidebar-panel-in 动画（mobile-sidebar.css 轮子），
+          portal 到 document.body——祖先 backdrop-filter 会建立 fixed 后代的
+          containing block，留在面板里 inset:0 只覆盖那张卡。点击遮罩关闭。 */}
+      {inCanvasWorkstation &&
+        projectsNarrow &&
+        mobileProjectsOpen &&
+        projectPanel &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="mobile-sidebar-scrim"
+            role="presentation"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setMobileProjectsOpen(false);
+            }}
+          >
+            <aside role="dialog" aria-modal="true" aria-label="项目" className="mobile-sidebar-panel">
+              <div className="mobile-sidebar-bg" aria-hidden="true" />
+              <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
+                {projectPanel(() => setMobileProjectsOpen(false))}
+              </div>
+            </aside>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
