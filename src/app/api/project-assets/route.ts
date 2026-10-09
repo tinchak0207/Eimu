@@ -20,6 +20,7 @@ import { AssetMountConflictError, AssetMountLimitError } from "@/lib/asset-scope
 import { isAssetLocalCopyId, toAssetKind } from "@/lib/asset-scope";
 import { readCanvasProject } from "@/lib/canvas/project-store";
 import { listCanvasProjectsForCaller } from "@/lib/canvas/team-canvas-gate";
+import { readCreativeProject } from "@/lib/creative-project/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,11 +36,18 @@ function fail(status: number, message: string, code: string): NextResponse {
  * 先查个人画布（便宜、不打 relay），未命中再查「个人＋团队」可见集（与 /api/canvas/projects
  * 同一把尺，不另立规则）；两者皆无 ⇒ 非自有／不存在，403。挂用写入路径仍照旧走
  * resolveMountable 的资产可见性闸（本处只补读路径的项目归属）。
+ *
+ * P1（项目→聊天→画布）起补第三路：**自有创作项目（`prj_…`）** 也是资产的作用域真源
+ * （资产以 `projectIds` 标签指向它，见 asset-scope 的 "in-project" 允许路径）。/history 的
+ * 项目维度要按创作项目列资产，而创作项目 id 不是画布 id，原先会被这条闸 403。放行条件依旧
+ * 只认呼叫者名下（`readCreativeProject` 的 userId 隔离），越权仍被挡——是补一条合法主体，
+ * 不是放宽边界。
  */
 async function projectVisibleToCaller(userId: number, projectId: string): Promise<boolean> {
   if (await readCanvasProject(userId, projectId)) return true;
   const visible = await listCanvasProjectsForCaller(userId);
-  return visible.some((project) => project.id === projectId);
+  if (visible.some((project) => project.id === projectId)) return true;
+  return (await readCreativeProject(userId, projectId)) !== null;
 }
 
 export async function GET(req: NextRequest) {

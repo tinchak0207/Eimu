@@ -24,6 +24,7 @@ import {
   saveAssetPack,
 } from "@/lib/asset-pack-store";
 import type { AssetPack } from "@/lib/asset-pack-store";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
 import { decideTeamAssetScope, lookupAssetsTeamMembership } from "@/lib/asset-team-scope";
 
 export const runtime = "nodejs";
@@ -64,6 +65,11 @@ export async function PUT(req: NextRequest) {
     body = (await req.json()) as Partial<AssetPack>;
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
+  }
+  // 修复 3：项目标签超上限一律 fail-loud 拒收（不再让 normalizeProjectIds 静默截断丢标签）。
+  // 放在「缺键不动」合并之前：只对本次请求**显式送来**的 projectIds 判长度（未给＝不动，不拒）。
+  if (projectTagIdsOverLimit(body?.projectIds)) {
+    return fail(400, `项目标签最多 ${MAX_ASSET_PROJECT_TAGS} 个`, "too_many_project_tags");
   }
   // P1-A 项目标签语义（纯加法）：**未给 projectIds ＝ 不动**——一次不带标签的整包 PUT
   // 不得静默清空既有标签；显式给值（含空阵列＝明确清除）才以该值为准。

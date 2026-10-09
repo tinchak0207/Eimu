@@ -144,7 +144,9 @@ export function teamIdOfScope(scope: AssetScope | undefined): string {
 
 /**
  * 单笔资产可挂的项目标签数上限（P1-A：`projectIds` 是用户自己的「多归属标签」）。
- * 超出时 normalizeProjectIds 截断（标签是弱约束，不因第 21 个标签而拒收整笔资产）。
+ * **写入路由入口已 fail-loud 拒收超限投入**（见 {@link projectTagIdsOverLimit}，400
+ * `too_many_project_tags`）；此处 `normalizeProjectIds` 的截断保留为**纵深防御**
+ * （读档收口 / 绕过路由的呼叫端仍不会写出超限记录）。
  */
 export const MAX_ASSET_PROJECT_TAGS = 20;
 const MAX_ASSET_PROJECT_TAG_LENGTH = 120;
@@ -170,6 +172,35 @@ export function normalizeProjectIds(raw: unknown): string[] {
     if (out.length >= MAX_ASSET_PROJECT_TAGS) break;
   }
   return out;
+}
+
+/**
+ * **写入路由入口的 fail-loud 闸**（修复 3，2026-10-09）：当本次请求**显式送来**的
+ * `projectIds` 在清洗去重后仍超过 {@link MAX_ASSET_PROJECT_TAGS} 时**必须拒收**
+ * （400 `too_many_project_tags`），不得像 {@link normalizeProjectIds} 那样静默 `slice` 截断
+ * ——截断会让排在末位的真实项目静默失去归属（静默丢数据：Hacker 实证 21 个互异标签时
+ * 第 21 个被丢）。
+ *
+ * **判据＝「落盘会被裁掉才拒」**（2026-10-09 收窄，原按去重前原始长度判过严）：
+ * 逐项照 {@link normalizeProjectIds} 的清洗规则（只认非空 string、`trim()` 后
+ * `slice(0,120)`、以清洗结果为键去重）累计**有效标签数**，去重后 > 上限才拒。
+ * 因此 `["a","a",…×21]`（去重后仅 1 个）放行——落盘不会被裁，拒绝它属于误判；
+ * 21 个互异（或清洗后仍互异）才拒。
+ *
+ * 非数组（含未给该栏位）→ false：未给＝不动，交给既有「缺键不动」语义，不在此拒；
+ * 非字符串项被忽略（`normalizeProjectIds` 同样丢弃它们，不影响落盘结果）。
+ */
+export function projectTagIdsOverLimit(raw: unknown): boolean {
+  if (!Array.isArray(raw)) return false;
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const tag = value.trim().slice(0, MAX_ASSET_PROJECT_TAG_LENGTH);
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    if (seen.size > MAX_ASSET_PROJECT_TAGS) return true;
+  }
+  return false;
 }
 
 /**
@@ -893,6 +924,17 @@ export function mountedAssetKeys(mounts: readonly AssetMountRecord[], projectId:
 
 // ─────────────────────────────────────────── 项目资产库（列表 + 检索 + 挂用入口）
 
+/**
+ * 资产来源锚点。与 `asset-pack-store.AssetPackItem.source` **同形**（此处本地声明，
+ * 不 import 存储层以免循环依赖）。「从生成记录存卡 / 存资产」写的是
+ * `{type:"history", id:<historyEntry.id>}`（见 history-card-anchor.ts）。
+ */
+export interface AssetSource {
+  type: "history" | "canvas" | "chat" | "workflow" | "manual";
+  id: string;
+  sessionId?: string;
+}
+
 export interface AssetLibraryCandidate {
   assetKind: AssetKind;
   assetId: string;
@@ -906,6 +948,13 @@ export interface AssetLibraryCandidate {
    * 只给人看与前端筛选，不进 canvas 节点 metadata / agent 压缩白名单（同 scope 裁决）。
    */
   projectIds?: string[];
+  /**
+   * 资产来源锚点（**只读投射**）：资产包 items[].source 的代表值，缺省＝无来源。
+   * 供只读消费者取 join 键（如 /history 的项目维度据 `source.type === "history"` 的
+   * `source.id` 反查该项目的生成记录血缘）。纯读——不进任何写路径，也不进 canvas
+   * metadata / agent 压缩白名单（与 projectIds 同裁决）。
+   */
+  source?: AssetSource;
   ownerUserId: number;
   updatedAt: string;
 }
@@ -918,22 +967,37 @@ export interface AssetLibraryItem extends AssetLibraryCandidate {
   projectIds: string[];
 }
 
+/**
+ * 取包内「代表来源」：第一个带 `source` 的 item 的 source。历史存成的资产包每个 item
+ * 都写同一条 `{type:"history", id:<entry.id>}`，取首个即代表包的来源。找不到回 null。
+ */
+function firstAssetSource(items: readonly { source?: AssetSource }[] | undefined): AssetSource | null {
+  for (const item of items ?? []) {
+    if (item.source && typeof item.source.id === "string" && item.source.id) return item.source;
+  }
+  return null;
+}
+
 /** 资产包 → 候选项（结构型别，不 import 存储层，避免循环）。 */
 export function candidatesFromPacks(
-  packs: readonly { id: string; title: string; digest?: string; tags?: string[]; scope?: AssetScope; projectIds?: string[]; updatedAt: string }[],
+  packs: readonly { id: string; title: string; digest?: string; tags?: string[]; scope?: AssetScope; projectIds?: string[]; updatedAt: string; items?: readonly { source?: AssetSource }[] }[],
   ownerUserId: number,
 ): AssetLibraryCandidate[] {
-  return packs.map((p) => ({
-    assetKind: "pack" as const,
-    assetId: p.id,
-    title: p.title,
-    tags: Array.isArray(p.tags) ? [...p.tags] : [],
-    kindLabel: "资产包",
-    ...(p.scope ? { scope: p.scope } : {}),
-    ...(p.projectIds?.length ? { projectIds: [...p.projectIds] } : {}),
-    ownerUserId,
-    updatedAt: p.updatedAt,
-  }));
+  return packs.map((p) => {
+    const source = firstAssetSource(p.items);
+    return {
+      assetKind: "pack" as const,
+      assetId: p.id,
+      title: p.title,
+      tags: Array.isArray(p.tags) ? [...p.tags] : [],
+      kindLabel: "资产包",
+      ...(p.scope ? { scope: p.scope } : {}),
+      ...(p.projectIds?.length ? { projectIds: [...p.projectIds] } : {}),
+      ...(source ? { source } : {}),
+      ownerUserId,
+      updatedAt: p.updatedAt,
+    };
+  });
 }
 
 const CARD_KIND_LABELS: Record<string, string> = { character: "角色", scene: "场景", style: "风格" };

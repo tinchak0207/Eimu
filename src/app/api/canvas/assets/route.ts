@@ -11,6 +11,7 @@ import {
   saveCanvasAsset,
 } from "@/lib/canvas/asset-store";
 import type { CanvasAsset } from "@/lib/canvas/asset-store";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +60,11 @@ export async function PUT(req: NextRequest) {
     body.imageUrl.length > MAX_IMAGE_DATA_URL_BYTES
   ) {
     return fail(400, "图片素材超过 2MB 上限，请压缩后再存", "image_too_large");
+  }
+  // 修复 3：项目标签超上限一律 fail-loud 拒收（不再让 normalizeProjectIds 静默截断丢标签）。
+  // 放在「缺键不动」合并之前：只对本次请求**显式送来**的 projectIds 判长度（未给＝不动，不拒）。
+  if (projectTagIdsOverLimit(body?.projectIds)) {
+    return fail(400, `项目标签最多 ${MAX_ASSET_PROJECT_TAGS} 个`, "too_many_project_tags");
   }
   // P1-A 项目标签语义（纯加法）：**未给 projectIds ＝ 不动**（整包 PUT 不得静默清空既有标签）；
   // 显式给值（含空阵列＝明确清除）才以该值为准。范式＝character-cards PATCH 的局部更新合并；

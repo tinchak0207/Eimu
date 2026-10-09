@@ -15,6 +15,7 @@ import {
 } from "@/lib/character-card-store";
 import { normalizeCharacterCard } from "@/lib/character-cards";
 import type { CharacterCard } from "@/lib/character-cards";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +51,10 @@ export async function POST(req: NextRequest) {
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
+  // 修复 3：项目标签超上限一律 fail-loud 拒收（不再让 normalizeProjectIds 静默截断丢标签）。
+  if (projectTagIdsOverLimit(body?.projectIds)) {
+    return fail(400, `项目标签最多 ${MAX_ASSET_PROJECT_TAGS} 个`, "too_many_project_tags");
+  }
   const normalized = normalizeCharacterCard({
     ...body,
     ...(typeof body?.id === "string" && body.id.trim() ? {} : { id: mintCardId() }),
@@ -77,6 +82,10 @@ export async function PATCH(req: NextRequest) {
   }
   const id = typeof body?.id === "string" ? body.id.trim() : "";
   if (!id) return fail(400, "缺少 id", "invalid_payload");
+  // 修复 3：项目标签超上限一律 fail-loud 拒收（未给 projectIds ＝ 不动，不在此拒）。
+  if (projectTagIdsOverLimit(body?.projectIds)) {
+    return fail(400, `项目标签最多 ${MAX_ASSET_PROJECT_TAGS} 个`, "too_many_project_tags");
+  }
 
   try {
     const cards = await listCharacterCards(caller.user.id);

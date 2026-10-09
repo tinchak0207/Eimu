@@ -16,6 +16,7 @@ import {
   normalizeAssetPack,
   saveAssetPack,
 } from "@/lib/asset-pack-store";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,6 +107,20 @@ export async function PUT(req: NextRequest) {
     body = await req.json();
   } catch {
     return errorResponse(400, "请求体不是合法的 JSON。", "invalid_request_error", "invalid_json", traceId);
+  }
+  // 修复 3：项目标签超上限一律 fail-loud 拒收（第 5 个写入口，与 web 四条同闸）。
+  // 放在 normalizeAssetPack 之前：它内部的 normalizeProjectIds 会静默截断丢标签，
+  // 那时才拒已经晚了。判据＝「落盘会被裁掉才拒」（去重后的有效标签数 > 上限），
+  // 非数组（未给 projectIds）不拒——未给＝不动，交给既有语义。
+  // 错误体沿用本档的 OpenAI 风格（{ error: { message, type, code } }），不套 web 端形状。
+  if (body && typeof body === "object" && projectTagIdsOverLimit((body as { projectIds?: unknown }).projectIds)) {
+    return errorResponse(
+      400,
+      `项目标签最多 ${MAX_ASSET_PROJECT_TAGS} 个`,
+      "invalid_request_error",
+      "too_many_project_tags",
+      traceId,
+    );
   }
   const normalized = normalizeAssetPack(body);
   if (!normalized) {

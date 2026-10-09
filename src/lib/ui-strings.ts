@@ -195,6 +195,24 @@ export const UI_STRINGS = {
   "assets.projectTag.empty": "这个项目还没有资产。给资产打上项目标签，它们就会出现在这里。",
   "assets.projectTag.limit": "一个资产最多打 {max} 个项目标签。",
 
+  // ── /history 项目维度（P1 资产总览；真源＝useCreativeProjects ＋ listProjectAssets）──
+  // 零硬编文案契约：/history 新增面一律经此表取字符串（新增 key 后 ui-strings.test 的
+  // 具名抽样不受影响——抽样只钉既有文案，不枚举新面档名）。
+  "history.project.label": "项目",
+  "history.project.all": "全部项目",
+  "history.project.none": "还没有创作项目",
+  "history.project.assetsTitle": "本项目资产",
+  "history.project.assetsSummary": "共 {count} 件资产",
+  "history.project.assetsLoading": "正在读取项目资产…",
+  "history.project.assetsError": "资产加载失败",
+  "history.project.historyEmpty": "这个项目还没有生成记录。",
+  "history.project.historyScanning": "已加载的记录里暂无本项目匹配，正在继续查找…",
+  // 修复 1（2026-10-09 重做）：自动续拉到达页数上限后的唯一出路。
+  // 文案刻意**不带页数断言**：上限计的是「额外汇拉的页数」，自动阶段实际查过的页数
+  // 含首屏＝N+1，写任何具体数字都会漂移成假陈述（复验实测）。按钮可反复点，每次手动画一页。
+  "history.project.historyScanMoreHint": "已查找最近的历史记录，仍没有本项目的内容；可继续查找更早的记录",
+  "history.project.historyScanMore": "继续查找更早的记录",
+
   // ── D1 资产血统溯源抽屉 ──────────────────────────────────
   "lineage.title": "溯源 · {hostKind}",
   "lineage.back": "返回上一级链",

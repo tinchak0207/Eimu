@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Boxes, FileJson, Filter, Image as ImageIcon, Music, Search, Sheet, Star, Video, Workflow, X } from "lucide-react";
+import { Boxes, ChevronDown, FileJson, Filter, Image as ImageIcon, Music, Search, Sheet, Star, Video, Workflow, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { text } from "@/lib/ui-strings";
 import { filterableDeliverableKinds } from "@/lib/deliverable-kind";
 import type { DeliverableKind } from "@/lib/deliverable-kind";
 import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/history-types";
@@ -16,6 +17,13 @@ export interface HistoryFilterBarProps {
   onExportCsv: () => void;
   onExportJson: () => void;
   onChange: (query: HistoryQuery) => void;
+  /**
+   * 项目维度（可选）：项目列表由父层以 useCreativeProjects（模块级单例）注入——
+   * 本档**不自开 fetch**，避免造第二条真源。三者缺一即不渲染项目控件（回归零变化）。
+   */
+  projects?: ReadonlyArray<{ id: string; title: string }>;
+  projectId?: string | null;
+  onProjectChange?: (id: string | null) => void;
   /** 父级定位/伸缩（桌面端工具栏一行内的 order/flex/对齐）。 */
   className?: string;
 }
@@ -53,9 +61,13 @@ function Chip({
   );
 }
 
-export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJson, onChange, className }: HistoryFilterBarProps) {
+export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJson, onChange, projects, projectId, onProjectChange, className }: HistoryFilterBarProps) {
   const [keyword, setKeyword] = useState(query.keyword ?? "");
   const [expanded, setExpanded] = useState(false);
+  // 项目维度：可展开胶囊（项目数可能多，不把整份清单摊进主行）。
+  const [projectOpen, setProjectOpen] = useState(false);
+  const hasProjectDimension = onProjectChange !== undefined;
+  const activeProject = (projects ?? []).find((project) => project.id === projectId) ?? null;
 
   // 外部（比如从 URL 恢复）改了关键词时同步到输入框。
   useEffect(() => {
@@ -189,6 +201,13 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
         <Chip active={!query.starredOnly && !query.withImageOnly && !query.entryKind} onClick={() => onChange({})}>
           全部
         </Chip>
+        {/* 项目维度：与同档 Chip 同族；项目多时收进可展开面板（不摊平主行）。 */}
+        {hasProjectDimension && (
+          <Chip active={Boolean(projectId)} onClick={() => setProjectOpen((value) => !value)}>
+            {projectId ? activeProject?.title ?? text("history.project.label") : text("history.project.all")}
+            <ChevronDown className="h-3.5 w-3.5" />
+          </Chip>
+        )}
         <Chip
           active={Boolean(query.starredOnly)}
           onClick={() => patch({ starredOnly: query.starredOnly ? undefined : true })}
@@ -228,6 +247,39 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
           </button>
         )}
       </div>
+
+      {/* 项目选择面板：移动端在流内展开，桌面端与分面抽屉同款（右对齐悬浮在工具栏下方）。 */}
+      {hasProjectDimension && projectOpen && (
+        <div className="space-y-2 rounded-ios-2xl bg-[rgba(0,0,0,0.025)] p-3 lg:absolute lg:right-0 lg:top-full lg:z-30 lg:mt-2 lg:w-80 lg:lg-sheet">
+          <p className="text-ios-caption1 font-medium text-[rgba(0,0,0,0.58)]">{text("history.project.label")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            <Chip
+              active={!projectId}
+              onClick={() => {
+                onProjectChange?.(null);
+                setProjectOpen(false);
+              }}
+            >
+              {text("history.project.all")}
+            </Chip>
+            {(projects ?? []).map((project) => (
+              <Chip
+                key={project.id}
+                active={projectId === project.id}
+                onClick={() => {
+                  onProjectChange?.(project.id);
+                  setProjectOpen(false);
+                }}
+              >
+                {project.title}
+              </Chip>
+            ))}
+          </div>
+          {(projects ?? []).length === 0 && (
+            <p className="text-ios-caption1 text-[rgba(0,0,0,0.58)]">{text("history.project.none")}</p>
+          )}
+        </div>
+      )}
 
       {/* 分面筛选 */}
       {expanded && facets && (
