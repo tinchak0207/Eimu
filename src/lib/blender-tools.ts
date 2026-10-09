@@ -849,5 +849,6 @@ export const BLENDER_TOOLS: readonly BlenderToolDef[] = [
   blenderExportGltfTool,
 ]
 
-/** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。 */
-export const BLENDER_HARNESS_TOOL_IDS = ["blender_exec", "blender_export_gltf", "blender_render"] as const
+/** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。
+ *  本体已迁到 ./harness-tool-ids.ts（客户端安全），此处 re-export 保持既有 import 者不破。 */
+export { BLENDER_HARNESS_TOOL_IDS } from "./harness-tool-ids"

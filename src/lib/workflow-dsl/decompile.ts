@@ -54,7 +54,7 @@ import {
   type WorkflowDslSource,
   type WorkflowDslStep,
 } from "./schema";
-import { HARNESS_TOOL_IDS } from "../harness-tool-registry";
+import { HARNESS_TOOL_IDS } from "../harness-tool-ids";
 import type { WorkflowNodeMetadata } from "./compile";
 
 /** schema 接受的 kind 值域（schema.ts 的 STEP_KINDS 未导出，此处按契约镜像）。 */

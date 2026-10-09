@@ -1266,5 +1266,6 @@ export const musicGenTool: MusicToolDef = {
 export type { LyriaMusicContract }
 export { buildLyriaStylePrompt }
 
-/** harness-tool-registry.ts 登记用 id 元组（同 BLENDER_HARNESS_TOOL_IDS 范式）。 */
-export const MUSIC_HARNESS_TOOL_IDS = ["music_gen"] as const
+/** harness-tool-registry.ts 登记用 id 元组（同 BLENDER_HARNESS_TOOL_IDS 范式）。
+ *  本体已迁到 ./harness-tool-ids.ts（客户端安全），此处 re-export 保持既有 import 者不破。 */
+export { MUSIC_HARNESS_TOOL_IDS } from "./harness-tool-ids"
