@@ -340,21 +340,31 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 一次闸道存档（GET 同上行端点），仅当 nodes>0 才回填；拉取异步到达时 sessionId
   // 变化 effect（newCanvasSession 清场）已跑完，load 直接覆盖即可。用户抢先铺过
   // 模板（或有计画卡）就不覆盖，避免快照把刚做好的东西冲掉。
+  // F1：闭画布期间 agent 可能晚写入 gateway 快照——本地仍空时短轮询再拉，打开画布可见节点。
   const restoredSnapshotForRef = useRef<string | null>(null);
   useEffect(() => {
     const sid = currentSessionId;
-    if (!sid || restoredSnapshotForRef.current === sid) return;
-    restoredSnapshotForRef.current = sid;
+    if (!sid) return;
+    if (restoredSnapshotForRef.current !== sid) restoredSnapshotForRef.current = sid;
     let cancelled = false;
-    void (async () => {
-      const snapshot = await fetchAgentCanvasSnapshot(sid);
-      if (cancelled || !snapshot) return;
+    const tryRestore = async () => {
       const host = canvasHostRef.current;
-      if (!host || host.nodes.length > 0 || host.plans.length > 0) return;
+      if (!host || host.nodes.length > 0 || host.plans.length > 0) return true;
+      const snapshot = await fetchAgentCanvasSnapshot(sid);
+      if (cancelled || !snapshot) return false;
+      if (!host || host.nodes.length > 0 || host.plans.length > 0) return true;
       host.restoreAgentSnapshot(snapshot);
-    })();
+      return true;
+    };
+    void tryRestore();
+    const timers = [5_000, 12_000, 24_000, 40_000].map((ms) =>
+      window.setTimeout(() => {
+        void tryRestore();
+      }, ms),
+    );
     return () => {
       cancelled = true;
+      for (const t of timers) window.clearTimeout(t);
     };
   }, [currentSessionId]);
   const [progressStartedAt, setProgressStartedAt] = useState<number>();

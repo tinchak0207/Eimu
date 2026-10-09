@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail } from "../lib/client"
+import { ok } from "../lib/client"
 import { gatewayReadSnapshot } from "../lib/canvas-flow"
 import { buildCanvasReceipt } from "../lib/canvas-state-summary"
 
@@ -15,11 +15,13 @@ export default tool({
   },
   async execute(args, context) {
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
-    if (!snap.has_state || snap.state === null) {
-      return fail("no_canvas_state", "画布尚未上报状态，请让用户打开画布", {
-        hint: "画布尚未上报状态，请让用户打开画布后重试。**拿到状态后：改步骤内容或结构一律 `workflow_write`（读 `dsl`→改 `steps`→整份交回）；退回某步旧内容用 `workflow_history` 查 version → `workflow_rollback`。**",
-      })
-    }
-    return ok({ ...buildCanvasReceipt(snap.state, { view: args.view, nodeId: args.node_id }), updated_at: snap.updated_at })
+    // F1：无上报＝空画布，不甩「请打开画布」。规划类可直接 workflow_write 落盘；
+    // 网关会写穿 canvasStates，用户稍后打开画布 hydrate 可见节点。
+    const state = snap.has_state && snap.state !== null ? snap.state : { nodes: [], connections: [] }
+    return ok({
+      ...buildCanvasReceipt(state, { view: args.view, nodeId: args.node_id }),
+      updated_at: snap.updated_at,
+      ...(snap.has_state ? {} : { canvas_empty: true, note: "画布尚未上报（视为空画布）。规划／铺产线请直接 `workflow_write` 整份交 DSL——节点会写入可 hydrate 队列／快照，用户稍后打开画布即可看到；不要只回复「请打开画布」。" }),
+    })
   },
 })

@@ -228,6 +228,8 @@ export interface CanvasOpsResult {
   ok: boolean
   error?: string
   created_node_ids?: string[]
+  /** F1：前端未回执／无 SSE 客户端时，结构 ops 已写穿 canvasStates，可稍后 hydrate。 */
+  queued?: boolean
 }
 
 interface PendingCanvasOps {
@@ -593,8 +595,85 @@ export function checkTemplateGuard(sessionId: string, ops: unknown[], deviation:
   return msg.join("\n")
 }
 
+/**
+ * F1 闭画布可落工作流：把结构 ops（add/update/delete/connect）写穿进 canvasStates。
+ * 前端未开／未回执时节点仍进可 hydrate 持久快照（markDirty → canvasSnapshot）；
+ * 用户稍后打开画布走 fetchAgentCanvasSnapshot 回填。跳过 select/viewport/run_generation。
+ */
+export function applyCanvasOpsToSnapshot(sessionId: string, ops: unknown[]): { created_node_ids: string[] } {
+  const created_node_ids: string[] = []
+  for (const raw of ops) {
+    if (!raw || typeof raw !== "object") continue
+    const op = raw as Record<string, unknown>
+    const type = op.type
+    if (type === "add_node") {
+      const node = op.node
+      if (!node || typeof node !== "object") continue
+      const id = (node as { id?: unknown }).id
+      applyCanvasNodeCreated(sessionId, { node })
+      if (typeof id === "string" && id) created_node_ids.push(id)
+    } else if (type === "update_node") {
+      const id = op.id
+      if (typeof id !== "string" || !id) continue
+      const patch = op.patch && typeof op.patch === "object" ? (op.patch as Record<string, unknown>) : {}
+      const key = canvasKeyFor(sessionId)
+      const snap = canvasStates.get(key)
+      if (!snap || !snap.state || typeof snap.state !== "object") continue
+      const cs = snap.state as PersistableCanvasState
+      const arr = nodesArray(cs)
+      const node = arr.find((n) => n && n.id === id)
+      if (!node) continue
+      if (typeof patch.title === "string") node.title = patch.title
+      if (patch.metadata && typeof patch.metadata === "object") {
+        const md =
+          node.metadata && typeof node.metadata === "object"
+            ? (node.metadata as Record<string, unknown>)
+            : (node.metadata = {})
+        Object.assign(md, patch.metadata as Record<string, unknown>)
+      }
+      if (patch.position !== undefined) node.position = patch.position
+      if (typeof patch.width === "number") node.width = patch.width
+      if (typeof patch.height === "number") node.height = patch.height
+      touchCanvasSnapshot(sessionId, cs)
+    } else if (type === "delete_nodes") {
+      applyCanvasNodeDeleted(sessionId, { node_ids: op.ids })
+    } else if (type === "connect_nodes") {
+      const conns = Array.isArray(op.connections) ? op.connections : []
+      for (const c of conns) {
+        if (!c || typeof c !== "object") continue
+        const from = (c as { fromNodeId?: unknown }).fromNodeId
+        const to = (c as { toNodeId?: unknown }).toNodeId
+        if (typeof from !== "string" || typeof to !== "string") continue
+        applyCanvasNodeConnected(sessionId, {
+          connection: { id: `conn-${from}-${to}`, fromNodeId: from, toNodeId: to },
+        })
+      }
+    } else if (type === "delete_connections") {
+      const ids = Array.isArray(op.ids)
+        ? (op.ids as unknown[]).filter((x): x is string => typeof x === "string")
+        : []
+      if (ids.length === 0) continue
+      const key = canvasKeyFor(sessionId)
+      const snap = canvasStates.get(key)
+      if (!snap || !snap.state || typeof snap.state !== "object") continue
+      const cs = snap.state as PersistableCanvasState
+      if (Array.isArray(cs.connections)) {
+        const idSet = new Set(ids)
+        cs.connections = (cs.connections as Record<string, unknown>[]).filter(
+          (c) => !(c && typeof c.id === "string" && idSet.has(c.id)),
+        )
+        touchCanvasSnapshot(sessionId, cs)
+      }
+    }
+  }
+  const st = resolveSession(sessionId) ?? subagentParentState(sessionId)
+  if (st) markDirty(st)
+  return { created_node_ids }
+}
+
 // 下发一批画布操作：经 SSE 对该 session 发 canvas.ops，挂起等前端回执。
-// 前端暂时断线也照发（事件进 replay buffer，重连即补），靠逾时兜底。
+// 前端暂时断线也照发（事件进 replay buffer，重连即补）。
+// F1：结构 ops 先写穿 canvasStates；无 SSE 客户端立即 queued 成功；逾时亦 queued 成功（不再 OPS_TIMEOUT 甩锅）。
 export function dispatchCanvasOps(
   state: SessionState,
   ops: unknown[],
@@ -602,17 +681,38 @@ export function dispatchCanvasOps(
   timeoutMs: number = CANVAS_OPS_TIMEOUT_MS,
 ): Promise<{ request_id: string; result: CanvasOpsResult }> {
   const request_id = `cop_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-  return new Promise((resolve, reject) => {
+  const offline = applyCanvasOpsToSnapshot(state.sessionId, ops)
+  const queuedResult: CanvasOpsResult = {
+    ok: true,
+    queued: true,
+    ...(offline.created_node_ids.length > 0 ? { created_node_ids: offline.created_node_ids } : {}),
+  }
+  // 无活 SSE 客户端：前端此刻接不到 canvas.ops，直接以写穿快照为准返回（可 hydrate）。
+  if (state.clients.size === 0) {
+    emitToSession(state, "canvas.ops", { request_id, ops, ...(label ? { label } : {}) })
+    return Promise.resolve({ request_id, result: queuedResult })
+  }
+  return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingCanvasOps.delete(request_id)
-      reject(Object.assign(new Error("canvas ops timeout"), { code: "OPS_TIMEOUT", request_id }))
+      // 逾时：快照已写穿，agent 视为成功（queued）；前端稍后打开可 hydrate／apply 队列。
+      resolve({ request_id, result: queuedResult })
     }, timeoutMs)
     pendingCanvasOps.set(request_id, {
       sessionKey: state.sessionId,
       settle: (result) => {
         clearTimeout(timer)
         pendingCanvasOps.delete(request_id)
-        resolve({ request_id, result })
+        // 前端真回执优先；若缺 created_node_ids 则用写穿侧的补上。
+        const merged: CanvasOpsResult = {
+          ...result,
+          created_node_ids: result.created_node_ids?.length
+            ? result.created_node_ids
+            : offline.created_node_ids.length > 0
+              ? offline.created_node_ids
+              : result.created_node_ids,
+        }
+        resolve({ request_id, result: merged })
       },
     })
     emitToSession(state, "canvas.ops", { request_id, ops, ...(label ? { label } : {}) })

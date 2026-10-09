@@ -23,18 +23,12 @@ export default tool({
   },
   async execute(args, context) {
     const outcome = await gatewayDispatchOps(GATEWAY, context.sessionID, args.ops, args.label, args)
-    if (outcome.code === "OPS_TIMEOUT") {
-      return fail(
-        "ops_timeout",
-        "前端 30 秒内未回执画布操作（画布页可能未打开或已断线）。请让用户打开画布工作台后重试。",
-        { request_id: outcome.request_id },
-      )
-    }
-    if (outcome.ok !== true) {
+    if (outcome.ok !== true && outcome.code !== "OPS_TIMEOUT") {
       return fail("canvas_ops_failed", outcome.error || (outcome.status ? `HTTP ${outcome.status}` : "下发失败"))
     }
     const result = outcome.result ?? {}
-    if (result.ok !== true) {
+    const queued = result.queued === true || outcome.code === "OPS_TIMEOUT"
+    if (result.ok !== true && !queued) {
       return fail("ops_rejected", result.error || "前端执行画布操作失败（可能被用户拒绝）", {
         request_id: outcome.request_id,
       })
@@ -42,6 +36,12 @@ export default tool({
     return ok({
       request_id: outcome.request_id,
       created_node_ids: result.created_node_ids ?? [],
+      ...(queued
+        ? {
+            queued: true,
+            note: "画布页未即时回执，操作已写入可 hydrate 快照队列；用户稍后打开画布即可看到。不要只回复「请打开画布」。",
+          }
+        : {}),
     })
   },
 })

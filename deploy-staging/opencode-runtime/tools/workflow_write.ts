@@ -43,12 +43,8 @@ export default tool({
   },
   async execute(args, context) {
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
-    if (!snap.has_state || snap.state === null) {
-      return fail("no_canvas_state", "画布尚未上报状态，请让用户打开画布后再改工作流", {
-        hint: "画布尚未上报状态，请让用户打开画布后重试。**拿到状态后：改步骤内容或结构一律 `workflow_write`（读 `dsl`→改 `steps`→整份交回——`dsl` 已自动覆盖存量画布上的产线节点，每步 `meta._origin_node_id` 原样带回；改提示词改「生成步」（kind=image/video 那一步）的 prompt（生成读的是生成节点自身的 metadata.prompt）；`dsl` 为空才按画布现状自己写一份）。退回某步旧内容用 `workflow_history` 查 version → `workflow_rollback`。**",
-      })
-    }
-    const s = (snap.state ?? {}) as Record<string, unknown>
+    // F1：无画布上报视为空画布，照样编译落盘（网关写穿 canvasStates／queued），禁止甩锅「请打开画布」。
+    const s = (snap.has_state && snap.state ? snap.state : {}) as Record<string, unknown>
     const current = {
       nodes: Array.isArray(s.nodes) ? s.nodes : [],
       connections: Array.isArray(s.connections) ? s.connections : [],
@@ -144,16 +140,13 @@ export default tool({
     }
 
     const outcome = await gatewayDispatchOps(GATEWAY, context.sessionID, ops, args.label)
-    if (outcome.code === "OPS_TIMEOUT") {
-      return fail("ops_timeout", "前端 30 秒内未回执（画布页可能未打开或已断线）。请让用户打开画布工作台后重试。", {
-        request_id: outcome.request_id,
-      })
-    }
-    if (outcome.ok !== true) {
+    if (outcome.ok !== true && outcome.code !== "OPS_TIMEOUT") {
       return fail("canvas_ops_failed", outcome.error || (outcome.status ? `HTTP ${outcome.status}` : "下发失败"))
     }
     const result = outcome.result ?? {}
-    if (result.ok !== true) {
+    // F1：网关逾时／无客户端时仍写穿快照并回 queued；视为成功，勿叫用户「打开画布」。
+    const queued = result.queued === true || outcome.code === "OPS_TIMEOUT"
+    if (result.ok !== true && !queued) {
       return fail("ops_rejected", result.error || "前端执行画布操作失败（可能被用户拒绝）", {
         request_id: outcome.request_id,
       })
@@ -167,6 +160,12 @@ export default tool({
       updated,
       summary,
       report_note: reportNote,
+      ...(queued
+        ? {
+            queued: true,
+            note: "画布页未即时回执，节点／连线已写入可 hydrate 快照队列；用户稍后打开画布即可看到。请向用户说明「已落盘，打开画布可见」，不要只回复「请打开画布」。",
+          }
+        : {}),
     })
   },
 })

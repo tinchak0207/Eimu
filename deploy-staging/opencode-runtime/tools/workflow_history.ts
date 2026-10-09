@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail } from "../lib/client"
+import { ok } from "../lib/client"
 import { gatewayReadSnapshot } from "../lib/canvas-flow"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
@@ -18,12 +18,8 @@ export default tool({
   },
   async execute(args, context) {
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
-    if (!snap.has_state || snap.state === null) {
-      return fail("no_canvas_state", "画布尚未上报状态，请让用户打开画布", {
-        hint: "画布尚未上报状态，请让用户打开画布后重试。**拿到状态后：改步骤内容或结构一律 `workflow_write`（读 `dsl`→改 `steps`→整份交回）；退回某步旧内容用 `workflow_history` 查 version → `workflow_rollback`。** **铺新产线＝有意动作**：交回的 `source.workflow` 不在当前画布 `dsl` 的 ns 里、且会新建节点时（画布已有其它产线），工具先回 `confirm_new_line` 要你确认——确认前画布不动；确为有意（用户要铺这条线／你在规划另一张画布）就带 `confirm_new_line: true` 重交，若它只是会话记忆或别的画布的 source 就不要交回。**回执里的新建/更新颗数（`created_node_ids`）必须如实转述，不得声称「无新建」。**",
-      })
-    }
-    const s = (snap.state ?? {}) as Record<string, unknown>
+    // F1：无上报＝空画布（与 canvas_get_state 对齐），不甩「请打开画布」。
+    const s = (snap.has_state && snap.state ? snap.state : { nodes: [], connections: [] }) as Record<string, unknown>
     let versions = Array.isArray(s.node_versions) ? (s.node_versions as any[]) : []
     const dsl = Array.isArray(s.dsl) ? s.dsl : []
     if (args.node_id) versions = versions.filter((e) => e?.node_id === args.node_id)
