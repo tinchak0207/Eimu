@@ -62,6 +62,8 @@ import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   FLOWMUSIC_MODELS,
+  FlowMusicServiceError,
+  classifyFlowMusicFailure,
   flowMusic2ApiUrl,
   generateFlowMusicTrack,
   isFlowMusic2ApiEnabled,
@@ -147,6 +149,7 @@ export class MusicToolError extends Error {
 
 function toFail(e: unknown): MusicToolResult {
   if (e instanceof MusicToolError) return fail(e.code, e.message)
+  if (e instanceof FlowMusicServiceError) return fail(e.code, e.message)
   return fail("music_tool_error", `music_gen 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
@@ -658,17 +661,19 @@ async function probeFlowMusic(): Promise<MusicChannelProbe> {
     }
   }
   const models = await probeFetch(`${base}/v1/models`, { headers: { Authorization: `Bearer ${key}` } })
+  if ("error" in models || (models.status !== 200 && models.status !== 401 && models.status !== 403)) {
+    return { channel, status: "unreachable", label: "FlowMusic2API 模型探针未通过，无法确认通路状态", evidence: "error" in models ? "GET /v1/models 请求失败（网络或超时）" : `GET /v1/models HTTP ${models.status}` }
+  }
   if (!("error" in models) && (models.status === 401 || models.status === 403)) {
     return { channel, status: "config_disabled", label: "FlowMusic2API 拒绝本机 API key", evidence: `GET /v1/models HTTP ${models.status}` }
   }
-  // 真鉴权探针（2026-10-02 修假绿灯）：/health 200 与 /v1/models 只证明容器活著＋本机 API key 有效，
-  // 不证明上游帐号 session 还能出曲。真 oracle = 用 admin 帐号打 POST /api/tokens/1/refresh-credits：
-  // 唯读、不生成、比 /test 更省（任务 3b）。失败才判 unreachable/needs_human_login；CHAIN_DEAD 仅附加讯号。
+  // 免费账号鉴权探针，不生成；由服务端现有 per-account 锁管理必要的续期。
+  // credits 鉴权成功不证明生成额度或音频交付。CHAIN_DEAD 仅附加信号，可能为恢复前残留。
   const adminUser = (process.env.FLOWMUSIC_ADMIN_USER ?? "").trim()
   const adminPass = (process.env.FLOWMUSIC_ADMIN_PASSWORD ?? "").trim()
   const marker = (process.env.FLOWMUSIC_CHAIN_DEAD_MARKER ?? "").trim() || FLOWMUSIC_CHAIN_DEAD_MARKER_DEFAULT
   const dead = await fsp.readFile(marker, "utf8").catch(() => null)
-  const deadEvidence = dead !== null ? `看门狗标记 ${marker}：${dead.replace(/\s+/g, " ").trim().slice(0, 120)}` : ""
+  const deadEvidence = dead !== null ? "看门狗存在 CHAIN_DEAD 标记（需结合当前鉴权结果判定）" : ""
   if (!adminUser || !adminPass) {
     return {
       channel,
@@ -684,12 +689,15 @@ async function probeFlowMusic(): Promise<MusicChannelProbe> {
     body: JSON.stringify({ username: adminUser, password: adminPass }),
   })
   const token = !("error" in login) && login.status === 200 ? (login.body as { token?: unknown })?.token : null
+  if ("error" in login || login.status >= 500) {
+    return { channel, status: "unreachable", label: "FlowMusic2API admin 服务不可达，无法确认上游登录状态", evidence: "error" in login ? "POST /api/admin/login 请求失败（网络或超时）" : `POST /api/admin/login HTTP ${login.status}` }
+  }
   if (typeof token !== "string" || !token) {
     return {
       channel,
       status: "config_disabled",
       label: "FlowMusic2API admin 登录失败（FLOWMUSIC_ADMIN_USER／PASSWORD 不符）",
-      evidence: `POST /api/admin/login ${"error" in login ? `失败：${login.error}` : `HTTP ${login.status}`}${deadEvidence ? "；" + deadEvidence : ""}`,
+      evidence: `POST /api/admin/login HTTP ${login.status}${deadEvidence ? "；" + deadEvidence : ""}`,
     }
   }
   const credits = await probeFetch(`${base}/api/tokens/1/refresh-credits`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }, 20_000)
@@ -698,24 +706,25 @@ async function probeFlowMusic(): Promise<MusicChannelProbe> {
       channel,
       status: "unreachable",
       label: "FlowMusic2API 真鉴权探针请求失败（服务/网络）",
-      evidence: `POST /api/tokens/1/refresh-credits 失败：${credits.error}${deadEvidence ? "；" + deadEvidence : ""}`,
+      evidence: `POST /api/tokens/1/refresh-credits 请求失败（网络或超时）${deadEvidence ? "；" + deadEvidence : ""}`,
     }
   }
   const cr = (credits.body ?? {}) as { credits?: unknown; success?: unknown }
-  if (credits.status === 200 && typeof cr.credits === "number" && cr.credits >= 0) {
+  if (credits.status === 200 && cr.success !== false && typeof cr.credits === "number" && Number.isFinite(cr.credits) && cr.credits >= 0) {
     return {
       channel,
       status: "ready",
-      label: "FlowMusic2API 可用（Lyria 3.5 整歌，带人声）",
+      label: "FlowMusic2API 账号鉴权通过（生成额度与音频交付尚未验证）",
       evidence: `GET /health 200，/v1/models 通过，真鉴权 POST /api/tokens/1/refresh-credits 200 credits=${cr.credits}${deadEvidence ? "；" + deadEvidence : ""}`,
+      capability: "支持人声整歌；credits 数值不能单独证明订阅方案是否允许生成，需实际生成确认",
     }
   }
-  // refresh-credits 非 200 ⇒ 上游账号会话失效（比 CHAIN_DEAD 更早、更真）；CHAIN_DEAD 只是附加证据。
+  const failure = classifyFlowMusicFailure(credits.status, credits.body)
   return {
     channel,
-    status: "needs_human_login",
-    label: "FlowMusic 账号会话已失效，需要暴君在真实 Chrome 重新登录 flowmusic.app 并导出 cookie 换血",
-    evidence: `真鉴权 POST /api/tokens/1/refresh-credits HTTP ${credits.status}：${JSON.stringify(cr).slice(0, 200)}${deadEvidence ? "；" + deadEvidence : ""}`,
+    status: failure.status,
+    label: failure.label,
+    evidence: `POST /api/tokens/1/refresh-credits HTTP ${credits.status}${failure.upstreamCode ? `，${failure.upstreamCode}` : ""}${deadEvidence ? "；" + deadEvidence : ""}`,
   }
 }
 
