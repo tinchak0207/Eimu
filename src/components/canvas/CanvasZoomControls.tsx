@@ -10,7 +10,7 @@
 // 的指针事件（否则拖滑杆 = 平移画布）。
 
 import { useCallback, useRef, useState } from "react";
-import { ClipboardCheck, Keyboard, LayoutGrid, Map as MapIcon, Maximize, Minus, Plus, ScanLine, Square, type LucideIcon } from "lucide-react";
+import { ClipboardCheck, Keyboard, Layers, LayoutGrid, Map as MapIcon, Maximize, Minus, Plus, ScanLine, Square, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LOD_LABEL, LOD_TARGET_SCALE, type CanvasLod } from "@/lib/canvas/lod";
 
@@ -58,8 +58,8 @@ const tToScale = (t: number) =>
   MIN_SCALE * Math.pow(MAX_SCALE / MIN_SCALE, Math.min(1, Math.max(0, t)));
 
 /** 圆形小按钮统一皮肤（28px 热区 + hover 态）。 */
-/** 语义缩放三层的图示（鸟瞰＝阶段牌组、协作＝单卡、工程＝扫描透析）；文字进 title/aria。 */
-const LOD_ICON: Record<1 | 2 | 3, LucideIcon> = { 1: LayoutGrid, 2: Square, 3: ScanLine };
+/** 语义缩放四层的图示（画布＝多层画布、鸟瞰＝阶段牌组、协作＝单卡、工程＝扫描透析）；文字进 title/aria。 */
+const LOD_ICON: Record<CanvasLod, LucideIcon> = { 0: Layers, 1: LayoutGrid, 2: Square, 3: ScanLine };
 
 const BUTTON_CLASS =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent";
@@ -192,10 +192,10 @@ function CanvasZoomControls({
 
       <div className="my-0.5 h-px w-4 bg-black/10" />
 
-      {/* 语义缩放三段：点击以中心为锚缩到该层目标倍率；高亮当前层。 */}
+      {/* 语义缩放四段：点击以中心为锚缩到该层目标倍率；高亮当前层。 */}
       {lod !== undefined && (
         <>
-          {([1, 2, 3] as const)
+          {([0, 1, 2, 3] as const)
             .filter((level) => level !== 3 || allowEngineering)
             .map((level) => (
               <button

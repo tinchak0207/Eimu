@@ -15,7 +15,7 @@ import type { AgentInteractionMode } from "./agent-chat-client";
 import type { ReferenceImageRole } from "./image-types";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
-import { ASSET_KEY_DELIMITER, GHOST_ASSET_SCOPE, normalizeAssetScope } from "./asset-scope";
+import { ASSET_KEY_DELIMITER, GHOST_ASSET_SCOPE, normalizeAssetScope, normalizeProjectIds } from "./asset-scope";
 import type { AssetScope } from "./asset-scope";
 import { expandEntityTokens, parseEntityTokens, resolveEntityTokenKind } from "./entity-tokens";
 
@@ -158,8 +158,15 @@ export interface CharacterCard {
    * 只给人看（项目资产库面板的归属标记与显式分享入口）——
    * **裁决排除**（同 D1 lineage 先例）：不进 canvas 节点 metadata、
    * 不进 toNodeMetadata、不进 compactMetadataForAgent。
+   * **LEGACY 并存（P1-A）**：单归属语义一行不动；新归属走下面的 `projectIds` 标签。
    */
   scope?: AssetScope;
+  /**
+   * P1-A 项目标签（多归属，纯加法）：与 scope 并存；缺省＝没有标签。
+   * 可见性判定见 asset-scope.resolveAssetScopeVisibility 的新允许路径；
+   * 同 scope 裁决：只给人看与前端筛选，不进 canvas 节点 metadata / agent 压缩白名单。
+   */
+  projectIds?: string[];
   /**
    * 资产批准状态（2026-09-24 决策 23）：**缺省＝已批准**（存量资产零改动、不追溯）。
    * 只有 `pending`/`rejected` 才算未批准，且**只在协作档**（`interaction_mode === "collaborate"`）
@@ -319,6 +326,9 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   //（D3：降格＝把归属不明的项目资产变成人人可用的个人资产）。
   // P0-2：team 作用域同样要落栏（只写 project 会让团队卡在存档端静默丢失归属）。
   const scope = normalizeAssetScope(c.scope);
+  // P1-A 项目标签：走 ./asset-scope 的 normalizeProjectIds 收口（去重 / 只留非空 string /
+  // 截 120 / 上限 20）；**结果为空则省略键**（不写空阵列冒充设定，同 scope 收口范式）。
+  const projectIds = normalizeProjectIds(c.projectIds);
   const approval = normalizeApprovalState(c.approval);
   return {
     id,
@@ -342,6 +352,7 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
       : scope.owner === "project" || scope.owner === "team"
         ? { scope }
         : {}),
+    ...(projectIds.length ? { projectIds } : {}),
     ...(approval ? { approval } : {}),
     createdAt: typeof c.createdAt === "string" ? c.createdAt : now,
     updatedAt: typeof c.updatedAt === "string" ? c.updatedAt : now,

@@ -83,6 +83,8 @@ export async function PATCH(req: NextRequest) {
     const current = cards.find((c) => c.id === id);
     if (!current) return fail(404, "卡不存在", "not_found");
     // 部分更新：未提供的栏位沿用现值；normalizeCharacterCard 统一清洗。
+    // P1-A：`projectIds` 走同一套局部更新语义——patch 未带 → `{...current}` 保留既有标签
+    //（＝「未给＝不动」）；显式给值（含空阵列）才以该值为准。清洗在 normalizeCharacterCard。
     // 值一律经 normalizeCharacterCard 收口清洗，这里的 cast 只过型别关。
     const patch = body as Partial<CharacterCard>;
     const merged: CharacterCard = {

@@ -72,6 +72,11 @@ export interface UseCanvasProjectSyncParams {
   setSavedProjects: Dispatch<SetStateAction<CanvasProjectSummary[]>>;
   setSaveState: Dispatch<SetStateAction<"idle" | "saving" | "saved" | "error" | "offline">>;
   setLoading: Dispatch<SetStateAction<boolean>>;
+  /**
+   * P2-A：进页 mint 出新画布 id 后，把它回报给主 hook 的 `activeCanvasId` state。
+   * 否则「当前打开哪张画布」在首帧会留在 null，画布清单的 isActive 标不中。
+   */
+  setActiveCanvasId: Dispatch<SetStateAction<string | null>>;
 }
 
 /**
@@ -86,7 +91,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     canvas, viewport, backgroundMode, projectTitle, activeCardIds, saveState,
     projectType, currentStep, episodes, styleId, scriptType, narrationVoice,
     sessionId, selectedNodeId, activeCharacterCards,
-    setSavedProjects, setSaveState, setLoading,
+    setSavedProjects, setSaveState, setLoading, setActiveCanvasId,
   } = params;
 
   const createdAtRef = useRef<string | null>(null);
@@ -95,6 +100,9 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   const hydratedRef = useRef(false);
   // 画布是否曾有节点：空专案不存，避免历史清单塞满刚开又关的空壳。
   const everHadNodesRef = useRef(false);
+  // P2-A：flushSave 要照存档 effect 的 offline 闸（不能同步从 render 值读 saveState）。
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
 
   // ─────────────────────── 进页初始化（只抓历史清单，不自动还原画布）
 
@@ -113,12 +121,14 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       projectIdRef.current = `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       createdAtRef.current = new Date().toISOString();
       hydratedRef.current = true;
+      // P2-A：把 minted id 回报给主 hook（activeCanvasId）。
+      setActiveCanvasId(projectIdRef.current);
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [mountedRef, projectIdRef, setLoading, setSaveState, setSavedProjects]);
+  }, [mountedRef, projectIdRef, setLoading, setSaveState, setSavedProjects, setActiveCanvasId]);
 
   // ─────────────────────── 专案储存（debounce 400ms）
 
@@ -183,6 +193,39 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
 
+  // ─────────────────────── P2-A：切画布前的即时存档（flush）
+
+  /**
+   * 把当前画布的待存改动**立刻**落盘（不等 400ms debounce）。
+   *
+   * 动机（本刀最容易翻车的一格）：换聊天/切到旧画布时，`openSavedCanvas` 会把
+   * `projectIdRef` 换成目标画布 id；若此刻还挂着旧画布的 debounce 计时器，它醒来
+   * 就会拿**新 projectId**存出旧画布内容（覆写目标），或拿旧 projectId 把改动吞掉。
+   * 所以切走前必须先把旧画布存完。
+   *
+   * 关键：`buildProject()` 与 `saveCanvasProject()` 都在**呼叫当下同步执行**
+   * （fetch body 当场 stringify），所以呼叫者可以「同步 flush → 立刻改 ref」而不丢：
+   * 存档请求已带旧 projectId 与旧节点。
+   *
+   * 闸门与下方存档 effect 逐条对齐：未 hydrate / offline / 空且从未有节点 → 不存。
+   */
+  const flushSave = useCallback((): Promise<void> => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (!hydratedRef.current) return Promise.resolve();
+    if (saveStateRef.current === "offline") return Promise.resolve();
+    if (canvasRef.current.nodes.length === 0 && !everHadNodesRef.current) return Promise.resolve();
+    const project = buildProject();
+    setSaveState("saving");
+    return saveCanvasProject(project).then((res) => {
+      if (!mountedRef.current) return;
+      if (res.ok) setSaveState("saved");
+      else setSaveState(res.reason === "not_authenticated" ? "offline" : "error");
+    });
+  }, [buildProject, canvasRef, everHadNodesRef, mountedRef, saveTimerRef, setSaveState]);
+
   // ─────────────────────── Wave C1：压缩快照上行（agent 的眼睛）
   // 3s 尾随防抖（第二轮就绪优化刀C，原 300ms）：sessionId 落地（AI 助理开场）
   // 触发的第一帧快照会与空态渲染争抢浏览器连接/网路，实测拖过 emptyAt
@@ -215,5 +258,5 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     return () => window.clearTimeout(t);
   }, [sessionId, canvas.nodes, canvas.connections, canvas.nodeVersions, selectedNodeId, viewport, activeCharacterCards, projectType, currentStep]);
 
-  return { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject };
+  return { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject, flushSave };
 }

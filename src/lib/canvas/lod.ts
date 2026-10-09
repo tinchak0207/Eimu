@@ -1,6 +1,7 @@
 // 语义缩放（Semantic Zoom，2026-09-30）纯函式层：
 //
 //   - nextLod：缩放倍率 k → 渲染抽象层级（LOD），带迟滞，停在门槛附近不来回跳。
+//       LOD 0 画布层（2026-10-09，k 最小）：每个画布一格，跨画布切换。
 //       LOD 1 导演鸟瞰（k 小）：只看 4 个阶段色块＋进度/审核，节点与连线不挂载。
 //       LOD 2 制片协作（预设）：现状不变。
 //       LOD 3 工程透析（k 大）：卡片世界几何不变，卡内叠工程条，可开透析面板。
@@ -8,32 +9,36 @@
 //     只读既有 metadata，不新增任何键（双白名单铁律）；Group 壳不计数。
 //   - summarizeStages：各阶段计数＋世界座标 bbox（供 HUD 点击飞到该阶段）。
 //   - fitStageViewport：bbox → 视口（k 夹在协作层区间，点击即落 LOD 2）。
-//   - lodBlend：k → 连续转场系数（gather 聚合 / xray 透析）。**k 是唯一真源**：
+//   - lodBlend：k → 连续转场系数（gather 聚合 / xray 透析 / board 画布层）。**k 是唯一真源**：
 //       离散 LOD 只管挂载与指针，视觉转场全是 k 的连续函数，可被滚轮「刷」、可逆。
 //   - interpolateViewport：相机飞行插值（世界中心线性 + k 对数插值，缩放速度感均匀）。
-//   - gatherOffsets / hudSlots / engineeringFocusViewport：聚合位移、鸟瞰卡槽位、透析落点。
+//   - gatherOffsets / hudSlots / boardLayout / engineeringFocusViewport：聚合位移、鸟瞰卡槽位、画布格槽位、透析落点。
 
 import { CanvasNodeType, type CanvasNode, type CanvasViewport } from "./types";
 
-export type CanvasLod = 1 | 2 | 3;
+export type CanvasLod = 0 | 1 | 2 | 3;
 export type CanvasStageId = 1 | 2 | 3 | 4;
 
 /**
  * 迟滞门槛：进入与退出分开，中间是缓冲带。
  * 工程层刻意放在 100% 以上（2026-10-01 暴君回馈）：模板/适应视图常落在 80–100%，
  * 工程层若从 80% 起跳，日常协作就会意外长出工程条（黑边）并多挂一堆元素（卡）。
+ * 画布层（2026-10-09）接在鸟瞰之下：进 0.18／出 0.22——比鸟瞰更缩才换层，
+ * 放大回来要越过 0.22 才回鸟瞰，不会在 0.2 附近来回跳。
  */
 export const LOD_THRESHOLDS = {
+  enterBoard: 0.18,
+  exitBoard: 0.22,
   enterOverview: 0.37,
   exitOverview: 0.43,
   enterEngineering: 1.15,
   exitEngineering: 1.05,
 } as const;
 
-/** 缩放控制「鸟瞰/协作/工程」三段按钮的目标倍率。 */
-export const LOD_TARGET_SCALE: Record<CanvasLod, number> = { 1: 0.3, 2: 0.6, 3: 1.5 };
+/** 缩放控制「画布/鸟瞰/协作/工程」四段按钮的目标倍率。 */
+export const LOD_TARGET_SCALE: Record<CanvasLod, number> = { 0: 0.1, 1: 0.3, 2: 0.6, 3: 1.5 };
 
-export const LOD_LABEL: Record<CanvasLod, string> = { 1: "鸟瞰", 2: "协作", 3: "工程" };
+export const LOD_LABEL: Record<CanvasLod, string> = { 0: "画布", 1: "鸟瞰", 2: "协作", 3: "工程" };
 
 export const CANVAS_STAGES: readonly { id: CanvasStageId; code: string; label: string }[] = [
   { id: 1, code: "01", label: "剧本大纲" },
@@ -44,18 +49,53 @@ export const CANVAS_STAGES: readonly { id: CanvasStageId; code: string; label: s
 
 /**
  * k → 下一个 LOD（带迟滞）。
- * 进 LOD1 需 k<0.37、退出需 k>0.43；进 LOD3 需 k>1.15、退出需 k<1.05。
- * allowEngineering=false（窄萤幕）时上限 2。
+ * 进 LOD0 需 k<0.18、退出需 k>0.22；进 LOD1 需 k<0.37、退出需 k>0.43；
+ * 进 LOD3 需 k>1.15、退出需 k<1.05。
+ * allowEngineering=false（窄萤幕）时 cap=2（**上限**语义：仍可下探到 LOD0/1）。
  */
 export function nextLod(prev: CanvasLod, k: number, opts: { allowEngineering?: boolean } = {}): CanvasLod {
   const cap: CanvasLod = opts.allowEngineering === false ? 2 : 3;
   let lod: CanvasLod;
-  if (prev === 1) {
-    lod = k > LOD_THRESHOLDS.exitOverview ? (k > LOD_THRESHOLDS.enterEngineering ? 3 : 2) : 1;
-  } else if (prev === 3) {
-    lod = k < LOD_THRESHOLDS.enterOverview ? 1 : k < LOD_THRESHOLDS.exitEngineering ? 2 : 3;
-  } else {
-    lod = k < LOD_THRESHOLDS.enterOverview ? 1 : k > LOD_THRESHOLDS.enterEngineering ? 3 : 2;
+  switch (prev) {
+    // 由画布层放大：越过 exitBoard 才离层；再往上按各层进入门槛判定。
+    case 0:
+      lod = k > LOD_THRESHOLDS.exitBoard
+        ? k > LOD_THRESHOLDS.enterOverview
+          ? k > LOD_THRESHOLDS.enterEngineering
+            ? 3
+            : 2
+          : 1
+        : 0;
+      break;
+    // 由鸟瞰缩小：低于 enterBoard 即入画布层；放大越过 exitOverview 才离鸟瞰。
+    case 1:
+      lod = k < LOD_THRESHOLDS.enterBoard
+        ? 0
+        : k > LOD_THRESHOLDS.exitOverview
+          ? k > LOD_THRESHOLDS.enterEngineering
+            ? 3
+            : 2
+          : 1;
+      break;
+    case 2:
+      lod = k < LOD_THRESHOLDS.enterBoard
+        ? 0
+        : k < LOD_THRESHOLDS.enterOverview
+          ? 1
+          : k > LOD_THRESHOLDS.enterEngineering
+            ? 3
+            : 2;
+      break;
+    default:
+      // case 3：缩小逐层退出（出工程 1.05→2、进鸟瞰 0.37→1、进画布 0.18→0）。
+      lod = k < LOD_THRESHOLDS.enterBoard
+        ? 0
+        : k < LOD_THRESHOLDS.enterOverview
+          ? 1
+          : k < LOD_THRESHOLDS.exitEngineering
+            ? 2
+            : 3;
+      break;
   }
   return lod > cap ? cap : lod;
 }
@@ -354,6 +394,12 @@ export function easeInOutCubic(t: number): number {
 export const GATHER_RANGE = { start: 0.5, end: 0.36 } as const;
 /** 透析带：k 1.10 → 1.35（LOD3 进入门槛 1.15 落在带内，挂载时工程条已开始滑出）。 */
 export const XRAY_RANGE = { start: 1.1, end: 1.35 } as const;
+/**
+ * 画布带：k 0.26 → 0.13。
+ * 带起点略高于 LOD0 进入门槛（enterBoard 0.18）——换层瞬间 board≈0.43，画布层已成形近半，
+ * 交接不落空（单挂载切换下把「穿空」压到最小）；带终点 0.13 在门槛之下，滚到底＝画布层全成形。
+ */
+export const BOARD_RANGE = { start: 0.26, end: 0.13 } as const;
 
 function logRamp(from: number, to: number, k: number): number {
   // `+ 0`：把 0/负数 产生的 -0 正规化成 +0。
@@ -365,12 +411,17 @@ export function easeInOutSine(t: number): number {
   return -(Math.cos(Math.PI * clamp01(t)) - 1) / 2;
 }
 
-/** k → 转场系数。gather=1 ＝完全鸟瞰；xray=1 ＝完全透析。两带不重叠。 */
-export function lodBlend(k: number): { gather: number; xray: number } {
+/**
+ * k → 转场系数。gather=1 ＝完全鸟瞰；xray=1 ＝完全透析；board=1 ＝完全画布层。
+ * 三带互不重叠（board 在 gather 之下）。**k 仍是唯一真源**：画布层的转场不是新增状态机，
+ * 只是同一函数多一条带——可被滚轮刷、可逆，与 gather/xray 同构。
+ */
+export function lodBlend(k: number): { gather: number; xray: number; board: number } {
   return {
     // 带内线性（对 log k）：平滑交给相机飞行的 easing＋带内减速；smoothstep 会把形变挤在带中段一闪而过。
     gather: logRamp(GATHER_RANGE.start, GATHER_RANGE.end, k),
     xray: logRamp(XRAY_RANGE.start, XRAY_RANGE.end, k),
+    board: logRamp(BOARD_RANGE.start, BOARD_RANGE.end, k),
   };
 }
 
@@ -400,7 +451,11 @@ const BAND_TIME_WEIGHT = 6;
 const WARP_SAMPLES = 96;
 
 function inMorphBand(k: number): boolean {
-  return (k <= GATHER_RANGE.start && k >= GATHER_RANGE.end) || (k >= XRAY_RANGE.start && k <= XRAY_RANGE.end);
+  return (
+    (k <= GATHER_RANGE.start && k >= GATHER_RANGE.end) ||
+    (k >= XRAY_RANGE.start && k <= XRAY_RANGE.end) ||
+    (k <= BOARD_RANGE.start && k >= BOARD_RANGE.end)
+  );
 }
 
 /**
@@ -534,6 +589,71 @@ export function hudLayout(size: { width: number; height: number }, count = CANVA
 /** 鸟瞰卡槽位（萤幕座标）＝ hudLayout(...).slots。 */
 export function hudSlots(size: { width: number; height: number }, count = CANVAS_STAGES.length): HudRect[] {
   return hudLayout(size, count).slots;
+}
+
+/**
+ * 画布层（LOD0）卡尺寸与安全区：与鸟瞰同一套安全区尺度（右让缩放轨、上让标题条），
+ * 但格子数不固定（1~N），故卡尺寸自适应：先试「一格一行」（最多列），放不下再折列。
+ * 只给布局同款范式，不另造 CSS 布局体系。
+ */
+export const BOARD_CARD = {
+  maxWidth: 300,
+  ratio: 1.18,
+  minWidth: 150,
+  minHeight: 176,
+  gap: 24,
+  leftInset: 28,
+  rightInset: 88,
+  topInset: 64,
+  headerSpace: 44,
+} as const;
+
+/** N 个画布格 → 槽位：优先一行铺开，超宽就折列；都塞不下退回单列（窄屏由容器滚动接管）。 */
+export function boardLayout(size: { width: number; height: number }, count: number): { mode: HudLayoutMode; slots: HudRect[] } {
+  const { gap, leftInset, rightInset, topInset, headerSpace, maxWidth, ratio, minWidth, minHeight } = BOARD_CARD;
+  const areaWidth = Math.max(0, size.width - leftInset - rightInset);
+  const areaHeight = Math.max(0, size.height - topInset - headerSpace);
+  const n = Math.max(1, count);
+  let cols = n;
+  let rows = 1;
+  let width = 0;
+  let height = 0;
+  for (let c = n; c >= 1; c--) {
+    const r = Math.ceil(n / c);
+    const cw = (areaWidth - gap * (c - 1)) / c;
+    const ch = (areaHeight - gap * (r - 1)) / r;
+    let w = Math.min(maxWidth, cw);
+    let h = w * ratio;
+    if (h > ch) {
+      h = ch;
+      w = h / ratio;
+    }
+    if (w < minWidth || h < minHeight) continue;
+    cols = c;
+    rows = r;
+    width = w;
+    height = h;
+    break;
+  }
+  if (width <= 0) {
+    cols = 1;
+    rows = n;
+    width = Math.max(minWidth, Math.min(maxWidth, areaWidth));
+    height = minHeight;
+  }
+  const blockWidth = width * cols + gap * (cols - 1);
+  const blockHeight = height * rows + gap * (rows - 1);
+  const left = leftInset + Math.max(0, (areaWidth - blockWidth) / 2);
+  const top = topInset + headerSpace + Math.max(0, (areaHeight - blockHeight) / 2);
+  return {
+    mode: cols >= n ? "row" : "grid",
+    slots: Array.from({ length: n }, (_, i) => ({
+      x: left + (i % cols) * (width + gap),
+      y: top + Math.floor(i / cols) * (height + gap),
+      width,
+      height,
+    })),
+  };
 }
 
 /**

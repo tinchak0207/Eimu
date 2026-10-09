@@ -93,6 +93,7 @@ import {
 import { useCameraFlight } from "./embed/use-camera-flight";
 import type { InspectInput } from "./node-view/node-inspect";
 import { CanvasStageOverview } from "./CanvasStageOverview";
+import { CanvasBoardOverview } from "./CanvasBoardOverview";
 import { CanvasEngineeringPanel } from "./CanvasEngineeringPanel";
 
 export interface CanvasEmbedProps {
@@ -211,8 +212,8 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     if (next === lodRef.current) return;
     lodRef.current = next;
     setLod(next);
-    // 鸟瞰层不挂载节点：内嵌 prompt 面板跟著收掉。
-    if (next === 1) setPromptPanelNodeId(null);
+    // 鸟瞰／画布层不挂载节点：内嵌 prompt 面板跟著收掉。
+    if (next <= 1) setPromptPanelNodeId(null);
   }, [canvas.viewport.k, allowEngineering]);
   const stageSummaries = useMemo(() => summarizeStages(canvas.nodes), [canvas.nodes]);
   const gatherOffsetMap = useMemo(() => gatherOffsets(canvas.nodes, stageSummaries), [canvas.nodes, stageSummaries]);
@@ -1192,7 +1193,9 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           )}
         </InfiniteCanvas>
 
-        {hasNodes && (
+        {/* 语义缩放上层：LOD1-3 阶段层 / LOD0 画布层。同一时刻只挂一层（避免两层叠影）；
+            显隐由既有 lod 状态机驱动（lod = nextLod(k)，k 是唯一真源），不新增第二套状态机。 */}
+        {hasNodes && lod >= 1 && (
           <CanvasStageOverview
             stages={stageSummaries}
             gather={gatherRaw}
@@ -1207,16 +1210,33 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           />
         )}
 
-        {canvas.nodes.length > 1 && expanded && minimapOpen && (
-          <CanvasMiniMap
-            nodes={canvas.nodes}
-            viewport={canvas.viewport}
-            viewportSize={viewportSize}
-            onJumpTo={(world) => canvas.centerOn(world, viewportSize.width, viewportSize.height)}
-            onClose={() => setMinimapOpen(false)}
-            className="bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] right-[calc(1rem+env(safe-area-inset-right,0px))]"
+        {lod === 0 && (
+          <CanvasBoardOverview
+            boards={canvas.canvasList ?? []}
+            board={blend.board}
+            activeNodes={canvas.nodes}
+            activeCanvasId={canvas.activeCanvasId ?? null}
+            size={viewportSize}
+            interactive={lod === 0}
+            wide={allowEngineering}
+            reduceMotion={reduceMotion}
+            onSwitchCanvas={canvas.switchCanvas}
           />
         )}
+
+        {/* 右下角小框：常驻（收起＝画布名胶囊／展开＝小地图＋画布名下拉切换）。 */}
+        <CanvasMiniMap
+          nodes={canvas.nodes}
+          viewport={canvas.viewport}
+          viewportSize={viewportSize}
+          onJumpTo={(world) => canvas.centerOn(world, viewportSize.width, viewportSize.height)}
+          canvases={canvas.canvasList ?? []}
+          activeCanvasId={canvas.activeCanvasId ?? null}
+          onSwitchCanvas={canvas.switchCanvas}
+          open={minimapOpen}
+          onOpenChange={setMinimapOpen}
+          className="bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] right-[calc(1rem+env(safe-area-inset-right,0px))]"
+        />
 
         {/* A9：缩放控件（全屏态；minimap 上方） */}
         {expanded && (

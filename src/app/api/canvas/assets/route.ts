@@ -60,6 +60,16 @@ export async function PUT(req: NextRequest) {
   ) {
     return fail(400, "图片素材超过 2MB 上限，请压缩后再存", "image_too_large");
   }
+  // P1-A 项目标签语义（纯加法）：**未给 projectIds ＝ 不动**（整包 PUT 不得静默清空既有标签）；
+  // 显式给值（含空阵列＝明确清除）才以该值为准。范式＝character-cards PATCH 的局部更新合并；
+  // 清洗仍由 normalizeAsset 收口，本路由不重复实作白名单。读取端原样回传。
+  if (body && typeof body === "object" && body.projectIds === undefined) {
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (id) {
+      const existing = (await listCanvasAssets(caller.user.id)).find((a) => a.id === id);
+      if (existing?.projectIds?.length) body = { ...body, projectIds: existing.projectIds };
+    }
+  }
   const normalized = normalizeAsset(body);
   if (!normalized) {
     return fail(400, "素材数据无效（需要 id / kind / title，image 素材需要合法 imageUrl）", "invalid_payload");

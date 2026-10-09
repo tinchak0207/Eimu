@@ -15,13 +15,16 @@ import { Loader2, RefreshCw, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { text, type UiStringKey } from "@/lib/ui-strings";
 import {
+  assignAssetProjectTags,
   assignAssetScope,
   listProjectAssets,
   mountProjectAsset,
   shareProjectAsset,
   unmountProjectAsset,
 } from "@/lib/project-assets-client";
+import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, normalizeProjectIds } from "@/lib/asset-scope";
 import type { AssetKind, AssetLibraryItem, AssetVisibility } from "@/lib/asset-scope";
+import { useCreativeProjects } from "@/hooks/use-creative-projects";
 
 export interface ProjectAssetLibraryPanelProps {
   open: boolean;
@@ -85,8 +88,19 @@ export function ProjectAssetLibraryPanel({
   const [busy, setBusy] = useState<BusyKey>(null);
   const [shareTarget, setShareTarget] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  // P1-B：标签目标项目（默认跟随全局 activeProjectId）＋「只看本项目标签」开关。
+  const [tagProjectId, setTagProjectId] = useState<string | null>(null);
+  const [filterByTag, setFilterByTag] = useState(false);
+  const tagSelectionTouched = useRef(false);
   const debouncedQuery = useDebouncedValue(query);
   const requestSeq = useRef(0);
+  const { projects, activeProjectId } = useCreativeProjects();
+
+  // 默认选中 activeProjectId（用户手动改过就不再回填）。
+  useEffect(() => {
+    if (tagSelectionTouched.current) return;
+    if (activeProjectId) setTagProjectId(activeProjectId);
+  }, [activeProjectId]);
 
   const load = useCallback(async () => {
     if (!projectId) {
@@ -203,10 +217,60 @@ export function ProjectAssetLibraryPanel({
     [projectId, shareTarget, load],
   );
 
-  const summary = useMemo(() => {
+  const toggleProjectTag = useCallback(
+    async (item: AssetLibraryItem) => {
+      if (!tagProjectId) return;
+      const current = normalizeProjectIds(item.projectIds);
+      const tagged = current.includes(tagProjectId);
+      if (!tagged && current.length >= MAX_ASSET_PROJECT_TAGS) {
+        setNotice(text("assets.projectTag.limit", { max: MAX_ASSET_PROJECT_TAGS }));
+        return;
+      }
+      const next = tagged ? current.filter((id) => id !== tagProjectId) : [...current, tagProjectId];
+      const key = `${item.assetKind}:${item.assetId}`;
+      setBusy(key);
+      const res = await assignAssetProjectTags({
+        assetKind: item.assetKind,
+        assetId: item.assetId,
+        projectIds: next,
+      });
+      setBusy(null);
+      // CanvasClientResult.ok 不是判别联合：ok 之后 data 仍可能 undefined，一起挡。
+      if (!res.ok || !res.data) {
+        setNotice(res.message ?? text("assets.error.action"));
+        return;
+      }
+      // 乐观更新本地列表该项的 projectIds——不打整表刷新（其余栏位与列表顺序不动）。
+      const savedProjectIds = res.data.projectIds;
+      setItems(
+        (prev) =>
+          prev?.map((entry) =>
+            entry.assetKind === item.assetKind && entry.assetId === item.assetId
+              ? { ...entry, projectIds: savedProjectIds }
+              : entry,
+          ) ?? prev,
+      );
+      setNotice(null);
+    },
+    [tagProjectId],
+  );
+
+  /**
+   * 「只看本项目标签」＝客户端过滤（服务端列表已过可见性/检索/挂用；标签是展示层筛选）。
+   *
+   * 走 src/lib/asset-scope.ts 的 filterByProjectTag（**client-safe**：该档纯逻辑无 IO、
+   * 不 import node:crypto 等伺服器专属模块，可从 "use client" 元件安全 import）。
+   * 语义：projectId 空 / 空白 → 原样回传；否则 projectIds 含它才命中。单一实作，不另立规则。
+   */
+  const visibleItems = useMemo(() => {
     const list = items ?? [];
-    return { total: list.length, mounted: list.filter((i) => i.mounted).length };
-  }, [items]);
+    if (!filterByTag) return list;
+    return filterByProjectTag(list, tagProjectId);
+  }, [items, filterByTag, tagProjectId]);
+
+  const summary = useMemo(() => {
+    return { total: visibleItems.length, mounted: visibleItems.filter((i) => i.mounted).length };
+  }, [visibleItems]);
 
   if (!open) return null;
 
@@ -242,6 +306,48 @@ export function ProjectAssetLibraryPanel({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
+        <label className="flex min-w-0 flex-1 items-center gap-1 text-ios-caption2 text-foreground/45">
+          <span className="shrink-0">{text("assets.projectTag.label")}</span>
+          <select
+            value={tagProjectId ?? ""}
+            onChange={(e) => {
+              tagSelectionTouched.current = true;
+              const next = e.target.value || null;
+              setTagProjectId(next);
+              if (!next) setFilterByTag(false); // 没选项目 = 没有「本项目」可看，开关一并收起
+            }}
+            className="min-w-0 flex-1 cursor-pointer rounded-lg bg-black/5 px-2 py-1 text-ios-caption1 text-foreground outline-none"
+          >
+            <option value="">{text("assets.projectTag.none")}</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!tagProjectId}
+          onClick={() => setFilterByTag((v) => !v)}
+          aria-pressed={filterByTag}
+          className={cn(
+            "shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption2 font-medium disabled:opacity-40",
+            filterByTag && tagProjectId
+              ? "bg-ios-blue/10 text-[#007AFF]"
+              : "bg-black/5 text-muted-foreground hover:bg-black/10",
+          )}
+        >
+          {text("assets.projectTag.filterOnly")}
+        </button>
+      </div>
+      {!tagProjectId && (
+        <p className="border-b px-3 py-1 text-ios-caption2 text-foreground/45">
+          {text("assets.projectTag.filterHint")}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
         <label className="flex min-w-0 flex-1 items-center gap-1 rounded-lg bg-black/5 px-2 py-1">
@@ -300,9 +406,13 @@ export function ProjectAssetLibraryPanel({
           <p className="border-b px-3.5 py-1 text-ios-caption2 text-foreground/45">
             {text("assets.summary", { total: summary.total, mounted: summary.mounted })}
           </p>
-          {items?.map((item) => {
+          {visibleItems.length === 0 && (
+            <p className="px-3.5 py-3 text-ios-caption1 text-foreground/45">{text("assets.projectTag.empty")}</p>
+          )}
+          {visibleItems.map((item) => {
             const key = `${item.assetKind}:${item.assetId}`;
             const isOwnProjectAsset = item.visibility === "in-project";
+            const tagged = tagProjectId ? normalizeProjectIds(item.projectIds).includes(tagProjectId) : false;
             return (
               <div key={key} className="border-b px-3 py-2.5 last:border-b-0">
                 <div className="flex items-start gap-2">
@@ -335,6 +445,20 @@ export function ProjectAssetLibraryPanel({
                   </button>
                 </div>
                 <div className="mt-1.5 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy === key || !tagProjectId}
+                    onClick={() => void toggleProjectTag(item)}
+                    aria-pressed={tagged}
+                    className={cn(
+                      "shrink-0 cursor-pointer rounded-lg px-1.5 py-0.5 text-ios-caption2 font-medium disabled:opacity-40",
+                      tagged
+                        ? "bg-ios-blue/10 text-[#007AFF] hover:bg-ios-blue/20"
+                        : "bg-black/5 text-muted-foreground hover:bg-black/10",
+                    )}
+                  >
+                    {tagged ? text("assets.projectTag.remove") : text("assets.projectTag.add")}
+                  </button>
                   <button
                     type="button"
                     disabled={busy === key}

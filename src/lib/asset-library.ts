@@ -115,6 +115,8 @@ export interface OwnedAssetRef {
   id: string;
   kind: AssetKind;
   scope?: AssetScope;
+  /** P1-A 项目标签（多归属）：喂给作用域裁决的新允许路径（缺省＝没有标签）。 */
+  projectIds?: string[];
   ownerUserId: number;
 }
 
@@ -129,10 +131,26 @@ export async function findOwnedAsset(input: {
 }): Promise<OwnedAssetRef | null> {
   if (input.assetKind === "pack") {
     const pack = (await listAssetPacks(input.userId)).find((p) => p.id === input.assetId);
-    return pack ? { id: pack.id, kind: "pack", ...(pack.scope ? { scope: pack.scope } : {}), ownerUserId: input.userId } : null;
+    return pack
+      ? {
+          id: pack.id,
+          kind: "pack",
+          ...(pack.scope ? { scope: pack.scope } : {}),
+          ...(pack.projectIds?.length ? { projectIds: pack.projectIds } : {}),
+          ownerUserId: input.userId,
+        }
+      : null;
   }
   const card = (await listCharacterCards(input.userId)).find((c) => c.id === input.assetId);
-  return card ? { id: card.id, kind: "card", ...(card.scope ? { scope: card.scope } : {}), ownerUserId: input.userId } : null;
+  return card
+    ? {
+        id: card.id,
+        kind: "card",
+        ...(card.scope ? { scope: card.scope } : {}),
+        ...(card.projectIds?.length ? { projectIds: card.projectIds } : {}),
+        ownerUserId: input.userId,
+      }
+    : null;
 }
 
 /** 当前项目已挂用的资产键（UI badge 用）。 */
@@ -146,7 +164,10 @@ export function visibilityOf(
   asset: OwnedAssetRef,
   ctx: AssetUseContext,
 ): AssetVisibility | null {
-  return resolveAssetVisibility({ id: asset.id, kind: asset.kind, scope: asset.scope, ownerUserId: asset.ownerUserId }, ctx);
+  return resolveAssetVisibility(
+    { id: asset.id, kind: asset.kind, scope: asset.scope, projectIds: asset.projectIds, ownerUserId: asset.ownerUserId },
+    ctx,
+  );
 }
 
 // ─────────────────────────────────────────── 使用/注入路径的裁决（REQ-B2）
@@ -170,7 +191,7 @@ export async function isAssetUsable(input: {
   if (!owned) return false;
   const shares = await listAssetShares(input.userId);
   return canUseAsset(
-    { id: owned.id, kind: owned.kind, scope: owned.scope, ownerUserId: owned.ownerUserId },
+    { id: owned.id, kind: owned.kind, scope: owned.scope, projectIds: owned.projectIds, ownerUserId: owned.ownerUserId },
     { viewerUserId: input.userId, projectId: input.projectId, shares },
   );
 }
@@ -207,7 +228,10 @@ export async function filterCardIdsForProject(input: {
   return input.cardIds.filter((id) => {
     const card = byId.get(id);
     if (!card) return true; // 查不到＝无法判定，不猜（不因此静默丢卡）
-    return canUseAsset({ id: card.id, kind: "card", scope: card.scope, ownerUserId: input.userId }, ctx);
+    return canUseAsset(
+      { id: card.id, kind: "card", scope: card.scope, projectIds: card.projectIds, ownerUserId: input.userId },
+      ctx,
+    );
   });
 }
 

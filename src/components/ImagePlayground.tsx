@@ -210,7 +210,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 保持稳定身份：否则 activeProjectId 一变，AgentChatSurface 的 onSessionChange
   // effect（[sessionId, onSessionChange]）会重跑，把「切项目」误当「开新会话」
   // 而把当前会话搬进项目。
-  const { activeProjectId, attachChat, findProjectIdBySession } = useCreativeProjects();
+  const { activeProjectId, attachChat, attachCanvas, findProjectIdBySession, findChatBySession } = useCreativeProjects();
   const projectAttachRef = useRef({ activeProjectId, attachChat, findProjectIdBySession });
   projectAttachRef.current = { activeProjectId, attachChat, findProjectIdBySession };
 
@@ -250,7 +250,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     // linkSessionToActiveProject。
     linkSessionToActiveProject(nextSessionId);
   }, [linkSessionToActiveProject]);
-  const canvasHost = useCanvasChat(currentSessionId);
+  // P2-A：把项目上下文注入画布 hook —— 换聊天时打开该聊天自己的画布（没有才新建）。
+  // activeProjectId/attachCanvas/findProjectIdBySession 都是 store 现成动作，useCanvasChat
+  // 内部存在 ref 里，此处传新对象不触发其 effect 重跑。
+  const canvasHost = useCanvasChat(currentSessionId, {
+    activeProjectId,
+    attachCanvas,
+    findProjectIdBySession,
+    findChatBySession,
+  });
   canvasHostRef.current = canvasHost;
 
   // 双向同步方向A：画布选中 workflow 节点 → chat 切到该节点所属会话。

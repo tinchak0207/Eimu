@@ -214,3 +214,50 @@ export async function assignAssetScope(input: {
   if (saved.ok) invalidateEntityCardIndex();
   return saved;
 }
+
+/**
+ * 设定资产的项目标签（projectIds 整包覆盖）。
+ *
+ * 与 assignAssetScope 逐行同款：走**既有**写入端点（包：PUT /api/assets 整包覆盖；
+ * 卡：POST /api/character-cards upsert by id），不另开端点、不改资产格式
+ * （项目标签只是记录上的一个可选栏位）。读改写：先取回该资产当前记录，
+ * **只替换 projectIds 键**，其余栏位原样回写——绝不夹带第二处改动。
+ */
+export async function assignAssetProjectTags(input: {
+  assetKind: AssetKind;
+  assetId: string;
+  projectIds: string[];
+}): Promise<CanvasClientResult<{ projectIds: string[] }>> {
+  if (input.assetKind === "pack") {
+    const listed = await request<AssetPack[]>("/api/assets", { method: "GET" }, (json) => {
+      const packs = (json as { packs?: unknown })?.packs;
+      return Array.isArray(packs) ? (packs as AssetPack[]) : undefined;
+    });
+    if (!listed.ok) return { ok: false, reason: listed.reason, message: listed.message };
+    const pack = (listed.data ?? []).find((p) => p.id === input.assetId);
+    if (!pack) return { ok: false, reason: "server", message: "资产包不存在" };
+    const saved = await request<true>(
+      "/api/assets",
+      { method: "PUT", body: JSON.stringify({ ...pack, projectIds: input.projectIds }) },
+      (json) => ((json as { success?: unknown })?.success === true ? true : undefined),
+    );
+    if (!saved.ok) return { ok: false, reason: saved.reason, message: saved.message };
+    return { ok: true, data: { projectIds: input.projectIds } };
+  }
+  const listed = await request<CharacterCard[]>("/api/character-cards", { method: "GET" }, (json) => {
+    const cards = (json as { cards?: unknown })?.cards;
+    return Array.isArray(cards) ? (cards as CharacterCard[]) : undefined;
+  });
+  if (!listed.ok) return { ok: false, reason: listed.reason, message: listed.message };
+  const card = (listed.data ?? []).find((c) => c.id === input.assetId);
+  if (!card) return { ok: false, reason: "server", message: "资产卡不存在" };
+  const saved = await request<true>(
+    "/api/character-cards",
+    { method: "POST", body: JSON.stringify({ ...card, projectIds: input.projectIds }) },
+    (json) => ((json as { success?: unknown })?.success === true ? true : undefined),
+  );
+  if (!saved.ok) return { ok: false, reason: saved.reason, message: saved.message };
+  // 同 assignAssetScope：改的是卡的栏位（卡库内容变了），不经 character-card-client，成功才发号。
+  invalidateEntityCardIndex();
+  return { ok: true, data: { projectIds: input.projectIds } };
+}

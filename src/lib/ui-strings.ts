@@ -185,6 +185,15 @@ export const UI_STRINGS = {
   "assets.visibility.inProject": "本项目",
   "assets.visibility.inTeam": "本团队",
   "assets.visibility.sharedIn": "分享进来",
+  // P1-B：项目标签（打标 / 按项目看）。既有四动作文案一字不动。
+  "assets.projectTag.label": "标签项目",
+  "assets.projectTag.none": "未选择项目",
+  "assets.projectTag.filterOnly": "只看本项目标签",
+  "assets.projectTag.filterHint": "先在上方选一个项目，才能只看它的标签。",
+  "assets.projectTag.add": "打上本项目标签",
+  "assets.projectTag.remove": "移除本项目标签",
+  "assets.projectTag.empty": "这个项目还没有资产。给资产打上项目标签，它们就会出现在这里。",
+  "assets.projectTag.limit": "一个资产最多打 {max} 个项目标签。",
 
   // ── D1 资产血统溯源抽屉 ──────────────────────────────────
   "lineage.title": "溯源 · {hostKind}",

@@ -35,6 +35,10 @@ export interface ProjectChatView {
   /** ms epoch：网关 last_activity_at 优先，否则 Date.parse(chat.updatedAt)。 */
   updatedAt: number;
   canvasCount: number;
+  /** 该聊天拥有的画布 id（归属真源＝项目档 chats[].canvasIds，**直传不做变换**）。 */
+  canvasIds: string[];
+  /** 该聊天的主画布（项目档原值直传；无则 undefined）。 */
+  primaryCanvasId?: string;
   archived: boolean;
 }
 
@@ -164,6 +168,9 @@ function chatToView(chat: ProjectChat, session: AgentSessionSummary | undefined)
     status: session?.status,
     updatedAt: resolveChatUpdatedAt(chat, session),
     canvasCount: Array.isArray(chat.canvasIds) ? chat.canvasIds.length : 0,
+    // P2-C：直传原始栏位（不做任何派生）——useCanvasChat 的补登/切画布要读它。
+    canvasIds: Array.isArray(chat.canvasIds) ? chat.canvasIds : [],
+    ...(chat.primaryCanvasId ? { primaryCanvasId: chat.primaryCanvasId } : {}),
     archived: Boolean(chat.archivedAt),
   };
 }
@@ -189,6 +196,8 @@ function sessionToView(session: AgentSessionSummary): ProjectChatView {
     status: session.status,
     updatedAt: sessionUpdatedAt(session),
     canvasCount: 0,
+    // 未分类会话：站点侧没有任何项目挂过，没有画布归属。
+    canvasIds: [],
     archived: false,
   };
 }
@@ -250,13 +259,31 @@ function upsertProjectInList(list: CreativeProject[], project: CreativeProject):
   return next;
 }
 
-function findChatBySession(sessionId: string): { project: CreativeProject; chat: ProjectChat } | null {
+function findChatEntryBySession(sessionId: string): { project: CreativeProject; chat: ProjectChat } | null {
   if (!sessionId) return null;
   for (const project of raw.creativeProjects) {
     const chat = project.chats.find((item) => item.sessionId === sessionId);
     if (chat) return { project, chat };
   }
   return null;
+}
+
+/**
+ * 会话 → 该聊天条目的画布归属（canvasIds + primaryCanvasId）。
+ * **直传项目档原值，不做派生**（归属真源＝项目档 chats[]，见 types.ts 档头）。
+ * 未归属会话 → null。供 `useCanvasChat` 的第二参注入——避免它绕过共享 store
+ * 直读原始项目档（`listProjects()`）而多一轮 `GET /api/projects`。
+ */
+export function findChatBySession(
+  sessionId: string,
+): { canvasIds: string[]; primaryCanvasId?: string } | null {
+  const entry = findChatEntryBySession(sessionId);
+  if (!entry) return null;
+  const { chat } = entry;
+  return {
+    canvasIds: Array.isArray(chat.canvasIds) ? chat.canvasIds : [],
+    ...(chat.primaryCanvasId ? { primaryCanvasId: chat.primaryCanvasId } : {}),
+  };
 }
 
 /**
@@ -366,7 +393,7 @@ export async function attachCanvasAction(
   canvasId: string,
   title?: string,
 ): Promise<void> {
-  const existing = findChatBySession(sessionId);
+  const existing = findChatEntryBySession(sessionId);
   const canvasIds = Array.from(new Set([...(existing?.chat.canvasIds ?? []), canvasId]));
   const chat: {
     sessionId: string;
@@ -431,6 +458,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
   attachCanvas(projectId: string, sessionId: string, canvasId: string, title?: string): Promise<void>;
   removeChat(projectId: string, sessionId: string): Promise<void>;
   findProjectIdBySession(sessionId: string): string | null;
+  findChatBySession(sessionId: string): { canvasIds: string[]; primaryCanvasId?: string } | null;
 } {
   const state = useSyncExternalStore(
     subscribeCreativeProjects,
@@ -459,6 +487,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
   );
   const removeChat = useCallback((projectId: string, sessionId: string) => removeChatAction(projectId, sessionId), []);
   const findProject = useCallback((sessionId: string) => findProjectIdBySession(sessionId), []);
+  const findChat = useCallback((sessionId: string) => findChatBySession(sessionId), []);
 
   return useMemo(
     () => ({
@@ -472,6 +501,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
       attachCanvas,
       removeChat,
       findProjectIdBySession: findProject,
+      findChatBySession: findChat,
     }),
     [
       state,
@@ -484,6 +514,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
       attachCanvas,
       removeChat,
       findProject,
+      findChat,
     ],
   );
 }

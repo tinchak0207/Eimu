@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
-import { GHOST_ASSET_SCOPE, isUsableAssetId, MAX_ASSET_ID_LENGTH, normalizeAssetScope } from "./asset-scope";
+import { GHOST_ASSET_SCOPE, isUsableAssetId, MAX_ASSET_ID_LENGTH, normalizeAssetScope, normalizeProjectIds } from "./asset-scope";
 import type { AssetScope } from "./asset-scope";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
@@ -101,6 +101,14 @@ export interface AssetPack {
    * 不进 compactMetadataForAgent（agent 不读资产归属）。
    */
   scope?: AssetScope;
+  /**
+   * P1-A 项目标签（多归属，纯加法）：与 scope 并存；缺省＝没有标签。
+   * **语义**：给资产打「属于哪些创作项目」的标签（天然多归属），可见性判定见
+   * asset-scope.resolveAssetScopeVisibility 的新允许路径。
+   * 只给人看与前端筛选——不进 canvas 节点 metadata、不进 toNodeMetadata、
+   * 不进 compactMetadataForAgent（同 scope 裁决）。
+   */
+  projectIds?: string[];
   /**
    * REQ-D1 血统（与 CharacterCard 同形、同一清洗收口）：REQ-B2b 的
    * 「包挂用＝在目标项目记本地包记录＋lineage 指向来源包」写入这一栏。
@@ -310,6 +318,9 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
   // teamId）写回 GHOST_ASSET_SCOPE 而非降格成 personal**——降格＝把归属不明的项目资产变成
   // 人人可用的个人资产（D3）。P0-2：team 作用域同样要落栏（否则团队包在存档端静默丢归属）。
   const scope = normalizeAssetScope(p.scope);
+  // P1-A 项目标签：走 ./asset-scope 的 normalizeProjectIds 收口（去重 / 只留非空 string /
+  // 截 120 / 上限 20）；**结果为空则省略键**（不写空阵列冒充设定，同 tags/scope 的收口范式）。
+  const projectIds = normalizeProjectIds(p.projectIds);
   // REQ-D1 血统栏位复用 ./lineage 的清洗收口（非法条目丢、上限截尾并显式标记）；
   // 与 character-cards.normalizeCharacterCard 同款，宿主不同、白名单同一把尺。
   const lineageRaw = Array.isArray(p.lineage) ? normalizeLineageLinks(p.lineage) : null;
@@ -321,6 +332,7 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
     ...(p.active === true ? { active: true } : {}),
     tags,
     ...(note ? { note } : {}),
+    ...(projectIds.length ? { projectIds } : {}),
     ...(scope === null
       ? { scope: { ...GHOST_ASSET_SCOPE } }
       : scope.owner === "project" || scope.owner === "team"

@@ -14,6 +14,13 @@ export type CanvasClientFailure =
   | "not_authenticated"
   /** 团队闸拒建共享画布（服务端 code=member_canvas_forbidden）：保留服务端团队文案，不降级成未登入。 */
   | "team_canvas_forbidden"
+  /**
+   * 服务器**明确**说这张专案不存在（P2-E）。
+   * 只有 `HTTP 404` 与专属 `code=not_found` 同时成立时才回这个值——「确认不存在」与
+   * 「本次瞬断／5xx／鉴权失败」必须可分辨：前者可安全采用空态，后者一律按兵不动
+   * （误把已落盘的画布当空画布，会在下一次存档时把线上内容覆盖掉）。
+   */
+  | "not_found"
   | "network"
   | "server"
   | "parse";
@@ -70,6 +77,12 @@ async function request<T>(path: string, init: RequestInit, pick: (json: unknown)
         : null;
     if (code === "member_canvas_forbidden") {
       return { ok: false, reason: "team_canvas_forbidden", message };
+    }
+    // P2-E：服务器**明确**说这张专案不存在——`HTTP 404` 与专属 `code=not_found` 两
+    // 者同时成立才认。单看 404 会把「路由/页面本身缺失」的 Next 404（JSON 解析失败
+    // 走上面 parse/server 分支）误判成「画布不存在」；单看 code 又可能被中间层伪造。
+    if (res.status === 404 && code === "not_found") {
+      return { ok: false, reason: "not_found", message };
     }
     return { ok: false, reason: res.status === 401 || res.status === 403 ? "not_authenticated" : "server", message };
   }

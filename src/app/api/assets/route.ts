@@ -65,7 +65,19 @@ export async function PUT(req: NextRequest) {
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
-  // 清洗 + 归属栏位（存档端的唯一收口；team 的权威盖章在下面的闸）。
+  // P1-A 项目标签语义（纯加法）：**未给 projectIds ＝ 不动**——一次不带标签的整包 PUT
+  // 不得静默清空既有标签；显式给值（含空阵列＝明确清除）才以该值为准。
+  // 依据的既有范式＝/api/character-cards PATCH 的 `{...current, ...patch}` 局部更新
+  //（未提供的栏位沿用现值）；清洗仍由 normalizeAssetPack 收口，本路由不重复实作白名单。
+  if (body && typeof body === "object" && body.projectIds === undefined) {
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (id) {
+      const existing = (await listAssetPacks(caller.user.id)).find((p) => p.id === id);
+      if (existing?.projectIds?.length) body = { ...body, projectIds: existing.projectIds };
+    }
+  }
+  // 清洗 + 归属栏位（存档端的唯一收口；team 的权威盖章在下面的闸）。projectIds 由
+  // normalizeAssetPack 内的 normalizeProjectIds 清洗，读取端原样回传（不从回应剥除）。
   const cleaned = normalizeAssetPack(body);
   if (!cleaned) {
     return fail(400, "资产包数据无效（需要 id / title，items 每项需要合法 kind / title）", "invalid_payload");

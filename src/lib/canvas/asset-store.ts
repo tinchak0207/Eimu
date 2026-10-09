@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
+import { normalizeProjectIds } from "@/lib/asset-scope";
 
 const ASSET_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
@@ -28,6 +29,11 @@ export interface CanvasAsset {
   /** image 素材 URL（https 或 dataURL）。 */
   imageUrl?: string;
   tags: string[];
+  /**
+   * P1-A 项目标签（多归属，纯加法）：给素材打「属于哪些创作项目」的标签。
+   * 缺省＝没有标签；只给人看与前端筛选（filterByProjectTag），**本档没有 scope 维度**。
+   */
+  projectIds?: string[];
   note?: string;
   createdAt: string;
   updatedAt: string;
@@ -109,6 +115,9 @@ export function normalizeAsset(payload: unknown): CanvasAsset | null {
 
   const now = new Date().toISOString();
   const note = typeof p.note === "string" ? p.note.trim() : "";
+  // P1-A 项目标签：走 asset-scope.normalizeProjectIds 收口（去重 / 只留非空 string /
+  // 截 120 / 上限 20）；**结果为空则省略键**（不写空阵列冒充设定，同 tags 的收口范式）。
+  const projectIds = normalizeProjectIds(p.projectIds);
   return {
     id: p.id.trim(),
     kind: p.kind,
@@ -116,6 +125,7 @@ export function normalizeAsset(payload: unknown): CanvasAsset | null {
     ...(p.kind === "text" ? { content: typeof p.content === "string" ? p.content : "" } : {}),
     ...(p.kind === "image" ? { imageUrl } : {}),
     tags,
+    ...(projectIds.length ? { projectIds } : {}),
     ...(note ? { note } : {}),
     createdAt: typeof p.createdAt === "string" ? p.createdAt : now,
     updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : now,

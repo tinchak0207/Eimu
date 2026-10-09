@@ -61,6 +61,9 @@ export type AssetOwnership = "personal" | "project" | "team";
  * 资产归属：personal＝个人资产（本帐号所有项目可用）；
  * project＝属于某个项目；team＝属于某个团队（P0-2 资产团队维度：跟组织走，切队严格隔离）。
  *
+ * **LEGACY 并存（P1-A，2026-10-09）**：单归属 scope 与挂用/分享机制**保留但不再扩张**——
+ * 新归属能力走 `projectIds` 标签（多归属、纯加法）。本栏位语义一行不动，旧记录只读兼容。
+ *
  * **维度只到此为止**：本刀只加归属维度与可见性，RBAC／配额／席位由后续刀接手
  *（见 asset-scope-store 的 MAX_*_PER_USER，仍是 per-user 而非 per-team）。
  */
@@ -137,9 +140,61 @@ export function teamIdOfScope(scope: AssetScope | undefined): string {
   return scope && scope.owner === "team" ? (scope.teamId ?? "") : "";
 }
 
+// ─────────────────────────────────────────── 项目标签（P1-A：资产用标签不用分类）
+
+/**
+ * 单笔资产可挂的项目标签数上限（P1-A：`projectIds` 是用户自己的「多归属标签」）。
+ * 超出时 normalizeProjectIds 截断（标签是弱约束，不因第 21 个标签而拒收整笔资产）。
+ */
+export const MAX_ASSET_PROJECT_TAGS = 20;
+const MAX_ASSET_PROJECT_TAG_LENGTH = 120;
+
+/**
+ * 收敛项目标签（`projectIds`）：去重、只留非空 string、逐项 `trim()` 后 `slice(0,120)`、
+ * 最多 `MAX_ASSET_PROJECT_TAGS` 个；非阵列 / 非法输入 → **[]**（不抛、不猜；
+ * 与 normalizeAssetScope 同精神：读不懂就是不设标签）。
+ *
+ * 与旧 `scope.projectId` **并存但语义不同**（P1-A 纯加法）：`scope` 是**单一**归属（legacy），
+ * `projectIds` 是**多归属标签**（新）。本函式只清洗标签，一行不碰 scope。
+ */
+export function normalizeProjectIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const tag = value.trim().slice(0, MAX_ASSET_PROJECT_TAG_LENGTH);
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+    if (out.length >= MAX_ASSET_PROJECT_TAGS) break;
+  }
+  return out;
+}
+
+/**
+ * 只看「打了某个项目标签」的资产（**与可见性无关，纯标签筛选**）：
+ * 供前端在资产总览按创作项目筛选（`projectIds.includes(projectId)`）。
+ * - `projectId` 为空 / 空白 → **原样回传**（同一阵列参考；不加筛选＝零行为漂移）。
+ * - 标签是弱约束：没有 `projectIds` 的资产一律不命中（不猜归属）。
+ */
+export function filterByProjectTag<T extends { projectIds?: string[] }>(
+  items: T[],
+  projectId: string | null | undefined,
+): T[] {
+  const target = typeof projectId === "string" ? projectId.trim() : "";
+  if (!target) return items;
+  return items.filter((item) => item.projectIds?.includes(target));
+}
+
 // ─────────────────────────────────────────── 显式分享（跨项目授权）
 
-/** 显式分享授权：把 fromProjectId 名下的一个资产授权给 toProjectId 可见可用。 */
+/**
+ * 显式分享授权：把 fromProjectId 名下的一个资产授权给 toProjectId 可见可用。
+ *
+ * **LEGACY 并存（P1-A）**：本机制保留、语义一行不动；P1-A 起不再新增分享记录，
+ * 新归属走 `projectIds` 标签（多归属、天然免分享）。
+ */
 export interface AssetShareRecord {
   /**
    * 确定性 id（不随机）：`share:{kind}:{len(assetId)}:{assetId}:{len(from)}:{from}:{len(to)}:{to}`。
@@ -352,6 +407,11 @@ export interface ScopedAssetLike {
   kind: AssetKind;
   /** 资产记录上的作用域；缺省＝personal（旧资产零改动）。 */
   scope?: AssetScope;
+  /**
+   * P1-A 项目标签（多归属，纯加法）：与 `scope` 并存；空/缺省＝没有标签。
+   * 命中当前项目时给 `in-project` 可见性（见 resolveAssetScopeVisibility 的新允许路径）。
+   */
+  projectIds?: string[];
   /** 资产拥有者（= 存储桶 userId）。 */
   ownerUserId: number;
 }
@@ -393,7 +453,7 @@ export interface AssetUseContext {
  * 也不猜「大概是哪个团队」。与既有 project 鬼状态同一把尺。
  */
 export function resolveAssetScopeVisibility(
-  asset: { id: string; kind: AssetKind; scope?: AssetScope },
+  asset: { id: string; kind: AssetKind; scope?: AssetScope; projectIds?: string[] },
   ctx: AssetUseContext,
 ): AssetVisibility | null {
   const scope = asset.scope ?? DEFAULT_ASSET_SCOPE;
@@ -408,6 +468,9 @@ export function resolveAssetScopeVisibility(
   const ownedBy = scope.projectId ?? "";
   if (!ownedBy) return null;
   if (ctx.projectId && ownedBy === ctx.projectId) return "in-project";
+  // P1-A 新允许路径（纯加法）：项目标签（多归属）。**插在旧精确匹配之后、share 查表之前**。
+  // `ctx.projectId` 为空时**不生效**——标签不得因此把 fail-closed 打开（无项目上下文仍只有 personal 可见）。
+  if (ctx.projectId && asset.projectIds?.includes(ctx.projectId)) return "in-project";
   return findActiveAssetShare(ctx.shares, asset.kind, asset.id, ownedBy, ctx.projectId) ? "shared-in" : null;
 }
 
@@ -439,14 +502,18 @@ export function canUseAsset(asset: ScopedAssetLike, ctx: AssetUseContext): boole
  * 故只过 scope 段——**与伺服器端同一把尺**（resolveAssetScopeVisibility），
  * 两端不可能漂移。个人卡（含全部 legacy 卡）缺 scope → 恒可见＝零回归（b 类）。
  */
-export function filterLockedCardsForProjectUse<T extends { id: string; scope?: AssetScope }>(
+export function filterLockedCardsForProjectUse<T extends { id: string; scope?: AssetScope; projectIds?: string[] }>(
   cards: readonly T[],
   ctx: { projectId: string | null; shares: readonly AssetShareRecord[] },
 ): T[] {
   if (!cards.length) return [];
   const useCtx: AssetUseContext = { viewerUserId: 0, projectId: ctx.projectId, shares: ctx.shares };
   return cards.filter(
-    (card) => resolveAssetScopeVisibility({ id: card.id, kind: "card", scope: card.scope }, useCtx) !== null,
+    (card) =>
+      resolveAssetScopeVisibility(
+        { id: card.id, kind: "card", scope: card.scope, projectIds: card.projectIds },
+        useCtx,
+      ) !== null,
   );
 }
 
@@ -572,7 +639,11 @@ export function isAssetLocalCopyId(value: unknown): boolean {
   return /^copy-(card|pack)-[0-9a-f]{32}$/.test(value.trim());
 }
 
-/** 挂用记录：资产收入某项目的资产库（copy-on-use 下＝来源→目标副本的连接记录）。 */
+/** 挂用记录：资产收入某项目的资产库（copy-on-use 下＝来源→目标副本的连接记录）。
+ *
+ * **LEGACY 并存（P1-A）**：copy-on-use 挂用机制保留、语义一行不动；P1-A 起不再新增挂用记录，
+ * 新归属走 `projectIds` 标签（多归属、免副本）。旧记录只读兼容。
+ */
 export interface AssetMountRecord {
   /** 确定性 id：`mount:{len(projectId)}:{projectId}:{kind}:{len(assetId)}:{assetId}`（同键重挂 = 同一件）。 */
   id: string;
@@ -830,19 +901,26 @@ export interface AssetLibraryCandidate {
   /** 人看的种类标签（资产包 / 角色 / 场景 / 风格）。 */
   kindLabel: string;
   scope?: AssetScope;
+  /**
+   * P1-A 项目标签（多归属，纯加法）：与 scope 并存；缺省＝没有标签。
+   * 只给人看与前端筛选，不进 canvas 节点 metadata / agent 压缩白名单（同 scope 裁决）。
+   */
+  projectIds?: string[];
   ownerUserId: number;
   updatedAt: string;
 }
 
 export interface AssetLibraryItem extends AssetLibraryCandidate {
   visibility: AssetVisibility;
-  /** 已在当前项目资产库中挂用。 */
+  /** 已在当前项目资产库中挂用（LEGACY 标记，P1-A 起恒为 false）。 */
   mounted: boolean;
+  /** P1-A：**永远存在**（没有标签＝[]），给前端按项目筛选用。 */
+  projectIds: string[];
 }
 
 /** 资产包 → 候选项（结构型别，不 import 存储层，避免循环）。 */
 export function candidatesFromPacks(
-  packs: readonly { id: string; title: string; digest?: string; tags?: string[]; scope?: AssetScope; updatedAt: string }[],
+  packs: readonly { id: string; title: string; digest?: string; tags?: string[]; scope?: AssetScope; projectIds?: string[]; updatedAt: string }[],
   ownerUserId: number,
 ): AssetLibraryCandidate[] {
   return packs.map((p) => ({
@@ -852,6 +930,7 @@ export function candidatesFromPacks(
     tags: Array.isArray(p.tags) ? [...p.tags] : [],
     kindLabel: "资产包",
     ...(p.scope ? { scope: p.scope } : {}),
+    ...(p.projectIds?.length ? { projectIds: [...p.projectIds] } : {}),
     ownerUserId,
     updatedAt: p.updatedAt,
   }));
@@ -861,7 +940,7 @@ const CARD_KIND_LABELS: Record<string, string> = { character: "角色", scene: "
 
 /** 资产卡 → 候选项（标签＝卡名称 + 种类，卡的检索面与包同构）。 */
 export function candidatesFromCards(
-  cards: readonly { id: string; name: string; kind: string; prompt?: string; scope?: AssetScope; updatedAt: string }[],
+  cards: readonly { id: string; name: string; kind: string; prompt?: string; scope?: AssetScope; projectIds?: string[]; updatedAt: string }[],
   ownerUserId: number,
 ): AssetLibraryCandidate[] {
   return cards.map((c) => ({
@@ -871,6 +950,7 @@ export function candidatesFromCards(
     tags: [CARD_KIND_LABELS[c.kind] ?? c.kind],
     kindLabel: CARD_KIND_LABELS[c.kind] ?? "卡",
     ...(c.scope ? { scope: c.scope } : {}),
+    ...(c.projectIds?.length ? { projectIds: [...c.projectIds] } : {}),
     ownerUserId,
     updatedAt: c.updatedAt,
   }));
@@ -917,7 +997,13 @@ export function buildProjectAssetLibrary(input: {
   for (const candidate of candidates) {
     if (isAssetLocalCopyId(candidate.assetId)) continue; // 内部副本不是可挂用条目
     const visibility = resolveAssetVisibility(
-      { id: candidate.assetId, kind: candidate.assetKind, scope: candidate.scope, ownerUserId: candidate.ownerUserId },
+      {
+        id: candidate.assetId,
+        kind: candidate.assetKind,
+        scope: candidate.scope,
+        projectIds: candidate.projectIds,
+        ownerUserId: candidate.ownerUserId,
+      },
       ctx,
     );
     if (!visibility) continue; // 不可见即不可用：不列进列表
@@ -925,7 +1011,8 @@ export function buildProjectAssetLibrary(input: {
     if (!matchesAssetQuery(candidate, q)) continue;
     const mounted = keys.has(mountedAssetKey(candidate.assetKind, candidate.assetId));
     if (mountedOnly && !mounted) continue;
-    items.push({ ...candidate, visibility, mounted });
+    // P1-A：projectIds 永远存在（没有标签＝[]），前端可直接照它筛选。
+    items.push({ ...candidate, projectIds: candidate.projectIds ? [...candidate.projectIds] : [], visibility, mounted });
   }
   return items.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
@@ -944,7 +1031,13 @@ export function resolveMountableAsset(
   const candidate = candidates.find((c) => c.assetKind === target.assetKind && c.assetId === target.assetId);
   if (!candidate) return null;
   const visibility = resolveAssetVisibility(
-    { id: candidate.assetId, kind: candidate.assetKind, scope: candidate.scope, ownerUserId: candidate.ownerUserId },
+    {
+      id: candidate.assetId,
+      kind: candidate.assetKind,
+      scope: candidate.scope,
+      projectIds: candidate.projectIds,
+      ownerUserId: candidate.ownerUserId,
+    },
     ctx,
   );
   return visibility ? { candidate, visibility } : null;

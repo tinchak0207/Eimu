@@ -62,6 +62,42 @@ export interface CanvasProjectSummary {
   nodeCount: number;
 }
 
+/**
+ * P2-A 冻结接口（另路 P2-B 按此写）：当前聊天拥有的画布清单的一列。
+ * 归属真源＝项目档 `CreativeProject.chats[].canvasIds`（见 types.ts 档头：画布不加反向栏位）。
+ */
+export interface ChatCanvasEntry {
+  id: string;
+  /** savedProjects 里的标题；缺失 → "未命名画布"。 */
+  title: string;
+  /** ms epoch；缺失 → 0。 */
+  updatedAt: number;
+  /** 是否该聊天的 primaryCanvasId。 */
+  isPrimary: boolean;
+  /** 是否当前打开。 */
+  isActive: boolean;
+}
+
+/**
+ * `useCanvasChat(sessionId, projectContext?)` 的第二参（可选；缺省＝没有项目上下文＝现状行为）。
+ * 由宿主（ImagePlayground）从 `useCreativeProjects()` 取现成动作/查询注入——
+ * 本 hook 不自己呼叫 useCreativeProjects，避免多挂一次 refreshProjects。
+ */
+export interface UseCanvasChatProjectContext {
+  /** 当前选中的项目 id（侧栏上下文；本刀行为不据此造归属，仅透传）。 */
+  activeProjectId?: string | null;
+  /** 把画布挂到会话（store 的 attachCanvasAction：绝不覆盖既有 canvasIds，primary 只补不抢）。 */
+  attachCanvas?: (projectId: string, sessionId: string, canvasId: string, title?: string) => Promise<void>;
+  /** 会话 → 项目 id（store 查询；同一份共享状态，不另建真源）。 */
+  findProjectIdBySession?: (sessionId: string) => string | null;
+  /**
+   * 会话 → 该聊天条目的画布归属（`canvasIds` + `primaryCanvasId`，store 直传项目档原值）。
+   * P2-C：本 hook 用它取「当前聊天的画布清单/主画布」，不再自行 `listProjects()`
+   * 绕一轮 `GET /api/projects`。未归属会话 → null。
+   */
+  findChatBySession?: (sessionId: string) => { canvasIds: string[]; primaryCanvasId?: string } | null;
+}
+
 /** 服务端摘要（`?view=summary`）的最小形状：已有节点数，不带节点本体。 */
 type CanvasProjectSummaryLike = { id: string; title: string; updatedAt: string; nodeCount: number };
 
@@ -255,6 +291,18 @@ export interface UseCanvasChatReturn {
   exportProject: () => CanvasProject;
   clearCanvas: () => void;
   newCanvasSession: () => void;
+  // ── 聊天内多画布（P2-A：一个聊天 → 多张画布）
+  /** 当前聊天拥有的画布清单（未归属会话 → 只含当前这一张）。 */
+  canvasList: ChatCanvasEntry[];
+  /** 当前打开的画布 id（随 projectIdRef 同步；建号前 null）。 */
+  activeCanvasId: string | null;
+  /** 切到当前聊天内已有的某张画布（切前先 flush 当前画布存档）。 */
+  switchCanvas: (canvasId: string) => void;
+  /**
+   * 在当前聊天内新建一张画布并切过去，回新 id（用于 UI 下拉「新建画布」）。
+   * 无当前会话时回 null（不造无主画布）。若会话已归属某项目则把新画布挂上去（primary 不动）。
+   */
+  createCanvas: (title?: string) => string | null;
   // ── 历史清单
   savedProjects: CanvasProjectSummary[];
   refreshSavedProjects: () => Promise<void>;
