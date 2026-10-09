@@ -10,7 +10,7 @@ export default tool({
     workflow_id: tool.schema.string().describe("workflow_id from workflow_start"),
     role: tool.schema.string().describe("node role name"),
     kind: tool.schema.enum(["text", "config", "image", "video", "audio", "film"]).describe(
-      "text = prompt/data node (engine skips); config = reference/setting node, NEVER executed — use only for inputs other nodes consume; image = generates an image via the platform (REQUIRED for any node that must output an image); video = generates a video via the platform (REQUIRED for any node that must output a video); audio = TTS 配音节点，生成台词音轨（免费，连到 film 节点自动混入成片）；film = 成片节点，免费本地拼接上游视频并混入上游配音音轨（不触发模型生成）",
+      "text = prompt/data node (engine skips); config = reference/setting node, NEVER executed — use only for inputs other nodes consume; image = generates an image via the platform (REQUIRED for any node that must output an image); video = generates a video via the platform (REQUIRED for any node that must output a video); audio = TTS 配音节点，生成台词音轨（按字符计价，'tts-zh' 单价 0.001 币/字符、1000 字约 1 币，以节点回执 cost_coins 为准；连到 film 节点自动混入成片）；film = 成片节点，免费本地拼接上游视频并混入上游配音音轨（不触发模型生成）",
     ),
     title: tool.schema.string().optional().describe("node title"),
     metadata: tool.schema.object({}).passthrough().optional().describe("{ prompt, model, size, duration_seconds, count }"),
