@@ -341,16 +341,30 @@ do_deploy() {
   fi
 
   # 2. 磁碟闸
+  #
+  # 2026-10-08 事故（磁盘打满连带打挂别的服务）：全量重建（api+worker）实测吃 ~4.3G，而
+  # 旧闸「< 6G 就 prune，prune 后 >= 4G 即放行」在 4.0G 时放行 ⇒ build 途中把根分割区吃到
+  # 100%（avail 0）⇒ ① `image-data-api` 与 worker 写不进盘进入重启回圈 ② postgres 崩溃恢复
+  # 期间 worker 自举报 `57P03 Consistent recovery state has not been yet reached`（症状像
+  # 迁移错，真因是 DB 在恢复）③ nginx -t 解析不到停掉的 `image-data-api` ⇒ reload 未执行
+  # ⇒ 上游 IP 陈旧（整片 502）。故闸必须留出「别的服务还能活」的余量，而不是「刚好够 build」。
   hdr "磁碟闸"
   local avail
   avail="$(rsh "df -B1G --output=avail / | tail -n1 | tr -d ' '")"
-  log "可用 ${avail}G"
+  log "可用 ${avail}G（全量重建实测约需 4.3G，闸要求清理后 ≥6G 以留余量）"
   if ((avail < 6)); then
-    log "< 6G → prune builder cache(>72h) 与 dangling image"
-    rsh "sudo -n docker builder prune -f --keep-storage 2gb && sudo -n docker image prune -f"
+    log "< 6G → prune builder cache 与 dangling image，并清掉被超越的控面旧映像（每个 repo 只留最新一个 rollback-*）"
+    rsh "sudo -n docker builder prune -af >/dev/null && sudo -n docker image prune -f >/dev/null
+         for repo in $API_IMAGE $WORKER_IMAGE; do
+           keep=\$(sudo -n docker image ls \$repo --format '{{.Tag}}' | grep '^rollback-' | sort -r | head -n1)
+           for t in \$(sudo -n docker image ls \$repo --format '{{.Tag}}' | grep '^rollback-'); do
+             [ \"\$t\" = \"\$keep\" ] || sudo -n docker rmi \"\$repo:\$t\" >/dev/null 2>&1 || true
+           done
+         done"
     avail="$(rsh "df -B1G --output=avail / | tail -n1 | tr -d ' '")"
-    log "prune 后可用 ${avail}G"
-    ((avail >= 4)) || die "可用空间 ${avail}G < 4G，中止"
+    log "清理后可用 ${avail}G"
+    # 6G：留 ~1.7G 给 postgres/其它容器写入；低于 4G 时连「当前服务是否还能活」都不保证。
+    ((avail >= 6)) || die "清理后可用仅 ${avail}G < 6G：全量重建会吃 ~4.3G 并把磁盘打满（2026-10-08 事故：连带动摇 image-data-api/postgres、nginx reload 失败）。请先人工清空间（删大档/旧备份），再重跑。"
   fi
 
   # 3. 版本化：现役 :latest → :rollback-<UTC>，各留最近 $ROLLBACK_KEEP 个
@@ -437,7 +451,18 @@ do_deploy() {
   t1="$(date +%s)"
   rsh "sudo -n docker tag $API_IMAGE:latest $API_IMAGE:git-$SHORT && sudo -n docker tag $WORKER_IMAGE:latest $WORKER_IMAGE:git-$SHORT"
   hdr "up -d ${SERVICES[*]}"
-  rsh "cd $(printf '%q' "$CP_DIR") && sudo -n docker compose -f $COMPOSE_FILE up -d ${SERVICES[*]} && sudo -n docker exec $NGINX_CTR nginx -t -q && sudo -n docker exec $NGINX_CTR nginx -s reload && echo 'reloaded $NGINX_CTR'"
+  rsh "cd $(printf '%q' "$CP_DIR") && sudo -n docker compose -f $COMPOSE_FILE up -d ${SERVICES[*]}"
+  # 上游 IP 变了 ⇒ 必须 reload。但 `nginx -t` 会重新解析 conf 里**全部**上游名，任一被引用的
+  # 容器不在运行即 `host not found in upstream "X"` ⇒ 测不过（2026-10-08：磁盘打满把
+  # image-data-api 打挂，reload 未执行 ⇒ 控面上游 IP 陈旧 ⇒ 整片 502，而脚本只留一行原始
+  # nginx 报错，看不出「是别的容器被连带打挂了」）。失败时把成因与修法摊开。
+  if ! rsh "sudo -n docker exec $NGINX_CTR nginx -t -q"; then
+    warn "nginx -t 不通过——它解析 conf 里全部上游名，通常是有被引用的容器不在运行（磁盘满/崩溃回圈常见）："
+    rsh "sudo -n docker exec $NGINX_CTR grep -ohE 'upstream: //[A-Za-z0-9_.-]+|upstream \"[A-Za-z0-9_.-]+\"' /etc/nginx/conf.d/default.conf | grep -ohE '[A-Za-z0-9_.-]+$' | sort -u" 2>/dev/null | sed 's/^/  conf 引用：/' >&2 || true
+    rsh "sudo -n docker ps --format '{{.Names}}'" 2>/dev/null | sort | sed 's/^/  正在运行：/' >&2 || true
+    die "nginx -t 失败 ⇒ **未执行 reload** ⇒ 控面上游 IP 陈旧（可能整片 502）。先修好上面缺失的容器（例如 docker start <name>；磁盘满时先 docker builder prune -af），再手动：docker exec $NGINX_CTR nginx -t -q && docker exec $NGINX_CTR nginx -s reload"
+  fi
+  rsh "sudo -n docker exec $NGINX_CTR nginx -s reload && echo 'reloaded $NGINX_CTR'"
 
   # 5. postcheck（失败 → 自动回滚到本次 rollback tag）
   if ! postcheck; then
