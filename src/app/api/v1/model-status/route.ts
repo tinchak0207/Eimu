@@ -19,7 +19,7 @@ import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { readAdminPools } from "@/lib/admin-pool-store";
 import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
-import { probeAllModelsStatus } from "@/lib/model-status-probe";
+import { probeAllModelsStatus, type ModelStatusEntry } from "@/lib/model-status-probe";
 import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
 import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
 import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
@@ -74,6 +74,22 @@ function errorResponse(status: number, message: string, code: string, traceId: s
   return withTraceId(response, traceId);
 }
 
+/**
+ * 对外投影（B5，2026-10-09）：剥离只供内部消费的渠道遥测。
+ * - `channel_id`（内部供应商渠道标识）不得出现在对外 wire。
+ * - `channel_balance`（内部计费余额信号）不得出现在对外 wire；同一资讯已由服务端
+ *   生成的 `note`（如「渠道欠费：…」）承载，note 必须保留。
+ * probe 层与 internal 面继续保留这两个栏位，只在对外 emit 边界投影；其余栏位
+ * （availability/note/last_24h/latency_ms/functions/capabilities…）与顺序逐字节不动。
+ */
+function toPublicModel(model: ModelStatusEntry & { channel_balance?: unknown }): Omit<
+  ModelStatusEntry & { channel_balance?: unknown },
+  "channel_id" | "channel_balance"
+> {
+  const { channel_id: _channelId, channel_balance: _channelBalance, ...safe } = model;
+  return safe;
+}
+
 export async function GET(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
   const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")), {
@@ -116,6 +132,8 @@ export async function GET(req: NextRequest) {
   // 的模型，提交面会在扣费前拒单——这里同判 unavailable，agent 不再往死模型投单。
   const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
   const models = snapshot.models.map((model) => {
+    // …内部裁决（见下）在 `model` 上叠加 availability/note/last_24h/channel_balance；
+    // 最后的 toPublicModel 会统一投影掉内部渠道遥测。
     const last24h = statsByModel.get(model.id);
     const base = last24h ? { ...model, last_24h: last24h } : model;
     const balance = balanceSignals.get(model.id);
@@ -139,7 +157,7 @@ export async function GET(req: NextRequest) {
       return { ...withBalance, availability: "unavailable" as const, note: `${reason}，请稍后重试或换其他模型` };
     }
     return withBalance;
-  });
+  }).map(toPublicModel);
 
   const response = addRateLimitHeaders(
     NextResponse.json(

@@ -212,7 +212,11 @@ export async function probeModelStatus(
   // 4 个视频模型全被报 unavailable，agent 误以为影片通道全灭）。
   const failures: string[] = [];
   let unprobeableChannelId: string | undefined;
+  // note 是对外字串，禁止内嵌渠道 id（env:xxx／池名／endpoint 名）——对外只用
+  // 非标识的 queue 序号（渠道1／渠道2）区隔多笔失败，避免泄漏内部供应商识别资讯。
+  let queuePosition = 0;
   for (const endpoint of queue) {
+    queuePosition += 1;
     const channelId = channelIdFromEndpointLabel(endpoint.label);
     if (UNPROBEABLE_CHANNEL_IDS.has(channelId)) {
       unprobeableChannelId ??= channelId;
@@ -224,7 +228,7 @@ export async function probeModelStatus(
     const expected = expectedSupplierModelId(endpoint.label, modelId);
     if (result.ok && expected && !result.modelIds?.includes(expected)) {
       failures.push(
-        `${channelId}: ${result.modelIds ? `/models 未列出上游模型 ${expected}` : "/models 回应不是模型清单，无法核对"}`,
+        `渠道${queuePosition}: ${result.modelIds ? `/models 未列出上游模型 ${expected}` : "/models 回应不是模型清单，无法核对"}`,
       );
       continue;
     }
@@ -232,7 +236,7 @@ export async function probeModelStatus(
       const entry = { ...base, availability: "available" as const, channel_id: channelId, latency_ms: result.ms };
       return failures.length > 0 ? { ...entry, note: `主渠道不可达，已由备用渠道承接（${failures.join("；")}）` } : entry;
     }
-    failures.push(`${channelId}: ${result.note ?? "上游不可达"}`);
+    failures.push(`渠道${queuePosition}: ${result.note ?? "上游不可达"}`);
   }
 
   if (unprobeableChannelId) {
