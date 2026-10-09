@@ -104,6 +104,7 @@
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
 | 交付/打包/要高清版 | 汇总成品链接 `delivery_assets`；放大并逐张验细节 `upscale_audit` | image_upscale |
+| 研究／剧本／蓝图等 workspace 文稿交付 | `document_upload`（path＝workspace 绝对路径）→ 把回执 `markdown_link` 写进交付文；禁止裸 VPS 路径冒充「可随时查看」。画布已开可另加 text 节点 | — |
 | 选模型/模型失败找替代 | GET /v1/model-status（15s 快取内复用，不要重探） | — |
 
 ## §音乐（唯一活链路；细则在 `skill music-director`）

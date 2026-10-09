@@ -59,7 +59,10 @@ function contentTypeFor(pathname) {
     ".webp": "image/webp",
     ".gif": "image/gif",
     ".json": "application/json",
-    ".txt": "text/plain",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/plain; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".pdf": "application/pdf",
   };
   return map[ext] || "application/octet-stream";
 }

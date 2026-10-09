@@ -22,11 +22,40 @@ import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, rec
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 
-// POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频 URL →
+// POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
+// 或接收 path_b64 位元组（含文档 md/txt/json/csv/pdf）→
 // 平台存储（image-data uploads 目录，公网面 store.tinchak0207.xyz/image-data/files/）。
 // 外部 URL 直连常被 Cloudflare 403 挑战拦截、/v1/uploads 拒收 video——
 // 影片/音频素材一律先经此端点入库取得平台 URL，再注入工作流节点。
+// 文档同通道（F2 2026-10-10）：workspace 研究/剧本 md 经 document_upload 入库后，
+// 聊天 markdown 链接即可点开，禁止再报裸 VPS 路径冒充「可随时查看」。
 // 鉴权同其他 session 类 internal 路由：分发层 loopback 门 + session_id 解析。
+
+/** 媒体入库允许的 Content-Type：原视频/音频/图片 + 文稿（F2 文档可达面）。 */
+function isAllowedMediaUploadContentType(contentType: string): boolean {
+  const ct = contentType.split(";")[0].trim().toLowerCase()
+  if (ct.startsWith("video/") || ct.startsWith("audio/") || ct.startsWith("image/")) return true
+  if (ct.startsWith("text/")) return true
+  if (ct === "application/json" || ct === "application/pdf") return true
+  return false
+}
+
+function outExtForContentType(contentType: string, fallbackExt: string): string {
+  const ct = contentType.split(";")[0].trim().toLowerCase()
+  if (ct.startsWith("video/")) return "mp4"
+  if (ct.startsWith("audio/")) return "mp3"
+  if (ct.includes("jpeg")) return "jpg"
+  if (ct.includes("webp")) return "webp"
+  if (ct.includes("gif")) return "gif"
+  if (ct.startsWith("image/")) return "png"
+  if (ct.includes("markdown") || ct === "text/x-markdown") return "md"
+  if (ct === "text/csv") return "csv"
+  if (ct === "application/json") return "json"
+  if (ct === "application/pdf") return "pdf"
+  if (ct.startsWith("text/")) return "txt"
+  return fallbackExt.replace(/^\./, "") || "bin"
+}
+
 export async function handleMediaUpload(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const sessionId = url.searchParams.get("session_id")
@@ -51,7 +80,7 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
   let outExt: string
   // 本地成片以 base64 位元组上传：video_upload 工具跑在 opencode-server 沙箱（PrivateTmp=yes）内，
   // 读得到 agent 写进私有 /tmp 的成片；网关进程（PrivateTmp=no）读不到该私有 /tmp，故由工具读档传
-  // 位元组、网关不碰 agent FS。仍校验大小/视频音频图片扩展名，保持「仅媒体」契约。
+  // 位元组、网关不碰 agent FS。仍校验大小与扩展名（视频/音频/图片/文稿），保持入库契约。
   if (typeof body.path_b64 === "string" && body.path_b64.trim()) {
     buf = Buffer.from(body.path_b64, "base64")
     total = buf.length
@@ -62,8 +91,8 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
     const fname = typeof body.filename === "string" ? body.filename : ""
     const srcExt = path.extname(fname).toLowerCase() || ".mp4"
     contentType = contentTypeForExt(srcExt)
-    if (!contentType.startsWith("video/") && !contentType.startsWith("audio/") && !contentType.startsWith("image/")) {
-      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片）` }, { status: 415 })
+    if (!isAllowedMediaUploadContentType(contentType)) {
+      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片/文稿 md·txt·json·csv·pdf）` }, { status: 415 })
     }
     outExt = srcExt.replace(/^\./, "")
   } else if (typeof body.url === "string" && body.url.trim()) {
@@ -78,8 +107,8 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
       return Response.json({ ok: false, error: `upstream responded http ${upstream.status}` }, { status: 502 })
     }
     contentType = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase()
-    if (!contentType.startsWith("video/") && !contentType.startsWith("audio/") && !contentType.startsWith("image/")) {
-      return Response.json({ ok: false, error: `unsupported content-type "${contentType || "none"}"（仅接受 video/*、audio/* 或 image/*）` }, { status: 415 })
+    if (!isAllowedMediaUploadContentType(contentType)) {
+      return Response.json({ ok: false, error: `unsupported content-type "${contentType || "none"}"（仅接受 video/*、audio/*、image/* 或文稿 text/*·json·pdf）` }, { status: 415 })
     }
     const contentLength = Number(upstream.headers.get("content-length") || "0")
     if (Number.isFinite(contentLength) && contentLength > MAX_BYTES) {
@@ -99,17 +128,13 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
       chunks.push(Buffer.from(value))
     }
     if (total === 0) return Response.json({ ok: false, error: "upstream returned empty body" }, { status: 502 })
-    outExt = contentType.startsWith("video/")
-      ? "mp4"
-      : contentType.startsWith("audio/")
-        ? "mp3"
-        : contentType.includes("jpeg")
-          ? "jpg"
-          : contentType.includes("webp")
-            ? "webp"
-            : contentType.includes("gif")
-              ? "gif"
-              : "png"
+    let urlPathExt = ""
+    try {
+      urlPathExt = path.extname(new URL(src).pathname).toLowerCase()
+    } catch {
+      urlPathExt = ""
+    }
+    outExt = outExtForContentType(contentType, urlPathExt || ".bin")
     buf = Buffer.concat(chunks)
   } else {
     return Response.json({ ok: false, error: "url or path_b64 (string) is required" }, { status: 400 })

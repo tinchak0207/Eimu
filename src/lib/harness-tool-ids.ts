@@ -40,6 +40,8 @@ export const HARNESS_TOOL_ID_LIST = [
   "cast_asset_lock",
   "character_dna_turnaround",
   "delivery_assets",
+  // ↓ 2026-10-10 F2：workspace 文稿入库平台 blob，聊天可点开
+  "document_upload",
   "detail_page_manifest",
   // ↓ 2026-09-02 3D导演台实装（16 director_* 工具：VPS .opencode/tools/ 落位 +
   //   lib/director-common.ts 共用传输/守卫层 + lib/director/ 纯函数链（kunpeng 轮子：motionTemplates/
