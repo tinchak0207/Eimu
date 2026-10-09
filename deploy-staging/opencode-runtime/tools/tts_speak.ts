@@ -7,7 +7,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
 export default tool({
   description:
-    "配音（TTS）：输入一句台词文本（中文），同步生成语音，返回音频 URL。用于剧本台词配音、旁白、单句 voiceover。\n\n【诚实纪律】上游 TTS 供应商当前不可用时，本工具会返回 tts_unavailable 错误——此时必须向用户如实说明「配音上游暂缺，无法生成音轨」，严禁编造音频链接或用文字冒充音频。上游恢复后本工具自动可用，无需换路。\n\n【成本】按字符计价（当前 0 币/字符，定价权威在 gateway pricing 模块，以工具返回的 cost_coins 为准）。",
+    "配音（TTS）：输入一句台词文本（中文），同步生成语音，返回音频 URL。用于剧本台词配音、旁白、单句 voiceover。\n\n【诚实纪律】上游 TTS 供应商当前不可用时，本工具会返回 tts_unavailable 错误——此时必须向用户如实说明「配音上游暂缺，无法生成音轨」，严禁编造音频链接或用文字冒充音频。上游恢复后本工具自动可用，无需换路。\n\n【成本】按字符计价：'tts-zh' 现价 0.001 币/字符（1 字 0.001 币，1000 字约 1 币）；定价权威在 gateway pricing 模块的 MODEL_PRICING['tts-zh']，单价以工具返回的 cost_coins 为准。上游不可用时返回 tts_unavailable，不产生费用。",
   args: {
     text: tool.schema
       .string()
