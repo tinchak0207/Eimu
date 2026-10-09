@@ -83,7 +83,9 @@ export async function POST(req: NextRequest) {
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
-  if (raw === null || typeof raw !== "object") return fail(400, "请求体必须是 JSON 物件", "invalid_payload");
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return fail(400, "请求体必须是 JSON 物件（不可为数组）", "invalid_payload");
+  }
   const { title: rawTitle } = raw as { title?: unknown };
 
   const now = new Date().toISOString();
