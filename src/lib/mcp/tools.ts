@@ -886,8 +886,8 @@ function defineTools(): ToolDefinition[] {
       name: "canvas_get_state",
       title: "读取画布快照",
       description: bilingual(
-        "读取某个 agent 会话当前画布快照（节点/连线/选中/视口，以及画布产线的可逆声明 dsl 与节点版本索引 node_versions）。改动画布产线前先读它拿 session_id 对应的现状。会话无快照时上游回 has_state=false。",
-        "Read the current canvas snapshot (nodes/connections/dsl/node_versions) of an agent session.",
+        "读取某个 agent 会话当前画布快照（节点/连线/选中/视口，以及画布产线的可逆声明 dsl 与节点版本索引 node_versions）。dsl 就是画布产线的权威骨架，已自动覆盖存量画布上的产线节点（含没有产线身份键的「提示词节点＋生成配置节点」）——读到 dsl 就直接改，不要自己发明骨架；每步 meta._origin_node_id 由读面自动填好（＝原画布节点 id），原样带回。dsl 为空有两种原因：①画布上确实没有任何产线节点；②画布太大，骨架超出快照预算——此时摘要里带 dsl_omitted: \"budget\"（不代表没有产线），先看节点清单、用 canvas_apply_ops 逐节点改或按画布现状写 DSL 收编（别另建平行节点）。改动画布产线前先读它拿 session_id 对应的现状。会话无快照时上游回 has_state=false。",
+        "Read the current canvas snapshot (nodes/connections/dsl/node_versions) of an agent session. The dsl is the authoritative skeleton of the canvas production line and already covers production-line nodes on legacy canvases (including prompt nodes + generation-config nodes that carry no production-line identity key) — edit it directly, never invent a skeleton; each step's meta._origin_node_id is auto-filled by the read surface (= the original canvas node id), carry it back verbatim. An empty dsl has two causes: (1) the canvas has no production-line node; (2) the canvas is too large and the skeleton exceeded the snapshot budget — in that case the summary carries dsl_omitted: \"budget\" (it does NOT mean there is no production line): inspect the node list, edit node-by-node via canvas_apply_ops, or write a DSL from the current canvas (never create parallel nodes).",
       ),
       inputSchema: {
         type: "object",
@@ -903,8 +903,8 @@ function defineTools(): ToolDefinition[] {
       name: "workflow_read",
       title: "读取工作流声明",
       description: bilingual(
-        "读取画布产线的可逆声明（dsl = 工作流 DSL 源码数组）与当前节点版本索引，供「像改代码一样改工作流」：读 dsl → 改 steps → 用 workflow_write 整份交回。只投影 dsl 与版本索引，不含节点坐标。要完整画布用 canvas_get_state。",
-        "Read the reversible workflow declarations (dsl) and node version index of an agent session's canvas.",
+        "读取画布产线的可逆声明（dsl = 工作流 DSL 源码数组）与当前节点版本索引，供「像改代码一样改工作流」：读 dsl → 改 steps → 用 workflow_write 整份交回。dsl 已覆盖存量画布产线节点（含未带产线身份键的「提示词节点＋生成配置节点」），并含每步 meta._origin_node_id（＝原画布节点 id，由读面自动填好，原样带回）。只投影 dsl 与版本索引，不含节点坐标。要完整画布用 canvas_get_state。",
+        "Read the reversible workflow declarations (dsl) and node version index of an agent session's canvas. The dsl already covers production-line nodes on legacy canvases (including prompt nodes + generation-config nodes that carry no production-line identity key), with meta._origin_node_id auto-filled on each step (= the original canvas node id, carry it back verbatim).",
       ),
       inputSchema: {
         type: "object",
@@ -974,8 +974,8 @@ function defineTools(): ToolDefinition[] {
       name: "workflow_write",
       title: "写入工作流声明",
       description: bilingual(
-        "把整份工作流声明（DSL）编译成画布操作，落图与否看是否给了 project_id。用法：先 canvas_get_state / workflow_read 读 dsl，按需增删改 steps，整份 source 交回本工具。\n· 给了 project_id：编译后原子套用到该画布项目（B 端密钥所属账号的画布；跨账号的 project_id 找不到，画布不动）——这是外部 coding agent 端到端写产线的通道。\n· 没给 project_id：只编译，回 ops 与 summary（纯函数端点 /v1/workflow/compile）。\n校验失败一律回 workflow_dsl_invalid 与逐条 errors；同 id 同节点＝幂等更新（重放不重复建节点）。",
-        "Compile a full workflow declaration (DSL) into canvas ops. With project_id it applies the ops atomically to that canvas project (owned by the key's account); without it, compile-only.",
+        "把整份工作流声明（DSL）编译成画布操作，落图与否看是否给了 project_id。用法：先 canvas_get_state / workflow_read 读 dsl 作为骨架。\n· dsl 非空 ⇒ 骨架已被读面自动收编（含存量画布上的产线节点），直接在读到的 dsl 上按需增删改 steps、整份 source 交回本工具；每步 meta._origin_node_id 原样带回（＝原画布节点 id），不要自己发明——只有画布上还不存在的新步骤才不带该键（编译器会新增节点）。\n· 改提示词要改「生成步」（kind=image/video 的那一步）的 prompt——生成面板与重跑读的是生成节点自身的 metadata.prompt；若上游另有「提示词节点步」持有同一段提示词（画布把提示词存了两份），把两处改成同一段：只改提示词步不会改变生成输入。\n· 节点上不合 DSL 格式的值（例：size 不是「宽x高」）读面会原样放进该步的 meta（同键，如 meta.size），不会丢；要改它就改 meta 里的同名键。\n· dsl 为空有两种原因：①画布上确实没有任何产线节点；②画布太大，骨架超出快照预算——此时摘要里带 dsl_omitted: \"budget\"（不代表没有产线），先看节点清单、用 canvas_apply_ops 逐节点改或按画布现状写 DSL 收编（别另建平行节点）；只有原因①时才需要你按画布现状写一份完整 DSL。\n· 给了 project_id：编译后原子套用到该画布项目（B 端密钥所属账号的画布；跨账号的 project_id 找不到，画布不动）——这是外部 coding agent 端到端写产线的通道。\n· 没给 project_id：只编译，回 ops 与 summary（纯函数端点 /v1/workflow/compile）。\n校验失败一律回 workflow_dsl_invalid 与逐条 errors；同 id 同节点＝幂等更新（重放不重复建节点）。",
+        "Compile a full workflow declaration (DSL) into canvas ops, and apply it when project_id is given. Usage: read dsl first via canvas_get_state / workflow_read. A non-empty dsl is already auto-adopted as the skeleton (covering production-line nodes on legacy canvases) — edit its steps and send the whole source back, keeping each step's meta._origin_node_id verbatim (= the original canvas node id; only brand-new steps omit it, the compiler adds those nodes). · To change a prompt, edit the prompt on the generation step (the kind=image/video step): the generation panel and re-run read that node's own metadata.prompt. If an upstream \"prompt node\" step holds the same text (the canvas stores the prompt twice), update both to the same text — editing only the prompt step does not change the generation input. Values on a node that do not fit the DSL format (e.g. size that is not \"WxH\") are carried over verbatim by the read surface into that step's meta under the same key (e.g. meta.size) and are not lost; to change such a value, edit the same-named key in meta. An empty dsl has two causes: (1) the canvas has no production-line node; (2) the canvas is too large and the skeleton exceeded the snapshot budget — then the summary carries dsl_omitted: \"budget\" (it does NOT mean there is no production line): inspect the node list, edit node-by-node via canvas_apply_ops, or write a DSL from the current canvas (never create parallel nodes). Only cause (1) requires you to write a full DSL from the current canvas. With project_id it applies the ops atomically to that canvas project (owned by the key's account); without it, compile-only.",
       ),
       inputSchema: {
         type: "object",
@@ -983,7 +983,7 @@ function defineTools(): ToolDefinition[] {
           source: {
             type: "object",
             description:
-              "整份工作流声明：{ workflow, title?, steps: [{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }] }（steps 1..24，从 dsl 读出后修改）。",
+              "整份工作流声明：{ workflow, title?, steps: [{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }] }（steps 1..256；先 canvas_get_state / workflow_read 读出 dsl 再改其 steps，逐步 meta._origin_node_id 原样带回＝更新原画布节点、省略＝编译器新增节点）。",
           },
           current: {
             type: "object",

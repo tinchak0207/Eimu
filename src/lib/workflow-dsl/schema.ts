@@ -42,7 +42,7 @@ export interface WorkflowDslStep {
   meta?: Record<string, unknown>;
 }
 
-/** 一份工作流源码：steps 1..24。 */
+/** 一份工作流源码：steps 数为 WORKFLOW_STEPS_MIN..WORKFLOW_STEPS_MAX（见下方常量）。 */
 export interface WorkflowDslSource {
   /** 命名空间 ^[a-z][a-z0-9_-]{0,47}$。 */
   workflow: string;
@@ -57,7 +57,9 @@ export const WORKFLOW_NS_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
 export const STEP_ID_PATTERN = /^[a-z][a-z0-9_]{0,47}$/;
 export const SIZE_PATTERN = /^\d+x\d+$/;
 export const WORKFLOW_STEPS_MIN = 1;
-export const WORKFLOW_STEPS_MAX = 24;
+// 作者防呆上限（2026-10-09 裁定由 24 抬到 256；实测存量最大 221 步）。上限只防呆，不是
+// 画布容量的真约束——真约束是快照 460KB 预算，超了会按既有守卫整份丢 dsl。
+export const WORKFLOW_STEPS_MAX = 256;
 export const META_MAX_BYTES = 4096;
 
 const STEP_KINDS = new Set(["image", "text", "video", "audio", "director"]);
@@ -103,7 +105,7 @@ export function validateWorkflowDsl(raw: unknown): { ok: true; source: WorkflowD
   if (!Array.isArray(stepsRaw)) {
     errors.push({
       field: "steps",
-      message: `steps ${describeValueKind(stepsRaw) === "missing" ? "缺失" : `类型为 ${describeValueKind(stepsRaw)}`}；须为 1..24 个步骤对象的数组`,
+      message: `steps ${describeValueKind(stepsRaw) === "missing" ? "缺失" : `类型为 ${describeValueKind(stepsRaw)}`}；须为 ${WORKFLOW_STEPS_MIN}..${WORKFLOW_STEPS_MAX} 个步骤对象的数组`,
       hint: "至少写一个步骤，如 steps: [{ id: \"first\", title: \"第一步\" }]",
     });
   } else {

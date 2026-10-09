@@ -207,6 +207,8 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
           ...(currentStep !== undefined ? { currentStep } : {}),
           characterCards: activeCharacterCards,
           ...(canvas.nodeVersions ? { nodeVersions: canvas.nodeVersions } : {}),
+          // DSL namespace＝画布 project id（同一张画布＝一条产线；族4 的 workflow 名由此来）。
+          ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
         }),
       );
     }, 3000);

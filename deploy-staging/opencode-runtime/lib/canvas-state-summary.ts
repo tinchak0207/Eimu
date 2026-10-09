@@ -110,7 +110,9 @@ export function buildCanvasReceipt(
     // workflow_versions＝节点版本索引（回退面）。两者缺席＝画布上还没有可编译的产线/版本。
     ...(Array.isArray(s.dsl) ? { dsl: s.dsl } : {}),
     ...(Array.isArray(s.node_versions) ? { workflow_versions: s.node_versions } : {}),
+    // 读面信号（2026-10-09）：dsl_omitted＝骨架因快照预算被省（reason/sources/steps），不代表没有产线；原样透传。
+    ...(s.dsl_omitted !== undefined ? { dsl_omitted: s.dsl_omitted } : {}),
     nodes: nodes.map(summarizeCanvasNode),
-    hint: "摘要视图：连线只回数量、content/metadata 已截短（失败资讯完整）。单点完整资料（含位置/尺寸/版本史）+上下游用 node_id；bounds 为全部节点包围盒，摆放新节点用；全量用 view=full（很大会被截断，落盘档请用 read 按 offset/limit 读）。dsl＝当前产线的可逆声明：要改产线就读它、改它、用 workflow_write 编译回图（不要手拼 ops）；workflow_versions 供 workflow_rollback 回退。",
+    hint: "摘要视图：连线只回数量、content/metadata 已截短（失败资讯完整）。单点完整资料（含位置/尺寸/版本史）+上下游用 node_id；bounds 为全部节点包围盒，摆放新节点用；全量用 view=full（很大会被截断，落盘档请用 read 按 offset/limit 读）。dsl＝当前产线的可逆声明（**已覆盖存量画布上的产线节点，含未带产线身份键的提示词节点与生成配置节点**）：要改产线就读它、改它、用 workflow_write 编译回图（不要手拼 ops）；每步 `meta._origin_node_id` 由读面自动填好、原样带回，不要自己发明；**改提示词要改「生成步」（kind=image/video 的那一步）的 prompt**（生成面板与重跑读的是生成节点自身的 metadata.prompt；画布把提示词存两份时，只改提示词步不改变生成输入）；workflow_versions 供 workflow_rollback 回退。若带 `dsl_omitted`（骨架因快照预算被省；**不代表没有产线**），先看节点清单再决定改法。",
   }
 }

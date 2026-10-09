@@ -13,16 +13,15 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 export default tool({
   description:
     "把整份工作流声明（DSL）编译成画布操作并原子落图——「像改代码一样改工作流」的写入口。用法：先 canvas_get_state 读当前 dsl（工作流的可逆声明），按需增删改 steps，整份 source 交回本工具。\n\n" +
-    "**冷启动（画布没有 dsl 时）**：不必先读到 dsl 才能用本工具。两种情况都能交：①收编——按画布现有产线节点写 steps（每步对应一颗现有节点，meta 可带 _origin_node_id 指定原节点 id），交回后编译器把现有节点收编进 DSL 管理（幂等更新+键回填，不建平行节点）；②新建——按用户意图直接写整份新产线 source 交回。\n\n" +
+    "**冷启动／收编（`dsl` 与画布现状的关系）**：①`dsl` 非空 ⇒ 骨架**已自动收编**存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点），**直接改 `steps` 整份交回即可，每步的 `meta._origin_node_id` 原样带回、不要自己发明**；②`dsl` 为空 ⇒ 两种原因（画布上确实没有任何产线节点；或画布太大、骨架超出快照预算，摘要带 `dsl_omitted: \"budget\"`，**不代表没有产线**），此时按画布现状写 steps 收编（**每步对应一颗现有节点，`meta._origin_node_id` 指原节点 id**；交回后编译器把现有节点收编进 DSL 管理，幂等更新+键回填，不建平行节点）或按用户意图整份新建产线 source。\n\n" +
     "source 形状：{ workflow: \"<小写字母开头 [a-z0-9_-]>\"， title?: string， steps: [ { id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? } ] }。\n" +
     "· id：小写字母开头 [a-z0-9_]，档内唯一；决定画布节点 id（同 id 同节点，重复交=幂等更新）。\n" +
     "· kind：image（默认）| text | video | audio | director。\n" +
     "· needs：依赖的上游 step id（画布连线由它推出）。\n" +
     "· tool：必须是 harness 工具 id（image_generate / image_edit / …），不确定就省略。\n" +
-    "· gate: true = 人工批准门禁步。meta 是自由透传键值（≤4KB）。steps 1..24 个。\n\n" +
-    "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；③v0 不删节点：源码里移除的步骤只回 warnings。\n\n" +
-    "**改画布产线上任何东西（改单步 prompt／改结构）都用本工具**——它按 step id 幂等（同 id 同节点＝更新），先读 `dsl` 再整份交回即可；只有节点不在 `dsl` 里、或要动位置/尺寸/手调连线时，才用 `canvas_apply_ops`。**禁**手拼 `add_node`+`connect_nodes` 搭流程。\n\n" +
-    "**改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。",
+    "· gate: true = 人工批准门禁步。meta 是自由透传键值（≤4KB）。steps 1..256 个。**合法性透传：节点上不合 DSL 格式的值（例：`size` 不是 `宽x高`）读面会原样放进该步的 `meta`（同键，如 `meta.size`），不会丢；要改它就改 `meta` 里的同名键。**\n\n" +
+    "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；③从 source 里移除步骤不会删画布节点（v0 只回 `warnings`）；**族4 节点在首次收编前**被移除时不会回 warning，下一步读面仍会看到它——要真移除节点用 `canvas_apply_ops`。\n\n" +
+    "**改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**`dsl` 已自动覆盖存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点），每步的 `meta._origin_node_id` 由读面自动填好——原样带回即可，不要自己发明。**改提示词要改「生成步」（kind=image/video 的那一步）的 `prompt`**——生成面板与重跑读的是生成节点自身的 `metadata.prompt`；若上游另有「提示词节点步」持有同一段提示词（画布把提示词存了两份），把两处改成同一段：只改提示词步不会改变生成输入。节点不在 `dsl` 里，或要动 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`（`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。**",
   args: {
     source: tool.schema
       .object({
@@ -31,10 +30,10 @@ export default tool({
         steps: tool.schema
           .array(tool.schema.object({ id: tool.schema.string() }).passthrough())
           .min(1)
-          .describe("步骤数组（1..24）"),
+          .describe("步骤数组（1..256）"),
       })
       .passthrough()
-      .describe("整份工作流声明（从 canvas_get_state 的 dsl 读出后修改再交回）"),
+      .describe("整份工作流声明（从 canvas_get_state / workflow_history 的 `dsl` 读出、修改 `steps` 后整份交回；`dsl` 已自动覆盖存量画布上的产线节点，每步 `meta._origin_node_id` 原样带回）"),
     label: tool.schema.string().optional().describe("给用户看的一句话操作意图，如「把分镜从 3 步扩到 5 步」"),
     dry_run: tool.schema.boolean().optional().describe("true = 只编译不落图，先看 ops 与 summary（用于确认改动面）"),
   },
@@ -42,7 +41,7 @@ export default tool({
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
     if (!snap.has_state || snap.state === null) {
       return fail("no_canvas_state", "画布尚未上报状态，请让用户打开画布后再改工作流", {
-        hint: "画布尚未上报状态，请让用户打开画布后重试。**拿到状态后：改步骤内容或结构一律 `workflow_write`（读 `dsl`→改 `steps`→整份交回）；退回某步旧内容用 `workflow_history` 查 version → `workflow_rollback`。**",
+        hint: "画布尚未上报状态，请让用户打开画布后重试。**拿到状态后：改步骤内容或结构一律 `workflow_write`（读 `dsl`→改 `steps`→整份交回——`dsl` 已自动覆盖存量画布上的产线节点，每步 `meta._origin_node_id` 原样带回；改提示词改「生成步」（kind=image/video 那一步）的 prompt（生成读的是生成节点自身的 metadata.prompt）；`dsl` 为空才按画布现状自己写一份）。退回某步旧内容用 `workflow_history` 查 version → `workflow_rollback`。**",
       })
     }
     const s = (snap.state ?? {}) as Record<string, unknown>

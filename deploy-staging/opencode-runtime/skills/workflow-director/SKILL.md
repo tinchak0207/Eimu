@@ -11,7 +11,7 @@ metadata:
 
 接到任务先 `asset_search` 查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包（免费），命中先复用原文再进 workflow_*，查空才自编 prompt。
 
-> **改已有画布产线（world1）先看这里**：画布上看得见的产线（节点 id 形如 `wf-…`／`tpl-…`）的读写回滚走 **DSL 三件**——`canvas_get_state` 读 `dsl` → `workflow_write` 整份交回；要退回某步内容用 `workflow_history` → `workflow_rollback`（详见「像改代码一样改画布产线」节）。这是 **world1 画布链**；`workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate` 打的是 **world2 后端执行图**（`/internal/workflow/*`），两者不是同一张图，别混用。
+> **改已有画布产线（world1）先看这里**：画布上看得见的产线——节点 id 形如 `wf-…`／`tpl-…` 的产线节点，**以及存量画布上没有产线身份键的产线节点（提示词节点／生成配置节点）**——的读写回滚走 **DSL 三件**：`canvas_get_state` 读 `dsl`（**`dsl` 已自动覆盖上述全部产线节点**）→ `workflow_write` 整份交回；要退回某步内容用 `workflow_history` → `workflow_rollback`（详见「像改代码一样改画布产线」节）。这是 **world1 画布链**；`workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate` 打的是 **world2 后端执行图**（`/internal/workflow/*`），两者不是同一张图，别混用。
 
 ## 心智模型（只需要懂这些）
 - **工作流** = 一组节点 + 连线。节点是「要什么资产」：text(脚本/提示词)、config(生成设定)、image(图)、video(影片)。
@@ -106,26 +106,24 @@ content: {
 
 ## 像改代码一样改画布产线（world1 画布链，2026-10-03 人机共笔）
 
-画布上看得见的产线（节点 id 形如 `wf-…`／`tpl-…`）由前端画布（world1）拥有真相。改它**不是**逐节点手拼，而是读写它的**可逆声明（DSL）**：
+画布上看得见的产线由前端画布（world1）拥有真相——除了节点 id 形如 `wf-…`／`tpl-…` 的产线节点，**存量画布上那些没有产线身份键的产线节点（提示词节点／生成配置节点）现在也读得成 `dsl`**（`canvas_get_state` / `workflow_history` 的 `dsl` 已自动覆盖它们；每步 `meta._origin_node_id` 自动填好＝原画布节点 id，原样带回即可，不要自己发明）。改它**不是**逐节点手拼，而是读写它的**可逆声明（DSL）**：
 
 | 动作 | 工具 | 说明 |
 |---|---|---|
-| 读声明与版本史 | `canvas_get_state`（摘要带 `dsl`／`workflow_versions`）或 `workflow_history` | `dsl` 是 `WorkflowDslSource[]`（`{ workflow, title?, steps }`）；`workflow_versions` 是各节点版本史（`reason` ∈ created／generated／edited／metadata／revert） |
-| 改整条产线 | `workflow_write` | 读 `dsl` → 改 `steps`（改结构或改单步内容；用 `needs` 改依赖）→ **整份 source 交回**。先过全图校验（id 重复／needs 悬空／依赖成环／tool 非法 → 整份拒绝、画布不动、错误自带修复提示），过了才确定性编译成 ops 原子落图；`dry_run:true` 可只编译预览 |
+| 读声明与版本史 | `canvas_get_state`（摘要带 `dsl`／`workflow_versions`）或 `workflow_history` | `dsl` 是 `WorkflowDslSource[]`（`{ workflow, title?, steps }`），**已自动覆盖存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点）**；每步 `meta._origin_node_id`（＝原画布节点 id）**由读面自动填好、原样带回即可，不要自己发明**；`workflow_versions` 是各节点版本史（`reason` ∈ created／generated／edited／metadata／revert） |
+| 改整条产线 | `workflow_write` | 读 `dsl` → 改 `steps`（改结构或改单步内容；用 `needs` 改依赖）→ **整份 source 交回**。**改提示词＝改「生成步」（kind=image/video 的那一步）的 `prompt`**——生成面板与重跑读的是生成节点自身的 `metadata.prompt`；画布把提示词存了两份（提示词节点步＋生成步）时，要两处改成同一段，只改提示词步不改变生成输入。先过全图校验（id 重复／needs 悬空／依赖成环／tool 非法 → 整份拒绝、画布不动、错误自带修复提示），过了才确定性编译成 ops 原子落图；`dry_run:true` 可只编译预览 |
 | 退回某步内容 | `workflow_history` 查 `version` → `workflow_rollback` | 只还原内容（title+metadata），不动位置/尺寸；回滚本身也落一版（`reason=revert`），可再回滚回去 |
 
 `steps` 形状：`{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }`（`id` 小写字母开头 `[a-z0-9_]`、档内唯一，**同 id 同节点＝幂等更新**；`needs` 驱动画布连线；`kind` ∈ image／text／video／audio／director，缺省 image）。
 
 **负面案例（禁止）**：
-- **改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。——改**整条产线结构**（加/删步骤、重排依赖）固然用它，**单步微调也走它**：同 id 同节点＝幂等更新（读了整份 `dsl`、只动第 2 步的 prompt、整份交回，就是正确做法）。
-- **节点不在 `dsl` 里，或 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。
-- **禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），也和人工拖过的坐标打架。
+- **改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**`dsl` 已自动覆盖存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点），每步的 `meta._origin_node_id` 由读面自动填好——原样带回即可，不要自己发明。**改提示词要改「生成步」（kind=image/video 的那一步）的 `prompt`**——生成面板与重跑读的是生成节点自身的 `metadata.prompt`；若上游另有「提示词节点步」持有同一段提示词（画布把提示词存了两份），把两处改成同一段：只改提示词步不会改变生成输入。节点不在 `dsl` 里，或要动 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`（`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。**——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），也和人工拖过的坐标打架。
 - **人拖过的节点位置不会被覆盖**：落图时节点位置由画布排布，人工编辑优先。
 - **v0 不删节点**：`source` 里移除的步骤只回 warnings，不会真删画布上已有节点。
 
 ## 标准流程：自订工作流（无模板）
 
-> **world 判定（2026-10-03）**：本节的 `workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate` **全部打 world2 后端执行图**（`/internal/workflow/*`；依据 `tools/workflow_start.ts:49`、`workflow_add_node.ts:21`、`workflow_connect.ts:17`、`workflow_generate.ts:17`）。**若用户要改的是画布上看得见的那条产线（节点 id 形如 `wf-…`／`tpl-…`，world1）**，不要走本节手拼路径，改走上一节的 DSL 路径（`canvas_get_state` 读 `dsl` → `workflow_write`；退版用 `workflow_history`／`workflow_rollback`）。
+> **world 判定（2026-10-03）**：本节的 `workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate` **全部打 world2 后端执行图**（`/internal/workflow/*`；依据 `tools/workflow_start.ts:49`、`workflow_add_node.ts:21`、`workflow_connect.ts:17`、`workflow_generate.ts:17`）。**若用户要改的是画布上看得见的那条产线（节点 id 形如 `wf-…`／`tpl-…`，或存量画布上没有产线身份键的提示词节点／生成配置节点；world1）**，不要走本节手拼路径，改走上一节的 DSL 路径（`canvas_get_state` 读 `dsl` → `workflow_write`；退版用 `workflow_history`／`workflow_rollback`）。
 
 用户要的不是模板位场景时：
 

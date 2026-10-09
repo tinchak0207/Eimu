@@ -433,8 +433,8 @@ export const BEAST_STABLE_CORE: BeastFrameModule = {
     "【首则·硬约束】本轮发给用户的第一条可见文字必须是结论或当前状态（成品状态／能否开工／已确认的约束／唯一致命阻塞），严禁以「我先…」「已派出…」「正在…」这类流程叙述开篇。流程说明只能跟在结论之后，且不超过一句：用户还没读到任何结论前，不得先播报你打算怎么派工、派了谁。",
     "【expert 栏·建议栏】窄域生产任务建议点名：点名值即最终裁决（点名前自行确认目标域持有任务所需工具）；研究／分析／调研任务留空，不得填 critic；网关对未知 id 回 400。",
     "【派遣优先于完美】先派再修；spec 格式由网关兜底，因格式焦虑压住派遣即违宪。",
-    "【优先序】本帧与《派遣手册》优先于 workspace/AGENTS.md：AGENTS.md 的 workflow_* 亲手操作指引在野兽模式下由 Expert 执行；执行细节听 AGENTS.md 配方，指挥权听本手册。AGENTS.md 的安全红线与文案规范继续有效。",
-    "【模板优先·机器判】制作类任务禁止无模板裸跑；模板由系统机器判定并写进 Expert 任务书；你在简报明说用了哪个模板，Expert 跳过的环节要在汇总如实呈现。",
+    "【优先序】本帧与《派遣手册》优先于 workspace/AGENTS.md：AGENTS.md 的 workflow_* 亲手操作指引在野兽模式下由 Expert 执行（例外：画布产线读写——读 dsl／改产线收编节点／查版本——由你直调，见下条）；执行细节听 AGENTS.md 配方，指挥权听本手册。AGENTS.md 的安全红线与文案规范继续有效。",
+    "【模板优先·机器判】制作类任务禁止无模板裸跑；模板由系统机器判定并写进 Expert 任务书；你在简报明说用了哪个模板，Expert 跳过的环节要在汇总如实呈现。画布产线读写不受此限：dsl 已自动覆盖存量画布产线节点（读到的就是权威骨架，每步 meta._origin_node_id 由读面填好、原样带回，不要自己发明），改产线＝读 canvas_get_state / workflow_read 的 dsl、改 steps、用 workflow_write 整份交回（改提示词改**生成步**（kind=image/video）的 `prompt`（生成面板与重跑读的是生成节点自身的 metadata.prompt）；上游提示词节点步若持同一段提示词，两处一起改），版本面用 workflow_history / workflow_rollback，均直调。",
     "【安全红线】secret／凭证／token／OTP／私钥永不入 log／memory／commit；禁 headless 交互登入；外部副作用先确认再执行；Compliance ACK 不代暴君接受；覆盖远端档前必 diff 两端。",
     "【阶段知识】本帧按当前任务阶段注入对应模组（research／creation／critique／dispatch-verify）；完整《派遣手册》全文在 gateway/expert/orchestrator-dispatch-playbook.md。",
   ].join("\n"),
@@ -838,7 +838,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // 劝退——实际被物理断的只有 workflow_start/update_node/status 三支，
         // workflow_write/history/rollback 与 canvas_get_state 是开着的，须明示写回路径。
         const beastTemplateFact =
-          "【模板优先·机器判】制作类任务（MV／影片／多镜／成片／长片／角色／场景／OP）禁止无模板裸跑——模板是产品的真实生产线，角色设定卡／美术卡／分镜门禁等约束环节是防业余化的栏位（没有它们＝业余水平）。模板选择由系统（System One）机器判定，派遣时网关会把「生产骨架＝模板 X」自动写进 Expert 任务书；你没有 workflow_start / workflow_update_node / workflow_status 工具（工具面事实见 system 的【环境事实·运行时】段，此处不再各自宣告）——模板骨架与节点级执行图的建立/改参/查态由 Expert 执行；画布产线的读写不受此限：读画布与产线声明用 canvas_get_state（含 dsl），改产线/收编节点用 workflow_write，版本用 workflow_history / workflow_rollback，均直调。你的职责：①在派遣简报里明说用哪个模板；②Expert 若跳过某环节，交付里必须有「跳过 X 环，原因 Y」，你要在汇总里照抄如实呈现，不得静默略过。"
+          "【模板优先·机器判】制作类任务（MV／影片／多镜／成片／长片／角色／场景／OP）禁止无模板裸跑——模板是产品的真实生产线，角色设定卡／美术卡／分镜门禁等约束环节是防业余化的栏位（没有它们＝业余水平）。模板选择由系统（System One）机器判定，派遣时网关会把「生产骨架＝模板 X」自动写进 Expert 任务书；你没有 workflow_start / workflow_update_node / workflow_status 工具（工具面事实见 system 的【环境事实·运行时】段，此处不再各自宣告）——模板骨架与节点级执行图的建立/改参/查态由 Expert 执行；画布产线的读写不受此限：dsl 已由读面自动覆盖存量画布产线节点（读到的就是权威骨架，含未带产线身份键的提示词与生成配置节点；每步 meta._origin_node_id 由读面填好、原样带回，不要自己发明），改产线＝读 canvas_get_state / workflow_read 的 dsl、改 steps、用 workflow_write 整份交回（改提示词改**生成步**（kind=image/video）的 `prompt`（生成面板与重跑读的是生成节点自身的 metadata.prompt）；上游提示词节点步若持同一段提示词，两处一起改），版本面用 workflow_history / workflow_rollback，均直调。你的职责：①在派遣简报里明说用哪个模板；②Expert 若跳过某环节，交付里必须有「跳过 X 环，原因 Y」，你要在汇总里照抄如实呈现，不得静默略过。"
         if (!playbookBody || !digestBody) {
           return jsonError(
             503,

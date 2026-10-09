@@ -8,8 +8,13 @@
 // 本档把「上行载荷」抽成纯函式：节点仍走既有压缩白名单，另加两个新栏位——
 //   · `dsl`：`decompileWorkflow` 从**全量 reducer state**（非压缩节点）反推的
 //     `WorkflowDslSource[]`。这是 agent 读回自己作品的可逆表达（图→声明）。
+//     namespace 用画布 project id——「同一张画布＝一条产线」，族4（无产线身份键的存量
+//     「生成单元」）的 workflow 名由此来；无 projectId 时 decompile 内部倒退到节点 id（见 A1）。
 //   · `node_versions`：节点版本索引（逐版只留 version/createdAt/reason/title，不带 metadata）。
 //     供 agent 读「这格改过几版」并经 `revert_node` 回退（REQ-B4 回滚面）。
+//   · `dsl_omitted`：仅当**有 dsl 但因预算被整份删掉**时出现的信号
+//     `{ reason: "budget", sources, steps }`。语义＝「有骨架但装不下」——读面/agent 不得
+//     据此认定画布没有产线节点（否则会按现状另写一份 DSL 造平行节点，伤用户画布）。
 //
 // 大小守卫：gateway `CANVAS_STATE_MAX_BYTES = 512KB`，超限整份 413（快照全丢）。
 // `dsl` 会复制一份 prompt（节点 metadata 里已有一份），故先算 base、逐栏位加、超预算就
@@ -47,6 +52,8 @@ export interface AgentCanvasSnapshotInput {
   currentStep?: number;
   characterCards?: CharacterCard[];
   nodeVersions?: CanvasNodeVersion[];
+  /** 画布 project id：作 DSL namespace（同一张画布＝一条产线），供族4 命名。 */
+  projectId?: string;
 }
 
 function byteLength(value: unknown): number {
@@ -85,10 +92,12 @@ export function buildNodeVersionIndex(
   return [...byNode.values()];
 }
 
-/** DSL 反推：从**全量** reducer state 算（不可用压缩节点，白名单已剥 DSL 运行期键）。 */
-export function buildWorkflowDsl(nodes: CanvasNode[], connections: CanvasConnection[]): WorkflowDslSource[] {
+/** DSL 反推：从**全量** reducer state 算（不可用压缩节点，白名单已剥 DSL 运行期键）。
+ *  namespace 用画布 project id ——「同一张画布＝一条产线」，族4（无产线身份键的存量
+ *  「生成单元」）的 workflow 名由此来；无 projectId 时 decompile 内部倒退到节点 id（见 A1）。 */
+export function buildWorkflowDsl(nodes: CanvasNode[], connections: CanvasConnection[], namespace?: string): WorkflowDslSource[] {
   try {
-    return decompileWorkflow({ nodes, connections });
+    return decompileWorkflow({ nodes, connections }, namespace ? { namespace } : undefined);
   } catch {
     // 反推失败（极端脏 metadata）不该拖垮整份快照：略过 dsl，agent 退化成只读节点。
     return [];
@@ -100,7 +109,7 @@ export function buildWorkflowDsl(nodes: CanvasNode[], connections: CanvasConnect
  * 超过预算时依序丢 `dsl`、`node_versions`（新增面），既有栏位不动。
  */
 export function buildAgentCanvasSnapshot(input: AgentCanvasSnapshotInput): Record<string, unknown> {
-  const { nodes, connections, selectedNodeIds, viewport, projectType, currentStep, characterCards, nodeVersions } = input;
+  const { nodes, connections, selectedNodeIds, viewport, projectType, currentStep, characterCards, nodeVersions, projectId } = input;
 
   const payload: Record<string, unknown> = {
     nodes: nodes.map((n) => ({
@@ -141,12 +150,22 @@ export function buildAgentCanvasSnapshot(input: AgentCanvasSnapshotInput): Recor
       : {}),
   };
 
-  const dsl = buildWorkflowDsl(nodes, connections);
+  const dsl = buildWorkflowDsl(nodes, connections, projectId);
   if (dsl.length > 0) payload.dsl = dsl;
   const versionIndex = buildNodeVersionIndex(nodes, nodeVersions);
   if (versionIndex.length > 0) payload.node_versions = versionIndex;
 
   if (byteLength(payload) > AGENT_SNAPSHOT_BUDGET_BYTES) delete payload.dsl;
   if (byteLength(payload) > AGENT_SNAPSHOT_BUDGET_BYTES) delete payload.node_versions;
+  // 预算把骨架丢掉时留信号（2026-10-09 hack 修复）：`dsl_omitted` 语义＝「有骨架但装不下」，
+  // 读面/agent 不得据此认定画布没有产线节点——否则会按现状另写一份 DSL 造平行节点（伤画布）。
+  // 只在「本来有 dsl、又被预算删掉」时出现；没超预算时该键不出现。
+  if (dsl.length > 0 && payload.dsl === undefined) {
+    payload.dsl_omitted = {
+      reason: "budget",
+      sources: dsl.length,
+      steps: dsl.reduce((sum, source) => sum + source.steps.length, 0),
+    };
+  }
   return payload;
 }
