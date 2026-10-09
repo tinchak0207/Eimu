@@ -63,22 +63,54 @@ async function resolveDerivedKey(req: NextRequest): Promise<DerivedKeyResult> {
 
 type RouteContext = { params: Promise<{ path?: string[] }> };
 
+/**
+ * 逐段白名单校验（第一把锁）。
+ *
+ * catch-all 的段已被 Next 解码，任何一段都不准改变上游路径形状。
+ *
+ * 坑（2026-10-09 对抗验收生产复现）：`encodeURIComponent("..") === ".."` ——
+ * 点号不在编码集内，所以「逐段重新编码」挡不住 `..`；而 Next 交给我们的 catch-all
+ * 段是已解码的（`..%2f..%2fimage-control%2fapi%2fversion` 会被解成一个含 `/` 的段），
+ * `encodeURIComponent` 也不会阻止段内的 `..`。随后 URL 归一化把 `..` 消解掉，
+ * 请求就落到网关 origin 的任意路径 —— 同源 SSRF（突破 `/agent/v1/` 收窄面，
+ * 可命中 `/image-control/*` 等控面前缀；GET/POST/DELETE 都会透传）。
+ * 故必须在拼接前逐段拒绝，不能只靠编码。
+ */
+function isUnsafeUpstreamSegment(segment: string): boolean {
+  if (segment === "" || segment === "." || segment === "..") return true;
+  // 段内含路径分隔符（Next 解码后可能出现）。
+  if (segment.includes("/") || segment.includes("\\")) return true;
+  // 双重编码残留：段里仍带 %2f/%5c（含大小写），上游再解一次就是分隔符。
+  if (/%2f|%5c/i.test(segment)) return true;
+  return false;
+}
+
 async function proxy(req: NextRequest, context: RouteContext, method: "GET" | "POST" | "DELETE"): Promise<Response> {
   const resolved = await resolveDerivedKey(req);
   if (!resolved.ok) return resolved.response;
 
   const { path } = await context.params;
-  // catch-all 的段已被 Next 解码；逐段重新编码再拼接，防止路径里的特殊字符
-  // 改变上游路由语义。空路径直接 404（不是网关语义，是本路由不存在）。
+  // catch-all 的段已被 Next 解码。先逐段白名单校验（第一把锁），再重新编码拼接，
+  // 防止路径里的特殊字符（尤其 `..`）改变上游路由语义。
+  // 空路径直接 404（不是网关语义，是本路由不存在）。
   // 插件 baseUrl 可能带 agent/v1 前缀（.../biz/agent/v1），拼接时剥掉重复段，
   // 两种写法（.../biz/sessions 与 .../biz/agent/v1/sessions）都归一到同一上游路径。
-  const segs = (path ?? []).map((segment) => encodeURIComponent(segment))
+  const rawSegs = path ?? [];
+  if (rawSegs.some(isUnsafeUpstreamSegment)) {
+    return fail(404, "路径不存在。", "not_found");
+  }
+  const segs = rawSegs.map((segment) => encodeURIComponent(segment))
   while (segs.length >= 2 && segs[0] === "agent" && segs[1] === "v1") segs.splice(0, 2)
   const subPath = segs.join("/");
   if (!subPath) {
     return fail(404, "路径不存在。", "not_found");
   }
   const upstreamUrl = `${agentGatewayOrigin()}/agent/v1/${subPath}${req.nextUrl.search}`;
+  // 第二把锁（兜底）：不管前面怎么绕，拼完再解析一遍，归一化后的 pathname
+  // 必须仍在 `/agent/v1/` 之内。`..` 已被 URL 归一化消解，这里看的就是最终落点。
+  if (!new URL(upstreamUrl).pathname.startsWith("/agent/v1/")) {
+    return fail(404, "路径不存在。", "not_found");
+  }
 
   // SSE 特判：GET 且末段是 events（/agent/v1/sessions/:id/events）。
   // 不带超时（事件流可以合法地静默数分钟），流式透传。

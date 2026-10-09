@@ -278,8 +278,8 @@ export async function getSkuRunJobs(
 ): Promise<GenerationJob[]> {
   const rows = await sql<JobRow[]>`
     SELECT * FROM generation_job
-    WHERE tenant_id = \${tenantId}
-      AND idempotency_key LIKE (\${SKU_RUN_KEY_PREFIX + ":" + runId + ":%"})
+    WHERE tenant_id = ${tenantId}
+      AND idempotency_key LIKE (${SKU_RUN_KEY_PREFIX + ":" + runId + ":%"})
     ORDER BY idempotency_key ASC
   `;
   const jobs = rows.map(mapGenerationJob);

@@ -145,11 +145,27 @@ function controlPlaneOrigin(): string {
   return (process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN ?? "").trim().replace(/\/+$/, "");
 }
 
+// 上游回应头白名单：照 `src/app/api/v1/openapi.json/route.ts` 的承诺（限流 60/min，
+// 「所有认证通过的回应都带 x-ratelimit-* 头」；trace_id 同步落在 X-Request-Id），
+// 以及 429 的 retry-after。**只**放行这些，不做整份 copy（避免把内部头一并带出去）。
+// 上游缺该头时不凭空造（缺失即不放）。
+const FORWARDED_RESPONSE_HEADERS = [
+  "x-ratelimit-limit-requests",
+  "x-ratelimit-remaining-requests",
+  "x-ratelimit-reset-requests",
+  "x-request-id",
+  "retry-after",
+] as const;
+
 function safeResponseHeaders(upstream: Response): Headers {
   const headers = new Headers();
   const contentType = upstream.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
   headers.set("cache-control", "no-store");
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   return headers;
 }
 
