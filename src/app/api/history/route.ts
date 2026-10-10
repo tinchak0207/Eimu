@@ -20,6 +20,8 @@ import type { HistoryEntry, HistoryQuery } from "@/lib/history-types";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { listGenerationJobsForTenant } from "@/lib/generation-core/job-repository";
 import { generationJobHistoryEntry } from "@/lib/generation-task-history";
+import { loadScopedLibrary } from "@/lib/asset-library";
+import { filterByProjectTag } from "@/lib/asset-scope";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
@@ -54,6 +56,7 @@ function readQuery(searchParams: URLSearchParams): HistoryQuery {
   const keyword = searchParams.get("keyword")?.trim();
   const modelId = searchParams.get("modelId")?.trim();
   const imageSize = searchParams.get("imageSize")?.trim();
+  const projectId = searchParams.get("projectId")?.trim();
   const since = parseTimestamp(searchParams.get("since"));
   const until = parseTimestamp(searchParams.get("until"));
 
@@ -61,6 +64,7 @@ function readQuery(searchParams: URLSearchParams): HistoryQuery {
     ...(keyword ? { keyword: keyword.slice(0, 200) } : {}),
     ...(modelId ? { modelId } : {}),
     ...(imageSize ? { imageSize } : {}),
+    ...(projectId ? { projectId } : {}),
     ...(parseBoolean(searchParams.get("starred")) ? { starredOnly: true } : {}),
     ...(parseBoolean(searchParams.get("withImage")) ? { withImageOnly: true } : {}),
     ...(since !== undefined ? { since } : {}),
@@ -128,9 +132,26 @@ async function fetchControlPlaneHistory(
 }
 
 /**
+ * 该项目标签下「来自生成记录」的资产 `source.id` 集合（历史条目 id）。
+ *
+ * 由**服务端自己算**（不依赖客户端把已加载条目过滤一遍）：这样 /api/history?projectId
+ * 的分页能同时覆盖「新记录（有盖章栏位 projectIds）」与「存量记录（无栏位、只有资产血缘）」
+ * ——谓词见 matchesHistoryQuery。复用既有资产库入口 loadScopedLibrary（列出当前用户
+ * 全部资产候选）＋纯函数 filterByProjectTag（与资产面板同一实作），不新造跨 store 遍历。
+ */
+async function projectHistoryLineageIds(userId: number, projectId: string): Promise<Set<string>> {
+  const snapshot = await loadScopedLibrary({ userId, projectId });
+  const ids = new Set<string>();
+  for (const item of filterByProjectTag(snapshot.candidates, projectId)) {
+    if (item.source?.type === "history" && item.source.id) ids.add(item.source.id);
+  }
+  return ids;
+}
+
+/**
  * GET /api/history
  *
- * 查询参数：cursor、pageSize、keyword、modelId、imageSize、starred、withImage、since、until、facets。
+ * 查询参数：cursor、pageSize、keyword、modelId、imageSize、starred、withImage、since、until、projectId、facets。
  * 返回 `{ success, data: { entries, cursor, total }, facets? }`。
  */
 export async function GET(req: NextRequest) {
@@ -140,6 +161,18 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const pageSize = Number(searchParams.get("pageSize")) || HISTORY_PAGE_SIZE;
   const cursor = searchParams.get("cursor");
+
+  const query = readQuery(searchParams);
+  // 项目维度：服务端自己算血缘 id 集合。算不出来（后端不可用等）**不得放行全部记录**，
+  // 照既有错误语义回 500（与 listGeneratedHistoryEntries 抛错时同款），fail-closed。
+  if (query.projectId) {
+    try {
+      query.projectLineageIds = await projectHistoryLineageIds(auth.user.id, query.projectId);
+    } catch (error) {
+      console.error("[history] 项目血缘索引不可用，拒绝放行全部记录", error);
+      return fail(500, "项目筛选暂时不可用，请稍后重试。");
+    }
+  }
 
   const storedEntries = await listGeneratedHistoryEntries(auth.user.id);
   let taskEntries: HistoryEntry[] = [];
@@ -154,9 +187,11 @@ export async function GET(req: NextRequest) {
     taskEntries = await fetchControlPlaneHistory(req, searchParams);
   }
   const merged = mergeHistoryEntries(storedEntries, taskEntries);
-  const data = paginateHistoryEntries(filterHistoryEntries(merged, readQuery(searchParams)), cursor, pageSize);
+  const data = paginateHistoryEntries(filterHistoryEntries(merged, query), cursor, pageSize);
 
   // 分面基于全量记录，只有第一屏需要；翻页时不必重复计算。
+  // 刻意不随 projectId 收窄（最小改动）：分面是「筛选栏的可选值」而非分页结果，
+  // 且 client 过滤时期它就是全量口径——保持逐字不变，不引入第二套语义。
   const facets = parseBoolean(searchParams.get("facets")) === true
     ? buildHistoryFacets(merged)
     : undefined;

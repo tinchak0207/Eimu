@@ -116,6 +116,20 @@ export function getCreativeProjectsServerSnapshot(): CreativeProjectsState {
   return EMPTY_STATE;
 }
 
+/**
+ * 按网关会话 id 反查它所属的创作项目 id（无归属／store 未载入 → null）。
+ * 归属真源＝raw.creativeProjects[].chats[].sessionId（与项目档同源，不另立一套）。
+ * 供**非 hook 的写入路径**（历史补录）盖章用；store 尚未 refresh 时回 null＝不盖章（不猜）。
+ */
+export function projectIdForSession(sessionId: string | null | undefined): string | null {
+  const target = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!target) return null;
+  for (const project of raw.creativeProjects) {
+    if (project.chats.some((chat) => chat.sessionId === target)) return project.id;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────── 纯逻辑
 
 function parseTime(iso: string): number {

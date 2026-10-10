@@ -325,6 +325,7 @@ function historyQueryParams(
   if (query.keyword) params.set("keyword", query.keyword);
   if (query.modelId) params.set("modelId", query.modelId);
   if (query.imageSize) params.set("imageSize", query.imageSize);
+  if (query.projectId) params.set("projectId", query.projectId);
   if (query.starredOnly) params.set("starred", "1");
   if (query.withImageOnly) params.set("withImage", "1");
   if (query.since !== undefined) params.set("since", String(query.since));

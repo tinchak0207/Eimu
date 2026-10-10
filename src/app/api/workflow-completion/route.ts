@@ -61,6 +61,7 @@ import { renderWorkflowDagPng } from "@/lib/dag-png-server";
 import { put } from "@/lib/blob-backend";
 import { saveGeneratedHistoryEntry } from "@/lib/server-history-store";
 import { sanitizeBlobSegment } from "@/lib/history-types";
+import { listCreativeProjects } from "@/lib/creative-project/store";
 import { ingestMemoryDocs } from "@/lib/agent-memory-store";
 import { deriveMemoryOwnerKey } from "@/lib/agent-memory-injection";
 import { extractWorkflowMemoryBody, shouldPersistWorkflow, WORKFLOW_MEMORY_BODY_MAX } from "@/lib/workflow-memory";
@@ -207,6 +208,24 @@ async function persistWorkflowMemory(input: {
   }
 }
 
+/**
+ * 把 gateway 推送 payload 的 `sessionId` 解析成创作项目 id（归属真源＝项目档
+ * CreativeProject.chats[].sessionId）。gateway 侧零改动——payload 本来就带 sessionId
+ * （见 deploy-staging/gateway/workflow-gw.ts `payload = { …, sessionId: state.sessionId }`）。
+ * 读失败只记 log 回空：盖章是旁路，不影响历史写入（fail-soft，与本站点其它旁路一致）。
+ */
+async function resolveProjectIdsForSession(userId: number, sessionId: string): Promise<string[]> {
+  try {
+    const projects = await listCreativeProjects(userId);
+    return projects
+      .filter((project) => project.chats.some((chat) => chat.sessionId === sessionId))
+      .map((project) => project.id);
+  } catch (error) {
+    console.error("[workflow-completion] 项目归属解析失败，本条记录不盖章。", error);
+    return [];
+  }
+}
+
 /** 非同步渲染 DAG 缩图并上传 Blob；任何失败回 null（呼叫端留空缩图栏位）。 */
 async function renderAndUploadDag(
   userId: number,
@@ -294,6 +313,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const nodeCount = dagNodes.length;
   const prompt = `工作流 ${workflowLabel}（${nodeCount} 节点）`;
 
+  // 项目盖章（R3-W2）：payload 的 sessionId → 创作项目 id。零 gateway 改动。
+  const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+  const projectIds = sessionId ? await resolveProjectIdsForSession(userId, sessionId) : [];
+
   // DAG 缩图：先渲染再写历史。刻意不是完全 fire-and-forget——若先写记录再补缩图，
   // 得为了「把 URL 补回去」再读一次索引、写第二次（多一次整份索引的读写与竞态）。
   // 而渲染失败已被 catch 成 null，最坏情况只是这条记录少一张缩图，不影响回应语义。
@@ -318,6 +341,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       entryKind: "workflow",
       workflow,
       taskId: entryId,
+      ...(projectIds.length ? { projectIds } : {}),
     });
   } catch (error) {
     console.error("[workflow-completion] 历史写入失败。", error);

@@ -6,6 +6,8 @@ import type {
 } from "@/lib/agent-chat-types";
 import type { HistoryEntry } from "@/lib/history-types";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { getCurrentAgentSession } from "@/lib/agent-current-session";
+import { projectIdForSession } from "@/hooks/use-creative-projects";
 import { PROVIDER_KEY } from "@/lib/provider-key";
 
 /**
@@ -121,6 +123,17 @@ export function agentHistoryEntryForMedia(item: AgentMediaItem): HistoryEntry {
 }
 
 /**
+ * 给要落库的条目盖章「当前会话所属的创作项目」（R3-W4）。已带章 / 无会话上下文 /
+ * store 未载入 → 原样返回（不猜、不捏造）。盖章只走 POST /api/history 的白名单收口
+ * （normalizeHistoryEntry 认 `projectIds`），不改条目 id，故不影响幂等 upsert。
+ */
+function withCurrentProject(entry: HistoryEntry): HistoryEntry {
+  if (entry.projectIds?.length) return entry;
+  const projectId = projectIdForSession(getCurrentAgentSession());
+  return projectId ? { ...entry, projectIds: [projectId] } : entry;
+}
+
+/**
  * 写入历史：沿用既有 POST /api/history（含 token / x-user-id 身分标头）。
  * 抓不到 token 直接回 false——未登入不该送出裸请求，呼叫方静默处理即可。
  */
@@ -134,7 +147,11 @@ export async function saveAgentMediaToHistory(entry: HistoryEntry): Promise<bool
   const user = getStoredUser();
   if (user?.id) headers["x-user-id"] = String(user.id);
   try {
-    const res = await fetch("/api/history", { method: "POST", headers, body: JSON.stringify(entry) });
+    const res = await fetch("/api/history", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(withCurrentProject(entry)),
+    });
     return res.ok;
   } catch {
     return false;

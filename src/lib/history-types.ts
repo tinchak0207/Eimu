@@ -9,13 +9,15 @@
 // 把服务端的图、本地的工作流参数、计费日志的真实消耗合并成同一条记录。
 //
 // 本模块只用 `import type` 跨文件引用，保证可以在 `node --test` 下直接导入做单元测试。
-// 唯一运行时依赖是 ./lineage（REQ-D1 血统清洗，零依赖纯函数档，不破坏上面这条）。
+// 仅有的两个运行时依赖都是零依赖纯函数档：./lineage（REQ-D1 血统清洗）与
+// ./asset-scope（项目标签清洗 normalizeProjectIds），不破坏上面这条。
 
 import type { GenerationWorkflowMetadata } from "./image-types";
 import { QUOTA_PER_COIN } from "./quota-constants";
 import { PROVIDER_KEY } from "./provider-key";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
+import { normalizeProjectIds } from "./asset-scope";
 // 交付物种类真源（./deliverable-kind，零依赖纯函数档）：
 // 历史侧的种类型别、mediaType 白名单、结果推断、hasImage 全由注册表推导。
 import {
@@ -122,6 +124,14 @@ export interface HistoryEntry {
   lineage?: LineageLink[];
   /** parents 曾超上限被截尾的显式标记（读时据此显示「仅保留最近 N 个」）。 */
   lineageTruncated?: boolean;
+  /**
+   * 项目标签（多归属，与资产标签同一套清洗规则）：这条记录写入时盖章的创作项目 id 集合。
+   * 可选、纯加法，存量记录没有这个栏位。服务端 projectId 过滤的谓词＝本栏位命中
+   * **或** 记录 id 落在「该项目标签资产以 source.type==="history" 引用的 id 集合」里
+   * （见 matchesHistoryQuery）——后者兜住没有栏位的存量记录。与 lineage 同裁决：
+   * 只给人看/筛，不进 agent 压缩白名单或 canvas 节点 metadata。
+   */
+  projectIds?: string[];
 }
 
 /** 服务端存储实体：比 HistoryEntry 多一个 userId。 */
@@ -144,6 +154,16 @@ export interface HistoryQuery {
   withImageOnly?: boolean;
   /** 只看某一类记录（图片 / 视频 / 音频 / 工作流）。缺省不限。 */
   entryKind?: HistoryEntryKind;
+  /**
+   * 只看某个创作项目（`prj_…`）的记录。谓词见 matchesHistoryQuery：盖章栏位命中，
+   * 或记录 id 落在 projectLineageIds 里。缺省不限。
+   */
+  projectId?: string;
+  /**
+   * 该项目标签资产的血缘 id 集合（服务端在 route 里算好挂上；不是 URL 参数）。
+   * 只服务本档的谓词，缺省＝空集合（此时只剩「盖章栏位」一路命中）。
+   */
+  projectLineageIds?: ReadonlySet<string>;
   /** 闭区间，毫秒时间戳。 */
   since?: number;
   until?: number;
@@ -390,6 +410,9 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
   // REQ-D1：血统栏位走纯函数白名单清洗（复用 ./lineage 收口），非法条目丢弃、
   // 超上限截尾并显式标记。缺栏＝来源不明，不捏造 parents。
   const lineageRaw = Array.isArray(raw.lineage) ? normalizeLineageLinks(raw.lineage) : null;
+  // 项目标签走资产标签同一套收口（./asset-scope.normalizeProjectIds：去重、
+  // 非空 string、trim 后 slice(0,120)、上限 20）；清洗后为空＝不写栏位。
+  const projectIds = normalizeProjectIds(raw.projectIds);
 
   return {
     id,
@@ -422,6 +445,7 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
           ...(lineageRaw.truncated || raw.lineageTruncated === true ? { lineageTruncated: true } : {}),
         }
       : {}),
+    ...(projectIds.length ? { projectIds } : {}),
     schemaVersion: finiteNumber(raw.schemaVersion) ?? HISTORY_SCHEMA_VERSION,
   };
 }
@@ -481,6 +505,8 @@ function enrich(base: HistoryEntry, extra: HistoryEntry): HistoryEntry {
     merged.lineage = extra.lineage;
     if (extra.lineageTruncated) merged.lineageTruncated = true;
   }
+  // 项目标签：两面取较全的一份（同 lineage 精神；同一id 的两面记录归属同一项目）。
+  if (!merged.projectIds?.length && extra.projectIds?.length) merged.projectIds = extra.projectIds;
   if (extra.starred) merged.starred = true;
   // 取更早的那个时间戳：客户端在所有出图落地后才记录，服务端在单个出图成功时就记录。
   if (extra.generatedAt < merged.generatedAt) merged.generatedAt = extra.generatedAt;
@@ -624,6 +650,13 @@ export function matchesHistoryQuery(entry: HistoryEntry, query: HistoryQuery): b
   if (query.imageSize && entry.workflow?.imageSize !== query.imageSize) return false;
   if (query.starredOnly && !entry.starred) return false;
   if (query.withImageOnly && !hasImage(entry)) return false;
+  // 项目维度：盖章栏位命中 **或** 记录 id 落进该项目的血缘集合（存量记录无栏位，靠后者）。
+  // projectLineageIds 缺省＝空集合 → 只有盖章一路命中（fail-closed，不因算不出来而放行）。
+  if (query.projectId) {
+    const stamped = entry.projectIds?.includes(query.projectId) === true;
+    const viaLineage = query.projectLineageIds?.has(entry.id) === true;
+    if (!stamped && !viaLineage) return false;
+  }
   if (query.since !== undefined && entry.generatedAt < query.since) return false;
   if (query.until !== undefined && entry.generatedAt > query.until) return false;
   return true;

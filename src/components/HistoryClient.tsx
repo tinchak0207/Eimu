@@ -58,9 +58,8 @@ const PARAM = {
 } as const;
 
 /**
- * 项目维度独立于 HistoryQuery：它是**客户端展示层过滤**（服务端没有项目标签真源），
- * 不进 /api/history 的请求参数（R4 红线），也因此不进 searchParamsFromQuery 的编排。
- * 只落 URL 供分享/后退复原。
+ * 项目维度落 URL 供分享/后退复原；它不进 `queryFromSearchParams` 的两轴编排，
+ * 但作为 `HistoryQuery.projectId` 并进**服务端**请求（R2：服务端按项目过滤）。
  */
 const PROJECT_PARAM = "projectId";
 
@@ -146,6 +145,12 @@ export function HistoryClient() {
     [searchParams],
   );
 
+  /** 真正发给服务端的查询：项目维度已改为服务端过滤（R2），必须并进 HistoryQuery。 */
+  const effectiveQuery = useMemo(
+    () => (projectId ? { ...urlQuery, projectId } : urlQuery),
+    [urlQuery, projectId],
+  );
+
   const { search: runSearch, loaded } = history;
   /** 上一次真正发出去的查询，用来避免 URL 与 store 之间来回触发。 */
   const lastQueryRef = useRef<string | null>(null);
@@ -155,11 +160,15 @@ export function HistoryClient() {
       lastQueryRef.current = null;
       return;
     }
-    const serialized = searchParamsFromQuery(urlQuery);
+    // projectId 不进 searchParamsFromQuery 的两轴编排，故拼进去重键——
+    // 否则「只切项目」（其他筛选没变）会被早退挡掉、不发新查询。
+    const serialized = projectId
+      ? `${searchParamsFromQuery(urlQuery)}\u0000${projectId}`
+      : searchParamsFromQuery(urlQuery);
     if (lastQueryRef.current === serialized && loaded) return;
     lastQueryRef.current = serialized;
-    runSearch(urlQuery);
-  }, [isLoggedIn, urlQuery, runSearch, loaded]);
+    runSearch(effectiveQuery);
+  }, [isLoggedIn, urlQuery, projectId, effectiveQuery, runSearch, loaded]);
 
   /** 生成中任务轮询：有 queued/running 卡时每 5 秒刷新，全部落地即停。 */
   const hasInProgress = history.entries.some(
@@ -167,9 +176,9 @@ export function HistoryClient() {
   );
   useEffect(() => {
     if (!isLoggedIn || !hasInProgress) return;
-    const timer = window.setInterval(() => { runSearch(urlQuery); }, 5000);
+    const timer = window.setInterval(() => { runSearch(effectiveQuery); }, 5000);
     return () => window.clearInterval(timer);
-  }, [isLoggedIn, hasInProgress, runSearch, urlQuery]);
+  }, [isLoggedIn, hasInProgress, runSearch, effectiveQuery]);
 
   /** 把当前项目维度拼回 URL：筛选改动不得把 projectId 冲掉（反之亦然）。 */
   const buildUrl = useCallback(
@@ -283,8 +292,10 @@ export function HistoryClient() {
   );
 
   // ── 项目维度：网格与灯箱共用的展示集（R2b）───────────────────
-  // 取该项目标签下「来自生成记录」的资产 `source.id` 集合（历史条目 id），据此筛 HistoryEntry。
-  // 纯客户端过滤；服务端 /api/history 一行未改（它没有项目标签真源，硬塞参数会变成同源断言）。
+  // 项目过滤已由服务端负责（R2：/api/history?projectId，含「盖章栏位 ∪ 资产血缘」）。
+  // 这里保留一条**客户端 union 兜底**：盖章栏位命中 **或** 落进已加载资产的血缘 id 集合
+  // （`projectHistoryIds`）——与新增的盖章列同一判据，不另立第二套真源、两套判据不打架。
+  // 存量记录无栏位时由血缘那一路兜住；服务端分页已覆盖两种命中，故正常情况下这里不裁掉任何条目。
   //
   // **下标基准唯一真源**：`displayEntries` 是网格实际渲染的阵列，也是灯箱（entries）与
   // 所有 `lightboxIndex` 计算（handleOpen / handleLineageJump / handleDelete）的唯一基准。
@@ -298,7 +309,12 @@ export function HistoryClient() {
     return ids;
   }, [projectAssets]);
   const projectEntries = useMemo(
-    () => (projectId ? history.entries.filter((entry) => projectHistoryIds.has(entry.id)) : history.entries),
+    () =>
+      projectId
+        ? history.entries.filter(
+            (entry) => entry.projectIds?.includes(projectId) === true || projectHistoryIds.has(entry.id),
+          )
+        : history.entries,
     [projectId, history.entries, projectHistoryIds],
   );
   /** 实际渲染进网格的记录：未选项目＝原数组（逐位元不变）；选中项目＝血缘过滤后。 */
