@@ -19,6 +19,7 @@ import { isSystemWakeText } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
+import { t2sVisibleText } from "./outbound-sanitize.ts"
 
 // L0 画像 onboarding：账户还没有任何确认过的画像时，引导 agent 用 question 工具
 // 以选择题采集画像（PM 原则：别让用户动脑写表单）。答案存 pendingProfile，
@@ -173,7 +174,18 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
             // 气泡会被 17.2k 字的派遣协议正文灌爆。模型上下文由 opencode 持有、
             // 不经本函式，故剥除不改变模型看到的内容（纯显示层过滤）。
             if (type === "text" && (info.role === "user" || info.role === "system") && typeof part.text === "string") {
-              parts.push({ ...part, text: stripTailInjectedPayload(part.text) })
+              // 2026-10-10：历史端点是用户可见的显示通道，出站文字同样过一次 T2S
+              // 收口（SSE 帧已由 sse-core 收口，此端点原样透传 opencode 存储文本，
+              // 刷新/重进会话时模型正文会从简体变回繁体）。仅对非 user 讯息转换，
+              // 用户自己输入的文字逐字保留；转换在剥离之后进行。
+              let text = stripTailInjectedPayload(part.text)
+              if (info.role !== "user") text = t2sVisibleText(text)
+              parts.push({ ...part, text })
+              continue
+            }
+            if (info.role !== "user" && typeof part.text === "string") {
+              const text = t2sVisibleText(part.text)
+              parts.push(text === part.text ? part : { ...part, text })
               continue
             }
             parts.push(part)
