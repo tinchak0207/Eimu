@@ -22,7 +22,7 @@
 //   - video → 调 /v1/videos/generations
 
 import { expandTemplate, topologicalSort, type WorkflowGraph, type WorkflowNode, type WorkflowNodeResult, type TemplateContent } from "./workflow-engine"
-import { getWorkflowTemplate, listWorkflowTemplates } from "./workflow-templates"
+import { getWorkflowTemplate, listWorkflowTemplates, leanTemplateForPlanOnly } from "./workflow-templates"
 import { validateShotJson, parseShotCandidate, shotOutputParams } from "./video-prompt-schema"
 import { isRetryableNodeError } from "./error-classify"
 
@@ -485,13 +485,28 @@ export class WorkflowService {
    * defaults 或 workflow_generate 时的动态选型接手，startSync 的 videoModel 只是
    * 建构期预填）。Jev 判定是毫秒级，骨架也该是毫秒级。
    */
-  startFast(templateId: string | null, content: TemplateContent = {}, owner?: unknown): { workflowId: string } | { error: string } {
-    return this.startSync(templateId, content, owner, null)
+  startFast(
+    templateId: string | null,
+    content: TemplateContent = {},
+    owner?: unknown,
+    opts?: { planOnlyLean?: boolean },
+  ): { workflowId: string } | { error: string } {
+    return this.startSync(templateId, content, owner, null, opts)
   }
 
   /** 建工作流（从模板或空）。回 workflowId 或 error（模板缺必需内容时）。 */
-  startSync(templateId: string | null, content: TemplateContent = {}, owner?: unknown, defaultVideoModel?: string | null): { workflowId: string } | { error: string } {
-    const template = templateId ? getWorkflowTemplate(templateId) : undefined
+  startSync(
+    templateId: string | null,
+    content: TemplateContent = {},
+    owner?: unknown,
+    defaultVideoModel?: string | null,
+    opts?: { planOnlyLean?: boolean },
+  ): { workflowId: string } | { error: string } {
+    let template = templateId ? getWorkflowTemplate(templateId) : undefined
+    // R2-G1：禁生成／只要方案 → 只展开 text／结构（不改原模板注册表）。
+    if (opts?.planOnlyLean && template) {
+      template = leanTemplateForPlanOnly(template)
+    }
     // 校验：模板每个 text role 都必须填内容（content/prompt 非空字串，或带有效 shot JSON），
     // 不让空白画布产生（agent 收到 400 后补齐重试）。shot 存在但无效 → 明确报错。
     if (template) {

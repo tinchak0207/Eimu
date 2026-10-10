@@ -395,6 +395,22 @@ export interface JevDispatchMeta {
 export const JEV_TEMPLATE_CONFIDENCE_MIN = 0.8
 
 /**
+ * R2-G1（2026-10-10）：规划／禁生成意图——确定性关键词闸（不依赖 Jev）。
+ * 命中后开场 PROMPT_SKELETON／Expert 骨架路径只展开 text／结构，剥离 image／video／
+ * audio／film／config 生成位与 image_generate 等生成工具卡（见 leanTemplateForPlanOnly）。
+ * 加法：未命中＝全量骨架，零回归。
+ */
+export function isPlanOnlyNoGenerationIntent(prompt: string): boolean {
+  const t = (prompt ?? "").slice(0, 4000)
+  if (!t.trim()) return false
+  // 显式禁生成／只要方案／纯策划；避免「生成角色小传」等创作动词误伤。
+  return /禁(?:止)?(?:付费)?生成|不要生成|勿生成|别生成|零生成|不做生成|不(?:要|做|进行)付费生成|不要出图|不要出片|不要成片|不出片|不要影片|不要视频|不要音频|不要配音|只要方案|只要策划|只要大纲|只要文案|只要研究|纯策划|纯方案|只(?:要|做)研究|只铺文本|文本板|第三空间策划|plan\s*only|no\s*generation|text[\s-]*only|without\s*generat|no\s*(?:image|video|audio|film)\b/i.test(
+    t,
+  )
+}
+
+
+/**
  * 单次 Jev 呼叫批次取回派遣元资讯（spec 模板分类＋工作流模板选择）——
  * Jev 范式：平行隔离、加题不加延迟。Jev 挂/格式异常 → 全 null（fail-open）。
  */
@@ -407,7 +423,7 @@ export async function classifyDispatchMeta(prompt: string): Promise<JevDispatchM
     workflow_template: {
       type: "choice",
       instructions:
-        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable, domain keywords first: anime/二次元/番剧/短剧 series production with full industrial chain (cast DNA, storyboard QC, previz, voiceover, promo)→shortdrama_visual; web-novel IP visual package (covers, character set, no film)→novel_ip; new product launch marketing suite→ecom_launch; AI try-on/model content→ecom_model; poster/cover batch for promotion→shortdrama_poster; art series/curation→art_curation; artist style immersion→art_style; adaptation of a novel or long text into a film pipeline→novel_film; generic multi-shot film without domain keywords, and any OP/MV/theme-song/opening/beat-sync/character-song/trailer video (landscape 16:9)→feature_film; single still image→single_image; character design sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; research/Q&A/analysis/review/plain lookup (no production)→none. Prefer the domain-specific template over the generic one when domain keywords are present.",
+        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable, domain keywords first: anime/二次元/番剧/短剧 series production with full industrial chain (cast DNA, storyboard QC, previz, voiceover, promo)→shortdrama_visual; web-novel IP visual package (covers, character set, no film)→novel_ip; new product launch marketing suite→ecom_launch; AI try-on/model content→ecom_model; poster/cover batch for promotion→shortdrama_poster; art series/curation→art_curation; artist style immersion→art_style; adaptation of a novel or long text into a film pipeline→novel_film; generic multi-shot film without domain keywords, and any OP/MV/theme-song/opening/beat-sync/character-song/trailer video (landscape 16:9)→feature_film; single still image→single_image; character design sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; research/Q&A/analysis/review/plain lookup (no production)→none. Prefer the domain-specific template over the generic one when domain keywords are present. If the user forbids generation / wants plan-only / script-only (禁生成/只要方案/纯策划/不要成片) but still asks for a production plan (短剧/大片/分镜/角色卡), STILL pick the matching domain template—do NOT choose none just because generation is forbidden; the gateway will lean the skeleton to text-only. Choose none only when there is no production structure to scaffold.",
       criteria: TEMPLATE_CRITERIA,
     },
   })
@@ -431,7 +447,20 @@ export async function classifyDispatchMeta(prompt: string): Promise<JevDispatchM
 }
 
 /** 模板骨架注入声明（机器闸）：跳过环节必须明说，静默跳过＝违规。 */
-export function workflowTemplateDirective(templateId: string, confidence: number): string {
+export function workflowTemplateDirective(
+  templateId: string,
+  confidence: number,
+  opts?: { planOnlyLean?: boolean },
+): string {
+  if (opts?.planOnlyLean) {
+    return (
+      `【机器·模板骨架·策划瘦身】System One 判定领域模板＝\`${templateId}\`（信心 ${confidence.toFixed(2)}），但用户明确**禁生成／只要方案／纯策划**：网关已按该模板**只展开 text／结构节点**，已剥离 image／video／audio／film／config 生成位与 image_generate 等生成工具卡。规则：\n` +
+      `1. 你**不得也不需呼叫 \`workflow_*\` 工具**建全量成片骨架；生成类工具本轮禁止。\n` +
+      `2. 用 \`workflow_write\`／text 节点／\`document_upload\` 回填策划正文（场次／角色／分镜／研究要点）。\n` +
+      `3. 不要把「打开画布即可看到生成位」当交付；画布上应只有文本／结构。\n` +
+      `4. 若上级后来明确要求成片生成，再另开生成回合——本回合保持零生成。`
+    )
+  }
   return (
     `【机器·模板骨架】System One 判定本任务属制作类，生产骨架＝workflow 模板 \`${templateId}\`（信心 ${confidence.toFixed(2)}）。**该会话的骨架已由网关建立并执行**（本指令下发时骨架已在跑，判定即弹，不需 Expert 触发）。规则：\n` +
     `1. 你**不得也不需呼叫 \`workflow_*\` 工具**——它们不在你的工具表内，骨架的建立、展开节点与连线由网关负责，Expert 呼叫只会失败。\n` +

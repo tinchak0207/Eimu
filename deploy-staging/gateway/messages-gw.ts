@@ -5,7 +5,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync, readdirSync } from "node:fs"
 import { loadUserSettings, listSessionRows } from "./persistence"
-import { gateUserInput, classifyDispatchMeta, classifyBeastStages } from "./jev-gate"
+import { gateUserInput, classifyDispatchMeta, classifyBeastStages, isPlanOnlyNoGenerationIntent } from "./jev-gate"
 // 0920：首条讯息即建模板骨架（不等模型思考/不等 Expert）——见下方 PROMPT_SKELETON。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { templatePlaceholderContent } from "./workflow-templates"
@@ -346,15 +346,18 @@ async function buildTemplateSkeletonForPrompt(state: SessionState, content: stri
       console.log(`[gateway] prompt skeleton skip (snapshot exists): wf=${snapWfId} session=${state.sessionId}`)
       return
     }
+    // R2-G1：禁生成／只要方案 → lean 骨架（无 image／video／audio／film 空壳）。
+    const planOnlyLean = isPlanOnlyNoGenerationIntent(content)
     const r = workflowService.startFast(
       meta.template.templateId,
       templatePlaceholderContent(meta.template.templateId) as never,
       state,
+      planOnlyLean ? { planOnlyLean: true } : undefined,
     )
     if ("workflowId" in r && typeof r.workflowId === "string") {
       workflowOwnerBySession.set(state.sessionId, r.workflowId)
       console.log(
-        `[gateway] jev_gate: PROMPT_SKELETON built template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} wf=${r.workflowId} session=${state.sessionId} (首条讯息即弹)`,
+        `[gateway] jev_gate: PROMPT_SKELETON built template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} wf=${r.workflowId} session=${state.sessionId} planOnlyLean=${planOnlyLean} (首条讯息即弹)`,
       )
     } else {
       console.log(`[gateway] prompt skeleton skipped: ${"error" in r ? r.error : "unknown"}`)

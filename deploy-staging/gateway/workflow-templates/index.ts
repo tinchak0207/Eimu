@@ -88,6 +88,54 @@ export function templatePlaceholderContent(templateId: string): Record<string, u
 }
 
 /** 模板清单（id/name/description/multiShot），用于注册与发现。 */
+
+/**
+ * R2-G1（2026-10-10）：策划／禁生成瘦身——只留 text 主节点与其间连线；
+ * 剥离 image／video／audio／film／config 生成位，并去掉生成类工具卡
+ * （避免骨架上冒出标题为 image_generate 的配方鬼影）。multiShot 关闭，
+ * 防止镜头链克隆出 gen／video。加法：原模板物件不改写。
+ */
+const GENERATION_TOOL_ID_RE =
+  /^(?:image_generate|video_generate|audio_generate|music_|tts_|voice_|dreamina|seedance|runway|luma|fal_|pixai)|(?:^|_)(?:i2v|t2v|t2i)(?:_|$)|generate$/i
+
+export function isGenerationToolId(toolId: string): boolean {
+  const id = (toolId ?? "").trim()
+  if (!id) return false
+  if (/^canvas_/.test(id)) return false
+  if (/^document_/.test(id)) return false
+  if (/^workflow_/.test(id)) return false
+  if (/^read$|^bash$|^glob$|^grep$/i.test(id)) return false
+  return GENERATION_TOOL_ID_RE.test(id) || /_generate$/.test(id) || id === "image_generate"
+}
+
+export function leanTemplateForPlanOnly(template: WorkflowTemplate): WorkflowTemplate {
+  const textNodes: WorkflowNodeSpec[] = template.nodes
+    .filter((n) => n.kind === "text")
+    .map((n) => {
+      const tools = (n.tools ?? []).filter((t) => !isGenerationToolId(t.id))
+      const next: WorkflowNodeSpec = { ...n }
+      if (tools.length) next.tools = tools
+      else delete next.tools
+      // 视觉入场门禁在禁生成回合易误导；保留可执行的策划门禁文案但去掉「才准渲染／才进生成」。
+      if (typeof next.gate === "string" && /渲染|生成图|生成影片|镜头生成|进入任何视觉/.test(next.gate)) {
+        next.gate = "策划批准门禁：用户未确认本环文本前，不进入下一策划环；本回合禁生成。"
+      }
+      return next
+    })
+  const roles = new Set(textNodes.map((n) => n.role))
+  const connections: WorkflowConnectionSpec[] = template.connections.filter(
+    (c) => roles.has(c.fromRole) && roles.has(c.toRole),
+  )
+  return {
+    ...template,
+    name: `${template.name}（策划瘦身）`,
+    description: `禁生成／只要方案：仅文本／结构节点（源模板 ${template.id}）。无 image／video／audio／film／config 生成位。`,
+    multiShot: false,
+    nodes: textNodes,
+    connections,
+  }
+}
+
 export function listWorkflowTemplates(): { id: string; name: string; description: string; multiShot?: boolean }[] {
   return WORKFLOW_TEMPLATES.map(({ id, name, description, multiShot }) => ({ id, name, description, multiShot }))
 }
