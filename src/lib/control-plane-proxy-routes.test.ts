@@ -163,6 +163,14 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/pixai/upload": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/project-assets": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/project-assets/shares": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
+  // 创作项目／聊天条目（P0 项目层）：真源在 Blob，不在 generation DB。闭包进 DB 模组的唯一
+  // 路径是 server-user→image-billing→new-api-auth-server→newapi-session-token；该链在 Vercel
+  // 上只用到 getGatewayBaseUrl()（new-api-auth-server.ts:39，纯 env 读）与
+  // ensureNewApiSessionTokenViaRelay（new-api-auth-server.ts:130，HMAC relay 打控面）；直连库的
+  // ensureNewApiSessionToken／lookupUserIdByToken 只被控面端点 /api/internal/newapi-session-token
+  // 调用（route.ts:68/56），本地不直连 DB。
+  "/api/projects": "创作项目真源在 Blob：creative-project/store 经 blob-backend 读写前缀 projects/<userId>（store.ts:36-38），写前 ensureBlobBackendWritable、不可写退进程内记忆体；闭包进 generation-core/database（getGenerationSql 未配置于 database.ts:22 throw）的唯一静态路径是 newapi-session-token.ts:23，而该路径在 Vercel 只经 ensureNewApiSessionTokenViaRelay（HMAC relay），直连库函数只被控面内部端点调用",
+  "/api/projects/chats": "聊天条目与 /api/projects 共用同一 store（creative-project/store，真源 Blob 前缀 projects/<userId>）；闭包触 DB 的唯一路径同 /api/projects（server-user→image-billing→new-api-auth-server 只取 getGatewayBaseUrl／ensureNewApiSessionTokenViaRelay HMAC relay），本地不直连 DB",
   "/api/recipe-templates": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/share": "server-history-store 只取 artifact-service 纯函式 validateAndDescribeBase64Image，走 Blob",
   "/api/skills/mine": "agent-memory-store 以 dbAvailable()（getGenerationSql 包 try/catch）判定，Vercel 走 Blob/记忆体；agent-memory-injection 只取 authenticateBizApiKey（Blob 兜底）",
