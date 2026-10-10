@@ -1,10 +1,10 @@
 "use client";
 
-// REQ-B2 团队资产空间：项目资产库面板（列表 + 搜寻/筛选 + 挂用入口 + 显式分享）。
+// REQ-B2 团队资产空间：项目资产库面板（列表 + 搜寻/筛选 + 项目标签）。
 //
-// 最小可用面：资产包与资产卡（角色/场景/风格）同列一张清单，每列带归属与可见性标记，
-// 可一键挂用/解除；项目归属的资产可在此显式分享到别的项目（唯一的跨项目授权入口）。
-// 视觉沿用画布弹层语汇（lg-sheet / rounded-ios-2xl / ios 字级），不另造样式体系。
+// 2026-10-09：挂用／解除挂用／显式分享交互已删——只保留「打项目标签／只看本项目标签」
+// （标签＝该项目常驻可用集；打了标签的资产由卡库刷新后自动进生成注入，不需挂用副本）。
+// 归属(scope)控件保留原样。视觉沿用画布弹层语汇（lg-sheet / rounded-ios-2xl / ios 字级），不另造样式体系。
 // 未登入安静显示登入提示（同 CanvasLibraryPanel 的资产 tab 惯例）。
 //
 // 文案纪律：本元件零硬编用户可见字串，全部经 `text()` 取自 src/lib/ui-strings.ts
@@ -18,9 +18,6 @@ import {
   assignAssetProjectTags,
   assignAssetScope,
   listProjectAssets,
-  mountProjectAsset,
-  shareProjectAsset,
-  unmountProjectAsset,
 } from "@/lib/project-assets-client";
 import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, normalizeProjectIds } from "@/lib/asset-scope";
 import type { AssetKind, AssetLibraryItem, AssetVisibility } from "@/lib/asset-scope";
@@ -34,10 +31,10 @@ export interface ProjectAssetLibraryPanelProps {
   /** 未登入态提示（父层已知登入态时传入，避免多余请求）。 */
   isLoggedIn?: boolean;
   /**
-   * REQ-B2b：挂用/解除后的**副本 id 变更**回报（父层据此把副本锁进／解锁出 cardIds）。
-   * 这是本刀生效的硬接线——不回报＝画面说「已挂用」但生成仍注入来源 id。
+   * 2026-10-09：标签变更 → 通知父层重读卡库并重组注入集（打标签立即生效，不需刷新页面）。
+   * 这是删掉挂用交互后「打了标签却要等下次卡库抓取才生效」的唯一补口。
    */
-  onCopyChange?: (change: { locked: string[]; unlocked: string[] }) => void | Promise<void>;
+  onTagsChange?: () => void | Promise<void>;
 }
 
 const VISIBILITY_KEY: Record<AssetVisibility, UiStringKey> = {
@@ -77,16 +74,14 @@ export function ProjectAssetLibraryPanel({
   onClose,
   projectId,
   isLoggedIn = true,
-  onCopyChange,
+  onTagsChange,
 }: ProjectAssetLibraryPanelProps) {
   const [items, setItems] = useState<AssetLibraryItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
-  const [mountedOnly, setMountedOnly] = useState(false);
   const [busy, setBusy] = useState<BusyKey>(null);
-  const [shareTarget, setShareTarget] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   // P1-B：标签目标项目（默认跟随全局 activeProjectId）＋「只看本项目标签」开关。
   const [tagProjectId, setTagProjectId] = useState<string | null>(null);
@@ -114,7 +109,6 @@ export function ProjectAssetLibraryPanel({
       projectId,
       q: debouncedQuery,
       kind: kindFilter,
-      mountedOnly,
     });
     if (seq !== requestSeq.current) return; // 旧回应不覆盖新查询
     setLoading(false);
@@ -124,55 +118,12 @@ export function ProjectAssetLibraryPanel({
       return;
     }
     setItems(res.data.items);
-  }, [projectId, debouncedQuery, kindFilter, mountedOnly]);
+  }, [projectId, debouncedQuery, kindFilter]);
 
   useEffect(() => {
     if (!open) return;
     void load();
   }, [open, load]);
-
-  const toggleMount = useCallback(
-    async (item: AssetLibraryItem) => {
-      if (!projectId) return;
-      const key = `${item.assetKind}:${item.assetId}`;
-      setBusy(key);
-      if (item.mounted) {
-        const res = await unmountProjectAsset({ projectId, assetKind: item.assetKind, assetId: item.assetId });
-        setBusy(null);
-        // CanvasClientResult.ok 不是判别联合：ok 之后 data 仍可能 undefined，一起挡。
-        if (!res.ok || !res.data) {
-          setNotice(res.message ?? text("assets.error.action"));
-          return;
-        }
-        // 解除＝连副本一起解锁（否则画面说「已解除」、生成还在注入副本）。
-        if (res.data.localCopyIds.length > 0) {
-          await onCopyChange?.({ locked: [], unlocked: res.data.localCopyIds });
-        }
-        setNotice(text("assets.mount.unmounted"));
-        await load();
-        return;
-      }
-      const res = await mountProjectAsset({ projectId, assetKind: item.assetKind, assetId: item.assetId });
-      setBusy(null);
-      if (!res.ok || !res.data) {
-        setNotice(res.message ?? text("assets.error.action"));
-        return;
-      }
-      // copy-on-use 的落地点：副本 id 锁进 cardIds（生成注入读的就是这批）。
-      if (res.data.localCopyIds.length > 0) {
-        await onCopyChange?.({ locked: res.data.localCopyIds, unlocked: [] });
-      }
-      setNotice(
-        res.data.skippedItems > 0
-          ? text("assets.mount.skipped", { count: res.data.skippedItems })
-          : res.data.created
-            ? text("assets.mount.created")
-            : text("assets.mount.existing"),
-      );
-      await load();
-    },
-    [projectId, load, onCopyChange],
-  );
 
   const changeScope = useCallback(
     async (item: AssetLibraryItem, toProjectScoped: boolean) => {
@@ -193,28 +144,6 @@ export function ProjectAssetLibraryPanel({
       await load();
     },
     [projectId, load],
-  );
-
-  const share = useCallback(
-    async (item: AssetLibraryItem) => {
-      if (!projectId || !shareTarget.trim()) return;
-      const key = `${item.assetKind}:${item.assetId}`;
-      setBusy(key);
-      const res = await shareProjectAsset({
-        assetKind: item.assetKind,
-        assetId: item.assetId,
-        fromProjectId: projectId,
-        toProjectId: shareTarget.trim(),
-      });
-      setBusy(null);
-      if (!res.ok) {
-        setNotice(res.message ?? text("assets.error.share"));
-        return;
-      }
-      setNotice(res.data?.created ? text("assets.share.created") : text("assets.share.existing"));
-      await load();
-    },
-    [projectId, shareTarget, load],
   );
 
   const toggleProjectTag = useCallback(
@@ -251,8 +180,10 @@ export function ProjectAssetLibraryPanel({
           ) ?? prev,
       );
       setNotice(null);
+      // 标签变更 → 通知父层重读卡库并重组注入集（打标签立即进生成，不等下次卡库抓取）。
+      await onTagsChange?.();
     },
-    [tagProjectId],
+    [tagProjectId, onTagsChange],
   );
 
   /**
@@ -269,7 +200,7 @@ export function ProjectAssetLibraryPanel({
   }, [items, filterByTag, tagProjectId]);
 
   const summary = useMemo(() => {
-    return { total: visibleItems.length, mounted: visibleItems.filter((i) => i.mounted).length };
+    return { total: visibleItems.length };
   }, [visibleItems]);
 
   if (!open) return null;
@@ -373,17 +304,6 @@ export function ProjectAssetLibraryPanel({
             {text(key)}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => setMountedOnly((v) => !v)}
-          aria-pressed={mountedOnly}
-          className={cn(
-            "cursor-pointer rounded-full px-2 py-0.5 text-ios-caption2 font-medium",
-            mountedOnly ? "bg-ios-green/10 text-[#248A3D]" : "bg-black/5 text-muted-foreground hover:bg-black/10",
-          )}
-        >
-          {text("assets.mountedOnly")}
-        </button>
       </div>
 
       {!isLoggedIn ? (
@@ -398,13 +318,13 @@ export function ProjectAssetLibraryPanel({
         <p className="px-3.5 py-3 text-ios-caption1 text-destructive">{text("assets.loadError", { error })}</p>
       ) : (items?.length ?? 0) === 0 ? (
         <p className="px-3.5 py-3 text-ios-caption1 text-foreground/45">
-          {mountedOnly ? text("assets.emptyMounted") : text("assets.empty")}
+          {text("assets.empty")}
         </p>
       ) : (
         <div className="overflow-y-auto" style={{ maxHeight: "min(52dvh, 400px)" }}>
           {notice && <p className="border-b px-3.5 py-1.5 text-ios-caption2 text-[#007AFF]">{notice}</p>}
           <p className="border-b px-3.5 py-1 text-ios-caption2 text-foreground/45">
-            {text("assets.summary", { total: summary.total, mounted: summary.mounted })}
+            {text("assets.summary.total", { total: summary.total })}
           </p>
           {visibleItems.length === 0 && (
             <p className="px-3.5 py-3 text-ios-caption1 text-foreground/45">{text("assets.projectTag.empty")}</p>
@@ -430,19 +350,6 @@ export function ProjectAssetLibraryPanel({
                       <p className="mt-0.5 truncate text-ios-caption2 text-foreground/45">{item.tags.join(" · ")}</p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    disabled={busy === key}
-                    onClick={() => void toggleMount(item)}
-                    className={cn(
-                      "shrink-0 cursor-pointer rounded-lg px-2 py-1 text-ios-caption1 font-medium disabled:opacity-50",
-                      item.mounted
-                        ? "bg-ios-green/10 text-[#248A3D] hover:bg-ios-green/20"
-                        : "bg-black/5 text-muted-foreground hover:bg-black/10",
-                    )}
-                  >
-                    {busy === key ? text("assets.mount.busy") : item.mounted ? text("assets.mount.release") : text("assets.mount.mount")}
-                  </button>
                 </div>
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <button
@@ -467,24 +374,6 @@ export function ProjectAssetLibraryPanel({
                   >
                     {isOwnProjectAsset ? text("assets.scope.toPersonal") : text("assets.scope.toProject")}
                   </button>
-                  {isOwnProjectAsset && (
-                    <>
-                      <input
-                        value={shareTarget}
-                        onChange={(e) => setShareTarget(e.target.value)}
-                        placeholder={text("assets.share.targetPlaceholder")}
-                        className="min-w-0 flex-1 rounded-lg bg-black/5 px-2 py-0.5 text-ios-caption2 text-foreground outline-none placeholder:text-foreground/35"
-                      />
-                      <button
-                        type="button"
-                        disabled={busy === key || !shareTarget.trim()}
-                        onClick={() => void share(item)}
-                        className="shrink-0 cursor-pointer rounded-lg bg-black/5 px-1.5 py-0.5 text-ios-caption2 font-medium text-[#007AFF] hover:bg-black/10 disabled:opacity-40"
-                      >
-                        {text("assets.share.action")}
-                      </button>
-                    </>
-                  )}
                 </div>
               </div>
             );

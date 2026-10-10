@@ -31,6 +31,13 @@ export interface UseCanvasCardsInput {
    * （项目归属的卡一律不可用，个人卡照用——fail-closed 不猜）。
    */
   getProjectId?: () => string | null;
+  /**
+   * 当前画布所属的**创作项目 id**（`prj_…`）。与 `getProjectId`（画布 id `canvas-…`）
+   * 是两套命名空间，**各自独立传递、不得互相冒充**：由宿主经共享 store 的
+   * `findProjectIdByCanvas` 反查得到。缺省/null＝无此上下文（标签驱动注入不生效）。
+   * 用途：把「打了本项目标签」的卡并入生成注入集（见 activeCharacterCards）。
+   */
+  creativeProjectId?: string | null;
 }
 
 /** 自动落卡的可选出口（回填分镜引用／写落卡标记要 patchNodeMetadata，由 use-canvas-chat 注入）。 */
@@ -362,13 +369,29 @@ export function useCanvasCards(options: UseCanvasCardsInput = {}) {
    * 锁定中的卡实体：生成时注入的就是这份（applyCharacterCards 按 id 序幂等注入）。
    * REQ-B2b 读取端作用域闸：不可见（跨项目、未分享）的卡不进这份集合——fail-closed。
    * 闸函式（filterLockedCardsForProjectUse）与伺服器端写入闸共用同一裁决尺。
+   *
+   * 2026-10-09 标签驱动注入：除「锁定集 ∩ 卡库」外，并入「`projectIds` 含当前
+   * **创作项目 id**（`prj_…`）」的卡（取自同一份 `characterCards` 全量库），再过同一道作用域闸。
+   * 语义边界：**标签＝该项目的常驻可用集**（自动进生成）；**锁定集＝本画布显式挑选**
+   * （仍优先，不重排）。个人卡与跨项目未打标签的卡**不得**因这条路进注入——
+   * 只有 `projectIds` 真的含 creativeProjectId 的卡才会被并入。
    */
+  const creativeProjectId = options.creativeProjectId ?? null;
   const activeCharacterCards = useMemo(() => {
     const projectId = readProjectId();
     const shares = shareTable && shareTable.projectId === projectId ? shareTable.shares : [];
     const locked = characterCards.filter((c) => activeCardIds.includes(c.id));
-    return filterLockedCardsForProjectUse(locked, { projectId, shares });
-  }, [characterCards, activeCardIds, shareTable, readProjectId]);
+    const tagged = creativeProjectId
+      ? characterCards.filter((c) => (c.projectIds ?? []).includes(creativeProjectId))
+      : [];
+    let merged = locked;
+    if (tagged.length) {
+      const lockedIds = new Set(locked.map((c) => c.id));
+      const extra = tagged.filter((c) => !lockedIds.has(c.id));
+      if (extra.length) merged = [...locked, ...extra];
+    }
+    return filterLockedCardsForProjectUse(merged, { projectId, creativeProjectId, shares });
+  }, [characterCards, activeCardIds, shareTable, readProjectId, creativeProjectId]);
 
   /**
    * REQ-B2b：挂用副本的锁定/解锁（面板挂用/解除后呼叫）。
@@ -394,6 +417,18 @@ export function useCanvasCards(options: UseCanvasCardsInput = {}) {
     },
     [],
   );
+
+  /**
+   * 重读用户全部卡（2026-10-09 标签驱动注入）：资产面板改了某资产的 `projectIds`
+   * 之后呼叫，让 `characterCards` 状态带上新标签 → `activeCharacterCards` 当场重组注入集。
+   * 与 `applyMountCopyChange` 的取数同源（同一支 `fetchCharacterCardsRemote`），
+   * 失败静默（卡是顺手锁定的配置，不打扰创作）。父层面板打标签后不再走挂用接线，
+   * 这是「打标签立刻进生成」的唯一刷新出口。
+   */
+  const refreshCharacterCards = useCallback(async () => {
+    const res = await fetchCharacterCardsRemote();
+    if (res.ok && res.data) setCharacterCards(res.data);
+  }, []);
 
   const upsertCharacterCard = useCallback(async (card: CharacterCard): Promise<boolean> => {
     const res = await saveCharacterCardRemote(card);
@@ -553,6 +588,8 @@ export function useCanvasCards(options: UseCanvasCardsInput = {}) {
     setActiveCardIds,
     /** REQ-B2b：挂用副本的锁定/解锁（面板 onCopyChange 的唯一入口）。 */
     applyMountCopyChange,
+    /** 标签变更后重读卡库（资产面板 onTagsChange 的唯一入口）。 */
+    refreshCharacterCards,
     characterCardsRef,
     activeCardIdsRef,
     upsertCharacterCard,

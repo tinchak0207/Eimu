@@ -210,7 +210,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 保持稳定身份：否则 activeProjectId 一变，AgentChatSurface 的 onSessionChange
   // effect（[sessionId, onSessionChange]）会重跑，把「切项目」误当「开新会话」
   // 而把当前会话搬进项目。
-  const { activeProjectId, attachChat, attachCanvas, findProjectIdBySession, findChatBySession } = useCreativeProjects();
+  const { activeProjectId, attachChat, attachCanvas, findProjectIdBySession, findProjectIdByCanvas, findChatBySession } = useCreativeProjects();
   const projectAttachRef = useRef({ activeProjectId, attachChat, findProjectIdBySession });
   projectAttachRef.current = { activeProjectId, attachChat, findProjectIdBySession };
 
@@ -257,6 +257,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     activeProjectId,
     attachCanvas,
     findProjectIdBySession,
+    findProjectIdByCanvas,
     findChatBySession,
   });
   canvasHostRef.current = canvasHost;

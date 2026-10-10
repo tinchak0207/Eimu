@@ -190,6 +190,17 @@ export function useCanvasChat(
   const pendingAgentOps = getQueueHeadEvent(agentOpsQueue);
 
   // ── 角色/场景卡域（P2 跨镜头一致性）：卡列表 + 项目级锁定
+  //
+  // 2026-10-09 前置改造：当前画布 → **创作项目 id**（`prj_…`）反查（共享 store 的
+  // findProjectIdByCanvas）。画布 id（projectIdRef，`canvas-…`）与创作项目 id 是两套命名空间，
+  // **各自独立传递**：projectIdRef 仍持画布 id（持久化/旧作用域路径用），creativeProjectId 单列
+  // （标签驱动注入用）——不得把画布 id 冒充成 creativeProjectId。
+  // 归属落定会触发宿主重渲染（ImagePlayground 订阅同一 store，projectContext 每次 render 换新物件）
+  // → 本 memo 重算；activeCanvasId 变化（mint/切画布）亦然。
+  const creativeProjectId = useMemo(() => {
+    const find = projectContext?.findProjectIdByCanvas;
+    return find && activeCanvasId ? find(activeCanvasId) : null;
+  }, [projectContext, activeCanvasId]);
   // 项目 id ref 先于卡域建立并注入（REQ-B2b）：卡域的读取端作用域闸要判「锁定卡属不属于
   // 当前项目」，读的就是这一个 ref——卡域在本 hook 之前呼叫，若晚建则闸首帧拿到 null 漏判。
   const projectIdRef = useRef<string | null>(null);
@@ -199,13 +210,14 @@ export function useCanvasChat(
     activeCharacterCards,
     setActiveCardIds,
     applyMountCopyChange,
+    refreshCharacterCards,
     characterCardsRef,
     activeCardIdsRef,
     upsertCharacterCard,
     removeCharacterCard,
     toggleCharacterCard,
     autoAnchorEmittedCards,
-  } = useCanvasCards({ getProjectId: () => projectIdRef.current });
+  } = useCanvasCards({ getProjectId: () => projectIdRef.current, creativeProjectId });
 
   // ── refs：给不参与 render 的路径读最新值
   const canvasRef = useRef(canvas);
@@ -1543,6 +1555,7 @@ export function useCanvasChat(
     activeCardIds,
     activeCharacterCards,
     applyMountCopyChange,
+    refreshCharacterCards,
     projectType,
     currentStep,
     episodes,

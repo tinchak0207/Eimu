@@ -458,6 +458,12 @@ export interface AssetUseContext {
   /** 当前项目 id；无项目上下文（如全域资产页）为 null —— 此时只有 personal 资产可见。 */
   projectId: string | null;
   /**
+   * 当前画布所属的**创作项目 id**（`prj_…`）。与 `projectId`（画布 id `canvas-…`）
+   * 是两套命名空间，各自独立传入、**不得互相冒充**。缺省/null＝无此上下文（标签路径不生效）。
+   * 用途：项目标签（`asset.projectIds`）按**创作项目 id** 命中——面板打的就是它。
+   */
+  creativeProjectId?: string | null;
+  /**
    * 当前团队 id（P0-2 资产团队维度）。**必须由呼叫端以 relay 权威值注入**
    *（`lookupTeamMembershipViaRelay` 回传的 teamId），**不得采信客户端送来的值**；
    * 查不到成员身份／未配置 → 省略此栏（＝无团队上下文）→ team 资产一律不可见（fail-closed）。
@@ -502,6 +508,11 @@ export function resolveAssetScopeVisibility(
   // P1-A 新允许路径（纯加法）：项目标签（多归属）。**插在旧精确匹配之后、share 查表之前**。
   // `ctx.projectId` 为空时**不生效**——标签不得因此把 fail-closed 打开（无项目上下文仍只有 personal 可见）。
   if (ctx.projectId && asset.projectIds?.includes(ctx.projectId)) return "in-project";
+  // 画布 id → 创作项目 id 打通（2026-10-09 前置改造）：面板打的标签是**创作项目 id（`prj_…`）**，
+  // 而画布生成闸的 `ctx.projectId` 是**画布 id（`canvas-…`）**——两者命名空间不同，上面那条恒不命中。
+  // 独立新增一条按 `creativeProjectId` 命中的路径；**保留**上面的画布 id 路径（旧数据/旧标签仍可能用画布 id）。
+  // 只按标签数组命中：个人卡与跨项目未打标签的卡不在 `projectIds` 里，故不因此进注入。
+  if (ctx.creativeProjectId && asset.projectIds?.includes(ctx.creativeProjectId)) return "in-project";
   return findActiveAssetShare(ctx.shares, asset.kind, asset.id, ownedBy, ctx.projectId) ? "shared-in" : null;
 }
 
@@ -535,10 +546,15 @@ export function canUseAsset(asset: ScopedAssetLike, ctx: AssetUseContext): boole
  */
 export function filterLockedCardsForProjectUse<T extends { id: string; scope?: AssetScope; projectIds?: string[] }>(
   cards: readonly T[],
-  ctx: { projectId: string | null; shares: readonly AssetShareRecord[] },
+  ctx: { projectId: string | null; creativeProjectId?: string | null; shares: readonly AssetShareRecord[] },
 ): T[] {
   if (!cards.length) return [];
-  const useCtx: AssetUseContext = { viewerUserId: 0, projectId: ctx.projectId, shares: ctx.shares };
+  const useCtx: AssetUseContext = {
+    viewerUserId: 0,
+    projectId: ctx.projectId,
+    ...(ctx.creativeProjectId ? { creativeProjectId: ctx.creativeProjectId } : {}),
+    shares: ctx.shares,
+  };
   return cards.filter(
     (card) =>
       resolveAssetScopeVisibility(

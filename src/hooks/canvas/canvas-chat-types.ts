@@ -91,6 +91,13 @@ export interface UseCanvasChatProjectContext {
   /** 会话 → 项目 id（store 查询；同一份共享状态，不另建真源）。 */
   findProjectIdBySession?: (sessionId: string) => string | null;
   /**
+   * 画布 id → 创作项目 id（`prj_…`）反查（store 查询 `findProjectIdByCanvas`）。
+   * **画布 id（`canvas-…`）与创作项目 id 是两套命名空间**：本 hook 据此反查得到
+   * `creativeProjectId` 并一路透到卡域注入集（use-canvas-cards 的 activeCharacterCards），
+   * **不得**把画布 id 直接当 creativeProjectId 用。宿主从 `useCreativeProjects()` 注入，零新增真源。
+   */
+  findProjectIdByCanvas?: (canvasId: string) => string | null;
+  /**
    * 会话 → 该聊天条目的画布归属（`canvasIds` + `primaryCanvasId`，store 直传项目档原值）。
    * P2-C：本 hook 用它取「当前聊天的画布清单/主画布」，不再自行 `listProjects()`
    * 绕一轮 `GET /api/projects`。未归属会话 → null。
@@ -354,6 +361,11 @@ export interface UseCanvasChatReturn {
    * 这是「画面标已挂用」与「生成真的注入副本」之间唯一的接线。
    */
   applyMountCopyChange: (change: { locked: string[]; unlocked: string[] }) => Promise<void>;
+  /**
+   * 2026-10-09 标签驱动注入：资产面板改了某资产的 `projectIds` 后呼叫，重读卡库
+   * 让注入集当场重组（打标签立即生效，不需刷新页面）。
+   */
+  refreshCharacterCards: () => Promise<void>;
   /** 建卡/更新卡（upsert）。 */
   upsertCharacterCard: (card: CharacterCard) => Promise<boolean>;
   /** 删卡（同时解除锁定）。 */

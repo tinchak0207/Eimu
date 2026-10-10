@@ -149,7 +149,7 @@ export const UI_STRINGS = {
 
   // ── B2 项目资产库面板 ────────────────────────────────────
   "assets.title": "项目资产库",
-  "assets.subtitle": "挂用＝在本项目建本地副本（改来源不影响副本，删来源副本仍可用）；跨项目复用需先显式分享",
+  "assets.subtitle": "给资产打上本项目标签，它就会常驻本项目的生成注入；一个资产可同时属于多个项目",
   "assets.refresh": "刷新资产库",
   "assets.close": "关闭资产库",
   "assets.searchPlaceholder": "搜索资产名 / 标签",
@@ -158,7 +158,7 @@ export const UI_STRINGS = {
   "assets.filter.card": "卡片",
   "assets.mountedOnly": "仅看已挂用",
   "assets.guest": "登录后可用项目资产库",
-  "assets.noProject": "本项目尚未建号（画布为空）· 先放一个节点再挂用资产",
+  "assets.noProject": "本项目尚未建号（画布为空）· 先放一个节点再给资产打项目标签",
   "assets.loading": "正在读取资产库…",
   "assets.loadError": "加载失败：{error}",
   "assets.error.loadFailed": "加载失败",
@@ -167,6 +167,7 @@ export const UI_STRINGS = {
   "assets.empty": "没有可见资产 · 去「资源库 / 角色卡」存一个",
   "assets.emptyMounted": "本项目还没有挂用的资产",
   "assets.summary": "共 {total} 项 · 已挂用 {mounted}",
+  "assets.summary.total": "共 {total} 项",
   "assets.mount.busy": "…",
   "assets.mount.mount": "挂用",
   "assets.mount.release": "已挂用 · 解除",

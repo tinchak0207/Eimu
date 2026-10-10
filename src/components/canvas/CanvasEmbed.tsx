@@ -1445,13 +1445,14 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
       {/* 快捷键帮助 / 资源库 / 图片编辑器（overflow 外层渲染） */}
       <CanvasShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* REQ-B2：项目资产库（专案 id 由 hook 的 getProjectId 直读，未建号则面板显示空态） */}
-      {/* REQ-B2b：挂用＝copy-on-use——面板把副本 id 交回来，这里锁进项目 cardIds（生成注入读的就是它） */}
+      {/* 2026-10-09：面板只剩「打项目标签／只看本项目标签」——打标签后靠 onTagsChange 重读卡库，
+          让打了本项目标签的资产当场进生成注入（旧挂用交互已删，不再锁副本进 cardIds）。 */}
       <ProjectAssetLibraryPanel
         open={projectAssetsOpen}
         onClose={() => setProjectAssetsOpen(false)}
         projectId={canvas.getProjectId()}
         isLoggedIn={isLoggedIn}
-        onCopyChange={canvas.applyMountCopyChange}
+        onTagsChange={canvas.refreshCharacterCards}
       />
       {/* WS-审查（2026-09-24）：资产／分镜审查面板（同一颗画布入口 + 步骤条的外开介面；
           决策 2：全自动档下这两个面板可看可改、不阻塞流程——面板本身不挡任何生成路径） */}

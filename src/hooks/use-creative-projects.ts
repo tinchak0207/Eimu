@@ -439,6 +439,25 @@ export function findProjectIdBySession(sessionId: string): string | null {
   return null;
 }
 
+/**
+ * 某张画布挂在哪个创作项目：扫各项目 `chats[].canvasIds`，**先命中者优先**
+ * （按 creativeProjects 数组顺序，即服务端 listProjects 顺序；archived 项目同样算命中）。
+ * 空串/非字串回 null。判据与 `findProjectIdBySession` 同族、只读同一份共享 store 的
+ * `raw.creativeProjects`（零新增真源）。
+ *
+ * 命名空间纪律：**画布 id（`canvas-…`）与创作项目 id（`prj_…`）是两套命名空间**，
+ * 本函式是两者之间唯一的反查入口——呼叫端不得把画布 id 直接当 `prj_` 用。
+ */
+export function findProjectIdByCanvas(canvasId: string): string | null {
+  if (typeof canvasId !== "string" || !canvasId) return null;
+  for (const project of raw.creativeProjects) {
+    for (const chat of project.chats) {
+      if (Array.isArray(chat.canvasIds) && chat.canvasIds.includes(canvasId)) return project.id;
+    }
+  }
+  return null;
+}
+
 /** 仅供自验/热重载：把 store 恢复到初始状态。 */
 export function __resetCreativeProjectsStore(): void {
   refreshSeq += 1;
@@ -458,6 +477,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
   attachCanvas(projectId: string, sessionId: string, canvasId: string, title?: string): Promise<void>;
   removeChat(projectId: string, sessionId: string): Promise<void>;
   findProjectIdBySession(sessionId: string): string | null;
+  findProjectIdByCanvas(canvasId: string): string | null;
   findChatBySession(sessionId: string): { canvasIds: string[]; primaryCanvasId?: string } | null;
 } {
   const state = useSyncExternalStore(
@@ -487,6 +507,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
   );
   const removeChat = useCallback((projectId: string, sessionId: string) => removeChatAction(projectId, sessionId), []);
   const findProject = useCallback((sessionId: string) => findProjectIdBySession(sessionId), []);
+  const findProjectByCanvas = useCallback((canvasId: string) => findProjectIdByCanvas(canvasId), []);
   const findChat = useCallback((sessionId: string) => findChatBySession(sessionId), []);
 
   return useMemo(
@@ -501,6 +522,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
       attachCanvas,
       removeChat,
       findProjectIdBySession: findProject,
+      findProjectIdByCanvas: findProjectByCanvas,
       findChatBySession: findChat,
     }),
     [
@@ -514,6 +536,7 @@ export function useCreativeProjects(): CreativeProjectsState & {
       attachCanvas,
       removeChat,
       findProject,
+      findProjectByCanvas,
       findChat,
     ],
   );
