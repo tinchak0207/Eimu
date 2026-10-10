@@ -31,7 +31,7 @@ export default tool({
     return ok({
       ...buildCanvasReceipt(state, { view: args.view, nodeId: args.node_id }),
       updated_at: snap.updated_at,
-      ...(snap.has_state ? {} : { canvas_empty: true, note: "画布尚未上报（视为空画布）。规划／铺产线请直接 `workflow_write` 整份交 DSL——节点会写入可 hydrate 队列／快照，用户稍后打开画布即可看到；不要只回复「请打开画布」。" }),
+      ...(snap.has_state ? {} : { canvas_empty: true, note: "画布尚未上报（视为空画布）。规划／铺产线请直接 `workflow_write` 整份交 DSL——节点会写入可 hydrate 队列／快照。落盘成功后向用户列**节点标题清单**或本轮 document 公网链接；**禁止**在助手正文写「请打开画布／打开画布即可看到／打开画布即可查看／打开即可看到」族话术。" }),
     })
   },
 })

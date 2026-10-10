@@ -99,7 +99,7 @@ export default tool({
     const sourceWorkflow = typeof args.source.workflow === "string" ? args.source.workflow : ""
     // 新产线判定：会新建节点，且交回的 ns 不在已知产线集合里（sourceWorkflow 为空字串也算不在）。
     const newProductionLine = added > 0 && !currentNs.has(sourceWorkflow)
-    const reportNote = `本次新建 ${added} 颗 / 更新 ${updated} 颗节点；如实向用户转述，不得声称「无新建」。`
+    const reportNote = `本次新建 ${added} 颗 / 更新 ${updated} 颗节点；如实向用户转述，不得声称「无新建」。正文列节点标题清单或 document 链接；禁止「打开画布即可看到／请打开画布」族话术。`
     if (args.dry_run === true) {
       // dry_run 不落图，故只带判定结果、不要求确认。
       return ok({ dry_run: true, new_production_line: newProductionLine, summary, ops })
@@ -172,7 +172,7 @@ export default tool({
       ...(queued
         ? {
             queued: true,
-            note: "画布页未即时回执，节点／连线已写入可 hydrate 快照队列；用户稍后打开画布即可看到。请向用户说明「已落盘，打开画布可见」，不要只回复「请打开画布」。",
+            note: "画布页未即时回执，节点／连线已写入可 hydrate 快照队列（queued＝已落盘）。向用户汇报：用回执里的**节点标题清单**（summary／steps／created），和／或本轮 document 公网链接；**禁止**写「请打开画布／打开画布即可看到／打开画布即可查看／打开即可看到」。落盘即交付，不要把打开画布当作业甩给用户。",
           }
         : {}),
     })

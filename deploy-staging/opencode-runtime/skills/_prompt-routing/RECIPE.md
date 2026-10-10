@@ -70,7 +70,7 @@
 | 只动位置／尺寸／手调连线，或节点不在 `dsl` 里 | `canvas_apply_ops`（已断路，经 `subagent_dispatch` 派对应域 Expert 执行；`update_node`／`connect_nodes`／`delete_connections`） |
 | **禁** | 手拼 `add_node`＋`connect_nodes` 搭整条产线 |
 
-拿不到画布状态（`no_canvas_state`）时，先请用户打开画布；**这不改变工具选择**——别因为读不到状态就换别的工具。
+画布尚未上报（`canvas_empty`／无状态）时视为空画布：直接 `workflow_write` 落盘（写穿可 hydrate 队列），**不要**请用户打开画布；**这不改变工具选择**。落盘后正文列节点标题清单或 document 链接；**禁止**「请打开画布／打开画布即可看到」族话术。
 
 
 ## §3D
