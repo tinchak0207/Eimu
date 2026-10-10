@@ -221,9 +221,11 @@ const DEPLOY_TARGETS: readonly DeployTarget[] = [
   { exported: LYRIA_TARGET, deployed: join(DEPLOY_LIB, "music_lyria.ts"), harnessOnlyRegions: 0 },
   { exported: YUE2_TARGET, deployed: join(DEPLOY_LIB, "music_yue2.ts"), harnessOnlyRegions: 0 },
   { exported: DIRECTOR_TARGET, deployed: join(DEPLOY_LIB, "music_prompt_director.ts"), harnessOnlyRegions: 0 },
-  // music-tools-impl.ts：7 段 harness-only 例外（注释头、take-entropy import 改写、
-  // source_audio 路径解析区块、工具/参数描述、呼叫端解析区块、audioBase64 传参）。
-  { exported: TOOLS_TARGET, deployed: join(DEPLOY_LIB, "music-tools-impl.ts"), harnessOnlyRegions: 7 },
+  // music-tools-impl.ts：9 段 harness-only 例外（注释头、take-entropy＋platformFetch import
+  // 改写、source_audio 路径解析＋musicChargeReceiptFields 扣费区块、工具描述、source_audio
+  // 参数描述、呼叫端 ref 生成解析区块、audioBase64 传参、上传失败早返回扣费、成功回执扣费）。
+  // 2026-10-10「音乐 1 币/次」新增后两段（上传失败早返回扣费、成功回执扣费），7 → 9。
+  { exported: TOOLS_TARGET, deployed: join(DEPLOY_LIB, "music-tools-impl.ts"), harnessOnlyRegions: 9 },
 ];
 
 /** 扫出部署档的 harness-only 例外行（含 marker 行本身），并验证 marker 成对。 */

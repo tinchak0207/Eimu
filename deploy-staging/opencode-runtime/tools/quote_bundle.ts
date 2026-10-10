@@ -36,6 +36,37 @@ async function loadVideoCatalog(sessionID: string, signal?: AbortSignal): Promis
   }
 }
 
+/**
+ * 音乐单价（2026-10-10「音乐 1 币/次」）：取自平台目录 GET /v1/models 的 x_coins_per_music，
+ * 与平台实扣端点 POST /v1/music/charges 同源（服务端定价），客户端不猜价。
+ * 形状未定稿（平台侧另一路在建）：可能是顶层栏位，也可能是某个 model 项上的栏位，
+ * 故两处都扫、取第一个数值；都查不到回 null（呼叫端标 price_source:"unknown"）。
+ * 绝不硬编码 1 币——写死会与平台定价漂移（同 TTS「宣称 vs 权威」的教训）。
+ */
+async function loadMusicPerSong(sessionID: string, signal?: AbortSignal): Promise<number | null> {
+  try {
+    const res = await platformFetch("/models", { method: "GET" }, sessionID, signal)
+    if (!res.ok) return null
+    const body = (await res.json()) as Record<string, any>
+    const pick = (v: unknown): number | null => {
+      if (typeof v === "number") return v
+      if (v && typeof v === "object") {
+        for (const n of Object.values(v as Record<string, unknown>)) if (typeof n === "number") return n
+      }
+      return null
+    }
+    const top = pick(body?.x_coins_per_music)
+    if (top !== null) return top
+    for (const m of (body?.data ?? []) as Array<Record<string, any>>) {
+      const v = pick(m?.x_coins_per_music)
+      if (v !== null) return v
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 async function loadBalance(sessionID: string, signal?: AbortSignal): Promise<number | null> {
   try {
     const res = await platformFetch("/quota", { method: "GET" }, sessionID, signal)
@@ -55,14 +86,14 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6
 
 export default tool({
   description:
-    "钱包预检＋批量预算单工具（免费不扣费）。不带 items 呼叫＝只查当前余额（开局预检用）。输入多笔 [{model, count, kind, duration_seconds, resolution, quality}]，输出每笔明细（单价 × 数量 = 小计）、总币数、当前余额 balance_coins、差额 shortfall_coins 与 affordable 布林。图片单价取自平台目录；影片单价=目录 x_coins_per_second[解析度]×时长（与实扣同源），目录查不到才标 price_source:\"estimate_unverified\"，图片查不到标 \"unknown\"，禁止拍脑袋。可选 max_unit_coins / max_coins_per_second 单价上限，超限项标 over_cap:true。批量开工前必须先用本工具出预算单给用户过目；affordable:false 时第一句就讲余额与差额。",
+    "钱包预检＋批量预算单工具（免费不扣费）。不带 items 呼叫＝只查当前余额（开局预检用）。输入多笔 [{model, count, kind, duration_seconds, resolution, quality}]，输出每笔明细（单价 × 数量 = 小计）、总币数、当前余额 balance_coins、差额 shortfall_coins 与 affordable 布林。图片单价取自平台目录；影片单价=目录 x_coins_per_second[解析度]×时长（与实扣同源）；音乐单价=目录 x_coins_per_music（1 币/次统一价、不分通路/take，与平台实扣同源，不按 model 区分）；目录查不到才标 price_source:\"estimate_unverified\"（仅影片有粗估），图片／音乐查不到标 \"unknown\"，禁止拍脑袋（音乐禁止硬编码 1 币）。可选 max_unit_coins / max_coins_per_second 单价上限，超限项标 over_cap:true。批量开工前必须先用本工具出预算单给用户过目；affordable:false 时第一句就讲余额与差额。",
   args: {
     items: tool.schema
       .array(
         tool.schema.object({
           model: tool.schema.string().describe("模型 id，如 gpt-image-2、seedance-2.0"),
-          count: tool.schema.number().int().min(1).max(200).describe("该项生成数量（张数或镜数）"),
-          kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，预设 image"),
+          count: tool.schema.number().int().min(1).max(200).describe("该项生成数量（张数／镜数／首数）"),
+          kind: tool.schema.enum(["image", "video", "music"]).optional().describe("image 或 video 或 music，预设 image（music＝音乐生成，1 币/次）"),
           duration_seconds: tool.schema.number().optional().describe("每支影片时长（秒），仅 video 用，预设取模型默认时长"),
           resolution: tool.schema.string().optional().describe("影片解析度，如 480p/720p/1080p，仅 video 用，预设取模型默认解析度（quality=hd 时 1080p）"),
           quality: tool.schema.enum(["standard", "hd"]).optional().describe("standard 或 hd，预设 standard"),
@@ -89,9 +120,11 @@ export default tool({
         )
       }
       const hasVideo = items.some((i) => i.kind === "video")
-      const [prices, videoCat, balance] = await Promise.all([
+      const hasMusic = items.some((i) => i.kind === "music")
+      const [prices, videoCat, musicPerSong, balance] = await Promise.all([
         items.some((i) => (i.kind ?? "image") === "image") ? loadCatalog(context.sessionID, context.abort) : Promise.resolve(null),
         hasVideo ? loadVideoCatalog(context.sessionID, context.abort) : Promise.resolve(null),
+        hasMusic ? loadMusicPerSong(context.sessionID, context.abort) : Promise.resolve(null),
         loadBalance(context.sessionID, context.abort),
       ])
       const lines: Array<Record<string, unknown>> = []
@@ -124,6 +157,13 @@ export default tool({
           }
           if (typeof args.max_coins_per_second === "number" && typeof cps === "number" && cps > args.max_coins_per_second) {
             extra.over_cap = true
+          }
+        } else if (kind === "music") {
+          // 音乐：目录次价（1 币/次统一，不分 model）。查不到 → unit 维持 null → 标 unknown。
+          if (typeof musicPerSong === "number") {
+            unit = musicPerSong
+            extra.coins_per_song = musicPerSong
+            priceSource = "catalog_per_song"
           }
         } else if (prices && prices[item.model]) {
           const e = prices[item.model]
@@ -196,7 +236,7 @@ export default tool({
             : unverified
               ? "含 estimate_unverified 粗估项（目录查无秒价），对用户标「待确认」。"
               : items.length
-                ? "全部项目均已按平台目录定价（影片=秒价×时长）。本预算单为事前告知，不取代逐笔扣费确认（confirm）。"
+                ? "全部项目均已按平台目录定价（影片=秒价×时长、音乐=目录次价）。本预算单为事前告知，不取代逐笔扣费确认（confirm）。"
                 : "本次仅查余额，未报价；total_coins=null 表示不适用（不是 0 币）。",
           overCap.length ? `超出单价上限：${overCap.join("、")}。` : "",
         ]

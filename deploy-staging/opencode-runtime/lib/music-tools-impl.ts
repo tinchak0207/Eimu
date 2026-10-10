@@ -99,6 +99,9 @@ import {
 // <harness-only>
 } from "./music_take_entropy"
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath } from "./sandbox"
+// 音乐扣费（2026-10-10「音乐 1 币/次」）：平台扣费端点经既有 platformFetch 签章轮子，
+// 不另造 fetch（同 image_generate／workflow 的调用范式）。
+import { platformFetch, randomUUID } from "./client"
 // </harness-only>
 
 // ── plumbing（ok/fail/resolveKey 同构 director-common.ts） ───────────────────
@@ -372,6 +375,77 @@ export async function resolveSourceAudio(raw: string, sessionId: string | undefi
     }
   }
   return { ok: true, value: { base64: buf.toString("base64"), source: "workspace_file", bytes: buf.byteLength, path: s } }
+}
+
+/**
+ * 音乐生成扣费（2026-10-10「音乐 1 币/次」）：契约＝平台控制面 `POST /v1/music/charges`
+ * （biz key 鉴权，请求体只带 `{ ref }`；定价在服务端，1 币/次，同 ref 幂等不双扣；
+ * 成功回 `{ ok:true, cost_coins:1 }`、重复回 `{ ..., deduped:true }`、余额不足 402）。
+ *
+ * 语义与调用纪律：
+ * - **先出音频、后扣费**：本 helper 只在回执组装点被呼叫（音频已生成／已上传后才评估），
+ *   绝不在生成前扣。
+ * - **不双扣**：`ref` 在每次工具调用开始时生成一次（见 execute 内 `musicChargeRef`），
+ *   同一次调用内的重试／回落通路沿用同一个 ref，平台按 ref 幂等。
+ * - **免费路径不扣**：`probe=true` 与「三通路全失败」都提前 return／throw，到不了呼叫点。
+ * - **失败不静默吞**：扣费失败如实回报（回 `cost_coins:null` ＋ `charge_error` ＋ `charge_note`），
+ *   不虚报 0，也不因扣费失败丢掉已产出的音频。
+ *
+ * 账本归属（`takes` 参数）：本次调用只扣 1 次，但 gateway 的 collectToolOutputMediaUrls 会把
+ * 顶层 cost_coins 回退贴到**每一张**音频卡（多 take 各一条账本行）。为避免账本合计（N 条 × 1 币）
+ * 与实扣（1 币/调用）背离，成功扣费后把非主 take 的 cost_coins 显式标 0，使账本合计 = 实扣。
+ */
+async function musicChargeReceiptFields(
+  ref: string,
+  sessionID: string | undefined,
+  takes?: Array<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  try {
+    const resp = await platformFetch(
+      "/music/charges",
+      { method: "POST", body: JSON.stringify({ ref }) },
+      sessionID ?? "",
+    )
+    const body = (await resp.json().catch(() => ({}))) as Record<string, unknown>
+    if (!resp.ok) {
+      // 平台错误封套＝{ error: { message, type, code, param } }（见 src/app/api/v1/music/charges/
+      // route.ts 的 errorResponse）——是**物件**不是字串；故先认 error.message，退回 error 字串／
+      // 顶层 message，最后才落到 HTTP 码，避免把平台的明文原因吞成泛用「HTTP 4xx/5xx」。
+      const errField = body?.error
+      const detail =
+        typeof errField === "string"
+          ? errField
+          : errField && typeof errField === "object" && typeof (errField as { message?: unknown }).message === "string"
+            ? String((errField as { message?: unknown }).message)
+            : typeof body?.message === "string"
+              ? body.message
+              : `HTTP ${resp.status}`
+      return {
+        cost_coins: null,
+        charge_error: resp.status === 402 ? "余额不足（这笔未扣费）" : `扣费失败（HTTP ${resp.status}）`,
+        charge_note: `本次音乐已生成，但平台扣费未完成：${detail}。费用状态以平台账本为准，不得对用户宣称已扣费，也不得当作免费。`,
+      }
+    }
+    if (typeof body?.cost_coins !== "number") {
+      return {
+        cost_coins: null,
+        charge_error: "平台扣费回应缺 cost_coins 字段",
+        charge_note: "本次音乐已生成，但平台扣费回应未带 cost_coins，实际费用状态以平台账本为准。",
+      }
+    }
+    // 非主 take 归 0：本次调用只扣 1 次，避免 gateway 把顶层价贴到每张卡使账本虚增（见上方说明）。
+    if (takes && takes.length > 1) for (const t of takes.slice(1)) t.cost_coins = 0
+    return {
+      cost_coins: body.cost_coins,
+      ...(body?.deduped === true ? { cost_deduped: true } : {}),
+    }
+  } catch (e: any) {
+    return {
+      cost_coins: null,
+      charge_error: "扣费呼叫异常",
+      charge_note: `本次音乐已生成，但扣费呼叫异常：${e?.message ?? String(e)}。费用状态以平台账本为准。`,
+    }
+  }
 }
 // </harness-only>
 
@@ -827,7 +901,7 @@ export const musicGenTool: MusicToolDef = {
   id: "music_gen",
   description:
     // <harness-only>
-    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 can_generate_vocal_song 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。",
+    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 can_generate_vocal_song 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。",
     // </harness-only>
   args: {
     probe: {
@@ -949,6 +1023,10 @@ export const musicGenTool: MusicToolDef = {
         if (!resolved.ok) return fail(resolved.code, resolved.message)
         sourceAudioBase64 = resolved.value.base64
       }
+      // 音乐扣费 ref（2026-10-10「音乐 1 币/次」）：**每次工具调用生成一次**，同一次调用内的
+      // 通路重试／回落全部沿用同一个 ref（平台按 ref 幂等 ⇒ 绝不双扣）。此处位于任何生成副作用
+      // 之前；probe=true 已提前 return、三通路全失败在下游 throw，都到不了扣费点。
+      const musicChargeRef = `music:${context?.sessionId ?? "anon"}:${randomUUID()}`
       // </harness-only>
       // cot_mode 缺省：常规＝full；翻唱（带 source_audio）＝melody（官方翻唱模式：
       // 只保留旋律骨干、伴奏自由适配新风格）；显式传 full 也允许＝保留原和声的重渲染。
@@ -1185,6 +1263,10 @@ export const musicGenTool: MusicToolDef = {
               audio_bytes: bytes.length,
               mime_type: generated.mimeType,
               audio_base64: generated.audioBase64,
+              // <harness-only>
+              // 音频已产出（上游已生成）才走到这里 ⇒ 照「先出音频、后扣费」仍扣一次，费用如实回报。
+              ...(await musicChargeReceiptFields(musicChargeRef, context?.sessionId)),
+              // </harness-only>
             })
           }
           throw e
@@ -1356,6 +1438,13 @@ export const musicGenTool: MusicToolDef = {
 
       return ok({
         title: "音乐生成完成",
+        // <harness-only>
+        // 先出音频、后扣费（2026-10-10「音乐 1 币/次」）：走到这里时音频已生成、（有会话时）
+        // 各候选已上传。经平台控制面按 musicChargeRef 幂等扣一次，回执带 cost_coins（顶层栏位，
+        // 供 audio.done 卡与 gateway 账本消费）；扣费失败如实回 charge_error，绝不静默吞。
+        // 传 audios：非主 take 归 0，账本合计 = 实扣 1 币/调用（多 take 不虚增）。
+        ...(await musicChargeReceiptFields(musicChargeRef, context?.sessionId, audios)),
+        // </harness-only>
         ...(promptChainRef ? { prompt_chain_ref: promptChainRef } : {}),
         ...(url ? { url, path_source: "gateway_uploads" } : { audio_base64: generated.audioBase64, upload: uploadCode }),
         ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),

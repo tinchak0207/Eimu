@@ -291,6 +291,12 @@ export const ledgerRef = {
   subscriptionTerm: (subscriptionId: string, termIndex: number) => `subscription:${subscriptionId}:term:${termIndex}`,
   /** 续期替换（把上一期未用完余额作废）的幂等键。 */
   subscriptionReplace: (subscriptionId: string, termIndex: number) => `subscription:${subscriptionId}:term:${termIndex}:replace`,
+  /**
+   * 音乐生成按次扣费的幂等键（chargeId = `music:<keyId>:<ref>`，见 lib/music-charge.ts）。
+   * 音乐没有 generation_job，也就没有 billing_operation.id ⇒ 不能沿用 consumption(operationId)
+   * 那条键；这里给音乐单独一个约定（幂等键是单一权威，别处不得自拼）。
+   */
+  musicCharge: (chargeId: string) => `music-charge:${chargeId}:debit`,
 } as const;
 
 // ─────────────────────────────────────────── 写入层

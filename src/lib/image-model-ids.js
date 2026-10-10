@@ -131,6 +131,11 @@ export const AVATAR_1_MODEL_ID = /** @type {const} */ ("avatar-1");
 export const LIPSYNC_1_MODEL_ID = /** @type {const} */ ("lipsync-1");
 export const SUPPORTED_AV_MODEL_IDS = [TTS_1_MODEL_ID, AVATAR_1_MODEL_ID, LIPSYNC_1_MODEL_ID];
 
+// 音乐生成（2026-10-10）：站内单价权威＝`src/lib/music-pricing.ts`（1 币/次）。
+// 同 TTS/AV 先例：**不入** SUPPORTED_* 列表（C 端选单/canvas 管线不受影响），只由
+// B 端 `GET /v1/models` 显式附加价目（x_coins_per_music，与实扣同源），供 agent 报价。
+export const MUSIC_1_MODEL_ID = /** @type {const} */ ("music-1");
+
 // 2026-09-27 暴君裁定「adobe2api 留图、停视频」：本表只列 adobe2api 仍承接的**图像**
 // 模型；原视频条目（veo/kling/seedance/firefly-video/luma/runway 全族）一并移除，
 // 对应 capability 由 seed 的 retireUnclaimedCapabilities 退役。

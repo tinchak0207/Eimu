@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isModelAllowedForKey, readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids";
+import { SUPPORTED_GENERATION_MODEL_IDS, MUSIC_1_MODEL_ID } from "@/lib/image-model-ids";
 import { imageGenerationCoins, modelDisplayName } from "@/lib/provider-config";
 import { generationCapabilities, generationCoins } from "@/lib/generation-model-catalog";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
+import { MUSIC_CHARGE_ENDPOINT, musicCoinsPerGeneration } from "@/lib/music-pricing";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
 export const runtime = "nodejs";
@@ -140,5 +141,28 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
     },
   );
 
-  return addRateLimitHeaders(NextResponse.json({ object: "list", data }), auth.key);
+  return addRateLimitHeaders(NextResponse.json({ object: "list", data: [...data, musicEntry(created, siteUrl)] }), auth.key);
+}
+
+/**
+ * 音乐生成条目（2026-10-10）：音乐走 harness 的 `music_gen`，不走平台的生成管线，
+ * 所以它不是「可按模型投递的生成端点」，而是一条**价目宣告**——agent 的报价工具
+ * 读 `x_coins_per_music`，与实扣同源（同一个 `musicCoinsPerGeneration()`，
+ * 见 `src/lib/music-pricing.ts`）。`x_endpoint` 指向扣费端点 `POST /v1/music/charges`，
+ * 呼叫方在那里按 `{ ref }` 申报一次生成（金额由服务端定价，不接受调用方传入）。
+ */
+function musicEntry(created: number, siteUrl: string) {
+  return {
+    id: MUSIC_1_MODEL_ID,
+    object: "model" as const,
+    created,
+    owned_by: "image-studio",
+    x_display_name: "音乐生成",
+    // 与图片/影片同族的「投递端点」栏位：这里是扣费端点（非生成端点）。
+    x_endpoint: MUSIC_CHARGE_ENDPOINT,
+    // 统一价：1 币/次（不分通路/版本/take 数）——与实扣同一颗常数。
+    x_coins_per_music: musicCoinsPerGeneration(),
+    x_docs_url: `${siteUrl}/docs`,
+    x_openapi_url: `${siteUrl}/v1/openapi.json`,
+  };
 }
