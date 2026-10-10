@@ -716,7 +716,7 @@ async function probeFlowMusic(): Promise<MusicChannelProbe> {
       status: "ready",
       label: "FlowMusic2API 账号鉴权通过（生成额度与音频交付尚未验证）",
       evidence: `GET /health 200，/v1/models 通过，真鉴权 POST /api/tokens/1/refresh-credits 200 credits=${cr.credits}${deadEvidence ? "；" + deadEvidence : ""}`,
-      capability: "支持人声整歌；credits 数值不能单独证明订阅方案是否允许生成，需实际生成确认",
+      capability: "支持人声整歌；成品实测 162–182 秒、不能精确控长，写词按「演唱字数预算 = 目标秒数 × BPM ÷ 60 × 每拍音节数」核算歌词字数（每拍音节数：慢板 ≤76 → 0.8／中速 77–119 → 1.0／快板 ≥120 → 1.4；目标秒数 = min(用户明确要求, 区间小值 165 秒)，用户未给时长用 165 秒、BPM 未定先定一个（缺省 88）；单曲演唱字数硬上限 ≤400 字），超预算上游只会压时值硬塞；credits 数值不能单独证明订阅方案是否允许生成，需实际生成确认",
     }
   }
   const failure = classifyFlowMusicFailure(credits.status, credits.body)
@@ -847,7 +847,7 @@ export const musicGenTool: MusicToolDef = {
       type: "string",
       required: false,
       description:
-        "自定义歌词（可选）。支持 [Verse]/[Chorus]/[Bridge] 段落标签或 [0:00 - 0:10] 时间戳结构；中文歌词一律简体（用户给繁体中文歌词先转成简体再送，不写繁体字形）；非中文歌词按内容语言（英文歌英文、日文歌日文），不强制汉化。YuE2 通路要求自定义歌词带 [Verse]/[Chorus] 段落标签（上游语法必需）。时间码只有 Gemini Lyria 直连认：FlowMusic2API 与 YuE2 会剥除歌词里的 [0:00 - 0:10] 时间码（段落标签原样保留），并在回执 notes 用大白话说明。缺省=纯器乐（Instrumental only, no vocals）。",
+        "自定义歌词（可选）。支持 [Verse]/[Chorus]/[Bridge] 段落标签或 [0:00 - 0:10] 时间戳结构；中文歌词一律简体（用户给繁体中文歌词先转成简体再送，不写繁体字形）；非中文歌词按内容语言（英文歌英文、日文歌日文），不强制汉化。YuE2 通路要求自定义歌词带 [Verse]/[Chorus] 段落标签（上游语法必需）。时间码只有 Gemini Lyria 直连认：FlowMusic2API 与 YuE2 会剥除歌词里的 [0:00 - 0:10] 时间码（段落标签原样保留），并在回执 notes 用大白话说明。缺省=纯器乐（Instrumental only, no vocals）。演唱正文不要用空格当停顿记号（会被读成演唱停顿、产生机械切分），停顿用标点或段落标签。字数须与目标时长×BPM 匹配：按「演唱字数预算 = 目标秒数 × BPM ÷ 60 × 每拍音节数」核算（每拍音节数：慢板 ≤76 → 0.8／中速 77–119 → 1.0／快板 ≥120 → 1.4；目标秒数 = min(用户明确要求, FlowMusic2API 实测区间小值 165 秒)，用户未给时长用 165 秒、BPM 未定先定一个（缺省 88）；单曲演唱字数硬上限 ≤400 字；非中文按音节数计，英文按音节、1 个英文词约 1.5 音节），超预算上游不会拒收，只会压时值、砍长音硬塞（听感 rap 化）。",
     },
     duration_hint: {
       type: "string",
