@@ -295,15 +295,21 @@ export function HistoryClient() {
   // 项目过滤已由服务端负责（R2：/api/history?projectId，含「盖章栏位 ∪ 资产血缘」）。
   // 这里保留一条**客户端 union 兜底**：盖章栏位命中 **或** 落进已加载资产的血缘 id 集合
   // （`projectHistoryIds`）——与新增的盖章列同一判据，不另立第二套真源、两套判据不打架。
-  // 存量记录无栏位时由血缘那一路兜住；服务端分页已覆盖两种命中，故正常情况下这里不裁掉任何条目。
+  //
+  // **辅助集未就绪时不二次裁剪**：`projectHistoryIds` 为 null ＝ `/api/project-assets`
+  // 未完成或失败/403（例如项目被删/归档后的旧标签页）。此时服务端已按项目过滤过一遍，
+  // 客户端**不得**拿空集合再裁一次——否则服务端正确返回的、只靠血缘命中的存量记录会被
+  // 静默隐藏（Hacker 实证：服务端 total=3、网格=2）。辅助集正常时它仍负责滤掉**只存在于
+  // 本地缓存**（localStorage 合并进来、未经服务端过滤）的越界条目——那才是它存在的理由。
   //
   // **下标基准唯一真源**：`displayEntries` 是网格实际渲染的阵列，也是灯箱（entries）与
   // 所有 `lightboxIndex` 计算（handleOpen / handleLineageJump / handleDelete）的唯一基准。
   // 若网格渲染 A、灯箱索引却按全量 history.entries 算，项目模式点开会翻到项目外的记录
   //（Hacker 实证翻到项目外条目）。因此本变量声明在所有使用点之前。
   const projectHistoryIds = useMemo(() => {
+    if (projectAssets === null) return null;
     const ids = new Set<string>();
-    for (const item of projectAssets ?? []) {
+    for (const item of projectAssets) {
       if (item.source?.type === "history" && item.source.id) ids.add(item.source.id);
     }
     return ids;
@@ -312,7 +318,10 @@ export function HistoryClient() {
     () =>
       projectId
         ? history.entries.filter(
-            (entry) => entry.projectIds?.includes(projectId) === true || projectHistoryIds.has(entry.id),
+            (entry) =>
+              entry.projectIds?.includes(projectId) === true ||
+              projectHistoryIds === null ||
+              projectHistoryIds.has(entry.id),
           )
         : history.entries,
     [projectId, history.entries, projectHistoryIds],

@@ -21,7 +21,7 @@ import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { listGenerationJobsForTenant } from "@/lib/generation-core/job-repository";
 import { generationJobHistoryEntry } from "@/lib/generation-task-history";
 import { loadScopedLibrary } from "@/lib/asset-library";
-import { filterByProjectTag } from "@/lib/asset-scope";
+import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
@@ -214,6 +214,14 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return fail(400, "请求体不是合法的 JSON。");
+  }
+
+  // 项目标签超上限一律 fail-loud 拒收（与其它写入口同一谓词，不再让 normalizeProjectIds
+  // 静默截断丢标签）。只对本次**显式送来**的 projectIds 判长度（未给＝不拒）。
+  const rawProjectIds =
+    body && typeof body === "object" ? (body as { projectIds?: unknown }).projectIds : undefined;
+  if (projectTagIdsOverLimit(rawProjectIds)) {
+    return fail(400, `项目标签最多 ${MAX_ASSET_PROJECT_TAGS} 个`);
   }
 
   const normalized = normalizeHistoryEntry(body, "server");
