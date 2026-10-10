@@ -1079,7 +1079,7 @@ test("subagent started→done settles the card, turn.done retires it into an exp
     status,
   });
   const all = [mk(1, "ok"), mk(2, "ok"), mk(3, "ok"), mk(4, "running")];
-  const markupAll = renderToStaticMarkup(createElement(AgentSubagentBar, { items: all }));
+  const markupAll = renderToStaticMarkup(createElement(AgentSubagentBar, { items: all, initialOpen: true }));
   for (const it of all) {
     assert.match(markupAll, new RegExp(it.label), "内联列表全量渲染，不再有名额裁剪");
   }
@@ -1175,7 +1175,7 @@ test("F3/F4 产出卡：截断预览 + 整行展开全文（渲染层才截断�
   assert.equal(reportPreview("\n\n第二行\n第三行"), "第二行");
 });
 
-test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、折叠头默认展开可收合（2026-09-11 逐字滑窗合同；09-19 去重裁定）", () => {
+test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、折叠头默认折叠可展开（2026-09-11 逐字滑窗合同；09-19 去重；G3 R2 默认折叠）", () => {
   const src = read("src/components/agent-chat/AgentSubagentBar.tsx");
   // 2026-09-10 暴君裁定：卡片级展开语义下线（单行卡无展开按钮）。
   assert.ok(!/aria-expanded=\{expanded\}/.test(src), "单行卡不再有展开语义");
@@ -1268,23 +1268,29 @@ test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、�
     activity: "先想一下\n再核价",
     status: "running",
   };
-  const markup = renderToStaticMarkup(createElement(AgentSubagentBar, { items: [runningItem] }));
+  const markup = renderToStaticMarkup(createElement(AgentSubagentBar, { items: [runningItem], initialOpen: true }));
   assert.match(markup, /先想一下 再核价/, "running 行渲染活动流（reasoning 也在内）");
   assert.doesNotMatch(markup, /第一段 第二段 收尾/, "有 activity 时不再喂 text");
   assert.doesNotMatch(markup, /truncate/, "running 行不得再走 truncate");
   // 没有 activity 的旧资料（或只有正文的旧帧）回落 text，不留空白行。
   const noActivityMarkup = renderToStaticMarkup(
-    createElement(AgentSubagentBar, { items: [{ ...runningItem, activity: undefined }] }),
+    createElement(AgentSubagentBar, { items: [{ ...runningItem, activity: undefined }], initialOpen: true }),
   );
   assert.match(noActivityMarkup, /第一段 第二段 收尾/, "没有 activity 时回落 text");
   // 空输出诚实文案，不假造内容（running 卡的 fallback「正在输出…」）。
   assert.match(src, /正在输出…/);
-  // 2026-09-19 暴君裁定：「折叠头放列表上方，默认展开可收合；
+  // 2026-09-19 暴君裁定：「折叠头放列表上方，可收合；
   // 弹出面板（lg-sheet/关闭钮/Esc）与置顶名额裁剪两套重复 UI 下线。
   // 2026-09-20 Route B：折叠头文案改「派出 N 个子代理」（无底色细行语言）。
+  // G3 R2（2026-10-10）：默认折叠——用户面靠 turn.status，展开才见细节噪音。
   assert.match(src, /派出 \{items\.length\} 个子代理/);
-  assert.match(src, /useState\(true\)/, "折叠头默认展开");
+  assert.match(src, /initialOpen = false/, "折叠头默认折叠（G3）");
+  assert.match(src, /useState\(initialOpen\)/, "折叠头初值走 initialOpen（默认 false）");
   assert.match(src, /aria-expanded=\{open\}/, "折叠头带展开语义（可收合）");
+  // 默认折叠：不传 initialOpen 时 DOM 只有折叠头，不见跑马灯正文。
+  const collapsedMarkup = renderToStaticMarkup(createElement(AgentSubagentBar, { items: [runningItem] }));
+  assert.match(collapsedMarkup, /派出 1 个子代理/);
+  assert.doesNotMatch(collapsedMarkup, /先想一下 再核价/, "默认折叠不渲染明细行");
   assert.ok(!/SubagentMenu/.test(readCode(src)), "弹出面板已下线（只有一份内联列表）");
   assert.ok(!/lg-sheet/.test(readCode(src)), "弹层材质随面板一起下线");
   assert.ok(!/pickVisibleSubagents/.test(readCode(src)), "置顶名额裁剪已下线（列表全量渲染）");

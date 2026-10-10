@@ -10,7 +10,7 @@ import { emitSanitizedDelta } from "./outbound-emit.ts"
 import { opencodeHeaders, scheduleTitleFetch, revertDeadTail } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets } from "./subagent"
+import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets, emitRunningSubagentsStatus } from "./subagent"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
 import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
@@ -80,6 +80,9 @@ function emitTurnDone(state: SessionState): void {
   state.lastTurnActiveAt = 0
   markDirty(state)
   emitToSession(state, "turn.done", {})
+  // F3（2026-10-10）：turn.done 清前端 turnStatus；若仍有在途 async 子代理，立刻回填
+  // 进度行，避免 await 窗真空（复用 turn.status，禁止 message.delta 污染正文）。
+  emitRunningSubagentsStatus(state.sessionId)
 }
 
 // ── 2026-10-02 能力片：孤儿 tool_use 追踪（设计取自 Claude Code yieldMissingToolResultBlocks

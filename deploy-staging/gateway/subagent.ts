@@ -28,7 +28,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSyn
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
-import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, type JevDispatchGuards } from "./jev-gate"
+import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, isPlanOnlyNoGenerationIntent, type JevDispatchGuards } from "./jev-gate"
 // 任务状态枚举真源（0920 收口）：running/ok/error/stopped 以此为准，禁散布裸字串。
 import type { TaskStatus } from "./types-gateway.ts"
 // 0920：模板判定即建骨架（不等 Expert）——workflowService 是纯 service 模组，
@@ -484,6 +484,8 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
     } catch (e) {
       console.error(`[gateway] subagent stop emit failed: id=${run.id}`, e)
     }
+    // G3：停止也给人话状态行（本路已停止＋剩余兄弟）。
+    emitSubagentCompletedStatus(run, "stopped")
     // 刻意**不唤醒**父会话：停止＝结束，不是新任务。唤醒会让 orchestrator 又起一轮
     // （并可能再派新 subagent），正是用户抱怨的「刹不住」。
   }
@@ -896,6 +898,10 @@ ${summary}`
       // 2026-10-02 能力片：用量计数（仅 summarizeChild 路径有值；新栏位，不动既有键）。
       ...(run.usage ? { usage: run.usage } : {}),
     })
+    // G3（2026-10-10）：用户默认面要「本路刚完成／失败」人话摘要——走 turn.status，
+    // 禁止 message.delta。run 已从注册表摘除；若仍有兄弟在跑，同一帧带上剩余路数
+    // （避免先写完成句再立刻被 emitRunningSubagentsStatus 覆盖而看不见）。
+    emitSubagentCompletedStatus(run, status)
     // R6 异步完成唤醒：async dispatch 的终态（成功与失败皆唤）在 emit 帧之外
     // 直接续父会话 turn（轮子=deps.wakeParent）。finishRun 幂等守卫保唤醒不重复；
     // deps.wakeParent 内部再带 ackTimer 在途让位，双保险。同步模式不唤（工具还在
@@ -1080,27 +1086,103 @@ function partialBodyOf(run: SubagentRun): string {
 /** D5（2026-10-02）：心跳与逾时前部分交付。
  *  证据：硬逾时 22 次、会话实录「40 分钟无任何存活讯号」、中止即全丢（REPORT A8）。
  *  心跳间隔（60s）无文献依据，属待调参数（MCP progress / A2A 任务状态机为机制类别依据）。
- *  心跳不得抛错、不得改变 run 状态；计时器 unref，不阻挡进程退出。 */
+ *  心跳不得抛错、不得改变 run 状态；计时器 unref，不阻挡进程退出。
+ *  F3（2026-10-10）：首跳立即发一帧（setInterval 首跳要等整段间隔）；父 turn.done
+ *  清前端 turnStatus 后由 emitRunningSubagentsStatus 立刻回填，避免 async await 真空。 */
+function emitSubagentHeartbeatStatus(run: SubagentRun): void {
+  if (run.status !== "running" || run.stopped) return
+  const state = deps?.resolveSession(run.parentGatewaySessionId) ?? deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
+  if (!state) return
+  const elapsed = Math.round((Date.now() - run.startedAt) / 1000)
+  try {
+    // 2026-10-04 F4：心跳不得夹带子代理内部交付正文——契约栏名清单（verdict/issues/
+    // evidence/qc）、「FAILED＋原因」、闸门核对说明会随 snippet 逐字外泄给用户。
+    // 只留用户可读的状态句；标签经用户可见映射（「机器审核」→「复核」）。
+    const label = userFacingSubagentLabel(run.label)
+    const text =
+      elapsed < 5
+        ? `子代理「${label}」进行中…`
+        : `子代理「${label}」仍在运行（已 ${elapsed}s）`
+    deps?.emitToSession(state, "turn.status", { text })
+  } catch {
+    /* 心跳失败不影响主流程 */
+  }
+}
+
+/**
+ * F3（2026-10-10）：父回合 turn.done 之后，若仍有在途子代理，立刻补一帧 turn.status。
+ * 前端 turn.done 会清 turnStatus；不补则 await 窗最长静默一整段心跳间隔。
+ * 多路在跑时单行展示最老一路＋总数（前端 turnStatus 是单值）。
+ */
+export function emitRunningSubagentsStatus(parentGatewaySessionId: string): void {
+  if (!parentGatewaySessionId || !deps) return
+  const list = (byParent.get(parentGatewaySessionId) ?? []).filter((r) => r.status === "running" && !r.stopped)
+  if (list.length === 0) return
+  const oldest = list.reduce((a, b) => (a.startedAt <= b.startedAt ? a : b))
+  if (list.length === 1) {
+    emitSubagentHeartbeatStatus(oldest)
+    return
+  }
+  const state =
+    deps.resolveSession(parentGatewaySessionId) ?? deps.findSessionByOpenCodeId(oldest.parentOpencodeSessionId)
+  if (!state) return
+  const elapsed = Math.round((Date.now() - oldest.startedAt) / 1000)
+  const label = userFacingSubagentLabel(oldest.label)
+  try {
+    deps.emitToSession(state, "turn.status", {
+      text: `${list.length} 个子代理仍在运行（「${label}」已 ${elapsed}s）`,
+    })
+  } catch {
+    /* 心跳失败不影响主流程 */
+  }
+}
+
+/**
+ * G3（2026-10-10）：子代理终态人话摘要 → turn.status。
+ * 复用既有暂态合同；不走 message.delta（对齐 turn-status-transient-row 污染根治）。
+ * 调用时机：finishRun 已 emit subagent.done、且本 run 已从 byParent 摘除之后。
+ * 若仍有兄弟在跑，单行合并「本路刚完成／失败」＋剩余路数，避免完成句被立刻覆盖。
+ */
+function emitSubagentCompletedStatus(run: SubagentRun, status: "ok" | "error" | "stopped"): void {
+  if (!deps) return
+  const state =
+    deps.resolveSession(run.parentGatewaySessionId) ?? deps.findSessionByOpenCodeId(run.parentOpencodeSessionId)
+  if (!state) return
+  const label = userFacingSubagentLabel(run.label)
+  const doneText =
+    status === "ok"
+      ? `本路刚完成：「${label}」`
+      : status === "error"
+        ? `本路失败：「${label}」`
+        : `本路已停止：「${label}」`
+  const list = (byParent.get(run.parentGatewaySessionId) ?? []).filter((r) => r.status === "running" && !r.stopped)
+  try {
+    if (list.length === 0) {
+      deps.emitToSession(state, "turn.status", { text: doneText })
+      return
+    }
+    const oldest = list.reduce((a, b) => (a.startedAt <= b.startedAt ? a : b))
+    const elapsed = Math.round((Date.now() - oldest.startedAt) / 1000)
+    const oldestLabel = userFacingSubagentLabel(oldest.label)
+    const rem =
+      list.length === 1
+        ? `「${oldestLabel}」仍在运行（已 ${elapsed}s）`
+        : `${list.length} 个子代理仍在运行（「${oldestLabel}」已 ${elapsed}s）`
+    deps.emitToSession(state, "turn.status", { text: `${doneText}；${rem}` })
+  } catch {
+    /* 摘要失败不影响主流程 */
+  }
+}
+
 function armHeartbeat(run: SubagentRun, hardMs: number): void {
   const hbMs = Number.parseInt(process.env.SUBAGENT_HEARTBEAT_MS || "", 10) || 60_000
   const earlyMs = Number.parseInt(process.env.SUBAGENT_EARLY_PARTIAL_MS || "", 10) || 120_000
   if (run.heartbeatTimer) clearInterval(run.heartbeatTimer)
   if (run.earlyPartialTimer) clearTimeout(run.earlyPartialTimer)
+  // F3：立即一帧，再进入周期；否则派工后／turn.done 后最长空窗 = hbMs。
+  emitSubagentHeartbeatStatus(run)
   run.heartbeatTimer = setInterval(() => {
-    if (run.status !== "running" || run.stopped) return
-    const state = deps?.resolveSession(run.parentGatewaySessionId) ?? deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
-    if (!state) return
-    const elapsed = Math.round((Date.now() - run.startedAt) / 1000)
-    try {
-      // 2026-10-04 F4：心跳不得夹带子代理内部交付正文——契约栏名清单（verdict/issues/
-      // evidence/qc）、「FAILED＋原因」、闸门核对说明会随 snippet 逐字外泄给用户。
-      // 只留用户可读的状态句；标签经用户可见映射（「机器审核」→「复核」）。
-      deps?.emitToSession(state, "turn.status", {
-        text: `子代理「${userFacingSubagentLabel(run.label)}」仍在运行（已 ${elapsed}s）`,
-      })
-    } catch {
-      /* 心跳失败不影响主流程 */
-    }
+    emitSubagentHeartbeatStatus(run)
   }, hbMs)
   unrefTimer(run.heartbeatTimer)
   if (hardMs > earlyMs + 30_000) {
@@ -1587,12 +1669,10 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // S3（2026-09-11）：reasoning 增量一并转发（跑马灯要让用户感知「子代理在
           // 工作」），用 kind 与正文区分；正文 payload 维持原样不带 kind（零回归）。
           const kind = typeof p.partID === "string" ? run.partKind.get(p.partID) : undefined
-          if (!hideBody) {
-            deps.emitToSession(
-              parentState,
-              "subagent.delta",
-              kind === "reasoning" ? { id: run.id, text: p.delta, kind } : { id: run.id, text: p.delta },
-            )
+          // G3（2026-10-10）：reasoning 增量不再转发父会话——评测 A/B/C 数万～十几万
+          // subagent.delta 主因是英文思考洪流；存活感已由 turn.status 心跳覆盖。正文 delta 照常。
+          if (!hideBody && kind !== "reasoning") {
+            deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: p.delta })
           }
           if (typeof p.partID === "string") {
             run.partEmitted.set(p.partID, (run.partEmitted.get(p.partID) ?? 0) + p.delta.length)
@@ -1694,12 +1774,9 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
         const emittedLen = run.partEmitted.get(id) ?? 0
         if (part.text.length > emittedLen) {
           const suffix = part.text.slice(emittedLen)
-          if (!hideBody) {
-            deps.emitToSession(
-              parentState,
-              "subagent.delta",
-              part.type === "reasoning" ? { id: run.id, text: suffix, kind: "reasoning" } : { id: run.id, text: suffix },
-            )
+          // G3：reasoning part 后缀不转发（同上）；正文照常。
+          if (!hideBody && part.type !== "reasoning") {
+            deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: suffix })
           }
           run.partEmitted.set(id, part.text.length)
           boundMap(run.partEmitted, 200)
@@ -2134,9 +2211,11 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         }
       }
       if (meta.template) {
-        prompt = `${workflowTemplateDirective(meta.template.templateId, meta.template.confidence)}\n\n---\n\n${prompt}`
+        // R2-G1：禁生成／只要方案 → 指令声明＋骨架 lean（与 messages-gw PROMPT_SKELETON 同闸）。
+        const planOnlyLean = isPlanOnlyNoGenerationIntent(prompt)
+        prompt = `${workflowTemplateDirective(meta.template.templateId, meta.template.confidence, planOnlyLean ? { planOnlyLean: true } : undefined)}\n\n---\n\n${prompt}`
         console.log(
-          `[gateway] jev_gate: WORKFLOW_TEMPLATE injected template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} label="${label}" expert=${expertId || "-"}`,
+          `[gateway] jev_gate: WORKFLOW_TEMPLATE injected template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} planOnlyLean=${planOnlyLean} label="${label}" expert=${expertId || "-"}`,
         )
         // 0920 暴君裁定（第二版）：模板判定完成即建骨架弹上画布——不等 Expert
         // 去调 workflow_start（实锤：Expert 根本没调，右边永远空白，「太慢了」）。
@@ -2156,11 +2235,16 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
               `[gateway] jev_gate: WORKFLOW_SKELETON reused wf=${priorWfId} session=${parent.sessionId} (per-session 去重，不新建不覆盖)`,
             )
           } else {
-            const r = workflowService.startFast(meta.template.templateId, templatePlaceholderContent(meta.template.templateId) as never, parent)
+            const r = workflowService.startFast(
+              meta.template.templateId,
+              templatePlaceholderContent(meta.template.templateId) as never,
+              parent,
+              planOnlyLean ? { planOnlyLean: true } : undefined,
+            )
             if ("workflowId" in r && typeof r.workflowId === "string") {
               workflowOwnerBySession.set(parent.sessionId, r.workflowId)
               console.log(
-                `[gateway] jev_gate: WORKFLOW_SKELETON built template=${meta.template.templateId} wf=${r.workflowId} session=${parent.sessionId} (判定即弹，不等 Expert)`,
+                `[gateway] jev_gate: WORKFLOW_SKELETON built template=${meta.template.templateId} wf=${r.workflowId} session=${parent.sessionId} planOnlyLean=${planOnlyLean} (判定即弹，不等 Expert)`,
               )
             } else {
               console.log(`[gateway] workflow skeleton skipped (start error): ${"error" in r ? r.error : "unknown"}`)

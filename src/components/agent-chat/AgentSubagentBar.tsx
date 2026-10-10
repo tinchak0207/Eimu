@@ -16,7 +16,7 @@ import { toolDisplayName } from "./AgentToolCard";
 //   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 6px 圆点。
 // 2026-09-19 暴君裁定（子任务 UI 去重）：
 //   折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI 合并为一份内联列表；
-//   默认展开、可收合（SubagentMenu 弹层整体下线）。
+//   可收合（SubagentMenu 弹层整体下线）；G3 R2 起默认折叠降噪。
 // 2026-09-10 暴君裁定（子任务卡视觉迭代）：
 //   running 态的末行摘要换跑马灯（marquee）——流式吐字观感＝快。
 
@@ -221,10 +221,17 @@ function SubagentCard({ item }: SubagentCardProps) {
   );
 }
 
-function AgentSubagentBarComponent({ items }: { items: AgentSubagentItem[] }) {
-  // 默认展开：子任务在跑时用户要看的就是这份列表；收合由折叠头手动控制，
-  // 手动收合优先于任何自动行为（新一轮 subagent.started 不把收起的列表摊回去）。
-  const [open, setOpen] = useState(true);
+function AgentSubagentBarComponent({
+  items,
+  initialOpen = false,
+}: {
+  items: AgentSubagentItem[];
+  /** 测试／调试可强制初开；生产默认折叠（G3 R2 降噪）。 */
+  initialOpen?: boolean;
+}) {
+  // G3（2026-10-10）：默认折叠——用户默认面靠 turn.status「进行中／本路刚完成」，
+  // 展开才见跑马灯细节；手动展开优先于任何自动行为（新 started 不把收起的摊回去）。
+  const [open, setOpen] = useState(initialOpen);
   if (items.length === 0) return null;
 
   return (
