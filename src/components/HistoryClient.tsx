@@ -63,18 +63,6 @@ const PARAM = {
  */
 const PROJECT_PARAM = "projectId";
 
-/**
- * 项目维度扫描的自动续拉页数上限（修复 1，2026-10-09 重做）。
- *
- * 项目匹配是**纯客户端过滤**（服务端没有项目标签真源），目标记录可能落在很后面的页。
- * 上一轮把「继续拉页」交给 HistoryGrid 内的无限滚动哨兵，但条目为空时网格不产生可交叉
- * 的高度，哨兵只在首次观察时触发一次 → 实测目标在第 5 页时只发 2 个请求就停死
- *（Hacker 实证）。现在改由本页**主动**续拉，并对自动续拉封顶：
- * 到达上限后不再自动翻页，改给一颗显式按钮（用户可反复点，每次一页），
- * 让「第 5 页之后的匹配」可达、也让「永远 0 匹配」能走到空态而不是永久假等待。
- */
-const PROJECT_SCAN_MAX_AUTO_PAGES = 5;
-
 // 合法种类值不再手写：由交付物注册表 + 非交付种类清单推导
 //   [...DELIVERABLE_KIND_IDS, ...NON_DELIVERABLE_ENTRY_KINDS]
 // 推导与解析落在 history-kind-filter（纯模块）——本档带 history.css，node:test
@@ -329,41 +317,6 @@ export function HistoryClient() {
   /** 实际渲染进网格的记录：未选项目＝原数组（逐位元不变）；选中项目＝血缘过滤后。 */
   const displayEntries = projectEntries;
 
-  // ── 项目维度扫描（修复 1，2026-10-09 重做）────────────────────
-  // 由本页主动续拉（不再依赖 HistoryGrid 空网格下的哨兵——实测它只触发一次，只多翻一页）。
-  // 封顶 PROJECT_SCAN_MAX_AUTO_PAGES；到顶后改走显式按钮，游标耗尽则落回空态。
-  const scanPagesRef = useRef(0);
-
-  // 换项目或换筛选都从头扫描。urlQuery 与「查询与 URL 同步」用的是同一个物件（不新造真源）。
-  useEffect(() => {
-    scanPagesRef.current = 0;
-  }, [projectId, urlQuery]);
-
-  /**
-   * 自动续拉：本页已加载的记录里 0 匹配、服务端还有下一页、且还没到页数上限时，
-   * 主动再拉一页。loadMoreHistory 自带并发闸（loading/loadingMore 时直接返回），
-   * 但这里仍必须带上 loadingMore 守卫，否则会重复计数、白白吃掉自动页数配额。
-   *
-   * 依赖逐项列出（含 displayEntries.length），任一变化（新一页到位 / 项目切换）都会重评。
-   * 非项目模式（projectId 为空）在第一行直接 return——逐字不改既有行为（回归红线）。
-   */
-  useEffect(() => {
-    if (!projectId) return;
-    if (displayEntries.length !== 0) return;
-    if (!history.hasMore) return;
-    if (history.loading || history.loadingMore) return;
-    if (scanPagesRef.current >= PROJECT_SCAN_MAX_AUTO_PAGES) return;
-    scanPagesRef.current += 1;
-    history.loadMore();
-  }, [
-    projectId,
-    displayEntries.length,
-    history.hasMore,
-    history.loading,
-    history.loadingMore,
-    history.loadMore,
-  ]);
-
   // ── 单条操作 ─────────────────────────────────────────────
 
   const handleOpen = useCallback(
@@ -547,20 +500,6 @@ export function HistoryClient() {
   const hasFilters = Object.keys(urlQuery).length > 0 || Boolean(projectId);
   const showSkeleton = (history.loading || isAuthLoading) && !history.entries.length;
 
-  /**
-   * 项目模式下的「仍在继续查找」状态（修复 1，2026-10-09 重做）：displayEntries 为空但服务端
-   * 还有下一页时，不能渲染空态（空态一上屏就没有后续拉页，落在第一页之外的项目记录永久不可达）。
-   * 续拉由本页上面的 effect **主动**驱动（不再靠 HistoryGrid 空网格里的哨兵——实测它只触发一次）。
-   * 此时照挂 HistoryGrid（条目为空也挂）以承载 loadingMore 骨架屏与卡片区，并配一行内联提示。
-   * 只有 `!hasMore`（游标耗尽）时才真正断定「这个项目没有记录」并显示空态。
-   *
-   * `projectScanCapped`＝自动续拉已达页数上限：此时不再自动翻页，改渲染一颗显式按钮
-   *（点击＝手动画一页，可反复点），保证第 N 页之后的匹配仍可达，也避免「永远 0 匹配」时
-   * 永久假等待（用户至少能一路点到游标耗尽、落到空态拿到「清除筛选」出路）。
-   */
-  const projectScanning = Boolean(projectId) && displayEntries.length === 0 && history.hasMore;
-  const projectScanCapped = projectScanning && scanPagesRef.current >= PROJECT_SCAN_MAX_AUTO_PAGES;
-
   const emptyReason = !isLoggedIn
     ? ("logged-out" as const)
     : history.error
@@ -707,7 +646,7 @@ export function HistoryClient() {
           <div className="hist-masonry" role="status" aria-label="正在加载生成历史">
             <HistorySkeleton count={8} />
           </div>
-        ) : displayEntries.length === 0 && !projectScanning ? (
+        ) : displayEntries.length === 0 ? (
           <HistoryEmptyState
             reason={emptyReason}
             message={emptyMessage}
@@ -715,49 +654,24 @@ export function HistoryClient() {
             onRetry={() => runSearch(urlQuery)}
           />
         ) : (
-          <>
-            {/* 项目模式且本页无匹配、但还有下一页：由上面的 effect 主动续拉（修复 1）。
-                自动续拉到顶后，改给一颗显式按钮当出路（每次点＝手动再拉一页）。 */}
-            {projectScanning && (
-              <div
-                role="status"
-                className="mb-4 flex flex-col gap-2 text-ios-footnote text-[rgba(0,0,0,0.58)] sm:flex-row sm:items-center sm:gap-3"
-              >
-                <span>
-                  {projectScanCapped
-                    ? text("history.project.historyScanMoreHint")
-                    : text("history.project.historyScanning")}
-                </span>
-                {projectScanCapped && (
-                  <button
-                    type="button"
-                    onClick={history.loadMore}
-                    className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1.5 text-ios-footnote font-medium text-[#007AFF] transition-colors duration-200 hover:bg-[rgba(0,122,255,0.16)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                  >
-                    {text("history.project.historyScanMore")}
-                  </button>
-                )}
-              </div>
-            )}
-            <HistoryGrid
-              entries={displayEntries}
-              entryKindFilter={parseEntryKind(searchParams.get(PARAM.entryKind))}
-              selectionMode={selectionMode}
-              selectedIds={selectedIds}
-              loadingMore={history.loadingMore}
-              hasMore={history.hasMore}
-              onLoadMore={history.loadMore}
-              onOpen={handleOpen}
-              onToggleSelect={toggleSelect}
-              onToggleStar={toggleStar}
-              onDownload={handleDownload}
-              onDelete={handleDelete}
-              onOpenAgent={handleOpenAgent}
-              onRerun={handleRerun}
-              onRerunVariant={handleRerunVariant}
-              onShowLineage={handleShowLineage}
-            />
-          </>
+          <HistoryGrid
+            entries={displayEntries}
+            entryKindFilter={parseEntryKind(searchParams.get(PARAM.entryKind))}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            loadingMore={history.loadingMore}
+            hasMore={history.hasMore}
+            onLoadMore={history.loadMore}
+            onOpen={handleOpen}
+            onToggleSelect={toggleSelect}
+            onToggleStar={toggleStar}
+            onDownload={handleDownload}
+            onDelete={handleDelete}
+            onOpenAgent={handleOpenAgent}
+            onRerun={handleRerun}
+            onRerunVariant={handleRerunVariant}
+            onShowLineage={handleShowLineage}
+          />
         )}
       </div>
 

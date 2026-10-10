@@ -207,12 +207,6 @@ export const UI_STRINGS = {
   "history.project.assetsLoading": "正在读取项目资产…",
   "history.project.assetsError": "资产加载失败",
   "history.project.historyEmpty": "这个项目还没有生成记录。",
-  "history.project.historyScanning": "已加载的记录里暂无本项目匹配，正在继续查找…",
-  // 修复 1（2026-10-09 重做）：自动续拉到达页数上限后的唯一出路。
-  // 文案刻意**不带页数断言**：上限计的是「额外汇拉的页数」，自动阶段实际查过的页数
-  // 含首屏＝N+1，写任何具体数字都会漂移成假陈述（复验实测）。按钮可反复点，每次手动画一页。
-  "history.project.historyScanMoreHint": "已查找最近的历史记录，仍没有本项目的内容；可继续查找更早的记录",
-  "history.project.historyScanMore": "继续查找更早的记录",
 
   // ── D1 资产血统溯源抽屉 ──────────────────────────────────
   "lineage.title": "溯源 · {hostKind}",
