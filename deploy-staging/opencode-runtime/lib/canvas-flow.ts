@@ -243,7 +243,7 @@ export interface DispatchOutcome {
   request_id: string | null
   code?: string
   error?: string
-  result?: { ok?: boolean; error?: string; created_node_ids?: string[] }
+  result?: { ok?: boolean; error?: string; created_node_ids?: string[]; queued?: boolean; queued_reason?: "no_client" | "ack_timeout" }
 }
 
 /** 下发 ops 到 gateway 并等前端回执（gateway 端最长 30s；本地 fetch 35s 兜底）。 */

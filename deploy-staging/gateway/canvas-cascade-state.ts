@@ -230,6 +230,8 @@ export interface CanvasOpsResult {
   created_node_ids?: string[]
   /** F1：前端未回执／无 SSE 客户端时，结构 ops 已写穿 canvasStates，可稍后 hydrate。 */
   queued?: boolean
+  /** 2026-10-11：queued 的原因——no_client＝无 SSE 客户端（稍后 hydrate）；ack_timeout＝有客户端但逾时未回执（前端很可能没渲染）。 */
+  queued_reason?: "no_client" | "ack_timeout"
 }
 
 interface PendingCanvasOps {
@@ -690,13 +692,14 @@ export function dispatchCanvasOps(
   // 无活 SSE 客户端：前端此刻接不到 canvas.ops，直接以写穿快照为准返回（可 hydrate）。
   if (state.clients.size === 0) {
     emitToSession(state, "canvas.ops", { request_id, ops, ...(label ? { label } : {}) })
-    return Promise.resolve({ request_id, result: queuedResult })
+    return Promise.resolve({ request_id, result: { ...queuedResult, queued_reason: "no_client" } })
   }
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingCanvasOps.delete(request_id)
       // 逾时：快照已写穿，agent 视为成功（queued）；前端稍后打开可 hydrate／apply 队列。
-      resolve({ request_id, result: queuedResult })
+      console.warn(`[gateway] canvas.ops ack timeout — session=${state.sessionId} request=${request_id} clients=${state.clients.size} ops=${ops.length}`)
+      resolve({ request_id, result: { ...queuedResult, queued_reason: "ack_timeout" } })
     }, timeoutMs)
     pendingCanvasOps.set(request_id, {
       sessionKey: state.sessionId,

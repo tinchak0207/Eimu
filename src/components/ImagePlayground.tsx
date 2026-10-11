@@ -237,12 +237,19 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   const prevAgentSessionRef = useRef<string | null>(null);
   const handleAgentSessionChange = useCallback((nextSessionId: string | null) => {
     if (nextSessionId === null) {
+      // 回到无会话空态（开新对话）＝模板库该重现；锚点清空，后续首个 sid 视为同一次建号不再复位。
+      if (prevAgentSessionRef.current !== null) setAgentTemplateDismissed(false);
+      prevAgentSessionRef.current = null;
       setCurrentSessionId(null);
       return;
     }
     if (nextSessionId !== prevAgentSessionRef.current) {
+      // 2026-10-11 画布空白 bug：首页首条消息 send() lazy 建号 → onUserMessage 先置 dismissed，
+      // 新 sid 随后回流；若此处无条件复位，模板轮播会盖回去、CanvasEmbed 卸载，canvas.ops 永不落地。
+      // 只有「从一个会话切到另一个会话」才复位；null → 首个 sid（首页建号／首次 resume）不复位。
+      const hadPrev = prevAgentSessionRef.current !== null;
       prevAgentSessionRef.current = nextSessionId;
-      setAgentTemplateDismissed(false);
+      if (hadPrev) setAgentTemplateDismissed(false);
     }
     setCurrentSessionId(nextSessionId);
     // P0-W4：新会话拿到 id 后挂到当前项目（模板卡 :282 / 留旧开新 :488 两条
@@ -289,7 +296,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     displayMode === "agent" &&
     !agentTemplateDismissed &&
     canvasHost.nodes.length === 0 &&
-    canvasHost.plans.length === 0;
+    canvasHost.plans.length === 0 &&
+    // agent 已下发画布操作：必须让位给 CanvasEmbed（它挂载才会执行 ops 并回执）。
+    !canvasHost.pendingAgentOps;
 
   /**
    * 2026-08-25 模板卡点击（卡即动作）：
