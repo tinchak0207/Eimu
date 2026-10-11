@@ -218,6 +218,17 @@ export interface SessionState {
   stepHasReasoning?: boolean
   /** 本 turn 是否已因空转中止并补发动作导向提示（同 turn 仅一次）。 */
   idleNudgeSent?: boolean
+  // ── 画布写穿硬闸（2026-10-11 修画布；volatile，不进持久化）──
+  /** 本会话命中多步影音制作意图（music + 多镜视频首期）。 */
+  avProductionIntent?: boolean
+  /** 命中时的模板 id（feature_film 等），供 nudge 文案。 */
+  avProductionTemplateId?: string
+  /** 本会话已成功 workflow_write（非 dry_run）。 */
+  workflowWriteSucceeded?: boolean
+  /** 收盘补写 nudge 已发过一次（防死循环）。 */
+  workflowWriteGateNudgeSent?: boolean
+  /** 开场骨架建好后待注入的「模型改 DSL」指令（注入后清空）。 */
+  pendingAvCanvasDirective?: string
   /** 2026-10-02：自上次动作以来的 reasoning 累计（无工具长推理断路器，见 reasoning-cap.ts）。 */
   reasonSinceActionChars?: number
   reasonSinceActionAt?: number

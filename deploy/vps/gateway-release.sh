@@ -70,6 +70,7 @@ RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-gateway-recon.sh"
 
 DRY_RUN=0
 SKIP_RECON=0
+SKIP_MEDIA_WF_COVERAGE=0
 FORCE=0
 SHA=""
 EXPLICIT_FILES=()
@@ -171,7 +172,7 @@ usage() {
 
 子命令：
   status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
-  release [--sha C] [--files F...] [--skip-recon] [--dry-run] [--force]
+  release [--sha C] [--files F...] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force]
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
                           → md5 manifest → 原子切 symlink → drain 闸门 + deploy.sh 闸门 → 验证
                           ⚠️ --files 不可用于本 gateway：release 目录必须是完整档案集，
@@ -193,6 +194,7 @@ parse_flags() {
     case "$1" in
       --dry-run) DRY_RUN=1 ;;
       --skip-recon) SKIP_RECON=1 ;;
+      --skip-media-wf-coverage) SKIP_MEDIA_WF_COVERAGE=1 ;;
       --force) FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       --files)
@@ -229,6 +231,27 @@ current_release_sha() {
   [ "$DRY_RUN" -eq 1 ] && return 0
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
     "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null" 2>/dev/null | head -1
+}
+
+
+# 2026-10-11 修画布：近 N 天媒体会话 workflow_write 覆盖率发版门（默认 7 天 ≥15%）。
+# 只读查 VPS ledger + opencode.db；样本不足（<5）跳过不挡。可用 --skip-media-wf-coverage 跳过。
+run_media_wf_coverage() {
+  [ "$SKIP_MEDIA_WF_COVERAGE" -eq 1 ] && { log "SKIP media workflow_write coverage（--skip-media-wf-coverage）"; return 0; }
+  local script="$REPO_ROOT/tools/check-media-workflow-write-coverage.py"
+  [ -f "$script" ] || die "找不到覆盖率脚本：$script"
+  log "== 媒体会话 workflow_write 覆盖率发版门 =="
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY-RUN: 将在 VPS 跑 check-media-workflow-write-coverage.py"
+    return 0
+  fi
+  # 上传脚本到远端临时档再跑（避免依赖生产树是否已含新档）
+  local remote_py="/tmp/check-media-workflow-write-coverage.$$.py"
+  run_remote_binary "cat > $remote_py" < "$script" || die "上传覆盖率脚本失败"
+  if ! run_remote "MEDIA_WF_DAYS=${MEDIA_WF_DAYS:-7} MEDIA_WF_MIN_COVERAGE=${MEDIA_WF_MIN_COVERAGE:-0.15} python3 $remote_py; ec=\$?; rm -f $remote_py; exit \$ec"; then
+    die "媒体会话 workflow_write 覆盖率未过门槛（见 tools/check-media-workflow-write-coverage.py；临时跳过加 --skip-media-wf-coverage）"
+  fi
+  log "media workflow_write coverage PASS"
 }
 
 run_recon() {
@@ -361,6 +384,7 @@ cmd_release() {
   fi
 
   run_recon
+  run_media_wf_coverage
 
   local stage_tar="/tmp/gw-release-$rel.tar"
   local stage_dir="/tmp/gw-release-$rel"

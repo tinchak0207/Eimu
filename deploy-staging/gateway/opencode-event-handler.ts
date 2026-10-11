@@ -7,7 +7,7 @@ import { sessions, markDirty, findSessionByOpenCodeId } from "./sessions-core.ts
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { flushOtherPartTails, takeTurnEndTail } from "./outbound-sanitize.ts"
 import { emitSanitizedDelta } from "./outbound-emit.ts"
-import { opencodeHeaders, scheduleTitleFetch, revertDeadTail } from "./opencode-client.ts"
+import { opencodeHeaders, scheduleTitleFetch, revertDeadTail, opencodeFetch } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets, emitRunningSubagentsStatus } from "./subagent"
@@ -22,7 +22,12 @@ import { loadUserSettings } from "./persistence.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { noteReasoningDelta, resetReasoningCap, buildReasoningNudge } from "./reasoning-cap.ts"
 import { emitUnfulfilledPlanNotice, recordUnfulfilledPlan } from "./plan-promise.ts"
-import { maybeCompactSession } from "./messages-gw.ts"
+import {
+  shouldBlockCompletionForWorkflowWrite,
+  buildWorkflowWriteGateNudge,
+  WORKFLOW_WRITE_GATE_MARK,
+} from "./canvas-write-gate.ts"
+import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce, maybeCompactSession } from "./messages-gw.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
 // 2026-10-02 能力片：错误讯息即模型上下文。failover 重投时以既有 prompt_async 文本
 // part 通道注入「续写指示」与「孤儿 tool_use 补 is_error」——模型可见、使用者不可见
@@ -700,6 +705,67 @@ export function handleOpencodeEvent(event: any): void {
           // 诚实告知改走耐久通道 message.delta（原 turn.status 暂态单行、紧接 turn.done 会一闪即逝）。
           emitUnfulfilledPlanNotice(state, (name, data) => emitToSession(state, name, data))
           state.planExperts = undefined
+        }
+        // 2026-10-11 修画布硬闸：多步影音制作未 workflow_write 真写穿 → 不得完成（每会话补写 1 次）。
+        if (
+          shouldBlockCompletionForWorkflowWrite({
+            avProductionIntent: state.avProductionIntent === true,
+            workflowWriteSucceeded: state.workflowWriteSucceeded === true,
+            nudgeSent: state.workflowWriteGateNudgeSent === true,
+            turnAborted: state.turnAborted === true,
+            hasLastPromptBody: Boolean(state.lastPromptBody),
+          })
+        ) {
+          state.workflowWriteGateNudgeSent = true
+          const nudge = buildWorkflowWriteGateNudge(state.avProductionTemplateId)
+          emitToSession(state, "message.delta", {
+            text:
+              `${WORKFLOW_WRITE_GATE_MARK} 多步影音制作尚未把产线 DSL 写穿画布（须成功调用 workflow_write，不能只 dry_run 或只交文档链接）。正在要求补写……\n`,
+          })
+          const body = state.lastPromptBody
+          if (body) {
+            const gen = state.turnGen ?? 0
+            const tailBlock = `${TAIL_PAYLOAD_MARKER}⟦gw:${ensureGatewayNonce(state)}⟧ `
+            const parts = body.parts.map((pt) => ({ ...pt }))
+            const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+            if (last && "text" in last && last.type === "text" && typeof last.text === "string") {
+              last.text = `${last.text}${tailBlock}${nudge}`
+            } else {
+              parts.push({ type: "text", text: `${tailBlock}${nudge}` })
+            }
+            const nudgeBody = { ...body, parts }
+            state.retryQueued = true
+            console.warn(
+              `[gateway] canvas-write-gate: block completion (no workflow_write) — session=${state.sessionId} template=${state.avProductionTemplateId ?? "?"}`,
+            )
+            setTimeout(async () => {
+              const cur = sessions.get(state.sessionId)
+              if (!cur || (cur.turnGen ?? 0) !== gen) return
+              if (cur.turnAborted) {
+                cur.lastTurnActiveAt = 0
+                cur.retryQueued = false
+                markDirty(cur)
+                return
+              }
+              try {
+                await revertDeadTail(cur.opencodeSessionId)
+                const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
+                  method: "POST",
+                  body: JSON.stringify(nudgeBody),
+                  timeoutMs: 10000,
+                })
+                if (!res.ok) throw new Error(`status ${res.status}`)
+                cur.retryQueued = false
+                cur.turnToolStarted = false
+                console.log(`[gateway] canvas-write-gate: nudge dispatched — session=${cur.sessionId}`)
+              } catch (e) {
+                console.error(`[gateway] canvas-write-gate nudge failed:`, e)
+                cur.retryQueued = false
+                emitTurnDone(cur)
+              }
+            }, TURN_RETRY_DELAY_MS)
+            break // 不发 turn.done：等补写轮结束
+          }
         }
         emitTurnDone(state)
         // 刀 2（2026-09-15）：机器 critic pass —— 收盘判定点。

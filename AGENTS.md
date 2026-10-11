@@ -103,6 +103,19 @@
 - 明文在 `.env.biz-key`（600，.gitignore 已覆盖）；调 `https://image.tinchak0207.xyz/v1/*`（Bearer sk-biz-…）。
 - 丢失/泄露只能吊销重签——用户明确不再签发，务必保管。
 
+
+## 画布写穿硬闸（2026-10-11 修画布裁定，违反＝事故）
+
+生产证据：媒体会话 `workflow_write` 覆盖率 ≈1%（ledger 有影音交付、画布却空／只 dry_run）。用户裁定三件必须落地，禁止只写文档：
+
+1. **收盘硬闸（gateway）**：多步影音制作意图（首期＝music + 多镜视频／`feature_film`／`shortdrama_visual`／`novel_film`／`single_video`）在 `session.idle` **未成功 `workflow_write`（非 dry_run）不得完成**——网关拦截 `turn.done` 并补写一次 nudge。
+2. **默认起画布骨架**：命中意图即 PROMPT_SKELETON／DSL 模板上画布；模型只改 DSL（`canvas_get_state` → 改 steps → `workflow_write`），禁止只交 document 链接冒充灶上有菜。
+3. **覆盖率发版门**：近 N 天媒体会话 `workflow_write` 覆盖率须过门槛（默认 7 天 ≥15%）。发版前跑：
+   `MEDIA_WF_DAYS=7 MEDIA_WF_MIN_COVERAGE=0.15 python3 tools/check-media-workflow-write-coverage.py`
+   诊断全量统计：`python3 tools/media-session-canvas-stats.py`（需 VPS ledger + opencode.db）。
+
+真源接线：`deploy-staging/gateway/canvas-write-gate.ts`、`opencode-event-handler.ts`（idle）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
+
 ## 按需附件（排障/设计/产品决策时才读，平时不载入）
 
 **膨胀铁律：本档只加行为规则；排障笔记进 runbook，历史归 memory，产品准则进 PRODUCT.md。**

@@ -6,6 +6,11 @@ import { createHash, randomBytes } from "node:crypto"
 import { readFileSync, readdirSync } from "node:fs"
 import { loadUserSettings, listSessionRows } from "./persistence"
 import { gateUserInput, classifyDispatchMeta, classifyBeastStages, isPlanOnlyNoGenerationIntent } from "./jev-gate"
+import {
+  isMultiStepAvProductionIntent,
+  buildAvCanvasSkeletonDirective,
+  MULTI_STEP_AV_TEMPLATES,
+} from "./canvas-write-gate.ts"
 // 0920：首条讯息即建模板骨架（不等模型思考/不等 Expert）——见下方 PROMPT_SKELETON。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { templatePlaceholderContent } from "./workflow-templates"
@@ -357,8 +362,15 @@ async function buildTemplateSkeletonForPrompt(state: SessionState, content: stri
     )
     if ("workflowId" in r && typeof r.workflowId === "string") {
       workflowOwnerBySession.set(state.sessionId, r.workflowId)
+      // 2026-10-11 修画布：多步影音模板 → 标记意图（收盘硬闸）+ 挂「模型改 DSL」指令。
+      const tid = meta.template.templateId
+      if (isMultiStepAvProductionIntent({ templateId: tid, prompt: content })) {
+        state.avProductionIntent = true
+        state.avProductionTemplateId = tid
+        state.pendingAvCanvasDirective = buildAvCanvasSkeletonDirective(tid, { planOnlyLean })
+      }
       console.log(
-        `[gateway] jev_gate: PROMPT_SKELETON built template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} wf=${r.workflowId} session=${state.sessionId} planOnlyLean=${planOnlyLean} (首条讯息即弹)`,
+        `[gateway] jev_gate: PROMPT_SKELETON built template=${tid} confidence=${meta.template.confidence.toFixed(2)} wf=${r.workflowId} session=${state.sessionId} planOnlyLean=${planOnlyLean} avIntent=${state.avProductionIntent === true} (首条讯息即弹)`,
       )
     } else {
       console.log(`[gateway] prompt skeleton skipped: ${"error" in r ? r.error : "unknown"}`)
@@ -598,6 +610,14 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   if (!rawContent) return jsonError(400, "content is required", "bad_request", "bad_request")
   // 2026-09-29 审计修复：入口就把冒充系统/网关权威的标题缴械（见 sanitizeUserContent）。
   const content = sanitizeUserContent(rawContent)
+  // 2026-10-11 修画布：首期以 music + 多镜关键词标记意图（模板判 none 时仍要硬闸）。
+  if (
+    !state.avProductionIntent &&
+    isMultiStepAvProductionIntent({ prompt: content, musicExpertSeen: false })
+  ) {
+    state.avProductionIntent = true
+    if (!state.avProductionTemplateId) state.avProductionTemplateId = "music_or_multishot"
+  }
   // C 方案（2026-10-02）：上一轮收盘记录的「未兑现开场计画」一次性取出（取出即清，
   // 杜绝跨轮残留误导）；于下方组 promptBody.system 时注入一行事实（非命令）。
   const priorPlanFact = takeUnfulfilledPlanInjection(state)
@@ -903,6 +923,16 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // 能力断路：ON 轮主会话挂 orchestrator agent（域工具已从工具表物理移除，
         // playbook prompt 声明＋工具表移除双保险；见 opencode.json agent.orchestrator）。
         promptBody.agent = "orchestrator"
+        // 2026-10-11 修画布：骨架已起 → 注入「读 dsl／workflow_write 改 DSL」指令（一次性）。
+        if (typeof state.pendingAvCanvasDirective === "string" && state.pendingAvCanvasDirective) {
+          appendSystemPayloadToTurnTail(
+            state,
+            promptBody,
+            state.pendingAvCanvasDirective,
+            "【机器·画布写穿·默认骨架】",
+          )
+          state.pendingAvCanvasDirective = undefined
+        }
       } else {
         // 2026-09-29 审计修复：非野兽路径（最常见）过去 agent 为空 → opencode 用预设 agent，
         // 既无创作身份（吃内建「软体工程 CLI」prompt）、又不挂 task 禁用。改挂 creator：

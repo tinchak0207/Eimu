@@ -70,6 +70,7 @@ import {
   type DeliveryGateResult,
   type CriticPassTarget,
 } from "./delivery-gate"
+import { isMultiStepAvProductionIntent } from "./canvas-write-gate.ts"
 // 刀 F（2026-09-15）：in-flight rework run 持久化 + 启动孤儿治理（复用 persistence.ts
 // 同一 bun:sqlite 层，非自造第二套持久层）。finishRun 终态删、startRework 成功写。
 import {
@@ -1747,7 +1748,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
             if (!run.artifacts.some((a) => a.url === c.url)) {
               run.artifacts.push({ kind: "audio", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
             }
-            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio")
+            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
           }
         }
         if (part.type !== "text" && part.type !== "reasoning") {
@@ -2322,6 +2323,19 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   }
   list.push(run)
   byParent.set(parent.sessionId, list)
+  // 2026-10-11 修画布：music／video-director 派遣即标影音意图；编剧／剪辑在父会话已标或 prompt 命中时补标。
+  if (expertId === "music" || expertId === "video-director") {
+    parent.avProductionIntent = true
+    if (!parent.avProductionTemplateId) {
+      parent.avProductionTemplateId = expertId === "music" ? "music" : "feature_film"
+    }
+  } else if (
+    (expertId === "screenwriter" || expertId === "editor") &&
+    (parent.avProductionIntent === true ||
+      isMultiStepAvProductionIntent({ templateId: parent.avProductionTemplateId, prompt }))
+  ) {
+    parent.avProductionIntent = true
+  }
 
   // 硬顶：同步 15 分钟（工具轮询 16 分钟死线之前收尾）；R6 async 30 分钟
   // （军团的窄领域研究/创作任务合法地更长，无工具死线顶着，给足余量）。

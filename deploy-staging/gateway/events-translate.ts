@@ -15,6 +15,8 @@ import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
+import { maybeEnqueueLyricAlignFromTool } from "./lyric-align-hook.ts"
+import { isSuccessfulWorkflowWrite } from "./canvas-write-gate.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce } from "./messages-gw.ts"
 // TODO(整合 Wave2)：以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
@@ -86,11 +88,11 @@ export function parseToolOutput(
 // 不因工具名放宽（不猜）。cost_coins 优先用候选项自己那颗物件的，没有才退回顶层（照原写法）。
 // 纯函式、无副作用。
 export function collectToolOutputMediaUrls(parsed: unknown): {
-  video: { url: string; cost_coins?: number }[]
-  audio: { url: string; cost_coins?: number }[]
+  video: { url: string; cost_coins?: number; title?: string }[]
+  audio: { url: string; cost_coins?: number; title?: string; cover?: string }[]
 } {
-  const video: { url: string; cost_coins?: number }[] = []
-  const audio: { url: string; cost_coins?: number }[] = []
+  const video: { url: string; cost_coins?: number; title?: string }[] = []
+  const audio: { url: string; cost_coins?: number; title?: string; cover?: string }[] = []
   if (parsed === null || typeof parsed !== "object") return { video, audio }
   const isVideoUrl = (u: unknown): u is string =>
     typeof u === "string" && u.length > 0 && /\.(mp4|mov|webm|m4v)(\?|$)/i.test(u)
@@ -100,8 +102,8 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
   const CANDIDATE_URL_KEYS = new Set(["url", "video_url", "mp4_url", "output_url", "audio_url", "file_url"])
   const MAX_SCAN_DEPTH = 3
   const MAX_SCAN_NODES = 200
-  const vidCands: { url: string; cost_coins?: number }[] = []
-  const audCands: { url: string; cost_coins?: number }[] = []
+  const vidCands: { url: string; cost_coins?: number; title?: string }[] = []
+  const audCands: { url: string; cost_coins?: number; title?: string; cover?: string }[] = []
   let visited = 0
   const walk = (node: unknown, depth: number): void => {
     if (node === null || depth > MAX_SCAN_DEPTH || visited >= MAX_SCAN_NODES) return
@@ -121,8 +123,11 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
         if (CANDIDATE_URL_KEYS.has(k) && typeof v === "string" && v.length > 0) {
           // cost_coins 优先用候选项自己那颗物件的，没有才退回顶层（照现有写法）。
           const cc = typeof obj.cost_coins === "number" ? obj.cost_coins : undefined
-          if (isVideoUrl(v)) vidCands.push({ url: v, cost_coins: cc })
-          if (isAudioUrl(v)) audCands.push({ url: v, cost_coins: cc })
+          // 真歌名/封面：候选物件自己带 title/cover 才认（缺省不带键，事件形状不变）。
+          const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : undefined
+          const cover = typeof obj.cover === "string" && obj.cover.trim() ? obj.cover.trim() : undefined
+          if (isVideoUrl(v)) vidCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}) })
+          if (isAudioUrl(v)) audCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}), ...(cover ? { cover } : {}) })
         }
         continue
       }
@@ -134,8 +139,8 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
     typeof (parsed as Record<string, unknown>).cost_coins === "number"
       ? ((parsed as Record<string, unknown>).cost_coins as number)
       : undefined
-  for (const c of vidCands) video.push({ url: c.url, cost_coins: c.cost_coins ?? topCost })
-  for (const c of audCands) audio.push({ url: c.url, cost_coins: c.cost_coins ?? topCost })
+  for (const c of vidCands) video.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}) })
+  for (const c of audCands) audio.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}), ...(c.cover ? { cover: c.cover } : {}) })
   return { video, audio }
 }
 
@@ -260,12 +265,21 @@ export async function emitVideoDone(
   void emitQuotaChanged(state)
 }
 
+/** audio.done 的可选元数据：真歌名 / 封面 / 歌词对齐状态。
+ *  全部缺席时事件与改动前逐位元相同（老前端不受影响）；缺哪个不带哪个。 */
+export interface AudioDoneMeta {
+  title?: string
+  cover?: string
+  lyric_status?: string
+}
+
 export async function emitAudioDone(
   state: SessionState,
   url: string,
   cost_coins?: number,
   task_id?: string,
   media_kind?: "audio",
+  meta?: AudioDoneMeta,
 ): Promise<void> {
   if (!url) return
   if (state.announcedUrls.has(url)) return
@@ -273,7 +287,16 @@ export async function emitAudioDone(
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
   registerSessionArtifact(state, { url, kind: "audio", task_id })
   // 音频 content 已是绝对公开 URL（平台 uploads），无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
-  emitToSession(state, "audio.done", { url, cost_coins, task_id, media_kind })
+  // 可选元数据只带非空值：缺参数＝事件形状一字不变（向后兼容）。
+  emitToSession(state, "audio.done", {
+    url,
+    cost_coins,
+    task_id,
+    media_kind,
+    ...(meta?.title ? { title: meta.title } : {}),
+    ...(meta?.cover ? { cover: meta.cover } : {}),
+    ...(meta?.lyric_status ? { lyric_status: meta.lyric_status } : {}),
+  })
   void appendLedgerFor(state, {
     kind: "audio",
     event: "done",
@@ -1038,6 +1061,12 @@ if (status === "pending" || status === "running") {
     const authReason = firstNonEmptyString(parsedRecord?.reason, parsedRecord?.auth_reason, parsedErrorRecord?.reason)
     const authOptionsRaw = parsedRecord?.options ?? parsedRecord?.auth_options ?? parsedErrorRecord?.options
     const ok = needsAuthorization ? false : hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
+    // 2026-10-11 修画布：记账真写穿（非 dry_run），供 session.idle 收盘硬闸。
+    if (toolName === "workflow_write" && isSuccessfulWorkflowWrite(parsed, ok)) {
+      state.workflowWriteSucceeded = true
+      markDirty(state)
+      console.log(`[gateway] canvas-write-gate: workflow_write succeeded — session=${state.sessionId}`)
+    }
     // S2a（2026-08-27）：ok 语义收紧为「已执行且成功」。失败必落
     // {ok:false, error:{code,message,human_message}}——human_message 中文短句必填。
     // 旧代码非 image_ 工具无条件回 ok:true，导致 workflow_rerun_node 等失败工具
@@ -1200,7 +1229,16 @@ if (status === "pending" || status === "running") {
       if (parsed !== null && typeof parsed === "object") {
         const media = collectToolOutputMediaUrls(parsed)
         for (const c of media.video) void emitVideoDone(state, c.url, c.cost_coins, undefined, "video")
-        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio")
+        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
+        // 出曲后自动 lyric-align（异步）：歌词来自工具入参，URL 来自出参；失败不挡播放。
+        if (media.audio.length > 0) {
+          maybeEnqueueLyricAlignFromTool({
+            toolName,
+            input: st.input,
+            parsed,
+            sessionId: state.sessionId,
+          })
+        }
       }
     }
   } else if (status === "error") {
