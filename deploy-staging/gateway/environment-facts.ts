@@ -29,9 +29,11 @@ import type { DeviceBridgeMode } from "./device-bridge-policy.ts"
 
 /**
  * 本机档案通道状态（device bridge，云端侧见 device-bridge.ts）。
- * `off`＝总开关关闭（能力未挂载）；`no_authorized_roots`＝装置在线但未授权任何
- * 本机根（递回型工具一律拒）；`credentials_unavailable`＝通道不可用（总开关开启、
- * 但该使用者取不到任何在线装置）；`online`＝可用；`unknown`＝本回合无法判定。
+ * `off`＝总开关关闭（能力未挂载）；`no_authorized_roots`＝装置已连线但未授权任何
+ * 本机根（递回型工具一律拒）；`credentials_unavailable`（历史命名，语义实为「未连线」）＝
+ * 总开关开启，但云端查不到该使用者的在线装置：成因为桌面壳未开启本机文件权限／未在该壳内
+ * 登录／本次连线尚未建立，**不是**「缺少凭据」（空授权根时桌面壳根本不注册，故闸道只能
+ * 看到「无在线装置」）；`online`＝可用；`unknown`＝本回合无法判定。
  *
  * 语义铁律：`unknown` 绝不等于「没有」——读不到事实（取不到 userId／查询失败）就维持
  * `unknown`，不得猜成 `off` 或任何否定结论。
@@ -213,9 +215,11 @@ export type DeviceBridgeStateInput = Pick<DeviceBridgeRuntimeState, "enabled" | 
  *
  * 四态判定：
  *   - `enabled === false`（总开关未开）⇒ `off`
- *   - `enabled && !online`（开著但该使用者无在线装置）⇒ `credentials_unavailable`
- *   - `enabled && online && authorizedRootCount === 0`（在线但未授权任何根）⇒ `no_authorized_roots`
- *   - `enabled && online && authorizedRootCount > 0`（在线且已授权根）⇒ `online`
+ *   - `enabled && !online`（开著但云端查不到该使用者的在线装置）⇒ `credentials_unavailable`
+ *     ＝「未连线」：壳没开／壳未登录／壳未授权任何资料夹（空授权根时桌面壳根本不注册）皆落此态，
+ *     故**不等于**「缺少凭据」，只是闸道侧看不到在线装置。
+ *   - `enabled && online && authorizedRootCount === 0`（已连线但未授权任何根）⇒ `no_authorized_roots`
+ *   - `enabled && online && authorizedRootCount > 0`（已连线且已授权根）⇒ `online`
  *   - 无查询结果（null/undefined）⇒ `unknown`（不得猜）
  */
 export function deriveLocalBridgeState(query: DeviceBridgeStateInput | null | undefined): LocalBridgeState {
@@ -474,13 +478,15 @@ function renderLocalBridge(state: LocalBridgeState): string {
     case "off":
       return "已关闭（本机文件通道未挂载）"
     case "no_authorized_roots":
-      return "在线，但未授权任何本机根目录（递归型工具一律拒绝）"
+      // 已连线但授权根为空：递归型工具一律拒；给 agent 一句可直接转述的使用者行动指令。
+      return "在线，但未授权任何本机根目录（递归型工具一律拒绝）；请使用者在桌面版底栏「本机文件」→「选择文件夹」授权至少一个资料夹"
     case "credentials_unavailable":
-      // 涵盖「总开关已开但该使用者无在线装置」与「凭据不可用」两种不可用情境，
-      // 不把成因写死成凭据（避免对模型陈述错误成因）。
-      return "不可用（该使用者当前无在线装置或缺少可用凭据）"
+      // 据实写「未连线」，**不得**写成「缺少可用凭据」（那是错误成因）：空授权根时桌面壳
+      // 根本不注册，闸道侧只能看到「无在线装置」，无法区分「壳没开／壳未登录／壳未授权」。
+      // 给 agent 一句可直接抄进对话的使用者行动指令。
+      return "未连线（桌面版尚未与本通道连线：可能未开启本机文件权限、未在该桌面版内登录，或本次连线尚未建立）；请使用者在桌面版底栏「本机文件」→「选择文件夹」授权资料夹，并确认已在该桌面版内登录，然后重试本机文件"
     case "online":
-      return "在线可用"
+      return "在线可用（云端已可经此通道读取使用者授权资料夹）"
     case "unknown":
       return "未知（本轮无法判定）"
   }
@@ -528,7 +534,13 @@ export function renderCapabilityCutoffFact(env: RuntimeEnvironment): string {
   if (cutoff.tools.length === 0) {
     return `【能力断路·物理事实】真源 expert/opencode-agents.json 对 agent=${env.plane} 未记录任何被移除的工具（未列出的工具默认为开）。${routing}`
   }
-  return `【能力断路·物理事实】真源 expert/opencode-agents.json 对 agent=${env.plane} 已物理移除以下 ${cutoff.tools.length} 个工具，直接调用会失败：${cutoff.tools.join("、")}。${routing}AGENTS.md 路由表中对应这些工具的行，由你派遣的 Expert 代为执行；其余工具（image_generate 等）的直接调用路由仍按 AGENTS.md 执行。`
+  // 断路名单过长时只报数量＋显式保留面，避免每轮把百级工具名灌进上下文（2026-10-11 context-slim）。
+  const held = ts.held.length > 0 ? `你本回合显式可调用：${ts.held.join("、")}。` : ""
+  const cutList =
+    cutoff.tools.length <= 24
+      ? `已物理移除：${cutoff.tools.join("、")}。`
+      : `已物理移除 ${cutoff.tools.length} 个域工具（名单省略；未在显式可调用列表中的自定义工具一律当断路）。`
+  return `【能力断路·物理事实】真源 expert/opencode-agents.json 对 agent=${env.plane}：${held}${cutList}${routing}AGENTS.md 路由表中对应断路工具的行，由你派遣的 Expert 代为执行；禁止直调域生成工具。`
 }
 
 /**
@@ -544,8 +556,12 @@ export function renderEnvironmentSection(env: RuntimeEnvironment): string {
     lines.push(`- 工具表：未能在真源 expert/opencode-agents.json 找到 agent=${env.plane} 的条目（工具面未知，勿断言）。`)
   } else {
     const heldPart = ts.held.length > 0 ? `显式启用 ${ts.held.length} 个：${ts.held.join("、")}` : "无显式启用的工具"
+    const cutNote =
+      ts.cut.length <= 24
+        ? `已从工具表物理移除 ${ts.cut.length} 个`
+        : `已从工具表物理移除 ${ts.cut.length} 个域工具（主会话仅保留显式启用面；未列出≠默认可调）`
     lines.push(
-      `- 工具表（真源 expert/opencode-agents.json）：${heldPart}；已从工具表物理移除 ${ts.cut.length} 个（未列出的工具默认为开）。`,
+      `- 工具表（真源 expert/opencode-agents.json）：${heldPart}；${cutNote}。`,
     )
   }
 
@@ -554,9 +570,13 @@ export function renderEnvironmentSection(env: RuntimeEnvironment): string {
     lines.push("- 能力断路：未知（工具表条目缺失）。")
   } else if (cutoff.tools.length === 0) {
     lines.push("- 能力断路：本档未记录任何被移除的工具。")
-  } else {
+  } else if (cutoff.tools.length <= 24) {
     lines.push(
       `- 能力断路：以下 ${cutoff.tools.length} 个工具不在你的工具表，直接调用会失败：${cutoff.tools.join("、")}；执行它们必须经 subagent_dispatch（带 expert 栏）派遣对应 Expert（唯一通路）。`,
+    )
+  } else {
+    lines.push(
+      `- 能力断路：${cutoff.tools.length} 个域工具不在你的工具表（名单省略）；直接调用会失败。执行它们必须经 subagent_dispatch（带 expert 栏）派遣对应 Expert（唯一通路）。本回合只准用显式启用工具。`,
     )
   }
 
@@ -574,8 +594,10 @@ export function renderEnvironmentSection(env: RuntimeEnvironment): string {
   if (client) {
     lines.push(`- 客户端运行面：${renderClientSurface(client.surface)}。`)
     const caps = client.localCapabilities
+    // 显式区分「能力存在」与「通道已连线」：window.eimuLocal 存在只代表桌面壳在且具备本机
+    // 能力，**不代表**云端已能经本机文件通道读到使用者的授权资料夹（是否已连线见下一行）。
     lines.push(
-      `- 客户端本机能力：window.eimuLocal ${renderClientCapability(caps?.windowEimuLocal)}；ffmpeg ${renderClientCapability(caps?.ffmpeg)}；ffprobe ${renderClientCapability(caps?.ffprobe)}；本机存档 ${renderClientCapability(caps?.localSave)}。`,
+      `- 客户端本机能力：window.eimuLocal ${renderClientCapability(caps?.windowEimuLocal)}；ffmpeg ${renderClientCapability(caps?.ffmpeg)}；ffprobe ${renderClientCapability(caps?.ffprobe)}；本机存档 ${renderClientCapability(caps?.localSave)}。注意：本行只陈述上述本机能力的可用性状态，与「本机文件通道是否已连线」是两件事（能力存在 ≠ 通道已连线）——通道状态请见下一行。`,
     )
     lines.push(`- 客户端渲染主机：${renderClientRenderHost(client.renderHost)}。`)
   }

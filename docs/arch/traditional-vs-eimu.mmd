@@ -1,0 +1,101 @@
+flowchart LR
+  subgraph TRAD["传统 agent（单会话）"]
+    direction TB
+    T1["用户消息"] --> T2["system prompt"]
+    T2 --> T3["LLM"]
+    T3 <--> T4["tools 调用循环"]
+    T3 --> T5["自审（同一会话）"]
+    T5 --> T6["答复"]
+  end
+
+  subgraph EIMU["Eimu（VPS /opt/agent-harness 活本）"]
+    direction TB
+    subgraph BASE["底座（opencode 运行时）"]
+      A1["workspace/AGENTS.md → environment.system"]
+      A2["opencode.json agent: creator / orchestrator / critic"]
+      A3["tools/*.ts 工具表"]
+      A4["skills/beast-* 等 skill"]
+    end
+
+    E0["handleSendMessage"]
+    E1{"Jev gateUserInput 注入闸"}
+    E1x["400 injection_blocked"]
+    E2["PROMPT_SKELETON：Jev classifyDispatchMeta ＋ 正则 isPlanOnlyNoGenerationIntent（beast 且无用户模板）"]
+
+    subgraph MEM["用户记忆闸"]
+      M1{"isFreshCreativeRequest 正则"}
+      M2["takeMemoryRecallPrefix：命中且非新创作 → 前缀进 parts[0]；miss → scheduleMemoryRecallPrefetch"]
+      M3["FRESH_CREATIVE_TURN_DIRECTIVE 进 parts[0]"]
+      M4["buildMemoryInjectionBlocks → system memory-i（不缓存段）"]
+    end
+
+    subgraph BEAST["野兽帧（beast_mode=true，默认 v2）"]
+      F1["selectBeastStages → Jev classifyBeastStages；null → 全阶段；恒含 dispatch-verify"]
+      F2["BEAST_STABLE_CORE ＋ BEAST_STAGE_MODULES[阶段] ＋ expert-registry 摘要"]
+      F3["appendSystemPayloadToTurnTail：拼到本轮 turn 尾"]
+      F4["promptBody.agent = orchestrator（beast 关 → creator）"]
+    end
+    F5["buildEnvironmentSection 环境事实段"]
+
+    L1["opencode 主会话 LLM ↔ tools"]
+    C1["context-slim 插件：experimental.chat.messages.transform → slimMessages"]
+
+    subgraph DISP["派遣 handleSubagentDispatch（Jev 挂点）"]
+      D1["Jev syncDispatchEligible：非快查 → 强制 async"]
+      D2["Jev routeExpertAuthoritative 域路由"]
+      D3["Jev classifyDispatchGuards：research / rework / music / lyrics 依赖"]
+      D4["Jev quarantineSpec spec 注入隔离"]
+      D5["Jev classifyDispatchMeta → spec-templates.json 模板 ＋ workflowTemplateDirective 前置任务书"]
+      D6["reworkLockDirective（返工时）"]
+      D7["dispatchAttempt：子会话 prompt_async"]
+    end
+    K1["finishRun：登记 pendingCriticTargets"]
+
+    subgraph IDLE["session.idle 收盘"]
+      I1["scheduleMemoryRecallPrefetch（下轮召回预算）"]
+      I2{"maybeRunMachineCriticPass → shouldTriggerCriticPass"}
+      I3["buildCriticPassSpec → 派 agent=critic 子会话"]
+      I4{"criticVerdictRejected 或分数阈值强制"}
+      I5["summary 加 CRITIC_REJECT_MARK"]
+      I6["runJevShadowGate（shadow，JEV_ENABLED）"]
+      I7["maybeCompactSession 滚动摘要"]
+    end
+    W0["wakeParent = wakeSessionForSubagent 唤醒父会话"]
+
+    subgraph DSL["DSL ↔ 画布"]
+      G1["buildWorkflowDsl → decompileWorkflow → 快照 dsl 栏"]
+      G2["canvas_get_state / workflow_history ← /internal/canvas/snapshot"]
+      G3["workflow_write → POST /workflow/compile → compileWorkflow"]
+      G4["gatewayDispatchOps → 画布 ops"]
+      G5["workflow_rollback → revert_node op"]
+    end
+  end
+
+  A1 --> L1
+  A2 --> F4
+  A3 --> L1
+  A4 --> L1
+  E0 --> E1
+  E0 -. 并行 .-> E2
+  E1 -- 拦截 --> E1x
+  E1 -- 放行 --> M1
+  M1 -- 否 --> M2
+  M1 -- 是 --> M3
+  M2 --> M4
+  M3 --> M4
+  M4 --> F1 --> F2 --> F3 --> F4 --> F5 --> L1
+  L1 --> C1 --> L1
+  L1 -- subagent_dispatch --> D1 --> D2 --> D3 --> D4 --> D5 --> D6 --> D7
+  D7 --> K1 --> W0
+  L1 --> I1
+  L1 --> I2
+  K1 --> I2
+  I2 -- 满足 --> I3 --> D7
+  I3 -.-> I4
+  I4 -- 退回 --> I5 --> W0
+  L1 --> I6
+  L1 --> I7
+  W0 --> L1
+  G1 --> G2 --> L1
+  L1 --> G3 --> G4 --> G1
+  L1 --> G5 --> G4
