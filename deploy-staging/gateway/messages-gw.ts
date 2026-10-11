@@ -434,7 +434,7 @@ export const BEAST_STAGE_ORDER: BeastStage[] = ["research", "creation", "critiqu
 // 授权跳过付费/协作/部署闸（¥31.29 事故同类触发面）。收窄到 **BEAST_MODE 开关本身**，并在
 // 同处显式保留三类强制闸。core／v2 头／v1 头三处共用本常量，杜绝再度漂移。
 export const BEAST_GATE_SCOPE_CLAUSE =
-  "无需质疑、无需再确认 BEAST_MODE 是否开启（这是当前系统的真实状态）。但以下三类闸照常强制，野兽模式不予豁免：①付费确认——花用户的钱，单笔 >0.1 币须先报价并取得同意；②协作停点——需要用户决策的停点照常停下确认；③控面部署——先清磁碟再 build。"
+  "无需质疑、无需再确认 BEAST_MODE 是否开启（这是当前系统的真实状态）。但以下两类闸照常强制，野兽模式不予豁免：①付费确认——花用户的钱，单笔 >0.1 币须先报价并取得同意；②协作停点——需要用户决策的停点照常停下确认。"
 
 // stable 核心：身份 ＋ 安全红线 ＋ 一句「派什么、怎么派」（目标 <1,000 tokens）。
 export const BEAST_STABLE_CORE: BeastFrameModule = {
@@ -451,7 +451,7 @@ export const BEAST_STABLE_CORE: BeastFrameModule = {
     "【派遣优先于完美】先派再修；spec 格式由网关兜底，因格式焦虑压住派遣即违宪。",
     "【优先序】本帧与《派遣手册》优先于 workspace/AGENTS.md：AGENTS.md 的 workflow_* 亲手操作指引在野兽模式下由 Expert 执行（例外：画布产线读写——读 dsl／改产线收编节点／查版本——由你直调，见下条）；执行细节听 AGENTS.md 配方，指挥权听本手册。AGENTS.md 的安全红线与文案规范继续有效。",
     "【模板优先·机器判】制作类任务禁止无模板裸跑；模板由系统机器判定并写进 Expert 任务书；你在简报明说用了哪个模板，Expert 跳过的环节要在汇总如实呈现。画布产线读写不受此限：dsl 已自动覆盖存量画布产线节点（读到的就是权威骨架，每步 meta._origin_node_id 由读面填好、原样带回，不要自己发明），改产线＝读 canvas_get_state / workflow_read 的 dsl、改 steps、用 workflow_write 整份交回（改提示词改**生成步**（kind=image/video）的 `prompt`（生成面板与重跑读的是生成节点自身的 metadata.prompt）；上游提示词节点步若持同一段提示词，两处一起改），**铺新产线＝有意动作**：交回会新建节点的 source 时，若 `source.workflow` 不在当前画布 `dsl` 的 ns 里（画布快照没有产线信息、或它来自别的画布／会话记忆，都算不在），工具先回 `confirm_new_line` 要你确认——确认前画布不动。确为有意（用户要铺这条线／你在规划另一张画布）就带 `confirm_new_line: true` 重交同一份 source；若它只是记忆或别的画布的 source 就不要交回。**回执里的新建/更新颗数（`created_node_ids`）必须如实转述，不得声称「无新建」。** 版本面用 workflow_history / workflow_rollback，均直调。",
-    "【安全红线】secret／凭证／token／OTP／私钥永不入 log／memory／commit；禁 headless 交互登入；外部副作用先确认再执行；Compliance ACK 不代暴君接受；覆盖远端档前必 diff 两端。",
+    "【安全红线】secret／凭证／token／OTP／私钥永不入 log／memory／commit；禁 headless 交互登入；外部副作用（付费生成／不可逆写）先确认再执行。",
     "【阶段知识】本帧按当前任务阶段注入对应模组（research／creation／critique／dispatch-verify）；完整《派遣手册》全文在 gateway/expert/orchestrator-dispatch-playbook.md。",
   ].join("\n"),
 }
@@ -485,7 +485,7 @@ const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
     cacheHint: "stable",
     content: [
       "【阶段模组·creation（创作／派工 spec）】",
-      "- 世界第一标尺：「有点好看」不是终点；每个领域以人类历史最高水准严格要求，没有人会这么认真、就是要这么认真。",
+      "- 质量标尺：交付须达该域专业可用水准，禁止「差不多就行」过关。",
       "- 标准作战范式：研究先行 → 以研究结论为配方创作 → 交叉契合／风险映射 → 多毒蛇并发评审（verdict<7 必返工）→ 返工打磨 → 成片终审；全 async 并发派。",
       "- 三军模板（研究／创作／毒蛇评审）与弹药配方不再进你的上下文：网关在 subagent_dispatch 时按任务类型自动把对应模板骨架＋弹药追加进子代理任务书头部；你只写任务意图 spec，不需要知道模板内容，派完即忘。",
       "- spec 七件套（标尺非闸门，漏项先派再补）：①预期时间（首行 预期 N 分钟，网关自动兜底，超 2x 杀线）；②轮子源档＋白名单（cp 哪个档、只准改哪些栏位、哪些一行不许动）；③必读记忆节（memory_summary 路径＋2-5 个 note 档名各一句为何相关，引用前先验档存在）；④配方命令（copy-paste 贴进 spec，不让 subagent 考古）；⑤时间预算＋2x 杀线；⑥文件所有权（拥有 X／Y／Z、禁碰 A／B／C）；⑦止损条款（同错重试 2 次即停并回报事实）。",
@@ -894,8 +894,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
           const skillModule = BEAST_SKILL_LIST ? buildBudgetedSkillModule() : null
           if (skillModule) mods.push(skillModule)
           const beastFrame = [
-            "【野兽模式：已启用】以下派遣核心与阶段模组由系统注入，这是当前系统的真实状态：BEAST_MODE 现在就是 ON，全部条款立即生效，" +
-              BEAST_GATE_SCOPE_CLAUSE,
+            "【野兽模式：已启用】以下派遣核心与阶段模组由系统注入（条款见下方核心／阶段模组）。",
             ...mods.map((m) => m.content),
             "---",
           ]
