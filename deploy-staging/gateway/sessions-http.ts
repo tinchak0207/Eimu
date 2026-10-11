@@ -180,6 +180,9 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 用户自己输入的文字逐字保留；转换在剥离之后进行。
               let text = stripTailInjectedPayload(part.text)
               if (info.role !== "user") text = t2sVisibleText(text)
+              // 剥离后为空串：该 text part 的内容全部是网关注入（无 text part 的罕见分支里，
+              // nudge 以标记开头被整段截掉）——整块丢弃，避免前端渲染出空气泡。
+              if (text.length === 0) continue
               parts.push({ ...part, text })
               continue
             }
