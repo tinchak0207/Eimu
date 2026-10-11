@@ -40,6 +40,7 @@ import {
 import { listRoutingEvents, summarizeRecentModelStats } from "../src/lib/routing-telemetry";
 import { summarizeChannelBalance } from "../src/lib/routing-balance-signal";
 import { generationCoins, modelPriceLabel } from "../src/lib/generation-model-catalog/pricing";
+import { generationModel } from "../src/lib/generation-model-catalog/capabilities";
 import type { OutputResolution } from "../src/lib/generation-model-catalog/types";
 import { __resetModelBreakerStateForTests, readUnavailableModels } from "../src/lib/generation-core/model-availability-gate";
 
@@ -70,7 +71,7 @@ function parseArgs(argv: readonly string[]): Options {
     windowHours: DEFAULT_WINDOW_HOURS,
     keepHealthEvents: false,
     includeDisabled: false,
-    consentSeconds: 4,
+    consentSeconds: 5,
     consentResolution: "720p",
   };
   const csv = (value: string): string[] => value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -114,7 +115,7 @@ const USAGE = `refresh-channel-bias.ts —— 渠道 bias 刷新（详见 docs/r
   --window-hours <n>             清理健康事件的时间窗（默认 72）
   --keep-health-events           保留窗口内 supplier_health_event（只复位调度态）
   --include-disabled             连 health_status='disabled' 的供应商一起复位（默认跳过）
-  --consent-seconds <n>          授权原话里的时长（默认 4＝最省的解锁形态）
+  --consent-seconds <n>          授权原话里的时长（默认 5＝该渠道真实下限；越界自动收回档位内）
   --consent-resolution <r>       授权原话里的档位（默认 720p）
   --apply / --dry-run            默认 dry-run：只打印将做的写操作 + 待粘贴的授权原话`;
 
@@ -234,15 +235,22 @@ async function accountSummary(sql: Sql, supplierIds: readonly string[]): Promise
 function printConsentPrompt(opts: Options, supplierLabels: readonly string[]): void {
   if (opts.models.length === 0) return;
   const resolution = opts.consentResolution as OutputResolution;
-  const seconds = opts.consentSeconds;
   console.log("\n授权原话（贴给 agent；agent 须以 override_zero_delivery=true + override_reason=该句原文 调 workflow_generate）");
   console.log("────────────────────────────────────────────────────────────");
   for (const id of opts.models) {
+    // 时长必须落在该模型真实允许的档位里：本轮教训——授权原话曾推荐 4 秒（我们自己的目录里
+    // 有，但上游 minimax-h3-max 720p 下限是 5 秒），结果第一单被上游 400 拒单（job 60f6da1a…）。
+    // 授权原话写着「照跑」，就不能给一个注定被拒的参数。
+    const allowed = generationModel(id)?.durations ?? [];
+    const seconds = allowed.length > 0 && !allowed.includes(opts.consentSeconds) ? allowed[0] : opts.consentSeconds;
+    if (seconds !== opts.consentSeconds) {
+      console.log(`⚠ ${id} 允许时长 ${allowed[0]}~${allowed[allowed.length - 1]} 秒，${opts.consentSeconds} 秒会被上游拒单 → 授权原话已改用 ${seconds} 秒`);
+    }
     const coins = generationCoins(id, { resolution, durationSeconds: seconds });
     const perSecond = modelPriceLabel(id, { resolution, durationSeconds: 1 });
     const channel = supplierLabels.length > 0 ? supplierLabels.join("/") : "平台默认渠道";
-    // 价目阶梯：让授权者一眼看到「解锁这一单」的最低成本与推荐档位。
-    const ladder = [4, 5, 10, 15]
+    const picks = (allowed.length > 0 ? allowed.filter((s) => s === allowed[0] || s === 10 || s === 15) : [seconds]);
+    const ladder = [...new Set(picks)]
       .map((s) => `${s}s=${generationCoins(id, { resolution, durationSeconds: s })}`)
       .join(" · ");
     console.log(

@@ -235,7 +235,10 @@ export const SEEDANCE_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9
 export const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"] as const;
 export const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 // 2026-09-05 暴君裁定：Seedance 全系只卖 ≥10 秒（10 秒以下亏本）。
-// SEEDANCE_DURATIONS 保留给非 Seedance 模型（MiniMax H3）沿用。
+// 2026-10-12 实测：miaowuai（上游 minimax-h3-max）720p 时长下限是 **5 秒**——传 4 秒被上游
+// 400 拒单（「生成时长 4 秒超出范围，分辨率 720p 支持 5～15 秒」，job 60f6da1a…）。本表若
+// 继续供 4 秒，等于让 agent 选到一个必然失败的值 ⇒ MiniMax H3 另立收窄档位。
+export const MINIMAX_H3_DURATIONS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const SEEDANCE_20_DURATIONS = [10, 11, 12, 13, 14, 15] as const;
 // seedance 2.5 时长档位（上游 sd4-seedance-2.5-480p / 720p，售卖下限 10s）
 export const SEEDANCE_25_480P_DURATIONS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] as const;

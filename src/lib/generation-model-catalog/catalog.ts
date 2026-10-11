@@ -64,7 +64,7 @@ import {
   VEO_31_MODEL_ID,
 } from "../image-model-ids.js";
 
-import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
+import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, MINIMAX_H3_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
 import { MODEL_KNOWLEDGE } from "./knowledge";
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
@@ -744,7 +744,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["720p", "1080p"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
-    durations: SEEDANCE_DURATIONS,
+    durations: MINIMAX_H3_DURATIONS,
     defaultDuration: 5,
     // 2026-08-28 价目表同源：720P=5 币/秒、1080P=10 币/秒（admin 覆写层原值折入，
     // 旧值 25/40 credits=2.5/4 币/秒为错价）。

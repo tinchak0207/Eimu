@@ -62,6 +62,15 @@ sudo docker exec -w /app image-control-worker npx tsx tools/refresh-channel-bias
 反面：渠道没修就刷新 = **伪造证据**，禁止。供应商被人为 `disabled` 的（人的决定）默认
 跳过，要覆盖须显式 `--include-disabled`。
 
+## 授权原话的参数纪律（2026-10-12 事故）
+
+工具生成的授权原话是**一次真实承诺**，参数必须落在该模型真实支持的档位里，否则等于让 agent
+拿一句「照跑」去撞一个必然被拒的参数。本轮实例：原话推荐 `4 秒 / 720p = 20 币`（当时以为是
+「最省的解锁形态」），而 miaowuai 的 `minimax-h3-max` 720p 下限是 **5 秒** → job
+`60f6da1a-ca9c-44ed-8484-5e9682b81fc5` 被上游 400 拒单（路由正确、上游也答话了，纯粹参数越界）。
+现在工具会读 `generationModel(id).durations`，越界自动收回档位内并印警告；目录侧
+`MINIMAX_H3_DURATIONS = [5..15]` 取代原先借用 `SEEDANCE_DURATIONS`（含 4）的档位。
+
 ## 刷不掉的：M4「近 24h 影片零交付」闸
 
 它不是偏误，是**花钱前的使用者护栏**：在没有任何真实交付证据时开跑付费生成，必须先向
