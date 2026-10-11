@@ -45,3 +45,12 @@ VPS `/opt/agent-harness/workspace/AGENTS.md` 在 21:54 被错写成 **开发者*
 ## 质量闸（需换手验）
 
 见 `eval-context-slim-20261011/QUALITY-GATE.md`。
+
+## 部署实况（CST）
+
+- commit：`d4ee7bef`
+- opencode：外科手术安装 AGENTS.md（workspace 根＋`.opencode/`）／opencode.json／`_prompt-routing/*`；`systemctl restart opencode-server` → active／HTTP 401（在线）
+- **未**跑全量 `opencode-release.sh`：plan 显示 prod `lib/music-tools-impl.ts`／`music_gen.ts`／`music_yue2.ts` 与 git 漂移，全量会冲掉生产热修
+- gateway：外科手术装 `environment-facts.ts`＋`expert/opencode-agents.json` 进当前 symlink release dir；`deploy.sh` → healthz=200
+- `gateway-release.sh` 因工作区未 commit 的 `media-internal-routes.ts` 被拒（--files 仍拦）→ 标缺口
+- 覆盖率门：本轮未跑（`--skip-media-wf-coverage` 意图；实际走了外科手术路径）
