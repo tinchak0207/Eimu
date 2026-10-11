@@ -21,6 +21,7 @@
 // fail-open 纪律：DB 读失败 → 空快照 → 全部 closed，绝不因为统计读不到把好模型标死。
 
 import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
+import { applyModelBiasResetToJobRows, EMPTY_BIAS_RESET_WATERMARKS, readBiasResetWatermarks } from "../bias-reset";
 import type { GenerationKind } from "./types";
 
 /** 统计窗口：只看最近 72h 建立的 job。 */
@@ -256,7 +257,10 @@ export async function readModelBreakerSnapshot(
       ORDER BY created_at DESC
       LIMIT ${MODEL_BREAKER_ROW_LIMIT}
     `;
-    const snapshot = buildModelBreakerSnapshot(rows, now);
+    // 渠道 bias 刷新水位（2026-10-12）：渠道修好后，被判为「修复前旧证据」的终态样本
+    // 不再计入本轮统计——否则修好的渠道要干等 72h 才从断路器里出来。fail-open。
+    const watermarks = await readBiasResetWatermarks(db).catch(() => EMPTY_BIAS_RESET_WATERMARKS);
+    const snapshot = buildModelBreakerSnapshot(applyModelBiasResetToJobRows(rows, watermarks), now);
     const supply = await db<{ public_model_id: string }[]>`
       SELECT capability.public_model_id
       FROM supplier_capability capability

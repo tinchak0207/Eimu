@@ -23,6 +23,7 @@
 - **控面部署前置：先清磁碟再 build（2026-10-03 事故，违反＝当场事故）**：动 deploy 之前先 `df -h /`；可用 <15% 或 `docker system df` 的 Build Cache >3GB 时，**先清再 build**（`docker builder prune -af`；`rollback-*`／`git-*` 映像每个 repo 只留最新一个）。VPS 只有 2 核，磁碟近满时 build 会把 IO 打满（load 100+）：站点 API 超时、`npm ci` 卡 14 分钟后失败。实测清完 96%→73%（释放 13G）后一次过。
 - **暴君点名的动手项＝下一个动作就是它，不排队**（2026-10-03 暴君纠正「左耳进右耳出」）：他在对话中间点名要清 cache／要动手的事，禁止先轮询部署、先试打不进去的 SSH、先做别的观察。等他催第二遍＝犯规。
 - 禁旁白（「我先读…」「分析完成」），只输出决策、证据、结果。
+- **远端批次纪律（2026-10-12 暴君纠正「光是修个影片链路你都这么浪费时间」）**：一次远端来回 ＝ 一整个批次——**上传＋安装＋跑＋验写进同一条命令**，禁止「传一个文件看一眼、再跑一次看一次」。动手前把要用的 schema／接口／行号**同批一次性查完**（`\d 表` 与关键源码同批取），别让 `created_at` vs `observed_at` 这类字段名错误吃掉一个来回。**主路径没跑通前不做诊断模式、不做验证脚手架**（诊断功能排在交付物之后）。判据：**任何远端改动 ≤2 个来回落地**——第 1 遍拿到真结果或真错误，第 2 遍修完即验；第 3 遍＝犯规，先停下来改这一条再动手。
 - 已完成的闭环不重跑验证。
 - Memory 纪律（2026-09-28 起＝memory pack 单一真源 `~/.claude/memory/`）：每完成可用工具/解决反覆问题/被纠正一次，当场 `mem add <slug> --type project|feedback|reference` → 填 `description` → `mem build`。**禁手改 `MEMORY.md`／`packs/*`／`catalog.tsv`**（生成物）；**禁整目录读 `notes/`**（915 篇），查询用 `mem find <关键字>`／`mem pack <id>`／`mem show <档名>`。旧路径（`~/.codex/memories/extensions/ad_hoc/notes/`、`~/.zcode/cli/memories/projects/image-app-*/memory/`）已封为同一真源的 symlink，勿当第二库。不写 = 智力归零。
 - Harness 迭代闭环：暴君回报浪费时间/规则没生效 → 当场先改对应规则再做事，每个回馈 = 一次压缩。

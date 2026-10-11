@@ -24,6 +24,7 @@ import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
 import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
 import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
+import { applyModelBiasReset, EMPTY_BIAS_RESET_WATERMARKS, readBiasResetWatermarks } from "@/lib/bias-reset";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,13 +44,18 @@ let recentEventsCache: { expiresAt: number; events: Awaited<ReturnType<typeof li
 /** 最近 routing events（60 秒缓存）：last_24h 统计与渠道余额信号共用一次读取。 */
 async function getRecentRoutingEvents() {
   const now = Date.now();
-  if (recentEventsCache && recentEventsCache.expiresAt > now) return recentEventsCache.events;
-  const events = await listRoutingEvents(RECENT_STATS_EVENT_LIMIT).catch((error) => {
-    console.error("[model-status] routing events unavailable:", error);
-    return [] as Awaited<ReturnType<typeof listRoutingEvents>>;
-  });
-  recentEventsCache = { expiresAt: now + RECENT_STATS_TTL_MS, events };
-  return events;
+  if (!recentEventsCache || recentEventsCache.expiresAt <= now) {
+    const events = await listRoutingEvents(RECENT_STATS_EVENT_LIMIT).catch((error) => {
+      console.error("[model-status] routing events unavailable:", error);
+      return [] as Awaited<ReturnType<typeof listRoutingEvents>>;
+    });
+    recentEventsCache = { expiresAt: now + RECENT_STATS_TTL_MS, events };
+  }
+  // 渠道 bias 刷新水位（2026-10-12）：渠道修好后被判为「修复前旧证据」的事件不再计入
+  // last_24h 统计与欠费信号——否则好渠道要干等 24h 自然过期才被 agent 相信。
+  // 水位读取 fail-open（读不到＝原判据）；快取只存原始事件，过滤在返回边界做。
+  const watermarks = await readBiasResetWatermarks().catch(() => EMPTY_BIAS_RESET_WATERMARKS);
+  return applyModelBiasReset(recentEventsCache.events, watermarks);
 }
 
 async function getRecentModelStats(): Promise<ModelRecentStats[]> {
