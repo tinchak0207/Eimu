@@ -9,16 +9,19 @@
 //     透过 electron-builder 产出的 app-update.yml（由 build.publish 生成）取得 feed，
 //     不硬编 URL。
 //
-// 平台能力（2026-10-05 现况）：
+// 平台能力（2026-10-11 现况）：
 //   - Windows（NSIS）：installer 自带 app-update.yml 的 feed，全链路可用。
-//   - Linux：0.3.3 起发行范式由 AppImage 换成 tar.gz，electron-updater 没有 tar.gz
-//     对应的 updater（无 APPIMAGE 环境变数时 AppImageUpdater 会直接略过检查），
-//     故 Linux 侧自动更新目前不生效——更新走「重新下载 tar.gz」。这里不加特判，
-//     让 electron-updater 自己安静略过，比自造一支更新器可控。
+//   - Linux：发行范式**必须**是 AppImage。0.3.3 曾把范式换成 tar.gz（「解压即可跑」），
+//     而 electron-updater 在 Linux 只认 AppImage（吃 process.env.APPIMAGE）／deb／rpm，
+//     **没有 tar.gz updater**——无 APPIMAGE 时 AppImageUpdater 直接略过检查 ⇒ Linux
+//     自动更新静默失效（2026-10-05→10-11 实际发生了八天，每一轮壳层修复都送不到使用者
+//     机器）。要换发行范式，先确认更新器跟得上。
 //
-// 差分下载（differential download）2026-10-05 起生效：先前托管在 Vercel Blob，多段
-// HTTP Range 请求会被忽略，electron-updater 自动退回全量下载；改放自家 nginx（原生
-// 支援 Range）之后差分下载自动启用，无需改码——正是原先预留的那一步。
+// 差分下载（differential download）：feed 的 blockMapSize 指的是**嵌在 AppImage 档尾**
+// 的 blockmap（electron-builder 的 embedded block map），因此不存在独立的
+// `.blockmap` 档，更新器用 Range 读档尾即可——不要因为 `.blockmap` 404 就判定差分坏了。
+// 启不启用看服务端支不支援多段 Range：自家 nginx 支援（2026-10-11 实测 0.3.3→0.3.4
+// 只下载 242,243 B），Vercel Blob 不支援（多段 Range 被忽略、回整档）时自动退回全量。
 //
 // 安全边界：本模组只在 app.isPackaged 为真时才检查更新；开发模式（electron .）
 // 一律 no-op，避免本机开发时打生产 feed。feed 覆写仅供 E2E 用
