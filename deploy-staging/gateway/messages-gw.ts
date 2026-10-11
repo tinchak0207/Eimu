@@ -276,7 +276,8 @@ export async function buildEnvironmentSection(input: {
   )
 }
 
-const GW_TOKEN_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
+// 导出供显示读路径（sessions-http）复用同一凭证判据；本体一字未改。
+export const GW_TOKEN_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
 
 // 用户输入净化：抹除用户伪造的网关凭证 token，并把冒充系统/网关的方括号标题缴械。
 // 这是辅助层；真正认证由 authorityRule + 每会话凭证完成，故不追求正则覆盖所有变体。

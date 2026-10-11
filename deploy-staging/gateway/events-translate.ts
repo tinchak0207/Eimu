@@ -16,7 +16,7 @@ import { emitSessionError } from "./emit-helpers.ts"
 import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
-import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
+import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce } from "./messages-gw.ts"
 // TODO(整合 Wave2)：以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
 // 整合阶段于 index.ts 补 export 后换成真 import、删除全部 declare，即完成桥接：
 // import { workflowService, emitQuestionRequest, armWatchdogTimer } from "./index.ts"
@@ -1330,12 +1330,15 @@ export function triggerIdleStepBreaker(
   // TAIL_PAYLOAD_MARKER 分隔：模型上下文内容不变（标记与 nudge 仍在同一 part 内、
   // 仍在模型眼前），显示读通道（slimHistoryMessages 的 stripTailInjectedPayload）
   // 会自动截掉标记之后的内容，历史端点不再把内部提示写进用户气泡。
+  // 尾端块带本会话凭证 ⟦gw:<nonce>⟧，与 appendSystemPayloadToTurnTail 同形状：
+  // 真注入件恒带凭证，显示读通道据此区分「真网关注入」与「用户自写的同形标记」。
+  const tailBlock = `${TAIL_PAYLOAD_MARKER}⟦gw:${ensureGatewayNonce(state)}⟧ `
   const parts = body.parts.map((pt) => ({ ...pt }))
   const last = parts.length > 0 ? parts[parts.length - 1] : undefined
   if (last && "text" in last && last.type === "text" && typeof last.text === "string") {
-    last.text = `${last.text}${TAIL_PAYLOAD_MARKER}${nudgeText}`
+    last.text = `${last.text}${tailBlock}${nudgeText}`
   } else {
-    parts.push({ type: "text", text: `${TAIL_PAYLOAD_MARKER}${nudgeText}` })
+    parts.push({ type: "text", text: `${tailBlock}${nudgeText}` })
   }
   const nudgeBody = { ...body, parts }
   console.warn(

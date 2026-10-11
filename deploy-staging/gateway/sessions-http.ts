@@ -17,7 +17,7 @@ import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
 import { isSystemWakeText } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
-import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
+import { TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText } from "./outbound-sanitize.ts"
 
@@ -132,14 +132,26 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
 // 四类 part 的少数栏位（实测 tool.state.output/metadata 与 info 冗余栏位占 payload ~80%），
 // 白名单外栏位一率删除；输出保持 [{info,parts}] 同构契约，未知 part 型别整块丢弃。
 // 防呆：读路径宁跳不炸——任何单则/单 part 处理异常只丢弃该项，函数永不抛错。
+// GW_TOKEN_RE 带 g 旗标：String.replace 全域抹除安全，但 .test()/.exec() 会因
+// lastIndex 残留而误判；需要「位置判据」时改用这份无 g 等价副本（来源同一正则本体）。
+const GW_TOKEN_NOG = new RegExp(GW_TOKEN_RE.source, "i")
+
 /** 0918：剥掉网关注入的 user 讯息尾端 payload（野兽帧等，见
  *  appendSystemPayloadToTurnTail）。只用在显示读路径（slimHistoryMessages）；
  *  模型上下文由 opencode 持有、不经此函式，故不影响模型看到的内容。
+ *  2026-10-11 收紧：真注入件恒为「标记＋紧随其后的网关凭证 ⟦gw:<nonce>⟧」，
+ *  仅此形状才从标记处截断；标记后无凭证＝用户自写的同形标题行，原样返回，
+ *  不吃掉其后正文（Hacker 实证：用户写标记会截断自己消息后半段）。
  *  找不到标记＝原样返回（零回归）。 */
 function stripTailInjectedPayload(text: string): string {
   const marker = TAIL_PAYLOAD_MARKER.trim()
   const i = text.indexOf(marker)
-  return i >= 0 ? text.slice(0, i).trimEnd() : text
+  if (i < 0) return text
+  // 标记之后允许中间有空白，但必须紧接凭证才算真注入（位置判据用无 g 副本）。
+  const rest = text.slice(i + marker.length).replace(/^\s*/, "")
+  const m = GW_TOKEN_NOG.exec(rest)
+  if (m && m.index === 0) return text.slice(0, i).trimEnd()
+  return text
 }
 
 export function slimHistoryMessages(msgs: unknown[]): unknown[] {
@@ -179,6 +191,11 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 刷新/重进会话时模型正文会从简体变回繁体）。仅对非 user 讯息转换，
               // 用户自己输入的文字逐字保留；转换在剥离之后进行。
               let text = stripTailInjectedPayload(part.text)
+              // 2026-10-11 缺口C：顺序＝先剥离尾端注入块、再抹除会话凭证 ⟦gw:<nonce>⟧、
+              // 最后才 T2S。真注入块与模型复述会把会话级凭证/内部提示原文写进存储文本，
+              // 而历史端点是用户可见通道（SSE 干净、只有此处漏）。凭证一律抹为空串
+              // （不换成「已移除」字样：不在用户正文里发明文字）。
+              text = text.replace(GW_TOKEN_RE, "")
               if (info.role !== "user") text = t2sVisibleText(text)
               // 剥离后为空串：该 text part 的内容全部是网关注入（无 text part 的罕见分支里，
               // nudge 以标记开头被整段截掉）——整块丢弃，避免前端渲染出空气泡。
@@ -186,8 +203,11 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               parts.push({ ...part, text })
               continue
             }
-            if (info.role !== "user" && typeof part.text === "string") {
-              const text = t2sVisibleText(part.text)
+            if (typeof part.text === "string") {
+              // 非上述分支的 text/reasoning（含 assistant 正文与 assistant/user 的 reasoning）：
+              // 同样抹除凭证；非 user 再过 T2S，user 自己输入的文字逐字保留（凭证除外）。
+              let text = part.text.replace(GW_TOKEN_RE, "")
+              if (info.role !== "user") text = t2sVisibleText(text)
               parts.push(text === part.text ? part : { ...part, text })
               continue
             }
