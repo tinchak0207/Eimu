@@ -142,16 +142,24 @@ const GW_TOKEN_NOG = new RegExp(GW_TOKEN_RE.source, "i")
  *  2026-10-11 收紧：真注入件恒为「标记＋紧随其后的网关凭证 ⟦gw:<nonce>⟧」，
  *  仅此形状才从标记处截断；标记后无凭证＝用户自写的同形标题行，原样返回，
  *  不吃掉其后正文（Hacker 实证：用户写标记会截断自己消息后半段）。
- *  找不到标记＝原样返回（零回归）。 */
+ *  2026-10-11 边角补正：改用「扫描第一个后面（允许空白）紧跟网关凭证的标记」，
+ *  而不是只看第一个标记——边界：用户自写的同形标记（后无凭证）不截断、其后正文保留；
+ *  该标记之后若真有注入块（带凭证）→ 从真注入块那处截断（用户气泡不再露出内部注入正文）。
+ *  找不到「带凭证的标记」＝原样返回（零回归）。 */
 function stripTailInjectedPayload(text: string): string {
   const marker = TAIL_PAYLOAD_MARKER.trim()
-  const i = text.indexOf(marker)
-  if (i < 0) return text
-  // 标记之后允许中间有空白，但必须紧接凭证才算真注入（位置判据用无 g 副本）。
-  const rest = text.slice(i + marker.length).replace(/^\s*/, "")
-  const m = GW_TOKEN_NOG.exec(rest)
-  if (m && m.index === 0) return text.slice(0, i).trimEnd()
-  return text
+  // 逐次寻找标记出现处；每处只看其后（允许空白）是否紧跟凭证（位置判据用无 g 副本，
+  // 该副本无 g 旗标故 .exec 无 lastIndex 残留）。第一个带凭证的标记＝真注入起点。
+  let from = 0
+  for (;;) {
+    const i = text.indexOf(marker, from)
+    if (i < 0) return text
+    const rest = text.slice(i + marker.length).replace(/^\s*/, "")
+    const m = GW_TOKEN_NOG.exec(rest)
+    if (m && m.index === 0) return text.slice(0, i).trimEnd()
+    // 该标记后无凭证（用户自写）：跳过它，继续找后面真正带凭证的标记。
+    from = i + marker.length
+  }
 }
 
 export function slimHistoryMessages(msgs: unknown[]): unknown[] {
