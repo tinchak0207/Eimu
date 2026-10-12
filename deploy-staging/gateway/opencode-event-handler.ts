@@ -719,8 +719,7 @@ export function handleOpencodeEvent(event: any): void {
           state.workflowWriteGateNudgeSent = true
           const nudge = buildWorkflowWriteGateNudge(state.avProductionTemplateId)
           emitToSession(state, "message.delta", {
-            text:
-              `${WORKFLOW_WRITE_GATE_MARK} 多步影音制作尚未把产线 DSL 写穿画布（须成功调用 workflow_write，不能只 dry_run 或只交文档链接）。正在要求补写……\n`,
+            text: `这一轮还差最后一步没落定，正在补上，稍等一下。\n`,
           })
           const body = state.lastPromptBody
           if (body) {
@@ -736,7 +735,7 @@ export function handleOpencodeEvent(event: any): void {
             const nudgeBody = { ...body, parts }
             state.retryQueued = true
             console.warn(
-              `[gateway] canvas-write-gate: block completion (no workflow_write) — session=${state.sessionId} template=${state.avProductionTemplateId ?? "?"}`,
+              `[gateway] canvas-write-gate: ${WORKFLOW_WRITE_GATE_MARK} block completion (no workflow_write) — session=${state.sessionId} template=${state.avProductionTemplateId ?? "?"}`,
             )
             setTimeout(async () => {
               const cur = sessions.get(state.sessionId)
