@@ -46,6 +46,40 @@ export const FLOWMUSIC_MODELS = {
 
 export type FlowMusicModelId = (typeof FLOWMUSIC_MODELS)[keyof typeof FLOWMUSIC_MODELS]
 
+/** 上游错误只用于分类；账号记录、cookie 与响应原文不能进入工具回执。 */
+export function classifyFlowMusicFailure(status: number, body: unknown): {
+  code: string
+  status: "needs_human_login" | "resource_insufficient" | "unreachable" | "config_disabled"
+  label: string
+  upstreamCode?: string
+} {
+  const value = body && typeof body === "object" ? body as Record<string, unknown> : {}
+  const error = value.error && typeof value.error === "object" ? value.error as Record<string, unknown> : {}
+  const text = [value.code, value.detail, value.message, typeof value.error === "string" ? value.error : null, error.message, error.code]
+    .filter((v): v is string => typeof v === "string").join(" ")
+  const refreshCode = text.match(/\brefresh_token_(?:already_used|not_found|revoked|expired)\b/i)?.[0].toLowerCase()
+  if (refreshCode || /invalid refresh token|no active FlowMusic account with usable Bearer|session.*(?:expired|revoked)|jwt.*expired/i.test(text)) {
+    return { code: "flowmusic_session_expired", status: "needs_human_login", label: "FlowMusic 账号登录已失效，需要重新登录并将工作阶段交给服务器独占续期", ...(refreshCode ? { upstreamCode: refreshCode } : {}) }
+  }
+  if (status === 429 || /quota|resource_exhausted|insufficient (?:credits|tokens)|credits? (?:exhausted|depleted)|配额耗尽|额度不足/i.test(text)) {
+    return { code: "flowmusic_resource_insufficient", status: "resource_insufficient", label: "FlowMusic 上游配额或限流不足" }
+  }
+  if (/invalid api key|unauthorized api key/i.test(text)) {
+    return { code: "flowmusic_config_disabled", status: "config_disabled", label: "FlowMusic2API 拒绝本机 API key" }
+  }
+  if (/\b403\b|permission denied|forbidden|access denied/i.test(text) || status === 401 || status === 403) {
+    return { code: "flowmusic_config_disabled", status: "config_disabled", label: "FlowMusic 鉴权或权限被拒绝，需检查本机 key 与上游账号权限" }
+  }
+  return { code: "flowmusic_unreachable", status: "unreachable", label: "FlowMusic 上游服务不可达或探针返回异常，登录状态未得到确认" }
+}
+
+export class FlowMusicServiceError extends Error {
+  constructor(public code: string, message: string) {
+    super(message)
+    this.name = "FlowMusicServiceError"
+  }
+}
+
 /** 非流式生成超时（上游整歌实测 162–182s，300s 硬顶含下载余量）。 */
 export const FLOWMUSIC_TIMEOUT_MS = 300_000
 
@@ -58,9 +92,6 @@ const FLOWMUSIC_DOWNLOAD_TIMEOUT_MS = 120_000
  * 此处只决定下载几个。
  */
 export const FLOWMUSIC_MAX_CANDIDATES = 2
-
-/** 错误讯息里携带的原文 body 上限（同 music-lyria.ts 口径）。 */
-const ERROR_BODY_MAX_CHARS = 8000
 
 /** 读 FlowMusic2API 服务地址（未配置 → null，调用方回落 Lyria 直连通路）。 */
 export function flowMusic2ApiUrl(): string | null {
@@ -196,8 +227,7 @@ export function extractFlowMusicAudioCandidates(body: unknown): FlowMusicAudioCa
     const match = content.match(/- Audio:\s*(https?:\/\/\S+)/)
     if (match) return [{ url: match[1].replace(/[)\]]+$/, ""), candidateIndex: 0 }]
   }
-  const excerpt = JSON.stringify(body)?.slice(0, 2000) ?? ""
-  throw new Error(`FlowMusic2API 响应中未找到音频 URL（clips 阵列与 content markdown 均无 Audio 行）。原文摘录：${excerpt}`)
+  throw new Error("FlowMusic2API 响应中未找到音频 URL（clips 阵列与 content markdown 均无 Audio 行）。原素材可在通路恢复后原样重交。")
 }
 
 /**
@@ -264,21 +294,23 @@ export async function generateFlowMusicTrack(
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(FLOWMUSIC_TIMEOUT_MS),
     })
-  } catch (e) {
-    throw new Error(
-      `FlowMusic2API 请求失败（网络层，端点 ${baseUrl}/v1/chat/completions）：${(e as Error)?.message ?? String(e)}`,
+  } catch {
+    throw new FlowMusicServiceError("flowmusic_unreachable",
+      "FlowMusic2API 请求失败（网络或超时）。原素材可在通路恢复后原样重交。",
     )
   }
   const bodyText = await response.text().catch(() => "")
   if (!response.ok) {
-    const shown = bodyText.slice(0, ERROR_BODY_MAX_CHARS)
-    throw new Error(`FlowMusic2API 返回 HTTP ${response.status}（模型 ${opts.model}）。原文 body：${shown || "(空)"}`)
+    let body: unknown = { detail: bodyText }
+    try { body = JSON.parse(bodyText) } catch { /* 非 JSON 错误体也仅内部分类 */ }
+    const failure = classifyFlowMusicFailure(response.status, body)
+    throw new FlowMusicServiceError(failure.code, `${failure.label}（HTTP ${response.status}${failure.upstreamCode ? `，${failure.upstreamCode}` : ""}）。原素材可在通路恢复后原样重交。`)
   }
   let body: unknown
   try {
     body = JSON.parse(bodyText)
   } catch {
-    throw new Error(`FlowMusic2API 响应不是合法 JSON（HTTP ${response.status}）。原文前 2000 字符：${bodyText.slice(0, 2000)}`)
+    throw new FlowMusicServiceError("flowmusic_unreachable", `FlowMusic2API 响应不是合法 JSON（HTTP ${response.status}）。原素材可在通路恢复后原样重交。`)
   }
 
   const candidates = extractFlowMusicAudioCandidates(body)

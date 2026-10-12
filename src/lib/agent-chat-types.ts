@@ -200,6 +200,12 @@ export interface AgentAudioDone {
   cost_coins?: number;
   task_id?: string;
   media_kind?: "audio" | "music";
+  /** 真实歌名（gateway 可选补栏位；缺省＝由 URL 猜或退化为不带编号的「音频」/「音乐」）。 */
+  title?: string;
+  /** 封面缩略图 URL（可选；缺省＝不显示封面，绝不拿默认专辑图占位）。 */
+  cover?: string;
+  /** 歌词对齐状态（可选，如 "aligning" / "ready"）；客户端可选读取，缺字段不崩。 */
+  lyric_status?: string;
 }
 
 /**
@@ -721,7 +727,24 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       const url = str(d.url);
       if (!url) return null;
       const mk = d.media_kind === "music" ? "music" : d.media_kind === "audio" ? "audio" : undefined;
-      return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id), ...(mk ? { media_kind: mk } : {}) } };
+      // title / cover / lyric_status 是网关可选补栏位：可能还没落地（缺字段一律 undefined，
+      // 不崩、不伪造）。空字串视同缺席，避免卡片渲染出空标题/破图。
+      const title = str(d.title);
+      const cover = str(d.cover);
+      const lyricStatus = str(d.lyric_status);
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          url,
+          cost_coins: num(d.cost_coins),
+          task_id: str(d.task_id),
+          ...(mk ? { media_kind: mk } : {}),
+          ...(title ? { title } : {}),
+          ...(cover ? { cover } : {}),
+          ...(lyricStatus ? { lyric_status: lyricStatus } : {}),
+        },
+      };
     }
     case "image.failed": {
       // task_id 可能缺（防御性）：帧仍要送达，settler 按序兜底配对。
@@ -1189,6 +1212,11 @@ export interface AgentToolCallItem extends TranscriptItemBase {
   costCoins?: number;
   /** 失败时的人类可读错误（gateway tool.result error.human_message 优先）。 */
   error?: string;
+  /**
+   * 失败时 gateway 分类出的错误码（tool.result error.code，如 `flowmusic_session_expired`）。
+   * 展示层据此渲染分类状态位（不把上游原文直甩到界面）；缺省＝无分类，照旧展示 error 文字。
+   */
+  errorCode?: string;
   /** 执行中进度（tool.progress 回填）。仅 running 期有意义，终态后忽略。 */
   progress?: { done: number; total: number; label?: string };
   /** 本机档案授权请求载荷（status==="needs_auth" 时必填，供卡片渲染三选一）。 */
@@ -1240,6 +1268,12 @@ export interface AgentAudioItem extends TranscriptItemBase {
   taskId?: string;
   /** "music"=成曲（音乐产物）、"audio"=单段音频。缺当 "audio" 展示。 */
   mediaKind?: "audio" | "music";
+  /** 真实歌名（audio.done.title；缺省时卡片回落 URL 猜测或不带编号的「音频」/「音乐」）。 */
+  title?: string;
+  /** 封面缩略图 URL（audio.done.cover；缺省＝不显示封面，不占位）。 */
+  cover?: string;
+  /** 歌词对齐状态（audio.done.lyric_status；如 "aligning"）。 */
+  lyricStatus?: string;
 }
 
 /**

@@ -6,11 +6,13 @@ import { WorkflowService } from "./workflow-service"
 import { gateWorkflowMemory } from "./jev-gate"
 import { estimateTtsCoins } from "./pricing-and-validation"
 import { compileShotPrompt, parseShotCandidate, shotOutputParams, type ShotJson } from "./video-prompt-schema"
-import { loadUserSettings } from "./persistence"
+import { loadUserSettings, getCriticVerdictByRun } from "./persistence"
+import { enqueueWorkflowCriticReview, hasWorkflowCriticReview } from "./subagent.ts"
+import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { sessions, dirtySessions, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { opencodeHeaders } from "./opencode-client.ts"
-import { catalogUnitCoins, catalogVideoPerSecondCoins, estimateNodeCoins, priceCatalogCache, resolveNodeModel, videoTierPerSecondSync } from "./pricing-gateway.ts"
+import { catalogUnitCoins, catalogVideoPerSecondCoins, estimateNodeCoins, resolveVideoSubmissionOptions, videoNodeCoinsSync, invalidateWorkflowPriceCatalog, priceCatalogCache, PRICE_CATALOG_TTL_MS, resolveNodeModel } from "./pricing-gateway.ts"
 import { TTS_UPSTREAM, probeTtsUpstream, settleConfirm } from "./media-internal-routes.ts"
 import { CONFIRM_THRESHOLD_COINS, CONFIRM_TIMEOUT_MS, OPENCODE_URL, PLATFORM_BASE, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
@@ -121,13 +123,16 @@ export const workflowService = new WorkflowService({
       if (n.kind === "text" || n.kind === "config") continue
       sawAny = true
       if (n.kind === "video") {
-        const secs = typeof n.metadata.duration_seconds === "number" && n.metadata.duration_seconds > 0 ? n.metadata.duration_seconds : 5
-        total += secs * videoTierPerSecondSync(n, graph)
+        const secs = typeof n.metadata.duration_seconds === "number" && n.metadata.duration_seconds > 0 ? n.metadata.duration_seconds : resolveConnectedVideoDuration(n.id, graph)
+        if (typeof secs !== "number" || !(secs > 0)) return null
+        const amount = videoNodeCoinsSync(n, graph, secs)
+        if (amount === null) return null
+        total += amount
         continue
       }
       if (n.kind !== "image") continue // audio/film 0 币
       const model = resolveNodeModel(n.id, n, graph)
-      const v = priceCatalogCache?.prices[model]
+      const v = priceCatalogCache && Date.now() - priceCatalogCache.at <= PRICE_CATALOG_TTL_MS ? priceCatalogCache.prices[model] : undefined
       if (typeof v !== "number") return null // 有估不出的节点：整图 null，不编数
       total += v
     }
@@ -203,13 +208,52 @@ export const workflowService = new WorkflowService({
     if (r.ok && r.content && node.kind === "video") void emitVideoDone(session, r.content, r.costCoins, node.id, "video")
     return r
   },
+  reviewBatch: async (wf, nodes) => {
+    const state = ((wf.owner ?? stateForWorkflow) as SessionState | null) ?? null
+    const targets: import("./delivery-gate.ts").CriticPassTarget[] = []
+    for (const node of nodes) {
+      const artifact = wf.nodeContent[node.id]
+      const binding = `workflow:${wf.workflowId}:${node.id}:${createHash("sha256").update(artifact).digest("hex")}`
+      const old = node.metadata.quality_review as { artifact?: string; state?: string; criticRunId?: string; requested?: boolean } | undefined
+      // Stored graph/canvas metadata alone cannot authorize continuation after restart or artifact changes.
+      const verdict = old?.criticRunId ? getCriticVerdictByRun(old.criticRunId) : null
+      let savedReceipt: any = null
+      try {
+        const line = verdict?.verdict_text?.split("\n").find((line: string) => line.startsWith("RECEIPT:"))
+        if (line) savedReceipt = JSON.parse(line.slice(8))
+      } catch { /* unverifiable remains partial */ }
+      const verified = verdict?.verdict === "pass" && savedReceipt?.ok === true && savedReceipt?.checked?.some((item: any) => item.runId === binding && item.artifact === artifact)
+      if (old?.artifact === artifact && verified) {
+        workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { ...old, state: "passed" })
+        continue
+      }
+      if (old?.artifact === artifact && old.requested) {
+        if (old.state === "pending" && !hasWorkflowCriticReview(state?.sessionId, binding)) workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { ...old, state: "partial", reason: "审阅在重启/断线后未获得可信完成回执" })
+        if (old.state === "passed") workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { ...old, state: "partial", reason: "旧通过没有可信当前产物回执" })
+        continue // same artifact is never charged/reviewed in an automatic loop
+      }
+      workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { state: state ? "pending" : "partial", requested: true, reason: state ? "等待独立感知" : "没有可用审阅身份" })
+      if (!state) continue
+      targets.push({
+        agent: node.kind === "image" ? "video-director" : "editor", label: node.title, runId: binding,
+        text: `artifact: ${artifact}\n要求: ${String(node.metadata.gate ?? "按当前任务独立审阅")}\nworkflow:${wf.workflowId} node:${node.id}`,
+        artifacts: [artifact], workflowReview: { workflowId: wf.workflowId, nodeId: node.id, artifact },
+        onReview: (result) => {
+          if (wf.nodeContent[node.id] !== artifact) return // stale receipt never approves new content
+          workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { state: result.state, requested: true, criticRunId: result.criticRunId, receipt: result.receipt })
+          if (result.state === "passed") workflowService.resumeAfterReview(wf.workflowId)
+        },
+      })
+    }
+    if (targets.length) enqueueWorkflowCriticReview(state, targets)
+  },
   // 2026-09-24 协作确认闸挂点（详见本档 COLLABORATE_GATE_ROLES 节）。
   // 档位判定在 gateway（settings 是 gateway 的真源），engine 只收「停不停」。
   awaitingApproval: async (wf) => {
     const state = ((wf.owner ?? stateForWorkflow) as SessionState | null) ?? null
     if (!state) return null
     // 只有协作档停（决策 1/2）。auto/preset：这里一句不问、零新增阻塞——护城河。
-    if (normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode !== "collaborate") return null
+    if (await billingAutoApprovalEnabled(state) || normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode !== "collaborate") return null
     const gate = resolveCollaborateGate(wf as Parameters<typeof resolveCollaborateGate>[0])
     if (!gate) return null
     if (!requestCollaborateApproval(state, wf, gate)) return null
@@ -1188,6 +1232,7 @@ export async function submitWorkflowNode(
 
   // 模型解析三级：节点自身 metadata.model → 沿上游 config 节点链（与 estimateNodeCoins 报价同口径）→ 兜底。
   // 视频兜底必须是活路由模型（metaso/minimax-h3）；seedance-2.0 的唯一供应商 filmera 已 degraded，写死即死单。
+  // 2026-10-12 暴君裁定：影片默认模型认知改为 minimax-h3（miaowuai 渠道上游 minimax-h3-max，稳定快速、约 45s 出片、单镜 5-15s、推荐 15s）。
   let model = typeof meta.model === "string" && meta.model ? meta.model : resolveNodeModel(nodeId, node, graph ?? { nodes: [], connections: [] })
   if (node.kind === "video" && (!model || model === "pixai-tsubaki2")) model = VIDEO_FALLBACK_MODEL // 2026-10-02：不再写死 minimax-h3（断路器 open）；resolveActiveModel 再按交付证据校正
   // F2（2026-08-31）：提交前主动查活性+跨 provider failover（取代旧的「探测到
@@ -1233,6 +1278,11 @@ export async function submitWorkflowNode(
     response_format: "url",
   }
   if (node.kind === "video") {
+    await catalogVideoPerSecondCoins(model, session.apiKey)
+    const videoOptions = resolveVideoSubmissionOptions(node, graph, model)
+    if (videoOptions.error) return { nodeId: node.id, ok: false, error: videoOptions.error }
+    payload.generate_audio = videoOptions.generateAudio
+    // 当前API无resolution/quality输入；显式非默认档已拒绝，不提交会被静默忽略的字段。
     // INC-0830：时长三级解析 meta → shot → 连线的视频 config；全部缺失时拒绝提交。
     // 旧版静默 `?? 5` 是 5 秒片事故根因之一：暴君指定 15s、上游照 5s 出、按条统一价照收。
     const cfgDuration = resolveConnectedVideoDuration(nodeId, graph)
@@ -1249,7 +1299,26 @@ export async function submitWorkflowNode(
       }
     }
     payload.duration_seconds = duration
-    if (refImages.length) payload.reference = refImages[0]
+    // 显式关键帧优先，连线图片随后；保序传递整组，不再只发第一张。
+    if (meta.reference_images !== undefined && !Array.isArray(meta.reference_images)) {
+      return { nodeId: node.id, ok: false, error: "视频 reference_images 必须是图片 URL 数组。" }
+    }
+    if ([meta.first_frame_url, meta.last_frame_url, meta.reference].some((ref) => ref !== undefined && typeof ref !== "string")) {
+      return { nodeId: node.id, ok: false, error: "视频起止帧及 reference 必须是图片 URL 字符串。" }
+    }
+    const explicitRefs = Array.isArray(meta.reference_images) ? meta.reference_images : []
+    const orderedRefs = [
+      ...(typeof meta.first_frame_url === "string" ? [meta.first_frame_url] : []),
+      ...(typeof meta.last_frame_url === "string" ? [meta.last_frame_url] : []),
+      ...explicitRefs,
+      ...(typeof meta.reference === "string" ? [meta.reference] : []),
+      ...refImages,
+    ]
+    const invalidRef = orderedRefs.some((ref) => typeof ref !== "string" || !/^https?:\/\//i.test(ref.trim()))
+    if (invalidRef) return { nodeId: node.id, ok: false, error: "视频参考图必须是 http(s) URL；请先上传本地关键帧。" }
+    // 首尾可以刻意使用同一张图；帧位置仍须保留，不能按 URL 去重抹掉止帧。
+    const videoRefs = orderedRefs.map((ref) => (ref as string).trim())
+    if (videoRefs.length) payload.reference_images = videoRefs
   } else if (refImages.length) {
     payload.reference = refImages[0]
   }
@@ -1274,11 +1343,17 @@ export async function submitWorkflowNode(
     // 解析用这位使用者的 key（`session.apiKey`，同下方提交用的 Bearer）：卡库按使用者隔离。
     const resolved = await resolveEntityTokens(promptForTokens, refImages, undefined, { apiKey: session.apiKey })
     payload.prompt = resolved.prompt
-    // 卡的图在前（resolved 内部已按控制面契约排序），既有单张 reference 并在后，去重、截 5。
-    const mergedRefs = sanitizeEntityReferences([
-      ...resolved.reference_images,
-      ...(typeof payload.reference === "string" ? [payload.reference] : []),
-    ])
+    // 视频关键帧在前，实体参考随后；不以实体解析器的 5 张上限截断视频输入。
+    // 模型上限交给控制面校验，超限明确拒绝，不能静默丢帧。
+    const mergedRefs = node.kind === "video"
+      ? [
+          ...(Array.isArray(payload.reference_images) ? payload.reference_images as string[] : []),
+          ...resolved.reference_images.filter((ref) => !(Array.isArray(payload.reference_images) && payload.reference_images.includes(ref))),
+        ]
+      : sanitizeEntityReferences([
+          ...resolved.reference_images,
+          ...(typeof payload.reference === "string" ? [payload.reference] : []),
+        ])
     if (mergedRefs.length) payload.reference_images = mergedRefs
   }
 
@@ -2118,7 +2193,7 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     // 探测不可达（models=null）fail-open 与既有行为一致；无影片节点/已覆写则不拦。
     const hasVideoExec = wf.graph.nodes.some((n) => n.kind === "video")
     if (hasVideoExec) {
-      const overrideOk = body.override_zero_delivery === true && typeof body.override_reason === "string" && body.override_reason.trim().length > 0
+      const overrideOk = await billingAutoApprovalEnabled(state) || (body.override_zero_delivery === true && typeof body.override_reason === "string" && body.override_reason.trim().length > 0)
       if (!overrideOk) {
         const zd = await videoZeroDelivery24h(state.apiKey)
         if (zd) {
@@ -2140,18 +2215,18 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     // S4 规格1（2026-08-27）：计费确认门槛改金额维度。旧世界 = 门槛倒挂：
     // 6.25 币的批量 workflow 零确认直接开跑，1 币的单笔重试反而弹卡——因为
     // confirm 只存在于工具层（image_* 单笔），workflow 批量执行完全绕过。
-    // 统一基准：估算总价 ≥ CONFIRM_THRESHOLD_COINS（默认 5 币）→ gateway
-    // 直接向用户弹 confirm.request，批准前不开跑（真拒绝窗口，不是同回合
-    // 报价）；< 门槛免扰自动跑。估算口径与 quote_bundle / cost_hint 同源
-    //（目录单价 × 数量 + 影片档位价 5/10 币/秒（R5-C））。估不出单价的节点计 0（目录
-    // 不可达时宁可放行小额，也不无限期卡死工作流——单笔扣费仍有工具层
-    // confirm 兜底）。金额与本次估算写回 workflow 记录，避免重复批准：
-    // 批准后 workflowGenerateApproved.set(wfid)，同批执行不二次弹卡。
+    // 目录coin报价≥门槛时沿用既有确认；缺报价明确409，不将未知价格计零放行。
+    // full/auto由既有确认机制持续授权，不绕过报价真值或预算限制。
+    invalidateWorkflowPriceCatalog()
     const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
     let estimatedTotal = 0
     for (const n of executableNodes) {
       const coins = await estimateNodeCoins(n, state.apiKey, wf.graph)
-      if (coins !== null) estimatedTotal = Math.round((estimatedTotal + coins) * 1e6) / 1e6
+      if (coins === null) {
+        const videoOptions = n.kind === "video" ? resolveVideoSubmissionOptions(n, wf.graph, resolveNodeModel(n.id, n, wf.graph)) : null
+        return Response.json({ ok: false, code: "workflow_price_unknown", error: videoOptions?.error ?? "当前目录未返回该生成节点的币值价格，预算未知；尚未提交生成。", node_id: n.id, cost_hint: null }, { status: 409 })
+      }
+      estimatedTotal = Math.round((estimatedTotal + coins) * 1e6) / 1e6
     }
     // R9 扩计画重确认：节点数比上次批准的多（agent 中途加节点）= 新一笔帐，
     // 必须按新总价重弹 confirm——2026-08-29 事故：批准时估 25 币，中途长到
@@ -2173,7 +2248,6 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       // 旧版等批准最长 15 分钟，工具层 10s 超时必炸，agent 据此误判后端死亡）。
       // 用户批准 → settleConfirm → runWfGenerate 续跑；拒绝/过期 → 卡片自收，
       // 工作流不动，agent 可用 workflow_status 复核后再议。
-      emitToSession(state, "confirm.request", { request_id: requestId, amount_coins: estimatedTotal, description })
       const timer = setTimeout(() => {
         wfGenerateContinuations.delete(requestId)
         settleConfirm(state, requestId, "expired")
@@ -2186,10 +2260,11 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       // 互动模式=auto：批量扣费确认自动批准。wfGenerateContinuations.set 必须先于
       // settleConfirm——settle 的 approved 分支会读该 map 触发 runWfGenerate 续跑。
       // R9 扩计划重确认在 auto 档同样自动放行（同一分支覆盖）。
-      if (normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode === "auto") {
+      if (await billingAutoApprovalEnabled(state)) {
         settleConfirm(state, requestId, "approved")
         return Response.json({ ok: true, status: "approved", request_id: requestId, note: `工作流已提交后台执行（workflow_id=${wfid}）。完成后系统会自动唤醒你汇报结果与真实花费。禁止用 bash sleep 或反复 workflow_status 等待；本轮现在总结已知状态并结束回合。` })
       }
+      emitToSession(state, "confirm.request", { request_id: requestId, amount_coins: estimatedTotal, description })
       return Response.json({ ok: true, status: "confirm_pending", request_id: requestId, note: `已弹出批量扣费确认卡（预估 ${estimatedTotal} 币），用户批准后自动开跑。批准后系统会自动唤醒你汇报结果与真实花费；禁止用 bash sleep 或反复 workflow_status 等待，本轮现在总结已知状态并结束回合。` })
     }
     // S6 规格3：质询冻结——最后一条用户消息是质询类且 assistant 尚未回覆

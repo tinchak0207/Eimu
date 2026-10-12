@@ -3,7 +3,7 @@ import { classifyError, platformFetch, ok, fail } from "../lib/client"
 
 export default tool({
   description:
-    "查询影片模型列表与币值成本（报价用，免费不扣费）。与 image_quote 对偶：本工具只回影片模型（mediaType=video）。**报价硬规则：只有 availability=available 的模型才允许写进任何计划/预算/推荐——availability=unavailable 的模型就是模型选择器里灰掉的那些，引用即欺客**。**计费口径（R9-A2，与平台实扣同源）：全部影片模型（含 seedance-2.0 系）都按秒扣费——总价 = coins_per_second[解析度] × 时长（秒）；15s 比 10s 贵 1.5 倍，不存在「5s/15s 同价」。billing=per_second（目录无秒价表时为 null）；未指定解析度时平台按 default_resolution 扣，开音轨且有 coins_per_second_with_audio 时按带音价。** **提交前预检：prompt_char_limit（默认 4000 字元，超限即 400 prompt_too_long）与 duration_slots（离散时长档）——多镜合条先数字符、目标时长先对档位，换模时必连这两项一起预检**。要生成影片时先用本工具查模型与单价，再用 workflow_* 工具或 image_generate kind=video 提交。查图片模型请用 image_quote。",
+    "免费查询当前视频模型、可用性、能力与币值单价。报价用available_models，近期真实交付证据另看proven_models；状态可用不等于本次已成功出片。视频价格以x_billing完整提交档位金额为准，per_video是固定次价，不按时长放大；无目录价标未知。提交前检查prompt_char_limit、duration_slots与参考图能力。生成用workflow或image_generate kind=video；图片报价用image_quote。",
   args: {
     model: tool.schema.string().optional().describe("若指定则只回这个影片模型的定价"),
   },
@@ -29,6 +29,8 @@ export default tool({
         .map((m: any) => ({
           id: m?.id,
           name: m?.name || m?.id,
+          billing: m?.x_billing ?? null,
+          coins_per_video: m?.x_coins_per_video ?? null,
           coins_per_second: m?.x_coins_per_second ?? null,
           coins_per_second_with_audio: m?.x_coins_per_second_with_audio ?? null,
           capabilities: m?.x_capabilities ?? m?.capabilities ?? m?.supported_tasks ?? null,
@@ -55,11 +57,7 @@ export default tool({
           const cps = m.coins_per_second as Record<string, number> | null | undefined
           const defRes = m.default_resolution as string | null
           const defaultRate = cps && defRes && typeof cps[defRes] === "number" ? cps[defRes] : null
-          // R9-A2（2026-09-30）：计费口径以平台实扣为准——/v1/videos/generations 以
-          // generationCoins(model,{resolution,durationSeconds}) 扣费＝目录秒价 × 时长，gateway
-          // catalogVideoPerSecondCoins 同源。旧 INC-0830 把 seedance-2.0 标 per_task「5s/15s 同价」
-          // 是上游成本口径，与用户实扣矛盾（15s 报 130、实扣 195），已撤。无秒价表回 null。
-          const billing = cps && Object.keys(cps).length ? "per_second" : null
+          const billing = m.billing?.unit ?? null
           const status = statusById.get(m.id)
           // 真实结果优先于探测（同 image_quote）：近 24h 有单且 0 交付＝不可荐。
           const jobs = Number(status?.last_24h?.jobs ?? 0)
@@ -77,6 +75,8 @@ export default tool({
             // 近 24h 真实表现（样本不足时栏位缺省＝没数据，不是 0%）。
             last_24h: status?.last_24h ?? null,
             billing,
+            billing_contract: m.billing,
+            coins_per_video: m.coins_per_video,
             coins_per_second: m.coins_per_second,
             coins_per_second_with_audio: m.coins_per_second_with_audio,
             resolutions: m.resolutions,
@@ -124,7 +124,7 @@ export default tool({
         evidence_warning,
         currency: "coins",
         pricing_note:
-          "影片一律按秒扣费（billing=per_second，与平台实扣同源）：总价 = coins_per_second[解析度] × 时长（秒）× 条数；未指定解析度按 default_resolution，开音轨且 coins_per_second_with_audio 非 null 时用带音价。例：seedance-2.0 720p 13 币/秒 → 10s=130、15s=195（不是同价）。批量预算用 quote_bundle（同口径）。billing 为 null＝目录无秒价，以平台实扣为准并对用户标「待确认」。**计划/预算/推荐只准用 available_models 里的模型（proven_models＝近 24h 真出过片的，优先；为空时见 evidence_warning，不得作承诺依据）——availability=unavailable 的模型（模型选择器已灰）写进计划=向用户报虚价**。**提交前必检 prompt_char_limit（默认 4000）：拼装 prompt 超限必被 400 prompt_too_long 拒收，多镜合条先数字符；duration_slots 是离散时长档（如 720p 档 10–29s 无 30s），目标时长不在档内即换档或拆条**。生成影片用 workflow_* 工具或 image_generate kind=video，shot JSON 必填 output.duration_seconds。图片模型请用 image_quote。",
+          "报价以billing_contract的完整分辨率/时长/音轨金额为准；per_video固定次价不按秒放大，未知档位不得编价。当前提交API只支持模型默认分辨率，非默认显式要求先明确unsupported，不静默降档。available表示状态，proven_models表示近期交付证据，均不证明本次成品。提交前核prompt_char_limit、duration_slots与参考图能力。",
       })
     } catch (e: any) {
       const err = await classifyError(null, e)

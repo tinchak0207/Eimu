@@ -28,6 +28,7 @@ import {
 } from "../canvas/types";
 import { HARNESS_TOOL_ID_LIST, HARNESS_TOOL_IDS } from "../harness-tool-registry";
 import {
+  WORKFLOW_NS_PATTERN,
   validateWorkflowDsl,
   type WorkflowDslSource,
   type WorkflowDslStep,
@@ -140,10 +141,12 @@ function buildStepMetadata(source: WorkflowDslSource, step: WorkflowDslStep, ste
 // ─────────────────────────── 编译期校验（schema 之后的跨步骤语义）
 
 /**
- * 校验顺序：id 唯一 → needs 引用存在 → Kahn 拓扑 → tool 成员。
+ * 校验顺序：id 唯一 → needs 引用存在 → _origin_node_id（同档唯一 + 不撞兄弟步骤确定性节点 id）
+ * → Kahn 拓扑 → tool 成员。workflow 命名空间用于推算每步的确定性节点 id
+ * （workflowNodeId(workflow, step.id)），供收编撞号检查比对。
  * 通过时附带确定性拓扑序（每轮按 DSL 原始顺序扫描，同输入同 stepIndex）。
  */
-function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIssue[]; topoOrder: WorkflowDslStep[] | null } {
+function validateGraph(steps: WorkflowDslStep[], workflow: string): { errors: WorkflowValidationIssue[]; topoOrder: WorkflowDslStep[] | null } {
   const errors: WorkflowValidationIssue[] = [];
   const idSet = new Set(steps.map((s) => s.id));
   const allIds = steps.map((s) => s.id).join(", ");
@@ -194,6 +197,27 @@ function validateGraph(steps: WorkflowDslStep[]): { errors: WorkflowValidationIs
       });
     } else {
       originOwner.set(origin, step.id);
+    }
+  }
+  if (errors.length > 0) return { errors, topoOrder: null };
+
+  // _origin_node_id 撞「别的步骤」的确定性节点 id（收编第三路 currentById.has(originNodeId) 会命中
+  // 那个兄弟节点）：本步与兄弟步写同一节点 ⇒ 兄弟步被静默覆盖（后被写者），needs 若互指同一节点
+  // 还发出 from==to 自环连线——静默图损坏、无任何报错。自己撞自己（族3 decompile→compile 原样带回
+  // 的 _origin_node_id == 自己的确定性 id）合法，不拦。
+  const detIdOwner = new Map<string, string>();
+  for (const step of steps) detIdOwner.set(workflowNodeId(workflow, step.id), step.id);
+  for (const step of steps) {
+    const origin = typeof step.meta?._origin_node_id === "string" ? step.meta._origin_node_id : "";
+    if (origin.length === 0) continue;
+    const owner = detIdOwner.get(origin);
+    if (owner !== undefined && owner !== step.id) {
+      errors.push({
+        step: step.id,
+        field: "meta._origin_node_id",
+        message: `步骤 ${step.id} 的 meta._origin_node_id "${origin}" 正好是步骤 ${owner} 的确定性节点 id；编译会把本步收编进步骤 ${owner} 的画布节点，两步共写同一节点 ⇒ 步骤 ${owner} 被静默覆盖，且若 needs 互指还会产生自环连线（from==to）。把本步的 _origin_node_id 改成一个专属节点 id，或直接删掉该键让它新增平行节点`,
+        hint: "该键是 canvas_get_state 带回的来源节点 id；不可等于同档另一步骤的节点 id。删掉它即新增平行节点",
+      });
     }
   }
   if (errors.length > 0) return { errors, topoOrder: null };
@@ -336,8 +360,8 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
   if (!schemaResult.ok) return { ok: false, errors: schemaResult.errors, ops: [] };
   const valid = schemaResult.source;
 
-  // 2-5. id 唯一 → needs 引用 → Kahn 拓扑 → tool 成员
-  const graph = validateGraph(valid.steps);
+  // 2-5. id 唯一 → needs 引用 → _origin_node_id（唯一 + 不撞兄弟确定性节点 id）→ Kahn 拓扑 → tool 成员
+  const graph = validateGraph(valid.steps, valid.workflow);
   if (graph.errors.length > 0 || graph.topoOrder === null) return { ok: false, errors: graph.errors, ops: [] };
   const topoOrder = graph.topoOrder;
 
@@ -371,6 +395,47 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
     // （撞键在编译前即 ok:false），此处不重复校验。
     const originNodeId = typeof step.meta?._origin_node_id === "string" ? step.meta._origin_node_id : undefined;
     if (originNodeId !== undefined && originNodeId.length > 0 && currentById.has(originNodeId)) {
+      // 收编第四道闸（2026-10-12）：命中画布真实节点，但未必是本步的节点——若它带着明确的
+      // stepId/workflow_ns 且与本步／本工作流不符，说明它属于别的步骤或别的工作流，收编会把它
+      // 静默改写（后被写者覆盖前者、跨工作流劫持且无任何警告）。validateGraph 的同档撞号只覆盖
+      // 「当前 DSL 的步骤」：①不在本 DSL、却已存在于画布的步骤节点 ②属于别的工作流命名空间的
+      // 节点 都漏网，故在收编发射前置此闸补上。命中即 ok:false、ops 空（教学式报错让 agent 改输入）。
+      const target = currentById.get(originNodeId)!;
+      const targetMd = (target.metadata ?? {}) as WorkflowNodeMetadata;
+      const targetStepId = typeof targetMd.stepId === "string" && targetMd.stepId.length > 0 ? targetMd.stepId : undefined;
+      if (targetStepId !== undefined && targetStepId !== step.id) {
+        return {
+          ok: false,
+          ops: [],
+          errors: [
+            {
+              step: step.id,
+              field: "meta._origin_node_id",
+              message: `步骤 ${step.id} 的 meta._origin_node_id "${originNodeId}" 指向画布上属于步骤 ${targetStepId} 的节点；收编会把本步写进该节点 ⇒ 步骤 ${targetStepId} 被静默覆盖（后被写者覆盖前者）。把本步的 _origin_node_id 改成专属节点 id，或直接删掉该键让它新增平行节点`,
+              hint: "该键是 canvas_get_state 带回的来源节点 id；不可指向画布上别的步骤的节点。删掉它即新增平行节点",
+            },
+          ],
+        };
+      }
+      const targetNs = typeof targetMd.workflow_ns === "string" && targetMd.workflow_ns.length > 0 ? targetMd.workflow_ns : undefined;
+      // 只在 targetNs「本身合法（符合 WORKFLOW_NS_PATTERN）」且 ≠ 本档 workflow 时才拒绝。
+      // decompile 会把非规范 ns（如 "Wf_Bad"）卫生化成 source.workflow（"wf_bad"），但画布上的
+      // 原始 metadata.workflow_ns 仍是非规范的 "Wf_Bad"；若拿它直接比对 valid.workflow 会拒绝
+      // decompile 自己的产物、破坏回程（EDGE C）。非规范 ns 无法断言归属，故放行走既有收编。
+      if (targetNs !== undefined && WORKFLOW_NS_PATTERN.test(targetNs) && targetNs !== valid.workflow) {
+        return {
+          ok: false,
+          ops: [],
+          errors: [
+            {
+              step: step.id,
+              field: "meta._origin_node_id",
+              message: `步骤 ${step.id} 的 meta._origin_node_id "${originNodeId}" 指向工作流 ${targetNs} 的节点（本档工作流为 ${valid.workflow}）；收编会把它改写进本工作流 ⇒ 跨工作流静默劫持别的节点。删掉该键让它在本工作流新增节点，或改成属于本工作流的节点 id`,
+              hint: `该键须指向本工作流（${valid.workflow}）的节点；跨工作流收编会静默劫持别人的节点`,
+            },
+          ],
+        };
+      }
       ops.push({ type: "update_node", id: originNodeId, patch: { title: step.title, metadata } });
       updated++;
       nodeIds.set(step.id, originNodeId);

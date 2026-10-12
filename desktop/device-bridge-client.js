@@ -236,16 +236,16 @@ function errorCodeOf(status, json) {
   return `http_${status}`;
 }
 
-async function post(pathname, body) {
-  const url = /^https?:\/\//.test(pathname) ? pathname : runtime.gatewayBaseUrl + pathname;
+async function post(pathname, body, transport = runtime) {
+  const url = /^https?:\/\//.test(pathname) ? pathname : transport.gatewayBaseUrl + pathname;
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${runtime.credential}`,
+      Authorization: `Bearer ${transport.credential}`,
     },
     body: JSON.stringify(body || {}),
-    signal: runtime.controller ? runtime.controller.signal : undefined,
+    signal: transport.controller ? transport.controller.signal : undefined,
   });
   let json = null;
   try {
@@ -256,8 +256,8 @@ async function post(pathname, body) {
   return { status: res.status, json };
 }
 
-async function postOk(pathname, body) {
-  const { status, json } = await post(pathname, body);
+async function postOk(pathname, body, transport = runtime) {
+  const { status, json } = await post(pathname, body, transport);
   if (status !== 200 || !json || json.ok !== true) {
     throw new BridgeError(errorCodeOf(status, json), status);
   }
@@ -485,6 +485,33 @@ async function connect() {
 
 // ── 对外 API ───────────────────────────────────────────────────────────
 
+/** 切档先同步租户权限；不依赖文件根、在线设备或桥生命周期。凭证只进既有HTTP标头。 */
+async function syncDeviceBridgeMode(mode, opts = {}) {
+  if (!PERMISSION_MODES.includes(mode)) throw new BridgeError("bad_mode", 400);
+  let credential = null;
+  let gatewayBaseUrl = (opts.gatewayBaseUrl || DEFAULT_GATEWAY_BASE_URL).replace(/\/+$/, "");
+  const ticket = typeof opts.tokenProvider === "function" ? opts.tokenProvider() : null;
+  if (ticket && typeof ticket.token === "string" && ticket.token.startsWith("sk-dev-") && Number(ticket.expiresAt) > Date.now()) {
+    credential = ticket.token;
+    if (typeof ticket.gatewayBaseUrl === "string" && /^https?:\/\//.test(ticket.gatewayBaseUrl)) {
+      gatewayBaseUrl = ticket.gatewayBaseUrl.replace(/\/+$/, "");
+    }
+  } else {
+    credential = typeof opts.credentialProvider === "function" ? await opts.credentialProvider() : null;
+  }
+  if (typeof credential !== "string" || !credential.trim()) {
+    if (typeof opts.onCredentialRequired === "function") opts.onCredentialRequired({ reason: "credentials_unavailable" });
+    throw new BridgeError("credentials_unavailable", 401);
+  }
+  const result = await postOk(`${PREFIX}/permissions`, { mode }, {
+    gatewayBaseUrl,
+    credential,
+    controller: { signal: AbortSignal.timeout(15000) },
+  });
+  if (result.mode !== mode) throw new BridgeError("permission_mode_not_synced", 502);
+  return result;
+}
+
 /**
  * 启动 device bridge（预设不启动：enabled !== true 即停在 "off"）。
  * @param {{gatewayBaseUrl?:string, credentialProvider?:()=>Promise<string|null>|string|null, enabled?:boolean, rootsProvider?:()=>string[], modeProvider?:()=>("off"|"ask"|"auto"|"full"), rulesProvider?:()=>unknown, deviceIdProvider?:()=>string, consentRootsProvider?:()=>string[], persistConsentRoots?:(roots:string[])=>void, auditConsent?:(entry:{scope:string,root:string})=>void, onStatus?:(s:object)=>void}} opts
@@ -653,6 +680,7 @@ function authorizeDeviceBridgeRoots(paths) {
 }
 
 module.exports = {
+  syncDeviceBridgeMode,
   startDeviceBridge,
   stopDeviceBridge,
   getDeviceBridgeState,

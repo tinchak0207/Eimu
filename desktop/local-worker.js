@@ -542,6 +542,9 @@ function createBridgeController(deps = {}) {
   }
   const startBridge = deps.startBridge;
   const stopBridge = deps.stopBridge;
+  const syncMode = typeof deps.syncMode === "function" ? deps.syncMode : null;
+  let modeUpdate = Promise.resolve();
+  let modeSyncError = null;
   const getClientState = typeof deps.getClientState === "function" ? deps.getClientState : () => ({});
   const writeEnabled = typeof deps.writeEnabled === "function" ? deps.writeEnabled : () => {};
   const readMode = typeof deps.readMode === "function" ? deps.readMode : () => undefined;
@@ -582,10 +585,10 @@ function createBridgeController(deps = {}) {
 
   /** 冻结契约的状态形状：{ enabled, state, roots, deviceId, mode, lastError? }。 */
   function snapshot() {
-    if (!userEnabled) return { enabled: false, state: "off", roots: currentRoots(), deviceId: null, mode: userMode };
+    if (!userEnabled) return { enabled: false, state: "off", roots: currentRoots(), deviceId: null, mode: userMode, ...(modeSyncError ? { lastError: modeSyncError } : {}) };
     // 已开启意图但尚无授权根：不启动，状态一律 no_authorized_roots（不误报客户端状态）。
     if (currentRoots().length === 0) {
-      return { enabled: true, state: "no_authorized_roots", roots: [], deviceId: null, mode: userMode };
+      return { enabled: true, state: "no_authorized_roots", roots: [], deviceId: null, mode: userMode, ...(modeSyncError ? { lastError: modeSyncError } : {}) };
     }
     const cs = getClientState() || {};
     const out = {
@@ -596,6 +599,7 @@ function createBridgeController(deps = {}) {
       mode: userMode,
     };
     if (cs.lastError) out.lastError = String(cs.lastError);
+    if (modeSyncError) out.lastError = modeSyncError;
     return out;
   }
 
@@ -665,18 +669,44 @@ function createBridgeController(deps = {}) {
     if (typeof mode !== "string" || !PERMISSION_MODES.includes(mode)) {
       throw new LocalError("E_BAD_ARGS", `非法权限模式：${String(mode)}`);
     }
-    userMode = mode;
-    writeMode(mode);
-    if (mode === "off") {
-      return applyDisable();
-    }
-    userEnabled = true;
-    writeEnabled(true);
-    if (currentRoots().length === 0) {
-      // 无授权根 ⇒ 不启动；前端引导 pickFiles，授权后 onRootsAuthorized 会自动接上。
-      return emit(snapshot());
-    }
-    return emit(await startNow());
+    const update = modeUpdate.then(async () => {
+      try {
+        if (!syncMode) throw new LocalError("E_MODE_SYNC", "权限同步不可用");
+        await syncMode(mode, startOptions());
+        modeSyncError = null;
+      } catch {
+        // 未同步时保留真实旧模式，不持久化、不停桥、不虚构切档成功。
+        modeSyncError = "权限模式未同步，请检查网络后重试；当前模式仍保持不变。";
+        return emit(snapshot());
+      }
+      userMode = mode;
+      writeMode(mode);
+      if (mode === "off") return applyDisable();
+      userEnabled = true;
+      writeEnabled(true);
+      if (currentRoots().length === 0) return emit(snapshot());
+      return emit(await startNow());
+    });
+    modeUpdate = update.then(() => {}, () => {});
+    return update;
+  }
+
+  // 启动恢复与晚到短票也需同步，即便 off 或没有文件根；与用户切档共用队列防乱序。
+  function syncCurrentMode() {
+    const update = modeUpdate.then(async () => {
+      try {
+        if (!syncMode) throw new LocalError("E_MODE_SYNC", "权限同步不可用");
+        await syncMode(userMode, startOptions());
+        modeSyncError = null;
+      } catch {
+        modeSyncError = "权限模式未同步，请检查登录和网络后重试；云端授权尚未确认更新。";
+        return emit(snapshot());
+      }
+      if (!userEnabled || userMode === "off" || currentRoots().length === 0) return emit(snapshot());
+      return emit(await startNow());
+    });
+    modeUpdate = update.then(() => {}, () => {});
+    return update;
   }
 
   return {
@@ -713,10 +743,9 @@ function createBridgeController(deps = {}) {
       userMode = normalizeMode(m);
     },
 
-    /** whenReady 依已还原的意图启动/重启；未启用＝不动。 */
+    /** whenReady 恢复时先同步持久化权限；off 与空根也必须同步。 */
     async restart() {
-      if (!userEnabled || currentRoots().length === 0) return emit(snapshot());
-      return emit(await startNow());
+      return syncCurrentMode();
     },
 
     /**
@@ -737,8 +766,7 @@ function createBridgeController(deps = {}) {
     async setCredential(credential) {
       const next = sanitizeBridgeCredential(credential);
       bridgeCredential = next;
-      if (userEnabled && currentRoots().length > 0) return emit(await startNow());
-      return emit(snapshot());
+      return syncCurrentMode();
     },
   };
 }

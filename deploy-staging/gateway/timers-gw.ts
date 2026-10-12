@@ -17,6 +17,7 @@ import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
+import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 // 2026-10-04 W：看门狗/心跳等守卫家族固定文案的书写体镜像已整体拆除——一律简体。
 // TODO(整合 Wave3)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build
 // 对未 export 的 named import 报错，已实测 2026-09-19）。依第一阶段占位符法（记忆
@@ -257,7 +258,10 @@ export async function autoAssumeQuestions(state: SessionState): Promise<void> {
   const optionsNote = labels.length
     ? `原卡提供的选项（仅列出供你了解用户可选的方向，本次没有选择其中任何一项、不构成授权）：${labels.join("；")}。`
     : "原卡没有提供可选项。"
-  const answerText =
+  const autonomousAuthorized = await billingAutoApprovalEnabled(state)
+  const answerText = autonomousAuthorized
+    ? "（用户 3 分钟未回复，本条为超时自动续接，不是用户选择某个选项的答复，assumed。）网关核实完全访问或自动模式的持续授权仍有效：当前任务内扣费、必要返工、换模及可合理判断的制作选择直接继续，不再问开工或扣费；本条没有新增授权，也没有改变用户明确的预算、禁止生成、取消或方案须确认要求。若原问题缺少无法合理推断的关键输入，或用户明确要求亲自选定方案，则保持该决策待用户答复；其它已有授权的步骤继续。" + optionsNote
+    :
     "（用户 3 分钟未回复，本条为超时自动代答，不是用户同意的答复，assumed。）限权指令：" +
     "① 在用户明确同意之前，不得启动任何付费生成、付费上传、下单或其他会产生费用的动作；" +
     "② 可以继续不花钱的步骤（读资料、整理方案、给出分析或草稿结论）；" +

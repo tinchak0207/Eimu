@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentSteerStatus, AgentUserTurnItem } from "@/lib/agent-chat-types";
 import { parseUserAttachmentBlock, AgentAttachmentCards } from "./AgentAttachmentCards";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { useHideAgentReasoning } from "@/lib/agent-display-preferences";
 
 /**
  * REQ-D2：steer 状态 → 人话（与网关 steer-core.ts 的 SteerStatus 值域一一对应）。
@@ -57,6 +58,7 @@ function usePrefersReducedMotion(): boolean {
 function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProps) {
   const isUser = item.kind === "user";
   const reducedMotion = usePrefersReducedMotion();
+  const hideReasoning = useHideAgentReasoning();
 
   // 罪状 1：用户消息里的 [ATTACHMENTS_BLOCK] 不再以裸文本示人——正文摘干净，
   // 附件解析成微信式卡片渲染在正文下方。没有区块时解析原样放行，一字不动。
@@ -113,6 +115,9 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
         ? "正在思考…"
         : "已思考";
 
+  // 保留推理数据和全部 hooks；纯推理条目隐藏后不留下气泡占位。
+  if (hideReasoning && item.kind === "assistant" && item.reasoning && !displayText.trim()) return null;
+
   return (
     <div
       className={cn("agent-rise flex w-full", isUser ? "justify-end" : "justify-start")}
@@ -138,7 +143,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             （write path 语义见上方 reasoningOpen）。open 一律由 state 给值——
             条件式会让「串流结束」这类 prop 变化重新决定开关，把使用者展开的
             区块又收回去。 */}
-        {item.kind === "assistant" && item.reasoning ? (
+        {item.kind === "assistant" && item.reasoning && !hideReasoning ? (
           <details
             className="mb-1.5 [&_.brain-chevron]:transition-transform [&[open]>.brain-summary_.brain-chevron]:rotate-180"
             open={reasoningOpen}

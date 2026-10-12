@@ -17,7 +17,7 @@ export const artStyleTemplate: WorkflowTemplate =
     multiShot: true,
     nodes: [
       // 环 1：采代表作（代表作原图库 + 元数据表）
-      { role: "ref_gen", kind: "config", title: "代表作采集配置", deliverable: "代表作采集环节的生图价目与参数配置（model/size/count/单价），代表原图库按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "ref_gen", kind: "config", title: "代表作采集配置", deliverable: "代表作采集环节的生图价目与参数配置（model/size/count；价格由当前目录取得），代表原图库按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "ref_pool",
         kind: "image",
@@ -37,7 +37,7 @@ export const artStyleTemplate: WorkflowTemplate =
         ],
       },
       // 环 2：拆DNA（笔触/色盘/光观察/构图/题材五维）
-      { role: "dna_gen", kind: "config", title: "DNA 解构图生成配置", deliverable: "DNA 解构环节的生图价目与参数配置（model/size/count/单价），五维解构图与证据局部按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "dna_gen", kind: "config", title: "DNA 解构图生成配置", deliverable: "DNA 解构环节的生图价目与参数配置（model/size/count；价格由当前目录取得），五维解构图与证据局部按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "dna_board",
         kind: "image",
@@ -57,7 +57,7 @@ export const artStyleTemplate: WorkflowTemplate =
         ],
       },
       // 环 3：签解构表（用户逐条签核的 DNA 卡）
-      { role: "dna_card_gen", kind: "config", title: "解构卡生成配置", deliverable: "解构卡环节的生图价目与参数配置（model/size/count/单价），签核版 DNA 卡按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "dna_card_gen", kind: "config", title: "解构卡生成配置", deliverable: "解构卡环节的生图价目与参数配置（model/size/count；价格由当前目录取得），签核版 DNA 卡按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "dna_card",
         kind: "image",
@@ -66,11 +66,11 @@ export const artStyleTemplate: WorkflowTemplate =
         // 画布侧据此自动落卡（后续可 @ 引用该风格）。
         defaults: { emitsEntity: { kind: "style", nameFrom: "input" } },
         deliverable: "用户逐条签核的 style DNA 卡与两张原作局部对位图",
-        gate: "用户逐条确认并锁定版本；存在未决条目、来源不明条目或高权重项未确认时，工作流停留在本步",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；用户逐条确认并锁定版本；存在未决条目、来源不明条目或高权重项未确认时，工作流停留在本步",
         notes: [
           "每条 DNA 必须可回看原作局部，不让用户只凭抽象文字签核",
           "用户修正项写入 revision_log；高权重项在后续逐维对拍中权重 x2",
-          "没有明确批准不能进入临摹或批量生图",
+          "无持续授权且预算未覆盖时，没有明确批准不能进入临摹或批量生图；完全访问或自动模式经独立评审后继续",
           "签核定版号 style_dna_approved_v1，版本号写进后续每张临摹的 prompt_snapshot 备查；revision_log 逐条记「谁改的/改了什么/依据哪张原作局部」",
           "两张对位图各圈 3 处高权重特征锚点（笔触走向线、明暗交界带、色盘取样点），签核时让用户逐处点选确认，不接受整图扫一眼通过",
           "交付本节点时把风格名写进节点 metadata 的 input 字段——画布侧据它自动落成风格卡并当卡名，缺了卡名只能退回节点标题「style DNA 卡（用户逐条签核版）」",
@@ -81,7 +81,7 @@ export const artStyleTemplate: WorkflowTemplate =
         ],
       },
       // 环 4：拍临摹对照（逐维对拍 + 综合临摹 + 并排对照板）
-      { role: "copy_gen", kind: "config", title: "临摹对拍生成配置", deliverable: "临摹对拍环节的生图价目与参数配置（model/size/count/单价），逐维对拍与对照板按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "copy_gen", kind: "config", title: "临摹对拍生成配置", deliverable: "临摹对拍环节的生图价目与参数配置（model/size/count；价格由当前目录取得），逐维对拍与对照板按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "copy_compare",
         kind: "image",
@@ -102,7 +102,7 @@ export const artStyleTemplate: WorkflowTemplate =
         ],
       },
       // 环 5：跑变体矩阵（3 个新题材 x 3 个新构图）
-      { role: "matrix_gen", kind: "config", title: "变体矩阵生成配置", deliverable: "变体矩阵环节的生图价目与参数配置（model/size/count/单价），3x3 泛化矩阵按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "matrix_gen", kind: "config", title: "变体矩阵生成配置", deliverable: "变体矩阵环节的生图价目与参数配置（model/size/count；价格由当前目录取得），3x3 泛化矩阵按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "variant_matrix",
         kind: "image",
@@ -141,7 +141,7 @@ export const artStyleTemplate: WorkflowTemplate =
         ],
       },
       // 环 7：做原创成组
-      { role: "origin_gen", kind: "config", title: "原创成组生成配置", deliverable: "原创成组环节的生图价目与参数配置（model/size/count/单价），原创成组作品按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "origin_gen", kind: "config", title: "原创成组生成配置", deliverable: "原创成组环节的生图价目与参数配置（model/size/count；价格由当前目录取得），原创成组作品按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "origin_set",
         kind: "image",
@@ -162,7 +162,7 @@ export const artStyleTemplate: WorkflowTemplate =
         ],
       },
       // 环 8：归档证物链（图库/DNA卡/对拍/矩阵/skip记录/成组/prompt骨架）
-      { role: "archive_gen", kind: "config", title: "证物归档配置", deliverable: "证物归档环节的生图价目与参数配置（model/size/count/单价），内化证物档案按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "archive_gen", kind: "config", title: "证物归档配置", deliverable: "证物归档环节的生图价目与参数配置（model/size/count；价格由当前目录取得），内化证物档案按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "evidence_archive",
         kind: "image",

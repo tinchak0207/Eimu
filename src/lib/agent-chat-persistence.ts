@@ -86,7 +86,8 @@ export function sanitizeItemsForStorage(items: AgentTranscriptItem[]): AgentTran
       continue;
     }
     if (it.kind === "audio") {
-      // 与 image/video 同法瘦身：留小字段，不复制 taskId。
+      // 与 image/video 同法瘦身：留小字段，不复制 taskId。title/cover/lyricStatus
+      // 都是短字串（歌名/封面 URL/状态词），留住才能在刷新后仍显示真歌名与封面。
       out.push({
         kind: "audio",
         id: it.id,
@@ -94,6 +95,9 @@ export function sanitizeItemsForStorage(items: AgentTranscriptItem[]): AgentTran
         url: it.url,
         costCoins: it.costCoins,
         mediaKind: it.mediaKind,
+        title: it.title,
+        cover: it.cover,
+        lyricStatus: it.lyricStatus,
       });
       continue;
     }

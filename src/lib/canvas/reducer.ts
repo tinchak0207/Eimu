@@ -73,9 +73,15 @@ export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
   const { nodes, connections } = state;
   if (nodes.length === 0) return state;
   if (connections.length === 0) {
+    const placed = nodes.filter((node) => node.moved);
     return {
       ...state,
-      nodes: nodes.map((node, index) => node.moved ? node : { ...node, position: nextPosition(nodes.slice(0, index)) }),
+      nodes: nodes.map((node) => {
+        if (node.moved) return node;
+        const positioned = { ...node, position: nextPosition(placed, node.width, node.height) };
+        placed.push(positioned);
+        return positioned;
+      }),
     };
   }
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -154,29 +160,56 @@ export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
     }
   }
 
+  const placed = nodes.filter((n) => n.moved);
   const nextNodes = nodes.map((n) => {
     if (n.moved) return n;
     const pos = nextPos.get(n.id);
-    return pos ? { ...n, position: pos } : n;
+    const positioned = pos ? { ...n, position: nextPosition(placed, n.width, n.height, pos) } : n;
+    placed.push(positioned);
+    return positioned;
   });
   return { ...state, nodes: nextNodes };
 }
 
-function nextPosition(existing: CanvasNode[]): CanvasPosition {
+export function nextPosition(
+  existing: CanvasNode[],
+  width = 340,
+  height = 240,
+  preferred?: CanvasPosition,
+): CanvasPosition {
   const cols = 3;
   const row = Math.floor(existing.length / cols);
   const col = existing.length % cols;
-  return {
+  const position = preferred ? { ...preferred } : {
     x: LAYOUT_START.x + col * (340 + LAYOUT_GAP_X),
     y: LAYOUT_START.y + row * (240 + LAYOUT_GAP_Y),
   };
+  // 以真实卡片尺寸与占位排版；既有节点（尤其人工移动的）只作障碍，不挪动。
+  // 每轮只向下跨过一个或多个障碍，最多 existing.length 轮即找到空位。
+  for (let pass = 0; pass <= existing.length; pass++) {
+    let nextY = position.y;
+    for (const node of existing) {
+      if (
+        position.x < node.position.x + node.width + LAYOUT_GAP_X &&
+        position.x + width + LAYOUT_GAP_X > node.position.x &&
+        position.y < node.position.y + node.height + LAYOUT_GAP_Y &&
+        position.y + height + LAYOUT_GAP_Y > node.position.y
+      ) nextY = Math.max(nextY, node.position.y + node.height + LAYOUT_GAP_Y);
+    }
+    if (nextY === position.y) break;
+    position.y = nextY;
+  }
+  return position;
 }
 
 function upsertNode(state: CanvasReducerState, node: CanvasNode): CanvasReducerState {
   const exists = state.nodes.some((n) => n.id === node.id);
   const nodes = exists
-    ? state.nodes.map((n) => (n.id === node.id ? node : n))
-    : [...state.nodes, { ...node, position: node.position.x || node.position.y ? node.position : nextPosition(state.nodes) }];
+    ? state.nodes.map((n) => (n.id === node.id ? { ...node, position: n.position, moved: n.moved } : n))
+    : [...state.nodes, {
+        ...node,
+        position: nextPosition(state.nodes, node.width, node.height, node.position.x || node.position.y ? node.position : undefined),
+      }];
   return { ...state, nodes };
 }
 

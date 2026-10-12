@@ -1,9 +1,20 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, Coins, Download, Library, Loader2, RotateCw, SlidersHorizontal } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Coins,
+  Download,
+  Library,
+  Loader2,
+  Mic2,
+  RotateCw,
+  SlidersHorizontal,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAudioItem } from "@/lib/agent-chat-types";
+import { guessAudioTitleFromUrl, openLyricPlayer } from "@/lib/lyric-player-url";
 import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentAudioCardProps {
@@ -124,13 +135,46 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
     flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
   }, [item, onDownload, downState, flash]);
 
+  const handleOpenLyricPlayer = useCallback(() => {
+    // 真歌名优先；没有就从 URL 猜一个可读档名；都没有则不传 title——
+    // 播放器自会显示「未命名曲目」，绝不传「音频 #N」这类编号占位。
+    const title = item.title?.trim() || guessAudioTitleFromUrl(item.url);
+    openLyricPlayer({ url: item.url, title, trackId: item.id });
+  }, [item.id, item.title, item.url]);
+
+  const title = item.title?.trim() ?? "";
+  const cover = item.cover?.trim() ?? "";
+
   return (
     <figure className="agent-rise">
-      {/* media_kind 徽章：music=成曲、其余（含缺省）=音频。 */}
-      <div className="flex items-center gap-2 px-3.5 pt-3">
-        <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-caption1 font-medium text-muted-foreground">
-          {item.mediaKind === "music" ? "音乐" : "音频"}
-        </span>
+      {/* 抬头：有真封面才显示缩略图（绝不用默认图占位）；有真歌名才显示标题
+          （缺省不摆「音频 #N」这类编号占位）。徽章说类别，两者互不冒充。 */}
+      <div className="flex items-center gap-2.5 px-3.5 pt-3">
+        {cover && (
+          // eslint-disable-next-line @next/next/no-img-element -- 上游封面 URL（store 来源），无需 next/image 优化
+          <img
+            src={cover}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            className="h-11 w-11 shrink-0 rounded-[10px] bg-black/[0.05] object-cover"
+          />
+        )}
+        <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+          {title && (
+            <p
+              className="max-w-full truncate text-ios-subhead font-semibold text-foreground"
+              title={title}
+            >
+              {title}
+            </p>
+          )}
+          <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-caption1 font-medium text-muted-foreground">
+            {item.mediaKind === "music" ? "音乐" : "音频"}
+          </span>
+        </div>
       </div>
       <div className="px-3.5 pt-2.5">
         {failed ? (
@@ -152,17 +196,42 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
             </button>
           </div>
         ) : (
-          <audio
-            key={retryKey}
-            src={item.url}
-            aria-label="智能体生成的音频"
-            controls
-            preload="metadata"
-            onError={() => setFailed(true)}
-            className="w-full"
-          />
+          <div className="flex flex-col gap-2.5">
+            {/* 主操作：打开已分好滚动歌词的 store 播放器（不再以浏览器默认 <audio> 为主体验）。 */}
+            <button
+              type="button"
+              onClick={handleOpenLyricPlayer}
+              className={cn(
+                "flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px]",
+                "bg-ios-blue text-white text-ios-subhead font-semibold",
+                "shadow-[0_1px_0_rgba(255,255,255,0.18)_inset] transition-colors duration-200",
+                "hover:bg-ios-blue/90 active:scale-[0.98]",
+                "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
+                "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+              )}
+            >
+              <Mic2 className="h-4.5 w-4.5" aria-hidden="true" />
+              打开滚动歌词播放器
+            </button>
+            {/* 次要：保留原生试听，方便不离开对话时快速确认音源。 */}
+            <audio
+              key={retryKey}
+              src={item.url}
+              aria-label="智能体生成的音频（次要试听）"
+              controls
+              preload="metadata"
+              onError={() => setFailed(true)}
+              className="w-full opacity-90"
+            />
+          </div>
         )}
       </div>
+      {item.lyricStatus === "aligning" && (
+        <p className="flex items-center gap-1.5 px-3.5 pt-2 text-ios-caption1 text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          歌词对齐中，完成后自动更新
+        </p>
+      )}
       {item.costCoins !== undefined && (
         <figcaption className="flex items-center gap-1 px-3.5 pt-2.5 text-ios-footnote text-muted-foreground">
           <Coins className="h-3.5 w-3.5" aria-hidden="true" />

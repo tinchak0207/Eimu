@@ -336,7 +336,7 @@ function blocked<T>(tool: ShortDramaToolId, input: unknown, output: T, gates: Sh
   return result(tool, input, output, gates, "blocked", kind, { input: [] });
 }
 
-export const STORYBOARD_MIN_SHOT_SECONDS = 10;
+export const STORYBOARD_MIN_SHOT_SECONDS = 5;
 
 function durationBoundsDetail(offenders: string[]): string {
   if (offenders.length === 0) return `each shot is ${STORYBOARD_MIN_SHOT_SECONDS}-30 seconds (per-clip billing: fill the model's largest slot)`;
@@ -440,11 +440,9 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     gate("shot_identity", every((shot) => Boolean(shot.shotId)) && uniqueShotIds.size === shots.length, "shot ids are present and unique"),
     gate("shot_order", ordered, "shot order is contiguous"),
     gate("scene_binding", every((shot) => Boolean(shot.sceneId)), "each shot is bound to a scene"),
-    // 2026-09-20 暴君裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
-    // 单镜上限 2→30s（允许打满 seedance-2.5 480p/30s 固定档；2.0 档 10-15s 同样在界内）。
-    // 2026-10-02 H7：AGENTS.md 硬规则「严禁 <10 秒短档」（workflow-video-rules §4b，seedance 2.0/2.5 下限 10s）机器化。
-    // 适用范围＝本门禁验的每个分镜条目（每镜 = 一条上游视频计费单位，不分题材/镜头类型；§4b 无例外条款，
-    // 余数不足 10s 须并入前一条或明确说明，故不豁免末镜）。
+    // 2026-10-12 暴君裁定：影片默认模型改为 minimax-h3（miaowuai 渠道上游 minimax-h3-max，
+    // 稳定快速、约 45 秒出片、单镜 5–15 秒，推荐 15 秒）⇒ 单镜下限 10s 放宽为 5s。
+    // 上限仍 30s（seedance-2.5 族仍有 30s 档）。按条计费下仍鼓励打满时长，但 5–9s 不再机器拦。
     gate("duration_bounds", every((shot) => shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30), durationBoundsDetail(shots.filter((shot) => !(shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30)).map((shot) => `${shot.shotId}(${Number.isFinite(shot.durationSeconds) ? shot.durationSeconds : "?"}s)`))),
     // 段长去 15s 上限：总长由创作需求决定，门禁只验「已声明且为正」；拆条打满档位是分镜纪律不是门禁。
     gate("segment_duration", segmentDuration > 0, "segment duration is declared and positive (split into max-slot clips, e.g. 80s -> 30+30+20)"),

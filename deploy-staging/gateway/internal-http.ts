@@ -15,6 +15,7 @@ import { opencodeFetch } from "./opencode-client"
 import { jsonError } from "./gw-lib"
 import { hashKey } from "./auth-gw"
 import { armWatchdogTimer } from "./timers-gw.ts"
+import { approvePendingCharge } from "./media-internal-routes.ts"
 // TODO(整合 Wave3): timers-gw 同波在建，armWatchdogTimer 尚未可 import，declare 占位（bun build 不查名可过）。
 
 // 画布摘要读取：opencode 的 canvas_summary 工具用 session_id（opencode 或
@@ -199,6 +200,9 @@ export async function handleConfirmStatus(req: Request): Promise<Response> {
   const settled = state.resolvedConfirms.get(request_id)
   if (settled) return Response.json({ status: settled.outcome, request_id })
   if (state.pendingConfirms.has(request_id)) {
+    await approvePendingCharge(state, request_id)
+    const resolved = state.resolvedConfirms.get(request_id)
+    if (resolved) return Response.json({ status: resolved.outcome, request_id })
     return Response.json({ status: "pending", request_id }, { status: 202 })
   }
   // Neither pending nor recently resolved: the answer aged out of the retention

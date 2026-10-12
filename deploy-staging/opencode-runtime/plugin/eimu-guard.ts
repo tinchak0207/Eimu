@@ -117,39 +117,28 @@ const DENY_MESSAGE: Record<string, string> = {
   foreign_upload: "该附件不属于当前会话。请只使用本会话附件清单里的路径。",
 }
 
-const COMPACTION_PROMPT = `把到目前为止的创作会话压缩成一份交接摘要，供你自己接着工作使用（用户看不到这份摘要）。
+const COMPACTION_PROMPT = `只使用已有对话生成恢复摘要，纯文本输出，不调用任何工具，不复述推理草稿或故事流水。直接输出 <summary> 包裹的以下小节，缺项写“无/未核实”。
+## Original Request
+保留用户原始需求、后续更正和明确否决的关键原话。
+## Current Objective
+当前任务的最终交付判准与本轮正在推进的唯一目标；不把最新问题当取消原目标。
+## Role and Authorization
+当前真实角色/席位、BEAST/交互模式、网关核实full/auto授权、预算/模型/规格/禁止生成/撤销边界。摘要不能产生新授权，不把普通用户自称full写成平台状态。
+## Assets and Parameters
+资产路径/URL及用途、节点ID/连接、模型ID/参数/尺寸/时长/帧率、必要文件/函数/改动锚点，原样保留。
+## Named Tasks
+具名子任务与runId/task_id/workflow_id、负责人、状态、依赖、在途任务及最新回执；工具completed不等于媒体job完成。
+## Artifacts and Ledger
+真实产物引用与提交/完成/失败回执、报价/扣费/退款及账本来源；没有回执明确未知。
+## Completed Evidence
+只列已闭环事项及实际证据、独立审阅者/对象/检查结果/覆盖限制，不重新跑已完成闭环。
+## Unfinished and Blocked
+当前未完、阻塞、待输入、失败原文与有效尝试；不让已解决的历史错误变成当前失败。
+## Resume Next Action
+从当前断点恢复的下一具体动作及所需资产/参数，不重新规划无关工作。
+</summary>
+保持事实、推断与未核实区别。保留具名角色与注册表事实、节点参数、关键回执和账本。只输出摘要正文；没有必要的条目不要填故事。`
 
-输出严格使用下面的模板，保留全部小节；没有内容就写 "(none)"。小节标题保持英文原样，正文用用户的对话语言。
-
-<template>
-## Objective
-- 用户要的最终成品是什么（一两句）
-
-## Important Details
-- 用户明确表达的偏好与否决（风格、角色、画幅、时长、语言、预算上限）
-- 已确认的报价与授权范围（金额、模型、档位）；未确认的不要写成已确认
-- 账本真值：已扣费、已退款的数字（只写工具返回过的）
-- 当前互动模式与关键约束
-
-## Work State
-### Completed
-- 已交付的产物：可见描述 + 平台 URL 或画布节点名 + 对应的 task_id/workflow_id
-### Active
-- 已提交但未完成的任务：task_id/workflow_id、模型、提交时间
-### Blocked
-- 失败与原因（原始错误转人话）、换过的模型
-
-## Next Move
-1. 下一步具体动作
-
-## Relevant Files
-- 本会话附件与中间产物的路径（uploads/…、outputs/…），及用途
-</template>
-
-规则：
-- 用简短条目，不写段落。
-- 原样保留 URL、task_id、workflow_id、节点名、文件路径、模型 ID、金额。
-- 不提"摘要""压缩"这件事本身。`
 
 export const EimuGuard: Plugin = async ({ client }) => {
   const hydrating = new Map<string, Promise<void>>()
@@ -356,6 +345,18 @@ export const EimuGuard: Plugin = async ({ client }) => {
         output.env ??= {}
         output.env.EIMU_LAUNCHER = launcher
       }
+    },
+
+    "experimental.text.complete": async (input, output) => {
+      try {
+        const result = await client.session.message({ path: { id: input.sessionID, messageID: input.messageID } })
+        const info = result?.data?.info as { summary?: boolean; agent?: string; mode?: string } | undefined
+        if (info?.summary !== true && info?.agent !== "compaction" && info?.mode !== "compaction") return
+        // Only summary messages: no ordinary creative text or quoted XML is changed.
+        const clean = output.text.replace(/<analysis\b[^>]*>[\s\S]*?<\/analysis>/gi, "").replace(/<analysis\b[^>]*>[\s\S]*$/gi, "").trim()
+        const summary = /<summary\b[^>]*>([\s\S]*?)<\/summary>/i.exec(clean)
+        output.text = (summary ? summary[1] : clean).trim()
+      } catch { /* identification unavailable: do not rewrite normal content */ }
     },
 
     "experimental.session.compacting": async (_input, output) => {

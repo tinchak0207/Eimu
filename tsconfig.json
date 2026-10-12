@@ -43,6 +43,8 @@
     "eval-*", "src/vendor-bridges",
     "deploy-staging",
     "staging",
+    "open-source",
+    "work",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]

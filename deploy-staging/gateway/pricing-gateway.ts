@@ -7,15 +7,8 @@ import { resolveVideoPerSecond } from "./workflow-service"
 import { PLATFORM_BASE } from "./constants-gateway.ts"
 import { resolveConnectedVideoDuration } from "./workflow-gw.ts"
 
-// R5-C（2026-08-28）影片估价改价目表档位（暴君钦定：价目表 100% 权威，代码与
-// 价目表冲突 = 代码错）：MiniMax H3 720P = 5 币/秒、1080P = 10 币/秒。旧 S4
-// 0.05 币/秒估算口径废除；目录 /v1/models 的视频价是 0.25 RMB 混币脏价，
-// 禁止回落目录。
-// 2026-08-30 双账本收敛：档位单价不再在此另立常量——统一由 workflow-service 的
-// resolveVideoPerSecond（锚点 unit_price_per_second 优先、档位价 5/10 兜底）提供，
-// 与 service 侧 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
-// S4 cost_hint 目录快取：GET /v1/models 的 x_coins_per_image，TTL 10 分钟
-//（与工具层 loadCatalog 同口径）。估不出单价的模型回 null（不许编数）。
+// 报价只认站内目录明确的x_coins_per_image/x_coins_per_second币字段，TTL10分钟。
+// RMB/供应商价格、模板锚点、历史档位与过期快取不能冒充当前平台币价；未知回null。
 export const PRICE_CATALOG_TTL_MS = 10 * 60 * 1000
 export let priceCatalogCache: { at: number; prices: Record<string, number> } | null = null
 
@@ -39,20 +32,20 @@ export async function catalogUnitCoins(model: string, apiKey: string): Promise<n
           const id = typeof m.id === "string" ? m.id : null
           if (!id) continue
           const raw = m.x_coins_per_image
-          if (typeof raw === "number") prices[id] = raw
+          if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) prices[id] = raw
           else if (raw && typeof raw === "object") {
             const o = raw as Record<string, unknown>
             const v = typeof o.standard === "number" ? o.standard : typeof o.hd === "number" ? o.hd : null
-            if (v !== null) prices[id] = v
+            if (v !== null && Number.isFinite(v) && v >= 0) prices[id] = v
           }
         }
-        if (Object.keys(prices).length > 0) priceCatalogCache = { at: now, prices }
+        priceCatalogCache = { at: now, prices }
       }
     } catch {
       // 目录不可达：沿用旧快取；完全没有 → 呼叫方拿到 null（不编数）
     }
   }
-  const v = priceCatalogCache?.prices[model]
+  const v = priceCatalogCache && now - priceCatalogCache.at <= PRICE_CATALOG_TTL_MS ? priceCatalogCache.prices[model] : undefined
   return typeof v === "number" ? v : null
 }
 
@@ -60,7 +53,7 @@ export async function catalogUnitCoins(model: string, apiKey: string): Promise<n
 // x_coins_per_second，与 catalogUnitCoins（x_coins_per_image）同一份目录回应、
 // 同一 10 分钟 TTL——本次事故修复：seedance-2.0 等无 MiniMax 硬编码档位的模型，
 // 从目录同源取（与扣费同一函式 generationCoins），不再落错误兜底档位。
-export let priceCatalogPerSecondCache: { at: number; table: Record<string, Record<string, number>> } | null = null
+export let priceCatalogPerSecondCache: { at: number; table: Record<string, Record<string, number>>; audioTable?: Record<string, Record<string, number>>; capabilities?: Record<string, Record<string, unknown>>; billing?: Record<string, Record<string, unknown>> } | null = null
 export async function catalogVideoPerSecondCoins(model: string, apiKey: string): Promise<Record<string, number> | null> {
   const now = Date.now()
   if (!priceCatalogPerSecondCache || now - priceCatalogPerSecondCache.at > PRICE_CATALOG_TTL_MS) {
@@ -72,44 +65,109 @@ export async function catalogVideoPerSecondCoins(model: string, apiKey: string):
       if (res.ok) {
         const body = (await res.json()) as { data?: Array<Record<string, unknown>> }
         const table: Record<string, Record<string, number>> = {}
+        const audioTable: Record<string, Record<string, number>> = {}
+        const capabilities: Record<string, Record<string, unknown>> = {}
+        const billing: Record<string, Record<string, unknown>> = {}
         for (const m of body.data ?? []) {
           const id = typeof m.id === "string" ? m.id : null
           if (!id) continue
+          billing[id] = m.x_billing && typeof m.x_billing === "object" ? m.x_billing as Record<string, unknown> : {}
+          capabilities[id] = m.x_capabilities && typeof m.x_capabilities === "object" ? m.x_capabilities as Record<string, unknown> : {}
+          const withAudio = m.x_coins_per_second_with_audio
+          if (withAudio && typeof withAudio === "object") {
+            audioTable[id] = Object.fromEntries(Object.entries(withAudio).filter(([, v]) => typeof v === "number" && Number.isFinite(v) && v >= 0)) as Record<string, number>
+          }
           const raw = m.x_coins_per_second
           if (raw && typeof raw === "object") {
             const entry: Record<string, number> = {}
             for (const [res_, v] of Object.entries(raw as Record<string, unknown>)) {
-              if (typeof v === "number") entry[res_] = v
+              if (typeof v === "number" && Number.isFinite(v) && v >= 0) entry[res_] = v
             }
+            const capabilities = m.x_capabilities as { defaultResolution?: unknown } | undefined
+            const defaultResolution = capabilities?.defaultResolution
+            if (typeof defaultResolution === "string" && typeof entry[defaultResolution] === "number") entry.default = entry[defaultResolution]
             if (Object.keys(entry).length) table[id] = entry
           }
         }
-        if (Object.keys(table).length > 0) priceCatalogPerSecondCache = { at: now, table }
+        priceCatalogPerSecondCache = { at: now, table, audioTable, capabilities, billing }
       }
     } catch {
       // 目录不可达：沿用旧快取
     }
   }
-  return priceCatalogPerSecondCache?.table[model] ?? null
+  return priceCatalogPerSecondCache && now - priceCatalogPerSecondCache.at <= PRICE_CATALOG_TTL_MS ? priceCatalogPerSecondCache.table[model] ?? null : null
+}
+
+/** 报价/提交共用视频选项解析；当前/v1/videos仅接受音轨，分辨率由模型默认决定。 */
+export function resolveVideoSubmissionOptions(
+  node: { id?: string; metadata: Record<string, unknown> },
+  graph: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] } | undefined,
+  model: string,
+): { resolution: string | null; generateAudio: boolean; error?: string } {
+  const cache = priceCatalogPerSecondCache
+  const cap = cache && Date.now() - cache.at <= PRICE_CATALOG_TTL_MS ? cache.capabilities?.[model] : undefined
+  const config = graph?.nodes.filter((n) => n.kind === "config" && graph.connections.some((c) => c.to === node.id && c.from === n.id)).at(-1)?.metadata ?? {}
+  const meta = { ...config, ...node.metadata }
+  const defaultResolution = typeof cap?.defaultResolution === "string" ? cap.defaultResolution : null
+  const raw = meta.resolution ?? meta.definition ?? meta.quality
+  let explicit: string | undefined
+  if (raw !== undefined && raw !== "standard" && raw !== "fast") {
+    const normalized = String(raw).toLowerCase()
+    explicit = normalized === "hd" || normalized === "1080" ? "1080p" : normalized === "720" ? "720p" : normalized
+  }
+  const resolution = explicit ?? defaultResolution
+  const generateAudio = typeof meta.generate_audio === "boolean" ? meta.generate_audio : cap?.defaultAudio === true
+  if (!defaultResolution) return { resolution, generateAudio, error: "目录未提供模型默认分辨率，无法核实提交档位" }
+  if (explicit && explicit !== defaultResolution) return { resolution, generateAudio, error: `当前视频提交API不接受显式分辨率；请求${explicit}、模型默认${defaultResolution}，未提交且未降规格` }
+  if (generateAudio && cap?.audio !== true) return { resolution, generateAudio, error: "当前模型不支持所请求音轨，未提交" }
+  return { resolution, generateAudio }
+}
+
+function cachedVideoRate(node: { id?: string; metadata: Record<string, unknown> }, graph: Parameters<typeof resolveVideoSubmissionOptions>[1], model: string): number | null {
+  const options = resolveVideoSubmissionOptions(node, graph, model)
+  if (options.error || !options.resolution) return null
+  const cache = priceCatalogPerSecondCache
+  if (cache?.billing?.[model]?.unit !== "per_second") return null
+  const table = options.generateAudio ? cache?.audioTable?.[model] ?? cache?.table[model] : cache?.table[model]
+  const value = table?.[options.resolution]
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+/** 完整提交档位报价，直接读站点generationCoins导出的金额，不用一秒样本盲乘。 */
+export function videoNodeCoinsSync(node: { id?: string; metadata: Record<string, unknown> }, graph: Parameters<typeof resolveVideoSubmissionOptions>[1], durationSeconds: number): number | null {
+  const model = typeof node.metadata.model === "string" && node.metadata.model ? node.metadata.model : graph ? resolveNodeModel(node.id ?? "", node, graph) : "minimax-h3"
+  const options = resolveVideoSubmissionOptions(node, graph, model)
+  if (options.error || !options.resolution) return null
+  const billing = priceCatalogPerSecondCache?.billing?.[model]
+  if (billing?.currency !== "coins" || (billing.unit !== "per_second" && billing.unit !== "per_video")) return null
+  const table = (options.generateAudio ? billing.prices_with_audio ?? billing.prices : billing.prices) as Record<string, Record<string, unknown>> | undefined
+  const amount = table?.[options.resolution]?.[String(durationSeconds)]
+  return typeof amount === "number" && Number.isFinite(amount) && amount >= 0 ? amount : null
+}
+
+/** 每次正式预算重新核目录，复用既有读取路径；缓存只供同步画布展示。 */
+export function invalidateWorkflowPriceCatalog(): void {
+  priceCatalogCache = null
+  priceCatalogPerSecondCache = null
 }
 
 // 同步变体：estimateGraphCoins（canvas.plan 热路径，同步签名不可 await）专用。
-// 只读已warm的目录快取（不发网路请求）；快取未warm时等同旧行为（纯锚点/档位兜底）。
+// 只读有效目录快取（不发网络请求）；未暖或过期时价格未知。
 export function videoTierPerSecondSync(
   node: { id?: string; kind: string; metadata: Record<string, unknown> },
   graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
-): number {
+): number | null {
   const model =
     typeof node.metadata.model === "string" && node.metadata.model
       ? node.metadata.model
       : graph
         ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
-        : "seedance-2.0"
-  const catalogTable = priceCatalogPerSecondCache?.table[model] ?? null
+        : "minimax-h3"
+  const catalogTable = priceCatalogPerSecondCache && Date.now() - priceCatalogPerSecondCache.at <= PRICE_CATALOG_TTL_MS ? priceCatalogPerSecondCache.table[model] ?? null : null
   return resolveVideoPerSecond(
     node as never,
     graph as never,
-    catalogTable ? (tier: "720p" | "1080p") => catalogTable[tier] ?? null : undefined,
+    catalogTable ? () => cachedVideoRate(node, graph, model) : undefined,
   )
 }
 
@@ -151,42 +209,28 @@ export function resolveNodeModel(
   return "pixai-tsubaki2"
 }
 
-/**
- * R5-C：影片档位单价（币/秒）——2026-08-30 双账本收敛：改由 workflow-service 的
- * 共享 resolveVideoPerSecond 提供（锚点 unit_price_per_second 优先、档位价 5/10
- * 兜底），与 service 侧 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
- * 此处保留薄封装以不改动既有调用点签名。
- */
+/** 影片每秒平台币价，取当前目录及默认分辨率，无价回null。 */
 export async function videoTierPerSecond(
   node: { id?: string; kind: string; metadata: Record<string, unknown> },
   graph: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] } | undefined,
   apiKey: string,
-): Promise<number> {
+): Promise<number | null> {
   const model =
     typeof node.metadata.model === "string" && node.metadata.model
       ? node.metadata.model
       : graph
         ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
-        : "seedance-2.0"
-  // catalog 快取：先查一次目录（同一 apiKey 10 分钟快取，见 catalogVideoPerSecondCoins）——
-  // 本次事故修复：seedance-2.0 等无 MiniMax 硬编码档位的模型，从 /v1/models 的
-  // x_coins_per_second 同源取（与扣费同一函式 generationCoins），不再被错误套用
-  // MiniMax 5/10 币/秒档位价。resolveVideoPerSecond 优先序：锚点价 → catalogLookup → 档位 5/10 兜底。
+        : "minimax-h3"
+  // 使用明确coin目录；不采信模板价格或通用5/10兜底。
   const catalogTable = await catalogVideoPerSecondCoins(model, apiKey)
   return resolveVideoPerSecond(
     node as never,
     graph as never,
-    catalogTable ? (tier: "720p" | "1080p") => catalogTable[tier] ?? null : undefined,
+    catalogTable ? () => cachedVideoRate(node, graph, model) : undefined,
   )
 }
 
-/**
- * S4：估算单一可执行节点的币耗。优先级：节点自带价 → 平台目录单价 → null。
- * video 按价目表档位价（R5-C：720P=5 / 1080P=10 币/秒）；image 按目录单价 × 1
- *（submitWorkflowNode 对 workflow 节点固定 n:1，count 在 config 上只是参考标注，
- * 不放大节点张数）。回 null 表示估不出（目录不可达且模型不在目录）——上层保持
- * null / 保守策略。
- */
+/** 单节点真实目录币价；视频按实际秒数，缺价格/秒数回null。 */
 export async function estimateNodeCoins(
   node: { kind: string; metadata: Record<string, unknown> },
   apiKey: string,
@@ -200,8 +244,9 @@ export async function estimateNodeCoins(
         ? node.metadata.duration_seconds
         : cfgDuration
     if (typeof secs !== "number" || !(secs > 0)) return null // 拒绝编数：与 submitWorkflowNode 的「缺时长拒绝提交」同口径
-    const perSec = await videoTierPerSecond(node, graph, apiKey)
-    return Math.round(secs * perSec * 100) / 100
+    const model = typeof node.metadata.model === "string" && node.metadata.model ? node.metadata.model : graph ? resolveNodeModel(nodeId, node, graph) : "minimax-h3"
+    await catalogVideoPerSecondCoins(model, apiKey)
+    return videoNodeCoinsSync(node, graph, secs)
   }
   if (node.kind !== "image") return 0 // audio/film 现行 0 币（TTS 定价 0）
   const nodeId = (node as { id?: string }).id ?? ""

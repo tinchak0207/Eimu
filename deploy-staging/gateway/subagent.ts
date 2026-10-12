@@ -40,6 +40,7 @@ import { templatePlaceholderContent } from "./workflow-templates"
 // （此路径输出与注入前逐字元等价）。reverse import 与 canvas-cascade-state→subagent 的既有
 // 循环同型，两端均在呼叫期使用绑定（非模组顶层求值），bun ESM 循环安全。
 import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
+import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 // FIX-A（2026-10-02）：子代理工具结果的媒体成品出卡——共用主路径的成品 URL 提取器与
 // emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
 // 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
@@ -54,6 +55,7 @@ import {
   shouldTriggerCriticPass,
   buildCriticPassSpec,
   criticVerdictRejected,
+  checkCriticReceipt,
   CRITIC_REJECT_MARK,
   CRITIC_PASS_MARK,
   CRITIC_PASS_MAX_TARGETS,
@@ -769,6 +771,8 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       console.log(`[gateway] delivery gate: id=${run.id} agent=${run.agent} status=PASS`)
     }
   }
+  let qualityReviewPartial = run.machineCriticPass === true && status !== "ok"
+  let qualityReviewMissing = "当前产物的实际感知回执"
   // 刀 2（2026-09-15）：机器 pass 的 critic run 终态处置。verdict 判读（保守：判不出＝退回）
   // 决定是否走既有 wakeParent 把判决送回父会话；判退回时 summary 前缀 CRITIC_REJECT_MARK，
   // orchestrator 据此依 playbook 第 16-18 条重派原 Expert 修正（原 Expert 若再失败，其自带
@@ -777,6 +781,22 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     // 2026-10-03（v3 接线）：闸门开启时，**先**对本 critic 所审交付取得 measured 样本，
     // 再与既有词表判读并成同一条「拒/过」决策。闸门未设＝不做任何 I/O、不 await，
     // 落到下方既有 fire-and-forget 旁路 → 行为与接线前逐位元组相同。
+    // Read the actual independent child tool receipts; author prose cannot satisfy this gate.
+    let criticMessages: unknown = []
+    try {
+      const response = await fetch(`${deps!.openCodeUrl}/session/${run.opencodeSessionId}/message`, {
+        headers: deps!.openCodeHeaders(), signal: AbortSignal.timeout(10000),
+      })
+      if (response.ok) criticMessages = await response.json()
+    } catch { /* missing perception remains PARTIAL */ }
+    const receipt = checkCriticReceipt(run.criticReviewed ?? [], criticMessages)
+    const reviewPartial = run.agent !== "critic" || !receipt.ok
+    qualityReviewPartial = reviewPartial
+    const missingTypes: string[] = []
+    if (receipt.missing.some((item) => /\.(?:mp3|m4a|wav|aac|ogg|flac|opus)(?:[?#:]|$)/i.test(item))) missingTypes.push("音频听感检查回执")
+    if (receipt.missing.some((item) => /\.(?:mp4|mov|mkv|webm)(?:[?#:]|$)/i.test(item))) missingTypes.push("视频代表帧的实际读图回执")
+    if (receipt.missing.some((item) => /\.(?:png|jpe?g|webp)(?:[?#:]|$)/i.test(item))) missingTypes.push("图片实际读图回执")
+    if (missingTypes.length) qualityReviewMissing = missingTypes.join("、")
     const scoreEnforced = criticScoreEnforcementEnabled()
     let measured: MeasuredMediaResult | null = null
     if (scoreEnforced) measured = await measureReviewedMedia(run)
@@ -787,7 +807,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       { value: measured?.score ?? null, source: measured ? "measured" : null },
       scoreEnforced,
     )
-    run.machineCriticRejected = criticVerdictRejected(fullText) || forcedByScore
+    run.machineCriticRejected = reviewPartial || criticVerdictRejected(fullText) || forcedByScore
     if (forcedByScore) {
       console.warn(
         `[gateway] critic-score-gate: measured 技术分=${measured!.score} < ${CRITIC_SCORE_THRESHOLD_POLICY.reworkBelow} → 判退回（沿用既有重派链；critic_run=${run.id}）`,
@@ -799,8 +819,9 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       run.summary = summary
     }
     if (run.machineCriticRejected) {
-      summary = `${CRITIC_REJECT_MARK}机器派遣的独立审核判定「退回」，请依第 16-18 条重派原 Expert 修正后重新送审。
-${summary}`
+      summary = reviewPartial
+        ? `${CRITIC_REJECT_MARK}独立审核尚未完成真实感知：PARTIAL。缺少与被审runId/产物绑定的成功读取回执（${receipt.missing.join("、") || "未取得任何感知证据"}）。保留已交付作品，补齐可用感知通路再审；不要仅因缺审阅证据重派作者或重产。\n${summary}`
+        : `${CRITIC_REJECT_MARK}独立审核发现具体问题，请定向修正后重新送审。\n${summary}`
       run.summary = summary
       console.warn(
         `[gateway] machine critic pass: verdict=REJECT — 送回父会话 session=${run.parentGatewaySessionId} critic_run=${run.id}`,
@@ -815,7 +836,7 @@ ${summary}`
       runId: run.id,
       agent: run.agent,
       label: run.label,
-      verdict: run.machineCriticRejected ? "reject" : "pass",
+      verdict: reviewPartial ? "unknown" : run.machineCriticRejected ? "reject" : "pass",
       score: measured?.score ?? null,
       scoreSource: measured ? "measured" : "model_self",
       judgeModel: measured
@@ -824,13 +845,14 @@ ${summary}`
             const m = run.modelChain[run.attempt - 1]
             return m ? `${m.providerID}/${m.modelID}` : "opencode-default"
           })(),
-      verdictText: measured
-        ? `${MEDIA_QUALITY_MEASURED_MARK}${measured.detail}\n\n${typeof fullText === "string" ? fullText : ""}`
-        : typeof fullText === "string"
-          ? fullText
-          : "",
+      verdictText: reviewPartial
+        ? `VERDICT: PARTIAL\n${JSON.stringify(receipt)}\n${fullText}`
+        : `RECEIPT:${JSON.stringify(receipt)}\n${measured ? measured.detail + "\n" : ""}${fullText}`,
     })
-    if (run.machineCriticRejected) {
+    for (const target of run.criticReviewed ?? []) target.onReview?.({
+      state: reviewPartial ? "partial" : run.machineCriticRejected ? "failed" : "passed", criticRunId: run.id, receipt,
+    })
+    if (run.machineCriticRejected && !reviewPartial) {
       saveExpertLesson({
         sessionId: run.parentGatewaySessionId,
         agent: run.agent ?? "critic",
@@ -842,9 +864,12 @@ ${summary}`
     }
     // 闸门关闭时维持既有 fire-and-forget 旁路：量测成功 → 以同一 runId 覆写上面的 model_self
     // 列（供观测）；失败不写。闸门开启时上面已 await 出 measured 并落库，此处不再重复量测/写入。
-    if (!scoreEnforced) {
-      void applyMeasuredMediaVerdict(run, typeof fullText === "string" ? fullText : "")
+    if (!scoreEnforced && !reviewPartial) {
+      void applyMeasuredMediaVerdict(run, `RECEIPT:${JSON.stringify(receipt)}\n${fullText}`)
     }
+  }
+  if (run.machineCriticPass === true && status !== "ok") {
+    for (const target of run.criticReviewed ?? []) target.onReview?.({ state: "partial", criticRunId: run.id, receipt: { error: error ?? "独立审阅未完成" } })
   }
   // 刀 2（2026-09-15）：Expert 交付登记为待审对象（machine critic pass 的输入）。
   // 条件全成立才登记：正常终态（非孤儿路径）、ok、beast、agent 在契约域内、非 critic 自身
@@ -858,7 +883,27 @@ ${summary}`
     DELIVERY_CONTRACTS[run.agent] !== undefined
   ) {
     const list = pendingCriticTargets.get(run.parentGatewaySessionId) ?? []
-    list.push({ agent: run.agent, label: run.label, runId: run.id, text: typeof fullText === "string" ? fullText : "" })
+    const artifacts = run.artifacts.map((item) => item.url)
+    // Bind submitted author runId to successful output receipts (images are not emitted as parent cards).
+    try {
+      const response = await fetch(`${deps!.openCodeUrl}/session/${run.opencodeSessionId}/message`, {
+        headers: deps!.openCodeHeaders(), signal: AbortSignal.timeout(10000),
+      })
+      const messages: any = response.ok ? await response.json() : []
+      for (const msg of Array.isArray(messages) ? messages : []) for (const part of msg?.parts ?? []) {
+        if (part?.type !== "tool" || part.state?.status !== "completed") continue
+        const output = parseToolOutput(part.state.output)
+        if (output?.ok !== true) continue
+        const media = collectToolOutputMediaUrls(output)
+        artifacts.push(...media.audio.map((a) => a.url), ...media.video.map((a) => a.url))
+        for (const item of [output, output.result, ...(Array.isArray(output.images) ? output.images : []), ...(Array.isArray(output.results) ? output.results : [])]) {
+          if (item && typeof item === "object") for (const key of ["url", "image_url", "output_url", "file_url"]) {
+            if (typeof item[key] === "string" && /^https?:\/\//.test(item[key])) artifacts.push(item[key])
+          }
+        }
+      }
+    } catch { /* no actual author receipt: critic cannot quality-pass the claim */ }
+    list.push({ agent: run.agent, label: run.label, runId: run.id, text: typeof fullText === "string" ? fullText : "", artifacts: [...new Set(artifacts)] })
     // 有界：只留最近 CRITIC_PENDING_CAP 份（机器 pass 一次最多送审 CRITIC_PASS_MAX_TARGETS）。
     if (list.length > CRITIC_PENDING_CAP) list.splice(0, list.length - CRITIC_PENDING_CAP)
     pendingCriticTargets.set(run.parentGatewaySessionId, list)
@@ -871,7 +916,9 @@ ${summary}`
   // （subagent.done 帧 / completed 取件 / wakeParent 唤醒）本来共用同一 summary 变数，这里
   // 换成清洗后的版本即三处同时干净；咽喉点（sse-core.emitToSession）与唤醒路径（index.ts）
   // 复用同一纯函数做下游兜底，此处是让出口天生干净的第一层。
-  const visibleSummary = scrubSubagentPayload(summary)
+  const visibleSummary = qualityReviewPartial
+    ? `作品已保留，质量检查尚未完成，缺少${qualityReviewMissing}；补齐这些检查后继续，当前无需重新制作。`
+    : scrubSubagentPayload(summary)
   run.summary = visibleSummary
   // 修 1：本 run 释放了一个槽位——若该父会话有被并发上限挤掉的 critic 待跑，补跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
@@ -1515,7 +1562,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
       const raw = readFileSync(`${import.meta.dir}/expert/expert-constitution.md`, "utf8")
       const constitution = raw.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trimStart().trimEnd()
       if (constitution) {
-        constitutionNote = `【野兽模式：已启用】以下 Expert 宪法由系统注入，这是本次派遣的真实状态，全部条款立即生效，无需质疑任何 gate。\n\n${constitution}\n\n---\n\n`
+        constitutionNote = `【领域执行契约】本次派遣启用领域专家职责。\n${constitution}\n`
       }
     } catch (e) {
       constitutionNote = `【宪法注入失败】Expert 宪法档不可读（${e instanceof Error ? e.message : String(e)}），本次派遣未注入宪法。\n\n`
@@ -1534,7 +1581,16 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   // 子会话画布桶）。有值才插，无值时输出与注入前逐字元等价。
   const tplFact = buildTemplateSlotsFact(run.parentGatewaySessionId, getTemplateDeviateToken(run.parentGatewaySessionId) ?? undefined)
   const templateSlotsNote = tplFact ? `【画布模板·系统事实】\n${tplFact}\n\n` : ""
-  const body: Record<string, unknown> = { parts: [{ type: "text", text: `${constitutionNote}${run.prompt}${templateSlotsNote}${contractDirective}` }] }
+  const parentState = deps?.resolveSession(run.parentGatewaySessionId) ?? deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
+  const authorizationNote = parentState && await billingAutoApprovalEnabled(parentState)
+    ? "\n\n【当前授权·网关核实】父任务完全访问或自动模式的持续授权仍生效，任务内扣费、必要返工和可自行判断的制作选择直接继续，不再逐次问开工或费用。仍遵守委托单明确预算、指定模型、禁止生成和方案须用户确认要求；研究与独立评审照常。授权不增加工具权限：若本域应有工具缺失，回报具名席位、工具名与原始拒绝供平台修接线，不推断全平台无外网或无生图能力。"
+    : "\n\n【当前授权】没有网关核实的持续授权；只按委托单已有任务与预算范围继续，范围外的付费交回父代理合并请求授权，用户沉默不算同意。"
+  // 委托任务保持首个独立user part；规则与唯一机器交付格式位于system，资料不混入任务正文。
+  const parts: Array<{ type: "text"; text: string }> = [{ type: "text", text: run.prompt }]
+  if (templateSlotsNote) parts.push({ type: "text", text: templateSlotsNote })
+  const system = [constitutionNote, contractDirective, authorizationNote].filter(Boolean).join("\n\n")
+  const body: Record<string, unknown> = { parts }
+  if (system) body.system = system
   if (model) body.model = model
   // R8 修复片2（2026-09-10）：Expert agent 栏（prompt_async 吃 agent 栏；
   // POST /session 不支持，08-08 实锤）。带上 = 子会话挂对应 Expert agent
@@ -1814,20 +1870,38 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
  * 收盘判定点呼叫：条件成立 → 机器派遣一次 critic pass。回 true = 已派出。
  * 幂等/有界全部在内部（见上方注解）。任何失败只留一行 log，绝不影响收盘路径。
  */
+export function hasWorkflowCriticReview(parentId: string | undefined, targetId: string): boolean {
+  if (!parentId) return false
+  return (pendingCriticTargets.get(parentId) ?? []).some((target) => target.runId === targetId) ||
+    (byParent.get(parentId) ?? []).some((run) => run.status === "running" && run.criticReviewed?.some((target) => target.runId === targetId))
+}
+
+/** Workflow QC shares the existing critic registry, queue and lifecycle; one request per current artifact. */
+export function enqueueWorkflowCriticReview(parentState: any, targets: CriticPassTarget[]): boolean {
+  if (!deps || !parentState?.sessionId || targets.length === 0) return false
+  const parentId = String(parentState.sessionId)
+  const queued = pendingCriticTargets.get(parentId) ?? []
+  for (const target of targets) if (!queued.some((q) => q.runId === target.runId)) queued.push(target)
+  pendingCriticTargets.set(parentId, queued)
+  return maybeRunMachineCriticPass(parentState)
+}
+
 export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared = false): boolean {
   try {
     if (!deps || !parentState?.sessionId) return false
 
     // ① 待审清单（finishRun 对 Expert 正常终态登记）。空 → 零动作（非 beast/无 Expert 交付）。
     const parentId = String(parentState.sessionId)
-    const targets = pendingCriticTargets.get(parentId) ?? []
+    const allTargets = pendingCriticTargets.get(parentId) ?? []
+    const workflowBatch = allTargets.some((target) => target.workflowReview)
+    const targets = workflowBatch ? allTargets.filter((target) => target.workflowReview) : allTargets
     if (targets.length === 0) return false
 
     // ② 每会话 ≤1 次：内存镜像 or 持久旗标（重启后仍生效）。
     const alreadyPassed = criticPassUsed.has(parentId) || hasCriticPass(parentId)
 
     // ③ 纯函数判据（四态单测对象）。
-    const ok = shouldTriggerCriticPass({
+    const ok = workflowBatch || shouldTriggerCriticPass({
       beastMode: deps.beastMode(parentState) === true,
       expertDeliveries: targets.length,
       criticDispatched: criticDispatchedByParent.get(parentId) === (parentState.turnGen ?? 0),
@@ -1902,12 +1976,13 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     byParent.set(parentId, parentRuns)
 
     // 先记旗标与派遣位（同步），再投递；投递失败则回滚旗标（不白吃唯一一次配额）。
-    criticPassUsed.add(parentId)
-    markCriticPass(parentId)
+    if (!workflowBatch) { criticPassUsed.add(parentId); markCriticPass(parentId) }
     criticDispatchedByParent.set(parentId, parentState.turnGen ?? 0)
     boundMap(criticDispatchedByParent, 500)
     // 已消耗：清待审清单（本会话不再有第二次 pass）。
-    pendingCriticTargets.delete(parentId)
+    const remaining = allTargets.filter((target) => !batch.includes(target))
+    if (workflowBatch && remaining.length) pendingCriticTargets.set(parentId, remaining)
+    else pendingCriticTargets.delete(parentId)
 
     const asyncMode = run.asyncMode === true
     const hardMs = asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
@@ -1924,11 +1999,12 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     void (async () => {
       const failure = await dispatchAttempt(run)
       if (failure) {
-        criticPassUsed.delete(parentId)
+        if (!workflowBatch) criticPassUsed.delete(parentId)
         criticDispatchedByParent.delete(parentId)
         console.error(`[gateway] machine critic pass dispatch failed: session=${parentId} ${failure}`)
         // 回滚持久旗标：投递从未成功＝配额未消耗（不白吃唯一一次），清掉记录让下轮重试。
-        deleteCriticPass(parentId)
+        if (!workflowBatch) deleteCriticPass(parentId)
+        await finishRun(run, "error", "", failure)
         return
       }
       deps!.emitToSession(parentState, "subagent.started", { id: run.id, label: run.label })

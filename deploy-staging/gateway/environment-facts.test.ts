@@ -21,6 +21,7 @@ import {
   deriveLocalBridgeState,
   environmentSectionStability,
   renderCapabilityCutoffFact,
+  isOpenToolSurface,
   renderEnvironmentSection,
   resolveLocalBridgeState,
   resolveLocalFilePolicy,
@@ -315,27 +316,46 @@ test("一致性探针（防漂移）：环境段宣告的断路工具 ⊇ regist
   // 例外：orchestrator 刻意保留的直调路由（tools/export-expert-agents.ts
   // ORCHESTRATOR_KEPT_DOMAIN_TOOLS）不在断路清单，也就不该被本子集探针要求切断。
   // digest 可能把同一工具列在别域的「工具 …」清单里（如 image_generate），故先剔除豁免项。
-  const keptByOrchestrator = new Set(["image_generate"])
+  // held 面（含 canvas_get_state / workflow_write / quote_bundle / subagent_* 等）本就不该被切。
+  const keptByOrchestrator = new Set(orch.toolSurface.held)
   for (const t of domainTools) {
     if (keptByOrchestrator.has(t)) continue
     assert.ok(orch.capabilityCutoff.tools.includes(t), `域工具 ${t} 应被 orchestrator 物理切断（能力断路漏切）`)
   }
-  // 例外：image_generate 是 orchestrator 刻意保留的直调路由（tools/export-expert-agents.ts
-  // ORCHESTRATOR_KEPT_DOMAIN_TOOLS），不得出现在断路清单里。
-  assert.equal(orch.capabilityCutoff.tools.includes("image_generate"), false, "image_generate 不应被切断")
+  for (const t of keptByOrchestrator) {
+    assert.equal(orch.capabilityCutoff.tools.includes(t), false, `${t} 属 held，不应被切断`)
+  }
 
-  // 环境段全文必须含真源推导出的每一个断路工具（宣告与事实一致）
+  // 2026-10-11 context-slim：cut>24 时环境段只报数量＋held，不灌百级工具名。
   const rendered = renderEnvironmentSection(orch)
-  for (const t of orch.capabilityCutoff.tools) assert.ok(rendered.includes(t), `环境段漏宣告 ${t}`)
+  assert.ok(orch.capabilityCutoff.tools.length > 24, "orchestrator 断路应 >24 才走省略路径")
+  assert.match(rendered, new RegExp(`${orch.capabilityCutoff.tools.length} 个域工具`))
+  assert.doesNotMatch(rendered, /image_edit/) // 名单省略：具体断路名不进段
 })
 
 test("renderCapabilityCutoffFact：数字/清单来自事实，未知时诚实", () => {
   const env = collect()
   const fact = renderCapabilityCutoffFact(env)
-  assert.ok(fact.includes(`以下 ${env.capabilityCutoff.tools.length} 个工具`))
-  for (const t of env.capabilityCutoff.tools) assert.ok(fact.includes(t))
+  // slim：>24 只报数量，不列全名
+  assert.ok(fact.includes(`已物理移除 ${env.capabilityCutoff.tools.length} 个域工具`))
+  assert.ok(fact.includes("Expert"))
   const unknown = collect({ plane: "no-such-agent" })
   assert.equal(unknown.capabilityCutoff.tools.length, 0)
+  assert.match(renderCapabilityCutoffFact(unknown), /工具面未知/)
+})
+
+test("beast OFF / creator：开放工具面，禁止套用 Expert 唯一通路话术", () => {
+  const env = collect({ plane: "creator" })
+  assert.equal(env.toolSurface.known, true)
+  assert.ok(isOpenToolSurface(env.toolSurface))
+  assert.deepEqual(env.toolSurface.cut, ["task"])
+  const section = renderEnvironmentSection(env)
+  assert.match(section, /默认开放/)
+  assert.match(section, /仅物理禁用 task|仅 task 禁用/)
+  assert.doesNotMatch(section, /Expert（唯一通路）/)
+  const fact = renderCapabilityCutoffFact(env)
+  assert.match(fact, /域生成工具可直调/)
+  assert.doesNotMatch(fact, /唯一通路/)
 })
 
 // ── 客户端环境上报（本包）：净化 / 渲染 / 稳定度 ─────────────────────────

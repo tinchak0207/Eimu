@@ -710,6 +710,37 @@ export function saveUserSettings(ownerKey: string, s: UserSettings): void {
   }
 }
 
+// 使用既有 settings 表的独立命名空间，以已鉴权 tenant 绑定模式；短效设备票不作 owner key。
+// 明确授权持续有效，只有新的显式 mode 会覆盖它，不能按心跳超时撤销。
+const tenantPermissionModes = new Map<string, "off" | "ask" | "auto" | "full">()
+
+export function loadTenantPermissionMode(tenant: string): "off" | "ask" | "auto" | "full" | null {
+  const cached = tenantPermissionModes.get(tenant)
+  if (cached) return cached
+  if (!db || !tenant) return null
+  try {
+    const row = db.query("SELECT data FROM user_settings WHERE owner_key = ?").get(`tenant-device-permission:${tenant}`) as { data: string } | null
+    const mode = row ? JSON.parse(row.data)?.mode : null
+    if (mode === "off" || mode === "ask" || mode === "auto" || mode === "full") {
+      tenantPermissionModes.set(tenant, mode)
+      return mode
+    }
+  } catch (e) { degrade(e, "loadTenantPermissionMode") }
+  return null
+}
+
+export function saveTenantPermissionMode(tenant: string, mode: "off" | "ask" | "auto" | "full"): void {
+  if (!tenant) return
+  tenantPermissionModes.set(tenant, mode)
+  if (!db) return
+  try {
+    db.query(
+      `INSERT INTO user_settings (owner_key, data, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(owner_key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+    ).run(`tenant-device-permission:${tenant}`, JSON.stringify({ mode }), Date.now())
+  } catch (e) { degrade(e, "saveTenantPermissionMode") }
+}
+
 // ---- 刀 F（2026-09-15）：in-flight rework run 持久化 ----
 export interface ReworkRecord {
   runId: string
@@ -865,6 +896,12 @@ export function saveCriticVerdict(v: {
     const scoreNum = typeof v.score === "number" && Number.isFinite(v.score) ? v.score : null
     const declared = v.scoreSource ?? null
     const scoreSource = declared === "measured" && scoreNum === null ? null : declared
+    // 真实审核回执必须完整落库；只截人话，不能切断当前artifact绑定JSON。
+    const verdictLines = (v.verdictText ?? "").split("\n")
+    const receiptLine = verdictLines.find((line) => line.startsWith("RECEIPT:"))
+    const verdictText = receiptLine
+      ? `${receiptLine}\n${verdictLines.filter((line) => line !== receiptLine).join("\n").slice(0, 4000)}`
+      : (v.verdictText ?? "").slice(0, 4000)
     db.query(
       `INSERT OR REPLACE INTO critic_verdicts (id, session_id, run_id, agent, label, verdict, score, score_source, judge_model, verdict_text, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -878,7 +915,7 @@ export function saveCriticVerdict(v: {
       scoreNum,
       scoreSource,
       v.judgeModel ?? null,
-      (v.verdictText ?? "").slice(0, 4000),
+      verdictText,
       Date.now(),
     )
   } catch (e) {

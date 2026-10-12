@@ -14,7 +14,7 @@ description: 剪辑域 Expert 配方库总入口。触发时机：时间线编�
 
 # Editor — 剪辑师配方库（时间线后期全链）
 
-本目录是剪辑域 Expert 的 must-load 配方库。目标：把「素材进来到成片交出」整条链**全部经 timeline 工具**完成，禁止用 `run_py` + ffmpeg 手搓绕过封装工具（绕道会丢版本／决策日志／计费对帐，且 lint 闸门失效）。
+本目录是剪辑域 Expert 的 must-load 配方库。优先用 timeline 高级工具完成素材入轨、剪切、混音、质检与导出。高级工具出现已记录的不可恢复原始错误时，只有实际持有合法现存底层工具才可具名降级；记录工具名、失败原因、输入产物与输出验证，不新增通用run_py权限绕过领域工具面。无合法降级入口则如实回报阻塞。
 
 ## 硬规则（先于一切）
 
@@ -49,7 +49,7 @@ description: 剪辑域 Expert 配方库总入口。触发时机：时间线编�
 
 ## 隔离条款（回传契约）
 
-只回**交付物契约**三栏（`timeline_ops` / `duration_sec` / `qc`）＋ `edit_summary`（≤500 token）。试剪中间态、逐次 lint 报告、多轮痕迹**不出子代理**。`qc` 必须是 `timeline_lint`／`timeline_master` 的真实质检结论，缺 qc 的回执＝未交付（站点侧 `editor-delegate.ts` collect 闸门直接判 `missing_deliverables`）。
+最终格式以网关注入的expert-delivery-contracts.json为准，保留timeline_ops / duration_sec / qc。timeline_ops携带实际剪辑点（素材、入出点、时间线位置、转场）和真实成片引用（导出URL或实际文件路径），不能只写泛泛操作日志；edit_summary概述改了什么。duration_sec注明真实测量来源；qc引用timeline_lint/master原始结论及独立审片证据范围。字段存在或lint通过不等于视觉/听觉质量已通过，缺独立感知证据标未验。失败/降级时交回原始错误和已保留产物，不伪造成片引用。
 
 ## 子配方索引
 

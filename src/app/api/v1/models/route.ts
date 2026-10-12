@@ -3,7 +3,7 @@ import { isModelAllowedForKey, readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { SUPPORTED_GENERATION_MODEL_IDS, MUSIC_1_MODEL_ID } from "@/lib/image-model-ids";
 import { imageGenerationCoins, modelDisplayName } from "@/lib/provider-config";
-import { generationCapabilities, generationCoins } from "@/lib/generation-model-catalog";
+import { generationCapabilities, generationCoins, generationModel } from "@/lib/generation-model-catalog";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
@@ -113,30 +113,31 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
         };
       }
 
-      // 视频按秒计价、费率随解析度浮动，所以给一张 resolution → coins/秒 的表。
-      // 用的是扣费同一个 generationCoins()，报价与实际扣费同源。
-      // 总价 = 表里的费率 × durationSeconds（可选时长见 x_capabilities.durations）。
+      // 计费契约直接由当前计费模型与generationCoins导出完整合法档位价格，客户端不猜倍率。
+      const pricingModel = generationModel(modelId);
+      const perSecondBilling = pricingModel?.videoCreditsPerSecond !== undefined || pricingModel?.videoCreditsWithAudioPerSecond !== undefined;
+      const prices: Record<string, Record<string, number>> = {};
+      const pricesWithAudio: Record<string, Record<string, number>> = {};
       const perSecond: Record<string, number> = {};
       const perSecondWithAudio: Record<string, number> = {};
       for (const resolution of capabilities?.resolutions ?? []) {
-        perSecond[resolution] = generationCoins(modelId, { resolution, durationSeconds: 1 });
-        if (capabilities?.audio) {
-          perSecondWithAudio[resolution] = generationCoins(modelId, {
-            resolution,
-            durationSeconds: 1,
-            generateAudio: true,
-          });
+        prices[resolution] = {};
+        pricesWithAudio[resolution] = {};
+        for (const durationSeconds of capabilities?.durations ?? []) {
+          prices[resolution][String(durationSeconds)] = generationCoins(modelId, { resolution, durationSeconds, generateAudio: false });
+          if (capabilities?.audio) pricesWithAudio[resolution][String(durationSeconds)] = generationCoins(modelId, { resolution, durationSeconds, generateAudio: true });
+        }
+        if (perSecondBilling) {
+          perSecond[resolution] = generationCoins(modelId, { resolution, durationSeconds: 1, generateAudio: false });
+          if (capabilities?.audio) perSecondWithAudio[resolution] = generationCoins(modelId, { resolution, durationSeconds: 1, generateAudio: true });
         }
       }
-      // 开音轨不加价的模型就不输出这张表，避免误导成「带音更贵」。
-      const audioDiffers = Object.keys(perSecondWithAudio).some(
-        (resolution) => perSecondWithAudio[resolution] !== perSecond[resolution],
-      );
-
+      const audioDiffers = JSON.stringify(pricesWithAudio) !== JSON.stringify(prices) && capabilities?.audio;
       return {
         ...base,
-        x_coins_per_second: perSecond,
-        ...(audioDiffers ? { x_coins_per_second_with_audio: perSecondWithAudio } : {}),
+        x_billing: { currency: "coins", unit: perSecondBilling ? "per_second" : pricingModel?.fixedCoins !== undefined ? "per_video" : "unknown", prices, ...(audioDiffers ? { prices_with_audio: pricesWithAudio } : {}) },
+        ...(perSecondBilling ? { x_coins_per_second: perSecond, ...(audioDiffers ? { x_coins_per_second_with_audio: perSecondWithAudio } : {}) } : {}),
+        ...(!perSecondBilling && pricingModel?.fixedCoins !== undefined ? { x_coins_per_video: generationCoins(modelId) } : {}),
       };
     },
   );

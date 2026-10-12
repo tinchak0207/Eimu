@@ -43,7 +43,7 @@ export const CONTEXT_SLIM_ENABLED = process.env.CONTEXT_SLIM !== "0"
 /** A：距最后一则 user 讯息超过此毫秒数＝上游 prompt cache 必已过期。预设 60 分钟。 */
 export const MICROCOMPACT_IDLE_MS = intEnv("MICROCOMPACT_IDLE_MINUTES", 60) * 60_000
 /** A：保留最近几笔可压缩的工具结果（下限 1）。 */
-export const MICROCOMPACT_KEEP = Math.max(1, intEnv("MICROCOMPACT_KEEP", 5))
+export const MICROCOMPACT_KEEP = Math.max(5, intEnv("MICROCOMPACT_KEEP", 5))
 /** A：豁免的工具名（skill 类等），逗号分隔。预设 skill。 */
 export const MICROCOMPACT_EXEMPT_TOOLS: ReadonlySet<string> = new Set(
   (process.env.MICROCOMPACT_EXEMPT_TOOLS ?? "skill")
@@ -151,16 +151,26 @@ function isNativeTruncatedRef(out: string): boolean {
 // ── 型别（宽松定义：现场可能是 SDK 型别或内部结构，只碰必要栏位）─────────────
 
 interface MsgLike {
-  info?: { role?: string; time?: { created?: number } }
+  info?: { role?: string; summary?: boolean; agent?: string; mode?: string; time?: { created?: number } }
   parts?: PartLike[]
 }
 interface PartLike {
+  text?: string
   type?: string
   tool?: string
   state?: {
     status?: string
     output?: unknown
   }
+}
+
+// Only expendable historical lookup output may be cleared. Unknown tools are preserved.
+const MICROCOMPACT_LOOKUP_TOOLS = new Set(["read", "glob", "grep", "list", "webfetch", "websearch", "search_web", "search_aggregate", "smart_search", "bash"])
+// Protect media receipts, ledger, approvals, dispatch and deliverables even if the tool part completed.
+function protectedReceipt(part: PartLike): boolean {
+  if (!MICROCOMPACT_LOOKUP_TOOLS.has(part.tool ?? "")) return true
+  const output = typeof part.state?.output === "string" ? part.state.output : ""
+  return /(?:task_id|workflow_id|runId|artifact|receipt|media_url|audio_url|video_url|image_url|cost_coins|estimated_cost|charged|refund|reservation|ledger|confirm_id|billing|扣费|退款|账本|已提交)/i.test(output)
 }
 
 /** 在换行边界切头（含切点那个换行）。 */
@@ -210,7 +220,7 @@ export async function slimMessages(
   const toolResultMax = opts.toolResultMax ?? TOOL_RESULT_MAX_CHARS
   const perMessageBudget = opts.perMessageBudget ?? TOOL_RESULT_BUDGET_PER_MESSAGE_CHARS
   const idleMs = opts.idleMs ?? MICROCOMPACT_IDLE_MS
-  const keep = Math.max(1, opts.keep ?? MICROCOMPACT_KEEP)
+  const keep = Math.max(5, opts.keep ?? MICROCOMPACT_KEEP)
   const exempt = opts.exemptTools ?? MICROCOMPACT_EXEMPT_TOOLS
   const result: SlimResult = { cleared: 0, persisted: 0, paths: [] }
   // 本轮被安全网改写过的 state：microCompact 同轮不得再清除（同轮自杀不可接受）。
@@ -219,6 +229,18 @@ export async function slimMessages(
   const failedPersist = new Set<object>()
 
   if (!Array.isArray(messages)) return result
+  // Recovery fallback for previously stored compaction drafts; never rewrite normal conversation.
+  for (const msg of messages) {
+    if (msg?.info?.summary !== true && msg?.info?.agent !== "compaction" && msg?.info?.mode !== "compaction") continue
+    if (!Array.isArray(msg.parts)) continue
+    msg.parts = msg.parts.filter((part) => part?.type !== "reasoning")
+    for (const part of msg.parts) {
+      if (part?.type !== "text" || typeof part.text !== "string") continue
+      const clean = part.text.replace(/<analysis\b[^>]*>[\s\S]*?<\/analysis>/gi, "").replace(/<analysis\b[^>]*>[\s\S]*$/gi, "").trim()
+      const summary = /<summary\b[^>]*>([\s\S]*?)<\/summary>/i.exec(clean)
+      part.text = (summary ? summary[1] : clean).trim()
+    }
+  }
 
   // ── B：工具结果预算安全网（先做，避免超大字串进入后续处理）──────────────
   try {
@@ -283,6 +305,8 @@ export async function slimMessages(
       }
       if (Number.isFinite(lastUserCreated) && now - lastUserCreated > idleMs) {
         // 依讯息顺序收集「可压缩」的已完成工具结果。
+        const allTools = messages.flatMap((m) => m?.parts ?? []).filter((p) => p?.type === "tool")
+        const recent = new Set(allTools.slice(-keep))
         const eligible: Array<{ st: NonNullable<PartLike["state"]> }> = []
         for (const msg of messages) {
           if (!msg || !Array.isArray(msg.parts)) continue
@@ -290,6 +314,7 @@ export async function slimMessages(
             if (!part || part.type !== "tool") continue
             const st = part.state
             if (!st || st.status !== "completed" || typeof st.output !== "string") continue
+            if (recent.has(part) || protectedReceipt(part)) continue
             const toolName = part.tool ?? ""
             if (exempt.has(toolName)) continue
             const out = st.output
@@ -308,7 +333,7 @@ export async function slimMessages(
           }
         }
         // 保留最近 keep 笔，其余清成标记（就地）。
-        const toClear = eligible.length - keep
+        const toClear = eligible.length
         for (let i = 0; i < toClear; i++) {
           eligible[i].st.output = CLEARED_MARKER
           result.cleared++

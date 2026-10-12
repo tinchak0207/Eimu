@@ -204,6 +204,9 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
   // U+FFFD 比例超标，都不得把乱码当成功内容呈现。
   const binary = event.data.binary === true || detectBinaryText(event.data.preview);
   const errText = !ok && !needsAuth ? error?.human_message ?? error?.message ?? undefined : undefined;
+  // 失败时一并带上 gateway 分类的错误码（如 flowmusic_*）：展示层据此渲染分类状态位，
+  // 而不是把上游原文（human_message 里可能夹带 HTTP 码/上游码/原文）直甩到界面。
+  const errCode = !ok && !needsAuth ? error?.code : undefined;
   // 终态映射（2026-09-18 契约）：ok + artifact_pending = 任务已提交、成品未到 →
   // 中继态 pending，绝不报「已完成」；成品/失败事件到达时由 settlePendingToolItems
   // 结算成 ok/failed。缺 artifact_pending 的旧格式逐位元照旧走 ok。
@@ -236,6 +239,7 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
         status,
         costCoins: cost_coins,
         error: errText,
+        errorCode: errCode,
         ...(authorization ? { authorization } : {}),
         ...(binary ? { binary: true } : {}),
         ...(event.data.bytes_read !== undefined ? { readBytes: event.data.bytes_read } : {}),
@@ -254,6 +258,7 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
       status,
       costCoins: cost_coins,
       error: errText,
+      errorCode: errCode,
       ...(authorization ? { authorization } : {}),
       ...(binary ? { binary: true } : {}),
       ...(event.data.bytes_read !== undefined ? { readBytes: event.data.bytes_read } : {}),
@@ -351,7 +356,7 @@ function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "
 }
 
 function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "audio.done" }): AgentChatState {
-  const { url, cost_coins, task_id, media_kind } = event.data;
+  const { url, cost_coins, task_id, media_kind, title, cover, lyric_status } = event.data;
   // 同 image.done：成品到了先结算对应 pending 卡，出音频卡照旧建／照旧去重。
   const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "audio" && it.url === url);
@@ -366,6 +371,10 @@ function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "
       costCoins: cost_coins,
       taskId: task_id,
       mediaKind: media_kind,
+      // 三个可选元数据：缺字段一律 undefined（网关可能还没补上），卡片据此降级。
+      title,
+      cover,
+      lyricStatus: lyric_status,
     };
     return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }

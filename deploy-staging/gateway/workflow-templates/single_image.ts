@@ -23,7 +23,7 @@ export const singleImageTemplate: WorkflowTemplate =
         role: "generation",
         kind: "config",
         title: "生成配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"},
         deliverable: "生成参数（模型/尺寸/张数/seed），改参数在此改、不改提示词",
       },
       {

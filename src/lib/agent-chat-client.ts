@@ -21,6 +21,7 @@ import type {
 import { AGENT_STEER_STATUSES } from "./agent-chat-types";
 import { LOCAL_TEST_MODE } from "./local-test-mode";
 import { UploadAbortedError, xhrUploadForm } from "./agent-uploads";
+import { getDeviceBridgeApi, isDeviceBridgeApi, type LocalFileMode } from "./device-bridge-display";
 
 /** 网道附件清单：download/attachment 解析后可转成 AgentAttachmentRef。 */
 export interface AgentAttachment {
@@ -582,6 +583,18 @@ export async function sendAgentMessage(
   options?: SendAgentMessageOptions,
   direct?: DirectSendContext | null,
 ): Promise<void> {
+  // 旧桌面停桥不会调用新权限端点；发送前以真实本机mode撤销云端残留full。
+  const desktop = getDeviceBridgeApi();
+  if (desktop) {
+    if (!isDeviceBridgeApi(desktop)) {
+      throw new AgentChatError("bad_request", "无法读取桌面权限，消息尚未发送，请更新桌面版后重试。");
+    }
+    const status = await desktop.bridge.status();
+    if (!["off", "ask", "auto", "full"].includes(status.mode ?? "")) {
+      throw new AgentChatError("bad_request", "无法确认桌面权限模式，消息尚未发送，请更新桌面版后重试。");
+    }
+    await syncDevicePermissionMode(status.mode as LocalFileMode);
+  }
   // 中继路由会 trim 后才转发；直连自己先 trim，两条路径送到网关的 content 等价。
   const trimmed = content.trim();
   const body: Record<string, unknown> = { content: trimmed };
@@ -606,6 +619,17 @@ export async function sendAgentMessage(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+/** 旧／新桌面共用已鉴权站点通路；成功才允许本机切档或发送新消息。 */
+export async function syncDevicePermissionMode(mode: LocalFileMode): Promise<void> {
+  const result = await agentFetch("/api/agent/device-permissions", {
+    method: "POST",
+    body: JSON.stringify({ mode }),
+  }) as { success?: boolean; mode?: string };
+  if (result?.success !== true || result.mode !== mode) {
+    throw new AgentChatError("gateway_error", "权限模式未同步，当前选择未更改，消息尚未发送。请稍后重试。");
+  }
 }
 
 /**

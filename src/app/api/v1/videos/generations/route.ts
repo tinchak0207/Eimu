@@ -5,6 +5,7 @@ import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import {
   aspectRatioFromImageSize,
   generationCoins,
+  generationCapabilities,
   isSupportedVideoModel,
   normalizeGenerationConfig,
   resolveGenerationModelId,
@@ -22,6 +23,7 @@ import {
   parseVideoPostProduction,
   videoPostProductionGeneratedSeconds,
 } from "@/lib/generation-core/video-post-production";
+import { EditInputError, parseReferenceImageSpecs, resolveEditReference } from "@/lib/biz-image-references";
 import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-request-headers";
@@ -106,6 +108,8 @@ interface VideoRequestBody {
   size?: unknown;
   duration_seconds?: unknown;
   generate_audio?: unknown;
+  /** 有序参考图；上游图片参考不代表硬锁首尾帧。 */
+  reference_images?: unknown;
   response_format?: unknown;
   callback_url?: unknown;
   /**
@@ -252,6 +256,22 @@ export async function POST(req: NextRequest) {
     return errorResponse(400, `n 需为 1 到 ${MAX_N} 之间的整数。`, "invalid_request_error", "invalid_n", traceId);
   }
 
+  // 先校验再计费：图片不可静默丢弃，也不把普通参考伪称首尾硬锁。
+  let referenceSpecs: ReturnType<typeof parseReferenceImageSpecs>;
+  try {
+    const caps = generationCapabilities(modelId);
+    const maxImages = modelId === "minimax-h3" ? 9 : (caps?.maxReferenceImages ?? 5);
+    referenceSpecs = parseReferenceImageSpecs(body.reference_images, maxImages);
+    if (referenceSpecs.length > 0 && !caps?.referenceImages) {
+      return errorResponse(400, `模型 ${modelId} 不支持参考图。`, "invalid_request_error", "unsupported_reference_images", traceId);
+    }
+  } catch (error) {
+    if (error instanceof EditInputError) {
+      return errorResponse(error.status, error.message, "invalid_request_error", error.code, traceId);
+    }
+    throw error;
+  }
+
   // 影片上游只返回 URL（无 b64 通道），强制 url，忽略 b64_json 请求。
   const responseFormat: "url" | "b64_json" = "url";
 
@@ -338,6 +358,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const references = await Promise.all(referenceSpecs.map((ref, index) =>
+      resolveEditReference(ref.url, `biz:${apiKey.id}`, `${req.headers.get("idempotency-key") ?? traceId}:video-reference:${index}`),
+    ));
     const submitted = await submitGenerationCommand({
       tenantId: `biz:${apiKey.id}`,
       apiKeyId: apiKey.id,
@@ -353,6 +376,7 @@ export async function POST(req: NextRequest) {
       workflow: {
         durationSeconds: normalized.config.durationSeconds,
         generateAudio: normalized.config.generateAudio,
+        ...(references.length ? { references } : {}),
         ...(postProduction ? { videoPostProduction: postProduction } : {}),
       },
       responseFormat,
@@ -368,6 +392,9 @@ export async function POST(req: NextRequest) {
       traceId,
     );
   } catch (error) {
+    if (error instanceof EditInputError) {
+      return errorResponse(error.status, error.message, "invalid_request_error", error.code, traceId);
+    }
     if (error instanceof IdempotencyConflictError) {
       return errorResponse(409, error.message, "invalid_request_error", "idempotency_key_reused", traceId);
     }

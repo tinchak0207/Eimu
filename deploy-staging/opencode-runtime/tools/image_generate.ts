@@ -1,7 +1,6 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import {
   priceForAsync,
-  estimateVideoCoins,
   classifyError,
   confirmSpend,
   dedupHash,
@@ -49,39 +48,24 @@ const CHANNEL_NOT_VERIFIED =
 /** 参考图上限（与站点 /api/canvas/generate 的 5 张同尺，上游自尾部截断）。 */
 const MAX_REFERENCE_IMAGES = 5
 
-/**
- * 影片确认金额（R9-A2 2026-09-30）：与 quote_bundle 同口径——GET /v1/models 的
- * x_coins_per_second[解析度] × 时长（平台 /v1/videos/generations 以 generationCoins
- * 按秒扣费、gateway catalogVideoPerSecondCoins 同源）。本工具提交的 payload 不带
- * resolution，平台按模型 defaultResolution 扣，故取 defaultResolution 那一档；
- * generate_audio=true 且目录有 x_coins_per_second_with_audio 时用带音价。
- * 目录查不到才退回 estimateVideoCoins（720P 5 币/秒粗估）并在确认卡标「粗估待确认」。
- * 旧版一律走 estimateVideoCoins：seedance-2.0 15s 确认卡报 75，实扣 195。
- */
+/** 视频确认金额直接取站点计费函数导出的完整档位，未知时不提交。 */
 async function videoCostFromCatalog(
-  model: string,
-  secs: number,
-  generateAudio: boolean | undefined,
-  sessionID: string,
-  signal?: AbortSignal,
-): Promise<{ coins: number; coins_per_second: number; resolution: string } | null> {
+  model: string, secs: number, generateAudio: boolean | undefined, sessionID: string, signal?: AbortSignal,
+): Promise<{ coins: number; billing_unit: string; resolution: string } | null> {
   try {
     const res = await platformFetch("/models", { method: "GET" }, sessionID, signal)
     if (!res.ok) return null
     const body = (await res.json()) as { data?: Array<Record<string, any>> }
     const m = (body.data ?? []).find((x) => x?.id === model)
-    const table = generateAudio && m?.x_coins_per_second_with_audio ? m.x_coins_per_second_with_audio : m?.x_coins_per_second
-    if (!table || typeof table !== "object") return null
-    const cps: Record<string, number> = {}
-    for (const [k, v] of Object.entries(table)) if (typeof v === "number") cps[k.toLowerCase()] = v
-    const def = m?.x_capabilities?.defaultResolution
-    const resolution = (typeof def === "string" ? def : Object.keys(cps)[0] ?? "").toLowerCase()
-    const rate = cps[resolution]
-    if (typeof rate !== "number") return null
-    return { coins: Math.round(rate * secs * 1e6) / 1e6, coins_per_second: rate, resolution }
-  } catch {
-    return null
-  }
+    const billing = m?.x_billing
+    const resolution = m?.x_capabilities?.defaultResolution
+    const audio = generateAudio ?? m?.x_capabilities?.defaultAudio === true
+    if (audio && m?.x_capabilities?.audio !== true) return null
+    const table = audio ? billing?.prices_with_audio ?? billing?.prices : billing?.prices
+    const coins = typeof resolution === "string" ? table?.[resolution]?.[String(secs)] : undefined
+    if (billing?.currency !== "coins" || !["per_second", "per_video"].includes(billing.unit) || typeof coins !== "number" || !Number.isFinite(coins) || coins < 0) return null
+    return { coins, billing_unit: billing.unit, resolution }
+  } catch { return null }
 }
 
 /**
@@ -123,14 +107,15 @@ async function normalizeReferenceImages(
   raw: string[] | undefined,
   sessionID: string,
   signal?: AbortSignal,
+  maxImages = MAX_REFERENCE_IMAGES,
 ): Promise<{ ok: true; images: string[] } | { ok: false; message: string }> {
   const images: string[] = []
   // 超过上限不静默截断（2026-10-04 修）：静默丢掉第 6 张以后＝「参考图与出图无关」的假成功。
   const provided = raw ?? []
-  if (provided.length > MAX_REFERENCE_IMAGES) {
+  if (provided.length > maxImages) {
     return {
       ok: false,
-      message: `参考图最多 ${MAX_REFERENCE_IMAGES} 张，本次收到 ${provided.length} 张（未截断、未提交）。请精简到 ${MAX_REFERENCE_IMAGES} 张以内后重试。`,
+      message: `参考图最多 ${maxImages} 张，本次收到 ${provided.length} 张（未截断、未提交）。请精简到 ${maxImages} 张以内后重试。`,
     }
   }
   const items = provided
@@ -257,7 +242,7 @@ async function resolveCharacterTags(
 
 export default tool({
   description:
-    "提交生图任务，回 task_id。【通路可用性宣告纪律】只有本工具真的成功出图（拿到 url，或 task 最终 succeeded）才可对用户说某模型/付费通路「可用、是活的」；参数错误（如 unsupported_size）、提交前被挡、确认被拒、insufficient_quota 都没有验证通路，不得据此宣称通路可用。insufficient_quota＝用户帐户余额不足（帐户层，换模型无效）；model_unavailable＝该模型通路故障（模型层，可换同类模型）——两者不可混报。size（仅 kind=image）只接受站点白名单（GET /v1/openapi.json 的 ImageGenerationRequest.size.enum，目前为 1024x1024/1536x1024/1024x1536/2048x2048/4096x4096，要 16:9 横图用 1536x1024），白名单外在确认扣费前就会被拒。此工具是「非同步」的：完成时间不定（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），harness 会自动续接结果。不要用本工具等待/轮询结果，提交后立即交还控制权。预估花费 ≤0.1 币的低成本草稿（如 gpt-image-2 单张）会直接执行、不需确认；其余会先跳出扣费确认。\n\n【重要分流】用户要「影片/大片/电影/名场面/分镜脚本/角色四视图/多镜头」时，必须用 workflow_* 工具建工作流（workflow_start + workflow_add_node + workflow_connect + workflow_generate），不要用本工具生单张图。本工具只用于单张图片生成。\n\n【影片时长硬规则（§4b 时长最大化）】生影片（kind=video）时，上游按条计费，全系影片只支持 ≥10 秒（严禁 5 秒短档，10 秒以下亏本）；seedance-2.0 为 10–15 秒，seedance-2.5-480p 为 10–30 秒。必须选最大档或符合分镜的 ≥10s 档。小于 10 秒将被工具直接拒绝。\n\n【task_id 纪律】回给用户的 task_id 必须是工具返回的完整 UUID（36 字元、含连字号），原样照抄，严禁截断或缩写（例如只写前 8 位）——短 id 在平台永远查不到任务。\n\n【角色一致性与 tag 角色卡】要用「同一张脸」时，优先把该角色的参考图（三视图／定妆照）用 reference_images 带上——这比只写文字描述可靠。也可以在 prompt 里写行内实体 tag `@[角色:名称]`（种类字可用 角色/场景/风格/道具/音频，繁简皆可）：平台会用该用户角色卡库里同名同 kind 的卡自动展开它的描述片段并附上它的参考图；卡库里没有同名卡时 tag 会原样保留（不会报错）。用 character_card_list 可以列出该用户已有的卡（名称/种类/参考图）——先查再写 tag，不要凭记忆猜名字。",
+    "异步提交图片或视频生成，返回完整task_id；完成由harness续接，不轮询。单图和已有分镜关键帧可直接调用；多镜制作沿用workflow工具。先用image_quote/video_quote核当前模型、尺寸、时长与价格。≤0.1币低成本草稿可直接执行；其它按本轮网关授权：full/auto直接提交，无持续或已有预算授权时确认。工具成功交付url或任务succeeded才证明产出；余额不足与模型不可用按原始错误区分。参考图支持URL/data URL/合法本地路径；可用角色卡tag或character_card_list维持一致性，图片参考不保证锁定视频首尾帧。返回task_id完整保留。",
   args: {
     prompt: tool.schema.string().describe("生成提示词"),
     model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2"),
@@ -270,18 +255,18 @@ export default tool({
       .describe("standard 或 hd，预设 standard。部分模型 hd 较贵（如 gpt-image-2 标准 1 币 / hd 2 币）"),
     duration_seconds: tool.schema
       .number()
-      .min(10)
+      .min(5)
       .optional()
       .describe(
-        "影片时长（秒，仅 video 用，最小 10 秒）。硬规则（§4b 时长档位最大化）：上游按条计费，全系影片只支持 ≥10 秒（严禁 5 秒短档，10 秒以下亏本）；seedance-2.0 为 10–15 秒，seedance-2.5 为 10–30 秒。必须选最大档或符合分镜的 ≥10s 档。",
+        "视频时长（秒），minimax-h3 支持 5–15 秒，默认推荐 15 秒；其他模型以 video_quote 为准。",
       ),
     generate_audio: tool.schema.boolean().optional().describe("是否生成音讯，仅 video 用"),
     reference_images: tool.schema
       .array(tool.schema.string())
-      .max(5)
+      .max(9)
       .optional()
       .describe(
-        "参考图（最多 5 张）：公网 http(s) URL、`data:image/...;base64,...`、或本地绝对路径（含工作区路径，如附件落盘的 uploads/<session>/...）。本地/工作区路径会先经沙箱校验（只能读本会话可见的文件），再自动上传换成公网 URL 送给上游。任一张路径越权、文件不存在或超过 20MB 会直接报错（不会静默丢弃参考图）。",
+        "参考图：图片最多5张，视频上限依模型（minimax-h3最多9张）；支持http(s) URL、data:image或合法本地绝对路径，原始校验错误会返回，不静默丢图。图片参考不保证锁定视频首尾帧。",
       ),
   },
   async execute(args, context) {
@@ -312,24 +297,24 @@ export default tool({
       }
     }
 
-    // 影片参考图尚未支援（A1, 2026-09-25）：如实报错，不静默丢掉参考图。
-    if (kind === "video" && (args.reference_images?.length ?? 0) > 0) {
-      return fail("unsupported_reference_images", "影片参考图尚未支援，请改用 kind=image 或改用 workflow_* 工具")
+    const maxReferences = kind === "video" && model === "minimax-h3" ? 9 : MAX_REFERENCE_IMAGES
+    if ((args.reference_images?.length ?? 0) > maxReferences) {
+      return fail("invalid_reference_images", `模型 ${model} 最多接受 ${maxReferences} 张参考图，本次未提交且未扣费。`)
     }
 
     const raw_duration = args.duration_seconds
     const generate_audio = args.generate_audio
 
-    // 影片时长硬规则（§4b）：严禁 <10 秒短档
+    // minimax-h3 视频支持 5–15 秒；默认推荐 15 秒
     if (kind === "video") {
-      if (typeof raw_duration === "number" && raw_duration < 10) {
+      if (typeof raw_duration === "number" && raw_duration < 5) {
         return fail(
           "invalid_duration",
-          `时长档位违规：${raw_duration} 秒过短。平台硬规则（§4b 时长档位最大化）：上游视频按条计费，全系影片只支持 ≥10 秒（5 秒/短档会造成平台亏本且被门禁拦截）。请改用支持的时长档位（例如 seedance-2.0 为 10–15 秒，seedance-2.5 为 10–30 秒），并遵循时长最大化原则。`,
+          `时长档位违规：${raw_duration} 秒过短。平台硬规则（§4b 时长档位最大化）：上游视频按条计费，视频时长最少 5 秒。minimax-h3 为 5–15 秒，推荐 15 秒；其他模型以 video_quote 为准，并遵循时长最大化原则。`,
         )
       }
     }
-    const duration_seconds = kind === "video" ? (raw_duration ?? 10) : undefined
+    const duration_seconds = kind === "video" ? (raw_duration ?? 15) : undefined
 
     // 最近 24h 真实表现提醒（2026-08-27）：可用 ≠ 表现好。样本 ≥5 且成功率 <50%
     // 时，先劝 agent 换模型而不是把请求发出去（失败会浪费排队时间，退款也不补时间）。
@@ -348,9 +333,11 @@ export default tool({
       kind === "video"
         ? await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, context.abort)
         : null
+    if (kind === "video" && !video_price) return fail("video_price_unknown", "目录没有本次完整提交档位的币值报价；尚未提交生成，不以未知价格开跑。")
+    if (kind === "video" && args.quality === "hd" && video_price?.resolution !== "1080p") return fail("unsupported_resolution", "当前视频API不接受显式1080p品质；模型默认档不同，未提交且未降规格。")
     const cost_coins =
       kind === "video"
-        ? (video_price?.coins ?? estimateVideoCoins(duration_seconds, args.quality))
+        ? video_price!.coins
         : Math.round(unit * n * 1e6) / 1e6
 
     // 扣费闸门：≤0.1 币的草稿直接放行，其余需用户确认
@@ -358,7 +345,7 @@ export default tool({
       const description =
         kind === "video"
           ? video_price
-            ? `生成 ${duration_seconds ?? 10} 秒视频（${model}，${video_price.resolution} ${video_price.coins_per_second} 币/秒），预估花费 ${cost_coins} 币`
+            ? `生成 ${duration_seconds ?? 10} 秒视频（${model}，${video_price.resolution}、${video_price.billing_unit}），预估花费 ${cost_coins} 币`
             : `生成 ${duration_seconds ?? 10} 秒视频（${model}），预估花费 ${cost_coins} 币（目录查无秒价，粗估待确认，实扣可能更高）`
           : `生成 ${n} 张图（${model}），预估花费 ${cost_coins} 币`
       const approved = await confirmSpend(
@@ -379,7 +366,7 @@ export default tool({
     try {
       const endpoint = kind === "video" ? "/videos/generations" : "/images/generations"
       // 参考图正规化（A1, 2026-09-25）：本机路径先上传平台取公网 URL；失败如实报错。
-      const normalized_refs = await normalizeReferenceImages(args.reference_images, context.sessionID, context.abort)
+      const normalized_refs = await normalizeReferenceImages(args.reference_images, context.sessionID, context.abort, maxReferences)
       if (!normalized_refs.ok) return fail("upload_failed", normalized_refs.message)
       let reference_images = normalized_refs.images
       // 行内实体 tag 解析（E2, 2026-09-25）：只在 prompt 含 `@[` 时呼叫；必须在送出
@@ -395,13 +382,16 @@ export default tool({
           )
         }
         final_prompt = resolved.prompt
-        reference_images = resolved.reference_images
+        reference_images = kind === "video"
+          ? [...reference_images, ...resolved.reference_images.filter((url) => !reference_images.includes(url))]
+          : resolved.reference_images
+        if (reference_images.length > maxReferences) return fail("invalid_reference_images", `角色卡补图后共 ${reference_images.length} 张，超过 ${maxReferences} 张；原参考图未截断、未提交。`)
         card_warnings = resolved.warnings
       }
       const card_note = card_warnings.length > 0 ? `【角色卡 tag 提醒】${card_warnings.join("；")}` : ""
       const payload: any =
         kind === "video"
-          ? { prompt: final_prompt, model, size, duration_seconds, generate_audio }
+          ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(reference_images.length > 0 ? { reference_images } : {}) }
           : {
               prompt: final_prompt,
               model,

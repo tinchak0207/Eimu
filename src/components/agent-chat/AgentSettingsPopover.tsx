@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MySkillsDialog } from "./MySkillsDialog";
+import { setHideAgentReasoning, useHideAgentReasoning } from "@/lib/agent-display-preferences";
 import {
   getAgentSettings,
   readCachedAgentSettings,
@@ -43,6 +44,7 @@ const INTERACTION_HINTS: Record<(typeof INTERACTION_MODES)[number], string> = {
 };
 
 export function AgentSettingsPopover() {
+  const hideReasoning = useHideAgentReasoning();
   const [open, setOpen] = useState(false);
   /** 「我的技能」管理面：在同一个设定弹层里再开一张 lg-sheet（不造第二个入口）。 */
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -124,6 +126,25 @@ export function AgentSettingsPopover() {
               <p className="mt-1 text-ios-caption2 leading-relaxed text-foreground/45">
                 把你自己的做法存成技能，输入框打「/」就能直呼
               </p>
+            </div>
+            <div className="px-2.5 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-ios-footnote font-medium text-foreground">隐藏思维链</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hideReasoning}
+                  aria-label="隐藏思维链"
+                  onClick={() => setHideAgentReasoning(!hideReasoning)}
+                  className="flex h-11 w-11 shrink-0 cursor-pointer items-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
+                >
+                  {/* 沿用 AdminRoutingPanel 的开关尺寸与滑块结构。 */}
+                  <span className={cn("relative h-6 w-11 rounded-full transition-colors", hideReasoning ? "bg-ios-blue" : "bg-black/15")}>
+                    <span className={cn("absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform", hideReasoning ? "left-6" : "left-1")} />
+                  </span>
+                </button>
+              </div>
+              <p className="mt-1 text-ios-caption2 leading-relaxed text-foreground/45">只显示回答和任务进度</p>
             </div>
             {/* d) 互动模式：三档 slider（原生 range min=0 max=2 step=1），当前档位点亮刻度点。 */}
             <div className="px-2.5 py-2.5">

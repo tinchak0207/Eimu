@@ -97,6 +97,13 @@ const DRAMA_30S_MODEL_NAMES = new Set(["sd25-30s"]);
 // claims 显式携带），不走 UPSTREAM_MODEL_BY_RESOLUTION 静态分辨率表。
 const NAPI_MODEL_NAMES = new Set(["seed-2.0", "seed-2.5"]);
 
+// miaowu（api.miaowuai.store，2026-10-12）族：new-api /v1/videos 走 Go 严格字段校验，
+// 未知栏位一律 400（实锤：generate_audio／aspect_ratio／duration／size／images／
+// reference_image_urls 全部 unknown field）。官方文档可接受体＝
+// {model, prompt, seconds, ratio?, resolution?, image_urls?, video_urls?, audio_urls?}；
+// completed 回应为顶层 url，与 xiaoyxiao 同形，轮询／extractOutputUrl 零改动。
+const SECONDS_FAMILY_MODEL_NAMES = new Set(["minimax-h3-max"]);
+
 // 每个平台模型允许的 duration 范围（秒）
 const DURATION_RANGES: Record<string, [number, number]> = {
   "seedance-2.0":      [4, 15],
@@ -202,10 +209,16 @@ export async function generateWithOpenaiVideo(
   const isSd7 = SD7_MODEL_NAMES.has(upstreamModel);
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);
   const isNapi = NAPI_MODEL_NAMES.has(upstreamModel);
+  const isSecondsFamily = SECONDS_FAMILY_MODEL_NAMES.has(upstreamModel);
 
   // 构建请求体
   let body: Record<string, unknown>;
-  if (isNapi) {
+  if (isSecondsFamily) {
+    // seconds 族：只送它认的栏位（严格解析，多一个就 400）。
+    body = { model: upstreamModel, prompt, seconds: duration };
+    if (ratio) body.ratio = ratio;
+    if (resolution) body.resolution = resolution;
+  } else if (isNapi) {
     // napi 上游 Go struct 的 seconds 栏位是 string（实弹 502 实锤：数字会被
     // cannot unmarshal number 拒收；官方文档 "seconds":"5" 亦带引号）。
     body = {
@@ -242,7 +255,13 @@ export async function generateWithOpenaiVideo(
   // 参考图（多模态参考）
   const references = input.workflow.references ?? [];
   if (references.length > 0) {
-    if (isNapi) {
+    if (isSecondsFamily) {
+      // miaowu 族参考图走 image_urls（上游 video_api.images_max=9）。
+      if (references.length > 9) {
+        throw new SupplierRequestError("miaowu video family accepts at most 9 reference images.", 400);
+      }
+      body.image_urls = references.map((ref) => ref.url);
+    } else if (isNapi) {
       // napi：参考图 URL 数组走 images 字段（官方文档图生视频形状）
       body.images = references.map((ref) => ref.url);
     } else {
@@ -463,6 +482,11 @@ function extractErrorMessage(response: Record<string, unknown>): string {  if (t
     if (typeof err.message === "string" && err.message.trim()) {
       return err.message.trim();
     }
+  }
+  // 字串形错误体（miaowu 真实形状：{"error":"unknown field \"size\""}，2026-10-12）。
+  // 缺这条会落到最后一行回 "unknown error"，把上游明确的字段拒收理由洗掉（本次排障被误导一轮）。
+  if (typeof response.error === "string" && response.error.trim()) {
+    return response.error.trim();
   }
   if (typeof response.message === "string" && response.message.trim()) {
     return response.message.trim();

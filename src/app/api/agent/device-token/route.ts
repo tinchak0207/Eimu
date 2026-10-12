@@ -64,7 +64,10 @@ export async function POST(req: NextRequest) {
 
   let resp: AgentGatewayResponse;
   try {
-    resp = await callAgentGateway("/agent/v1/device-bridge/token", { method: "POST", key: caller.key });
+    // 必须带 `{}`：闸道的 device-bridge 路由用 readJsonBody，完全没有 body 或空 body 一律
+    // 400 bad_request（→ 这里落成 502 device_token_unavailable，换票永远失败）；
+    // 带了才会把 Content-Type 设成 application/json 并送出可解析的 JSON。
+    resp = await callAgentGateway("/agent/v1/device-bridge/token", { method: "POST", key: caller.key, body: {} });
   } catch {
     return fail(502, "本机档案换票服务连接失败，请稍后重试。", "device_token_unreachable");
   }

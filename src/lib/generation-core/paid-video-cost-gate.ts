@@ -80,6 +80,8 @@ export type PaidVideoResolution = (typeof PAID_VIDEO_ALLOWED_RESOLUTIONS)[number
 export const PAID_VIDEO_MODEL_WHITELIST = [
   "minimax-h3-933-2k-支持真人",
   "minimax-h3-a",
+  // 2026-10-12：miaowuai 认领的 minimax-h3 上游模型（quota_type=1 按次固定价，非动态价）。
+  "minimax-h3-max",
   "seedance-2.0-900-特惠",
   "seedance-2.0-933-特惠",
   "seedance-2.5-1010-特惠",
@@ -112,6 +114,8 @@ export const PAID_VIDEO_UNIT_PRICE_CNY: Record<PaidVideoModelId, number> = {
   "seedance-2.0-933-特惠": 1.3,
   "seedance-2.5-1010-特惠": 1.6,
   "minimax-h3-a": 1.6,
+  // miaowuai 认领（2026-10-12 /api/pricing 实查，× usd_exchange_rate=7）。
+  "minimax-h3-max": 2.0,
 };
 
 const PRICING_SOURCE = "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)";

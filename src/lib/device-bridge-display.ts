@@ -186,10 +186,12 @@ export function describeBridgeStatus(status: BridgeStatus | null): BridgeDisplay
         roots,
       };
     case "credentials_unavailable":
+      // 据实改写（2026-10-11）：旧的「手放装置凭证档」是操作者路径的措辞，对真实
+      // 使用者是误导；真相是「页面正在向壳换一张短效票」，换不到才是停在这里。
       return {
-        label: "已开启 · 尚未设定装置凭证",
+        label: "已开启 · 正在获取权限",
         tone: "warn",
-        description: "桌面版还没设定装置凭证（见说明）；此功能需要一次性设定。",
+        description: "正在获取本机文件权限…若一直停在这里，请点「重试」或重新登录。",
         connected: false,
         roots,
       };
@@ -237,6 +239,72 @@ export function bridgeToneClass(tone: BridgeTone): string {
   }
 }
 
+// ─────────────────────────── 失败态 → 可点的「下一步」（文案＝单一真源）
+
+/** 使用者在本机档案权限卡上能主动做的一件事。 */
+export type BridgeActionKind = "pick_directory" | "retry_credential" | "login";
+
+export interface BridgeActionHint {
+  kind: BridgeActionKind;
+  /** 按钮文字（真源在此，组件不得另写）。 */
+  label: string;
+  /** 行动上方的一行人话（真源在此，组件不得另写）。 */
+  description: string;
+  tone: BridgeTone;
+}
+
+/**
+ * 把「本机档案权限」的失败态翻成使用者能按的一步（纯函式）。
+ *
+ * 为什么要有它（2026-10-11）：`pickDirectory()` 早就存在却零呼叫点 ⇒ 使用者无从
+ * 授权任何资料夹；凭证换不到时也是静默死等。这条把两种「卡住」都收敛成一颗按钮，
+ * 未登录时另点明「登录后才能开启」——不再让使用者对着没有出口的状态发呆。
+ *
+ * 只对**需要使用者动作**的两个状态给行动；其余（off/connecting/online/error 等）
+ * 一律回 null，维持现状不动。
+ */
+export function describeBridgeAction(state: BridgeState, loggedIn: boolean): BridgeActionHint | null {
+  switch (state) {
+    case "no_authorized_roots":
+      return {
+        kind: "pick_directory",
+        label: "选择文件夹…",
+        description: "还没授权任何文件夹，agent 现在读不到本机档案。",
+        tone: "warn",
+      };
+    case "credentials_unavailable":
+      return loggedIn
+        ? {
+            kind: "retry_credential",
+            label: "重试",
+            description: "正在获取本机文件权限…",
+            tone: "info",
+          }
+        : {
+            kind: "login",
+            label: "登录",
+            description: "登录后才能开启本机文件权限。",
+            tone: "warn",
+          };
+    default:
+      return null;
+  }
+}
+
+/**
+ * 收起态 chip 该不该给警示（纯函式）。true＝已开启却没有任何授权根，或凭证未就绪。
+ *
+ * 刻意不含 `off`（status.enabled=false）：那是使用者自己关掉的，警示会变噪音；
+ * 也不含 status=null（还在读）。
+ */
+export function bridgeNeedsAttention(status: BridgeStatus | null): boolean {
+  if (!status) return false;
+  if (status.state === "credentials_unavailable") return true;
+  if (!status.enabled) return false;
+  const roots = Array.isArray(status.roots) ? status.roots : [];
+  return roots.length === 0;
+}
+
 // ─────────────────────────── 本机档案权限模式（四档；文案＝单一真源）
 
 /**
@@ -275,7 +343,7 @@ export const LOCAL_FILE_MODES: readonly LocalFileModeSpec[] = [
     id: "full",
     icon: "globe",
     title: "完全访问",
-    subtitle: "整个家目录可读；敏感位置（~/.ssh、~/.aws、私钥等）一律不读。",
+    subtitle: "自动执行并同意所有扣费；整个家目录可读，敏感位置（~/.ssh、~/.aws、私钥等）仍不读取。",
   },
 ] as const;
 
@@ -387,6 +455,12 @@ export interface DeviceBridgeController {
   setMode(mode: LocalFileMode): Promise<void>;
   /** 选资料夹（挑完即授权该路径）并重读 status。回传已授权路径（失败回空阵列）。 */
   pickDirectory(): Promise<string[]>;
+  /**
+   * 重推一张短效装置票（2026-10-11）。给「credentials_unavailable」的「重试」
+   * 用：复用既有的推票流程（挂载／索取／到期前走的同一条 pushCredentialOnce），
+   * 不复制逻辑。未注入 pushCredential 时是无操作。
+   */
+  refreshCredential(): Promise<void>;
   /** 卸载时呼叫：取消订阅、标记 disposed，之后不再 notify。 */
   dispose(): void;
 }
@@ -413,6 +487,8 @@ function errText(e: unknown): string {
 export function createDeviceBridgeController(
   getApi: () => unknown = getDeviceBridgeApi,
   opts: {
+    /** 远端页面兼容旧桌面：云端权限同步成功后才切本机模式。 */
+    syncMode?: (mode: LocalFileMode) => Promise<void>;
     /**
      * 换一张短效装置票并推给壳（W7a）。由呼叫端注入**有 IO 的那一支**
      * （`device-bridge-credential.ts` 的 fetchAndPushDeviceCredential），本档维持零 IO。
@@ -493,8 +569,12 @@ export function createDeviceBridgeController(
     patch({ busy: true, notice: null });
     try {
       let next: BridgeStatus;
+      if (opts.syncMode) await opts.syncMode(mode);
       if (typeof a.bridge.setMode === "function") {
         next = await a.bridge.setMode(mode);
+        if (next.mode !== undefined && next.mode !== mode) {
+          throw new Error(next.lastError || "桌面权限尚未切换，当前选择保持不变，请重试。");
+        }
         if (mode !== "off" && !next.enabled) next = await a.bridge.enable();
       } else if (mode === "off") {
         next = await a.bridge.disable();
@@ -626,6 +706,9 @@ export function createDeviceBridgeController(
     setEnabled,
     setMode,
     pickDirectory,
+    // 复用同一条推票流程（挂载／被索取／到期前用的就是它）；没注入 pushCredential
+    // 时 pushCredentialOnce 是无操作，故这里不必另判。
+    refreshCredential: pushCredentialOnce,
     dispose,
   };
 }

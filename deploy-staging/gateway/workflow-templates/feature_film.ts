@@ -16,11 +16,11 @@ export const featureFilmTemplate: WorkflowTemplate =
         kind: "text",
         title: "故事脚本 / 分镜",
         deliverable: "结构化故事脚本（场次表 + 逐镜景别/机位/运镜 + 台词按 4.5 字/秒折算时长 + 钩子位标注），一页大纲供用户快速批准",
-        gate: "剧本人工批准门禁：用户未确认故事大纲和镜头清单前，禁止进入任何视觉环节",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；剧本人工批准门禁：用户未确认故事大纲和镜头清单前，禁止进入任何视觉环节",
         notes: [
           "按「场」切分：地点或时间变化即换场；每场提取起止拍、冲突点、情绪值（-5~+5），台词按 4.5 字/秒折算成秒数写进 JSON，后续镜头时长直接引用不重算",
           "每场标记钩子位（悬念/反转/情绪爆点），标注「留住观众的那一帧」候选；成片前 3 秒必须出现第一个钩子（黄金 3 秒法则）",
-          "输出同时给机器可读 JSON 和人可读一页大纲，方便用户快速批准；大纲未批准不进任何视觉环节",
+          "输出同时给机器可读 JSON 和人可读一页大纲，方便用户快速批准；无持续授权时大纲未批准不进任何视觉环节；完全访问或自动模式经独立评审后继续",
         ],
         tools: [
           { id: "script_scene_parse", input: "剧本原文", output: "结构化场次表（场景/节拍/台词按 4.5 字/秒折算时长）" },
@@ -47,7 +47,7 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "char_sheet",
         kind: "config",
         title: "角色 A 四视图配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 4, kind: "image", sheet: "4-view", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 4, kind: "image", sheet: "4-view"},
         deliverable: "四视图生成配置（模型/尺寸/张数 + 角色专属固定 seed，材质高光比例写死：金属×1.5、皮肤×0.5）",
       },
       {
@@ -86,7 +86,7 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "scene_gen",
         kind: "config",
         title: "场景图配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"},
         deliverable: "场景图生成配置（同一固定 seed 族，只变场景内容不变风格参数）",
       },
       {
@@ -112,7 +112,7 @@ export const featureFilmTemplate: WorkflowTemplate =
         kind: "text",
         title: "镜头 1 脚本",
         deliverable: "镜头脚本（景别/机位/运镜/秒数=台词折算+反应拍 + J/L-cut 转场标记；情绪时序链「听见→停顿→眼神→表情→说话」拆反应镜头）",
-        gate: "分镜人工批准门禁：镜头脚本给用户过目确认节奏与构图后才准渲染影片",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；分镜人工批准门禁：镜头脚本给用户过目确认节奏与构图后才准渲染影片",
         notes: [
           "每镜写清摄影语言：景别（远全中近特）、机位角度、运镜（推拉摇移跟）、秒数=台词折算时长+反应拍，情绪时序链排进镜头设计不拍满面瘫对白",
           "转场预埋 J/L-cut：声音先入或延后 0.5-1s，剪辑阶段直接按标记执行；单镜 3-8 秒为宜，超长拆段拼接",
@@ -127,7 +127,7 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "shot1_gen",
         kind: "config",
         title: "镜头 1 影片配置",
-        defaults: { size: "16:9", kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 },
+        defaults: { size: "16:9", kind: "video", },
         deliverable: "影片生成配置（模型由 workflow-service 动态选活、时长对齐镜头脚本折算；单镜 3-8 秒，超长拆段拼接防崩坏）",
       },
       {

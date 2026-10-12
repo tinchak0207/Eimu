@@ -193,3 +193,9 @@ redteam-*
 # 29MB、54 档，属对外发布物料而非 App 运行时代码 —— 不入 App repo（.vercelignore 另有同名排除，
 # 防止哪天被 git add 后被 CLI 部署一起上传）。
 /open-source/
+
+# ── 本地盲测音档、暂存目录与工作区（2026-10-12 瘦身）──
+/blind-test-*/
+/work/
+/_inbox/
+

@@ -80,11 +80,11 @@ export const CRITIC_PERSONA_DESCRIPTION =
  * 审核官可调用的工具白名单（2026-09-15 能力断路裁定钉死；禁给全工具面——
  * 审核官不产内容，不需要画图/跑 Blender/渲染视频，任何生成工具都不给）。
  *
- * 只给 search_web 一件 web 查证工具（核对交付物外部事实声称用；id 真源在
+ * 开放只读检索、图片感知与视频抽帧/分析工具（核对真实产物与外部事实；id 真源在
  * VPS .opencode/tools/，见档头 ①；registry critic 激活行 toolIds import 本
  * 常量，零复制——与 screenwriter 版同款方向）。
  */
-export const CRITIC_PERSONA_TOOL_IDS = ["search_web"] as const;
+export const CRITIC_PERSONA_TOOL_IDS = ["search_web", "read_image", "vision_analyze", "video_analyze", "video_measure", "video_transcribe", "video_evidence"] as const;
 
 export type CriticPersonaToolId = (typeof CRITIC_PERSONA_TOOL_IDS)[number];
 

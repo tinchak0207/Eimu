@@ -26,7 +26,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         kind: "text",
         title: "结构化场次表＋台词本（场景/节拍/台词按 4.5 字/秒折算）",
         deliverable: "结构化场次 JSON（每场：场景/人物/道具/服装/情绪拍点/钩子位）+ 按角色聚合的台词本（每句标 TTS 音色与语速）",
-        gate: "剧本人工批准：用户逐场确认或整体批准后才允许生成任何人物图；拒绝则带理由回流重写，禁止自动越门",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；剧本人工批准：用户逐场确认或整体批准后才允许生成任何人物图；拒绝则带理由回流重写，禁止自动越门",
         notes: [
           "场次拍点化：动作与台词交替成拍，台词时长按 4.5 字/秒确定性折算，每集总时长反推拍数",
           "前 3 拍冷开场兑现钩子是硬门：第 1 拍必须抛冲突，不许铺垫超过 10 秒",
@@ -41,7 +41,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
       },
       // 环 2：铸造主演资产（角色 DNA 签名文本 → 生成配置 → 三视图角色卡；multiShot 可复制多角色）
       { role: "cast", kind: "text", title: "主演角色描述（DNA 签名 8 维 + 音色）", deliverable: "主演角色描述文本（DNA 签名 8 维 + TTS 音色），作为主演资产卡生成的输入契约" },
-      { role: "cast_gen", kind: "config", title: "主演资产生成配置", deliverable: "主演资产环节的生图价目与参数配置（model/size/count/单价），三视图角色卡按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "cast_gen", kind: "config", title: "主演资产生成配置", deliverable: "主演资产环节的生图价目与参数配置（model/size/count；价格由当前目录取得），三视图角色卡按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "cast_card",
         kind: "image",
@@ -50,7 +50,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         // 同属该角色的参考图），画布侧据此自动落卡并回填分镜引用。
         defaults: { emitsEntity: { kind: "character", nameFrom: "input" } },
         deliverable: "每位主演的角色设定集：正/侧/背三视图 + 面部与服装的 DNA 签名描述串 + 情绪九宫格 + 道具状态变体",
-        gate: "人物批准：主演三视图 + DNA 签名经用户确认后才进分镜；单角色可单独重铸不推倒全部",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；人物批准：主演三视图 + DNA 签名经用户确认后才进分镜；单角色可单独重铸不推倒全部",
         notes: [
           "三视图同一 seed 同一次生成，DNA 签名串写进每次出图 prompt 首行——一致性靠「固定 seed + 特征串复述」双保险，不靠运气",
           "场景设定图给一致性锚点（固定机位参照物）+ 尺度参照（门高/桌高），出无人无手白底图，避免手部崩坏污染资产",
@@ -90,7 +90,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         kind: "config",
         title: "3D 白模预演方案（逐镜构图/运镜/走位，待导演台原语）",
         deliverable: "白模预演方案（逐镜分镜构图/运镜/走位，3D 白模时间线可回放）+ 用户确认过的镜头方案记录",
-        defaults: { kind: "director", unit_price_coins: 0 },
+        defaults: { kind: "director"},
         notes: [
           "先 director_get_state 了解导演台工程状态（已有元素/方案/镜头），再动其它 director 工具，不在空工程上盲写",
           "用 director_propose_plans 按分镜表出预演方案（构图/机位/走位），出完停在门禁等用户确认，未确认不落任何镜头动作",
@@ -105,7 +105,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         ],
       },
       // 环 5：渲染关键帧（逐镜首尾帧双锁 + CP 剧照 + 色调参照帧）
-      { role: "keyframe_gen", kind: "config", title: "关键帧生成配置", deliverable: "关键帧环节的生图价目与参数配置（model/size/count/单价），逐镜首尾帧与 CP 剧照按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "keyframe_gen", kind: "config", title: "关键帧生成配置", deliverable: "关键帧环节的生图价目与参数配置（model/size/count；价格由当前目录取得），逐镜首尾帧与 CP 剧照按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "keyframe",
         kind: "image",
@@ -142,7 +142,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         ],
       },
       // 环 7：生成镜头视频（I2V：关键帧首尾帧 + 角色/场景参考）
-      { role: "video_gen", kind: "config", title: "镜头视频生成配置", deliverable: "镜头视频环节的生图价目与参数配置（尺寸/每秒单价），逐镜 I2V 片段按此执行", defaults: { size: "9:16", kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 } },
+      { role: "video_gen", kind: "config", title: "镜头视频生成配置", deliverable: "镜头视频环节的生图价目与参数配置（尺寸与生成参数；价格由当前目录取得），逐镜 I2V 片段按此执行", defaults: { size: "9:16", kind: "video", } },
       {
         role: "shot_video",
         kind: "video",
@@ -179,7 +179,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         ],
       },
       // 环 9：产出投放物料（竖屏封面 + 预告切片物料）
-      { role: "promo_gen", kind: "config", title: "投放物料生成配置", deliverable: "投放物料环节的生图价目与参数配置（model/size/count/单价），竖屏封面与预告切片物料按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1792", count: 3, kind: "image", unit_price_coins: 0.001 } },
+      { role: "promo_gen", kind: "config", title: "投放物料生成配置", deliverable: "投放物料环节的生图价目与参数配置（model/size/count；价格由当前目录取得），竖屏封面与预告切片物料按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1792", count: 3, kind: "image"} },
       {
         role: "promo",
         kind: "image",

@@ -5,6 +5,8 @@
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import {
   CANVAS_INITIAL_STATE,
+  layoutGraph,
+  nextPosition,
   recordCanvasNodeVersion,
   reduceCanvasEvent,
   restoreCanvasNodes,
@@ -69,13 +71,13 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       return reduceCanvasEvent(state, normalized);
     }
     case "load":
-      return {
+      return recoverLegacyAgentStack({
         units: [],
         nodes: action.nodes,
         connections: action.connections,
         ...(action.deletedNodes && action.deletedNodes.length > 0 ? { deletedNodes: action.deletedNodes } : {}),
         ...(action.nodeVersions && action.nodeVersions.length > 0 ? { nodeVersions: action.nodeVersions } : {}),
-      };
+      });
     case "move":
       return {
         ...state,
@@ -329,7 +331,7 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       // 收紧的唯一正解＝先把要放行的键加进 `layout.ts` 的 `toNodeMetadata`（白名单真源不在
       // 本档），再回来把这里改成过白名单。在那之前维持直通，消费端自行清洗。
       // 未列举白名单外且无读者的死资料：batchIndex / batchTotal / storageKey / stepName / toolIds。
-      let next = state;
+      let next = recoverLegacyAgentStack(state);
       for (const op of action.ops) {
         switch (op.type) {
           case "add_node": {
@@ -391,9 +393,31 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             break;
         }
       }
-      return next;
+      return action.ops.some((op) => op.type === "add_node" || op.type === "connect_nodes") ? layoutGraph(next) : next;
     }
   }
+}
+
+/** 恢复旧 adapter 的精确签名：多个自动产线节点被固定为 (40,40)+moved。
+ * 只释放有 agent/DSL 来源的重叠节点；其他坐标（含人工拖放）原样保留。
+ */
+function recoverLegacyAgentStack(state: CanvasReducerState): CanvasReducerState {
+  const candidates = state.nodes.filter((node) => {
+    const meta = node.metadata as Record<string, unknown> | undefined;
+    return node.moved === true && node.position.x === 40 && node.position.y === 40 &&
+      Boolean(meta && (meta.workflow_ns || meta.workflow_id || meta.stepId || meta.session_id || meta.pipelineCard || meta.role));
+  });
+  if (candidates.length < 2) return state;
+  const recoverIds = new Set(candidates.map((node) => node.id));
+  const before = new Map(state.nodes.map((node) => [node.id, node]));
+  const repaired = layoutGraph({
+    ...state,
+    nodes: state.nodes.map((node) => ({ ...node, moved: !recoverIds.has(node.id) })),
+  });
+  return {
+    ...repaired,
+    nodes: repaired.nodes.map((node) => recoverIds.has(node.id) ? node : before.get(node.id)!),
+  };
 }
 
 /** agent add_node → 完整 CanvasNode：缺尺寸取型别预设、id 撞号丢弃、type 不认识降级文本。 */
@@ -406,16 +430,19 @@ function normalizeAgentNode(
     ? (raw.type as CanvasNodeType)
     : CanvasNodeType.Text;
   const preset = CANVAS_NODE_DEFAULT_SIZE[type];
+  const width = typeof raw.width === "number" && Number.isFinite(raw.width) ? Math.max(120, raw.width) : preset.width;
+  const height = typeof raw.height === "number" && Number.isFinite(raw.height) ? Math.max(90, raw.height) : preset.height;
+  const position = raw.position && Number.isFinite(raw.position.x) && Number.isFinite(raw.position.y) ? raw.position : undefined;
   return {
     id: raw.id,
     type,
     title: (raw.title ?? preset.title).slice(0, 120),
-    position: raw.position ?? { x: 40, y: 40 },
-    width: raw.width ?? preset.width,
-    height: raw.height ?? preset.height,
+    position: nextPosition(existing, width, height, position),
+    width,
+    height,
     // 契约：raw metadata 原始直通（不过白名单）——2026-09-25 逐键清点后确认
     // 收紧会剥掉被读键（含 DSL 通道的 step.meta 透传），维持直通，见 agent_ops 开头注释。
     ...(raw.metadata ? { metadata: raw.metadata } : {}),
-    moved: true,
+    ...(position ? { moved: true } : {}),
   };
 }

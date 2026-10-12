@@ -9,7 +9,7 @@
  * 两平台可以不同（不同平台的打包时程／机器受限，不强制同步）。top-level `version`
  * 只是「已存在的最新版本」的标记，供外部标注与排序，**不是**两平台共用版号。
  *
- * 现况：Linux 0.3.4、Windows 0.3.3。Linux 于 2026-10-11 以 AppImage 形态重发（见下 linux 段
+ * 现况：Linux 0.3.5、Windows 0.3.3。Linux 于 2026-10-12 发布完全访问授权同步修复（见下 linux 段
  * 注释）；Windows 仍是 0.3.3 旧壳，重打包待办。两平台 2026-10-04 同批发行的「壳内不再显示任何
  * 下载入口（改由 DesktopDownloadButton 在 window.eimuShell 存在时自我隐藏）」与「Windows 安装器
  * 品牌化 assisted 精灵（自绘侧栏／中文文案／无原生安装模式页）」等改动仍在。
@@ -31,18 +31,18 @@
  */
 export const DESKTOP_RELEASES = {
   // 已存在的最新版本（＝两平台目前较新者），非两平台共用版号。
-  version: "0.3.4",
+  version: "0.3.5",
   linux: {
     // 该平台产物版本：0.3.4。同一份 0.3.4 应用（含最低权限档语义变更「读取预设允许、写入询问」
     // ＋装置票修复 `sk-dev-`：网页换票 → 窄 IPC → 壳当 Bearer；授权根落盘）于 2026-10-11 由
     // `dist-034/linux-unpacked` 以 electron-builder AppImage target 重装成可自我更新的形态。
     // size/sha256 为上传后实测值；feed（本目录 `latest-linux.yml`）逐字与之对帐。
     // 执行方式：`chmod +x` 后直接跑（要免 libfuse2 可 `--appimage-extract`）。
-    version: "0.3.4",
-    url: "https://store.tinchak0207.xyz/downloads/desktop/Eimu-0.3.4-linux-x86_64.AppImage",
-    size: 125982445,
+    version: "0.3.5",
+    url: "https://store.tinchak0207.xyz/downloads/desktop/Eimu-0.3.5-linux-x86_64.AppImage",
+    size: 125986491,
     ext: "AppImage",
-    sha256: "f60ffa079393ab1a3b5b292d1477ea5836a9a9562ed08327392d7f028c890c49",
+    sha256: "3026f417c62891dc8a8ff3436b478ae4e97af2eac22a95b22207c8ebb6d2ab84",
   },
   windows: {
     // 该平台产物版本：0.3.3，于 2026-10-04 同批重建并上传（2026-10-05 原档原样迁到 VPS，

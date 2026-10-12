@@ -1,0 +1,194 @@
+--- a/internal/service/accounts.go
++++ b/internal/service/accounts.go
+@@ -75,7 +75,20 @@
+ 		return nil, err
+ 	}
+ 	s.applyDefaultProxy(ctx, account)
+-	updated, err := s.refreshAccountByProtocol(ctx, *account)
++	// Once a grant starts, caller cancellation must not discard its response:
++	// the upstream may already have consumed the one-use refresh token.
++	refreshTimeout := s.cfg.UpstreamTimeout
++	if refreshTimeout <= 0 {
++		refreshTimeout = time.Minute
++	}
++	refreshCtx, cancelRefresh := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
++	defer cancelRefresh()
++	updated, err := s.refreshAccountByProtocol(refreshCtx, *account)
++	// A completed grant consumed a one-use refresh token. Persist the new chain
++	// even if the HTTP caller disconnected after the upstream response. Keep
++	// the account lock until this bounded commit completes.
++	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
++	defer cancelCommit()
+ 	now := time.Now().UTC()
+ 	if err != nil {
+ 		fields := map[string]any{
+@@ -109,8 +122,10 @@
+ 		if strings.TrimSpace(updated.Cookies) != "" && updated.Cookies != account.Cookies {
+ 			fields["cookies"] = updated.Cookies
+ 		}
+-		_ = s.db.UpdateAccountFields(ctx, id, fields)
+-		return account, err
++		if persistErr := s.db.UpdateAccountFields(commitCtx, id, fields); persistErr != nil {
++			return &updated, fmt.Errorf("refresh failed: %w; credential commit failed: %v", err, persistErr)
++		}
++		return &updated, err
+ 	}
+ 	fields := map[string]any{
+ 		"email":                  firstNonEmpty(updated.Email, account.Email),
+@@ -128,8 +143,8 @@
+ 	if strings.TrimSpace(updated.Cookies) != "" {
+ 		fields["cookies"] = updated.Cookies
+ 	}
+-	if err := s.db.UpdateAccountFields(ctx, id, fields); err != nil {
+-		return nil, err
++	if err := s.db.UpdateAccountFields(commitCtx, id, fields); err != nil {
++		return &updated, fmt.Errorf("credential commit failed: %w", err)
+ 	}
+ 	updated.ID = id
+ 	return &updated, nil
+@@ -416,9 +431,14 @@
+ func (s *AccountService) refreshAccountByAvailableCredentials(ctx context.Context, account domain.Account) (domain.Account, error) {
+ 	var supabaseErr error
+ 	if strings.TrimSpace(account.RefreshToken) != "" {
+-		refreshed, err := s.client.RefreshSupabase(ctx, account)
++		refreshed, err := s.client.RefreshSupabaseSession(ctx, account)
+ 		if err == nil {
+ 			return refreshed, nil
++		}
++		if refreshed.RefreshToken != account.RefreshToken {
++			// The grant consumed the old token. Persist its new chain and report
++			// an unusable session; a provider fallback cannot make this a success.
++			return refreshed, err
+ 		}
+ 		account = refreshed
+ 		supabaseErr = err
+@@ -487,6 +507,12 @@
+ }
+ 
+ func hasCurrentFlowBearer(account domain.Account, now time.Time) bool {
++	// Request authentication prioritizes the cookie JWT, so its expiry must
++	// also govern freshness; an old provider bearer cannot rescue a dead JWT.
++	if jwt := extractSupabaseJWT(account.Cookies); jwt != "" {
++		expiry := extractJWTExpiry(jwt)
++		return expiry != nil && expiry.After(now)
++	}
+ 	if strings.TrimSpace(firstNonEmpty(account.FlowBearer, account.AT)) == "" {
+ 		return false
+ 	}
+@@ -513,11 +539,17 @@
+ }
+ 
+ func shouldRefreshAccount(account domain.Account, lead time.Duration, now time.Time) bool {
+-	if strings.TrimSpace(firstNonEmpty(account.FlowBearer, account.AT)) == "" {
++	expiry := account.ATExpires
++	if jwt := extractSupabaseJWT(account.Cookies); jwt != "" {
++		expiry = extractJWTExpiry(jwt)
++		if expiry == nil {
++			return true
++		}
++	} else if strings.TrimSpace(firstNonEmpty(account.FlowBearer, account.AT)) == "" {
+ 		return true
+ 	}
+-	if account.ATExpires != nil {
+-		if account.ATExpires.Sub(now) <= lead {
++	if expiry != nil {
++		if expiry.Sub(now) <= lead {
+ 			return true
+ 		}
+ 		if account.LastRefreshAt != nil {
+--- a/internal/service/flowmusic.go
++++ b/internal/service/flowmusic.go
+@@ -11,9 +11,9 @@
+ 	"net/http"
+ 	"net/url"
+ 	"sort"
+-	"sync"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"sync/atomic"
+ 	"time"
+ 
+@@ -22,8 +22,8 @@
+ )
+ 
+ type FlowMusicClient struct {
+-	cfg        config.Config
+-	mu         sync.Mutex
++	cfg         config.Config
++	mu          sync.Mutex
+ 	httpClients map[string]*http.Client
+ }
+ 
+@@ -116,7 +116,19 @@
+ 	return &FlowMusicClient{cfg: cfg, httpClients: make(map[string]*http.Client)}
+ }
+ 
++// RefreshSupabase retains the legacy provider-bearer conversion contract.
+ func (c *FlowMusicClient) RefreshSupabase(ctx context.Context, account domain.Account) (domain.Account, error) {
++	return c.refreshSupabase(ctx, account, false)
++}
++
++// RefreshSupabaseSession refreshes the credentials used by FlowMusic requests.
++// A valid Supabase JWT is sufficient; provider renewal must not delay its commit.
++func (c *FlowMusicClient) RefreshSupabaseSession(ctx context.Context, account domain.Account) (domain.Account, error) {
++	return c.refreshSupabase(ctx, account, true)
++}
++
++func (c *FlowMusicClient) refreshSupabase(ctx context.Context, account domain.Account, sessionOnly bool) (domain.Account, error) {
++	originalExpiry, originalATExpiry := account.ExpiresAt, account.ATExpires
+ 	refreshToken := strings.TrimSpace(firstNonEmpty(account.RefreshToken, account.ST))
+ 	if refreshToken == "" {
+ 		return account, fmt.Errorf("refresh_token is empty")
+@@ -166,8 +178,21 @@
+ 	// provider_token guard. Generation authenticates with this JWT (see
+ 	// applyFlowHeaders), so a missing/expired provider_token must never discard
+ 	// the fresh cookie.
+-	if cookieValue := buildSupabaseAuthCookie(payload, &account); cookieValue != "" {
+-		account.Cookies = cookieValue
++	freshCookie := buildSupabaseAuthCookie(payload, &account)
++	if freshCookie != "" {
++		account.Cookies = freshCookie
++	}
++	if sessionOnly {
++		jwtExpiry := extractJWTExpiry(getString(payload, "access_token"))
++		if freshCookie == "" || jwtExpiry == nil || !jwtExpiry.After(now) {
++			// Keep a malformed grant response from marking an old cookie fresh.
++			account.ExpiresAt, account.ATExpires = originalExpiry, originalATExpiry
++			return account, fmt.Errorf("supabase session refresh returned no usable fresh JWT cookie")
++		}
++		account.ExpiresAt = jwtExpiry
++		account.ATExpires = jwtExpiry
++		account.LastRefreshResult = "supabase_session_refresh_success"
++		return account, nil
+ 	}
+ 	if account.ProviderToken == "" {
+ 		return account, fmt.Errorf("supabase refresh succeeded but provider_token is missing; cannot update FlowMusic bearer")
+@@ -1186,7 +1211,6 @@
+ 	return token
+ }
+ 
+-
+ func extractRefreshTokenFromJWT(jwt string) string {
+ 	parts := strings.SplitN(jwt, ".", 3)
+ 	if len(parts) < 2 {
+--- a/internal/store/config_store.go
++++ b/internal/store/config_store.go
+@@ -108,7 +108,16 @@
+ 	if err != nil || !ok {
+ 		return err
+ 	}
+-	_, _, err = s.UpsertAccount(ctx, account)
++	// Initial credentials are a bootstrap seed, never the authority after
++	// rotation. Upserting here restored an already-consumed token on restart.
++	existing, err := s.GetAccountByEmail(ctx, account.Email)
++	if err != nil && err != ErrNotFound {
++		return err
++	}
++	if existing != nil {
++		return nil
++	}
++	_, err = s.CreateAccount(ctx, account)
+ 	return err
+ }
+ 

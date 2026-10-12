@@ -23,7 +23,7 @@ export const characterSheetTemplate: WorkflowTemplate =
         role: "sheet",
         kind: "config",
         title: "四视图配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 4, kind: "image", sheet: "4-view", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 4, kind: "image", sheet: "4-view"},
         deliverable: "四视图生成配置（模型/尺寸 + 角色专属固定 seed）",
       },
       {

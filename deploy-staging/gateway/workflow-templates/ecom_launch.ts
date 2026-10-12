@@ -18,7 +18,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
     multiShot: true,
     nodes: [
       // 环 1：锁产品（白底主图 + RMBG 抠图 + 产品 DNA 锁定）
-      { role: "product_gen", kind: "config", title: "白底产品锁生成配置", deliverable: "锁产品环节的生图价目与参数配置（model/size/count/单价），白底产品锁成图按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "product_gen", kind: "config", title: "白底产品锁生成配置", deliverable: "锁产品环节的生图价目与参数配置（model/size/count；价格由当前目录取得），白底产品锁成图按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "product_card",
         kind: "image",
@@ -42,7 +42,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         ],
       },
       // 环 2：铺场景包（棚拍极简/生活方式/材质微距）
-      { role: "scene_gen", kind: "config", title: "场景包生成配置", deliverable: "场景包环节的生图价目与参数配置（model/size/count/单价），情绪场景组图按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 3, kind: "image", unit_price_coins: 0.001 } },
+      { role: "scene_gen", kind: "config", title: "场景包生成配置", deliverable: "场景包环节的生图价目与参数配置（model/size/count；价格由当前目录取得），情绪场景组图按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 3, kind: "image"} },
       {
         role: "scene_pack",
         kind: "image",
@@ -63,7 +63,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         ],
       },
       // 环 3：出模特图（全身场景 + 特写佩戴/使用）
-      { role: "model_gen", kind: "config", title: "模特图生成配置", deliverable: "模特图环节的生图价目与参数配置（model/size/count/单价），模特演绎图按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 2, kind: "image", unit_price_coins: 0.001 } },
+      { role: "model_gen", kind: "config", title: "模特图生成配置", deliverable: "模特图环节的生图价目与参数配置（model/size/count；价格由当前目录取得），模特演绎图按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 2, kind: "image"} },
       {
         role: "model_shot",
         kind: "image",
@@ -84,7 +84,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         ],
       },
       // 环 4：出主视觉（KV 英雄构图 + CTA 负空间版）
-      { role: "kv_gen", kind: "config", title: "KV 主视觉生成配置", deliverable: "KV 环节的生图价目与参数配置（model/size/count/单价），主视觉与 CTA 版式按此执行", defaults: { model: "pixai-tsubaki2", size: "1536x1024", count: 2, kind: "image", unit_price_coins: 0.001 } },
+      { role: "kv_gen", kind: "config", title: "KV 主视觉生成配置", deliverable: "KV 环节的生图价目与参数配置（model/size/count；价格由当前目录取得），主视觉与 CTA 版式按此执行", defaults: { model: "pixai-tsubaki2", size: "1536x1024", count: 2, kind: "image"} },
       {
         role: "kv_hero",
         kind: "image",
@@ -105,7 +105,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         ],
       },
       // 环 5：排详情页（5-6 屏长图分镜）
-      { role: "detail_gen", kind: "config", title: "详情页分屏生成配置", deliverable: "详情页环节的生图价目与参数配置（model/size/count/单价），长图分屏按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 6, kind: "image", unit_price_coins: 0.001 } },
+      { role: "detail_gen", kind: "config", title: "详情页分屏生成配置", deliverable: "详情页环节的生图价目与参数配置（model/size/count；价格由当前目录取得），长图分屏按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 6, kind: "image"} },
       {
         role: "detail_page",
         kind: "image",
@@ -126,7 +126,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         ],
       },
       // 环 6：批量出画幅（1:1 / 3:1 / 9:16 / 16:9 重排矩阵；multiShot 可复制多 SKU）
-      { role: "aspect_gen", kind: "config", title: "多画幅重排生成配置", deliverable: "多画幅环节的生图价目与参数配置（model/size/count/单价），全画幅矩阵按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "aspect_gen", kind: "config", title: "多画幅重排生成配置", deliverable: "多画幅环节的生图价目与参数配置（model/size/count；价格由当前目录取得），全画幅矩阵按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "aspect_matrix",
         kind: "image",
@@ -147,7 +147,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         ],
       },
       // 环 7：放大精修（≥2048 短边，主图类可 4096）
-      { role: "upscale_gen", kind: "config", title: "放大精修配置", deliverable: "放大精修环节的生图价目与参数配置（model/size/count/单价），交付级精修图组按此执行", defaults: { model: "pixai-tsubaki2", size: "2048x2048", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "upscale_gen", kind: "config", title: "放大精修配置", deliverable: "放大精修环节的生图价目与参数配置（model/size/count；价格由当前目录取得），交付级精修图组按此执行", defaults: { model: "pixai-tsubaki2", size: "2048x2048", count: 1, kind: "image"} },
       {
         role: "final_assets",
         kind: "image",

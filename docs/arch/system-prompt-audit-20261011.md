@@ -180,3 +180,7 @@ journalctl -u agent-gateway --since "5 min ago" | grep "beast-frame] v2" | tail 
 - **未**跑全量 `opencode-release.sh`（避开 music 漂移）
 - `systemctl restart opencode-server` + `agent-gateway` → 皆 active；gateway `:8081`，SSE 已连 `127.0.0.1:4096`
 - 校验：AGENTS 无「底层模型 happycoding」「原生工具直调 image_generate」；messages-gw 为「两类闸」＋帧头短句无重复闸门
+
+## 8. 续篇
+
+beast OFF（creator）路径见 `docs/arch/system-prompt-audit-beast-off-20261011.md`（2026-10-11）。

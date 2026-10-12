@@ -98,7 +98,7 @@ function gate(id: string, passed: boolean, evidence: string): GateResult {
   return { id, status: passed ? "pass" : "block", evidence }
 }
 
-const MIN_SHOT_SECONDS = 10
+const MIN_SHOT_SECONDS = 5
 
 function inBounds_ok(offenders: string[], shots: Shot[]): string {
   if (shots.length === 0 || offenders.length === 0) return `单镜 ${MIN_SHOT_SECONDS}-30 秒（按条计费：单镜尽量打满模型最大档）`
@@ -118,8 +118,7 @@ function runGates(shots: Shot[], lockedCharacters: Set<string>, lockedScenes: Se
     gate("shot_order", ordered, ordered ? "镜号连续 1..N" : `镜号序列不连续：${shots.map((s) => s.order ?? "?").join("→")}`),
     gate("scene_binding", every((s) => Boolean(s.sceneId)), every((s) => Boolean(s.sceneId)) ? "每镜绑定场次" : `缺 sceneId：${bad((s) => Boolean(s.sceneId)).join(", ")}`),
     // 2026-09-20 暴君裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
-    // 单镜上限 2→30s（允许打满 seedance-2.5 480p/30s 固定档；2.0 档 10-15s 同样在界内）。
-    // 2026-10-02 H7：AGENTS.md 硬规则「严禁 <10 秒短档」（workflow-video-rules §4b）机器化；每镜=一条上游计费单位，无题材/镜头例外，末镜余数亦不豁免（须并入前一镜或明确说明）。
+    // 2026-10-12：默认影片模型改 minimax-h3（单镜 5-15s、推荐 15s）⇒ 下限 10s 放宽为 5s；上限仍 30s。
     gate("duration_bounds", every(inBounds), inBounds_ok(bad(inBounds), shots)),
     // 段长去 15s 上限：总长由创作需求决定，门禁只验「已声明且为正」；拆条打满档位是分镜纪律不是门禁。
     gate("segment_duration", (segmentDuration ?? 0) > 0, `段长已声明（输入 ${segmentDuration ?? "未填"}s；分镜总长 ${Math.round(totalDuration * 10) / 10}s；拆条打满最大档，例 80s → 30+30+20）`),
@@ -147,7 +146,7 @@ const SEMANTIC_SYSTEM = [
 
 export default tool({
   description:
-    "分镜 17 道 QC 门（10-30 秒单镜（严禁 <10 秒）/段长须声明（拆条打满模型最大档）/镜号连续/角色场景卡锁定/关键帧尾帧音讯锚点/交付比例等，17 项清单移植自 PRD 源文 shortdrama-domain，逐门代码判定 pass/block+证据）。shots 填分镜表 JSON（阵列或 {shots:[...]}，栏位 shotId/order/sceneId/prompt/durationSeconds/characterCardIds/sceneCardIds/keyframeId/lastFrameId/audioAnchorId/aspectRatio），也接受每行一镜的纯文本。另附 LLM 语义判定段（情绪连贯/轴线/节奏，失败诚实标 unavailable）。ready=true 才可进关键帧渲染。",
+    "检查分镜结构、时长、镜号、角色/场景锁定与素材锚点，返回代码门禁pass/block及证据；可选语义审核，不可用如实标记。shots接受JSON数组或{shots:[...]}（shotId/order/sceneId/prompt/durationSeconds/characterCardIds/sceneCardIds/keyframeId/lastFrameId/audioAnchorId/aspectRatio），也接受每行一镜。ready=true才进入关键帧生成；本回执不代表已对生成后的图片/视频做视觉审核。",
   args: {
     shots: tool.schema.string().describe("分镜表：JSON 字串或每行一镜的纯文本"),
     locked_character_card_ids: tool.schema.string().optional().describe("已锁定角色卡 id，JSON 阵列字串或逗号分隔"),

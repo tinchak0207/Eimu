@@ -2,13 +2,7 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, platformFetch, classifyError, registerTask } from "../lib/client"
 
 // 首尾帧视频链（2026-08-31 片4）：关键帧清单 → 逐镜提交视频 job（站点计费链）→ 轮询 → 按镜 mp4。
-// 【契约实证】站点 B 端 /v1/videos/generations 的 VideoRequestBody 只收
-// {model, prompt, n, size, duration_seconds, generate_audio, response_format, callback_url}，
-// 无 first_frame/last_frame/reference 栏位（站点与控制面两层 route 皆如此，已逐行核对）。
-// 上游 newapi/metaso adapter 虽支持 workflow.references 首尾帧，但只有 web /api/generation-jobs
-// （multipart + 用户 session 钥匙）会填充，B 端 sk-biz 计费链路径拿不到。
-// 故本工具严守「不绕过计费链」：提交走 /v1/videos/generations，首尾帧如实降级为文生视频，
-// 并在每个镜标注 frames_passed:false + 降级原因，绝不假称帧已透传。
+// 帧通过有序 reference_images 进入站点计费链；minimax-h3 是图片参考，不保证硬锁首尾帧。
 
 interface Shot {
   first_frame_url?: string
@@ -29,14 +23,20 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
   const arr = Array.isArray(j) ? j : [j]
   const shots: Shot[] = []
   for (const item of arr) {
-    if (!item || typeof item !== "object") continue
+    if (!item || typeof item !== "object" || Array.isArray(item)) return { shots: [], error: `第 ${shots.length + 1} 镜必须为对象，未提交任何镜头` }
     const o = item as Record<string, unknown>
     const prompt = typeof o.prompt === "string" ? o.prompt.trim() : typeof o.description === "string" ? o.description.trim() : ""
     const first = typeof o.first_frame_url === "string" ? o.first_frame_url.trim() : undefined
     const last = typeof o.last_frame_url === "string" ? o.last_frame_url.trim() : undefined
-    if (!prompt && !first && !last) continue
+    for (const key of ["first_frame_url", "last_frame_url"]) {
+      if (o[key] !== undefined && (typeof o[key] !== "string" || !/^https?:\/\//i.test(String(o[key]).trim()))) {
+        return { shots: [], error: `第 ${shots.length + 1} 镜 ${key} 必须是非空 http(s) URL，未提交任何镜头` }
+      }
+    }
+    if (o.duration_seconds !== undefined && (typeof o.duration_seconds !== "number" || !Number.isFinite(o.duration_seconds) || o.duration_seconds < 5 || o.duration_seconds > 15)) return { shots: [], error: `第 ${shots.length + 1} 镜时长必须为 5–15 秒` }
+    if (!prompt && !first && !last) return { shots: [], error: `第 ${shots.length + 1} 镜缺少 prompt 或图片，未提交任何镜头` }
     shots.push({
-      prompt: prompt || "（无文字提示，仅帧参考——但 B 端不支持帧，将如实标注）",
+      prompt: prompt || "根据参考图片生成连贯的视频",
       first_frame_url: first || undefined,
       last_frame_url: last || undefined,
       duration_seconds: typeof o.duration_seconds === "number" ? o.duration_seconds : undefined,
@@ -48,7 +48,7 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
   return { shots }
 }
 
-/** 构造单镜提交体（站点 B 端实际契约字段；帧字段不放入——放了会被丢弃，宁可不放并如实说明）。 */
+/** 首帧、尾帧保序作为图片参考；不宣称上游硬锁端点。 */
 function buildBody(shot: Shot, defModel: string, defSize: string, defDur: number): Record<string, unknown> {
   return {
     model: shot.model || defModel,
@@ -57,6 +57,7 @@ function buildBody(shot: Shot, defModel: string, defSize: string, defDur: number
     size: shot.size || defSize,
     duration_seconds: shot.duration_seconds ?? defDur,
     response_format: "url",
+    reference_images: [shot.first_frame_url, shot.last_frame_url].filter((url): url is string => Boolean(url)),
   }
 }
 
@@ -100,28 +101,29 @@ async function pollJob(
 
 export default tool({
   description:
-    "首尾帧视频链：输入关键帧清单（JSON 数组 [{first_frame_url?, last_frame_url?, prompt, duration_seconds?, model?, size?}]），逐镜经站点计费链 /v1/videos/generations 提交视频 job，轮询至完成，返回按镜排序的 mp4 URL + 耗时 + 实际 cost_coins。\n\n【诚实·帧契约】站点 B 端 /v1/videos/generations 实测只收 {model,prompt,n,size,duration_seconds,generate_audio,response_format,callback_url}，无 first_frame/last_frame/reference 字段（站点+控制面两层 route 逐行核对）。上游虽支持首尾帧，但仅 web 端 multipart+用户 session 路径可填，B 端 sk-biz 计费链拿不到。故本工具严守『不绕过计费链』：首尾帧如实降级为文生视频，每镜标注 frames_passed:false 与降级原因，绝不假称帧已透传。要真正首尾帧需走 web 路径（非本工具）。\n\n【预算纪律】必带 dry_run（构造提交体不发射，零扣费）；真发射前用目录 coins_per_second×时长做保守估价，超 budget_max_coins（默认 50）直接拒发并回报预算冲突，不擅自超支。submit_only 模式提交后立即返回 job ids 不等完成（长任务不阻塞）。同一错误重试 2 次即停，失败由站点计费链退款，不重发烧钱。",
+    "首尾帧视频链：输入关键帧清单（JSON 数组 [{first_frame_url?, last_frame_url?, prompt, duration_seconds?, model?, size?}]），逐镜经站点计费链 /v1/videos/generations 提交视频 job，轮询至完成，返回按镜排序的 mp4 URL + 耗时 + 实际 cost_coins。\n\n【帧契约】首帧和尾帧 URL 按序经 reference_images 透传站点计费链。minimax-h3 支持最多 9 张图片参考；图片参与生成，但不保证锁定开头或结尾。禁止丢弃关键帧而静默改成纯文生视频。\n\n【预算纪律】必带 dry_run（构造提交体不发射，零扣费）；真发射前用目录 coins_per_second×时长做保守估价，超 budget_max_coins（默认 50）直接拒发并回报预算冲突，不擅自超支。submit_only 模式提交后立即返回 job ids 不等完成（长任务不阻塞）。同一错误重试 2 次即停，失败由站点计费链退款，不重发烧钱。",
   args: {
     shots: tool.schema.string().min(1).describe("关键帧清单 JSON 数组字串：[{first_frame_url?, last_frame_url?, prompt, duration_seconds?, model?, size?}]"),
     model: tool.schema.string().optional().describe("默认视频模型（镜未指定时用）；建议先用 video_quote 查可用模型与单价"),
     size: tool.schema.string().optional().describe("默认画幅，如 16:9 / 9:16（镜未指定时用），默认 16:9"),
-    duration_seconds: tool.schema.number().int().min(4).max(15).optional().describe("默认时长秒（镜未指定时用）"),
+    duration_seconds: tool.schema.number().int().min(5).max(15).optional().describe("默认时长秒（镜未指定时用）"),
     dry_run: tool.schema.boolean().optional().describe("true=只构造提交体与预算估算，不发射、零扣费（默认 false）"),
     submit_only: tool.schema.boolean().optional().describe("true=提交后立即返回 job ids 不等完成（长任务不阻塞工具）"),
     budget_max_coins: tool.schema.number().min(0).optional().describe("真发射预算上限（币），默认 50；估价超限即拒发"),
-    max_shots: tool.schema.number().int().min(1).max(12).optional().describe("镜数上限，默认 8，超出截断并标 truncated"),
+    max_shots: tool.schema.number().int().min(1).max(100).optional().describe("镜数上限，默认 100，超过上限明确拒绝，禁止静默截断"),
     poll_timeout_ms: tool.schema.number().int().min(10000).max(600000).optional().describe("单镜轮询上限毫秒，默认 300000"),
   },
   async execute(args, context) {
     const { shots, error } = parseShots(args.shots)
     if (error) return fail("invalid_shots", error, { title: "关键帧清单解析失败" })
 
-    const maxShots = args.max_shots ?? 8
-    const truncated = shots.length > maxShots
-    const work = shots.slice(0, maxShots)
+    const maxShots = args.max_shots ?? 100
+    if (shots.length > maxShots) return fail("too_many_shots", `共 ${shots.length} 镜超过 max_shots=${maxShots}；未截断、未提交。`)
+    const truncated = false
+    const work = shots
     const defModel = (args.model || "").trim()
     const defSize = args.size || "16:9"
-    const defDur = args.duration_seconds ?? 5
+    const defDur = args.duration_seconds ?? 15
     const dryRun = args.dry_run === true
     const submitOnly = args.submit_only === true
     const budgetMax = args.budget_max_coins ?? 50
@@ -159,11 +161,11 @@ export default tool({
 
     const frameFinding = {
       endpoint: "/v1/videos/generations",
-      first_frame_supported: false,
-      last_frame_supported: false,
-      reason:
-        "站点 B 端 VideoRequestBody 无 first_frame/last_frame/reference 字段（站点+控制面两层 route 逐行核对）；上游首尾帧仅 web /api/generation-jobs（multipart+用户 session）可填，B 端计费链路径拿不到。",
-      degradation: "text_to_video（仅 prompt 提交，帧 URL 不透传，如实在每镜标注 frames_passed:false）",
+      reference_images_supported: true,
+      keyframe_image_input_supported: true,
+      head_tail_lock_guaranteed: false,
+      reason: "首帧、尾帧依序作为图片参考传入；minimax-h3 不保证锁定首尾端点。",
+      degradation: null,
     }
 
     // ── dry_run：构造提交体 + 预算估算，零扣费，不发射 ──
@@ -178,14 +180,14 @@ export default tool({
             submit_body: b,
             input_first_frame_url: work[i].first_frame_url ?? null,
             input_last_frame_url: work[i].last_frame_url ?? null,
-            frames_passed: false,
+            frames_passed: ((b.reference_images as string[]) ?? []).length > 0,
             est_coins: Math.round(estimates[i] * 1e4) / 1e4,
           })),
           total_est_coins: Math.round(totalEstimate * 1e4) / 1e4,
           budget_max_coins: budgetMax,
           within_budget: totalEstimate <= budgetMax,
           truncated,
-          note: "dry_run 未提交任何 job、零扣费。真发射请设 dry_run=false（并确认 within_budget）。帧字段不会进入提交体——站点 B 端不支持。",
+          note: "dry_run 未提交任何 job、零扣费。真发射请设 dry_run=false（并确认 within_budget）。帧 URL 已按序进入 reference_images；图片参考不保证锁定首尾。",
         },
         { dry_run: true, shots: work.length, total_est_coins: totalEstimate },
       )
@@ -227,8 +229,8 @@ export default tool({
         submit_body: body,
         input_first_frame_url: work[i].first_frame_url ?? null,
         input_last_frame_url: work[i].last_frame_url ?? null,
-        frames_passed: false,
-        frame_note: "站点 B 端不支持首尾帧，已降级文生视频",
+        frames_passed: ((body.reference_images as string[]) ?? []).length > 0,
+        frame_note: "图片已按首帧、尾帧顺序提交为参考；不保证锁定首尾端点",
       }
       if (submitOnly) {
         results.push({ ...base, status: "submitted", poll_url: `/v1/videos/${jobId}`, elapsed_ms: Date.now() - t0 })
@@ -263,7 +265,7 @@ export default tool({
         truncated,
         note: submitOnly
           ? "submit_only：job 已提交计费链，未轮询完成。用 GET /v1/videos/{job_id} 续查，完成后 result_url 取 mp4。"
-          : "逐镜经站点计费链提交+轮询；mp4_url 为成功镜产物；cost_coins 从站点 job 记录读实际值。frames_passed 恒 false（B 端帧契约不支持，已降级文生视频）。",
+          : "逐镜经站点计费链提交+轮询；mp4_url 为成功镜产物；cost_coins 从站点 job 记录读实际值。frames_passed 表示图片参考已随请求提交；不保证锁定首尾端点。",
       },
       { shots: results.length, succeeded, submit_only: submitOnly },
     )

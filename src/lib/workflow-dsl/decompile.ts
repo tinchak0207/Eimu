@@ -55,7 +55,7 @@ import {
   type WorkflowDslStep,
 } from "./schema";
 import { HARNESS_TOOL_IDS } from "../harness-tool-ids";
-import type { WorkflowNodeMetadata } from "./compile";
+import { workflowNodeId, type WorkflowNodeMetadata } from "./compile";
 
 /** schema 接受的 kind 值域（schema.ts 的 STEP_KINDS 未导出，此处按契约镜像）。 */
 const STEP_KINDS = new Set(["image", "text", "video", "audio", "director"]);
@@ -223,6 +223,23 @@ function enforceCompileValidity(sources: WorkflowDslSource[], nodeById: Map<stri
       }
       // 防御：跑完仍不合法 → 丢弃该步（不虚构、不带非法值出闸）。
       if (isStepSchemaValid(step)) steps.push(step);
+    }
+    // GAP A 镜像（2026-10-12）：compile 的 validateGraph 会拒绝「某步 meta._origin_node_id 恰好
+    // 等于另一步的确定性节点 id」的 DSL（两步共写同一画布节点 ⇒ 静默覆盖）。反推器若吐出这种
+    // 来源键，「读到的 dsl 原样交回必须成功」的承诺就会整份 ok:false 破裂。此处镜像该闸：只对
+    // 存活步骤建立确定性 id 集（workflowNodeId(source.workflow, step.id)），撞到**兄弟步**的
+    // 确定性 id 即删本步 _origin_node_id（compile 收编第三路 fallback 到 add_node，步骤不丢）；
+    // 撞自己的确定性 id（族3 decompile→compile 原样带回）合法，保留。放在降级循环之后，与
+    // compile 只看存活步骤的口径一致，也不干扰 title 兜底（其亦读 _origin_node_id）。
+    const detIdOwner = new Map<string, string>();
+    for (const step of steps) detIdOwner.set(workflowNodeId(source.workflow, step.id), step.id);
+    for (const step of steps) {
+      const meta = step.meta;
+      if (meta === undefined) continue;
+      const origin = meta._origin_node_id;
+      if (typeof origin !== "string" || origin.length === 0) continue;
+      const owner = detIdOwner.get(origin);
+      if (owner !== undefined && owner !== step.id) delete meta._origin_node_id;
     }
     // source 级：steps 数须为 WORKFLOW_STEPS_MIN..WORKFLOW_STEPS_MAX。超上限 ⇒ **整份 source
     // 不输出**（诚实缺省，2026-10-09 裁定）：截断会把「读到的就是权威骨架」变成假话，且回写

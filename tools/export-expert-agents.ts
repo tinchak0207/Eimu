@@ -39,8 +39,7 @@
 //   orchestrator = 只断「Expert 域工具」（registry toolIds 联集）。
 //     刻意保留 search_web / workflow_* 等「非 Expert 域工具」——AGENTS.md 路由表
 //     对它们仍有效，orchestrator 需要它们直调（野兽 playbook 军团）；image_generate
-//     虽已并入 video-director 域（art-style 接线），orchestrator 仍经
-//     ORCHESTRATOR_KEPT_DOMAIN_TOOLS 例外保持默认开。
+//     是 video-director 域工具，协调者关闭；画布控制和只读报价保留。
 //   expert = 全集（--tools-file 清单 / fallback）减去「该 expert 自己的 toolIds」→ 全部 false。
 //     旧规则「其他 6 行的 toolIds 联集 → false」写窄了：任何不属于任何 Expert 的工具
 //     （如 image_generate）不会被列进 false，等于 leakage —— 白名单只部分物理化，
@@ -145,7 +144,14 @@ function loadUniverse(): { tools: string[]; source: "tools-file" | "fallback" } 
 
 /** orchestrator 现行描述原文（VPS opencode.json agent.orchestrator，09-08 断路先例）。 */
 const ORCHESTRATOR_DESCRIPTION =
-  "MOE Orchestrator（野兽模式主会话）：域工具已断路，只能 subagent_dispatch 派发 Expert";
+  "Eimu 创作协调者：研究与派遣、只读报价、画布控制和独立验收；媒体生成与代码执行关闭";
+
+const ORCHESTRATOR_PROMPT = "你是 Eimu 创作协调者。理解用户目标，研究前人作品并整合独立研究结论，写自包含任务书（目标、资产、参数、授权边界、交付与验收要求），经 subagent_dispatch 派具名生产专家；研究任务可留 expert 空。收真实产物后交独立 critic 审阅，按具体问题定向返工。你负责 quote_bundle 报价与账本核对、canvas_get_state/workflow_write 画布控制和收盘写穿；不直接生成媒体或执行代码。阅读资料与注册表以理解任务，不加载生产配方。共同契约见 workspace/AGENTS.md，持续授权按网关真实状态执行。向用户报告结果与必要进度，不复述内部审稿。";
+const CREATOR_PROMPT = "你是 Eimu 创作助理（BEAST OFF），可直接调用当前开放域工具完成图片、视频、音乐创作。研究先行，再按任务读取 .opencode/skills/_prompt-routing/creator-guide.md 对应节与本域配方；多步工作可派 subagent_dispatch。共同真实性、授权、安全与交付契约见 workspace/AGENTS.md。只写歌词派 lyricist；需要原创歌词的歌曲先 lyricist 后 music，完整原词直接原样谱曲，纯器乐不派歌词。";
+const CRITIC_PROMPT = "你是独立审阅者，不制作内容。针对真实交付对象调用可用只读感知/检索工具：图片实际读图，视频实际抽帧/分析，音频只用现场真实音频分析通路；容器或转写只能证明技术/文字，不能代替听感。逐项对照用户目标，给出具名检查对象、工具真实回执或可访问产物、结果与未覆盖项；没有工具或未感知的维度标 PARTIAL，不能 PASS。保留 verdict/issues/evidence/qc 契约字段，qc 为独立回执说明，不是作者自检勾选。末行 VERDICT: PASS|FAIL|PARTIAL；字串本身不是验收证据。";
+const DIRECTOR3D_PROMPT = "你是 3D 制作专家。先确认任务书的输入资产、场景/机位、动画范围、目标尺寸与帧率、交付格式及贴图要求，缺省采用与用户目标一致的合理规格并明示；不制造统一分辨率或压缩限制。按本域配方驱动现有 Blender/3D 工具，交付任务要求的 GLB、贴图及渲染/可交互产物，保留实际文件/URL、导出回执和可用性证据。失败指出具体资产、阶段、原始工具错误与已尝试修复；没有加载/渲染证据的部分标未验。作者自查后送独立审阅。";
+const ORCHESTRATOR_CONTROL_TOOLS = new Set(["canvas_get_state", "glob", "grep", "image_quote", "list", "local_files", "local_files_authorize", "memory_recall", "question", "quote_bundle", "read", "read_image", "search_aggregate", "search_web", "skill", "smart_search", "subagent_dispatch", "subagent_status", "subagent_stop", "todowrite", "video_analyze", "video_evidence", "video_measure", "video_quote", "video_transcribe", "vision_analyze", "webfetch", "websearch", "workflow_history", "workflow_rollback", "workflow_write"]);
+const CRITIC_READ_TOOLS = new Set(["glob", "grep", "list", "read", "read_image", "search_web", "video_analyze", "video_evidence", "video_measure", "video_transcribe", "vision_analyze", "webfetch", "websearch"]);
 
 /** Expert 描述后缀（R8 修复片 1 裁定文案）。 */
 const EXPERT_DESCRIPTION_SUFFIX = "（Expert：仅经 subagent_dispatch expert 栏路由）";
@@ -186,15 +192,10 @@ const ORCHESTRATOR_DISABLED_SHARED_TOOLS = new Set(["workflow_start", "workflow_
  * task = opencode 通用子代理工具；对 orchestrator 关闭——派工唯一通路是 subagent_dispatch。
  * builtin 不在工具档清单内（universe 不含），须显式列进 map 才会物理禁用；否则默认开。
  * environment-facts 从本档 map 推导 orchestrator 的【能力断路·物理事实】，缺此行 = 宣告面少一件。 */
-const ORCHESTRATOR_DISABLED_BUILTIN_TOOLS = new Set(["task"])
+const ORCHESTRATOR_DISABLED_BUILTIN_TOOLS = new Set(["apply_patch", "bash", "edit", "lsp", "multiedit", "patch", "run_py", "task", "write"])
 
-/** orchestrator 保留的「Expert 域工具」例外（2026-10-01 art-style 接线回归修复）：
- * image_generate 原为无归属工具（orchestrator 默认开、设计刻意保留直调生图）；
- * 并入 video-director 域以接通 art_style 模板后进入 DOMAIN_TOOLS 联集，orchestrator
- * 的「域工具全 false」规则会连带把它物理禁用。修法＝显式豁免（与
- * ORCHESTRATOR_DISABLED_SHARED_TOOLS 反向对偶：那组 Expert 开/orchestrator 关，
- * 这组 Expert 开/orchestrator 也开）。 */
-const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set(["image_generate"]);
+/** No production-domain exemptions for the coordinator; read/control capabilities are explicitly listed above. */
+const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set<string>();
 
 /**
  * opencode-agents.json —— **不双写、禁止盲目覆盖发布副本**（2026-10-06 修正）。
@@ -238,23 +239,20 @@ function buildAgentsJson(universeTools: readonly string[]): string {
   };
 
   const agents: Record<string, unknown> = {};
-  // orchestrator 在前：25 域工具全 false + question true（主会话保留提问内建）。
-  // 注意：orchestrator 只断 Expert 域工具，非 Expert 域工具（search_web / workflow_* 等）保持默认开；
-  // 例外①＝ORCHESTRATOR_DISABLED_SHARED_TOOLS 显式 false（2026-09-21：野兽帧 beastTemplateFact
-  // 声明「你没有 workflow_* 工具」必须是物理事实，模板骨架由 Expert 建立；local_files 不在
-  // 此列，orchestrator 保持默认开——opencode.json 对它显式 true）。
-  // 例外②＝ORCHESTRATOR_KEPT_DOMAIN_TOOLS 反向豁免（2026-10-01：image_generate 虽并入
-  // video-director 域，orchestrator 仍刻意保留直调生图，不得被域工具全 false 规则连带禁用）。
+  // Positive control allowlist: research/read-only quotes/canvas remain; all other custom tools are denied.
   agents["orchestrator"] = {
     mode: "all",
     description: ORCHESTRATOR_DESCRIPTION,
+    prompt: ORCHESTRATOR_PROMPT,
     tools: {
       ...toolsFalse(DOMAIN_TOOLS.filter((id) => !ORCHESTRATOR_KEPT_DOMAIN_TOOLS.has(id))),
       ...toolsFalse([...ORCHESTRATOR_DISABLED_SHARED_TOOLS]),
       ...toolsFalse([...ORCHESTRATOR_DISABLED_BUILTIN_TOOLS]),
-      question: true,
+      ...toolsFalse(universeTools.filter((id) => !ORCHESTRATOR_CONTROL_TOOLS.has(id))),
+      ...Object.fromEntries([...ORCHESTRATOR_CONTROL_TOOLS].map((id) => [id, true])),
     },
   };
+  agents["creator"] = { mode: "all", description: "Eimu 默认创作助理（BEAST OFF）：开放域创作", prompt: CREATOR_PROMPT, tools: { task: false } };
   // 其后按 registry 插入序：每个 Expert false 掉「全集 − 自己域工具 − 共享工具」
   // （含不属于任何 Expert 的工具，如 image_generate）。
   for (const expert of Object.values(EXPERT_REGISTRY)) {
@@ -263,8 +261,13 @@ function buildAgentsJson(universeTools: readonly string[]): string {
     agents[expert.id] = {
       mode: "all",
       description: `${expert.description}${EXPERT_DESCRIPTION_SUFFIX}`,
-      ...(expert.id === "lyricist" ? { prompt: LYRICIST_PERSONA_PROMPT } : {}),
-      tools: toolsFalse(foreign),
+      ...(expert.id === "lyricist" ? { prompt: LYRICIST_PERSONA_PROMPT } : expert.id === "critic" ? { prompt: CRITIC_PROMPT } : ["director3d", "web3d-director"].includes(expert.id) ? { prompt: DIRECTOR3D_PROMPT } : {}),
+      tools: {
+        ...toolsFalse(foreign),
+        // 关键帧生图属于 video-director；显式开放防止配置合并保留旧 false。
+        ...(expert.id === "video-director" ? { image_generate: true } : {}),
+        ...(expert.id === "critic" ? { ...toolsFalse([...ORCHESTRATOR_DISABLED_BUILTIN_TOOLS]), ...Object.fromEntries([...CRITIC_READ_TOOLS].map((id) => [id, true])) } : {}),
+      },
     };
   }
   return `${JSON.stringify(agents, null, 2)}\n`;

@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { AgentToolAuthScope, AgentToolCallItem } from "@/lib/agent-chat-types";
 import { taskStatusTone } from "@/lib/agent-task-status";
+import { classifiedErrorStatus } from "@/lib/agent-error-status";
 import { AgentParamDisclosure } from "./AgentParamDisclosure";
 
 export interface AgentToolCardProps {
@@ -330,6 +331,8 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
   // tool.invoke 弄丢（只补发 tool.result），花出去的钱不许凭空消失。
   const panelMounted = item.argsSummary !== undefined;
   const nakedCost = !panelMounted && item.costCoins !== undefined ? item.costCoins : undefined;
+  // 已分类的上游错误（gateway error.code）→ 状态位文案；未分类回 null 照旧展示原文字。
+  const errorStatus = classifiedErrorStatus(item.errorCode);
 
   // 工具行（2026-09-20 Grok 级无底色细行）：类型图标 + 人话标题（截断吃满剩余
   // 宽度）+ 右端状态（Loader2/Check + 状态词）。无参数可展开时行不当按钮
@@ -430,15 +433,27 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
 
       {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。 */}
-      {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
-          让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。
-          错误原文是上游字串（常含 URL／JSON 键值）：必须能任意换行，
-          否则一个长 token 直接撑破行宽（2026-09-20 根因清剿）。 */}
-      {taskStatusTone(item.status).isFailure && item.error && (
-        <p className="ml-[22px] break-words rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive [overflow-wrap:anywhere]">
-          {item.error}
-        </p>
-      )}
+      {/* 失败原因两态（2026-10-11）：gateway 已分类的 code（如 flowmusic_*）渲染成
+          分类状态位（一句话类别 + 是否可重试），不把可能夹带上游原文的 human_message
+          直甩界面；未分类的照旧展示人话原文字（兜底不消失）。 */}
+      {taskStatusTone(item.status).isFailure &&
+        (errorStatus ? (
+          <div className="ml-[22px] flex flex-col gap-0.5 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive">
+            <p className="font-medium">
+              {errorStatus.label}
+              <span className="ml-1 font-normal text-destructive/80">
+                · {errorStatus.retryable ? "可重试" : "需人工处理"}
+              </span>
+            </p>
+            <p className="break-words [overflow-wrap:anywhere]">{errorStatus.hint}</p>
+          </div>
+        ) : (
+          item.error && (
+            <p className="ml-[22px] break-words rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive [overflow-wrap:anywhere]">
+              {item.error}
+            </p>
+          )
+        ))}
 
       {/* 需要授权（缺陷 C）：把 needs_authorization 渲染成 action 态，列出三选一供点击。
           三件事必须同时成立：① 语义说「需要授权」而非「完成」；② 明说尚未读到文件；

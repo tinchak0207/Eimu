@@ -42,6 +42,7 @@ export interface RunNodeFn {
 export interface WorkflowServiceOptions {
   emit: EmitFn
   runNode: RunNodeFn
+  reviewBatch?: (wf: ActiveWorkflow, nodes: WorkflowNode[]) => Promise<void>
   /**
    * S5a（2026-08-27）：错误人话化挂点（index.ts 注入 humanMessageFor）。
    * 节点失败的 canvas.node.updated patch 在 errorDetails 原文之外补
@@ -82,7 +83,7 @@ export interface ActiveWorkflow {
   workflowId: string
   templateId: string
   graph: WorkflowGraph
-  status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota" | "paused_awaiting_approval"
+  status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota" | "paused_awaiting_approval" | "review_pending" | "review_partial" | "review_failed"
   nodeStatus: Record<string, "pending" | "running" | "success" | "error">
   nodeContent: Record<string, string>
   nodeCost: Record<string, number>
@@ -122,17 +123,7 @@ function splitIntoBatches(order: string[], graph: WorkflowGraph): string[][] {
  * 有序表 ERROR_RULES（与人话翻译同源同序），判定改走 isRetryableNodeError。
  */
 
-/**
- * R5-B/R5-D2（2026-08-29 价目表纠偏）：节点单价解析——沿连线向上游 config（≤2 层）
- * 取指定价格栏位。取数原则 = 与 /pricing 数据源同源，冲突时改代码：
- *   - unit_price_coins（币/张）：pixai 系 0.001（价目表权威值；/v1/models 目录同源
- *     正确。R5-B 曾误信 ledger 实扣 3 币/张——真相是计费层多扣 3000 倍的 bug，
- *     另线修复，ledger 不作价格依据）。
- *   - unit_price_per_second（币/秒）：MiniMax H3 档位 720P = 5、1080P 见
- *     unit_price_per_second_1080p = 10（暴君价目表）。目录对 minimax-h3 标 0.25
- *     是 RMB 混币脏价，影片禁用目录。
- * 图片预设栏位行为不变；栏位参数化供影片档位复用同一条 2 层上游解析。
- */
+/** 沿上游config解析数值字段（用于秒数等参数）；报价不再以metadata价格作真源。 */
 export function resolveNodeUnitPrice(node: WorkflowNode, graph: WorkflowGraph, field = "unit_price_coins"): number | null {
   const self = node.metadata[field]
   if (typeof self === "number" && self > 0) return self
@@ -156,51 +147,21 @@ export function resolveNodeUnitPrice(node: WorkflowNode, graph: WorkflowGraph, f
   return null
 }
 
-/**
- * 2026-08-30 双账本收敛：网关侧硬编码档位价（5/10 币/秒）与 service 侧 metadata
- * 锚点价（unit_price_per_second）两套宇宙——同一工作流两个估值各写各的，报价与
- * 实扣可能漂移。收敛为单一公共函数：档位判定 + 锚点价优先、档位价兜底。
- * 供 index.ts 的 estimateNodeCoins / estimateGraphCoins 与 workflow-service 的
- * estimateGraphLocalCoins 同源调用（CONFIRM_THRESHOLD / preflightBudget /
- * midBatchBudgetGate / cost_hint 同一把尺）。
- */
-/**
- * 2026-08-31 R10 计费同源：加第三个可选参数 catalogLookup——由呼叫方（index.ts
- * 的 videoTierPerSecond）传入查平台目录 x_coins_per_second 的闭包。优先级变成
- * 锚点价（unit_price_per_second，暴君裁定不动）→ 目录价（本次新增，seedance-2.0
- * 等无 MiniMax 硬编码档位的模型走这层）→ 档位 5/10 兜底（暴君裁定 MiniMax H3
- * 校准值，不动）。省略第三参数时与旧版逐字节等价，preflightBudget/
- * midBatchBudgetGate/cost_hint 三个既有调用点不用改。
- */
+/** 视频报价仅使用目录明确的币/秒字段；模板锚点与历史档位不是账本。 */
 export function resolveVideoPerSecond(
   node: WorkflowNode,
   graph: WorkflowGraph,
-  catalogLookup?: (tier: "720p" | "1080p") => number | null,
-): number {
-  const tier = videoQualityTier(node, graph)
-  const anchored = resolveNodeUnitPrice(
-    node,
-    graph,
-    tier === "1080p" ? "unit_price_per_second_1080p" : "unit_price_per_second",
-  )
-  if (anchored !== null && anchored > 0) return anchored
-  // R10 协调修复：catalogLookup 不再要求本函式自行解析 node.metadata.model——
-  // video 节点自身的 model 常态为空（model 挂在上游 config），呼叫方
-  // （index.ts 的 videoTierPerSecond）已用 resolveNodeModel 解析好完整 model 并
-  // 闭包捕获，这里直接调用即可；此前要求 node.metadata.model 非空才调用闭包，
-  // 导致目录 fallback 恒不触发（闭包永远没机会跑）。
-  if (catalogLookup) {
-    const fromCatalog = catalogLookup(tier)
-    if (fromCatalog !== null && fromCatalog > 0) return fromCatalog
-  }
-  return tier === "1080p" ? 10 : 5
+  catalogLookup?: (tier: "720p" | "1080p" | "default") => number | null,
+): number | null {
+  const value = catalogLookup?.(videoQualityTier(node, graph))
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
 }
 /**
  * R5-D2：影片档位探测——quality 栏位（节点自身或上游 config ≤2 层；index.ts 提交
  * 视频时原样透传 cfg.quality）含 "1080" → 1080P 档；含 "720" 或缺省 → 720P 档
  *（保守取低档）。resolution/definition 栏位同名同判。
  */
-function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1080p" {
+function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1080p" | "default" {
   const scan = (meta: Record<string, unknown>): string | null => {
     for (const k of ["quality", "resolution", "definition"]) {
       const v = meta[k]
@@ -230,7 +191,7 @@ function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1
     }
     frontier = frontier.flatMap((up) => upstreamOf(up.id))
   }
-  return "720p"
+  return "default"
 }
 
 /** 余额解析（与 gateway fetchBalance/extractBalance 同构：balance_coins/balance/coins/credit，递归 data）。 */
@@ -271,6 +232,7 @@ export class WorkflowService {
   private workflows = new Map<string, ActiveWorkflow>()
   // F1（2026-08-31）：执行循环去重集合——generate() 重入守卫与 finally 清理用。
   private generateLoops = new Set<string>()
+  private reviewResume = new Set<string>()
   constructor(private opts: WorkflowServiceOptions) {}
 
   /** 通知 gateway：本工作流有状态变更，请镜像进 session 持久化（防抖落盘）。 */
@@ -324,64 +286,17 @@ export class WorkflowService {
     return { nodeId: last?.nodeId ?? node.id, ok: false, error: `${last?.error ?? "unknown"}（已自动重试 ${maxRetries} 次仍失败）` }
   }
 
-  /**
-   * R5-B/R5-D2：本地估价——image 节点取 config 的 unit_price_coins（pixai 系 0.001
-   * 币/张 = 价目表同源值；5 张 ≈ 0.005 币是正确显示）；无 config 价锚时解析模型：
-   * 缺 model（引擎预设 pixai-tsubaki2）或 pixai 系 → 价目表 0.001，其他模型无本地锚
-   * → null（纯图工作流由目录挂点同源补价）。video 节点按 quality 档位取
-   * unit_price_per_second（720P = 5 币/秒预设、1080P = 10 币/秒），秒数取节点/上游
-   * config 的 duration_seconds，取不到按保守预设 5s。0.05 币/秒旧口径与目录脏价
-   *（minimax-h3 被标 0.25，RMB 混币）一律禁用；解析不到锚点 → null（宁缺勿编）。
-   */
+  /** 价格只由既有站内coin目录挂点提供；模板metadata不参与报价。 */
   estimateGraphLocalCoins(graph: WorkflowGraph): number | null {
-    let total = 0
-    let any = false
-    for (const n of graph.nodes) {
-      if (n.kind === "text" || n.kind === "config") continue
-      any = true
-      if (n.kind === "video") {
-        // R5-D2：档位价——1080P 只认 unit_price_per_second_1080p（无档位价不低报，
-        // 回 null）；720P（含缺省）认 unit_price_per_second。
-        const perSec =
-          videoQualityTier(n, graph) === "1080p"
-            ? resolveNodeUnitPrice(n, graph, "unit_price_per_second_1080p")
-            : resolveNodeUnitPrice(n, graph, "unit_price_per_second")
-        if (perSec === null) return null // 无锚点不编数（0.05 旧口径已废）
-        const selfSecs = n.metadata.duration_seconds
-        const secs =
-          typeof selfSecs === "number" && selfSecs > 0
-            ? selfSecs
-            : (resolveNodeUnitPrice(n, graph, "duration_seconds") ?? 5) // 保守预设 5s
-        total += perSec * secs
-        continue
-      }
-      if (n.kind !== "image") continue
-      const anchored = resolveNodeUnitPrice(n, graph)
-      if (anchored !== null) {
-        total += anchored
-        continue
-      }
-      // R5-D2：无价锚——模型归属判断（见 resolveImageModelName）
-      const model = resolveImageModelName(n, graph)
-      if (model && !model.startsWith("pixai")) return null
-      total += 0.001 // 缺 model = 引擎预设 pixai-tsubaki2；pixai 系 = 价目表 0.001 币/张
-    }
-    return any ? Math.round(total * 1e6) / 1e6 : null
+    // 同步画布读面复用已暖站内coin目录；没有报价挂点时媒体价格明确未知。
+    if (this.opts.estimateGraphCoins) return this.opts.estimateGraphCoins(graph)
+    const executable = graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
+    if (!executable.length || executable.some((n) => n.kind === "image" || n.kind === "video")) return null
+    return 0 // 既有audio/film执行路径不收平台生成币
   }
 
-  /**
-   * R5-B/R5-D2：全图估价——本地锚点（unit_price_coins / unit_price_per_second，
-   * 价目表同源）优先。含 video 节点的图禁用 gateway 目录回落：video 旧口径
-   * 0.05 币/秒与目录脏价（minimax-h3 标 0.25，RMB 混币）都会从回落漏进来——
-   * 宁可 null 不回落脏价。纯图工作流本地估不出才回落 gateway 目录挂点
-   *（目录图片价与 /pricing 同源正确；seedance 2.0 是视频模型，分类归属由域 A 修，
-   * 本估价不把它当图片模型——无 unit_price 锚点即 null）。
-   */
   estimateTotalCoins(graph: WorkflowGraph): number | null {
-    const local = this.estimateGraphLocalCoins(graph)
-    if (local !== null) return local
-    if (graph.nodes.some((n) => n.kind === "video")) return null
-    return this.opts.estimateGraphCoins ? this.opts.estimateGraphCoins(graph) : null
+    return this.estimateGraphLocalCoins(graph)
   }
 
   /**
@@ -419,8 +334,9 @@ export class WorkflowService {
       (n) => n.kind !== "text" && n.kind !== "config" && wf.nodeStatus[n.id] !== "success",
     )
     if (!pending.length) return null
-    const need = this.estimateTotalCoins({ nodes: pending, connections: wf.graph.connections })
-    if (need === null || !(need > 0)) return null
+    const need = this.estimateTotalCoins({ nodes: wf.graph.nodes.filter((n) => n.kind === "text" || n.kind === "config" || pending.some((p) => p.id === n.id)), connections: wf.graph.connections })
+    if (need === null) return "未取得当前目录币值报价，预算状态未知；工作流已暂停，尚未提交生成。"
+    if (!(need > 0)) return null
     const balance = await this.ownerBalance(wf)
     if (balance === null) return null
     if (balance < need) {
@@ -433,7 +349,8 @@ export class WorkflowService {
 
   private async preflightBudget(wf: ActiveWorkflow): Promise<string | null> {
     const need = this.estimateTotalCoins(wf.graph)
-    if (need === null || !(need > 0)) return null
+    if (need === null) return "未取得当前目录币值报价，预算状态未知；工作流已暂停，尚未提交生成。"
+    if (!(need > 0)) return null
     const owner = wf.owner as { apiKey?: string } | null | undefined
     if (!owner?.apiKey) {
       console.log(`[workflow-budget] ${wf.workflowId} preflight skipped: no session key on owner (need=${need})`)
@@ -468,7 +385,7 @@ export class WorkflowService {
    */
   async start(templateId: string | null, content: TemplateContent = {}, owner?: unknown): Promise<{ workflowId: string } | { error: string }> {
     let videoModel: string | null = null
-    if (templateId && this.opts.pickDefaultVideoModel && getWorkflowTemplate(templateId)?.multiShot) {
+    if (templateId && this.opts.pickDefaultVideoModel && (getWorkflowTemplate(templateId)?.multiShot || templateId === "single_video")) {
       // fail-open：探测不可达/逾时 → null → startSync 用引擎默认（submit 前仍有 F2 failover）
       videoModel = await Promise.race([
         this.opts.pickDefaultVideoModel().catch(() => null),
@@ -541,7 +458,7 @@ export class WorkflowService {
     for (const n of graph.nodes) {
       if (n.kind === "config") {
         const isVideo = n.metadata.kind === "video"
-        if (!n.metadata.model) n.metadata.model = isVideo ? defaultVideoModel || "seedance-2.0" : "pixai-tsubaki2"
+        if (!n.metadata.model) n.metadata.model = isVideo ? defaultVideoModel || "minimax-h3" : "pixai-tsubaki2"
         if (!n.metadata.size) n.metadata.size = isVideo ? "16:9" : "1024x1024"
       }
     }
@@ -657,6 +574,7 @@ export class WorkflowService {
   }
 
   updateNode(workflowId: string, nodeId: string, patch: Record<string, unknown>): { error: string } | { node: unknown; affected_node_ids: string[]; status: string } {
+    patch = { ...patch }; delete patch.quality_review // review authority only comes from the real critic lifecycle
     const wf = this.workflows.get(workflowId)
     if (!wf) return { error: "workflow not found" }
     const node = wf.graph.nodes.find((n: any) => n.id === nodeId)
@@ -725,6 +643,53 @@ export class WorkflowService {
     return { ok: true }
   }
 
+  recordQualityReview(workflowId: string, nodeId: string, artifact: string, review: Record<string, unknown>): void {
+    const wf = this.workflows.get(workflowId)
+    const node = wf?.graph.nodes.find((n) => n.id === nodeId)
+    if (!wf || !node || wf.nodeContent[nodeId] !== artifact) return
+    node.metadata.quality_review = { ...review, artifact }
+    this.dirty(wf)
+    // Existing durable gate string conveys quality state on the canvas; authority remains server/DB.
+    this.opts.emit(wf.owner, "canvas.node.updated", { unit_id: workflowId, node_id: nodeId, patch: { gate: `独立质量审阅：${String(review.state)}；当前产物${review.state === "passed" ? "已验" : "未通过，暂停下游"}` } })
+  }
+
+  private requiresQualityReview(wf: ActiveWorkflow, node: WorkflowNode): boolean {
+    // Policy comes from the server node kind/template, never from mutable canvas/DSL gate text.
+    if (["image", "video", "film"].includes(node.kind)) return true
+    if (node.kind === "audio") {
+      const source = getWorkflowTemplate(wf.templateId)?.nodes.find((spec) => spec.role === node.role)
+      return !!source?.gate
+    }
+    return false
+  }
+
+  /** Media execution success and independent quality approval are distinct states. */
+  private async qualityGate(wf: ActiveWorkflow): Promise<string | null> {
+    const nodes = wf.graph.nodes.filter((node) => node.kind !== "text" && node.kind !== "config" && wf.nodeStatus[node.id] === "success" && !!wf.nodeContent[node.id] &&
+      this.requiresQualityReview(wf, node))
+    if (!nodes.length) return null
+    // Hook validates saved receipt against the current artifact even when metadata claims passed.
+    if (this.opts.reviewBatch) await this.opts.reviewBatch(wf, nodes)
+    else for (const node of nodes) this.recordQualityReview(wf.workflowId, node.id, wf.nodeContent[node.id], { state: "partial", reason: "没有独立审阅provider" })
+    for (const node of nodes) {
+      const review = node.metadata.quality_review as { artifact?: string; state?: string } | undefined
+      if (review?.artifact === wf.nodeContent[node.id] && review.state === "passed") continue
+      wf.status = review?.state === "failed" ? "review_failed" : review?.state === "partial" ? "review_partial" : "review_pending"
+      this.dirty(wf)
+      return `独立质量审阅${wf.status === "review_pending" ? "进行中" : "尚未通过"}，已保留当前产物并暂停下游；不自动重新生成。`
+    }
+    return null
+  }
+
+  /** Callback resumes using the existing generation lock; no second concurrent loop. */
+  resumeAfterReview(workflowId: string): void {
+    if (this.generateLoops.has(workflowId)) { this.reviewResume.add(workflowId); return }
+    const wf = this.workflows.get(workflowId)
+    if (!wf || !["review_pending", "review_partial"].includes(wf.status)) return
+    if (wf.graph.nodes.some((n) => { const r = n.metadata.quality_review as { artifact?: string; state?: string } | undefined; return r && r.artifact === wf.nodeContent[n.id] && r.state !== "passed" })) return
+    void this.generate(workflowId)
+  }
+
   /** H6：路由层同步预检用——该工作流是否已有 generate 循环在跑。 */
   isGenerating(workflowId: string): boolean {
     return this.generateLoops.has(workflowId)
@@ -740,6 +705,7 @@ export class WorkflowService {
       return await this.generateInner(workflowId)
     } finally {
       this.generateLoops.delete(workflowId)
+      if (this.reviewResume.delete(workflowId)) this.resumeAfterReview(workflowId)
     }
   }
 
@@ -804,6 +770,8 @@ export class WorkflowService {
         executableIds.push(nodeId)
       }
       if (!executableIds.length) continue
+      const reviewBlocked = await this.qualityGate(wf)
+      if (reviewBlocked) return { ok: false, status: reviewBlocked }
       // R9 中途闸：批间重查余额（详见 midBatchBudgetGate 注）。
       const pausedReason = await this.midBatchBudgetGate(wf)
       if (pausedReason) {
@@ -868,6 +836,8 @@ export class WorkflowService {
     // R10（2026-08-31）：此三态只判定 execution 维度（节点是否跑完），不代表交付完整性
     //（宣告4镜头只跑成1镜头时，此处仍会是 success——delivery 维度的完整性检查见 status() 的
     // delivery 阵列，两个维度刻意分离，不在此处混入）。
+    const reviewBlocked = await this.qualityGate(wf)
+    if (reviewBlocked) return { ok: false, status: reviewBlocked }
     const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
     const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
     const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length
@@ -915,6 +885,7 @@ export class WorkflowService {
         status: wf.nodeStatus[n.id],
         content: wf.nodeContent[n.id],
         costCoins: wf.nodeCost[n.id],
+        quality_review: n.metadata.quality_review ?? null,
       })),
       connections: wf.graph.connections,
       ...(delivery.length ? { delivery } : {}),
@@ -976,6 +947,16 @@ export class WorkflowService {
    * 执行/事件/落盘语义与 generate 完全一致（emitGraph 幂等兜底、逐节点 dirty）。
    */
   async rerun(workflowId: string, rootNodeId: string): Promise<{ ok: boolean; status: string }> {
+    if (this.generateLoops.has(workflowId)) return { ok: false, status: "already running" }
+    this.generateLoops.add(workflowId)
+    try { return await this.rerunInner(workflowId, rootNodeId) }
+    finally {
+      this.generateLoops.delete(workflowId)
+      if (this.reviewResume.delete(workflowId)) this.resumeAfterReview(workflowId)
+    }
+  }
+
+  private async rerunInner(workflowId: string, rootNodeId: string): Promise<{ ok: boolean; status: string }> {
     const wf = this.workflows.get(workflowId)
     if (!wf) return { ok: false, status: "workflow not found" }
     const root = wf.graph.nodes.find((n) => n.id === rootNodeId)
@@ -1030,6 +1011,8 @@ export class WorkflowService {
         executableIds.push(nodeId)
       }
       if (!executableIds.length) continue
+      const reviewBlocked = await this.qualityGate(wf)
+      if (reviewBlocked) return { ok: false, status: reviewBlocked }
       for (const nodeId of executableIds) {
         wf.nodeStatus[nodeId] = "running"
         this.dirty(wf)
@@ -1070,6 +1053,8 @@ export class WorkflowService {
     }
 
     // R5-B：三态终判（与 generate 同口径）——partial 时成功节点成果原样保留
+    const reviewBlocked = await this.qualityGate(wf)
+    if (reviewBlocked) return { ok: false, status: reviewBlocked }
     const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
     const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
     const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length

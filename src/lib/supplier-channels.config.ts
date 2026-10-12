@@ -117,6 +117,31 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
+    // miaowuai（喵呜API，api.miaowuai.store，2026-10-12 暴君指定）：影片生成
+    // **默认渠道**——协议与我方既有 openai_video 轮子同型（new-api 上游：POST
+    // {base}/videos 创建、GET {base}/videos/{id} 轮询，completed 顶层 `url`，与
+    // xiaoyxiao 实弹形状相同），adapter 零改动。认领 minimax-h3 → 上游
+    // minimax-h3-max（GET /v1/models 2026-10-12 实查）。
+    //
+    // 上游单价（GET https://api.miaowuai.store/api/pricing 2026-10-12 免 key 唯读实查）：
+    //   model_name=minimax-h3-max, quota_type=1, model_price=0.2857142857142857（USD；
+    //   站点 /api/status usd_exchange_rate=7 ⇒ ¥2.00/次，按次固定价、不随
+    //   resolution/seconds 变动）；video_api：sizes=["720p","480p"]、seconds 5–15
+    //   （≤720p，符合成本闸红线；**不是** 4k 动态价，无 ¥31.2857 事故形状）。
+    label: "miaowuai",
+    baseUrlEnv: "MIAOWUAI_BASE_URL",
+    apiKeyEnv: "MIAOWUAI_API_KEY",
+    enabledEnv: "MIAOWUAI_ENABLED",
+    tier: "managed_pool",
+    sitePriority: 3,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      { modelId: "minimax-h3", supplierModelId: "minimax-h3-max", kinds: ["video_generate"], unitPriceCny: 2.0, priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-12 (quota_type=1, model_price=0.2857142857142857 USD × usd_exchange_rate=7 = ¥2.00)" },
+    ],
+  },
+
+{
     label: "hublinuxdo",
     baseUrlEnv: "HUBLINUXDO_BASE_URL",
     apiKeyEnv: "HUBLINUXDO_API_KEY",

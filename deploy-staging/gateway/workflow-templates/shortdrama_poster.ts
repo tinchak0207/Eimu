@@ -18,7 +18,7 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
     multiShot: true,
     nodes: [
       // 步 1：锚定视觉基调（key art 定调，后续全链以它为风格锚）
-      { role: "tone_gen", kind: "config", title: "基调生成配置", deliverable: "基调环节的生图价目与参数配置（model/size/count/单价），key art 主视觉按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "tone_gen", kind: "config", title: "基调生成配置", deliverable: "基调环节的生图价目与参数配置（model/size/count；价格由当前目录取得），key art 主视觉按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 1, kind: "image"} },
       {
         role: "key_art",
         kind: "image",
@@ -44,7 +44,7 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
         ],
       },
       // 步 2：提炼主演海报（气场版 / 情绪版）
-      { role: "poster_gen", kind: "config", title: "主演海报生成配置", deliverable: "主演海报环节的生图价目与参数配置（model/size/count/单价），气场版/情绪版海报按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 2, kind: "image", unit_price_coins: 0.001 } },
+      { role: "poster_gen", kind: "config", title: "主演海报生成配置", deliverable: "主演海报环节的生图价目与参数配置（model/size/count；价格由当前目录取得），气场版/情绪版海报按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 2, kind: "image"} },
       {
         role: "main_poster",
         kind: "image",
@@ -67,7 +67,7 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
         ],
       },
       // 步 3：排布 CP 对戏图（对视/逼近/拉扯三级张力）
-      { role: "cp_gen", kind: "config", title: "CP 对戏生成配置", deliverable: "CP 对戏环节的生图价目与参数配置（model/size/count/单价），三级张力图组按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 3, kind: "image", unit_price_coins: 0.001 } },
+      { role: "cp_gen", kind: "config", title: "CP 对戏生成配置", deliverable: "CP 对戏环节的生图价目与参数配置（model/size/count；价格由当前目录取得），三级张力图组按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 3, kind: "image"} },
       {
         role: "cp_pair",
         kind: "image",
@@ -90,7 +90,7 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
         ],
       },
       // 步 4：切片封面批量（剧名安全区模板，逐集对位情绪标签）
-      { role: "cover_gen", kind: "config", title: "切片封面批量配置", deliverable: "切片封面环节的生图价目与参数配置（model/size/count/单价），批量信息流封面按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 8, kind: "image", unit_price_coins: 0.001 } },
+      { role: "cover_gen", kind: "config", title: "切片封面批量配置", deliverable: "切片封面环节的生图价目与参数配置（model/size/count；价格由当前目录取得），批量信息流封面按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 8, kind: "image"} },
       {
         role: "slice_cover",
         kind: "image",
@@ -112,7 +112,7 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
         ],
       },
       // 步 5：生成变体测试包（单变量钩子/字效变体，供 A/B 归因）
-      { role: "variant_gen", kind: "config", title: "投放变体生成配置", deliverable: "投放变体环节的生图价目与参数配置（model/size/count/单价），A/B 变体包按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 8, kind: "image", unit_price_coins: 0.001 } },
+      { role: "variant_gen", kind: "config", title: "投放变体生成配置", deliverable: "投放变体环节的生图价目与参数配置（model/size/count；价格由当前目录取得），A/B 变体包按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1536", count: 8, kind: "image"} },
       {
         role: "variant_pack",
         kind: "image",

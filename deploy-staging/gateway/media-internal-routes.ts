@@ -7,12 +7,11 @@ import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
 import { estimateTtsCoins } from "./pricing-and-validation"
-import { loadUserSettings } from "./persistence"
-import { normalizeUserSettings } from "./sessions-http.ts"
+import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
 import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, checkTemplateGuard, canvasResultNodeId, applyCanvasNodeUpdated, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
-import { resolveSession, getOwnedSession } from "./sessions-core.ts"
+import { resolveSession, getOwnedSession, sessions } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.ts"
 import { emitSessionError } from "./emit-helpers.ts"
@@ -447,6 +446,9 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   const settled = state.resolvedConfirms.get(request_id)
   if (settled) return Response.json({ status: settled.outcome, request_id })
   if (state.pendingConfirms.has(request_id)) {
+    await approvePendingCharge(state, request_id)
+    const resolved = state.resolvedConfirms.get(request_id)
+    if (resolved) return Response.json({ status: resolved.outcome, request_id })
     return Response.json({ status: "pending", request_id }, { status: 202 })
   }
 
@@ -457,7 +459,20 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   // confirm.resolved；工具下一次轮询 /internal/confirm-status 直接拿到 approved）。
   // 不 emit confirm.request（用户不看确认卡）。余额不足仍会被预检/结算拒掉，
   // 402 预算闸与批间 midBatchBudgetGate 不受影响（系统级安全，不是提问）。
-  if (normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode === "auto") {
+  const autoApproved = await billingAutoApprovalEnabled(state)
+  // 权限查询会让出执行权；其它首次注册/轮询/切档可能已注册或结清同一单。
+  // 恢复执行后先重取真实状态，不能覆盖原 timer/callback 或重复生成账目。
+  const racedResolved = state.resolvedConfirms.get(request_id)
+  if (racedResolved) return Response.json({ status: racedResolved.outcome, request_id })
+  const racedPending = state.pendingConfirms.get(request_id)
+  if (racedPending) {
+    if (autoApproved && racedPending.ledger) settleConfirm(state, request_id, "approved")
+    const resolved = state.resolvedConfirms.get(request_id)
+    if (resolved) return Response.json({ status: resolved.outcome, request_id })
+    return Response.json({ status: "pending", request_id }, { status: 202 })
+  }
+  // 此处到 pending 注册与同步 settle 之间没有 await，JS 执行段保持原子。
+  if (autoApproved) {
     state.pendingConfirms.set(request_id, {
       timer: setTimeout(() => {}, 0),
       ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
@@ -484,6 +499,22 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   emitToSession(state, "confirm.request", { request_id, amount_coins: amount, description })
 
   return Response.json({ status: "pending", request_id }, { status: 202 })
+}
+
+/** 只结清带扣费账目的确认；协作停点等非收费确认不得由此获得授权。 */
+export async function approvePendingCharge(state: SessionState, requestId: string): Promise<boolean> {
+  if (!state.pendingConfirms.get(requestId)?.ledger) return false
+  if (!await billingAutoApprovalEnabled(state)) return false
+  // await 期间可能已由用户/过期处理结清，settleConfirm 本身保证只执行一次。
+  return settleConfirm(state, requestId, "approved")
+}
+
+/** 用户切入 full：同租户已弹出的收费卡立即结清并复用原续跑链。 */
+export async function approveTenantPendingCharges(tenant: string): Promise<void> {
+  for (const state of sessions.values()) {
+    if (state.pendingConfirms.size === 0 || await billingPermissionTenant(state) !== tenant) continue
+    for (const requestId of [...state.pendingConfirms.keys()]) await approvePendingCharge(state, requestId)
+  }
 }
 
 /**
@@ -607,8 +638,8 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
     await emitVideoDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
   } else if (event === "audio.done") {
     // 同 video.done：放行却静默丢帧。共用 emitAudioDone，语义与前端 audio.done 卡对齐。
-    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio" }
-    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
+    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio"; title?: string; cover?: string; lyric_status?: string }
+    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind, { title: d.title, cover: d.cover, lyric_status: d.lyric_status })
   } else if (event === "image.failed") {
     const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
     if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)

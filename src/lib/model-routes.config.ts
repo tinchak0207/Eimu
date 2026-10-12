@@ -74,7 +74,9 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   "seedance-2.0": ["xiaoyxiao", "gway"],
   "seedance-2.5-480p": ["xiaoyxiao", "gway"],
   "seedance-2.5-720p": ["xiaoyxiao", "gway"],
-  "minimax-h3": ["xiaoyxiao"],
+  // 2026-10-12 暴君裁定：影片生成默认渠道改 miaowuai（api.miaowuai.store），
+  // minimax-h3 → 上游 minimax-h3-max（¥2.00/次，成本闸白名单已登记）；xiaoyxiao 退为备援。
+  "minimax-h3": ["miaowuai", "xiaoyxiao"],
 
   // ── 语音 ──
   "tts-1": ["harness-tts"],

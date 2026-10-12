@@ -26,8 +26,9 @@
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
 | 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途经 `subagent_dispatch` 派对应 3D/动态域 Expert 执行 `blender_exec`） | — |
-| 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：严禁 <10 秒短档，按 attach/workflow-video-rules.md §4b 时长最大化，seedance-2.0 选用 10–15s、seedance-2.5 选用 10–30s**） | — |
+| 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：默认 minimax-h3（可靠稳定快速、约 45s 出片、单镜 5–15s、推荐 15s）；时长策略按 attach/workflow-video-rules.md §4b（按条计费，尽量打满时长档）**） | — |
 | 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读 attach/workflow-video-rules.md** | — |
+| 关键帧驱动影片／图生视频／起止关键帧 | `image_generate` 影片模型传 `reference_images:[起帧URL,止帧URL]`；`last_frame_video_chain` 每镜 shots 传 `first_frame_url`／`last_frame_url`；工作流视频节点 metadata 传首尾同名字段或 `reference_images`，也可连接对应图片节点。minimax-h3 最多 9 张有序图参考；28 张／14 镜按每镜 2 张注入。上游 image_urls 是图片驱动参考，不承诺像素级首尾硬锁；禁止声称本站影片端不接受图片而改成纯文生视频。 | — |
 | 影片拆解（链接或上传影片：讲了什么/分镜/台词/反推提示词/翻拍/去字幕/下载） | 链接先 `video_fetch`（首次 action=prepare）落本地 → `video_analyze`（场景切点+代表帧+词级台词；提示词反推回 vlm_unavailable 时对代表帧跑 read-image 补）；只要台词稿 `video_transcribe`；去字幕 `video_desubtitle`；翻拍/换角重做 `video_remake_plan`；抽帧/切段/探针 `video_evidence`；台词折算秒数写进分镜 `video_measure` | ffmpeg 抽帧 + read-image |
 
 ## §剪辑
@@ -128,4 +129,3 @@
 - **除非用户明确要求某平台（B站／GitHub／Reddit）的站内内容，否则不要先挑平台工具**；通用网页一律先 `search_web`（经 `subagent_dispatch` 派研究子代理执行）。
 - 三者结论都必须带 URL 出处，禁止只凭内部知识作答。
 - **硬规则：通用网页意图不要用 `search_aggregate`；要平台站内内容不要用 `search_web`。禁止为了「比较哪个搜寻工具」而派子代理——照这张表选就好。**
-

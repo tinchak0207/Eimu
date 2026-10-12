@@ -29,7 +29,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         kind: "text",
         title: "结构化剧本（场次表/节拍/台词折算）",
         deliverable: "结构化剧本 JSON（场次表 + 节拍 beat list + 台词表按 4.5 字/秒折算时长 + 每场钩子位标注 + 情绪曲线标注）+ 一页故事大纲",
-        gate: "剧本人工批准门禁：用户未确认大纲和场次表前，禁止进入任何视觉环节",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；剧本人工批准门禁：用户未确认大纲和场次表前，禁止进入任何视觉环节",
         notes: [
           "按「场」切分而非按章节：地点或时间变化即换场；每场提取起止拍、冲突点、情绪值（-5~+5）",
           "台词全部按 4.5 字/秒折算成秒数写进 JSON，后续分镜时长直接引用不重算",
@@ -65,7 +65,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "char_gen",
         kind: "config",
         title: "角色卡生成配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"},
         deliverable: "角色卡生成配置（模型/尺寸/张数/固定 seed），锁定三视图生成参数供全片复用",
       },
       {
@@ -103,7 +103,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "art_gen",
         kind: "config",
         title: "美术卡生成配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"},
         deliverable: "美术卡生成配置（同一固定 seed 族，只变场景内容不变风格参数，等价于 sref 风格锁）",
       },
       {
@@ -125,7 +125,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         kind: "text",
         title: "分镜表（逐镜景别/机位/运镜/时长）",
         deliverable: "分镜表 JSON（逐镜：景别/机位/运镜/时长取自台词折算/转场标记 J-cut 或 L-cut）+ 黑白 sketch-lock 线稿分镜板（低成本低分辨率先行）",
-        gate: "分镜人工批准门禁：sketch 板 + 分镜表给用户过目，确认节奏与构图后才准进白模预演",
+        gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；分镜人工批准门禁：sketch 板 + 分镜表给用户过目，确认节奏与构图后才准进白模预演",
         notes: [
           "sketch-lock 黑白先行：先用线稿/灰度图铺全部分镜验证构图与叙事节奏，构图错了重画线稿成本远低于重渲关键帧",
           "每镜写清摄影语言：景别（远全中近特）、机位角度、运镜（推拉摇移跟）、秒数=台词折算时长+反应拍",
@@ -162,7 +162,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "keyframe_gen",
         kind: "config",
         title: "关键帧生成配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"},
         deliverable: "关键帧生成配置（角色 DNA 短语原文复用 + 专属固定 seed + 三视图参考图三重锁）",
       },
       {
@@ -188,8 +188,8 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "video_gen",
         kind: "config",
         title: "视频生成配置",
-        defaults: { model: "seedance-2.0", size: "16:9", duration_seconds: 15, kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 },
-        deliverable: "视频生成配置（I2V 双帧法：起始帧定入场、结束帧定落点；单镜 3-8 秒，超长拆段拼接）",
+        defaults: { size: "16:9", duration_seconds: 15, kind: "video", },
+        deliverable: "视频生成配置（I2V 双帧法：起始帧定入场、结束帧定落点；单镜 5-15 秒（推荐 15 秒），超长拆段拼接）",
       },
       {
         role: "shot_video",

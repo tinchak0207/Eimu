@@ -37,7 +37,7 @@ export const artCurationTemplate: WorkflowTemplate =
         ],
       },
       // 环 2：情绪板（单图生成编排）
-      { role: "moodboard_gen", kind: "config", title: "情绪板生成配置", deliverable: "情绪板环节的生图价目与参数配置（model/size/count/单价），情绪板参考图组按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "moodboard_gen", kind: "config", title: "情绪板生成配置", deliverable: "情绪板环节的生图价目与参数配置（model/size/count；价格由当前目录取得），情绪板参考图组按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "moodboard",
         kind: "image",
@@ -58,7 +58,7 @@ export const artCurationTemplate: WorkflowTemplate =
         ],
       },
       // 环 3：风格锚（canonical key art，全组对表基准）
-      { role: "style_gen", kind: "config", title: "风格锚生成配置", deliverable: "风格锚环节的生图价目与参数配置（model/size/count/单价），canonical key art 按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "style_gen", kind: "config", title: "风格锚生成配置", deliverable: "风格锚环节的生图价目与参数配置（model/size/count；价格由当前目录取得），canonical key art 按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "style_anchor",
         kind: "image",
@@ -83,7 +83,7 @@ export const artCurationTemplate: WorkflowTemplate =
         ],
       },
       // 环 4：构图稿（黑白 sketch-lock）
-      { role: "composition_gen", kind: "config", title: "构图稿生成配置", deliverable: "构图稿环节的生图价目与参数配置（model/size/count/单价），黑白 sketch-lock 线稿按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "composition_gen", kind: "config", title: "构图稿生成配置", deliverable: "构图稿环节的生图价目与参数配置（model/size/count；价格由当前目录取得），黑白 sketch-lock 线稿按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "composition",
         kind: "image",
@@ -104,7 +104,7 @@ export const artCurationTemplate: WorkflowTemplate =
         ],
       },
       // 环 5：成组渲染（同风格锚批量成稿）
-      { role: "batch_gen", kind: "config", title: "成组渲染配置", deliverable: "成组渲染环节的生图价目与参数配置（model/size/count/单价），成组彩色成稿按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "batch_gen", kind: "config", title: "成组渲染配置", deliverable: "成组渲染环节的生图价目与参数配置（model/size/count；价格由当前目录取得），成组彩色成稿按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "batch_render",
         kind: "image",
@@ -144,7 +144,7 @@ export const artCurationTemplate: WorkflowTemplate =
         ],
       },
       // 环 7：展陈主视觉（海报/墙面布置/图录）
-      { role: "exhibition_gen", kind: "config", title: "展陈主视觉生成配置", deliverable: "展陈主视觉环节的生图价目与参数配置（model/size/count/单价），海报/墙面模拟/图录按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "exhibition_gen", kind: "config", title: "展陈主视觉生成配置", deliverable: "展陈主视觉环节的生图价目与参数配置（model/size/count；价格由当前目录取得），海报/墙面模拟/图录按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "exhibition_visual",
         kind: "image",
@@ -165,7 +165,7 @@ export const artCurationTemplate: WorkflowTemplate =
         ],
       },
       // 环 8：多规格交付（印刷级文件 + 线上展厅素材）
-      { role: "delivery_gen", kind: "config", title: "多规格交付生成配置", deliverable: "多规格交付环节的生图价目与参数配置（model/size/count/单价），印刷级成品与展厅素材按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 } },
+      { role: "delivery_gen", kind: "config", title: "多规格交付生成配置", deliverable: "多规格交付环节的生图价目与参数配置（model/size/count；价格由当前目录取得），印刷级成品与展厅素材按此执行", defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"} },
       {
         role: "delivery",
         kind: "image",

@@ -13,6 +13,7 @@
 // 生图端把原始 token 送模型会生出废图，音频端宁可照原样念也不要整条生成被挡）。
 import { wrapMusicTool, musicGenTool } from "../lib/music-tools-adapter"
 import { siteFetch } from "../lib/client"
+import { registerMusicGenTrack } from "../lib/music-lyric-register"
 
 /** `@[` 出现次数（只数标记，不做语法解析）。 */
 function markerCount(text: string): number {
@@ -81,9 +82,16 @@ export default {
   async execute(args: Record<string, unknown>, context: any) {
     const prompt = typeof args?.prompt === "string" ? args.prompt : ""
     // 不含 `@[` → 完全不呼叫站点（不多一个 RTT，行为与改动前逐位元相同）。
-    if (!prompt.includes("@[")) return musicGenBase.execute(args, context)
+    if (!prompt.includes("@[")) {
+      const result = await musicGenBase.execute(args, context)
+      // 出曲即入库：成功回执后登记（fail-open，不改回执、不挡返回）。
+      await registerMusicGenTrack(args, result)
+      return result
+    }
     const resolved = await resolveAudioEntityPrompt(prompt, context?.sessionID, context?.abort)
     const result = await musicGenBase.execute({ ...args, prompt: resolved.prompt }, context)
+    // 出曲即入库：登记用**原始入参**（args.lyrics），不受 tag 展开影响。
+    await registerMusicGenTrack(args, result)
     return withCardNote(result, resolved.note)
   },
 }

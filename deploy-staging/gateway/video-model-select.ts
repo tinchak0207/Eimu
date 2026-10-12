@@ -5,10 +5,10 @@
 //   无交付证据的模型与有证据者同等；③ 只在 availability==="unavailable" 时才换，
 //   「available 但近 24h 零交付」放行。
 // 规则：只选「近期有真实交付且断路器非 open」者；无任何 proven 时才退到「无近期样本」
-// （jobs=0，没有被证伪）者，其中 seedance-2.0 优先；有 ≥ZERO_DELIVERY_MIN_JOBS 单且 0 交付者永远排除。
+// （jobs=0，没有被证伪）者，其中 minimax-h3 优先；有 ≥ZERO_DELIVERY_MIN_JOBS 单且 0 交付者永远排除。
 // 纯函数、无 I/O，供 pickDefaultVideoModel / resolveActiveModel / 兜底共用。
 
-export const VIDEO_FALLBACK_MODEL = "seedance-2.0"
+export const VIDEO_FALLBACK_MODEL = "minimax-h3"
 /** 近 24h 至少这么多单且 0 交付才判「已被证伪」（避免单次抖动毒死好模型）。 */
 export const ZERO_DELIVERY_MIN_JOBS = 3
 
@@ -47,7 +47,7 @@ export function isProvenVideoModel(m: ModelStatusEntryLike): boolean {
   return m.media_type === "video" && m.availability === "available" && !breakerOpen(m) && num(m.last_24h?.delivered) > 0
 }
 
-/** 可选视频模型，由优到劣：proven(交付数降序→成功率)；其次无样本者（seedance-2.0 优先）。 */
+/** 可选视频模型，由优到劣：proven(交付数降序→成功率)；其次无样本者（minimax-h3 优先）。 */
 export function rankVideoModels(
   models: readonly ModelStatusEntryLike[],
   exclude: ReadonlySet<string> = new Set(),

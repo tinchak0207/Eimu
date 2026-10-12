@@ -34,7 +34,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const localWorker = require("./local-worker.js");
 const { PERMISSION_MODES } = require("./lib/permission-rules.js");
-const { startDeviceBridge, stopDeviceBridge, getDeviceBridgeState, resolveStableDeviceId } = require("./device-bridge-client.js");
+const { startDeviceBridge, stopDeviceBridge, getDeviceBridgeState, resolveStableDeviceId, syncDeviceBridgeMode } = require("./device-bridge-client.js");
 const { readCredentialStore } = require("./lib/bridge-credential.js");
 const {
   registerWindowControlsIpc,
@@ -502,6 +502,7 @@ if (!gotLock) {
     // 好处：「授权根变更→以新 roots 重注册」可在纯 node 下以间谍 client 验（*.test.js），
     // 不必启动 Electron（本档顶层呼叫 app API，无法在 node 下 require）。
     const bridgeController = localWorker.createBridgeController({
+      syncMode: syncDeviceBridgeMode,
       startBridge: (opts) =>
         startDeviceBridge({
           ...opts,
@@ -574,13 +575,10 @@ if (!gotLock) {
     const wantEnabled =
       (envBridgeOverride || settings.deviceBridgeEnabled === true) && resolvedMode !== "off";
     bridgeController.setEnabledSilently(wantEnabled);
-    if (wantEnabled) {
-      void bridgeController.restart().catch(() => {
-        /* 启动失败不得影响壳启动 */
-      });
-    } else {
-      broadcastBridgeStatus(bridgeController.status()); // 让页面收到初始状态（off 或 mode=off）
-    }
+    // 权限同步不依赖启桥与授权根；启动 off 也需撤销可能残留的云端 full。
+    void bridgeController.restart().catch(() => {
+      /* 同步失败通过控制器状态如实展示，不阻塞壳启动；页面送票后自动再同步。 */
+    });
 
     // 0.3.0：自绘视窗控制钮的 IPC（preload 暴露的 window.eimuShell 之主进程侧）。
     // 登记一次即可；目标视窗以 event.sender 反查，非全域 mainWindow。

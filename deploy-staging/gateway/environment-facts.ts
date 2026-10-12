@@ -523,6 +523,14 @@ function renderClientRenderHost(host: ClientRenderHost | undefined): string {
  * 能力断路事实（单一宣告真源）。由 toolSurface 推导清单与数字，路由语义为既有
  * 规则的固定外框（与旧散文同语义）。legacy v1 帧与环境段共用此函式 ⇒ 不会各自为真源。
  */
+/** 开放工具面（beast OFF / creator）：无显式 held、断路很少且不含「仅保留派遣面」语义。 */
+export function isOpenToolSurface(ts: ToolSurface): boolean {
+  if (!ts.known) return false
+  if (ts.held.length > 0) return false
+  // creator 真源仅禁 task；亦容忍 cut 为空（未列＝全开）。
+  return ts.cut.length === 0 || (ts.cut.length <= 2 && ts.cut.every((id) => id === "task"))
+}
+
 export function renderCapabilityCutoffFact(env: RuntimeEnvironment): string {
   const ts = env.toolSurface
   const cutoff = env.capabilityCutoff
@@ -530,6 +538,14 @@ export function renderCapabilityCutoffFact(env: RuntimeEnvironment): string {
     "要执行这些工具，必须经 subagent_dispatch（带 expert 栏）派遣对应 Expert——这是唯一通路。"
   if (!ts.known || !cutoff.known) {
     return `【能力断路·物理事实】未能在真源 expert/opencode-agents.json 找到 agent=${env.plane} 的工具表，工具面未知，勿凭记忆断言自己有什么或没有什么。`
+  }
+  // beast OFF / creator：默认开放，禁止套用 orchestrator 的「Expert 唯一通路」话术。
+  if (isOpenToolSurface(ts)) {
+    const cutNote =
+      cutoff.tools.length === 0
+        ? "未记录任何被移除的工具（未列出＝默认开）。"
+        : `仅物理禁用：${cutoff.tools.join("、")}（其余未列出＝默认开）。`
+    return `【能力断路·物理事实】真源 expert/opencode-agents.json 对 agent=${env.plane}：${cutNote}域生成工具可直调；多步骤／可并行大活再用 subagent_dispatch。`
   }
   if (cutoff.tools.length === 0) {
     return `【能力断路·物理事实】真源 expert/opencode-agents.json 对 agent=${env.plane} 未记录任何被移除的工具（未列出的工具默认为开）。${routing}`
@@ -554,6 +570,12 @@ export function renderEnvironmentSection(env: RuntimeEnvironment): string {
 
   if (!ts.known) {
     lines.push(`- 工具表：未能在真源 expert/opencode-agents.json 找到 agent=${env.plane} 的条目（工具面未知，勿断言）。`)
+  } else if (isOpenToolSurface(ts)) {
+    const cutNote =
+      ts.cut.length === 0 ? "无物理禁用" : `仅物理禁用 ${ts.cut.join("、")}`
+    lines.push(
+      `- 工具表（真源 expert/opencode-agents.json）：默认开放（未列出＝开）；${cutNote}。域生成可直调；大活再派 subagent_dispatch。`,
+    )
   } else {
     const heldPart = ts.held.length > 0 ? `显式启用 ${ts.held.length} 个：${ts.held.join("、")}` : "无显式启用的工具"
     const cutNote =
@@ -568,6 +590,14 @@ export function renderEnvironmentSection(env: RuntimeEnvironment): string {
   const cutoff = env.capabilityCutoff
   if (!cutoff.known) {
     lines.push("- 能力断路：未知（工具表条目缺失）。")
+  } else if (isOpenToolSurface(ts)) {
+    if (cutoff.tools.length === 0) {
+      lines.push("- 能力断路：无（工具面默认开放）。")
+    } else {
+      lines.push(
+        `- 能力断路：仅 ${cutoff.tools.join("、")} 禁用；其余域工具可直调（勿套用 orchestrator 的 Expert 唯一通路）。`,
+      )
+    }
   } else if (cutoff.tools.length === 0) {
     lines.push("- 能力断路：本档未记录任何被移除的工具。")
   } else if (cutoff.tools.length <= 24) {

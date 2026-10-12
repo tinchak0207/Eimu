@@ -289,7 +289,7 @@ export function policyForUrl(url: string): QualityPolicy | null {
 }
 
 /** 纯函式：从交付正文抽出可量测的媒体 URL（去重、保序、封顶）。 */
-export function extractMediaTargets(text: string): string[] {
+export function extractMediaTargets(text: string, maxArtifacts = MEDIA_QUALITY_MAX_ARTIFACTS): string[] {
   if (typeof text !== "string" || text.length === 0) return []
   const found: string[] = []
   const seen = new Set<string>()
@@ -300,7 +300,7 @@ export function extractMediaTargets(text: string): string[] {
     if (seen.has(url)) continue
     seen.add(url)
     found.push(url)
-    if (found.length >= MEDIA_QUALITY_MAX_ARTIFACTS) break
+    if (found.length >= maxArtifacts) break
   }
   return found
 }

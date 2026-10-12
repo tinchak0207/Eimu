@@ -23,7 +23,7 @@ export const sceneSetupTemplate: WorkflowTemplate =
         role: "generation",
         kind: "config",
         title: "场景图配置",
-        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image", unit_price_coins: 0.001 },
+        defaults: { model: "pixai-tsubaki2", size: "1024x1024", count: 1, kind: "image"},
         deliverable: "场景图生成参数（固定 seed 保证同场景重生成不漂移）",
       },
       {

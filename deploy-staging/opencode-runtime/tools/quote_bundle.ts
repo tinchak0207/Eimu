@@ -1,14 +1,12 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { loadCatalog, estimateVideoCoins, platformFetch, ok, fail } from "../lib/client"
+import { loadCatalog, platformFetch, ok, fail } from "../lib/client"
 
 // 批量预算单：多笔生成任务一次性估价（明细 + 总价）＋钱包对帐。
 // 图片单价：loadCatalog（GET /v1/models 的 x_coins_per_image，10 分钟快取），与 image_generate 同源。
-// 影片单价（R9-A 2026-09-30）：GET /v1/models 的 x_coins_per_second[解析度] × 时长，与 gateway
-// catalogVideoPerSecondCoins（扣费同源）同口径；目录查不到才退回 estimateVideoCoins 并标
-// price_source:"estimate_unverified"。旧版影片一律 720P 5 币/秒，seedance-2.0 15s 报 75 实为 195。
+// 影片报价读x_billing完整档位金额；未知回null，固定价不按秒放大，不使用粗估fallback。
 // 余额：GET /v1/quota（与 gateway fetchBalance 同源），回应带 balance/shortfall/affordable。
 
-type VideoEntry = { cps: Record<string, number>; defaultResolution: string | null; defaultDuration: number | null }
+type VideoEntry = { cps: Record<string, number>; billing: Record<string, any>; defaultResolution: string | null; defaultDuration: number | null; defaultAudio: boolean; audio: boolean }
 
 async function loadVideoCatalog(sessionID: string, signal?: AbortSignal): Promise<Record<string, VideoEntry> | null> {
   try {
@@ -19,13 +17,15 @@ async function loadVideoCatalog(sessionID: string, signal?: AbortSignal): Promis
     for (const m of body.data ?? []) {
       if (typeof m?.id !== "string") continue
       const raw = m.x_coins_per_second
-      if (!raw || typeof raw !== "object") continue
+      if (!m.x_billing || typeof m.x_billing !== "object") continue
       const cps: Record<string, number> = {}
-      for (const [k, v] of Object.entries(raw)) if (typeof v === "number") cps[k.toLowerCase()] = v
-      if (!Object.keys(cps).length) continue
+      for (const [k, v] of Object.entries(raw ?? {})) if (typeof v === "number") cps[k.toLowerCase()] = v
       const cap = m.x_capabilities ?? {}
       out[m.id] = {
         cps,
+        billing: m.x_billing,
+        defaultAudio: cap.defaultAudio === true,
+        audio: cap.audio === true,
         defaultResolution: typeof cap.defaultResolution === "string" ? cap.defaultResolution.toLowerCase() : null,
         defaultDuration: typeof cap.defaultDuration === "number" ? cap.defaultDuration : null,
       }
@@ -86,7 +86,7 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6
 
 export default tool({
   description:
-    "钱包预检＋批量预算单工具（免费不扣费）。不带 items 呼叫＝只查当前余额（开局预检用）。输入多笔 [{model, count, kind, duration_seconds, resolution, quality}]，输出每笔明细（单价 × 数量 = 小计）、总币数、当前余额 balance_coins、差额 shortfall_coins 与 affordable 布林。图片单价取自平台目录；影片单价=目录 x_coins_per_second[解析度]×时长（与实扣同源）；音乐单价=目录 x_coins_per_music（1 币/次统一价、不分通路/take，与平台实扣同源，不按 model 区分）；目录查不到才标 price_source:\"estimate_unverified\"（仅影片有粗估），图片／音乐查不到标 \"unknown\"，禁止拍脑袋（音乐禁止硬编码 1 币）。可选 max_unit_coins / max_coins_per_second 单价上限，超限项标 over_cap:true。批量开工前必须先用本工具出预算单给用户过目；affordable:false 时第一句就讲余额与差额。",
+    "免费查钱包与批量预算。items给model/count/kind及视频完整时长/分辨率/音轨；图片和音乐读目录单价，视频读x_billing完整档位金额（按秒或固定次价均由站点计费函数导出）。未知价格的total/affordable为null，不编估价或把未知当零。当前视频API仅支持模型默认分辨率，显式非默认报价未知。只查余额需balance_only:true。预算是事前告知，扣费按本轮真实授权。",
   args: {
     items: tool.schema
       .array(
@@ -96,7 +96,8 @@ export default tool({
           kind: tool.schema.enum(["image", "video", "music"]).optional().describe("image 或 video 或 music，预设 image（music＝音乐生成，1 币/次）"),
           duration_seconds: tool.schema.number().optional().describe("每支影片时长（秒），仅 video 用，预设取模型默认时长"),
           resolution: tool.schema.string().optional().describe("影片解析度，如 480p/720p/1080p，仅 video 用，预设取模型默认解析度（quality=hd 时 1080p）"),
-          quality: tool.schema.enum(["standard", "hd"]).optional().describe("standard 或 hd，预设 standard"),
+          quality: tool.schema.enum(["standard", "hd"]).optional().describe("图片品质；视频hd映射1080p，当前提交API仅接受模型默认分辨率"),
+          generate_audio: tool.schema.boolean().optional().describe("视频是否带音轨；未指定时取模型当前defaultAudio"),
           label: tool.schema.string().optional().describe("明细显示名（如「S03-镜1 定场镜头」）"),
         }),
       )
@@ -139,25 +140,25 @@ export default tool({
 
         if (kind === "video") {
           const v = videoCat?.[item.model]
-          const secs = item.duration_seconds || v?.defaultDuration || 10
-          const res = (item.resolution ?? (item.quality === "hd" ? "1080p" : v?.defaultResolution ?? "720p")).toLowerCase()
-          const cps = v?.cps[res]
-          extra.duration_seconds = secs
-          extra.resolution = res
-          if (typeof cps === "number") {
-            unit = r6(cps * secs)
-            extra.coins_per_second = cps
-            priceSource = "catalog_per_second"
+          const secs = item.duration_seconds ?? v?.defaultDuration
+          const res = (item.resolution ?? (item.quality === "hd" ? "1080p" : v?.defaultResolution))?.toLowerCase()
+          const withAudio = item.generate_audio ?? v?.defaultAudio ?? false
+          extra.duration_seconds = secs ?? null
+          extra.resolution = res ?? null
+          extra.generate_audio = withAudio
+          const billing = v?.billing
+          const table = withAudio ? billing?.prices_with_audio ?? billing?.prices : billing?.prices
+          const amount = res && typeof secs === "number" ? table?.[res]?.[String(secs)] : undefined
+          // 当前视频API不接受显式非默认档位；报价不承诺会被静默忽略的规格。
+          if (res && res === v?.defaultResolution && (!withAudio || v?.audio === true) && billing?.currency === "coins" && (billing.unit === "per_second" || billing.unit === "per_video") && typeof amount === "number" && Number.isFinite(amount) && amount >= 0) {
+            unit = amount
+            extra.billing_unit = billing.unit
+            priceSource = "catalog_exact_parameters"
           } else {
-            unit = estimateVideoCoins(secs, item.quality)
-            priceSource = "estimate_unverified"
-            extra.note = v
-              ? `目录无此解析度 ${res} 的秒价（可用：${Object.keys(v.cps).join("/")}），此价为粗估，实扣可能更高`
-              : "目录查无此影片模型秒价，此价为粗估，实扣可能更高；对用户标「待确认」"
+            extra.note = "目录未提供该完整提交档位币价，或请求分辨率不受当前提交API支持；未核定预算，不编估值。"
           }
-          if (typeof args.max_coins_per_second === "number" && typeof cps === "number" && cps > args.max_coins_per_second) {
-            extra.over_cap = true
-          }
+          const cps = billing?.unit === "per_second" && res ? v?.cps[res] : undefined
+          if (typeof args.max_coins_per_second === "number" && typeof cps === "number" && cps > args.max_coins_per_second) extra.over_cap = true
         } else if (kind === "music") {
           // 音乐：目录次价（1 币/次统一，不分 model）。查不到 → unit 维持 null → 标 unknown。
           if (typeof musicPerSong === "number") {
@@ -204,14 +205,16 @@ export default tool({
 
       const unverified = lines.filter((l) => l.price_source === "estimate_unverified").length
       const overCap = lines.filter((l) => l.over_cap === true).map((l) => l.label)
-      const shortfall = balance === null ? null : r6(Math.max(0, total - balance))
-      const affordable = balance === null ? null : balance > 0 && balance >= total
+      const shortfall = balance === null || hasUnknown ? null : r6(Math.max(0, total - balance))
+      const affordable = balance === null || hasUnknown ? null : balance > 0 && balance >= total
       const walletNote =
         balance === null
           ? "余额查询失败（未知），不可假设充足。"
           : balance <= 0
             ? `余额 ${balance} 币（≤0，不可消费），任何付费生成都会失败；第一句就告诉用户余额与差额 ${shortfall} 币。`
-            : affordable
+            : hasUnknown
+              ? "预算含未知档位价格，不能判定余额足够。"
+              : affordable
               ? `余额 ${balance} 币，足够支付合计 ${total} 币。`
               : `余额 ${balance} 币不足以支付合计 ${total} 币，差额 ${shortfall} 币；第一句就讲余额与差额。`
 
@@ -236,7 +239,7 @@ export default tool({
             : unverified
               ? "含 estimate_unverified 粗估项（目录查无秒价），对用户标「待确认」。"
               : items.length
-                ? "全部项目均已按平台目录定价（影片=秒价×时长、音乐=目录次价）。本预算单为事前告知，不取代逐笔扣费确认（confirm）。"
+                ? "全部项目均已按平台目录定价（影片按完整提交档位金额，固定次价不乘时长；音乐按目录次价）。本预算单为事前告知，不取代逐笔扣费确认（confirm）。"
                 : "本次仅查余额，未报价；total_coins=null 表示不适用（不是 0 币）。",
           overCap.length ? `超出单价上限：${overCap.join("、")}。` : "",
         ]

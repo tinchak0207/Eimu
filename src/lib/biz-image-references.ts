@@ -157,13 +157,13 @@ function invalidReferenceImages(message: string): EditInputError {
  * `MAX_REFERENCE_IMAGES` 张、保序；超过或形状非法一律 400 `invalid_reference_images`，
  * **不静默截断**（静默截断＝客户以为 6 张都进去了）。
  */
-export function parseReferenceImageSpecs(input: unknown): ReferenceImageSpec[] {
+export function parseReferenceImageSpecs(input: unknown, maxImages = MAX_REFERENCE_IMAGES): ReferenceImageSpec[] {
   if (input === undefined || input === null) return [];
   if (!Array.isArray(input)) {
     throw invalidReferenceImages("reference_images 需为数组，元素为 URL 字符串或 { url, role?, name? } 对象。");
   }
-  if (input.length > MAX_REFERENCE_IMAGES) {
-    throw invalidReferenceImages(`reference_images 最多 ${MAX_REFERENCE_IMAGES} 张，收到 ${input.length} 张。`);
+  if (input.length > maxImages) {
+    throw invalidReferenceImages(`reference_images 最多 ${maxImages} 张，收到 ${input.length} 张。`);
   }
   const specs: ReferenceImageSpec[] = [];
   for (const item of input) {

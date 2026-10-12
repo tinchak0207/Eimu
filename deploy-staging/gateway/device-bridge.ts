@@ -48,6 +48,7 @@
 // 本档只准动 deploy-staging/gateway/ 之下；未部署、未接 VPS。
 
 import { memoryEnvBool } from "./constants-gateway.ts"
+import { saveTenantPermissionMode } from "./persistence.ts"
 import {
   DEVICE_TICKET_TTL_MS,
   hashKey,
@@ -769,6 +770,7 @@ export class DeviceBridge {
       lastSeenAt: now,
     })
     this.byConnection.set(connectionId, key)
+    if (isDeviceBridgeMode(modeRaw)) saveTenantPermissionMode(input.tenant, mode)
     return {
       deviceId,
       connectionId,
@@ -1303,6 +1305,15 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
   const connectionId = typeof body.connection_id === "string" ? body.connection_id : ""
 
   switch (ctx.pathname) {
+    case "/agent/v1/device-bridge/permissions": {
+      if (!isDeviceBridgeMode(body.mode)) return errorResponse(400, "bad_request", "mode must be off|ask|auto|full")
+      saveTenantPermissionMode(tenant, body.mode)
+      if (body.mode === "full") {
+        const { approveTenantPendingCharges } = await import("./media-internal-routes.ts")
+        await approveTenantPendingCharges(tenant)
+      }
+      return Response.json({ ok: true, mode: body.mode })
+    }
     case "/agent/v1/device-bridge/token": {
       // 铸一张短效装置票给**已登录的页面／桌面壳**（页面→站内服务端→此处，Bearer 是
       // 服务端持有的 sk-biz-*）。票本身即身分凭据，故只以 sk-biz 路径可达：
@@ -1329,6 +1340,10 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
         rules: body.rules,
         home: body.home,
       })
+      if (reg.mode === "full") {
+        const { approveTenantPendingCharges } = await import("./media-internal-routes.ts")
+        await approveTenantPendingCharges(tenant)
+      }
       return Response.json({
         ok: true,
         device_id: reg.deviceId,

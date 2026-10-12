@@ -188,7 +188,7 @@ export function renderContractDirective(
   const fields = c.requiredFields.slice()
   if (c.qcSignatureRequired && !fields.includes("qc")) fields.push("qc")
   const fieldList = fields.join(",")
-  return `\n\n【交付契约·系统注入】本次交付正文必须逐字出现以下栏位名并各带实质内容（缺整栏＝未交付，系统闸门将逐栏核对）：${fieldList}。栏位名为硬匹配，措辞不得同义替换；无真实产物的栏位必须写 FAILED＋原因，禁止以占位文字冒充交付。`
+  return `\n\n【交付契约·系统注入】本次交付正文必须逐字出现以下栏位名并各带实质内容（缺整栏＝未交付，系统闸门将逐栏核对）：${fieldList}。最终返回单个顶层JSON，键就是上述字段，字段值可用自然语说明；不要再造另一份最终格式。过程工具回执保持原样。qc写制作自查与独立审阅证据的覆盖范围，不能自证质量；无真实产物的字段明确失败与原因。系统字段存在性检查不等于独立质量验收。`
 }
 
 /**
@@ -234,6 +234,10 @@ export interface CriticPassTarget {
   runId: string
   /** 交付正文（finishRun 手上就是未截断全文）。 */
   text: string
+  /** Captured from this author's actual successful output receipts, not authored prose. */
+  artifacts?: string[]
+  workflowReview?: { workflowId: string; nodeId: string; artifact: string }
+  onReview?: (result: { state: "passed" | "failed" | "partial"; criticRunId: string; receipt: unknown }) => void
 }
 
 /**
@@ -352,7 +356,8 @@ export function buildCriticPassSpec(
     "verdict：只接受两种值之一 ——「通过」或「退回」。",
     "issues：逐条列出问题；判「退回」时**必须指名是哪份交付的哪个栏位**、问题为何。通过时可为空阵列，但键必须在场。",
     "evidence：你的核验过程与指针（引用交付正文原文片段佐证）。",
-    "qc：自检结论 + 签名。",
+    "qc：具名独立审阅身份、实际感知工具callId、被审runId与artifact、检查结果和未覆盖项；作者勾选/文字PASS不作为证据。",
+    "缺真实读取/感知、失败或覆盖不足时写未验，不要求作者盲目重产。末行 VERDICT: PASS|FAIL|PARTIAL。",
     "",
     "被审正文若标记「已截断」，你只能就所见部分下判，不得对截断外内容断言。你只审不产：禁止改写或补产被审内容。",
     "",
@@ -388,7 +393,50 @@ export function buildCriticPassSpec(
   return `${head}\n${blocks.join("\n")}`
 }
 
-const CRITIC_REJECT_WORDS = ["退回", "驳回", "驳回", "不通过", "不通过", "未通过", "未通过", "reject", "rejected"]
+/** Independent evidence from the actual critic child session, never from qc/verdict prose. */
+export function checkCriticReceipt(targets: CriticPassTarget[], messages: unknown): {
+  ok: boolean; checked: Array<{ runId: string; artifact: string; callId: string; tool: string }>; missing: string[]
+} {
+  const checked: Array<{ runId: string; artifact: string; callId: string; tool: string }> = []
+  const missing: string[] = []
+  const parts = Array.isArray(messages) ? messages.flatMap((m: any) => m?.info?.role === "assistant" ? m?.parts ?? [] : []) : []
+  for (const target of targets) {
+    for (const artifact of extractMediaTargets((target.artifacts ?? []).join("\n"), Infinity)) {
+      if (!target.artifacts?.includes(artifact)) { missing.push(`${target.runId}:${artifact}:no-author-receipt`); continue }
+      const reachable = new Set([artifact])
+      let proof: { callId: string; tool: string } | undefined
+      // Preserve execution order: a derived frame must be produced before it is actually inspected.
+      for (const part of parts) {
+        if (part?.type !== "tool" || part?.state?.status !== "completed" || typeof part?.callID !== "string") continue
+        let out: any
+        try { out = typeof part.state.output === "string" ? JSON.parse(part.state.output) : part.state.output } catch { continue }
+        if (out?.ok !== true) continue
+        const input = part.state.input ?? {}
+        const source = input.image_url ?? input.image_path ?? input.source ?? input.url
+        if (typeof source !== "string" || !reachable.has(source)) continue
+        const visual = part.tool === "vision_analyze" || (part.tool === "read_image" && out.attached === true && out.bytes > 0 && typeof out.mime === "string" && out.mime.startsWith("image/"))
+        // Successful decoding/vision of the actual image/frame is required; metadata/transcript isn't perception.
+        if (visual && /\.(png|jpe?g|webp|gif|bmp|avif|heic)(?:[?#]|$)/i.test(source)) {
+          proof = { callId: part.callID, tool: part.tool }
+        }
+        // Read-only analysis/fetch can provide derivative frame provenance, but cannot self-award PASS.
+        if (["video_fetch", "video_analyze", "video_evidence"].includes(part.tool)) {
+          // Existing analysis receipts contain both published URLs and local frame paths.
+          const refs = (value: unknown): string[] => typeof value === "string"
+            ? /^(?:https?:\/\/|\/).+\.(?:png|jpe?g|webp|gif|bmp|avif|heic|mp4|mov|mkv|webm)(?:[?#].*)?$/i.test(value) ? [value] : []
+            : Array.isArray(value) ? value.flatMap(refs)
+            : value && typeof value === "object" ? Object.values(value).flatMap(refs) : []
+          for (const ref of refs(out)) reachable.add(ref)
+        }
+      }
+      if (proof) checked.push({ runId: target.runId, artifact, ...proof })
+      else missing.push(`${target.runId}:${artifact}`)
+    }
+  }
+  return { ok: checked.length > 0 && missing.length === 0, checked, missing }
+}
+
+const CRITIC_REJECT_WORDS = ["partial", "fail", "未验", "退回", "驳回", "驳回", "不通过", "不通过", "未通过", "未通过", "reject", "rejected"]
 const CRITIC_PASS_WORDS = ["通过", "通过", "pass", "approve", "accept", "approved"]
 
 /**

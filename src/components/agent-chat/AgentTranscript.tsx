@@ -85,7 +85,7 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
           case "user":
           case "assistant":
             return (
-              <li key={item.id}>
+              <li key={item.id} className="empty:hidden">
                 <AgentMessageBubble item={item} sessionId={sessionId} />
               </li>
             );
