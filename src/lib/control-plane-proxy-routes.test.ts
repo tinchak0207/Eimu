@@ -66,6 +66,7 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/agent/biz/[...path]": "biz-api-key-store 以 bizKeyDatabaseEnabled() 闸 DB，Vercel 走 Blob 镜像＋BIZ_API_KEY_HASHES 兜底",
   "/api/agent/biz/resolve-owner": "biz-api-key-store 以 bizKeyDatabaseEnabled() 闸 DB，Vercel 走 Blob 镜像＋BIZ_API_KEY_HASHES 兜底",
   "/api/agent/device-token": "经 agent-session-guard→agent-user-key，DB 以 bizKeyDatabaseEnabled()（=controlPlaneEnabled）闸住，Vercel 走 Blob/记忆体兜底；本端点自身纯代理换票，不写 DB/log（W7a 桌面壳装置桥，2026-10-05）",
+  "/api/agent/device-permissions": "经 agent-session-guard→agent-user-key，DB 以 bizKeyDatabaseEnabled()（=controlPlaneEnabled）闸住，Vercel 走 Blob/记忆体兜底；本端点自身纯代理权限模式（off/ask/auto/full）到 agent 网关，不写 DB/log（同 device-token 一族的 W7a 桌面壳装置桥，2026-10-13）",
   "/api/agent/memory/export": "agent-memory-store 以 dbAvailable()（getGenerationSql 包 try/catch）判定，Vercel 走 Blob/记忆体",
   "/api/agent/memory/ingest": "agent-memory-store 以 dbAvailable()（getGenerationSql 包 try/catch）判定，Vercel 走 Blob/记忆体",
   "/api/agent/memory/retract": "agent-memory-store 以 dbAvailable()（getGenerationSql 包 try/catch）判定，Vercel 走 Blob/记忆体",
