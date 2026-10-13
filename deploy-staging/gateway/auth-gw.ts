@@ -77,23 +77,38 @@ export const encoder = new TextEncoder()
 export const decoder = new TextDecoder()
 
 
-// ---- auth validation (cached 5 minutes) ----
+// ---- auth validation (正结论缓存 5 分钟；负结论只认上游明确否定) ----
+
+// 2026-10-14：负结论缓存单独用短 TTL。负结论也可能源自上游自身抖动（一次 401 是它当下
+// 的判断，不代表这把 key 持续无效），短 TTL 限制单次瞬时失败的爆炸半径。
+export const KEY_NEG_CACHE_TTL_MS = 15_000
 
 export async function validateApiKey(key: string): Promise<boolean> {
   const now = Date.now()
   const cached = keyCache.get(key)
   if (cached && cached.expiresAt > now) return cached.ok
   let ok = false
+  let conclusive = false // 只有上游明确答复才算结论；超时/网络抖动/5xx/429 一律不算
   try {
     const res = await fetch(`${PLATFORM_BASE}/v1/models`, {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 实测 24–125ms，5s 上限收敛为 2s 尾延迟保护
     })
     ok = res.ok
+    if (res.ok) {
+      conclusive = true // 2xx：正结论
+    } else if (res.status === 401 || res.status === 403) {
+      conclusive = true // 上游明确否定：负结论
+    }
   } catch {
     ok = false
   }
-  keyCache.set(key, { ok, expiresAt: now + KEY_CACHE_TTL_MS })
+  // 判定不出（瞬时失败/上游 5xx 等）不写缓存：下一次请求重新判定，避免把一次抖动
+  // 放大成这把合法 key 连续 5 分钟全部 401（2026-10-14 两支评测 agent 实测需重试最多
+  // 15 次才自愈的根因）。
+  if (conclusive) {
+    keyCache.set(key, { ok, expiresAt: now + (ok ? KEY_CACHE_TTL_MS : KEY_NEG_CACHE_TTL_MS) })
+  }
   return ok
 }
 
@@ -115,6 +130,7 @@ export async function resolveCanonicalIdentity(rawKey: string): Promise<{ key: s
   if (cached && cached.expiresAt > now) return { key: cached.key ?? rawKey, userId: cached.userId }
   let canonical: string | null = null
   let userId: number | null = null
+  let answered = false // 上游是否给出明确答复；超时/网络/5xx 等瞬时失败一律不算结论，不写缓存
   try {
     const res = await fetch(`${PLATFORM_BASE}/api/agent/biz/resolve-owner`, {
       method: "POST",
@@ -122,6 +138,7 @@ export async function resolveCanonicalIdentity(rawKey: string): Promise<{ key: s
       signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 实测 95–533ms，负缓存 60s 防风暴下 2s 足够
     })
     if (res.ok) {
+      answered = true // 200：有无映射都是明确结论
       const data = (await res.json()) as { canonical_key?: unknown; user_id?: unknown }
       if (typeof data.canonical_key === "string" && data.canonical_key.startsWith("sk-biz-")) {
         canonical = data.canonical_key
@@ -129,15 +146,19 @@ export async function resolveCanonicalIdentity(rawKey: string): Promise<{ key: s
       if (typeof data.user_id === "number" && Number.isInteger(data.user_id) && data.user_id > 0) {
         userId = data.user_id
       }
+    } else if (res.status === 401 || res.status === 403) {
+      answered = true // 上游明确否定
     }
   } catch {
-    // fall through: fallback to rawKey
+    // 瞬时失败：不写缓存，fallback 回 rawKey
   }
-  canonKeyCache.set(rawKey, {
-    key: canonical,
-    userId,
-    expiresAt: now + (canonical ? CANON_KEY_TTL_MS : CANON_KEY_NEG_TTL_MS),
-  })
+  if (answered) {
+    canonKeyCache.set(rawKey, {
+      key: canonical,
+      userId,
+      expiresAt: now + (canonical ? CANON_KEY_TTL_MS : CANON_KEY_NEG_TTL_MS),
+    })
+  }
   return { key: canonical ?? rawKey, userId }
 }
 
