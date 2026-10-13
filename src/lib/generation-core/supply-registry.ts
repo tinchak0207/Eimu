@@ -1,5 +1,6 @@
 import { REGISTRY_CHANNELS } from "@/lib/supplier-channels.config";
 import { generateWithBlenderNode } from "./blender-node-upstream";
+import { generateWithDmc, pollDmcTask } from "./dmc-upstream";
 import { generateWithFilmera, pollFilmeraTask } from "./filmera-upstream";
 import { generateWithHarnessTts } from "./harness-tts-upstream";
 import { generateWithMetaso, pollMetasoTask } from "./metaso-upstream";
@@ -73,6 +74,14 @@ const metasoAdapter: SupplyAdapter = {
   poll: (supplier, providerTaskId) => pollMetasoTask(supplier, providerTaskId),
 };
 
+// dmc.cc MiniMax-H3（2026-10-13）：与 metaso 同形协议（/v2/video_generation +
+// 轮询），见 dmc-upstream.ts（为何另立一档而非复用 metaso 协议）。
+const dmcAdapter: SupplyAdapter = {
+  protocol: "dmc",
+  submit: (supplier, input) => generateWithDmc(supplier, input),
+  poll: (supplier, providerTaskId) => pollDmcTask(supplier, providerTaskId),
+};
+
 const openaiVideoAdapter: SupplyAdapter = {
   protocol: "openai_video",
   submit: (supplier, input) => generateWithOpenaiVideo(supplier, input),
@@ -123,6 +132,7 @@ const BUILTIN_ADAPTERS: readonly SupplyAdapter[] = [
   openaiImagesAdapter,
   adobe2apiAdapter,
   metasoAdapter,
+  dmcAdapter,
   openaiVideoAdapter,
   filmeraAdapter,
   blenderBridgeAdapter,

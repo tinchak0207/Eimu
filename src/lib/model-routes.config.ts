@@ -74,9 +74,9 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   "seedance-2.0": ["xiaoyxiao", "gway"],
   "seedance-2.5-480p": ["xiaoyxiao", "gway"],
   "seedance-2.5-720p": ["xiaoyxiao", "gway"],
-  // 2026-10-12 暴君裁定：影片生成默认渠道改 miaowuai（api.miaowuai.store），
-  // minimax-h3 → 上游 minimax-h3-max（¥2.00/次，成本闸白名单已登记）；xiaoyxiao 退为备援。
-  "minimax-h3": ["miaowuai", "xiaoyxiao"],
+  // 2026-10-13 暴君裁定：影片生成首发上游改 dmc（dmc.cc，MiniMax 官方协议，
+  // 按秒 ¥0.10/s，实弹 2×5s 对帐一致）；miaowuai（¥2.00/次）与 xiaoyxiao 退为备援。
+  "minimax-h3": ["dmc", "miaowuai", "xiaoyxiao"],
   // 2026-10-13：seedance-2.0-mini 以 miaowuai 重新上架（上游 seedance-2.0-mini 同名直传，
   // 按秒计价 ¥0.09/s(480p)、¥0.2/s(720p)）；xiaoyxiao/gway 无该档位可承接，故仅此一跳。
   "seedance-2.0-mini": ["miaowuai"],

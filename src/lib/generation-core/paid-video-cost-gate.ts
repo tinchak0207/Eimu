@@ -96,6 +96,11 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
   // 就仍然被约束在 ≤720p、seconds ≤30，且闸日志留下一笔可稽核记录；单价由 agnes-video
   // 供给 claim 的 unitPriceCny:0 提供（不进兜底表）。
   "agnes-video-2.5-flash",
+  // 2026-10-13：dmc（dmc.cc）认领的 minimax-h3 上游模型名。**按秒计价**
+  // （model_price=0.014706 USD/s × usd_exchange_rate=6.8 = ¥0.10/s；实单 2×5s 对帐
+  // total_usage=100.0008分=¥1.000008）。单价由 dmc 供给 claim 的
+  // `unitPriceCnyPerSecond`（{720p:0.1}）提供，不进兜底表。
+  "MiniMax-H3",
 ] as const;
 
 export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];

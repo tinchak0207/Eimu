@@ -122,6 +122,33 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
+    // dmc（dmc.cc，2026-10-13 暴君指定为影片**首发上游**）：与 metaso 同形的
+    // MiniMax 官方协议（POST {base}/v2/video_generation 建任务、GET
+    // {base}/v2/query/video_generation/{id} 轮询），见 dmc-upstream.ts。上游只出
+    // 768P、整数 1–15 秒，模型名固定 MiniMax-H3（GET /v1/models 2026-10-13 实查：
+    // 仅 MiniMax-H3 一条）。
+    //
+    // 上游单价（GET https://dmc.cc/api/pricing 2026-10-13 免登入唯读实查）：
+    //   model_name=MiniMax-H3, quota_type=1, model_price=0.014706（USD/s；
+    //   站点 /api/status usd_exchange_rate=6.8 ⇒ ¥0.10/秒，**按秒计价**，与
+    //   miaowu 的按次固定价不同型）；billing_usage_schema.seconds 与
+    //   billing_usage_examples（768P 5s/10s/15s）确认按秒计。
+    // 实单对帐（2×5s 文生视频，2026-10-13）：/v1/dashboard/billing/usage
+    //   total_usage=100.0008 分 = ¥1.000008 ≈ ¥0.10/s × 10s，与核价一致。
+    label: "dmc",
+    baseUrlEnv: "DMC_BASE_URL",
+    apiKeyEnv: "DMC_API_KEY",
+    enabledEnv: "DMC_ENABLED",
+    tier: "relay",
+    sitePriority: 2,
+    chatImageModels: [],
+    adapterType: "dmc",
+    claims: [
+      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.1 }, priceSource: "GET https://dmc.cc/api/pricing 2026-10-13 (quota_type=1, model_price=0.014706 USD/s × usd_exchange_rate=6.8 = ¥0.10/s)；实单对帐 2×5s → /v1/dashboard/billing/usage total_usage=100.0008分 = ¥1.000008" },
+    ],
+  },
+
+{
     // miaowuai（喵呜API，api.miaowuai.store，2026-10-12 暴君指定）：影片生成
     // **默认渠道**——协议与我方既有 openai_video 轮子同型（new-api 上游：POST
     // {base}/videos 创建、GET {base}/videos/{id} 轮询，completed 顶层 `url`，与
