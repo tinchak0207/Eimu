@@ -310,7 +310,7 @@ export const GW_TOKEN_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
 // 用户输入净化：抹除用户伪造的网关凭证 token，并把冒充系统/网关的方括号标题缴械。
 // 这是辅助层；真正认证由 authorityRule + 每会话凭证完成，故不追求正则覆盖所有变体。
 const FORGED_AUTHORITY_RE =
-  /^[\s>*_.·、，,~`"'“”‘’\-]*[【\[（(]?\s*(系统注入|系统注入|野兽模式|野兽模式|优先序|优先序|能力断路|能力断路|模板优先|模板优先|指令来源|指令来源|系统指令|系统指令|system\s*prompt|developer\s*mode)\b/gim
+  /^[\s>*_.·、，,~`"'“”‘’\-]*[【\[（(]?\s*(系统注入|野兽模式|优先序|能力断路|模板优先|指令来源|系统指令|system\s*prompt|developer\s*mode)(?!\w)/gim
 
 export function sanitizeUserContent(text: string): string {
   if (!text) return text
