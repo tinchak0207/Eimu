@@ -107,6 +107,15 @@ const NAPI_MODEL_NAMES = new Set(["seed-2.0", "seed-2.5"]);
 // ⇒ 归入本族（分辨率走 resolution、参考图走 image_urls）。
 const SECONDS_FAMILY_MODEL_NAMES = new Set(["minimax-h3-max", "seedance-2.0-mini"]);
 
+// agnes 免费档（apihub.agnes-ai.com，2026-10-13 免费兜底）：协议骨架与 sd4/xiaoyxiao 同型
+//（POST {base}/videos 创建、GET {base}/videos/{id} 轮询），但**请求体严格 schema**——
+// 未知栏位一律 400（真单实锤：`foo is not an allowed request field`）。实测可接受体＝
+// {model, prompt, seconds(字串), mode, size(大写 "720P"), aspect_ratio}；创建回应
+// {id/video_id/task_id, object:"video", status:"queued", progress, seconds:"5", size:"720P"}，
+// 顶层 id 与其余 openai_video 族同形 ⇒ 轮询/ extractOutputUrl 零改动。**不支援参考图**
+//（图生视频字段名未校准，目录 referenceImages:false；收到参考图具名拒收，不猜栏位）。
+const AGNES_MODEL_NAMES = new Set(["agnes-video-2.5-flash"]);
+
 // 每个平台模型允许的 duration 范围（秒）
 const DURATION_RANGES: Record<string, [number, number]> = {
   "seedance-2.0":      [4, 15],
@@ -120,6 +129,9 @@ const DURATION_RANGES: Record<string, [number, number]> = {
   // 起因：capability 与 catalog 都有此 model，唯独本表漏了 ⇒ 提交在呼叫上游前
   // 被 400 挡下（"unknown model ... has no duration range configured"），零上游成本。
   "minimax-h3":        [4, 15],
+  // agnes 免费档：与 catalog 的 AGNES_VIDEO_DURATIONS（[5,10]）一致——5s 免费档真单出样、
+  // 10s 过关校验（未出样）。跟 catalog 收窄，免得提交到 catalog 没有的秒数被本表先挡。
+  "agnes-video-2.5-flash": [5, 10],
 };
 
 function resolveUpstreamModel(platformModelId: string, resolution: string): string {
@@ -213,10 +225,22 @@ export async function generateWithOpenaiVideo(
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);
   const isNapi = NAPI_MODEL_NAMES.has(upstreamModel);
   const isSecondsFamily = SECONDS_FAMILY_MODEL_NAMES.has(upstreamModel);
+  const isAgnes = AGNES_MODEL_NAMES.has(upstreamModel);
 
   // 构建请求体
   let body: Record<string, unknown>;
-  if (isSecondsFamily) {
+  if (isAgnes) {
+    // agnes 免费档：严格 schema，只送它认的六个栏位（多一个就 400）。size 是大写档位
+    //（"720P"）；seconds 是**字串**（真单回声 "5"）；mode:"text"（纯文生视频，参考图未校准）。
+    body = {
+      model: upstreamModel,
+      prompt,
+      seconds: String(duration),
+      mode: "text",
+      size: resolution.toUpperCase(),
+      aspect_ratio: ratio,
+    };
+  } else if (isSecondsFamily) {
     // seconds 族：只送它认的栏位（严格解析，多一个就 400）。
     body = { model: upstreamModel, prompt, seconds: duration };
     if (ratio) body.ratio = ratio;
@@ -258,6 +282,10 @@ export async function generateWithOpenaiVideo(
   // 参考图（多模态参考）
   const references = input.workflow.references ?? [];
   if (references.length > 0) {
+    if (isAgnes) {
+      // 图生视频字段名未校准（上游拒未知栏位）⇒ 不猜、不送，具名拒收（零上游成本）。
+      throw new SupplierRequestError("agnes video upstream does not accept reference images (image-to-video field uncalibrated).", 400);
+    }
     if (isSecondsFamily) {
       // miaowu 族参考图走 image_urls（上游 video_api.images_max=9）。
       if (references.length > 9) {

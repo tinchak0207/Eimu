@@ -64,6 +64,9 @@ export const LUMA_RAY2_MODEL_ID = /** @type {const} */ ("luma-ray-2");
 export const LUMA_RAY3_HDR_MODEL_ID = /** @type {const} */ ("luma-ray-3-hdr");
 export const KLING_25_TURBO_MODEL_ID = /** @type {const} */ ("kling-2.5-turbo");
 export const MINIMAX_H3_MODEL_ID = /** @type {const} */ ("minimax-h3");
+// agnes 免费视频（apihub.agnes-ai.com，2026-10-13 暴君指定）：平台自有免费额度渠道，
+// 作为**免费兜底**——付费视频渠道（miaowu / xiaoyxiao）全断时仍有可用供货。上游名同名直传。
+export const AGNES_VIDEO_25_FLASH_MODEL_ID = /** @type {const} */ ("agnes-video-2.5-flash");
 
 // blender 节点能力标签（片Y/片AA，2026-09-06）：capability model_id 即能力标签
 // （NODES-PLAN §3.1，零路由栏位扩散）。不入 SUPPORTED_* 列表（同 TTS/AV 先例）：
@@ -114,12 +117,15 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
 //   seedance-2.5-30s（依赖 seedance-2.5-3010-特惠，不在白名单）
 // 2026-10-13：seedance-2.0-mini 由 miaowuai 承接（上游 seedance-2.0-mini 按秒计价，
 // 已进付费视频白名单）⇒ 重新上架；fast / 30s 仍无供货，维持下架。
+// 2026-10-13：agnes-video-2.5-flash 上架——平台自有**免费兜底**视频档（免费额度渠道，
+// agnes 上游成本 ¥0），付费渠道（miaowu/xiaoyxiao）全断时仍有供货；免费档队列/限速较慢。
 export const SUPPORTED_VIDEO_MODEL_IDS = [
   SEEDANCE_20_MODEL_ID,
   SEEDANCE_20_MINI_MODEL_ID,
   SEEDANCE_25_480P_MODEL_ID,
   SEEDANCE_25_720P_MODEL_ID,
   MINIMAX_H3_MODEL_ID,
+  AGNES_VIDEO_25_FLASH_MODEL_ID,
 ];
 
 export const SUPPORTED_GENERATION_MODEL_IDS = [

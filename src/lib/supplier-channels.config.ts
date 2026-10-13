@@ -297,6 +297,34 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
   {
+    // agnes-video（免费兜底视频档，2026-10-13 暴君指定）：与既有 agnes（图片）同一上游
+    // base，但视频走 /v1/videos 异步协议。**一个 supplier 只有一个 adapter_type**，图片与
+    // 视频协议不同，故拆成两条 registry 条目（`env:agnes` 图片、`env:agnes-video` 视频）。
+    //
+    // 协议复用 openai_video 轮子（禁造新轮子）：POST {base}/videos 创建、GET {base}/videos/{id}
+    // 轮询——与 xiaoyxiao/miaowu 同型；请求体形状是 agnes 专属的
+    // {model, prompt, seconds(字串), mode, size(大写 720P), aspect_ratio}，由
+    // openai-video-upstream 的 agnes 分支构造。**上游严格拒未知栏位**（真单 400
+    // `foo is not an allowed request field`），故只送上述六栏。
+    //
+    // **免费**：上游成本 ¥0（平台自有免费额度）。但视频提交走 openai_video 的 fail-closed
+    // 成本闸，故上游名进视频白名单并给 unitPriceCny:0（成本 0，闸照样审，保留 ≤720p 边界）。
+    // 免费档队列/限速（真单见过 429 rate_limit_exceeded / 503 video_queue_full）；key 与图片
+    // 渠道分开（AGNES_VIDEO_API_KEY），不覆写既有可用的 AGNES_API_KEY。
+    label: "agnes-video",
+    baseUrlEnv: "AGNES_BASE_URL",
+    apiKeyEnv: "AGNES_VIDEO_API_KEY",
+    enabledEnv: null,
+    tier: "fallback",
+    sitePriority: 40,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      { modelId: "agnes-video-2.5-flash", supplierModelId: "agnes-video-2.5-flash", kinds: ["video_generate"], unitPriceCny: 0, priceSource: "free tier（agnes 平台自有免费额度，上游成本 ¥0，2026-10-13 暴君指定为免费兜底）" },
+    ],
+  },
+
+  {
     label: "harness-tts",
     baseUrlEnv: "HARNESS_TTS_BASE_URL",
     apiKeyEnv: "HARNESS_TTS_API_KEY",

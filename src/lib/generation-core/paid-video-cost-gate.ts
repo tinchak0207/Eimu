@@ -91,6 +91,11 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
   // =per_second：480p ¥0.09/s、720p ¥0.2/s），非按次固定价——单价由 registry claim 的
   // `unitPriceCnyPerSecond` 提供，无兜底表值。秒数/分辨率上限仍由本闸红线约束。
   "seedance-2.0-mini",
+  // 2026-10-13：agnes 免费兜底档（agnes 平台自有免费额度，上游成本 ¥0）。它本身**不付费**
+  //（单价 0），列进白名单的目的是走本闸的 fail-closed 审：只要它经 openai_video 协议提交，
+  // 就仍然被约束在 ≤720p、seconds ≤30，且闸日志留下一笔可稽核记录；单价由 agnes-video
+  // 供给 claim 的 unitPriceCny:0 提供（不进兜底表）。
+  "agnes-video-2.5-flash",
 ] as const;
 
 export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];

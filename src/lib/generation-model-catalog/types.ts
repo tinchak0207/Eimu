@@ -244,6 +244,10 @@ export const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as 
 // 继续供 4 秒，等于让 agent 选到一个必然失败的值 ⇒ MiniMax H3 另立收窄档位。
 export const MINIMAX_H3_DURATIONS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 export const SEEDANCE_20_DURATIONS = [10, 11, 12, 13, 14, 15] as const;
+// agnes 免费视频档（agnes-video-2.5-flash，2026-10-13）：上游规格无公开文档，按真单探针
+// 收窄到已验证/已过校验的两档——5s（免费档 200 queued 实测）、10s（上游校验通过、到队列闸）。
+// 未校准更多档位前不外露，免得 agent 选到必被上游拒的秒数。
+export const AGNES_VIDEO_DURATIONS = [5, 10] as const;
 // seedance 2.5 时长档位（上游 sd4-seedance-2.5-480p / 720p，售卖下限 10s）
 export const SEEDANCE_25_480P_DURATIONS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] as const;
 export const SEEDANCE_25_720P_DURATIONS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29] as const;

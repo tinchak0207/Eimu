@@ -80,6 +80,9 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   // 2026-10-13：seedance-2.0-mini 以 miaowuai 重新上架（上游 seedance-2.0-mini 同名直传，
   // 按秒计价 ¥0.09/s(480p)、¥0.2/s(720p)）；xiaoyxiao/gway 无该档位可承接，故仅此一跳。
   "seedance-2.0-mini": ["miaowuai"],
+  // 2026-10-13 免费兜底：agnes 免费额度渠道（上游成本 ¥0）。付费视频渠道（miaowu
+  // 余额断/xiaoyxiao 502）全断时的兜底供货；免费档队列/限速较慢，非默认路径。
+  "agnes-video-2.5-flash": ["agnes-video"],
 
   // ── 语音 ──
   "tts-1": ["harness-tts"],

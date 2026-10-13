@@ -3,6 +3,7 @@
 // 旧构建层；同时本文件新增 resolveGenerationModelId（显示名风格 id 宽容归一）。
 import {
   AGNES_IMAGE_25_FLASH_MODEL_ID,
+  AGNES_VIDEO_25_FLASH_MODEL_ID,
   ADOBE_FIREFLY_FILL_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   ADOBE_FIREFLY_VIDEO_MODEL_ID,
@@ -64,7 +65,7 @@ import {
   VEO_31_MODEL_ID,
 } from "../image-model-ids.js";
 
-import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, SEEDANCE_20_MINI_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, MINIMAX_H3_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
+import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, SEEDANCE_20_MINI_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, MINIMAX_H3_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS, AGNES_VIDEO_DURATIONS } from "./types";
 import { MODEL_KNOWLEDGE } from "./knowledge";
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
@@ -751,6 +752,28 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     // 旧值 25/40 credits=2.5/4 币/秒为错价）。
     videoCreditsPerSecond: { "720p": 50, "1080p": 100 },
     referenceImages: true,
+  },
+  // agnes 免费视频档（2026-10-13 暴君指定为**免费兜底**）：平台自有免费额度渠道，
+  // 上游成本 ¥0 ⇒ videoCreditsPerSecond 全 0（generationCoins 下限 0.00001 币/秒，
+  // 对使用者近乎免费）。上游无公开规格：分辨率/秒数按免费档真单探针收窄（仅 720P、5s
+  // 出过 200 queued；480p/10s 过关校验未出样）。**不支援参考图**——上游严格拒未知栏位、
+  // 图生视频字段未校准，故 referenceImages:false，能力面不外露参考图，免得 agent 送出必被 400 的形状。
+  [AGNES_VIDEO_25_FLASH_MODEL_ID]: {
+    id: AGNES_VIDEO_25_FLASH_MODEL_ID,
+    displayName: "Agnes Video 2.5 Flash（免费兜底）",
+    kind: "video",
+    popularity: 60,
+    vendor: "Agnes",
+    aspectRatios: VIDEO_RATIOS,
+    resolutions: ["480p", "720p"],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    durations: AGNES_VIDEO_DURATIONS,
+    defaultDuration: 5,
+    videoCreditsPerSecond: { "480p": 0, "720p": 0 },
+    referenceImages: false,
+    supportsAudio: false,
+    defaultAudio: false,
   },
   [LUMA_RAY314_MODEL_ID]: {
     id: LUMA_RAY314_MODEL_ID,

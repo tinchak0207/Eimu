@@ -9,6 +9,13 @@
 // 纯函数、无 I/O，供 pickDefaultVideoModel / resolveActiveModel / 兜底共用。
 
 export const VIDEO_FALLBACK_MODEL = "minimax-h3"
+/**
+ * 免费兜底视频档（2026-10-13 暴君指定）：agnes 平台自有免费额度渠道，上游成本 ¥0。
+ * 付费视频渠道（miaowu 余额断 / xiaoyxiao 502）全断时，它仍能供货——是**最后手段**，
+ * 不是首选：免费档队列/限速较慢、画质/时长受限，故排在任何已证伪以外的模型之后。
+ * 「教育 agent」的落点：视频导演/工作流选型知道有此免费回退，付费全断时不至于零供货。
+ */
+export const FREE_FALLBACK_VIDEO_MODEL = "agnes-video-2.5-flash"
 /** 近 24h 至少这么多单且 0 交付才判「已被证伪」（避免单次抖动毒死好模型）。 */
 export const ZERO_DELIVERY_MIN_JOBS = 3
 
@@ -63,9 +70,12 @@ export function rankVideoModels(
   const proven = ok
     .filter(isProvenVideoModel)
     .sort((a, b) => num(b.last_24h?.delivered) - num(a.last_24h?.delivered) || num(b.last_24h?.success_rate) - num(a.last_24h?.success_rate))
+  // 无样本者内部优先序：主兜底（minimax-h3，有交付史）→ 其他 → 免费兜底（agnes，最后手段）。
+  const noSampleRank = (id: unknown): number =>
+    id === VIDEO_FALLBACK_MODEL ? 0 : id === FREE_FALLBACK_VIDEO_MODEL ? 2 : 1
   const noSample = ok
     .filter((m) => !isProvenVideoModel(m) && num(m.last_24h?.jobs) === 0)
-    .sort((a, b) => Number(b.id === VIDEO_FALLBACK_MODEL) - Number(a.id === VIDEO_FALLBACK_MODEL))
+    .sort((a, b) => noSampleRank(a.id) - noSampleRank(b.id))
   return [...proven.map((m) => ({ id: m.id as string, proven: true })), ...noSample.map((m) => ({ id: m.id as string, proven: false }))]
 }
 
