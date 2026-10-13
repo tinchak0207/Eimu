@@ -87,12 +87,20 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
   "seedance-2.5-1010-特惠",
   "seedance-2.5-900-特惠",
   "grok-video-1.5",
+  // 2026-10-13：miaowuai 认领的 seedance-2.0-mini。**按秒计价**（video_api.pricing.unit
+  // =per_second：480p ¥0.09/s、720p ¥0.2/s），非按次固定价——单价由 registry claim 的
+  // `unitPriceCnyPerSecond` 提供，无兜底表值。秒数/分辨率上限仍由本闸红线约束。
+  "seedance-2.0-mini",
 ] as const;
 
 export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];
 
 /**
  * 上游按次单价（人民币元／次）＋来源。**站外事实，无法从 catalog 推导**，故显式。
+ *
+ * ⚠ 只含**按次固定价**模型（quota_type=1、billing_usage_schema=null、不随
+ * resolution/seconds 变动）；**按秒计价**模型（seedance-2.0-mini）不在此表——其单价
+ * 只能由该供给 claim 的 `unitPriceCnyPerSecond` 提供，缺失即未核价（拒收）。
  *
  * 来源原文（`GET https://api.xiaoyxiao.xyz/api/pricing`，2026-09-27 免登入唯读实查，
  * HTTP 200 / 28280 bytes / 32 model）：
@@ -106,7 +114,7 @@ export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];
  * 全部 `billing_usage_schema=null`、`billing_usage_examples=null`、`quota_type=1`
  * ⇒ 按次固定价，**不随 resolution/seconds 变动**（放宽秒数的依据）。
  */
-export const PAID_VIDEO_UNIT_PRICE_CNY: Record<PaidVideoModelId, number> = {
+export const PAID_VIDEO_UNIT_PRICE_CNY: Partial<Record<PaidVideoModelId, number>> = {
   "seedance-2.0-900-特惠": 0.7,
   "seedance-2.5-900-特惠": 0.9,
   "minimax-h3-933-2k-支持真人": 1.1,
@@ -123,9 +131,14 @@ const PRICING_SOURCE = "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (qu
 /** 已核价三元组（model, resolution, seconds）。 */
 export interface PricedVideoTriple {
   supplierModelId: PaidVideoModelId;
-  /** 按次固定单价（人民币元）。 */
+  /**
+   * 成本上界（人民币元／单）。`per_call`：按次固定单价（＝真实单价）；
+   * `per_second`：**最坏单次成本上界**＝最高每秒价 × 硬上限秒数（`PAID_VIDEO_MAX_SECONDS`）。
+   */
   unitCostCny: number;
-  billingBasis: "per_call";
+  billingBasis: "per_call" | "per_second";
+  /** `per_second` 才有：每档分辨率单价（¥／秒），键＝resolution。 */
+  perSecondByResolution?: Record<string, number>;
   /** 已核价的 resolution 档位。 */
   resolutions: readonly PaidVideoResolution[];
   /** 已核价的秒数档位。 */
@@ -140,28 +153,61 @@ function isAllowedResolution(value: string): value is PaidVideoResolution {
   return (PAID_VIDEO_ALLOWED_RESOLUTIONS as readonly string[]).includes(value);
 }
 
-interface ClaimPrice {
-  unitCostCny: number;
-  source: string;
+/** 每档分辨率单价表（¥／秒）的清洗：只留有限正数；全非法或非物件回 null。 */
+function sanitizePerSecondRates(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== "object") return null;
+  const out: Record<string, number> = {};
+  for (const [resolution, rate] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof rate === "number" && Number.isFinite(rate) && rate > 0) out[resolution] = rate;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /**
- * 按（供给 label, 上游 model）查 claim 核价（V-03）；claim 无价回退
- * `PAID_VIDEO_UNIT_PRICE_CNY`（兜底表，xiaoyxiao 价）；两者皆无回 null（＝未核价）。
+ * per_second 的最坏单次成本上界＝最高每秒价 × 硬上限秒数。闸门只要成本上界
+ * （真实秒数/分辨率在上游提交时才定），故用型号级上界，与具体三元组无关。
+ */
+function worstCasePerSecondCostCny(perSecond: Record<string, number>): number {
+  const maxRate = Math.max(...Object.values(perSecond));
+  return Math.round(maxRate * PAID_VIDEO_MAX_SECONDS * 10000) / 10000;
+}
+
+interface ClaimPrice {
+  /** 见 {@link PricedVideoTriple.unitCostCny} 的语义。 */
+  unitCostCny: number;
+  source: string;
+  billingBasis: "per_call" | "per_second";
+  perSecondByResolution?: Record<string, number>;
+}
+
+/**
+ * 按（供给 label, 上游 model）查 claim 核价（V-03）：按次固定价读 `unitPriceCny`，
+ * 按秒计价读 `unitPriceCnyPerSecond`（最坏上界由 {@link worstCasePerSecondCostCny} 折算）；
+ * claim 无价回退 `PAID_VIDEO_UNIT_PRICE_CNY`（兜底表只含按次模型）；两者皆无回 null（＝未核价）。
  * label 未知（未带 label 的呼叫）直接用兜底表。
  */
 export function resolvePaidVideoUnitPrice(supplierLabel: string | null | undefined, supplierModelId: string): ClaimPrice | null {
   if (supplierLabel) {
     const channel = REGISTRY_CHANNELS.find((entry) => entry.label === supplierLabel);
-    const claim = channel?.claims.find(
-      (entry) => entry.supplierModelId === supplierModelId && typeof entry.unitPriceCny === "number",
-    );
-    if (claim && typeof claim.unitPriceCny === "number") {
-      return { unitCostCny: claim.unitPriceCny, source: claim.priceSource ?? `supplier-channels.config ${supplierLabel}` };
+    const claim = channel?.claims.find((entry) => entry.supplierModelId === supplierModelId);
+    if (claim) {
+      const fallbackSource = claim.priceSource ?? `supplier-channels.config ${supplierLabel}`;
+      if (typeof claim.unitPriceCny === "number") {
+        return { unitCostCny: claim.unitPriceCny, source: fallbackSource, billingBasis: "per_call" };
+      }
+      const perSecond = sanitizePerSecondRates(claim.unitPriceCnyPerSecond);
+      if (perSecond) {
+        return {
+          unitCostCny: worstCasePerSecondCostCny(perSecond),
+          source: fallbackSource,
+          billingBasis: "per_second",
+          perSecondByResolution: perSecond,
+        };
+      }
     }
   }
   const fallback = PAID_VIDEO_UNIT_PRICE_CNY[supplierModelId as PaidVideoModelId];
-  return fallback === undefined ? null : { unitCostCny: fallback, source: PRICING_SOURCE };
+  return fallback === undefined ? null : { unitCostCny: fallback, source: PRICING_SOURCE, billingBasis: "per_call" };
 }
 
 /**
@@ -187,7 +233,11 @@ function buildPricedVideoTriples(): PricedVideoTriple[] {
       if (!price) continue; // 未核价＝不许提交
       const catalogModel = GENERATION_MODEL_CATALOG[claim.modelId];
       if (!catalogModel) continue;
-      const resolutions = (catalogModel.resolutions ?? []).filter(isAllowedResolution);
+      let resolutions = (catalogModel.resolutions ?? []).filter(isAllowedResolution);
+      // per_second：只认该 claim 已给单价的档位（缺价档位＝不许提交）。
+      if (price.billingBasis === "per_second") {
+        resolutions = resolutions.filter((resolution) => price.perSecondByResolution?.[resolution] !== undefined);
+      }
       const seconds = (catalogModel.durations ?? []).filter(
         (value) => Number.isInteger(value) && value >= 1 && value <= PAID_VIDEO_MAX_SECONDS,
       );
@@ -196,10 +246,11 @@ function buildPricedVideoTriples(): PricedVideoTriple[] {
       triples.push({
         supplierModelId: upstreamModel as PaidVideoModelId,
         unitCostCny: price.unitCostCny,
-        billingBasis: "per_call",
+        billingBasis: price.billingBasis,
+        ...(price.perSecondByResolution ? { perSecondByResolution: price.perSecondByResolution } : {}),
         resolutions: [...resolutions],
         seconds: [...seconds],
-        source: `${price.source} → model_name="${upstreamModel}", model_price=${price.unitCostCny}, billing_usage_schema=null；`
+        source: `${price.source} → model_name="${upstreamModel}", billing_basis=${price.billingBasis}, unit_cost_cny=${price.unitCostCny}；`
           + `seconds/resolutions 取自 catalog "${claim.modelId}"`,
         semantics: "upstream-tier-semantics-unverified",
       });
@@ -328,15 +379,34 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
       detail: `供给 "${label ?? "(unknown)"}" 的 model "${model}" 无核价（claim 与兜底表皆无），拒收。`,
     };
   }
-  if (price.unitCostCny === triple.unitCostCny && triple.source.startsWith(price.source)) {
+  // 提交渠道的计费基未必与生成该三元组的渠道相同（同一上游 model 可能按次／按秒被不同
+  // 供给认领）；以提交渠道 claim 为准。per_second 还要确认提交档位本身有单价。
+  const channelResolutions = price.billingBasis === "per_second"
+    ? triple.resolutions.filter((resolution) => price.perSecondByResolution?.[resolution] !== undefined)
+    : triple.resolutions;
+  if (price.billingBasis === "per_second" && !channelResolutions.includes(rawResolution as PaidVideoResolution)) {
+    return {
+      allowed: false,
+      reason: "triple_not_priced",
+      detail: `供给 "${label ?? "(unknown)"}" 的 model "${model}" 在 resolution "${rawResolution}" 无按秒单价，拒收。`,
+    };
+  }
+  if (
+    price.billingBasis === triple.billingBasis
+    && price.unitCostCny === triple.unitCostCny
+    && triple.source.startsWith(price.source)
+  ) {
     return { allowed: true, triple };
   }
   return {
     allowed: true,
     triple: {
       ...triple,
+      billingBasis: price.billingBasis,
       unitCostCny: price.unitCostCny,
-      source: `${price.source} → supplier="${label ?? "(unknown)"}", model_name="${model}", model_price=${price.unitCostCny}`,
+      resolutions: channelResolutions,
+      ...(price.perSecondByResolution ? { perSecondByResolution: price.perSecondByResolution } : {}),
+      source: `${price.source} → supplier="${label ?? "(unknown)"}", model_name="${model}", billing_basis=${price.billingBasis}, unit_cost_cny=${price.unitCostCny}`,
     },
   };
 }

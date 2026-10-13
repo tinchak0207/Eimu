@@ -232,6 +232,10 @@ export const VIDEO_RATIOS = ["16:9", "9:16", "1:1"] as const;
 export const WIDE_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"] as const;
 export const RUNWAY_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
 export const SEEDANCE_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
+// seedance 2.0 mini（上游 miaowu seedance-2.0-mini，2026-10-13）：上游 video_api.ratios
+// 只有 1:1/16:9/9:16/4:3/3:4（**无 21:9**，比 SEEDANCE_VIDEO_RATIOS 少一档），故单列，
+// 免得选到 21:9 必然被上游 400 拒单。
+export const SEEDANCE_20_MINI_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 export const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"] as const;
 export const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 // 2026-09-05 暴君裁定：Seedance 全系只卖 ≥10 秒（10 秒以下亏本）。

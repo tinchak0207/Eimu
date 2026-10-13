@@ -25,6 +25,11 @@ export interface RegistryChannelClaim {
    * 付费视频成本闸（paid-video-cost-gate.ts）优先读这里，缺省才回退闸内兜底表。
    */
   unitPriceCny?: number;
+  /**
+   * 按**秒**计费上游的每档分辨率单价（人民币元／秒），键＝resolution（如 "480p"/"720p"）。
+   * 与 unitPriceCny（按次固定价）互斥；两者皆缺＝未核价（付费视频闸 fail-closed 拒收）。
+   */
+  unitPriceCnyPerSecond?: Record<string, number>;
   /** 核价来源原文＋日期，例 "GET https://www.gway.dev/api/pricing 2026-09-28 vip quota_type=1"。 */
   priceSource?: string;
 }
@@ -138,6 +143,12 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     adapterType: "openai_video",
     claims: [
       { modelId: "minimax-h3", supplierModelId: "minimax-h3-max", kinds: ["video_generate"], unitPriceCny: 2.0, priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-12 (quota_type=1, model_price=0.2857142857142857 USD × usd_exchange_rate=7 = ¥2.00)" },
+      // seedance-2.0-mini（2026-10-13 暴君指定）：上游按**秒**计价，与 minimax-h3-max
+      // 的按次固定价不同型——`video_api.pricing.unit="per_second"`，rules：480p
+      // 0.012857142857142857 USD/s、720p 0.028571428571428574 USD/s，站点
+      // usd_exchange_rate=7 ⇒ ¥0.09/s、¥0.2/s。上游名与平台名同名直传；sizes 480p/720p、
+      // seconds 4–15、ratios 1:1/16:9/9:16/4:3/3:4（**无 21:9**）。
+      { modelId: "seedance-2.0-mini", supplierModelId: "seedance-2.0-mini", kinds: ["video_generate"], unitPriceCnyPerSecond: { "480p": 0.09, "720p": 0.2 }, priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-13 (video_api.pricing.unit=per_second: 480p 0.012857142857142857 USD/s → ¥0.09/s, 720p 0.028571428571428574 USD/s → ¥0.2/s × usd_exchange_rate=7)" },
     ],
   },
 

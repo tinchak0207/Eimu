@@ -112,8 +112,11 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
 //   seedance-2.0-fast（先前依赖 sd-2.0-933-720-fast-原生真人，该档位不在白名单）/
 //   seedance-2.0-mini（依赖 seedance2.0-mini-A，不在白名单）/
 //   seedance-2.5-30s（依赖 seedance-2.5-3010-特惠，不在白名单）
+// 2026-10-13：seedance-2.0-mini 由 miaowuai 承接（上游 seedance-2.0-mini 按秒计价，
+// 已进付费视频白名单）⇒ 重新上架；fast / 30s 仍无供货，维持下架。
 export const SUPPORTED_VIDEO_MODEL_IDS = [
   SEEDANCE_20_MODEL_ID,
+  SEEDANCE_20_MINI_MODEL_ID,
   SEEDANCE_25_480P_MODEL_ID,
   SEEDANCE_25_720P_MODEL_ID,
   MINIMAX_H3_MODEL_ID,

@@ -64,7 +64,7 @@ import {
   VEO_31_MODEL_ID,
 } from "../image-model-ids.js";
 
-import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, MINIMAX_H3_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
+import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, SEEDANCE_20_MINI_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, MINIMAX_H3_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
 import { MODEL_KNOWLEDGE } from "./knowledge";
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
@@ -601,7 +601,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     kind: "video",
     popularity: 95,
     vendor: "Dreamina",
-    aspectRatios: SEEDANCE_VIDEO_RATIOS,
+    // 2026-10-13 承接渠道 miaowu（上游 seedance-2.0-mini）不支持 21:9，故用收窄档。
+    aspectRatios: SEEDANCE_20_MINI_VIDEO_RATIOS,
     resolutions: ["480p", "720p"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
