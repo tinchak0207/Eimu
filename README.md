@@ -1,50 +1,67 @@
-# Eimu
+<div align="center">
 
-### 说出来，就成片。
+# 🎬 Eimu
 
-**终结多轮 Agent 的上下文腐烂与时空坍缩。将一句自然语言编译为确定性的二维分镜画布与三维机位空间。**
+### **说出来，就成片。**
+**The Spatiotemporal Multi-Agent Compiler for Film, 3D & Music Production**
+
+*终结长链路 Agent 的上下文腐烂与 5 秒时空坍缩 —— 将一句自然语言编译为确定性的二维分镜画布与三维机位空间。*
 
 <p align="center">
-  <a href="https://eimu.dev/"><strong>⚡ 立即体验云端工作台 (eimu.dev)</strong></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#核心机制把不可控的自由度从流程里拿掉"><strong>架构与隔离机制</strong></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#跨模态泛化实证零特化刷榜腾讯-songbench"><strong>SongBench 评测实证</strong></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#把-eimu-接进你的工具"><strong>接入 API / MCP</strong></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://eimu.dev/docs"><strong>文档</strong></a>
+  <a href="https://eimu.dev/"><img src="https://img.shields.io/badge/⚡_Live_Cloud-eimu.dev-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo"></a>
+  <a href="#-跨模态泛化实证零特化刷榜腾讯-songbench"><img src="https://img.shields.io/badge/SongBench_Eval-7.418_(Best--of--8)-DC2626?style=for-the-badge" alt="SongBench 7.418"></a>
+  <a href="#-编译级-agent-runtime把不可控的自由度拿掉"><img src="https://img.shields.io/badge/Runtime-90_Tools_·_1,816_Tests-2563EB?style=for-the-badge" alt="90 Tools 1816 Tests"></a>
+  <a href="#-把-eimu-接进-cursor--claude-code--openai-sdk"><img src="https://img.shields.io/badge/Protocol-OpenAI_API_&_Remote_MCP-059669?style=for-the-badge" alt="OpenAI & MCP"></a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Pipelines-13_产线_·_57_模型-0F172A?style=flat-square" alt="13 Pipelines 57 Models">
-  <img src="https://img.shields.io/badge/Agent_Runtime-90_工具_·_1,816_测试-2563EB?style=flat-square" alt="90 Tools 1816 Tests">
-  <img src="https://img.shields.io/badge/3D_Director-Blender_5.2_·_142_镜头语言-4F46E5?style=flat-square" alt="142 Camera Rules">
-  <img src="https://img.shields.io/badge/SongBench-7.418_(Best--of--8)_·_极差砍半-DC2626?style=flat-square" alt="SongBench 7.418">
+  <img src="https://img.shields.io/badge/Pipelines-13_工业产线_·_57_生成模型-1E293B?style=flat-square" alt="13 Pipelines 57 Models">
+  <img src="https://img.shields.io/badge/3D_Director-Blender_5.2_Headless_·_142_镜头语言-4F46E5?style=flat-square" alt="Blender 5.2">
+  <img src="https://img.shields.io/badge/Resilience-18s_SSE_Kill_→_54s_Async_Commit-D97706?style=flat-square" alt="Chaos Tested">
+  <img src="https://img.shields.io/badge/Unit_Economics-¥0.09_Core_Cost_·_80%25_Margin-10B981?style=flat-square" alt="Unit Economics">
 </p>
+
+<p align="center">
+  <a href="https://eimu.dev/"><strong>🚀 在线工作台 (送免费额度)</strong></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#-为什么传统-agent-交不出完整作品"><strong>范式代差</strong></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#-编译级-agent-runtime把不可控的自由度拿掉"><strong>五段式隔离架构</strong></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#-跨模态泛化实证零特化刷榜腾讯-songbench"><strong>SongBench 评测</strong></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#-把-eimu-接进-cursor--claude-code--openai-sdk"><strong>接入 API / MCP</strong></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="https://eimu.dev/docs"><strong>完整文档</strong></a>
+</p>
+
+</div>
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/c5d7745e-5b45-462c-8b70-a30ae618de3b" width="100%"></video>
+  <br>
+  <sub>▲ 真实会话实录：仅输入一句「生成秦始皇骑北极熊的电影」，Eimu 零反问直接编排 21 个生成节点，串联剧本、四视图角色卡、Blender 三维机位与原创配乐，直出 36 秒与 64.48 秒完整成片。</sub>
 </p>
 
 <p align="center">
-  <img src="docs/preview/01-workstation.png" alt="Eimu 工作台：一句需求，结果同屏" width="100%">
+  <img src="docs/preview/01-workstation.png" alt="Eimu 工作台：左聊右画，一句需求结果同屏" width="100%">
 </p>
-
-- **折叠一维时间，锁定三维时空**：单点模型只能吐出「5 秒钟即用即弃的时空切片」，传统对话 Agent 则在多轮 Prefill 中迅速丢失角色与机位状态。Eimu 用子会话隔离杀死试错的「垃圾时间」，通过 `Descript DSL` 编译器将创作意图固化为二维有向无环画布（DAG）与三维 Blender 机位轨迹。
-- **左聊右画（L1 自动挡 + L2 手动挡）**：左侧像发微信一样说人话，AI 总导演自动拆剧本、锁角色卡、排产线；右侧 21+ 节点工程画布随时展开，供专业创作者做手术刀级局部微调。
-- **时空资产沉淀与复利**：作品完成，制作方法与实体卡片（角色、场景、LoRA、分镜产线）完整留存。让第二次创作顺着第一次自然发生，使第 N 部作品的边际成本趋近于零。
 
 ---
 
-## 为什么传统 Agent 交不出完整长片？
+## ⚡ 为什么传统 Agent 交不出完整作品？
 
-市面上绝大多数 Agent 框架活在一条脆弱的**一维线性时间流**里：每一轮交互都必须把全量 System Prompt、工具索引和历史记录重新 Prefill 一遍（TTFT 首字延迟极长、Token 随轮次指数级爆炸）；角色外貌与分镜状态完全寄居在自然语言上下文（Context Engineering）中，跑过数轮后必然发生上下文腐烂与角色变脸。
+单点视频模型只能吐出**「5 秒钟即用即弃的时空切片」**；而市面上 99% 的网红 Agent 框架活在一条脆弱的**一维线性时间流**里——每轮对话重复 Prefill 全量索引，角色与机位状态寄居在自然语言上下文里，跑过数轮必然发生**上下文腐烂与角色变脸**。
 
-在 Eimu 中，你说出一句**「生成秦始皇骑北极熊的电影」**或贴入一段《大明最后的十七年》小说正文，系统不是靠写更长的提示词去碰运气，而是启动一套**编译级多 Agent 产线**：
+**Eimu 是一台将「一维时间」折叠并锚定为「二维画布与三维空间」的创作状态机：**
 
-1. **空间上不穿帮**：人物骨相、服装、场景光影被封装为跨镜头强绑定的实体卡片（`@[角色:崇祯]`），配合三维导演台与 Blender 渲染节点预排的 142 条镜头语言，21 个生成节点一次编排到位。
-2. **时间上不断裂**：从剧本拆解、四视图定妆、分镜关键帧、动态视频到原创配乐与字幕装配，全部在同一张创作图上闭环合成，直接交出 **64.48 秒**《大明最后的十七年》与 **36 秒**《始皇帝的北境征途》完整成片。
+| 核心维度 | 单点生成工具 (Sora / 海螺等) | 手搓节点工具 (ComfyUI 等) | 传统对话 Agent (ReAct / OpenClaw 类) | **🎬 Eimu (Spatiotemporal Compiler)** |
+| :--- | :--- | :--- | :--- | :--- |
+| **时空连续性** | ❌ **5 秒即坍缩**<br>跨镜头角色变脸、光影重置 | ⚠️ **靠人肉硬连**<br>改一个设定需手动重连整张网 | ❌ **长链路必丢状态**<br>靠 Context 硬记，多轮后记忆腐烂 | ✅ **全域时空守恒**<br>`@[角色:崇祯]` 实体卡 + 3D 导演台锁死 64s 长片 |
+| **上下文与延迟** | — | — | ❌ **指数级膨胀**<br>每轮全量 Prefill，TTFT 极慢且烧钱 | ✅ **百毫秒路由 + 用后即删**<br>`Jev` 按需挂载记忆，子会话仅回传 `≤500 Token` 契约 |
+| **控制粒度** | ❌ **纯黑盒抽卡**<br>局部穿帮只能整条重抽 | ⚠️ **纯手动挡**<br>极客玩具，普通创作者零可用性 | ❌ **纯嘴皮子幻觉**<br>工具越界乱调，不可控自由度极高 | ✅ **L1 自动挡 + L2 手动挡**<br>左聊自然语言，右改 21+ 节点 `Descript DSL` 画布 |
+| **故障与断网韧性** | ⚠️ 刷新页面易丢任务 | ❌ 本地算力崩盘即归零 | ❌ 前端断连 SSE 即中断报错 | ✅ **云端持久化 + Critic 门禁**<br>实测 18s 强杀断网，后台 54s 独立跑完并完整落盘 |
+| **时间复利** | ❌ 关掉网页一切归零 | ⚠️ 仅留存静态 JSON 连线 | ❌ 跑一万次任务仍是失忆新手 | ✅ **跨作品资产沉淀**<br>角色卡、LoRA 与成熟产线一键复用于第 N 部作品 |
 
 <p align="center">
   <img src="docs/preview/02-intent-to-canvas.png" alt="一句需求，整张创作图一次落成" width="100%">
@@ -52,139 +69,158 @@
 
 ---
 
-## 核心机制：把不可控的自由度从流程里拿掉
+## 🧠 编译级 Agent Runtime：把不可控的自由度拿掉
 
 > **“编排层不是「更会写提示词」，是把不可控的自由度从流程里拿掉。”**
 
-Eimu Agentic Runtime 彻底摒弃了让单一全能模型“既当裁判又当运动员”的脆弱范式，通过五层硬核机制锁死长链路交付质量：
+Eimu 拒绝让单一全能模型“既当裁判又当运动员”，全栈自研了包含 **Jev 决策路由**、**野兽模式强约束注入**、**物理级白名单子代理** 与 **Descript DSL 编译器** 的运行时核心：
 
-1. **双路预处理与 Jev 百毫秒级路由（Preprocessing & Dynamic Memory）**
-   用户输入瞬间分流：一路由轻量小模型毫秒级响应接住前端交互；另一路经 `Jev 1` 决策模型单次前向传播拦截越狱与无关指令（零主模型算力浪费）。`Jev 2` 动态判定当前轮次是否需要调取历史设定，按需从记忆库（已沉淀 1,359+ 篇工程与创作记忆）精准抽取目标块，彻底告别全量 Prefill。
-2. **野兽模式强注入与「不动手的导演」（Beast Mode Playbook Injection）**
-   开启 `BEAST_MODE=ON` 时，向主 Agent 头部强注入《派遣手册（Orchestrator Dispatch Playbook）》与《Expert 注册表摘要》（手册缺失或空档即触发 `playbook_unavailable` 结构化报错，拒绝假 ON 裸奔）。主 Agent 被强制降级为**「本体不内联动手的导演」**，仅负责定位目标、撰写含验收标准的 Spec，并通过 `routeExpert` 与 `Jev 3` 路由至领域专家。
-3. **物理级工具白名单隔离（Physical Tool Whitelisting）**
-   领域专家子代理（如音乐导演、分镜导演）进入会话即加载专属配方库（`.opencode/skills/`），且仅挂载域内白名单工具。音乐导演不是“被提示词劝告别用画图和 Blender 工具”，而是**它的工具表里从物理机制上根本不存在域外工具**，从根源上消灭越界幻觉。
-4. **子会话用后即删 + ≤500 Token 六栏契约闸门（Return Isolation & Contract Gate）**
-   子代理内部复杂的多轮网页检索、六层导演确定性改写、多 take 采样日志与试听中间态全部封闭在子会话内，**用后即删，绝不回传污染主上下文**。子代理仅允许向主 Agent 回传 `≤500 token` 的交付摘要，以及强制包含 `qcSignature` 在内的六栏交付契约（缺一栏即判定未交付）。
-5. **Descript DSL 编译锁画布 + Critic Gate 云端异步落盘**
-   所有画布修改指令均编译为自研 `Descript DSL`，与前端 Canvas 双向无损同步。产出的媒体资产必须通过挂载 `Critic Skill` 的独立审片子代理门禁检验，失败自动触发局部重试隔离。全链路在云端持久化运行——**实测在前端 18 秒强行掐断 SSE 连接的极端断网场景下，服务端依然在 54 秒内独立跑完 `workflow_write` 并将完整画布状态安全落盘**。
+```text
+                                  ┌─► [Small Model] ──► Quick Response (毫秒级前端接话)
+[User Input] ──► (Preprocessing) ─┤
+                                  └─► [Jev 1: 安全/相关性判定] ──(拦截越狱/废话)──► Reject
+                                                │ (Pass)
+                                                ▼
+                 (Memory System)  ◄── [Jev 2: 按需记忆探针] ──► 仅抽取命中块 [Memory A/B/C/D] (1,359+ 篇沉淀)
+                                                │
+                                                ▼
+                 (Runtime Core)       [Beast Mode Gate: 强注入 Dispatch Playbook + Expert 注册表]
+                                                │
+                                                ▼
+                                      [Orchestrator (降级为「不动手的导演」: 仅写 Spec 与验收契约)]
+                                                │
+                      ┌─────────────────────────┴─────────────────────────┐
+                      ▼ (Dispatch Subagent via Jev 3)                     ▼ (Edit Canvas)
+         [领域专家子代理: Music / Storyboard / 3D]              [Write Descript DSL] ──► [Compiler]
+         ├─ 物理级工具白名单 (音乐专家工具表内无画图/Blender)                              │
+         ├─ 内部六层确定性改写 + 8 轴集合熵选优 + 三通道降级                               ▼
+         └─ 💥 子会话用后即删！仅回传 ≤500 Token 摘要 + 六栏契约 ──► [Deterministic DAG Workflow ⇄ Canvas UI]
+                                                                          │
+                                                                          ▼
+                 (Critic Gate)        [Asset Output] ──► [Critic Subagent (qcSignature 质检)]
+                                                         ├─ Pass ──► 落盘交付资源库
+                                                         └─ Fail ──► 局部节点隔离重试 (不重跑全链路)
+```
+
+<p align="center">
+  <img src="docs/preview/ZH-8-mechanism.png" alt="图 8：Eimu 五段式 Agent 隔离与契约设计机制" width="100%">
+</p>
+
+### 五大工程铁律
+1. **杀死「垃圾时间」（Sub-session Destruction）**：子代理内部上百次网页检索、多 take 采样与通道报错日志全部封闭在子会话内，**用后即删，绝不污染主上下文**；主会话仅接收 `≤500 token` 摘要与带 `qcSignature` 的六栏交付契约（缺一栏即拒收）。
+2. **物理级工具白名单（Physical Whitelisting）**：领域专家不是“被 Prompt 劝告别乱调工具”，而是从注册表机制上直接剔除域外工具，彻底根绝越界幻觉。
+3. **三维导演台先排机位（3D Pre-vis to Render）**：内置 Headless Blender 5.2 渲染节点与 **142 条专业镜头语言**，复杂运镜先在三维空间排好几何轨迹，再精准驱动画面生成。
+4. **花钱前先摊出计划卡（Cost Guardrails）**：预扣 → 提交 → 失败自动退回，僵尸账自愈；正因为砍掉了每轮无脑全量 Prefill，单次中等任务推理（~600k token，¥0.06）+ 生图（¥0.03）**核心成本仅 ¥0.09**，在 ¥0.45 售价下实现 **80% 核心毛利率**。
+5. **混沌工程实证（Chaos-Tested Harness）**：历经 **1,816 项自动化测试** 与凌晨抽签式红蓝对抗评测——不存在工具绝不编造、伪造 `ok:true` 回执当场拒斥、客户端 18 秒断网强杀 SSE 后服务端 54 秒独立落盘。
+
+<p align="center">
+  <img src="docs/preview/10-film-strip.jpg" alt="《大明最后的十七年》64.48秒成片关键帧：全部镜头出自同一张创作图" width="100%">
+</p>
 
 ---
 
-## 跨模态泛化实证：零特化刷榜腾讯 SongBench
+## 🏆 跨模态泛化实证：零特化刷榜腾讯 SongBench
 
-检验一套 Agent 架构含金量的最高标准，是看它在**未做底层模型特化微调**的情况下，能否将方法论直接泛化至全新模态。
+一套真正强大的 Agent 编排架构，应当在**不改底层框架、不做垂类模型微调**的前提下，直接泛化至全新模态。
 
-我们将 Eimu 的影视编排底座直接延伸至音乐生成领域（内置 `genre → mood → instrumentation → vocal → structure → production` 六层确定性改写、8 条距离轴集合熵选优 `熵 = 相异度分布熵 × 平均距离`、以及 `Lyria / FlowMusic / YuE2` 三通道健康探针与失败降级）。仅输入一句自然语言提示词：**「我想要一首类似飞儿乐团那种喧闹史诗风格的乐曲」**，自动生成原创曲目《逆风不灭》。
+我们将 Eimu 架构直接用于音乐生成（子代理内建 `genre → mood → instrumentation → vocal → structure → production` 六层改写、8 条距离轴集合熵选优 `熵 = 相异度分布熵 × 平均距离`、以及 `Lyria / FlowMusic / YuE2` 三通道健康探针路由）。仅输入一句提示词：**「我想要一首类似飞儿乐团那种喧闹史诗风格的乐曲」**，自动交付《逆风不灭》。
 
-在腾讯官方 **SongBench（arXiv:2604.25937）** 第三方模型七维评测尺（与 27 首格莱美、金曲奖获奖曲及经典录音同批同尺测试）下：
+<p align="center">
+  <img src="docs/preview/POSTER-grammy-leaderboard.png" alt="腾讯 SongBench 七维评测分布：Eimu 7.418" width="100%">
+</p>
 
-| 评测维度 / 对照组 | 裸模型基线 (YuE2 无 Harness) | Eimu 编排均值 (4首单次成品) | Eimu 《逆风不灭》 (Best-of-8) | 27 首参考金曲库内相对分位 |
+在腾讯官方 **SongBench（arXiv:2604.25937）** 第三方模型七维评测尺（与 27 首格莱美、金曲奖获奖曲同批同尺测试）下：
+
+| 评测维度 / 对照组 | 裸模型基线 (`YuE2` 无 Harness) | Eimu 编排均值 (4首单次交付) | **Eimu 《逆风不灭》 (Best-of-8)** | 27 首参考金曲库内相对分位 |
 | :--- | :---: | :---: | :---: | :---: |
-| **七维综合均分** | 6.411 (表基线 6.50) | **6.975** | **7.418** | — |
-| **旋律 (Melody)** | 6.45 | 7.38 | **7.60** | **96% 分位** |
-| **编曲 (Arrangement)** | 6.75 | 7.43 | **7.87** | **93% 分位** |
-| **音乐性 (Musicality)** | 5.70 | 6.16 | **6.41** | **93% 分位** |
-| **器乐 (Instrumental)** | 6.85 | 7.24 | **7.51** | **89% 分位** |
-| **结构 (Structure)** | 6.32 | 7.34 | **7.85** | **89% 分位** |
-| **混音 (Mixing)** | 6.70 | 6.97 | **7.44** | **85% 分位** |
-| **人声 (Vocal)** | 6.74 | 7.08 | **7.23** | **74% 分位** |
+| **📊 七维综合均分** | 6.411 (表基线 6.50) | **6.975** | **7.418** | — |
+| **🎵 旋律 (Melody)** | 6.45 | 7.38 | **7.60** | **🔥 96% 分位** |
+| **🎻 编曲 (Arrangement)** | 6.75 | 7.43 | **7.87** | **🔥 93% 分位** |
+| **✨ 音乐性 (Musicality)** | 5.70 | 6.16 | **6.41** | **🔥 93% 分位** |
+| **🎸 器乐 (Instrumental)** | 6.85 | 7.24 | **7.51** | **89% 分位** |
+| **🏗️ 结构 (Structure)** | 6.32 | 7.34 | **7.85** | **89% 分位** |
+| **🎛️ 混音 (Mixing)** | 6.70 | 6.97 | **7.44** | **85% 分位** |
+| **🎤 人声 (Vocal)** | 6.74 | 7.08 | **7.23** | **74% 分位** |
 
-- **强力收敛抽卡方差（四臂消融对照）**：即便剥离前端导演层、仅给定相同的成熟 Brief 测试执行层，Eimu 编排依然将单通道跨题采样的极差从裸模型的 **0.829** 大幅压缩至 **0.436**（波动率直接砍半），并在最考验工程组织的「编曲」与「混音」维度分别带来 **+0.196** 与 **+0.098** 的净增益，把“玄学抽卡”彻底改造为工业级稳定交付。
-
-> *科学口径声明：以上数据采用腾讯 SongBench 官方评测器与官方权重跑出（正控制曲四批独立运行均复现 6.9150），仅作为同一标尺下验证 Eimu Harness 相较裸模型抬升上限与收敛方差的工程实证，不作跨口径商业排名或“超越人类获奖作品”的主张。*
+- **强力收敛抽卡方差（四臂消融对照）**：在给定相同成熟 Brief 的执行层对照实验中，Eimu 将单通道跨题采样极差从裸模型的 **0.829** 强行压降至 **0.436（不稳定性直接砍半）**，并在最考验工程组织的「编曲」与「混音」维度分别带来 **+0.196** 与 **+0.098** 的净增益。
+- *科学口径声明：评测采用腾讯 SongBench 官方评测器与权重（正控制曲四批独立运行均复现 6.9150），仅作为同一标尺下验证 Eimu Harness 抬升上限与收敛方差的工程实证，不作商业排行或“超越人类获奖作品”的主张。*
 
 ---
 
-## 你可以拿它做什么
+## 🎯 全场景产能矩阵（13 条产线 · 57 个模型）
 
-| 场景 | 你说的话 | 你得到的 |
-| --- | --- | --- |
+| 场景 | 你说的话（L1 对话自动挡） | Eimu 编译并交付的时空产物（L2 画布可精调） |
+| :--- | :--- | :--- |
 | **历史长片 / 小说漫剧** | 「把这章《大明最后的十七年》拆成短剧」 | 角色卡锁定崇祯骨相，21+ 节点一次编排，直出 **64.48 秒**含音轨成片 |
 | **史诗奇观短片** | 「生成秦始皇骑北极熊的电影」 | 剧本、角色四视图、分镜、配乐全自动接力，直出 **36 秒**电影级成片 |
 | **金曲级原创音乐** | 「来一首华语金曲奖风格的乐曲」 | 3 路子代理并发调研曲风歌词，六层改写 + 集合熵选优交付完整人声单曲 |
-| **电商上市片** | 「给这款护肤品做一支 30 秒上市短片」 | 分镜、成片、配音、字幕，加各投放版位的裁切图 |
-| **角色系列内容** | 「主角小明，接下来 10 个场景」 | 同一张脸贯穿所有镜头 |
-| **海报与主视觉** | 「做一版，再来 8 组」 | 一批同风格变体，一张主图自动裁出各版位 |
 | **三维机位预演** | 「先在三维导演台排好运动轨迹」 | Blender 渲染节点 + 142 条镜头语言，三维空间排好机位再驱动成片 |
-
-## 为什么用起来不一样
-
-**1. 助理全包，不是工具箱。** 你说目标，助理拆解、选模型、定参数、派任务、失败重试。需要精确控制时，专业工作台和画布随时就在手边。
-
-**2. 同一个角色，从第一镜到最后一镜。** 角色、场景、风格、道具存成卡，提示词里写 `@[角色:小明]` 就带上他的样子；锁定后整张画布都认得他。
-
-**3. 花钱之前，先看它打算怎么做。** 助理先摊出计划卡；便宜的草稿直接跑，其余先确认。每个按钮旁写明要花多少币，没出图不扣钱，失败、逾时自动退款。
-
-**4. 每一份产出，先过两道关。** 独立的审核官只负责驳回、不替任何人说好话；成品还要过质检，没清完不许交付。
-
-**5. 看到好作品，一步复刻。** 点「做同款」，提示词和风格直接进工作台；满意的一张，一键「再来 N 组」。
-
-**6. 画布就是控制台。** 每个结果都是一个节点，就地改提示词、换模型、再生成；每个节点留着历史版本，删掉的也能找回；修图、抠图、抽帧，原图永远不动。
+| **电商上市片 / 视觉包** | 「给这款护肤品做一支 30 秒短片，再来 8 组海报」 | 分镜、成片、配音、字幕 + 同风格批量变体与多投放版位自动裁切 |
 
 <p align="center">
   <img src="docs/preview/03-canvas.png" alt="无限画布" width="49%">
-  <img src="docs/preview/07-history.png" alt="生成历史与复用" width="49%">
+  <img src="docs/preview/07-history.png" alt="生成历史与跨作品资产复用" width="49%">
 </p>
-
-<p align="center">
-  <img src="docs/preview/10-film-strip.jpg" alt="成片关键帧：全部镜头出自同一张创作图" width="100%">
-</p>
-
-## 三步上手
-
-1. 打开 [eimu.dev](https://eimu.dev/)，用 GitHub、Google 或微信登录，首次登录送约 5 张图的额度。
-2. 说出你要什么。不知道怎么说，回答几道选择题就行。
-3. 看助理的计划，确认，成片出来。
-
-没登录也能先试：免费提示词优化会把一句大白话整理成结构化提示词。
-
-## 把 Eimu 接进你的工具
-
-OpenAI 兼容接口，改一个 base URL 就接上；Claude Code、Cursor、Codex 复制一行指令即可调用，扣的是同一个账号的余额。
-
-```bash
-curl https://eimu.dev/openai/v1/images/generations \
-  -H "Authorization: Bearer $EIMU_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-image-2","prompt":"a premium skincare bottle on a soft ivory background"}'
-```
-
-- **同步出图**：等图出来才回 200，现成 OpenAI SDK 不用改轮询代码。
-- **重复请求不重复扣费**：带 `Idempotency-Key`；给 `callback_url`，完成后主动回调。
-- **Remote MCP**：`/api/mcp`，生图、改图、生影片、配音、放大、查额度，与站内同一本账。
-- **批量与按规格下单**：`/v1/batches`、`/v1/skus`。
-- 在设置页自助建 key，弹窗直接给可粘贴的 curl。
-
-端点表见 [图像生成 API 文档](docs/biz-api.md)，调用流程见 [B 端 API 调用指南](docs/biz-api-guide.md)。密钥即计费主体，请勿写入前端代码或提交进版本库。
-
-## 模型
-
-- **图像**：GPT Image、Nano Banana、Seedream / Dreamina、FLUX、Adobe Firefly、Runway、PixAI 日系、Blender 渲染
-- **影片**：Veo 3.1、Kling、Seedance 2.0 / 2.5、Runway、Firefly Video、MiniMax、Luma Ray、数字人、对口型
-- **音乐与配乐**：Lyria、FlowMusic、YuE2（支持三通道健康探针与自动失败降级）
-- **语音**：TTS（8 个实测可播音色）
-
-完整清单（13 条产线、57 个模型）以 `src/lib/generation-model-catalog/catalog.ts` 为准。模型不是差异点；让它们通过同一套 `Descript DSL` 编译器、同一套计费账本与同一套失败恢复语义可靠交付，才是 Eimu 的主体。
-
-## 诚实声明
-
-- 三维导演台、Blender 渲染节点（142 条镜头语言）及 3D 白模作空间参考图已可用；全自动复杂机位直驱长片仍在持续迭代。
-- 图像类实体卡已可用；音色卡的 `@` 引用仍在验证。
-- 放大由模型重新绘制，细节会变，不是像素插值。
-
-## 有意不做的事
-
-- **不做时间轴剪辑**：助理替你剪。
-- **不做 Photoshop**：复杂修改交给模型重绘。
-- **不做技能市集**：你的配方只属于你。
-- **不做「分享墙」式社交**：生成是生产，不是打卡。
-
-> 使用在线服务需注册账号并充值额度；接入生成能力需配置相应供应商的 API 凭证，模型调用与存储可能产生费用。
 
 ---
 
-## 架构全景与工程实现（90 个 Agent 工具 · 1,816 项自动化测试）
+## 🔌 把 Eimu 接进 Cursor / Claude Code / OpenAI SDK
+
+无需从头搭建渲染集群，改一行 `base_url` 或挂载 Remote MCP，即可将 Eimu 的 57 个模型与实体资产卡直接注入你的工作流（与站内共享同一套幂等计费账本）：
+
+### 1. 一行指令挂载 Remote MCP（Claude Code / Cursor / Codex）
+```json
+{
+  "mcpServers": {
+    "eimu-studio": {
+      "url": "https://eimu.dev/api/mcp",
+      "headers": {
+        "Authorization": "Bearer $EIMU_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### 2. OpenAI 兼容接口（同步出图 · 幂等防重扣 · 交易级 Webhook）
+```bash
+curl https://eimu.dev/openai/v1/images/generations \
+  -H "Authorization: Bearer $EIMU_API_KEY" \
+  -H "Idempotency-Key: trace-2026-001" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"@[角色:崇祯] 站在风雪煤山回望紫禁城, 电影级宽银幕光影"}'
+```
+- **开发者友好特性**：同步等待出图回 `200`（免写轮询代码）；支持 `/v1/batches` 批量与 `/v1/skus` 按规格下单；详见 [图像生成 API 文档](docs/biz-api.md) 与 [B 端调用指南](docs/biz-api-guide.md)。
+
+### 3. 云端开箱即用 vs 本地自建（Cloud vs Self-Hosted）
+
+| 部署方式 | 环境依赖与配置成本 | 适用人群 | 入口 |
+| :--- | :--- | :--- | :--- |
+| **☁️ Eimu Cloud (官方推荐)** | **零配置**，微信 / GitHub 扫码即送免费算力额度，享底层集采底价（生图进价 ¥0.01） | 独立创作者、漫剧工作室、直接调 API/MCP 的开发者 | **[👉 立即打开 eimu.dev](https://eimu.dev/)** |
+| **🛠️ Local Self-Hosted** | 需自行配置 Node 20+、Postgres 租约库、Headless Blender 5.2 (EGL) 及 57 个上游模型凭证 | 研究多 Agent 编排机制与分布式控制平面的系统工程师 | 见下方《架构与本地开发》 |
+
+---
+
+## 🗺️ 模型生态与演进路线图 (Roadmap)
+
+- **已接入多模态矩阵**（完整定义见 `src/lib/generation-model-catalog/catalog.ts`）：
+  - **图像与三维**：GPT Image、Nano Banana、Seedream / Dreamina、FLUX、Adobe Firefly、Runway、PixAI 日系、Blender 5.2 渲染
+  - **视频与表演**：Veo 3.1、Kling、Seedance 2.0 / 2.5、Runway、Firefly Video、MiniMax、Luma Ray、数字人、对口型
+  - **音乐与语音**：Lyria、FlowMusic、YuE2（三通道健康探针与自动降级）、TTS（8 个实测可播音色）
+- **工程里程碑与诚实边界**：
+  - [x] `Descript DSL` 编译器与 21+ 节点 DAG 画布双向同步
+  - [x] `Jev` 百毫秒决策路由与野兽模式五段式物理白名单隔离
+  - [x] 图像类实体卡（角色/场景/风格）跨镜头绑定与 Blender 3D 白模参考预演
+  - [x] 音乐子代理零特化泛化并在腾讯 SongBench 取得 7.418 (Best-of-8) 与方差砍半实证
+  - [x] 网关鉴权正/负缓存隔离（15s 负缓存防瞬时抖动毒化）与 18s 断网 SSE 异步落盘验收
+  - [ ] 由 3D 导演台机位轨迹全自动直驱长片渲染（持续验证迭代中）
+  - [ ] 音色卡的 `@` 实体跨会话强引用与交付物链接语义化版本命名对齐
+
+**有意不做的事（Anti-Goals）**：不做传统时间轴剪辑软件（助理替你装配）；不做 Photoshop 图层堆砌；不做带抽成的技能市集；不做打卡式社交分享墙。生成是严肃的工业生产。
+
+---
+
+## 🏗️ 系统架构与代码拓扑（90 个工具 · 1,816 项测试）
 
 ### 仓库结构
 
@@ -287,9 +323,15 @@ npm run build        # 生产构建
 | [产品准则](PRODUCT.md) | 用户、定位、能力边界与产品决策原则 |
 | [第三方声明](THIRD-PARTY-NOTICES.md) | 引入的第三方开源组件与许可 |
 
+---
 
-## 开源生态与商业托管声明
+## 📈 Star History & 授权声明
 
-- **架构与评测实证共享**：我们鼓励开发者与研究者参考 Eimu 的编译级多 Agent 编排机制（`Descript DSL`、五段式物理白名单与契约回传隔离）及对抗评测基准。
-- **免配置云端生产环境**：本地完整复现 13 条产线需配置 57 个上游模型供应商凭证、Postgres 租约库及 Headless Blender 渲染集群。如需零配置开箱即用、体验单次任务 ¥0.09 极低核心成本的工业级成片产线，请直接访问官方云端工作台 **[eimu.dev](https://eimu.dev/)** 或通过上方 OpenAI 兼容 API / MCP 接入。
-- **版权与许可**：本仓库核心业务代码与专属产线配方版权归作者（陈天泽、徐振华）所有。仓库内包含的第三方开源组件及其许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)，原有版权与许可声明予以保留。
+<p align="center">
+  <a href="https://star-history.com/#zyese/eimu&Date">
+    <img src="https://api.star-history.com/svg?repos=zyese/eimu&type=Date" alt="Star History Chart" width="80%">
+  </a>
+</p>
+
+- **开源共享与商业托管**：我们公开 Eimu 的系统架构规范、五段式 Agent 隔离机制与评测基准实证，供多模态 Agent 社区研究参考；生产环境完整算力托管请直接访问 **[eimu.dev](https://eimu.dev/)**。
+- **版权声明**：本项目核心业务代码与专属产线配方为私有产权（Proprietary），版权归作者（陈天泽、徐振华）所有，All Rights Reserved。仓库内包含的第三方开源组件及其许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
