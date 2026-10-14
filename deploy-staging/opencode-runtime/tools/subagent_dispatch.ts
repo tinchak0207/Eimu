@@ -8,6 +8,21 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const WAIT_MS = Number(process.env.SUBAGENT_WAIT_MS || 20_000)
 const POLL_DEADLINE_MS = 16 * 60 * 1000 // 网关侧 15 分钟硬顶会先以 error 收尾
 
+// F9（P1·把「成功」报成「失败」修复）：终态成败映射——**与 tools/subagent_status.ts 的
+// STATUS_IS_FAILURE 同源**（其真源＝gateway types-gateway.ts 的 TASK_STATUS_SEMANTICS.isFailure）。
+// stopped（人工停）/interrupted/suspended/partial 都不是失败，只有 error/timeout 类才算失败。
+// 工具档之间无法共享常量（各自独立打包），故此处内联同一判据；两处必须同步改动。
+const STATUS_IS_FAILURE: Record<string, boolean> = {
+  ok: false,
+  error: true,
+  stopped: false,
+  running: false,
+  interrupted: false,
+  suspended: false,
+  timeout: true,
+  partial: false,
+}
+
 // D2（2026-10-02）：必填自检与示例——把过去 135 次空参数（`{}`）造成的
 // opencode schema 空错误码，换成「指名缺哪栏 + 可照抄的完整参数」。
 const EXAMPLE_ARGS = {
@@ -130,10 +145,18 @@ export default tool({
           continue // 单次取件失败不放弃，继续等下一轮（wait_ms 天然限速，不会满速死回圈）
         }
         if (st?.done) {
-          if (st.status === "ok") {
-            return ok({ title: "子代理完成", summary: st.summary ?? "" })
+          // F9：按终态成败表判定，不再「status !== "ok" 即失败」——终态 stopped（人工停）等非失败
+          // 状态不得回 fail（否则 orchestrator 收到「失败」会倾向重派＝重复付费生成）。
+          const failed = STATUS_IS_FAILURE[String(st.status)] === true
+          if (!failed) {
+            const title =
+              st.status === "stopped" ? "子代理已停止（非失败）" : st.status === "interrupted" ? "子代理已中断（非终态）" : "子代理完成"
+            return ok({ title, status: st.status ?? "ok", summary: st.summary ?? "" })
           }
-          return fail("subagent_error", st.error || st.summary || "子代理失败")
+          return fail("subagent_error", st.error || st.summary || "子代理失败", {
+            status: st.status,
+            ...(st.summary ? { summary: st.summary } : {}),
+          })
         }
       }
       return fail("timeout", "等待子代理结果超时（16 分钟），请稍后用相同 label 重新派发")

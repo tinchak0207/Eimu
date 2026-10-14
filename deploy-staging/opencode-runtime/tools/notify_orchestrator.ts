@@ -22,7 +22,7 @@ export default tool({
     "**kind**：`progress`＝里程碑/阶段进展；`blocked`＝被卡住、无法自行推进；`question`＝需要派工方拿主意的决策，可带 `question` 对象（`header` 提问标题、`options` 候选答案、`is_blocking` 是否阻塞等待答复、`is_secret` 是否敏感）。",
     "**父方忙碌时不会被打断**：消息进它的待读队列，回执 `delivery:\"skipped_inactive\"`、`parent_woken:false`；该回报**会在派工方下一次被唤醒时一并送达**（不保证立即）。父方空闲时唤醒一次，回 `delivery:\"accepted\"`、`parent_woken:true`。**唤醒有 60s 窗口限流，且按类别分道：progress／blocked（连同 `is_blocking:false` 的非阻塞提问）一道，`is_blocking:true` 的阻塞式提问另一道，各自独立计时——一类刚唤醒过不会抑制另一类。** 若回执带 `throttled:true`，表示**本类**在本窗口内已唤醒过父方、本条只入队：回报不会丢，会在派工方**下一次被唤醒时一并送达**（不保证立即，不会立刻被读到）。若你在等答复而长时间无回应，用 `subagent_status` 复核 `pending_questions`，别原地重投。等待唤醒不靠轮询——以本工具的真实回执为准。",
     "**不要用它刷进度**：只为需要对方知晓或决策的事件上报，琐碎的过程日志不要投。上报内容不是正式交付，正式成果仍按任务书交付契约回传。",
-    `**必填**：kind 与 text。缺任一个会被拒并回传可照抄的完整参数示例。示例参数：${EXAMPLE_JSON}`,
+    `**必填**：kind；text（kind=question 时可用非空 question.header 代替）。缺失会被拒并回传可照抄的完整参数示例。示例参数：${EXAMPLE_JSON}`,
   ].join("\n"),
   args: {
     kind: tool.schema
@@ -32,12 +32,12 @@ export default tool({
     text: tool.schema
       .string()
       .optional()
-      .describe("一句话说明发生了什么、你需要什么。必填"),
+      .describe("一句话说明发生了什么、你需要什么。kind≠question 时必填；kind=question 时可用非空 question.header 代替"),
     question: tool.schema
       .object({
         header: tool.schema.string().describe("提问标题（简短）"),
         options: tool.schema.array(tool.schema.string()).optional().describe("候选答案清单（可选，供派工方/用户挑选）"),
-        is_blocking: tool.schema.boolean().optional().describe("true=你需要答复才能继续；缺省 false（不阻塞）"),
+        is_blocking: tool.schema.boolean().optional().describe("true=你需要答复才能继续；缺省 true（阻塞等待答复）（与 ask_parent 一致）"),
         is_secret: tool.schema.boolean().optional().describe("true=提问涉及敏感信息，展示时注意"),
       })
       .optional()
@@ -48,7 +48,13 @@ export default tool({
     const text = typeof args.text === "string" ? args.text.trim() : ""
     const missing: string[] = []
     if (!kind) missing.push("kind")
-    if (!text) missing.push("text")
+    // F11（P2·契约不可达修复）：网关对 kind="question" 允许「text 或非空 question.header」二者其一，
+    // 此前工具端强制 text 必填会把合法的 header-only 提问拦死（HTTP 呼叫数 0）。仅非 question 时
+    // text 必填；question 允许 question.header 兜底。
+    const qHeader =
+      args.question && typeof args.question === "object" && typeof args.question.header === "string" ? args.question.header.trim() : ""
+    if (kind !== "question" && !text) missing.push("text")
+    if (kind === "question" && !text && !qHeader) missing.push("text（或非空 question.header）")
     if (missing.length > 0) {
       return fail(
         "missing_required_args",

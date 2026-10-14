@@ -904,6 +904,12 @@ function removeFromRegistries(run: SubagentRun): void {
   if (run.deadlineTimer) clearTimeout(run.deadlineTimer)
   if (run.heartbeatTimer) clearInterval(run.heartbeatTimer)
   if (run.earlyPartialTimer) clearTimeout(run.earlyPartialTimer)
+  // F7（P2·计时器泄漏修复）：挂起时臂上的 timer 此前不在此清——摘注册表（stop/终态回收）后
+  // 挂起 timer 仍会到点尝试唤醒已回收的 run。与上面四个计时器同处清理。
+  if (run.suspension?.timer) {
+    clearTimeout(run.suspension.timer)
+    run.suspension.timer = undefined
+  }
 }
 
 /**
@@ -2910,13 +2916,18 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     if (liveRun?.checkpoints?.length) {
       inheritedCp = fromCpId ? liveRun.checkpoints.find((c) => c.id === fromCpId) : liveRun.lastCheckpoint ?? liveRun.checkpoints[liveRun.checkpoints.length - 1]
     }
-    if (!inheritedCp) {
+    // F1（P1·跨会话越权修复，2026-10-14）：回退两条腿（completed 记录 / 落盘检查点档）都必须过
+    // 父归属闸——liveRun 那条已按父过滤，这两条没有：B 知道 A 的 run id 即可把 A 的终态检查点
+    // （summary/data 整段）注入本会话任务书。归属不成立＝视同查不到（不回退、不注入），行为与
+    // 其他「查不到」一致。归属判据复用同一文件既有的 parentOwnsRunId。
+    const cpOwned = parentOwnsRunId(parent.sessionId, fromCpRunId)
+    if (!inheritedCp && cpOwned) {
       const compRec = completed.get(fromCpRunId)
       if (compRec?.lastCheckpoint && (!fromCpId || compRec.lastCheckpoint.id === fromCpId)) {
         inheritedCp = compRec.lastCheckpoint
       }
     }
-    if (!inheritedCp) {
+    if (!inheritedCp && cpOwned) {
       try {
         if (existsSync(SUBAGENT_CHECKPOINTS_DIR)) {
           const files = readdirSync(SUBAGENT_CHECKPOINTS_DIR).filter((f) => f.startsWith(`${fromCpRunId}-`) && f.endsWith(".json"))
@@ -3357,6 +3368,10 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
   }
   if (cands.length === 1) {
     const c = cands[0]
+    // F12（P2·失败丢死因与产物修复）：单候选若为终态，必须带 summary/error/artifacts/partial/reason
+    // ——与 done 分支同形状。否则工具层失败渲染只剩「子代理失败」四字，与「失败先读成品再决定重派」
+    // 的立场矛盾（orchestrator 会误判零产物而重派＝重复付费生成）。运行中候选不加这些（无终态事实）。
+    const rec = c.running ? undefined : completed.get(c.runId)
     return Response.json({
       ok: true,
       done: !c.running,
@@ -3365,6 +3380,11 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       label: c.label,
       ...(c.running ? { elapsed_ms: c.elapsed_ms } : {}),
       ...(c.resumable !== undefined ? { resumable: c.resumable } : {}),
+      ...(rec?.summary !== undefined ? { summary: rec.summary } : {}),
+      ...(rec?.error ? { error: rec.error } : {}),
+      ...(rec?.partial ? { partial: true } : {}),
+      ...(rec?.reason ? { reason: rec.reason } : {}),
+      ...(rec?.artifacts?.length ? { artifacts: rec.artifacts } : {}),
     })
   }
   if (cands.length > 1) {
@@ -3899,7 +3919,11 @@ async function resumeTerminalRun(
     return { ok: false, code: "not_messageable", error: `「${old.label}」的子会话不可续（会话 id 非法或子会话已被回收）；请重新派工。`, status: 409 }
   }
   const list = byParent.get(old.parentGatewaySessionId) ?? []
-  if (list.length >= MAX_ACTIVE_PER_PARENT) {
+  // F4（P2·并发口径不一致修复）：与其余六处（dispatch / autoResumeSuspendedRun /
+  // checkPendingResumeQueue / handleSubagentResume / critic 两处）**同一口径**——只数
+  // status === "running" 的（suspended/interrupted 已交出并发槽）。此前用 list.length 把
+  // suspended 也算满，会把对终态 run 的合法续跑误回并发满。
+  if (list.filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) {
     return { ok: false, code: "concurrency_limit", error: SUBAGENT_BUSY_MESSAGE, status: 409 }
   }
   // G3（2026-10-14 竞态修复）：认领必须在**任何 await 之前且同步完成**——否则投递 await 窗内
@@ -4116,7 +4140,6 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
     // （尤其 blocking 提问的答复会永远卡在队列里、问题永不解除）。故此处立即唤醒：清挂起、
     // 取并发槽（满则入恢复队列）、把指示／答复原文投进子会话，并按 question_id 解除提问。
     if (live.status === "suspended") {
-      const questionResolved = resolveQuestionOnAnswer(live, body.question_id)
       const woken = await autoResumeSuspendedRun(
         live,
         kind === "question" ? "answer" : "message",
@@ -4126,6 +4149,9 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
       if (!woken) {
         return Response.json({ ok: false, code: "not_messageable", error: `「${live.label}」挂起态唤醒失败；指示未投递。` }, { status: 502 })
       }
+      // G1（2026-10-14 修复）：解除提问挪到唤醒成功之后——唤醒失败回 502 时不得先行标记解除，
+      // 否则父会话以为答过了、子代理其实没收到；此刻提问保持 pending，可重投。
+      const questionResolved = resolveQuestionOnAnswer(live, body.question_id)
       return Response.json({
         ok: true,
         delivery: live.status === "running" ? "steered" : "queued",
@@ -4468,10 +4494,14 @@ export async function handleSubagentAskParent(req: Request): Promise<Response> {
   const isBlocking = body.is_blocking !== false
   const isSecret = body.is_secret === true
   const options = Array.isArray(body.options) ? body.options.slice(0, 8).map((o) => String(o).slice(0, 200)) : undefined
+  // F6（P2·内审正文旁路修复）：内审（machineCriticPass）run 的提问正文对所有父向外发出口一致抑制
+  // （与 notify 的 reportText / SSE 的 hideBody 同一条件）。此前 ask-parent 直接落 rawQ ⇒ 内审正文
+  // 连同 header 经父会话回报队列 / SSE note 帧 / 唤醒载荷外泄。工具回执给子代理自己的原文不受影响。
+  const parentFacingQ = run.machineCriticPass === true ? SUBAGENT_INTERNAL_BODY_WITHHELD : rawQ.slice(0, SUBAGENT_BUS_MAX_CHARS)
   const qItem = {
     id: questionId,
     header,
-    text: rawQ.slice(0, SUBAGENT_BUS_MAX_CHARS),
+    text: parentFacingQ,
     options,
     is_blocking: isBlocking,
     is_secret: isSecret,
@@ -4488,14 +4518,14 @@ export async function handleSubagentAskParent(req: Request): Promise<Response> {
     return Response.json({ ok: true, question_id: questionId, is_blocking: isBlocking, resolve_by: qItem.resolve_by, parent_woken: false, note: "已记录提问，父会话离线" })
   }
   const notes = (parentState.subagentNotes ?? []) as Array<{ id: string; run_id: string; kind: string; text: string; at: number }>
-  notes.push({ id: crypto.randomUUID(), run_id: run.id, kind: "question", text: `[${header}] ${rawQ}`, at: now })
+  notes.push({ id: crypto.randomUUID(), run_id: run.id, kind: "question", text: `[${header}] ${parentFacingQ}`, at: now })
   if (notes.length > SUBAGENT_NOTE_QUEUE_MAX) notes.splice(0, notes.length - SUBAGENT_NOTE_QUEUE_MAX)
   parentState.subagentNotes = notes
 
   deps.emitToSession(parentState, "subagent.note", {
     id: run.id,
     kind: "question",
-    text: `[${header}] ${rawQ}`,
+    text: `[${header}] ${parentFacingQ}`,
     at: now,
     question_id: questionId,
     header,
@@ -4540,7 +4570,7 @@ export async function handleSubagentAskParent(req: Request): Promise<Response> {
     id: run.id,
     label: run.label,
     kind: "question",
-    text: `${SUBAGENT_UNTRUSTED_PREFIX}\n[提问·${header}] ${rawQ}`,
+    text: `${SUBAGENT_UNTRUSTED_PREFIX}\n[提问·${header}] ${parentFacingQ}`,
   })
   return Response.json({
     ok: true,
@@ -4645,7 +4675,9 @@ export async function handleSubagentScratchpad(req: Request): Promise<Response> 
     pad = new Map<string, ScratchpadEntry>()
     sessionScratchpads.set(parentKey, pad)
   }
-  const action = typeof body.action === "string" ? body.action.trim() : "list"
+  // F5（P2·静默误判修复）：不再缺省 "list"——未知值（含 "SET" 等大小写/拼写错）此前静默落到末尾
+  // 的 list 分支并回 ok:true（写意图被当读执行且不报错）。list 必须由**显式** action:"list" 触发。
+  const action = typeof body.action === "string" ? body.action.trim() : ""
   const childRun = byChildOc.get(sid)
   const producer = childRun?.label || "orchestrator"
   if (action === "set") {
@@ -4686,12 +4718,19 @@ export async function handleSubagentScratchpad(req: Request): Promise<Response> 
     const deleted = pad.delete(key)
     return Response.json({ ok: true, key, deleted })
   }
-  const cat = typeof body.category === "string" && body.category.trim() ? body.category.trim() : undefined
-  const entries: ScratchpadEntry[] = []
-  for (const item of pad.values()) {
-    if (!cat || item.category === cat) entries.push(item)
+  if (action === "list") {
+    const cat = typeof body.category === "string" && body.category.trim() ? body.category.trim() : undefined
+    const entries: ScratchpadEntry[] = []
+    for (const item of pad.values()) {
+      if (!cat || item.category === cat) entries.push(item)
+    }
+    return Response.json({ ok: true, count: entries.length, entries })
   }
-  return Response.json({ ok: true, count: entries.length, entries })
+  // F5：显式终局——未知 action 一律 400（不再静默当 list 读）。
+  return Response.json(
+    { ok: false, code: "invalid_action", error: 'action 非法：scratchpad 只接受 "set"/"get"/"delete"/"list"（区分大小写）。' },
+    { status: 400 },
+  )
 }
 
 /**
@@ -4719,7 +4758,9 @@ export async function handleSubagentArtifact(req: Request): Promise<Response> {
     reg = new Map<string, TypedArtifact>()
     sessionArtifactRegistries.set(parentKey, reg)
   }
-  const action = typeof body.action === "string" ? body.action.trim() : "list"
+  // F5（P2·静默误判修复）：同 scratchpad——未知 action（含大小写/拼写错）不再静默落 list 回 ok:true；
+  // list 必须由**显式** action:"list" 触发，其余非法值一律 400。
+  const action = typeof body.action === "string" ? body.action.trim() : ""
   const childRun = byChildOc.get(sid)
   const producer = childRun?.label || "orchestrator"
   if (action === "register") {
@@ -4768,12 +4809,19 @@ export async function handleSubagentArtifact(req: Request): Promise<Response> {
     }
     return Response.json({ ok: false, code: "missing_args", error: "artifact_id 或 name 必传其一" }, { status: 400 })
   }
-  const filterType = typeof body.type === "string" && body.type.trim() ? body.type.trim() : undefined
-  const artifacts: TypedArtifact[] = []
-  for (const a of reg.values()) {
-    if (!filterType || a.type === filterType) artifacts.push(a)
+  if (action === "list") {
+    const filterType = typeof body.type === "string" && body.type.trim() ? body.type.trim() : undefined
+    const artifacts: TypedArtifact[] = []
+    for (const a of reg.values()) {
+      if (!filterType || a.type === filterType) artifacts.push(a)
+    }
+    return Response.json({ ok: true, count: artifacts.length, artifacts })
   }
-  return Response.json({ ok: true, count: artifacts.length, artifacts })
+  // F5：显式终局——未知 action 一律 400（不再静默当 list 读）。
+  return Response.json(
+    { ok: false, code: "invalid_action", error: 'action 非法：artifact 只接受 "register"/"get"/"list"（区分大小写）。' },
+    { status: 400 },
+  )
 }
 
 // ── 支柱四：主动挂起与恢复（Suspend & Resume）──────────────────────────────────
@@ -4791,6 +4839,13 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
     if (!q.some((item) => item.run.id === run.id)) {
       q.push({ run, payload: customPayload, triggerSource, resumeText })
     }
+    // F3（P1·答复被 timer 抢先吞掉修复）：入队即解除挂起时臂上的 timer（默认 30s）——否则 timer
+    // 先到点会用**通用恢复文案**唤醒 run，入队的 resumeText（答问原文）永不投递（且提问已被标记
+    // resolved）。排队成功后投递的唯一触发权交给 checkPendingResumeQueue。
+    if (run.suspension?.timer) {
+      clearTimeout(run.suspension.timer)
+      run.suspension.timer = undefined
+    }
     return true
   }
   if (run.suspension?.timer) {
@@ -4799,13 +4854,12 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
   }
   run.status = "running"
   const checkpointData = customPayload ?? run.suspension?.checkpoint_data
+  // F2（P1·谎报成功＋僵尸占槽修复）：先留住 suspension 对象，投递失败时原样退回（timer 上面已
+  // 就地置 undefined ⇒ 退回后也不会重臂，符合「不重臂」）。
+  const savedSuspension = run.suspension
   run.suspension = undefined
   run.lastActivityAt = Date.now()
   writeLiveLog(run, true)
-  const parentState = parentStateOf(run)
-  if (parentState && deps) {
-    deps.emitToSession(parentState, "subagent.resumed", { id: run.id, label: run.label, trigger: triggerSource })
-  }
   // resumeText（来自发起方的答问／指示）优先：挂起子代理被唤醒时最需要的是这条内容本身，
   // 而不是「槽位已获取」的空话。无 resumeText 时维持既有文案逐字不变。
   const resumeMsg =
@@ -4813,7 +4867,23 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
     (checkpointData
       ? `【挂起结束·恢复执行（触发源：${triggerSource}）】\n数据：\n${typeof checkpointData === "string" ? checkpointData : JSON.stringify(checkpointData, null, 2)}\n\n并发槽已获取，请接续下一步！`
       : `【挂起结束·恢复执行（触发源：${triggerSource}）】并发槽已获取，请继续推进！`)
-  await deliverChildTurn(run, resumeMsg, `auto_resume_${triggerSource}`, true)
+  // F2：以投递结果为真值——子会话已死时 deliverChildTurn 回 false，不得无条件回 true（调用方会
+  // 误回 ok:true/steered，且 run 停在 running 一直占并发槽＝僵尸占槽）。
+  const delivered = await deliverChildTurn(run, resumeMsg, `auto_resume_${triggerSource}`, true)
+  if (!delivered) {
+    // 投递失败：不谎报——状态退回 suspended、恢复 suspension、写一次 live log，如实回 false
+    // （resumed 事件此时尚未发出，不会有「已恢复」的假帧）。
+    run.status = "suspended"
+    run.suspension = savedSuspension
+    run.lastActivityAt = Date.now()
+    writeLiveLog(run, true)
+    return false
+  }
+  // 投递成功：发 resumed 事件（与既有 happy path 同一载荷，仅移到投递确认之后）。
+  const parentState = parentStateOf(run)
+  if (parentState && deps) {
+    deps.emitToSession(parentState, "subagent.resumed", { id: run.id, label: run.label, trigger: triggerSource })
+  }
   return true
 }
 
@@ -4826,6 +4896,9 @@ export function checkPendingResumeQueue(parentId: string): void {
   if (runningCount >= MAX_ACTIVE_PER_PARENT) return
   const next = q.shift()
   if (!next) return
+  // F8（P2·无界常驻修复）：队列抽空即删键——否则每个曾入队的父会话永久留键（非空时还持有 run
+  // 引用）。下一个仍留队时保持键，条数由 handleSubagentResume/autoResume 的「同 run 不重复入队」有界。
+  if (q.length === 0) pendingResumeQueue.delete(parentId)
   void autoResumeSuspendedRun(next.run, next.triggerSource, next.payload, next.resumeText)
 }
 
@@ -4944,6 +5017,12 @@ export async function handleSubagentResume(req: Request): Promise<Response> {
     if (!q.some((item) => item.run.id === run.id)) {
       q.push({ run, payload: body.payload, triggerSource: body.trigger_source || "manual" })
     }
+    // G2（2026-10-14 修复·同型 F3）：入队即解除挂起时臂上的 timer——否则 timer 先到点会用通用
+    // 恢复文案唤醒 run，队列项里的 payload 永不投递。投递唯一触发权交给 checkPendingResumeQueue。
+    if (run.suspension?.timer) {
+      clearTimeout(run.suspension.timer)
+      run.suspension.timer = undefined
+    }
     return Response.json({
       ok: true,
       queued: true,
@@ -4952,7 +5031,15 @@ export async function handleSubagentResume(req: Request): Promise<Response> {
       note: "当前并发槽位已满（3/3），恢复请求已入队排队，待槽位空出后自动恢复",
     })
   }
-  await autoResumeSuspendedRun(run, body.trigger_source || "manual", body.payload)
+  // F2（P1·谎报成功修复）：autoResumeSuspendedRun 以投递结果为真值，投递失败（子会话不可达/已失效）
+  // 时如实回 502 not_messageable，绝不回「已恢复运行」。
+  const resumed = await autoResumeSuspendedRun(run, body.trigger_source || "manual", body.payload)
+  if (!resumed) {
+    return Response.json(
+      { ok: false, code: "not_messageable", error: "挂起子代理唤醒失败（子会话不可达或已失效）；未投递。", subagent_id: run.id },
+      { status: 502 },
+    )
+  }
   return Response.json({
     ok: true,
     status: "running",
