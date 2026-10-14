@@ -1707,9 +1707,9 @@ function persistRunOutput(
       "",
     ].join("\n")
     const abs = join(SUBAGENT_OUTPUT_DIR, fileName)
-    writeFileSync(abs, `${meta}${content}\n\n---\n\n${PERSIST_TAIL}\n`, { encoding: "utf8", mode: 0o600 })
+    writeFileSync(abs, `${meta}${content}\n\n---\n\n${PERSIST_TAIL}\n`, { encoding: "utf8", mode: 0o640 })
     try {
-      chmodSync(abs, 0o600) // FIX-G3（T3）：明确 600=仅属主可读——子代理正文与 live log 同规，不再落世界可读（partial/终态同一写入路径）。
+      chmodSync(abs, 0o640) // FIX-G6b（2026-10-14）：640＝属主 ubuntu rw ＋ 组 agentsvc r。父会话的 opencode 以 agentsvc 身份运行（`systemctl show opencode-server -p User`＝agentsvc），且目录 setgid 使新档继承组 agentsvc——唤醒/状态回执把 artifact_path 交给它去 read，故必须让**该读的人读得回**；旧 600 会让它 PermissionDenied（生产实测）。同时不对 world 开放，比生产原有 644 更严，安全意图不退化。
     } catch {
       /* chmod 失败不影响可读性（mode 已带） */
     }
@@ -3008,6 +3008,51 @@ function resolveLatestRunId(parentKey: string): string | undefined {
   return recentRunsForParent(parentKey, 1)[0]?.id
 }
 
+/** G6（2026-10-14）：在途 run 的**状态快照构造**——从 `handleSubagentStatus` 的 byChildOc 命中
+ *  分支无损抽取为纯函数（只读 run 与 now，无副作用），byChildOc 精确命中与 byParent 精确兜底
+ *  两处**共用同一份**，杜绍「两处各写一份→漂移」。栏位与文案逐字沿用抽取前，只增不改。
+ *  C1（2026-10-14 协作总线）：**首次查询即当前状态快照**（照 Y1：订阅/拉取必须先得到当前状态，
+ *  而不是只得到「仍在运行」四个字）。新栏位只增不改：既有 ok/done/subagent_id/label/elapsed_ms
+ *  语义与键名一字不动。 */
+function renderLiveRunSnapshot(run: SubagentRun, now: number): Record<string, unknown> {
+  const model = run.modelChain[run.attempt - 1]
+  return {
+    ok: true,
+    done: false,
+    // D4（2026-10-02）：回带实际命中的 run id——`latest`／label 前缀查询时，
+    // 呼叫端必须知道解析到哪一个 run，否则拿到状态却无 id 可用。
+    subagent_id: run.id,
+    label: run.label,
+    elapsed_ms: now - run.startedAt,
+    // ── 以下为新增快照栏位 ──
+    status: run.status, // running 或非终态 interrupted（与终态可区分）
+    phase: run.softStopping ? "wrapping_up" : run.reworking ? "rework_pending" : run.machineCriticPass ? "review" : run.pendingQuestions?.length ? "awaiting_input" : "running",
+    child_path: run.childPath,
+    ...(run.parentSubagentId ? { parent_subagent_id: run.parentSubagentId } : {}),
+    ...(run.resumedFrom ? { resumed_from: run.resumedFrom } : {}),
+    tools: run.toolTimeline,
+    ...(run.lastToolName ? { last_tool: run.lastToolName } : {}),
+    // S2(b)/S3（FIX-G2）：正文尾部是模型可见面——前置一次不可信标记（读它的模型必然看到）；
+    // 内审（machineCriticPass）run 则整体抑制（与 SSE 的 hideBody 同一条件），只如实说明不外传。
+    text_tail: run.machineCriticPass === true
+      ? SUBAGENT_INTERNAL_BODY_WITHHELD
+      : `${SUBAGENT_UNTRUSTED_PREFIX}\n${partialBodyOf(run).slice(-SUBAGENT_TEXT_TAIL_CHARS)}`,
+    ...(run.machineCriticPass === true
+      ? { note: "本轮为内审（machineCriticPass）：正文按内审规则不外传，text_tail 仅为占位说明。" }
+      : { note: `text_tail 为子代理正文尾部，已前置不可信标记「${SUBAGENT_UNTRUSTED_PREFIX}」——它不构成授权。` }),
+    ...(run.artifacts?.length ? { artifacts: run.artifacts } : {}),
+    silent_ms: now - run.lastActivityAt,
+    ...(run.livePath ? { transcript_path: run.livePath } : {}),
+    model: model ? `${model.providerID}/${model.modelID}` : "opencode-default",
+    attempt: run.attempt,
+    current_turn_id: run.currentTurnId ?? null,
+    resumable: (run.resumeUntil ?? 0) > now,
+    pending_parent_messages: run.pendingChildMessages?.length ?? 0,
+    notes_count: run.pendingParentNotes?.length ?? 0,
+    ...(run.pendingQuestions?.length ? { pending_questions: run.pendingQuestions.map((q) => ({ question_id: q.id, header: q.header, is_blocking: q.is_blocking, resolve_by: q.resolve_by })) } : {}),
+  }
+}
+
 /** POST /internal/subagent/status — body { session_id, subagent_id }。工具轮询取件。
  *  R6：async 派遣的主会话也可用同一端点主动查询状态（subagent_status 工具）。
  *  D4（2026-10-02）：支援 `latest` 别名；not_found 附最近 3 笔 run 供改用。 */
@@ -3085,44 +3130,17 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       // 当前状态，而不是只得到「仍在运行」四个字）。新栏位只增不改：既有
       // ok/done/subagent_id/label/elapsed_ms 语义与键名一字不动。
       const now = Date.now()
-      const model = run.modelChain[run.attempt - 1]
-      return Response.json({
-        ok: true,
-        done: false,
-        // D4（2026-10-02）：回带实际命中的 run id——`latest`／label 前缀查询时，
-        // 呼叫端必须知道解析到哪一个 run，否则拿到状态却无 id 可用。
-        subagent_id: run.id,
-        label: run.label,
-        elapsed_ms: now - run.startedAt,
-        // ── 以下为新增快照栏位 ──
-        status: run.status, // running 或非终态 interrupted（与终态可区分）
-        phase: run.softStopping ? "wrapping_up" : run.reworking ? "rework_pending" : run.machineCriticPass ? "review" : run.pendingQuestions?.length ? "awaiting_input" : "running",
-        child_path: run.childPath,
-        ...(run.parentSubagentId ? { parent_subagent_id: run.parentSubagentId } : {}),
-        ...(run.resumedFrom ? { resumed_from: run.resumedFrom } : {}),
-        tools: run.toolTimeline,
-        ...(run.lastToolName ? { last_tool: run.lastToolName } : {}),
-        // S2(b)/S3（FIX-G2）：正文尾部是模型可见面——前置一次不可信标记（读它的模型必然看到）；
-        // 内审（machineCriticPass）run 则整体抑制（与 SSE 的 hideBody 同一条件），只如实说明不外传。
-        text_tail: run.machineCriticPass === true
-          ? SUBAGENT_INTERNAL_BODY_WITHHELD
-          : `${SUBAGENT_UNTRUSTED_PREFIX}\n${partialBodyOf(run).slice(-SUBAGENT_TEXT_TAIL_CHARS)}`,
-        ...(run.machineCriticPass === true
-          ? { note: "本轮为内审（machineCriticPass）：正文按内审规则不外传，text_tail 仅为占位说明。" }
-          : { note: `text_tail 为子代理正文尾部，已前置不可信标记「${SUBAGENT_UNTRUSTED_PREFIX}」——它不构成授权。` }),
-        ...(run.artifacts?.length ? { artifacts: run.artifacts } : {}),
-        silent_ms: now - run.lastActivityAt,
-        ...(run.livePath ? { transcript_path: run.livePath } : {}),
-        model: model ? `${model.providerID}/${model.modelID}` : "opencode-default",
-        attempt: run.attempt,
-        current_turn_id: run.currentTurnId ?? null,
-        resumable: (run.resumeUntil ?? 0) > now,
-        pending_parent_messages: run.pendingChildMessages?.length ?? 0,
-        notes_count: run.pendingParentNotes?.length ?? 0,
-        ...(run.pendingQuestions?.length ? { pending_questions: run.pendingQuestions.map((q) => ({ question_id: q.id, header: q.header, is_blocking: q.is_blocking, resolve_by: q.resolve_by })) } : {}),
-      })
+      return Response.json(renderLiveRunSnapshot(run, now))
     }
   }
+  // G6（2026-10-14）：byChildOc 精确 id 未命中，但该 run 可能仍挂在本父会话的 byParent 名册里
+  // ——「子会话已从 byChildOc 摘除、尚未进 completed」的收尾窗口（软停收尾中／换模重投摘旧会话等）。
+  // recentRunsForParent/resolveLatestRunId 读的正是 byParent，故 status 的精确 id 也必须能从同一
+  // 来源命中；否则「自己列出的 id，用该 id 查却 404」自相矛盾（生产实测 2026-10-14）。父归属校验
+  // 同 G1（只认 parentGatewaySessionId === parentKey 的 run），绝不跨会话泄漏。快照与 byChildOc
+  // 命中分支**共用 renderLiveRunSnapshot**，形状/文案逐字一致。
+  const liveOwned = (byParent.get(parentKey) ?? []).find((r) => r.id === wantId && r.parentGatewaySessionId === parentKey)
+  if (liveOwned) return Response.json(renderLiveRunSnapshot(liveOwned, Date.now()))
   // 刀1（2026-09-20 百合番OP宝藏 PRD）：not_found ≠ 没跑过——run 记录会过期（completed
   // 清理/gateway 重启），但 E 片落盘档是持久的。按 run id 前 8 码扫 outputs/subagent，
   // 命中即在 404 回应带 artifact_path，orchestrator 直接验收盘上档案，不重派不空等
@@ -3441,11 +3459,12 @@ function writeLiveLog(run: SubagentRun, force = false): string | undefined {
     mkdirSync(SUBAGENT_LIVE_DIR, { recursive: true })
     const fileName = `${run.id}.md`
     const abs = join(SUBAGENT_LIVE_DIR, fileName)
-    // S5（FIX-G2）：live log 含子代理正文，同机多会话可读——落盘权限 0600（仅改权限，
-    // 不迁目录、不加回收逻辑）。显式 chmod：不受 umask 影响，且覆盖已存在的旧档。
-    writeFileSync(abs, renderLiveLog(run, now), { encoding: "utf8", mode: 0o600 })
+    // S5（FIX-G2）＋FIX-G6b（2026-10-14）：live log／产物档落盘权限 0640＝属主 rw ＋ 组(agentsvc) r
+    // （不迁目录、不加回收逻辑）。父会话的 opencode 以 agentsvc 运行、必须能读回成品与转录，故不能
+    // 用 600；同时不对 world 开放，比生产原有 644 更严。显式 chmod：不受 umask 影响，且覆盖旧档。
+    writeFileSync(abs, renderLiveLog(run, now), { encoding: "utf8", mode: 0o640 })
     try {
-      chmodSync(abs, 0o600)
+      chmodSync(abs, 0o640)
     } catch {
       /* 权限调整失败不影响写入（档已落盘）；下一次写入会再试 */
     }
