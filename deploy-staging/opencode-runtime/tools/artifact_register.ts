@@ -45,7 +45,7 @@ export default tool({
       .optional()
       .describe("产物可访问 URI（register 必填：可为完整 HTTP 链接或相对文件系统路径）"),
     metadata: tool.schema
-      .record(tool.schema.any())
+      .record(tool.schema.string(), tool.schema.any())
       .optional()
       .describe("产物结构化元数据（可选：如分辨率、码率、时长、提示词、生成消耗等）"),
     artifact_id: tool.schema

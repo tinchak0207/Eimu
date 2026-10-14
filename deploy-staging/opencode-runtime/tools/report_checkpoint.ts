@@ -33,7 +33,7 @@ export default tool({
       .optional()
       .describe("当前任务整体进度百分比（0-100，必填）"),
     data: tool.schema
-      .record(tool.schema.any())
+      .record(tool.schema.string(), tool.schema.any())
       .optional()
       .describe("阶段产出的关键结构化数据（如已完成的任务ID、选择的参数、阶段结论等，供断点接管继承）"),
     summary: tool.schema

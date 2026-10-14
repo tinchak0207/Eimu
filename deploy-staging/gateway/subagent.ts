@@ -828,11 +828,11 @@ export function stopSubagentsForParent(parentGatewaySessionId: string, by: "user
   return stopped
 }
 
-/** X4（2026-10-14）：按 id／label 前缀找**任意在途**（running／interrupted）run——软停与非终态
- *  可寻址需要它；`findRunningRun` 只认 running（既有语义不动，保持兼容）。 */
+/** X4（2026-10-14）：按 id／label 前缀找**任意在途**（running／interrupted／suspended）run——软停、
+ *  挂起与非终态可寻址需要它；`findRunningRun` 只认 running（既有语义不动，保持兼容）。 */
 function findLiveRun(parentGatewaySessionId: string, idOrLabel: string): SubagentRun | undefined {
   const list = (byParent.get(parentGatewaySessionId) ?? []).filter(
-    (r) => (r.status === "running" || r.status === "interrupted") && !r.stopped,
+    (r) => (r.status === "running" || r.status === "interrupted" || r.status === "suspended") && !r.stopped,
   )
   const exact = list.find((r) => r.id === idOrLabel)
   if (exact) return exact

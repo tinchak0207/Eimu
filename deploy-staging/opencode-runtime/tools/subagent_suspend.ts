@@ -39,7 +39,7 @@ export default tool({
       .optional()
       .describe("等待的上游异步任务 ID（可选）"),
     checkpoint_data: tool.schema
-      .record(tool.schema.any())
+      .record(tool.schema.string(), tool.schema.any())
       .optional()
       .describe("挂起时需保存的上下文状态数据（可选，恢复时注入）"),
   },
