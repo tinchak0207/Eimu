@@ -11,8 +11,10 @@
  *      - 一次性注入标记（vettingInjected / userMemory）
  *      - 画布摘要（canvasSummary）
  *      - 摘要压缩水位（compact.lastCount）
- * 2. 存储选 bun:sqlite（bun 内建）：单文件 /opt/agent-harness/gateway/sessions.db、
+ * 2. 存储选 bun:sqlite（bun 内建）：单文件 /opt/agent-harness/state/sessions.db、
  *    WAL 模式、同步 API（getOwnedSession 是同步函数，lazy reload 不用改异步签名）。
+ *    ⚠ db 必须放在 release 目录**之外**（2026-10-13「会话丢失」事故）：放在 release
+ *    目录内时，每次发版换 symlink 会连库一起被换掉，新会话随旧 release 一起消失。
  * 3. 写入时机：dirty 标记 + 3s 防抖 flush（index.ts 持有 flush 循环），关键转换点
  *    （建立/删除）同步写；SIGTERM 时补一次 flush。重启最多丢 3s 内的 replay 帧，
  *    讯息本身永远安全在 opencode。
@@ -103,7 +105,7 @@ export interface PersistedRow {
 // 注意：DB 路径在模组载入时固定。bun test 会并行跑多个测试档且共用本模组单例；
 // 若在 initPersistence() 重新读 env，各档会互相把 db 连线指向不同档案（隔离竞态，
 // 实测会打断 steer-ledger-db 的持久层断言）。故维持单一路径、全进程共享。
-const DB_PATH = process.env.SESSIONS_DB_PATH || "/opt/agent-harness/gateway/sessions.db"
+const DB_PATH = process.env.SESSIONS_DB_PATH || "/opt/agent-harness/state/sessions.db"
 
 /** 目前使用的 DB 档路径（诊断／测试读回用；唯读）。 */
 export function currentDbPath(): string {
@@ -111,12 +113,42 @@ export function currentDbPath(): string {
 }
 
 let db: Database | null = null
-let warned = false
+
+// 2026-10-13「会话丢失」事故：旧实作用 warned 旗标只在**首次**失败时记一条日志，
+// 之后整个进程静音 —— 生产上连续 11 小时写失败却只有一行日志，没人发现。
+// 静默退化本身是事故的一部分，改为节流上报（首条立刻，其后每 30s 至多一条）。
+let lastPersistError: { where: string; message: string; at: number } | null = null
+let lastDegradeLogAt = 0
 
 function degrade(e: unknown, where: string): void {
-  if (!warned) {
-    console.error(redactForLog(`[gateway] persistence degraded (${where}): ${e}`))
-    warned = true
+  const message = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+  lastPersistError = { where, message, at: Date.now() }
+  const now = Date.now()
+  if (now - lastDegradeLogAt > 30_000) {
+    lastDegradeLogAt = now
+    console.error(redactForLog(`[gateway] persistence degraded (${where}): ${message}`))
+  }
+}
+
+/** 保存失败/成功都必须经过这里记帐：失败 → 记下并节流上报；成功 → 若刚从失败中恢复就报一条恢复日志。 */
+function noteSaveFailure(e: unknown, where: string): void {
+  degrade(e, where)
+}
+
+function noteSaveSuccess(): void {
+  if (lastPersistError) {
+    console.log(redactForLog(`[gateway] persistence recovered (was failing: ${lastPersistError.where}: ${lastPersistError.message})`))
+    lastPersistError = null
+  }
+}
+
+/** 只读诊断视图（/healthz 用）：ready=false 表示「重启会丢新会话」。 */
+export function persistenceStatus(): { ready: boolean; dbPath: string; lastError: string | null; lastErrorWhere: string | null } {
+  return {
+    ready: db !== null && lastPersistError === null,
+    dbPath: DB_PATH,
+    lastError: lastPersistError?.message ?? null,
+    lastErrorWhere: lastPersistError?.where ?? null,
   }
 }
 
@@ -406,6 +438,23 @@ export function initPersistence(): void {
     db.exec("PRAGMA journal_mode=WAL")
     db.exec("PRAGMA synchronous=NORMAL")
     const report = runMigrations(db)
+    // 2026-10-13：SQLite 权限不足时会静默把连接降级成只读（O_RDONLY），
+    // 之后每次写都失败而 gateway 照常服务 —— 本次「会话丢失」正是如此。
+    // 开库后立刻做一次真写探测（BEGIN IMMEDIATE 取写锁，随即回滚，不改数据），
+    // 只读/不可写必须当场大声报出来，不许静默。
+    try {
+      db.exec("BEGIN IMMEDIATE")
+    } catch (e) {
+      noteSaveFailure(e, "init-write-probe")
+      const message = e instanceof Error ? e.message : String(e)
+      if (/readonly|read-only/i.test(message)) {
+        console.error(
+          redactForLog(`[gateway] FATAL: sessions db is READ-ONLY (${DB_PATH}): ${message} — new sessions WILL be lost on restart`),
+        )
+      }
+    } finally {
+      try { db.exec("ROLLBACK") } catch {}
+    }
     console.log(
       redactForLog(
         `[gateway] session persistence ready: ${DB_PATH} (schema v${report.to}/${SCHEMA_VERSION}` +
@@ -554,8 +603,11 @@ function parseRow(row: { id: string; owner_key: string; opencode_session_id: str
 
 // ---- CRUD ----
 
-export function saveSession(state: PersistableState): void {
-  if (!db) return
+export function saveSession(state: PersistableState): boolean {
+  if (!db) {
+    noteSaveFailure(new Error("persistence not initialized (db is null)"), "save")
+    return false
+  }
   try {
     const now = Date.now()
     db.query(
@@ -567,9 +619,11 @@ export function saveSession(state: PersistableState): void {
          updated_at = excluded.updated_at,
          data = excluded.data`,
     ).run(state.sessionId, state.apiKey, state.opencodeSessionId, now, now, JSON.stringify(serialize(state)))
+    noteSaveSuccess()
+    return true
   } catch (e) {
     // UNIQUE(opencode_session_id) 冲突 = 旧 row 残留同 opencode id（如重启竞态），
-    // 先删旧 row 再重试一次；再失败就降级放弃本帧写入。
+    // 先删旧 row 再重试一次；再失败才判定本帧写入失败（回传 false，绝不假报成功）。
     try {
       db.query("DELETE FROM sessions WHERE opencode_session_id = ? AND id != ?").run(state.opencodeSessionId, state.sessionId)
       const now = Date.now()
@@ -582,8 +636,11 @@ export function saveSession(state: PersistableState): void {
            updated_at = excluded.updated_at,
            data = excluded.data`,
       ).run(state.sessionId, state.apiKey, state.opencodeSessionId, now, now, JSON.stringify(serialize(state)))
+      noteSaveSuccess()
+      return true
     } catch (e2) {
-      degrade(e2, "save")
+      noteSaveFailure(e2, "save")
+      return false
     }
   }
 }

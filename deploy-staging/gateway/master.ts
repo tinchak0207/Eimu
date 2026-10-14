@@ -202,7 +202,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     let idx = 0
     for (const c of tl.clips) {
       const ext = (c.path.split("?")[0].split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "") || "mp4"
-      const s = await resolveSource(c.path, idx, ext)
+      const s = await resolveSource(c.path, idx, ext, workDir)
       if (!s) throw new TimelineValidationError(`clip ${c.id} 素材不可达：${c.path.slice(0, 120)}`)
       // 静帧素材（2026-09-28 漫剧评测实锤）：单张 png/jpg 不带 -loop 1 只解出 1 帧，trim 后视频轨
       // 只剩 0.08 秒、音轨照样 60 秒——容器时长骗过 probe，成片实为坏片。静帧一律 -loop 1 成连续流，

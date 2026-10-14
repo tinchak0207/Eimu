@@ -49,25 +49,47 @@ export function markDirty(state: SessionState): void {
 
 export function flushDirtySessions(): void {
   if (dirtySessions.size === 0) return
-  const ids = [...dirtySessions]
-  dirtySessions.clear()
-  for (const id of ids) {
+  for (const id of [...dirtySessions]) {
     const st = sessions.get(id)
-    if (st) saveSession(st)
+    if (!st) {
+      // 会话已拆：dirty 标记跟着回收（不是「保存成功」，是已无对象可存）。
+      dirtySessions.delete(id)
+      continue
+    }
+    // 旧实作先 clear 再 save：一次失败 = 这一帧永久丢失、且永不重试。
+    // 现在只有 saveSession 明确回传成功才清 dirty；失败保留，下一轮（3s 后）自然重试。
+    if (saveSession(st)) dirtySessions.delete(id)
   }
 }
 
 setInterval(flushDirtySessions, PERSIST_FLUSH_INTERVAL_MS)
 
-// systemd restart（SIGTERM）前补一次 flush，把最后 ≤3s 的 replay 帧也保住。
-process.on("SIGTERM", () => {
+// systemd restart（SIGTERM）前把**全部**内存会话写盘，不只是 dirty 的那批。
+// 2026-10-13：旧实作只 flush dirty（清完 dirty 再 save、失败不重试），一旦落盘路径
+// 出问题，退出前最后一帧就再也没机会补回来。退出前全量写一次成本可忽略，
+// 换的是「重启后会话映射不丢」。
+export function flushAllSessions(): void {
+  for (const st of sessions.values()) {
+    try {
+      saveSession(st)
+    } catch (e) {
+      console.error(`[gateway] shutdown flush failed for ${st.sessionId}:`, e)
+    }
+  }
+}
+
+function shutdownFlush(signal: string): void {
   try {
-    flushDirtySessions()
-  } catch {
+    flushAllSessions()
+  } catch (e) {
     // best-effort：flush 失败不阻止退出
+    console.error(`[gateway] ${signal} flush error:`, e)
   }
   process.exit(0)
-})
+}
+
+process.on("SIGTERM", () => shutdownFlush("SIGTERM"))
+process.on("SIGINT", () => shutdownFlush("SIGINT"))
 
 // ── N1 规格3（2026-08-27）：重启斩 turn 的自动重投 ──────────────────
 // 评测实锤：opencode-server 重启斩杀 in-flight turn（无 idle、无 turn.done），

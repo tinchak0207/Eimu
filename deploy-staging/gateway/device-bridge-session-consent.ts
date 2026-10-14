@@ -75,7 +75,7 @@ export function defaultConsentFilePath(env: NodeJS.ProcessEnv = process.env): st
   if (explicit) return explicit
   const stateDir = String(env.MEMORY_STATE_DIR ?? "").trim()
   if (stateDir) return join(stateDir, FILE_NAME)
-  const dbPath = String(env.SESSIONS_DB_PATH ?? "").trim() || "/opt/agent-harness/gateway/sessions.db"
+  const dbPath = String(env.SESSIONS_DB_PATH ?? "").trim() || "/opt/agent-harness/state/sessions.db"
   let dir = dirname(dbPath)
   try {
     dir = dirname(realpathSync(dbPath))

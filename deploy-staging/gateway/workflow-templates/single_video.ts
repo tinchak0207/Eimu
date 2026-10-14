@@ -25,7 +25,7 @@ export const singleVideoTemplate: WorkflowTemplate =
         title: "参考图（可选）",
         deliverable: "参考图（角色/场景锚点），带上可保人物一致性",
         notes: [
-          "带角色/场景锚点参考图可保人物一致性；多参考时角色参考锁脸、场景参考锁背景各司其职",
+          "角色/场景图辅助一致性，不保证硬锁首尾；运镜写 camera.start/end/trajectory/timing/parallax 或时间 keyframes。physical dolly 是连续机位位移与视差，optical zoom 是固定机位变焦，合法 static 保留；首帧跳变不能当运镜",
         ],
       },
       {

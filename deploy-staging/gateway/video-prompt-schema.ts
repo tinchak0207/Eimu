@@ -9,7 +9,7 @@
 //   action         按 beat 的动作描述（必填；动作用具体计数，不用模糊形容词）
 //   appearance     外观/服装
 //   environment    { time_of_day, lighting, elements[] }
-//   camera         { shot_type, angle, movement, lens }
+//   camera         { shot_type, angle, movement, lens, start, end, trajectory, timing, parallax, keyframes:[{time_seconds,position}] }
 //   style          { look, mood, color_grading }
 //   audio          { dialogue: [{ character, tone, line }], ambience, sfx[] }
 //   output         { duration_seconds, aspect_ratio }
@@ -26,17 +26,93 @@
 //            （Style → Shot type → Camera → 主体动作 → 环境 → 光 → 时长 hint）
 //
 // 通用规则：一镜一机位运动 + 一主体动作；各族 front-load（camera+subject 在前）；
-// duration 编进 prompt 尾部 hint；输出守卫 ≤3800 字——超长先砍 style.color_grading
-// → environment.elements → audio.sfx，再截断 action。
+// duration 编进 prompt 尾部 hint；输出守卫 ≤3800 字，超长明确拒绝；不截断动作或运动轨迹。
 //
 // 纯函数、零依赖、可单测。
+
+export interface ShotCamera {
+  shot_type?: string
+  angle?: string
+  movement?: string
+  lens?: string
+  start?: string
+  end?: string
+  trajectory?: string
+  timing?: string
+  parallax?: string
+  keyframes?: { time_seconds: number; position: string }[]
+}
+
+const CAMERA_ALIASES: Record<string, keyof ShotCamera> = {
+  cameraTrajectory: "trajectory", camera_trajectory: "trajectory",
+  cameraStart: "start", camera_start: "start", startPosition: "start", start_position: "start",
+  cameraEnd: "end", camera_end: "end", endPosition: "end", end_position: "end",
+  cameraKeyframes: "keyframes", camera_keyframes: "keyframes",
+}
+
+/** Shared camera contract: reject unsupported data instead of silently losing motion. */
+export function normalizeShotCamera(input: Record<string, unknown>, duration?: number): ShotCamera | undefined {
+  const raw = input.camera !== undefined ? input.camera : input.cam
+  if (input.camera !== undefined && input.cam !== undefined) throw new Error("camera 与 cam 不可同时提供")
+  if (raw !== undefined && (typeof raw !== "object" || raw === null || Array.isArray(raw))) {
+    if (typeof raw !== "string" || !raw.trim()) throw new Error("camera/cam 必须是对象或非空运动描述")
+  }
+  const camera: Record<string, unknown> = typeof raw === "string" ? { movement: raw } : { ...(raw as Record<string, unknown> ?? {}) }
+  for (const key of ["trajectory", "keyframes", "start", "end", "timing", "parallax"] as const) {
+    if (input[key] !== undefined) {
+      if (camera[key] !== undefined) throw new Error(`camera.${key} 与独立 ${key} 重复，请明确唯一值`)
+      camera[key] = input[key]
+    }
+  }
+  for (const [alias, key] of Object.entries(CAMERA_ALIASES)) {
+    for (const source of [input, camera]) {
+      if (source[alias] === undefined) continue
+      if (camera[key] !== undefined) throw new Error(`${alias} 与 camera.${key} 重复，请明确唯一值`)
+      camera[key] = source[alias]
+    }
+    delete camera[alias]
+  }
+  const fields = ["shot_type", "angle", "movement", "lens", "start", "end", "trajectory", "timing", "parallax", "keyframes"]
+  for (const [key, value] of Object.entries(camera)) {
+    if (!fields.includes(key)) throw new Error(`不支持 camera.${key}，请按已公布的运镜结构填写`)
+    if (key !== "keyframes" && (typeof value !== "string" || !value.trim())) throw new Error(`camera.${key} 必须是非空字符串`)
+  }
+  if (camera.keyframes !== undefined) {
+    if (!Array.isArray(camera.keyframes) || !camera.keyframes.length) throw new Error("camera.keyframes 必须是非空数组 [{time_seconds,position}]")
+    let previous = -1
+    for (const frame of camera.keyframes) {
+      if (!frame || typeof frame !== "object" || Array.isArray(frame) || Object.keys(frame).some(k => !["time_seconds", "position"].includes(k))) throw new Error("camera.keyframes 每项只接受 time_seconds 与 position")
+      const time = frame.time_seconds
+      if (typeof time !== "number" || !Number.isFinite(time) || time < 0 || time <= previous || (duration !== undefined && time > duration) || typeof frame.position !== "string" || !frame.position.trim()) throw new Error("camera.keyframes 时间必须递增且位于镜头时长内，position 必须非空")
+      previous = time
+    }
+  }
+  return Object.keys(camera).length ? camera as ShotCamera : undefined
+}
+
+function cameraMotionText(camera?: ShotCamera): string {
+  if (!camera) return ""
+  const parts: string[] = []
+  if (camera.movement) parts.push(`Camera movement: ${camera.movement}`)
+  for (const key of ["start", "end", "trajectory", "timing", "parallax"] as const) {
+    if (camera[key]) parts.push(`Camera ${key}: ${camera[key]}`)
+  }
+  for (const frame of camera.keyframes ?? []) parts.push(`At ${frame.time_seconds}s camera position: ${frame.position}`)
+  const movement = camera.movement ?? ""
+  if (/dolly|push in|pull out|truck|tracking|arc|推镜|拉镜|移镜|跟拍/i.test(movement)) {
+    parts.push("The camera body moves continuously through the scene; perspective and foreground/background parallax evolve along the stated path, rather than enlarging a still image. Preserve continuity from the first frames through the whole shot.")
+  } else if (/zoom|变焦/i.test(movement)) {
+    parts.push("Optical zoom changes focal length with the camera body stationary; do not substitute a physical dolly move.")
+  }
+  return parts.join(". ")
+}
 
 export interface ShotJson {
   subject: string
   appearance?: string
   action: string
   environment?: { time_of_day?: string; lighting?: string; elements?: string[] }
-  camera?: { shot_type?: string; angle?: string; movement?: string; lens?: string }
+  camera?: ShotCamera
   style?: { look?: string; mood?: string; color_grading?: string }
   audio?: {
     dialogue?: { character: string; tone?: string; line: string }[]
@@ -96,7 +172,14 @@ export function validateShotJson(obj: unknown): { ok: true; shot: ShotJson } | {
     if (typeof d !== "number" || !Number.isFinite(d) || d < 1) {
       return { ok: false, error: `缺少 output.duration_seconds（数字，单位秒，≥1）——不填会被按 5 秒短片生成。示例：${SHOT_EXAMPLE}` }
     }
-    return { ok: true, shot }
+    try {
+      const camera = normalizeShotCamera(shot as unknown as Record<string, unknown>, d)
+      const canonical = { ...shot } as unknown as Record<string, unknown>
+      for (const key of ["cam", "trajectory", "keyframes", "start", "end", "timing", "parallax", ...Object.keys(CAMERA_ALIASES)]) delete canonical[key]
+      return { ok: true, shot: { ...canonical, camera } as unknown as ShotJson }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
   if (typeof obj === "string") {
     let parsed: unknown = null
@@ -172,7 +255,12 @@ function compileVeo(shot: ShotJson): string {
     const value = nonEmpty(shot.camera?.[key])
     if (value) camera[key] = value
   }
+  for (const key of ["start", "end", "trajectory", "timing", "parallax", "keyframes"] as const) {
+    if (shot.camera?.[key] !== undefined) camera[key] = shot.camera[key]
+  }
   if (Object.keys(camera).length) compact.camera = camera
+  const motion = cameraMotionText(shot.camera)
+  if (motion) compact.camera_motion_contract = motion
   const style: Record<string, unknown> = {}
   for (const key of ["look", "mood", "color_grading"] as const) {
     const value = nonEmpty(shot.style?.[key])
@@ -278,56 +366,16 @@ function compileDefault(shot: ShotJson): string {
   return segs.join(". ") + "."
 }
 
-// ── 长度守卫 ──
-
-interface CompileDrops {
-  grading: boolean
-  elements: boolean
-  sfx: boolean
-}
-
-function dropFields(shot: ShotJson, drops: CompileDrops): ShotJson {
-  const s: ShotJson = { ...shot }
-  if (drops.grading && nonEmpty(s.style?.color_grading)) s.style = { ...s.style, color_grading: undefined }
-  if (drops.elements && cleanList(s.environment?.elements).length) s.environment = { ...s.environment, elements: undefined }
-  if (drops.sfx && cleanList(s.audio?.sfx).length) s.audio = { ...s.audio, sfx: undefined }
-  return s
-}
-
-/**
- * 编译 shot JSON 成指定模型的 prompt 字串。
- * 长度守卫 ≤3800 字：先依序砍 color_grading → elements → sfx，仍超长再截断 action。
- */
+/** Compile using the existing model-family formats; never truncate motion or user action. */
 export function compileShotPrompt(shot: ShotJson, model: string): string {
-  const build = (s: ShotJson): string => {
-    const m = String(model ?? "").toLowerCase()
-    if (m.startsWith("veo")) return compileVeo(s)
-    if (m.startsWith("kling")) return compileKling(s)
-    if (m.startsWith("runway")) return compileRunway(s)
-    if (m.startsWith("luma")) return compileLuma(s)
-    return compileDefault(s)
-  }
-  let out = build(shot)
-  let drops: CompileDrops = { grading: false, elements: false, sfx: false }
-  if (out.length > MAX_PROMPT_LENGTH) {
-    const stages: CompileDrops[] = [
-      { grading: true, elements: false, sfx: false },
-      { grading: true, elements: true, sfx: false },
-      { grading: true, elements: true, sfx: true },
-    ]
-    for (const stage of stages) {
-      drops = stage
-      out = build(dropFields(shot, stage))
-      if (out.length <= MAX_PROMPT_LENGTH) return out
-    }
-  }
-  if (out.length > MAX_PROMPT_LENGTH) {
-    const action = typeof shot.action === "string" ? shot.action : ""
-    const overhead = out.length - action.length
-    if (action.length > 0 && overhead < MAX_PROMPT_LENGTH) {
-      out = build(dropFields({ ...shot, action: action.slice(0, MAX_PROMPT_LENGTH - overhead) }, drops))
-    }
-    if (out.length > MAX_PROMPT_LENGTH) out = out.slice(0, MAX_PROMPT_LENGTH)
-  }
+  const normalized = { ...shot, camera: normalizeShotCamera(shot as unknown as Record<string, unknown>, shot.output?.duration_seconds) }
+  const m = String(model ?? "").toLowerCase()
+  let out = m.startsWith("veo") ? compileVeo(normalized)
+    : m.startsWith("kling") ? compileKling(normalized)
+    : m.startsWith("runway") ? compileRunway(normalized)
+    : m.startsWith("luma") ? compileLuma(normalized) : compileDefault(normalized)
+  const motion = cameraMotionText(normalized.camera)
+  if (motion && !m.startsWith("veo")) out += `\n${motion}`
+  if (out.length > MAX_PROMPT_LENGTH) throw new Error(`编译后的镜头提示词共 ${out.length} 字，超过 ${MAX_PROMPT_LENGTH}；未截断、未提交，请缩短非必要描述`)
   return out
 }

@@ -5,7 +5,7 @@
 // 前缀＋本档头＋单行 import，其余一字未动。
 import type { MemoryDocLite, SessionState } from "./types-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
-import { getOwnedSession, sessions } from "./sessions-core.ts"
+import { getOwnedSession, sessions, deleteOpencodeSession } from "./sessions-core.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { hashKey } from "./auth-gw.ts"
 import { loadUserSettings, saveSession } from "./persistence.ts"
@@ -121,7 +121,16 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
     retryQueued: false,
   }
   sessions.set(sessionId, state)
-  saveSession(state) // 建立即同步落盘：重启后 getOwnedSession 可恢复
+  // 建立即同步落盘：重启后 getOwnedSession 可恢复。
+  // 2026-10-13：旧实作不管成败都往下走、照回 200 ——「首次落盘失败假报成功」正是
+  // 事故成因。现在落盘失败一律回 503（不假报成功），并撤掉刚建的会话（内存 + 上游
+  // opencode 会话），避免留下重启即消失、且上游成孤儿的幽灵会话。
+  if (!saveSession(state)) {
+    sessions.delete(sessionId)
+    void deleteOpencodeSession(body.id)
+    console.error(`[gateway] session create aborted: persistence unavailable — session=${sessionId} (opencode ${body.id})`)
+    return jsonError(503, "session persistence unavailable — refusing to create a session that would be lost on restart", "persistence_unavailable", "server_error")
+  }
   const user_id = await hashKey(key)
   console.log(`[gateway] session created: ${sessionId} (opencode ${body.id})`)
   return Response.json({ session_id: sessionId, user_id })

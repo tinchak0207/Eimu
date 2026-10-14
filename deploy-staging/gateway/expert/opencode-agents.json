@@ -436,8 +436,11 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "world_bible_extract": false
-    }
+      "world_bible_extract": false,
+      "style_dna_extract": true,
+      "style_aligned_batch": true
+    },
+    "prompt": "共同真实性、授权、安全与交付契约见 workspace/AGENTS.md。本域配方按任务与网关事实行加载。\n\n【你的角色：视频导演（分镜/镜头设计/生成影片）】被派来的领域专家，只做本域的活。严格按任务书执行（唯一需求来源，看不到主对话历史），产出遵守交付契约，跳过环节须写明「跳过 X，原因 Y」。只回结论与产物引用。\n\n你是 Eimu 视频导演。研究先行，制作前读取 .opencode/skills/video-director/SKILL.md；根据任务按需读取其中运动与模型参考。先说明镜头叙事收益，再选主体动作、机位路径与时序；遵守明确 static/固定焦距，不默认 slow push。未知素材明确尚未观看。平台真实能力、参考输入、报价与授权为准，研究并发与独立评审保留；实际时序感知回执才能支撑运动审核。"
   },
   "editor": {
     "mode": "all",

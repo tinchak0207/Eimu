@@ -31,7 +31,7 @@
  * 合并为单次解码，降低重复 CPU。
  */
 import { spawn } from "node:child_process"
-import { access, mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { getTimeline, clipLength, type Timeline, type TimelineClip } from "./timeline"
 import { detectFfmpeg } from "./editor/canvas/videoCompose"
@@ -171,7 +171,7 @@ async function runFF(bin: string, args: string[], timeoutMs: number): Promise<FF
 }
 
 /** 素材解析：本地路径直用；http(s) URL 下载到 $WORKSPACE_DIR/tmp（同款 B3 rhythm.ts 口径） */
-async function resolveLocal(src: string): Promise<string> {
+async function resolveLocal(src: string, downloadedPaths: string[]): Promise<string> {
   if (/^https?:\/\//i.test(src)) {
     const res = await fetch(src, { signal: AbortSignal.timeout(30_000) })
     if (!res.ok) throw new Error(`素材下载失败 HTTP ${res.status}`)
@@ -181,6 +181,7 @@ async function resolveLocal(src: string): Promise<string> {
     const dir = path.join(WORKSPACE_DIR, "tmp")
     await mkdir(dir, { recursive: true })
     const local = path.join(dir, `lint-clip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`)
+    downloadedPaths.push(local)
     await writeFile(local, new Uint8Array(buf))
     return local
   }
@@ -284,6 +285,22 @@ async function lintOneClip(
   p: Placed,
   audioCovered: boolean,
 ): Promise<ClipOutcome> {
+  const downloadedPaths: string[] = []
+  try {
+    return await lintOneClipWithSources(ffmpeg, ffprobe, p, audioCovered, downloadedPaths)
+  } finally {
+    // 仅回收本次 URL 下载；用户提供的本地素材不进入此列表。
+    await Promise.all(downloadedPaths.map((file) => rm(file, { force: true }).catch(() => {})))
+  }
+}
+
+async function lintOneClipWithSources(
+  ffmpeg: string,
+  ffprobe: string,
+  p: Placed,
+  audioCovered: boolean,
+  downloadedPaths: string[],
+): Promise<ClipOutcome> {
   const issues: LintIssue[] = []
   const notes: string[] = []
   const c = p.clip
@@ -311,7 +328,7 @@ async function lintOneClip(
 
   let local: string
   try {
-    local = await resolveLocal(c.path)
+    local = await resolveLocal(c.path, downloadedPaths)
   } catch (e) {
     issues.push({
       t_start_ms: ms(p.start),

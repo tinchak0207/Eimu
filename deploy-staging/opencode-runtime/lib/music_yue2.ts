@@ -238,6 +238,75 @@ function pickArtifacts(raw: unknown): Yue2Artifact[] {
   return out
 }
 
+// ── 生成失败分型：瞬时 vs 硬（2026-10-11 事故修复）────────────────────────────
+//
+// 事故：YuE2 的**瞬时**故障（HTTP 429 busy／服务不可达／超时）被工具层当成硬失败，
+// 静默换到付费通路 FlowMusic 并扣币（累计 5 币）。用户口径＝音乐只走 YuE2。
+//
+// 判定依据一律来自**实作事实**（不是猜）：
+//   瞬时 transient（不得触发付费回落，应重试同一通路）：
+//     · HTTP 429 —— 服务端 `busy`：本机 8GB 一次一歌，生成中拒收新请求
+//       （local_service.py 生成锁未取到即 `429 err_response("busy", ...)`）；亦兼容
+//       响应体 error=="busy"（等值语义，防服务端/代理变体）。
+//     · HTTP 502/503/504 —— 反向隧道／网关暂时不可用，属传输层而非语义错误。
+//     · 网络层失败 —— ECONNREFUSED（笔电关机/隧道断＝服务不可达）／ECONNRESET／
+//       ETIMEDOUT／ENOTFOUND／fetch failed／socket hang up／不可达／请求超时
+//       （AbortSignal.timeout(YUE2_TIMEOUT_MS) 触发）。
+//   硬 hard（保持既有回落链不变）：其余 4xx/5xx 语义错误（400 参数错误、422、500
+//     generation_failed 等）与响应契约破损（非 JSON／ok!==true／缺 audio_b64）。
+//
+// 客户端此前一律 `throw new Error(...)`（裸 Error，不带 status/code），工具层无从分辨，
+// 只能一概回落。本次改为带 code/status/kind 的 Yue2GenerateError，使分型有可判定的
+// 实作依据；同时导出 isYue2TransientFailure／yue2TransientCode 供工具层与验证使用。
+export type Yue2FailureKind = "transient" | "hard"
+
+/** YuE2 生成失败：带对外错误码、HTTP 状态与瞬时/硬分类。 */
+export class Yue2GenerateError extends Error {
+  code: string
+  status: number
+  kind: Yue2FailureKind
+  constructor(code: string, status: number, kind: Yue2FailureKind, message: string) {
+    super(message)
+    this.code = code
+    this.status = status
+    this.kind = kind
+    this.name = "Yue2GenerateError"
+  }
+}
+
+/** HTTP 状态 → 瞬时/硬判定（429＝busy；502/503/504＝传输层暂时不可用；其余＝硬失败）。 */
+export function classifyYue2HttpStatus(status: number): { kind: Yue2FailureKind; code: string } {
+  if (status === 429) return { kind: "transient", code: "yue2_busy" }
+  if (status === 502 || status === 503 || status === 504) return { kind: "transient", code: "yue2_unavailable" }
+  return { kind: "hard", code: "yue2_upstream_error" }
+}
+
+/**
+ * 瞬时判定（工具层回落前必过）。typed error 走 kind；裸 Error（旧式/外部抛）以错误讯息
+ * 里既有的可辨识字串兜底——兜底依据即上方分类的落点（HTTP 429/50x、网络层关键字、
+ * 服务端 busy 的「繁忙」措辞），不是凭空猜。
+ */
+export function isYue2TransientFailure(e: unknown): boolean {
+  if (e instanceof Yue2GenerateError) return e.kind === "transient"
+  const message = e instanceof Error ? e.message : String(e)
+  if (/\bHTTP 429\b/.test(message)) return true
+  if (/\bHTTP 50[234]\b/.test(message)) return true
+  if (/繁忙|busy/i.test(message)) return true
+  return /请求失败（网络层|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|fetch failed|socket hang up|不可达|timed out|timeout|aborted/i.test(
+    message,
+  )
+}
+
+/** 瞬时失败的对外错误码（回执用）：优先 typed code，其次按讯息分类。 */
+export function yue2TransientCode(e: unknown): string {
+  if (e instanceof Yue2GenerateError) return e.code
+  const message = e instanceof Error ? e.message : String(e)
+  if (/\bHTTP 429\b/.test(message)) return "yue2_busy"
+  if (/\bHTTP 50[234]\b/.test(message)) return "yue2_unavailable"
+  if (/timeout|aborted/i.test(message)) return "yue2_timeout"
+  return "yue2_unreachable"
+}
+
 /**
  * 调 YuE2 Modal 生成整曲（音频以 base64 直接回传，无公网 URL 可下载）；
  * 工具层拿到 base64 后走既有上传／ffprobe 实测通路。
@@ -261,17 +330,28 @@ export async function generateYue2Track(
       signal: AbortSignal.timeout(YUE2_TIMEOUT_MS),
     })
   } catch (e) {
-    throw new Error(
-      `YuE2 Modal 请求失败（网络层，端点 ${baseUrl}${YUE2_GENERATE_PATH}）：${(e as Error)?.message ?? String(e)}`,
+    // 网路层失败（含 AbortSignal.timeout 触发的请求超时）一律瞬时：笔电关机/隧道断＝服务不可达。
+    const cause = e as Error
+    const isTimeout = cause?.name === "TimeoutError" || /abort|timeout/i.test(cause?.message ?? "")
+    throw new Yue2GenerateError(
+      isTimeout ? "yue2_timeout" : "yue2_unreachable",
+      0,
+      "transient",
+      `YuE2 Modal 请求失败（网络层，端点 ${baseUrl}${YUE2_GENERATE_PATH}）：${cause?.message ?? String(e)}`,
     )
   }
   const bodyText = await response.text().catch(() => "")
   if (!response.ok) {
-    throw new Error(upstreamFailureText(response.status, bodyText))
+    // 429 busy／502-504 传输层暂时不可用＝瞬时（不回落，重试同一通路）；其余 4xx/5xx＝硬失败（回落）。
+    const { kind, code } = classifyYue2HttpStatus(response.status)
+    throw new Yue2GenerateError(code, response.status, kind, upstreamFailureText(response.status, bodyText))
   }
   const parsed = parseJsonOrNull(bodyText)
   if (parsed === null) {
-    throw new Error(
+    throw new Yue2GenerateError(
+      "yue2_bad_response",
+      response.status,
+      "hard",
       `YuE2 Modal 响应不是合法 JSON（HTTP ${response.status}）。原文前 2000 字符：${bodyText.slice(0, 2000)}`,
     )
   }
@@ -280,13 +360,21 @@ export async function generateYue2Track(
     const failure = [payload?.error, payload?.detail].filter(
       (v): v is string => typeof v === "string" && v !== "",
     )
-    throw new Error(
+    // 防御：服务端若以 HTTP 200＋{ok:false,error:"busy"} 回报「生成中」（与 429 等值语义），照样归瞬时。
+    const busy = payload?.error === "busy"
+    throw new Yue2GenerateError(
+      busy ? "yue2_busy" : "yue2_upstream_error",
+      response.status,
+      busy ? "transient" : "hard",
       `YuE2 Modal 响应 ok 不为 true${failure.length > 0 ? `（${failure.join("；")}）` : ""}（HTTP ${response.status}）。原文前 2000 字符：${bodyText.slice(0, 2000)}`,
     )
   }
   const audioBase64 = typeof payload.audio_b64 === "string" ? payload.audio_b64 : ""
   if (!audioBase64) {
-    throw new Error(
+    throw new Yue2GenerateError(
+      "yue2_bad_response",
+      response.status,
+      "hard",
       `YuE2 Modal 响应缺少 audio_b64（HTTP ${response.status}）。原文前 2000 字符：${bodyText.slice(0, 2000)}`,
     )
   }

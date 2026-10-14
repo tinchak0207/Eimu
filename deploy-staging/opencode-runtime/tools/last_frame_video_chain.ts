@@ -1,3 +1,4 @@
+import { compileShotPrompt, normalizeShotCamera, type ShotCamera } from "../lib/video-prompt-schema"
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, platformFetch, classifyError, registerTask } from "../lib/client"
 
@@ -8,6 +9,7 @@ interface Shot {
   first_frame_url?: string
   last_frame_url?: string
   prompt: string
+  camera?: ShotCamera
   duration_seconds?: number
   model?: string
   size?: string
@@ -25,7 +27,8 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
   for (const item of arr) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return { shots: [], error: `第 ${shots.length + 1} 镜必须为对象，未提交任何镜头` }
     const o = item as Record<string, unknown>
-    const prompt = typeof o.prompt === "string" ? o.prompt.trim() : typeof o.description === "string" ? o.description.trim() : ""
+    if (o.prompt !== undefined && typeof o.prompt !== "string") return { shots: [], error: `第 ${shots.length + 1} 镜 prompt 必须是字符串；未提交任何镜头` }
+    const prompt = typeof o.prompt === "string" ? o.prompt : typeof o.description === "string" ? o.description : ""
     const first = typeof o.first_frame_url === "string" ? o.first_frame_url.trim() : undefined
     const last = typeof o.last_frame_url === "string" ? o.last_frame_url.trim() : undefined
     for (const key of ["first_frame_url", "last_frame_url"]) {
@@ -34,9 +37,13 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
       }
     }
     if (o.duration_seconds !== undefined && (typeof o.duration_seconds !== "number" || !Number.isFinite(o.duration_seconds) || o.duration_seconds < 5 || o.duration_seconds > 15)) return { shots: [], error: `第 ${shots.length + 1} 镜时长必须为 5–15 秒` }
-    if (!prompt && !first && !last) return { shots: [], error: `第 ${shots.length + 1} 镜缺少 prompt 或图片，未提交任何镜头` }
+    if (!prompt.trim() && !first && !last) return { shots: [], error: `第 ${shots.length + 1} 镜缺少 prompt 或图片，未提交任何镜头` }
+    let camera: ShotCamera | undefined
+    try { camera = normalizeShotCamera(o, typeof o.duration_seconds === "number" ? o.duration_seconds : undefined) }
+    catch (error) { return { shots: [], error: `第 ${shots.length + 1} 镜运镜无效：${error instanceof Error ? error.message : String(error)}；未提交任何镜头` } }
     shots.push({
-      prompt: prompt || "根据参考图片生成连贯的视频",
+      camera,
+      prompt: prompt.trim() ? prompt : "根据参考图片生成连贯的视频",
       first_frame_url: first || undefined,
       last_frame_url: last || undefined,
       duration_seconds: typeof o.duration_seconds === "number" ? o.duration_seconds : undefined,
@@ -50,9 +57,14 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
 
 /** 首帧、尾帧保序作为图片参考；不宣称上游硬锁端点。 */
 function buildBody(shot: Shot, defModel: string, defSize: string, defDur: number): Record<string, unknown> {
+  const duration = shot.duration_seconds ?? defDur
+  // Keep free text verbatim; only explicitly supplied camera data adds a compiled motion block.
+  const motion = shot.camera ? compileShotPrompt({ subject: "", action: "", camera: shot.camera, output: { duration_seconds: duration } }, shot.model || defModel) : ""
+  const prompt = motion ? `${shot.prompt}\n${motion}` : shot.prompt
+  if (prompt.length > 4000) throw new Error(`镜头提示词共 ${prompt.length} 字超过 4000；未截断、未提交`)
   return {
     model: shot.model || defModel,
-    prompt: shot.prompt,
+    prompt,
     n: 1,
     size: shot.size || defSize,
     duration_seconds: shot.duration_seconds ?? defDur,
@@ -101,9 +113,9 @@ async function pollJob(
 
 export default tool({
   description:
-    "首尾帧视频链：输入关键帧清单（JSON 数组 [{first_frame_url?, last_frame_url?, prompt, duration_seconds?, model?, size?}]），逐镜经站点计费链 /v1/videos/generations 提交视频 job，轮询至完成，返回按镜排序的 mp4 URL + 耗时 + 实际 cost_coins。\n\n【帧契约】首帧和尾帧 URL 按序经 reference_images 透传站点计费链。minimax-h3 支持最多 9 张图片参考；图片参与生成，但不保证锁定开头或结尾。禁止丢弃关键帧而静默改成纯文生视频。\n\n【预算纪律】必带 dry_run（构造提交体不发射，零扣费）；真发射前用目录 coins_per_second×时长做保守估价，超 budget_max_coins（默认 50）直接拒发并回报预算冲突，不擅自超支。submit_only 模式提交后立即返回 job ids 不等完成（长任务不阻塞）。同一错误重试 2 次即停，失败由站点计费链退款，不重发烧钱。",
+    "首尾帧视频链：输入关键帧清单（JSON 数组 [{first_frame_url?, last_frame_url?, prompt, camera?, trajectory?, keyframes?, duration_seconds?, model?, size?}]），逐镜经站点计费链 /v1/videos/generations 提交视频 job，轮询至完成，返回按镜排序的 mp4 URL + 耗时 + 实际 cost_coins。\n\n【运镜契约】camera={movement?,start?,end?,trajectory?,timing?,parallax?,keyframes?:[{time_seconds,position}]}，独立trajectory/keyframes同样实传；未知结构或超长明确拒绝。散文prompt逐字保留，未指定运镜不添加默认运动。dolly是摄影机空间位移，zoom是机位固定的光学变焦；参考图差异不是连续运镜证据。\n\n【帧契约】首帧和尾帧 URL 按序经 reference_images 透传站点计费链。minimax-h3 支持最多 9 张图片参考；图片参与生成，但不保证锁定开头或结尾。禁止丢弃关键帧而静默改成纯文生视频。\n\n【预算纪律】必带 dry_run（构造提交体不发射，零扣费）；真发射前用目录 coins_per_second×时长做保守估价，超 budget_max_coins（默认 50）直接拒发并回报预算冲突，不擅自超支。submit_only 模式提交后立即返回 job ids 不等完成（长任务不阻塞）。同一错误重试 2 次即停，失败由站点计费链退款，不重发烧钱。",
   args: {
-    shots: tool.schema.string().min(1).describe("关键帧清单 JSON 数组字串：[{first_frame_url?, last_frame_url?, prompt, duration_seconds?, model?, size?}]"),
+    shots: tool.schema.string().min(1).describe("关键帧清单 JSON 数组字串：[{first_frame_url?, last_frame_url?, prompt, camera?, trajectory?, keyframes?, duration_seconds?, model?, size?}]"),
     model: tool.schema.string().optional().describe("默认视频模型（镜未指定时用）；建议先用 video_quote 查可用模型与单价"),
     size: tool.schema.string().optional().describe("默认画幅，如 16:9 / 9:16（镜未指定时用），默认 16:9"),
     duration_seconds: tool.schema.number().int().min(5).max(15).optional().describe("默认时长秒（镜未指定时用）"),
@@ -132,6 +144,10 @@ export default tool({
       return fail("missing_model", "未提供默认 model 且部分镜无 model：先用 video_quote 查可用模型再提交", { title: "缺模型" })
     }
 
+    let bodies: Record<string, unknown>[]
+    try { bodies = work.map((s) => buildBody(s, defModel, defSize, defDur)) }
+    catch (error) { return fail("invalid_shots", error instanceof Error ? error.message : String(error)) }
+
     // 目录单价（保守估价：取该模型各分辨率 coins_per_second 的最大值 × 时长）
     let rateTable: Record<string, Record<string, number>> = {}
     try {
@@ -155,7 +171,6 @@ export default tool({
       return 10 * dur // 保守兜底
     }
 
-    const bodies = work.map((s) => buildBody(s, defModel, defSize, defDur))
     const estimates = bodies.map(estimateShot)
     const totalEstimate = estimates.reduce((a, b) => a + b, 0)
 

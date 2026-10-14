@@ -137,7 +137,7 @@ export const featureFilmTemplate: WorkflowTemplate =
         deliverable: "镜头 MP4（带元数据：时长/分辨率/首尾帧缩略图），以角色四视图+场景图为参考保跨镜一致",
         gate: "逐镜抽帧质检：抽首/中/尾 3 帧比对角色漂移/形变/闪帧，不合格即重生成",
         notes: [
-          "镜头间链式衔接：下一镜起始帧可引用上一镜尾帧（last-frame 链），保证动作连续场景不跳变",
+          "镜头间链式衔接：下一镜起始帧可引用上一镜尾帧（last-frame 链），辅助动作连续；camera.start/end/trajectory/timing/parallax 或时间 keyframes 写入镜头；dolly 为物理位移、zoom 为固定机位变焦，合法 static 保留；首帧跳变不算运镜",
           "运动提示词只描述起止帧之间的运动与情绪变化，不重复描述静态外观；单镜时长 3-8 秒，超长拆多段生成后拼接防运动幅度过大崩坏",
         ],
         tools: [

@@ -112,7 +112,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         title: "关键帧（每镜首帧/尾帧 + CP 剧照）",
         deliverable: "每镜起始帧（0.00 秒主图）+ 镜内切点子帧图 + 主演 CP 剧照（情绪高潮位双人构图）+ 每场色调参照帧",
         notes: [
-          "I2V 起始结束帧双锁：起帧 = 本镜起始帧，尾帧 = 下一镜起始帧（或本镜切点子帧），首尾帧锁定后镜头间才不跳变",
+          "I2V 首尾图按序参考：起帧取本镜起始，尾帧取预期切点；图片参考不保证硬锁端点。运镜写 camera.start/end/trajectory/timing/parallax 或时间 keyframes，physical dolly 需要透视与前后景视差，不能用同构图放大代替；合法 static 保留",
           "参考图权重分层：DNA 签名串放 prompt 首行，三视图控制脸部，场景锚点图控制背景，材质高光比例写死（如「缎面高光 30%/皮肤 60%」）",
           "CP 剧照选情绪拍点表最高分位生成，构图学海报：双人视线引导线交叉，留投放标题位",
           "关键帧出图后立刻与三视图并排比对，脸部相似度肉眼不过关当场重roll，不带病进视频",

@@ -402,7 +402,7 @@ export type TurnMetricsSnapshot = {
  * 血泪：停止曾复用 error 一行省事 → 使用者看到红字「失败」的假判定
  * （见 memory stopped-status-not-failure-0920）。
  */
-export type TaskStatus = "running" | "ok" | "error" | "stopped"
+export type TaskStatus = "running" | "ok" | "error" | "stopped" | "interrupted"
 
 /** 任务状态语义表：UI 标签、是否失败、如何结算工具卡。 */
 export const TASK_STATUS_SEMANTICS: Record<TaskStatus, { uiLabel: string; isFailure: boolean; settlesToolCard: "ok" | "fail" | "none" }> = {
@@ -410,9 +410,13 @@ export const TASK_STATUS_SEMANTICS: Record<TaskStatus, { uiLabel: string; isFail
   error: { uiLabel: "失败", isFailure: true, settlesToolCard: "fail" },
   stopped: { uiLabel: "已停止", isFailure: false, settlesToolCard: "none" },
   running: { uiLabel: "进行中", isFailure: false, settlesToolCard: "none" },
+  // 2026-10-14 子代理协作总线（X2/Y1）：interrupted 是**一等非终态**——当前回合被打断、
+  // 仍可再收输入，必须与 ok/error/stopped 三种终态可区分（Codex `AgentStatus::Interrupted`、
+  // A2A `INPUT_REQUIRED` 同旨）。isFailure=false：被打断不等于失败（同 stopped 的假判定教训）。
+  interrupted: { uiLabel: "已中断", isFailure: false, settlesToolCard: "none" },
 }
 
 /** 型别守卫：unknown 收窄到 TaskStatus。 */
 export function isTaskStatus(v: unknown): v is TaskStatus {
-  return v === "running" || v === "ok" || v === "error" || v === "stopped"
+  return v === "running" || v === "ok" || v === "error" || v === "stopped" || v === "interrupted"
 }

@@ -5,9 +5,10 @@ import path from "node:path"
 import { WorkflowService } from "./workflow-service"
 import { gateWorkflowMemory } from "./jev-gate"
 import { estimateTtsCoins } from "./pricing-and-validation"
-import { compileShotPrompt, parseShotCandidate, shotOutputParams, type ShotJson } from "./video-prompt-schema"
+import { compileShotPrompt, normalizeShotCamera, parseShotCandidate, shotOutputParams, type ShotJson } from "./video-prompt-schema"
 import { loadUserSettings, getCriticVerdictByRun } from "./persistence"
 import { enqueueWorkflowCriticReview, hasWorkflowCriticReview } from "./subagent.ts"
+import { VIDEO_MOTION_RECEIPT_POLICY } from "./delivery-gate.ts"
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { sessions, dirtySessions, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
@@ -222,7 +223,8 @@ export const workflowService = new WorkflowService({
         const line = verdict?.verdict_text?.split("\n").find((line: string) => line.startsWith("RECEIPT:"))
         if (line) savedReceipt = JSON.parse(line.slice(8))
       } catch { /* unverifiable remains partial */ }
-      const verified = verdict?.verdict === "pass" && savedReceipt?.ok === true && savedReceipt?.checked?.some((item: any) => item.runId === binding && item.artifact === artifact)
+      const videoReview = /\.(mp4|mov|mkv|webm)(?:[?#]|$)/i.test(artifact)
+      const verified = verdict?.verdict === "pass" && savedReceipt?.ok === true && savedReceipt?.checked?.some((item: any) => item.runId === binding && item.artifact === artifact && (!videoReview || item.motion?.policy === VIDEO_MOTION_RECEIPT_POLICY))
       if (old?.artifact === artifact && verified) {
         workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { ...old, state: "passed" })
         continue
@@ -238,6 +240,11 @@ export const workflowService = new WorkflowService({
         agent: node.kind === "image" ? "video-director" : "editor", label: node.title, runId: binding,
         text: `artifact: ${artifact}\n要求: ${String(node.metadata.gate ?? "按当前任务独立审阅")}\nworkflow:${wf.workflowId} node:${node.id}`,
         artifacts: [artifact], workflowReview: { workflowId: wf.workflowId, nodeId: node.id, artifact },
+        mediaIntent: [{ artifact,
+          ...(typeof node.metadata.prompt === "string" ? { prompt: node.metadata.prompt } : {}),
+          camera: parseShotCandidate(node.metadata.shot)?.camera ?? node.metadata.camera ?? node.metadata.cam,
+          ...(typeof node.metadata.duration_seconds === "number" ? { durationSeconds: node.metadata.duration_seconds } : {}),
+        }],
         onReview: (result) => {
           if (wf.nodeContent[node.id] !== artifact) return // stale receipt never approves new content
           workflowService.recordQualityReview(wf.workflowId, node.id, artifact, { state: result.state, requested: true, criticRunId: result.criticRunId, receipt: result.receipt })
@@ -1254,10 +1261,22 @@ export async function submitWorkflowNode(
   let payloadDurationHint: number | undefined = undefined
   const shotCandidate = (parseShotCandidate(meta.shot) ?? parseShotCandidate(prompt)) as ShotJson | null
   if (node.kind === "video" && shotCandidate) {
-    prompt = compileShotPrompt(shotCandidate, model)
+    try { prompt = compileShotPrompt(shotCandidate, model) }
+    catch (error) { return { nodeId: node.id, ok: false, error: `invalid_shot: ${error instanceof Error ? error.message : String(error)}` } }
     const shotParams = shotOutputParams(shotCandidate)
     if (shotParams.duration_seconds !== undefined && typeof meta.duration_seconds !== "number") payloadDurationHint = shotParams.duration_seconds
     if (shotParams.aspect_ratio && typeof meta.size !== "string") shotSize = shotParams.aspect_ratio
+  }
+
+  if (node.kind === "video" && !shotCandidate && ["camera", "cam", "trajectory", "keyframes", "start", "end", "timing", "parallax", "cameraTrajectory", "camera_trajectory", "cameraStart", "camera_start", "startPosition", "start_position", "cameraEnd", "camera_end", "endPosition", "end_position", "cameraKeyframes", "camera_keyframes"].some(key => meta[key] !== undefined)) {
+    try {
+      const duration = typeof meta.duration_seconds === "number" ? meta.duration_seconds : undefined
+      const camera = normalizeShotCamera(meta, duration)
+      const motion = compileShotPrompt({ subject: "", action: "", camera, output: { duration_seconds: duration } }, model)
+      const combined = `${prompt}\n${motion}`
+      if (combined.length > 3800) throw new Error(`镜头提示词共 ${combined.length} 字超过 3800；未截断、未提交`)
+      prompt = combined
+    } catch (error) { return { nodeId: node.id, ok: false, error: `invalid_shot: ${error instanceof Error ? error.message : String(error)}` } }
   }
 
   // 参考图：上游中已完成且有 content 的 image 节点（角色图/场景图 → 影片参考）

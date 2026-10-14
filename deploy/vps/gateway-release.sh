@@ -227,10 +227,15 @@ assert_gateway_tree_clean() {
 
 # 既有轮子：部署前 recon 对账（0=一致 1=漂移 2=故障）
 # 现行 release 的 GIT_SHA（recon 的正确基准：生产是否仍等于上次发出的那一版）
+# 2026-10-14 修：手造 release 目录（yolo-*／prompt-qc-*／camera-skill-*）没有 meta.env，
+# 远端 sed 读不到档返回退出码 2；`2>/dev/null` 只吞 stderr 吞不掉退出码，于是 pipefail 下
+# 这里赋值失败 → 整支脚本静默 EXIT 2（2026-10-12 现场，见 memory
+# 2026-10-12-gateway-release-blocked-two-gates）。`|| true` 把「读不到」收敛成空字串，
+# 落到呼叫端本来就写好的 `case "$base" in ""|unknown-baseline) base="HEAD"` 分支。
 current_release_sha() {
   [ "$DRY_RUN" -eq 1 ] && return 0
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
-    "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null" 2>/dev/null | head -1
+    "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null || true" 2>/dev/null | head -1 || true
 }
 
 

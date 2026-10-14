@@ -85,7 +85,7 @@ content: {
   "subject": "主体（谁/什么）",
   "appearance": "外观、服装、材质",
   "action": "按 beat 的动作：具体计数与计时（'走了三步后回头'），不要模糊形容词",
-  "camera": { "shot_type": "close-up | medium shot | wide establishing | aerial", "angle": "low angle | eye level | high angle", "movement": "dolly in | pan left | tracking | crane up | handheld | static", "lens": "35mm anamorphic, shallow DOF" },
+  "camera": { "shot_type": "close-up | medium shot | wide establishing | aerial", "angle": "low angle | eye level | high angle", "movement": "dolly in | pan left | tracking | crane up | handheld | static", "lens": "35mm anamorphic, shallow DOF", "start": "0秒机位在桌边", "end": "5秒机位到人物前侧", "trajectory": "沿桌边连续前移", "timing": "0–5秒缓慢匀速", "parallax": "近处桌灯比背景墙移动更快", "keyframes": [{"time_seconds": 0, "position": "桌边"}, {"time_seconds": 5, "position": "人物前侧"}] },
   "environment": { "time_of_day": "golden hour | dusk | morning", "lighting": "soft window light, 45° key right", "elements": ["neon signs", "wet asphalt", "puddles"] },
   "style": { "look": "cinematic | documentary | UGC phone camera", "mood": "tense | warm | melancholic", "color_grading": "teal and orange" },
   "audio": { "dialogue": [{ "character": "侦探", "tone": "weary", "line": "我不相信巧合。" }], "ambience": "room tone, distant traffic", "sfx": ["footsteps", "door creak"] },
@@ -97,6 +97,8 @@ content: {
 
 - **模板路径**（workflow_start content）：text 角色（shot/character/scene）可直接给 `shot: { ...上述 schema... }`（与 content 二选一，shot 优先）。
 - **自订路径**（workflow_add_node）：text 或 video 节点 metadata 加 `shot: { ... }`；也可以把 JSON 字串直接放 content，后端能解析。
+- **运镜**：camera.start/end/trajectory/timing/parallax 与 keyframes:[{time_seconds,position}] 会确定性写进提交 prompt；keyframes 时间递增且不超镜头时长。链工具接受独立 trajectory/keyframes，不能只在旁白写运镜。未知结构或编译后超过3800字明确拒绝，不静默截断。散文原话保留，未指定运镜不添加默认static。
+- **物理语义**：dolly/push/truck 是摄影机连续空间位移，应描述透视变化、前后景视差或遮挡揭示；zoom 是摄影机固定、焦距变化。两张同构图尺寸不同不证明dolly；开头帧骤跳不算连续运镜。合法fixed/static镜头可让主体运动，不强加机位运动。图片参考不等于硬锁首尾；H3用自然语言说明连续路径，不把Hailuo方括号标签当硬指令。
 - **规则**：一镜一机位运动 + 一主体动作；对话每行 ≤5 秒；不要写否定句（描述存在什么，不是没有什么）；negative 数组不会进正文（平台无此栏位）。
 - **填错会被 400 挡下**：缺 subject/action 时错误讯息带完整 schema，补齐重试即可。
 

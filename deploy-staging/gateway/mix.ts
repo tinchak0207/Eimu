@@ -35,13 +35,16 @@ async function fileExists(p: string): Promise<boolean> {
   try { await access(p); return true } catch { return false }
 }
 
-/** 素材解析：本地档直用；http(s) 下载到 tmp。返回 {path, downloaded} 或 null（不可达）。B6 master 导出复用。 */
-export async function resolveSource(src: string, idx: number, ext: string): Promise<{ path: string } | null> {
+/** 素材解析：本地档直用；http(s) 下载到 tmp。返回 {path} 或 null（不可达）。B6 master 导出复用。 */
+export async function resolveSource(src: string, idx: number, ext: string, downloadDir = TMP_DIR): Promise<{ path: string } | null> {
   if (/^https?:\/\//.test(src)) {
-    await mkdir(TMP_DIR, { recursive: true })
-    const dst = path.join(TMP_DIR, `mix-${Date.now()}-${idx}.${ext.replace(/[^a-z0-9]/gi, "") || "wav"}`)
+    await mkdir(downloadDir, { recursive: true })
+    const dst = path.join(downloadDir, `mix-${Date.now()}-${idx}.${ext.replace(/[^a-z0-9]/gi, "") || "wav"}`)
     const r = await run(`curl -fsSL --max-time 60 -o ${shq(dst)} ${shq(src)}`, 90_000)
-    if (r.exit_code !== 0) return null
+    if (r.exit_code !== 0) {
+      await rm(dst, { force: true }).catch(() => {})
+      return null
+    }
     return { path: dst }
   }
   return (await fileExists(src)) ? { path: src } : null
@@ -148,7 +151,7 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     let resolveFail = false
     for (const c of [...groups.voice, ...groups.music, ...groups.sfx]) {
       const ext = (c.path.split("?")[0].split(".").pop() || "wav")
-      const s = await resolveSource(c.path, idx++, ext)
+      const s = await resolveSource(c.path, idx++, ext, workDir)
       if (!s) {
         syncErrors.push({ clip_id: c.id, type: "source_unreachable", detail: `素材不可达：${c.path.slice(0, 120)}` })
         resolveFail = true
@@ -268,12 +271,19 @@ export async function analyzeMix(sessionId: string): Promise<MixReport> {
 /** POST /agent/v1/timeline/mix：loudnorm 两遍法渲染落盘 mix.wav。 */
 export async function applyMix(sessionId: string): Promise<{ report: MixReport; outPath: string | null; publicUrl: string | null }> {
   const { report, mixPath, workDir } = await buildMixFlow(sessionId)
-  if (report.sync_errors.length) {
+  try {
+    return await renderMix(sessionId, report, mixPath)
+  } finally {
+    // 工作目录包括本轮下载，覆盖成功、提前返回和异常出口。
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+async function renderMix(sessionId: string, report: MixReport, mixPath: string | null): Promise<{ report: MixReport; outPath: string | null; publicUrl: string | null }> {
+  if (report.sync_errors.length) {
     throw new TimelineValidationError(`sync_errors 非空（${report.sync_errors.length} 条），先修时间线再混音：` + JSON.stringify(report.sync_errors))
   }
   if (!mixPath) {
-    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
     return { report, outPath: null, publicUrl: null }
   }
   const ffmpeg = await detectFfmpeg()
@@ -304,6 +314,5 @@ export async function applyMix(sessionId: string): Promise<{ report: MixReport; 
   report.compliant = after.integrated_lufs !== null && after.true_peak_dbtp !== null
     && Math.abs(after.integrated_lufs + 16) <= 1.5 && after.true_peak_dbtp <= -1.0
   report.notes.push("loudnorm 两遍法完成（I=-16/TP=-1.5 目标），publicUrl 暂不挂公网路由（本片决策：返回本地路径）")
-  if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
   return { report, outPath: dst, publicUrl: null }
 }

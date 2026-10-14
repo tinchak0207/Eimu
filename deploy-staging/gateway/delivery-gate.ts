@@ -236,6 +236,8 @@ export interface CriticPassTarget {
   text: string
   /** Captured from this author's actual successful output receipts, not authored prose. */
   artifacts?: string[]
+  /** Actual generation input / server workflow parameters, never the author's review prose. */
+  mediaIntent?: Array<{ artifact: string; prompt?: string; camera?: unknown; durationSeconds?: number; sourceCallId?: string }>
   workflowReview?: { workflowId: string; nodeId: string; artifact: string }
   onReview?: (result: { state: "passed" | "failed" | "partial"; criticRunId: string; receipt: unknown }) => void
 }
@@ -358,6 +360,8 @@ export function buildCriticPassSpec(
     "evidence：你的核验过程与指针（引用交付正文原文片段佐证）。",
     "qc：具名独立审阅身份、实际感知工具callId、被审runId与artifact、检查结果和未覆盖项；作者勾选/文字PASS不作为证据。",
     "缺真实读取/感知、失败或覆盖不足时写未验，不要求作者盲目重产。末行 VERDICT: PASS|FAIL|PARTIAL。",
+    "视频（包括合法静态镜头）必须核时间连续性：先 video_evidence probe 取得真实duration/frameRate，再 frames/tile/tiles抽原帧0、下一原帧（请求1/fps减0.001秒以避免取到第二帧），以及约25%/50%/75%/片尾≥90%时刻；实际read_image或vision_analyze读取这组帧/拼板。单帧、scene代表帧、metadata、转写或像素差不是动态感知。",
+    "核对下列真实生成意图与序列实际运动：首帧跳变不是连续运镜；主体微动不是摄影机运动；画面整体放大只能说明缩放观感，physical dolly需要前后景视差、遮挡揭示或连续透视变化证据。静态意图允许机位不动；意图未知只报告可观察运动和未覆盖项，不强行要求移动。无法区分时PARTIAL，不凭motion PASS字串补证。",
     "",
     "被审正文若标记「已截断」，你只能就所见部分下判，不得对截断外内容断言。你只审不产：禁止改写或补产被审内容。",
     "",
@@ -382,6 +386,7 @@ export function buildCriticPassSpec(
         `Expert: ${t.agent}`,
         `label: ${t.label}`,
         `runId: ${t.runId}`,
+        `真实生成输入/工作流意图（缺失=unknown）：${JSON.stringify(t.mediaIntent ?? [])}`,
         fields.length > 0
           ? `该 Expert 交付契约栏位（真源 DELIVERY_CONTRACTS，共 ${fields.length} 栏）：${fields.join("、")}`
           : "该 Expert 交付契约栏位：未登记（按正文自述核对）",
@@ -393,45 +398,77 @@ export function buildCriticPassSpec(
   return `${head}\n${blocks.join("\n")}`
 }
 
-/** Independent evidence from the actual critic child session, never from qc/verdict prose. */
+export const VIDEO_MOTION_RECEIPT_POLICY = "video-sequence-perception-v1"
+
+/** Independent perception, with source-bound temporal coverage; sampling never decides camera quality. */
 export function checkCriticReceipt(targets: CriticPassTarget[], messages: unknown): {
-  ok: boolean; checked: Array<{ runId: string; artifact: string; callId: string; tool: string }>; missing: string[]
+  ok: boolean; checked: Array<{ runId: string; artifact: string; callId: string; tool: string; motion?: { policy: string; duration: number; frameRate: number; times: number[]; callIds: string[]; probeCallId: string; derivationCallIds: string[] } }>; missing: string[]
 } {
-  const checked: Array<{ runId: string; artifact: string; callId: string; tool: string }> = []
+  const checked: ReturnType<typeof checkCriticReceipt>["checked"] = []
   const missing: string[] = []
   const parts = Array.isArray(messages) ? messages.flatMap((m: any) => m?.info?.role === "assistant" ? m?.parts ?? [] : []) : []
-  for (const target of targets) {
-    for (const artifact of extractMediaTargets((target.artifacts ?? []).join("\n"), Infinity)) {
-      if (!target.artifacts?.includes(artifact)) { missing.push(`${target.runId}:${artifact}:no-author-receipt`); continue }
-      const reachable = new Set([artifact])
-      let proof: { callId: string; tool: string } | undefined
-      // Preserve execution order: a derived frame must be produced before it is actually inspected.
-      for (const part of parts) {
-        if (part?.type !== "tool" || part?.state?.status !== "completed" || typeof part?.callID !== "string") continue
-        let out: any
-        try { out = typeof part.state.output === "string" ? JSON.parse(part.state.output) : part.state.output } catch { continue }
-        if (out?.ok !== true) continue
-        const input = part.state.input ?? {}
-        const source = input.image_url ?? input.image_path ?? input.source ?? input.url
-        if (typeof source !== "string" || !reachable.has(source)) continue
-        const visual = part.tool === "vision_analyze" || (part.tool === "read_image" && out.attached === true && out.bytes > 0 && typeof out.mime === "string" && out.mime.startsWith("image/"))
-        // Successful decoding/vision of the actual image/frame is required; metadata/transcript isn't perception.
-        if (visual && /\.(png|jpe?g|webp|gif|bmp|avif|heic)(?:[?#]|$)/i.test(source)) {
-          proof = { callId: part.callID, tool: part.tool }
-        }
-        // Read-only analysis/fetch can provide derivative frame provenance, but cannot self-award PASS.
-        if (["video_fetch", "video_analyze", "video_evidence"].includes(part.tool)) {
-          // Existing analysis receipts contain both published URLs and local frame paths.
-          const refs = (value: unknown): string[] => typeof value === "string"
-            ? /^(?:https?:\/\/|\/).+\.(?:png|jpe?g|webp|gif|bmp|avif|heic|mp4|mov|mkv|webm)(?:[?#].*)?$/i.test(value) ? [value] : []
-            : Array.isArray(value) ? value.flatMap(refs)
-            : value && typeof value === "object" ? Object.values(value).flatMap(refs) : []
-          for (const ref of refs(out)) reachable.add(ref)
+  const refs = (value: unknown): string[] => typeof value === "string"
+    ? /^(?:https?:\/\/|\/).+\.(?:png|jpe?g|webp|gif|bmp|avif|heic|mp4|mov|mkv|webm)(?:[?#].*)?$/i.test(value) ? [value] : []
+    : Array.isArray(value) ? value.flatMap(refs)
+    : value && typeof value === "object" ? Object.values(value).flatMap(refs) : []
+  for (const target of targets) for (const artifact of extractMediaTargets((target.artifacts ?? []).join("\n"), Infinity)) {
+    const video = /\.(mp4|mov|mkv|webm)(?:[?#]|$)/i.test(artifact)
+    const reachable = new Set([artifact])
+    const frameTimes = new Map<string, number[]>()
+    const viewed = new Set<number>(); const calls = new Set<string>()
+    const derivations = new Set<string>(); let probeCallId = ""
+    let duration = 0; let frameRate = 0
+    let proof: { callId: string; tool: string } | undefined
+    for (const part of parts) {
+      if (part?.type !== "tool" || part?.state?.status !== "completed" || typeof part?.callID !== "string") continue
+      let out: any
+      try { out = typeof part.state.output === "string" ? JSON.parse(part.state.output) : part.state.output } catch { continue }
+      if (out?.ok !== true) continue
+      const input = part.state.input ?? {}
+      const source = input.image_url ?? input.image_path ?? input.source ?? input.url
+      if (typeof source !== "string" || !reachable.has(source)) continue
+      const visual = part.tool === "vision_analyze" || (part.tool === "read_image" && out.attached === true && out.bytes > 0 && typeof out.mime === "string" && out.mime.startsWith("image/"))
+      if (visual && /\.(png|jpe?g|webp|gif|bmp|avif|heic)(?:[?#]|$)/i.test(source)) {
+        if (!video) proof = { callId: part.callID, tool: part.tool }
+        else if (frameTimes.has(source)) {
+          for (const time of frameTimes.get(source)!) viewed.add(time)
+          calls.add(part.callID); proof = { callId: part.callID, tool: part.tool }
         }
       }
-      if (proof) checked.push({ runId: target.runId, artifact, ...proof })
-      else missing.push(`${target.runId}:${artifact}`)
+      if (!["video_fetch", "video_analyze", "video_evidence"].includes(part.tool)) continue
+      // Existing exact-source receipts establish local aliases; metadata alone supplies no visual proof.
+      for (const ref of refs(out)) {
+        // A cut/re-encoded video is a different artifact, not an alias of the full review target.
+        if (!/\.(mp4|mov|mkv|webm)(?:[?#]|$)/i.test(ref) || part.tool === "video_fetch" || (part.tool === "video_evidence" && ["probe", "fetch"].includes(input.action))) reachable.add(ref)
+      }
+      if (part.tool !== "video_evidence") continue
+      if (input.action === "probe" && out.action === "probe" && out.hasVideo === true && Number.isFinite(out.duration) && out.duration > 0 && Number.isFinite(out.frameRate) && out.frameRate > 0) {
+        duration = out.duration; frameRate = out.frameRate
+        probeCallId = part.callID
+      }
+      if (!duration || !["frames", "tile", "tiles"].includes(input.action) || out.action !== input.action) continue
+      const register = (path: unknown, frames: any[]) => {
+        if (typeof path !== "string") return
+        const times = frames.map((frame) => frame?.at).filter((at): at is number => typeof at === "number" && Number.isFinite(at) && at >= 0 && at < duration)
+        if (!times.length) return
+        derivations.add(part.callID)
+        const aliases = [path, ...(Array.isArray(out.artifacts) ? out.artifacts.filter((item: any) => item?.path === path).map((item: any) => item.url) : [])]
+        for (const alias of aliases) if (typeof alias === "string") { reachable.add(alias); frameTimes.set(alias, times) }
+      }
+      if (input.action === "frames") for (const frame of out.frames ?? []) register(frame.path, [frame])
+      if (input.action === "tile") register(out.path, out.frames ?? [])
+      if (input.action === "tiles") for (const grid of out.grids ?? []) register(grid.path, grid.frames ?? [])
     }
+    const times = [...viewed].sort((a, b) => a - b)
+    const epsilon = 0.002
+    const temporal = duration > 0 && frameRate > 0 && times.length >= 6 &&
+      times.some((t) => t <= 0.5 / frameRate + epsilon) &&
+      times.some((t) => t > times[0]! + epsilon && t >= 0.5 / frameRate - epsilon && t <= 1.5 / frameRate + epsilon) &&
+      [0.25, 0.5, 0.75].every((fraction) => times.some((t) => Math.abs(t - duration * fraction) <= duration * 0.10)) &&
+      times.some((t) => t >= duration * 0.90)
+    if (proof && (!video || temporal)) checked.push({ runId: target.runId, artifact, ...proof,
+      ...(video ? { motion: { policy: VIDEO_MOTION_RECEIPT_POLICY, duration, frameRate, times, callIds: [...calls], probeCallId, derivationCallIds: [...derivations] } } : {}) })
+    else missing.push(`${target.runId}:${artifact}${video ? ":motion-sequence-or-opening-adjacent-frames-missing" : ""}`)
   }
   return { ok: checked.length > 0 && missing.length === 0, checked, missing }
 }

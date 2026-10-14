@@ -13,13 +13,13 @@ import { jsonError, getBearer } from "./gw-lib.ts"
 import { isLoopback, validateApiKey, resolveCanonicalKey, resolveCanonicalIdentity, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS, DEVICE_TICKET_PREFIX, redeemDeviceTicket } from "./auth-gw.ts"
 import { sessions, markDirty, getOwnedSession, resolveSession, issueSseTicket, redeemSseTicket, handleDeleteSession } from "./sessions-core.ts"
 import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
-import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle } from "./persistence.ts"
+import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle, persistenceStatus } from "./persistence.ts"
 import { fetchOpencodeTitle } from "./opencode-client.ts"
 import { openEventStream } from "./sse-core.ts"
 import { handleAttachmentUpload, sanitizeUploadName, reserveUniqueUploadName, contentTypeForExt } from "./uploads-media.ts"
 import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
-import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker } from "./subagent.ts"
+import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker, handleSubagentMessage, handleSubagentNotify } from "./subagent.ts"
 import { workflowServiceTemplates, handleWorkflowInternal, pushWorkflowCompletion } from "./workflow-gw.ts"
 import { handleDirectorRoutes } from "./director.ts"
 import { handleCreateSession, handleEventStream, handleConfirm } from "./session-lifecycle.ts"
@@ -68,6 +68,22 @@ async function internalDeviceResolveTenant(sessionId: string): Promise<string | 
   if (!key) return null
   const identity = await resolveCanonicalIdentity(key)
   return identity.userId == null ? null : `u:${identity.userId}`
+}
+
+/**
+ * G2（2026-10-14 协作总线修复）：`/internal/subagent/*` 端点组的统一错误兜底。
+ * 这些 handler 读 body／解析字段，任何未预期抛错此前会冒到 Bun 顶层 → **HTML 500**，
+ * 机器调用方（opencode 工具）`res.json()` 直接失败。此处捕获后一律回**同形状 JSON**
+ * `{ok:false, code:"internal_error", error}`，500。error 只给一句话原因（不泄漏栈）。
+ */
+async function guardedSubagentEndpoint(label: string, fn: () => Promise<Response>): Promise<Response> {
+  try {
+    return await fn()
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e)
+    console.error(`[gateway] subagent endpoint error (${label}):`, e)
+    return Response.json({ ok: false, code: "internal_error", error: `子代理端点内部错误（${label}）：${reason}` }, { status: 500 })
+  }
 }
 
 export async function handleRequest(req: Request, srv: { requestIP: (r: Request) => { address: string } | null }): Promise<Response> {
@@ -151,7 +167,7 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
     // /agent/ to this port WITHOUT stripping the prefix, so /healthz alone is
     // not reachable from outside and an external uptime check would get 401.
     if (req.method === "GET" && (pathname === "/healthz" || pathname === "/agent/healthz")) {
-      return Response.json({ ok: true, timestamp: new Date().toISOString(), sessions: sessions.size })
+      return Response.json({ ok: true, timestamp: new Date().toISOString(), sessions: sessions.size, persistence: persistenceStatus() })
     }
 
     // Internal routes: loopback-only, no API key
@@ -212,18 +228,30 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
         return handleInternalDeviceAuthorize(req, { resolveTenant: internalDeviceResolveTenant })
       }
       // 子代理运行时：派发 + 工具轮询取件（loopback，鉴权同其他 internal 端点）。
+      // G2（2026-10-14 协作总线修复）：这一组 handler 加统一 try/catch——它们内部读 body／
+      // 解析字段，任何未预期抛错都必须回 **JSON** 而非 Bun 默认的 HTML 500（机器调用方
+      // 收 HTML 会直接解析失败）。code=internal_error，语义＝网关内部错误，非呼叫方输入错。
       if (req.method === "POST" && pathname === "/internal/subagent/dispatch") {
-        return handleSubagentDispatch(req)
+        return await guardedSubagentEndpoint("dispatch", () => handleSubagentDispatch(req))
       }
       if (req.method === "POST" && pathname === "/internal/subagent/status") {
-        return handleSubagentStatus(req)
+        return await guardedSubagentEndpoint("status", () => handleSubagentStatus(req))
       }
       // 0920 停止闸：orchestrator 的主动停止入口（此前只有 dispatch/status，
       // orchestrator 眼睁睁看著子代理跑飞却无权刹车）。body: { session_id, subagent_id?, all? }
       //   - 带 subagent_id：停那一个（id 或 label 前缀）
       //   - all:true 或缺 subagent_id：停该会话名下全部在跑子代理
       if (req.method === "POST" && pathname === "/internal/subagent/stop") {
-        return handleSubagentStop(req)
+        return await guardedSubagentEndpoint("stop", () => handleSubagentStop(req))
+      }
+      // 2026-10-14 子代理协作总线（spec §3.1）：父→子消息（mode 三态＋expected_turn_id
+      // 精确 steer，回应带 submission_id 与「接受≠已处理」）与子→父回报（notify_orchestrator：
+      // 父忙只入队不打断、父闲唤醒一次）。与上面三端点同风格：同一 loopback 门内，不加二次鉴权。
+      if (req.method === "POST" && pathname === "/internal/subagent/message") {
+        return await guardedSubagentEndpoint("message", () => handleSubagentMessage(req))
+      }
+      if (req.method === "POST" && pathname === "/internal/subagent/notify") {
+        return await guardedSubagentEndpoint("notify", () => handleSubagentNotify(req))
       }
       // D1（2026-10-02）：工具层重复呼叫断路器的强制收尾（plugin eimu-guard 在 N+5 次时呼叫）。
       if (req.method === "POST" && pathname === "/internal/session/loop-breaker") {
