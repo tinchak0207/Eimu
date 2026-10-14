@@ -332,7 +332,6 @@
     }
   },
   "agent": {
-    "compaction": { "tools": { "*": false }, "permission": { "*": "deny" } },
     "creator": {
       "mode": "all",
       "description": "Eimu 默认创作助理（非野兽模式主会话）：直接出图/出片/剪辑/交付，大活派 subagent_dispatch",
@@ -467,21 +466,21 @@
         "world_bible_extract": false,
         "question": true,
         "task": false,
-        "grep": true,
+        "skill": true,
+        "apply_patch": false,
         "multiedit": false,
-        "websearch": true,
-        "write": false,
+        "glob": true,
+        "lsp": false,
+        "edit": false,
         "list": true,
         "read": true,
-        "lsp": false,
-        "skill": true,
-        "bash": false,
-        "todowrite": true,
-        "edit": false,
-        "glob": true,
-        "apply_patch": false,
+        "grep": true,
+        "websearch": true,
+        "webfetch": true,
         "patch": false,
-        "webfetch": true
+        "todowrite": true,
+        "write": false,
+        "bash": false
       }
     },
     "director3d": {
@@ -695,7 +694,7 @@
     "video-director": {
       "mode": "all",
       "description": "专属视频导演：接委托单自主设计分镜/运镜/时长与分辨率并选型 seedance/kling 系模型产出成片，只回交付物契约与交付摘要，过程不出子代理。（Expert：仅经 subagent_dispatch expert 栏路由）",
-      "prompt": "共同真实性、授权、安全与交付契约见 workspace/AGENTS.md。本域配方按任务与网关事实行加载。\n\n【你的角色：视频导演（分镜/镜头设计/生成影片）】被派来的领域专家，只做本域的活。严格按任务书执行（唯一需求来源，看不到主对话历史），产出遵守交付契约，跳过环节须写明「跳过 X，原因 Y」。只回结论与产物引用。",
+      "prompt": "共同真实性、授权、安全与交付契约见 workspace/AGENTS.md。本域配方按任务与网关事实行加载。\n\n【你的角色：视频导演（分镜/镜头设计/生成影片）】被派来的领域专家，只做本域的活。严格按任务书执行（唯一需求来源，看不到主对话历史），产出遵守交付契约，跳过环节须写明「跳过 X，原因 Y」。只回结论与产物引用。\n\n你是 Eimu 视频导演。研究先行，制作前读取 .opencode/skills/video-director/SKILL.md；根据任务按需读取其中运动与模型参考。先说明镜头叙事收益，再选主体动作、机位路径与时序；遵守明确 static/固定焦距，不默认 slow push。未知素材明确尚未观看。平台真实能力、参考输入、报价与授权为准，研究并发与独立评审保留；实际时序感知回执才能支撑运动审核。",
       "tools": {
         "aspect_reflow": false,
         "asset_activate": false,
@@ -765,9 +764,9 @@
         "sketch_lock": false,
         "storyboard_qc_17": false,
         "story_sequence_consistency": false,
-        "style_aligned_batch": false,
+        "style_aligned_batch": true,
         "style_anchor_sref": false,
-        "style_dna_extract": false,
+        "style_dna_extract": true,
         "subagent_dispatch": false,
         "subagent_status": false,
         "timeline_lint": false,
@@ -1306,19 +1305,19 @@
         "multiedit": false,
         "patch": false,
         "apply_patch": false,
-        "video_analyze": true,
-        "list": true,
-        "video_measure": true,
-        "video_evidence": true,
-        "grep": true,
-        "search_web": true,
-        "read": true,
-        "webfetch": true,
-        "read_image": true,
         "glob": true,
+        "lsp": false,
+        "list": true,
+        "read": true,
+        "read_image": true,
+        "grep": true,
         "websearch": true,
         "video_transcribe": true,
-        "lsp": false
+        "video_analyze": true,
+        "webfetch": true,
+        "search_web": true,
+        "video_evidence": true,
+        "video_measure": true
       }
     },
     "lyricist": {
@@ -1425,6 +1424,14 @@
         "doc_struct": false,
         "world_bible_extract": false,
         "image_quote": false
+      }
+    },
+    "compaction": {
+      "tools": {
+        "*": false
+      },
+      "permission": {
+        "*": "deny"
       }
     }
   }

@@ -199,25 +199,58 @@ export async function redriveInterruptedTurn(state: SessionState, gen: number): 
   dispatchInterruptedTurn(cur, body, gen)
 }
 
-export function maybeReprompInterruptedTurn(state: SessionState): void {
-  const at = state.lastTurnActiveAt ?? 0
-  if (!at || Date.now() - at > TURN_REPROMPT_WINDOW_MS) return
-  if (repromptedSessions.has(state.sessionId)) return // 已处理过（双恢复路径）
-  repromptedSessions.add(state.sessionId)
-  const body = state.lastPromptBody
-  const gen = state.turnGen ?? 0
-  console.log(`[gateway] N1 reprompt: in-flight turn detected at restore (gen=${gen}, ${Math.round((Date.now() - at) / 1000)}s ago) — session=${state.sessionId}`)
-  // 诚实告知先行（无论重投成败，用户都该知道发生过中断）；无在线客户端时
-  // 暂存待 SSE 接入补投（R4-A S3②）。
-  stashOrEmitRestoreNotice(state, "服务刚经历过一次重启，你上一条消息的处理被中断了。正在为你自动重新提交…\n")
-  if (!body) {
-    // R4 实锤缺口：lastPromptBody 未持久化 → 旧路径在这里只发一句降级话术
-    // 就收工（且帧常无人在线收不到）。改为从 opencode 历史重推导并重投。
-    void redriveInterruptedTurn(state, gen)
-    return
-  }
-  dispatchInterruptedTurn(state, body, gen)
+// Gateway 重启不代表 OpenCode 回合停止。接管只观察原回合，绝不重发 user prompt。
+const restoredTurnGenerations = new WeakMap<SessionState, number>()
+export function isRestoredGatewayTurn(state: SessionState): boolean {
+  return restoredTurnGenerations.get(state) === (state.turnGen ?? 0)
 }
+export function maybeReprompInterruptedTurn(state: SessionState): void {
+  restoredTurnGenerations.set(state, state.turnGen ?? 0)
+  if (repromptedSessions.has(state.sessionId)) return
+  repromptedSessions.add(state.sessionId)
+  void reconcileRestoredGatewayTurn(state)
+}
+export async function reconcileRestoredGatewayTurn(state: SessionState): Promise<void> {
+  if (!isRestoredGatewayTurn(state) || sessions.get(state.sessionId) !== state) return
+  try {
+    const response = await fetch(`${OPENCODE_URL}/session/status`, {
+      headers: opencodeHeaders(), signal: AbortSignal.timeout(10000),
+    })
+    if (!response.ok) return
+    const statuses = await response.json() as Record<string, { type?: string }>
+    if (!isRestoredGatewayTurn(state) || sessions.get(state.sessionId) !== state) return
+    const status = statuses[state.opencodeSessionId]?.type
+    if (status === "busy" || status === "retry") {
+      if (!(state.lastTurnActiveAt ?? 0)) { state.lastTurnActiveAt = Date.now(); markDirty(state) }
+      return
+    }
+    // idle 不是“没执行”：只有原当前回合权威终态才能补收尾。无证据继续等待。
+    const history = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
+      headers: opencodeHeaders(), signal: AbortSignal.timeout(10000),
+    })
+    if (!history.ok) return
+    const msgs = await history.json() as any[]
+    if (!Array.isArray(msgs)) return
+    const userIndex = msgs.findLastIndex((m) => m?.info?.role === "user")
+    const assistant = msgs.slice(userIndex + 1).findLast((m) => m?.info?.role === "assistant")
+    if (!assistant?.info?.time?.completed || (assistant.parts ?? []).some((p: any) =>
+      p.type === "tool" && ["pending", "running"].includes(p.state?.status))) return
+    if (!isRestoredGatewayTurn(state) || sessions.get(state.sessionId) !== state) return
+    if (state.lastTurnActiveAt) {
+      state.lastTurnActiveAt = 0
+      markDirty(state)
+      emitToSession(state, "turn.done", {})
+    }
+  } catch { /* 未知或暂时不可达不重投、不伪造终态 */ }
+}
+let restoredReconcileRunning = false
+setInterval(() => {
+  if (restoredReconcileRunning) return
+  restoredReconcileRunning = true
+  void Promise.all([...sessions.values()].filter(isRestoredGatewayTurn)
+    .map(reconcileRestoredGatewayTurn)).finally(() => { restoredReconcileRunning = false })
+}, 15000)
+
 
 
 // 内存 miss 时从 DB lazy reload（进程重启后的会话恢复路径）。
