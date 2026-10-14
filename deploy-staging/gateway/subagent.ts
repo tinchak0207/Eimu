@@ -41,6 +41,7 @@ import { templatePlaceholderContent } from "./workflow-templates"
 // 循环同型，两端均在呼叫期使用绑定（非模组顶层求值），bun ESM 循环安全。
 import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
+import { notify, waitFor, parseWaitMs } from "./internal-waiters.ts"
 // FIX-A（2026-10-02）：子代理工具结果的媒体成品出卡——共用主路径的成品 URL 提取器与
 // emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
 // 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
@@ -730,6 +731,8 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   const stoppedResult = { status: "stopped" as TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, ...(droppedQueued > 0 ? { dropped_queued_messages: droppedQueued } : {}) }
   saveDurableSubagentRun(run, stoppedResult)
   completed.set(run.id, stoppedResult)
+  // WP2（2026-10-14）：终态落点——叫醒 /internal/subagent/status 上该 run 的长挂起 waiter。
+  notify(`subagent:${run.parentGatewaySessionId}:${run.id}`)
   const state = parentStateOf(run)
   if (state && deps) {
     try {
@@ -1312,6 +1315,8 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   checkPendingResumeQueue(run.parentGatewaySessionId)
   completed.set(run.id, durableResult)
+  // WP2（2026-10-14）：终态落点（finishRun 单一路径）——叫醒该 run 的长挂起 waiter。
+  notify(`subagent:${run.parentGatewaySessionId}:${run.id}`)
   // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
   if (status === "ok" && (run.agent || run.researchTask) && !run.partialPersist) {
     saveDelivery({
@@ -3080,6 +3085,9 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
         reason: "timeout",
         parent: run.parentGatewaySessionId,
       })
+      // WP2（2026-10-14）：同步 dispatch 超时放行＝轮询方可观测的终态（done:true/timeout）——
+      // 叫醒该 run 的长挂起 waiter，让工具端立即取件而非等满 wait_ms。
+      notify(`subagent:${run.parentGatewaySessionId}:${run.id}`)
       // E 片（2026-09-12）：超时放行这一刻的事实也落盘（无正文 → 写死因事实）。此刻
       // 盘上不是交付物，**不挂「完整结果已落盘」指针**（挂了会误导）；run 后续真完成
       // 时 finishRun 用全文覆写同一档并带指针。
@@ -3197,12 +3205,39 @@ function renderLiveRunSnapshot(run: SubagentRun, now: number): Record<string, un
   }
 }
 
+/** WP2（2026-10-14）：解析「该 subagent_status 查询是否正指向一个在途 run」并给出长挂起 key。
+ *  仅当目标**当前非终态且可按 run id 命中在途注册表**时回 `subagent:<父会话>:<runId>`；
+ *  终态／label 前缀／未知 id 一律回 null（→ 不等待，沿用现行为立即返回，零回归）。
+ *  只读、无副作用；状态源与 handleSubagentStatus 主逻辑同源（completed/durable/byChildOc/byParent），
+ *  不自造第三份状态。 */
+function liveSubagentWaitKey(parentKey: string, wantId: string): string | null {
+  let id = wantId
+  if (id === "latest") {
+    id = resolveLatestRunId(parentKey) ?? ""
+    if (!id) return null
+  }
+  // 已是终态（completed 或 durable）→ 不等待，直接走既有终态读回。
+  const doneRec = completed.get(id)
+  if (doneRec && doneRec.parent === parentKey) return null
+  // 判**终态**而非「durable 行存在」：派工时 saveDurableSubagentRun(run)（status:"running"、无 result）
+  // 就已建 durable 行 ⇒ 对在途 run durableSubagentRun(id) 也 truthy。只有带 result 才是终态，
+  // 与主逻辑同源（handleSubagentStatus 的 done = persistedOwned ? persisted.result : undefined）。
+  const dur = durableSubagentRun(id)
+  if (dur && dur.result !== undefined && dur.parentGatewaySessionId === parentKey) return null
+  for (const run of byChildOc.values()) {
+    if (run.id === id && run.parentGatewaySessionId === parentKey) return `subagent:${parentKey}:${run.id}`
+  }
+  const liveOwned = (byParent.get(parentKey) ?? []).find((r) => r.id === id && r.parentGatewaySessionId === parentKey)
+  if (liveOwned) return `subagent:${parentKey}:${liveOwned.id}`
+  return null
+}
+
 /** POST /internal/subagent/status — body { session_id, subagent_id }。工具轮询取件。
  *  R6：async 派遣的主会话也可用同一端点主动查询状态（subagent_status 工具）。
  *  D4（2026-10-02）：支援 `latest` 别名；not_found 附最近 3 笔 run 供改用。 */
 export async function handleSubagentStatus(req: Request): Promise<Response> {
   pruneCompleted()
-  const body = (await readJsonObject(req)) as { session_id?: string; subagent_id?: string }
+  const body = (await readJsonObject(req)) as { session_id?: string; subagent_id?: string; wait_ms?: unknown }
   let wantId = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
   if (!wantId) {
     return Response.json(
@@ -3234,6 +3269,15 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
     }
     wantId = latestId
   }
+  // WP2（2026-10-14）可选长挂起：wait_ms>0 且目标当前为在途 run 时，登记 waiter 等到终态落点
+  // （completed.set → notify）即时唤醒，或等满 wait_ms。缺省/0 ⇒ 跳过此块，行为与接线前
+  // 逐位元一致（零回归）。key 含 run id 避碰同会话多个在途 subagent。
+  const waitMs = parseWaitMs(body.wait_ms)
+  if (waitMs > 0) {
+    const wkey = liveSubagentWaitKey(parentKey, wantId)
+    if (wkey) await waitFor(wkey, waitMs)
+  }
+  // 无论是否等待过，下方都**重新读一次真实状态**（不信任任何 waiter 结果）。
   const persisted = durableSubagentRun(wantId)
   // G1（2026-10-14 跨会话越权修复）：终态记录**必须父归属匹配**才回正文/摘要/路径——
   // durable 按其 parent 栏位，completed 按其 rec.parent。不匹配一律落到 404 not_found

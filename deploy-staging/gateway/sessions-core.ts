@@ -16,6 +16,7 @@ import { personaModel } from "./model-registry.ts"
 import { workflowService, workflowOwnerBySession, workflowSnapshotFor, restoreWorkflowsFromSnapshot } from "./workflow-gw.ts"
 import { memoryRecallPrefetch, memoryRecallInflight } from "./memory-wiring.ts"
 import { rejectOpencodeQuestion } from "./questions-gw.ts"
+import { notify } from "./internal-waiters.ts"
 import { recoverSteerCommandsOnRevive } from "./steer-ledger-gw.ts"
 // TODO(整合 Wave1): 以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
 // 整合阶段把下行注释还原成真 import、删除全部 declare，即完成桥接：
@@ -425,6 +426,10 @@ export function teardownSession(id: string, state: SessionState, reason: string,
     clearTimeout(pending.timer)
     state.resolvedConfirms.set(requestId, { outcome: "denied", resolvedAt: Date.now() })
     emitToSession(state, "confirm.resolved", { request_id: requestId, approved: false })
+    // WP2（2026-10-14）：拆除路径绕过 settleConfirm，须自行叫醒该 confirm 的长挂起 waiter
+    //（否则 wait_ms 要等满才 abort 唤醒，最长 60s）。只补 notify——不改本循环既有 emit/落账语义
+    //（settleConfirm 的 denied 分支会额外 resumeWorkflowGate(false)，此处刻意不引入以保行为不变）。
+    notify(`confirm:${state.sessionId}:${requestId}`)
   }
   state.pendingConfirms.clear()
   for (const [requestId] of state.pendingQuestions) {

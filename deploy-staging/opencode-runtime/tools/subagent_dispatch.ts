@@ -3,7 +3,9 @@ import { ok, fail } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
-const POLL_INTERVAL_MS = 4000
+// 单次网关挂起上限：wait_ms>0 且仍 running 时 gateway 挂在端点上，状态变化
+// 立即回，或等满此值回当前态。env SUBAGENT_WAIT_MS 可覆写。
+const WAIT_MS = Number(process.env.SUBAGENT_WAIT_MS || 20_000)
 const POLL_DEADLINE_MS = 16 * 60 * 1000 // 网关侧 15 分钟硬顶会先以 error 收尾
 
 // D2（2026-10-02）：必填自检与示例——把过去 135 次空参数（`{}`）造成的
@@ -108,10 +110,9 @@ export default tool({
           note: typeof data.note === "string" ? data.note : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。",
         })
       }
-      // 同步模式（或缺省）：原语义阻塞轮询，零回归。
+      // 同步模式（或缺省）：长挂起取件（wait_ms），零回归。
       const deadline = Date.now() + POLL_DEADLINE_MS
       while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
         if (context.abort?.aborted) {
           return fail("aborted", "会话中断，已停止等待子代理结果")
         }
@@ -120,12 +121,13 @@ export default tool({
           const sr = await fetch(`${GATEWAY}/internal/subagent/status`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: context.sessionID, subagent_id: subagentId }),
-            signal: AbortSignal.timeout(10000),
+            body: JSON.stringify({ session_id: context.sessionID, subagent_id: subagentId, wait_ms: WAIT_MS }),
+            // 逾时必须 > WAIT_MS，否则 20s 挂起会被本地超时砍断。
+            signal: AbortSignal.timeout(WAIT_MS + 10_000),
           })
           st = await sr.json().catch(() => ({}))
         } catch {
-          continue // 单次轮询失败不放弃，继续等下一轮
+          continue // 单次取件失败不放弃，继续等下一轮（wait_ms 天然限速，不会满速死回圈）
         }
         if (st?.done) {
           if (st.status === "ok") {

@@ -20,6 +20,7 @@ import { humanMessageFor } from "./humanize-gw.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
+import { notify } from "./internal-waiters.ts"
 
 // POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
 // 或接收 path_b64 位元组（含文档 md/txt/json/csv/pdf）→
@@ -533,6 +534,10 @@ export function settleConfirm(state: SessionState, requestId: string, outcome: C
     const oldest = state.resolvedConfirms.keys().next()
     if (!oldest.done) state.resolvedConfirms.delete(oldest.value)
   }
+  // WP2（2026-10-14）：confirm 唯一的**结算落定点**（user 答复／过期／会话拆除三路皆经此）。
+  // 叫醒该 confirm 上所有长挂起 waiter（/internal/confirm-status 的 wait_ms）；无 waiter 时 no-op。
+  // 只负责叫醒——键与呼叫端 register 一致（`confirm:<canonical sessionId>:<request_id>`）。
+  notify(`confirm:${state.sessionId}:${requestId}`)
 
   const approved = outcome === "approved"
   emitToSession(state, "confirm.resolved", { request_id: requestId, approved })

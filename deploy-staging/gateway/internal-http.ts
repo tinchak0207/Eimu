@@ -18,6 +18,7 @@ import { armWatchdogTimer } from "./timers-gw.ts"
 import { approvePendingCharge } from "./media-internal-routes.ts"
 import { durableSessionTasks, stableGenerationOwnerScope } from "./job-delivery"
 import { queueLegacyGenerationWake } from "./job-store"
+import { waitFor, parseWaitMs } from "./internal-waiters.ts"
 // TODO(整合 Wave3): timers-gw 同波在建，armWatchdogTimer 尚未可 import，declare 占位（bun build 不查名可过）。
 
 // 画布摘要读取：opencode 的 canvas_summary 工具用 session_id（opencode 或
@@ -182,9 +183,9 @@ export async function handleTimelineRoutes(key: string, req: Request, pathname: 
 
 /** Poll target for the tool: has the user answered this confirm yet? */
 export async function handleConfirmStatus(req: Request): Promise<Response> {
-  let body: { session_id?: string; request_id?: string }
+  let body: { session_id?: string; request_id?: string; wait_ms?: unknown }
   try {
-    body = (await req.json()) as { session_id?: string; request_id?: string }
+    body = (await req.json()) as { session_id?: string; request_id?: string; wait_ms?: unknown }
   } catch {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
@@ -199,6 +200,15 @@ export async function handleConfirmStatus(req: Request): Promise<Response> {
   // session that no longer exists.
   if (!state) return Response.json({ status: "denied", request_id, reason: "session_gone" })
 
+  // WP2（2026-10-14）可选长挂起：wait_ms>0 且当前仍非终态（pending）时，登记 waiter 等到
+  // 结算落定点（settleConfirm → notify）即时唤醒，或等满 wait_ms。缺省/0 ⇒ 跳过此块，
+  // 行为与接线前逐位元一致（零回归）。key 含 request_id 避碰同会话多笔在途 confirm。
+  const waitMs = parseWaitMs(body.wait_ms)
+  if (waitMs > 0 && state.pendingConfirms.has(request_id)) {
+    await waitFor(`confirm:${state.sessionId}:${request_id}`, waitMs)
+  }
+
+  // 无论是否等待过，都在此**重新读一次真实状态**（不信任任何 waiter 结果）。
   const settled = state.resolvedConfirms.get(request_id)
   if (settled) return Response.json({ status: settled.outcome, request_id })
   if (state.pendingConfirms.has(request_id)) {

@@ -6,7 +6,11 @@
 import { existsSync, readFileSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
 
-export const API_BASE = "https://image.tinchak0207.xyz/v1"
+// WP3：VPS 本机直连控面，避免绕 Vercel 边缘（image.tinchak0207.xyz 由 Vercel 边缘
+// 服务、middleware 再把 /v1/* 改写回 VPS 控面）。实测等价性：store.tinchak0207.xyz/
+// image-control/api/v1 的 /openapi.json body sha256 与公网域名 image.tinchak0207.xyz/v1
+// 完全相同（同一后端），但延时约 14ms vs 88~113ms。语义不变，只是换快路径。
+export const API_BASE = process.env.PLATFORM_API_BASE || "https://store.tinchak0207.xyz/image-control/api/v1"
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const POLLER = process.env.POLLER_URL || "http://127.0.0.1:8082/"
 
@@ -395,9 +399,11 @@ export interface ConfirmSpendInput {
 }
 
 /**
- * 询问用户核准一笔花费。gateway 阻塞至多 ~90s，故 fetch 逾时 ≥100s。
+ * 询问用户核准一笔花费。第一步先向 gateway 登记请求（202 pending 立刻返回），
+ * 之后以「长挂起取件」取得答复：每轮带 wait_ms 挂到 /internal/confirm-status，
+ * gateway 在状态变化时立即回，或等满 wait_ms 回当前态（不再固定 2s 轮询）。
  * 外部 signal（如 context.abort）也接上，用户取消同样能中止等待。
- * 任何失败（gateway 错误 / 逾时 / 用户取消）都回 false → caller 必须中止。
+ * 任何失败（gateway 错误 / 逾时 / 用户取消）都回 false → caller 必须中止（fail-closed）。
  */
 export async function confirmSpend(
   input: ConfirmSpendInput,
@@ -407,7 +413,9 @@ export async function confirmSpend(
 
   // Register the request. The gateway answers immediately (202 pending) instead
   // of blocking, because the confirm window is 15 minutes and no HTTP request
-  // survives that: Bun's idleTimeout caps at 255s. So: register, then poll.
+  // survives that: Bun's idleTimeout caps at 255s. So: register once, then take
+  // the answer by blocking pickup — each confirm-status call hangs on the
+  // gateway (wait_ms) until the state changes or the wait window expires.
   const registered = await postInternal(
     "/internal/confirm-request",
     {
@@ -429,16 +437,15 @@ export async function confirmSpend(
   const deadline = Date.now() + CONFIRM_POLL_TOTAL_MS
   while (Date.now() < deadline) {
     if (signal?.aborted) return false
-    await sleep(CONFIRM_POLL_INTERVAL_MS, signal)
-    if (signal?.aborted) return false
 
     const status = await postInternal(
       "/internal/confirm-status",
-      { session_id: input.sessionID, request_id },
+      { session_id: input.sessionID, request_id, wait_ms: CONFIRM_WAIT_MS },
       signal,
     )
-    // A transient failure to reach the gateway is not an answer. Keep polling
-    // until the deadline rather than reading a blip as a denial.
+    if (signal?.aborted) return false
+    // A transient failure to reach the gateway is not an answer. Keep picking
+    // up until the deadline rather than reading a blip as a denial.
     if (!status) continue
     if (status.status === "approved") return true
     if (status.status && status.status !== "pending") return false
@@ -446,7 +453,9 @@ export async function confirmSpend(
   return false
 }
 
-const CONFIRM_POLL_INTERVAL_MS = 2_000
+// 单次网关挂起上限：wait_ms>0 时 gateway 挂在内部端点上，直到 confirm 状态
+// 变化（立即回）或等满此值（回当前态）。env CONFIRM_WAIT_MS 可覆写。
+const CONFIRM_WAIT_MS = Number(process.env.CONFIRM_WAIT_MS || 20_000)
 // Slightly past the gateway's own 15-minute expiry so the loop sees the real
 // "expired" outcome instead of giving up first and reporting its own timeout.
 const CONFIRM_POLL_TOTAL_MS = 16 * 60 * 1000
@@ -480,7 +489,14 @@ async function postInternal(
   const onAbort = () => controller.abort()
   if (signal?.aborted) controller.abort()
   else signal?.addEventListener("abort", onAbort, { once: true })
-  const timeout = setTimeout(() => controller.abort(), 15_000)
+  // 若调用方带 wait_ms（长挂起取件），per-request 逾时必须放行整个挂起窗口，
+  // 否则挂起会在 15s 被本地 abort 砍断、回 null 当成 transient。wait_ms 缺省
+  // 0 时保持原来的 15s 上限不变。
+  const waitMs =
+    typeof (payload as { wait_ms?: unknown } | null)?.wait_ms === "number"
+      ? (payload as { wait_ms: number }).wait_ms
+      : 0
+  const timeout = setTimeout(() => controller.abort(), 15_000 + waitMs)
   try {
     const resp = await fetch(`${GATEWAY}${path}`, {
       method: "POST",
