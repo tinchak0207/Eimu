@@ -8,7 +8,13 @@ import { createHash } from "node:crypto"
 let store: Database | undefined
 function db(): Database {
   if (store) return store
-  const path = process.env.EIMU_TASK_JOURNAL_PATH || "/opt/agent-harness/state/tool-journal/tool-jobs.sqlite"
+  // 默认落点必须在 opencode 服务**可写**的根内：该服务以 agentsvc 运行且 systemd 只授权
+  // ReadWritePaths=/opt/agent-harness/workspace（ProtectSystem=strict），写
+  // /opt/agent-harness/state/** 会 SQLITE_CANTOPEN（unable to open database file）
+  // 并连带打死 image_quote／workflow_write 等所有走本档的路径（2026-10-14 生产事故）。
+  const path =
+    process.env.EIMU_TASK_JOURNAL_PATH ||
+    "/opt/agent-harness/workspace/.local/share/eimu/tool-journal/tool-jobs.sqlite"
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
   store = new Database(path, { create: true })
   store.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=10000;
