@@ -70,6 +70,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { VIDEO_DIRECTOR_PERSONA_PROMPT } from "../src/lib/video-director-persona";
 
 import { EXPERT_REGISTRY } from "../src/lib/expert-registry";
 import { buildExpertRegistryDigest } from "../src/lib/orchestrator-beast-frame";
@@ -179,7 +180,7 @@ const DOMAIN_TOOLS: string[] = dedupePreserveOrder(
  * 皆显式 local_files:true；它不属任何 Expert 域工具，若落入「域外工具全 false」规则就会被
  * 写成 false，使 editor/video-director/director3d 的提示词宣告「local_files 已被移除」，
  * 与同一份部署的 opencode.json 直接矛盾。 */
-const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status", "local_files"])
+const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status", "local_files", "image_get_result", "image_result_download", "video_result_fetch"])
 
 /** SHARED_TOOLS 中 orchestrator 亦须显式禁用的子集：野兽帧 beastTemplateFact 声明
  * 「你没有 workflow_* 工具」，必须是物理事实。local_files 不在此列——opencode.json 对
@@ -261,11 +262,11 @@ function buildAgentsJson(universeTools: readonly string[]): string {
     agents[expert.id] = {
       mode: "all",
       description: `${expert.description}${EXPERT_DESCRIPTION_SUFFIX}`,
-      ...(expert.id === "lyricist" ? { prompt: LYRICIST_PERSONA_PROMPT } : expert.id === "critic" ? { prompt: CRITIC_PROMPT } : ["director3d", "web3d-director"].includes(expert.id) ? { prompt: DIRECTOR3D_PROMPT } : {}),
+      ...(expert.id === "lyricist" ? { prompt: LYRICIST_PERSONA_PROMPT } : expert.id === "video-director" ? { prompt: VIDEO_DIRECTOR_PERSONA_PROMPT } : expert.id === "critic" ? { prompt: CRITIC_PROMPT } : ["director3d", "web3d-director"].includes(expert.id) ? { prompt: DIRECTOR3D_PROMPT } : {}),
       tools: {
         ...toolsFalse(foreign),
-        // 关键帧生图属于 video-director；显式开放防止配置合并保留旧 false。
-        ...(expert.id === "video-director" ? { image_generate: true } : {}),
+        // 关键帧和风格工具属于 video-director；显式 true 才能覆盖配置深合并残留的旧 false。
+        ...(expert.id === "video-director" ? { image_generate: true, image_get_result: true, image_result_download: true, video_result_fetch: true, style_dna_extract: true, style_aligned_batch: true } : {}),
         ...(expert.id === "critic" ? { ...toolsFalse([...ORCHESTRATOR_DISABLED_BUILTIN_TOOLS]), ...Object.fromEntries([...CRITIC_READ_TOOLS].map((id) => [id, true])) } : {}),
       },
     };
@@ -446,6 +447,36 @@ function syncLyricistBindings(): string[] {
   return mismatches;
 }
 
+/** 只同步视频导演短入口及已登记风格工具；保留模型、其他工具及其他角色。 */
+function syncVideoDirectorBindings(): string[] {
+  const mismatches: string[] = [];
+  for (const path of [join(HARNESS_RUNTIME_ROOT, "opencode.json"), join(SYNC_DIR, AGENTS_JSON)]) {
+    const config = JSON.parse(readFileSync(path, "utf8"));
+    const role = (config.agent ?? config)["video-director"];
+    if (!role) throw new Error(`EXPORT_FAIL：${path} 缺少 video-director，不自动重建角色`);
+    for (const entry of Object.values(config.agent ?? config) as any[]) {
+      if (!entry || typeof entry !== "object") continue;
+      entry.tools ??= {};
+      for (const id of ["image_get_result", "image_result_download", "video_result_fetch"]) entry.tools[id] = true;
+    }
+    role.prompt = VIDEO_DIRECTOR_PERSONA_PROMPT;
+    role.tools ??= {};
+    role.tools.image_get_result = true;
+    role.tools.image_result_download = true;
+    role.tools.video_result_fetch = true;
+    role.tools.style_dna_extract = true;
+    role.tools.style_aligned_batch = true;
+    const expected = `${JSON.stringify(config, null, 2)}\n`;
+    if (readFileSync(path, "utf8") === expected) continue;
+    if (CHECK) mismatches.push(path);
+    else {
+      writeFileSync(path, expected);
+      console.log(`EXPORT_OK：${path}（仅视频导演 prompt、风格与共享产物回收工具绑定）`);
+    }
+  }
+  return mismatches;
+}
+
 function main(): void {
   const universe = loadUniverse();
 
@@ -485,7 +516,7 @@ function main(): void {
   const unowned = universe.tools.filter((id) => !DOMAIN_TOOLS.includes(id)).length;
 
   if (CHECK) {
-    const mismatches: string[] = syncLyricistBindings();
+    const mismatches: string[] = [...syncLyricistBindings(), ...syncVideoDirectorBindings()];
     for (const product of PRODUCTS) {
       const expected = product.build(universe.tools);
       for (const dir of product.dirs) {
@@ -530,6 +561,7 @@ function main(): void {
     }
   }
   syncLyricistBindings();
+  syncVideoDirectorBindings();
   console.log(
     `导出依据：域工具 ${DOMAIN_TOOLS.length} 个（registry 联集）/ 工具全集 ${universe.tools.length} 个（${universe.source}）/ registry ${Object.keys(EXPERT_REGISTRY).length} 行；skillPath 护栏 ${guard.degraded ? "降级" : guard.ok ? "PASS" : "WARN"}。`,
   );

@@ -29,6 +29,12 @@ import {
   listCompletedGenerationArtifacts,
   listGenerationAttemptsForJob,
   markProviderTaskSubmitted,
+  checkpointProviderOutput,
+  checkpointProviderTaskReceipt,
+  clearProviderOutputCheckpoint,
+  restoreProviderResponsesFromSpool,
+  recoverJobsFromCanonicalArtifacts,
+  settleRequestedGenerationCancellation,
   extendGenerationDeadlineJob,
   extendGenerationQueueDeadline,
   recoverExpiredGenerationLeases,
@@ -101,11 +107,16 @@ export async function submitWithSupplyCostGate(
 // 病灶 D（2026-08-30）：排队期退避不再撞穿 3 分钟 deadline。
 // - WINDOW：deadline 只剩 <30s 才顺延（避免无意义地提前续）。
 // - STEP：每次顺延 +5min（extendGenerationQueueDeadline 相对 now 增量）。
-// - CAP：排队总预算相对 started_at 封顶 20min，超过就不再顺延，让
-//   deadline_exceeded 正常杀单 —— 纯无供应商的死路不会无限挂单。
+// 队列的等待观测窗口不终结已受理订单；真实开工预算仅在租到供应商时开始。
 const QUEUE_EXTENSION_WINDOW_MS = 30_000;
 const QUEUE_EXTENSION_STEP_MS = 5 * 60_000;
 const QUEUE_EXTENSION_CAP_MS = 20 * 60_000;
+/** 排队总等待上限（自 created_at 起，未开工即终结＋退款）；env GENERATION_QUEUE_MAX_WAIT_MS 可调。 */
+const DEFAULT_QUEUE_MAX_WAIT_MS = 2 * 60 * 60_000;
+export function queueMaxWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.GENERATION_QUEUE_MAX_WAIT_MS);
+  return Number.isFinite(raw) && raw >= 5 * 60_000 ? raw : DEFAULT_QUEUE_MAX_WAIT_MS;
+}
 
 /** 可恢复的等容量状态才允许排队顺延；纯死路（供应商被排除/全 disabled/未 seed 等）不延。 */
 const RECOVERABLE_QUEUE_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new Set([
@@ -134,7 +145,7 @@ export function generationBudgetMs(kind: GenerationKind): number {
     : GENERATION_BUDGET_MS;
 }
 
-/** 排队顺延决策：deadline 快到期 + 未超排队上限 + 处在可恢复状态。纯逻辑，供测试直接断言。 */
+/** 排队观测窗口接近到期时续期，容量等待不消耗执行预算。 */
 export function shouldExtendQueueDeadline(input: {
   diagnosisReason: SupplierUnavailabilityReason;
   deadlineAt: Date;
@@ -143,12 +154,11 @@ export function shouldExtendQueueDeadline(input: {
   windowMs?: number;
   capMs?: number;
 }): boolean {
-  const { diagnosisReason, deadlineAt, startedAt, now } = input;
-  if (!startedAt) return false;
+  const { diagnosisReason, deadlineAt, now } = input;
+
   const windowMs = input.windowMs ?? QUEUE_EXTENSION_WINDOW_MS;
-  const capMs = input.capMs ?? QUEUE_EXTENSION_CAP_MS;
   if (deadlineAt.getTime() - now >= windowMs) return false;
-  if (now >= startedAt.getTime() + capMs) return false;
+
   return RECOVERABLE_QUEUE_REASONS.has(diagnosisReason);
 }
 
@@ -216,28 +226,19 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
 
   try {
     while (completed < job.requestedCount) {
-      if (Date.now() >= job.deadlineAt.getTime()) {
-        // INC-0831 铁律：deadline 只代表「我们的等待预算」用完，不代表上游失败。
-        // 有在飞上游任务 → 冻结进对帐（submit_unknown），钱不动，真相由
-        // provider-reconciliation 查出来再结算；没有在飞任务 → 走原诚实失败+退款。
-        if (await jobHasUnresolvedProviderTask(job.id, sql)) {
-          await freezeGenerationJobForReconciliation({
-            jobId: job.id,
-            workerId,
-            reason: "Generation deadline elapsed with a submitted provider task outstanding; frozen for reconciliation.",
-          }, sql);
-          return;
-        }
-        await failGenerationJob({ jobId: job.id, workerId, failureClass: "deadline_exceeded", failureDetail: "Generation deadline elapsed before all outputs completed." }, sql);
-        await refundFailure(job, completed, workerId, sql);
-        const jobAttempts = await listGenerationAttemptsForJob(job.id, sql);
-        await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });
+      // 排队等待是已受理的持久订单，绝不冒充上游生成超时。
+      // 已提交但未知的尝试只交回对账，不再发第二次生成。
+      if (await jobHasUnresolvedProviderTask(job.id, sql)) {
+        await freezeGenerationJobForReconciliation({ jobId: job.id, workerId,
+          reason: 'Outstanding provider attempt is owned by recovery; no duplicate submission.' }, sql);
         return;
       }
-      // 人工取消检查：job 已 cancelled（或租约易主）→ 停止后续 attempt，
-      // 在飞产出丢弃、不调 completeGenerationJob；钱由 reconcileGenerationBilling
-      // 对终态 job 按已完成张数 commit、退还差额兜底。
+      // 取消停止后续提交；已在飞的原请求保留响应并完成交付对账。
       const currentJob = await getGenerationJob(job.id, sql);
+      if (currentJob?.cancelRequestedAt) {
+        await settleRequestedGenerationCancellation(job.id, sql);
+        return;
+      }
       if (!currentJob || currentJob.status === "cancelled" || currentJob.leaseOwner !== workerId) {
         return;
       }
@@ -252,7 +253,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
       }, sql);
       if (supplierLease) {
         // R7-D：排队 3 分钟 deadline 只保护等容量阶段；真的租到供应商开工了，
-        // 立即按 started_at 展期到生成总预算（慢而健康的影片单不被误杀）。
+        // 立即从本次供应商租约起算执行预算（排队时长不消耗运行时间）。
         // 病灶 D：extend 返回实际写入的 deadline，同步回内存 job.deadlineAt，
         // 否则内存仍停在 claim 时的 3 分钟快照，长任务会被误杀。
         // INC-VIDEO-0927：预算按 kind 分级（影片 25 分钟，其余 15 分钟）。
@@ -294,24 +295,28 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           await emitJobRoutingEvent({ job, attempts: attemptsAfterFail, outcome: "exhausted", refunded: true });
           return;
         }
-        // 病灶 D：排队期退避撞穿 deadline —— 无 lease 反覆 claim→释放直到 3 分钟
-        // deadline 到期被 deadline_exceeded 杀单（实录 12 笔 video job，attempt_count=0）。
-        // 当 deadline 快到期且处在「可恢复」的等容量状态（cooldown 未到 / 并发满 /
-        // 账号暂挂）时顺延一次；纯死路（suppliers_disabled / supplier_excluded /
-        // 未 seed 等）不延，超过 started_at 起的 20min 排队上限也不延。
-        if (shouldExtendQueueDeadline({
-          diagnosisReason: diagnosis.reason,
-          deadlineAt: job.deadlineAt,
-          startedAt: job.startedAt,
-          now: Date.now(),
-        })) {
-          const extendedTo = await extendGenerationQueueDeadline(job, workerId, QUEUE_EXTENSION_STEP_MS, sql).catch(() => null);
-          applyExtendedDeadline(job, extendedTo);
+        // 排队总等待上限（2026-10-14 修 19 单永久 queued）：顺延只是观测窗口，不能无限挂单。
+        // 自建单起超过上限、且本单从未有在飞上游任务（循环顶已 jobHasUnresolvedProviderTask
+        // 排除）→ 诚实失败＋退款。deadline_exceeded 不计入模型闸样本（容量饱和不是渠道坏）。
+        const queuedForMs = Date.now() - job.createdAt.getTime();
+        if (queuedForMs >= queueMaxWaitMs()) {
+          await failGenerationJob({
+            jobId: job.id,
+            workerId,
+            failureClass: "deadline_exceeded",
+            failureDetail: `Queue wait exceeded ${Math.round(queueMaxWaitMs() / 60_000)} min without any provider submission (${diagnosis.reason}): ${diagnosis.detail}`,
+          }, sql);
+          await refundFailure(job, completed, workerId, sql);
+          await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });
+          return;
         }
+        // 保留已受理订单并诚实释放为queued；容量、健康与路由恢复后续接，不耗生成预算。
+        const extendedTo = await extendGenerationQueueDeadline(job, workerId, QUEUE_EXTENSION_STEP_MS, sql);
+        applyExtendedDeadline(job, extendedTo);
         await releaseJobForRetry({
           jobId: job.id,
           workerId,
-          availableAt: new Date(Date.now() + backoffMs(job.attemptCount)),
+          availableAt: new Date(Date.now() + Math.max(5_000, backoffMs(job.attemptCount))),
           failureClass: "overloaded",
           failureDetail: `${diagnosis.reason}: ${diagnosis.detail}`,
         }, sql);
@@ -324,6 +329,16 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         });
       }, Math.max(1_000, Math.floor(options.supplierLeaseMs / 3)));
       const startedAt = Date.now();
+      const cancelController = new AbortController();
+      let submissionStarted = false;
+      const cancelWatch = setInterval(() => {
+        void getGenerationJob(job.id, sql).then((current) => {
+          // 本地取消/租约变化不等于远端取消；无查询能力的同步请求继续接收原响应。
+          // 只在尚未调用adapter时用signal阻止新增提交。
+          if (!submissionStarted && (!current || current.cancelRequestedAt || current.status === 'cancelled' || current.leaseOwner !== workerId)) cancelController.abort();
+        }).catch(() => undefined);
+      }, 2_000);
+      let responseReceived = false;
       let attemptId: string | null = null;
       // 刚失败那次 attempt 的序号（FG-02/03：重放裁决的唯一状态输入，非呼叫方预算）。
       let attemptNo: number | null = null;
@@ -334,21 +349,25 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           supplierId: supplierLease.supplier.id,
           supplierModelId: supplierLease.supplier.supplierModelId,
           outputIndex: completed,
+          supplierAccountId: supplierLease.supplier.account.id,
+          supplierCapabilityId: supplierLease.supplier.capabilityId,
+          protocol: supplierLease.supplier.adapterType,
         }, sql);
         attemptId = attempt.id;
         attemptNo = attempt.attemptNo;
         // INC-0830-VIDEO / INC-0831：适配器在上游提交完成、取得 provider task id 的瞬间
         // 回调 → 先 durably 万 attempt 行（task id + 对帐排程；事故根治点：只发事件
         // 不落行 = 轮询断掉后 task id 无人认领），再落 attempt_submitted 事件（遥测）。
-        const onProviderTaskSubmitted = (providerTaskId: string, protocol: ProviderProtocol): void => {
-          void markProviderTaskSubmitted({
+        const onProviderTaskSubmitted = async (providerTaskId: string, protocol: ProviderProtocol): Promise<void> => {
+          await checkpointProviderTaskReceipt({jobId:job.id,attemptId:attempt.id,providerTaskId,protocol});
+          const recorded = await markProviderTaskSubmitted({
             jobId: job.id,
             attemptId: attempt.id,
             providerTaskId,
             protocol,
-          }, sql).catch((error) => {
-            console.error(`[generation-worker] provider task id 落库失败（对帐靠失败路径兜底） job=${job.id} task=${providerTaskId}`, error);
-          });
+          }, sql);
+          if (!recorded) throw new Error('Submitted provider task could not be durably assigned to this attempt.');
+          await clearProviderOutputCheckpoint(attempt.id);
           emitJobEvent({
             jobId: job.id,
             event: JOB_EVENT.attemptSubmitted,
@@ -363,6 +382,11 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             },
           }, sql);
         };
+        const freshBeforeSubmit=await getGenerationJob(job.id,sql);
+        if (!freshBeforeSubmit || freshBeforeSubmit.cancelRequestedAt || freshBeforeSubmit.status==='cancelled' || freshBeforeSubmit.leaseOwner!==workerId) {
+          await sql`UPDATE generation_attempt SET status='failed',recovery_status='resolved',failure_class='cancelled',finished_at=now() WHERE id=${attempt.id}`;
+          await settleRequestedGenerationCancellation(job.id,sql); return;
+        }
         const output = await submitWithSupplyCostGate(supplierLease.supplier, {
           jobId: job.id,
           attemptId: attempt.id,
@@ -376,7 +400,25 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           quality: job.quality,
           workflow: job.workflow,
           onProviderTaskSubmitted,
+          onProviderRequestStarted:async()=>{
+            const ready=await getGenerationJob(job.id,sql);
+            if (!ready || ready.cancelRequestedAt || ready.status==='cancelled' || ready.leaseOwner!==workerId) throw new SupplierRequestError('Cancelled before provider submission.',400,null,undefined,'cancelled');
+            cancelController.signal.throwIfAborted();
+            await sql`UPDATE generation_attempt SET provider_submission_started_at=COALESCE(provider_submission_started_at,now()),recovery_detail='provider_submission_started',updated_at=now() WHERE id=${attempt.id}`;
+            submissionStarted=true;
+          },
+          idempotencyKey: attempt.id,
+          signal: AbortSignal.any([cancelController.signal, AbortSignal.timeout(generationBudgetMs(job.kind))]),
+          onProviderResponse: async (output) => {
+            responseReceived = true;
+            await checkpointProviderOutput({ jobId: job.id, attemptId: attempt.id, output }, sql);
+          },
         });
+        // All adapters have a common response checkpoint even when their native protocol has none.
+        if (!responseReceived) {
+          responseReceived = true;
+          await checkpointProviderOutput({ jobId: job.id, attemptId: attempt.id, output }, sql);
+        }
         const stored = await persistOutputArtifact({
           jobId: job.id,
           attemptId: attempt.id,
@@ -384,6 +426,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           base64: output.base64,
           url: output.url,
           endpointLabel: output.endpointLabel,
+          supplierModelId:output.supplierModelId,providerRequestId:output.providerRequestId,originalHttpStatus:output.httpStatus,
           mediaKind: job.kind === "tts" ? "audio" : (job.kind === "video_generate" || job.kind === "avatar" || job.kind === "lipsync") ? "video" : "image",
         }, sql);
         const latencyMs = Date.now() - startedAt;
@@ -426,10 +469,42 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           width: stored.validated.width,
           height: stored.validated.height,
           endpointLabel: output.endpointLabel,
+          actualSupplierModelId:output.supplierModelId || null,originalHttpStatus:output.httpStatus || null,
         });
         completed += 1;
       } catch (error) {
         const failure = classifySupplierFailure(error);
+        const nativeStatus=error instanceof SupplierRequestError ? error.upstreamStatus ?? error.status : failure.httpStatus;
+        const accepted2xx=!!nativeStatus && nativeStatus>=200 && nativeStatus<300;
+        const acceptedUnparsed=accepted2xx && !(nativeStatus===202 && error instanceof SupplierRequestError && error.providerTaskId);
+        const ambiguous = !failure.httpStatus || failure.httpStatus === 408 || accepted2xx || (error instanceof Error && error.name === 'AbortError');
+        if(attemptId && acceptedUnparsed && error instanceof SupplierRequestError) {
+          responseReceived=true;
+          await checkpointProviderOutput({jobId:job.id,attemptId,output:{base64:null,url:null,httpStatus:nativeStatus!,
+            providerTaskId:error.providerTaskId,endpointLabel:supplierLease.supplier.label,supplierModelId:supplierLease.supplier.supplierModelId ?? '',
+            evidence:{source:'unparsed-provider-response',originalResponseBody:error.responseBody ?? '',actualSupplierModelKnown:!!supplierLease.supplier.supplierModelId}}},sql);
+        }
+        if (attemptId && !submissionStarted && !responseReceived) {
+          await sql`UPDATE generation_attempt SET status='failed',recovery_status='resolved',
+            failure_class='artifact_download',failure_detail='Provider was not called; input preparation/cancellation failed.',
+            finished_at=now(),updated_at=now() WHERE id=${attemptId}`;
+          const current=await getGenerationJob(job.id,sql);
+          if (current?.cancelRequestedAt) await settleRequestedGenerationCancellation(job.id,sql);
+          else await releaseJobForRetry({jobId:job.id,workerId,availableAt:new Date(Date.now()+5000),failureClass:'artifact_download',failureDetail:'Input preparation awaits recovery; no provider request submitted.'},sql);
+          return;
+        }
+        if (attemptId && (responseReceived || ambiguous)) {
+          await sql`UPDATE generation_attempt SET status = 'submit_unknown',
+            failure_class = ${responseReceived ? 'artifact_download' : 'unknown'},
+            failure_detail = ${responseReceived ? 'Provider response saved; original artifact recovery pending.' : 'Submission outcome is unknown; cancelled waiting does not cancel remote work.'},
+            provider_next_poll_at = now(),
+            provider_reconcile_deadline_at = COALESCE(provider_reconcile_deadline_at, now() + interval '24 hours'),
+            recovery_owner = CASE WHEN recovery_status='manual' THEN recovery_owner ELSE 'control-plane:provider-reconciliation' END, updated_at = now()
+            WHERE id = ${attemptId}`;
+          await freezeGenerationJobForReconciliation({ jobId: job.id, workerId,
+            reason: responseReceived ? 'Original provider output awaits delivery recovery.' : 'Unknown submitted request awaits reconciliation.' }, sql);
+          return;
+        }
         // FG-01：先把上游原生错误逐字捕获成版本化记录（与产品解释分栏存放），
         // 之后所有落库路径共用同一份 record —— 解释永不覆写原生栏位。
         const failureRecord = createFailureRecord({ error, explanation: explainFailure(failure) });
@@ -529,10 +604,13 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           return;
         }
       } finally {
+        clearInterval(cancelWatch);
         clearInterval(supplierHeartbeat);
         await releaseSupplierLease(supplierLease.id, workerId, sql);
       }
     }
+    const finalJob = await getGenerationJob(job.id, sql);
+    if (finalJob?.cancelRequestedAt) { await settleRequestedGenerationCancellation(job.id, sql); return; }
     await completeGenerationJob({ jobId: job.id, workerId, artifacts }, sql);
     await commitGenerationBilling(job, job.billingAmount, sql);
     const jobAttempts = await listGenerationAttemptsForJob(job.id, sql);
@@ -577,7 +655,9 @@ export async function runGenerationMaintenanceOnce(options: GenerationWorkerOpti
   const executorId = options.workerId
     ? `billing:${options.workerId}`
     : `billing:${process.env.HOSTNAME ?? "local"}:${process.pid}`;
+  await restoreProviderResponsesFromSpool(sql);
   await recoverExpiredGenerationLeases(sql);
+  await recoverJobsFromCanonicalArtifacts(sql);
   await reconcileGenerationBilling({ executorId, sql });
   await projectGatePathBilling({ executorId, sql });
   // INC-0831：provider 对帐循环——按 task id 查上游真相，晚到成品落地、
@@ -724,7 +804,9 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
     try {
       const now = Date.now();
       if (now - lastMaintenance > 30_000) {
+        await restoreProviderResponsesFromSpool(sql);
         await recoverExpiredGenerationLeases(sql);
+        await recoverJobsFromCanonicalArtifacts(sql);
         await reconcileGenerationBilling({ executorId: billingExecutorId, sql });
         await projectGatePathBilling({ executorId: billingExecutorId, sql });
         // INC-0831：provider 对帐循环——按 task id 查上游真相，晚到成品落地、

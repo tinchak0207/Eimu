@@ -26,7 +26,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const job = await getGenerationJobForTenant(id, `biz:${auth.key.id}`);
   if (!job) return error(404, "Generation task was not found.", "task_not_found", traceId, auth.key);
-  if (taskStatus(job) !== "succeeded") return error(409, "Generation result is not ready.", "result_not_ready", traceId, auth.key);
+  if (taskStatus(job) !== "succeeded" && !(taskStatus(job)==="cancelled" && job.result?.artifacts.length)) return error(409, "Generation result is not ready.", "result_not_ready", traceId, auth.key);
   const artifacts = job.result?.artifacts ?? [];
   // 默认回 JSON；只有 ?format=redirect 才 302（向后相容旧 redirect 客户端）
   if (req.nextUrl.searchParams.get("format") === "redirect" && artifacts.length === 1 && artifacts[0]?.url) {

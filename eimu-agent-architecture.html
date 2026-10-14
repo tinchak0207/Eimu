@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eimu Agentic Architecture — 架构图 (忠实呈现 · 横屏拓扑)</title>
+  <style>
+    :root {
+      --bg-page: #070a11;
+      --bg-panel: rgba(15, 23, 42, 0.85);
+      --bg-card: #0f172a;
+      --bg-card-elevated: #1e293b;
+      --border-subtle: rgba(255, 255, 255, 0.12);
+      --border-strong: rgba(255, 255, 255, 0.25);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --c-traditional: #94a3b8;
+      --c-preproc: #38bdf8;       /* 浅蓝 Preprocessing */
+      --c-memory: #3b82f6;        /* 蓝色 Memory System */
+      --c-runtime: #10b981;       /* 绿色 Agent Runtime Core */
+      --c-workflow: #a855f7;      /* 紫色 Workflow */
+      --c-critic: #f43f5e;        /* 粉红 Critic Gate */
+      --c-highlight: #f59e0b;     /* 琥珀高亮 */
+      
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    [data-theme="light"] {
+      --bg-page: #f8fafc;
+      --bg-panel: rgba(255, 255, 255, 0.9);
+      --bg-card: #ffffff;
+      --bg-card-elevated: #f1f5f9;
+      --border-subtle: rgba(0, 0, 0, 0.1);
+      --border-strong: rgba(0, 0, 0, 0.2);
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+      --c-traditional: #64748b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      height: 56px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      z-index: 100;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge-live {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .view-tabs {
+      display: flex;
+      background: rgba(0,0,0,0.25);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .view-btn {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    .view-btn.active, .view-btn:hover {
+      color: var(--text-main);
+      background: var(--bg-card);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-card);
+      color: var(--text-main);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover {
+      background: var(--bg-card-elevated);
+      border-color: var(--border-strong);
+    }
+
+    #viewport-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      cursor: grab;
+      user-select: none;
+    }
+
+    #viewport-container.panning {
+      cursor: grabbing;
+    }
+
+    svg#main-diagram {
+      width: 100%;
+      height: 100%;
+      display: block;
+      transform-origin: 0 0;
+    }
+
+    .boundary-rect {
+      rx: 16;
+      stroke-width: 2.5;
+      filter: drop-shadow(0 0 12px rgba(0,0,0,0.5));
+    }
+
+    .boundary-header-bg {
+      rx: 6;
+    }
+
+    .boundary-title-text {
+      font-size: 19px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      font-family: var(--font-sans);
+    }
+
+    .node-group {
+      cursor: pointer;
+    }
+
+    .node-base-rect {
+      fill: var(--bg-card);
+      stroke: var(--border-subtle);
+      stroke-width: 1.6;
+      rx: 8;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .node-group:hover .node-base-rect {
+      stroke-width: 2.2;
+      filter: drop-shadow(0 6px 14px rgba(0,0,0,0.4));
+      transform: translateY(-1.5px);
+    }
+
+    .node-base-diamond {
+      fill: var(--bg-card);
+      stroke: var(--border-subtle);
+      stroke-width: 1.6;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .node-group:hover .node-base-diamond {
+      stroke-width: 2.2;
+      filter: drop-shadow(0 6px 14px rgba(0,0,0,0.4));
+      transform: translateY(-1.5px);
+    }
+
+    .txt-title {
+      font-size: 13px;
+      font-weight: 700;
+      fill: var(--text-main);
+      text-anchor: middle;
+      pointer-events: none;
+    }
+
+    .txt-sub {
+      font-size: 11px;
+      font-weight: 600;
+      fill: var(--text-muted);
+      text-anchor: middle;
+      font-family: var(--font-mono);
+      pointer-events: none;
+    }
+
+    .txt-desc {
+      font-size: 10px;
+      font-weight: 500;
+      fill: var(--text-dim);
+      text-anchor: middle;
+      pointer-events: none;
+    }
+
+    .wire {
+      fill: none;
+      stroke: var(--text-dim);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: stroke 0.2s, stroke-width 0.2s;
+    }
+
+    .wire.dashed {
+      stroke-dasharray: 6 5;
+    }
+
+    .wire-badge {
+      rx: 4;
+      stroke-width: 1;
+    }
+
+    .wire-badge-text {
+      font-size: 10px;
+      font-weight: 800;
+      text-anchor: middle;
+      dominant-baseline: middle;
+      font-family: var(--font-mono);
+    }
+
+    .legend-bar {
+      position: absolute;
+      bottom: 24px;
+      left: 24px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 10px 16px;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      z-index: 80;
+      font-size: 12px;
+      color: var(--text-muted);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 500;
+    }
+    .legend-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 3px;
+    }
+
+    #detail-drawer {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      width: 380px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+      display: none;
+      z-index: 90;
+      animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    #detail-drawer h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #detail-drawer p {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 14px;
+    }
+
+    #detail-drawer .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #detail-drawer .tag {
+      font-size: 11px;
+      padding: 3px 8px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 5px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .zoom-tools {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 80;
+    }
+
+    .zoom-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      backdrop-filter: blur(12px);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+
+    .zoom-btn:hover {
+      background: var(--bg-card-elevated);
+      border-color: var(--border-strong);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <h1>Eimu Agentic Architecture <span class="badge-live">生产拓扑 · 横向从左到右流向</span></h1>
+    </div>
+
+    <div class="controls">
+      <div class="view-tabs">
+        <button class="view-btn active" onclick="switchView('all')">全景架构</button>
+        <button class="view-btn" onclick="switchView('eimu')">Eimu 生产链路</button>
+        <button class="view-btn" onclick="switchView('traditional')">传统单体对照</button>
+        <button class="view-btn" onclick="switchView('critic')">Critic 独立评审</button>
+      </div>
+
+      <button class="btn" onclick="resetZoom()">⟲ 居中重置</button>
+      <button class="btn" onclick="toggleTheme()">🌓 切换主题</button>
+      <button class="btn" onclick="exportSVG()">📥 导出 SVG</button>
+    </div>
+  </header>
+
+  <div id="viewport-container">
+    <div class="zoom-tools">
+      <button class="zoom-btn" onclick="zoomIn()" title="放大">+</button>
+      <button class="zoom-btn" onclick="zoomOut()" title="缩小">−</button>
+      <button class="zoom-btn" onclick="resetZoom()" title="适应画布">⟲</button>
+    </div>
+
+    <div class="legend-bar">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--c-preproc);"></div>Preprocessing 预处理</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--c-memory);"></div>Memory System 记忆系统</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--c-runtime);"></div>Runtime Core 调度核心</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--c-workflow);"></div>Workflow 工作流</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--c-critic);"></div>Critic Gate 评审门禁</div>
+    </div>
+
+    <div id="detail-drawer">
+      <h3 id="drawer-title">节点名称</h3>
+      <p id="drawer-desc">详细技术原理与流向说明。</p>
+      <div class="tags" id="drawer-tags"></div>
+    </div>
+
+    <!-- MAIN SVG DIAGRAM (WIDTH: 2850, HEIGHT: 1120) -->
+    <svg id="main-diagram" viewBox="0 0 2850 1120" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <!-- Marker Arrows -->
+        <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--text-dim)"/>
+        </marker>
+        <marker id="arr-preproc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--c-preproc)"/>
+        </marker>
+        <marker id="arr-memory" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--c-memory)"/>
+        </marker>
+        <marker id="arr-runtime" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--c-runtime)"/>
+        </marker>
+        <marker id="arr-workflow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--c-workflow)"/>
+        </marker>
+        <marker id="arr-critic" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--c-critic)"/>
+        </marker>
+
+        <!-- Background Grid -->
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="0.8"/>
+        </pattern>
+      </defs>
+
+      <!-- Grid Background -->
+      <rect width="2850" height="1120" fill="url(#grid)" />
+
+      <!-- ========================================================================= -->
+      <!-- SECTION 1: TRADITIONAL AGENT (LEFT CONTRAST ZONE, X: 60 ~ 540) -->
+      <!-- ========================================================================= -->
+      <g id="group-traditional">
+        <text x="70" y="65" font-size="28" font-weight="800" fill="var(--c-traditional)" font-family="var(--font-sans)">Traditional Agent</text>
+        <text x="310" y="65" font-size="13" font-weight="600" fill="var(--text-dim)">传统单体 ReAct 范式对照</text>
+
+        <!-- Outer Boundary -->
+        <rect x="60" y="90" width="480" height="510" rx="16" fill="none" stroke="var(--c-traditional)" stroke-width="1.8" stroke-dasharray="5 5"/>
+
+        <!-- User -->
+        <g class="node-group" onclick="showDetail('User (Traditional)', '传统交互模型：用户单线等待大模型完整吐出响应，TTFT 严重受制于上下文 Prefill 长度。', ['Baseline', 'Synchronous'])">
+          <rect x="80" y="320" width="85" height="50" class="node-base-rect"/>
+          <text x="122" y="350" class="txt-title">User</text>
+        </g>
+
+        <!-- User Input -->
+        <g class="node-group" onclick="showDetail('User Input', '单次用户输入直接塞入单体模型，缺乏语义分类与预处理拦截。', ['Raw-Input'])">
+          <rect x="200" y="320" width="95" height="50" class="node-base-rect"/>
+          <text x="247" y="350" class="txt-title">User Input</text>
+        </g>
+
+        <!-- Context Stack: Memory, System Prompt, Safety, Skills, Tools -->
+        <g class="node-group" onclick="showDetail('上下文全量注入堆栈', '每次调用均完整拼接全量 Memory、System Prompt、安全守则与技能索引，导致首 token 延迟 (TTFT) 极长且严重浪费 token。', ['Context-Engineering', 'Bottleneck'])">
+          <rect x="180" y="115" width="135" height="180" rx="10" fill="#1e293b" fill-opacity="0.6" stroke="var(--border-subtle)" stroke-width="1.5"/>
+          <rect x="190" y="125" width="115" height="26" rx="5" fill="#0f172a" stroke="var(--border-subtle)"/><text x="247" y="142" class="txt-sub">Memory Index</text>
+          <rect x="190" y="158" width="115" height="30" rx="5" fill="#f59e0b" fill-opacity="0.18" stroke="var(--c-highlight)" stroke-width="1.5"/><text x="247" y="177" class="txt-title" fill="#f59e0b">System Prompt</text>
+          <rect x="190" y="196" width="115" height="26" rx="5" fill="#0f172a" stroke="var(--border-subtle)"/><text x="247" y="213" class="txt-sub">Safety Guideline</text>
+          <rect x="190" y="229" width="115" height="26" rx="5" fill="#0f172a" stroke="var(--border-subtle)"/><text x="247" y="246" class="txt-sub">Skills Index</text>
+          <rect x="190" y="261" width="115" height="26" rx="5" fill="#0f172a" stroke="var(--border-subtle)"/><text x="247" y="278" class="txt-sub">Tools Index</text>
+        </g>
+
+        <!-- Base Model Loop Container -->
+        <rect x="345" y="200" width="175" height="380" rx="12" fill="#0f172a" fill-opacity="0.7" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
+
+        <!-- Base Model -->
+        <g class="node-group" onclick="showDetail('Base Model (Traditional)', '单体大模型自循环：承担所有推理、技能路由与响应，极易被上下文冲垮。', ['Monolithic', 'ReAct'])">
+          <rect x="360" y="315" width="105" height="55" class="node-base-rect" stroke="var(--c-highlight)"/>
+          <text x="412" y="343" class="txt-title">Base Model</text>
+          <text x="412" y="359" class="txt-desc">Single Brain</text>
+        </g>
+
+        <!-- Reasoning pill -->
+        <rect x="385" y="398" width="55" height="20" rx="10" fill="#f59e0b" fill-opacity="0.2" stroke="var(--c-highlight)"/>
+        <text x="412" y="411" class="txt-desc" fill="#f59e0b" font-weight="700">Reasoning</text>
+
+        <!-- Tools / Skills ? Diamond -->
+        <g class="node-group">
+          <polygon points="412,435 462,465 412,495 362,465" class="node-base-diamond"/>
+          <text x="412" y="461" class="txt-title" font-size="11">Tools /</text>
+          <text x="412" y="475" class="txt-title" font-size="11">Skills ?</text>
+        </g>
+
+        <!-- Invoke & Result -->
+        <g class="node-group">
+          <rect x="468" y="445" width="46" height="32" rx="6" class="node-base-rect"/>
+          <text x="491" y="464" class="txt-desc" font-weight="700">Invoke</text>
+          
+          <rect x="445" y="322" width="68" height="35" rx="17" class="node-base-rect"/>
+          <text x="479" y="344" class="txt-desc" font-weight="700">Invoke result</text>
+        </g>
+
+        <!-- Response -->
+        <g class="node-group">
+          <rect x="375" y="525" width="75" height="36" rx="6" class="node-base-rect"/>
+          <text x="412" y="547" class="txt-title">Response</text>
+        </g>
+
+        <!-- Traditional Edges -->
+        <path d="M 165 345 L 200 345" class="wire" marker-end="url(#arr)"/>
+        <path d="M 295 345 L 360 345" class="wire" marker-end="url(#arr)"/>
+        <path d="M 315 205 Q 340 205 360 320" class="wire" marker-end="url(#arr)"/>
+        
+        <path d="M 412 370 L 412 398" class="wire"/>
+        <path d="M 412 418 L 412 435" class="wire" marker-end="url(#arr)"/>
+        
+        <!-- Tools Yes -->
+        <path d="M 462 465 L 468 465" class="wire" marker-end="url(#arr)"/>
+        <rect x="442" y="442" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+        <text x="453" y="450" class="wire-badge-text" fill="#10b981">Yes</text>
+
+        <path d="M 491 445 L 491 357" class="wire" marker-end="url(#arr)"/>
+        <path d="M 445 340 L 412 340" class="wire dashed" marker-end="url(#arr)"/>
+
+        <!-- Tools No -->
+        <path d="M 412 495 L 412 525" class="wire" marker-end="url(#arr)"/>
+        <rect x="420" y="502" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+        <text x="430" y="510" class="wire-badge-text" fill="#f43f5e">No</text>
+
+        <path d="M 375 543 L 122 543 L 122 370" class="wire dashed" marker-end="url(#arr)"/>
+
+        <!-- Three Hard Problems Cards Below -->
+        <rect x="60" y="625" width="480" height="450" rx="16" fill="#0f172a" fill-opacity="0.85" stroke="rgba(248, 113, 113, 0.3)" stroke-width="1.5"/>
+        <text x="90" y="660" font-size="16" font-weight="800" fill="#f87171">⚠️ 传统单体 Agent 的三大硬伤 (痛点根因)</text>
+
+        <!-- Metric 1 -->
+        <rect x="85" y="685" width="430" height="105" rx="10" fill="#020617" fill-opacity="0.5" stroke="var(--border-subtle)"/>
+        <text x="105" y="715" font-size="14" font-weight="700" fill="#f87171" font-family="var(--font-mono)">TTFT: Long</text>
+        <text x="105" y="740" font-size="12" fill="var(--text-muted)">Long because of prefill every round</text>
+        <text x="105" y="765" font-size="11" fill="var(--text-dim)">每轮交互需全量 Prefill 庞大 Prompt、历史与技能列表，首 Token 耗时长。</text>
+
+        <!-- Metric 2 -->
+        <rect x="85" y="805" width="430" height="115" rx="10" fill="#020617" fill-opacity="0.5" stroke="var(--border-subtle)"/>
+        <text x="105" y="835" font-size="14" font-weight="700" fill="#f87171" font-family="var(--font-mono)">Time to First Response: Might be long</text>
+        <text x="105" y="860" font-size="12" fill="var(--text-muted)">Depends on context engineering or base model</text>
+        <text x="105" y="885" font-size="11" fill="var(--text-dim)">端到端响应高度依赖上下文工程复杂度与底座模型状态，多轮迭代下耗时不可控。</text>
+
+        <!-- Metric 3 -->
+        <rect x="85" y="935" width="430" height="115" rx="10" fill="#020617" fill-opacity="0.5" stroke="var(--border-subtle)"/>
+        <text x="105" y="965" font-size="14" font-weight="700" fill="#f87171" font-family="var(--font-mono)">State-space: Fragile</text>
+        <text x="105" y="990" font-size="12" fill="var(--text-muted)">Depends on stored memories, files, easy to lose</text>
+        <text x="105" y="1015" font-size="11" fill="var(--text-dim)">状态空间脆弱地寄生在散落文件与静态记忆中，多轮长程创作中极易丢失。</text>
+      </g>
+
+      <!-- ========================================================================= -->
+      <!-- SECTION 2: EIMU ARCHITECTURE (HORIZONTAL PANORAMA, X: 580 ~ 2800) -->
+      <!-- ========================================================================= -->
+      <g id="group-eimu">
+        <!-- Main Title -->
+        <text x="600" y="60" font-size="32" font-weight="900" fill="#f8fafc" letter-spacing="-0.02em" font-family="var(--font-sans)">Eimu Architecture</text>
+        <text x="940" y="60" font-size="14" font-weight="500" fill="var(--text-muted)">生产级工业分权架构：快慢分流预处理 · 动态记忆路由 · 调度核心与专家派发 · 画布DSL编译 · 独立Critic评审</text>
+
+        <!-- ======================================================================= -->
+        <!-- SUB-SYSTEM 1: PREPROCESSING (LIGHT BLUE, X: 600 ~ 990) -->
+        <!-- ======================================================================= -->
+        <g id="subsys-preprocessing">
+          <rect x="600" y="90" width="390" height="985" class="boundary-rect" fill="none" stroke="var(--c-preproc)"/>
+          
+          <rect x="620" y="110" width="160" height="32" fill="#38bdf8" fill-opacity="0.15" stroke="var(--c-preproc)" class="boundary-header-bg"/>
+          <text x="700" y="132" class="boundary-title-text" fill="var(--c-preproc)" text-anchor="middle">Preprocessing</text>
+
+          <!-- User Node -->
+          <g class="node-group" onclick="showDetail('User (Eimu 创作者)', '创作者端点：获得双轨体验，简单查询毫秒级返回，深度影音任务进入专家协同。', ['Entrypoint', 'Creator'])">
+            <rect x="630" y="500" width="90" height="55" class="node-base-rect" stroke="var(--c-preproc)" stroke-width="2.5"/>
+            <text x="675" y="533" class="txt-title">User</text>
+          </g>
+
+          <!-- User Input -->
+          <g class="node-group" onclick="showDetail('User Input (输入分流中心)', '用户输入并发分流至三条互不阻塞的流水线：
+1. 快速小模型流 (Small Model)
+2. Jev 1 安全与越狱前置审查
+3. 主意图直通进入核心调度与记忆系统', ['Dispatcher', '3-Way-Fork'])">
+            <rect x="750" y="500" width="105" height="55" class="node-base-rect"/>
+            <text x="802" y="533" class="txt-title">User Input</text>
+          </g>
+
+          <!-- Small Model & Quick Response -->
+          <g class="node-group" onclick="showDetail('Small Model (快速小模型)', '轻量模型拦截简单提问与快捷交互，毫秒级流式直出，绕开主脑调度。', ['Low-Latency', 'Fast-Path'])">
+            <rect x="755" y="710" width="95" height="55" class="node-base-rect" stroke="var(--c-preproc)"/>
+            <text x="802" y="736" class="txt-title">Small</text>
+            <text x="802" y="752" class="txt-title">Model</text>
+          </g>
+
+          <g class="node-group" onclick="showDetail('Quick Response (毫秒级直出)', '极速直接返回给用户，保证交互起步即响应，TTFT 逼近零感知。', ['Zero-Prefill'])">
+            <rect x="880" y="710" width="95" height="55" class="node-base-rect"/>
+            <text x="927" y="736" class="txt-title">Quick</text>
+            <text x="927" y="752" class="txt-title">Response</text>
+          </g>
+
+          <!-- Jev 1 & Jailbreak / Unrelated Check -->
+          <g class="node-group" onclick="showDetail('Jev 1 (TypeSafe System One 安全门禁)', 'Jev System One 毫秒级语义分类器，专司越狱探测、恶意指令拦截与无关输入过滤。', ['Security', 'Jev-Gate'])">
+            <rect x="770" y="270" width="65" height="45" class="node-base-rect" stroke="var(--c-preproc)"/>
+            <text x="802" y="297" class="txt-title" fill="var(--c-preproc)">Jev 1</text>
+          </g>
+
+          <g class="node-group" onclick="showDetail('Jailbreak or unrelated? 判定门', '安全与相关性判定菱形：
+• Yes: 触发直接安全阻断回复并返回给 User
+• No: 放行进入 Runtime Core 开启野兽模式判定', ['Decision-Gate'])">
+            <polygon points="930,260 985,292 930,325 875,292" class="node-base-diamond" stroke="var(--c-preproc)"/>
+            <text x="930" y="288" class="txt-title" font-size="11">Jailbreak or</text>
+            <text x="930" y="302" class="txt-title" font-size="11">unrelated ?</text>
+          </g>
+
+          <g class="node-group" onclick="showDetail('Response (拦截回复)', '安全拒答或澄清回应，直通回传 User。', ['Safe-Exit'])">
+            <rect x="895" y="175" width="75" height="42" class="node-base-rect"/>
+            <text x="932" y="201" class="txt-title">Response</text>
+          </g>
+
+          <!-- Preprocessing Wires -->
+          <path d="M 720 527 L 750 527" class="wire" marker-end="url(#arr)"/>
+
+          <!-- Fork to Small Model -->
+          <path d="M 802 555 L 802 710" class="wire" marker-end="url(#arr-preproc)"/>
+          <path d="M 850 737 L 880 737" class="wire" marker-end="url(#arr)"/>
+          <!-- Loopback to User -->
+          <path d="M 927 765 L 927 840 L 675 840 L 675 555" class="wire dashed" stroke="var(--c-preproc)" marker-end="url(#arr-preproc)"/>
+
+          <!-- Fork to Jev 1 -->
+          <path d="M 802 500 L 802 315" class="wire" marker-end="url(#arr-preproc)"/>
+          <path d="M 835 292 L 875 292" class="wire" marker-end="url(#arr)"/>
+
+          <!-- Jailbreak Yes -->
+          <path d="M 930 260 L 930 217" class="wire" marker-end="url(#arr)"/>
+          <rect x="940" y="232" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="951" y="240" class="wire-badge-text" fill="#10b981">Yes</text>
+          <path d="M 895 196 L 675 196 L 675 500" class="wire dashed" stroke="var(--c-preproc)" marker-end="url(#arr-preproc)"/>
+
+          <!-- Jailbreak No -> Into Runtime Core -->
+          <path d="M 985 292 L 1055 292" class="wire" stroke="var(--c-runtime)" stroke-width="2.2" marker-end="url(#arr-runtime)"/>
+          <rect x="1005" y="282" width="22" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="1016" y="290" class="wire-badge-text" fill="#f43f5e">No</text>
+        </g>
+
+        <!-- ======================================================================= -->
+        <!-- SUB-SYSTEM 2: MEMORY SYSTEM (DEEP BLUE, X: 1020 ~ 1440, Y: 550 ~ 1075) -->
+        <!-- ======================================================================= -->
+        <g id="subsys-memory">
+          <rect x="1020" y="550" width="420" height="525" class="boundary-rect" fill="none" stroke="var(--c-memory)"/>
+          
+          <rect x="1040" y="570" width="180" height="32" fill="#3b82f6" fill-opacity="0.15" stroke="var(--c-memory)" class="boundary-header-bg"/>
+          <text x="1130" y="592" class="boundary-title-text" fill="var(--c-memory)" text-anchor="middle">Memory System</text>
+
+          <!-- Jev 2 & Intended Memory Decision -->
+          <g class="node-group" onclick="showDetail('Jev 2 (记忆意图判别器)', '针对用户当前提示词做快速语义分流，判断是否有明确的特定记忆提取诉求（如特定主角模型、风格绑定或上一轮草稿）。', ['Jev-Gate', 'Intent-Router'])">
+            <rect x="1050" y="630" width="60" height="42" class="node-base-rect" stroke="var(--c-memory)"/>
+            <text x="1080" y="656" class="txt-title" fill="var(--c-memory)">Jev 2</text>
+          </g>
+
+          <g class="node-group" onclick="showDetail('Intended Memory? 记忆意图分支', '判定意图明确度：
+• Yes: 精准定点提取指定记忆分片 (Direct Hit)
+• No: 流经 Selection 进行多维语义过滤与重排序 (Rerank)', ['Decision-Gate'])">
+            <polygon points="1200,620 1255,651 1200,682 1145,651" class="node-base-diamond" stroke="var(--c-memory)"/>
+            <text x="1200" y="648" class="txt-title" font-size="11">Intended</text>
+            <text x="1200" y="662" class="txt-title" font-size="11">Memory ?</text>
+          </g>
+
+          <g class="node-group" onclick="showDetail('Selection (动态记忆重排序筛选)', '根据多模态语义向量动态抽取与当前创作最相关的记忆碎片，避免无关历史污染调度中枢。', ['Rerank', 'Filter'])">
+            <rect x="1155" y="750" width="90" height="45" class="node-base-rect"/>
+            <text x="1200" y="777" class="txt-title">Selection</text>
+          </g>
+
+          <!-- Memory Tier Stack (A, B, C, D) -->
+          <g class="node-group" onclick="showDetail('Memory 分层持久库 (A/B/C/D)', 'Eimu 的结构化分级记忆体：
+A: 全局事实与用户偏好
+B: 动态进化与可更新工作状态 (可被写回)
+C: 会话上下文与临时剧本
+D: 资产指纹与缓存索引', ['Tiered-Memory', 'State-Store'])">
+            <rect x="1050" y="720" width="65" height="230" rx="10" fill="#1e3a8a" fill-opacity="0.25" stroke="var(--c-memory)" stroke-width="1.8"/>
+            <text x="1082" y="746" class="txt-sub" fill="var(--c-memory)" font-weight="800">Memory</text>
+            
+            <rect x="1060" y="765" width="45" height="30" rx="15" fill="#0f172a" stroke="rgba(255,255,255,0.2)"/><text x="1082" y="785" class="txt-title" font-size="12">A</text>
+            <rect x="1060" y="810" width="45" height="30" rx="15" fill="#3b82f6" fill-opacity="0.25" stroke="var(--c-memory)" stroke-width="2.2"/><text x="1082" y="830" class="txt-title" fill="var(--c-memory)" font-size="13">B</text>
+            <rect x="1060" y="855" width="45" height="30" rx="15" fill="#0f172a" stroke="rgba(255,255,255,0.2)"/><text x="1082" y="875" class="txt-title" font-size="12">C</text>
+            <rect x="1060" y="900" width="45" height="30" rx="15" fill="#0f172a" stroke="rgba(255,255,255,0.2)"/><text x="1082" y="920" class="txt-title" font-size="12">D</text>
+          </g>
+
+          <!-- Node Pill B (Writeback Target) -->
+          <g class="node-group" onclick="showDetail('记忆写回锚点 B', '接收来自 Runtime Core 中 Edit Memory? 的确认信号，直接原地更新记忆块 B，实现状态机的精确因果演进！', ['State-Mutation', 'Writeback'])">
+            <rect x="1340" y="810" width="55" height="32" rx="16" fill="#3b82f6" fill-opacity="0.2" stroke="var(--c-memory)" stroke-width="2.5"/>
+            <text x="1367" y="831" class="txt-title" fill="var(--c-memory)" font-size="14">B</text>
+          </g>
+
+          <!-- Memory System Wires -->
+          <path d="M 855 527 L 1000 527 L 1000 651 L 1050 651" class="wire" marker-end="url(#arr)"/>
+          <path d="M 1110 651 L 1145 651" class="wire" marker-end="url(#arr)"/>
+
+          <!-- Intended Yes -> Direct to Memory B -->
+          <path d="M 1255 651 L 1295 651 L 1295 825 L 1105 825" class="wire" stroke="var(--c-memory)" marker-end="url(#arr-memory)"/>
+          <rect x="1265" y="640" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="1276" y="648" class="wire-badge-text" fill="#10b981">Yes</text>
+
+          <!-- Intended No -> Selection -> Memory -->
+          <path d="M 1200 682 L 1200 750" class="wire" marker-end="url(#arr)"/>
+          <rect x="1208" y="705" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="1218" y="713" class="wire-badge-text" fill="#f43f5e">No</text>
+          <path d="M 1155 772 L 1115 772" class="wire" marker-end="url(#arr-memory)"/>
+
+          <!-- Extracted Memory output to Base Model (Orchestrator) -->
+          <path d="M 1082 720 L 1082 490 L 1350 490 L 1350 370" class="wire" stroke="var(--c-memory)" stroke-width="2.2" marker-end="url(#arr-memory)"/>
+        </g>
+
+        <!-- ======================================================================= -->
+        <!-- SUB-SYSTEM 3: AGENT RUNTIME CORE (GREEN, X: 1020 ~ 2060)  -->
+        <!-- ======================================================================= -->
+        <g id="subsys-runtime">
+          <!-- Top Orchestrator Box -->
+          <rect x="1020" y="90" width="600" height="430" class="boundary-rect" fill="none" stroke="var(--c-runtime)"/>
+          
+          <rect x="1040" y="110" width="220" height="32" fill="#10b981" fill-opacity="0.15" stroke="var(--c-runtime)" class="boundary-header-bg"/>
+          <text x="1150" y="132" class="boundary-title-text" fill="var(--c-runtime)" text-anchor="middle">Agent Runtime Core</text>
+
+          <!-- Beast Mode On? Diamond -->
+          <g class="node-group" onclick="showDetail('Beast Mode On? (野兽模式开关判定)', '工业级自治模式开关：
+• Yes: 动态注入 Orchestrator Instruction，解锁高并发多专家协同编排
+• No: 降级为基础轻量调度模式直通主模型', ['Autonomous-Mode', 'Branch'])">
+            <polygon points="1105,260 1160,292 1105,325 1050,292" class="node-base-diamond" stroke="var(--c-runtime)" stroke-width="2.2"/>
+            <text x="1105" y="288" class="txt-title" font-size="11">Beast Mode</text>
+            <text x="1105" y="302" class="txt-title" font-size="11">On ?</text>
+          </g>
+
+          <!-- Orchestrator Instruction -->
+          <g class="node-group" onclick="showDetail('Orchestrator Instruction (野兽编排指令)', '野兽模式核心指令集：注入深思熟虑的影视制作准则、分步拆解范式与并发调度契约。', ['Meta-Prompt', 'Orchestration'])">
+            <rect x="1190" y="265" width="105" height="55" class="node-base-rect" stroke="var(--c-runtime)"/>
+            <text x="1242" y="289" class="txt-title">Orchestrator</text>
+            <text x="1242" y="306" class="txt-title">Instruction</text>
+          </g>
+
+          <!-- Compact Index Stack (System Prompt, Skill Index, Tools Index) -->
+          <g class="node-group" onclick="showDetail('精炼上下文索引栈', '彻底摆脱传统单体 Agent 的上下文灌水：仅装载核心 System Prompt、技能目录索引与工具签名索引，零冗余！', ['Lean-Context', 'Index-Only'])">
+            <rect x="1200" y="150" width="125" height="100" rx="8" fill="#10b981" fill-opacity="0.08" stroke="var(--c-runtime)" stroke-width="1.5"/>
+            <rect x="1208" y="158" width="109" height="24" rx="4" fill="#064e3b" stroke="var(--border-subtle)"/><text x="1262" y="174" class="txt-sub">System Prompt</text>
+            <rect x="1208" y="186" width="109" height="24" rx="4" fill="#064e3b" stroke="var(--border-subtle)"/><text x="1262" y="202" class="txt-sub">Skill Index</text>
+            <rect x="1208" y="214" width="109" height="24" rx="4" fill="#064e3b" stroke="var(--border-subtle)"/><text x="1262" y="230" class="txt-sub">Tools Index</text>
+          </g>
+
+          <!-- Base Model (Orchestrator) -->
+          <g class="node-group" onclick="showDetail('Base Model (Orchestrator) 调度主脑', '主控总导演：汇聚 User Input 原始意图、动态记忆提取切片、精炼索引与 Critic 评审反馈，全局协调产线。', ['Orchestrator', 'Central-Brain'])">
+            <rect x="1335" y="260" width="130" height="70" class="node-base-rect" stroke="var(--c-runtime)" stroke-width="2.5"/>
+            <text x="1400" y="290" class="txt-title" font-size="14">Base Model</text>
+            <text x="1400" y="312" class="txt-sub" fill="var(--c-runtime)" font-weight="800">(Orchestrator)</text>
+          </g>
+
+          <!-- Dispatch Subagent? Diamond -->
+          <g class="node-group" onclick="showDetail('Dispatch Subagent? 专家分发判定', '关键架构决策分流：
+• Yes: 触发垂直领域专家池 (Experts) 并指派独立 Subagent 并发执行
+• No: 检查是否需要更新状态/记忆 (Edit Memory?) 或直接推进画布', ['Subagent-Gate', 'Fan-out'])">
+            <polygon points="1540,260 1600,295 1540,330 1480,295" class="node-base-diamond" stroke="var(--c-runtime)" stroke-width="2.2"/>
+            <text x="1540" y="291" class="txt-title" font-size="11">Dispatch</text>
+            <text x="1540" y="306" class="txt-title" font-size="11">Subagent ?</text>
+          </g>
+
+          <!-- Runtime Core Wires -->
+          <!-- Beast Mode Yes -->
+          <path d="M 1130 260 Q 1160 240 1190 285" class="wire" marker-end="url(#arr)"/>
+          <rect x="1145" y="245" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="1156" y="253" class="wire-badge-text" fill="#10b981">Yes</text>
+          <path d="M 1295 292 L 1335 292" class="wire" stroke="var(--c-runtime)" marker-end="url(#arr-runtime)"/>
+
+          <!-- Beast Mode No -->
+          <path d="M 1105 325 L 1105 355 L 1380 355 L 1380 330" class="wire" marker-end="url(#arr)"/>
+          <rect x="1120" y="347" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="1130" y="355" class="wire-badge-text" fill="#f43f5e">No</text>
+
+          <!-- Context stack into Base Model -->
+          <path d="M 1262 250 L 1262 275 L 1355 275 L 1355 260" class="wire" marker-end="url(#arr)"/>
+
+          <!-- Base Model to Dispatch Subagent -->
+          <path d="M 1465 295 L 1480 295" class="wire" stroke="var(--c-runtime)" marker-end="url(#arr-runtime)"/>
+
+          <!-- User Input Trunk line directly into Base Model (Orchestrator) -->
+          <path d="M 855 527 L 1390 527 L 1390 330" class="wire" stroke="var(--c-preproc)" stroke-width="2.2" marker-end="url(#arr-preproc)"/>
+
+          <!-- ===================================================================== -->
+          <!-- SUBAGENT SPECIALISTS BOX (BELOW RUNTIME CORE, X: 1510 ~ 2060) -->
+          <!-- ===================================================================== -->
+          <rect x="1510" y="550" width="550" height="525" class="boundary-rect" fill="none" stroke="var(--c-runtime)" stroke-dasharray="4 4"/>
+          <text x="1530" y="580" font-size="16" font-weight="800" fill="var(--c-runtime)">Specialist Subagents Execution</text>
+
+          <!-- Experts Pool -->
+          <g class="node-group" onclick="showDetail('Experts 专家池', '细分专业领域模型池（包含 General 综合创作、Music 音乐卡点编曲、Camera 视频运镜等专家角色）。', ['Domain-Experts', 'Specialists'])">
+            <rect x="1540" y="610" width="90" height="120" rx="8" fill="#10b981" fill-opacity="0.08" stroke="var(--c-runtime)" stroke-width="1.8"/>
+            <text x="1585" y="632" class="txt-sub" fill="var(--c-runtime)" font-weight="800">Experts</text>
+            <rect x="1550" y="642" width="70" height="22" rx="4" fill="#0f172a" stroke="var(--border-subtle)"/><text x="1585" y="657" class="txt-sub">General</text>
+            <rect x="1550" y="670" width="70" height="22" rx="4" fill="#0f172a" stroke="var(--border-subtle)"/><text x="1585" y="685" class="txt-sub">Music</text>
+            <rect x="1550" y="698" width="70" height="20" rx="4" fill="#0f172a" stroke="var(--border-subtle)"/><text x="1585" y="712" class="txt-sub">···</text>
+          </g>
+
+          <!-- Jev 3 (Expert Selector) -->
+          <g class="node-group" onclick="showDetail('Jev 3 (专家智能匹配器)', 'TypeSafe System One 规则与轻量意图分类器，根据当前任务标签瞬间匹配最合适的专家身份。', ['Jev-Gate', 'Expert-Selector'])">
+            <rect x="1660" y="660" width="55" height="36" class="node-base-rect" stroke="var(--c-runtime)"/>
+            <text x="1687" y="683" class="txt-title" fill="var(--c-runtime)" font-size="12">Jev 3</text>
+          </g>
+
+          <!-- Selected Expert Instance -->
+          <g class="node-group" onclick="showDetail('General 专家实例', '选定的专家配置上下文，将作为特化指导灌注给子代理。', ['Specialized-Context'])">
+            <rect x="1745" y="635" width="80" height="36" class="node-base-rect"/>
+            <text x="1785" y="658" class="txt-title">General</text>
+          </g>
+
+          <!-- Base Model (General Subagent) Box -->
+          <g class="node-group" onclick="showDetail('Base Model (General Subagent) 子代理', '具体执行细分任务的专家子代理大模型，拥有隔离的执行环境与专注目标，不被全局噪声干扰。', ['Subagent', 'Execution-Unit'])">
+            <rect x="1860" y="615" width="125" height="75" class="node-base-rect" stroke="var(--c-runtime)" stroke-width="2.2"/>
+            <text x="1922" y="645" class="txt-title" font-size="13">Base Model</text>
+            <text x="1922" y="665" class="txt-sub" fill="var(--c-runtime)" font-weight="800">General</text>
+            <text x="1922" y="678" class="txt-sub" fill="var(--c-runtime)" font-weight="800">Subagent</text>
+          </g>
+
+          <!-- Dispatch Yes to Experts Pool -->
+          <path d="M 1540 330 L 1540 670 L 1540 670" class="wire" stroke="var(--c-runtime)" stroke-width="2.2" marker-end="url(#arr-runtime)"/>
+          <rect x="1550" y="588" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="1561" y="596" class="wire-badge-text" fill="#10b981">Yes</text>
+
+          <!-- Jev 3 & Select to Expert -->
+          <path d="M 1660 678 L 1630 678" class="wire"/>
+          <path d="M 1630 653 L 1745 653" class="wire" marker-end="url(#arr)"/>
+          <text x="1690" y="645" font-size="10" font-weight="700" fill="var(--text-muted)" text-anchor="middle">Select</text>
+
+          <path d="M 1825 653 L 1860 653" class="wire" marker-end="url(#arr)"/>
+
+          <!-- User Input branch into General Subagent -->
+          <path d="M 1390 527 L 1922 527 L 1922 615" class="wire" stroke="var(--c-preproc)" stroke-width="2" marker-end="url(#arr-preproc)"/>
+
+          <!-- Subagent Result Loopback to Orchestrator -->
+          <path d="M 1860 675 L 1475 675 L 1475 320 L 1465 320" class="wire dashed" stroke="var(--c-runtime)" stroke-width="2.2" marker-end="url(#arr-runtime)"/>
+          <text x="1500" y="692" font-size="10" font-weight="700" fill="var(--c-runtime)">Subagent Result Loopback</text>
+        </g>
+
+        <!-- ======================================================================= -->
+        <!-- SUB-SYSTEM 4: WORKFLOW & CANVAS (PURPLE, X: 1670 ~ 2400, Y: 330 ~ 510)  -->
+        <!-- ======================================================================= -->
+        <g id="subsys-workflow">
+          <!-- Edit Memory? Diamond -->
+          <g class="node-group" onclick="showDetail('Edit Memory? 记忆修饰判定', '判定本次对话是否产生新的持久事实、项目设定或经验沉淀：
+• Yes: 触发记忆写回链路更新 Memory 节点 B
+• No: 流向画布编辑与工作流推进分支', ['Memory-Gate', 'Evolution'])">
+            <polygon points="1710,165 1765,195 1710,225 1655,195" class="node-base-diamond"/>
+            <text x="1710" y="191" class="txt-title" font-size="11">Edit</text>
+            <text x="1710" y="205" class="txt-title" font-size="11">Memory ?</text>
+          </g>
+
+          <!-- Edit Canvas? Diamond -->
+          <g class="node-group" onclick="showDetail('Edit Canvas? 画布编辑判定', '判定是否需要修改画布结构与执行节点：
+• Yes: 编写 TypeScript 动态工作流 DSL 并编译挂载
+• No: 保持现有画布结构，直接流向 Run? 执行判定', ['Canvas-Gate'])">
+            <polygon points="1710,345 1765,375 1710,405 1655,375" class="node-base-diamond" stroke="var(--c-workflow)" stroke-width="2.2"/>
+            <text x="1710" y="371" class="txt-title" font-size="11">Edit</text>
+            <text x="1710" y="385" class="txt-title" font-size="11">Canvas ?</text>
+          </g>
+
+          <!-- Purple Workflow Boundary Box (Completely in y: 325 ~ 495, no overlap!) -->
+          <rect x="1650" y="325" width="730" height="175" class="boundary-rect" fill="none" stroke="var(--c-workflow)"/>
+          
+          <rect x="1670" y="335" width="130" height="26" fill="#a855f7" fill-opacity="0.15" stroke="var(--c-workflow)" class="boundary-header-bg"/>
+          <text x="1735" y="353" class="boundary-title-text" fill="var(--c-workflow)" font-size="16" text-anchor="middle">Workflow</text>
+
+          <!-- Write Typescript DSL -->
+          <g class="node-group" onclick="showDetail('Write Typescript DSL', 'AI 模型以代码即工作流的形式，将影音创作规划编写为可执行的 TypeScript DSL，声明各算子依赖与参数。', ['DSL-Authoring', 'Code-As-Workflow'])">
+            <rect x="1800" y="390" width="105" height="60" class="node-base-rect" stroke="var(--c-workflow)" stroke-width="2"/>
+            <text x="1852" y="413" class="txt-title" font-size="11">Write</text>
+            <text x="1852" y="427" class="txt-title" font-size="11">Typescript</text>
+            <text x="1852" y="441" class="txt-sub" fill="var(--c-workflow)" font-weight="700">DSL</text>
+          </g>
+
+          <!-- Compiler -->
+          <g class="node-group" onclick="showDetail('Compiler (DSL 编译器)', '对生成的 TypeScript DSL 进行强类型静态检查、依赖拓扑校验与动态构建，防止错误配置下发。', ['TypeCheck', 'Compiler'])">
+            <rect x="1935" y="397" width="75" height="46" class="node-base-rect"/>
+            <text x="1972" y="425" class="txt-title">Compiler</text>
+          </g>
+
+          <!-- Workflow Engine Node -->
+          <g class="node-group" onclick="showDetail('Workflow (工作流引擎实例)', '已编译挂载的实际执行图 DAG，调度生图、音视频合成、TTS 与剪辑等算子。', ['Execution-DAG'])">
+            <rect x="2040" y="397" width="85" height="46" class="node-base-rect" stroke="var(--c-workflow)" stroke-width="2"/>
+            <text x="2082" y="425" class="txt-title">Workflow</text>
+          </g>
+
+          <!-- Canvas UI/UX -->
+          <g class="node-group" onclick="showDetail('Canvas UI/UX (双真相画布交互)', '双真相前端画布：与模型共享同构状态，创作者可直观拖拽镜头、修改节奏与调色。', ['Canvas-UI', 'Bi-directional'])">
+            <rect x="2155" y="397" width="85" height="46" class="node-base-rect"/>
+            <text x="2197" y="417" class="txt-title" font-size="11">Canvas</text>
+            <text x="2197" y="433" class="txt-title" font-size="11">UI / UX</text>
+          </g>
+
+          <!-- Canvas User -->
+          <g class="node-group" onclick="showDetail('User (画布端交互)', '创作者在画布上的直接介入（微调分镜、局部重绘、节奏剪裁），人机协同闭环。', ['Human-In-The-Loop'])">
+            <rect x="2270" y="400" width="55" height="40" class="node-base-rect"/>
+            <text x="2297" y="425" class="txt-title" font-size="12">User</text>
+          </g>
+
+          <!-- Workflow Wiring -->
+          <!-- Dispatch Subagent No -> Edit Memory -->
+          <path d="M 1540 260 L 1540 195 L 1655 195" class="wire" marker-end="url(#arr)"/>
+          <rect x="1550" y="215" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="1560" y="223" class="wire-badge-text" fill="#f43f5e">No</text>
+
+          <!-- Edit Memory Yes -> Wire to Memory B -->
+          <path d="M 1710 165 L 1710 135 L 1367 135 L 1367 810" class="wire" stroke="var(--c-memory)" stroke-width="2.2" marker-end="url(#arr-memory)"/>
+          <rect x="1718" y="142" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="1729" y="150" class="wire-badge-text" fill="#10b981">Yes</text>
+
+          <!-- Edit Memory No -> Edit Canvas -->
+          <path d="M 1710 225 L 1710 345" class="wire" marker-end="url(#arr)"/>
+          <rect x="1718" y="275" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="1728" y="283" class="wire-badge-text" fill="#f43f5e">No</text>
+
+          <!-- Edit Canvas Yes -> Write Typescript DSL -->
+          <path d="M 1765 375 L 1785 375 L 1785 420 L 1800 420" class="wire" stroke="var(--c-workflow)" stroke-width="2" marker-end="url(#arr-workflow)"/>
+          <rect x="1770" y="365" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="1781" y="373" class="wire-badge-text" fill="#10b981">Yes</text>
+
+          <path d="M 1905 420 L 1935 420" class="wire" marker-end="url(#arr)"/>
+          <path d="M 2010 420 L 2040 420" class="wire" marker-end="url(#arr)"/>
+          <path d="M 2125 420 L 2155 420" class="wire" marker-end="url(#arr)"/>
+
+          <!-- Canvas Direct Edit Wire -->
+          <path d="M 2270 420 L 2240 420" class="wire" marker-end="url(#arr)"/>
+          <path d="M 2155 430 L 2125 430" class="wire dashed" stroke="var(--c-workflow)"/>
+          <text x="2140" y="445" font-size="9" fill="var(--text-muted)" text-anchor="middle">Edit</text>
+        </g>
+
+        <!-- ======================================================================= -->
+        <!-- SUB-SYSTEM 5: CRITIC GATE & EXECUTION (ROSE, X: 1980 ~ 2750, Y: 60 ~ 285)-->
+        <!-- ======================================================================= -->
+        <g id="subsys-critic">
+          <!-- Run? Diamond (Positioned between Workflow top and Command/Asset outputs) -->
+          <g class="node-group" onclick="showDetail('Run? (真机执行判定门)', '关键真假执行守门判定：
+• Yes: 实际下发云端或算力节点执行，产出资产与观测指标
+• No: 免运行（如纯剧本规划或静态审查），直通 Critic 评审', ['Execution-Gate'])">
+            <polygon points="2082,210 2130,240 2082,270 2034,240" class="node-base-diamond" stroke="var(--c-critic)" stroke-width="2.2"/>
+            <text x="2082" y="236" class="txt-title" font-size="12">Run ?</text>
+          </g>
+
+          <!-- Workflow up to Run? -->
+          <path d="M 2082 397 L 2082 270" class="wire" marker-end="url(#arr)"/>
+
+          <!-- Edit Canvas No straight bypass into Run? -->
+          <path d="M 1765 195 L 1805 195 L 1805 180 L 2082 180 L 2082 210" class="wire" marker-end="url(#arr)"/>
+          <rect x="1775" y="185" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="1785" y="193" class="wire-badge-text" fill="#f43f5e">No</text>
+
+          <!-- Command Result Node -->
+          <g class="node-group" onclick="showDetail('Command Result (执行观测遥测)', '真实环境执行日志、算力消耗与上游返回状态。带有①号反向链路标记，回传 Orchestrator 消化。', ['Telemetry', 'Feedback-1'])">
+            <rect x="1980" y="105" width="95" height="45" class="node-base-rect"/>
+            <text x="2027" y="127" class="txt-title" font-size="11">Command</text>
+            <text x="2027" y="141" class="txt-title" font-size="11">Result</text>
+          </g>
+
+          <!-- Asset Output Node -->
+          <g class="node-group" onclick="showDetail('Asset Output (生成资产产出)', '经过渲染生成的真实视频片段、多轨音频或高清静帧。这是真实世界交付物，严禁以测试假绿灯充数。', ['Artifact', 'Deliverable'])">
+            <rect x="2120" y="105" width="85" height="45" class="node-base-rect" stroke="var(--c-critic)" stroke-width="2"/>
+            <text x="2162" y="127" class="txt-title" font-size="11">Asset</text>
+            <text x="2162" y="141" class="txt-title" font-size="11">Output</text>
+          </g>
+
+          <!-- Critic Gate Boundary Box (Strictly above y: 285) -->
+          <rect x="2240" y="65" width="490" height="215" class="boundary-rect" fill="none" stroke="var(--c-critic)"/>
+          
+          <rect x="2260" y="80" width="160" height="30" fill="#f43f5e" fill-opacity="0.15" stroke="var(--c-critic)" class="boundary-header-bg"/>
+          <text x="2340" y="101" class="boundary-title-text" fill="var(--c-critic)" font-size="18" text-anchor="middle">Critic Gate</text>
+
+          <!-- Critic Skill -->
+          <g class="node-group" onclick="showDetail('Critic Skill (独立评审专家规范)', 'Eimu 的视觉与工程验收判准集合：
+• 严格视觉检查 (运镜视差/节奏/最长字幕/色彩规范)
+• 对抗式 Hack 检验与边界攻击
+• 严禁作者自验，必须独立第三方审核', ['Review-Protocol', 'Impeccable'])">
+            <rect x="2270" y="145" width="95" height="50" class="node-base-rect" stroke="var(--c-critic)"/>
+            <text x="2317" y="168" class="txt-title" font-size="12">Critic</text>
+            <text x="2317" y="182" class="txt-title" font-size="12">Skill</text>
+          </g>
+
+          <!-- Base Model (Critic Subagent) -->
+          <g class="node-group" onclick="showDetail('Base Model (Critic Subagent) 独立评审模型', '独立部署的批评家大模型。以挑刺和找瑕疵为首要目标，对成片和规划进行严苛打分并提炼修改意见，直接驱动主脑重做！', ['Independent-Critic', 'Gatekeeper'])">
+            <rect x="2410" y="135" width="150" height="75" class="node-base-rect" stroke="var(--c-critic)" stroke-width="2.5"/>
+            <text x="2485" y="165" class="txt-title" font-size="14">Base Model</text>
+            <text x="2485" y="185" class="txt-sub" fill="var(--c-critic)" font-weight="800">(Critic Subagent)</text>
+          </g>
+
+          <!-- Run? Yes branching to Command Result & Asset Output -->
+          <path d="M 2060 225 L 2027 175 L 2027 150" class="wire" marker-end="url(#arr)"/>
+          <path d="M 2105 225 L 2162 175 L 2162 150" class="wire" stroke="var(--c-critic)" stroke-width="2" marker-end="url(#arr-critic)"/>
+          <rect x="2071" y="190" width="22" height="15" fill="#10b981" fill-opacity="0.2" stroke="#10b981" class="wire-badge"/>
+          <text x="2082" y="198" class="wire-badge-text" fill="#10b981">Yes</text>
+
+          <!-- Run? No straight into Critic Subagent -->
+          <path d="M 2130 240 L 2485 240 L 2485 210" class="wire" marker-end="url(#arr)"/>
+          <rect x="2145" y="230" width="20" height="15" fill="#f43f5e" fill-opacity="0.2" stroke="#f43f5e" class="wire-badge"/>
+          <text x="2155" y="238" class="wire-badge-text" fill="#f43f5e">No</text>
+
+          <!-- Asset Output into Critic Subagent -->
+          <path d="M 2205 127 L 2485 127 L 2485 135" class="wire" stroke="var(--c-critic)" stroke-width="2.2" marker-end="url(#arr-critic)"/>
+
+          <!-- Critic Skill into Critic Subagent -->
+          <path d="M 2365 170 L 2410 170" class="wire" stroke="var(--c-critic)" stroke-width="2" marker-end="url(#arr-critic)"/>
+
+          <!-- ===================================================================== -->
+          <!-- FEEDBACK LOOP 1: Command Result -> Orchestrator (Badge ①) -->
+          <!-- ===================================================================== -->
+          <path d="M 2027 105 L 2027 40 L 1430 40 L 1430 260" class="wire dashed" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#arr)"/>
+          <circle cx="2027" cy="65" r="10" fill="#0f172a" stroke="var(--border-subtle)" stroke-width="1.5"/>
+          <text x="2027" y="69" font-size="11" font-weight="800" fill="var(--text-muted)" text-anchor="middle">1</text>
+
+          <!-- ===================================================================== -->
+          <!-- FEEDBACK LOOP 2: Critic Review Feedback -> Orchestrator (Top Highway) -->
+          <!-- ===================================================================== -->
+          <path d="M 2485 135 L 2485 18 L 1370 18 L 1370 260" class="wire" stroke="var(--c-critic)" stroke-width="2.8" marker-end="url(#arr-critic)"/>
+          
+          <!-- Callout Badge along top highway -->
+          <rect x="1800" y="8" width="200" height="24" rx="6" fill="#0f172a" stroke="var(--c-critic)" stroke-width="1.5"/>
+          <text x="1900" y="24" class="txt-sub" fill="var(--c-critic)" font-weight="800" text-anchor="middle">Critic Review Feedback Loop</text>
+        </g>
+
+      </g>
+    </svg>
+  </div>
+
+  <script>
+    const svg = document.getElementById('main-diagram');
+    const container = document.getElementById('viewport-container');
+    let isPanning = false;
+    let startX = 0, startY = 0;
+    let viewBox = { x: 0, y: 0, w: 2850, h: 1120 };
+    const origViewBox = { ...viewBox };
+
+    function updateViewBox() {
+      svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
+    }
+
+    container.addEventListener('mousedown', (e) => {
+      if (e.target.closest('#detail-drawer') || e.target.closest('.zoom-tools') || e.target.closest('.legend-bar')) return;
+      isPanning = true;
+      container.classList.add('panning');
+      startX = e.clientX;
+      startY = e.clientY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      const dx = (e.clientX - startX) * (viewBox.w / container.clientWidth);
+      const dy = (e.clientY - startY) * (viewBox.h / container.clientHeight);
+      viewBox.x -= dx;
+      viewBox.y -= dy;
+      startX = e.clientX;
+      startY = e.clientY;
+      updateViewBox();
+    });
+
+    window.addEventListener('mouseup', () => {
+      isPanning = false;
+      container.classList.remove('panning');
+    });
+
+    container.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY > 0 ? 1.08 : 0.92;
+      const mouseX = e.clientX - container.getBoundingClientRect().left;
+      const mouseY = e.clientY - container.getBoundingClientRect().top;
+      
+      const svgX = viewBox.x + (mouseX / container.clientWidth) * viewBox.w;
+      const svgY = viewBox.y + (mouseY / container.clientHeight) * viewBox.h;
+
+      viewBox.w *= zoomFactor;
+      viewBox.h *= zoomFactor;
+      viewBox.x = svgX - (mouseX / container.clientWidth) * viewBox.w;
+      viewBox.y = svgY - (mouseY / container.clientHeight) * viewBox.h;
+      updateViewBox();
+    });
+
+    function zoomIn() {
+      const cx = viewBox.x + viewBox.w / 2;
+      const cy = viewBox.y + viewBox.h / 2;
+      viewBox.w *= 0.85;
+      viewBox.h *= 0.85;
+      viewBox.x = cx - viewBox.w / 2;
+      viewBox.y = cy - viewBox.h / 2;
+      updateViewBox();
+    }
+
+    function zoomOut() {
+      const cx = viewBox.x + viewBox.w / 2;
+      const cy = viewBox.y + viewBox.h / 2;
+      viewBox.w *= 1.15;
+      viewBox.h *= 1.15;
+      viewBox.x = cx - viewBox.w / 2;
+      viewBox.y = cy - viewBox.h / 2;
+      updateViewBox();
+    }
+
+    function resetZoom() {
+      viewBox = { ...origViewBox };
+      updateViewBox();
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme');
+      document.documentElement.setAttribute('data-theme', current === 'light' ? 'dark' : 'light');
+    }
+
+    const drawer = document.getElementById('detail-drawer');
+    const drawerTitle = document.getElementById('drawer-title');
+    const drawerDesc = document.getElementById('drawer-desc');
+    const drawerTags = document.getElementById('drawer-tags');
+
+    function showDetail(title, desc, tags) {
+      drawerTitle.textContent = title;
+      drawerDesc.textContent = desc;
+      drawerTags.innerHTML = tags.map(t => `<span class="tag">${t}</span>`).join('');
+      drawer.style.display = 'block';
+    }
+
+    function switchView(view) {
+      document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+
+      const traditional = document.getElementById('group-traditional');
+      const eimu = document.getElementById('group-eimu');
+
+      if (view === 'all') {
+        traditional.style.opacity = '1';
+        eimu.style.opacity = '1';
+        viewBox = { ...origViewBox };
+      } else if (view === 'eimu') {
+        traditional.style.opacity = '0.12';
+        eimu.style.opacity = '1';
+        viewBox = { x: 570, y: 0, w: 2280, h: 1100 };
+      } else if (view === 'traditional') {
+        traditional.style.opacity = '1';
+        eimu.style.opacity = '0.12';
+        viewBox = { x: 40, y: 40, w: 520, h: 1060 };
+      } else if (view === 'critic') {
+        traditional.style.opacity = '0.12';
+        eimu.style.opacity = '1';
+        viewBox = { x: 1950, y: 0, w: 850, h: 500 };
+      }
+      updateViewBox();
+    }
+
+    function exportSVG() {
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "eimu-agent-architecture.svg";
+      link.click();
+    }
+  </script>
+</body>
+</html>

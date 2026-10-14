@@ -1,3 +1,4 @@
+import { contentHash } from "../lib/image-journal"
 import { tool } from "@opencode-ai/plugin/tool"
 import {
   classifyError,
@@ -39,6 +40,9 @@ export default tool({
   description:
     "图生图改图。支援改图的模型以平台目录 edit=true 为准（GET /v1/model-status），预设 gpt-image-2。除 pixai 系为同步（10-30s 直接回图）外，其余模型是「非同步」任务制：提交后回 task_id，完成时间不定（空闲几十秒到几分钟，高峰排队更久、逾时自动退款），harness 会自动续接结果并出图卡——提交后立即交还控制权，不要轮询。超过 0.1 币会先跳出扣费确认。",
   args: {
+    project:tool.schema.string().describe("继承稳定项目；付费沿用现有授权，不另换预算作用域"),
+    request_id:tool.schema.string().describe("稳定原请求ID，恢复不能另换ID"),
+    project_budget_coins:tool.schema.number().min(0).optional().describe("项目累计上限约束，只能收紧已有上限；不是付费授权"),
     image_url: tool.schema
       .string()
       .describe("原图：http(s)/data URL 或本地绝对路径（聊天附件解析出的 uploads 路径直接可传）；media: 图片 ID 仅 pixai 系可用"),
@@ -52,15 +56,7 @@ export default tool({
   },
   async execute(args, context) {
     const model = args.model ?? "gpt-image-2"
-    const request_id = randomUUID()
-    // 模型可用性强制探测（2026-08-15）
-    const probe = await probeModelAvailable(model, context.sessionID, context.abort)
-    if (probe.availability === "unavailable") {
-      return fail(
-        "model_unavailable",
-        `改图模型 ${model} 目前不可用（${probe.note ?? "渠道故障"}）。请改用其他可用模型，或告知用户。`,
-      )
-    }
+    const request_id = args.request_id
     const estimate = await estimateEditCoins(model, context.sessionID, args.quality, context.abort)
 
     // ── 分支一：pixai bridge 域 = 原同步链（mediaId + 同步回图出卡）──
@@ -85,7 +81,7 @@ export default tool({
           }
         }
 
-        const payload: any = { image, prompt: args.prompt, model, response_format: "url" }
+        const payload: any = { image, prompt: args.prompt, model, response_format: "url", workflow:{metadata:{project:args.project,request_id,project_budget_coins:args.project_budget_coins,input_signature:contentHash({...args,project_budget_coins:undefined})}} }
         if (args.size) payload.size = args.size === "2k" ? "2k" : "1k"
         if (args.quality) payload.quality = args.quality
 
@@ -138,7 +134,7 @@ export default tool({
         }
       }
 
-      const payload: any = { image, prompt: args.prompt, model, response_format: "url" }
+      const payload: any = { image, prompt: args.prompt, model, response_format: "url", workflow:{metadata:{project:args.project,request_id,project_budget_coins:args.project_budget_coins,input_signature:contentHash({...args,project_budget_coins:undefined})}} }
       if (args.size) payload.size = args.size === "2k" ? "2k" : "1k"
       if (args.quality) payload.quality = args.quality
 
@@ -160,9 +156,10 @@ export default tool({
           // 注册给 poller 自动轮询续接（同 image_generate 轮子）；best-effort。
           const reg = await registerTask(task_id, context.sessionID, "image", context.abort, {
             dedup_hash: dedupHash({ model, prompt: args.prompt, image, size: args.size }),
-            model,
+            model, project:args.project,request_id,
             cost_coins: estimate,
           })
+          if(!reg.durable)return fail("registration_pending","原任务已接受，登记仍待恢复；不得新生成。",{task_id,request_id,recoverable:true})
           return ok(
             {
               task_id,

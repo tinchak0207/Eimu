@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, open, rename, readdir, readFile, unlink, stat } from "node:fs/promises";
+import path from "node:path";
+import { encryptGenerationPrompt, decryptGenerationPrompt } from "./crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { resolveModelRoute } from "./model-routing";
@@ -13,6 +16,7 @@ import type {
   ProviderProtocol,
   SupplierLease,
   SupplierRecord,
+  SupplierGenerationOutput,
 } from "./types";
 
 type Row = Record<string, unknown>;
@@ -91,6 +95,7 @@ export function mapGenerationJob(row: Row): GenerationJob {
     completedCount: Number(row.completed_count),
     attemptCount: Number(row.attempt_count),
     billingAmount: Number(row.billing_amount),
+    cancelRequestedAt: nullableDate(row.cancel_requested_at),
     deadlineAt: asDate(row.deadline_at),
     availableAt: asDate(row.available_at),
     leaseOwner: row.lease_owner === null ? null : String(row.lease_owner),
@@ -98,6 +103,7 @@ export function mapGenerationJob(row: Row): GenerationJob {
     failureClass: row.failure_class === null ? null : row.failure_class as FailureClass,
     failureDetail: row.failure_detail === null ? null : String(row.failure_detail),
     failureRecord: mapFailureRecordColumn(row.failure_record_json),
+    recovery: jsonValue(row.recovery_json, null),
     result: jsonValue<GenerationJobResult | null>(row.result_json, null),
     createdAt: asDate(row.created_at),
     startedAt: nullableDate(row.started_at),
@@ -188,7 +194,9 @@ export async function createGenerationJob(
 }
 
 export async function getGenerationJob(id: string, sql: GenerationSql = getGenerationSql()): Promise<GenerationJob | null> {
-  const rows = await sql<Row[]>`SELECT * FROM generation_job WHERE id = ${id} LIMIT 1`;
+  const rows = await sql<Row[]>`SELECT job.*, (SELECT jsonb_build_object('state',a.recovery_status,'owner',a.recovery_owner,'deadline_at',a.provider_reconcile_deadline_at,'detail',a.recovery_detail)
+      FROM generation_attempt a WHERE a.job_id=job.id AND a.status='submit_unknown' ORDER BY a.attempt_no DESC LIMIT 1) AS recovery_json
+      FROM generation_job job WHERE job.id = ${id} LIMIT 1`;
   return rows[0] ? mapGenerationJob(rows[0]) : null;
 }
 
@@ -198,7 +206,9 @@ export async function getGenerationJobForTenant(
   sql: GenerationSql = getGenerationSql(),
 ): Promise<GenerationJob | null> {
   const rows = await sql<Row[]>`
-    SELECT * FROM generation_job WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1
+    SELECT job.*, (SELECT jsonb_build_object('state',a.recovery_status,'owner',a.recovery_owner,'deadline_at',a.provider_reconcile_deadline_at,'detail',a.recovery_detail)
+      FROM generation_attempt a WHERE a.job_id=job.id AND a.status='submit_unknown' ORDER BY a.attempt_no DESC LIMIT 1) AS recovery_json
+      FROM generation_job job WHERE job.id = ${id} AND job.tenant_id = ${tenantId} LIMIT 1
   `;
   return rows[0] ? mapGenerationJob(rows[0]) : null;
 }
@@ -263,6 +273,8 @@ export async function listCompletedGenerationArtifacts(
       width: row.width === null ? null : Number(row.width),
       height: row.height === null ? null : Number(row.height),
       endpointLabel: typeof metadata.endpointLabel === "string" ? metadata.endpointLabel : "unknown",
+      actualSupplierModelId: typeof metadata.actualSupplierModelId==='string' ? metadata.actualSupplierModelId : null,
+      originalHttpStatus:typeof metadata.originalHttpStatus==='number' ? metadata.originalHttpStatus : null,
     };
   });
 }
@@ -307,17 +319,16 @@ export async function claimNextGenerationJob(
       FROM generation_job
       WHERE status = 'queued'
         AND available_at <= now()
-      -- Expired queued jobs must still be claimed once so the worker can move
-      -- them to a terminal state and execute the existing refund path. Leaving
-      -- them out here creates permanently queued, already-charged tasks.
-      ORDER BY (deadline_at <= now()) DESC, available_at, created_at
+      -- Accepted queue entries stay recoverable even after their observation deadline.
+      -- FIFO does not prioritize expired capacity waiters ahead of new jobs.
+      ORDER BY created_at, available_at
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
     UPDATE generation_job job
     SET status = 'leased', lease_owner = ${workerId},
         lease_expires_at = now() + (${leaseMs}::text || ' milliseconds')::interval,
-        heartbeat_at = now(), started_at = COALESCE(started_at, now()), updated_at = now()
+        heartbeat_at = now(), updated_at = now()
     FROM candidate
     WHERE job.id = candidate.id
     RETURNING job.*
@@ -360,23 +371,17 @@ export async function releaseJobForRetry(input: {
   `;
 }
 
-// R7-D（2026-08-29）：排队 deadline（预设 3 分钟）只保护「等容量」阶段；
-// 开工后以 started_at 为锚展期到 15 分钟总生成预算。GREATEST 保证对显式
-// 传入更长 deadlineMs 的调用者只增不减；只在租约仍属本 worker 时生效。
-//
-// 病灶 D 修复（2026-08-30）：改为 RETURNING 实际写入的 deadline_at，让调用方
-// 同步内存 `job.deadlineAt`，消除「内存快照 deadline 与 DB 不一致」的语义漂移
-// （真正开工的 job 内存 deadline 停在 claim 时 3 分钟，DB 已被 extend 到 15 分钟）。
+// 每次取得真实供应商容量后才从当前时刻开始执行预算；排队观测截止与执行截止分别保存。
 export async function extendGenerationDeadlineJob(
   job: { id: string; startedAt: Date | null },
   workerId: string,
   totalBudgetMs: number,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<Date | null> {
-  if (!job.startedAt) return null;
   const rows = await sql<{ deadline_at: unknown }[]>`
     UPDATE generation_job
-    SET deadline_at = GREATEST(deadline_at, ${job.startedAt} + (${totalBudgetMs}::text || ' milliseconds')::interval),
+    SET deadline_at = now() + (${totalBudgetMs}::text || ' milliseconds')::interval,
+        execution_deadline_at = now() + (${totalBudgetMs}::text || ' milliseconds')::interval,
         updated_at = now()
     WHERE id = ${job.id} AND lease_owner = ${workerId}
       AND status IN ('leased', 'submitting', 'running')
@@ -385,23 +390,17 @@ export async function extendGenerationDeadlineJob(
   return rows[0] ? asDate(rows[0].deadline_at) : null;
 }
 
-// 病灶 D（2026-08-30）：排队期退避撞穿 3 分钟 deadline —— 无 lease 时反覆
-// claim→acquire 失败→releaseForRetry(backoff)，直到排队 deadline 到期被
-// deadline_exceeded 杀单（实录 12 笔 video job 全死于此，attempt_count=0）。
-// 这里做一次排队顺延：deadline 快到期且还在「可恢复」的等容量状态时，把
-// deadline 往后推 extraMs（相对 now 增量，避免 started_at 锚定的 GREATEST
-// 第二次就推不动）。上限由调用方用 shouldExtendQueueDeadline 把关（20min 封顶），
-// 确保纯无供应商的死路不会无限挂单。
+// 队列观测窗口可滚动续期；容量等待不终结已经受理的订单。
 export async function extendGenerationQueueDeadline(
   job: { id: string; startedAt: Date | null },
   workerId: string,
   extraMs: number,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<Date | null> {
-  if (!job.startedAt) return null;
   const rows = await sql<{ deadline_at: unknown }[]>`
     UPDATE generation_job
     SET deadline_at = GREATEST(deadline_at, now() + (${extraMs}::text || ' milliseconds')::interval),
+        queue_deadline_at = now() + (${extraMs}::text || ' milliseconds')::interval,
         updated_at = now()
     WHERE id = ${job.id} AND lease_owner = ${workerId}
       AND status IN ('leased', 'submitting', 'running')
@@ -416,11 +415,14 @@ export async function beginGenerationAttempt(input: {
   supplierId: string;
   supplierModelId: string | null;
   outputIndex: number;
+  supplierAccountId?: string;
+  supplierCapabilityId?: number;
+  protocol?: string;
 }, sql: GenerationSql = getGenerationSql()): Promise<{ id: string; attemptNo: number }> {
   return sql.begin(async (tx) => {
     const jobs = await tx<{ attempt_count: number }[]>`
       UPDATE generation_job
-      SET status = 'submitting', attempt_count = attempt_count + 1, updated_at = now()
+      SET status = 'submitting', started_at = COALESCE(started_at, now()), attempt_count = attempt_count + 1, updated_at = now()
       WHERE id = ${input.jobId} AND lease_owner = ${input.workerId}
         AND status IN ('leased', 'running')
       RETURNING attempt_count
@@ -430,10 +432,12 @@ export async function beginGenerationAttempt(input: {
     const attemptNo = Number(jobs[0].attempt_count);
     await tx`
       INSERT INTO generation_attempt (
-        id, job_id, attempt_no, output_index, supplier_id, supplier_model_id, status
+        id, job_id, attempt_no, output_index, supplier_id, supplier_model_id, status,
+        supplier_account_id, supplier_capability_id, upstream_request_key, provider_protocol, recovery_owner, recovery_detail
       ) VALUES (
         ${id}, ${input.jobId}, ${attemptNo}, ${input.outputIndex}, ${input.supplierId},
-        ${input.supplierModelId}, 'submitting'
+        ${input.supplierModelId}, 'submitting', ${input.supplierAccountId ?? null},
+        ${input.supplierCapabilityId ?? null}, ${id}, ${input.protocol ?? null}, 'control-plane:provider-reconciliation', 'input_preparation_not_submitted'
       )
     `;
     return { id, attemptNo };
@@ -461,15 +465,18 @@ export async function completeGenerationAttempt(input: {
       SET status = 'succeeded', provider_request_id = ${input.providerRequestId ?? null},
           provider_task_id = ${input.providerTaskId ?? null}, provider_http_status = ${input.providerHttpStatus},
           first_output_at = now(), finished_at = now(), latency_ms = ${input.latencyMs},
+          provider_state = 'succeeded', recovery_status = 'resolved', provider_next_poll_at = NULL, response_ciphertext = NULL,
           evidence_json = ${tx.json(JSON.parse(JSON.stringify(input.evidence ?? {})) as never)}, updated_at = now()
       WHERE id = ${input.attemptId} AND job_id = ${input.jobId}
     `;
     await tx`
       UPDATE generation_job
-      SET status = 'running', completed_count = completed_count + ${input.advanceOutput === false ? 0 : 1}, updated_at = now()
-      WHERE id = ${input.jobId} AND lease_owner = ${input.workerId}
+      SET status = CASE WHEN status='cancelled' THEN 'cancelled' ELSE 'running' END,
+          completed_count = (SELECT count(*) FROM artifact WHERE job_id=${input.jobId} AND role='output'), updated_at = now()
+      WHERE id = ${input.jobId} AND (lease_owner = ${input.workerId} OR status='cancelled')
     `;
   });
+  await clearProviderOutputCheckpoint(input.attemptId);
 }
 
 export async function failGenerationAttempt(input: {
@@ -531,12 +538,12 @@ export async function markProviderTaskSubmitted(input: {
     SET provider_task_id = ${input.providerTaskId},
         provider_protocol = ${input.protocol},
         provider_state = 'running',
-        provider_next_poll_at = now() + (${delaySec}::text || ' seconds')::interval,
-        provider_reconcile_deadline_at = now() + (${windowSec}::text || ' seconds')::interval,
+        provider_next_poll_at = COALESCE(provider_next_poll_at,now() + (${delaySec}::text || ' seconds')::interval),
+        provider_reconcile_deadline_at = COALESCE(provider_reconcile_deadline_at,now() + (${windowSec}::text || ' seconds')::interval),
         updated_at = now()
     WHERE id = ${input.attemptId} AND job_id = ${input.jobId}
       AND (provider_task_id IS NULL OR provider_task_id = ${input.providerTaskId})
-      AND status IN ('submitting', 'running', 'failed')
+      AND status IN ('submitting', 'running', 'failed', 'submit_unknown')
     RETURNING id
   `;
   return Boolean(rows[0]);
@@ -571,8 +578,7 @@ export async function freezeGenerationJobForReconciliation(input: {
     FROM supplier
     WHERE generation_attempt.supplier_id = supplier.id
       AND generation_attempt.job_id = ${input.jobId}
-      AND generation_attempt.provider_task_id IS NOT NULL
-      AND generation_attempt.provider_state IN ('unknown', 'running')
+      AND generation_attempt.status IN ('submitting', 'running', 'failed', 'submit_unknown')
   `;
   emitJobEvent({
     jobId: input.jobId,
@@ -607,7 +613,7 @@ export async function reviveGenerationJobWithArtifacts(input: {
         finished_at = COALESCE(finished_at, now()),
         lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL, updated_at = now()
     WHERE id = ${input.jobId}
-      AND status IN ('failed', 'refunded', 'submit_unknown', 'cancelled')
+      AND status IN ('failed', 'refunded', 'submit_unknown')
       AND requested_count <= ${input.artifacts.length}
     RETURNING id
   `;
@@ -656,8 +662,9 @@ export async function failGenerationJobForReconciliation(input: {
 export async function jobHasUnresolvedProviderTask(jobId: string, sql: GenerationSql = getGenerationSql()): Promise<boolean> {
   const rows = await sql<{ id: string }[]>`
     SELECT id FROM generation_attempt
-    WHERE job_id = ${jobId} AND provider_task_id IS NOT NULL
-      AND provider_state IN ('unknown', 'running')
+    WHERE job_id = ${jobId}
+      AND ((provider_task_id IS NOT NULL AND provider_state IN ('unknown','running'))
+        OR (status='submit_unknown' AND recovery_status <> 'resolved'))
     LIMIT 1
   `;
   return Boolean(rows[0]);
@@ -674,6 +681,7 @@ export async function attemptedSupplierRoutingForOutput(
     JOIN supplier ON supplier.id = attempt.supplier_id
     WHERE attempt.job_id = ${jobId} AND attempt.output_index = ${outputIndex}
       AND attempt.status = 'failed'
+      AND attempt.failure_class NOT IN ('artifact_download','cancelled','user_input','pricing_config')
   `;
   return {
     supplierIds: rows.map((row) => row.supplier_id),
@@ -849,10 +857,15 @@ export async function cancelGenerationJob(
       SELECT status FROM generation_job WHERE id = ${jobId} AND tenant_id = ${tenantId} LIMIT 1
     ), updated AS (
       UPDATE generation_job
-      SET status = 'cancelled', failure_class = 'cancelled', failure_detail = 'Cancelled by client.',
-          finished_at = now(), lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+      SET cancel_requested_at = COALESCE(cancel_requested_at,now()),
+          status = CASE WHEN status IN ('submitting','running','submit_unknown') THEN status ELSE 'cancelled' END,
+          failure_class = CASE WHEN status IN ('submitting','running','submit_unknown') THEN failure_class ELSE 'cancelled' END,
+          failure_detail = 'Client requested cancellation; submitted remote work is preserved for reconciliation.',
+          finished_at = CASE WHEN status IN ('submitting','running','submit_unknown') THEN finished_at ELSE now() END,
+          lease_owner = CASE WHEN status IN ('submitting','running','submit_unknown') THEN lease_owner ELSE NULL END,
+          lease_expires_at = CASE WHEN status IN ('submitting','running','submit_unknown') THEN lease_expires_at ELSE NULL END,updated_at = now()
       WHERE id = ${jobId} AND tenant_id = ${tenantId}
-        AND status IN ('pending_billing', 'queued', 'leased', 'submitting', 'running')
+        AND status IN ('pending_billing', 'queued', 'leased', 'submitting', 'running','submit_unknown')
       RETURNING id
     )
     SELECT updated.id, previous.status AS previous_status
@@ -872,6 +885,16 @@ export async function recoverExpiredGenerationLeases(sql: GenerationSql = getGen
   unknown: number;
 }> {
   return sql.begin(async (tx) => {
+    // 新代码明确记载尚在准备输入且没有POST起点；旧版本NULL不能据此推断未发。
+    const prepared=await tx<{job_id:string}[]>`UPDATE generation_attempt a SET status='failed',recovery_status='resolved',
+      failure_class='artifact_download',failure_detail='Lease expired during input preparation; provider was never called.',finished_at=now(),updated_at=now()
+      FROM generation_job job WHERE job.id=a.job_id AND job.lease_expires_at<now()
+      AND a.status IN ('submitting','running') AND a.provider_submission_started_at IS NULL
+      AND a.recovery_detail='input_preparation_not_submitted' RETURNING a.job_id`;
+    if(prepared.length) await tx`UPDATE generation_job SET status='queued',available_at=now(),lease_owner=NULL,
+      lease_expires_at=NULL,heartbeat_at=NULL,updated_at=now() WHERE id=ANY(${prepared.map(a=>a.job_id)}::text[])
+      AND status IN ('submitting','running') AND lease_expires_at<now()
+      AND NOT EXISTS(SELECT 1 FROM generation_attempt a WHERE a.job_id=generation_job.id AND a.status IN ('submitting','running','submit_unknown') AND a.recovery_status<>'resolved')`;
     const requeued = await tx<{ id: string }[]>`
       UPDATE generation_job
       SET status = 'queued', available_at = now(), lease_owner = NULL, lease_expires_at = NULL,
@@ -893,7 +916,8 @@ export async function recoverExpiredGenerationLeases(sql: GenerationSql = getGen
       await tx`
         UPDATE generation_attempt
         SET status = 'submit_unknown', failure_class = 'unknown',
-            failure_detail = 'Worker lease expired before provider result was durably reconciled.', updated_at = now()
+            failure_detail = 'Worker lease expired before provider result was durably reconciled.',
+            recovery_owner = COALESCE(recovery_owner, 'control-plane:provider-reconciliation'), updated_at = now()
         WHERE job_id = ANY(${unknown.map((row) => row.id)}::text[]) AND status IN ('submitting', 'running')
       `;
       await tx`
@@ -902,7 +926,7 @@ export async function recoverExpiredGenerationLeases(sql: GenerationSql = getGen
             provider_reconcile_deadline_at = COALESCE(provider_reconcile_deadline_at, now() + interval '24 hours'),
             updated_at = now()
         WHERE job_id = ANY(${unknown.map((row) => row.id)}::text[])
-          AND provider_task_id IS NOT NULL AND provider_state IN ('unknown', 'running')
+          AND provider_state IN ('unknown', 'running', 'succeeded')
       `;
     }
     await tx`DELETE FROM supplier_lease WHERE expires_at < now()`;
@@ -956,4 +980,148 @@ export function mapSupplierLease(row: Row): SupplierLease {
     expiresAt: asDate(row.expires_at),
     supplier: mapSupplierRecord(row),
   };
+}
+
+/** 供应商已返回成品：先保存响应，再做下载/验证；这些恢复绝不再次提交生成。 */
+export async function checkpointProviderOutput(input: {
+  jobId: string; attemptId: string; output: SupplierGenerationOutput;
+}, sql: GenerationSql = getGenerationSql()): Promise<void> {
+  const unparsed=input.output.evidence?.source==='unparsed-provider-response';
+  const response = encryptGenerationPrompt(JSON.stringify({...input.output,receipt_kind:unparsed?'unparsed_response':'output'}));
+  await writeProviderReceiptSpool(input.jobId,input.attemptId,response);
+  const rows = await sql<{ id: string }[]>`
+    UPDATE generation_attempt SET response_ciphertext = ${response}, provider_state = ${unparsed?'unknown':'succeeded'},
+      provider_request_id = COALESCE(${input.output.providerRequestId ?? null}, provider_request_id),
+      provider_task_id = COALESCE(${input.output.providerTaskId ?? null}, provider_task_id),
+      provider_http_status = ${input.output.httpStatus},
+      evidence_json = ${sql.json(JSON.parse(JSON.stringify(input.output.evidence ?? {})) as never)}, recovery_status = ${unparsed?'manual':'pending'},
+      provider_next_poll_at = CASE WHEN ${unparsed} THEN NULL ELSE now()+interval '2 minutes' END,
+      provider_reconcile_deadline_at = COALESCE(provider_reconcile_deadline_at, now() + interval '24 hours'),
+      recovery_owner = ${unparsed?'control-plane:manual-reconciliation':'control-plane:provider-reconciliation'},
+      recovery_detail = CASE WHEN ${unparsed} THEN 'Successful HTTP response has no recognized media pointer; original encrypted response retained, never resubmit.' ELSE recovery_detail END, updated_at = now()
+    WHERE id = ${input.attemptId} AND job_id = ${input.jobId} RETURNING id
+  `;
+  if (!rows[0]) throw new Error('Provider response has no durable attempt owner.');
+}
+
+function responseSpoolDirectory(): string {
+  return process.env.GENERATION_RESPONSE_SPOOL_DIR ?? '/app/generation-response-spool';
+}
+
+/** 重启或DB写入失败后只重放保存成品，不重新生成；成功后回收加密日志。 */
+export async function restoreProviderResponsesFromSpool(sql: GenerationSql = getGenerationSql()): Promise<void> {
+  const directory = responseSpoolDirectory();
+  const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []; throw error;
+  });
+  for (const name of names.filter((value) => /^[a-f0-9-]{36}\.json(?:\.[a-f0-9-]{36}\.tmp)?$/.test(value)).slice(0, 100)) {
+    let invalidReceipt=false;
+    try {
+    const filename = path.join(directory, name);
+    if (name.endsWith('.tmp') && Date.now()-(await stat(filename)).mtimeMs<120_000) continue;
+    const content=await readFile(filename,'utf8');
+    invalidReceipt=true;
+    const record = JSON.parse(content) as { jobId: string; attemptId: string; ciphertext: string };
+    if (record.attemptId!==name.slice(0,36) || !/^[a-f0-9-]{36}$/.test(record.jobId)) throw new Error('Invalid checkpoint owner');
+    invalidReceipt=false;
+    const rows = await sql<{ status: string; recovery_status:string; live: boolean }[]>`SELECT attempt.status,attempt.recovery_status, (job.lease_expires_at>now() AND job.status IN ('submitting','running','leased')) AS live FROM generation_attempt attempt JOIN generation_job job ON job.id=attempt.job_id WHERE attempt.id=${record.attemptId} AND attempt.job_id=${record.jobId}`;
+    if (rows[0]?.status === 'succeeded' || (rows[0]?.status==='failed' && rows[0]?.recovery_status==='resolved')) { await unlink(filename); continue; }
+    if (!rows[0] || rows[0].live) continue;
+    invalidReceipt=true;
+    const receipt=JSON.parse(decryptGenerationPrompt(record.ciphertext)) as SupplierGenerationOutput & {receipt_kind?:string;protocol?:string};
+    if(receipt.receipt_kind==='provider_task') {
+      if(!receipt.providerTaskId || !receipt.protocol) throw new Error('Incomplete original provider task receipt');
+      invalidReceipt=false;
+      const assigned=await markProviderTaskSubmitted({jobId:record.jobId,attemptId:record.attemptId,
+        providerTaskId:receipt.providerTaskId,protocol:receipt.protocol,firstPollDelayMs:1},sql);
+      if(!assigned) {invalidReceipt=true;throw new Error('Original task receipt cannot overwrite a different provider owner');}
+      await sql`UPDATE generation_attempt SET recovery_status='pending',recovery_owner='control-plane:provider-reconciliation',updated_at=now() WHERE id=${record.attemptId}`;
+    } else if(receipt.receipt_kind==='unparsed_response') {
+      invalidReceipt=false;
+      await checkpointProviderOutput({jobId:record.jobId,attemptId:record.attemptId,output:receipt},sql);
+      await rename(filename,`${filename}.manual`);
+    } else {
+      invalidReceipt=false;
+      if(!receipt.url && !receipt.base64) {invalidReceipt=true;throw new Error('Original response has no media pointer');}
+      await checkpointProviderOutput({jobId:record.jobId,attemptId:record.attemptId,output:receipt},sql);
+    }
+    await sql`UPDATE generation_attempt SET status='submit_unknown', provider_next_poll_at=CASE WHEN ${receipt.receipt_kind==='provider_task'} THEN provider_next_poll_at ELSE now() END
+      WHERE id=${record.attemptId} AND status NOT IN ('succeeded')`;
+    if (name.endsWith('.tmp') || receipt.receipt_kind==='provider_task') await unlink(filename);
+    } catch {
+      // 瞬态DB/IO失败保留原扩展名，下一维护轮继续；只有确定无效证据才进入人工。
+      if (!invalidReceipt) continue;
+      // 保留坏文件供人工恢复，单个文件不得堵住整批维护与所有已受理订单。
+      await sql`UPDATE generation_attempt SET recovery_status='manual', recovery_owner='control-plane:manual-reconciliation',
+        recovery_detail='Encrypted response journal cannot be restored; original journal retained for operator.',
+        updated_at=now() WHERE id=${name.slice(0,36)}`.catch(() => undefined);
+      await rename(path.join(directory,name),path.join(directory,`${name}.manual`)).catch(()=>undefined);
+    }
+  }
+}
+
+export async function clearProviderOutputCheckpoint(attemptId: string): Promise<void> {
+  await unlink(path.join(responseSpoolDirectory(), `${attemptId}.json`)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') console.warn('[response-recovery] completed checkpoint cleanup deferred', attemptId);
+  });
+}
+
+/** 产物已落、job收口前进程退出：canonical事实优先，不依赖待轮询attempt。 */
+export async function recoverJobsFromCanonicalArtifacts(sql: GenerationSql = getGenerationSql()): Promise<void> {
+  const jobs = await sql<{ id: string; requested_count: number }[]>`
+    SELECT job.id,job.requested_count FROM generation_job job
+    WHERE (job.status='submit_unknown' OR (job.cancel_requested_at IS NOT NULL AND job.status IN ('running','submitting')))
+      AND EXISTS(SELECT 1 FROM artifact a WHERE a.job_id=job.id AND a.role='output')
+    ORDER BY job.updated_at LIMIT 100
+  `;
+  for (const job of jobs) {
+    const current = await getGenerationJob(job.id,sql);
+    if (current?.cancelRequestedAt) { await settleRequestedGenerationCancellation(job.id,sql); continue; }
+    const artifacts = await listCompletedGenerationArtifacts(job.id, sql);
+    if (artifacts.length >= Number(job.requested_count)) {
+      await reviveGenerationJobWithArtifacts({jobId:job.id,workerId:'recovery:canonical-artifacts',artifacts},sql);
+    } else {
+      await sql`UPDATE generation_job SET status='queued',completed_count=${artifacts.length},
+        available_at=now(),failure_class=NULL,failure_detail=NULL,updated_at=now()
+        WHERE id=${job.id} AND status='submit_unknown' AND NOT EXISTS(
+          SELECT 1 FROM generation_attempt a WHERE a.job_id=${job.id}
+          AND a.status IN ('submitting','running','submit_unknown') AND a.recovery_status<>'resolved'
+        )`;
+    }
+  }
+}
+
+/** 已在飞的取消请求：先保留全部已知产物，再终结未执行部分；账务由既有维护幂等结算。 */
+export async function settleRequestedGenerationCancellation(jobId: string, sql: GenerationSql=getGenerationSql()): Promise<boolean> {
+  if (await jobHasUnresolvedProviderTask(jobId,sql)) return false;
+  const artifacts=await listCompletedGenerationArtifacts(jobId,sql);
+  const result={created:Math.floor(Date.now()/1000),artifacts,endpointLabel:artifacts.at(-1)?.endpointLabel};
+  const rows=await sql<{id:string}[]>`UPDATE generation_job SET status='cancelled',completed_count=${artifacts.length},
+    primary_artifact_id=${artifacts[0]?.id ?? null},result_json=${sql.json(result as never)},
+    failure_class='cancelled',failure_detail='Cancellation settled after preserving all known submitted output.',
+    finished_at=now(),lease_owner=NULL,lease_expires_at=NULL,updated_at=now()
+    WHERE id=${jobId} AND cancel_requested_at IS NOT NULL AND status IN ('running','submitting','submit_unknown','leased','queued')
+    AND NOT EXISTS(SELECT 1 FROM generation_attempt a WHERE a.job_id=${jobId} AND a.status IN ('submitting','running','submit_unknown') AND a.recovery_status<>'resolved') RETURNING id`;
+  return !!rows[0];
+}
+
+async function writeProviderReceiptSpool(jobId:string,attemptId:string,response:string):Promise<void> {
+  const directory = responseSpoolDirectory();
+  await mkdir(directory, { recursive: true, mode: 0o770 });
+  // UUID文件名、AES-GCM内容；fsync后才确认收到，卷必须由生产挂载持久保存。
+  const finalPath = path.join(directory, `${attemptId}.json`);
+  const temporaryPath = `${finalPath}.${randomUUID()}.tmp`;
+  const file = await open(temporaryPath, 'wx', 0o660);
+  try { await file.writeFile(JSON.stringify({ jobId: jobId, attemptId: attemptId, ciphertext: response })); await file.sync(); }
+  finally { await file.close(); }
+  await rename(temporaryPath, finalPath);
+  const directoryFile = await open(directory, 'r');
+  try { await directoryFile.sync(); } finally { await directoryFile.close(); }
+
+}
+
+/** 异步受理回执先fsync再落DB；DB故障或退出也不能丢掉原上游task关联。 */
+export async function checkpointProviderTaskReceipt(input:{jobId:string;attemptId:string;providerTaskId:string;protocol:ProviderProtocol}):Promise<void> {
+  const ciphertext=encryptGenerationPrompt(JSON.stringify({receipt_kind:'provider_task',...input}));
+  await writeProviderReceiptSpool(input.jobId,input.attemptId,ciphertext);
 }

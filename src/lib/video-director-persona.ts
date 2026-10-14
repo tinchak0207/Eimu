@@ -20,10 +20,8 @@
  * 都在 VPS /opt/agent-harness，本地 repo 无 gateway 真源可改。本档钉死契约
  * 四要素并被委托单/回传两端 import。
  *
- * SKILL 挂载：repo skills/ 无视频域配方库（考古结论 2026-09-08：astra-ad-studio
- * 仅有 asset_search 种子包指引与 MP4 渲染尾注、make-blender-education-video 是
- * 3D 教育视频链、motion-design/blender-director 是 3D 域；无视频导演专属
- * SKILL.md）→ 本档 skillPaths 置空并在此声明，收口片/后续配方库落库时再补。
+ * SKILL 挂载：视频导演读取视频域导演配方；模型与运动参考按任务读取，
+ * 不挂载 Blender 原生相机配方，不把文本运镜等同原生位姿控制。
  *
  * 隔离铁律：视频导演回传只含交付物契约 + 交付摘要（四栏 payload + video_summary
  * ≤500 token），过程（生成日志/试看中间态/多轮痕迹）不出 subagent——对应
@@ -85,6 +83,9 @@ export const VIDEO_DIRECTOR_PERSONA_TOOL_IDS = [
   "last_frame_video_chain",
   "image_quote",
   "image_generate",
+  "image_get_result",
+  "image_result_download",
+  "video_result_fetch",
   "canvas_get_state",
   "canvas_apply_ops",
   "style_dna_extract",
@@ -96,15 +97,11 @@ export type VideoDirectorPersonaToolId = (typeof VIDEO_DIRECTOR_PERSONA_TOOL_IDS
 
 // ─────────────────────────────────────────── ③ SKILL 挂载引用
 
-/**
- * SKILL 挂载点：repo skills/ 经考古（2026-09-08）无视频域配方库——
- * skills/{astra-ad-studio,make-blender-education-video,motion-design,
- * blender-director,music-director,web-3d-awwwards,blender-agent-os} 逐一核对，
- * 无视频导演专属 SKILL.md（astra-ad-studio 仅种子包指引+SVG/HTML 交付链）。
- * 本档置空数组并声明：配方库落库（video-director/SKILL.md）后由收口片补挂，
- * 禁提前指幻影路径（记忆 subagent-spec-must-read-memory 幻影档教训）。
- */
-export const VIDEO_DIRECTOR_PERSONA_SKILL_PATHS: readonly string[] = [];
+/** 生成器统一映射为 workspace/.opencode 路径，参考文件由 Skill 按需索引。 */
+export const VIDEO_DIRECTOR_PERSONA_SKILL_PATHS: readonly string[] = ["skills/video-director/SKILL.md"];
+
+/** 运行期仅挂载短入口；不常驻模型手册或运动词库。 */
+export const VIDEO_DIRECTOR_PERSONA_PROMPT = "共同真实性、授权、安全与交付契约见 workspace/AGENTS.md。本域配方按任务与网关事实行加载。\n\n【你的角色：视频导演（分镜/镜头设计/生成影片）】被派来的领域专家，只做本域的活。严格按任务书执行（唯一需求来源，看不到主对话历史），产出遵守交付契约，跳过环节须写明「跳过 X，原因 Y」。只回结论与产物引用。\n\n你是 Eimu 视频导演。研究先行，制作前读取 .opencode/skills/video-director/SKILL.md；根据任务按需读取其中运动与模型参考。先说明镜头叙事收益，再选主体动作、机位路径与时序；遵守明确 static/固定焦距，不默认 slow push。未知素材明确尚未观看。平台真实能力、参考输入、报价与授权为准，研究并发与独立评审保留；实际时序感知回执才能支撑运动审核。制作委托必须包含共享workspace、project/frame/request_id、已有明确预算及canonical/reference/style版本（无额外cap时明确注明，不制造新权限门槛）；图片回收使用image_result_download，不派无该能力的通用席位。按耐久任务与本地hash报告coverage，observed不是downloaded，queued不是失败；持续授权不重复确认。";
 
 // ─────────────────────────────────────────── ④ 委托单 + 回传契约（import，零重定义）
 

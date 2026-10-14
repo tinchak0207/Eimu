@@ -27,6 +27,7 @@ import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGeneratio
 export interface SupplyAdapter {
   /** 全域唯一；＝ DB `supplier.adapter_type` ＝ attempt `provider_protocol`。 */
   readonly protocol: string;
+  readonly checkpointsSubmissionStart?: boolean;
   /** 提交。同步协议回成品；异步协议在拿到 task id 时呼叫 `input.onProviderTaskSubmitted`。 */
   submit(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput>;
   /** 异步协议的对帐轮询（provider-reconciliation 用）。缺席＝同步协议。 */
@@ -58,12 +59,14 @@ export function workflowSeconds(input: SupplierGenerationInput): number | null {
 
 const openaiImagesAdapter: SupplyAdapter = {
   protocol: "openai_images",
+  checkpointsSubmissionStart: true,
   submit: (supplier, input) => requestOpenAiCompatibleSupplier(supplier, input),
   reconcileVia: "newapi_video",
 };
 
 const adobe2apiAdapter: SupplyAdapter = {
   protocol: "adobe2api",
+  checkpointsSubmissionStart: true,
   submit: (supplier, input) => requestOpenAiCompatibleSupplier(supplier, input),
   reconcileVia: "newapi_video",
 };

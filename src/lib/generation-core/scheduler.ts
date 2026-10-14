@@ -266,11 +266,23 @@ export async function diagnoseSupplierUnavailability(
   }
 
   const withHealthyAccount = await sql<Row[]>`
-    SELECT supplier.id, supplier.failure_domain FROM supplier
+    SELECT supplier.id, supplier.failure_domain, supplier.concurrency_limit,
+      (SELECT count(*)::int FROM supplier_lease l WHERE l.supplier_id=supplier.id AND l.expires_at>now()) AS active_leases,
+      account.id AS account_id, account.concurrency_limit AS account_limit,
+      (SELECT count(*)::int FROM supplier_lease l WHERE l.supplier_account_id=account.id AND l.expires_at>now()) AS account_leases,
+      capability.concurrency_limit AS capability_limit,
+      (SELECT count(*)::int FROM supplier_lease l WHERE l.supplier_capability_id=capability.id AND l.expires_at>now()) AS capability_leases
+      FROM supplier
     JOIN supplier_capability capability ON capability.supplier_id = supplier.id
     JOIN supplier_account account ON account.supplier_id = supplier.id
     WHERE capability.public_model_id = ${job.modelId} AND capability.kind = ${job.kind}
       AND capability.is_current AND capability.enabled
+      AND capability.health_status <> 'disabled'
+      AND (capability.cooldown_until IS NULL OR capability.cooldown_until <= now())
+      AND (${job.ratio}::text IS NULL OR cardinality(capability.ratios)=0 OR ${job.ratio}=ANY(capability.ratios))
+      AND (${job.resolution}::text IS NULL OR cardinality(capability.resolutions)=0 OR ${job.resolution}=ANY(capability.resolutions))
+      AND (${job.routingClass} <> 'firefly_only' OR supplier.adapter_type='adobe2api')
+      AND (${job.routingClass} <> 'hub_only' OR supplier.id=${HUB_ONLY_SUPPLIER_ID})
       AND supplier.id = ANY(${route.supplierIds}::text[])
       AND supplier.enabled AND supplier.health_status <> 'disabled'
       AND (supplier.cooldown_until IS NULL OR supplier.cooldown_until <= now())
@@ -318,7 +330,7 @@ export async function diagnoseSupplierUnavailability(
   return {
     reason: "capacity_saturated",
     detail: `No eligible supplier could be leased for ${job.modelId} `
-      + `(active leases vs limits: ${notCooling.map((row) => `${String(row.id)} ${Number(row.active_leases)}/${Number(row.concurrency_limit)}`).join(", ")}). `
+      + `(active leases vs limits: ${withHealthyAccount.filter((row) => leaseable.some(([id]) => id === String(row.id))).map((row) => `${String(row.id)} ${Number(row.active_leases)}/${Number(row.concurrency_limit)}; account ${String(row.account_id)} ${Number(row.account_leases)}/${Number(row.account_limit)}; capability ${Number(row.capability_leases)}/${Number(row.capability_limit)}`).join(", ")}). `
       + "The job stays queued and will retry.",
   };
 }
@@ -395,7 +407,7 @@ export async function reportSupplierFailure(
   // INC-0830-VIDEO：upstream_protocol = 「上游成功但我们解析不出输出」——我们的
   // 解析 bug，不是上游的错。不记 health event（不拉低 success_rate_5m）、不动
   // supplier/account/capability 健康状态，渠道继续接单；只留一行日志待查。
-  if (failure.failureClass === "upstream_protocol") {
+  if (["upstream_protocol", "artifact_download", "pricing_config", "cancelled", "unknown", "user_input"].includes(failure.failureClass)) {
     console.warn(
       `[scheduler] upstream_protocol failure (no cooldown, no health penalty) supplier=${supplier.supplierId} account=${supplier.accountId}: ${failure.detail.slice(0, 300)}`,
     );

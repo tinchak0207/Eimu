@@ -87,6 +87,7 @@ export interface GenerationJob {
   completedCount: number;
   attemptCount: number;
   billingAmount: number;
+  cancelRequestedAt?: Date | null;
   deadlineAt: Date;
   availableAt: Date;
   leaseOwner: string | null;
@@ -98,6 +99,7 @@ export interface GenerationJob {
    * 产品解释只住在 record.explanation，永不回写 failureClass/failureDetail 的来源事实。
    */
   failureRecord: FailureRecord | null;
+  recovery?: { state: string; owner: string | null; deadline_at: string | null; detail: string | null } | null;
   result: GenerationJobResult | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -116,6 +118,8 @@ export interface GenerationArtifactResult {
   width: number | null;
   height: number | null;
   endpointLabel: string;
+  actualSupplierModelId?: string | null;
+  originalHttpStatus?: number | null;
 }
 
 export interface GenerationJobResult {
@@ -227,6 +231,11 @@ export interface SupplierLease {
 export type ProviderProtocol = string;
 
 export interface SupplierGenerationInput {
+  /** 稳定提交关联；HTTP取消只取消等待，不证明供给侧已取消。 */
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+  onProviderResponse?: (output: SupplierGenerationOutput) => Promise<void>;
+
   jobId: string;
   attemptId: string;
   modelId: string;
@@ -244,7 +253,8 @@ export interface SupplierGenerationInput {
    * 对帐排程 durably 落进 attempt 行（只发事件不落行 = 事故重演）。同步适配器
    * 不需要实现。
    */
-  onProviderTaskSubmitted?: (providerTaskId: string, protocol: ProviderProtocol) => void;
+  onProviderRequestStarted?: () => Promise<void>;
+  onProviderTaskSubmitted?: (providerTaskId: string, protocol: ProviderProtocol) => Promise<void>;
 }
 
 export interface SupplierGenerationOutput {

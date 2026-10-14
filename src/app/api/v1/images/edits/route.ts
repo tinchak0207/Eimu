@@ -136,6 +136,9 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
   // 算价前先同步 admin 覆写，与 /v1/images/generations 同序。
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_EDIT_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN) * n;
+  if (body.cap_coins != null && (typeof body.cap_coins !== "number" || !Number.isFinite(body.cap_coins) || body.cap_coins < 0 || quota / QUOTA_PER_COIN > body.cap_coins)) {
+    return respond(pixaiRequestError("本次权威报价超过单请求硬预算，尚未提交且未扣费。", "task_budget_exceeded", traceId), 402);
+  }
 
   // ── 幂等（reserveSyncCharge 之前）：同 key 重试不重复扣费 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
@@ -344,6 +347,7 @@ async function durableEditBranch(input: {
     bizKeyId: key.id,
     billingUserId: key.userId,
     baseBillingAmount,
+    budgetCapCoins: typeof body.cap_coins === "number" && Number.isFinite(body.cap_coins) ? body.cap_coins : undefined,
   });
   if (!gate.ok) {
     return respond(
@@ -351,6 +355,8 @@ async function durableEditBranch(input: {
       gate.status,
     );
   }
+
+  if (body.cap_coins != null && (typeof body.cap_coins !== "number" || !Number.isFinite(body.cap_coins) || body.cap_coins < 0 || baseBillingAmount / QUOTA_PER_COIN > body.cap_coins)) return respond(pixaiRequestError("本次权威报价超过单请求硬预算，尚未提交且未扣费。", "task_budget_exceeded", traceId), 402);
 
   try {
     const submitted = await submitGenerationCommand({
@@ -369,7 +375,7 @@ async function durableEditBranch(input: {
       responseFormat: "url",
       requestedCount: rawN,
       billingAmount: gate.billingAmount,
-      workflow: { references: [reference] },
+      workflow: { ...(typeof body.workflow === "object" && body.workflow ? body.workflow : {}), references: [reference] },
     });
     return respond(generationTaskResponse(submitted.job), 202, {
       Location: `/v1/images/${submitted.job.id}`,

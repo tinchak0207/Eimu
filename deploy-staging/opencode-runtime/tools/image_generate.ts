@@ -1,18 +1,24 @@
 import { tool } from "@opencode-ai/plugin/tool"
+import { readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import {
-  priceForAsync,
   classifyError,
   confirmSpend,
   dedupHash,
   registerTask,
   platformFetch,
   siteFetch,
-  probeModelAvailable,
+  loadCatalog,
+  randomUUID,
+  productionScope,
   publicImageUrl,
+  authorizedProjectBudget,
+  uploadImageBytes,
   ok,
   fail,
 } from "../lib/client"
-import { checkAgentPath, looksLikeAgentPath } from "../lib/sandbox"
+import { WORKSPACE, checkAgentPath, looksLikeAgentPath, safeFetch } from "../lib/sandbox"
+import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash } from "../lib/image-journal"
 
 /**
  * 生图尺寸白名单（R9-C, 2026-09-30）：真源＝站点 GET /v1/openapi.json 的
@@ -108,8 +114,9 @@ async function normalizeReferenceImages(
   sessionID: string,
   signal?: AbortSignal,
   maxImages = MAX_REFERENCE_IMAGES,
-): Promise<{ ok: true; images: string[] } | { ok: false; message: string }> {
+): Promise<{ ok: true; images: string[]; fingerprints: string[] } | { ok: false; message: string }> {
   const images: string[] = []
+  const fingerprints:string[] = []
   // 超过上限不静默截断（2026-10-04 修）：静默丢掉第 6 张以后＝「参考图与出图无关」的假成功。
   const provided = raw ?? []
   if (provided.length > maxImages) {
@@ -131,11 +138,22 @@ async function normalizeReferenceImages(
       const invalid = validateDataImage(src, i + 1)
       if (invalid) return { ok: false, message: invalid }
       images.push(src)
+      fingerprints.push(createHash("sha256").update(Buffer.from(src.split(",")[1].replace(/\s+/g,""),"base64")).digest("hex"))
       continue
     }
     if (/^https?:/i.test(src)) {
-      images.push(src)
-      continue
+      try {
+        const response=await safeFetch(src,{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(30000)]):AbortSignal.timeout(30000)})
+        if(!response.ok||!response.body)throw new Error("reference_unreachable")
+        const reader=response.body.getReader();const hash=createHash("sha256");const chunks:Uint8Array[]=[];let bytes=0
+        try {for(;;){const item=await reader.read();if(item.done)break;bytes+=item.value.byteLength;if(bytes>20*1024*1024)throw new Error("reference_too_large");hash.update(item.value);chunks.push(item.value)}}catch(e){await reader.cancel().catch(()=>undefined);throw e}finally{reader.releaseLock()}
+        if(!bytes)throw new Error("reference_empty")
+        const mime=(response.headers.get("content-type")??"image/png").split(";")[0]
+        if(!mime.startsWith("image/"))throw new Error("reference_not_image")
+        const frozen=await uploadImageBytes(`data:${mime};base64,${Buffer.concat(chunks).toString("base64")}`,sessionID,signal)
+        if(!frozen.url)throw new Error("reference_snapshot_missing")
+        images.push(frozen.url);fingerprints.push(hash.digest("hex"));continue
+      }catch {return {ok:false,message:`第 ${i+1} 张参考图无法验证内容hash；未生成，请恢复原canonical参考地址。`}}
     }
     if (!looksLikeAgentPath(src)) {
       return {
@@ -160,7 +178,9 @@ async function normalizeReferenceImages(
     }
     try {
       // 复用 image_edit durable 链的同一轮子：读位元组 → 网关 /internal/media/upload → 公网 URL。
-      const url = await publicImageUrl(src, sessionID, signal)
+      const bytes=readFileSync(src.startsWith("/")?src:`${WORKSPACE}/${src}`)
+      const fingerprint=createHash("sha256").update(bytes).digest("hex")
+      const url = (await uploadImageBytes(`data:image/png;base64,${bytes.toString("base64")}`,sessionID,signal)).url
       if (!url) {
         return {
           ok: false,
@@ -168,6 +188,7 @@ async function normalizeReferenceImages(
         }
       }
       images.push(url)
+      fingerprints.push(fingerprint)
     } catch (e: any) {
       const msg = e?.message || String(e)
       // 传目录时 readFileSync 会抛裸 EISDIR（2026-10-04 修）：换成人话，不把 errno 丢给用户。
@@ -177,7 +198,7 @@ async function normalizeReferenceImages(
       return { ok: false, message: `第 ${i + 1} 张参考图处理失败（${src}）：${msg}` }
     }
   }
-  return { ok: true, images }
+  return { ok: true, images, fingerprints }
 }
 
 /**
@@ -245,6 +266,15 @@ export default tool({
     "异步提交图片或视频生成，返回完整task_id；完成由harness续接，不轮询。单图和已有分镜关键帧可直接调用；多镜制作沿用workflow工具。先用image_quote/video_quote核当前模型、尺寸、时长与价格。≤0.1币低成本草稿可直接执行；其它按本轮网关授权：full/auto直接提交，无持续或已有预算授权时确认。工具成功交付url或任务succeeded才证明产出；余额不足与模型不可用按原始错误区分。参考图支持URL/data URL/合法本地路径；可用角色卡tag或character_card_list维持一致性，图片参考不保证锁定视频首尾帧。返回task_id完整保留。",
   args: {
     prompt: tool.schema.string().describe("生成提示词"),
+    project: tool.schema.string().optional().describe("制作项目稳定ID；跨批次共享冻结模型、尺寸、参考版本与硬预算"),
+    frame: tool.schema.number().int().min(1).optional().describe("项目帧号；逐帧制作必须n=1，150帧即150个独立task"),
+    request_id: tool.schema.string().optional().describe("稳定提交ID；断线/429重试必须沿用，不产生无关联新job"),
+    retry_task_id: tool.schema.string().optional().describe("已有完整task_id：恢复查询与收据，不再次付费生成"),
+    cap_coins: tool.schema.number().min(0).optional().describe("该单请求硬预算，传给权威控制面"),
+    project_budget_coins: tool.schema.number().min(0).optional().describe("项目累计上限约束；可信用户配置优先，模型参数仅收紧，不冒充付费授权"),
+    reference_version: tool.schema.string().optional().describe("已冻结canonical/reference版本"),
+    style_version: tool.schema.string().optional().describe("已冻结STYLE LOCK版本"),
+    style_lock: tool.schema.string().optional().describe("项目固定风格前缀，工具逐字附加；同项目不允许改变"),
     model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2"),
     size: tool.schema.string().optional().describe("尺寸，如 1024x1024"),
     n: tool.schema.number().int().min(1).max(4).optional().describe("生成张数，预设 1"),
@@ -271,19 +301,37 @@ export default tool({
   },
   async execute(args, context) {
     const model = args.model ?? "gpt-image-2"
-    // 模型可用性强制探测（2026-08-15）：不可用不得提交，避免把请求发给坏渠道。
-    const probe = await probeModelAvailable(model, context.sessionID, context.abort)
-    if (probe.availability === "unavailable") {
-      return fail(
-        "model_unavailable",
-        `模型 ${model} 目前不可用（${probe.note ?? "渠道故障"}）——这是模型/通路层故障，不是用户余额问题。请改用同类型可用模型，或告知用户此模型暂时不可用。`,
-        { channel_verified: false, note: CHANNEL_NOT_VERIFIED },
-      )
-    }
-
+    // 模型准入只由控制面执行；工具不把排队/退款/下载失败算成模型故障。
     const size = args.size ?? "1024x1024"
     const n = args.n ?? 1
     const kind = args.kind ?? "image"
+    if (args.frame != null && (!args.project || kind !== "image" || n !== 1)) return fail("invalid_frame_contract", "逐帧生成必须提供project，kind=image且n=1；不允许以拼图或多候选冒充多帧。")
+    if (args.project && (args.project.length > 200 || !args.project.trim())) return fail("invalid_project", "project必须为非空稳定ID，最多200字。")
+    if (args.request_id && args.request_id.length > 200) return fail("invalid_request_id", "request_id最多200字。")
+    if (args.style_version && !args.style_lock) return fail("missing_style_lock", "冻结style_version必须同时提供完整style_lock。")
+    if (args.reference_version && !args.reference_images?.length) return fail("missing_canonical", "冻结reference_version必须提供canonical参考图。")
+    const request_id = args.request_id ?? (args.frame != null ? `frame:${args.project}:${args.frame}` : randomUUID())
+    let scope:string
+    try {scope=await productionScope(context.sessionID,args.project,context.abort)}
+    catch {return fail("session_identity_unavailable","网关暂不能证明当前凭证归属；不使用共享key、不生成，原request_id可恢复。",{request_id,recoverable:true,new_generation:false})}
+    if (args.retry_task_id) {
+      try {
+        const original = await platformFetch(`/${kind === "video" ? "videos" : "images"}/${encodeURIComponent(args.retry_task_id)}`, {method:"GET"}, context.sessionID, context.abort)
+        const body = await original.json().catch(() => ({}))
+        if (!original.ok) { const err = await classifyError(original, body); return fail(err.code, err.hint, { task_id:args.retry_task_id, request_id, recoverable:true }) }
+        const registration = await registerTask(args.retry_task_id, context.sessionID, kind, undefined, { model:body.model ?? model, request_id, project:args.project, frame:args.frame })
+        return ok({ task_id:args.retry_task_id, request_id, status:body.status ?? "unknown", resumed:true, new_generation:false, artifacts:body.data ?? [], registration, note:"只恢复原job；未创建新付费请求。终态失败需按原job与明确返工授权交中控恢复。" })
+      } catch { return fail("result_unknown", "原job状态暂不可确认；保留原task_id，不能创建无关联替代任务。", {task_id:args.retry_task_id,request_id,recoverable:true}) }
+    }
+    const input_signature=contentHash({prompt:args.prompt,model,size,n,kind,quality:args.quality ?? "standard",duration_seconds:args.duration_seconds,generate_audio:args.generate_audio,project:args.project,frame:args.frame,reference_images:args.reference_images??[],reference_version:args.reference_version,style_version:args.style_version,style_lock:args.style_lock??""})
+    let prior:any
+    try {prior=getSubmission(scope,request_id)} catch {return fail("submission_journal_unavailable","当前席位不能写耐久提交/预算收据；未生成，请交具备制作能力的席位。",{request_id,recoverable:true,new_generation:false})}
+    const priorIdentity = prior ? JSON.parse(prior.metadata_json) : null
+    if(priorIdentity?.input_signature && priorIdentity.input_signature!==input_signature)return fail("idempotency_key_reused","同request_id的输入已改变；保留原job，不静默切模型、参考图或帧。",{task_id:prior?.task_id,request_id,new_generation:false})
+    if (prior?.task_id) {
+      const reg = await registerTask(prior.task_id, prior.session_id, kind, undefined, JSON.parse(prior.metadata_json))
+      return ok({task_id:prior.task_id,request_id,status:"accepted",resumed:true,new_generation:false,registration:reg,note:"原提交已接受；使用image_get_result与image_result_download续接，不重生成。"})
+    }
 
     // 尺寸白名单前置校验（R9-C）：必须在报价/confirm.request 之前，非法尺寸不得让用户签字。
     if (kind === "image") {
@@ -316,18 +364,11 @@ export default tool({
     }
     const duration_seconds = kind === "video" ? (raw_duration ?? 15) : undefined
 
-    // 最近 24h 真实表现提醒（2026-08-27）：可用 ≠ 表现好。样本 ≥5 且成功率 <50%
-    // 时，先劝 agent 换模型而不是把请求发出去（失败会浪费排队时间，退款也不补时间）。
-    const last24h = probe.last_24h
-    if (last24h && last24h.jobs >= 5 && last24h.success_rate < 0.5) {
-      return fail(
-        "model_low_success_rate",
-        `模型 ${model} 探测可用，但最近 24h 真实成功率只有 ${Math.round(last24h.success_rate * 100)}%（${last24h.delivered}/${last24h.jobs} 成功，${last24h.refunded} 笔已退款）。强烈建议改用同类型近期成功率高的模型（可查 /v1/model-status 的 last_24h 对比），或明确告知用户此模型近期表现差、可能反覆失败。`,
-      )
-    }
-
     // 单价取自平台目录（权威值），不用本地硬编码表
-    const unit = await priceForAsync(model, context.sessionID, args.quality, context.abort)
+    const catalog = await loadCatalog(context.sessionID, context.abort)
+    const entry = catalog?.[model]
+    const unit = args.quality === "hd" ? (entry?.hd ?? entry?.standard) : (entry?.standard ?? entry?.hd)
+    if (kind === "image" && (typeof unit !== "number" || !Number.isFinite(unit) || unit < 0)) return fail("price_unknown", "没有本次模型档位的权威报价，未提交；恢复目录后用相同 request_id 重试。")
     // 影片：目录秒价 × 时长（与实扣同源，R9-A2）；目录查不到才粗估并在确认卡标「粗估待确认」。
     const video_price =
       kind === "video"
@@ -335,13 +376,21 @@ export default tool({
         : null
     if (kind === "video" && !video_price) return fail("video_price_unknown", "目录没有本次完整提交档位的币值报价；尚未提交生成，不以未知价格开跑。")
     if (kind === "video" && args.quality === "hd" && video_price?.resolution !== "1080p") return fail("unsupported_resolution", "当前视频API不接受显式1080p品质；模型默认档不同，未提交且未降规格。")
-    const cost_coins =
+    let cost_coins =
       kind === "video"
         ? video_price!.coins
-        : Math.round(unit * n * 1e6) / 1e6
+        : Math.round(unit! * n * 1e6) / 1e6
+
+    if(prior && prior.state!=="rejected")cost_coins=prior.reservation
+
+    let budget: {cap?:number;version:string;source:string} | undefined
+    if(args.project) {
+      try {budget=prior&&prior.state!=="rejected"&&priorIdentity?.budget_version&&lockedProjectBudget(scope)!=null ? {cap:lockedProjectBudget(scope)!,version:priorIdentity.budget_version,source:priorIdentity.budget_source??"agent_constraint"} : await authorizedProjectBudget(context.sessionID,args.project,args.project_budget_coins,context.abort)}
+      catch(e:any){return fail(e.code??"project_budget_unknown",e.message,{request_id,new_generation:false,recoverable:true})}
+    }
 
     // 扣费闸门：≤0.1 币的草稿直接放行，其余需用户确认
-    if (cost_coins > 0.1) {
+    if (cost_coins > 0.1 && (!prior || prior.state==="rejected")) {
       const description =
         kind === "video"
           ? video_price
@@ -349,7 +398,7 @@ export default tool({
             : `生成 ${duration_seconds ?? 10} 秒视频（${model}），预估花费 ${cost_coins} 币（目录查无秒价，粗估待确认，实扣可能更高）`
           : `生成 ${n} 张图（${model}），预估花费 ${cost_coins} 币`
       const approved = await confirmSpend(
-        { sessionID: context.sessionID, amount_coins: cost_coins, description, model },
+        { sessionID: context.sessionID, amount_coins: cost_coins, description, model, request_id },
         context.abort,
       )
       if (!approved) {
@@ -371,7 +420,7 @@ export default tool({
       let reference_images = normalized_refs.images
       // 行内实体 tag 解析（E2, 2026-09-25）：只在 prompt 含 `@[` 时呼叫；必须在送出
       // 生成请求之前完成，且解析后的值才是真正送上游／算 dedup 的值。
-      let final_prompt = args.prompt
+      let final_prompt = args.style_lock ? `${args.style_lock}\n${args.prompt}` : args.prompt
       let card_warnings: string[] = []
       if (args.prompt.includes("@[")) {
         const resolved = await resolveCharacterTags(final_prompt, reference_images, context.sessionID, context.abort)
@@ -388,6 +437,19 @@ export default tool({
         if (reference_images.length > maxReferences) return fail("invalid_reference_images", `角色卡补图后共 ${reference_images.length} 张，超过 ${maxReferences} 张；原参考图未截断、未提交。`)
         card_warnings = resolved.warnings
       }
+      if(priorIdentity?.submitted_references && prior.state!=="rejected") reference_images=priorIdentity.submitted_references
+      let fingerprints:string[]
+      if(priorIdentity?.reference_fingerprints && prior.state!=="rejected") fingerprints=priorIdentity.reference_fingerprints
+      else {
+        const known=new Map(normalized_refs.images.map((url,index)=>[url,normalized_refs.fingerprints[index]]))
+        const extra=reference_images.filter(url=>!known.has(url))
+        const finalRefs=await normalizeReferenceImages(extra,context.sessionID,context.abort,maxReferences)
+        if(!finalRefs.ok)return fail("reference_hash_unavailable",finalRefs.message,{new_generation:false})
+        const frozen=new Map(extra.map((url,index)=>[url,{url:finalRefs.images[index],hash:finalRefs.fingerprints[index]}]))
+        fingerprints=reference_images.map(url=>known.get(url)??frozen.get(url)?.hash!)
+        reference_images=reference_images.map(url=>frozen.get(url)?.url??url)
+        if(fingerprints.some(hash=>!hash))return fail("reference_hash_unavailable","角色卡最终参考图内容未完整验证；未提交。",{new_generation:false})
+      }
       const card_note = card_warnings.length > 0 ? `【角色卡 tag 提醒】${card_warnings.join("；")}` : ""
       const payload: any =
         kind === "video"
@@ -403,9 +465,17 @@ export default tool({
               ...(reference_images.length > 0 ? { reference_images } : {}),
             }
 
+      const identity = { scope, budget_version:budget?.version, budget_source:budget?.source, size, input_signature, submitted_references:reference_images, reference_fingerprints:fingerprints, request_id, session_id:context.sessionID, project:args.project, frame:args.frame, model, cost_coins, reference_version:args.reference_version ?? contentHash(fingerprints), style_version:args.style_version ?? contentHash(args.style_lock ?? "") }
+      payload.workflow = { metadata: { budget_version:budget?.version, session_id:context.sessionID,project:args.project,frame:args.frame,request_id,size,reference_version:identity.reference_version,style_version:identity.style_version,style_lock:args.style_lock ?? "" } }
+      payload.cap_coins = Math.min(args.cap_coins ?? cost_coins, cost_coins)
+      // 单次权威实扣不得高于本地原子保留；目录变价应拒绝而非穿透项目上限。
+      // 在任何生成POST前原子预留项目硬预算和提交意图。网络不明时继续保留，不能盲目释放。
+      try {
+        prepareSubmission(identity, { ...payload, reference_images:args.reference_images ?? [], workflow:payload.workflow }, {model,size,quality:args.quality ?? "standard",reference_version:identity.reference_version,reference_hash:contentHash(fingerprints),style_version:identity.style_version,style_lock:args.style_lock ?? ""}, budget?.cap)
+      } catch (e:any) { return fail(String(e.message).split(":")[0], e.message, {request_id,new_generation:false}) }
       const resp = await platformFetch(
         endpoint,
-        { method: "POST", body: JSON.stringify(payload) },
+        { method: "POST", headers:{"Idempotency-Key":request_id}, body: JSON.stringify(payload) },
         context.sessionID,
         context.abort,
       )
@@ -413,8 +483,10 @@ export default tool({
       const task_id = data?.task_id ?? data?.id ?? null
 
       if (resp.status === 202 || (resp.ok && task_id)) {
+        if (typeof task_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(task_id)) return fail("submission_unknown", "上游接受但未给完整task_id；保留request_id与预算，按相同Idempotency-Key恢复。", {request_id,recoverable:true})
+        acceptTaskSubmission(scope,request_id,task_id,{task_id,session_id:context.sessionID,kind,model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size})
         if (task_id) {
-          // 注册给 poller 自动轮询；best-effort，失败不影响主流程。
+          // 收据先SQLite落盘，再登记网关；失败保持可恢复接受态。
           // dedup_hash 让 poller 能认出「同一个请求重送」直接回快取（0 币），
           // cost_coins 让 poller 续接时发得出正确金额（平台轮询回应不含价格）。
           // E2：杂凑用「解析后」的最终 prompt 与最终参考图——否则同一个请求重送会
@@ -423,44 +495,47 @@ export default tool({
             dedup_hash: dedupHash({ model, prompt: dedupKeyPrompt(final_prompt, reference_images), size, n }),
             model,
             cost_coins,
+            project:args.project,frame:args.frame,request_id,
+            reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,
           })
           poller_ok = reg.ok
           poller_error = reg.error
+          if (!reg.durable) return fail("registration_pending", "上游已接受且本地耐久收据已保存，网关登记暂不可达；稍后按同一task_id/request_id恢复，禁止重复生成。", {task_id,request_id,status:"accepted",recoverable:true,new_generation:false})
         }
         return ok(
           {
             task_id: task_id ?? null,
+            request_id,project:args.project,frame:args.frame,reference_version:identity.reference_version,style_version:identity.style_version,
             kind,
             model,
             estimated_cost_coins: cost_coins,
             note:
-              "已提交。完成时间不定：空闲时通常几十秒到几分钟，高峰期可能排队更久，逾时会自动退款——对用户报耗时时用这个分档说法，不要报精确秒数。harness 会自动续接结果。不要轮询。回报 task_id 给用户时必须原样照抄完整 UUID（36 字元含连字号），严禁截断成前 8 位——短 id 在平台查不到任务。" +
+              "已提交并耐久登记。queued不等于上游失败；完整task_id/request_id必须保留。图完成后用image_get_result读取，再image_result_download验证落盘与ACK；Agent回合结束不撤销作业，不重生成。" +
               (card_note ? `\n${card_note}` : ""),
           },
           { poller_ok, poller_error },
         )
       }
 
-      // 部分实作可能同步直接回图，兜底处理
+      // 同步产物没有平台job时建立明确来源的内部产物收据；不交poller查虚构平台ID。
       if (resp.ok) {
-        const url = data?.data?.[0]?.url || data?.result_url || data?.url
-        if (url) {
-          return ok({
-            url,
-            task_id: data?.id ?? null,
-            kind,
-            model,
-            estimated_cost_coins: cost_coins,
-            ...(card_note ? { note: card_note } : {}),
-          })
+        const artifacts=Array.isArray(data.data)?data.data.filter((a:any)=>typeof a.url==="string"):data.result_url?[{url:data.result_url}]:data.url?[{url:data.url}]:[]
+        if(artifacts.length) {
+          const hex=contentHash({scope,request_id});const receiptID=`${hex.slice(0,8)}-${hex.slice(8,12)}-5${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`
+          const status=artifacts.length>=n?"succeeded":"failed"
+          const extra={model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,result_source:"synchronous_receipt",completion:{status,artifacts,cost_coins:data.cost_coins??cost_coins}}
+          acceptTaskSubmission(scope,request_id,receiptID,{task_id:receiptID,session_id:context.sessionID,kind,...extra})
+          const receipt=await registerTask(receiptID,context.sessionID,kind,context.abort,extra)
+          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(card_note?{note:card_note}:{})})
         }
       }
 
       const err = await classifyError(resp, data)
-      return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, channel_verified: false, note: CHANNEL_NOT_VERIFIED })
+      if (resp.status >= 400 && resp.status < 500) finishSubmission(scope, request_id, "rejected")
+      return fail(err.code, err.hint, { request_id, recoverable:true, retry_after_ms: err.retry_after_ms, channel_verified: false, note: CHANNEL_NOT_VERIFIED })
     } catch (e: any) {
       const err = await classifyError(null, e)
-      return fail(err.code, err.hint, { channel_verified: false, note: CHANNEL_NOT_VERIFIED })
+      return fail("submission_unknown", "提交状态不确定；已保留request_id与预算，请使用相同Idempotency-Key恢复，不能创建无关联新job。", {request_id,recoverable:true,original_error:err.code,channel_verified:false})
     }
   },
 })

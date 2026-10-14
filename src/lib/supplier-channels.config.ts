@@ -252,18 +252,18 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       },
       // 0.016＝1K/2K/4K 统一价，来源与日期见 priceSource（站点公开价目，免 key 唯读实查）。
       // 上游模型名与我方同名，`GET /v1/models` 实证无分组后缀（非 -g75 等变体），故 supplierModelId=null 直传。
-      // edit 未实测，故这两条只宣告 image_generate；上游 hub 对同两模型亦只宣告 generate。
+      // 2026-10-14 生产成功请求证明 flare/sunburst 的 images/edits 能力；保留hub原契约。
       {
         modelId: "gpt-image-2.5-flare",
         supplierModelId: null,
-        kinds: ["image_generate"],
+        kinds: ["image_generate", "image_edit"],
         unitPriceCny: 0.016,
         priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
       },
       {
         modelId: "gpt-image-2.5-sunburst",
         supplierModelId: null,
-        kinds: ["image_generate"],
+        kinds: ["image_generate", "image_edit"],
         unitPriceCny: 0.016,
         priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
       },

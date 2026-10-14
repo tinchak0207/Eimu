@@ -322,6 +322,8 @@ export async function generateWithOpenaiVideo(
   const createResponse = await openaiVideoRequest(baseUrl, "videos", {
     method: "POST",
     apiKey,
+    signal: input.signal,
+    idempotencyKey: input.idempotencyKey ?? input.attemptId,
     body: JSON.stringify(requestBody),
   });
   const taskId = String(createResponse.id ?? "").trim();
@@ -329,12 +331,13 @@ export async function generateWithOpenaiVideo(
     throw new SupplierRequestError("openai-video upstream create response is missing id.", 502);
   }
   // 上游任务已提交：通知 worker durably 落 attempt 行（task id + 对账排程，INC-0831）
-  input.onProviderTaskSubmitted?.(taskId, "openai_video");
+  await input.onProviderTaskSubmitted?.(taskId, "openai_video");
 
   // 轮询
   const deadline = Date.now() + openaiVideoMaxWaitMs();
   let lastStatus: string | undefined;
   while (Date.now() < deadline) {
+    input.signal?.throwIfAborted();
     const queryResponse = await openaiVideoRequest(baseUrl, `videos/${encodeURIComponent(taskId)}`, {
       method: "GET",
       apiKey,
@@ -536,7 +539,7 @@ function readOpenaiVideoCredential(supplier: SupplierRecord): string {
 async function openaiVideoRequest(
   baseUrl: string,
   path: string,
-  init: { method: "GET" | "POST"; apiKey: string; body?: string },
+  init: { method: "GET" | "POST"; apiKey: string; body?: string; signal?: AbortSignal; idempotencyKey?: string },
 ): Promise<Record<string, unknown>> {
   let response: Response;
   try {
@@ -545,16 +548,17 @@ async function openaiVideoRequest(
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${init.apiKey}`,
+        ...(init.idempotencyKey ? { "Idempotency-Key": init.idempotencyKey, "X-Request-ID": init.idempotencyKey } : {}),
         ...(init.body ? { "Content-Type": "application/json" } : {}),
       },
       ...(init.body ? { body: init.body } : {}),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new SupplierRequestError("openai-video upstream request timed out.", 408);
     }
-    throw new SupplierRequestError("openai-video upstream request failed.", 502);
+    throw new SupplierRequestError("openai-video submission transport outcome is unknown.", 408, null, undefined, "unknown");
   }
   let payload: unknown;
   try {

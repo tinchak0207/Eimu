@@ -1,192 +1,67 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { classifyError, platformFetch, ok, fail } from "../lib/client"
+import { classifyError, platformFetch, gatewayRequest, flushTaskRegistrations, productionScope, ok, fail } from "../lib/client"
+import { reconcileSubmissions, outstandingSubmissions } from "../lib/image-journal"
 
-// ---- 轮子来源：client.ts resolveKey（L136-170）打网关回环的 base URL 常数与请求写法，逐字复制 ----
-const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
-
-interface TaskEntry {
-  task_id: string
-  kind?: string
-  label?: string
-  status: "queued" | "running" | "succeeded" | "failed"
-  url?: string
-  submitted_at: number
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function artifactsOf(body: any): any[] {
+  const raw = Array.isArray(body.artifacts) ? body.artifacts : Array.isArray(body.data) ? body.data : []
+  const artifacts = raw.filter((a:any) => typeof a?.url === "string" && /^https?:\/\//.test(a.url))
+  if (!artifacts.length && typeof body.url === "string" && /^https?:\/\//.test(body.url)) artifacts.push({url:body.url})
+  return artifacts
 }
-
-/**
- * 向网关回环取本轮 session 的全部任务清单。
- * 契约（网关侧 POST /internal/session-tasks，由另一 agent 同步实装）：
- *   { ok: boolean, tasks: Array<{ task_id; kind?; label?; status; url?; submitted_at }> }
- * 端点尚未上线／网路错 → 回空阵列，不让工具整个炸掉。
- * 注意：tasks 里可能含「没有 job id 的成品条目」（kind 标 video/audio/film、status: "succeeded"、
- * 直接给 url）；这类条目不要去打 /images/{id} 查，直接用它的 url。
- * 回传的 reachable 区分「端点没回应」与「端点回应了但清单为空」——两种情况不共用一句话。
- */
-async function listTasks(
-  sessionID: string,
-  signal?: AbortSignal,
-): Promise<{ tasks: TaskEntry[]; reachable: boolean }> {
-  try {
-    const resp = await fetch(`${GATEWAY}/internal/session-tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionID }),
-      signal,
-    })
-    if (resp.ok) {
-      const body = await resp.json().catch(() => ({}))
-      if (Array.isArray(body?.tasks)) return { tasks: body.tasks as TaskEntry[], reachable: true }
-      // 200 但载荷不符契约：端点在、形状不对，算可达但空——别谎报「未回应」。
-      return { tasks: [], reachable: true }
-    }
-  } catch {
-    // 网络层失败／超时：端点确实没回应。
-  }
-  return { tasks: [], reachable: false }
+async function observe(task:any, sessionID:string): Promise<any> {
+  try { return await gatewayRequest("/internal/job-ack", {session_id:sessionID,task_id:task.task_id,stage:"observed"}) }
+  catch { return {acknowledged:false,recoverable:true} }
 }
-
-const isFullUuid = (id: string): boolean => id.length >= 36 && id.includes("-")
-
-async function fetchOnce(id: string, context: any) {
-  let resp = await platformFetch(`/images/${id}`, {}, context.sessionID, context.abort)
-  let body = await resp.json().catch(() => ({}))
-  // 404 回落 /videos/{id}（保留：兼容旧版站点）。根因更正 2026-10-02，原假设已推翻：
-  // 站点 /v1/images/{id} 与 /v1/videos/{id} 共用同一条 tenant-scoped 查询
-  // (getGenerationJobForTenant(id,"biz:"+key.id) → SELECT ... WHERE id=? AND tenant_id=? LIMIT 1，
-  // 无 kind 过滤)，故同一把 key 的影片 id 打 /images 一样回 200；真正的 404 来自 tenant
-  // 不匹配（换了 key／fallback HARNESS_API_KEY），不是命名空间。此回落在现行站点不会被触发。
-  // 本轮真正修好的那一半在 poller：成功事件名 image.done → video.done，否则 .mp4 进 <img> 变破图。
-  if (resp.status === 404) {
-    const vresp = await platformFetch(`/videos/${id}`, {}, context.sessionID, context.abort)
-    const vbody = await vresp.json().catch(() => ({}))
-    if (vresp.ok) {
-      resp = vresp
-      body = vbody
-    }
-  }
-  return { resp, body }
+function render(task:any, receipt:any) {
+  const status = task.status ?? "unknown"
+  const artifacts = artifactsOf(task)
+  const common = {...task,task_id:task.task_id,status,artifacts,observation_receipt:receipt,downloaded:task.downloaded === true || task.downloaded_at != null}
+  // URL不得盖掉refunded/failed/cancelled真实终态。
+  if (["failed","refunded","cancelled"].includes(status)) return fail("generation_failed", task.error?.message ?? task.reason ?? `任务${status}；不会自动重生成。`, {...common,title:"真实失败终态",recoverable:status !== "cancelled",partial_artifacts_available:artifacts.length>0,...(artifacts.length?{download_tool:"image_result_download"}:{})})
+  if (status === "succeeded" && artifacts.length) return ok({...common,title:"生成完成，等待验证落盘",url:artifacts[0].url,download_tool:"image_result_download"})
+  return fail(status === "succeeded" ? "artifact_missing" : "result_not_ready", status === "succeeded" ? "作业标记完成但缺完整artifact；先对账恢复，不重生成。" : "作业尚未完成或状态未知；保留原task_id，后台继续追随，不创建新job。", {...common,title:"尚未交付",recoverable:true})
 }
-
-/** succeeded / failed / 未就绪 三分支渲染（保留原 ok()/fail() 契约；result_not_ready 文案改为不诱导重试） */
-function renderResult(body: any, id: string, correctedFrom?: string) {
-  const status = body?.status || body?.data?.[0]?.status
-  // 公网直链优先；result_url 是需 Bearer 的相对路径（直接取 = 401），仅绝对 URL 才采用
-  const absResult = typeof body?.result_url === "string" && /^https?:\/\//.test(body.result_url) ? body.result_url : undefined
-  const url = body?.data?.[0]?.url || body?.data?.[0]?.videoUrl || absResult || body?.url
-
-  if (status === "succeeded" || url) {
-    return ok({
-      title: "任务完成",
-      url,
-      cost_coins: body?.cost_coins ?? body?.x_cost_coins ?? null,
-      task_id: id,
-      ...(correctedFrom ? { id_corrected_from: correctedFrom } : {}),
-    })
-  }
-
-  if (status === "failed") {
-    return fail("generation_failed", body?.error?.message || body?.message || "生成失败", {
-      title: "生成失败",
-    })
-  }
-
-  // queued / running / pending / processing
-  return fail(
-    "result_not_ready",
-    "任务仍在生成中，harness 会自动续接，请勿重复查询；可先处理清单里其他已就绪的任务。",
-    { title: "尚未就绪" },
-  )
-}
-
 export default tool({
-  description:
-    "查询生图/生影片结果（succeeded 后用，免费不扣费）。带 task_id 查单笔；不带 task_id 可取回本轮全部任务清单（真实 task_id 与 URL）。task_id 不完整时会依清单前缀自动纠错。禁止凭记忆猜 ID：不确定就不带参数先取清单。任务仍在进行时回 result_not_ready，harness 会自动续接。清单里可能含没有 job id 的成品条目（kind 标 video/audio/film、status: \"succeeded\"、直接给 url）：这类不要打 /images/{id} 查询，直接用它给的 url。",
-  args: {
-    task_id: tool.schema.string().optional().describe("generate 回传的任务 ID；省略则回本轮全部任务清单"),
+  description:"耐久查询图片/视频作业，免费。不传ID按当前session及project/frame取全部真实jobs与完整artifacts，支持task_ids整批过滤，不猜ID、不依赖内存Map、不把退款当成功。读取产生observed回执，只有image_result_download真实验证全部落盘才产生downloaded回执。",
+  args:{
+    task_id:tool.schema.string().optional().describe("完整UUID；缺ID则耐久枚举当前session"),
+    task_ids:tool.schema.array(tool.schema.string()).optional().describe("可选整批UUID清单，直接过滤耐久查询结果，不做30次单查假枚举"),
+    project:tool.schema.string().optional().describe("项目稳定ID"),
+    frame:tool.schema.number().int().min(1).optional().describe("项目帧号"),
   },
   async execute(args, context) {
     try {
-      const { tasks, reachable } = await listTasks(context.sessionID, context.abort)
-      // 2026-10-05：此前「端点不可达」与「清单为空」共用同一句话，模型被误导成「网关坏了」
-      // 而放弃用工具自救（生产实录）。两种情况必须说清楚。
-      const listNote = reachable
-        ? ""
-        : "任务清单端点未回应（网关回环不可用）；"
-
-      // 零参数 → 回本轮全部任务清单
+      await flushTaskRegistrations()
+      const listing = await gatewayRequest("/internal/session-tasks", {session_id:context.sessionID,project:args.project,frame:args.frame}, context.abort)
+      if (listing.durable !== true || !Array.isArray(listing.tasks)) return fail("invalid_task_index", "网关没有返回耐久任务列表；不可解释为空或假称已完成。")
+      const tasks:any[] = listing.tasks
+      reconcileSubmissions(tasks)
+      const scope = await productionScope(context.sessionID,args.project,context.abort)
+      const pending_requests = outstandingSubmissions(scope)
       if (!args.task_id) {
-        if (tasks.length === 0) {
-          return fail(
-            "no_tasks",
-            reachable
-              ? "本轮任务清单为空（网关已回应：本会话目前没有登记任何任务或成品）。若成品已出现在对话里，请改用 delivery_assets 取交付清单。"
-              : "任务清单端点未回应（网关回环不可用）。请以 generate 回传的完整 task_id 查询，或稍后重试。",
-            { title: "尚无任务" },
-          )
-        }
-        return ok({ title: "本轮任务清单", tasks })
+        const selected = args.task_ids ? tasks.filter(t=>args.task_ids!.includes(t.task_id)) : tasks
+        const receipts = await Promise.all(selected.map(t=>observe(t,context.sessionID)))
+        const missing_ids = args.task_ids?.filter(id=>!selected.some(t=>t.task_id===id)) ?? []
+        return ok({title:"耐久任务与产物清单",tasks:selected.map((t,i)=>({...t,artifacts:artifactsOf(t),observation_receipt:receipts[i]})),missing_ids,pending_requests,coverage:listing.coverage ?? null,note:"queued/running/unknown均未交付；成功URL也不等于本地落盘。"})
       }
-
-      const rawId = args.task_id
-      let id = rawId
-      let correctedFrom: string | undefined
-
-      // 不像完整 UUID → 先在清单做前缀匹配纠错
-      if (!isFullUuid(id)) {
-        const matches = tasks.filter(
-          (t) => typeof t?.task_id === "string" && t.task_id.startsWith(id),
-        )
-        if (matches.length > 1) {
-          return fail("ambiguous_task_id", "前缀匹配到多笔，请从清单选完整 ID", {
-            title: "ID 不唯一",
-            candidates: matches,
-          })
-        }
-        if (matches.length === 1) {
-          correctedFrom = id
-          id = matches[0].task_id
-        }
-        // 0 笔 → 照原样打平台，由下面 404 分支诚实纠错
+      if (!UUID.test(args.task_id)) return fail("invalid_task_id", "必须提供完整UUID；请从耐久清单复制，不猜前缀。", {tasks})
+      const registered = tasks.find(t=>t.task_id===args.task_id)
+      if(registered?.result_source==="synchronous_receipt")return render(registered,await observe(registered,context.sessionID))
+      const response = await platformFetch(`/images/${encodeURIComponent(args.task_id)}`, {method:"GET"}, context.sessionID,context.abort)
+      const body = await response.json().catch(()=>({}))
+      if (!response.ok) {const err=await classifyError(response,body);return fail(err.code,err.hint,{task_id:args.task_id,status:"unknown",recoverable:true,tasks})}
+      if (!registered) {
+        await gatewayRequest("/internal/job-import", {session_id:context.sessionID,task_id:args.task_id,kind:body.kind?.startsWith("video")?"video":"image",project:args.project,frame:args.frame},context.abort)
       }
-
-      const { resp, body } = await fetchOnce(id, context)
-      if (!resp.ok) {
-        const err = await classifyError(resp, body)
-        if (err.code === "task_not_found") {
-          // 最后防线：以传入 ID 前 8 码在清单找「不一样的」真实 ID，唯一一笔 → 自动重试一次
-          const prefix = rawId.slice(0, 8)
-          const matches = tasks.filter(
-            (t) =>
-              typeof t?.task_id === "string" &&
-              t.task_id.startsWith(prefix) &&
-              t.task_id !== id,
-          )
-          if (matches.length === 1) {
-            const retry = await fetchOnce(matches[0].task_id, context)
-            if (retry.resp.ok) {
-              return renderResult(retry.body, matches[0].task_id, rawId)
-            }
-            const retryErr = await classifyError(retry.resp, retry.body)
-            return fail(retryErr.code, retryErr.hint, {
-              retry_after_ms: retryErr.retry_after_ms,
-              title: "查询失败",
-              tasks,
-            })
-          }
-          // 找不到 → 把完整清单附在错误里，让模型一次纠错而非连猜
-          return fail("task_not_found", err.hint, {
-            title: "查询失败",
-            tasks,
-            ...(tasks.length === 0 ? { note: listNote } : {}),
-          })
-        }
-        return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, title: "查询失败" })
+      const task = {...registered,...body,task_id:args.task_id,artifacts:artifactsOf(body)}
+      if (["succeeded","failed","refunded","cancelled"].includes(task.status)) {
+        await gatewayRequest("/internal/job-completion", {task_id:args.task_id,status:task.status,artifacts:task.artifacts,reason:body.error?.message,cost_coins:body.cost_coins}).catch(()=>undefined)
       }
-
-      return renderResult(body, id, correctedFrom)
-    } catch (e: any) {
-      const err = await classifyError(null, e)
-      return fail(err.code, err.hint, { title: "查询失败" })
+      reconcileSubmissions([task])
+      return render(task,await observe(task,context.sessionID))
+    } catch (e:any) {
+      return fail("task_index_unavailable", "耐久任务索引暂不可达；原作业继续追随，不宣称无任务、不重新生成。", {recoverable:true})
     }
   },
 })

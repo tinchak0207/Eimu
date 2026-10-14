@@ -1,0 +1,19 @@
+# 合入生产永久control-plane-compose.yml或其systemd明确加载的配置；不能只单次CLI覆盖。
+# 先建立宿主目录root:2001/2770；已核实APIuid100/gid101、workeruid0且2001未占用。
+services:
+  generation-api:
+    environment:
+      GENERATION_RESPONSE_SPOOL_DIR: /app/generation-response-spool
+    group_add:
+      - "2001"
+    volumes:
+      - /opt/image-control-plane/generation-response-spool:/app/generation-response-spool
+  generation-worker:
+    environment:
+      GENERATION_RESPONSE_SPOOL_DIR: /app/generation-response-spool
+    group_add:
+      - "2001"
+    volumes:
+      - /opt/image-control-plane/generation-response-spool:/app/generation-response-spool
+    # 已有SIGTERM drain停止新claim、等待已在飞请求完成；覆盖最长影片25分钟预算和物化。
+    stop_grace_period: 30m

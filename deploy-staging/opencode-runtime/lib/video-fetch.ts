@@ -243,7 +243,10 @@ export async function downloadDirectMedia(
     await res.body.cancel().catch(() => {})
     return false
   }
-  const bytes = Buffer.from(await res.arrayBuffer())
+  if(Number(res.headers.get("content-length"))>512*1024*1024){await res.body.cancel();throw new Error("视频产物超过512MB")}
+  const reader=res.body.getReader();const chunks:Uint8Array[]=[];let total=0
+  try{for(;;){const item=await reader.read();if(item.done)break;total+=item.value.byteLength;if(total>512*1024*1024)throw new Error("视频产物超过512MB");chunks.push(item.value)}}catch(error){await reader.cancel().catch(()=>undefined);throw error}finally{reader.releaseLock()}
+  const bytes = Buffer.concat(chunks)
   if (bytes.length === 0) return false
   await writeFile(target, bytes)
   return true

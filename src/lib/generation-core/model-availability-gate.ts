@@ -37,8 +37,8 @@ export const MODEL_BREAKER_LOW_SUCCESS_RATE = 0.2;
 export const MODEL_BREAKER_HALF_OPEN_INTERVAL_MS = 30 * 60_000;
 /** 统计快照记忆体快取 TTL。 */
 export const MODEL_BREAKER_CACHE_TTL_MS = 60_000;
-/** 用户侧失败原因：不代表模型坏，不计入样本。 */
-export const MODEL_BREAKER_EXCLUDED_FAILURE_CLASSES: readonly string[] = ["user_input", "cancelled"];
+/** 不代表模型坏的失败原因，不计入样本（含容量饱和/限流等瞬态：2026-10-14 假判定死循环修复）。 */
+export const MODEL_BREAKER_EXCLUDED_FAILURE_CLASSES: readonly string[] = ["user_input", "cancelled", "deadline_exceeded", "artifact_download", "malformed_output", "empty_result", "network", "unknown", "pricing_config", "authentication", "quota_exhausted", "overloaded", "rate_limited"];
 /** 计入的终态（cancelled 是用户主动取消，不计入）。 */
 export const MODEL_BREAKER_TERMINAL_STATUSES: readonly string[] = ["succeeded", "failed", "refunded"];
 /** 回滚开关：设为 1/true 则闸门整体停用（列表与提交都不拦）。 */
@@ -251,10 +251,15 @@ export async function readModelBreakerSnapshot(
     const db = sql ?? getGenerationSql();
     const since = new Date(now - MODEL_BREAKER_WINDOW_MS);
     const rows = await db<ModelOutcomeRow[]>`
-      SELECT model_id, kind, status, failure_class, created_at, finished_at, updated_at
-      FROM generation_job
-      WHERE created_at > ${since}
-      ORDER BY created_at DESC
+      SELECT job.model_id, job.kind,
+        CASE WHEN attempt.provider_state = 'succeeded' OR attempt.status = 'succeeded' THEN 'succeeded' ELSE 'failed' END AS status,
+        CASE WHEN attempt.provider_state = 'succeeded' OR attempt.status = 'succeeded' THEN NULL ELSE attempt.failure_class END AS failure_class, attempt.created_at, attempt.finished_at, attempt.updated_at
+      FROM generation_attempt attempt JOIN generation_job job ON job.id = attempt.job_id
+      WHERE attempt.created_at > ${since}
+        AND COALESCE(attempt.evidence_json->>'source','') <> 'operator-confirmed-upstream-receipt'
+        AND (attempt.status IN ('succeeded', 'failed') OR attempt.provider_state = 'succeeded')
+        AND (attempt.provider_state = 'succeeded' OR attempt.status = 'succeeded' OR attempt.provider_http_status IS NOT NULL)
+      ORDER BY attempt.created_at DESC
       LIMIT ${MODEL_BREAKER_ROW_LIMIT}
     `;
     // 渠道 bias 刷新水位（2026-10-12）：渠道修好后，被判为「修复前旧证据」的终态样本

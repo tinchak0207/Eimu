@@ -463,7 +463,7 @@ async function pollJob(
   timeoutMs: number,
   signal?: AbortSignal,
   /** INC-0831：首次见到 job 行即回调（filmera 的 task id 只能从轮询行取得），让 worker 尽早 durably 落对帐锚点。 */
-  onTaskId?: (jobId: string) => void,
+  onTaskId?: (jobId: string) => Promise<void>,
 ): Promise<{ jobId: string; takeId: string }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -476,7 +476,7 @@ async function pollJob(
     );
     const job = jobs[0];
     if (job) {
-      if (onTaskId && job.id != null) onTaskId(String(job.id));
+      if (onTaskId && job.id != null) await onTaskId(String(job.id));
       const status = String(job.status ?? "");
       if (status === "done") {
         const takeId = job.result_take_id ? String(job.result_take_id) : null;
@@ -574,7 +574,7 @@ export async function generateWithFilmera(
 
   // 内部超时：server action / supabase / 轮询共享同一 signal
   const timeoutMs = isVideo ? 600_000 : 180_000;
-  const internalSignal = signal ?? AbortSignal.timeout(timeoutMs);
+  const internalSignal = AbortSignal.any([...(signal ? [signal] : []), ...(input.signal ? [input.signal] : []), AbortSignal.timeout(timeoutMs)]);
 
   // Token 生命周期：距过期 < 5 分钟自动用 refresh_token 轮换
   const state = await getValidFilmeraToken(config, internalSignal);
@@ -623,8 +623,8 @@ export async function generateWithFilmera(
     }
 
     // 3) 轮询 job（concurrency_limit=1 保证同一项目同一时刻只有一个 job，取最新即本次）
-    const { jobId, takeId } = await pollJob(config, token, timeoutMs, internalSignal, (id) => {
-      input.onProviderTaskSubmitted?.(id, "filmera");
+    const { jobId, takeId } = await pollJob(config, token, timeoutMs, internalSignal, async (id) => {
+      await input.onProviderTaskSubmitted?.(id, "filmera");
     });
 
     // 4) 拿媒体 URL

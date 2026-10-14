@@ -63,6 +63,14 @@ export async function submitGenerationCommand(
   } = {},
 ): Promise<SubmittedGenerationCommand> {
   const sql = options.sql ?? getGenerationSql();
+  // 同一帧返工必须继承不可变制作关联，显式新配置仍由调用者负责。
+  if (command.retryOfTaskId) {
+    const original = await getGenerationJob(command.retryOfTaskId, sql);
+    if (!original || original.tenantId !== command.tenantId) throw new Error('Retry source job does not belong to this tenant.');
+    command = { ...command, workflow: { ...original.workflow, ...command.workflow,
+      metadata: { ...original.workflow.metadata, ...command.workflow?.metadata } } };
+  }
+  if (command.kind === 'image_generate' && command.workflow?.references?.length) command = { ...command, kind: 'image_edit' };
   const requestedCount = command.requestedCount ?? 1;
   const routingClass = command.routingClass ?? "generic";
   const requestHash = generationRequestHash({

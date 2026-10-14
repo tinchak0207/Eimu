@@ -33,6 +33,7 @@ function newApiKey(): string {
 type NewApiPayload = {
   data?: Array<{ b64_json?: string; url?: string; id?: string }>;
   id?: string;
+  task_id?: string;
   error?: { message?: string; code?: string | number };
 };
 
@@ -67,7 +68,8 @@ export async function generateWithNewApi(supplier: SupplierRecord, input: Suppli
     return generateWithNewApiChat(supplier, input, model);
   }
 
-  const path = isVideo ? "/video/generations" : "/images/generations";
+  const references = input.workflow.references ?? [];
+  const path = isVideo ? "/video/generations" : references.length ? "/images/edits" : "/images/generations";
   const body: Record<string, unknown> = {
     model,
     prompt: input.prompt,
@@ -75,16 +77,31 @@ export async function generateWithNewApi(supplier: SupplierRecord, input: Suppli
     ...(input.size ? { size: input.size } : {}),
     ...(input.quality ? { quality: input.quality === "quality" ? "high" : "medium" } : {}),
   };
+  let requestBody: BodyInit = JSON.stringify(body);
+  if (!isVideo && references.length) {
+    const form = new FormData();
+    for (const [key,value] of Object.entries(body)) form.append(key,String(value));
+    for (const reference of references) {
+      const response = await fetch(reference.url,{signal:AbortSignal.any([...(input.signal ? [input.signal] : []),AbortSignal.timeout(30_000)])});
+      if (!response.ok) throw new SupplierRequestError('Reference image download failed before provider submission.',response.status,null,undefined,'artifact_download');
+      form.append('image',new Blob([await response.arrayBuffer()],{type:reference.mimeType || 'image/png'}),reference.name || 'reference.png');
+    }
+    requestBody=form;
+  }
   let response: Response;
+  await input.onProviderRequestStarted?.();
+  input.signal?.throwIfAborted();
   try {
     response = await fetch(`${newApiBaseUrl()}${path}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${newApiKey()}`,
-        "Content-Type": "application/json",
+        ...(requestBody instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        "Idempotency-Key": input.idempotencyKey ?? input.attemptId,
+        "X-Request-ID": input.idempotencyKey ?? input.attemptId,
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(isVideo ? NEWAPI_TIMEOUT_VIDEO_MS : NEWAPI_TIMEOUT_IMAGE_MS),
+      body: requestBody,
+      signal: AbortSignal.any([...(input.signal ? [input.signal] : []), AbortSignal.timeout(isVideo ? NEWAPI_TIMEOUT_VIDEO_MS : NEWAPI_TIMEOUT_IMAGE_MS)]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") throw new SupplierRequestError("new-api request timed out.", 408);
@@ -104,9 +121,14 @@ export async function generateWithNewApi(supplier: SupplierRecord, input: Suppli
       response.headers.get("retry-after"),
     );
   }
+  if (response.status === 202) {
+    const taskId=payload?.task_id ?? payload?.id;
+    if (taskId) await input.onProviderTaskSubmitted?.(taskId,isVideo?'newapi_video':'newapi_relay');
+    throw new SupplierRequestError('Provider accepted request; original task awaits read-only reconciliation.',408,null,text,'unknown',taskId,202);
+  }
   const first = payload?.data?.[0];
   if (!first?.b64_json && !first?.url) {
-    throw new SupplierRequestError("new-api result was empty.", response.status);
+    throw new SupplierRequestError('new-api result was empty.',response.status,null,text,'empty_result',undefined,response.status);
   }
   return {
     base64: first?.b64_json ?? null,
@@ -134,12 +156,16 @@ async function generateWithNewApiChat(
 ): Promise<SupplierGenerationOutput> {
   const references = (input.workflow.references ?? []).filter((reference) => reference.url.length > 0);
   let response: Response;
+  await input.onProviderRequestStarted?.();
+  input.signal?.throwIfAborted();
   try {
     response = await fetch(`${newApiBaseUrl()}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${newApiKey()}`,
         "Content-Type": "application/json",
+        "Idempotency-Key": input.idempotencyKey ?? input.attemptId,
+        "X-Request-ID": input.idempotencyKey ?? input.attemptId,
       },
       body: JSON.stringify({
         model,
@@ -155,7 +181,7 @@ async function generateWithNewApiChat(
           },
         ],
       }),
-      signal: AbortSignal.timeout(NEWAPI_TIMEOUT_IMAGE_MS),
+      signal: AbortSignal.any([...(input.signal ? [input.signal] : []), AbortSignal.timeout(NEWAPI_TIMEOUT_IMAGE_MS)]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") throw new SupplierRequestError("new-api request timed out.", 408);
@@ -198,7 +224,7 @@ async function generateWithNewApiChat(
     output = chatImageOutput(rawContent);
   }
   if (!output.base64 && !output.url) {
-    throw new SupplierRequestError("new-api result was empty.", response.status);
+    throw new SupplierRequestError('new-api result was empty.',response.status,null,text,'empty_result',undefined,response.status);
   }
   return {
     base64: output.base64,

@@ -83,6 +83,8 @@ export async function generateWithDmc(
   const createResponse = await dmcRequest(baseUrl, "v2/video_generation", {
     method: "POST",
     apiKey,
+    signal: input.signal,
+    idempotencyKey: input.idempotencyKey ?? input.attemptId,
     body: JSON.stringify({
       model: DMC_API_MODEL,
       content,
@@ -96,11 +98,12 @@ export async function generateWithDmc(
     throw new SupplierRequestError("DMC create response is missing task_id.", 502);
   }
   // INC-0831：上游任务已提交 → worker durably 落 attempt 行（task id + 对帐排程）。
-  input.onProviderTaskSubmitted?.(taskId.trim(), "dmc");
+  await input.onProviderTaskSubmitted?.(taskId.trim(), "dmc");
 
   const deadline = Date.now() + DMC_MAX_WAIT_MS;
   let lastStatus: string | undefined;
   while (Date.now() < deadline) {
+    input.signal?.throwIfAborted();
     const response = await dmcRequest(baseUrl, `v2/query/video_generation/${encodeURIComponent(taskId)}`, {
       method: "GET",
       apiKey,
@@ -170,7 +173,7 @@ function readDmcCredential(supplier: SupplierRecord): string {
 async function dmcRequest(
   baseUrl: string,
   path: string,
-  init: { method: "GET" | "POST" | "DELETE"; apiKey: string; body?: string },
+  init: { method: "GET" | "POST" | "DELETE"; apiKey: string; body?: string; signal?: AbortSignal; idempotencyKey?: string },
 ): Promise<Record<string, unknown>> {
   let response: Response;
   try {
@@ -179,16 +182,17 @@ async function dmcRequest(
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${init.apiKey}`,
+        ...(init.idempotencyKey ? { "Idempotency-Key": init.idempotencyKey, "X-Request-ID": init.idempotencyKey } : {}),
         ...(init.body ? { "Content-Type": "application/json" } : {}),
       },
       ...(init.body ? { body: init.body } : {}),
-      signal: AbortSignal.timeout(DMC_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(DMC_REQUEST_TIMEOUT_MS)]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new SupplierRequestError("DMC request timed out.", 408);
     }
-    throw new SupplierRequestError("DMC request failed.", 502);
+    throw new SupplierRequestError("DMC submission transport outcome is unknown.", 408, null, undefined, "unknown");
   }
   let payload: unknown;
   try {

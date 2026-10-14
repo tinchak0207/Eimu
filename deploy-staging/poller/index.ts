@@ -1,17 +1,20 @@
 import { serve } from "bun";
-import { doneEventFor, pollPathFor } from "./media-endpoints";
+import { pollPathFor } from "./media-endpoints";
 
 // ============================================================
 // Configuration
 // ============================================================
-const HARNESS_API_KEY = process.env.HARNESS_API_KEY;
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://127.0.0.1:8081";
-const POLLER_TICK_MS = parseInt(process.env.POLLER_TICK_MS ?? "4000", 10);
+// WP3：VPS 本机直连控面（不经 Vercel 边缘/Cloudflare）。实测 store.tinchak0207.xyz/
+// image-control/api/v1 的 /openapi.json body sha256 与公网域名 image.tinchak0207.xyz/v1
+// 完全相同（同一后端），延时约 14ms vs 88~113ms。语义不变，只是换快路径。
+const PLATFORM_API_BASE = process.env.PLATFORM_API_BASE ?? "https://store.tinchak0207.xyz/image-control/api/v1";
+const POLLER_TICK_MS = parseInt(process.env.POLLER_TICK_MS ?? "1000", 10);
+// WP1 前段密集快探：任务创建后 FAST_PROBE_WINDOW_MS 内以 FAST_PROBE_TICK_MS 间隔轮询，
+// 让 1~8s 快速出图的媒体不再被首轮指数退避（首退避即 8s + jitter）白等 3~11s。
+const FAST_PROBE_WINDOW_MS = parseInt(process.env.POLLER_FAST_WINDOW_MS ?? "8000", 10);
+const FAST_PROBE_TICK_MS = parseInt(process.env.POLLER_FAST_TICK_MS ?? "1000", 10);
 const POLLER_REGISTER_PORT = parseInt(process.env.POLLER_REGISTER_PORT ?? "8082", 10);
-
-if (!HARNESS_API_KEY) {
-  console.warn("[poller] HARNESS_API_KEY not set — per-session keys will be used, fallback will be empty");
-}
 
 try {
   new URL(GATEWAY_URL);
@@ -41,6 +44,7 @@ interface PendingTask {
   retry_count: number;
   next_attempt_at: number; // epoch ms
   deadline_at: number; // epoch ms
+  created_at: number; // epoch ms（任务进入 poller 的时刻，用于前段密集快探窗口判定）
 }
 
 interface PlatformResponse {
@@ -61,13 +65,8 @@ interface PollResult {
   costCoins?: number;
   reason?: string;
   refunded?: boolean;
-}
-
-interface DedupEntry {
-  url: string;
-  task_id: string;
-  cost_coins?: number;
-  ts: number;
+  status?: string;
+  artifacts?: Array<{ url: string }>;
 }
 
 // ============================================================
@@ -121,6 +120,7 @@ function registerTask(p: {
   dedup_hash?: string;
   model?: string;
   cost_coins?: number;
+  created_at?: number;
 }): void {
   // Image lifetime 12min：平台自身 deadline（deadline_exceeded→refunded）在
   // ~10min 落地；12min 是 poller 兜底死线——超过即按失败收尾（发帧 + 停轮询），
@@ -138,6 +138,7 @@ function registerTask(p: {
     retry_count: 0,
     next_attempt_at: 0,
     deadline_at: Date.now() + lifetimeMin * 60_000,
+    created_at: p.created_at ?? Date.now(),
   });
 }
 
@@ -155,6 +156,16 @@ function jitter(ms: number): number {
 }
 
 function applyBackoff(task: PendingTask, retryAfterSeconds?: number): void {
+  // WP1 前段密集快探：任务创建窗口内不累加 retry_count、不做指数退避，
+  // 只按快探间隔（或上游 Retry-After，若有且更大）排下一次探测；窗口过后
+  // 从干净的 retry_count 开始原有指数退避语义。
+  if (Date.now() - task.created_at < FAST_PROBE_WINDOW_MS) {
+    const fast = retryAfterSeconds !== undefined && retryAfterSeconds > 0
+      ? retryAfterSeconds * 1000
+      : FAST_PROBE_TICK_MS;
+    task.next_attempt_at = Date.now() + fast;
+    return;
+  }
   task.retry_count++;
   let delayMs = baseBackoff(task.retry_count);
   if (retryAfterSeconds !== undefined && retryAfterSeconds > 0) {
@@ -190,9 +201,9 @@ async function resolveKey(session_id: string): Promise<string> {
     console.warn(
       `[poller] session-key resolution failed for session ${session_id}:`,
       (err as Error).message,
-      "— falling back to HARNESS_API_KEY"
+      "— keeping owner-scoped task pending"
     );
-    return HARNESS_API_KEY ?? "";
+    throw new Error("owner-scoped session key unavailable");
   }
 }
 
@@ -208,11 +219,15 @@ function hashId(input: string): string {
 // Platform API call
 // ============================================================
 async function pollTask(task: PendingTask): Promise<PollResult> {
-  const url = `https://image.tinchak0207.xyz${pollPathFor(task.kind, task.task_id)}`;
+  // pollPathFor 回传的是公开域形状的 `/v1/images/<id>`（见 media-endpoints.ts:41-44），
+  // PLATFORM_API_BASE 已含 `/image-control/api/v1`，故剥掉多余的 `/v1` 前缀，
+  // 拼出 `/image-control/api/v1/images/<id>`（= Vercel 对 /v1/* 的改写目标，同一后端）。
+  const url = `${PLATFORM_API_BASE}${pollPathFor(task.kind, task.task_id).replace(/^\/v1/, "")}`;
 
   let res: Response;
   try {
     res = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
       headers: {
         Authorization: `Bearer ${task.api_key}`,
         Accept: "application/json",
@@ -278,6 +293,8 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
         ? body.error.message
         : undefined;
 
+  const knownArtifacts = (body.data ?? []).map((item) => ({ ...item, url: item.url ?? item.videoUrl })).filter((item): item is { url: string } => typeof item.url === "string" && /^https?:\/\//.test(item.url));
+
   if (status === "succeeded") {
     // Prefer the public direct link over result_url. Two reasons result_url is
     // wrong for display: it is a RELATIVE path ("/v1/images/{id}/result"), and
@@ -298,13 +315,16 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
       urlValue !== undefined
         ? `任务完成：${urlValue}（task_id: ${task.task_id}）。请显示图片URL给用户，询问是否改图/放大/重生成。`
         : `任务完成（task_id: ${task.task_id}），但平台未返回 result_url。请显示任务状态给用户，询问是否改图/放大/重生成。`;
-    return { done: true, outcome: "succeeded", message, url: urlValue, costCoins };
+    const artifacts = knownArtifacts;
+    if (!artifacts.length && urlValue) artifacts.push({ url: urlValue });
+    if (!artifacts.length) { applyBackoff(task); return { done: false }; }
+    return { done: true, outcome: "succeeded", status, artifacts, message, url: urlValue, costCoins };
   }
 
   if (status === "failed") {
     const reason = errorText ? `原因：${errorText}` : "未知原因";
     const message = `任务失败（task_id: ${task.task_id}）。${reason}。请向用户说明生成失败，询问是否重试。`;
-    return { done: true, outcome: "failed", message, reason: errorText ?? "未知原因" };
+    return { done: true, outcome: "failed", status, artifacts: knownArtifacts, message, reason: errorText ?? "未知原因" };
   }
 
   // refunded：平台终态（如 deadline_exceeded / overloaded 排队超时后退款）。
@@ -321,8 +341,11 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
       message,
       reason: `已退款：${errorText ?? "平台未说明原因"}`,
       refunded: true,
+      artifacts: knownArtifacts,
+      status,
     };
   }
+  if (status === "cancelled") return { done: true, outcome: "failed", status, artifacts: knownArtifacts, reason: errorText || "平台确认取消" };
 
   // "queued" / "running" / anything else: keep polling with backoff
   applyBackoff(task);
@@ -330,162 +353,70 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
 }
 
 // ============================================================
-// Gateway event emit (fire-and-forget)
-// ============================================================
-async function emitEvent(session_id: string, event: string, data: Record<string, unknown>): Promise<void> {
-  try {
-    const res = await fetch(`${GATEWAY_URL}/internal/emit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id, event, data }),
-    });
-    if (!res.ok) {
-      console.error(`[poller] emit ${event} failed (${res.status}) for session ${session_id}`);
-    } else {
-      console.log(`[poller] emitted ${event} for session ${session_id}`);
-    }
-  } catch (err) {
-    console.error(`[poller] emit ${event} error for ${session_id}:`, (err as Error).message);
-  }
-}
-
-// ============================================================
-// Dedup cache (PRD §437)
-// ============================================================
-const DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
-const DEDUP_MAX = 500;
-const dedupCache = new Map<string, DedupEntry>();
-
-function getDedup(hash: string): DedupEntry | undefined {
-  const entry = dedupCache.get(hash);
-  if (entry === undefined) return undefined;
-  if (Date.now() - entry.ts > DEDUP_TTL_MS) {
-    dedupCache.delete(hash);
-    return undefined;
-  }
-  return entry;
-}
-
-function recordDedup(hash: string, entry: { url: string; task_id: string; cost_coins?: number }): void {
-  dedupCache.set(hash, { ...entry, ts: Date.now() });
-  if (dedupCache.size <= DEDUP_MAX) return;
-  let oldestKey: string | undefined;
-  let oldestTs = Infinity;
-  for (const [k, v] of dedupCache) {
-    if (v.ts < oldestTs) {
-      oldestTs = v.ts;
-      oldestKey = k;
-    }
-  }
-  if (oldestKey !== undefined) dedupCache.delete(oldestKey);
-}
-
-// ============================================================
-// Task failure fan-out：会话级错误帧 + 节点级失败帧（与 image.done 对称）
-// ============================================================
-function emitTaskFailure(session_id: string, task_id: string, reason: string, refunded: boolean): void {
-  void emitEvent(session_id, "session.error", {
-    code: refunded ? "task_refunded" : "task_failed",
-    message: reason,
-  });
-  void emitEvent(session_id, "image.failed", {
-    task_id,
-    reason,
-    refunded,
-  });
-}
-
-// ============================================================
-// Gateway resume
-// ============================================================
-async function resumeSession(session_id: string, content: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${GATEWAY_URL}/internal/resume-session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id, content }),
-    });
-    if (res.status === 404) {
-      console.log(`[poller] session ${session_id} is gone (404); task dropped, no one listening`);
-      return false;
-    }
-    if (!res.ok) {
-      console.error(`[poller] resume-session failed (${res.status}) for session ${session_id}`);
-      return false;
-    }
-    console.log(`[poller] resumed session ${session_id}`);
-    return true;
-  } catch (err) {
-    console.error(`[poller] resume-session error for ${session_id}:`, (err as Error).message);
-    return false;
-  }
-}
-
-// ============================================================
 // Main tick
 // ============================================================
 let lastTick = Date.now();
 
-async function tick(): Promise<void> {
-  lastTick = Date.now();
-  const now = Date.now();
-
-  for (const [id, task] of pendingTasks) {
-    // Lifetime cap: images 12 min（对齐平台 deadline）, videos 30 min。
-    // 超时按失败收尾：发 image.failed 帧 + 人话 resume，节点不再卡「生成中」。
-    if (now >= task.deadline_at) {
-      pendingTasks.delete(id);
-      const lifetimeMin = task.kind === "video" ? 30 : 12;
-      console.warn(`[poller] task ${id} exceeded ${lifetimeMin}min lifetime, timing out`);
-      emitTaskFailure(task.session_id, id, `任务逾时（超过 ${lifetimeMin} 分钟未完成）`, false);
-      await resumeSession(
-        task.session_id,
-        `${task.kind === "video" ? "这部影片" : "这张图"}等了 ${lifetimeMin} 分钟还没生成完，先不让用户干等了（task_id: ${task.task_id}）。` +
-          `请向用户口语说明这次生成超时，若平台后续退款会自动退回，并询问要不要重试一次。`
-      );
-      continue;
-    }
-
-    if (task.next_attempt_at > now) continue; // still in backoff
-
-    // Acquire token bucket permit
-    if (!bucket.consume()) {
-      // no permit yet; leave task for next tick
-      continue;
-    }
-
-    console.log(`[poller] polling ${task.kind} ${id} (retry #${task.retry_count})`);
-    const result = await pollTask(task);
-
-    if (!result.done) continue;
-
-    pendingTasks.delete(id);
-
-    if (result.outcome === "succeeded") {
-      if (result.url !== undefined) {
-        // Prefer the platform's authoritative cost; fall back to the estimate the
-        // tool computed at submit time. Verified: the platform poll response
-        // carries no cost_coins field, so without the fallback every image.done
-        // reached the frontend with no charge amount and the ledger row had none
-        // either — the user could never see what a generation actually cost.
-        const cost = result.costCoins ?? task.cost_coins;
-        const emitData: Record<string, unknown> = { url: result.url, task_id: id };
-        if (cost !== undefined) emitData.cost_coins = cost;
-        if (task.kind === "video") emitData.media_kind = "video";
-        void emitEvent(task.session_id, doneEventFor(task.kind), emitData);
-        if (task.dedup_hash !== undefined) {
-          recordDedup(task.dedup_hash, { url: result.url, task_id: id, cost_coins: cost });
-        }
-      }
-    } else if (result.outcome === "failed") {
-      // 失败也要推节点级帧：与 image.done 对称，前端据此把节点置 error 态。
-      emitTaskFailure(task.session_id, id, result.reason ?? "未知原因", result.refunded === true);
-    }
-
-    if (result.message !== undefined) {
-      await resumeSession(task.session_id, result.message);
-    }
+let ticking = false;
+async function gatewayReceipt(path: string, body: unknown): Promise<any> {
+  const response = await fetch(`${GATEWAY_URL}${path}`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+  const result = await response.json();
+  if (!response.ok || !result.ok || !result.durable) throw new Error(`durable receipt unavailable (${response.status})`);
+  return result;
+}
+let recoveredAt = 0;
+async function recoverPending(): Promise<void> {
+  // SQLite on the gateway is the authoritative registry; this Map is only a polling cache.
+  const snapshot = await gatewayReceipt("/internal/job-pending", {});
+  const active = new Set<string>();
+  for (const receipt of snapshot.tasks || []) {
+    active.add(receipt.task_id);
+    if (pendingTasks.has(receipt.task_id)) continue;
+    try {
+      const credentialSession = receipt.credential_session_id || receipt.producer_oc;
+      const api_key = await resolveKey(credentialSession);
+      registerTask({ task_id: receipt.task_id, session_id: receipt.producer_oc, kind: receipt.kind,
+        api_key, model: receipt.model, cost_coins: receipt.cost_coins, created_at: receipt.created_at });
+      pendingTasks.get(receipt.task_id)!.deadline_at = receipt.created_at + (receipt.kind === "video" ? 30 : 12) * 60000;
+      if (["failed", "refunded", "cancelled"].includes(receipt.status)) pendingTasks.get(receipt.task_id)!.next_attempt_at = Date.now() + 10 * 60000;
+    } catch { console.warn(`[poller] task ${receipt.task_id} owner resolution deferred; durable receipt retained`); }
   }
+  for (const id of pendingTasks.keys()) if (!active.has(id)) pendingTasks.delete(id);
+  recoveredAt = Date.now();
+}
+async function tick(): Promise<void> {
+  if (ticking) return;
+  ticking = true;
+  lastTick = Date.now();
+  try {
+    if (Date.now() - recoveredAt > 30000) await recoverPending();
+    for (const [id, task] of pendingTasks) {
+      lastTick = Date.now();
+      const now = Date.now();
+      // Waiting budget is a progress boundary, never an authoritative failure/cancellation.
+      if (now >= task.deadline_at) {
+        console.warn(`[poller] task ${id} exceeded waiting budget; continuing authoritative tracking`);
+        task.deadline_at = now + 30 * 60000;
+      }
+      if (task.next_attempt_at > now || !bucket.consume()) continue;
+      console.log(`[poller] polling ${task.kind} ${id} (retry #${task.retry_count})`);
+      const result = await pollTask(task);
+      if (!result.done) continue;
+      try {
+        await gatewayReceipt("/internal/job-completion", { task_id: id, status: result.status,
+          artifacts: result.artifacts || [], reason: result.reason, cost_coins: result.costCoins ?? task.cost_coins });
+        // Delete cache only AFTER terminal result and its unread consumer inbox are durably handed off.
+        if (result.status === "succeeded") pendingTasks.delete(id);
+        else task.next_attempt_at = Date.now() + 10 * 60000; // Reconcile original ID for late success; never resubmit generation.
+      } catch (error) {
+        applyBackoff(task);
+        console.warn(`[poller] task ${id} durable handoff deferred:`, (error as Error).message);
+      }
+    }
+  } catch (error) {
+    console.warn("[poller] durable recovery deferred:", (error as Error).message);
+  } finally { ticking = false; lastTick = Date.now(); }
 }
 
 // ============================================================
@@ -532,23 +463,8 @@ const server = serve({
           return Response.json({ ok: false, error: "kind must be 'image' or 'video'" }, { status: 400 });
         }
 
-        if (typeof body.dedup_hash === "string" && body.dedup_hash.length > 0) {
-          const cached = getDedup(body.dedup_hash);
-          if (cached) {
-            console.log(`[poller] dedup hit for session ${body.session_id}, reusing result ${cached.task_id}`);
-            void emitEvent(body.session_id, "image.done", {
-              url: cached.url,
-              cost_coins: 0,
-              task_id: cached.task_id,
-            });
-            const msg =
-              `侦测到完全相同的请求，已直接从快取回传先前结果，0 币耗费。\n` +
-              `结果：${cached.url}（task_id: ${cached.task_id}）。\n请显示图片URL给用户，询问是否改图/放大/重生成。`;
-            await resumeSession(body.session_id, msg);
-            return Response.json({ ok: true, deduped: true, url: cached.url });
-          }
-        }
-
+        // This endpoint runs AFTER upstream acceptance. A cache hit must never hide the new accepted job.
+        await gatewayReceipt("/internal/job-register", body);
         const api_key = await resolveKey(body.session_id);
         const keyEntry = resolvedSessions.get(body.session_id);
         const user_id = keyEntry?.user_id;
@@ -567,7 +483,7 @@ const server = serve({
           `[poller] registered ${body.kind} task ${body.task_id} for session ${body.session_id}` +
             (user_id !== undefined ? ` (user ${hashId(user_id)})` : "")
         );
-        return Response.json({ ok: true });
+        return Response.json({ ok: true, durable: true });
       } catch (err) {
         return Response.json({ ok: false, error: (err as Error).message }, { status: 400 });
       }
@@ -588,7 +504,7 @@ const server = serve({
 // Startup
 // ============================================================
 console.log(`[poller] register server on :${POLLER_REGISTER_PORT}`);
-console.log(`[poller] gateway ${GATEWAY_URL}, tick ${POLLER_TICK_MS}ms`);
+console.log(`[poller] gateway ${GATEWAY_URL}, tick ${POLLER_TICK_MS}ms, fast probe window ${FAST_PROBE_WINDOW_MS}ms @ ${FAST_PROBE_TICK_MS}ms, api ${PLATFORM_API_BASE}`);
 
-setInterval(tick, POLLER_TICK_MS).unref?.();
+setInterval(tick, Math.min(POLLER_TICK_MS, FAST_PROBE_TICK_MS)).unref?.();
 void tick(); // run immediately at startup

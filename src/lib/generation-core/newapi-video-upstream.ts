@@ -100,7 +100,7 @@ function statusError(payload: Record<string, unknown>, httpStatus: number): Supp
   return new SupplierRequestError(message, status, null, undefined, undefined, undefined, httpStatus);
 }
 
-async function newApiRequest(baseUrl: string, path: string, apiKey: string, init?: { body?: string }): Promise<{ payload: Record<string, unknown>; ok: boolean; status: number }> {
+async function newApiRequest(baseUrl: string, path: string, apiKey: string, init?: { body?: string; signal?: AbortSignal; idempotencyKey?: string }): Promise<{ payload: Record<string, unknown>; ok: boolean; status: number }> {
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
@@ -108,16 +108,17 @@ async function newApiRequest(baseUrl: string, path: string, apiKey: string, init
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${apiKey}`,
+        ...(init?.idempotencyKey ? { "Idempotency-Key": init.idempotencyKey, "X-Request-ID": init.idempotencyKey } : {}),
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
       },
       ...(init?.body ? { body: init.body } : {}),
-      signal: AbortSignal.timeout(NEWAPI_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.any([...(init?.signal ? [init.signal] : []), AbortSignal.timeout(NEWAPI_REQUEST_TIMEOUT_MS)]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new SupplierRequestError("new-api video API request timed out.", 408);
     }
-    throw new SupplierRequestError("new-api video API request failed.", 502);
+    throw new SupplierRequestError("new-api video submission transport outcome is unknown.", 408, null, undefined, "unknown");
   }
   let payload: unknown;
   try {
@@ -160,6 +161,7 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
   const baseUrl = kernelBaseUrl();
   const apiKey = kernelApiKey();
   const submit = await newApiRequest(baseUrl, "/video/generations", apiKey, {
+    signal: input.signal, idempotencyKey: input.idempotencyKey ?? input.attemptId,
     body: JSON.stringify({
       model: input.modelId,
       prompt,
@@ -176,11 +178,12 @@ export async function generateWithNewApiVideo(input: SupplierGenerationInput): P
   }
   // INC-0831：上游任务已提交 → worker durably 落 attempt 行（task id + 对帐排程）。
   // 只发事件不落行 = 中控打掉上游成功任务的事故重演。
-  input.onProviderTaskSubmitted?.(taskId, "newapi_video");
+  await input.onProviderTaskSubmitted?.(taskId, "newapi_video");
 
   const submittedAt = Date.now();
   const deadline = submittedAt + maxWaitMs();
   while (Date.now() < deadline) {
+    input.signal?.throwIfAborted();
     const { payload, ok, status: httpStatus } = await newApiRequest(baseUrl, `/video/generations/${encodeURIComponent(taskId)}`, apiKey);
     const code = typeof payload.code === "string" ? payload.code : "";
     // 查询回应包裹在 {code:"success", data:TaskDto}；非 success code 一律是错误

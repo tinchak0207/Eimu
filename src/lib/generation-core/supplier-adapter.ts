@@ -17,6 +17,7 @@ export { chatImageOutput } from "./openai-images-adapter";
 // 以 base_url 判定（不是协议），因此不进 registry；adapter_type 仍按原协议记录。
 const newApiRelayAdapter: SupplyAdapter = {
   protocol: "newapi_relay",
+  checkpointsSubmissionStart: true,
   submit: (supplier, input) => generateWithNewApi(supplier, input),
   reconcileVia: "newapi_video",
 };
@@ -47,5 +48,10 @@ export function resolveSupplyAdapter(supplier: SupplierRecord, input: SupplierGe
 }
 
 export async function generateWithSupplier(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput> {
-  return resolveSupplyAdapter(supplier, input).submit(supplier, input);
+  input.signal?.throwIfAborted();
+  const adapter=resolveSupplyAdapter(supplier,input);
+  if (!adapter.checkpointsSubmissionStart) await input.onProviderRequestStarted?.();
+  const output = await adapter.submit(supplier, input);
+  await input.onProviderResponse?.(output);
+  return output;
 }

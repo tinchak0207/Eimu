@@ -444,6 +444,9 @@ export async function persistOutputArtifact(input: {
   base64: string | null;
   url: string | null;
   endpointLabel: string;
+  supplierModelId?: string | null;
+  providerRequestId?: string | null;
+  originalHttpStatus?: number | null;
   mediaKind?: "image" | "video" | "audio";
   retentionExpiresAt?: Date | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<PersistedOutputArtifact> {
@@ -468,7 +471,8 @@ export async function persistOutputArtifact(input: {
     validated,
     byteSize: buffer.length,
     retentionExpiresAt: input.retentionExpiresAt ?? null,
-    metadata: { endpointLabel: input.endpointLabel },
+    metadata: { endpointLabel: input.endpointLabel,actualSupplierModelId: input.supplierModelId || null,
+      providerRequestId:input.providerRequestId ?? null,originalHttpStatus:input.originalHttpStatus && input.originalHttpStatus>0 ? input.originalHttpStatus : null },
   }, sql);
   return { id: recorded.id, objectKey, deliveryUrl: blob.url, validated, byteSize: buffer.length, inserted: recorded.inserted };
 }

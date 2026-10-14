@@ -68,6 +68,8 @@ export async function generateWithMetaso(
   const createResponse = await metasoRequest(baseUrl, "v2/video_generation", {
     method: "POST",
     apiKey,
+    signal: input.signal,
+    idempotencyKey: input.idempotencyKey ?? input.attemptId,
     body: JSON.stringify({
       model: METASO_API_MODEL,
       content,
@@ -81,11 +83,12 @@ export async function generateWithMetaso(
     throw new SupplierRequestError("Metaso create response is missing task_id.", 502);
   }
   // INC-0831：上游任务已提交 → worker durably 落 attempt 行（task id + 对帐排程）。
-  input.onProviderTaskSubmitted?.(taskId.trim(), "metaso");
+  await input.onProviderTaskSubmitted?.(taskId.trim(), "metaso");
 
   const deadline = Date.now() + METASO_MAX_WAIT_MS;
   let lastStatus: string | undefined;
   while (Date.now() < deadline) {
+    input.signal?.throwIfAborted();
     const response = await metasoRequest(baseUrl, `v2/query/video_generation/${encodeURIComponent(taskId)}`, {
       method: "GET",
       apiKey,
@@ -155,7 +158,7 @@ function readMetasoCredential(supplier: SupplierRecord): string {
 async function metasoRequest(
   baseUrl: string,
   path: string,
-  init: { method: "GET" | "POST" | "DELETE"; apiKey: string; body?: string },
+  init: { method: "GET" | "POST" | "DELETE"; apiKey: string; body?: string; signal?: AbortSignal; idempotencyKey?: string },
 ): Promise<Record<string, unknown>> {
   let response: Response;
   try {
@@ -164,16 +167,17 @@ async function metasoRequest(
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${init.apiKey}`,
+        ...(init.idempotencyKey ? { "Idempotency-Key": init.idempotencyKey, "X-Request-ID": init.idempotencyKey } : {}),
         ...(init.body ? { "Content-Type": "application/json" } : {}),
       },
       ...(init.body ? { body: init.body } : {}),
-      signal: AbortSignal.timeout(METASO_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(METASO_REQUEST_TIMEOUT_MS)]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new SupplierRequestError("Metaso request timed out.", 408);
     }
-    throw new SupplierRequestError("Metaso request failed.", 502);
+    throw new SupplierRequestError("Metaso submission transport outcome is unknown.", 408, null, undefined, "unknown");
   }
   let payload: unknown;
   try {

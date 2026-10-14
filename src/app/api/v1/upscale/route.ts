@@ -186,6 +186,9 @@ export async function POST(req: NextRequest) {
   // 档位价（1k／2k／4k），legacy pixai-bridge 仍是一口价 0.001 币（同源价，禁另写价目）。
   const pricingModelId = upscaleChargeModelId(backend);
   const quota = upscaleChargeQuota(backend, size, QUOTA_PER_COIN);
+  if (body.cap_coins != null && (typeof body.cap_coins !== "number" || !Number.isFinite(body.cap_coins) || body.cap_coins < 0 || quota / QUOTA_PER_COIN > body.cap_coins)) {
+    return respond(pixaiRequestError("本次权威报价超过单请求硬预算，尚未提交且未扣费。", "task_budget_exceeded", traceId), 402);
+  }
 
   // ── 幂等（reserveSyncCharge 之前）：同 key 重试不重复扣费 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
@@ -241,6 +244,7 @@ export async function POST(req: NextRequest) {
     return await deliverGptImageUpscale({
       plan,
       reference,
+      metadata: typeof body.workflow === "object" && body.workflow ? (body.workflow as {metadata?:Record<string,unknown>}).metadata : undefined,
       key: auth.key,
       charged,
       traceId,
@@ -283,6 +287,7 @@ export async function POST(req: NextRequest) {
 type UpscaleCharge = SyncCharge;
 
 interface UpscaleDeliverContext {
+  metadata?:Record<string,unknown>;
   plan: GptImageUpscalePlan;
   reference: GenerationReference;
   key: BizApiKey;
@@ -324,7 +329,7 @@ async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Respo
       responseFormat: "url",
       requestedCount: 1,
       billingAmount: UPSCALE_UPSTREAM_BILLING_AMOUNT,
-      workflow: { references: [ctx.reference], prompt: ctx.plan.prompt },
+      workflow: { references: [ctx.reference], prompt: ctx.plan.prompt, metadata:ctx.metadata },
     });
     jobId = submitted.job.id;
   } catch (error) {

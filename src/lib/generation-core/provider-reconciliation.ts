@@ -1,3 +1,4 @@
+import { decryptGenerationPrompt } from "./crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { persistOutputArtifact } from "./artifact-service";
 import { refundGenerationBilling } from "./billing-ledger";
@@ -8,11 +9,13 @@ import {
   listCompletedGenerationArtifacts,
   mapSupplierRecord,
   reviveGenerationJobWithArtifacts,
+  checkpointProviderOutput,
+  clearProviderOutputCheckpoint,
 } from "./job-repository";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { planReplay, type ReplayPlan } from "./operation-registry";
 import { pollSupplyTask } from "./supply-registry";
-import type { ProviderTaskPollResult, ProviderProtocol, SupplierRecord } from "./types";
+import type { ProviderTaskPollResult, ProviderProtocol, SupplierRecord, SupplierGenerationOutput } from "./types";
 
 type Row = Record<string, unknown>;
 
@@ -52,10 +55,10 @@ export async function runProviderReconciliation(input: {
   // ① 对帐窗口耗尽：永久退出轮询（truth unknown → 冻结人工对帐，禁退款）。
   const expired = await sql<Row[]>`
     UPDATE generation_attempt
-    SET provider_next_poll_at = NULL,
+    SET provider_next_poll_at = NULL, recovery_status='manual', recovery_owner='control-plane:manual-reconciliation',
+        recovery_detail='Automatic recovery deadline elapsed; operator must reconcile the original upstream request.',
         reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
-    WHERE provider_state IN ('unknown', 'running')
-      AND provider_task_id IS NOT NULL
+    WHERE recovery_status <> 'resolved'
       AND provider_next_poll_at IS NOT NULL
       AND provider_reconcile_deadline_at IS NOT NULL
       AND provider_reconcile_deadline_at <= now()
@@ -80,8 +83,10 @@ export async function runProviderReconciliation(input: {
         updated_at = now()
     WHERE id IN (
       SELECT candidate.id FROM generation_attempt candidate
-      WHERE candidate.provider_state IN ('unknown', 'running')
-        AND candidate.provider_task_id IS NOT NULL
+      WHERE candidate.recovery_status = 'pending'
+        AND (candidate.provider_state IN ('unknown', 'running') OR candidate.response_ciphertext IS NOT NULL)
+        AND NOT EXISTS(SELECT 1 FROM generation_job live_job WHERE live_job.id=candidate.job_id
+          AND live_job.lease_expires_at>now() AND live_job.status IN ('leased','submitting','running'))
         AND candidate.provider_next_poll_at IS NOT NULL
         AND candidate.provider_next_poll_at <= now()
         AND (candidate.reconcile_lease_expires_at IS NULL OR candidate.reconcile_lease_expires_at < now())
@@ -89,8 +94,8 @@ export async function runProviderReconciliation(input: {
       LIMIT ${claimBatchSize}
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, job_id, output_index, supplier_id, provider_task_id,
-      COALESCE(provider_protocol, 'newapi_video') AS protocol, provider_poll_count
+    RETURNING id, job_id, output_index, supplier_id, provider_task_id, upstream_request_key, response_ciphertext,
+      provider_protocol AS protocol, provider_poll_count
   `;
   if (!claimed.length) return summary;
 
@@ -117,11 +122,17 @@ export async function runProviderReconciliation(input: {
     JOIN supplier ON supplier.id = attempt.supplier_id
     LEFT JOIN LATERAL (
       SELECT * FROM supplier_account acct WHERE acct.supplier_id = supplier.id
-      ORDER BY acct.enabled DESC, acct.id ASC LIMIT 1
+        AND (acct.id = attempt.supplier_account_id OR
+          (attempt.supplier_account_id IS NULL AND (SELECT count(*) FROM supplier_account a WHERE a.supplier_id=supplier.id)=1))
+      LIMIT 1
     ) account ON true
     LEFT JOIN LATERAL (
       SELECT * FROM supplier_capability cap WHERE cap.supplier_id = supplier.id
-      ORDER BY cap.is_current DESC, cap.id DESC LIMIT 1
+        AND (cap.id=attempt.supplier_capability_id OR
+          (attempt.supplier_capability_id IS NULL AND cap.public_model_id=job.model_id
+            AND cap.kind=job.kind AND cap.is_current
+            AND cap.supplier_model_id IS NOT DISTINCT FROM attempt.supplier_model_id))
+      LIMIT 1
     ) capability ON true
     WHERE attempt.id = ANY(${attemptIds}::text[])
   `;
@@ -135,7 +146,13 @@ export async function runProviderReconciliation(input: {
       const ctx = contextById.get(attemptId);
       if (!ctx) throw new Error(`reconcile context missing for attempt ${attemptId}`);
       const protocol = String(ctx.protocol) as ProviderProtocol;
-      const providerTaskId = String(claim.provider_task_id);
+      const providerTaskId = claim.provider_task_id ? String(claim.provider_task_id) : String(claim.upstream_request_key ?? attemptId);
+      if (!claim.response_ciphertext && (!ctx.account_id || !ctx.capability_id)) {
+        await sql`UPDATE generation_attempt SET recovery_status='manual',recovery_owner='control-plane:manual-reconciliation',
+          recovery_detail='Original submitting account/capability cannot be proved; do not query another account.',
+          provider_next_poll_at=NULL,reconcile_lease_owner=NULL,reconcile_lease_expires_at=NULL,updated_at=now() WHERE id=${attemptId}`;
+        summary.exhausted++; continue;
+      }
       const supplier = mapSupplierRecord(ctx);
       const pollCount = Number(claim.provider_poll_count ?? 0);
 
@@ -146,7 +163,8 @@ export async function runProviderReconciliation(input: {
       if (deadlineAt !== null && deadlineAt <= Date.now()) {
         await sql`
           UPDATE generation_attempt
-          SET provider_next_poll_at = NULL,
+          SET provider_next_poll_at = NULL, recovery_status='manual', recovery_owner='control-plane:manual-reconciliation',
+              recovery_detail='Automatic recovery deadline elapsed; upstream outcome remains unknown.',
               reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
           WHERE id = ${attemptId}
         `;
@@ -161,8 +179,35 @@ export async function runProviderReconciliation(input: {
       }
 
       let result: ProviderTaskPollResult;
+      let savedOutput: SupplierGenerationOutput | undefined;
       try {
-        result = await pollProviderTask(protocol, providerTaskId, supplier);
+        if (claim.response_ciphertext) {
+          savedOutput = JSON.parse(decryptGenerationPrompt(String(claim.response_ciphertext))) as SupplierGenerationOutput;
+          result = { state: 'succeeded', url: savedOutput.url, base64: savedOutput.base64 };
+        } else if (claim.provider_task_id && !(ctx.kind==='image_generate' || ctx.kind==='image_edit')) {
+          result = await pollProviderTask(protocol, providerTaskId, supplier);
+        } else {
+          const lookup = supplier.configuration.resultLookupPath;
+          if (typeof lookup !== 'string' || !lookup.startsWith('/') || !lookup.includes('{request_id}')) {
+            await sql`UPDATE generation_attempt SET recovery_status='manual',
+              recovery_owner='control-plane:manual-reconciliation',
+              recovery_detail='Supplier has no configured read-only resultLookupPath; reconcile by upstream_request_key. Never resubmit.',
+              provider_next_poll_at=NULL, reconcile_lease_owner=NULL, reconcile_lease_expires_at=NULL, updated_at=now()
+              WHERE id=${attemptId}`;
+            await sql`UPDATE generation_job SET failure_detail='Original upstream request requires manual reconciliation; generation will not be resubmitted.', updated_at=now()
+              WHERE id=${jobId} AND status='submit_unknown'`;
+            summary.exhausted += 1;
+            continue;
+          }
+          const credential = process.env[supplier.account.credentialRef] ?? process.env[supplier.credentialRef];
+          const response = await fetch(`${supplier.baseUrl.replace(/\/+$/, '')}${lookup.replace('{request_id}', encodeURIComponent(providerTaskId))}`, {
+            method: 'GET', headers: { Authorization: `Bearer ${credential ?? ''}` }, signal: AbortSignal.timeout(30_000),
+          });
+          if (!response.ok) throw new Error(`Read-only response lookup HTTP ${response.status}; outcome remains unknown.`);
+          const payload = await response.json() as { data?: { url?: string; b64_json?: string }[] };
+          const media = payload.data?.[0];
+          result = media?.url || media?.b64_json ? { state: 'succeeded', url: media.url ?? null, base64: media.b64_json ?? null } : { state: 'running' };
+        }
       } catch (error) {
         // 查询通道失败 ≠ 任务失败：真相未变，退避重试（重放许可问 registry）。
         summary.pollErrors += 1;
@@ -211,6 +256,7 @@ export async function runProviderReconciliation(input: {
           providerTaskId,
           protocol,
           result,
+          output: savedOutput,
         });
         if (delivered) summary.delivered += 1;
         continue;
@@ -286,6 +332,8 @@ async function backoffAttempt(
       UPDATE generation_attempt
       SET provider_poll_count = provider_poll_count + 1,
           provider_last_polled_at = now(), provider_next_poll_at = NULL,
+          recovery_status='manual', recovery_owner='control-plane:manual-reconciliation',
+          recovery_detail='Automatic read-only reconciliation replay budget exhausted; original response/request retained.',
           reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
       WHERE id = ${attemptId}
     `;
@@ -335,6 +383,7 @@ async function landReconciledArtifact(
     providerTaskId: string;
     protocol: ProviderProtocol;
     result: Extract<ProviderTaskPollResult, { state: "succeeded" }>;
+    output?: SupplierGenerationOutput;
   },
 ): Promise<boolean> {
   const job = await getGenerationJob(input.jobId, sql);
@@ -342,19 +391,26 @@ async function landReconciledArtifact(
   const mediaKind = job.kind === "tts"
     ? "audio"
     : (job.kind === "video_generate" || job.kind === "avatar" || job.kind === "lipsync") ? "video" : "image";
+  await checkpointProviderOutput({ jobId: input.jobId, attemptId: input.attemptId,
+    output: input.output ?? { base64: input.result.base64, url: input.result.url, httpStatus: 0,
+      endpointLabel: `reconcile:${input.protocol}`, supplierModelId: '',
+      providerTaskId: input.providerTaskId,
+      evidence: { originalHttpStatusKnown: false, actualSupplierModelKnown: false, source: 'provider-confirmed-readonly-result' } } }, sql);
   const stored = await persistOutputArtifact({
     jobId: input.jobId,
     attemptId: input.attemptId,
     outputIndex: input.outputIndex,
     base64: input.result.base64,
     url: input.result.url,
-    endpointLabel: `reconcile:${input.protocol}`,
+    endpointLabel: input.output?.endpointLabel ?? `reconcile:${input.protocol}`,
+    supplierModelId:input.output?.supplierModelId || null,providerRequestId:input.output?.providerRequestId,
+    originalHttpStatus:input.output?.httpStatus || null,
     mediaKind,
   }, sql);
 
   await sql`
     UPDATE generation_attempt
-    SET status = 'succeeded', provider_state = 'succeeded',
+    SET status = 'succeeded', provider_state = 'succeeded', recovery_status='resolved', response_ciphertext=NULL,
         provider_last_polled_at = now(), provider_poll_count = provider_poll_count + 1,
         provider_result_json = ${sql.json(JSON.parse(JSON.stringify({
           state: "succeeded",
@@ -368,6 +424,7 @@ async function landReconciledArtifact(
         reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
     WHERE id = ${input.attemptId} AND job_id = ${input.jobId}
   `;
+  await clearProviderOutputCheckpoint(input.attemptId);
   emitJobEvent({
     jobId: input.jobId,
     event: JOB_EVENT.reconcilePolled,
@@ -381,6 +438,7 @@ async function landReconciledArtifact(
     },
   }, sql);
 
+  await sql`UPDATE generation_job SET completed_count=(SELECT count(*) FROM artifact WHERE job_id=${input.jobId} AND role='output'), updated_at=now() WHERE id=${input.jobId}`;
   const activeStatuses = new Set(["pending_billing", "billing_unknown", "queued", "leased", "submitting", "running"]);
   if (activeStatuses.has(job.status)) return false;
   const artifacts = await listCompletedGenerationArtifacts(input.jobId, sql);
@@ -409,7 +467,7 @@ async function confirmReconciledFailure(
 ): Promise<boolean> {
   await sql`
     UPDATE generation_attempt
-    SET provider_state = 'failed',
+    SET provider_state = 'failed', status='failed', recovery_status='resolved', response_ciphertext=NULL,
         provider_last_polled_at = now(), provider_poll_count = provider_poll_count + 1,
         provider_result_json = ${sql.json(JSON.parse(JSON.stringify({ state: "failed", reason: input.reason.slice(0, 2000) })) as never)},
         provider_next_poll_at = NULL,

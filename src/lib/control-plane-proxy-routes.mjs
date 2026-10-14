@@ -26,6 +26,7 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   // 下列四条 2026-09-28 由漂移棘轮揪出：route 只有裸路径（原 `/:path*` 匹配不到、
   // 控面也没有子路径），且直接触库、Vercel 无闸 → 登入后必 500。控面容器内实测四条皆 401（存在）。
   "/api/admin/billing-operations",
+  "/api/admin/generation-recovery",
   "/api/admin/biz-keys/provision",
   "/api/probe/stuck",
   "/api/probe/jobs/:path*",

@@ -2,8 +2,8 @@ import type { GenerationJob } from "./types";
 import { generationDatabaseConfigured, getGenerationSql } from "./database";
 
 export function taskStatus(job: GenerationJob): "queued" | "running" | "succeeded" | "failed" | "cancelled" | "refunded" | "unknown" {
-  if (job.status === "queued" || job.status === "pending_billing") return "queued";
-  if (job.status === "leased" || job.status === "submitting" || job.status === "running") return "running";
+  if (job.status === "queued" || job.status === "pending_billing" || job.status === "leased") return "queued";
+  if (job.status === "submitting" || job.status === "running") return "running";
   if (job.status === "succeeded") return "succeeded";
   if (job.status === "cancelled") return "cancelled";
   if (job.status === "refunded") return "refunded";
@@ -40,6 +40,9 @@ export function generationTaskResponse(job: GenerationJob, options: GenerationTa
     primary_result_id: job.primaryResultId ?? job.result?.artifacts[0]?.id ?? null,
     result_ids: job.result?.artifacts.map((artifact) => artifact.id) ?? [],
     retry_of_task_id: job.retryOfTaskId,
+    metadata: job.workflow.metadata ?? {},
+    cancellation_requested: Boolean(job.cancelRequestedAt),
+    ...(job.recovery ? { recovery: job.recovery } : {}),
     task_url: `/v1/${taskResourcePath(job.kind)}/${job.id}`,
     request_config: {
       model: job.modelId,
@@ -51,14 +54,14 @@ export function generationTaskResponse(job: GenerationJob, options: GenerationTa
         ? { prompt: ((job.workflow as { prompt?: string }).prompt ?? "").slice(0, 500) }
         : {}),
     },
-    ...(status === "succeeded"
+    ...((status === "succeeded" || (status === "cancelled" && job.result?.artifacts.length))
       ? {
           result_url: `/v1/${taskResourcePath(job.kind)}/${job.id}/result`,
           data: job.result?.artifacts ?? [],
           ...(typeof options.costCoins === "number" ? { cost_coins: options.costCoins } : {}),
         }
       : {}),
-    ...(job.failureClass ? { error: failureError(job) } : {}),
+    ...(job.failureClass ? status === "queued" ? { waiting: failureError(job) } : { error: failureError(job) } : {}),
   };
 }
 

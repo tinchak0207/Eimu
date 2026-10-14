@@ -5,6 +5,8 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
+import { createHash } from "node:crypto"
+import { journalRegistration, pendingRegistrations, registeredTask, acquireSharedRateSlot, prepareSubmission, finishSubmission, getSubmission, contentHash, lockedProjectBudget, acceptTaskSubmission } from "./image-journal"
 
 // WP3：VPS 本机直连控面，避免绕 Vercel 边缘（image.tinchak0207.xyz 由 Vercel 边缘
 // 服务、middleware 再把 /v1/* 改写回 VPS 控面）。实测等价性：store.tinchak0207.xyz/
@@ -15,6 +17,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const POLLER = process.env.POLLER_URL || "http://127.0.0.1:8082/"
 
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 // 20MB
+const referenceSnapshots=new Map<string,{sha256:string;url:string|null;mediaId:string}>()
 
 // ---------------------------------------------------------------------------
 // 定价表（原散落在各 tool 的 IMAGE_PRICES / edit / upscale / video 估价）
@@ -136,8 +139,7 @@ const keyInflight = new Map<string, Promise<string>>()
 
 /**
  * 从 gateway（loopback）解析 caller 自己的 sk-biz-* key。
- * gateway 无法解析时（如 CLI session 没有 gateway 侧记录）退回
- * process.env.HARNESS_API_KEY。以 sessionID 快取。
+ * gateway无法证明session归属就失败；不回退共享HARNESS_API_KEY，避免跨租户错单。
  */
 export async function resolveKey(sessionID: string, signal?: AbortSignal): Promise<string> {
   const cached = keyCache.get(sessionID)
@@ -162,14 +164,9 @@ export async function resolveKey(sessionID: string, signal?: AbortSignal): Promi
         }
       }
     } catch {
-      // gateway 无法解析，走 fallback
+      // 运输失败不是凭证归属证据。
     }
-    const fallback = process.env.HARNESS_API_KEY
-    if (!fallback) {
-      throw new Error("无法解析 API key：gateway 无此 session 记录且无 HARNESS_API_KEY")
-    }
-    keyCache.set(sessionID, fallback)
-    return fallback
+    throw new Error("session_identity_unavailable: 网关暂不能证明本session凭证归属；保留原job，禁止回退共享key。")
   })()
 
   keyInflight.set(sessionID, p)
@@ -201,57 +198,17 @@ const RATE_LIMIT_WINDOW_MS = 60_000
 // otherwise pile up unbounded waiters and the turn would look hung with no reason.
 const RATE_LIMIT_MAX_WAIT_MS = 120_000
 
-interface RateWindow {
-  /** Timestamps of recent sends, oldest first. */
-  hits: number[]
-  /** Serializes waiters for this key so they don't all wake at once and overshoot. */
-  tail: Promise<void>
-}
-
-const rateWindows = new Map<string, RateWindow>()
-
-/**
- * Block until sending one request for `key` stays inside the local window.
- * Throws only if the wait would exceed RATE_LIMIT_MAX_WAIT_MS, or on abort.
- */
+/** 同账户跨进程共享SQLite滑窗；不是各lane各自持有Map。 */
 async function acquireRateSlot(key: string, signal?: AbortSignal): Promise<void> {
-  let win = rateWindows.get(key)
-  if (!win) {
-    win = { hits: [], tail: Promise.resolve() }
-    rateWindows.set(key, win)
+  const account=createHash("sha256").update(key).digest("hex")
+  const deadline=Date.now()+RATE_LIMIT_MAX_WAIT_MS
+  for (;;) {
+    if(signal?.aborted)throw new Error("aborted")
+    const delay=acquireSharedRateSlot(account,Date.now(),RATE_LIMIT_MAX,RATE_LIMIT_WINDOW_MS)
+    if(delay===0)return
+    if(Date.now()+delay>deadline)throw new Error("shared_rate_limit_wait_exceeded")
+    await sleep(delay,signal)
   }
-  const w = win
-
-  // Chain onto the tail: one waiter admitted at a time per key. Without this,
-  // N concurrent callers would each independently read the same window state,
-  // all conclude there is room, and blow straight past the limit.
-  const mine = w.tail.then(async () => {
-    const deadline = Date.now() + RATE_LIMIT_MAX_WAIT_MS
-    for (;;) {
-      if (signal?.aborted) throw new Error("aborted")
-      const now = Date.now()
-      // Drop anything older than the window; those no longer count against us.
-      while (w.hits.length > 0 && now - w.hits[0] >= RATE_LIMIT_WINDOW_MS) w.hits.shift()
-      if (w.hits.length < RATE_LIMIT_MAX) {
-        w.hits.push(now)
-        return
-      }
-      // Full: the earliest hit is what has to age out before a slot frees.
-      const waitMs = RATE_LIMIT_WINDOW_MS - (now - w.hits[0]) + 5
-      if (now + waitMs > deadline) {
-        throw new Error(`rate limit wait exceeded ${Math.round(RATE_LIMIT_MAX_WAIT_MS / 1000)}s`)
-      }
-      await sleep(waitMs, signal)
-    }
-  })
-
-  // Keep the chain alive even if this waiter throws, or one abort would wedge
-  // every later request for this key behind a permanently rejected tail.
-  w.tail = mine.then(
-    () => undefined,
-    () => undefined,
-  )
-  return mine
 }
 
 /**
@@ -260,6 +217,9 @@ async function acquireRateSlot(key: string, signal?: AbortSignal): Promise<void>
  * 而控制面那棵树是落后的分叉（没有角色卡路由）；/api/biz/* 不在改写清单内，
  * 由站点本体服务（有 Blob、有完整五值卡模型）。角色卡与 tag 解析走这里。
  */
+// TODO（WP3 待验证）：本包不改 SITE_BASE——/api/biz/* 是否也在 store.tinchak0207.xyz/
+// image-control 快路径上存在尚未验证（控面是落后分叉，可能没有 /api/biz/* 路由），
+// 保持走公网本站 origin；验证后再决定是否切换。
 export const SITE_BASE = "https://image.tinchak0207.xyz"
 
 /**
@@ -289,7 +249,69 @@ export async function platformFetch(
   sessionID: string,
   signal?: AbortSignal,
 ): Promise<Response> {
+  if(init.method?.toUpperCase()==="POST" && ["/images/edits","/upscale"].includes(path))return trackedLegacySubmission(path,init,sessionID,signal)
   return fetchWithBase(API_BASE, path, init, sessionID, signal)
+}
+
+/** 所有制作入口共用可信项目预算；模型参数只能收紧已授权cap。 */
+export async function authorizedProjectBudget(sessionID:string,project:string,requested?:number,signal?:AbortSignal):Promise<{cap?:number;version:string;source:string}> {
+  const receipt=await gatewayRequest("/internal/project-budget",{session_id:sessionID,project},signal)
+  if(receipt.durable!==true)throw Object.assign(new Error("项目约束暂不可读取；保留原请求恢复。"),{code:"project_budget_unavailable"})
+  if(requested!=null&&(!Number.isFinite(requested)||requested<0))throw Object.assign(new Error("预算收紧值无效；未提交。"),{code:"invalid_budget"})
+  const cap=receipt.authorized===true?receipt.cap_coins:undefined
+  if(receipt.authorized===true&&(typeof cap!=="number"||!Number.isFinite(cap)||cap<0||!receipt.version))throw Object.assign(new Error("已存在的预算约束记录无效；不能忽略上限继续提交。"),{code:"project_budget_unavailable"})
+  return {cap:cap==null?requested:Math.min(cap,requested??cap),version:receipt.version?String(receipt.version):"no_extra_cap",source:receipt.authorized===true?String(receipt.source??"human_config"):requested==null?"no_extra_cap":"agent_constraint"}
+}
+
+async function trackedLegacySubmission(path:string,init:RequestInit,sessionID:string,signal?:AbortSignal):Promise<Response> {
+  const payload=JSON.parse(String(init.body??"{}"));const metadata=payload.workflow?.metadata??{};const project=metadata.project
+  if(typeof project!=="string"||!project.trim())throw Object.assign(new Error("改图/放大必须继承已授权project；未提交，不新开预算作用域。"),{code:"project_budget_unknown"})
+  const headers=new Headers(init.headers);const requestID=headers.get("idempotency-key")??metadata.request_id
+  if(!requestID)throw Object.assign(new Error("制作请求缺稳定request_id；未提交。"),{code:"request_id_required"})
+  const scope=await productionScope(sessionID,project,signal);const prior=getSubmission(scope,requestID)
+  if(prior?.task_id) {
+    const listing=await gatewayRequest("/internal/session-tasks",{session_id:sessionID,project},signal)
+    const task=listing.tasks?.find((t:any)=>t.task_id===prior.task_id)
+    if(task)return Response.json({task_id:task.task_id,id:task.task_id,status:task.status,data:task.artifacts??[],cost_coins:task.cost_coins}, {status:task.status==="succeeded"?200:202})
+    return Response.json({task_id:prior.task_id,status:"registration_pending",recoverable:true},{status:202})
+  }
+  const priorIdentity=prior?JSON.parse(prior.metadata_json):undefined
+  if(priorIdentity?.input_signature&&priorIdentity.input_signature!==metadata.input_signature)throw Object.assign(new Error("原request_id输入意图已改变；未提交。"),{code:"idempotency_key_reused"})
+  if(priorIdentity?.submitted_image&&prior.state!=="rejected")payload.image=priorIdentity.submitted_image
+  let budget:{cap?:number;version:string;source:string}
+  if(prior&&prior.state!=="rejected"&&priorIdentity?.budget_version&&lockedProjectBudget(scope)!=null)budget={cap:lockedProjectBudget(scope)!,version:priorIdentity.budget_version,source:priorIdentity.budget_source??"agent_constraint"}
+  else budget=await authorizedProjectBudget(sessionID,project,metadata.project_budget_coins,signal)
+  const catalog=await loadCatalog(sessionID,signal);const entry=catalog?.[payload.model];const quote=payload.quality==="hd"?(entry?.hd??entry?.standard):(entry?.standard??entry?.hd)
+  if(typeof quote!=="number"||!Number.isFinite(quote)||quote<0)throw Object.assign(new Error("该改图/放大档位缺权威报价；未提交。"),{code:"price_unknown"})
+  const cost=prior&&prior.state!=="rejected"?prior.reservation:quote*Math.max(1,Number(payload.n)||1)
+  payload.cap_coins=Math.min(payload.cap_coins??cost,cost);payload.workflow={metadata:{...metadata,session_id:sessionID,request_id:requestID,budget_version:budget.version}}
+  let referenceHash=priorIdentity?.reference_fingerprints?.[0]
+  if(!referenceHash) {
+    const snapshot=referenceSnapshots.get(payload.image)
+    if(snapshot)referenceHash=snapshot.sha256
+    else if(/^(https?:|data:image\/)/i.test(payload.image)) {
+      const frozen=await uploadImageBytes(payload.image,sessionID,signal)
+      if(!frozen.url)throw Object.assign(new Error("参考图快照缺固定产物地址"),{code:"reference_snapshot_missing"})
+      payload.image=frozen.url;referenceHash=frozen.sha256
+    }else throw Object.assign(new Error("既有媒体ID缺字节回执；请继承原图片URL以冻结实际内容，未生成。"),{code:"reference_unverified"})
+  }
+  payload.workflow.metadata.actual_reference_sha256=referenceHash
+  const identity={scope,session_id:sessionID,project,request_id:requestID,model:payload.model,cost_coins:cost,budget_version:budget.version,budget_source:budget.source,submitted_image:payload.image,reference_fingerprints:[referenceHash],reference_version:referenceHash,input_signature:metadata.input_signature}
+  prepareSubmission(identity,payload,null,budget.cap)
+  let response:Response
+  try {response=await fetchWithBase(API_BASE,path,{...init,headers,body:JSON.stringify(payload)},sessionID,signal)}catch(e){finishSubmission(scope,requestID,"submitting");throw e}
+  const body=await response.clone().json().catch(()=>({}))
+  if(!response.ok){finishSubmission(scope,requestID,response.status<500?"rejected":"submitting");return response}
+  const upstreamID=body.task_id??body.id
+  const artifacts=Array.isArray(body.data)?body.data.filter((a:any)=>typeof a.url==="string"):body.url?[{url:body.url}]:body.result_url?[{url:body.result_url}]:[]
+  const authoritativeID=typeof upstreamID==="string"&&/^[0-9a-f-]{36}$/i.test(upstreamID)?upstreamID:undefined
+  if(!authoritativeID&&!artifacts.length){finishSubmission(scope,requestID,"submitting");return Response.json({error:{code:"submission_unknown",message:"上游响应缺真实任务ID和产物；保留原幂等键与预算，不虚构任务。"},request_id:requestID,recoverable:true},{status:502})}
+  const hex=contentHash({scope,requestID});const receiptID=`${hex.slice(0,8)}-${hex.slice(8,12)}-5${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`
+  const id=authoritativeID??receiptID
+  const extra={project,request_id:requestID,model:payload.model,cost_coins:cost,requested_count:Math.max(1,Number(payload.n)||1),...(artifacts.length?{result_source:"synchronous_receipt",completion:{status:artifacts.length>=Math.max(1,Number(payload.n)||1)?"succeeded":"failed",artifacts,cost_coins:body.cost_coins??cost}}:{})}
+  acceptTaskSubmission(scope,requestID,id,{task_id:id,session_id:sessionID,kind:"image",...extra})
+  await registerTask(id,sessionID,"image",signal,extra)
+  return response
 }
 
 /**
@@ -550,42 +572,81 @@ export async function emitEvent(
   }
 }
 
-/**
- * 注册非同步任务给 poller 自动轮询。best-effort，回 {ok, error?}。
- *
- * dedup_hash / model / cost_coins 一定要带：
- * - dedup_hash 不带，poller 的去重快取永远不会命中（等于整段死码），
- *   同一个 prompt 重送会再扣一次钱。
- * - cost_coins 不带，平台轮询回应里没有价格栏位（2026-08-07 实测），
- *   poller 发出的 image.done 就会少掉 cost_coins，前端显示不出扣费、
- *   帐本那一列也缺金额。
- */
-export async function registerTask(
-  task_id: string,
-  sessionID: string,
-  kind: string,
-  signal?: AbortSignal,
-  extra?: { dedup_hash?: string; model?: string; cost_coins?: number },
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const resp = await fetch(POLLER, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task_id,
-        session_id: sessionID,
-        kind,
-        ...(extra?.dedup_hash ? { dedup_hash: extra.dedup_hash } : {}),
-        ...(extra?.model ? { model: extra.model } : {}),
-        ...(typeof extra?.cost_coins === "number" ? { cost_coins: extra.cost_coins } : {}),
-      }),
-      signal,
-    })
-    if (!resp.ok) return { ok: false, error: `poller http_${resp.status}` }
-    return { ok: true }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || String(e) }
+/** 获取账户隔离的制作 scope；只保存 key 的单向摘要，不保存任何凭证。 */
+export async function productionScope(sessionID: string, project?: string, signal?: AbortSignal): Promise<string> {
+  if(project) {
+    const receipt=await gatewayRequest("/internal/project-budget",{session_id:sessionID,project},signal)
+    if(receipt.durable!==true||typeof receipt.scope!=="string"||!receipt.scope)throw new Error("project_scope_unavailable: 缺可信稳定项目归属；可恢复原任务，不新生成。")
+    return receipt.scope
   }
+  // 非项目只读归属使用可信父会话ID；不随API key轮换改变产物scope。
+  const key=await gatewayRequest("/internal/session-tasks",{session_id:sessionID},signal)
+  if(key.durable!==true||!key.owner_scope)throw new Error("session_scope_unavailable")
+  return String(key.owner_scope)
+}
+
+/** 内部耐久端点；有界超时，HTTP成功也必须检查协议字段。 */
+export async function gatewayRequest(path: string, body: unknown, signal?: AbortSignal): Promise<any> {
+  const deadline = AbortSignal.timeout(8000)
+  const combined = signal ? AbortSignal.any([signal, deadline]) : deadline
+  const resp = await fetch(`${GATEWAY}${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), signal: combined,
+  })
+  const result = await resp.json().catch(() => ({}))
+  if (!resp.ok || result?.ok !== true) throw new Error(`gateway_${resp.status}: ${result?.error?.code ?? result?.error ?? "invalid_response"}`)
+  return result
+}
+
+export async function flushTaskRegistrations(): Promise<void> {
+  const pending=pendingRegistrations()
+  for(let offset=0;offset<pending.length;offset+=16) {
+    const outcomes=await Promise.all(pending.slice(offset,offset+16).map(async entry=>{
+      try {
+        const payload=JSON.parse(entry.registration_json)
+        const result=await gatewayRequest("/internal/job-register",payload)
+        if(result.durable===true) {
+          if(payload.completion)await gatewayRequest("/internal/job-completion",{task_id:entry.task_id,...payload.completion})
+          registeredTask(entry.task_id)
+        }
+        return "answered"
+      } catch(e:any) {
+        // 某旧席位409不能堵住其他项目；真正运输中断才停止整批，outbox始终保留。
+        return /^gateway_4\d\d:/.test(e?.message??"") ? "answered" : "unreachable"
+      }
+    }))
+    if(outcomes.every(value=>value==="unreachable"))break
+  }
+}
+
+/** 上游接受后先落 SQLite outbox，再耐久登记网关，最后唤醒poller。 */
+export async function registerTask(
+  task_id: string, sessionID: string, kind: string, signal?: AbortSignal,
+  extra?: { dedup_hash?: string; model?: string; cost_coins?: number; project?: string; frame?: number; request_id?: string; reference_version?: string; style_version?: string; requested_count?: number; size?: string; completion?:{status:string;artifacts:any[];cost_coins?:number}; result_source?:string },
+): Promise<{ ok: boolean; durable: boolean; error?: string }> {
+  const payload = { task_id, session_id: sessionID, kind, ...extra }
+  journalRegistration(task_id, sessionID, payload)
+  let durable = false
+  let lastError = ""
+  for (let attempt = 0; attempt < 2 && !durable; attempt++) {
+    try {
+      const result = await gatewayRequest("/internal/job-register", payload)
+      durable = result.durable === true
+      if (!durable) lastError = "gateway_missing_durable_receipt"
+    } catch (e: any) { lastError = e?.message || "gateway_unreachable" }
+  }
+  if (!durable) return { ok: false, durable: false, error: lastError }
+  if(extra?.completion) {
+    try{await gatewayRequest("/internal/job-completion",{task_id,...extra.completion},signal)}
+    catch{return {ok:false,durable:true,error:"artifact_completion_pending"}}
+  }
+  registeredTask(task_id)
+  if(extra?.result_source==="synchronous_receipt")return {ok:true,durable:true}
+  // 主收据已提交；poller唤醒只是可重试提示，不能撤销接受态。
+  try {
+    const resp = await fetch(POLLER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(8000) })
+    return { ok: resp.ok, durable: true, ...(resp.ok ? {} : { error: `poller_http_${resp.status}` }) }
+  } catch { return { ok: false, durable: true, error: "poller_wakeup_pending" } }
 }
 
 /**
@@ -640,20 +701,24 @@ export async function uploadImageBytes(
   imageSource: string,
   sessionID: string,
   signal?: AbortSignal,
-): Promise<{ mediaId: string; url: string | null }> {
+): Promise<{ mediaId: string; url: string | null; sha256:string }> {
   const src = (imageSource || "").trim()
   if (!src) throw Object.assign(new Error("图片地址为空，请传 http(s)/data URL 或本地绝对路径"), { code: "bad_request" })
   let buf: Buffer
   let mimeType: string
   if (/^(https?:|data:)/i.test(src)) {
-    const img = await fetch(src, { signal })
-    if (!img.ok) {
-      throw Object.assign(new Error(`下载原图失败：HTTP ${img.status}`), { code: "fetch_failed" })
-    }
-    buf = Buffer.from(await img.arrayBuffer())
+    const img = /^data:/i.test(src)?await fetch(src,{signal}):await (await import("./sandbox")).safeFetch(src,{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(60000)]):AbortSignal.timeout(60000)})
+    if (!img.ok||!img.body) throw Object.assign(new Error(`下载原图失败：HTTP ${img.status}`), { code: "fetch_failed" })
+    const reader=img.body.getReader();const chunks:Uint8Array[]=[];let total=0
+    try {for(;;){const item=await reader.read();if(item.done)break;total+=item.value.byteLength;if(total>MAX_UPLOAD_BYTES)throw Object.assign(new Error("参考图超过20MB"),{code:"too_large"});chunks.push(item.value)}}catch(error){await reader.cancel().catch(()=>undefined);throw error}finally{reader.releaseLock()}
+    buf = Buffer.concat(chunks)
     mimeType = (img.headers.get("content-type") || guessMime(src)).split(";")[0].trim() || "image/png"
   } else {
-    const local = await readLocalImageBytes(src)
+    const sandbox=await import("./sandbox")
+    const absolute=resolvePath(sandbox.WORKSPACE,src)
+    const verdict=sandbox.checkAgentPath(absolute,sessionID)
+    if(!verdict.ok)throw Object.assign(new Error("参考图片路径被沙箱拒绝"),{code:"unsafe_reference_path"})
+    const local = await readLocalImageBytes(absolute,sessionID)
     buf = local.buffer
     mimeType = local.mimeType
   }
@@ -675,7 +740,9 @@ export async function uploadImageBytes(
   }
   const body = (await resp.json().catch(() => ({}))) as Record<string, any>
   const mediaId = body?.mediaId || body?.media_id || body?.id || body?.data?.[0]?.id || body?.url || ""
-  return { mediaId, url: body?.url || body?.data?.[0]?.url || null }
+  const receipt={mediaId,url:body?.url||body?.data?.[0]?.url||null,sha256:createHash("sha256").update(buf).digest("hex")}
+  for(const id of [receipt.mediaId,receipt.url])if(id)referenceSnapshots.set(id,receipt)
+  return receipt
 }
 
 /**
@@ -683,7 +750,7 @@ export async function uploadImageBytes(
  * 路径解析：原样 → process.cwd() → /opt/agent-harness/workspace 依序命中。
  * 抛错带 .code 供 classifyError 诚实归因。
  */
-async function readLocalImageBytes(src: string): Promise<{ buffer: Buffer; mimeType: string; absPath: string }> {
+async function readLocalImageBytes(src: string,sessionID:string): Promise<{ buffer: Buffer; mimeType: string; absPath: string }> {
   let abs = src
   if (!isAbsolute(abs)) {
     const hit = [process.cwd(), "/opt/agent-harness/workspace"]
@@ -697,6 +764,9 @@ async function readLocalImageBytes(src: string): Promise<{ buffer: Buffer; mimeT
       { code: "not_found" },
     )
   }
+  const sandbox=await import("./sandbox")
+  const verdict=sandbox.checkAgentPath(abs,sessionID)
+  if(!verdict.ok)throw Object.assign(new Error("参考图片路径被沙箱拒绝"),{code:"unsafe_reference_path"})
   const buffer = readFileSync(abs)
   return { buffer, mimeType: guessMime(abs), absPath: abs }
 }
@@ -715,7 +785,11 @@ export async function publicImageUrl(
 ): Promise<string> {
   const src = (imageSource || "").trim()
   if (!src) throw Object.assign(new Error("图片地址为空，请传 http(s)/data URL 或本地绝对路径"), { code: "bad_request" })
-  if (/^https?:\/\//i.test(src)) return src
+  if (/^https?:\/\//i.test(src)) {
+    const frozen=await uploadImageBytes(src,sessionID,signal)
+    if(!frozen.url)throw Object.assign(new Error("参考图快照未返回固定产物地址"),{code:"reference_snapshot_missing"})
+    return frozen.url
+  }
   if (/^data:image\//i.test(src)) {
     if (src.length > 6 * 1024 * 1024) {
       throw Object.assign(
@@ -731,7 +805,7 @@ export async function publicImageUrl(
       { code: "bad_request" },
     )
   }
-  const { buffer, absPath } = await readLocalImageBytes(src)
+  const { buffer, absPath } = await readLocalImageBytes(src,sessionID)
   if (buffer.length === 0) throw Object.assign(new Error("图片内容为空"), { code: "bad_request" })
   if (buffer.length > MAX_UPLOAD_BYTES) {
     throw Object.assign(

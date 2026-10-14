@@ -130,6 +130,8 @@ function budgetExceededResponse(
 }
 
 interface ImageRequestBody {
+  workflow?: unknown;
+  retry_of_task_id?: unknown;
   model?: unknown;
   prompt?: unknown;
   n?: unknown;
@@ -365,7 +367,8 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
         billingUserId: apiKey.userId,
         source: "biz",
         idempotencyKey: req.headers.get("idempotency-key"),
-        kind: "image_generate",
+        kind: plan.references.length ? "image_edit" : "image_generate",
+        retryOfTaskId: typeof body.retry_of_task_id === "string" ? body.retry_of_task_id : null,
         // routing_hint:"hub" 仅影响调度偏好（probe 探针用），不改变计费与能力校验。
         routingClass: modelId === ADOBE_FIREFLY_MODEL_ID
           ? "firefly_only"
@@ -382,7 +385,16 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
         billingAmount: gate.billingAmount,
         // references 与既有 metadata.controlNets 合成同一个 workflow（互不覆盖）；
         // 两者皆无时展开零键 —— 提交 payload 与改动前逐位元等价。
-        ...generationWorkflowField({ references: plan.references, controlNets: pixaiControlNets }),
+        workflow: {
+          ...generationWorkflowField({ references: plan.references, controlNets: pixaiControlNets }).workflow,
+          metadata: {
+            ...(body.workflow && typeof body.workflow === 'object' && !Array.isArray(body.workflow)
+              && (body.workflow as Record<string, unknown>).metadata && typeof (body.workflow as Record<string, unknown>).metadata === 'object'
+              && !Array.isArray((body.workflow as Record<string, unknown>).metadata)
+              ? (body.workflow as { metadata: Record<string, unknown> }).metadata : {}),
+            ...generationWorkflowField({ references: plan.references, controlNets: pixaiControlNets }).workflow?.metadata,
+          },
+        },
       });
       return withTraceId(
         addRateLimitHeaders(

@@ -1,3 +1,4 @@
+import { contentHash } from "../lib/image-journal"
 import { tool } from "@opencode-ai/plugin/tool"
 import {
   classifyError,
@@ -16,22 +17,15 @@ export default tool({
   description:
     "放大图片（同步 ~20s）。超过 0.1 币会先跳出扣费确认，用户确认后才执行。",
   args: {
+    project:tool.schema.string().describe("继承稳定项目；付费沿用现有授权，不另换预算作用域"),
+    request_id:tool.schema.string().describe("稳定原请求ID，恢复不能另换ID"),
+    project_budget_coins:tool.schema.number().min(0).optional().describe("项目累计上限约束，只能收紧已有上限；不是付费授权"),
     image_url: tool.schema.string().describe("原图 URL"),
     scale: tool.schema.number().optional().describe("放大倍数，预设 2"),
     model: tool.schema.string().optional().describe("放大模型名，省略则用平台预设"),
   },
   async execute(args, context) {
     const scale = args.scale ?? 2
-    // 模型可用性强制探测（仅当指定了 model；省略时平台预设）
-    if (args.model) {
-      const probe = await probeModelAvailable(args.model, context.sessionID, context.abort)
-      if (probe.availability === "unavailable") {
-        return fail(
-          "model_unavailable",
-          `放大模型 ${args.model} 目前不可用（${probe.note ?? "渠道故障"}）。请改用其他可用模型，或告知用户。`,
-        )
-      }
-    }
     try {
       const image = await resolveMediaId(args.image_url, context.sessionID, context.abort)
 
@@ -39,7 +33,7 @@ export default tool({
       // 没给 model 时 priceForAsync 取不到目录项，回保守的 FALLBACK_COINS（1 币），
       // 会落在确认区间 —— 宁可多问一次，不要少扣费提示。
       const estimate = await estimateUpscaleCoins(args.model ?? "", context.sessionID, undefined, context.abort)
-      const request_id = randomUUID()
+      const request_id = args.request_id
       if (estimate > 0.1) {
         const approved = await confirmSpend(
           {
@@ -61,12 +55,13 @@ export default tool({
         {
           method: "POST",
           headers: { "idempotency-key": request_id }, // PRD §152：重试不重复扣费
-          body: JSON.stringify({ image, factor: scale, ...(args.model ? { model: args.model } : {}) }),
+          body: JSON.stringify({ image, factor: scale, model:args.model??"pixai-upscale", workflow:{metadata:{project:args.project,request_id,project_budget_coins:args.project_budget_coins,input_signature:contentHash({...args,project_budget_coins:undefined})}} }),
         },
         context.sessionID,
         context.abort,
       )
       const body = await resp.json().catch(() => ({}))
+      if(resp.status===202)return ok({task_id:body.task_id??body.id,request_id,status:body.status??"queued",recoverable:true,note:"原放大任务仍待结果；用image_get_result回收，不能新建请求。"})
       if (!resp.ok) {
         const err = await classifyError(resp, body)
         return fail(err.code, err.hint, { retry_after_ms: err.retry_after_ms, title: "放大失败" })

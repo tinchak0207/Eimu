@@ -34,7 +34,7 @@ async function readPayload(response: Response): Promise<ProviderPayload | null> 
     return JSON.parse(text) as ProviderPayload;
   } catch {
     if (!response.ok) throw new SupplierRequestError(text.slice(0, 1000), response.status, response.headers.get("retry-after"), text.slice(0, 1000));
-    return null;
+    throw new SupplierRequestError('Successful provider response could not be parsed; reconcile original request.',response.status,null,text,'malformed_output',undefined,response.status);
   }
 }
 
@@ -60,10 +60,10 @@ export function chatImageOutput(content: string): { base64: string | null; url: 
   return { base64: null, url };
 }
 
-async function referencesAsFormData(references: SupplierGenerationInput["workflow"]["references"]): Promise<FormData> {
+async function referencesAsFormData(references: SupplierGenerationInput["workflow"]["references"], signal?: AbortSignal): Promise<FormData> {
   const body = new FormData();
   for (const reference of references ?? []) {
-    const response = await fetch(reference.url, { signal: AbortSignal.timeout(30_000) });
+    const response = await fetch(reference.url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]) });
     if (!response.ok) throw new SupplierRequestError(`Failed to download reference image: HTTP ${response.status}.`, response.status, response.headers.get("retry-after"));
     const bytes = await response.arrayBuffer();
     body.append("image", new Blob([bytes], { type: reference.mimeType || response.headers.get("content-type") || "image/png" }), reference.name || "reference-image.png");
@@ -111,6 +111,8 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
   const references = input.workflow.references ?? [];
   const headers: Record<string, string> = {
     Authorization: `Bearer ${readCredential(supplier)}`,
+    "Idempotency-Key": input.idempotencyKey ?? input.attemptId,
+    "X-Request-ID": input.idempotencyKey ?? input.attemptId,
   };
   // rc.21 原生视频路由是 /v1/video/generations（无 "s" 目录层）；/videos/generations 实测 404。
   let path = input.kind === "video_generate" ? "/video/generations" : "/images/generations";
@@ -153,7 +155,7 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
     });
   } else if (supplier.adapterType === "openai_images" && references.length && input.kind !== "video_generate") {
     path = "/images/edits";
-    const form = await referencesAsFormData(references);
+    const form = await referencesAsFormData(references, input.signal);
     form.append("model", upstreamModel);
     form.append("prompt", input.prompt);
     if (input.size) form.append("size", input.size);
@@ -183,6 +185,8 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
   }
 
   let response: Response;
+  await input.onProviderRequestStarted?.();
+  input.signal?.throwIfAborted();
   try {
     response = await fetch(`${cleanBaseUrl(supplier.baseUrl)}${path}`, {
       method: "POST",
@@ -191,7 +195,7 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
       // 影片生成实测远长于图片（kling 8s 片 2-6 分钟）；单一 100s 预设会让影片永远超时。
       // 图片 180s（2026-08-27 实测：hub.linux.do gpt-image-2 59s、gemini-3.1-flash-image
       // chat 生图 73s，100s 预设把这两条路全部掐死在「Supplier request timed out」）。
-      signal: AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? (input.kind === "video_generate" ? 600_000 : 180_000))),
+      signal: AbortSignal.any([...(input.signal ? [input.signal] : []), AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? (input.kind === "video_generate" ? 600_000 : 180_000)))]),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") throw new SupplierRequestError("Supplier request timed out.", 408);
@@ -205,13 +209,12 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
       response.headers.get("retry-after"),
     );
   }
-  // 202 Accepted 不是成功：任务已收、成品未回。worker 不做轮询，202 一律记失败
-  // （providerHttpStatus=202），调度器会换下一个 supplier 重试。
+  // 202表示上游已受理；持久关联任务并保留unknown，只对账原请求，不重投。
   if (response.status === 202) {
-    throw new SupplierRequestError(
-      `Supplier ${supplier.label} returned HTTP 202 (accepted) without an image; the worker does not poll tasks.`,
-      202,
-    );
+    const taskId = payload?.task_id ?? payload?.id;
+    if (taskId) await input.onProviderTaskSubmitted?.(taskId, supplier.adapterType);
+    throw new SupplierRequestError('Provider accepted this request; reconcile the original request without replay.',
+      408, undefined, JSON.stringify(payload), 'unknown', taskId, 202);
   }
   const first = payload?.data?.[0];
   if (viaChatImage) {
@@ -222,7 +225,7 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
     const contentText = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent ?? "");
     const chatImage = chatImageOutput(contentText);
     if (!chatImage.base64 && !chatImage.url) {
-      throw new SupplierRequestError(`Supplier chat image result was empty. Content preview: ${contentText.slice(0, 200)}`, response.status);
+      throw new SupplierRequestError(`Supplier chat image result was empty. Content preview: ${contentText.slice(0, 200)}`, response.status,null,JSON.stringify(payload),'malformed_output',payload?.task_id,response.status);
     }
     return {
       base64: chatImage.base64,
@@ -236,7 +239,7 @@ export async function requestOpenAiCompatibleSupplier(supplier: SupplierRecord, 
     };
   }
   const url = supplier.adapterType === "adobe2api" ? adobeOutputUrl(payload) : first?.url ?? null;
-  if (!first?.b64_json && !url) throw new SupplierRequestError("Supplier result was empty.", response.status);
+  if (!first?.b64_json && !url) throw new SupplierRequestError("Supplier result was empty.", response.status,null,JSON.stringify(payload),'empty_result',payload?.task_id,response.status);
   return {
     base64: first?.b64_json ?? null,
     url,

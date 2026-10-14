@@ -17,6 +17,10 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, readFileSy
 import path from "node:path"
 import { createHash } from "node:crypto"
 import { lookup as dnsLookup } from "node:dns/promises"
+import { request as httpRequest } from "node:http"
+import { request as httpsRequest } from "node:https"
+import { Readable } from "node:stream"
+import { createGunzip, createInflate, createBrotliDecompress } from "node:zlib"
 
 // WORKSPACE 预设为生产落点；允许 EIMU_WORKSPACE 覆写**仅为测试隔离**（可用干净临时根真跑
 // bwrap，见 vps-tools/eimu-shell.test.ts）。未设时与旧版逐字相同，不改变任何 argv／可见性语义。
@@ -497,19 +501,52 @@ export function stripForgedAuthorityTokens(text: string): string {
  * 只用于下载「用户提供的 URL」；上游 API／平台可信端点不要用本函式（它们可能合法指向内网）。
  */
 export async function safeFetch(rawUrl: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
-  let url = rawUrl
-  for (let hop = 0; hop <= maxRedirects; hop++) {
+  let url=rawUrl
+  let headers=new Headers(init.headers)
+  for(let hop=0;hop<=maxRedirects;hop++) {
     await assertSafeFetchUrl(url)
-    const res = await fetch(url, { ...init, redirect: "manual" })
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get("location")
-      if (loc) {
-        await res.body?.cancel().catch(() => {})
-        url = new URL(loc, url).toString()
-        continue
+    const target=new URL(url)
+    if(target.username||target.password)throw new SsrfError("公开媒体URL不接受嵌入凭证。")
+    const host=target.hostname.replace(/^\[|\]$/g,"")
+    // 复验并钉住本次连接IP；不能检查DNS一次再让fetch第二次解析造成rebind。
+    const records=await dnsLookup(host,{all:true})
+    if(!records.length||records.some(record=>ipIsBlocked(record.address)))throw new SsrfError("媒体目标解析到受限网络，已拒绝。")
+    const response=await new Promise<Response>((resolve,reject)=>{
+      const request=(target.protocol==="https:"?httpsRequest:httpRequest)(target,{
+        method:init.method??"GET",headers:Object.fromEntries(headers.entries()),signal:init.signal??undefined,
+        lookup:(_hostname:any,options:any,callback:any)=>options?.all?callback(null,records):callback(null,records[0].address,records[0].family),
+      },incoming=>{
+        const responseHeaders=new Headers()
+        for(const [name,value] of Object.entries(incoming.headers)) {
+          if(Array.isArray(value))for(const item of value)responseHeaders.append(name,item)
+          else if(value!=null)responseHeaders.set(name,value)
+        }
+        const status=incoming.statusCode??502
+        const empty=[204,205,304].includes(status)||(init.method??"GET").toUpperCase()==="HEAD"
+        const coding=responseHeaders.get("content-encoding")?.toLowerCase()
+        const decode=coding==="gzip"?createGunzip():coding==="deflate"?createInflate():coding==="br"?createBrotliDecompress():null
+        const stream=decode?incoming.pipe(decode):incoming
+        if(decode){responseHeaders.delete("content-encoding");responseHeaders.delete("content-length");decode.on("close",()=>incoming.destroy())}
+        resolve(new Response(empty?null:Readable.toWeb(stream) as any,{status,headers:responseHeaders}))
+        if(empty)incoming.resume()
+      })
+      request.on("error",reject)
+      request.setTimeout(90000,()=>request.destroy(new Error("公开媒体连接超时。")))
+      if(init.body!=null) {
+        if(typeof init.body==="string"||init.body instanceof Uint8Array)request.end(init.body)
+        else {request.destroy();reject(new Error("安全媒体下载仅支持字符串或字节请求体。"))}
+      } else request.end()
+    })
+    if(response.status>=300&&response.status<400) {
+      const location=response.headers.get("location")
+      if(location) {
+        await response.body?.cancel().catch(()=>{})
+        const next=new URL(location,url)
+        if(next.origin!==target.origin) {headers.delete("authorization");headers.delete("cookie");headers.delete("proxy-authorization");headers.delete("host")}
+        url=next.toString();continue
       }
     }
-    return res
+    return response
   }
   throw new SsrfError("重定向次数过多，已拒绝。")
 }
