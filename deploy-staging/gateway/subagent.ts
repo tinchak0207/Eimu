@@ -560,7 +560,7 @@ const sessionScratchpads = new Map<string, Map<string, ScratchpadEntry>>()
 // 父会话 id → 具型产物注册表（Workspace Registry）
 const sessionArtifactRegistries = new Map<string, Map<string, TypedArtifact>>()
 // 父会话 id → 排队等待并发槽恢复的挂起子代理队列
-const pendingResumeQueue = new Map<string, Array<{ run: SubagentRun; payload: unknown; triggerSource: string }>>()
+const pendingResumeQueue = new Map<string, Array<{ run: SubagentRun; payload: unknown; triggerSource: string; resumeText?: string }>>()
 
 // ── 刀 2（2026-09-15）：machine critic pass 状态 ─────────────────────────────────
 // 待审交付：父 gateway session id → 本窗口内已终态的 Expert 交付（尚未送审）。
@@ -4068,6 +4068,32 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
         ...(questionResolved ? { question_resolved: true } : {}),
       })
     }
+    // 挂起态（支柱四）：挂起的 run 不会自己结束本轮，走下面的 QueueOnly 排队＝永不送达
+    // （尤其 blocking 提问的答复会永远卡在队列里、问题永不解除）。故此处立即唤醒：清挂起、
+    // 取并发槽（满则入恢复队列）、把指示／答复原文投进子会话，并按 question_id 解除提问。
+    if (live.status === "suspended") {
+      const questionResolved = resolveQuestionOnAnswer(live, body.question_id)
+      const woken = await autoResumeSuspendedRun(
+        live,
+        kind === "question" ? "answer" : "message",
+        undefined,
+        childFacingFrame(text, kind),
+      )
+      if (!woken) {
+        return Response.json({ ok: false, code: "not_messageable", error: `「${live.label}」挂起态唤醒失败；指示未投递。` }, { status: 502 })
+      }
+      return Response.json({
+        ok: true,
+        delivery: live.status === "running" ? "steered" : "queued",
+        subagent_id: live.id,
+        submission_id: nextSubmissionId(live),
+        note:
+          live.status === "running"
+            ? "挂起子代理已被唤醒并获得并发槽位，指示／答复已投递（复用同一子会话与历史）。接受标识不代表已被处理。"
+            : "并发槽位已满，唤醒请求与指示／答复已入恢复队列，待槽位空出后自动投递。",
+        ...(questionResolved ? { question_resolved: true } : {}),
+      })
+    }
     // QueueOnly（X9 同旨）：不打断当前轮，等它自己 idle 再投（`start_if_idle` 在跑时的语义；
     // 内审/重派在途的 start_or_steer 也走这条腿——不污染正在跑的判定轮）。
     live.pendingChildMessages.push({ id: crypto.randomUUID(), text, at: Date.now() })
@@ -4708,7 +4734,7 @@ export async function handleSubagentArtifact(req: Request): Promise<Response> {
 
 // ── 支柱四：主动挂起与恢复（Suspend & Resume）──────────────────────────────────
 /** 自动恢复挂起的 run */
-async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, customPayload?: unknown): Promise<boolean> {
+async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, customPayload?: unknown, resumeText?: string): Promise<boolean> {
   if (run.status !== "suspended") return false
   const parentKey = run.parentGatewaySessionId
   const runningCount = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running").length
@@ -4719,7 +4745,7 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
       pendingResumeQueue.set(parentKey, q)
     }
     if (!q.some((item) => item.run.id === run.id)) {
-      q.push({ run, payload: customPayload, triggerSource })
+      q.push({ run, payload: customPayload, triggerSource, resumeText })
     }
     return true
   }
@@ -4736,9 +4762,13 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
   if (parentState && deps) {
     deps.emitToSession(parentState, "subagent.resumed", { id: run.id, label: run.label, trigger: triggerSource })
   }
-  const resumeMsg = checkpointData
-    ? `【挂起结束·恢复执行（触发源：${triggerSource}）】\n数据：\n${typeof checkpointData === "string" ? checkpointData : JSON.stringify(checkpointData, null, 2)}\n\n并发槽已获取，请接续下一步！`
-    : `【挂起结束·恢复执行（触发源：${triggerSource}）】并发槽已获取，请继续推进！`
+  // resumeText（来自发起方的答问／指示）优先：挂起子代理被唤醒时最需要的是这条内容本身，
+  // 而不是「槽位已获取」的空话。无 resumeText 时维持既有文案逐字不变。
+  const resumeMsg =
+    resumeText ??
+    (checkpointData
+      ? `【挂起结束·恢复执行（触发源：${triggerSource}）】\n数据：\n${typeof checkpointData === "string" ? checkpointData : JSON.stringify(checkpointData, null, 2)}\n\n并发槽已获取，请接续下一步！`
+      : `【挂起结束·恢复执行（触发源：${triggerSource}）】并发槽已获取，请继续推进！`)
   await deliverChildTurn(run, resumeMsg, `auto_resume_${triggerSource}`, true)
   return true
 }
@@ -4752,7 +4782,7 @@ export function checkPendingResumeQueue(parentId: string): void {
   if (runningCount >= MAX_ACTIVE_PER_PARENT) return
   const next = q.shift()
   if (!next) return
-  void autoResumeSuspendedRun(next.run, next.triggerSource, next.payload)
+  void autoResumeSuspendedRun(next.run, next.triggerSource, next.payload, next.resumeText)
 }
 
 /**
