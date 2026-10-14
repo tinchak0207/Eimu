@@ -27,12 +27,16 @@ const LIVE_FIELDS = [
   "pending_parent_messages",
   "notes_count",
   "pending_questions",
+  "last_checkpoint",
+  "checkpoints_count",
+  "from_checkpoint",
+  "suspension",
 ] as const
 
 // 终态成败映射——**真源＝gateway types-gateway.ts 的 TASK_STATUS_SEMANTICS**（2026-10-14 逐值核对，
 // 该表 `isFailure` 字段是唯一判据）：
 //   ok→false｜error→true｜stopped→false（人工停止不是失败，见 memory stopped-status-not-failure-0920）｜
-//   running→false（非终态）｜interrupted→false（一等非终态，可再收输入）。
+//   running→false（非终态）｜interrupted→false（一等非终态，可再收输入）｜suspended→false（主动挂起交出并发槽，非失败）。
 // gateway 的 TaskStatus 枚举本身没有 "timeout"：超时终态以 status:"error" 收尾（finishRun 传 "error"）；
 // 但**过期产物档**的头部状态行会写 "timeout"/"partial"（persistRunOutput 的 effStatus，被
 // findPersistedArtifact 抽出）⇒ 本表额外收录这两个产物层状态（timeout=失败、partial=非失败的部分结果）。
@@ -42,6 +46,7 @@ const STATUS_IS_FAILURE: Record<string, boolean> = {
   stopped: false,
   running: false,
   interrupted: false,
+  suspended: false,
   timeout: true,
   partial: false,
 }
@@ -62,8 +67,8 @@ export default tool({
     "返回运行中（done=false，含已耗时）或终态（done=true）。终态成败以 `status` 判定：`ok`＝成功（`summary` 为交付文本）；`error`（含超时）＝**失败**，会如实带 `error`/`summary`/`reason`/`partial`/`artifacts`；`stopped`＝**人工停止、不是失败**（回成功回执并说明可否续跑）。结果在网关侧保留 10 分钟，过期会报「不存在或已过期」并附最近 3 笔 run 供你改用；已落盘的产物会附 artifact_path，直接 read 验收，不要重派。",
     "若只是等后台子代理完成，可结束本轮由自动唤醒回灌；也可按需轮询——轮询不会被禁用，但同一 id 连续同参数轮询超过阈值会收到「改变参数或停止」的工具层提示。",
     "终态记录会带 `artifacts`（该子代理已产出的成品 URL 清单），失败/超时也带——先读它再决定要不要重派。任何终态都会附 `artifact_path`（完整产物档）/`transcript_path`（工作日志档），可直接 read 验收，不要重派。",
-    "`status` 可能是 `interrupted`：**这不是失败、也不是终态**——表示它当前那一轮被打断了、但会话还在，可以继续用 `subagent_message` 追加指令让它接着跑。",
-    "运行中还会带 `phase`（当前阶段）、`tools`（工具时间线）、`last_tool`（当前工具）、`text_tail`（正文尾部）、`silent_ms`（静默时长）、`transcript_path`（可 read 的实时工作日志档路径）、`model`/`attempt`/`resumable`/`current_turn_id`、`child_path`（人可读寻址路径，形如 /root/<label>-<id>）、`pending_parent_messages`（在途排队给它的消息数）/`notes_count`（它未读的回报数）。要判断它是「正常在跑」还是「跑偏」，看 `tools`/`text_tail`/`silent_ms` 与 transcript_path 的实况，而不是只看耗时。",
+    "`status` 可能是 `interrupted` 或 `suspended`：**这都不是失败、也不是终态**——`interrupted` 表示当前那一轮被打断了、会话还在，可以继续用 `subagent_message` 追加指令让它接着跑；`suspended` 表示子代理主动挂起交出并发槽等待异步任务完成，可在条件满足时用 `subagent_resume` 恢复它。",
+    "运行中还会带 `phase`（当前阶段，如 running/suspended/awaiting_input/wrapping_up）、`tools`（工具时间线）、`last_tool`（当前工具）、`text_tail`（正文尾部）、`silent_ms`（静默时长）、`transcript_path`（可 read 的实时工作日志档路径）、`model`/`attempt`/`resumable`/`current_turn_id`、`child_path`（人可读寻址路径，形如 /root/<label>-<id>）、`last_checkpoint`/`checkpoints_count`（阶段检查点）、`suspension`（挂起状态信息）、`pending_parent_messages`（在途排队给它的消息数）/`notes_count`（它未读的回报数）。要判断它是「正常在跑」还是「跑偏」，看 `tools`/`text_tail`/`silent_ms` 与 transcript_path 的实况，而不是只看耗时。",
     "`pending_questions`（仅当它登记了阻塞式提问时出现）＝`[{ question_id, header, is_blocking, resolve_by }]`：要回答其中一条，用 subagent_message 带 `kind:\"question\"` 与取自该清单的 `question_id`（网关只按 id 精确解除）。",
   ].join("\n"),
   args: {

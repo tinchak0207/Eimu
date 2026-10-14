@@ -10,7 +10,7 @@
 // （原 index.ts 5821–6368 行，逐行原样搬运）。
 import type { SessionState } from "./types-gateway.ts"
 import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
-import { sessions, markDirty } from "./sessions-core.ts"
+import { sessions, markDirty, isRestoredGatewayTurn } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { personaPatienceMul } from "./sessions-http.ts"
 import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
@@ -136,6 +136,7 @@ export function clearMidturnStallTimer(state: SessionState): void {
 }
 
 export function armMidturnStallTimer(state: SessionState): void {
+  if (isRestoredGatewayTurn(state)) return
   clearMidturnStallTimer(state)
   const gen = state.turnGen ?? 0
   state.midturnStallTimer = setTimeout(() => {
@@ -366,6 +367,7 @@ export function turnHasActivity(st: SessionState): boolean {
 
 /** 用户消息/resume 送达后布哨；每次触发后自续（第二轮触发=终局判定）。 */
 export function armWatchdogTimer(state: SessionState): void {
+  if (isRestoredGatewayTurn(state)) return
   clearWatchdogTimer(state)
   // R5-C：中段停滞哨与启动看门狗同点布防/重布（含重投轮），撤哨走 idle。
   armMidturnStallTimer(state)
@@ -471,6 +473,7 @@ export function clearErrorStallTimer(state: SessionState): void {
 }
 
 export function armErrorStallTimer(state: SessionState): void {
+  if (isRestoredGatewayTurn(state)) return
   clearErrorStallTimer(state)
   const gen = state.turnGen ?? 0
   state.errorStallTimer = setTimeout(() => {

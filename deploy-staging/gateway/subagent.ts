@@ -24,7 +24,7 @@
  * 工具原样转给主代理。
  */
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs"
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
@@ -138,6 +138,7 @@ export const SUBAGENT_SUMMARY_MAX_CHARS = 4000
 // workspace 真身 /opt/agent-harness/workspace，opencode server 的 --dir 就是它）。
 const SUBAGENT_OUTPUT_REL = "outputs/subagent"
 const SUBAGENT_OUTPUT_DIR = "/opt/agent-harness/workspace/outputs/subagent"
+const SUBAGENT_CHECKPOINTS_DIR = join(SUBAGENT_OUTPUT_DIR, "checkpoints")
 const PERSIST_TAIL = "[gateway 落盘: 完整结果未截断]"
 const COMPLETED_TTL_MS = 10 * 60 * 1000 // status 轮询窗口，过期即弃
 export const SUBAGENT_BUSY_MESSAGE = "已有 3 个子代理在跑，等一个完成再派"
@@ -276,6 +277,51 @@ export interface SubagentUsage {
   tokens: number
 }
 
+// ── 2026-10-14 支柱 2/3/4：结构化检查点／挂起／具型产物／共享状态板 ──
+export interface SubagentCheckpoint {
+  id: string
+  run_id: string
+  stage: string
+  progress: number
+  data: Record<string, unknown>
+  summary: string
+  at: number
+}
+
+export interface SubagentSuspension {
+  reason: string
+  condition: {
+    type: "timer" | "poll_task" | "manual"
+    task_id?: string
+    poll_url?: string
+    timeout_seconds?: number
+  }
+  checkpoint_data?: Record<string, unknown>
+  suspended_at: number
+  resume_token: string
+  timer?: ReturnType<typeof setTimeout>
+}
+
+export interface TypedArtifact {
+  id: string
+  name: string
+  type: string
+  uri: string
+  metadata?: Record<string, unknown>
+  producer: string
+  run_id: string
+  registered_at: number
+}
+
+export interface ScratchpadEntry {
+  key: string
+  value: unknown
+  category?: string
+  producer: string
+  producer_run_id?: string
+  updated_at: number
+}
+
 interface SubagentRun {
   id: string
   parentGatewaySessionId: string
@@ -406,6 +452,11 @@ interface SubagentRun {
   resumedFrom?: string
   // X9 延伸：最近一次因本路 notify 唤醒父会话的时刻（progress/blocked 的 60s 防抖判据）。
   lastNoteWakeAt?: number
+  // ── 支柱 2/3/4：检查点／断点接管／挂起 ──
+  checkpoints: SubagentCheckpoint[]
+  lastCheckpoint?: SubagentCheckpoint
+  fromCheckpoint?: { run_id: string; checkpoint_id: string; stage: string }
+  suspension?: SubagentSuspension
 }
 
 interface SubagentResult {
@@ -442,6 +493,10 @@ interface SubagentResult {
   resumedFrom?: string
   // G9(b)（2026-10-14 修复）：hard 停时被丢弃的排队父→子消息条数（不静默丢，如实带出）。
   dropped_queued_messages?: number
+  // ── 支柱 2/3/4：检查点／断点接管 ──
+  lastCheckpoint?: SubagentCheckpoint
+  checkpointsCount?: number
+  fromCheckpoint?: { run_id: string; checkpoint_id: string; stage: string }
 }
 
 interface SubagentDeps {
@@ -498,6 +553,14 @@ const resumable = new Map<string, SubagentRun>()
 const resumeInFlight = new Set<string>()
 // X5：软停／提问登记的到期扫描是既有 livenessTick 的顺手活；该 tick 只在 initSubagent
 // 之后跑，未初始化时（纯函数测试／极端情况）任何新路径都不启动，零回归。
+
+// ── 支柱 2/3/4：检查点／共享工作区／挂起恢复队列 ───────────────────────────
+// 父会话 id → 共享工作区状态板（Scratchpad）
+const sessionScratchpads = new Map<string, Map<string, ScratchpadEntry>>()
+// 父会话 id → 具型产物注册表（Workspace Registry）
+const sessionArtifactRegistries = new Map<string, Map<string, TypedArtifact>>()
+// 父会话 id → 排队等待并发槽恢复的挂起子代理队列
+const pendingResumeQueue = new Map<string, Array<{ run: SubagentRun; payload: unknown; triggerSource: string }>>()
 
 // ── 刀 2（2026-09-15）：machine critic pass 状态 ─────────────────────────────────
 // 待审交付：父 gateway session id → 本窗口内已终态的 Expert 交付（尚未送审）。
@@ -627,11 +690,15 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
     return stopSubagentRunSoft(run, by, reason)
   }
   if (run.stopped || run.status === "stopped" || run.status === "ok" || run.status === "error") return false
-  if (run.status !== "running" && run.status !== "interrupted") return false
+  if (run.status !== "running" && run.status !== "interrupted" && run.status !== "suspended") return false
   // G4(b)：硬停软停收尾中的 run——先撤优雅期计时器与软停态，否则计时器到点还会动这条 run。
   if (run.softStopping) {
     if (run.softStopping.timer) clearTimeout(run.softStopping.timer)
     run.softStopping = undefined
+  }
+  if (run.suspension?.timer) {
+    clearTimeout(run.suspension.timer)
+    run.suspension.timer = undefined
   }
   run.stopped = true
   run.stoppedBy = by
@@ -656,8 +723,9 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   run.error = text
   run.summary = summary
   removeFromRegistries(run)
-  // 修 1：停止也释放槽位——补跑被挤掉的 critic。
+  // 修 1：停止也释放槽位——补跑被挤掉的 critic 与挂起队列。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
+  checkPendingResumeQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id)
   const stoppedResult = { status: "stopped" as TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, ...(droppedQueued > 0 ? { dropped_queued_messages: droppedQueued } : {}) }
   saveDurableSubagentRun(run, stoppedResult)
@@ -703,8 +771,12 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
  * 明确的「用户手动停」语义（Y4「你自己停的」）仍归 hard／stopped：那些 run 不给续跑。
  */
 function stopSubagentRunSoft(run: SubagentRun, by: "user" | "orchestrator", reason: string): boolean {
-  if (run.status !== "running" && run.status !== "interrupted") return false
+  if (run.status !== "running" && run.status !== "interrupted" && run.status !== "suspended") return false
   if (run.stopped) return false
+  if (run.suspension?.timer) {
+    clearTimeout(run.suspension.timer)
+    run.suspension.timer = undefined
+  }
   const text = reason || `已请子代理「${run.label}」收尾`
   run.softStopping = { at: Date.now(), reason: text, by }
   // X2：非终态 interrupted——当前回合被打断，仍可再收输入（收尾指令就是它的下一条输入）。
@@ -1225,6 +1297,9 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     transcriptPath: run.livePath,
     ...(run.resumedFrom ? { resumedFrom: run.resumedFrom } : {}),
     ...(resumeOpen ? { resumable: true, resumeUntil: run.resumeUntil } : {}),
+    ...(run.lastCheckpoint ? { lastCheckpoint: run.lastCheckpoint } : {}),
+    checkpointsCount: run.checkpoints?.length ?? 0,
+    ...(run.fromCheckpoint ? { fromCheckpoint: run.fromCheckpoint } : {}),
   }
   try { saveDurableSubagentRun({ ...run, fullText }, durableResult) }
   catch (error) { run.status = "running"; run.resumeUntil = undefined; run.recoveredWatcher = true; console.error("[gateway] durable subagent terminal deferred:", run.id); return }
@@ -1235,6 +1310,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     boundMap(resumable, 500)
   }
   maybeDrainCriticQueue(run.parentGatewaySessionId)
+  checkPendingResumeQueue(run.parentGatewaySessionId)
   completed.set(run.id, durableResult)
   // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
   if (status === "ok" && (run.agent || run.researchTask) && !run.partialPersist) {
@@ -2329,7 +2405,8 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     // 任一子代理完成释放槽位时由 maybeDrainCriticQueue 补跑。此前 return false 直接
     // 丢弃（实锤：四次被挤掉；唯一一次跑到时 verdict 亦未回灌）。
     const list = byParent.get(parentId) ?? []
-    if (list.length >= MAX_ACTIVE_PER_PARENT) {
+    const runningCount = list.filter((r) => r.status === "running").length
+    if (runningCount >= MAX_ACTIVE_PER_PARENT) {
       criticRetryQueue.set(parentId, targets.slice(-CRITIC_PASS_MAX_TARGETS))
       boundMap(criticRetryQueue, 500)
       console.log(
@@ -2390,6 +2467,7 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       pendingTools: new Set(),
       artifacts: [],
       toolStatusEmitted: new Map(),
+      checkpoints: [],
     }
 
     // 注册进 byParent：与 handleSubagentDispatch 同语义——critic run 占一个并发位、
@@ -2448,7 +2526,7 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
 function maybeDrainCriticQueue(parentId: string): void {
   const queued = criticRetryQueue.get(parentId)
   if (!queued || queued.length === 0 || !deps) return
-  if ((byParent.get(parentId) ?? []).length >= MAX_ACTIVE_PER_PARENT) return
+  if ((byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) return
   const parentState = deps.resolveSession(parentId)
   if (!parentState?.sessionId) return
   criticRetryQueue.delete(parentId)
@@ -2564,6 +2642,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     prompt?: string
     async?: boolean
     expert?: string
+    from_checkpoint_run_id?: string
+    from_checkpoint_id?: string
   }
   const label = typeof body.label === "string" ? body.label.trim() : ""
   // P2b 刀1：prompt 需可被自动补行改写。
@@ -2816,14 +2896,60 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     console.log(`[gateway] jev_gate: REWORK_LOCK injected label="${label}" original=${prior?.relPath || "-"}`)
   }
 
-  // 并发上限：第 4 个拒绝，文案原样给主代理（附 code 与当前在跑清单，便于编排等待而非重试）。
+  // 支柱二（检查点增量断点接管）：若指定了 from_checkpoint_run_id，查出前序检查点并结构化注入任务书
+  const fromCpRunId = typeof body.from_checkpoint_run_id === "string" ? body.from_checkpoint_run_id.trim() : ""
+  const fromCpId = typeof body.from_checkpoint_id === "string" ? body.from_checkpoint_id.trim() : ""
+  let inheritedCp: SubagentCheckpoint | undefined
+  if (fromCpRunId) {
+    const liveRun = (byParent.get(parent.sessionId) ?? []).find((r) => r.id === fromCpRunId)
+    if (liveRun?.checkpoints?.length) {
+      inheritedCp = fromCpId ? liveRun.checkpoints.find((c) => c.id === fromCpId) : liveRun.lastCheckpoint ?? liveRun.checkpoints[liveRun.checkpoints.length - 1]
+    }
+    if (!inheritedCp) {
+      const compRec = completed.get(fromCpRunId)
+      if (compRec?.lastCheckpoint && (!fromCpId || compRec.lastCheckpoint.id === fromCpId)) {
+        inheritedCp = compRec.lastCheckpoint
+      }
+    }
+    if (!inheritedCp) {
+      try {
+        if (existsSync(SUBAGENT_CHECKPOINTS_DIR)) {
+          const files = readdirSync(SUBAGENT_CHECKPOINTS_DIR).filter((f) => f.startsWith(`${fromCpRunId}-`) && f.endsWith(".json"))
+          if (files.length > 0) {
+            files.sort()
+            const targetFile = fromCpId ? `${fromCpRunId}-${fromCpId}.json` : files[files.length - 1]
+            const targetPath = join(SUBAGENT_CHECKPOINTS_DIR, targetFile)
+            if (existsSync(targetPath)) {
+              inheritedCp = JSON.parse(readFileSync(targetPath, "utf8")) as SubagentCheckpoint
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(`[gateway] subagent checkpoint read deferred: ${fromCpRunId}`, e)
+      }
+    }
+  }
+
+  if (inheritedCp) {
+    const cpFact = `【检查点断点接管·系统事实】
+本子代理继承前序子代理（runId: ${inheritedCp.run_id}）阶段【${inheritedCp.stage}】进度 ${inheritedCp.progress}%：
+- 阶段摘要：${inheritedCp.summary}
+- 检查点数据：
+${JSON.stringify(inheritedCp.data, null, 2)}
+
+【铁律】以上阶段与任务已完成并验证，绝对禁止从零重跑！直接从该阶段断点接续攻坚！\n\n`
+    prompt = `${cpFact}${prompt}`
+  }
+
+  // 并发上限：第 4 个拒绝（已挂起 suspended 的子代理交出并发槽，不计入运行数），文案原样给主代理。
   const list = byParent.get(parent.sessionId) ?? []
-  if (list.length >= MAX_ACTIVE_PER_PARENT) {
+  const runningList = list.filter((r) => r.status === "running")
+  if (runningList.length >= MAX_ACTIVE_PER_PARENT) {
     return Response.json({
       ok: false,
       code: "concurrency_limit",
       error: SUBAGENT_BUSY_MESSAGE,
-      running: list.map((r) => ({ id: r.id, label: r.label, elapsed_ms: Date.now() - r.startedAt })),
+      running: runningList.map((r) => ({ id: r.id, label: r.label, elapsed_ms: Date.now() - r.startedAt })),
     })
   }
 
@@ -2880,6 +3006,9 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     pendingTools: new Set(),
     artifacts: [],
     toolStatusEmitted: new Map(),
+    checkpoints: inheritedCp ? [inheritedCp] : [],
+    lastCheckpoint: inheritedCp,
+    fromCheckpoint: inheritedCp ? { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } : undefined,
   }
   list.push(run)
   byParent.set(parent.sessionId, list)
@@ -2972,9 +3101,14 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       status: "running",
       async: true,
       note: "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。",
+      ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
     })
   }
-  return Response.json({ ok: true, subagent_id: run.id })
+  return Response.json({
+    ok: true,
+    subagent_id: run.id,
+    ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
+  })
 }
 
 /** D4（2026-10-02）：本会话最近 N 笔 run（运行中＋已完成，按时间倒序）。
@@ -3025,8 +3159,8 @@ function renderLiveRunSnapshot(run: SubagentRun, now: number): Record<string, un
     label: run.label,
     elapsed_ms: now - run.startedAt,
     // ── 以下为新增快照栏位 ──
-    status: run.status, // running 或非终态 interrupted（与终态可区分）
-    phase: run.softStopping ? "wrapping_up" : run.reworking ? "rework_pending" : run.machineCriticPass ? "review" : run.pendingQuestions?.length ? "awaiting_input" : "running",
+    status: run.status, // running 或非终态 interrupted 或 suspended（与终态可区分）
+    phase: run.status === "suspended" ? "suspended" : run.softStopping ? "wrapping_up" : run.reworking ? "rework_pending" : run.machineCriticPass ? "review" : run.pendingQuestions?.length ? "awaiting_input" : "running",
     child_path: run.childPath,
     ...(run.parentSubagentId ? { parent_subagent_id: run.parentSubagentId } : {}),
     ...(run.resumedFrom ? { resumed_from: run.resumedFrom } : {}),
@@ -3050,6 +3184,16 @@ function renderLiveRunSnapshot(run: SubagentRun, now: number): Record<string, un
     pending_parent_messages: run.pendingChildMessages?.length ?? 0,
     notes_count: run.pendingParentNotes?.length ?? 0,
     ...(run.pendingQuestions?.length ? { pending_questions: run.pendingQuestions.map((q) => ({ question_id: q.id, header: q.header, is_blocking: q.is_blocking, resolve_by: q.resolve_by })) } : {}),
+    ...(run.lastCheckpoint ? { last_checkpoint: run.lastCheckpoint } : {}),
+    checkpoints_count: run.checkpoints?.length ?? 0,
+    ...(run.fromCheckpoint ? { from_checkpoint: run.fromCheckpoint } : {}),
+    ...(run.suspension ? {
+      suspension: {
+        reason: run.suspension.reason,
+        condition: run.suspension.condition,
+        suspended_at: run.suspension.suspended_at,
+      }
+    } : {}),
   }
 }
 
@@ -3118,6 +3262,9 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       ...(done.startedAt ? { started_at: done.startedAt, finished_at: done.finishedAt } : {}),
       ...(done.transcriptPath ?? revivable?.livePath ? { transcript_path: done.transcriptPath ?? revivable?.livePath } : {}),
       ...(done.artifactPath ? { artifact_path: done.artifactPath } : {}),
+      ...(done.lastCheckpoint ? { last_checkpoint: done.lastCheckpoint } : {}),
+      ...(done.checkpointsCount !== undefined ? { checkpoints_count: done.checkpointsCount } : {}),
+      ...(done.fromCheckpoint ? { from_checkpoint: done.fromCheckpoint } : {}),
       // 接续判定以**内存索引**为准（窗口不跨重启；重启后如实回 resumable:false）。
       resumable: revivable !== undefined,
       ...(revivable ? { note: `仍在接续窗口内：可用 subagent_message 直接给它追加指示续跑（不需重新派工）。` } : {}),
@@ -4212,6 +4359,531 @@ export async function handleSubagentNotify(req: Request): Promise<Response> {
     parent_woken: true,
     ...(questionId ? { question_id: questionId } : {}),
     note: "已唤醒父会话一次（回答/指示用 subagent_message 回报本路）。",
+  })
+}
+
+// ── 支柱一：父子通信 RPC（AskParent）────────────────────────────────────────
+/**
+ * POST /internal/subagent/ask-parent
+ * body { session_id, subagent_id?, header, question, options?, is_blocking?, is_secret?, timeout_seconds? }
+ * 子代理向发起方（orchestrator / 用户）定向提问。
+ */
+export async function handleSubagentAskParent(req: Request): Promise<Response> {
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  const body = (await readJsonObject(req)) as {
+    session_id?: string
+    subagent_id?: string
+    header?: string
+    question?: string
+    options?: unknown
+    is_blocking?: boolean
+    is_secret?: boolean
+    timeout_seconds?: number
+  }
+  const childOc = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  if (!childOc) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填（子代理自己的 opencode 会话 id 或 parent session id）" }, { status: 400 })
+  const rawQ = typeof body.question === "string" ? body.question.trim() : ""
+  if (!rawQ) return Response.json({ ok: false, code: "missing_required_args", error: "question 必填（提问详情）" }, { status: 400 })
+  const wantId = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
+  const run = byChildOc.get(childOc) ?? (wantId ? findLiveRun(childOc, wantId) : undefined)
+  if (!run) {
+    return Response.json({ ok: false, code: "not_found", error: "找不到指定的子代理" }, { status: 404 })
+  }
+  const questionId = crypto.randomUUID()
+  const now = Date.now()
+  const autoMs = typeof body.timeout_seconds === "number" && body.timeout_seconds > 0
+    ? Math.min(body.timeout_seconds * 1000, 600_000)
+    : 600_000
+  const header = String(body.header || "子代理提问").slice(0, 200)
+  const isBlocking = body.is_blocking !== false
+  const isSecret = body.is_secret === true
+  const options = Array.isArray(body.options) ? body.options.slice(0, 8).map((o) => String(o).slice(0, 200)) : undefined
+  const qItem = {
+    id: questionId,
+    header,
+    text: rawQ.slice(0, SUBAGENT_BUS_MAX_CHARS),
+    options,
+    is_blocking: isBlocking,
+    is_secret: isSecret,
+    asked_at: now,
+    resolve_by: now + autoMs,
+  }
+  if (!run.pendingQuestions) run.pendingQuestions = []
+  run.pendingQuestions.push(qItem)
+  if (run.pendingQuestions.length > SUBAGENT_QUESTION_MAX) run.pendingQuestions.shift()
+  writeLiveLog(run, true)
+
+  const parentState = parentStateOf(run)
+  if (!parentState) {
+    return Response.json({ ok: true, question_id: questionId, is_blocking: isBlocking, resolve_by: qItem.resolve_by, parent_woken: false, note: "已记录提问，父会话离线" })
+  }
+  const notes = (parentState.subagentNotes ?? []) as Array<{ id: string; run_id: string; kind: string; text: string; at: number }>
+  notes.push({ id: crypto.randomUUID(), run_id: run.id, kind: "question", text: `[${header}] ${rawQ}`, at: now })
+  if (notes.length > SUBAGENT_NOTE_QUEUE_MAX) notes.splice(0, notes.length - SUBAGENT_NOTE_QUEUE_MAX)
+  parentState.subagentNotes = notes
+
+  deps.emitToSession(parentState, "subagent.note", {
+    id: run.id,
+    kind: "question",
+    text: `[${header}] ${rawQ}`,
+    at: now,
+    question_id: questionId,
+    header,
+    options,
+    is_blocking: isBlocking,
+  })
+
+  const busy = parentState.ackTimer != null
+  if (busy || typeof deps.wakeParentNote !== "function") {
+    return Response.json({
+      ok: true,
+      question_id: questionId,
+      delivery: "skipped_inactive",
+      parent_woken: false,
+      is_blocking: isBlocking,
+      resolve_by: qItem.resolve_by,
+      note: busy ? "父会话正在处理当前回合，已存入待答队列（不打断）。" : "已入队（无空闲唤醒出口）。",
+    })
+  }
+
+  const nowWake = Date.now()
+  const lastWake = typeof parentState.lastBlockingQuestionWakeAt === "number" ? parentState.lastBlockingQuestionWakeAt : 0
+  if (isBlocking && lastWake > 0 && nowWake - lastWake < SUBAGENT_NOTIFY_THROTTLE_MS) {
+    return Response.json({
+      ok: true,
+      question_id: questionId,
+      delivery: "throttled",
+      parent_woken: false,
+      is_blocking: isBlocking,
+      resolve_by: qItem.resolve_by,
+      note: `父会话最近 ${Math.round((nowWake - lastWake) / 1000)}s 内已因提问被唤醒过，本提问已登记入队，将在下次回合送达。`,
+    })
+  }
+
+  if (isBlocking) {
+    parentState.lastBlockingQuestionWakeAt = nowWake
+  } else {
+    run.lastNoteWakeAt = nowWake
+    parentState.lastNoteWakeAt = nowWake
+  }
+  deps.wakeParentNote(parentState, {
+    id: run.id,
+    label: run.label,
+    kind: "question",
+    text: `${SUBAGENT_UNTRUSTED_PREFIX}\n[提问·${header}] ${rawQ}`,
+  })
+  return Response.json({
+    ok: true,
+    question_id: questionId,
+    delivery: "accepted",
+    parent_woken: true,
+    is_blocking: isBlocking,
+    resolve_by: qItem.resolve_by,
+    note: "提问已送达并成功唤醒发起方；回答将通过 subagent_message 回送本子会话。",
+  })
+}
+
+// ── 支柱二：检查点增量流（ReportCheckpoint）────────────────────────────────
+/**
+ * POST /internal/subagent/checkpoint
+ * body { session_id, subagent_id?, stage, progress, data?, summary? }
+ * 子代理上报阶段完成检查点，立即落盘并通知主代理。
+ */
+export async function handleSubagentCheckpoint(req: Request): Promise<Response> {
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  const body = (await readJsonObject(req)) as {
+    session_id?: string
+    subagent_id?: string
+    stage?: string
+    progress?: number
+    data?: Record<string, unknown>
+    summary?: string
+  }
+  const childOc = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  if (!childOc) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填" }, { status: 400 })
+  const wantId = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
+  const run = byChildOc.get(childOc) ?? (wantId ? findLiveRun(childOc, wantId) : undefined)
+  if (!run) {
+    return Response.json({ ok: false, code: "not_found", error: "找不到指定的子代理" }, { status: 404 })
+  }
+  const stage = String(body.stage || "checkpoint").trim().slice(0, 100)
+  const progress = Math.min(100, Math.max(0, Number(body.progress) || 0))
+  const data = typeof body.data === "object" && body.data !== null && !Array.isArray(body.data) ? body.data : {}
+  const summary = String(body.summary || "").trim().slice(0, 2000)
+  const cpId = crypto.randomUUID()
+  const checkpoint: SubagentCheckpoint = {
+    id: cpId,
+    run_id: run.id,
+    stage,
+    progress,
+    data,
+    summary,
+    at: Date.now(),
+  }
+  if (!run.checkpoints) run.checkpoints = []
+  run.checkpoints.push(checkpoint)
+  if (run.checkpoints.length > 50) run.checkpoints.shift()
+  run.lastCheckpoint = checkpoint
+  try {
+    mkdirSync(SUBAGENT_CHECKPOINTS_DIR, { recursive: true })
+    const file = join(SUBAGENT_CHECKPOINTS_DIR, `${run.id}-${cpId}.json`)
+    writeFileSync(file, JSON.stringify(checkpoint, null, 2), { encoding: "utf8", mode: 0o640 })
+    try { chmodSync(file, 0o640) } catch {}
+  } catch (e) {
+    console.error(`[gateway] subagent checkpoint disk write failed: id=${run.id}`, e)
+  }
+  writeLiveLog(run)
+  const parentState = parentStateOf(run)
+  if (parentState) {
+    deps.emitToSession(parentState, "subagent.checkpoint", {
+      id: run.id,
+      label: run.label,
+      checkpoint,
+    })
+  }
+  return Response.json({
+    ok: true,
+    checkpoint_id: cpId,
+    subagent_id: run.id,
+    stage,
+    progress,
+    at: checkpoint.at,
+  })
+}
+
+// ── 支柱三：共享工作区状态板与具型产物契约 ──────────────────────────────────────
+/**
+ * POST /internal/subagent/scratchpad
+ * body { session_id, action: "set"|"get"|"list"|"delete", key?, value?, category? }
+ */
+export async function handleSubagentScratchpad(req: Request): Promise<Response> {
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  const body = (await readJsonObject(req)) as {
+    session_id?: string
+    action?: string
+    key?: string
+    value?: unknown
+    category?: string
+  }
+  const sid = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  if (!sid) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填" }, { status: 400 })
+  const parent = resolveParentSession(sid)
+  if (!parent) return unknownSessionResponse(sid)
+  const parentKey = parent.sessionId
+  let pad = sessionScratchpads.get(parentKey)
+  if (!pad) {
+    pad = new Map<string, ScratchpadEntry>()
+    sessionScratchpads.set(parentKey, pad)
+  }
+  const action = typeof body.action === "string" ? body.action.trim() : "list"
+  const childRun = byChildOc.get(sid)
+  const producer = childRun?.label || "orchestrator"
+  if (action === "set") {
+    const key = typeof body.key === "string" ? body.key.trim() : ""
+    if (!key) return Response.json({ ok: false, code: "missing_key", error: "key 必填" }, { status: 400 })
+    if (key.length > 128) return Response.json({ ok: false, code: "key_too_long", error: "key 长度不能超过 128" }, { status: 400 })
+    if (body.value === undefined) return Response.json({ ok: false, code: "missing_value", error: "value 必填" }, { status: 400 })
+    const entry: ScratchpadEntry = {
+      key,
+      value: body.value,
+      category: typeof body.category === "string" ? body.category.trim().slice(0, 64) : undefined,
+      producer,
+      producer_run_id: childRun?.id,
+      updated_at: Date.now(),
+    }
+    pad.set(key, entry)
+    if (pad.size > 200) {
+      const oldestKey = pad.keys().next().value
+      if (oldestKey) pad.delete(oldestKey)
+    }
+    deps.emitToSession(parent, "subagent.scratchpad_updated", {
+      key,
+      category: entry.category,
+      producer: entry.producer,
+      updated_at: entry.updated_at,
+    })
+    return Response.json({ ok: true, key, updated_at: entry.updated_at })
+  }
+  if (action === "get") {
+    const key = typeof body.key === "string" ? body.key.trim() : ""
+    if (!key) return Response.json({ ok: false, code: "missing_key", error: "key 必填" }, { status: 400 })
+    const entry = pad.get(key)
+    return Response.json({ ok: true, key, entry: entry ?? null })
+  }
+  if (action === "delete") {
+    const key = typeof body.key === "string" ? body.key.trim() : ""
+    if (!key) return Response.json({ ok: false, code: "missing_key", error: "key 必填" }, { status: 400 })
+    const deleted = pad.delete(key)
+    return Response.json({ ok: true, key, deleted })
+  }
+  const cat = typeof body.category === "string" && body.category.trim() ? body.category.trim() : undefined
+  const entries: ScratchpadEntry[] = []
+  for (const item of pad.values()) {
+    if (!cat || item.category === cat) entries.push(item)
+  }
+  return Response.json({ ok: true, count: entries.length, entries })
+}
+
+/**
+ * POST /internal/subagent/artifact
+ * body { session_id, action: "register"|"get"|"list", name?, type?, uri?, metadata?, artifact_id? }
+ */
+export async function handleSubagentArtifact(req: Request): Promise<Response> {
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  const body = (await readJsonObject(req)) as {
+    session_id?: string
+    action?: string
+    name?: string
+    type?: string
+    uri?: string
+    metadata?: Record<string, unknown>
+    artifact_id?: string
+  }
+  const sid = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  if (!sid) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填" }, { status: 400 })
+  const parent = resolveParentSession(sid)
+  if (!parent) return unknownSessionResponse(sid)
+  const parentKey = parent.sessionId
+  let reg = sessionArtifactRegistries.get(parentKey)
+  if (!reg) {
+    reg = new Map<string, TypedArtifact>()
+    sessionArtifactRegistries.set(parentKey, reg)
+  }
+  const action = typeof body.action === "string" ? body.action.trim() : "list"
+  const childRun = byChildOc.get(sid)
+  const producer = childRun?.label || "orchestrator"
+  if (action === "register") {
+    const name = typeof body.name === "string" ? body.name.trim() : ""
+    const type = typeof body.type === "string" ? body.type.trim() : ""
+    const uri = typeof body.uri === "string" ? body.uri.trim() : ""
+    if (!name || !type || !uri) {
+      return Response.json({ ok: false, code: "missing_required_args", error: "name, type, uri 均为必填" }, { status: 400 })
+    }
+    const artId = crypto.randomUUID()
+    const artifact: TypedArtifact = {
+      id: artId,
+      name: name.slice(0, 128),
+      type: type.slice(0, 64),
+      uri: uri.slice(0, 1024),
+      metadata: typeof body.metadata === "object" && body.metadata !== null && !Array.isArray(body.metadata) ? body.metadata : undefined,
+      producer,
+      run_id: childRun?.id || "",
+      registered_at: Date.now(),
+    }
+    reg.set(artId, artifact)
+    if (reg.size > 200) {
+      const oldestId = reg.keys().next().value
+      if (oldestId) reg.delete(oldestId)
+    }
+    if (childRun) {
+      childRun.artifacts.push({
+        kind: artifact.type,
+        url: artifact.uri,
+        cost_coins: typeof artifact.metadata?.cost_coins === "number" ? artifact.metadata.cost_coins : undefined,
+      })
+    }
+    deps.emitToSession(parent, "subagent.artifact_registered", { artifact })
+    return Response.json({ ok: true, artifact_id: artId, artifact })
+  }
+  if (action === "get") {
+    const artId = typeof body.artifact_id === "string" ? body.artifact_id.trim() : ""
+    const name = typeof body.name === "string" ? body.name.trim() : ""
+    if (artId) {
+      const hit = reg.get(artId)
+      return Response.json({ ok: true, artifact: hit ?? null })
+    }
+    if (name) {
+      const hit = [...reg.values()].find((a) => a.name === name)
+      return Response.json({ ok: true, artifact: hit ?? null })
+    }
+    return Response.json({ ok: false, code: "missing_args", error: "artifact_id 或 name 必传其一" }, { status: 400 })
+  }
+  const filterType = typeof body.type === "string" && body.type.trim() ? body.type.trim() : undefined
+  const artifacts: TypedArtifact[] = []
+  for (const a of reg.values()) {
+    if (!filterType || a.type === filterType) artifacts.push(a)
+  }
+  return Response.json({ ok: true, count: artifacts.length, artifacts })
+}
+
+// ── 支柱四：主动挂起与恢复（Suspend & Resume）──────────────────────────────────
+/** 自动恢复挂起的 run */
+async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, customPayload?: unknown): Promise<boolean> {
+  if (run.status !== "suspended") return false
+  const parentKey = run.parentGatewaySessionId
+  const runningCount = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running").length
+  if (runningCount >= MAX_ACTIVE_PER_PARENT) {
+    let q = pendingResumeQueue.get(parentKey)
+    if (!q) {
+      q = []
+      pendingResumeQueue.set(parentKey, q)
+    }
+    if (!q.some((item) => item.run.id === run.id)) {
+      q.push({ run, payload: customPayload, triggerSource })
+    }
+    return true
+  }
+  if (run.suspension?.timer) {
+    clearTimeout(run.suspension.timer)
+    run.suspension.timer = undefined
+  }
+  run.status = "running"
+  const checkpointData = customPayload ?? run.suspension?.checkpoint_data
+  run.suspension = undefined
+  run.lastActivityAt = Date.now()
+  writeLiveLog(run, true)
+  const parentState = parentStateOf(run)
+  if (parentState && deps) {
+    deps.emitToSession(parentState, "subagent.resumed", { id: run.id, label: run.label, trigger: triggerSource })
+  }
+  const resumeMsg = checkpointData
+    ? `【挂起结束·恢复执行（触发源：${triggerSource}）】\n数据：\n${typeof checkpointData === "string" ? checkpointData : JSON.stringify(checkpointData, null, 2)}\n\n并发槽已获取，请接续下一步！`
+    : `【挂起结束·恢复执行（触发源：${triggerSource}）】并发槽已获取，请继续推进！`
+  await deliverChildTurn(run, resumeMsg, `auto_resume_${triggerSource}`, true)
+  return true
+}
+
+/** 槽位空出时检查恢复队列 */
+export function checkPendingResumeQueue(parentId: string): void {
+  if (!parentId) return
+  const q = pendingResumeQueue.get(parentId)
+  if (!q || q.length === 0) return
+  const runningCount = (byParent.get(parentId) ?? []).filter((r) => r.status === "running").length
+  if (runningCount >= MAX_ACTIVE_PER_PARENT) return
+  const next = q.shift()
+  if (!next) return
+  void autoResumeSuspendedRun(next.run, next.triggerSource, next.payload)
+}
+
+/**
+ * POST /internal/subagent/suspend
+ * body { session_id, subagent_id?, reason?, condition?: { type?, task_id?, poll_url?, timeout_seconds? }, checkpoint_data? }
+ */
+export async function handleSubagentSuspend(req: Request): Promise<Response> {
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  const body = (await readJsonObject(req)) as {
+    session_id?: string
+    subagent_id?: string
+    reason?: string
+    condition?: {
+      type?: "timer" | "poll_task" | "manual"
+      task_id?: string
+      poll_url?: string
+      timeout_seconds?: number
+    }
+    checkpoint_data?: Record<string, unknown>
+  }
+  const childOc = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  if (!childOc) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填（子代理自己的 opencode 会话 id 或 parent session id）" }, { status: 400 })
+  const wantId = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
+  const run = byChildOc.get(childOc) ?? (wantId ? findLiveRun(childOc, wantId) : undefined)
+  if (!run) {
+    return Response.json({ ok: false, code: "not_found", error: "找不到指定的子代理" }, { status: 404 })
+  }
+  if (run.status !== "running") {
+    return Response.json({ ok: false, code: "not_suspendable", error: `子代理当前状态为 ${run.status}，只有 running 状态可主动挂起` }, { status: 409 })
+  }
+  const cond = body.condition && typeof body.condition === "object" ? body.condition : { type: "timer" as const, timeout_seconds: 30 }
+  const timeoutSec = Math.max(1, Math.min(Number(cond.timeout_seconds) || 30, 1800))
+  const resumeToken = crypto.randomUUID()
+  run.status = "suspended"
+  run.suspension = {
+    reason: String(body.reason || "主动挂起等待异步任务/释放槽位").slice(0, 500),
+    condition: {
+      type: cond.type === "poll_task" ? "poll_task" : cond.type === "manual" ? "manual" : "timer",
+      task_id: typeof cond.task_id === "string" ? cond.task_id.trim() : undefined,
+      poll_url: typeof cond.poll_url === "string" ? cond.poll_url.trim() : undefined,
+      timeout_seconds: timeoutSec,
+    },
+    checkpoint_data: typeof body.checkpoint_data === "object" && body.checkpoint_data !== null && !Array.isArray(body.checkpoint_data) ? body.checkpoint_data : undefined,
+    suspended_at: Date.now(),
+    resume_token: resumeToken,
+  }
+  if (run.suspension.condition.type === "timer" || run.suspension.condition.timeout_seconds) {
+    run.suspension.timer = setTimeout(() => {
+      void autoResumeSuspendedRun(run, "timer_expired")
+    }, timeoutSec * 1000)
+    run.suspension.timer.unref?.()
+  }
+  writeLiveLog(run, true)
+  const parentState = parentStateOf(run)
+  if (parentState) {
+    deps.emitToSession(parentState, "subagent.suspended", {
+      id: run.id,
+      label: run.label,
+      reason: run.suspension.reason,
+      condition: run.suspension.condition,
+    })
+  }
+  maybeDrainCriticQueue(run.parentGatewaySessionId)
+  checkPendingResumeQueue(run.parentGatewaySessionId)
+  return Response.json({
+    ok: true,
+    status: "suspended",
+    subagent_id: run.id,
+    resume_token: resumeToken,
+    timeout_seconds: timeoutSec,
+    note: "子代理已挂起并交出并发槽位；超时或调用 subagent_resume 时恢复执行。",
+  })
+}
+
+/**
+ * POST /internal/subagent/resume
+ * body { session_id, subagent_id, resume_token?, payload?, trigger_source? }
+ */
+export async function handleSubagentResume(req: Request): Promise<Response> {
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  const body = (await readJsonObject(req)) as {
+    session_id?: string
+    subagent_id?: string
+    resume_token?: string
+    payload?: unknown
+    trigger_source?: string
+  }
+  const sid = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  const target = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
+  if (!sid || !target) {
+    return Response.json({ ok: false, code: "missing_required_args", error: "session_id 与 subagent_id 必填" }, { status: 400 })
+  }
+  const parent = resolveParentSession(sid)
+  if (!parent) return unknownSessionResponse(sid)
+  const parentKey = parent.sessionId
+  const wantId = target === "latest" ? resolveLatestRunId(parentKey) ?? target : target
+  const run = findLiveRun(parentKey, wantId)
+  if (!run) {
+    return Response.json({ ok: false, code: "not_found", error: `找不到子代理：${target}` }, { status: 404 })
+  }
+  if (run.status !== "suspended") {
+    return Response.json({ ok: false, code: "not_suspended", error: `子代理当前状态为 ${run.status}，非 suspended 挂起状态无法 resume` }, { status: 409 })
+  }
+  const token = typeof body.resume_token === "string" ? body.resume_token.trim() : ""
+  if (token && run.suspension?.resume_token && token !== run.suspension.resume_token) {
+    return Response.json({ ok: false, code: "invalid_resume_token", error: "resume_token 不匹配" }, { status: 403 })
+  }
+  const runningCount = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running").length
+  if (runningCount >= MAX_ACTIVE_PER_PARENT) {
+    let q = pendingResumeQueue.get(parentKey)
+    if (!q) {
+      q = []
+      pendingResumeQueue.set(parentKey, q)
+    }
+    if (!q.some((item) => item.run.id === run.id)) {
+      q.push({ run, payload: body.payload, triggerSource: body.trigger_source || "manual" })
+    }
+    return Response.json({
+      ok: true,
+      queued: true,
+      status: "suspended",
+      subagent_id: run.id,
+      note: "当前并发槽位已满（3/3），恢复请求已入队排队，待槽位空出后自动恢复",
+    })
+  }
+  await autoResumeSuspendedRun(run, body.trigger_source || "manual", body.payload)
+  return Response.json({
+    ok: true,
+    status: "running",
+    subagent_id: run.id,
+    note: "子代理已恢复运行并获得并发槽位",
   })
 }
 

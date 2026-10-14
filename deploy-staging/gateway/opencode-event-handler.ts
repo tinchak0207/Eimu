@@ -3,7 +3,7 @@
 // failover/jitter 两台重试机、critic pass、Jev gate、question freeze、video release、
 // compaction 触发）。除档头注释/import/declare 占位/export 前缀外与源逐行等价（diff 验 identical）。
 // 依赖解析：Wave1/已建模组真 import；仍住 index.ts 未 export 的符号 declare 占位（stage1 记忆 subagent 占位符法）。
-import { sessions, markDirty, findSessionByOpenCodeId } from "./sessions-core.ts"
+import { sessions, markDirty, findSessionByOpenCodeId, isRestoredGatewayTurn, reconcileRestoredGatewayTurn } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { flushOtherPartTails, takeTurnEndTail } from "./outbound-sanitize.ts"
 import { emitSanitizedDelta } from "./outbound-emit.ts"
@@ -202,7 +202,7 @@ export function handleOpencodeEvent(event: any): void {
                 ctx: { hasTool: state.turnToolStarted === true, hasText: (state.turnTextChars ?? 0) > 0 },
               })
               if (
-                capVerdict.kind !== "none" &&
+                capVerdict.kind !== "none" && !isRestoredGatewayTurn(state) &&
                 !state.idleNudgeSent && !state.turnAborted && (state.lastTurnActiveAt ?? 0) > 0 && state.lastPromptBody
               ) {
                 if (capVerdict.kind === "soft") {
@@ -443,6 +443,8 @@ export function handleOpencodeEvent(event: any): void {
         clearErrorStallTimer(state)
         // R5-C：中段停滞哨同撤（turn 已收尾）。
         clearMidturnStallTimer(state)
+        // 恢复的原回合由 OC 收尾；发布不能触发 failover/jitter/质量补写重投。
+        if (isRestoredGatewayTurn(state)) { void reconcileRestoredGatewayTurn(state); break }
         // N1 规格3：in-flight 打点的清除**不在这里**（2026-10-02 steer 误判修复）。
         // 这一格只是「idle 到了」，还不是「回合结束了」——下面 failover／jitter 两条
         // 重投腿会在同一轮内再送 prompt_async（语义＝同一回合的下一跳，故刻意不发

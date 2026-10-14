@@ -1,3 +1,4 @@
+import { generationUserAdmissions } from "./job-store"
 // 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave2）：0918 前缀快取尾端注入
 // （TAIL_PAYLOAD_MARKER/appendSystemPayloadToTurnTail）、handleSendMessage 全函数
 // （vetting/memory/persona/beast 注入、compaction 闸、watchdog 布哨）、滚动摘要压缩
@@ -568,6 +569,18 @@ export function buildBudgetedSkillModule(
 }
 
 export async function handleSendMessage(key: string, id: string, req: Request): Promise<Response> {
+  const state = getOwnedSession(key, id)
+  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+  const consumer = state.opencodeSessionId
+  generationUserAdmissions.set(consumer, (generationUserAdmissions.get(consumer) || 0) + 1)
+  try { return await handleAdmittedUserMessage(key, id, req) }
+  finally {
+    const count = (generationUserAdmissions.get(consumer) || 1) - 1
+    if (count) generationUserAdmissions.set(consumer, count)
+    else generationUserAdmissions.delete(consumer)
+  }
+}
+async function handleAdmittedUserMessage(key: string, id: string, req: Request): Promise<Response> {
   // Phase 0 观测：t_accept 起点（函数进入时刻；计时档在 turnGen 递增处建立）。
   const tAcceptAt = Date.now()
   const state = getOwnedSession(key, id)

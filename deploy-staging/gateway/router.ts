@@ -19,7 +19,7 @@ import { openEventStream } from "./sse-core.ts"
 import { handleAttachmentUpload, sanitizeUploadName, reserveUniqueUploadName, contentTypeForExt } from "./uploads-media.ts"
 import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
-import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker, handleSubagentMessage, handleSubagentNotify } from "./subagent.ts"
+import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker, handleSubagentMessage, handleSubagentNotify, handleSubagentAskParent, handleSubagentCheckpoint, handleSubagentScratchpad, handleSubagentArtifact, handleSubagentSuspend, handleSubagentResume } from "./subagent.ts"
 import { workflowServiceTemplates, handleWorkflowInternal, pushWorkflowCompletion } from "./workflow-gw.ts"
 import { handleDirectorRoutes } from "./director.ts"
 import { handleCreateSession, handleEventStream, handleConfirm } from "./session-lifecycle.ts"
@@ -31,6 +31,8 @@ import { handleSteer } from "./steer-gw.ts"
 import { handleTranscript, handleAbortSession } from "./session-read.ts"
 import { handleQuota } from "./quota-ledger.ts"
 import { handleCanvasStateRead, handleTimelineRoutes, handleConfirmStatus, handleResumeSession, handleSessionKey, handleSessionTasks, handleOptimizePrompt, handleExtractLessons } from "./internal-http.ts"
+import { handleGenerationDelivery } from "./job-delivery"
+import { generationMaintenanceEnabled } from "./job-store"
 import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSearch, MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // W6a（2026-10-04）：装置桥云端侧（本机 daemon 出站注册／取件）。总开关 EIMU_DEVICE_BRIDGE，预设 OFF。
 import { deviceBridgeEnabled, handleDeviceBridgeRoutes, handleInternalDeviceAuthorize, handleInternalDeviceInvoke, handleInternalDeviceStatus } from "./device-bridge.ts"
@@ -167,6 +169,8 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
     // /agent/ to this port WITHOUT stripping the prefix, so /healthz alone is
     // not reachable from outside and an external uptime check would get 401.
     if (req.method === "GET" && (pathname === "/healthz" || pathname === "/agent/healthz")) {
+      // persistence.ready=false 表示「现在起新建的会话重启会丢」——这是 2026-10-13
+      // 事故期间**没人看得见**的信号，现在做成可观测的（只读，无副作用）。
       return Response.json({ ok: true, timestamp: new Date().toISOString(), sessions: sessions.size, persistence: persistenceStatus() })
     }
 
@@ -174,6 +178,9 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
     if (pathname.startsWith("/internal/")) {
       if (!isLoopback(clientIp)) {
         return jsonError(403, "internal endpoint only reachable from localhost", "forbidden", "forbidden")
+      }
+      if (req.method === "POST" && ["/internal/job-register", "/internal/job-completion", "/internal/job-ack", "/internal/job-transfer", "/internal/job-pending", "/internal/job-bind", "/internal/job-import", "/internal/job-maintenance", "/internal/project-budget"].includes(pathname)) {
+        return handleGenerationDelivery(req, pathname)
       }
       if (req.method === "POST" && pathname === "/internal/confirm-request") {
         return handleConfirmRequest(req)
@@ -252,6 +259,25 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/notify") {
         return await guardedSubagentEndpoint("notify", () => handleSubagentNotify(req))
+      }
+      // 2026-10-14 协作总线四大支柱：RPC(ask-parent)、检查点(checkpoint)、白板(scratchpad)、具型产物(artifact)、挂起(suspend)、恢复(resume)
+      if (req.method === "POST" && pathname === "/internal/subagent/ask-parent") {
+        return await guardedSubagentEndpoint("ask-parent", () => handleSubagentAskParent(req))
+      }
+      if (req.method === "POST" && pathname === "/internal/subagent/checkpoint") {
+        return await guardedSubagentEndpoint("checkpoint", () => handleSubagentCheckpoint(req))
+      }
+      if (req.method === "POST" && pathname === "/internal/subagent/scratchpad") {
+        return await guardedSubagentEndpoint("scratchpad", () => handleSubagentScratchpad(req))
+      }
+      if (req.method === "POST" && pathname === "/internal/subagent/artifact") {
+        return await guardedSubagentEndpoint("artifact", () => handleSubagentArtifact(req))
+      }
+      if (req.method === "POST" && pathname === "/internal/subagent/suspend") {
+        return await guardedSubagentEndpoint("suspend", () => handleSubagentSuspend(req))
+      }
+      if (req.method === "POST" && pathname === "/internal/subagent/resume") {
+        return await guardedSubagentEndpoint("resume", () => handleSubagentResume(req))
       }
       // D1（2026-10-02）：工具层重复呼叫断路器的强制收尾（plugin eimu-guard 在 N+5 次时呼叫）。
       if (req.method === "POST" && pathname === "/internal/session/loop-breaker") {
@@ -619,6 +645,9 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
 }
 
 
+    if (req.method === "POST" && /^\/agent\/v1\/sessions(?:\/[^/]+\/messages)?$/.test(pathname) && generationMaintenanceEnabled()) {
+      return Response.json({ ok: false, code: "maintenance", error: "服务更新中，已受理任务继续处理，请稍后重试。" }, { status: 503, headers: { "Retry-After": "60" } })
+    }
     if (req.method === "POST" && pathname === "/agent/v1/sessions") {
       return handleCreateSession(key, req)
     }

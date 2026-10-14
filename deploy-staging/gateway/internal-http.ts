@@ -16,6 +16,8 @@ import { jsonError } from "./gw-lib"
 import { hashKey } from "./auth-gw"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { approvePendingCharge } from "./media-internal-routes.ts"
+import { durableSessionTasks, stableGenerationOwnerScope } from "./job-delivery"
+import { queueLegacyGenerationWake } from "./job-store"
 // TODO(整合 Wave3): timers-gw 同波在建，armWatchdogTimer 尚未可 import，declare 占位（bun build 不查名可过）。
 
 // 画布摘要读取：opencode 的 canvas_summary 工具用 session_id（opencode 或
@@ -221,46 +223,16 @@ export async function handleResumeSession(req: Request): Promise<Response> {
   if (!session_id || typeof content !== "string" || content.trim() === "") {
     return jsonError(400, "session_id and content are required", "bad_request", "bad_request")
   }
-  const state = resolveSession(session_id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  // Async, same reason as handleSendMessage: the poller must not be held open
-  // for the length of an LLM turn.
+  // Compatibility callers also enter the durable inbox. Busy/missing consumers never lose a wake.
   try {
-    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/prompt_async`, {
-      method: "POST",
-      body: JSON.stringify({ ...beastAgentField(state), parts: [{ type: "text", text: content }] }),
-      timeoutMs: 10000,
-    })
-    if (!res.ok) {
-      return jsonError(502, `opencode resume failed: ${res.status}`, "backend_error", "backend_error")
-    }
+    const owner = resolveSession(session_id) ?? subagentParentState(session_id)
+    const consumer = session_id.startsWith("ses_") ? session_id : owner?.opencodeSessionId || session_id
+    const receipt = queueLegacyGenerationWake(session_id, content, owner?.sessionId || "", consumer)
+    return Response.json({ ok: true, durable: true, queued: true, delivery_id: receipt.task_id, consumer_session_id: consumer }, { status: 202 })
   } catch {
-    return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
+    return jsonError(503, "durable inbox unavailable; sender must retain and retry", "backend_error", "backend_error")
   }
-  // 抖动重试记账（与 handleSendMessage 同款）：resume 轮同样可能抖动早死。
-  state.lastPromptBody = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
-  state.turnGen = (state.turnGen ?? 0) + 1
-  state.turnTextChars = 0
-  state.turnReasoningChars = 0
-  state.turnRetries = 0
-  state.turnAborted = false
-  state.turnAbortSource = undefined // D2-1b：新轮起点清中止来源（与 turnAborted 同点）
-  state.retryQueued = false
-  state.turnUpstreamError = null
-  // R2-A 看门狗：resume 轮同样要兜 turn 未启动。
-  state.turnToolStarted = false
-  state.watchdogRetried = false
-  // 修 1：resume 开新轮，旧死亡宣告作废（撤回帧不嫁接到新轮）。
-  state.deathDeclared = false
-  // R8-B 工单 #4：resume 轮同样重置 question 答覆标记。
-  state.questionAnsweredThisTurn = false
-  // 2026-10-02 steer 误判修复：resume 轮同样要打 lastTurnActiveAt（steer 受理闸
-  // 唯一依据；三条「从 idle 起轮」路径——子代理唤醒／workflow 唤醒／本端点——
-  // 原本全漏，唤醒驱动会话的 steer 因此全被 409 no_active_turn 误判失败）。
-  state.lastTurnActiveAt = Date.now()
-  markDirty(state)
-  armWatchdogTimer(state)
-  return Response.json({ ok: true })
+
 }
 
 export async function handleSessionKey(req: Request): Promise<Response> {
@@ -295,7 +267,7 @@ export async function handleSessionKey(req: Request): Promise<Response> {
 // 0831：本轮任务登记表端点（给工具读的权威 ID 来源）。鉴权/防呆逐字对齐 /internal/session-key：
 // 同处 /internal/ loopback 门内、同一 resolveSession 查找、同 jsonError 防呆；仅回应换成 tasks 契约。
 export async function handleSessionTasks(req: Request): Promise<Response> {
-  let body: { session_id?: string }
+  let body: { session_id?: string; project?: string; frame?: number }
   try {
     body = (await req.json()) as { session_id?: string }
   } catch {
@@ -310,7 +282,10 @@ export async function handleSessionTasks(req: Request): Promise<Response> {
   // 「回环未回应」。改回 200 + tasks:[] + session_found:false，如实区分「无会话」与「无任务」。
   if (!state) return Response.json({ ok: true, session_found: false, tasks: [] })
   // hydrate 重启恢复的 session 该栏可能 undefined（sessions-core 已补，这里再兜底防 500）。
-  return Response.json({ ok: true, session_found: true, tasks: [...(state.sessionTasks?.values() ?? [])] })
+  const tasks = new Map([...(state.sessionTasks?.values() ?? [])].map((task) => [task.task_id, task]))
+  for (const task of durableSessionTasks(session_id)) tasks.set(task.task_id, task)
+  return Response.json({ ok: true, durable: true, owner_scope: await stableGenerationOwnerScope(session_id), session_found: true, tasks: [...tasks.values()].filter((task: any) =>
+    (body.project === undefined || task.project === body.project) && (body.frame === undefined || task.frame === body.frame)) })
 }
 
 

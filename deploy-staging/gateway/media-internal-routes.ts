@@ -573,7 +573,7 @@ export function settleConfirm(state: SessionState, requestId: string, outcome: C
 }
 
 // 用 task_id（或按序）把 loading 节点置 error，resume 的 agent 文案讲人话。
-function emitImageFailed(
+export function emitImageFailed(
   state: SessionState,
   task_id: string,
   reason: string,

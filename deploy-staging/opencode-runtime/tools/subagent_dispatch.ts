@@ -47,6 +47,14 @@ export default tool({
       .describe(
         "true=后台派出立即返回，完成后自动唤醒主会话附结果摘要（失败也唤醒），军团并发派遣一律用它；缺省/false=同步等待结果（仅限必须立即拿结果的小任务）",
       ),
+    from_checkpoint_run_id: tool.schema
+      .string()
+      .optional()
+      .describe("前序子代理的 runId（断点接管）：指定后自动继承该子代理最近落盘的检查点，绝不从零重跑已完成阶段"),
+    from_checkpoint_id: tool.schema
+      .string()
+      .optional()
+      .describe("继承前序子代理的指定检查点 ID（可选，缺省自动取最新检查点）"),
   },
   async execute(args, context) {
     // D2：必填先自检——不让空参数走到网路层，也不回空错误码。
@@ -65,6 +73,8 @@ export default tool({
     try {
       const asyncMode = args.async === true
       const expert = typeof args.expert === "string" && args.expert.trim() ? args.expert.trim() : undefined
+      const fromCpRunId = typeof args.from_checkpoint_run_id === "string" && args.from_checkpoint_run_id.trim() ? args.from_checkpoint_run_id.trim() : undefined
+      const fromCpId = typeof args.from_checkpoint_id === "string" && args.from_checkpoint_id.trim() ? args.from_checkpoint_id.trim() : undefined
       const res = await fetch(`${GATEWAY}/internal/subagent/dispatch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,6 +84,8 @@ export default tool({
           prompt,
           async: asyncMode,
           ...(expert !== undefined ? { expert } : {}),
+          ...(fromCpRunId !== undefined ? { from_checkpoint_run_id: fromCpRunId } : {}),
+          ...(fromCpId !== undefined ? { from_checkpoint_id: fromCpId } : {}),
         }),
         signal: AbortSignal.timeout(15000),
       })
