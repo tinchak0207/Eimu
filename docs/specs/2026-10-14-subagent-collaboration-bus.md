@@ -540,3 +540,34 @@ runtime 工作树里另有一批「生成工具」未提交改动（`tools/image
 | FIX-G6 | gateway `subagent.ts` | 修 H7 ①：`handleSubagentStatus` 精确 id 解析补 **`byParent` 兜底**（快照构造抽成 `renderLiveRunSnapshot(run,now)` 双处共用，禁复制两份；只认本父会话归属）；顺带核查 `message/stop` 的精确 id 解析（`message` 已能解析并回 `not_messageable` 而非 404；`stop{mode}` 已能解析）。修 H7 ②：产物档与 live log **`0600 → 0640`**（属主 rw＋组 agentsvc 可读；父会话的 opencode 以 agentsvc 运行、必须读得回成品与转录；仍不对 world 开放，比生产原有 0644 更严） | 已修＋**已上线并生产复验**（release `0c94d0154b3e-20261014T051729Z`）：软停后按精确 id 查 → `{ok:true,done:false,status:"interrupted",phase:"wrapping_up"}`（不再 404）；live log／产物档 `640 ubuntu agentsvc` 且 `sudo -u agentsvc head` 实测可读（原 PermissionDenied 消失） |
 | — | 软停收敛（生产实测） | `soft stop requested` → `interrupted/wrapping_up` → **`soft stop grace expired (90s) — 落 partial 后按 stopped 收尾`** → 产物档落盘（0640）＝**软停保住已产出成果** | 已验（第二轮的两次真实软停） |
 | — | 部署 | gateway `d631246a6ccc` → release `d631246a6ccc-20261014T044144Z`（716 档、syntax gate PASS、healthz 200）；runtime 同 sha → `…T044218Z`（1235 档，新装 `notify_orchestrator.ts`/`subagent_message.ts`） | 已上线（FIX-G6 为第二轮） |
+
+## 7. 上线后生产事故与四支柱真路径验收（2026-10-14 第二轮）
+
+### 7.1 P0：四大支柱上线 10 分钟后全站瘫痪（runtime 工具 schema 炸穿开放编码工具注册表）
+
+- **现象**：`748ad57f957a` 双发布（gateway `…T062720Z`）后，`opencode-server` 重启于 `06:28:34Z`，**`06:28:45Z` 起每一个会话每一轮**都 `level=ERROR message="prompt_async failed" cause="Cause([Die(TypeError: undefined is not an object (evaluating 'r._zod'))])"`，同一 session 以 ~2s 间隔重试满 10 次后向用户吐「上游持续报错」。`grep -c _zod` 至修复前累计 **156 行**，覆盖至少 3 个会话（含真实用户会话）。
+- **根因（本地决定性复现，非推测）**：opencode `1.18.14` 内建 zod 为 **4.1.8**；其 `ToolRegistry` 的 plugin 工具边界（`packages/opencode/src/tool/registry.ts` `fromPlugin`）对每个工具执行 `z.object(def.args)` → `z.toJSONSchema(schema,{io:"input",metadata:zodMetadataRegistry(schema)})`。而 **zod 4.1.8 的 `z.record(x)` 单参写法把唯一参数当 `keyType`、`valueType` 留 `undefined`**（4.4.3 才容忍单参），`to-json-schema.js` 取 `valueType._zod` 即抛。三支新工具命中该写法：`report_checkpoint.data`、`artifact_register.metadata`、`subagent_suspend.checkpoint_data`。`ToolRegistry.state` 是**全量**构造 ⇒ **一支坏工具炸掉整张注册表**，与用户无关的会话一并 `prompt_async failed`。
+- **复现与验证口径**：以 opencode 自带 `@opencode-ai/plugin@1.18.14`（其 zod = 4.1.8）复刻 `fromPlugin`＋`zodMetadataRegistry`＋`normalizeZodJsonSchema` 全链，逐一喂入 `tools/*.ts`：修复前 3/8 FAIL（栈落 `zod/v4/core/to-json-schema.js:15:21 schema._zod`），修复后 **128 支工具全部 OK（SCHEMA_FAIL=0）**。
+- **修复**：`z.record(z.any())` → **`z.record(z.string(), z.any())`**（显式两参，两版 zod 通吃）。commits `551e3e8b`（runtime 3 档）＋ `aa754b50`（gateway，另含 7.2/7.3）。
+- **发布**：`gateway-release` `551e3e8be38b-20261014T063731Z`（recon OK 84 档、coverage 40.0% PASS、healthz 200）＋ `opencode-release` `…T063817Z`（1241 档、`PERM_OK agentsvc 可读`、service active）。修复后 `_zod` 计数**停在 156 不再增长**。
+
+### 7.2 P1：`findLiveRun` 漏认 `suspended` ⇒ `subagent_resume` 恒回 `not_found`
+
+`findLiveRun` 只认 `running`/`interrupted`，而 `handleSubagentResume` 走它寻址 ⇒ 自报自己挂起的 run 用完整 id 也回 `not_found`（生产实测）。修：过滤器补 `r.status === "suspended"`。
+
+### 7.3 P1（跨支柱死锁）：对**挂起中**子代理答问会被排队＝永不送达
+
+`handleSubagentMessage` 的活跃分支里，`suspended` 的 run `running=false` ⇒ 落进 QueueOnly「等本轮结束再按序处理」。但**挂起态永远不会自己结束本轮** ⇒ 答复（尤其 `is_blocking:true` 提问的答复）永不投递、`pending_questions` 永不解除，只能空等挂起计时器到点。这正是支柱一 × 支柱四的交集缺口。修：命中 `suspended` 时改走 `autoResumeSuspendedRun` 立即唤醒（清挂起＋取并发槽，槽满则入恢复队列）并投递发起方原文；`autoResumeSuspendedRun` 增可选 `resumeText`（发起方原文优先于「槽位已获取」模板），随恢复队列一并携带。
+
+### 7.4 四支柱生产真路径 E2E（修复后，真会话／真端点；作者≠验收者待补）
+
+| 支柱 | 真跑证据 | 判定 |
+|---|---|---|
+| ① RPC / AskParent | 子代理 `ask_parent [ok]`；网关日志 `subagent note wake: … kind=question`；存活态 `subagent_status` 回 `pending_questions[{question_id,header,is_blocking,resolve_by}]`；`subagent_message{kind:"question",question_id}` 回 `{"ok":true,"delivery":"steered|queued"}`（**修复前为 `not_messageable`，即已消除**） | **PASS** |
+| ② 检查点 / 断点继承 | `report_checkpoint [ok]`；`subagent_status.last_checkpoint{stage,progress,data,summary}`＋`checkpoints_count`；落盘档 `-rw-r----- ubuntu agentsvc`（0640）；`subagent_dispatch{from_checkpoint_run_id}` 回 `from_checkpoint{run_id,checkpoint_id,stage}` | **PASS** |
+| ③ 共享白板 / 具型产物 | `scratchpad{action:"set"}` → `list` 回 `e2e_shared_key`（含 producer/run_id）；`artifact_register{register}` → `list` 回 `e2e_artifact`（含 metadata）；同一父会话另见 orchestrator 真实登记的 10 条鲸鱼娘产物 | **PASS** |
+| ④ 挂起 / 恢复 | `subagent_suspend [ok]` → `status:"suspended"`、`phase:"suspended"`、`done:false`（并发槽释放）；`subagent_resume` 回 `{"ok":true,"status":"running","note":"…已恢复运行并获得并发槽位"}`，随后该 run 以真实摘要 `status:"ok"` 收尾 | **PASS** |
+
+**零回归红线**：`_zod` 计数修复后不再增长；`bun build` syntax gate PASS；发布后 `healthz=200`、opencode `service active`。
+
+**诚实边界**：7.3 修复发布在 drain 闸门后（生产鲸鱼娘会话正在真实产出，不打断），发布完成前的 RPC 答问闭环复验见 7.5；本节判定以 7.5 的最终复验为准。
