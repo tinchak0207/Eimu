@@ -312,6 +312,11 @@ export function summarizeRecentModelStats(
   const cutoff = nowMs - windowMs;
   for (const event of events) {
     if (event.ts < cutoff) continue;
+    // 2026-10-14 假判定修复：只统计真实上游终态。排队超时（从未提交上游）、容量饱和、
+    // 限流、超时、取消等不是渠道坏——计入会让 agent 侧 last_24h 闸把健康渠道判死，
+    // 流量全压到剩余渠道 → 饱和 → 更多排队超时 → 自我强化（flare 实录 24h 234 单
+    // deadline_exceeded 但上游 attempt 210 成功/37 次 503）。
+    if (event.outcome !== "delivered" && !isRealUpstreamFailure(event)) continue;
     let stats = byModel.get(event.modelId);
     if (!stats) {
       stats = {
@@ -344,6 +349,20 @@ export function summarizeRecentModelStats(
       p80_latency_ms: latencyP80(deliveredLatencies),
     }))
     .sort((a, b) => b.jobs - a.jobs);
+}
+
+/** 不代表渠道坏的失败原因（瞬态/用户侧/我方侧），与模型闸 MODEL_BREAKER_EXCLUDED_FAILURE_CLASSES 同口径。 */
+const NON_UPSTREAM_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  "user_input", "cancelled", "deadline_exceeded", "artifact_download", "malformed_output", "empty_result",
+  "network", "unknown", "pricing_config", "authentication", "quota_exhausted", "overloaded", "rate_limited",
+  "upstream_protocol",
+]);
+
+/** 失败事件里至少一个尝试拿到上游 HTTP 回应且原因属真实上游终态失败，才算渠道失败。 */
+function isRealUpstreamFailure(event: RoutingEvent): boolean {
+  return event.attempts.some((attempt) => !attempt.ok
+    && typeof attempt.status === "number"
+    && !NON_UPSTREAM_FAILURE_REASONS.has(attempt.reason ?? "unknown"));
 }
 
 /**
