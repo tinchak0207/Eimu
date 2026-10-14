@@ -45,6 +45,14 @@ export function emitSessionError(state: SessionState, code: string, message: str
   // MessageAbortedError 还会误布错误停滞哨（中止后又弹「上游刚才报错了」）。
   // 中止的 UI 收尾由 turn.done 表达；这里只留日志，不发帧、不记上游错、不布哨。
   if (code === "MessageAbortedError" || /abort/i.test(message)) return
+  // 2026-10-14：poller 的生成任务级失败（task_failed/task_refunded）不是 LLM 上游错误——
+  // 此前会记 turnUpstreamError（idle 触发 failover 重投整轮）并布错误停滞哨，
+  // 多张图本地逾时 ⇒ 「上游连续报错且自动重试未能恢复」收掉整个 turn（与假逾时同一锁死链）。
+  // 只发帧给用户，不记上游错、不布哨。
+  if (code === "task_failed" || code === "task_refunded") {
+    emitToSession(state, "session.error", { code, message })
+    return
+  }
   // 2026-08-31：上游模型错误（TLS 断链/输出审核 400/欠费 403 等）记入 flag，
   // idle 收尾走 failover 换模重投；tool_error 是工具拒绝、Aborted 是用户打断，
   // 都不是渠道问题，不记。
