@@ -236,7 +236,8 @@ export async function handleCanvasStatePublic(key: string, id: string, req: Requ
     const code = stored.status === 413 ? "payload_too_large" : "bad_request"
     return jsonError(stored.status, stored.message, code, code)
   }
-  return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt })
+  // rev 供前端做乐观并发：下次上行带回该版本，服务端据此拒绝迟到的旧快照。
+  return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt, rev: stored.rev })
 }
 
 // GET /agent/v1/sessions/:id/canvas/state — 前端（经站点代理）快照下行。
