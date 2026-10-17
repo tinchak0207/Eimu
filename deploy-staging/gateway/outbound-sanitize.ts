@@ -30,6 +30,7 @@ export type PartStripState = { pending: string; suppress: boolean; fence: boolea
 //（> 开头）、非链接、非表格行，且英文词数达标（≥5 词且句末有标点，或 ≥8 词）
 // 判为英文成句正文 → 整行压制，发一帧一次性中文提示替代。书名/章节列表行
 //（无句末标点）与代码栅栏内容直通。短行（术语/标识符/型号）永不命中。
+const OPENUI_STATEMENT_RE = /^[A-Za-z_$][\w$]*\s*=\s*(?:[A-Za-z_][\w]*\s*\(|@[A-Za-z]+\(|\[)/
 export function isEnglishProseLine(line: string): boolean {
   const t = line.trim()
   if (!t) return false
@@ -37,6 +38,9 @@ export function isEnglishProseLine(line: string): boolean {
   if (t.startsWith(">")) return false // markdown 引文 → 放行
   if (t.startsWith("|")) return false // 表格行 → 放行
   if (/https?:\/\//.test(t)) return false // 链接行 → 放行
+  // 2026-10-18 OpenUI：模型偶尔不套围栏直接输出 openui 语句（`form = Form("p", btns, [f1, f2])`）。
+  // 这类「标识符 = 组件调用/数组/动作」的程序行不是英文正文，压掉会让前端拿到半截程序。
+  if (OPENUI_STATEMENT_RE.test(t)) return false
   const words = t.match(/[A-Za-z]{2,}/g)
   const n = words ? words.length : 0
   if (n < 5) return false
