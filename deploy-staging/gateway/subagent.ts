@@ -1999,7 +1999,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
       method: "POST",
       headers: deps!.openCodeHeaders(),
       body: "{}",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000),
     })
     if (res.ok) {
       const data = (await res.json()) as { id?: string }
@@ -2075,7 +2075,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
       method: "POST",
       headers: deps!.openCodeHeaders(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000),
     })
     if (!res.ok) throw new Error(`prompt_async status ${res.status}`)
   } catch (e) {
@@ -3797,7 +3797,7 @@ async function deliverChildTurn(run: SubagentRun, text: string, tag: string, sta
       method: "POST",
       headers: deps.openCodeHeaders(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000),
     })
     if (!res.ok) {
       console.error(`[gateway] subagent bus deliver failed (${tag}): id=${run.id} label="${run.label}" status=${res.status}`)
@@ -5228,11 +5228,20 @@ function seedTakenOverCursor(run: SubagentRun, messages: any[]): void {
   }
 }
 let takeoverReconciling = false
+let takeoverBackoffUntil = 0
+let takeoverFailStreak = 0
 async function reconcileTakenOverRuns(): Promise<void> {
   if (!deps || takeoverReconciling) return
+  if (Date.now() < takeoverBackoffUntil) return
+  // 无 recoveredWatcher 在跑时不打 /session/status——opencode 内存顶满时每 15s 一次 10s 超时会与真实派工抢通道（2026-10-17 实锤）。
+  let hasWatcher = false
+  for (const run of byChildOc.values()) {
+    if (run.recoveredWatcher && run.status === "running") { hasWatcher = true; break }
+  }
+  if (!hasWatcher) return
   takeoverReconciling = true
   try {
-    const response = await fetch(`${deps.openCodeUrl}/session/status`, { headers: deps.openCodeHeaders(), signal: AbortSignal.timeout(10000) })
+    const response = await fetch(`${deps.openCodeUrl}/session/status`, { headers: deps.openCodeHeaders(), signal: AbortSignal.timeout(5000) })
     if (!response.ok) return
     const statuses: any = await response.json()
     for (const run of byChildOc.values()) {
@@ -5245,6 +5254,12 @@ async function reconcileTakenOverRuns(): Promise<void> {
         else await summarizeChild(run)
       }
     }
+    takeoverFailStreak = 0
+  } catch (error) {
+    takeoverFailStreak++
+    const delay = Math.min(300_000, 15_000 * (2 ** Math.min(takeoverFailStreak, 4)))
+    takeoverBackoffUntil = Date.now() + delay
+    console.warn(`[gateway] takeover reconciliation deferred: ${error instanceof Error ? error.message : "unavailable"} (backoff ${Math.round(delay / 1000)}s streak=${takeoverFailStreak})`)
   } finally { takeoverReconciling = false }
 }
 /** Reattach the original OpenCode stream; never POST prompt, generate, abort or DELETE on takeover. */
@@ -5300,5 +5315,6 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
     bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
   }
   await reconcileTakenOverRuns()
-  setInterval(() => void reconcileTakenOverRuns().catch((error) => console.warn("[gateway] takeover reconciliation deferred:", error instanceof Error ? error.message : "unavailable")), 15000).unref?.()
+  // 有 watcher 才真正打 opencode；失败时 reconcileTakenOverRuns 内指数退避，避免 15s 风暴。
+  setInterval(() => void reconcileTakenOverRuns(), 15000).unref?.()
 }
