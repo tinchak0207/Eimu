@@ -1,0 +1,179 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   OpenUI（生成式 UI）在 Eimu 助理消息里的最小主题映射。
+
+   作用域只到 AgentOpenUIBlock 的容器（.eimu-openui-block），不改聊天壳、
+   不改 Liquid Glass 材质。原则：
+   - 字体 / 前景色跟随 Eimu 正文，不用 OpenUI 默认的 Inter 与纯黑；
+   - 卡片、下沉面、边框、圆角映射到 Eimu 的浅色玻璃语汇；
+   - 窄屏不横向撑破气泡（容器自己滚，不推宽聊天列）。
+
+   OpenUI 的字体不是单一变量：Card 等组件用
+   `font: var(--openui-text-body-default)` 这种 shorthand 变量（内部写死 Inter
+   与 16px），所以必须同时覆写 shorthand，而不是只改 --openui-font-body。
+   ───────────────────────────────────────────────────────────────────────── */
+
+.eimu-openui-block {
+  --eimu-openui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* 字体族 / 字级（px 固定：工作站态会缩放根字号，这里不能跟着 rem 漂） */
+  --openui-font-body: var(--eimu-openui-font);
+  --openui-font-heading: var(--eimu-openui-font);
+  --openui-font-label: var(--eimu-openui-font);
+  --openui-font-numbers: var(--eimu-openui-font);
+
+  --openui-text-body-default: 400 15px/1.6 var(--eimu-openui-font);
+  --openui-text-body-default-heavy: 600 15px/1.6 var(--eimu-openui-font);
+  --openui-text-body-lg: 400 17px/1.6 var(--eimu-openui-font);
+  --openui-text-body-lg-heavy: 600 17px/1.6 var(--eimu-openui-font);
+  --openui-text-body-sm: 400 13px/1.55 var(--eimu-openui-font);
+  --openui-text-body-sm-heavy: 600 13px/1.55 var(--eimu-openui-font);
+  --openui-text-body-xs: 400 12px/1.5 var(--eimu-openui-font);
+  --openui-text-body-xs-heavy: 600 12px/1.5 var(--eimu-openui-font);
+
+  --openui-text-heading-xl: 700 28px/1.2 var(--eimu-openui-font);
+  --openui-text-heading-lg: 650 24px/1.25 var(--eimu-openui-font);
+  --openui-text-heading-md: 650 20px/1.3 var(--eimu-openui-font);
+  --openui-text-heading-sm: 600 17px/1.35 var(--eimu-openui-font);
+  --openui-text-heading-xs: 600 15px/1.4 var(--eimu-openui-font);
+
+  --openui-text-label-default: 500 14px/1.35 var(--eimu-openui-font);
+  --openui-text-label-default-heavy: 600 14px/1.35 var(--eimu-openui-font);
+  --openui-text-label-lg: 500 15px/1.35 var(--eimu-openui-font);
+  --openui-text-label-lg-heavy: 600 15px/1.35 var(--eimu-openui-font);
+
+  /* 前景 / 面 / 边框：对齐 Eimu 的 hsl tokens（--foreground: 0 0% 8%） */
+  --openui-text-neutral-primary: #141414;
+  --openui-text-neutral-secondary: rgba(20, 20, 20, 0.62);
+  --openui-text-neutral-tertiary: rgba(20, 20, 20, 0.42);
+
+  --openui-background: transparent;
+  --openui-foreground: #ffffff;
+  --openui-popover-background: #ffffff;
+
+  --openui-sunk-light: rgba(0, 0, 0, 0.02);
+  --openui-sunk: rgba(0, 0, 0, 0.04);
+  --openui-sunk-deep: rgba(0, 0, 0, 0.07);
+  --openui-elevated-light: rgba(0, 0, 0, 0.03);
+  --openui-elevated: rgba(0, 0, 0, 0.06);
+  --openui-elevated-strong: rgba(0, 0, 0, 0.12);
+  --openui-elevated-intense: rgba(0, 0, 0, 0.24);
+
+  --openui-border-default: rgba(0, 0, 0, 0.08);
+  --openui-border-interactive: rgba(0, 0, 0, 0.14);
+  --openui-border-interactive-emphasis: rgba(0, 0, 0, 0.2);
+
+  /* Eimu accent = iOS blue（tailwind ios.blue），不用 OpenUI 默认蓝紫 */
+  --openui-interactive-accent-default: #007aff;
+  --openui-interactive-accent-hover: rgba(0, 122, 255, 0.82);
+  --openui-interactive-accent-pressed: #0062d6;
+  --openui-interactive-accent-disabled: rgba(0, 122, 255, 0.38);
+  --openui-text-brand: #007aff;
+  --openui-border-accent: rgba(0, 122, 255, 0.45);
+  --openui-border-accent-emphasis: rgba(0, 122, 255, 0.7);
+  --openui-border-interactive-selected: rgba(0, 122, 255, 0.7);
+
+  /* 圆角：与 Eimu 卡片（12–20px）同阶，不用 OpenUI 的 24–48px */
+  --openui-radius-2xs: 4px;
+  --openui-radius-xs: 6px;
+  --openui-radius-s: 8px;
+  --openui-radius-m: 10px;
+  --openui-radius-l: 12px;
+  --openui-radius-xl: 12px;
+  --openui-radius-2xl: 14px;
+  --openui-radius-3xl: 16px;
+  --openui-radius-4xl: 18px;
+  --openui-radius-5xl: 20px;
+  --openui-radius-6xl: 24px;
+
+  max-width: 100%;
+  min-width: 0;
+  /* 宿主气泡由外层决定宽度；内部溢出交给 Table / Carousel 自己滚，
+     这里禁止出现整卡横移（曾实测 scrollWidth 比 clientWidth 大 11-12px）。 */
+  overflow-x: hidden;
+  overscroll-behavior-x: contain;
+  font-family: inherit;
+  color: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 所有 OpenUI 组件都允许在 flex/grid 轨道里收缩，避免固定 min-content 撑宽卡片 */
+.eimu-openui-block :where([class^="openui-"], [class*=" openui-"]) {
+  min-width: 0;
+}
+
+/* 内容测量容器不额外制造宽高 */
+.eimu-openui-block > [data-openui-content] {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 表单控件默认继承 OpenUI 字体变量，但原生元素仍会回落到浏览器默认字体 */
+.eimu-openui-block :where(button, input, textarea, select) {
+  font-family: inherit;
+}
+
+/* 卡片本身撑满气泡宽度；宽度由外层聊天气泡决定 */
+.eimu-openui-block :where(.openui-card) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Table / Carousel 保留内部横向滚动，但不允许撑破外层 */
+.eimu-openui-block :where(.openui-table-container, .openui-carousel, .openui-carousel-content) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.eimu-openui-block :where(table) {
+  max-width: 100%;
+}
+
+/* ── 触控目标（移动端 ≥44px）───────────────────────────────────────────────
+   只作用于本容器内部，不影响聊天壳。thumb / 轨道视觉尺寸不动，
+   只把可点区域抬高。 */
+.eimu-openui-block
+  :where(
+    button,
+    [role="button"],
+    [role="combobox"],
+    .openui-select-trigger,
+    input,
+    textarea,
+    select
+  ) {
+  min-height: 44px;
+}
+
+/* 勾选框/单选框/开关的「盒子」保持原视觉尺寸，44px 命中区交给整行容器 */
+.eimu-openui-block
+  :where(.openui-checkbox-item-root, .openui-radio-item-root, .openui-switch-item-root) {
+  min-height: 0;
+}
+
+.eimu-openui-block :where(.openui-checkbox-item-container, .openui-radio-item-container) {
+  min-height: 44px;
+  align-items: center;
+}
+
+.eimu-openui-block :where(.openui-slider-root) {
+  height: 44px;
+  min-height: 44px;
+}
+
+.eimu-openui-block :where(.openui-switch-group, .openui-switch-item) {
+  min-height: 44px;
+}
+
+@media (max-width: 639.98px) {
+  .eimu-openui-block {
+    font-size: 0.9375rem; /* 15px：与手机端助理正文（17px）相邻层级，不抢正文 */
+    --openui-text-body-default: 400 15px/1.6 var(--eimu-openui-font);
+    --openui-text-heading-lg: 650 21px/1.3 var(--eimu-openui-font);
+    --openui-text-heading-md: 650 18px/1.35 var(--eimu-openui-font);
+  }
+}

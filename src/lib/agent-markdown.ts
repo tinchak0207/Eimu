@@ -5,6 +5,7 @@
 // 把文本解析成结构化 token 树，交给 AgentMarkdown 组件渲染成 React 元素——
 // 不走 marked 的 HTML 字符串输出 + dangerouslySetInnerHTML：模型/用户输入
 // 里的任何原始 HTML 在这里被直接丢弃，XSS 面为零。
+import { OPENUI_ROOT_LINE_RE, OPENUI_STATEMENT_LINE_RE } from "./openui/catalog";
 import { lexer, type Token, type Tokens } from "marked";
 
 /** 行内 span。link 指向图片时由渲染层转缩略图（罪状 9）。 */
@@ -178,7 +179,14 @@ function blockFromToken(t: Token): MdBlock[] {
     case "heading":
       return [{ type: "h", level: (t as Tokens.Heading).depth, children: inlineFromTokens((t as Tokens.Heading).tokens) }];
     case "code":
-      return [{ type: "code", lang: (t as Tokens.Code).lang, text: (t as Tokens.Code).text }];
+    {
+      const code = t as Tokens.Code;
+      // 未标语言（或泛用语言名）但内容是 openui 程序 → 按裸 DSL 渲染（失败退回普通代码文本）。
+      if (!isOpenUILang(code.lang) && GENERIC_CODE_LANGS.has(normalizeCodeLang(code.lang)) && looksLikeOpenUIProgram(code.text)) {
+        return [{ type: "code", lang: "openui bare", text: code.text }];
+      }
+      return [{ type: "code", lang: code.lang, text: code.text }];
+    }
     case "blockquote": {
       const inner: MdBlock[] = [];
       for (const child of (t as Tokens.Blockquote).tokens ?? []) inner.push(...blockFromToken(child));
@@ -202,11 +210,198 @@ function blockFromToken(t: Token): MdBlock[] {
   }
 }
 
+/** 语言名归一：fence info string 的大小写与前后空白都不该影响分派。 */
+export function normalizeCodeLang(lang?: string): string {
+  return (lang ?? "").trim().toLowerCase();
+}
+
+/** 模型常见的 openui 围栏语言名写法（含 openui-lang 等变体）。 */
+const OPENUI_LANGS = new Set(["openui", "openui-lang", "openuilang", "open-ui", "oui"]);
+/** 无语言名或泛用语言名的代码块：内容像 openui 程序时也按 openui 渲染。 */
+const GENERIC_CODE_LANGS = new Set(["", "text", "plaintext", "plain", "txt", "dsl", "ui"]);
+
+/** 是否 OpenUI 栅栏（`OpenUI`、` openui `、`openui title=demo`、`openui-lang` 一律算）。 */
+export function isOpenUILang(lang?: string): boolean {
+  // info string 的第一个词是语言名，其后是参数（如 `openui title=demo`）。
+  // 空串安全："" / 空白都 split 出 ""，不在集合里。
+  return OPENUI_LANGS.has(normalizeCodeLang(lang).split(/\s+/)[0]);
+}
+
+/**
+ * 该 openui 块是否由「裸 DSL 识别」包出来的（info string 带 `bare`）。
+ * 这类块解析失败时必须退回成普通可读文本，而不是折叠的「原文」。
+ */
+export function isBareOpenUIInfo(lang?: string): boolean {
+  const words = normalizeCodeLang(lang).split(/\s+/);
+  return OPENUI_LANGS.has(words[0]) && words.includes("bare");
+}
+
+/** 一段文本整体是否像 openui 程序（首个非空行是 `root = X(`，或 ≥2 条语句且含 Card(）。 */
+export function looksLikeOpenUIProgram(text: string): boolean {
+  const lines = text.split("\n").filter((l) => l.trim());
+  if (lines.length === 0) return false;
+  if (OPENUI_ROOT_LINE_RE.test(lines[0])) return true;
+  const stmts = lines.filter((l) => OPENUI_STATEMENT_LINE_RE.test(l));
+  return stmts.length >= 2 && stmts.length >= lines.length * 0.8 && /\bCard\s*\(/i.test(text);
+}
+
+/** 一行内括号深度变化（忽略字符串里的括号）。 */
+function bracketDelta(line: string): number {
+  let d = 0;
+  let quote: string | null = null;
+  let esc = false;
+  for (const ch of line) {
+    if (quote) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") d += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") d -= 1;
+  }
+  return d;
+}
+
+const BARE_ROOT_TAIL_RE = /^\s*root\s*=\s*[A-Za-z_]*\s*$/;
+const OPENUI_LABEL_LINE_RE = /^\s*(?:openui|openui-lang)\s*:?\s*$/i;
+
+/**
+ * 裸 DSL 识别（2026-10-18）：模型不守约、没套 ```openui 围栏时，把正文里的
+ * openui 程序段落包成 ```openui bare 围栏。判据保守：
+ *   - 起点必须是 `root = 组件名(` 行（流式时末行仅 `root =` 也算起点，避免先
+ *     闪一下纯文本再变成卡片）；
+ *   - 向后连续吃「语句行」或括号未闭合的续行；空行只在下一行仍是语句时跨过；
+ *   - 有效条件：≥2 条语句、或吃到文末（流式中）、或单行 root 里含 Card(；
+ *   - 起点前紧邻的语句行与单独的 `openui` 标签行一并收进来。
+ * 围栏内的文本一律不动。误判时由渲染端退回普通文本（见 isBareOpenUIInfo）。
+ */
+export function fenceBareOpenUI(text: string): string {
+  if (!/\broot\s*=/.test(text)) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let fence: { ch: string; len: number } | null = null;
+  let changed = false;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (fence) {
+      const m = FENCE_CLOSE.exec(line);
+      if (m && m[1][0] === fence.ch && m[1].length >= fence.len) fence = null;
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    const fo = FENCE_OPEN.exec(line);
+    if (fo) {
+      fence = { ch: fo[2][0], len: fo[2].length };
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    const isLast = i === lines.length - 1;
+    if (!OPENUI_ROOT_LINE_RE.test(line) && !(isLast && BARE_ROOT_TAIL_RE.test(line))) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    // 起点前紧邻的语句行（含组件调用）与 openui 标签行
+    const pre: string[] = [];
+    while (out.length && OPENUI_STATEMENT_LINE_RE.test(out[out.length - 1]) && /\(/.test(out[out.length - 1])) {
+      pre.unshift(out.pop()!);
+    }
+    if (out.length && OPENUI_LABEL_LINE_RE.test(out[out.length - 1])) out.pop();
+    const block: string[] = [];
+    let depth = 0;
+    let stmts = 0;
+    let j = i;
+    while (j < lines.length) {
+      const l = lines[j];
+      if (depth > 0) {
+        block.push(l);
+        depth += bracketDelta(l);
+        j += 1;
+        continue;
+      }
+      if (j === i || OPENUI_STATEMENT_LINE_RE.test(l)) {
+        block.push(l);
+        stmts += 1;
+        depth = Math.max(0, bracketDelta(l));
+        j += 1;
+        continue;
+      }
+      if (!l.trim()) {
+        let k = j;
+        while (k < lines.length && !lines[k].trim()) k += 1;
+        if (k < lines.length && OPENUI_STATEMENT_LINE_RE.test(lines[k])) {
+          while (j < k) block.push(lines[j++]);
+          continue;
+        }
+      }
+      break;
+    }
+    const reachedEnd = j >= lines.length;
+    const valid = stmts + pre.length >= 2 || reachedEnd || /\bCard\s*\(/.test(line);
+    if (!valid) {
+      out.push(...pre, line);
+      i += 1;
+      continue;
+    }
+    while (block.length && !block[block.length - 1].trim()) block.pop();
+    out.push("```openui bare", ...pre, ...block, "```");
+    changed = true;
+    i = j;
+  }
+  return changed ? out.join("\n") : text;
+}
+
+// CommonMark 围栏：≤3 空格缩进，``` / ~~~ 至少三个。opening 的 info string
+// 取第一个词（`openui` 之外可能还带参数，语言名仍要认得出来）。
+const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})[ \t]*([^\n]*)$/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+
+/**
+ * 流式收尾保障（2026-10-17）：assistant 文本逐 delta 到达时，一个 OpenUI 栅栏
+ * 可能正处于「已开、未闭」状态。marked 本身会把未闭合栅栏吃到文末，但这里按
+ * 契约显式补上闭合围栏再交给 lexer——让 `code` token 的边界确定，避免下游
+ * （流式渲染器）在「文末是不是还有下文」上做猜测。
+ *
+ * 纯函数：只扫描围栏状态，只在「文本结束时仍处于 openui 围栏内」时追加
+ * 一个换行 + 同字符同长度的闭合围栏。普通代码块、未开栅栏的文本一字不动，
+ * 不会凭空吞内容。
+ */
+function closeUnterminatedOpenUIFence(text: string): string {
+  let open: { ch: string; len: number; lang: string } | null = null;
+  for (const line of text.split("\n")) {
+    if (open === null) {
+      const m = FENCE_OPEN.exec(line);
+      if (!m) continue;
+      const fence = m[2];
+      const info = m[3].trim();
+      // CommonMark：反引号围栏的 info string 不能再含反引号（否则那是行内代码）。
+      if (fence[0] === "`" && info.includes("`")) continue;
+      open = { ch: fence[0], len: fence.length, lang: info.split(/\s+/)[0] ?? "" };
+    } else {
+      const m = FENCE_CLOSE.exec(line);
+      if (!m) continue;
+      const fence = m[1];
+      // 同字符且长度 ≥ opening 才算闭合（`~~~` 不在 ``` 围栏里闭合）。
+      if (fence[0] === open.ch && fence.length >= open.len) open = null;
+    }
+  }
+  if (!open || !isOpenUILang(open.lang)) return text;
+  // 只在缺行尾换行时补一个：否则会凭空多出一个空行、改变代码原文的尾端。
+  const gap = text.endsWith("\n") ? "" : "\n";
+  return `${text}${gap}${open.ch.repeat(open.len)}`;
+}
+
 /** markdown 文本 → 结构化块序列。解析失败（理论不会）退回单段纯文本，不吞内容。 */
 export function parseAgentMarkdown(text: string): MdBlock[] {
   try {
     const blocks: MdBlock[] = [];
-    for (const t of lexer(text, { gfm: true, breaks: true })) {
+    // 预处理：① 裸 DSL 包成 ```openui bare；② 补流式中未闭合的 openui 围栏。其余原样进 lexer。
+    for (const t of lexer(closeUnterminatedOpenUIFence(fenceBareOpenUI(text)), { gfm: true, breaks: true })) {
       blocks.push(...blockFromToken(t));
     }
     return blocks;

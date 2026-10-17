@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentSteerStatus, AgentUserTurnItem } from "@/lib/agent-chat-types";
 import { parseUserAttachmentBlock, AgentAttachmentCards } from "./AgentAttachmentCards";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { useAgentChatSend } from "./agent-chat-send-context";
 import { useHideAgentReasoning } from "@/lib/agent-display-preferences";
 
 /**
@@ -59,6 +60,8 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const isUser = item.kind === "user";
   const reducedMotion = usePrefersReducedMotion();
   const hideReasoning = useHideAgentReasoning();
+  // 面板既有发送通道（OpenUI 的 @ToAssistant 用）；未接线时为 undefined。
+  const agentSend = useAgentChatSend();
 
   // 罪状 1：用户消息里的 [ATTACHMENTS_BLOCK] 不再以裸文本示人——正文摘干净，
   // 附件解析成微信式卡片渲染在正文下方。没有区块时解析原样放行，一字不动。
@@ -182,7 +185,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             行内代码弱化——罪状 3/9）；用户气泡保持纯文本原样。 */}
         {displayText ? (
           item.kind === "assistant" ? (
-            <AgentMarkdown text={displayText} />
+            <AgentMarkdown text={displayText} isStreaming={item.streaming} onSend={agentSend} />
           ) : (
             displayText
           )
