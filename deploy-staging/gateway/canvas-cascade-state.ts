@@ -60,10 +60,52 @@ function sweepCanvasStates(): void {
   }
 }
 
+// 服务端单调版本号：每个画布 key 一份，第一次接受写入为 1，之后只增不减。
+// 与快照分开存放：applyCanvasNode* 等既有写穿路径整份替换快照时不携带版本，
+// 不能因此把版本打回原点。
+const canvasStateRevs = new Map<string, number>()
+
+// 形状校验：拒绝脏快照（数组/null/基本类型、非数组 steps、非对象/数组的
+// nodes/connections、__proto__ 键）。只校验确实出现的栏位——前端真实上行形状
+// 只有 nodes/connections，不得强制要求 steps。
+function canvasStateShapeError(state: unknown): string | null {
+  if (typeof state !== "object" || state === null || Array.isArray(state)) {
+    return "state 必须是普通对象（数组/null/基本类型不接受）"
+  }
+  const obj = state as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(obj, "__proto__")) {
+    return "state 不得包含 __proto__ 键"
+  }
+  if (obj.steps !== undefined && !Array.isArray(obj.steps)) {
+    return "state.steps 必须是数组"
+  }
+  for (const field of ["nodes", "connections"] as const) {
+    const value = obj[field]
+    if (value !== undefined && (typeof value !== "object" || value === null)) {
+      return `state.${field} 必须是对象或数组`
+    }
+  }
+  return null
+}
+
+// 上行版本：优先 rev，其次 version；两者都不是有限数字时回 null（按旧行为接受）。
+function incomingCanvasRev(state: unknown): number | null {
+  const obj = state as Record<string, unknown>
+  for (const field of ["rev", "version"] as const) {
+    const value = obj[field]
+    if (typeof value === "number" && Number.isFinite(value)) return value
+  }
+  return null
+}
+
 export function storeCanvasState(
   sessionId: string,
   stateValue: unknown,
-): { ok: true; bytes: number; updatedAt: number } | { ok: false; status: number; message: string } {
+): { ok: true; bytes: number; updatedAt: number; rev: number } | { ok: false; status: number; message: string } {
+  const shapeError = canvasStateShapeError(stateValue)
+  if (shapeError) {
+    return { ok: false, status: 400, message: shapeError }
+  }
   let bytes = 0
   try {
     bytes = Buffer.byteLength(JSON.stringify(stateValue), "utf-8")
@@ -73,10 +115,20 @@ export function storeCanvasState(
   if (bytes > CANVAS_STATE_MAX_BYTES) {
     return { ok: false, status: 413, message: `state exceeds ${CANVAS_STATE_MAX_BYTES} bytes` }
   }
+  const key = canvasKeyFor(sessionId)
+  const currentRev = canvasStateRevs.get(key) ?? 0
+  const incomingRev = incomingCanvasRev(stateValue)
+  // 乐观并发：带版本且落后于服务端当前版本 = 旧标签页的迟到保存，整份拒绝，
+  // 已存快照（含 agent 刚写入的节点/连线）一律不动。
+  if (incomingRev !== null && incomingRev < currentRev) {
+    return { ok: false, status: 409, message: `stale snapshot (rev=${incomingRev} < current=${currentRev})` }
+  }
+  const nextRev = Math.max(currentRev + 1, incomingRev !== null ? incomingRev + 1 : 0)
   sweepCanvasStates()
   const updatedAt = Date.now()
-  canvasStates.set(canvasKeyFor(sessionId), { state: stateValue, updatedAt })
-  return { ok: true, bytes, updatedAt }
+  canvasStates.set(key, { state: stateValue, updatedAt })
+  canvasStateRevs.set(key, nextRev)
+  return { ok: true, bytes, updatedAt, rev: nextRev }
 }
 
 // 工具/内部读取最新快照；无快照回 null。
@@ -760,7 +812,7 @@ export async function handleCanvasStateWrite(req: Request): Promise<Response> {
     const code = stored.status === 413 ? "payload_too_large" : "bad_request"
     return jsonError(stored.status, stored.message, code, code)
   }
-  return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt })
+  return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt, rev: stored.rev })
 }
 
 // GET /internal/canvas/snapshot — 工具读最新快照（与既有 GET /internal/canvas/state 分开）。
