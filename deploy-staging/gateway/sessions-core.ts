@@ -275,11 +275,10 @@ const PROCESS_STARTED_AT = Date.now()
 const REAP_GRACE_MS = 60_000
 
 function restoredTurnSilentMs(state: SessionState): number {
-  const last = Math.max(
-    state.lastTurnActiveAt ?? 0,
-    lastOcActivityAt(state.opencodeSessionId),
-    state.turnLastFrameAt ?? 0,
-  )
+  // 刻意**不含** turnLastFrameAt：emitToSession 会刷新它，而告警帧本身也是 emit——
+  // 把它算进来＝自己发的告警把静默计时清零，死回合永远等不到交还（2026-10-18 实测：
+  // 告警打了、reap 永不触发）。只认上游事实：opencode 事件与回合打点。
+  const last = Math.max(state.lastTurnActiveAt ?? 0, lastOcActivityAt(state.opencodeSessionId))
   return last > 0 ? Date.now() - last : 0
 }
 
