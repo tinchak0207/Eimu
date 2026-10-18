@@ -5,7 +5,8 @@ import path from "node:path"
 import { initPersistence, saveSession, loadSessionById, loadSessionByOpencodeId, deleteSessionRow, hydrateRow } from "./persistence"
 import { forgetCriticPassState, forgetSessionWorkspaceState } from "./subagent"
 import type { SessionState } from "./types-gateway.ts"
-import { OPENCODE_URL, UPLOADS_DIR } from "./constants-gateway.ts"
+import { OPENCODE_URL, UPLOADS_DIR, RESTORED_TURN_NOTICE_MS, RESTORED_TURN_REAP_MS } from "./constants-gateway.ts"
+import { lastOcActivityAt, liveChildCount } from "./session-activity.ts"
 import { jsonError } from "./gw-lib.ts"
 import { canvasStates } from "./canvas-cascade-state.ts"
 import { emitToSession, stripStaleTurnTextFromReplay, closeSessionStreams } from "./sse-core.ts"
@@ -219,6 +220,16 @@ export function maybeReprompInterruptedTurn(state: SessionState): void {
 }
 export async function reconcileRestoredGatewayTurn(state: SessionState): Promise<void> {
   if (!isRestoredGatewayTurn(state) || sessions.get(state.sessionId) !== state) return
+  // 回合已收尾（正常 idle 或下方僵局交还）→ 不再接管；否则同一 turnGen 会在新回合里
+  // 被继续当成「重启遗留」，把新回合也一起盯死。
+  if (!(state.lastTurnActiveAt ?? 0)) return
+  // 静默越线：先给用户一行可见告警（平台在监督），再把控制权交还。
+  const silentMs = restoredTurnSilentMs(state)
+  if (silentMs >= RESTORED_TURN_NOTICE_MS) restoredTurnNotice(state, silentMs)
+  if (silentMs >= RESTORED_TURN_REAP_MS && canReapRestoredTurn(state)) {
+    await reapRestoredTurn(state, silentMs)
+    return
+  }
   try {
     const response = await fetch(`${OPENCODE_URL}/session/status`, {
       headers: opencodeHeaders(), signal: AbortSignal.timeout(10000),
@@ -249,6 +260,67 @@ export async function reconcileRestoredGatewayTurn(state: SessionState): Promise
       emitToSession(state, "turn.done", {})
     }
   } catch { /* 未知或暂时不可达不重投、不伪造终态 */ }
+}
+
+// ── 2026-10-18：重启遗留回合的时间上限 ─────────────────────────────────────
+// 上面的接管只问 opencode「还忙吗」——opencode 永久 busy 或永不 completed 时，
+// 会话就永久「运行中」（生产实测 2.4 小时，5 个会话）。这里给它一个有界监督：
+//   5 分钟静默 → 一行可见告警（用户知道平台在盯）；
+//   10 分钟静默且无在跑子代理、无待答问题 → 中止上游、清零在途打点、发 turn.done。
+// 静默＝三者取最新：本进程收到的该会话 opencode 事件 / turn 帧 / 回合打点。
+const restoredNoticeSent = new Set<string>()
+// 进程启动后的观察窗口：刚连上 /event 的会话需要几秒才会把「还活着」的事实打进时钟，
+// 这段窗口内一律不判死，避免重启瞬间把真在跑的长回合当僵尸。
+const PROCESS_STARTED_AT = Date.now()
+const REAP_GRACE_MS = 60_000
+
+function restoredTurnSilentMs(state: SessionState): number {
+  const last = Math.max(
+    state.lastTurnActiveAt ?? 0,
+    lastOcActivityAt(state.opencodeSessionId),
+    state.turnLastFrameAt ?? 0,
+  )
+  return last > 0 ? Date.now() - last : 0
+}
+
+function restoredTurnNotice(state: SessionState, silentMs: number): void {
+  const key = `${state.sessionId}:${state.turnGen ?? 0}`
+  if (restoredNoticeSent.has(key)) return
+  restoredNoticeSent.add(key)
+  if (restoredNoticeSent.size > 2000) restoredNoticeSent.clear()
+  const mins = Math.max(1, Math.round(silentMs / 60000))
+  console.warn(`[gateway] restored turn silent ${Math.round(silentMs / 1000)}s, notifying user — session=${state.sessionId}`)
+  emitToSession(state, "turn.status", {
+    text: `这一轮已经 ${mins} 分钟没有任何新进展，我还在盯；若是长任务会继续等，异常会在 10 分钟时自动收尾。`,
+  })
+}
+
+function canReapRestoredTurn(state: SessionState): boolean {
+  if (Date.now() - PROCESS_STARTED_AT < REAP_GRACE_MS) return false // 见 REAP_GRACE_MS：先让活会话证明自己
+  if (state.pendingQuestions.size > 0 || state.pendingConfirms.size > 0) return false // 等用户答覆，静默属预期
+  if (liveChildCount(state.sessionId) > 0) return false // 子代理还在跑＝父回合合法静默
+  return true
+}
+
+async function reapRestoredTurn(state: SessionState, silentMs: number): Promise<void> {
+  const ocId = state.opencodeSessionId
+  // 上游可能真的还在跑（只是网关收不到事件）：先让它停，避免继续烧钱。
+  try {
+    await fetch(`${OPENCODE_URL}/session/${ocId}/abort`, {
+      method: "POST", headers: opencodeHeaders(), signal: AbortSignal.timeout(5000),
+    })
+  } catch { /* 上游不可达不影响交还 */ }
+  const mins = Math.max(1, Math.round(silentMs / 60000))
+  state.lastTurnActiveAt = 0
+  state.turnAborted = false
+  markDirty(state)
+  emitToSession(state, "message.delta", {
+    text: `这一轮已经 ${mins} 分钟没有返回任何进展，我已经停止等待、把控制权交还给你。刚才完成的部分不会丢，直接发送下一条消息即可继续。\n`,
+  })
+  emitToSession(state, "turn.done", {})
+  console.warn(
+    `[gateway] restored turn reaped after ${Math.round(silentMs / 1000)}s silent — session=${state.sessionId} oc=${ocId}`,
+  )
 }
 let restoredReconcileRunning = false
 setInterval(() => {

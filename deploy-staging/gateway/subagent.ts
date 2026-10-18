@@ -126,7 +126,9 @@ import {
 // CC 2.1.302 SubagentStart/SubagentStop hook（2026-10-18 接线）。
 // fire-and-forget：hook 失败只进日志，绝不影响派遣/收尾。
 import { runHooksWithBudget } from "./hooks-http.ts"
-
+// 会话活性时钟（2026-10-18）：把 byParent 的只读计数注册给重启接管判断用，
+// 避免「父回合静默但子代理还在跑」被误判为死回合。
+import { setLiveChildCounter } from "./session-activity.ts"
 // P2b（2026-09-11）刀1：任务书首行自动补「预期 N 分钟」死线行。
 // 任何派遣若首行没有「预期 N」，补上 5 分钟 → R1 parseSyncDeadlineMs 得
 // min(2*5,4)=4 分钟 = 240s 同步硬死线，主会话不再被无死线子代理长期锁住。
@@ -657,6 +659,11 @@ interface SubagentDeps {
 let deps: SubagentDeps | undefined
 // 父 gateway session id → 活跃子代理列表（dispatch 并发上限按此计）
 const byParent = new Map<string, SubagentRun[]>()
+// 会话活性时钟的只读回调：仍在跑、未停止的子代理路数。
+setLiveChildCounter(
+  (parentGatewaySessionId) =>
+    (byParent.get(parentGatewaySessionId) ?? []).filter((r) => r.status === "running" && !r.stopped).length,
+)
 // 子 opencode session id → run（全局 tap 按 sessionID 命中）
 const byChildOc = new Map<string, SubagentRun>()
 // FIX-B（2026-10-02）：子会话→父会话映射的耐久性。byChildOc 在 run 收尾（finishRun/

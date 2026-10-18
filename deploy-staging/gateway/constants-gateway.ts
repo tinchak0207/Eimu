@@ -114,6 +114,16 @@ export const COMPACT_INFLIGHT_MAX_MS =
 export const SESSION_COMPACT_RETRY_TIMEOUT_MS =
   Number.parseInt(process.env.SESSION_COMPACT_RETRY_TIMEOUT_MS || "30000", 10) || 30_000
 
+// ── 2026-10-18 重启遗留回合交还（「卡死没人监督」的缺口）────────────────────
+// 病灶：网关重启后在途回合的计时器全部消失，接管逻辑只问 opencode「还忙吗」并无限信任；
+// opencode 一旦永久 busy 或留下永不 completed 的 assistant 消息，会话就永远「运行中」，
+// 用户、平台、主代理都没有一方在监督（生产实测 5 个会话卡 2.4 小时）。
+// 静默判据 = 本进程收到的该会话事件 / turn 帧 / 打点三者取最新；越线先告警，再交还。
+export const RESTORED_TURN_NOTICE_MS =
+  Number.parseInt(process.env.RESTORED_TURN_NOTICE_MS || "300000", 10) || 300_000
+export const RESTORED_TURN_REAP_MS =
+  Number.parseInt(process.env.RESTORED_TURN_REAP_MS || "600000", 10) || 600_000
+
 export const OPENCODE_URL = (process.env.OPENCODE_URL || "http://127.0.0.1:4096").replace(/\/+$/, "")
 export const OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD || ""
 export const PORT = Number.parseInt(process.env.GATEWAY_PORT || "8081", 10) || 8081

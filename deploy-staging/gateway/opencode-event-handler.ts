@@ -17,6 +17,7 @@ import { beastAgentField } from "./session-lifecycle.ts"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
 import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
+import { markOcActivity } from "./session-activity.ts"
 import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
 import { clearWatchdogTimer, clearHeartbeatTimer, clearAckTimer, clearErrorStallTimer, clearMidturnStallTimer, armWatchdogTimer, emitTurnEndSummaryIfSilent, emitRecoveryClosingIfSilent, releasePendingVideoWorkflows } from "./timers-gw.ts"
@@ -346,6 +347,9 @@ export function handleOpencodeEvent(event: any): void {
   try {
     const opencodeSessionId = eventSessionId(event)
     if (!opencodeSessionId) return
+    // 会话活性时钟：任何事件（含子代理子会话、心跳、工具状态）都算「这条会话还活着」。
+    // 重启接管据此判断在途回合是真在跑还是僵住——见 sessions-core.reconcileRestoredGatewayTurn。
+    markOcActivity(opencodeSessionId)
     // 子代理运行时：子 opencode 会话的事件翻译成 subagent.* 帧发到父会话，
     // 不进入常规翻译（常规路径按 opencode id 查 sessions，子会话查不到会直接丢）。
     if (subagentHandlesSession(opencodeSessionId)) {
