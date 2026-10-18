@@ -3305,10 +3305,14 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 只有显式 async:false（且 Jev 判「下一步必须依赖结果」的快速事实查询）才同步；fork 恒后台
   // （aYt 的 isAsync:true）。并发上限仍由下方同一闸门控制，不变。
   let asyncMode = typeof deps.wakeParent === "function" && (isFork || body.async !== false)
+  // 用户显式要求同步（async:false）但被 Jev 闸门强制转后台时置真：异步回执必须带上
+  // sync_downgraded 与不可忽略的降级说明，避免模型对用户声称「同步等待」。
+  let syncDowngraded = false
   if (!isFork && typeof deps.wakeParent === "function" && body.async === false) {
     const eligible = await syncDispatchEligible(prompt)
     if (eligible === false) {
       asyncMode = true
+      syncDowngraded = true
       console.log(`[gateway] jev_gate: SYNC_DOWNGRADED label="${label}" (not a quick fact lookup, forced async)`)
     }
   }
@@ -3832,7 +3836,10 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
       ...(run.isFork ? { fork: true, model: "inherit" } : {}),
       status: "running",
       async: true,
-      note: run.isFork ? FORK_STARTED_NOTICE : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。",
+      ...(syncDowngraded ? { sync_downgraded: true } : {}),
+      note: syncDowngraded
+        ? "你要求同步等待，但这一路不是快速事实查询，已按后台执行：现在返回的是已派出，不是结果。用户问起时要照实说「后台运行」。完成后会自动唤醒主会话汇总。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。"
+        : run.isFork ? FORK_STARTED_NOTICE : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。",
       ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
       // D2：显式 effort 时如实回报 variant 是否真的带上（不支持＝false，非安慰剂）。
       ...(run.effort ? { effort: run.effort, variant_applied: run.variantApplied === true } : {}),
