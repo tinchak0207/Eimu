@@ -11,7 +11,7 @@ OpenUI 只用于把本会话已经产出的真实成品排成一页好看的展�
 
 ### 语法
 - 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块。
-- 围栏内第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法；可选参数不传时用 null 占位。
+- 围栏内只能写本语言的赋值语句（不是 JSON、不是 JSX）：第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法；可选参数不传时用 null 占位。禁止输出 JSON 组件树（例如 type/props/children 对象）。
 - 引用的名字都要定义；定义的名字都要能从 root 引用到，否则不渲染。数组里可以直接内联组件调用。
 - 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：Card, Row, Grid, Box, Carousel, Tabs, TabItem, Separator, CardHeader, Title, TextContent, Caption, Badge, List, ListItem, Callout, ImageResult, ImageGallery, VideoPlayer, AudioPlayer, AlbumPlayer, CompareView, DeliverableCard, Table, Col, BarChart, LineChart, PieChart, Series, Button, Buttons。动作只有 @ToAssistant / @OpenUrl。
 
