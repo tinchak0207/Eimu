@@ -9,8 +9,8 @@
  *
  * 同源保证：组件签名行逐字取自 `generateSystemPrompt(eimuLibrary.toSpec())`，
  * 白名单行取自 `catalog.ts` 的 OPENUI_COMPONENTS；脚本断言两者集合相等、
- * 提示词里出现的每个 `Name(` 都在白名单内、两个示例都能被同一个 eimuLibrary
- * 解析且 0 错误。
+ * 提示词里出现的每个 `Name(` 都在白名单内、全部示例都能被同一个 eimuLibrary
+ * 解析且 0 错误；提示词不得出现已移除的表单/控制台组件调用。
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -79,59 +79,59 @@ function extractSignatures(full: string): string[] {
   return sigs;
 }
 
-const EXAMPLE_FORM = [
-  "root = Card([hdr, form])",
-  'hdr = CardHeader("生成参数", "选好后点生成")',
-  'form = Form("gen_params", btns, [f1, f2, f3])',
-  'btns = Buttons([Button("按这组参数生成", @ToAssistant("按当前参数生成"), "primary")])',
-  'f1 = FormControl("风格", style)',
-  'style = Select("style", [s1, s2, s3], "选择风格")',
-  's1 = SelectItem("real", "写实摄影")',
-  's2 = SelectItem("anime", "日系动画")',
-  's3 = SelectItem("ink", "水墨")',
-  'f2 = FormControl("比例", ratio)',
-  'ratio = RadioGroup("ratio", [r1, r2], "16:9")',
-  'r1 = RadioItem("横屏 16:9", "适合电脑观看", "16:9")',
-  'r2 = RadioItem("竖屏 9:16", "适合手机短视频", "9:16")',
-  'f3 = FormControl("时长（秒）", dur)',
-  'dur = Slider("seconds", "discrete", 5, 15, 5, [10])',
+// 示例里的 TASK_ID_x 只是占位：模型必须换成本会话任务表里的真实 task_id。
+const EXAMPLE_BLIND = [
+  "root = Card([hdr, pick])",
+  'hdr = CardHeader("四版海报已出", "先盲选，再看参数")',
+  'pick = CompareView(["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], "blind", "哪一版最接近你想要的？")',
 ].join("\n");
 
-const EXAMPLE_PICK = [
-  "root = Card([hdr, picks])",
-  'hdr = CardHeader("先定个风格")',
-  'picks = Buttons([b1, b2, b3])',
-  'b1 = Button("写实摄影", @ToAssistant("用写实摄影风格"), "secondary")',
-  'b2 = Button("日系动画", @ToAssistant("用日系动画风格"), "secondary")',
-  'b3 = Button("水墨", @ToAssistant("用水墨风格"), "secondary")',
+const EXAMPLE_VIDEO = [
+  "root = Card([hdr, player, more])",
+  'hdr = CardHeader("成片已交付", "30 秒竖屏短片")',
+  'player = VideoPlayer("TASK_ID_1", "终版成片，已过独立评审")',
+  'more = Buttons([Button("再来一版", @ToAssistant("同样要求再做一版成片"), "secondary")])',
 ].join("\n");
+
+const EXAMPLE_ALBUM = [
+  "root = Card([hdr, album])",
+  'hdr = CardHeader("专辑已完成", "三首成曲")',
+  'album = AlbumPlayer("专辑名", ["TASK_ID_1", "TASK_ID_2", "TASK_ID_3"], "点曲目可看滚动歌词")',
+].join("\n");
+
+const EXAMPLE_AB = [
+  "root = Card([hdr, ab])",
+  'hdr = CardHeader("A/B 对比", "同一需求两种风格")',
+  'ab = CompareView(["TASK_ID_1", "TASK_ID_2"], "side")',
+].join("\n");
+
+const EXAMPLES: Array<[string, string]> = [
+  ["示例 1：多图盲选", EXAMPLE_BLIND],
+  ["示例 2：视频交付", EXAMPLE_VIDEO],
+  ["示例 3：专辑播放器", EXAMPLE_ALBUM],
+  ["示例 4：A/B 对比", EXAMPLE_AB],
+];
 
 function buildPrompt(signatures: string[]): string {
   return [
-    "## OpenUI 交互块（可选）",
-    "只有当用户需要做选择或调参数时（选风格/模型/比例/时长、比较几个方案、从多张图里挑），才在正常中文回复的末尾附加一个 ```openui 围栏块；其余所有情况照常用中文说人话，不要输出 openui。",
-    "- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块；不要把整个回复写成程序。",
+    "## OpenUI 成品展示层（可选）",
+    "OpenUI 只用于展示本会话已经产出的真实成品：多图画廊/盲选、视频播放与交付、单曲/专辑播放、A/B 对比。只有本轮或上下文里已有真实产物（工具结果或会话任务表里有 task_id）时，才在正常中文回复末尾附加一个 ```openui 围栏块；没有成品就不出 UI，照常用中文回复。",
+    "- 参数、风格、比例、时长、分镜、设计全部由你自己决定；绝不输出参数表单、设置面板、创作控制台、仪表盘或流程步骤条，也不让用户填写任何字段。",
+    "- 绝不编造状态、队列、进度、引擎、计费、价格、张数或任何数字；文字里出现的事实与数字只能来自本轮工具结果。",
+    "- 用户要「复杂 UI」「渲染个界面」「能力演示」时，用一句话说明 OpenUI 是成品展示层；有已有产物就用它展示，没有就先把成品做出来，不做假控制台。",
+    "- 成品组件只收 taskId：填本会话任务表/工具结果里的真实 task_id（没有 task_id 的产物填它的原 URL）；不许猜、不许造、不许用示例里的 TASK_ID 占位。查不到的产物前端会显示「产物未找到」。",
+    "- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块。",
     "- 围栏内第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法。",
     "- 引用的名字都要定义；定义的名字都要能从 root 引用到，否则不渲染。",
     `- 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：${OPENUI_COMPONENTS.join(", ")}。动作只有 ${OPENUI_ACTIONS.map((a) => `@${a}`).join(" / ")}。`,
-    '- 表单：`Form(name, Buttons([...]), [FormControl...])`，每个字段一个 FormControl，恰好一个 "primary" 提交按钮且动作是 @ToAssistant("...")；表单取值由客户端自动附在消息后，不要手写取值。',
-    "- 表单外的快捷选项用 Buttons + secondary Button + @ToAssistant。",
-    "- 图片只用对话或工具结果里的真实 URL（ImageBlock 单张、ImageGallery 多张）；没有真实 URL 就不放图片组件，也不要用 Markdown 图片语法。",
-    "- 布局要在手机宽度（约 360px）可读：选项 ≤6 个，文案简短。",
+    "- Buttons 仅用于真正有歧义时的一键快选（最多 4 个 secondary Button + @ToAssistant），或成品后的「再来一版」；自动模式下不出快选。@ToAssistant 只把一句话发回对话，不会直接生成媒体。",
+    "- Callout 只写本轮真实发生的事实（如某件产物失败已退款）；TextContent 写简短说明，不写假数据。",
+    "- 不要用 Markdown 图片语法；布局要在手机宽度（约 360px）可读。",
     "",
-    `### 组件签名（? 为可选参数；Rules = ${RULES_FULL}）`,
+    "### 组件签名（? 为可选参数）",
     ...signatures,
     "",
-    "### 示例 1：生成参数面板",
-    "```openui",
-    EXAMPLE_FORM,
-    "```",
-    "",
-    "### 示例 2：快捷选择",
-    "```openui",
-    EXAMPLE_PICK,
-    "```",
-    "",
+    ...EXAMPLES.flatMap(([title, ex]) => [`### ${title}`, "```openui", ex, "```", ""]),
   ].join("\n");
 }
 
@@ -158,6 +158,9 @@ const allowed = new Set<string>([...OPENUI_COMPONENTS, ...OPENUI_ACTIONS, "Actio
 const mentioned = new Set([...prompt.matchAll(/\b([A-Z][A-Za-z]+)\(/g)].map((m) => m[1]));
 const stray = [...mentioned].filter((n) => !allowed.has(n));
 if (stray.length) fail(`提示词里出现白名单外的组件：${stray.join(", ")}`);
+for (const ex of EXAMPLES.map(([, e]) => e)) {
+  if (/\b(Form|FormControl|Input|TextArea|Select|Slider|RadioGroup|CheckBoxGroup|OptionCards|Steps|Table|Tag)\(/.test(ex)) fail("示例里出现已移除的表单/控制台组件");
+}
 // 签名的参数部分里出现的大写类型名必须都在白名单（防 `topContent?: Icon | Image` 这类漏网）。
 const { openuiChatLibrary } = require("@openuidev/react-ui") as { openuiChatLibrary: { components: Record<string, unknown> } };
 const chatNames = new Set(Object.keys(openuiChatLibrary.components));
@@ -171,7 +174,7 @@ for (const pattern of [/ENTIRE/i, /no markdown/i, /Every response is/i, /entire 
   if (pattern.test(prompt)) fail(`残留「整段回复即程序」措辞：${pattern}`);
 }
 const parser = createParser(eimuLibrary.toJSONSchema());
-for (const [label, ex] of [["form", EXAMPLE_FORM], ["pick", EXAMPLE_PICK]] as const) {
+for (const [label, ex] of EXAMPLES) {
   const r = parser.parse(ex);
   if (!r.root || r.meta.errors.length || r.meta.incomplete) {
     fail(`示例 ${label} 解析失败：${JSON.stringify(r.meta.errors)}`);
@@ -187,5 +190,5 @@ if (process.argv.includes("--check")) {
   writeFileSync(outFile, prompt, "utf8");
   console.log(`openui prompt written: ${outFile}`);
   console.log(`chars: ${prompt.length}  approx tokens: ${Math.ceil(prompt.length / 2.2)}`);
-  console.log(`components: ${OPENUI_COMPONENTS.length}  examples: 2 (parsed, 0 errors)`);
+  console.log(`components: ${OPENUI_COMPONENTS.length}  examples: ${EXAMPLES.length} (parsed, 0 errors)`);
 }

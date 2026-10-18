@@ -8,6 +8,7 @@ import type { BatchAnchor } from "@/lib/agent-batch-anchor";
 import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
 import { AgentChatSendProvider } from "./agent-chat-send-context";
+import { AgentArtifactsProvider } from "./agent-artifacts-context";
 import { AgentComposer, SEND_HARD_TIMEOUT_MS, type AgentComposerProps } from "./AgentComposer";
 import { AgentConfirmCard } from "./AgentConfirmCard";
 import { AgentQuestionCard } from "./AgentQuestionCard";
@@ -598,8 +599,11 @@ function AgentChatPanelComponent({
         ) : (
           // OpenUI 的 @ToAssistant 按钮复用面板既有 onSend（与输入框同一条通道，
           // 不新造发送路径）；Provider 只罩消息列表，空态没有气泡可发。
+          // OpenUI 成品组件按 taskId 查会话产物（AgentArtifactsProvider），动作与媒体卡同一组。
           <AgentChatSendProvider value={onSend}>
-            <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} onAuthorizeLocalFiles={authorizeLocalFiles} />
+            <AgentArtifactsProvider items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions}>
+              <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} onAuthorizeLocalFiles={authorizeLocalFiles} />
+            </AgentArtifactsProvider>
           </AgentChatSendProvider>
         )}
 

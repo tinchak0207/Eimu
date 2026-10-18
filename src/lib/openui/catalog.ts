@@ -12,23 +12,40 @@
  * 在主聊天 bundle 里，不能把 OpenUI 运行时拖进主包。
  */
 
-/** 注册顺序即提示词里的签名顺序。 */
+/**
+ * 注册顺序即提示词里的签名顺序。
+ *
+ * 2026-10-18 改造（产品哲学纠偏）：OpenUI 是「AI 拿到成品后自动生成的展示层」，
+ * 不是参数收集面板。表单/控制台类组件（Form、FormControl、Input、TextArea、Select、
+ * Slider、RadioGroup、CheckBoxGroup、OptionCards、Steps、Table、Tag 等）全部移出白名单；
+ * 成品组件只收 taskId（会话产物 task_id，或任务表里该产物的原 URL），由前端从会话产物
+ * 里查真实条目渲染，查不到显示「产物未找到」——模型无法凭空编造媒体。
+ */
 export const OPENUI_COMPONENTS = [
   // 布局 / 文本
   "Card",
   "CardHeader",
   "TextContent",
   "Callout",
-  "Tag",
   "Separator",
-  // 媒体 / 数据
-  "ImageBlock",
+  // 成品展示（绑定会话真实产物）
+  "ImageResult",
   "ImageGallery",
-  "Table",
-  "Col",
-  "Steps",
-  "StepsItem",
-  // 表单
+  "VideoPlayer",
+  "AudioPlayer",
+  "AlbumPlayer",
+  "CompareView",
+  "DeliverableCard",
+  // 一键快选（≤4，自动模式不出）
+  "Button",
+  "Buttons",
+] as const;
+
+/**
+ * 已移出白名单的组件（含上游 chat 库里常被模型写出的控制台/表单类）。repair.ts 遇到它们
+ * 直接删掉该语句并清理引用——不再降级成「未识别组件」提示框，避免把表单残骸展示给用户。
+ */
+export const OPENUI_REMOVED_COMPONENTS = [
   "Form",
   "FormControl",
   "Input",
@@ -42,11 +59,34 @@ export const OPENUI_COMPONENTS = [
   "CheckBoxItem",
   "OptionCards",
   "OptionCard",
-  "Button",
-  "Buttons",
-  // Tag / OptionCard 的 schema 引用 Icon，必须注册
+  "Steps",
+  "StepsItem",
+  "Table",
+  "Col",
+  "Tag",
+  "TagBlock",
   "Icon",
+  "IconText",
+  "DatePicker",
+  "Chips",
+  "Switch",
+  "Toggle",
+  "EditableTable",
+  "MetricIndicator",
+  "MetricIndicatorInline",
+  "LineChart",
+  "AreaChart",
+  "BarChart",
+  "PieChart",
+  "Tabs",
+  "Accordion",
+  "ListBlock",
+  "FollowUpBlock",
 ] as const;
+
+export const OPENUI_REMOVED_SET: ReadonlySet<string> = new Set(
+  OPENUI_REMOVED_COMPONENTS.map((n) => n.toLowerCase()),
+);
 
 export type OpenUIComponentName = (typeof OPENUI_COMPONENTS)[number];
 
@@ -58,7 +98,8 @@ export const OPENUI_ACTIONS = ["ToAssistant", "OpenUrl"] as const;
 /**
  * 常见误名 → 白名单组件（key 一律小写、去掉 `_`/`-`）。
  * 值为白名单名时直接改名；值以 `text:` 开头表示「把参数里的文字收成
- * TextContent」，`image:` 表示「转成 ImageBlock(src, alt)」。
+ * TextContent」，`image:` 表示「转成 ImageResult(src)」，`removed:` 表示「已移除的
+ * 表单/控制台类组件，整条删除」。
  */
 export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   // 容器 / 标题
@@ -75,10 +116,8 @@ export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   markdown: "text:",
   markdownrenderer: "text:",
   inlineheader: "text:",
-  icontext: "text:",
   label: "text:",
   codeblock: "text:",
-  metricindicatorinline: "text:",
   subtitle: "text:",
   description: "text:",
   note: "text:",
@@ -86,56 +125,71 @@ export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   alert: "Callout",
   notice: "Callout",
   banner: "Callout",
-  badge: "Tag",
-  chip: "Tag",
   divider: "Separator",
   hr: "Separator",
-  // 媒体
+  // 成品（旧 Image/ImageBlock 写法 → ImageResult(src)，src 仍须是会话真实产物）
   image: "image:",
   img: "image:",
   picture: "image:",
+  imageblock: "image:",
   gallery: "ImageGallery",
   imagegrid: "ImageGallery",
-  // 表单
-  textfield: "Input",
-  textinput: "Input",
-  textbox: "Input",
-  multilineinput: "TextArea",
-  dropdown: "Select",
-  picker: "Select",
-  combobox: "Select",
-  option: "SelectItem",
-  selectoption: "SelectItem",
-  dropdownitem: "SelectItem",
-  range: "Slider",
-  rangeslider: "Slider",
-  radio: "RadioItem",
-  radiobutton: "RadioItem",
-  radiooption: "RadioItem",
-  radiogroups: "RadioGroup",
-  radios: "RadioGroup",
-  checkbox: "CheckBoxItem",
-  checkboxitem: "CheckBoxItem",
-  checkboxes: "CheckBoxGroup",
-  checkboxlist: "CheckBoxGroup",
-  choice: "OptionCard",
-  choicecard: "OptionCard",
-  optioncarditem: "OptionCard",
-  choices: "OptionCards",
-  choicecards: "OptionCards",
-  optiongrid: "OptionCards",
-  field: "FormControl",
-  formfield: "FormControl",
-  formitem: "FormControl",
+  carousel: "ImageGallery",
+  video: "VideoPlayer",
+  videoblock: "VideoPlayer",
+  player: "VideoPlayer",
+  audio: "AudioPlayer",
+  audioblock: "AudioPlayer",
+  musicplayer: "AudioPlayer",
+  album: "AlbumPlayer",
+  playlist: "AlbumPlayer",
+  compare: "CompareView",
+  comparison: "CompareView",
+  blindpick: "CompareView",
+  deliverable: "DeliverableCard",
+  delivery: "DeliverableCard",
+  // 表单/控制台类 → 删除（见 OPENUI_REMOVED_COMPONENTS）
+  textfield: "removed:",
+  textinput: "removed:",
+  textbox: "removed:",
+  multilineinput: "removed:",
+  dropdown: "removed:",
+  picker: "removed:",
+  combobox: "removed:",
+  option: "removed:",
+  selectoption: "removed:",
+  dropdownitem: "removed:",
+  range: "removed:",
+  rangeslider: "removed:",
+  radio: "removed:",
+  radiobutton: "removed:",
+  radiooption: "removed:",
+  radiogroups: "removed:",
+  radios: "removed:",
+  checkbox: "removed:",
+  checkboxes: "removed:",
+  checkboxlist: "removed:",
+  choice: "removed:",
+  choicecard: "removed:",
+  optioncarditem: "removed:",
+  choices: "removed:",
+  choicecards: "removed:",
+  optiongrid: "removed:",
+  field: "removed:",
+  formfield: "removed:",
+  formitem: "removed:",
+  step: "removed:",
+  stepitem: "removed:",
+  column: "removed:",
+  badge: "removed:",
+  chip: "removed:",
+  // 按钮
   btn: "Button",
   actionbutton: "Button",
   buttongroup: "Buttons",
   buttonrow: "Buttons",
   actions: "Buttons",
   btngroup: "Buttons",
-  step: "StepsItem",
-  stepitem: "StepsItem",
-  column: "Col",
 };
 
 /** 动作误名 → 白名单动作（key 小写）。 */

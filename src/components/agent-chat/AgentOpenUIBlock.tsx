@@ -47,8 +47,10 @@ import {
   maxBracketDepth,
   maxReferenceDepth,
 } from "@/lib/openui/eimu-library";
-import { buildOpenUIActionMessage, safeOpenUrl } from "@/lib/openui/action-message";
+import { buildOpenUIActionMessage, OpenUIActionMessageError, safeOpenUrl } from "@/lib/openui/action-message";
 import { repairOpenUISource, type RepairNote } from "@/lib/openui/repair";
+import { ArtifactSlotRendererProvider } from "@/lib/openui/artifact-slot";
+import { OpenUIArtifactSlot } from "./OpenUIArtifactSlot";
 
 /** 预检解析器：与 Renderer 同一个 eimuLibrary schema（模块级单例）。 */
 const precheckParser = createParser(eimuLibrary.toJSONSchema());
@@ -218,6 +220,7 @@ export default function AgentOpenUIBlock({ code: sourceCode, isStreaming, onSend
   const contentRef = useRef<HTMLDivElement | null>(null);
   const limitWarnedRef = useRef(false);
   const [errors, setErrors] = useState<OpenUIError[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [hasRenderableRoot, setHasRenderableRoot] = useState(false);
   const [renderEmpty, setRenderEmpty] = useState(false);
 
@@ -289,8 +292,15 @@ export default function AgentOpenUIBlock({ code: sourceCode, isStreaming, onSend
   const handleAction = useCallback(
     (event: ActionEvent) => {
       if (event.type === "continue_conversation") {
-        const message = buildOpenUIActionMessage(event);
-        if (message) onSend?.(message);
+        setActionError(null);
+        try {
+          const message = buildOpenUIActionMessage(event);
+          if (message) onSend?.(message);
+        } catch (error) {
+          setActionError(error instanceof OpenUIActionMessageError
+            ? error.message
+            : "提交未能完成，内容尚未发送。请重新提交。");
+        }
         return;
       }
       if (event.type === "open_url") {
@@ -355,6 +365,7 @@ export default function AgentOpenUIBlock({ code: sourceCode, isStreaming, onSend
       <OpenUIRenderErrorBoundary code={code} bare={bare}>
         <div ref={contentRef} data-openui-content="">
           <ThemeProvider mode="light">
+            <ArtifactSlotRendererProvider value={OpenUIArtifactSlot}>
             <Renderer
               response={code}
               library={eimuLibrary}
@@ -364,9 +375,11 @@ export default function AgentOpenUIBlock({ code: sourceCode, isStreaming, onSend
               onParseResult={handleParseResult}
               onError={handleError}
             />
+            </ArtifactSlotRendererProvider>
           </ThemeProvider>
         </div>
         {showPartialErrors ? <PartialErrors errors={partialErrors} code={code} notes={repair.notes} /> : null}
+        {actionError ? <p role="alert" className="mt-3 rounded-ios-md border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm leading-6 text-destructive" data-openui-action-error="">{actionError}</p> : null}
       </OpenUIRenderErrorBoundary>
       {showRawFallback ? <RawFallback code={sourceCode} errors={errors.length ? errors : precheck?.errors} /> : null}
     </div>

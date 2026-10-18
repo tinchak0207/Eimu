@@ -5,10 +5,11 @@
  * 目标是「能对上就对上，对不上就显式降级，绝不静默丢组件」：
  *   - 组件名：精确 → 大小写/分隔符归一 → 别名表 → 编辑距离模糊匹配；
  *   - 已移除的文字类组件（Text / BoldText / Markdown…）→ TextContent(文字)；
- *     Image(alt, src) → ImageBlock(src, alt)；
+ *     Image(alt, src) / ImageBlock(src) → ImageResult(src)（src 仍须是会话真实产物）；
+ *   - 已移出白名单的表单/控制台类组件（Form、Input、Slider、Table、Steps…，见
+ *     catalog.OPENUI_REMOVED_COMPONENTS）→ 整条语句删除并清理引用，不展示残骸（2026-10-18）；
  *   - 命名参数 `title: "x"` / `title="x"` → 按签名顺序改回位置参数；
  *   - 常见错位：Button(label, "primary", @Action) → Button(label, @Action, "primary")；
- *     Slider 的 defaultValue 写成数字 → [数字]；
  *   - 动作名：@toAssistant / @Send → @ToAssistant，@Link → @OpenUrl；
  *   - 根：缺 root 时补；root 不是 Card 时外包一层 Card；
  *   - 仍然映射不了的组件 → Callout("warning", "未识别组件：X", 参数里的文字)，
@@ -25,6 +26,7 @@ import {
   OPENUI_COMPONENT_ALIASES,
   OPENUI_COMPONENTS,
   OPENUI_COMPONENT_SET,
+  OPENUI_REMOVED_SET,
 } from "./catalog";
 
 // ── AST ─────────────────────────────────────────────────────────────────
@@ -199,6 +201,11 @@ function ser(n: Node): string {
 // ── 名称解析 ────────────────────────────────────────────────────────────
 const norm = (s: string) => s.toLowerCase().replace(/[_-]/g, "");
 const NORMALIZED = new Map(OPENUI_COMPONENTS.map((n) => [norm(n), n as string]));
+const REMOVED_CANDIDATE = "\u0000removed";
+const FUZZY_CANDIDATES: Array<[string, string]> = [
+  ...NORMALIZED,
+  ...[...OPENUI_REMOVED_SET].map((k) => [norm(k), REMOVED_CANDIDATE] as [string, string]),
+];
 
 function levenshtein(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 2) return 99;
@@ -219,6 +226,7 @@ export type ResolvedName =
   | { kind: "component"; name: string; via: "exact" | "case" | "alias" | "fuzzy" }
   | { kind: "text"; via: "alias" }
   | { kind: "image"; via: "alias" }
+  | { kind: "removed"; via: "exact" | "alias" }
   | null;
 
 export function resolveComponentName(name: string): ResolvedName {
@@ -226,13 +234,17 @@ export function resolveComponentName(name: string): ResolvedName {
   const k = norm(name);
   const cased = NORMALIZED.get(k);
   if (cased) return { kind: "component", name: cased, via: "case" };
+  if (OPENUI_REMOVED_SET.has(k)) return { kind: "removed", via: "exact" };
   const alias = OPENUI_COMPONENT_ALIASES[k];
   if (alias === "text:") return { kind: "text", via: "alias" };
   if (alias === "image:") return { kind: "image", via: "alias" };
+  if (alias === "removed:") return { kind: "removed", via: "alias" };
   if (alias) return { kind: "component", name: alias, via: "alias" };
   // 复数/单数误差：Buttons↔Button 已在白名单；其余去尾 s 再查一次别名。
+  if (k.endsWith("s") && OPENUI_REMOVED_SET.has(k.slice(0, -1))) return { kind: "removed", via: "alias" };
   if (k.endsWith("s") && OPENUI_COMPONENT_ALIASES[k.slice(0, -1)]) {
     const a2 = OPENUI_COMPONENT_ALIASES[k.slice(0, -1)];
+    if (a2 === "removed:") return { kind: "removed", via: "alias" };
     if (a2 !== "text:" && a2 !== "image:") return { kind: "component", name: a2, via: "alias" };
   }
   if (k.length >= 4) {
@@ -240,7 +252,8 @@ export function resolveComponentName(name: string): ResolvedName {
     let best: string | null = null;
     let bestD = 99;
     let tie = false;
-    for (const [nk, real] of NORMALIZED) {
+    // 已移除组件也参与模糊匹配（Slidr → Slider 已移除 → 删除），免得落成「未识别组件」残骸。
+    for (const [nk, real] of FUZZY_CANDIDATES) {
       const d = levenshtein(k, nk);
       if (d < bestD) {
         bestD = d;
@@ -250,7 +263,10 @@ export function resolveComponentName(name: string): ResolvedName {
         tie = true;
       }
     }
-    if (best && bestD <= limit && !tie) return { kind: "component", name: best, via: "fuzzy" };
+    if (best && bestD <= limit && !tie) {
+      if (best === REMOVED_CANDIDATE) return { kind: "removed", via: "alias" };
+      return { kind: "component", name: best, via: "fuzzy" };
+    }
   }
   return null;
 }
@@ -297,6 +313,11 @@ function textOf(args: Arg[]): string {
 
 const looksUrl = (s: string) => /^(https?:)?\/\//i.test(s.trim());
 
+/** 已移除组件的占位节点：repairOpenUISource 收尾时整条删除/从数组剔除/置 null。 */
+const REMOVED_RAW = "__eimu_removed__";
+const REMOVED: Node = { t: "lit", raw: REMOVED_RAW };
+const isRemoved = (n: Node) => n.t === "lit" && n.raw === REMOVED_RAW;
+
 class Repairer {
   notes: RepairNote[] = [];
   constructor(readonly argOrder: ArgOrderMap) {}
@@ -332,14 +353,18 @@ class Repairer {
       this.notes.push({ kind: "text-alias", detail: `${n.name} → TextContent` });
       return { t: "call", name: "TextContent", action: false, args: [{ value: { t: "str", value: textOf(args) } }] };
     }
+    if (r.kind === "removed") {
+      this.notes.push({ kind: "removed-component", detail: n.name });
+      return REMOVED;
+    }
     if (r.kind === "image") {
       const strs: string[] = [];
       args.forEach((a) => (a.value.t === "str" ? strs.push(a.value.value) : undefined));
       const src = strs.find(looksUrl);
-      const alt = strs.find((s) => s !== src) ?? "";
-      this.notes.push({ kind: "image-alias", detail: `${n.name} → ImageBlock` });
-      if (!src) return { t: "call", name: "TextContent", action: false, args: [{ value: { t: "str", value: alt || "（图片缺少地址）" } }] };
-      return { t: "call", name: "ImageBlock", action: false, args: [{ value: { t: "str", value: src } }, { value: { t: "str", value: alt } }] };
+      this.notes.push({ kind: "image-alias", detail: `${n.name} → ImageResult` });
+      // 没有地址就不出图片（不把 alt 文字当成品展示）。
+      if (!src) return REMOVED;
+      return { t: "call", name: "ImageResult", action: false, args: [{ value: { t: "str", value: src } }] };
     }
     if (r.via !== "exact") this.notes.push({ kind: `name-${r.via}`, detail: `${n.name} → ${r.name}` });
     return this.fixArgs(r.name, args);
@@ -402,10 +427,13 @@ class Repairer {
         this.notes.push({ kind: "button-string-action", detail: act.value });
       }
     }
-    // Slider defaultValue（第 6 个位置）写成数字 → [数字]
-    if (name === "Slider" && args[5]?.t === "lit" && /^-?\d/.test((args[5] as { raw: string }).raw)) {
-      args[5] = { t: "arr", items: [args[5]] };
-      this.notes.push({ kind: "slider-default", detail: "wrapped in array" });
+    // 旧 ImageGallery([{src, alt}]) 写法 → ImageGallery(["src", …])（src 仍按会话产物解析）
+    if (name === "ImageGallery" && args[0]?.t === "arr" && args[0].items.some((x) => x.t === "obj")) {
+      const items = args[0].items
+        .map((x) => (x.t === "obj" ? x.entries.find((e) => e.key === "src" || e.key === "taskId")?.value : x))
+        .filter((x): x is Node => Boolean(x) && x!.t === "str");
+      args[0] = { t: "arr", items };
+      this.notes.push({ kind: "gallery-objects", detail: "src objects → ids" });
     }
     return { t: "call", name, action: false, args: args.map((value) => ({ value })) };
   }
@@ -475,6 +503,31 @@ export function repairOpenUISource(code: string, argOrder: ArgOrderMap): RepairR
     }
   }
 
+  // 已移除组件收尾：整条是移除组件的语句删掉；其余位置的引用从数组剔除、单值置 null。
+  const removedNames = new Set<string>();
+  for (const st of stmts) if ("name" in st && isRemoved(st.node)) removedNames.add(st.name);
+  if (removedNames.size > 0 || rep.notes.some((n) => n.kind === "removed-component" || n.kind === "image-alias")) {
+    const gone = (n: Node) => isRemoved(n) || (n.t === "ref" && removedNames.has(n.name));
+    const clean = (n: Node): Node => {
+      switch (n.t) {
+        case "arr":
+          return { t: "arr", items: n.items.filter((x) => !gone(x)).map(clean) };
+        case "obj":
+          return { t: "obj", entries: n.entries.map((e) => ({ key: e.key, value: gone(e.value) ? { t: "lit", raw: "null" } : clean(e.value) })) };
+        case "call":
+          return { ...n, args: n.args.map((a) => ({ key: a.key, value: gone(a.value) ? ({ t: "lit", raw: "null" } as Node) : clean(a.value) })) };
+        default:
+          return n;
+      }
+    };
+    for (let i = stmts.length - 1; i >= 0; i -= 1) {
+      const st = stmts[i];
+      if (!("name" in st)) continue;
+      if (removedNames.has(st.name)) stmts.splice(i, 1);
+      else st.node = clean(st.node);
+    }
+  }
+
   // 根修复：仅在全部语句都已完整解析时做（流式半截时不动，避免跳变）。
   const parsed = stmts.filter((s): s is { name: string; node: Node } => "name" in s);
   const allParsed = stmts.every((s) => "name" in s || !s.raw.trim());
@@ -490,6 +543,31 @@ export function repairOpenUISource(code: string, argOrder: ArgOrderMap): RepairR
       const inner: Node = rootStmt.node;
       rootStmt.node = { t: "call", name: "Card", action: false, args: [{ value: { t: "arr", items: [inner] } }] };
       rep.notes.push({ kind: "root-wrapped", detail: (inner as { name: string }).name });
+    }
+  }
+
+  // 删掉移除组件后留下的孤儿语句（例如表单的提交按钮组）：从 root 不可达即删，
+  // 否则解析器会因「定义了却没被引用」拒绝渲染。只在发生过移除时做，合规程序恒等。
+  if (allParsed && removedNames.size > 0 && rootStmt) {
+    const byName = new Map(parsed.map((s) => [s.name, s.node]));
+    const reach = new Set<string>(["root"]);
+    const walk = (n: Node) => {
+      if (n.t === "ref") {
+        if (!reach.has(n.name) && byName.has(n.name)) {
+          reach.add(n.name);
+          walk(byName.get(n.name)!);
+        }
+      } else if (n.t === "arr") n.items.forEach(walk);
+      else if (n.t === "obj") n.entries.forEach((e) => walk(e.value));
+      else if (n.t === "call") n.args.forEach((a) => walk(a.value));
+    };
+    walk(rootStmt.node);
+    for (let i = stmts.length - 1; i >= 0; i -= 1) {
+      const st = stmts[i];
+      if ("name" in st && !reach.has(st.name)) {
+        stmts.splice(i, 1);
+        rep.notes.push({ kind: "orphan-pruned", detail: st.name });
+      }
     }
   }
 

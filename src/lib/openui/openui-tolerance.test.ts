@@ -53,8 +53,9 @@ test("常见误名：Dropdown/Option/ButtonGroup → Select/SelectItem/Buttons",
   assert.equal(p.meta.errors.length, 0, `${r.code}\n${JSON.stringify(p.meta.errors)}`);
 });
 
-test("模糊拼写：Slidr/Calout → Slider/Callout；歧义短名不乱映射", () => {
-  assert.deepEqual(resolveComponentName("Slidr"), { kind: "component", name: "Slider", via: "fuzzy" });
+test("模糊拼写：Calout → Callout；Slidr → 已移除（删除）；歧义短名不乱映射", () => {
+  // 2026-10-18 成品展示层改造：Slider 等表单组件移出白名单，拼错的也按已移除处理。
+  assert.deepEqual(resolveComponentName("Slidr"), { kind: "removed", via: "alias" });
   assert.deepEqual(resolveComponentName("Calout"), { kind: "component", name: "Callout", via: "fuzzy" });
   assert.equal(resolveComponentName("Xyz"), null);
 });
@@ -84,12 +85,12 @@ test("Slider defaultValue 写成数字 → [数字]", () => {
   assert.equal(p.meta.errors.length, 0, `${r.code}\n${JSON.stringify(p.meta.errors)}`);
 });
 
-test("已移除的文字类组件 → TextContent，Image → ImageBlock", () => {
+test("已移除的文字类组件 → TextContent，Image → ImageResult", () => {
   const { r, p } = repairAndParse('root = Card([t, b, i])\nt = Text("说明文字")\nb = BoldText("text", "加粗")\ni = Image("示意", "https://example.com/a.png")');
   assert.ok(p.root);
   assert.equal(p.meta.errors.length, 0, `${r.code}\n${JSON.stringify(p.meta.errors)}`);
   assert.match(r.code, /TextContent\("说明文字"\)/);
-  assert.match(r.code, /ImageBlock\("https:\/\/example.com\/a.png", "示意"\)/);
+  assert.match(r.code, /ImageResult\("https:\/\/example.com\/a.png"\)/);
 });
 
 test("映射不了的组件 → 可见 Callout（带原文字），不静默丢", () => {

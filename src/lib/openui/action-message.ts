@@ -13,12 +13,20 @@ export type OpenUIActionEventLike = {
   formState?: unknown;
 };
 
-export const MAX_ACTION_MESSAGE = 4_000;
-const TRUNCATION_MARK = "…（已截断）";
-const MAX_FORM_FIELDS = 20;
-const MAX_FIELD_VALUE = 200;
-const MAX_CONTEXT = 1000;
-const MAX_APPENDIX = 2_000;
+/** 与聊天 OpenUI 程序的字符限额一致；超限拒绝整次提交，绝不截断字段。 */
+export const MAX_ACTION_MESSAGE = 40_000;
+
+export class OpenUIActionMessageError extends Error {
+  constructor() {
+    super(`提交内容超过 ${MAX_ACTION_MESSAGE.toLocaleString("zh-CN")} 字符，已阻止发送。请缩短内容后重新提交；当前填写的内容仍保留在表单中。`);
+    this.name = "OpenUIActionMessageError";
+  }
+}
+
+function requireMessageWithinLimit(message: string): string {
+  if (message.length > MAX_ACTION_MESSAGE) throw new OpenUIActionMessageError();
+  return message;
+}
 
 type FieldWrapper = { value: unknown; componentType?: string };
 
@@ -52,7 +60,7 @@ function stringifyFieldValue(value: unknown): string {
       text = String(value);
     }
   }
-  return text.length > MAX_FIELD_VALUE ? `${text.slice(0, MAX_FIELD_VALUE)}…` : text;
+  return requireMessageWithinLimit(text);
 }
 
 /**
@@ -83,10 +91,10 @@ export function collectFormFields(formState: unknown): Array<[string, unknown]> 
  */
 export function buildActionAppendix(event: OpenUIActionEventLike): string {
   const parts: string[] = [];
-  const fields = collectFormFields(event.formState).filter(([, v]) => v !== undefined && v !== null && v !== "");
+  // 空字符串也是一次明确的清空操作，必须回传；未填写的 placeholder 不在 store 中。
+  const fields = collectFormFields(event.formState).filter(([, v]) => v !== undefined && v !== null);
   if (fields.length > 0) {
     const rendered = fields
-      .slice(0, MAX_FORM_FIELDS)
       .map(([name, value]) => `${name}=${stringifyFieldValue(value)}`)
       .join("；");
     parts.push(`当前表单取值：${rendered}`);
@@ -102,16 +110,11 @@ export function buildActionAppendix(event: OpenUIActionEventLike): string {
         json = String(context);
       }
     }
-    if (json) parts.push(`补充数据：${json.length > MAX_CONTEXT ? `${json.slice(0, MAX_CONTEXT)}…` : json}`);
+    if (json) parts.push(`补充数据：${requireMessageWithinLimit(json)}`);
   }
   if (parts.length === 0) return "";
   const appendix = `\n${parts.join("\n")}`;
-  return appendix.length > MAX_APPENDIX ? appendix.slice(0, MAX_APPENDIX) : appendix;
-}
-
-function capActionMessage(message: string): string {
-  if (message.length <= MAX_ACTION_MESSAGE) return message;
-  return `${message.slice(0, MAX_ACTION_MESSAGE - TRUNCATION_MARK.length)}${TRUNCATION_MARK}`;
+  return requireMessageWithinLimit(appendix);
 }
 
 /** continue_conversation → 要发出的消息；无可发内容时回 null。其它动作类型回 null。 */
@@ -121,7 +124,7 @@ export function buildOpenUIActionMessage(event: OpenUIActionEventLike): string |
   const text = event.humanFriendlyMessage || fromParams;
   const appendix = buildActionAppendix(event);
   const message = text.trim() ? `${text}${appendix}` : appendix.trimStart();
-  return message.trim() ? capActionMessage(message) : null;
+  return message.trim() ? requireMessageWithinLimit(message) : null;
 }
 
 /** open_url 动作：只放行 http(s)。 */

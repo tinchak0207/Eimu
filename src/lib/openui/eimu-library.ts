@@ -16,10 +16,14 @@
  *
  * 注意：本文件会被 Node 脚本（tsx）与客户端组件同时 import，**不要在这里 import CSS**。
  */
-import { createElement } from "react";
+import { createElement, useMemo } from "react";
 import {
   createLibrary,
   defineComponent,
+  isReactiveAssign,
+  useFormName,
+  useGetFieldValue,
+  useSetDefaultValue,
   type DefinedComponent,
   type PromptOptions,
 } from "@openuidev/react-lang";
@@ -27,6 +31,12 @@ import { openuiChatLibrary, openuiChatPromptOptions } from "@openuidev/react-ui"
 import { z } from "zod/v4";
 
 import { OPENUI_COMPONENTS } from "./catalog";
+import {
+  ArtifactSlot,
+  normalizeArtifactRefs,
+  type ArtifactSlotKind,
+  type ArtifactSlotProps,
+} from "./artifact-slot";
 import type { ArgOrderMap } from "./repair";
 
 type AnyComponent = DefinedComponent<any>;
@@ -393,177 +403,168 @@ function wrapSanitized(component: AnyComponent): AnyComponent {
 }
 
 /**
+ * 上游 RadioGroup / Slider / CheckBoxGroup 只把默认值交给控件绘制，未注册
+ * 到 Renderer store；未触碰就提交时实际 formState 因而漏字段。
+ * 复用官方默认值写入 hook 与原 renderer，仅补同一 store 的初始注册。
+ * 已存值（包括 false、空数组、取消勾选）始终优先，不从 DOM 反推取值。
+ */
+function withRegisteredDefaults(component: AnyComponent): AnyComponent {
+  if (!["RadioGroup", "Slider", "CheckBoxGroup"].includes(component.name)) return component;
+  return defineComponent({
+    name: component.name,
+    props: component.props,
+    description: component.description,
+    component: (renderProps) => {
+      const props = renderProps.props as Record<string, any>;
+      const formName = useFormName();
+      const getFieldValue = useGetFieldValue();
+      const existingValue = getFieldValue(formName, props.name);
+      const defaultValue = useMemo(() => {
+        // 双向绑定由上游 useStateField 自己管理，不向命名表单写入另一份值。
+        if (isReactiveAssign(props.value)) return undefined;
+        if (component.name === "CheckBoxGroup") {
+          return Object.fromEntries((props.items ?? []).map((item: { props: { name: string; defaultChecked?: boolean } }) =>
+            [item.props.name, props.value?.[item.props.name] ?? item.props.defaultChecked ?? false]));
+        }
+        if (component.name === "Slider") return props.value ?? props.defaultValue ?? [props.min];
+        return props.value ?? props.defaultValue;
+      }, [props.items, props.value, props.defaultValue, props.min]);
+      useSetDefaultValue({ formName, componentType: component.name, name: props.name, existingValue, defaultValue });
+      return createElement(component.component as any, renderProps);
+    },
+  });
+}
+
+/**
  * 精选组件：唯一真源在 `catalog.ts`（网关提示词、修复映射、裸 DSL 识别共用）。
- * 2026-10-18 收窄到 28 个以压缩提示词：Text/BoldText/MarkDownRenderer/
- * InlineHeader/IconText/CodeBlock/MetricIndicatorInline/Label → 由 repair.ts
- * 收成 TextContent；Image → ImageBlock；Carousel 移除。
+ * 2026-10-18 改造：OpenUI 只做「成品展示层」——表单/控制台类组件全部移出，
+ * 新增 7 个成品组件（只收 taskId，渲染交给 artifact-slot 注入的真实产物卡片）。
  */
 const SELECTED: readonly string[] = OPENUI_COMPONENTS;
 
-const refOf = (name: string) => pick(name).ref;
+/** 快选按钮上限：一键快选只在真歧义时出现，最多 4 个。 */
+export const MAX_QUICK_PICK_BUTTONS = 4;
 
-/** zod union 需要至少两个元素的元组类型。 */
-const unionOf = (schemas: unknown[]) =>
-  z.union(schemas as unknown as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+const taskIdSchema = z.string();
+const taskIdListSchema = z.array(z.string());
 
-/**
- * 只有容器型组件能直接作为 Card 的 children；字段/子项（FormControl、
- * SelectItem、Col、Button、OptionCard、StepsItem、Label、Icon）
- * 由各自的父组件消费，不作为顶层块。
- */
-const CARD_CHILD_EXCLUDED = new Set([
-  "Card",
-  "FormControl",
-  "Label",
-  "Input",
-  "TextArea",
-  "Select",
-  "SelectItem",
-  "Slider",
-  "CheckBoxGroup",
-  "CheckBoxItem",
-  "RadioGroup",
-  "RadioItem",
-  "Button",
-  "OptionCard",
-  "StepsItem",
-  "Col",
-  "Icon",
-  "IconText",
-]);
+function artifactComponent(
+  name: string,
+  kind: ArtifactSlotKind,
+  props: z.ZodObject<any>,
+  description: string,
+  toSlot: (p: Record<string, any>) => Omit<ArtifactSlotProps, "kind">,
+): AnyComponent {
+  return defineComponent({
+    name,
+    props,
+    description,
+    component: (renderProps) =>
+      createElement(ArtifactSlot, { kind, ...toSlot((renderProps.props ?? {}) as Record<string, any>) }),
+  });
+}
 
-/** FormControl 可挂的输入控件（chat 库另有 DatePicker / Chips，本库未收录）。 */
-const FORM_FIELD_NAMES = [
-  "Input",
-  "TextArea",
-  "Select",
-  "Slider",
-  "CheckBoxGroup",
-  "RadioGroup",
-  "OptionCards",
-];
+const EimuImageResult = artifactComponent(
+  "ImageResult",
+  "image",
+  z.object({ taskId: taskIdSchema, caption: z.string().optional() }),
+  "单张成品图（带下载/再来一版/变体）；taskId 必须是本会话真实产物的 task_id",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskId), caption: p.caption }),
+);
 
-/** OptionCard：原 schema 的 topContent 是 Icon | Image，本库不注册 Image，收窄为 Icon。 */
-const EimuOptionCard = defineComponent({
-  name: "OptionCard",
-  props: z.object({
-    value: z.string(),
-    title: z.string(),
-    subtitle: z.string().optional(),
-    topContent: (pick("Icon").ref as unknown as z.ZodTypeAny).optional(),
-    disabled: z.boolean().optional(),
+const EimuImageGallery = artifactComponent(
+  "ImageGallery",
+  "gallery",
+  z.object({ taskIds: taskIdListSchema, caption: z.string().optional() }),
+  "多张成品图画廊（点开大图）；taskIds 全部来自本会话真实产物",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskIds), caption: p.caption }),
+);
+
+const EimuVideoPlayer = artifactComponent(
+  "VideoPlayer",
+  "video",
+  z.object({ taskId: taskIdSchema, caption: z.string().optional() }),
+  "成片/视频播放器（带下载/再来一版/变体）；taskId 为本会话真实视频产物",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskId), caption: p.caption }),
+);
+
+const EimuAudioPlayer = artifactComponent(
+  "AudioPlayer",
+  "audio",
+  z.object({ taskId: taskIdSchema, caption: z.string().optional() }),
+  "单曲/音频播放器（封面、歌名、滚动歌词播放器入口）；taskId 为本会话真实音频产物",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskId), caption: p.caption }),
+);
+
+const EimuAlbumPlayer = artifactComponent(
+  "AlbumPlayer",
+  "album",
+  z.object({ title: z.string(), taskIds: taskIdListSchema, caption: z.string().optional() }),
+  "专辑播放器：多首成曲按曲序排列，首曲封面作专辑封面，每首可打开滚动歌词播放器",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskIds), title: p.title, caption: p.caption }),
+);
+
+const EimuCompareView = artifactComponent(
+  "CompareView",
+  "compare",
+  z.object({
+    taskIds: taskIdListSchema,
+    mode: z.enum(["side", "blind"]).optional(),
+    question: z.string().optional(),
   }),
-  description: pick("OptionCard").description,
-  component: pick("OptionCard").component,
-});
+  "2-4 个真实候选并排对比；mode blind 时隐去参数只标方案 A/B/C，用户点选后回传所选 task_id",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskIds).slice(0, 4), mode: p.mode === "blind" ? "blind" : "side", caption: p.question }),
+);
 
-const EimuOptionCards = defineComponent({
-  name: "OptionCards",
-  props: z.object({
-    ...(pick("OptionCards").props as unknown as { shape: Record<string, z.ZodTypeAny> }).shape,
-    items: z.array(EimuOptionCard.ref).optional(),
-  }),
-  description: pick("OptionCards").description,
-  component: pick("OptionCards").component,
-});
+const EimuDeliverableCard = artifactComponent(
+  "DeliverableCard",
+  "deliverable",
+  z.object({ title: z.string(), taskIds: taskIdListSchema, note: z.string().optional() }),
+  "成品交付卡：标题+说明+本次交付的全部真实产物（每件带下载/再来一版/变体/存图库）",
+  (p) => ({ refs: normalizeArtifactRefs(p.taskIds), title: p.title, caption: p.note }),
+);
 
-const EimuFormControl = defineComponent({
-  name: "FormControl",
-  props: z.object({
-    label: z.string(),
-    input: unionOf(FORM_FIELD_NAMES.map((n) => (n === "OptionCards" ? EimuOptionCards.ref : refOf(n)))),
-    hint: z.string().optional(),
-  }),
-  description: pick("FormControl").description,
-  component: pick("FormControl").component,
-});
-
-/**
- * Form 的原 schema 引用的是原始 FormControl，必须一起换成本库的窄接口，
- * 否则 parser 会报 “field expects object but got component FormControl”。
- */
-const EimuForm = defineComponent({
-  name: "Form",
-  props: z.object({
-    name: z.string(),
-    buttons: pick("Buttons").ref,
-    fields: z.array(EimuFormControl.ref).default([]),
-  }),
-  description: pick("Form").description,
-  component: pick("Form").component,
-});
-
-/**
- * 图片组件守卫：复用官方 renderer，只拦非法 URL，避免模型用图片槽探测内网
- * （127.* / localhost / 169.254.169.254 / data: / file: 等）。
- */
-const EimuImageBlock = defineComponent({
-  name: "ImageBlock",
-  props: z.object({ src: z.string(), alt: z.string().optional() }),
-  description: `${pick("ImageBlock").description}. src must be a real http(s) product URL; private, loopback, credential-bearing, and non-http(s) URLs are rejected.`,
+/** Buttons：一键快选最多 4 个，多余的直接不渲染。 */
+const EimuButtons = defineComponent({
+  name: "Buttons",
+  props: pick("Buttons").props,
+  description: `${pick("Buttons").description} At most ${MAX_QUICK_PICK_BUTTONS} buttons.`,
   component: (renderProps) => {
-    if (!isSafeRemoteImageUrl(renderProps.props.src)) return null;
-    return createElement(pick("ImageBlock").component as any, renderProps as any);
-  },
-});
-
-const EimuImageGallery = defineComponent({
-  name: "ImageGallery",
-  props: z.object({
-    images: z.array(
-      z.object({
-        src: z.string(),
-        alt: z.string().optional(),
-        details: z.string().optional(),
-      }),
-    ),
-  }),
-  description: `${pick("ImageGallery").description}. Every src must be a real http(s) product URL; unsafe entries are dropped and an all-unsafe gallery renders nothing.`,
-  component: (renderProps) => {
-    const images = filterSafeImageItems(renderProps.props.images).map((image) =>
-      image.details
-        ? { ...image, details: sanitizeMarkdownImages(image.details) }
-        : image,
-    );
-    if (images.length === 0) return null;
-    return createElement(pick("ImageGallery").component as any, {
-      ...renderProps,
-      props: { ...renderProps.props, images },
-    } as any);
+    const props = (renderProps.props ?? {}) as Record<string, unknown>;
+    const buttons = Array.isArray(props.buttons) ? props.buttons.slice(0, MAX_QUICK_PICK_BUTTONS) : props.buttons;
+    return createElement(pick("Buttons").component as any, { ...renderProps, props: { ...props, buttons } } as any);
   },
 });
 
 /** 已被替换的组件 → 新 schema；供父级 union 引用。 */
 const localOverrides: Record<string, AnyComponent> = {
-  FormControl: EimuFormControl,
-  Form: EimuForm,
-  ImageBlock: EimuImageBlock,
+  ImageResult: EimuImageResult,
   ImageGallery: EimuImageGallery,
-  OptionCard: EimuOptionCard,
-  OptionCards: EimuOptionCards,
+  VideoPlayer: EimuVideoPlayer,
+  AudioPlayer: EimuAudioPlayer,
+  AlbumPlayer: EimuAlbumPlayer,
+  CompareView: EimuCompareView,
+  DeliverableCard: EimuDeliverableCard,
+  Buttons: EimuButtons,
 };
+
+/** 只有容器型组件能直接作为 Card 的 children；Button 由 Buttons 消费。 */
+const CARD_CHILD_EXCLUDED = new Set(["Card", "Button"]);
 
 const componentRef = (name: string) => (localOverrides[name] ?? pick(name)).ref;
 
-
-
 const cardChildren = SELECTED.filter((name) => !CARD_CHILD_EXCLUDED.has(name)).map(componentRef);
+
+/** zod union 需要至少两个元素的元组类型。 */
+const unionOf = (schemas: unknown[]) =>
+  z.union(schemas as unknown as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
 
 const EimuCard = defineComponent({
   name: "Card",
   props: z.object({
     children: z.array(unionOf(cardChildren)),
-    sources: z
-      .array(
-        z.object({
-          url: z.string().optional(),
-          title: z.string(),
-          sourceName: z.string(),
-        }),
-      )
-      .optional(),
   }),
-  description: pick("Card").description,
+  description: "Vertical container for the whole openui block.",
   component: pick("Card").component,
 });
 
@@ -579,36 +580,26 @@ const overrides: Record<string, AnyComponent> = localOverrides;
 export const eimuLibrary = createLibrary({
   root: "Card",
   // 统一 wrapper 是 Markdown 图片剥离的唯一真源；新增组件自动获得覆盖。
-  components: SELECTED.map((name) => wrapSanitized(overrides[name] ?? pick(name))),
+  components: SELECTED.map((name) => wrapSanitized(withRegisteredDefaults(overrides[name] ?? pick(name)))),
 });
 
 const baseRules = openuiChatPromptOptions.additionalRules ?? [];
 
 /**
- * Eimu 场景规则。保留 chat 库中与表单/图片/表格/按钮契约相关的条目，
- * 去掉指向未收录组件（Tabs、InlineHeader、Chips、DatePicker、charts、
- * FollowUpBlock）的条目，再补两条 Eimu 生图/生视频专用规则。
+ * Eimu 场景规则（2026-10-18 改造）：只保留卡片/按钮契约，删除全部表单规则
+ * （原 643/647 行「Prefer structured inputs」「生图/生视频时渲染一个 Form」）。
+ * 注：tools/gen-openui-prompt.mts 只抽签名行，网关实际规则以该脚本为准。
  */
 export const eimuPromptOptions: PromptOptions = {
-  // 示例由 tools/gen-openui-prompt.mts 统一追加（参数面板，逐字正确签名）。
   examples: [],
   additionalRules: [
     baseRules[1], // 每条回复一个 Card，children 自动纵向堆叠
-    "For suggested next actions outside a form, use Buttons with secondary/tertiary Button actions (@ToAssistant); do not generate a generic related-queries list.",
-    baseRules[9], // 每个字段一个 FormControl 引用
-    baseRules[10], // Form(name, buttons, fields)
-    baseRules[11], // 禁止 Form 嵌套 Form
     "CardHeader is the page-level heading — place it first in Card.",
-    "Every image slot requires a REAL URL from a tool result, the conversation, or the user — never invent, guess, or template a URL, and never use loopback/private/intranet hosts; if no real URL exists, compose without image components.",
-    "Never use Markdown image syntax (`![alt](url)`) or raw HTML `<img>` in any text or description; images are only allowed through the ImageBlock and ImageGallery components, with a real product URL already present in context.",
-    baseRules[30], // Table 按列组织，各列长度一致
-    baseRules[32], // 表单恰好一个 primary submit Button，无 reset
-    "Prefer structured inputs (Select, RadioGroup, Slider, CheckBoxGroup, OptionCards) over free-text Input; label every FormControl and keep field names unique.",
-    "Form inputs work ONLY inside a FormControl within a Form; for suggestions outside a form use a Button with a @ToAssistant action (secondary/tertiary variant).",
+    "OpenUI is the presentation layer for finished artifacts only: bind media components to real task_id values from this session; never invent ids, URLs, statuses, queues, prices or numbers.",
+    "Never build parameter forms, control panels or dashboards; the agent decides all parameters itself.",
+    "Never use Markdown image syntax (`![alt](url)`) or raw HTML `<img>` in any text.",
+    `Buttons are only for a one-tap pick when the request is genuinely ambiguous (at most ${MAX_QUICK_PICK_BUTTONS}); omit them otherwise.`,
     baseRules[36], // Button 只做真实动作，不编造 URL
-    // ── Eimu 专用 ──
-    "Eimu: when the user asks to generate an image or video, render one Form with the needed fields (prompt TextArea, style Select, aspect RadioGroup, seconds Slider) and exactly one primary submit Button; label every control in the user's language.",
-    "Eimu: render media only from real URLs already present in the conversation (ImageBlock for one result, ImageGallery for several); never invent or guess a URL.",
   ],
 };
 

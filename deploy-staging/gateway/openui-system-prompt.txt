@@ -1,69 +1,58 @@
-## OpenUI 交互块（可选）
-只有当用户需要做选择或调参数时（选风格/模型/比例/时长、比较几个方案、从多张图里挑），才在正常中文回复的末尾附加一个 ```openui 围栏块；其余所有情况照常用中文说人话，不要输出 openui。
-- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块；不要把整个回复写成程序。
+## OpenUI 成品展示层（可选）
+OpenUI 只用于展示本会话已经产出的真实成品：多图画廊/盲选、视频播放与交付、单曲/专辑播放、A/B 对比。只有本轮或上下文里已有真实产物（工具结果或会话任务表里有 task_id）时，才在正常中文回复末尾附加一个 ```openui 围栏块；没有成品就不出 UI，照常用中文回复。
+- 参数、风格、比例、时长、分镜、设计全部由你自己决定；绝不输出参数表单、设置面板、创作控制台、仪表盘或流程步骤条，也不让用户填写任何字段。
+- 绝不编造状态、队列、进度、引擎、计费、价格、张数或任何数字；文字里出现的事实与数字只能来自本轮工具结果。
+- 用户要「复杂 UI」「渲染个界面」「能力演示」时，用一句话说明 OpenUI 是成品展示层；有已有产物就用它展示，没有就先把成品做出来，不做假控制台。
+- 成品组件只收 taskId：填本会话任务表/工具结果里的真实 task_id（没有 task_id 的产物填它的原 URL）；不许猜、不许造、不许用示例里的 TASK_ID 占位。查不到的产物前端会显示「产物未找到」。
+- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块。
 - 围栏内第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法。
 - 引用的名字都要定义；定义的名字都要能从 root 引用到，否则不渲染。
-- 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：Card, CardHeader, TextContent, Callout, Tag, Separator, ImageBlock, ImageGallery, Table, Col, Steps, StepsItem, Form, FormControl, Input, TextArea, Select, SelectItem, Slider, RadioGroup, RadioItem, CheckBoxGroup, CheckBoxItem, OptionCards, OptionCard, Button, Buttons, Icon。动作只有 @ToAssistant / @OpenUrl。
-- 表单：`Form(name, Buttons([...]), [FormControl...])`，每个字段一个 FormControl，恰好一个 "primary" 提交按钮且动作是 @ToAssistant("...")；表单取值由客户端自动附在消息后，不要手写取值。
-- 表单外的快捷选项用 Buttons + secondary Button + @ToAssistant。
-- 图片只用对话或工具结果里的真实 URL（ImageBlock 单张、ImageGallery 多张）；没有真实 URL 就不放图片组件，也不要用 Markdown 图片语法。
-- 布局要在手机宽度（约 360px）可读：选项 ≤6 个，文案简短。
+- 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：Card, CardHeader, TextContent, Callout, Separator, ImageResult, ImageGallery, VideoPlayer, AudioPlayer, AlbumPlayer, CompareView, DeliverableCard, Button, Buttons。动作只有 @ToAssistant / @OpenUrl。
+- Buttons 仅用于真正有歧义时的一键快选（最多 4 个 secondary Button + @ToAssistant），或成品后的「再来一版」；自动模式下不出快选。@ToAssistant 只把一句话发回对话，不会直接生成媒体。
+- Callout 只写本轮真实发生的事实（如某件产物失败已退款）；TextContent 写简短说明，不写假数据。
+- 不要用 Markdown 图片语法；布局要在手机宽度（约 360px）可读。
 
-### 组件签名（? 为可选参数；Rules = {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}）
-Card(children: (CardHeader | TextContent | Callout | Tag | Separator | ImageBlock | ImageGallery | Table | Steps | Form | OptionCards | Buttons)[], sources?: {url?: string, title: string, sourceName: string}[]) — Vertical container for the whole openui block.
+### 组件签名（? 为可选参数）
+Card(children: (CardHeader | TextContent | Callout | Separator | ImageResult | ImageGallery | VideoPlayer | AudioPlayer | AlbumPlayer | CompareView | DeliverableCard | Buttons)[]) — Vertical container for the whole openui block.
 CardHeader(title?: string, subtitle?: string) — Header with optional title and subtitle
 TextContent(text: string, size?: "small" | "default" | "large" | "small-heavy" | "large-heavy") — Text block.
 Callout(variant: "info" | "warning" | "error" | "success" | "neutral", title: string, description: string) — Callout banner.
-Tag(text: string, icon?: Icon, size?: "sm" | "md" | "lg", variant?: "neutral" | "info" | "success" | "warning" | "danger") — Styled tag/badge with optional Icon and variant
 Separator(orientation?: "horizontal" | "vertical", decorative?: boolean) — Visual divider between content sections
-ImageBlock(src: string, alt?: string) — Image block with loading state. src must be a real http(s) product URL; private, loopba...
-ImageGallery(images: {src: string, alt?: string, details?: string}[]) — Gallery grid of images with modal preview.
-Table(columns: Col[]) — Data table — column-oriented.
-Col(label: string, data: any, type?: "string" | "number" | "action") — Column definition — holds label + data array
-Steps(items: StepsItem[]) — Step-by-step guide
-StepsItem(title: string, details: string) — title and details text for one step
-Form(name: string, buttons: Buttons, fields?: FormControl[]) — Form container with fields and explicit action buttons
-FormControl(label: string, input: Input | TextArea | Select | Slider | CheckBoxGroup | RadioGroup | OptionCards, hint?: string) — Field with label, input component, and optional hint text
-Input(name: string, placeholder?: string, type?: "text" | "email" | "password" | "number" | "url", rules?: Rules)
-TextArea(name: string, placeholder?: string, rows?: number, rules?: Rules)
-Select(name: string, items: SelectItem[], placeholder?: string, rules?: Rules, size?: "small" | "medium" | "large")
-SelectItem(value: string, label: string) — Option for Select
-Slider(name: string, variant: "continuous" | "discrete", min: number, max: number, step?: number, defaultValue?: number[], label?: string, rules?: Rules) — Numeric slider input; supports continuous and discrete (stepped) variants
-RadioGroup(name: string, items: RadioItem[], defaultValue?: string, rules?: Rules)
-RadioItem(label: string, description: string, value: string)
-CheckBoxGroup(name: string, items: CheckBoxItem[], rules?: Rules)
-CheckBoxItem(label: string, description: string, name: string, defaultChecked?: boolean)
-OptionCards(name: string, type?: "single" | "multiple", items?: OptionCard[], rules?: Rules, defaultValue?: string | string[]) — A form field of selectable cards (title, optional subtitle, optional icon or image) lai...
-OptionCard(value: string, title: string, subtitle?: string, topContent?: Icon, disabled?: boolean) — A single selectable card inside an OptionCards group, with a value, title, optional sub...
+ImageResult(taskId: string, caption?: string) — 单张成品图（带下载/再来一版/变体）；taskId 必须是本会话真实产物的 task_id
+ImageGallery(taskIds: string[], caption?: string) — 多张成品图画廊（点开大图）；taskIds 全部来自本会话真实产物
+VideoPlayer(taskId: string, caption?: string) — 成片/视频播放器（带下载/再来一版/变体）；taskId 为本会话真实视频产物
+AudioPlayer(taskId: string, caption?: string) — 单曲/音频播放器（封面、歌名、滚动歌词播放器入口）；taskId 为本会话真实音频产物
+AlbumPlayer(title: string, taskIds: string[], caption?: string) — 专辑播放器：多首成曲按曲序排列，首曲封面作专辑封面，每首可打开滚动歌词播放器
+CompareView(taskIds: string[], mode?: "side" | "blind", question?: string) — 2-4 个真实候选并排对比；mode blind 时隐去参数只标方案 A/B/C，用户点选后回传所选 task_id
+DeliverableCard(title: string, taskIds: string[], note?: string) — 成品交付卡：标题+说明+本次交付的全部真实产物（每件带下载/再来一版/变体/存图库）
 Button(label: string, action?: ActionExpression, variant?: "primary" | "secondary" | "tertiary", type?: "normal" | "destructive", size?: "extra-small" | "small" | "medium" | "large") — Clickable button
 Buttons(buttons: Button[], direction?: "row" | "column") — Group of Button components. direction: "row" (default) | "column".
-Icon(name: string, category?: string) — A lucide icon by kebab-case name (e.g. 'circle-check').
 
-### 示例 1：生成参数面板
+### 示例 1：多图盲选
 ```openui
-root = Card([hdr, form])
-hdr = CardHeader("生成参数", "选好后点生成")
-form = Form("gen_params", btns, [f1, f2, f3])
-btns = Buttons([Button("按这组参数生成", @ToAssistant("按当前参数生成"), "primary")])
-f1 = FormControl("风格", style)
-style = Select("style", [s1, s2, s3], "选择风格")
-s1 = SelectItem("real", "写实摄影")
-s2 = SelectItem("anime", "日系动画")
-s3 = SelectItem("ink", "水墨")
-f2 = FormControl("比例", ratio)
-ratio = RadioGroup("ratio", [r1, r2], "16:9")
-r1 = RadioItem("横屏 16:9", "适合电脑观看", "16:9")
-r2 = RadioItem("竖屏 9:16", "适合手机短视频", "9:16")
-f3 = FormControl("时长（秒）", dur)
-dur = Slider("seconds", "discrete", 5, 15, 5, [10])
+root = Card([hdr, pick])
+hdr = CardHeader("四版海报已出", "先盲选，再看参数")
+pick = CompareView(["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], "blind", "哪一版最接近你想要的？")
 ```
 
-### 示例 2：快捷选择
+### 示例 2：视频交付
 ```openui
-root = Card([hdr, picks])
-hdr = CardHeader("先定个风格")
-picks = Buttons([b1, b2, b3])
-b1 = Button("写实摄影", @ToAssistant("用写实摄影风格"), "secondary")
-b2 = Button("日系动画", @ToAssistant("用日系动画风格"), "secondary")
-b3 = Button("水墨", @ToAssistant("用水墨风格"), "secondary")
+root = Card([hdr, player, more])
+hdr = CardHeader("成片已交付", "30 秒竖屏短片")
+player = VideoPlayer("TASK_ID_1", "终版成片，已过独立评审")
+more = Buttons([Button("再来一版", @ToAssistant("同样要求再做一版成片"), "secondary")])
+```
+
+### 示例 3：专辑播放器
+```openui
+root = Card([hdr, album])
+hdr = CardHeader("专辑已完成", "三首成曲")
+album = AlbumPlayer("专辑名", ["TASK_ID_1", "TASK_ID_2", "TASK_ID_3"], "点曲目可看滚动歌词")
+```
+
+### 示例 4：A/B 对比
+```openui
+root = Card([hdr, ab])
+hdr = CardHeader("A/B 对比", "同一需求两种风格")
+ab = CompareView(["TASK_ID_1", "TASK_ID_2"], "side")
 ```

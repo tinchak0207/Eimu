@@ -427,11 +427,12 @@ const OPENUI_PROMPT_PATH = `${import.meta.dir}/openui-system-prompt.txt`
 
 /** Eimu 触发政策：与档内容同段注入（静态常数，随版本走，不逐轮重算）。 */
 const OPENUI_USAGE_POLICY = [
-  "【OpenUI 界面程序·使用政策】",
-  "只在用户要选参数／风格／模型、比较多方案、查看多图结果、调整数值或需要局部交互（按钮、表单、滑块）时输出 OpenUI；纯文字回答、执行型任务（直接调工具）、一句话能说清时不要硬塞 UI。",
-  "程序放进 ```openui 围栏，必须以 root = ... 开头；围栏外只写必要的简短中文说明，不超过60个中文字。",
-  "只能用提示词列出的组件与参数，不许发明组件名；一次回复最多一个 openui 块；布局须在手机宽度（约360–400px）可读，避免超宽表格与横向滚动。",
-  "OpenUI 只是呈现层，不替代工具执行、画布写穿或真实产物交付。",
+  "【OpenUI 成品展示层·使用政策】（2026-10-18 改造：OpenUI 是成品展示层，不是参数收集面板）",
+  "只在本会话已有真实产物（图片／视频／成片／音乐，有 task_id 或任务表 URL）时输出 OpenUI，用 ImageResult／ImageGallery／VideoPlayer／AudioPlayer／AlbumPlayer／CompareView／DeliverableCard 展示；纯文字回答、尚无产物、仍在制作中都不出 UI。",
+  "禁止参数表单、设置面板、创作控制台、仪表盘、流程步骤条；参数、风格、分镜和设计由你自己决定，不让用户填写。禁止编造状态、队列、进度、引擎、计费、价格或任何数字，事实只来自本轮工具结果。",
+  "成品组件只填真实 task_id（无 task_id 的产物填任务表里的原 URL），不许猜测或照抄示例占位。用户要「复杂 UI」「能力演示」时一句话说明 OpenUI 是成品展示层，有产物就展示产物，没有就先完成成品。",
+  "程序放进 ```openui 围栏，必须以 root = ... 开头；围栏外只写必要的简短中文说明，不超过60个中文字；一次回复最多一个 openui 块；不许发明组件名。",
+  "OpenUI 只是呈现层，不替代工具执行、画布写穿或真实产物交付；OpenUI 块未渲染／解析失败是界面故障，不是出片故障，不因此派 video-director／editor 查时间线，未收到真实交互回传不声称界面已成功。",
 ].join("\n")
 
 function loadOpenUISystemPrompt(): string | null {
@@ -816,6 +817,8 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     }
     if (autonomousAuthorized) {
       adaptLines.push("【互动模式】自动模式：完全自主推进，从理解需求到出图/出片一轮做完，用户通常只需发一条消息。分镜、剧情、构图、工作流参数全部自己决定，不要征询确认；不要调用 question 工具提问，不要等待任何扣费确认（系统会自动放行扣费确认卡）；仅当完全无法理解用户意图时才允许提问。")
+      // 2026-10-18 OpenUI 改造：自动模式不出一键快选（Buttons 快选只给非自动模式的真歧义）。
+      if (EIMU_OPENUI_ENABLED) adaptLines.push("【OpenUI】自动模式：openui 块里不出 Buttons 快选，只展示成品。")
     } else if (userSettings.interaction_mode === "preset") {
       adaptLines.push("【互动模式】预设模式：少问多干。先制定完整工作流计划，然后一次性整包请求授权（合并为一次扣费确认，不要把计划拆成多笔分散确认）；扣费与关键原则性决策仍须用户批准，但把要问的问题集中到尽量少的轮次一次性问完。")
     } else if (userSettings.interaction_mode === "collaborate") {
