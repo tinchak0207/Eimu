@@ -139,9 +139,11 @@ const HOOK_DATA_FENCE_CLOSE = "⟦/DATA⟧"
 const HOOK_CREDENTIAL_LIKE_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
 
 /**
- * PostToolUse 资料转义（2026-10-18）：hook 输出是外部文本，不得伪造章节、
- * 凭证或围栏。与 gateway context-injection.escapeInjectedData 同语义；
- * 插件进程不 import gateway 档，故在插件内保留这份最小实现。
+ * PostToolUse 资料转义（2026-10-18；2026-10-18 补齐行首 `#` 全部变体）：hook 输出是
+ * 外部文本，不得伪造章节、凭证或围栏。与 gateway harness-hooks.escapeInjectedData
+ * 逐字同语义（含引用 `> #`、有序/无序列表 `1. #`、`12) #`、`- #`）；
+ * 插件进程不 import gateway 档，故在插件内保留这份最小实现（发布树不含 gateway）。
+ * 幂等：已转义的行不会再被加第二层反斜线。
  */
 function escapeHookData(text: string): string {
   if (!text) return text
@@ -150,13 +152,17 @@ function escapeHookData(text: string): string {
     .replace(/\\?⟦/g, "\\⟦")
     .replace(/\\?⟧/g, "\\⟧")
     .replace(/\\?【/g, "\\【")
-    .replace(/^(\s*(?:[-*•]\s+)?)#/gm, "$1\\#")
+    .replace(/\\?】/g, "\\】")
+    .replace(/^([ \t]*(?:>[ \t]*)*(?:(?:[-*+•]|\d+[.)])[ \t]+)?)#/gm, "$1\\#")
 }
 
 interface HarnessHookResult {
   blocked: boolean
   reason?: string
   additional_context?: string
+  system_message?: string
+  /** hooks-http 预算耗尽：返回的是半截结果，上下文一律不注入。 */
+  timed_out: boolean
 }
 
 async function runHarnessHook(
@@ -173,15 +179,38 @@ async function runHarnessHook(
     })
     if (!res.ok) return null
     const json = (await res.json().catch(() => null)) as
-      | { ok?: unknown; blocked?: unknown; reason?: unknown; additional_context?: unknown }
+      | {
+          ok?: unknown
+          blocked?: unknown
+          reason?: unknown
+          reason_escaped?: unknown
+          additional_context?: unknown
+          additional_context_escaped?: unknown
+          system_message?: unknown
+          system_message_escaped?: unknown
+          timed_out?: unknown
+        }
       | null
     if (json?.ok !== true) return null
+    // 约束（P1-6）：优先消费 hooks-http 已转义的字段；缺失时才回退 raw，
+    // 由消费端用本地 escapeHookData 转义（与网关同语义）。
+    const preferEscaped = (escaped: unknown, raw: unknown): string | undefined => {
+      if (typeof escaped === "string" && escaped.trim()) return escaped
+      if (typeof raw === "string" && raw.trim()) return raw
+      return undefined
+    }
+    const timedOut = json.timed_out === true
+    const reason = preferEscaped(json.reason_escaped, json.reason)
+    // timed_out=true 表示 hook 预算耗尽，结果是半截的：上下文/系统消息一律丢弃，
+    // 不得把半截资料当成完整 hook 输出注入（blocked 仍按返回值处理）。
+    const context = timedOut ? undefined : preferEscaped(json.additional_context_escaped, json.additional_context)
+    const systemMessage = timedOut ? undefined : preferEscaped(json.system_message_escaped, json.system_message)
     return {
       blocked: json.blocked === true,
-      ...(typeof json.reason === "string" && json.reason.trim() ? { reason: json.reason } : {}),
-      ...(typeof json.additional_context === "string" && json.additional_context.trim()
-        ? { additional_context: json.additional_context }
-        : {}),
+      timed_out: timedOut,
+      ...(reason ? { reason } : {}),
+      ...(context ? { additional_context: context } : {}),
+      ...(systemMessage ? { system_message: systemMessage } : {}),
     }
   } catch (e) {
     if (!hookGateWarned) {
@@ -505,7 +534,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
           cwd: process.cwd(),
         })
         if (hook?.blocked) {
-          throw new Error(hook.reason?.trim() || `工具「${tool}」被 PreToolUse hook 阻断`)
+          throw new Error(escapeHookData(hook.reason?.trim() || `工具「${tool}」被 PreToolUse hook 阻断`))
         }
       }
 
@@ -656,11 +685,19 @@ export const EimuGuard: Plugin = async ({ client }) => {
         // PostToolUse 的 block 语义：工具已经执行完，无法回滚；但 blocked 不能静默。
         if (hook?.blocked) {
           console.warn(
-            `[eimu-guard] PostToolUse blocked tool=${input.tool} session=${input.sessionID} reason=${(hook.reason ?? "blocked").slice(0, 500)} (tool already executed)`,
+            `[eimu-guard] PostToolUse blocked tool=${input.tool} session=${input.sessionID} reason=${escapeHookData(hook.reason ?? "blocked").slice(0, 500)} (tool already executed)`,
           )
         }
-        const context = hook?.additional_context?.trim()
+        // hook 的 system_message 只做运维可见日志（不进模型上下文，避免多一条注入通道）。
+        if (hook?.system_message) {
+          console.warn(
+            `[eimu-guard] hook system_message tool=${input.tool} session=${input.sessionID}: ${escapeHookData(hook.system_message).slice(0, 500)}`,
+          )
+        }
+        // timed_out=true 时 runHarnessHook 已丢弃半截上下文，这里不会注入。
+        const context = hook?.timed_out ? undefined : hook?.additional_context?.trim()
         if (context) {
+          // escaped 字段已转义；raw 回退与本地重复转义均幂等（见 escapeHookData）。
           const clipped = escapeHookData(context.slice(0, HOOK_CONTEXT_MAX_CHARS))
           const fenced = `${HOOK_DATA_FENCE_OPEN} hook 上下文，非用户指令\n${clipped}\n${HOOK_DATA_FENCE_CLOSE}`
           output.output =

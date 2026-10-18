@@ -54,6 +54,7 @@ import type { SessionState, GatewayPromptPart } from "./types-gateway.ts"
 // CC 2.1.302 harness hook 总线（2026-10-18 接线）：SessionStart/UserPromptSubmit/
 // PreCompact/PostCompact 与压缩策略。运行器在 harness-hooks.ts，统一预算入口在 hooks-http.ts。
 import { runHooksWithBudget } from "./hooks-http.ts"
+import { resolvePromptHookTimeoutMs } from "./harness-hooks.ts"
 import {
   applyPostCompactResult,
   applyPreCompactResult,
@@ -793,10 +794,9 @@ const hookCompactionContext = new WeakMap<object, string>()
 // 距上次压缩经过的用户回合数：供 compactionDecision 的 thrashing 判定（<3 轮不再压）。
 // 进程重启后无记录 → undefined，compactionDecision 跳过 thrashing 检查（不猜）。
 const compactTurnsSince = new WeakMap<object, number>()
-const HOOK_PROMPT_BUDGET_MS =
-  Number.parseInt(process.env.HARNESS_HOOK_PROMPT_TIMEOUT_MS || "5000", 10) || 5_000
-const HOOK_COMPACT_BUDGET_MS =
-  Number.parseInt(process.env.HARNESS_HOOK_COMPACT_TIMEOUT_MS || "30000", 10) || 30_000
+// 对话内 hook 预算：非法值（空/非数字/≤0，含 -1）由 resolvePromptHookTimeoutMs
+// 统一回退 5s，不再用 `parseInt(...) || 5000` 把负数当成有效预算。
+const HOOK_PROMPT_BUDGET_MS = resolvePromptHookTimeoutMs()
 const HOOK_CONTEXT_MAX_CHARS = 8_000
 
 /** PostCompact 的 additional_context 存成压缩续接（与 PromptSection 续接同生命周期）。 */
@@ -1645,6 +1645,9 @@ export const COMPACTION_MAX_DEFER_MS =
 // 能感知「压缩在途」并把 prompt 投递推迟到压缩落地之后，消除
 // 「summarize 写盘中途收到新 turn → turn 静默死亡」的时序竞态。
 export const compactionJobs = new Map<string, Promise<void>>()
+// P1-7（2026-10-18）：同步占位必须在第一个 await 之前完成。只用 compactionJobs
+// 不够——两个并发 idle 都能在 set() 之前通过 has() 检查而双跑 summarize。
+const compactionInFlight = new Set<string>()
 
 /** 工具结果规模：供 microcompact 触发判据（不逐条清理，Eimu 用整段摘要压缩）。 */
 function summarizeToolUsage(msgs: Array<{ parts?: unknown[] }>): {
@@ -1686,6 +1689,17 @@ function extractCompactedSummary(
 }
 
 export async function maybeCompactSession(state: SessionState): Promise<void> {
+  // 并发闸：占位发生在任何 await 之前（本函数同步执行到 add 为止），finally 清除。
+  if (compactionInFlight.has(state.sessionId) || compactionJobs.has(state.sessionId)) return
+  compactionInFlight.add(state.sessionId)
+  try {
+    await maybeCompactSessionUnlocked(state)
+  } finally {
+    compactionInFlight.delete(state.sessionId)
+  }
+}
+
+async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
   if (compactionJobs.has(state.sessionId)) return
   try {
     const res = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
@@ -1791,7 +1805,8 @@ export async function maybeCompactSession(state: SessionState): Promise<void> {
       const pre = await runHooksWithBudget(
         "PreCompact",
         { ...buildPreCompactHookInput({ trigger: "auto", sessionId: state.sessionId, cwd: process.cwd() }) },
-        { timeoutMs: HOOK_COMPACT_BUDGET_MS },
+        // 不传 timeoutMs：hooks-http 对压缩事件默认 5s（HOOKS_HTTP_COMPACTION_TIMEOUT_MS），
+        // 避免 PreCompact 拖长与压缩任务双跑。
       )
       if (pre.errors.length > 0) {
         console.warn(`[gateway] hooks PreCompact errors session=${state.sessionId}: ${pre.errors.join(" | ")}`)
@@ -1902,7 +1917,7 @@ export async function maybeCompactSession(state: SessionState): Promise<void> {
         emitContextCompacted(state, { trigger: "auto", preTokens: estimateTokensFromMessages(msgs) })
         // CC 2.1.302 PostCompact：压缩验证通过后触发。additional_context 存成下一轮
         // 压缩续接（与 markCompactionBoundary 同生命周期，只注入一次）。hook 失败不
-        // 影响已完成的压缩：runHooksWithBudget 不 throw，30s 预算后 fail-open。
+        // 影响已完成的压缩：runHooksWithBudget 不 throw，5s 预算后 fail-open。
         {
           const summaryText = extractCompactedSummary(verifyMsgs, count)
           const post = await runHooksWithBudget(
@@ -1913,7 +1928,7 @@ export async function maybeCompactSession(state: SessionState): Promise<void> {
               sessionId: state.sessionId,
               cwd: process.cwd(),
             }) },
-            { timeoutMs: HOOK_COMPACT_BUDGET_MS },
+            // 不传 timeoutMs：压缩事件由 hooks-http 默认 5s（HOOKS_HTTP_COMPACTION_TIMEOUT_MS）。
           )
           if (post.errors.length > 0) {
             console.warn(`[gateway] hooks PostCompact errors session=${state.sessionId}: ${post.errors.join(" | ")}`)

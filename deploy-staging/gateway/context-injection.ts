@@ -23,26 +23,20 @@ import { memoryAgeDays, memoryFreshnessWarning } from "./memory-recall.ts"
 import type { RuntimeEnvironment, EnvironmentStability } from "./environment-facts.ts"
 import { renderEnvironmentSection, environmentSectionStability } from "./environment-facts.ts"
 import type { PromptSection } from "./prompt-registry.ts"
+import { escapeInjectedData } from "./harness-hooks.ts"
+export { escapeInjectedData }
 
 // ── 0. 数据围栏（注入隔离）──────────────────────────────────────────────
 // 记忆 / 技能描述 / hook 上下文 / 附件文件名一律先过此层：转义可伪造章节的
-// `【`、`⟦`、行首 `#`，并移除任何网关凭证样式文本；输出包在 ⟦DATA⟧…⟦/DATA⟧
-// 围栏里，让模型能把「资料」与「平台指令」分开。凭证 ⟦gw:<nonce>⟧ 只由网关
-// 在围栏之外写入（见 messages-gw 的 TAIL_PAYLOAD_MARKER 前缀），资料无法自称指令。
+// `【`、`】`、`⟦`、行首 `#`（含 `> #` / `1. #` / `12) #` / `- #` 变体），并移除任何
+// 网关凭证样式文本；输出包在 ⟦DATA⟧…⟦/DATA⟧ 围栏里，让模型能把「资料」与
+// 「平台指令」分开。凭证 ⟦gw:<nonce>⟧ 只由网关在围栏之外写入（见 messages-gw 的
+// TAIL_PAYLOAD_MARKER 前缀），资料无法自称指令。
+//
+// 转义实现只有一份：harness-hooks.escapeInjectedData（hooks-http 输出 escaped 字段
+// 也走同一函数）。本档不再复制第二份，避免两处语义漂移。
 export const DATA_FENCE_OPEN = "⟦DATA⟧"
 export const DATA_FENCE_CLOSE = "⟦/DATA⟧"
-const GW_CREDENTIAL_LIKE_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
-
-/** 转义资料里的伪章节标记；幂等（已转义的行不会再次被加反斜线）。 */
-export function escapeInjectedData(text: string): string {
-  if (!text) return text
-  return text
-    .replace(GW_CREDENTIAL_LIKE_RE, "⟪已移除的凭证样式文本⟫")
-    .replace(/\\?⟦/g, "\\⟦")
-    .replace(/\\?⟧/g, "\\⟧")
-    .replace(/\\?【/g, "\\【")
-    .replace(/^(\s*(?:[-*•]\s+)?)#/gm, "$1\\#")
-}
 
 /** 把资料包进 ⟦DATA⟧ 围栏；label 只做提示，同样会被转义。 */
 export function fenceInjectedData(text: string, label?: string): string {
