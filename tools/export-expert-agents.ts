@@ -179,8 +179,9 @@ const DOMAIN_TOOLS: string[] = dedupePreserveOrder(
  * local_files 加入的理由：部署 opencode.json 对 orchestrator/editor/video-director/director3d
  * 皆显式 local_files:true；它不属任何 Expert 域工具，若落入「域外工具全 false」规则就会被
  * 写成 false，使 editor/video-director/director3d 的提示词宣告「local_files 已被移除」，
- * 与同一份部署的 opencode.json 直接矛盾。 */
-const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status", "local_files", "image_get_result", "image_result_download", "video_result_fetch"])
+ * 与同一份部署的 opencode.json 直接矛盾。
+ * Blender 三工具自 2026-10-18 起是共享工具（全席位可直调），不再按 Expert 域断路。 */
+const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status", "local_files", "image_get_result", "image_result_download", "video_result_fetch", "blender_exec", "blender_render", "blender_export_gltf"])
 
 /** SHARED_TOOLS 中 orchestrator 亦须显式禁用的子集：野兽帧 beastTemplateFact 声明
  * 「你没有 workflow_* 工具」，必须是物理事实。local_files 不在此列——opencode.json 对

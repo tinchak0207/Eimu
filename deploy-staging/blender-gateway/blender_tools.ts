@@ -486,6 +486,40 @@ if used_engine.startswith("BLENDER_EEVEE"):
     apply_previz_survival_preset(scene)
 scene.render.image_settings.file_format = "PNG"
 
+def ensure_camera(scene):
+    if scene.camera is not None:
+        return
+    meshes = [o for o in scene.objects if o.type == "MESH"]
+    if not meshes:
+        raise RuntimeError("场景没有相机也没有网格物体，无法渲染")
+    corners = []
+    for o in meshes:
+        for c in o.bound_box:
+            corners.append(o.matrix_world @ mathutils.Vector(c))
+    center = sum(corners, mathutils.Vector()) / len(corners)
+    radius = max((c - center).length for c in corners)
+    cam_data = bpy.data.cameras.new("auto_camera")
+    cam_obj = bpy.data.objects.new("auto_camera", cam_data)
+    scene.collection.objects.link(cam_obj)
+    distance = radius * 3.0 / max(math.tan(cam_data.angle * 0.5), 1e-3)
+    cam_obj.location = center + mathutils.Vector((distance * 0.7, -distance * 0.7, distance * 0.55))
+    cam_obj.rotation_euler = (center - cam_obj.location).to_track_quat("-Z", "Y").to_euler()
+    scene.camera = cam_obj
+    print("AUTO_CAMERA_ADDED")
+
+def ensure_light(scene):
+    if any(o.type == "LIGHT" for o in scene.objects):
+        return
+    light_data = bpy.data.lights.new("auto_key", type="SUN")
+    light_data.energy = 3.0
+    light_obj = bpy.data.objects.new("auto_key", light_data)
+    scene.collection.objects.link(light_obj)
+    light_obj.rotation_euler = (math.radians(50), 0.0, math.radians(35))
+    print("AUTO_LIGHT_ADDED")
+
+ensure_camera(scene)
+ensure_light(scene)
+
 if TURNTABLE:
     meshes = [o for o in scene.objects if o.type == "MESH"]
     if not meshes:
@@ -556,7 +590,7 @@ export const blenderExecTool: BlenderToolDef = {
     script: {
       type: "string",
       required: true,
-      description: "完整 bpy 脚本文本（import bpy 开头）；产物写相对路径即落到桥工作目录。",
+      description: "完整 bpy 脚本文本（import bpy 开头）；产物写 `out/` 相对路径（桥只扫 out/ 并公网化）。",
     },
     timeout_ms: {
       type: "number",
@@ -842,7 +876,7 @@ export const blenderRenderTool: BlenderToolDef = {
 
 export const blenderExportGltfTool: BlenderToolDef = {
   id: "blender_export_gltf",
-  description: "把 Blender 场景导出 glb/glTF 供前端 viewport 预览。glb=单文件二进制（推荐），gltf=JSON+分离资源。产物自动落到桥的工作目录。",
+  description: "把 Blender 场景导出 glb/glTF 供前端 viewport 预览。glb=单文件二进制（推荐），gltf=JSON+分离资源。产物落到桥 out/ 并自动公网化，交付回执里的 public_urls。",
   args: {
     scene_blend_path: {
       type: "string",
@@ -872,18 +906,19 @@ export const blenderExportGltfTool: BlenderToolDef = {
       const script = buildExportScript({
         sceneBlendPath: asString(rawArgs.scene_blend_path),
         format: format === "glb" ? "GLB" : "GLTF_SEPARATE",
-        outputPath: `${outputName}.${format}`,
+        outputPath: `out/${outputName}.${format}`,
       })
       const data = await bridgeExecute(script, EXPORT_DEFAULT_TIMEOUT_MS, context)
       return ok({
         title: "GLTF 导出完成",
         artifacts: data.artifacts,
         artifact_count: data.artifacts.length,
+        artifact_base_url: artifactBaseUrl(),
         scene_summary: data.scene_summary,
         stdout_tail: data.stdout_tail,
         duration_ms: data.duration_ms,
         format,
-        output_path: `${outputName}.${format}`,
+        output_path: `out/${outputName}.${format}`,
       })
     } catch (e) {
       return toFail(e)
@@ -898,5 +933,6 @@ export const BLENDER_TOOLS: readonly BlenderToolDef[] = [
   blenderExportGltfTool,
 ]
 
-/** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。 */
-export const BLENDER_HARNESS_TOOL_IDS = ["blender_exec", "blender_export_gltf", "blender_render"] as const
+/** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。
+ *  本体已迁到 ./harness-tool-ids.ts（客户端安全），此处 re-export 保持既有 import 者不破。 */
+export { BLENDER_HARNESS_TOOL_IDS } from "./harness-tool-ids"

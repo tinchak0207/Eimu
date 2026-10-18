@@ -25,7 +25,7 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途经 `subagent_dispatch` 派对应 3D/动态域 Expert 执行 `blender_exec`） | — |
+| 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途直接 blender_exec） | — |
 | 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：默认 minimax-h3（可靠稳定快速、约 45s 出片、单镜 5–15s、推荐 15s）；时长策略按 attach/workflow-video-rules.md §4b（按条计费，尽量打满时长档）**） | — |
 | 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读 attach/workflow-video-rules.md** | — |
 | 关键帧驱动影片／图生视频／起止关键帧 | `image_generate` 影片模型传 `reference_images:[起帧URL,止帧URL]`；`last_frame_video_chain` 每镜 shots 传 `first_frame_url`／`last_frame_url`；工作流视频节点 metadata 传首尾同名字段或 `reference_images`，也可连接对应图片节点。minimax-h3 最多 9 张有序图参考；28 张／14 镜按每镜 2 张注入。上游 image_urls 是图片驱动参考，不承诺像素级首尾硬锁；禁止声称本站影片端不接受图片而改成纯文生视频。 | — |
@@ -78,7 +78,7 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | `skill blender-director` 取配方 → 经 `subagent_dispatch` 派对应 3D/动态域 Expert 执行 `blender_exec` 建模（先 `asset_search` 查 blender-3d-assets 现成件）→ `blender_render`（eevee 快稿；**转台/360° 直接传 `turntable: true` 出 mp4**，别翻 .opencode 源码或本机找 blender 二进位——渲染在远端桥上）→ 交付返回的 `public_urls`；要网页可交互预览加 `blender_export_gltf`。**主动选用**：画图需求要「精确几何／同一物体多角度一致／空间布局／产品 360°」时文生图做不稳，直接走 Blender（本机渲染，零扣费），渲染图可再 `image_edit` 风格化 | image_generate（只要氛围图、不在意几何时） |
+| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 直接调用 blender_exec 建模（所有席位开放，不必派 Expert；先 asset_search 查 blender-3d-assets 现成件）→ blender_render（eevee 快稿；转台/360° 传 turntable: true 出 mp4）→ 交付 public_urls；要网页可交互预览加 blender_export_gltf。**主动选用**：精确几何／同一物体多角度一致／空间布局／产品 360° 时不走文生图，直接 Blender（本机渲染，零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
 
 ## §商品图
 
