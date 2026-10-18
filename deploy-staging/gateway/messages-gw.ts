@@ -431,7 +431,7 @@ const OPENUI_USAGE_POLICY = [
   "只在本会话已有真实产物（图片／视频／成片／音乐，有 task_id 或任务表 URL）时输出 OpenUI，用 ImageResult／ImageGallery／VideoPlayer／AudioPlayer／AlbumPlayer／CompareView／DeliverableCard 展示；纯文字回答、尚无产物、仍在制作中都不出 UI。",
   "有产物时把它排成一页丰富的展示（2026-10-18 富展示）：CardHeader + Badge 事实条 + 主成品（画廊 hero/masonry/strip、CompareView slider、带歌词或波形的播放器、带封面帧的成片）+ Tabs 收纳交付清单／曲目表／本轮过程时间线；用 Row／Grid／Box／Carousel 排版，不要只堆一列卡片。",
   "禁止参数表单、设置面板、创作控制台、仪表盘、流程步骤条；参数、风格、分镜和设计由你自己决定，不让用户填写。禁止编造状态、队列、进度、引擎、计费、价格或任何数字：页面上的数字（时长、分辨率、扣费、曲序、模型名）只能用 Query(\"artifact\"／\"artifacts\") 读出的字段引用，Table／图表只能引用 Query 结果，字面量数字会被前端删掉。",
-  "成品组件只填真实 task_id（无 task_id 的产物填任务表里的原 URL），不许猜测或照抄示例占位。用户要「复杂 UI」「能力演示」时一句话说明 OpenUI 是成品展示层，有产物就展示产物，没有就先完成成品。",
+  "成品组件只填真实 task_id（无 task_id 的产物填任务表里的原 URL），不许猜测或照抄示例占位。用户要「复杂 UI」「能力演示」「做个 UI」时：有产物就展示；没有产物 → 一两句说明后立刻停下；非自动模式可用 Buttons。禁止自动开图／视频／音乐／产线，禁止列创作菜单或「告诉我方向就开工」。",
   "程序放进 ```openui 围栏，必须以 root = ... 开头；围栏外只写必要的简短中文说明，不超过60个中文字；一次回复最多一个 openui 块；不许发明组件名。",
   "OpenUI 只是呈现层，不替代工具执行、画布写穿或真实产物交付；OpenUI 块未渲染／解析失败是界面故障，不是出片故障，不因此派 video-director／editor 查时间线，未收到真实交互回传不声称界面已成功。",
 ].join("\n")
