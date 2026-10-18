@@ -6,8 +6,9 @@
 // - 审批必须复用网关既有 confirm 卡（pendingConfirms + SSE + 用户答复端点），不得自动通过。
 // - 计划模式下写操作由 planModeGuard 统一回 ask；只读工具放行。
 import { createHash, randomUUID } from "node:crypto"
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises"
-import { join, resolve, sep } from "node:path"
+import { constants } from "node:fs"
+import { lstat, mkdir, open, readFile, realpath, writeFile } from "node:fs/promises"
+import { dirname, join, resolve, sep } from "node:path"
 import { CONFIRM_TIMEOUT_MS } from "./constants-gateway"
 import { waitFor } from "./internal-waiters"
 import { settleConfirm } from "./media-internal-routes"
@@ -208,7 +209,30 @@ export async function resolvePlansDir(configured?: string): Promise<string> {
     const root = await realpath(resolve(stateRoot())).catch(() => resolve(stateRoot()))
     if (!isWithin(root, real)) throw new Error(`plans directory escapes state root: ${dir}`)
   }
+  await sharePlanAccess(real, true)
   return real
+}
+
+/** 分离服务账户时，仅向配置的运行时组开放计划目录；默认仍保持私有。 */
+async function sharePlanAccess(target: string, directory: boolean): Promise<void> {
+  const raw = process.env.HARNESS_PLAN_GID?.trim()
+  if (!raw) return
+  const gid = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(gid) || gid > 0xfffffffe) {
+    throw new Error("invalid HARNESS_PLAN_GID")
+  }
+  // 使用不跟随链接的 fd 修改权限，避免共享目录中的换链改到其他文件。
+  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | (directory ? constants.O_DIRECTORY : 0))
+  try {
+    const stat = await handle.stat()
+    if (stat.uid !== process.getuid?.() || (!directory && (!stat.isFile() || stat.nlink !== 1))) {
+      throw new Error("refusing to share a plan path not owned by the gateway")
+    }
+    await handle.chown(-1, gid)
+    await handle.chmod(directory ? 0o2770 : 0o660)
+  } finally {
+    await handle.close()
+  }
 }
 
 function planSlugFor(sessionId: string): string {
@@ -228,6 +252,7 @@ async function ensurePlanFile(filePath: string): Promise<void> {
   try {
     const stat = await lstat(filePath)
     if (stat.isSymbolicLink()) throw new Error(`refusing symlinked plan file: ${filePath}`)
+    await sharePlanAccess(filePath, false)
     return
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
@@ -237,6 +262,7 @@ async function ensurePlanFile(filePath: string): Promise<void> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
   }
+  await sharePlanAccess(filePath, false)
 }
 
 async function readPlanFile(filePath: string): Promise<{ plan: string } | { failure: ExitPlanModeFailure }> {
@@ -283,6 +309,7 @@ export async function enterPlanMode(
   if (!sid) throw new Error("sessionId is required")
   const existing = readPlanState(sid)
   if (existing?.mode === "plan") {
+    await sharePlanAccess(dirname(existing.filePath), true)
     await ensurePlanFile(existing.filePath)
     // H6：权限引擎与计划状态保持一致（幂等）。内部转移不改会话显式 setMode。
     setPlanPolicyMode(sid)
