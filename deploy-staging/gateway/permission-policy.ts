@@ -1,11 +1,13 @@
 // permission-policy.ts — 权限求值内核：模式、三桶规则、provenance、模式转移守卫、写路径安全。
 //
 // 约束：
-// - 纯函数求值，不执行任何工具、不做 I/O；realpath/symlink 事实由 context 注入。
+// - 求值以纯计算为主；写路径的 symlink/realpath 事实由网关进程自己 lstat/realpath
+//   （不信任调用方传参），其余 I/O 一律不做。
 // - 求值序固定：safetyCheck（bypass 不可绕）→ deny → ask → allow，各桶取首命中。
 // - 不引入新依赖；路径一律按 posix 语义处理，Windows 反斜线先正规化。
 // - bypassPermissions 只存在于内部；对外模式集合见 EXTERNAL_MODES。
 
+import { lstatSync, realpathSync } from "node:fs"
 import { posix } from "node:path"
 
 // ── 模式 ───────────────────────────────────────────────────────────────────
@@ -24,10 +26,23 @@ export type PermissionMode = (typeof ALL_MODES)[number]
 /** 对外暴露的模式；bypassPermissions 不在其中。 */
 export const EXTERNAL_MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk"] as const
 
+export type ExternalPermissionMode = (typeof EXTERNAL_MODES)[number]
+
 const MODE_SET: ReadonlySet<string> = new Set(ALL_MODES)
+const EXTERNAL_MODE_SET: ReadonlySet<string> = new Set(EXTERNAL_MODES)
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
   return typeof value === "string" && MODE_SET.has(value)
+}
+
+/** HTTP 面只接受对外模式：bypassPermissions 只能由可信启动配置在进程内产生。 */
+export function isExternalPermissionMode(value: unknown): value is ExternalPermissionMode {
+  return typeof value === "string" && EXTERNAL_MODE_SET.has(value)
+}
+
+/** bypass 的唯一可信来源：进程启动环境。 */
+export function bypassPermissionsEnvAllowed(): boolean {
+  return process.env.AGENT_ALLOW_BYPASS_PERMISSIONS === "1"
 }
 
 // ── provenance ─────────────────────────────────────────────────────────────
@@ -212,6 +227,8 @@ export interface PolicyStateSnapshot {
   prePlanMode?: PermissionMode
   autoModeActive: boolean
   bypassAvailable: boolean
+  bypassDisabled: boolean
+  autoModeAvailable: boolean
   restricted: boolean
   additionalDirectories: string[]
   rules: RuleBuckets
@@ -226,6 +243,8 @@ interface InternalPolicyState {
   prePlanMode?: PermissionMode
   autoModeActive: boolean
   bypassAvailable: boolean
+  bypassDisabled: boolean
+  autoModeAvailable: boolean
   restricted: boolean
   additionalDirectories: Set<string>
   rules: RuleBuckets
@@ -234,6 +253,8 @@ interface InternalPolicyState {
 }
 
 const states = new Map<string, InternalPolicyState>()
+/** state Map 容量上限：tenant/session 由调用方给，属本地信任边界，但仍须防无界增长。 */
+const MAX_POLICY_STATES = 500
 
 function stateKey(sessionId: string, tenant: string): string {
   return `${tenant || "default"}\u0000${sessionId || "default"}`
@@ -270,19 +291,33 @@ function listRules(
 function getState(sessionId: string, tenant: string): InternalPolicyState {
   const key = stateKey(sessionId, tenant)
   let state = states.get(key)
-  if (!state) {
-    state = {
-      sessionId: sessionId || "default",
-      tenant: tenant || "default",
-      mode: "default",
-      autoModeActive: false,
-      bypassAvailable: false,
-      restricted: false,
-      additionalDirectories: new Set(),
-      rules: emptyBuckets(),
-      updatedAt: Date.now(),
-    }
+  if (state) {
+    // LRU：命中即移到队尾。
+    states.delete(key)
     states.set(key, state)
+    return state
+  }
+  state = {
+    sessionId: sessionId || "default",
+    tenant: tenant || "default",
+    mode: "default",
+    autoModeActive: false,
+    // 可信启动配置：只有进程环境显式放行且服务端状态才可能为 true。
+    bypassAvailable: bypassPermissionsEnvAllowed(),
+    bypassDisabled: false,
+    autoModeAvailable: process.env.AGENT_AUTO_MODE_AVAILABLE !== "0",
+    restricted: false,
+    additionalDirectories: new Set(),
+    rules: emptyBuckets(),
+    updatedAt: Date.now(),
+  }
+  states.set(key, state)
+  if (states.size > MAX_POLICY_STATES) {
+    for (const oldest of states.keys()) {
+      if (oldest === key) continue
+      states.delete(oldest)
+      break
+    }
   }
   return state
 }
@@ -297,6 +332,8 @@ export function getPolicyState(sessionId: string, tenant = "default"): PolicySta
     ...(state.prePlanMode ? { prePlanMode: state.prePlanMode } : {}),
     autoModeActive: state.autoModeActive,
     bypassAvailable: state.bypassAvailable,
+    bypassDisabled: state.bypassDisabled,
+    autoModeAvailable: state.autoModeAvailable,
     restricted: state.restricted,
     additionalDirectories: [...state.additionalDirectories],
     rules: cloneBuckets(state.rules),
@@ -337,6 +374,14 @@ export function guardModeTransition(next: unknown, context: ModeGuardContext = {
     return { ok: false, code: "invalid_mode", error: `unknown permission mode: ${String(next)}` }
   }
   if (next === "bypassPermissions") {
+    // 唯一可信来源：进程启动环境。请求体/调用方不能授权 bypass。
+    if (!bypassPermissionsEnvAllowed()) {
+      return {
+        ok: false,
+        code: "bypass_not_launched",
+        error: "bypassPermissions requires the gateway process to be launched with AGENT_ALLOW_BYPASS_PERMISSIONS=1",
+      }
+    }
     if (context.restricted) {
       return { ok: false, code: "bypass_restricted", error: "bypassPermissions is not available in restricted mode" }
     }
@@ -357,7 +402,8 @@ export function guardModeTransition(next: unknown, context: ModeGuardContext = {
   return { ok: true, mode: next }
 }
 
-/** 危险 allow 规则：可在 auto 模式下绕过分类器的任意执行面。 */
+/** 危险 allow 规则：可在 auto 模式下绕过分类器的任意执行面。
+ * 归一化 `Bash(python:*)`、`Bash(python*)`、`Bash(python *)` 为同一危险形态。 */
 export function isDangerousAllowRule(ruleText: string): boolean {
   const rule = parseRule(ruleText)
   if (!rule) return true
@@ -365,10 +411,12 @@ export function isDangerousAllowRule(ruleText: string): boolean {
   if (!SHELL_LIKE_TOOLS.has(tool)) return false
   const content = rule.ruleContent
   if (content === undefined || /^[\s*]+$/.test(content)) return true
-  const trimmed = content.trim().replace(/:$/, "")
-  const first = trimmed.split(/\s+/)[0]?.toLowerCase() ?? ""
-  if (!DANGEROUS_EXEC_PREFIXES.has(first)) return false
-  return trimmed.endsWith("*") || /^[\s*]+$/.test(trimmed.slice(first.length))
+  const normalized = content.trim()
+  // 只有通配到「可执行档本身」的规则才危险：python:* / python* / python *。
+  if (!/\*$/.test(normalized)) return false
+  const head = normalized.replace(/:\*$/, "").replace(/\*$/, "").trim()
+  const first = head.split(/\s+/)[0]?.toLowerCase().replace(/:$/, "") ?? ""
+  return DANGEROUS_EXEC_PREFIXES.has(first)
 }
 
 const SHELL_LIKE_TOOLS = new Set(["bash", "powershell", "shell", "exec", "run_py", "runpy", "python", "python3"])
@@ -489,9 +537,16 @@ export interface UpdateRulesInput {
   directories?: string[]
   /** 仅供 setMode 的守卫判定。 */
   restricted?: boolean
+  /** 仅允许 latch true（不可由请求体解除）。 */
   bypassDisabled?: boolean
+  /** @deprecated 请求体不可授权 bypass；保留字段仅为兼容旧调用方，内部忽略。 */
   isBypassPermissionsModeAvailable?: boolean
+  /** @deprecated 请求体不可关闭 auto 模式；保留字段仅为兼容旧调用方，内部忽略。 */
   autoModeAvailable?: boolean
+  /** replaceRules 清空 deny 桶时必须显式声明。 */
+  clear?: boolean
+  /** 清空 deny 桶所需的进程级 token。 */
+  clearToken?: string
 }
 
 export interface UpdateRulesResult {
@@ -524,16 +579,17 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
   const tenant = typeof input.tenant === "string" && input.tenant ? input.tenant : "default"
   const state = getState(sessionId, tenant)
 
-  if (input.restricted !== undefined) state.restricted = input.restricted === true
-  if (input.isBypassPermissionsModeAvailable === true) state.bypassAvailable = true
+  // restricted / bypassDisabled 只能 latch true：context 或请求体都不能解除。
+  if (input.restricted === true) state.restricted = true
+  if (input.bypassDisabled === true) state.bypassDisabled = true
 
   if (input.action === "setMode") {
     const guard = guardModeTransition(input.mode, {
       restricted: state.restricted,
-      bypassDisabled: input.bypassDisabled,
-      isBypassPermissionsModeAvailable:
-        input.isBypassPermissionsModeAvailable ?? state.bypassAvailable,
-      autoModeAvailable: input.autoModeAvailable,
+      bypassDisabled: state.bypassDisabled,
+      // 服务端状态（进程环境初始化），不读请求体。
+      isBypassPermissionsModeAvailable: state.bypassAvailable,
+      autoModeAvailable: state.autoModeAvailable,
     })
     if (!guard.ok) return { ok: false, code: guard.code, error: guard.error }
 
@@ -609,11 +665,25 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
       }
     }
     bucket[destination] = [...set]
+    // H3：auto 模式下新加入的 allow 规则同样立即剥离危险形态。
+    if (behavior === "allow" && state.mode === "auto") stripDangerousAllowRules(state)
     state.updatedAt = Date.now()
     return { ok: true, state: getPolicyState(sessionId, tenant), changed }
   }
   if (input.action === "replaceRules") {
+    // 空数组不得静默清空 deny：必须显式 clear:true 且带进程级 token。
+    if (behavior === "deny" && rules.length === 0) {
+      const expected = process.env.AGENT_PERMISSION_CLEAR_TOKEN ?? ""
+      if (input.clear !== true || !expected || input.clearToken !== expected) {
+        return {
+          ok: false,
+          code: "clear_forbidden",
+          error: "refusing to empty the deny bucket without clear:true and a valid clearToken",
+        }
+      }
+    }
     bucket[destination] = [...new Set(rules)]
+    if (behavior === "allow" && state.mode === "auto") stripDangerousAllowRules(state)
     state.updatedAt = Date.now()
     return { ok: true, state: getPolicyState(sessionId, tenant), changed: rules.length }
   }
@@ -648,6 +718,7 @@ export interface PathSafetyResult {
 const CONTROL_DIR_SEGMENTS = new Set([
   ".git",
   ".claude",
+  ".ssh",
   ".vscode",
   ".idea",
   ".husky",
@@ -669,6 +740,7 @@ const SHELL_RC_BASENAMES = new Set([
   ".zlogout",
   ".profile",
   ".kshrc",
+  ".envrc",
   ".cshrc",
   ".tcshrc",
   ".config/fish/config.fish",
@@ -702,9 +774,12 @@ function lower(path: string): string {
 function isSettingsFile(path: string): boolean {
   const normalized = lower(path).replace(/\/+$/, "")
   const base = basenameOf(normalized)
+  const segments = pathSegments(normalized)
+  // M1：.claude/settings*.json 一律需确认（含 settings.local.json / settings.foo.json）。
+  if (segments.includes(".claude") && /^settings[^/]*\.json$/.test(base)) return true
   if (SETTINGS_BASENAMES.has(base)) {
     if (base !== "settings.json" && base !== "settings.local.json") return true
-    return pathSegments(normalized).includes(".claude")
+    return segments.includes(".claude")
   }
   return /\/managed-settings\.d\//.test(`/${normalized}/`)
 }
@@ -844,6 +919,12 @@ const READ_ONLY_TOOLS = new Set([
   "video_result_fetch",
 ])
 
+/** HTTP 面（permission-http）需要的只读判定：与 evaluate 内部缺省语义同源。 */
+export function isReadOnlyTool(tool: string): boolean {
+  if (typeof tool !== "string" || !tool.trim()) return false
+  return READ_ONLY_TOOLS.has(tool.trim().toLowerCase())
+}
+
 const EDIT_TOOLS = new Set([
   "write",
   "write_file",
@@ -887,6 +968,11 @@ function effectivePathCaseInsensitive(context: PermissionContext): boolean {
 function isReadOnly(tool: string, context: PermissionContext): boolean {
   if (context.isReadOnlyTool) return context.isReadOnlyTool(tool) === true
   return READ_ONLY_TOOLS.has(tool.toLowerCase())
+}
+
+/** 对内/对外共用的只读工具判定（HTTP 响应回传，供插件使用）。 */
+export function isReadOnlyTool(tool: string): boolean {
+  return typeof tool === "string" && READ_ONLY_TOOLS.has(tool.toLowerCase())
 }
 
 function isEditTool(tool: string): boolean {
@@ -1019,7 +1105,11 @@ function matchPathGlob(pattern: string, candidate: string, caseInsensitive: bool
 
 function candidatePathSpellings(rawPath: string, context: PermissionContext): string[] {
   const cwd = contextCwd(context)
-  const raw = normalizePathString(rawPath)
+  let raw = normalizePathString(rawPath)
+  // H2：候选侧与规则侧一致展开 home；`~/x` 与 `/home/x` 同判。
+  if (raw === "~" || raw.startsWith("~/")) {
+    raw = posix.join(contextHome(context), raw.slice(raw === "~" ? 1 : 2))
+  }
   const absolute = raw.startsWith("/") ? normalizeAbsolute(raw) : normalizeAbsolute(posix.join(cwd, raw))
   const out = new Set<string>()
   out.add(absolute)
@@ -1074,6 +1164,65 @@ function textGlobToRegExp(pattern: string): RegExp {
 }
 
 const COMPOUND_COMMAND_RE = /[;&|\n`]|\$\(/
+
+/**
+ * H1：把复合命令拆成简单命令，供 deny 逐段匹配。
+ * 覆盖 `;`、`&&`、`||`、`|`、换行、反引号、`$()`（含嵌套括号，最多 4 层）。
+ */
+export function splitSimpleCommands(command: string, depth = 0): string[] {
+  if (typeof command !== "string" || !command.trim()) return []
+  const pieces: string[] = []
+  let rest = ""
+  let i = 0
+  while (i < command.length) {
+    const ch = command[i]
+    if (ch === "`") {
+      const end = command.indexOf("`", i + 1)
+      if (end === -1) {
+        rest += command.slice(i)
+        break
+      }
+      pieces.push(command.slice(i + 1, end))
+      rest += " "
+      i = end + 1
+      continue
+    }
+    if (ch === "$" && command[i + 1] === "(") {
+      let level = 1
+      let j = i + 2
+      for (; j < command.length && level > 0; j++) {
+        if (command[j] === "(") level++
+        else if (command[j] === ")") level--
+      }
+      const body = command.slice(i + 2, level === 0 ? j - 1 : command.length)
+      pieces.push(body)
+      rest += " "
+      i = j
+      continue
+    }
+    rest += ch
+    i++
+  }
+  for (const part of rest.split(/\|\||&&|[;|\n\r]+/)) {
+    const trimmed = part.trim()
+    if (trimmed) pieces.push(trimmed)
+  }
+  const out: string[] = []
+  for (const piece of pieces) {
+    const trimmed = piece.trim()
+    if (!trimmed) continue
+    // 反引号/命令替换内容本身也可能是复合命令：递归拆一层。
+    if (depth < 4 && (/[;|\n]/.test(trimmed) || trimmed.includes("$(") || trimmed.includes("`"))) {
+      const nested = splitSimpleCommands(trimmed, depth + 1)
+      if (nested.length > 0) {
+        out.push(...nested)
+        continue
+      }
+    }
+    out.push(trimmed)
+  }
+  return out
+}
 
 function matchBashContent(content: string, command: string): boolean {
   const value = squashCommand(command)
@@ -1170,12 +1319,14 @@ function matchToolName(ruleToolName: string, tool: string): boolean {
   return textGlobToRegExp(left).test(right)
 }
 
-/** 单条规则是否命中该工具调用。 */
+/** 单条规则是否命中该工具调用。
+ * behavior 传入时用于区分匹配策略：deny 按每个简单命令逐段匹配；allow/ask 仍禁跨复合命令。 */
 export function ruleMatches(
   rule: PermissionRule,
   tool: string,
   input: Record<string, unknown>,
   context: PermissionContext = {},
+  behavior?: Behavior,
 ): boolean {
   if (!matchToolName(rule.toolName, tool)) return false
   if (rule.ruleContent === undefined) return true
@@ -1192,7 +1343,12 @@ export function ruleMatches(
           : typeof input.script === "string"
             ? input.script
             : ""
-    return command ? matchBashContent(content, command) : false
+    if (!command) return false
+    if (behavior === "deny") {
+      // H1：任一段简单命令命中 deny 即拒；避免 `git status && rm -rf /` 逃逸。
+      return splitSimpleCommands(command).some((segment) => matchBashContent(content, segment))
+    }
+    return matchBashContent(content, command)
   }
 
   if (PATH_ARG_KEYS[name]) {
@@ -1230,27 +1386,114 @@ export function stripSandboxDisableParam(
   return copy
 }
 
-function bashWriteTargets(command: string): string[] {
+interface ShellWriteTarget {
+  /** 已按 cwd 归一的绝对路径；动态目标保留原文。 */
+  path: string
+  dynamic: boolean
+}
+
+function resolveShellPath(raw: string, cwd: string, home: string): string {
+  const value = raw.trim().replace(/^["']|["']$/g, "").replace(/\\ /g, " ")
+  if (value === "~" || value.startsWith("~/")) {
+    return normalizeAbsolute(posix.join(home, value.slice(1)))
+  }
+  if (value.startsWith("/")) return normalizeAbsolute(value)
+  return normalizeAbsolute(posix.join(cwd, value))
+}
+
+/** H4：把 bash 命令按 shell 控制符拆段，跟踪 `cd X` 后各段的实际 cwd。 */
+function splitShellSequence(command: string): string[] {
+  return command
+    .replace(/`/g, "\n")
+    // 不把 `>|` / `>>|` 的竖线当管道拆开。
+    .split(/\|\||&&|[;\n\r]+|(?<![>])\|/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function shellWriteTargetsIn(segment: string): string[] {
   const targets = new Set<string>()
-  for (const match of command.matchAll(/(?:^|[^&>])>>?\s*("?)([^\s;&|>]+)\1/g)) {
+  // 覆盖 `>|`、`>>|`（noclobber override 不能绕过写路径闸）。
+  for (const match of segment.matchAll(/(?:^|[^&>])(?:>>?\|?)\s*("?)([^\s;&|>]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
-  for (const match of command.matchAll(/(?:^|\s)&>>?\s*("?)([^\s;&|>]+)\1/g)) {
+  for (const match of segment.matchAll(/(?:^|\s)&(?:\|?)>>?\|?\s*("?)([^\s;&|>]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
-  for (const match of command.matchAll(/\btee\s+(?:-a\s+)?("?)([^\s;&|]+)\1/g)) {
+  for (const match of segment.matchAll(/\btee\s+(?:-a\s+)?("?)([^\s;&|]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
-  for (const match of command.matchAll(/\bsed\s+(?:-[a-zA-Z]*i[a-zA-Z]*\s+)("?)([^\s;&|]+)\1/g)) {
+  for (const match of segment.matchAll(
+    /\bsed\s+-[a-zA-Z]*i[a-zA-Z]*(?:\s+(?:-[^\s]+\s+)*)(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s+("?)([^\s;&|]+)\1/g,
+  )) {
     if (match[2]) targets.add(match[2])
   }
-  for (const match of command.matchAll(/\b(?:cp|mv|install)\s+(?:-[^\s]+\s+)*("?)([^\s;&|]+)\1\s+("?)([^\s;&|]+)\3/g)) {
+  for (const match of segment.matchAll(/\b(?:cp|mv|install)\s+(?:-[^\s]+\s+)*("?)([^\s;&|]+)\1\s+("?)([^\s;&|]+)\3/g)) {
     if (match[4]) targets.add(match[4])
   }
-  for (const match of command.matchAll(/\brm\s+(?:-[^\s]+\s+)*("?)([^\s;&|]+)\1/g)) {
+  for (const match of segment.matchAll(/\brm\s+(?:-[^\s]+\s+)*("?)([^\s;&|]+)\1/g)) {
+    if (match[2]) targets.add(match[2])
+  }
+  for (const match of segment.matchAll(/\bdd\s+[^;&|]*\bof=("?)([^\s;&|]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
   return [...targets]
+}
+
+function bashWriteTargets(command: string, cwd: string, home: string): ShellWriteTarget[] {
+  const targets: ShellWriteTarget[] = []
+  let current: string | null = cwd
+  for (const segment of splitShellSequence(command)) {
+    const cdMatch = /^cd(?:\s+--)?\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))$/.exec(segment)
+    if (cdMatch) {
+      const rawDir = cdMatch[2] ?? cdMatch[3] ?? cdMatch[4] ?? ""
+      current = /[$`]/.test(rawDir) ? null : resolveShellPath(rawDir, cwd, home)
+      continue
+    }
+    for (const raw of shellWriteTargetsIn(segment)) {
+      const relative = !raw.startsWith("/") && !raw.startsWith("~")
+      const dynamic = /[$`]/.test(raw) || (current === null && relative)
+      targets.push(dynamic ? { path: raw, dynamic: true } : { path: resolveShellPath(raw, current ?? cwd, home), dynamic: false })
+    }
+  }
+  return targets
+}
+
+/** 动态目标的字面量仍可能指向敏感路径：含这些片段的动态写入一律 deny。 */
+function isSensitiveWriteText(text: string): boolean {
+  const normalized = lower(text)
+  const base = basenameOf(normalized)
+  return (
+    SHELL_RC_BASENAMES.has(base) ||
+    isSettingsFile(normalized) ||
+    isEnvFile(normalized) ||
+    normalized.includes("/.ssh") ||
+    normalized.includes("/.claude") ||
+    normalized.includes("/.git/")
+  )
+}
+
+/** symlink 事实由网关进程自己 lstat，不接受调用方传参。 */
+function gatewayIsSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/** 写路径的 realpath 也由网关自己解析；调用方注入只作补充。 */
+function gatewayRealpath(path: string): string | undefined {
+  try {
+    return realpathSync(path)
+  } catch {
+    return undefined
+  }
+}
+
+/** 编辑工具的相对路径按 cwd 归一；`~/` 展开 home。 */
+function resolveSafetyPath(raw: string, context: PermissionContext): string {
+  return resolveShellPath(raw, contextCwd(context), contextHome(context))
 }
 
 function safetyDecision(
@@ -1278,7 +1521,8 @@ function safetyCheck(
   context: PermissionContext,
   mode: PermissionMode,
 ): PermissionDecision | null {
-  if (input[SANDBOX_DISABLE_PARAM] === true) {
+  // M2：键存在即视为尝试绕过，不认可 `"true"` / 1 / false 之类写法。
+  if (Object.prototype.hasOwnProperty.call(input, SANDBOX_DISABLE_PARAM)) {
     if (context.dangerouslyDisableSandboxAllowed !== true || context.restricted) {
       return safetyDecision(
         "sandboxOverride",
@@ -1291,6 +1535,9 @@ function safetyCheck(
 
   const name = tool.toLowerCase()
   const paths = pathsFromTool(tool, input)
+  const cwd = contextCwd(context)
+  const home = contextHome(context)
+
   if (BASH_FAMILY.has(name)) {
     const command =
       typeof input.command === "string"
@@ -1298,16 +1545,45 @@ function safetyCheck(
         : typeof input.code === "string"
           ? input.code
           : ""
-    for (const target of bashWriteTargets(command)) {
-      const direct = checkPathSafety(target, mode, {
-        symlink: context.isSymlink?.(target) === true,
-      })
-      if (!direct.safe) return safetyDecision(direct.kind, direct.reason.reason ?? "unsafe write path", direct.behavior, { path: target, mode })
-      const resolved = context.realpath?.(target)
-      if (resolved && resolved !== target) {
-        const viaLink = checkPathSafety(resolved, mode)
+    if (!command) return null
+
+    // heredoc 的落点无法静态判定：保守回 ask。
+    if (/<<-?\s*['"]?[A-Za-z_\\]/.test(command)) {
+      return safetyDecision(
+        "heredocTarget",
+        "heredoc write target cannot be statically determined; confirm before running",
+        "ask",
+        { mode },
+      )
+    }
+
+    for (const target of bashWriteTargets(command, cwd, home)) {
+      if (target.dynamic) {
+        const sensitive = isSensitiveWriteText(target.path)
+        return safetyDecision(
+          sensitive ? "shell_rc" : "dynamicWriteTarget",
+          sensitive
+            ? "write target uses a variable/command substitution and points at a sensitive path"
+            : "write target uses a variable or command substitution and cannot be statically verified",
+          sensitive ? "deny" : "ask",
+          { path: target.path, mode },
+        )
+      }
+      const direct = checkPathSafety(target.path, mode, { symlink: gatewayIsSymlink(target.path) })
+      if (!direct.safe) {
+        return safetyDecision(direct.kind, direct.reason.reason ?? "unsafe write path", direct.behavior, {
+          path: target.path,
+          mode,
+        })
+      }
+      const resolved = gatewayRealpath(target.path)
+      if (resolved && resolved !== target.path) {
+        const viaLink = checkPathSafety(resolved, mode, { symlink: gatewayIsSymlink(resolved) })
         if (!viaLink.safe) {
-          return safetyDecision(viaLink.kind, viaLink.reason.reason ?? "unsafe write path", viaLink.behavior, { path: target, mode })
+          return safetyDecision(viaLink.kind, viaLink.reason.reason ?? "unsafe write path", viaLink.behavior, {
+            path: target.path,
+            mode,
+          })
         }
       }
     }
@@ -1316,23 +1592,36 @@ function safetyCheck(
 
   if (!isEditTool(tool)) return null
 
-  for (const path of paths) {
-    const direct = checkPathSafety(path, mode, { symlink: context.isSymlink?.(path) === true })
+  for (const raw of paths) {
+    const dynamic = /[$`]/.test(raw)
+    if (dynamic) {
+      const sensitive = isSensitiveWriteText(raw)
+      return safetyDecision(
+        sensitive ? "shell_rc" : "dynamicWriteTarget",
+        sensitive
+          ? "write target uses a variable/command substitution and points at a sensitive path"
+          : "write target uses a variable or command substitution and cannot be statically verified",
+        sensitive ? "deny" : "ask",
+        { path: raw, mode },
+      )
+    }
+    const abs = resolveSafetyPath(raw, context)
+    const direct = checkPathSafety(abs, mode, { symlink: gatewayIsSymlink(abs) })
     if (!direct.safe) {
       return safetyDecision(direct.kind, direct.reason.reason ?? "unsafe write path", direct.behavior, {
-        path,
+        path: abs,
         mode,
       })
     }
-    const resolved = context.realpath?.(path)
-    if (resolved && resolved !== path) {
-      const viaLink = checkPathSafety(resolved, mode)
+    const resolved = gatewayRealpath(abs) ?? context.realpath?.(abs) ?? context.realpath?.(raw)
+    if (resolved && resolved !== abs) {
+      const viaLink = checkPathSafety(resolved, mode, { symlink: gatewayIsSymlink(resolved) })
       if (!viaLink.safe) {
         return safetyDecision(
           viaLink.kind,
           viaLink.reason.reason ?? "write target resolves to an unsafe path",
           viaLink.behavior,
-          { path, mode },
+          { path: abs, mode },
         )
       }
     }
@@ -1374,14 +1663,14 @@ function firstRuleHit(
     for (const ruleText of rules) {
       if (skipDangerous && isDangerousAllowRule(ruleText)) continue
       const rule = parseRule(ruleText)
-      if (rule && ruleMatches(rule, tool, input, context)) {
+      if (rule && ruleMatches(rule, tool, input, context, bucket)) {
         return { rule: formatRule(rule), source }
       }
     }
     if (source === "session") {
       for (const rule of injectedRules(bucket, context)) {
         if (skipDangerous && isDangerousAllowRule(formatRule(rule))) continue
-        if (ruleMatches(rule, tool, input, context)) {
+        if (ruleMatches(rule, tool, input, context, bucket)) {
           return { rule: formatRule(rule), source }
         }
       }
@@ -1523,10 +1812,13 @@ export function evaluateToolPermission(args: {
   const tool = typeof args.tool === "string" && args.tool ? args.tool : "unknown"
   const state = getState(sessionId, tenant)
 
-  if (context.restricted !== undefined) state.restricted = context.restricted === true
-  if (context.isBypassPermissionsModeAvailable === true) state.bypassAvailable = true
+  // restricted 只能 latch true：context 不得解除。
+  if (context.restricted === true) state.restricted = true
+  if (context.bypassDisabled === true) state.bypassDisabled = true
 
-  const mode = context.mode && isPermissionMode(context.mode) ? context.mode : state.mode
+  // C2：context.mode 只认对外模式；bypassPermissions 一律忽略（只能来自可信状态）。
+  const requestedMode = context.mode && isExternalPermissionMode(context.mode) ? context.mode : undefined
+  const mode = requestedMode ?? state.mode
 
   // 1. safetyCheck：先于所有规则与模式，bypassPermissions 不可绕。
   const safety = safetyCheck(tool, input, context, mode)

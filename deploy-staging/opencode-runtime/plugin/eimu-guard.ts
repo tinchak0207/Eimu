@@ -56,6 +56,7 @@ const PLAN_EXEMPT_TOOLS: ReadonlySet<string> = new Set(
 )
 
 let gatewayGateWarned = false
+let defaultModeFallbackWarned = false
 
 /** gateway loopback POST；超时/不可达回 null（调用方按 C1/H5 处理）。 */
 async function gatewayPost(path: string, body: unknown): Promise<Response | null> {
@@ -299,7 +300,8 @@ export const EimuGuard: Plugin = async ({ client }) => {
         throw new Error("计划模式状态查询超时/不可达：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
       }
 
-      // 权限闸：404/5xx/网络失败退回既有 guard；deny 直接拒绝；ask 按 C3 处理。
+      // 权限闸：404/5xx/网络失败退回既有 guard；deny 直接拒绝；ask 按 C3 处理
+      //（default 档回落既有 guard，其它来源 fail-closed）。
       if (permRes) {
         if (gatewayFallbackStatus(permRes)) {
           // 旧网关/网关故障：退回既有路径/沙箱/SSRF guard。
@@ -320,14 +322,13 @@ export const EimuGuard: Plugin = async ({ client }) => {
                 `工具「${tool}」需要人工确认（${decision.reason?.reason ?? "ask"}），当前插件没有确认队列，已按 fail-closed 拒绝。`,
               )
             }
-            // C3：默认模式 ask 不得静默放行。只读/计划控制工具继续走既有 guard；
-            // 写/执行类必须先取得显式授权（既有 guard 不提供确认队列）。
-            const readOnly =
-              decision.read_only === true ||
-              (typeof decision.read_only !== "boolean" && PLAN_READ_ONLY_FALLBACK.has(lowerTool))
-            if (!readOnly && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
-              throw new Error(
-                `工具「${tool}」需要确认：该工具需在设置中授权（添加 allow 规则）后再调用。`,
+            // C3（产品阻断级修正）：default 档的 ask **回落既有 guard**，不是静默放行——
+            // 下方的路径白名单、bwrap 沙箱、SSRF 闸仍然执行。显式信任边界：
+            // Eimu 没有工具级确认队列，默认模式的确认语义由既有 guard 兜底。
+            if (!defaultModeFallbackWarned) {
+              defaultModeFallbackWarned = true
+              console.warn(
+                `[eimu-guard] permission.default_mode_fallback: tool=${tool} session=${input.sessionID} — 默认模式 ask 交由既有 guard 兜底（无工具级确认队列）`,
               )
             }
           }

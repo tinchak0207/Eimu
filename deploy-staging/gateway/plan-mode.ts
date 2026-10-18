@@ -11,6 +11,7 @@ import { join, resolve, sep } from "node:path"
 import { CONFIRM_TIMEOUT_MS } from "./constants-gateway"
 import { waitFor } from "./internal-waiters"
 import { settleConfirm } from "./media-internal-routes"
+import { getPolicyState, isPermissionMode, updateRules } from "./permission-policy"
 import { resolveSession } from "./sessions-core"
 import { emitToSession } from "./sse-core"
 import { subagentParentState } from "./subagent"
@@ -87,6 +88,8 @@ export interface PlanGuardVerdict {
 
 const PLAN_SCAFFOLD = "# Plan\n\n<!-- 在调用 ExitPlanMode 前，把完整计划写入本文件。 -->\n"
 const PLAN_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+/** 计划目录不得落进控制目录（与写路径 safetyCheck 对齐）。 */
+const FORBIDDEN_PLAN_DIR_SEGMENTS = new Set([".git", ".claude", ".ssh"])
 const planStates = new Map<string, PlanSessionState>()
 
 function workspaceRoot(): string {
@@ -101,22 +104,33 @@ function isWithin(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(root + sep)
 }
 
+function assertSafePlansDir(path: string): void {
+  for (const segment of path.split(sep)) {
+    if (FORBIDDEN_PLAN_DIR_SEGMENTS.has(segment.toLowerCase())) {
+      throw new Error(`plans directory must not contain a control directory segment: ${path}`)
+    }
+  }
+}
+
 /**
  * 计划目录解析：显式目录必须位于工作区内；缺省为 HARNESS_STATE/plans。
- * 所有目录在创建后都会被 realpath 复核一次，防止中间层 symlink 逃逸。
+ * H6：拒绝落在 .git/.claude/.ssh 或工作区根；创建前后各校验一次，防 symlink 逃逸。
  */
 export async function resolvePlansDir(configured?: string): Promise<string> {
   const explicit = (configured?.trim() || process.env.HARNESS_PLANS_DIR?.trim() || "").trim()
   const dir = explicit ? resolve(explicit) : join(stateRoot(), "plans")
+  assertSafePlansDir(dir)
   await mkdir(dir, { recursive: true, mode: 0o700 })
   const stat = await lstat(dir)
   if (stat.isSymbolicLink()) throw new Error(`plans directory must not be a symlink: ${dir}`)
   const real = await realpath(dir)
+  assertSafePlansDir(real)
+  const workspace = await realpath(resolve(workspaceRoot())).catch(() => resolve(workspaceRoot()))
+  if (real === workspace) throw new Error(`plans directory must not be the workspace root: ${dir}`)
   if (explicit) {
-    const workspace = await realpath(resolve(workspaceRoot()))
     if (!isWithin(workspace, real)) throw new Error(`plans directory must be within workspace: ${dir}`)
   } else {
-    const root = await realpath(resolve(stateRoot()))
+    const root = await realpath(resolve(stateRoot())).catch(() => resolve(stateRoot()))
     if (!isWithin(root, real)) throw new Error(`plans directory escapes state root: ${dir}`)
   }
   return real
@@ -195,6 +209,8 @@ export async function enterPlanMode(
   const existing = planStates.get(sid)
   if (existing?.mode === "plan") {
     await ensurePlanFile(existing.filePath)
+    // H6：权限引擎与计划状态保持一致（幂等）。
+    updateRules({ sessionId: sid, action: "setMode", mode: "plan" })
     return {
       mode: "plan",
       planFilePath: existing.filePath,
@@ -206,7 +222,12 @@ export async function enterPlanMode(
   const slug = planSlugFor(sid)
   const filePath = join(dir, `${slug}.md`)
   await ensurePlanFile(filePath)
-  const prePlanMode = options.prePlanMode?.trim() || "default"
+  // prePlanMode 只能取自服务端权限状态；请求体不能借此指定 bypassPermissions。
+  const policy = getPolicyState(sid)
+  const currentMode = policy.mode === "plan" ? policy.prePlanMode ?? "default" : policy.mode
+  const requested = options.prePlanMode?.trim()
+  const prePlanMode =
+    requested && isPermissionMode(requested) && requested !== "bypassPermissions" ? requested : currentMode
   const record: PlanSessionState = {
     sessionId: sid,
     mode: "plan",
@@ -216,15 +237,27 @@ export async function enterPlanMode(
     createdAt: Date.now(),
   }
   planStates.set(sid, record)
+  // H6：进入计划模式同时驱动权限引擎（prePlanMode 由权限内核记录）。
+  updateRules({ sessionId: sid, action: "setMode", mode: "plan" })
   const state = findSession(sid)
   if (state) emitToSession(state, "plan.mode", { mode: "plan", pre_plan_mode: prePlanMode, plan_file_path: filePath })
   return { mode: "plan", planFilePath: filePath, planSlug: slug, prePlanMode }
+}
+
+/** H6：退出计划模式时恢复原权限模式；不可用则降级 default。 */
+function restorePolicyMode(sessionId: string, prePlanMode: string): void {
+  const target = isPermissionMode(prePlanMode) ? prePlanMode : "default"
+  const restored = updateRules({ sessionId, action: "setMode", mode: target })
+  if (!restored.ok && target !== "default") {
+    updateRules({ sessionId, action: "setMode", mode: "default" })
+  }
 }
 
 function finalizeApproval(record: PlanSessionState, plan: string, state: SessionState | null): ExitPlanModeApproved {
   record.mode = "exited"
   record.exitedAt = Date.now()
   record.pendingRequestId = undefined
+  restorePolicyMode(record.sessionId, record.prePlanMode)
   if (state) {
     emitToSession(state, "plan.mode", {
       mode: record.prePlanMode,
@@ -324,6 +357,8 @@ export async function exitPlanMode(
 
 export function getPlanState(sessionId: string): {
   mode: "plan" | "default"
+  /** H5：显式布尔，插件只认这个字段判定计划状态。 */
+  inPlanMode: boolean
   prePlanMode?: string
   planSlug?: string
   planFilePath?: string
@@ -334,9 +369,10 @@ export function getPlanState(sessionId: string): {
   const sid = sessionId?.trim()
   if (!sid) throw new Error("sessionId is required")
   const record = planStates.get(sid)
-  if (!record) return { mode: "default" }
+  if (!record) return { mode: "default", inPlanMode: false }
   return {
     mode: record.mode === "plan" ? "plan" : "default",
+    inPlanMode: record.mode === "plan",
     prePlanMode: record.prePlanMode,
     planSlug: record.planSlug,
     planFilePath: record.filePath,
@@ -346,7 +382,11 @@ export function getPlanState(sessionId: string): {
   }
 }
 
-const READ_ONLY_TOOL_NAMES = new Set(
+/**
+ * H6：计划模式只读工具的唯一真源。
+ * 网关通过 /internal/plan/state 的 read_only_tools 下发；插件不再自带第二份清单。
+ */
+export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set(
   [
     "read",
     "list",
@@ -432,6 +472,6 @@ export function planModeGuard(
       }
     }
   }
-  if (readOnly ?? READ_ONLY_TOOL_NAMES.has(lower)) return { behavior: "allow", reason: "" }
+  if (readOnly ?? PLAN_READ_ONLY_TOOLS.has(lower)) return { behavior: "allow", reason: "" }
   return { behavior: "ask", reason: `Cannot call ${name} while in plan mode.` }
 }

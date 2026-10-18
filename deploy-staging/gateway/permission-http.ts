@@ -9,7 +9,8 @@
 import {
   evaluateToolPermission,
   getPolicyState,
-  isPermissionMode,
+  isExternalPermissionMode,
+  isReadOnlyTool,
   isRuleDestination,
   updateRules,
   type Behavior,
@@ -17,6 +18,10 @@ import {
   type PermissionMode,
   type RuleAction,
 } from "./permission-policy.ts"
+import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy"
+import { loadUserSettings } from "./persistence"
+import { getPlanState } from "./plan-mode"
+import { resolveSession } from "./sessions-core"
 
 const MAX_BODY_BYTES = 1024 * 1024
 
@@ -92,22 +97,25 @@ function pathFlagsOf(context: Record<string, unknown>): Record<string, PathFlags
   return out
 }
 
-function buildContext(raw: Record<string, unknown>): PermissionContext {
+function buildContext(raw: Record<string, unknown>, modeOverride?: PermissionMode): PermissionContext {
   const pathFlags = pathFlagsOf(raw)
   const readOnlyTools = stringArray(raw.read_only_tools ?? raw.readOnlyTools)
   const pathCaseInsensitive = booleanField(raw, "case_insensitive_path") ?? booleanField(raw, "caseInsensitivePath")
   const context: PermissionContext = {
-    ...(typeof raw.mode === "string" && isPermissionMode(raw.mode) ? { mode: raw.mode } : {}),
+    // C2：HTTP 面只接受对外模式；bypassPermissions 不在请求体里合法。
+    // 会话推导出的 mode 优先于请求体（请求体只能在无会话时兜底）。
+    ...(modeOverride
+      ? { mode: modeOverride }
+      : typeof raw.mode === "string" && isExternalPermissionMode(raw.mode)
+        ? { mode: raw.mode }
+        : {}),
     ...(typeof raw.cwd === "string" && raw.cwd ? { cwd: raw.cwd } : {}),
     ...(typeof raw.home === "string" && raw.home ? { home: raw.home } : {}),
     ...(typeof raw.settings_dir === "string" && raw.settings_dir ? { settingsDir: raw.settings_dir } : {}),
     ...(typeof raw.settingsDir === "string" && raw.settingsDir ? { settingsDir: raw.settingsDir } : {}),
     restricted: booleanField(raw, "restricted"),
+    // bypassDisabled 只允许 latch true；bypass/auto 可用性不接受请求体。
     bypassDisabled: booleanField(raw, "bypass_disabled") ?? booleanField(raw, "bypassDisabled"),
-    isBypassPermissionsModeAvailable:
-      booleanField(raw, "is_bypass_permissions_mode_available") ??
-      booleanField(raw, "isBypassPermissionsModeAvailable"),
-    autoModeAvailable: booleanField(raw, "auto_mode_available") ?? booleanField(raw, "autoModeAvailable"),
     dangerouslyDisableSandboxAllowed:
       booleanField(raw, "dangerously_disable_sandbox_allowed") ??
       booleanField(raw, "dangerouslyDisableSandboxAllowed"),
@@ -138,32 +146,72 @@ function buildContext(raw: Record<string, unknown>): PermissionContext {
   return context
 }
 
+/** tenant 一律由会话状态推导，不信任请求体。 */
+async function deriveTenant(sessionId: string, fallback: string): Promise<string> {
+  const state = resolveSession(sessionId)
+  if (!state) return fallback
+  try {
+    return (await billingPermissionTenant(state)) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * 权限模式由会话推导（产品连续性的关键）：
+ * - 显式 plan 状态优先；
+ * - billingAutoApprovalEnabled → auto；
+ * - interaction_mode === "collaborate" → default；
+ * - 其余（preset 等）→ auto。
+ * 请求体不能决定模式。
+ */
+async function deriveMode(sessionId: string): Promise<PermissionMode | undefined> {
+  if (getPlanState(sessionId).inPlanMode) return "plan"
+  const state = resolveSession(sessionId)
+  if (!state) return undefined
+  try {
+    if (await billingAutoApprovalEnabled(state)) return "auto"
+    const settings = loadUserSettings(state.apiKey) as { interaction_mode?: string } | null
+    return settings?.interaction_mode === "collaborate" ? "default" : "auto"
+  } catch {
+    // 设置/身份查询失败不得把产品锁死：按其余档位处理。
+    return "auto"
+  }
+}
+
 async function handleEvaluate(body: Record<string, unknown>): Promise<Response> {
   const sessionId = stringField(body, "session_id")
   if (!sessionId) return error(400, "bad_request", "session_id is required")
   const tool = stringField(body, "tool")
   if (!tool) return error(400, "bad_request", "tool is required")
-  const tenant = stringField(body, "tenant") || "default"
+  const bodyTenant = stringField(body, "tenant") || "default"
   const input = objectField(body, "input")
   const contextRaw = objectField(body, "context")
 
   const rawMode = contextRaw.mode
-  if (rawMode !== undefined && !isPermissionMode(rawMode)) {
-    return error(400, "invalid_mode", `unknown permission mode: ${String(rawMode)}`)
+  if (rawMode !== undefined && !isExternalPermissionMode(rawMode)) {
+    return error(400, "invalid_mode", `mode must be one of the external modes: ${String(rawMode)}`)
   }
+
+  // 产品阻断级修正：模式/tenant 由会话推导，不信任请求体。
+  const tenant = await deriveTenant(sessionId, bodyTenant)
+  const mode = await deriveMode(sessionId)
 
   const decision = evaluateToolPermission({
     sessionId,
     tenant,
     tool,
     input,
-    context: buildContext(contextRaw),
+    context: buildContext(contextRaw, mode),
   })
 
   return json(200, {
     ok: true,
     behavior: decision.behavior,
     reason: decision.reason,
+    // 只读分类仍回传，供审计/调试；default 档 ask 由插件回落既有 guard。
+    read_only: isReadOnlyTool(tool),
+    ...(mode ? { mode } : {}),
     ...(decision.suggestions ? { suggestions: decision.suggestions } : {}),
   })
 }
@@ -171,7 +219,8 @@ async function handleEvaluate(body: Record<string, unknown>): Promise<Response> 
 async function handleRules(body: Record<string, unknown>): Promise<Response> {
   const sessionId = stringField(body, "session_id")
   if (!sessionId) return error(400, "bad_request", "session_id is required")
-  const tenant = stringField(body, "tenant") || "default"
+  // tenant 由会话推导，不信任请求体。
+  const tenant = await deriveTenant(sessionId, stringField(body, "tenant") || "default")
   const action = stringField(body, "action")
   if (!ACTIONS.has(action)) {
     return error(400, "invalid_action", `unknown action: ${action || "(empty)"}`)
@@ -183,8 +232,17 @@ async function handleRules(body: Record<string, unknown>): Promise<Response> {
   }
 
   const modeRaw = body.mode
-  if (modeRaw !== undefined && !isPermissionMode(modeRaw)) {
-    return error(400, "invalid_mode", `unknown permission mode: ${String(modeRaw)}`)
+  if (modeRaw !== undefined) {
+    if (modeRaw === "bypassPermissions") {
+      return error(
+        403,
+        "bypass_not_externally_settable",
+        "bypassPermissions can only come from the gateway process startup configuration",
+      )
+    }
+    if (!isExternalPermissionMode(modeRaw)) {
+      return error(400, "invalid_mode", `unknown permission mode: ${String(modeRaw)}`)
+    }
   }
 
   const rules = body.rules === undefined ? undefined : stringArray(body.rules)
@@ -207,11 +265,10 @@ async function handleRules(body: Record<string, unknown>): Promise<Response> {
     behavior: behavior ? (behavior as Behavior) : undefined,
     directories: stringArray(body.directories),
     restricted: booleanField(body, "restricted"),
+    // 只允许 latch true；bypass 可用性/auto 可用性不接受请求体。
     bypassDisabled: booleanField(body, "bypass_disabled") ?? booleanField(body, "bypassDisabled"),
-    isBypassPermissionsModeAvailable:
-      booleanField(body, "is_bypass_permissions_mode_available") ??
-      booleanField(body, "isBypassPermissionsModeAvailable"),
-    autoModeAvailable: booleanField(body, "auto_mode_available") ?? booleanField(body, "autoModeAvailable"),
+    clear: body.clear === true,
+    clearToken: typeof body.clear_token === "string" ? body.clear_token : typeof body.clearToken === "string" ? body.clearToken : undefined,
   })
 
   if (!result.ok) {
@@ -224,7 +281,7 @@ async function handleRules(body: Record<string, unknown>): Promise<Response> {
 async function handleState(body: Record<string, unknown>): Promise<Response> {
   const sessionId = stringField(body, "session_id")
   if (!sessionId) return error(400, "bad_request", "session_id is required")
-  const tenant = stringField(body, "tenant") || "default"
+  const tenant = await deriveTenant(sessionId, stringField(body, "tenant") || "default")
   return json(200, { ok: true, session_id: sessionId, tenant, state: getPolicyState(sessionId, tenant) })
 }
 

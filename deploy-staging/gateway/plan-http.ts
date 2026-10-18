@@ -1,6 +1,6 @@
 // /internal/plan/* 内部端点（loopback-only 由 router 上游闸门负责）。
 import { jsonError } from "./gw-lib"
-import { enterPlanMode, exitPlanMode, getPlanState } from "./plan-mode"
+import { PLAN_READ_ONLY_TOOLS, enterPlanMode, exitPlanMode, getPlanState } from "./plan-mode"
 
 const PREFIX = "/internal/plan/"
 const MAX_EXIT_WAIT_MS = 240_000
@@ -42,7 +42,12 @@ export async function handlePlan(req: Request, pathname: string): Promise<Respon
         return Response.json({ success: true, ...result })
       }
       case "state": {
-        return Response.json({ success: true, ...getPlanState(sessionId) })
+        // H5/H6：inPlanMode 必须显式；只读清单由网关下发，插件不在本地维护第二份。
+        return Response.json({
+          success: true,
+          ...getPlanState(sessionId),
+          read_only_tools: [...PLAN_READ_ONLY_TOOLS],
+        })
       }
       default:
         return jsonError(404, "unknown plan route", "not_found", "not_found")

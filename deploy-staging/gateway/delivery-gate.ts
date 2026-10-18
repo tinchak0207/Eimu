@@ -71,6 +71,17 @@ export const REWORK_FAIL_MARK = "【交付闸门·重派后仍未达标】"
 export const ORPHANED_GATE_MARK = "【交付闸门·进程中断未复原】"
 
 /**
+ * Artifact 验证闸（P2-5 接线）：交付涉及已落库 artifact 时，verify_status==="blocked"
+ * 一律拒绝交付。调用端不传记录（或记录为空）时保持原行为，不误杀。
+ */
+export const ARTIFACT_VERIFY_BLOCKED_MARK = "【交付闸门·产物验证未通过】"
+
+export interface ArtifactVerifyRecord {
+  name: string
+  verify_status?: string | null
+}
+
+/**
  * 契约载入（模组载入时一次）。档不存在/坏掉 → 空契约 + 一行 warn（fail-open，见档头）。
  * 用 `import.meta.dir`（Bun）：gateway 进程 WorkingDirectory=/opt/agent-harness/gateway，
  * 本档与 expert/ 同层 → `${import.meta.dir}/expert/...` 与 subagent.ts 的 expert-ids.json
@@ -122,11 +133,32 @@ export function checkDelivery(
   agent: string | undefined,
   text: string,
   contracts: DeliveryContracts,
+  artifactVerify?: ReadonlyArray<ArtifactVerifyRecord> | null,
 ): DeliveryGateResult {
-  // 非 Expert / 未登记 → 零回归放行。
-  if (!agent || typeof agent !== "string") return { ok: true, missing: [] }
+  // P2-5：artifact 验证 blocked 是独立拒绝条件（无记录时不进入，不误杀）。
+  const blocked = (artifactVerify ?? [])
+    .filter((record) => record && record.verify_status === "blocked")
+    .map((record) => record.name)
+  // 非 Expert / 未登记 → 零回归放行（除非有 blocked artifact）。
+  if (!agent || typeof agent !== "string") {
+    return blocked.length === 0
+      ? { ok: true, missing: [] }
+      : {
+          ok: false,
+          missing: blocked.map((name) => `artifact:${name}:verify_blocked`),
+          reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 验证未通过（blocked）：${blocked.join("、")}。此交付物不得放行。`,
+        }
+  }
   const contract = contracts[agent]
-  if (!contract) return { ok: true, missing: [] }
+  if (!contract) {
+    return blocked.length === 0
+      ? { ok: true, missing: [] }
+      : {
+          ok: false,
+          missing: blocked.map((name) => `artifact:${name}:verify_blocked`),
+          reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 验证未通过（blocked）：${blocked.join("、")}。此交付物不得放行。`,
+        }
+  }
 
   // 栏位名大小写正规化后子字串命中。toLowerCase 对 CJK 是恒等（中文标签不受影响），
   // 故契约栏位若写中文标签也照样子字串可比。
@@ -141,6 +173,14 @@ export function checkDelivery(
   // qcSignatureRequired：签名要求是独立条款——即使 requiredFields 没列 qc，也要求 qc 栏位名在场。
   if (contract.qcSignatureRequired && !missing.includes("qc") && !haystack.includes("qc")) {
     push("qc")
+  }
+  if (blocked.length > 0) {
+    for (const name of blocked) push(`artifact:${name}:verify_blocked`)
+    return {
+      ok: false,
+      missing,
+      reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 验证未通过（blocked）：${blocked.join("、")}。此交付物不得放行。`,
+    }
   }
   if (missing.length === 0) return { ok: true, missing: [] }
   const total = contract.requiredFields.length + (contract.qcSignatureRequired && !contract.requiredFields.includes("qc") ? 1 : 0)

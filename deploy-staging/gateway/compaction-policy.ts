@@ -16,6 +16,8 @@ export const COMPACT_TRIGGER_BUFFER_TOKENS = 13000
 export const COMPACT_BLOCK_BUFFER_TOKENS = 3000
 export const COMPACT_THRASHING_TURNS = 3
 export const COMPACT_BREAKER_FAILURES = 3
+/** 窗口值不可用（Infinity/NaN）时的归一默认值。 */
+export const COMPACT_DEFAULT_WINDOW_TOKENS = 200000
 
 export const MICROCOMPACT = Object.freeze({
   minIdleSeconds: 3900,
@@ -25,7 +27,8 @@ export const MICROCOMPACT = Object.freeze({
   minTriggerToolUses: 20,
 })
 
-export type CompactionAction = "none" | "warn" | "compact" | "blocked"
+/** thrashing 是独立状态：它不是 over_limit 的 blocked，调用方可分别处理。 */
+export type CompactionAction = "none" | "warn" | "compact" | "blocked" | "thrashing"
 export type CompactionReason = "thrashing" | "breaker" | "over_limit"
 
 export interface CompactionDecisionInput {
@@ -62,12 +65,22 @@ function finiteNonNegative(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
 }
 
+/** Infinity/NaN 等不可用窗口归一为默认；0/负数仍表示「无窗口」。 */
+function normalizeWindowTokens(value: unknown): number {
+  if (typeof value !== "number" || Number.isNaN(value)) return 0
+  if (value === Number.POSITIVE_INFINITY || value > Number.MAX_SAFE_INTEGER) {
+    return COMPACT_DEFAULT_WINDOW_TOKENS
+  }
+  return value > 0 ? value : 0
+}
+
 export function compactionDecision(input: CompactionDecisionInput): CompactionDecision {
-  const windowTokens = finiteNonNegative(input.windowTokens)
+  const windowTokens = normalizeWindowTokens(input.windowTokens)
   const usedTokens = finiteNonNegative(input.usedTokens)
   const enabled = input.enabled !== false
   const warnAt = Math.max(0, windowTokens - COMPACT_WARN_BUFFER_TOKENS)
-  const compactAt = Math.max(0, windowTokens - COMPACT_TRIGGER_BUFFER_TOKENS)
+  // 约束：小窗口（≤13000）下 compactAt 至少为 1，used=0 时不得立即 compact。
+  const compactAt = windowTokens > 0 ? Math.max(1, windowTokens - COMPACT_TRIGGER_BUFFER_TOKENS) : 0
   const blockAt =
     input.blockingLimitTokens !== undefined && Number.isFinite(input.blockingLimitTokens) && input.blockingLimitTokens > 0
       ? input.blockingLimitTokens
@@ -93,7 +106,8 @@ export function compactionDecision(input: CompactionDecisionInput): CompactionDe
   if (usedTokens >= compactAt && enabled) {
     const lastCompactTurns = input.lastCompactTurns
     if (lastCompactTurns !== undefined && lastCompactTurns >= 0 && lastCompactTurns < COMPACT_THRASHING_TURNS) {
-      return { ...base, action: "blocked", level: "blocked", reason: "thrashing", thrashing: true }
+      // 约束（P1-11）：thrashing 走独立 action/level，不伪装成 blocked。
+      return { ...base, action: "thrashing", level: "thrashing", reason: "thrashing", thrashing: true }
     }
     return { ...base, action: "compact", level: "compact", thrashing: false }
   }
@@ -187,7 +201,7 @@ Your summary should include the following sections:
 3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable, and include a summary of why this file read or edit is important.
 4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
 5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results. These are critical for understanding the user's feedback and changing intent. Preserve any security-relevant instructions or constraints verbatim so they remain in effect after compaction. ${SECURITY_NOTE}
+6. All user messages: List ALL user messages that are not tool results. These are critical for understanding your user's feedback and changing intent. Preserve any security-relevant instructions or constraints verbatim so they remain in effect after compaction. ${SECURITY_NOTE}
 7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
 8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
 9. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the user's request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.
@@ -320,6 +334,8 @@ export interface PreCompactHookResult {
 export interface AppliedPreCompactResult {
   blocked: boolean
   blockedBy?: string
+  /** 约束（P1-10）：blocked 时必须把拒绝原因回传给调用方。 */
+  blockedReason?: string
   newCustomInstructions?: string
   userDisplayMessage?: string
 }
@@ -358,9 +374,10 @@ export function applyPreCompactResult(result: PreCompactHookResult): AppliedPreC
       ? result.additionalContext.trim()
       : undefined)
 
+  const blockedReason = blockedParts.length > 0 ? blockedParts.join("\n") : undefined
   return {
     blocked: blockedParts.length > 0,
-    ...(blockedParts.length > 0 ? { blockedBy: blockedParts.join("\n") } : {}),
+    ...(blockedReason !== undefined ? { blockedBy: blockedReason, blockedReason } : {}),
     ...(newCustomInstructions !== undefined ? { newCustomInstructions } : {}),
     ...(displayParts.length > 0 ? { userDisplayMessage: displayParts.join("\n") } : {}),
   }

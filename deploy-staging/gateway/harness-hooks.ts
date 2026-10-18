@@ -67,6 +67,8 @@ export type EnabledHookEvent = (typeof ENABLED_HOOK_EVENTS)[number]
 
 export const DEFAULT_HOOKS_PATH = "/opt/agent-harness/state/hooks.json"
 export const DEFAULT_HOOK_TIMEOUT_MS = 60000
+/** 单个 hook 的硬上限：任何配置/调用参数都不能超过 10 分钟。 */
+export const MAX_HOOK_TIMEOUT_MS = 600000
 
 export const HOOK_OUTPUT_LIMITS = Object.freeze({
   reason: 2000,
@@ -95,7 +97,7 @@ export interface HookHttpAction {
 export type HookAction = HookCommandAction | HookHttpAction
 
 export interface HookMatcher {
-  matcher?: string | string[] | null
+  matcher?: string | null
   hooks: HookAction[]
 }
 
@@ -118,6 +120,8 @@ export interface HookExecutionResult {
   stdout?: string
   stderr?: string
   error?: string
+  /** 非致命问题（例如 hookSpecificOutput 事件名不匹配被丢弃）。 */
+  warnings?: string[]
   durationMs: number
 }
 
@@ -132,6 +136,8 @@ export interface HookRunResult {
   hookSpecificOutput?: Record<string, unknown>
   results: HookExecutionResult[]
   errors: string[]
+  /** 非致命问题；同时以 `warning: ...` 形式并入 errors，便于旧调用方看到。 */
+  warnings?: string[]
 }
 
 export interface RunHooksOptions {
@@ -160,7 +166,17 @@ function asString(value: unknown): string | undefined {
 }
 
 function positiveTimeout(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined
+  return Math.min(MAX_HOOK_TIMEOUT_MS, Math.floor(value))
+}
+
+function effectiveTimeout(...candidates: Array<number | undefined>): number {
+  for (const value of candidates) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return Math.min(MAX_HOOK_TIMEOUT_MS, Math.floor(value))
+    }
+  }
+  return DEFAULT_HOOK_TIMEOUT_MS
 }
 
 function normalizeAction(value: unknown): HookAction | null {
@@ -212,10 +228,22 @@ function normalizeConfig(value: unknown): { config: HooksConfig; errors: string[
         errors.push(`matcher for ${event} must be an object with a hooks array`)
         continue
       }
-      const matcher =
-        typeof matcherValue.matcher === "string" || Array.isArray(matcherValue.matcher)
-          ? (matcherValue.matcher as string | string[])
-          : undefined
+      // 约束（P1-7）：matcher 必须是 string。非 string 记 error 并跳过该 hook；
+      // 坏正则同样记 error 并跳过，绝不退化成 match-all。
+      let matcher: string | undefined
+      if (matcherValue.matcher !== undefined && matcherValue.matcher !== null) {
+        if (typeof matcherValue.matcher !== "string") {
+          errors.push(`matcher for ${event} must be a string`)
+          continue
+        }
+        try {
+          new RegExp(matcherValue.matcher)
+          matcher = matcherValue.matcher
+        } catch (error) {
+          errors.push(`invalid matcher regex for ${event}: ${(error as Error).message}`)
+          continue
+        }
+      }
       const actions: HookAction[] = []
       for (const actionValue of matcherValue.hooks) {
         const action = normalizeAction(actionValue)
@@ -234,20 +262,31 @@ function normalizeConfig(value: unknown): { config: HooksConfig; errors: string[
   return { config, errors }
 }
 
-async function readHooksConfig(configPath: string): Promise<{ config: HooksConfig; errors: string[] }> {
+async function readHooksConfig(
+  configPath: string,
+  explicit: boolean,
+): Promise<{ config: HooksConfig; errors: string[] }> {
   try {
     const text = await Bun.file(configPath).text()
     if (text.trim().length === 0) return { config: { hooks: {} }, errors: [] }
     return normalizeConfig(JSON.parse(text))
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    if (code === "ENOENT") return { config: { hooks: {} }, errors: [] }
+    // 约束（P1-8）：显式配置的路径不存在时给出 config_missing；只有默认路径
+    // 缺失才视为「没有配置 hook」。拼错路径不得静默关掉整条 hook 总线。
+    if (code === "ENOENT") {
+      return {
+        config: { hooks: {} },
+        errors: explicit ? [`config_missing: hooks config not found: ${configPath}`] : [],
+      }
+    }
     return { config: { hooks: {} }, errors: [`failed to read hooks config ${configPath}: ${(error as Error).message}`] }
   }
 }
 
 export async function loadHooksConfig(configPath = process.env.HARNESS_HOOKS_PATH || DEFAULT_HOOKS_PATH): Promise<HooksConfig> {
-  return (await readHooksConfig(configPath)).config
+  const explicit = configPath !== DEFAULT_HOOKS_PATH
+  return (await readHooksConfig(configPath, explicit)).config
 }
 
 function matcherQuery(event: string, input: Record<string, unknown>): string | undefined {
@@ -271,21 +310,28 @@ function matcherQuery(event: string, input: Record<string, unknown>): string | u
   }
 }
 
-function matcherMatches(matcher: string | string[] | null | undefined, query: string | undefined): boolean {
-  if (matcher === undefined || matcher === null) return true
-  const patterns = Array.isArray(matcher) ? matcher : [matcher]
-  if (patterns.length === 0) return true
-  if (patterns.every((pattern) => pattern === "" || pattern === "*")) return true
-  // 约束：matcher 指定了但事件没有可匹配值 → 不执行（fail-closed）。
-  if (query === undefined) return false
-  for (const pattern of patterns) {
-    try {
-      if (new RegExp(pattern).test(query)) return true
-    } catch {
-      // 约束：坏正则不执行该 matcher。
-    }
+interface MatcherResult {
+  matched: boolean
+  error?: string
+}
+
+function matcherMatches(matcher: unknown, query: string | undefined): MatcherResult {
+  if (matcher === undefined || matcher === null) return { matched: true }
+  // 约束（P1-7）：matcher 必须是 string；数组或其它类型一律报错并跳过，
+  // 不得因为「无法解析」而退化成 match-all。
+  if (typeof matcher !== "string") {
+    return { matched: false, error: "matcher must be a string" }
   }
-  return false
+  if (matcher === "" || matcher === "*") return { matched: true }
+  let re: RegExp
+  try {
+    re = new RegExp(matcher)
+  } catch (error) {
+    return { matched: false, error: `invalid matcher regex: ${(error as Error).message}` }
+  }
+  // 约束：matcher 指定了但事件没有可匹配值 → 不执行（fail-closed）。
+  if (query === undefined) return { matched: false }
+  return { matched: re.test(query) }
 }
 
 function chars(text: string): string[] {
@@ -360,9 +406,17 @@ interface ParsedActionOutput {
   stdout: string
   stderr: string
   error?: string
+  warnings?: string[]
 }
 
-function parseActionOutput(stdoutRaw: string, stderrRaw: string, exitCode: number, timedOut: boolean, timeoutMs: number): ParsedActionOutput {
+function parseActionOutput(
+  stdoutRaw: string,
+  stderrRaw: string,
+  exitCode: number,
+  timedOut: boolean,
+  timeoutMs: number,
+  event: string,
+): ParsedActionOutput {
   const stdout = truncateHookOutput(stdoutRaw, 4000, 100)
   const stderr = truncateHookOutput(stderrRaw, 4000, 100)
   if (timedOut) {
@@ -390,7 +444,16 @@ function parseActionOutput(stdoutRaw: string, stderrRaw: string, exitCode: numbe
     }
   }
 
-  const hookSpecificOutput = isRecord(json.hookSpecificOutput) ? json.hookSpecificOutput : undefined
+  const warnings: string[] = []
+  let hookSpecificOutput = isRecord(json.hookSpecificOutput) ? json.hookSpecificOutput : undefined
+  // 约束（P0-4）：hookSpecificOutput 必须声明与当前事件一致的 hookEventName；
+  // 不一致（含缺失）时丢弃该字段并发警告，绝不把别的事件输出套到本事件上。
+  if (hookSpecificOutput !== undefined && hookSpecificOutput.hookEventName !== event) {
+    warnings.push(
+      `hookSpecificOutput_event_mismatch: expected ${event}, got ${String(hookSpecificOutput.hookEventName)}`,
+    )
+    hookSpecificOutput = undefined
+  }
   const permissionDecision = asString(hookSpecificOutput?.permissionDecision)
   const jsonDecision = asString(json.decision)
   const blockDecision = jsonDecision === "block" || permissionDecision === "deny" || json.continue === false
@@ -413,6 +476,7 @@ function parseActionOutput(stdoutRaw: string, stderrRaw: string, exitCode: numbe
       ? { systemMessage: truncateSystemMessage(systemMessageSource) }
       : {}),
     ...(hookSpecificOutput !== undefined ? { hookSpecificOutput } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     stdout,
     stderr,
     ...(exitCode === 0 ? {} : { error: `hook exited with code ${exitCode}` }),
@@ -434,7 +498,7 @@ async function runCommandAction(
   opts: RunHooksOptions,
 ): Promise<HookExecutionResult> {
   const started = Date.now()
-  const timeoutMs = action.timeout ?? opts.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
+  const timeoutMs = effectiveTimeout(action.timeout, opts.timeoutMs)
   const cwd = opts.cwd ?? process.env.HARNESS_WORKSPACE ?? process.cwd()
   let timedOut = false
   const controller = new AbortController()
@@ -443,12 +507,32 @@ async function runCommandAction(
     if (opts.signal.aborted) controller.abort()
     else opts.signal.addEventListener("abort", onOuterAbort, { once: true })
   }
+
+  let proc: ReturnType<typeof Bun.spawn> | null = null
+  const abortPromise = new Promise<"aborted">((resolveAbort) => {
+    if (controller.signal.aborted) resolveAbort("aborted")
+    else controller.signal.addEventListener("abort", () => resolveAbort("aborted"), { once: true })
+  })
   const timer = setTimeout(() => {
     timedOut = true
     controller.abort()
   }, timeoutMs)
 
-  let proc: ReturnType<typeof Bun.spawn> | null = null
+  // 约束（P1-6）：超时/中止只杀整个进程组（detached → 新 process group），
+  // 且立刻返回，不等孙进程释放 stdout（否则 `bash -lc 'sleep 300 &'` 会挂住）。
+  const killTree = () => {
+    if (proc === null) return
+    try {
+      process.kill(-proc.pid, "SIGKILL")
+    } catch {
+      try {
+        proc.kill()
+      } catch {
+        // 约束：kill 失败不掩盖超时结论。
+      }
+    }
+  }
+
   try {
     proc = Bun.spawn(["bash", "-lc", action.command], {
       cwd,
@@ -461,7 +545,8 @@ async function runCommandAction(
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      signal: controller.signal,
+      // 创建独立进程组：超时才能一次杀掉 bash 及其子进程/孙进程。
+      detached: true,
     })
     const stdin = proc.stdin
     if (stdin !== undefined && stdin !== null && typeof stdin !== "number") {
@@ -478,8 +563,25 @@ async function runCommandAction(
     const stderrPromise = proc.stderr && typeof proc.stderr !== "number"
       ? new Response(proc.stderr).text()
       : Promise.resolve("")
-    const [stdoutRaw, stderrRaw, exitCode] = await Promise.all([stdoutPromise, stderrPromise, proc.exited])
-    const parsed = parseActionOutput(stdoutRaw, stderrRaw, exitCode, timedOut, timeoutMs)
+    const work = Promise.all([stdoutPromise, stderrPromise, proc.exited]).then(
+      ([stdoutRaw, stderrRaw, exitCode]) =>
+        ({ kind: "done" as const, stdoutRaw, stderrRaw, exitCode }),
+    )
+    // 超时 promise 不等待 work；work 之后可能才 reject（管道被 kill），吞掉即可。
+    work.catch(() => undefined)
+    const outcome = await Promise.race([work, abortPromise])
+    if (outcome === "aborted") {
+      killTree()
+      return {
+        type: "command",
+        command: action.command,
+        ok: false,
+        blocked: false,
+        error: timedOut ? `hook timed out after ${timeoutMs}ms` : "hook aborted",
+        durationMs: Date.now() - started,
+      }
+    }
+    const parsed = parseActionOutput(outcome.stdoutRaw, outcome.stderrRaw, outcome.exitCode, timedOut, timeoutMs, event)
     return {
       type: "command",
       command: action.command,
@@ -487,11 +589,7 @@ async function runCommandAction(
       durationMs: Date.now() - started,
     }
   } catch (error) {
-    try {
-      proc?.kill()
-    } catch {
-      // 约束：kill 失败不掩盖原始错误。
-    }
+    killTree()
     const message = timedOut ? `hook timed out after ${timeoutMs}ms` : (error as Error).message
     return {
       type: "command",
@@ -514,7 +612,7 @@ async function runHttpAction(
   opts: RunHooksOptions,
 ): Promise<HookExecutionResult> {
   const started = Date.now()
-  const timeoutMs = action.timeout ?? opts.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
+  const timeoutMs = effectiveTimeout(action.timeout, opts.timeoutMs)
   let timedOut = false
   const controller = new AbortController()
   const onOuterAbort = () => controller.abort()
@@ -550,7 +648,7 @@ async function runHttpAction(
         durationMs: Date.now() - started,
       }
     }
-    const parsed = parseActionOutput(body, "", 0, timedOut, timeoutMs)
+    const parsed = parseActionOutput(body, "", 0, timedOut, timeoutMs, event)
     return {
       type: "http",
       url: action.url,
@@ -583,7 +681,9 @@ export async function runHooks(
 
   let config = opts.config
   if (config === undefined) {
-    const loaded = await readHooksConfig(opts.configPath ?? process.env.HARNESS_HOOKS_PATH ?? DEFAULT_HOOKS_PATH)
+    const explicitPath = opts.configPath ?? process.env.HARNESS_HOOKS_PATH
+    const configPath = explicitPath ?? DEFAULT_HOOKS_PATH
+    const loaded = await readHooksConfig(configPath, explicitPath !== undefined)
     config = loaded.config
     result.errors.push(...loaded.errors)
   }
@@ -591,7 +691,12 @@ export async function runHooks(
   const query = matcherQuery(event, input)
   const tasks: Array<Promise<HookExecutionResult>> = []
   for (const matcher of config.hooks[event] ?? []) {
-    if (!matcherMatches(matcher.matcher, query)) continue
+    const match = matcherMatches(matcher.matcher, query)
+    if (match.error !== undefined) {
+      result.errors.push(`${event}: ${match.error}`)
+      continue
+    }
+    if (!match.matched) continue
     for (const action of matcher.hooks) {
       tasks.push(
         action.type === "command"
@@ -629,10 +734,18 @@ export async function runHooks(
   const firstSpecific = results.find((entry) => entry.hookSpecificOutput !== undefined)?.hookSpecificOutput
   if (firstSpecific !== undefined) result.hookSpecificOutput = firstSpecific
 
+  const warnings: string[] = []
   for (const entry of results) {
     if (entry.error !== undefined) {
       result.errors.push(`${entry.command ?? entry.url ?? entry.type}: ${entry.error}`)
     }
+    for (const warning of entry.warnings ?? []) {
+      warnings.push(`${entry.command ?? entry.url ?? entry.type}: ${warning}`)
+    }
+  }
+  if (warnings.length > 0) {
+    result.warnings = warnings
+    for (const warning of warnings) result.errors.push(`warning: ${warning}`)
   }
   return result
 }
