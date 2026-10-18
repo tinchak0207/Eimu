@@ -54,9 +54,11 @@ export interface SessionState {
   sessionId: string
   apiKey: string
   opencodeSessionId: string
-  // 2026-10-02：每会话的网关权威 nonce（12 位 hex）。由 messages-gw.ensureGatewayNonce
-  // 惰性产生／校验（!gwNonce 或格式不符即重生成），用于 authorityRule 与
-  // TAIL_PAYLOAD_MARKER⟦gw:…⟧——故为可选（未产生前 undefined）。
+  // 网关权威 nonce（12 位 hex）。由 messages-gw.ensureGatewayNonce 惰性产生／校验
+  // （!gwNonce 或格式不符即重生成）：按身份稳定＝由 apiKey 经 sha256 派生，同一账户
+  // 跨会话逐位元相同（让 system+tools 前缀命中上游 prefix cache），仅无身份时才退回
+  // 每会话随机。安全边界：不同 apiKey 派生值不同（不跨用户）；不向用户输出；唯一用途
+  // 是 authorityRule 与 TAIL_PAYLOAD_MARKER⟦gw:…⟧——故为可选（未产生前 undefined）。
   gwNonce?: string
   clients: Set<SSEClient>
   pendingConfirms: Map<string, PendingConfirm>

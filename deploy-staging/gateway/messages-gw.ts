@@ -142,14 +142,22 @@ export function tagTailPart(part: object, meta: TailPartMeta): void {
   tailPartMeta.set(part, meta)
 }
 
-export function ensureGatewayNonce(state: { gwNonce?: string }): string {
-  if (!state.gwNonce || !/^[0-9a-f]{12}$/.test(state.gwNonce)) state.gwNonce = randomBytes(6).toString("hex")
+export function ensureGatewayNonce(state: { gwNonce?: string; apiKey?: string }): string {
+  if (state.gwNonce && /^[0-9a-f]{12}$/.test(state.gwNonce)) return state.gwNonce
+  const seed = typeof state.apiKey === "string" && state.apiKey.length >= 8 ? state.apiKey : ""
+  // 按身份稳定的 nonce：同一账户跨会话逐位元相同，system+tools 才能命中上游前缀缓存
+  // （每会话随机串会让整个 tools 块跨会话 miss：实测 cached 3712→896）。
+  // 跨用户仍然不同；泄漏影响面限于该账户自己的会话；无身份时退回每会话随机。
+  state.gwNonce = seed
+    ? createHash("sha256").update(`eimu-gw-nonce:v1:${seed}`).digest("hex").slice(0, 12)
+    : randomBytes(6).toString("hex")
   return state.gwNonce
 }
 
-// authorityRule 逐位元拆成「静态头／会话尾」两截，切点落在每会话随机凭证 ⟦gw:<nonce>⟧
-// 之前：让可快取的静态前缀不含任何 session 级资料（跨 session 逐位元相同），而头＋尾
-// 相接仍与旧 authorityRule(nonce) 逐位元相同（内容与行序零改动，只把切点显式化）。
+// authorityRule 逐位元拆成「静态头／会话尾」两截，切点落在网关凭证 ⟦gw:<nonce>⟧
+// （按身份稳定：由 apiKey 派生，无身份时才每会话随机）之前：让可快取的静态前缀不含任何
+// session 级资料（跨 session 逐位元相同），而头＋尾相接仍与旧 authorityRule(nonce) 逐位元
+// 相同（内容与行序零改动，只把切点显式化）。
 // 设计取自 Claude Code SYSTEM_PROMPT_DYNAMIC_BOUNDARY / systemPromptSection /
 // DANGEROUS_uncachedSystemPromptSection（未复制程式码，仅取概念）。
 const AUTHORITY_RULE_HEAD = [
