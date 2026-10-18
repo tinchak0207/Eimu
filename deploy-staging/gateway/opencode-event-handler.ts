@@ -358,7 +358,18 @@ export function handleOpencodeEvent(event: any): void {
     // session.error (if it ever appears) or any event carrying properties.error.
     const err = event?.properties?.error
     if (event?.type === "session.error" || err != null) {
-      emitSessionError(state, opencodeErrorCode(err), opencodeErrorMessage(err))
+      // 2026-10-18 超大会话止血：上游明确报上下文超限时登记 pendingCompact，
+      // 让 idle/task 终态必再尝试一次压缩；否则「错误→零输出→重试→再超限」空转。
+      const errMessage = opencodeErrorMessage(err)
+      if (
+        /context.{0,16}(length|window|limit|overflow)|input token exceed|maximum.{0,12}tokens|prompt is too long|too many tokens/i.test(
+          errMessage,
+        )
+      ) {
+        state.pendingCompact = true
+        console.warn(`[gateway] context-overflow upstream error → pendingCompact=1 — session=${state.sessionId}`)
+      }
+      emitSessionError(state, opencodeErrorCode(err), errMessage)
       return
     }
 

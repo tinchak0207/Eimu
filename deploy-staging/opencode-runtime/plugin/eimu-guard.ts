@@ -169,6 +169,43 @@ interface HarnessHookResult {
   timed_out: boolean
 }
 
+/** hooks-http / 合并 precheck 共用的响应消费：ok!==true 一律视为「hook 不可用」（fail-open）。 */
+function harnessHookResultFromJson(json: unknown): HarnessHookResult | null {
+  if (!json || typeof json !== "object") return null
+  const data = json as {
+    ok?: unknown
+    blocked?: unknown
+    reason?: unknown
+    reason_escaped?: unknown
+    additional_context?: unknown
+    additional_context_escaped?: unknown
+    system_message?: unknown
+    system_message_escaped?: unknown
+    timed_out?: unknown
+  }
+  if (data.ok !== true) return null
+  // 约束（P1-6）：优先消费 hooks-http 已转义的字段；缺失时才回退 raw，
+  // 由消费端用本地 escapeHookData 转义（与网关同语义）。
+  const preferEscaped = (escaped: unknown, raw: unknown): string | undefined => {
+    if (typeof escaped === "string" && escaped.trim()) return escaped
+    if (typeof raw === "string" && raw.trim()) return raw
+    return undefined
+  }
+  const timedOut = data.timed_out === true
+  const reason = preferEscaped(data.reason_escaped, data.reason)
+  // timed_out=true 表示 hook 预算耗尽，结果是半截的：上下文/系统消息一律丢弃，
+  // 不得把半截资料当成完整 hook 输出注入（blocked 仍按返回值处理）。
+  const context = timedOut ? undefined : preferEscaped(data.additional_context_escaped, data.additional_context)
+  const systemMessage = timedOut ? undefined : preferEscaped(data.system_message_escaped, data.system_message)
+  return {
+    blocked: data.blocked === true,
+    timed_out: timedOut,
+    ...(reason ? { reason } : {}),
+    ...(context ? { additional_context: context } : {}),
+    ...(systemMessage ? { system_message: systemMessage } : {}),
+  }
+}
+
 async function runHarnessHook(
   event: "PreToolUse" | "PostToolUse",
   sessionID: string,
@@ -182,40 +219,7 @@ async function runHarnessHook(
       signal: AbortSignal.timeout(HOOK_HTTP_TIMEOUT_MS),
     })
     if (!res.ok) return null
-    const json = (await res.json().catch(() => null)) as
-      | {
-          ok?: unknown
-          blocked?: unknown
-          reason?: unknown
-          reason_escaped?: unknown
-          additional_context?: unknown
-          additional_context_escaped?: unknown
-          system_message?: unknown
-          system_message_escaped?: unknown
-          timed_out?: unknown
-        }
-      | null
-    if (json?.ok !== true) return null
-    // 约束（P1-6）：优先消费 hooks-http 已转义的字段；缺失时才回退 raw，
-    // 由消费端用本地 escapeHookData 转义（与网关同语义）。
-    const preferEscaped = (escaped: unknown, raw: unknown): string | undefined => {
-      if (typeof escaped === "string" && escaped.trim()) return escaped
-      if (typeof raw === "string" && raw.trim()) return raw
-      return undefined
-    }
-    const timedOut = json.timed_out === true
-    const reason = preferEscaped(json.reason_escaped, json.reason)
-    // timed_out=true 表示 hook 预算耗尽，结果是半截的：上下文/系统消息一律丢弃，
-    // 不得把半截资料当成完整 hook 输出注入（blocked 仍按返回值处理）。
-    const context = timedOut ? undefined : preferEscaped(json.additional_context_escaped, json.additional_context)
-    const systemMessage = timedOut ? undefined : preferEscaped(json.system_message_escaped, json.system_message)
-    return {
-      blocked: json.blocked === true,
-      timed_out: timedOut,
-      ...(reason ? { reason } : {}),
-      ...(context ? { additional_context: context } : {}),
-      ...(systemMessage ? { system_message: systemMessage } : {}),
-    }
+    return harnessHookResultFromJson(await res.json().catch(() => null))
   } catch (e) {
     if (!hookGateWarned) {
       hookGateWarned = true
@@ -248,8 +252,120 @@ async function gatewayPost(path: string, body: unknown): Promise<Response | null
 }
 
 /** 仅旧网关的端点不存在允许兼容回退；5xx 不得绕过安全状态。 */
-function gatewayFallbackStatus(res: Response): boolean {
-  return res.status === 404 || res.status === 405
+function gatewayFallbackStatus(status: number): boolean {
+  return status === 404 || status === 405
+}
+
+// ── 工具前置检查合并（2026-10-18）───────────────────────────────────────────
+// 原路径：plan/state 与 permission/evaluate 并发（各 800ms）→ PreToolUse hooks/run（800ms），
+// 最多 3 个 loopback 往返。合并端点一次请求内并发跑三项、逐项回传等价 HTTP 状态；
+// 本档仍按原有顺序与各自 fail-open/fail-closed 语义消费，不放宽任何判定。
+// 预算＝原 worst case（800 + 800），不会比旧路径更早判超时。
+const PRECHECK_PATH = "/internal/tool/precheck"
+const PRECHECK_HTTP_TIMEOUT_MS = GATE_HTTP_TIMEOUT_MS + HOOK_HTTP_TIMEOUT_MS
+
+/** 合并端点里的单个检查：status 是等价 HTTP 状态；0 = 网关侧超时/不可判定。 */
+interface PrecheckChild {
+  status: number
+  body: unknown | null
+}
+
+interface PrecheckOutcome {
+  plan: PrecheckChild | null
+  permission: PrecheckChild | null
+  hook: HarnessHookResult | null
+}
+
+/** 旧的独立端点 Response 与新端点的子结果统一成同一形状，下面判定逻辑逐行不变。 */
+interface GateResponse {
+  status: number
+  ok: boolean
+  json: () => Promise<unknown>
+}
+
+function gateFromResponse(res: Response | null): GateResponse | null {
+  if (!res) return null
+  return { status: res.status, ok: res.ok, json: () => res.json() }
+}
+
+/** status 0（网关侧超时/不可判定）映射为 null＝与旧的「网络失败」完全同义。 */
+function gateFromPrecheck(child: PrecheckChild | null): GateResponse | null {
+  if (!child || child.status === 0) return null
+  return {
+    status: child.status,
+    ok: child.status >= 200 && child.status < 300,
+    json: async () => child.body,
+  }
+}
+
+function precheckChildOf(value: unknown): PrecheckChild | null {
+  if (!value || typeof value !== "object") return null
+  const status = (value as { status?: unknown }).status
+  if (typeof status !== "number" || !Number.isFinite(status)) return null
+  return { status, body: (value as { body?: unknown }).body ?? null }
+}
+
+/**
+ * 一次 loopback 调用完成 plan + permission + PreToolUse。
+ * 返回 "legacy" = 端点不存在（旧网关），调用方回退到原来的三次呼叫。
+ * 返回 null = 网关不可达/超时：plan 视为不可达（写类 fail-closed）、
+ * permission 跳过（原语义）、hook fail-open —— 与旧路径逐项语义一致。
+ */
+async function gatewayPrecheck(
+  sessionID: string,
+  tool: string,
+  args: Record<string, unknown>,
+  checks: { plan: boolean; permission: boolean },
+): Promise<PrecheckOutcome | "legacy" | null> {
+  let res: Response
+  try {
+    res = await fetch(`${GATEWAY}${PRECHECK_PATH}`, {
+      method: "POST",
+      headers: harnessInternalHeaders(),
+      body: JSON.stringify({
+        session_id: sessionID,
+        tool,
+        input: args,
+        // hook 的 cwd 语义是「工具执行进程的 cwd」，必须由插件传入（网关 cwd 不同）。
+        cwd: process.cwd(),
+        checks,
+      }),
+      signal: AbortSignal.timeout(PRECHECK_HTTP_TIMEOUT_MS),
+    })
+  } catch (e) {
+    if (!gatewayGateWarned) {
+      gatewayGateWarned = true
+      console.warn(
+        `[eimu-guard] gateway precheck unreachable; falling back to per-check semantics: ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+    return null
+  }
+  if (gatewayFallbackStatus(res.status)) return "legacy"
+  if (!res.ok) {
+    // 与旧路径同构：plan/permission 都拿到同状态非 2xx（plan 先判、fail-closed）；hook fail-open。
+    return {
+      plan: { status: res.status, body: null },
+      permission: { status: res.status, body: null },
+      hook: null,
+    }
+  }
+  const json = (await res.json().catch(() => null)) as
+    | { ok?: unknown; plan?: unknown; permission?: unknown; hook?: unknown }
+    | null
+  if (!json || json.ok !== true) {
+    // 200 但 body 不可解析：等价于各端点「200 + 坏 JSON」→ 写类 fail-closed，hook fail-open。
+    return {
+      plan: { status: 200, body: null },
+      permission: { status: 200, body: null },
+      hook: null,
+    }
+  }
+  return {
+    plan: precheckChildOf(json.plan),
+    permission: precheckChildOf(json.permission),
+    hook: harnessHookResultFromJson(json.hook),
+  }
 }
 
 // ── D1（2026-10-02）：工具层重复呼叫断路器 ──────────────────────────────────
@@ -362,7 +478,10 @@ const COMPACTION_PROMPT = `只使用已有对话生成恢复摘要，纯文本�
 const BG_BUDGET_MS = process.env.EIMU_BG_MS || "15000"
 
 /** 扫会话 tmp 里的 *.notify，用 opencode 已有的 promptAsync 把完成结果送回该会话。 */
-export async function settleBackgroundJobs(client: { session: { promptAsync: (args: unknown) => Promise<unknown> } }): Promise<void> {
+// loader 契约：本档每个 export 都会被 opencode 当 plugin factory 调用；非 Plugin 形状的 export
+// 会返回 undefined 被塞进插件数组，之后 Plugin.trigger 访问即 `undefined is not an object`
+// （2026-10-18 事故：本函式曾 export，createUserMessage 阶段每轮 prompt 必炸，正文永不出现）。
+async function settleBackgroundJobs(client: { session: { promptAsync: (args: unknown) => Promise<unknown> } }): Promise<void> {
   let slugs: string[]
   try {
     slugs = readdirSync(RUN_ROOT)
@@ -498,21 +617,48 @@ export const EimuGuard: Plugin = async ({ client }) => {
         throw new Error("task 工具已停用：派子代理请用 subagent_dispatch（带 expert 字段）。")
       }
 
-      // CC 2.1.302：计划模式闸 + 权限求值（gateway 持有权威状态；跨进程走 HTTP）。
-      // 两者并行、各自 800ms 超时。404/405 保留旧网关兼容；5xx 拒绝执行。
+      // CC 2.1.302：计划模式闸 + 权限求值 + PreToolUse hook（gateway 持有权威状态）。
+      // 2026-10-18：三项合并为一次 loopback 往返（POST /internal/tool/precheck）；端点不存在
+      // （旧网关 404/405）时回退原来的三次呼叫。下面逐项判定与失败语义保持原样。
       const lowerTool = tool.toLowerCase()
       const readOnlyLocal = PLAN_READ_ONLY_FALLBACK.has(lowerTool)
-      const [planRes, permRes] = readOnlyLocal
-        ? [null, null]
-        : await Promise.all([
+      const precheck = await gatewayPrecheck(input.sessionID, tool, args, {
+        plan: !readOnlyLocal,
+        permission: !readOnlyLocal,
+      })
+
+      let planRes: GateResponse | null = null
+      let permRes: GateResponse | null = null
+      // precheckHookDone=true：hook 已在合并请求内执行；值为 null 表示 hook 不可用（fail-open）。
+      let hookResult: HarnessHookResult | null = null
+      let precheckHookDone = false
+
+      if (precheck === "legacy") {
+        // 旧网关：保留原三次呼叫路径（只读工具仍不查 plan/permission）。
+        if (!readOnlyLocal) {
+          const [planLegacy, permLegacy] = await Promise.all([
             gatewayPost("/internal/plan/state", { session_id: input.sessionID }),
             gatewayPost("/internal/permission/evaluate", { session_id: input.sessionID, tool, input: args }),
           ])
+          planRes = gateFromResponse(planLegacy)
+          permRes = gateFromResponse(permLegacy)
+        }
+      } else if (precheck) {
+        if (!readOnlyLocal) {
+          planRes = gateFromPrecheck(precheck.plan)
+          permRes = gateFromPrecheck(precheck.permission)
+        }
+        hookResult = precheck.hook
+        precheckHookDone = true
+      } else {
+        // 网关不可达/整体超时：plan 视为不可达（写类 fail-closed）、permission 跳过、hook fail-open。
+        precheckHookDone = true
+      }
 
       // H5 计划闸 fail-closed：超时/网络失败、200 但 JSON 不可解析或缺 inPlanMode
       // → 写类拒绝、读类放行。404/405（旧网关）退回既有 guard；5xx 拒绝。
       if (planRes) {
-        if (gatewayFallbackStatus(planRes)) {
+        if (gatewayFallbackStatus(planRes.status)) {
           // 旧网关没有计划端点：继续走既有 guard。
         } else if (!planRes.ok) {
           throw new Error(`计划模式状态查询失败（HTTP ${planRes.status}），已拒绝工具调用。`)
@@ -558,7 +704,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
       // 权限闸：404/405 退回既有 guard（路径/沙箱/SSRF）；5xx 拒绝；
       // deny 直接拒绝；ask 按 C3 处理；200 但不可解析时写类 fail-closed。
       if (permRes) {
-        if (gatewayFallbackStatus(permRes)) {
+        if (gatewayFallbackStatus(permRes.status)) {
           // 旧网关端点不存在：退回既有路径/沙箱/SSRF guard。
         } else if (!permRes.ok) {
           throw new Error(`权限求值失败（HTTP ${permRes.status}），已按 fail-closed 拒绝工具调用。`)
@@ -599,11 +745,13 @@ export const EimuGuard: Plugin = async ({ client }) => {
       // blocked → 用 hook 返回的 reason 抛错；超时/失败 fail-open 继续。
       // additional_context 不回注（由网关记录），这里只消费 blocked/reason。
       {
-        const hook = await runHarnessHook("PreToolUse", input.sessionID, {
-          tool_name: tool,
-          tool_input: args,
-          cwd: process.cwd(),
-        })
+        const hook = precheckHookDone
+          ? hookResult
+          : await runHarnessHook("PreToolUse", input.sessionID, {
+              tool_name: tool,
+              tool_input: args,
+              cwd: process.cwd(),
+            })
         if (hook?.blocked) {
           throw new Error(escapeHookData(hook.reason?.trim() || `工具「${tool}」被 PreToolUse hook 阻断`))
         }

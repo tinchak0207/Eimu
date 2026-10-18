@@ -2,8 +2,17 @@
 // （TURN_METRICS_RING/beginTurnMetrics/noteTurnPromptDispatch/noteTurnDeferred/markTurnFirst/
 // noteTurnUsage/finishTurnMetrics）、event-loop lag 取样（含模组级 startEventLoopLagSampler()
 // 副作用呼叫，原样搬）、percentile/stageStats/turnMetricsSnapshot（原 index.ts 4378–4592 行）。
-import type { SessionState, TurnMetricsEnd, TurnMetricsSnapshot } from "./types-gateway.ts"
+import type { SessionState, TurnMetricsEnd, TurnMetricsRecord, TurnMetricsSnapshot } from "./types-gateway.ts"
 import { redactForLog, type LogSafeText } from "./analytics-meta.ts"
+
+// 2026-10-18：t_first_visible 是「用户真正看到首帧」的时刻（emitToSession 前打点），
+// 与 t_first_text（模型正文 delta 抵达）区分。types-gateway.ts 不在本轮允许修改的
+// 文件清单内，故以局部扩展型别承载，不改公共契约形状（旧字段全部保留）。
+type TurnMetricsRecordX = TurnMetricsRecord & { t_first_visible: number | null }
+type TurnMetricsSnapshotX = TurnMetricsSnapshot & {
+  t_first_visible: number | null
+  d_first_visible_ms: number | null
+}
 
 // ── journal 出口（2026-10-02）：型别层签核 ＋ 遮罩 ──────────────────────
 // 本档所有落 console/journal 的行都只走这两个函数（禁止直接 console.*）。参数型别是
@@ -70,6 +79,7 @@ export function beginTurnMetrics(state: SessionState, tAccept: number): void {
       t_last_prompt_sent: null,
       t_first_reasoning: null,
       t_first_text: null,
+      t_first_visible: null,
       t_first_tool: null,
       t_first_plan: null,
       deferredAt: null,
@@ -78,7 +88,7 @@ export function beginTurnMetrics(state: SessionState, tAccept: number): void {
       contextTokens: null,
       cacheRead: null,
       cacheWrite: null,
-    }
+    } as TurnMetricsRecordX
   } catch (e) {
     journalError(redactForLog(`[gateway] turn.metrics begin failed: session=${state.sessionId} ${e}`))
   }
@@ -103,15 +113,19 @@ export function noteTurnDeferred(state: SessionState): void {
   if (m && m.deferredAt === null) m.deferredAt = Date.now()
 }
 
-/** 本轮首个里程碑（reasoning/text/tool/plan）——只记第一次，之后静默。 */
-export function markTurnFirst(state: SessionState, kind: "reasoning" | "text" | "tool" | "plan"): void {
-  const m = state.turnMetrics
+/** 本轮首个里程碑（reasoning/text/visible/tool/plan）——只记第一次，之后静默。
+ *  visible＝真正 emit message.delta 给用户的时刻（2026-10-18 新增，d_first_visible_ms）；
+ *  text 保留为「模型正文 delta 抵达」的旧口径，兼容既有日志/看板。 */
+export function markTurnFirst(state: SessionState, kind: "reasoning" | "text" | "visible" | "tool" | "plan"): void {
+  const m = state.turnMetrics as TurnMetricsRecordX | null | undefined
   if (!m) return
   const now = Date.now()
   if (kind === "reasoning") {
     if (m.t_first_reasoning === null) m.t_first_reasoning = now
   } else if (kind === "text") {
     if (m.t_first_text === null) m.t_first_text = now
+  } else if (kind === "visible") {
+    if (m.t_first_visible === null) m.t_first_visible = now
   } else if (kind === "tool") {
     if (m.t_first_tool === null) m.t_first_tool = now
   } else if (m.t_first_plan === null) {
@@ -142,7 +156,7 @@ export function noteTurnUsage(state: SessionState, info: unknown): void {
 /** 收档：算衍生阶段差、入 ring、印 journal 单行。end=superseded（被下一轮取代、
  *  从未收尾）时 t_done 留 null——不谎报结束时间。 */
 export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): void {
-  const m = state.turnMetrics
+  const m = state.turnMetrics as TurnMetricsRecordX | null | undefined
   if (!m) return
   state.turnMetrics = null
   try {
@@ -150,7 +164,7 @@ export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): voi
     const tDone = end === "superseded" ? null : now
     const promptDeferredMs =
       m.deferredAt === null ? 0 : Math.max(0, (m.t_last_prompt_sent ?? now) - m.deferredAt)
-    const snap: TurnMetricsSnapshot = {
+    const snap: TurnMetricsSnapshotX = {
       // 存完整 session id：旧版只存前 8 字符，token 提醒与压缩判定的
       // `row.session === state.sessionId` 永远不成立，导致提醒/压缩全失效。
       session: m.sessionId,
@@ -163,6 +177,7 @@ export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): voi
       t_last_prompt_sent: m.t_last_prompt_sent,
       t_first_reasoning: m.t_first_reasoning,
       t_first_text: m.t_first_text,
+      t_first_visible: m.t_first_visible,
       t_first_tool: m.t_first_tool,
       t_first_plan: m.t_first_plan,
       t_done: tDone,
@@ -174,6 +189,7 @@ export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): voi
       d_prompt_ms: m.t_prompt_sent === null ? null : m.t_prompt_sent - m.t_accept,
       d_first_reasoning_ms: m.t_first_reasoning === null ? null : m.t_first_reasoning - m.t_accept,
       d_first_text_ms: m.t_first_text === null ? null : m.t_first_text - m.t_accept,
+      d_first_visible_ms: m.t_first_visible === null ? null : m.t_first_visible - m.t_accept,
       d_first_tool_ms: m.t_first_tool === null ? null : m.t_first_tool - m.t_accept,
       d_first_plan_ms: m.t_first_plan === null ? null : m.t_first_plan - m.t_accept,
       d_total_ms: tDone === null ? null : tDone - m.t_accept,
@@ -235,6 +251,7 @@ export function turnMetricsSnapshot(): Record<string, unknown> {
     "d_prompt_ms",
     "d_first_reasoning_ms",
     "d_first_text_ms",
+    "d_first_visible_ms",
     "d_first_tool_ms",
     "d_first_plan_ms",
     "d_total_ms",
@@ -242,7 +259,7 @@ export function turnMetricsSnapshot(): Record<string, unknown> {
   ] as const
   for (const f of fields) {
     stages[f] = stageStats(
-      turnMetricsRing.map((r) => r[f]).filter((v): v is number => typeof v === "number"),
+      turnMetricsRing.map((r) => (r as TurnMetricsSnapshotX)[f]).filter((v): v is number => typeof v === "number"),
     )
   }
   const lag = eventLoopLagSamples.slice().sort((a, b) => a - b)

@@ -17,7 +17,15 @@ import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { templatePlaceholderContent } from "./workflow-templates"
 import { jsonError } from "./gw-lib.ts"
 // 2026-10-04 W：守卫的用户可见文案书写体镜像家族已整体拆除——一律简体。
-import { MEMORY_SHARED_ENABLED } from "./constants-gateway.ts"
+import {
+  MEMORY_SHARED_ENABLED,
+  UPSTREAM_HARD_TOKEN_LIMIT,
+  PRE_DISPATCH_COMPACT_WAIT_MS,
+  COMPACT_BLOCKED_BREAKER_COUNT,
+  COMPACT_BLOCKED_BREAKER_MS,
+  COMPACT_INFLIGHT_MAX_MS,
+  SESSION_COMPACT_RETRY_TIMEOUT_MS,
+} from "./constants-gateway.ts"
 import { sessions, markDirty, getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { normalizeUserSettings, PROFILE_ONBOARDING_DIRECTIVE } from "./sessions-http.ts"
@@ -25,7 +33,7 @@ import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { startTurnPlan } from "./plan-gw.ts"
 import { takeUnfulfilledPlanInjection } from "./plan-promise.ts"
-import { beginTurnMetrics, noteTurnDeferred, noteTurnPromptDispatch, lastTurnContextTokens } from "./metrics-gw.ts"
+import { beginTurnMetrics, noteTurnDeferred, noteTurnPromptDispatch, turnMetricsRing, metricsSessionMatches } from "./metrics-gw.ts"
 // CC 2.1.302 上下文编排移植（2026-10-18）：提示词内核 ＋ 注入层。
 // prompt-registry 负责类型化 section、确定性排序、去重、预算、latch 与破缓存审计；
 // context-injection 负责记忆/技能/环境/token/压缩续接/附件预算，全部返回 sections[]。
@@ -63,6 +71,7 @@ import {
   compactionDecision,
   extractPinnedConstraints,
   microcompactPlan,
+  preDispatchCompactionRequired,
 } from "./compaction-policy.ts"
 import { resolveInvisibleUploadPaths } from "./events-translate.ts"
 import { hasTemplateNodes, buildTemplateSlotsFact, templateLandingFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
@@ -1371,7 +1380,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   // 无 metrics 或未知模型 → 不输出 <total_tokens>（不拿猜出来的窗口骗模型）。
   // 可用 EIMU_TOKEN_REMINDER=0 关闭。默认每 user turn 注入一次。
   {
-    const lastUsed = lastTurnContextTokens(state.sessionId)
+    const lastUsed = knownSessionUsedTokens(state)
     const windowTokens = modelWindowTokens(promptBody.model?.modelID)
     if (lastUsed !== undefined && windowTokens !== null) {
       const reminder = buildTokenReminderSection(
@@ -1516,6 +1525,78 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     console.log(
       `[gateway] prompt.tail_budget session=${state.sessionId} total=${PROMPT_TOTAL_BUDGET_CHARS} system=${promptBody.system?.length ?? systemChars} allowance=${tailBudgetInfo.allowance} before=${tailBudgetInfo.before} after=${tailBudgetInfo.after} truncated_parts=${tailBudgetInfo.truncated}`,
     )
+  }
+  // ── 2026-10-18 投递前硬闸（超大会话止血）────────────────────────────────
+  // 生产事故：used_tokens≈2.4M(estimate) 的会话每轮仍把整段历史送上游，模型零输出，
+  // 90s+90s 看门狗后才收档（d_total_ms≈180000）；同时 idle 触发的 summarize 自身
+  // 也送 2.4M，必然 AbortError。此闸在 prompt_async 之前先压缩；压缩未完成时
+  // 明确报错收尾，绝不把无界上下文直送 provider。
+  {
+    let preflightUsed = knownSessionUsedTokens(state)
+    // 网关刚重启（metrics 与缓存皆空）时的兜底：只对「曾压缩过」的会话做一次
+    // 4s 有界轻量探测（最近 200 条），避免首个回合直接放行 2.4M 上下文。
+    if (preflightUsed === undefined && state.compact !== undefined) {
+      try {
+        const probe = await opencodeFetch(`/session/${state.opencodeSessionId}/message?limit=200`, {
+          timeoutMs: 4_000,
+        })
+        if (probe.ok) {
+          const arr = (await probe.json()) as unknown
+          if (Array.isArray(arr)) {
+            const estimate = estimateActiveContextTokens(arr)
+            rememberSessionUsedTokens(state, estimate)
+            preflightUsed = estimate
+          }
+        }
+      } catch {
+        /* 探测失败不挡正常投递（无法得知用量时沿用既有行为） */
+      }
+    }
+    if (preDispatchCompactionRequired({ usedTokens: preflightUsed })) {
+      console.warn(
+        `[gateway] pre-dispatch compaction required: session=${state.sessionId} used_tokens=${preflightUsed} hard_limit=${UPSTREAM_HARD_TOKEN_LIMIT}`,
+      )
+      emitToSession(state, "turn.status", {
+        text: `上下文已接近安全上限，正在压缩历史…`,
+      })
+      const running = compactionJobs.get(state.sessionId) ?? maybeCompactSession(state)
+      let settled = false
+      let waitTimer: ReturnType<typeof setTimeout> | null = null
+      await Promise.race([
+        running.then(
+          () => {
+            settled = true
+          },
+          () => {
+            settled = true
+          },
+        ),
+        new Promise<void>((resolve) => {
+          waitTimer = setTimeout(resolve, PRE_DISPATCH_COMPACT_WAIT_MS)
+        }),
+      ])
+      if (waitTimer) clearTimeout(waitTimer)
+      const afterUsed = knownSessionUsedTokens(state)
+      if (!settled || preDispatchCompactionRequired({ usedTokens: afterUsed })) {
+        // 不静默空转、不带病投递：如实告知 + 收尾；下一轮会继续尝试有界压缩。
+        state.pendingCompact = true
+        markDirty(state)
+        console.warn(
+          `[gateway] pre-dispatch compaction not ready (settled=${settled} used_after=${afterUsed ?? "unknown"}), refusing unbounded dispatch — session=${state.sessionId}`,
+        )
+        emitToSession(state, "message.delta", {
+          text:
+            `本会话上下文已超过安全上限（约 ${Math.round((preflightUsed ?? 0) / 1000)}k tokens），需要先完成历史压缩才能继续。` +
+            `压缩尚未在 ${Math.round(PRE_DISPATCH_COMPACT_WAIT_MS / 1000)} 秒内完成，这次没有把超长上下文直接送上游；` +
+            `你的消息仍完整保留，请稍后重发或继续对话，系统会自动再试。\n`,
+        })
+        emitToSession(state, "turn.done", {})
+        return Response.json({ session_id: id, context_compaction_required: true }, { status: 202 })
+      }
+      console.log(
+        `[gateway] pre-dispatch compaction ready: session=${state.sessionId} used_tokens=${afterUsed ?? "unknown"} (was ${preflightUsed})`,
+      )
+    }
   }
   // 抖动重试记账：本轮起点。零文本结束时用 lastPromptBody 重放。
   state.lastPromptBody = promptBody
@@ -1692,7 +1773,11 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
 // compact.lastCount（自上次压缩新增不足半个阈值不触发，重启后水位仍在）。
 export const SESSION_COMPACT_THRESHOLD = Number.parseInt(process.env.SESSION_COMPACT_THRESHOLD || "40", 10) || 40
 export const SESSION_COMPACT_MIN_NEW = Math.max(4, Math.floor(SESSION_COMPACT_THRESHOLD / 2))
-export const SESSION_COMPACT_TIMEOUT_MS = 180_000
+// 2026-10-18 止血：单次 summarize 从 180s 缩到 60s（env 可覆写）。180s 是生产
+// 「AbortError→水位不推进→下轮再压→再 180s」死循环的单次成本；压缩已在 idle
+// 异步路径，缩短超时不会拖住回合。紧急压缩失败再给一次 30s 有界重试。
+export const SESSION_COMPACT_TIMEOUT_MS =
+  Number.parseInt(process.env.SESSION_COMPACT_TIMEOUT_MS || "60000", 10) || 60_000
 // 压缩闸的有界等待上限（2026-09-18）：压缩在途时 prompt 最多被挡这么久，超时即
 // 径行投递（见 handleSendMessage 的 compactionJob 分支）。env 可覆写。
 export const COMPACTION_MAX_DEFER_MS =
@@ -1704,6 +1789,75 @@ export const compactionJobs = new Map<string, Promise<void>>()
 // P1-7（2026-10-18）：同步占位必须在第一个 await 之前完成。只用 compactionJobs
 // 不够——两个并发 idle 都能在 set() 之前通过 has() 检查而双跑 summarize。
 const compactionInFlight = new Set<string>()
+
+// 2026-10-18 超大会话止血：metrics 的 context_tokens 缺失时（生产日志里
+// used_tokens=2441457(estimate) 即此形态），仍要让「投递前硬闸」拿得到用量。
+// WeakMap 随 SessionState 生命周期回收，不额外泄漏。
+const sessionUsedTokens = new WeakMap<SessionState, number>()
+
+/** blocked/失败熔断状态：连续失败 N 次或持续 T 毫秒未成功 → 紧急压缩 + 安全降级。 */
+interface CompactBreakerState {
+  streak: number
+  since: number
+}
+const compactBreakerBySession = new WeakMap<SessionState, CompactBreakerState>()
+
+function compactBreaker(state: SessionState): CompactBreakerState {
+  let cur = compactBreakerBySession.get(state)
+  if (!cur) {
+    cur = { streak: 0, since: 0 }
+    compactBreakerBySession.set(state, cur)
+  }
+  return cur
+}
+
+function rememberSessionUsedTokens(state: SessionState, tokens: number | undefined): void {
+  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0) return
+  sessionUsedTokens.set(state, Math.round(tokens))
+}
+
+/**
+ * 最近一条带 context_tokens 的计量行＋时间。
+ * 压缩成功后旧行已过期（它统计的是压缩前的历史），必须能分辨。
+ */
+function lastMetricContext(state: SessionState): { tokens: number; at: number } | undefined {
+  for (let i = turnMetricsRing.length - 1; i >= 0; i--) {
+    const row = turnMetricsRing[i]
+    if (!metricsSessionMatches(row.session, state.sessionId)) continue
+    if (typeof row.context_tokens !== "number") continue
+    return { tokens: row.context_tokens, at: row.t_done ?? row.t_accept }
+  }
+  return undefined
+}
+
+/** 本会话已知用量：metrics 须晚于最后一次压缩；否则用压缩后的估算值／缓存。 */
+function knownSessionUsedTokens(state: SessionState): number | undefined {
+  const metric = lastMetricContext(state)
+  const compactedAt = state.compact?.at ?? 0
+  const cached = sessionUsedTokens.get(state)
+  if (metric && metric.at >= compactedAt) return metric.tokens
+  if (cached !== undefined) return cached
+  return metric?.tokens
+}
+
+/**
+ * 2026-10-18 关键口径修正：opencode 压缩后旧讯息仍留在存储（供历史展示），
+ * 但它们已不在模型上下文中。旧码用 estimateTokensFromMessages(msgs) 估算会把
+ * 压缩前的整段历史重复计入 → 永远 blocked / 每轮重压（生产 2.4M 估值病灶）。
+ * 只估「最近一条 summary/compaction 之后」的有效上下文。
+ */
+export function estimateActiveContextTokens(msgs: unknown[]): number | undefined {
+  if (!Array.isArray(msgs) || msgs.length === 0) return undefined
+  let start = 0
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const info = (msgs[i] as { info?: { summary?: boolean; mode?: string; agent?: string } } | null)?.info
+    if (info?.summary === true || info?.mode === "compaction" || info?.agent === "compaction") {
+      start = i
+      break
+    }
+  }
+  return estimateTokensFromMessages(msgs.slice(start))
+}
 
 /** 工具结果规模：供 microcompact 触发判据（不逐条清理，Eimu 用整段摘要压缩）。 */
 function summarizeToolUsage(msgs: Array<{ parts?: unknown[] }>): {
@@ -1765,10 +1919,26 @@ export function flushPendingCompact(state: SessionState): void {
 async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
   if (compactionJobs.has(state.sessionId)) return
   try {
-    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
-      timeoutMs: 10_000,
-    })
-    if (!res.ok) return
+    // 2026-10-18：超大会话的 GET /message（整段历史序列化）可能远超 10s，旧码一次
+    // AbortError 就退出 → 压缩永不发生。保留一次更长窗口的重试（只在大会话上多花）。
+    let res: Awaited<ReturnType<typeof opencodeFetch>> | null = null
+    let lastFetchError = ""
+    for (const timeoutMs of [10_000, 45_000]) {
+      try {
+        const r = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, { timeoutMs })
+        if (r.ok) {
+          res = r
+          break
+        }
+        lastFetchError = `status ${r.status}`
+      } catch (e) {
+        lastFetchError = `fetch error: ${e}`
+      }
+    }
+    if (!res) {
+      console.warn(`[gateway] session compact skipped (message fetch failed: ${lastFetchError}) — session=${state.sessionId}`)
+      return
+    }
     const msgs = (await res.json()) as Array<{
       info?: { role?: string; model?: { providerID?: string; modelID?: string } }
     }>
@@ -1789,13 +1959,15 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
     })
     // compactionDecision 用真实窗口与最近一轮 context_tokens 判 over_limit/warn；
     // 窗口未知（模型不在映射表）时 windowTokens=0 → action none，不猜。
-    // 2026-10-18 止血：lastTurnContextTokens 缺失时用讯息列表粗估，禁止静默当 0
-    // （当 0 会让 token 路径永不触发，超长制作会话涨到百万 token）。
-    const lastUsedTokens = lastTurnContextTokens(state.sessionId)
-    const estimatedUsedTokens = estimateTokensFromMessages(msgs)
-    const usedTokens = lastUsedTokens ?? estimatedUsedTokens
-    const usedTokensSource =
-      lastUsedTokens !== undefined ? "metrics" : estimatedUsedTokens !== undefined ? "estimate" : "none"
+    // 2026-10-18 止血：lastTurnContextTokens 缺失时用「有效上下文」粗估，禁止静默当 0
+    // （当 0 会让 token 路径永不触发，超长制作会话涨到百万 token）；压缩成功后
+    // 旧 metrics 行过期，改用最近一次压缩之后的估算。
+    const metric = lastMetricContext(state)
+    const compactedAt = state.compact?.at ?? 0
+    const metricUsable = metric !== undefined && metric.at >= compactedAt
+    const estimatedUsedTokens = estimateActiveContextTokens(msgs)
+    const usedTokens = (metricUsable ? metric.tokens : undefined) ?? estimatedUsedTokens ?? metric?.tokens
+    const usedTokensSource = metricUsable ? "metrics" : estimatedUsedTokens !== undefined ? "estimate" : "none"
     const lastModelID = (() => {
       for (let i = msgs.length - 1; i >= 0; i--) {
         const info = msgs[i]?.info as
@@ -1828,12 +2000,17 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
       return null
     })()
     const windowTokens = modelWindowTokens(lastModelID) ?? 0
+    // 2026-10-18：把估算值也记进会话缓存——生产上 metrics 的 context_tokens 常缺失，
+    // 投递前硬闸必须仍能拿到「这个会话已经很大了」的事实。
+    rememberSessionUsedTokens(state, usedTokens)
+    const breaker = compactBreaker(state)
     const decision = compactionDecision({
       windowTokens,
       usedTokens: usedTokens ?? 0,
       // 本会话尚未压缩过时 lastCompactTurns=undefined：不做 thrashing 判定。
       // 已压缩过时用真实用户回合计数；重启后计数缺失同样传 undefined（不猜）。
       lastCompactTurns: state.compact !== undefined ? compactTurnsSince.get(state) : undefined,
+      hardLimitTokens: UPSTREAM_HARD_TOKEN_LIMIT,
     })
     const thresholdReached = count >= SESSION_COMPACT_THRESHOLD
     const earlyTrigger =
@@ -1842,13 +2019,25 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
       (microPlan !== null || decision.action === "compact")
     // pendingCompact 重试：上次因在途 turn 登记的强制压缩，本轮继续走判定。
     const pendingRetry = state.pendingCompact === true
-    if (!thresholdReached && !earlyTrigger && !pendingRetry) return
-    // 强制 token 压缩：decision 已要 compact/blocked/warn 且用量 ≥ compactAt。
+    // 2026-10-18：blocked 持续计时——不是只有「压缩失败」才升级；一直 blocked
+    // （含被在途任务 defer）超过上界同样要升级为紧急压缩。
+    if (decision.action === "blocked" && breaker.since === 0) breaker.since = Date.now()
+    const blockedSinceMs = breaker.since > 0 ? Date.now() - breaker.since : 0
+    const breakerOpen =
+      breaker.streak >= COMPACT_BLOCKED_BREAKER_COUNT ||
+      (breaker.since > 0 && blockedSinceMs >= COMPACT_BLOCKED_BREAKER_MS)
+    // 2026-10-18：紧急压缩＝熔断已开（连续失败/持续 blocked）或已超硬上限。
+    const emergencyCompact = breakerOpen || decision.hardLimitExceeded
+    // 硬上限/紧急压缩是绝对触发条件——即使讯息数不到阈值、microcompact 未命中，
+    // 也必须压缩，否则 2.4M token 的会话会一轮轮直送上游。
+    if (!thresholdReached && !earlyTrigger && !pendingRetry && !emergencyCompact) return
+    // 强制 token 压缩：decision 已要 compact/blocked/warn 或已达到硬上限/紧急态。
     // 制作会话几乎永远有 generation 在途；若仍无限 defer → 上下文涨到百万。
     const forceTokenCompact =
-      (decision.action === "compact" || decision.action === "blocked" || decision.action === "warn") &&
-      (usedTokens ?? 0) >= decision.compactAt &&
-      decision.compactAt > 0
+      emergencyCompact ||
+      ((decision.action === "compact" || decision.action === "blocked" || decision.action === "warn") &&
+        (usedTokens ?? 0) >= decision.compactAt &&
+        decision.compactAt > 0)
     // 0831 竞态根治：opencode binary 对摘要讯息硬挡 tool call（"Tool call not allowed
     // while generating summary"）。摘要模型若看到「还有任务待查」就会吐 tool call →
     // 整条摘要作废、session 无声 idle。
@@ -1858,10 +2047,23 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
     //   理由：turn 已 idle 时 generation 是 poller 侧任务，与 summarize 写盘无同一 LLM 竞态；
     //   summarize 假成功仍有既有校验挡水位；无限 defer 的代价是百万 token / OOM。
     // - 非 force 路径（纯讯息数阈值）仍要求无在途 generation，保持原安全闸。
+    // - 2026-10-18：在途任务有上界——超过 COMPACT_INFLIGHT_MAX_MS 视为已死（与遗留
+    //   durable run 结论一致），不得永久阻塞压缩。
     // 注：state.sessionTasks 在网关重启后为空（hydrate 补空 Map）→ 在途闸自然放行，可接受。
     const inflight = [...state.sessionTasks.values()].filter(
       (t) => t.status === "queued" || t.status === "running",
     )
+    const nowMs = Date.now()
+    const liveInflight = inflight.filter((t) => {
+      const submittedAt = typeof t.submitted_at === "number" ? t.submitted_at : 0
+      return submittedAt > 0 && nowMs - submittedAt <= COMPACT_INFLIGHT_MAX_MS
+    })
+    const staleInflight = inflight.length - liveInflight.length
+    if (staleInflight > 0) {
+      console.warn(
+        `[gateway] compact ignoring ${staleInflight} stale in-flight task(s) older than ${COMPACT_INFLIGHT_MAX_MS}ms (treated dead): session=${state.sessionId}`,
+      )
+    }
     const hasTurnInFlight = state.turnMetrics !== null && state.turnMetrics !== undefined
     if (hasTurnInFlight) {
       if (forceTokenCompact || pendingRetry) {
@@ -1874,20 +2076,20 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
       }
       return
     }
-    if (inflight.length > 0) {
+    if (liveInflight.length > 0) {
       if (forceTokenCompact || pendingRetry) {
         console.log(
-          `[gateway] compact proceeding despite ${inflight.length} generation task(s): session=${state.sessionId} force_token=1 used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) compactAt=${decision.compactAt} window=${windowTokens || "unknown"}`,
+          `[gateway] compact proceeding despite ${liveInflight.length} generation task(s): session=${state.sessionId} force_token=1 used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) compactAt=${decision.compactAt} window=${windowTokens || "unknown"}`,
         )
         // 继续往下走 summarize；不 return。
       } else {
         if (earlyTrigger || thresholdReached) {
           state.pendingCompact = true
           console.log(
-            `[gateway] compact deferred (pendingCompact=1): ${state.sessionId} has ${inflight.length} in-flight task(s); will retry on task terminal / next idle`,
+            `[gateway] compact deferred (pendingCompact=1): ${state.sessionId} has ${liveInflight.length} in-flight task(s); will retry on task terminal / next idle`,
           )
         } else {
-          console.log(`[gateway] compact deferred: ${state.sessionId} has ${inflight.length} in-flight task(s)`)
+          console.log(`[gateway] compact deferred: ${state.sessionId} has ${liveInflight.length} in-flight task(s)`)
         }
         return
       }
@@ -1907,7 +2109,7 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
     }
     if (decision.action !== "none" || forceTokenCompact) {
       console.log(
-        `[gateway] compact decision: session=${state.sessionId} action=${decision.action} used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) window=${windowTokens || "unknown"} compactAt=${decision.compactAt} pct_left=${decision.pctLeft}${earlyTrigger ? " early_trigger=1" : ""}${forceTokenCompact ? " force_token=1" : ""}`,
+        `[gateway] compact decision: session=${state.sessionId} action=${decision.action} used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) window=${windowTokens || "unknown"} compactAt=${decision.compactAt} pct_left=${decision.pctLeft}${earlyTrigger ? " early_trigger=1" : ""}${forceTokenCompact ? " force_token=1" : ""}${decision.hardLimitExceeded ? ` hard_limit=1(hardLimit=${decision.hardLimit})` : ""}${emergencyCompact ? " emergency=1" : ""}`,
       )
     }
     // summarize 需要 providerID+modelID：取最近一条带 model 资讯的讯息（与该会话实际模型一致）。
@@ -1965,16 +2167,56 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
         )
       }
     }
+    // 2026-10-18 熔断记账：失败不是「静默 return」——连续失败/持续失败要升级为
+    // 紧急压缩，超过上界则安全降级（重置压缩水位），避免永久 blocked。
+    const recordCompactFailure = (reason: string): void => {
+      breaker.streak += 1
+      if (breaker.since === 0) breaker.since = Date.now()
+      const elapsed = Date.now() - breaker.since
+      console.warn(
+        `[gateway] compact failure streak=${breaker.streak}/${COMPACT_BLOCKED_BREAKER_COUNT} elapsed=${elapsed}ms reason=${reason} — session=${state.sessionId}`,
+      )
+      if (breaker.streak >= COMPACT_BLOCKED_BREAKER_COUNT || elapsed >= COMPACT_BLOCKED_BREAKER_MS) {
+        // 安全降级：重置水位（下一轮按现有阈值/硬上限重新触发有界压缩）并清 pending，
+        // 不允许「blocked → 永远不压」。消息本身不动。
+        state.compact = undefined
+        state.pendingCompact = false
+        breaker.streak = 0
+        breaker.since = 0
+        markDirty(state)
+        console.warn(
+          `[gateway] compact degraded: breaker open, watermark reset, next turn retries bounded compaction — session=${state.sessionId}`,
+        )
+      }
+    }
+    const recordCompactSuccess = (): void => {
+      breaker.streak = 0
+      breaker.since = 0
+    }
     compactionJobs.set(
       state.sessionId,
       (async () => {
-        const r = await opencodeFetch(`/session/${state.opencodeSessionId}/summarize`, {
-          method: "POST",
-          body: JSON.stringify({ providerID, modelID }),
-          timeoutMs: SESSION_COMPACT_TIMEOUT_MS,
-        })
-        if (!r.ok) {
-          console.warn(`[gateway] session compact failed: ${state.sessionId} status=${r.status}`)
+        // 有界重试：仅紧急压缩多给一次短窗口；普通压缩仍单次，避免拖长 idle 占位。
+        let r: Awaited<ReturnType<typeof opencodeFetch>> | null = null
+        let lastError = ""
+        const attempts = emergencyCompact ? 2 : 1
+        for (let attempt = 0; attempt < attempts; attempt++) {
+          try {
+            r = await opencodeFetch(`/session/${state.opencodeSessionId}/summarize`, {
+              method: "POST",
+              body: JSON.stringify({ providerID, modelID }),
+              timeoutMs: attempt === 0 ? SESSION_COMPACT_TIMEOUT_MS : SESSION_COMPACT_RETRY_TIMEOUT_MS,
+            })
+            if (r.ok) break
+            lastError = `status ${r.status}`
+          } catch (e) {
+            lastError = `fetch error: ${e}`
+            r = null
+          }
+        }
+        if (!r || !r.ok) {
+          console.warn(`[gateway] session compact failed: ${state.sessionId} ${lastError || "no response"}`)
+          recordCompactFailure(lastError || "no response")
           return
         }
         // 0831 假成功诚实化：/summarize 回 HTTP 200 不等于摘要成功。opencode binary 对
@@ -1986,11 +2228,24 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
           parts?: Array<{ type?: string; text?: string }>
         }>
         try {
-          const vr = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
-            timeoutMs: 10_000,
-          })
-          if (!vr.ok) {
-            console.warn(`[gateway] session compact UNVERIFIED (status=${vr.status}), 水位不推进: ${state.sessionId}`)
+          // 2026-10-18：验证同样要能扛超大会话（生产 UNVERIFIED AbortError 病灶）。
+          let vr: Awaited<ReturnType<typeof opencodeFetch>> | null = null
+          let verifyError = ""
+          for (const timeoutMs of [10_000, 45_000]) {
+            try {
+              const x = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, { timeoutMs })
+              if (x.ok) {
+                vr = x
+                break
+              }
+              verifyError = `status ${x.status}`
+            } catch (e) {
+              verifyError = `fetch error: ${e}`
+            }
+          }
+          if (!vr) {
+            console.warn(`[gateway] session compact UNVERIFIED (${verifyError}), 水位不推进: ${state.sessionId}`)
+            recordCompactFailure(`verify ${verifyError}`)
             return
           }
           const vj = (await vr.json()) as Array<{
@@ -1999,11 +2254,13 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
           }>
           if (!Array.isArray(vj)) {
             console.warn(`[gateway] session compact UNVERIFIED (bad payload), 水位不推进: ${state.sessionId}`)
+            recordCompactFailure("verify bad payload")
             return
           }
           verifyMsgs = vj
         } catch (e) {
           console.warn(`[gateway] session compact UNVERIFIED (fetch error: ${e}), 水位不推进: ${state.sessionId}`)
+          recordCompactFailure(`verify fetch error: ${e}`)
           return
         }
         // 0918 修复：只验「本次 summarize 新增」的讯息（.slice(count)，count =
@@ -2020,13 +2277,21 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
           console.warn(
             `[gateway] session compact FAILED (summary errored, 水位不推进): ${state.sessionId} err=${JSON.stringify(badSummary.info?.error)}`,
           )
+          recordCompactFailure("summary errored")
           return
         }
         state.compact = { lastCount: count, at: Date.now() }
         compactTurnsSince.set(state, 0)
+        recordCompactSuccess()
+        // 压缩成功后更新用量缓存：历史已被摘要替换，下一轮投递前硬闸不应再读到
+        // 压缩前的 2.4M 估值（否则会误挡正常会话）。
+        {
+          const postTokens = estimateActiveContextTokens(verifyMsgs)
+          rememberSessionUsedTokens(state, postTokens)
+        }
         // CC 2.1.302 压缩续接：只有验证通过、水位推进后才登记边界；
         // 下一回合 takeCompactionContinuation 注入一次重建说明。
-        markCompactionBoundary(state, { preTokens: estimateTokensFromMessages(msgs) })
+        markCompactionBoundary(state, { preTokens: estimateActiveContextTokens(msgs) })
         // 0918：压缩改写历史（摘要不见得保留尾端注入的 payload 正文）→ 作废尾端
         // 去重指纹，下一轮必重贴一次 payload，避免野兽帧在压缩后从上下文消失。
         state.lastTailPayloadHash = undefined
@@ -2040,7 +2305,7 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
         // 需求1（2026-10-02）：压缩是系统级边界——发一则使用者可见的 context.compacted
         // 事件（系统级、永不进 assistant 正文流、预设耐久可 replay 重放）。放在验证
         // 通过、水位推进之后＝只有真压缩成功才告知用户；失败（假成功已挡）不发。
-        emitContextCompacted(state, { trigger: "auto", preTokens: estimateTokensFromMessages(msgs) })
+        emitContextCompacted(state, { trigger: "auto", preTokens: estimateActiveContextTokens(msgs) })
         // CC 2.1.302 PostCompact：压缩验证通过后触发。additional_context 存成下一轮
         // 压缩续接（与 markCompactionBoundary 同生命周期，只注入一次）。hook 失败不
         // 影响已完成的压缩：runHooksWithBudget 不 throw，5s 预算后 fail-open。
@@ -2121,7 +2386,15 @@ export function estimateTokensFromMessages(msgs: unknown[]): number | undefined 
   for (const m of msgs) {
     const parts = (m as MessageLike | null | undefined)?.parts
     if (Array.isArray(parts)) {
-      for (const p of parts) if (typeof p?.text === "string") chars += p.text.length
+      for (const p of parts) {
+        if (typeof p?.text === "string") chars += p.text.length
+        // 2026-10-18：工具结果在 state.output（不在 text），旧估法漏掉全部工具输出，
+        // 会让「工具密集的超大会话」被严重低估。只对 tool part 计入，避免重复。
+        const out = (p as { type?: string; state?: { output?: unknown } } | null | undefined)?.state?.output
+        if ((p as { type?: string } | null | undefined)?.type === "tool" && typeof out === "string") {
+          chars += out.length
+        }
+      }
       continue
     }
     // 取不到 parts 时退回整条序列化长度，避免漏估成 0。

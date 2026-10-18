@@ -209,12 +209,92 @@ export function cleanUtf16Chunk(st: { hi?: string }, chunk: string, flush = fals
   return s.replace(/\uFFFD/g, "").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
 }
 
-/** 喂入一个 chunk，回传可安全外发的文本（行未完整时扣留，可能回空串）。 */
+// ── 2026-10-18：尾行即时吐出（首字被扣住修复）──
+// 旧行为：无换行的尾行一律进 pending，等到换行/新 part/回合结束才吐——中文单段
+// 回答在模型吐完整段前前端一片空白；工具前的单行旁白可能整轮不出现（见下方 R9 注）。
+// 新判定（逐 chunk 重新评估 pending）：只有「仍可能被抑制/改写规则命中」的尾行才扣留：
+//   ① 可能成为代码栅栏（```/~~~ 开头，或只打了 1-2 个反引号/波浪号的前缀）；
+//   ② 可能成为 markdown 标题——已能按前缀判定为非内部标题（如「## 你好」）时提前吐出；
+//   ③ 目前全是可打印 ASCII（无 CJK）——英文守门：已达 isEnglishProseLine 判据立即压制；
+//      否则扣留到完整行，超过 120 字符仍无判据则立即吐出；
+//   ④ 纯空白（可能是 ①② 的前缀）；
+//   其余（出现 CJK、emoji、假名…）立即吐出。跨 chunk 会被改坏的窄后缀例外：
+//   路径 token（含 / 或 \，≤512 字）从 token 起点扣留；行尾「係」连 lookbehind 上下文
+//   一起扣留（否则拼回后系词启发式失准）。
+// 完整行仍走原状态机（fence/suppress/英文/繁简/内部引用）语义不变；suppress 置位后
+// 仍吞到下一个非内部标题（非标题尾行不可能变成标题，故可立即吞掉，结果等价）。
+const FENCE_LINE_START_RE = /^[ \t]*(?:```|~~~)/
+const FENCE_PREFIX_RE = /^[ \t]*(?:`{1,2}|~{1,2})$/
+const HEADING_LINE_START_RE = /^[ \t]*#/
+const WHITESPACE_ONLY_RE = /^[ \t]*$/
+const PRINTABLE_ASCII_ONLY_RE = /^[\t\x20-\x7E]*$/
+const TAIL_ASCII_HOLD_MAX = 120
+// 与上方 INTERNAL_SECTION_HEADING_RE 的英文段名保持同步；用于「标题是否仍可能成为
+// 内部段」的前缀判定（判定为否时提前吐出，见 headingMayBecomeInternal）。
+const INTERNAL_SECTION_NAMES = [
+  "objective", "work state", "next move", "relevant files", "important details",
+  "completed", "active", "blocked", "progress summary", "verdict", "issues",
+  "evidence", "beats", "shots", "timeline_ops",
+]
+const HEADING_MARK_RE = /^#{1,6}[ \t]*/
+// 尾 token 分隔符＝空白 + 常见标点；刻意排除 / \ . - _ ~ ` :（路径 token 自身字符）。
+const TAIL_TOKEN_SEP_RE = /[\s,;!?()\[\]{}<>"'|，。；、：！？（）【】「」『』《》〈〉…—]/
+const PATH_TOKEN_PREFIX_RE = /^(?:runs|uploads|out|tmp|\.opencode|\/opt|\/home|\/tmp|\/var|~)[/\\]/
+const PATH_TOKEN_MAX = 512
+
+/** 标题是否仍可能命中 INTERNAL_SECTION_HEADING_RE（按已见正文前缀判断）。
+ *  例："## Object" → true（还可能是 Objective）；"## 你好" → false（英文段名永不
+ *  含 CJK，整行已可判定为非内部标题，可提前吐出）。 */
+function headingMayBecomeInternal(tail: string): boolean {
+  const m = HEADING_MARK_RE.exec(tail)
+  if (!m) return false
+  const body = tail.slice(m[0].length).toLowerCase().replace(/[ \t]*:?[ \t]*$/, "")
+  return INTERNAL_SECTION_NAMES.some((n) => n.startsWith(body))
+}
+
+/** 尾行中「必须等下一个 chunk 才能正确改写」的后缀起点；无则 -1。
+ *  ① 路径续写：最后一个分隔符之后的 token 含 / 或 \（或命中路径前缀）→ 从 token 起点扣留；
+ *     token > 512 视为普通文本。② 繁简系词：以 係 结尾 → 扣留 係 及其 lookbehind 上下文
+ *     字符（[\\sA-Za-z0-9]），否则下一行拼回时 lookbehind 丢失会把「A 係對」误转成「系」。 */
+function rewriteHoldStart(tail: string): number {
+  if (!tail) return -1
+  let i = tail.length - 1
+  while (i >= 0 && !TAIL_TOKEN_SEP_RE.test(tail[i]!)) i--
+  const start = i + 1
+  const token = tail.slice(start)
+  if (token && token.length <= PATH_TOKEN_MAX && (/[/\\]/.test(token) || PATH_TOKEN_PREFIX_RE.test(token))) {
+    return start
+  }
+  if (tail.endsWith("係")) {
+    let from = tail.length - 1
+    const prev = tail[from - 1]
+    if (prev !== undefined && /[\sA-Za-z0-9]/.test(prev)) from -= 1
+    return from
+  }
+  return -1
+}
+
+/** 吐出尾行；若尾部仍需跨 chunk 改写，则把该窄后缀留在 pending。 */
+function emitTail(st: PartStripState, tail: string): string {
+  const from = rewriteHoldStart(tail)
+  if (from < 0) return transformBodyLine(tail)
+  st.pending = tail.slice(from)
+  const prefix = tail.slice(0, from)
+  return prefix ? transformBodyLine(prefix) : ""
+}
+
+/** 尾行正文（非栅栏）与完整行走同一套改写：内部引用剥离 + 条款编号 + 繁→简。 */
+function transformBodyLine(line: string): string {
+  return t2sLine(scrubInternalRefs(line).replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定"))
+}
+
+/** 喂入一个 chunk，回传可安全外发的文本（仅「可能被规则命中」的尾行扣留，可回空串）。 */
 export function stripOutboundFeed(st: PartStripState, chunk: string): string {
   chunk = cleanUtf16Chunk(st, chunk)
   if (!chunk) return ""
   const lines = (st.pending + chunk).split("\n")
-  st.pending = lines.pop() ?? "" // 最后一段是未完成行（无换行终结），扣留待判
+  st.pending = ""
+  const tail = lines.pop() ?? "" // 最后一段是未完成行（无换行终结），按下方规则决定去留
   let out = ""
   for (const line of lines) {
     // 代码栅栏：栅栏内容直通（S1 硬要求：代码块不误伤）。
@@ -247,6 +327,38 @@ export function stripOutboundFeed(st: PartStripState, chunk: string): string {
     }
     // S2：内部条款编号剥离（留语义）+ R5-C 繁→简守门。
     out += t2sLine(scrubInternalRefs(line).replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定")) + "\n"
+  }
+  // ── 尾行去留（2026-10-18）──
+  const mayBecomeFence = FENCE_LINE_START_RE.test(tail) || FENCE_PREFIX_RE.test(tail)
+  const mayBecomeHeading = HEADING_LINE_START_RE.test(tail)
+  const headingSafe = mayBecomeHeading && !headingMayBecomeInternal(tail)
+  if (st.fence) {
+    // 栅栏内容直通；但围栏标记（含 1-2 个字符的前缀）必须等整行才能判开/关。
+    if (mayBecomeFence || WHITESPACE_ONLY_RE.test(tail)) st.pending = tail
+    else out += tail
+  } else if (st.suppress) {
+    // 内部段：标题/栅栏可能结束或穿透抑制，需等整行；已判定为非内部标题则立即恢复正文。
+    if (mayBecomeFence || (mayBecomeHeading && !headingSafe) || WHITESPACE_ONLY_RE.test(tail)) {
+      st.pending = tail
+    } else if (headingSafe) {
+      st.suppress = false
+      out += emitTail(st, tail)
+    }
+    // 其余正文反正会被吞，立即丢弃。
+  } else if (mayBecomeFence || WHITESPACE_ONLY_RE.test(tail)) {
+    st.pending = tail
+  } else if (mayBecomeHeading && !headingSafe) {
+    // 仍可能是内部章节标题：等完整行再判。
+    st.pending = tail
+  } else if (PRINTABLE_ASCII_ONLY_RE.test(tail)) {
+    // 已经满足英文正文判据（≥8 词等）→ 立即压制；否则扣留到完整行或 120 字符上限。
+    if (isEnglishProseLine(tail)) st.sawEnglish = true
+    else if (tail.length <= TAIL_ASCII_HOLD_MAX) st.pending = tail
+    else out += emitTail(st, tail)
+  } else {
+    // CJK/emoji/假名等（或已判定安全的标题/超长 ASCII）：立即吐出；只有路径续写
+    // 与尾部「係」这类跨 chunk 改写窄后缀才留在 pending。
+    out += emitTail(st, tail)
   }
   return out
 }

@@ -1,3 +1,5 @@
+import { UPSTREAM_HARD_TOKEN_LIMIT } from "./constants-gateway.ts"
+
 /**
  * compaction-policy.ts — Claude Code 2.1.302 自动压缩 / microcompact / PreCompact /
  * PostCompact 的 Eimu 纯策略层。
@@ -42,6 +44,11 @@ export interface CompactionDecisionInput {
   enabled?: boolean
   /** 覆盖 blocked 阈值（CC 的 CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE）。 */
   blockingLimitTokens?: number
+  /**
+   * 2026-10-18：绝对硬上限。用量到此即必须压缩，不受模型窗口与 breaker 影响。
+   * undefined 时用 UPSTREAM_HARD_TOKEN_LIMIT（预设 120000，env 可覆写）。
+   */
+  hardLimitTokens?: number
 }
 
 export interface CompactionDecision {
@@ -54,6 +61,9 @@ export interface CompactionDecision {
   blockAt: number
   breakerOpen: boolean
   thrashing: boolean
+  /** 2026-10-18：用量已达到绝对硬上限（调用方必须在本回合投递前压缩）。 */
+  hardLimitExceeded: boolean
+  hardLimit: number
 }
 
 export function estimateTokens(text: string): number {
@@ -85,22 +95,39 @@ export function compactionDecision(input: CompactionDecisionInput): CompactionDe
     input.blockingLimitTokens !== undefined && Number.isFinite(input.blockingLimitTokens) && input.blockingLimitTokens > 0
       ? input.blockingLimitTokens
       : Math.max(0, windowTokens - COMPACT_BLOCK_BUFFER_TOKENS)
+  const hardLimit =
+    input.hardLimitTokens !== undefined && Number.isFinite(input.hardLimitTokens) && input.hardLimitTokens > 0
+      ? input.hardLimitTokens
+      : UPSTREAM_HARD_TOKEN_LIMIT
+  // 2026-10-18：绝对硬上限——与窗口无关；超过时必须压缩，breaker 也不能让它静默通过。
+  const hardLimitExceeded = hardLimit > 0 && usedTokens >= hardLimit
   const failures = finiteNonNegative(input.consecutiveFailures)
   const breakerOpen = failures >= COMPACT_BREAKER_FAILURES
   const pctLeft = windowTokens > 0 ? Math.max(0, Math.round(((windowTokens - usedTokens) / windowTokens) * 100)) : 0
-  const base = { warnAt, compactAt, blockAt, pctLeft, breakerOpen }
+  const base = { warnAt, compactAt, blockAt, pctLeft, breakerOpen, hardLimitExceeded, hardLimit }
 
   if (windowTokens === 0) {
+    // 窗口未知不猜常规阈值；但硬上限是绝对事实，仍然强制压缩。
+    if (hardLimitExceeded && enabled) {
+      return { ...base, action: "compact", level: "compact", reason: "over_limit", thrashing: false }
+    }
     return { ...base, action: "none", level: "none", thrashing: false }
   }
 
   if (usedTokens >= blockAt) {
+    // blocked 仍是「必须先压缩」信号；不因 hardLimit 改写既有语义。
     return { ...base, action: "blocked", level: "blocked", reason: "over_limit", thrashing: false }
   }
 
-  // 约束：breaker 打开时不再尝试压缩；回合本身继续，交给用户 /clear 或换路。
-  if (breakerOpen) {
+  // 2026-10-18 熔断纠偏：旧版 breaker 打开＝action none，超大会话会带着无界上下文
+  // 继续跑（无限 blocked 的另一种形态）。硬上限命中时熔断不得阻止压缩。
+  if (breakerOpen && !hardLimitExceeded) {
     return { ...base, action: "none", level: "none", reason: "breaker", thrashing: false }
+  }
+
+  // 硬上限优先于 thrashing：超过绝对上限时不再用「压缩太频繁」挡掉压缩。
+  if (hardLimitExceeded && enabled) {
+    return { ...base, action: "compact", level: "compact", thrashing: false }
   }
 
   if (usedTokens >= compactAt && enabled) {
@@ -117,6 +144,22 @@ export function compactionDecision(input: CompactionDecisionInput): CompactionDe
   }
 
   return { ...base, action: "none", level: "none", thrashing: false }
+}
+
+/**
+ * 2026-10-18：投递前硬闸的纯判定。usedTokens 未知（undefined）时不做判断——
+ * 不拿猜出来的用量误挡正常会话。
+ */
+export function preDispatchCompactionRequired(input: {
+  usedTokens?: number
+  hardLimitTokens?: number
+}): boolean {
+  if (typeof input.usedTokens !== "number" || !Number.isFinite(input.usedTokens)) return false
+  const hardLimit =
+    input.hardLimitTokens !== undefined && Number.isFinite(input.hardLimitTokens) && input.hardLimitTokens > 0
+      ? input.hardLimitTokens
+      : UPSTREAM_HARD_TOKEN_LIMIT
+  return hardLimit > 0 && input.usedTokens >= hardLimit
 }
 
 export interface MicrocompactInput {

@@ -93,6 +93,27 @@ export const QUESTION_HEARTBEAT_MS = Number.parseInt(process.env.QUESTION_HEARTB
 // 答覆文案标注 assumed——无人值守跑批不再挂死（T4 实锤 question 卡挂死 15+ 分钟）。
 export const QUESTION_ASSUME_MS = Number.parseInt(process.env.QUESTION_ASSUME_MS || "180000", 10) || 180_000
 
+// ── 2026-10-18 超大会话止血（只加常量，不改既有语义）──────────────────────
+// 上游上下文硬上限：估算用量到此即必须先压缩再投递，不允许把数 M token 的历史
+// 直接送 provider。与模型窗口无关（窗口 200k 的会话在 120k 就该压）。
+export const UPSTREAM_HARD_TOKEN_LIMIT =
+  Number.parseInt(process.env.UPSTREAM_HARD_TOKEN_LIMIT || "120000", 10) || 120_000
+// 投递前紧急压缩的有界等待：超过即明确报错收尾，不把无界 prompt 直送上游。
+export const PRE_DISPATCH_COMPACT_WAIT_MS =
+  Number.parseInt(process.env.PRE_DISPATCH_COMPACT_WAIT_MS || "15000", 10) || 15_000
+// blocked/失败熔断：连续 N 次失败或持续 T 毫秒仍未压缩成功 → 紧急压缩（有界输入）。
+export const COMPACT_BLOCKED_BREAKER_COUNT =
+  Number.parseInt(process.env.COMPACT_BLOCKED_BREAKER_COUNT || "3", 10) || 3
+export const COMPACT_BLOCKED_BREAKER_MS =
+  Number.parseInt(process.env.COMPACT_BLOCKED_BREAKER_MS || "600000", 10) || 600_000
+// compact deferred 的在途 generation 任务上界：超时按「任务已死」处理（与遗留
+// durable run 结论一致），不得让死任务永久阻塞压缩。
+export const COMPACT_INFLIGHT_MAX_MS =
+  Number.parseInt(process.env.COMPACT_INFLIGHT_MAX_MS || "900000", 10) || 900_000
+// 压缩失败后的有界重试窗口（缩短 180s 单次超时，失败再给一次短窗口）。
+export const SESSION_COMPACT_RETRY_TIMEOUT_MS =
+  Number.parseInt(process.env.SESSION_COMPACT_RETRY_TIMEOUT_MS || "30000", 10) || 30_000
+
 export const OPENCODE_URL = (process.env.OPENCODE_URL || "http://127.0.0.1:4096").replace(/\/+$/, "")
 export const OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD || ""
 export const PORT = Number.parseInt(process.env.GATEWAY_PORT || "8081", 10) || 8081

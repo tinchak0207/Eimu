@@ -36,6 +36,10 @@ export function emitSanitizedDelta(state: SessionState, partId: string | undefin
     })
   }
   if (safe) {
+    // Phase 0 观测（2026-10-18 修）：用户可见首帧 = 真正 emit message.delta 的时刻。
+    // 旧打点（函数入口 markTurnFirst "text"）测的是「模型 delta 抵达」，会被剥离器
+    // 扣留/压制，永远比用户实际看到的好看；两栏并存，旧日志口径保留。
+    markTurnFirst(state, "visible")
     emitToSession(state, "message.delta", { text: safe }, { strippable: true })
     // R8-B 工单 #5：模型正文到达 = 用户可见输出刷新（静默通知判定依据）。
     state.lastUserVisibleAt = Date.now()

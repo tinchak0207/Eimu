@@ -16,10 +16,21 @@
 // 纯记忆体改写：不动 DB、不发任何上游请求（零 API 成本）。任何错误都 try/catch 原样放行。
 
 import type { Plugin } from "@opencode-ai/plugin"
-import { CONTEXT_SLIM_ENABLED, slimMessages } from "../lib/context-slim-core"
+import { CONTEXT_SLIM_ENABLED, markCompactionRequest, slimMessages } from "../lib/context-slim-core"
 
 export const ContextSlim: Plugin = async () => {
   return {
+    // 2026-10-18：生产二进制里 compaction 的调用顺序是
+    //   compacting hook → structuredClone(head) → messages.transform → toModelMessagesEffect
+    // 压缩 prompt 在 transform 之后才附加，故必须在此登记 sessionID，供 transform 识别
+    // 「这一次是压缩请求」并做有界截断（见 lib/context-slim-core boundCompactionInput）。
+    "experimental.session.compacting": async (input) => {
+      try {
+        markCompactionRequest((input as { sessionID?: unknown } | undefined)?.sessionID)
+      } catch {
+        /* 登记失败只影响压缩截断，不影响正常压缩 */
+      }
+    },
     "experimental.chat.messages.transform": async (_input, output) => {
       if (!CONTEXT_SLIM_ENABLED) return
       try {

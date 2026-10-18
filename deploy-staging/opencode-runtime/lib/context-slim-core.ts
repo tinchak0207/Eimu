@@ -63,6 +63,59 @@ export const TOOL_RESULT_PERSIST_DIR =
 const PREVIEW_HEAD_CHARS = intEnv("TOOL_RESULT_PREVIEW_HEAD_CHARS", 2_000)
 const PREVIEW_TAIL_CHARS = intEnv("TOOL_RESULT_PREVIEW_TAIL_CHARS", 1_000)
 
+// ── 2026-10-18：压缩请求输入硬上限 ─────────────────────────────────────────
+// 生产事故：2.4M token 的会话触发 summarize 时，压缩请求本身把整段历史再送一次，
+// 必然 AbortError（180s 超时）→ 水位不推进 → 每轮重压。压缩是「送上游前的最后一关」
+// 上的请求，必须与普通对话一样有界：保留最早的用户需求 + 已有压缩摘要 + 最近内容。
+export const COMPACTION_INPUT_MAX_CHARS = intEnv("COMPACTION_INPUT_MAX_CHARS", 60_000)
+export const COMPACTION_INPUT_HEAD_CHARS = intEnv("COMPACTION_INPUT_HEAD_CHARS", 8_000)
+export const COMPACTION_PINNED_SUMMARY_MAX_CHARS = intEnv("COMPACTION_PINNED_SUMMARY_MAX_CHARS", 20_000)
+/** 压缩请求识别标记（opencode 压缩 prompt 与 CC 形状都覆盖；正常对话不会命中）。 */
+const COMPACTION_REQUEST_MARKERS = [
+  "只使用已有对话生成恢复摘要",
+  "## Original Request",
+  "CRITICAL: Respond with TEXT ONLY",
+  "Your task is to create a detailed summary",
+  "Provide a detailed but concise summary of our conversation",
+]
+export const COMPACTION_INPUT_TRUNCATED_MARK =
+  "[compaction input truncated — older content omitted from this summary request; full history remains in storage]"
+
+// 2026-10-18 生产取证（opencode binary 96451904 字节处）：
+//   trigger("experimental.session.compacting", {sessionID}, {context, prompt})
+//   ze = structuredClone(select(...).head)
+//   trigger("experimental.chat.messages.transform", {}, {messages: ze})
+//   toModelMessagesEffect(ze, ...)  → process({messages:[..., {role:"user", text: compactionPrompt}]})
+// 即：压缩 prompt 是在 transform **之后**才附加的，靠「最后一条文本含压缩 prompt」无法
+// 识别压缩请求。改由 plugin 的 compacting hook 按 sessionID 登记，transform 按
+// messages[].info.sessionID 消费（同一进程内、30s TTL）。
+const compactionRequestSessions = new Map<string, number>()
+export const COMPACTION_REQUEST_TTL_MS = intEnv("COMPACTION_REQUEST_TTL_MS", 30_000)
+
+/** plugin 的 experimental.session.compacting hook 呼叫：标记该会话下一次 transform 是压缩请求。 */
+export function markCompactionRequest(sessionId: unknown): void {
+  const sid = typeof sessionId === "string" ? sessionId.trim() : ""
+  if (!sid) return
+  const now = Date.now()
+  compactionRequestSessions.set(sid, now)
+  // 有界：清掉过期项，避免长期泄漏。
+  for (const [key, at] of compactionRequestSessions) {
+    if (now - at > COMPACTION_REQUEST_TTL_MS) compactionRequestSessions.delete(key)
+  }
+  if (compactionRequestSessions.size > 64) {
+    const first = compactionRequestSessions.keys().next().value
+    if (typeof first === "string") compactionRequestSessions.delete(first)
+  }
+}
+
+function messageSessionId(messages: MsgLike[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const sid = messages[i]?.info?.sessionID
+    if (typeof sid === "string" && sid) return sid
+  }
+  return undefined
+}
+
 /** 原生截断参考句（opencode tool_output 超限时写入讯息的字串）。 */
 const NATIVE_TRUNCATED_RE = /Full output saved to:/
 /** 从原生参考句取回落盘路径（"Full output saved to: <path>"，到此行为止的第一个非空白字串）。 */
@@ -151,7 +204,7 @@ function isNativeTruncatedRef(out: string): boolean {
 // ── 型别（宽松定义：现场可能是 SDK 型别或内部结构，只碰必要栏位）─────────────
 
 interface MsgLike {
-  info?: { role?: string; summary?: boolean; agent?: string; mode?: string; time?: { created?: number } }
+  info?: { role?: string; sessionID?: string; summary?: boolean; agent?: string; mode?: string; time?: { created?: number } }
   parts?: PartLike[]
 }
 interface PartLike {
@@ -185,6 +238,158 @@ export function cutAtNewlineTail(s: string, n: number): string {
   const start = s.length - n
   const i = s.indexOf("\n", start)
   return s.slice(i === -1 ? start : i + 1)
+}
+
+/** 2026-10-18：这是不是一个压缩（summarize/compact）请求？只看最后 3 则讯息。 */
+export function isCompactionRequest(messages: MsgLike[]): boolean {
+  if (!Array.isArray(messages)) return false
+  // 优先：compacting hook 按 sessionID 登记的标记（生产二进位实测的可靠信号）。
+  const sid = messageSessionId(messages)
+  if (sid) {
+    const markedAt = compactionRequestSessions.get(sid)
+    if (markedAt !== undefined && Date.now() - markedAt <= COMPACTION_REQUEST_TTL_MS) {
+      compactionRequestSessions.delete(sid) // 一次性消费
+      return true
+    }
+  }
+  const tail = messages.slice(-3)
+  for (const msg of tail) {
+    const info = msg?.info as { system?: string } | undefined
+    if (typeof info?.system === "string" && COMPACTION_REQUEST_MARKERS.some((m) => info.system!.includes(m))) {
+      return true
+    }
+    for (const part of msg?.parts ?? []) {
+      if (part?.type !== "text" || typeof part.text !== "string") continue
+      if (COMPACTION_REQUEST_MARKERS.some((m) => part.text!.includes(m))) return true
+    }
+  }
+  return false
+}
+
+type CompactionSlot =
+  | { kind: "text"; role?: string; info?: MsgLike["info"]; part: PartLike; text: string }
+  | { kind: "tool"; role?: string; info?: MsgLike["info"]; state: NonNullable<PartLike["state"]>; text: string }
+
+function compactionSlots(messages: MsgLike[]): CompactionSlot[] {
+  const slots: CompactionSlot[] = []
+  for (const msg of messages) {
+    if (!msg || !Array.isArray(msg.parts)) continue
+    const role = msg.info?.role
+    const info = msg.info
+    for (const part of msg.parts) {
+      if (!part) continue
+      if (part.type === "text" && typeof part.text === "string" && part.text.length > 0) {
+        slots.push({ kind: "text", role, info, part, text: part.text })
+      } else if (part.type === "tool") {
+        const st = part.state
+        if (st && st.status === "completed" && typeof st.output === "string" && st.output.length > 0) {
+          slots.push({ kind: "tool", role, info, state: st, text: st.output })
+        }
+      }
+    }
+  }
+  return slots
+}
+
+function isCompactionSummary(info: MsgLike["info"] | undefined): boolean {
+  return info?.summary === true || info?.agent === "compaction" || info?.mode === "compaction"
+}
+
+/**
+ * 2026-10-18：把压缩请求的对话文本截到固定上限，保留：
+ *   ① 第一条 user 讯息的头（关键早期需求/约束）；
+ *   ② 既有压缩摘要（继续压缩时最重要的早期信息）；
+ *   ③ 最近的讯息（按槽位从尾部整条保留，必要时只留最后一段）。
+ * 其余文本/工具输出就地换成截断标记。回传被省略的字元数。
+ */
+export function boundCompactionInput(
+  messages: MsgLike[],
+  opts: { maxChars?: number; headChars?: number; pinnedSummaryMaxChars?: number } = {},
+): number {
+  const maxChars = Math.max(1000, opts.maxChars ?? COMPACTION_INPUT_MAX_CHARS)
+  const headChars = Math.max(0, opts.headChars ?? COMPACTION_INPUT_HEAD_CHARS)
+  const pinnedMax = Math.max(0, opts.pinnedSummaryMaxChars ?? COMPACTION_PINNED_SUMMARY_MAX_CHARS)
+  const slots = compactionSlots(messages)
+  if (slots.length === 0) return 0
+  const total = slots.reduce((n, s) => n + s.text.length, 0)
+  if (total <= maxChars) return 0
+
+  const keep = new Map<CompactionSlot, string>()
+  let budget = maxChars
+
+  // ① 关键早期信息：第一条 user 文本（截头）。
+  const firstUser = slots.find((s) => s.kind === "text" && s.role === "user")
+  if (firstUser && headChars > 0) {
+    const kept = cutAtNewlineHead(firstUser.text, Math.min(headChars, budget))
+    keep.set(firstUser, kept)
+    budget = Math.max(0, budget - kept.length)
+  }
+
+  // ② 既有压缩摘要整段保留（上限 pinnedMax，避免把上一次摘要也截碎）。
+  for (const slot of slots) {
+    if (!isCompactionSummary(slot.info)) continue
+    if (keep.has(slot)) continue
+    const allowance = Math.min(pinnedMax, budget)
+    if (allowance <= 0) break
+    const kept = slot.text.length <= allowance ? slot.text : cutAtNewlineHead(slot.text, allowance)
+    keep.set(slot, kept)
+    budget = Math.max(0, budget - kept.length)
+  }
+
+  // ③ 最近内容：从尾部往前整槽保留，最后一槽可只留尾段。
+  for (let i = slots.length - 1; i >= 0; i--) {
+    if (budget <= 0) break
+    const slot = slots[i]
+    if (keep.has(slot)) continue
+    if (slot.text.length <= budget) {
+      keep.set(slot, slot.text)
+      budget -= slot.text.length
+      continue
+    }
+    const tail = cutAtNewlineTail(slot.text, Math.max(1, budget))
+    if (tail) keep.set(slot, tail)
+    budget = 0
+  }
+
+  let omitted = 0
+  // 先做「保留内容」的总长对帐；超限时从最早的尾部保留槽继续丢弃（首条 user
+  // 与既有摘要属于关键早期信息，不参与二次丢弃）。
+  const SHORT_MARK = "[...]"
+  const order = new Map<CompactionSlot, number>(slots.map((slot, i) => [slot, i]))
+  let totalAfter = 0
+  for (const slot of slots) {
+    const kept = keep.get(slot)
+    totalAfter += kept !== undefined ? kept.length : SHORT_MARK.length
+  }
+  const droppable = [...keep.keys()]
+    .filter((slot) => slot !== firstUser && !isCompactionSummary(slot.info))
+    .sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
+  for (const slot of droppable) {
+    if (totalAfter <= maxChars - COMPACTION_INPUT_TRUNCATED_MARK.length) break
+    const kept = keep.get(slot)
+    if (!kept) continue
+    totalAfter -= Math.max(0, kept.length - SHORT_MARK.length)
+    keep.delete(slot)
+  }
+  // 第一个被丢弃的槽位保留完整说明，其余用极短标记，避免标记本身撑爆预算。
+  let firstDropped = true
+  for (const slot of slots) {
+    const kept = keep.get(slot)
+    if (kept !== undefined) {
+      if (kept !== slot.text) {
+        omitted += slot.text.length - kept.length
+        if (slot.kind === "text") slot.part.text = kept
+        else slot.state.output = kept
+      }
+      continue
+    }
+    omitted += slot.text.length
+    const mark = firstDropped ? COMPACTION_INPUT_TRUNCATED_MARK : SHORT_MARK
+    firstDropped = false
+    if (slot.kind === "text") slot.part.text = mark
+    else slot.state.output = mark
+  }
+  return omitted
 }
 
 /** 内容定址档名（幂等：同内容同档）。 */
@@ -229,6 +434,19 @@ export async function slimMessages(
   const failedPersist = new Set<object>()
 
   if (!Array.isArray(messages)) return result
+  // 2026-10-18：压缩请求自身必须有界——超大会话的 summarize 不能把整段历史再送一次。
+  try {
+    if (isCompactionRequest(messages)) {
+      const omitted = boundCompactionInput(messages)
+      if (omitted > 0) {
+        console.warn(
+          `[context-slim] compaction input bounded: omitted=${omitted} chars max=${COMPACTION_INPUT_MAX_CHARS}`,
+        )
+      }
+    }
+  } catch {
+    /* 截断失败：原样放行（压缩仍可能超时，但绝不因截断自身抛错） */
+  }
   // Recovery fallback for previously stored compaction drafts; never rewrite normal conversation.
   for (const msg of messages) {
     if (msg?.info?.summary !== true && msg?.info?.agent !== "compaction" && msg?.info?.mode !== "compaction") continue
