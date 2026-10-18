@@ -103,7 +103,7 @@ async function guardedSubagentEndpoint(label: string, fn: () => Promise<Response
   }
 }
 
-export async function handleRequest(req: Request, srv: { requestIP: (r: Request) => { address: string } | null }): Promise<Response> {
+export async function handleRequest(req: Request, srv: { requestIP: (r: Request) => { address: string } | null }, ipProbe?: Request): Promise<Response> {
   {
     const url = new URL(req.url)
     const pathname = url.pathname
@@ -153,7 +153,8 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
     }
     let clientIp: string | null = null
     try {
-      clientIp = srv.requestIP(req)?.address ?? null
+      // ipProbe：调用方若为注入请求 id 重建过 Request，用它传原始连接对象；否则用 req。
+      clientIp = srv.requestIP(ipProbe ?? req)?.address ?? null
     } catch {
       clientIp = null
     }

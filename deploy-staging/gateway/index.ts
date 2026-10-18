@@ -114,7 +114,9 @@ const server = Bun.serve({
       return new Response(null, { status: 204, headers })
     }
 
-    const res = await handleRequest(stamped, srv)
+    // 重建的 Request 会丢失连接对象，Bun 的 requestIP 对它返回 null，/internal/* 会被误判为非本机。
+    // 原始 req 只用于取来源 IP，handler 仍用 stamped。
+    const res = await handleRequest(stamped, srv, req)
     // Response headers are immutable once constructed, so rebuild. The body is
     // passed through by reference, which keeps SSE streaming intact.
     const headers = new Headers(res.headers)
