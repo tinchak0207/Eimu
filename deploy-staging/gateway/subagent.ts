@@ -172,6 +172,14 @@ const ASYNC_HARD_TIMEOUT_MS = 30 * 60 * 1000
 // 收束父会话。阈值默认 120s（SUBAGENT_STALE_MS 覆写）；30 分钟硬顶保留为最后兜底，不删。
 const SUBAGENT_STALE_DEFAULT_MS = 120_000
 const SUBAGENT_LIVENESS_POLL_DEFAULT_MS = 15_000
+// 2026-10-18：单工具挂住上限。有在途工具时活性检测整体放行（防误杀长生成），
+// 代价是一条永不返回的命令（等输入、tail -f、无超时的网络调用）能把 run 静默拖到
+// 30 分钟硬顶——用户侧只看到「终端命令 运行中」，且没有任何一方介入。
+// 超过此值即按失活收尾（保留已产出部分），默认 10 分钟，env 可覆写。
+const SUBAGENT_TOOL_MAX_DEFAULT_MS = 600_000
+function subagentToolMaxMs(): number {
+  return Number.parseInt(process.env.SUBAGENT_TOOL_MAX_MS || "", 10) || SUBAGENT_TOOL_MAX_DEFAULT_MS
+}
 function subagentStaleMs(): number {
   const n = Number.parseInt(process.env.SUBAGENT_STALE_MS || "", 10)
   return Number.isFinite(n) && n >= 30_000 ? n : SUBAGENT_STALE_DEFAULT_MS
@@ -471,6 +479,11 @@ interface SubagentRun {
   //   「有在途工具」＝合法的长期静默（长生成），活性检测必须放行，不得误杀。
   lastActivityAt: number
   pendingTools: Set<string>
+  // 2026-10-18：在途工具的起始时刻（callID → first seen pending/running）。
+  // 为什么需要：有在途工具时活性检测整体放行，一条挂住的 bash（tail -f／等输入）
+  // 可以让 run 一路静默到 30 分钟硬顶，用户只看到「终端命令 运行中」。
+  // 单工具超过 SUBAGENT_TOOL_MAX_MS 即判挂住，按失活收尾。
+  pendingToolSince?: Map<string, number>
   // 2026-10-05 修复（成品交付链下半场）：本 run 的工具结果里已观测到的成片类成品。
   // 子代理被 30 分钟硬顶/上游错误打死、或收尾摘要里没写 URL 时，父会话仍能拿到
   // 「这一路已经产出了什么」——此前唯一证据是用户屏幕上的卡片，父模型据此误判零产物重派。
@@ -2016,6 +2029,19 @@ function startLivenessWatch(): void {
   unrefTimer(livenessTimer)
 }
 
+/** 在途工具里最早开始、且仍在途的那一个（timeout 判断用）。 */
+function oldestPendingTool(run: SubagentRun, now: number): { callId: string; ageMs: number } | null {
+  const since = run.pendingToolSince
+  if (!since || since.size === 0) return null
+  let best: { callId: string; ageMs: number } | null = null
+  for (const [callId, at] of since) {
+    if (!run.pendingTools.has(callId)) { since.delete(callId); continue } // 已摘除的残留
+    const ageMs = now - at
+    if (!best || ageMs > best.ageMs) best = { callId, ageMs }
+  }
+  return best
+}
+
 function livenessTick(): void {
   const staleMs = subagentStaleMs()
   const now = Date.now()
@@ -2025,6 +2051,22 @@ function livenessTick(): void {
   for (const run of runs) {
     if (run.recoveredWatcher) continue // Authoritative status/message reconciliation owns takeover; no stale/deadline abort.
     if (run.status !== "running") continue
+    // 单工具挂住（2026-10-18）：有在途工具时下面的失活检测会整体放行，这里按**工具时长**
+    // 补一条硬线——一条永不返回的命令不能在「正常运行」的名义下拖满 30 分钟。
+    const hungTool = oldestPendingTool(run, now)
+    if (hungTool && hungTool.ageMs >= subagentToolMaxMs()) {
+      console.warn(
+        `[gateway] subagent tool hung ${Math.round(hungTool.ageMs / 1000)}s: id=${run.id} label="${run.label}" tool=${run.lastToolName ?? "-"} call=${hungTool.callId.slice(0, 16)}`,
+      )
+      run.partialPersist = true
+      void finishRun(
+        run,
+        "error",
+        partialBodyOf(run),
+        `子代理的工具调用超过 ${Math.round(subagentToolMaxMs() / 60000)} 分钟没有返回（命令可能挂住），已强制结束；已产出的部分已保留。`,
+      )
+      continue
+    }
     const verdict = evaluateRunLiveness({
       status: run.status,
       stopped: run.stopped,
@@ -2578,6 +2620,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   // F8（断面 B）：新子会话投递成功＝活性起点；清上一 attempt 的在途工具残留。
   run.lastActivityAt = Date.now()
   run.pendingTools.clear()
+  run.pendingToolSince?.clear()
   console.log(
     `[gateway] subagent attempt: id=${run.id} label="${run.label}" attempt=${run.attempt}/${Math.max(run.modelChain.length, 1)} model=${model ? `${model.providerID}/${model.modelID}` : "opencode-default"} child=${childId} agent=${run.agent ?? "-"}${run.isFork ? " mode=fork" : ""}`,
   )
@@ -2720,8 +2763,11 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
             if (st === "pending" || st === "running") {
               run.pendingTools.add(callId)
               boundSet(run.pendingTools, 200)
+              if (!run.pendingToolSince) run.pendingToolSince = new Map()
+              if (!run.pendingToolSince.has(callId)) run.pendingToolSince.set(callId, Date.now())
             } else if (st === "completed" || st === "error") {
               run.pendingTools.delete(callId)
+              run.pendingToolSince?.delete(callId)
             }
           }
           // 2026-10-05：向父会话发子代理工具状态帧。此前网关从不发这类帧 → 长工具
@@ -4659,6 +4705,7 @@ async function deliverChildTurn(run: SubagentRun, text: string, tag: string, sta
     run.lastActivityAt = Date.now()
     // F8 活性语义：投递成功＝本会话重新有在途事实（清上一 attempt 的在途工具残留同 dispatchAttempt）。
     run.pendingTools.clear()
+    run.pendingToolSince?.clear()
     console.log(`[gateway] subagent bus deliver (${tag}): id=${run.id} label="${run.label}" child=${run.opencodeSessionId}`)
     return true
   } catch (e) {
@@ -6174,6 +6221,7 @@ function reviveSavedRun(saved: any): SubagentRun {
   const run = { ...decoded, status: "running", recoveredWatcher: true, reworking: false, modelChain: [], reworkCount: Math.max(1, decoded.reworkCount || 0), lastActivityAt: Date.now() } as SubagentRun
   for (const key of ["messageRole", "partEmitted", "partKind", "partText", "toolStatusEmitted"]) if (!((run as any)[key] instanceof Map)) (run as any)[key] = new Map()
   for (const key of ["suppressedParts", "pendingTools"]) if (!((run as any)[key] instanceof Set)) (run as any)[key] = new Set()
+  if (!(run.pendingToolSince instanceof Map)) run.pendingToolSince = new Map()
   run.artifacts ||= []
   return run
 }
