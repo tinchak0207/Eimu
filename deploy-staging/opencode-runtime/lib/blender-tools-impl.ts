@@ -4,8 +4,9 @@
  * 本档由 tools/export-blender-tools-staging.ts 从行为真源 src/lib/blender-tools.ts
  * 机械导出：真源全文逐行保留（bpy 脚本模板/分块存活配方/makedirs/崩溃重试/ffmpeg
  * 合成/指纹接线/artifact_base_url 全在），除「环境适配」外与真源逐行等价。
- * 白名单 diff 仅两处：① 本注释头；② 真源 `./blender-asset-store` import → 桩块
- * （理由见桩块注释）。禁止手改本档——改真源后跑
+ * 白名单 diff 仅三处：① 本注释头；② 真源 `./blender-asset-store` import → 桩块
+ * （理由见桩块注释）；③ `./harness-tool-ids` re-export → 内联同值字面量（理由见
+ * 导出脚本对应节）。禁止手改本档——改真源后跑
  * `npx tsx tools/export-blender-tools-staging.ts` 重导出（根治 T2 部署漂移）。
  *
  * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
@@ -935,4 +936,4 @@ export const BLENDER_TOOLS: readonly BlenderToolDef[] = [
 
 /** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。
  *  本体已迁到 ./harness-tool-ids.ts（客户端安全），此处 re-export 保持既有 import 者不破。 */
-export { BLENDER_HARNESS_TOOL_IDS } from "./harness-tool-ids"
+export const BLENDER_HARNESS_TOOL_IDS = ["blender_exec", "blender_export_gltf", "blender_render"] as const

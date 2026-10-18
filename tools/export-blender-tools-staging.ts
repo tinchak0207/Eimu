@@ -66,7 +66,20 @@ async function saveSceneAssets(
   return { ok: false, code: "staging_stub", hint: "staging 稿未接资产库，产物入库停用（真源行为=userId 缺省同义）。" }
 }`;
 
-const body = source.replace(IMPORT_LINE, STUB);
+// ── 白名单 diff ③（2026-10-18 事故）：`./harness-tool-ids` re-export 内联 ──────
+// 事故：真源把 BLENDER_HARNESS_TOOL_IDS 本体迁到 ./harness-tool-ids 后改成 re-export，
+// 重导出把 `export { … } from "./harness-tool-ids"` 带进 staging，而 VPS .opencode/lib
+// 没有这个档 → 模块加载即 `Cannot find module './harness-tool-ids'`，三工具整体不可用。
+// 这行只是登记用 id 元组，与工具行为无关：内联成与真源同值的字面量，staging 自持闭环。
+const REEXPORT_LINE = 'export { BLENDER_HARNESS_TOOL_IDS } from "./harness-tool-ids"';
+if (!source.includes(REEXPORT_LINE)) {
+  console.error(`EXPORT_FAIL：真源未找到预期 re-export 行（真源结构变了，先改本脚本白名单再导出）：\n  ${REEXPORT_LINE}`);
+  process.exit(1);
+}
+const REEXPORT_INLINE =
+  'export const BLENDER_HARNESS_TOOL_IDS = ["blender_exec", "blender_export_gltf", "blender_render"] as const';
+
+const body = source.replace(IMPORT_LINE, STUB).replace(REEXPORT_LINE, REEXPORT_INLINE);
 
 // ── 白名单 diff ②：注释头（落位说明 + 禁手改宣言）────────────────────────────
 const HEADER = `/**
@@ -75,8 +88,9 @@ const HEADER = `/**
  * 本档由 tools/export-blender-tools-staging.ts 从行为真源 src/lib/blender-tools.ts
  * 机械导出：真源全文逐行保留（bpy 脚本模板/分块存活配方/makedirs/崩溃重试/ffmpeg
  * 合成/指纹接线/artifact_base_url 全在），除「环境适配」外与真源逐行等价。
- * 白名单 diff 仅两处：① 本注释头；② 真源 \`./blender-asset-store\` import → 桩块
- * （理由见桩块注释）。禁止手改本档——改真源后跑
+ * 白名单 diff 仅三处：① 本注释头；② 真源 \`./blender-asset-store\` import → 桩块
+ * （理由见桩块注释）；③ \`./harness-tool-ids\` re-export → 内联同值字面量（理由见
+ * 导出脚本对应节）。禁止手改本档——改真源后跑
  * \`npx tsx tools/export-blender-tools-staging.ts\` 重导出（根治 T2 部署漂移）。
  *
  * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
