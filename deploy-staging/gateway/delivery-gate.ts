@@ -772,10 +772,10 @@ function reviewDetectionView(s: string): string {
 }
 
 // ── 判定规则（三族，命中任一即内审产物）─────────────────────────────────────
-// 族 1：契约**判决**栏名（verdict/issues/qcSignature）——任意 markdown 包裹下命中。
+// 族 1：契约**判决**栏名（verdict/qcSignature 任意 markdown 包裹下命中；issues 须栏位语法）。
 // F11：`score_abc` 等**数据**栏名不再单独判 review（否则用户 prompt 里用户自己写的
 // `melody_notation / score_abc` 会被整段误降级）——它们走 scaffold 的「纯栏位行」删除。
-const REVIEW_FIELD_RE = /\b(?:verdict|issues?|qc[\s\-_.]*signature)\b/i
+const REVIEW_FIELD_RE = /\b(?:verdict|qc[\s\-_.]*signature)\b|\bissues?\s*[:：=|]/i
 // 族 2：内部审核身份（含繁体变体）。
 const CRITIC_IDENTITY_RE =
   /独立审核|獨立審核|审核官|審核官|机器审核|機器審核|复核官|覆核官|\bcritic\b/i
@@ -783,9 +783,6 @@ const CRITIC_IDENTITY_RE =
 const CRITIC_STRUCTURE_RE =
   /被审原文|被審原文|栏位存在性|欄位存在性|审核已完成|審核已完成|结论如下|結論如下/
 const NUMBERED_REVIEW_RE = /(?:^|\s)\d+[.、]\s*【/
-// 族 3：内部路径 / runId 形态 UUID / 裸 runId / 用量 token 计数 / 裸回环端点。
-const INTERNAL_ARTIFACT_RE =
-  /outputs\/subagent\/|\.opencode\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\[子代理用量\]|\brunId\b|\btokens?\b[\s:：=]*\d{2,}|(?:工具调用|tool\s*calls?)[\s:：=]*\d+|127\.0\.0\.1/i
 // 判词（退回类）——只用于降级句式的方向选择，不单独作判定族。
 const REJECT_WORD_RE = /退回|驳回|駁回|不通过|不通過/
 const GAP_WORD_RE = /有落差|需修正/
@@ -800,18 +797,28 @@ type ReviewClass = "review" | "scaffold" | "clean"
 
 /**
  * 纯函数：判定一段载荷是否内审/复核产物。
- *  `review`   = 内审/复核产物（判决栏名 / 审核身份 / 审稿结构 / 内部路径与 runId）→ 整段降级；
+ *  `review`   = 内审/复核产物（判决栏名 / 审核身份 / 审稿结构 / 编号审稿）→ 整段降级；
  *  `scaffold` = 正常交付里夹带的契约栏脚手架 → 只删脚手架行，正文逐字保留；
  *  `clean`    = 正常业务正文 → 原样返回。
  */
 export function classifyInternalReviewPayload(s: string): ReviewClass {
   const v = reviewDetectionView(s)
+  // 栏位语法视图：保留表格管道、把引号归一为空格。`reviewDetectionView` 会把 `|` 抹成空格，
+  // 若只判 v，`| issues |`／`"issues":` 的栏位边界会消失——本视图只补这两个形态，不参与其他判族。
+  const fieldView = s
+    .replace(/\r\n?/g, "\n")
+    .replace(INTERNAL_ENDPOINT_URL_RE, " ")
+    .replace(VISIBLE_URL_SEGMENT_RE, " ")
+    .replace(/\uFF1A/g, ":")
+    .replace(/[`*_~>#]+/g, " ")
+    .replace(/["']/g, " ")
+    .replace(/\s+/g, " ")
   if (
     REVIEW_FIELD_RE.test(v) ||
+    REVIEW_FIELD_RE.test(fieldView) ||
     CRITIC_IDENTITY_RE.test(v) ||
     CRITIC_STRUCTURE_RE.test(v) ||
-    NUMBERED_REVIEW_RE.test(v) ||
-    INTERNAL_ARTIFACT_RE.test(v)
+    NUMBERED_REVIEW_RE.test(v)
   ) {
     return "review"
   }
@@ -961,6 +968,17 @@ export function scrubVisibleProse(raw: unknown): string {
 }
 
 /**
+ * 弱内部痕迹的**就地脱敏**（clean/scaffold 路径专用，不整段降级）：
+ * 内部路径 / runId / 用量计数换成产品语言；UUID 与 task_id 是用户需要的生成回执，保持原样。
+ */
+function sanitizeWeakInternalArtifacts(s: string): string {
+  return s
+    .replace(INTERNAL_PATH_RE, "内部工作区")
+    .replace(RUN_ID_RE, "运行编号")
+    .replace(TOKEN_COUNT_RE, "用量计数")
+}
+
+/**
  * 纯函数（三出口共用）：子代理产出/唤醒载荷 → 用户可见文字。
  *  内审/复核产物 → 一句产品语言（+ 成品 URL）；正常交付 → 去纯内部栏位行留正文；正常正文 → 原样。
  *  F11 附加：整行恰为裸栏名单词（如 subagent.delta 的裸 `evidence`）整行删除；裸回环端点先删。
@@ -979,16 +997,18 @@ export function scrubSubagentPayload(raw: unknown): string {
   // 2) 结构判定 → 分层降级。
   const cls = classifyInternalReviewPayload(s)
   if (cls === "review") return degradeInternalReviewPayload(s)
-  // scaffold：只删**纯内部栏位行**（无中文说明）；无行被删时原样返回（正常报告逐字不变）。
-  if (cls === "scaffold") return stripScaffoldFromDeliverable(s)
+  // scaffold：只删**纯内部栏位行**（无中文说明），再就地脱敏弱内部痕迹；正常报告正文逐字不变。
+  if (cls === "scaffold") return sanitizeWeakInternalArtifacts(stripScaffoldFromDeliverable(s))
   // 3) 正常正文：整行恰为裸栏名单词的行删掉（R5 的 138 帧裸 `evidence`），其余逐字不变。
   if (BARE_INTERNAL_TOKEN_RE.test(s.trim())) return ""
   const lines = s.split("\n").filter((line) => !BARE_INTERNAL_TOKEN_RE.test(line.trim()))
   const joined = lines.join("\n")
   // F13：无行被删 → **逐字原样返回**（不再无条件 trim/折叠空行——用户 prompt／歌词／业务正文
   // 必须 OUT==IN；旧行为会把首尾空白与连续空行吃掉，破坏「不过清洗」的长度+sha 判据）。
-  if (joined === s) return s
-  return joined.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  const body =
+    joined === s ? s : joined.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  // 正常正文里的弱内部痕迹就地脱敏（不再整段降级），UUID/task_id 保留。
+  return sanitizeWeakInternalArtifacts(body)
 }
 
 /** F11：用户可见**文字**帧（正文/状态/通知）——只清洗这些帧的 `text`；tool/canvas/结构化帧不碰。 */
