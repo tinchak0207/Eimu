@@ -48,6 +48,8 @@ import { handleArtifact } from "./artifact-http.ts"
 import { handleCron } from "./cron-http.ts"
 import { handlePlan } from "./plan-http.ts"
 import { handleMemory } from "./memory-http.ts"
+// 2026-10-18：harness hook 总线的 loopback HTTP 面（plugin 的 Pre/PostToolUse 跨进程入口）。
+import { handleHooks } from "./hooks-http.ts"
 // TODO(整合 Wave3)：以下符号同波在建（questions-gw/session-read/quota-ledger/internal-http/
 // memory-wiring.ts），bun build 对 named import 硬查（未 export 即报错），故先 declare 占位
 // （第一阶段占位符法，记忆 gateway-index-refactor-stage1-0919）；整合 subagent 统一换真 import。
@@ -342,6 +344,11 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
         (pathname === "/internal/memory/save" || pathname === "/internal/memory/list" || pathname === "/internal/memory/read")
       ) {
         return handleMemory(req, pathname)
+      }
+      // CC 2.1.302 hook 总线：opencode plugin 的工具生命周期 hook 唯一入口。
+      // 精确路径匹配，放在 memory 家族旁，不遮蔽下方任何 startsWith 路由。
+      if (req.method === "POST" && pathname === "/internal/hooks/run") {
+        return handleHooks(req, pathname)
       }
       // 工作流引擎端点：接受 session_id（opencode 或 gateway id）解析 session。
       if (pathname === "/internal/workflow/templates" && req.method === "GET") {

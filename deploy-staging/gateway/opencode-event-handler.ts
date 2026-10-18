@@ -31,6 +31,8 @@ import {
   WORKFLOW_WRITE_GATE_MARK,
 } from "./canvas-write-gate.ts"
 import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce, maybeCompactSession } from "./messages-gw.ts"
+// CC 2.1.302 Stop hook：收盘路径 fire-and-forget，绝不阻塞 turn.done。
+import { runHooksWithBudget } from "./hooks-http.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
 // 2026-10-02 能力片：错误讯息即模型上下文。failover 重投时以既有 prompt_async 文本
 // part 通道注入「续写指示」与「孤儿 tool_use 补 is_error」——模型可见、使用者不可见
@@ -973,6 +975,20 @@ export function handleOpencodeEvent(event: any): void {
         releasePendingVideoWorkflows(state)
         // 回合结束是滚动摘要压缩的触发点：此刻无在途生成、讯息数稳定。
         void maybeCompactSession(state)
+        // CC 2.1.302 Stop hook：turn.done 已发（上方 emitTurnDone），此处仅
+        // fire-and-forget。runHooksWithBudget 永不 throw，超时/无配置都不影响收盘。
+        void runHooksWithBudget(
+          "Stop",
+          {
+            hook_event_name: "Stop",
+            session_id: state.sessionId,
+            stop_hook_active: false,
+            cwd: process.cwd(),
+          },
+          { timeoutMs: 60_000 },
+        ).catch((e) => {
+          console.warn(`[gateway] hooks Stop failed session=${state.sessionId}: ${e instanceof Error ? e.message : String(e)}`)
+        })
         // REQ-D2（2026-09-22）：本回合排队中的 steer（回合执行中用户追加的指引）
         // 在此投递——空队列零动作（与改动前逐位等价）；turnAborted 时 planSteerFlush
         // 全数作废（停止优先），不投递。放在 turn.done 之后：前端先看到本回合收尾，

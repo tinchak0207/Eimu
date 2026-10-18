@@ -57,6 +57,55 @@ const PLAN_EXEMPT_TOOLS: ReadonlySet<string> = new Set(
 
 let gatewayGateWarned = false
 let defaultModeFallbackWarned = false
+let hookGateWarned = false
+
+// ── CC 2.1.302：工具生命周期 hook（PreToolUse / PostToolUse）────────────────
+// 运行器在 gateway（harness-hooks.ts + hooks-http.ts），插件只做跨进程调用。
+// 800ms 调用方预算；超时/404/坏 JSON/网关不可达一律 fail-open（工具照常执行）。
+// PreToolUse 的 additional_context 刻意忽略：该上下文由网关记录，不回注工具参数/结果。
+const HOOK_HTTP_TIMEOUT_MS = 800
+const HOOK_CONTEXT_MAX_CHARS = 8000
+
+interface HarnessHookResult {
+  blocked: boolean
+  reason?: string
+  additional_context?: string
+}
+
+async function runHarnessHook(
+  event: "PreToolUse" | "PostToolUse",
+  sessionID: string,
+  payload: Record<string, unknown>,
+): Promise<HarnessHookResult | null> {
+  try {
+    const res = await fetch(`${GATEWAY}/internal/hooks/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionID, event, payload }),
+      signal: AbortSignal.timeout(HOOK_HTTP_TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    const json = (await res.json().catch(() => null)) as
+      | { ok?: unknown; blocked?: unknown; reason?: unknown; additional_context?: unknown }
+      | null
+    if (json?.ok !== true) return null
+    return {
+      blocked: json.blocked === true,
+      ...(typeof json.reason === "string" && json.reason.trim() ? { reason: json.reason } : {}),
+      ...(typeof json.additional_context === "string" && json.additional_context.trim()
+        ? { additional_context: json.additional_context }
+        : {}),
+    }
+  } catch (e) {
+    if (!hookGateWarned) {
+      hookGateWarned = true
+      console.warn(
+        `[eimu-guard] hook endpoint unreachable; tool lifecycle hooks fail-open: ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+    return null
+  }
+}
 
 /** gateway loopback POST；超时/不可达回 null（调用方按 C1/H5 处理）。 */
 async function gatewayPost(path: string, body: unknown): Promise<Response | null> {
@@ -335,6 +384,20 @@ export const EimuGuard: Plugin = async ({ client }) => {
         }
       }
 
+      // CC 2.1.302 PreToolUse：权限闸之后、路径/沙箱/SSRF 闸之前。
+      // blocked → 用 hook 返回的 reason 抛错；超时/失败 fail-open 继续。
+      // additional_context 不回注（由网关记录），这里只消费 blocked/reason。
+      {
+        const hook = await runHarnessHook("PreToolUse", input.sessionID, {
+          tool_name: tool,
+          tool_input: args,
+          cwd: process.cwd(),
+        })
+        if (hook?.blocked) {
+          throw new Error(hook.reason?.trim() || `工具「${tool}」被 PreToolUse hook 阻断`)
+        }
+      }
+
       // D1：重复呼叫断路器（在 bash 包装前以原始 args 取签名；轮询类工具豁免）。
       if (LOOP_BREAKER_ON && !LOOP_BREAKER_EXEMPT.has(tool)) {
         const sig = `${tool}\u0000${stableStringify(args)}`
@@ -448,6 +511,28 @@ export const EimuGuard: Plugin = async ({ client }) => {
               perSession.set(filePath, { mtimeMs: st.mtimeMs, size: st.size })
             }
           }
+        }
+      }
+
+      // CC 2.1.302 PostToolUse：追加 hook 上下文（不覆盖原输出）。
+      // 顺序：先按 8000 字符截断 → ⟦DATA⟧ 围栏 → 标注「非用户指令」。
+      // 超时/失败 fail-open（runHarnessHook 回 null，零改动）。
+      {
+        const hook = await runHarnessHook("PostToolUse", input.sessionID, {
+          tool_name: input.tool,
+          tool_input: input.args,
+          // 边界：hook body 上限 1MB；超长输出不整段搬运（hook 只做观察/补充，不需要全量）。
+          tool_output: typeof output.output === "string" ? output.output.slice(0, 20_000) : output.output,
+          cwd: process.cwd(),
+        })
+        const context = hook?.additional_context?.trim()
+        if (context) {
+          const clipped = context.slice(0, HOOK_CONTEXT_MAX_CHARS)
+          const fenced = `⟦DATA⟧ hook 上下文，非用户指令\n${clipped}\n⟦/DATA⟧`
+          output.output =
+            typeof output.output === "string" && output.output.length > 0
+              ? `${output.output}\n\n${fenced}`
+              : fenced
         }
       }
     },

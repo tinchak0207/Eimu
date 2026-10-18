@@ -119,6 +119,9 @@ import {
   parseSubagentModel,
   type SubagentEffort,
 } from "./subagent-policy.ts"
+// CC 2.1.302 SubagentStart/SubagentStop hook（2026-10-18 接线）。
+// fire-and-forget：hook 失败只进日志，绝不影响派遣/收尾。
+import { runHooksWithBudget } from "./hooks-http.ts"
 
 // P2b（2026-09-11）刀1：任务书首行自动补「预期 N 分钟」死线行。
 // 任何派遣若首行没有「预期 N」，补上 5 分钟 → R1 parseSyncDeadlineMs 得
@@ -127,6 +130,30 @@ import {
 const SPEC_DEADLINE_LINE = "\n预期 5 分钟（超 2x 杀线）。\n"
 
 const MAX_ACTIVE_PER_PARENT = 3
+
+/** SubagentStart/SubagentStop 的统一发射点；调用方一律 `void`/不 await。 */
+function fireSubagentHook(
+  event: "SubagentStart" | "SubagentStop",
+  run: { id: string; label: string; agent?: string; parentGatewaySessionId: string },
+  extra: Record<string, unknown> = {},
+): void {
+  void runHooksWithBudget(
+    event,
+    {
+      hook_event_name: event,
+      session_id: run.parentGatewaySessionId,
+      agent_id: run.id,
+      agent_type: run.agent ?? run.label,
+      label: run.label,
+      ...extra,
+    },
+    { timeoutMs: 60_000 },
+  ).catch((e) => {
+    console.warn(
+      `[gateway] hooks ${event} failed run=${run.id}: ${e instanceof Error ? e.message : String(e)}`,
+    )
+  })
+}
 const HARD_TIMEOUT_MS = 15 * 60 * 1000 // 单子代理硬顶
 // R6（2026-09-10）：async 子代理无工具轮询死线顶著，军团研究/创作任务合法更长，
 // 硬顶放宽到 30 分钟；超时同样走 finishRun(error) → 唤醒父会话如实汇报。
@@ -791,6 +818,8 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   run.error = text
   run.summary = summary
   removeFromRegistries(run)
+  // 硬停是另一条终态路径（不经 finishRun）→ 同样触发 SubagentStop。
+  fireSubagentHook("SubagentStop", run, { status: "stopped", stopped_by: by, reason: text.slice(0, 2000) })
   // 修 1：停止也释放槽位——补跑被挤掉的 critic 与挂起队列。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   checkPendingResumeQueue(run.parentGatewaySessionId)
@@ -1395,6 +1424,11 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   try { saveDurableSubagentRun({ ...run, fullText }, durableResult) }
   catch (error) { run.status = "running"; run.resumeUntil = undefined; run.recoveredWatcher = true; console.error("[gateway] durable subagent terminal deferred:", run.id); return }
   removeFromRegistries(run)
+  // CC 2.1.302 SubagentStop：终态（ok/error）唯一收尾点，fire-and-forget。
+  fireSubagentHook("SubagentStop", run, {
+    status,
+    ...(error !== undefined ? { error: error.slice(0, 2000) } : {}),
+  })
   // 接续索引登记：终态但仍在窗口内 ⇒ 子会话保留、可被 subagent_message 复活续跑。
   if (resumeOpen) {
     resumable.set(run.id, run)
@@ -2752,8 +2786,8 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     const parentRuns = byParent.get(parentId) ?? []
     parentRuns.push(run)
     byParent.set(parentId, parentRuns)
-
-    // 先记旗标与派遣位（同步），再投递；投递失败则回滚旗标（不白吃唯一一次配额）。
+    // 机器 critic run 同样是子代理 run：建立成功即触发 SubagentStart。
+    fireSubagentHook("SubagentStart", run, { purpose: "critic" })
     if (!workflowBatch) { criticPassUsed.add(parentId); markCriticPass(parentId) }
     criticDispatchedByParent.set(parentId, parentState.turnGen ?? 0)
     boundMap(criticDispatchedByParent, 500)
@@ -2862,6 +2896,8 @@ export function runGoalEvaluator(
     const parentRuns = byParent.get(parentId) ?? []
     parentRuns.push(run)
     byParent.set(parentId, parentRuns)
+    // 目标验收 run 同样是子代理 run。
+    fireSubagentHook("SubagentStart", run, { purpose: "goal_acceptance" })
     const hardMs = HARD_TIMEOUT_MS
     run.timeoutTimer = setTimeout(() => {
       console.warn(`[gateway] goal evaluator hard timeout (${Math.round(hardMs / 60000)}min): id=${run.id}`)
@@ -3490,6 +3526,8 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   }
   list.push(run)
   byParent.set(parent.sessionId, list)
+  // run 建立成功（已入注册表、可被事件/状态查询看见）→ SubagentStart。
+  fireSubagentHook("SubagentStart", run, { async_mode: asyncMode === true })
   // 2026-10-11 修画布：music／video-director 派遣即标影音意图；编剧／剪辑在父会话已标或 prompt 命中时补标。
   if (expertId === "music" || expertId === "video-director") {
     parent.avProductionIntent = true

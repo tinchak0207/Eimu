@@ -1,4 +1,7 @@
 import { Database } from "bun:sqlite"
+// CC 2.1.302 TaskCreated/TaskCompleted hook（2026-10-18 接线）。
+// fire-and-forget：hook 失败只进日志，绝不影响任务板操作。
+import { runHooksWithBudget } from "./hooks-http.ts"
 
 // 持久任务板：移植 Claude Code 的 TaskCreate/TaskUpdate/TaskList 语义。
 // 与 sessions 共用同一持久目录（SESSIONS_DB_PATH），独立表 agent_tasks。
@@ -270,6 +273,27 @@ function insertTask(
   return Number(info.lastInsertRowid)
 }
 
+function fireTaskHook(
+  event: "TaskCreated" | "TaskCompleted",
+  sessionId: string,
+  task: { id: number; subject: string; description?: string; status?: string },
+): void {
+  void runHooksWithBudget(
+    event,
+    {
+      hook_event_name: event,
+      session_id: sessionId,
+      task_id: String(task.id),
+      subject: task.subject,
+      ...(task.description !== undefined ? { description: task.description } : {}),
+      ...(task.status !== undefined ? { status: task.status } : {}),
+    },
+    { timeoutMs: 60_000 },
+  ).catch((e) => {
+    console.warn(`[gateway] hooks ${event} failed session=${sessionId}: ${e instanceof Error ? e.message : String(e)}`)
+  })
+}
+
 export function createTask(
   sessionId: string,
   input: { subject: string; description: string; activeForm?: string | null; metadata?: Record<string, unknown> },
@@ -282,6 +306,8 @@ export function createTask(
   const activeForm = typeof input.activeForm === "string" ? input.activeForm : null
   const metadata = isPlainRecord(input.metadata) ? input.metadata : {}
   const id = withTransaction(() => insertTask(sessionId, subject, description, activeForm, metadata))
+  // 落库成功后触发；不 await，任务创建响应不等待 hook。
+  fireTaskHook("TaskCreated", sessionId, { id, subject, description, status: "pending" })
   return { task: { id, subject } }
 }
 
@@ -454,6 +480,16 @@ export function updateTask(sessionId: string, taskId: number, patch: TaskUpdateP
 
     const statusChange =
       task.status !== original.status ? { from: original.status, to: task.status } : undefined
+    // status 变为 completed 且落库成功 → TaskCompleted。空 patch（updatedFields=[]）
+    // 上面已 return；此处 statusChange 存在即代表确实写了新状态。
+    if (statusChange?.to === "completed") {
+      fireTaskHook("TaskCompleted", sessionId, {
+        id: task.id,
+        subject: task.subject,
+        description: task.description,
+        status: task.status,
+      })
+    }
     return {
       success: true,
       taskId,

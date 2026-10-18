@@ -2,8 +2,9 @@
  * harness-hooks.ts — Claude Code 2.1.302 hook 总线的 Eimu 落地。
  *
  * 约束（照 CC 2.1.302 m0318 原始实现）：
- * - 33 个事件名保留；首期只接 10 个（PreToolUse/PostToolUse/Stop/SessionStart/
- *   PreCompact/PostCompact/TaskCreated/TaskCompleted/SubagentStart/SubagentStop）。
+ * - 33 个事件名保留；首期只接 11 个（PreToolUse/PostToolUse/Stop/SessionStart/
+ *   UserPromptSubmit/PreCompact/PostCompact/TaskCreated/TaskCompleted/SubagentStart/
+ *   SubagentStop）。
  * - 配置 HARNESS_HOOKS_PATH（默认 /opt/agent-harness/state/hooks.json）：
  *   {hooks:{<event>:[{matcher?,hooks:[{type:"command"|"http",command?|url?,headers?,timeout?}]}]}}
  * - command 用 `bash -lc`，stdin 写 JSON；http 用 fetch；默认超时 60000ms；并行执行。
@@ -49,12 +50,14 @@ export const HOOK_EVENTS = [
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
-/** 首期只接这十个；其余事件名保留但未接。 */
+/** 首期只接这十一个；其余事件名保留但未接。 */
 export const ENABLED_HOOK_EVENTS = [
   "PreToolUse",
   "PostToolUse",
   "Stop",
   "SessionStart",
+  // 2026-10-18 接线：每轮用户消息都要触发（原清单遗漏，属死配置）。
+  "UserPromptSubmit",
   "PreCompact",
   "PostCompact",
   "TaskCreated",
