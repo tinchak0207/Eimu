@@ -20,6 +20,8 @@ import { handleAttachmentUpload, sanitizeUploadName, reserveUniqueUploadName, co
 import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
 import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker, handleSubagentMessage, handleSubagentNotify, handleSubagentAskParent, handleSubagentCheckpoint, handleSubagentScratchpad, handleSubagentArtifact, handleSubagentSuspend, handleSubagentResume } from "./subagent.ts"
+// 用户面 peek 子代理（列表／转录增量／停止）；鉴权沿用下方 Bearer 闸门。
+import { handleSubagentListPublic, handleSubagentStopPublic, handleSubagentTranscriptPublic } from "./subagent-http.ts"
 import { workflowServiceTemplates, handleWorkflowInternal, pushWorkflowCompletion } from "./workflow-gw.ts"
 import { handleDirectorRoutes } from "./director.ts"
 import { handleCreateSession, handleEventStream, handleConfirm } from "./session-lifecycle.ts"
@@ -1058,6 +1060,22 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     // 从共享语料跑 §7 召回。契约 §3 未列此路由，属本片新增（已在回报中标明）。
     if (req.method === "POST" && pathname === "/agent/v1/memory/recall") {
       return handleMemoryRecallSearch(key, req)
+    }
+
+    // 用户面 peek 子代理：停止 → 单 run 转录增量 → 本会话子代理列表（顺序不可颠倒）。
+    m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/subagents\/([^/]+)\/stop$/)
+    if (req.method === "POST" && m) {
+      return handleSubagentStopPublic(key, m[1], m[2])
+    }
+
+    m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/subagents\/([^/]+)$/)
+    if (req.method === "GET" && m) {
+      return handleSubagentTranscriptPublic(key, m[1], m[2], req.url)
+    }
+
+    m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/subagents$/)
+    if (req.method === "GET" && m) {
+      return handleSubagentListPublic(key, m[1])
     }
 
     return jsonError(404, "not found", "not_found", "not_found")

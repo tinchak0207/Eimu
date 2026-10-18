@@ -512,7 +512,7 @@ function AgentChatPanelComponent({
       {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。
           窄屏 gutter 同上：12px（父卡）+4px＝16px。 */}
       <div className="pb-1 max-sm:px-1">
-        <AgentSubagentBar items={subagentItems} />
+        <AgentSubagentBar items={subagentItems} sessionId={sessionId} />
       </div>
 
       {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。

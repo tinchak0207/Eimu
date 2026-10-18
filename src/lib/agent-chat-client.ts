@@ -16,6 +16,9 @@ import type {
   AgentQuotaState,
   AgentSessionHistoryResponse,
   AgentSteerStatus,
+  AgentSubagentRunSummary,
+  AgentSubagentTranscriptEntry,
+  AgentSubagentTranscriptPage,
   OpenCodeMessage,
 } from "./agent-chat-types";
 import { AGENT_STEER_STATUSES } from "./agent-chat-types";
@@ -328,6 +331,70 @@ export async function listAgentSessions(): Promise<AgentSessionSummary[]> {
   return sessions.filter(
     (it): it is AgentSessionSummary =>
       typeof it === 'object' && it !== null && typeof (it as AgentSessionSummary).session_id === 'string',
+  );
+}
+
+/**
+ * 列出某会话的子代理运行（网关 GET /agent/v1/sessions/:id/subagents 透传）。
+ * 阵列形状不对时回空表（与 listAgentSessions 同语义），不把列表故障升级成聊天故障。
+ */
+export async function listAgentSubagents(sessionId: string): Promise<AgentSubagentRunSummary[]> {
+  const data = await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/subagents`, {
+    method: "GET",
+  });
+  const subagents = (data as { subagents?: unknown })?.subagents;
+  if (!Array.isArray(subagents)) return [];
+  return subagents.filter(
+    (it): it is AgentSubagentRunSummary =>
+      typeof it === "object" && it !== null && typeof (it as AgentSubagentRunSummary).id === "string",
+  );
+}
+
+/**
+ * 读一页子代理转录。offset 缺省从 0 开始；续拉只喂上一页的 next_offset。
+ * 404 沿 agentFetch 既有 not_found 语义；entries 不是阵列＝契约破裂，丢 parse_error。
+ */
+export async function readAgentSubagentTranscript(
+  sessionId: string,
+  runId: string,
+  offset?: number,
+): Promise<AgentSubagentTranscriptPage> {
+  const query =
+    typeof offset === "number" && Number.isFinite(offset)
+      ? `?offset=${Math.max(0, Math.floor(offset))}`
+      : "";
+  const data = await agentFetch(
+    `/api/agent/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(runId)}${query}`,
+    { method: "GET" },
+  );
+  const d = (data ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(d.entries)) {
+    throw new AgentChatError("parse_error", "服务器未返回有效的子代理日志。");
+  }
+  const entries = d.entries as AgentSubagentTranscriptEntry[];
+  const asNumber = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const base = typeof offset === "number" && Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  return {
+    object: typeof d.object === "string" ? d.object : "",
+    run_id: typeof d.run_id === "string" ? d.run_id : runId,
+    entries,
+    // next_offset 缺栏时按本页长度推进——否则轮询会在原地重读同一页。
+    next_offset: asNumber(d.next_offset) ?? base + entries.length,
+    truncated: d.truncated === true,
+    eof: d.eof === true,
+    size: asNumber(d.size) ?? 0,
+  };
+}
+
+/**
+ * 请求停止一个仍在运行的子代理。409 not_running 由调用端视为「已结束」，
+ * 不当失败提示（网关契约：{ok:false,code:"not_running"}）。
+ */
+export async function stopAgentSubagent(sessionId: string, runId: string): Promise<void> {
+  await agentFetch(
+    `/api/agent/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(runId)}/stop`,
+    { method: "POST" },
   );
 }
 

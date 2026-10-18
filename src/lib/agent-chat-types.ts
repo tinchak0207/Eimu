@@ -1349,6 +1349,77 @@ export interface AgentSubagentToolEntry {
   status: "running" | "ok" | "failed";
 }
 
+// ─────────────────────────── 子代理运行与实时转录（网关契约 2026-10-18）
+//
+// GET /agent/v1/sessions/:id/subagents         → { object, subagents: AgentSubagentRunSummary[] }
+// GET /agent/v1/sessions/:id/subagents/:runId  → AgentSubagentTranscriptPage
+// POST /agent/v1/sessions/:id/subagents/:runId/stop → { ok:true } | 409 { ok:false, code:"not_running" }
+//
+// 栏位名是后端合同本身，前端不得另起别名；runId 只是 URL 参数语义（即 summary.id）。
+
+/** 一次子代理工具调用的运行记录（列表端点 tools[]）。 */
+export interface AgentSubagentRunTool {
+  call_id: string;
+  tool: string;
+  status: "running" | "ok" | "failed";
+  at: number;
+  ended_at?: number;
+}
+
+/** 子代理产出的附件引用（列表端点 artifacts[]）。 */
+export interface AgentSubagentRunArtifact {
+  kind: string;
+  url: string;
+}
+
+/** 转录可用性（列表端点 transcript）。 */
+export interface AgentSubagentRunTranscriptInfo {
+  available: boolean;
+  bytes: number;
+  truncated: boolean;
+}
+
+/** 列表端点里的一个子代理运行。 */
+export interface AgentSubagentRunSummary {
+  id: string;
+  label: string;
+  agent: string;
+  status: "running" | "ok" | "error" | "stopped";
+  started_at: number;
+  last_activity_at: number;
+  elapsed_ms: number;
+  silent_ms: number;
+  tool?: string;
+  pending_tools?: number;
+  tools: AgentSubagentRunTool[];
+  artifacts: AgentSubagentRunArtifact[];
+  summary?: string;
+  transcript: AgentSubagentRunTranscriptInfo;
+}
+
+/**
+ * 转录流里的一行。字段随 k 变化，形状即网关合同：
+ * text→s；tool→id,name,status；artifact→kind,url；note→name,s；end→status,summary。
+ */
+export type AgentSubagentTranscriptEntry =
+  | { t: number; k: "meta" }
+  | { t: number; k: "text"; s: string }
+  | { t: number; k: "tool"; id: string; name: string; status: "running" | "ok" | "failed" }
+  | { t: number; k: "artifact"; kind: string; url: string }
+  | { t: number; k: "note"; name: string; s: string }
+  | { t: number; k: "end"; status: "running" | "ok" | "error" | "stopped"; summary?: string };
+
+/** 转录分页回应：续拉只认 next_offset，eof 为真后不再请求。 */
+export interface AgentSubagentTranscriptPage {
+  object: string;
+  run_id: string;
+  entries: AgentSubagentTranscriptEntry[];
+  next_offset: number;
+  truncated: boolean;
+  eof: boolean;
+  size: number;
+}
+
 /**
  * 回合收尾后的子代理产出卡（F3）。subagent 条目退场时，有 summary/全文的
  * 转存成这条持久条目留在 transcript 里：中止不再把 1082 字产出一起删掉。

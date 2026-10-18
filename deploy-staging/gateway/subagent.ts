@@ -26,6 +26,8 @@
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs"
 import { join, resolve, sep } from "node:path"
+// 用户面 peek 子代理：追加式 JSONL 转录（与 live .md 日志并存，不改其语义）。
+import { appendTranscript, getTranscriptInfo, initTranscript } from "./subagent-transcript.ts"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
 import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, isPlanOnlyNoGenerationIntent, type JevDispatchGuards } from "./jev-gate"
@@ -545,6 +547,10 @@ interface SubagentRun {
   // C1：实时工作日志档相对路径（`outputs/subagent/live/<runId>.md`）与上次写入时刻（节流用）。
   livePath?: string
   liveWrittenAt?: number
+  // 内审 run 的转录只写一次「正文不外传」说明（去重标记），绝不落正文。
+  transcriptHideNoted?: boolean
+  // 转录终态行的单次写标记：硬停与 finishRun／软停收尾竞态时只留一条 end。
+  transcriptEnded?: boolean
   // X7：终态接续窗口。> now 表示子会话未 DELETE、run 可被 subagent_message 复活续跑；
   // 到期由 livenessTick 回收。**只**在自然终态（ok/error／soft 收尾）设置；人工硬停
   // （stopped）与孤儿不设——对应 Y4「你自己停的不自动续」。
@@ -974,6 +980,8 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
     // 刻意**不唤醒**父会话：停止＝结束，不是新任务。唤醒会让 orchestrator 又起一轮
     // （并可能再派新 subagent），正是用户抱怨的「刹不住」。
   }
+  // 转录终态与会话是否还在无关：会话已摘除时照样落 end（一次性标记防双写）。
+  appendTranscriptEnd(run, "stopped", summary)
   if (isOpenCodeSessionId(run.opencodeSessionId) && deps) {
     void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/abort`, {
       method: "POST",
@@ -1659,6 +1667,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       // 2026-10-14 协作总线（C3）：soft 收尾的新栏位（谁请它收尾＋原因）；非 soft 时零注入。
       ...(softStop ? { soft_stopped: true, stopped_by: softStop.by, reason: softStop.reason } : {}),
     })
+    appendTranscriptEnd(run, status, visibleSummary)
     // G3（2026-10-10）：用户默认面要「本路刚完成／失败」人话摘要——走 turn.status，
     // 禁止 message.delta。run 已从注册表摘除；若仍有兄弟在跑，同一帧带上剩余路数
     // （避免先写完成句再立刻被 emitRunningSubagentsStatus 覆盖而看不见）。
@@ -2774,6 +2783,10 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // subagent.delta 主因是英文思考洪流；存活感已由 turn.status 心跳覆盖。正文 delta 照常。
           if (!hideBody && kind !== "reasoning") {
             deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: p.delta })
+            appendTranscript(run.id, { t: Date.now(), k: "text", s: scrubSubagentPayload(p.delta) })
+          } else if (hideBody && kind !== "reasoning" && run.transcriptHideNoted !== true) {
+            run.transcriptHideNoted = true
+            appendTranscript(run.id, { t: Date.now(), k: "note", name: "internal", s: "（内部复核正文不外传）" })
           }
           if (typeof p.partID === "string") {
             run.partEmitted.set(p.partID, (run.partEmitted.get(p.partID) ?? 0) + p.delta.length)
@@ -2833,6 +2846,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
                 tool: toolName,
                 status: frameStatus,
               })
+              appendTranscript(run.id, { t: Date.now(), k: "tool", id: callId, name: toolName, status: frameStatus })
               // C1：工具状态**变化**是实时工作日志档最有价值的时点——节流仍 ≥1000ms。
               writeLiveLog(run)
             }
@@ -2860,12 +2874,14 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           for (const c of media.video) {
             if (!run.artifacts.some((a) => a.url === c.url)) {
               run.artifacts.push({ kind: "video", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
+              appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "video", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
             }
             void emitVideoDone(parentState, c.url, c.cost_coins, undefined, "video")
           }
           for (const c of media.audio) {
             if (!run.artifacts.some((a) => a.url === c.url)) {
               run.artifacts.push({ kind: "audio", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
+              appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "audio", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
             }
             void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
           }
@@ -2899,6 +2915,10 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // G3：reasoning part 后缀不转发（同上）；正文照常。
           if (!hideBody && part.type !== "reasoning") {
             deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: suffix })
+            appendTranscript(run.id, { t: Date.now(), k: "text", s: scrubSubagentPayload(suffix) })
+          } else if (hideBody && part.type !== "reasoning" && run.transcriptHideNoted !== true) {
+            run.transcriptHideNoted = true
+            appendTranscript(run.id, { t: Date.now(), k: "note", name: "internal", s: "（内部复核正文不外传）" })
           }
           run.partEmitted.set(id, part.text.length)
           boundMap(run.partEmitted, 200)
@@ -3067,6 +3087,7 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     byParent.set(parentId, parentRuns)
     // 机器 critic run 同样是子代理 run：建立成功即触发 SubagentStart。
     fireSubagentHook("SubagentStart", run, { purpose: "critic" })
+    ensureTranscript(run)
     if (!workflowBatch) { criticPassUsed.add(parentId); markCriticPass(parentId) }
     criticDispatchedByParent.set(parentId, parentState.turnGen ?? 0)
     boundMap(criticDispatchedByParent, 500)
@@ -3177,6 +3198,7 @@ export function runGoalEvaluator(
     byParent.set(parentId, parentRuns)
     // 目标验收 run 同样是子代理 run。
     fireSubagentHook("SubagentStart", run, { purpose: "goal_acceptance" })
+    ensureTranscript(run)
     const hardMs = HARD_TIMEOUT_MS
     run.timeoutTimer = setTimeout(() => {
       console.warn(`[gateway] goal evaluator hard timeout (${Math.round(hardMs / 60000)}min): id=${run.id}`)
@@ -3835,6 +3857,7 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   byParent.set(parent.sessionId, targetList)
   // run 建立成功（已入注册表、可被事件/状态查询看见）→ SubagentStart。
   fireSubagentHook("SubagentStart", run, { async_mode: asyncMode === true })
+  ensureTranscript(run)
   // 2026-10-11 修画布：music／video-director 派遣即标影音意图；编剧／剪辑在父会话已标或 prompt 命中时补标。
   if (expertId === "music" || expertId === "video-director") {
     parent.avProductionIntent = true
@@ -4631,12 +4654,89 @@ function writeLiveLog(run: SubagentRun, force = false): string | undefined {
  *  S3（FIX-G2）：内审 run 的正文抑制对回报队列一致生效——存进去的是如实的「不外传」说明，
  *  不是空串、也不是原始正文（红线 4）。 */
 function pushParentNote(run: SubagentRun, kind: string, text: string): void {
-  const body = isInternalReviewRun(run) ? SUBAGENT_INTERNAL_BODY_WITHHELD : text.slice(0, SUBAGENT_BUS_MAX_CHARS)
+  const internal = isInternalReviewRun(run)
+  const body = internal ? SUBAGENT_INTERNAL_BODY_WITHHELD : text.slice(0, SUBAGENT_BUS_MAX_CHARS)
   run.pendingParentNotes.push({ id: crypto.randomUUID(), kind, text: body, at: Date.now() })
   if (run.pendingParentNotes.length > SUBAGENT_NOTE_QUEUE_MAX) {
     run.pendingParentNotes.splice(0, run.pendingParentNotes.length - SUBAGENT_NOTE_QUEUE_MAX)
   }
+  appendTranscript(run.id, { t: Date.now(), k: "note", name: kind, s: internal ? body : scrubSubagentPayload(body) })
   writeLiveLog(run)
+}
+
+/** 建转录（幂等）：run 建立/恢复点统一入口；已存在的转录绝不覆盖。 */
+function ensureTranscript(run: SubagentRun): void {
+  initTranscript({
+    runId: run.id,
+    parentSessionId: run.parentGatewaySessionId,
+    label: run.label,
+    agent: run.agent,
+    prompt: run.prompt,
+    startedAt: run.startedAt,
+  })
+}
+
+/** 转录终态行只写一次：硬停与 finishRun/软停收尾共用同一标记（不改任何 SSE 帧）。 */
+function appendTranscriptEnd(run: SubagentRun, status: string, summary?: string): void {
+  if (run.transcriptEnded) return
+  run.transcriptEnded = true
+  appendTranscript(run.id, {
+    t: Date.now(),
+    k: "end",
+    status,
+    ...(typeof summary === "string" ? { summary } : {}),
+  })
+}
+
+/** 用户面 peek 子代理的 live 快照。HTTP 层只消费此形状，不直接读内部 run。 */
+export interface PublicSubagentRun {
+  id: string
+  label: string
+  agent: string
+  status: "running" | "ok" | "error" | "stopped"
+  started_at: number
+  last_activity_at: number
+  elapsed_ms: number
+  silent_ms: number
+  tool: string | null
+  pending_tools: number
+  tools: Array<{ call_id: string; tool: string; status: string; at: number; ended_at?: number }>
+  artifacts: Array<{ kind: string; url: string }>
+  summary?: string
+  transcript: { available: boolean; bytes: number; truncated: boolean }
+}
+
+export function listLiveSubagentRuns(parentGatewaySessionId: string): PublicSubagentRun[] {
+  const now = Date.now()
+  return (byParent.get(parentGatewaySessionId) ?? []).map((run) => ({
+    id: run.id,
+    label: run.label,
+    agent: run.agent ?? "",
+    status: run.status === "ok" || run.status === "error" || run.status === "stopped" ? run.status : "running",
+    started_at: run.startedAt,
+    last_activity_at: run.lastActivityAt,
+    elapsed_ms: Math.max(0, now - run.startedAt),
+    silent_ms: Math.max(0, now - run.lastActivityAt),
+    tool: run.lastToolName ?? null,
+    pending_tools: run.pendingTools.size,
+    tools: run.toolTimeline.map((t) => ({
+      call_id: t.call_id,
+      tool: t.tool,
+      status: t.status,
+      at: t.at,
+      ...(t.ended_at !== undefined ? { ended_at: t.ended_at } : {}),
+    })),
+    artifacts: (run.artifacts ?? []).map((a) => ({ kind: a.kind, url: a.url })),
+    ...(run.summary ? { summary: run.summary } : {}),
+    transcript: getTranscriptInfo(run.id),
+  }))
+}
+
+/** 用户面停止：能找到该 run 就交给 stopSubagentRun 裁决（终态/已 stopped 由它返 false）。 */
+export function stopLiveSubagentRun(parentGatewaySessionId: string, runId: string): boolean {
+  const run = (byParent.get(parentGatewaySessionId) ?? []).find((r) => r.id === runId)
+  if (!run) return false
+  return stopSubagentRun(run, "user", "用户从任务面板停止", "hard")
 }
 
 /** X3：派给子代理的一条消息的对外框架。发起方的中途指示＝正常任务指示（Y4），但明确其
@@ -4934,6 +5034,8 @@ async function resumeTerminalRun(
     criticReviewed: undefined,
     livePath: undefined,
     liveWrittenAt: undefined,
+    transcriptHideNoted: undefined,
+    transcriptEnded: undefined,
     currentTurnId: undefined,
     lastToolName: undefined,
     timeoutTimer: undefined,
@@ -4958,6 +5060,7 @@ async function resumeTerminalRun(
   byChildOc.set(run.opencodeSessionId, run)
   list.push(run)
   byParent.set(run.parentGatewaySessionId, list)
+  ensureTranscript(run)
   const delivered = await deliverChildTurn(run, childFacingFrame(text, kind), "resume", true)
   if (!delivered) {
     removeFromRegistries(run)
@@ -6364,6 +6467,7 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
       run.prompt = textBlocksOfMessage(firstUser)
       run.recoveredWatcher = true
       seedTakenOverCursor(run, messages)
+      ensureTranscript(run)
       bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
       saveDurableSubagentRun(run)
       } catch (error) { console.warn("[gateway] individual legacy takeover deferred:", record.runId, error instanceof Error ? error.message : "unavailable") }
@@ -6374,6 +6478,7 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
   // Existing durable rework records also transfer to watchers rather than abort+DELETE.
   for (const record of loadReworkRecords()) if (!durableSubagentRun(record.runId)) {
     const run = runFromReworkRecord(record)
+    ensureTranscript(run)
     bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
     saveDurableSubagentRun(run)
   }
@@ -6389,6 +6494,7 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
     const list = byParent.get(run.parentGatewaySessionId) || []
     if (!list.some((existing) => existing.id === run.id)) list.push(run)
     byParent.set(run.parentGatewaySessionId, list)
+    ensureTranscript(run)
     bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
   }
   await reconcileTakenOverRuns()

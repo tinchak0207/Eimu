@@ -3,7 +3,18 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentSubagentItem, AgentSubagentToolEntry } from "@/lib/agent-chat-types";
+import type {
+  AgentSubagentItem,
+  AgentSubagentRunSummary,
+  AgentSubagentToolEntry,
+  AgentSubagentTranscriptEntry,
+} from "@/lib/agent-chat-types";
+import {
+  AgentChatError,
+  listAgentSubagents,
+  readAgentSubagentTranscript,
+  stopAgentSubagent,
+} from "@/lib/agent-chat-client";
 import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 import { toolDisplayName } from "./AgentToolCard";
 
@@ -151,6 +162,240 @@ function MarqueeLine({ text }: { text: string }) {
 
 interface SubagentCardProps {
   item: AgentSubagentItem;
+  sessionId?: string | null;
+  open: boolean;
+  onToggle: () => void;
+}
+
+/** 面板距底的贴合阈值（px）：用户向上翻看时不抢滚动位置。 */
+const STICK_BOTTOM_PX = 24;
+/** 运行中续拉间隔：2s 是「看起来实时」与请求量之间的折中。 */
+const TRANSCRIPT_POLL_MS = 2000;
+/** 远端列表的刷新间隔：只在列表里仍有 running 时启用，终态即停。 */
+const REMOTE_LIST_POLL_MS = 5000;
+/**
+ * 「刚结束」窗口（10 分钟）：这个栏的定位是当前进度，不是历史墙——刷新后仍要
+ * 看得见刚完成的这一路，但更早的终态 run（列表最多 30 条）不再进 UI。
+ */
+const REMOTE_FRESH_MS = 10 * 60 * 1000;
+
+/** 远端列表 → 上栏白名单：运行中，或 10 分钟内结束；其余丢弃。 */
+function isPourableRemoteRun(run: AgentSubagentRunSummary): boolean {
+  return run.status === "running" || run.silent_ms < REMOTE_FRESH_MS;
+}
+
+/**
+ * 远端列表行 → 与帧内行同构的展示条目。只活在渲染层，不写回 reducer；
+ * id 加 remote: 前缀避免与帧内条目撞 key，同一次运行的 subagentId 仍指向网关 id。
+ */
+function remoteRunToSubagentItem(run: AgentSubagentRunSummary): AgentSubagentItem {
+  return {
+    kind: "subagent",
+    id: `remote:${run.id}`,
+    seq: Number.MAX_SAFE_INTEGER,
+    subagentId: run.id,
+    label: run.label,
+    lastLine: run.summary ?? (run.tool ? `${run.tool} 运行中` : "运行中…"),
+    status: run.status,
+    ...(run.summary ? { summary: run.summary } : {}),
+    tools: (run.tools ?? []).map((tool) => ({
+      callId: tool.call_id,
+      tool: tool.tool,
+      status: tool.status,
+    })),
+  };
+}
+
+/** 转录行渲染：顺序即网关 entries 顺序，不重排、不合并。 */
+function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscriptEntry[] }) {
+  return (
+    <>
+      {entries.map((entry, index) => {
+        switch (entry.k) {
+          case "text":
+            return (
+              <p
+                key={`${index}-text`}
+                className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground"
+              >
+                {entry.s}
+              </p>
+            );
+          case "tool":
+            return (
+              <div
+                key={`${index}-tool`}
+                className="flex min-w-0 items-center gap-1.5 text-ios-footnote text-muted-foreground"
+              >
+                <span className={cn("h-1 w-1 shrink-0 rounded-full", TOOL_STATUS_DOT[entry.status])} aria-hidden="true" />
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{toolDisplayName(entry.name)}</span>
+                <span className={cn("shrink-0 whitespace-nowrap", TOOL_STATUS_WORD_TONE[entry.status])}>
+                  {TOOL_STATUS_WORD[entry.status]}
+                </span>
+              </div>
+            );
+          case "artifact":
+            return (
+              <a
+                key={`${index}-artifact`}
+                href={entry.url}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 break-all text-ios-footnote text-ios-blue underline-offset-2 hover:underline"
+              >
+                {entry.kind ? `附件（${entry.kind}）` : "附件"}
+              </a>
+            );
+          case "note":
+            return (
+              <div key={`${index}-note`} className="flex min-w-0 gap-1.5 text-ios-footnote text-muted-foreground">
+                <span className="shrink-0 text-foreground/45">备注·{entry.name}</span>
+                <span className="min-w-0 whitespace-pre-wrap break-words">{entry.s}</span>
+              </div>
+            );
+          case "end":
+            return (
+              <div
+                key={`${index}-end`}
+                className="flex min-w-0 flex-wrap items-center gap-1.5 text-ios-footnote text-muted-foreground"
+              >
+                <span className="shrink-0">运行结束</span>
+                <span className={cn("shrink-0 whitespace-nowrap", STATUS_WORD_TONE[entry.status])}>
+                  {STATUS_WORD[entry.status]}
+                </span>
+                {entry.summary && <span className="min-w-0 whitespace-pre-wrap break-words">{entry.summary}</span>}
+              </div>
+            );
+          case "meta":
+          default:
+            return null;
+        }
+      })}
+    </>
+  );
+}
+
+/**
+ * 子代理实时转录面板。
+ * 约束：sessionId 缺失不发请求（只展示本地记录）；running 才轮询；
+ * eof／终态／关闭／卸载即停；拉取失败降级成「本地记录」，不弹错。
+ */
+function SubagentDetailPanel({
+  item,
+  sessionId,
+  runId,
+}: {
+  item: AgentSubagentItem;
+  sessionId?: string | null;
+  runId: string;
+}) {
+  const fallbackText = item.text || item.activity || item.lastLine || "";
+  const [entries, setEntries] = useState<AgentSubagentTranscriptEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [stopState, setStopState] = useState<"idle" | "stopping" | "stopped" | "failed">("idle");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  const offsetRef = useRef(0);
+  const running = item.status === "running" && stopState !== "stopped";
+
+  // 轮询启停只由 running 决定：eof 是「本页读完了」的单次语义，不是调度信号——
+  // 运行中的子代理每页都可能 eof:true，用它停表会让日志冻结在第一页。
+  useEffect(() => {
+    if (!sessionId || !runId) return;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const page = await readAgentSubagentTranscript(sessionId, runId, offsetRef.current);
+        if (cancelled) return;
+        offsetRef.current = page.next_offset;
+        if (page.entries.length > 0) setEntries((prev) => [...prev, ...page.entries]);
+        setLoadError(false);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    void pull();
+    if (!running) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = window.setInterval(() => {
+      void pull();
+    }, TRANSCRIPT_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [sessionId, runId, running]);
+
+  // 只有用户本来就在底部附近才跟随；向上翻看时新行不抢视窗。
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [entries, loaded, loadError]);
+
+  const handleStop = async () => {
+    if (!sessionId || !runId || stopState === "stopping" || stopState === "stopped") return;
+    setStopState("stopping");
+    try {
+      await stopAgentSubagent(sessionId, runId);
+      setStopState("stopped");
+    } catch (err) {
+      // 409 not_running＝网关说它已经结束，与停止成功同义。
+      if (err instanceof AgentChatError && err.status === 409) {
+        setStopState("stopped");
+        return;
+      }
+      setStopState("failed");
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1 pb-1 pl-7 pr-2">
+      <div
+        ref={scrollRef}
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
+        }}
+        className="agent-scroll-thin max-h-64 min-w-0 overflow-y-auto overflow-x-hidden"
+      >
+        <div className="flex min-w-0 flex-col gap-1">
+          {entries.length > 0 && <SubagentTranscriptLines entries={entries} />}
+          {loadError && (
+            <p className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground">
+              日志暂时读不到，下面是本地记录
+            </p>
+          )}
+          {(!sessionId || loadError) && fallbackText && (
+            <p className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground">{fallbackText}</p>
+          )}
+          {!sessionId && !fallbackText && <p className="text-ios-footnote text-foreground/45">暂无记录。</p>}
+          {loaded && !loadError && entries.length === 0 && (
+            <p className="text-ios-footnote text-foreground/45">暂无记录。</p>
+          )}
+        </div>
+      </div>
+      {running && (
+        <button
+          type="button"
+          onClick={handleStop}
+          disabled={stopState === "stopping"}
+          className="min-h-9 w-fit cursor-pointer touch-manipulation rounded-[10px] px-2 -mx-2 text-left text-ios-footnote text-ios-red transition-colors hover:bg-ios-red/[0.06] disabled:cursor-default disabled:opacity-50 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/25 [-webkit-tap-highlight-color:transparent]"
+        >
+          {stopState === "stopping" ? "正在停止…" : "停止"}
+        </button>
+      )}
+      {stopState === "stopped" && <p className="text-ios-footnote text-foreground/45">已停止</p>}
+      {stopState === "failed" && <p className="text-ios-footnote text-ios-red">停止失败，请重试</p>}
+    </div>
+  );
 }
 
 /**
@@ -177,10 +422,16 @@ function SubagentToolLines({ entries }: { entries: AgentSubagentToolEntry[] }) {
   );
 }
 
-function SubagentCard({ item }: SubagentCardProps) {
+function SubagentCard({ item, sessionId, open, onToggle }: SubagentCardProps) {
   return (
     <div className="flex min-w-0 w-full flex-col">
-      <div className="agent-rise flex min-h-11 min-w-0 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
+      {/* 整行即按钮：折叠态沿用原 div 的全部类名，外观零变化；展开态在下方追加面板。 */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="agent-rise flex min-h-11 min-w-0 w-full cursor-pointer touch-manipulation items-center gap-2 rounded-[12px] px-2 -mx-2 text-left select-none transition-colors hover:bg-white/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
+      >
         <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
         {/* 标签（闸道给的短标签）：旧写法 shrink-0 没有任何宽度上限＝长标签
            既不缩也不截，直接把整行撑出面板宽度（2026-09-20 根因清剿）。
@@ -215,23 +466,67 @@ function SubagentCard({ item }: SubagentCardProps) {
           className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
           aria-label={STATUS_LABEL[item.status]}
         />
-      </div>
+      </button>
       {item.status === "running" && <SubagentToolLines entries={item.tools ?? []} />}
+      {open && <SubagentDetailPanel item={item} sessionId={sessionId} runId={item.subagentId} />}
     </div>
   );
 }
 
 function AgentSubagentBarComponent({
-  items,
+  items: frameItems,
   initialOpen = false,
+  sessionId = null,
 }: {
   items: AgentSubagentItem[];
   /** 测试／调试可强制初开；生产默认折叠（G3 R2 降噪）。 */
   initialOpen?: boolean;
+  /** 缺失时不发转录请求，详情面板只展示本地兜底（离线／测试可用）。 */
+  sessionId?: string | null;
 }) {
   // G3（2026-10-10）：默认折叠——用户默认面靠 turn.status「进行中／本路刚完成」，
   // 展开才见跑马灯细节；手动展开优先于任何自动行为（新 started 不把收起的摊回去）。
   const [open, setOpen] = useState(initialOpen);
+  // 详情面板同一时间只开一路：轮询只有一份，避免多路并发把面板变成日志墙。
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+  // 帧外的运行（刷新/回放窗口之外）：只有列表端点还能证明它们存在。
+  const [remoteRuns, setRemoteRuns] = useState<AgentSubagentRunSummary[]>([]);
+
+  // 拉一次列表；只有列表里仍有 running 才每 5s 续拉，全部终态即停。
+  // 失败静默：远端列表只负责补入口，绝不阻塞或打扰帧内条目。
+  useEffect(() => {
+    if (!sessionId) {
+      setRemoteRuns((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const rows = await listAgentSubagents(sessionId);
+        if (cancelled) return;
+        setRemoteRuns(rows.filter(isPourableRemoteRun));
+        // 续拉判据看原始 rows：过滤只影响展示，不改变「是否还有 running」。
+        if (rows.some((row) => row.status === "running")) {
+          timer = window.setTimeout(load, REMOTE_LIST_POLL_MS);
+        }
+      } catch {
+        // 静默：列表不可用不等于子代理不存在，帧内条目照常显示。
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [sessionId]);
+
+  // 帧内优先：同一 run 同时在两边时只保留帧内那一行（不重复、不写回 reducer）。
+  const localIds = new Set(frameItems.map((item) => item.subagentId));
+  const items = [
+    ...frameItems,
+    ...remoteRuns.filter((run) => !localIds.has(run.id)).map(remoteRunToSubagentItem),
+  ];
   if (items.length === 0) return null;
 
   return (
@@ -250,7 +545,13 @@ function AgentSubagentBarComponent({
         />
       </button>
       {open && items.map((item) => (
-        <SubagentCard key={item.id} item={item} />
+        <SubagentCard
+          key={item.id}
+          item={item}
+          sessionId={sessionId}
+          open={openRunId === item.subagentId}
+          onToggle={() => setOpenRunId((cur) => (cur === item.subagentId ? null : item.subagentId))}
+        />
       ))}
     </div>
   );
