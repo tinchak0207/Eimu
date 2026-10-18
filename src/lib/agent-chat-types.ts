@@ -1399,11 +1399,12 @@ export interface AgentSubagentRunSummary {
 
 /**
  * 转录流里的一行。字段随 k 变化，形状即网关合同：
- * text→s；tool→id,name,status；artifact→kind,url；note→name,s；end→status,summary。
+ * text→s（长正文切块时续块带 cont:true，首块不带）；
+ * tool→id,name,status；artifact→kind,url；note→name,s；end→status,summary。
  */
 export type AgentSubagentTranscriptEntry =
   | { t: number; k: "meta" }
-  | { t: number; k: "text"; s: string }
+  | { t: number; k: "text"; s: string; cont?: boolean }
   | { t: number; k: "tool"; id: string; name: string; status: "running" | "ok" | "failed" }
   | { t: number; k: "artifact"; kind: string; url: string }
   | { t: number; k: "note"; name: string; s: string }

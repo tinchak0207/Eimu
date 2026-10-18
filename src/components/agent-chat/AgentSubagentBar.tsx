@@ -206,25 +206,46 @@ function remoteRunToSubagentItem(run: AgentSubagentRunSummary): AgentSubagentIte
   };
 }
 
-/** 转录行渲染：顺序即网关 entries 顺序，不重排、不合并。 */
+/** 渲染块：连续正文（含续块）合成一段；其余 entry 原样一项。 */
+type TranscriptBlock =
+  | { key: string; text: string }
+  | { key: string; entry: Exclude<AgentSubagentTranscriptEntry, { k: "text" }> };
+
+/** 转录行渲染：顺序即网关 entries 顺序，不重排；仅把 cont 续块并回同一段正文。 */
 function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscriptEntry[] }) {
+  // 网关会把长正文切成多条 text，续块带 cont:true。先归并成块再渲染：
+  // 一段正文只出一个 <p>，否则每个切块各成一段，段落被硬生生拆开。
+  const blocks: TranscriptBlock[] = [];
+  entries.forEach((entry, index) => {
+    if (entry.k === "text") {
+      const last = blocks[blocks.length - 1];
+      // 只并入紧邻的上一个正文块；中间夹了工具/备注等就另起一段。
+      if (entry.cont === true && last && "text" in last) {
+        last.text += entry.s;
+        return;
+      }
+      blocks.push({ key: `${index}-text`, text: entry.s });
+      return;
+    }
+    blocks.push({ key: `${index}-${entry.k}`, entry });
+  });
+
   return (
     <>
-      {entries.map((entry, index) => {
+      {blocks.map((block) => {
+        if ("text" in block) {
+          return (
+            <p key={block.key} className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground">
+              {block.text}
+            </p>
+          );
+        }
+        const entry = block.entry;
         switch (entry.k) {
-          case "text":
-            return (
-              <p
-                key={`${index}-text`}
-                className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground"
-              >
-                {entry.s}
-              </p>
-            );
           case "tool":
             return (
               <div
-                key={`${index}-tool`}
+                key={block.key}
                 className="flex min-w-0 items-center gap-1.5 text-ios-footnote text-muted-foreground"
               >
                 <span className={cn("h-1 w-1 shrink-0 rounded-full", TOOL_STATUS_DOT[entry.status])} aria-hidden="true" />
@@ -237,7 +258,7 @@ function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscript
           case "artifact":
             return (
               <a
-                key={`${index}-artifact`}
+                key={block.key}
                 href={entry.url}
                 target="_blank"
                 rel="noreferrer"
@@ -248,7 +269,7 @@ function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscript
             );
           case "note":
             return (
-              <div key={`${index}-note`} className="flex min-w-0 gap-1.5 text-ios-footnote text-muted-foreground">
+              <div key={block.key} className="flex min-w-0 gap-1.5 text-ios-footnote text-muted-foreground">
                 <span className="shrink-0 text-foreground/45">备注·{entry.name}</span>
                 <span className="min-w-0 whitespace-pre-wrap break-words">{entry.s}</span>
               </div>
@@ -256,7 +277,7 @@ function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscript
           case "end":
             return (
               <div
-                key={`${index}-end`}
+                key={block.key}
                 className="flex min-w-0 flex-wrap items-center gap-1.5 text-ios-footnote text-muted-foreground"
               >
                 <span className="shrink-0">运行结束</span>

@@ -42,6 +42,7 @@ const META_HEAD_BYTES = 8_192
 const FILE_MODE = 0o640
 const LOCK_RETRIES = 3
 const LOCK_RETRY_MS = 2
+const STALE_LOCK_MS = 30_000
 const FILE_READ_CHUNK = 1_048_576
 
 /** 唯一的 runId 白名单真源（HTTP 层复用同一常量）。 */
@@ -209,43 +210,49 @@ function byteLen(text: string): number {
   return Buffer.byteLength(text, "utf8")
 }
 
-function truncateUtf8(text: string, budget: number): string {
+/** 单个码点在 JSON 字符串内部的序列化字节数（不含两侧引号；转义字符按膨胀后计）。 */
+function jsonCharBytes(ch: string): number {
+  return byteLen(JSON.stringify(ch)) - 2
+}
+
+/** 按「序列化后字节预算」截断字符串。 */
+function truncateJsonText(text: string, budget: number): string {
   if (budget <= 0) return ""
   let out = ""
   let used = 0
   for (const ch of text) {
-    const size = byteLen(ch)
-    if (used + size > budget) break
+    const cost = jsonCharBytes(ch)
+    if (used + cost > budget) break
     out += ch
-    used += size
+    used += cost
   }
   return out
 }
 
-/** 按 UTF-8 码点边界切块；预算连单个码点都放不下时回空表（交给截断路径）。 */
-function splitUtf8(text: string, budget: number): string[] {
+/** 按「序列化后字节预算」切块；预算连单个码点都放不下时回空表（交给兜底路径）。 */
+function splitJsonText(text: string, budget: number): string[] {
   if (budget <= 0) return []
   const chunks: string[] = []
   let current = ""
   let used = 0
   for (const ch of text) {
-    const size = byteLen(ch)
-    if (used + size > budget) {
+    const cost = jsonCharBytes(ch)
+    if (used + cost > budget) {
       if (current) {
         chunks.push(current)
         current = ""
         used = 0
       }
-      if (size > budget) return []
+      if (cost > budget) return []
     }
     current += ch
-    used += size
+    used += cost
   }
   if (current) chunks.push(current)
   return chunks
 }
 
-/** 把一条 entry 编码成若干 JSONL 行，保证单行不超过上限。 */
+/** 把一条 entry 编码成若干 JSONL 行，保证单行不超过上限、且绝不返回空表。 */
 function encodeEntryLines(entry: Record<string, unknown>, limit: number): string[] {
   let raw: string
   try {
@@ -257,17 +264,27 @@ function encodeEntryLines(entry: Record<string, unknown>, limit: number): string
   const rawLine = `${raw}\n`
   if (byteLen(rawLine) <= limit) return [rawLine]
 
-  // 正文超限：按 UTF-8 边界切成多条连续 text 行（不丢字）。
+  // 正文超限：按 JSON.stringify 之后的字节预算切块（引号/反斜线/换行会膨胀），不丢字。
   if (entry.k === "text" && typeof entry.s === "string") {
-    const overhead = byteLen(`${JSON.stringify({ ...entry, s: "" })}\n`)
-    const budget = limit - overhead
-    if (budget >= 4) {
-      const chunks = splitUtf8(entry.s, budget)
+    const headEntry: Record<string, unknown> = { ...entry }
+    delete headEntry.cont
+    const headOverhead = byteLen(`${JSON.stringify({ ...headEntry, s: "" })}\n`)
+    const contOverhead = byteLen(`${JSON.stringify({ ...headEntry, s: "", cont: true })}\n`)
+    const budget = limit - Math.max(headOverhead, contOverhead)
+    if (budget > 0) {
+      const chunks = splitJsonText(entry.s, budget)
       if (chunks.length > 0) {
-        const lines = chunks.map((s) => `${JSON.stringify({ ...entry, s })}\n`)
+        const lines = chunks.map((s, index) =>
+          index === 0
+            ? `${JSON.stringify({ ...headEntry, s })}\n`
+            : `${JSON.stringify({ ...headEntry, s, cont: true })}\n`,
+        )
         if (lines.every((line) => byteLen(line) <= limit)) return lines
       }
     }
+    // 极端小上限：至少落一条空正文，绝不静默丢弃整条。
+    const textFallback = `${JSON.stringify({ ...headEntry, s: "", truncated: true })}\n`
+    if (byteLen(textFallback) <= limit) return [textFallback]
   }
 
   // 其它 kind：保留形状（前端按 k 渲染），截断可长文字段并标 truncated:true。
@@ -283,9 +300,9 @@ function encodeEntryLines(entry: Record<string, unknown>, limit: number): string
       trimmed[key] = ""
       continue
     }
-    const kept = truncateUtf8(value, budget)
+    const kept = truncateJsonText(value, budget)
     trimmed[key] = kept
-    budget -= byteLen(kept)
+    budget -= byteLen(JSON.stringify(kept)) - 2
   }
   const trimmedLine = `${JSON.stringify(trimmed)}\n`
   if (byteLen(trimmedLine) <= limit) return [trimmedLine]
@@ -293,9 +310,10 @@ function encodeEntryLines(entry: Record<string, unknown>, limit: number): string
   // 兜底：极长非字符串字段（如超长 id/name）——只留可识别的最小形状。
   const minimalShape: Record<string, unknown> = { t: entry.t, k: entry.k, truncated: true, preview: "" }
   const previewBudget = limit - byteLen(`${JSON.stringify(minimalShape)}\n`)
-  minimalShape.preview = truncateUtf8(raw, Math.max(0, previewBudget))
+  minimalShape.preview = truncateJsonText(raw, Math.max(0, previewBudget))
   const minimalLine = `${JSON.stringify(minimalShape)}\n`
-  return byteLen(minimalLine) <= limit ? [minimalLine] : []
+  // 极端上限下宁可超限也不能丢条目（调用方会记日志）。
+  return [minimalLine]
 }
 
 function sleepSync(ms: number): void {
@@ -308,14 +326,59 @@ function sleepSync(ms: number): void {
 
 function acquireTrimLock(runId: string): { fd: number; file: string } | null {
   const file = join(transcriptDir(), `${runId}.lock`)
+  let reclaimed = false
   for (let i = 0; i < LOCK_RETRIES; i += 1) {
     try {
-      return { fd: openSync(file, "wx", FILE_MODE), file }
+      const fd = openSync(file, "wx", FILE_MODE)
+      try {
+        writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }))
+      } catch {
+        /* lock 内容仅诊断用 */
+      }
+      return { fd, file }
     } catch {
+      // 只回收明显陈旧的锁（>30s），避免永久关闭轮转；新鲜锁继续退避。
+      try {
+        const st = statSync(file)
+        if (!reclaimed && Date.now() - st.mtimeMs > STALE_LOCK_MS) {
+          reclaimed = true
+          try {
+            unlinkSync(file)
+          } catch {
+            /* 已被其他进程释放 */
+          }
+          try {
+            const fd = openSync(file, "wx", FILE_MODE)
+            try {
+              writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }))
+            } catch {
+              /* ignore */
+            }
+            return { fd, file }
+          } catch {
+            /* 竞态输给别的进程，继续退避 */
+          }
+        }
+      } catch {
+        /* 无锁档或已被释放 */
+      }
       sleepSync(LOCK_RETRY_MS)
     }
   }
   return null
+}
+
+function releaseTrimLock(lock: { fd: number; file: string }): void {
+  try {
+    closeSync(lock.fd)
+  } catch {
+    /* ignore */
+  }
+  try {
+    unlinkSync(lock.file)
+  } catch {
+    /* ignore */
+  }
 }
 
 /** 轮转：临时档 + rename 原子替换；抢不到 lock 就跳过本次裁剪（append 继续）。 */
@@ -365,55 +428,54 @@ function maybeTrim(runId: string): void {
         /* 临时档清理失败不影响主流程 */
       }
     }
-    try {
-      closeSync(lock.fd)
-    } catch {
-      /* ignore */
-    }
-    try {
-      unlinkSync(lock.file)
-    } catch {
-      /* ignore */
-    }
+    releaseTrimLock(lock)
   }
 }
 
-/** 外部删除后重建：旁档有归属信息就补回 meta 首行；新档仍用受控权限。 */
+/** 外部删除后重建：重建纳入 trim lock（多进程最多写一条 meta）；抢不到锁就不写 meta。 */
 function rebuildIfMissing(runId: string): void {
   const file = jsonlPath(runId)
   if (existsSync(file)) return
-  const side = readMetaRecord(runId)
-  if (!side.parent && !side.label && side.started_at === undefined) {
-    closeSync(openSync(file, "a", FILE_MODE))
+  const lock = acquireTrimLock(runId)
+  // 抢不到锁：让持锁方写 meta，本进程只 append 正文行（meta 行数最多 1）。
+  if (!lock) return
+  try {
+    if (existsSync(file)) return
+    const side = readMetaRecord(runId)
+    if (!side.parent && !side.label && side.started_at === undefined) {
+      closeSync(openSync(file, "a", FILE_MODE))
+      try {
+        chmodSync(file, FILE_MODE)
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    const metaLine = `${JSON.stringify({
+      t: Date.now(),
+      k: "meta",
+      parent: side.parent ?? "",
+      label: side.label ?? "",
+      agent: side.agent ?? null,
+      prompt_head: "",
+      started_at: side.started_at ?? Date.now(),
+    })}\n`
+    const fd = openSync(file, "a", FILE_MODE)
+    try {
+      writeSync(fd, metaLine)
+    } finally {
+      closeSync(fd)
+    }
     try {
       chmodSync(file, FILE_MODE)
     } catch {
       /* ignore */
     }
-    return
-  }
-  const metaLine = `${JSON.stringify({
-    t: Date.now(),
-    k: "meta",
-    parent: side.parent ?? "",
-    label: side.label ?? "",
-    agent: side.agent ?? null,
-    prompt_head: "",
-    started_at: side.started_at ?? Date.now(),
-  })}\n`
-  const fd = openSync(file, "a", FILE_MODE)
-  try {
-    writeSync(fd, metaLine)
+    // 新档从 0 重新编号；旧读者的旧 offset 会按越界处理，不会错位读到别的条目。
+    writeMetaRecord(runId, { base_offset: 0 })
   } finally {
-    closeSync(fd)
+    releaseTrimLock(lock)
   }
-  try {
-    chmodSync(file, FILE_MODE)
-  } catch {
-    /* ignore */
-  }
-  // 新档从 0 重新编号；旧读者的旧 offset 会按越界处理，不会错位读到别的条目。
-  writeMetaRecord(runId, { base_offset: 0 })
 }
 
 export interface InitTranscriptInput {
@@ -476,7 +538,19 @@ export function appendTranscript(runId: string, entry: Record<string, unknown>):
     console.error(`[gateway] subagent transcript encode failed (ignored): id=${id}`, e)
     return
   }
-  if (lines.length === 0) return
+  if (lines.length === 0) {
+    let bytes = 0
+    try {
+      bytes = byteLen(JSON.stringify(entry))
+    } catch {
+      /* 体积仅诊断用 */
+    }
+    // 绝不静默丢条目：编码失败必须留痕。
+    console.error(
+      `[gateway] subagent transcript entry dropped: id=${id} kind=${String(entry.k)} bytes=${bytes}`,
+    )
+    return
+  }
   try {
     ensureDir()
     rebuildIfMissing(id)
@@ -536,6 +610,15 @@ export function readTranscriptDelta(runId: string, offset: number, readMaxBytes 
     chunk = readRange(file, filePos, Math.min(want, size - filePos))
     const nl = chunk.lastIndexOf(0x0a)
     consumed = nl >= 0 ? nl + 1 : 0
+    if (consumed === 0 && chunk.length > 0 && filePos + chunk.length >= size) {
+      // 文件以合法 JSON 结束但没有尾换行：按完整条目返回，游标推到 size。
+      try {
+        const parsed = JSON.parse(chunk.toString("utf8"))
+        if (parsed && typeof parsed === "object") consumed = chunk.length
+      } catch {
+        /* 半行：保持现状（eof:false），等后续写入补全 */
+      }
+    }
     if (consumed === 0 && chunk.length > 0 && filePos + chunk.length < size) {
       // 已读满 want 且块内无换行：继续向后找这一行的结尾（最多再扫 MAX_LINE_SCAN_BYTES）。
       const scanStart = filePos + chunk.length
@@ -619,6 +702,20 @@ export interface TranscriptListItem {
   endAt?: number
 }
 
+const parentConflictWarned = new Set<string>()
+
+/** 首行 parent 与旁档 parent 不一致：只记一次，不复述内容、不改返回形状。 */
+function warnParentConflict(runId: string, headParent?: string, sideParent?: string): void {
+  if (headParent === undefined || sideParent === undefined || headParent === sideParent) return
+  if (parentConflictWarned.has(runId)) return
+  parentConflictWarned.add(runId)
+  if (parentConflictWarned.size > 500) {
+    const first = parentConflictWarned.values().next().value
+    if (typeof first === "string") parentConflictWarned.delete(first)
+  }
+  console.warn(`[gateway] subagent transcript parent mismatch: id=${runId} head=${headParent} sidecar=${sideParent}`)
+}
+
 /** 扫描目录，按首行 meta.parent 过滤；首行缺失时回退旁档。mtime 倒序，最多 50 条。 */
 export function listTranscriptsForParent(parentSessionId: string): TranscriptListItem[] {
   if (typeof parentSessionId !== "string" || !parentSessionId) return []
@@ -648,7 +745,9 @@ export function listTranscriptsForParent(parentSessionId: string): TranscriptLis
     const head = readFirstLine(row.runId, row.size)
     const side = readMetaRecord(row.runId)
     const headIsMeta = head !== null && head.k === "meta"
-    const parent = headIsMeta && typeof head.parent === "string" ? head.parent : side.parent
+    const headParent = headIsMeta && typeof head.parent === "string" ? head.parent : undefined
+    warnParentConflict(row.runId, headParent, side.parent)
+    const parent = headParent ?? side.parent
     if (parent !== parentSessionId) continue
     const label = headIsMeta && typeof head.label === "string" ? head.label : side.label ?? ""
     const agent = headIsMeta && typeof head.agent === "string" ? head.agent : side.agent ?? ""
@@ -693,6 +792,8 @@ export function getTranscriptParent(runId: string): string | undefined {
     return readMetaRecord(id).parent
   }
   const head = readFirstLine(id, size)
-  if (head && head.k === "meta" && typeof head.parent === "string") return head.parent
-  return readMetaRecord(id).parent
+  const sideParent = readMetaRecord(id).parent
+  const headParent = head && head.k === "meta" && typeof head.parent === "string" ? head.parent : undefined
+  warnParentConflict(id, headParent, sideParent)
+  return headParent ?? sideParent
 }
