@@ -6280,8 +6280,25 @@ function seedTakenOverCursor(run: SubagentRun, messages: any[]): void {
       }
       if (part.type === "tool" && part.callID) {
         const st = part.state?.status
-        if (["pending", "running"].includes(st)) run.pendingTools.add(part.callID)
-        else run.pendingTools.delete(part.callID)
+        if (["pending", "running"].includes(st)) {
+          run.pendingTools.add(part.callID)
+          // 2026-10-19：重建时补上工具起始时刻，否则「命令永远 running」的重建 run 没有
+          // 任何时长依据，工具硬线永远不触发（实测就是永久「终端命令 运行中」）。
+          const started = Number(part.state?.time?.start) || Date.now()
+          if (!run.pendingToolSince) run.pendingToolSince = new Map()
+          if (!run.pendingToolSince.has(part.callID)) run.pendingToolSince.set(part.callID, started)
+          if (!run.pendingToolInfo) run.pendingToolInfo = new Map()
+          const out = typeof part.state?.metadata?.output === "string" ? part.state.metadata.output : ""
+          run.pendingToolInfo.set(part.callID, {
+            name: typeof part.tool === "string" ? part.tool : "",
+            outLen: out.length,
+            outAt: out.length > 0 ? Math.max(started, Number(part.state?.time?.end) || 0) : 0,
+          })
+        } else {
+          run.pendingTools.delete(part.callID)
+          run.pendingToolSince?.delete(part.callID)
+          run.pendingToolInfo?.delete(part.callID)
+        }
         run.toolStatusEmitted.set(part.callID, ["pending", "running"].includes(st) ? "running" : st === "completed" ? "ok" : "failed")
       }
     }
