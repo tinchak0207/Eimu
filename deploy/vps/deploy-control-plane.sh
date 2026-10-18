@@ -149,19 +149,19 @@ USE_RSYNC=0
 ALLOW_BULK=0   # 4b 残留清理的安全闸旁路（--allow-bulk-remove）；默认 0＝差集异常即中止
 
 do_plan() {
-  HEAD_SHA="$(git rev-parse HEAD)"; SHORT="$(git rev-parse --short=8 HEAD)"
-  hdr "来源：git HEAD $SHORT（$(git log -1 --format=%s HEAD | cut -c1-80)）"
+  HEAD_SHA="$(git rev-parse HEAD)"; SHORT="${HEAD_SHA:0:8}"
+  hdr "来源：git $SHORT（$(git log -1 --format=%s "$HEAD_SHA" | cut -c1-80)）"
 
   # 1. git archive HEAD → stage
   STAGE="$(mktemp -d /tmp/cp-deploy-stage.XXXXXX)"
   WORK="$(mktemp -d /tmp/cp-deploy-work.XXXXXX)"
   PRESENT=(); local p
   for p in "${ARCHIVE_PATHS[@]}"; do
-    if git cat-file -e "HEAD:$p" 2>/dev/null; then PRESENT+=("$p"); else log "略过（HEAD 无此路径）：$p"; fi
+    if git cat-file -e "$HEAD_SHA:$p" 2>/dev/null; then PRESENT+=("$p"); else log "略过（提交无此路径）：$p"; fi
   done
-  git archive --format=tar HEAD -- "${PRESENT[@]}" | tar -x -C "$STAGE"
-  git show "HEAD:deploy/vps/Dockerfile" >"$STAGE/Dockerfile"
-  git show "HEAD:.dockerignore" >"$STAGE/.dockerignore"
+  git archive --format=tar "$HEAD_SHA" -- "${PRESENT[@]}" | tar -x -C "$STAGE"
+  git show "$HEAD_SHA:deploy/vps/Dockerfile" >"$STAGE/Dockerfile"
+  git show "$HEAD_SHA:.dockerignore" >"$STAGE/.dockerignore"
   log "stage：$(find "$STAGE" -type f | wc -l) 档，$(du -sh "$STAGE" | cut -f1)"
 
   # 2. working tree 相对 HEAD 的未提交改动（只警告）
@@ -334,11 +334,8 @@ do_deploy() {
 
   # 1. preflight
   hdr "preflight"
-  if [[ -f src/lib/control-plane-proxy-routes.test.ts ]]; then
-    npx tsx --test src/lib/control-plane-proxy-routes.test.ts
-  else
-    log "略过：src/lib/control-plane-proxy-routes.test.ts 不存在"
-  fi
+  bash -n "${BASH_SOURCE[0]}"
+  log "脚本语法通过；按 AGENTS.md 不以历史测试作部署闸门，代码由后续生产构建校验。"
 
   # 2. 磁碟闸
   #
