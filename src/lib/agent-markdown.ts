@@ -396,12 +396,54 @@ function closeUnterminatedOpenUIFence(text: string): string {
   return `${text}${gap}${open.ch.repeat(open.len)}`;
 }
 
+/**
+ * 兜底（2026-10-18）：openui 围栏里出现「```正文」粘连行时拆成「```」+「正文」。
+ * 起因：网关把收尾提示直接拼在模型的闭合围栏后面（```本轮由我直接完成…），
+ * CommonMark 不认带文字的闭合行 → 围栏不闭合 → DSL 解析失败、整段裸露。
+ * openui 程序行不可能以反引号开头，所以 openui 围栏内的这类行只可能是「闭合 + 粘连正文」。
+ * 纯函数：只动 openui 围栏内的粘连行，其它代码块/正文一字不动。
+ */
+function splitGluedOpenUIFenceClose(text: string): string {
+  if (!text.includes("```") && !text.includes("~~~")) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let open: { ch: string; len: number; openui: boolean } | null = null;
+  let changed = false;
+  for (const line of lines) {
+    if (open === null) {
+      const m = FENCE_OPEN.exec(line);
+      if (m && !(m[2][0] === "`" && m[3].includes("`"))) {
+        open = { ch: m[2][0], len: m[2].length, openui: isOpenUILang(m[3].trim().split(/\s+/)[0] ?? "") };
+      }
+      out.push(line);
+      continue;
+    }
+    const close = FENCE_CLOSE.exec(line);
+    if (close) {
+      if (close[1][0] === open.ch && close[1].length >= open.len) open = null;
+      out.push(line);
+      continue;
+    }
+    if (open.openui) {
+      const glued = /^( {0,3})(`{3,}|~{3,})[ \t]*(\S.*)$/.exec(line);
+      if (glued && glued[2][0] === open.ch && glued[2].length >= open.len) {
+        out.push(`${glued[1]}${glued[2]}`, glued[3]);
+        open = null;
+        changed = true;
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return changed ? out.join("\n") : text;
+}
+
 /** markdown 文本 → 结构化块序列。解析失败（理论不会）退回单段纯文本，不吞内容。 */
 export function parseAgentMarkdown(text: string): MdBlock[] {
   try {
     const blocks: MdBlock[] = [];
-    // 预处理：① 裸 DSL 包成 ```openui bare；② 补流式中未闭合的 openui 围栏。其余原样进 lexer。
-    for (const t of lexer(closeUnterminatedOpenUIFence(fenceBareOpenUI(text)), { gfm: true, breaks: true })) {
+    // 预处理：⓪ 拆「```+正文」粘连闭合行；① 裸 DSL 包成 ```openui bare；② 补流式中未闭合的 openui 围栏。其余原样进 lexer。
+    for (const t of lexer(closeUnterminatedOpenUIFence(fenceBareOpenUI(splitGluedOpenUIFenceClose(text))), { gfm: true, breaks: true })) {
       blocks.push(...blockFromToken(t));
     }
     return blocks;

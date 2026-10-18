@@ -20,6 +20,16 @@ export function serializeSse(name: string, data: unknown, eventId: number): stri
   return `id: ${eventId}\nevent: ${name}\ndata: ${payload}\n\n`
 }
 
+/**
+ * 2026-10-18：网关追加正文的统一换行闸（纯函数）。已发正文不以换行结尾时，在追加文字前补一个 \n。
+ * 起因：plan-promise 收尾提示直接拼在模型结尾的「```」后面，闭合行变成「```本轮由我…」，
+ * openui 围栏不闭合 → 前端解析 root=false → 整段 DSL 裸露显示（ses_eb38c6a61ffeBgJ6ViYriiPx0R）。
+ */
+export function withLeadingNewlineIfNeeded(lastChar: string | undefined, text: string): string {
+  if (!text || !lastChar || lastChar === "\n" || text.startsWith("\n")) return text
+  return `\n${text}`
+}
+
 /** 修 1（2026-09-01）：内容/产物帧 = 僵尸还魂的证据。watchdog 死亡宣告后，
  *  这些帧到达说明重投 retry 真的在产出——「后端无响应」是误判，必须撤回。 */
 export function isRevivalFrame(name: string): boolean {
@@ -34,6 +44,20 @@ export function isRevivalFrame(name: string): boolean {
 }
 
 export function emitToSession(state: SessionState, name: string, data: unknown, opts?: { strippable?: boolean }): void {
+  // 2026-10-18：所有网关主动追加的正文（非 strippable＝非模型输出：plan-promise、emit-helpers、
+  // timers-gw、workflow-gw、messages-gw、sessions-core 等）统一在此单一出口补前导换行。
+  if (name === "message.delta") {
+    const raw = (data as { text?: unknown })?.text
+    if (typeof raw === "string" && raw) {
+      if (!(opts?.strippable ?? false)) {
+        const fixed = withLeadingNewlineIfNeeded(state.messageDeltaLastChar, raw)
+        if (fixed !== raw) data = { ...(data as Record<string, unknown>), text: fixed }
+      }
+      state.messageDeltaLastChar = raw.slice(-1)
+    }
+  } else if (name === "turn.done") {
+    state.messageDeltaLastChar = undefined
+  }
   // 修 1（2026-09-01）：死亡宣告可撤回。deathDeclared 期间第一条内容帧到达
   // → 先发一次性撤回帧（turn.status，与 watchdog 告警同通道，前端零改动），
   // 立即清位（防重复撤回/防递归），再放行原内容帧。

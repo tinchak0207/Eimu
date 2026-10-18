@@ -235,6 +235,9 @@ export interface SessionState {
   /** 2026-10-02：turn.plan 点名的专家 id + 本轮 subagent.started 计数（收盘对账，见 plan-promise.ts）。 */
   planExperts?: string[]
   turnSubagentStarts?: number
+  /** 2026-10-18：本轮已发 message.delta 正文的最后一个字符（turn.done 清空）。网关追加正文时据此补换行，
+   *  防止「```」闭合行与追加文字粘成一行导致 openui 围栏不闭合。volatile，不进持久化。 */
+  messageDeltaLastChar?: string
   /** 2026-10-02 C 方案：收盘记录的「未兑现开场计画」专家 id（计画点名但整轮零派遣）。
    *  下一轮 messages-gw 组 promptBody.system 时一次性注入事实并清除；volatile，不进持久化。 */
   pendingUnfulfilledPlan?: string[]
