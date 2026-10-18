@@ -182,7 +182,7 @@ function blockFromToken(t: Token): MdBlock[] {
     {
       const code = t as Tokens.Code;
       // 未标语言（或泛用语言名）但内容是 openui 程序 → 按裸 DSL 渲染（失败退回普通代码文本）。
-      if (!isOpenUILang(code.lang) && GENERIC_CODE_LANGS.has(normalizeCodeLang(code.lang)) && looksLikeOpenUIProgram(code.text)) {
+      if (!isOpenUILang(code.lang) && GENERIC_CODE_LANGS.has(normalizeCodeLang(code.lang).split(/\s+/)[0]) && looksLikeOpenUIProgram(code.text)) {
         return [{ type: "code", lang: "openui bare", text: code.text }];
       }
       return [{ type: "code", lang: code.lang, text: code.text }];
@@ -218,7 +218,8 @@ export function normalizeCodeLang(lang?: string): string {
 /** 模型常见的 openui 围栏语言名写法（含 openui-lang 等变体）。 */
 const OPENUI_LANGS = new Set(["openui", "openui-lang", "openuilang", "open-ui", "oui"]);
 /** 无语言名或泛用语言名的代码块：内容像 openui 程序时也按 openui 渲染。 */
-const GENERIC_CODE_LANGS = new Set(["", "text", "plaintext", "plain", "txt", "dsl", "ui"]);
+// 模型也会把赋值式 DSL 标成 ini；仅内容满足 OpenUI 程序判据才转交受限解释器。
+const GENERIC_CODE_LANGS = new Set(["", "text", "plaintext", "plain", "txt", "dsl", "ui", "ini"]);
 
 /** 是否 OpenUI 栅栏（`OpenUI`、` openui `、`openui title=demo`、`openui-lang` 一律算）。 */
 export function isOpenUILang(lang?: string): boolean {

@@ -4,8 +4,8 @@
 # 来源＝本机 git HEAD（不是 working tree）。控面＝VPS /opt/image-control-plane（无 git 手搬副本）。
 #   plan     git archive HEAD → 与 VPS app/ 做 checksum 比对 → 双向 diff 闸（BLOCKED＝VPS 独有修改）
 #            → compose 漂移（只印键名）→ 磁碟。不改 VPS 任何东西。
-#   deploy   plan 无 BLOCKED（或逐档 --allow-overwrite）→ preflight → 磁碟闸 → rollback tag
-#            → 同步 → compose build → git tag → up -d → nginx -t＋reload imagesite-nginx → postcheck（失败自动回滚）
+#   deploy   已硬停用：禁止在在线生产主机同步源码并全量构建；须改用离机预构建镜像产物。
+#            本脚本尚不提供预构建产物导入发布，不能以参数绕过此限制。
 #   rollback [tag]  不给 tag 用最新的 :rollback-*
 #
 # 用法：
@@ -16,6 +16,18 @@
 # 22443 连续快速连线会被 RST ⇒ 整次执行共用一条 SSH ControlMaster 连线。
 # compose 档 control-plane-compose.yml 是 VPS 自有（含 secret），本脚本永不覆写、永不印值。
 set -euo pipefail
+
+# 本脚本的目标是承载在线服务的 4GB 生产主机；源码全量构建已造成资源耗尽。
+# 在 SSH、EXIT trap、plan、源码同步之前硬拒绝，不提供强制绕过开关。
+if [[ "${1:-plan}" == "deploy" ]]; then
+  printf '%s\n' \
+    'ERROR: 禁止在承载在线服务的生产主机原地同步源码并全量构建控制面。' \
+    '请在离机构建机按 deploy/vps/Dockerfile 预构建两个镜像，产物建议保存到：' \
+    '  work/control-plane-prebuilt/<commit>/images.tar（docker save 镜像归档）' \
+    '本脚本尚不支持预构建产物导入发布；请使用仅导入已构建镜像并切换服务的发布流程。' \
+    'plan 与 rollback 命令仍保留。' >&2
+  exit 1
+fi
 
 VPS_HOST="${VPS_HOST:-ubuntu@43.172.85.76}"
 VPS_PORT="${VPS_PORT:-22443}"
