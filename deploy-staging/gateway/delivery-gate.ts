@@ -780,8 +780,10 @@ const REVIEW_FIELD_RE = /\b(?:verdict|qc[\s\-_.]*signature)\b|\bissues?\s*[:：=
 const CRITIC_IDENTITY_RE =
   /独立审核|獨立審核|审核官|審核官|机器审核|機器審核|复核官|覆核官|\bcritic\b/i
 // 族 2'：内审正文结构特征（编号审稿条目 / 逐条引用 / 存在性判词）。
+// 注意：`结论如下`／`結論如下` 是普通中文短语（正常交付也会用），不能作为内审判据；
+// 真内审仍由 verdict/issues 栏位与审核身份判族拦截。
 const CRITIC_STRUCTURE_RE =
-  /被审原文|被審原文|栏位存在性|欄位存在性|审核已完成|審核已完成|结论如下|結論如下/
+  /被审原文|被審原文|栏位存在性|欄位存在性|审核已完成|審核已完成/
 const NUMBERED_REVIEW_RE = /(?:^|\s)\d+[.、]\s*【/
 // 判词（退回类）——只用于降级句式的方向选择，不单独作判定族。
 const REJECT_WORD_RE = /退回|驳回|駁回|不通过|不通過/
