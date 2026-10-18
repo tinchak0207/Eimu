@@ -20,14 +20,31 @@
  * Slider、RadioGroup、CheckBoxGroup、OptionCards、Steps、Table、Tag 等）全部移出白名单；
  * 成品组件只收 taskId（会话产物 task_id，或任务表里该产物的原 URL），由前端从会话产物
  * 里查真实条目渲染，查不到显示「产物未找到」——模型无法凭空编造媒体。
+ *
+ * 同日富展示（阶段 1+2）：加回排版组件 Row/Grid/Box/Carousel/Tabs/Title/Caption/
+ * Badge/List（参考 open-intelligent-ui，MIT，见 THIRD_PARTY_NOTICES.md）；Table/Col/
+ * 图表重回白名单，但数据位只许引用 Query("artifact"/"artifacts") 读出的会话产物
+ * 元数据，字面量数字由 repair 整件删除（OPENUI_DATA_ARG_SLOTS）；Tag 由 Badge 取代。
  */
 export const OPENUI_COMPONENTS = [
-  // 布局 / 文本
+  // 布局（2026-10-18 富展示：参考 thesysdev/open-intelligent-ui 的 layout，MIT）
   "Card",
-  "CardHeader",
-  "TextContent",
-  "Callout",
+  "Row",
+  "Grid",
+  "Box",
+  "Carousel",
+  "Tabs",
+  "TabItem",
   "Separator",
+  // 文本
+  "CardHeader",
+  "Title",
+  "TextContent",
+  "Caption",
+  "Badge",
+  "List",
+  "ListItem",
+  "Callout",
   // 成品展示（绑定会话真实产物）
   "ImageResult",
   "ImageGallery",
@@ -36,10 +53,38 @@ export const OPENUI_COMPONENTS = [
   "AlbumPlayer",
   "CompareView",
   "DeliverableCard",
+  // 数据（只许引用 Query 结果；repair 删字面量数字）
+  "Table",
+  "Col",
+  "BarChart",
+  "LineChart",
+  "PieChart",
+  "Series",
   // 一键快选（≤4，自动模式不出）
   "Button",
   "Buttons",
 ] as const;
+
+/** 运行时内置语句（不是组件）：只读 Query；Mutation 一律删除（OpenUI 不写任何东西）。 */
+export const OPENUI_BUILTIN_CALLS = ["Query"] as const;
+
+/** 只读工具（toolProvider）：前端从会话产物取真实元数据，取不到字段为空。 */
+export const OPENUI_TOOLS = ["artifact", "artifacts"] as const;
+
+/**
+ * 数据组件的「数据位」参数下标：这些位置只能引用 Query 结果（或其 @ 运算），
+ * 字面量数字/数组一律删掉整件组件（repair 收尾清引用）。
+ */
+export const OPENUI_DATA_ARG_SLOTS: Record<string, readonly number[]> = {
+  Col: [1],
+  Series: [1],
+  PieChart: [0, 1],
+  BarChart: [0],
+  LineChart: [0],
+};
+
+/** 文字里不许出现字面量数字的组件（数字只能来自 Query 字段引用）。 */
+export const OPENUI_NO_LITERAL_DIGIT_COMPONENTS = ["Badge", "Callout"] as const;
 
 /**
  * 已移出白名单的组件（含上游 chat 库里常被模型写出的控制台/表单类）。repair.ts 遇到它们
@@ -61,10 +106,6 @@ export const OPENUI_REMOVED_COMPONENTS = [
   "OptionCard",
   "Steps",
   "StepsItem",
-  "Table",
-  "Col",
-  "Tag",
-  "TagBlock",
   "Icon",
   "IconText",
   "DatePicker",
@@ -74,14 +115,13 @@ export const OPENUI_REMOVED_COMPONENTS = [
   "EditableTable",
   "MetricIndicator",
   "MetricIndicatorInline",
-  "LineChart",
   "AreaChart",
-  "BarChart",
-  "PieChart",
-  "Tabs",
   "Accordion",
   "ListBlock",
   "FollowUpBlock",
+  "Mutation",
+  "HtmlView",
+  "RadarChart",
 ] as const;
 
 export const OPENUI_REMOVED_SET: ReadonlySet<string> = new Set(
@@ -106,8 +146,34 @@ export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   container: "Card",
   panel: "Card",
   header: "CardHeader",
-  title: "CardHeader",
-  heading: "CardHeader",
+  heading: "Title",
+  h1: "Title",
+  h2: "Title",
+  h3: "Title",
+  stack: "Box",
+  vstack: "Box",
+  column: "Box",
+  flex: "Box",
+  hstack: "Row",
+  inline: "Row",
+  columns: "Grid",
+  gridlayout: "Grid",
+  slider: "removed:",
+  slides: "Carousel",
+  tab: "TabItem",
+  tabpanel: "TabItem",
+  tag: "Badge",
+  chip: "Badge",
+  pill: "Badge",
+  timeline: "List",
+  bulletlist: "List",
+  item: "ListItem",
+  step: "ListItem",
+  stepitem: "ListItem",
+  caption: "Caption",
+  small: "Caption",
+  datatable: "Table",
+  grid: "Grid",
   cardtitle: "CardHeader",
   // 文本类（已从库中移除或模型臆造）→ TextContent
   text: "text:",
@@ -118,7 +184,7 @@ export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   inlineheader: "text:",
   label: "text:",
   codeblock: "text:",
-  subtitle: "text:",
+  subtitle: "Caption",
   description: "text:",
   note: "text:",
   // 提示
@@ -134,7 +200,6 @@ export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   imageblock: "image:",
   gallery: "ImageGallery",
   imagegrid: "ImageGallery",
-  carousel: "ImageGallery",
   video: "VideoPlayer",
   videoblock: "VideoPlayer",
   player: "VideoPlayer",
@@ -178,11 +243,6 @@ export const OPENUI_COMPONENT_ALIASES: Record<string, string> = {
   field: "removed:",
   formfield: "removed:",
   formitem: "removed:",
-  step: "removed:",
-  stepitem: "removed:",
-  column: "removed:",
-  badge: "removed:",
-  chip: "removed:",
   // 按钮
   btn: "Button",
   actionbutton: "Button",

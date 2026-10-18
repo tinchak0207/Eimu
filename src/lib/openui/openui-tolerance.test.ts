@@ -199,6 +199,6 @@ test("同源：catalog = eimuLibrary 注册组件 = 网关提示词白名单行"
   assert.ok(line);
   const listed = line!.split("：")[1].split("。")[0].split(", ").map((s) => s.trim()).sort();
   assert.deepEqual(listed, [...OPENUI_COMPONENTS].sort());
-  assert.ok(prompt.length <= 7000);
+  assert.ok(prompt.length <= 25000); // 2026-10-18 富展示：预算放宽到约 25k
   assert.ok(!/ENTIRE|entire response/i.test(prompt));
 });

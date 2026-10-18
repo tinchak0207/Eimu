@@ -14,12 +14,23 @@ import { createContext, createElement, useContext, type ComponentType } from "re
 
 export type ArtifactSlotKind = "image" | "gallery" | "video" | "audio" | "album" | "compare" | "deliverable";
 
+/** ImageGallery 版式：grid 等宽网格 / masonry 瀑布流 / hero 首图大+其余缩略 / strip 横向胶片条。 */
+export type GalleryLayout = "grid" | "masonry" | "hero" | "strip";
+export const GALLERY_LAYOUTS: readonly GalleryLayout[] = ["grid", "masonry", "hero", "strip"];
+
 export type ArtifactSlotProps = {
   kind: ArtifactSlotKind;
   refs: string[];
   title?: string;
   caption?: string;
-  mode?: "side" | "blind";
+  /** CompareView：side 并排 / blind 盲选 / slider 前后滑块（两张图）。 */
+  mode?: "side" | "blind" | "slider";
+  /** ImageGallery 版式。 */
+  layout?: GalleryLayout;
+  /** AudioPlayer 预览：lyrics 歌词片段 / waveform 波形（取不到就不显示）。 */
+  preview?: "lyrics" | "waveform";
+  /** VideoPlayer 封面帧（秒）；给了就先显示该帧+播放键，点开才换成完整播放卡。 */
+  posterAt?: number;
 };
 
 const ArtifactSlotRendererContext = createContext<ComponentType<ArtifactSlotProps> | null>(null);

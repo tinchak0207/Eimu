@@ -24,14 +24,24 @@ const { eimuLibrary, eimuPromptOptions } = require("../src/lib/openui/eimu-libra
   eimuLibrary: import("@openuidev/react-lang").Library;
   eimuPromptOptions: import("@openuidev/react-lang").PromptOptions;
 };
-const { OPENUI_COMPONENTS, OPENUI_ACTIONS } = require("../src/lib/openui/catalog.ts") as {
+const { OPENUI_COMPONENTS, OPENUI_ACTIONS, OPENUI_TOOLS, OPENUI_REMOVED_COMPONENTS } = require("../src/lib/openui/catalog.ts") as {
   OPENUI_COMPONENTS: readonly string[];
   OPENUI_ACTIONS: readonly string[];
+  OPENUI_TOOLS: readonly string[];
+  OPENUI_REMOVED_COMPONENTS: readonly string[];
+};
+const { eimuArgOrder } = require("../src/lib/openui/eimu-library.ts") as { eimuArgOrder: Record<string, readonly string[]> };
+const { repairOpenUISource } = require("../src/lib/openui/repair.ts") as {
+  repairOpenUISource: (code: string, order: Record<string, readonly string[]>) => { changed: boolean; notes: unknown[] };
+};
+const { RICH_EXAMPLES, fillRichExample } = require("../src/lib/openui/rich-examples.ts") as {
+  RICH_EXAMPLES: Array<{ key: string; title: string; code: string }>;
+  fillRichExample: (code: string, ids: readonly string[]) => string;
 };
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outFile = resolve(repoRoot, "deploy-staging/gateway/openui-system-prompt.txt");
-const MAX_CHARS = 7_000;
+const MAX_CHARS = 25_000;
 
 const RULES_FULL =
   "{required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}";
@@ -80,55 +90,53 @@ function extractSignatures(full: string): string[] {
 }
 
 // 示例里的 TASK_ID_x 只是占位：模型必须换成本会话任务表里的真实 task_id。
-const EXAMPLE_BLIND = [
-  "root = Card([hdr, pick])",
-  'hdr = CardHeader("四版海报已出", "先盲选，再看参数")',
-  'pick = CompareView(["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], "blind", "哪一版最接近你想要的？")',
-].join("\n");
+// 示范程序唯一真源：src/lib/openui/rich-examples.ts（演示页与单测共用）。
+const PLACEHOLDER_IDS = ["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"];
+const EXAMPLES: Array<[string, string]> = RICH_EXAMPLES.map((ex, i) => [
+  `示例 ${i + 1}：${ex.title}`,
+  fillRichExample(ex.code, PLACEHOLDER_IDS),
+]);
 
-const EXAMPLE_VIDEO = [
-  "root = Card([hdr, player, more])",
-  'hdr = CardHeader("成片已交付", "30 秒竖屏短片")',
-  'player = VideoPlayer("TASK_ID_1", "终版成片，已过独立评审")',
-  'more = Buttons([Button("再来一版", @ToAssistant("同样要求再做一版成片"), "secondary")])',
-].join("\n");
-
-const EXAMPLE_ALBUM = [
-  "root = Card([hdr, album])",
-  'hdr = CardHeader("专辑已完成", "三首成曲")',
-  'album = AlbumPlayer("专辑名", ["TASK_ID_1", "TASK_ID_2", "TASK_ID_3"], "点曲目可看滚动歌词")',
-].join("\n");
-
-const EXAMPLE_AB = [
-  "root = Card([hdr, ab])",
-  'hdr = CardHeader("A/B 对比", "同一需求两种风格")',
-  'ab = CompareView(["TASK_ID_1", "TASK_ID_2"], "side")',
-].join("\n");
-
-const EXAMPLES: Array<[string, string]> = [
-  ["示例 1：多图盲选", EXAMPLE_BLIND],
-  ["示例 2：视频交付", EXAMPLE_VIDEO],
-  ["示例 3：专辑播放器", EXAMPLE_ALBUM],
-  ["示例 4：A/B 对比", EXAMPLE_AB],
-];
+const QUERY_FIELDS =
+  "found, kind(image/video/audio), title(歌名/片名), model(生成模型), size(生成尺寸参数), resolution(实测分辨率 如 1920×1080), duration(实测时长 m:ss), durationSec, cost(实际扣费 如「12 金币」), costCoins, trackNo(本会话曲序), mediaKind(film/video/music/audio), lyricStatus";
 
 function buildPrompt(signatures: string[]): string {
   return [
     "## OpenUI 成品展示层（可选）",
-    "OpenUI 只用于展示本会话已经产出的真实成品：多图画廊/盲选、视频播放与交付、单曲/专辑播放、A/B 对比。只有本轮或上下文里已有真实产物（工具结果或会话任务表里有 task_id）时，才在正常中文回复末尾附加一个 ```openui 围栏块；没有成品就不出 UI，照常用中文回复。",
+    "OpenUI 只用于把本会话已经产出的真实成品排成一页好看的展示：交付卡、画廊、盲选、视频交付、单曲/专辑、A/B 对比、过程回顾。只有本轮或上下文里已有真实产物（工具结果或会话任务表里有 task_id）时，才在正常中文回复末尾附加一个 ```openui 围栏块；没有成品就不出 UI，照常用中文回复。",
+    "",
+    "### 产品边界（硬规则）",
     "- 参数、风格、比例、时长、分镜、设计全部由你自己决定；绝不输出参数表单、设置面板、创作控制台、仪表盘或流程步骤条，也不让用户填写任何字段。",
-    "- 绝不编造状态、队列、进度、引擎、计费、价格、张数或任何数字；文字里出现的事实与数字只能来自本轮工具结果。",
+    "- 绝不编造状态、队列、进度、引擎、计费、价格、张数、时长、分辨率或任何数字。页面上出现的数字只能是 Query 读出的字段（见下），字面量数字会被前端删掉。",
     "- 用户要「复杂 UI」「渲染个界面」「能力演示」时，用一句话说明 OpenUI 是成品展示层；有已有产物就用它展示，没有就先把成品做出来，不做假控制台。",
     "- 成品组件只收 taskId：填本会话任务表/工具结果里的真实 task_id（没有 task_id 的产物填它的原 URL）；不许猜、不许造、不许用示例里的 TASK_ID 占位。查不到的产物前端会显示「产物未找到」。",
-    "- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块。",
-    "- 围栏内第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法。",
-    "- 引用的名字都要定义；定义的名字都要能从 root 引用到，否则不渲染。",
-    `- 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：${OPENUI_COMPONENTS.join(", ")}。动作只有 ${OPENUI_ACTIONS.map((a) => `@${a}`).join(" / ")}。`,
-    "- Buttons 仅用于真正有歧义时的一键快选（最多 4 个 secondary Button + @ToAssistant），或成品后的「再来一版」；自动模式下不出快选。@ToAssistant 只把一句话发回对话，不会直接生成媒体。",
-    "- Callout 只写本轮真实发生的事实（如某件产物失败已退款）；TextContent 写简短说明，不写假数据。",
-    "- 不要用 Markdown 图片语法；布局要在手机宽度（约 360px）可读。",
+    "- 过程时间线（List timeline）只回顾本轮真实做过的步骤，不写没发生的环节、不写耗时数字。",
+    "- Callout 只写本轮真实发生、且不含数字的事实（如「有一张生成失败，已自动退款」）；不写排队/进度/预计/引擎类状态。",
     "",
-    "### 组件签名（? 为可选参数）",
+    "### 语法",
+    "- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块。",
+    "- 围栏内第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法；可选参数不传时用 null 占位。",
+    "- 引用的名字都要定义；定义的名字都要能从 root 引用到，否则不渲染。数组里可以直接内联组件调用。",
+    `- 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：${OPENUI_COMPONENTS.join(", ")}。动作只有 ${OPENUI_ACTIONS.map((a) => `@${a}`).join(" / ")}。`,
+    "",
+    "### 版式（像 ChatGPT 那样排成一页，而不是一列卡片）",
+    "- 结构：CardHeader 定标题 → 一行 Badge 事实条 → 主成品（画廊/播放器/对比）→ 需要时用 Tabs 收纳次要视图（交付清单、曲目表、过程）→ 结尾可选 Buttons。",
+    "- Row 放并排的小东西（Badge 事实条、两个按钮），事实条用 Row([...], 2, \"center\", \"start\", true) 允许换行；Grid 放 2-4 个等宽块（多个单曲、几张对比卡）；Box(tone soft/outline) 只用来把一组内容圈起来；Carousel 放备选/往期版本；Tabs 2-5 个签。",
+    "- ImageGallery 版式：hero 首图大+缩略切换（交付主视觉）、masonry 瀑布流（风格不一的多张）、strip 横向胶片条（同系列）、grid 等宽网格。CompareView：blind 盲选、side 并排、slider 两张图前后滑块（修图前后、同构图两风格）。",
+    "- AudioPlayer preview：lyrics 显示歌词片段（成曲）、waveform 显示波形（纯音乐/音效）；VideoPlayer posterAt：取成片里有代表性的一帧（秒）作封面。",
+    "- Title 用于块标题（md）；Caption 写小字说明；TextContent 写一两句正文；别写大段散文。手机宽度约 360px 也要可读：一行 Badge 不超过 4 个，Grid 列数不超过 2（多了会自动降列）。",
+    "",
+    "### 真实元数据：Query（只读）",
+    `- 写法：\`m = Query("artifact", {taskId: "真实task_id"})\` 读一件产物；\`arts = Query("artifacts", {kind: "audio"})\` 读本会话某类全部产物（kind 可省略），结果在 arts.rows，数量在 arts.count。只有这两个工具：${OPENUI_TOOLS.join(", ")}；不许写其他工具名，不许写 Mutation。`,
+    `- 字段：${QUERY_FIELDS}。取不到的字段为空，组件会自动隐藏——不要写第三个默认值参数（会被删掉），也不要手写任何数字兜底。`,
+    "- 引用字段：Badge(m.resolution)、Badge(m.duration, \"info\")、Caption(m.model)。数组字段可整列取：arts.rows.title、arts.rows.duration；也可 @Each(arts.rows, \"a\", ListItem(a.title, a.duration))（循环变量只在模板里用）、@Count(arts.rows)。",
+    "- Table / Col / BarChart / LineChart / PieChart / Series 的数据只能是 Query 字段（如 Col(\"时长\", arts.rows.duration)、Series(\"时长（秒）\", arts.rows.durationSec)）；写字面量数组或数字的整件会被删掉。",
+    "",
+    "### 按钮",
+    "- Buttons 仅用于真正有歧义时的一键快选（最多 4 个 secondary Button + @ToAssistant），或成品后的「再来一版」；自动模式下不出快选。@ToAssistant 只把一句话发回对话，不会直接生成媒体。",
+    "- 不要用 Markdown 图片语法。",
+    "",
+    "### 组件签名（? 为可选参数，Node 指任意白名单组件）",
     ...signatures,
     "",
     ...EXAMPLES.flatMap(([title, ex]) => [`### ${title}`, "```openui", ex, "```", ""]),
@@ -154,12 +162,21 @@ const registered = Object.keys(eimuLibrary.components).sort();
 if (JSON.stringify(registered) !== JSON.stringify(want)) {
   fail(`eimuLibrary 注册组件 ≠ catalog 白名单\n  lib=${registered.join(",")}`);
 }
-const allowed = new Set<string>([...OPENUI_COMPONENTS, ...OPENUI_ACTIONS, "Action"]);
+const BUILTIN_FNS = ["Query", "Each", "Count", "Sum"];
+const allowed = new Set<string>([...OPENUI_COMPONENTS, ...OPENUI_ACTIONS, "Action", ...BUILTIN_FNS]);
 const mentioned = new Set([...prompt.matchAll(/\b([A-Z][A-Za-z]+)\(/g)].map((m) => m[1]));
 const stray = [...mentioned].filter((n) => !allowed.has(n));
 if (stray.length) fail(`提示词里出现白名单外的组件：${stray.join(", ")}`);
-for (const ex of EXAMPLES.map(([, e]) => e)) {
-  if (/\b(Form|FormControl|Input|TextArea|Select|Slider|RadioGroup|CheckBoxGroup|OptionCards|Steps|Table|Tag)\(/.test(ex)) fail("示例里出现已移除的表单/控制台组件");
+const removedRe = new RegExp(`\\b(${OPENUI_REMOVED_COMPONENTS.join("|")})\\(`);
+for (const [label, ex] of EXAMPLES) {
+  if (removedRe.test(ex)) fail(`示例 ${label} 里出现已移除的表单/控制台组件`);
+  for (const m of ex.matchAll(/Query\("([^"]+)"/g)) if (!OPENUI_TOOLS.includes(m[1])) fail(`示例 ${label} 用了未注册工具 ${m[1]}`);
+  // 示例必须是 repair 恒等（否则模型照抄后会被前端改写/删除）。
+  const rep = repairOpenUISource(ex, eimuArgOrder);
+  if (rep.changed) fail(`示例 ${label} 不是 repair 恒等：${JSON.stringify(rep.notes)}`);
+  // 字面量数字只许出现在 posterAt / gap 这类版式参数，不许出现在字符串里。
+  const strs = [...ex.replace(/TASK_ID_\d/g, "").matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+  if (strs.some((t) => /[0-9０-９]/.test(t))) fail(`示例 ${label} 的字符串里有数字（会教模型编造数字）`);
 }
 // 签名的参数部分里出现的大写类型名必须都在白名单（防 `topContent?: Icon | Image` 这类漏网）。
 const { openuiChatLibrary } = require("@openuidev/react-ui") as { openuiChatLibrary: { components: Record<string, unknown> } };

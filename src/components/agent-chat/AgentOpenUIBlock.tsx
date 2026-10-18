@@ -50,6 +50,7 @@ import {
 import { buildOpenUIActionMessage, OpenUIActionMessageError, safeOpenUrl } from "@/lib/openui/action-message";
 import { repairOpenUISource, type RepairNote } from "@/lib/openui/repair";
 import { ArtifactSlotRendererProvider } from "@/lib/openui/artifact-slot";
+import { useArtifactToolProvider } from "./agent-artifacts-context";
 import { OpenUIArtifactSlot } from "./OpenUIArtifactSlot";
 
 /** 预检解析器：与 Renderer 同一个 eimuLibrary schema（模块级单例）。 */
@@ -215,6 +216,8 @@ export default function AgentOpenUIBlock({ code: sourceCode, isStreaming, onSend
     }
   }, [sourceCode]);
   const code = repair.code;
+  // OpenUI 1.0 Query 只读工具：从会话产物取真实元数据（取不到字段为空）。
+  const toolProvider = useArtifactToolProvider();
   // 表单状态只保存在 ref：不持久化、不因 state 更新触发父级/自身重渲染。
   const formStateRef = useRef<Record<string, unknown>>({});
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -374,6 +377,7 @@ export default function AgentOpenUIBlock({ code: sourceCode, isStreaming, onSend
               onStateUpdate={handleStateUpdate}
               onParseResult={handleParseResult}
               onError={handleError}
+              toolProvider={toolProvider}
             />
             </ArtifactSlotRendererProvider>
           </ThemeProvider>

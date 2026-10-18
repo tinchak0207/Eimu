@@ -26,13 +26,16 @@ import {
   useSetDefaultValue,
   type DefinedComponent,
   type PromptOptions,
+  type ToolSpec,
 } from "@openuidev/react-lang";
 import { openuiChatLibrary, openuiChatPromptOptions } from "@openuidev/react-ui";
 import { z } from "zod/v4";
 
 import { OPENUI_COMPONENTS } from "./catalog";
+import { layoutComponents, nodeChildren } from "./eimu-layout";
 import {
   ArtifactSlot,
+  GALLERY_LAYOUTS,
   normalizeArtifactRefs,
   type ArtifactSlotKind,
   type ArtifactSlotProps,
@@ -475,25 +478,41 @@ const EimuImageResult = artifactComponent(
 const EimuImageGallery = artifactComponent(
   "ImageGallery",
   "gallery",
-  z.object({ taskIds: taskIdListSchema, caption: z.string().optional() }),
-  "多张成品图画廊（点开大图）；taskIds 全部来自本会话真实产物",
-  (p) => ({ refs: normalizeArtifactRefs(p.taskIds), caption: p.caption }),
+  z.object({
+    taskIds: taskIdListSchema,
+    caption: z.string().optional(),
+    layout: z.enum(GALLERY_LAYOUTS as unknown as ["grid", "masonry", "hero", "strip"]).optional(),
+  }),
+  "多张成品图画廊；layout grid 网格 / masonry 瀑布流 / hero 首图大图+缩略 / strip 横向胶片条",
+  (p) => ({
+    refs: normalizeArtifactRefs(p.taskIds),
+    caption: p.caption,
+    layout: (GALLERY_LAYOUTS as readonly string[]).includes(p.layout) ? p.layout : "grid",
+  }),
 );
 
 const EimuVideoPlayer = artifactComponent(
   "VideoPlayer",
   "video",
-  z.object({ taskId: taskIdSchema, caption: z.string().optional() }),
-  "成片/视频播放器（带下载/再来一版/变体）；taskId 为本会话真实视频产物",
-  (p) => ({ refs: normalizeArtifactRefs(p.taskId), caption: p.caption }),
+  z.object({ taskId: taskIdSchema, caption: z.string().optional(), posterAt: z.number().optional() }),
+  "成片/视频播放器（带下载/再来一版/变体）；posterAt 秒数＝先显示该帧作封面，点播放再展开",
+  (p) => ({
+    refs: normalizeArtifactRefs(p.taskId),
+    caption: p.caption,
+    posterAt: typeof p.posterAt === "number" && Number.isFinite(p.posterAt) && p.posterAt >= 0 ? p.posterAt : undefined,
+  }),
 );
 
 const EimuAudioPlayer = artifactComponent(
   "AudioPlayer",
   "audio",
-  z.object({ taskId: taskIdSchema, caption: z.string().optional() }),
-  "单曲/音频播放器（封面、歌名、滚动歌词播放器入口）；taskId 为本会话真实音频产物",
-  (p) => ({ refs: normalizeArtifactRefs(p.taskId), caption: p.caption }),
+  z.object({ taskId: taskIdSchema, caption: z.string().optional(), preview: z.enum(["lyrics", "waveform"]).optional() }),
+  "单曲播放器（封面、歌名、滚动歌词入口）；preview lyrics 歌词片段 / waveform 波形，取不到就不显示",
+  (p) => ({
+    refs: normalizeArtifactRefs(p.taskId),
+    caption: p.caption,
+    preview: p.preview === "lyrics" || p.preview === "waveform" ? p.preview : undefined,
+  }),
 );
 
 const EimuAlbumPlayer = artifactComponent(
@@ -509,11 +528,15 @@ const EimuCompareView = artifactComponent(
   "compare",
   z.object({
     taskIds: taskIdListSchema,
-    mode: z.enum(["side", "blind"]).optional(),
+    mode: z.enum(["side", "blind", "slider"]).optional(),
     question: z.string().optional(),
   }),
-  "2-4 个真实候选并排对比；mode blind 时隐去参数只标方案 A/B/C，用户点选后回传所选 task_id",
-  (p) => ({ refs: normalizeArtifactRefs(p.taskIds).slice(0, 4), mode: p.mode === "blind" ? "blind" : "side", caption: p.question }),
+  "2-4 个真实候选对比；blind 盲选只标方案 A/B/C 并回传所选 task_id；slider 两张图前后拖动滑块",
+  (p) => ({
+    refs: normalizeArtifactRefs(p.taskIds).slice(0, 4),
+    mode: p.mode === "blind" || p.mode === "slider" ? p.mode : "side",
+    caption: p.question,
+  }),
 );
 
 const EimuDeliverableCard = artifactComponent(
@@ -548,27 +571,17 @@ const localOverrides: Record<string, AnyComponent> = {
   Buttons: EimuButtons,
 };
 
-/** 只有容器型组件能直接作为 Card 的 children；Button 由 Buttons 消费。 */
-const CARD_CHILD_EXCLUDED = new Set(["Card", "Button"]);
-
-const componentRef = (name: string) => (localOverrides[name] ?? pick(name)).ref;
-
-const cardChildren = SELECTED.filter((name) => !CARD_CHILD_EXCLUDED.has(name)).map(componentRef);
-
-/** zod union 需要至少两个元素的元组类型。 */
-const unionOf = (schemas: unknown[]) =>
-  z.union(schemas as unknown as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
-
 const EimuCard = defineComponent({
   name: "Card",
   props: z.object({
-    children: z.array(unionOf(cardChildren)),
+    children: nodeChildren,
   }),
-  description: "Vertical container for the whole openui block.",
+  description: "Vertical container for the whole openui block; children may be any layout, text, artifact or data component.",
   component: pick("Card").component,
 });
 
 localOverrides.Card = EimuCard;
+Object.assign(localOverrides, layoutComponents);
 
 const overrides: Record<string, AnyComponent> = localOverrides;
 
@@ -599,9 +612,51 @@ export const eimuPromptOptions: PromptOptions = {
     "Never build parameter forms, control panels or dashboards; the agent decides all parameters itself.",
     "Never use Markdown image syntax (`![alt](url)`) or raw HTML `<img>` in any text.",
     `Buttons are only for a one-tap pick when the request is genuinely ambiguous (at most ${MAX_QUICK_PICK_BUTTONS}); omit them otherwise.`,
+    "Every number shown (Badge, Callout, Table, charts) must be a field of a Query(\"artifact\"/\"artifacts\") result; literal numbers are removed.",
     baseRules[36], // Button 只做真实动作，不编造 URL
   ],
 };
+
+/**
+ * 只读工具（OpenUI 1.0 Query + toolProvider）：前端从会话产物取真实元数据。
+ * 字段取不到就是空串 / null——绝不补估算值。实现见 agent-artifacts-context.tsx。
+ */
+const ARTIFACT_META_PROPERTIES = {
+  found: { type: "boolean", description: "该 task_id 是否在本会话产物里" },
+  kind: { type: "string", enum: ["image", "video", "audio", ""] },
+  title: { type: "string", description: "歌名/片名（没有为空）" },
+  model: { type: "string", description: "生成模型（来自产物 recipe，没有为空）" },
+  size: { type: "string", description: "生成尺寸参数，如 1024x1536（没有为空）" },
+  resolution: { type: "string", description: "实测分辨率，如 1920×1080（读不到为空）" },
+  duration: { type: "string", description: "实测时长 m:ss（视频/音频，读不到为空）" },
+  durationSec: { type: "number", description: "实测时长秒数（读不到为 null）" },
+  cost: { type: "string", description: "本件实际扣费，如「12 金币」（没有为空）" },
+  costCoins: { type: "number", description: "本件实际扣费金币数（没有为 null）" },
+  trackNo: { type: "number", description: "音频在本会话的曲序，从 1 起（非音频为 null）" },
+  mediaKind: { type: "string", description: "film/video/music/audio（没有为空）" },
+  lyricStatus: { type: "string", description: "歌词对齐状态 ready/aligning（没有为空）" },
+} as const;
+
+export const eimuToolSpecs: ToolSpec[] = [
+  {
+    name: "artifact",
+    description: "读取本会话一件真实产物的元数据（只读）",
+    inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] },
+    outputSchema: { type: "object", properties: ARTIFACT_META_PROPERTIES },
+  },
+  {
+    name: "artifacts",
+    description: "列出本会话真实产物（只读）；kind 可选 image/video/audio",
+    inputSchema: { type: "object", properties: { kind: { type: "string" } } },
+    outputSchema: {
+      type: "object",
+      properties: {
+        rows: { type: "array", items: { type: "object", properties: { taskId: { type: "string" }, ...ARTIFACT_META_PROPERTIES } } },
+        count: { type: "number" },
+      },
+    },
+  },
+];
 
 /**
  * 组件 → 位置参数属性名顺序（取自实际注册的 zod schema），供 repair.ts 把

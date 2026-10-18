@@ -7,6 +7,7 @@ import { AgentMarkdown } from "@/components/agent-chat/AgentMarkdown";
 import { AgentArtifactsProvider } from "@/components/agent-chat/agent-artifacts-context";
 import { AgentChatSendProvider } from "@/components/agent-chat/agent-chat-send-context";
 import type { AgentChatState } from "@/lib/agent-chat-types";
+import { fillRichExample, RICH_EXAMPLES } from "@/lib/openui/rich-examples";
 
 /**
  * OpenUI 成品展示层演示（2026-10-18 改造）：会话产物用演示条目模拟（真实公开素材 URL），
@@ -15,35 +16,43 @@ import type { AgentChatState } from "@/lib/agent-chat-types";
  */
 const STORE = "https://store.tinchak0207.xyz/image-data/files/uploads";
 const ALBUM_COVER = `${STORE}/media-1791379462314-gf50k0.png`;
+// 演示会话数据（模拟 image/video/audio.done 已到达的条目）：模型/尺寸/扣费是演示夹具，
+// 分辨率与时长由浏览器对真实素材实测。
 const DEMO_ITEMS: AgentChatState["items"] = [
-  { kind: "image", id: "demo-img-1", seq: 1, url: "/showcase/showcase1.webp", taskId: "task_demo_img_1" },
-  { kind: "image", id: "demo-img-2", seq: 2, url: "/showcase/showcase2.webp", taskId: "task_demo_img_2" },
-  { kind: "image", id: "demo-img-3", seq: 3, url: "/showcase/showcase3.webp", taskId: "task_demo_img_3" },
-  { kind: "image", id: "demo-img-4", seq: 4, url: "/showcase/showcase4.webp", taskId: "task_demo_img_4" },
-  { kind: "video", id: "demo-vid-1", seq: 1, url: "/showcase/agent-templates/drama-visual-2.mp4", taskId: "task_demo_vid_1", mediaKind: "film" },
+  { kind: "image", id: "demo-img-1", seq: 1, url: "/showcase/showcase1.webp", taskId: "task_demo_img_1", costCoins: 4, recipe: { model: "flux-pro", size: "1024x1536" } },
+  { kind: "image", id: "demo-img-2", seq: 2, url: "/showcase/showcase2.webp", taskId: "task_demo_img_2", costCoins: 4, recipe: { model: "flux-pro", size: "1024x1536" } },
+  { kind: "image", id: "demo-img-3", seq: 3, url: "/showcase/showcase3.webp", taskId: "task_demo_img_3", costCoins: 3, recipe: { model: "seedream", size: "1024x1536" } },
+  { kind: "image", id: "demo-img-4", seq: 4, url: "/showcase/showcase4.webp", taskId: "task_demo_img_4", costCoins: 3, recipe: { model: "seedream", size: "1024x1536" } },
+  { kind: "video", id: "demo-vid-1", seq: 1, url: "/showcase/agent-templates/drama-visual-2.mp4", taskId: "task_demo_vid_1", mediaKind: "film", costCoins: 60 },
   { kind: "video", id: "demo-vid-2", seq: 2, url: "/showcase/agent-templates/ecom-launch-2.mp4", taskId: "task_demo_vid_2" },
   { kind: "audio", id: "demo-aud-1", seq: 1, url: `${STORE}/media-1791378096227-27qm92.m4a`, taskId: "task_demo_aud_1", mediaKind: "music", title: "路灯下的行李", cover: ALBUM_COVER },
   { kind: "audio", id: "demo-aud-2", seq: 2, url: `${STORE}/media-1791378172616-fg77z2.m4a`, taskId: "task_demo_aud_2", mediaKind: "music", title: "六平米", cover: ALBUM_COVER },
   { kind: "audio", id: "demo-aud-3", seq: 3, url: `${STORE}/media-1791378246147-za04wv.m4a`, taskId: "task_demo_aud_3", mediaKind: "music", title: "像没发生过", cover: ALBUM_COVER },
 ];
 
-const GALLERY_BLIND = `root = Card([hdr, pick])
-hdr = CardHeader("四版海报已出", "先盲选，再看参数")
-pick = CompareView(["task_demo_img_1", "task_demo_img_2", "task_demo_img_3", "task_demo_img_4"], "blind", "哪一版最接近你想要的？")`;
+const IMG_IDS = ["task_demo_img_1", "task_demo_img_2", "task_demo_img_3", "task_demo_img_4"];
+const VID_IDS = ["task_demo_vid_1", "task_demo_vid_2"];
+const AUD_IDS = ["task_demo_aud_1", "task_demo_aud_2", "task_demo_aud_3"];
+const IDS_BY_KIND = { image: IMG_IDS, video: VID_IDS, audio: AUD_IDS } as const;
 
-const VIDEO_DELIVERY = `root = Card([hdr, player, more])
-hdr = CardHeader("成片已交付", "30 秒竖屏短片")
-player = VideoPlayer("task_demo_vid_1", "终版成片，已过独立评审")
-more = DeliverableCard("本次交付", ["task_demo_vid_1", "task_demo_vid_2"], "成片与备选剪辑，均可下载或再来一版")`;
+const WAVEFORM = `root = Card([hdr, song])
+hdr = CardHeader("单曲", "波形预览")
+song = AudioPlayer("task_demo_aud_2", "第二首", "waveform")`;
 
-const ALBUM = `root = Card([hdr, album])
-hdr = CardHeader("专辑《把灯留着》", "三首已完成")
-album = AlbumPlayer("把灯留着", ["task_demo_aud_1", "task_demo_aud_2", "task_demo_aud_3"], "点曲目可打开滚动歌词播放器")`;
+const MISSING = `root = Card([hdr, gallery])
+hdr = CardHeader("缺失产物", "含一个不存在的 taskId")
+gallery = ImageGallery(["task_demo_img_3", "task_fake_not_exist"], "不存在的那件应显示「产物未找到」", "grid")`;
 
-const AB = `root = Card([hdr, ab, gallery])
-hdr = CardHeader("A/B 对比", "同一提示词两种风格")
-ab = CompareView(["task_demo_img_1", "task_demo_img_2"], "side")
-gallery = ImageGallery(["task_demo_img_3", "task_demo_img_4", "task_fake_not_exist"], "其余两张候选（含一个不存在的 taskId，应显示「产物未找到」）")`;
+// 模型手写数字/假数据回放：字面量徽章、排队 Callout、字面量表格与图表、未知工具 Query 全部被删。
+const FAKE_NUMBERS = `root = Card([hdr, b1, c1, t1, q2, chart2, ok])
+hdr = CardHeader("渲染完成", "假数字回放")
+b1 = Badge("30 秒", "info")
+c1 = Callout("info", "队列", "排队第 3 位，预计 2 分钟")
+t1 = Table([Col("模型", ["A", "B"]), Col("耗时", [12, 30])])
+q2 = Query("get_orders", {}, {rows: []})
+vals = [1, 2, 3]
+chart2 = BarChart(["a", "b", "c"], [Series("x", vals)])
+ok = TextContent("只有这句说明应保留。")`;
 
 // 旧版生产输出（控制台/表单）回放：新白名单下表单、表格、步骤、标签被整条删除，只剩标题与文本。
 const LEGACY_CONSOLE = `root = Card([hdr, intro, tagA, statusCall, tbl, stepList, form, quick])
@@ -59,13 +68,22 @@ fA = FormControl("画面描述", inDesc)
 inDesc = Input("desc", "霓虹雨夜的街角", "text")
 quick = Buttons([Button("先给一句话方案", @ToAssistant("先给一句话方案"), "secondary")])`;
 
+const SHORT_NAMES: Record<string, string> = {
+  "delivery-gallery": "交付卡+画廊",
+  album: "专辑",
+  "ab-compare": "A/B 滑块",
+  "process-timeline": "过程时间线",
+  "series-masonry": "瀑布流+参数表",
+  "blind-pick": "多图盲选",
+};
+
 const EXAMPLES = [
-  { name: "画廊盲选", source: GALLERY_BLIND },
-  { name: "视频交付", source: VIDEO_DELIVERY },
-  { name: "专辑播放器", source: ALBUM },
-  { name: "A/B 对比", source: AB },
+  ...RICH_EXAMPLES.map((ex) => ({ name: SHORT_NAMES[ex.key] ?? ex.title, source: fillRichExample(ex.code, IDS_BY_KIND[ex.kind]) })),
+  { name: "单曲波形", source: WAVEFORM },
+  { name: "缺失产物", source: MISSING },
+  { name: "假数字回放（应被清理）", source: FAKE_NUMBERS },
   { name: "旧控制台回放（应被清理）", source: LEGACY_CONSOLE },
-] as const;
+];
 
 export default function OpenUIDemoPage() {
   const [selected, setSelected] = useState(0);
@@ -85,7 +103,7 @@ export default function OpenUIDemoPage() {
         </Link>
         <header className="mb-8 mt-5 max-w-3xl">
           <h1 className="text-balance text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">成品到手，界面自动长出来。</h1>
-          <p className="mt-4 text-base leading-7 text-muted-foreground">OpenUI 只做成品展示层：画廊、盲选、视频交付、专辑播放器。组件只认会话里的真实产物 taskId，查不到就显示「产物未找到」。</p>
+          <p className="mt-4 text-base leading-7 text-muted-foreground">OpenUI 只做成品展示层：画廊、盲选、视频交付、专辑、A/B 滑块、过程时间线。组件只认会话里的真实产物 taskId，查不到就显示「产物未找到」；徽章、表格、图表里的数字只来自 Query 读到的真实元数据。</p>
         </header>
         <div role="group" aria-label="选择演示内容" className="mb-6 flex flex-wrap gap-2">
           {EXAMPLES.map((example, index) => (

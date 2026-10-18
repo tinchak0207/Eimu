@@ -177,3 +177,150 @@
     --openui-text-heading-md: 650 18px/1.35 var(--eimu-openui-font);
   }
 }
+
+/* ── 富展示布局 / 文本原语（eimu-layout.ts；2026-10-18）─────────────────────
+   参考 thesysdev/open-intelligent-ui（MIT）的 iui-* 版式：三档间距
+   （内 4-8px / 组 12-16px / 段 20-24px），窄屏自动降列。 */
+.eimu-openui-block .eimu-oui-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.eimu-openui-block .eimu-oui-row > * { min-width: 0; }
+.eimu-openui-block .eimu-oui-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.eimu-openui-block .eimu-oui-box { border-radius: 12px; min-width: 0; }
+.eimu-openui-block .eimu-oui-box.eimu-oui-row { flex-wrap: wrap; }
+.eimu-openui-block .eimu-oui-soft { background: rgba(0, 0, 0, 0.035); padding: 12px; }
+.eimu-openui-block .eimu-oui-outline { border: 1px solid rgba(0, 0, 0, 0.08); padding: 12px; }
+.eimu-openui-block .eimu-oui-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(var(--eimu-oui-cols, 2), minmax(0, 1fr));
+  min-width: 0;
+}
+.eimu-openui-block .eimu-oui-grid[data-cols="1"] { --eimu-oui-cols: 1; }
+.eimu-openui-block .eimu-oui-grid[data-cols="3"] { --eimu-oui-cols: 3; }
+.eimu-openui-block .eimu-oui-grid[data-cols="4"] { --eimu-oui-cols: 4; }
+@media (max-width: 639.98px) {
+  .eimu-openui-block .eimu-oui-grid[data-cols="3"],
+  .eimu-openui-block .eimu-oui-grid[data-cols="4"] { --eimu-oui-cols: 2; }
+}
+@media (max-width: 379.98px) {
+  .eimu-openui-block .eimu-oui-grid { --eimu-oui-cols: 1; }
+}
+.eimu-openui-block .eimu-oui-carousel {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  padding-bottom: 4px;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.eimu-openui-block .eimu-oui-slide {
+  flex: 0 0 min(78%, 320px);
+  scroll-snap-align: start;
+  min-width: 0;
+}
+.eimu-openui-block .eimu-oui-tabs { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.eimu-openui-block .eimu-oui-tablist {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  overflow-x: auto;
+  max-width: 100%;
+}
+.eimu-openui-block .eimu-oui-tab {
+  flex: 1 0 auto;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(20, 20, 20, 0.62);
+  background: transparent;
+  white-space: nowrap;
+}
+.eimu-openui-block .eimu-oui-tab.is-active {
+  background: #fff;
+  color: #141414;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.eimu-openui-block .eimu-oui-tabpanel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.eimu-openui-block .eimu-oui-title { font-weight: 650; color: #141414; line-height: 1.3; }
+.eimu-openui-block .eimu-oui-title-sm { font-size: 15px; }
+.eimu-openui-block .eimu-oui-title-md { font-size: 17px; }
+.eimu-openui-block .eimu-oui-title-lg { font-size: 20px; }
+.eimu-openui-block .eimu-oui-title-xl { font-size: 24px; }
+.eimu-openui-block .eimu-oui-caption { margin: 0; font-size: 13px; line-height: 1.5; color: rgba(20, 20, 20, 0.55); }
+.eimu-openui-block .eimu-oui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(20, 20, 20, 0.78);
+}
+.eimu-openui-block .eimu-oui-badge-info { background: rgba(0, 122, 255, 0.1); color: #0062d6; }
+.eimu-openui-block .eimu-oui-badge-success { background: rgba(52, 199, 89, 0.12); color: #1f7a3a; }
+.eimu-openui-block .eimu-oui-badge-warning { background: rgba(255, 149, 0, 0.13); color: #a35a00; }
+.eimu-openui-block .eimu-oui-badge-danger { background: rgba(255, 59, 48, 0.11); color: #c4251c; }
+.eimu-openui-block .eimu-oui-badge-purple { background: rgba(175, 82, 222, 0.12); color: #8a35b8; }
+.eimu-openui-block .eimu-oui-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.eimu-openui-block .eimu-oui-list > li { display: flex; gap: 10px; align-items: flex-start; position: relative; min-width: 0; }
+.eimu-openui-block .eimu-oui-list-marker {
+  flex: 0 0 auto;
+  min-width: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(20, 20, 20, 0.55);
+  line-height: 1.6;
+}
+.eimu-openui-block .eimu-oui-list-bullet > li > .eimu-oui-list-marker:empty::before { content: "•"; }
+.eimu-openui-block .eimu-oui-list-body { min-width: 0; }
+.eimu-openui-block .eimu-oui-list-title { font-size: 14.5px; line-height: 1.55; color: #141414; }
+.eimu-openui-block .eimu-oui-list-desc { font-size: 13px; line-height: 1.5; color: rgba(20, 20, 20, 0.55); }
+.eimu-openui-block .eimu-oui-timeline > li { padding-bottom: 2px; }
+.eimu-openui-block .eimu-oui-timeline .eimu-oui-list-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1.5px solid rgba(0, 122, 255, 0.55);
+  font-size: 12px;
+  line-height: 1;
+  z-index: 1;
+}
+.eimu-openui-block .eimu-oui-timeline .eimu-oui-list-marker:empty::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #007aff;
+}
+.eimu-openui-block .eimu-oui-timeline > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 10.5px;
+  top: 24px;
+  bottom: -10px;
+  width: 1.5px;
+  background: rgba(0, 122, 255, 0.25);
+}

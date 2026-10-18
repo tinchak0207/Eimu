@@ -23,10 +23,14 @@
 import {
   OPENUI_ACTION_ALIASES,
   OPENUI_ACTIONS,
+  OPENUI_BUILTIN_CALLS,
   OPENUI_COMPONENT_ALIASES,
   OPENUI_COMPONENTS,
   OPENUI_COMPONENT_SET,
+  OPENUI_DATA_ARG_SLOTS,
+  OPENUI_NO_LITERAL_DIGIT_COMPONENTS,
   OPENUI_REMOVED_SET,
+  OPENUI_TOOLS,
 } from "./catalog";
 
 // ── AST ─────────────────────────────────────────────────────────────────
@@ -147,8 +151,19 @@ function parseExpr(lx: Lexer): Node {
   if (!name) throw new ParseFail(`unexpected ${c} at ${lx.i}`);
   if (name === "true" || name === "false" || name === "null") return { t: "lit", raw: name };
   if (lx.peek() === "(") return { t: "call", name, action: false, args: parseArgs(lx) };
-  return { t: "ref", name };
+  // 成员访问 `meta.duration` / `rows.rows.title`（Query 结果字段）：整段当一个引用。
+  let path = name;
+  while (lx.s[lx.i] === "." && /[A-Za-z_$]/.test(lx.s[lx.i + 1] ?? "")) {
+    lx.i += 1;
+    const seg = lx.ident();
+    if (!seg) throw new ParseFail("bad member");
+    path += `.${seg}`;
+  }
+  return { t: "ref", name: path };
 }
+
+/** `meta.duration` → `meta`（语句名）。 */
+const refRoot = (name: string) => name.split(".")[0];
 
 function parseArgs(lx: Lexer): Arg[] {
   lx.eat("(");
@@ -344,6 +359,21 @@ class Repairer {
 
   call(n: Extract<Node, { t: "call" }>): Node {
     const args = n.args.map((a) => ({ key: a.key, value: this.node(a.value) }));
+    // 运行时内置语句（只读 Query）原样保留；Mutation 在移除表里，下面走删除。
+    if ((OPENUI_BUILTIN_CALLS as readonly string[]).includes(n.name)) {
+      const tool = args[0]?.value;
+      if (!tool || tool.t !== "str" || !(OPENUI_TOOLS as readonly string[]).includes(tool.value)) {
+        this.notes.push({ kind: "removed-component", detail: `Query(${tool && tool.t === "str" ? tool.value : "?"})` });
+        return REMOVED;
+      }
+      // 默认值（第 3 参）是模型手写的「假数据」入口：一律丢掉，取不到的字段就为空。
+      const third = args[2]?.value;
+      if (args.length > 2 && !(third && third.t === "obj" && third.entries.length === 0 && args.length === 3)) {
+        this.notes.push({ kind: "query-defaults-dropped", detail: tool.value });
+        return { ...n, args: [args[0], args[1] ?? { value: { t: "obj", entries: [] } as Node }] };
+      }
+      return { ...n, args };
+    }
     const r = resolveComponentName(n.name);
     if (r === null) {
       this.notes.push({ kind: "unknown-component", detail: n.name });
@@ -435,7 +465,90 @@ class Repairer {
       args[0] = { t: "arr", items };
       this.notes.push({ kind: "gallery-objects", detail: "src objects → ids" });
     }
+    // Badge / Callout 的文字里不许有字面量数字（数字只能来自 Query 字段引用）。
+    if ((OPENUI_NO_LITERAL_DIGIT_COMPONENTS as readonly string[]).includes(name) && args.some((a) => a.t === "str" && /[0-9０-９]/.test(a.value))) {
+      this.notes.push({ kind: "literal-digit-removed", detail: name });
+      return REMOVED;
+    }
     return { t: "call", name, action: false, args: args.map((value) => ({ value })) };
+  }
+}
+
+// ── 数据组件只许引用 Query 结果 ─────────────────────────────────────────
+const DATA_CONTAINERS: Record<string, number> = { Table: 0, BarChart: 1, LineChart: 1 };
+
+function hasNumberLiteral(n: Node): boolean {
+  switch (n.t) {
+    case "lit":
+      return /^-?\d/.test(n.raw);
+    case "arr":
+      return n.items.some(hasNumberLiteral);
+    case "obj":
+      return n.entries.some((e) => hasNumberLiteral(e.value));
+    case "call":
+      // @Round(x, 1) 这类运算参数里的小常数允许；只看非 @ 调用与数组。
+      return n.action ? n.args.some((a) => a.value.t !== "lit" && hasNumberLiteral(a.value)) : n.args.some((a) => hasNumberLiteral(a.value));
+    default:
+      return false;
+  }
+}
+
+function refsAny(n: Node, names: ReadonlySet<string>): boolean {
+  switch (n.t) {
+    case "ref":
+      return names.has(refRoot(n.name));
+    case "arr":
+      return n.items.some((x) => refsAny(x, names));
+    case "obj":
+      return n.entries.some((e) => refsAny(e.value, names));
+    case "call":
+      return n.args.some((a) => refsAny(a.value, names));
+    default:
+      return false;
+  }
+}
+
+/** 数据位合法：引用到 Query 派生名（含 @Each 循环变量），且不含字面量数字/数字数组。 */
+function queryBacked(n: Node, backed: ReadonlySet<string>): boolean {
+  if (n.t === "lit" && n.raw === "null") return true;
+  if (hasNumberLiteral(n)) return false;
+  if (n.t === "ref") return backed.has(refRoot(n.name));
+  if (n.t === "arr") return n.items.length > 0 && n.items.every((x) => queryBacked(x, backed));
+  if (n.t === "call" && n.action) return refsAny(n, backed);
+  return false;
+}
+
+/** @Each(list, "x", tpl)：tpl 里的 x 视为 Query 派生（当 list 是 Query 派生时）。 */
+function enforceData(n: Node, backed: ReadonlySet<string>, notes: RepairNote[]): Node {
+  switch (n.t) {
+    case "arr":
+      return { t: "arr", items: n.items.map((x) => enforceData(x, backed, notes)) };
+    case "obj":
+      return { t: "obj", entries: n.entries.map((e) => ({ key: e.key, value: enforceData(e.value, backed, notes) })) };
+    case "call": {
+      if (n.action && n.name === "Each" && n.args.length >= 3 && n.args[1].value.t === "str") {
+        const inner = queryBacked(n.args[0].value, backed) ? new Set([...backed, n.args[1].value.value]) : backed;
+        return { ...n, args: n.args.map((a, i) => ({ key: a.key, value: enforceData(a.value, i === 2 ? inner : backed, notes) })) };
+      }
+      const args = n.args.map((a) => ({ key: a.key, value: enforceData(a.value, backed, notes) }));
+      const slots = n.action ? undefined : OPENUI_DATA_ARG_SLOTS[n.name];
+      if (slots && slots.some((i) => args[i] && !queryBacked(args[i].value, backed))) {
+        notes.push({ kind: "data-literal-removed", detail: n.name });
+        return REMOVED;
+      }
+      const container = n.action ? undefined : DATA_CONTAINERS[n.name];
+      if (container !== undefined) {
+        const list = args[container]?.value;
+        const left = list?.t === "arr" ? list.items.filter((x) => !isRemoved(x)) : list ? [list] : [];
+        if (left.length === 0 || (list && isRemoved(list))) {
+          notes.push({ kind: "data-literal-removed", detail: n.name });
+          return REMOVED;
+        }
+      }
+      return { ...n, args };
+    }
+    default:
+      return n;
   }
 }
 
@@ -503,11 +616,34 @@ export function repairOpenUISource(code: string, argOrder: ArgOrderMap): RepairR
     }
   }
 
+  // 数据组件收紧：Table / Col / 图表的数据位只许引用 Query 结果，字面量数字整件删除。
+  {
+    const named = stmts.filter((st): st is { name: string; node: Node } => "name" in st);
+    const backed = new Set(named.filter((st) => st.node.t === "call" && st.node.name === "Query" && !st.node.action).map((st) => st.name));
+    for (let changedSet = true; changedSet; ) {
+      changedSet = false;
+      for (const st of named) {
+        const isComponent = st.node.t === "call" && !st.node.action;
+        if (!backed.has(st.name) && !isComponent && refsAny(st.node, backed) && !hasNumberLiteral(st.node)) {
+          backed.add(st.name);
+          changedSet = true;
+        }
+      }
+    }
+    for (const st of named) {
+      if (st.node.t === "call" && st.node.name === "Query" && !st.node.action) continue;
+      // 两轮：先删数据位不合法的 Col/Series，再删因此变空的 Table/图表。
+      st.node = enforceData(enforceData(st.node, backed, rep.notes), backed, rep.notes);
+    }
+  }
+
   // 已移除组件收尾：整条是移除组件的语句删掉；其余位置的引用从数组剔除、单值置 null。
   const removedNames = new Set<string>();
   for (const st of stmts) if ("name" in st && isRemoved(st.node)) removedNames.add(st.name);
-  if (removedNames.size > 0 || rep.notes.some((n) => n.kind === "removed-component" || n.kind === "image-alias")) {
-    const gone = (n: Node) => isRemoved(n) || (n.t === "ref" && removedNames.has(n.name));
+  const REMOVAL_KINDS = new Set(["removed-component", "image-alias", "literal-digit-removed", "data-literal-removed"]);
+  const anyRemoval = removedNames.size > 0 || rep.notes.some((n) => REMOVAL_KINDS.has(n.kind));
+  if (anyRemoval) {
+    const gone = (n: Node) => isRemoved(n) || (n.t === "ref" && removedNames.has(refRoot(n.name)));
     const clean = (n: Node): Node => {
       switch (n.t) {
         case "arr":
@@ -548,14 +684,15 @@ export function repairOpenUISource(code: string, argOrder: ArgOrderMap): RepairR
 
   // 删掉移除组件后留下的孤儿语句（例如表单的提交按钮组）：从 root 不可达即删，
   // 否则解析器会因「定义了却没被引用」拒绝渲染。只在发生过移除时做，合规程序恒等。
-  if (allParsed && removedNames.size > 0 && rootStmt) {
+  if (allParsed && anyRemoval && rootStmt) {
     const byName = new Map(parsed.map((s) => [s.name, s.node]));
     const reach = new Set<string>(["root"]);
     const walk = (n: Node) => {
       if (n.t === "ref") {
-        if (!reach.has(n.name) && byName.has(n.name)) {
-          reach.add(n.name);
-          walk(byName.get(n.name)!);
+        const root = refRoot(n.name);
+        if (!reach.has(root) && byName.has(root)) {
+          reach.add(root);
+          walk(byName.get(root)!);
         }
       } else if (n.t === "arr") n.items.forEach(walk);
       else if (n.t === "obj") n.entries.forEach((e) => walk(e.value));
