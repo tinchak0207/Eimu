@@ -228,8 +228,8 @@ async function sharePlanAccess(target: string, directory: boolean): Promise<void
     if (stat.uid !== process.getuid?.() || (!directory && (!stat.isFile() || stat.nlink !== 1))) {
       throw new Error("refusing to share a plan path not owned by the gateway")
     }
-    await handle.chown(-1, gid)
-    await handle.chmod(directory ? 0o2770 : 0o660)
+    await handle.chown(stat.uid, gid)
+    await handle.chmod(directory ? 0o770 : 0o660)
   } finally {
     await handle.close()
   }
