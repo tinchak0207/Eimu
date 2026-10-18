@@ -13,6 +13,7 @@
 //   9. D6（2026-10-02）上下文经济：bash/read/grep 等输出硬上限；同 session 重读未变更档案回摘要。
 
 import type { Plugin } from "@opencode-ai/plugin"
+import { harnessInternalHeaders } from "../lib/client"
 import { stat } from "node:fs/promises"
 import { resolve as resolvePath } from "node:path"
 import {
@@ -141,7 +142,7 @@ const HOOK_CREDENTIAL_LIKE_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
 /**
  * PostToolUse 资料转义（2026-10-18；2026-10-18 补齐行首 `#` 全部变体）：hook 输出是
  * 外部文本，不得伪造章节、凭证或围栏。与 gateway harness-hooks.escapeInjectedData
- * 逐字同语义（含引用 `> #`、有序/无序列表 `1. #`、`12) #`、`- #`）；
+ * 逐字同语义（含引用、有序/无序列表的混合与重复前缀 `- > #`、`> 1. > - #`）；
  * 插件进程不 import gateway 档，故在插件内保留这份最小实现（发布树不含 gateway）。
  * 幂等：已转义的行不会再被加第二层反斜线。
  */
@@ -153,7 +154,7 @@ function escapeHookData(text: string): string {
     .replace(/\\?⟧/g, "\\⟧")
     .replace(/\\?【/g, "\\【")
     .replace(/\\?】/g, "\\】")
-    .replace(/^([ \t]*(?:>[ \t]*)*(?:(?:[-*+•]|\d+[.)])[ \t]+)?)#/gm, "$1\\#")
+    .replace(/^([ \t]*(?:(?:>[ \t]*)|(?:(?:[-*+•]|\d+[.)])[ \t]+))*)#/gm, "$1\\#")
 }
 
 interface HarnessHookResult {
@@ -173,7 +174,7 @@ async function runHarnessHook(
   try {
     const res = await fetch(`${GATEWAY}/internal/hooks/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: harnessInternalHeaders(),
       body: JSON.stringify({ session_id: sessionID, event, payload }),
       signal: AbortSignal.timeout(HOOK_HTTP_TIMEOUT_MS),
     })
@@ -228,7 +229,7 @@ async function gatewayPost(path: string, body: unknown): Promise<Response | null
   try {
     return await fetch(`${GATEWAY}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: harnessInternalHeaders(),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(GATE_HTTP_TIMEOUT_MS),
     })
@@ -243,9 +244,9 @@ async function gatewayPost(path: string, body: unknown): Promise<Response | null
   }
 }
 
-/** 旧网关（路由不存在）或网关故障：退回既有 guard，不阻塞全部工具。 */
+/** 仅旧网关的端点不存在允许兼容回退；5xx 不得绕过安全状态。 */
 function gatewayFallbackStatus(res: Response): boolean {
-  return res.status === 404 || res.status === 405 || res.status >= 500
+  return res.status === 404 || res.status === 405
 }
 
 // ── D1（2026-10-02）：工具层重复呼叫断路器 ──────────────────────────────────
@@ -425,7 +426,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
       }
 
       // CC 2.1.302：计划模式闸 + 权限求值（gateway 持有权威状态；跨进程走 HTTP）。
-      // 两者并行、各自 800ms 超时。C1：404/5xx/网络失败不阻塞全部工具。
+      // 两者并行、各自 800ms 超时。404/405 保留旧网关兼容；5xx 拒绝执行。
       const lowerTool = tool.toLowerCase()
       const [planRes, permRes] = await Promise.all([
         gatewayPost("/internal/plan/state", { session_id: input.sessionID }),
@@ -433,10 +434,10 @@ export const EimuGuard: Plugin = async ({ client }) => {
       ])
 
       // H5 计划闸 fail-closed：超时/网络失败、200 但 JSON 不可解析或缺 inPlanMode
-      // → 写类拒绝、读类放行。404/5xx（旧网关/故障）退回既有 guard。
+      // → 写类拒绝、读类放行。404/405（旧网关）退回既有 guard；5xx 拒绝。
       if (planRes) {
         if (gatewayFallbackStatus(planRes)) {
-          // 旧网关没有计划端点或网关故障：不阻塞工具，继续走既有 guard。
+          // 旧网关没有计划端点：继续走既有 guard。
         } else if (!planRes.ok) {
           throw new Error(`计划模式状态查询失败（HTTP ${planRes.status}），已拒绝工具调用。`)
         } else {
@@ -478,17 +479,11 @@ export const EimuGuard: Plugin = async ({ client }) => {
         throw new Error("计划模式状态查询超时/不可达：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
       }
 
-      // 权限闸：404/5xx/网络失败退回既有 guard（路径/沙箱/SSRF），绝不把失败当作 allow；
+      // 权限闸：404/405 退回既有 guard（路径/沙箱/SSRF）；5xx 拒绝；
       // deny 直接拒绝；ask 按 C3 处理；200 但不可解析时写类 fail-closed。
       if (permRes) {
         if (gatewayFallbackStatus(permRes)) {
-          // 旧网关/网关故障：退回既有路径/沙箱/SSRF guard（仍会挡工作区外写入）。
-          if (permRes.status >= 500 && !gatewayGateWarned) {
-            gatewayGateWarned = true
-            console.warn(
-              `[eimu-guard] permission endpoint HTTP ${permRes.status}; falling back to existing path/sandbox guards (not an allow)`,
-            )
-          }
+          // 旧网关端点不存在：退回既有路径/沙箱/SSRF guard。
         } else if (!permRes.ok) {
           throw new Error(`权限求值失败（HTTP ${permRes.status}），已按 fail-closed 拒绝工具调用。`)
         } else {

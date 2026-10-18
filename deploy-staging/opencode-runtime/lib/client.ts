@@ -16,6 +16,14 @@ export const API_BASE = process.env.PLATFORM_API_BASE || "https://store.tinchak0
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const POLLER = process.env.POLLER_URL || "http://127.0.0.1:8082/"
 
+/** 本轮 harness internal 调用的统一请求头；未配置令牌时兼容 loopback。 */
+export function harnessInternalHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const token = process.env.HARNESS_INTERNAL_TOKEN
+  if (token) headers["X-Internal-Token"] = token
+  return headers
+}
+
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 // 20MB
 const referenceSnapshots=new Map<string,{sha256:string;url:string|null;mediaId:string}>()
 

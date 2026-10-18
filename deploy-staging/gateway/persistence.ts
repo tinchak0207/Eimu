@@ -184,7 +184,7 @@ const textEncoder = new TextEncoder()
 //   守门测试：persistence-schema.test.ts 断言 serialize() 输出键集 == PERSISTED_DATA_KEYS，
 //   且每个落盘键在 hydrateRow() 输出都能找到（含别名映射）——只改 A/C 忘改 D/E 即失败。
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export interface Migration {
   version: number
@@ -389,7 +389,54 @@ export const MIGRATIONS: Migration[] = [
   { version: 1, name: "baseline-session-and-quality-schema", up: baselineSchema },
   { version: 2, name: "sessions-owner-updated-index", up: sessionsOwnerUpdatedIndex },
   { version: 3, name: "quality-measurable-score-and-human-labels", up: qualityMeasurableSchema },
+  { version: 4, name: "durable-harness-security-state", up: (database) => {
+    database.exec(`CREATE TABLE IF NOT EXISTS harness_security_state (
+      namespace TEXT NOT NULL, state_key TEXT NOT NULL, data TEXT NOT NULL,
+      revision INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY(namespace, state_key))`)
+  } },
 ]
+
+/** 安全状态不能沿用普通会话持久化的内存兜底：不可读写时拒绝操作。 */
+function securityDatabase(): Database {
+  if (!db) initPersistence()
+  if (!db) throw new Error("harness_security_store_unavailable")
+  return db
+}
+
+export function loadHarnessSecurityState(namespace: string, key: string): { data: unknown; revision: number } | null {
+  const row = securityDatabase().query(
+    "SELECT data, revision FROM harness_security_state WHERE namespace=? AND state_key=?",
+  ).get(namespace, key) as { data: string; revision: number } | null
+  if (!row) return null
+  try {
+    return { data: JSON.parse(row.data), revision: row.revision }
+  } catch {
+    throw new Error("harness_security_state_invalid")
+  }
+}
+
+/** 乐观并发：旧进程/旧缓存不能覆盖另一进程刚保存的限制。 */
+export function saveHarnessSecurityState(namespace: string, key: string, data: unknown, revision: number): number {
+  const database = securityDatabase()
+  const encoded = JSON.stringify(data)
+  const result = revision === 0
+    ? database.query(`INSERT OR IGNORE INTO harness_security_state
+        (namespace,state_key,data,revision,updated_at) VALUES (?,?,?,1,?)`).run(namespace, key, encoded, Date.now())
+    : database.query(`UPDATE harness_security_state SET data=?, revision=revision+1, updated_at=?
+        WHERE namespace=? AND state_key=? AND revision=?`).run(encoded, Date.now(), namespace, key, revision)
+  if (result.changes !== 1) throw new Error("harness_security_state_conflict")
+  return revision + 1
+}
+
+export function deleteHarnessSecurityState(namespace: string, key: string): void {
+  securityDatabase().query("DELETE FROM harness_security_state WHERE namespace=? AND state_key=?").run(namespace, key)
+}
+
+/** 计划与权限的切换必须同事务提交，失败时两边一并回滚。 */
+export function withHarnessSecurityTransaction<T>(operation: () => T): T {
+  return securityDatabase().transaction(operation).immediate()
+}
 
 /**
  * 依序跑完所有未套用的 migration（idempotent、逐版执行）。

@@ -12,6 +12,7 @@ import { CONFIRM_TIMEOUT_MS } from "./constants-gateway"
 import { waitFor } from "./internal-waiters"
 import { settleConfirm } from "./media-internal-routes"
 import { PLAN_READ_ONLY_TOOLS, getPolicyState, isPermissionMode, updateRules } from "./permission-policy"
+import { loadHarnessSecurityState, saveHarnessSecurityState, withHarnessSecurityTransaction } from "./persistence"
 import { resolveSession } from "./sessions-core"
 import { emitToSession } from "./sse-core"
 import { subagentParentState } from "./subagent"
@@ -25,6 +26,7 @@ export const NOT_IN_PLAN_MODE_MESSAGE =
 export const PLAN_FILE_MAX_BYTES = 2_000_000
 
 export interface PlanSessionState {
+  durableRevision: number
   sessionId: string
   mode: "plan" | "exited"
   prePlanMode: string
@@ -98,6 +100,27 @@ const MAX_PLAN_STATES = 500
 const PLAN_STATE_TTL_MS = 24 * 60 * 60 * 1000
 const planStates = new Map<string, PlanSessionState>()
 
+function readPlanState(sessionId: string): PlanSessionState | undefined {
+  const saved = loadHarnessSecurityState("plan", sessionId)
+  if (!saved) {
+    planStates.delete(sessionId)
+    return undefined
+  }
+  const cached = planStates.get(sessionId)
+  if (cached && cached.durableRevision === saved.revision) return cached
+  const raw = saved.data as PlanSessionState | null
+  if (!raw || raw.sessionId !== sessionId || (raw.mode !== "plan" && raw.mode !== "exited") ||
+      !isPermissionMode(raw.prePlanMode) || raw.prePlanMode === "bypassPermissions" ||
+      typeof raw.planSlug !== "string" || !PLAN_SLUG_RE.test(raw.planSlug) ||
+      typeof raw.filePath !== "string" || resolve(raw.filePath) !== raw.filePath ||
+      !Number.isFinite(raw.createdAt)) throw new Error("harness_plan_state_invalid")
+  // 审批是当前进程的一次性状态，重启/跨进程加载必须重新发卡，不恢复旧授权。
+  const record: PlanSessionState = { ...raw, durableRevision: saved.revision, pendingRequestId: undefined }
+  planStates.set(sessionId, record)
+  trimPlanCache()
+  return record
+}
+
 /** 计划文件仍是进入时写入的 scaffold（或只有空白/注释）：视为未写计划。 */
 function isScaffoldOrEmptyPlan(text: string): boolean {
   const stripped = text
@@ -108,9 +131,23 @@ function isScaffoldOrEmptyPlan(text: string): boolean {
   return stripped === PLAN_SCAFFOLD.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*#\s*Plan\s*$/gim, "").trim()
 }
 
-/** planStates 上限与清理：活跃计划永不淘汰，先清最老的已退出记录。 */
+/** 审批中的记录不能淘汰；其他计划可随时从数据库恢复。 */
 function rememberPlanState(record: PlanSessionState): void {
+  try {
+    const revision = saveHarnessSecurityState("plan", record.sessionId, {
+      ...record, durableRevision: undefined, pendingRequestId: undefined,
+      prePlanMode: record.prePlanMode === "bypassPermissions" ? "default" : record.prePlanMode,
+    }, record.durableRevision)
+    record.durableRevision = revision
+  } catch (error) {
+    planStates.delete(record.sessionId)
+    throw error
+  }
   planStates.set(record.sessionId, record)
+  trimPlanCache()
+}
+
+function trimPlanCache(): void {
   const cutoff = Date.now() - PLAN_STATE_TTL_MS
   for (const [id, candidate] of planStates) {
     if (candidate.mode !== "plan" && (candidate.exitedAt ?? candidate.createdAt) < cutoff) {
@@ -120,12 +157,12 @@ function rememberPlanState(record: PlanSessionState): void {
   while (planStates.size > MAX_PLAN_STATES) {
     let removed = false
     for (const [id, candidate] of planStates) {
-      if (candidate.mode === "plan") continue
+      if (candidate.pendingRequestId) continue
       planStates.delete(id)
       removed = true
       break
     }
-    // 全部是活跃计划时保持上限之上的长度，也不丢进行中的计划状态。
+    // 淘汰只移除缓存，活跃计划仍可从数据库恢复。
     if (!removed) break
   }
 }
@@ -244,11 +281,11 @@ export async function enterPlanMode(
 ): Promise<EnterPlanModeResult> {
   const sid = sessionId?.trim()
   if (!sid) throw new Error("sessionId is required")
-  const existing = planStates.get(sid)
+  const existing = readPlanState(sid)
   if (existing?.mode === "plan") {
     await ensurePlanFile(existing.filePath)
     // H6：权限引擎与计划状态保持一致（幂等）。内部转移不改会话显式 setMode。
-    updateRules({ sessionId: sid, action: "setMode", mode: "plan", fromPlanTransition: true })
+    setPlanPolicyMode(sid)
     return {
       mode: "plan",
       planFilePath: existing.filePath,
@@ -267,6 +304,7 @@ export async function enterPlanMode(
   const prePlanMode =
     requested && isPermissionMode(requested) && requested !== "bypassPermissions" ? requested : currentMode
   const record: PlanSessionState = {
+    durableRevision: existing?.durableRevision ?? 0,
     sessionId: sid,
     mode: "plan",
     prePlanMode,
@@ -274,12 +312,18 @@ export async function enterPlanMode(
     filePath,
     createdAt: Date.now(),
   }
-  rememberPlanState(record)
-  // H6：进入计划模式同时驱动权限引擎（prePlanMode 由权限内核记录）。
-  updateRules({ sessionId: sid, action: "setMode", mode: "plan", fromPlanTransition: true })
+  withHarnessSecurityTransaction(() => {
+    setPlanPolicyMode(sid)
+    rememberPlanState(record)
+  })
   const state = findSession(sid)
   if (state) emitToSession(state, "plan.mode", { mode: "plan", pre_plan_mode: prePlanMode, plan_file_path: filePath })
   return { mode: "plan", planFilePath: filePath, planSlug: slug, prePlanMode }
+}
+
+function setPlanPolicyMode(sessionId: string): void {
+  const result = updateRules({ sessionId, action: "setMode", mode: "plan", fromPlanTransition: true })
+  if (!result.ok) throw new Error(`plan_permission_transition_failed: ${result.code}`)
 }
 
 /** H6：退出计划模式时恢复原权限模式；不可用则降级 default。 */
@@ -287,15 +331,19 @@ function restorePolicyMode(sessionId: string, prePlanMode: string): void {
   const target = isPermissionMode(prePlanMode) ? prePlanMode : "default"
   const restored = updateRules({ sessionId, action: "setMode", mode: target, fromPlanTransition: true })
   if (!restored.ok && target !== "default") {
-    updateRules({ sessionId, action: "setMode", mode: "default", fromPlanTransition: true })
+    const fallback = updateRules({ sessionId, action: "setMode", mode: "default", fromPlanTransition: true })
+    if (!fallback.ok) throw new Error(`plan_permission_transition_failed: ${fallback.code}`)
+  } else if (!restored.ok) {
+    throw new Error(`plan_permission_transition_failed: ${restored.code}`)
   }
 }
 
 function finalizeApproval(record: PlanSessionState, plan: string, state: SessionState | null): ExitPlanModeApproved {
-  record.mode = "exited"
-  record.exitedAt = Date.now()
-  record.pendingRequestId = undefined
-  restorePolicyMode(record.sessionId, record.prePlanMode)
+  const exited: PlanSessionState = { ...record, mode: "exited", exitedAt: Date.now(), pendingRequestId: undefined }
+  withHarnessSecurityTransaction(() => {
+    restorePolicyMode(record.sessionId, record.prePlanMode)
+    rememberPlanState(exited)
+  })
   if (state) {
     emitToSession(state, "plan.mode", {
       mode: record.prePlanMode,
@@ -316,7 +364,7 @@ export async function exitPlanMode(
 ): Promise<ExitPlanModeResult> {
   const sid = sessionId?.trim()
   if (!sid) throw new Error("sessionId is required")
-  const record = planStates.get(sid)
+  const record = readPlanState(sid)
   if (!record || record.mode !== "plan") {
     return { approved: false, code: "not_in_plan_mode", error: NOT_IN_PLAN_MODE_MESSAGE }
   }
@@ -354,6 +402,8 @@ export async function exitPlanMode(
     ;(timer as unknown as { unref?: () => void }).unref?.()
     state.pendingConfirms.set(requestId, { timer })
     record.pendingRequestId = requestId
+    planStates.set(sid, record)
+    trimPlanCache()
     const preview = plan.length > 4_000 ? `${plan.slice(0, 4_000)}\n…` : plan
     emitToSession(state, "confirm.request", {
       request_id: requestId,
@@ -414,7 +464,7 @@ export function getPlanState(sessionId: string): {
 } {
   const sid = sessionId?.trim()
   if (!sid) throw new Error("sessionId is required")
-  const record = planStates.get(sid)
+  const record = readPlanState(sid)
   if (!record) return { mode: "default", inPlanMode: false }
   return {
     mode: record.mode === "plan" ? "plan" : "default",
@@ -465,7 +515,8 @@ export function planModeGuard(
     const active = [...planStates.values()].filter((record) => record.mode === "plan")
     if (active.length === 1) sessionId = active[0].sessionId
   }
-  const inPlanMode = sessionId ? planStates.get(sessionId)?.mode === "plan" : false
+  const planRecord = sessionId ? readPlanState(sessionId) : undefined
+  const inPlanMode = planRecord?.mode === "plan"
   if (!inPlanMode) return { behavior: "allow", reason: "" }
   if (!name || PLAN_MODE_EXEMPT_TOOLS.has(lower)) return { behavior: "allow", reason: "" }
 
@@ -483,7 +534,7 @@ export function planModeGuard(
   if (readOnly ?? PLAN_READ_ONLY_TOOLS.has(lower)) return { behavior: "allow", reason: "" }
 
   // 写计划文件本身是计划模式的合法动作；不能把唯一的出口也挡住。
-  const planFilePath = sessionId ? planStates.get(sessionId)?.filePath : undefined
+  const planFilePath = planRecord?.filePath
   if (planFilePath && isPlanFileTarget(name, input, planFilePath)) return { behavior: "allow", reason: "" }
 
   return { behavior: "ask", reason: `Cannot call ${name} while in plan mode.` }
@@ -526,4 +577,3 @@ function isPlanFileTarget(tool: string, input: unknown, planFilePath: string): b
   const target = resolve(planFilePath)
   return candidates.every((candidate) => resolve(candidate.trim()) === target)
 }
-

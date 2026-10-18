@@ -172,6 +172,8 @@ async function injectGoalNudge(state: SessionState, reason: string): Promise<voi
 
 /** 导出仅供离线验收（G2 turnGen 记账）；生产只由 maybeRunGoalAcceptance 调用。 */
 export async function deliverGoalNudge(state: SessionState, reason: string): Promise<void> {
+  if (state.turnAborted || state.turnAbortSource === "user") return
+  const turnGen = state.turnGen ?? 0
   emitToSession(state, "message.delta", { text: `目标验收尚未通过，已提醒继续补齐：${reason}\n` })
   const body = {
     ...beastAgentField(state),
@@ -188,6 +190,8 @@ export async function deliverGoalNudge(state: SessionState, reason: string): Pro
     timeoutMs: 10000,
   })
   if (!res.ok) throw new Error(`status ${res.status}`)
+  // 请求在途时用户停止或开启新回合，旧 nudge 不得恢复 running 状态或撤销停止。
+  if (state.turnAborted || state.turnAbortSource === "user" || (state.turnGen ?? 0) !== turnGen) return
   // G2：nudge 也是一次「新回合起点」——必须与用户消息/唤醒路径同样 bump turnGen，
   // 否则 session.idle 的「本回合已验收」闸会把它当成同一回合而永不再验收。
   state.lastPromptBody = body as NonNullable<SessionState["lastPromptBody"]>
@@ -195,8 +199,6 @@ export async function deliverGoalNudge(state: SessionState, reason: string): Pro
   state.turnTextChars = 0
   state.turnReasoningChars = 0
   state.turnRetries = 0
-  state.turnAborted = false
-  state.turnAbortSource = undefined
   state.retryQueued = false
   state.turnUpstreamError = null
   state.turnToolStarted = false
@@ -216,7 +218,7 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
   try {
     if (!state?.sessionId || !state.opencodeSessionId) return
     if (state.pendingQuestions.size > 0) return
-    if (state.turnAborted) return
+    if (state.turnAborted || state.turnAbortSource === "user") return
     const goal = getActiveGoal(state.sessionId)
     if (!goal) return
     // G1 熔断：连续 not_met 次数已持久化，重启后仍然生效。
@@ -249,11 +251,15 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
       let dispatched = false
       try {
         const tail = await recentTranscriptTail(state.opencodeSessionId)
+        // transcript 的异步读取也可能跨回合；旧请求不得派发或改写新验收记录。
+        if (goalEvalBySession.get(state.sessionId) !== record || (state.turnGen ?? 0) !== turnGen || state.turnAborted || state.turnAbortSource === "user") return
         const spec = buildGoalEvaluatorSpec(goal.condition)
         dispatched = runGoalEvaluator(state, { label: spec.label, prompt: `${spec.prompt}${tail}` }, (result) => {
           const current = goalEvalBySession.get(state.sessionId)
-          if (!current || current.goalId !== goal.id) return
+          if (current !== record) return
           current.inFlight = false
+          // 只释放本次记录；旧回合结果不得写入 verdict 或触发新回合 nudge。
+          if ((state.turnGen ?? 0) !== turnGen || state.turnAborted || state.turnAbortSource === "user") return
           const active = getActiveGoal(state.sessionId)
           if (!active || active.id !== goal.id) return
           if (result.status !== "ok") {
@@ -293,7 +299,7 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
         console.error(`[gateway] goal acceptance failed: session=${state.sessionId}`, e)
       } finally {
         const current = goalEvalBySession.get(state.sessionId)
-        if (!dispatched && current && current.goalId === goal.id) current.inFlight = false
+        if (!dispatched && current === record) current.inFlight = false
       }
     })()
   } catch (e) {

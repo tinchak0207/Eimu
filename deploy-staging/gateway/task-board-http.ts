@@ -21,7 +21,7 @@ import { subagentParentState } from "./subagent.ts"
 const PREFIX = "/internal/task/"
 
 /**
- * P2-13：可选内部令牌。设置 HARNESS_INTERNAL_TOKEN 时，task/goal/findings 家族一律要求
+ * P2-13：可选内部令牌。设置 HARNESS_INTERNAL_TOKEN 时，本轮 12 组 harness 家族一律要求
  * `X-Internal-Token`；未设置时保持既有 loopback 信任边界（并只告警一次）。
  */
 function tokensEqual(a: string, b: string): boolean {
@@ -44,7 +44,7 @@ export function internalTokenRejection(req: Request): Response | null {
   if (!global.__harnessInternalTokenWarned) {
     global.__harnessInternalTokenWarned = true
     console.warn(
-      "[gateway] HARNESS_INTERNAL_TOKEN unset; /internal/* task/goal/findings rely on the loopback trust boundary only",
+      "[gateway] HARNESS_INTERNAL_TOKEN unset; harness internal routes rely on the loopback trust boundary only",
     )
   }
   return null

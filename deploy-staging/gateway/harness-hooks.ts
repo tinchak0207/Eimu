@@ -184,7 +184,7 @@ export function escapeInjectedData(text: string): string {
     .replace(/\\?⟧/g, "\\⟧")
     .replace(/\\?【/g, "\\【")
     .replace(/\\?】/g, "\\】")
-    .replace(/^([ \t]*(?:>[ \t]*)*(?:(?:[-*+•]|\d+[.)])[ \t]+)?)#/gm, "$1\\#")
+    .replace(/^([ \t]*(?:(?:>[ \t]*)|(?:(?:[-*+•]|\d+[.)])[ \t]+))*)#/gm, "$1\\#")
 }
 
 /**

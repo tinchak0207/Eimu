@@ -78,7 +78,7 @@ import {
   type CriticPassTarget,
 } from "./delivery-gate"
 // P1-3 接线：交付闸消费 artifact store 的 verify 状态（blocked 拒绝、no_row 保持原行为）。
-import { listArtifacts } from "./artifact-store.ts"
+import { listArtifacts, artifactLocalEvidenceMatches } from "./artifact-store.ts"
 import { isMultiStepAvProductionIntent } from "./canvas-write-gate.ts"
 // 刀 F（2026-09-15）：in-flight rework run 持久化 + 启动孤儿治理（复用 persistence.ts
 // 同一 bun:sqlite 层，非自造第二套持久层）。finishRun 终态删、startRework 成功写。
@@ -1184,8 +1184,8 @@ async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: st
 
 /**
  * P1-3：交付闸消费 verify 状态。子代理的 artifact 工具以**子会话 id** 写入 store，
- * 所以按 run.opencodeSessionId 取 mine 列表；读不到 store（旧库/未初始化）时回空数组，
- * 保持闸门原有行为（不误杀）。
+ * 所以按 run.opencodeSessionId 取 mine 列表；仅查询成功的空记录兼容历史交付。
+ * store 读取失败返回明确失败证据，由收尾链正常落失败终态，不抛出留下悬挂 run。
  */
 function artifactVerifyRecords(run: SubagentRun): ArtifactVerifyRecord[] {
   try {
@@ -1193,10 +1193,12 @@ function artifactVerifyRecords(run: SubagentRun): ArtifactVerifyRecord[] {
     return listArtifacts(run.opencodeSessionId, "mine").map((view) => ({
       name: view.name,
       verify_status: view.verify_status,
+      url: view.url,
+      local_available: artifactLocalEvidenceMatches(view),
     }))
   } catch (e) {
-    console.warn(`[gateway] delivery gate: artifact verify 状态读取失败，按无记录处理 run=${run.id}`, e)
-    return []
+    console.warn(`[gateway] delivery gate: artifact verify 状态读取失败，拒绝交付 run=${run.id}`, e)
+    return [{ name: "artifact_store_unavailable", verify_status: "blocked" }]
   }
 }
 
@@ -1218,15 +1220,16 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const softStop = run.softStopping
   run.softStopping = undefined
   run.status = status
-  // P1-3：交付闸开跑前先读本 run 的 artifact verify 状态（blocked 拒绝；no_row 原行为）。
-  const artifactVerify = status === "ok" && run.agent ? artifactVerifyRecords(run) : []
   // CC 2.1.302 结果契约：usage 必须随完成通知/status 返回。summarizeChild 路径已算过；
   // 超时/上游错误等收尾路径在此补一次（幂等：已有值不重算）。
   if (!run.usage) run.usage = await childUsageSnapshot(run)
   // E 片（2026-09-12）缺陷一：**先落盘完整全文/死因全文，再走摘要与 DELETE**。行内
   // 摘要仍只给 600 字（semantics 不变），但前缀挂落盘指针 → 父会话可 read 全文。
+  // usage 的 await 完成后再取交付证据快照；无名/普通 expert 同样受已登记产物闸约束。
+  const artifactVerify = status === "ok" ? artifactVerifyRecords(run) : []
+  const artifactEvidenceVerdict = checkDelivery(undefined, fullText, {}, artifactVerify)
   const persist = persistRunOutput(run, status, fullText, error)
-  if (status === "ok" && run.agent && !run.stopped && typeof run.goalEvaluator !== "function") {
+  if (status === "ok" && artifactEvidenceVerdict.ok && run.agent && !run.stopped && typeof run.goalEvaluator !== "function") {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
     arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify).ok : undefined })
     if (arr.length > 20) arr.shift()
@@ -1263,7 +1266,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   //     wakeParent 唤醒）自动全带（三处都用下面这个 summary 变数）；
   //   - subagent.done payload 加**新栏位** delivery_gate（ok 时不加，既有栏语义不动）。
   // 判据用**未截断全文 fullText**（不是 600 字摘要——摘要会把栏位名切掉→假阴性）。
-  // 只在 ok + beastMode + agent 有值时跑：非 Expert 通用子代理零回归。
+  // 历史契约范围不变；任何 run 的实际登记产物都必须具备可用交付证据。
   // 边界：只验栏位名存在性，不验值/品质（见 delivery-gate.ts 档头）。
   let deliveryGate: { ok: boolean; missing: string[]; reworked?: boolean; stillFailing?: boolean; orphaned?: boolean } | undefined
   // 刀 F（2026-09-15）：孤儿治理路径——启动扫描重建的 in-flight rework run（watcher 已死、
@@ -1275,14 +1278,17 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     console.warn(
       `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=ORPHANED (进程中断未复原) missing=${miss.join(",")}`,
     )
-  } else if (status === "ok" && (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent) {
-    const verdict = checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify)
+  } else if (status === "ok" && ((run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent || artifactVerify.length > 0)) {
+    // 历史契约范围不扩大；其他 run 仅检查其实际登记的产物证据。
+    const enforceContract = run.beastMode === true || run.agent === "lyricist" || run.agent === "music"
+    const verdict = checkDelivery(enforceContract ? run.agent : undefined, fullText, DELIVERY_CONTRACTS, artifactVerify)
     // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
     // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
     // 非 Expert/已失败收场零污染；status==="ok" 是必要条件——上游 error/超时不进重派链。
     // 提前 return：本轮**不终态**（回退 status、不发 done/不 completed.set/不 wake），
     // run 留在注册表由 startRework 接棒；终态只属重派链的最后一次 finishRun（spec 6 幂等）。
-    if (!verdict.ok && run.reworkCount === 0 && !run.reworkFailure && !run.stopped) {
+    // 产物证据失败直接拒绝；换子会话重派会遗忘旧 store 记录，不能作为修复证据。
+    if (!verdict.ok && artifactEvidenceVerdict.ok && run.reworkCount === 0 && !run.reworkFailure && !run.stopped) {
       run.reworkCount = 1
       run.reworking = true
       run.status = "running"
@@ -1303,15 +1309,25 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       return
     }
     if (!verdict.ok) {
-      if (run.reworkFailure) {
+      if (verdict.missing.some((field) => field.startsWith("artifact:"))) {
+        // 真实产物证据失败直接作为失败终态，不能靠换会话重派抹去旧记录。
+        status = "error"
+        run.status = "error"
+        error = verdict.reason || "登记产物没有可用交付证据"
+        run.error = error
+      }
+      if (!artifactEvidenceVerdict.ok) {
+        summary = `${verdict.reason || "产物缺少可用交付证据，请修复当前引用后重新交付。"}\n${summary}`
+        deliveryGate = { ok: false, missing: verdict.missing }
+      } else if (run.reworkFailure) {
         // 重派投递从未成功（如 opencode 不可达）：重派没跑过，done 不伪称 reworked——
         // 维持片 C 原「未达标」标记语义，仅缀一行失败事实。
-        summary = `${formatDeliveryGateNotice(run.agent, verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
+        summary = `${formatDeliveryGateNotice(run.agent ?? "", verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing }
       } else {
         // 重派后复检仍 FAIL：标记升级「重派后仍未达标」，交由既有唤醒链如实回报。
         // status 栏语义不动（仍 ok——重派是补救尝试，不保证成功，也不把缺口洗成错误）。
-        summary = `${formatDeliveryGateNotice(run.agent, verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
+        summary = `${formatDeliveryGateNotice(run.agent ?? "", verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing, reworked: true, stillFailing: true }
       }
       run.summary = summary

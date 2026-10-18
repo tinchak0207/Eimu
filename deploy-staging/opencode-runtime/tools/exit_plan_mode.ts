@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail } from "../lib/client"
+import { ok, fail, harnessInternalHeaders } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const WAIT_PER_CALL_MS = 240_000
@@ -37,7 +37,7 @@ export default tool({
       try {
         res = await fetch(`${GATEWAY}/internal/plan/exit`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: harnessInternalHeaders(),
           body: JSON.stringify({ session_id: context.sessionID, wait_ms: WAIT_PER_CALL_MS }),
           signal: AbortSignal.timeout(WAIT_PER_CALL_MS + 15_000),
         })

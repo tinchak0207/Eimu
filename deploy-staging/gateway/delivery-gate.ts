@@ -71,14 +71,17 @@ export const REWORK_FAIL_MARK = "【交付闸门·重派后仍未达标】"
 export const ORPHANED_GATE_MARK = "【交付闸门·进程中断未复原】"
 
 /**
- * Artifact 验证闸（P2-5 接线）：交付涉及已落库 artifact 时，verify_status==="blocked"
- * 一律拒绝交付。调用端不传记录（或记录为空）时保持原行为，不误杀。
+ * Artifact 验证闸（P2-5 接线）：交付涉及已落库 artifact 时，外链必须 verified；
+ * 无外链本地文件必须有当前安全读取/hash 匹配证据。调用端不传记录（或记录为空）时保持原行为，不误杀。
  */
 export const ARTIFACT_VERIFY_BLOCKED_MARK = "【交付闸门·产物验证未通过】"
 
 export interface ArtifactVerifyRecord {
   name: string
   verify_status?: string | null
+  url?: string | null
+  /** 仅无 URL 且当前安全读取的 hash/bytes 与登记值一致时为 true。 */
+  local_available?: boolean
 }
 
 /**
@@ -135,9 +138,10 @@ export function checkDelivery(
   contracts: DeliveryContracts,
   artifactVerify?: ReadonlyArray<ArtifactVerifyRecord> | null,
 ): DeliveryGateResult {
-  // P2-5：artifact 验证 blocked 是独立拒绝条件（无记录时不进入，不误杀）。
+  // 外链未 verified 或本地证据不可用时拒绝；完全无记录沿用历史行为。
   const blocked = (artifactVerify ?? [])
-    .filter((record) => record && record.verify_status === "blocked")
+    .filter((record) => record && (record.verify_status === "blocked" ||
+      (record.url === null ? record.local_available !== true : record.verify_status !== "verified")))
     .map((record) => record.name)
   // 非 Expert / 未登记 → 零回归放行（除非有 blocked artifact）。
   if (!agent || typeof agent !== "string") {
@@ -146,7 +150,7 @@ export function checkDelivery(
       : {
           ok: false,
           missing: blocked.map((name) => `artifact:${name}:verify_blocked`),
-          reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 验证未通过（blocked）：${blocked.join("、")}。此交付物不得放行。`,
+          reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 尚无可用交付证据：${blocked.join("、")}。此交付物不得放行。`,
         }
   }
   const contract = contracts[agent]
@@ -156,7 +160,7 @@ export function checkDelivery(
       : {
           ok: false,
           missing: blocked.map((name) => `artifact:${name}:verify_blocked`),
-          reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 验证未通过（blocked）：${blocked.join("、")}。此交付物不得放行。`,
+          reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 尚无可用交付证据：${blocked.join("、")}。此交付物不得放行。`,
         }
   }
 
@@ -179,7 +183,7 @@ export function checkDelivery(
     return {
       ok: false,
       missing,
-      reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 验证未通过（blocked）：${blocked.join("、")}。此交付物不得放行。`,
+      reason: `${ARTIFACT_VERIFY_BLOCKED_MARK} artifact 尚无可用交付证据：${blocked.join("、")}。此交付物不得放行。`,
     }
   }
   if (missing.length === 0) return { ok: true, missing: [] }
@@ -202,6 +206,9 @@ export function formatDeliveryGateNotice(
   contracts: DeliveryContracts,
   mark: string = DELIVERY_GATE_MARK,
 ): string {
+  if (result.missing.some((field) => field.startsWith("artifact:"))) {
+    return `${mark}${result.reason?.replace(ARTIFACT_VERIFY_BLOCKED_MARK, "") || "产物缺少可用交付证据，请重新验证。"}`
+  }
   const c = contracts[agent]
   const total = c
     ? c.requiredFields.length + (c.qcSignatureRequired && !c.requiredFields.includes("qc") ? 1 : 0)
@@ -602,6 +609,14 @@ export function buildReworkDirective(
   result: DeliveryGateResult,
   contracts: DeliveryContracts,
 ): string {
+  if (result.missing.some((field) => field.startsWith("artifact:"))) {
+    return [
+      "【系统修正指令·自动重派（上限 1 次，本次为第 1 次）】",
+      result.reason || "登记产物尚无可用交付证据。",
+      "修复当前登记产物：有外链的产物调用 artifact_verify 核实当前 URL；无外链本地文件须保留可安全读取且 hash/bytes 与登记一致的真实文件。",
+      "不得只在正文补状态或伪造验证字段；完成修复后重新交付原任务的完整结果。",
+    ].join("\n")
+  }
   const c = contracts[agent]
   const fields = c ? c.requiredFields.slice() : result.missing.slice()
   const total = c

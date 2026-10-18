@@ -2,13 +2,14 @@
 //
 // 约束：
 // - 求值以纯计算为主；写路径的 symlink/realpath 事实由网关进程自己 lstat/realpath
-//   （不信任调用方传参），其余 I/O 一律不做。
+//   （不信任调用方传参）；安全状态通过既有 SQLite 持久化，不允许内存兜底。
 // - 求值序固定：safetyCheck（bypass 不可绕）→ deny → ask → allow，各桶取首命中。
 // - 不引入新依赖；路径一律按 posix 语义处理，Windows 反斜线先正规化。
 // - bypassPermissions 只存在于内部；对外模式集合见 EXTERNAL_MODES。
 
 import { lstatSync, realpathSync } from "node:fs"
 import { posix } from "node:path"
+import { loadHarnessSecurityState, saveHarnessSecurityState, deleteHarnessSecurityState } from "./persistence"
 
 // ── 模式 ───────────────────────────────────────────────────────────────────
 
@@ -246,6 +247,7 @@ export interface PolicyStateSnapshot {
 }
 
 interface InternalPolicyState {
+  durableRevision: number
   sessionId: string
   tenant: string
   mode: PermissionMode
@@ -303,14 +305,16 @@ function listRules(
 
 function getState(sessionId: string, tenant: string): InternalPolicyState {
   const key = stateKey(sessionId, tenant)
+  const saved = loadHarnessSecurityState("permission", key)
   let state = states.get(key)
-  if (state) {
+  if (state && state.durableRevision === (saved?.revision ?? 0)) {
     // LRU：命中即移到队尾。
     states.delete(key)
     states.set(key, state)
     return state
   }
   state = {
+    durableRevision: 0,
     sessionId: sessionId || "default",
     tenant: tenant || "default",
     mode: "default",
@@ -325,13 +329,32 @@ function getState(sessionId: string, tenant: string): InternalPolicyState {
     autoAllowAudit: [],
     updatedAt: Date.now(),
   }
+  if (saved) {
+    const raw = saved.data as Partial<PolicyStateSnapshot> | null
+    if (!raw || raw.sessionId !== state.sessionId || raw.tenant !== state.tenant ||
+        !isExternalPermissionMode(raw.mode) ||
+        (raw.prePlanMode !== undefined && !isExternalPermissionMode(raw.prePlanMode)) ||
+        (raw.explicitMode !== undefined && !isExternalPermissionMode(raw.explicitMode)) ||
+        typeof raw.restricted !== "boolean" || typeof raw.bypassDisabled !== "boolean" ||
+        !Array.isArray(raw.additionalDirectories) || !raw.additionalDirectories.every((d) => typeof d === "string") ||
+        !validSavedBuckets(raw.rules) ||
+        (raw.strippedDangerousRules !== undefined && !validSavedBuckets({ allow: raw.strippedDangerousRules, ask: {}, deny: {} }))) {
+      throw new Error("harness_permission_state_invalid")
+    }
+    state = { ...state, durableRevision: saved.revision, mode: raw.mode,
+      prePlanMode: raw.prePlanMode, explicitMode: raw.explicitMode,
+      autoModeActive: raw.mode === "auto", restricted: raw.restricted,
+      bypassDisabled: raw.bypassDisabled, additionalDirectories: new Set(raw.additionalDirectories),
+      rules: cloneBuckets(raw.rules!), strippedDangerousRules: raw.strippedDangerousRules,
+      updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now() }
+  }
   states.set(key, state)
   if (states.size > MAX_POLICY_STATES) {
-    // 只有非保护状态可被淘汰：restricted / bypassDisabled / plan latch 丢了会静默解除限制。
+    // 所有限制均已持久化；缓存淘汰不会移除任何规则或 latch。
     for (const oldest of states.keys()) {
       if (oldest === key) continue
       const candidate = states.get(oldest)
-      if (candidate && isProtectedState(candidate)) continue
+      if (candidate?.mode === "bypassPermissions") continue
       states.delete(oldest)
       break
     }
@@ -340,14 +363,30 @@ function getState(sessionId: string, tenant: string): InternalPolicyState {
   return state
 }
 
-/** 受保护的会话状态：任何 LRU 淘汰都不得清掉。 */
-function isProtectedState(state: InternalPolicyState): boolean {
-  return (
-    state.restricted === true ||
-    state.bypassDisabled === true ||
-    state.mode === "plan" ||
-    state.prePlanMode !== undefined
-  )
+function validSavedBuckets(value: unknown): value is RuleBuckets {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  return (["allow", "ask", "deny"] as const).every((behavior) => {
+    const bucket = (value as RuleBuckets)[behavior]
+    return bucket && typeof bucket === "object" && !Array.isArray(bucket) &&
+      Object.entries(bucket).every(([source, rules]) => PROVENANCE_SOURCES.includes(source as ProvenanceSource) &&
+        Array.isArray(rules) && rules.every((rule) => typeof rule === "string"))
+  })
+}
+
+function persistPolicyState(state: InternalPolicyState): void {
+  const key = stateKey(state.sessionId, state.tenant)
+  try {
+    // bypass 只活在当前进程，重启后回落普通模式；限制和规则仍完整保存。
+    state.durableRevision = saveHarnessSecurityState("permission", key, {
+      ...state, durableRevision: undefined, additionalDirectories: [...state.additionalDirectories],
+      mode: state.mode === "bypassPermissions" ? "default" : state.mode,
+      prePlanMode: state.prePlanMode === "bypassPermissions" ? "default" : state.prePlanMode,
+      explicitMode: state.explicitMode === "bypassPermissions" ? undefined : state.explicitMode,
+    }, state.durableRevision)
+  } catch (error) {
+    states.delete(key)
+    throw error
+  }
 }
 
 function recordAutoAllow(state: InternalPolicyState, tool: string): void {
@@ -382,8 +421,9 @@ export function getPolicyState(sessionId: string, tenant = "default"): PolicySta
   }
 }
 
-/** 清空某会话的政策状态（进程内）。 */
+/** 可信生命周期清理：同时移除持久状态，不能用于缓存淘汰。 */
 export function resetPolicyState(sessionId: string, tenant = "default"): void {
+  deleteHarnessSecurityState("permission", stateKey(sessionId, tenant))
   states.delete(stateKey(sessionId, tenant))
 }
 
@@ -646,8 +686,11 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
   const state = getState(sessionId, tenant)
 
   // restricted / bypassDisabled 只能 latch true：context 或请求体都不能解除。
-  if (input.restricted === true) state.restricted = true
-  if (input.bypassDisabled === true) state.bypassDisabled = true
+  if ((input.restricted === true && !state.restricted) || (input.bypassDisabled === true && !state.bypassDisabled)) {
+    if (input.restricted === true) state.restricted = true
+    if (input.bypassDisabled === true) state.bypassDisabled = true
+    persistPolicyState(state)
+  }
 
   if (input.action === "setMode") {
     const guard = guardModeTransition(input.mode, {
@@ -673,6 +716,7 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
     if (!input.fromPlanTransition && guard.mode !== "bypassPermissions") {
       state.explicitMode = guard.mode
     }
+    persistPolicyState(state)
     return { ok: true, state: getPolicyState(sessionId, tenant), changed: 1 }
   }
 
@@ -704,6 +748,7 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
       }
     }
     state.updatedAt = Date.now()
+    persistPolicyState(state)
     return { ok: true, state: getPolicyState(sessionId, tenant), changed }
   }
 
@@ -738,6 +783,7 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
     // H3：auto 模式下新加入的 allow 规则同样立即剥离危险形态。
     if (behavior === "allow" && state.mode === "auto") stripDangerousAllowRules(state)
     state.updatedAt = Date.now()
+    persistPolicyState(state)
     return { ok: true, state: getPolicyState(sessionId, tenant), changed }
   }
   if (input.action === "replaceRules") {
@@ -758,6 +804,7 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
     bucket[destination] = next
     if (behavior === "allow" && state.mode === "auto") stripDangerousAllowRules(state)
     state.updatedAt = Date.now()
+    persistPolicyState(state)
     return { ok: true, state: getPolicyState(sessionId, tenant), changed: rules.length }
   }
 
@@ -773,6 +820,7 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
   }
   bucket[destination] = next
   state.updatedAt = Date.now()
+  persistPolicyState(state)
   return { ok: true, state: getPolicyState(sessionId, tenant), changed }
 }
 
@@ -2123,8 +2171,11 @@ export function evaluateToolPermission(args: {
   const state = getState(sessionId, tenant)
 
   // restricted 只能 latch true：context 不得解除。
-  if (context.restricted === true) state.restricted = true
-  if (context.bypassDisabled === true) state.bypassDisabled = true
+  if ((context.restricted === true && !state.restricted) || (context.bypassDisabled === true && !state.bypassDisabled)) {
+    if (context.restricted === true) state.restricted = true
+    if (context.bypassDisabled === true) state.bypassDisabled = true
+    persistPolicyState(state)
+  }
 
   // C2：context.mode 只认对外模式；bypassPermissions 一律忽略（只能来自可信状态）。
   const requestedMode = context.mode && isExternalPermissionMode(context.mode) ? context.mode : undefined

@@ -449,18 +449,23 @@ export function updateTask(sessionId: string, taskId: number, patch: TaskUpdateP
       if (cycle) return { success: false, error: `dependency cycle rejected: ${formatCycle(cycle)}` }
     }
 
-    if (patch.status === "completed" && original.status !== "completed") {
-      // 只把「仍存在且未完成」的依赖视为阻塞；已删除/已完成的不再阻塞。
-      const blockers = task.blockedBy.filter((id) => {
+    if (patch.status !== undefined) task.status = patch.status as TaskStatus
+    // 校验事务最终图：正向/反向加依赖及依赖重开，都不能留下“完成但仍被阻塞”的受影响任务。
+    for (const candidate of view.values()) {
+      if (candidate.status !== "completed") continue
+      const before = origin.get(candidate.id)
+      const affected = candidate.id === taskId ||
+        !before || !sameIds(candidate.blockedBy, before.blockedBy) ||
+        candidate.blockedBy.some((id) => view.get(id)?.status !== origin.get(id)?.status)
+      if (!affected) continue
+      const blockers = candidate.blockedBy.filter((id) => {
         const dependency = view.get(id)
         return dependency !== undefined && dependency.status !== "completed"
       })
       if (blockers.length > 0) {
-        return { success: false, error: `blocked by ${blockers.map((id) => `#${id}`).join(", ")}` }
+        return { success: false, error: `task #${candidate.id} blocked by ${blockers.map((id) => `#${id}`).join(", ")}` }
       }
     }
-
-    if (patch.status !== undefined) task.status = patch.status as TaskStatus
     if (patch.subject !== undefined) task.subject = patch.subject.trim()
     if (patch.description !== undefined) task.description = patch.description.trim()
     if (patch.activeForm !== undefined) task.activeForm = patch.activeForm

@@ -256,6 +256,7 @@ function db(): Database {
     producer TEXT,
     verified_at INTEGER,
     verify_status TEXT,
+    verify_epoch INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER,
     UNIQUE(artifact_id,version)
   );
@@ -272,6 +273,11 @@ function db(): Database {
   );
   CREATE INDEX IF NOT EXISTS artifact_versions_artifact ON artifact_versions(artifact_id);
   CREATE INDEX IF NOT EXISTS artifact_assets_artifact ON artifact_assets(artifact_id);`)
+  // 验证目标原地变化（含 A→B→A）必须递增 epoch，旧探测不能覆盖新引用。
+  const versionColumns = next.query("PRAGMA table_info(artifact_versions)").all() as Array<{ name: string }>
+  if (!versionColumns.some((column) => column.name === "verify_epoch")) {
+    next.exec("ALTER TABLE artifact_versions ADD COLUMN verify_epoch INTEGER NOT NULL DEFAULT 0")
+  }
   // P2-11：版本号单调 epoch。旧库没有该栏；ALTER 失败（已存在）不阻断。
   try {
     next.exec("ALTER TABLE artifacts ADD COLUMN version_epoch INTEGER NOT NULL DEFAULT 0")
@@ -503,6 +509,17 @@ function readRegularFile(inputPath: string): ReadFileResult {
     throw new ArtifactError("file_too_large", `文件 ${bytes.length} 字节，超过 16MiB 上限`, 413)
   }
   return { absolutePath, bytes, sha256: sha256Hex(bytes), size: bytes.length }
+}
+
+/** 无外链的本地产物：交付前按既有安全读路径核对当前字节，不依赖 URL 探测状态。 */
+export function artifactLocalEvidenceMatches(view: ArtifactVersionView): boolean {
+  if (view.url || !view.path || !view.sha256) return false
+  try {
+    const file = readRegularFile(view.path)
+    return file.sha256 === view.sha256 && file.size === view.bytes
+  } catch {
+    return false
+  }
 }
 
 function parseAcl(raw: unknown): Record<string, unknown> {
@@ -773,7 +790,7 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
       if (metadataChanged) {
         db()
           .query(
-            "UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=?,verify_status='unverified',verified_at=NULL WHERE id=?",
+            "UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=?,verify_epoch=verify_epoch+1,verify_status='unverified',verified_at=NULL WHERE id=?",
           )
           .run(nextUrl, nextPath, nextType, nextProducer, Number(live.id))
       } else {
@@ -1219,6 +1236,7 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
   const artifact = requireArtifact(sessionId, name)
   const { version, view } = resolvedVersion(artifact, normalizeVersion(input.version))
   const checkedAt = Date.now()
+  const verifyEpoch = Number(version.verify_epoch ?? 0)
 
   // 约束：无 url = 没有探测结果 → no_row；不得写 verified_at，不得宣称干净。
   if (!view.url) {
@@ -1287,12 +1305,16 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
   }
   // P2-5：只有 verified 才写 verified_at；blocked/no_row 一律 NULL。
   const verifiedAt = state === "verified" ? Date.now() : null
-  if (state === "verified" && storedSha === "" && probe.sha256) {
-    db()
-      .query("UPDATE artifact_versions SET sha256=?,bytes=?,verify_status=?,verified_at=? WHERE id=?")
-      .run(probe.sha256, probe.bytes ?? 0, state, verifiedAt, Number(version.id))
-  } else {
-    db().query("UPDATE artifact_versions SET verify_status=?, verified_at=? WHERE id=?").run(state, verifiedAt, Number(version.id))
+  // CAS 同时绑定 epoch 与探测快照；并发元数据变更、删除或另一验证回填均使旧结果失效。
+  const targetMatch = "id=? AND verify_epoch=? AND url IS ? AND path IS ? AND sha256 IS ? AND bytes IS ? AND content_type IS ? AND producer IS ?"
+  const targetParams = [Number(version.id), verifyEpoch, version.url, version.path, version.sha256, version.bytes, version.content_type, version.producer]
+  const applied = state === "verified" && storedSha === "" && probe.sha256
+    ? db().query(`UPDATE artifact_versions SET sha256=?,bytes=?,verify_status=?,verified_at=? WHERE ${targetMatch}`)
+        .run(probe.sha256, probe.bytes ?? 0, state, verifiedAt, ...targetParams)
+    : db().query(`UPDATE artifact_versions SET verify_status=?,verified_at=? WHERE ${targetMatch}`)
+        .run(state, verifiedAt, ...targetParams)
+  if (applied.changes === 0) {
+    throw new ArtifactError("verification_target_changed", "验证期间交付物引用已变化，请重新验证当前版本", 409)
   }
   return {
     state,
@@ -1557,7 +1579,7 @@ export function registerArtifact(input: RegisterArtifactInput): ArtifactVersionV
     if (metadataChanged) {
       db()
         .query(
-          "UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=?,verify_status='unverified',verified_at=NULL WHERE id=?",
+          "UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=?,verify_epoch=verify_epoch+1,verify_status='unverified',verified_at=NULL WHERE id=?",
         )
         .run(url, localPath, contentType, producer, Number(live.id))
       db().query("UPDATE artifacts SET updated_at=? WHERE id=?").run(now, Number(existing.id))

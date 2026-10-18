@@ -37,7 +37,7 @@ import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSear
 // W6a（2026-10-04）：装置桥云端侧（本机 daemon 出站注册／取件）。总开关 EIMU_DEVICE_BRIDGE，预设 OFF。
 import { deviceBridgeEnabled, handleDeviceBridgeRoutes, handleInternalDeviceAuthorize, handleInternalDeviceInvoke, handleInternalDeviceStatus } from "./device-bridge.ts"
 // CC 2.1.302 移植：任务板／会话目标／评审 findings／唤醒／监视的内部端点（全部 loopback）。
-import { handleTaskBoard } from "./task-board-http.ts"
+import { handleTaskBoard, internalTokenRejection } from "./task-board-http.ts"
 import { handleGoal } from "./goal-http.ts"
 import { handleFindings } from "./findings-http.ts"
 import { handleWakeup } from "./wakeup-http.ts"
@@ -304,8 +304,18 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       if (req.method === "POST" && pathname === "/internal/memory/batch-run") {
         return handleMemoryBatchRunInternal(req)
       }
+      // 只保护本轮 harness 的 12 组；历史 internal（含 memory/batch-run）保持原边界。
+      // 共享令牌只认证运行时调用，不把 body.session_id 绑定到租户身份。
+      if (
+        /^\/internal\/(?:task|goal|findings|wakeup|monitor|mailbox|permission|artifact|cron|plan)\//.test(pathname) ||
+        /^\/internal\/memory\/(?:save|list|read)$/.test(pathname) ||
+        pathname === "/internal/hooks/run"
+      ) {
+        const tokenError = internalTokenRejection(req)
+        if (tokenError) return tokenError
+      }
       // CC 2.1.302 移植：任务板／会话目标／评审 findings／唤醒／监视。
-      // 与上方 /internal/* 同构：只验 loopback，无第二把 key；handler 自带 body 解析与校验。
+      // loopback + 可选 HARNESS_INTERNAL_TOKEN；handler 自带 body 解析与校验。
       if (req.method === "POST" && pathname.startsWith("/internal/task/")) {
         return handleTaskBoard(req, pathname)
       }
