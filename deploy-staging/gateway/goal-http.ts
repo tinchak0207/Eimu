@@ -12,12 +12,15 @@ import { emitToSession } from "./sse-core.ts"
 import { settleConfirm } from "./media-internal-routes.ts"
 import { CONFIRM_TIMEOUT_MS } from "./constants-gateway.ts"
 import type { ConfirmOutcome, SessionState } from "./types-gateway.ts"
+import { internalTokenRejection } from "./task-board-http.ts"
 import {
   GoalStateError,
   GoalValidationError,
   approveGoal,
   clearGoal,
   getActiveGoal,
+  getGoalById,
+  getLatestTerminalGoal,
   getProposedGoal,
   proposeGoal,
   recordVerdict,
@@ -140,6 +143,8 @@ function sessionIdOf(body: Record<string, unknown>): string {
  */
 export async function handleGoal(req: Request, pathname: string): Promise<Response> {
   if (req.method !== "POST") return jsonError(405, "method not allowed", "bad_request", "method_not_allowed")
+  const tokenError = internalTokenRejection(req)
+  if (tokenError) return tokenError
   const body = await readJson(req)
   if (!body) return jsonError(400, "invalid json body", "bad_request", "bad_request")
   const rawSessionId = sessionIdOf(body)
@@ -178,15 +183,16 @@ export async function handleGoal(req: Request, pathname: string): Promise<Respon
     }
 
     if (pathname === "/internal/goal/approve") {
-      const goalId = payload.goal_id ?? payload.id
-      const goal = approveGoal(sessionId, Number(goalId))
+      // P2-7：不做 Number() 强转；非 JSON number 正整数由 approveGoal 抛 400。
+      const rawGoalId = payload.goal_id !== undefined ? payload.goal_id : payload.id
+      const goal = approveGoal(sessionId, rawGoalId as number)
       settleGoalCard(sessionId, goal.id, "approved")
       return Response.json({ ok: true, goal })
     }
 
     if (pathname === "/internal/goal/reject") {
-      const goalId = payload.goal_id ?? payload.id
-      const goal = rejectGoal(sessionId, Number(goalId), "rejected")
+      const rawGoalId = payload.goal_id !== undefined ? payload.goal_id : payload.id
+      const goal = rejectGoal(sessionId, rawGoalId as number, "rejected")
       settleGoalCard(sessionId, goal.id, "denied")
       return Response.json({ ok: true, goal })
     }
@@ -198,15 +204,35 @@ export async function handleGoal(req: Request, pathname: string): Promise<Respon
     }
 
     if (pathname === "/internal/goal/status") {
+      // P2-6：支持按 goal_id 查询任意状态（含已 met 的终态）；不传时额外返回最近终态。
+      // P2-7：goal_id 只接受 JSON number 正整数，字符串/数组一律 400。
+      if (payload.goal_id !== undefined || payload.id !== undefined) {
+        const rawGoalId = payload.goal_id !== undefined ? payload.goal_id : payload.id
+        const goal = getGoalById(sessionId, rawGoalId as number)
+        if (!goal) return jsonError(404, `goal not found: ${String(rawGoalId)}`, "not_found", "goal_not_found")
+        return Response.json({
+          ok: true,
+          goal,
+          active: goal.status === "active" ? goal : null,
+          proposed: goal.status === "proposed" ? goal : null,
+          last_verdict: goal.last_verdict ?? goal.verdict ?? null,
+          last_reason: goal.last_reason ?? goal.verdict_reason ?? null,
+          not_met_streak: goal.not_met_streak,
+          latest_terminal: goal,
+        })
+      }
       const active = getActiveGoal(sessionId) ?? null
+      const latestTerminal = getLatestTerminalGoal(sessionId) ?? null
+      const lastVerdictSource = active ?? latestTerminal
       return Response.json({
         ok: true,
         active,
         proposed: getProposedGoal(sessionId) ?? null,
-        // G1：最近 verdict 与 reason 必须可见（not_met 时目标仍是 active）。
-        last_verdict: active?.last_verdict ?? active?.verdict ?? null,
-        last_reason: active?.last_reason ?? active?.verdict_reason ?? null,
+        // G1：not_met 时目标仍是 active；P2-6：已 met 后 active 为空，从最近终态读取。
+        last_verdict: lastVerdictSource?.last_verdict ?? lastVerdictSource?.verdict ?? null,
+        last_reason: lastVerdictSource?.last_reason ?? lastVerdictSource?.verdict_reason ?? null,
         not_met_streak: active?.not_met_streak ?? 0,
+        latest_terminal: latestTerminal,
       })
     }
 

@@ -192,6 +192,12 @@ const CACHE_LEAD_MIN_PERIOD_MS = 300_000
 /** C7：一次性任务的补发窗口；超出窗口的过去时刻视为 expired，不静默顺延。 */
 export const ONE_SHOT_CATCHUP_WINDOW_MS = 5 * 60_000
 
+/** P2：跨进程投递认领的 stale 上限（进程崩溃后最多占用这么久）。 */
+const CRON_CLAIM_TTL_MS = 10 * 60_000
+
+/** P2：同一会话一次 tick 最多触发的任务数；其余留到下一拍，避免一次齐发。 */
+const CRON_MAX_PER_SESSION_PER_TICK = 1
+
 /** FNV-1a 32bit：给 jitter 一个稳定的非零散列（自增小 id 不再恒得 0）。 */
 function hash32(input: string): number {
   let hash = 0x811c9dc5
@@ -570,6 +576,9 @@ export interface CronRow {
   created_at: number
   status: string
   pid: number | null
+  /** P2：跨进程投递认领标记（1=已有进程在投递）。 */
+  firing: number | null
+  firing_at: number | null
 }
 
 export interface CronFireTask {
@@ -603,8 +612,13 @@ let connection: Database | undefined
 let initialized = false
 let cronInitError: Error | null = null
 
-/** C4：启动期间 durable 文件损坏等错误在此留档，startCronTicker 据此拒绝启动。 */
+/**
+ * C4：启动期间 durable 文件损坏等错误在此留档，startCronTicker 据此拒绝启动。
+ * 未初始化时先触发一次 db()（懒加载），否则 HTTP 层在 ticker 之前调用会读到 null、
+ * 把损坏状态误报成 200；错误在此统一由 db() 内部捕获进 cronInitError。
+ */
 export function getCronInitError(): Error | null {
+  if (!initialized) db()
   return cronInitError
 }
 
@@ -650,11 +664,15 @@ function db(): Database {
     next_fire_at INTEGER,
     created_at INTEGER,
     status TEXT NOT NULL DEFAULT 'active',
-    pid INTEGER
+    pid INTEGER,
+    firing INTEGER NOT NULL DEFAULT 0,
+    firing_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS scheduled_crons_due ON scheduled_crons(status,next_fire_at);
   CREATE INDEX IF NOT EXISTS scheduled_crons_session ON scheduled_crons(session_id,status);`)
   ensureColumn(next, "scheduled_crons", "pid", "INTEGER")
+  ensureColumn(next, "scheduled_crons", "firing", "INTEGER NOT NULL DEFAULT 0")
+  ensureColumn(next, "scheduled_crons", "firing_at", "INTEGER")
   // 非 durable 任务只活在本进程；只清本进程/已死 owner 的行（C1）。
   cleanupNonDurableRows(next)
   connection = next
@@ -695,7 +713,14 @@ export function rehydrateDurableCrons(stateDir?: string): number {
   for (const task of tasks) {
     const numericId = Number.parseInt(task.id, 10)
     if (!Number.isInteger(numericId) || numericId <= 0) continue
-    const recurring = task.recurring !== false
+    // P1：一次性任务必须显式写 recurring:false；旧版缺字段被当成 recurring=true。
+    // 缺字段一律按一次性处理（task.recurring === true 才周期）。
+    const recurring = task.recurring === true
+    // P3：7 天过期在「从 durable 文件恢复」这一创建路径上就判定，不等下一次 tick。
+    if (recurring && task.permanent !== true && now - task.createdAt >= DEFAULT_CRON_JITTER.recurringMaxAgeMs) {
+      console.error(`[gateway] durable recurring cron ${task.id} expired before rehydrate (created ${new Date(task.createdAt).toISOString()})`)
+      continue
+    }
     const next = computeNextFire({
       id: numericId,
       cron: task.cron,
@@ -711,6 +736,9 @@ export function rehydrateDurableCrons(stateDir?: string): number {
         )
         continue
       }
+    } else if (next === null) {
+      console.error(`[gateway] durable recurring cron ${task.id} has no next occurrence (not restored)`)
+      continue
     }
     handle
       .query(`INSERT INTO scheduled_crons(id,session_id,cron,prompt,recurring,durable,permanent,last_fired_at,next_fire_at,created_at,status,pid)
@@ -763,6 +791,20 @@ export async function createCron(input: CreateCronInput): Promise<CreateCronResu
   const id = inserted?.id ?? Number((handle.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id)
   if (!Number.isInteger(id) || id <= 0) throw new Error("cron insert did not return a row id")
   const next = computeNextFire({ id, cron, recurring, createdAt, lastFiredAt: null })
+  if (recurring) {
+    // P2/P3：算不出下一次（如 2 月 31 日）→ 永不触发，创建时就拒绝；
+    // 非 permanent 周期任务 7 天后过期，若首次触发晚于过期点，也不可能触发 → 同样拒绝。
+    if (next === null) {
+      handle.query("DELETE FROM scheduled_crons WHERE id=?").run(id)
+      throw new Error(`never_fires: cron has no future occurrence: ${cron}`)
+    }
+    if (!permanent && next > createdAt + DEFAULT_CRON_JITTER.recurringMaxAgeMs) {
+      handle.query("DELETE FROM scheduled_crons WHERE id=?").run(id)
+      throw new Error(
+        `never_fires: recurring cron expires before its first fire (next=${new Date(next).toISOString()}): ${cron}`,
+      )
+    }
+  }
   if (!recurring && (next === null || next < createdAt - ONE_SHOT_CATCHUP_WINDOW_MS)) {
     // C7：一次性任务算不出未来触发（或已过补发窗口）→ 明确 expired，不静默顺延一年。
     handle.query("DELETE FROM scheduled_crons WHERE id=?").run(id)
@@ -793,7 +835,8 @@ export async function createCron(input: CreateCronInput): Promise<CreateCronResu
       cron,
       prompt,
       createdAt,
-      ...(recurring ? { recurring: true } : {}),
+      // P1：显式写 recurring（含 false）。缺失字段在旧版 rehydrate 里被当成 recurring。
+      recurring,
       ...(permanent ? { permanent: true } : {}),
       createdBySessionId: sessionId,
       createdByPid: process.pid,
@@ -878,6 +921,10 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
   ticking = true
   try {
     const now = Date.now()
+    // P2：清理崩溃进程遗留的认领（正常投递是秒级；10 分钟视为 stale）。
+    db()
+      .query("UPDATE scheduled_crons SET firing=0,firing_at=NULL WHERE status='active' AND firing=1 AND (firing_at IS NULL OR firing_at<?)")
+      .run(now - CRON_CLAIM_TTL_MS)
     // C5：先按「会话是否空闲」过滤，再对空闲会话取 LIMIT 行。
     // 直接 LIMIT 50 再逐行跳过 busy，会让 50 条 busy 行饿死后面真正 idle 的会话。
     let rows: CronRow[]
@@ -904,12 +951,24 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
         .all(now) as CronRow[]
     }
     const fired: CronFireTask[] = []
+    const perSession = new Map<string, number>()
+    let throttled = 0
     for (const row of rows) {
       const task = toTask(row)
+      // P2：每会话每 tick 限 1 条；其余保持 active 且 next_fire_at 仍在过去，留到下一拍。
+      if ((perSession.get(task.sessionId) ?? 0) >= CRON_MAX_PER_SESSION_PER_TICK) {
+        throttled += 1
+        continue
+      }
+      // P2：原子认领——两个 gateway 进程同时 tick 时，只有 UPDATE 影响 1 行的那个投递。
+      const claimed = db()
+        .query("UPDATE scheduled_crons SET firing=1,firing_at=? WHERE id=? AND status='active' AND firing=0")
+        .run(now, task.id)
+      if (Number(claimed.changes) !== 1) continue
       // C7：一次性任务已过补发窗口（进程停机很久）→ 报错 expired，不再补发。
       if (!task.recurring && row.next_fire_at !== null && row.next_fire_at < now - ONE_SHOT_CATCHUP_WINDOW_MS) {
         console.error(`[gateway] one-shot cron ${task.id} expired before delivery (fire_at=${row.next_fire_at})`)
-        db().query("UPDATE scheduled_crons SET status='expired' WHERE id=?").run(task.id)
+        db().query("UPDATE scheduled_crons SET status='expired',firing=0,firing_at=NULL WHERE id=?").run(task.id)
         if (task.durable) {
           await mutateDurableTasks(task.sessionId, options.stateDir?.trim() || cronStateDir(), (tasks) => {
             const index = tasks.findIndex((entry) => Number.parseInt(entry.id, 10) === task.id)
@@ -924,12 +983,13 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
         options.onError?.(error)
         if (!task.recurring) {
           // 一次性任务投递失败：保留任务，60s 后重试（与 CC「留待后续会话」同义）。
-          db().query("UPDATE scheduled_crons SET next_fire_at=? WHERE id=?").run(now + 60_000, task.id)
+          db().query("UPDATE scheduled_crons SET next_fire_at=?,firing=0,firing_at=NULL WHERE id=?").run(now + 60_000, task.id)
           continue
         }
         // recurring 投递失败只丢这一轮，仍按周期推进。
       }
       fired.push(task)
+      perSession.set(task.sessionId, (perSession.get(task.sessionId) ?? 0) + 1)
       const expired = shouldExpireCron(
         { recurring: task.recurring, permanent: task.permanent, createdAt: task.createdAt },
         now,
@@ -939,9 +999,13 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
         // C14：next 永不落回过去（计算值与 now+1 取大），避免同一行每拍重放。
         const next = computed === null ? null : Math.max(computed, now + 1)
         if (next === null) {
-          db().query("UPDATE scheduled_crons SET last_fired_at=?, status='expired' WHERE id=?").run(now, task.id)
+          db()
+            .query("UPDATE scheduled_crons SET last_fired_at=?, status='expired', firing=0, firing_at=NULL WHERE id=?")
+            .run(now, task.id)
         } else {
-          db().query("UPDATE scheduled_crons SET last_fired_at=?, next_fire_at=? WHERE id=?").run(now, next, task.id)
+          db()
+            .query("UPDATE scheduled_crons SET last_fired_at=?, next_fire_at=?, firing=0, firing_at=NULL WHERE id=?")
+            .run(now, next, task.id)
         }
         if (task.durable) {
           await mutateDurableTasks(task.sessionId, options.stateDir?.trim() || cronStateDir(), (tasks) => {
@@ -959,6 +1023,9 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
           })
         }
       }
+    }
+    if (throttled > 0) {
+      console.log(`[gateway] cron throttled: ${throttled} due task(s) deferred to next tick (max ${CRON_MAX_PER_SESSION_PER_TICK}/session/tick)`)
     }
     return fired
   } finally {

@@ -1,9 +1,12 @@
 import { Database } from "bun:sqlite"
 // CC 2.1.302 TaskCreated/TaskCompleted hook（2026-10-18 接线）。
-// fire-and-forget：hook 失败只进日志，绝不影响任务板操作。
+// 语义边界（P2-12）：本实现是**写后通知**，不是 CC 的写前阻塞式 hook——落库成功后才
+// fire-and-forget 派发，hook 的 blocked 结果既不回滚也不拒绝任务写入；hook 失败只进日志。
+// 工具描述与本档注释都不得宣称与 CC 的阻塞语义对齐。
 import { runHooksWithBudget } from "./hooks-http.ts"
 
-// 持久任务板：移植 Claude Code 的 TaskCreate/TaskUpdate/TaskList 语义。
+// 持久任务板：按 Claude Code TaskCreate/TaskUpdate/TaskList 的**数据语义**实现
+// （双写依赖、删除清引用、completed 前校验 blockedBy）；hook 仅通知，不阻塞写入。
 // 与 sessions 共用同一持久目录（SESSIONS_DB_PATH），独立表 agent_tasks。
 //
 // 依赖双写（对齐 CC qHt）：A.blocks 含 B ⇔ B.blockedBy 含 A。
@@ -289,7 +292,18 @@ function fireTaskHook(
       ...(task.status !== undefined ? { status: task.status } : {}),
     },
     { timeoutMs: 60_000 },
-  ).catch((e) => {
+  ).then((result) => {
+    if (result.errors.length > 0) {
+      console.warn(`[gateway] hooks ${event} errors session=${sessionId}: ${result.errors.join(" | ")}`)
+    }
+    // Task hook 的 block 语义：状态变更已落库，blocked 不能被静默吞掉；
+    // 至少留下可检索日志（含 reason），供运维核对「hook 想拦但未回滚」的事实。
+    if (result.blocked) {
+      console.warn(
+        `[gateway] hooks ${event} blocked session=${sessionId} task=${task.id} reason=${(result.reason ?? "blocked").slice(0, 500)} (task change already persisted)`,
+      )
+    }
+  }).catch((e) => {
     console.warn(`[gateway] hooks ${event} failed session=${sessionId}: ${e instanceof Error ? e.message : String(e)}`)
   })
 }
@@ -450,7 +464,10 @@ export function updateTask(sessionId: string, taskId: number, patch: TaskUpdateP
     if (patch.subject !== undefined) task.subject = patch.subject.trim()
     if (patch.description !== undefined) task.description = patch.description.trim()
     if (patch.activeForm !== undefined) task.activeForm = patch.activeForm
-    if (patch.owner !== undefined) task.owner = patch.owner
+    if (patch.owner !== undefined) {
+      // P2-4：空字符串与 null 同义＝释放认领；非空值 trim 后落库。
+      task.owner = typeof patch.owner === "string" ? patch.owner.trim() || null : null
+    }
     if (patch.metadata !== undefined) {
       for (const [key, value] of Object.entries(patch.metadata)) {
         if (value === null) delete task.metadata[key]
@@ -459,6 +476,11 @@ export function updateTask(sessionId: string, taskId: number, patch: TaskUpdateP
     }
 
     const updatedFields = writeChangedRow(sessionId, original, task)
+    // P2-5：响应必须反映写库后的真实行（尤其 updated_at），不能回传变更前的内存对象。
+    const persistRow = (): Task => {
+      const row = readRow(sessionId, taskId)
+      return row ? decodeTask(row) : task
+    }
 
     // 对端只写实际变化的依赖数组。
     for (const next of view.values()) {
@@ -475,9 +497,10 @@ export function updateTask(sessionId: string, taskId: number, patch: TaskUpdateP
 
     if (updatedFields.length === 0) {
       // 空 patch（或所有字段都是原值）：不 bump updated_at，updatedFields 为空。
-      return { success: true, taskId, updatedFields: [], task }
+      return { success: true, taskId, updatedFields: [], task: persistRow() }
     }
 
+    const persisted = persistRow()
     const statusChange =
       task.status !== original.status ? { from: original.status, to: task.status } : undefined
     // status 变为 completed 且落库成功 → TaskCompleted。空 patch（updatedFields=[]）
@@ -495,7 +518,7 @@ export function updateTask(sessionId: string, taskId: number, patch: TaskUpdateP
       taskId,
       updatedFields,
       ...(statusChange ? { statusChange } : {}),
-      task,
+      task: persisted,
     }
   })
 }
@@ -547,7 +570,8 @@ function writeChangedRow(sessionId: string, before: Task, next: Task): string[] 
   }
   if (changed.length === 0) return []
   assignments.push("updated_at=?")
-  values.push(Date.now())
+  // P2-5：单调递增——同一毫秒内连续写也保证 updatedAt 严格变大。
+  values.push(Math.max(Date.now(), before.updatedAt + 1))
   values.push(sessionId, next.id)
   db().query(`UPDATE agent_tasks SET ${assignments.join(", ")} WHERE session_id=? AND id=?`).run(...values)
   return changed

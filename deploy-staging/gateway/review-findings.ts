@@ -3,7 +3,8 @@
 // - 一次调用报完；findings 最多 32 条，按严重度从高到低。
 // - 整批校验通过才在**单事务**内写入；任一字段非法则整批拒绝并回报具体字段。
 // - 空数组合法（表示「没有存活的问题」）。
-// - 同一 (session_id, run_id) 是同一批次：重复上报整批替换（幂等，不累积）。
+// - 只有调用方显式给 run_id 时，同一 (session_id, run_id) 才视为同一批次：重复上报整批替换（幂等）。
+// - 未给 run_id 时**每次上报生成独立批次 id**（时间戳+随机），多个 critic 连续上报不会互相覆盖。
 // - 只用 SESSIONS_DB_PATH 同一持久库（与 job-store.ts 同配方），不另立状态目录。
 import { Database } from "bun:sqlite"
 
@@ -278,7 +279,7 @@ function normalizeFinding(raw: unknown, index: number, errors: FindingsFieldErro
  * 一次提交整批评审问题。校验失败整批拒绝（抛 FindingsValidationError）；
  * 成功则单事务写入，返回 {ok:true,count}。
  */
-export function reportFindings(sessionId: string, input: ReportFindingsInput): { ok: true; count: number } {
+export function reportFindings(sessionId: string, input: ReportFindingsInput): { ok: true; count: number; run_id: string } {
   const sid = requireSessionId(sessionId)
   const errors: FindingsFieldError[] = []
 
@@ -315,12 +316,11 @@ export function reportFindings(sessionId: string, input: ReportFindingsInput): {
 
   if (errors.length > 0) throw new FindingsValidationError(errors)
 
-  // F1：同一 (session_id, run_id) 是同一批次——重复上报在单事务内整批替换。
-  // 未给 run_id 时生成稳定值（同会话恒定），因此同会话重复上报同样幂等。
-  const effectiveRunId = runId ?? `auto:${sid}`
-  const generatedRunId = runId === null
-
+  // P1-3：只有显式 run_id 才按批替换；未给时每次生成独立批次 id，
+  // 否则多个 critic 会用同一个 `auto:<sid>` 互相 DELETE（只留最后一批）。
   const now = Date.now()
+  const explicitRunId = runId !== null
+  const effectiveRunId = runId ?? `auto:${sid}:${now.toString(36)}:${crypto.randomUUID().slice(0, 8)}`
   const database = db()
   const insert = database.query(
     `INSERT INTO review_findings(
@@ -328,10 +328,8 @@ export function reportFindings(sessionId: string, input: ReportFindingsInput): {
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
   )
   database.transaction(() => {
-    database.query("DELETE FROM review_findings WHERE session_id=? AND run_id=?").run(sid, effectiveRunId)
-    if (generatedRunId) {
-      // 兼容旧版「无 run_id → NULL」的历史批次，避免无限累积。
-      database.query("DELETE FROM review_findings WHERE session_id=? AND run_id IS NULL").run(sid)
+    if (explicitRunId) {
+      database.query("DELETE FROM review_findings WHERE session_id=? AND run_id=?").run(sid, effectiveRunId)
     }
     for (const f of normalized) {
       insert.run(
@@ -350,7 +348,7 @@ export function reportFindings(sessionId: string, input: ReportFindingsInput): {
       )
     }
   })()
-  return { ok: true, count: normalized.length }
+  return { ok: true, count: normalized.length, run_id: effectiveRunId }
 }
 
 /** 最近 N 条（跨 run，created_at 新的在前；同一批次内按提交顺序）。 */

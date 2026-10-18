@@ -12,6 +12,7 @@ import {
   isExternalPermissionMode,
   isReadOnlyTool,
   isRuleDestination,
+  toDenyAuditRecord,
   updateRules,
   type Behavior,
   type PermissionContext,
@@ -19,6 +20,7 @@ import {
   type RuleAction,
 } from "./permission-policy.ts"
 import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy"
+import { appendDenyAudit } from "./events-translate.ts"
 import { loadUserSettings } from "./persistence"
 import { getPlanState } from "./plan-mode"
 import { resolveSession } from "./sessions-core"
@@ -160,13 +162,16 @@ async function deriveTenant(sessionId: string, fallback: string): Promise<string
 /**
  * 权限模式由会话推导（产品连续性的关键）：
  * - 显式 plan 状态优先；
+ * - 会话 `/rules setMode` 显式设置（dontAsk/acceptEdits/plan…）次之，不被推导覆盖；
  * - billingAutoApprovalEnabled → auto；
  * - interaction_mode === "collaborate" → default；
  * - 其余（preset 等）→ auto。
  * 请求体不能决定模式。
  */
-async function deriveMode(sessionId: string): Promise<PermissionMode | undefined> {
+async function deriveMode(sessionId: string, tenant: string): Promise<PermissionMode | undefined> {
   if (getPlanState(sessionId).inPlanMode) return "plan"
+  const explicit = getPolicyState(sessionId, tenant).explicitMode
+  if (explicit) return explicit
   const state = resolveSession(sessionId)
   if (!state) return undefined
   try {
@@ -195,15 +200,35 @@ async function handleEvaluate(body: Record<string, unknown>): Promise<Response> 
 
   // 产品阻断级修正：模式/tenant 由会话推导，不信任请求体。
   const tenant = await deriveTenant(sessionId, bodyTenant)
-  const mode = await deriveMode(sessionId)
+  const mode = await deriveMode(sessionId, tenant)
+  const planState = getPlanState(sessionId)
+  const context = buildContext(contextRaw, mode)
+  if (planState.inPlanMode && planState.planFilePath) context.planFilePath = planState.planFilePath
 
   const decision = evaluateToolPermission({
     sessionId,
     tenant,
     tool,
     input,
-    context: buildContext(contextRaw, mode),
+    context,
   })
+
+  // deny 落审计：与 events-translate 既有 appendDenyAudit 同一格式（4 值 source）。
+  if (decision.behavior === "deny") {
+    try {
+      appendDenyAudit(
+        toDenyAuditRecord({
+          sessionId,
+          callId: stringField(body, "call_id") || stringField(body, "callId") || `perm-${Date.now().toString(36)}`,
+          tool,
+          operation: tool,
+          decision,
+        }),
+      )
+    } catch {
+      // 审计失败不得改变权限决策。
+    }
+  }
 
   return json(200, {
     ok: true,

@@ -32,6 +32,13 @@ export async function handleWakeup(req: Request, pathname: string): Promise<Resp
   if (!body || typeof body !== "object") return bad("request body must be a JSON object", "bad_request")
   const sessionId = pickSessionId(body)
   if (!sessionId) return bad("session_id is required", "bad_request")
+  // P3：类型严格——stop/noop 只接受布尔；"true" 不能当成 true 静默照常执行。
+  if (body.stop !== undefined && typeof body.stop !== "boolean") {
+    return bad("stop must be a boolean", "bad_stop")
+  }
+  if (body.noop !== undefined && typeof body.noop !== "boolean") {
+    return bad("noop must be a boolean", "bad_noop")
+  }
 
   try {
     if (pathname === "/internal/wakeup/list") {

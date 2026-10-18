@@ -11,11 +11,14 @@ import { join, resolve, sep } from "node:path"
 import { CONFIRM_TIMEOUT_MS } from "./constants-gateway"
 import { waitFor } from "./internal-waiters"
 import { settleConfirm } from "./media-internal-routes"
-import { getPolicyState, isPermissionMode, updateRules } from "./permission-policy"
+import { PLAN_READ_ONLY_TOOLS, getPolicyState, isPermissionMode, updateRules } from "./permission-policy"
 import { resolveSession } from "./sessions-core"
 import { emitToSession } from "./sse-core"
 import { subagentParentState } from "./subagent"
 import type { SessionState } from "./types-gateway"
+
+// H6：计划只读清单单一真源在 permission-policy；plan-http 下发给插件。
+export { PLAN_READ_ONLY_TOOLS }
 
 export const NOT_IN_PLAN_MODE_MESSAGE =
   "You are not in plan mode. To enter plan mode, call the EnterPlanMode tool first."
@@ -72,6 +75,7 @@ export interface ExitPlanModeFailure {
     | "missing_plan_file"
     | "session_not_found"
     | "plan_too_large"
+    | "empty_plan"
     | "symlinked_plan_file"
 }
 
@@ -90,7 +94,41 @@ const PLAN_SCAFFOLD = "# Plan\n\n<!-- 在调用 ExitPlanMode 前，把完整计�
 const PLAN_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 /** 计划目录不得落进控制目录（与写路径 safetyCheck 对齐）。 */
 const FORBIDDEN_PLAN_DIR_SEGMENTS = new Set([".git", ".claude", ".ssh"])
+const MAX_PLAN_STATES = 500
+const PLAN_STATE_TTL_MS = 24 * 60 * 60 * 1000
 const planStates = new Map<string, PlanSessionState>()
+
+/** 计划文件仍是进入时写入的 scaffold（或只有空白/注释）：视为未写计划。 */
+function isScaffoldOrEmptyPlan(text: string): boolean {
+  const stripped = text
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^\s*#\s*Plan\s*$/gim, "")
+    .trim()
+  if (!stripped) return true
+  return stripped === PLAN_SCAFFOLD.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*#\s*Plan\s*$/gim, "").trim()
+}
+
+/** planStates 上限与清理：活跃计划永不淘汰，先清最老的已退出记录。 */
+function rememberPlanState(record: PlanSessionState): void {
+  planStates.set(record.sessionId, record)
+  const cutoff = Date.now() - PLAN_STATE_TTL_MS
+  for (const [id, candidate] of planStates) {
+    if (candidate.mode !== "plan" && (candidate.exitedAt ?? candidate.createdAt) < cutoff) {
+      planStates.delete(id)
+    }
+  }
+  while (planStates.size > MAX_PLAN_STATES) {
+    let removed = false
+    for (const [id, candidate] of planStates) {
+      if (candidate.mode === "plan") continue
+      planStates.delete(id)
+      removed = true
+      break
+    }
+    // 全部是活跃计划时保持上限之上的长度，也不丢进行中的计划状态。
+    if (!removed) break
+  }
+}
 
 function workspaceRoot(): string {
   return process.env.HARNESS_WORKSPACE?.trim() || "/opt/agent-harness/workspace"
@@ -209,8 +247,8 @@ export async function enterPlanMode(
   const existing = planStates.get(sid)
   if (existing?.mode === "plan") {
     await ensurePlanFile(existing.filePath)
-    // H6：权限引擎与计划状态保持一致（幂等）。
-    updateRules({ sessionId: sid, action: "setMode", mode: "plan" })
+    // H6：权限引擎与计划状态保持一致（幂等）。内部转移不改会话显式 setMode。
+    updateRules({ sessionId: sid, action: "setMode", mode: "plan", fromPlanTransition: true })
     return {
       mode: "plan",
       planFilePath: existing.filePath,
@@ -236,9 +274,9 @@ export async function enterPlanMode(
     filePath,
     createdAt: Date.now(),
   }
-  planStates.set(sid, record)
+  rememberPlanState(record)
   // H6：进入计划模式同时驱动权限引擎（prePlanMode 由权限内核记录）。
-  updateRules({ sessionId: sid, action: "setMode", mode: "plan" })
+  updateRules({ sessionId: sid, action: "setMode", mode: "plan", fromPlanTransition: true })
   const state = findSession(sid)
   if (state) emitToSession(state, "plan.mode", { mode: "plan", pre_plan_mode: prePlanMode, plan_file_path: filePath })
   return { mode: "plan", planFilePath: filePath, planSlug: slug, prePlanMode }
@@ -247,9 +285,9 @@ export async function enterPlanMode(
 /** H6：退出计划模式时恢复原权限模式；不可用则降级 default。 */
 function restorePolicyMode(sessionId: string, prePlanMode: string): void {
   const target = isPermissionMode(prePlanMode) ? prePlanMode : "default"
-  const restored = updateRules({ sessionId, action: "setMode", mode: target })
+  const restored = updateRules({ sessionId, action: "setMode", mode: target, fromPlanTransition: true })
   if (!restored.ok && target !== "default") {
-    updateRules({ sessionId, action: "setMode", mode: "default" })
+    updateRules({ sessionId, action: "setMode", mode: "default", fromPlanTransition: true })
   }
 }
 
@@ -285,6 +323,14 @@ export async function exitPlanMode(
   const read = await readPlanFile(record.filePath)
   if ("failure" in read) return read.failure
   const plan = read.plan
+  // 计划文件仍是进入时的 scaffold：不拿模板冒充计划去审批。
+  if (isScaffoldOrEmptyPlan(plan)) {
+    return {
+      approved: false,
+      code: "empty_plan",
+      error: `计划文件 ${record.filePath} 仍是空白/模板。请先把完整计划写入 plan_file_path，再调用 exit_plan_mode。`,
+    }
+  }
   const state = findSession(sid)
   if (!state) {
     return {
@@ -383,50 +429,12 @@ export function getPlanState(sessionId: string): {
 }
 
 /**
- * H6：计划模式只读工具的唯一真源。
- * 网关通过 /internal/plan/state 的 read_only_tools 下发；插件不再自带第二份清单。
+ * H6：计划模式只读工具的唯一真源（permission-policy.ts 的 PLAN_READ_ONLY_TOOLS，
+ * 本档再导出供 plan-http 下发；插件 fallback 必须与该表逐项一致）。
  */
-export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set(
-  [
-    "read",
-    "list",
-    "ls",
-    "glob",
-    "grep",
-    "webfetch",
-    "websearch",
-    "whoami",
-    "lsp_diagnostics",
-    "task_list",
-    "task_get",
-    "subagent_status",
-    "workflow_status",
-    "workflow_history",
-    "image_get_result",
-    "video_result_fetch",
-    "memory_recall",
-    "asset_search",
-    "asset_get",
-    "character_card_list",
-    "search_web",
-    "search_aggregate",
-    "smart_search",
-    "video_analyze",
-    "video_measure",
-    "video_transcribe",
-    "video_evidence",
-    "vision_analyze",
-    "read_image",
-    "timeline_query",
-    "canvas_get_state",
-    "director_get_state",
-    "quota",
-  ].map((name) => name.toLowerCase()),
-)
-
 const PLAN_MODE_EXEMPT_TOOLS = new Set(
-  ["enterplanmode", "exitplanmode", "askuserquestion", "enter_plan_mode", "exit_plan_mode", "ask_parent"].map((name) =>
-    name.toLowerCase(),
+  ["enterplanmode", "exitplanmode", "askuserquestion", "ask", "enter_plan_mode", "exit_plan_mode", "ask_parent"].map(
+    (name) => name.toLowerCase(),
   ),
 )
 
@@ -473,5 +481,49 @@ export function planModeGuard(
     }
   }
   if (readOnly ?? PLAN_READ_ONLY_TOOLS.has(lower)) return { behavior: "allow", reason: "" }
+
+  // 写计划文件本身是计划模式的合法动作；不能把唯一的出口也挡住。
+  const planFilePath = sessionId ? planStates.get(sessionId)?.filePath : undefined
+  if (planFilePath && isPlanFileTarget(name, input, planFilePath)) return { behavior: "allow", reason: "" }
+
   return { behavior: "ask", reason: `Cannot call ${name} while in plan mode.` }
 }
+
+const PLAN_FILE_WRITE_TOOLS = new Set([
+  "write",
+  "write_file",
+  "edit",
+  "multiedit",
+  "patch",
+  "apply_patch",
+  "notebook_edit",
+  "str_replace",
+  "create_file",
+])
+
+function isPlanFileTarget(tool: string, input: unknown, planFilePath: string): boolean {
+  if (!PLAN_FILE_WRITE_TOOLS.has(tool.toLowerCase())) return false
+  if (!input || typeof input !== "object") return false
+  const record = input as Record<string, unknown>
+  const candidates: string[] = []
+  for (const key of ["filePath", "file_path", "path", "notebook_path", "notebookPath"]) {
+    const value = record[key]
+    if (typeof value === "string" && value) candidates.push(value)
+  }
+  const patchText =
+    typeof record.patchText === "string"
+      ? record.patchText
+      : typeof record.patch_text === "string"
+        ? record.patch_text
+        : ""
+  for (const match of patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*(.+)$/gm)) {
+    if (match[1]?.trim()) candidates.push(match[1].trim())
+  }
+  for (const match of patchText.matchAll(/^(?:\+\+\+|---) [ab]\/(.+)$/gm)) {
+    if (match[1]?.trim()) candidates.push(match[1].trim())
+  }
+  if (candidates.length === 0) return false
+  const target = resolve(planFilePath)
+  return candidates.every((candidate) => resolve(candidate.trim()) === target)
+}
+

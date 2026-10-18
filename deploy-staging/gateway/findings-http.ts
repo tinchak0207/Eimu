@@ -6,6 +6,7 @@
 import { jsonError } from "./gw-lib.ts"
 import { resolveSession } from "./sessions-core.ts"
 import { subagentParentState } from "./subagent.ts"
+import { internalTokenRejection } from "./task-board-http.ts"
 import {
   FindingsValidationError,
   latestFindingsRun,
@@ -29,6 +30,8 @@ async function readJson(req: Request): Promise<Record<string, unknown> | null> {
 
 export async function handleFindings(req: Request, pathname: string): Promise<Response> {
   if (req.method !== "POST") return jsonError(405, "method not allowed", "bad_request", "method_not_allowed")
+  const tokenError = internalTokenRejection(req)
+  if (tokenError) return tokenError
   const payload = await readJson(req)
   if (!payload) return jsonError(400, "invalid json body", "bad_request", "bad_request")
   const rawSessionId = typeof payload.session_id === "string" ? payload.session_id.trim() : ""
@@ -42,7 +45,8 @@ export async function handleFindings(req: Request, pathname: string): Promise<Re
         findings: payload.findings,
         run_id: payload.run_id,
       })
-      return Response.json(result)
+      // P2-14：回执附带最近批次摘要，让调用方（含最终回报）能引用真实批次，而不是只看到条数。
+      return Response.json({ ...result, latest_run: latestFindingsRun(sessionId) ?? null })
     }
 
     if (pathname === "/internal/findings/list") {

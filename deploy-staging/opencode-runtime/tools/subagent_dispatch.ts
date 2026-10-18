@@ -167,6 +167,17 @@ export default tool({
       }
       // 同步模式（或缺省）：长挂起取件（wait_ms），零回归。
       const deadline = Date.now() + POLL_DEADLINE_MS
+      // P3（2026-10-18 紧回圈修复）：status 端点回 404/500 时旧代码照样解析 `{}` 并立即下一轮
+      // （挂起不存在→满速死回圈）。现在记录连续失败、指数退避，超过上限如实失败。
+      let consecutiveFailures = 0
+      const MAX_CONSECUTIVE_FAILURES = 8
+      const backoff = async (): Promise<boolean> => {
+        consecutiveFailures += 1
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) return false
+        const delay = Math.min(5_000, 250 * 2 ** (consecutiveFailures - 1))
+        await new Promise((r) => setTimeout(r, delay))
+        return true
+      }
       while (Date.now() < deadline) {
         if (context.abort?.aborted) {
           return fail("aborted", "会话中断，已停止等待子代理结果")
@@ -180,9 +191,29 @@ export default tool({
             // 逾时必须 > WAIT_MS，否则 20s 挂起会被本地超时砍断。
             signal: AbortSignal.timeout(WAIT_MS + 10_000),
           })
-          st = await sr.json().catch(() => ({}))
+          if (!sr.ok) {
+            // 4xx/5xx 不是「还在跑」：退避后重试，连续失败超限则如实失败（不再紧回圈）。
+            if (!(await backoff())) {
+              return fail("status_unavailable", `查询子代理状态连续失败 ${consecutiveFailures} 次（HTTP ${sr.status}）；请稍后用 subagent_status 复核，不要盲目重派。`, {
+                http_status: sr.status,
+                subagent_id: subagentId,
+              })
+            }
+            continue
+          }
+          st = await sr.json().catch(() => null)
+          if (st === null || typeof st !== "object") {
+            if (!(await backoff())) {
+              return fail("status_unavailable", `查询子代理状态连续返回非法 JSON ${consecutiveFailures} 次；请稍后用 subagent_status 复核。`, { subagent_id: subagentId })
+            }
+            continue
+          }
+          consecutiveFailures = 0
         } catch {
-          continue // 单次取件失败不放弃，继续等下一轮（wait_ms 天然限速，不会满速死回圈）
+          if (!(await backoff())) {
+            return fail("gateway_unreachable", `等待子代理结果时连续 ${consecutiveFailures} 次无法连接网关；请稍后用 subagent_status 复核。`, { subagent_id: subagentId })
+          }
+          continue
         }
         if (st?.done) {
           // F9：按终态成败表判定，不再「status !== "ok" 即失败」——终态 stopped（人工停）等非失败

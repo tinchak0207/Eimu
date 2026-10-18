@@ -122,17 +122,16 @@ export function clampWakeupDelay(seconds: number): number {
 
 /**
  * W3：noop streak 只统计连续 noop。
- * 真实唤醒（noop=false）产生的 0 行不把 streak 重置为 1；只有显式取消才终结 streak。
+ * 只看向最新一行：noop 行返回其 streak，真实唤醒（noop_streak=0）立即把 streak 归零
+ * （旧实现会跳过 0 继续往旧行找，真实唤醒后 streak 仍续命）；显式取消同样终结 streak。
  */
 function lastNoopStreak(sessionId: string): number {
-  const rows = db()
-    .query("SELECT noop_streak,status FROM session_wakeups WHERE session_id=? ORDER BY id DESC LIMIT 100")
-    .all(sessionId) as Array<{ noop_streak: number; status: string }>
-  for (const row of rows) {
-    if (row.status === "cancelled") return 0
-    if (typeof row.noop_streak === "number" && row.noop_streak > 0) return row.noop_streak
-  }
-  return 0
+  const row = db()
+    .query("SELECT noop_streak,status FROM session_wakeups WHERE session_id=? ORDER BY id DESC LIMIT 1")
+    .get(sessionId) as { noop_streak: number; status: string } | null
+  if (!row) return 0
+  if (row.status === "cancelled") return 0
+  return typeof row.noop_streak === "number" && row.noop_streak > 0 ? row.noop_streak : 0
 }
 
 /**
@@ -208,9 +207,16 @@ export function dueWakeups(now: number = Date.now()): WakeupRow[] {
     .all(now, WAKEUP_TICK_BATCH) as WakeupRow[]
 }
 
-/** 标记一次触发的结果；wake 抛错时由 ticker 传 "failed"（不重试，避免坏 prompt 无限唤醒）。 */
-export function markFired(id: number, status: "fired" | "failed" | "cancelled" = "fired"): void {
-  db().query("UPDATE session_wakeups SET status=?, fired_at=?, pid=NULL WHERE id=?").run(status, Date.now(), id)
+/**
+ * 标记一次触发的结果；wake 抛错时由 ticker 传 "failed"（不重试，避免坏 prompt 无限唤醒）。
+ * P2：只允许 firing → 终态。跨进程 stop 已把行写成 cancelled 时，这里的影响行数为 0，
+ * 绝不把 stop 的结果覆盖回 fired/failed。返回实际更新行数供调用方判断。
+ */
+export function markFired(id: number, status: "fired" | "failed" | "cancelled" = "fired"): number {
+  const res = db()
+    .query("UPDATE session_wakeups SET status=?, fired_at=?, pid=NULL WHERE id=? AND status='firing'")
+    .run(status, Date.now(), id)
+  return Number(res.changes)
 }
 
 /**
@@ -292,17 +298,26 @@ export function startWakeupTicker(opts: { intervalMs?: number; wake: WakeupFn })
         }
         try {
           await opts.wake(row.session_id, fresh.prompt)
-          if (cancelledInFlight.has(row.id)) {
+          // P2：投递途中另一个进程可能已 stop（DB 行变 cancelled）；收尾前重查，
+          // 不能拿内存里的 cancelledInFlight 当唯一判据。
+          const after = db().query("SELECT status FROM session_wakeups WHERE id=?").get(row.id) as
+            | { status: string }
+            | null
+          if (cancelledInFlight.has(row.id) || after?.status !== "firing") {
             // W2：投递途中被 stop；请求已发出，但记账必须是 cancelled，后续不再触发。
             markFired(row.id, "cancelled")
             console.log(`[gateway] wakeup cancelled in-flight: id=${row.id} session=${row.session_id}`)
+          } else if (markFired(row.id, "fired") === 0) {
+            console.log(`[gateway] wakeup fired but row was already terminal (cross-process stop): id=${row.id}`)
           } else {
-            markFired(row.id, "fired")
             console.log(`[gateway] wakeup fired: id=${row.id} session=${row.session_id} streak=${row.noop_streak}`)
           }
         } catch (e) {
           // W6：单行失败写 failed，ticker 继续处理下一行。
-          if (cancelledInFlight.has(row.id)) markFired(row.id, "cancelled")
+          const after = db().query("SELECT status FROM session_wakeups WHERE id=?").get(row.id) as
+            | { status: string }
+            | null
+          if (cancelledInFlight.has(row.id) || after?.status !== "firing") markFired(row.id, "cancelled")
           else markFired(row.id, "failed")
           console.error(`[gateway] wakeup failed: id=${row.id} session=${row.session_id}:`, e)
         } finally {

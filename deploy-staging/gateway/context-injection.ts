@@ -135,6 +135,9 @@ export const SKILL_INDEX_BUDGET_CHARS = (() => {
   return Number.isFinite(n) && n > 0 ? n : 1200
 })()
 
+/** 技能索引开关：与 EIMU_TOKEN_REMINDER 同一布尔语义（0|false|off|no＝关）。 */
+export const SKILL_INDEX_ENABLED = envFlagEnabled(process.env.EIMU_SKILL_INDEX)
+
 export const DEFAULT_SKILLS_DIR =
   process.env.EIMU_SKILLS_DIR ||
   (process.env.BEAST_SKILLS_DIR || "/opt/agent-harness/workspace/.opencode/skills")
@@ -335,7 +338,16 @@ export function buildEnvironmentPromptSection(input: EnvironmentInjectionInput):
 }
 
 // ── 4. token 提醒 ────────────────────────────────────────────────────────
-export const TOKEN_REMINDER_ENABLED = !/^(0|false|off|no)$/i.test(process.env.EIMU_TOKEN_REMINDER ?? "")
+/** 布尔 env 的唯一判定：`0|false|off|no`（大小写不敏感）＝关闭；其余（含未设置）＝开启。
+ *  EIMU_SKILL_INDEX 与 EIMU_TOKEN_REMINDER 共用同一语义，避免出现 `false` 仍开启的分裂。 */
+export function envFlagEnabled(raw: string | undefined, defaultEnabled = true): boolean {
+  if (raw === undefined) return defaultEnabled
+  const value = raw.trim()
+  if (!value) return defaultEnabled
+  return !/^(0|false|off|no)$/i.test(value)
+}
+
+export const TOKEN_REMINDER_ENABLED = envFlagEnabled(process.env.EIMU_TOKEN_REMINDER)
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = (() => {
   const n = Number.parseInt(process.env.EIMU_CONTEXT_WINDOW_TOKENS || "200000", 10)
   return Number.isFinite(n) && n > 0 ? n : 200000
@@ -474,6 +486,7 @@ export function applyAttachmentBudget(text: string, maxChars = ATTACHMENT_TURN_C
   const originalChars = text.length
   const firstOpen = text.indexOf(ATT_OPEN)
   if (firstOpen < 0) return { text, truncated: false, originalChars, chars: originalChars }
+  const budget = Math.max(0, Math.floor(maxChars))
 
   const spans: Array<{ innerStart: number; innerEnd: number }> = []
   let cursor = firstOpen
@@ -492,42 +505,54 @@ export function applyAttachmentBudget(text: string, maxChars = ATTACHMENT_TURN_C
   }
 
   if (unclosedAt >= 0) {
-    // 未闭合：剩余整段都是附件资料，按同一预算截断；不足预算也照样围栏化。
+    // 未闭合：head（开标记前的用户正文）也计入同一个预算。head 本身超预算时
+    // 截断 head 并明确告知；否则按「head + 围栏 + inner」全量 ≤ budget 收口。
     const head = text.slice(0, unclosedAt)
     const inner = text.slice(unclosedAt + ATT_OPEN.length)
-    const fenceOverhead = DATA_FENCE_OPEN.length + DATA_FENCE_CLOSE.length + 2
-    const mark = `\n（附件块未闭合，已按 ${maxChars} 字符预算截断）`
-    const room = Math.max(0, maxChars - fenceOverhead)
+    const fenceOverhead = ATT_OPEN.length + 3 + DATA_FENCE_OPEN.length + DATA_FENCE_CLOSE.length + 2
+    const HEAD_MARK = "\n…（附件块未闭合：正文已按总预算截断）"
+    if (head.length + fenceOverhead >= budget) {
+      const keepHead = Math.max(0, budget - HEAD_MARK.length)
+      const next = `${head.slice(0, keepHead)}${HEAD_MARK}`
+      return { text: next.slice(0, budget), truncated: true, originalChars, chars: Math.min(budget, next.length), unclosed: true }
+    }
+    const mark = `\n（附件块未闭合，已按 ${budget} 字符总预算截断）`
+    const room = Math.max(0, budget - head.length - fenceOverhead)
     if (inner.length > room) {
       const keep = Math.max(0, room - mark.length)
       const next = `${head}${ATT_OPEN}\n${DATA_FENCE_OPEN}\n${escapeInjectedData(inner.slice(0, keep))}${mark}\n${DATA_FENCE_CLOSE}`
-      return { text: next, truncated: true, originalChars, chars: next.length, unclosed: true }
+      return { text: next.slice(0, budget), truncated: true, originalChars, chars: Math.min(budget, next.length), unclosed: true }
     }
     const next = `${head}${ATT_OPEN}\n${fenceInjectedData(inner)}`
     return { text: next, truncated: false, originalChars, chars: next.length, unclosed: true }
   }
 
-  let used = 0
-  let truncated = false
   let out = ""
+  let truncated = false
   let pos = 0
   for (const span of spans) {
     out += text.slice(pos, span.innerStart)
     const inner = text.slice(span.innerStart, span.innerEnd)
     const overhead = DATA_FENCE_OPEN.length + DATA_FENCE_CLOSE.length + 2
-    const room = Math.max(0, maxChars - used - overhead)
+    // head（第一个开标记之前）与块间正文都计入；预算不足时只裁块内资料。
+    const room = Math.max(0, budget - out.length - overhead)
     let kept = inner
     if (inner.length > room) {
-      const mark = `\n（附件清单超 ${maxChars} 字符，已截断）`
+      const mark = `\n（附件清单超 ${budget} 字符总预算，已截断）`
       kept = inner.slice(0, Math.max(0, room - mark.length)) + mark
       truncated = true
     }
     const fenced = `\n${fenceInjectedData(kept)}\n`
     out += fenced
-    used += fenced.length
     pos = span.innerEnd
   }
   out += text.slice(pos)
+  // 防御：块外正文本身已超预算时，整体截断并写清原因（不让「附件预算」变成软约束）。
+  if (out.length > budget) {
+    const mark = `\n…（本轮消息含附件，已按 ${budget} 字符总预算截断）`
+    out = `${out.slice(0, Math.max(0, budget - mark.length))}${mark}`.slice(0, budget)
+    truncated = true
+  }
   return { text: out, truncated, originalChars, chars: out.length }
 }
 

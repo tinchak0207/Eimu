@@ -163,8 +163,13 @@ export function formatRecalledDocs(docs: RecalledDoc[]): string {
 
 export const memoryRecallTool: MemoryToolDef = {
   id: "memory_recall",
-  description:
-    "从平台共享记忆库召回领域知识正文（memory_recall，中控 /agent/v1/memory/recall）。当共享知识目录里有一条与当前任务相关、但目录摘要不足以落地时，用本工具读该条全文。返回条目列表，每条含 [domain] slug — description 与 body；引用前须记得它记录的是「写下那一刻」的认知、可能已过期，与现场冲突时以现场为准并说明冲突。",
+  description: [
+    "从平台共享记忆库召回领域知识正文（memory_recall）。",
+    "何时用：共享目录摘要不足以落地，需要读某条全文时。",
+    "何时不用：摘要已足够、或只是通用常识时不要召回。",
+    "关键约束：返回 [domain] slug — description 与 body；记忆是写下那一刻的观察，可能过期，与现场冲突时以现场为准并说明冲突；limit 1-5，默认 3。",
+    "示例：memory_recall({query:\"纪录片 节奏 卡点\", limit:3})",
+  ].join("\n"),
   args: {
     query: {
       type: "string",

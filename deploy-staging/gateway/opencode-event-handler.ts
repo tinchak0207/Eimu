@@ -10,9 +10,9 @@ import { emitSanitizedDelta } from "./outbound-emit.ts"
 import { opencodeHeaders, scheduleTitleFetch, revertDeadTail, opencodeFetch } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets, emitRunningSubagentsStatus, runGoalEvaluator } from "./subagent"
+import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets, emitRunningSubagentsStatus, runGoalEvaluator, findRunningRun } from "./subagent"
 // CC 2.1.302 移植：会话目标验收（active goal 在每回合收尾时由独立验收者判定）。
-import { getActiveGoal, buildGoalEvaluatorSpec, recordVerdict, GOAL_MAX_NOT_MET_STREAK } from "./session-goals.ts"
+import { getActiveGoal, buildGoalEvaluatorSpec, parseGoalEvaluatorOutput, recordVerdict, GOAL_MAX_NOT_MET_STREAK } from "./session-goals.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
@@ -41,6 +41,9 @@ import { buildFailoverInjection, buildContinuationDirective, type OrphanToolUse 
 // REQ-D2（2026-09-22）：回合收尾投递待投的 steer（空队列＝零动作，无 steer 的回合逐位等价）。
 // 方向与既有 maybeCompactSession 同款（本档 → messages-gw 家族），不新增环。
 import { flushPendingSteers } from "./steer-gw.ts"
+
+/** Stop hook loop guard：session state → 已触发 hook 的 turnGen。 */
+const stopHookTurnGen = new WeakMap<object, number>()
 
 // TODO(来自 events-translate.ts): eventSessionId(index.ts 2715)/handleToolPartUpdate(index.ts 3309)
 //   —— W7 并行在建 events-translate.ts，建成后改真 import。
@@ -156,22 +159,11 @@ async function recentTranscriptTail(opencodeSessionId: string): Promise<string> 
   return text.length > GOAL_EVAL_TRANSCRIPT_MAX_CHARS ? text.slice(-GOAL_EVAL_TRANSCRIPT_MAX_CHARS) : text
 }
 
-/** 从验收者输出里取严格 JSON；容忍代码围栏与前后噪音。 */
-function parseGoalVerdict(text: string): { verdict: "met" | "not_met"; reason: string } | null {
-  const raw = typeof text === "string" ? text : ""
-  const start = raw.indexOf("{")
-  const end = raw.lastIndexOf("}")
-  if (start < 0 || end <= start) return null
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>
-    const verdict = parsed.verdict
-    if (verdict !== "met" && verdict !== "not_met") return null
-    const reason = typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "验收者未给出理由"
-    return { verdict, reason }
-  } catch {
-    return null
-  }
-}
+/** 从验收者输出里取判定：JSON 优先，其次 critic 的末行 VERDICT（P1-2）。 */
+const parseGoalVerdict = parseGoalEvaluatorOutput
+
+/** 与 buildGoalEvaluatorSpec 的 label 一致；用于判断验收 run 是否还活着。 */
+const GOAL_EVALUATOR_LABEL = "目标验收"
 
 /** not_met 的一次性 nudge：走既有 prompt_async 通道注入，并给用户一行可见说明。 */
 async function injectGoalNudge(state: SessionState, reason: string): Promise<void> {
@@ -220,7 +212,7 @@ export async function deliverGoalNudge(state: SessionState, reason: string): Pro
  * session.idle 收盘挂点（fire-and-forget，永不影响 turn.done）。
  * 判据：有 active goal；无 pending question；本轮尚未验收过。
  */
-function maybeRunGoalAcceptance(state: SessionState): void {
+export function maybeRunGoalAcceptance(state: SessionState): void {
   try {
     if (!state?.sessionId || !state.opencodeSessionId) return
     if (state.pendingQuestions.size > 0) return
@@ -240,6 +232,16 @@ function maybeRunGoalAcceptance(state: SessionState): void {
     }
     const turnGen = state.turnGen ?? 0
     const prev = goalEvalBySession.get(state.sessionId)
+    if (prev && prev.goalId === goal.id) {
+      // P1-1：验收 run 可能被硬停（stopSubagentRun 不走 finishRun，onTerminal 永不回调），
+      // 旧版 inFlight 会永久为 true、目标从此不再验收。若注册表里已找不到该验收 run，
+      // 说明它已停止/异常收尾——清 inFlight 并放开「本回合已验收」闸，下一 idle 重新验收。
+      // 次数约束仍由持久化的 not_met_streak（GOAL_MAX_NOT_MET_STREAK）负责。
+      if (prev.inFlight && !findRunningRun(state.sessionId, GOAL_EVALUATOR_LABEL)) {
+        prev.inFlight = false
+        prev.lastTurnGen = -1
+      }
+    }
     if (prev && prev.goalId === goal.id && (prev.inFlight || prev.lastTurnGen === turnGen || prev.stopped)) return
     const record = { goalId: goal.id, lastTurnGen: turnGen, inFlight: true, notMet: prev?.goalId === goal.id ? prev.notMet : 0, stopped: false }
     goalEvalBySession.set(state.sessionId, record)
@@ -977,18 +979,39 @@ export function handleOpencodeEvent(event: any): void {
         void maybeCompactSession(state)
         // CC 2.1.302 Stop hook：turn.done 已发（上方 emitTurnDone），此处仅
         // fire-and-forget。runHooksWithBudget 永不 throw，超时/无配置都不影响收盘。
-        void runHooksWithBudget(
-          "Stop",
-          {
-            hook_event_name: "Stop",
-            session_id: state.sessionId,
-            stop_hook_active: false,
-            cwd: process.cwd(),
-          },
-          { timeoutMs: 60_000 },
-        ).catch((e) => {
-          console.warn(`[gateway] hooks Stop failed session=${state.sessionId}: ${e instanceof Error ? e.message : String(e)}`)
-        })
+        // loop guard：同一 turnGen 只触发一次，避免 Stop hook 的 block/continuation
+        // 造成无限收盘循环。blocked 不得静默：落日志 + turn.status 让前端可见。
+        {
+          const alreadyRan = stopHookTurnGen.get(state) === state.turnGen
+          stopHookTurnGen.set(state, state.turnGen)
+          if (!alreadyRan) {
+            void runHooksWithBudget(
+              "Stop",
+              {
+                hook_event_name: "Stop",
+                session_id: state.sessionId,
+                stop_hook_active: false,
+                cwd: process.cwd(),
+              },
+              { timeoutMs: 60_000 },
+            ).then((result) => {
+              if (result.errors.length > 0) {
+                console.warn(`[gateway] hooks Stop errors session=${state.sessionId}: ${result.errors.join(" | ")}`)
+              }
+              if (result.blocked) {
+                const reason = result.reason ?? "Stop hook blocked"
+                console.warn(`[gateway] Stop hook blocked session=${state.sessionId} reason=${reason.slice(0, 500)}`)
+                try {
+                  emitToSession(state, "turn.status", { text: `收盘 hook 报告阻塞：${reason.slice(0, 500)}` })
+                } catch {
+                  /* SSE 不可达不改变 hook 已报告阻塞的事实 */
+                }
+              }
+            }).catch((e) => {
+              console.warn(`[gateway] hooks Stop failed session=${state.sessionId}: ${e instanceof Error ? e.message : String(e)}`)
+            })
+          }
+        }
         // REQ-D2（2026-09-22）：本回合排队中的 steer（回合执行中用户追加的指引）
         // 在此投递——空队列零动作（与改动前逐位等价）；turnAborted 时 planSteerFlush
         // 全数作废（停止优先），不投递。放在 turn.done 之后：前端先看到本回合收尾，

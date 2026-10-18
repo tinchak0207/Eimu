@@ -3,11 +3,8 @@ import { ok, fail } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
-// 网关新追加的只增栏位（照 §3.2 C1）：存在才透传，缺省不出现在回执里，
-// 既有栏位语义一律不动。
-// R4（2026-10-14）：以 handleSubagentStatus 运行中分支**实际构造的键**为准逐行核对补全
-// （gateway subagent.ts 的 `for (const run of byChildOc.values())` 分支）——新增
-// child_path/parent_subagent_id/resumed_from/last_tool/pending_parent_messages/notes_count/pending_questions。
+// 网关运行中快照（renderLiveRunSnapshot）**实际构造的键**——逐行对齐（P3 2026-10-18：
+// 旧表含运行中不存在的 usage/artifact_path，且漏了 note，导致真实栏位被丢弃或虚构栏位出现）。
 const LIVE_FIELDS = [
   "phase",
   "child_path",
@@ -16,10 +13,10 @@ const LIVE_FIELDS = [
   "tools",
   "last_tool",
   "text_tail",
+  "note",
   "artifacts",
   "silent_ms",
   "transcript_path",
-  "artifact_path",
   "model",
   "attempt",
   "resumable",
@@ -35,8 +32,10 @@ const LIVE_FIELDS = [
   "fork",
   "effort",
   "variant_applied",
-  "usage",
 ] as const
+
+// 终态记录（done / 过期产物）额外带的键：终态才有 usage 与 artifact_path。
+const TERMINAL_FIELDS = [...LIVE_FIELDS, "usage", "artifact_path"] as const
 
 // 终态成败映射——**真源＝gateway types-gateway.ts 的 TASK_STATUS_SEMANTICS**（2026-10-14 逐值核对，
 // 该表 `isFailure` 字段是唯一判据）：
@@ -124,19 +123,21 @@ export default tool({
       if (data.done === true) {
         const status = typeof data.status === "string" && data.status ? data.status : "ok"
         const artifacts = Array.isArray(data.artifacts) ? data.artifacts : undefined
-        const live = pickLive(data, LIVE_FIELDS, ["artifacts"])
+        const live = pickLive(data, TERMINAL_FIELDS, ["artifacts"])
         const gatewayNote = typeof data.note === "string" && data.note ? data.note : undefined
         // 非失败终态（TASK_STATUS_SEMANTICS.isFailure=false）：ok / stopped / interrupted。
         if (STATUS_IS_FAILURE[status] !== true) {
           const note =
             status === "stopped"
-              ? "已停止（非失败）：成果按停时快照保留；若仍在接续窗口内，可用 subagent_message 追加指令续跑，不必重新派遣。"
+              // P3（2026-10-18）：人工停止的 run **不可续跑**（gateway resumeTerminalRun 对 stopped
+              // 回 agent_cancelled）。旧文案说「若仍在接续窗口内可续跑」，与网关实际行为矛盾。
+              ? "已停止（非失败）：成果按停时快照保留。人工停止的 run 不能续跑（续跑会被拒为 agent_cancelled）；要继续这项工作请重新派遣。"
               : status === "interrupted"
                 ? "已中断（非终态）：可用 subagent_message 追加指令让它继续，或等它自行收尾。"
                 : gatewayNote
           const title =
             status === "stopped"
-              ? "子代理已停止（非失败，可续跑）"
+              ? "子代理已停止（非失败，不可续跑）"
               : status === "interrupted"
                 ? "子代理已中断（非终态，可继续）"
                 : "子代理已完成"
@@ -179,7 +180,7 @@ export default tool({
           artifact_path: data.artifact_path,
           ...(data.artifact_bytes !== undefined ? { artifact_bytes: data.artifact_bytes } : {}),
           ...(data.artifact_mtime !== undefined ? { artifact_mtime: data.artifact_mtime } : {}),
-          ...pickLive(data, LIVE_FIELDS, ["artifacts", "artifact_path"]),
+          ...pickLive(data, TERMINAL_FIELDS, ["artifacts", "artifact_path"]),
         }
         const note = typeof data.note === "string" && data.note ? data.note : "run 记录已过期但产物已落盘：直接 read 该路径验收，勿重派。"
         if (STATUS_IS_FAILURE[expStatus] === true) {

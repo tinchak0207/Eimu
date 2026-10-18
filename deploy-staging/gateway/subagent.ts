@@ -25,7 +25,7 @@
  */
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 权威闸——spec 注入隔离＋expert 路由＋sync 资格。
 // 量级瘦身 A：spec 模板机器注入（playbook 2.0 起模板不进 orchestrator 上下文）。
 import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, isPlanOnlyNoGenerationIntent, type JevDispatchGuards } from "./jev-gate"
@@ -108,6 +108,7 @@ import {
   normalizeEffort,
   effortVariant,
   stripAuthorizationSection,
+  shouldRetryWithoutVariant,
   computeSubagentUsage,
   runMessageWindow,
   messagesInWindow,
@@ -192,6 +193,29 @@ export const SUBAGENT_SUMMARY_MAX_CHARS = 4000
 const SUBAGENT_OUTPUT_REL = "outputs/subagent"
 const SUBAGENT_OUTPUT_DIR = "/opt/agent-harness/workspace/outputs/subagent"
 const SUBAGENT_CHECKPOINTS_DIR = join(SUBAGENT_OUTPUT_DIR, "checkpoints")
+// P0（2026-10-18 路径穿越修复）：from_checkpoint_run_id / from_checkpoint_id 会被拼进
+// `join(checkpointsDir, "<runId>-<cpId>.json")`。此前只 trim、不校验 ⇒ `x/../../..` 可
+// 逃出 checkpoints 目录读取任意 .json。现在两者都必须匹配白名单，且 resolve 后仍须落在
+// checkpoints 目录内（双闸：字符白名单 + 路径包含）。
+const CHECKPOINT_TOKEN_RE = /^[A-Za-z0-9_-]{1,64}$/
+
+/** 纯函数：检查点 id／run id 的 token 校验。未提供回 undefined；非法回 null。 */
+export function safeCheckpointToken(raw: unknown): string | undefined | null {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== "string") return null
+  const value = raw.trim()
+  if (!value) return undefined
+  return CHECKPOINT_TOKEN_RE.test(value) ? value : null
+}
+
+/** 纯函数：在 checkpoints 目录内解析检查点档路径；任何逃逸（resolve 后不在目录内）回 null。 */
+export function resolveCheckpointFile(dir: string, runId: string, checkpointId: string): string | null {
+  if (!CHECKPOINT_TOKEN_RE.test(runId) || !CHECKPOINT_TOKEN_RE.test(checkpointId)) return null
+  const root = resolve(dir)
+  const target = resolve(root, `${runId}-${checkpointId}.json`)
+  if (!target.startsWith(root + sep)) return null
+  return target
+}
 const PERSIST_TAIL = "[gateway 落盘: 完整结果未截断]"
 const COMPLETED_TTL_MS = 10 * 60 * 1000 // status 轮询窗口，过期即弃
 export const SUBAGENT_BUSY_MESSAGE = "已有 3 个子代理在跑，等一个完成再派"
@@ -349,10 +373,12 @@ export interface SubagentCheckpoint {
 
 export interface SubagentSuspension {
   reason: string
+  // P3（2026-10-18 死码清理）：`poll_url`/`task_id` 此前只被保存、从不轮询，`poll_task` 与
+  // `timer` 行为完全相同 ⇒ 删除这两个字段，类型收敛为真正生效的两态：
+  //   timer  ＝到期自动恢复（armSuspensionTimer，失败自动重臂）；
+  //   manual ＝不自动恢复，等 subagent_resume（此前 manual 也会被 timeout 自动唤醒＝不生效）。
   condition: {
-    type: "timer" | "poll_task" | "manual"
-    task_id?: string
-    poll_url?: string
+    type: "timer" | "manual"
     timeout_seconds?: number
   }
   checkpoint_data?: Record<string, unknown>
@@ -655,7 +681,7 @@ const sessionScratchpads = new Map<string, Map<string, ScratchpadEntry>>()
 // 父会话 id → 具型产物注册表（Workspace Registry）
 const sessionArtifactRegistries = new Map<string, Map<string, TypedArtifact>>()
 // 父会话 id → 排队等待并发槽恢复的挂起子代理队列
-const pendingResumeQueue = new Map<string, Array<{ run: SubagentRun; payload: unknown; triggerSource: string; resumeText?: string }>>()
+const pendingResumeQueue = new Map<string, Array<{ run: SubagentRun; payload: unknown; triggerSource: string; resumeText?: string; questionId?: string }>>()
 
 // ── 刀 2（2026-09-15）：machine critic pass 状态 ─────────────────────────────────
 // 待审交付：父 gateway session id → 本窗口内已终态的 Expert 交付（尚未送审）。
@@ -762,6 +788,31 @@ function unknownSessionResponse(sid: string): Response {
   )
 }
 
+/**
+ * P2（2026-10-18 同级越权修复）：`subagent_message/stop/resume/suspend` 只允许两种调用方：
+ *   ① 主会话/orchestrator（`sid` 不在 byChildOc 里）——可控制本会话全部子代理；
+ *   ② 子代理自身（`sid` 是它的 opencode 会话 id）——只允许控制**它自己派出的子 run**
+ *      （`parentSubagentId` 或 `forkRequesterRunId` 指向它）。
+ * 其余一律 403 `sibling_forbidden`：旧实现让任一子代理凭真实会话 id 操作兄弟 run，等于没有隔离。
+ * 诚实边界：这是应用层归属闸，不是 per-session 令牌（见 S4 注释的平台级缺口）。
+ */
+function callerCanControlRun(sid: string, target: { parentSubagentId?: string; forkRequesterRunId?: string }): boolean {
+  const caller = byChildOc.get(sid)
+  if (!caller) return true // 主会话/orchestrator
+  return target.parentSubagentId === caller.id || target.forkRequesterRunId === caller.id
+}
+
+function siblingForbiddenResponse(): Response {
+  return Response.json(
+    {
+      ok: false,
+      code: "sibling_forbidden",
+      error: "子代理默认不能操作兄弟子代理（同级越权）：只能控制自己派出的子 run；需要停止/续跑兄弟请回报 orchestrator，由主会话处理。",
+    },
+    { status: 403 },
+  )
+}
+
 // ── 0920 暴君裁定：子代理停止闸（此前「一出就刹不住车」）─────────────────────
 // 病灶（三处结构性缺失，全在本次修复）：
 //   ① 用户终止按钮打 /agent/v1/sessions/:id/abort → 只杀**主会话**在途 turn，
@@ -824,7 +875,7 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   checkPendingResumeQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id)
-  const stoppedResult = { status: "stopped" as TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, ...(droppedQueued > 0 ? { dropped_queued_messages: droppedQueued } : {}) }
+  const stoppedResult = { status: "stopped" as TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId, stopped_by: by, stoppedAt: run.stoppedAt, ...(droppedQueued > 0 ? { dropped_queued_messages: droppedQueued } : {}) }
   saveDurableSubagentRun(run, stoppedResult)
   completed.set(run.id, stoppedResult)
   // WP2（2026-10-14）：终态落点——叫醒 /internal/subagent/status 上该 run 的长挂起 waiter。
@@ -872,6 +923,9 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
 function stopSubagentRunSoft(run: SubagentRun, by: "user" | "orchestrator", reason: string): boolean {
   if (run.status !== "running" && run.status !== "interrupted" && run.status !== "suspended") return false
   if (run.stopped) return false
+  // P2（2026-10-18）：连续 soft stop 会覆盖 run.softStopping 而旧 grace timer 仍活着
+  // ⇒ 旧 timer 到点用旧闭包把 run 硬停（计时器泄漏 + 语义错乱）。覆盖前先撤旧 timer。
+  if (run.softStopping?.timer) clearTimeout(run.softStopping.timer)
   if (run.suspension?.timer) {
     clearTimeout(run.suspension.timer)
     run.suspension.timer = undefined
@@ -909,7 +963,8 @@ function stopSubagentRunSoft(run: SubagentRun, by: "user" | "orchestrator", reas
     if (!cur || run.status === "stopped" || completed.has(run.id)) return
     console.warn(`[gateway] subagent soft stop grace expired (${Math.round(SUBAGENT_SOFT_STOP_GRACE_MS / 1000)}s): id=${run.id} label="${run.label}" — 落 partial 后按 stopped 收尾`)
     run.status = "running" // 交回硬停路径的状态前置（其守卫要求 running）
-    stopSubagentRun(run, by, `${text}（收尾超时，已按部分结果结束）`, "hard")
+    // `by` 用本次 soft stop 的真实发起者（不是硬编码 "orchestrator"）。
+    stopSubagentRun(run, cur.by, `${text}（收尾超时，已按部分结果结束）`, "hard")
   }, SUBAGENT_SOFT_STOP_GRACE_MS)
   unrefTimer(run.softStopping.timer)
   console.log(`[gateway] subagent soft stop requested: id=${run.id} label="${run.label}" by=${by} parent=${run.parentGatewaySessionId} reason=${text}`)
@@ -921,7 +976,9 @@ function stopSubagentRunSoft(run: SubagentRun, by: "user" | "orchestrator", reas
  *  计数只算真停到的（靠 stopSubagentRun 的布尔返回），不再出现「stopped:0 却列了该 run」的不诚实回执。 */
 export function stopSubagentsForParent(parentGatewaySessionId: string, by: "user" | "orchestrator", reason = ""): number {
   const list = byParent.get(parentGatewaySessionId) ?? []
-  const running = list.filter((r) => (r.status === "running" || r.status === "interrupted") && !r.stopped)
+  // P1（2026-10-18）：stop-all 必须包含 suspended——挂起只是让出并发槽，run 仍在注册表里，
+  // 用户按停止就是要它停；漏掉会让「已停止」的回执与实况不符。
+  const running = list.filter((r) => (r.status === "running" || r.status === "interrupted" || r.status === "suspended") && !r.stopped)
   let stopped = 0
   for (const r of running) if (stopSubagentRun(r, by, reason)) stopped += 1
   return stopped
@@ -930,7 +987,7 @@ export function stopSubagentsForParent(parentGatewaySessionId: string, by: "user
 /** X4（2026-10-14）：按 id／label 前缀找**任意在途**（running／interrupted／suspended）run——软停、
  *  挂起与非终态可寻址需要它；`findRunningRun` 只认 running（既有语义不动，保持兼容）。 */
 function findLiveRun(parentGatewaySessionId: string, idOrLabel: string): SubagentRun | undefined {
-  const list = (byParent.get(parentGatewaySessionId) ?? []).filter(
+    const list = (byParent.get(parentGatewaySessionId) ?? []).filter(
     (r) => (r.status === "running" || r.status === "interrupted" || r.status === "suspended") && !r.stopped,
   )
   const exact = list.find((r) => r.id === idOrLabel)
@@ -1495,7 +1552,8 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       // D7：fork 的完成/失败结果回到**发起 fork 的子代理会话**（requester），不是主会话。
       // 走既有 deliverChildTurn（与 dispatchAttempt 同一条 prompt_async 轮廓），不新造通路。
       const requester = run.forkRequesterRunId ? findRunById(run.forkRequesterRunId) : undefined
-      if (requester && !requester.stopped && isOpenCodeSessionId(requester.opencodeSessionId)) {
+      const route = forkResultDeliveryTarget(requester)
+      if (route === "requester" && requester && byChildOc.get(requester.opencodeSessionId) === requester) {
         const label = userFacingSubagentLabel(run.label)
         const content =
           `【fork 完成·系统自动唤醒】你发起的 fork「${label}」（${run.id.slice(0, 8)}）已结束：status=${status}。\n\n` +
@@ -1505,9 +1563,30 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
         console.log(
           `[gateway] fork result delivered to requester: fork=${run.id} requester=${requester.id} child=${requester.opencodeSessionId} status=${status}`,
         )
+      } else if (typeof deps!.wakeParent === "function") {
+        // P1（2026-10-18）：requester 已终态/已停止/会话已回收——结果不得静默投进无人消费的
+        // 旧会话（prompt_async 会起一轮没人收的 turn，且父会话永远等不到结果）。回落主会话并
+        // 记录事实，主会话据此决定是否重派或继续。
+        const label = userFacingSubagentLabel(run.label)
+        try {
+          deps!.wakeParent(state, {
+            id: run.id,
+            label: run.label,
+            status,
+            summary:
+              `【fork 结果回落】发起这条 fork 的子代理已结束或不可投递（requester=${run.forkRequesterRunId ?? "-"}），结果回落到主会话。fork「${label}」（${run.id.slice(0, 8)}）status=${status}。\n\n${visibleSummary}`,
+            error,
+            artifacts: run.artifacts,
+          })
+        } catch (e) {
+          console.error(`[gateway] fork fallback wake failed: id=${run.id}`, e)
+        }
+        console.warn(
+          `[gateway] fork result fell back to parent session (requester not live): fork=${run.id} requester=${run.forkRequesterRunId ?? "-"} requester_found=${requester ? requester.status : "gone"} status=${status}`,
+        )
       } else {
         console.warn(
-          `[gateway] fork result not delivered (requester gone/stopped): fork=${run.id} requester=${run.forkRequesterRunId ?? "-"} status=${status}`,
+          `[gateway] fork result not delivered (requester gone/stopped, no wakeParent): fork=${run.id} requester=${run.forkRequesterRunId ?? "-"} status=${status}`,
         )
       }
     } else if (run.asyncMode === true && run.machineCriticPass === true) {
@@ -2365,17 +2444,26 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   try {
     const variant = typeof body.variant === "string" ? body.variant : undefined
     let res = await postPrompt(body)
-    if (!res.ok && variant) {
+    // 2026-10-18 P1：只有「明确的 variant 不支持」才允许去掉 variant 重投。
+    // 401/402/429/5xx/超时绝不重投——重投＝重复付费/重复执行，且这些状态与
+    // variant 无关。400/422 是 opencode/上游对未知字段的两种标准拒绝。
+    const variantUnsupported = shouldRetryWithoutVariant(res.status)
+    if (!res.ok && variant && variantUnsupported) {
       // D2：该 agent/model 不支持 variant 时，原样重投（不带 variant），并如实把
       // variant_applied 记成 false——绝不把「带了字段」伪称成「升档生效」。
       delete body.variant
       run.variantApplied = false
       console.warn(
-        `[gateway] subagent variant unsupported (agent=${run.agent ?? "-"} variant=${variant} status=${res.status}) — retrying without variant: id=${run.id}`,
+        `[gateway] subagent variant unsupported (agent=${run.agent ?? "-"} variant=${variant} status=${res.status}) — retrying without variant once: id=${run.id}`,
       )
       res = await postPrompt(body)
     } else if (res.ok && variant) {
       run.variantApplied = true
+    } else if (!res.ok && variant) {
+      // 非 variant 类错误：不重投，按原状态失败，避免重复付费。
+      console.warn(
+        `[gateway] subagent variant request failed with status=${res.status}; not retrying to avoid duplicate billing: id=${run.id}`,
+      )
     }
     if (!res.ok) throw new Error(`prompt_async status ${res.status}`)
   } catch (e) {
@@ -3045,13 +3133,12 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     expert?: string
     from_checkpoint_run_id?: string
     from_checkpoint_id?: string
-    // CC 2.1.302 移植：fork / model / effort / name / isolation。
+    // CC 2.1.302 移植：fork / model / effort / name（isolation 从未生效，已删除）。
     fork?: boolean
     subagent_type?: string
     model?: string
     effort?: string
     name?: string
-    isolation?: string
   }
   const label = typeof body.label === "string" ? body.label.trim() : ""
   // `fork:true` 与 `subagent_type:"fork"` 等价（照 CC Agent schema 的 subagent_type）。
@@ -3097,16 +3184,6 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         { status: 409 },
       )
     }
-    if (body.isolation === "remote") {
-      return Response.json(
-        {
-          ok: false,
-          code: "fork_remote_isolation",
-          error: 'Fork cannot use isolation: "remote" — a remote session cannot inherit the conversation context. Omit isolation, or spawn a named agent type for remote work.',
-        },
-        { status: 409 },
-      )
-    }
   }
   if (requesterRun) {
     const depth = agentNestingDepth(requesterRun.childPath)
@@ -3139,31 +3216,13 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   if (nameCheck.ok !== true) {
     return Response.json({ ok: false, code: "invalid_name", error: nameCheck.error }, { status: 400 })
   }
-  let requestedName = nameCheck.name ?? (isFork ? forkNameFromLabel(label) : undefined)
-  if (requestedName) {
-    // D9：同名**未结束**拒绝重派（running／interrupted 非终态／suspended 都算未结束；
-    // 已 stopped 的不占名）。终态重名可复用，查询时按 finishedAt 取最新。
-    const isUnfinished = (r: SubagentRun): boolean => !r.stopped && (r.status === "running" || r.status === "interrupted" || r.status === "suspended")
-    const activeNames = new Set((byParent.get(parent.sessionId) ?? []).filter(isUnfinished).map((r) => r.name))
-    if (activeNames.has(requestedName)) {
-      // fork 的自动名（label 派生）照 aYt 的 allocateName：自动加序号，不让并发 fork 因撞名失败。
-      if (isFork && nameCheck.name === undefined) {
-        const base = requestedName
-        for (let i = 2; i <= 99; i++) {
-          const candidate = `${base}-${i}`.slice(0, 64)
-          if (!activeNames.has(candidate)) {
-            requestedName = candidate
-            break
-          }
-        }
-      }
-      if (activeNames.has(requestedName)) {
-        return Response.json(
-          { ok: false, code: "name_taken", error: `name「${requestedName}」已被本会话一个**尚未结束**的子代理占用；换一个名字或等它结束后再用。` },
-          { status: 409 },
-        )
-      }
-    }
+  // P2（2026-10-18）：自动名同样必须过 validateSubagentName——label「latest/main/team lead」
+  // 派生出的 `latest`/`main`/`team-lead` 是保留名，旧实现直接放行＝绕过保留名。不合法回退 "fork"。
+  const autoForkName = nameCheck.name === undefined && isFork
+  let requestedName = nameCheck.name
+  if (autoForkName) {
+    const derived = validateSubagentName(forkNameFromLabel(label))
+    requestedName = derived.ok && derived.name ? derived.name : "fork"
   }
   // CC 2.1.302 后台默认（m0626 @5633 的 yo 公式）：agents run in the background by default。
   // 只有显式 async:false（且 Jev 判「下一步必须依赖结果」的快速事实查询）才同步；fork 恒后台
@@ -3372,9 +3431,22 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     console.log(`[gateway] jev_gate: REWORK_LOCK injected label="${label}" original=${prior?.relPath || "-"}`)
   }
 
-  // 支柱二（检查点增量断点接管）：若指定了 from_checkpoint_run_id，查出前序检查点并结构化注入任务书
-  const fromCpRunId = typeof body.from_checkpoint_run_id === "string" ? body.from_checkpoint_run_id.trim() : ""
-  const fromCpId = typeof body.from_checkpoint_id === "string" ? body.from_checkpoint_id.trim() : ""
+  // 支柱二（检查点增量断点接管）：若指定了 from_checkpoint_run_id，查出前序检查点并结构化注入任务书。
+  // P0（2026-10-18）：两个 token 都会拼进档名——先过白名单，非法一律 400（实测 `x/../../..` 被拒）。
+  const fromCpRunIdRaw = safeCheckpointToken(body.from_checkpoint_run_id)
+  const fromCpIdRaw = safeCheckpointToken(body.from_checkpoint_id)
+  if (fromCpRunIdRaw === null || fromCpIdRaw === null) {
+    return Response.json(
+      {
+        ok: false,
+        code: "invalid_checkpoint_id",
+        error: "from_checkpoint_run_id / from_checkpoint_id 只接受 1-64 位字母、数字、下划线、连字符（路径分隔符与 .. 一律拒绝）。",
+      },
+      { status: 400 },
+    )
+  }
+  const fromCpRunId = fromCpRunIdRaw ?? ""
+  const fromCpId = fromCpIdRaw ?? ""
   let inheritedCp: SubagentCheckpoint | undefined
   if (fromCpRunId && !isFork) {
     const liveRun = (byParent.get(parent.sessionId) ?? []).find((r) => r.id === fromCpRunId)
@@ -3398,9 +3470,11 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
           const files = readdirSync(SUBAGENT_CHECKPOINTS_DIR).filter((f) => f.startsWith(`${fromCpRunId}-`) && f.endsWith(".json"))
           if (files.length > 0) {
             files.sort()
+            // P0：目标档路径必须由受校验 token 构造，且 resolve 后仍在 checkpoints 目录内。
             const targetFile = fromCpId ? `${fromCpRunId}-${fromCpId}.json` : files[files.length - 1]
-            const targetPath = join(SUBAGENT_CHECKPOINTS_DIR, targetFile)
-            if (existsSync(targetPath)) {
+            const fallbackId = fromCpId || targetFile.slice(fromCpRunId.length + 1, -".json".length)
+            const targetPath = resolveCheckpointFile(SUBAGENT_CHECKPOINTS_DIR, fromCpRunId, fallbackId)
+            if (targetPath && existsSync(targetPath)) {
               inheritedCp = JSON.parse(readFileSync(targetPath, "utf8")) as SubagentCheckpoint
             }
           }
@@ -3472,6 +3546,34 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     chain = [parsed, ...chain.filter((m) => m.providerID !== parsed.providerID || m.modelID !== parsed.modelID)]
   }
 
+  // P2（2026-10-18 并发同名原子占位）：名字检查与占位必须与 `targetList.push(run)` 处在**同一段
+  // 同步代码**里——此前检查发生在多个 await（Jev 分类/路由/模板）之前，两个并发 dispatch 能
+  // 同时通过检查、各自推出同名 run。这里在 push 前紧邻检查（中间无 await），单线程下即原子。
+  if (requestedName) {
+    const isUnfinished = (r: SubagentRun): boolean => !r.stopped && (r.status === "running" || r.status === "interrupted" || r.status === "suspended")
+    // 重新读取当前数组（并发 dispatch 可能已把 byParent 换成新数组）；检查与 push 之间无 await。
+    const currentList = byParent.get(parent.sessionId) ?? list
+    const activeNames = new Set(currentList.filter(isUnfinished).map((r) => r.name))
+    if (activeNames.has(requestedName)) {
+      // fork 的自动名（label 派生）照 aYt 的 allocateName：自动加序号，不让并发 fork 因撞名失败。
+      if (autoForkName) {
+        const base = requestedName
+        for (let i = 2; i <= 99; i++) {
+          const candidate = `${base}-${i}`.slice(0, 64)
+          if (!activeNames.has(candidate)) {
+            requestedName = candidate
+            break
+          }
+        }
+      }
+      if (activeNames.has(requestedName)) {
+        return Response.json(
+          { ok: false, code: "name_taken", error: `name「${requestedName}」已被本会话一个**尚未结束**的子代理占用；换一个名字或等它结束后再用。` },
+          { status: 409 },
+        )
+      }
+    }
+  }
   const runId = crypto.randomUUID()
   const run: SubagentRun = {
     id: runId,
@@ -3524,8 +3626,9 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     lastCheckpoint: inheritedCp,
     fromCheckpoint: inheritedCp ? { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } : undefined,
   }
-  list.push(run)
-  byParent.set(parent.sessionId, list)
+  const targetList = byParent.get(parent.sessionId) ?? list
+  targetList.push(run)
+  byParent.set(parent.sessionId, targetList)
   // run 建立成功（已入注册表、可被事件/状态查询看见）→ SubagentStart。
   fireSubagentHook("SubagentStart", run, { async_mode: asyncMode === true })
   // 2026-10-11 修画布：music／video-director 派遣即标影音意图；编剧／剪辑在父会话已标或 prompt 命中时补标。
@@ -3666,6 +3769,25 @@ function recentRunsForParent(
   }
   for (const [id, rec] of completed) {
     if (rec.parent === parentKey) out.push({ id, label: rec.label ?? "", status: rec.status, running: false, at: rec.finishedAt })
+  }
+  // P1（2026-10-18）：completed 只有 10 分钟 TTL，durable 行是持久真源——`latest` 与查询
+  // 不能因 TTL 到期就 404。此处纳入 durable 行（TTL 只影响内存终态展示，不影响查询）。
+  // 归属按 parentGatewaySessionId；同 id 以内存记录优先。
+  try {
+    const seen = new Set(out.map((r) => r.id))
+    for (const row of durableSubagentRuns()) {
+      if (!row || row.parentGatewaySessionId !== parentKey || seen.has(row.id)) continue
+      out.push({
+        id: row.id,
+        label: row.result?.label ?? row.label ?? "",
+        status: row.result?.status ?? row.status,
+        running: false,
+        at: row.result?.finishedAt ?? row.updated_at ?? 0,
+      })
+      seen.add(row.id)
+    }
+  } catch {
+    /* durable 层异常不阻断内存视图 */
   }
   return out
     .sort((a, b) => b.at - a.at)
@@ -3862,6 +3984,8 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
     return Response.json({
       ok: true,
       done: true,
+      // D4：回带实际命中的 run id——`latest`／label 解析后的终态查询必须让呼叫端知道落到哪一条。
+      subagent_id: wantId,
       status: done.status,
       summary: done.summary,
       label: done.label,
@@ -3935,12 +4059,27 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       cands.push({ runId: id, label: rec.label ?? "", status: rec.status, running: false, resumable: resumable.has(id) })
     }
   }
+  // P1（2026-10-18）：label/name 查询也纳入 durable 行——completed TTL 到期后，按 label
+  // 前缀仍应查得到（TTL 只影响内存终态展示，不影响查询）。同 id 去重，归属严格匹配。
+  try {
+    const seen = new Set(cands.map((c) => c.runId))
+    for (const row of durableSubagentRuns()) {
+      if (!row || row.parentGatewaySessionId !== parentKey || row.id === wantId || seen.has(row.id)) continue
+      const rowLabel = row.result?.label ?? row.label ?? ""
+      const rowName = row.result?.name
+      if (!(rowName && rowName.startsWith(wantId)) && !rowLabel.startsWith(wantId)) continue
+      cands.push({ runId: row.id, label: rowLabel, status: row.result?.status ?? row.status, running: false, resumable: false })
+      seen.add(row.id)
+    }
+  } catch {
+    /* durable 层异常不阻断内存候选 */
+  }
   if (cands.length === 1) {
     const c = cands[0]
     // F12（P2·失败丢死因与产物修复）：单候选若为终态，必须带 summary/error/artifacts/partial/reason
     // ——与 done 分支同形状。否则工具层失败渲染只剩「子代理失败」四字，与「失败先读成品再决定重派」
     // 的立场矛盾（orchestrator 会误判零产物而重派＝重复付费生成）。运行中候选不加这些（无终态事实）。
-    const rec = c.running ? undefined : completed.get(c.runId)
+    const rec = c.running ? undefined : completed.get(c.runId) ?? durableSubagentRun(c.runId)?.result
     return Response.json({
       ok: true,
       done: !c.running,
@@ -4042,29 +4181,30 @@ export async function handleSubagentStop(req: Request): Promise<Response> {
   if (!parent) return unknownSessionResponse(sid)
   const parentKey = parent.sessionId
   if (targetId && body.all !== true) {
-    // 显式 mode 时也要能在途寻址（含非终态 interrupted 的 run），否则软停打不到收尾中的 run。
-    const run = mode ? findLiveRun(parentKey, targetId) : findRunningRun(parentKey, targetId)
+    // P1（2026-10-18）：定向 stop 一律用 findLiveRun（running／interrupted／suspended 都可寻址）。
+    // 旧实现无 mode 时只认 running，对 interrupted/suspended 回 404 not_found——用户看到「找不到」
+    // 却明明还有这一路，且无法停止。现在两种状态都能被真停；终态统一回 not_cancelable。
+    const run = findLiveRun(parentKey, targetId)
     if (!run) {
-      if (mode) {
-        const terminal = findTerminalRecord(parentKey, targetId)
-        if (terminal) {
-          return Response.json(
-            {
-              ok: false,
-              code: "not_cancelable",
-              error: `「${terminal.label ?? ""}」已经结束（${terminal.status}），没有在跑的回合可取消。取消是尽力而为：已终态的 run 不会被改写。`,
-              status: terminal.status,
-              ...(terminal.resumable ? { resumable: true, note: "仍在接续窗口内：可用 subagent_message 续跑，不需要重新派工。" } : {}),
-            },
-            { status: 409 },
-          )
-        }
+      const terminal = findTerminalRecord(parentKey, targetId)
+      if (terminal) {
+        return Response.json(
+          {
+            ok: false,
+            code: "not_cancelable",
+            error: `「${terminal.label ?? ""}」已经结束（${terminal.status}），没有在跑的回合可取消。取消是尽力而为：已终态的 run 不会被改写。`,
+            status: terminal.status,
+            ...(terminal.resumable ? { resumable: true, note: "仍在接续窗口内：可用 subagent_message 续跑，不需要重新派工。" } : {}),
+          },
+          { status: 409 },
+        )
       }
       return Response.json(
         { ok: false, code: "not_found", error: `找不到在跑的子代理：${targetId}`, recent_runs: recentRunsForParent(parentKey, 3) },
         { status: 404 },
       )
     }
+    if (!callerCanControlRun(sid, run)) return siblingForbiddenResponse()
     const label = run.label
     const id = run.id
     const stopped = stopSubagentRun(
@@ -4083,6 +4223,8 @@ export async function handleSubagentStop(req: Request): Promise<Response> {
     // 回带 mode 是**新栏位**（仅显式给 mode 时出现）：缺省调用逐字等价于旧响应。
     return Response.json({ ok: true, stopped: 1, subagent_ids: [id], ...(mode ? { mode } : {}) })
   }
+  // P2（2026-10-18 同级越权）：stop-all 只允许主会话/orchestrator 发起；子代理不得一键清场兄弟。
+  if (byChildOc.get(sid)) return siblingForbiddenResponse()
   // G9(a)：计数与 ids 必须如实——含非终态 interrupted 的 run，且只列**真正停掉**的（旧版 ids 在
   // 停止前就取全量、且漏掉 interrupted，会出现「stopped:0 却列了该 run」的不诚实回执）。
   // FIX-G3（T4）：`all` 分支**尊重 mode**——旧版无论传什么都按 hard 停却回 mode:"hard"，
@@ -4091,7 +4233,7 @@ export async function handleSubagentStop(req: Request): Promise<Response> {
   //   · 缺省／mode==="hard" → 走既有硬停 stopSubagentsForParent（abort+DELETE）。
   // **不传 mode 时响应键与文案逐字不变**（零回归红线 2）：仍为 {ok,stopped,subagent_ids}、无 mode 键。
   // 计数与 ids 如实：含非终态 interrupted 的在途 run（沿用上一轮 stopSubagentsForParent 的收纳范围）。
-  const list = (byParent.get(parentKey) ?? []).filter((r) => (r.status === "running" || r.status === "interrupted") && !r.stopped)
+  const list = (byParent.get(parentKey) ?? []).filter((r) => (r.status === "running" || r.status === "interrupted" || r.status === "suspended") && !r.stopped)
   let n: number
   if (mode === "soft") {
     const reason = "已按你的要求请全部在跑子代理收尾"
@@ -4415,6 +4557,21 @@ function findRunById(id: string): SubagentRun | undefined {
   return undefined
 }
 
+/**
+ * P1（2026-10-18）：fork 结果的投递对象判定（纯函数）。
+ * requester 只有仍在跑（running／interrupted 且未 stopped）才可接收——已终态/已停止的
+ * requester 其子会话没有 watcher，投进去＝起一轮无人消费的 turn、父会话永远等不到结果。
+ * 这种情况一律回落主会话（"main"），由 finishRun 走 wakeParent 并记录事实。
+ */
+export function forkResultDeliveryTarget(
+  requester: { stopped?: boolean; status?: string } | undefined,
+): "requester" | "main" {
+  if (!requester) return "main"
+  if (requester.stopped) return "main"
+  if (requester.status !== "running" && requester.status !== "interrupted") return "main"
+  return "requester"
+}
+
 /** G1（2026-10-14 跨会话越权修复）：本父会话是否拥有该 run id。用于 status 的磁盘产物回退闸——
  *  归属来源＝completed 记录 / resumable 索引 / durable 行，任一命中即算拥有；全查无＝不拥有
  *  （不落 artifact 分支，防止用他会话的 run id 经落盘路径越权读取）。 */
@@ -4433,7 +4590,6 @@ function findTerminalRecord(
   parentGatewaySessionId: string,
   idOrLabel: string,
 ): { id: string; label?: string; name?: string; status: string; resumable: boolean } | undefined {
-  const hit = (id: string): boolean => id === idOrLabel
   const recs: Array<{ id: string; label?: string; name?: string; status: string; resumable: boolean; at: number }> = []
   for (const [id, rec] of completed) {
     if (rec.parent !== parentGatewaySessionId) continue
@@ -4453,7 +4609,7 @@ function findTerminalRecord(
   } catch {
     /* durable 层异常不阻断终态判定（内存表已给结论） */
   }
-  const byId = recs.find(hit)
+  const byId = recs.find((r) => r.id === idOrLabel)
   if (byId) return byId
   // D9：同名终态按 finishedAt 取最新（旧实现取 Map 插入序第一条）。
   const nameMatches = recs.filter((r) => (r.name ?? "") === idOrLabel).sort((a, b) => b.at - a.at)
@@ -4526,6 +4682,10 @@ async function resumeTerminalRun(
     startedAt: Date.now(),
     status: "running",
     resumedFrom: old.id,
+    // P1（2026-10-18 同步 run resume 永无通知修复）：终态续跑由 subagent_message 发起，
+    // 发起方不再有工具在轮询；若沿用旧的 asyncMode=false，finishRun 不会 wakeParent，
+    // 结果永远送不回父会话。只要注入了唤醒出口就一律 async（finishRun 走既有唤醒链）。
+    asyncMode: typeof deps.wakeParent === "function" ? true : old.asyncMode,
     summary: undefined,
     error: undefined,
     stopped: undefined,
@@ -4672,6 +4832,18 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
   if (!parent) return unknownSessionResponse(sid)
   const parentKey = parent.sessionId
   const wantId = target === "latest" ? resolveLatestRunId(parentKey) ?? target : target
+  // P2（2026-10-18 同级越权）：子代理只能给自己的子 run 发消息；兄弟 run 一律 403。
+  // 终态目标没有内存 run 可判归属，按 durable 行（含 parentSubagentId/forkRequesterRunId）判。
+  const callerRun = byChildOc.get(sid)
+  if (callerRun) {
+    const liveForAuth = findLiveRun(parentKey, wantId)
+    if (liveForAuth) {
+      if (!callerCanControlRun(sid, liveForAuth)) return siblingForbiddenResponse()
+    } else {
+      const durableTarget = durableSubagentRun(wantId)
+      if (!durableTarget || !callerCanControlRun(sid, durableTarget)) return siblingForbiddenResponse()
+    }
+  }
 
   const live = findLiveRun(parentKey, wantId)
   if (live) {
@@ -4722,27 +4894,31 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
     // （尤其 blocking 提问的答复会永远卡在队列里、问题永不解除）。故此处立即唤醒：清挂起、
     // 取并发槽（满则入恢复队列）、把指示／答复原文投进子会话，并按 question_id 解除提问。
     if (live.status === "suspended") {
-      const woken = await autoResumeSuspendedRun(
+      // P1（2026-10-18 答复过早解除修复）：question 只在**真正投递成功**后解除。
+      // autoResume 现在回三态：resumed（已投递）/ queued（槽满入队，尚未投递）/ false。
+      // queued 时把 question_id 随队列项一起保存，等队列真正投递成功再解除（见 checkPendingResumeQueue）。
+      const hadQuestion = typeof body.question_id === "string" && body.question_id.length > 0 &&
+        (live.pendingQuestions?.some((q) => q.id === body.question_id) ?? false)
+      const outcome = await autoResumeSuspendedRun(
         live,
         kind === "question" ? "answer" : "message",
         undefined,
         childFacingFrame(text, kind),
+        body.question_id,
       )
-      if (!woken) {
-        return Response.json({ ok: false, code: "not_messageable", error: `「${live.label}」挂起态唤醒失败；指示未投递。` }, { status: 502 })
+      if (outcome === false) {
+        return Response.json({ ok: false, code: "not_messageable", error: `「${live.label}」挂起态唤醒失败；指示未投递（提问保持未答，可重投）。` }, { status: 502 })
       }
-      // G1（2026-10-14 修复）：解除提问挪到唤醒成功之后——唤醒失败回 502 时不得先行标记解除，
-      // 否则父会话以为答过了、子代理其实没收到；此刻提问保持 pending，可重投。
-      const questionResolved = resolveQuestionOnAnswer(live, body.question_id)
+      const questionResolved = outcome === "resumed" && hadQuestion && !(live.pendingQuestions?.some((q) => q.id === body.question_id) ?? false)
       return Response.json({
         ok: true,
-        delivery: live.status === "running" ? "steered" : "queued",
+        delivery: outcome === "resumed" ? "resumed" : "queued",
         subagent_id: live.id,
         submission_id: nextSubmissionId(live),
         note:
-          live.status === "running"
+          outcome === "resumed"
             ? "挂起子代理已被唤醒并获得并发槽位，指示／答复已投递（复用同一子会话与历史）。接受标识不代表已被处理。"
-            : "并发槽位已满，唤醒请求与指示／答复已入恢复队列，待槽位空出后自动投递。",
+            : "并发槽位已满，唤醒请求与指示／答复已入恢复队列；投递成功后才解除提问。",
         ...(questionResolved ? { question_resolved: true } : {}),
       })
     }
@@ -4752,6 +4928,9 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
     if (live.pendingChildMessages.length > SUBAGENT_CHILD_QUEUE_MAX) {
       live.pendingChildMessages.splice(0, live.pendingChildMessages.length - SUBAGENT_CHILD_QUEUE_MAX)
     }
+    // P1（2026-10-18）：QueueOnly 分支此前从不解除提问——答复明明已排队，父会话却一直看到
+    // pending_questions，子代理白等到超时。投递（入队）成功后按 question_id 精确解除。
+    const questionResolved = resolveQuestionOnAnswer(live, body.question_id)
     writeLiveLog(live)
     return Response.json({
       ok: true,
@@ -4759,6 +4938,7 @@ export async function handleSubagentMessage(req: Request): Promise<Response> {
       subagent_id: live.id,
       submission_id: nextSubmissionId(live),
       pending_count: live.pendingChildMessages.length,
+      ...(questionResolved ? { question_resolved: true } : {}),
       note: "已排队（不打断当前轮）：子代理这一轮结束时按序处理。接受标识不代表已被处理。",
     })
   }
@@ -5407,8 +5587,36 @@ export async function handleSubagentArtifact(req: Request): Promise<Response> {
 }
 
 // ── 支柱四：主动挂起与恢复（Suspend & Resume）──────────────────────────────────
-/** 自动恢复挂起的 run */
-async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, customPayload?: unknown, resumeText?: string): Promise<boolean> {
+/** 挂起 timer 的单一臂法（P2 2026-10-18）：投递失败时**自动重臂**，不再让 run 永久卡在
+ *  suspended（旧实现 timer 到点恢复失败后无任何后续触发源）。 */
+function armSuspensionTimer(run: SubagentRun, delayMs: number): void {
+  const suspension = run.suspension
+  if (!suspension) return
+  if (suspension.timer) clearTimeout(suspension.timer)
+  suspension.timer = setTimeout(() => {
+    if (run.suspension !== suspension) return
+    suspension.timer = undefined
+    void autoResumeSuspendedRun(run, "timer_expired").then((outcome) => {
+      if (outcome === false && run.status === "suspended") armSuspensionTimer(run, Math.min(30_000, delayMs))
+    })
+  }, delayMs)
+  unrefTimer(suspension.timer)
+}
+
+/**
+ * 自动恢复挂起的 run。
+ * 返回值（P1 2026-10-18 三态化）：
+ *   - "resumed"：并发槽已拿到且 prompt_async 投递成功（提问此时才解除）；
+ *   - "queued" ：槽位满，恢复请求与待投内容（含 question_id）已入队，**尚未投递**；
+ *   - false    ：投递失败/状态不符，状态退回 suspended，调用方不得标记已答。
+ */
+async function autoResumeSuspendedRun(
+  run: SubagentRun,
+  triggerSource: string,
+  customPayload?: unknown,
+  resumeText?: string,
+  questionId?: string,
+): Promise<"resumed" | "queued" | false> {
   if (run.status !== "suspended") return false
   const parentKey = run.parentGatewaySessionId
   const runningCount = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running").length
@@ -5419,7 +5627,8 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
       pendingResumeQueue.set(parentKey, q)
     }
     if (!q.some((item) => item.run.id === run.id)) {
-      q.push({ run, payload: customPayload, triggerSource, resumeText })
+      // P1：question_id 随队列项保存，真正投递成功后才解除（不得在入队时就标已答）。
+      q.push({ run, payload: customPayload, triggerSource, resumeText, questionId })
     }
     // F3（P1·答复被 timer 抢先吞掉修复）：入队即解除挂起时臂上的 timer（默认 30s）——否则 timer
     // 先到点会用**通用恢复文案**唤醒 run，入队的 resumeText（答问原文）永不投递（且提问已被标记
@@ -5428,7 +5637,7 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
       clearTimeout(run.suspension.timer)
       run.suspension.timer = undefined
     }
-    return true
+    return "queued"
   }
   if (run.suspension?.timer) {
     clearTimeout(run.suspension.timer)
@@ -5461,15 +5670,19 @@ async function autoResumeSuspendedRun(run: SubagentRun, triggerSource: string, c
     writeLiveLog(run, true)
     return false
   }
+  // P1：真正投递成功后才解除对应提问（早于此＝父会话以为答过了，子代理其实没收到）。
+  if (questionId) resolveQuestionOnAnswer(run, questionId)
   // 投递成功：发 resumed 事件（与既有 happy path 同一载荷，仅移到投递确认之后）。
   const parentState = parentStateOf(run)
   if (parentState && deps) {
     deps.emitToSession(parentState, "subagent.resumed", { id: run.id, label: run.label, trigger: triggerSource })
   }
-  return true
+  return "resumed"
 }
 
-/** 槽位空出时检查恢复队列 */
+/** 槽位空出时检查恢复队列。
+ *  P2（2026-10-18）：shift 后投递失败必须**重入队并重臂 timer**——旧实现直接丢弃，run 永远
+ *  卡在 suspended，父会话也再没有触发源。 */
 export function checkPendingResumeQueue(parentId: string): void {
   if (!parentId) return
   const q = pendingResumeQueue.get(parentId)
@@ -5481,12 +5694,24 @@ export function checkPendingResumeQueue(parentId: string): void {
   // F8（P2·无界常驻修复）：队列抽空即删键——否则每个曾入队的父会话永久留键（非空时还持有 run
   // 引用）。下一个仍留队时保持键，条数由 handleSubagentResume/autoResume 的「同 run 不重复入队」有界。
   if (q.length === 0) pendingResumeQueue.delete(parentId)
-  void autoResumeSuspendedRun(next.run, next.triggerSource, next.payload, next.resumeText)
+  void autoResumeSuspendedRun(next.run, next.triggerSource, next.payload, next.resumeText, next.questionId).then((outcome) => {
+    if (outcome !== false) return
+    // 失败：重入队（队首，保持原顺序）＋重臂 timer；下一次槽位释放或 timer 到点再试。
+    let queue = pendingResumeQueue.get(parentId)
+    if (!queue) {
+      queue = []
+      pendingResumeQueue.set(parentId, queue)
+    }
+    if (!queue.some((item) => item.run.id === next.run.id)) queue.unshift(next)
+    const timeoutMs = Math.min(30_000, Math.max(5_000, (next.run.suspension?.condition.timeout_seconds ?? 30) * 1000))
+    armSuspensionTimer(next.run, timeoutMs)
+    console.warn(`[gateway] resume queue delivery failed, re-queued: id=${next.run.id} label="${next.run.label}"`)
+  })
 }
 
 /**
  * POST /internal/subagent/suspend
- * body { session_id, subagent_id?, reason?, condition?: { type?, task_id?, poll_url?, timeout_seconds? }, checkpoint_data? }
+ * body { session_id, subagent_id?, reason?, condition?: { type?: "timer"|"manual", timeout_seconds? }, checkpoint_data? }
  */
 export async function handleSubagentSuspend(req: Request): Promise<Response> {
   if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
@@ -5495,9 +5720,7 @@ export async function handleSubagentSuspend(req: Request): Promise<Response> {
     subagent_id?: string
     reason?: string
     condition?: {
-      type?: "timer" | "poll_task" | "manual"
-      task_id?: string
-      poll_url?: string
+      type?: "timer" | "manual" | "poll_task"
       timeout_seconds?: number
     }
     checkpoint_data?: Record<string, unknown>
@@ -5518,21 +5741,27 @@ export async function handleSubagentSuspend(req: Request): Promise<Response> {
   run.status = "suspended"
   run.suspension = {
     reason: String(body.reason || "主动挂起等待异步任务/释放槽位").slice(0, 500),
+    // poll_task 输入保留兼容但按 timer 处理（没有真实轮询器时不得假装在轮询）。
     condition: {
-      type: cond.type === "poll_task" ? "poll_task" : cond.type === "manual" ? "manual" : "timer",
-      task_id: typeof cond.task_id === "string" ? cond.task_id.trim() : undefined,
-      poll_url: typeof cond.poll_url === "string" ? cond.poll_url.trim() : undefined,
+      type: cond.type === "manual" ? "manual" : "timer",
       timeout_seconds: timeoutSec,
     },
     checkpoint_data: typeof body.checkpoint_data === "object" && body.checkpoint_data !== null && !Array.isArray(body.checkpoint_data) ? body.checkpoint_data : undefined,
     suspended_at: Date.now(),
     resume_token: resumeToken,
   }
-  if (run.suspension.condition.type === "timer" || run.suspension.condition.timeout_seconds) {
-    run.suspension.timer = setTimeout(() => {
-      void autoResumeSuspendedRun(run, "timer_expired")
-    }, timeoutSec * 1000)
-    run.suspension.timer.unref?.()
+  if (run.suspension.condition.type === "timer") {
+    armSuspensionTimer(run, timeoutSec * 1000)
+  }
+  // P0（2026-10-18 suspend 不真停修复）：此时若子会话仍有一轮在生成，必须 abort——只改状态
+  // 不中止生成 = 算力继续烧、事件继续流、父会话以为它停了。**不 DELETE**（挂起要保留历史，
+  // resume 复用同一会话）。并发口径明确为「挂起不占槽，但已停止生成」。
+  if (isOpenCodeSessionId(run.opencodeSessionId) && deps) {
+    void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/abort`, {
+      method: "POST",
+      headers: deps.openCodeHeaders(),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {})
   }
   writeLiveLog(run, true)
   const parentState = parentStateOf(run)
@@ -5552,7 +5781,7 @@ export async function handleSubagentSuspend(req: Request): Promise<Response> {
     subagent_id: run.id,
     resume_token: resumeToken,
     timeout_seconds: timeoutSec,
-    note: "子代理已挂起并交出并发槽位；超时或调用 subagent_resume 时恢复执行。",
+    note: "已中止当前生成并交出并发槽位（挂起不占槽、不再消耗算力；子会话与历史保留）。超时或调用 subagent_resume 时恢复执行。",
   })
 }
 
@@ -5582,6 +5811,8 @@ export async function handleSubagentResume(req: Request): Promise<Response> {
   if (!run) {
     return Response.json({ ok: false, code: "not_found", error: `找不到子代理：${target}` }, { status: 404 })
   }
+  // P2（2026-10-18 同级越权）：子代理只能恢复自己派出的子 run。
+  if (!callerCanControlRun(sid, run)) return siblingForbiddenResponse()
   if (run.status !== "suspended") {
     return Response.json({ ok: false, code: "not_suspended", error: `子代理当前状态为 ${run.status}，非 suspended 挂起状态无法 resume` }, { status: 409 })
   }
@@ -5615,12 +5846,27 @@ export async function handleSubagentResume(req: Request): Promise<Response> {
   }
   // F2（P1·谎报成功修复）：autoResumeSuspendedRun 以投递结果为真值，投递失败（子会话不可达/已失效）
   // 时如实回 502 not_messageable，绝不回「已恢复运行」。
+  // P1（2026-10-18 同步 run resume 永无通知修复）：手动 resume 意味着已经没有工具在轮询——
+  // 若原 run 是同步（asyncMode=false），完成后不会 wakeParent，父会话永远等不到通知。改为 async。
+  if (run.asyncMode !== true && typeof deps.wakeParent === "function") {
+    run.asyncMode = true
+    console.log(`[gateway] subagent resume switched to async notify: id=${run.id} label="${run.label}"`)
+  }
   const resumed = await autoResumeSuspendedRun(run, body.trigger_source || "manual", body.payload)
-  if (!resumed) {
+  if (resumed === false) {
     return Response.json(
       { ok: false, code: "not_messageable", error: "挂起子代理唤醒失败（子会话不可达或已失效）；未投递。", subagent_id: run.id },
       { status: 502 },
     )
+  }
+  if (resumed === "queued") {
+    return Response.json({
+      ok: true,
+      queued: true,
+      status: "suspended",
+      subagent_id: run.id,
+      note: "当前并发槽位已满（3/3），恢复请求已入队排队，待槽位空出后自动恢复",
+    })
   }
   return Response.json({
     ok: true,

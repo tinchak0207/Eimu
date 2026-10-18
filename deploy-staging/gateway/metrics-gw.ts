@@ -32,6 +32,30 @@ function journalError(line: LogSafeText): void {
 export const TURN_METRICS_RING = 200
 export const turnMetricsRing: TurnMetricsSnapshot[] = []
 
+/**
+ * 计量行 → 会话的匹配。
+ *
+ * 新行存完整 session id（精确匹配）。旧行曾存前 8 字符；为兼容进程内迁移/热更新
+ * 残留的旧行，短于等于 8 字符的记录按前缀匹配。前缀匹配只对「看起来像旧截断值」
+ * 的行生效，不会让两个正常完整 id 互相命中。
+ */
+export function metricsSessionMatches(recorded: unknown, sessionId: string): boolean {
+  if (typeof recorded !== "string" || !recorded || !sessionId) return false
+  if (recorded === sessionId) return true
+  return recorded.length <= 8 && sessionId.startsWith(recorded)
+}
+
+/** 取该会话最近一条带 context_tokens 的计量行（倒序扫描）。 */
+export function lastTurnContextTokens(sessionId: string): number | undefined {
+  for (let i = turnMetricsRing.length - 1; i >= 0; i--) {
+    const row = turnMetricsRing[i]
+    if (metricsSessionMatches(row.session, sessionId) && typeof row.context_tokens === "number") {
+      return row.context_tokens
+    }
+  }
+  return undefined
+}
+
 /** 本轮计时档起点；t_accept = handleSendMessage 进入时刻（呼叫方带入）。
  *  既有在途档（上一轮未收尾）先以 superseded 收档，保证每 session 至多一份。 */
 export function beginTurnMetrics(state: SessionState, tAccept: number): void {
@@ -127,7 +151,9 @@ export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): voi
     const promptDeferredMs =
       m.deferredAt === null ? 0 : Math.max(0, (m.t_last_prompt_sent ?? now) - m.deferredAt)
     const snap: TurnMetricsSnapshot = {
-      session: m.sessionId.length > 8 ? m.sessionId.slice(0, 8) : m.sessionId,
+      // 存完整 session id：旧版只存前 8 字符，token 提醒与压缩判定的
+      // `row.session === state.sessionId` 永远不成立，导致提醒/压缩全失效。
+      session: m.sessionId,
       gen: m.gen,
       attempt: m.attempt,
       provider: m.providerID,

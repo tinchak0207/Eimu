@@ -27,7 +27,10 @@ export default tool({
     try {
       const resp = await fetch(`${GATEWAY}/internal/artifact/publish`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.HARNESS_INTERNAL_TOKEN ? { "X-Internal-Token": process.env.HARNESS_INTERNAL_TOKEN } : {}),
+        },
         body: JSON.stringify({
           session_id: context.sessionID,
           name: args.name,

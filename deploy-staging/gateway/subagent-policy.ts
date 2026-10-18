@@ -149,14 +149,41 @@ export const FORK_HARD_RULES = [
 
 /**
  * D7：父快照里的【当前授权】是派遣当时的文本，fork 必须按当下状态重新求值，
- * 不能沿用旧快照。此纯函数把授权段整段剥掉（含其后到下一个 `\n\n【` 或文末）。
+ * 不能沿用旧快照。此纯函数把授权段整段剥掉。
+ *
+ * 2026-10-18 修复：按段 header 精确匹配（行首【当前授权…】），只删到下一个以
+ * 【 开头的段 header 或文末；段内空行不提前结束。主会话变体
+ * 【当前授权】/【当前授权·最高当前判准】/【当前授权·网关核实】都命中；
+ * WORKER_HARD_RULES（Notes: 开头）逐字保留。
  */
 export function stripAuthorizationSection(system: string): string {
   if (!system) return ""
-  return system
-    .replace(/\n*【当前授权(?:·网关核实)?】[\s\S]*?(?=\n\n【|$)/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+  const lines = system.split("\n")
+  const out: string[] = []
+  let skipping = false
+  for (const line of lines) {
+    if (/^[ \t]*【当前授权[^】]*】/.test(line)) {
+      skipping = true
+      continue
+    }
+    if (skipping) {
+      // 段边界：下一个【段头，或 worker 硬规则块（Notes:）。后者不以前缀【开头，
+      // 但必须逐字保留（旧正则曾把它整段吞掉）。
+      if (/^[ \t]*(?:【|Notes:)/.test(line)) skipping = false
+      else continue
+    }
+    out.push(line)
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim()
+}
+
+/**
+ * D2（2026-10-18 收紧）：只有明确的「variant 字段不被支持」才允许去掉 variant 重投。
+ * 400/422 是 opencode/上游对未知字段的标准拒绝；401/402/429/5xx/超时与 variant 无关，
+ * 重投会造成重复付费/重复执行，一律不重投。
+ */
+export function shouldRetryWithoutVariant(status: number): boolean {
+  return status === 400 || status === 422
 }
 
 /** 照 llo 的合成 tool_result 文案：父会话的 dispatch 工具结果只写「已在后台开始」，
@@ -228,7 +255,11 @@ export function forkNameFromLabel(label: string): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 24)
-  return name || "fork"
+  // P2（2026-10-18）：自动名必须过 validateSubagentName——"latest"/"main"/"team lead"/"system"
+  // 派生出的保留名不得绕过 name 闸门。不合法回退 "fork"。
+  const candidate = name || "fork"
+  const check = validateSubagentName(candidate)
+  return check.ok && check.name ? check.name : "fork"
 }
 
 // ── 深度 ─────────────────────────────────────────────────────────────────────

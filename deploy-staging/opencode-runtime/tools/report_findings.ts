@@ -5,6 +5,13 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const FINDINGS_MAX_ITEMS = 32
 const SHORT_SUMMARY_MAX_CHARS = 60
 
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const token = process.env.HARNESS_INTERNAL_TOKEN
+  if (token) headers["X-Internal-Token"] = token
+  return headers
+}
+
 export default tool({
   description: [
     "提交结构化评审问题（ReportFindings），一批写完。",
@@ -12,6 +19,7 @@ export default tool({
     "关键约束：最多 32 条；空数组合法（没有存活问题）；每条必填 file、summary、failure_scenario；file 用仓库相对路径（禁止绝对路径与 ..），line 为 1-based。",
     "失败处置：missing_required_args 表示 findings 缺失或不是数组；invalid_findings 表示超过 32 条，只报最重要的并按严重度排序；findings_report_failed 按 gateway hint 修正。",
     "互指：findings 是评审结论，不是任务；要跟踪修复用 task_create/task_update；交付物验证用 artifact_verify。",
+    "消费边界：findings 会持久化供人工审计与事后查询（/internal/findings/list），当前没有自动修复或自动门禁消费方；不要假设有人会自动处理，需修复时另建任务。请在最终回报中列出本次 run_id 与条数。",
     "示例：report_findings({findings:[{file:src/auth.ts, line:42, summary:session 过期后 user 为 undefined, failure_scenario:过期 token 命中缓存后访问 user.id 崩溃}]})",
   ].join("\n"),
   args: {
@@ -44,7 +52,10 @@ export default tool({
         }),
       )
       .describe("本次全部评审问题，按严重度从高到低（最多 32 条；空数组=没有存活的问题）"),
-    run_id: tool.schema.string().optional().describe("评审批次标识（可选，同一批次请复用同一个值）"),
+    run_id: tool.schema
+      .string()
+      .optional()
+      .describe("评审批次标识：显式复用同一值＝同一批次整批替换（幂等）；不传＝每次上报生成独立批次（多个 critic 不会互相覆盖）"),
   },
   async execute(args, context) {
     if (!Array.isArray(args.findings)) {
@@ -60,7 +71,7 @@ export default tool({
     try {
       const res = await fetch(`${GATEWAY}/internal/findings/report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           session_id: context.sessionID,
           level: args.level,
@@ -77,7 +88,7 @@ export default tool({
           Array.isArray(data?.errors) ? { errors: data.errors } : { http_status: res.status },
         )
       }
-      return ok({ count: data.count })
+      return ok({ count: data.count, run_id: data.run_id, latest_run: data.latest_run })
     } catch (e) {
       return fail("gateway_unreachable", (e as Error).message)
     }

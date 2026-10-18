@@ -65,7 +65,7 @@
       "name": "MiniMax Relay",
       "options": {
         "baseURL": "https://xn--wnup5g6so4wn.de5.net/v1",
-        "apiKey": "sk-ur8AP4tTmekxVdkG21WEoYOmK0Dtz8T0qbffLQvjc39DRvqH"
+        "apiKey": "{env:EIMU_KEY_MINIMAX_RELAY}"
       },
       "models": {
         "MiniMax-M3": {}
@@ -76,7 +76,7 @@
       "name": "BAI",
       "options": {
         "baseURL": "https://api.b.ai/v1",
-        "apiKey": "sk-17w4vtozas9pv5t12353m0hb1x6rwsqz"
+        "apiKey": "{env:EIMU_KEY_B_AI}"
       },
       "models": {
         "deepseek-v4-flash-vision-exp": {},
@@ -106,7 +106,7 @@
       "name": "Hub OAIFree",
       "options": {
         "baseURL": "https://hub.oaifree.com/v1",
-        "apiKey": "ah-cd99fe81e2527a21721997a3673f5b2bd799ed643c84ed3c7853b03415ab2b1b"
+        "apiKey": "{env:EIMU_KEY_HUBLINUXDO}"
       },
       "models": {
         "MiniMax-M3": {},
@@ -151,7 +151,7 @@
       "name": "HeroHao Relay",
       "options": {
         "baseURL": "https://sub2.herohao.top/v1",
-        "apiKey": "sk-edbc3d000d6b1f92240e98da8a7c5c1c811ec2d0f0c4e86bfc0989d779a0a55d"
+        "apiKey": "{env:EIMU_KEY_HEROHAO}"
       },
       "models": {
         "MiniMax-M3": {},
@@ -163,7 +163,7 @@
       "name": "Shuai API",
       "options": {
         "baseURL": "https://api.shuaiapi.com/v1",
-        "apiKey": "sk-HloolAPI-YULIYt7EaRyBvWlAdQxUDnCFj6ifCE1F9lwCD13JpUA0BscS"
+        "apiKey": "{env:EIMU_KEY_SHUAI}"
       },
       "models": {
         "deepseek-v4-flash": {},
@@ -176,7 +176,7 @@
       "name": "Shuai API (Claude)",
       "options": {
         "baseURL": "https://api.shuaiapi.com/v1",
-        "apiKey": "sk-HloolAPI-7fMyKmsnXy746FAq6udH2ouWMjP5z4nnuonBPNPVymtXPozL"
+        "apiKey": "{env:EIMU_KEY_SHUAI_CLAUDE}"
       },
       "models": {
         "claude-sonnet-5": {}
@@ -187,7 +187,7 @@
       "name": "Shuai API (GPT-5.6)",
       "options": {
         "baseURL": "https://api.shuaiapi.com/v1",
-        "apiKey": "sk-HloolAPI-t2qoQ503QqUFlKr9C6mmokeZ40rTWogVQDu57Sik6vompta9"
+        "apiKey": "{env:EIMU_KEY_SHUAI_GPT}"
       },
       "models": {
         "gpt-5.6-sol": {
@@ -202,7 +202,7 @@
       "name": "Shuai API (Luna)",
       "options": {
         "baseURL": "https://api.shuaiapi.com/v1",
-        "apiKey": "sk-HloolAPI-ynZsvMPQ2EMkURgiktZ5hMwUlUbTwKDcArnqS6V6zq1sy4y2"
+        "apiKey": "{env:EIMU_KEY_SHUAI_LUNA}"
       },
       "models": {
         "gpt-5.6-luna": {
@@ -217,7 +217,7 @@
       "name": "A6 API Direct",
       "options": {
         "baseURL": "https://api-direct.a6api.com/v1",
-        "apiKey": "sk-EVk0ER8wl4oL2xZIGlbt0Of9o7jkQkLknd9SLH9BHrXYkyDH"
+        "apiKey": "{env:EIMU_KEY_A6API}"
       },
       "models": {
         "deepseek-v4-flash-vision-exp": {},
@@ -247,7 +247,7 @@
       "name": "Stealth Relay",
       "options": {
         "baseURL": "https://xn--wnup5g6so4wn.de5.net/v1",
-        "apiKey": "sk-ur8AP4tTmekxVdkG21WEoYOmK0Dtz8T0qbffLQvjc39DRvqH"
+        "apiKey": "{env:EIMU_KEY_STEALTH}"
       },
       "models": {
         "stealth/union-alpha": {}
@@ -258,7 +258,7 @@
       "name": "Chaozhiyuan Pool",
       "options": {
         "baseURL": "https://pool.chaozhiyuanai.com/v1",
-        "apiKey": "sk-1256581dbaf1a1e55a777e0b03e8abc2cb26363217797d000a9d2747bf240c89"
+        "apiKey": "{env:EIMU_KEY_CHAOZHIYUAN}"
       },
       "models": {
         "gpt-5.6-sol": {},
@@ -270,7 +270,7 @@
     "agnes": {
       "options": {
         "baseURL": "https://apihub.agnes-ai.com/v1",
-        "apiKey": "sk-8IboPBkxQhTq4fvhCSuq3ZMdUihQlFcFiBk1xNVdve7JcGjN"
+        "apiKey": "{env:EIMU_KEY_AGNES}"
       }
     },
     "stepfun": {
@@ -278,7 +278,7 @@
       "name": "Stepfun API",
       "options": {
         "baseURL": "https://api.stepfun.com/step_plan/v1",
-        "apiKey": "1m0TeVploxQ6UmUa5VMZAq6RcH68Lg5kUEsk00qwemeuNtKCY4pumPnnSmelHnP5D"
+        "apiKey": "{env:EIMU_KEY_STEPFUN}"
       },
       "models": {
         "step-5-preview": {}
@@ -289,7 +289,7 @@
       "name": "HappyCoding",
       "options": {
         "baseURL": "https://happycoding.xyz/v1",
-        "apiKey": "sk-Vu0wFUQXw0VNQt0B2n1NwHg8QqntafYoLlwwMFt62yzqr5xb"
+        "apiKey": "{env:EIMU_KEY_HAPPYCODING}"
       },
       "models": {
         "deepseek-v4.1-flash": {
@@ -374,6 +374,7 @@
         "memory_read": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "enter_plan_mode": true,
         "exit_plan_mode": true
@@ -529,6 +530,7 @@
         "monitor_watch": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -620,6 +622,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": true,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -654,6 +660,7 @@
         "task_list": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -736,6 +743,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": false,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -769,6 +780,7 @@
         "monitor_watch": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -851,6 +863,10 @@
         "style_dna_extract": true,
         "subagent_dispatch": false,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -884,6 +900,7 @@
         "monitor_watch": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -966,6 +983,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": false,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "tts_speak": false,
         "upscale_audit": false,
         "video_quote": false,
@@ -992,6 +1013,7 @@
         "monitor_watch": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -1072,6 +1094,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": false,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -1103,6 +1129,7 @@
         "task_list": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -1185,6 +1212,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": false,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -1217,6 +1248,7 @@
         "task_list": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -1300,6 +1332,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": false,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -1332,6 +1368,7 @@
         "task_list": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -1415,6 +1452,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": true,
         "subagent_status": false,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -1467,6 +1508,7 @@
         "report_findings": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,
@@ -1548,6 +1590,10 @@
         "style_dna_extract": false,
         "subagent_dispatch": true,
         "subagent_status": true,
+        "subagent_message": false,
+        "subagent_stop": false,
+        "subagent_resume": false,
+        "subagent_suspend": false,
         "timeline_lint": false,
         "timeline_master": false,
         "timeline_mix": false,
@@ -1586,6 +1632,7 @@
         "task_list": true,
         "mailbox_send": true,
         "mailbox_read": true,
+        "mailbox_mark_read": true,
         "mailbox_agents": true,
         "memory_save": true,
         "memory_list": true,

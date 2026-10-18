@@ -17,7 +17,8 @@ export default tool({
     "恢复处于 suspended 的子代理。",
     "何时用：异步长任务完成或恢复条件满足，且并发槽可用时。",
     "何时不用：运行中或已终态的子代理不要 resume；先用 subagent_status 确认 suspended。",
-    "关键约束：并发 3/3 时恢复请求排队，槽位释放后自动执行；payload 原样回灌给子代理。",
+    "关键约束：并发 3/3 时恢复请求排队，槽位释放后自动执行；payload 原样回灌给子代理；恢复后以 async 通知完成（不靠轮询）。",
+    "调用权限：主会话（orchestrator）可恢复本会话任意子代理；子代理只能恢复自己派出的子 run，操作兄弟会被拒为 sibling_forbidden。",
     "示例：subagent_resume({subagent_id:\"agent-x7q\", payload:\"视频已完成：https://example.com/final.mp4\"})",
   ].join("\n"),
   args: {

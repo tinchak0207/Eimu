@@ -17,7 +17,10 @@
 //   真正的权限边界在 Eimu 既有工具闸与宿主隔离。
 import { Database } from "bun:sqlite"
 import { emitToSession } from "./sse-core.ts"
-import { resolveSession, sessions } from "./sessions-core.ts"
+import { resolveSession } from "./sessions-core.ts"
+// 子代理会话不在主 sessions 表；monitor 的 session_id 可能是子会话的 opencode id，
+// 存活判定必须与其它 /internal 路由同源：resolveSession ?? subagentParentState。
+import { subagentParentState } from "./subagent"
 
 export const MONITOR_DEFAULT_TIMEOUT_MS = 300_000
 export const MONITOR_MAX_TIMEOUT_MS = 1_800_000
@@ -25,6 +28,8 @@ export const MONITOR_MIN_TIMEOUT_MS = 1_000
 export const MONITOR_MAX_EVENTS_PER_SECOND = 20
 export const MONITOR_LAST_LINES = 50
 const MONITOR_LINE_MAX_CHARS = 2_000
+/** P2：无换行输出（如 tail 跟随的二进制流）缓冲上限；超出保留尾部。 */
+const MONITOR_BUFFER_MAX_CHARS = 64 * 1024
 const MONITOR_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 const MONITOR_RETENTION_PER_SESSION = 200
 const MONITOR_PRUNE_EVERY_TICKS = 60
@@ -52,7 +57,13 @@ export interface SessionMonitorRow {
   started_at: number
   ended_at: number | null
   last_lines: string
+  /** owner gateway 的 pid（用于判定另一个 gateway 进程仍持有该监视）。 */
   pid: number | null
+  /** 采集子进程 pid（ws 监视为空）。 */
+  child_pid: number | null
+  /** 采集子进程组 id（detached spawn → 等于 child_pid）。 */
+  child_pgid: number | null
+  truncated_count: number
 }
 
 export interface MonitorView extends Omit<SessionMonitorRow, "last_lines"> {
@@ -79,33 +90,197 @@ export function normalizeMonitorTimeout(ms: unknown): number {
 }
 
 // ── 命令安全闸（最小防线）──────────────────────────────────────────────
-// 按 shell 词法切分后逐段检查命令位置与危险模式；引号、反引号、$() 都会被展开后再判，
-// 因此 `bash -c 'rm -rf /'`、`echo $(rm -rf /)`、`/usr/bin/sudo` 都无法用字串变形绕过。
+// 链路：shell 词法切分 → 展开（引号 / $'...' ANSI-C / $( ) / 反引号 / 花括号）
+// → 命令位归一（basename）→ 包装器展开（env/nice/ionice/timeout/setsid/xargs/...）
+// → 逐命令检查解释器与破坏性参数。
+// 只检查「命令位」与解释器的 -c / script 参数：`echo eval`、`grep 'sudo'` 不误杀。
+// 这不是沙箱；真正的权限边界在既有工具闸与宿主隔离。
 
 interface ShellToken {
   value: string
   subs: string[]
   op: boolean
+  redirect?: string
 }
 
 const SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"])
 const HARD_DENY = new Set([
   "sudo",
   "doas",
+  "su",
   "shutdown",
   "reboot",
   "poweroff",
   "halt",
-  "su",
   "mkfs",
   "eval",
+  "source",
+  "pkill",
+  "killall",
+  "truncate",
+  "shred",
+  "wipefs",
 ])
-const COMMAND_PREFIXES = new Set(["env", "command", "exec", "nohup", "builtin", "time", "xargs"])
+const WRAPPERS = new Set([
+  "env",
+  "command",
+  "exec",
+  "nohup",
+  "builtin",
+  "time",
+  "xargs",
+  "nice",
+  "ionice",
+  "timeout",
+  "setsid",
+  "stdbuf",
+  "busybox",
+  "chronic",
+])
+const DEVICE_WRITE_COMMANDS = new Set(["cp", "mv", "install", "rsync", "dd", "cat", "tee", "tar"])
+const DEVICE_SOURCE = /^(?:if=|of=)?\/dev\/(?:zero|random|urandom|full|mem)$/
+const INTERPRETER_EVAL: Record<string, RegExp> = {
+  python: /^-c/,
+  python3: /^-c/,
+  pypy3: /^-c/,
+  node: /^(-e|--eval|-p|--print)/,
+  nodejs: /^(-e|--eval|-p|--print)/,
+  perl: /^-e/,
+  ruby: /^-e/,
+  php: /^-r/,
+  bun: /^(-e|--eval)/,
+  deno: /^(-e|--eval)/,
+}
 
 function basename(word: string): string {
   const trimmed = word.replace(/\/+$/, "")
   const index = trimmed.lastIndexOf("/")
   return index >= 0 ? trimmed.slice(index + 1) : trimmed
+}
+
+/** $'...' 的 ANSI-C 转义解码：\xHH、\uHHHH、\0NNN、\n\t\r\\\'\" 等。 */
+function decodeAnsiC(raw: string): string {
+  let out = ""
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index]
+    if (char !== "\\") {
+      out += char
+      continue
+    }
+    const next = raw[index + 1]
+    if (next === undefined) break
+    index += 1
+    switch (next) {
+      case "n":
+        out += "\n"
+        break
+      case "t":
+        out += "\t"
+        break
+      case "r":
+        out += "\r"
+        break
+      case "a":
+        out += "\x07"
+        break
+      case "b":
+        out += "\b"
+        break
+      case "f":
+        out += "\f"
+        break
+      case "v":
+        out += "\v"
+        break
+      case "\\":
+        out += "\\"
+        break
+      case "'":
+        out += "'"
+        break
+      case '"':
+        out += '"'
+        break
+      case "x": {
+        const hex = raw.slice(index + 1, index + 3)
+        if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+          out += String.fromCharCode(Number.parseInt(hex, 16))
+          index += 2
+        } else {
+          out += "x"
+        }
+        break
+      }
+      case "u": {
+        const hex = raw.slice(index + 1, index + 5)
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(Number.parseInt(hex, 16))
+          index += 4
+        } else {
+          out += "u"
+        }
+        break
+      }
+      case "0": {
+        const octal = raw.slice(index + 1, index + 4).match(/^[0-7]{1,3}/)?.[0] ?? ""
+        out += String.fromCharCode(Number.parseInt(octal || "0", 8))
+        index += octal.length
+        break
+      }
+      default:
+        out += next
+    }
+  }
+  return out
+}
+
+function splitTopLevelCommas(body: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let current = ""
+  for (const char of body) {
+    if (char === "{") depth += 1
+    if (char === "}") depth -= 1
+    if (char === "," && depth === 0) {
+      parts.push(current)
+      current = ""
+      continue
+    }
+    current += char
+  }
+  parts.push(current)
+  return parts
+}
+
+/** 花括号展开（至少一层，上限 32 个候选）：`s{udo,}` → sudo / s。 */
+function expandBraces(word: string, depth = 0): string[] {
+  if (depth > 3) return [word]
+  const open = word.indexOf("{")
+  if (open < 0) return [word]
+  let level = 0
+  let close = -1
+  for (let index = open; index < word.length; index += 1) {
+    if (word[index] === "{") level += 1
+    else if (word[index] === "}") {
+      level -= 1
+      if (level === 0) {
+        close = index
+        break
+      }
+    }
+  }
+  if (close < 0) return [word]
+  const prefix = word.slice(0, open)
+  const body = word.slice(open + 1, close)
+  const suffix = word.slice(close + 1)
+  const parts = splitTopLevelCommas(body)
+  if (parts.length < 2) return [word] // {a} 不是展开
+  const out: string[] = []
+  for (const part of parts) {
+    for (const expanded of expandBraces(prefix + part + suffix, depth + 1)) out.push(expanded)
+    if (out.length >= 32) break
+  }
+  return out.slice(0, 32)
 }
 
 /** 读取平衡括号内的 $() 内容；返回内容与右括号之后的下标。 */
@@ -156,6 +331,23 @@ function readBacktick(source: string, start: number): { text: string; end: numbe
   return { text: source.slice(start), end: source.length }
 }
 
+function readAnsiC(source: string, start: number): { text: string; end: number } {
+  let index = start
+  let raw = ""
+  while (index < source.length) {
+    if (source[index] === "\\" && index + 1 < source.length) {
+      raw += source[index]
+      raw += source[index + 1]
+      index += 2
+      continue
+    }
+    if (source[index] === "'") return { text: decodeAnsiC(raw), end: index + 1 }
+    raw += source[index]
+    index += 1
+  }
+  return { text: decodeAnsiC(raw), end: source.length }
+}
+
 function lexShell(source: string): ShellToken[] {
   const tokens: ShellToken[] = []
   let current = ""
@@ -170,9 +362,9 @@ function lexShell(source: string): ShellToken[] {
     subs = []
     started = false
   }
-  const pushOp = (op: string): void => {
+  const pushOp = (op: string, redirect?: string): void => {
     pushWord()
-    tokens.push({ value: op, subs: [], op: true })
+    tokens.push(redirect ? { value: op, subs: [], op: true, redirect } : { value: op, subs: [], op: true })
   }
 
   while (index < source.length) {
@@ -192,7 +384,10 @@ function lexShell(source: string): ShellToken[] {
       index += 1
       while (index < source.length && source[index] !== '"') {
         if (source[index] === "\\" && index + 1 < source.length) {
-          current += source[index + 1]
+          // 双引号内反斜杠只对 $ ` " \ 换行 生效；其余（如 \x73）保留给内层解释器解析。
+          const next = source[index + 1]
+          if (next === "$" || next === "`" || next === '"' || next === "\\" || next === "\n") current += next
+          else current += `\\${next}`
           index += 2
           continue
         }
@@ -214,6 +409,13 @@ function lexShell(source: string): ShellToken[] {
         index += 1
       }
       index += 1
+      continue
+    }
+    if (char === "$" && source[index + 1] === "'") {
+      started = true
+      const sub = readAnsiC(source, index + 2)
+      current += sub.text
+      index = sub.end
       continue
     }
     if (char === "\\" && index + 1 < source.length) {
@@ -238,6 +440,23 @@ function lexShell(source: string): ShellToken[] {
       index = sub.end
       continue
     }
+    if (char === "<" || char === ">") {
+      let op = char
+      if (source[index + 1] === char) {
+        op += char
+        index += 1
+        if (char === "<" && source[index + 1] === "<") {
+          op += "<"
+          index += 1
+        }
+      } else if (source[index + 1] === "&" || (char === ">" && source[index + 1] === "|")) {
+        op += source[index + 1]
+        index += 1
+      }
+      pushOp(op, op)
+      index += 1
+      continue
+    }
     if (char === ";" || char === "|" || char === "&" || char === "(" || char === ")" || char === "\n") {
       pushOp(char === "\n" ? ";" : char)
       index += 1
@@ -256,43 +475,181 @@ function lexShell(source: string): ShellToken[] {
   return tokens
 }
 
-function checkSegment(words: ShellToken[], pipelineIndex: number, depth: number): void {
-  for (const word of words) {
-    for (const sub of word.subs) assertCommandInternal(sub, depth + 1)
-  }
-  const values = words.map((word) => word.value)
-  let index = 0
-  while (index < values.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(values[index])) index += 1
-  while (index < values.length && COMMAND_PREFIXES.has(basename(values[index]))) {
-    index += 1
-    while (index < values.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(values[index])) index += 1
-  }
-  if (index >= values.length) return
-  const command = basename(values[index])
-  const args = values.slice(index + 1)
+type WrapperStep = { kind: "next"; index: number } | { kind: "inline"; text: string } | { kind: "end" }
 
-  // 硬拒绝：命令词出现在任何位置（含 `xargs sudo`）都拒绝。
-  for (const value of values) {
-    const word = basename(value)
-    if (HARD_DENY.has(word) || word.startsWith("mkfs.")) {
-      throw new MonitorPolicyError(`command refused by monitor policy (${word})`)
+const XARGS_VALUE_FLAGS = new Set(["-n", "-L", "-I", "-P", "-s", "-E", "-d", "-a", "-e"])
+
+/** 跳过选项：返回第一个非选项（命令位）下标；`--` 后直接返回下一词。 */
+function skipOpts(values: string[], start: number, withValue: Set<string>): number {
+  let index = start
+  while (index < values.length) {
+    const value = values[index]
+    if (value === "--") return index + 1
+    if (value.startsWith("-") && value !== "-") {
+      const eq = value.indexOf("=")
+      const flag = eq >= 0 ? value.slice(0, eq) : value
+      index += withValue.has(flag) ? 2 : 1
+      continue
+    }
+    return index
+  }
+  return index
+}
+
+/** 包装器展开：返回被包装命令的下标 / 内联脚本 / 无后续命令。 */
+function wrapperStep(name: string, values: string[], index: number, subsAt: boolean[] = []): WrapperStep {
+  const rest = index + 1
+  switch (name) {
+    case "env": {
+      let at = rest
+      while (at < values.length) {
+        const value = values[at]
+        if (value === "-S" || value === "--split-string") {
+          if (subsAt[at + 1]) refuse("env -S from substitution")
+          return { kind: "inline", text: values[at + 1] ?? "" }
+        }
+        if (value.startsWith("--split-string=")) return { kind: "inline", text: value.slice("--split-string=".length) }
+        if (value === "--") {
+          at += 1
+          break
+        }
+        if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(value)) {
+          at += 1
+          continue
+        }
+        if (value.startsWith("-") && value !== "-") {
+          at += value === "-u" || value === "-C" || value === "--unset" || value === "--chdir" ? 2 : 1
+          continue
+        }
+        break
+      }
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "timeout": {
+      const at = skipOpts(values, rest, new Set(["-s", "--signal", "-k", "--kill-after"])) + 1 // duration
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "nice": {
+      const at = skipOpts(values, rest, new Set(["-n", "--adjustment"]))
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "ionice": {
+      let at = rest
+      while (at < values.length && values[at].startsWith("-")) {
+        const value = values[at]
+        at += value === "-p" || value === "-P" || value === "-c" || value === "-n" || value === "-t" ? 2 : 1
+      }
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "xargs": {
+      let at = rest
+      while (at < values.length) {
+        const value = values[at]
+        if (value === "--") {
+          at += 1
+          break
+        }
+        if (!value.startsWith("-") || value === "-") break
+        const flag = value.includes("=") ? value.slice(0, value.indexOf("=")) : value
+        at += XARGS_VALUE_FLAGS.has(flag) ? 2 : 1
+      }
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "command": {
+      if (values[rest] === "-v" || values[rest] === "-V") return { kind: "end" }
+      const at = skipOpts(values, rest, new Set())
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "exec": {
+      const at = skipOpts(values, rest, new Set(["-a"]))
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "time": {
+      const at = skipOpts(values, rest, new Set(["-f", "--format", "-o", "--output"]))
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "stdbuf": {
+      const at = skipOpts(values, rest, new Set(["-i", "-o", "-e", "--input", "--output", "--error"]))
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    case "setsid":
+    case "nohup":
+    case "builtin":
+    case "chronic":
+    case "busybox": {
+      const at = skipOpts(values, rest, new Set())
+      return at < values.length ? { kind: "next", index: at } : { kind: "end" }
+    }
+    default:
+      return rest < values.length ? { kind: "next", index: rest } : { kind: "end" }
+  }
+}
+
+function refuse(reason: string): never {
+  throw new MonitorPolicyError(`command refused by monitor policy (${reason})`)
+}
+
+function checkCommand(
+  name: string,
+  args: string[],
+  argSubs: boolean[],
+  inputRedirect: boolean,
+  pipelineIndex: number,
+  depth: number,
+): void {
+  if (!name) return
+  if (HARD_DENY.has(name) || name.startsWith("mkfs.")) refuse(name)
+  // 命令位出现未展开的变量/反引号：无法证明它指向什么，直接拒绝。
+  if (/[$`]/.test(name)) refuse("unresolved command name")
+
+  if (SHELL_NAMES.has(name)) {
+    if (inputRedirect) refuse("shell reading script from stdin/file")
+    let sawC = false
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]
+      let script: string | undefined
+      let scriptHasSub = false
+      if (arg === "-c" || /^-[A-Za-z]*c[A-Za-z]*$/.test(arg)) {
+        sawC = true
+        script = args[index + 1]
+        scriptHasSub = argSubs[index + 1] === true
+      } else if (/^-[A-Za-z]*c.+$/.test(arg)) {
+        sawC = true
+        script = arg.slice(arg.indexOf("c") + 1)
+        scriptHasSub = argSubs[index] === true
+      }
+      if (script !== undefined) {
+        // 外层 $( )/反引号的输出会变成内层脚本（bash -c "$(echo sudo) id"），无法静态证明 → 拒绝。
+        if (scriptHasSub) refuse("shell script from substitution")
+        assertCommandInternal(script, depth + 1)
+        return
+      }
+    }
+    if (sawC) refuse("shell -c without script")
+    if (args.some((arg) => !arg.startsWith("-") && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(arg))) {
+      refuse("shell script file")
+    }
+    if (pipelineIndex > 0) refuse("pipe into shell")
+    return
+  }
+
+  const evalFlag = INTERPRETER_EVAL[name]
+  if (evalFlag && args.some((arg) => evalFlag.test(arg))) refuse(`${name} inline code`)
+  if (name === "deno" && args[0] === "eval") refuse("deno eval")
+
+  if (name === "find") {
+    for (const arg of args) {
+      if (arg === "-exec" || arg === "-execdir" || arg === "-ok" || arg === "-okdir") refuse("find -exec")
+      if (arg === "-delete") refuse("find -delete")
     }
   }
 
-  if (SHELL_NAMES.has(command)) {
-    if (args.some((arg) => arg === "-c" || /^-[A-Za-z]*c[A-Za-z]*$/.test(arg))) {
-      throw new MonitorPolicyError("command refused by monitor policy (shell -c)")
-    }
-    if (pipelineIndex > 0) {
-      throw new MonitorPolicyError("command refused by monitor policy (pipe into shell)")
-    }
+  if (DEVICE_WRITE_COMMANDS.has(name)) {
+    if (args.some((arg) => DEVICE_SOURCE.test(arg))) refuse(`${name} /dev/zero`)
   }
+  if (name === "dd" && args.some((arg) => arg.startsWith("of=/dev/"))) refuse("dd of=/dev/")
 
-  if (command === "dd" && values.some((value) => value.startsWith("of=/dev/"))) {
-    throw new MonitorPolicyError("command refused by monitor policy (dd of=/dev/)")
-  }
-
-  if (command === "rm") {
+  if (name === "rm") {
     let recursive = false
     let force = false
     for (const arg of args) {
@@ -304,13 +661,95 @@ function checkSegment(words: ShellToken[], pipelineIndex: number, depth: number)
         if (flags.includes("f")) force = true
       }
     }
-    if (recursive && force) {
-      throw new MonitorPolicyError("command refused by monitor policy (rm recursive+force)")
-    }
-    if (recursive && args.some((arg) => arg === "/" || arg === "/*" || arg === "//")) {
-      throw new MonitorPolicyError("command refused by monitor policy (rm -r /)")
-    }
+    if (recursive && force) refuse("rm recursive+force")
+    if (recursive && args.some((arg) => arg === "/" || arg === "/*" || arg === "//")) refuse("rm -r /")
   }
+}
+
+function analyzeSingle(
+  values: string[],
+  start: number,
+  subsAt: boolean[],
+  inputRedirect: boolean,
+  pipelineIndex: number,
+  depth: number,
+): void {
+  let index = start
+  let guard = 0
+  while (index < values.length) {
+    guard += 1
+    if (guard > 12) refuse("nested wrapper")
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(values[index])) {
+      index += 1
+      continue
+    }
+    // 命令位来自替换（$(echo sudo)）：实际执行的词不可静态证明 → 拒绝。
+    if (subsAt[index]) refuse("command substitution at command position")
+    const name = basename(values[index])
+    if (!name) return
+    if (WRAPPERS.has(name)) {
+      const step = wrapperStep(name, values, index, subsAt)
+      if (step.kind === "end") return
+      if (step.kind === "inline") {
+        if (step.text.trim()) assertCommandInternal(step.text, depth + 1)
+        return
+      }
+      index = step.index
+      continue
+    }
+    checkCommand(name, values.slice(index + 1), subsAt.slice(index + 1), inputRedirect, pipelineIndex, depth)
+    return
+  }
+}
+
+/** 命令位可能由花括号展开成多个候选（`s{udo,}`）；逐个候选独立判定。 */
+function analyzeCommand(
+  values: string[],
+  start: number,
+  subsAt: boolean[],
+  inputRedirect: boolean,
+  pipelineIndex: number,
+  depth: number,
+): void {
+  const alternatives = expandBraces(values[start])
+  for (const alternative of alternatives) {
+    const next = values.slice()
+    next[start] = alternative
+    analyzeSingle(next, start, subsAt, inputRedirect, pipelineIndex, depth)
+  }
+}
+
+function checkSegment(segment: ShellToken[], pipelineIndex: number, depth: number): void {
+  for (const word of segment) {
+    for (const sub of word.subs) assertCommandInternal(sub, depth + 1)
+  }
+  const words: ShellToken[] = []
+  let inputRedirect = false
+  const redirectTargets: string[] = []
+  for (let index = 0; index < segment.length; index += 1) {
+    const token = segment[index]
+    if (token.op) {
+      if (token.redirect) {
+        if (token.redirect.startsWith("<")) inputRedirect = true
+        const target = segment[index + 1]
+        if (target && !target.op) {
+          redirectTargets.push(target.value)
+          index += 1
+        }
+      }
+      continue
+    }
+    words.push(token)
+  }
+  for (const target of redirectTargets) {
+    if (/^\/dev\/(?:sd|nvme|hd|vd|dm-|md)/.test(target)) refuse("raw device write")
+  }
+  const values = words.map((word) => word.value)
+  const subsAt = words.map((word) => word.subs.length > 0)
+  let index = 0
+  while (index < values.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(values[index])) index += 1
+  if (index >= values.length) return
+  analyzeCommand(values, index, subsAt, inputRedirect, pipelineIndex, depth)
 }
 
 function assertCommandInternal(command: string, depth: number): void {
@@ -324,6 +763,11 @@ function assertCommandInternal(command: string, depth: number): void {
   }
   for (const token of tokens) {
     if (!token.op) {
+      segment.push(token)
+      continue
+    }
+    if (token.redirect) {
+      // 重定向属于当前段：保留 token（目标词在 checkSegment 里识别）。
       segment.push(token)
       continue
     }
@@ -382,10 +826,16 @@ function db(): Database {
     started_at INTEGER NOT NULL,
     ended_at INTEGER,
     last_lines TEXT NOT NULL DEFAULT '[]',
-    pid INTEGER
+    pid INTEGER,
+    child_pid INTEGER,
+    child_pgid INTEGER,
+    truncated_count INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS session_monitors_session ON session_monitors(session_id, status);`)
   ensureColumn(next, "session_monitors", "pid", "INTEGER")
+  ensureColumn(next, "session_monitors", "child_pid", "INTEGER")
+  ensureColumn(next, "session_monitors", "child_pgid", "INTEGER")
+  ensureColumn(next, "session_monitors", "truncated_count", "INTEGER NOT NULL DEFAULT 0")
   connection = next
   return next
 }
@@ -408,10 +858,13 @@ interface ActiveMonitor {
   startedAt: number
   eventCount: number
   droppedCount: number
+  truncatedCount: number
   lastLines: string[]
   windowStart: number
   windowCount: number
   finished: boolean
+  childPid: number | null
+  childPgid: number | null
   kill: () => void
   timer?: ReturnType<typeof setTimeout>
   state?: SessionStateLike
@@ -460,8 +913,18 @@ function expiryMessage(minutes: number, events: number): string {
 
 function persistCounters(handle: ActiveMonitor, status = "running", endedAt: number | null = null): void {
   db()
-    .query("UPDATE session_monitors SET status=?,event_count=?,dropped_count=?,ended_at=?,last_lines=? WHERE id=?")
-    .run(status, handle.eventCount, handle.droppedCount, endedAt, JSON.stringify(handle.lastLines), handle.id)
+    .query(
+      "UPDATE session_monitors SET status=?,event_count=?,dropped_count=?,truncated_count=?,ended_at=?,last_lines=? WHERE id=?",
+    )
+    .run(
+      status,
+      handle.eventCount,
+      handle.droppedCount,
+      handle.truncatedCount,
+      endedAt,
+      JSON.stringify(handle.lastLines),
+      handle.id,
+    )
 }
 
 function emitMonitorFrame(
@@ -568,6 +1031,21 @@ function killProcessGroup(proc: ReturnType<typeof Bun.spawn>): void {
   killer.unref?.()
 }
 
+/** 按进程组回收（reaper 用：只拿得到 DB 里的 pgid，没有 Bun.spawn 句柄）。 */
+function killProcessGroupId(pgid: number): void {
+  if (!Number.isInteger(pgid) || pgid <= 1) return
+  const signalGroup = (signal: NodeJS.Signals): void => {
+    try {
+      process.kill(-pgid, signal)
+    } catch {
+      // ESRCH：组已不存在。
+    }
+  }
+  signalGroup("SIGTERM")
+  const killer = setTimeout(() => signalGroup("SIGKILL"), MONITOR_KILL_GRACE_MS)
+  killer.unref?.()
+}
+
 function spawnCommand(handle: ActiveMonitor, command: string): void {
   const cwd = process.env.HARNESS_WORKSPACE || "/opt/agent-harness/workspace"
   const proc = Bun.spawn(["bash", "-lc", command], {
@@ -579,25 +1057,53 @@ function spawnCommand(handle: ActiveMonitor, command: string): void {
     detached: true,
   })
   handle.kill = () => killProcessGroup(proc)
+  // P1：DB 里记的是采集子进程（detached → 自成一个进程组），不是 gateway 自己的 pid。
+  // gateway 被 SIGKILL 后，新进程据此 kill(-pgid) 回收孤儿。
+  handle.childPid = proc.pid
+  handle.childPgid = proc.pid
+  try {
+    db()
+      .query("UPDATE session_monitors SET child_pid=?,child_pgid=? WHERE id=?")
+      .run(proc.pid, proc.pid, handle.id)
+  } catch (e) {
+    console.error(`[gateway] monitor ${handle.id} failed to record child pid:`, e)
+  }
 
   void (async () => {
     const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader()
     const decoder = new TextDecoder()
     let buffer = ""
+    let overflowed = false
     try {
       for (;;) {
         const { value, done } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
+        // P2：无换行的输出曾把 buffer 撑成无界；超过上限保留尾部并只记一次 output_truncated。
+        if (buffer.length > MONITOR_BUFFER_MAX_CHARS) {
+          buffer = buffer.slice(-MONITOR_BUFFER_MAX_CHARS)
+          if (!overflowed) {
+            overflowed = true
+            handle.truncatedCount += 1
+          }
+        }
         let newline = buffer.indexOf("\n")
         while (newline >= 0) {
           const line = buffer.slice(0, newline).replace(/\r$/, "")
           buffer = buffer.slice(newline + 1)
+          overflowed = false
           if (line.trim()) deliver(handle, line)
           newline = buffer.indexOf("\n")
         }
       }
       buffer += decoder.decode()
+      if (buffer.length > MONITOR_BUFFER_MAX_CHARS) {
+        buffer = buffer.slice(-MONITOR_BUFFER_MAX_CHARS)
+        if (!overflowed) {
+          overflowed = true
+          handle.truncatedCount += 1
+        }
+      }
       const tail = buffer.replace(/\r$/, "")
       if (tail.trim()) deliver(handle, tail)
     } catch (e) {
@@ -673,8 +1179,8 @@ export function startMonitor(
 
   const startedAt = Date.now()
   const inserted = db()
-    .query(`INSERT INTO session_monitors(session_id,description,command,ws_url,timeout_ms,status,event_count,dropped_count,started_at,ended_at,last_lines,pid)
-      VALUES(?,?,?,?,?,'running',0,0,?,NULL,'[]',?)`)
+    .query(`INSERT INTO session_monitors(session_id,description,command,ws_url,timeout_ms,status,event_count,dropped_count,truncated_count,started_at,ended_at,last_lines,pid)
+      VALUES(?,?,?,?,?,'running',0,0,0,?,NULL,'[]',?)`)
     .run(sid, description.slice(0, 200), command || null, ws || null, timeoutMs, startedAt, process.pid)
   const id = Number(inserted.lastInsertRowid)
 
@@ -686,10 +1192,13 @@ export function startMonitor(
     startedAt,
     eventCount: 0,
     droppedCount: 0,
+    truncatedCount: 0,
     lastLines: [],
     windowStart: startedAt,
     windowCount: 0,
     finished: false,
+    childPid: null,
+    childPgid: null,
     kill: () => {},
   }
   active.set(id, handle)
@@ -742,16 +1251,21 @@ export function listMonitors(sessionId: string): MonitorView[] {
 }
 
 /** 会话拆除/显式取消时一并收档；返回实际停止的监视数。 */
-export function killSessionMonitors(sessionId: string): number {
+export function killSessionMonitors(sessionId: string, reason = "stopped"): number {
   const sid = typeof sessionId === "string" ? sessionId.trim() : ""
   if (!sid) throw new Error("sessionId is required")
   let stopped = 0
   for (const handle of [...active.values()]) {
     if (handle.sessionId !== sid) continue
-    finishMonitor(handle, "stopped")
+    finishMonitor(handle, "stopped", reason)
     stopped += 1
   }
-  const res = db().query("UPDATE session_monitors SET status='stopped',ended_at=? WHERE session_id=? AND status='running'").run(Date.now(), sid)
+  // 只动本进程 owner 的行：另一个存活 gateway 进程对同一 session 的监视不被误杀。
+  const res = db()
+    .query(
+      "UPDATE session_monitors SET status='stopped',ended_at=? WHERE session_id=? AND status='running' AND (pid IS NULL OR pid=?)",
+    )
+    .run(Date.now(), sid, process.pid)
   return stopped + Number(res.changes)
 }
 
@@ -790,6 +1304,32 @@ interface MonitorReaper {
 let reaper: MonitorReaper | null = null
 
 /**
+ * 会话存活判定：与其它 /internal 路由同一解析链。
+ * - gateway 会话：resolveSession 含 gateway id / opencode id / DB 懒加载；
+ * - 子代理会话：subagentParentState 回溯父会话。
+ * 旧实现用 `sessions.has(id)`，而 sessions 的键是 gateway UUID —— 用 opencode id
+ * 或子会话 id 创建的 monitor 会被每一拍当成「会话已消失」秒杀（P1）。
+ */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+function sessionAlive(sessionId: string): boolean {
+  try {
+    return Boolean(resolveSession(sessionId) ?? subagentParentState(sessionId))
+  } catch (e) {
+    // 解析链异常（DB/宿主）时不误杀正在工作的监视。
+    console.error("[gateway] monitor session liveness check failed:", e)
+    return true
+  }
+}
+
+/**
  * 启动全局 reaper（单实例、幂等、.unref()）：刷计数、按墙钟判超时，
  * 收档进程重启后失去内存句柄且 owner pid 已死的 running 行（M3：活跃进程的行绝不动），
  * 并在会话已拆除时杀整个监视进程组（M2 的接线点，无需改 sessions-core）。
@@ -802,18 +1342,29 @@ export function startMonitorReaper(opts: { intervalMs?: number } = {}): () => vo
   const tick = (): void => {
     try {
       const now = Date.now()
+      const goneSessions = new Set<string>()
       for (const handle of [...active.values()]) {
         // 会话已被 teardown/DELETE：监视不得继续占用子进程，整组收档。
-        // 只看内存表：绝不能在这里 resolveSession——DB 懒加载会把已 teardown 的会话复活。
-        if (!sessions.has(handle.sessionId)) {
-          finishMonitor(handle, "stopped", "session gone")
+        if (!sessionAlive(handle.sessionId)) {
+          goneSessions.add(handle.sessionId)
           continue
         }
         persistCounters(handle, "running", null)
         if (now - handle.startedAt >= handle.timeoutMs) finishMonitor(handle, "expired")
       }
+      // P1：killSessionMonitors 接到会话消失检测，不再是从未被呼叫的死码。
+      for (const sid of goneSessions) {
+        try {
+          const killed = killSessionMonitors(sid, "session gone")
+          console.log(`[gateway] monitor session gone: session=${sid} stopped=${killed}`)
+        } catch (e) {
+          console.error(`[gateway] killSessionMonitors failed for ${sid}:`, e)
+        }
+      }
       const orphans = db()
-        .query("SELECT id,session_id,description,event_count,dropped_count,started_at,pid FROM session_monitors WHERE status='running'")
+        .query(
+          "SELECT id,session_id,description,event_count,dropped_count,started_at,pid,child_pid,child_pgid FROM session_monitors WHERE status='running'",
+        )
         .all() as Array<{
         id: number
         session_id: string
@@ -822,11 +1373,23 @@ export function startMonitorReaper(opts: { intervalMs?: number } = {}): () => vo
         dropped_count: number
         started_at: number
         pid: number | null
+        child_pid: number | null
+        child_pgid: number | null
       }>
       for (const row of orphans) {
         if (active.has(row.id)) continue
-        // M3：owner 仍存活的行不碰（可能是另一个 gateway 进程的监视）。
-        if (typeof row.pid === "number" && pidAlive(row.pid)) continue
+        // M3：另一个存活 gateway 进程持有的行不碰；本进程 pid 的遗留行按孤儿处理
+        //（pid 复用无法区分，宁可回收采集子进程也不留下孤儿）。
+        if (typeof row.pid === "number" && row.pid !== process.pid && pidAlive(row.pid)) continue
+        // P1：owner 已死 → 用 DB 里的采集子进程组 id 回收整组（不是 gateway pid）。
+        if (typeof row.child_pgid === "number" && row.child_pgid > 1) {
+          if (groupAlive(row.child_pgid)) {
+            killProcessGroupId(row.child_pgid)
+            console.log(
+              `[gateway] monitor orphan reaped: id=${row.id} owner=${row.pid ?? "none"} pgid=${row.child_pgid}`,
+            )
+          }
+        }
         db().query("UPDATE session_monitors SET status='expired',ended_at=? WHERE id=? AND status='running'").run(now, row.id)
         const minutes = Math.max(0, Math.round((now - row.started_at) / 60_000))
         emitMonitorFrame(

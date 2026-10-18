@@ -220,11 +220,18 @@ export interface PermissionDecision {
 
 export type RuleBuckets = Record<Behavior, Partial<Record<ProvenanceSource, string[]>>>
 
+export interface AutoAllowAuditEntry {
+  ts: number
+  tool: string
+}
+
 export interface PolicyStateSnapshot {
   sessionId: string
   tenant: string
   mode: PermissionMode
   prePlanMode?: PermissionMode
+  /** 会话显式 setMode 的模式；优先于 deriveMode 的自动推导（plan 状态除外）。 */
+  explicitMode?: PermissionMode
   autoModeActive: boolean
   bypassAvailable: boolean
   bypassDisabled: boolean
@@ -233,6 +240,8 @@ export interface PolicyStateSnapshot {
   additionalDirectories: string[]
   rules: RuleBuckets
   strippedDangerousRules?: Partial<Record<ProvenanceSource, string[]>>
+  /** auto 模式无规则命中时自动放行的审计环（最多 50 条）。 */
+  autoAllowAudit: AutoAllowAuditEntry[]
   updatedAt: number
 }
 
@@ -241,6 +250,7 @@ interface InternalPolicyState {
   tenant: string
   mode: PermissionMode
   prePlanMode?: PermissionMode
+  explicitMode?: PermissionMode
   autoModeActive: boolean
   bypassAvailable: boolean
   bypassDisabled: boolean
@@ -249,8 +259,11 @@ interface InternalPolicyState {
   additionalDirectories: Set<string>
   rules: RuleBuckets
   strippedDangerousRules?: Partial<Record<ProvenanceSource, string[]>>
+  autoAllowAudit: AutoAllowAuditEntry[]
   updatedAt: number
 }
+
+const MAX_AUTO_ALLOW_AUDIT = 50
 
 const states = new Map<string, InternalPolicyState>()
 /** state Map 容量上限：tenant/session 由调用方给，属本地信任边界，但仍须防无界增长。 */
@@ -309,17 +322,40 @@ function getState(sessionId: string, tenant: string): InternalPolicyState {
     restricted: false,
     additionalDirectories: new Set(),
     rules: emptyBuckets(),
+    autoAllowAudit: [],
     updatedAt: Date.now(),
   }
   states.set(key, state)
   if (states.size > MAX_POLICY_STATES) {
+    // 只有非保护状态可被淘汰：restricted / bypassDisabled / plan latch 丢了会静默解除限制。
     for (const oldest of states.keys()) {
       if (oldest === key) continue
+      const candidate = states.get(oldest)
+      if (candidate && isProtectedState(candidate)) continue
       states.delete(oldest)
       break
     }
+    // 全部受保护时宁可超上限也不丢 latch。
   }
   return state
+}
+
+/** 受保护的会话状态：任何 LRU 淘汰都不得清掉。 */
+function isProtectedState(state: InternalPolicyState): boolean {
+  return (
+    state.restricted === true ||
+    state.bypassDisabled === true ||
+    state.mode === "plan" ||
+    state.prePlanMode !== undefined
+  )
+}
+
+function recordAutoAllow(state: InternalPolicyState, tool: string): void {
+  state.autoAllowAudit.push({ ts: Date.now(), tool })
+  if (state.autoAllowAudit.length > MAX_AUTO_ALLOW_AUDIT) {
+    state.autoAllowAudit.splice(0, state.autoAllowAudit.length - MAX_AUTO_ALLOW_AUDIT)
+  }
+  state.updatedAt = Date.now()
 }
 
 /** 返回快照副本；调用方改动不影响内核状态。 */
@@ -330,6 +366,7 @@ export function getPolicyState(sessionId: string, tenant = "default"): PolicySta
     tenant: state.tenant,
     mode: state.mode,
     ...(state.prePlanMode ? { prePlanMode: state.prePlanMode } : {}),
+    ...(state.explicitMode ? { explicitMode: state.explicitMode } : {}),
     autoModeActive: state.autoModeActive,
     bypassAvailable: state.bypassAvailable,
     bypassDisabled: state.bypassDisabled,
@@ -340,6 +377,7 @@ export function getPolicyState(sessionId: string, tenant = "default"): PolicySta
     ...(state.strippedDangerousRules
       ? { strippedDangerousRules: bucketClone(state.strippedDangerousRules) }
       : {}),
+    autoAllowAudit: [...state.autoAllowAudit],
     updatedAt: state.updatedAt,
   }
 }
@@ -403,7 +441,8 @@ export function guardModeTransition(next: unknown, context: ModeGuardContext = {
 }
 
 /** 危险 allow 规则：可在 auto 模式下绕过分类器的任意执行面。
- * 归一化 `Bash(python:*)`、`Bash(python*)`、`Bash(python *)` 为同一危险形态。 */
+ * 归一化 `Bash(python:*)`、`Bash(python*)`、`Bash(python *)`、`Bash(./python*)`、
+ * `Bash(/usr/bin/python*)`、`Bash(FOO=1 python*)`、`Bash(cd /tmp && python*)` 为同一危险形态。 */
 export function isDangerousAllowRule(ruleText: string): boolean {
   const rule = parseRule(ruleText)
   if (!rule) return true
@@ -414,9 +453,31 @@ export function isDangerousAllowRule(ruleText: string): boolean {
   const normalized = content.trim()
   // 只有通配到「可执行档本身」的规则才危险：python:* / python* / python *。
   if (!/\*$/.test(normalized)) return false
-  const head = normalized.replace(/:\*$/, "").replace(/\*$/, "").trim()
-  const first = head.split(/\s+/)[0]?.toLowerCase().replace(/:$/, "") ?? ""
-  return DANGEROUS_EXEC_PREFIXES.has(first)
+  const head = dangerousCommandHead(normalized)
+  return DANGEROUS_EXEC_PREFIXES.has(head) || /^python\d*(?:\.\d+)*$/.test(head)
+}
+
+/** 取规则前缀最后一个简单命令的可执行档名（剥离 env 赋值、路径、目录切换与引号）。 */
+function dangerousCommandHead(content: string): string {
+  let head = content.trim().replace(/:\*$/, "").replace(/\*+$/, "").trim()
+  const segments = head
+    .split(/\|\||&&|[;|\n\r]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  head = segments[segments.length - 1] ?? head
+  const words = head.split(/\s+/).filter(Boolean)
+  let index = 0
+  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index++
+  // 常见包装器：command/env/sudo 后面的才是真实可执行档。
+  while (index < words.length && /^(?:command|env|sudo|nohup|timeout)$/i.test(words[index])) {
+    index++
+    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^-/.test(words[index]))) index++
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index++
+  }
+  let word = words[index] ?? ""
+  word = word.replace(/["']/g, "").replace(/\\(?![\\\s])/g, "")
+  if (word.includes("/")) word = word.slice(word.lastIndexOf("/") + 1)
+  return word.toLowerCase()
 }
 
 const SHELL_LIKE_TOOLS = new Set(["bash", "powershell", "shell", "exec", "run_py", "runpy", "python", "python3"])
@@ -547,6 +608,11 @@ export interface UpdateRulesInput {
   clear?: boolean
   /** 清空 deny 桶所需的进程级 token。 */
   clearToken?: string
+  /**
+   * 内部计划模式转移（enter/exit）标记：只改运行模式，不改「会话显式 setMode」。
+   * HTTP /rules 不传此字段。
+   */
+  fromPlanTransition?: boolean
 }
 
 export interface UpdateRulesResult {
@@ -603,6 +669,10 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
     }
 
     applyModeTransition(state, guard.mode)
+    // 会话显式 setMode 是 deriveMode 的最高优先真源；计划模式的内部转移不覆写它。
+    if (!input.fromPlanTransition && guard.mode !== "bypassPermissions") {
+      state.explicitMode = guard.mode
+    }
     return { ok: true, state: getPolicyState(sessionId, tenant), changed: 1 }
   }
 
@@ -671,18 +741,21 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
     return { ok: true, state: getPolicyState(sessionId, tenant), changed }
   }
   if (input.action === "replaceRules") {
-    // 空数组不得静默清空 deny：必须显式 clear:true 且带进程级 token。
-    if (behavior === "deny" && rules.length === 0) {
-      const expected = process.env.AGENT_PERMISSION_CLEAR_TOKEN ?? ""
-      if (input.clear !== true || !expected || input.clearToken !== expected) {
-        return {
-          ok: false,
-          code: "clear_forbidden",
-          error: "refusing to empty the deny bucket without clear:true and a valid clearToken",
-        }
+    // deny 桶只能由带进程级 token 的显式操作收缩：空数组不是唯一入口，
+    // 非空 replace 删掉既有 deny 规则同样要 token。
+    const next = [...new Set(rules)]
+    const nextSet = new Set(next)
+    const removesDenyRule =
+      behavior === "deny" && (next.length === 0 || existing.some((rule) => !nextSet.has(rule)))
+    // 清空整个 deny 桶仍要求 clear:true；非空收缩只要求 token。
+    if (removesDenyRule && !hasDenyClearToken(input, next.length === 0)) {
+      return {
+        ok: false,
+        code: "clear_forbidden",
+        error: "refusing to remove deny rules without clear:true and a valid clearToken",
       }
     }
-    bucket[destination] = [...new Set(rules)]
+    bucket[destination] = next
     if (behavior === "allow" && state.mode === "auto") stripDangerousAllowRules(state)
     state.updatedAt = Date.now()
     return { ok: true, state: getPolicyState(sessionId, tenant), changed: rules.length }
@@ -691,9 +764,23 @@ export function updateRules(input: UpdateRulesInput): UpdateRulesResult {
   const remove = new Set(rules)
   const next = existing.filter((rule) => !remove.has(rule))
   const changed = existing.length - next.length
+  if (behavior === "deny" && changed > 0 && !hasDenyClearToken(input)) {
+    return {
+      ok: false,
+      code: "clear_forbidden",
+      error: "refusing to remove deny rules without clear:true and a valid clearToken",
+    }
+  }
   bucket[destination] = next
   state.updatedAt = Date.now()
   return { ok: true, state: getPolicyState(sessionId, tenant), changed }
+}
+
+/** deny 桶收缩的唯一授权：与进程环境一致的 token；清空整桶时另需 clear:true。 */
+function hasDenyClearToken(input: UpdateRulesInput, emptying = false): boolean {
+  const expected = process.env.AGENT_PERMISSION_CLEAR_TOKEN ?? ""
+  if (expected.length === 0 || input.clearToken !== expected) return false
+  return emptying ? input.clear === true : true
 }
 
 // ── 路径安全（safetyCheck，bypass 不可绕） ─────────────────────────────────
@@ -705,6 +792,7 @@ export type PathSafetyKind =
   | "symlink"
   | "settings_file"
   | "shell_rc"
+  | "credential_file"
   | "env_file"
   | "control_directory"
 
@@ -752,6 +840,22 @@ const SETTINGS_BASENAMES = new Set([
   "managed-settings.json",
 ])
 
+/** 凭证/身份设档：改动可改写 git/npm 身份或注入 registry token。 */
+const CREDENTIAL_BASENAMES = new Set([
+  ".gitconfig",
+  ".npmrc",
+  ".netrc",
+  ".pgpass",
+  ".pypirc",
+  ".dockerconfigjson",
+])
+
+/** fish 的 functions 目录下的档会在每个 shell 启动时被 source。 */
+function isFishFunctionPath(path: string): boolean {
+  const normalized = lower(path)
+  return normalized.includes("/.config/fish/functions/") || normalized.startsWith(".config/fish/functions/")
+}
+
 function normalizePathString(path: string): string {
   return path.replace(/\\/g, "/")
 }
@@ -793,6 +897,11 @@ function isShellRc(path: string): boolean {
 
 function isEnvFile(path: string): boolean {
   return /^\.env(?:$|[.\-_])/.test(basenameOf(path))
+}
+
+function isCredentialFile(path: string): boolean {
+  if (CREDENTIAL_BASENAMES.has(basenameOf(path))) return true
+  return isFishFunctionPath(path)
 }
 
 function hasControlSegment(path: string): boolean {
@@ -855,6 +964,9 @@ export function checkPathSafety(
   if (isSettingsFile(normalized)) {
     return result("ask", "settings_file", "write target is a permission/settings file and always requires confirmation")
   }
+  if (isCredentialFile(normalized)) {
+    return result("deny", "credential_file", "write target is a credential/identity file and can leak or hijack credentials")
+  }
   if (isShellRc(normalized)) {
     return result("deny", "shell_rc", "write target is a shell startup file and can execute code")
   }
@@ -891,33 +1003,78 @@ export interface PermissionContext {
   isReadOnlyTool?: (tool: string) => boolean
   /** 路径比较是否大小写不敏感；缺省按平台。 */
   caseInsensitivePath?: boolean
+  /** 计划模式计划文件绝对路径：写它本身是计划模式的合法动作，不视为越界写。 */
+  planFilePath?: string
 }
 
-const READ_ONLY_TOOLS = new Set([
-  "read",
-  "read_file",
-  "list",
-  "list_dir",
-  "ls",
-  "glob",
-  "grep",
-  "stat",
-  "lsp",
-  "read_image",
-  "vision_analyze",
-  "webfetch",
-  "web_fetch",
-  "fetch",
-  "websearch",
-  "web_search",
-  "todo_read",
-  "todo_status",
-  "task_status",
-  "subagent_status",
-  "workflow_status",
-  "image_get_result",
-  "video_result_fetch",
-])
+/**
+ * 计划/权限共用的只读工具唯一真源。
+ * - plan-http 通过 /internal/plan/state 的 read_only_tools 下发；
+ * - 权限内核的 plan 分支与 isReadOnlyTool 直接引用本常量；
+ * - 插件在网关不可用时使用的 fallback 必须与本表逐项一致（跨树无法 import）。
+ */
+export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set(
+  [
+    "read",
+    "read_file",
+    "list",
+    "list_dir",
+    "ls",
+    "glob",
+    "grep",
+    "stat",
+    "lsp",
+    "lsp_diagnostics",
+    "read_image",
+    "vision_analyze",
+    "webfetch",
+    "web_fetch",
+    "fetch",
+    "websearch",
+    "web_search",
+    "search_web",
+    "search_aggregate",
+    "smart_search",
+    "todo_read",
+    "todo_status",
+    "task_status",
+    "task_list",
+    "task_get",
+    "subagent_status",
+    "workflow_status",
+    "workflow_history",
+    "image_get_result",
+    "video_result_fetch",
+    "video_analyze",
+    "video_measure",
+    "video_transcribe",
+    "video_evidence",
+    "timeline_query",
+    "canvas_get_state",
+    "director_get_state",
+    "quota",
+    "memory_recall",
+    "asset_search",
+    "asset_get",
+    "character_card_list",
+    "whoami",
+  ].map((name) => name.toLowerCase()),
+)
+
+const READ_ONLY_TOOLS = PLAN_READ_ONLY_TOOLS
+
+/** 计划模式下必须放行的控制类工具（进入/退出计划、向用户提问）。 */
+export const PLAN_CONTROL_TOOLS: ReadonlySet<string> = new Set(
+  [
+    "enter_plan_mode",
+    "exit_plan_mode",
+    "enterplanmode",
+    "exitplanmode",
+    "ask",
+    "askuserquestion",
+    "ask_parent",
+  ].map((name) => name.toLowerCase()),
+)
 
 /** HTTP 面（permission-http）需要的只读判定：与 evaluate 内部缺省语义同源。 */
 export function isReadOnlyTool(tool: string): boolean {
@@ -970,11 +1127,6 @@ function isReadOnly(tool: string, context: PermissionContext): boolean {
   return READ_ONLY_TOOLS.has(tool.toLowerCase())
 }
 
-/** 对内/对外共用的只读工具判定（HTTP 响应回传，供插件使用）。 */
-export function isReadOnlyTool(tool: string): boolean {
-  return typeof tool === "string" && READ_ONLY_TOOLS.has(tool.toLowerCase())
-}
-
 function isEditTool(tool: string): boolean {
   return EDIT_TOOLS.has(tool.toLowerCase())
 }
@@ -1009,13 +1161,13 @@ function pathsFromTool(tool: string, input: Record<string, unknown>): string[] {
           : typeof input.input === "string"
             ? input.input
             : ""
-    for (const match of patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)) {
+    for (const match of patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*(.+)$/gm)) {
       const path = match[1]?.trim()
-      if (path) paths.add(path)
+      if (path && path !== "/dev/null") paths.add(path)
     }
     for (const match of patchText.matchAll(/^(?:\+\+\+|---) [ab]\/(.+)$/gm)) {
       const path = match[1]?.trim()
-      if (path) paths.add(path)
+      if (path && path !== "/dev/null") paths.add(path)
     }
     const keys = PATH_ARG_KEYS[name] ?? []
     for (const key of keys) {
@@ -1144,6 +1296,8 @@ function withinAnyRoot(rawPath: string, context: PermissionContext): boolean {
     const value = caseInsensitive ? candidate.toLowerCase() : candidate
     for (const root of roots) {
       const rootValue = caseInsensitive ? root.toLowerCase() : root
+      // 根为 "/" 时 `${root}/` 会变成 "//"，永远不命中；单独处理。
+      if (rootValue === "" || rootValue === "/") return true
       if (value === rootValue || value.startsWith(`${rootValue}/`)) return true
     }
   }
@@ -1224,9 +1378,23 @@ export function splitSimpleCommands(command: string, depth = 0): string[] {
   return out
 }
 
-function matchBashContent(content: string, command: string): boolean {
-  const value = squashCommand(command)
-  let pattern = squashCommand(content)
+/** 命令位归一化（仅 deny 匹配）：剥引号/反斜线转义并把可执行档路径取 basename。
+ * 使 `r''m`、`r\m`、`/usr/bin/curl` 与规则 `rm` / `curl *` 同判。 */
+function normalizeDenyCommand(command: string): string {
+  const squashed = squashCommand(command)
+    .replace(/['"]/g, "")
+    .replace(/\\ /g, " ")
+    .replace(/\\(?![\\\s])/g, "")
+  const space = squashed.search(/\s/)
+  const head = space === -1 ? squashed : squashed.slice(0, space)
+  const rest = space === -1 ? "" : squashed.slice(space)
+  const base = head.includes("/") ? head.slice(head.lastIndexOf("/") + 1) : head
+  return `${base}${rest}`.trim()
+}
+
+function matchBashContent(content: string, command: string, denyMode = false): boolean {
+  const value = squashCommand(denyMode ? normalizeDenyCommand(command) : command)
+  let pattern = squashCommand(denyMode ? normalizeDenyCommand(content) : content)
   if (/^[\s*]+$/.test(pattern)) return true
   // 前缀放行不得跨过 shell 控制符：`git status -s && rm -rf /` 不是 `git status *`。
   const compound = COMPOUND_COMMAND_RE.test(command) || COMPOUND_COMMAND_RE.test(value)
@@ -1346,7 +1514,8 @@ export function ruleMatches(
     if (!command) return false
     if (behavior === "deny") {
       // H1：任一段简单命令命中 deny 即拒；避免 `git status && rm -rf /` 逃逸。
-      return splitSimpleCommands(command).some((segment) => matchBashContent(content, segment))
+      // deny 匹配额外做命令位归一（引号/反斜线/绝对路径），挡纯文本变体。
+      return splitSimpleCommands(command).some((segment) => matchBashContent(content, segment, true))
     }
     return matchBashContent(content, command)
   }
@@ -1393,7 +1562,12 @@ interface ShellWriteTarget {
 }
 
 function resolveShellPath(raw: string, cwd: string, home: string): string {
-  const value = raw.trim().replace(/^["']|["']$/g, "").replace(/\\ /g, " ")
+  const value = raw
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\\ /g, " ")
+    // 子 shell 段可能以 `)` 结尾（`(cd /tmp; echo x > f)`）。
+    .replace(/\)+$/g, "")
   if (value === "~" || value.startsWith("~/")) {
     return normalizeAbsolute(posix.join(home, value.slice(1)))
   }
@@ -1411,6 +1585,108 @@ function splitShellSequence(command: string): string[] {
     .filter(Boolean)
 }
 
+/** 简单 shell 分词：去引号，保留变量与命令替换原文。 */
+function shellTokens(text: string): string[] {
+  const out: string[] = []
+  const re = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s;&|()]+)/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text))) {
+    const token = match[1] ?? match[2] ?? match[3] ?? ""
+    if (token) out.push(token)
+  }
+  return out
+}
+
+function isOptionToken(token: string): boolean {
+  return token.length > 1 && token.startsWith("-")
+}
+
+function optionValueTargets(command: string, args: string[]): string[] {
+  const targets: string[] = []
+  const operands: string[] = []
+  let targetDirectory: string | null = null
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === "-t" || arg === "--target-directory") {
+      targetDirectory = args[i + 1] ?? targetDirectory
+      i++
+      continue
+    }
+    if (arg.startsWith("--target-directory=")) {
+      targetDirectory = arg.slice("--target-directory=".length)
+      continue
+    }
+    if (isOptionToken(arg)) continue
+    operands.push(arg)
+  }
+
+  if (command === "tee") {
+    for (const operand of operands) targets.push(operand)
+    return targets
+  }
+  if (command === "ln" || command === "truncate") {
+    if (targetDirectory) targets.push(targetDirectory)
+    // truncate: 最后 operand 是档；ln: 最后 operand 是 link／目录。
+    const last = operands[operands.length - 1]
+    if (last) targets.push(last)
+    return targets
+  }
+  if (command === "cp" || command === "mv" || command === "install") {
+    if (targetDirectory) {
+      targets.push(targetDirectory)
+      return targets
+    }
+    const last = operands[operands.length - 1]
+    if (operands.length >= 2 && last) targets.push(last)
+    return targets
+  }
+  return targets
+}
+
+/** sed 的写目标：in-place 时最后一个非选项 operand（`--in-place` 与 `-i` 同判）。 */
+function sedInPlaceTarget(args: string[]): string | null {
+  let inPlace = false
+  let hasScriptOption = false
+  const operands: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === "-e" || arg === "-f") {
+      hasScriptOption = true
+      i++
+      continue
+    }
+    if (arg === "--in-place" || arg.startsWith("--in-place=") || /^-[a-zA-Z]*i(?:\.[^\s]*)?$/.test(arg)) {
+      inPlace = true
+      continue
+    }
+    if (isOptionToken(arg)) continue
+    operands.push(arg)
+  }
+  if (!inPlace) return null
+  const needed = hasScriptOption ? 1 : 2
+  if (operands.length < needed) return null
+  return operands[operands.length - 1] ?? null
+}
+
+/** python -c 中的 open(path, "w") 落点。 */
+function pythonOpenTargets(args: string[]): string[] {
+  const codeIndex = args.indexOf("-c")
+  const code = codeIndex === -1 ? "" : args[codeIndex + 1] ?? ""
+  if (!code || !/\bopen\s*\(/.test(code)) return []
+  const targets: string[] = []
+  let literal = false
+  for (const match of code.matchAll(/\bopen\s*\(\s*(['"])([^'"]+)\1\s*(?:,\s*(['"])([^'"]*)\3)?/g)) {
+    literal = true
+    const mode = match[4] ?? ""
+    if (!mode || /[wax+]/.test(mode)) targets.push(match[2])
+  }
+  if (!literal) {
+    // 目标无法静态判定：动态目标交给 ask 分支（敏感字面量仍会 deny）。
+    targets.push("$python_open")
+  }
+  return targets
+}
+
 function shellWriteTargetsIn(segment: string): string[] {
   const targets = new Set<string>()
   // 覆盖 `>|`、`>>|`（noclobber override 不能绕过写路径闸）。
@@ -1420,22 +1696,26 @@ function shellWriteTargetsIn(segment: string): string[] {
   for (const match of segment.matchAll(/(?:^|\s)&(?:\|?)>>?\|?\s*("?)([^\s;&|>]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
-  for (const match of segment.matchAll(/\btee\s+(?:-a\s+)?("?)([^\s;&|]+)\1/g)) {
-    if (match[2]) targets.add(match[2])
-  }
-  for (const match of segment.matchAll(
-    /\bsed\s+-[a-zA-Z]*i[a-zA-Z]*(?:\s+(?:-[^\s]+\s+)*)(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s+("?)([^\s;&|]+)\1/g,
-  )) {
-    if (match[2]) targets.add(match[2])
-  }
-  for (const match of segment.matchAll(/\b(?:cp|mv|install)\s+(?:-[^\s]+\s+)*("?)([^\s;&|]+)\1\s+("?)([^\s;&|]+)\3/g)) {
-    if (match[4]) targets.add(match[4])
-  }
-  for (const match of segment.matchAll(/\brm\s+(?:-[^\s]+\s+)*("?)([^\s;&|]+)\1/g)) {
-    if (match[2]) targets.add(match[2])
-  }
   for (const match of segment.matchAll(/\bdd\s+[^;&|]*\bof=("?)([^\s;&|]+)\1/g)) {
     if (match[2]) targets.add(match[2])
+  }
+
+  const tokens = shellTokens(segment)
+  let index = 0
+  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index++
+  const command = (tokens[index] ?? "").split("/").pop()?.toLowerCase() ?? ""
+  const args = tokens.slice(index + 1)
+  if (!command) return [...targets]
+
+  if (command === "sed") {
+    const target = sedInPlaceTarget(args)
+    if (target) targets.add(target)
+  } else if (command === "tee" || command === "ln" || command === "truncate" || command === "cp" || command === "mv" || command === "install") {
+    for (const target of optionValueTargets(command, args)) targets.add(target)
+  } else if (command === "rm") {
+    for (const arg of args) if (!isOptionToken(arg)) targets.add(arg)
+  } else if (/^python(?:\d+(?:\.\d+)*)?$/.test(command)) {
+    for (const target of pythonOpenTargets(args)) targets.add(target)
   }
   return [...targets]
 }
@@ -1444,7 +1724,8 @@ function bashWriteTargets(command: string, cwd: string, home: string): ShellWrit
   const targets: ShellWriteTarget[] = []
   let current: string | null = cwd
   for (const segment of splitShellSequence(command)) {
-    const cdMatch = /^cd(?:\s+--)?\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))$/.exec(segment)
+    // 支持 `cd`、`pushd` 与子 shell 前导 `(`（`(cd /tmp; ...)`）。
+    const cdMatch = /^[\s(]*(?:cd|pushd)(?:\s+--)?\s+("([^"]+)"|'([^']+)'|([^\s;&|)]+))/.exec(segment)
     if (cdMatch) {
       const rawDir = cdMatch[2] ?? cdMatch[3] ?? cdMatch[4] ?? ""
       current = /[$`]/.test(rawDir) ? null : resolveShellPath(rawDir, cwd, home)
@@ -1465,6 +1746,8 @@ function isSensitiveWriteText(text: string): boolean {
   const base = basenameOf(normalized)
   return (
     SHELL_RC_BASENAMES.has(base) ||
+    CREDENTIAL_BASENAMES.has(base) ||
+    isFishFunctionPath(normalized) ||
     isSettingsFile(normalized) ||
     isEnvFile(normalized) ||
     normalized.includes("/.ssh") ||
@@ -1702,14 +1985,30 @@ function allowSuggestion(tool: string, matchedRule?: string): PermissionSuggesti
   }
 }
 
+/** 计划模式的合法动作：控制类工具与「写计划文件」不受 plan floor 拦截。 */
+function isPlanControlTool(tool: string): boolean {
+  return PLAN_CONTROL_TOOLS.has(tool.toLowerCase())
+}
+
+function isPlanFileWrite(tool: string, input: Record<string, unknown>, context: PermissionContext): boolean {
+  if (!context.planFilePath || !context.planFilePath.trim()) return false
+  if (!isEditTool(tool)) return false
+  const paths = pathsFromTool(tool, input)
+  if (paths.length === 0) return false
+  const target = normalizeAbsolute(normalizePathString(context.planFilePath))
+  return paths.every((path) => resolveSafetyPath(path, context) === target)
+}
+
+function planAllowsTool(tool: string, input: Record<string, unknown>, context: PermissionContext): boolean {
+  return isReadOnly(tool, context) || isPlanControlTool(tool) || isPlanFileWrite(tool, input, context)
+}
+
 function modeDecision(
   mode: PermissionMode,
   tool: string,
   input: Record<string, unknown>,
   context: PermissionContext,
 ): PermissionDecision {
-  const readOnly = isReadOnly(tool, context)
-
   if (mode === "bypassPermissions") {
     return {
       behavior: "allow",
@@ -1725,10 +2024,19 @@ function modeDecision(
   }
 
   if (mode === "plan") {
-    if (readOnly) {
+    if (planAllowsTool(tool, input, context)) {
       return {
         behavior: "allow",
-        reason: { type: "mode", mode, source: "mode", reason: "plan mode allows read-only calls" },
+        reason: {
+          type: "mode",
+          mode,
+          source: "mode",
+          reason: isPlanControlTool(tool)
+            ? "plan mode allows plan control tools"
+            : isPlanFileWrite(tool, input, context)
+              ? "plan mode allows writing the plan file"
+              : "plan mode allows read-only calls",
+        },
       }
     }
     return {
@@ -1773,16 +2081,18 @@ function modeDecision(
   }
 
   if (mode === "auto") {
+    // auto 的产品语义就是「无需确认」；没有规则命中时放行，而不是 fail-closed 卡死全部工具。
+    // 危险 allow 规则仍在进入 auto / 新增 allow 时被剥离（stripDangerousAllowRules），
+    // safetyCheck（写路径）与 deny 桶仍先于本分支生效。
     return {
-      behavior: "ask",
+      behavior: "allow",
       reason: {
         type: "classifier",
         mode,
         source: "mode",
-        classifier: "unavailable",
-        reason: "auto mode has no classifier wired; the call is held for confirmation",
+        classifier: "auto-allow",
+        reason: "auto mode allows calls without confirmation",
       },
-      suggestions: [allowSuggestion(tool)],
     }
   }
 
@@ -1851,10 +2161,10 @@ export function evaluateToolPermission(args: {
     return decision
   }
 
-  // 4. allow 桶（首命中）。plan 对非只读调用保留 ask。
+  // 4. allow 桶（首命中）。plan 对非计划合法动作保留 ask。
   const allowHit = firstRuleHit("allow", state, context, tool, input, mode === "auto")
   if (allowHit) {
-    if (mode === "plan" && !isReadOnly(tool, context)) {
+    if (mode === "plan" && !planAllowsTool(tool, input, context)) {
       return {
         behavior: "ask",
         reason: {
@@ -1870,8 +2180,10 @@ export function evaluateToolPermission(args: {
     return ruleDecision(allowHit, "allow")
   }
 
-  // 5. 模式兜底。
-  return modeDecision(mode, tool, input, context)
+  // 5. 模式兜底。auto 的自动放行落一条进程内审计（无规则命中路径）。
+  const decision = modeDecision(mode, tool, input, context)
+  if (decision.behavior === "allow" && mode === "auto") recordAutoAllow(state, tool)
+  return decision
 }
 
 // ── 与既有 deny 审计兼容 ──────────────────────────────────────────────────

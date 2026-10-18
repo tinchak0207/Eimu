@@ -47,6 +47,7 @@ export const AGENT_EVENT_NAMES = [
   "turn.done",
   "turn.status",
   "turn.plan",
+  "context.compacted",
   "confirm.request",
   "confirm.resolved",
   "quota.changed",
@@ -258,6 +259,12 @@ export interface AgentTurnStatus {
   text: string;
 }
 
+/** 网关 context.compacted 系统边界事件（压缩验证通过、水位推进后才发）。 */
+export interface AgentContextCompacted {
+  trigger: "auto" | "manual";
+  preTokens?: number;
+}
+
 /**
  * gateway（2026-09-18 契约，同事在网关端施工）—— 送讯后 ~1.4–2.0s 先到的
  * 「本轮计画」帧：由模型现算的真实计画（不是罐头），让使用者在重型回合
@@ -467,6 +474,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "director.done"; data: AgentDirectorDone }
     | { name: "turn.done"; data: AgentTurnDone }
     | { name: "turn.status"; data: AgentTurnStatus }
+    | { name: "context.compacted"; data: AgentContextCompacted }
     | { name: "turn.plan"; data: AgentTurnPlan }
     | { name: "confirm.request"; data: AgentConfirmRequest }
     | { name: "confirm.resolved"; data: AgentConfirmResolved }
@@ -795,6 +803,10 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       const text = str(d.text);
       if (text === undefined) return null;
       return { name, event_id: eventId, data: { text } };
+    }
+    case "context.compacted": {
+      const trigger = d.trigger === "manual" ? "manual" : "auto";
+      return { name, event_id: eventId, data: { trigger, preTokens: num(d.preTokens) } };
     }
     case "turn.plan": {
       // plan 是唯一必需栏位：空字串／缺栏位／非字串一律整帧丢弃（丢半张计画卡

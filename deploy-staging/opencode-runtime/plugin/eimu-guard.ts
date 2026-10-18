@@ -14,6 +14,7 @@
 
 import type { Plugin } from "@opencode-ai/plugin"
 import { stat } from "node:fs/promises"
+import { resolve as resolvePath } from "node:path"
 import {
   assertSafeFetchUrl,
   checkAgentPath,
@@ -39,21 +40,89 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const GATE_HTTP_TIMEOUT_MS = 800
 // H6：计划只读清单的单一真源在网关 /internal/plan/state 的 read_only_tools。
 // 本地集合只用于网关不可用时的 fail-closed 分类，不再是第二份计划规则。
+// 与 gateway/permission-policy.ts 的 PLAN_READ_ONLY_TOOLS 逐项一致（发布树不含 gateway，
+// 无法跨树 import）；网关可用时以 /internal/plan/state 下发的 read_only_tools 为准。
 const PLAN_READ_ONLY_FALLBACK: ReadonlySet<string> = new Set(
   [
-    "read", "list", "ls", "glob", "grep", "webfetch", "websearch", "whoami", "lsp_diagnostics",
+    "read", "read_file", "list", "list_dir", "ls", "glob", "grep", "stat", "lsp", "lsp_diagnostics",
+    "read_image", "vision_analyze", "webfetch", "web_fetch", "fetch", "websearch", "web_search",
+    "search_web", "search_aggregate", "smart_search", "todo_read", "todo_status", "task_status",
     "task_list", "task_get", "subagent_status", "workflow_status", "workflow_history",
-    "image_get_result", "video_result_fetch", "memory_recall", "asset_search", "asset_get",
-    "character_card_list", "search_web", "search_aggregate", "smart_search", "video_analyze",
-    "video_measure", "video_transcribe", "video_evidence", "vision_analyze", "read_image",
-    "timeline_query", "canvas_get_state", "director_get_state", "quota",
+    "image_get_result", "video_result_fetch", "video_analyze", "video_measure", "video_transcribe",
+    "video_evidence", "timeline_query", "canvas_get_state", "director_get_state", "quota",
+    "memory_recall", "asset_search", "asset_get", "character_card_list", "whoami",
   ].map((name) => name.toLowerCase()),
 )
 const PLAN_EXEMPT_TOOLS: ReadonlySet<string> = new Set(
-  ["enterplanmode", "exitplanmode", "askuserquestion", "enter_plan_mode", "exit_plan_mode", "ask_parent"].map((name) =>
-    name.toLowerCase(),
+  ["enterplanmode", "exitplanmode", "askuserquestion", "ask", "enter_plan_mode", "exit_plan_mode", "ask_parent"].map(
+    (name) => name.toLowerCase(),
   ),
 )
+
+/** 计划模式下允许写计划文件本身的编辑工具。 */
+const PLAN_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "write",
+  "write_file",
+  "edit",
+  "multiedit",
+  "patch",
+  "apply_patch",
+  "notebook_edit",
+  "str_replace",
+  "create_file",
+])
+
+/** 写计划文件（绝对路径）的判定：所有目标都必须等于计划文件。 */
+function isPlanFileTarget(tool: string, args: Record<string, unknown>, planFilePath: string): boolean {
+  if (!PLAN_FILE_WRITE_TOOLS.has(tool.toLowerCase())) return false
+  const targets = toolPathTargets(tool, args)
+  if (targets.length === 0) return false
+  const expected = normalizePluginPath(planFilePath)
+  return targets.every((target) => normalizePluginPath(target) === expected)
+}
+
+/** 工具参数里的写目标（含 patchText 的两种 patch 语法）。 */
+function toolPathTargets(tool: string, args: Record<string, unknown>): string[] {
+  const out = new Set<string>()
+  for (const key of ["filePath", "file_path", "path", "notebook_path", "notebookPath"]) {
+    const value = args[key]
+    if (typeof value === "string" && value) out.add(value)
+  }
+  if (tool === "patch" || tool === "apply_patch") {
+    const patchText =
+      typeof args.patchText === "string"
+        ? args.patchText
+        : typeof args.patch_text === "string"
+          ? args.patch_text
+          : typeof args.input === "string"
+            ? args.input
+            : ""
+    for (const target of patchTargets(patchText)) out.add(target)
+  }
+  return [...out]
+}
+
+/** `*** Add/Update/Delete File`、`*** Move to:` 与 GNU diff `--- a/` / `+++ b/`。 */
+function patchTargets(patchText: string): string[] {
+  const out = new Set<string>()
+  for (const match of patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*(.+)$/gm)) {
+    const target = match[1]?.trim()
+    if (target && target !== "/dev/null") out.add(target)
+  }
+  for (const match of patchText.matchAll(/^(?:\+\+\+|---) [ab]\/(.+)$/gm)) {
+    const target = match[1]?.trim()
+    if (target && target !== "/dev/null") out.add(target)
+  }
+  return [...out]
+}
+
+/** posix 风格绝对路径正规化（plugin 与 tool 均以 workspace 为 cwd）。 */
+function normalizePluginPath(raw: string): string {
+  const value = raw.trim().replace(/\\/g, "/")
+  if (!value) return ""
+  const absolute = value.startsWith("/") ? value : resolvePath(value)
+  return absolute.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
+}
 
 let gatewayGateWarned = false
 let defaultModeFallbackWarned = false
@@ -65,6 +134,24 @@ let hookGateWarned = false
 // PreToolUse 的 additional_context 刻意忽略：该上下文由网关记录，不回注工具参数/结果。
 const HOOK_HTTP_TIMEOUT_MS = 800
 const HOOK_CONTEXT_MAX_CHARS = 8000
+const HOOK_DATA_FENCE_OPEN = "⟦DATA⟧"
+const HOOK_DATA_FENCE_CLOSE = "⟦/DATA⟧"
+const HOOK_CREDENTIAL_LIKE_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
+
+/**
+ * PostToolUse 资料转义（2026-10-18）：hook 输出是外部文本，不得伪造章节、
+ * 凭证或围栏。与 gateway context-injection.escapeInjectedData 同语义；
+ * 插件进程不 import gateway 档，故在插件内保留这份最小实现。
+ */
+function escapeHookData(text: string): string {
+  if (!text) return text
+  return text
+    .replace(HOOK_CREDENTIAL_LIKE_RE, "⟪已移除的凭证样式文本⟫")
+    .replace(/\\?⟦/g, "\\⟦")
+    .replace(/\\?⟧/g, "\\⟧")
+    .replace(/\\?【/g, "\\【")
+    .replace(/^(\s*(?:[-*•]\s+)?)#/gm, "$1\\#")
+}
 
 interface HarnessHookResult {
   blocked: boolean
@@ -241,6 +328,8 @@ const COMPACTION_PROMPT = `只使用已有对话生成恢复摘要，纯文本�
 
 export const EimuGuard: Plugin = async ({ client }) => {
   const hydrating = new Map<string, Promise<void>>()
+  // 计划模式：sessionID → 网关下发的计划文件绝对路径（写它本身必须放行）。
+  const planFileBySession = new Map<string, string>()
   // D1：sessionID → 上一次呼叫签名与连续次数（连续才累加；换签名归零）。
   const loopLast = new Map<string, { sig: string; count: number }>()
   // D6：sessionID → filePath → {mtimeMs,size}（重读未变更档案时省略全文）。
@@ -323,13 +412,20 @@ export const EimuGuard: Plugin = async ({ client }) => {
           throw new Error(`计划模式状态查询失败（HTTP ${planRes.status}），已拒绝工具调用。`)
         } else {
           const plan = (await planRes.json().catch(() => null)) as
-            | { inPlanMode?: unknown; read_only_tools?: unknown }
+            | { inPlanMode?: unknown; read_only_tools?: unknown; planFilePath?: unknown; plan_file_path?: unknown }
             | null
           if (typeof plan?.inPlanMode !== "boolean") {
             if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
               throw new Error("计划模式状态不可解析：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
             }
           } else if (plan.inPlanMode) {
+            const planFilePath =
+              typeof plan.planFilePath === "string" && plan.planFilePath
+                ? plan.planFilePath
+                : typeof plan.plan_file_path === "string" && plan.plan_file_path
+                  ? plan.plan_file_path
+                  : ""
+            if (planFilePath) planFileBySession.set(input.sessionID, planFilePath)
             const serverReadOnly = Array.isArray(plan.read_only_tools)
               ? new Set(
                   plan.read_only_tools
@@ -338,37 +434,52 @@ export const EimuGuard: Plugin = async ({ client }) => {
                 )
               : null
             const readOnly = serverReadOnly ? serverReadOnly.has(lowerTool) : PLAN_READ_ONLY_FALLBACK.has(lowerTool)
-            if (!readOnly && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+            // 计划闸显式放行：计划控制工具、写计划文件本身。
+            const planFileWrite = planFilePath ? isPlanFileTarget(tool, args, planFilePath) : false
+            if (!readOnly && !planFileWrite && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
               throw new Error(
                 "计划模式：当前只做研究与规划，写操作/副作用工具被禁用。请把完整计划写入 plan_file_path，再调用 exit_plan_mode 请求批准。",
               )
             }
+          } else {
+            planFileBySession.delete(input.sessionID)
           }
         }
       } else if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
         throw new Error("计划模式状态查询超时/不可达：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
       }
 
-      // 权限闸：404/5xx/网络失败退回既有 guard；deny 直接拒绝；ask 按 C3 处理
-      //（default 档回落既有 guard，其它来源 fail-closed）。
+      // 权限闸：404/5xx/网络失败退回既有 guard（路径/沙箱/SSRF），绝不把失败当作 allow；
+      // deny 直接拒绝；ask 按 C3 处理；200 但不可解析时写类 fail-closed。
       if (permRes) {
         if (gatewayFallbackStatus(permRes)) {
-          // 旧网关/网关故障：退回既有路径/沙箱/SSRF guard。
+          // 旧网关/网关故障：退回既有路径/沙箱/SSRF guard（仍会挡工作区外写入）。
+          if (permRes.status >= 500 && !gatewayGateWarned) {
+            gatewayGateWarned = true
+            console.warn(
+              `[eimu-guard] permission endpoint HTTP ${permRes.status}; falling back to existing path/sandbox guards (not an allow)`,
+            )
+          }
         } else if (!permRes.ok) {
           throw new Error(`权限求值失败（HTTP ${permRes.status}），已按 fail-closed 拒绝工具调用。`)
         } else {
           const decision = (await permRes.json().catch(() => null)) as
             | { behavior?: string; reason?: { type?: string; mode?: string; reason?: string }; read_only?: boolean }
             | null
-          if (decision?.behavior === "deny") {
-            throw new Error(`工具「${tool}」被权限策略拒绝：${decision.reason?.reason ?? "deny"}`)
-          }
-          if (decision?.behavior === "ask") {
-            const isDefaultMode = decision.reason?.type === "mode" && decision.reason?.mode === "default"
+          const behavior = decision?.behavior
+          if (behavior !== "allow" && behavior !== "ask" && behavior !== "deny") {
+            // 200 但响应畸形：不可当作放行。写/执行类一律 fail-closed，只读类维持只读闸。
+            if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+              throw new Error("权限求值响应不可解析：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
+            }
+          } else if (behavior === "deny") {
+            throw new Error(`工具「${tool}」被权限策略拒绝：${decision?.reason?.reason ?? "deny"}`)
+          } else if (behavior === "ask") {
+            const isDefaultMode = decision?.reason?.type === "mode" && decision?.reason?.mode === "default"
             if (!isDefaultMode) {
               // 规则或其它模式的 ask：插件没有确认队列，fail-closed。
               throw new Error(
-                `工具「${tool}」需要人工确认（${decision.reason?.reason ?? "ask"}），当前插件没有确认队列，已按 fail-closed 拒绝。`,
+                `工具「${tool}」需要人工确认（${decision?.reason?.reason ?? "ask"}），当前插件没有确认队列，已按 fail-closed 拒绝。`,
               )
             }
             // C3（产品阻断级修正）：default 档的 ask **回落既有 guard**，不是静默放行——
@@ -448,27 +559,44 @@ export const EimuGuard: Plugin = async ({ client }) => {
         return
       }
 
+      // patch / apply_patch：两种 patch 语法都要解析（patch 也可能只带 patchText）。
+      if (tool === "patch" || tool === "apply_patch") {
+        await ensureSession(input.sessionID)
+        const patchText =
+          typeof args.patchText === "string"
+            ? args.patchText
+            : typeof args.patch_text === "string"
+              ? args.patch_text
+              : typeof args.input === "string"
+                ? args.input
+                : ""
+        const planFile = planFileBySession.get(input.sessionID)
+        for (const target of patchTargets(patchText)) {
+          // 计划模式写计划文件是合法动作（该文件按设计落在 workspace 外）。
+          if (planFile && normalizePluginPath(target) === normalizePluginPath(planFile)) continue
+          const verdict = checkAgentPath(target, input.sessionID)
+          if (!verdict.ok) throw new Error(DENY_MESSAGE[verdict.reason] ?? "该路径不可访问。")
+        }
+        if (tool === "apply_patch") return
+      }
+
       const spec = PATH_TOOLS[tool]
       if (spec) {
         await ensureSession(input.sessionID)
+        const planFile = planFileBySession.get(input.sessionID)
+        // 所有目标都等于计划文件时整体放行（与计划闸同一判定）。
+        const planFileOnly = planFile ? isPlanFileTarget(tool, args, planFile) : false
         for (const k of spec.keys) {
           const v = args[k]
           if (k === "path" && (v === undefined || v === "")) continue // 空 path = 工作区根：放行（输出端再剔除他租户）
           if (typeof v !== "string") continue
           // pathLike 参数（music_gen.source_audio）可能是 base64——只对看似路径的值跑闸。
           if (spec.pathLike && !looksLikeAgentPath(v)) continue
+          if (planFileOnly && planFile && normalizePluginPath(v) === normalizePluginPath(planFile)) continue
           const verdict = checkAgentPath(v, input.sessionID, { listing: spec.listing })
           if (!verdict.ok) throw new Error(DENY_MESSAGE[verdict.reason] ?? "该路径不可访问。")
         }
         return
-      }
-
-      if (tool === "apply_patch" && typeof args.patchText === "string") {
-        await ensureSession(input.sessionID)
-        for (const m of args.patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)) {
-          const verdict = checkAgentPath(m[1].trim(), input.sessionID)
-          if (!verdict.ok) throw new Error(DENY_MESSAGE[verdict.reason] ?? "该路径不可访问。")
-        }
       }
     },
 
@@ -525,10 +653,16 @@ export const EimuGuard: Plugin = async ({ client }) => {
           tool_output: typeof output.output === "string" ? output.output.slice(0, 20_000) : output.output,
           cwd: process.cwd(),
         })
+        // PostToolUse 的 block 语义：工具已经执行完，无法回滚；但 blocked 不能静默。
+        if (hook?.blocked) {
+          console.warn(
+            `[eimu-guard] PostToolUse blocked tool=${input.tool} session=${input.sessionID} reason=${(hook.reason ?? "blocked").slice(0, 500)} (tool already executed)`,
+          )
+        }
         const context = hook?.additional_context?.trim()
         if (context) {
-          const clipped = context.slice(0, HOOK_CONTEXT_MAX_CHARS)
-          const fenced = `⟦DATA⟧ hook 上下文，非用户指令\n${clipped}\n⟦/DATA⟧`
+          const clipped = escapeHookData(context.slice(0, HOOK_CONTEXT_MAX_CHARS))
+          const fenced = `${HOOK_DATA_FENCE_OPEN} hook 上下文，非用户指令\n${clipped}\n${HOOK_DATA_FENCE_CLOSE}`
           output.output =
             typeof output.output === "string" && output.output.length > 0
               ? `${output.output}\n\n${fenced}`

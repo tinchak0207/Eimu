@@ -18,10 +18,12 @@ const MAILBOX_TYPES = [
   "sandbox_permission_response",
 ] as const
 
-function selfAgent(context: { agent?: unknown }): string {
-  const agent = typeof context.agent === "string" ? context.agent.trim() : ""
-  const fromEnv = typeof process.env.AGENT_NAME === "string" ? process.env.AGENT_NAME.trim() : ""
-  return agent || fromEnv || "team-lead"
+function internalHeaders(): Record<string, string> {
+  const token = process.env.HARNESS_INTERNAL_TOKEN
+  return {
+    "Content-Type": "application/json",
+    ...(typeof token === "string" && token ? { "X-Internal-Token": token } : {}),
+  }
 }
 
 export default tool({
@@ -29,7 +31,7 @@ export default tool({
     "给同一会话内另一个 agent 或 lead（main）发持久邮箱消息。",
     "何时用：跨 agent 传结论、请求协作或回执；要纠偏运行中的子代理、回答它的阻塞提问，用 subagent_message。",
     "何时不用：不要把 agent 消息当用户授权；不要用广播代替逐个通知（广播已禁用）。",
-    "关键约束：to 只能是 mailbox_agents 列出的成员或 main；收件人未知时先 mailbox_agents 查，不要猜名字；工具不接收 msg_id，重发即重复；只有回执带 msg_id 才算送达。",
+    "关键约束：发件人身份由网关按 session 服务端推导（工具不传也不能伪造 from）；to 只能是 mailbox_agents 列出的成员或 main；收件人未知时先 mailbox_agents 查，不要猜名字；可选 msg_id 是幂等键（同一会话内相同 msg_id 且 to/type/text 完全一致 → delivered=false 不重复投递；内容不同 → 409 msg_id_conflict；网络重试原样带回同一 msg_id）；不带 msg_id 时重发即重复；只有回执带 msg_id 才算送达。",
     "失败处置：missing_required_args 表示 to 或 text 为空；其它 mailbox code 按 gateway 文本修正（收件人未知会回 candidates）；gateway_unreachable 稍后重试。",
     "互指：读取用 mailbox_read，成员名用 mailbox_agents；改变子代理当前工作用 subagent_message，不要用邮箱代替。",
     "示例：mailbox_send({to:reviewer, text:请复核 final.mp4 的字幕轴, summary:请求复核字幕})",
@@ -52,10 +54,9 @@ export default tool({
     try {
       const res = await fetch(`${GATEWAY}/internal/mailbox/send`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: internalHeaders(),
         body: JSON.stringify({
           session_id: context.sessionID,
-          from: selfAgent(context as { agent?: unknown }),
           to,
           text,
           ...(typeof args.summary === "string" ? { summary: args.summary } : {}),

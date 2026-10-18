@@ -6,7 +6,6 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const EXAMPLE_ARGS = {
   reason: "等待 MiniMax-H3 视频生成任务完成，让出并发槽位",
   timeout_seconds: 60,
-  task_id: "task_video_933_minimax_01",
   checkpoint_data: {
     shots_prepared: [1, 2],
     video_prompt: "Camera moves forward slowly through the misty valley",
@@ -16,11 +15,11 @@ const EXAMPLE_JSON = JSON.stringify(EXAMPLE_ARGS)
 
 export default tool({
   description: [
-    "子代理主动挂起并交出并发槽。",
+    "子代理主动挂起自己并交出并发槽（仅限自身；默认不对其他子代理开放）。",
     "何时用：遇到上游限流或视频渲染等长任务，需要把槽位让给其他子任务时。",
     "何时不用：主代理不要调用；普通短暂等待不需要挂起。",
-    "关键约束：timeout_seconds 默认 30，到期自动恢复；checkpoint_data 原样回灌；恢复由调度器或 subagent_resume 触发。",
-    "示例：subagent_suspend({reason:\"等待视频上游生成\", timeout_seconds:120, task_id:\"vid_123\"})",
+    "关键约束：挂起会立即中止当前生成（不再消耗算力），子会话历史保留；timeout_seconds 默认 30，到期自动恢复；checkpoint_data 原样回灌；恢复由定时器或 subagent_resume 触发。",
+    "示例：subagent_suspend({reason:\"等待视频上游生成\", timeout_seconds:120})",
   ].join("\n"),
   args: {
     reason: tool.schema
@@ -31,10 +30,6 @@ export default tool({
       .number()
       .optional()
       .describe("挂起等待时长秒数（默认 30 秒，最大 1800 秒；到期自动恢复获得并发槽）"),
-    task_id: tool.schema
-      .string()
-      .optional()
-      .describe("等待的上游异步任务 ID（可选）"),
     checkpoint_data: tool.schema
       .record(tool.schema.string(), tool.schema.any())
       .optional()
@@ -43,7 +38,6 @@ export default tool({
   async execute(args, context) {
     const reason = typeof args.reason === "string" ? args.reason.trim() : "子代理主动挂起等待异步任务"
     const timeoutSeconds = typeof args.timeout_seconds === "number" && args.timeout_seconds > 0 ? args.timeout_seconds : 30
-    const taskId = typeof args.task_id === "string" ? args.task_id.trim() : undefined
 
     try {
       const res = await fetch(`${GATEWAY}/internal/subagent/suspend`, {
@@ -53,8 +47,7 @@ export default tool({
           session_id: context.sessionID,
           reason,
           condition: {
-            type: taskId ? "poll_task" : "timer",
-            task_id: taskId,
+            type: "timer",
             timeout_seconds: timeoutSeconds,
           },
           checkpoint_data: args.checkpoint_data,

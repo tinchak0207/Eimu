@@ -4,6 +4,13 @@ import { ok, fail } from "../lib/client"
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const CONDITION_MAX_CHARS = 500
 
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const token = process.env.HARNESS_INTERNAL_TOKEN
+  if (token) headers["X-Internal-Token"] = token
+  return headers
+}
+
 const EXAMPLE_ARGS = {
   condition: "所有测试通过（bun test 退出码 0），且仓库无未提交的调试输出",
   ask_user: true,
@@ -49,7 +56,7 @@ export default tool({
     try {
       const res = await fetch(`${GATEWAY}/internal/goal/propose`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           session_id: context.sessionID,
           condition,

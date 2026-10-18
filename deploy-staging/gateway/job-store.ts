@@ -127,7 +127,7 @@ export function setGenerationMaintenance(enabled: boolean): void {
 }
 export function durableSubagentRun(id: string): any | undefined {
   const row: any = db().query("SELECT * FROM subagent_durable_runs WHERE run_id=?").get(id)
-  return row ? { ...JSON.parse(row.data), status: row.status, result: row.result ? JSON.parse(row.result) : undefined } : undefined
+  return row ? { ...JSON.parse(row.data), status: row.status, result: row.result ? JSON.parse(row.result) : undefined, updated_at: row.updated_at } : undefined
 }
 export function durableSubagentRuns(): any[] {
   return (db().query("SELECT run_id FROM subagent_durable_runs").all() as any[]).map((r) => durableSubagentRun(r.run_id))
@@ -148,6 +148,11 @@ export function saveDurableSubagentRun(run: any, result?: any): void {
       registerGenerationReceipt({ task_id: id, parent_gw: run.parentGatewaySessionId, producer_oc: run.opencodeSessionId,
         consumer_oc: run.parentOpencodeSessionId, kind: 'message', content, run_id: run.id })
       completeGenerationReceipt(id, 'succeeded', [], { content })
+      // P0（2026-10-18 双投递修复）：子代理结果**只走单一交付路径** wakeParent（subagent.ts
+      // finishRun）。这里仍保留耐久 receipt 作为查询/审计记录，但落库即标 observed——
+      // job-delivery 的 drain 只投递 `!observed_at` 的 message，故不会在 10 分钟后再投一次。
+      // 父模型 ack 前也不会重复：唤醒仅由 finishRun 的幂等守卫发一次。
+      acknowledgeGeneration(id, 'observed', { delivered_via: 'subagent_wakeParent' })
     }
   })()
 }

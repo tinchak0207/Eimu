@@ -20,6 +20,56 @@ import { subagentParentState } from "./subagent.ts"
 
 const PREFIX = "/internal/task/"
 
+/**
+ * P2-13：可选内部令牌。设置 HARNESS_INTERNAL_TOKEN 时，task/goal/findings 家族一律要求
+ * `X-Internal-Token`；未设置时保持既有 loopback 信任边界（并只告警一次）。
+ */
+function tokensEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+export function internalTokenRejection(req: Request): Response | null {
+  const expected = process.env.HARNESS_INTERNAL_TOKEN
+  if (typeof expected === "string" && expected) {
+    const supplied = req.headers.get("x-internal-token") ?? ""
+    if (!tokensEqual(supplied, expected)) {
+      return jsonError(403, "invalid or missing X-Internal-Token", "forbidden", "internal_token_required")
+    }
+    return null
+  }
+  const global = globalThis as { __harnessInternalTokenWarned?: boolean }
+  if (!global.__harnessInternalTokenWarned) {
+    global.__harnessInternalTokenWarned = true
+    console.warn(
+      "[gateway] HARNESS_INTERNAL_TOKEN unset; /internal/* task/goal/findings rely on the loopback trust boundary only",
+    )
+  }
+  return null
+}
+
+const OWNER_NAME_MAX_CHARS = 64
+
+/**
+ * P2-4：owner 是「任意合法 agent 名」而不是必须已注册的收件人。默认只做形状校验；
+ * HARNESS_TASK_OWNER_STRICT=1 时恢复「必须已在邮箱团队注册」的旧校验（可配置）。
+ */
+function validateOwnerName(owner: string): string | null {
+  if (!owner) return null
+  if (owner.length > OWNER_NAME_MAX_CHARS) return `owner must be at most ${OWNER_NAME_MAX_CHARS} characters`
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(owner)) return "owner must not contain control characters"
+  if (owner === "*") return 'owner must be a single agent name (broadcast "*" is not supported)'
+  if (owner.includes("@")) return "owner must be a bare agent name"
+  return null
+}
+
+function ownerStrictMode(): boolean {
+  const raw = (process.env.HARNESS_TASK_OWNER_STRICT ?? "").trim().toLowerCase()
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes"
+}
+
 /** 把 opencode 子会话 id 收敛到父 gateway 会话 id；解析不到时保持原值。 */
 export function canonicalTaskSessionId(sessionId: string): string {
   const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
@@ -45,6 +95,8 @@ function positiveIdArray(value: unknown): number[] | null {
 }
 
 export async function handleTaskBoard(req: Request, pathname: string): Promise<Response> {
+  const tokenError = internalTokenRejection(req)
+  if (tokenError) return tokenError
   let parsed: unknown
   try {
     parsed = await req.json()
@@ -135,28 +187,37 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
           if (payload.owner !== null && typeof payload.owner !== "string") {
             return jsonError(400, "owner must be a string or null", "bad_request", "bad_request")
           }
-          if (typeof payload.owner === "string") {
-            // M1：先 trim、再按该会话（已归一化到父会话）团队校验收件人；
-            // 未知 owner 返回 404，绝不落库后再假装投递成功。
-            const owner = payload.owner.trim()
-            if (!owner) return jsonError(400, "owner must not be blank", "bad_request", "bad_request")
-            try {
-              resolveRecipient(sessionId, owner)
-            } catch (e) {
-              if (e instanceof MailboxRecipientError) {
-                return Response.json(
-                  { ok: false, success: false, error: { message: e.message, type: "not_found", code: e.code }, candidates: e.candidates },
-                  { status: 404 },
-                )
-              }
-              if (e instanceof MailboxValidationError) {
-                return jsonError(400, e.message, "bad_request", e.code)
-              }
-              throw e
-            }
-            patch.owner = owner
-          } else {
+          if (payload.owner === null) {
+            // P2-4：null 与空字符串同义＝释放认领。
             patch.owner = null
+          } else {
+            const owner = payload.owner.trim()
+            if (!owner) {
+              // 工具描述承诺「空字符串或 null 释放认领」，HTTP 必须与之一致。
+              patch.owner = null
+            } else {
+              const nameError = validateOwnerName(owner)
+              if (nameError) return jsonError(400, nameError, "bad_request", "bad_request")
+              // 默认允许任意合法 agent 名（示例 owner:"director" 可用）；
+              // 需要严格邮箱成员校验的部署可开 HARNESS_TASK_OWNER_STRICT=1。
+              if (ownerStrictMode()) {
+                try {
+                  resolveRecipient(sessionId, owner)
+                } catch (e) {
+                  if (e instanceof MailboxRecipientError) {
+                    return Response.json(
+                      { ok: false, success: false, error: { message: e.message, type: "not_found", code: e.code }, candidates: e.candidates },
+                      { status: 404 },
+                    )
+                  }
+                  if (e instanceof MailboxValidationError) {
+                    return jsonError(400, e.message, "bad_request", e.code)
+                  }
+                  throw e
+                }
+              }
+              patch.owner = owner
+            }
           }
         }
         if (payload.metadata !== undefined) {
@@ -209,7 +270,11 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
               })
               delivered = frame.delivered === true
             } catch (e) {
-              console.error("[gateway] task assignment frame failed:", e)
+              // P2-4：非严格模式下 owner 可以是未注册的合法 agent 名——任务归属成立，
+              // 只是邮箱帧无处可投；如实回 delivered:false，不当 404、不刷错误日志。
+              if (!(e instanceof MailboxRecipientError)) {
+                console.error("[gateway] task assignment frame failed:", e)
+              }
             }
           }
         }

@@ -17,7 +17,7 @@ import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
 import { isSystemWakeText } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
-import { TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
+import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText } from "./outbound-sanitize.ts"
 
@@ -133,8 +133,12 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
 // 白名单外栏位一率删除；输出保持 [{info,parts}] 同构契约，未知 part 型别整块丢弃。
 // 防呆：读路径宁跳不炸——任何单则/单 part 处理异常只丢弃该项，函数永不抛错。
 // GW_TOKEN_RE 带 g 旗标：String.replace 全域抹除安全，但 .test()/.exec() 会因
-// lastIndex 残留而误判；需要「位置判据」时改用这份无 g 等价副本（来源同一正则本体）。
-const GW_TOKEN_NOG = new RegExp(GW_TOKEN_RE.source, "i")
+// lastIndex 残留而误判；需要「位置判据」时在函数内惰性构造无 g 副本。
+// 2026-10-18 TDZ 修复：顶层读 GW_TOKEN_RE.source 会在单独 import messages-gw 的
+// 循环依赖里触发未初始化绑定。改为呼叫时读取，模块求值阶段不碰该绑定。
+function gwTokenNoG(): RegExp {
+  return new RegExp(GW_TOKEN_RE.source, "i")
+}
 
 /** 0918：剥掉网关注入的 user 讯息尾端 payload（野兽帧等，见
  *  appendSystemPayloadToTurnTail）。只用在显示读路径（slimHistoryMessages）；
@@ -145,8 +149,13 @@ const GW_TOKEN_NOG = new RegExp(GW_TOKEN_RE.source, "i")
  *  2026-10-11 边角补正：改用「扫描第一个后面（允许空白）紧跟网关凭证的标记」，
  *  而不是只看第一个标记——边界：用户自写的同形标记（后无凭证）不截断、其后正文保留；
  *  该标记之后若真有注入块（带凭证）→ 从真注入块那处截断（用户气泡不再露出内部注入正文）。
- *  找不到「带凭证的标记」＝原样返回（零回归）。 */
+ *  2026-10-18：无凭证的资料块（模板偏好等）使用 TAIL_DATA_MARKER，恒定可从标记处剥离。
+ *  找不到可剥离标记＝原样返回（零回归）。 */
 function stripTailInjectedPayload(text: string): string {
+  // 资料块无凭证，但标记是网关专属：先按它截断。
+  const dataMarker = TAIL_DATA_MARKER.trim()
+  const dataAt = text.indexOf(dataMarker)
+  if (dataAt >= 0) text = text.slice(0, dataAt).trimEnd()
   const marker = TAIL_PAYLOAD_MARKER.trim()
   // 逐次寻找标记出现处；每处只看其后（允许空白）是否紧跟凭证（位置判据用无 g 副本，
   // 该副本无 g 旗标故 .exec 无 lastIndex 残留）。第一个带凭证的标记＝真注入起点。
@@ -155,7 +164,7 @@ function stripTailInjectedPayload(text: string): string {
     const i = text.indexOf(marker, from)
     if (i < 0) return text
     const rest = text.slice(i + marker.length).replace(/^\s*/, "")
-    const m = GW_TOKEN_NOG.exec(rest)
+    const m = gwTokenNoG().exec(rest)
     if (m && m.index === 0) return text.slice(0, i).trimEnd()
     // 该标记后无凭证（用户自写）：跳过它，继续找后面真正带凭证的标记。
     from = i + marker.length

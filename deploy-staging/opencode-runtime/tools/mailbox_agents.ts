@@ -3,6 +3,14 @@ import { ok, fail } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
+function internalHeaders(): Record<string, string> {
+  const token = process.env.HARNESS_INTERNAL_TOKEN
+  return {
+    "Content-Type": "application/json",
+    ...(typeof token === "string" && token ? { "X-Internal-Token": token } : {}),
+  }
+}
+
 export default tool({
   description: [
     "列出本会话可寻址的 agent 名、角色与 main 别名。",
@@ -17,7 +25,7 @@ export default tool({
     try {
       const res = await fetch(`${GATEWAY}/internal/mailbox/agents`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: internalHeaders(),
         body: JSON.stringify({ session_id: context.sessionID }),
         signal: AbortSignal.timeout(15000),
       })

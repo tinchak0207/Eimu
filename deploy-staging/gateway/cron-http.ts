@@ -5,6 +5,7 @@ import {
   createCron,
   currentCronFireSink,
   deleteCron,
+  getCronInitError,
   listCrons,
   parseCronExpression,
   tickCrons,
@@ -12,12 +13,20 @@ import {
 
 const PREFIX = "/internal/cron/"
 
+class BadField extends Error {
+  readonly code = "bad_request"
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function asBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback
+/** P3：类型严格——显式传了非布尔值回 400，不能把 "false"/"true" 静默当成缺省。 */
+function readBoolean(body: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = body[key]
+  if (value === undefined) return fallback
+  if (typeof value !== "boolean") throw new BadField(`${key} must be a boolean`)
+  return value
 }
 
 // C9：state_dir 请求参数已删除——durable 文件根一律由 HARNESS_STATE 决定，
@@ -38,6 +47,17 @@ export async function handleCron(req: Request, pathname: string): Promise<Respon
     switch (pathname.slice(PREFIX.length)) {
       case "create": {
         if (!sessionId) return jsonError(400, "session_id is required", "bad_request", "bad_request")
+        // P2/P3：启动期 durable 文件损坏时 ticker 不会启动；创建任务只会永远不触发，
+        // 如实拒绝并暴露 corrupt_durable_file，而不是静默收下。
+        const initError = getCronInitError()
+        if (initError) {
+          return jsonError(
+            500,
+            `scheduled tasks state is unavailable: ${initError.message}`,
+            "server_error",
+            (initError as { code?: string }).code === "corrupt_durable_file" ? "corrupt_durable_file" : "internal_error",
+          )
+        }
         const cron = typeof body.cron === "string" ? body.cron.trim() : ""
         const prompt = typeof body.prompt === "string" ? body.prompt.trim() : ""
         if (!cron) return jsonError(400, "cron is required", "bad_request", "bad_request")
@@ -49,9 +69,9 @@ export async function handleCron(req: Request, pathname: string): Promise<Respon
           sessionId,
           cron,
           prompt,
-          recurring: asBoolean(body.recurring, true),
-          durable: asBoolean(body.durable, false),
-          permanent: asBoolean(body.permanent, false),
+          recurring: readBoolean(body, "recurring", true),
+          durable: readBoolean(body, "durable", false),
+          permanent: readBoolean(body, "permanent", false),
         })
         return Response.json({
           success: true,
@@ -113,14 +133,19 @@ export async function handleCron(req: Request, pathname: string): Promise<Respon
   } catch (error) {
     // M8/M9：错误码如实返回，策略/参数拒绝不再包成 200。
     const message = error instanceof Error ? error.message : String(error)
+    if (error instanceof BadField) return jsonError(400, error.message, "bad_request", "bad_request")
+    // P2：损坏的 durable 文件必须先于 lock / scheduled_tasks.json 的 409 分支匹配。
+    if ((error as { code?: string })?.code === "corrupt_durable_file" || /corrupt/i.test(message)) {
+      return jsonError(500, message, "server_error", "corrupt_durable_file")
+    }
+    if (/^never_fires/i.test(message)) {
+      return jsonError(400, message, "bad_request", "never_fires")
+    }
     if (/^expired:/i.test(message) || /invalid cron expression/i.test(message)) {
       return jsonError(400, message, "bad_request", /^expired:/i.test(message) ? "expired" : "invalid_cron")
     }
     if (/lock|scheduled_tasks\.json/i.test(message)) {
       return jsonError(409, message, "conflict", "lock_unavailable")
-    }
-    if (/corrupt/i.test(message)) {
-      return jsonError(500, message, "server_error", "corrupt_durable_file")
     }
     return jsonError(500, message, "server_error", "internal_error")
   }
