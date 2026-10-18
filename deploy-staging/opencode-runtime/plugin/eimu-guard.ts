@@ -15,7 +15,8 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { harnessInternalHeaders } from "../lib/client"
 import { stat } from "node:fs/promises"
-import { resolve as resolvePath } from "node:path"
+import { readdirSync, readFileSync, unlinkSync } from "node:fs"
+import { join, resolve as resolvePath } from "node:path"
 import {
   assertSafeFetchUrl,
   checkAgentPath,
@@ -30,6 +31,8 @@ import {
   setOwner,
   SsrfError,
   ensureSessionLauncher,
+  RUN_ROOT,
+  sessionTmpDir,
   unwrapShellCommand,
 } from "../lib/sandbox"
 
@@ -356,6 +359,67 @@ const COMPACTION_PROMPT = `只使用已有对话生成恢复摘要，纯文本�
 保持事实、推断与未核实区别。保留具名角色与注册表事实、节点参数、关键回执和账本。只输出摘要正文；没有必要的条目不要填故事。`
 
 
+const BG_BUDGET_MS = process.env.EIMU_BG_MS || "15000"
+
+/** 扫会话 tmp 里的 *.notify，用 opencode 已有的 promptAsync 把完成结果送回该会话。 */
+export async function settleBackgroundJobs(client: { session: { promptAsync: (args: unknown) => Promise<unknown> } }): Promise<void> {
+  let slugs: string[]
+  try {
+    slugs = readdirSync(RUN_ROOT)
+  } catch {
+    return
+  }
+  for (const slug of slugs) {
+    const dir = join(RUN_ROOT, slug, "tmp")
+    let names: string[]
+    try {
+      names = readdirSync(dir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.endsWith(".notify")) continue
+      const file = join(dir, name)
+      let text = ""
+      try {
+        text = readFileSync(file, "utf8")
+      } catch {
+        continue
+      }
+      const [sessionID = "", exitCode = "", outPath = "", errPath = ""] = text.split("\n")
+      if (!sessionID) {
+        try { unlinkSync(file) } catch { /* 无会话可唤醒 */ }
+        continue
+      }
+      const id = name.replace(/\.notify$/, "")
+      const cmdPath = join(dir, `${id}.cmd`)
+      let cmd = ""
+      try { cmd = readFileSync(cmdPath, "utf8") } catch { /* 命令原文丢失不影响唤醒 */ }
+      const outTail = (() => { try { const b = readFileSync(outPath); return b.subarray(Math.max(0, b.length - 2000)).toString("utf8") } catch { return "" } })()
+      const errTail = (() => { try { const b = readFileSync(errPath); return b.subarray(Math.max(0, b.length - 2000)).toString("utf8") } catch { return "" } })()
+      const body = redactSecrets(
+        [
+          `后台命令已结束。task_id=${id} exit=${exitCode || "?"}`,
+          `命令: ${cmd.slice(0, 300)}`,
+          `日志（沙箱内）: /tmp/${id}.out 与 /tmp/${id}.err`,
+          outTail ? `--- stdout 尾部 ---\n${outTail}` : "",
+          errTail ? `--- stderr 尾部 ---\n${errTail}` : "",
+          "这是命令完成通知，不是新的用户要求。按退出码和输出继续原来的任务；不要 sleep 轮询，也不要把同一条命令再跑一遍。",
+        ].filter(Boolean).join("\n"),
+      )
+      try {
+        await client.session.promptAsync({
+          path: { id: sessionID },
+          body: { parts: [{ type: "text", text: body }] },
+        })
+        try { unlinkSync(file) } catch { /* 下次再试会重复唤醒，尽力删 */ }
+      } catch (e) {
+        console.warn(`[eimu-guard] background notify failed task=${id}: ${(e as Error)?.message ?? e}`)
+      }
+    }
+  }
+}
+
 export const EimuGuard: Plugin = async ({ client }) => {
   const hydrating = new Map<string, Promise<void>>()
   // 计划模式：sessionID → 网关下发的计划文件绝对路径（写它本身必须放行）。
@@ -364,6 +428,15 @@ export const EimuGuard: Plugin = async ({ client }) => {
   const loopLast = new Map<string, { sig: string; count: number }>()
   // D6：sessionID → filePath → {mtimeMs,size}（重读未变更档案时省略全文）。
   const readSeen = new Map<string, Map<string, { mtimeMs: number; size: number }>>()
+  const pollKey = globalThis as { __eimuBgPoll?: ReturnType<typeof setInterval> }
+  if (!pollKey.__eimuBgPoll) {
+    pollKey.__eimuBgPoll = setInterval(() => {
+      void settleBackgroundJobs(client).catch((e) => {
+        console.warn(`[eimu-guard] background poll: ${(e as Error)?.message ?? e}`)
+      })
+    }, 2000)
+    pollKey.__eimuBgPoll.unref?.()
+  }
 
   /** 从 gateway 可信查得本会话（含子代理→父）拥有的 upload uuid，设为唯一允许集。 */
   async function ensureSession(sessionID: string): Promise<void> {
@@ -726,6 +799,9 @@ export const EimuGuard: Plugin = async ({ client }) => {
         }
         output.env ??= {}
         output.env.EIMU_LAUNCHER = launcher
+        output.env.EIMU_SESSION_ID = sessionID
+        output.env.EIMU_BG_DIR = sessionTmpDir(sessionID)
+        output.env.EIMU_BG_MS = BG_BUDGET_MS
       }
     },
 

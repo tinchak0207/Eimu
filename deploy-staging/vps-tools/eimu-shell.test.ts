@@ -7,7 +7,7 @@
 // 另加 (d) launcher 已设但非 `-c` 形态 → 仍透明（保护 opencode 内部把 shell 当工具用的呼叫）。
 //
 // 跑法：bun test deploy-staging/vps-tools/eimu-shell.test.ts
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -92,6 +92,68 @@ describe("eimu-shell 三态真值", () => {
     const got = run(["-c", "echo hi"], { env: { EIMU_LAUNCHER: "" } })
     expect(got.status).toBe(0)
     expect(got.stdout).toBe("hi\n")
+  })
+
+  test("(f) 设了后台目录但命令很快 → 输出和退出码仍是命令本身", () => {
+    const dir = mkdtempSync(join(tmpdir(), "eimu-bg-fast-"))
+    const launcher = join(dir, "run.sh")
+    writeFileSync(launcher, "#!/bin/bash\ncd \"$1\" || exit 1\nexec /bin/bash -c \"$2\"\n")
+    chmodSync(launcher, 0o755)
+    const bg = mkdtempSync(join(tmpdir(), "eimu-bg-dir-"))
+    const got = run(["-c", "echo hi"], {
+      env: { EIMU_LAUNCHER: launcher, EIMU_BG_DIR: bg, EIMU_BG_MS: "15000", EIMU_SESSION_ID: "s-fast" },
+    })
+    expect(got.status).toBe(0)
+    expect(got.stdout).toBe("hi\n")
+    expect(got.stdout).not.toContain("后台")
+  })
+
+  test("(g) 超过 15s 预算 → 马上返回，命令继续跑完并留下 notify", () => {
+    const dir = mkdtempSync(join(tmpdir(), "eimu-bg-slow-"))
+    const launcher = join(dir, "run.sh")
+    writeFileSync(launcher, "#!/bin/bash\ncd \"$1\" || exit 1\nexec /bin/bash -c \"$2\"\n")
+    chmodSync(launcher, 0o755)
+    const bg = mkdtempSync(join(tmpdir(), "eimu-bg-dir-"))
+    const started = Date.now()
+    const got = run(["-c", "python3 -c 'import time; time.sleep(1); print(\"DONE\")'"], {
+      env: { EIMU_LAUNCHER: launcher, EIMU_BG_DIR: bg, EIMU_BG_MS: "300", EIMU_SESSION_ID: "s-slow" },
+    })
+    const elapsed = Date.now() - started
+    expect(got.status).toBe(0)
+    expect(elapsed).toBeLessThan(900)
+    expect(got.stdout).toContain("已自动转入后台")
+    expect(got.stdout).toContain("task_id=eimu-bg-")
+    const deadline = Date.now() + 3000
+    let notify = ""
+    while (Date.now() < deadline) {
+      const names = readdirSync(bg)
+      const hit = names.find((n) => n.endsWith(".notify"))
+      if (hit) {
+        notify = readFileSync(join(bg, hit), "utf8")
+        break
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+    }
+    const lines = notify.split("\n")
+    expect(lines[0]).toBe("s-slow")
+    expect(lines[1]).toBe("0")
+    const out = readFileSync(lines[2], "utf8")
+    expect(out).toContain("DONE")
+  })
+
+  test("(h) sleep 不自动进后台", () => {
+    const dir = mkdtempSync(join(tmpdir(), "eimu-bg-sleep-"))
+    const launcher = join(dir, "run.sh")
+    writeFileSync(launcher, "#!/bin/bash\ncd \"$1\" || exit 1\nexec /bin/bash -c \"$2\"\n")
+    chmodSync(launcher, 0o755)
+    const bg = mkdtempSync(join(tmpdir(), "eimu-bg-dir-"))
+    const started = Date.now()
+    const got = run(["-c", "sleep 0.4"], {
+      env: { EIMU_LAUNCHER: launcher, EIMU_BG_DIR: bg, EIMU_BG_MS: "200", EIMU_SESSION_ID: "s-sleep" },
+    })
+    expect(Date.now() - started).toBeGreaterThan(300)
+    expect(got.status).toBe(0)
+    expect(got.stdout).not.toContain("后台")
   })
 })
 
