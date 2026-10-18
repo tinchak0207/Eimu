@@ -15,6 +15,14 @@ const POLLER_TICK_MS = parseInt(process.env.POLLER_TICK_MS ?? "1000", 10);
 const FAST_PROBE_WINDOW_MS = parseInt(process.env.POLLER_FAST_WINDOW_MS ?? "8000", 10);
 const FAST_PROBE_TICK_MS = parseInt(process.env.POLLER_FAST_TICK_MS ?? "1000", 10);
 const POLLER_REGISTER_PORT = parseInt(process.env.POLLER_REGISTER_PORT ?? "8082", 10);
+// 硬上限（止血 2026-10-18）：waiting budget 仍是进度边界，可短暂延期继续 authoritative
+// tracking；但 retry / waiting-budget 超限累计到上限后必须停 poll、投递失败终态收据，
+// 禁止无限 +30min，禁止重新提交付费生成。可用 env 覆盖。
+const MAX_RETRY_COUNT = parseInt(process.env.POLLER_MAX_RETRY_COUNT ?? "200", 10);
+const MAX_WAITING_BUDGET_EXCEEDED = parseInt(
+  process.env.POLLER_MAX_WAITING_BUDGET_EXCEEDED ?? "4",
+  10,
+);
 
 try {
   new URL(GATEWAY_URL);
@@ -45,6 +53,10 @@ interface PendingTask {
   next_attempt_at: number; // epoch ms
   deadline_at: number; // epoch ms
   created_at: number; // epoch ms（任务进入 poller 的时刻，用于前段密集快探窗口判定）
+  // waiting budget 超限次数：每次 deadline 到期 +1；达 MAX_WAITING_BUDGET_EXCEEDED 即硬终止。
+  waiting_budget_exceeded_count: number;
+  // 硬终止后停 poll（可保留 map 防 recover 重置计数）；绝不 resubmit。
+  tracking_exhausted?: boolean;
 }
 
 interface PlatformResponse {
@@ -139,6 +151,7 @@ function registerTask(p: {
     next_attempt_at: 0,
     deadline_at: Date.now() + lifetimeMin * 60_000,
     created_at: p.created_at ?? Date.now(),
+    waiting_budget_exceeded_count: 0,
   });
 }
 
@@ -394,10 +407,49 @@ async function tick(): Promise<void> {
     for (const [id, task] of pendingTasks) {
       lastTick = Date.now();
       const now = Date.now();
-      // Waiting budget is a progress boundary, never an authoritative failure/cancellation.
-      if (now >= task.deadline_at) {
-        console.warn(`[poller] task ${id} exceeded waiting budget; continuing authoritative tracking`);
-        task.deadline_at = now + 30 * 60000;
+      // 硬终止后停 poll：已投递失败收据；禁止 resubmit；不因 recover 再开无限 tracking。
+      if (task.tracking_exhausted) continue;
+      // Waiting budget 仍是进度边界（可有限次延期继续 authoritative tracking），
+      // 但不再无限 +30min；累计超限或 retry 触顶 → 硬终止。
+      if (
+        now >= task.deadline_at &&
+        task.waiting_budget_exceeded_count < MAX_WAITING_BUDGET_EXCEEDED
+      ) {
+        task.waiting_budget_exceeded_count++;
+        if (task.waiting_budget_exceeded_count < MAX_WAITING_BUDGET_EXCEEDED) {
+          console.warn(
+            `[poller] task ${id} exceeded waiting budget ` +
+              `(${task.waiting_budget_exceeded_count}/${MAX_WAITING_BUDGET_EXCEEDED}); ` +
+              `continuing authoritative tracking (progress boundary only; not infinite)`,
+          );
+          task.deadline_at = now + 30 * 60000;
+        }
+        // else: 计数已达上限，不延期；下方 hardStop 投递失败收据并停 poll。
+      }
+      const hardStop =
+        task.retry_count >= MAX_RETRY_COUNT ||
+        task.waiting_budget_exceeded_count >= MAX_WAITING_BUDGET_EXCEEDED;
+      if (hardStop) {
+        const reason =
+          `poller hard stop: retry_count=${task.retry_count}/${MAX_RETRY_COUNT}, ` +
+          `waiting_budget_exceeded=${task.waiting_budget_exceeded_count}/${MAX_WAITING_BUDGET_EXCEEDED} ` +
+          `(stop poll; no resubmit; billing unchanged)`;
+        console.warn(`[poller] task ${id} ${reason}`);
+        try {
+          await gatewayReceipt("/internal/job-completion", {
+            task_id: id,
+            status: "failed",
+            artifacts: [],
+            reason,
+          });
+          // 停 poll；保留 map 条目避免 recover 把计数清零后重开无限跟踪。禁止重新提交生成。
+          task.tracking_exhausted = true;
+          task.next_attempt_at = Number.MAX_SAFE_INTEGER;
+        } catch (error) {
+          applyBackoff(task);
+          console.warn(`[poller] task ${id} hard-stop handoff deferred:`, (error as Error).message);
+        }
+        continue;
       }
       if (task.next_attempt_at > now || !bucket.consume()) continue;
       console.log(`[poller] polling ${task.kind} ${id} (retry #${task.retry_count})`);
@@ -504,7 +556,7 @@ const server = serve({
 // Startup
 // ============================================================
 console.log(`[poller] register server on :${POLLER_REGISTER_PORT}`);
-console.log(`[poller] gateway ${GATEWAY_URL}, tick ${POLLER_TICK_MS}ms, fast probe window ${FAST_PROBE_WINDOW_MS}ms @ ${FAST_PROBE_TICK_MS}ms, api ${PLATFORM_API_BASE}`);
+console.log(`[poller] gateway ${GATEWAY_URL}, tick ${POLLER_TICK_MS}ms, fast probe window ${FAST_PROBE_WINDOW_MS}ms @ ${FAST_PROBE_TICK_MS}ms, api ${PLATFORM_API_BASE}, max_retry=${MAX_RETRY_COUNT}, max_waiting_budget_exceeded=${MAX_WAITING_BUDGET_EXCEEDED}`);
 
 setInterval(tick, Math.min(POLLER_TICK_MS, FAST_PROBE_TICK_MS)).unref?.();
 void tick(); // run immediately at startup
