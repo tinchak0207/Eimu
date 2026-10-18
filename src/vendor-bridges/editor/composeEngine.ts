@@ -423,7 +423,7 @@ export async function runFfmpegWithProgress(args: {
 }): Promise<void> {
   const start = Date.now();
   const stageName = args.stageName ?? '最终合成';
-  const workerScript = `${args.command} > ${shq(args.logPath)} 2>&1; echo $? > ${shq(args.exitPath)}`;
+  const workerScript = `exec ${args.command} > ${shq(args.logPath)} 2>&1`;
   const launch = [
     `rm -f ${shq(args.progressPath)} ${shq(args.logPath)} ${shq(args.exitPath)}`,
     `nohup sh -c ${shq(workerScript)} </dev/null >/dev/null 2>&1 & echo $!`,
@@ -1109,12 +1109,20 @@ export async function composeEditorTimeline(
       vCur = '[vsub]';
     }
 
-    // 音频图：主轨音频 + audioClips
+    // 音频图：主轨无音轨时 anullsrc 垫静音，再与 audioClips 混音
     const audios: AudioClip[] = activeAudioClips;
-    let aCur = '[0:a]';
+    const baseHasAudio = await hasAudioStream(ffmpeg, basePath);
+    let mainAudio = '[0:a]';
+    if (!baseHasAudio) {
+      inputs.push(`-f lavfi -t ${renderDuration.toFixed(3)} -i anullsrc=channel_layout=stereo:sample_rate=44100`);
+      fc.push(`[${inIdx}:a]anull[asilent]`);
+      mainAudio = '[asilent]';
+      inIdx += 1;
+    }
+    let aCur = mainAudio;
     if (audios.length > 0) {
       const aLabels: string[] = ['[a0]'];
-      fc.push(`[0:a]anull[a0]`);
+      fc.push(`${mainAudio}anull[a0]`);
       for (const a of audios) {
         inputs.push(`-i "${a.path}"`);
         const lbl = `[aa${inIdx}]`;
@@ -1129,10 +1137,10 @@ export async function composeEditorTimeline(
       fc.push(`${aLabels.join('')}amix=inputs=${aLabels.length}:duration=first:normalize=0[amix]`);
       aCur = '[amix]';
     }
-    // 响度统一 / 降噪
+    // 响度统一 / 降噪。normalize=0 必须带响度保护，避免混音削波。
     const post: string[] = [];
     if (settings.denoise) post.push('afftdn=nf=-25');
-    if (settings.loudnorm) post.push('loudnorm=I=-16:TP=-1.5:LRA=11');
+    if (settings.loudnorm || audios.length > 0) post.push('loudnorm=I=-16:TP=-1.5:LRA=11');
     if (post.length > 0) {
       fc.push(`${aCur}${post.join(',')}[afinal]`);
       aCur = '[afinal]';

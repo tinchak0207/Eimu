@@ -102,6 +102,9 @@ export const VISION_TIMEOUT_MS = 60_000
 /** 图片下载超时。 */
 export const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000
 
+/** URL 下载硬顶。有 Content-Length 超限立即拒绝；没有长度则流式计数，超过即中止。 */
+export const DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
+
 /** data URL 请求体上限保护（请求 JSON 总量 ~20MB，留余量）。 */
 export const IMAGE_MAX_BYTES = 18 * 1024 * 1024
 
@@ -202,6 +205,43 @@ function extMimeOf(pathOrUrl: string): { mime: string; ext: string } | null {
   return { mime: mime ?? "", ext }
 }
 
+async function readDownloadBody(response: Response): Promise<Buffer> {
+  const declared = Number(response.headers.get("content-length") ?? "")
+  if (Number.isFinite(declared) && declared > DOWNLOAD_MAX_BYTES) {
+    throw new VisionToolError("image_too_large", "图片超过 10MB，已拒绝下载。")
+  }
+  if (!response.body) {
+    const raw = Buffer.from(await response.arrayBuffer().catch(() => new ArrayBuffer(0)))
+    if (raw.length > DOWNLOAD_MAX_BYTES) {
+      throw new VisionToolError("image_too_large", "图片超过 10MB，已拒绝下载。")
+    }
+    return raw
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value?.byteLength) continue
+      received += value.byteLength
+      if (received > DOWNLOAD_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        throw new VisionToolError("image_too_large", "图片超过 10MB，已中止下载。")
+      }
+      chunks.push(value)
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      // cancel 之后锁可能已经释放
+    }
+  }
+  return Buffer.concat(chunks)
+}
+
 /**
  * 解析图片来源为 { bytes, mime, source }。
  * 3 种来源：data URL（直接解码）、http(s) URL（下载 + content-type 白名单）、本地路径（副档名白名单预检）。
@@ -231,7 +271,7 @@ export async function readImageSource(
     }
     // 2026-09-29：原本 response.text() 再 Buffer.from(text,"binary")＝把二进位当 UTF-8 解码，
     // 所有 URL 图片位元组被破坏（上游回「图片输入格式/解析错误」）。一律按位元组读。
-    const raw = Buffer.from(await response.arrayBuffer().catch(() => new ArrayBuffer(0)))
+    const raw = await readDownloadBody(response)
     if (!response.ok) {
       const bodyText = raw.toString("utf8")
       throw new VisionToolError(

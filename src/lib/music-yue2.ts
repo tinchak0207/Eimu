@@ -28,7 +28,9 @@
  *   - 工具文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
-import { createHmac, randomUUID } from "node:crypto"
+import { createHash, createHmac, randomUUID } from "node:crypto"
+import { readFile, readdir } from "node:fs/promises"
+import path from "node:path"
 
 /** YuE2 Modal 服务地址 env 名（缺省＝本通路停用）。 */
 export const YUE2_MODAL_ENDPOINT_ENV = "YUE2_MODAL_ENDPOINT"
@@ -226,6 +228,74 @@ function pickArtifacts(raw: unknown): Yue2Artifact[] {
   return out
 }
 
+/** 本地服务落盘文件名（local_service / modal 的 run 目录产物）。 */
+const YUE2_LANDED_AUDIO = "audio.flac"
+
+function isYue2Timeout(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false
+  const name = "name" in e ? String((e as { name?: unknown }).name ?? "") : ""
+  const message = "message" in e ? String((e as { message?: unknown }).message ?? "") : ""
+  return name === "TimeoutError" || /timeout/i.test(message)
+}
+
+function yue2LandedRoots(): string[] {
+  const roots: string[] = []
+  const fromEnv = (process.env.YUE2_LOCAL_OUT ?? "").trim()
+  if (fromEnv) roots.push(fromEnv)
+  roots.push(path.resolve("deploy-staging/yue2-modal/out_local/service/runs"))
+  return roots
+}
+
+/** 超时后若本次 id 的 audio.flac 已落盘，读回当成功，避免成品被丢弃。 */
+async function readLandedYue2Audio(requestId: string): Promise<GenerateYue2TrackResult | null> {
+  for (const root of yue2LandedRoots()) {
+    let names: string[]
+    try {
+      names = await readdir(root)
+    } catch {
+      continue
+    }
+    const dirs = names.filter((name) => name === requestId || name.startsWith(`${requestId}-`)).sort()
+    for (const dir of dirs.reverse()) {
+      const file = path.join(root, dir, YUE2_LANDED_AUDIO)
+      let buf: Buffer
+      try {
+        buf = await readFile(file)
+      } catch {
+        continue
+      }
+      if (buf.length < 4 || buf.subarray(0, 4).toString("latin1") !== "fLaC") continue
+      let scoreAbc: string | null = null
+      try {
+        const score = (await readFile(path.join(root, dir, "score.abc"), "utf8")).trim()
+        scoreAbc = score || null
+      } catch { /* 乐谱可缺 */ }
+      let durationSeconds = 0
+      try {
+        const receipt = JSON.parse(await readFile(path.join(root, dir, "receipt.json"), "utf8")) as {
+          audio_seconds?: unknown
+          abc?: unknown
+        }
+        if (typeof receipt.audio_seconds === "number" && Number.isFinite(receipt.audio_seconds) && receipt.audio_seconds > 0) {
+          durationSeconds = receipt.audio_seconds
+        }
+        if (!scoreAbc && typeof receipt.abc === "string" && receipt.abc.trim()) scoreAbc = receipt.abc
+      } catch { /* receipt 可缺 */ }
+      return {
+        audioBase64: buf.toString("base64"),
+        mimeType: "audio/flac",
+        scoreAbc,
+        truncated: null,
+        durationSeconds,
+        upstreamUrl: null,
+        artifacts: [],
+        audioSha256: createHash("sha256").update(buf).digest("hex"),
+      }
+    }
+  }
+  return null
+}
+
 /**
  * 调 YuE2 Modal 生成整曲（音频以 base64 直接回传，无公网 URL 可下载）；
  * 工具层拿到 base64 后走既有上传／ffprobe 实测通路。
@@ -249,6 +319,10 @@ export async function generateYue2Track(
       signal: AbortSignal.timeout(YUE2_TIMEOUT_MS),
     })
   } catch (e) {
+    if (isYue2Timeout(e)) {
+      const recovered = await readLandedYue2Audio(body.id)
+      if (recovered) return recovered
+    }
     throw new Error(
       `YuE2 Modal 请求失败（网络层，端点 ${baseUrl}${YUE2_GENERATE_PATH}）：${(e as Error)?.message ?? String(e)}`,
     )

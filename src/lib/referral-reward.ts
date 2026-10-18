@@ -227,6 +227,11 @@ export function createPostgresReferralStore(sql: GenerationSql): ReferralStore {
           WHERE status = 'succeeded'
             AND (billing_user_id = ${inviteeId} OR tenant_id = ${`web:${inviteeId}`})
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM referral_binding AS existing
+          WHERE existing.invitee_id = ${inviterId}
+            AND existing.inviter_id = ${inviteeId}
+        )
         ON CONFLICT (invitee_id) DO NOTHING
         RETURNING invitee_id
       `;
@@ -268,15 +273,31 @@ export function createPostgresReferralStore(sql: GenerationSql): ReferralStore {
     },
     async claim({ inviteeId, role, beneficiaryId, inviterId, amountQuota }) {
       await ensureSchema(sql);
-      const rows = await sql<Row[]>`
-        INSERT INTO referral_reward (invitee_id, role, beneficiary_id, inviter_id, idempotency_ref, amount_quota, status)
-        VALUES (${inviteeId}, ${role}, ${beneficiaryId}, ${inviterId}, ${referralRewardRef(inviteeId, role)}, ${amountQuota}, 'pending')
-        ON CONFLICT (invitee_id, role) DO UPDATE
-          SET status = 'pending', detail = NULL, amount_quota = EXCLUDED.amount_quota, updated_at = now()
-          WHERE referral_reward.status = 'failed'
-        RETURNING invitee_id
-      `;
-      return rows.length > 0;
+      const insertReward = async (tx: GenerationSql) => {
+        const rows = await tx<Row[]>`
+          INSERT INTO referral_reward (invitee_id, role, beneficiary_id, inviter_id, idempotency_ref, amount_quota, status)
+          VALUES (${inviteeId}, ${role}, ${beneficiaryId}, ${inviterId}, ${referralRewardRef(inviteeId, role)}, ${amountQuota}, 'pending')
+          ON CONFLICT (invitee_id, role) DO UPDATE
+            SET status = 'pending', detail = NULL, amount_quota = EXCLUDED.amount_quota, updated_at = now()
+            WHERE referral_reward.status = 'failed'
+          RETURNING invitee_id
+        `;
+        return rows.length > 0;
+      };
+      if (role !== "inviter") return insertReward(sql);
+
+      // 次数与占位（加额）同一事务。advisory lock 挡住「还没有行」的缺口，FOR UPDATE 锁已有奖励行。
+      return sql.begin(async (tx) => {
+        await tx`SELECT pg_advisory_xact_lock(${inviterId})`;
+        const locked = await tx<Row[]>`
+          SELECT invitee_id FROM referral_reward
+          WHERE role = 'inviter' AND beneficiary_id = ${inviterId}
+            AND status IN ('pending', 'applied', 'unknown')
+          FOR UPDATE
+        `;
+        if (locked.length >= MAX_REWARDED_INVITES) return false;
+        return insertReward(tx as unknown as GenerationSql);
+      });
     },
     async mark(inviteeId, role, status, detail) {
       await ensureSchema(sql);

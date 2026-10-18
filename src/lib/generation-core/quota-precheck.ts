@@ -3,10 +3,8 @@
 // env SURGERY_QUOTA_PRECHECK=1 时，提交先做一次无状态配额预检——只读 new-api
 // users.quota（沿用 gateway-admin fetchGatewayUser 既有通路，即 /v1/quota 的
 // 生产读法，不造新轮子；users.quota 为唯一真源，1 币 = 500000 quota）：
-//   - 额度足够 → 以 billingAmount=0 提交：createGenerationJob 对 0 额任务直接
-//     落 queued（job-repository 零额快车道），阻塞式 reserve 执行器整段被跳过，
-//     计费交事后投影（本阶段未实现，帐面真源 = new-api logs type=2）；
-//     commit/refund 机制原样保留（0 额时天然 no-op，不动帐）。
+//   - 额度足够 → 回传 baseBillingAmount（等于即将由既有 reserve 执行器预扣的金额）。
+//     禁止再写 billingAmount=0：0 会让 job 走零额快车道，事后投影再扣一遍。
 //   - 额度不足 → 按现契约 402 insufficient_balance 拒单，不产生注定失败的 job。
 //   - 上游不可达 → 不替闸门做主，原样回落现行阻塞式 reserve 路径：现有代码对
 //     new-api 不可用的既有姿势是歧义结果冻结 billing_unknown、永不盲目重放
@@ -46,6 +44,11 @@ import {
   readMemberQuota,
   type MemberQuotaSnapshot,
 } from "./member-quota";
+import {
+  consumeMemberDailyQuota,
+  quotaLimitStoreEnabled,
+  readMemberQuotaLimitRow,
+} from "./team-quota-limits";
 
 export const SURGERY_QUOTA_PRECHECK_ENV = "SURGERY_QUOTA_PRECHECK";
 
@@ -109,7 +112,7 @@ export type QuotaGateDecision =
       ok: false;
       status: 402 | 503;
       type: "insufficient_balance" | "api_error" | "task_budget_exceeded";
-      code: "insufficient_balance" | "control_plane_unavailable" | "task_budget_exceeded";
+      code: "insufficient_balance" | "control_plane_unavailable" | "task_budget_exceeded" | "daily_quota_exceeded";
       message: string;
       /**
        * 仅 task_budget_exceeded 携带（W5b）：本次任务的估算币值与客户宣告的上限。
@@ -371,6 +374,28 @@ export async function enforceQuotaGate(
         message: MEMBER_QUOTA_INSUFFICIENT_MESSAGE,
       };
     }
+    if (quotaLimitStoreEnabled()) {
+      const limitRow = await readMemberQuotaLimitRow(member.memberUserId, deps.sql);
+      if (limitRow?.mode === "daily") {
+        const daily = await consumeMemberDailyQuota(
+          {
+            teamUserId: member.teamUserId,
+            memberUserId: member.memberUserId,
+            costQuota: input.baseBillingAmount,
+          },
+          { sql: deps.sql },
+        );
+        if (!daily.ok) {
+          return {
+            ok: false,
+            status: 402,
+            type: "insufficient_balance",
+            code: "daily_quota_exceeded",
+            message: daily.message,
+          };
+        }
+      }
+    }
   }
 
   const precheck = await checkQuotaAvailable(
@@ -400,7 +425,9 @@ export async function enforceQuotaGate(
   }
 
   console.log(
-    `[quota-precheck] pass bizKey=${input.bizKeyId} userId=${input.billingUserId} quota=${precheck.quota} required=${input.baseBillingAmount}; skipping blocking reserve (billing -> post-hoc projection)`,
+    `[quota-precheck] pass bizKey=${input.bizKeyId} userId=${input.billingUserId} quota=${precheck.quota} required=${input.baseBillingAmount}; incumbent reserve amount=${input.baseBillingAmount}`,
   );
-  return { ok: true, billingAmount: 0 };
+  // 余额足够不等于免费。金额交给 job 的 pending reserve（reserveGenerationBilling 单次预扣）。
+  // 不在这里再调 reserve：此刻还没有 job，再扣会和执行器双扣。billing_amount 非 0，投影不扫这笔。
+  return { ok: true, billingAmount: input.baseBillingAmount };
 }

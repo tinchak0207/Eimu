@@ -300,7 +300,8 @@ async function postRelay(body: Record<string, unknown>, options: RelayOptions): 
 
 /**
  * 请控制面给这张单入帐（幂等）。永不 throw：
- * credited/already_credited＝钱已落地（不必再发兑换码）；failed/unavailable＝退回旧流程；
+ * credited/already_credited＝钱已落地（不必再发兑换码）；failed＝上游明确没动，呼叫方可退回旧兑换码；
+ * unavailable＝超时、非 2xx 或通道缺失，结果未定，不得发兑换码（上游可能已经加额）；
  * in_flight＝已占位结果未定，不得再发兑换码（防双发）。
  */
 export async function creditMapayOrderViaRelay(
@@ -324,16 +325,18 @@ export function isMapayCreditSettled(outcome: MapayCreditOutcome): boolean {
 }
 
 /**
- * 入帐结果 → 发放通道（notify／return 共用，唯一决策表）：
+ * 入帐结果 → 发放通道（notify 唯一决策表）：
  *   direct      钱已落地，不再生成兑换码
- *   redemption  入帐通道明确不可用（failed/unavailable）→ 退回旧兑换码流程
+ *   redemption  上游明确没动（failed）→ 才允许发兑换码
+ *   retry       超时 / 非 2xx / 通道缺失（unavailable）→ 回 500 让支付网关重投，禁止发码
  *   hold        已占位但结果未定 → 不开第二条通道，交人工核对
  */
-export type MapayDeliveryChannel = "direct" | "redemption" | "hold" | "none";
+export type MapayDeliveryChannel = "direct" | "redemption" | "hold" | "retry" | "none";
 
 export function mapayDeliveryFor(outcome: MapayCreditOutcome): MapayDeliveryChannel {
   if (isMapayCreditSettled(outcome)) return "direct";
   if (outcome === "in_flight") return "hold";
-  if (outcome === "failed" || outcome === "unavailable") return "redemption";
+  if (outcome === "unavailable") return "retry";
+  if (outcome === "failed") return "redemption";
   return "none";
 }

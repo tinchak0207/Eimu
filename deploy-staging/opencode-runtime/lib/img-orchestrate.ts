@@ -17,13 +17,67 @@ import {
 } from "./client"
 import { extractJson } from "./llm-channel"
 import { safeFetch } from "./sandbox"
-import { spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { aggregateBatchCost, type CostAggregate } from "./cost-accounting"
 
 // VLM 读图前先由本机下载并内联成 data URL（2026-09-29 e2e 实锤）：直接把 URL 交给上游，
 // 上游得自己抓图——eimu.dev 等站在 Cloudflare 后，非浏览器抓取被挡（400/502），webp 也未必收。
 // 内联后格式统一 jpeg/png；下载失败才退回原 URL，不编造。
 const VLM_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+const PY_TO_PNG =
+  "import sys,io\nfrom PIL import Image\nim=Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB')\nb=io.BytesIO();im.save(b,'PNG');sys.stdout.buffer.write(b.getvalue())"
+
+/** stdin 进图、stdout 出 PNG。失败、超时或超过 64MB 回 null。异步 spawn，不堵事件循环。 */
+function convertToPng(bytes: Buffer): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const child = spawn("python3", ["-c", PY_TO_PNG], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
+    const stdout = child.stdout
+    const stderr = child.stderr
+    const stdin = child.stdin
+    if (!stdout || !stderr || !stdin) {
+      child.kill("SIGKILL")
+      resolve(null)
+      return
+    }
+    const chunks: Buffer[] = []
+    let size = 0
+    const max = 64 * 1024 * 1024
+    let settled = false
+    let timer: ReturnType<typeof setTimeout>
+    const finish = (out: Buffer | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(out)
+    }
+    timer = setTimeout(() => {
+      child.kill("SIGKILL")
+      finish(null)
+    }, 30_000)
+    stdout.on("data", (chunk: Buffer) => {
+      size += chunk.length
+      if (size > max) {
+        child.kill("SIGKILL")
+        finish(null)
+        return
+      }
+      chunks.push(chunk)
+    })
+    stderr.on("data", () => {})
+    child.on("error", () => finish(null))
+    child.on("close", (code) => {
+      if (code !== 0) {
+        finish(null)
+        return
+      }
+      const out = Buffer.concat(chunks)
+      finish(out.length > 0 ? out : null)
+    })
+    stdin.on("error", () => {})
+    stdin.end(bytes)
+  })
+}
+
 async function inlineImageForVlm(u: string): Promise<string> {
   if (!/^https?:\/\//i.test(u)) return u
   try {
@@ -33,13 +87,9 @@ async function inlineImageForVlm(u: string): Promise<string> {
     if (bytes.length === 0 || bytes.length > 15 * 1024 * 1024) return u
     let mime = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase()
     if (mime !== "image/jpeg" && mime !== "image/png") {
-      const conv = spawnSync(
-        "python3",
-        ["-c", "import sys,io\nfrom PIL import Image\nim=Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB')\nb=io.BytesIO();im.save(b,'PNG');sys.stdout.buffer.write(b.getvalue())"],
-        { input: bytes, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 },
-      )
-      if (conv.status !== 0 || !conv.stdout?.length) return u
-      bytes = conv.stdout
+      const png = await convertToPng(bytes)
+      if (!png) return u
+      bytes = png
       mime = "image/png"
     }
     return `data:${mime};base64,${bytes.toString("base64")}`

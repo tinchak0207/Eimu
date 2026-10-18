@@ -8,7 +8,8 @@
 // 凭证无状态：不带 userId 的存根、不写库，验证只需要重新算一遍 HMAC，
 // 因此不会引入会话存储，也没有可以被重放的长期 token。
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
 
 /** 凭证有效期。60 秒足够 302 落地，又不至于被捡走慢慢重放。 */
 export const EMU_OAUTH_CODE_TTL_MS = 60_000;
@@ -77,4 +78,62 @@ export function verifyEmuOauthCode(code: string): number | null {
   } catch {
     return null;
   }
+}
+
+const consumedUntil = new Map<string, number>();
+let consumeSchema: Promise<void> | null = null;
+
+function codeHash(code: string): string {
+  return createHash("sha256").update(code).digest("hex");
+}
+
+function rememberConsumed(code: string): boolean {
+  const now = Date.now();
+  for (const [key, expiry] of consumedUntil) {
+    if (expiry <= now) consumedUntil.delete(key);
+  }
+  if (consumedUntil.has(code)) return false;
+  consumedUntil.set(code, now + EMU_OAUTH_CODE_TTL_MS);
+  return true;
+}
+
+async function persistConsumed(code: string): Promise<"inserted" | "duplicate" | "unavailable"> {
+  if (!generationDatabaseConfigured()) return "unavailable";
+  try {
+    if (!consumeSchema) {
+      consumeSchema = (async () => {
+        const sql = getGenerationSql();
+        await sql`
+          CREATE TABLE IF NOT EXISTS emu_oauth_consumed (
+            code_hash text PRIMARY KEY,
+            consumed_at timestamptz NOT NULL DEFAULT now()
+          )
+        `;
+      })().catch((error) => {
+        consumeSchema = null;
+        throw error;
+      });
+    }
+    await consumeSchema;
+    const sql = getGenerationSql();
+    const rows = await sql`
+      INSERT INTO emu_oauth_consumed (code_hash)
+      VALUES (${codeHash(code)})
+      ON CONFLICT (code_hash) DO NOTHING
+      RETURNING code_hash
+    `;
+    return rows.length > 0 ? "inserted" : "duplicate";
+  } catch {
+    return "unavailable";
+  }
+}
+
+/** 验签并单次消费。同一 code 第二次调用返回 null。 */
+export async function consumeEmuOauthCode(code: string): Promise<number | null> {
+  const userId = verifyEmuOauthCode(code);
+  if (userId === null) return null;
+  if (!rememberConsumed(code)) return null;
+  const persisted = await persistConsumed(code);
+  if (persisted === "duplicate") return null;
+  return userId;
 }

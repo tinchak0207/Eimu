@@ -19,7 +19,9 @@
 // （signatureDomain "newapi-session-token"）转投控制面的
 // /image-control/api/internal/newapi-session-token。
 
+import { createHash } from "node:crypto";
 import {
+  generationDatabaseConfigured,
   getGenerationSql,
 } from "@/lib/generation-core/database";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
@@ -37,6 +39,38 @@ export type EnsuredSessionToken = {
 };
 
 let schemaReady: Promise<void> | null = null;
+let revocationSchemaReady: Promise<void> | null = null;
+const revokedSessionHashes = new Set<string>();
+
+function hashSessionToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export function isSessionTokenRevokedLocally(token: string): boolean {
+  return revokedSessionHashes.has(hashSessionToken(token));
+}
+
+/** 本进程黑名单或控制面吊销表命中都算已登出。库不可用时只看本进程。 */
+export async function isSessionTokenRevoked(token: string): Promise<boolean> {
+  if (!token) return false;
+  if (isSessionTokenRevokedLocally(token)) return true;
+  if (!generationDatabaseConfigured()) return false;
+  try {
+    const sql = getGenerationSql();
+    await ensureRevocationSchema();
+    const hash = hashSessionToken(token);
+    const blocked = await sql`
+      SELECT token_hash FROM newapi_session_revocation WHERE token_hash = ${hash} LIMIT 1
+    `;
+    if (blocked.length > 0) {
+      revokedSessionHashes.add(hash);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
 
 async function ensureSchema(): Promise<void> {
   if (!schemaReady) {
@@ -55,6 +89,71 @@ async function ensureSchema(): Promise<void> {
     });
   }
   return schemaReady;
+}
+
+async function ensureRevocationSchema(): Promise<void> {
+  if (!generationDatabaseConfigured()) return;
+  if (!revocationSchemaReady) {
+    revocationSchemaReady = (async () => {
+      const sql = getGenerationSql();
+      await sql`
+        CREATE TABLE IF NOT EXISTS newapi_session_revocation (
+          token_hash TEXT PRIMARY KEY,
+          revoked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+    })().catch((error) => {
+      revocationSchemaReady = null;
+      throw error;
+    });
+  }
+  return revocationSchemaReady;
+}
+
+export async function revokeNewApiSessionToken(
+  token: string,
+  userId: number | null,
+): Promise<{ revoked: boolean; persisted: boolean }> {
+  if (!token) return { revoked: false, persisted: false };
+  const hash = hashSessionToken(token);
+  revokedSessionHashes.add(hash);
+  if (!generationDatabaseConfigured()) return { revoked: true, persisted: false };
+  try {
+    const sql = getGenerationSql();
+    await ensureRevocationSchema();
+    await sql`
+      INSERT INTO newapi_session_revocation (token_hash)
+      VALUES (${hash})
+      ON CONFLICT (token_hash) DO NOTHING
+    `;
+    if (userId && Number.isInteger(userId) && userId > 0) {
+      await sql`DELETE FROM newapi_session_token WHERE user_id = ${userId} AND token = ${token}`;
+    } else {
+      await sql`DELETE FROM newapi_session_token WHERE token = ${token}`;
+    }
+    return { revoked: true, persisted: true };
+  } catch {
+    console.error("[newapi-session-token] revoke failed");
+    return { revoked: true, persisted: false };
+  }
+}
+
+export async function rotateUpstreamAccessToken(token: string, userId: number): Promise<boolean> {
+  if (!token || !Number.isInteger(userId) || userId <= 0) return false;
+  try {
+    const response = await fetch(`${getGatewayBaseUrl()}/api/user/token`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "New-Api-User": String(userId),
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+    await response.arrayBuffer().catch(() => undefined);
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** 用 Bearer token 验活：HTTP 200 且 body success 才算活。 */
@@ -181,8 +280,22 @@ export async function ensureNewApiSessionTokenViaRelay(
  * 而前端存储的 user 可能是坏残留——id 的唯一可信源是这张表）。
  */
 export async function lookupUserIdByToken(token: string): Promise<number | null> {
+  if (!token || isSessionTokenRevokedLocally(token)) return null;
   try {
     const sql = getGenerationSql();
+    const hash = hashSessionToken(token);
+    try {
+      await ensureRevocationSchema();
+      const blocked = await sql`
+        SELECT token_hash FROM newapi_session_revocation WHERE token_hash = ${hash} LIMIT 1
+      `;
+      if (blocked.length > 0) {
+        revokedSessionHashes.add(hash);
+        return null;
+      }
+    } catch {
+      // 吊销表不可用时仍查会话表。
+    }
     const rows = await sql`
       SELECT user_id FROM newapi_session_token WHERE token = ${token} LIMIT 1
     `;

@@ -143,13 +143,13 @@ export function createPostgresUserAttributionStore(
           email             = COALESCE(EXCLUDED.email, user_attribution.email),
           email_provider    = COALESCE(EXCLUDED.email_provider, user_attribution.email_provider),
           email_verified_at = COALESCE(EXCLUDED.email_verified_at, user_attribution.email_verified_at),
-          -- 归因：首触胜出（既有非 NULL 值永不覆盖）。
-          signup_source     = COALESCE(user_attribution.signup_source, EXCLUDED.signup_source),
-          utm_source        = COALESCE(user_attribution.utm_source, EXCLUDED.utm_source),
-          utm_medium        = COALESCE(user_attribution.utm_medium, EXCLUDED.utm_medium),
-          utm_campaign      = COALESCE(user_attribution.utm_campaign, EXCLUDED.utm_campaign),
-          referrer_host     = COALESCE(user_attribution.referrer_host, EXCLUDED.referrer_host),
-          landing_path      = COALESCE(user_attribution.landing_path, EXCLUDED.landing_path),
+          -- 首触是一整行事实：已有 first_touch_at 时整组保持，否则整组写入。禁止逐列拼合。
+          signup_source     = CASE WHEN user_attribution.first_touch_at IS NULL THEN EXCLUDED.signup_source ELSE user_attribution.signup_source END,
+          utm_source        = CASE WHEN user_attribution.first_touch_at IS NULL THEN EXCLUDED.utm_source ELSE user_attribution.utm_source END,
+          utm_medium        = CASE WHEN user_attribution.first_touch_at IS NULL THEN EXCLUDED.utm_medium ELSE user_attribution.utm_medium END,
+          utm_campaign      = CASE WHEN user_attribution.first_touch_at IS NULL THEN EXCLUDED.utm_campaign ELSE user_attribution.utm_campaign END,
+          referrer_host     = CASE WHEN user_attribution.first_touch_at IS NULL THEN EXCLUDED.referrer_host ELSE user_attribution.referrer_host END,
+          landing_path      = CASE WHEN user_attribution.first_touch_at IS NULL THEN EXCLUDED.landing_path ELSE user_attribution.landing_path END,
           first_touch_at    = COALESCE(user_attribution.first_touch_at, EXCLUDED.first_touch_at),
           updated_at        = now()
         RETURNING user_id

@@ -50,6 +50,25 @@ export async function resolveSource(src: string, idx: number, ext: string, downl
   return (await fileExists(src)) ? { path: src } : null
 }
 
+/** 已有试听窗（in/out 或 preview）才截 BGM；没有这些字段就不发明窗口，仍从 0 铺到全片。 */
+function bgmAudibleSpan(bgm: object, total: number): { startSec: number; inSec: number; outSec: number; duration: number } {
+  const raw = bgm as Record<string, unknown>
+  const preview = raw.preview
+  const host = preview && typeof preview === "object" && !Array.isArray(preview) ? (preview as Record<string, unknown>) : raw
+  const hasWindow = preview != null || "in" in raw || "out" in raw || "inSec" in raw || "outSec" in raw
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null)
+  const inn = num(host.inSec) ?? num(host.in)
+  const out = num(host.outSec) ?? num(host.out)
+  if (!hasWindow || inn === null || out === null || !(out > inn)) {
+    return { startSec: 0, inSec: 0, outSec: total, duration: total }
+  }
+  const start = Math.max(0, Math.min(num(host.startSec) ?? inn, total))
+  const end = Math.max(start, Math.min(out, total))
+  const span = Math.max(0.01, end - start)
+  const sourceIn = num(host.inSec) ?? 0
+  return { startSec: start, inSec: sourceIn, outSec: sourceIn + span, duration: span }
+}
+
 /** 单 clip 音频图（时间线座标）：atrim→asetpts→volume→afade→adelay（composeEngine L1125 口径）。 */
 function clipFilter(c: AudioClip): string {
   const dur = Math.max(0.01, (c.outSec ?? c.duration) - (c.inSec ?? 0))
@@ -117,8 +136,9 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     groups[kind === "voice" ? "voice" : kind === "bgm" ? "music" : "sfx"].push(c)
   }
   // bgm 主轨（EditorBgm）视为 music 一枚 clip
-  const bgmEntry: AudioClip | null = tl.bgm?.path
-    ? { id: "bgm-virtual", trackId: "bgm-virtual", path: tl.bgm.path, label: tl.bgm.label || "bgm", startSec: 0, duration: total, inSec: 0, outSec: total, volume: tl.bgm.volume ?? 1 }
+  const bgmSpan = tl.bgm?.path ? bgmAudibleSpan(tl.bgm, total) : null
+  const bgmEntry: AudioClip | null = tl.bgm?.path && bgmSpan
+    ? { id: "bgm-virtual", trackId: "bgm-virtual", path: tl.bgm.path, label: tl.bgm.label || "bgm", startSec: bgmSpan.startSec, duration: bgmSpan.duration, inSec: bgmSpan.inSec, outSec: bgmSpan.outSec, volume: tl.bgm.volume ?? 1 }
     : null
   if (bgmEntry) groups.music.push(bgmEntry)
 
@@ -178,7 +198,7 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
       return `${lb}f`
     }
   const amixChain = (labels: string[], out: string): string =>
-    labels.length === 1 ? `[${labels[0]}]anull[${out}]` : `${labels.map((l) => `[${l}]`).join("")}amix=inputs=${labels.length}:duration=longest:normalize=0[${out}]`
+    labels.length === 1 ? `[${labels[0]}]anull[${out}]` : `${labels.map((l) => `[${l}]`).join("")}amix=inputs=${labels.length}:duration=longest:normalize=0,alimiter=limit=0.95:level=disabled[${out}]`
 
     const voiceLabels = groups.voice.map(addInput)
     const busLabels = [...groups.music, ...groups.sfx].map(addInput)
@@ -192,7 +212,7 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
     if (voiceLabels.length && busLabels.length) {
       // label 单次消费：voiceMix/ducked 各 asplit 一份单独输出（sidechain 侧链一份、终混一份）
       // 第二输出档 = ducked bus（纯压缩 BGM/SFX），duck 深度量测必须量它；量未压缩 bus 恒为 0dB（0831 B5 实测坑）
-      fc += `[voiceMix]asplit=2[voiceSc][voiceFin];[bus][voiceSc]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=300[ducked];[ducked]asplit=2[duckMix][duckOnly];[duckMix][voiceFin]amix=inputs=2:duration=longest:normalize=0[mixfull];[mixfull]${tail}`
+      fc += `[voiceMix]asplit=2[voiceSc][voiceFin];[bus][voiceSc]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=300[ducked];[ducked]asplit=2[duckMix][duckOnly];[duckMix][voiceFin]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=disabled[mixfull];[mixfull]${tail}`
       maps = `-map "[mix]"`
     } else if (voiceLabels.length) {
       fc += `[voiceMix]${tail}`

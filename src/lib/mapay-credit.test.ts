@@ -205,11 +205,11 @@ test("relay reports unavailable when the channel env is missing", async () => {
   }
 });
 
-test("delivery channel table: settled → direct, in_flight → hold, failed/unavailable → redemption", () => {
+test("delivery channel table: settled → direct, in_flight → hold, failed → redemption, unavailable → retry", () => {
   assert.equal(mapayDeliveryFor("credited"), "direct");
   assert.equal(mapayDeliveryFor("already_credited"), "direct");
   assert.equal(mapayDeliveryFor("in_flight"), "hold");
   assert.equal(mapayDeliveryFor("failed"), "redemption");
-  assert.equal(mapayDeliveryFor("unavailable"), "redemption");
+  assert.equal(mapayDeliveryFor("unavailable"), "retry");
   assert.equal(mapayDeliveryFor("none"), "none");
 });

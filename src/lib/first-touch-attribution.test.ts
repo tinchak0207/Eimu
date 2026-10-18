@@ -90,6 +90,7 @@ test("分组键：utm_source 小写胜出 → 其次 referrer host → 最后 di
   assert.equal(channel.utmSource, "Bili");
   assert.equal(channel.utmMedium, "cpc");
   assert.equal(channel.utmCampaign, "launch");
+  assert.equal(channel.landingPath, "/?utm_source=Bili&utm_medium=cpc&utm_campaign=launch");
   assert.equal(deriveSignupSource(channel), "bili");
 });
 

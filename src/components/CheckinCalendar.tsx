@@ -64,6 +64,15 @@ export function CheckinCalendar({ className }: CheckinCalendarProps) {
   }, []);
 
   const weekDays = useMemo(() => {
+    const labels = ["日", "一", "二", "三", "四", "五", "六"] as const;
+    if (!mounted) {
+      return labels.map((label, index) => ({
+        key: `weekday-${index}`,
+        label,
+        date: "–",
+        isToday: false,
+      }));
+    }
     const today = new Date();
     const start = new Date(today);
     start.setHours(0, 0, 0, 0);
@@ -73,12 +82,12 @@ export function CheckinCalendar({ className }: CheckinCalendarProps) {
       date.setDate(start.getDate() + index);
       return {
         key: date.toISOString(),
-        label: ["日", "一", "二", "三", "四", "五", "六"][date.getDay()],
+        label: labels[date.getDay()],
         date: date.getDate(),
         isToday: date.toDateString() === today.toDateString(),
       };
     });
-  }, []);
+  }, [mounted]);
 
   const loadStatus = useCallback(async () => {
     if (!token) return;

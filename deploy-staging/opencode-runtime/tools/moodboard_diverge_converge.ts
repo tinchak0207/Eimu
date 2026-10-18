@@ -20,14 +20,14 @@ const RANK_SYSTEM =
 
 export default tool({
   description:
-    "情绪板发散→收敛：theme 填主题词。发散段：LLM 生成 directions（默认 3）× per_direction（默认 3）张 prompt 并生图（默认 9 张）；收敛段：返回带 direction 标签的图组 + LLM 推荐排序。诚实声明：收敛决策权在用户——工具只给推荐，不自动砍方向，agent 应拿 ranking 向用户提问确认。dry_run=true 仍执行 LLM 发散（内部通道零扣费）返回完整请求清单，但不提交生图、不排序。计费同 image_generate 站点链。",
+    "情绪板发散→收敛：theme 填主题词。发散段：LLM 生成 directions（默认 3）× per_direction（默认 3）张 prompt。默认 dry_run=true，不提交生图；显式 dry_run:false 才生图并计费（默认 9 张）。收敛段：返回带 direction 标签的图组 + LLM 推荐排序。诚实声明：收敛决策权在用户——工具只给推荐，不自动砍方向，agent 应拿 ranking 向用户提问确认。dry_run 仍执行 LLM 发散（内部通道零扣费）返回完整请求清单，但不提交生图、不排序。计费同 image_generate 站点链。",
   args: {
     theme: tool.schema.string().describe("主题词（如 「夏日柠檬气泡水」）"),
     directions: tool.schema.number().int().min(1).max(4).optional().describe("发散方向数 1-4，默认 3"),
     per_direction: tool.schema.number().int().min(1).max(4).optional().describe("每方向张数 1-4，默认 3"),
     model: tool.schema.string().optional().describe(`生成模型，默认 ${ORCH_DEFAULT_MODEL}`),
     size: tool.schema.string().optional().describe("尺寸：1024x1024 / 1536x1024 / 1024x1536 / 2048x2048"),
-    dry_run: tool.schema.boolean().optional().describe("true=只返回 LLM 发散的请求清单与报价，不提交生图"),
+    dry_run: tool.schema.boolean().optional().describe("默认 true：只返回 LLM 发散的请求清单与报价，不提交生图。显式 false 才提交生图并计费"),
   },
   async execute(args, context) {
     const theme = args.theme.trim()
@@ -56,7 +56,8 @@ export default tool({
       })
     })
     if (!reqs.length) return fail("no_prompts", "LLM 方向内无有效 prompt", { title: "发散失败" })
-    if (args.dry_run) {
+    const dryRun = args.dry_run !== false
+    if (dryRun) {
       return ok({
         title: `moodboard dry_run：${dirs.length} 方向 × ${nPer} 张 = ${reqs.length} 张`,
         directions: dirs.slice(0, nDir).map((d) => ({ label: String(d?.label ?? ""), rationale: String(d?.rationale ?? "") })),

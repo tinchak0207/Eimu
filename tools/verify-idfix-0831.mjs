@@ -5,6 +5,11 @@
 // 且站点自己的 404 被网关兜底包成「上游原因」。
 import fs from "node:fs";
 
+if (process.env.ALLOW_PROD_VERIFY !== "1") {
+  console.error("拒绝执行：必须设置 ALLOW_PROD_VERIFY=1。未设置时不读生产 key，也不对生产下单。");
+  process.exit(1);
+}
+
 const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
 const BASE = "https://store.tinchak0207.xyz/agent/v1";
 const AUTH = { authorization: `Bearer ${KEY}` };

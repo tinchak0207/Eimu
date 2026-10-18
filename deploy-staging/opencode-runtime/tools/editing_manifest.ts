@@ -47,7 +47,7 @@ const RES: Record<string, [number, number]> = { "16:9": [1280, 720], "9:16": [72
 
 export default tool({
   description:
-    "剪辑声明生成器（纯代码，产 ffmpeg edit decision list，不执行剪辑不扣费）。clips 填镜头清单 JSON 阵列字串：[{\"url\":\"...\",\"label\":\"shot1\",\"duration\":4.2}]（url 或 path，duration 必填秒数）。可选 aspect（16:9/9:16/1:1，默认 16:9）、fps（默认 24）、audio_urls（TTS 音轨数组 JSON）。输出：concat 声明文本（file 行，同 gateway 口径）、时间轴 timeline、harness_clips（gateway setHarnessState 直接可用形状）、ffmpeg 命令组（归一化 concat / copy concat / 音轨混流 -movflags +faststart）。成片环拼接由 gateway 执行，本工具只出声明与校验（缺时长即拒绝，不盲拼）。",
+    "剪辑声明生成器（纯代码，产 ffmpeg edit decision list，不执行剪辑不扣费）。clips 填镜头清单 JSON 阵列字串：[{\"url\":\"...\",\"label\":\"shot1\",\"duration\":4.2}]（url 或 path，duration 必填秒数）。可选 aspect（16:9/9:16/1:1，默认 16:9）、fps（默认 24）、audio_urls（TTS 音轨数组 JSON）。输出：concat 声明文本（file 行，同 gateway 口径）、时间轴 timeline、harness_clips（gateway setHarnessState 直接可用形状）、ffmpeg 命令组（归一化 concat / copy concat / 音轨按分镜绝对时间 adelay+atrim+amix，不 concat 贴整条，无音轨视频不引用 [0:a]）。成片环拼接由 gateway 执行，本工具只出声明与校验（缺时长即拒绝，不盲拼）。",
   args: {
     clips: tool.schema.string().describe('镜头清单 JSON 阵列字串：[{"url","label","duration"}]'),
     aspect: tool.schema.string().optional().describe("目标画幅 16:9/9:16/1:1，默认 16:9"),
@@ -87,10 +87,26 @@ export default tool({
         return fail("invalid_audio_urls", "audio_urls 必须是 URL 的 JSON 阵列字串", { title: "输入非法" })
       }
     }
-    const audioMerge = audioUrls.length > 1 ? `ffmpeg -y -f concat -safe 0 -i ${shq("audio-list.txt")} -c:a aac audio-merged.m4a` : null
-    const audioMix = audioUrls.length
-      ? `ffmpeg -y -i ${shq("film.mp4")} -i ${shq(audioUrls.length > 1 ? "audio-merged.m4a" : audioUrls[0])} -map 0:v -map 1:a -c:v copy -c:a aac -movflags +faststart film-mixed.mp4`
-      : null
+    // 多段配音按分镜绝对时间 adelay/atrim/amix，禁止 concat 后整条贴上。成片无音轨，不引用 [0:a]。
+    const audioMerge = null
+    const audioMix = (() => {
+      if (!audioUrls.length || !timeline.length) return null
+      const n = Math.min(audioUrls.length, timeline.length)
+      const inputs = audioUrls.slice(0, n).map((u) => `-i ${shq(u)}`).join(" ")
+      const chains: string[] = []
+      const labels: string[] = []
+      for (let i = 0; i < n; i += 1) {
+        const startMs = Math.max(0, Math.round(timeline[i].start * 1000))
+        const dur = timeline[i].duration
+        const trim = dur > 0 ? `atrim=0:${dur.toFixed(3)},asetpts=PTS-STARTPTS,` : "asetpts=PTS-STARTPTS,"
+        chains.push(`[${i + 1}:a]${trim}adelay=${startMs}:all=1[da${i}]`)
+        labels.push(`[da${i}]`)
+      }
+      const mix = n === 1
+        ? `${labels[0]}anull[aout]`
+        : `${labels.join("")}amix=inputs=${n}:duration=longest:normalize=0[aout]`
+      return `ffmpeg -y -i ${shq("film.mp4")} ${inputs} -filter_complex "${chains.join(";")};${mix}" -map 0:v -map "[aout]" -c:v copy -c:a aac -movflags +faststart film-mixed.mp4`
+    })()
 
     return ok({
       title: `剪辑声明：${clips.length} 段/${total}s/${aspect}`,
@@ -115,7 +131,7 @@ export default tool({
         audio_mix: audioMix,
       },
       validation: {
-        gateway_parity: "harness_clips/concat/混流命令与 gateway assembleFilmNode 同口径",
+        gateway_parity: "harness_clips/视频 concat 与 gateway 同口径；配音按分镜绝对时间对齐，不整条 concat 贴上",
         min_output_seconds: Math.floor(total * 0.9),
         note: "成片时长低于输入总长 90% 应判失败（gateway 校验门同规则）",
       },

@@ -385,7 +385,7 @@ test("FG-b：quota_exhausted(402) fail-fast 后的应退额精确（退款语义
   );
 });
 
-test("FG-b：reserve 超预算不扣款——冻结为 billing_unknown（保守终结，等既有 zombie 全额退款）", async () => {
+test("FG-b：reserve 超预算不扣款——冻结为 billing_unknown（不在此处退款；zombie 只标 needs_review）", async () => {
   const { sql, calls, status } = mockBillingSql({
     claimedAttemptNo: RESERVE_REFUND_BUDGET + 1,
     jobRow: jobRow({ status: "pending_billing" }),
@@ -401,7 +401,7 @@ test("FG-b：reserve 超预算不扣款——冻结为 billing_unknown（保守�
   }, sql);
 
   assert.equal(reserves, 0, "超预算的 reserve 不得发出外部扣款");
-  assert.equal(status(), "unknown", "reserve op 冻结为 unknown（扣款状态不明 → 走保守全额退款）");
+  assert.equal(status(), "unknown", "reserve op 冻结为 unknown（金额不动；zombie 再标 needs_review，不自动退款）");
   assert.equal(result.status, "billing_unknown", "job 进 billing_unknown 供 probe 看见");
   assert.ok(
     calls.some((call) => call.sql.includes("SET status = 'unknown'") && String(call.values).includes("operation registry")),

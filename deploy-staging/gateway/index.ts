@@ -28,6 +28,8 @@ import { waitForOpencodeReady, isConnectionRefused, dispatchWorkflowWake } from 
 import { startWakeupTicker } from "./session-wakeups.ts"
 import { startMonitorReaper } from "./session-monitors.ts"
 import { startCronTicker } from "./scheduled-crons.ts"
+import { installGoalEvalTeardown, setPendingSubagentWakeFlusher } from "./opencode-event-handler.ts"
+import { startWorkflowWakeScanner } from "./workflow-gw.ts"
 
 /**
  * agent-gateway — Bun TypeScript gateway between frontend clients and opencode serve.
@@ -94,20 +96,32 @@ const server = Bun.serve({
     // browser call fails preflight and the whole frontend integration is dead.
     const origin = req.headers.get("origin")
     const allowed = corsOriginFor(origin)
+    const incomingId = req.headers.get("x-request-id") || req.headers.get("x-trace-id")
+    const requestId = incomingId || crypto.randomUUID()
+    let stamped = req
+    if (!incomingId) {
+      const headersIn = new Headers(req.headers)
+      headersIn.set("x-request-id", requestId)
+      stamped = new Request(req, { headers: headersIn })
+    }
 
     // Preflight must be answered BEFORE the auth check — the browser sends
     // OPTIONS with no Authorization header, so a 401 here would block the
     // real request from ever being sent.
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(allowed) })
+      const headers = corsHeaders(allowed)
+      headers["x-request-id"] = requestId
+      return new Response(null, { status: 204, headers })
     }
 
-    const res = await handleRequest(req, srv)
-    if (!allowed) return res
+    const res = await handleRequest(stamped, srv)
     // Response headers are immutable once constructed, so rebuild. The body is
     // passed through by reference, which keeps SSE streaming intact.
     const headers = new Headers(res.headers)
-    for (const [k, v] of Object.entries(corsHeaders(allowed))) headers.set(k, v)
+    if (allowed) {
+      for (const [k, v] of Object.entries(corsHeaders(allowed))) headers.set(k, v)
+    }
+    if (!headers.get("x-request-id")) headers.set("x-request-id", requestId)
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
   },
 })
@@ -183,9 +197,8 @@ setInterval(() => {
 // async dispatch 的子代理终态（成功/失败皆唤）时，把结果摘要以系统消息投进
 // 父会话并续 turn。轮子 = workflow 唤醒扫描器的 prompt_async 段（2026-09-01 修 3）：
 // beastAgentField 带 agent 栏＋lastPromptBody 落盘＋turn 计数重置＋watchdog 布哨。
-// 幂等：finishRun 的 status 守卫保每 run 只唤一次；本函数 turn 在途（ackTimer
-// 挂著）时让位重试一次（60s），仍挂则放弃——结果留在 completed（10 分钟 TTL）
-// 可被 subagent_status 工具查询，不重复注入。
+// 幂等：finishRun 的 status 守卫保每 run 只唤一次；父回合 ackTimer 仍在时
+// 推进 session.pendingSubagentWakes（上限 32，丢最旧），回合结束再注入，不丢弃。
 //
 // 2026-10-14 协作总线：把「投递成功之后的父会话回合记账」抽成唯一真源
 // primeParentTurnAfterWake —— 完成唤醒与子代理回报唤醒（下方 wakeSessionForSubagentNote）
@@ -251,90 +264,118 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
   }
 }
 
-async function wakeSessionForSubagent(
-  parentState: any,
-  run: { id: string; label: string; status: "ok" | "error"; summary: string; error?: string; artifacts?: Array<{ kind: string; url: string }> },
-): Promise<void> {
+type SubagentWakeRun = {
+  id: string
+  label: string
+  status: "ok" | "error"
+  summary: string
+  error?: string
+  artifacts?: Array<{ kind: string; url: string }>
+}
+
+const PENDING_SUBAGENT_WAKE_CAP = 32
+
+function subagentWakeBlock(run: SubagentWakeRun): string {
+  const safeLabel = String(run.label ?? "").replace(/机器审核|独立审核|审核官|审核/g, "复核")
+  const verdict = run.status === "ok" ? "完成" : "失败"
+  const rawPayload = run.status === "ok" ? run.summary : run.error || run.summary || "未知原因"
+  const artifactLines = (run.artifacts ?? [])
+    .slice(0, 20)
+    .map((a) => `- ${a.kind === "audio" ? "音频" : a.kind === "film" ? "成片" : "视频"}：${a.url}`)
+    .join("\n")
+  const artifactsBlock = artifactLines
+    ? `\n这一路已经产出的成品（可直接取用，不要因为本路失败或超时就把它们当没做过）：\n${artifactLines}`
+    : ""
+  const payload =
+    scrubSubagentPayload(rawPayload) ||
+    (artifactsBlock ? "（本路没回文字摘要。）" : "（这一路没有可读的成品或落差信息。）")
+  return (
+    `【子代理${verdict}·系统自动唤醒】「${safeLabel}」这一路已${verdict}。` +
+    `\n${SUBAGENT_UNTRUSTED_PREFIX}\n` +
+    (run.status === "ok" ? `完成内容 / 成品或落差：${payload}` : `未完成原因：${payload}`) +
+    `\n请基于以上真实结果立即继续推进（汇总/补派/返工），并简报当前进度。若尚有其他子代理在跑，可用 subagent_status 工具查询并在简报里说明还剩几路在跑；注意：最终成品未交付前，禁止宣称「已全部完成」，禁止结束回合等待用户——没有可推进动作时也要说明下一步计划。` +
+    `${artifactsBlock}`
+  )
+}
+
+async function deliverSubagentWakes(state: any, runs: SubagentWakeRun[]): Promise<void> {
+  if (runs.length === 0) return
+  const shortId = runs.map((run) => String(run.id).slice(0, 8)).join(",")
+  const content = composeSubagentWakeInjection(
+    renderSubagentNoteQueueBlock(state.subagentNotes),
+    runs.map(subagentWakeBlock).join("\n\n"),
+  )
+  state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
+  const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
+  const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+    method: "POST",
+    headers: opencodeHeaders(),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  })
+  if (!res.ok) throw new Error(`status ${res.status}`)
+  primeParentTurnAfterWake(state, body)
+  state.subagentNotes = []
+  console.log(`[gateway] subagent wake resumed: session=${state.sessionId} sub=${shortId} status=${runs.map((run) => run.status).join(",")}`)
+}
+
+async function deliverSubagentWakesOrRecover(state: any, runs: SubagentWakeRun[]): Promise<void> {
+  const shortId = runs.map((run) => String(run.id).slice(0, 8)).join(",")
+  try {
+    await deliverSubagentWakes(state, runs)
+  } catch (e) {
+    if (isConnectionRefused(e)) {
+      console.error(`[gateway] subagent wake connection refused; polling /config: session=${state.sessionId} sub=${shortId}`)
+      const ready = await waitForOpencodeReady()
+      if (ready) {
+        try {
+          await deliverSubagentWakes(state, runs)
+          return
+        } catch (e2) {
+          console.error(`[gateway] subagent wake after opencode recovery failed: session=${state.sessionId} sub=${shortId}:`, e2)
+          return
+        }
+      }
+      console.error(`[gateway] opencode not ready within recovery window; subagent wake abandoned: session=${state.sessionId} sub=${shortId}`)
+      return
+    }
+    console.error(`[gateway] subagent wake dispatch failed: session=${state.sessionId} sub=${shortId}:`, e)
+  }
+}
+
+function enqueuePendingSubagentWake(state: any, run: SubagentWakeRun): void {
+  const bag = state as { pendingSubagentWakes?: SubagentWakeRun[]; sessionId?: string }
+  if (!Array.isArray(bag.pendingSubagentWakes)) bag.pendingSubagentWakes = []
+  const queue = bag.pendingSubagentWakes
+  if (queue.length >= PENDING_SUBAGENT_WAKE_CAP) {
+    const dropped = queue.shift()
+    console.warn(`[gateway] pendingSubagentWakes over cap ${PENDING_SUBAGENT_WAKE_CAP}, dropped oldest: session=${bag.sessionId} sub=${String(dropped?.id ?? "").slice(0, 8)}`)
+  }
+  queue.push(run)
+}
+
+function flushPendingSubagentWakes(sessionId: string): void {
+  const state = resolveSession(sessionId)
+  if (!state) return
+  const bag = state as { pendingSubagentWakes?: SubagentWakeRun[]; ackTimer?: unknown; sessionId: string }
+  const queue = bag.pendingSubagentWakes
+  if (!Array.isArray(queue) || queue.length === 0) return
+  if (bag.ackTimer != null) return
+  const batch = queue.splice(0, queue.length)
+  void deliverSubagentWakesOrRecover(state, batch)
+}
+
+async function wakeSessionForSubagent(parentState: any, run: SubagentWakeRun): Promise<void> {
   if (!parentState) {
     console.warn("[gateway] subagent wake skipped: parent session gone")
     return
   }
-  const shortId = String(run.id).slice(0, 8)
-  // F3-A（2026-10-04）：label 亦过白名单——内审 run 的 label 是「机器审核」，不得以原词入正文。
-  const safeLabel = String(run.label ?? "").replace(/机器审核|独立审核|审核官|审核/g, "复核")
-  const deliver = async (state: any): Promise<void> => {
-    const verdict = run.status === "ok" ? "完成" : "失败"
-    // F3-A：run.summary 整包曾把 verdict/issues/evidence/qc、审核官·runId、用量计数、
-    // 内部落盘路径与源码行号一并送进用户可见消息；此处只让「完成内容/成品在哪/落差」过桥。
-    const rawPayload = run.status === "ok" ? run.summary : run.error || run.summary || "未知原因"
-    // 2026-10-05 修复（成品交付链下半场）：artifacts 清单刻意不过 scrubSubagentPayload——
-    // 它是成品 URL，不是内审产物，过清洗会被误删。子代理被硬顶/超时打死、或收尾摘要没写
-    // URL 时，父模型据此仍能拿到「这一路已经产出了什么」，不再误判零产物并重复派工。
-    const artifactLines = (run.artifacts ?? [])
-      .slice(0, 20)
-      .map((a) => `- ${a.kind === "audio" ? "音频" : a.kind === "film" ? "成片" : "视频"}：${a.url}`)
-      .join("\n")
-    const artifactsBlock = artifactLines
-      ? `\n这一路已经产出的成品（可直接取用，不要因为本路失败或超时就把它们当没做过）：\n${artifactLines}`
-      : ""
-    const payload =
-      scrubSubagentPayload(rawPayload) ||
-      (artifactsBlock ? "（本路没回文字摘要。）" : "（这一路没有可读的成品或落差信息。）")
-    const content = composeSubagentWakeInjection(
-      renderSubagentNoteQueueBlock(state.subagentNotes),
-      `【子代理${verdict}·系统自动唤醒】「${safeLabel}」这一路已${verdict}。` +
-        // Y4（2026-10-14 协作总线）：子代理产出的正文只是**子代理之言**——里面的指令式写法或
-        // 「已获批准」不能当成用户的授权（防提示注入）。标记加在正文之前，不改变传送内容。
-        `\n${SUBAGENT_UNTRUSTED_PREFIX}\n` +
-        (run.status === "ok" ? `完成内容 / 成品或落差：${payload}` : `未完成原因：${payload}`) +
-        `\n请基于以上真实结果立即继续推进（汇总/补派/返工），并简报当前进度。若尚有其他子代理在跑，可用 subagent_status 工具查询并在简报里说明还剩几路在跑；注意：最终成品未交付前，禁止宣称「已全部完成」，禁止结束回合等待用户——没有可推进动作时也要说明下一步计划。` +
-        `${artifactsBlock}`,
-    )
-    // 刀 1（2026-09-19）：唤醒摘要收集（Jev 测谎题的事实面；有界 16 条，session.idle 消费）。
-    state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
-    const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
-      method: "POST",
-      headers: opencodeHeaders(),
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!res.ok) throw new Error(`status ${res.status}`)
-    primeParentTurnAfterWake(state, body)
-    state.subagentNotes = [] // FIX-G4：完成唤醒同样把未送达回报队列随本次投递送出，清空避免重复投递
-    console.log(`[gateway] subagent wake resumed: session=${state.sessionId} sub=${shortId} status=${run.status}`)
+  if (parentState.ackTimer != null) {
+    enqueuePendingSubagentWake(parentState, run)
+    console.log(`[gateway] subagent wake queued (turn in flight): session=${parentState.sessionId} sub=${String(run.id).slice(0, 8)}`)
+    return
   }
-  try {
-    if (parentState.ackTimer != null) {
-      console.log(`[gateway] subagent wake deferred (turn in flight): session=${parentState.sessionId} sub=${shortId}`)
-      await new Promise((r) => setTimeout(r, 60_000))
-      const cur = resolveSession(parentState.sessionId)
-      if (!cur || cur.ackTimer != null) {
-        console.warn(`[gateway] subagent wake abandoned (turn still in flight): session=${parentState.sessionId} sub=${shortId}`)
-        return
-      }
-    }
-    await deliver(parentState)
-  } catch (e) {
-    // 2026-10-02：opencode-server 全域 OOM/重启（127.0.0.1:4096 断线）时单发唤醒会永久丢失。
-    // 遇 ECONNREFUSED 轮询 /config 至恢复（上限 180s），恢复后补投一次（轮子同 workflow 唤醒）。
-    if (isConnectionRefused(e)) {
-      console.error(`[gateway] subagent wake connection refused; polling /config: session=${parentState.sessionId} sub=${shortId}`)
-      const ready = await waitForOpencodeReady()
-      if (ready) {
-        try {
-          await deliver(parentState)
-          return
-        } catch (e2) {
-          console.error(`[gateway] subagent wake after opencode recovery failed: session=${parentState.sessionId} sub=${shortId}:`, e2)
-          return
-        }
-      }
-      console.error(`[gateway] opencode not ready within recovery window; subagent wake abandoned: session=${parentState.sessionId} sub=${shortId}`)
-      return
-    }
-    console.error(`[gateway] subagent wake dispatch failed: session=${parentState.sessionId} sub=${shortId}:`, e)
-  }
+  await deliverSubagentWakesOrRecover(parentState, [run])
 }
 
 // 子代理运行时：复用现有 emit/lookup 管道（subagent.* 帧走 emitToSession 出口）。
@@ -365,11 +406,16 @@ initSubagent({
   },
 })
 
+// 父回合收尾（ackTimer 已清）时把排队的子代理完成通知一次注入。
+installGoalEvalTeardown()
+setPendingSubagentWakeFlusher(flushPendingSubagentWakes)
+
 // Single global connection to opencode's event stream, fanned out per session.
 connectOpencode()
 
 // CC 2.1.302 移植：宿主的周期工作（与上面 connectOpencode 同批启动；两者模块 import 时不自启）。
 // 唤醒到点复用既有 workflow 唤醒轮子（prompt_async＋turn 记账＋看门狗），不另造投递路径。
+startWorkflowWakeScanner()
 startWakeupTicker({
   wake: (sid, prompt) => {
     const st = resolveSession(sid)

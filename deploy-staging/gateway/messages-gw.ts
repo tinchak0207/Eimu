@@ -61,6 +61,7 @@ import {
   buildPostCompactHookInput,
   buildPreCompactHookInput,
   compactionDecision,
+  extractPinnedConstraints,
   microcompactPlan,
 } from "./compaction-policy.ts"
 import { resolveInvisibleUploadPaths } from "./events-translate.ts"
@@ -431,32 +432,70 @@ export function appendDataPayloadToTurnTail(
   promptBody.parts.push(part)
 }
 
+const USER_BODY_MIN_CHARS = 2000
+const SECONDARY_SYSTEM_HEADERS = ["【技能索引", "【可用 skill", "【运行时环境", "【阶段知识·按需载入"]
+
+function stripSecondarySystemBlocks(system: string): string {
+  return system
+    .split(/\n(?=【)/)
+    .filter((chunk) => {
+      const head = chunk.trimStart()
+      if (head.startsWith("【硬约束")) return true
+      return !SECONDARY_SYSTEM_HEADERS.some((header) => head.startsWith(header))
+    })
+    .join("\n")
+}
+
+function isSecondaryTail(part: GatewayPromptPart, index: number): boolean {
+  if (index === 0) return false
+  const meta = tailPartMeta.get(part)
+  const id = meta?.id ?? ""
+  if (id === "environment" || id === "skill-index" || id === "skill" || id === "beast-phase-skills" || id.includes("skill")) return true
+  if (!("text" in part) || typeof (part as { text?: unknown }).text !== "string") return false
+  const text = (part as { text: string }).text
+  return SECONDARY_SYSTEM_HEADERS.some((header) => text.includes(header))
+}
+
+type PinnedSession = SessionState & { pinnedConstraints?: string }
+
+function rememberPinnedConstraints(state: SessionState, content: string): void {
+  const bag = state as PinnedSession
+  if (bag.pinnedConstraints !== undefined) return
+  bag.pinnedConstraints = (state.turnGen ?? 0) === 0 ? extractPinnedConstraints(content) : ""
+}
+
+function pinnedConstraintsText(state: SessionState): string {
+  const text = (state as PinnedSession).pinnedConstraints ?? ""
+  return text.length > 2000 ? text.slice(0, 2000) : text
+}
+
 /**
- * 硬保证：本轮 system + parts[0] 用户正文 + 全部尾端注入 ≤ PROMPT_TOTAL_BUDGET_CHARS。
+ * 硬保证：本轮 system + 尾端注入尽量落在 PROMPT_TOTAL_BUDGET_CHARS 内。
  *
- * - parts[0] 也计入总预算（旧实现把它当免费额度，附件/长正文可无限绕过）。
+ * - parts[0] 用户正文至少保留 min(2000, 原文长度)，预算不够先砍技能索引和次要环境段。
  * - injectionRender 判为 budget 丢弃的 section，对应尾端 part 真正移除（不是只记日志）；
- *   priority 数字大者先被裁，同 priority 先裁后追加者。
+ *   priority 数字大者先裁，同 priority 先裁后追加者。用户正文不因预算变成空字符串。
  * - file part（图片）不裁；text part 超限才截断，并写清截断文案。
- * - 返回 before/after（含 parts[0]）/truncated 供日志对帐——不静默丢内容。
  */
 export function enforceTurnTailBudget(
-  promptBody: { parts: GatewayPromptPart[] },
+  promptBody: { parts: GatewayPromptPart[]; system?: string },
   systemChars: number,
   droppedSectionIds: Iterable<string> = [],
 ): { allowance: number; before: number; after: number; truncated: number } {
-  const allowance = Math.max(0, PROMPT_TOTAL_BUDGET_CHARS - systemChars)
+  let systemLen = systemChars
   const parts = promptBody.parts
   const isText = (p: GatewayPromptPart): p is { type: string; text: string } =>
     "text" in p && typeof p.text === "string"
   const textLength = (): number => parts.reduce((n, p) => n + (isText(p) ? p.text.length : 0), 0)
   const before = textLength()
   let truncated = 0
+  const originalUserLen = parts[0] && isText(parts[0]) ? parts[0].text.length : 0
+  const userFloor = Math.min(USER_BODY_MIN_CHARS, originalUserLen)
+  const allowanceNow = (): number => Math.max(0, PROMPT_TOTAL_BUDGET_CHARS - systemLen)
 
-  // 1) 真正执行 renderPrompt 的 dropped 记账：按 section id 移除对应 part。
   const dropped = new Set(droppedSectionIds)
   if (dropped.size > 0) {
-    for (let i = parts.length - 1; i >= 0; i--) {
+    for (let i = parts.length - 1; i >= 1; i--) {
       const meta = tailPartMeta.get(parts[i])
       if (!meta || !dropped.has(meta.id)) continue
       parts.splice(i, 1)
@@ -464,49 +503,62 @@ export function enforceTurnTailBudget(
     }
   }
 
-  // 2) 总量仍超预算：按 priority（数字大先裁）→ 追加顺序（后追加先裁）。
+  const over = (): boolean => textLength() > allowanceNow()
+  if (over() && typeof promptBody.system === "string") {
+    const stripped = stripSecondarySystemBlocks(promptBody.system)
+    if (stripped.length < promptBody.system.length) {
+      promptBody.system = stripped
+      systemLen = stripped.length
+      truncated++
+    }
+  }
+  if (over()) {
+    for (let i = parts.length - 1; i >= 1; i--) {
+      if (!isSecondaryTail(parts[i], i)) continue
+      parts.splice(i, 1)
+      truncated++
+    }
+  }
+
   for (;;) {
     const after = textLength()
-    if (after <= allowance) return { allowance, before, after, truncated }
+    if (after <= allowanceNow()) return { allowance: allowanceNow(), before, after, truncated }
     let pick = -1
     let pickPriority = -Infinity
-    for (let i = 0; i < parts.length; i++) {
+    for (let i = 1; i < parts.length; i++) {
       const part = parts[i]
       if (!isText(part) || part.text.length === 0) continue
       const meta = tailPartMeta.get(part)
-      const priority = meta ? meta.priority : i === 0 ? -1 : 50 + i
+      const priority = meta ? meta.priority : 50 + i
       if (priority >= pickPriority) {
         pickPriority = priority
         pick = i
       }
     }
-    if (pick < 0) break
+    if (pick < 0) {
+      const user = parts[0]
+      if (!user || !isText(user) || user.text.length <= userFloor) break
+      const excess = textLength() - allowanceNow()
+      const keep = Math.max(userFloor, user.text.length - excess)
+      if (keep >= user.text.length) break
+      const mark = "\n…（尾端注入超总预算，已截断）"
+      const piece = keep <= mark.length ? user.text.slice(0, keep) : user.text.slice(0, keep - mark.length) + mark
+      user.text = piece.length >= userFloor ? piece : user.text.slice(0, userFloor)
+      truncated++
+      if (user.text.length <= userFloor) break
+      continue
+    }
     const part = parts[pick] as { type: string; text: string }
-    const excess = textLength() - allowance
+    const excess = textLength() - allowanceNow()
     const keep = Math.max(0, part.text.length - excess)
     const mark = "\n…（尾端注入超总预算，已截断）"
     const piece =
-      keep <= 0
-        ? pick === 0
-          ? mark.slice(0, Math.max(0, allowance))
-          : ""
-        : keep <= mark.length
-          ? mark.slice(0, keep)
-          : part.text.slice(0, keep - mark.length) + mark
-    if (pick === 0 && piece.length === 0) {
-      // 预算被压到 0：连截断标记都放不下。宁可发送空正文，也不突破硬预算。
-      part.text = ""
-      truncated++
-      break
-    }
-    if (piece.length === 0) {
-      parts.splice(pick, 1)
-    } else {
-      part.text = piece
-    }
+      keep <= 0 ? "" : keep <= mark.length ? mark.slice(0, keep) : part.text.slice(0, keep - mark.length) + mark
+    if (piece.length === 0) parts.splice(pick, 1)
+    else part.text = piece
     truncated++
   }
-  return { allowance, before, after: textLength(), truncated }
+  return { allowance: allowanceNow(), before, after: textLength(), truncated }
 }
 
 /**
@@ -638,7 +690,7 @@ export const BEAST_PHASE_SKILL_POINTERS: BeastFrameModule = {
   target: "tail",
   cacheHint: "stable",
   content: [
-    "【阶段知识·按需载入（skill）】完整阶段知识已抽成四个 opencode skill，**不再随本帧注入**。动手前必须先用 `skill` 工具载入对应者，载入后按其正文执行；不要凭记忆推测阶段规则：",
+    "【阶段知识·按需载入】完整阶段知识已抽成四个 opencode skill，不再随本帧注入。不要凭记忆推测阶段规则：",
     "- `beast-research`：派遣研究／调研／分析／竞品任务，或写创作 spec 前建知识高地时载入。",
     "- `beast-creation`：撰写 Expert 派遣 spec、拆创作任务、选模板／模型、写任务书时载入。",
     "- `beast-critique`：验收任何交付物、核对数字／契约栏、跨档抽查、派遣 critic 时载入。",
@@ -685,7 +737,7 @@ export const BEAST_STABLE_CORE: BeastFrameModule = {
     "【派遣】默认 async:true；生产任务点名注册表中的 expert，研究任务按现有路由派遣。任务书包含具体原料、路径与改动白名单、依赖、预算与授权、交付格式和验收标准。派出后报告实质进展，完成通知到达后验收并续接。",
     WORKER_RULES_CONTRACT,
     "【权限】实际工具表决定能调用什么；扣费与协作停点按本轮【当前授权】执行，野兽模式本身不授予付款权限。缺本域工具时回报具名席位、工具名和原始拒绝，由平台恢复接线，不推断上游故障。",
-    "【画布】存量制作沿用用户模板与已落盘产物。画布读写按可见 schema 使用 canvas_get_state / workflow_read → 改 DSL → workflow_write；新产线按工具回执确认，不因记忆中的旧产线另建一条。生成 prompt 必须写到生成步骤；对新建、更新、跳过环节如实说明。",
+    "【画布】存量制作沿用用户模板与已落盘产物。读画布只用 canvas_get_state → 改 DSL → workflow_write；新产线按工具回执确认，不因记忆中的旧产线另建一条。生成 prompt 必须写到生成步骤；对新建、更新、跳过环节如实说明。",
     "【交付】以实际产物与独立证据验收；未完成或在途的部分如实标明。研究与评审深度保留，进度只描述决策或实质结果，不叙述读文件、检索或内部思考。",
     "【安全】凭证、token、OTP、私钥不进入日志、记忆或交付；交互身份认证使用用户控制的真实浏览器；不可逆操作按当前授权处理。",
   ].join("\n"),
@@ -872,6 +924,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   // 其余用户正文一字不动），超限标注「已截断」。
   const attachmentBudget = applyAttachmentBudget(sanitizeUserContent(rawContent))
   const content = attachmentBudget.text
+  rememberPinnedConstraints(state, content)
   if (attachmentBudget.truncated) {
     console.log(
       `[gateway] attachment budget truncated: session=${state.sessionId} ${attachmentBudget.originalChars}->${attachmentBudget.chars} chars`,
@@ -1361,10 +1414,13 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     latch: latchSystemSection,
   })
   promptBody.system = renderedPrompt.text
+  const pinned = pinnedConstraintsText(state)
+  if (pinned) promptBody.system = `${promptBody.system}\n\n【硬约束·必须遵守】\n${pinned}`
+  const systemChars = promptBody.system.length
   // turn 级注入记账：system 已用字符 + beast 手册/注册表/技能索引 + injectionSections
   // 共享 PROMPT_TOTAL_BUDGET_CHARS。尾部预算不足时按 priority 丢可丢段并记账；
   // 绝不再用 Number.MAX_SAFE_INTEGER 绕过预算。
-  const tailBudget = Math.max(0, PROMPT_TOTAL_BUDGET_CHARS - renderedPrompt.text.length - tailExtraChars)
+  const tailBudget = Math.max(0, PROMPT_TOTAL_BUDGET_CHARS - systemChars - tailExtraChars)
   let injectionDroppedIds: string[] = []
   if (injectionSections.length > 0) {
     const injectionRender = renderPrompt({
@@ -1455,10 +1511,10 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   }
   // 尾端硬预算：system + 所有注入 part 共享 PROMPT_TOTAL_BUDGET_CHARS；超限从
   // 最低优先级（最后追加）开始截断并记账。放在所有 append 之后、落 lastPromptBody 之前。
-  const tailBudgetInfo = enforceTurnTailBudget(promptBody, renderedPrompt.text.length, injectionDroppedIds)
+  const tailBudgetInfo = enforceTurnTailBudget(promptBody, systemChars, injectionDroppedIds)
   if (tailBudgetInfo.truncated > 0 || process.env.PROMPT_ACCOUNT_LOG === "2") {
     console.log(
-      `[gateway] prompt.tail_budget session=${state.sessionId} total=${PROMPT_TOTAL_BUDGET_CHARS} system=${renderedPrompt.text.length} allowance=${tailBudgetInfo.allowance} before=${tailBudgetInfo.before} after=${tailBudgetInfo.after} truncated_parts=${tailBudgetInfo.truncated}`,
+      `[gateway] prompt.tail_budget session=${state.sessionId} total=${PROMPT_TOTAL_BUDGET_CHARS} system=${promptBody.system?.length ?? systemChars} allowance=${tailBudgetInfo.allowance} before=${tailBudgetInfo.before} after=${tailBudgetInfo.after} truncated_parts=${tailBudgetInfo.truncated}`,
     )
   }
   // 抖动重试记账：本轮起点。零文本结束时用 lastPromptBody 重放。

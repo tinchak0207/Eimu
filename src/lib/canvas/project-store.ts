@@ -337,6 +337,20 @@ export async function mutateCanvasProject(
   });
 }
 
+/** 删除团队命名空间 `canvas/team/<teamId>` 下的画布。不扫描个人前缀。 */
+export async function deleteTeamCanvasProjects(teamId: string, ids: string[]): Promise<number> {
+  if (!teamId) return 0;
+  const targets = new Set(ids.filter(Boolean));
+  if (!targets.size) return 0;
+  return enqueueTeam(teamId, async () => {
+    const current = await readTeamProjects(teamId);
+    const removed = current.filter((project) => targets.has(project.id));
+    if (!removed.length) return 0;
+    await writeTeamProjects(teamId, current.filter((project) => !targets.has(project.id)));
+    return removed.length;
+  });
+}
+
 /** 删除若干画布专案。返回实际删除数。 */
 export async function deleteCanvasProjects(userId: number, ids: string[]): Promise<number> {
   const targets = new Set(ids.filter(Boolean));

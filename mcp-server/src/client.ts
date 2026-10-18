@@ -145,7 +145,7 @@ export async function generateAndWait(
     status: done.status,
     id: done.id,
     artifacts: summarizeArtifacts(done.data),
-    url: first.url ?? first.b64,
+    url: first.url,
     ...(done.status !== "succeeded" && done.error ? { error: done.error } : {}),
   };
 }

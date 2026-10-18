@@ -113,7 +113,7 @@ test("no cap: decision is identical whether the field is omitted or explicitly u
       { ...base, budgetCapCoins: undefined },
       { fetchUser: userReader(582_377_145), sql, readAvailableQuota: noLedgerReader() },
     );
-    assert.deepEqual(omitted, { ok: true, billingAmount: 0 });
+    assert.deepEqual(omitted, { ok: true, billingAmount: 2 * QUOTA_PER_COIN });
     assert.deepEqual(explicit, omitted, "omitted cap vs budgetCapCoins:undefined must be byte-identical");
   });
 });
@@ -150,14 +150,14 @@ test("cap covers the estimate ⇒ allowed (boundary inclusive, `>` not `>=`)", a
       { bizKeyId: "key-1", billingUserId: 87, baseBillingAmount: QUOTA_PER_COIN, budgetCapCoins: 1 },
       deps,
     );
-    assert.deepEqual(boundary, { ok: true, billingAmount: 0 });
+    assert.deepEqual(boundary, { ok: true, billingAmount: QUOTA_PER_COIN });
 
     // cap 宽裕 → 放行。
     const roomy = await enforceQuotaGate(
       { bizKeyId: "key-1", billingUserId: 87, baseBillingAmount: QUOTA_PER_COIN, budgetCapCoins: 5 },
       { fetchUser: userReader(582_377_145), sql, readAvailableQuota: noLedgerReader() },
     );
-    assert.deepEqual(roomy, { ok: true, billingAmount: 0 });
+    assert.deepEqual(roomy, { ok: true, billingAmount: QUOTA_PER_COIN });
   });
 });
 
@@ -204,7 +204,7 @@ test("non-finite cap (NaN/Infinity/-Infinity) never trips the budget gate", asyn
         { bizKeyId: "key-1", billingUserId: 87, baseBillingAmount: 2 * QUOTA_PER_COIN, budgetCapCoins: cap },
         { fetchUser: userReader(582_377_145), sql, readAvailableQuota: noLedgerReader() },
       );
-      assert.deepEqual(decision, { ok: true, billingAmount: 0 }, `cap=${cap} must not block a real task`);
+      assert.deepEqual(decision, { ok: true, billingAmount: 2 * QUOTA_PER_COIN }, `cap=${cap} must not block a real task`);
     }
   });
 });

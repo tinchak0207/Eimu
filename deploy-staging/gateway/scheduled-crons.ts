@@ -993,12 +993,22 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
         await options.fire(task)
       } catch (error) {
         options.onError?.(error)
-        // 超时/断线可能发生在对方已接收之后；保留投递身份，不能重试同一轮或伪报 fired。
+        // 偶发失败不写 status=unknown（那会让周期任务再也排不进 active 扫描）。
+        // 周期任务保持 active 并按 cron 排下一次；一次性，或明确 not_submitted 且不可重试，才标 failed。
         const refusal = error as { code?: unknown; retryable?: unknown }
-        const status = refusal?.code === "not_submitted"
-          ? refusal.retryable === true ? "active" : "failed"
-          : "unknown"
-        db().query("UPDATE scheduled_crons SET status=?,firing=0,firing_at=NULL WHERE id=? AND status='active'").run(status, task.id)
+        const notSubmitted = refusal?.code === "not_submitted"
+        const hardFail = !task.recurring || (notSubmitted && refusal.retryable !== true)
+        if (!hardFail) {
+          const computed = computeNextFire({ ...task, lastFiredAt: now })
+          const next = Math.max(computed ?? now + 60_000, now + 1)
+          db()
+            .query("UPDATE scheduled_crons SET status='active', next_fire_at=?, firing=0, firing_at=NULL WHERE id=? AND status='active'")
+            .run(next, task.id)
+        } else {
+          db()
+            .query("UPDATE scheduled_crons SET status='failed', firing=0, firing_at=NULL WHERE id=? AND status='active'")
+            .run(task.id)
+        }
         continue
       }
       fired.push(task)

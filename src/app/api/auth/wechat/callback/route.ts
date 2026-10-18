@@ -38,7 +38,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const passwordSeed = process.env.GITHUB_LOGIN_SECRET || process.env.GITHUB_CLIENT_SECRET || "";
+    const passwordSeed = process.env.WECHAT_CALLBACK_SECRET?.trim() || "";
+    if (!passwordSeed) {
+      return NextResponse.json({ success: false, message: "not_configured" }, { status: 503 });
+    }
     const result = await loginWechatPeer(peerId, passwordSeed);
     const ok = await completeWechatLogin(rawCode, peerId, result.token, result.user);
     if (!ok) {

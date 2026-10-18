@@ -60,6 +60,7 @@ __pycache__/
 
 # typescript
 *.tsbuildinfo
+*.out
 next-env.d.ts
 
 .claude/

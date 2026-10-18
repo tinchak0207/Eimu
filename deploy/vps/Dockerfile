@@ -14,6 +14,9 @@ RUN --mount=type=cache,id=image-control-next-cache,target=/app/.next/cache npm r
 
 # Durable generation work must not live in the Next.js HTTP container. This target
 # keeps the same source/dependencies but runs the Postgres-backed worker loop.
+# 不在 npm ci 之后拆 node_modules（three 等被运行时间接引用，乱删会启动失败）。
+# 瘦身只靠 .dockerignore：排除 *.mp4（public 下站点片除外）、*.out、tests、docs、
+# playwright 报告。worker 不从 builder 复制 .next；前端构建产物只留在 builder/runner。
 FROM deps AS generation-worker
 WORKDIR /app
 ENV NODE_ENV=production

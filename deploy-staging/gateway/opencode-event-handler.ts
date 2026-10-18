@@ -3,7 +3,7 @@
 // failover/jitter 两台重试机、critic pass、Jev gate、question freeze、video release、
 // compaction 触发）。除档头注释/import/declare 占位/export 前缀外与源逐行等价（diff 验 identical）。
 // 依赖解析：Wave1/已建模组真 import；仍住 index.ts 未 export 的符号 declare 占位（stage1 记忆 subagent 占位符法）。
-import { sessions, markDirty, findSessionByOpenCodeId, isRestoredGatewayTurn, reconcileRestoredGatewayTurn } from "./sessions-core.ts"
+import { sessions, markDirty, findSessionByOpenCodeId, isRestoredGatewayTurn, reconcileRestoredGatewayTurn, registerSessionTeardownHook } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { flushOtherPartTails, takeTurnEndTail } from "./outbound-sanitize.ts"
 import { emitSanitizedDelta } from "./outbound-emit.ts"
@@ -98,6 +98,26 @@ function emitTurnDone(state: SessionState): void {
   emitRunningSubagentsStatus(state.sessionId)
 }
 
+let flushPendingSubagentWakes: ((sessionId: string) => void) | null = null
+
+export function setPendingSubagentWakeFlusher(fn: (sessionId: string) => void): void {
+  flushPendingSubagentWakes = fn
+}
+
+function flushQueuedSubagentWakes(state: SessionState): void {
+  try {
+    flushPendingSubagentWakes?.(state.sessionId)
+  } catch (e) {
+    console.error("[gateway] flush pending subagent wakes failed:", e)
+  }
+}
+
+function closeTurnAndFlushWakes(state: SessionState): void {
+  emitTurnDone(state)
+  clearAckTimer(state)
+  flushQueuedSubagentWakes(state)
+}
+
 // ── 2026-10-02 能力片：孤儿 tool_use 追踪（设计取自 Claude Code yieldMissingToolResultBlocks
 // ——换模型时替未收到结果的 tool_use 补 is_error，未复制程式码）──────────────
 // 纯读观测：记录每个 session 目前 in-flight 的工具调用；工具 completed/error 即摘除。
@@ -143,6 +163,12 @@ const goalEvalBySession = new Map<
   string,
   { goalId: number; lastTurnGen: number; inFlight: boolean; dispatched: boolean; notMet: number; stopped: boolean }
 >()
+
+export function installGoalEvalTeardown(): void {
+  registerSessionTeardownHook((id) => {
+    goalEvalBySession.delete(id)
+  })
+}
 
 async function recentTranscriptTail(opencodeSessionId: string): Promise<string> {
   const res = await opencodeFetch(`/session/${encodeURIComponent(opencodeSessionId)}/message`, { timeoutMs: 8000 })
@@ -932,11 +958,17 @@ export function handleOpencodeEvent(event: any): void {
             )
             setTimeout(async () => {
               const cur = sessions.get(state.sessionId)
-              if (!cur || (cur.turnGen ?? 0) !== gen) return
+              if (!cur) return
+              if ((cur.turnGen ?? 0) !== gen) {
+                // 新回合仍在途时不关新回合；旧回合已经空闲则补 turn.done，避免前端挂死。
+                if ((cur.lastTurnActiveAt ?? 0) > 0) return
+                closeTurnAndFlushWakes(cur)
+                return
+              }
               if (cur.turnAborted) {
-                cur.lastTurnActiveAt = 0
                 cur.retryQueued = false
                 markDirty(cur)
+                closeTurnAndFlushWakes(cur)
                 return
               }
               try {
@@ -953,7 +985,7 @@ export function handleOpencodeEvent(event: any): void {
               } catch (e) {
                 console.error(`[gateway] canvas-write-gate nudge failed:`, e)
                 cur.retryQueued = false
-                emitTurnDone(cur)
+                closeTurnAndFlushWakes(cur)
               }
             }, TURN_RETRY_DELAY_MS)
             break // 不发 turn.done：等补写轮结束
@@ -988,6 +1020,7 @@ export function handleOpencodeEvent(event: any): void {
         }
         // S6 规格2：turn 正常结束，ack timer 不再需要。
         clearAckTimer(state)
+        flushQueuedSubagentWakes(state)
         // S6 规格3：质询回覆完成 → 放行被冻结的视频工作流（先释放再压缩）。
         releasePendingVideoWorkflows(state)
         // 回合结束是滚动摘要压缩的触发点：此刻无在途生成、讯息数稳定。

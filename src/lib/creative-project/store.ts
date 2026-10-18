@@ -1,7 +1,12 @@
 // 创作项目（P0 新层）云端持久化（Blob）。
 //
 // 沿用 canvas/project-store.ts 的模式：每次写入落到新路径 + 修剪旧世代，
-// 避免 Blob cacheControlMaxAge 60s 下限造成的「刚存读不到」。单用户写入串行。
+// 避免 Blob cacheControlMaxAge 60s 下限造成的「刚存读不到」。
+//
+// 写入队列限制：writeQueues 只存在于本进程内存，同一 userId 的写在本进程内串行。
+// 多实例、多进程各自一份队列，不能互相看见 in-flight，也不能防止后写覆盖先写。
+// 文档没有可比较的写入版本字段（schemaVersion 只是结构版本），这里不发明迁移，也不假装有分布式锁。
+// 未消除多实例覆盖。
 import { randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
@@ -41,6 +46,7 @@ function indexPrefix(userId: number): string {
   return `${userPrefix(userId)}/index-`;
 }
 
+/** 本进程内按 userId 串行。跨进程无效，见文件头。 */
 function enqueue<T>(userId: number, task: () => Promise<T>): Promise<T> {
   const previous = writeQueues.get(userId) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(task);
@@ -268,7 +274,8 @@ export async function saveCreativeProject(userId: number, project: CreativeProje
 }
 
 /**
- * 对单一项目做**读-改-写**（在 per-user 写入伫列 `enqueue` 内执行，避免与存档竞态。
+ * 对单一项目做**读-改-写**（在本进程 per-user 写入队列 `enqueue` 内执行。
+ * 只避免本进程内的存档竞态，多实例仍可能互相覆盖。
  *
  * mutator 回 `null`＝放弃写入；找不到项目同样回 null。
  * 回传实际落盘的（已清洗）项目，供路由原样回给端点。updatedAt 由 store 盖章。
@@ -317,7 +324,7 @@ export async function deleteCreativeProjects(userId: number, ids: string[]): Pro
 /**
  * 存量迁移（幂等）：既有画布专案 → 一条「默认画布」聊天（`sessionId: ""`）。
  *
- * 在 enqueue 串行区内做：
+ * 在本进程 enqueue 串行区内做（多实例无效）：
  * 1. 已盖过 `legacyMigratedAt` 章 → 直接回现项目，不写盘。
  * 2. 无 legacy 画布 → 不写盘（不给新用户白烧一次 Blob 写）。
  * 3. 有 legacy 画布且当前项目数为 0 → 建项目（id 由 randomBytes 生成）。

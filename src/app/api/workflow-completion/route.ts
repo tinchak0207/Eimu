@@ -25,31 +25,9 @@
 // Phase 1 已完工且验收过、本片不改 gateway（越界）。Bearer + constant-time 比较
 // 是既有端点（/v1/compile 用 B key Bearer）的同款范式。
 //
-// ── user 归属方案（本片最大的不确定性，如实说明）──────────────────────────
-// gateway payload 只有 sessionId，**没有任何 userId**，gateway 进程本身也不持有
-// 用户身份（sessions core 的 SessionState 只有 sessionId/apiKey/providerState；
-// identity 由站点侧 resolveAgentCaller 在代理层解析，见 agent-session-guard.ts）。
-// 也就是说：**从 gateway payload 可靠解析出 «记录该归属哪个用户» 在现行资料形状下
-// 做不到**（站点侧 process memory 没有 sessionId→userId 表，gateway 也没有；
-// 任何「去 DB 反查」的路径都不存在，gateway 零 DB）。
-//
-// 本片采取的方案：**显式环境变数归属**。
-//   env `WORKFLOW_COMPLETION_USER_ID` → 记录归该 userId；
-//   未配置 → 400 + log，**不猜、不写 0、不写进任何人的历史**。
-//
-// 为什么是这个方案而不是「payload 加 user_id」：加栏位要改已验收的 Phase 1
-// gateway（越界）且 gateway 手上没有这个值，得先让站点把 userId 带进建号请求并
-// 由 gateway 存进 session（跨三档的改动）。在「本片是站点侧接收端」的边界内，
-// 正解是把「归属」显式化为一项部署配置，而不是在站点侧编一个 userId。
-//
-// 风险（诚实列出）：
-//   1. 单一归属：此 env 只能指向一个用户，多用户场景下所有工作流记录会落同一人。
-//      这是「先让链路通、再把身份带上」的阶段性取舍，不是最终形态。
-//   2. 配错 = 写错人：secret「配错一个数字」写进别人历史，是本设计唯一的真实
-//      风险。缓解＝未配置就 400（不会默认落到 0/1 号用户），且后续要改成
-//      gateway 带 user_id（建议的正解，见回报）。
-//   3. 幂等键不含 userId：记录 id = `workflow-<workflowId>`，换 env 指向别的用户
-//      不会覆盖旧记录，新用户会多出一条。可接受（不删不改别人的记录）。
+// 归属：请求必须带发起者 userId，并用本路由既有 Bearer（共享密钥、constant-time）
+// 验签。验签失败或没有 userId → 401。不再读取 WORKFLOW_COMPLETION_USER_ID，
+// 无签名的旧调用不得写入固定用户。
 //
 // 附带：鉴权用掉的那把 key 顺便做 ownerKey 正典化（deriveMemoryOwnerKey）——它与
 // gateway 注入记忆用的 ownerKey 同算法，让「这条记录是哪个 agent 身份跑出来的」
@@ -267,14 +245,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail(401, "unauthorized", "unauthorized");
   }
 
-  // 归属：显式 env，未配置就拒（不猜、不默认，理由见档头）。
-  const userIdRaw = process.env.WORKFLOW_COMPLETION_USER_ID?.trim() ?? "";
-  const userId = Number(userIdRaw);
-  if (!userIdRaw || !Number.isInteger(userId) || userId <= 0) {
-    console.error("[workflow-completion] WORKFLOW_COMPLETION_USER_ID 未配置或非法，拒绝写入（无法确定记录归属）。");
-    return fail(400, "workflow completion owner is not configured", "owner_not_configured");
-  }
-
   // 取原始位元组先判体积，再解析：直接 req.json() 对超大 body 没有前置防线。
   const raw = await req.arrayBuffer();
   if (raw.byteLength === 0) return fail(400, "empty body", "invalid_payload");
@@ -290,6 +260,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return fail(400, "request body must be an object", "invalid_payload");
+  }
+
+  const userIdRaw = (payload as { userId?: unknown }).userId;
+  const userId = typeof userIdRaw === "number" ? userIdRaw : Number(userIdRaw);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return fail(401, "unauthorized", "unauthorized");
   }
 
   // 必要栏位宽松校验：workflowId/templateId/status/nodes。缺 connections 视为空阵列。

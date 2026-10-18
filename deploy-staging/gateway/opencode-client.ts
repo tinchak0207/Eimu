@@ -174,6 +174,12 @@ const OPENCODE_SSE_IDLE_MS = 30_000
 export function connectOpencode(): void {
   const url = `${OPENCODE_URL}/event`
   void (async () => {
+    let backoffMs = 2000
+    const takeBackoff = (): number => {
+      const current = backoffMs
+      backoffMs = Math.min(backoffMs * 2, 30_000)
+      return current
+    }
     while (true) {
       const controller = new AbortController()
       let lastByteAt = Date.now()
@@ -192,10 +198,12 @@ export function connectOpencode(): void {
           signal: controller.signal,
         })
         if (!res.ok || !res.body) {
-          console.error(`[gateway] opencode SSE connect failed: status=${res.status}`)
-          await sleep(2000)
+          const waitMs = takeBackoff()
+          console.error(`[gateway] opencode SSE connect failed: status=${res.status} backoff=${waitMs / 1000}s`)
+          await sleep(waitMs)
           continue
         }
+        backoffMs = 2000
         console.log(`[gateway] opencode SSE connected: ${url}`)
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
@@ -224,13 +232,16 @@ export function connectOpencode(): void {
             }
           }
         }
-        console.error(`[gateway] opencode SSE stream ended`)
+        const waitMs = takeBackoff()
+        console.error(`[gateway] opencode SSE stream ended backoff=${waitMs / 1000}s`)
+        await sleep(waitMs)
       } catch (e) {
-        console.error(`[gateway] opencode SSE error: ${e}`)
+        const waitMs = takeBackoff()
+        console.error(`[gateway] opencode SSE error: ${e} backoff=${waitMs / 1000}s`)
+        await sleep(waitMs)
       } finally {
         clearInterval(watchdog)
       }
-      await sleep(2000)
     }
   })()
 }

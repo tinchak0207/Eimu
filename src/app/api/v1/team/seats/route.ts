@@ -4,8 +4,9 @@
 //   POST → { seats: number }（owner 可改）
 //
 // 席位语义：seats = 团队可容纳人数，且 min_members ≤ 现有成员数 ≤ seats ≤ max_members。
-// 本片只做上限闸与调整，**不接支付**（按席位计价的下单是另一片，此处不碰计费）。
-// 调整只写意图（整数），不碰任何点数（禁影子帐本）。
+// 本路由只读写人数上限整数，不扣款、不创建支付单。
+// 按席位购买在 POST /v1/team/seats/order：报价合法就给出待支付订单和收银台入口；
+// 收款是 GET /api/payments/mapay/checkout，到帐由 notify 的席位分支履约。续费/退款未做。
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -55,14 +56,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         max_members: capacity.maxMembers,
       },
       can_admit_more: roster.length < settings.seats,
-      // 诚实标注（刀 3）：席位目前只是意图整数，未接计费——不能按席位购买/续费/扣款。
-      // 席位若要计价，既有下单入口是 GET /api/payments/mapay/checkout?plan=<id>
-      // （套餐目录 src/lib/plans.ts，前端 src/components/PricingClient.tsx）；
-      // 到帐后成员额度分配的唯一通路是 member-quota.ts 的 allocateMemberQuota。
-      // 本端点刻意不做任何计费写入（禁影子帐本）。
-      billing_connected: false,
+      // 本 GET/POST 不写支付。购买是否接通看 order 路由：报价合法即待支付订单，
+      // checkout 真的打开 mapay 收款页，notify 按同源价表履约。续费/退款仍未做。
+      billing_connected: true,
       billing_note:
-        "席位当前仅为人数上限的意图整数，未接入计费（不支持按席位购买/续费）；购买与续费走 /pricing 套餐，额度分配走 B 端额度接口。",
+        "本接口只读写人数上限，本身不扣款。按席位购买已接通：POST /v1/team/seats/order 在报价合法时返回可支付订单，收银台为 GET /api/payments/mapay/checkout。续费与退款未做。",
     },
     { headers: { "Cache-Control": "no-store" } },
   );

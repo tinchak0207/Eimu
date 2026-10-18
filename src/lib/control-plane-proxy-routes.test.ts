@@ -98,6 +98,7 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/auth/github/callback": "pwa-handoff 双模式（Vercel 走 HMAC relay）＋ recordUserAttributionViaRelay，本地不直连 DB",
   "/api/auth/google/callback": "pwa-handoff 双模式（Vercel 走 HMAC relay）＋ recordUserAttributionViaRelay，本地不直连 DB",
   "/api/auth/handoff": "pwa-handoff 双模式：Vercel 无 DB 时经 HMAC relay 转投控面",
+  "/api/auth/logout": "登出吊销会话哈希。无库时查询抛错被吞、只留进程内拒绝并尝试上游轮换；有库才落吊销表。会话校验路由不读这张表",
   "/api/auth/me": "只用 *ViaRelay（lookupUserIdByToken/welcome-gift/user-attribution）打控面，relay 失败回 503 transient",
   "/api/auth/wechat/callback": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/auth/wechat/msg": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",

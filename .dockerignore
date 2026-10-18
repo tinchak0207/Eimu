@@ -1,40 +1,17 @@
-# Docker does NOT read .gitignore, so the build context must be trimmed here.
-# Build context is this directory: deploy/vps/control-plane-compose.yml declares
-# `context: ./app`, and ./app on the VPS is a copy of this repo root.
-#
-# ALLOWLIST, not denylist: the repo root collects throwaway dirs (.tmp-home,
-# .tools, eval-*, deploy-staging 15G, promo-video, *.mp4 …) faster than anyone
-# updates a denylist. Everything is excluded unless re-included below. A new
-# top-level dir that the build or the worker truly needs must be added here.
-
-*
-
-!src
-!public
-!worker
-!tools
-!db
-!bridge
-!skills
-# 运行时读档（EXPERT_CONSTITUTION_PATH 等）与 next build 型别检查会碰到的测试汇入。
-!deploy-staging/expert-gateway
-!deploy-staging/gateway
-
-!package.json
-!package-lock.json
-!next.config.mjs
-!next-env.d.ts
-!tsconfig.json
-!tailwind.config.ts
-!postcss.config.mjs
-!components.json
-
-# Critical: node_modules must stay excluded, otherwise `COPY . .` in
-# deploy/vps/Dockerfile overwrites the node_modules that the deps stage
-# just produced with `npm ci`.
-**/node_modules
-**/.next
-**/*.tsbuildinfo
-**/.env*
-**/*.log
-**/*.mp4
+# worker 与 builder 共用上下文。不在镜像里拆 node_modules。
+# 排除无关大文件；public 下的 mp4 是站点资源（宣传片/showcase），加回。
+node_modules
+.git
+.next
+*.mp4
+!public/**/*.mp4
+*.out
+*.tsbuildinfo
+docs
+tests
+**/tests
+playwright-report
+**/playwright-report
+test-results
+**/test-results
+output/playwright

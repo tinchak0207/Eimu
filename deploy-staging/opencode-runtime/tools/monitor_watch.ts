@@ -17,7 +17,7 @@ export default tool({
   description: [
     "监视外部事件源：start 立即返回 monitor id，事件作为会话事件推送。",
     "何时用：等待任务完成、日志出现、服务恢复等外部条件；只是稍后再查用 schedule_wakeup。",
-    "关键约束：command 与 ws 二选一；timeout_ms 默认 300000、上限 1800000；每秒最多 20 条，超出丢弃计数；stop 需正整数 monitor_id；本工具没有 noop 参数。",
+    "关键约束：command 与 ws 二选一；timeout_ms 默认 300000、上限 1800000；每秒最多 20 条，超出丢弃计数；stop 需正整数 monitor_id；本工具没有 noop 参数。监视终态或异常退出且父会话空闲时，网关会注入一条以 [Monitor Result] 开头的唤醒，正文带 stderr 尾部。",
     "失败处置：bad_action 表示 action 不是 start/stop/status；missing_description 补描述；bad_source 表示 command/ws 必须且只能填一个；missing_monitor_id 补 id；monitor_failed 按 gateway 文本修正。",
     "互指：稍后再查用 schedule_wakeup；周期性提醒用 cron_create；不要用 sleep 或连续轮询轰炸。",
     "示例：monitor_watch({action:start, description:等待渲染完成, command:tail -f /tmp/render.log | grep -m1 DONE, timeout_ms:600000})",

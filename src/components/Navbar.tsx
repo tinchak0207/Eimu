@@ -422,7 +422,7 @@ export default function Navbar({ className }: NavbarProps) {
           {/* Right side */}
           <div
             className={cn(
-              "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1 sm:gap-1 lg:gap-1.5",
+              "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1 sm:min-w-[20rem] sm:flex-none sm:gap-1 lg:gap-1.5",
               "app-region-no-drag",
               isLoggedIn && user
                 ? ""

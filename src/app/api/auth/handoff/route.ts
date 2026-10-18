@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { claimHandoff, createHandoffTicket, pollHandoff } from "@/lib/pwa-handoff";
+import { packHandoffTicket } from "@/lib/github-auth";
+import { INVITE_COOKIE, looksLikeInviteCode } from "@/lib/first-touch-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -18,10 +20,13 @@ export async function POST(req: NextRequest) {
     const provider = req.nextUrl.searchParams.get("provider") === "google" ? "google" : "github";
     try {
       const ticket = await createHandoffTicket();
+      const invite = looksLikeInviteCode(req.cookies.get(INVITE_COOKIE)?.value)
+        ? req.cookies.get(INVITE_COOKIE)?.value
+        : null;
       return NextResponse.json({
         success: true,
         ticket,
-        loginUrl: `/api/auth/${provider}/start?handoff=${ticket}`,
+        loginUrl: `/api/auth/${provider}/start?handoff=${encodeURIComponent(packHandoffTicket(ticket, invite))}`,
       });
     } catch (error) {
       console.error("[auth/handoff:create]", error);
@@ -42,8 +47,20 @@ export async function POST(req: NextRequest) {
       if (!claimed) {
         return NextResponse.json({ success: false }, { status: 404 });
       }
-      const userJson = JSON.stringify(claimed.user ?? {});
-      const response = NextResponse.json({ success: true, user: claimed.user });
+      const rawUser = claimed.user && typeof claimed.user === "object"
+        ? { ...(claimed.user as Record<string, unknown>) }
+        : {};
+      const carriedInvite = typeof rawUser.eimu_invite === "string" ? rawUser.eimu_invite : null;
+      delete rawUser.eimu_invite;
+      const requestInvite = req.cookies.get(INVITE_COOKIE)?.value;
+      const invite = looksLikeInviteCode(carriedInvite)
+        ? carriedInvite
+        : looksLikeInviteCode(requestInvite)
+          ? requestInvite
+          : null;
+      // napi_user 必须 encodeURIComponent。读取侧 new-api-client.getCookieValue 会 decodeURIComponent。
+      const userJson = encodeURIComponent(JSON.stringify(rawUser));
+      const response = NextResponse.json({ success: true, user: rawUser });
       response.cookies.set("napi_token", claimed.token, {
         path: "/",
         maxAge: 60 * 60 * 24 * 30,
@@ -56,6 +73,14 @@ export async function POST(req: NextRequest) {
         sameSite: "lax",
         secure: true,
       });
+      if (invite) {
+        response.cookies.set(INVITE_COOKIE, invite, {
+          path: "/",
+          maxAge: 90 * 24 * 60 * 60,
+          sameSite: "lax",
+          secure: true,
+        });
+      }
       return response;
     } catch (error) {
       console.error("[auth/handoff:claim]", error);

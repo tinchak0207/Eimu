@@ -12,6 +12,7 @@
 //
 // 预设不公开：没有这张记录，/p/<shareId> 就查无此页；撤销＝删记录，同一条路径当场 404。
 
+import { createHash } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "./blob-backend";
 import { sanitizeBlobSegment } from "./history-types";
 import { generateShareId, isShareId } from "./share-id";
@@ -52,6 +53,11 @@ function indexPath(userId: number): string {
 // 记忆体降级（非生产或显式 opt-in）：与 blob 后端同语义，只是不持久化。
 const memoryRecords = new Map<string, ShareRecord>();
 const memoryIndexes = new Map<number, ShareIndexItem[]>();
+const entryKeys = new Map<string, string>();
+
+function shareEntryKey(userId: number, entryId: string, resultIndex: number): string {
+  return createHash("sha256").update(`${userId}\n${entryId}\n${resultIndex}`).digest("hex");
+}
 
 interface ShareIndexDocument {
   schemaVersion: number;
@@ -65,11 +71,14 @@ function parseIndexDocument(payload: unknown): ShareIndexItem[] {
       ? (payload as ShareIndexDocument).shares
       : [];
   return raw.flatMap((item): ShareIndexItem[] => {
-    const value = item as Partial<ShareIndexItem> | null;
-    if (!value || !isShareId(value.shareId) || typeof value.entryId !== "string") return [];
+    const value = item as (Partial<ShareIndexItem> & { entryKey?: unknown }) | null;
+    if (!value || !isShareId(value.shareId)) return [];
+    const entryKey = typeof value.entryKey === "string" ? value.entryKey : "";
+    if (typeof value.entryId !== "string" && !entryKey) return [];
+    if (entryKey && value.shareId) entryKeys.set(value.shareId, entryKey);
     return [{
       shareId: value.shareId,
-      entryId: value.entryId,
+      entryId: typeof value.entryId === "string" ? value.entryId : "",
       resultIndex: Number.isFinite(value.resultIndex) ? Number(value.resultIndex) : 0,
       createdAt: Number.isFinite(value.createdAt) ? Number(value.createdAt) : 0,
       hidePrompt: value.hidePrompt === true,
@@ -153,7 +162,16 @@ async function writeIndex(userId: number, shares: ShareIndexItem[]): Promise<voi
   }
 
   const previous = await listIndexBlobs(userId).catch(() => []);
-  const document: ShareIndexDocument = { schemaVersion: SHARE_SCHEMA_VERSION, shares: capped };
+  const document = {
+    schemaVersion: SHARE_SCHEMA_VERSION,
+    shares: capped.map((item) => ({
+      shareId: item.shareId,
+      resultIndex: item.resultIndex,
+      createdAt: item.createdAt,
+      hidePrompt: item.hidePrompt === true,
+      entryKey: shareEntryKey(userId, item.entryId, item.resultIndex),
+    })),
+  };
   await put(indexPath(userId), JSON.stringify(document), {
     access: "public",
     contentType: "application/json",
@@ -180,19 +198,40 @@ async function readRecord(shareId: string): Promise<ShareRecord | null> {
     // 直接按路径名取（不经 list）：list 在 Vercel Blob 上最终一致，刚建立的分享
     // 可能还没出现在列表里——那会让刚分享完的连结自己 404。
     const payload = await readJson(await get(recordPath(shareId), { access: "public", useCache: false }));
-    return payload === null ? null : parseRecord(payload);
+    const parsed = payload === null ? null : parseRecord(payload);
+    const cached = memoryRecords.get(shareId);
+    if (parsed && cached?.hidePrompt && !parsed.snapshot.prompt && cached.snapshot.prompt) {
+      parsed.snapshot = { ...parsed.snapshot, prompt: cached.snapshot.prompt };
+    }
+    return parsed;
   } catch (error) {
     console.error(`[share] 读取分享记录失败 shareId=${shareId}`, error);
     return null;
   }
 }
 
+/** 公开 blob 只留展示字段。隐藏提示词时不写 prompt；内部 id 一律不进公开 JSON。 */
+function publicShareDocument(record: ShareRecord): Record<string, unknown> {
+  const prompt = record.hidePrompt ? "" : record.snapshot.prompt;
+  return {
+    schemaVersion: record.schemaVersion,
+    shareId: record.shareId,
+    createdAt: record.createdAt,
+    hidePrompt: record.hidePrompt,
+    snapshot: {
+      ...(prompt ? { prompt } : {}),
+      modelId: record.snapshot.modelId,
+      aspectRatio: record.snapshot.aspectRatio,
+      imageSize: record.snapshot.imageSize,
+      imageUrl: record.snapshot.imageUrl,
+    },
+  };
+}
+
 async function writeRecord(record: ShareRecord): Promise<void> {
-  if (!ensureBlobBackendWritable("share-store.writeRecord")) {
-    memoryRecords.set(record.shareId, record);
-    return;
-  }
-  await put(recordPath(record.shareId), JSON.stringify(record), {
+  memoryRecords.set(record.shareId, record);
+  if (!ensureBlobBackendWritable("share-store.writeRecord")) return;
+  await put(recordPath(record.shareId), JSON.stringify(publicShareDocument(record)), {
     access: "public",
     contentType: "application/json",
     cacheControlMaxAge: 60,
@@ -226,8 +265,10 @@ export interface CreateShareResult {
  */
 export async function createShare(input: CreateShareInput): Promise<CreateShareResult> {
   const index = await readIndex(input.userId);
+  const key = shareEntryKey(input.userId, input.entryId, input.resultIndex);
   const existing = index.find(
-    (item) => item.entryId === input.entryId && item.resultIndex === input.resultIndex,
+    (item) => item.resultIndex === input.resultIndex
+      && (item.entryId === input.entryId || entryKeys.get(item.shareId) === key),
   );
 
   if (existing) {
@@ -281,10 +322,16 @@ export async function listSharesForUser(userId: number): Promise<ShareIndexItem[
 async function ownedRecord(userId: number, shareId: string): Promise<ShareRecord | null> {
   if (!isShareId(shareId)) return null;
   const index = await readIndex(userId);
-  if (!index.some((item) => item.shareId === shareId)) return null;
+  const item = index.find((entry) => entry.shareId === shareId);
+  if (!item) return null;
   const record = await readRecord(shareId);
   if (!record) return null;
-  return record.ownerUserId === userId ? record : null;
+  return {
+    ...record,
+    ownerUserId: userId,
+    entryId: item.entryId,
+    resultIndex: item.resultIndex,
+  };
 }
 
 /** 切换「隐藏提示词」。只认本人的分享（所有权由呼叫端已验证的 userId 决定）。 */

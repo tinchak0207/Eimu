@@ -86,14 +86,13 @@ const EDGE_VOICES: readonly VoiceEntry[] = [
  * 这些名字上游是接受的（会被换成右边那颗 edge 音色），所以它们也必须是合法的 `voice` 值——
  * 否则既有呼叫端会从「能用」变成 400。
  *
- * ⚠️ 已知缺陷（**不在本刀修**，proxy 在 VPS）：`shimmer` 指向 `zh-CN-XiaoyouNeural`，
- * 而 Microsoft 现行清单**已无这颗音色**（见上方 14 条 zh-* 全量）⇒ 走降级路径时它会失败。
- * 修法＝改 VPS `/opt/edge-tts/tts-proxy.js:21` 的目标（要部署）；本档只把事实记下来。
+ * `shimmer` 不再指向已下架的 `zh-CN-XiaoyouNeural`，改到清单里仍在的 `zh-CN-XiaoyiNeural`。
+ * `normalizeVoiceId` 不把呼叫端传入的音色改写成 alex。
  */
 export const VOICE_ALIASES: Readonly<Record<string, string>> = {
   tara: "zh-CN-XiaoxiaoNeural",
   alloy: "zh-CN-XiaoxiaoNeural",
-  shimmer: "zh-CN-XiaoyouNeural",
+  shimmer: "zh-CN-XiaoyiNeural",
   nova: "zh-CN-XiaoyiNeural",
   echo: "zh-CN-YunxiNeural",
   onyx: "zh-CN-YunxiNeural",
@@ -150,11 +149,12 @@ export function isServableVoice(value: unknown): boolean {
   return SILICONFLOW_VOICE_PATTERN.test(id) && id.includes("/");
 }
 
-/** 清洗 `voice`：合法（可提交）回 trim 后的原值，否则 null。 */
+/** 清洗 `voice`：合法（可提交）回 trim 后的原值，否则 null。不改写成 alex。 */
 export function normalizeVoiceId(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const id = raw.trim();
-  return isServableVoice(id) ? id : null;
+  if (!isServableVoice(id)) return null;
+  return id;
 }
 
 /** `ListVoices` 语义：**无参数全量回**（对手的 `ListVoices` 就是这个形状）。 */

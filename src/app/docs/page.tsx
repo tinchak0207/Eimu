@@ -19,6 +19,11 @@ const SITE_URL = getSiteUrlFromEnv();
 export const metadata: Metadata = {
   title: "AI 助理快速上手 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs` },
+  openGraph: {
+    title: "AI 助理快速上手 | 文档中心",
+    description: "AI 助理快速上手 | 文档中心",
+    url: "/docs",
+  },
 };
 
 // ---- 教学文案数据（现场逐字：与助理聊天首页示例句同文案）----

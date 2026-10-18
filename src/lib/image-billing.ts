@@ -238,10 +238,8 @@ export async function reserveImageQuota(
     throw error;
   }
 
-  // 已知余额充足（≥ 2 次生成额度）时跳过复核，省一次网关请求；低余额才复核，防止扣穿。
-  if (knownQuota !== undefined && knownQuota >= 2 * quotaToReserve) {
-    return;
-  }
+  // 上游 add_quota 没有条件扣减。扣完立刻读余额，负数就加回。高余额也复核（并发仍可能扣穿）。
+  void knownQuota;
 
   try {
     const user = await fetchManagedImageUser(userId, env, fetcher);

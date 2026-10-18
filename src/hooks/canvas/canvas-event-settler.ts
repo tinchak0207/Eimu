@@ -172,7 +172,9 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
     const timer = window.setInterval(() => {
       const since = loadingSinceRef.current;
       const now = Date.now();
+      const liveIds = new Set<string>();
       for (const node of canvasRef.current.nodes) {
+        liveIds.add(node.id);
         if (!isPendingSettledNode(node)) {
           since.delete(node.id);
           continue;
@@ -181,6 +183,9 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
         else if (now - since.get(node.id)! > LOADING_SUSPECT_TIMEOUT_MS) {
           settleNodeWithFailure(node.id, "等待超时（15 分钟无结果），疑似失败，可重试");
         }
+      }
+      for (const id of since.keys()) {
+        if (!liveIds.has(id)) since.delete(id);
       }
     }, SUSPECT_SCAN_INTERVAL_MS);
     return () => window.clearInterval(timer);

@@ -8,6 +8,11 @@ const SITE_URL = getSiteUrlFromEnv();
 export const metadata: Metadata = {
   title: "把助理带走（MCP 接入） | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/mcp` },
+  openGraph: {
+    title: "把助理带走（MCP 接入） | 文档中心",
+    description: "把助理带走（MCP 接入） | 文档中心",
+    url: "/docs/mcp",
+  },
 };
 
 // ---- 把助理带走（MCP 接入干货，工具描述逐字取自原 MCP 接入页）----

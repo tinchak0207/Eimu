@@ -6,6 +6,10 @@ import { createHash } from "node:crypto"
 import { lookup } from "node:dns/promises"
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { isIP } from "node:net"
+import { request as httpRequest } from "node:http"
+import { request as httpsRequest } from "node:https"
+import { Readable } from "node:stream"
+import { createGunzip, createInflate, createBrotliDecompress } from "node:zlib"
 import path from "node:path"
 
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
@@ -1110,21 +1114,35 @@ function hostnameLooksBlocked(hostname: string): boolean {
   return false
 }
 
-/** DNS 解析后校验每个实际 IP（至少校验一次，缩小 DNS rebinding 窗口）。 */
-export async function assertPublicHost(hostname: string): Promise<void> {
+/** 解析与校验只做一次；传输层必须用返回的地址钉住实际连接，不能再次解析。 */
+export async function resolvePublicHost(hostname: string, signal?: AbortSignal): Promise<Array<{ address: string; family: number }>> {
+  signal?.throwIfAborted()
   const host = normalizeHostname(hostname)
   if (hostnameLooksBlocked(host)) {
     throw new BlockedUrlError("private_address", `拒绝内网/本机地址：${hostname}`)
   }
-  if (isIP(host) !== 0) return
+  const family = isIP(host)
+  if (family !== 0) return [{ address: host, family }]
   let records: Array<{ address: string; family: number }>
+  let abort: (() => void) | undefined
   try {
-    records = await lookup(host, { all: true, verbatim: true })
+    const pending = lookup(host, { all: true, verbatim: true })
+    records = signal ? await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        abort = () => reject(signal.reason ?? new Error("probe_timeout"))
+        signal.addEventListener("abort", abort, { once: true })
+        if (signal.aborted) abort()
+      }),
+    ]) : await pending
   } catch (e) {
+    if (signal?.aborted) throw e
     throw new BlockedUrlError(
       "dns_resolution_failed",
       `DNS 解析失败：${hostname}（${e instanceof Error ? e.message : String(e)}）`,
     )
+  } finally {
+    if (abort) signal?.removeEventListener("abort", abort)
   }
   if (records.length === 0) throw new BlockedUrlError("dns_resolution_failed", `DNS 无记录：${hostname}`)
   for (const record of records) {
@@ -1132,6 +1150,54 @@ export async function assertPublicHost(hostname: string): Promise<void> {
       throw new BlockedUrlError("private_address", `${hostname} 解析到内网地址 ${record.address}`)
     }
   }
+  return records
+}
+
+export async function assertPublicHost(hostname: string): Promise<void> {
+  await resolvePublicHost(hostname)
+}
+
+/** 复用 runtime/lib/sandbox.safeFetch 的 Node request/lookup 钉 IP 传输机制。 */
+async function fetchPinnedResponse(target: URL, init: RequestInit, signal: AbortSignal): Promise<Response> {
+  const records = await resolvePublicHost(target.hostname, signal)
+  signal.throwIfAborted()
+  return new Promise<Response>((resolve, reject) => {
+    const request = (target.protocol === "https:" ? httpsRequest : httpRequest)(target, {
+      method: init.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init.headers).entries()),
+      agent: false,
+      signal,
+      lookup: (_hostname, options, callback) => (options as { all?: boolean }).all
+        ? (callback as Function)(null, records)
+        : (callback as Function)(null, records[0].address, records[0].family),
+    }, (incoming) => {
+      try {
+        const headers = new Headers()
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (Array.isArray(value)) for (const item of value) headers.append(name, item)
+          else if (value !== undefined) headers.set(name, value)
+        }
+        const status = incoming.statusCode ?? 502
+        const empty = [204, 205, 304].includes(status) || (init.method ?? "GET").toUpperCase() === "HEAD"
+        const coding = headers.get("content-encoding")?.toLowerCase()
+        const decode = !empty && (coding === "gzip" ? createGunzip() : coding === "deflate" ? createInflate() : coding === "br" ? createBrotliDecompress() : null)
+        const stream = decode ? incoming.pipe(decode) : incoming
+        if (decode) {
+          headers.delete("content-encoding")
+          headers.delete("content-length")
+          incoming.on("error", (error) => decode.destroy(error))
+          decode.on("close", () => incoming.destroy())
+        }
+        resolve(new Response(empty ? null : Readable.toWeb(stream) as ReadableStream<Uint8Array>, { status, headers }))
+        if (empty) incoming.resume()
+      } catch (error) {
+        incoming.destroy()
+        reject(error)
+      }
+    })
+    request.on("error", reject)
+    request.end()
+  })
 }
 
 async function fetchManualRedirects(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -1148,10 +1214,10 @@ async function fetchManualRedirects(url: string, init: RequestInit, timeoutMs: n
       throw new BlockedUrlError("unsupported_url_scheme", `只允许 http/https：${parsed.protocol}`)
     }
     // 约束：每一跳都校验 host（含 302 → 169.254/127.0.0.1 等跳转型 SSRF）。
-    await assertPublicHost(parsed.hostname)
     const remaining = deadline - Date.now()
     if (remaining <= 0) throw new Error("probe_timeout")
-    const response = await fetch(current, { ...init, redirect: "manual", signal: AbortSignal.timeout(remaining) })
+    const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(remaining)]) : AbortSignal.timeout(remaining)
+    const response = await fetchPinnedResponse(parsed, init, signal)
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location")
       if (!location) return response

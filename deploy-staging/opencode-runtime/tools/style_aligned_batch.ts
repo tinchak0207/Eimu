@@ -16,8 +16,8 @@ import { normHex, parseUrlArray, parseStringArray } from "../lib/batch5-matting"
 // 或直接给风格参考图 URL 现场抽取）+ 主题清单 → 逐项 prompt+锚后缀 → 站点 generations
 // 批量生图（img-orchestrate runGenBatch 计费链）→ 复用 outlier_audit_regenerate 核心做
 // 群组一致性审计（VLM 评分 + z-score 离群）。
-// 诚实（spec 红线）：文字级风格锚对齐（prompt 后缀复用 + 统一 model/size），
-// 非 StyleAligned attention-sharing；无上游 batch id，逐项 task_id 如实回传真实 batch 统计。
+// 文本美学描述，供提示词拼接，不是图像特征锁定。不是 --sref，不是 IP-Adapter。
+// 无上游 batch id，逐项 task_id 如实回传真实 batch 统计。
 // 风格抽取段逐行复用 style_anchor_sref.ts（片3）；群组审计段逐行复用 outlier_audit_regenerate.ts（片5）。
 
 const STYLE_Q =
@@ -46,12 +46,12 @@ function zScores(vals: number[]): number[] {
 
 export default tool({
   description:
-    "风格对齐批量渲染：items（主题/分镜清单 JSON 阵列字串，1-8 项）+ 风格锚二选一（style_prompt_suffix=style_anchor_sref 的 prompt_suffix 文字，或 style_ref_urls=风格参考图 URL JSON 阵列现场抽取）→ 逐项 prompt 追加风格锚后缀 → 站点 /v1/images/generations 批量生图（同 image_generate 计费链，统一 model/size 锚定）→ 产物群组 VLM 一致性审计（逐图 consistency 评分 + z-score 离群标记 + 离群图重生指令，复用 outlier_audit 核心）。诚实：这是文字级风格锚对齐（prompt 后缀复用），非 StyleAligned attention-sharing，无上游 batch id——回传真实逐项 task_id 与 batch 统计（requested/succeeded/failed/total_cost）。dry_run=true 只返回请求清单与免费目录报价，不提交、不扣费。",
+    "文本美学描述，供提示词拼接，不是图像特征锁定。items（主题/分镜清单 JSON 阵列字串，1-8 项）+ 风格文字二选一（style_prompt_suffix 为可拼接的风格后缀，或 style_ref_urls 为参考图 URL，现场让 VLM 写成文字）→ 逐项 prompt 追加同一段文字 → 站点 /v1/images/generations 批量生图（同 image_generate 计费链，统一 model/size）。不是 --sref，不是 IP-Adapter。style_anchor_token 只是文本哈希，便于对账，不是图像特征。群组审计里的 consistency 是模型随口给的文字判断，不是测量值，不当作特征锁定。无上游 batch id，回传真实逐项 task_id 与 batch 统计（requested/succeeded/failed/total_cost）。dry_run=true 只返回请求清单与免费目录报价，不提交、不扣费。",
   args: {
     items: tool.schema.string().describe('主题清单 JSON 阵列字串，例 ["晨光中的古城墙","雨夜霓虹街巷"]（1-8 项）'),
-    style_prompt_suffix: tool.schema.string().optional().describe("风格锚后缀文字（style_anchor_sref 输出的 prompt_suffix），与 style_ref_urls 二选一"),
-    style_ref_urls: tool.schema.string().optional().describe('风格参考图 URL JSON 阵列字串（无现成后缀时现场 VLM 抽取，1-6 张）'),
-    style_anchor_token: tool.schema.string().optional().describe("可选：style_anchor_sref 的 token，仅原样回显便于对账"),
+    style_prompt_suffix: tool.schema.string().optional().describe("可拼接的风格文字后缀，与 style_ref_urls 二选一。不是 --sref，不是图像特征"),
+    style_ref_urls: tool.schema.string().optional().describe('风格参考图 URL JSON 阵列字串（无现成后缀时现场写成文字，1-6 张）'),
+    style_anchor_token: tool.schema.string().optional().describe("可选：文本哈希记号，仅原样回显便于对账，不是 --sref 或图像特征"),
     model: tool.schema.string().optional().describe(`生图模型，默认 ${ORCH_DEFAULT_MODEL}`),
     size: tool.schema.string().optional().describe("尺寸（站点白名单 1024x1024/1536x1024/1024x1536/2048x2048），默认 1024x1024"),
     skip_audit: tool.schema.boolean().optional().describe("true=跳过群组一致性 VLM 审计（省 VLM 预算）"),
@@ -92,9 +92,9 @@ export default tool({
       if (lighting) parts.push(`lighting: ${lighting}`)
       suffix = parts.join("; ")
       styleDna = { brushwork, palette, composition, lighting, english_suffix: enSuffix || null }
-      anchorToken = "sref-" + createHash("sha256").update(JSON.stringify(styleDna)).digest("hex").slice(0, 12)
+      anchorToken = "text-" + createHash("sha256").update(JSON.stringify(styleDna)).digest("hex").slice(0, 12)
     } else if (!anchorToken) {
-      anchorToken = "sref-" + createHash("sha256").update(suffix).digest("hex").slice(0, 12)
+      anchorToken = "text-" + createHash("sha256").update(suffix).digest("hex").slice(0, 12)
     }
 
     const model = args.model ?? ORCH_DEFAULT_MODEL
@@ -108,8 +108,8 @@ export default tool({
     }))
 
     const mechanism =
-      "文字级风格锚对齐：每项 prompt 追加同一风格后缀 + 统一 model/size 锚定，走站点 /v1/images/generations 计费链" +
-      "（同 image_generate，reserve/commit 在站点端）；非 StyleAligned attention-sharing，无上游 batch id。"
+      "文本美学描述，供提示词拼接，不是图像特征锁定：每项 prompt 追加同一段文字 + 统一 model/size，走站点 /v1/images/generations 计费链" +
+      "（同 image_generate，reserve/commit 在站点端）。不是 --sref，不是 IP-Adapter，无上游 batch id。"
 
     if (args.dry_run) {
       const plan = await planRequests(reqs, context.sessionID, context.abort)
@@ -183,7 +183,8 @@ export default tool({
             per_image: perImage,
             outliers,
             regenerate_instructions: outliers.map((o) => ({ tag: o.tag, url: o.url, corrected_prompt: o.regenerate_prompt })),
-            mechanism: "vlm_group_consistency + zscore",
+            mechanism: "vlm_text_judgment_not_a_measurement",
+            note: "consistency 是模型随口给的文字判断，不是测量值，不是图像特征锁定。",
           }
         }
       }
@@ -212,7 +213,7 @@ export default tool({
         mechanism,
         seed: null,
         seed_policy: SEED_NOTE,
-        note: "诚实：文字级风格锚对齐（prompt 后缀复用+统一 model/size），非 StyleAligned attention-sharing；consistency 为 VLM 目测非像素量化；离群图重生指令仅给 prompt 未自动生图。",
+        note: "文本美学描述，供提示词拼接，不是图像特征锁定。不是 --sref，不是 IP-Adapter。consistency 是模型随口给的文字判断，不是测量值。离群图只给修正提示词，不自动生图。",
       },
       {
         token: anchorToken,

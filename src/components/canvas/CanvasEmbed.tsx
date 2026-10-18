@@ -30,6 +30,7 @@ import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
 import type { CanvasGenerationReference } from "@/lib/canvas/semantic-nodes";
 import { bezierPath } from "@/lib/canvas/layout";
+import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { CanvasConnections } from "./CanvasConnections";
 import { CanvasNodeViewMemo } from "./CanvasNodeView";
@@ -1034,7 +1035,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   const pendingOps = canvas.pendingAgentOps;
 
   return (
-    <>
+    <CanvasErrorBoundary>
       <div
         ref={containerRef}
         className={cn("ce-embed-root relative w-full overflow-hidden", !expanded && "ce-compact")}
@@ -1585,7 +1586,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           }}
         />
       )}
-    </>
+    </CanvasErrorBoundary>
   );
 }
 

@@ -21,13 +21,17 @@ test("401 and 403 quarantine the credential account rather than retrying it", ()
   }
 });
 
-test("408 and 5xx are overload failures, never misclassified as Adobe scope failures", () => {
-  for (const status of [408, 500, 503]) {
+test("5xx are overload failures; 4xx is a terminal client error, never overloaded", () => {
+  for (const status of [500, 503]) {
     const result = classifySupplierFailure(new SupplierRequestError("system under load", status), NOW);
     assert.equal(result.failureClass, "overloaded");
     assert.equal(result.retryable, true);
     assert.equal(result.quarantineSupplier, false);
   }
+  const client = classifySupplierFailure(new SupplierRequestError("system under load", 408), NOW);
+  assert.equal(client.failureClass, "user_input");
+  assert.equal(client.retryable, false);
+  assert.equal(client.quarantineSupplier, false);
 });
 
 test("empty output and artifact download failure have different cooldown classes", () => {

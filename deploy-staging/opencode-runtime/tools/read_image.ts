@@ -1,6 +1,17 @@
+import { stat } from "node:fs/promises"
 import { tool } from "@opencode-ai/plugin/tool"
 import { readImageSource, VisionToolError } from "../lib/vision_impl"
 import { checkAgentPath } from "../lib/sandbox"
+
+const MAX_CONTEXT_BASE64_CHARS = 1024 * 1024
+const MAX_CONTEXT_RAW_BYTES = Math.floor((MAX_CONTEXT_BASE64_CHARS * 3) / 4)
+
+function imageTooLarge(hint: string) {
+  return {
+    title: "读图失败",
+    output: JSON.stringify({ ok: false, error: { code: "image_too_large", hint } }),
+  }
+}
 
 // 原生「中性读图」工具（2026-09-29 审计修复；2026-10-02 改为把原图交给当前模型自己看）。
 //
@@ -55,9 +66,22 @@ export default tool({
       }
     }
     try {
+      if (imageUrl?.startsWith("data:") && imageUrl.length > MAX_CONTEXT_BASE64_CHARS + 64) {
+        return imageTooLarge("图片数据超过约 1MB。当前运行时不能缩放，已拒绝放入上下文。")
+      }
+      if (imagePath) {
+        try {
+          const info = await stat(imagePath)
+          if (info.size > MAX_CONTEXT_RAW_BYTES) {
+            return imageTooLarge("图片超过约 1MB。当前运行时不能缩放，已拒绝放入上下文。")
+          }
+        } catch {
+          // 文件不存在交给 readImageSource 报错
+        }
+      }
       const image = await readImageSource(imageUrl, imagePath)
-      if (image.bytes.byteLength > 20 * 1024 * 1024) {
-        return { title: "读图失败", output: JSON.stringify({ ok: false, error: { code: "image_too_large", hint: "图片超过 20MB，请先用 image_upscale 之外的方式压缩或改用 vision_analyze。" } }) }
+      if (image.bytes.byteLength > MAX_CONTEXT_RAW_BYTES) {
+        return imageTooLarge("图片超过约 1MB。当前运行时不能缩放，已拒绝放入上下文。")
       }
       const ext = image.mime.slice(image.mime.indexOf("/") + 1).replace(/[^a-z0-9]/gi, "") || "png"
       const filename = imagePath ? imagePath.split(/[\\/]/).pop() || `image.${ext}` : `image.${ext}`

@@ -18,6 +18,7 @@ import {
   parseSeatOrderParam,
   seatOrderEntitlementCoins,
   seatOrderId,
+  seatOrderIdentity,
   seatOrderParam,
 } from "./team-seat-order.ts";
 
@@ -31,19 +32,23 @@ function priced(overrides: Partial<Record<string, Partial<Record<string, number 
 
 const PRICED = priced({ team: { month: 39 } });
 
-test("幂等：订单 id 由请求四元组决定（同请求同 id、不同席位不同 id），形状同 mapay out_trade_no", () => {
-  const a = seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
-  const b = seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
-  const c = seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 6 });
-  const otherTeam = seatOrderId({ teamUserId: 118, tier: "team", cycle: "month", seats: 5 });
+test("交易号每次唯一（含时间与随机）；稳定业务身份另算，形状仍是 TS+16hex", () => {
+  const input = { teamUserId: 117, tier: "team" as const, cycle: "month" as const, seats: 5 };
+  const a = seatOrderId(input);
+  const b = seatOrderId(input);
+  const c = seatOrderId({ ...input, seats: 6 });
+  const otherTeam = seatOrderId({ ...input, teamUserId: 118 });
 
-  assert.equal(a, b, "同请求重放必须得到同一个 out_trade_no（不会产生第二张订单）");
+  assert.notEqual(a, b, "同规格再下单必须是新的 out_trade_no");
   assert.notEqual(a, c);
   assert.notEqual(a, otherTeam);
   assert.match(a, /^TS[0-9A-F]{16}$/);
+  assert.match(b, /^TS[0-9A-F]{16}$/);
   assert.equal(isSeatOrderId(a), true);
   assert.equal(isSeatOrderId("IMGABC123"), false);
   assert.equal(isSeatOrderId("TSzz"), false);
+  assert.equal(seatOrderIdentity(input), seatOrderIdentity(input));
+  assert.notEqual(seatOrderIdentity(input), seatOrderIdentity({ ...input, seats: 6 }));
 });
 
 test("履约识别码带 seat: 前缀：既有金币套餐解析器认不得它（不会被 redeem 成金币）", () => {
@@ -62,8 +67,14 @@ test("待支付订单形状：out_trade_no/param/name/money 沿用 mapay 栏位�
   if (!quote.ok) return;
 
   const order = buildSeatPendingOrder({ teamUserId: 117, quote });
-  assert.deepEqual(order, {
-    out_trade_no: seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }),
+  assert.equal(isSeatOrderId(order.out_trade_no), true);
+  assert.notEqual(
+    order.out_trade_no,
+    seatOrderId({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }),
+    "再取一次交易号不得等于已生成的 out_trade_no",
+  );
+  const { out_trade_no: _tradeNo, ...rest } = order;
+  assert.deepEqual(rest, {
     param: "seat:117:team:month:5",
     name: "团队席位 团队档 月度 5 席",
     money: "195.00",
@@ -121,9 +132,10 @@ test("报价合法 → 200 可支付：回报价 + 待支付订单 + 收银台�
   assert.equal(decision.todo.length, 3);
   assert.match(decision.todo.join("\n"), /已落地/);
   assert.match(decision.todo.join("\n"), /fulfillMapayRedemption/);
-  // 重放：同一请求再判一次，out_trade_no 一模一样（没有第二张订单、没有状态被写）。
+  // 再判一次：交易号必须换新，履约识别码不变。
   const replay = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }, PRICED);
-  assert.equal(replay.pending_order?.out_trade_no, decision.pending_order?.out_trade_no);
+  assert.notEqual(replay.pending_order?.out_trade_no, decision.pending_order?.out_trade_no);
+  assert.equal(replay.pending_order?.param, decision.pending_order?.param);
 });
 
 test("param 反解：seatOrderParam → parseSeatOrderParam 逐栏还原；畸形/非席位一律 null", () => {

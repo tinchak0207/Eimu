@@ -97,6 +97,7 @@ export default function OpenUIDemoPage() {
 
   return (
     <main className="min-h-dvh bg-background px-4 py-6 text-foreground selection:bg-ios-blue/15 sm:px-6 sm:py-10">
+      <meta name="robots" content="noindex, nofollow" />
       <div className="mx-auto max-w-6xl">
         <Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <ArrowLeft size={16} aria-hidden="true" />回到 Eimu

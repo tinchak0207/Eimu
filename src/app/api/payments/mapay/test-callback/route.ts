@@ -17,6 +17,10 @@ function mask(value: string) {
 }
 
 export async function GET(req: NextRequest) {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ success: false, message: "not_found" }, { status: 404 });
+  }
+
   const expectedToken = process.env.MAPAY_TEST_TOKEN ?? "";
   const token = req.nextUrl.searchParams.get("token") ?? req.headers.get("x-mapay-test-token") ?? "";
 
@@ -70,7 +74,7 @@ export async function GET(req: NextRequest) {
     notifyText,
     returnStatus: returned.status,
     hasCdk: !!cdk,
-    cdk: req.nextUrl.searchParams.get("reveal") === "1" ? cdk : mask(cdk),
-    location: req.nextUrl.searchParams.get("reveal") === "1" ? location : location.replace(cdk, mask(cdk)),
+    cdk: mask(cdk),
+    location: cdk ? location.replace(cdk, mask(cdk)) : location,
   });
 }

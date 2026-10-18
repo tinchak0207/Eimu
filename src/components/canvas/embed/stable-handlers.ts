@@ -13,19 +13,36 @@ export function useStableHandlers<P extends object>(props: P): P {
   const latest = useRef(props);
   latest.current = props;
   const cache = useRef(new Map<string, AnyFn>());
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(props)) {
+  const prevKeys = useRef<string[]>([]);
+  const prevValues = useRef<unknown[]>([]);
+  const stableOut = useRef<P | null>(null);
+
+  const keys = Object.keys(props);
+  const values: unknown[] = [];
+  let same = stableOut.current !== null && prevKeys.current.length === keys.length;
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
     const value = (props as Record<string, unknown>)[key];
+    let next: unknown = value;
     if (typeof value === "function" && /^on[A-Z]/.test(key)) {
       let proxy = cache.current.get(key);
       if (!proxy) {
         proxy = (...args: unknown[]) => ((latest.current as Record<string, unknown>)[key] as AnyFn | undefined)?.(...args);
         cache.current.set(key, proxy);
       }
-      out[key] = proxy;
-    } else {
-      out[key] = value;
+      next = proxy;
     }
+    values.push(next);
+    if (same && (prevKeys.current[i] !== key || !Object.is(prevValues.current[i], next))) same = false;
   }
-  return out as P;
+
+  if (same && stableOut.current) return stableOut.current;
+
+  const out: Record<string, unknown> = {};
+  for (let i = 0; i < keys.length; i += 1) out[keys[i]] = values[i];
+  const frozen = out as P;
+  prevKeys.current = keys;
+  prevValues.current = values;
+  stableOut.current = frozen;
+  return frozen;
 }

@@ -32,6 +32,13 @@ function summarise(prompt: string, max = 80): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
+/** 大图容器预留比例。没有字段、空串或解析不了时用 1/1。 */
+function reservedAspectRatio(value: string | null | undefined): string {
+  const match = String(value ?? "").trim().match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
+  if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) return "1 / 1";
+  return `${match[1]} / ${match[2]}`;
+}
+
 export async function generateMetadata({ params }: RouteParams): Promise<Metadata> {
   const { shareId } = await params;
   const share = await getPublicShare(shareId);
@@ -112,12 +119,17 @@ export default async function PublicSharePage({ params }: RouteParams) {
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
               {/* 作品本体：外部 blob URL（既有 owner 托管），用 <img> 直出——站上既有
                   的同类画面（血统抽屉、参考图预览）都是这样，不经 /_next/image 白名单。 */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={view.imageUrl}
-                alt={view.prompt ? summarise(view.prompt, 120) : "分享的 AI 作品"}
-                className="w-full rounded-ios-2xl object-contain sm:rounded-ios-3xl"
-              />
+              <div
+                className="w-full overflow-hidden rounded-ios-2xl sm:rounded-ios-3xl"
+                style={{ aspectRatio: reservedAspectRatio(view.aspectRatio) }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={view.imageUrl}
+                  alt={view.prompt ? summarise(view.prompt, 120) : "分享的 AI 作品"}
+                  className="h-full w-full object-contain"
+                />
+              </div>
             </div>
           </div>
 

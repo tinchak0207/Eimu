@@ -40,18 +40,20 @@ import { PricingAtmosphere } from "@/components/pricing3d/PricingAtmosphere";
 
 /** 活动位：有真实活动数据才渲染；endsAt 存在才有倒计时，否则只显示文案。 */
 function ActivityBanner({ promo }: { promo: PricingPromo }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     if (!promo.endsAt) return;
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [promo.endsAt]);
   const endsAt = promo.endsAt ? new Date(promo.endsAt).getTime() : null;
-  const remaining = endsAt !== null && endsAt > now ? Math.floor((endsAt - now) / 1000) : null;
+  const remaining = now !== null && endsAt !== null && endsAt > now ? Math.floor((endsAt - now) / 1000) : null;
   const countdown =
     remaining !== null
       ? `${Math.floor(remaining / 3600)}:${String(Math.floor((remaining % 3600) / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`
       : null;
+  const countdownLabel = now === null && promo.endsAt ? "--:--:--" : countdown;
   return (
     <div className="lg-float mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-ios-2xl px-4 py-3">
       <Sparkles className="h-4 w-4 shrink-0 text-[#c9a84c]" aria-hidden="true" />
@@ -59,9 +61,9 @@ function ActivityBanner({ promo }: { promo: PricingPromo }) {
         {promo.title}
         <span className="ml-2 font-normal text-[rgba(0,0,0,0.58)]">{promo.detail}</span>
       </p>
-      {countdown && (
+      {countdownLabel && (
         <span className="rounded-full bg-[rgba(201,168,76,0.14)] px-2.5 py-1 font-mono text-ios-caption1 font-semibold text-[#c9a84c]">
-          剩余 {countdown}
+          剩余 {countdownLabel}
         </span>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { PricingClient } from "@/components/PricingClient";
+import { PLANS } from "@/lib/plans";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 const SITE_URL = getSiteUrlFromEnv();
@@ -23,6 +24,25 @@ export const metadata = {
   },
 };
 
+const pricingJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: "Eimu 充值套餐",
+  description: PRICING_DESCRIPTION,
+  offers: PLANS.map((plan) => ({
+    "@type": "Offer",
+    name: plan.name,
+    price: plan.price,
+    priceCurrency: "CNY",
+    description: `${plan.coins} 金币，${plan.validDays} 天。${plan.tagline}`,
+  })),
+};
+
 export default function PricingPage() {
-  return <PricingClient />;
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(pricingJsonLd) }} />
+      <PricingClient />
+    </>
+  );
 }

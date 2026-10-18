@@ -204,9 +204,19 @@ async function handleNotify(req: NextRequest) {
         return response("success");
       }
 
-      // redemption＝上游明确没动／通道或网路不可用 → 退回旧流程（生成兑换码），
-      // 保证钱一定能落地（宁可让用户手动兑一次，也不能付了没额度）。
-      console.warn("[mapay notify] direct credit unavailable, falling back to redemption", {
+      if (channel === "retry") {
+        // unavailable 把「环境缺失」和「8 秒超时」收成同一个词。超时那时上游可能已经加额。
+        // 再发兑换码就是双倍到账。回 fail，支付网关重投；重投若已入账会走 direct。
+        console.warn("[mapay notify] direct credit indeterminate, refusing redemption", {
+          out_trade_no: params.out_trade_no,
+          user_id: bound.userId,
+          credit: outcome,
+        });
+        return response("fail", 500);
+      }
+
+      // failed＝上游明确没动，才退回兑换码。未绑定用户的旧 param 不进这个分支。
+      console.warn("[mapay notify] direct credit declined, falling back to redemption", {
         out_trade_no: params.out_trade_no,
         user_id: bound.userId,
         credit: outcome,
@@ -218,6 +228,7 @@ async function handleNotify(req: NextRequest) {
         ? await firstChargeRedemptionPlan(plan, bound.userId, params.out_trade_no)
         : plan;
 
+    // 兑换码只在 notify 创建。回跳只读，不再并行发码。
     const redemption = await fulfillMapayRedemption({
       orderId: params.out_trade_no,
       plan: redemptionPlan,

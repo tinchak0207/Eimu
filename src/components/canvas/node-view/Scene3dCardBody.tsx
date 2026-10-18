@@ -38,7 +38,7 @@ export function Scene3dCardBody({ node }: { node: CanvasNode }) {
   const summary = scene?.scene_summary?.trim() ?? "";
   // 导入卡（本机 GLB）：无 turntable/stills/blend，主体直接是 GLB 视口。
   const isImport = scene?.source === "import";
-  const glbPlayable = Boolean(scene?.glb_path && isHttpUrl(scene.glb_path));
+  const glbPlayable = typeof scene?.glb_path === "string" && scene.glb_path.trim() !== "";
   const hasAssets = Boolean(scene?.blend_path || glbPlayable);
   // 3D 预览（片P）：glb 真资产视口。内嵌面切换（壳内不叠卡），非浮层非新卡。
   const [previewOpen, setPreviewOpen] = useState(false);

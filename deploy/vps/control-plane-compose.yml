@@ -6,6 +6,11 @@ services:
     image: postgres:16-alpine
     container_name: image-control-postgres
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - ./.env.control-plane
     environment:
@@ -29,6 +34,11 @@ services:
       target: runner
     container_name: image-control-api
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - ./.env.control-plane
     environment:
@@ -51,6 +61,11 @@ services:
       target: generation-worker
     container_name: image-control-worker
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - ./.env.control-plane
     volumes:

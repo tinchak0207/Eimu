@@ -15,15 +15,13 @@
 //   ⇒ 故席位以 `seat:` 前缀与套餐 id 空间隔离，走独立的收银台/履约分支。
 //
 // ── 幂等 ──
-//   本档不落任何本地订单（无订单表 = 无影子帐本）；订单 id 由请求四元组
-//   (team, tier, cycle, seats) 决定性推导 ⇒ 同请求重放得**同一个 out_trade_no**，
-//   永不会产生第二张订单（与 member-quota 的「绝对目标值天然幂等」同一思路：
-//   确定性身份取代随机 id）。同规格续费需另加期别判别码（见
-//   SEAT_ORDER_FULFILLMENT_TODO），不可靠本 id 区分。
+//   本档不落任何本地订单（无订单表 = 无影子帐本）。
+//   out_trade_no 每次调用都唯一（Date.now + 随机串），续费不得撞上已入帐主键。
+//   稳定业务身份见 seatOrderIdentity()，那不是交易号。
 //
 // 纯函式层：不碰 DB / env / 网络，可直接在 node --test 下测。
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { formatMapayMoney } from "@/lib/mapay";
 import { TEAM_SEAT_CYCLE_LABELS, TEAM_SEAT_TIER_LABELS, isTeamSeatCycle, isTeamSeatTier, quoteSeatOrder, seatIncludedCoins, type SeatQuoteOk, type SeatOrderRequest, type TeamSeatPriceTable } from "./team-seat-pricing";
@@ -61,12 +59,26 @@ export interface SeatOrderIdentity {
 }
 
 /**
- * 决定性订单 id（同四元组 ⇒ 同 id ⇒ 重放不会有第二张订单）。
- * 不带时间、不带随机：时间/随机 = 重放必然新单。
+ * 稳定业务身份（同四元组同值）。不是 out_trade_no，不能当支付主键。
+ */
+export function seatOrderIdentity(input: SeatOrderIdentity): string {
+  const digest = createHash("sha256")
+    .update(`team-seat-identity:${input.teamUserId}:${input.tier}:${input.cycle}:${input.seats}`, "utf8")
+    .digest("hex");
+  return digest.slice(0, 16);
+}
+
+/**
+ * 交易号。每次唯一：时间戳 + 随机串进入哈希，避免续费撞 already_credited。
+ * 形状仍是 TS + 16 hex，isSeatOrderId 不用改。
  */
 export function seatOrderId(input: SeatOrderIdentity): string {
+  const nonce = `${Date.now().toString(36)}${randomBytes(8).toString("hex")}`;
   const digest = createHash("sha256")
-    .update(`team-seat-order:${input.teamUserId}:${input.tier}:${input.cycle}:${input.seats}`, "utf8")
+    .update(
+      `team-seat-order:${input.teamUserId}:${input.tier}:${input.cycle}:${input.seats}:${nonce}`,
+      "utf8",
+    )
     .digest("hex");
   return `TS${digest.slice(0, 16).toUpperCase()}`;
 }
@@ -101,7 +113,7 @@ export function seatOrderEntitlementCoins(input: SeatOrderIdentity): number | nu
 
 /** mapay param/out_trade_no 语义的待支付订单（形状照 buildMapayCheckoutFields 的栏位口径）。 */
 export interface SeatPendingOrder {
-  /** mapay out_trade_no：决定性 id，幂等键。 */
+  /** mapay out_trade_no：当次唯一交易号，也是这张单的入帐幂等键。 */
   out_trade_no: string;
   /** mapay param：履约识别码（seat: 前缀，与金币套餐 id 空间不重叠）。 */
   param: string;
@@ -181,7 +193,7 @@ export type SeatOrderDecision = SeatOrderReady | SeatOrderRejection;
  *
  * 可支付不是「翻一个布林」的开关：pending_order 的 param 只有在下游（收银台
  * checkout + notify 席位履约分支）真的接线时才有意义——两者与本判定共用同一份
- * 同源价表与同一个决定性 out_trade_no，缺一则整条链在编译期就散
+ * 同源价表与当次唯一的 out_trade_no，缺一则整条链在编译期就散
  * （见 src/lib/team-seat-fulfillment.ts 与 /api/payments/mapay/{checkout,notify}）。
  *
  * @param pricing 测试注入用；生产一律用 TEAM_SEAT_PRICING（唯一真源）。

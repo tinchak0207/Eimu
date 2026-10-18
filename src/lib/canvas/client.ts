@@ -172,32 +172,136 @@ export function downloadJson(filename: string, payload: unknown): void {
 // ─────────────────────────────────────────── Wave C：agent 操作画布的上行通道
 
 /**
- * canvas-state 404 静默降级（罪状 2c）：会话已被网关回收后，画布每动一下
- * 快照上行/下行仍会打向同一个端点，产生一串 404（console 噪音）。
- * 这里用进程内 Set 记住「已确认死亡」的会话：一旦某次快照请求吃到 404，
- * 该会话的后续快照请求直接跳过——清空本地态语义、停轮询，不弹任何提示。
- * （进程内 Set：刷新归零，与快照「尽力而为」同生命周期。）
+ * canvas-state 404 短时降级：会话被网关回收后，连续打同一个端点只会刷 404。
+ * 记下截止时间，TTL 过后允许再试。5xx 与 409 不拉黑。
  */
-const deadSnapshotSessions = new Set<string>();
+const SNAPSHOT_DEAD_TTL_MS = 60_000;
+const deadSnapshotSessions = new Map<string, number>();
+
+function snapshotSessionBlocked(sessionId: string): boolean {
+  const until = deadSnapshotSessions.get(sessionId);
+  if (until === undefined) return false;
+  if (Date.now() >= until) {
+    deadSnapshotSessions.delete(sessionId);
+    return false;
+  }
+  return true;
+}
+
+function blockSnapshotSession(sessionId: string): void {
+  deadSnapshotSessions.set(sessionId, Date.now() + SNAPSHOT_DEAD_TTL_MS);
+}
+
+/** 网关乐观锁字段：state 内优先 `rev`，其次 `version`（canvas-cascade-state incomingCanvasRev）。 */
+function readSnapshotRev(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  for (const field of ["rev", "version"] as const) {
+    const n = obj[field];
+    if (typeof n === "number" && Number.isFinite(n)) return n;
+  }
+  const message = typeof obj.message === "string" ? obj.message : "";
+  const nested = obj.error;
+  const nestedMessage =
+    nested && typeof nested === "object" && typeof (nested as { message?: unknown }).message === "string"
+      ? (nested as { message: string }).message
+      : "";
+  const match = /current=(\d+(?:\.\d+)?)/.exec(nestedMessage || message);
+  if (match) {
+    const n = Number(match[1]);
+    if (Number.isFinite(n)) return n;
+  }
+  if (nested && typeof nested === "object") return readSnapshotRev(nested);
+  return null;
+}
+
+function stateWithRev(state: unknown, rev: number | null): unknown {
+  if (rev === null || !state || typeof state !== "object" || Array.isArray(state)) return state;
+  return { ...(state as Record<string, unknown>), rev };
+}
+
+export interface CanvasSnapshotPostResult {
+  ok: boolean;
+  /** 成功时是服务端发回的新 rev；409 时是远端当前 rev（若能读到）。 */
+  rev: number | null;
+  conflict: boolean;
+  /** 409 时拉到的远端快照。调用方用它替换本地，不要再用旧快照覆盖。 */
+  remote: Record<string, unknown> | null;
+}
+
+function emptySnapshotPost(partial: Partial<CanvasSnapshotPostResult> = {}): CanvasSnapshotPostResult {
+  return { ok: false, rev: null, conflict: false, remote: null, ...partial };
+}
+
+async function readSnapshotResponse(sessionId: string): Promise<{
+  status: number;
+  state: Record<string, unknown> | null;
+  rev: number | null;
+}> {
+  if (snapshotSessionBlocked(sessionId)) return { status: 404, state: null, rev: null };
+  const headers = authHeaders();
+  const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
+    method: "GET",
+    headers: { ...headers, Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (res.status === 404) blockSnapshotSession(sessionId);
+  if (!res.ok) return { status: res.status, state: null, rev: null };
+  const json: unknown = await res.json();
+  if (!json || typeof json !== "object") return { status: res.status, state: null, rev: null };
+  const body = json as Record<string, unknown>;
+  const state =
+    body.state && typeof body.state === "object" && !Array.isArray(body.state)
+      ? (body.state as Record<string, unknown>)
+      : body;
+  return { status: res.status, state, rev: readSnapshotRev(body) ?? readSnapshotRev(state) };
+}
 
 /** 压缩画布快照 → gateway（agent 的 canvas_get_state 读这份）。失败静默：快照是尽力而为。 */
-export async function postCanvasSnapshot(sessionId: string, state: unknown): Promise<void> {
-  if (deadSnapshotSessions.has(sessionId)) return; // 会话已死：不再上行，不产生 404 噪音。
+export async function postCanvasSnapshot(sessionId: string, state: unknown): Promise<CanvasSnapshotPostResult> {
+  if (snapshotSessionBlocked(sessionId)) return emptySnapshotPost();
   const headers = authHeaders();
-  if (!headers) return; // 未登入安静降级，不送 401 请求。
+  if (!headers) return emptySnapshotPost();
   headers["Content-Type"] = "application/json";
+  const revInState = readSnapshotRev(state);
+  const bodyState = stateWithRev(state, revInState);
   try {
     const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ state }),
+      body: JSON.stringify({ state: bodyState }),
       cache: "no-store",
       keepalive: true,
     });
-    // 会话已被网关回收：静默降级，之后不再打这个端点。
-    if (res.status === 404) deadSnapshotSessions.add(sessionId);
+    if (res.status === 404) {
+      blockSnapshotSession(sessionId);
+      return emptySnapshotPost();
+    }
+    // 5xx 不拉黑：网关抖动不是会话死亡。
+    if (res.status >= 500) return emptySnapshotPost();
+    let json: unknown = null;
+    try {
+      json = await res.json();
+    } catch {
+      json = null;
+    }
+    if (res.status === 409) {
+      const rev = readSnapshotRev(json);
+      let remote: Record<string, unknown> | null = null;
+      let remoteRev: number | null = null;
+      try {
+        const pulled = await readSnapshotResponse(sessionId);
+        remote = pulled.state;
+        remoteRev = pulled.rev;
+      } catch {
+        remote = null;
+      }
+      return emptySnapshotPost({ conflict: true, rev: rev ?? remoteRev, remote });
+    }
+    if (!res.ok) return emptySnapshotPost();
+    return { ok: true, rev: readSnapshotRev(json), conflict: false, remote: null };
   } catch {
-    /* 尽力而为：断网不打扰创作 */
+    return emptySnapshotPost();
   }
 }
 
@@ -206,24 +310,10 @@ export async function postCanvasSnapshot(sessionId: string, state: unknown): Pro
  *  注意与上行刻意不同：不因「本端无 token」提前放弃 —— 权限判定是站内路由的职责
  *  （resolveAgentCaller），本端拦截会让 LOCAL_TEST 与 token 恢复中的窗口永远拿不到回填。 */
 export async function fetchAgentCanvasSnapshot(sessionId: string): Promise<Record<string, unknown> | null> {
-  if (deadSnapshotSessions.has(sessionId)) return null; // 会话已死：静默降级，不重复 404。
-  const headers = authHeaders();
   try {
-    const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
-      method: "GET",
-      headers: { ...headers, Accept: "application/json" },
-      cache: "no-store",
-    });
-    // 会话已被回收：记入死亡名单（上行也会跳过），本地快照态当空处理。
-    if (res.status === 404) deadSnapshotSessions.add(sessionId);
-    if (!res.ok) return null;
-    const json: unknown = await res.json();
-    if (!json || typeof json !== "object") return null;
-    // 闸道把 POST 的 {state} 原样存取：下行可能是 {state:{nodes…}} 或扁平 {nodes…}。
-    const body = json as Record<string, unknown>;
-    const state =
-      body.state && typeof body.state === "object" ? (body.state as Record<string, unknown>) : body;
-    if (!Array.isArray(state.nodes) || state.nodes.length === 0) return null;
+    const pulled = await readSnapshotResponse(sessionId);
+    const state = pulled.state;
+    if (!state || !Array.isArray(state.nodes) || state.nodes.length === 0) return null;
     return state;
   } catch {
     return null;

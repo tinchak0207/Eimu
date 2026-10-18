@@ -63,6 +63,18 @@ export async function runProviderReconciliation(input: {
       AND provider_reconcile_deadline_at IS NOT NULL
       AND provider_reconcile_deadline_at <= now()
       AND (reconcile_lease_expires_at IS NULL OR reconcile_lease_expires_at < now())
+      AND NOT EXISTS (
+        SELECT 1
+        FROM generation_job image_job
+        JOIN supplier image_supplier ON image_supplier.id = generation_attempt.supplier_id
+        WHERE image_job.id = generation_attempt.job_id
+          AND image_job.kind IN ('image_generate', 'image_edit')
+          AND (
+            COALESCE(image_supplier.configuration_json->>'resultLookupPath', '') = ''
+            OR left(image_supplier.configuration_json->>'resultLookupPath', 1) <> '/'
+            OR position('{request_id}' in image_supplier.configuration_json->>'resultLookupPath') = 0
+          )
+      )
     RETURNING id, job_id
   `;
   for (const row of expired) {
@@ -155,12 +167,28 @@ export async function runProviderReconciliation(input: {
       }
       const supplier = mapSupplierRecord(ctx);
       const pollCount = Number(claim.provider_poll_count ?? 0);
+      const imageKind = ctx.kind === "image_generate" || ctx.kind === "image_edit";
+      const lookupPath = supplier.configuration.resultLookupPath;
+      const hasResultLookup = typeof lookupPath === "string" && lookupPath.startsWith("/") && lookupPath.includes("{request_id}");
+      const undeliveredImageWithoutLookup = imageKind && !hasResultLookup && !claim.response_ciphertext;
 
       // 认领到退休之间窗口可能已过：退休优先于轮询。
       const deadlineAt = claim.provider_reconcile_deadline_at
         ? new Date(claim.provider_reconcile_deadline_at as string | Date).getTime()
         : null;
       if (deadlineAt !== null && deadlineAt <= Date.now()) {
+        if (undeliveredImageWithoutLookup) {
+          const failed = await confirmReconciledFailure(sql, {
+            executorId: input.executorId,
+            jobId,
+            attemptId,
+            providerTaskId,
+            reason: "Image task reconcile deadline elapsed without delivery and without resultLookupPath.",
+          });
+          if (failed) summary.confirmedFailed += 1;
+          else summary.exhausted += 1;
+          continue;
+        }
         await sql`
           UPDATE generation_attempt
           SET provider_next_poll_at = NULL, recovery_status='manual', recovery_owner='control-plane:manual-reconciliation',
@@ -186,19 +214,28 @@ export async function runProviderReconciliation(input: {
           result = { state: 'succeeded', url: savedOutput.url, base64: savedOutput.base64 };
         } else if (claim.provider_task_id && !(ctx.kind==='image_generate' || ctx.kind==='image_edit')) {
           result = await pollProviderTask(protocol, providerTaskId, supplier);
-        } else {
-          const lookup = supplier.configuration.resultLookupPath;
-          if (typeof lookup !== 'string' || !lookup.startsWith('/') || !lookup.includes('{request_id}')) {
-            await sql`UPDATE generation_attempt SET recovery_status='manual',
-              recovery_owner='control-plane:manual-reconciliation',
-              recovery_detail='Supplier has no configured read-only resultLookupPath; reconcile by upstream_request_key. Never resubmit.',
-              provider_next_poll_at=NULL, reconcile_lease_owner=NULL, reconcile_lease_expires_at=NULL, updated_at=now()
-              WHERE id=${attemptId}`;
-            await sql`UPDATE generation_job SET failure_detail='Original upstream request requires manual reconciliation; generation will not be resubmitted.', updated_at=now()
-              WHERE id=${jobId} AND status='submit_unknown'`;
-            summary.exhausted += 1;
+        } else if (!hasResultLookup) {
+          if (imageKind) {
+            const delaySec = Math.max(1, Math.floor(pollBackoffMs(pollCount, false) / 1000));
+            await sql`UPDATE generation_attempt
+              SET provider_last_polled_at = now(),
+                  provider_poll_count = provider_poll_count + 1,
+                  provider_next_poll_at = now() + (${delaySec}::text || ' seconds')::interval,
+                  reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
+              WHERE id = ${attemptId}`;
             continue;
           }
+          await sql`UPDATE generation_attempt SET recovery_status='manual',
+            recovery_owner='control-plane:manual-reconciliation',
+            recovery_detail='Supplier has no configured read-only resultLookupPath; reconcile by upstream_request_key. Never resubmit.',
+            provider_next_poll_at=NULL, reconcile_lease_owner=NULL, reconcile_lease_expires_at=NULL, updated_at=now()
+            WHERE id=${attemptId}`;
+          await sql`UPDATE generation_job SET failure_detail='Original upstream request requires manual reconciliation; generation will not be resubmitted.', updated_at=now()
+            WHERE id=${jobId} AND status='submit_unknown'`;
+          summary.exhausted += 1;
+          continue;
+        } else {
+          const lookup = lookupPath as string;
           const credential = process.env[supplier.account.credentialRef] ?? process.env[supplier.credentialRef];
           const response = await fetch(`${supplier.baseUrl.replace(/\/+$/, '')}${lookup.replace('{request_id}', encodeURIComponent(providerTaskId))}`, {
             method: 'GET', headers: { Authorization: `Bearer ${credential ?? ''}` }, signal: AbortSignal.timeout(30_000),

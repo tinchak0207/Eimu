@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url"
 import { assertPublicHost } from "./artifact-store"
 import { emitToSession } from "./sse-core.ts"
 import { resolveSession } from "./sessions-core.ts"
+import { dispatchWorkflowWake } from "./workflow-gw.ts"
 // 子代理会话不在主 sessions 表；monitor 的 session_id 可能是子会话的 opencode id，
 // 存活判定必须与其它 /internal 路由同源：resolveSession ?? subagentParentState。
 import { subagentParentState } from "./subagent"
@@ -865,6 +866,7 @@ interface ActiveMonitor {
   droppedCount: number
   truncatedCount: number
   lastLines: string[]
+  stderrTail: string
   windowStart: number
   windowCount: number
   finished: boolean
@@ -958,6 +960,17 @@ function emitMonitorFrame(
  * M6：状态如实记录退出原因——`ended:code` / `ended:signal`（超时才是 expired）。
  * 帧文案带具体 code/signal，不把非零退出与信号都伪装成 expired。
  */
+const MONITOR_STDERR_CAP = 4096
+
+function appendMonitorStderr(handle: ActiveMonitor, chunk: string): void {
+  if (!chunk) return
+  handle.stderrTail = (handle.stderrTail + chunk).slice(-MONITOR_STDERR_CAP)
+}
+
+function sessionIdleForMonitorWake(state: { turnMetrics?: unknown; ackTimer?: unknown; lastTurnActiveAt?: number }): boolean {
+  return state.turnMetrics == null && state.ackTimer == null && (state.lastTurnActiveAt ?? 0) <= 0
+}
+
 function finishMonitor(handle: ActiveMonitor, status: string, detail?: string): void {
   if (handle.finished) return
   handle.finished = true
@@ -968,6 +981,8 @@ function finishMonitor(handle: ActiveMonitor, status: string, detail?: string): 
   } catch {
     // 进程/连接可能已自行结束。
   }
+  const stderrNote = handle.stderrTail?.trim() ? `\nstderr:\n${handle.stderrTail.trim()}` : ""
+  const detailText = [detail, stderrNote].filter(Boolean).join("")
   const endedAt = Date.now()
   persistCounters(handle, status, endedAt)
   const minutes = Math.max(0, Math.round((endedAt - handle.startedAt) / 60_000))
@@ -979,7 +994,7 @@ function finishMonitor(handle: ActiveMonitor, status: string, detail?: string): 
       handle.eventCount,
       handle.droppedCount,
       "monitor.expired",
-      expiryMessage(minutes, handle.eventCount),
+      `${expiryMessage(minutes, handle.eventCount)}${stderrNote}`,
     )
   } else if (status === "ended" || status.startsWith("ended:")) {
     emitMonitorFrame(
@@ -989,7 +1004,7 @@ function finishMonitor(handle: ActiveMonitor, status: string, detail?: string): 
       handle.eventCount,
       handle.droppedCount,
       "monitor.ended",
-      `[Monitor ended: ${detail || "source closed"}]`,
+      `[Monitor ended: ${detailText || "source closed"}]`,
     )
   } else if (status === "error") {
     emitMonitorFrame(
@@ -999,10 +1014,25 @@ function finishMonitor(handle: ActiveMonitor, status: string, detail?: string): 
       handle.eventCount,
       handle.droppedCount,
       "monitor.error",
-      `[Monitor ended with an error: ${detail || "unknown error"}]`,
+      `[Monitor ended with an error: ${detailText || "unknown error"}]`,
     )
   } else {
-    emitMonitorFrame(handle.sessionId, handle.id, handle.description, handle.eventCount, handle.droppedCount, "monitor.stopped")
+    emitMonitorFrame(
+      handle.sessionId,
+      handle.id,
+      handle.description,
+      handle.eventCount,
+      handle.droppedCount,
+      "monitor.stopped",
+      stderrNote ? `[Monitor stopped]${stderrNote}` : undefined,
+    )
+  }
+  const parent = resolveSession(handle.sessionId) ?? subagentParentState(handle.sessionId)
+  if (parent && sessionIdleForMonitorWake(parent)) {
+    const text = `[Monitor Result] ${handle.description} ${status}${detailText ? ` ${detailText}` : ""}`
+    void dispatchWorkflowWake(parent, `monitor:${handle.id}`, text, "final").catch((e) => {
+      console.error(`[gateway] monitor result wake failed: id=${handle.id}`, e)
+    })
   }
   console.log(`[gateway] monitor ${status}: id=${handle.id} session=${handle.sessionId} events=${handle.eventCount} dropped=${handle.droppedCount}`)
 }
@@ -1077,7 +1107,7 @@ function spawnCommand(handle: ActiveMonitor, command: string, sandbox: { argv: s
     env: monitorEnv(),
     stdin: "ignore",
     stdout: "pipe",
-    stderr: "ignore",
+    stderr: "pipe",
     detached: true,
   })
   handle.kill = () => killProcessGroup(proc)
@@ -1093,6 +1123,23 @@ function spawnCommand(handle: ActiveMonitor, command: string, sandbox: { argv: s
     killProcessGroup(proc)
     throw new Error(`monitor ${handle.id} failed to record child pid`)
   }
+
+  const stderrDone = (async () => {
+    const stderr = proc.stderr
+    if (!stderr) return
+    const reader = (stderr as ReadableStream<Uint8Array>).getReader()
+    const decoder = new TextDecoder()
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        appendMonitorStderr(handle, decoder.decode(value, { stream: true }))
+      }
+      appendMonitorStderr(handle, decoder.decode())
+    } catch {
+      // stderr 读失败不打断 stdout 收档。
+    }
+  })()
 
   void (async () => {
     const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader()
@@ -1132,8 +1179,11 @@ function spawnCommand(handle: ActiveMonitor, command: string, sandbox: { argv: s
       const tail = buffer.replace(/\r$/, "")
       if (tail.trim()) deliver(handle, tail)
     } catch (e) {
+      await stderrDone
       if (!handle.finished) finishMonitor(handle, "error", (e as Error)?.message || String(e))
+      return
     }
+    await stderrDone
     let code: number | null = null
     try {
       code = await proc.exited
@@ -1237,6 +1287,7 @@ export async function startMonitor(
     droppedCount: 0,
     truncatedCount: 0,
     lastLines: [],
+    stderrTail: "",
     windowStart: startedAt,
     windowCount: 0,
     finished: false,

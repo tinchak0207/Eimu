@@ -254,6 +254,49 @@ export function dailyQuotaAllows(input: {
   return { ok: true };
 }
 
+/**
+ * 每日限额的唯一扣减：单条条件 UPDATE（used+cost<=limit）。0 行＝超限或不是 daily 行，拒绝。
+ * 跨日在同一条语句里把计数重置为本次 cost，避免先读后写。
+ */
+export async function consumeMemberDailyQuota(
+  input: { teamUserId: number; memberUserId: number; costQuota: number; nowMs?: number },
+  deps: { sql?: GenerationSql } = {},
+): Promise<QuotaDecision> {
+  const cost = Math.floor(Number(input.costQuota));
+  if (!Number.isFinite(cost) || cost <= 0) return { ok: true };
+  if (!quotaLimitStoreEnabled() && !deps.sql) {
+    return { ok: false, code: "store_unavailable", message: "每日额度暂不可用。" };
+  }
+  const today = quotaDayKey(input.nowMs ?? Date.now());
+  const sql = deps.sql ?? getGenerationSql();
+  const rows = await sql<{ daily_quota_used: number | string }[]>`
+    UPDATE team_member_quota
+    SET
+      daily_quota_used = CASE
+        WHEN daily_quota_day IS DISTINCT FROM ${today} THEN ${cost}
+        ELSE daily_quota_used + ${cost}
+      END,
+      daily_quota_day = ${today},
+      updated_at = now()
+    WHERE team_user_id = ${input.teamUserId}
+      AND member_user_id = ${input.memberUserId}
+      AND quota_mode = 'daily'
+      AND (
+        (daily_quota_day IS DISTINCT FROM ${today} AND ${cost} <= daily_quota)
+        OR (daily_quota_day IS NOT DISTINCT FROM ${today} AND daily_quota_used + ${cost} <= daily_quota)
+      )
+    RETURNING daily_quota_used
+  `;
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      code: "daily_quota_exceeded",
+      message: "今日额度已用完，将于每日 00:00（UTC+8）重置。",
+    };
+  }
+  return { ok: true };
+}
+
 // ─────────────────────────────────────────── 映射层存取（意图栏位）
 
 /** 治理/配额映射层可用性（C 端 Vercel 无控制面库 ⇒ 不可用）。 */

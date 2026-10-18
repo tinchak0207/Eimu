@@ -220,7 +220,7 @@ test("generate image route refunds reserved quota on every path that fails to de
   assert.match(source, /delivered = true/);
   assert.match(source, /if \(quotaReserved && !delivered\)/);
   assert.ok(
-    source.lastIndexOf("refundImageQuota") < source.lastIndexOf("All compatible image generation channels"),
+    source.lastIndexOf("refundImageQuota") < source.lastIndexOf("Image generation failed."),
     "refund must be settled before the terminal 503 is returned",
   );
 });
@@ -290,7 +290,7 @@ test("every routing exit leaves an admin-visible telemetry event", () => {
   // maxDuration hard-kill, and a budget-burning run is exactly the run that needs
   // evidence. Success can afford after() — the user should not wait on telemetry.
   assert.ok(
-    source.indexOf("await emitRoutingEvent(failureOutcome") < source.indexOf("All compatible image generation channels"),
+    source.indexOf("await emitRoutingEvent(failureOutcome") < source.indexOf("Image generation failed."),
     "failure telemetry must be settled before the terminal 503",
   );
 
@@ -389,7 +389,7 @@ test("generate image route bills authenticated users server-side", () => {
   assert.match(source, /refundImageQuota/);
   assert.match(source, /authenticatedUser\.id/);
   assert.ok(source.indexOf("reserveImageQuota") < source.indexOf("requestImageGeneration"));
-  assert.ok(source.lastIndexOf("refundImageQuota") < source.lastIndexOf("All compatible image generation channels"));
+  assert.ok(source.lastIndexOf("refundImageQuota") < source.lastIndexOf("Image generation failed."));
 });
 
 test("image billing helper adjusts the server-calculated quota for each request", () => {

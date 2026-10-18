@@ -1,3 +1,4 @@
+import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./generation-core/database";
 import { QUOTA_PER_COIN } from "./quota-constants";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -95,16 +96,104 @@ function exactRedemption(items: NewApiRedemption[] | undefined, name: string, qu
   return items?.find((item) => item.name === name && item.quota === quota && item.key);
 }
 
-export async function fulfillMapayRedemption(
+let generatingStateReady: Promise<void> | null = null;
+
+/** mapay_order_intake.state 现有值是 received/fulfilled/parked。待处理＝received。占位改成 generating。 */
+async function ensureGeneratingState(sql: GenerationSql): Promise<void> {
+  if (!generatingStateReady) {
+    generatingStateReady = (async () => {
+      await sql`
+        ALTER TABLE mapay_order_intake
+        DROP CONSTRAINT IF EXISTS mapay_order_intake_state_check
+      `;
+      await sql`
+        ALTER TABLE mapay_order_intake
+        ADD CONSTRAINT mapay_order_intake_state_check
+        CHECK (state IN ('received', 'generating', 'fulfilled', 'parked'))
+      `;
+    })().catch((error) => {
+      generatingStateReady = null;
+      throw error;
+    });
+  }
+  return generatingStateReady;
+}
+
+type ClaimResult = "claimed" | "lost" | "skip";
+
+/**
+ * 创建前占位。有本地订单行就条件更新 state：只有一个并发能从 received 改成 generating。
+ * 没有行则按 out_trade_no 唯一键插入。抢不到返回 lost，调用方不得再 POST 上游。
+ * 没有控制面库（回跳/Vercel）返回 skip。
+ */
+async function claimRedemptionCreate(orderId: string): Promise<ClaimResult> {
+  if (!generationDatabaseConfigured()) return "skip";
+  let sql: GenerationSql;
+  try {
+    sql = getGenerationSql();
+  } catch {
+    return "skip";
+  }
+
+  try {
+    await ensureGeneratingState(sql);
+    const updated = await sql<{ out_trade_no: string }[]>`
+      UPDATE mapay_order_intake
+      SET state = 'generating', updated_at = now()
+      WHERE out_trade_no = ${orderId} AND state = 'received'
+      RETURNING out_trade_no
+    `;
+    if (updated.length > 0) return "claimed";
+
+    const current = await sql<{ state: string }[]>`
+      SELECT state FROM mapay_order_intake WHERE out_trade_no = ${orderId} LIMIT 1
+    `;
+    if (current.length === 0) {
+      const inserted = await sql<{ out_trade_no: string }[]>`
+        INSERT INTO mapay_order_intake (out_trade_no, raw_params, state)
+        VALUES (${orderId}, ${sql.json({})}, 'generating')
+        ON CONFLICT (out_trade_no) DO NOTHING
+        RETURNING out_trade_no
+      `;
+      return inserted.length > 0 ? "claimed" : "lost";
+    }
+    return "lost";
+  } catch (error) {
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS mapay_redemption_claim (
+          out_trade_no text PRIMARY KEY,
+          state text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `;
+      const inserted = await sql<{ out_trade_no: string }[]>`
+        INSERT INTO mapay_redemption_claim (out_trade_no, state)
+        VALUES (${orderId}, 'generating')
+        ON CONFLICT (out_trade_no) DO NOTHING
+        RETURNING out_trade_no
+      `;
+      return inserted.length > 0 ? "claimed" : "lost";
+    } catch (fallbackError) {
+      console.error(
+        "[mapay-redemption] claim skipped",
+        error instanceof Error ? error.message : String(error),
+        fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+      );
+      return "skip";
+    }
+  }
+}
+
+async function searchMapayRedemption(
   input: { orderId: string; plan: MapayRedemptionPlan },
-  env: EnvLike = process.env,
-  fetcher: FetchLike = fetch,
-): Promise<FulfilledRedemption> {
+  env: EnvLike,
+  fetcher: FetchLike,
+): Promise<NewApiRedemption | null> {
   const name = mapayOrderRedemptionName(input.orderId);
   const quota = mapayPlanQuota(input.plan);
   const headers = adminHeaders(env);
   const baseUrl = gatewayBaseUrl(env);
-
   const search = await fetcher(
     `${baseUrl}/api/redemption/search?keyword=${encodeURIComponent(name)}`,
     { headers, cache: "no-store" },
@@ -113,13 +202,38 @@ export async function fulfillMapayRedemption(
   if (!search.ok || !searchResult.success) {
     throw new Error(searchResult.message ?? "Failed to search redemption code.");
   }
+  return exactRedemption(searchResult.data?.items, name, quota) ?? null;
+}
 
-  const existing = exactRedemption(searchResult.data?.items, name, quota);
+/** 只查已有兑换码，不创建。 */
+export async function findMapayRedemption(
+  input: { orderId: string; plan: MapayRedemptionPlan },
+  env: EnvLike = process.env,
+  fetcher: FetchLike = fetch,
+): Promise<FulfilledRedemption | null> {
+  const existing = await searchMapayRedemption(input, env, fetcher);
+  return existing ? { key: existing.key, created: false } : null;
+}
+
+const redemptionInflight = new Map<string, Promise<FulfilledRedemption>>();
+
+async function createMapayRedemption(
+  input: { orderId: string; plan: MapayRedemptionPlan },
+  env: EnvLike,
+  fetcher: FetchLike,
+): Promise<FulfilledRedemption> {
+  const claim = await claimRedemptionCreate(input.orderId);
+  const existing = await searchMapayRedemption(input, env, fetcher);
   if (existing) return { key: existing.key, created: false };
+  if (claim === "lost") {
+    throw new Error("Redemption already claimed; upstream key is not ready.");
+  }
 
-  const create = await fetcher(`${baseUrl}/api/redemption/`, {
+  const name = mapayOrderRedemptionName(input.orderId);
+  const quota = mapayPlanQuota(input.plan);
+  const create = await fetcher(`${gatewayBaseUrl(env)}/api/redemption/`, {
     method: "POST",
-    headers,
+    headers: adminHeaders(env),
     body: JSON.stringify({
       name,
       count: 1,
@@ -130,10 +244,24 @@ export async function fulfillMapayRedemption(
   });
   const createResult = await readGatewayResult<string[]>(create);
   const key = createResult.data?.[0];
-
   if (!create.ok || !createResult.success || !key) {
     throw new Error(createResult.message ?? "Failed to create redemption code.");
   }
-
   return { key, created: true };
+}
+
+export function fulfillMapayRedemption(
+  input: { orderId: string; plan: MapayRedemptionPlan },
+  env: EnvLike = process.env,
+  fetcher: FetchLike = fetch,
+): Promise<FulfilledRedemption> {
+  const pending = redemptionInflight.get(input.orderId);
+  if (pending) {
+    return pending.then((winner) => ({ key: winner.key, created: false }));
+  }
+  const run = createMapayRedemption(input, env, fetcher).finally(() => {
+    redemptionInflight.delete(input.orderId);
+  });
+  redemptionInflight.set(input.orderId, run);
+  return run;
 }

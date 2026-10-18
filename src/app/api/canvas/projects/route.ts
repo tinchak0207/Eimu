@@ -3,7 +3,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { filterCardIdsForProject } from "@/lib/asset-library";
-import { deleteCanvasProjects } from "@/lib/canvas/project-store";
+import { deleteCanvasProjects, deleteTeamCanvasProjects } from "@/lib/canvas/project-store";
+import { lookupTeamMembershipViaRelay } from "@/lib/team-membership-lookup";
 import {
   listCanvasProjectsForCaller,
   readTeamCanvasProjectsForCaller,
@@ -138,15 +139,25 @@ export async function DELETE(req: NextRequest) {
   if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
 
   let ids: string[] = [];
+  let teamId = req.nextUrl.searchParams.get("teamId")?.trim() ?? "";
   try {
-    const body = (await req.json()) as { ids?: unknown };
+    const body = (await req.json()) as { ids?: unknown; teamId?: unknown };
     ids = Array.isArray(body?.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
+    if (!teamId && typeof body?.teamId === "string") teamId = body.teamId.trim();
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
   if (!ids.length) return fail(400, "缺少 ids", "invalid_payload");
 
   try {
+    if (teamId) {
+      const membership = await lookupTeamMembershipViaRelay(caller.user.id);
+      if (!membership || membership.teamId !== teamId || (membership.role !== "owner" && membership.role !== "admin")) {
+        return fail(403, "只有团队管理员可以删除团队画布", "forbidden");
+      }
+      const deleted = await deleteTeamCanvasProjects(teamId, ids);
+      return NextResponse.json({ success: true, deleted }, { status: 200 });
+    }
     const deleted = await deleteCanvasProjects(caller.user.id, ids);
     return NextResponse.json({ success: true, deleted }, { status: 200 });
   } catch (error) {

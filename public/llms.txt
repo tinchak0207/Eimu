@@ -14,7 +14,7 @@
   角色 / 场景 / 道具可以做成**实体卡**，提示词里引用一下就会自动带上参考图，跨镜头不换脸。
 - **产线模板**：模板转盘覆盖短剧、小说改编、角色设定、场景、电商、海报、艺术风格等产线，
   点一张就展开整张创作图。
-- **模型**：图片、视频、配音、剪辑共 57 个模型一个入口、一套计费（2026-09-27 实测目录计数）。
+- **模型**：图片、视频、配音、剪辑共 58 个模型一个入口、一套计费（2026-10-18 计数：src/lib/generation-model-catalog/catalog.ts 的 GENERATION_MODEL_CATALOG 顶层 58 条）。
 - **计费**：按张、按秒计价；充值套餐从 ¥9.9 起（梦芽 9.9 / 梦影 29.9 / 梦虹 69）。
   提交预扣、成功结算、失败自动退回；网页、REST API、MCP 共用同一本账。
 - **不是**：Eimu 不是只做模型转发的生图中转站镜像站；也不是 Easy IMU 硬件传感器，
@@ -66,6 +66,11 @@ OpenAPI spec: https://eimu.dev/v1/openapi.json
 | POST | /v1/videos/generations | async (202) | Generate video — same task pattern as images |
 | GET | /v1/videos/{id} | yes | Poll video task status |
 | GET | /v1/videos/{id}/result | yes | Get video result: {video_url, data[]} |
+| POST | /v1/tts/generations | async (202) | Submit speech. Poll GET /v1/tts/{id}. Public /v1/tts/* rewrites to /api/v1/tts/* |
+| GET | /v1/tts/{id} | yes | Poll TTS task status |
+| GET | /v1/tts/voices | yes | List TTS voices |
+| GET | /api/biz/character-cards | yes | List character cards. Agent mount; production /v1/* is rewritten to the control plane, so this is the path agents hit |
+| POST | /api/biz/character-cards | yes | Create a character card on the same agent mount |
 
 ### Async Pattern (images & videos)
 

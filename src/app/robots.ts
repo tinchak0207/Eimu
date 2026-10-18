@@ -1,11 +1,8 @@
 import type { MetadataRoute } from "next";
 import { getSiteUrl } from "@/lib/site-url";
 
-// 只留一条通用规则：/api/ 属非内容路由（爬它只是浪费 crawl budget）。
-// 2026-10-05 红队：原本逐条列举 /admin、/settings、/auth、/agent… 等于在 robots.txt
-// 里反向给出「哪些路径是敏感的」侦察字典；已全部移除，不再对外枚举敏感路径。
-// 后台/登入等页面本身有鉴权闸，不靠 robots 挡。
-const NON_CONTENT_PATHS = ["/api/"];
+// 非内容路由：管理台、演示、登录落地、旧助理书签、API。页面 metadata 同时 noindex。
+const NON_CONTENT_PATHS = ["/admin", "/openui-demo", "/wechat-login", "/agent", "/api/"];
 
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const siteUrl = await getSiteUrl();

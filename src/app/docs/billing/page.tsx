@@ -8,6 +8,11 @@ const SITE_URL = getSiteUrlFromEnv();
 export const metadata: Metadata = {
   title: "充值与计费 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/billing` },
+  openGraph: {
+    title: "充值与计费 | 文档中心",
+    description: "充值与计费 | 文档中心",
+    url: "/docs/billing",
+  },
 };
 
 // ---- 充值方案（现场逐字：与 /pricing 四档文案一致）----

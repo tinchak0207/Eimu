@@ -68,6 +68,10 @@ export const PAID_VIDEO_MAX_SECONDS = 30;
 /**
  * 允许送给付费视频上游的 resolution 白名单（上限 ≤720p）。
  * 4k/2k/1080p/540p/360p 一律不在内 ⇒ 直接拒收。
+ *
+ * 2026-10-18：DMC 改为 H3 768P + auto-hd 超分的高清链路，但 auto-hd 在
+ * group default 下无 channel、/v2 路由又强制 768P ⇒ 高清暂不具备可提交形态，
+ * 白名单维持现状；上游开通后再一并打开。
  */
 export const PAID_VIDEO_ALLOWED_RESOLUTIONS = ["480p", "720p"] as const;
 
@@ -96,10 +100,9 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
   // 就仍然被约束在 ≤720p、seconds ≤30，且闸日志留下一笔可稽核记录；单价由 agnes-video
   // 供给 claim 的 unitPriceCny:0 提供（不进兜底表）。
   "agnes-video-2.5-flash",
-  // 2026-10-13：dmc（dmc.cc）认领的 minimax-h3 上游模型名。**按秒计价**
-  // （model_price=0.014706 USD/s × usd_exchange_rate=6.8 = ¥0.10/s；实单 2×5s 对帐
-  // total_usage=100.0008分=¥1.000008）。单价由 dmc 供给 claim 的
-  // `unitPriceCnyPerSecond`（{720p:0.1}）提供，不进兜底表。
+  // 2026-10-13：dmc（dmc.cc，2026-10-18 改址 api.ll2.cn）认领的 minimax-h3 上游模型名。
+  // **按秒计价**（H3 768P model_price=0.007353 USD/s × usd_exchange_rate=6.8 = ¥0.05/s）。
+  // 单价由 dmc 供给 claim 的 `unitPriceCnyPerSecond`（{720p:0.05}）提供，不进兜底表。
   "MiniMax-H3",
 ] as const;
 
@@ -459,18 +462,13 @@ export function assertPaidVideoSubmissionAllowed(facts: PaidVideoSubmissionFacts
 
 /**
  * 生产平面入口（V-03，worker-service 在取得租约后、呼叫供给前呼叫；只用于 video_generate）。
- * - `failClosed`（`openai_video` 协议）：一律过闸，白名单外即拒——与搬迁前行为一致。
- * - 否则：只有上游 model 落在白名单内才过闸；不在白名单的既有视频路径（metaso/filmera 等）放行不审。
- * 回传 null＝未审（非白名单的非 fail-closed 协议）或豁免。
+ * `failClosed` / 白名单不再放行：无论协议标志，一律走 assertPaidVideoSubmissionAllowed。
+ * 回传 null 只可能来自闸门内部的豁免三元组为空，不是「未审放行」。
  */
 export function enforcePaidVideoCostGate(
   facts: PaidVideoSubmissionFacts,
   options: { failClosed: boolean },
 ): PricedVideoTriple | null {
-  if (!options.failClosed && !isPaidVideoModelWhitelisted(
-    typeof facts.supplierModelId === "string" ? facts.supplierModelId.trim() : facts.supplierModelId,
-  )) {
-    return null;
-  }
+  void options.failClosed;
   return assertPaidVideoSubmissionAllowed(facts);
 }

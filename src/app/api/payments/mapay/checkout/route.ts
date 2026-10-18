@@ -52,13 +52,13 @@ async function resolveUserId(req: NextRequest): Promise<number | null> {
 }
 
 /**
- * 已登入 → `${planId}.${userId}.${hmac8}`（notify 可据此直接入帐）；
+ * 已登入 → 新签名（含本次 out_trade_no 与时间戳，至少 32 hex）。
  * 未登入／查不到／没有签名密钥 → null（呼叫方沿用旧格式）。
  */
-function boundOrderParam(planId: string, userId: number | null): string | null {
+function boundOrderParam(planId: string, userId: number | null, outTradeNo: string): string | null {
   const secret = mapayOrderSecret();
-  if (!secret || !userId) return null;
-  return buildMapayOrderParam(planId, userId, secret);
+  if (!secret || !userId || !outTradeNo) return null;
+  return buildMapayOrderParam(planId, userId, secret, { outTradeNo, timestamp: Date.now() });
 }
 
 /**
@@ -74,8 +74,8 @@ async function firstChargeAllowed(userId: number | null): Promise<boolean> {
 
 /**
  * 席位订单收银台：`?plan=seat:<team>:<tier>:<cycle>:<seats>` → mapay 收款页。
- * 金额与 out_trade_no 全来自同源价表/决定性推导（与下单端 pending_order 一字不差；
- * 同请求重放永远是同一张单）；只有团队主帐本人（登入 cookie 反查 userId ＝订单团队）
+ * 金额来自同源价表。out_trade_no 每次打开收银台都新生成，避免同规格续费被当成重放。
+ * 只有团队主帐本人（登入 cookie 反查 userId ＝订单团队）
  * 可发起支付。复用 mapay 既有签名与栏位口径（buildMapayCheckoutFields），不造第二套支付。
  */
 async function seatCheckout(req: NextRequest, identity: SeatOrderIdentity) {
@@ -156,12 +156,13 @@ export async function GET(req: NextRequest) {
 
   try {
     const config = getMapayConfig();
+    const orderId = createMapayOrderId();
     const fields = buildMapayCheckoutFields({
       config,
-      orderId: createMapayOrderId(),
+      orderId,
       paymentType: normalizeMapayPaymentType(req.nextUrl.searchParams.get("type")),
       plan,
-      param: boundOrderParam(plan.id, userId) ?? undefined,
+      param: boundOrderParam(plan.id, userId, orderId) ?? undefined,
     });
 
     return new NextResponse(renderMapaySubmitPage(getMapaySubmitUrl(config.gatewayUrl), fields), {

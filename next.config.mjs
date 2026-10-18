@@ -53,6 +53,7 @@ const nextConfig = {
         destination: `/use-cases/${category}`,
         permanent: true,
       })),
+      { source: "/agent", destination: "/?agent=1", permanent: false },
       { source: "/docs/harness", destination: "/docs/workflow", permanent: true },
       { source: "/docs/harness/:path*", destination: "/docs/workflow", permanent: true },
       { source: "/docs/report", destination: "/docs", permanent: true },

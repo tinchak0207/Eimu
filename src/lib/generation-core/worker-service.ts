@@ -47,9 +47,6 @@ import { enforcePaidVideoCostGate } from "./paid-video-cost-gate";
 import type { GenerationArtifactResult, GenerationJob, GenerationKind, ProviderProtocol, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 import { runProviderReconciliation } from "./provider-reconciliation";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
-import { onFilmeraTokenRotated } from "./filmera-upstream";
-import { refreshFilmeraSupplierHealth } from "./filmera-health";
-import { readFile, writeFile } from "node:fs/promises";
 import { emitJobRoutingEvent } from "../routing-telemetry";
 import { sweepMapayIntakeOnce } from "@/lib/mapay-intake";
 
@@ -65,6 +62,20 @@ export interface GenerationWorkerOptions {
 
 function backoffMs(attemptCount: number): number {
   return Math.min(60_000, 1_000 * 2 ** Math.min(6, attemptCount));
+}
+
+function isDatabaseConnectionError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+  const message = error instanceof Error ? error.message : String(error);
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+  return /^(08000|08001|08003|08004|08006|57P01|57P02|57P03|53300|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)$/.test(code)
+    || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|connection terminated|connection refused|could not connect|the database system is (starting up|shutting down)|too many clients|connect ECONN/i.test(`${code} ${message} ${cause}`);
+}
+
+function databaseBackoffMs(streak: number): number {
+  return Math.min(30_000, 1_000 * 2 ** Math.min(Math.max(0, streak - 1), 5));
 }
 
 /**
@@ -665,7 +676,6 @@ export async function runGenerationMaintenanceOnce(options: GenerationWorkerOpti
   await runProviderReconciliation({ executorId, sql });
   await runAccountMaintenanceOnce(sql);
   await refreshAdobeSupplierHealth(sql);
-  await refreshFilmeraSupplierHealth(sql);
   await recoverExpiredCooldowns(sql);
 }
 
@@ -766,24 +776,9 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
   process.once("SIGTERM", stop);
   let lastMaintenance = 0;
   const billingExecutorId = `billing:${process.env.HOSTNAME ?? "local"}:${process.pid}`;
-  // filmera token 轮换持久化：内存换新后原子写回 env 文件，
-  // worker 重启不丢失 refresh_token 链（否则每次重启都退回旧 token → 401 死锁）。
-  const envPath = process.env.FILMERA_ENV_PATH ?? "/opt/image-control-plane/.env.control-plane";
-  onFilmeraTokenRotated(async (next) => {
-    try {
-      const text = await readFile(envPath, "utf8");
-      const lines = text.split("\n").filter((l) => !l.startsWith("FILMERA_AUTH_TOKEN=") && !l.startsWith("FILMERA_REFRESH_TOKEN="));
-      lines.push(`FILMERA_AUTH_TOKEN=${next.accessToken}`);
-      lines.push(`FILMERA_REFRESH_TOKEN=${next.refreshToken}`);
-      // bind-mount 单文件挂载不支援 rename 覆盖（EBUSY），直接原地写入。
-      // 写入期间理论上有瞬间不完整窗口，但 env 只在容器启动时读取，可接受。
-      await writeFile(envPath, lines.join("\n"), "utf8");
-      process.env.FILMERA_AUTH_TOKEN = next.accessToken;
-      process.env.FILMERA_REFRESH_TOKEN = next.refreshToken;
-    } catch (error) {
-      console.warn("[generation-worker] filmera token 持久化失败（仅内存生效）", error instanceof Error ? error.message : String(error));
-    }
-  });
+  let dbFailureStreak = 0;
+  let lastDbErrorSummary = "";
+  let lastDbErrorLogAt = 0;
   const inFlight = new Set<Promise<void>>();
   const dispatch = (job: GenerationJob): void => {
     // finally 的清理改挂 task.finally()：promise 先落 const 才能自引用，
@@ -817,7 +812,6 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         // REQ-E1a/E1b：充值入帐同步 + 跨层对帐（内部自带节奏门槛，非每轮执行）。
         await runAccountMaintenanceOnce(sql);
         await refreshAdobeSupplierHealth(sql);
-        await refreshFilmeraSupplierHealth(sql);
         // 病灶 C：cooldown 到期自动恢复（disabled 不自动恢复）。每 30s 与健康循环
         // 一起扫一次，把「cooldown 已到期」的 supplier/account 捡回 healthy。
         await recoverExpiredCooldowns(sql);
@@ -835,13 +829,28 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         const job = await claimGenerationJob({ ...options, sql });
         if (job) {
           dispatch(job);
+          dbFailureStreak = 0;
           // 池未满且仍有积压：立刻继续租，让同一批突发一次拉满，不空转等下一个 poll。
           continue;
         }
       }
+      dbFailureStreak = 0;
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     } catch (error) {
-      // 迭代失败（暂时性，继续轮询）
+      if (isDatabaseConnectionError(error)) {
+        dbFailureStreak += 1;
+        const waitMs = databaseBackoffMs(dbFailureStreak);
+        const summary = error instanceof Error ? error.message : String(error);
+        const nowMs = Date.now();
+        if (summary !== lastDbErrorSummary || nowMs - lastDbErrorLogAt >= 30_000) {
+          console.error(`[generation-worker] 数据库连接失败，${waitMs}ms 后重试: ${summary}`);
+          lastDbErrorSummary = summary;
+          lastDbErrorLogAt = nowMs;
+        }
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      dbFailureStreak = 0;
       console.error("[generation-worker] 迭代失败（暂时性，继续轮询）", error);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }

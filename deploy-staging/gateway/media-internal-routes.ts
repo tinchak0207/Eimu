@@ -306,11 +306,13 @@ interface TtsProbeResult {
   note: string
 }
 
-/** 探测 TTS 上游是否真的能产中文音频（带 60s 负缓存避免反覆打坏渠道）。 */
-let ttsProbeCache: { at: number; result: TtsProbeResult } | null = null
+/** 探测 TTS 上游。负缓存只覆盖网络连接失败，且不超过 5 秒；HTTP 403 不缓存。 */
+const TTS_PROBE_NEGATIVE_TTL_MS = 5_000
+let ttsProbeCache: { at: number; ttl: number; result: TtsProbeResult } | null = null
 export async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeResult> {
-  if (ttsProbeCache && Date.now() - ttsProbeCache.at < 60_000) return ttsProbeCache.result
+  if (ttsProbeCache && Date.now() - ttsProbeCache.at < ttsProbeCache.ttl) return ttsProbeCache.result
   let result: TtsProbeResult
+  let cacheNegative = false
   try {
     const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
       method: "POST",
@@ -340,9 +342,14 @@ export async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeRe
       result = { available: false, note: `上游 HTTP ${res.status}: ${msg}` }
     }
   } catch (e) {
+    const name = e instanceof Error ? e.name : ""
+    const aborted = name === "AbortError" || name === "TimeoutError"
     result = { available: false, note: `上游不可达: ${e instanceof Error ? e.message : String(e)}` }
+    cacheNegative = !aborted
   }
-  ttsProbeCache = { at: Date.now(), result }
+  if (result.available) ttsProbeCache = { at: Date.now(), ttl: 60_000, result }
+  else if (cacheNegative) ttsProbeCache = { at: Date.now(), ttl: TTS_PROBE_NEGATIVE_TTL_MS, result }
+  else ttsProbeCache = null
   return result
 }
 

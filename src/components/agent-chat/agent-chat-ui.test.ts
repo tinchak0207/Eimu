@@ -778,7 +778,7 @@ test("nothing routes users to a standalone /agent page", () => {
   // 导航栏不再有「助理」链接：它会把人带离卡片。
   assert.doesNotMatch(readCode(navbar), /href="\/agent"/);
   // 旧书签落地后回首页并直接开在 agent 面，不是渲染一个独立页。
-  assert.match(agentRoute, /router\.replace\(`\/\$\{query\}`\)/);
+  assert.match(agentRoute, /redirect\("\/\?agent=1"\)/);
   assert.match(agentRoute, /\?agent=1/);
   assert.doesNotMatch(readCode(agentRoute), /variant="page"/);
   // 首页要认这个 query 才算真的接住了交接。

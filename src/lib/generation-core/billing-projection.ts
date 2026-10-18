@@ -43,6 +43,9 @@ interface GatePathJobRow {
   quality: string | null;
   resolution: string | null;
   requested_count: number;
+  /** 失败单只按已完成张数计价；成功单不读此列。 */
+  completed_count?: number | null;
+  status?: string | null;
   workflow_json: unknown;
   billing_user_id: number;
 }
@@ -55,41 +58,75 @@ export interface BillingProjectionSummary {
   writeoffs: number;
 }
 
-/** 与 incumbent 完全同源的确定性定价重算；无法确定 = 0（上层跳过并记录，不猜）。 */
-export function estimateGatePathBasePrice(row: GatePathJobRow): number {
-  const count = Math.max(1, Number(row.requested_count) || 1);
+/** 与 incumbent 完全同源的确定性定价重算。未知 kind / 无价返回 null，调用方不得记成 0 元成功。 */
+export function estimateGatePathBasePrice(row: GatePathJobRow): number | null {
+  // 失败单只收已完成张数，不按 requested_count 全额。成功单仍按请求张数。
+  const count = row.status === "failed"
+    ? Math.max(0, Number(row.completed_count) || 0)
+    : Math.max(1, Number(row.requested_count) || 1);
+  if (count <= 0) return null;
+  const workflow = (row.workflow_json && typeof row.workflow_json === "object" ? row.workflow_json : {}) as {
+    durationSeconds?: number;
+    generateAudio?: boolean;
+    inputLength?: number;
+  };
   try {
-    if (row.kind === "image_generate") {
-      const coins = imageGenerationCoins(row.model_id, (row.quality as "fast" | "quality") ?? "fast");
-      return Math.round(coins * QUOTA_PER_COIN) * count;
+    switch (row.kind) {
+      case "image_generate":
+      case "image_edit": {
+        // image_edit 与出图共用已 import 的 imageGenerationCoins（目录 imageCredits / fixedCoins）。
+        const coins = imageGenerationCoins(
+          row.model_id,
+          (row.quality as "fast" | "quality") ?? "fast",
+          (row.resolution ?? undefined) as never,
+        );
+        if (!Number.isFinite(coins) || coins <= 0) {
+          console.error(`[billing-projection] no price kind=${row.kind} model=${row.model_id}`);
+          return null;
+        }
+        return Math.round(coins * QUOTA_PER_COIN) * count;
+      }
+      case "video_generate": {
+        const coins = generationCoins(row.model_id, {
+          resolution: (row.resolution ?? undefined) as never,
+          durationSeconds: workflow.durationSeconds,
+          generateAudio: workflow.generateAudio,
+        } as never);
+        if (!Number.isFinite(coins) || coins <= 0) {
+          console.error(`[billing-projection] no price kind=video_generate model=${row.model_id}`);
+          return null;
+        }
+        return Math.round(coins * QUOTA_PER_COIN) * count;
+      }
+      case "avatar":
+      case "lipsync": {
+        // 目录预设 fixedCoins=0 是试运行价，不是免费。0 / 非有限 = 无价，拒绝当成 0 元。
+        const coins = generationCoins(row.model_id, {
+          resolution: (row.resolution ?? undefined) as never,
+          durationSeconds: workflow.durationSeconds,
+          generateAudio: workflow.generateAudio,
+        } as never);
+        if (!Number.isFinite(coins) || coins <= 0) {
+          console.error(`[billing-projection] no price kind=${row.kind} model=${row.model_id} (refusing to bill 0)`);
+          return null;
+        }
+        return Math.round(coins * QUOTA_PER_COIN) * count;
+      }
+      case "tts": {
+        // 逐字计价，与 /v1/tts/generations 同源。不乘 count：inputLength 已是整段字数。
+        // 缺字数 → 无价（null），不记 0 元成功。
+        const quota = ttsQuotaForChars(Number(workflow.inputLength));
+        if (!Number.isFinite(quota) || quota <= 0) return null;
+        return quota;
+      }
+      default:
+        console.error(`[billing-projection] unknown kind=${row.kind} model=${row.model_id}; refusing to price as 0`);
+        return null;
     }
-    if (row.kind === "video_generate") {
-      const workflow = (row.workflow_json && typeof row.workflow_json === "object" ? row.workflow_json : {}) as {
-        durationSeconds?: number;
-        generateAudio?: boolean;
-      };
-      const coins = generationCoins(row.model_id, {
-        resolution: (row.resolution ?? undefined) as never,
-        durationSeconds: workflow.durationSeconds,
-        generateAudio: workflow.generateAudio,
-      } as never);
-      return Math.round(coins * QUOTA_PER_COIN) * count;
-    }
-    // TTS（2026-10-01 接入逐字计费）：闸门路径（billing_amount=0）的 succeeded tts job
-    // 由投影补记帐。金额＝提交时已落库的 `workflow.inputLength`（请求文本实际字数，
-    // 提交端写入的真源；缺此栏位的旧单 → NaN → 0 → 如实跳过并记 skippedUnknownPrice，
-    // 不猜字数）逐字计价，与 /v1/tts/generations 的 baseBillingAmount 同源同价。
-    // 不乘 count：`inputLength` 已是整段文本字数，`requestedCount` 对 TTS 恒为 1。
-    if (row.kind === "tts") {
-      const workflow = (row.workflow_json && typeof row.workflow_json === "object" ? row.workflow_json : {}) as {
-        inputLength?: number;
-      };
-      return ttsQuotaForChars(Number(workflow.inputLength));
-    }
-  } catch {
-    return 0;
+  } catch (error) {
+    console.error(`[billing-projection] price threw kind=${row.kind} model=${row.model_id}`, error);
+    return null;
   }
-  return 0;
 }
 
 /**
@@ -113,11 +150,16 @@ export async function projectGatePathBilling(input: {
   let rows: GatePathJobRow[];
   try {
     rows = await sql<GatePathJobRow[]>`
-      SELECT job.id, job.kind, job.model_id, job.quality, job.resolution, job.requested_count, job.workflow_json, job.billing_user_id
+      SELECT job.id, job.kind, job.model_id, job.quality, job.resolution,
+             job.requested_count, job.completed_count, job.status,
+             job.workflow_json, job.billing_user_id
       FROM generation_job job
-      WHERE job.status = 'succeeded'
-        AND job.billing_amount = 0
+      WHERE job.billing_amount = 0
         AND job.billing_user_id IS NOT NULL
+        AND (
+          job.status = 'succeeded'
+          OR (job.status = 'failed' AND job.completed_count > 0)
+        )
         AND NOT EXISTS (
           SELECT 1 FROM billing_operation op
           WHERE op.job_id = job.id AND op.operation = 'commit' AND op.amount > 0
@@ -134,9 +176,9 @@ export async function projectGatePathBilling(input: {
     const jobId = String(row.id);
     try {
       const amount = estimateGatePathBasePrice(row);
-      if (amount <= 0) {
+      if (amount == null || !(amount > 0)) {
         summary.skippedUnknownPrice += 1;
-        console.error(`[billing-projection] skip job ${jobId}: cannot determine base price (kind=${row.kind} model=${row.model_id})`);
+        console.error(`[billing-projection] skip job ${jobId}: cannot determine base price (kind=${row.kind} model=${row.model_id}); not recording a 0-amount commit`);
         continue;
       }
 
@@ -233,6 +275,7 @@ export async function projectGatePathBilling(input: {
       FROM generation_job job
       WHERE job.status = 'failed'
         AND job.billing_amount = 0
+        AND COALESCE(job.completed_count, 0) = 0
         AND job.billing_user_id IS NOT NULL
         AND EXISTS (
           SELECT 1 FROM generation_attempt attempt
@@ -256,9 +299,9 @@ export async function projectGatePathBilling(input: {
     const jobId = String(row.id);
     try {
       const amount = estimateGatePathBasePrice(row);
-      if (amount <= 0) {
+      if (amount == null || !(amount > 0)) {
         summary.skippedUnknownPrice += 1;
-        console.error(`[billing-projection] writeoff skip job ${jobId}: cannot determine base price (kind=${row.kind} model=${row.model_id})`);
+        console.error(`[billing-projection] writeoff skip job ${jobId}: cannot determine base price (kind=${row.kind} model=${row.model_id}); not recording a 0-amount writeoff`);
         continue;
       }
 

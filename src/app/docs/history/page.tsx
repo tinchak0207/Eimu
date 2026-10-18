@@ -8,6 +8,11 @@ const SITE_URL = getSiteUrlFromEnv();
 export const metadata: Metadata = {
   title: "历史素材复用 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/history` },
+  openGraph: {
+    title: "历史素材复用 | 文档中心",
+    description: "历史素材复用 | 文档中心",
+    url: "/docs/history",
+  },
 };
 
 export default function DocsHistoryPage() {

@@ -69,6 +69,28 @@ function disposeActorLabel(object: THREE.Object3D): void {
   object.remove(label);
 }
 
+const MATERIAL_TEXTURE_SLOTS = [
+  "map",
+  "normalMap",
+  "roughnessMap",
+  "metalnessMap",
+  "aoMap",
+  "emissiveMap",
+  "bumpMap",
+  "displacementMap",
+  "alphaMap",
+  "lightMap",
+  "envMap",
+] as const;
+
+function disposeMaterialTextures(material: THREE.Material): void {
+  const bag = material as THREE.Material & Partial<Record<(typeof MATERIAL_TEXTURE_SLOTS)[number], THREE.Texture | null | undefined>>;
+  for (const slot of MATERIAL_TEXTURE_SLOTS) {
+    const tex = bag[slot];
+    if (tex) tex.dispose();
+  }
+}
+
 function attachActorLabel(object: THREE.Object3D, name: string, color: string, height: number): void {
   disposeActorLabel(object);
   const canvas = document.createElement('canvas');
@@ -155,6 +177,9 @@ export class DirectorEngine {
   private objects = new Map<string, THREE.Object3D>();
   private elementCache = new Map<string, DirectorElement>();
   private raf = 0;
+  isDisposed = false;
+  private loadGeneration = 0;
+  private loadSlots = new Map<string, number>();
   private container: HTMLDivElement;
   private texLoader = new THREE.TextureLoader();
   private pendingTextures = 0;
@@ -284,26 +309,64 @@ export class DirectorEngine {
     });
     this.renderer.domElement.addEventListener('dblclick', (e) => this.pick(e, true));
 
-    const loop = () => {
-      this.raf = requestAnimationFrame(loop);
-      this.orbit.update();
-      this.faceBillboards();
-      this.shotCameraHelper.update();
-      this.renderer.render(this.scene, this.camera);
-      if (this.monitorRenderer) {
-        const gizmoWasVisible = this.gizmoHelper.visible;
-        this.setShotHelpersVisible(false);
-        this.gizmoHelper.visible = false;
-        this.monitorRenderer.render(this.scene, this.shotCamera);
-        this.setShotHelpersVisible(true);
-        this.gizmoHelper.visible = gizmoWasVisible;
-      }
-    };
-    loop();
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    this.renderLoop();
+  }
+
+  private onVisibilityChange = (): void => {
+    if (this.isDisposed) return;
+    if (document.hidden) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+      return;
+    }
+    if (this.raf === 0) this.renderLoop();
+  };
+
+  private renderLoop = (): void => {
+    if (this.isDisposed || document.hidden) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+      return;
+    }
+    this.orbit.update();
+    this.faceBillboards();
+    this.shotCameraHelper.update();
+    this.renderer.render(this.scene, this.camera);
+    if (this.monitorRenderer) {
+      const gizmoWasVisible = this.gizmoHelper.visible;
+      this.setShotHelpersVisible(false);
+      this.gizmoHelper.visible = false;
+      this.monitorRenderer.render(this.scene, this.shotCamera);
+      this.setShotHelpersVisible(true);
+      this.gizmoHelper.visible = gizmoWasVisible;
+    }
+    if (this.isDisposed || document.hidden) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+      return;
+    }
+    this.raf = requestAnimationFrame(this.renderLoop);
+  };
+
+  private beginLoad(slot: string): number {
+    const generation = ++this.loadGeneration;
+    this.loadSlots.set(slot, generation);
+    return generation;
+  }
+
+  private loadIsStale(slot: string, generation: number): boolean {
+    return this.isDisposed || this.loadSlots.get(slot) !== generation;
   }
 
   dispose(): void {
+    if (this.isDisposed) return;
+    this.isDisposed = true;
+    this.loadGeneration += 1;
+    this.loadSlots.clear();
     cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.gizmo.detach();
     this.gizmo.dispose();
     this.orbit.dispose();
@@ -313,6 +376,8 @@ export class DirectorEngine {
       const mat = m.material as THREE.Material | THREE.Material[] | undefined;
       if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
       else mat?.dispose();
+      if (Array.isArray(mat)) mat.forEach((x) => disposeMaterialTextures(x));
+      else if (mat) disposeMaterialTextures(mat);
     });
     this.renderer.dispose();
     this.monitorRenderer?.dispose();
@@ -357,6 +422,7 @@ export class DirectorEngine {
         this.scene.remove(obj);
         this.objects.delete(id);
         this.elementCache.delete(id);
+        this.loadSlots.delete(`billboard:${id}`);
       }
     }
     // 新增/更新
@@ -433,10 +499,16 @@ export class DirectorEngine {
         );
         base.position.y = 0.025;
         group.add(base);
+        const generation = this.beginLoad(`billboard:${el.id}`);
         this.pendingTextures++;
         this.texLoader.load(
           el.imagePath,
           (tex) => {
+            if (this.loadIsStale(`billboard:${el.id}`, generation)) {
+              tex.dispose();
+              this.pendingTextures = Math.max(0, this.pendingTextures - 1);
+              return;
+            }
             tex.colorSpace = THREE.SRGBColorSpace;
             mat.map = tex;
             mat.needsUpdate = true;
@@ -446,7 +518,11 @@ export class DirectorEngine {
             this.pendingTextures--;
           },
           undefined,
-          () => { this.pendingTextures--; mat.color.set(0x555c66); },
+          () => {
+            this.pendingTextures = Math.max(0, this.pendingTextures - 1);
+            if (this.loadIsStale(`billboard:${el.id}`, generation)) return;
+            mat.color.set(0x555c66);
+          },
         );
         return group;
       }
@@ -900,23 +976,39 @@ export class DirectorEngine {
    * 不 throw：失败回传结构化错误并触发 onGltfAssetError；url=null 卸载现有资产。
    */
   async setGltfAsset(url: string | null, opts?: { targetHeightM?: number }): Promise<GltfLoadOutcome | null> {
+    const generation = this.beginLoad("gltf");
     if (this.gltfAssetRoot) {
       this.scene.remove(this.gltfAssetRoot);
       disposeGltfObject(this.gltfAssetRoot);
       this.gltfAssetRoot = null;
     }
-    if (!url) return null;
+    if (this.isDisposed || !url) return null;
     const holder = new THREE.Group();
     holder.userData.isDirectorGltfAsset = true;
-    this.scene.add(holder);
-    this.gltfAssetRoot = holder;
-    const outcome = await loadGltfAsset(holder, url, opts);
-    if (!outcome.ok) {
+    try {
+      const outcome = await loadGltfAsset(holder, url, opts);
+      if (this.loadIsStale("gltf", generation)) {
+        this.scene.remove(holder);
+        disposeGltfObject(holder);
+        if (this.gltfAssetRoot === holder) this.gltfAssetRoot = null;
+        return null;
+      }
+      if (!outcome.ok) {
+        this.scene.remove(holder);
+        disposeGltfObject(holder);
+        this.onGltfAssetError?.(outcome.message, outcome.stage);
+        return outcome;
+      }
+      this.scene.add(holder);
+      this.gltfAssetRoot = holder;
+      return outcome;
+    } catch (err) {
       this.scene.remove(holder);
-      this.gltfAssetRoot = null;
-      this.onGltfAssetError?.(outcome.message, outcome.stage);
+      disposeGltfObject(holder);
+      if (this.gltfAssetRoot === holder) this.gltfAssetRoot = null;
+      if (this.loadIsStale("gltf", generation)) return null;
+      throw err;
     }
-    return outcome;
   }
 
   onGltfAssetError?: (message: string, stage: GltfLoadStage) => void;
@@ -927,11 +1019,16 @@ export class DirectorEngine {
   }
 
   setPanorama(imagePath: string | null): void {
+    const generation = this.beginLoad("panorama");
     if (!imagePath) {
       this.scene.background = new THREE.Color(0x16181c);
       return;
     }
     this.texLoader.load(imagePath, (tex) => {
+      if (this.loadIsStale("panorama", generation)) {
+        tex.dispose();
+        return;
+      }
       tex.mapping = THREE.EquirectangularReflectionMapping;
       tex.colorSpace = THREE.SRGBColorSpace;
       this.scene.background = tex;

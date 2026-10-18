@@ -161,6 +161,14 @@ export function resolveFirstTouchCookieValue(
   return encodeFirstTouchCookieValue(input);
 }
 
+function joinLandingPath(pathname: string | null | undefined, search: string | null | undefined): string | null {
+  const path = typeof pathname === "string" ? pathname : "";
+  const query = typeof search === "string" ? search : "";
+  if (!path && !query) return null;
+  if (!query || path.includes("?")) return path || query;
+  return `${path}${query.startsWith("?") ? query : `?${query}`}`;
+}
+
 /** 从 `window.location.search` 抽 utm 三兄弟（缺＝null，不做猜测）。 */
 export function firstTouchFromLocation(input: {
   search: string;
@@ -175,7 +183,7 @@ export function firstTouchFromLocation(input: {
     utmMedium: params.get("utm_medium"),
     utmCampaign: params.get("utm_campaign"),
     referrerHost: referrerHostFrom(input.referrer ?? "", input.selfHost),
-    landingPath: normalizeTouchToken(input.pathname ?? null, 300),
+    landingPath: normalizeTouchToken(joinLandingPath(input.pathname, input.search), 300),
     capturedAt: input.capturedAt ?? new Date().toISOString(),
   };
 }

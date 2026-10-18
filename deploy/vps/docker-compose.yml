@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: imagesite-nextjs
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - ./app/.env.production
     environment:
@@ -23,6 +28,11 @@ services:
       target: generation-worker
     container_name: imagesite-generation-worker
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - ./app/.env.production
     environment:
@@ -34,6 +44,11 @@ services:
     image: calciumion/new-api:latest
     container_name: imagesite-new-api
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       PORT: 3001
       TZ: Asia/Hong_Kong
@@ -49,6 +64,11 @@ services:
     image: nginx:1.27-alpine
     container_name: imagesite-nginx
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     depends_on:
       - nextjs
     ports:
@@ -67,6 +87,11 @@ services:
   certbot:
     image: certbot/certbot:latest
     container_name: imagesite-certbot
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     profiles:
       - manual
     volumes:

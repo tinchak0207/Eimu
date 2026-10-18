@@ -2,6 +2,8 @@ import { SupplierRequestError } from "./failure-classifier";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
 // dmc.cc MiniMax-H3 文生视频上游封装（2026-10-13 两笔 5s 实弹打通）。
+// 2026-10-18 上游改址 api.ll2.cn：协议路径不变，但 base 取**根路径**
+// （https://api.ll2.cn，任务接口在 /v2/…；/v1 只是 OpenAI 兼容面）。
 //
 // 协议与 metaso 同形（MiniMax 官方形态）：
 //   POST {base}/v2/video_generation           建任务 → {task_id}
@@ -198,11 +200,11 @@ async function dmcRequest(
   try {
     payload = await response.json();
   } catch {
-    // 同一类状态洗白（D-3）：上游回 HTML 错误页（常见于 400/5xx）时，真实状态不能丢，
-    // 否则真 400 会以 502 进原生硬停判定。产品侧 status 仍是 502（我方解析失败）。
+    // 4xx 保留上游原 status。只有 5xx 或拿不到成功体的解析失败才用 502。
+    const status = response.status >= 400 && response.status <= 499 ? response.status : 502;
     throw new SupplierRequestError(
       `DMC returned invalid JSON (HTTP ${response.status}).`,
-      502,
+      status,
       null,
       undefined,
       undefined,
@@ -215,11 +217,10 @@ async function dmcRequest(
       typeof payload === "object" && payload !== null && "error" in payload
         ? String((payload as { error: { message?: unknown } }).error?.message ?? payload)
         : `DMC API request failed with HTTP ${response.status}.`;
-    // status 照既有语义改写（供应商侧失败，隔离/冷却行为不动）；upstreamStatus 原样带上
-    // 上游真实状态，供确定性 4xx 的原生硬停判读（D-3：真 400 不得被 502 洗成可重放）。
+    // 4xx 保留原 status。5xx 才记 502。upstreamStatus 仍带上游原文。
     throw new SupplierRequestError(
       message,
-      response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502,
+      response.status >= 400 && response.status <= 499 ? response.status : 502,
       null,
       undefined,
       undefined,

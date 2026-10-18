@@ -29,7 +29,7 @@ import type { fetchGatewayUser } from "@/lib/gateway-admin";
 
 import { readAccountLedger, type LedgerEntry } from "./account-ledger";
 import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
-import { readTeamQuotaView, toCoins, upsertTeamMember, type TeamLock } from "./member-quota";
+import { allocateMemberQuota, readMemberQuota, readTeamQuotaView, toCoins, upsertTeamMember, type TeamLock } from "./member-quota";
 
 // ─────────────────────────────────────────── 配置（常量可调，不硬编）
 
@@ -1106,6 +1106,26 @@ export async function removeTeamMember(
       }
       if (!canManageRole(actor, target, "member")) {
         return fail<{ memberUserId: number; removed: boolean }>(403, "forbidden", "你的角色无权移除该成员。");
+      }
+      const snapshot = await readMemberQuota(target.memberUserId);
+      if (!snapshot) {
+        return fail<{ memberUserId: number; removed: boolean }>(503, "store_unavailable", "成员剩余额度读不到，已停止移除。");
+      }
+      if (snapshot.remaining > 0) {
+        const reclaimed = await allocateMemberQuota(
+          {
+            teamUserId: input.teamUserId,
+            memberKeyId: target.memberKeyId,
+            targetGranted: snapshot.used,
+          },
+          { sql: tx, withTeamLock: async (_teamUserId, fn) => fn(tx) },
+        );
+        if (!reclaimed.ok) {
+          const status = reclaimed.status === 400 || reclaimed.status === 403 || reclaimed.status === 404 || reclaimed.status === 409
+            ? reclaimed.status
+            : 503;
+          return fail<{ memberUserId: number; removed: boolean }>(status, "store_unavailable", "成员剩余额度退回失败，未移除该成员。");
+        }
       }
       await tx`
         DELETE FROM team_member_quota WHERE team_user_id = ${input.teamUserId} AND member_user_id = ${target.memberUserId}

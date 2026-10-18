@@ -92,12 +92,13 @@ async function internalDeviceResolveTenant(sessionId: string): Promise<string | 
  * 机器调用方（opencode 工具）`res.json()` 直接失败。此处捕获后一律回**同形状 JSON**
  * `{ok:false, code:"internal_error", error}`，500。error 只给一句话原因（不泄漏栈）。
  */
-async function guardedSubagentEndpoint(label: string, fn: () => Promise<Response>): Promise<Response> {
+async function guardedSubagentEndpoint(label: string, fn: () => Promise<Response>, req?: Request): Promise<Response> {
   try {
     return await fn()
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e)
-    console.error(`[gateway] subagent endpoint error (${label}):`, e)
+    const rid = req?.headers.get("x-request-id") || req?.headers.get("x-trace-id") || crypto.randomUUID()
+    console.error(`[gateway] subagent endpoint error (${label}) rid=${rid}:`, e)
     return Response.json({ ok: false, code: "internal_error", error: `子代理端点内部错误（${label}）：${reason}` }, { status: 500 })
   }
 }
@@ -184,8 +185,15 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
     // not reachable from outside and an external uptime check would get 401.
     if (req.method === "GET" && (pathname === "/healthz" || pathname === "/agent/healthz")) {
       // persistence.ready=false 表示「现在起新建的会话重启会丢」——这是 2026-10-13
-      // 事故期间**没人看得见**的信号，现在做成可观测的（只读，无副作用）。
-      return Response.json({ ok: true, timestamp: new Date().toISOString(), sessions: sessions.size, persistence: persistenceStatus() })
+      // 事故期间**没人看得见**的信号。未就绪返回 503，不报假 200。
+      const persistence = persistenceStatus()
+      const requestId = req.headers.get("x-request-id") || req.headers.get("x-trace-id") || crypto.randomUUID()
+      const body = { ok: persistence.ready, timestamp: new Date().toISOString(), sessions: sessions.size, persistence, request_id: requestId }
+      if (!persistence.ready) {
+        console.error(`[gateway] healthz persistence not ready rid=${requestId}`)
+        return Response.json(body, { status: 503, headers: { "x-request-id": requestId } })
+      }
+      return Response.json(body, { headers: { "x-request-id": requestId } })
     }
 
     // Internal routes: loopback-only, no API key
@@ -253,45 +261,45 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       // 解析字段，任何未预期抛错都必须回 **JSON** 而非 Bun 默认的 HTML 500（机器调用方
       // 收 HTML 会直接解析失败）。code=internal_error，语义＝网关内部错误，非呼叫方输入错。
       if (req.method === "POST" && pathname === "/internal/subagent/dispatch") {
-        return await guardedSubagentEndpoint("dispatch", () => handleSubagentDispatch(req))
+        return await guardedSubagentEndpoint("dispatch", () => handleSubagentDispatch(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/status") {
-        return await guardedSubagentEndpoint("status", () => handleSubagentStatus(req))
+        return await guardedSubagentEndpoint("status", () => handleSubagentStatus(req), req)
       }
       // 0920 停止闸：orchestrator 的主动停止入口（此前只有 dispatch/status，
       // orchestrator 眼睁睁看著子代理跑飞却无权刹车）。body: { session_id, subagent_id?, all? }
       //   - 带 subagent_id：停那一个（id 或 label 前缀）
       //   - all:true 或缺 subagent_id：停该会话名下全部在跑子代理
       if (req.method === "POST" && pathname === "/internal/subagent/stop") {
-        return await guardedSubagentEndpoint("stop", () => handleSubagentStop(req))
+        return await guardedSubagentEndpoint("stop", () => handleSubagentStop(req), req)
       }
       // 2026-10-14 子代理协作总线（spec §3.1）：父→子消息（mode 三态＋expected_turn_id
       // 精确 steer，回应带 submission_id 与「接受≠已处理」）与子→父回报（notify_orchestrator：
       // 父忙只入队不打断、父闲唤醒一次）。与上面三端点同风格：同一 loopback 门内，不加二次鉴权。
       if (req.method === "POST" && pathname === "/internal/subagent/message") {
-        return await guardedSubagentEndpoint("message", () => handleSubagentMessage(req))
+        return await guardedSubagentEndpoint("message", () => handleSubagentMessage(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/notify") {
-        return await guardedSubagentEndpoint("notify", () => handleSubagentNotify(req))
+        return await guardedSubagentEndpoint("notify", () => handleSubagentNotify(req), req)
       }
       // 2026-10-14 协作总线四大支柱：RPC(ask-parent)、检查点(checkpoint)、白板(scratchpad)、具型产物(artifact)、挂起(suspend)、恢复(resume)
       if (req.method === "POST" && pathname === "/internal/subagent/ask-parent") {
-        return await guardedSubagentEndpoint("ask-parent", () => handleSubagentAskParent(req))
+        return await guardedSubagentEndpoint("ask-parent", () => handleSubagentAskParent(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/checkpoint") {
-        return await guardedSubagentEndpoint("checkpoint", () => handleSubagentCheckpoint(req))
+        return await guardedSubagentEndpoint("checkpoint", () => handleSubagentCheckpoint(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/scratchpad") {
-        return await guardedSubagentEndpoint("scratchpad", () => handleSubagentScratchpad(req))
+        return await guardedSubagentEndpoint("scratchpad", () => handleSubagentScratchpad(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/artifact") {
-        return await guardedSubagentEndpoint("artifact", () => handleSubagentArtifact(req))
+        return await guardedSubagentEndpoint("artifact", () => handleSubagentArtifact(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/suspend") {
-        return await guardedSubagentEndpoint("suspend", () => handleSubagentSuspend(req))
+        return await guardedSubagentEndpoint("suspend", () => handleSubagentSuspend(req), req)
       }
       if (req.method === "POST" && pathname === "/internal/subagent/resume") {
-        return await guardedSubagentEndpoint("resume", () => handleSubagentResume(req))
+        return await guardedSubagentEndpoint("resume", () => handleSubagentResume(req), req)
       }
       // D1（2026-10-02）：工具层重复呼叫断路器的强制收尾（plugin eimu-guard 在 N+5 次时呼叫）。
       if (req.method === "POST" && pathname === "/internal/session/loop-breaker") {
@@ -511,7 +519,7 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
           const fallbackMime = extMime.startsWith("video/") || extMime.startsWith("audio/") ? extMime : "video/mp4"
           return Response.json({ ok: true, path: `uploads/${sessionId}/${finalName}`, name: finalName, size: file.size, mime: file.type || fallbackMime })
         } catch (e) {
-          console.error("[gateway] media-upload error:", e)
+          console.error(`[gateway] media-upload error rid=${req.headers.get("x-request-id") || req.headers.get("x-trace-id") || crypto.randomUUID()}:`, e)
           return jsonError(500, "media upload failed", "server_error", "server_error")
         }
       }

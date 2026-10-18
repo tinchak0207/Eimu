@@ -1,6 +1,6 @@
 // B6（2026-08-31）母带检查+导出闸 — REQ-EDIT-07 聚合收尾。
 // check = 时长/解析度/画幅 + B4 lint must + B5 mix sync_errors 聚合；blockers 非空拒导。
-// 导出 = concat（trim→变速→scale/pad 画幅→clip.filter 调色）+ mix.wav 音轨 + 字幕 ASS 烧录（失败自动降级重试）
+// 导出 = concat（trim→变速→scale/pad 画幅→clip.filter 调色）+ mix.wav 音轨 + 字幕 ASS 烧录（失败即拒导，不静默拿掉字幕）
 //   + 封面帧 + probeRenderedVideo 强校验（轮子：composeEngine probeRenderedVideo；解析度口径 EXPORT_RESOLUTIONS）。
 // 2026-09-15 补三项（AID 产品层对称差，见 ./material-fingerprint.ts 档头）：
 //   check 加素材 URL 结构守卫（blocker source="url"）；export 回填素材集合 fingerprint。
@@ -25,6 +25,15 @@ const TMP_DIR = path.join(WORKSPACE_DIR, "tmp")
 
 const shq = (v: string) => `'${String(v).replace(/'/g, "'\\''")}'`
 const r3 = (n: number) => Math.round(n * 1000) / 1000
+const VIDEO_EXT = new Set(["mp4", "mov", "mkv", "webm", "m4v", "avi", "mpg", "mpeg", "ts", "m2ts", "wmv", "flv", "ogv", "3gp"])
+function evenDim(n: number): number {
+  const v = Math.max(2, Math.floor(n))
+  return v - (v % 2)
+}
+/** subtitles 滤镜路径：冒号、反斜杠、单引号都要转义，否则滤镜被截断。 */
+function escapeSubtitlesPath(p: string): string {
+  return p.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'")
+}
 
 async function run(cmd: string, timeoutMs = 600_000): Promise<CommandResult> {
   return invoke<CommandResult>("execute_command", { command: cmd, timeoutMs }).catch(() => ({ stdout: "", stderr: "", exit_code: 1 }) as CommandResult)
@@ -156,7 +165,13 @@ function clipChain(c: TimelineClip, idx: number, w: number, h: number): string {
   const speed = c.speed && c.speed > 0 ? c.speed : 1
   const parts = [`[${idx}:v]trim=start=${inS.toFixed(3)}:end=${outS.toFixed(3)}`, "setpts=PTS-STARTPTS"]
   if (speed !== 1) parts.push(`setpts=PTS/${speed.toFixed(4)}`)
-  parts.push(`scale=${w}:${h}:force_original_aspect_ratio=decrease`, `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`, "setsar=1")
+  const ew = evenDim(w)
+  const eh = evenDim(h)
+  parts.push(
+    `scale=${ew}:${eh}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
+    `pad=${ew}:${eh}:trunc((ow-iw)/4)*2:trunc((oh-ih)/4)*2`,
+    "setsar=1",
+  )
   const tone = filterToFfmpeg(c.filter ?? null)
   if (tone) parts.push(tone)
   return parts.join(",") + "[v" + idx + "]"
@@ -201,13 +216,16 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     const srcByClip: { clip: TimelineClip; path: string }[] = []
     let idx = 0
     for (const c of tl.clips) {
-      const ext = (c.path.split("?")[0].split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "") || "mp4"
+      const rawName = c.path.split("?")[0]
+      const suffix = rawName.includes(".") ? (rawName.split(".").pop() || "").replace(/[^a-z0-9]/gi, "").toLowerCase() : ""
+      const ext = suffix || "bin"
       const s = await resolveSource(c.path, idx, ext, workDir)
       if (!s) throw new TimelineValidationError(`clip ${c.id} 素材不可达：${c.path.slice(0, 120)}`)
       // 静帧素材（2026-09-28 漫剧评测实锤）：单张 png/jpg 不带 -loop 1 只解出 1 帧，trim 后视频轨
       // 只剩 0.08 秒、音轨照样 60 秒——容器时长骗过 probe，成片实为坏片。静帧一律 -loop 1 成连续流，
       // -t 以 outSec 封顶（多留一帧余量给 trim），动态素材路径不变。
-      const isStill = /^(png|jpe?g|webp|bmp)$/i.test(ext)
+      // 已知视频后缀才当动态素材；无后缀或未知后缀按静帧，避免无 -loop 只解出 1 帧。
+      const isStill = !VIDEO_EXT.has(suffix)
       const stillSec = Math.max(0.1, Math.min(c.outSec ?? c.duration, c.duration)) + 0.1
       inputs.push(isStill ? `-loop 1 -framerate 25 -t ${stillSec.toFixed(3)} -i ${shq(s.path)}` : `-i ${shq(s.path)}`)
       chains.push(clipChain(c, idx, preset.w, preset.h))
@@ -225,7 +243,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     // 视频侧不能用 apad（纯音频滤镜，接到视频 pad 上=media type mismatch）；时长帽用 trim=duration
     fc += `;[vcat]trim=duration=${outDur},setpts=PTS-STARTPTS[vmain]`
 
-    // 字幕烧录（ASS 落档；滤镜失败自动降级重试不烧录）
+    // 字幕烧录（ASS 落档；失败直接拒导，不交无字幕片）
     const ass = subtitlesAss(tl)
     let burnSub = false
     let assFile: string | null = null
@@ -249,7 +267,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
     const outPath = path.join(WORKSPACE_DIR, "timelines", sessionId, `master_${presetId}.mp4`)
     const doRender = async (withSub: boolean): Promise<CommandResult> => {
       const fcFinal = withSub && assFile
-        ? fc + `;[vmain]subtitles=${assFile}[vout]`
+        ? fc + `;[vmain]subtitles='${escapeSubtitlesPath(assFile)}'[vout]`
         : fc + ";[vmain]null[vout]"
       const fcFile = path.join(workDir, "filtergraph.txt")
       await writeFile(fcFile, fcFinal)
@@ -257,11 +275,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       const cmd = `${ffmpeg} -y -hide_banner -loglevel error ${inputs.join(" ")} -filter_complex_script ${shq(fcFile)} -map "[vout]"${hasAudio ? ` -map "[amain]"` : ""} -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -movflags +faststart${hasAudio ? " -c:a aac -b:a 192k" : ""} ${shq(outPath)}`
       return run(cmd, 600_000)
     }
-    let r = await doRender(burnSub)
-    if (r.exit_code !== 0 && burnSub) {
-      notes.push(`字幕烧录失败（${(r.stderr || "").slice(-160).trim()}），自动降级为不烧录重渲`)
-      r = await doRender(false)
-    }
+    const r = await doRender(burnSub)
     if (r.exit_code !== 0) {
       throw new TimelineValidationError(`母带渲染失败：${(r.stderr || "unknown").slice(-400)}`)
     }

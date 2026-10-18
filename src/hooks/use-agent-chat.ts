@@ -71,6 +71,8 @@ import type { AgentTranscriptItem } from "@/lib/agent-chat-types";
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
+/** 运行时 transcript 硬上限。超出丢最旧。持久化截断仍由 persistence 自己的上限负责。 */
+const MAX_RUNTIME_CHAT_ITEMS = 200;
 
 /** 存档节流：transcript 变化后至少隔 1s 才写一次 localStorage，避免每次 SSE 帧都写。 */
 const SAVE_THROTTLE_MS = 1_000;
@@ -121,7 +123,16 @@ type AgentChatAction =
   // hook 侧判定时机（防抖/是否新发送），落地交给纯 helper，与上面同范式。
   | { type: "zombie-resurrect" };
 
+function capRuntimeChatItems(state: AgentChatState): AgentChatState {
+  if (state.items.length <= MAX_RUNTIME_CHAT_ITEMS) return state;
+  return { ...state, items: state.items.slice(-MAX_RUNTIME_CHAT_ITEMS) };
+}
+
 function chatReducer(state: AgentChatState, action: AgentChatAction): AgentChatState {
+  return capRuntimeChatItems(reduceAgentChat(state, action));
+}
+
+function reduceAgentChat(state: AgentChatState, action: AgentChatAction): AgentChatState {
   // 网关事件都有 name，本端合成 action 用 type —— 用 in 判别，两边互不干扰。
   if ("name" in action) {
     return agentChatReducer(state, action);

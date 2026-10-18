@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { MOCK_MODE, mockGetSelf } from "@/lib/mock";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
 import { sanitizeUpstreamMessage } from "@/lib/proxy";
-import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
+import { isSessionTokenRevoked, lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 import { ensureWelcomeGiftOnLogin } from "@/lib/welcome-gift-login";
 import {
   WELCOME_GIFT_IMAGE_COUNT,
@@ -183,6 +183,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "未授权" }, { status: 401 });
   }
   const token = authHeader.slice(7);
+  if (await isSessionTokenRevoked(token)) {
+    return NextResponse.json({ success: false, message: "未授权" }, { status: 401 });
+  }
 
   // ── Mock mode ──────────────────────────────────────────────────────────────
   if (MOCK_MODE) {

@@ -122,19 +122,23 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
-    // dmc（dmc.cc，2026-10-13 暴君指定为影片**首发上游**）：与 metaso 同形的
-    // MiniMax 官方协议（POST {base}/v2/video_generation 建任务、GET
-    // {base}/v2/query/video_generation/{id} 轮询），见 dmc-upstream.ts。上游只出
-    // 768P、整数 1–15 秒，模型名固定 MiniMax-H3（GET /v1/models 2026-10-13 实查：
-    // 仅 MiniMax-H3 一条）。
+    // dmc（dmc.cc，2026-10-13 暴君指定为影片**首发上游**；2026-10-18 上游改址
+    // api.ll2.cn）：与 metaso 同形的 MiniMax 官方协议（POST {base}/v2/video_generation
+    // 建任务、GET {base}/v2/query/video_generation/{id} 轮询），见 dmc-upstream.ts。
+    // 上游只出 768P、整数 1–15 秒，模型名固定 MiniMax-H3。
     //
-    // 上游单价（GET https://dmc.cc/api/pricing 2026-10-13 免登入唯读实查）：
-    //   model_name=MiniMax-H3, quota_type=1, model_price=0.014706（USD/s；
-    //   站点 /api/status usd_exchange_rate=6.8 ⇒ ¥0.10/秒，**按秒计价**，与
-    //   miaowu 的按次固定价不同型）；billing_usage_schema.seconds 与
-    //   billing_usage_examples（768P 5s/10s/15s）确认按秒计。
-    // 实单对帐（2×5s 文生视频，2026-10-13）：/v1/dashboard/billing/usage
-    //   total_usage=100.0008 分 = ¥1.000008 ≈ ¥0.10/s × 10s，与核价一致。
+    // DMC_BASE_URL 必须填**根路径** `https://api.ll2.cn`，不可带 `/v1`：任务接口
+    // 不在 /v1 下（2026-10-18 唯读实查：GET /v1/v2/query/video_generation/x →
+    // 404 "Invalid URL"；GET /v2/query/video_generation/x → 404 "Task not found"
+    // 即路由存在；POST /v2/video_generation {} → 400 "model is required"）。
+    // ll2 的 `/v1` 只是 OpenAI 兼容面（/v1/models 可见 MiniMax-H3）。
+    //
+    // 上游单价（GET https://api.ll2.cn/api/pricing 2026-10-18 唯读实查）：
+    //   model_name=MiniMax-H3, quota_type=1, billing_mode=tiered_expr,
+    //   billing_expr=tier("768P", seconds × 0.007353)（USD/s；站点
+    //   /api/status usd_exchange_rate=6.8 ⇒ ¥0.05/秒）。
+    // 旧站 dmc.cc 同 schema model_price=0.014706 USD/s（¥0.10/s，2026-10-13
+    //   2×5s 实单对帐 100.0008 分 = ¥1.000008 一致）——ll2 价为其一半。
     label: "dmc",
     baseUrlEnv: "DMC_BASE_URL",
     apiKeyEnv: "DMC_API_KEY",
@@ -144,7 +148,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     chatImageModels: [],
     adapterType: "dmc",
     claims: [
-      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.1 }, priceSource: "GET https://dmc.cc/api/pricing 2026-10-13 (quota_type=1, model_price=0.014706 USD/s × usd_exchange_rate=6.8 = ¥0.10/s)；实单对帐 2×5s → /v1/dashboard/billing/usage total_usage=100.0008分 = ¥1.000008" },
+      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.05 }, priceSource: "GET https://api.ll2.cn/api/pricing 2026-10-18 (H3 768P: seconds × 0.007353 USD/s × usd_exchange_rate=6.8 = ¥0.05/s)；auto-hd 超分的 1080p/2k/4k 档待 upstream 开通后另计（2026-10-18 实测无 channel）" },
     ],
   },
 

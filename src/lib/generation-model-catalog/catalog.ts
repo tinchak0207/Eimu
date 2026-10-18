@@ -946,6 +946,10 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
   },
 };
 
+// lipsync / avatar 无供给适配器（registry 只有 harness_tts）。价格栏保留，只标不可用。
+Object.assign(GENERATION_MODEL_CATALOG[AVATAR_1_MODEL_ID], { available: false, enabled: false });
+Object.assign(GENERATION_MODEL_CATALOG[LIPSYNC_1_MODEL_ID], { available: false, enabled: false });
+
 // 模型卡三字段（吞并决策清单主线四首件）：知识数据独立成档（knowledge.ts，纯加法、
 // 可单测），这里在目录初始化时一次性挂到对应条目上。pricing 覆写走浅合并（{...base}），
 // knowledge 字段天然在覆写后存活，下游一律经 generationModel()/modelKnowledge() 读取。

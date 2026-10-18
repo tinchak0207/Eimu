@@ -4,13 +4,21 @@
 // 每次写入落到新路径 + 修剪旧世代（避免 Blob cacheControlMaxAge 60s 下限造成
 // 「刚存读不到」）、单用户写入串行（write queue）、无 Blob 时记忆体降级。
 // 冷启动量小（每用户上限 100 张卡），不建 SQL/新基建。
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { normalizeCharacterCard } from "./character-cards";
-import type { CharacterCard } from "./character-cards";
+import type { CharacterCard, CharacterCardDisguise, CharacterCardReferenceImage } from "./character-cards";
 
 const CARD_SCHEMA_VERSION = 1;
+const MAX_REFERENCE_DATA_URL_BYTES = 4 * 1024 * 1024;
+
+export class CharacterCardPersistError extends Error {
+  constructor(message = "参考图无法转存，未保存角色卡。") {
+    super(message);
+    this.name = "CharacterCardPersistError";
+  }
+}
 const INDEX_GENERATIONS_KEPT = 2;
 /** 每用户卡片上限（写入时截尾；REQ-B2b 挂用建副本前先验容量，超限诚实拒绝而非静默丢卡）。 */
 export const MAX_CARDS_PER_USER = 100;
@@ -89,8 +97,96 @@ async function readCards(userId: number): Promise<CharacterCard[]> {
   return [...cards];
 }
 
+function sniffImageMime(buffer: Buffer): { mimeType: string; extension: string } | null {
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return { mimeType: "image/png", extension: "png" };
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { mimeType: "image/jpeg", extension: "jpg" };
+  }
+  if (buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") {
+    return { mimeType: "image/webp", extension: "webp" };
+  }
+  return null;
+}
+
+async function materializeReferenceUrl(userId: number, cardId: string, slot: string, url: string): Promise<string> {
+  if (!url.startsWith("data:image/")) return url;
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(url);
+  if (!match) throw new CharacterCardPersistError();
+  const buffer = Buffer.from(match[2], "base64");
+  if (buffer.length === 0 || buffer.length > MAX_REFERENCE_DATA_URL_BYTES) throw new CharacterCardPersistError();
+  const sniffed = sniffImageMime(buffer);
+  if (!sniffed) throw new CharacterCardPersistError();
+  if (!ensureBlobBackendWritable("character-card-store.reference")) throw new CharacterCardPersistError();
+  const digest = createHash("sha256").update(`${userId}|${cardId}|${slot}|`).update(buffer).digest("hex");
+  const pathname = `${userPrefix(userId)}/refs/${digest}.${sniffed.extension}`;
+  try {
+    const blob = await put(pathname, buffer, {
+      access: "public",
+      contentType: sniffed.mimeType,
+      cacheControlMaxAge: 31_536_000,
+    });
+    if (!blob.url || blob.url.startsWith("data:")) throw new CharacterCardPersistError();
+    return blob.url;
+  } catch (error) {
+    if (error instanceof CharacterCardPersistError) throw error;
+    throw new CharacterCardPersistError();
+  }
+}
+
+async function materializeReferences(
+  userId: number,
+  cardId: string,
+  slot: string,
+  references: CharacterCardReferenceImage[],
+): Promise<CharacterCardReferenceImage[]> {
+  const next: CharacterCardReferenceImage[] = [];
+  for (let index = 0; index < references.length; index += 1) {
+    const reference = references[index];
+    next.push({
+      ...reference,
+      url: await materializeReferenceUrl(userId, cardId, `${slot}-${index}`, reference.url),
+    });
+  }
+  return next;
+}
+
+async function materializeCard(userId: number, card: CharacterCard): Promise<CharacterCard> {
+  const references = await materializeReferences(userId, card.id, "ref", card.references);
+  let disguises: CharacterCardDisguise[] | undefined;
+  if (card.disguises?.length) {
+    disguises = [];
+    for (let index = 0; index < card.disguises.length; index += 1) {
+      const disguise = card.disguises[index];
+      disguises.push({
+        ...disguise,
+        references: await materializeReferences(userId, card.id, `disguise-${index}`, disguise.references),
+      });
+    }
+  }
+  const stored: CharacterCard = disguises ? { ...card, references, disguises } : { ...card, references };
+  if (JSON.stringify(stored).includes("data:image/")) throw new CharacterCardPersistError();
+  return stored;
+}
+
+function dropInlineImages(cards: CharacterCard[]): CharacterCard[] {
+  const cleanUrl = (url: string) => (url.startsWith("data:image/") ? "" : url);
+  return cards.map((card) => {
+    const references = card.references.map((reference) => ({ ...reference, url: cleanUrl(reference.url) }));
+    const disguises = card.disguises?.map((disguise) => ({
+      ...disguise,
+      prompt: disguise.prompt?.includes("data:image/") ? "" : disguise.prompt,
+      references: disguise.references.map((reference) => ({ ...reference, url: cleanUrl(reference.url) })),
+    }));
+    const prompt = card.prompt.includes("data:image/") ? "" : card.prompt;
+    return disguises ? { ...card, prompt, references, disguises } : { ...card, prompt, references };
+  });
+}
+
 async function writeCards(userId: number, cards: CharacterCard[]): Promise<void> {
-  const capped = [...cards].slice(0, MAX_CARDS_PER_USER);
+  const capped = dropInlineImages(cards).slice(0, MAX_CARDS_PER_USER);
+  if (JSON.stringify(capped).includes("data:image/")) throw new CharacterCardPersistError();
   if (!ensureBlobBackendWritable("character-card-store.writeCards")) {
     memoryStore.set(userId, capped);
     indexCache.delete(userId);
@@ -121,14 +217,16 @@ export async function listCharacterCards(userId: number): Promise<CharacterCard[
   return cards.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
-/** 储存/覆盖一张卡（upsert by id）。非法卡静默丢弃。 */
-export async function saveCharacterCard(userId: number, card: CharacterCard): Promise<void> {
+/** 储存/覆盖一张卡（upsert by id）。非法卡静默丢弃。data:image 必须先转成对象存储 URL。 */
+export async function saveCharacterCard(userId: number, card: CharacterCard): Promise<CharacterCard | null> {
   const normalized = normalizeCharacterCard(card);
-  if (!normalized) return;
-  await enqueue(userId, async () => {
+  if (!normalized) return null;
+  return enqueue(userId, async () => {
+    const stored = await materializeCard(userId, normalized);
     const current = await readCards(userId);
-    const next = [normalized, ...current.filter((c) => c.id !== normalized.id)];
+    const next = [stored, ...current.filter((c) => c.id !== stored.id)];
     await writeCards(userId, next.slice(0, MAX_CARDS_PER_USER));
+    return stored;
   });
 }
 

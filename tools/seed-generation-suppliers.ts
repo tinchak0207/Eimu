@@ -350,20 +350,14 @@ async function retireUnclaimedCapabilities(
 }
 
 /**
- * 渠道级并发上限（supplier 与 default account 共用）。
- *
- * seed 在每次 worker 重启都会把 DB 里的 supplier/account.concurrency_limit
- * 重置成这里的返回值（ON CONFLICT DO UPDATE concurrency_limit = EXCLUDED...）
- * —— 2026-08-29 实录：直接 UPDATE DB 放开 metaso 到 6，worker 一重启就被冲回 1，
- * 突发视频单全部卡在 capacity_saturated 0/1。要调并发先改这张表再部署。
- *
- * metaso（第三方 metaso API，稳定）暴君裁定放 6；pixai（自营账号池）上限 2；
- * 其余渠道维持 env 默认（1）。capability 层的 concurrency_limit 是粘性列
- * （seed 只在新建 capability 时写），不受此重置影响。
+ * 仅新插入的 supplier / default account 写入并发。
+ * 已存在行不在 ON CONFLICT 里覆盖 concurrency_limit。
+ * dmc、xiaoyxiao、gway、miaowuai 新行默认 4。metaso 不再单独设 6。
+ * pixai 新行上限 2；其余渠道维持 env 默认（1）。
  */
 function channelConcurrency(label: string): number {
   if (label === NEWAPI_ROUTE_LABEL) return newApiConcurrency();
-  if (label === "metaso") return 6;
+  if (label === "dmc" || label === "xiaoyxiao" || label === "gway" || label === "miaowuai") return 4;
   if (label === "pixai") return 2;
   return Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1));
 }
@@ -435,7 +429,7 @@ async function main() {
         label = EXCLUDED.label, adapter_type = EXCLUDED.adapter_type, supply_tier = EXCLUDED.supply_tier,
         failure_domain = EXCLUDED.failure_domain, base_url = EXCLUDED.base_url,
         credential_ref = EXCLUDED.credential_ref, enabled = EXCLUDED.enabled,
-        priority = EXCLUDED.priority, concurrency_limit = EXCLUDED.concurrency_limit,
+        priority = EXCLUDED.priority,
         configuration_json = EXCLUDED.configuration_json, config_version = supplier.config_version + 1,
         updated_at = now()
     `;
@@ -466,7 +460,7 @@ async function main() {
       )
       ON CONFLICT (id) DO UPDATE SET
         label = EXCLUDED.label, credential_ref = EXCLUDED.credential_ref, enabled = EXCLUDED.enabled,
-        concurrency_limit = EXCLUDED.concurrency_limit, configuration_json = EXCLUDED.configuration_json,
+        configuration_json = EXCLUDED.configuration_json,
         updated_at = now()
     `;
     const capabilities = channelCapabilities(channel.label);

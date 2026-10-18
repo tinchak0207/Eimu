@@ -255,7 +255,7 @@ export function HistoryLightbox({
         onClick={(event) => event.stopPropagation()}
       >
         {/* 顶部工具栏 */}
-        <header className="flex shrink-0 items-center justify-between gap-3 px-4 pt-4 sm:px-6">
+        <header className="flex shrink-0 items-center justify-between gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
           <div className="min-w-0 flex-1">
             <p id={titleId} className="truncate text-ios-subhead font-semibold text-[rgba(255,255,255,0.92)]">
               {promptText || "生成记录"}
@@ -464,7 +464,7 @@ export function HistoryLightbox({
         {/* 胶片条 */}
         <nav
           aria-label="历史图片列表"
-          className="hist-filmstrip flex shrink-0 gap-2 overflow-x-auto px-4 pb-4 pt-2 sm:px-6"
+          className="hist-filmstrip flex shrink-0 gap-2 overflow-x-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
         >
           {entries.map((item, itemIndex) => {
             const thumb = entrySrc(item);

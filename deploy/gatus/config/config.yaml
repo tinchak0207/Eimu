@@ -10,31 +10,37 @@ ui:
   default-sort-by: group
 
 endpoints:
-  - name: Gemini 3.1 Flash Image - 1K generation
+  # /v1/images/generations 是异步接口，POST 回 202 不代表 worker 或数据库活着。
+  # 改打控制面就绪探针。告警外发未配置密钥，见文件末尾注释，不打开。
+  - name: 控制面就绪
     group: Production
-    url: https://image.tinchak0207.xyz/v1/images/generations
-    method: POST
-    interval: 2h
-    headers:
-      Authorization: "Bearer ${IMAGE_API_KEY}"
-      Content-Type: application/json
-    body: |
-      {"model":"gemini-3.1-flash-image","prompt":"Uptime monitor probe. Create a single minimal blue square on a white background.","size":"1024x1024","n":1,"routing_hint":"hub"}
+    url: https://store.tinchak0207.xyz/image-control/api/readyz
+    method: GET
+    interval: 15m
     client:
-      timeout: 10m
+      timeout: 30s
     conditions:
-      # production 的 /v1/images/generations 是非同步 API：POST 一律回 202 + task body。
-      # 探测必须验证「202 + task id 存在」，而不是宽松的 2xx——否则卡 202 也算成功。
-      # routing_hint=hub → 调度器固定走 hublinuxdo 渠道。
-      - "[STATUS] == 202"
-      - "[BODY].id != \"\""
+      - "[STATUS] == 200"
+      - "[BODY].ok == true"
     ui:
       hide-hostname: true
       hide-port: true
       hide-errors: false
-      badge:
-        response-time:
-          thresholds: [10000, 30000, 60000, 120000, 300000]
+
+  - name: Agent 网关健康
+    group: Production
+    url: https://store.tinchak0207.xyz/agent/healthz
+    method: GET
+    interval: 15m
+    client:
+      timeout: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].ok == true"
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false
 
   # 风控绊线（金丝雀／异常注册）：此前只存在于 VPS `/opt/image-gatus/config/config.yaml`，
   # repo 没有这一段 ⇒ 拿 repo 单向覆盖会把它整条冲掉。2026-10-04 依「双向 diff 取并集」
@@ -70,3 +76,9 @@ endpoints:
       hide-hostname: true
       hide-port: true
       hide-errors: false
+
+# 告警密钥未配置，外发保持关闭。不要在仓库里写 Telegram token。
+# alerting:
+#   telegram:
+#     token: "${TELEGRAM_BOT_TOKEN}"
+#     id: "${TELEGRAM_CHAT_ID}"

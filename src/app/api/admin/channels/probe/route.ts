@@ -13,6 +13,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
+function redactSecrets(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{4,}/gi, "[redacted]")
+    .replace(/bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/key=[^\s&"'<>]+/gi, "key=[redacted]");
+}
+
 const PROBEABLE_ENV_CHANNEL_IDS = new Set(["env:sub2api", "env:primary", "env:fallback"]);
 const UNPROBEABLE_CHANNEL_IDS = new Set<string>([]);
 
@@ -60,7 +67,7 @@ export async function POST(req: NextRequest) {
     if (PROBEABLE_ENV_CHANNEL_IDS.has(channelId)) {
       const channel = describeEnvChannels(process.env).find((item) => item.id === channelId);
       if (!channel?.endpoint) {
-        return NextResponse.json({ ok: false, ms: 0, note: "渠道未配置，无法探测。" });
+        return NextResponse.json({ ok: false, ms: 0, note: "渠道未配置，无法探测。" }, { status: 503 });
       }
       return NextResponse.json(await probeModelsEndpoint(channel.endpoint));
     }
@@ -79,7 +86,8 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === "UNAUTHORIZED") {
       return NextResponse.json({ success: false, message: "请先登录管理员后台。" }, { status: 401 });
     }
-    const message = error instanceof Error ? error.message : "探测失败。";
-    return NextResponse.json({ success: false, message }, { status: 500 });
+    const raw = error instanceof Error ? error.message : "探测失败。";
+    console.error("[admin-channels-probe]", redactSecrets(raw));
+    return NextResponse.json({ success: false, message: "探测失败。" }, { status: 500 });
   }
 }

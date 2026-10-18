@@ -53,8 +53,28 @@ export async function GET(req: NextRequest) {
   try {
     upstream = await fetch(target, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: "follow",
+      redirect: "manual",
     });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get("location");
+      if (!location) return fail(400, "重定向地址缺失", "invalid_url");
+      let next: URL;
+      try {
+        next = new URL(location, target);
+      } catch {
+        return fail(400, "重定向地址不合法", "invalid_url");
+      }
+      if (next.protocol !== "https:" || isForbiddenHost(next.hostname)) {
+        return fail(400, "重定向目标不是 https 公网图片地址", "invalid_url");
+      }
+      upstream = await fetch(next, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        redirect: "manual",
+      });
+      if (upstream.status >= 300 && upstream.status < 400) {
+        return fail(400, "重定向目标不合法", "invalid_url");
+      }
+    }
   } catch {
     return fail(502, "上游图片获取失败", "upstream_failed");
   }

@@ -683,6 +683,9 @@ export function useCanvasChat(
     setSaveState,
     setLoading,
     setActiveCanvasId,
+    onRemoteSnapshot: (snapshot) => {
+      restoreAgentSnapshot(snapshot as Parameters<typeof restoreAgentSnapshot>[0]);
+    },
   });
 
   // ─────────────────────── P2-A：聊天内多画布（切换 / 新建 / 清单）

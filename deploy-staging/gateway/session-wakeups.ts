@@ -282,19 +282,21 @@ export function startWakeupTicker(opts: { intervalMs?: number; wake: WakeupFn })
     if (ticking) return
     ticking = true
     try {
-      for (const row of dueWakeups(Date.now())) {
+      const due = dueWakeups(Date.now())
+      const WAKEUP_CONCURRENCY = 5
+      const fireOne = async (row: WakeupRow): Promise<void> => {
         // W2：认领后立刻重查，stop 可能在 dueWakeups 与认领之间发生。
         const claimed = db()
           .query("UPDATE session_wakeups SET status='firing',pid=? WHERE id=? AND status='scheduled'")
           .run(process.pid, row.id)
-        if (Number(claimed.changes) !== 1) continue
+        if (Number(claimed.changes) !== 1) return
         const fresh = db()
           .query("SELECT status,prompt FROM session_wakeups WHERE id=?")
           .get(row.id) as { status: string; prompt: string } | null
         if (!fresh || fresh.status !== "firing" || cancelledInFlight.has(row.id)) {
           markFired(row.id, "cancelled")
           cancelledInFlight.delete(row.id)
-          continue
+          return
         }
         try {
           await opts.wake(row.session_id, fresh.prompt)
@@ -327,6 +329,9 @@ export function startWakeupTicker(opts: { intervalMs?: number; wake: WakeupFn })
         } finally {
           cancelledInFlight.delete(row.id)
         }
+      }
+      for (let i = 0; i < due.length; i += WAKEUP_CONCURRENCY) {
+        await Promise.allSettled(due.slice(i, i + WAKEUP_CONCURRENCY).map((row) => fireOne(row)))
       }
       tickCount += 1
       if (tickCount % WAKEUP_PRUNE_EVERY_TICKS === 0) pruneWakeups()

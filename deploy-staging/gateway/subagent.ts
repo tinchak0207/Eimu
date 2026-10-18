@@ -708,6 +708,30 @@ const criticDispatchedByParent = new Map<string, number>()
 const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string; contractOk?: boolean }>>()
 // 本会话是否已用掉 machine critic pass（内存镜像；权威在 persistence.critic_passes）。
 const criticPassUsed = new Set<string>()
+const DURABLE_TERMINAL_RETRY_CAP = 64
+const durableTerminalRetry = new Set<string>()
+
+function noteDurableTerminalRetry(runId: string): void {
+  if (!runId || durableTerminalRetry.has(runId)) return
+  if (durableTerminalRetry.size >= DURABLE_TERMINAL_RETRY_CAP) {
+    const oldest = durableTerminalRetry.values().next().value
+    if (oldest !== undefined) durableTerminalRetry.delete(oldest)
+  }
+  durableTerminalRetry.add(runId)
+}
+
+/** parseToolOutput 的窄返回值没有 shots/result/images；缺了就当空，不把整包当镜头。 */
+function toolOutputMediaBag(output: unknown): { shots: unknown[]; images: unknown[]; results: unknown[]; result?: unknown; task_id?: string } {
+  if (!output || typeof output !== "object") return { shots: [], images: [], results: [] }
+  const bag = output as { shots?: unknown; images?: unknown; results?: unknown; result?: unknown; task_id?: unknown }
+  return {
+    shots: Array.isArray(bag.shots) ? bag.shots : [],
+    images: Array.isArray(bag.images) ? bag.images : [],
+    results: Array.isArray(bag.results) ? bag.results : [],
+    ...(bag.result && typeof bag.result === "object" ? { result: bag.result } : {}),
+    ...(typeof bag.task_id === "string" ? { task_id: bag.task_id } : {}),
+  }
+}
 const CRITIC_PENDING_CAP = 16
 // 修 1（2026-10-02）：被并发上限挤掉的 critic 待审目标入队（per-parent）。
 // 此前直接丢弃 → critic 从未跑；槽位释放时由 maybeDrainCriticQueue 补跑。有界。
@@ -1458,13 +1482,15 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
         if (part?.type !== "tool" || part.state?.status !== "completed") continue
         const output = parseToolOutput(part.state.output)
         if (output?.ok !== true) continue
+        const mediaBag = toolOutputMediaBag(output)
         if (msg?.info?.role === "assistant" && ["image_generate", "last_frame_video_chain", "video_generate"].includes(part.tool)) {
           const input = part.state.input ?? {}
           let shots: any[] = []
           try { shots = typeof input.shots === "string" ? JSON.parse(input.shots) : [] } catch { /* unavailable stays unknown */ }
-          for (const [index, item] of (Array.isArray(output.shots) ? output.shots : [output]).entries()) {
-            const submitted = item?.submit_body ?? shots[index] ?? input
-            const taskId = item?.job_id ?? item?.task_id ?? output.task_id
+          for (const [index, item] of mediaBag.shots.entries()) {
+            const shot = item as { submit_body?: any; job_id?: unknown; task_id?: unknown }
+            const submitted = shot?.submit_body ?? shots[index] ?? input
+            const taskId = shot?.job_id ?? shot?.task_id ?? mediaBag.task_id
             const urls = collectToolOutputMediaUrls(item).video.map((entry) => entry.url)
             if (taskId) urls.push(...run.artifacts.filter((entry) => entry.task_id === taskId).map((entry) => entry.url))
             for (const artifact of new Set(urls)) mediaIntent.push({ artifact,
@@ -1477,9 +1503,10 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
         }
         const media = collectToolOutputMediaUrls(output)
         artifacts.push(...media.audio.map((a) => a.url), ...media.video.map((a) => a.url))
-        for (const item of [output, output.result, ...(Array.isArray(output.images) ? output.images : []), ...(Array.isArray(output.results) ? output.results : [])]) {
+        for (const item of [output, mediaBag.result, ...mediaBag.images, ...mediaBag.results]) {
           if (item && typeof item === "object") for (const key of ["url", "image_url", "output_url", "file_url"]) {
-            if (typeof item[key] === "string" && /^https?:\/\//.test(item[key])) artifacts.push(item[key])
+            const value = (item as Record<string, unknown>)[key]
+            if (typeof value === "string" && /^https?:\/\//.test(value)) artifacts.push(value)
           }
         }
       }
@@ -1541,7 +1568,10 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     ...(run.variantApplied !== undefined ? { variant_applied: run.variantApplied } : {}),
   }
   try { saveDurableSubagentRun({ ...run, fullText }, durableResult) }
-  catch (error) { run.status = "running"; run.resumeUntil = undefined; run.recoveredWatcher = true; console.error("[gateway] durable subagent terminal deferred:", run.id); return }
+  catch (saveError) {
+    noteDurableTerminalRetry(run.id)
+    console.error("[gateway] durable subagent terminal save failed; releasing slot:", run.id, saveError)
+  }
   removeFromRegistries(run)
   // CC 2.1.302 SubagentStop：终态（ok/error）唯一收尾点，fire-and-forget。
   fireSubagentHook("SubagentStop", run, {
@@ -3106,6 +3136,14 @@ export function forgetCriticPassState(parentId: string): void {
   criticPassUsed.delete(parentId)
   criticRetryQueue.delete(parentId)
 }
+
+/** 会话拆除时按 sessionId 清共享工作区与 critic 已用标记。idle reap 也要清，避免 Map 无界。 */
+export function forgetSessionWorkspaceState(sessionId: string): void {
+  if (!sessionId) return
+  sessionScratchpads.delete(sessionId)
+  sessionArtifactRegistries.delete(sessionId)
+  criticPassUsed.delete(sessionId)
+}
 /**
  * 刀 1（2026-09-19）：待审 Expert 交付快照（Jev 空壳栏初筛喂料）。
  * 只读镜像——不清空、不影响 machine critic pass 的消耗语义（浅拷贝阵列，
@@ -3578,7 +3616,7 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
       code: "concurrency_limit",
       error: SUBAGENT_BUSY_MESSAGE,
       running: runningList.map((r) => ({ id: r.id, label: r.label, elapsed_ms: Date.now() - r.startedAt })),
-    })
+    }, { status: 409 })
   }
 
   // Y4（2026-10-14）兄弟名册：把「本父会话当前存在哪些子代理」作为任务书头部事实块注入。

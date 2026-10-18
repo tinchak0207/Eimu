@@ -224,7 +224,7 @@ test("(a) 无 token 映射 + user 额度足 → 放行（0 额快车道，不再
       { bizKeyId: "key-without-mapping", billingUserId: 87, baseBillingAmount: 250_000 },
       { fetchUser: userReader(582_377_145, calls), sql },
     );
-    assert.deepEqual(decision, { ok: true, billingAmount: 0 }, "无映射的 key 必须照常走 user 额度并放行");
+    assert.deepEqual(decision, { ok: true, billingAmount: 250_000 }, "无映射的 key 必须照常走 user 额度并放行，金额等于应预扣");
     assert.deepEqual(calls, [87], "必须真的读了 user 额度（旧行为是不发请求直接 503）");
     assert.equal(queries.length, 1, "预检只剩成员名册一跳");
     assert.ok(queries[0].includes("team_member_quota"));
@@ -278,7 +278,7 @@ test("(c) 有映射的 key 行为逐位不变（旧三态回归：放行/402/回
     const unmapped = await run([]);
     const mapped = await run([LEGACY_TOKEN_MAPPING_ROW]);
 
-    assert.deepEqual(unmapped.pass, { ok: true, billingAmount: 0 });
+    assert.deepEqual(unmapped.pass, { ok: true, billingAmount: 250_000 });
     assert.deepEqual(mapped.pass, unmapped.pass, "有映射 vs 无映射：放行面逐位相等");
     assert.deepEqual(mapped.short, unmapped.short, "有映射 vs 无映射：402 面逐位相等");
     assert.deepEqual(mapped.short.ok === false ? mapped.short.message : "", BALANCE_MESSAGE);
@@ -290,7 +290,7 @@ test("(c) 有映射的 key 行为逐位不变（旧三态回归：放行/402/回
   });
 });
 
-test("gate ON with sufficient quota skips the blocking reserve (billingAmount = 0)", async (t) => {
+test("gate ON with sufficient quota returns the reserve amount (not 0)", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const { sql, queries } = mockPrecheckSql();
@@ -298,7 +298,7 @@ test("gate ON with sufficient quota skips the blocking reserve (billingAmount = 
       { bizKeyId: "key-1", billingUserId: 87, baseBillingAmount: 250_000 },
       { fetchUser: userReader(582_377_145), sql },
     );
-    assert.deepEqual(decision, { ok: true, billingAmount: 0 });
+    assert.deepEqual(decision, { ok: true, billingAmount: 250_000 });
     // 一跳：成员名册（未登记成员 = 不受成员配额执法）；映射表已不再被查。
     assert.equal(queries.length, 1);
     assert.ok(queries[0].includes("team_member_quota"));
@@ -465,7 +465,7 @@ test("先判成员额度再走既有计费户检查：次序可证，且计费�
   });
 });
 
-test("成员额度与计费户都充足 → 0 额快车道（billingAmount = 0）", async (t) => {
+test("成员额度与计费户都充足 → 回传应预扣金额（不是 0）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const { sql } = mockPrecheckSql([memberRow()]);
@@ -477,7 +477,7 @@ test("成员额度与计费户都充足 → 0 额快车道（billingAmount = 0�
         readMemberQuota: memberQuotaReader({ granted: 250_000_000, used: 0, remaining: 250_000_000 }),
       },
     );
-    assert.deepEqual(decision, { ok: true, billingAmount: 0 });
+    assert.deepEqual(decision, { ok: true, billingAmount: 250_000 });
   });
 });
 
@@ -564,7 +564,7 @@ test("未登记为成员的 key 完全不读成员额度（零回归：行为与
         readMemberQuota: memberQuotaReader({ granted: 0, used: 0, remaining: 0 }, memberCalls),
       },
     );
-    assert.deepEqual(decision, { ok: true, billingAmount: 0 });
+    assert.deepEqual(decision, { ok: true, billingAmount: 250_000 });
     assert.deepEqual(memberCalls, [], "非成员 key 不得新增任何成员额度读取");
   });
 });

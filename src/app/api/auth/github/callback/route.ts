@@ -2,16 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/new-api-auth-server";
 import { signEmuOauthCode } from "@/lib/emu-oauth";
 import {
-  buildGitHubEmail,
   buildGitHubPassword,
+  buildGitHubPasswordLegacy,
   buildGitHubUsername,
   extractTicketFromState,
+  unpackHandoffTicket,
   type GitHubProfile,
 } from "@/lib/github-auth";
 import { deliverHandoff } from "@/lib/pwa-handoff";
-import { ensureGatewayUserForOAuth } from "@/lib/gateway-admin";
-import { FIRST_TOUCH_COOKIE, decodeFirstTouchCookieValue, type GitHubEmailEntry } from "@/lib/first-touch-attribution";
-import { buildOAuthAttributionInput, recordUserAttributionViaRelay } from "@/lib/user-attribution";
+import { ensureGatewayUserForOAuth, findGatewayUserByUsername, resetGatewayUserPassword } from "@/lib/gateway-admin";
+import { FIRST_TOUCH_COOKIE, INVITE_COOKIE, decodeFirstTouchCookieValue, looksLikeInviteCode, type GitHubEmailEntry } from "@/lib/first-touch-attribution";
+import { buildOAuthAttributionInput, recordInviteViaRelay, recordUserAttributionViaRelay } from "@/lib/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -80,14 +81,12 @@ async function fetchGithubEmails(accessToken: string): Promise<GitHubEmailEntry[
 
 async function registerGithubUser(profile: GitHubProfile, password: string) {
   const username = buildGitHubUsername(profile);
-  const email = buildGitHubEmail(profile);
   try {
-    // 已存在（老用户）由 ensureGatewayUserForOAuth 内部按复用吸收，不抛。
+    // 已存在（老用户）由 ensureGatewayUserForOAuth 内部按用户名 github_<id> 复用，不抛。
     await ensureGatewayUserForOAuth({ username, password });
   } catch (error) {
     console.error("[auth/github/register]", {
       username,
-      email,
       message: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -102,7 +101,8 @@ export async function GET(req: NextRequest) {
   // PWA 跨浏览器交接分支：state 内嵌 handoff ticket（常用浏览器打开授权链
   // 接，无本站 state cookie）。ticket 是 128-bit 随机 hex + 一次性消费，足以
   // 替代 state cookie 的 CSRF 防护；其余（exchange/注册/login）全走原路径。
-  const handoffTicket = state ? extractTicketFromState(state) : null;
+  const handoff = unpackHandoffTicket(state ? extractTicketFromState(state) : null);
+  const handoffTicket = handoff.ticket;
   if (handoffTicket) {
     // 落进下方共享流程；仅在 state 校验与最终 redirect 两处分叉。
     // handoff 链路同样必须有 code：GitHub 只在成功授权时回跳。
@@ -135,7 +135,19 @@ export async function GET(req: NextRequest) {
       throw new Error(`github_register:${error instanceof Error ? error.message : "unknown"}`);
     }
 
-    const loginResult = await loginViaNewApi(getGatewayBaseUrl(), username, password);
+    let loginResult = await loginViaNewApi(getGatewayBaseUrl(), username, password);
+    if (!loginResult.ok) {
+      const legacy = buildGitHubPasswordLegacy(profile, passwordSeed);
+      if (legacy !== password) {
+        loginResult = await loginViaNewApi(getGatewayBaseUrl(), username, legacy);
+      }
+    }
+    if (!loginResult.ok) {
+      const existing = await findGatewayUserByUsername(username).catch(() => null);
+      if (existing && (await resetGatewayUserPassword(existing.id, password))) {
+        loginResult = await loginViaNewApi(getGatewayBaseUrl(), username, password);
+      }
+    }
     if (!loginResult.ok) {
       console.error("[auth/github/login]", { username, status: loginResult.status, message: loginResult.message });
       throw new Error(`github_login:${loginResult.message || "unknown"}`);
@@ -159,11 +171,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const cookieInvite = req.cookies.get(INVITE_COOKIE)?.value;
+    const invite = looksLikeInviteCode(cookieInvite) ? cookieInvite : looksLikeInviteCode(handoff.invite) ? handoff.invite : null;
+    if (invite) {
+      await recordInviteViaRelay(loginResult.user.id, invite);
+    }
+    const handoffUser = invite ? { ...loginResult.user, eimu_invite: invite } : loginResult.user;
+
     // PWA 交接分支：把会话投递到 ticket（PWA 侧轮询 claim 领回）；投递失败
     // 不挡主流程——浏览器侧照常拿到 cookie。
     if (handoffTicket) {
       try {
-        await deliverHandoff(handoffTicket, loginResult.token, loginResult.user);
+        await deliverHandoff(handoffTicket, loginResult.token, handoffUser);
       } catch (error) {
         console.error("[auth/github/handoff-deliver]", error);
       }

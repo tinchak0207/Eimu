@@ -6,6 +6,7 @@ import { getStoredToken, getStoredUser, clearStoredToken, setStoredToken, syncSt
 import { fetchMe, logout as doLogout } from "@/lib/auth-client";
 import type { WelcomeGiftModal } from "@/lib/welcome-gift-modal";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
+import { bindCreativeProjectsAuth } from "@/hooks/use-creative-projects";
 
 interface AuthState {
   user: NewApiUser | null;
@@ -101,6 +102,11 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     setToken(null);
     setWelcomeGift(null);
   }, [localTestMode]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    bindCreativeProjectsAuth(user ? String(user.id) : null, token);
+  }, [isLoading, token, user]);
 
   useEffect(() => {
     // 水合成功标记：启动自愈脚本据此判断「页面是否真的活了」。

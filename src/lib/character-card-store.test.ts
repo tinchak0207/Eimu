@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   __resetCharacterCardStoreForTests,
+  CharacterCardPersistError,
   deleteCharacterCards,
   listCharacterCards,
   saveCharacterCard,
@@ -45,6 +46,17 @@ test("store（记忆体降级）：save upsert / list / delete 幂等", async ()
   assert.equal(deleted, 1);
   assert.equal((await listCharacterCards(1)).length, 1);
   assert.equal(await deleteCharacterCards(1, ["card-a"]), 0); // 再删 = 0
+});
+
+test("store：data:image 转存失败时拒绝且不入库", async () => {
+  __resetCharacterCardStoreForTests();
+  await assert.rejects(
+    () => saveCharacterCard(1, card("card-data", {
+      references: [{ url: "data:image/png;base64,aaaa", role: "character", name: "内嵌" }],
+    })),
+    CharacterCardPersistError,
+  );
+  assert.equal((await listCharacterCards(1)).length, 0);
 });
 
 test("store：非法卡静默丢弃（normalizeCharacterCard 收口）", async () => {

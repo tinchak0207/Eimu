@@ -1,6 +1,7 @@
 import {
   type NewApiUser,
   clearStoredToken,
+  getStoredToken,
   getStoredUser,
 } from "./new-api-client";
 import { parseWelcomeGiftModal, type WelcomeGiftModal } from "./welcome-gift-modal";
@@ -85,5 +86,16 @@ export async function ackWelcomeGiftModalSeen(token: string): Promise<boolean> {
 }
 
 export function logout(): void {
+  const token = getStoredToken();
+  const user = getStoredUser();
   clearStoredToken();
+  if (!token || typeof fetch === "undefined") return;
+  void fetch("/api/auth/logout", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(user?.id ? { "x-user-id": String(user.id) } : {}),
+    },
+    keepalive: true,
+  }).catch(() => undefined);
 }

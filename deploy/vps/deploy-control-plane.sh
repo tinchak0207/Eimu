@@ -43,7 +43,7 @@ NGINX_CTR="imagesite-nginx"
 # 只 reload 不 restart（2026-09-28 事故）：restart 会让 nginx 在启动时重新解析 conf 内所有上游，
 # 任一上游容器已被移除（当时是 adobe2api-plus-web）→ [emerg] host not found → 全站入口重启回圈 2m42s。
 # reload 同样重新解析上游 IP（控面重建后 IP 会变），但设定有错时 master 保留旧 worker 继续服务。
-PUBLIC_HEALTHZ="https://store.tinchak0207.xyz/image-control/api/healthz"
+PUBLIC_HEALTHZ="https://store.tinchak0207.xyz/image-control/api/readyz"
 SERVICES=(generation-api generation-worker)
 ROLLBACK_KEEP=3
 
@@ -276,11 +276,11 @@ postcheck() {
   fi
   out=""
   for i in $(seq 1 20); do
-    if out="$(rsh "sudo -n docker exec $API_CTR wget -S -O /dev/null http://127.0.0.1:3000/api/healthz 2>&1 | grep -m1 'HTTP/'")" \
+    if out="$(rsh "sudo -n docker exec $API_CTR wget -S -O /dev/null http://127.0.0.1:3000/api/readyz 2>&1 | grep -m1 'HTTP/'")" \
       && grep -q ' 200' <<<"$out"; then break; fi
     out="${out:-no response}"; sleep 3
   done
-  if grep -q ' 200' <<<"$out"; then log "OK   healthz ${out# *}"; else log "FAIL healthz：${out}"; ok=1; fi
+  if grep -q ' 200' <<<"$out"; then log "OK   readyz ${out# *}"; else log "FAIL readyz：${out}"; ok=1; fi
   # 控面自代理回圈探针（2026-10-08 事故）：src/middleware.ts 只要 GENERATION_CONTROL_PLANE_PROXY_ORIGIN
   # 非空就把 /api/v1/* 代回该 origin；若控面容器自己带着这个变数，origin 即本机 ⇒ 回圈 ⇒ nginx 回
   # 400 Request Header Or Cookie Too Large，全 B 端面不可用——而 healthz（不在代理路径表内）照样 200，

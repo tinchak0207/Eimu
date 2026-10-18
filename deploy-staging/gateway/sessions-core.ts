@@ -3,17 +3,17 @@ import { rm } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { initPersistence, saveSession, loadSessionById, loadSessionByOpencodeId, deleteSessionRow, hydrateRow } from "./persistence"
-import { forgetCriticPassState } from "./subagent"
+import { forgetCriticPassState, forgetSessionWorkspaceState } from "./subagent"
 import type { SessionState } from "./types-gateway.ts"
 import { OPENCODE_URL, UPLOADS_DIR } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { canvasStates } from "./canvas-cascade-state.ts"
 import { emitToSession, stripStaleTurnTextFromReplay, closeSessionStreams } from "./sse-core.ts"
 import { opencodeHeaders } from "./opencode-client.ts"
-import { sseTickets, SSE_TICKET_TTL_MS } from "./auth-gw.ts"
+import { sseTickets, SSE_TICKET_TTL_MS, pruneExpiringMap } from "./auth-gw.ts"
 import { armWatchdogTimer, armHeartbeatTimer, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat } from "./timers-gw.ts"
 import { personaModel } from "./model-registry.ts"
-import { workflowService, workflowOwnerBySession, workflowSnapshotFor, restoreWorkflowsFromSnapshot } from "./workflow-gw.ts"
+import { workflowService, workflowOwnerBySession, workflowSnapshotFor, restoreWorkflowsFromSnapshot, releaseWorkflowSession } from "./workflow-gw.ts"
 import { memoryRecallPrefetch, memoryRecallInflight } from "./memory-wiring.ts"
 import { rejectOpencodeQuestion } from "./questions-gw.ts"
 import { notify } from "./internal-waiters.ts"
@@ -27,6 +27,12 @@ import { recoverSteerCommandsOnRevive } from "./steer-ledger-gw.ts"
 // DB 只保存 gateway 自有的那部分状态（身分映射 / replayBuffer / 去重集合 / 注入标记）。
 initPersistence()
 export const sessions = new Map<string, SessionState>()
+
+const sessionTeardownHooks: Array<(sessionId: string) => void> = []
+
+export function registerSessionTeardownHook(fn: (sessionId: string) => void): void {
+  sessionTeardownHooks.push(fn)
+}
 
 // dirty 标记 + 防抖 flush：emitToSession 等高频变更只标记，每 3 秒统一落盘；
 // 建立/删除走同步写。重启最多丢 3 秒内的 replay 帧，讯息本身永远安全在 opencode。
@@ -316,6 +322,7 @@ export function getOwnedSession(key: string, id: string): SessionState | null {
 
 // Mint an SSE ticket for a session the caller already owns.
 export function issueSseTicket(key: string, sessionId: string): string {
+  pruneExpiringMap(sseTickets)
   const ticket = `st_${crypto.randomUUID().replace(/-/g, "")}`
   sseTickets.set(ticket, { sessionId, apiKey: key, expiresAt: Date.now() + SSE_TICKET_TTL_MS })
   return ticket
@@ -324,6 +331,7 @@ export function issueSseTicket(key: string, sessionId: string): string {
 // Redeem a ticket for its session. Expiry is checked here rather than by a
 // sweeper alone so a stale entry can never authenticate a stream.
 export function redeemSseTicket(ticket: string, sessionId: string): SessionState | null {
+  pruneExpiringMap(sseTickets)
   const rec = sseTickets.get(ticket)
   if (!rec) return null
   if (rec.expiresAt <= Date.now()) {
@@ -400,6 +408,11 @@ export async function deleteOpencodeSession(opencodeSessionId: string): Promise<
 export function teardownSession(id: string, state: SessionState, reason: string, keepRow = false): void {
   sessions.delete(id)
   dirtySessions.delete(id)
+  releaseWorkflowSession(id)
+  forgetSessionWorkspaceState(id)
+  for (const hook of sessionTeardownHooks) {
+    try { hook(id) } catch (e) { console.error(`[gateway] session teardown hook failed: ${id}`, e) }
+  }
   // 工作流拥有权清理：session 已拆，内存工作流一并摘除（idle reap 保留 row 时，
   // 快照仍在 DB，revive 后可再恢复）。
   const wfid = workflowOwnerBySession.get(id)

@@ -8,7 +8,7 @@ import {
   type BizKeyDraft,
 } from "@/lib/biz-api-keys";
 import { issueBizApiKey, listBizApiKeys } from "@/lib/biz-api-key-store";
-import { verifyEmuOauthCode } from "@/lib/emu-oauth";
+import { consumeEmuOauthCode } from "@/lib/emu-oauth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   }
 
   const code = typeof body.code === "string" ? body.code : "";
-  const userId = verifyEmuOauthCode(code);
+  const userId = await consumeEmuOauthCode(code);
   if (userId === null) {
     return fail(401, "授权凭证无效或已过期，请重新发起授权。", "invalid_code");
   }

@@ -260,11 +260,16 @@ test("无帐本实例（Vercel 副本）：回落 adapter 直扣直退；退款�
   const errors: unknown[][] = [];
   const origError = console.error;
   console.error = (...args: unknown[]) => { errors.push(args); };
+  let thrown: unknown;
   try {
     await (await refundSyncCharge(charged.charge, { status: 502 }, { adapter, databaseConfigured: false }))();
+  } catch (error) {
+    thrown = error;
   } finally {
     console.error = origError;
   }
+  assert.ok(thrown, "无帐本退款失败不得当成成功");
+  assert.equal(charged.charge.status, "billing_unknown");
   assert.equal(errors.length, 1);
   assert.match(String(errors[0][0]), /refund failed \(no ledger\).*quota=1500000/);
 });

@@ -33,7 +33,7 @@ import { encryptGenerationPrompt } from "./crypto";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./database";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { getGenerationJob, mapGenerationJob } from "./job-repository";
-import type { FailureClass, GenerationJob } from "./types";
+import type { FailureClass, GenerationJob, GenerationJobStatus } from "./types";
 
 /** 同步 job 的租约：路由 maxDuration 300s＋余裕。过期 → 既有 lease recovery 标 submit_unknown（钱冻结、probe 可见）。 */
 const SYNC_LEASE_MS = 6 * 60_000;
@@ -72,6 +72,11 @@ export interface SyncCharge {
   action: string;
   /** 是否有 billing_operation 列。 */
   ledger: boolean;
+  /**
+   * 无帐本退款失败时停在 billing_unknown（未决），不得当成退款成功。
+   * 有帐本时终态以 generation_job.status 为准。
+   */
+  status?: GenerationJobStatus;
 }
 
 export type SyncChargeResult =
@@ -227,10 +232,12 @@ function directRefund(charge: SyncCharge, amount: number, deps: SyncChargeDeps):
         amount,
       });
     } catch (error) {
+      charge.status = "billing_unknown";
       console.error(
-        `[sync-charge] refund failed (no ledger) action=${charge.action} userId=${charge.userId} quota=${amount} jobId=${charge.jobId}`,
+        `[sync-charge] refund failed (no ledger) action=${charge.action} userId=${charge.userId} quota=${amount} jobId=${charge.jobId} status=billing_unknown`,
         error,
       );
+      throw error;
     }
   };
 }
@@ -280,13 +287,20 @@ export async function commitSyncCharge(
     const consumed = job.billingAmount - unused;
     if (consumed > 0) await commitGenerationBilling(job, consumed, sql);
     if (unused > 0) await recordPendingGenerationRefund(job, unused, sql);
-    await sql`
+    const updated = await sql<{ id: string }[]>`
       UPDATE generation_job
       SET status = 'succeeded', completed_count = ${Math.max(0, outcome.delivered)},
           failure_class = NULL, failure_detail = NULL, finished_at = now(),
           lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL, updated_at = now()
-      WHERE id = ${job.id} AND status = 'running'
+      WHERE id = ${job.id} AND status IN ('submitting', 'running')
+      RETURNING id
     `;
+    if (!updated[0]) {
+      console.error(
+        `[sync-charge] terminal update matched 0 rows action=${charge.action} job=${charge.jobId} expected status submitting|running; not treating as succeeded`,
+      );
+      return NOOP_SETTLEMENT;
+    }
     emitJobEvent({ jobId: job.id, event: "sync_job_succeeded", actor: executorOf(deps), detail: { action: charge.action, delivered: outcome.delivered, requested: n, consumed, refundDue: unused } }, sql);
   } catch (error) {
     console.error(`[sync-charge] commit bookkeeping failed action=${charge.action} job=${charge.jobId}`, error);
@@ -314,13 +328,20 @@ export async function refundSyncCharge(
     const job = await getGenerationJob(charge.jobId, sql);
     if (!job) throw new Error(`Sync job ${charge.jobId} not found.`);
     await recordPendingGenerationRefund(job, job.billingAmount, sql);
-    await sql`
+    const updated = await sql<{ id: string }[]>`
       UPDATE generation_job
       SET status = 'failed', failure_class = ${failureClass}, failure_detail = ${detail},
           finished_at = now(), lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL,
           updated_at = now()
-      WHERE id = ${job.id} AND status = 'running'
+      WHERE id = ${job.id} AND status IN ('submitting', 'running')
+      RETURNING id
     `;
+    if (!updated[0]) {
+      console.error(
+        `[sync-charge] terminal update matched 0 rows action=${charge.action} job=${charge.jobId} expected status submitting|running; not treating as failed`,
+      );
+      return NOOP_SETTLEMENT;
+    }
     emitJobEvent({ jobId: job.id, event: JOB_EVENT.jobFailed, actor: executorOf(deps), upstreamRaw: detail, detail: { reason: "sync_upstream_failed", action: charge.action, httpStatus: failure.status, failureClass } }, sql);
   } catch (error) {
     // 帐本没写成也照样尝试外部退款：refundGenerationBilling 会自行补建 refund op。

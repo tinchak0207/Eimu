@@ -428,10 +428,13 @@ export const EimuGuard: Plugin = async ({ client }) => {
       // CC 2.1.302：计划模式闸 + 权限求值（gateway 持有权威状态；跨进程走 HTTP）。
       // 两者并行、各自 800ms 超时。404/405 保留旧网关兼容；5xx 拒绝执行。
       const lowerTool = tool.toLowerCase()
-      const [planRes, permRes] = await Promise.all([
-        gatewayPost("/internal/plan/state", { session_id: input.sessionID }),
-        gatewayPost("/internal/permission/evaluate", { session_id: input.sessionID, tool, input: args }),
-      ])
+      const readOnlyLocal = PLAN_READ_ONLY_FALLBACK.has(lowerTool)
+      const [planRes, permRes] = readOnlyLocal
+        ? [null, null]
+        : await Promise.all([
+            gatewayPost("/internal/plan/state", { session_id: input.sessionID }),
+            gatewayPost("/internal/permission/evaluate", { session_id: input.sessionID, tool, input: args }),
+          ])
 
       // H5 计划闸 fail-closed：超时/网络失败、200 但 JSON 不可解析或缺 inPlanMode
       // → 写类拒绝、读类放行。404/405（旧网关）退回既有 guard；5xx 拒绝。

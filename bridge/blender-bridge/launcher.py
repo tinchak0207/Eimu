@@ -5,7 +5,7 @@ Spawns and supervises one Blender process running the verbatim blender-mcp
 addon (bridge/blender-bridge/blender_addon.py, source: ahujasid/blender-mcp)
 in background mode:
 
-    [unshare -rn] blender --background --factory-startup --python-expr <bootstrap>
+    [unshare -rn] blender --background --factory-startup --disable-autoexec --python-expr <bootstrap>
 
 Design notes (field-verified facts baked in):
 - `unshare -rn true` works on this host (rootless user namespaces enabled).
@@ -264,7 +264,7 @@ class BlenderSupervisor:
             if self.isolate:
                 cmd += ["unshare", "-rn"]
             cmd += [self.blender_bin, "--background", "--factory-startup",
-                    "--python-expr", _BOOTSTRAP]
+                    "--disable-autoexec", "--python-expr", _BOOTSTRAP]
 
             # start_new_session => own process group => killpg reaches blender
             # and every child it spawned.

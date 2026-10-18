@@ -77,6 +77,10 @@ export interface UseCanvasProjectSyncParams {
    * 否则「当前打开哪张画布」在首帧会留在 null，画布清单的 isActive 标不中。
    */
   setActiveCanvasId: Dispatch<SetStateAction<string | null>>;
+  /**
+   * 快照 409：远端较新。调用方用这份快照替换本地，不要再把冲突前的本地快照写回去。
+   */
+  onRemoteSnapshot?: (snapshot: Record<string, unknown>) => void;
 }
 
 /**
@@ -92,6 +96,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     projectType, currentStep, episodes, styleId, scriptType, narrationVoice,
     sessionId, selectedNodeId, activeCharacterCards,
     setSavedProjects, setSaveState, setLoading, setActiveCanvasId,
+    onRemoteSnapshot,
   } = params;
 
   const createdAtRef = useRef<string | null>(null);
@@ -103,6 +108,14 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   // P2-A：flushSave 要照存档 effect 的 offline 闸（不能同步从 render 值读 saveState）。
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
+  const snapshotRevRef = useRef<number | null>(null);
+  const snapshotSessionRef = useRef<string | null>(null);
+  const onRemoteSnapshotRef = useRef(onRemoteSnapshot);
+  onRemoteSnapshotRef.current = onRemoteSnapshot;
+  if (snapshotSessionRef.current !== (sessionId ?? null)) {
+    snapshotSessionRef.current = sessionId ?? null;
+    snapshotRevRef.current = null;
+  }
 
   // ─────────────────────── 进页初始化（只抓历史清单，不自动还原画布）
 
@@ -189,9 +202,19 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       if (saveTimerRef.current !== null) return;
       void saveCanvasProject(buildProject());
     }, VIEWPORT_SAVE_DEBOUNCE_MS);
-    // 不在 cleanup 清计时器：关掉画布前的最后一次停手也要落盘（下一轮 effect 开头会自行清旧计时器）。
+    // 视口变化时不清计时器以外的副作用：下一轮 effect 开头会清旧计时器。
+    // 卸载必须清掉，否则离屏后仍会发出无主保存。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
+
+  useEffect(() => {
+    return () => {
+      if (viewportSaveTimerRef.current !== null) {
+        window.clearTimeout(viewportSaveTimerRef.current);
+        viewportSaveTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // ─────────────────────── P2-A：切画布前的即时存档（flush）
 
@@ -239,21 +262,28 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       // 反推的可逆声明）＋ `node_versions`（版本索引）。作品/剧集三栏只带纯量指针、
       // **不带 episodes**：剧集上限 200、script 长文会顶爆 512KB（route 413），且截断版
       // 回写 Blob 会静默吃掉剧本原文——episodes 走 saveCanvasProject 正规路径。
-      void postCanvasSnapshot(
-        sessionId,
-        buildAgentCanvasSnapshot({
-          nodes: canvas.nodes,
-          connections: canvas.connections,
-          selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
-          viewport,
-          ...(projectType ? { projectType } : {}),
-          ...(currentStep !== undefined ? { currentStep } : {}),
-          characterCards: activeCharacterCards,
-          ...(canvas.nodeVersions ? { nodeVersions: canvas.nodeVersions } : {}),
-          // DSL namespace＝画布 project id（同一张画布＝一条产线；族4 的 workflow 名由此来）。
-          ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
-        }),
-      );
+      const snapshot = buildAgentCanvasSnapshot({
+        nodes: canvas.nodes,
+        connections: canvas.connections,
+        selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
+        viewport,
+        ...(projectType ? { projectType } : {}),
+        ...(currentStep !== undefined ? { currentStep } : {}),
+        characterCards: activeCharacterCards,
+        ...(canvas.nodeVersions ? { nodeVersions: canvas.nodeVersions } : {}),
+        // DSL namespace＝画布 project id（同一张画布＝一条产线；族4 的 workflow 名由此来）。
+        ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
+      });
+      if (snapshotRevRef.current !== null) snapshot.rev = snapshotRevRef.current;
+      void postCanvasSnapshot(sessionId, snapshot).then((result) => {
+        if (!mountedRef.current) return;
+        if (result.conflict) {
+          if (result.rev !== null) snapshotRevRef.current = result.rev;
+          if (result.remote) onRemoteSnapshotRef.current?.(result.remote);
+          return;
+        }
+        if (result.ok && result.rev !== null) snapshotRevRef.current = result.rev;
+      });
     }, 3000);
     return () => window.clearTimeout(t);
   }, [sessionId, canvas.nodes, canvas.connections, canvas.nodeVersions, selectedNodeId, viewport, activeCharacterCards, projectType, currentStep]);

@@ -8,6 +8,11 @@ const SITE_URL = getSiteUrlFromEnv();
 export const metadata: Metadata = {
   title: "助理设定与野兽模式 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/assistant` },
+  openGraph: {
+    title: "助理设定与野兽模式 | 文档中心",
+    description: "助理设定与野兽模式 | 文档中心",
+    url: "/docs/assistant",
+  },
 };
 
 // ---- 教学文案数据（现场逐字：与助理设定弹层 / 输入区思考级别菜单同文案）----

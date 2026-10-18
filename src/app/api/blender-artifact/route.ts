@@ -55,7 +55,9 @@ export async function GET(req: NextRequest) {
   const contentType = CONTENT_TYPES[ext];
   if (!contentType) return fail(404, `不支持的产物类型（${ext || "无扩展名"}）`, "unsupported_type");
 
-  const outDir = path.join(process.cwd(), ".blender-work", "out");
+  const userDir = String(caller.user.id);
+  if (!/^\d+$/.test(userDir)) return fail(400, "用户身份无效", "invalid_user");
+  const outDir = path.join(process.cwd(), ".blender-work", "out", userDir);
   const filePath = path.join(outDir, name);
   if (!filePath.startsWith(outDir + path.sep) || !existsSync(filePath)) {
     return fail(404, "产物不存在（桥可能还没生成该文件）", "not_found");

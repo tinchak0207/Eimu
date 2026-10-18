@@ -11,7 +11,7 @@
 //
 // 分层：
 //   · 纯函式层 `evaluateMediaQuality(probe, policy)` — 无 I/O，可单元测试。
-//   · I/O 层 `probeMedia(target)` — spawn ffprobe／ffmpeg；支援本地路径与 http(s) URL。
+//   · I/O 层 `probeMedia(target)` — 只接受公网 http(s)；本地路径直接拒绝，不交给 ffprobe。
 //
 // 轮子来源：`src/lib/music-tools.ts:185-230` 的 ffprobe 时长实测封装（spawn / 1 秒级
 // timeout / SIGKILL / ENOENT「系统未安装」判定 / 退出码处理 / 失败不冒充）。本档
@@ -21,9 +21,14 @@
 //  环境（`invoke('execute_command')` / `$WORKSPACE_DIR`），不是 Next 服务端可直用；见回报。）
 
 import { spawn } from "node:child_process";
-import { rm, stat, writeFile } from "node:fs/promises";
+import { lookup } from "node:dns/promises";
+import { createWriteStream } from "node:fs";
+import { rm, stat } from "node:fs/promises";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 // ── 型别 ─────────────────────────────────────────────────────────────────────
 
@@ -308,11 +313,98 @@ function parseDb(raw: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** volumedetect：ffmpeg 把 `mean_volume:` / `max_volume:` 写在 stderr。 */
+const DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
+const DOWNLOAD_REDIRECTS = 2;
+
+function isPrivateIPv4(address: string): boolean {
+  const parts = address.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return true;
+  const nums = parts.map((part) => Number(part));
+  if (nums.some((n) => n > 255)) return true;
+  const [a, b] = nums;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && (b === 168 || b === 0)) return true;
+  if (a >= 224) return true;
+  return false;
+}
+
+function isPrivateIPv6(address: string): boolean {
+  const host = address.toLowerCase();
+  if (host === "::" || host === "::1") return true;
+  if (host.startsWith("::ffff:")) {
+    const mapped = host.slice("::ffff:".length);
+    return isIP(mapped) === 4 ? isPrivateIPv4(mapped) : true;
+  }
+  const first = host.split(":")[0] || "0";
+  const value = Number.parseInt(first, 16);
+  if (!Number.isFinite(value)) return true;
+  if ((value & 0xfe00) === 0xfc00) return true;
+  if ((value & 0xffc0) === 0xfe80) return true;
+  if ((value & 0xff00) === 0xff00) return true;
+  return false;
+}
+
+function isBlockedHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  if (!host || host === "localhost" || host === "metadata" || host === "metadata.google.internal") return true;
+  if (host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) return true;
+  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) return true;
+  const family = isIP(host);
+  if (family === 4) return isPrivateIPv4(host);
+  if (family === 6) return isPrivateIPv6(host);
+  return false;
+}
+
+async function assertPublicHttpUrl(target: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    throw new Error("仅接受 http(s) 媒体地址");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("仅接受 http(s) 媒体地址");
+  }
+  if (url.username || url.password) throw new Error("拒绝带凭证的媒体地址");
+  if (isBlockedHostname(url.hostname)) throw new Error("拒绝私网、链路本地或元数据地址");
+  if (isIP(url.hostname) === 0) {
+    const records = await lookup(url.hostname, { all: true, verbatim: true }).catch(() => []);
+    if (!records.length) throw new Error("无法解析媒体主机");
+    for (const record of records) {
+      if (isBlockedHostname(record.address)) throw new Error("拒绝解析到私网的媒体主机");
+    }
+  }
+  return url;
+}
+
+async function streamToTemp(res: Response, local: string): Promise<void> {
+  const declared = Number(res.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > DOWNLOAD_MAX_BYTES) {
+    throw new Error("素材下载超过 25MB 上限");
+  }
+  if (!res.body) throw new Error("素材下载没有响应体");
+  let received = 0;
+  const limited = new Transform({
+    transform(chunk, _encoding, callback) {
+      received += chunk.length;
+      if (received > DOWNLOAD_MAX_BYTES) {
+        callback(new Error("素材下载超过 25MB 上限"));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  await pipeline(Readable.fromWeb(res.body as import("node:stream/web").ReadableStream), limited, createWriteStream(local));
+}
+
+/** volumedetect：ffmpeg 把 `mean_volume:` / `max_volume:` 写在 stderr。限制线程与输入时长。 */
 async function measureVolume(localPath: string, timeoutMs: number): Promise<{ mean: number | null; max: number | null }> {
   const r = await runBinary(
     "ffmpeg",
-    ["-hide_banner", "-nostats", "-i", localPath, "-vn", "-af", "volumedetect", "-f", "null", "-"],
+    ["-hide_banner", "-nostats", "-threads", "1", "-t", "60", "-i", localPath, "-vn", "-af", "volumedetect", "-f", "null", "-"],
     timeoutMs,
   );
   if (!r.ok) return { mean: null, max: null };
@@ -322,23 +414,31 @@ async function measureVolume(localPath: string, timeoutMs: number): Promise<{ me
   return { mean: parseDb(mean?.[1]), max: parseDb(max?.[1]) };
 }
 
-/** 素材解析：本地路径直用；http(s) URL 下载到 os.tmpdir()（fetch + AbortSignal.timeout）。 */
+/** 只下载公网 http(s) 到临时文件。非 http(s)、私网、超 25MB 一律拒绝，不把本地路径交给 ffprobe。 */
 async function resolveLocal(target: string, timeoutMs: number): Promise<{ path: string; tmp: string | null }> {
-  if (!/^https?:\/\//i.test(target)) {
-    return { path: target, tmp: null };
+  let current = await assertPublicHttpUrl(target);
+  let res: Response | null = null;
+  for (let hop = 0; hop <= DOWNLOAD_REDIRECTS; hop += 1) {
+    res = await fetch(current, { signal: AbortSignal.timeout(timeoutMs), redirect: "manual" });
+    if (res.status < 300 || res.status >= 400) break;
+    const location = res.headers.get("location");
+    if (!location || hop === DOWNLOAD_REDIRECTS) throw new Error("媒体重定向不合法");
+    current = await assertPublicHttpUrl(new URL(location, current).toString());
   }
-  const res = await fetch(target, { signal: AbortSignal.timeout(timeoutMs) });
-  if (!res.ok) throw new Error(`素材下载失败 HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.byteLength > 200 * 1024 * 1024) throw new Error("素材下载超过 200MB 上限");
-  const ext = (path.extname(new URL(target).pathname) || ".bin").slice(0, 8).replace(/[^.a-zA-Z0-9]/g, "") || ".bin";
+  if (!res || !res.ok) throw new Error(`素材下载失败 HTTP ${res?.status ?? 0}`);
+  const ext = (path.extname(current.pathname) || ".bin").slice(0, 8).replace(/[^.a-zA-Z0-9]/g, "") || ".bin";
   const local = path.join(os.tmpdir(), `mq-probe-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`);
-  await writeFile(local, buf);
+  try {
+    await streamToTemp(res, local);
+  } catch (error) {
+    await rm(local, { force: true }).catch(() => {});
+    throw error;
+  }
   return { path: local, tmp: local };
 }
 
 /**
- * 实测一个媒体档案（本地路径或 http(s) URL）。任何失败回带分类的 `MediaProbe`
+ * 实测一个公网 http(s) 媒体。任何失败回带分类的 `MediaProbe`
  * （status!=="ok"），**不 throw、不冒充**。`timeoutMs` 套用于每个子程序与 URL 下载。
  */
 export async function probeMedia(target: string, timeoutMs = 15_000): Promise<MediaProbe> {

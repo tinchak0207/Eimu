@@ -90,9 +90,9 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         kind: "config",
         title: "3D 白模预演方案（逐镜构图/运镜/走位，待导演台原语）",
         deliverable: "白模预演方案（逐镜分镜构图/运镜/走位，3D 白模时间线可回放）+ 用户确认过的镜头方案记录",
-        defaults: { kind: "director"},
+        defaults: { preview: "director" },
         notes: [
-          "先 director_get_state 了解导演台工程状态（已有元素/方案/镜头），再动其它 director 工具，不在空工程上盲写",
+          "本节点是配置/备注，不是生图节点：预演节点不执行生图。先 director_get_state 了解导演台工程状态（已有元素/方案/镜头），再动其它 director 工具，不在空工程上盲写",
           "用 director_propose_plans 按分镜表出预演方案（构图/机位/走位），出完停在门禁等用户确认，未确认不落任何镜头动作",
           "确认后 director_apply_proposal 落方案，再用 director_manage_shot/director_upsert_action 逐镜细化走位与运镜，形成可回放的白模预演",
         ],

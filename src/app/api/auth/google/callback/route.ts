@@ -2,16 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/new-api-auth-server";
 import { signEmuOauthCode } from "@/lib/emu-oauth";
 import {
-  buildGoogleEmail,
   buildGooglePassword,
   buildGoogleUsername,
   type GoogleProfile,
 } from "@/lib/google-auth";
-import { extractTicketFromState } from "@/lib/github-auth";
+import { extractTicketFromState, unpackHandoffTicket } from "@/lib/github-auth";
 import { deliverHandoff } from "@/lib/pwa-handoff";
 import { ensureGatewayUserForOAuth } from "@/lib/gateway-admin";
-import { FIRST_TOUCH_COOKIE, decodeFirstTouchCookieValue } from "@/lib/first-touch-attribution";
-import { buildOAuthAttributionInput, recordUserAttributionViaRelay } from "@/lib/user-attribution";
+import { FIRST_TOUCH_COOKIE, INVITE_COOKIE, decodeFirstTouchCookieValue, looksLikeInviteCode } from "@/lib/first-touch-attribution";
+import { buildOAuthAttributionInput, recordInviteViaRelay, recordUserAttributionViaRelay } from "@/lib/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -59,14 +58,11 @@ async function fetchGoogleProfile(accessToken: string) {
 
 async function registerGoogleUser(profile: GoogleProfile, password: string) {
   const username = buildGoogleUsername(profile);
-  const email = buildGoogleEmail(profile);
   try {
-    // 已存在（老用户）由 ensureGatewayUserForOAuth 内部按复用吸收，不抛。
     await ensureGatewayUserForOAuth({ username, password });
   } catch (error) {
     console.error("[auth/google/register]", {
       username,
-      email,
       message: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -81,7 +77,8 @@ export async function GET(req: NextRequest) {
   // PWA 跨浏览器交接分支：state 内嵌 handoff ticket（常用浏览器打开授权链
   // 接，无本站 state cookie）。ticket 是 128-bit 随机 hex + 一次性消费，足以
   // 替代 state cookie 的 CSRF 防护；其余（exchange/注册/login）全走原路径。
-  const handoffTicket = state ? extractTicketFromState(state) : null;
+  const handoff = unpackHandoffTicket(state ? extractTicketFromState(state) : null);
+  const handoffTicket = handoff.ticket;
   if (handoffTicket) {
     // 落进下方共享流程；仅在 state 校验与最终 redirect 两处分叉。
     // handoff 链路同样必须有 code：Google 只在成功授权时回跳。
@@ -138,11 +135,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const cookieInvite = req.cookies.get(INVITE_COOKIE)?.value;
+    const invite = looksLikeInviteCode(cookieInvite) ? cookieInvite : looksLikeInviteCode(handoff.invite) ? handoff.invite : null;
+    if (invite) {
+      await recordInviteViaRelay(loginResult.user.id, invite);
+    }
+    const handoffUser = invite ? { ...loginResult.user, eimu_invite: invite } : loginResult.user;
+
     // PWA 交接分支：把会话投递到 ticket（PWA 侧轮询 claim 领回）；投递失败
     // 不挡主流程——浏览器侧照常拿到 cookie。
     if (handoffTicket) {
       try {
-        await deliverHandoff(handoffTicket, loginResult.token, loginResult.user);
+        await deliverHandoff(handoffTicket, loginResult.token, handoffUser);
       } catch (error) {
         console.error("[auth/google/handoff-deliver]", error);
       }

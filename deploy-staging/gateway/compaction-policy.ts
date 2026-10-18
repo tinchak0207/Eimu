@@ -414,3 +414,21 @@ export function applyPostCompactResult(result: PostCompactHookResult): AppliedPo
       : undefined)
   return message !== undefined ? { userDisplayMessage: message } : {}
 }
+
+const PINNED_CONSTRAINT_CAP = 2000
+const PINNED_CONSTRAINT_MAX = 8
+const PINNED_CONSTRAINT_MARK = /必须|禁止|预算|只准|不要/
+
+/** 首回合硬约束：按句号/换行切开，留下含标记词的句子，最多 8 条、约 2000 字。 */
+export function extractPinnedConstraints(text: string): string {
+  const picked: string[] = []
+  for (const raw of String(text ?? "").split(/[\n。！？!?]+/)) {
+    const sentence = raw.trim()
+    if (!sentence || !PINNED_CONSTRAINT_MARK.test(sentence)) continue
+    const next = picked.length === 0 ? sentence : `${picked.join("\n")}\n${sentence}`
+    if (next.length > PINNED_CONSTRAINT_CAP) break
+    picked.push(sentence)
+    if (picked.length >= PINNED_CONSTRAINT_MAX) break
+  }
+  return picked.join("\n").slice(0, PINNED_CONSTRAINT_CAP)
+}

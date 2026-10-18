@@ -78,6 +78,18 @@ const DEFAULT_IMAGE_SIZE = "1024x1024";
 const SUPPORTED_IMAGE_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536"]);
 const IMAGE_EDITS_PATH = "/images/edits";
 const IMAGE_GENERATIONS_PATH = "/images/generations";
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{4,}/gi, "[redacted]")
+    .replace(/bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/key=[^\s&"'<>]+/gi, "key=[redacted]");
+}
+
+function loggedError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return redactSecrets(sanitizeUpstreamMessage(raw) ?? raw);
+}
 const PRIMARY_UPSTREAM_TIMEOUT_MS = 100_000;
 const BANANA_UPSTREAM_TIMEOUT_MS = 100_000;
 const FALLBACK_UPSTREAM_TIMEOUT_MS = 100_000;
@@ -547,7 +559,7 @@ export async function POST(req: NextRequest) {
   };
   after(() =>
     appendGateLog(authenticatedUser.id, gateLogEntry).catch((error) => {
-      console.error(`Failed to append gate log [requestId=${requestId}]`, error);
+      console.error(`Failed to append gate log [requestId=${requestId}] ${loggedError(error)}`);
     }),
   );
   if (gatesBlock(gateChecks)) {
@@ -619,8 +631,9 @@ export async function POST(req: NextRequest) {
       await reserveImageQuota(authenticatedUser.id, generationQuota, authenticatedUser.quota);
       quotaReserved = true;
     } catch (error) {
+      console.error(`Failed to reserve image quota [requestId=${requestId}] ${loggedError(error)}`);
       return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Failed to reserve image quota." },
+        { error: "Failed to reserve image quota." },
         { status: 402 },
       );
     }
@@ -708,7 +721,7 @@ export async function POST(req: NextRequest) {
           } catch (error) {
             // Inline the base64 instead: an oversized response beats no image at all.
             // For upstream-URL re-hosting failures, the original URL simply stays.
-            console.error(`Failed to persist generated image [requestId=${requestId}]`, error);
+            console.error(`Failed to persist generated image [requestId=${requestId}] ${loggedError(error)}`);
           }
         }
 
@@ -746,7 +759,7 @@ export async function POST(req: NextRequest) {
                 },
               ],
             }).catch((error) => {
-              console.error(`Failed to save history [requestId=${requestId}]`, error);
+              console.error(`Failed to save history [requestId=${requestId}] ${loggedError(error)}`);
             }),
           );
         }
@@ -777,13 +790,13 @@ export async function POST(req: NextRequest) {
         if (error instanceof UnsupportedEndpointInputError) {
           // 本路径是 DURABLE_PASS_THROUGH（middleware 不缓冲），失败体的脱敏只能在**生成源**
           // 做：上游 message 可能夹带内部文案，出站前先过 sanitize（正常业务文案原样保留）。
-          failureReasons.push(sanitizeUpstreamMessage(error.message) ?? error.message);
+          failureReasons.push(redactSecrets(sanitizeUpstreamMessage(error.message) ?? "unsupported input"));
           continue;
         }
         recordEndpointFailure(endpoint);
         failureReasons.push(endpointFailureReason(error));
         const upstreamStatus = error instanceof UpstreamImageError ? `, upstreamStatus=${error.status}` : "";
-        const upstreamMessage = error instanceof Error ? error.message : String(error);
+        const upstreamMessage = loggedError(error);
         console.error(`Failed on ${endpoint.label} [requestId=${requestId}, endpointHost=${safeEndpointName(endpoint.baseURL)}, upstreamModel=${resolveUpstreamModelId(modelId, endpoint.modelId)}${upstreamStatus}, attemptTimeoutMs=${attemptTimeoutMs}] ${upstreamMessage}`);
       }
     }
@@ -796,7 +809,7 @@ export async function POST(req: NextRequest) {
         await refundImageQuota(authenticatedUser.id, generationQuota);
       } catch (error) {
         refundFailed = true;
-        console.error(`Failed to refund image quota [requestId=${requestId}]`, error);
+        console.error(`Failed to refund image quota [requestId=${requestId}] ${loggedError(error)}`);
       }
     }
   }
@@ -822,8 +835,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (failureReasons.length > 0) {
+    console.error(`Image generation failed [requestId=${requestId}] ${redactSecrets(failureReasons.join("; "))}`);
+  }
   return NextResponse.json(
-    { error: `All compatible image generation channels are unavailable (${failureReasons.join("; ")}).` },
+    { error: "Image generation failed." },
     { status: 503 },
   );
 }

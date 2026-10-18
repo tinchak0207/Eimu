@@ -84,6 +84,27 @@ export async function fetchGatewayUser(userId: number): Promise<GatewayAdminUser
 }
 
 /**
+ * 把已有上游账号的密码改成当前推导值。
+ * 只送 id 和 password。新 API 的 Update 用 Updates，空字段不会把邮箱和额度抹掉。
+ * 失败只返回 false，不把密码写进日志。
+ */
+export async function resetGatewayUserPassword(userId: number, password: string): Promise<boolean> {
+  if (!Number.isInteger(userId) || userId <= 0 || password.length < 8) return false;
+  try {
+    const result = await callGateway(`/api/user/`, {
+      method: "PUT",
+      body: JSON.stringify({ id: userId, password }),
+    });
+    return result.success === true;
+  } catch (error) {
+    console.error(
+      `[gateway-admin] reset password failed user=${userId}: ${error instanceof Error ? error.message : "error"}`,
+    );
+    return false;
+  }
+}
+
+/**
  * 上游兑换码记录（REQ-E1a 充值入账的唯一上游依据）。
  *
  * 只读：`GET /api/redemption/?p=&page_size=`（AdminAuth 路由，与 mapay-redemption.ts

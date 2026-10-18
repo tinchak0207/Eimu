@@ -53,20 +53,20 @@ export function ImageLightbox({ src, alt, onClose, caption, footer }: ImageLight
       className="fixed inset-0 z-[95] flex min-h-[100dvh] w-screen cursor-pointer items-center justify-center bg-[rgba(31,34,48,0.74)] p-6 backdrop-blur-md"
       onClick={onClose}
     >
-      <div className="absolute inset-x-0 top-6 flex justify-center">
+      <div className="absolute inset-x-0 top-[max(1.5rem,env(safe-area-inset-top))] flex justify-center">
         <div className="lg-float rounded-full px-4 py-2 text-sm text-[#6f7987]">
           按 Esc 关闭
         </div>
       </div>
       {caption ? (
-        <div className="absolute inset-x-0 top-[4.5rem] flex justify-center">
+        <div className="absolute inset-x-0 top-[calc(max(1.5rem,env(safe-area-inset-top))+3rem)] flex justify-center">
           <div className="lg-float rounded-full px-4 py-1.5 text-[13px] font-medium text-[#6f7987]">
             {caption}
           </div>
         </div>
       ) : null}
       {footer ? (
-        <div className="absolute inset-x-0 bottom-6 flex justify-center">{footer}</div>
+        <div className="absolute inset-x-0 bottom-[max(1.5rem,env(safe-area-inset-bottom))] flex justify-center">{footer}</div>
       ) : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img

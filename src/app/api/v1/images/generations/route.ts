@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleGeneration(req: NextRequest, rejection: RejectionContext): Promise<Response> {
-  const requestId = Math.random().toString(36).slice(2);
+  // 日志与错误体共用这一个 trace id。不要再另造只出现在日志里的 requestId。
   const traceId = getOrCreateTraceId(req);
 
   // ── 认证 ──────────────────────────────────────────────────
@@ -420,7 +420,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
       if (error instanceof GenerationModelUnavailableError) {
         return errorResponse(503, error.message, "api_error", "no_endpoints", traceId);
       }
-      console.error(`[biz-api] durable task creation failed requestId=${requestId}`, error);
+      console.error(`[biz-api] durable task creation failed traceId=${traceId}`, error);
       return errorResponse(503, "Generation control plane is temporarily unavailable.", "api_error", "control_plane_unavailable", traceId);
     }
   }
@@ -479,7 +479,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     }
     // 其他预留失败（网关不可达／回滚不确定）不是余额问题：走本路由既有的控制面
     // 不可用契约（与 durable 分支同一组码），只把真因写进服务端日志，不对客户说谎。
-    console.error(`[biz-api] reserve failed requestId=${requestId}: ${reserveMessage}`);
+    console.error(`[biz-api] reserve failed traceId=${traceId}: ${reserveMessage}`);
     return errorResponse(
       503,
       "Generation control plane is temporarily unavailable.",
@@ -506,7 +506,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
           prompt: plan.prompt,
           imageSize: size,
           qualityMode,
-          requestId: `${requestId}-${index + 1}`,
+          requestId: `${traceId}-${index + 1}`,
           ...(pixaiControlNets ? { controlNets: pixaiControlNets } : {}),
         });
 
@@ -535,13 +535,13 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     // 退款不能拖慢响应，也不能因为失败而把成功的结果吞掉。
     after(() =>
       refundImageQuota(apiKey.userId, unusedQuota).catch((error) => {
-        console.error(`[biz-api] 退款失败 requestId=${requestId}, userId=${apiKey.userId}, quota=${unusedQuota}`, error);
+        console.error(`[biz-api] 退款失败 traceId=${traceId}, userId=${apiKey.userId}, quota=${unusedQuota}`, error);
       }),
     );
   }
 
   if (!delivered) {
-    console.error(`[biz-api] requestId=${requestId}, keyId=${apiKey.id}, model=${modelId}, failures=${failures.join(" | ")}`);
+    console.error(`[biz-api] traceId=${traceId}, keyId=${apiKey.id}, model=${modelId}, failures=${failures.join(" | ")}`);
     return errorResponse(
       502,
       `生图失败：${failures.join("；") || "上游无响应"}`,
@@ -555,7 +555,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
   after(() => flushBizApiKeyUsage().catch(() => undefined));
 
   console.log(
-    `[biz-api] requestId=${requestId}, keyId=${apiKey.id}, label=${apiKey.label}, model=${modelId}, n=${rawN}, delivered=${delivered}, coins=${coinsPerImage * delivered}`,
+    `[biz-api] traceId=${traceId}, keyId=${apiKey.id}, label=${apiKey.label}, model=${modelId}, n=${rawN}, delivered=${delivered}, coins=${coinsPerImage * delivered}`,
   );
 
   return withTraceId(

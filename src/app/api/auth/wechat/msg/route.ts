@@ -57,7 +57,12 @@ async function pushCustomText(openid: string, content: string): Promise<void> {
 
 /** 异步兑换：开号/登入 → 标记完成 → 客服消息推送结果。 */
 async function redeemAsync(openid: string, record: WechatLoginState): Promise<void> {
-  const seed = process.env.WECHAT_CALLBACK_SECRET?.trim() || "wechat-official";
+  const seed = process.env.WECHAT_CALLBACK_SECRET?.trim() || "";
+  if (!seed) {
+    console.error("[wechat/msg] WECHAT_CALLBACK_SECRET 未配置，拒绝兑换");
+    await pushCustomText(openid, "登录失败，请刷新网页重新扫码后再试。");
+    return;
+  }
   try {
     const result = await loginWechatPeer(openid, seed);
     const completed = await completeWechatLogin(record.code, openid, result.token, result.user);
@@ -79,13 +84,14 @@ export async function POST(req: NextRequest) {
     console.warn("[wechat/msg] WECHAT_OFFICIAL_TOKEN 未配置，拒绝请求");
     return new NextResponse("not configured", { status: 503 });
   }
-  // 这个端点收到的扫码事件＝直接发 session，理应验签（否则可伪造 SCAN 事件）。
-  // 2026-09-30 先只记录不挡：用 `vercel env pull` 拿到的 token 签的 GET 被线上判
-  // 403，无法证明真实推送的签名会过；硬挡可能让所有微信登入失效。等日志证实真实
-  // 推送 signature_ok=true 后再改成 403 挡下。
   const sp = req.nextUrl.searchParams;
   const signatureOk = verifyWechatSignature(token, sp.get("signature"), sp.get("timestamp"), sp.get("nonce"));
-  console.log(`[wechat/msg] POST signature_ok=${signatureOk}`);
+  if (!signatureOk) {
+    return new NextResponse("invalid signature", { status: 403 });
+  }
+  if (!process.env.WECHAT_CALLBACK_SECRET?.trim()) {
+    return new NextResponse("not configured", { status: 503 });
+  }
 
   const xml = await req.text();
   const msg = parseIncomingMessage(xml);

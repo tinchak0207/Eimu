@@ -187,12 +187,12 @@
     backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
   }
 
-  /* ≤639.98px：顶栏预设完全透明（与页面底色无缝，见 Navbar 的 max-sm: 覆写）；只有页面卷动
-     之后才补一层毛玻璃，否则内容会从图示底下穿过去。桌面岛状不受影响。
+  /* ≤767.98px：与手机同一套卷动毛玻璃。640–767 原先两头都不命中（手机停在 639.98，
+     桌面岛从 768 起），顶栏在这块宽度是空的。桌面岛规则仍从 768 起，不在这里改。
      ID＋属性选择器的特异度盖过同层的 max-sm:bg-transparent / max-sm:[backdrop-filter:none]，
      所以卷动态不需动 JSX 的 utility；未卷动时不命中此规则＝仍全透明。
      只给毛玻璃本身，不补 border / box-shadow——分隔线在手机上很刺眼。 */
-  @media (max-width: 639.98px) {
+  @media (max-width: 767.98px) {
     #global-navbar nav[aria-label="主导航"][data-nav-scrolled="true"] {
       background: rgba(255, 255, 255, 0.72);
       -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -205,7 +205,7 @@
      而面板卡（.canvas-chat-scroll-fill > section.lg-card）是 0.56 白／blur40／saturate180／
      brightness1.08；同一萤幕并排就是一深一浅。这里把岛降级到卡面同一组数值（blur 半径不是
      新增的上限，卡面本来就是 40px）。特异度（ID＋属性）盖过同层 .lg-bar。
-     行动版完全不受影响：<640 由上方规则接管，640–767 保持原样。 */
+     行动版完全不受影响：≤767.98px 由上方卷动毛玻璃接管，本规则从 768px 起。 */
   @media (min-width: 768px) {
     #global-navbar nav[aria-label="主导航"] {
       background: rgba(255, 255, 255, 0.56);
@@ -583,12 +583,6 @@
 .driver-popover.atc-tour-popover .driver-popover-arrow-side-bottom {
   border-bottom-color: rgba(18, 18, 24, 0.92);
 }
-
-
-.driver-active [role="menu"] * {
-  pointer-events: auto !important;
-}
-
 
 
   /* ── Style preset chip ── */  /* Sits inside a single-line scroll rail: fixed 36px height to match the

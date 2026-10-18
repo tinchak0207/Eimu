@@ -113,7 +113,7 @@ type BillingClaimOutcome =
  * UPDATE 内已 +1，故它就是「即将执行的这次尝试」的序号（FG 教训：先定序号语义再改点）。
  *
  * 被拒时的终结刻意沿用既有桶，不动金额与状态机语义：
- *  - reserve → unknown（扣款状态不明 → 既有 6h zombie reclaim 全额退款给用户，用户不亏）
+ *  - reserve → unknown（扣款状态不明 → zombie 只标 needs_review，金额不动，不自动退款）
  *  - refund  → failed（退款未落地且不再自动重试 → 出现在 probe 的 refund_failed 名单）
  */
 async function claimBillingOperation(input: {
@@ -663,6 +663,7 @@ function zombieFailureClass(reserveError: string): FailureClass {
 type ZombieDisposition =
   | { action: "skip" }
   | { action: "requeued" }
+  | { action: "needs_review" }
   | { action: "failed"; refundFull: boolean; job: GenerationJob };
 
 /**
@@ -676,7 +677,8 @@ type ZombieDisposition =
  *   这是确定性失败（典型：用户余额买不起该模型，每次重试都扣成负数再回滚），
  *   无限重试毫无意义 → CAS 将 op 锁成 failed，任务终结为 failed，不退款。
  * - reserve op = failed：reserve 已被确定性拒绝（4xx），无外部扣款 → 任务 failed，不退款。
- * - 其余（op = unknown，或 pending 但无 reversed 凭据）：扣款状态不明 →
+ * - reserve op = unknown：扣款是否落地不明 → 标 needs_review，金额不动，不自动退款。
+ * - 其余（pending 但无 reversed 凭据）：扣款状态不明 →
  *   任务 failed 后全额退款（宁可平台承担可能的风赠，也不让用户承担不确定）。
  *
  * op 为 pending 时必须先 CAS（带 status='pending' 条件的原子更新）再改任务，
@@ -777,6 +779,21 @@ async function reclaimOneZombie(input: {
       return { action: "failed", refundFull: false, job };
     }
 
+    if (reserveStatus === "unknown") {
+      await tx`
+        UPDATE billing_operation
+        SET status = 'needs_review', last_error = ${detail}, updated_at = now()
+        WHERE job_id = ${input.jobId} AND operation = 'reserve' AND sequence = 1 AND status = 'unknown'
+      `;
+      await tx`
+        UPDATE generation_job
+        SET failure_detail = ${detail}, updated_at = now()
+        WHERE id = ${input.jobId} AND status IN ('pending_billing', 'billing_unknown')
+      `;
+      emitJobEvent({ jobId: input.jobId, event: JOB_EVENT.zombieReclaimed, actor: input.executorId, upstreamRaw: reserveError || null, detail: { reserveStatus, refund: "none", review: "needs_review", stuckAs: job.status } }, sql);
+      return { action: "needs_review" };
+    }
+
     if (reserveStatus === "pending") {
       const claimed = await tx<Row[]>`
         UPDATE billing_operation
@@ -798,6 +815,10 @@ async function reclaimOneZombie(input: {
 
   if (disposition.action === "requeued") {
     console.log(`[billing-reconcile] zombie ${input.jobId}: requeued (reserve applied)`);
+    return 1;
+  }
+  if (disposition.action === "needs_review") {
+    console.log(`[billing-reconcile] zombie ${input.jobId}: reserve unknown marked needs_review, amount unchanged`);
     return 1;
   }
   if (disposition.action !== "failed") return 0;
@@ -885,7 +906,7 @@ export interface BillingOperationView {
   modelId: string;
   operation: BillingOperation;
   amount: number;
-  status: "pending" | "executing" | "applied" | "unknown" | "failed";
+  status: "pending" | "executing" | "applied" | "unknown" | "failed" | "needs_review";
   attemptCount: number;
   nextAttemptAt: Date;
   executionExpiresAt: Date | null;
@@ -1064,7 +1085,7 @@ export type SyncReserveOutcome =
  *  - 确定未扣（rejected／retry 类）：op → failed、job → failed。同步路由不排程重试：
  *    客户当下就拿到 402，不能在背后偷偷扣。
  *  - 不明（unknown）：op → unknown、job → billing_unknown，交既有 zombie reclaim
- *    （6h 后全额退款）——与 durable 路径同一保守语义。
+ *    （标 needs_review，金额不动，不自动全额退款）。
  * 呼叫前 job 必须处于 'submitting'（门面建单时设定），使 dueReservationJobs／
  * zombie reclaim（只认 pending_billing/billing_unknown）在扣款进行中碰不到它。
  */

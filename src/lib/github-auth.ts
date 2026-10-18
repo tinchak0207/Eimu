@@ -30,6 +30,14 @@ export function buildGitHubUsername(profile: GitHubProfile) {
 
 export function buildGitHubPassword(profile: GitHubProfile, secret: string) {
   const digest = createHmac("sha256", secret)
+    .update(`github:${profile.id}`)
+    .digest("hex");
+  return `Gh${digest.slice(0, 14)}`;
+}
+
+/** 改名之前的推导。只在新密码登录失败时再试一次，避免把未改名的老账号锁在门外。 */
+export function buildGitHubPasswordLegacy(profile: GitHubProfile, secret: string) {
+  const digest = createHmac("sha256", secret)
     .update(`github:${profile.id}:${profile.login}`)
     .digest("hex");
   return `Gh${digest.slice(0, 14)}`;
@@ -56,4 +64,20 @@ export function extractTicketFromState(state: string): string | null {
   const [base, ticket] = parts;
   if (!base || !ticket) return null;
   return ticket;
+}
+
+/** handoff 查询值可附带邀请码（ticket~invite）。ticket 本身不含 ~。 */
+export function packHandoffTicket(ticket: string, invite: string | null | undefined): string {
+  if (!invite || invite.includes("~") || invite.includes(".")) return ticket;
+  return `${ticket}~${invite}`;
+}
+
+export function unpackHandoffTicket(raw: string | null | undefined): { ticket: string | null; invite: string | null } {
+  if (!raw) return { ticket: null, invite: null };
+  const splitAt = raw.indexOf("~");
+  if (splitAt <= 0) return { ticket: raw, invite: null };
+  const ticket = raw.slice(0, splitAt);
+  const invite = raw.slice(splitAt + 1);
+  if (!ticket || !invite) return { ticket: raw, invite: null };
+  return { ticket, invite };
 }

@@ -12,11 +12,19 @@ Contract (pinned, shared with the tool layer; additive-only):
                 queue_depth:int, concurrency:int}
 
     POST /v1/execute  body {script:string, timeout_ms?:number (default 300000, cap 600000)}
+         Authorization: Bearer $BLENDER_BRIDGE_TOKEN (required). Missing
+         environment variable or a bad token → 401, script is not executed.
          → 200 {ok:true, artifacts:[{path,bytes,kind:"blend|png|mp4|glb|other"}],
                 scene_summary:string, stdout_tail:string(<=2000 chars), duration_ms:number,
                 queued:bool, queue_position:int}
          → 429 {ok:false, error:"queue_full"}
          → 500 {ok:false, error:string, stdout_tail:string, queued:bool, queue_position:int}
+
+    POST /v1/cancel
+         Authorization: Bearer $BLENDER_BRIDGE_TOKEN (same rule as execute).
+         If the bridge Blender process is alive, SIGKILL its process group.
+         → 200 {ok:true, killed:bool}
+         → 401 {ok:false, error:"unauthorized"}
 
 artifacts: files created or modified under $BLENDER_WORK/out/ during the
 job (session snapshot diff: the out/ tree is snapshotted path→mtime when
@@ -44,9 +52,10 @@ script inherits it).
          fetches bytes through this endpoint. path is a single relative path
          under out/ (subdirectories allowed, no ".." segments, no absolute
          paths, no backslashes); only render artifact extensions are served —
-         never .py/.log/.json sidecars beyond meta-style data. No auth by
-         design (mirrors /v1/execute): the bridge must stay loopback/tunnel
-         bound, never exposed publicly.
+         never .py/.log/.json sidecars beyond meta-style data. /v1/execute
+         and /v1/cancel require Authorization: Bearer equal to the
+         BLENDER_BRIDGE_TOKEN environment variable (unset or mismatch is
+         401 and does not run). This endpoint stays loopback/tunnel bound.
 
          Asset byte channel (piece AN, eval REPORT S2 dead-line 2): GLB/BVH
          pack bodies live in the bridge host's .asset-cache/ (multi-GB, never
@@ -61,9 +70,8 @@ script inherits it).
          here — the agent fetches those URLs directly.
 
 Queue semantics: execute requests run through a FIFO queue in front of the
-blender supervisor (same semantics as the generation-worker concurrency
-pool: env-tunable concurrency, FIFO order, bounded depth, failure
-self-healing). BLENDER_BRIDGE_CONCURRENCY execution slots (default 1);
+blender supervisor (FIFO order, bounded depth, failure self-healing).
+CONCURRENCY is fixed at 1 (BLENDER_BRIDGE_CONCURRENCY is ignored).
 BLENDER_BRIDGE_QUEUE_DEPTH waiting slots (default 16) — overflow answers
 429 queue_full immediately. queue_position is 1-based at enqueue time
 (0 when a slot was free).
@@ -71,12 +79,13 @@ BLENDER_BRIDGE_QUEUE_DEPTH waiting slots (default 16) — overflow answers
 Timeout semantics: timeout_ms budgets execution only (queue wait is not
 deducted from it). Total wait (queue + execution) beyond timeout_ms x 2 hits
 the hard deadline: a still-queued job is abandoned with 500 without running;
-a running job's blender process group is SIGKILLed and the request answers
-500. The next request transparently relaunches a fresh factory-startup
-Blender, so a killed job never blocks the queue.
+a running job's blender process group is SIGKILLed, every job still waiting
+is dropped (500, not executed), and the request answers 500. A later new
+request relaunches a fresh factory-startup Blender.
 
 Run:  python3 bridge/blender-bridge/server.py
 """
+import hmac
 import json
 import os
 import re
@@ -96,7 +105,6 @@ MIN_TIMEOUT_MS = 1000
 # Concurrency-pool semantics mirrored from the generation worker
 # (GENERATION_WORKER_CONCURRENCY): env-tunable pool size, FIFO queue,
 # bounded waiting depth with immediate rejection on overflow.
-DEFAULT_CONCURRENCY = 1
 DEFAULT_QUEUE_DEPTH = 16
 
 
@@ -107,7 +115,9 @@ def _env_int(name, default, minimum=1):
         return default
 
 
-CONCURRENCY = _env_int("BLENDER_BRIDGE_CONCURRENCY", DEFAULT_CONCURRENCY)
+# Fixed at 1. BLENDER_BRIDGE_CONCURRENCY is ignored: a timeout kill drops
+# the Blender process, so a second slot must not keep running beside it.
+CONCURRENCY = 1
 QUEUE_DEPTH = _env_int("BLENDER_BRIDGE_QUEUE_DEPTH", DEFAULT_QUEUE_DEPTH)
 
 _KIND_BY_EXT = {
@@ -191,7 +201,7 @@ _EXEC_LOCK = threading.RLock()
 # hand-to-hand between waiters (condition notify) so that exactly one
 # waiting job enters per exit and FIFO order is preserved.
 _QUEUE_CV = threading.Condition(threading.Lock())
-_QUEUE = {"waiters": [], "running": 0, "seq": 0}
+_QUEUE = {"waiters": [], "running": 0, "seq": 0, "epoch": 0}
 
 
 _PROC_GENERATION = [0]  # incremented on every (re)launch
@@ -337,6 +347,45 @@ def job_output_tail(sup, before_bytes, max_chars):
         return ""
 
 
+def _bearer_authorized(headers):
+    """True only when Authorization Bearer equals BLENDER_BRIDGE_TOKEN.
+
+    Missing env, empty token, or a mismatch is unauthorized. An unset
+    token is never treated as anonymous access.
+    """
+    expected = os.environ.get("BLENDER_BRIDGE_TOKEN")
+    if not expected:
+        return False
+    raw = headers.get("Authorization") or ""
+    scheme, _, got = raw.partition(" ")
+    if scheme.lower() != "bearer" or got == "":
+        return False
+    if len(got) != len(expected):
+        return False
+    return hmac.compare_digest(got, expected)
+
+
+def _unauthorized(handler):
+    handler.close_connection = True
+    handler._json(401, {"ok": False, "error": "unauthorized"})
+
+
+def _clear_wait_queue():
+    """Drop every job still waiting after a timeout kill."""
+    with _QUEUE_CV:
+        _QUEUE["waiters"].clear()
+        _QUEUE["epoch"] += 1
+        _QUEUE_CV.notify_all()
+
+
+def handle_cancel():
+    with _STATE:
+        sup = _SUPERVISOR
+    if sup is None or not sup.is_alive():
+        return 200, {"ok": True, "killed": False}
+    return 200, {"ok": True, "killed": bool(sup.kill())}
+
+
 def handle_execute(script, timeout_ms):
     timeout_ms = max(MIN_TIMEOUT_MS, min(MAX_TIMEOUT_MS,
                                          int(timeout_ms or DEFAULT_TIMEOUT_MS)))
@@ -346,6 +395,7 @@ def handle_execute(script, timeout_ms):
             return 429, {"ok": False, "error": "queue_full"}
         _QUEUE["seq"] += 1
         ticket = _QUEUE["seq"]
+        epoch = _QUEUE["epoch"]
         _QUEUE["waiters"].append(ticket)
         enqueue_position = len(_QUEUE["waiters"])
 
@@ -356,11 +406,15 @@ def handle_execute(script, timeout_ms):
     # never blocks the waiters behind it).
     hard_deadline = time.monotonic() + (2 * timeout_ms / 1000.0)
     abandoned = False
+    cleared = False
     promoted = False
     waited = False
     try:
         with _QUEUE_CV:
             while True:
+                if _QUEUE["epoch"] != epoch:
+                    cleared = True
+                    break
                 if _QUEUE["running"] < CONCURRENCY and _QUEUE["waiters"][:1] == [ticket]:
                     _QUEUE["waiters"].pop(0)
                     _QUEUE["running"] += 1
@@ -389,6 +443,11 @@ def handle_execute(script, timeout_ms):
                 _QUEUE["running"] -= 1
                 _QUEUE_CV.notify_all()
         raise
+    if cleared:
+        return 500, {"ok": False,
+                     "error": ("queue cleared after blender execution timeout; "
+                               "waiting job dropped without running"),
+                     "queued": True, "queue_position": enqueue_position}
     if abandoned:
         return 500, {"ok": False,
                      "error": ("queue hard deadline: still queued after %dms "
@@ -427,6 +486,7 @@ def _run_job(script, timeout_ms, queued, queue_position):
                         timeout_s=timeout_ms / 1000.0)
     except launcher.ExecutionTimeout:
         killed = sup.kill()
+        _clear_wait_queue()
         error = ("execution timed out after %dms; blender process group %s"
                  % (timeout_ms, "killed" if killed else "already gone"))
         return 500, {"ok": False, "error": error,
@@ -616,8 +676,22 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"ok": False, "error": "not found: %s" % self.path})
 
     def do_POST(self):
-        if self.path != "/v1/execute":
+        path = self.path.split("?", 1)[0]
+        if path == "/v1/cancel":
+            if not _bearer_authorized(self.headers):
+                _unauthorized(self)
+                return
+            try:
+                code, obj = handle_cancel()
+            except Exception as e:  # never let the bridge hang or crash
+                code, obj = 500, {"ok": False, "error": "cancel failed: %s" % e}
+            self._json(code, obj)
+            return
+        if path != "/v1/execute":
             self._json(404, {"ok": False, "error": "not found: %s" % self.path})
+            return
+        if not _bearer_authorized(self.headers):
+            _unauthorized(self)
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)

@@ -100,14 +100,14 @@ export async function catalogVideoPerSecondCoins(model: string, apiKey: string):
 
 /** 报价/提交共用视频选项解析；当前/v1/videos仅接受音轨，分辨率由模型默认决定。 */
 export function resolveVideoSubmissionOptions(
-  node: { id?: string; metadata: Record<string, unknown> },
-  graph: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] } | undefined,
+  node: { id?: string; metadata?: Record<string, unknown> | null },
+  graph: { nodes: { id: string; kind: string; metadata?: Record<string, unknown> | null }[]; connections: { from: string; to: string }[] } | undefined,
   model: string,
 ): { resolution: string | null; generateAudio: boolean; error?: string } {
   const cache = priceCatalogPerSecondCache
   const cap = cache && Date.now() - cache.at <= PRICE_CATALOG_TTL_MS ? cache.capabilities?.[model] : undefined
   const config = graph?.nodes.filter((n) => n.kind === "config" && graph.connections.some((c) => c.to === node.id && c.from === n.id)).at(-1)?.metadata ?? {}
-  const meta = { ...config, ...node.metadata }
+  const meta = { ...config, ...(node.metadata ?? {}) }
   const defaultResolution = typeof cap?.defaultResolution === "string" ? cap.defaultResolution : null
   const raw = meta.resolution ?? meta.definition ?? meta.quality
   let explicit: string | undefined

@@ -8,7 +8,8 @@ function assertPath(path:string, session:string):void {
 }
 export function atomicWrite(path:string, bytes:Uint8Array, session:string):void {
   assertPath(path,session)
-  mkdirSync(dirname(path),{recursive:true,mode:0o700})
+  // Gateway 通过 agentsvc 组读取产物并独立核验下载 ACK。
+  mkdirSync(dirname(path),{recursive:true,mode:0o750})
   assertPath(path,session)
   const directory=realpathSync(dirname(path))
   assertPath(directory,session)
@@ -19,7 +20,7 @@ export function atomicWrite(path:string, bytes:Uint8Array, session:string):void 
   const temp=`${bound}/${tempName}`
   try {
     assertPath(realpathSync(bound),session)
-    const fd=openSync(temp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600)
+    const fd=openSync(temp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o640)
     try {writeFileSync(fd,bytes);fsyncSync(fd)} finally {closeSync(fd)}
     if(realpathSync(dirname(path))!==directory)throw new Error("output_directory_changed")
     assertPath(path,session)

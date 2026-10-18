@@ -2,6 +2,11 @@
 # 先建立宿主目录root:2001/2770；已核实APIuid100/gid101、workeruid0且2001未占用。
 services:
   generation-api:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       GENERATION_RESPONSE_SPOOL_DIR: /app/generation-response-spool
     group_add:
@@ -9,6 +14,11 @@ services:
     volumes:
       - /opt/image-control-plane/generation-response-spool:/app/generation-response-spool
   generation-worker:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       GENERATION_RESPONSE_SPOOL_DIR: /app/generation-response-spool
     group_add:

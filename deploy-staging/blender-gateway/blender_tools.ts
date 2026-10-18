@@ -4,8 +4,9 @@
  * 本档由 tools/export-blender-tools-staging.ts 从行为真源 src/lib/blender-tools.ts
  * 机械导出：真源全文逐行保留（bpy 脚本模板/分块存活配方/makedirs/崩溃重试/ffmpeg
  * 合成/指纹接线/artifact_base_url 全在），除「环境适配」外与真源逐行等价。
- * 白名单 diff 仅两处：① 本注释头；② 真源 `./blender-asset-store` import → 桩块
- * （理由见桩块注释）。禁止手改本档——改真源后跑
+ * 白名单 diff 仅三处：① 本注释头；② 真源 `./blender-asset-store` import → 桩块
+ * （理由见桩块注释）；③ `./harness-tool-ids` re-export → 内联同值字面量（理由见
+ * 导出脚本对应节）。禁止手改本档——改真源后跑
  * `npx tsx tools/export-blender-tools-staging.ts` 重导出（根治 T2 部署漂移）。
  *
  * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
@@ -209,6 +210,30 @@ function classifyFetchError(e: unknown): BridgeError {
   )
 }
 
+function bridgeHeaders(contentType?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${process.env.BLENDER_BRIDGE_TOKEN ?? ""}`,
+  }
+  if (contentType) headers["Content-Type"] = contentType
+  return headers
+}
+
+async function bridgeCancel(): Promise<void> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5_000)
+  try {
+    await fetch(`${bridgeUrl()}/v1/cancel`, {
+      method: "POST",
+      headers: bridgeHeaders(),
+      signal: controller.signal,
+    })
+  } catch {
+    // 取消是尽力而为；桥已死或无进程时忽略。
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function bridgeExecute(
   script: string,
   timeoutMs: number,
@@ -224,17 +249,21 @@ async function bridgeExecute(
   try {
     response = await fetch(`${bridgeUrl()}/v1/execute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: bridgeHeaders("application/json"),
       body: JSON.stringify({ script, timeout_ms: timeoutMs }),
       signal,
     })
   } catch (e) {
     clearTimeout(timer)
+    if (controller.signal.aborted || context?.abort?.aborted) {
+      await bridgeCancel()
+    }
     if (controller.signal.aborted && !context?.abort?.aborted) {
       throw bridgeError(
         "bridge_timeout",
         `等待 blender-bridge 响应超时（上限 ${abortMs} ms，脚本 timeout_ms=${timeoutMs}）。` +
-          `可为 blender_exec 传更大的 timeout_ms，或缩短脚本工作量；桥进程健康可用 GET ${bridgeUrl()}/v1/health 验证。`,
+          `桥上该任务可能仍在排队或渲染（GET ${bridgeUrl()}/v1/health 看 queue_depth）：不要原地立刻重试，` +
+          `先把渲染交给 blender_render（它有专用超时与存活预设），或等桥空再执行建模脚本。`,
       )
     }
     if (context?.abort?.aborted) {
@@ -277,7 +306,7 @@ async function bridgeHealth(
   const timer = setTimeout(() => controller.abort(), 10_000)
   let response: Response
   try {
-    response = await fetch(`${bridgeUrl()}/v1/health`, { signal: controller.signal })
+    response = await fetch(`${bridgeUrl()}/v1/health`, { signal: controller.signal, headers: bridgeHeaders() })
   } catch (e) {
     clearTimeout(timer)
     if (controller.signal.aborted && !context?.abort?.aborted) {
@@ -585,7 +614,7 @@ print("GLTF_EXPORTED:" + OUTPUT_PATH)
 export const blenderExecTool: BlenderToolDef = {
   id: "blender_exec",
   description:
-    "在 Blender 沙箱执行 bpy 脚本：建模、搭建场景、修改场景、骨架动画 keyframe。产物文件自动落到桥的工作目录。",
+    "在 Blender 沙箱执行 bpy 脚本：建模、搭建场景、修改场景、骨架动画 keyframe。本工具只负责建模/改场景，不要在脚本里调用 bpy.ops.render.render 渲染成图（渲染走 blender_render；exec 内渲染极易撞 120s 超时并占住桥队列）。产物文件写 out/ 相对路径。",
   args: {
     script: {
       type: "string",
@@ -700,6 +729,8 @@ export const blenderRenderTool: BlenderToolDef = {
     },
   },
   async execute(rawArgs, context) {
+    let chunkDir: string | null = null
+    let cleanupChunkDir = false
     try {
       const engineRaw = asString(rawArgs.render_engine)
       if (engineRaw !== undefined && engineRaw !== "eevee" && engineRaw !== "cycles") {
@@ -782,6 +813,8 @@ export const blenderRenderTool: BlenderToolDef = {
         throw lastErr
       }
 
+      chunkDir = nodePath.join(outDir, outputDirName)
+      cleanupChunkDir = true
       if (span) {
         for (let c = span.start; c <= span.end; c += RENDER_CHUNK_FRAMES) {
           await renderChunkWithRetry(c, Math.min(c + RENDER_CHUNK_FRAMES - 1, span.end))
@@ -828,7 +861,6 @@ export const blenderRenderTool: BlenderToolDef = {
             `turntable PNG 序列合成 mp4 失败：${mux.error}${mux.stderr ? `\nffmpeg stderr 尾部：\n${mux.stderr.slice(-1500)}` : ""}`,
             {
               title: "Turntable 渲染完成",
-              // PNG 序列仍在（out/<名>_frames/），供排查或手工合成。
               artifacts,
               artifact_count: artifacts.length,
               artifact_base_url: artifactBaseUrl(),
@@ -854,7 +886,7 @@ export const blenderRenderTool: BlenderToolDef = {
         artifacts = [mp4Artifact]
       }
 
-      return ok({
+      const okResult = ok({
         title: turntable ? "Turntable 渲染完成" : "渲染完成",
         artifacts,
         artifact_count: artifacts.length,
@@ -868,8 +900,19 @@ export const blenderRenderTool: BlenderToolDef = {
         output_base: outputBase,
         ...(mp4Artifact ? { mp4: mp4Artifact.path, fps: sceneFps || 24, chunk_count: chunkCount } : { chunk_count: chunkCount }),
       })
+      if (!turntable) cleanupChunkDir = false
+      return okResult
     } catch (e) {
       return toFail(e)
+    } finally {
+      if (
+        cleanupChunkDir &&
+        chunkDir &&
+        nodePath.basename(chunkDir).endsWith("_frames") &&
+        nodePath.basename(nodePath.dirname(chunkDir)) === "out"
+      ) {
+        await fsp.rm(chunkDir, { recursive: true, force: true }).catch(() => {})
+      }
     }
   },
 }
@@ -935,4 +978,4 @@ export const BLENDER_TOOLS: readonly BlenderToolDef[] = [
 
 /** harness-tool-registry.ts 登记用 id 元组（字母序，与 HARNESS_TOOL_ID_LIST 登记顺序一致）。
  *  本体已迁到 ./harness-tool-ids.ts（客户端安全），此处 re-export 保持既有 import 者不破。 */
-export { BLENDER_HARNESS_TOOL_IDS } from "./harness-tool-ids"
+export const BLENDER_HARNESS_TOOL_IDS = ["blender_exec", "blender_export_gltf", "blender_render"] as const

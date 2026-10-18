@@ -40,13 +40,14 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,PingFang SC,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,1,2,1,2,40,40,${portrait ? 120 : 48},1
+Style: Default,'Noto Sans CJK SC','Source Han Sans SC',sans-serif,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,1,2,1,2,40,40,${portrait ? 120 : 48},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
-  const lines = cues.map((c) =>
-    `Dialogue: 0,${assTime(c.startSec)},${assTime(c.endSec)},Default,,0,0,0,,${c.text.replace(/\n/g, '\\N')}`,
-  );
+  const lines = cues.map((c) => {
+    const text = c.text.replace(/[{}]/g, (ch) => `\\${ch}`).replace(/\n/g, '\\N');
+    return `Dialogue: 0,${assTime(c.startSec)},${assTime(c.endSec)},Default,,0,0,0,,${text}`;
+  });
   return header + lines.join('\n') + '\n';
 }

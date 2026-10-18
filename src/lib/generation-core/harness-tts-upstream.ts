@@ -29,7 +29,11 @@
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
-/** 闸道 TTS 路径（router.ts:531 逐字）。 */
+/**
+ * 拼在 supplier.baseUrl 后面的路径。
+ * 渠道基址已经是 `https://…/agent`，网关注册的是 `/agent/v1/tts`，
+ * 这里只能再加 `/v1/tts`，否则会变成 `/agent/agent/v1/tts`。
+ */
 export const HARNESS_TTS_PATH = "/v1/tts";
 
 function cleanBaseUrl(value: string): string {

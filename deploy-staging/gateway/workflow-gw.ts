@@ -60,7 +60,7 @@ import { hasEntityToken, resolveEntityTokens, sanitizeEntityReferences } from ".
 
 export const workflowService = new WorkflowService({
   emit: (state, name, data) => {
-    const target = (state as SessionState | undefined) ?? stateForWorkflow
+    const target = state as SessionState | undefined
     if (target) emitToSession(target, name, data)
     // 0920：画布事件同步落快照。此前这条出口只发 SSE 不写 canvasStates，
     // 前端刷新／重连后骨架全丢（GET /internal/canvas/snapshot 永远 has_state:false，
@@ -145,8 +145,8 @@ export const workflowService = new WorkflowService({
   //（轮子 = resolveActiveModel 同源判活；挑选逻辑与其 failover pool 同构：
   // media_type=video + available，按 24h 成功率排序取最优）。选不出回 null
   //（service 侧回退引擎默认，submit 前仍有 F2 failover 兜底）。
-  pickDefaultVideoModel: async (): Promise<string | null> => {
-    const session = stateForWorkflow
+  pickDefaultVideoModel: async (owner?: unknown): Promise<string | null> => {
+    const session = owner as SessionState | undefined
     const apiKey = session?.apiKey
     if (!apiKey) return null
     const models = await fetchModelStatusCached(apiKey)
@@ -166,9 +166,12 @@ export const workflowService = new WorkflowService({
     owner.workflowSnapshot = workflowSnapshotOf(wf)
     markDirty(owner)
   },
-  runNode: async (node, upstream, graph) => {
-    const session = stateForWorkflow
+  runNode: async (node, upstream, graph, owner) => {
+    const session = owner as SessionState | undefined
     if (!session) return { nodeId: node.id, ok: false, error: "no active session" }
+    if ((node.kind as string) === "director") {
+      return { nodeId: node.id, ok: false, error: "预演节点不执行生图" }
+    }
     // novel_film 配音环：真实 TTS 闭环（同步调用）；拼装（film）仍无上游。
     if (node.kind === "audio") {
       // 配音环：真实 TTS 闭环。取台词文本（node.metadata 或上游 text 节点），
@@ -195,7 +198,7 @@ export const workflowService = new WorkflowService({
       return { nodeId: node.id, ok: true, content: `${TTS_PUBLIC_BASE}/${fileName}`, costCoins: estimateTtsCoins("tts-zh", ttsText) }
     }
     if (node.kind === "film") {
-      const r = await assembleFilmNode(node, upstream, graph)
+      const r = await assembleFilmNode(node, upstream, graph, session)
       if (r.ok && r.content) void emitVideoDone(session, r.content, r.costCoins, node.id, "film")
       return r
     }
@@ -210,7 +213,7 @@ export const workflowService = new WorkflowService({
     return r
   },
   reviewBatch: async (wf, nodes) => {
-    const state = ((wf.owner ?? stateForWorkflow) as SessionState | null) ?? null
+    const state = (wf.owner as SessionState | null) ?? null
     const targets: import("./delivery-gate.ts").CriticPassTarget[] = []
     for (const node of nodes) {
       const artifact = wf.nodeContent[node.id]
@@ -257,7 +260,7 @@ export const workflowService = new WorkflowService({
   // 2026-09-24 协作确认闸挂点（详见本档 COLLABORATE_GATE_ROLES 节）。
   // 档位判定在 gateway（settings 是 gateway 的真源），engine 只收「停不停」。
   awaitingApproval: async (wf) => {
-    const state = ((wf.owner ?? stateForWorkflow) as SessionState | null) ?? null
+    const state = (wf.owner as SessionState | null) ?? null
     if (!state) return null
     // 只有协作档停（决策 1/2）。auto/preset：这里一句不问、零新增阻塞——护城河。
     if (await billingAutoApprovalEnabled(state) || normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode !== "collaborate") return null
@@ -394,8 +397,31 @@ export async function pushWorkflowCompletion(state: SessionState): Promise<void>
   }
 }
 
-// runNode 需要目前的 session（key）。workflow 端点都是带 session 呼叫的，执行前设入。
+/** @deprecated 生产路径禁止读取。仅保留导出，避免旧测试编译失败；业务只读参数或 wf.owner。 */
 export let stateForWorkflow: SessionState | null = null
+
+const WORKFLOW_SESSION_MAP_CAP = 2000
+function capMap<K, V>(map: Map<K, V>, cap = WORKFLOW_SESSION_MAP_CAP): void {
+  const orig = map.set.bind(map)
+  map.set = ((key: K, value: V) => {
+    if (!map.has(key) && map.size >= cap) {
+      const oldest = map.keys().next().value as K | undefined
+      if (oldest !== undefined) map.delete(oldest)
+    }
+    return orig(key, value)
+  }) as typeof map.set
+}
+function capSet<T>(set: Set<T>, cap = WORKFLOW_SESSION_MAP_CAP): void {
+  const orig = set.add.bind(set)
+  set.add = ((value: T) => {
+    if (!set.has(value) && set.size >= cap) {
+      const oldest = set.keys().next().value as T | undefined
+      if (oldest !== undefined) set.delete(oldest)
+    }
+    return orig(value)
+  }) as typeof set.add
+}
+capSet(workflowCompletionPushed)
 
 // ---- 工作流持久化（2026-08-27 修复，与 canvasSnapshot 同构）----
 // 根因：workflow 状态只在内存 Map（workflowService.workflows），gateway 重启即丢，
@@ -407,8 +433,10 @@ export let stateForWorkflow: SessionState | null = null
 // 前置声明：markDirty 引用 workflowOwnerBySession，const 提升安全（仅在请求
 // 处理时执行，远晚于模组顶层求值）。
 export const workflowOwnerBySession = new Map<string, string>() // sessionId -> workflowId
+capMap(workflowOwnerBySession)
 // F1（2026-08-31）断点续跑登记表：每进程每工作流只自动续跑一次，防循环重试。
 export const autoResumedWorkflows = new Set<string>()
+capSet(autoResumedWorkflows)
 
 /**
  * H8（2026-10-02）：节点失败文案必须带 failure_class + 上游原文首句。
@@ -447,6 +475,7 @@ export interface WorkflowBillingTruth {
   deviation_coins?: number
 }
 export const workflowBilling = new Map<string, WorkflowBillingTruth>()
+capMap(workflowBilling)
 
 /**
  * H13（2026-10-02）：批准额累加而非覆写。旧版每次 approve 直接 set 覆写，同一 wf
@@ -493,6 +522,7 @@ export function recordWorkflowRefund(state: SessionState, wfid: string, chargedC
 // ── 2026-10-02 e2e 成片评测三死线：控面为准的实扣结算 / 排队换道 / 孤儿镜取消 / 直推通报 ──
 /** 每工作流提交过的上游 job（供终态向控面结算实扣、停滞/放弃时取消）。 */
 export const workflowJobs = new Map<string, Map<string, { nodeId: string; kind: "video" | "image" }>>()
+capMap(workflowJobs)
 /** 排队超过此时长提示并尝试换同价通道（PM 死线：5 分钟）。 */
 export const QUEUE_SWITCH_MS = Number.parseInt(process.env.WORKFLOW_QUEUE_SWITCH_MS || "300000", 10) || 300_000
 
@@ -610,6 +640,7 @@ export async function settleWorkflowCharges(state: SessionState, wfid: string): 
 
 /** 已直推过通报的 key（wfid:kind）。 */
 export const workflowNoticeSent = new Set<string>()
+capSet(workflowNoticeSent)
 
 /**
  * 工作流终态/停滞直推通报（不经 LLM、不依赖 4096 唤醒）：SSE message.delta，含成片连结与控面实扣。
@@ -663,6 +694,7 @@ export async function sendWorkflowNotice(state: SessionState, wfid: string, kind
 // workflowService.generate 的 promise 在 runWfGenerate 手里，poller 摸不到
 // 内存工作流状态，故挂 gateway 不挂 poller（最小改动路径）。
 export const workflowWake = new Map<string, { sessionId: string; lastProgressAt: number }>()
+capMap(workflowWake)
 export const WORKFLOW_STALL_MS = Number.parseInt(process.env.WORKFLOW_STALL_MS || "360000", 10) || 360_000
 export const WORKFLOW_WAKE_SCAN_MS = 60_000
 
@@ -733,14 +765,14 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   }
   const graph = s.graph && typeof s.graph === "object" && Array.isArray((s.graph as { nodes?: unknown[] }).nodes) ? (s.graph as { nodes: unknown[]; connections?: unknown[] }) : null
   if (!graph) return
-  const nodeStatus: Record<string, "pending" | "running" | "success" | "error"> = {}
+  const nodeStatus: Record<string, "pending" | "running" | "success" | "error" | "skipped"> = {}
   const interrupted: string[] = []
   for (const [id, st] of Object.entries(s.nodeStatus ?? {})) {
     if (st === "running") {
       // 服务重启中断：执行循环已死，这个节点不可能还在跑——诚实标错，不伪造。
       nodeStatus[id] = "error"
       interrupted.push(id)
-    } else if (st === "pending" || st === "success" || st === "error") {
+    } else if (st === "pending" || st === "success" || st === "error" || st === "skipped") {
       nodeStatus[id] = st
     }
   }
@@ -836,10 +868,7 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
     }
     const wfid = restored.workflowId
     setTimeout(() => {
-      // F1 修（2026-08-31）：stateForWorkflow 由 /internal/workflow/* 请求入口赋值，
-      // 离线恢复（重启后无任何请求）时为 null → runNode 解析不到 session，image
-      // 节点全灭 "no active session"。timer 内先补本 session 指针再续跑。
-      stateForWorkflow = state
+      // runNode 读 restore 时绑定的 wf.owner，不写全局 session。
       // 2026-10-02：续跑与 runWfGenerate 同样登记唤醒 + 终态直推（此前 F1 续跑完成零通知——实测 wf_muqf0xbg_1）。
       workflowWake.set(wfid, { sessionId: state.sessionId, lastProgressAt: Date.now() })
       void workflowService
@@ -865,6 +894,7 @@ export async function assembleFilmNode(
   node: { id?: string; kind: string; metadata: Record<string, unknown> },
   upstream: Map<string, string>,
   graph?: { nodes: { id: string; role: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
+  session?: { sessionTitle?: string | null } | null,
 ): Promise<{ nodeId: string; ok: boolean; content?: string; costCoins?: number; message?: string; error?: string }> {
   const nodeId = (node as { id?: string }).id || ""
   const incoming = (graph?.connections ?? []).filter((c) => c.to === nodeId).map((c) => c.from)
@@ -940,11 +970,8 @@ export async function assembleFilmNode(
       clipIds.push(`h${i}`)
       clipSecs.push(sec)
     }
-    // 字幕轨 + 标题字（2026-10-02 接线）：字幕文本真源 = 各镜头上游分镜脚本 text 节点
-    // metadata.content（同 TTS 取文本口径 text→content→prompt，非新造抽取逻辑）；
-    // 时间轴 = 各镜头成片段时长累加。标题字真源 = 会话标题（项目标题，runNode 注入
-    // node.metadata.project_title）。交给 composeEngine 既有字幕烧录轮子（toAss +
-    // `subtitles=` 滤镜）落进画面。
+    // 字幕轨 + 标题字：台词时间只用已探到的 TTS/音频时长。没有真实时长不铺满镜头。
+    // 标题单独占 0..titleEnd，不改台词的 startSec。
     const subTextOfShot = (videoRole: string): string => {
       const shotRole = videoRole.replace(/_video$/, "")
       const scriptNode = graph?.nodes.find((n) => n.role === shotRole && n.kind === "text")
@@ -952,24 +979,65 @@ export async function assembleFilmNode(
       const raw = typeof md?.content === "string" ? md.content : typeof md?.text === "string" ? md.text : typeof md?.prompt === "string" ? md.prompt : ""
       return raw.trim()
     }
-    // 标题字真源 = 会话标题（项目标题；opencode 首条消息后异步生成），
-    // 生产走 stateForWorkflow.sessionTitle；harness/测试可经 metadata.project_title 注入。
+    type StagedAudio = { path: string; durationSec: number | null }
+    const stagedAudios: StagedAudio[] = []
+    let audioStageError: string | null = null
+    if (audioList.length > 0) {
+      try {
+        for (let i = 0; i < audioList.length; i += 1) {
+          const aPath = path.join(workDir, `audio_${i}.mp3`)
+          const mTts = audioList[i].match(/^https:\/\/store\.tinchak0207\.xyz\/agent\/v1\/audio\/([^/?#]+)$/)
+          const mDisk = audioList[i].match(/^https:\/\/store\.tinchak0207\.xyz\/image-data\/files\/(.+)$/)
+          if (mTts && !mTts[1].includes("..")) {
+            const cp = await invoke<CommandResult>("execute_command", { command: `cp ${shq(path.join(TTS_AUDIO_DIR, mTts[1]))} ${shq(aPath)}`, timeoutMs: 30000 })
+            if (cp.exit_code !== 0) throw new Error("平台音频本盘缺失")
+          } else if (mDisk && !mDisk[1].includes("..")) {
+            const cp = await invoke<CommandResult>("execute_command", { command: `cp ${shq(path.join("/opt/image-data-api/data", mDisk[1]))} ${shq(aPath)}`, timeoutMs: 30000 })
+            if (cp.exit_code !== 0) throw new Error("平台音频本盘缺失")
+          } else {
+            const res = await fetch(audioList[i], { signal: AbortSignal.timeout(120_000) })
+            if (!res.ok) throw new Error(`音频下载失败（http ${res.status}）`)
+            await Bun.write(aPath, res)
+          }
+          const aProbe = await invoke<CommandResult>("execute_command", {
+            command: `${ffmpeg.replace(/ffmpeg$/, "ffprobe")} -v error -show_entries format=duration -of csv=p=0 ${shq(aPath)}`,
+            timeoutMs: 15000,
+          })
+          const aDur = Number.parseFloat((aProbe.stdout || "").trim())
+          stagedAudios.push({ path: aPath, durationSec: Number.isFinite(aDur) && aDur > 0 ? aDur : null })
+        }
+      } catch (e) {
+        audioStageError = String((e as Error).message ?? e).slice(0, 200)
+        stagedAudios.length = 0
+        console.log(`[workflow] assembleFilm audio stage deferred: ${audioStageError}`)
+      }
+    }
     const projectTitle = String(
-      (node.metadata as Record<string, unknown>).project_title ?? stateForWorkflow?.sessionTitle ?? "",
+      node.metadata?.project_title ?? session?.sessionTitle ?? "",
     ).trim()
     const subtitleCues: { id: string; startSec: number; endSec: number; text: string }[] = []
     {
+      const dialogueIdx: number[] = []
+      for (let i = 0; i < sources.length; i += 1) {
+        if (subTextOfShot(sources[i].role)) dialogueIdx.push(i)
+      }
+      const pairByShot = stagedAudios.length === sources.length && sources.length > 0
+      const pairByLine = !pairByShot && dialogueIdx.length > 0 && stagedAudios.length === dialogueIdx.length
       let cursor = 0
+      let lineAudio = 0
       for (let i = 0; i < sources.length; i += 1) {
         const text = subTextOfShot(sources[i].role)
-        if (text) subtitleCues.push({ id: `sub_${i}`, startSec: cursor, endSec: cursor + clipSecs[i], text })
+        let dur: number | null = null
+        if (pairByShot) dur = stagedAudios[i]?.durationSec ?? null
+        else if (pairByLine && text) dur = stagedAudios[lineAudio++]?.durationSec ?? null
+        if (text && dur != null && dur > 0) {
+          subtitleCues.push({ id: `sub_${i}`, startSec: cursor, endSec: cursor + dur, text })
+        }
         cursor += clipSecs[i]
       }
       if (projectTitle) {
         const titleEnd = Math.min(3, Math.max(1, clipSecs[0] ?? 3))
         subtitleCues.unshift({ id: "title", startSec: 0, endSec: titleEnd, text: projectTitle })
-        // 标题与首镜字幕同区不叠字：首镜字幕从标题退场后开始。
-        if (subtitleCues.length > 1) subtitleCues[1].startSec = Math.max(subtitleCues[1].startSec, titleEnd)
       }
     }
     setHarnessState({
@@ -999,31 +1067,13 @@ export async function assembleFilmNode(
     let mixNote = ""
     if (audioList.length > 0) {
       try {
-        const audioPaths: string[] = []
+        if (audioStageError || stagedAudios.length !== audioList.length) {
+          throw new Error(audioStageError || "配音素材未齐")
+        }
+        const audioPaths = stagedAudios.map((a) => a.path)
         let totalAudioSec = 0
-        for (let i = 0; i < audioList.length; i += 1) {
-          const aPath = path.join(workDir, `audio_${i}.mp3`)
-          // 平台产物 URL 直接映射本盘路径（同镜头素材 fast-path 口径）；其余走网络下载。
-          const mTts = audioList[i].match(/^https:\/\/store\.tinchak0207\.xyz\/agent\/v1\/audio\/([^/?#]+)$/)
-          const mDisk = audioList[i].match(/^https:\/\/store\.tinchak0207\.xyz\/image-data\/files\/(.+)$/)
-          if (mTts && !mTts[1].includes("..")) {
-            const cp = await invoke<CommandResult>("execute_command", { command: `cp ${shq(path.join(TTS_AUDIO_DIR, mTts[1]))} ${shq(aPath)}`, timeoutMs: 30000 })
-            if (cp.exit_code !== 0) throw new Error("平台音频本盘缺失")
-          } else if (mDisk && !mDisk[1].includes("..")) {
-            const cp = await invoke<CommandResult>("execute_command", { command: `cp ${shq(path.join("/opt/image-data-api/data", mDisk[1]))} ${shq(aPath)}`, timeoutMs: 30000 })
-            if (cp.exit_code !== 0) throw new Error("平台音频本盘缺失")
-          } else {
-            const res = await fetch(audioList[i], { signal: AbortSignal.timeout(120_000) })
-            if (!res.ok) throw new Error(`音频下载失败（http ${res.status}）`)
-            await Bun.write(aPath, res)
-          }
-          audioPaths.push(aPath)
-          const aProbe = await invoke<CommandResult>("execute_command", {
-            command: `${ffmpeg.replace(/ffmpeg$/, "ffprobe")} -v error -show_entries format=duration -of csv=p=0 ${shq(aPath)}`,
-            timeoutMs: 15000,
-          })
-          const aDur = Number.parseFloat((aProbe.stdout || "").trim())
-          if (Number.isFinite(aDur) && aDur > 0) totalAudioSec += aDur
+        for (const a of stagedAudios) {
+          if (a.durationSec != null && a.durationSec > 0) totalAudioSec += a.durationSec
         }
         let trackPath = audioPaths[0]
         if (audioPaths.length > 1) {
@@ -1217,8 +1267,12 @@ export async function submitWorkflowNode(
   upstream: Map<string, string>,
   graph?: { nodes: { id: string; role: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
 ): Promise<{ nodeId: string; ok: boolean; content?: string; costCoins?: number; error?: string; lastAttempt?: Record<string, unknown> }> {
-  const meta = node.metadata
   const nodeId = (node as { id?: string }).id || ""
+  if ((node.kind as string) === "director") {
+    return { nodeId, ok: false, error: "预演节点不执行生图" }
+  }
+  if (!node.metadata) node.metadata = {}
+  const meta = node.metadata
 
   // 解析 prompt：优先 node.metadata，其次沿上游连线 BFS 找第一个有内容的 text 节点
   // （大片模板：角色描述 text → 四视图 config → 各视图 image；image 的 prompt 继承自角色描述）
@@ -1298,7 +1352,11 @@ export async function submitWorkflowNode(
   }
   if (node.kind === "video") {
     await catalogVideoPerSecondCoins(model, session.apiKey)
-    const videoOptions = resolveVideoSubmissionOptions(node, graph, model)
+    const videoOptions = resolveVideoSubmissionOptions(
+      { id: typeof node.id === "string" ? node.id : nodeId, metadata: node.metadata ?? undefined },
+      graph,
+      model,
+    )
     if (videoOptions.error) return { nodeId: node.id, ok: false, error: videoOptions.error }
     payload.generate_audio = videoOptions.generateAudio
     // 当前API无resolution/quality输入；显式非默认档已拒绝，不提交会被静默忽略的字段。
@@ -1591,6 +1649,7 @@ export function workflowServiceTemplates(): Response {
 // 已经是逐笔扣费确认的总闸门，双重弹卡反而是打扰）。workflow 删除/重跑
 // 不清此记录：同批重跑金额通常下降，重弹只会造成倒挂复辟。
 export const workflowGenerateApproved = new Map<string, { amount: number; nodes: number }>()
+capMap(workflowGenerateApproved)
 
 // 2026-08-29 整改（session 00c583ed 事故）：批量执行 confirm 的批准续跑注册表。
 // 旧版 /workflow/generate 在 handler 内联 while 轮询等用户批准（最长
@@ -1599,6 +1658,7 @@ export const workflowGenerateApproved = new Map<string, { amount: number; nodes:
 // 不可达」弃模板转手动逐镜。改为非阻塞：弹卡 → 注册回调 → 立即回
 // confirm_pending；settleConfirm(approved) 触发 runWfGenerate。
 export const wfGenerateContinuations = new Map<string, { state: SessionState; wfid: string; nodes: number; amount: number }>()
+capMap(wfGenerateContinuations)
 
 // ── 2026-09-24 协作确认闸（collaborate 档专属：剧本批准／资产确认／分镜确认）────
 //
@@ -1645,6 +1705,7 @@ export const COLLABORATE_GATE_LABELS: Record<string, string> = {
  * 同为进程内真值）：gateway 重启后重新问一次，宁可多问一次也不放过未确认的资产。
  */
 export const workflowGateApprovals = new Map<string, Map<string, string>>()
+capMap(workflowGateApprovals)
 
 /**
  * 停点续跑注册表（request_id → 待续跑的 workflow）。**刻意与 wfGenerateContinuations
@@ -1654,6 +1715,7 @@ export const workflowGateApprovals = new Map<string, Map<string, string>>()
  * settle 只触发续跑，一毛钱不碰帐。
  */
 export const wfGateContinuations = new Map<string, { state: SessionState; wfid: string; role: string; gateNodeId: string }>()
+capMap(wfGateContinuations)
 
 /** 交付物指纹：内容前 16 位 sha256（内容可能含换行/中文，只取指纹比对，不外泄原文）。 */
 function deliverableFingerprint(content: string): string {
@@ -1942,6 +2004,44 @@ async function postWorkflowWake(state: SessionState, wfid: string, content: stri
 
 // 同一会话同时到期的wakeup/cron/workflow只能有一个在途提交。
 const workflowWakeInFlight = new Set<string>()
+capSet(workflowWakeInFlight)
+
+/** 会话结束时清掉与该 session 绑定的表，以及能从 owner 反查到的 workflowId 表项。 */
+export function releaseWorkflowSession(sessionId: string): void {
+  if (!sessionId) return
+  const wfids = new Set<string>()
+  const owned = workflowOwnerBySession.get(sessionId)
+  if (owned) wfids.add(owned)
+  for (const [wfid, w] of workflowWake) {
+    if (w.sessionId === sessionId) wfids.add(wfid)
+  }
+  for (const [key, c] of wfGenerateContinuations) {
+    if (c.state?.sessionId === sessionId) {
+      wfGenerateContinuations.delete(key)
+      if (c.wfid) wfids.add(c.wfid)
+    }
+  }
+  for (const [key, c] of wfGateContinuations) {
+    if (c.state?.sessionId === sessionId) {
+      wfGateContinuations.delete(key)
+      if (c.wfid) wfids.add(c.wfid)
+    }
+  }
+  workflowOwnerBySession.delete(sessionId)
+  workflowWakeInFlight.delete(sessionId)
+  for (const wfid of wfids) {
+    workflowCompletionPushed.delete(wfid)
+    autoResumedWorkflows.delete(wfid)
+    workflowBilling.delete(wfid)
+    workflowJobs.delete(wfid)
+    workflowWake.delete(wfid)
+    workflowGenerateApproved.delete(wfid)
+    workflowGateApprovals.delete(wfid)
+    for (const key of [...workflowNoticeSent]) {
+      if (key === wfid || key.startsWith(`${wfid}:`)) workflowNoticeSent.delete(key)
+    }
+  }
+}
 
 /** 仅对明确的连接拒绝恢复重试；直发通报不是模型受理凭据。 */
 export async function dispatchWorkflowWake(state: SessionState, wfid: string, content: string, kind: "final" | "stalled"): Promise<void> {
@@ -1980,7 +2080,11 @@ export async function dispatchWorkflowWake(state: SessionState, wfid: string, co
 // 让 agent 开一轮诚实汇报后收尾。turn 在途（ackTimer 挂著）时让位——节点
 // 事件正在直播，agent 自己会汇报；下一轮扫描再试。投递/状态重置逐行同
 // handleResumeSession 的轮子（prompt_async + turn 重置 + 布哨）。
-setInterval(() => {
+// 由 index.ts 调用 startWorkflowWakeScanner，模块加载时不启动。
+let scanner: ReturnType<typeof setInterval> | null = null
+export function startWorkflowWakeScanner(): void {
+  if (scanner) return
+  const timer = setInterval(() => {
   for (const [wfid, w] of workflowWake) {
     const state = sessions.get(w.sessionId)
     if (!state) {
@@ -2053,6 +2157,9 @@ setInterval(() => {
     })().catch((error) => console.error(`[gateway] workflow wake preparation failed: wf=${wfid}`, error))
   }
 }, WORKFLOW_WAKE_SCAN_MS)
+  timer.unref?.()
+  scanner = timer
+}
 
 // workflow 内部端点（loopback）：Deepseek 的 workflow_* 工具呼叫。
 export async function handleWorkflowInternal(req: Request, session: SessionState): Promise<Response> {
@@ -2062,7 +2169,6 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
   const state = session
   const url = new URL(req.url)
   const pathname = url.pathname
-  stateForWorkflow = session
   let body: Record<string, unknown> = {}
   if (req.method === "POST") {
     try {
@@ -2264,12 +2370,12 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     // 目录coin报价≥门槛时沿用既有确认；缺报价明确409，不将未知价格计零放行。
     // full/auto由既有确认机制持续授权，不绕过报价真值或预算限制。
     invalidateWorkflowPriceCatalog()
-    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
+    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config" && (n.kind as string) !== "director")
     let estimatedTotal = 0
     for (const n of executableNodes) {
       const coins = await estimateNodeCoins(n, state.apiKey, wf.graph)
       if (coins === null) {
-        const videoOptions = n.kind === "video" ? resolveVideoSubmissionOptions(n, wf.graph, resolveNodeModel(n.id, n, wf.graph)) : null
+        const videoOptions = n.kind === "video" ? resolveVideoSubmissionOptions({ id: n.id, metadata: n.metadata ?? undefined }, wf.graph, resolveNodeModel(n.id, n, wf.graph)) : null
         return Response.json({ ok: false, code: "workflow_price_unknown", error: videoOptions?.error ?? "当前目录未返回该生成节点的币值价格，预算未知；尚未提交生成。", node_id: n.id, cost_hint: null }, { status: 409 })
       }
       estimatedTotal = Math.round((estimatedTotal + coins) * 1e6) / 1e6
@@ -2406,7 +2512,7 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       }
     }
     // 后台执行（与 generate 同语义）：立即回 running，节点结果走 canvas.* 事件。
-    // stateForWorkflow 已在 handleWorkflowInternal 开头设为本次 session。
+    // rerun 读 start/restore 时绑定的 wf.owner。
     const executionId = `rex_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     void workflowService.rerun(wfid, rootNodeId).then((r) => {
       if (!r.ok) console.error(`[workflow] rerun ${wfid}/${rootNodeId} finished: ${r.status}`)

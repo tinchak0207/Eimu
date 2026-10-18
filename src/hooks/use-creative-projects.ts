@@ -56,6 +56,7 @@ export interface CreativeProjectsState {
 }
 
 const ACTIVE_PROJECT_STORAGE_KEY = "eimu-active-project-v1";
+const CREATIVE_PROJECTS_OWNER_KEY = "eimu-creative-projects-owner-v1";
 
 const EMPTY_STATE: CreativeProjectsState = {
   projects: [],
@@ -83,6 +84,10 @@ let raw: StoreState = {
   loading: false,
   error: null,
 };
+/** undefined＝鉴权还没绑定。绑定后与缓存归属不符就丢弃。 */
+let boundUserId: string | null | undefined = undefined;
+let boundToken: string | null | undefined = undefined;
+let cacheOwnerUserId: string | null = readOwnerKey();
 
 /** 派生视图快照。只在 raw 变化时由 recompute() 换新对象（否则 useSyncExternalStore 无限 render）。 */
 let snapshot: CreativeProjectsState = buildState(raw);
@@ -263,6 +268,63 @@ function writeStoredActiveProjectId(id: string | null): void {
   }
 }
 
+function readOwnerKey(): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const value = localStorage.getItem(CREATIVE_PROJECTS_OWNER_KEY);
+    return value && value.length ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeOwnerKey(userId: string | null): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (userId) localStorage.setItem(CREATIVE_PROJECTS_OWNER_KEY, userId);
+    else localStorage.removeItem(CREATIVE_PROJECTS_OWNER_KEY);
+  } catch {
+    // 隐私模式/配额满：持久化失败不该让功能坏掉。
+  }
+}
+
+function clearCreativeProjectsMemory(): void {
+  raw = {
+    creativeProjects: [],
+    sessions: [],
+    activeProjectId: null,
+    loading: false,
+    error: null,
+  };
+  cacheOwnerUserId = null;
+  writeStoredActiveProjectId(null);
+  writeOwnerKey(null);
+  refreshSeq += 1;
+  recompute();
+}
+
+/**
+ * 登出、token 变化、user id 变化时清掉模块缓存和本机项目指针。
+ * 缓存里的 userId 与当前不符也丢弃，避免上一位用户的项目留在内存里。
+ */
+export function bindCreativeProjectsAuth(userId: string | null, token: string | null): void {
+  const storedOwner = readOwnerKey();
+  const identityChanged = boundUserId !== undefined && (boundUserId !== userId || boundToken !== token);
+  const storedMismatch = storedOwner !== null && storedOwner !== userId;
+  boundUserId = userId;
+  boundToken = token;
+  if (userId === null || identityChanged || storedMismatch) {
+    clearCreativeProjectsMemory();
+    if (userId) {
+      writeOwnerKey(userId);
+      cacheOwnerUserId = userId;
+    }
+    return;
+  }
+  writeOwnerKey(userId);
+  cacheOwnerUserId = userId;
+}
+
 // ─────────────────────────────────────────────────────────── 动作（模块级，单例）
 
 function upsertProjectInList(list: CreativeProject[], project: CreativeProject): CreativeProject[] {
@@ -302,24 +364,38 @@ export function findChatBySession(
 
 /**
  * 拉取项目列表 + 网关会话列表并合并。
- * 任一路失败只保留旧数据 + 设 error；activeProjectId 指向不存在项目时清空（fail-safe）。
+ * 非 401 的失败保留旧数据 + 设 error；401 清空内存，不留上一位用户的项目。
+ * activeProjectId 指向不存在项目时清空（fail-safe）。
  * silent 用于写操作后的对帐（不闪 loading）。
  */
 export async function refreshProjects(options?: { silent?: boolean }): Promise<void> {
   const seq = ++refreshSeq;
+  if (boundUserId !== undefined && cacheOwnerUserId !== null && cacheOwnerUserId !== boundUserId) {
+    clearCreativeProjectsMemory();
+    if (boundUserId) {
+      writeOwnerKey(boundUserId);
+      cacheOwnerUserId = boundUserId;
+    }
+  }
   if (!options?.silent) setRaw({ loading: true, error: null });
 
   const [projectsResult, sessionsResult] = await Promise.allSettled([listProjects(), listAgentSessions()]);
   if (seq !== refreshSeq) return; // 被更新的一次取代，丢弃旧结果。
 
   let error: string | null = null;
-  let creativeProjects = raw.creativeProjects;
-  let sessions = raw.sessions;
+  const ownerMismatch = boundUserId !== undefined && cacheOwnerUserId !== null && cacheOwnerUserId !== boundUserId;
+  let creativeProjects = ownerMismatch ? [] : raw.creativeProjects;
+  let sessions = ownerMismatch ? [] : raw.sessions;
+  let unauthorized = false;
 
   if (projectsResult.status === "fulfilled") {
     const res = projectsResult.value;
     if (res.ok && res.data) creativeProjects = res.data;
-    else error = res.message ?? "项目列表加载失败";
+    else if (res.reason === "not_authenticated") {
+      unauthorized = true;
+      creativeProjects = [];
+      sessions = [];
+    } else error = res.message ?? "项目列表加载失败";
   } else {
     error = errorMessage(projectsResult.reason, "项目列表加载失败");
   }
@@ -330,11 +406,16 @@ export async function refreshProjects(options?: { silent?: boolean }): Promise<v
     error = error ?? errorMessage(sessionsResult.reason, "会话列表加载失败");
   }
 
-  let activeProjectId = raw.activeProjectId;
+  let activeProjectId = unauthorized || ownerMismatch ? null : raw.activeProjectId;
+  if (unauthorized) {
+    writeStoredActiveProjectId(null);
+    cacheOwnerUserId = boundUserId ?? null;
+  }
   if (activeProjectId && !creativeProjects.some((project) => project.id === activeProjectId)) {
     activeProjectId = null;
     writeStoredActiveProjectId(null);
   }
+  if (!unauthorized && boundUserId) cacheOwnerUserId = boundUserId;
 
   raw = { creativeProjects, sessions, activeProjectId, loading: false, error };
   recompute();

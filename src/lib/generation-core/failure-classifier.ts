@@ -209,7 +209,11 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   // 全部匹配不到 → 502 掉进 overloaded 桶 → retryable → 任务在退避循环空转到
   // deadline（实录：seedance-2.0/-fast/-mini/-2.5-720p 共 72 笔 deadline_exceeded，
   // 真话只躺在 attempt 表）。补齐中英词与错误码。
-  if (status === 408 || (status !== undefined && status >= 500) || containsAny(normalized, ["system under load", "overloaded", "service unavailable", "temporarily unavailable"])) {
+  // 400-499 不得进 overloaded。确定性客户端错误走下方既有终态（user_input 等）。
+  if (
+    (status === undefined || status < 400 || status >= 500) &&
+    ((status !== undefined && status >= 500) || containsAny(normalized, ["system under load", "overloaded", "service unavailable", "temporarily unavailable"]))
+  ) {
     // 3 分钟而非 30 秒（2026-08-27）：first_party 排序永远压过 managed_pool，
     // 30s 冷却到期又被选中→再失败，单个 job 的 attempt 预算被同一渠道烧光
     // （实测 adobe2api「temporarily unavailable」31 次、sub2api 29 次）。
@@ -229,6 +233,9 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   }
   if (containsAny(normalized, ["econnreset", "enotfound", "fetch failed", "socket hang up", "network", "timed out", "timeout"])) {
     return { failureClass: "network", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + 30_000), detail, httpStatus: status };
+  }
+  if (status !== undefined && status >= 400 && status <= 499) {
+    return { failureClass: "user_input", retryable: false, switchSupplier: false, quarantineSupplier: false, cooldownUntil: null, detail, httpStatus: status };
   }
   return { failureClass: "unknown", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + 30_000), detail, httpStatus: status };
 }

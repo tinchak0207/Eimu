@@ -10,9 +10,8 @@ import {
   runGenBatch,
 } from "../lib/img-orchestrate"
 
-// 角色 DNA 三视图（2026-08-31 片2）：8 维 DNA（发型/脸型/体型/肤色/服装/色板/年龄感/标志物）
-// 由输入解析或 LLM 补全 → 拼固定后缀模板 → 生三视图。诚实：DNA 是结构化一致性锚点
-// （把特征写进每个 prompt），非魔法编码；seed 平台不可控标 null。
+// 单张排版概念图，不是分视角锁定。8 维外观文本拼进同一张图的提示词，只生一次。
+// 这些文本供后续提示词拼接，不锁死正面/侧面/背面的一致性。seed 平台不可控，标 null。
 
 const DNA_KEYS = ["hair", "face_shape", "body_type", "skin_tone", "outfit", "palette", "age_vibe", "signature"] as const
 
@@ -21,7 +20,7 @@ const DNA_SYSTEM =
 
 export default tool({
   description:
-    "角色 DNA 三视图：character_setting 填角色设定文字，输出三视图（正面/侧面/背面）+ 8 维 DNA 签名（发型/脸型/体型/肤色/服装/色板/年龄感/标志物）。DNA 可由 dna 参数（JSON 物件字串）直给，否则用 LLM 从设定补全；DNA 表与后缀进 metadata 供后续步骤引用。诚实声明：DNA 是结构化一致性锚点（把 8 维特征固定写入每个 prompt 后缀），不是魔法编码；平台不支持 seed，seed 标 null。dry_run=true 只返回请求清单与报价，不提交生图（LLM 补全 DNA 为内部通道不扣费，仍会执行以给完整 prompt）。",
+    "单张排版概念图，不是分视角锁定。character_setting 填角色设定文字，一次只生成一张把正面、侧面、背面排在同一张上的概念图，并给出 8 维外观文本（发型/脸型/体型/肤色/服装/色板/年龄感/标志物）。这些文本只供后续提示词拼接，不锁死各视角一致性。dna 可直给 JSON，否则用 LLM 从设定补全。平台不支持 seed，seed 为 null。dry_run=true 只返回请求清单与报价，不提交生图（LLM 补全为内部通道不扣费，仍会执行以给完整 prompt）。",
   args: {
     character_setting: tool.schema.string().describe("角色设定文字（外貌/服装/气质等）"),
     dna: tool.schema
@@ -55,22 +54,22 @@ export default tool({
       : ""
     const model = args.model ?? ORCH_DEFAULT_MODEL
     const size = normalizeSize(args.size)
-    const prompt = `character turnaround sheet, "${setting}", shown in front view, side view and back view on one sheet, full body, neutral pose, plain white background, character DNA lock — ${dnaSuffix || "(DNA 补全不可用，仅凭设定)"}`
+    const prompt = `single character concept sheet, "${setting}", front view, side view and back view arranged on one sheet, full body, neutral pose, plain white background, layout only not a locked turnaround — ${dnaSuffix || "(外观描述补全不可用，仅凭设定)"}`
     const reqs = [{ tag: "turnaround", prompt, model, size, n: 1 }]
     if (args.dry_run) {
       return ok({
-        title: "character_dna_turnaround dry_run",
+        title: "单张排版概念图 dry_run",
         dna,
         dna_source: dnaSource,
         ...(await planRequests(reqs, context.sessionID, context.abort)),
       })
     }
-    const batch = await runGenBatch(reqs, context.sessionID, context.abort, `角色 DNA 三视图（${model}）`)
+    const batch = await runGenBatch(reqs, context.sessionID, context.abort, `单张排版概念图（${model}）`)
     if (!batch.ok) return fail(batch.code, batch.hint, { title: "生图失败", ...batch.detail })
     const r0 = batch.results[0]
     return ok(
       {
-        title: r0.status === "succeeded" ? "DNA 三视图完成" : "DNA 三视图失败",
+        title: r0.status === "succeeded" ? "单张排版概念图完成" : "单张排版概念图失败",
         dna,
         dna_source: dnaSource,
         dna_suffix: dnaSuffix || null,
@@ -82,7 +81,7 @@ export default tool({
         cost_coins: r0.cost_coins,
         ...(r0.error ? { error: r0.error } : {}),
         seed_policy: SEED_NOTE,
-        note: "dna/dna_suffix 即一致性锚点：后续任何步骤把 dna_suffix 原样附加到 prompt 尾部即可复用本角色。",
+        note: "单张排版概念图，不是分视角锁定。dna_suffix 只是可拼进后续提示词的文本，不锁死三视图一致性。",
       },
       { dna, dna_suffix: dnaSuffix || null, url: r0.url, seed: null },
     )

@@ -20,7 +20,21 @@ export const sseTickets = new Map<string, { sessionId: string; apiKey: string; e
 export const UPLOAD_TICKET_TTL_MS = Number.parseInt(process.env.UPLOAD_TICKET_TTL_MS || "3600000", 10) || 3_600_000
 export const uploadTickets = new Map<string, { sessionId: string; expiresAt: number }>()
 
+const EXPIRING_MAP_CAP = 5000
+
+export function pruneExpiringMap<T extends { expiresAt: number }>(map: Map<string, T>, cap = EXPIRING_MAP_CAP): void {
+  const now = Date.now()
+  for (const [key, value] of map) {
+    if (value.expiresAt <= now) map.delete(key)
+  }
+  if (map.size <= cap) return
+  const ranked = [...map.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt)
+  const excess = map.size - cap
+  for (let i = 0; i < excess; i++) map.delete(ranked[i][0])
+}
+
 export function issueUploadTicket(sessionId: string): string {
+  pruneExpiringMap(uploadTickets)
   const ticket = `ut_${crypto.randomUUID().replace(/-/g, "")}`
   uploadTickets.set(ticket, { sessionId, expiresAt: Date.now() + UPLOAD_TICKET_TTL_MS })
   return ticket
@@ -29,6 +43,7 @@ export function issueUploadTicket(sessionId: string): string {
 /** 只验票据有效（未过期）且与会话匹配，不验 key（GET 方是浏览器标签）。
  *  过期顺手删条目；无效/过期/会话不匹配回 false，呼叫端一律 404 不泄露存在性。 */
 export function redeemUploadTicket(ticket: string, sessionId: string): boolean {
+  pruneExpiringMap(uploadTickets)
   const rec = uploadTickets.get(ticket)
   if (!rec) return false
   if (rec.expiresAt <= Date.now()) {
@@ -84,6 +99,7 @@ export const decoder = new TextDecoder()
 export const KEY_NEG_CACHE_TTL_MS = 15_000
 
 export async function validateApiKey(key: string): Promise<boolean> {
+  pruneExpiringMap(keyCache)
   const now = Date.now()
   const cached = keyCache.get(key)
   if (cached && cached.expiresAt > now) return cached.ok
@@ -107,6 +123,7 @@ export async function validateApiKey(key: string): Promise<boolean> {
   // 放大成这把合法 key 连续 5 分钟全部 401（2026-10-14 两支评测 agent 实测需重试最多
   // 15 次才自愈的根因）。
   if (conclusive) {
+    pruneExpiringMap(keyCache)
     keyCache.set(key, { ok, expiresAt: now + (ok ? KEY_CACHE_TTL_MS : KEY_NEG_CACHE_TTL_MS) })
   }
   return ok

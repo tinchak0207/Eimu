@@ -36,7 +36,7 @@ export interface RunNodeFn {
    * graph = 整个节点流（供 submit 解析上游 text/config 拿 prompt/参考）。
    * node 本身 metadata 可能只有 config 的 model/size——prompt 常在上游。
    */
-  (node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph): Promise<WorkflowNodeResult>
+  (node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph, owner?: unknown): Promise<WorkflowNodeResult>
 }
 
 export interface WorkflowServiceOptions {
@@ -68,7 +68,7 @@ export interface WorkflowServiceOptions {
    * 挂点不可用（探测故障），回退引擎默认（与旧行为一致，submit 前仍有 F2 failover
    * 兜底）。轮子 = index.ts 的 resolveActiveModel 同源（/v1/model-status 判活）。
    */
-  pickDefaultVideoModel?: () => Promise<string | null>
+  pickDefaultVideoModel?: (owner?: unknown) => Promise<string | null>
   /**
    * 2026-09-24 协作确认闸（collaborate 档专属）：批次间挂点，语义与 R9 中途闸
    *（midBatchBudgetGate）同构——回非 null 字串＝暂停，该字串即回给呼叫端/用户的
@@ -84,7 +84,7 @@ export interface ActiveWorkflow {
   templateId: string
   graph: WorkflowGraph
   status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota" | "paused_awaiting_approval" | "review_pending" | "review_partial" | "review_failed"
-  nodeStatus: Record<string, "pending" | "running" | "success" | "error">
+  nodeStatus: Record<string, "pending" | "running" | "success" | "error" | "skipped">
   nodeContent: Record<string, string>
   nodeCost: Record<string, number>
   owner: unknown // 建立时绑定的 session；emit 事件送回这个 session，后台执行不受 stateForWorkflow 影响
@@ -259,7 +259,7 @@ export class WorkflowService {
    * 重试 2 次，重试耗尽才判 error；不可重试错误（缺提示词/模型不可用/submit 4xx）
    * 立即返回不浪费重试。每步 console.log 留 journal 路径证据。
    */
-  private async runNodeWithRetry(node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph): Promise<WorkflowNodeResult> {
+  private async runNodeWithRetry(node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph, owner?: unknown): Promise<WorkflowNodeResult> {
     const maxRetries = 2
     const backoffs = [5_000, 15_000]
     let last: WorkflowNodeResult | null = null
@@ -269,7 +269,7 @@ export class WorkflowService {
         console.log(`[workflow-retry] ${node.id} attempt ${attempt}/${maxRetries + 1} in ${wait}ms (prev: ${String(last?.error ?? "").slice(0, 140)})`)
         await new Promise((r) => setTimeout(r, wait))
       }
-      const result = await this.opts.runNode(node, upstream, graph)
+      const result = await this.opts.runNode(node, upstream, graph, owner)
       if (result.ok) {
         if (attempt > 1) console.log(`[workflow-retry] ${node.id} RECOVERED on attempt ${attempt}`)
         return result
@@ -388,7 +388,7 @@ export class WorkflowService {
     if (templateId && this.opts.pickDefaultVideoModel && (getWorkflowTemplate(templateId)?.multiShot || templateId === "single_video")) {
       // fail-open：探测不可达/逾时 → null → startSync 用引擎默认（submit 前仍有 F2 failover）
       videoModel = await Promise.race([
-        this.opts.pickDefaultVideoModel().catch(() => null),
+        this.opts.pickDefaultVideoModel(owner).catch(() => null),
         new Promise<null>((r) => setTimeout(() => r(null), 5000)),
       ])
     }
@@ -519,6 +519,9 @@ export class WorkflowService {
     // 流式搭建：start 成功即把展开的节点流推上画布（模板路径一次可见整副骨架），
     // 之后 agent 的 add_node / connect 逐颗增量长出来——不等 workflow_generate。
     this.emitGraph(wf)
+    for (const n of wf.graph.nodes) {
+      if ((n.kind as string) === "director") this.markDirectorSkipped(wf, n.id)
+    }
     return { workflowId }
   }
 
@@ -556,6 +559,7 @@ export class WorkflowService {
     if (typeof metadata.content === "string" && metadata.content) wf.nodeContent[node.id] = metadata.content
     // 流式搭建：新节点即时上画布（emitNodeDelta 按 id 去重，幂等）。
     this.emitNodeDelta(wf, node)
+    if ((node.kind as string) === "director") this.markDirectorSkipped(wf, node.id)
     this.dirty(wf) // 节点流变更持久化
     return { nodeId: node.id }
   }
@@ -695,6 +699,50 @@ export class WorkflowService {
     return this.generateLoops.has(workflowId)
   }
 
+  /** director 预演节点不提交生图。 */
+  private markDirectorSkipped(wf: ActiveWorkflow, nodeId: string): void {
+    if (wf.nodeStatus[nodeId] === "skipped") return
+    wf.nodeStatus[nodeId] = "skipped"
+    this.dirty(wf)
+    try {
+      this.opts.emit(wf.owner, "canvas.node.updated", {
+        unit_id: wf.workflowId,
+        node_id: nodeId,
+        patch: { status: "skipped", message: "预演节点不执行生图", errorDetails: "预演节点不执行生图" },
+      })
+    } catch (e) {
+      console.error(`[workflow] ${wf.workflowId} director skip emit failed:`, e)
+    }
+  }
+
+  /** 批次异常：仍在 running 的节点写成 error 并走既有 canvas.node.updated，不把异常当成成功。 */
+  private failStillRunning(wf: ActiveWorkflow, workflowId: string, error: unknown): void {
+    const message = error instanceof Error && error.message ? error.message : String(error ?? "unknown")
+    for (const n of wf.graph.nodes) {
+      if (wf.nodeStatus[n.id] !== "running") continue
+      wf.nodeStatus[n.id] = "error"
+      this.dirty(wf)
+      try {
+        this.opts.emit(wf.owner, "canvas.node.updated", {
+          unit_id: workflowId,
+          node_id: n.id,
+          patch: {
+            status: "error",
+            errorDetails: message,
+            ...(this.opts.humanize ? { human_message: this.opts.humanize(message) } : {}),
+          },
+        })
+      } catch (emitErr) {
+        console.error(`[workflow] ${workflowId} node ${n.id} error emit failed:`, emitErr)
+      }
+    }
+    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config" && (n.kind as string) !== "director")
+    const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
+    const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length
+    wf.status = errCount > 0 && okCount > 0 ? "partial" : "failed"
+    this.dirty(wf)
+  }
+
   /** 执行工作流。emit canvas 事件；text/config 节点视为完成，image/video 调 runNode。 */
   async generate(workflowId: string): Promise<{ ok: boolean; status: string }> {
     // F1（2026-08-31）重入守卫：同一工作流已有执行循环在跑时拒绝二次 generate，
@@ -712,6 +760,17 @@ export class WorkflowService {
   private async generateInner(workflowId: string): Promise<{ ok: boolean; status: string }> {
     const wf = this.workflows.get(workflowId)
     if (!wf) return { ok: false, status: "workflow not found" }
+    try {
+      return await this.generateInnerBody(workflowId, wf)
+    } catch (e) {
+      this.failStillRunning(wf, workflowId, e)
+      const message = e instanceof Error ? e.message : String(e)
+      console.error(`[workflow] ${workflowId} generateInner exception: ${message}`)
+      return { ok: false, status: message || "generate failed" }
+    }
+  }
+
+  private async generateInnerBody(workflowId: string, wf: ActiveWorkflow): Promise<{ ok: boolean; status: string }> {
     // R5-B：余额预检在置 running 之前——拒绝开工时工作流状态不动、一币不烧。
     const budgetBlocked = await this.preflightBudget(wf)
     if (budgetBlocked) return { ok: false, status: budgetBlocked }
@@ -731,9 +790,12 @@ export class WorkflowService {
     // 防假阳性（2026-08-21 测试轮实录）：模型可能把生成节点建成 config 类型，
     // 引擎逐节点跳过后仍回 success——前端显示「跑完了」实际什么都没发生。
     // 全工作流没有任何可执行节点时必须显式报错，把正确的 kind 语义告诉模型。
+    for (const n of wf.graph.nodes) {
+      if ((n.kind as string) === "director") this.markDirectorSkipped(wf, n.id)
+    }
     const executableCount = order.filter((id) => {
       const node = wf.graph.nodes.find((n) => n.id === id)
-      return node && node.kind !== "text" && node.kind !== "config"
+      return node && node.kind !== "text" && node.kind !== "config" && (node.kind as string) !== "director"
     }).length
     if (executableCount === 0) {
       wf.status = "failed"
@@ -765,6 +827,10 @@ export class WorkflowService {
       for (const nodeId of batch) {
         const node = wf.graph.nodes.find((n) => n.id === nodeId)
         if (!node) continue
+        if ((node.kind as string) === "director") {
+          this.markDirectorSkipped(wf, nodeId)
+          continue
+        }
         if (node.kind === "text" || node.kind === "config") continue // audio/film 不跳过：执行由 runNode 诚实回报上游可用性
         if (wf.nodeStatus[nodeId] === "success" && wf.nodeContent[nodeId]) continue // R5-B 恢复语义：沿用既有成果，不重跑成功节点
         executableIds.push(nodeId)
@@ -799,7 +865,7 @@ export class WorkflowService {
       const results = await Promise.all(
         executableIds.map((nodeId) => {
           const node = wf.graph.nodes.find((n) => n.id === nodeId)!
-          return this.runNodeWithRetry(node, upstreamContent, wf.graph).then((result) => ({ nodeId, result }))
+          return this.runNodeWithRetry(node, upstreamContent, wf.graph, wf.owner).then((result) => ({ nodeId, result }))
         }),
       )
       for (const { nodeId, result } of results) {
@@ -838,7 +904,7 @@ export class WorkflowService {
     // delivery 阵列，两个维度刻意分离，不在此处混入）。
     const reviewBlocked = await this.qualityGate(wf)
     if (reviewBlocked) return { ok: false, status: reviewBlocked }
-    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
+    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config" && (n.kind as string) !== "director")
     const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
     const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length
     wf.status = errCount === 0 ? "success" : okCount === 0 ? "failed" : "partial"
@@ -964,7 +1030,12 @@ export class WorkflowService {
     if (root.kind === "text" || root.kind === "config") {
       return { ok: false, status: "text/config 节点是参考资料，无需重跑" }
     }
+    if ((root.kind as string) === "director") {
+      this.markDirectorSkipped(wf, rootNodeId)
+      return { ok: true, status: "预演节点不执行生图" }
+    }
 
+    try {
     // downstream 闭包：root + 沿连线可达的全部节点（BFS 至不变）
     const affected = new Set<string>([rootNodeId])
     for (let changed = true; changed; ) {
@@ -992,7 +1063,7 @@ export class WorkflowService {
     }
     for (const id of affected) {
       const n = wf.graph.nodes.find((x) => x.id === id)
-      if (!n || n.kind === "text" || n.kind === "config") continue
+      if (!n || n.kind === "text" || n.kind === "config" || (n.kind as string) === "director") continue
       wf.nodeStatus[id] = "pending"
       delete wf.nodeContent[id]
       delete wf.nodeCost[id]
@@ -1007,6 +1078,10 @@ export class WorkflowService {
         if (!affected.has(nodeId)) continue
         const node = wf.graph.nodes.find((n) => n.id === nodeId)
         if (!node) continue
+        if ((node.kind as string) === "director") {
+          this.markDirectorSkipped(wf, nodeId)
+          continue
+        }
         if (node.kind === "text" || node.kind === "config") continue
         executableIds.push(nodeId)
       }
@@ -1021,7 +1096,7 @@ export class WorkflowService {
       const results = await Promise.all(
         executableIds.map((nodeId) => {
           const node = wf.graph.nodes.find((n) => n.id === nodeId)!
-          return this.runNodeWithRetry(node, upstreamContent, wf.graph).then((result) => ({ nodeId, result }))
+          return this.runNodeWithRetry(node, upstreamContent, wf.graph, wf.owner).then((result) => ({ nodeId, result }))
         }),
       )
       for (const { nodeId, result } of results) {
@@ -1055,13 +1130,19 @@ export class WorkflowService {
     // R5-B：三态终判（与 generate 同口径）——partial 时成功节点成果原样保留
     const reviewBlocked = await this.qualityGate(wf)
     if (reviewBlocked) return { ok: false, status: reviewBlocked }
-    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config")
+    const executableNodes = wf.graph.nodes.filter((n) => n.kind !== "text" && n.kind !== "config" && (n.kind as string) !== "director")
     const okCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "success").length
     const errCount = executableNodes.filter((n) => wf.nodeStatus[n.id] === "error").length
     wf.status = errCount === 0 ? "success" : okCount === 0 ? "failed" : "partial"
     console.log(`[workflow] rerun ${workflowId} finished: status=${wf.status} success=${okCount} error=${errCount} (of ${executableNodes.length} executable)`)
     this.dirty(wf)
     return { ok: wf.status !== "failed", status: wf.status }
+    } catch (e) {
+      this.failStillRunning(wf, workflowId, e)
+      const message = e instanceof Error ? e.message : String(e)
+      console.error(`[workflow] rerun ${workflowId} exception: ${message}`)
+      return { ok: false, status: message || "rerun failed" }
+    }
   }
 }
 

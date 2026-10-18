@@ -3,7 +3,8 @@
 //
 // 约束：
 // - 计划文件目录默认 HARNESS_STATE/plans；显式配置的目录必须落在工作区内。
-// - 审批必须复用网关既有 confirm 卡（pendingConfirms + SSE + 用户答复端点），不得自动通过。
+// - 审批必须复用网关既有 confirm 卡（pendingConfirms + SSE + 用户答复端点）。
+// - 例外：已有的全自动/无确认通道（interaction_mode=auto、租户 full、进入前模式 auto/dontAsk/bypassPermissions）直接批准，不轮询。
 // - 计划模式下写操作由 planModeGuard 统一回 ask；只读工具放行。
 import { createHash, randomUUID } from "node:crypto"
 import { constants } from "node:fs"
@@ -13,8 +14,8 @@ import { CONFIRM_TIMEOUT_MS } from "./constants-gateway"
 import { waitFor } from "./internal-waiters"
 import { settleConfirm } from "./media-internal-routes"
 import { PLAN_READ_ONLY_TOOLS, getPolicyState, isPermissionMode, updateRules } from "./permission-policy"
-import { loadHarnessSecurityState, saveHarnessSecurityState, withHarnessSecurityTransaction } from "./persistence"
-import { billingPermissionTenant } from "./charge-approval-policy"
+import { loadHarnessSecurityState, saveHarnessSecurityState, withHarnessSecurityTransaction, loadUserSettings } from "./persistence"
+import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy"
 import { resolveSession } from "./sessions-core"
 import { emitToSession } from "./sse-core"
 import { subagentParentState } from "./subagent"
@@ -375,6 +376,16 @@ function restorePolicyMode(sessionId: string, prePlanMode: string, tenant: strin
   }
 }
 
+async function planExitAutoApproved(state: SessionState, record: PlanSessionState): Promise<boolean> {
+  if (await billingAutoApprovalEnabled(state)) return true
+  if (state.apiKey) {
+    const settings = loadUserSettings(state.apiKey) as { interaction_mode?: string } | null
+    if (settings?.interaction_mode === "auto") return true
+  }
+  const prior = record.prePlanMode
+  return prior === "auto" || prior === "dontAsk" || prior === "bypassPermissions"
+}
+
 async function finalizeApproval(record: PlanSessionState, plan: string, state: SessionState, requestId: string): Promise<ExitPlanModeApproved | ExitPlanModeFailure> {
   // 授权绑定发卡时的完整内容和请求；不能拿旧卡批准随后改写的计划。
   const tenant = record.permissionTenant ?? await billingPermissionTenant(state)
@@ -436,6 +447,16 @@ export async function exitPlanMode(
   }
 
   const planHash = read.sha256
+  if (await planExitAutoApproved(state, record)) {
+    const requestId = record.pendingRequestId && record.pendingPlanHash === planHash
+      ? record.pendingRequestId
+      : `plan_auto_${randomUUID().replace(/-/g, "").slice(0, 12)}`
+    record.pendingRequestId = requestId
+    record.pendingPlanHash = planHash
+    planStates.set(sid, record)
+    trimPlanCache()
+    return finalizeApproval(record, plan, state, requestId)
+  }
   if (record.pendingRequestId && record.pendingPlanHash !== planHash) {
     // 计划变更作废旧卡，并唤醒持有旧请求的并发等待者。
     settleConfirm(state, record.pendingRequestId, "denied")

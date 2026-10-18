@@ -20,7 +20,9 @@
 //
 // 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 
+import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { put } from "@/lib/blob-backend";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { AD_SIZE_OPTIONS, normalizeSizeSelection, type AdSizeOption } from "@/lib/ad-formats";
 import { summarizeFormatCrops, type FormatCropPlan } from "@/lib/canvas/format-crops";
@@ -45,6 +47,7 @@ interface ExecutedItem {
   id: string;
   mode: FormatCropPlan["mode"];
   status: "done" | "skipped";
+  url?: string;
   dataUrl?: string;
   width?: number;
   height?: number;
@@ -149,18 +152,39 @@ export async function POST(req: NextRequest) {
   let executed: ExecutedItem[] | undefined;
   if (execute && buffer) {
     executed = [];
+    const inlineFallback: Array<{ item: ExecutedItem; bytes: Buffer }> = [];
     for (const plan of summary.plans) {
       if (plan.mode === "crop" && plan.cropRect) {
         try {
           const out = await cropImage(buffer, plan.cropRect);
-          executed.push({
-            id: plan.id,
-            mode: "crop",
-            status: "done",
-            dataUrl: `data:image/webp;base64,${out.toString("base64")}`,
-            width: plan.outputWidth,
-            height: plan.outputHeight,
-          });
+          const safeId = plan.id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40) || "crop";
+          const pathname = `canvas/format-crops/${caller.user.id}/${safeId}-${randomBytes(4).toString("hex")}.webp`;
+          try {
+            const blob = await put(pathname, out, {
+              access: "public",
+              contentType: "image/webp",
+              cacheControlMaxAge: 60,
+            });
+            executed.push({
+              id: plan.id,
+              mode: "crop",
+              status: "done",
+              url: blob.url,
+              width: plan.outputWidth,
+              height: plan.outputHeight,
+            });
+          } catch {
+            inlineFallback.push({
+              item: {
+                id: plan.id,
+                mode: "crop",
+                status: "done",
+                width: plan.outputWidth,
+                height: plan.outputHeight,
+              },
+              bytes: out,
+            });
+          }
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           executed.push({ id: plan.id, mode: "crop", status: "skipped", reason: `crop_failed:${reason}` });
@@ -181,6 +205,15 @@ export async function POST(req: NextRequest) {
         continue;
       }
       executed.push({ id: plan.id, mode: "rejected", status: "skipped", reason: plan.reason ?? "rejected" });
+    }
+    if (inlineFallback.length > 2) {
+      return fail(413, "裁切结果无法写入对象存储，拒绝在一个响应里内联超过 2 张图片", "payload_too_large");
+    }
+    for (const pending of inlineFallback) {
+      executed.push({
+        ...pending.item,
+        dataUrl: `data:image/webp;base64,${pending.bytes.toString("base64")}`,
+      });
     }
   }
 

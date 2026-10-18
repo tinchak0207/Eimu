@@ -1,3 +1,4 @@
+// @deprecated 已从 opencode.json 禁用：eimu-guard 对 task 工具抛错，且 tools/ 会被加载器注册。不要删除本文件。
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail } from "../lib/client"
 

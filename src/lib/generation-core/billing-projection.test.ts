@@ -118,9 +118,9 @@ test("failed job without upstream attempt -> no writeoff, no insert at all", asy
   assert.equal(summary.projected, 0);
 });
 
-/** 从呼叫记录中捞出 writeoff 扫描查询的 SQL 文本（含 job.status = 'failed'）。 */
+/** 从呼叫记录中捞出 writeoff 扫描（不含 succeeded 投影扫描，那条也会提到 failed）。 */
 function writeoffScanSql(calls: Call[]): string {
-  const call = calls.find((c) => c.sql.includes("job.status = 'failed'"));
+  const call = calls.find((c) => c.sql.includes("job.status = 'failed'") && c.sql.includes("operation = 'writeoff'"));
   assert.ok(call, "writeoff scan query should be issued");
   return call.sql;
 }

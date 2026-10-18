@@ -24,12 +24,20 @@ export const dynamic = "force-dynamic";
 
 type StepState = "ok" | "degraded" | "cooldown" | "disabled" | "no_capability" | "missing";
 
+function redactSecrets(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{4,}/gi, "[redacted]")
+    .replace(/bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/key=[^\s&"'<>]+/gi, "key=[redacted]");
+}
+
 function errorResponse(error: unknown, fallback: string) {
   if (error instanceof Error && error.message === "UNAUTHORIZED") {
     return NextResponse.json({ success: false, message: "请先登录管理员后台。" }, { status: 401 });
   }
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ success: false, message }, { status: 500 });
+  const raw = error instanceof Error ? error.message : fallback;
+  console.error("[admin-model-routes]", redactSecrets(raw));
+  return NextResponse.json({ success: false, message: fallback }, { status: 500 });
 }
 
 async function loadSupplierState() {

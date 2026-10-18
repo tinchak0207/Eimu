@@ -7,6 +7,11 @@ const SITE_URL = getSiteUrlFromEnv();
 export const metadata: Metadata = {
   title: "开发进阶（B 端 API） | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/api` },
+  openGraph: {
+    title: "开发进阶（B 端 API） | 文档中心",
+    description: "开发进阶（B 端 API） | 文档中心",
+    url: "/docs/api",
+  },
 };
 
 export default function DocsApiPage() {

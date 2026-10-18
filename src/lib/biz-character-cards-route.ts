@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { bizErrorResponse, guardBizApiKey } from "@/lib/biz-openai-error";
-import { listCharacterCards, saveCharacterCard } from "@/lib/character-card-store";
+import { CharacterCardPersistError, listCharacterCards, saveCharacterCard } from "@/lib/character-card-store";
 import { MAX_CARD_REFERENCES, normalizeCharacterCard, toCharacterCardKind } from "@/lib/character-cards";
 import type { CharacterCard, CharacterCardKind } from "@/lib/character-cards";
 
@@ -235,13 +235,19 @@ export async function POST(req: NextRequest) {
   try {
     // saveCharacterCard 语义 = **upsert by id（replace，非 append）**：
     // 同 id 的既有项被新卡取代并移到最前，卡总数不变。
-    await saveCharacterCard(auth.key.userId, normalized);
+    const saved = await saveCharacterCard(auth.key.userId, normalized);
+    if (!saved) {
+      return bizErrorResponse(400, "卡数据无效，未保存。", "invalid_request_error", "invalid_payload", traceId);
+    }
     return withTraceId(
-      NextResponse.json({ object: "character_card", data: toWireCard(normalized) }, { status: 201 }),
+      NextResponse.json({ object: "character_card", data: toWireCard(saved) }, { status: 201 }),
       traceId,
     );
   } catch (error) {
-    console.error("[biz-character-cards] save failed:", error);
+    if (error instanceof CharacterCardPersistError) {
+      return bizErrorResponse(400, "参考图无法转存，未保存角色卡。", "invalid_request_error", "reference_persist_failed", traceId);
+    }
+    console.error("[biz-character-cards] save failed");
     return bizErrorResponse(500, "保存角色卡失败，请稍后再试。", "api_error", "internal_error", traceId);
   }
 }
