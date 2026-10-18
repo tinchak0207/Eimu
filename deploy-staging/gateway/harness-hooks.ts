@@ -12,6 +12,9 @@
  *   systemMessage 4000、单行 200。
  * - 错误不阻断主流程，但写进 errors/results。
  */
+import { readdirSync, readFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+
 export const HOOK_EVENTS = [
   "PreToolUse",
   "PostToolUse",
@@ -72,6 +75,8 @@ export const DEFAULT_HOOKS_PATH = "/opt/agent-harness/state/hooks.json"
 export const DEFAULT_HOOK_TIMEOUT_MS = 60000
 /** 单个 hook 的硬上限：任何配置/调用参数都不能超过 10 分钟。 */
 export const MAX_HOOK_TIMEOUT_MS = 600000
+/** 对话内 hook（SessionStart/UserPromptSubmit/Stop）的默认预算；非法配置回退此值。 */
+export const DEFAULT_HOOK_PROMPT_TIMEOUT_MS = 5000
 
 export const HOOK_OUTPUT_LIMITS = Object.freeze({
   reason: 2000,
@@ -125,6 +130,8 @@ export interface HookExecutionResult {
   error?: string
   /** 非致命问题（例如 hookSpecificOutput 事件名不匹配被丢弃）。 */
   warnings?: string[]
+  /** 约束（P2-10）：超时/中止是否已发生；孙进程无法回收时 errors 会写明。 */
+  timedOut?: boolean
   durationMs: number
 }
 
@@ -139,6 +146,8 @@ export interface HookRunResult {
   hookSpecificOutput?: Record<string, unknown>
   results: HookExecutionResult[]
   errors: string[]
+  /** 任一行超时（P2-10）：调用方据此避免把「超时」误判成「明确放行」。 */
+  timedOut?: boolean
   /** 非致命问题；同时以 `warning: ...` 形式并入 errors，便于旧调用方看到。 */
   warnings?: string[]
 }
@@ -158,6 +167,47 @@ export function isHookEvent(event: string): event is HookEvent {
 
 export function isEnabledHookEvent(event: string): event is EnabledHookEvent {
   return (ENABLED_HOOK_EVENTS as readonly string[]).includes(event)
+}
+
+/**
+ * 约束（P1-6/P3-14）：hook 注入的 additionalContext/systemMessage 是资料不是指令。
+ * 插件与网关消费前必须先过本函数：转义可伪造章节的行首 `#`（含 `> #`、`1. #`、
+ * `- #` 变体）与围栏字符。导出给 opencode 插件 import（插件侧修改由 H 代理执行）。
+ */
+const GW_CREDENTIAL_LIKE_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
+
+export function escapeInjectedData(text: string): string {
+  if (!text) return text
+  return String(text)
+    .replace(GW_CREDENTIAL_LIKE_RE, "⟪已移除的凭证样式文本⟫")
+    .replace(/\\?⟦/g, "\\⟦")
+    .replace(/\\?⟧/g, "\\⟧")
+    .replace(/\\?【/g, "\\【")
+    .replace(/\\?】/g, "\\】")
+    .replace(/^([ \t]*(?:>[ \t]*)*(?:(?:[-*+•]|\d+[.)])[ \t]+)?)#/gm, "$1\\#")
+}
+
+/**
+ * 约束（P2-12）：HARNESS_HOOK_PROMPT_TIMEOUT_MS 非法（空/非数字/≤0）回退 5s；
+ * messages-gw 现为 `parseInt(...) || 5000`，会把负数当有效预算。调用方应改用本函数
+ * （H 代理修改点，见交付报告）。
+ */
+export function resolvePromptHookTimeoutMs(raw = process.env.HARNESS_HOOK_PROMPT_TIMEOUT_MS): number {
+  if (typeof raw !== "string" || raw.trim().length === 0) return DEFAULT_HOOK_PROMPT_TIMEOUT_MS
+  const parsed = Number(raw.trim())
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_HOOK_PROMPT_TIMEOUT_MS
+  return Math.min(MAX_HOOK_TIMEOUT_MS, Math.floor(parsed))
+}
+
+/**
+ * 约束（P2-12）：空字符串 / 纯空白 = 未配置（用默认路径，不报 config_missing）；
+ * 只有显式给出非空路径且文件不存在才是 config_missing。
+ */
+export function resolveHooksConfigPath(explicit?: string): { path: string; explicit: boolean } {
+  const raw = explicit ?? process.env.HARNESS_HOOKS_PATH
+  const trimmed = typeof raw === "string" ? raw.trim() : ""
+  if (trimmed.length === 0) return { path: DEFAULT_HOOKS_PATH, explicit: false }
+  return { path: trimmed, explicit: true }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -287,9 +337,9 @@ async function readHooksConfig(
   }
 }
 
-export async function loadHooksConfig(configPath = process.env.HARNESS_HOOKS_PATH || DEFAULT_HOOKS_PATH): Promise<HooksConfig> {
-  const explicit = configPath !== DEFAULT_HOOKS_PATH
-  return (await readHooksConfig(configPath, explicit)).config
+export async function loadHooksConfig(configPath?: string): Promise<HooksConfig> {
+  const resolved = resolveHooksConfigPath(configPath)
+  return (await readHooksConfig(resolved.path, resolved.explicit)).config
 }
 
 function matcherQuery(event: string, input: Record<string, unknown>): string | undefined {
@@ -410,6 +460,7 @@ interface ParsedActionOutput {
   stderr: string
   error?: string
   warnings?: string[]
+  timedOut?: boolean
 }
 
 function parseActionOutput(
@@ -429,6 +480,7 @@ function parseActionOutput(
       exitCode,
       stdout,
       stderr,
+      timedOut: true,
       error: `hook timed out after ${timeoutMs}ms`,
     }
   }
@@ -461,7 +513,15 @@ function parseActionOutput(
   const jsonDecision = asString(json.decision)
   const blockDecision = jsonDecision === "block" || permissionDecision === "deny" || json.continue === false
   const exitBlocked = exitCode === 2
-  const reasonSource = asString(json.reason) ?? asString(json.stopReason) ?? (exitBlocked ? stderrRaw.trim() || stdoutRaw.trim() : undefined)
+  // 约束（P2-11）：CC 的拒绝理由在 permissionDecisionReason，必须映射到 reason
+  // 回给调用方；不能只认 reason/stopReason 而丢掉拒绝原因。
+  const permissionDecisionReason =
+    asString(hookSpecificOutput?.permissionDecisionReason) ?? asString(json.permissionDecisionReason)
+  const reasonSource =
+    permissionDecisionReason ??
+    asString(json.reason) ??
+    asString(json.stopReason) ??
+    (exitBlocked ? stderrRaw.trim() || stdoutRaw.trim() : undefined)
   const additionalContextSource =
     asString(hookSpecificOutput?.additionalContext) ?? asString(json.additionalContext)
   const systemMessageSource = asString(json.systemMessage)
@@ -494,6 +554,132 @@ function eventEnv(event: string, input: Record<string, unknown>): Record<string,
   }
 }
 
+interface ProcRow {
+  pid: number
+  ppid: number
+  pgrp: number
+  sid: number
+}
+
+/** 读 /proc/<pid>/stat：comm 可能含空格/括号，按最后一个 ')' 切字段。 */
+function readProcTable(): ProcRow[] {
+  const rows: ProcRow[] = []
+  let names: string[]
+  try {
+    names = readdirSync("/proc")
+  } catch {
+    return rows
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue
+    const pid = Number(name)
+    if (pid === process.pid) continue
+    let text: string
+    try {
+      text = readFileSync(`/proc/${name}/stat`, "utf8")
+    } catch {
+      continue
+    }
+    const close = text.lastIndexOf(")")
+    if (close < 0) continue
+    const fields = text.slice(close + 2).split(" ")
+    const ppid = Number(fields[1])
+    const pgrp = Number(fields[2])
+    const sid = Number(fields[3])
+    if (!Number.isFinite(ppid) || !Number.isFinite(pgrp) || !Number.isFinite(sid)) continue
+    rows.push({ pid, ppid, pgrp, sid })
+  }
+  return rows
+}
+
+/**
+ * 约束（P2-10）：`setsid` 会让孙进程换 session/pgid，单靠 pgrp/sid 追不到。
+ * 每次 hook 运行注入唯一环境令牌，按 /proc/<pid>/environ 命中同一令牌的进程，
+ * 即使已 reparent 到 init 也能回收。
+ */
+function findProcessesByRunToken(token: string): number[] {
+  const marker = `HARNESS_HOOK_RUN_TOKEN=${token}`
+  const pids: number[] = []
+  let names: string[]
+  try {
+    names = readdirSync("/proc")
+  } catch {
+    return pids
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue
+    const pid = Number(name)
+    if (pid === process.pid) continue
+    let environ: string
+    try {
+      environ = readFileSync(`/proc/${name}/environ`, "utf8")
+    } catch {
+      continue
+    }
+    if (environ.split("\0").includes(marker)) pids.push(pid)
+  }
+  return pids
+}
+
+/**
+ * 约束（P2-10）：先杀进程组，再按运行令牌 + /proc 的 pgrp/sid/ppid 递归收集后代
+ * 并 SIGKILL；返回回收统计，调用方立刻返回 `timedOut`，不等孙进程释放管道。
+ */
+function killProcessTree(rootPid: number, runToken?: string): { killed: number; unreaped: number } {
+  try {
+    process.kill(-rootPid, "SIGKILL")
+  } catch {
+    // 进程组可能已不存在。
+  }
+  try {
+    process.kill(rootPid, "SIGKILL")
+  } catch {
+    // 主进程可能已退出。
+  }
+  const table = readProcTable()
+  const children = new Map<number, number[]>()
+  for (const row of table) {
+    const list = children.get(row.ppid)
+    if (list !== undefined) list.push(row.pid)
+    else children.set(row.ppid, [row.pid])
+  }
+  const targets = new Set<number>()
+  const queue: number[] = [rootPid]
+  if (runToken !== undefined && runToken.length > 0) {
+    for (const pid of findProcessesByRunToken(runToken)) {
+      if (targets.has(pid)) continue
+      targets.add(pid)
+      queue.push(pid)
+    }
+  }
+  while (queue.length > 0) {
+    const pid = queue.pop() as number
+    for (const row of table) {
+      if (targets.has(row.pid)) continue
+      if (row.pgrp === pid || row.sid === pid || row.ppid === pid) {
+        targets.add(row.pid)
+        queue.push(row.pid)
+      }
+    }
+    for (const child of children.get(pid) ?? []) {
+      if (targets.has(child)) continue
+      targets.add(child)
+      queue.push(child)
+    }
+  }
+  let killed = 0
+  for (const pid of targets) {
+    try {
+      process.kill(pid, "SIGKILL")
+      killed += 1
+    } catch (error) {
+      // ESRCH = 已经退出，视为已回收。
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") killed += 1
+    }
+  }
+  return { killed, unreaped: Math.max(0, targets.size - killed) }
+}
+
 async function runCommandAction(
   action: HookCommandAction,
   event: string,
@@ -503,6 +689,8 @@ async function runCommandAction(
   const started = Date.now()
   const timeoutMs = effectiveTimeout(action.timeout, opts.timeoutMs)
   const cwd = opts.cwd ?? process.env.HARNESS_WORKSPACE ?? process.cwd()
+  // 约束（P2-10）：运行令牌随环境继承，setsid/双 fork 的后代也能被追回。
+  const runToken = randomUUID()
   let timedOut = false
   const controller = new AbortController()
   const onOuterAbort = () => controller.abort()
@@ -521,18 +709,14 @@ async function runCommandAction(
     controller.abort()
   }, timeoutMs)
 
-  // 约束（P1-6）：超时/中止只杀整个进程组（detached → 新 process group），
-  // 且立刻返回，不等孙进程释放 stdout（否则 `bash -lc 'sleep 300 &'` 会挂住）。
+  // 约束（P1-6/P2-10）：超时/中止杀整个进程组并扫描 /proc 回收 setsid 孙进程；
+  // 立刻返回，不等孙进程释放 stdout（否则 `bash -lc 'setsid sleep 300'` 会挂住）。
+  let reapNote = ""
   const killTree = () => {
     if (proc === null) return
-    try {
-      process.kill(-proc.pid, "SIGKILL")
-    } catch {
-      try {
-        proc.kill()
-      } catch {
-        // 约束：kill 失败不掩盖超时结论。
-      }
+    const reap = killProcessTree(proc.pid, runToken)
+    if (reap.unreaped > 0) {
+      reapNote = ` (${reap.unreaped} descendant process(es) could not be reaped)`
     }
   }
 
@@ -543,6 +727,7 @@ async function runCommandAction(
         ...process.env,
         ...opts.env,
         ...eventEnv(event, input),
+        HARNESS_HOOK_RUN_TOKEN: runToken,
         CLAUDE_PROJECT_DIR: cwd,
       },
       stdin: "pipe",
@@ -580,7 +765,8 @@ async function runCommandAction(
         command: action.command,
         ok: false,
         blocked: false,
-        error: timedOut ? `hook timed out after ${timeoutMs}ms` : "hook aborted",
+        timedOut,
+        error: (timedOut ? `hook timed out after ${timeoutMs}ms` : "hook aborted") + reapNote,
         durationMs: Date.now() - started,
       }
     }
@@ -599,7 +785,8 @@ async function runCommandAction(
       command: action.command,
       ok: false,
       blocked: false,
-      error: message,
+      timedOut,
+      error: message + reapNote,
       durationMs: Date.now() - started,
     }
   } finally {
@@ -664,6 +851,7 @@ async function runHttpAction(
       url: action.url,
       ok: false,
       blocked: false,
+      timedOut,
       error: timedOut ? `hook timed out after ${timeoutMs}ms` : (error as Error).message,
       durationMs: Date.now() - started,
     }
@@ -684,9 +872,8 @@ export async function runHooks(
 
   let config = opts.config
   if (config === undefined) {
-    const explicitPath = opts.configPath ?? process.env.HARNESS_HOOKS_PATH
-    const configPath = explicitPath ?? DEFAULT_HOOKS_PATH
-    const loaded = await readHooksConfig(configPath, explicitPath !== undefined)
+    const resolved = resolveHooksConfigPath(opts.configPath)
+    const loaded = await readHooksConfig(resolved.path, resolved.explicit)
     config = loaded.config
     result.errors.push(...loaded.errors)
   }
@@ -713,6 +900,7 @@ export async function runHooks(
   // 约束：并行执行；单个 hook 的失败只记录，不中断其他 hook。
   const results = await Promise.all(tasks)
   result.results = results
+  if (results.some((entry) => entry.timedOut === true)) result.timedOut = true
 
   const blockedEntries = results.filter((entry) => entry.blocked)
   result.blocked = blockedEntries.length > 0

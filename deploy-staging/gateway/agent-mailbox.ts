@@ -64,7 +64,8 @@ export type SendMessageInput = {
   from: string
   to: string
   text: string
-  timestamp: string
+  /** 省略＝服务端取 now（重试时不参与幂等比较，避免服务端时间漂移造成假冲突）。 */
+  timestamp?: string
   type?: string
   summary?: string
   color?: string
@@ -112,6 +113,18 @@ export class MailboxValidationError extends Error {
   }
 }
 
+/** 同一会话已有主团队且与请求团队不同（需要显式 switch:true 才能迁移）。 */
+export class MailboxTeamConflictError extends Error {
+  readonly code = "team_conflict"
+  readonly currentTeam: string
+
+  constructor(message: string, currentTeam: string) {
+    super(message)
+    this.name = "MailboxTeamConflictError"
+    this.currentTeam = currentTeam
+  }
+}
+
 export class MailboxRecipientError extends Error {
   readonly code = "unknown_recipient"
   readonly candidates: string[]
@@ -134,12 +147,23 @@ export class MailboxConflictError extends Error {
   }
 }
 
-// 输入上限（与 spec 一致）：text 按 UTF-8 字节数，其余按字符数。
+// 输入上限：UTF-16 字符数与 UTF-8 字节数双限（两者必须一致生效）。
 const MAX_TEXT_BYTES = 100 * 1024
+const MAX_TEXT_CHARS = 100 * 1024
 const MAX_SUMMARY_CHARS = 2000
+const MAX_SUMMARY_BYTES = MAX_SUMMARY_CHARS * 4
 const MAX_MSG_ID_CHARS = 128
+const MAX_MSG_ID_BYTES = MAX_MSG_ID_CHARS * 4
 const MAX_TEAM_CHARS = 64
+const MAX_TEAM_BYTES = MAX_TEAM_CHARS * 4
 const MAX_AGENT_CHARS = 64
+const MAX_AGENT_BYTES = MAX_AGENT_CHARS * 4
+
+// P2 名册卫生：这些形态不是可寻址成员名（main 是 lead 的别名，不是可注册成员）。
+const RESERVED_AGENT_NAMES = new Set(["main", "user", "system"])
+
+// drain 后的 tombstone 保留窗口：超过 7 天物理清理（唯一键保留期内保证幂等）。
+const DRAIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 type MessageRow = {
   id: number
@@ -175,6 +199,7 @@ function db(): Database {
     color TEXT,
     read INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
+    delivered_at INTEGER,
     UNIQUE(session_id,msg_id));
     CREATE TABLE IF NOT EXISTS agent_teams (
       team TEXT PRIMARY KEY,
@@ -189,8 +214,31 @@ function db(): Database {
       PRIMARY KEY(team,agent));
     CREATE INDEX IF NOT EXISTS agent_messages_inbox ON agent_messages(session_id,to_agent,read);`)
   migrateMsgIdScope(next)
+  ensureTombstoneColumn(next)
   connection = next
   return next
+}
+
+/**
+ * read=2 是 drain tombstone（不再物理删行）：唯一键在保留窗口内继续保证
+ * 同一 msg_id 重试不重投。老库补 delivered_at 列；无该列时旧语义仍然成立。
+ */
+function ensureTombstoneColumn(conn: Database): void {
+  const columns = conn.query("PRAGMA table_info(agent_messages)").all() as Array<{ name?: string }>
+  if (!columns.some((column) => column.name === "delivered_at")) {
+    conn.exec("ALTER TABLE agent_messages ADD COLUMN delivered_at INTEGER")
+  }
+  conn.exec(
+    "CREATE INDEX IF NOT EXISTS agent_messages_drained ON agent_messages(read, delivered_at);" +
+      "CREATE INDEX IF NOT EXISTS agent_messages_agent_inbox ON agent_messages(session_id,to_agent,read,id);",
+  )
+  cleanupDrainedMessages(conn)
+}
+
+/** 清理策略：drain tombstone 超过 7 天物理删除（只在开库/写入时跑，成本 O(过期行数)）。 */
+function cleanupDrainedMessages(conn: Database): void {
+  const cutoff = Date.now() - DRAIN_TOMBSTONE_RETENTION_MS
+  conn.query("DELETE FROM agent_messages WHERE read=2 AND delivered_at IS NOT NULL AND delivered_at < ?").run(cutoff)
 }
 
 /**
@@ -228,6 +276,7 @@ function migrateMsgIdScope(conn: Database): void {
         color TEXT,
         read INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
+        delivered_at INTEGER,
         UNIQUE(session_id,msg_id));
       INSERT INTO agent_messages(id,msg_id,session_id,team,from_agent,to_agent,type,text,summary,color,read,created_at)
         SELECT id,msg_id,session_id,team,from_agent,to_agent,type,text,summary,color,read,created_at FROM agent_messages_legacy;
@@ -289,23 +338,43 @@ function withImmediate<T>(fn: () => T): T {
   }
 }
 
-const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/
 const DEFAULT_LEAD = "team-lead"
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+// ANSI/控制字符/NUL、C1、bidi 控制符：邮件正文、摘要与所有标识符一律拒绝。
+// （ESC 含在 C0 区间内；允许的换行/制表符由 opts.allowWhitespace 显式放行。）
+const FORBIDDEN_CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/
+const FORBIDDEN_BIDI_RE = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u2028\u2029]/
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+function assertSafeText(value: string, field: string, allowWhitespace = false): void {
+  const control = allowWhitespace
+    ? value.replace(/[\t\n\r]/g, "").match(FORBIDDEN_CONTROL_RE)
+    : value.match(FORBIDDEN_CONTROL_RE)
+  if (control) {
+    throw new MailboxValidationError(
+      field,
+      `contains forbidden control character U+${control[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`,
+    )
+  }
+  if (FORBIDDEN_BIDI_RE.test(value)) throw new MailboxValidationError(field, "contains forbidden bidi control character")
+  if (LONE_SURROGATE_RE.test(value)) throw new MailboxValidationError(field, "contains a lone UTF-16 surrogate")
+}
+
 function requireString(
   value: unknown,
   field: string,
-  opts: { allowEmpty?: boolean; maxLength?: number; maxBytes?: number } = {},
+  opts: { allowEmpty?: boolean; maxLength?: number; maxBytes?: number; allowWhitespace?: boolean } = {},
 ): string {
   if (typeof value !== "string") throw new MailboxValidationError(field, "must be a string")
+  assertSafeText(value, field, opts.allowWhitespace === true)
   const trimmed = value.trim()
   if (!opts.allowEmpty && !trimmed) throw new MailboxValidationError(field, "must not be empty")
   if (opts.maxLength !== undefined && value.length > opts.maxLength) {
-    throw new MailboxValidationError(field, `must be at most ${opts.maxLength} characters`)
+    throw new MailboxValidationError(field, `must be at most ${opts.maxLength} UTF-16 characters`)
   }
   if (opts.maxBytes !== undefined && Buffer.byteLength(value, "utf8") > opts.maxBytes) {
     throw new MailboxValidationError(field, `must be at most ${opts.maxBytes} bytes`)
@@ -323,8 +392,59 @@ function singleLine(value: string, field: string): void {
   if (/[\n\r]/u.test(value)) throw new MailboxValidationError(field, "must be a single line")
 }
 
+/** 可寻址成员名：拒绝广播/别名/保留名与 @ 形态，双长度上限。 */
+export function validateAgentName(value: unknown, field = "agent"): string {
+  const clean = requireString(value, field, { maxLength: MAX_AGENT_CHARS, maxBytes: MAX_AGENT_BYTES })
+  singleLine(clean, field)
+  if (clean === "*" || clean === "@" || clean.includes("*") || clean.includes("@")) {
+    throw new MailboxValidationError(field, 'must be a bare agent name (broadcast "*" and "@" forms are not addressable)')
+  }
+  if (RESERVED_AGENT_NAMES.has(clean.toLowerCase())) {
+    throw new MailboxValidationError(field, `"${clean}" is reserved; use "main" only as a recipient alias`)
+  }
+  return clean
+}
+
+export function isAddressableAgentName(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  try {
+    validateAgentName(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28
+  if ([4, 6, 9, 11].includes(month)) return 30
+  return 31
+}
+
+/**
+ * ISO-8601 严格校验：Date.parse 会把 2 月 30 日静默滚到 3 月 2 日，
+ * 所以先逐段校验日历合法性（含闰年）与时区偏移范围。
+ */
 function parseTimestamp(value: string): number {
-  if (!TIMESTAMP_RE.test(value)) throw new MailboxValidationError("timestamp", "must be an ISO-8601 timestamp")
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value)
+  if (!match) throw new MailboxValidationError("timestamp", "must be an ISO-8601 timestamp")
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  if (month < 1 || month > 12) throw new MailboxValidationError("timestamp", "has an invalid month")
+  if (day < 1 || day > daysInMonth(year, month)) throw new MailboxValidationError("timestamp", "is not a valid calendar date")
+  if (hour > 23 || minute > 59 || second > 59) throw new MailboxValidationError("timestamp", "has an invalid time of day")
+  if (match[7] !== undefined) {
+    const offsetHour = Number(match[7])
+    const offsetMinute = Number(match[8])
+    if (offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)) {
+      throw new MailboxValidationError("timestamp", "has an invalid timezone offset")
+    }
+  }
   const parsed = Date.parse(value)
   if (!Number.isFinite(parsed)) throw new MailboxValidationError("timestamp", "is not a valid date")
   return parsed
@@ -492,14 +612,16 @@ function teamMembers(team: string): TeamMemberRow[] {
     .all(team) as TeamMemberRow[]
 }
 
-function leadOf(sessionId: string): string {
+export function leadOf(sessionId: string): string {
   return primaryTeam(sessionId)?.lead_agent || DEFAULT_LEAD
 }
 
 export function getTeamState(sessionId: string): MailboxTeamState {
   const team = primaryTeam(sessionId)
-  const members = team ? teamMembers(team.team) : []
-  const lead = team?.lead_agent || DEFAULT_LEAD
+  const rawMembers = team ? teamMembers(team.team) : []
+  // P2：名册只列可寻址成员（历史脏数据里的 "*"／"@"／"main"／空白名不出现）。
+  const members = rawMembers.filter((member) => isAddressableAgentName(member.agent))
+  const lead = isAddressableAgentName(team?.lead_agent) ? (team as TeamRow).lead_agent : DEFAULT_LEAD
   const agents: MailboxAgent[] = [
     { name: lead, role: "lead", agent_type: null, team: team?.team ?? null },
     ...members
@@ -520,54 +642,102 @@ export function getTeamState(sessionId: string): MailboxTeamState {
   }
 }
 
-export function registerTeam(sessionId: string, team: string, leadAgent: string): TeamRow {
-  const cleanSession = requireString(sessionId, "session_id")
-  const cleanTeam = requireString(team, "team", { maxLength: MAX_TEAM_CHARS })
-  const cleanLead = requireString(leadAgent, "lead_agent", { maxLength: MAX_AGENT_CHARS })
-  singleLine(cleanTeam, "team")
-  singleLine(cleanLead, "lead_agent")
-  return withImmediate((): TeamRow => {
-    const existing = db()
-      .query("SELECT team,session_id,lead_agent,created_at FROM agent_teams WHERE team=?")
-      .get(cleanTeam) as TeamRow | null
-    if (existing && existing.session_id !== cleanSession) {
-      throw new MailboxValidationError("team", "is already bound to another session")
-    }
-    db()
-      .query(
-        "INSERT INTO agent_teams(team,session_id,lead_agent,created_at) VALUES(?,?,?,?) " +
-          "ON CONFLICT(team) DO UPDATE SET lead_agent=excluded.lead_agent",
-      )
-      .run(cleanTeam, cleanSession, cleanLead, Date.now())
-    // M4：lead 轮换时旧 lead 名下未读消息迁移给新 lead（否则新 lead 永远看不到）。
-    if (existing && existing.lead_agent !== cleanLead) {
-      const info = db()
-        .query("UPDATE agent_messages SET to_agent=? WHERE session_id=? AND to_agent=? AND read=0")
-        .run(cleanLead, cleanSession, existing.lead_agent)
-      const moved = Number(info.changes)
-      if (moved > 0) {
-        console.log(
-          `[gateway] mailbox: lead rotation ${existing.lead_agent} -> ${cleanLead} moved ${moved} unread message(s)`,
-        )
-      }
-    }
-    return (
-      (db()
-        .query("SELECT team,session_id,lead_agent,created_at FROM agent_teams WHERE session_id=? ORDER BY created_at ASC, team ASC LIMIT 1")
-        .get(cleanSession) as TeamRow | null) ?? {
-        team: cleanTeam,
-        session_id: cleanSession,
-        lead_agent: cleanLead,
-        created_at: Date.now(),
-      }
-    )
-  })
+type RegisterTeamOptions = { switch?: boolean }
+
+function validateTeamName(value: unknown): string {
+  const clean = requireString(value, "team", { maxLength: MAX_TEAM_CHARS, maxBytes: MAX_TEAM_BYTES })
+  singleLine(clean, "team")
+  return clean
 }
 
-export function addTeamMember(team: string, agent: string, agentType?: string | null): TeamMemberRow {
-  const cleanTeam = requireString(team, "team", { maxLength: MAX_TEAM_CHARS })
-  const cleanAgent = requireString(agent, "agent", { maxLength: MAX_AGENT_CHARS })
-  singleLine(cleanAgent, "agent")
+/** 调用方必须已在 withImmediate 事务内。单一主团队不变量在此处强制。 */
+function registerTeamTx(
+  cleanSession: string,
+  cleanTeam: string,
+  cleanLead: string,
+  options: RegisterTeamOptions,
+): TeamRow {
+  const byName = db()
+    .query("SELECT team,session_id,lead_agent,created_at FROM agent_teams WHERE team=?")
+    .get(cleanTeam) as TeamRow | null
+  if (byName && byName.session_id !== cleanSession) {
+    throw new MailboxValidationError("team", "is already bound to another session")
+  }
+  const existing = primaryTeam(cleanSession)
+  if (existing && existing.team !== cleanTeam && options.switch !== true) {
+    throw new MailboxTeamConflictError(
+      `session already has team "${existing.team}"; pass switch:true to migrate members and messages to "${cleanTeam}"`,
+      existing.team,
+    )
+  }
+  // 把所有历史团队（含 legacy 多团队）折叠进 cleanTeam：成员/消息迁移后删旧行，
+  // 保证一个会话只有一个主团队，不会出现第二团队静默孤儿。
+  const staleTeams = (
+    db().query("SELECT team,session_id,lead_agent,created_at FROM agent_teams WHERE session_id=? AND team<>?").all(
+      cleanSession,
+      cleanTeam,
+    ) as TeamRow[]
+  )
+  if (staleTeams.length > 0 && options.switch !== true) {
+    throw new MailboxTeamConflictError(
+      `session already has team "${staleTeams[0].team}"; pass switch:true to migrate members and messages`,
+      staleTeams[0].team,
+    )
+  }
+  const previousLead = existing?.lead_agent ?? byName?.lead_agent ?? null
+  for (const stale of staleTeams) {
+    db()
+      .query(
+        "INSERT OR IGNORE INTO agent_team_members(team,agent,agent_type,joined_at) " +
+          "SELECT ?,agent,agent_type,joined_at FROM agent_team_members WHERE team=?",
+      )
+      .run(cleanTeam, stale.team)
+    db().query("UPDATE agent_messages SET team=? WHERE session_id=? AND team=?").run(cleanTeam, cleanSession, stale.team)
+    db().query("DELETE FROM agent_team_members WHERE team=?").run(stale.team)
+    db().query("DELETE FROM agent_teams WHERE team=?").run(stale.team)
+  }
+  db()
+    .query(
+      "INSERT INTO agent_teams(team,session_id,lead_agent,created_at) VALUES(?,?,?,?) " +
+        "ON CONFLICT(team) DO UPDATE SET lead_agent=excluded.lead_agent",
+    )
+    .run(cleanTeam, cleanSession, cleanLead, Date.now())
+  // M4：lead 轮换时旧 lead 名下未读消息迁移给新 lead（否则新 lead 永远看不到）。
+  if (previousLead && previousLead !== cleanLead) {
+    const info = db()
+      .query("UPDATE agent_messages SET to_agent=? WHERE session_id=? AND to_agent=? AND read=0")
+      .run(cleanLead, cleanSession, previousLead)
+    const moved = Number(info.changes)
+    if (moved > 0) {
+      console.log(`[gateway] mailbox: lead rotation ${previousLead} -> ${cleanLead} moved ${moved} unread message(s)`)
+    }
+  }
+  return (
+    (db()
+      .query("SELECT team,session_id,lead_agent,created_at FROM agent_teams WHERE session_id=? ORDER BY created_at ASC, team ASC LIMIT 1")
+      .get(cleanSession) as TeamRow | null) ?? {
+      team: cleanTeam,
+      session_id: cleanSession,
+      lead_agent: cleanLead,
+      created_at: Date.now(),
+    }
+  )
+}
+
+export function registerTeam(
+  sessionId: string,
+  team: string,
+  leadAgent: string,
+  options: RegisterTeamOptions = {},
+): TeamRow {
+  const cleanSession = requireString(sessionId, "session_id")
+  const cleanTeam = validateTeamName(team)
+  const cleanLead = validateAgentName(leadAgent, "lead_agent")
+  return withImmediate(() => registerTeamTx(cleanSession, cleanTeam, cleanLead, options))
+}
+
+/** 调用方必须已在事务内。 */
+function addTeamMemberTx(cleanTeam: string, cleanAgent: string, agentType?: string | null): TeamMemberRow {
   const exists = db().query("SELECT team FROM agent_teams WHERE team=?").get(cleanTeam)
   if (!exists) throw new MailboxValidationError("team", `unknown team "${cleanTeam}"`)
   db()
@@ -581,25 +751,91 @@ export function addTeamMember(team: string, agent: string, agentType?: string | 
     .get(cleanTeam, cleanAgent) as TeamMemberRow
 }
 
+export function addTeamMember(team: string, agent: string, agentType?: string | null): TeamMemberRow {
+  const cleanTeam = validateTeamName(team)
+  const cleanAgent = validateAgentName(agent)
+  return withImmediate(() => addTeamMemberTx(cleanTeam, cleanAgent, agentType))
+}
+
+export function removeTeamMember(team: string, agent: string): number {
+  const cleanTeam = validateTeamName(team)
+  const cleanAgent = validateAgentName(agent)
+  return withImmediate(() => {
+    const info = db().query("DELETE FROM agent_team_members WHERE team=? AND agent=?").run(cleanTeam, cleanAgent)
+    return Number(info.changes)
+  })
+}
+
+export type TeamMemberInput = { agent: string; agentType?: string | null }
+
+/**
+ * P1 原子批量登记：先校验整批（任一非法即整批不落库），再在单一事务里写团队＋成员。
+ * 用于 POST /internal/mailbox/team（不再逐条调用 addTeamMember 形成半批状态）。
+ */
+export function registerTeamWithMembers(
+  sessionId: string,
+  team: string,
+  leadAgent: string,
+  members: TeamMemberInput[],
+  options: RegisterTeamOptions = {},
+): MailboxTeamState {
+  const cleanSession = requireString(sessionId, "session_id")
+  const cleanTeam = validateTeamName(team)
+  const cleanLead = validateAgentName(leadAgent, "lead_agent")
+  const validated: TeamMemberInput[] = []
+  const seen = new Set<string>()
+  for (const member of members) {
+    const agent = validateAgentName(member.agent)
+    if (agent === cleanLead || seen.has(agent)) continue
+    seen.add(agent)
+    validated.push({ agent, agentType: member.agentType ?? null })
+  }
+  withImmediate(() => {
+    registerTeamTx(cleanSession, cleanTeam, cleanLead, options)
+    for (const member of validated) addTeamMemberTx(cleanTeam, member.agent, member.agentType ?? null)
+  })
+  return getTeamState(cleanSession)
+}
+
 /**
  * 派遣接线（subagent.ts 调用）：把 worker 登记进父会话的团队，让 mailbox_agents
  * 能列出它。team 省略时沿用父会话已登记的团队；没有团队则建一个会话级团队，
- * lead 默认 team-lead。该函数不参与编排，仅登记可寻址成员。
+ * lead 默认 team-lead。uniquePerRun：同名成员已存在时用 `name#shortRun`，
+ * 旧成员名下的未读消息不自动继承（消息仍留在旧名邮箱，物理隔离）。
  */
 export function registerTeamMember(
   sessionId: string,
   team: string | null | undefined,
   agent: string,
   agentType?: string | null,
+  options: { runId?: string; uniquePerRun?: boolean; replaceStale?: boolean } = {},
 ): TeamMemberRow {
   const cleanSession = requireString(sessionId, "session_id")
-  const cleanAgent = requireString(agent, "agent", { maxLength: MAX_AGENT_CHARS })
-  singleLine(cleanAgent, "agent")
-  const existing = primaryTeam(cleanSession)
-  const explicitTeam = typeof team === "string" ? team.trim() : ""
-  const teamName = explicitTeam || existing?.team || `team-${cleanSession}`.slice(0, MAX_TEAM_CHARS)
-  registerTeam(cleanSession, teamName, existing?.lead_agent || DEFAULT_LEAD)
-  return addTeamMember(teamName, cleanAgent, agentType ?? null)
+  const cleanAgent = validateAgentName(agent)
+  return withImmediate(() => {
+    const existing = primaryTeam(cleanSession)
+    const explicitTeam = typeof team === "string" ? team.trim() : ""
+    const teamName = explicitTeam || existing?.team || `team-${cleanSession}`.slice(0, MAX_TEAM_CHARS)
+    const lead = existing?.lead_agent || DEFAULT_LEAD
+    registerTeamTx(cleanSession, teamName, lead, {
+      switch: Boolean(explicitTeam && existing && explicitTeam !== existing.team) ? false : true,
+    })
+    let finalAgent = cleanAgent
+    if (options.uniquePerRun === true && cleanAgent !== lead) {
+      const taken = db()
+        .query("SELECT agent FROM agent_team_members WHERE team=? AND agent=?")
+        .get(teamName, cleanAgent) as { agent: string } | null
+      if (taken) {
+        const suffix = `#${(options.runId ?? randomUUID()).slice(0, 8)}`
+        finalAgent = `${cleanAgent.slice(0, Math.max(1, MAX_AGENT_CHARS - suffix.length))}${suffix}`
+        // 旧 run 已结束才允许摘除旧名（replaceStale）；仍有活 run 时保留其可寻址性。
+        if (options.replaceStale === true) {
+          db().query("DELETE FROM agent_team_members WHERE team=? AND agent=?").run(teamName, cleanAgent)
+        }
+      }
+    }
+    return addTeamMemberTx(teamName, finalAgent, agentType ?? null)
+  })
 }
 
 export function resolveRecipient(
@@ -607,19 +843,22 @@ export function resolveRecipient(
   to: string,
 ): { name: string; role: "lead" | "member"; agent_type: string | null; team: string | null } {
   const cleanSession = requireString(sessionId, "session_id")
-  const target = requireString(to, "to")
+  const target = requireString(to, "to", { maxLength: MAX_AGENT_CHARS, maxBytes: MAX_AGENT_BYTES })
   singleLine(target, "to")
+  const team = primaryTeam(cleanSession)
+  const lead = team?.lead_agent || DEFAULT_LEAD
+  const members = (team ? teamMembers(team.team) : []).filter((row) => isAddressableAgentName(row.agent))
+  if (target === "main") {
+    return { name: lead, role: "lead", agent_type: null, team: team?.team ?? null }
+  }
   if (target === "*") {
     throw new MailboxValidationError("to", 'broadcast (to: "*") is not supported; send one message per recipient')
   }
-  if (target.includes("@")) {
+  if (target === "@" || target.includes("@") || target.includes("*")) {
     throw new MailboxValidationError("to", "must be a bare agent name")
   }
-  const team = primaryTeam(cleanSession)
-  const lead = team?.lead_agent || DEFAULT_LEAD
-  const members = team ? teamMembers(team.team) : []
-  if (target === "main") {
-    return { name: lead, role: "lead", agent_type: null, team: team?.team ?? null }
+  if (RESERVED_AGENT_NAMES.has(target.toLowerCase())) {
+    throw new MailboxValidationError("to", `"${target}" is reserved and not addressable`)
   }
   const member = members.find((row) => row.agent === target)
   if (member) {
@@ -639,13 +878,19 @@ export function resolveRecipient(
 
 export function sendMessage(input: SendMessageInput): SendMessageResult {
   const sessionId = requireString(input.sessionId, "session_id")
-  const from = requireString(input.from, "from", { maxLength: MAX_AGENT_CHARS })
-  const text = requireString(input.text, "text", { allowEmpty: true, maxBytes: MAX_TEXT_BYTES })
+  const from = validateAgentName(input.from, "from")
+  const text = requireString(input.text, "text", {
+    allowEmpty: true,
+    allowWhitespace: true,
+    maxBytes: MAX_TEXT_BYTES,
+    maxLength: MAX_TEXT_CHARS,
+  })
   if (!text.trim()) throw new MailboxValidationError("text", "must not be blank")
-  singleLine(from, "from")
-  const to = requireString(input.to, "to")
+  const to = requireString(input.to, "to", { maxLength: MAX_AGENT_CHARS, maxBytes: MAX_AGENT_BYTES })
   singleLine(to, "to")
-  const timestamp = requireString(input.timestamp, "timestamp")
+  const timestampExplicit =
+    input.timestamp !== undefined && input.timestamp !== null && String(input.timestamp).trim() !== ""
+  const timestamp = timestampExplicit ? requireString(input.timestamp, "timestamp") : new Date().toISOString()
   const createdAt = parseTimestamp(timestamp)
   const type = (input.type === undefined ? "message" : requireString(input.type, "type")) as AgentMessageType
   if (!MESSAGE_TYPES.includes(type)) {
@@ -655,71 +900,99 @@ export function sendMessage(input: SendMessageInput): SendMessageResult {
   const summary =
     input.summary === undefined || input.summary === null
       ? null
-      : requireString(input.summary, "summary", { allowEmpty: true, maxLength: MAX_SUMMARY_CHARS })
+      : requireString(input.summary, "summary", {
+          allowEmpty: true,
+          allowWhitespace: true,
+          maxLength: MAX_SUMMARY_CHARS,
+          maxBytes: MAX_SUMMARY_BYTES,
+        })
   const color = optionalString(input.color, "color")
   const msgId =
     input.msg_id === undefined
       ? `msg_${randomUUID()}`
-      : requireString(input.msg_id, "msg_id", { maxLength: MAX_MSG_ID_CHARS })
+      : requireString(input.msg_id, "msg_id", { maxLength: MAX_MSG_ID_CHARS, maxBytes: MAX_MSG_ID_BYTES })
   singleLine(msgId, "msg_id")
   const teamOverride =
     input.team === undefined || input.team === null
       ? null
-      : requireString(input.team, "team", { maxLength: MAX_TEAM_CHARS })
+      : requireString(input.team, "team", { maxLength: MAX_TEAM_CHARS, maxBytes: MAX_TEAM_BYTES })
   if (teamOverride) singleLine(teamOverride, "team")
 
   return withImmediate((): SendMessageResult => {
-    // 幂等短路先于收件人解析：重试同一 msg_id 不因团队变更而失败。
-    // 但同一 (session_id,msg_id) 的 to/type/text 必须完全一致，否则 409 而不是静默成功。
+    cleanupDrainedMessages(db())
+    const expectedTeam = teamOverride ?? primaryTeam(sessionId)?.team ?? null
+    // P1：比较字段加入 from/timestamp/team/summary——内容不同的同 msg_id 一律 409。
+    type Existing = {
+      msg_id: string
+      from_agent: string
+      to_agent: string
+      type: string
+      text: string
+      summary: string | null
+      team: string | null
+      created_at: number
+    }
     const existing = db()
-      .query("SELECT msg_id,to_agent,type,text,team FROM agent_messages WHERE session_id=? AND msg_id=?")
-      .get(sessionId, msgId) as { msg_id: string; to_agent: string; type: string; text: string; team: string | null } | null
-    if (existing) {
-      const expectedTo = to === "main" ? leadOf(sessionId) : to
-      if (existing.to_agent !== expectedTo || existing.type !== type || existing.text !== text) {
+      .query(
+        "SELECT msg_id,from_agent,to_agent,type,text,summary,team,created_at " +
+          "FROM agent_messages WHERE session_id=? AND msg_id=?",
+      )
+      .get(sessionId, msgId) as Existing | null
+    const conflictIfChanged = (row: Existing, expectedTo: string): void => {
+      const changed: string[] = []
+      if (row.from_agent !== from) changed.push("from")
+      if (row.to_agent !== expectedTo) changed.push("to")
+      if (row.type !== type) changed.push("type")
+      if (row.text !== text) changed.push("text")
+      if ((row.summary ?? null) !== (summary ?? null)) changed.push("summary")
+      if ((row.team ?? null) !== (expectedTeam ?? null)) changed.push("team")
+      // 只有调用方显式给 timestamp 时才比较；服务端 now 不参与（否则幂等重试必假冲突）。
+      if (timestampExplicit && row.created_at !== createdAt) changed.push("timestamp")
+      if (changed.length > 0) {
         throw new MailboxConflictError(
-          `msg_id "${msgId}" already exists in session "${sessionId}" with different to/type/text`,
+          `msg_id "${msgId}" already exists in session "${sessionId}" with different ${changed.join("/")}`,
         )
       }
+    }
+    if (existing) {
+      const expectedTo = to === "main" ? leadOf(sessionId) : to
+      conflictIfChanged(existing, expectedTo)
       return { msg_id: existing.msg_id, to: existing.to_agent, team: existing.team, duplicate: true, delivered: false }
     }
     const resolved = resolveRecipient(sessionId, to)
-    const team = teamOverride ?? primaryTeam(sessionId)?.team ?? null
     try {
       db()
         .query(
           "INSERT INTO agent_messages(msg_id,session_id,team,from_agent,to_agent,type,text,summary,color,read,created_at) " +
             "VALUES(?,?,?,?,?,?,?,?,?,0,?)",
         )
-        .run(msgId, sessionId, team, from, resolved.name, type, text, summary, color, createdAt)
+        .run(msgId, sessionId, expectedTeam, from, resolved.name, type, text, summary, color, createdAt)
     } catch (e) {
       // 并发竞态：另一进程刚插了同一 (session_id,msg_id)。按同一套冲突语义收口，
       // 不把 UNIQUE 约束错误冒成 500。
       const message = e instanceof Error ? e.message : String(e)
       if (/UNIQUE constraint failed/i.test(message)) {
         const raced = db()
-          .query("SELECT msg_id,to_agent,type,text,team FROM agent_messages WHERE session_id=? AND msg_id=?")
-          .get(sessionId, msgId) as
-          | { msg_id: string; to_agent: string; type: string; text: string; team: string | null }
-          | null
+          .query(
+            "SELECT msg_id,from_agent,to_agent,type,text,summary,team,created_at " +
+              "FROM agent_messages WHERE session_id=? AND msg_id=?",
+          )
+          .get(sessionId, msgId) as Existing | null
         if (raced) {
-          if (raced.to_agent !== resolved.name || raced.type !== type || raced.text !== text) {
-            throw new MailboxConflictError(
-              `msg_id "${msgId}" already exists in session "${sessionId}" with different to/type/text`,
-            )
-          }
+          conflictIfChanged(raced, resolved.name)
           return { msg_id: raced.msg_id, to: raced.to_agent, team: raced.team, duplicate: true, delivered: false }
         }
       }
       throw e
     }
-    return { msg_id: msgId, to: resolved.name, team, duplicate: false, delivered: true }
+    return { msg_id: msgId, to: resolved.name, team: expectedTeam, duplicate: false, delivered: true }
   })
 }
 
 export function readMessages(sessionId: string, agent: string, options: ReadMessagesOptions = {}): AgentMessage[] {
   const cleanSession = requireString(sessionId, "session_id")
   // H3：读的 agent 必须是该会话团队里的可寻址成员（main 归一化为 lead），否则 404。
+  // HTTP 端只传服务端推导的调用者身份；这里仍保留 recipient 解析作为纵深防御。
   const target = resolveRecipient(cleanSession, agent).name
   const limit = options.limit === undefined ? 50 : options.limit
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
@@ -735,23 +1008,29 @@ export function readMessages(sessionId: string, agent: string, options: ReadMess
   const drain = options.drain === true
 
   return withImmediate((): AgentMessage[] => {
-    // M2：after 游标与排序同源——统一按 id 升序，不再混入 read/created_at。
+    // P2：明确实现「未读优先、同级最旧优先」。after 仍是 id 游标（同一排序内生效）。
+    // read=2 是 drain tombstone，不再投递。
     const rows = db()
       .query(
         "SELECT id,msg_id,session_id,team,from_agent,to_agent,type,text,summary,color,read,created_at " +
-          "FROM agent_messages WHERE session_id=? AND to_agent=? AND id>? " +
-          "ORDER BY id ASC LIMIT ?",
+          "FROM agent_messages WHERE session_id=? AND to_agent=? AND read<>2 AND id>? " +
+          "ORDER BY CASE WHEN read=0 THEN 0 ELSE 1 END ASC, id ASC LIMIT ?",
       )
       .all(cleanSession, target, after ?? 0, limit) as MessageRow[]
     if (drain) {
-      // 约束：照 cIe——已读行全部剪除，本次交付行（含未读）也剪除；未交付的未读保留。
-      db().query("DELETE FROM agent_messages WHERE session_id=? AND to_agent=? AND read=1").run(cleanSession, target)
+      // P1：不物理删除——已读行与本次交付行统一打 tombstone（read=2, delivered_at），
+      // 唯一键保留＝同一 msg_id 重试不再重投；未交付的未读行原样保留。
+      const now = Date.now()
+      db()
+        .query("UPDATE agent_messages SET read=2, delivered_at=? WHERE session_id=? AND to_agent=? AND read=1")
+        .run(now, cleanSession, target)
       if (rows.length > 0) {
         const ids = rows.map((row) => row.id)
         db()
-          .query(`DELETE FROM agent_messages WHERE id IN (${ids.map(() => "?").join(",")})`)
-          .run(...ids)
+          .query(`UPDATE agent_messages SET read=2, delivered_at=? WHERE id IN (${ids.map(() => "?").join(",")}) AND read<>2`)
+          .run(now, ...ids)
       }
+      cleanupDrainedMessages(db())
     }
     return rows.map(decodeMessage)
   })
@@ -764,7 +1043,19 @@ export function markRead(sessionId: string, agent: string, msgIds: string[]): nu
   if (!Array.isArray(msgIds) || msgIds.length === 0) {
     throw new MailboxValidationError("msg_ids", "must be a non-empty array")
   }
-  const ids = [...new Set(msgIds.map((id) => requireString(id, "msg_ids[]")))]
+  // P2：全非法（非字符串/空白）→ 400（与工具描述一致），混合批次只处理合法项。
+  const ids = [
+    ...new Set(
+      msgIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .map((id) => requireString(id, "msg_ids[]", { maxLength: MAX_MSG_ID_CHARS, maxBytes: MAX_MSG_ID_BYTES })),
+    ),
+  ]
+  if (ids.length === 0) {
+    throw new MailboxValidationError("msg_ids", "must contain at least one non-empty string")
+  }
   let marked = 0
   withImmediate(() => {
     for (let offset = 0; offset < ids.length; offset += 500) {
@@ -790,23 +1081,27 @@ export function sendTaskAssignment(
   sessionId: string,
   to: string,
   task: Pick<Task, "id" | "subject" | "description">,
-  assignedBy = DEFAULT_LEAD,
+  assignedBy?: string,
+  options: { msgId?: string; timestamp?: string } = {},
 ): SendMessageResult {
-  const timestamp = new Date().toISOString()
+  // P1：from 用该会话真实 lead（不再硬编码 team-lead）；调用方可显式覆盖。
+  const sender = assignedBy ?? leadOf(sessionId)
+  const timestamp = options.timestamp ?? new Date().toISOString()
   const frame = {
     type: "task_assignment",
     taskId: task.id,
     subject: task.subject,
     description: task.description,
-    assignedBy,
+    assignedBy: sender,
     timestamp,
   }
   return sendMessage({
     sessionId,
-    from: assignedBy,
+    from: sender,
     to,
     text: JSON.stringify(frame),
     timestamp,
     type: "task_assignment",
+    msg_id: options.msgId,
   })
 }

@@ -94,6 +94,76 @@ function positiveIdArray(value: unknown): number[] | null {
   return value.every((id) => typeof id === "number" && Number.isInteger(id) && id > 0) ? (value as number[]) : null
 }
 
+// ── assignment 补投（P1）────────────────────────────────────────────────────
+// delivered:false / 投递抛错时不再一次性丢掉：同一份帧（含稳定 msg_id 与 timestamp）
+// 留在待投队列，下一次 update 或 30s ticker 补投；同一 task 只保留最新一帧。
+type PendingAssignment = {
+  sessionId: string
+  to: string
+  task: { id: number; subject: string; description: string }
+  msgId: string
+  timestamp: string
+}
+const pendingAssignments = new Map<string, PendingAssignment>()
+let assignmentRetryTimer: ReturnType<typeof setInterval> | undefined
+
+function assignmentKey(sessionId: string, taskId: number): string {
+  return `${sessionId}:${taskId}`
+}
+
+function flushPendingAssignments(): void {
+  for (const [key, pending] of pendingAssignments) {
+    try {
+      const frame = sendTaskAssignment(pending.sessionId, pending.to, pending.task, undefined, {
+        msgId: pending.msgId,
+        timestamp: pending.timestamp,
+      })
+      // duplicate=true 表示同一帧已在邮箱里（幂等命中），等价于已投递成功。
+      if (frame.delivered === true || frame.duplicate === true) pendingAssignments.delete(key)
+    } catch (e) {
+      if (!(e instanceof MailboxRecipientError)) {
+        console.error("[gateway] task assignment retry failed:", e)
+      }
+    }
+  }
+  if (pendingAssignments.size === 0 && assignmentRetryTimer) {
+    clearInterval(assignmentRetryTimer)
+    assignmentRetryTimer = undefined
+  }
+}
+
+function queueAssignment(pending: PendingAssignment): void {
+  pendingAssignments.set(assignmentKey(pending.sessionId, pending.task.id), pending)
+  if (!assignmentRetryTimer) {
+    assignmentRetryTimer = setInterval(flushPendingAssignments, 30_000)
+    // 不让补投 ticker 阻止进程退出（bun/node 均有 unref）。
+    ;(assignmentRetryTimer as unknown as { unref?: () => void }).unref?.()
+  }
+}
+
+function deliverAssignment(pending: PendingAssignment): boolean {
+  try {
+    const frame = sendTaskAssignment(pending.sessionId, pending.to, pending.task, undefined, {
+      msgId: pending.msgId,
+      timestamp: pending.timestamp,
+    })
+    if (frame.delivered === true || frame.duplicate === true) {
+      pendingAssignments.delete(assignmentKey(pending.sessionId, pending.task.id))
+      return true
+    }
+    queueAssignment(pending)
+    return false
+  } catch (e) {
+    // P2-4：非严格模式下 owner 可以是未注册的合法 agent 名——任务归属成立，邮箱帧进
+    // 待投队列，等成员登记后的下一次 update / ticker 补投；不刷错误日志。
+    if (!(e instanceof MailboxRecipientError)) {
+      console.error("[gateway] task assignment frame failed:", e)
+    }
+    queueAssignment(pending)
+    return false
+  }
+}
+
 export async function handleTaskBoard(req: Request, pathname: string): Promise<Response> {
   const tokenError = internalTokenRejection(req)
   if (tokenError) return tokenError
@@ -149,8 +219,13 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
         return Response.json({ success: true, task })
       }
       case "update": {
+        // 上一次投递失败的 assignment 在这里补投（另一条路径是 30s ticker）。
+        flushPendingAssignments()
         const taskId = taskIdOf(payload)
         if (taskId === null) return jsonError(400, "taskId must be a positive integer", "bad_request", "bad_request")
+        if (payload.force !== undefined && typeof payload.force !== "boolean") {
+          return jsonError(400, "force must be a boolean", "bad_request", "bad_request")
+        }
         const patch: TaskUpdatePatch = {}
         if (payload.status !== undefined) {
           if (typeof payload.status !== "string") return jsonError(400, "status must be a string", "bad_request", "bad_request")
@@ -254,28 +329,50 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
           patch.removeBlockedBy = ids
         }
         const before = getTask(sessionId, taskId)
+        // P1 认领冲突：任务已由他人 in_progress 时，改 owner 必须显式 force:true。
+        if (
+          typeof patch.owner === "string" &&
+          payload.force !== true &&
+          typeof before?.owner === "string" &&
+          before.owner.trim() !== patch.owner &&
+          before.status === "in_progress"
+        ) {
+          return Response.json(
+            {
+              ok: false,
+              success: false,
+              error: {
+                message: `task #${taskId} is in_progress and owned by "${before.owner}"; pass force:true to reassign`,
+                type: "conflict",
+                code: "owner_claim_conflict",
+              },
+              owner: before.owner,
+            },
+            { status: 409 },
+          )
+        }
         const result = updateTask(sessionId, taskId, patch)
         // CC 任务板联动：owner 变更（含首次认领）后把 task_assignment 帧投给新 owner。
         // 只读 task-board 的 Task 类型、不改它；投递失败不影响任务更新结果。
-        // M1：owner 已在上面校验并 trim；同一 owner 重复赋值不重复发帧；delivered 如实回传。
+        // P1：帧 from 用真实 lead（sendTaskAssignment 默认值）；同一 owner 重复赋值不重复发帧；
+        // 失败进补投队列，duplicate（同一帧已在邮箱）按已投递计。
         let delivered = false
         if (result.success && typeof patch.owner === "string" && result.task) {
           const previousOwner = typeof before?.owner === "string" ? before.owner.trim() : null
           if (patch.owner !== previousOwner) {
-            try {
-              const frame = sendTaskAssignment(sessionId, patch.owner, {
+            const pending: PendingAssignment = {
+              sessionId,
+              to: patch.owner,
+              task: {
                 id: result.task.id,
                 subject: result.task.subject,
                 description: result.task.description,
-              })
-              delivered = frame.delivered === true
-            } catch (e) {
-              // P2-4：非严格模式下 owner 可以是未注册的合法 agent 名——任务归属成立，
-              // 只是邮箱帧无处可投；如实回 delivered:false，不当 404、不刷错误日志。
-              if (!(e instanceof MailboxRecipientError)) {
-                console.error("[gateway] task assignment frame failed:", e)
-              }
+              },
+              // 稳定幂等键：补投时必须原样复用，避免重复投递。
+              msgId: `task-assignment-${result.task.id}-${patch.owner}-${Date.now()}`,
+              timestamp: new Date().toISOString(),
             }
+            delivered = deliverAssignment(pending)
           }
         }
         return Response.json({ ...result, delivered })

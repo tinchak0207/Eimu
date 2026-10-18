@@ -31,6 +31,13 @@ export const MEMORY_DEFAULT_NAME = "MEMORY.md"
 export const MEMORY_ARCHIVED_SENTINEL = ".archived"
 export const DEFAULT_MEMORY_ROOT = "/opt/agent-harness/state/agent-memory"
 
+/** 约束（P2 配额）：每 tenant/scope 的记忆文件数与总字节上限。 */
+export const MEMORY_SCOPE_MAX_FILES = 500
+export const MEMORY_SCOPE_MAX_BYTES = 20 * 1024 * 1024
+/** 写锁：退避重试，超时回 conflict；持锁超过 stale 阈值视为崩溃残留。 */
+export const MEMORY_LOCK_TIMEOUT_MS = 10_000
+export const MEMORY_LOCK_STALE_MS = 30_000
+
 /** 注入围栏：读出的记忆正文进入 prompt 时必须包在这两个哨兵之间。 */
 export const MEMORY_PROMPT_FENCE_OPEN = "<<<MEMORY_DATA>>>"
 export const MEMORY_PROMPT_FENCE_CLOSE = "<<<END_MEMORY_DATA>>>"
@@ -40,11 +47,10 @@ export type MemoryWriteMode = "overwrite" | "append"
 
 export type MemoryErrorCode =
   | "content_too_large"
-  | "index_too_large"
-  | "content_screened"
   | "content_secret"
   | "invalid_path"
   | "store_archived"
+  | "store_full"
   | "not_writable"
   | "not_found"
   | "conflict"
@@ -70,6 +76,8 @@ function memoryErrorStatus(code: MemoryErrorCode): number {
     case "store_archived":
     case "conflict":
       return 409
+    case "store_full":
+      return 507
     case "read_failed":
       return 500
     default:
@@ -453,90 +461,215 @@ async function atomicWrite(file: string, data: Buffer): Promise<void> {
 }
 
 /**
- * 约束（P0-2）：append 不得 read-modify-write。用 O_APPEND 打开后单次写入
- * 自定界负载（内容末尾补一个换行），追加完再做总量检查；超限时明确报错，
- * 可行时回滚本次追加，绝不静默丢写。
- * 返回 { bytes, sha256 }：bytes 是追加后的文件总大小。
+ * 约束（P1-4）：`.archived` 哨兵对 **name 展开后的最终路径** 的所有祖先生效。
+ * 必须在创建任何锁文件/临时文件之前调用，否则会先在归档目录里留下写痕迹。
  */
-async function appendFileAtomic(
-  file: string,
-  incoming: Buffer,
-  maxBytes: number,
-): Promise<{ bytes: number; sha256: string }> {
-  // 约束：追加负载自带尾换行，避免并发时依赖「先读末尾再决定分隔符」的竞态。
-  const payload =
-    incoming.byteLength > 0 && incoming[incoming.byteLength - 1] !== 0x0a
-      ? Buffer.concat([incoming, Buffer.from("\n")])
-      : incoming
+async function assertNotArchivedPath(rootReal: string, file: string): Promise<void> {
+  const targetDir = dirname(file)
+  const rel = relative(rootReal, targetDir)
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new MemoryError("invalid_path", "memory path escapes the configured root")
+  }
+  const chain = [rootReal]
+  if (rel.length > 0) {
+    let current = rootReal
+    for (const segment of rel.split(sep)) {
+      current = join(current, segment)
+      chain.push(current)
+    }
+  }
+  for (const dir of chain) {
+    const sentinel = await lstatOrNull(join(dir, MEMORY_ARCHIVED_SENTINEL))
+    if (sentinel !== null) {
+      throw new MemoryError("store_archived", "cannot modify archived resource")
+    }
+  }
+}
 
+/**
+ * 在真正创建 name 展开的子目录之前，先按词法路径检查已存在的祖先目录是否归档。
+ * 不存在的目录不可能带哨兵；符号链接/非目录交给后续 ensureContainedFilePath 拒绝。
+ */
+async function assertNoArchivedAlongName(dirReal: string, relativeName: string): Promise<void> {
+  let current = dirReal
+  for (const segment of relativeName.split("/").slice(0, -1)) {
+    current = join(current, segment)
+    const info = await lstatOrNull(current)
+    if (info === null || info.isSymbolicLink() || !info.isDirectory()) return
+    const sentinel = await lstatOrNull(join(current, MEMORY_ARCHIVED_SENTINEL))
+    if (sentinel !== null) {
+      throw new MemoryError("store_archived", "cannot modify archived resource")
+    }
+  }
+}
+
+// ─────────────────────────── 写锁 / 配额 ───────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
+}
+
+function lockPathFor(file: string): string {
+  return join(dirname(file), `.${basename(file)}.lock`)
+}
+
+/**
+ * 约束（P0-1/P0-2）：同一文件的 overwrite 与 append 必须串行。用 O_EXCL 锁文件 +
+ * 退避重试；持锁进程崩溃的残留以 mtime 超时回收。取锁失败回 conflict，不无限等待。
+ */
+async function withFileLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + MEMORY_LOCK_TIMEOUT_MS
   let handle: Awaited<ReturnType<typeof open>> | null = null
+  for (;;) {
+    try {
+      handle = await open(lockPath, "wx", 0o600)
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      const info = await lstatOrNull(lockPath)
+      if (info !== null && Date.now() - Number(info.mtimeMs) > MEMORY_LOCK_STALE_MS) {
+        try {
+          await unlink(lockPath)
+        } catch {
+          // 约束：别人已回收同一把锁是成功路径。
+        }
+        continue
+      }
+      if (Date.now() >= deadline) {
+        throw new MemoryError("conflict", "memory store is busy; retry later")
+      }
+      await sleep(2 + Math.random() * 8)
+    }
+  }
   try {
-    handle = await open(file, "a", 0o600)
-    const before = statSize(await handle.stat())
-    if (before > maxBytes) {
-      throw new MemoryError("content_too_large", "existing memory file exceeds the size limit")
-    }
-    if (before + payload.byteLength > maxBytes) {
-      throw new MemoryError(
-        "content_too_large",
-        `content must be at most ${maxBytes} bytes after append`,
-      )
-    }
-    const { bytesWritten } = await handle.write(payload)
-    if (bytesWritten !== payload.byteLength) {
-      throw new MemoryError("not_writable", "append was not written atomically")
-    }
-    await handle.sync()
-    const after = statSize(await handle.stat())
-    if (after > maxBytes) {
-      // 只有确认没有并发交错时才回滚，避免误删别人的追加。
-      if (after === before + payload.byteLength) {
-        await handle.truncate(before)
-      }
-      throw new MemoryError(
-        "content_too_large",
-        `content must be at most ${maxBytes} bytes after append`,
-      )
-    }
-    return { bytes: after, sha256: createHash("sha256").update(payload).digest("hex") }
+    return await fn()
   } finally {
-    if (handle !== null) {
-      try {
-        await handle.close()
-      } catch {
-        // 约束：关闭失败不掩盖写入错误。
-      }
+    try {
+      await handle.close()
+    } catch {
+      // 约束：关闭失败不掩盖业务结果。
     }
+    try {
+      await unlink(lockPath)
+    } catch {
+      // 约束：锁可能已被 stale 回收。
+    }
+  }
+}
+
+interface ScopeUsage {
+  files: number
+  bytes: number
+}
+
+/** 统计 tenant/scope 下的记忆文件（只算 .md；不跟随 symlink）。 */
+async function scopeUsage(scopeRoot: string): Promise<ScopeUsage> {
+  const usage: ScopeUsage = { files: 0, bytes: 0 }
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > MEMORY_PATH_MAX_SEGMENTS + 2) return
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1)
+        continue
+      }
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue
+      const info = await lstatOrNull(full)
+      if (info === null || info.isSymbolicLink() || !info.isFile()) continue
+      usage.files += 1
+      usage.bytes += statSize(info)
+    }
+  }
+  await walk(scopeRoot, 0)
+  return usage
+}
+
+/**
+ * 约束（P2-8）：每 tenant/scope 文件数 ≤500、总字节 ≤20MB。配额检查在 scope 锁内、
+ * 写入前完成；超限回 store_full，本次不落盘。
+ */
+async function assertScopeQuota(
+  scopeRoot: string,
+  existingBytes: number | null,
+  nextBytes: number,
+): Promise<void> {
+  const usage = await scopeUsage(scopeRoot)
+  const projectedFiles = usage.files + (existingBytes === null ? 1 : 0)
+  const projectedBytes = usage.bytes - (existingBytes ?? 0) + nextBytes
+  if (projectedFiles > MEMORY_SCOPE_MAX_FILES) {
+    throw new MemoryError(
+      "store_full",
+      `memory scope file limit reached (max ${MEMORY_SCOPE_MAX_FILES} files)`,
+    )
+  }
+  if (projectedBytes > MEMORY_SCOPE_MAX_BYTES) {
+    throw new MemoryError(
+      "store_full",
+      `memory scope size limit reached (max ${MEMORY_SCOPE_MAX_BYTES} bytes)`,
+    )
   }
 }
 
 // ─────────────────────────── secret 扫描 ───────────────────────────
 
-// 约束：宁可误拒。命中只报类型，绝不回显命中的密文。
+// 约束（P1-3）：先剥离零宽/双向控制字符再扫，避免 `AKIA\u200b...` 这类
+// 「字符中间塞不可见符」把前缀拆散。任何扫描都只报类型，绝不回显命中内容。
+const INVISIBLE_CHARS_RE =
+  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g
+
+export function stripInvisibleChars(text: string): string {
+  return text.replace(INVISIBLE_CHARS_RE, "")
+}
+
+// 约束（P1-3）：JS 的 \b 把 `_` 当词字符，`MY_AWS_SECRET_ACCESS_KEY` 这类
+// 环境变量式前缀会漏判。统一用「前后不是字母数字」的边界，`_` 视为分隔符。
 const SECRET_PATTERNS: ReadonlyArray<{ label: string; re: RegExp }> = [
   { label: "private-key", re: /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/i },
   // PEM 正文（去掉 header 后剩下的 base64 长串）单独命中：只贴正文也算泄漏。
-  { label: "private-key-body", re: /\bMII[A-Za-z0-9+/]{40,}={0,2}\b/ },
-  { label: "aws-access-key", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
-  { label: "github-token", re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/ },
-  { label: "slack-token", re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/ },
-  { label: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{30,}\b/ },
-  { label: "model-api-key", re: /\b(?:sk|pk|xsk)-[A-Za-z0-9_-]{16,}\b/ },
-  { label: "npm-token", re: /\bnpm_[A-Za-z0-9]{20,}\b/ },
-  { label: "stripe-key", re: /\b[rs]k_live_[A-Za-z0-9]{16,}\b/ },
-  { label: "jwt", re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
-  { label: "bearer-token", re: /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/i },
-  { label: "credential-assignment", re: /\b(?:api[_-]?key|apikey|secret|client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|passwd|private[_-]?key)\b\s*[:=]\s*["'`]?[A-Za-z0-9_\-+/=.]{12,}/i },
-  { label: "telegram-token", re: /\b\d{8,10}:[A-Za-z0-9_-]{30,}\b/ },
+  { label: "private-key-body", re: /(?<![A-Za-z0-9])MII[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9])/ },
+  { label: "aws-access-key", re: /(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])/ },
+  { label: "github-token", re: /(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{20,}(?![A-Za-z0-9])/ },
+  { label: "slack-token", re: /(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9])/ },
+  { label: "google-api-key", re: /(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{30,}(?![A-Za-z0-9])/ },
+  { label: "model-api-key", re: /(?<![A-Za-z0-9])(?:sk|pk|xsk)-[A-Za-z0-9_-]{16,}(?![A-Za-z0-9])/ },
+  { label: "npm-token", re: /(?<![A-Za-z0-9])npm_[A-Za-z0-9]{20,}(?![A-Za-z0-9])/ },
+  { label: "stripe-key", re: /(?<![A-Za-z0-9])[rs]k_live_[A-Za-z0-9]{16,}(?![A-Za-z0-9])/ },
+  { label: "jwt", re: /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9])/ },
+  { label: "bearer-token", re: /(?<![A-Za-z0-9])Bearer\s+[A-Za-z0-9._~+/-]{20,}=*(?![A-Za-z0-9])/i },
+  // 约束（P1-3）：任何赋值给 *KEY/*TOKEN/*SECRET/*PASSWORD* 且值长 ≥8 一律拒。
+  // 兼容 `AWS_SECRET_ACCESS_KEY=`、`DB_PASSWORD=`、`OPENAI_API_KEY="..."` 等
+  // 环境变量/配置行；宁可误拒。
+  {
+    label: "credential-assignment",
+    re: /(?<![A-Za-z0-9])[A-Za-z0-9_.-]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_.-]*["'`]?\s*[:=]\s*["'`]?[^\s"'`]{8,}/i,
+  },
+  // 旧式 api_key: value（保持标签可读，已被上面的通用规则覆盖）。
+  {
+    label: "credential-assignment",
+    re: /(?<![A-Za-z0-9])(?:api[_-]?key|apikey|secret|client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|passwd|private[_-]?key)["'`]?\s*[:=]\s*["'`]?[A-Za-z0-9_\-+/=.]{8,}/i,
+  },
+  { label: "telegram-token", re: /(?<![A-Za-z0-9])\d{8,10}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9])/ },
   // URL 内嵌凭据：任意 scheme://user:pass@（不再只限数据库 URL）。
-  { label: "url-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@/i },
-  { label: "connection-string", re: /\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:[^\s@]+@/i },
+  { label: "url-credentials", re: /(?<![A-Za-z0-9])[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@/i },
+  {
+    label: "connection-string",
+    re: /(?<![A-Za-z0-9])(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:[^\s@]+@/i,
+  },
 ]
 
-const BASE64_RUN_RE = /[A-Za-z0-9+/]{24,}={0,2}/g
+const BASE64_RUN_RE = /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])/g
+const HEX_RUN_RE = /(?<![0-9A-Fa-f])[0-9A-Fa-f]{32,}(?![0-9A-Fa-f])/g
 
 function scanText(text: string): { ok: boolean; label?: string } {
   for (const pattern of SECRET_PATTERNS) {
+    pattern.re.lastIndex = 0
     if (pattern.re.test(text)) return { ok: false, label: pattern.label }
   }
   return { ok: true }
@@ -545,37 +678,66 @@ function scanText(text: string): { ok: boolean; label?: string } {
 function mostlyPrintable(text: string): boolean {
   if (text.length === 0) return false
   let printable = 0
+  let counted = 0
   for (const ch of text) {
+    counted += 1
     const code = ch.codePointAt(0) ?? 0
     if (code === 0x0a || code === 0x0d || code === 0x09 || (code >= 0x20 && code <= 0x7e)) printable += 1
   }
-  return printable / text.length > 0.9
+  return counted > 0 && printable / counted > 0.9
 }
 
-/** 约束：先按字面扫；再做 base64 解码扫描、去空白拼接扫描（分片拼秘密）。 */
+/** 把一段 base64/hex 文本解码后再扫；解码结果不像文本就跳过。 */
+function scanEncodedRuns(
+  text: string,
+  re: RegExp,
+  label: string,
+  decode: (match: string) => string,
+): { ok: boolean; label?: string } {
+  re.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    let decoded = ""
+    try {
+      decoded = decode(match[0])
+    } catch {
+      continue
+    }
+    if (!mostlyPrintable(decoded)) continue
+    const hit = scanText(decoded)
+    if (!hit.ok) return { ok: false, label: `${label}:${hit.label ?? "secret"}` }
+  }
+  return { ok: true }
+}
+
+/**
+ * 约束（P1-3）：扫描输入是「最终文件全文」——overwrite 是本次内容，append 是
+ * 既有内容＋本次内容。扫描前剥离零宽/双向控制字符与全部空白（分片拼接），
+ * 再对 base64（含 MIME 折行）与 hex 解码后复扫。
+ */
 export function scanMemorySecrets(content: string): { ok: boolean; label?: string } {
-  const direct = scanText(content)
+  const normalized = stripInvisibleChars(String(content ?? ""))
+  const direct = scanText(normalized)
   if (!direct.ok) return direct
 
   // 分片拼接：去掉所有空白后连续扫描，覆盖「密钥被换行/空格拆成多段」。
-  const joined = content.replace(/\s+/g, "")
-  if (joined !== content) {
-    const split = scanText(joined)
+  const compact = normalized.replace(/\s+/g, "")
+  if (compact !== normalized) {
+    const split = scanText(compact)
     if (!split.ok) return split
   }
 
-  // base64：解码后仍以可打印文本为主时再扫一遍。
-  BASE64_RUN_RE.lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = BASE64_RUN_RE.exec(content)) !== null) {
-    try {
-      const decoded = Buffer.from(match[0], "base64").toString("utf8")
-      if (!mostlyPrintable(decoded)) continue
-      const hit = scanText(decoded)
-      if (!hit.ok) return { ok: false, label: `base64:${hit.label ?? "secret"}` }
-    } catch {
-      // 约束：解码失败视为普通文本，不影响后续扫描。
-    }
+  // base64/hex：原文（跨行分片）与去空白文本各扫一遍。
+  const sources = compact === normalized ? [normalized] : [normalized, compact]
+  for (const source of sources) {
+    const b64 = scanEncodedRuns(source, BASE64_RUN_RE, "base64", (m) =>
+      Buffer.from(m, "base64").toString("utf8"),
+    )
+    if (!b64.ok) return b64
+    const hex = scanEncodedRuns(source, HEX_RUN_RE, "hex", (m) =>
+      m.length % 2 === 0 ? Buffer.from(m, "hex").toString("utf8") : "",
+    )
+    if (!hex.ok) return hex
   }
   return { ok: true }
 }
@@ -593,8 +755,9 @@ function assertNoSecrets(content: string): void {
 // ─────────────────────────── prompt 注入围栏 ───────────────────────────
 
 /**
- * 约束（P1-13）：记忆正文是不可执行的资料，不是指令。注入 prompt 前包上围栏，
- * 并把正文里可能被误读为控制标记的字符转义。
+ * 约束（P1-13/P3-14）：记忆正文是不可执行的资料，不是指令。注入 prompt 前包上围栏，
+ * 并把正文里可能被误读为控制标记的字符转义。行首 `#` 的变体（引用 `> #`、
+ * 有序/无序列表 `1. #`、`- #`）一律转义，避免伪造章节。
  * 注意：memory_read 的返回值保持原文；本函数只供注入层使用。
  */
 export function fenceMemoryForPrompt(text: string): string {
@@ -605,7 +768,7 @@ export function fenceMemoryForPrompt(text: string): string {
     .replace(/】/g, "[ESC_U3011]")
     .replace(/⟦/g, "[ESC_U27E6]")
     .replace(/⟧/g, "[ESC_U27E7]")
-    .replace(/(^|\n)([ \t]*)#[ \t]*交付/g, "$1$2[ESC_HASH] 交付")
+    .replace(/^([ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?)#/gm, "$1[ESC_HASH]")
   return `${MEMORY_PROMPT_FENCE_OPEN}\n${escaped}\n${MEMORY_PROMPT_FENCE_CLOSE}`
 }
 
@@ -630,23 +793,63 @@ export async function memorySave(input: MemorySaveInput): Promise<MemorySaveResu
   const { dirReal, rootReal } = await ensureContainedDir(paths.root, paths.dir, true)
   await assertNotArchived(rootReal, dirReal)
   const relativeName = relative(paths.dir, paths.file).split(sep).join("/")
+  // 约束（P1-4）：name 展开后的祖先先查归档，再建目录/锁。
+  await assertNoArchivedAlongName(dirReal, relativeName)
   const file = await ensureContainedFilePath(dirReal, relativeName, true)
+  await assertNotArchivedPath(rootReal, file)
 
-  let bytes: number
-  let sha256: string
-  if (mode === "append") {
-    assertNoSecrets(incoming.toString("utf8"))
-    const existingInfo = await lstatOrNull(file)
-    if (existingInfo !== null) await assertRegularFile(file, dirReal)
-    const appended = await appendFileAtomic(file, incoming, MEMORY_CONTENT_MAX_BYTES)
-    bytes = appended.bytes
-    sha256 = appended.sha256
-  } else {
-    assertNoSecrets(incoming.toString("utf8"))
-    await atomicWrite(file, incoming)
-    bytes = incoming.byteLength
-    sha256 = createHash("sha256").update(incoming).digest("hex")
+  // tenant/scope 根：root/tenant/{user|project|local}
+  const scopeSegments = relative(rootReal, dirReal).split(sep).slice(0, 2).filter((s) => s.length > 0)
+  const scopeRoot = await realpath(join(rootReal, ...scopeSegments))
+  if (!isUnder(rootReal, scopeRoot)) {
+    throw new MemoryError("invalid_path", "memory scope escapes the configured root")
   }
+
+  let bytes = 0
+  let sha256 = ""
+  // 锁序固定：scope 锁 → 文件锁（全局唯一顺序，避免死锁）。
+  await withFileLock(join(scopeRoot, ".quota.lock"), async () => {
+    await withFileLock(lockPathFor(file), async () => {
+      const existingInfo = await lstatOrNull(file)
+      let existing = Buffer.alloc(0)
+      if (existingInfo !== null) {
+        await assertRegularFile(file, dirReal)
+        existing = await readFile(file)
+      }
+
+      let final: Buffer
+      if (mode === "append") {
+        const needsSeparator =
+          incoming.byteLength > 0 &&
+          existing.byteLength > 0 &&
+          existing[existing.byteLength - 1] !== 0x0a
+        final = needsSeparator
+          ? Buffer.concat([existing, Buffer.from("\n"), incoming])
+          : Buffer.concat([existing, incoming])
+      } else {
+        final = incoming
+      }
+
+      // 约束（P0-2）：锁内检查总量；超限直接拒绝，目标文件保持原样。
+      if (final.byteLength > MEMORY_CONTENT_MAX_BYTES) {
+        throw new MemoryError(
+          "content_too_large",
+          `content must be at most ${MEMORY_CONTENT_MAX_BYTES} bytes after append`,
+        )
+      }
+      // 约束（P1-3）：append 扫「最终文件全文」，分片写入无法绕过。
+      assertNoSecrets(final.toString("utf8"))
+      await assertScopeQuota(
+        scopeRoot,
+        existingInfo !== null ? existing.byteLength : null,
+        final.byteLength,
+      )
+      await atomicWrite(file, final)
+      bytes = final.byteLength
+      // 约束（P3-13）：bytes/sha256 统一为 **写入后的最终文件** 语义。
+      sha256 = createHash("sha256").update(final).digest("hex")
+    })
+  })
 
   return {
     scope: input.scope,
@@ -667,6 +870,8 @@ export async function memoryRead(
   await assertNotArchived(rootReal, dirReal)
   const relativeName = relative(paths.dir, paths.file).split(sep).join("/")
   const file = await ensureContainedFilePath(dirReal, relativeName, false)
+  // 约束（P1-4）：name 展开后的所有祖先都要查归档，嵌套目录同样拒读。
+  await assertNotArchivedPath(rootReal, file)
   const info = await assertRegularFile(file, dirReal)
 
   // 约束：单次最多回传 65536 字符；超出截断并提示先分段读取。
@@ -752,6 +957,8 @@ export async function memoryList(
       // 约束：不跟随 symlink。
       if (info.isSymbolicLink()) continue
       if (info.isDirectory()) {
+        // 约束（P1-4）：归档子树不再可列出。
+        if (entry.name === MEMORY_ARCHIVED_SENTINEL) continue
         await walk(full, depth + 1)
         continue
       }

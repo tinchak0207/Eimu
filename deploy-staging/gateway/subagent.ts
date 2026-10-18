@@ -43,7 +43,7 @@ import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascad
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { notify, waitFor, parseWaitMs } from "./internal-waiters.ts"
 // 协作总线：派遣成功即登记 worker 为 mailbox 团队成员（只登记，不参与编排）。
-import { registerTeamMember } from "./agent-mailbox.ts"
+import { registerTeamMember, removeTeamMember } from "./agent-mailbox.ts"
 // FIX-A（2026-10-02）：子代理工具结果的媒体成品出卡——共用主路径的成品 URL 提取器与
 // emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
 // 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
@@ -72,10 +72,13 @@ import {
   // 2026-10-04 F10：done 摘要从源头过用户可见白名单（内审/契约内部文字不上桌）。
   // F10 起与 sse-core 咽喉点、index.ts 唤醒路径共用同一纯函数 scrubSubagentPayload。
   scrubSubagentPayload,
+  type ArtifactVerifyRecord,
   type CriticScoreSample,
   type DeliveryGateResult,
   type CriticPassTarget,
 } from "./delivery-gate"
+// P1-3 接线：交付闸消费 artifact store 的 verify 状态（blocked 拒绝、no_row 保持原行为）。
+import { listArtifacts } from "./artifact-store.ts"
 import { isMultiStepAvProductionIntent } from "./canvas-write-gate.ts"
 // 刀 F（2026-09-15）：in-flight rework run 持久化 + 启动孤儿治理（复用 persistence.ts
 // 同一 bun:sqlite 层，非自造第二套持久层）。finishRun 终态删、startRework 成功写。
@@ -548,6 +551,9 @@ interface SubagentRun {
   // ── CC 2.1.302 移植（2026-10-18）──────────────────────────────────────────
   // name：可达 64 字符的可寻址名（subagent_message/status 可直接按名寻址）。
   name?: string
+  // P0 邮箱身份：派遣时登记进团队的实际成员名（可能是 `name#shortRun`）。HTTP 端按
+  // 子会话 id 解析到这个值，工具不再自报 from。
+  mailboxName?: string
   // fork：子会话由父会话 `/session/{id}/fork` 服务端复制完整历史（含 tool_use/tool_result），
   // 继承同一 agent 工具面与模型；结果只取 fork 自己新产生的最后一则 assistant 文本。
   isFork?: boolean
@@ -660,7 +666,10 @@ const byChildOc = new Map<string, SubagentRun>()
 // **只在绑定处写**，不改任何 byChildOc.has()/delete() 语义（subagent_stop/status 依赖它们）。
 const RECENT_CHILD_PARENT_CAP = 200
 const RECENT_CHILD_PARENT_TTL_MS = 2 * 60 * 60 * 1000
-const recentChildParent = new Map<string, { parentGatewaySessionId: string; parentOpencodeSessionId: string; at: number }>()
+const recentChildParent = new Map<
+  string,
+  { parentGatewaySessionId: string; parentOpencodeSessionId: string; at: number; memberName?: string }
+>()
 // 子代理 id → 结果（工具轮询取件；TTL 后清）
 const completed = new Map<string, SubagentResult>()
 // X7/C4（2026-10-14）：接续索引。终态但仍在 resumeUntil 窗口内的 run 挂在这里（同时子会话
@@ -715,11 +724,36 @@ export function subagentHandlesSession(opencodeSessionId: string): boolean {
 }
 
 /**
+ * P0：子会话 → 邮箱身份（派遣登记名）。mailbox HTTP 端用它做服务端身份解析：
+ * 工具传来的 session_id 是子会话 id，from 一律由这里推导。
+ * 机器 critic / goal evaluator 不登记成员，明确不可寻址（返回 null）。
+ */
+export function subagentMailboxMemberName(opencodeSessionId: string): string | null {
+  const run = byChildOc.get(opencodeSessionId)
+  if (run) {
+    if (run.machineCriticPass === true || typeof run.goalEvaluator === "function") return null
+    return (
+      run.mailboxName ??
+      ((run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`)
+    )
+  }
+  // run 已收尾（byChildOc 已删）时回退 TTL 表：保留最后 2h 的邮箱身份。
+  return recentChildParent.get(opencodeSessionId)?.memberName ?? null
+}
+
+/**
  * 死线③（片 AN，评测 REPORT S2）：子代理 opencode session 不在主 sessions 表，
  * /internal/session-key 查无记录 → 工具侧 resolveKey 全挂（「网关侧解析不到本
  * 会话的 API key」）。子会话仍活跃时经此继承父会话 apiKey（同一用户，计费口径
  * 不变）；父会话已被逐出/收尾则回 undefined，维持 404 原语义。
  */
+export function subagentMailboxMemberName(opencodeSessionId: string): string | null {
+  const run = byChildOc.get(opencodeSessionId)
+  if (!run) return null
+  if (run.machineCriticPass === true || typeof run.goalEvaluator === "function") return null
+  return (run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`
+}
+
 export function subagentParentApiKey(opencodeSessionId: string): string | undefined {
   const state = subagentParentState(opencodeSessionId)
   const key = state?.apiKey
@@ -1035,6 +1069,7 @@ function rememberChildParent(childId: string, run: SubagentRun): void {
     parentGatewaySessionId: run.parentGatewaySessionId,
     parentOpencodeSessionId: run.parentOpencodeSessionId,
     at: Date.now(),
+    memberName: run.mailboxName,
   })
   while (recentChildParent.size > RECENT_CHILD_PARENT_CAP) {
     const oldest = recentChildParent.keys().next().value
@@ -1147,6 +1182,24 @@ async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: st
   persistMeasuredVerdict(run, measured, criticVerdictText)
 }
 
+/**
+ * P1-3：交付闸消费 verify 状态。子代理的 artifact 工具以**子会话 id** 写入 store，
+ * 所以按 run.opencodeSessionId 取 mine 列表；读不到 store（旧库/未初始化）时回空数组，
+ * 保持闸门原有行为（不误杀）。
+ */
+function artifactVerifyRecords(run: SubagentRun): ArtifactVerifyRecord[] {
+  try {
+    if (!run.opencodeSessionId) return []
+    return listArtifacts(run.opencodeSessionId, "mine").map((view) => ({
+      name: view.name,
+      verify_status: view.verify_status,
+    }))
+  } catch (e) {
+    console.warn(`[gateway] delivery gate: artifact verify 状态读取失败，按无记录处理 run=${run.id}`, e)
+    return []
+  }
+}
+
 /** 收尾：登记结果、摘除注册表、向父会话发 done、DELETE 子会话防堆积。
  *  2026-10-03：改 async——仅在「critic-score 闸门开启且本 run 是机器 critic」时才会 await
  *  一次量测（要在判决前拿到 measured 分）。闸门未设时无任何 await：副作用与时序与接线前
@@ -1165,6 +1218,8 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const softStop = run.softStopping
   run.softStopping = undefined
   run.status = status
+  // P1-3：交付闸开跑前先读本 run 的 artifact verify 状态（blocked 拒绝；no_row 原行为）。
+  const artifactVerify = status === "ok" && run.agent ? artifactVerifyRecords(run) : []
   // CC 2.1.302 结果契约：usage 必须随完成通知/status 返回。summarizeChild 路径已算过；
   // 超时/上游错误等收尾路径在此补一次（幂等：已有值不重算）。
   if (!run.usage) run.usage = await childUsageSnapshot(run)
@@ -1173,7 +1228,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const persist = persistRunOutput(run, status, fullText, error)
   if (status === "ok" && run.agent && !run.stopped && typeof run.goalEvaluator !== "function") {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
-    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS).ok : undefined })
+    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify).ok : undefined })
     if (arr.length > 20) arr.shift()
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
@@ -1221,7 +1276,7 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=ORPHANED (进程中断未复原) missing=${miss.join(",")}`,
     )
   } else if (status === "ok" && (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent) {
-    const verdict = checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS)
+    const verdict = checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify)
     // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
     // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
     // 非 Expert/已失败收场零污染；status==="ok" 是必要条件——上游 error/超时不进重派链。
@@ -3657,24 +3712,45 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   // D5（2026-10-02）：心跳 + 逾时前 2 分钟部分交付。
   armHeartbeat(run, hardMs)
 
+  // 协作总线接线（P0）：派遣**前**登记，保证子会话第一次工具调用即可解析身份。
+  // P2：同名成员已存在时用 `name#shortRun`，旧名未读消息不继承；旧 run 已结束时摘除
+  // 旧名（仍有活 run 则保留其可寻址性）。登记失败不影响派遣，子会话将明确不可寻址。
+  let mailboxMembership: { team: string; agent: string } | undefined
+  try {
+    const mailboxBaseName =
+      (run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`
+    const liveBaseNames = new Set(
+      (byParent.get(parent.sessionId) ?? [])
+        .filter((r) => r !== run && !r.stopped && (r.status === "running" || r.status === "interrupted" || r.status === "suspended"))
+        .map((r) => r.mailboxName ?? ((r.name ?? r.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${r.id.slice(0, 8)}`)),
+    )
+    const row = registerTeamMember(parent.sessionId, undefined, mailboxBaseName, expertId || null, {
+      runId: run.id,
+      uniquePerRun: true,
+      replaceStale: !liveBaseNames.has(mailboxBaseName),
+    })
+    run.mailboxName = row.agent
+    mailboxMembership = { team: row.team, agent: row.agent }
+  } catch (e) {
+    console.error("[gateway] mailbox member registration failed:", e)
+  }
+
   // 投递任务书（第一次 attempt；后续上游错误换模重试走 retryWithNextModel）
   const failure = await dispatchAttempt(run)
   if (failure) {
+    // 投递从未成功：撤销本次成员登记，避免名册留下不可达成员。
+    if (mailboxMembership) {
+      try {
+        removeTeamMember(mailboxMembership.team, mailboxMembership.agent)
+      } catch (e) {
+        console.error("[gateway] mailbox member rollback failed:", e)
+      }
+    }
     // 投递失败：死因随 502 同步返回工具（主会话当场知道），R6 唤醒不再补发，
     // 避免同一失败双重注入。
     run.asyncMode = false
     finishRun(run, "error", "", `子代理${failure}`)
     return Response.json({ ok: false, error: `子代理${failure}` }, { status: 502 })
-  }
-
-  // 协作总线接线：派遣成功即把 worker 登记进父会话团队，让 mailbox_agents 列出它。
-  // 只加登记，不改编排；登记失败绝不影响派遣结果。
-  try {
-    const memberName =
-      (run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`
-    registerTeamMember(parent.sessionId, undefined, memberName, expertId || null)
-  } catch (e) {
-    console.error("[gateway] mailbox member registration failed:", e)
   }
 
   deps.emitToSession(parent, "subagent.started", { id: run.id, label: run.label })

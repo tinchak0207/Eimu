@@ -60,7 +60,7 @@ export default tool({
         )
       }
       const messages = Array.isArray(data.messages) ? data.messages : []
-      return ok({ title: `收到 ${messages.length} 条消息`, messages, count: messages.length })
+      return ok({ title: `收到 ${messages.length} 条消息`, agent: data.agent, messages, count: messages.length })
     } catch (e) {
       return fail("gateway_unreachable", e instanceof Error ? e.message : String(e))
     }

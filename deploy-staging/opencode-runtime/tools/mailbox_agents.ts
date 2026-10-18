@@ -40,6 +40,7 @@ export default tool({
       }
       return ok({
         title: `可寻址 agent ${Array.isArray(data.agents) ? data.agents.length : 0} 个`,
+        self: data.self,
         team: data.team,
         lead: data.lead,
         agents: data.agents,

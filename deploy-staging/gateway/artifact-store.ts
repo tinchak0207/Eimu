@@ -9,6 +9,15 @@ import { isIP } from "node:net"
 import path from "node:path"
 
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
+// 入库字节上限仍是 16MiB；verify 只读取远端字节做流式哈希，影音成品可远超 16MiB。
+const DEFAULT_VERIFY_MAX_BYTES = 256 * 1024 * 1024
+export function artifactVerifyMaxBytes(): number {
+  const raw = process.env.ARTIFACT_VERIFY_MAX_BYTES
+  if (!raw) return DEFAULT_VERIFY_MAX_BYTES
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_VERIFY_MAX_BYTES
+  return Math.floor(n)
+}
 const MAX_NAME_LENGTH = 256
 const MAX_SLUG_LENGTH = 96
 const MAX_ASSET_KEY_LENGTH = 128
@@ -80,6 +89,7 @@ export interface ArtifactVersionView {
 
 export interface PublishArtifactInput {
   sessionId: string
+  /** 已废弃：owner 一律由 sessionId 推导，忽略调用方传入值（P1 身份修复）。 */
   ownerKey?: string
   name: string
   path: string
@@ -110,6 +120,18 @@ export interface VerifyArtifactInput {
   sessionId: string
   name: string
   version?: number
+  /** P2-6：0 字节 / 204 默认 blocked；显式 allow_empty=true 才允许。 */
+  allowEmpty?: boolean
+}
+
+/** P1/P3：只登记元数据（不产生新版本、不隐式 publish）。 */
+export interface RegisterArtifactInput {
+  sessionId: string
+  name: string
+  url?: string
+  path?: string
+  contentType?: string
+  producer?: string
 }
 
 export interface VerifyArtifactResult {
@@ -141,6 +163,8 @@ export interface UploadAssetInput {
   url?: string
   contentType?: string
   assetKey?: string
+  /** 操作者身份；store 层一律取 sessionId（忽略外部传入）。 */
+  actor?: string
 }
 
 export interface CopyAssetInput {
@@ -212,6 +236,7 @@ function db(): Database {
     name TEXT,
     slug TEXT,
     latest_version INTEGER NOT NULL DEFAULT 0,
+    version_epoch INTEGER NOT NULL DEFAULT 0,
     acl_mode TEXT NOT NULL DEFAULT 'owner',
     acl_json TEXT NOT NULL DEFAULT '{}',
     pinned INTEGER NOT NULL DEFAULT 0,
@@ -247,6 +272,20 @@ function db(): Database {
   );
   CREATE INDEX IF NOT EXISTS artifact_versions_artifact ON artifact_versions(artifact_id);
   CREATE INDEX IF NOT EXISTS artifact_assets_artifact ON artifact_assets(artifact_id);`)
+  // P2-11：版本号单调 epoch。旧库没有该栏；ALTER 失败（已存在）不阻断。
+  try {
+    next.exec("ALTER TABLE artifacts ADD COLUMN version_epoch INTEGER NOT NULL DEFAULT 0")
+  } catch {
+    // 栏位已存在。
+  }
+  try {
+    // 旧库回填：epoch 取当前存在过的最大版本，避免删除最新版后复用同一版本号。
+    next.exec(`UPDATE artifacts SET version_epoch = (
+      SELECT COALESCE(MAX(version), 0) FROM artifact_versions WHERE artifact_id = artifacts.id
+    ) WHERE version_epoch = 0`)
+  } catch {
+    // 回填失败不阻断 store 启动；发布路径仍会取 max(latest, epoch)+1。
+  }
   // 既有库迁移（P1-4）：旧表没有 UNIQUE；先去重保留最新一行，再建唯一索引。
   // 任何一步失败都不得阻止 store 载入（旧库可能仍在写入）。
   try {
@@ -298,6 +337,14 @@ function normalizeVersion(value: unknown): number | undefined {
   if (value === undefined || value === null || value === "") return undefined
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isInteger(n) || n < 1) throw new ArtifactError("invalid_version", "version 必须是 ≥1 的整数")
+  return n
+}
+
+/** P2-9：asset_id 必须是 ≥1 的整数；字符串/NaN 一律 400，绝不静默当成缺失。 */
+function normalizeAssetId(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined
+  const n = typeof value === "number" ? value : Number(value)
+  if (!Number.isInteger(n) || n < 1) throw new ArtifactError("invalid_asset_id", "asset_id 必须是 ≥1 的整数", 400)
   return n
 }
 
@@ -356,6 +403,17 @@ const CONTENT_TYPES: Record<string, string> = {
 function contentTypeFor(filePath: string, provided?: string): string {
   if (provided) return provided.slice(0, 256)
   return CONTENT_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream"
+}
+
+/** 从 URL 的路径扩展名推出期望 MIME（用于 verify 的 content_type 一致性检查）。 */
+function expectedContentTypeForUrl(rawUrl: string): string | null {
+  try {
+    const ext = path.extname(new URL(rawUrl).pathname).toLowerCase()
+    const expected = CONTENT_TYPES[ext]
+    return expected ? expected.split(";")[0].trim().toLowerCase() : null
+  } catch {
+    return null
+  }
 }
 
 function sha256Hex(buffer: Buffer): string {
@@ -504,10 +562,29 @@ function resolvedVersion(artifact: any, version?: number): { artifact: any; vers
 }
 
 // ── 身份 / ACL（P1-2）───────────────────────────────────────────────────────
-// actor 默认等于 sessionId（既有 HTTP/工具调用不传 actor 时行为不变）。
-function resolveActor(actor: string | undefined, fallback: string): string {
-  const value = typeof actor === "string" ? actor.trim() : ""
-  return value || fallback
+// P1 身份修复：actor **只**由 sessionId 推导。外部传入的 actor/requesterKey 一律忽略，
+// 否则知道 session_id 的人可在 body 里换一个 actor 跨会话操作。
+function resolveActor(_actor: string | undefined, fallback: string): string {
+  return fallback
+}
+
+/** P2-13：URL 只接受 http/https（javascript:/data: 等一律 400）。 */
+function assertHttpUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new ArtifactError("invalid_url", `URL 无法解析：${value}`, 400)
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new ArtifactError(
+      "unsupported_url_scheme",
+      `只允许 http/https URL，收到 ${parsed.protocol}`,
+      400,
+      { scheme: parsed.protocol },
+    )
+  }
+  return value
 }
 
 function aclUsers(artifact: any): string[] {
@@ -520,13 +597,15 @@ function sameIdentity(a: string, b: string): boolean {
   return a === b || a.toLowerCase() === b.toLowerCase()
 }
 
-/** owner / public / org / users 命中任一即视为可读。 */
+/**
+ * P2-10：可读判据 = owner 或 users 白名单。公共/组织共享没有真实租户概念，
+ * 一律视为 owner-only（旧 public/org 行降级为 private，不再对所有人开放）。
+ */
 function canReadArtifact(artifact: any, actor: string): boolean {
   const owner = String(artifact.owner_key ?? "")
   // owner 是密钥类不透明身份：精确匹配；users 名单按大小写不敏感匹配。
   if (owner !== "" && owner === actor) return true
   const mode = String(artifact.acl_mode ?? "owner")
-  if (mode === "public" || mode === "org") return true
   if (mode === "users") return aclUsers(artifact).some((user) => sameIdentity(user, actor))
   return false
 }
@@ -565,11 +644,13 @@ function userExists(value: string): boolean {
   return false
 }
 
-export function getArtifact(sessionId: string, name: string, version?: number): ArtifactVersionView | null {
+export function getArtifact(sessionId: string, name: string, version?: number, actor?: string): ArtifactVersionView | null {
   const sid = requiredText(sessionId, "session_id", MAX_NAME_LENGTH)
   const artifactName = requiredText(name, "name", MAX_NAME_LENGTH)
   const artifact = artifactRow(sid, artifactName)
   if (!artifact) return null
+  // P1：可读性由 ACL 决定；跨会话非共享读取 → 403（不再仅凭知道 session_id 就放行）。
+  requireReadAccess(artifact, resolveActor(actor, sid))
   const wanted = normalizeVersion(version)
   const row = versionRow(Number(artifact.id), wanted ?? Number(artifact.latest_version))
   // P3：artifact 还在但版本行被删除时，明确回 version_not_found（不能伪装成 artifact 不存在）。
@@ -586,48 +667,54 @@ export function listArtifacts(sessionId: string, scope: ArtifactListScope = "min
     LEFT JOIN artifact_versions v ON v.artifact_id = a.id AND v.version = a.latest_version`
   let rows: any[]
   if (scope === "shared") {
-    rows = db().query(`${base} WHERE a.acl_mode <> 'owner' ORDER BY a.updated_at DESC`).all() as any[]
+    // 先全取，再按 ACL 过滤：旧查询把 acl_mode<>'owner' 当共享，会把 users 名单外的人
+    // 也算作可读（P1 泄漏）。真正可读性只由 canReadArtifact 判定。
+    rows = db().query(`${base} WHERE a.session_id <> ? ORDER BY a.updated_at DESC`).all(sid) as any[]
   } else if (scope === "all") {
-    rows = db().query(`${base} WHERE a.session_id = ? OR a.acl_mode <> 'owner' ORDER BY a.updated_at DESC`).all(sid) as any[]
+    rows = db().query(`${base} ORDER BY a.updated_at DESC`).all() as any[]
   } else if (scope === "mine") {
     rows = db().query(`${base} WHERE a.session_id = ? ORDER BY a.updated_at DESC`).all(sid) as any[]
   } else {
     throw new ArtifactError("invalid_scope", "scope 只接受 mine/shared/all")
   }
-  return rows
-    .filter((row) => row.v_version !== null)
-    .map((row) => {
-      const view = rowView(
-        row,
-        {
-          version: row.v_version,
-          url: row.v_url,
-          path: row.v_path,
-          sha256: row.v_sha256,
-          bytes: row.v_bytes,
-          content_type: row.v_content_type,
-          producer: row.v_producer,
-          verified_at: row.v_verified_at,
-          verify_status: row.v_verify_status,
-          created_at: row.v_created_at,
-        },
-      )
-      // P1-2：shared / all 里不属于本次 session 的条目脱敏——不回 path 与 owner_key。
-      if (scope === "shared" || String(row.session_id ?? "") !== sid) {
-        return { ...view, owner_key: "", path: null }
-      }
-      return view
+  const out: ArtifactVersionView[] = []
+  for (const row of rows) {
+    if (row.v_version === null) continue
+    const own = String(row.session_id ?? "") === sid
+    if (scope === "mine" && !own) continue
+    if (!own && !canReadArtifact(row, sid)) continue
+    const view = rowView(row, {
+      version: row.v_version,
+      url: row.v_url,
+      path: row.v_path,
+      sha256: row.v_sha256,
+      bytes: row.v_bytes,
+      content_type: row.v_content_type,
+      producer: row.v_producer,
+      verified_at: row.v_verified_at,
+      verify_status: row.v_verify_status,
+      created_at: row.v_created_at,
     })
+    if (!own) {
+      // P1：shared/all 只返回可读条目；非 owner 的条目脱敏 url/sha/name（及 path/owner_key）。
+      out.push({ ...view, owner_key: "", name: "", slug: "", url: null, path: null, sha256: "" })
+    } else {
+      out.push(view)
+    }
+  }
+  return out
 }
 
 export function publishArtifact(input: PublishArtifactInput): PublishArtifactResult {
   const sessionId = requiredText(input.sessionId, "session_id", MAX_NAME_LENGTH)
-  const ownerKey = optionalText(input.ownerKey, "owner_key", MAX_NAME_LENGTH) || sessionId
+  // P1：owner 只由 session_id 推导；body 里的 owner_key 一律忽略。
+  const ownerKey = sessionId
   const name = requiredText(input.name, "name", MAX_NAME_LENGTH)
   // 约束：文件在进入事务前完整读取并校验；失败不得留下半条版本。
   const file = readRegularFile(input.path)
   const contentType = contentTypeFor(file.absolutePath, optionalText(input.contentType, "content_type", 256))
-  const url = optionalText(input.url, "url", MAX_URL_LENGTH) || null
+  const rawUrl = optionalText(input.url, "url", MAX_URL_LENGTH)
+  const url = rawUrl ? assertHttpUrl(rawUrl) : null
   const producer = optionalText(input.producer, "producer", MAX_NAME_LENGTH) || null
   const expectedVersion = normalizeExpectedVersion(input.expectedVersion)
   const now = Date.now()
@@ -641,15 +728,15 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
       }
       const inserted = db()
         .query(
-          `INSERT INTO artifacts(session_id,owner_key,name,slug,latest_version,acl_mode,acl_json,pinned,created_at,updated_at)
-           VALUES(?,?,?,?,1,'owner','{}',0,?,?)`,
+          `INSERT INTO artifacts(session_id,owner_key,name,slug,latest_version,version_epoch,acl_mode,acl_json,pinned,created_at,updated_at)
+           VALUES(?,?,?,?,1,1,'owner','{}',0,?,?)`,
         )
         .run(sessionId, ownerKey, name, slugFor(sessionId, name), now, now)
       const artifactId = Number(inserted.lastInsertRowid)
       db()
         .query(
           `INSERT INTO artifact_versions(artifact_id,version,url,path,sha256,bytes,content_type,producer,verified_at,verify_status,created_at)
-           VALUES(?,?,?,?,?,?,?,?,NULL,NULL,?)`,
+           VALUES(?,?,?,?,?,?,?,?,NULL,'unverified',?)`,
         )
         .run(artifactId, 1, url, file.absolutePath, file.sha256, file.size, contentType, producer, now)
       const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(artifactId) as any
@@ -673,15 +760,27 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
     // P2-6：内容未变（sha256/bytes 相同）不升版本，但必须吸收新的 url/content_type/producer 元数据
     // 并回 changed:true——新 URL 不得被吞掉。
     if (live && String(live.sha256) === file.sha256 && Number(live.bytes) === file.size) {
-      db()
-        .query("UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=? WHERE id=?")
-        .run(
-          url ?? (typeof live.url === "string" ? live.url : null),
-          file.absolutePath,
-          contentType,
-          producer ?? (typeof live.producer === "string" ? live.producer : null),
-          Number(live.id),
-        )
+      const nextUrl = url ?? (typeof live.url === "string" ? live.url : null)
+      const nextPath = file.absolutePath
+      const nextType = contentType
+      const nextProducer = producer ?? (typeof live.producer === "string" ? live.producer : null)
+      // P1：URL/path/content_type/producer 任一变化 → 旧的 verify 结论失效，必须重置。
+      const metadataChanged =
+        nextUrl !== (typeof live.url === "string" ? live.url : null) ||
+        nextPath !== (typeof live.path === "string" ? live.path : null) ||
+        nextType !== String(live.content_type ?? "") ||
+        nextProducer !== (typeof live.producer === "string" ? live.producer : null)
+      if (metadataChanged) {
+        db()
+          .query(
+            "UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=?,verify_status='unverified',verified_at=NULL WHERE id=?",
+          )
+          .run(nextUrl, nextPath, nextType, nextProducer, Number(live.id))
+      } else {
+        db()
+          .query("UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=? WHERE id=?")
+          .run(nextUrl, nextPath, nextType, nextProducer, Number(live.id))
+      }
       db().query("UPDATE artifacts SET updated_at=? WHERE id=?").run(now, Number(existing.id))
       const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(Number(existing.id)) as any
       const updatedLive = versionRow(Number(existing.id), liveVersion)
@@ -689,13 +788,17 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
       return { ...view, readBack: view, changed: true }
     }
 
-    const nextVersion = liveVersion + 1
+    // P2-11：版本号单调——删除最新版后不得复用同号；epoch 记录历史最大版本。
+    const epoch = Number(existing.version_epoch ?? 0)
+    const nextVersion = Math.max(liveVersion, Number.isFinite(epoch) ? epoch : 0) + 1
     // P1-3：owner_key 只由创建时决定，后续版本更新不得改写。
-    db().query("UPDATE artifacts SET latest_version=?,updated_at=? WHERE id=?").run(nextVersion, now, Number(existing.id))
+    db()
+      .query("UPDATE artifacts SET latest_version=?,version_epoch=?,updated_at=? WHERE id=?")
+      .run(nextVersion, nextVersion, now, Number(existing.id))
     db()
       .query(
         `INSERT INTO artifact_versions(artifact_id,version,url,path,sha256,bytes,content_type,producer,verified_at,verify_status,created_at)
-         VALUES(?,?,?,?,?,?,?,?,NULL,NULL,?)`,
+         VALUES(?,?,?,?,?,?,?,?,NULL,'unverified',?)`,
       )
       .run(Number(existing.id), nextVersion, url, file.absolutePath, file.sha256, file.size, contentType, producer, now)
     const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(Number(existing.id)) as any
@@ -724,8 +827,12 @@ export function setAcl(input: SetAclInput): ArtifactVersionView {
     aclMode = "owner"
     aclJson = {}
   } else if (mode === "org") {
-    aclMode = "org"
-    aclJson = { access }
+    // P2-10：本仓库没有 org/租户成员表，无法证明「同组织」。拒绝而不是把 org 当所有人。
+    throw new ArtifactError(
+      "org_unsupported",
+      "当前没有组织/租户概念，mode=org 无法安全实现；请用 mode=users 指定成员，或 mode=private",
+      400,
+    )
   } else if (mode === "people" || mode === "users") {
     const rawPeople = Array.isArray(input.people)
       ? input.people.filter((p): p is string => typeof p === "string" && Boolean(p.trim())).map((p) => p.trim())
@@ -743,7 +850,7 @@ export function setAcl(input: SetAclInput): ArtifactVersionView {
     aclMode = "users"
     aclJson = { users: unique.slice(0, 256), access }
   } else {
-    throw new ArtifactError("invalid_acl_mode", "mode 只接受 private/org/people/users", 400)
+    throw new ArtifactError("invalid_acl_mode", "mode 只接受 private/people/users", 400)
   }
   const now = Date.now()
   db().query("UPDATE artifacts SET acl_mode=?,acl_json=?,updated_at=? WHERE id=?").run(aclMode, JSON.stringify(aclJson), now, Number(artifact.id))
@@ -774,21 +881,28 @@ function contentRangeTotal(value: string | null): number | null {
   return match ? Number(match[1]) : null
 }
 
-async function readCapped(response: Response, cap: number): Promise<{ buffer: Buffer; truncated: boolean }> {
+/** P1-5：流式读取并计算 sha256（不再把整个影音文件堆在内存里）。 */
+async function readCappedHash(
+  response: Response,
+  cap: number,
+): Promise<{ sha256: string; length: number; truncated: boolean }> {
+  const hash = createHash("sha256")
   if (!response.body) {
     const raw = Buffer.from(await response.arrayBuffer())
-    return { buffer: raw.subarray(0, cap), truncated: raw.length > cap }
+    const sliced = raw.subarray(0, cap)
+    hash.update(sliced)
+    return { sha256: hash.digest("hex"), length: sliced.length, truncated: raw.length > cap }
   }
   const reader = response.body.getReader()
-  const chunks: Buffer[] = []
   let total = 0
   let truncated = false
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
     if (!value || value.byteLength === 0) continue
-    if (total + value.byteLength > cap) {
-      chunks.push(Buffer.from(value.subarray(0, cap - total)))
+    const room = cap - total
+    if (value.byteLength > room) {
+      hash.update(value.subarray(0, room))
       total = cap
       truncated = true
       try {
@@ -798,10 +912,10 @@ async function readCapped(response: Response, cap: number): Promise<{ buffer: Bu
       }
       break
     }
-    chunks.push(Buffer.from(value))
+    hash.update(value)
     total += value.byteLength
   }
-  return { buffer: Buffer.concat(chunks), truncated }
+  return { sha256: hash.digest("hex"), length: total, truncated }
 }
 
 // ── SSRF 防护（P0-1）────────────────────────────────────────────────────────
@@ -873,31 +987,66 @@ function isPrivateIpv4(value: number): boolean {
   return value === 0xffffffff
 }
 
+/** 把 IPv6 文本展开成 8 个 16 位分组；无法解析回 null（调用方按 blocked 处理）。 */
+function parseIpv6Groups(raw: string): number[] | null {
+  let addr = raw.toLowerCase().split("%")[0]
+  // 内嵌 IPv4（::ffff:127.0.0.1 / 64:ff9b::192.168.1.1）先换成两组十六进制。
+  if (addr.includes(".")) {
+    const idx = addr.lastIndexOf(":")
+    if (idx < 0) return null
+    const v4 = parseIpv4Literal(addr.slice(idx + 1))
+    if (v4 === null) return null
+    addr = `${addr.slice(0, idx)}:${((v4 >>> 16) & 0xffff).toString(16)}:${(v4 & 0xffff).toString(16)}`
+  }
+  let head = addr
+  let tail = ""
+  const doubleColon = addr.indexOf("::")
+  if (doubleColon >= 0) {
+    head = addr.slice(0, doubleColon)
+    tail = addr.slice(doubleColon + 2)
+  }
+  const headGroups = head ? head.split(":") : []
+  const tailGroups = tail ? tail.split(":") : []
+  const parse = (parts: string[]): number[] | null => {
+    const out: number[] = []
+    for (const part of parts) {
+      if (!/^[0-9a-f]{1,4}$/.test(part)) return null
+      out.push(Number.parseInt(part, 16))
+    }
+    return out
+  }
+  const hs = parse(headGroups)
+  const ts = parse(tailGroups)
+  if (!hs || !ts) return null
+  if (doubleColon >= 0) {
+    const missing = 8 - hs.length - ts.length
+    if (missing < 0) return null
+    return [...hs, ...new Array<number>(missing).fill(0), ...ts]
+  }
+  return hs.length === 8 ? hs : null
+}
+
 function isPrivateIpv6(raw: string): boolean {
-  const addr = raw.toLowerCase().split("%")[0]
-  if (addr === "::" || addr === "::1") return true
+  const g = parseIpv6Groups(raw)
+  // 解析不了按私网处理（fail-closed）。
+  if (!g) return true
+  if (g.every((part) => part === 0)) return true // ::
+  if (g.slice(0, 7).every((part) => part === 0) && g[7] === 1) return true // ::1
   // fe80::/10 link-local
-  if (/^fe[89ab][0-9a-f]?:/.test(addr)) return true
+  if ((g[0] & 0xffc0) === 0xfe80) return true
   // fc00::/7 unique local
-  if (/^f[cd][0-9a-f]{2}:/.test(addr)) return true
-  // IPv4-mapped / IPv4-compatible：提取末尾 32 位再按 IPv4 规则判。
-  const mapped = /^::(?:ffff:)?(.+)$/.exec(addr)
-  if (mapped) {
-    const tail = mapped[1]
-    if (isIP(tail) === 4) {
-      const value = parseIpv4Literal(tail)
-      return value === null ? true : isPrivateIpv4(value)
-    }
-    const groups = tail.split(":")
-    // ::ffff:7f00:1 → 后两组十六进制即 IPv4。
-    if (groups.length >= 2) {
-      const hi = Number.parseInt(groups[groups.length - 2], 16)
-      const lo = Number.parseInt(groups[groups.length - 1], 16)
-      if (Number.isFinite(hi) && Number.isFinite(lo)) {
-        return isPrivateIpv4(((hi << 16) | lo) >>> 0)
-      }
-    }
-    return true
+  if ((g[0] & 0xfe00) === 0xfc00) return true
+  // IPv4-mapped ::ffff:0:0/96 与 IPv4-compatible ::/96
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && (g[5] === 0xffff || g[5] === 0)) {
+    return isPrivateIpv4(((g[6] << 16) | g[7]) >>> 0)
+  }
+  // P2-14：NAT64 64:ff9b::/96 内嵌 IPv4。
+  if (g[0] === 0x0064 && g[1] === 0xff9b && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0) {
+    return isPrivateIpv4(((g[6] << 16) | g[7]) >>> 0)
+  }
+  // P2-14：6to4 2002::/16 的第 2、3 组是内嵌 IPv4。
+  if (g[0] === 0x2002) {
+    return isPrivateIpv4(((g[1] << 16) | g[2]) >>> 0)
   }
   return false
 }
@@ -989,6 +1138,7 @@ function blockedProbe(error: string): ProbeOutcome {
 async function probeUrl(url: string): Promise<ProbeOutcome> {
   // 约束：只探测 http(s)；其他 scheme 没有可记录的 HTTP 证据。
   if (!/^https?:\/\//i.test(url)) return blockedProbe("unsupported_url_scheme")
+  const cap = artifactVerifyMaxBytes()
   let headStatus: number | null = null
   let headType: string | null = null
   let headLength: number | null = null
@@ -1011,27 +1161,39 @@ async function probeUrl(url: string): Promise<ProbeOutcome> {
   let getStatus: number | null = null
   let getType: string | null = null
   let getTotal: number | null = null
-  let observed: Buffer | null = null
+  let observedSha: string | null = null
+  let observedLength: number | null = null
   let getTruncated = false
   let getError: string | null = null
   let getRan = false
+
+  const runGet = async (headers: Record<string, string>): Promise<void> => {
+    const get = await fetchManualRedirects(url, { method: "GET", headers }, PROBE_GET_TIMEOUT_MS)
+    getStatus = get.status
+    getType = get.headers.get("content-type")
+    getTotal = contentRangeTotal(get.headers.get("content-range")) ?? parseLength(get.headers.get("content-length"))
+    const read = await readCappedHash(get, cap)
+    observedSha = read.sha256
+    observedLength = read.length
+    getTruncated = read.truncated
+  }
 
   // 约束：HEAD 2xx 仍要 GET Range 才能记录 sha256；HEAD 405/501 或抛错时也必须 GET。
   const needGet = headStatus === null || (headStatus >= 200 && headStatus < 300) || headStatus === 405 || headStatus === 501
   if (needGet) {
     getRan = true
     try {
-      const get = await fetchManualRedirects(
-        url,
-        { method: "GET", headers: { Range: `bytes=0-${ARTIFACT_MAX_BYTES - 1}` } },
-        PROBE_GET_TIMEOUT_MS,
-      )
-      getStatus = get.status
-      getType = get.headers.get("content-type")
-      getTotal = contentRangeTotal(get.headers.get("content-range")) ?? parseLength(get.headers.get("content-length"))
-      const read = await readCapped(get, ARTIFACT_MAX_BYTES)
-      observed = read.buffer
-      getTruncated = read.truncated
+      await runGet({ Range: `bytes=0-${cap - 1}` })
+      // P1-4：416 = 服务端不支持/拒绝该 Range；回退无 Range GET 再比对 sha，不得误判 blocked。
+      if (getStatus === 416) {
+        getStatus = null
+        getType = null
+        getTotal = null
+        observedSha = null
+        observedLength = null
+        getTruncated = false
+        await runGet({})
+      }
     } catch (e) {
       if (e instanceof BlockedUrlError) return blockedProbe(e.kind)
       getError = e instanceof Error ? e.message : String(e)
@@ -1040,11 +1202,12 @@ async function probeUrl(url: string): Promise<ProbeOutcome> {
 
   const status = getStatus ?? headStatus
   const contentType = getType ?? headType
-  // P2-9：0 字节是合法内容，空 buffer 的 sha256 = e3b0c442...；不能因 length 0 当成“无证据”。
-  const decoded = observed
-  const sha = decoded ? sha256Hex(decoded) : null
-  const bytes = getTruncated ? ARTIFACT_MAX_BYTES : getTotal ?? (decoded ? decoded.length : headLength)
-  const partial = getTruncated || (getTotal !== null && decoded !== null && getTotal > decoded.length) || (getRan && getStatus === 206 && getTotal !== null && decoded !== null && decoded.length < getTotal)
+  const sha = observedSha
+  const bytes = getTruncated ? cap : getTotal ?? observedLength ?? headLength
+  const partial =
+    getTruncated ||
+    (getTotal !== null && observedLength !== null && getTotal > observedLength) ||
+    (getRan && getStatus === 206 && getTotal !== null && observedLength !== null && observedLength < getTotal)
   const error = getError ?? headError
   const method = getRan ? (headStatus !== null ? "HEAD+GET" : "GET") : headStatus !== null ? "HEAD" : null
   return { status, contentType, bytes, sha256: sha, partial, method, error }
@@ -1085,7 +1248,17 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
 
   const probe = await probeUrl(view.url)
   const reachable = probe.status !== null && probe.status >= 200 && probe.status < 300
-  const sha256Match = probe.sha256 !== null ? probe.sha256 === view.sha256 : null
+  const storedSha = typeof view.sha256 === "string" ? view.sha256.trim() : ""
+  // P1-5：URL-only 登记（sha 为空）没有可比对的期望值；verify 成功后回填实测 sha。
+  const sha256Match = storedSha === "" ? null : probe.sha256 !== null ? probe.sha256 === storedSha : null
+  const expectedType = expectedContentTypeForUrl(view.url)
+  const observedType = (probe.contentType ?? "").split(";")[0].trim().toLowerCase()
+  const typeMismatch =
+    reachable &&
+    expectedType !== null &&
+    observedType !== "" &&
+    observedType !== "application/octet-stream" &&
+    observedType !== expectedType
   let state: VerifyState = "blocked"
   let reason: string | null = null
   if (!reachable) {
@@ -1097,8 +1270,16 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
         : "http_status"
   } else if (probe.partial) {
     reason = "body_partial"
+  } else if ((probe.bytes ?? 0) <= 0 && input.allowEmpty !== true) {
+    // P2-6：0 字节 / 204 不是“干净证据”；必须显式 allow_empty。
+    reason = "empty_body"
+  } else if (typeMismatch) {
+    reason = "content_type_mismatch"
   } else if (!probe.sha256) {
     reason = "sha256_unavailable"
+  } else if (storedSha === "") {
+    // 登记行：把实测 sha/bytes 回填，之后才有可复核的期望值。
+    state = "verified"
   } else if (!sha256Match) {
     reason = "sha256_mismatch"
   } else {
@@ -1106,7 +1287,13 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
   }
   // P2-5：只有 verified 才写 verified_at；blocked/no_row 一律 NULL。
   const verifiedAt = state === "verified" ? Date.now() : null
-  db().query("UPDATE artifact_versions SET verify_status=?, verified_at=? WHERE id=?").run(state, verifiedAt, Number(version.id))
+  if (state === "verified" && storedSha === "" && probe.sha256) {
+    db()
+      .query("UPDATE artifact_versions SET sha256=?,bytes=?,verify_status=?,verified_at=? WHERE id=?")
+      .run(probe.sha256, probe.bytes ?? 0, state, verifiedAt, Number(version.id))
+  } else {
+    db().query("UPDATE artifact_versions SET verify_status=?, verified_at=? WHERE id=?").run(state, verifiedAt, Number(version.id))
+  }
   return {
     state,
     verify_status: state,
@@ -1120,7 +1307,7 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
     content_type: probe.contentType,
     bytes: probe.bytes,
     sha256: probe.sha256,
-    expected_sha256: view.sha256,
+    expected_sha256: storedSha || (probe.sha256 ?? ""),
     sha256_match: sha256Match,
     method: probe.method,
     partial: probe.partial,
@@ -1131,8 +1318,14 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
 }
 
 function safeAssetKey(raw: string): string {
-  const cleaned = raw.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, MAX_ASSET_KEY_LENGTH)
-  return cleaned || "asset"
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "")
+  const base = cleaned.slice(0, MAX_ASSET_KEY_LENGTH)
+  // P2-12：归一化会把 `A/B` 与 `A B` 都变成 `A_B`；只有发生归一化/截断时加哈希后缀，
+  // 保证不同原始键不撞同一行（已经是安全字符的键保持原样，兼容既有资产）。
+  if (cleaned && cleaned === raw && cleaned.length <= MAX_ASSET_KEY_LENGTH) return cleaned
+  const digest = createHash("sha256").update(raw).digest("hex").slice(0, 8)
+  const room = Math.max(1, MAX_ASSET_KEY_LENGTH - digest.length - 1)
+  return `${(base || "asset").slice(0, room)}-${digest}`
 }
 
 function assetRowView(row: any): ArtifactAssetView {
@@ -1178,11 +1371,15 @@ function defaultAssetUrl(slug: string, assetKey: string, sha256: string): string
 export function uploadAsset(input: UploadAssetInput): ArtifactAssetView {
   const sessionId = requiredText(input.sessionId, "session_id", MAX_NAME_LENGTH)
   const name = requiredText(input.name, "name", MAX_NAME_LENGTH)
+  const actor = resolveActor(input.actor, sessionId)
   const artifact = requireArtifact(sessionId, name)
+  // P2-8：写资产必须 owner；跨会话一律 403（与 copy_from 的目标端同口径）。
+  requireOwner(artifact, actor, "写入该 artifact 的资产")
   const file = readRegularFile(input.path)
   const key = safeAssetKey(optionalText(input.assetKey, "asset_key", MAX_ASSET_KEY_LENGTH) || path.basename(file.absolutePath))
   const contentType = contentTypeFor(file.absolutePath, optionalText(input.contentType, "content_type", 256))
-  const url = optionalText(input.url, "url", MAX_URL_LENGTH) || defaultAssetUrl(String(artifact.slug), key, file.sha256)
+  const rawUrl = optionalText(input.url, "url", MAX_URL_LENGTH)
+  const url = rawUrl ? assertHttpUrl(rawUrl) : defaultAssetUrl(String(artifact.slug), key, file.sha256)
   writeAssetFile(Number(artifact.id), file.sha256, key, file.bytes)
   const now = Date.now()
   // P1-4：唯一键 (artifact_id, asset_key)；upsert 保证并发同 key 只留一行。
@@ -1201,11 +1398,11 @@ export function uploadAsset(input: UploadAssetInput): ArtifactAssetView {
   })
 }
 
-export function listAssets(sessionId: string, name: string): ArtifactAssetView[] {
-  const artifact = requireArtifact(
-    requiredText(sessionId, "session_id", MAX_NAME_LENGTH),
-    requiredText(name, "name", MAX_NAME_LENGTH),
-  )
+export function listAssets(sessionId: string, name: string, actor?: string): ArtifactAssetView[] {
+  const sid = requiredText(sessionId, "session_id", MAX_NAME_LENGTH)
+  const artifact = requireArtifact(sid, requiredText(name, "name", MAX_NAME_LENGTH))
+  // P2-8：与 upload/copy 同口径——只有 owner 能列资产，跨会话 403。
+  requireOwner(artifact, resolveActor(actor, sid), "列出该 artifact 的资产")
   const rows = db().query("SELECT * FROM artifact_assets WHERE artifact_id=? ORDER BY created_at,id").all(Number(artifact.id)) as any[]
   return rows.map(assetRowView)
 }
@@ -1217,7 +1414,7 @@ export function readAsset(input: ReadAssetInput): ArtifactAssetView & { content_
   const actor = resolveActor(input.actor, sessionId)
   // P1-2：读必须满足 owner/public/org/users ACL。
   requireReadAccess(artifact, actor)
-  const assetId = input.assetId === undefined ? undefined : Number(input.assetId)
+  const assetId = normalizeAssetId(input.assetId)
   const assetKey = optionalText(input.assetKey, "asset_key", MAX_ASSET_KEY_LENGTH)
   let row: any | null
   if (assetId !== undefined) {
@@ -1257,8 +1454,9 @@ export function copyAsset(input: CopyAssetInput): ArtifactAssetView {
   requireReadAccess(source, actor)
   requireOwner(dest, actor, "写入该 artifact 的资产")
   let sourceRow: any | null
-  if (input.fromAssetId !== undefined) {
-    sourceRow = db().query("SELECT * FROM artifact_assets WHERE artifact_id=? AND id=?").get(Number(source.id), Number(input.fromAssetId)) as any
+  const fromAssetId = normalizeAssetId(input.fromAssetId)
+  if (fromAssetId !== undefined) {
+    sourceRow = db().query("SELECT * FROM artifact_assets WHERE artifact_id=? AND id=?").get(Number(source.id), fromAssetId) as any
   } else if (input.fromAssetKey) {
     sourceRow = db().query("SELECT * FROM artifact_assets WHERE artifact_id=? AND asset_key=?").get(
       Number(source.id),
@@ -1300,6 +1498,72 @@ export function copyAsset(input: CopyAssetInput): ArtifactAssetView {
       .run(Number(dest.id), key, url, sourceView.sha256, sourceView.bytes, sourceView.content_type, now)
     const row = db().query("SELECT * FROM artifact_assets WHERE artifact_id=? AND asset_key=?").get(Number(dest.id), key) as any
     return assetRowView(row)
+  })
+}
+
+/**
+ * P1-5/P3-15：只登记元数据，不发布版本。
+ * - artifact 不存在 → 建 artifact + version 1（sha256 为空，bytes=0；verify 成功后回填）。
+ * - 已存在（owner 才可）→ 不升版本；仅当现有 live 行本身也是未哈希的登记行时原地更新
+ *   元数据并重置 verify；已发布（有 sha）的行一律不碰，交由 artifact_publish 升版。
+ */
+export function registerArtifact(input: RegisterArtifactInput): ArtifactVersionView & { changed: boolean } {
+  const sessionId = requiredText(input.sessionId, "session_id", MAX_NAME_LENGTH)
+  const name = requiredText(input.name, "name", MAX_NAME_LENGTH)
+  const rawUrl = optionalText(input.url, "url", MAX_URL_LENGTH)
+  const url = rawUrl ? assertHttpUrl(rawUrl) : null
+  const rawPath = optionalText(input.path, "path", MAX_URL_LENGTH)
+  const localPath = rawPath ? path.resolve(rawPath) : null
+  if (!url && !localPath) throw new ArtifactError("missing_uri", "register 需要 url 或 path", 400)
+  const contentType = contentTypeFor(url ?? localPath ?? "", optionalText(input.contentType, "content_type", 256))
+  const producer = optionalText(input.producer, "producer", MAX_NAME_LENGTH) || "artifact_register"
+  const now = Date.now()
+
+  return withImmediate(() => {
+    const existing = artifactRow(sessionId, name)
+    if (!existing) {
+      const inserted = db()
+        .query(
+          `INSERT INTO artifacts(session_id,owner_key,name,slug,latest_version,version_epoch,acl_mode,acl_json,pinned,created_at,updated_at)
+           VALUES(?,?,?,?,1,1,'owner','{}',0,?,?)`,
+        )
+        .run(sessionId, sessionId, name, slugFor(sessionId, name), now, now)
+      const artifactId = Number(inserted.lastInsertRowid)
+      db()
+        .query(
+          `INSERT INTO artifact_versions(artifact_id,version,url,path,sha256,bytes,content_type,producer,verified_at,verify_status,created_at)
+           VALUES(?,?,?,?,?,0,?,?,NULL,'unverified',?)`,
+        )
+        .run(artifactId, 1, url, localPath, "", contentType, producer, now)
+      const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(artifactId) as any
+      return { ...rowView(artifact, versionRow(artifactId, 1)), changed: true }
+    }
+    // P1：登记同样只有 owner 能做；跨会话 403。
+    requireOwner(existing, sessionId, "登记该 artifact")
+    const liveVersion = Number(existing.latest_version)
+    const live = versionRow(Number(existing.id), liveVersion)
+    if (!live) {
+      throw new ArtifactError("no_live_version", "artifact 没有可登记的 live 版本；请用 artifact_publish 创建", 409)
+    }
+    // 已发布（有真实 sha）的行不得被登记静默改写或升版。
+    if (String(live.sha256 ?? "").trim() !== "") {
+      return { ...rowView(existing, live), changed: false }
+    }
+    const metadataChanged =
+      (url ?? null) !== (typeof live.url === "string" ? live.url : null) ||
+      (localPath ?? null) !== (typeof live.path === "string" ? live.path : null) ||
+      contentType !== String(live.content_type ?? "") ||
+      producer !== (typeof live.producer === "string" ? live.producer : producer)
+    if (metadataChanged) {
+      db()
+        .query(
+          "UPDATE artifact_versions SET url=?,path=?,content_type=?,producer=?,verify_status='unverified',verified_at=NULL WHERE id=?",
+        )
+        .run(url, localPath, contentType, producer, Number(live.id))
+      db().query("UPDATE artifacts SET updated_at=? WHERE id=?").run(now, Number(existing.id))
+    }
+    const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(Number(existing.id)) as any
+    return { ...rowView(artifact, versionRow(Number(existing.id), liveVersion)), changed: metadataChanged }
   })
 }
 

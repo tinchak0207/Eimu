@@ -12,6 +12,7 @@ import {
   listAssets,
   publishArtifact,
   readAsset,
+  registerArtifact,
   setAcl,
   uploadAsset,
   verifyArtifact,
@@ -30,11 +31,24 @@ function text(body: Body, field: string): string | undefined {
   return typeof value === "string" ? value : undefined
 }
 
-function numberValue(body: Body, field: string): number | undefined {
+/** P2-9：version 严格校验——`"abc"`/浮点/布尔 → 400，绝不静默回退 latest。 */
+function strictVersion(body: Body): number | undefined {
+  const value = body["version"]
+  if (value === undefined || value === null || value === "") return undefined
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ArtifactError("invalid_version", "version 必须是 ≥1 的整数", 400)
+  }
+  return value
+}
+
+/** P2-9：asset_id/from_asset_id 严格校验。 */
+function strictAssetId(body: Body, field: string): number | undefined {
   const value = body[field]
   if (value === undefined || value === null || value === "") return undefined
-  const n = typeof value === "number" ? value : Number(value)
-  return Number.isFinite(n) ? n : undefined
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ArtifactError(`invalid_${field}`, `${field} 必须是 ≥1 的整数`, 400)
+  }
+  return value
 }
 
 /** P2-7：expected_version 严格 number 校验（boolean/array/NaN/Infinity/字符串 → 400）。 */
@@ -52,14 +66,28 @@ function strictExpectedVersion(body: Body): number | undefined {
 }
 
 /**
- * P1-2：actor 从 body.actor 或 X-Session-Id 取，默认 session_id。
- * （内部路由只由 loopback 闸门保护，此处是身份归属而非第二套鉴权。）
+ * P1 身份修复：actor **只**由 session_id 推导，body.actor / X-Session-Id 不再作为身份。
+ * 若调用方显式给出不同的 actor 或 X-Session-Id，视为跨会话操作 → 403。
+ * HARNESS_INTERNAL_TOKEN 设置时，所有 artifact HTTP 入口额外校验 X-Internal-Token。
  */
+function assertInternalToken(req: Request): void {
+  const expected = process.env.HARNESS_INTERNAL_TOKEN
+  if (typeof expected !== "string" || !expected) return
+  const supplied = req.headers.get("x-internal-token") ?? ""
+  if (supplied !== expected) {
+    throw new ArtifactError("unauthorized", "X-Internal-Token 缺失或不匹配", 403)
+  }
+}
+
 function actorOf(req: Request, body: Body, sessionId: string): string {
   const fromBody = typeof body.actor === "string" ? body.actor.trim() : ""
-  if (fromBody) return fromBody
+  if (fromBody && fromBody !== sessionId) {
+    throw new ArtifactError("cross_session_forbidden", "actor 必须等于 session_id，禁止跨会话操作", 403)
+  }
   const fromHeader = (req.headers.get("x-session-id") || "").trim()
-  if (fromHeader) return fromHeader
+  if (fromHeader && fromHeader !== sessionId) {
+    throw new ArtifactError("cross_session_forbidden", "X-Session-Id 必须等于 session_id，禁止跨会话操作", 403)
+  }
   return sessionId
 }
 
@@ -85,17 +113,23 @@ async function readBody(req: Request): Promise<Body> {
 
 export async function handleArtifact(req: Request, pathname: string): Promise<Response> {
   try {
+    assertInternalToken(req)
     const body = await readBody(req)
     const route = pathname.replace(/^\/internal\/artifact\/?/, "").replace(/\/+$/, "")
     const sessionId = requireSession(body)
+    // P1：所有入口先固定 actor=session_id；显式跨会话字段一律 403。
+    const actor = actorOf(req, body, sessionId)
 
     if (route === "publish") {
       const name = text(body, "name")
       const filePath = text(body, "path")
       if (!name || !filePath) return responseError("missing_required_args", "name 与 path 必填", 400)
+      const bodyOwner = typeof body.owner_key === "string" ? body.owner_key.trim() : ""
+      if (bodyOwner && bodyOwner !== sessionId) {
+        throw new ArtifactError("cross_session_forbidden", "owner_key 必须等于 session_id，禁止跨会话发布", 403)
+      }
       const result = publishArtifact({
         sessionId,
-        ownerKey: text(body, "owner_key"),
         name,
         path: filePath,
         url: text(body, "url"),
@@ -106,10 +140,24 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
       return Response.json({ ok: true, ...result, artifact: result })
     }
 
+    if (route === "register") {
+      const name = text(body, "name")
+      if (!name) return responseError("missing_required_args", "name 必填", 400)
+      const result = registerArtifact({
+        sessionId,
+        name,
+        url: text(body, "url"),
+        path: text(body, "path"),
+        contentType: text(body, "content_type"),
+        producer: text(body, "producer"),
+      })
+      return Response.json({ ok: true, ...result, artifact: result })
+    }
+
     if (route === "get") {
       const name = text(body, "name")
       if (!name) return responseError("missing_required_args", "name 必填", 400)
-      const artifact = getArtifact(sessionId, name, numberValue(body, "version"))
+      const artifact = getArtifact(sessionId, name, strictVersion(body), actor)
       if (!artifact) return responseError("artifact_not_found", `artifact 不存在：${name}`, 404)
       return Response.json({ ok: true, artifact })
     }
@@ -126,7 +174,12 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
     if (route === "verify") {
       const name = text(body, "name")
       if (!name) return responseError("missing_required_args", "name 必填", 400)
-      const result = await verifyArtifact({ sessionId, name, version: numberValue(body, "version") })
+      const result = await verifyArtifact({
+        sessionId,
+        name,
+        version: strictVersion(body),
+        allowEmpty: boolValue(body, "allow_empty") === true,
+      })
       // P2-5：blocked/no_row 一律 ok:false + 非 2xx（工具层已 fail，这里统一）。
       if (result.state !== "verified") {
         const code = result.state === "no_row" ? "verify_no_row" : "verify_blocked"
@@ -143,8 +196,8 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
       const name = text(body, "name")
       const mode = text(body, "mode")
       if (!name || !mode) return responseError("missing_required_args", "name 与 mode 必填", 400)
-      if (mode !== "org" && mode !== "people" && mode !== "users" && mode !== "private") {
-        return responseError("invalid_acl_mode", "mode 只接受 private/org/people/users", 400)
+      if (mode !== "people" && mode !== "users" && mode !== "private") {
+        return responseError("invalid_acl_mode", "mode 只接受 private/people/users（没有 org/租户概念）", 400)
       }
       const access = text(body, "access")
       if (access !== undefined && access !== "view" && access !== "comment") {
@@ -154,9 +207,8 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
       const artifact = setAcl({
         sessionId,
         name,
-        actor: actorOf(req, body, sessionId),
-        requesterKey: text(body, "requester_key"),
-        mode: mode as "org" | "people" | "users" | "private",
+        actor,
+        mode: mode as "people" | "users" | "private",
         access: access as AclAccess | undefined,
         people,
       })
@@ -166,15 +218,15 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
     if (route === "delete") {
       const name = text(body, "name")
       if (!name) return responseError("missing_required_args", "name 必填", 400)
-      const result = deleteArtifact({ sessionId, name, actor: actorOf(req, body, sessionId) })
+      const result = deleteArtifact({ sessionId, name, actor })
       return Response.json({ ok: true, ...result })
     }
 
     if (route === "delete_version") {
       const name = text(body, "name")
-      const version = numberValue(body, "version")
+      const version = strictVersion(body)
       if (!name || version === undefined) return responseError("missing_required_args", "name 与 version 必填", 400)
-      const result = deleteArtifactVersion({ sessionId, name, version, actor: actorOf(req, body, sessionId) })
+      const result = deleteArtifactVersion({ sessionId, name, version, actor })
       return Response.json({ ok: true, ...result })
     }
 
@@ -189,6 +241,7 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
         const asset = uploadAsset({
           sessionId,
           name,
+          actor,
           path: filePath,
           url: text(body, "url"),
           contentType: text(body, "content_type"),
@@ -198,7 +251,7 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
       }
 
       if (action === "list") {
-        const assets = listAssets(sessionId, name)
+        const assets = listAssets(sessionId, name, actor)
         return Response.json({ ok: true, count: assets.length, assets })
       }
 
@@ -206,8 +259,8 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
         const asset = readAsset({
           sessionId,
           name,
-          actor: actorOf(req, body, sessionId),
-          assetId: numberValue(body, "asset_id"),
+          actor,
+          assetId: strictAssetId(body, "asset_id"),
           assetKey: text(body, "asset_key"),
           includeData: boolValue(body, "include_data"),
         })
@@ -220,10 +273,10 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
         const asset = copyAsset({
           sessionId,
           name,
-          actor: actorOf(req, body, sessionId),
+          actor,
           fromSessionId: text(body, "from_session_id"),
           fromName,
-          fromAssetId: numberValue(body, "from_asset_id"),
+          fromAssetId: strictAssetId(body, "from_asset_id"),
           fromAssetKey: text(body, "from_asset_key"),
           assetKey: text(body, "asset_key"),
         })

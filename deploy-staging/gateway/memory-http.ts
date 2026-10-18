@@ -12,6 +12,7 @@
 import { resolve } from "node:path"
 import { billingPermissionTenant } from "./charge-approval-policy.ts"
 import { resolveSession } from "./sessions-core.ts"
+import { subagentParentState } from "./subagent.ts"
 import {
   fenceMemoryForPrompt,
   memoryList,
@@ -25,6 +26,8 @@ import {
 
 const PREFIX = "/internal/memory/"
 const DEFAULT_WORKSPACE_DIR = "/opt/agent-harness/workspace"
+/** JSON 转义会膨胀，给 content 的 100KB 上限留足余量；仍然有界。 */
+const MEMORY_HTTP_BODY_MAX_BYTES = 2 * 1024 * 1024
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -49,6 +52,45 @@ function badRequest(message: string): Response {
   return errorResponse("invalid_request", message, 400)
 }
 
+/**
+ * 约束（P2-9）：先看 Content-Length；chunked 请求流式累计，超限立即停止读取
+ * 并回 413，绝不先 `req.json()` 把整个 body 读进内存。
+ */
+async function readBodyLimited(
+  req: Request,
+  maxBytes: number,
+): Promise<{ ok: true; text: string } | { ok: false; tooLarge: boolean }> {
+  const declared = req.headers.get("content-length")
+  if (declared !== null && declared.trim().length > 0) {
+    const size = Number(declared)
+    if (Number.isFinite(size) && size > maxBytes) return { ok: false, tooLarge: true }
+  }
+  if (req.body === null) return { ok: true, text: "" }
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined) continue
+      total += value.byteLength
+      if (total > maxBytes) {
+        try {
+          await reader.cancel()
+        } catch {
+          // 约束：取消失败不改变超限结论。
+        }
+        return { ok: false, tooLarge: true }
+      }
+      chunks.push(value)
+    }
+  } catch {
+    return { ok: false, tooLarge: false }
+  }
+  return { ok: true, text: Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8") }
+}
+
 /** workspace 只来自网关配置/部署环境，不从请求体取。 */
 function gatewayWorkspaceDir(): string {
   const configured = process.env.HARNESS_WORKSPACE?.trim()
@@ -66,8 +108,17 @@ export async function handleMemory(req: Request, pathname: string): Promise<Resp
   }
 
   let parsed: unknown
+  const rawBody = await readBodyLimited(req, MEMORY_HTTP_BODY_MAX_BYTES)
+  if (!rawBody.ok) {
+    if (!("tooLarge" in rawBody) || !rawBody.tooLarge) return badRequest("cannot read request body")
+    return errorResponse(
+      "body_too_large",
+      `request body exceeds ${MEMORY_HTTP_BODY_MAX_BYTES} bytes`,
+      413,
+    )
+  }
   try {
-    parsed = await req.json()
+    parsed = JSON.parse(rawBody.text)
   } catch {
     return badRequest("invalid json body")
   }
@@ -87,7 +138,9 @@ export async function handleMemory(req: Request, pathname: string): Promise<Resp
   if (requestedSessionId === undefined || requestedSessionId.trim().length === 0) {
     return errorResponse("session_required", "session_id is required", 401)
   }
-  const state = resolveSession(requestedSessionId.trim())
+  // 子代理的 opencode session id 不在 resolveSession 表里：与其它 internal 端点
+  // 一致，经 subagentParentState 回溯父 gateway 会话（P1-5）。
+  const state = resolveSession(requestedSessionId.trim()) ?? subagentParentState(requestedSessionId.trim())
   if (!state || !state.sessionId || !state.apiKey) {
     return errorResponse("session_not_found", "unknown session", 401)
   }
