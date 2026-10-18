@@ -239,6 +239,12 @@ export function startTurnPlan(state: SessionState, userText: string, gen: number
       // 会落在答案之后。turnMetrics 在受理当下建立、turn.done/abort/superseded 收档，故
       // 「null」＝本轮已收尾。此条只会少发一个已无意义的过期计画，不会误杀在途轮。
       if (!cur.turnMetrics) return
+      // 正文已经开始流＝这行计画只能插在答案中间（实测 2026-10-18：plan 2815ms > 首字 2785ms）。
+      // 迟到的计画对使用者不是「首字」，是干扰：宁可少发一行，也不打断正在读的正文。
+      if ((cur.turnTextChars ?? 0) > 0) {
+        console.log(`[gateway] turn.plan skipped (text already started chars=${cur.turnTextChars})`)
+        return
+      }
       const experts = digest ? extractPlanExperts(plan, digest) : []
       emitToSession(cur, "turn.plan", {
         plan,
