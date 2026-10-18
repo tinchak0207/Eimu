@@ -235,7 +235,8 @@ async function bridgeExecute(
       throw bridgeError(
         "bridge_timeout",
         `等待 blender-bridge 响应超时（上限 ${abortMs} ms，脚本 timeout_ms=${timeoutMs}）。` +
-          `可为 blender_exec 传更大的 timeout_ms，或缩短脚本工作量；桥进程健康可用 GET ${bridgeUrl()}/v1/health 验证。`,
+          `桥上该任务可能仍在排队或渲染（GET ${bridgeUrl()}/v1/health 看 queue_depth）：不要原地立刻重试，` +
+          `先把渲染交给 blender_render（它有专用超时与存活预设），或等桥空再执行建模脚本。`,
       )
     }
     if (context?.abort?.aborted) {
@@ -586,7 +587,7 @@ print("GLTF_EXPORTED:" + OUTPUT_PATH)
 export const blenderExecTool: BlenderToolDef = {
   id: "blender_exec",
   description:
-    "在 Blender 沙箱执行 bpy 脚本：建模、搭建场景、修改场景、骨架动画 keyframe。产物文件自动落到桥的工作目录。",
+    "在 Blender 沙箱执行 bpy 脚本：建模、搭建场景、修改场景、骨架动画 keyframe。本工具只负责建模/改场景，不要在脚本里调用 bpy.ops.render.render 渲染成图（渲染走 blender_render；exec 内渲染极易撞 120s 超时并占住桥队列）。产物文件写 out/ 相对路径。",
   args: {
     script: {
       type: "string",
