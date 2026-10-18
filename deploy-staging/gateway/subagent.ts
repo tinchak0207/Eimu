@@ -2072,10 +2072,12 @@ function livenessTick(): void {
   const runs: SubagentRun[] = []
   for (const list of byParent.values()) for (const r of list) runs.push(r)
   for (const run of runs) {
-    if (run.recoveredWatcher) continue // Authoritative status/message reconciliation owns takeover; no stale/deadline abort.
     if (run.status !== "running") continue
     // 单工具挂住（2026-10-18）：有在途工具时下面的失活检测会整体放行，这里按**工具时长**
     // 补一条硬线——一条永不返回的命令不能在「正常运行」的名义下拖满 30 分钟。
+    // 2026-10-19：这条对 recoveredWatcher 同样生效——重启接管重建的 run 此前整体跳过
+    // 活性检查（交给 status 对账），实测「命令已结束但 part 仍是 running」时对账永远等，
+    // 用户侧就是永久「终端命令 运行中」。
     const hungTool = oldestPendingTool(run, now)
     if (hungTool) {
       // 终端类：零输出静默 3 分钟即判死（有输出会刷新 silentMs，长构建/转码不受影响）。
@@ -2094,6 +2096,7 @@ function livenessTick(): void {
         continue
       }
     }
+    if (run.recoveredWatcher) continue // 重建的 watcher 不做「无活动」判定（对账负责），但上面的工具硬线已生效
     const verdict = evaluateRunLiveness({
       status: run.status,
       stopped: run.stopped,
