@@ -139,6 +139,9 @@ export interface SessionState {
   // 滚动摘要压缩水位：上次 opencode summarize 后的讯息数与时间（持久化）。
   // 触发条件 = 讯息数 ≥ SESSION_COMPACT_THRESHOLD 且自上次压缩新增 ≥ 半个阈值。
   compact?: { lastCount: number; at: number }
+  /** 2026-10-18 止血：token 已达 compactAt 但因在途 turn 暂缓压缩时置 true；
+   *  turn 收尾 / 生成任务终态收口点再调 maybeCompactSession。volatile，不持久化。 */
+  pendingCompact?: boolean
   /** 2026-10-02：模板偏离 token（网关签发、单次核销、TTL 15 分）。落持久层＝跨 agent-gateway 重启存活。 */
   tplDeviateToken?: { token: string; at: number } | null
   /** 已上报过 turn.status 的 compaction part id（2026-10-02 压缩可见化去重，volatile）。 */

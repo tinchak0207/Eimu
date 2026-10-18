@@ -362,6 +362,10 @@ const MODEL_WINDOW_RULES: Array<{ pattern: RegExp; tokens: number }> = [
   { pattern: /200k/, tokens: 200_000 },
   { pattern: /128k/, tokens: 131_072 },
   { pattern: /64k/, tokens: 65_536 },
+  // 2026-10-18 止血：生产主模型 deepseek-v4.1-flash（含 happycoding/ 前缀）钉 131072，
+  // 与既有 deepseek 族一致；放在族名规则之前，避免被更宽模式抢走。
+  { pattern: /deepseek-v4\.1-flash/, tokens: 131_072 },
+  { pattern: /happycoding[/\\].*deepseek|deepseek.*happycoding/, tokens: 131_072 },
   { pattern: /gpt-4\.1|gemini-(?:2\.5|3)/, tokens: 1_000_000 },
   { pattern: /claude|sonnet|opus|haiku|minimax-m|glm-5/, tokens: 200_000 },
   { pattern: /gpt-4o|gpt-4-turbo|deepseek|qwen|kimi|moonshot|glm-4/, tokens: 131_072 },

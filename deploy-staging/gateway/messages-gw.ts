@@ -1699,6 +1699,13 @@ export async function maybeCompactSession(state: SessionState): Promise<void> {
   }
 }
 
+/** 2026-10-18 止血：turn 收尾 / 生成任务终态收口点调用。
+ *  仅当 pendingCompact 已登记时再进 maybeCompactSession，避免每个 task 终态都扫一遍。 */
+export function flushPendingCompact(state: SessionState): void {
+  if (!state.pendingCompact) return
+  void maybeCompactSession(state)
+}
+
 async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
   if (compactionJobs.has(state.sessionId)) return
   try {
@@ -1726,11 +1733,41 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
     })
     // compactionDecision 用真实窗口与最近一轮 context_tokens 判 over_limit/warn；
     // 窗口未知（模型不在映射表）时 windowTokens=0 → action none，不猜。
-    const usedTokens = lastTurnContextTokens(state.sessionId)
+    // 2026-10-18 止血：lastTurnContextTokens 缺失时用讯息列表粗估，禁止静默当 0
+    // （当 0 会让 token 路径永不触发，超长制作会话涨到百万 token）。
+    const lastUsedTokens = lastTurnContextTokens(state.sessionId)
+    const estimatedUsedTokens = estimateTokensFromMessages(msgs)
+    const usedTokens = lastUsedTokens ?? estimatedUsedTokens
+    const usedTokensSource =
+      lastUsedTokens !== undefined ? "metrics" : estimatedUsedTokens !== undefined ? "estimate" : "none"
     const lastModelID = (() => {
       for (let i = msgs.length - 1; i >= 0; i--) {
-        const id = (msgs[i]?.info as { model?: { modelID?: string } } | undefined)?.model?.modelID
-        if (typeof id === "string" && id) return id
+        const info = msgs[i]?.info as
+          | { model?: { providerID?: string; modelID?: string } }
+          | undefined
+        const modelID = info?.model?.modelID
+        if (typeof modelID !== "string" || !modelID) continue
+        // 带 provider 前缀一并交给 modelWindowTokens（happycoding/deepseek-…）。
+        const providerID = info?.model?.providerID
+        if (typeof providerID === "string" && providerID && !modelID.includes("/")) {
+          return `${providerID}/${modelID}`
+        }
+        return modelID
+      }
+      // 讯息缺 model 时回退本会话最近实际 dispatch 的模型，避免 window=0 永久不压。
+      const fallback =
+        state.lastDispatchedModel?.modelID ||
+        state.stickyModel?.modelID ||
+        state.lastPromptBody?.model?.modelID
+      if (typeof fallback === "string" && fallback) {
+        const providerID =
+          state.lastDispatchedModel?.providerID ||
+          state.stickyModel?.providerID ||
+          state.lastPromptBody?.model?.providerID
+        if (typeof providerID === "string" && providerID && !fallback.includes("/")) {
+          return `${providerID}/${fallback}`
+        }
+        return fallback
       }
       return null
     })()
@@ -1747,41 +1784,74 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
       !thresholdReached &&
       count > lastCount &&
       (microPlan !== null || decision.action === "compact")
-    if (!thresholdReached && !earlyTrigger) return
+    // pendingCompact 重试：上次因在途 turn 登记的强制压缩，本轮继续走判定。
+    const pendingRetry = state.pendingCompact === true
+    if (!thresholdReached && !earlyTrigger && !pendingRetry) return
+    // 强制 token 压缩：decision 已要 compact/blocked/warn 且用量 ≥ compactAt。
+    // 制作会话几乎永远有 generation 在途；若仍无限 defer → 上下文涨到百万。
+    const forceTokenCompact =
+      (decision.action === "compact" || decision.action === "blocked" || decision.action === "warn") &&
+      (usedTokens ?? 0) >= decision.compactAt &&
+      decision.compactAt > 0
     // 0831 竞态根治：opencode binary 对摘要讯息硬挡 tool call（"Tool call not allowed
     // while generating summary"）。摘要模型若看到「还有任务待查」就会吐 tool call →
-    // 整条摘要作废、session 无声 idle。压缩前必须无在途生成任务。
+    // 整条摘要作废、session 无声 idle。
+    // 2026-10-18 止血改动：
+    // - 有在途 LLM turn（turnMetrics）→ 仍必须 defer，并登记 pendingCompact（禁止 silent drop）。
+    // - 仅 generation sessionTasks 在途 + forceTokenCompact → 允许压缩。
+    //   理由：turn 已 idle 时 generation 是 poller 侧任务，与 summarize 写盘无同一 LLM 竞态；
+    //   summarize 假成功仍有既有校验挡水位；无限 defer 的代价是百万 token / OOM。
+    // - 非 force 路径（纯讯息数阈值）仍要求无在途 generation，保持原安全闸。
     // 注：state.sessionTasks 在网关重启后为空（hydrate 补空 Map）→ 在途闸自然放行，可接受。
     const inflight = [...state.sessionTasks.values()].filter(
       (t) => t.status === "queued" || t.status === "running",
     )
+    const hasTurnInFlight = state.turnMetrics !== null && state.turnMetrics !== undefined
+    if (hasTurnInFlight) {
+      if (forceTokenCompact || pendingRetry) {
+        state.pendingCompact = true
+        console.log(
+          `[gateway] compact deferred (pendingCompact=1): ${state.sessionId} has in-flight turn; used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) compactAt=${decision.compactAt}`,
+        )
+      } else {
+        console.log(`[gateway] compact deferred: ${state.sessionId} has an in-flight turn or undelivered prompt`)
+      }
+      return
+    }
     if (inflight.length > 0) {
-      console.log(`[gateway] compact deferred: ${state.sessionId} has ${inflight.length} in-flight task(s)`)
-      return
+      if (forceTokenCompact || pendingRetry) {
+        console.log(
+          `[gateway] compact proceeding despite ${inflight.length} generation task(s): session=${state.sessionId} force_token=1 used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) compactAt=${decision.compactAt} window=${windowTokens || "unknown"}`,
+        )
+        // 继续往下走 summarize；不 return。
+      } else {
+        if (earlyTrigger || thresholdReached) {
+          state.pendingCompact = true
+          console.log(
+            `[gateway] compact deferred (pendingCompact=1): ${state.sessionId} has ${inflight.length} in-flight task(s); will retry on task terminal / next idle`,
+          )
+        } else {
+          console.log(`[gateway] compact deferred: ${state.sessionId} has ${inflight.length} in-flight task(s)`)
+        }
+        return
+      }
     }
-    // 2026-09-18：从源头减少触发——本 session 有在途 turn 或「已受理尚未投递」的
-    // prompt 时不排压缩，留待下一个 idle 再试。判据用 turnMetrics：它在
-    // handleSendMessage 受理当下建立（beginTurnMetrics，早于压缩闸判定），
-    // turn.done / abort / 被下一轮取代三条路径收档——故「非空」精确等于
-    // 「有已受理但未收尾的 turn」，同时涵盖被压缩闸挡住的未投递 prompt。
-    // 理由：summarize 写盘中途收到新 turn 会让 opencode 静默丢弃 prompt_async
-    //（历史实锤「turn 永不启动」），这正是闸存在的理由；在此跳过＝不制造该竞态。
-    if (state.turnMetrics !== null && state.turnMetrics !== undefined) {
-      console.log(`[gateway] compact deferred: ${state.sessionId} has an in-flight turn or undelivered prompt`)
-      return
-    }
+    // 已通过在途闸：清除 pending 标记（无论本次最终 summarize 成败，避免卡死旗标；
+    // 失败时水位不推进，下轮 threshold/force 仍会再触发）。
+    if (state.pendingCompact) state.pendingCompact = false
     // 正常阈值路径仍要求「自上次压缩新增 ≥ 半个阈值」；microcompact/decision 的
     // early trigger 只要求确有待压缩的新讯息（count > lastCount，已在上面判定）。
-    if (thresholdReached && count - lastCount < SESSION_COMPACT_MIN_NEW) return
+    // forceTokenCompact / pendingRetry 已证明用量或先前判定需要压缩，不得再被 MIN_NEW 挡掉。
+    if (!forceTokenCompact && !pendingRetry && thresholdReached && count - lastCount < SESSION_COMPACT_MIN_NEW) return
     if (microPlan) {
       // clearAtLeastTokens 只作判据：整段摘要不会逐条清理这些 tool result。
       console.log(
         `[gateway] microcompact plan (trigger only; Eimu uses whole-summary compaction): session=${state.sessionId} trigger=${microPlan.trigger} tool_uses=${toolUsage.toolUseCount} clearable=${microPlan.clearToolUses} estimated_saved=${microPlan.estimatedTokensSaved} clear_at_least=${microPlan.clearAtLeastTokens}${earlyTrigger ? " early_trigger=1" : ""}`,
       )
     }
-    if (decision.action !== "none") {
+    if (decision.action !== "none" || forceTokenCompact) {
       console.log(
-        `[gateway] compact decision: session=${state.sessionId} action=${decision.action} used_tokens=${usedTokens ?? "unknown"} window=${windowTokens || "unknown"} pct_left=${decision.pctLeft}${earlyTrigger ? " early_trigger=1" : ""}`,
+        `[gateway] compact decision: session=${state.sessionId} action=${decision.action} used_tokens=${usedTokens ?? "unknown"}(${usedTokensSource}) window=${windowTokens || "unknown"} compactAt=${decision.compactAt} pct_left=${decision.pctLeft}${earlyTrigger ? " early_trigger=1" : ""}${forceTokenCompact ? " force_token=1" : ""}`,
       )
     }
     // summarize 需要 providerID+modelID：取最近一条带 model 资讯的讯息（与该会话实际模型一致）。

@@ -14,6 +14,7 @@ import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, 
 import { resolveSession, getOwnedSession, sessions } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.ts"
+import { flushPendingCompact } from "./messages-gw.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
@@ -590,6 +591,8 @@ export function emitImageFailed(
   if (t) {
     t.status = "failed"
   }
+  // 2026-10-18 止血：失败也是终态，冲刷 pendingCompact。
+  flushPendingCompact(state)
   // S5a：失败原因人话化（原文保留），SSE 帧与画布 errorDetails 补 human_message。
   const human = humanMessageFor(reason)
   emitToSession(state, "image.failed", { task_id, reason, refunded, human_message: human })

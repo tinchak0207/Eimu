@@ -18,7 +18,7 @@ import { emitQuestionRequest } from "./questions-gw.ts"
 import { maybeEnqueueLyricAlignFromTool } from "./lyric-align-hook.ts"
 import { isSuccessfulWorkflowWrite } from "./canvas-write-gate.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
-import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce } from "./messages-gw.ts"
+import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce, flushPendingCompact } from "./messages-gw.ts"
 // TODO(整合 Wave2)：以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
 // 整合阶段于 index.ts 补 export 后换成真 import、删除全部 declare，即完成桥接：
 // import { workflowService, emitQuestionRequest, armWatchdogTimer } from "./index.ts"
@@ -239,6 +239,8 @@ export function registerSessionArtifact(
     submitted_at: prev?.submitted_at ?? Date.now(),
   })
   boundMap(state.sessionTasks, TOOL_STATUS_DEDUP_CAP)
+  // 2026-10-18 止血：成品登记＝任务终态，冲刷 pendingCompact。
+  flushPendingCompact(state)
 }
 
 export async function emitVideoDone(
@@ -540,6 +542,8 @@ export function emitCanvasResult(
     t.status = "succeeded"
     t.url = url
   }
+  // 2026-10-18 止血：生成任务终态 → 若有 pendingCompact 立刻再试压缩。
+  flushPendingCompact(state)
   const unitId = state.canvasUnitByTask.get(taskId)
   if (!unitId) return false
   const patch = { status: "success", content: url, ...(typeof cost_coins === "number" ? { cost_coins } : {}) }
