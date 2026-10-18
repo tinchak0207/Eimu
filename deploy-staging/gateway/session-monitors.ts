@@ -16,6 +16,9 @@
 // - 命令安全闸是最小防线，不是沙箱：按 shell 分词逐段检查危险形态（含引号/反引号/$()/管道），
 //   真正的权限边界在 Eimu 既有工具闸与宿主隔离。
 import { Database } from "bun:sqlite"
+import { join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
+import { assertPublicHost } from "./artifact-store"
 import { emitToSession } from "./sse-core.ts"
 import { resolveSession } from "./sessions-core.ts"
 // 子代理会话不在主 sessions 表；monitor 的 session_id 可能是子会话的 opencode id，
@@ -27,6 +30,8 @@ export const MONITOR_MAX_TIMEOUT_MS = 1_800_000
 export const MONITOR_MIN_TIMEOUT_MS = 1_000
 export const MONITOR_MAX_EVENTS_PER_SECOND = 20
 export const MONITOR_LAST_LINES = 50
+export const MONITOR_MAX_PER_SESSION = 4
+export const MONITOR_MAX_ACTIVE = 32
 const MONITOR_LINE_MAX_CHARS = 2_000
 /** P2：无换行输出（如 tail 跟随的二进制流）缓冲上限；超出保留尾部。 */
 const MONITOR_BUFFER_MAX_CHARS = 64 * 1024
@@ -71,7 +76,7 @@ export interface MonitorView extends Omit<SessionMonitorRow, "last_lines"> {
 }
 
 export class MonitorPolicyError extends Error {
-  constructor(message = "command refused by monitor policy") {
+  constructor(message = "command refused by monitor policy", readonly code = "command_refused") {
     super(message)
     this.name = "MonitorPolicyError"
   }
@@ -873,7 +878,7 @@ interface ActiveMonitor {
 const active = new Map<number, ActiveMonitor>()
 
 function stateFor(handle: ActiveMonitor): SessionStateLike | undefined {
-  if (!handle.state) handle.state = resolveSession(handle.sessionId)
+  if (!handle.state) handle.state = resolveSession(handle.sessionId) ?? subagentParentState(handle.sessionId)
   return handle.state
 }
 
@@ -936,7 +941,7 @@ function emitMonitorFrame(
   name: string,
   message?: string,
 ): void {
-  const state = resolveSession(sessionId)
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
   if (!state) return
   emitToSession(state, name, {
     monitor_id: monitorId,
@@ -1046,10 +1051,29 @@ function killProcessGroupId(pgid: number): void {
   killer.unref?.()
 }
 
-function spawnCommand(handle: ActiveMonitor, command: string): void {
-  const cwd = process.env.HARNESS_WORKSPACE || "/opt/agent-harness/workspace"
-  const proc = Bun.spawn(["bash", "-lc", command], {
-    cwd,
+async function monitorSandbox(sessionId: string): Promise<{ argv: string[]; cwd: string }> {
+  // 生产运行时的既有沙箱轮子，绝对路径由部署工作区推导；缺失绝不回落裸 shell。
+  const workspace = resolve(process.env.HARNESS_WORKSPACE || "/opt/agent-harness/workspace")
+  const modulePath = join(workspace, ".opencode", "lib", "sandbox.ts")
+  let sandbox: typeof import("../opencode-runtime/lib/sandbox")
+  try { sandbox = await import(pathToFileURL(modulePath).href) }
+  catch { throw new MonitorPolicyError("monitor sandbox module unavailable") }
+  if (!sandbox.sandboxAvailable() || resolve(sandbox.WORKSPACE) !== workspace) {
+    throw new MonitorPolicyError("monitor sandbox unavailable or workspace mismatch")
+  }
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
+  if (!state) throw new MonitorPolicyError("monitor session unavailable")
+  // Gateway和运行时是不同UID，监视不占用运行时真实sid的私有.run目录。
+  const sandboxSessionId = `monitor:${sessionId}`
+  sandbox.setOwner(sandboxSessionId, [state.sessionId])
+  sandbox.ensureSessionDirs(sandboxSessionId)
+  const cwd = sandbox.sessionRunDir(sandboxSessionId)
+  return { argv: sandbox.sandboxPrefix({ sessionID: sandboxSessionId, cwd }), cwd }
+}
+
+function spawnCommand(handle: ActiveMonitor, command: string, sandbox: { argv: string[]; cwd: string }): void {
+  const proc = Bun.spawn([...sandbox.argv, "--", "/bin/bash", "--noprofile", "--norc", "-c", command], {
+    cwd: sandbox.cwd,
     env: monitorEnv(),
     stdin: "ignore",
     stdout: "pipe",
@@ -1066,7 +1090,8 @@ function spawnCommand(handle: ActiveMonitor, command: string): void {
       .query("UPDATE session_monitors SET child_pid=?,child_pgid=? WHERE id=?")
       .run(proc.pid, proc.pid, handle.id)
   } catch (e) {
-    console.error(`[gateway] monitor ${handle.id} failed to record child pid:`, e)
+    killProcessGroup(proc)
+    throw new Error(`monitor ${handle.id} failed to record child pid`)
   }
 
   void (async () => {
@@ -1152,7 +1177,7 @@ function connectWebSocket(handle: ActiveMonitor, url: string): void {
     const data = (event as MessageEvent).data
     const text =
       typeof data === "string" ? data : data instanceof Uint8Array ? new TextDecoder().decode(data) : String(data ?? "")
-    for (const line of text.split("\n")) if (line.trim()) deliver(handle, line)
+    for (const line of text.slice(0, MONITOR_BUFFER_MAX_CHARS).split("\n")) if (line.trim()) deliver(handle, line)
   })
   socket.addEventListener("error", () => {
     if (!handle.finished) finishMonitor(handle, "error", "websocket error")
@@ -1163,10 +1188,10 @@ function connectWebSocket(handle: ActiveMonitor, url: string): void {
 }
 
 // ── 对外 API ────────────────────────────────────────────────────────────
-export function startMonitor(
+export async function startMonitor(
   sessionId: string,
   input: MonitorInput,
-): { id: number; status: "running"; timeout_ms: number; description: string } {
+): Promise<{ id: number; status: "running"; timeout_ms: number; description: string }> {
   const sid = typeof sessionId === "string" ? sessionId.trim() : ""
   if (!sid) throw new Error("sessionId is required")
   const description = typeof input?.description === "string" ? input.description.trim() : ""
@@ -1176,13 +1201,31 @@ export function startMonitor(
   if (Boolean(command) === Boolean(ws)) throw new Error("exactly one of command or ws is required")
   if (command) assertMonitorCommandAllowed(command)
   const timeoutMs = normalizeMonitorTimeout(input.timeout_ms)
+  let sandbox: { argv: string[]; cwd: string } | undefined
+  if (command) sandbox = await monitorSandbox(sid)
+  else {
+    let parsed: URL
+    try { parsed = new URL(ws) }
+    catch { throw new MonitorPolicyError("ws must be a valid ws:// or wss:// URL", "ws_refused") }
+    if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.username || parsed.password || ws.length > 4096) {
+      throw new MonitorPolicyError("ws must use ws/wss without embedded credentials", "ws_refused")
+    }
+    try { await assertPublicHost(parsed.hostname) }
+    catch { throw new MonitorPolicyError("ws address must resolve only to public IPs", "ws_refused") }
+  }
 
   const startedAt = Date.now()
-  const inserted = db()
-    .query(`INSERT INTO session_monitors(session_id,description,command,ws_url,timeout_ms,status,event_count,dropped_count,truncated_count,started_at,ended_at,last_lines,pid)
+  const database = db()
+  // 同一SQLite事务认领资源槽，防并发HTTP与多进程绕过硬上限。
+  const id = database.transaction(() => {
+    const counts = database.query("SELECT COUNT(*) AS total,SUM(CASE WHEN session_id=? THEN 1 ELSE 0 END) AS owned FROM session_monitors WHERE status='running'").get(sid) as { total: number; owned: number | null }
+    if (counts.total >= MONITOR_MAX_ACTIVE || (counts.owned ?? 0) >= MONITOR_MAX_PER_SESSION) {
+      throw new MonitorPolicyError("monitor active limit reached", "monitor_limit")
+    }
+    return Number(database.query(`INSERT INTO session_monitors(session_id,description,command,ws_url,timeout_ms,status,event_count,dropped_count,truncated_count,started_at,ended_at,last_lines,pid)
       VALUES(?,?,?,?,?,'running',0,0,0,?,NULL,'[]',?)`)
-    .run(sid, description.slice(0, 200), command || null, ws || null, timeoutMs, startedAt, process.pid)
-  const id = Number(inserted.lastInsertRowid)
+      .run(sid, description.slice(0, 200), command || null, ws || null, timeoutMs, startedAt, process.pid).lastInsertRowid)
+  }).immediate()
 
   const handle: ActiveMonitor = {
     id,
@@ -1204,7 +1247,7 @@ export function startMonitor(
   active.set(id, handle)
 
   try {
-    if (command) spawnCommand(handle, command)
+    if (command) spawnCommand(handle, command, sandbox!)
     else connectWebSocket(handle, ws)
   } catch (e) {
     active.delete(id)

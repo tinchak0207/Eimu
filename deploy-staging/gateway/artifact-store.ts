@@ -4,7 +4,7 @@
 import { Database } from "bun:sqlite"
 import { createHash } from "node:crypto"
 import { lookup } from "node:dns/promises"
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { isIP } from "node:net"
 import path from "node:path"
 
@@ -495,20 +495,40 @@ function readRegularFile(inputPath: string): ReadFileResult {
   if (before.size > ARTIFACT_MAX_BYTES) {
     throw new ArtifactError("file_too_large", `文件 ${before.size} 字节，超过 16MiB 上限`, 413)
   }
-  let bytes: Buffer
+  let fd: number | undefined
   try {
-    bytes = readFileSync(absolutePath)
+    // 与计划文件同源的 fd 防线：不能在检查后重新按路径无界读取。
+    // O_NONBLOCK 防换成 FIFO 阻塞；再检查实际打开的 inode 与真实根目录。
+    fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    const opened = fstatSync(fd)
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new ArtifactError("file_changed_during_read", "打开期间文件发生变化，整笔拒绝", 409)
+    }
+    assertUploadPathAllowed(`/proc/self/fd/${fd}`)
+    if (opened.size > ARTIFACT_MAX_BYTES) {
+      throw new ArtifactError("file_too_large", `文件 ${opened.size} 字节，超过 16MiB 上限`, 413)
+    }
+    const buffer = Buffer.alloc(Math.min(opened.size + 1, ARTIFACT_MAX_BYTES + 1))
+    let length = 0
+    while (length < buffer.length) {
+      const count = readSync(fd, buffer, length, buffer.length - length, length)
+      if (count === 0) break
+      length += count
+    }
+    const after = fstatSync(fd)
+    const current = lstatSync(absolutePath)
+    if (length !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs ||
+        current.dev !== opened.dev || current.ino !== opened.ino || !current.isFile() || current.nlink !== 1) {
+      throw new ArtifactError("file_changed_during_read", "读取期间文件发生变化，整笔拒绝", 409)
+    }
+    const bytes = buffer.subarray(0, length)
+    return { absolutePath, bytes, sha256: sha256Hex(bytes), size: bytes.length }
   } catch (e) {
+    if (e instanceof ArtifactError) throw e
     throw new ArtifactError("file_read_failed", `读取失败：${e instanceof Error ? e.message : String(e)}`, 400)
+  } finally {
+    if (fd !== undefined) closeSync(fd)
   }
-  const after = lstatSync(absolutePath)
-  if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
-    throw new ArtifactError("file_changed_during_read", "读取期间文件发生变化，整笔拒绝", 409)
-  }
-  if (bytes.length > ARTIFACT_MAX_BYTES) {
-    throw new ArtifactError("file_too_large", `文件 ${bytes.length} 字节，超过 16MiB 上限`, 413)
-  }
-  return { absolutePath, bytes, sha256: sha256Hex(bytes), size: bytes.length }
 }
 
 /** 无外链的本地产物：交付前按既有安全读路径核对当前字节，不依赖 URL 探测状态。 */
@@ -1091,7 +1111,7 @@ function hostnameLooksBlocked(hostname: string): boolean {
 }
 
 /** DNS 解析后校验每个实际 IP（至少校验一次，缩小 DNS rebinding 窗口）。 */
-async function assertPublicHost(hostname: string): Promise<void> {
+export async function assertPublicHost(hostname: string): Promise<void> {
   const host = normalizeHostname(hostname)
   if (hostnameLooksBlocked(host)) {
     throw new BlockedUrlError("private_address", `拒绝内网/本机地址：${hostname}`)

@@ -51,7 +51,7 @@ export async function handleMonitor(req: Request, pathname: string): Promise<Res
       // M7：显式传入的 timeout_ms 原样下传，非有限数由 normalizeMonitorTimeout 拒绝（400），
       // 不能用 typeof === "number" 把它静默吞成默认值。
       const rawTimeout = body.timeout_ms ?? body.timeoutMs
-      const result = startMonitor(sessionId, {
+      const result = await startMonitor(sessionId, {
         description,
         timeout_ms: rawTimeout === undefined ? undefined : (rawTimeout as number),
         command,
@@ -82,7 +82,7 @@ export async function handleMonitor(req: Request, pathname: string): Promise<Res
   } catch (e) {
     if (e instanceof MonitorPolicyError) {
       // 契约形状：{ ok:false, error:"command refused by monitor policy" }；具体命中规则放 detail。
-      return bad("command refused by monitor policy", "command_refused", 400, { detail: e.message })
+      return bad(e.code === "command_refused" ? "command refused by monitor policy" : "monitor refused by policy", e.code, e.code === "monitor_limit" ? 429 : 400, { detail: e.message })
     }
     const message = (e as Error)?.message || String(e)
     // M8/M9：错误码如实返回，不把「找不到」或坏参数包成通用 200/500。

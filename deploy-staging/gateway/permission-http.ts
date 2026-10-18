@@ -24,6 +24,7 @@ import { appendDenyAudit } from "./events-translate.ts"
 import { loadUserSettings } from "./persistence"
 import { getPlanState } from "./plan-mode"
 import { resolveSession } from "./sessions-core"
+import { subagentParentState } from "./subagent"
 
 const MAX_BODY_BYTES = 1024 * 1024
 
@@ -51,7 +52,26 @@ async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   const declared = Number(req.headers.get("content-length") ?? "")
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null
   try {
-    const parsed = await req.json()
+    const reader = req.body?.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    if (reader) {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          total += value.byteLength
+          if (total > MAX_BODY_BYTES) {
+            await reader.cancel().catch(() => {})
+            return null
+          }
+          chunks.push(value)
+        }
+      } finally {
+        reader.releaseLock()
+      }
+    }
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"))
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
     return parsed as Record<string, unknown>
   } catch {
@@ -149,14 +169,12 @@ function buildContext(raw: Record<string, unknown>, modeOverride?: PermissionMod
 }
 
 /** tenant 一律由会话状态推导，不信任请求体。 */
-async function deriveTenant(sessionId: string, fallback: string): Promise<string> {
-  const state = resolveSession(sessionId)
-  if (!state) return fallback
-  try {
-    return (await billingPermissionTenant(state)) ?? fallback
-  } catch {
-    return fallback
-  }
+async function deriveTenant(sessionId: string): Promise<string> {
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
+  if (!state) return "default"
+  const tenant = await billingPermissionTenant(state)
+  if (!tenant) throw new Error("permission_session_has_no_tenant")
+  return tenant
 }
 
 /**
@@ -172,15 +190,15 @@ async function deriveMode(sessionId: string, tenant: string): Promise<Permission
   if (getPlanState(sessionId).inPlanMode) return "plan"
   const explicit = getPolicyState(sessionId, tenant).explicitMode
   if (explicit) return explicit
-  const state = resolveSession(sessionId)
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
   if (!state) return undefined
   try {
     if (await billingAutoApprovalEnabled(state)) return "auto"
     const settings = loadUserSettings(state.apiKey) as { interaction_mode?: string } | null
     return settings?.interaction_mode === "collaborate" ? "default" : "auto"
   } catch {
-    // 设置/身份查询失败不得把产品锁死：按其余档位处理。
-    return "auto"
+    // 身份/设置失败不能升级为无需确认。
+    return "default"
   }
 }
 
@@ -189,7 +207,6 @@ async function handleEvaluate(body: Record<string, unknown>): Promise<Response> 
   if (!sessionId) return error(400, "bad_request", "session_id is required")
   const tool = stringField(body, "tool")
   if (!tool) return error(400, "bad_request", "tool is required")
-  const bodyTenant = stringField(body, "tenant") || "default"
   const input = objectField(body, "input")
   const contextRaw = objectField(body, "context")
 
@@ -199,7 +216,7 @@ async function handleEvaluate(body: Record<string, unknown>): Promise<Response> 
   }
 
   // 产品阻断级修正：模式/tenant 由会话推导，不信任请求体。
-  const tenant = await deriveTenant(sessionId, bodyTenant)
+  const tenant = await deriveTenant(sessionId)
   const mode = await deriveMode(sessionId, tenant)
   const planState = getPlanState(sessionId)
   const context = buildContext(contextRaw, mode)
@@ -245,7 +262,7 @@ async function handleRules(body: Record<string, unknown>): Promise<Response> {
   const sessionId = stringField(body, "session_id")
   if (!sessionId) return error(400, "bad_request", "session_id is required")
   // tenant 由会话推导，不信任请求体。
-  const tenant = await deriveTenant(sessionId, stringField(body, "tenant") || "default")
+  const tenant = await deriveTenant(sessionId)
   const action = stringField(body, "action")
   if (!ACTIONS.has(action)) {
     return error(400, "invalid_action", `unknown action: ${action || "(empty)"}`)
@@ -306,7 +323,7 @@ async function handleRules(body: Record<string, unknown>): Promise<Response> {
 async function handleState(body: Record<string, unknown>): Promise<Response> {
   const sessionId = stringField(body, "session_id")
   if (!sessionId) return error(400, "bad_request", "session_id is required")
-  const tenant = await deriveTenant(sessionId, stringField(body, "tenant") || "default")
+  const tenant = await deriveTenant(sessionId)
   return json(200, { ok: true, session_id: sessionId, tenant, state: getPolicyState(sessionId, tenant) })
 }
 

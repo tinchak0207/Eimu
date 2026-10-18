@@ -385,11 +385,11 @@ try {
   startCronTicker({
     isIdle: (sid) => {
       const st = resolveSession(sid)
-      return !st || st.turnMetrics == null
+      return st !== undefined && st.turnMetrics == null && st.ackTimer == null && (st.lastTurnActiveAt ?? 0) <= 0
     },
     fire: async (task) => {
       const st = resolveSession(task.sessionId)
-      if (!st) return
+      if (!st) throw new Error(`session not found: ${task.sessionId}`)
       await dispatchWorkflowWake(st, `cron:${task.id}`, task.prompt, "final")
     },
   })
@@ -424,4 +424,3 @@ export { memoryRecallPrefetch, memoryRecallInflight, scheduleMemoryRecallPrefetc
 // FIX-G4：导出两个唤醒出口以便「可独立真跑」验收（与 subagent.ts 的 renderSubagentNoteWakeContent
 // 同法：仅暴露引用，**不改变任何运行时行为**）。
 export { wakeSessionForSubagent, wakeSessionForSubagentNote }
-

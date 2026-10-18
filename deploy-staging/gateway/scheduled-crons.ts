@@ -750,7 +750,8 @@ export function rehydrateDurableCrons(stateDir?: string): number {
           permanent=excluded.permanent,
           last_fired_at=COALESCE(excluded.last_fired_at,scheduled_crons.last_fired_at),
           next_fire_at=excluded.next_fire_at
-        WHERE scheduled_crons.status='active'`)
+        WHERE scheduled_crons.status='active'
+          AND (scheduled_crons.last_fired_at IS NULL OR excluded.last_fired_at>=scheduled_crons.last_fired_at)`)
       .run(
         numericId,
         task.createdBySessionId || "durable",
@@ -862,7 +863,7 @@ export function listCrons(sessionId: string, options: { includeInactive?: boolea
   if (!sid) throw new Error("sessionId is required")
   const sql = options.includeInactive
     ? "SELECT * FROM scheduled_crons WHERE session_id=? ORDER BY id ASC"
-    : "SELECT * FROM scheduled_crons WHERE session_id=? AND status='active' ORDER BY id ASC"
+    : "SELECT * FROM scheduled_crons WHERE session_id=? AND status IN ('active','unknown','failed') ORDER BY id ASC"
   return db().query(sql).all(sid) as CronRow[]
 }
 
@@ -915,15 +916,20 @@ export function currentCronFireSink(): ((task: CronFireTask) => void | Promise<v
   return activeFireSink
 }
 
+/** 手动 tick 也必须复用宿主注入的空闲判断，不能由 HTTP 参数伪造。 */
+export function currentCronTicker(): CronTickerHandle | null {
+  return activeTicker
+}
+
 /** 处理一批到期任务：先 fire，再按 recurring/一次性/过期决定下一格。 */
 export async function tickCrons(options: CronTickerOptions): Promise<CronFireTask[]> {
   if (ticking) return []
   ticking = true
   try {
     const now = Date.now()
-    // P2：清理崩溃进程遗留的认领（正常投递是秒级；10 分钟视为 stale）。
+    // 在途认领过期代表投递结果未知；不能释放后盲目重发同一轮。
     db()
-      .query("UPDATE scheduled_crons SET firing=0,firing_at=NULL WHERE status='active' AND firing=1 AND (firing_at IS NULL OR firing_at<?)")
+      .query("UPDATE scheduled_crons SET status='unknown',firing=0,firing_at=NULL WHERE status='active' AND firing=1 AND (firing_at IS NULL OR firing_at<?)")
       .run(now - CRON_CLAIM_TTL_MS)
     // C5：先按「会话是否空闲」过滤，再对空闲会话取 LIMIT 行。
     // 直接 LIMIT 50 再逐行跳过 busy，会让 50 条 busy 行饿死后面真正 idle 的会话。
@@ -941,13 +947,16 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
       const placeholders = idleSessions.map(() => "?").join(",")
       rows = db()
         .query(
-          `SELECT * FROM scheduled_crons WHERE status='active' AND next_fire_at IS NOT NULL AND next_fire_at<=?
-           AND session_id IN (${placeholders}) ORDER BY next_fire_at ASC LIMIT 50`,
+          `SELECT * FROM (SELECT *,ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY next_fire_at,id) AS session_rank
+           FROM scheduled_crons WHERE status='active' AND firing=0 AND next_fire_at IS NOT NULL AND next_fire_at<=?
+           AND session_id IN (${placeholders})) WHERE session_rank=1 ORDER BY next_fire_at ASC LIMIT 50`,
         )
         .all(now, ...idleSessions) as CronRow[]
     } else {
       rows = db()
-        .query("SELECT * FROM scheduled_crons WHERE status='active' AND next_fire_at IS NOT NULL AND next_fire_at<=? ORDER BY next_fire_at ASC LIMIT 50")
+        .query(`SELECT * FROM (SELECT *,ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY next_fire_at,id) AS session_rank
+          FROM scheduled_crons WHERE status='active' AND firing=0 AND next_fire_at IS NOT NULL AND next_fire_at<=?)
+          WHERE session_rank=1 ORDER BY next_fire_at ASC LIMIT 50`)
         .all(now) as CronRow[]
     }
     const fired: CronFireTask[] = []
@@ -955,6 +964,9 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
     let throttled = 0
     for (const row of rows) {
       const task = toTask(row)
+      // 前一会话的异步投递期间，后面的会话可能已经接收用户新回合。
+      // 认领与提交之间不 await，必须在此使用实时空闲状态。
+      if (options.isIdle && !options.isIdle(task.sessionId)) continue
       // P2：每会话每 tick 限 1 条；其余保持 active 且 next_fire_at 仍在过去，留到下一拍。
       if ((perSession.get(task.sessionId) ?? 0) >= CRON_MAX_PER_SESSION_PER_TICK) {
         throttled += 1
@@ -981,12 +993,13 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
         await options.fire(task)
       } catch (error) {
         options.onError?.(error)
-        if (!task.recurring) {
-          // 一次性任务投递失败：保留任务，60s 后重试（与 CC「留待后续会话」同义）。
-          db().query("UPDATE scheduled_crons SET next_fire_at=?,firing=0,firing_at=NULL WHERE id=?").run(now + 60_000, task.id)
-          continue
-        }
-        // recurring 投递失败只丢这一轮，仍按周期推进。
+        // 超时/断线可能发生在对方已接收之后；保留投递身份，不能重试同一轮或伪报 fired。
+        const refusal = error as { code?: unknown; retryable?: unknown }
+        const status = refusal?.code === "not_submitted"
+          ? refusal.retryable === true ? "active" : "failed"
+          : "unknown"
+        db().query("UPDATE scheduled_crons SET status=?,firing=0,firing_at=NULL WHERE id=? AND status='active'").run(status, task.id)
+        continue
       }
       fired.push(task)
       perSession.set(task.sessionId, (perSession.get(task.sessionId) ?? 0) + 1)
@@ -1014,14 +1027,16 @@ export async function tickCrons(options: CronTickerOptions): Promise<CronFireTas
           })
         }
       } else {
-        if (expired) db().query("UPDATE scheduled_crons SET last_fired_at=?, status='expired' WHERE id=?").run(now, task.id)
-        else db().query("DELETE FROM scheduled_crons WHERE id=?").run(task.id)
+        // 先留耐久终态。文件落盘失败或进程崩溃时，rehydrate 不能将已投递任务复活。
+        db().query("UPDATE scheduled_crons SET last_fired_at=?, status=?,firing=0,firing_at=NULL WHERE id=?")
+          .run(now, expired ? "expired" : "fired", task.id)
         if (task.durable) {
           await mutateDurableTasks(task.sessionId, options.stateDir?.trim() || cronStateDir(), (tasks) => {
             const index = tasks.findIndex((entry) => Number.parseInt(entry.id, 10) === task.id)
             if (index >= 0) tasks.splice(index, 1)
           })
         }
+        if (!task.durable && !expired) db().query("DELETE FROM scheduled_crons WHERE id=? AND status='fired'").run(task.id)
       }
     }
     if (throttled > 0) {

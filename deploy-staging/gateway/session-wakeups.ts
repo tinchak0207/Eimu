@@ -21,7 +21,7 @@ const WAKEUP_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 const WAKEUP_RETENTION_PER_SESSION = 200
 const WAKEUP_PRUNE_EVERY_TICKS = 60
 
-export type WakeupStatus = "scheduled" | "firing" | "fired" | "failed" | "cancelled"
+export type WakeupStatus = "scheduled" | "firing" | "fired" | "failed" | "unknown" | "cancelled"
 
 export interface WakeupInput {
   delaySeconds: number
@@ -71,8 +71,8 @@ function ensureColumn(handle: Database, table: string, column: string, declarati
 }
 
 /**
- * W1：启动回滚只动「没有 owner / owner 已死 / 本进程重启前」的 firing 行。
- * 仍存活的其它 gateway 进程正在投递的行绝不回滚（多进程共库时不被互踩）。
+ * firing 已跨过提交边界，崩溃后无法判断接收方是否执行；只能记为 unknown，不能重投。
+ * 仍存活的其它 gateway 进程正在投递的行不动（多进程共库时不被互踩）。
  */
 function recoverStaleFiring(handle: Database): void {
   const rows = handle.query("SELECT id,pid FROM session_wakeups WHERE status='firing'").all() as Array<{
@@ -85,8 +85,8 @@ function recoverStaleFiring(handle: Database): void {
     const stale = owner === null || owner === process.pid || !pidAlive(owner)
     if (!stale) continue
     handle
-      .query("UPDATE session_wakeups SET status='scheduled',pid=NULL WHERE id=? AND status='firing'")
-      .run(row.id)
+      .query("UPDATE session_wakeups SET status='unknown',fired_at=?,pid=NULL WHERE id=? AND status='firing'")
+      .run(Date.now(), row.id)
   }
 }
 
@@ -212,7 +212,7 @@ export function dueWakeups(now: number = Date.now()): WakeupRow[] {
  * P2：只允许 firing → 终态。跨进程 stop 已把行写成 cancelled 时，这里的影响行数为 0，
  * 绝不把 stop 的结果覆盖回 fired/failed。返回实际更新行数供调用方判断。
  */
-export function markFired(id: number, status: "fired" | "failed" | "cancelled" = "fired"): number {
+export function markFired(id: number, status: "fired" | "failed" | "unknown" | "cancelled" = "fired"): number {
   const res = db()
     .query("UPDATE session_wakeups SET status=?, fired_at=?, pid=NULL WHERE id=? AND status='firing'")
     .run(status, Date.now(), id)
@@ -227,20 +227,20 @@ export function pruneWakeups(now: number = Date.now()): number {
   const handle = db()
   let removed = 0
   const expired = handle
-    .query("DELETE FROM session_wakeups WHERE status IN ('fired','failed','cancelled') AND created_at < ?")
+    .query("DELETE FROM session_wakeups WHERE status IN ('fired','failed','unknown','cancelled') AND created_at < ?")
     .run(now - WAKEUP_RETENTION_MS)
   removed += Number(expired.changes)
   const sessions = handle
     .query(
-      "SELECT session_id FROM session_wakeups WHERE status IN ('fired','failed','cancelled') GROUP BY session_id HAVING COUNT(*) > ?",
+      "SELECT session_id FROM session_wakeups WHERE status IN ('fired','failed','unknown','cancelled') GROUP BY session_id HAVING COUNT(*) > ?",
     )
     .all(WAKEUP_RETENTION_PER_SESSION) as Array<{ session_id: string }>
   for (const session of sessions) {
     const res = handle
       .query(
-        `DELETE FROM session_wakeups WHERE session_id=? AND status IN ('fired','failed','cancelled')
+        `DELETE FROM session_wakeups WHERE session_id=? AND status IN ('fired','failed','unknown','cancelled')
          AND id NOT IN (
-           SELECT id FROM session_wakeups WHERE session_id=? AND status IN ('fired','failed','cancelled')
+           SELECT id FROM session_wakeups WHERE session_id=? AND status IN ('fired','failed','unknown','cancelled')
            ORDER BY id DESC LIMIT ?
          )`,
       )
@@ -313,12 +313,16 @@ export function startWakeupTicker(opts: { intervalMs?: number; wake: WakeupFn })
             console.log(`[gateway] wakeup fired: id=${row.id} session=${row.session_id} streak=${row.noop_streak}`)
           }
         } catch (e) {
-          // W6：单行失败写 failed，ticker 继续处理下一行。
+          // sink 抛错不代表接收方没执行（例如 prompt_async 回执超时）。禁止盲重发。
           const after = db().query("SELECT status FROM session_wakeups WHERE id=?").get(row.id) as
             | { status: string }
             | null
           if (cancelledInFlight.has(row.id) || after?.status !== "firing") markFired(row.id, "cancelled")
-          else markFired(row.id, "failed")
+          else if ((e as { code?: unknown })?.code === "not_submitted") {
+            if ((e as { retryable?: unknown }).retryable === true) {
+              db().query("UPDATE session_wakeups SET status='scheduled',pid=NULL WHERE id=? AND status='firing'").run(row.id)
+            } else markFired(row.id, "failed")
+          } else markFired(row.id, "unknown")
           console.error(`[gateway] wakeup failed: id=${row.id} session=${row.session_id}:`, e)
         } finally {
           cancelledInFlight.delete(row.id)

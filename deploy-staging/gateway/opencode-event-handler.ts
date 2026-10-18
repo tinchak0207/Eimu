@@ -141,7 +141,7 @@ function clearInFlightTools(state: SessionState): void {
 const GOAL_EVAL_TRANSCRIPT_MAX_CHARS = 8000
 const goalEvalBySession = new Map<
   string,
-  { goalId: number; lastTurnGen: number; inFlight: boolean; notMet: number; stopped: boolean }
+  { goalId: number; lastTurnGen: number; inFlight: boolean; dispatched: boolean; notMet: number; stopped: boolean }
 >()
 
 async function recentTranscriptTail(opencodeSessionId: string): Promise<string> {
@@ -153,6 +153,11 @@ async function recentTranscriptTail(opencodeSessionId: string): Promise<string> 
     const role = m?.info?.role === "user" ? "user" : "assistant"
     for (const p of Array.isArray(m?.parts) ? m.parts : []) {
       if (p?.type === "text" && typeof p.text === "string" && p.text.trim()) lines.push(`${role}: ${p.text.trim()}`)
+      // 验收者禁止自取证，必须能看到对话中已有的真实工具结果，不能只喂助手自述。
+      if (p?.type === "tool" && (p.state?.status === "completed" || p.state?.status === "error")) {
+        const evidence = p.state.status === "completed" ? p.state.output : p.state.error
+        if (typeof evidence === "string" && evidence.trim()) lines.push(`tool ${String(p.tool ?? "unknown")} (${p.state.status}): ${evidence.trim()}`)
+      }
     }
   }
   const text = lines.join("\n")
@@ -227,6 +232,7 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
         goalId: goal.id,
         lastTurnGen: state.turnGen ?? 0,
         inFlight: false,
+        dispatched: false,
         notMet: goal.not_met_streak,
         stopped: true,
       })
@@ -239,13 +245,13 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
       // 旧版 inFlight 会永久为 true、目标从此不再验收。若注册表里已找不到该验收 run，
       // 说明它已停止/异常收尾——清 inFlight 并放开「本回合已验收」闸，下一 idle 重新验收。
       // 次数约束仍由持久化的 not_met_streak（GOAL_MAX_NOT_MET_STREAK）负责。
-      if (prev.inFlight && !findRunningRun(state.sessionId, GOAL_EVALUATOR_LABEL)) {
+      if (prev.inFlight && prev.dispatched && !findRunningRun(state.sessionId, GOAL_EVALUATOR_LABEL)) {
         prev.inFlight = false
         prev.lastTurnGen = -1
       }
     }
     if (prev && prev.goalId === goal.id && (prev.inFlight || prev.lastTurnGen === turnGen || prev.stopped)) return
-    const record = { goalId: goal.id, lastTurnGen: turnGen, inFlight: true, notMet: prev?.goalId === goal.id ? prev.notMet : 0, stopped: false }
+    const record = { goalId: goal.id, lastTurnGen: turnGen, inFlight: true, dispatched: false, notMet: prev?.goalId === goal.id ? prev.notMet : 0, stopped: false }
     goalEvalBySession.set(state.sessionId, record)
     void (async () => {
       let dispatched = false
@@ -253,6 +259,8 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
         const tail = await recentTranscriptTail(state.opencodeSessionId)
         // transcript 的异步读取也可能跨回合；旧请求不得派发或改写新验收记录。
         if (goalEvalBySession.get(state.sessionId) !== record || (state.turnGen ?? 0) !== turnGen || state.turnAborted || state.turnAbortSource === "user") return
+        const active = getActiveGoal(state.sessionId)
+        if (!active || active.id !== goal.id) return
         const spec = buildGoalEvaluatorSpec(goal.condition)
         dispatched = runGoalEvaluator(state, { label: spec.label, prompt: `${spec.prompt}${tail}` }, (result) => {
           const current = goalEvalBySession.get(state.sessionId)
@@ -295,6 +303,7 @@ export function maybeRunGoalAcceptance(state: SessionState): void {
           }
           void injectGoalNudge(state, parsed.reason).catch((e) => console.error(`[gateway] goal nudge failed: session=${state.sessionId}`, e))
         })
+        record.dispatched = dispatched
       } catch (e) {
         console.error(`[gateway] goal acceptance failed: session=${state.sessionId}`, e)
       } finally {

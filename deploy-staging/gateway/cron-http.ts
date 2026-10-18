@@ -3,12 +3,11 @@
 import { jsonError } from "./gw-lib"
 import {
   createCron,
-  currentCronFireSink,
+  currentCronTicker,
   deleteCron,
   getCronInitError,
   listCrons,
   parseCronExpression,
-  tickCrons,
 } from "./scheduled-crons"
 
 const PREFIX = "/internal/cron/"
@@ -97,7 +96,7 @@ export async function handleCron(req: Request, pathname: string): Promise<Respon
           durable: row.durable === 1,
           permanent: row.permanent === 1,
           last_fired_at: row.last_fired_at,
-          next_fire_at: row.next_fire_at,
+          next_fire_at: row.status === "active" ? row.next_fire_at : null,
           created_at: row.created_at,
           status: row.status,
         }))
@@ -118,13 +117,9 @@ export async function handleCron(req: Request, pathname: string): Promise<Respon
         return Response.json({ success: true, id })
       }
       case "tick": {
-        const fire = currentCronFireSink()
-        if (!fire) return jsonError(503, "cron ticker is not started", "backend_error", "ticker_not_started")
-        const idle = body.is_idle !== false
-        const fired = await tickCrons({
-          fire,
-          isIdle: () => idle,
-        })
+        const ticker = currentCronTicker()
+        if (!ticker) return jsonError(503, "cron ticker is not started", "backend_error", "ticker_not_started")
+        const fired = await ticker.tick()
         return Response.json({ success: true, fired })
       }
       default:

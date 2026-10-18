@@ -27,6 +27,7 @@ export default tool({
     "列出通过 cron_create 创建的定时任务（含 durable 与仅本会话两种）。",
     "每条返回 id、cron、prompt、recurring、durable、实际下一次触发时间 next_fire_at。",
     "何时用：汇报触发时间、核对任务是否仍在、删除前找 id；向用户说时间要用 next_fire_at，不要用 cron 表达式里的分钟。",
+    "status=unknown 表示可能已经投递，排程暂停且没有下一次触发时间；先核对原会话，禁止直接重建或重投。",
     "失败处置：cron_list_failed 按 gateway 文本修正；gateway_unreachable 稍后重试；空列表是合法结果。",
     "互指：创建用 cron_create，取消用 cron_delete；一次性唤醒用 schedule_wakeup。",
     "示例：cron_list()",

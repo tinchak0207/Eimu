@@ -285,6 +285,10 @@ export async function handleMailbox(req: Request, pathname: string): Promise<Res
       case "team": {
         const team = optionalRecordString(body, "team")
         if (!team) return Response.json({ ok: true, ...getTeamState(sessionId) })
+        // 成员只能读取名册；变更团队/lead/成员是 coordinator 的管理动作。
+        if (caller.kind !== "lead") {
+          return jsonError(403, "only the team lead can change the team roster", "forbidden", "team_change_forbidden")
+        }
         if (body.switch !== undefined && typeof body.switch !== "boolean") {
           return jsonError(400, "switch must be a boolean", "bad_request", "bad_request")
         }

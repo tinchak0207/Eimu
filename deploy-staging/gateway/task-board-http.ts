@@ -114,7 +114,15 @@ function assignmentKey(sessionId: string, taskId: number): string {
 function flushPendingAssignments(): void {
   for (const [key, pending] of pendingAssignments) {
     try {
-      const frame = sendTaskAssignment(pending.sessionId, pending.to, pending.task, undefined, {
+      // 补投是派工动作，必须以任务当前归属和生命周期为准。
+      // 释放认领、改派、删除或完成后，旧帧不能再启动旧 worker。
+      const task = getTask(pending.sessionId, pending.task.id)
+      if (!task || task.owner !== pending.to || task.status === "completed") {
+        pendingAssignments.delete(key)
+        continue
+      }
+      // 只有尚未成功落库的帧会保留在队列；使用当前任务内容，稳定投递ID不变。
+      const frame = sendTaskAssignment(pending.sessionId, pending.to, task, undefined, {
         msgId: pending.msgId,
         timestamp: pending.timestamp,
       })
@@ -219,8 +227,6 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
         return Response.json({ success: true, task })
       }
       case "update": {
-        // 上一次投递失败的 assignment 在这里补投（另一条路径是 30s ticker）。
-        flushPendingAssignments()
         const taskId = taskIdOf(payload)
         if (taskId === null) return jsonError(400, "taskId must be a positive integer", "bad_request", "bad_request")
         if (payload.force !== undefined && typeof payload.force !== "boolean") {
@@ -352,12 +358,14 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
           )
         }
         const result = updateTask(sessionId, taskId, patch)
+        // 先应用变更，再按最新 owner/status 淘汰旧帧，避免释放请求反而触发派工。
+        if (result.success) flushPendingAssignments()
         // CC 任务板联动：owner 变更（含首次认领）后把 task_assignment 帧投给新 owner。
         // 只读 task-board 的 Task 类型、不改它；投递失败不影响任务更新结果。
         // P1：帧 from 用真实 lead（sendTaskAssignment 默认值）；同一 owner 重复赋值不重复发帧；
         // 失败进补投队列，duplicate（同一帧已在邮箱）按已投递计。
         let delivered = false
-        if (result.success && typeof patch.owner === "string" && result.task) {
+        if (result.success && typeof patch.owner === "string" && result.task && result.task.status !== "completed") {
           const previousOwner = typeof before?.owner === "string" ? before.owner.trim() : null
           if (patch.owner !== previousOwner) {
             const pending: PendingAssignment = {

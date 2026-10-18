@@ -7,13 +7,14 @@
 // - 计划模式下写操作由 planModeGuard 统一回 ask；只读工具放行。
 import { createHash, randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { lstat, mkdir, open, readFile, realpath, writeFile } from "node:fs/promises"
+import { lstat, mkdir, open, realpath, writeFile } from "node:fs/promises"
 import { dirname, join, resolve, sep } from "node:path"
 import { CONFIRM_TIMEOUT_MS } from "./constants-gateway"
 import { waitFor } from "./internal-waiters"
 import { settleConfirm } from "./media-internal-routes"
 import { PLAN_READ_ONLY_TOOLS, getPolicyState, isPermissionMode, updateRules } from "./permission-policy"
 import { loadHarnessSecurityState, saveHarnessSecurityState, withHarnessSecurityTransaction } from "./persistence"
+import { billingPermissionTenant } from "./charge-approval-policy"
 import { resolveSession } from "./sessions-core"
 import { emitToSession } from "./sse-core"
 import { subagentParentState } from "./subagent"
@@ -36,6 +37,8 @@ export interface PlanSessionState {
   createdAt: number
   exitedAt?: number
   pendingRequestId?: string
+  pendingPlanHash?: string
+  permissionTenant?: string
 }
 
 export interface EnterPlanModeResult {
@@ -80,6 +83,7 @@ export interface ExitPlanModeFailure {
     | "plan_too_large"
     | "empty_plan"
     | "symlinked_plan_file"
+    | "plan_changed"
 }
 
 export type ExitPlanModeResult =
@@ -114,9 +118,10 @@ function readPlanState(sessionId: string): PlanSessionState | undefined {
       !isPermissionMode(raw.prePlanMode) || raw.prePlanMode === "bypassPermissions" ||
       typeof raw.planSlug !== "string" || !PLAN_SLUG_RE.test(raw.planSlug) ||
       typeof raw.filePath !== "string" || resolve(raw.filePath) !== raw.filePath ||
+      (raw.permissionTenant !== undefined && (typeof raw.permissionTenant !== "string" || !raw.permissionTenant)) ||
       !Number.isFinite(raw.createdAt)) throw new Error("harness_plan_state_invalid")
   // 审批是当前进程的一次性状态，重启/跨进程加载必须重新发卡，不恢复旧授权。
-  const record: PlanSessionState = { ...raw, durableRevision: saved.revision, pendingRequestId: undefined }
+  const record: PlanSessionState = { ...raw, durableRevision: saved.revision, pendingRequestId: undefined, pendingPlanHash: undefined }
   planStates.set(sessionId, record)
   trimPlanCache()
   return record
@@ -136,7 +141,7 @@ function isScaffoldOrEmptyPlan(text: string): boolean {
 function rememberPlanState(record: PlanSessionState): void {
   try {
     const revision = saveHarnessSecurityState("plan", record.sessionId, {
-      ...record, durableRevision: undefined, pendingRequestId: undefined,
+      ...record, durableRevision: undefined, pendingRequestId: undefined, pendingPlanHash: undefined,
       prePlanMode: record.prePlanMode === "bypassPermissions" ? "default" : record.prePlanMode,
     }, record.durableRevision)
     record.durableRevision = revision
@@ -196,6 +201,11 @@ export async function resolvePlansDir(configured?: string): Promise<string> {
   const explicit = (configured?.trim() || process.env.HARNESS_PLANS_DIR?.trim() || "").trim()
   const dir = explicit ? resolve(explicit) : join(stateRoot(), "plans")
   assertSafePlansDir(dir)
+  const workspacePath = resolve(workspaceRoot())
+  // 请求指定目录先做词法包含检查，拒绝前不能在任意位置创建目录。
+  if (explicit && (!isWithin(workspacePath, dir) || dir === workspacePath)) {
+    throw new Error("plans directory must be within workspace and below its root")
+  }
   await mkdir(dir, { recursive: true, mode: 0o700 })
   const stat = await lstat(dir)
   if (stat.isSymbolicLink()) throw new Error(`plans directory must not be a symlink: ${dir}`)
@@ -265,36 +275,35 @@ async function ensurePlanFile(filePath: string): Promise<void> {
   await sharePlanAccess(filePath, false)
 }
 
-async function readPlanFile(filePath: string): Promise<{ plan: string } | { failure: ExitPlanModeFailure }> {
-  let stat
+async function readPlanFile(filePath: string): Promise<{ plan: string; sha256: string } | { failure: ExitPlanModeFailure }> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined
   try {
-    stat = await lstat(filePath)
+    // 直接打开拒绝链接的 fd，校验与读取使用同一个对象，避免 lstat → readFile 换链。
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    const stat = await handle.stat()
+    if (!stat.isFile() || stat.nlink !== 1) {
+      return { failure: { approved: false, code: "missing_plan_file", error: "Plan must be a regular file with one link." } }
+    }
+    const buffer = Buffer.alloc(PLAN_FILE_MAX_BYTES + 1)
+    let bytes = 0
+    while (bytes < buffer.length) {
+      const result = await handle.read(buffer, bytes, buffer.length - bytes, bytes)
+      if (result.bytesRead === 0) break
+      bytes += result.bytesRead
+    }
+    if (stat.size > PLAN_FILE_MAX_BYTES || bytes > PLAN_FILE_MAX_BYTES) {
+      return { failure: { approved: false, code: "plan_too_large", error: `Plan exceeds ${PLAN_FILE_MAX_BYTES} bytes.` } }
+    }
+    const content = buffer.subarray(0, bytes)
+    return { plan: content.toString("utf-8"), sha256: createHash("sha256").update(content).digest("hex") }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {
-        failure: {
-          approved: false,
-          code: "missing_plan_file",
-          error: `No plan file found at ${filePath}. Please write your plan to this file before calling ExitPlanMode.`,
-        },
-      }
-    }
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT") return { failure: { approved: false, code: "missing_plan_file", error: `No plan file found at ${filePath}.` } }
+    if (code === "ELOOP") return { failure: { approved: false, code: "symlinked_plan_file", error: "Refusing symlinked plan file." } }
     throw error
+  } finally {
+    await handle?.close()
   }
-  if (stat.isSymbolicLink()) {
-    return {
-      failure: { approved: false, code: "symlinked_plan_file", error: `Refusing symlinked plan file at ${filePath}.` },
-    }
-  }
-  if (!stat.isFile()) {
-    return { failure: { approved: false, code: "missing_plan_file", error: `No plan file found at ${filePath}.` } }
-  }
-  if (stat.size > PLAN_FILE_MAX_BYTES) {
-    return {
-      failure: { approved: false, code: "plan_too_large", error: `Plan file at ${filePath} exceeds ${PLAN_FILE_MAX_BYTES} bytes.` },
-    }
-  }
-  return { plan: await readFile(filePath, "utf-8") }
 }
 
 function findSession(sessionId: string): SessionState | null {
@@ -307,12 +316,15 @@ export async function enterPlanMode(
 ): Promise<EnterPlanModeResult> {
   const sid = sessionId?.trim()
   if (!sid) throw new Error("sessionId is required")
+  const state = findSession(sid)
+  const tenant = state ? await billingPermissionTenant(state) : "default"
+  if (!tenant) throw new Error("plan_session_has_no_tenant")
   const existing = readPlanState(sid)
   if (existing?.mode === "plan") {
     await sharePlanAccess(dirname(existing.filePath), true)
     await ensurePlanFile(existing.filePath)
     // H6：权限引擎与计划状态保持一致（幂等）。内部转移不改会话显式 setMode。
-    setPlanPolicyMode(sid)
+    setPlanPolicyMode(sid, existing.permissionTenant ?? tenant)
     return {
       mode: "plan",
       planFilePath: existing.filePath,
@@ -325,14 +337,13 @@ export async function enterPlanMode(
   const filePath = join(dir, `${slug}.md`)
   await ensurePlanFile(filePath)
   // prePlanMode 只能取自服务端权限状态；请求体不能借此指定 bypassPermissions。
-  const policy = getPolicyState(sid)
+  const policy = getPolicyState(sid, tenant)
   const currentMode = policy.mode === "plan" ? policy.prePlanMode ?? "default" : policy.mode
-  const requested = options.prePlanMode?.trim()
-  const prePlanMode =
-    requested && isPermissionMode(requested) && requested !== "bypassPermissions" ? requested : currentMode
+  const prePlanMode = currentMode
   const record: PlanSessionState = {
     durableRevision: existing?.durableRevision ?? 0,
     sessionId: sid,
+    permissionTenant: tenant,
     mode: "plan",
     prePlanMode,
     planSlug: slug,
@@ -340,35 +351,44 @@ export async function enterPlanMode(
     createdAt: Date.now(),
   }
   withHarnessSecurityTransaction(() => {
-    setPlanPolicyMode(sid)
+    setPlanPolicyMode(sid, tenant)
     rememberPlanState(record)
   })
-  const state = findSession(sid)
   if (state) emitToSession(state, "plan.mode", { mode: "plan", pre_plan_mode: prePlanMode, plan_file_path: filePath })
   return { mode: "plan", planFilePath: filePath, planSlug: slug, prePlanMode }
 }
 
-function setPlanPolicyMode(sessionId: string): void {
-  const result = updateRules({ sessionId, action: "setMode", mode: "plan", fromPlanTransition: true })
+function setPlanPolicyMode(sessionId: string, tenant: string): void {
+  const result = updateRules({ sessionId, tenant, action: "setMode", mode: "plan", fromPlanTransition: true })
   if (!result.ok) throw new Error(`plan_permission_transition_failed: ${result.code}`)
 }
 
 /** H6：退出计划模式时恢复原权限模式；不可用则降级 default。 */
-function restorePolicyMode(sessionId: string, prePlanMode: string): void {
+function restorePolicyMode(sessionId: string, prePlanMode: string, tenant: string): void {
   const target = isPermissionMode(prePlanMode) ? prePlanMode : "default"
-  const restored = updateRules({ sessionId, action: "setMode", mode: target, fromPlanTransition: true })
+  const restored = updateRules({ sessionId, tenant, action: "setMode", mode: target, fromPlanTransition: true })
   if (!restored.ok && target !== "default") {
-    const fallback = updateRules({ sessionId, action: "setMode", mode: "default", fromPlanTransition: true })
+    const fallback = updateRules({ sessionId, tenant, action: "setMode", mode: "default", fromPlanTransition: true })
     if (!fallback.ok) throw new Error(`plan_permission_transition_failed: ${fallback.code}`)
   } else if (!restored.ok) {
     throw new Error(`plan_permission_transition_failed: ${restored.code}`)
   }
 }
 
-function finalizeApproval(record: PlanSessionState, plan: string, state: SessionState | null): ExitPlanModeApproved {
-  const exited: PlanSessionState = { ...record, mode: "exited", exitedAt: Date.now(), pendingRequestId: undefined }
+async function finalizeApproval(record: PlanSessionState, plan: string, state: SessionState, requestId: string): Promise<ExitPlanModeApproved | ExitPlanModeFailure> {
+  // 授权绑定发卡时的完整内容和请求；不能拿旧卡批准随后改写的计划。
+  const tenant = record.permissionTenant ?? await billingPermissionTenant(state)
+  if (!tenant) throw new Error("plan_session_has_no_tenant")
+  const read = await readPlanFile(record.filePath)
+  if ("failure" in read) return read.failure
+  const current = readPlanState(record.sessionId)
+  if (current !== record || current.mode !== "plan" || record.pendingRequestId !== requestId ||
+      !record.pendingPlanHash || record.pendingPlanHash !== read.sha256 || read.plan !== plan) {
+    return { approved: false, code: "plan_changed", error: "计划或审批请求已变化，请重新请求批准。" }
+  }
+  const exited: PlanSessionState = { ...record, mode: "exited", exitedAt: Date.now(), pendingRequestId: undefined, pendingPlanHash: undefined }
   withHarnessSecurityTransaction(() => {
-    restorePolicyMode(record.sessionId, record.prePlanMode)
+    restorePolicyMode(record.sessionId, record.prePlanMode, tenant)
     rememberPlanState(exited)
   })
   if (state) {
@@ -415,10 +435,17 @@ export async function exitPlanMode(
     }
   }
 
+  const planHash = read.sha256
+  if (record.pendingRequestId && record.pendingPlanHash !== planHash) {
+    // 计划变更作废旧卡，并唤醒持有旧请求的并发等待者。
+    settleConfirm(state, record.pendingRequestId, "denied")
+    record.pendingRequestId = undefined
+    record.pendingPlanHash = undefined
+  }
   let requestId = record.pendingRequestId
   const prior = requestId ? state.resolvedConfirms.get(requestId) : undefined
-  if (prior) {
-    if (prior.outcome === "approved") return finalizeApproval(record, plan, state)
+  if (requestId && prior) {
+    if (prior.outcome === "approved") return finalizeApproval(record, plan, state, requestId)
     // 上一次被拒/过期：清掉后重新发一张卡。
     record.pendingRequestId = undefined
     requestId = undefined
@@ -429,6 +456,7 @@ export async function exitPlanMode(
     ;(timer as unknown as { unref?: () => void }).unref?.()
     state.pendingConfirms.set(requestId, { timer })
     record.pendingRequestId = requestId
+    record.pendingPlanHash = planHash
     planStates.set(sid, record)
     trimPlanCache()
     const preview = plan.length > 4_000 ? `${plan.slice(0, 4_000)}\n…` : plan
@@ -444,9 +472,12 @@ export async function exitPlanMode(
   const waitMs = Math.max(0, Math.min(options.waitMs ?? 0, CONFIRM_TIMEOUT_MS))
   const deadline = Date.now() + waitMs
   for (;;) {
+    if (record.pendingRequestId !== requestId) {
+      return { approved: false, code: "plan_changed", error: "计划或审批请求已变化，请重新请求批准。" }
+    }
     const settled = state.resolvedConfirms.get(requestId)
     if (settled) {
-      if (settled.outcome === "approved") return finalizeApproval(record, plan, state)
+      if (settled.outcome === "approved") return finalizeApproval(record, plan, state, requestId)
       record.pendingRequestId = undefined
       if (state) emitToSession(state, "plan.mode", { mode: "plan", approved: false, plan_file_path: record.filePath })
       return {

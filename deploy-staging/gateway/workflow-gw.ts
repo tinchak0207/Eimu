@@ -1883,73 +1883,95 @@ export async function waitForOpencodeReady(maxMs = WAKE_RECOVERY_WAIT_MS, interv
   }
 }
 
-/** 单次唤醒投递（prompt_async）＋本轮状态重置（逐行同 handleResumeSession 轮子）。 */
-async function postWorkflowWake(state: SessionState, wfid: string, content: string, attempt: number): Promise<void> {
-  const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
-    method: "POST",
-    headers: opencodeHeaders(),
-    body: JSON.stringify({ ...beastAgentField(state), parts: [{ type: "text", text: content }] }),
-    signal: AbortSignal.timeout(10000),
-  })
-  if (!res.ok) throw new Error(`status ${res.status}`)
-  state.lastPromptBody = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
-  state.turnGen = (state.turnGen ?? 0) + 1
+function workflowWakeSessionBusy(state: SessionState): boolean {
+  return state.ackTimer != null || state.turnMetrics != null || (state.lastTurnActiveAt ?? 0) > 0
+}
+
+/** 唤醒失败必须区分确定未提交与受理未知；后者绝不能盲目重投。 */
+export class WorkflowWakeDispatchError extends Error {
+  constructor(readonly code: "submission_unknown" | "not_submitted", message: string, readonly retryable = false) {
+    super(message)
+    this.name = "WorkflowWakeDispatchError"
+  }
+}
+
+/** 单次唤醒投递；只在上游实际受理且仍属原回合时更新本地状态。 */
+async function postWorkflowWake(state: SessionState, wfid: string, content: string, attempt: number, turnGen: number, ocId: string): Promise<void> {
+  if (state.turnAborted || state.turnAbortSource === "user" || (state.turnGen ?? 0) !== turnGen || state.opencodeSessionId !== ocId) {
+    throw new WorkflowWakeDispatchError("not_submitted", "wake cancelled because the session stopped or changed turns")
+  }
+  if (workflowWakeSessionBusy(state)) {
+    throw new WorkflowWakeDispatchError("not_submitted", "session is processing an active turn", true)
+  }
+  const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
+  let res: Response
+  try {
+    res = await fetch(`${OPENCODE_URL}/session/${ocId}/prompt_async`, {
+      method: "POST",
+      headers: opencodeHeaders(),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    })
+  } catch (error) {
+    // 连接拒绝证明尚未发出HTTP请求；超时/断线可能发生在受理之后。
+    if (isConnectionRefused(error)) throw error
+    throw new WorkflowWakeDispatchError("submission_unknown", "wake submission outcome unknown; not retrying")
+  }
+  if (!res.ok) {
+    const rejected = [400, 401, 403, 404, 405, 409, 413, 415, 422, 429].includes(res.status)
+    throw new WorkflowWakeDispatchError(rejected ? "not_submitted" : "submission_unknown", `wake prompt_async HTTP ${res.status}`)
+  }
+  // 已受理不能撤回；旧回执不得覆盖新回合或清掉用户停止状态。
+  if (state.turnAborted || state.turnAbortSource === "user" || (state.turnGen ?? 0) !== turnGen || state.opencodeSessionId !== ocId) return
+  state.lastPromptBody = body
+  state.turnGen = turnGen + 1
   state.turnTextChars = 0
   state.turnReasoningChars = 0
   state.turnRetries = 0
-  state.turnAborted = false
   state.retryQueued = false
   state.turnUpstreamError = null
   state.turnToolStarted = false
   state.watchdogRetried = false
   state.questionAnsweredThisTurn = false
   state.deathDeclared = false
-  // 2026-10-02 steer 误判修复：workflow 唤醒轮同样要打 lastTurnActiveAt
-  //（steer 受理闸唯一依据，漏点＝唤醒轮期间 steer 全被 409 误判）。
   state.lastTurnActiveAt = Date.now()
   markDirty(state)
   armWatchdogTimer(state)
   console.log(`[gateway] workflow wake resumed: session=${state.sessionId} wf=${wfid} attempt=${attempt + 1}`)
 }
 
-/**
- * 唤醒投递（prompt_async）带重试：4096 瞬断（评测 08:36:40 ECONNREFUSED）不再一次即弃。
- * 退避 0/5/15/45s；遇 ECONNREFUSED 额外轮询 /config 至恢复（上限 180s），恢复后补投一次；
- * 耗尽后直推通报兜底（sendWorkflowNotice 去重，已发则不重复）。
- */
+// 同一会话同时到期的wakeup/cron/workflow只能有一个在途提交。
+const workflowWakeInFlight = new Set<string>()
+
+/** 仅对明确的连接拒绝恢复重试；直发通报不是模型受理凭据。 */
 export async function dispatchWorkflowWake(state: SessionState, wfid: string, content: string, kind: "final" | "stalled"): Promise<void> {
-  const delays = [0, 5_000, 15_000, 45_000]
-  let lastErr: unknown = null
-  for (let attempt = 0; attempt < delays.length; attempt++) {
-    if (delays[attempt] > 0) await new Promise((r) => setTimeout(r, delays[attempt]))
-    try {
-      await postWorkflowWake(state, wfid, content, attempt)
-      return
-    } catch (e) {
-      lastErr = e
-      const refused = isConnectionRefused(e)
-      console.error(
-        `[gateway] workflow wake dispatch failed: session=${state.sessionId} wf=${wfid} attempt=${attempt + 1}/${delays.length}${refused ? " (connection refused; polling /config)" : ""}:`,
-        e,
-      )
-      if (refused) {
-        const ready = await waitForOpencodeReady()
-        if (!ready) {
-          console.error(`[gateway] opencode not ready within ${Math.round(WAKE_RECOVERY_WAIT_MS / 1000)}s; stop wake retries: session=${state.sessionId} wf=${wfid}`)
-          break
-        }
-        try {
-          await postWorkflowWake(state, wfid, content, attempt)
-          return
-        } catch (e2) {
-          lastErr = e2
-          console.error(`[gateway] workflow wake after opencode recovery failed: session=${state.sessionId} wf=${wfid}:`, e2)
-        }
+  if (workflowWakeInFlight.has(state.sessionId)) {
+    throw new WorkflowWakeDispatchError("not_submitted", "another wake submission is in flight", true)
+  }
+  workflowWakeInFlight.add(state.sessionId)
+  try {
+    const turnGen = state.turnGen ?? 0
+    const ocId = state.opencodeSessionId
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await postWorkflowWake(state, wfid, content, attempt, turnGen, ocId)
+        return
+      } catch (error) {
+        lastError = error
+        if (!isConnectionRefused(error) || attempt > 0) break
+        if (!(await waitForOpencodeReady())) break
       }
     }
+    if (lastError instanceof WorkflowWakeDispatchError && lastError.retryable) throw lastError
+    // 保留原用户直发兜底，但不能把未唤醒伪装成成功，调用者据此记failed/unknown。
+    try { await sendWorkflowNotice(state, wfid, kind) }
+    catch (error) { console.error(`[gateway] workflow fallback notice failed: session=${state.sessionId} wf=${wfid}`, error) }
+    if (lastError instanceof WorkflowWakeDispatchError) throw lastError
+    throw new WorkflowWakeDispatchError("not_submitted", "opencode connection unavailable; wake was not submitted", true)
+  } finally {
+    workflowWakeInFlight.delete(state.sessionId)
   }
-  console.error(`[gateway] workflow wake exhausted, falling back to direct notice: session=${state.sessionId} wf=${wfid}`, lastErr)
-  await sendWorkflowNotice(state, wfid, kind)
 }
 
 // ── 修 3：长任务唤醒扫描器（60s 一轮）────────────────────────────────
@@ -1977,7 +1999,7 @@ setInterval(() => {
     // 2026-09-24：协作确认闸的暂停是**合法等待**（决策 5 不设超时），不是「跑完了」。
     // 唤醒 agent 只会逼它对用户谎报结果；批准后 runWfGenerate 会重新登记唤醒。
     if (wfStatus === "paused_awaiting_approval") continue
-    if (state.ackTimer != null) continue // turn 在途让位，下一轮扫描再唤
+    if (workflowWakeSessionBusy(state)) continue // turn 在途让位，下一轮扫描再唤
     // 停滞判死：卡在 running 的节点 patch 成画布终态（error，与
     // workflow-service/emitImageFailed 的节点失败形状对称）+ 走修 2 退款留痕。
     if (stalled) {
@@ -2022,8 +2044,13 @@ setInterval(() => {
       const content =
         `${head}各节点终态：${nodeList || "无可执行节点"}。${moneyText}` +
         `系统已向用户直发一条含成片链接与控制面实扣币数的通报；你只需简要补充结果与失败原因（一律引用上面的真实状态与 billing 真值，禁止编造，不要重复贴链接/币数），然后结束回合。禁止再用 bash sleep 或反复 workflow_status 轮询。`
-      void dispatchWorkflowWake(state, wfid, content, stalled ? "stalled" : "final")
-    })()
+      try {
+        await dispatchWorkflowWake(state, wfid, content, stalled ? "stalled" : "final")
+      } catch (error) {
+        if (error instanceof WorkflowWakeDispatchError && error.retryable && !workflowWake.has(wfid)) workflowWake.set(wfid, w)
+        console.error(`[gateway] workflow wake not confirmed: session=${state.sessionId} wf=${wfid}`, error)
+      }
+    })().catch((error) => console.error(`[gateway] workflow wake preparation failed: wf=${wfid}`, error))
   }
 }, WORKFLOW_WAKE_SCAN_MS)
 

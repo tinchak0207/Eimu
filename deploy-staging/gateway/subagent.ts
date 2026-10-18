@@ -732,10 +732,8 @@ export function subagentMailboxMemberName(opencodeSessionId: string): string | n
   const run = byChildOc.get(opencodeSessionId)
   if (run) {
     if (run.machineCriticPass === true || typeof run.goalEvaluator === "function") return null
-    return (
-      run.mailboxName ??
-      ((run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`)
-    )
+    // 登记失败不能用猜出的label冒充已存在的同名成员。
+    return run.mailboxName ?? null
   }
   // run 已收尾（byChildOc 已删）时回退 TTL 表：保留最后 2h 的邮箱身份。
   return recentChildParent.get(opencodeSessionId)?.memberName ?? null
@@ -747,13 +745,6 @@ export function subagentMailboxMemberName(opencodeSessionId: string): string | n
  * 会话的 API key」）。子会话仍活跃时经此继承父会话 apiKey（同一用户，计费口径
  * 不变）；父会话已被逐出/收尾则回 undefined，维持 404 原语义。
  */
-export function subagentMailboxMemberName(opencodeSessionId: string): string | null {
-  const run = byChildOc.get(opencodeSessionId)
-  if (!run) return null
-  if (run.machineCriticPass === true || typeof run.goalEvaluator === "function") return null
-  return (run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`
-}
-
 export function subagentParentApiKey(opencodeSessionId: string): string | undefined {
   const state = subagentParentState(opencodeSessionId)
   const key = state?.apiKey
@@ -3244,6 +3235,13 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   const requesterRun = byChildOc.get(body.sessionId)
   // CC 2.1.302 xn：fork 的可用性闸——编排/coordinator 模式不得 fork（main 会话即编排者），
   // fork 内不得再 fork（d7e 同一禁令的机器兜底），fork 不得 remote（远程会话无法继承历史）。
+  // fork worker 禁止任何形式的再派工，不能把 fork:false 当作绕过入口。
+  if (requesterRun?.isFork === true) {
+    return Response.json(
+      { ok: false, code: "fork_recursive_fork", error: "Forked workers cannot spawn subagents. Complete your task directly using your tools." },
+      { status: 409 },
+    )
+  }
   if (isFork) {
     if (!requesterRun) {
       return Response.json(
@@ -3252,12 +3250,6 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
           code: "fork_coordinator_mode",
           error: "Fork is not available in coordinator/orchestration mode. 主会话请派遣具名 worker；fork 只能由正在执行的子代理对自己的会话发起。",
         },
-        { status: 409 },
-      )
-    }
-    if (requesterRun.isFork === true) {
-      return Response.json(
-        { ok: false, code: "fork_recursive_fork", error: "Fork is not available inside a forked worker. Complete your task directly using your tools." },
         { status: 409 },
       )
     }
