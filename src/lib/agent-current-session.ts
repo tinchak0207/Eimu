@@ -8,14 +8,21 @@
 // 唯一写者＝AgentChatSurface（useEffect 同步 sessionId）；读者在侧栏开启时一次性
 // 取值，不订阅、不重绘。
 
+import { getStoredUser } from "./new-api-client";
+
 let currentAgentSessionId: string | null = null;
+let currentOwnerId: number | null = null;
 
 /** 唯一写者：AgentChatSurface（把 useAgentChat 的 sessionId 同步进来）。 */
 export function setCurrentAgentSession(id: string | null): void {
   currentAgentSessionId = id;
+  try { currentOwnerId = getStoredUser()?.id ?? null; } catch { currentOwnerId = null; }
 }
 
 /** 读者：MobileSidebar 开启时一次性读取；agent 面未挂载／尚未建号回 null。 */
 export function getCurrentAgentSession(): string | null {
-  return currentAgentSessionId;
+  try {
+    const ownerId = getStoredUser()?.id ?? null;
+    return ownerId !== null && ownerId === currentOwnerId ? currentAgentSessionId : null;
+  } catch { return null; }
 }

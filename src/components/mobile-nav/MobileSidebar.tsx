@@ -175,6 +175,7 @@ export interface MobileSidebarPanelProps {
   userSubtitle: string;
   /** 会话目录：null＝载入中，[]＝已载入但为空。 */
   sessions: AgentSessionSummary[] | null;
+  loadError?: string | null;
   /** 当前会话（＝活跃会话的唯读镜像，见 @/lib/agent-current-session；agent 面未挂载
    *  时退回既有 localStorage 存档的 sessionId），null＝尚未建立／无存档，
    *  此时没有任何一列算「当前」。 */
@@ -208,6 +209,7 @@ export function MobileSidebarPanel({
   userName,
   userSubtitle,
   sessions,
+  loadError,
   currentSessionId,
   formatLabel,
   query,
@@ -328,6 +330,7 @@ export function MobileSidebarPanel({
           <div className="px-1 pb-2">
             <AgentSessionList
               sessions={sessions}
+              loadError={loadError}
               currentSessionId={currentSessionId}
               switchingTo={null}
               startingNew={false}
@@ -423,7 +426,9 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
   const pathname = usePathname();
   const narrow = useIsNarrow();
   const { user } = useAuth();
-  const [sessions, setSessions] = useState<AgentSessionSummary[] | null>(null);
+  const [sessionCache, setSessionCache] = useState<{ ownerId: number; items: AgentSessionSummary[] } | null>(null);
+  const [sessionError, setSessionError] = useState<{ ownerId: number; message: string } | null>(null);
+  const sessions = user && sessionCache?.ownerId === user.id ? sessionCache.items : null;
   // 当前会话（当前高亮用）：开侧栏时读既有 localStorage 存档，不用第三套状态。
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   // 标题格式化：null＝唯一实作（AgentChatSurface）尚未动态载入完。
@@ -448,21 +453,23 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // 首次开启载入会话目录（null＝载入中；失败视为空）。
+  // 每次开启从服务端刷新；失败保留已核实目录，重新开启可重试。
   useEffect(() => {
-    if (!active || sessions !== null) return;
+    if (!active || !user) return;
+    const ownerId = user.id;
+    setSessionError(null);
     let cancelled = false;
     void listAgentSessions()
       .then((list) => {
-        if (!cancelled) setSessions(list);
+        if (!cancelled) setSessionCache({ ownerId, items: list });
       })
       .catch(() => {
-        if (!cancelled) setSessions([]);
+        if (!cancelled) setSessionError({ ownerId, message: "历史加载失败，请重新打开重试。" });
       });
     return () => {
       cancelled = true;
     };
-  }, [active, sessions]);
+  }, [active, user?.id]);
 
   // 动态载入唯一标题格式化（见 loadFormatSessionLabel）：侧栏没开就不下载
   // agent-chat chunk；Promise 记忆化，重开侧栏不再请求。
@@ -486,8 +493,8 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
   // 才退回读既有存档（坏 JSON／无存档／逾 24h 一律 null）。
   useEffect(() => {
     if (!active) return;
-    setCurrentSessionId(getCurrentAgentSession() ?? readPersistedSessionId());
-  }, [active]);
+    setCurrentSessionId(user ? getCurrentAgentSession() ?? readPersistedSessionId() : null);
+  }, [active, user?.id]);
 
   // Esc 关闭＋滚动锁＋焦点进出。存原 overflow 再还原：首页全出血有自己的
   // html/body 锁，不能关掉侧栏时把别人的锁一起抹平。
@@ -552,6 +559,7 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
         userName={displayName}
         userSubtitle={subtitle}
         sessions={sessions}
+        loadError={sessionError?.ownerId === user?.id ? sessionError?.message : null}
         currentSessionId={currentSessionId}
         formatLabel={formatLabel ?? fallbackSessionLabel}
         query={query}

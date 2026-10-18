@@ -35,6 +35,8 @@ import {
 import { cn } from "@/lib/utils";
 import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
 import { useAgentChat } from "@/hooks/use-agent-chat";
+import { useAuth } from "@/hooks/use-auth";
+import { authHeaders } from "@/lib/canvas/client";
 import { setCurrentAgentSession } from "@/lib/agent-current-session";
 import { subscribeAgentSurfaceActions } from "@/lib/agent-surface-actions";
 import {
@@ -254,10 +256,14 @@ export function AgentChatSurface({
   onExit,
   headerExtra,
 }: AgentChatSurfaceProps) {
+  const { user: chatHistoryUser } = useAuth();
+  const historyOwnerRef = useRef(chatHistoryUser?.id ?? null);
+  historyOwnerRef.current = chatHistoryUser?.id ?? null;
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   // 「我的资产」面板：null = 未加载，[] = 已加载但为空。
   const [showAssets, setShowAssets] = useState(false);
-  const [assetPacks, setAssetPacks] = useState<AssetPack[] | null>(null);
+  const [assetCache, setAssetCache] = useState<{ ownerId: number; packs: AssetPack[] } | null>(null);
+  const assetPacks = assetCache && assetCache.ownerId === chatHistoryUser?.id ? assetCache.packs : null;
   const [activatingPackId, setActivatingPackId] = useState<string | null>(null);
   // 搜索：300ms debounce 后按 ?q= 重新拉取（空字串还原为全量）。
   const [assetQuery, setAssetQuery] = useState("");
@@ -269,6 +275,16 @@ export function AgentChatSurface({
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
   // 图卡的 payload 级重跑对话框（entry 由媒体条目即时合成；null = 未开）。
   const [rerunDialog, setRerunDialog] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
+  const [contentOwnerId, setContentOwnerId] = useState(chatHistoryUser?.id ?? null);
+  const contentIsCurrent = contentOwnerId === (chatHistoryUser?.id ?? null);
+  useEffect(() => {
+    const nextOwnerId = chatHistoryUser?.id ?? null;
+    if (contentOwnerId === nextOwnerId) return;
+    setContentOwnerId(nextOwnerId);
+    setDraft("");
+    setPrefill(null);
+    setRerunDialog(null);
+  }, [chatHistoryUser?.id, contentOwnerId]);
   const chat = useAgentChat({
     // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
     // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
@@ -318,7 +334,9 @@ export function AgentChatSurface({
   const [, setHistorySnapshot] = useState<{ itemCount: number; savedAt: number } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   // 会话目录（对话历史 dropdown 的数据）：null = 未加载，[] = 已加载但为空。
-  const [historyList, setHistoryList] = useState<AgentSessionSummary[] | null>(null);
+  const [historyCache, setHistoryCache] = useState<{ ownerId: number; items: AgentSessionSummary[] } | null>(null);
+  const [historyError, setHistoryError] = useState<{ ownerId: number; message: string } | null>(null);
+  const historyList = chatHistoryUser && historyCache?.ownerId === chatHistoryUser.id ? historyCache.items : null;
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [startingNew, setStartingNew] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
@@ -417,26 +435,41 @@ export function AgentChatSurface({
   }, [showAssets]);
 
   const lastAssetQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    lastAssetQueryRef.current = null;
+    setAssetCache(null);
+    setSavedIds(new Set());
+    setAssetQuery("");
+    setActivatingPackId(null);
+    setShowAssets(false);
+  }, [chatHistoryUser?.id]);
 
   /** 拉取资产包列表；q 非空时走 ?q= 服务端搜索，空字串还原为全量。同 query 去重。 */
   const loadAssets = useCallback(async (q: string): Promise<void> => {
     const query = q.trim();
-    if (query === lastAssetQueryRef.current) return;
-    lastAssetQueryRef.current = query;
+    const ownerId = chatHistoryUser?.id;
+    const headers = authHeaders();
+    if (ownerId == null || !headers || headers["x-user-id"] !== String(ownerId)) return;
+    const queryKey = `${ownerId}:${query}`;
+    if (queryKey === lastAssetQueryRef.current) return;
+    lastAssetQueryRef.current = queryKey;
     try {
       const url = query ? `/api/assets?q=${encodeURIComponent(query)}` : "/api/assets";
-      const res = await fetch(url);
+      const res = await fetch(url, { headers, cache: "no-store" });
+      if (historyOwnerRef.current !== ownerId || lastAssetQueryRef.current !== queryKey) return;
       if (!res.ok) {
         lastAssetQueryRef.current = null; // 失败要能重拉，不能被去重挡死
         return;
       }
       const data = (await res.json()) as { packs?: AssetPack[] };
-      if (Array.isArray(data?.packs)) setAssetPacks(data.packs);
+      if (historyOwnerRef.current === ownerId && lastAssetQueryRef.current === queryKey && Array.isArray(data?.packs)) {
+        setAssetCache({ ownerId, packs: data.packs });
+      }
     } catch {
       // 静默失败：面板保持原状，可重试（清去重标记）。
-      lastAssetQueryRef.current = null;
+      if (historyOwnerRef.current === ownerId && lastAssetQueryRef.current === queryKey) lastAssetQueryRef.current = null;
     }
-  }, []);
+  }, [chatHistoryUser?.id]);
 
   /*
    * 2026-10-01 暴君「打开反应缓慢」：悬停/聚焦顶栏图标就先拉数据，点下去时列表多半已就绪。
@@ -452,10 +485,13 @@ export function AgentChatSurface({
       const next = !prev;
       // 2026-10-01 修：原本先把 lastAssetQueryRef 设成 "" 再 loadAssets("")——去重判定
       // 当场命中直接 return，首开永远不发请求，面板卡在「正在加载资产…」直到用户打字。
-      if (next && assetPacks === null) void loadAssets("");
+      if (next) {
+        lastAssetQueryRef.current = null;
+        void loadAssets(assetQuery);
+      }
       return next;
     });
-  }, [assetPacks, loadAssets]);
+  }, [assetQuery, loadAssets]);
 
   // 搜索词（300ms debounce）变化 → 重新拉取（空字串还原为全量）。
   useEffect(() => {
@@ -467,35 +503,56 @@ export function AgentChatSurface({
   const onActivatePack = useCallback(
     async (pack: AssetPack): Promise<void> => {
       if (activatingPackId !== null) return;
+      const ownerId = chatHistoryUser?.id;
+      const headers = authHeaders();
+      if (ownerId == null || !headers || headers["x-user-id"] !== String(ownerId)) return;
       setActivatingPackId(pack.id);
       try {
         const res = await fetch("/api/assets", {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...headers },
           body: JSON.stringify({ ...pack, active: true }),
         });
-        if (res.ok) setShowAssets(false);
+        if (res.ok && historyOwnerRef.current === ownerId) setShowAssets(false);
       } catch {
         // 静默失败：面板留在原地，用户可重试。
       } finally {
-        setActivatingPackId(null);
+        if (historyOwnerRef.current === ownerId) setActivatingPackId(null);
       }
     },
-    [activatingPackId],
+    [activatingPackId, chatHistoryUser?.id],
   );
 
   /** dropdown 开关：第一次打开时拉取目录（之后直接切换显示，不重复请求）。 */
-  const historyLoadingRef = useRef(false);
+  const historyLoadingRef = useRef<number | null>(null);
   const prefetchHistory = useCallback((): void => {
-    if (historyList !== null || historyLoadingRef.current) return;
-    historyLoadingRef.current = true;
+    const ownerId = chatHistoryUser?.id;
+    if (ownerId === undefined || historyList !== null || historyLoadingRef.current === ownerId) return;
+    historyLoadingRef.current = ownerId;
+    setHistoryError(null);
     void listAgentSessions()
-      .then(setHistoryList)
-      .catch(() => setHistoryList([]))
+      .then((items) => {
+        if (historyOwnerRef.current === ownerId) setHistoryCache({ ownerId, items });
+      })
+      .catch(() => {
+        if (historyOwnerRef.current === ownerId) setHistoryError({ ownerId, message: "历史加载失败，请重新打开重试。" });
+      })
       .finally(() => {
-        historyLoadingRef.current = false;
+        if (historyLoadingRef.current === ownerId) historyLoadingRef.current = null;
       });
-  }, [historyList]);
+  }, [historyList, chatHistoryUser?.id]);
+
+  useEffect(() => {
+    setHistoryCache(null);
+    setHistoryError(null);
+    setShowHistory(false);
+    setSwitchingTo(null);
+    setHistorySnapshot(null);
+    historyLoadingRef.current = null;
+    prefetchHistory();
+    // 账号不变时保留缓存；目录由登录/切换账号触发服务端恢复。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatHistoryUser?.id]);
 
   const toggleHistory = useCallback(async (): Promise<void> => {
     setShowHistory((prev) => {
@@ -540,7 +597,7 @@ export function AgentChatSurface({
       if (ok) {
         setShowHistory(false);
         setHistorySnapshot(null);
-        setHistoryList(null); // 置 null = 未载入，下次打开 dropdown 重新拉目录（新会话入列）
+        setHistoryCache(null); // 下次打开重新读取服务端目录。
       }
     } finally {
       setStartingNew(false);
@@ -581,15 +638,21 @@ export function AgentChatSurface({
   const isInline = variant === "inline";
 
   const onSaveToLibrary = useCallback(async (item: AgentChatLibraryItem): Promise<boolean> => {
+    const ownerId = chatHistoryUser?.id;
+    const headers = authHeaders();
+    if (ownerId == null || !headers || headers["x-user-id"] !== String(ownerId)) return false;
     // 客户端幂等：连点两下不该在资产包里躺两条一样的记录；去重命中也算「已存入」。
     if (savedIds.has(item.id)) return true;
     try {
       const now = new Date().toISOString();
       // 1. 拉取现有资产包，找「聊天素材」确定性包（不存在则构造空包）。
-      const listRes = await fetch("/api/assets");
-      const data = listRes.ok ? ((await listRes.json()) as { packs?: AssetPack[] }) : null;
-      const packs = Array.isArray(data?.packs) ? data.packs : [];
+      const listRes = await fetch("/api/assets", { headers, cache: "no-store" });
+      if (!listRes.ok || historyOwnerRef.current !== ownerId) return false;
+      const data = (await listRes.json()) as { success?: boolean; packs?: AssetPack[] };
+      if (!data.success || !Array.isArray(data.packs)) return false;
+      const packs = data.packs;
       const existing = packs.find((p) => p.id === CHAT_ASSETS_PACK_ID);
+      if (historyOwnerRef.current !== ownerId) return false;
       // 2. 去重键按种类走各自的 URL 栏位（图→imageUrl，影片/音频→mediaUrl）：
       //    不让影片拿图片的 imageUrl 去比，图片既有去重逻辑逐字不受影响。
       const urlField = assetUrlFieldOf(item.kind);
@@ -611,17 +674,19 @@ export function AgentChatSurface({
       // 3. PUT 整包 upsert（store 按 id 覆写，单用户写入串行）。
       const res = await fetch("/api/assets", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(pack),
       });
-      if (!res.ok) return false;
+      if (!res.ok || historyOwnerRef.current !== ownerId) return false;
       setSavedIds((prev) => new Set([...prev, item.id]));
+      lastAssetQueryRef.current = null;
+      setAssetCache(null);
       return true;
     } catch {
       // 回 false＝卡片显示短暂「未存入」；图还在，用户仍可下载。
       return false;
     }
-  }, [savedIds, sessionId]);
+  }, [savedIds, sessionId, chatHistoryUser?.id]);
 
   // 媒体卡「改图」把图加进输入框附件的既有入口（AgentComposer.enqueueFiles 经此上抛）。
   const attachFilesRef = useRef<((files: File[]) => void) | null>(null);
@@ -1104,6 +1169,7 @@ export function AgentChatSurface({
                       <div className="agent-param-drawer-body">
                         <AgentSessionList
                           sessions={historyList}
+                          loadError={historyError?.ownerId === chatHistoryUser?.id ? historyError?.message : null}
                           currentSessionId={sessionId}
                           switchingTo={switchingTo}
                           startingNew={startingNew}
@@ -1127,6 +1193,7 @@ export function AgentChatSurface({
                     <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
                       <AgentSessionList
                         sessions={historyList}
+                        loadError={historyError?.ownerId === chatHistoryUser?.id ? historyError?.message : null}
                         currentSessionId={sessionId}
                         switchingTo={switchingTo}
                         startingNew={startingNew}
@@ -1210,7 +1277,7 @@ export function AgentChatSurface({
 
       {/* D-24：承接使用者已打的半句话，点一下搬进输入框接着写（不自动送出，
           半句话直接送可能立刻扣费）；右侧「放弃」直接丢掉。 */}
-      {draft && (
+      {contentIsCurrent && draft && (
         <div className="agent-surface-draft mb-2 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-ios-blue/[0.07] px-3 py-2 ring-1 ring-ios-blue/[0.16]">
           <Bot className="h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
           <button
@@ -1274,6 +1341,7 @@ export function AgentChatSurface({
 
       <div className="flex min-h-0 flex-1 flex-col">
         <AgentChatPanel
+          key={chatHistoryUser?.id ?? "anonymous"}
           state={state}
           connection={connection}
           sessionId={sessionId}
@@ -1297,7 +1365,7 @@ export function AgentChatSurface({
              startingSession 让空态显「正在建立会话…」并撤掉推荐语。 */
           stopPending={aborting}
           sessionStarting={startingSession}
-          prefill={prefill}
+          prefill={contentIsCurrent ? prefill : null}
           onPrefillConsumed={clearPrefill}
           onFirstUserMessage={onUserMessage}
           attachFilesRef={attachFilesRef}
@@ -1306,7 +1374,7 @@ export function AgentChatSurface({
 
       {/* 图卡「再来 N 组／微调变体」的 payload 级重跑对话框；完成讯息走既有 notice
           通道落进 transcript（surface 无自有 toast，不另造一套）。 */}
-      {rerunDialog && (
+      {contentIsCurrent && rerunDialog && (
         <RerunDialog
           entry={rerunDialog.entry}
           mode={rerunDialog.mode}

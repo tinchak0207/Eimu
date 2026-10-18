@@ -7,16 +7,16 @@
 // 权衡：AES-256-GCM + AGENT_KEY_ENCRYPTION_SECRET 加密后，就算 Blob / DB 整库泄露，
 // 没有 secret 也解不开；而 secret 只走环境变量，不在任何存储里。
 //
-// 存储优先 Postgres（agent_user_keys 表），DB 不可用退回 Blob（沿用
-// biz-api-key-store 的「新路径 + 修剪旧世代」惯例），再退回进程内存 —— 这条
-// 兜底链与 B 端 key 的 biz-api-key-store 一致，只是对象换成「明文可还原」的密文。
+// 唯一写入源为控制面 Postgres（agent_user_keys.user_id 唯一键）。
+// Vercel 无数据库时走现有 HMAC 签名代理；Blob 仅只读迁移历史 key，不能写全索引或退内存。
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
-import { BIZ_KEY_DEFAULT_RPM, generateBizApiKey } from "@/lib/biz-api-keys";
+import { blobBackendConfigured, get, list } from "@/lib/blob-backend";
+import { BIZ_KEY_DEFAULT_RPM, generateBizApiKey, hashBizApiKey } from "@/lib/biz-api-keys";
 import { issueBizApiKey } from "@/lib/biz-api-key-store";
-import { bizKeyDatabaseEnabled } from "@/lib/biz-api-key-repository";
+import { bizKeyDatabaseEnabled, findBizKeyByHash } from "@/lib/biz-api-key-repository";
 import { getGenerationSql } from "@/lib/generation-core/database";
+import { BIZ_KEY_SYNC_SIGNATURE_HEADER, BIZ_KEY_SYNC_TIMESTAMP_HEADER, signBizKeySync } from "@/lib/biz-key-sync";
 
 export const AGENT_KEY_PAYLOAD_VERSION = "v1";
 
@@ -94,19 +94,15 @@ export function decryptAgentKey(payload: string, secret: string): string {
 // ─────────────────────────── 存储：Postgres → Blob → 进程内存
 
 const BLOB_STORE_PREFIX = "agent-user-keys/index.v1";
-const BLOB_GENERATIONS_KEPT = 2;
 
 type BlobRef = { url: string; pathname: string; uploadedAt: Date };
-
-/** 进程内快取 / 最后兜底。拿到记录先落内存，省得每个请求都读一遍 Blob。 */
-const memoryRecords = new Map<number, AgentUserKeyRecord>();
 
 function agentKeyDatabaseEnabled(): boolean {
   return bizKeyDatabaseEnabled();
 }
 
 function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return blobBackendConfigured();
 }
 
 let ensureTablePromise: Promise<void> | null = null;
@@ -121,7 +117,10 @@ function ensureAgentKeyTable(): Promise<void> {
         encrypted_key text NOT NULL,
         created_at timestamptz DEFAULT now()
       )
-    `.then(() => undefined);
+    `.then(() => undefined).catch((error) => {
+      ensureTablePromise = null;
+      throw error;
+    });
   }
   return ensureTablePromise;
 }
@@ -143,14 +142,18 @@ async function findAgentKeyInDatabase(userId: number): Promise<AgentUserKeyRecor
     : null;
 }
 
-async function insertAgentKeyIntoDatabase(record: AgentUserKeyRecord): Promise<void> {
-  if (!agentKeyDatabaseEnabled()) return;
+async function insertAgentKeyIntoDatabase(record: AgentUserKeyRecord): Promise<AgentUserKeyRecord | null> {
+  if (!agentKeyDatabaseEnabled()) return null;
   await ensureAgentKeyTable();
   await getGenerationSql()`
     INSERT INTO agent_user_keys (user_id, biz_key_id, encrypted_key)
     VALUES (${record.userId}, ${record.bizKeyId}, ${record.encryptedKey})
     ON CONFLICT (user_id) DO NOTHING
   `;
+  // 并发跨进程只认数据库获胜行，不能把本进程未写入的随机 key 缓存成账号身份。
+  const winner = await findAgentKeyInDatabase(record.userId);
+  if (!winner) throw new Error("agent key 持久化后无法读取。");
+  return winner;
 }
 
 async function listStoreBlobs(): Promise<BlobRef[]> {
@@ -172,93 +175,107 @@ function coerceRecords(payload: unknown): Map<number, AgentUserKeyRecord> {
   const out = new Map<number, AgentUserKeyRecord>();
   if (!Array.isArray(payload)) return out;
   for (const item of payload) {
-    if (typeof item !== "object" || item === null) continue;
+    if (typeof item !== "object" || item === null) throw new Error("历史 agent key 记录格式无效。");
     const raw = item as Partial<AgentUserKeyRecord>;
-    if (typeof raw.userId !== "number" || typeof raw.bizKeyId !== "string" || typeof raw.encryptedKey !== "string") continue;
+    if (typeof raw.userId !== "number" || !Number.isSafeInteger(raw.userId) || raw.userId < 0 ||
+        typeof raw.bizKeyId !== "string" || !raw.bizKeyId || typeof raw.encryptedKey !== "string" || !raw.encryptedKey) {
+      throw new Error("历史 agent key 记录格式无效。");
+    }
     out.set(raw.userId, { userId: raw.userId, bizKeyId: raw.bizKeyId, encryptedKey: raw.encryptedKey });
   }
   return out;
 }
 
-/** 读最新一档可解析的索引；坏世代跳过往旧找，不让一次写坏抹掉全部。 */
-async function readBlobRecords(): Promise<Map<number, AgentUserKeyRecord>> {
-  const refs = await listStoreBlobs();
-  for (const ref of refs) {
-    try {
-      const blob = await get(ref.url, { access: "public" });
-      if (!blob || blob.statusCode !== 200) continue;
-      const parsed = JSON.parse(await new Response(blob.stream).text()) as unknown;
-      const records = coerceRecords(parsed);
-      if (records.size > 0) return records;
-    } catch {
-      // 读不动的一代就跳过，往下找旧的。
-    }
+/** 历史 Blob 只读：按世代为当前账号寻找既有记录，读取失败不能伪装成不存在。 */
+async function readLegacyBlobRecord(userId: number): Promise<AgentUserKeyRecord | null> {
+  if (!hasBlobStore()) return null;
+  for (const ref of await listStoreBlobs()) {
+    const blob = await get(ref.url, { access: "public" });
+    if (!blob || blob.statusCode !== 200) throw new Error("历史 agent key 读取失败。");
+    const parsed: unknown = JSON.parse(await new Response(blob.stream).text());
+    if (!Array.isArray(parsed)) throw new Error("历史 agent key 索引格式无效。");
+    const record = coerceRecords(parsed).get(userId);
+    if (record) return record;
   }
-  return new Map();
-}
-
-/** 新增/更新一把记录。每次写到新路径，再修剪旧世代 —— 沿用 biz-api-key-store。 */
-async function writeBlobRecord(record: AgentUserKeyRecord): Promise<void> {
-  if (!hasBlobStore()) return;
-  const records = await readBlobRecords();
-  records.set(record.userId, record);
-  const previous = await listStoreBlobs().catch(() => [] as BlobRef[]);
-  const pathname = `${BLOB_STORE_PREFIX}-${Date.now()}-${randomBytes(4).toString("hex")}.json`;
-  await put(pathname, JSON.stringify([...records.values()]), {
-    access: "public",
-    contentType: "application/json",
-    cacheControlMaxAge: 60,
-  });
-  const stale = previous.slice(BLOB_GENERATIONS_KEPT - 1);
-  if (stale.length) {
-    await del(stale.map((blob) => blob.url)).catch(() => undefined);
-  }
-}
-
-async function findEncryptedKey(userId: number): Promise<string | null> {
-  const cached = memoryRecords.get(userId);
-  if (cached) return cached.encryptedKey;
-
-  if (agentKeyDatabaseEnabled()) {
-    try {
-      const row = await findAgentKeyInDatabase(userId);
-      if (row) {
-        memoryRecords.set(userId, row);
-        return row.encryptedKey;
-      }
-    } catch {
-      // DB 瞬时不可用就往下走，不因一次查询失败就报错。
-    }
-  }
-
-  if (hasBlobStore()) {
-    try {
-      const record = (await readBlobRecords()).get(userId);
-      if (record) {
-        memoryRecords.set(userId, record);
-        return record.encryptedKey;
-      }
-    } catch {
-      // 同上，退回内存。
-    }
-  }
-
   return null;
 }
 
-async function saveRecord(record: AgentUserKeyRecord): Promise<void> {
-  if (agentKeyDatabaseEnabled()) {
-    try {
-      await insertAgentKeyIntoDatabase(record); // ON CONFLICT DO NOTHING：并发时后到者自然放弃
-      memoryRecords.set(record.userId, record);
-      return;
-    } catch {
-      // DB 刚好坏的瞬间，B 端 key 已登记（issueBizApiKey 有它自己的兜底），
-      // 这里把加密记录落 Blob，别让本次签发的 key 因为一次 DB 抖动就失忆。
+export interface AgentLegacyKeyCandidate {
+  bizKeyId: string;
+  key: string;
+}
+
+/** 只读权威账号记录；库错误直接失败，不向 Blob/进程内存降级。 */
+export async function lookupAgentKeyOnControlPlane(userId: number): Promise<string | null> {
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error("agent user id 无效。");
+  if (!agentKeyDatabaseEnabled()) throw new AgentKeyConfigError("agent key 控制面数据库未配置。");
+  const existing = await findAgentKeyInDatabase(userId);
+  return existing ? decryptAgentKey(existing.encryptedKey, requireEncryptionSecret()) : null;
+}
+
+/** 内部签名端点的唯一写入路径。已存在账号保持原 key；候选必须由真实 B key 注册表证明属主。 */
+export async function getOrCreateAgentKeyOnControlPlane(
+  userId: number,
+  legacy?: AgentLegacyKeyCandidate,
+): Promise<string> {
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error("agent user id 无效。");
+  if (!agentKeyDatabaseEnabled()) throw new AgentKeyConfigError("agent key 控制面数据库未配置。");
+  const secret = requireEncryptionSecret();
+  const existing = await findAgentKeyInDatabase(userId);
+  if (existing) return decryptAgentKey(existing.encryptedKey, secret);
+  if (legacy) {
+    // 只认控制面注册表当前真实记录，不接受 Blob/env 认证兜底来证明迁移属主。
+    const registered = await findBizKeyByHash(hashBizApiKey(legacy.key));
+    if (!registered || !registered.enabled || registered.userId !== userId || registered.id !== legacy.bizKeyId) {
+      throw new Error("历史 agent key 归属校验失败。");
     }
+    const saved = await insertAgentKeyIntoDatabase({
+      userId,
+      bizKeyId: registered.id,
+      encryptedKey: encryptAgentKey(legacy.key, secret),
+    });
+    if (!saved) throw new Error("agent key 持久化不可用。");
+    return decryptAgentKey(saved.encryptedKey, secret);
   }
-  await writeBlobRecord(record);
-  memoryRecords.set(record.userId, record);
+  return createAndStore(userId, secret);
+}
+
+/** 无 DB 的 Vercel 只调用中心原子 get-or-create；断线/拒绝不回落到本地另签身份。 */
+async function relayAgentKey(userId: number): Promise<string> {
+  const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/+$/, "");
+  const secret = process.env.GENERATION_BILLING_RELAY_SECRET?.trim();
+  if (!origin || !secret) throw new AgentKeyConfigError("agent key 签名代理通道未配置。");
+  const request = async (op: "lookup" | "get-or-create", legacy?: AgentLegacyKeyCandidate): Promise<string | null> => {
+    const rawBody = JSON.stringify({ op, user_id: userId, ...(legacy ? { legacy } : {}) });
+    const timestamp = String(Date.now());
+    const response = await fetch(`${origin}/image-control/api/internal/agent-user-key`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [BIZ_KEY_SYNC_TIMESTAMP_HEADER]: timestamp,
+        [BIZ_KEY_SYNC_SIGNATURE_HEADER]: signBizKeySync(secret, timestamp, rawBody, "agent-user-key"),
+      },
+      body: rawBody,
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = await response.json().catch(() => null) as { ok?: boolean; key?: unknown } | null;
+    if (!response.ok || payload?.ok !== true) throw new Error("agent key 控制面解析失败。");
+    if (op === "lookup" && payload.key === null) return null;
+    if (typeof payload.key !== "string" || !payload.key.startsWith("sk-biz-")) throw new Error("agent key 控制面响应无效。");
+    return payload.key;
+  };
+  // 中央已有 key 时完全不依赖旧 Blob；仅首次迁移才读取旧记录。
+  const existing = await request("lookup");
+  if (existing) return existing;
+  const legacyRecord = await readLegacyBlobRecord(userId);
+  const legacy = legacyRecord ? {
+    bizKeyId: legacyRecord.bizKeyId,
+    key: decryptAgentKey(legacyRecord.encryptedKey, requireEncryptionSecret()),
+  } : undefined;
+  const key = await request("get-or-create", legacy);
+  if (!key) throw new Error("agent key 控制面响应无效。");
+  return key;
 }
 
 async function createAndStore(userId: number, secret: string): Promise<string> {
@@ -280,8 +297,9 @@ async function createAndStore(userId: number, secret: string): Promise<string> {
     encryptedKey: encryptAgentKey(generated.key, secret),
   };
 
-  await saveRecord(record);
-  return generated.key;
+  const saved = await insertAgentKeyIntoDatabase(record);
+  if (!saved) throw new Error("agent key 持久化不可用。");
+  return decryptAgentKey(saved.encryptedKey, secret);
 }
 
 function requireEncryptionSecret(env: NodeJS.ProcessEnv = process.env): string {
@@ -301,10 +319,14 @@ export async function getOrCreateAgentKeyForUser(userId: number): Promise<string
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const secret = requireEncryptionSecret();
-    const encrypted = await findEncryptedKey(userId);
-    if (encrypted) return decryptAgentKey(encrypted, secret);
-    return createAndStore(userId, secret);
+    if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error("agent user id 无效。");
+    if (!agentKeyDatabaseEnabled()) return relayAgentKey(userId);
+    const existing = await lookupAgentKeyOnControlPlane(userId);
+    if (existing) return existing;
+    // 控制面公开解析入口也必须迁移既有 Blob，不能抢在 Vercel 前另签身份。
+    const old = await readLegacyBlobRecord(userId);
+    const legacy = old ? { bizKeyId: old.bizKeyId, key: decryptAgentKey(old.encryptedKey, requireEncryptionSecret()) } : undefined;
+    return getOrCreateAgentKeyOnControlPlane(userId, legacy);
   })();
 
   inflightForUser.set(userId, promise);

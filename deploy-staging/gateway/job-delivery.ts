@@ -1,5 +1,5 @@
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
-  completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, renderedGeneration, transferGeneration, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
+  completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
 import { beastAgentField } from "./session-lifecycle"
@@ -158,7 +158,7 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
 }
 
 let draining = false
-async function drainGenerationInbox(): Promise<void> {
+export async function drainGenerationInbox(): Promise<void> {
   if (draining) return
   draining = true
   try {
@@ -184,6 +184,8 @@ async function drainGenerationInbox(): Promise<void> {
         renderedGeneration(receipt.task_id)
       }
       if (generationMaintenanceEnabled()) continue
+      // 消息通知不是待下载媒体：已提交或结果未知的通知永不定时重投，保留真实 ACK 状态。
+      if (receipt.kind === "message" && receipt.notified_at !== null) continue
       // An accepted prompt is not an ACK. Retry unread batches conservatively, never every tick.
       if (receipt.notified_at && Date.now() - receipt.notified_at < 10 * 60_000) continue
       if (statuses[receipt.consumer_oc]?.type && statuses[receipt.consumer_oc].type !== "idle") continue
@@ -209,12 +211,15 @@ async function drainGenerationInbox(): Promise<void> {
         }
         continue
       }
-      const jobs = group.map((r) => ({ task_id: r.task_id, status: r.status, frame: r.frame, project: r.project,
+      const parent = resolveSession(group[0].parent_gw)
+      // No await between admission, the durable claim and sending: an accepted user turn wins.
+      if (generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
+      const claimed = new Set(claimGenerationMessages(group.filter((r) => r.kind === "message").map((r) => r.task_id), consumer))
+      const pending = group.filter((r) => r.kind !== "message" || claimed.has(r.task_id))
+      if (!pending.length) continue
+      const jobs = pending.map((r) => ({ task_id: r.task_id, status: r.status, frame: r.frame, project: r.project,
         kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}), delivery_id: `generation:${r.task_id}` }))
       const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 回收原任务。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
-      const parent = resolveSession(group[0].parent_gw)
-      // No await between this admission check and sending: an already accepted user turn wins.
-      if (generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
       const agent = generationParent(consumer)?.consumer_agent
       const promptBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
       let ownTurnGen: number | undefined
@@ -238,7 +243,7 @@ async function drainGenerationInbox(): Promise<void> {
         throw error
       }
       if (response.ok) {
-        notifyGeneration(group.map((r) => r.task_id))
+        notifyGeneration(pending.map((r) => r.task_id))
         if (parent && ownTurnGen === parent.turnGen) armWatchdogTimer(parent)
       } else if (parent && ownTurnGen === parent.turnGen) {
         parent.lastTurnActiveAt = 0

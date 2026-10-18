@@ -80,7 +80,7 @@ export function completeGenerationReceipt(id: string, status: string, artifacts:
   db().query(`UPDATE generation_receipts SET status=?,artifacts=?,data=?,updated_at=?,
     observed_at=CASE WHEN ? THEN NULL ELSE observed_at END,
     downloaded_at=CASE WHEN ? THEN NULL ELSE downloaded_at END,
-    notified_at=CASE WHEN ? THEN NULL ELSE notified_at END,
+    notified_at=CASE WHEN ? AND kind<>'message' THEN NULL ELSE notified_at END,
     rendered_at=CASE WHEN ? THEN NULL ELSE rendered_at END WHERE task_id=?`)
     .run(status, JSON.stringify(artifacts), JSON.stringify(data), Date.now(), changed ? 1 : 0, changed ? 1 : 0, changed ? 1 : 0, changed ? 1 : 0, id)
   return generationReceipt(id)!
@@ -109,10 +109,24 @@ export function notifyGeneration(ids: string[]): void {
   const update = db().query("UPDATE generation_receipts SET notified_at=? WHERE task_id=?")
   db().transaction(() => { for (const id of ids) update.run(Date.now(), id) })()
 }
+/** 消息唤醒提交前耐久占位；超时是提交结果未知，不能再盲投。真实消费 ACK 另记。 */
+export function claimGenerationMessages(ids: string[], consumer: string): string[] {
+  const claim = db().query(`UPDATE generation_receipts SET notified_at=?,updated_at=?
+    WHERE task_id=? AND consumer_oc=? AND kind='message' AND observed_at IS NULL
+      AND notified_at IS NULL AND status IN ('succeeded','failed','refunded','cancelled')`)
+  return db().transaction(() => {
+    const claimed: string[] = []
+    const now = Date.now()
+    for (const id of ids) if (claim.run(now, now, id, consumer).changes === 1) claimed.push(id)
+    return claimed
+  })()
+}
 export function transferGeneration(id: string, consumer: string, reason = "same-owner collector accepted receipt"): void {
   const row = generationReceipt(id)
   if (!row) throw new Error("unregistered job")
-  db().query("UPDATE generation_receipts SET consumer_oc=?,observed_at=NULL,notified_at=NULL,data=?,updated_at=? WHERE task_id=?")
+  db().query(`UPDATE generation_receipts SET consumer_oc=?,
+    observed_at=CASE WHEN kind='message' THEN observed_at ELSE NULL END,
+    notified_at=CASE WHEN kind='message' THEN notified_at ELSE NULL END,data=?,updated_at=? WHERE task_id=?`)
     .run(consumer, JSON.stringify({ ...row, artifacts: undefined, previous_consumer_oc: row.consumer_oc, transfer_reason: reason }), Date.now(), id)
 }
 export function renderedGeneration(id: string): void {
@@ -148,11 +162,9 @@ export function saveDurableSubagentRun(run: any, result?: any): void {
       registerGenerationReceipt({ task_id: id, parent_gw: run.parentGatewaySessionId, producer_oc: run.opencodeSessionId,
         consumer_oc: run.parentOpencodeSessionId, kind: 'message', content, run_id: run.id })
       completeGenerationReceipt(id, 'succeeded', [], { content })
-      // P0（2026-10-18 双投递修复）：子代理结果**只走单一交付路径** wakeParent（subagent.ts
-      // finishRun）。这里仍保留耐久 receipt 作为查询/审计记录，但落库即标 observed——
-      // job-delivery 的 drain 只投递 `!observed_at` 的 message，故不会在 10 分钟后再投一次。
-      // 父模型 ack 前也不会重复：唤醒仅由 finishRun 的幂等守卫发一次。
-      acknowledgeGeneration(id, 'observed', { delivered_via: 'subagent_wakeParent' })
+      // finishRun 仍走既有 wakeParent 单一出口。先占位防 drain 再投；
+      // 这里只证明开始提交，不伪造消费者已读，真实取件才写 observed_at。
+      claimGenerationMessages([id], run.parentOpencodeSessionId)
     }
   })()
 }

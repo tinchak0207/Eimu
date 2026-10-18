@@ -17,7 +17,8 @@
 // 视觉沿用 CanvasNodePromptPanel 的白底/暗色语汇；data-canvas-interactive +
 // 事件 stopPropagation 阻止画布手势吃掉面板操作；Escape / 关闭钮收起。
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import { Loader2, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/canvas/client";
@@ -107,6 +108,7 @@ async function upsertCanvasPack(newItems: AssetPackItem[]): Promise<PromptSaveSt
     const listRes = await fetch("/api/assets", { headers, cache: "no-store" });
     if (listRes.status === 401) return "unauthorized";
     const listData = (await listRes.json().catch(() => null)) as { success?: boolean; packs?: AssetPack[] } | null;
+    if (!listRes.ok || !listData?.success || !Array.isArray(listData.packs)) return "error";
     const existing =
       listData?.success && Array.isArray(listData.packs)
         ? listData.packs.find((p) => p.id === CANVAS_PACK_ID)
@@ -147,6 +149,11 @@ async function upsertCanvasPack(newItems: AssetPackItem[]): Promise<PromptSaveSt
 }
 
 export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage: _onInsertImage, onUsePrompt, onApplyRecipeTemplate, isLoggedIn = false }: CanvasLibraryPanelProps) {
+  const { user, token } = useAuth();
+  const ownerId = user?.id ?? null;
+  const ownerRef = useRef(ownerId);
+  ownerRef.current = ownerId;
+  const assetRequestRef = useRef(0);
   const [tab, setTab] = useState<LibraryTab>("prompts");
 
   // ── 配方模板（2026-08-27 自专业工作站迁入：useRecipeTemplates 原样引用）
@@ -170,7 +177,16 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   const [styleSaveStates, setStyleSaveStates] = useState<Record<string, PromptSaveState>>({});
 
   // ── 我的素材状态（资产包视图）
-  const [assets, setAssets] = useState<AssetPack[] | null>(null);
+  const [assetCache, setAssetCache] = useState<{ ownerId: number; packs: AssetPack[] } | null>(null);
+  const assets = assetCache?.ownerId === ownerId ? assetCache.packs : null;
+  const setAssets = useCallback((next: AssetPack[] | null | ((previous: AssetPack[] | null) => AssetPack[] | null)) => {
+    if (ownerId == null || ownerRef.current !== ownerId) return;
+    setAssetCache((previous) => {
+      const current = previous?.ownerId === ownerId ? previous.packs : null;
+      const packs = typeof next === "function" ? next(current) : next;
+      return packs ? { ownerId, packs } : null;
+    });
+  }, [ownerId]);
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [assetsUnauthorized, setAssetsUnauthorized] = useState(false);
@@ -179,6 +195,18 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   const [assetActionError, setAssetActionError] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [activatingId, setActivatingId] = useState<string | null>(null);
+  useEffect(() => {
+    assetRequestRef.current += 1;
+    setAssetCache(null);
+    setAssetsLoading(false);
+    setAssetsError(null);
+    setAssetsUnauthorized(ownerId == null);
+    setAssetActionError(null);
+    setDeletingIds(new Set());
+    setActivatingId(null);
+    setSaveStates({});
+    setStyleSaveStates({});
+  }, [ownerId]);
 
   // ── Escape 收起
   useEffect(() => {
@@ -222,37 +250,40 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   // ── 我的素材载入（每次打开/切到该 tab 重新拉，保证存入后可见）。
   // 支援 ?q= 跨 pack 搜寻（title/tags/digest 由服务端过滤，空字串还原为拉全量）。
   const loadAssets = useCallback(async (query = "") => {
+    const request = ++assetRequestRef.current;
+    const headers = authHeaders();
+    const current = () => ownerRef.current === ownerId && assetRequestRef.current === request &&
+      authHeaders()?.Authorization === headers?.Authorization;
     setAssetsLoading(true);
     setAssetsError(null);
     setAssetActionError(null);
     try {
-      const headers = authHeaders();
-      if (!headers) {
+      if (ownerId == null || !headers || headers["x-user-id"] !== String(ownerId)) {
         // 未登入诚实显示登入提示，不发注定 401 的请求。
         setAssetsUnauthorized(true);
-        setAssets(null);
         return;
       }
       const q = query.trim();
       const url = q ? `/api/assets?q=${encodeURIComponent(q)}` : "/api/assets";
       const res = await fetch(url, { headers, cache: "no-store" });
+      if (!current()) return;
       if (res.status === 401) {
         setAssetsUnauthorized(true);
-        setAssets(null);
         return;
       }
       const data = (await res.json()) as { success?: boolean; packs?: AssetPack[]; error?: string };
+      if (!current()) return;
       if (!res.ok || !data.success || !Array.isArray(data.packs)) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       setAssetsUnauthorized(false);
       setAssets(data.packs);
     } catch (error) {
-      setAssetsError(error instanceof Error ? error.message : "加载失败");
+      if (current()) setAssetsError(error instanceof Error ? error.message : "加载失败");
     } finally {
-      setAssetsLoading(false);
+      if (current()) setAssetsLoading(false);
     }
-  }, []);
+  }, [ownerId, setAssets, token]);
 
   // 搜索词（300ms debounce）变化即按 q 重新拉取；空字串还原为全量。
   useEffect(() => {
@@ -323,8 +354,8 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   const saveStyleToAssets = useCallback(async (item: { id: string; title: string; text: string; tags: string[]; note: string }) => {
     setStyleSaveStates((prev) => ({ ...prev, [item.id]: "saving" }));
     const state = await upsertCanvasPack(nodeToAssetPackItems({ id: `kunpeng-${item.id}`, title: item.title, prompt: item.text }));
-    setStyleSaveStates((prev) => ({ ...prev, [item.id]: state }));
-  }, []);
+    if (ownerRef.current === ownerId) setStyleSaveStates((prev) => ({ ...prev, [item.id]: state }));
+  }, [ownerId]);
 
   // ── 资产包客户端过滤（title / tags / digest）
   const filteredAssets = useMemo(() => {
@@ -343,56 +374,63 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage:
   const saveToAssets = useCallback(async (p: LibraryPromptItem) => {
     setSaveStates((prev) => ({ ...prev, [p.id]: "saving" }));
     const state = await upsertCanvasPack(nodeToAssetPackItems({ id: `prompt-${p.id}`, title: p.title, prompt: p.prompt }));
-    setSaveStates((prev) => ({ ...prev, [p.id]: state }));
-  }, []);
+    if (ownerRef.current === ownerId) setSaveStates((prev) => ({ ...prev, [p.id]: state }));
+  }, [ownerId]);
 
   // ── 动作：删除资产包
   const deleteAsset = useCallback(async (id: string) => {
+    const headers = authHeaders();
+    if (ownerId == null || ownerRef.current !== ownerId || !headers || headers["x-user-id"] !== String(ownerId)) return;
     setDeletingIds((prev) => new Set(prev).add(id));
     setAssetActionError(null);
     try {
       const res = await fetch("/api/assets", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", ...(authHeaders() ?? {}) },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({ ids: [id] }),
       });
       const data = (await res.json()) as { success?: boolean };
+      if (ownerRef.current !== ownerId) return;
       if (!res.ok || !data.success) throw new Error("delete failed");
       setAssets((prev) => (prev ? prev.filter((p) => p.id !== id) : prev));
     } catch {
-      setAssetActionError("删除失败，请重试");
+      if (ownerRef.current === ownerId) setAssetActionError("删除失败，请重试");
     } finally {
-      setDeletingIds((prev) => {
+      if (ownerRef.current === ownerId) setDeletingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
     }
-  }, []);
+  }, [ownerId, setAssets]);
 
   // ── 动作：设为使用（active）— PUT /api/assets 该包 active:true（单一 active 由后端保证）
   const setPackActive = useCallback(async (pack: AssetPack) => {
+    const headers = authHeaders();
+    if (ownerId == null || ownerRef.current !== ownerId || !headers || headers["x-user-id"] !== String(ownerId)) return;
     setActivatingId(pack.id);
     setAssetActionError(null);
     try {
       const res = await fetch("/api/assets", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...(authHeaders() ?? {}) },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({ ...pack, active: true }),
       });
+      if (ownerRef.current !== ownerId) return;
       if (res.status === 401) {
         setAssetsUnauthorized(true);
         return;
       }
       const data = (await res.json()) as { success?: boolean };
+      if (ownerRef.current !== ownerId) return;
       if (!res.ok || !data.success) throw new Error("set active failed");
       setAssets((prev) => prev?.map((p) => (p.id === pack.id ? { ...p, active: true } : { ...p, active: undefined })) ?? prev);
     } catch {
-      setAssetActionError("设为使用失败，请重试");
+      if (ownerRef.current === ownerId) setAssetActionError("设为使用失败，请重试");
     } finally {
-      setActivatingId(null);
+      if (ownerRef.current === ownerId) setActivatingId(null);
     }
-  }, []);
+  }, [ownerId, setAssets]);
 
   // 阻止事件冒泡到画布
   const stopPropagation = useCallback((e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {

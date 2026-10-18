@@ -86,6 +86,7 @@ const SESSION_STATUS_META: Record<
 export interface AgentSessionListProps {
   /** null = 未加载；[] = 已加载但为空。 */
   sessions: AgentSessionSummary[] | null;
+  loadError?: string | null;
   /** null = 本轮还没送出过、会话尚未建立（lazy 建号），此时没有任何一列算「当前」。 */
   currentSessionId: string | null;
   switchingTo: string | null;
@@ -103,6 +104,7 @@ export interface AgentSessionListProps {
 
 export function AgentSessionList({
   sessions,
+  loadError,
   currentSessionId,
   switchingTo,
   startingNew,
@@ -112,6 +114,7 @@ export function AgentSessionList({
   onStartNew,
 }: AgentSessionListProps) {
   if (sessions === null) {
+    if (loadError) return <p role="alert" className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/65">{loadError}</p>;
     return (
       <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
         正在加载历史会话…

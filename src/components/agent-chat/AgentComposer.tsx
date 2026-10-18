@@ -1131,6 +1131,7 @@ function AgentComposerComponent({
    * abort 对应请求；结算（成功或失败）后清掉，避免泄漏。
    */
   const uploadAbortsRef = useRef<Map<string, AbortController>>(new Map());
+  const uploadMountedRef = useRef(true);
   const beginUpload = useCallback((id: string): AbortController => {
     const controller = new AbortController();
     uploadAbortsRef.current.set(id, controller);
@@ -1300,6 +1301,7 @@ function AgentComposerComponent({
       // 09-13 附件 lazy 建号：空态（还没发过消息）选档＝用户明确动作，与 send()
       // 同源走 ensureSession（复用 start() 串行化管线，不并发第二条 POST）。
       const session = sessionId ?? (await onEnsureSession?.());
+      if (!uploadMountedRef.current) return;
       if (!session) {
         Array.from(files).forEach((file) => {
           setAttachments((prev) => [
@@ -1573,7 +1575,11 @@ function AgentComposerComponent({
   const attachmentsRef = useRef<PendingAttachment[]>([]);
   attachmentsRef.current = attachments;
   useEffect(() => {
+    uploadMountedRef.current = true;
     return () => {
+      uploadMountedRef.current = false;
+      uploadAbortsRef.current.forEach((controller) => controller.abort());
+      uploadAbortsRef.current.clear();
       attachmentsRef.current.forEach(releaseUrls);
     };
   }, []);

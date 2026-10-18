@@ -8,6 +8,8 @@
 // not_authenticated（登入失效）。除此之外断线就是重连，不往上抛。
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { getStoredUser } from "@/lib/new-api-client";
 import {
   AGENT_EVENT_NAMES,
   AGENT_STEER_QUEUE_TTL_MS,
@@ -39,6 +41,7 @@ import {
   deleteAgentSession,
   fetchAgentQuota,
   fetchAgentSessionMessages,
+  listAgentSessions,
   requestSseTicket,
   patchAgentSessionMemory,
   resolveAgentConfirm,
@@ -58,6 +61,7 @@ import { createFrameBatcher, type FrameBatcher } from "@/lib/agent-chat-frame-ba
 import {
   clearPersisted,
   loadPersisted,
+  loadLegacyPersisted,
   savePersisted,
   type PersistedAgentChat,
 } from "@/lib/agent-chat-persistence";
@@ -279,6 +283,18 @@ export interface UseAgentChatReturn {
 
 export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn {
   const { onCanvasEvent, canvasStateProvider, onSendBlockedByAuth } = options ?? {};
+  const { user, isLoading: authLoading } = useAuth();
+  const ownerId = user?.id ?? null;
+  const ownerIdRef = useRef<number | null>(ownerId);
+  const accountEpochRef = useRef(0);
+  const renderedOwnerIdRef = useRef(ownerId);
+  renderedOwnerIdRef.current = ownerId;
+  const currentAccountRef = useRef<() => boolean>(() => true);
+  currentAccountRef.current = () => {
+    if (ownerIdRef.current !== renderedOwnerIdRef.current) return false;
+    if (ownerIdRef.current === 0) return true; // 显式本地测试账号不写登录凭证。
+    try { return (getStoredUser()?.id ?? null) === ownerIdRef.current; } catch { return false; }
+  };
 
   const [state, dispatch] = useReducer(chatReducer, EMPTY_AGENT_CHAT_STATE);
   const [connection, setConnection] = useState<UseAgentChatReturn["connection"]>("idle");
@@ -292,6 +308,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
   // ── refs：给稳定的 callback 阅最新值，避免闭包抓到旧 state。
   const stateRef = useRef(state);
+  const stateAccountEpochRef = useRef(accountEpochRef.current);
   const sessionIdRef = useRef<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<number | null>(null);
@@ -359,6 +376,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
   useEffect(() => {
     stateRef.current = state;
+    stateAccountEpochRef.current = accountEpochRef.current;
   }, [state]);
 
   useEffect(() => {
@@ -366,32 +384,57 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     canvasStateProviderRef.current = canvasStateProvider;
   }, [onCanvasEvent, canvasStateProvider]);
 
-  // D-17：mount 时读一次本地存档，决定「有可恢复的上次会话」。
+  // 账号切换作废全部旧请求/连接；缓存归属由服务端目录核实，本地只作加速。
   useEffect(() => {
-    const saved = loadPersisted();
-    if (saved) {
-      persistedRef.current = saved;
-      // 同一次访问里刚 toggle 关掉又打开：不问，静默**续接**既有会话
-      //（09-12 建号权收归发送按钮≠续接权也上交：resume 只铸票重连存档里的
-      // 现成会话，零建号 POST，不违反「来的时候不加」）。刚开过新对话
-      //（startNewSession 已 clearPersisted）→ 这里 saved 为空，落空态不发请求。
-      // 提前在这里判断而不是等 resume()，否则二选一卡会闪一帧。
-      if (!sessionTouchedInThisVisit) {
-        setResumable({ sessionId: saved.sessionId, itemCount: saved.items.length, savedAt: saved.savedAt });
-      } else {
-        void resume();
-      }
+    ownerIdRef.current = ownerId;
+    accountEpochRef.current += 1;
+    sessionEpochRef.current += 1;
+    connectSeqRef.current += 1;
+    esRef.current?.close();
+    esRef.current = null;
+    frameBatcherRef.current?.drop();
+    for (const timer of [retryTimerRef, saveTimerRef, steerExpiryTimerRef]) {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
     }
-    // 只在 mount 读一次，之后靠 resume / discardAndStartNew / end 维护状态。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    sessionIdRef.current = null;
+    persistedRef.current = null;
+    activeTicketRef.current = null;
+    startPipelineRef.current = null;
+    abortInFlightRef.current = null;
+    startedRef.current = false;
+    closedRef.current = false;
+    closedReasonRef.current = null;
+    mutedUntilNextSendRef.current = false;
+    forceNewRef.current = false;
+    setSessionId(null);
+    setResumable(null);
+    setError(null);
+    setAborting(false);
+    setStartingSession(false);
+    setConnection("idle");
+    dispatch({ type: "reset" });
+    if (authLoading || ownerId === null) return;
+    let cancelled = false;
+    const epoch = sessionEpochRef.current;
+    const cached = loadPersisted(Date.now(), ownerId) ?? loadLegacyPersisted();
+    void listAgentSessions().then((sessions) => {
+      if (cancelled || ownerIdRef.current !== ownerId || sessionEpochRef.current !== epoch) return;
+      if (cached && sessions.some((it) => it.session_id === cached.sessionId)) {
+        persistedRef.current = cached;
+        savePersisted(cached, ownerId);
+        setResumable({ sessionId: cached.sessionId, itemCount: cached.items.length, savedAt: cached.savedAt });
+      }
+    }).catch(() => { /* 网络失败不展示未经归属核实的旧客户端缓存。 */ });
+    return () => { cancelled = true; };
+  }, [ownerId, authLoading]);
 
   // D-18：transcript 变化时节流写入存档（>=1s）；会话终结时清存档。
   // 不依赖 state 本身（省得每帧都写），靠 ref 保证取到最新 items。
   useEffect(() => {
     const sid = sessionIdRef.current;
     const s = stateRef.current;
-    if (!sid || !s) return;
+    if (!sid || !s || stateAccountEpochRef.current !== accountEpochRef.current) return;
 
     // 会话已终结（双方任一关）：存档没意义了，直接清掉。
     if (s.closed) {
@@ -399,19 +442,21 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      clearPersisted();
+      clearPersisted(ownerIdRef.current);
       persistedRef.current = null;
       setResumable(null);
       return;
     }
 
     const doSave = () => {
+      const owner = ownerIdRef.current;
+      if (owner === null || owner !== ownerId || sid !== sessionIdRef.current) return;
       savePersisted({
         sessionId: sid,
         lastEventId: s.lastEventId,
         savedAt: Date.now(),
         items: s.items,
-      });
+      }, owner);
       lastSavedAtRef.current = Date.now();
     };
 
@@ -430,7 +475,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
   // state.closed（来自 session.closed）＝永久停止重连。
   useEffect(() => {
-    if (!state.closed) return;
+    if (!state.closed || stateAccountEpochRef.current !== accountEpochRef.current) return;
     closedRef.current = true;
     if (esRef.current) {
       esRef.current.close();
@@ -444,7 +489,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    clearPersisted();
+    clearPersisted(ownerIdRef.current);
     persistedRef.current = null;
     setResumable(null);
     setConnection("closed");
@@ -695,8 +740,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   // 触发渲染，UI 要禁用「停止」按钮就得靠这个 state。
   const requestAbort = useCallback((sid: string): Promise<void> => {
     if (abortInFlightRef.current) return abortInFlightRef.current;
+    const accountEpoch = accountEpochRef.current;
     setAborting(true);
     const p = abortAgentSession(sid).finally(() => {
+      if (accountEpochRef.current !== accountEpoch || abortInFlightRef.current !== p) return;
       abortInFlightRef.current = null;
       setAborting(false);
     });
@@ -708,9 +755,13 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   // startedRef / startPipelineRef——start() 的串行化外壳从这里过；核心若自己
   // 去查管线，会 await 到调用方正在飞的那条，死锁。
   const runStartCore = useCallback(async (): Promise<boolean> => {
+    const owner = ownerIdRef.current;
+    const accountEpoch = accountEpochRef.current;
+    const epoch = sessionEpochRef.current;
+    if (owner === null) return false;
     try {
       const session = await createAgentSession();
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current || accountEpochRef.current !== accountEpoch || ownerIdRef.current !== owner || sessionEpochRef.current !== epoch) return false;
       sessionIdRef.current = session.session_id;
       setSessionId(session.session_id);
       sessionEpochRef.current += 1; // 新会话建立：任何还在飞行、捕获了旧 epoch 的 send() 都该放弃。
@@ -722,16 +773,17 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 这里只是开场快照，晚几百毫秒到无感知）。
       void fetchAgentQuota()
         .then((quota) => {
-          if (mountedRef.current) dispatch({ type: "quota", quota });
+          if (mountedRef.current && accountEpochRef.current === accountEpoch && ownerIdRef.current === owner) dispatch({ type: "quota", quota });
         })
         .catch(() => {
           // 种子是 best-effort，抓不到不阻挡开场。
         });
 
       await openConnection();
+      if (!mountedRef.current || accountEpochRef.current !== accountEpoch || sessionIdRef.current !== session.session_id) return false;
       return true;
     } catch (err) {
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current || accountEpochRef.current !== accountEpoch || ownerIdRef.current !== owner) return false;
       const message = err instanceof Error ? err.message : "无法开始 Agent 会话。";
       setError(message);
       if (isTerminalAuthError(err)) {
@@ -746,6 +798,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   }, [dispatch, openConnection]);
 
   const start = useCallback(async (): Promise<void> => {
+    if (!currentAccountRef.current()) return;
+    const accountEpoch = accountEpochRef.current;
     if (closedRef.current) return;
     if (startedRef.current) {
       // 空态并发再入（09-12 lazy 建号后两条 send() 同抢一个空态）：建号在飞
@@ -756,7 +810,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     // D-17：有未过期的存档，且不是「刚点了开新会话」——不建号，
     // 把决定权留给 UI（存档收进对话历史，空态由用户发消息驱动）。
     // send() 的 lazy 建号带 forceNew 放行：空态按发送＝明确要开新会话。
-    const existing = loadPersisted();
+    const existing = loadPersisted(Date.now(), ownerIdRef.current);
     if (existing && !forceNewRef.current) return;
     forceNewRef.current = false;
     startedRef.current = true;
@@ -773,21 +827,25 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     try {
       await pipeline;
     } finally {
-      if (startPipelineRef.current === pipeline) startPipelineRef.current = null;
+      if (accountEpochRef.current === accountEpoch && startPipelineRef.current === pipeline) startPipelineRef.current = null;
     }
   }, [runStartCore]);
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
+    if (!currentAccountRef.current()) return null;
+    const accountEpoch = accountEpochRef.current;
     if (closedRef.current) return sessionIdRef.current;
     if (!sessionIdRef.current) {
       forceNewRef.current = true;
       await start();
     }
-    return sessionIdRef.current;
+    return accountEpochRef.current === accountEpoch ? sessionIdRef.current : null;
   }, [start]);
 
   const send = useCallback(
     async (text: string, opts?: { sessionDirective?: string; silent?: boolean }): Promise<void> => {
+      if (!currentAccountRef.current()) return;
+      const accountEpoch = accountEpochRef.current;
       const trimmed = typeof text === "string" ? text.trim() : "";
       if (!trimmed) return;
       if (closedRef.current) return;
@@ -806,9 +864,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         try {
           await start();
         } finally {
-          if (mountedRef.current) setStartingSession(false);
+          if (mountedRef.current && accountEpochRef.current === accountEpoch) setStartingSession(false);
         }
       }
+      if (accountEpochRef.current !== accountEpoch || !mountedRef.current) return;
       // sessionId 判空必须留在乐观插入之前（铁律）：建号失败（未登录/网络/已
       // 关闭）时 sid 仍 null——不能把使用者的话回声进 transcript，否则留下一句
       // 永久的「幽灵」用户发言，且没有任何办法标记它其实从未送达。
@@ -868,6 +927,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       if (steering) {
         try {
           const ack = await steerAgentSession(sid, trimmed, { steerId });
+          if (accountEpochRef.current !== accountEpoch) return;
           dispatch({
             type: "steer-ack",
             steerId: ack.steer_id,
@@ -885,6 +945,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
               : `已排队${typeof ack.position === "number" ? `（第 ${ack.position} 条）` : ""}，本回合结束后生效`,
           );
         } catch (err) {
+          if (accountEpochRef.current !== accountEpoch) return;
           // 送不进去就说实话：徽章改「未生效」，不让用户以为指令已经在跑。
           dispatch({ type: "steer-ack", steerId, status: "failed" });
           if (isSteerUnavailableError(err)) {
@@ -916,6 +977,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
       // 会话代校验：上面的 await（steer-abort）期间若使用者切了会话/开了新
       // 会话，sid 已经是死会话，不能再把消息送过去——放弃发送并说清楚。
+      if (accountEpochRef.current !== accountEpoch) return;
       if (sessionEpochRef.current !== epoch) {
         dispatchNotice("error", "会话已切换，消息未发送，请重新发送。");
         return;
@@ -939,6 +1001,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
           direct,
         );
       } catch (err) {
+        if (accountEpochRef.current !== accountEpoch) return;
         dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");
       }
     },
@@ -947,14 +1010,17 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
   const confirm = useCallback(
     async (requestId: string, approved: boolean): Promise<boolean> => {
+      if (!currentAccountRef.current()) return false;
+      const accountEpoch = accountEpochRef.current;
       if (closedRef.current) return false;
       const sid = sessionIdRef.current;
       if (!sid) return false;
       try {
         await resolveAgentConfirm(sid, requestId, approved);
         // 裁决结果由网关以 confirm.resolved 事件送回，reducer 会收起卡片并留痕。
-        return true;
+        return accountEpochRef.current === accountEpoch;
       } catch (err) {
+        if (accountEpochRef.current !== accountEpoch) return false;
         dispatchNotice("error", err instanceof Error ? err.message : "回复确认失败，请重试。");
         return false;
       }
@@ -964,13 +1030,16 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
   const answerQuestion = useCallback(
     async (requestId: string, answers: string[][]): Promise<boolean> => {
+      if (!currentAccountRef.current()) return false;
+      const accountEpoch = accountEpochRef.current;
       if (closedRef.current) return false;
       const sid = sessionIdRef.current;
       if (!sid) return false;
       try {
         await replyAgentQuestion(sid, requestId, answers);
-        return true;
+        return accountEpochRef.current === accountEpoch;
       } catch (err) {
+        if (accountEpochRef.current !== accountEpoch) return false;
         dispatchNotice("error", err instanceof Error ? err.message : "回复问题失败，请重试。");
         return false;
       }
@@ -979,6 +1048,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   );
 
   const retry = useCallback(async (): Promise<void> => {
+    if (!currentAccountRef.current()) return;
     if (closedRef.current) return;
     if (retryTimerRef.current !== null) {
       window.clearTimeout(retryTimerRef.current);
@@ -997,11 +1067,14 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   }, [start, openConnection]);
 
   const abort = useCallback(async (): Promise<void> => {
+    if (!currentAccountRef.current()) return;
+    const accountEpoch = accountEpochRef.current;
     if (closedRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
     try {
       await requestAbort(sid);
+      if (accountEpochRef.current !== accountEpoch || sessionIdRef.current !== sid) return;
       // 静默窗开启：server 端 abort 落地后，opencode 的残响帧（迟到
       // delta/前缀补发）不再渲染，直到下一次 send()。
       mutedUntilNextSendRef.current = true;
@@ -1020,6 +1093,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 用户按下停止的那一刻画面就该显示「已中止」。已 injected/applied 的条目不退。
       dispatch({ type: "steer-abort-queued" });
     } catch (err) {
+      if (accountEpochRef.current !== accountEpoch) return;
       // 失败时不合成终态帧：真回合还在跑，翻成收尾就是说谎；后续 delta 本就会
       // 自愈（reducer 收到内容帧会把 turnActive 设回真）。
       dispatchNotice("error", err instanceof Error ? err.message : "中止失败，请重试。");
@@ -1027,6 +1101,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   }, [dispatch, dispatchNotice, requestAbort]);
 
   const end = useCallback(async (): Promise<void> => {
+    if (!currentAccountRef.current()) return;
+    const accountEpoch = accountEpochRef.current;
     closedRef.current = true;
     closedReasonRef.current = 'manual';
     if (esRef.current) {
@@ -1057,8 +1133,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         // 释放资源是 best-effort；就算删不掉，本端也已经不再重连。
       }
     }
+    if (accountEpochRef.current !== accountEpoch) return;
     // D-8：会话结束，本地存档同步清除，下次进来干净开场。
-    clearPersisted();
+    clearPersisted(ownerIdRef.current);
     persistedRef.current = null;
     setResumable(null);
   }, [dispatch]);
@@ -1068,6 +1145,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
    * 若铸票失败且是「会话已被回收」（4xx），清档退回开新会话。
    */
   const resume = useCallback(async (): Promise<void> => {
+    if (!currentAccountRef.current()) return;
+    const owner = ownerIdRef.current;
+    const accountEpoch = accountEpochRef.current;
+    const seq = ++connectSeqRef.current;
+    if (owner === null) return;
     // 09-12：session.closed（网关 idle 回收）是「该会话终局」，续档＝开启新生命，入口解锁；
     // auth（登入失效）/manual（本端 end()）保持封锁。
     if (closedRef.current && closedReasonRef.current !== 'session') return;
@@ -1085,8 +1167,15 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
     // 先铸票探活。成功 = 会话还在网关，走正常 openConnection 续传。
     try {
-      const ticket = await requestSseTicket(sid);
-      if (!mountedRef.current) return;
+      const [ticket, history] = await Promise.all([
+        requestSseTicket(sid),
+        fetchAgentSessionMessages(sid).catch(() => null),
+      ]);
+      if (!mountedRef.current || accountEpochRef.current !== accountEpoch || ownerIdRef.current !== owner || seq !== connectSeqRef.current) return;
+      const serverItems = history && history.fallback !== "replay_only"
+        ? normalizeOpenCodeMessages(history.messages).items : [];
+      const items = serverItems.length ? serverItems : saved.items;
+      const cursor = serverItems.length && history ? history.event_counter : lastEventId;
       // 恢复上下文：sessionId + 存档（items/lastEventId）。
       sessionIdRef.current = sid;
       setSessionId(sid);
@@ -1097,7 +1186,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 续档回放的 message/reasoning 帧会被 L567 整批丢弃，重建出来一片空白。
       mutedUntilNextSendRef.current = false;
       sessionTouchedInThisVisit = true;
-      dispatch({ type: "restore", items: saved.items, lastEventId, savedAt: saved.savedAt });
+      dispatch({ type: "restore", items, lastEventId: cursor, savedAt: saved.savedAt });
       // D2-3：存档里若还有「排队中」的 steer 徽章（网关重启后它的 volatile 队列已经
       // 没了，永远不会再补终态帧），按同一个 TTL 排一趟清扫——到点仍停 queued 的翻
       // 「未能送达」，页面不留在永久「排队中」。锚点用存档时刻（restore 已按它扫过
@@ -1105,23 +1194,26 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       armSteerExpiry(saved.savedAt + AGENT_STEER_QUEUE_TTL_MS - Date.now());
       try {
         const quota = await fetchAgentQuota();
-        if (mountedRef.current) dispatch({ type: "quota", quota });
+        if (mountedRef.current && accountEpochRef.current === accountEpoch && ownerIdRef.current === owner) dispatch({ type: "quota", quota });
       } catch {
         // 种子是 best-effort。
       }
       // 用存档的 lastEventId 当续传游标开 SSE；即便 restore 的 dispatch
       // 还没反映进 stateRef，也从上一次结尾接着收。探针票直接复用，
       // 不再多 mint 一张，避免多余请求也避免「票已用完」竞态。
-      await openConnection(lastEventId, ticket);
+      if (accountEpochRef.current !== accountEpoch || ownerIdRef.current !== owner || seq !== connectSeqRef.current) return;
+      await openConnection(cursor, ticket);
+      if (!mountedRef.current || accountEpochRef.current !== accountEpoch || sessionIdRef.current !== sid) return;
       // 续接成功：不再显示「继续上次」提示（存档继续在 transcript 变化时更新）。
       setResumable(null);
       persistedRef.current = null;
       // 老会话补注账户记忆：建号时记忆可能还是空的（或当时没这功能）。
       void patchAgentSessionMemory(sid);
     } catch (err) {
+      if (accountEpochRef.current !== accountEpoch || ownerIdRef.current !== owner || seq !== connectSeqRef.current) return;
       // 铸票的探针失败；4xx = 会话已被网关回收 → 清档、说清楚，停在空态。
       if (isSessionReclaimed(err)) {
-        clearPersisted();
+        clearPersisted(ownerIdRef.current);
         persistedRef.current = null;
         setResumable(null);
         // 09-12 建号权收归发送按钮：过期不再自动建号（自动建＝用户可能根本
@@ -1154,6 +1246,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
    */
   const switchSession = useCallback(
     async (targetSessionId: string): Promise<boolean> => {
+      if (!currentAccountRef.current()) return false;
+      const accountEpoch = accountEpochRef.current;
       if (!targetSessionId) return false;
       // 09-12 主刀：网关 idle 回收（session.closed）是「该会话终局」，不是「本端终结」。
       // 点历史会话＝切向另一条会话、开启新生命，须解锁让 openConnection 重连回放；
@@ -1197,7 +1291,6 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         // persistedRef，逻辑不变）：目标会话有本机存档 → 不需要全史，
         // 直接省掉那个 RTT。
         const saved = persistedRef.current;
-        const useSaved = !!saved && saved.sessionId === targetSessionId;
         // 2026-09-12 全量历史重建（判准不变，改为与票平行发射）：无存档
         // 时由 GET /api/agent/sessions/[id] 拉 opencode 全量历史重建
         // transcript，SSE 从 event_counter 起只接增量，不再依赖网关 1000
@@ -1205,9 +1298,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         //   { messages, event_counter, replay_first_id, fallback?:"replay_only" }。
         // fetch 失败／normalize 契约漂移 → null＝降级讯号（等价旧 catch 降级，
         // 不往上抛错）。
-        const historyPromise = useSaved
-          ? null
-          : fetchAgentSessionMessages(targetSessionId)
+        const historyPromise = fetchAgentSessionMessages(targetSessionId)
               .then((history) => {
                 const { items } = normalizeOpenCodeMessages(history.messages);
                 // 可用性判定——任一不满足即降级，宁可走旧路也不blank欺场：
@@ -1243,7 +1334,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         // 09-12：新身份解除中止静默窗，保证历史会话回放的 message/reasoning 帧不被丢。
         mutedUntilNextSendRef.current = false;
         sessionTouchedInThisVisit = true;
-        if (saved && saved.sessionId === targetSessionId) {
+        if (!restored && saved && saved.sessionId === targetSessionId) {
           // 存档属于目标会话：原样回放＋用存档游标续传（原语义）。
           dispatch({ type: "restore", items: saved.items, lastEventId: saved.lastEventId });
           await openConnection(saved.lastEventId, ticket);
@@ -1259,6 +1350,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
           dispatch({ type: "reset" });
           await openConnection(0, ticket);
         }
+        if (!mountedRef.current || accountEpochRef.current !== accountEpoch || sessionIdRef.current !== targetSessionId) return false;
         void patchAgentSessionMemory(targetSessionId);
         return true;
       } catch (err) {
@@ -1287,6 +1379,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
    * 这个是「留旧开新」。
    */
   const startNewSession = useCallback(async (): Promise<boolean> => {
+    if (!currentAccountRef.current()) return false;
+    const owner = ownerIdRef.current;
+    const accountEpoch = accountEpochRef.current;
     // 09-12：开新会话＝新生命语义，session.closed 后入口解锁重建；auth/manual 仍封锁。
     if (closedRef.current && closedReasonRef.current !== 'session') return false;
     closedRef.current = false;
@@ -1295,7 +1390,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     // 等它结算再清。不等的话它在清空之后落地，等于空态被它击穿。
     if (startPipelineRef.current) {
       await startPipelineRef.current;
-      if (closedRef.current) return false;
+      if (closedRef.current || ownerIdRef.current !== owner || accountEpochRef.current !== accountEpoch) return false;
     }
     // 换轨前断旧流：新会话的事件不该混进旧连线的尾部。
     if (esRef.current) {
@@ -1316,7 +1411,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     // 不清必成陷阱：mount 的「同次访问静默续接」与跨访问的「继续上次」二选一
     // 都会把用户刚抛弃的旧对话凭空复活（旧设计靠新会话首个事件覆写存档，
     // lazy 世界里开新后可能根本不再 send，存档就永远搁著发霉）。
-    clearPersisted();
+    clearPersisted(ownerIdRef.current);
     sessionIdRef.current = null;
     setSessionId(null);
     sessionEpochRef.current += 1; // 旧会话身份作废：飞行中捕获旧 epoch 的 send() 该放弃。
@@ -1333,6 +1428,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
 
   /** D-17：删掉上次的会话并开一个全新会话。 */
   const discardAndStartNew = useCallback(async (): Promise<void> => {
+    if (!currentAccountRef.current()) return;
+    const owner = ownerIdRef.current;
+    const epoch = sessionEpochRef.current;
     // 别让存档挡住开新会话。
     forceNewRef.current = true;
     const saved = persistedRef.current;
@@ -1343,8 +1441,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         // 删不掉也没关系：它可能已被网关回收，清理是 best-effort。
       }
     }
+    if (ownerIdRef.current !== owner || sessionEpochRef.current !== epoch) return;
     // 重置到空 state，清掉存档与可续标记。
-    clearPersisted();
+    clearPersisted(ownerIdRef.current);
     persistedRef.current = null;
     setResumable(null);
     dispatch({ type: "reset" });
@@ -1359,17 +1458,17 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   // resume 分支一并退役：重开＝空态，旧会话去历史 dropdown 切回。
 
   return {
-    state,
-    connection,
-    sessionId,
-    error,
+    state: ownerIdRef.current === ownerId ? state : EMPTY_AGENT_CHAT_STATE,
+    connection: ownerIdRef.current === ownerId ? connection : "idle",
+    sessionId: ownerIdRef.current === ownerId ? sessionId : null,
+    error: ownerIdRef.current === ownerId ? error : null,
     start,
     send,
     confirm,
     answerQuestion,
     retry,
     end,
-    resumable,
+    resumable: ownerIdRef.current === ownerId ? resumable : null,
     resume,
     switchSession,
     startNewSession,

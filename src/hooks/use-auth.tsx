@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import type { NewApiUser } from "@/lib/new-api-client";
 import { getStoredToken, getStoredUser, clearStoredToken, setStoredToken, syncStoredAuthFromCookie } from "@/lib/new-api-client";
 import { fetchMe, logout as doLogout } from "@/lib/auth-client";
@@ -43,6 +43,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [isLoading, setIsLoading] = useState(!localTestMode);
   const [welcomeGift, setWelcomeGift] = useState<WelcomeGiftModal | null>(null);
   const clearWelcomeGift = useCallback(() => setWelcomeGift(null), []);
+  const authEpochRef = useRef(0);
 
   useEffect(() => {
     // 生产构建下条件被 SWC 对 process.env.NODE_ENV 的常量折叠＋DCE 整块剔除，
@@ -58,9 +59,11 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const refresh = useCallback(async () => {
     if (localTestMode) return;
     const t = getStoredToken();
-    if (!t) { setIsLoading(false); return; }
+    const epoch = ++authEpochRef.current;
+    if (!t) { setUser(null); setToken(null); setWelcomeGift(null); setIsLoading(false); return; }
 
     const result = await fetchMe(t);
+    if (epoch !== authEpochRef.current || getStoredToken() !== t) return;
     if (result.ok && result.user) {
       const validToken = result.token ?? t;
       setStoredToken(validToken, result.user);
@@ -82,13 +85,17 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   const setAuth = useCallback((t: string, u: NewApiUser) => {
     if (localTestMode) return;
+    authEpochRef.current += 1;
     setStoredToken(t, u);   // persist to localStorage
     setToken(t);
     setUser(u);
+    setWelcomeGift(null);
+    setIsLoading(false);
   }, [localTestMode]);
 
   const logout = useCallback(() => {
     if (localTestMode) return;
+    authEpochRef.current += 1;
     doLogout();
     setUser(null);
     setToken(null);
@@ -104,12 +111,14 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     // Hydrate from localStorage on mount
     const storedUser = getStoredUser();
     const storedToken = getStoredToken();
+    const epoch = ++authEpochRef.current;
     if (storedUser && storedToken) {
       setUser(storedUser);
       setToken(storedToken);
       setIsLoading(false);
       // Refresh in background to get latest quota
       fetchMe(storedToken).then((result) => {
+        if (epoch !== authEpochRef.current || getStoredToken() !== storedToken) return;
         if (result.ok && result.user) {
           const validToken = result.token ?? storedToken;
           setStoredToken(validToken, result.user);
@@ -123,7 +132,23 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     } else {
       setIsLoading(false);
     }
-  }, [localTestMode]);
+    // 其他标签页登录/退出时，以该标签页当前凭证重取身份，作废本页旧请求。
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key !== "napi_token" && event.key !== "napi_user" && event.key !== null) return;
+      authEpochRef.current += 1;
+      const nextToken = getStoredToken();
+      const nextUser = getStoredUser();
+      setToken(nextToken);
+      setUser(nextToken ? nextUser : null);
+      setWelcomeGift(null);
+      void refresh();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      authEpochRef.current += 1;
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [localTestMode, refresh]);
 
   return (
     <AuthContext.Provider value={{

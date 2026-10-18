@@ -1,12 +1,6 @@
-// Agent 聊天会话持久化：把「未结束的对话」落在 localStorage，供下次进入时恢复。
-//
-// 为什么存 localStorage：
-//   - 网关没有 session GET / list 端点，前端手上唯一能跨刷新持有的会话凭据
-//     就是 sessionId（DELETE 之外没有任何读路径）。
-//   - 存活线 24 小时（2026-08-29 起）：网关闲置 30 分钟只回收内存态，DB row
-//     （sessions.db）保留 7 天、opencode 会话不再被 idle reaper 删除——空闲会话
-//     重开 SSE 时经 DB 懒恢复照常铸票、回放历史。因此存档给满 24h 保存线，
-//     覆盖暴君要求的「至少保存 24 小时」。
+// Agent 聊天按账号缓存：localStorage 仅加速恢复最近内容，服务端会话目录和全量历史是真源。
+// 新客户端登录后从服务端找回历史；旧版无归属缓存只有经服务端确认属于当前账号才迁移。
+// 本地快照保留24小时、最多80条，不限制服务端会话及完整历史的保存与恢复。
 //
 // 防御纪律（隐私模式 / 坏数据一律当「没有存档」，绝不 throw）：
 //   - localStorage 在隐私模式或禁用环境下 getItem/setItem 会抛异常 → 吞掉。
@@ -19,6 +13,7 @@
 // 测试传内存实现），便于 node 环境下直接测。
 
 import type { AgentTranscriptItem } from "./agent-chat-types";
+import { getStoredUser } from "./new-api-client";
 
 export const AGENT_CHAT_STORAGE_KEY = "agent-chat-session-v1";
 export const AGENT_CHAT_STORAGE_VERSION = 1;
@@ -223,26 +218,45 @@ export function clearPersistedSnapshot(storage: AgentStorageLike): boolean {
 
 function browserStorage(): AgentStorageLike | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage ?? null;
+  try { return window.localStorage ?? null; } catch { return null; }
+}
+
+function storedOwner(): number | null {
+  try { return getStoredUser()?.id ?? null; } catch { return null; }
+}
+
+function accountStorage(storage: AgentStorageLike, ownerId: number): AgentStorageLike {
+  const key = `${AGENT_CHAT_STORAGE_KEY}:user:${ownerId}`;
+  return {
+    getItem: () => storage.getItem(key),
+    setItem: (_key, value) => storage.setItem(key, value),
+    removeItem: () => storage.removeItem(key),
+  };
+}
+
+/** 旧版无归属缓存只能用于服务端归属核实后的迁移，禁止直接展示。 */
+export function loadLegacyPersisted(now: number = Date.now()): PersistedAgentChat | null {
+  const storage = browserStorage();
+  return storage ? loadPersistedSnapshot(storage, now) : null;
 }
 
 /** 读浏览器里未过期的存档；没有 / 隐私模式 / 坏数据一律回 null。 */
-export function loadPersisted(now: number = Date.now()): PersistedAgentChat | null {
+export function loadPersisted(now: number = Date.now(), ownerId: number | null = storedOwner()): PersistedAgentChat | null {
   const storage = browserStorage();
-  if (!storage) return null;
-  return loadPersistedSnapshot(storage, now);
+  if (!storage || ownerId === null) return null;
+  return loadPersistedSnapshot(accountStorage(storage, ownerId), now);
 }
 
 /** 写浏览器存档；失败回 false，绝不 throw。 */
-export function savePersisted(snapshot: Omit<PersistedAgentChat, "version">): boolean {
+export function savePersisted(snapshot: Omit<PersistedAgentChat, "version">, ownerId: number | null = storedOwner()): boolean {
   const storage = browserStorage();
-  if (!storage) return false;
-  return savePersistedSnapshot(storage, snapshot);
+  if (!storage || ownerId === null) return false;
+  return savePersistedSnapshot(accountStorage(storage, ownerId), snapshot);
 }
 
 /** 清掉浏览器存档；失败也不 throw。 */
-export function clearPersisted(): boolean {
+export function clearPersisted(ownerId: number | null = storedOwner()): boolean {
   const storage = browserStorage();
-  if (!storage) return false;
-  return clearPersistedSnapshot(storage);
+  if (!storage || ownerId === null) return false;
+  return clearPersistedSnapshot(accountStorage(storage, ownerId));
 }
