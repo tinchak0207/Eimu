@@ -16,14 +16,11 @@ const EXAMPLE_JSON = JSON.stringify(EXAMPLE_ARGS)
 
 export default tool({
   description: [
-    "子代理主动挂起当前执行并交出并发槽位（Suspend & Yield Concurrency）。",
-    "用于在遇到上游限流或异步长任务（视频渲染、批次生图）时主动休眠，将宝贵的 3 个并发槽位腾出给其他子任务；待计时器到期或任务就绪时，由调度器自动恢复（Resume）并回灌结果。",
-    "**字段说明**：",
-    "  - `reason`：挂起原因（如「等待视频上游生成」「等待上游限流冷却」）；",
-    "  - `timeout_seconds`：挂起时长秒数（默认 30 秒，到期网关自动恢复本子代理）；",
-    "  - `task_id`：可选上游长任务 ID；",
-    "  - `checkpoint_data`：挂起时保存的临时上下文数据（恢复时原样回灌）。",
-    `示例参数：${EXAMPLE_JSON}`,
+    "子代理主动挂起并交出并发槽。",
+    "何时用：遇到上游限流或视频渲染等长任务，需要把槽位让给其他子任务时。",
+    "何时不用：主代理不要调用；普通短暂等待不需要挂起。",
+    "关键约束：timeout_seconds 默认 30，到期自动恢复；checkpoint_data 原样回灌；恢复由调度器或 subagent_resume 触发。",
+    "示例：subagent_suspend({reason:\"等待视频上游生成\", timeout_seconds:120, task_id:\"vid_123\"})",
   ].join("\n"),
   args: {
     reason: tool.schema

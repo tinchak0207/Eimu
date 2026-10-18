@@ -14,13 +14,11 @@ const EXAMPLE_JSON = JSON.stringify(EXAMPLE_ARGS)
 
 export default tool({
   description: [
-    "主动恢复一个处于挂起（suspended）状态的子代理（Resume Subagent）。",
-    "可由主代理在观察到异步长任务完成或满足恢复条件时显式调用；若当前并发槽已满（3/3），恢复请求将自动进入排队队列，待槽位释放后自动获取槽位恢复执行。",
-    "**字段说明**：",
-    "  - `subagent_id`：要恢复的子代理 ID，或 `latest`；",
-    "  - `resume_token`：可选令牌（若由子代理自身挂起回传）；",
-    "  - `payload`：可选回传给恢复后子代理的数据或结果文本（如异步完成的视频链接）。",
-    `示例参数：${EXAMPLE_JSON}`,
+    "恢复处于 suspended 的子代理。",
+    "何时用：异步长任务完成或恢复条件满足，且并发槽可用时。",
+    "何时不用：运行中或已终态的子代理不要 resume；先用 subagent_status 确认 suspended。",
+    "关键约束：并发 3/3 时恢复请求排队，槽位释放后自动执行；payload 原样回灌给子代理。",
+    "示例：subagent_resume({subagent_id:\"agent-x7q\", payload:\"视频已完成：https://example.com/final.mp4\"})",
   ].join("\n"),
   args: {
     subagent_id: tool.schema

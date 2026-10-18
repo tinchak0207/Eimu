@@ -42,6 +42,8 @@ import { templatePlaceholderContent } from "./workflow-templates"
 import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { notify, waitFor, parseWaitMs } from "./internal-waiters.ts"
+// 协作总线：派遣成功即登记 worker 为 mailbox 团队成员（只登记，不参与编排）。
+import { registerTeamMember } from "./agent-mailbox.ts"
 // FIX-A（2026-10-02）：子代理工具结果的媒体成品出卡——共用主路径的成品 URL 提取器与
 // emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
 // 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
@@ -94,6 +96,29 @@ import {
 // 2026-10-03：事后产物硬检（确定性量测；gateway 侧移植，见 media-quality.ts 档头）。
 // 只回技术分（非审美）；量测失败一律 null，绝不让交付主流程受阻。
 import { measureMediaScore, MEDIA_QUALITY_MEASURED_MARK, type MeasuredMediaResult } from "./media-quality.ts"
+// CC 2.1.302 移植（2026-10-18）：fork／worker 硬规则／name／effort／深度闸的纯策略。
+// 本档零 gateway 内部依赖，避免扩大 subagent↔sessions-core 的既有 ESM 循环。
+import {
+  WORKER_HARD_RULES,
+  FORK_HARD_RULES,
+  FORK_STARTED_NOTICE,
+  buildForkDirective,
+  validateSubagentName,
+  forkNameFromLabel,
+  normalizeEffort,
+  effortVariant,
+  stripAuthorizationSection,
+  computeSubagentUsage,
+  runMessageWindow,
+  messagesInWindow,
+  type MessageWindow,
+  type SubagentUsageMessage,
+  subagentMaxDepth,
+  agentNestingDepth,
+  depthLimitMessage,
+  parseSubagentModel,
+  type SubagentEffort,
+} from "./subagent-policy.ts"
 
 // P2b（2026-09-11）刀1：任务书首行自动补「预期 N 分钟」死线行。
 // 任何派遣若首行没有「预期 N」，补上 5 分钟 → R1 parseSyncDeadlineMs 得
@@ -165,7 +190,8 @@ function subagentResumeTtlMs(): number {
 const SIBLING_ROSTER_MAX = 20
 // X7/Y4：子代理层级深度上限（Codex exceeds_thread_spawn_depth_limit、Claude Code 3 层）。
 // 本轮只**约束**（超限拒绝派工并如实回报），不做多级路由。
-const SUBAGENT_MAX_DEPTH = 3
+// CC 2.1.302 移植（2026-10-18）：默认 3，env SUBAGENT_MAX_DEPTH 可覆写（见 subagent-policy.ts）。
+
 // C1/X8：实时工作日志档。Codex 是事件流由消费方自行拼装；我方父模型只有 read 工具，
 // 故给**可 read 的档**（节流 ≥1000ms，终态强制写，写失败绝不抛错）。
 const SUBAGENT_LIVE_REL = "outputs/subagent/live"
@@ -275,7 +301,12 @@ interface SubagentModelRef {
 export interface SubagentUsage {
   tool_calls: number
   duration_ms: number
-  tokens: number
+  // D3：上游消息完全没有 tokens 栏时不输出 0（0 是伪造的「用了 0 token」），改为缺省。
+  tokens?: number
+  // CC 2.1.302 结果契约（@4671176 task-notification）：<subagent_tokens>/<tool_uses>/<duration_ms>。
+  // 与上方旧栏位同值、同时输出，既有消费方零改动。
+  subagent_tokens?: number
+  tool_uses?: number
 }
 
 // ── 2026-10-14 支柱 2/3/4：结构化检查点／挂起／具型产物／共享状态板 ──
@@ -404,6 +435,9 @@ interface SubagentRun {
   machineCriticPass?: boolean
   // 刀 2：机器 pass 的 critic run 专用——其终态 verdict 判读结果（false=通过）。
   machineCriticRejected?: boolean
+  // CC 2.1.302 移植：目标验收 run 的终态回调（runGoalEvaluator 注入）。只在本 run
+  // 走 finishRun 单一路径时触发一次；不参与 critic 判决、不唤醒父会话。
+  goalEvaluator?: (result: { status: "ok" | "error"; text: string; error?: string }) => void
   // 2026-10-03：机器 critic run 被派时所审的那批 Expert 交付（跨 finishRun 需要它们的
   // 正文抽取可量测媒体 URL）。只在 maybeRunMachineCriticPass 建立 run 时赋值一次。
   criticReviewed?: CriticPassTarget[]
@@ -458,6 +492,33 @@ interface SubagentRun {
   lastCheckpoint?: SubagentCheckpoint
   fromCheckpoint?: { run_id: string; checkpoint_id: string; stage: string }
   suspension?: SubagentSuspension
+  // ── CC 2.1.302 移植（2026-10-18）──────────────────────────────────────────
+  // name：可达 64 字符的可寻址名（subagent_message/status 可直接按名寻址）。
+  name?: string
+  // fork：子会话由父会话 `/session/{id}/fork` 服务端复制完整历史（含 tool_use/tool_result），
+  // 继承同一 agent 工具面与模型；结果只取 fork 自己新产生的最后一则 assistant 文本。
+  isFork?: boolean
+  /** fork 的历史来源（呼叫者的 opencode 会话 id）。父字段仍指向主会话，避免破坏归属/唤醒链。 */
+  forkSourceOpencodeSessionId?: string
+  /** D4/D3：fork 的 boundary messageID（必须在父消息列表中找到）与 fork 会话创建时刻。
+   *  结果文本与 usage 只认 boundary 之后／创建时间严格大于的消息，绝不把父消息当 fork 产出。 */
+  forkBoundaryMessageID?: string
+  forkCreatedAt?: number
+  /** D7：发起本次 fork 的子代理 run id——完成/失败结果唤醒它，而不是主会话。 */
+  forkRequesterRunId?: string
+  /** D6：实际派工者的 opencode 会话 id（子代理派孙代理时是子会话；main 派工时是主会话）。
+   *  非 fork 子会话创建时作为 parentID，让 opencode 侧也记录真实层级。 */
+  requesterOpencodeSessionId?: string
+  /** D2：本 run 是否真的带上了 variant（false＝该 agent/model 不支持，已原样重投）。 */
+  variantApplied?: boolean
+  /** 派工者的 system prompt 快照（fork 直接用它作为子会话 system，照 d7e 的 parent snapshot）。 */
+  forkSystemSnapshot?: string
+  /** 本 run 自己的 system prompt 快照。子代理再 fork 时原样交给 fork（d7e 的
+   *  parent system prompt snapshot），避免 fork 丢掉派遣时注入的宪法/契约/授权段。 */
+  systemPromptSnapshot?: string
+  effort?: SubagentEffort
+  /** 显式 model 覆写（provider/model）；fork 忽略（继承父模型）。 */
+  modelOverride?: SubagentModelRef
 }
 
 interface SubagentResult {
@@ -498,6 +559,12 @@ interface SubagentResult {
   lastCheckpoint?: SubagentCheckpoint
   checkpointsCount?: number
   fromCheckpoint?: { run_id: string; checkpoint_id: string; stage: string }
+  // ── CC 2.1.302 移植（2026-10-18）：终态结果契约 ──
+  name?: string
+  is_fork?: boolean
+  effort?: SubagentEffort
+  variant_applied?: boolean
+  usage?: SubagentUsage
 }
 
 interface SubagentDeps {
@@ -839,6 +906,9 @@ function findLiveRun(parentGatewaySessionId: string, idOrLabel: string): Subagen
   )
   const exact = list.find((r) => r.id === idOrLabel)
   if (exact) return exact
+  // CC 2.1.302：name 是可直接寻址的稳定标识（subagent_message 按名字寻址）。
+  const named = list.find((r) => r.name === idOrLabel)
+  if (named) return named
   return list.find((r) => r.label.startsWith(idOrLabel))
 }
 
@@ -847,6 +917,8 @@ export function findRunningRun(parentGatewaySessionId: string, idOrLabel: string
   const list = (byParent.get(parentGatewaySessionId) ?? []).filter((r) => r.status === "running" && !r.stopped)
   const exact = list.find((r) => r.id === idOrLabel)
   if (exact) return exact
+  const named = list.find((r) => r.name === idOrLabel)
+  if (named) return named
   const byLabel = list.filter((r) => r.label.startsWith(idOrLabel))
   return byLabel[0]
 }
@@ -1007,10 +1079,13 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const softStop = run.softStopping
   run.softStopping = undefined
   run.status = status
+  // CC 2.1.302 结果契约：usage 必须随完成通知/status 返回。summarizeChild 路径已算过；
+  // 超时/上游错误等收尾路径在此补一次（幂等：已有值不重算）。
+  if (!run.usage) run.usage = await childUsageSnapshot(run)
   // E 片（2026-09-12）缺陷一：**先落盘完整全文/死因全文，再走摘要与 DELETE**。行内
   // 摘要仍只给 600 字（semantics 不变），但前缀挂落盘指针 → 父会话可 read 全文。
   const persist = persistRunOutput(run, status, fullText, error)
-  if (status === "ok" && run.agent && !run.stopped) {
+  if (status === "ok" && run.agent && !run.stopped && typeof run.goalEvaluator !== "function") {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
     arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS).ok : undefined })
     if (arr.length > 20) arr.shift()
@@ -1032,8 +1107,8 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   const truncNote =
     okTrunc && okTrunc.truncated > 0 ? `\n\n[已截断 ${okTrunc.truncated} 字元；完整结果见落盘指标]` : ""
   const usageNote =
-    status === "ok" && run.usage
-      ? `\n\n[子代理用量] 工具调用 ${run.usage.tool_calls} 次 · 耗时 ${Math.round(run.usage.duration_ms / 1000)}s · token ${run.usage.tokens}`
+    run.usage
+      ? `\n\n[子代理用量] 工具调用 ${run.usage.tool_calls} 次 · 耗时 ${Math.round(run.usage.duration_ms / 1000)}s${typeof run.usage.tokens === "number" ? ` · token ${run.usage.tokens}` : " · token 上游未提供"}`
       : ""
   let summary = `${persist.pointer}${inline}${truncNote}${usageNote}`
   run.summary = summary
@@ -1309,6 +1384,13 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     ...(run.lastCheckpoint ? { lastCheckpoint: run.lastCheckpoint } : {}),
     checkpointsCount: run.checkpoints?.length ?? 0,
     ...(run.fromCheckpoint ? { fromCheckpoint: run.fromCheckpoint } : {}),
+    // CC 2.1.302 结果契约：usage 与 name/fork 进 durable/completed，status 与完成通知
+    // 由同一记录取件（唯一真源，不另算一份）。
+    ...(run.usage ? { usage: run.usage } : {}),
+    ...(run.name ? { name: run.name } : {}),
+    ...(run.isFork ? { is_fork: true } : {}),
+    ...(run.effort ? { effort: run.effort } : {}),
+    ...(run.variantApplied !== undefined ? { variant_applied: run.variantApplied } : {}),
   }
   try { saveDurableSubagentRun({ ...run, fullText }, durableResult) }
   catch (error) { run.status = "running"; run.resumeUntil = undefined; run.recoveredWatcher = true; console.error("[gateway] durable subagent terminal deferred:", run.id); return }
@@ -1323,6 +1405,16 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
   completed.set(run.id, durableResult)
   // WP2（2026-10-14）：终态落点（finishRun 单一路径）——叫醒该 run 的长挂起 waiter。
   notify(`subagent:${run.parentGatewaySessionId}:${run.id}`)
+  // CC 2.1.302 移植：目标验收 run 的终态回调（只此一处，finishRun 幂等守卫保证一次）。
+  if (typeof run.goalEvaluator === "function") {
+    const onTerminal = run.goalEvaluator
+    run.goalEvaluator = undefined
+    try {
+      onTerminal({ status, text: fullText, error })
+    } catch (e) {
+      console.error(`[gateway] goal evaluator terminal callback failed: id=${run.id}`, e)
+    }
+  }
   // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
   if (status === "ok" && (run.agent || run.researchTask) && !run.partialPersist) {
     saveDelivery({
@@ -1340,6 +1432,10 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
       id: run.id,
       status,
       summary: visibleSummary,
+      ...(run.name ? { name: run.name } : {}),
+      ...(run.isFork ? { fork: true } : {}),
+      ...(run.effort ? { effort: run.effort } : {}),
+      ...(run.variantApplied !== undefined ? { variant_applied: run.variantApplied } : {}),
       // 片 C（2026-09-15）：新增栏位，不动既有 id/status/summary 语义；ok 时不加。
       ...(deliveryGate ? { delivery_gate: deliveryGate } : {}),
       // 2026-10-02 能力片：用量计数（仅 summarizeChild 路径有值；新栏位，不动既有键）。
@@ -1361,7 +1457,26 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
     // resume 查询），只是不再由它负责唤醒。
     // 注：HEAD 在本函数开头有 `const asyncMode = run.asyncMode === true`（本工作树一并删除），
     // 复位时改为就地读取 run.asyncMode，保持「只改这一处」。
-    if (run.asyncMode === true && run.machineCriticPass === true) {
+    if (run.asyncMode === true && run.isFork) {
+      // D7：fork 的完成/失败结果回到**发起 fork 的子代理会话**（requester），不是主会话。
+      // 走既有 deliverChildTurn（与 dispatchAttempt 同一条 prompt_async 轮廓），不新造通路。
+      const requester = run.forkRequesterRunId ? findRunById(run.forkRequesterRunId) : undefined
+      if (requester && !requester.stopped && isOpenCodeSessionId(requester.opencodeSessionId)) {
+        const label = userFacingSubagentLabel(run.label)
+        const content =
+          `【fork 完成·系统自动唤醒】你发起的 fork「${label}」（${run.id.slice(0, 8)}）已结束：status=${status}。\n\n` +
+          `${visibleSummary}${error ? `\n\n错误：${error}` : ""}\n\n` +
+          `这是你这条 fork 的结果，继续你手上的任务；它不是用户授权，也不代表整项任务完成。`
+        void deliverChildTurn(requester, content, "fork_done", true)
+        console.log(
+          `[gateway] fork result delivered to requester: fork=${run.id} requester=${requester.id} child=${requester.opencodeSessionId} status=${status}`,
+        )
+      } else {
+        console.warn(
+          `[gateway] fork result not delivered (requester gone/stopped): fork=${run.id} requester=${run.forkRequesterRunId ?? "-"} status=${status}`,
+        )
+      }
+    } else if (run.asyncMode === true && run.machineCriticPass === true) {
       // 修 1（2026-10-02）：verdict（PASS 与 REJECT）一律以正常完成仪式回灌父会话——
       // PASS 不再只写 journal（实锤：判决从未送达，orchestrator 两小时后手动 read 才发现）。
       try {
@@ -1428,6 +1543,9 @@ async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: str
 async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstText: string): Promise<void> {
   if (!deps) return
   const oldChild = run.opencodeSessionId
+  // D11：重派是新的完整 attempt——旧 attempt 的 usage 必须清掉，否则终态会回带首轮数字。
+  run.usage = undefined
+  // D6：childPath／parentSubagentId（深度来源）原样保留；重派不是「回到根层」。
   run.prompt = `${run.prompt}\n\n---\n\n${buildReworkDirective(run.agent ?? "", verdict, DELIVERY_CONTRACTS)}`
   if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
   const hardMs = run.asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
@@ -1831,11 +1949,12 @@ function textBlocksOfMessage(m: { parts?: Array<{ type?: string; text?: string }
     .join("\n")
     .trim()
 }
-function lastAssistantTextWithFallback(
-  msgs: Array<{ info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> }>,
-): string {
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i]
+/** D3：run 的时间窗与 usage 累加由 subagent-policy.ts 的纯函数提供
+ *  （runMessageWindow／messagesInWindow／computeSubagentUsage，供验收脚本直接单测）。 */
+function lastAssistantTextWithFallback(msgs: SubagentUsageMessage[], win: MessageWindow): string {
+  const scoped = messagesInWindow(msgs, win)
+  for (let i = scoped.length - 1; i >= 0; i--) {
+    const m = scoped[i]
     if (m?.info?.role !== "assistant") continue
     const t = textBlocksOfMessage(m)
     if (t) return t
@@ -1843,34 +1962,22 @@ function lastAssistantTextWithFallback(
   return ""
 }
 
-/** 用量计数：tool part 计数 ＋ token（最后一则 assistant 的 input/output/cache）
- *  ＋耗时。token 口径 = input+output+cache.read+cache.write（对齐 Claude Code
- *  getTokenCountFromUsage 的 input+cache_creation+cache_read+output 形态，未复制程式码）。 */
-function computeSubagentUsage(
-  msgs: Array<{ info?: { role?: string; tokens?: unknown }; parts?: Array<{ type?: string }> }>,
-  startedAt: number,
-): SubagentUsage {
-  let toolCalls = 0
-  for (const m of msgs) for (const p of m?.parts ?? []) if (p?.type === "tool") toolCalls++
-  let tokens = 0
-  const lastAssistant = [...msgs].reverse().find((m) => m?.info?.role === "assistant")
-  const tk = lastAssistant?.info?.tokens
-  if (tk && typeof tk === "object") {
-    const t = tk as Record<string, unknown>
-    for (const k of ["input", "output"]) {
-      const v = t[k]
-      if (typeof v === "number" && Number.isFinite(v)) tokens += v
-    }
-    const c = t.cache
-    if (c && typeof c === "object") {
-      const cc = c as Record<string, unknown>
-      for (const k of ["read", "write"]) {
-        const v = cc[k]
-        if (typeof v === "number" && Number.isFinite(v)) tokens += v
-      }
-    }
+/** 终态补 usage 用：任何收尾路径（idle/超时/上游错误）都能从子会话消息算出同一口径。
+ *  失败一律 undefined（usage 不是交付闸门，绝不阻断收尾）。 */
+async function childUsageSnapshot(run: SubagentRun): Promise<SubagentUsage | undefined> {
+  if (!deps || !isOpenCodeSessionId(run.opencodeSessionId)) return undefined
+  try {
+    const res = await fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/message`, {
+      headers: deps.openCodeHeaders(),
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return undefined
+    const msgs = (await res.json()) as SubagentUsageMessage[]
+    if (!Array.isArray(msgs)) return undefined
+    return computeSubagentUsage(msgs, run.startedAt, runMessageWindow(run))
+  } catch {
+    return undefined
   }
-  return { tool_calls: toolCalls, duration_ms: Date.now() - startedAt, tokens }
 }
 
 /** 子会话 idle：取最后一条 assistant 文本作 summary。 */
@@ -1899,8 +2006,11 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
       if (Array.isArray(msgs)) {
         // 2026-10-02 能力片：语义结果＝最后一则有文字的 assistant 讯息（loop 可能停在
         // 纯 tool_use 讯息，回退到最近有文字的一则）；非「全文前 600 字」。
-        text = lastAssistantTextWithFallback(msgs)
-        run.usage = computeSubagentUsage(msgs, run.startedAt)
+        // D3：统一走 run 时间窗——fork 只认 boundary 之后／创建时间严格大于的消息，
+        // 父会话复制过来的旧结论绝不冒充 fork 产出；普通子会话只认 startedAt 之后。
+        const window = runMessageWindow(run)
+        text = lastAssistantTextWithFallback(msgs, window)
+        run.usage = computeSubagentUsage(msgs, run.startedAt, window)
       }
     }
   } catch (e) {
@@ -1914,7 +2024,7 @@ async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（202
   // 「正常 idle + 零 assistant 文本」收尾——session.error 事件根本不会出现，下面的
   // 换模重试链因此从不触发，attempt 永远停在 1/5。此处补上对称触发点：零文本且链上
   // 还有备选模型 → 视同渠道故障换模重投；耗尽才如实 finishRun error（语义不变）。
-  if (run.attempt < run.modelChain.length) {
+  if (!run.isFork && run.attempt < run.modelChain.length) {
     const nextAttempt = run.attempt + 1
     const oldChild = run.opencodeSessionId
     console.error(
@@ -1992,21 +2102,139 @@ export function buildExpertSkillFact(agent: string | undefined): string {
   return `【本域配方库】${paths} —— 这是本域配方库，进域即载，常驻。\n\n`
 }
 
+/**
+ * CC 2.1.302 fork 的父上下文快照（1.18 与 dev 的差异兜底）：
+ *  - opencode dev 的 projectFork 会复制 agent/model/permission；1.18.34 的 fork 只复制消息，
+ *    所以这里显式取父会话的 agent/model，prompt_async 时带上（= model:"inherit"、
+ *    useExactTools：同一 agent 决定同一套工具面）。
+ *  - boundary：1.18 与 dev 的 messageID 都是「before」语义。父最后一条若是 assistant
+ *    （含正在执行的 subagent_dispatch tool_use），以它为界可排除未结算的工具调用，
+ *    让 fork 的 transcript 以干净的 user 请求结尾，不出现无 tool_result 的悬空 tool_use。
+ *    同一父回合派出的多个 fork 都以同一条 assistant 为界 ⇒ 复制出逐位元相同的父前缀，
+ *    前缀缓存一致（对应 llo 用合成 tool_result「Fork started — processing in background」
+ *    维持兄弟 fork 同前缀的做法；Eimu 的 dispatch 收据本身就是那条合成结果）。
+ *  D4：取不到 boundary／agent／model 一律**拒绝 fork**（返回明确错误），不再 fail-open
+ *  退化成「整段复制」——那会把父的历史当成 fork 的继承边界并丢掉工具面/模型绑定。
+ *  boundary 必须是父消息列表里**真实存在**的那条 messageID 才接受。
+ */
+type ForkContext =
+  | {
+      ok: true
+      boundaryMessageID: string
+      agent: string
+      model: { providerID: string; modelID: string }
+      variant?: string
+    }
+  | { ok: false; error: string }
+
+async function resolveForkContext(source: string): Promise<ForkContext> {
+  try {
+    const [sessRes, msgRes] = await Promise.all([
+      fetch(`${deps!.openCodeUrl}/session/${source}`, {
+        headers: deps!.openCodeHeaders(),
+        signal: AbortSignal.timeout(10000),
+      }),
+      fetch(`${deps!.openCodeUrl}/session/${source}/message`, {
+        headers: deps!.openCodeHeaders(),
+        signal: AbortSignal.timeout(10000),
+      }),
+    ])
+    if (!sessRes.ok) return { ok: false, error: `父会话不可读（opencode status ${sessRes.status}）` }
+    if (!msgRes.ok) return { ok: false, error: `父会话消息不可读（opencode status ${msgRes.status}）` }
+    const info = (await sessRes.json().catch(() => null)) as any
+    const msgs = (await msgRes.json().catch(() => null)) as any
+    if (!Array.isArray(msgs) || msgs.length === 0) {
+      return { ok: false, error: "父会话没有可继承的消息，无法确定 fork boundary" }
+    }
+    const last = msgs[msgs.length - 1]
+    if (last?.info?.role !== "assistant" || typeof last.info.id !== "string" || !last.info.id) {
+      return { ok: false, error: "父会话最后一条消息不是 assistant，无法确定 fork boundary" }
+    }
+    const boundaryMessageID: string = last.info.id
+    // D4：messageID 必须在父消息列表中找到才接受（防上游返回的 id 与列表漂移）。
+    if (!msgs.some((m: any) => m?.info?.id === boundaryMessageID)) {
+      return { ok: false, error: "fork boundary messageID 不在父消息列表中" }
+    }
+    let agent: string | undefined
+    let model: { providerID: string; modelID: string } | undefined
+    let variant: string | undefined
+    if (typeof info?.agent === "string" && info.agent) agent = info.agent
+    const m = info?.model
+    if (m && typeof m.providerID === "string" && typeof (m.modelID ?? m.id) === "string") {
+      model = { providerID: m.providerID, modelID: m.modelID ?? m.id }
+      if (typeof m.variant === "string" && m.variant) variant = m.variant
+    }
+    if (typeof info?.variant === "string" && info.variant) variant = variant ?? info.variant
+    // 老版本 session info 不含 agent/model：从 boundary（最近一条 assistant）兜底。
+    if (!agent && typeof last.info.mode === "string" && last.info.mode) agent = last.info.mode
+    if (!model && typeof last.info.providerID === "string" && typeof last.info.modelID === "string") {
+      model = { providerID: last.info.providerID, modelID: last.info.modelID }
+    }
+    if (!variant && typeof last.info.variant === "string" && last.info.variant) variant = last.info.variant
+    if (!agent) return { ok: false, error: "取不到父会话 agent，fork 无法继承同一工具面，已拒绝" }
+    if (!model) return { ok: false, error: "取不到父会话 model，fork 无法继承模型，已拒绝" }
+    return { ok: true, boundaryMessageID, agent, model, ...(variant ? { variant } : {}) }
+  } catch (e) {
+    return { ok: false, error: `fork 上下文不可读（opencode 不可达：${(e as Error).message}）` }
+  }
+}
+
 async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   let childId: string | undefined
-  try {
-    const res = await fetch(`${deps!.openCodeUrl}/session`, {
-      method: "POST",
-      headers: deps!.openCodeHeaders(),
-      body: "{}",
-      signal: AbortSignal.timeout(30000),
-    })
-    if (res.ok) {
-      const data = (await res.json()) as { id?: string }
-      childId = data.id
+  let forkModel: { providerID: string; modelID: string } | undefined
+  let forkAgent: string | undefined
+  let forkVariant: string | undefined
+  run.variantApplied = undefined
+  if (run.isFork) {
+    // CC 2.1.302 aYt：fork 不新建空会话，而是让 opencode 在服务端复制父会话到 boundary
+    // 为止的**完整消息历史**（含 tool_use/tool_result；dev 的 projectFork 逐行复制
+    // SessionMessageTable；1.18 的 fork 复制消息与 parts）。
+    const source = run.forkSourceOpencodeSessionId
+    if (!isOpenCodeSessionId(source)) {
+      return `fork 源会话非法（非 ses 前缀：「${String(source)}」）`
     }
-  } catch {
-    childId = undefined
+    const ctx = await resolveForkContext(source)
+    if (!ctx.ok) return `fork 上下文不可用，已拒绝 fork：${ctx.error}`
+    forkModel = ctx.model
+    forkAgent = ctx.agent
+    forkVariant = ctx.variant
+    try {
+      const res = await fetch(`${deps!.openCodeUrl}/session/${source}/fork`, {
+        method: "POST",
+        headers: deps!.openCodeHeaders(),
+        body: JSON.stringify({ messageID: ctx.boundaryMessageID }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { id?: string }
+        childId = data.id
+        // D3：fork 的结果/usage 只认 boundary 之后的消息；创建时刻只作 boundary 缺失兜底。
+        run.forkBoundaryMessageID = ctx.boundaryMessageID
+        run.forkCreatedAt = Date.now()
+      } else {
+        return `fork 会话创建失败（opencode status ${res.status}）`
+      }
+    } catch (e) {
+      return `fork 会话创建失败（opencode 不可达：${(e as Error).message}）`
+    }
+  } else {
+    try {
+      // D6：把真实派工者写成 parentID（opencode Session.parentID）；opencode 不支持
+      // 该栏时它会被忽略，不影响现有创建路径。
+      const requesterOc = run.requesterOpencodeSessionId ?? run.parentOpencodeSessionId
+      const res = await fetch(`${deps!.openCodeUrl}/session`, {
+        method: "POST",
+        headers: deps!.openCodeHeaders(),
+        body: JSON.stringify(isOpenCodeSessionId(requesterOc) ? { parentID: requesterOc } : {}),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { id?: string }
+        childId = data.id
+      }
+    } catch {
+      childId = undefined
+    }
   }
   if (!childId) return "会话创建失败（opencode 不可达）"
   // E 片（2026-09-12）缺陷二防御：opencode 回的 id 必须是 ses 前缀字串才拿去拼 URL。
@@ -2022,7 +2250,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   rememberChildParent(childId, run)
   saveDurableSubagentRun(run)
 
-  const model = run.modelChain[run.attempt - 1]
+  const model = run.isFork ? undefined : run.modelChain[run.attempt - 1]
   // 野兽模式 ON：任务书头部注入 Expert 宪法（诚实铁律/工具域断路/配方优先/
   // 记忆纪律/停止上报）。宪法档不可读时保留任务书原文并附损坏标记——任务书
   // 本身已自包含，不因宪法缺席而丢任务；标记让父会话能如实上报注入未生效。
@@ -2059,24 +2287,62 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
     ? "\n\n【当前授权·网关核实】父任务完全访问或自动模式的持续授权仍生效，任务内扣费、必要返工和可自行判断的制作选择直接继续，不再逐次问开工或费用。仍遵守委托单明确预算、指定模型、禁止生成和方案须用户确认要求；研究与独立评审照常。授权不增加工具权限：若本域应有工具缺失，回报具名席位、工具名与原始拒绝供平台修接线，不推断全平台无外网或无生图能力。"
     : "\n\n【当前授权】没有网关核实的持续授权；只按委托单已有任务与预算范围继续，范围外的付费交回父代理合并请求授权，用户沉默不算同意。"
   // 委托任务保持首个独立user part；规则与唯一机器交付格式位于system，资料不混入任务正文。
-  const parts: Array<{ type: "text"; text: string }> = [{ type: "text", text: run.prompt }]
-  if (templateSlotsNote) parts.push({ type: "text", text: templateSlotsNote })
-  const system = [constitutionNote, contractDirective, authorizationNote].filter(Boolean).join("\n\n")
+  // fork：父历史已在会话内（fork 端点复制），这里只投 d7e 指令原文；不重投 spec/模板/宪法。
+  const parts: Array<{ type: "text"; text: string }> = run.isFork
+    ? [{ type: "text", text: buildForkDirective(run.prompt) }]
+    : [{ type: "text", text: run.prompt }]
+  if (!run.isFork && templateSlotsNote) parts.push({ type: "text", text: templateSlotsNote })
+  const system = run.isFork
+    // D7/D8：fork 的授权段每次重新求值（剥掉父快照里的旧【当前授权】），末尾再压
+    // fork 专用硬规则（禁止再派／禁止报告 .md／交付物落盘豁免），recency 最高。
+    ? [stripAuthorizationSection(run.forkSystemSnapshot || WORKER_HARD_RULES), authorizationNote.trim(), FORK_HARD_RULES].filter(Boolean).join("\n\n")
+    // D2：不再注入「【推理强度】」散文（安慰剂）；effort 真正生效的载体是 body.variant。
+    : [constitutionNote, contractDirective, authorizationNote, WORKER_HARD_RULES].filter(Boolean).join("\n\n")
+  // 供本 run 的子代理再 fork 时原样继承（fork 不能再 fork，但保留完整语义）。
+  run.systemPromptSnapshot = system
   const body: Record<string, unknown> = { parts }
   if (system) body.system = system
   if (model) body.model = model
+  // D2：仅当呼叫方显式给 effort 时才带 variant；fork 继承父会话的 variant 快照。
+  if (run.isFork) {
+    if (forkVariant) body.variant = forkVariant
+  } else if (run.effort) {
+    body.variant = effortVariant(run.effort)
+  }
+  // fork 的 model:"inherit" 与 useExactTools：dev 的 fork 已复制 agent/model；1.18 的 fork
+  // 只复制消息 ⇒ 显式带父会话快照。取不到就省略，让 opencode 用默认。
+  if (run.isFork) {
+    if (forkModel) body.model = forkModel
+    if (forkAgent) body.agent = forkAgent
+  }
   // R8 修复片2（2026-09-10）：Expert agent 栏（prompt_async 吃 agent 栏；
   // POST /session 不支持，08-08 实锤）。带上 = 子会话挂对应 Expert agent
   // （工具表裁剪到该域）；缺省 = default build 零变化。换模重试
   // （retryWithNextModel）走本函数，agent 自然继承。
-  if (run.agent) body.agent = run.agent
-  try {
-    const res = await fetch(`${deps!.openCodeUrl}/session/${childId}/prompt_async`, {
+  // fork 不带 agent/model：fork 端点已把父会话的 agent/model 复制进子会话（useExactTools）。
+  if (!run.isFork && run.agent) body.agent = run.agent
+  const postPrompt = (payload: Record<string, unknown>) =>
+    fetch(`${deps!.openCodeUrl}/session/${childId}/prompt_async`, {
       method: "POST",
       headers: deps!.openCodeHeaders(),
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30000),
     })
+  try {
+    const variant = typeof body.variant === "string" ? body.variant : undefined
+    let res = await postPrompt(body)
+    if (!res.ok && variant) {
+      // D2：该 agent/model 不支持 variant 时，原样重投（不带 variant），并如实把
+      // variant_applied 记成 false——绝不把「带了字段」伪称成「升档生效」。
+      delete body.variant
+      run.variantApplied = false
+      console.warn(
+        `[gateway] subagent variant unsupported (agent=${run.agent ?? "-"} variant=${variant} status=${res.status}) — retrying without variant: id=${run.id}`,
+      )
+      res = await postPrompt(body)
+    } else if (res.ok && variant) {
+      run.variantApplied = true
+    }
     if (!res.ok) throw new Error(`prompt_async status ${res.status}`)
   } catch (e) {
     byChildOc.delete(childId)
@@ -2086,7 +2352,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   run.lastActivityAt = Date.now()
   run.pendingTools.clear()
   console.log(
-    `[gateway] subagent attempt: id=${run.id} label="${run.label}" attempt=${run.attempt}/${Math.max(run.modelChain.length, 1)} model=${model ? `${model.providerID}/${model.modelID}` : "opencode-default"} child=${childId} agent=${run.agent ?? "-"}`,
+    `[gateway] subagent attempt: id=${run.id} label="${run.label}" attempt=${run.attempt}/${Math.max(run.modelChain.length, 1)} model=${model ? `${model.providerID}/${model.modelID}` : "opencode-default"} child=${childId} agent=${run.agent ?? "-"}${run.isFork ? " mode=fork" : ""}`,
   )
   return undefined
 }
@@ -2124,7 +2390,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
       // tool_error/Aborted 不是渠道问题，换模无意义，维持原语义直接收尾。
       const isUpstreamApiError =
         Boolean(err) && typeof err === "object" && typeof (err as { data?: { message?: unknown } }).data?.message === "string"
-      if (isUpstreamApiError && run.attempt < run.modelChain.length) {
+      if (isUpstreamApiError && !run.isFork && run.attempt < run.modelChain.length) {
         const nextAttempt = run.attempt + 1
         console.error(
           `[gateway] subagent upstream error (attempt ${run.attempt}/${run.modelChain.length}): id=${run.id} label="${run.label}" error=${msg} — 换模重投`,
@@ -2170,7 +2436,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
     // 2026-10-04 F6：机器内审 run（critic pass）的推理/正文一律不上屏——内审正文对用户零价值，
     // 且是 R3 实测最大的外泄通道（subagent.delta 把子代理正文按帧流给父会话，实测含
     // evidence/qc/verdict/退回）。此处按 run 身份整体抑制；非内审子代理照常流，咽喉点再做 token 级兜底。
-    const hideBody = run.machineCriticPass === true
+    const hideBody = run.machineCriticPass === true || typeof run.goalEvaluator === "function"
 
     switch (event?.type) {
       case "message.updated": {
@@ -2532,6 +2798,94 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
   }
 }
 
+/**
+ * CC 2.1.302 移植：目标验收派遣。复用 critic pass 的同一套轮子（byParent 注册 +
+ * dispatchAttempt 建子会话 + modelChain + hard timeout/heartbeat），不新写模型客户端，
+ * 也不走 handleSubagentDispatch 的 expert 校验。终态由 finishRun 的 goalEvaluator 回调
+ * 交回调用方（只回最后一段 assistant 文本，不注入父会话、不发第二套 wake）。
+ * 并发上限满／未注入 deps／投递失败 → 回 false，调用方下一回合再试。
+ */
+export function runGoalEvaluator(
+  parentState: any,
+  spec: { label?: string; prompt: string },
+  onTerminal: (result: { status: "ok" | "error"; text: string; error?: string }) => void,
+): boolean {
+  try {
+    if (!deps || !parentState?.sessionId) return false
+    const prompt = typeof spec?.prompt === "string" ? spec.prompt : ""
+    if (!prompt.trim() || typeof onTerminal !== "function") return false
+    const parentId = String(parentState.sessionId)
+    if ((byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) {
+      console.log(`[gateway] goal evaluator skipped (parent at concurrency cap ${MAX_ACTIVE_PER_PARENT}): session=${parentId}`)
+      return false
+    }
+    let chain: SubagentModelRef[] = []
+    try {
+      chain = deps.subagentModelChain(parentState) ?? []
+    } catch (e) {
+      console.error(`[gateway] goal evaluator model chain failed (fallback to opencode default): session=${parentId}`, e)
+    }
+    const run: SubagentRun = {
+      id: crypto.randomUUID(),
+      parentGatewaySessionId: parentId,
+      parentOpencodeSessionId: String(parentState.opencodeSessionId ?? ""),
+      opencodeSessionId: "",
+      label: spec.label ?? "目标验收",
+      startedAt: Date.now(),
+      status: "running",
+      prompt: SPEC_DEADLINE_LINE + prompt,
+      modelChain: chain,
+      attempt: 1,
+      reworkCount: 0,
+      beastMode: false,
+      agent: "critic",
+      asyncMode: false,
+      machineCriticPass: false,
+      goalEvaluator: onTerminal,
+      childPath: `/root/goal-${crypto.randomUUID().slice(0, 8)}`,
+      toolTimeline: [],
+      pendingChildMessages: [],
+      pendingParentNotes: [],
+      pendingQuestions: [],
+      submissionSeq: 0,
+      messageRole: new Map(),
+      partEmitted: new Map(),
+      partKind: new Map(),
+      suppressedParts: new Set(),
+      partText: new Map(),
+      lastActivityAt: Date.now(),
+      pendingTools: new Set(),
+      artifacts: [],
+      toolStatusEmitted: new Map(),
+      checkpoints: [],
+    }
+    const parentRuns = byParent.get(parentId) ?? []
+    parentRuns.push(run)
+    byParent.set(parentId, parentRuns)
+    const hardMs = HARD_TIMEOUT_MS
+    run.timeoutTimer = setTimeout(() => {
+      console.warn(`[gateway] goal evaluator hard timeout (${Math.round(hardMs / 60000)}min): id=${run.id}`)
+      run.partialPersist = true
+      finishRun(run, "error", partialBodyOf(run), `目标验收超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
+    }, hardMs)
+    armHeartbeat(run, hardMs)
+    void (async () => {
+      const failure = await dispatchAttempt(run)
+      if (failure) {
+        console.error(`[gateway] goal evaluator dispatch failed: session=${parentId} ${failure}`)
+        await finishRun(run, "error", "", failure)
+        return
+      }
+      deps!.emitToSession(parentState, "subagent.started", { id: run.id, label: run.label })
+      console.log(`[gateway] goal evaluator dispatched: session=${parentId} run=${run.id} child=${run.opencodeSessionId}`)
+    })()
+    return true
+  } catch (e) {
+    console.error("[gateway] goal evaluator failed:", e)
+    return false
+  }
+}
+
 /** 修 1：槽位释放后补跑被并发上限挤掉的 machine critic pass（per-parent 队列）。
  *  复用 maybeRunMachineCriticPass 的完整判据与派遣轮子（不另造第二套）。 */
 function maybeDrainCriticQueue(parentId: string): void {
@@ -2655,8 +3009,17 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     expert?: string
     from_checkpoint_run_id?: string
     from_checkpoint_id?: string
+    // CC 2.1.302 移植：fork / model / effort / name / isolation。
+    fork?: boolean
+    subagent_type?: string
+    model?: string
+    effort?: string
+    name?: string
+    isolation?: string
   }
   const label = typeof body.label === "string" ? body.label.trim() : ""
+  // `fork:true` 与 `subagent_type:"fork"` 等价（照 CC Agent schema 的 subagent_type）。
+  const isFork = body.fork === true || body.subagent_type === "fork"
   // P2b 刀1：prompt 需可被自动补行改写。
   let prompt = typeof body.prompt === "string" ? body.prompt : ""
   if (!body.sessionId || !label || !prompt) {
@@ -2669,27 +3032,60 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   }
   // P2b 刀1：首行自动补死线行。已写「预期/预期 N」= 原样不动（避免双补）。
   // 字符集与 R1 parseSyncDeadlineMs 对齐（简/繁皆认），确保不重复补。
-  if (!/^\s*[预预]\s*期\s*\d/.test(prompt)) {
+  // fork 是一次性执行指令（d7e），不补同步死线行。
+  if (!isFork && !/^\s*[预预]\s*期\s*\d/.test(prompt)) {
     prompt = SPEC_DEADLINE_LINE + prompt
   }
   // X7/Y4（2026-10-14）深度上限：**派工前**查派工者的 childPath 深度。派工者是子代理时，
-  // body.sessionId 是它的子 opencode 会话 id（byChildOc 能命中）。超限（> SUBAGENT_MAX_DEPTH
-  // 层）拒绝派工并如实回报——本轮只约束、不做多级路由（Codex exceeds_thread_spawn_depth_limit
-  // 与 Claude Code「最多三层」同旨）。命中不了 run＝走下面的既有解析路径（行为不变）。
+  // body.sessionId 是它的子 opencode 会话 id（byChildOc 能命中）。超限拒绝派工并如实回报
+  // ——本轮只约束、不做多级路由（Codex exceeds_thread_spawn_depth_limit 同旨）。
+  // CC 2.1.302 移植：默认 3（env SUBAGENT_MAX_DEPTH 覆写），文案照「Subagent nesting
+  // limit reached (depth N of M)」；depth 为**派工者**的嵌套深度（main=0）。
   const requesterRun = byChildOc.get(body.sessionId)
+  // CC 2.1.302 xn：fork 的可用性闸——编排/coordinator 模式不得 fork（main 会话即编排者），
+  // fork 内不得再 fork（d7e 同一禁令的机器兜底），fork 不得 remote（远程会话无法继承历史）。
+  if (isFork) {
+    if (!requesterRun) {
+      return Response.json(
+        {
+          ok: false,
+          code: "fork_coordinator_mode",
+          error: "Fork is not available in coordinator/orchestration mode. 主会话请派遣具名 worker；fork 只能由正在执行的子代理对自己的会话发起。",
+        },
+        { status: 409 },
+      )
+    }
+    if (requesterRun.isFork === true) {
+      return Response.json(
+        { ok: false, code: "fork_recursive_fork", error: "Fork is not available inside a forked worker. Complete your task directly using your tools." },
+        { status: 409 },
+      )
+    }
+    if (body.isolation === "remote") {
+      return Response.json(
+        {
+          ok: false,
+          code: "fork_remote_isolation",
+          error: 'Fork cannot use isolation: "remote" — a remote session cannot inherit the conversation context. Omit isolation, or spawn a named agent type for remote work.',
+        },
+        { status: 409 },
+      )
+    }
+  }
   if (requesterRun) {
-    const depth = subagentDepth(requesterRun.childPath)
-    if (depth > SUBAGENT_MAX_DEPTH) {
+    const depth = agentNestingDepth(requesterRun.childPath)
+    const limit = subagentMaxDepth()
+    if (depth >= limit) {
       console.log(
-        `[gateway] subagent dispatch denied (depth ${depth} > ${SUBAGENT_MAX_DEPTH}): path=${requesterRun.childPath} label="${label}"`,
+        `[gateway] subagent dispatch denied (depth ${depth} >= limit ${limit}): path=${requesterRun.childPath} label="${label}"`,
       )
       return Response.json(
         {
           ok: false,
           code: "depth_limit",
-          error: `子代理层级已达上限（当前 ${depth} 层，上限 ${SUBAGENT_MAX_DEPTH} 层）：不再向下派工。请把这件事自己做完，或回报发起方改为在更上层分工。`,
+          error: depthLimitMessage(depth, limit),
           depth,
-          limit: SUBAGENT_MAX_DEPTH,
+          limit,
           child_path: requesterRun.childPath,
         },
         { status: 409 },
@@ -2701,12 +3097,43 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 可用自己的 oc id 派孙代理（此前只认 resolveSession ⇒ 孙代理派工必 404）。
   const parent = resolveParentSession(body.sessionId)
   if (!parent) return unknownSessionResponse(body.sessionId)
-  // R6：async 开关。显式 true 且 wakeParent 已注入才走异步；否则一律同步（默认路径零变化）。
-  // 刀3（2026-09-19）：async 三条件机器化（playbook 1.9 起 LLM 不再自判）——
-  // beast 下明确要求 sync（async:false）时，Jev 判「非单一快速事实查询」→ 自动
-  // 转 async 并记 SYNC_DOWNGRADED；Jev 挂 → 放行 sync（fail-open＝现状行为）。
-  let asyncMode = body.async === true && typeof deps.wakeParent === "function"
-  if (!asyncMode && body.async === false && typeof deps.wakeParent === "function") {
+  // CC 2.1.302 name：可达 64 字符；main/team-lead/user/system 保留；agent-id 形状拒绝。
+  // fork 未给 name 时按 label 生成（照 aYt 的 `_`：前 3 词、≤24 字）。
+  const nameCheck = validateSubagentName(body.name)
+  if (nameCheck.ok !== true) {
+    return Response.json({ ok: false, code: "invalid_name", error: nameCheck.error }, { status: 400 })
+  }
+  let requestedName = nameCheck.name ?? (isFork ? forkNameFromLabel(label) : undefined)
+  if (requestedName) {
+    // D9：同名**未结束**拒绝重派（running／interrupted 非终态／suspended 都算未结束；
+    // 已 stopped 的不占名）。终态重名可复用，查询时按 finishedAt 取最新。
+    const isUnfinished = (r: SubagentRun): boolean => !r.stopped && (r.status === "running" || r.status === "interrupted" || r.status === "suspended")
+    const activeNames = new Set((byParent.get(parent.sessionId) ?? []).filter(isUnfinished).map((r) => r.name))
+    if (activeNames.has(requestedName)) {
+      // fork 的自动名（label 派生）照 aYt 的 allocateName：自动加序号，不让并发 fork 因撞名失败。
+      if (isFork && nameCheck.name === undefined) {
+        const base = requestedName
+        for (let i = 2; i <= 99; i++) {
+          const candidate = `${base}-${i}`.slice(0, 64)
+          if (!activeNames.has(candidate)) {
+            requestedName = candidate
+            break
+          }
+        }
+      }
+      if (activeNames.has(requestedName)) {
+        return Response.json(
+          { ok: false, code: "name_taken", error: `name「${requestedName}」已被本会话一个**尚未结束**的子代理占用；换一个名字或等它结束后再用。` },
+          { status: 409 },
+        )
+      }
+    }
+  }
+  // CC 2.1.302 后台默认（m0626 @5633 的 yo 公式）：agents run in the background by default。
+  // 只有显式 async:false（且 Jev 判「下一步必须依赖结果」的快速事实查询）才同步；fork 恒后台
+  // （aYt 的 isAsync:true）。并发上限仍由下方同一闸门控制，不变。
+  let asyncMode = typeof deps.wakeParent === "function" && (isFork || body.async !== false)
+  if (!isFork && typeof deps.wakeParent === "function" && body.async === false) {
     const eligible = await syncDispatchEligible(prompt)
     if (eligible === false) {
       asyncMode = true
@@ -2729,7 +3156,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   let dispatchGuards: JevDispatchGuards = { research: null, rework: null, musicDependency: null }
   const beastOn = deps.beastMode(parent)
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
-  if (beastOn || rawExpert === "lyricist" || rawExpert === "music") {
+  if (!isFork && (beastOn || rawExpert === "lyricist" || rawExpert === "music")) {
     let allowed: unknown
     try {
       allowed = (JSON.parse(readFileSync(`${import.meta.dir}/expert/expert-ids.json`, "utf8")) as { experts?: unknown })?.experts
@@ -2809,8 +3236,10 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 间接注入通道（手册模板二【研究输入】逐字嵌 prompt）。Jev 判拦截线以上 →
   // spec 头注入机器隔离声明（不拦派遣、只废掉注入指令的效力）。
   {
-    const quarantine = await quarantineSpec(`dispatch:${label || "unlabeled"}`, prompt)
-    if (quarantine) prompt = `${quarantine}\n${prompt}`
+    if (!isFork) {
+      const quarantine = await quarantineSpec(`dispatch:${label || "unlabeled"}`, prompt)
+      if (quarantine) prompt = `${quarantine}\n${prompt}`
+    }
   }
 
   // 量级瘦身 A（2026-09-19）：spec 模板机器注入。三军模板（研究/创作/毒蛇评审，
@@ -2821,7 +3250,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 命中制作类（confidence≥0.8）即把骨架硬注入任务书头（先于军团模板），
   // 让「没人负责选模板」不再可能（事故：60s 百合 OP MV 裸跑＝无角色卡约束）。
   let researchTask = dispatchGuards.research === true
-  if (expertId !== "lyricist") {
+  if (!isFork && expertId !== "lyricist") {
     let templateInjected = false
     try {
       const tpl = JSON.parse(readFileSync(`${import.meta.dir}/spec-templates.json`, "utf8")) as Record<string, string>
@@ -2900,7 +3329,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
 
   // M3（2026-10-02）：返工 spec 内容锁。侦测到返工任务 → 注入「只改 X 栏、其余逐字沿用
   // <原稿路径>＋交付附 diff」（原稿路径＝同 label/同 expert 最近一份落盘交付物）。
-  if (isReworkSpec(prompt, dispatchGuards.rework)) {
+  if (!isFork && isReworkSpec(prompt, dispatchGuards.rework)) {
     const delivered = deliveredByParent.get(parent.sessionId) ?? []
     const prior = [...delivered].reverse().find((d) => d.relPath && (d.label === label.slice(0, 20) || (expertId && d.agent === expertId)))
     prompt = `${reworkLockDirective(prior?.relPath ?? "")}\n\n---\n\n${prompt}`
@@ -2911,7 +3340,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   const fromCpRunId = typeof body.from_checkpoint_run_id === "string" ? body.from_checkpoint_run_id.trim() : ""
   const fromCpId = typeof body.from_checkpoint_id === "string" ? body.from_checkpoint_id.trim() : ""
   let inheritedCp: SubagentCheckpoint | undefined
-  if (fromCpRunId) {
+  if (fromCpRunId && !isFork) {
     const liveRun = (byParent.get(parent.sessionId) ?? []).find((r) => r.id === fromCpRunId)
     if (liveRun?.checkpoints?.length) {
       inheritedCp = fromCpId ? liveRun.checkpoints.find((c) => c.id === fromCpId) : liveRun.lastCheckpoint ?? liveRun.checkpoints[liveRun.checkpoints.length - 1]
@@ -2974,16 +3403,37 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   // 互相踩脚。名册是**启动时刻的快照**（照 Claude Code sibling roster 语义）；本 run 此刻
   // 还没进 list，天然不入册。无事实＝零注入（输出与注入前逐字等价）。
   // 刻意放在全部 Jev 分类／守卫／模板注入之后：注入内容不参与语义判定（零扰动）。
-  const rosterFact = buildSiblingRosterFact(parent.sessionId)
+  const rosterFact = isFork ? "" : buildSiblingRosterFact(parent.sessionId)
   if (rosterFact) prompt = `${rosterFact}${prompt}`
 
   // 模型链：父会话 persona 主模型 + registry fallbacks（空链 = 吃 opencode 预设，
   // 仅在 registry 缺失的极端情况发生，此时无链可换）。
+  // CC 2.1.302：显式 model 覆写优先级最高（fork 忽略，继承父模型）；effort 只选档与
+  // 任务书声明（opencode 1.18 无 per-request effort 栏位，见 subagent-policy.ts）。
   let chain: SubagentModelRef[] = []
   try {
     chain = deps.subagentModelChain(parent) ?? []
   } catch (e) {
     console.error(`[gateway] subagent model chain failed (fallback to opencode default): id=${parent.sessionId}`, e)
+  }
+  const effort = isFork ? undefined : normalizeEffort(body.effort)
+  if (!isFork && body.effort !== undefined && body.effort !== null && body.effort !== "" && effort === undefined) {
+    return Response.json(
+      { ok: false, code: "invalid_effort", error: `effort 只接受 low/medium/high/xhigh/max（收到 ${JSON.stringify(body.effort)}）` },
+      { status: 400 },
+    )
+  }
+  let modelOverride: SubagentModelRef | undefined
+  if (!isFork && body.model !== undefined && body.model !== null && body.model !== "") {
+    const parsed = parseSubagentModel(body.model, chain[0]?.providerID)
+    if (!parsed) {
+      return Response.json(
+        { ok: false, code: "invalid_model", error: `model 需为 "provider/model" 或可补齐 provider 的 modelID（收到 ${JSON.stringify(body.model)}）` },
+        { status: 400 },
+      )
+    }
+    modelOverride = parsed
+    chain = [parsed, ...chain.filter((m) => m.providerID !== parsed.providerID || m.modelID !== parsed.modelID)]
   }
 
   const runId = crypto.randomUUID()
@@ -2996,6 +3446,18 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     parentOpencodeSessionId: parent.opencodeSessionId,
     opencodeSessionId: "",
     label: label.slice(0, 20),
+    name: requestedName,
+    isFork: isFork || undefined,
+    forkSourceOpencodeSessionId: isFork ? body.sessionId : undefined,
+    // D7：fork 的结果回到发起它的子代理，而不是主会话。
+    forkRequesterRunId: isFork ? requesterRun?.id : undefined,
+    // D6：记录真实派工者（子会话创建时写 parentID）。
+    requesterOpencodeSessionId: body.sessionId,
+    // 父 system prompt 快照：fork 取派工者自己的 system 快照（宪法/契约/授权/worker 规则），
+    // 这是 d7e 的 parent system prompt snapshot；不是主会话的 lastPromptBody。
+    forkSystemSnapshot: isFork ? requesterRun?.systemPromptSnapshot : undefined,
+    effort,
+    modelOverride,
     startedAt: Date.now(),
     status: "running",
     prompt,
@@ -3064,6 +3526,16 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     return Response.json({ ok: false, error: `子代理${failure}` }, { status: 502 })
   }
 
+  // 协作总线接线：派遣成功即把 worker 登记进父会话团队，让 mailbox_agents 列出它。
+  // 只加登记，不改编排；登记失败绝不影响派遣结果。
+  try {
+    const memberName =
+      (run.name ?? run.label.trim().replace(/\s+/g, "-")).slice(0, 64) || `worker-${run.id.slice(0, 8)}`
+    registerTeamMember(parent.sessionId, undefined, memberName, expertId || null)
+  } catch (e) {
+    console.error("[gateway] mailbox member registration failed:", e)
+  }
+
   deps.emitToSession(parent, "subagent.started", { id: run.id, label: run.label })
   console.log(
     `[gateway] subagent dispatched: id=${run.id} label="${run.label}" parent=${parent.sessionId} child=${run.opencodeSessionId}${asyncMode ? " mode=async" : ""}`,
@@ -3117,15 +3589,22 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
       ok: true,
       subagent_id: run.id,
       label: run.label,
+      ...(run.name ? { name: run.name } : {}),
+      ...(run.isFork ? { fork: true, model: "inherit" } : {}),
       status: "running",
       async: true,
-      note: "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。",
+      note: run.isFork ? FORK_STARTED_NOTICE : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。",
       ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
+      // D2：显式 effort 时如实回报 variant 是否真的带上（不支持＝false，非安慰剂）。
+      ...(run.effort ? { effort: run.effort, variant_applied: run.variantApplied === true } : {}),
     })
   }
   return Response.json({
     ok: true,
     subagent_id: run.id,
+    ...(run.name ? { name: run.name } : {}),
+    ...(run.isFork ? { fork: true, model: "inherit" } : {}),
+    ...(run.effort ? { effort: run.effort, variant_applied: run.variantApplied === true } : {}),
     ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
   })
 }
@@ -3161,6 +3640,42 @@ function resolveLatestRunId(parentKey: string): string | undefined {
   return recentRunsForParent(parentKey, 1)[0]?.id
 }
 
+/** CC 2.1.302：status 的 id／name 双寻址。durable/completed 按 id 索引，name 必须先解析成 id
+ *  （否则按名字查终态会 404）。只在本会话归属内解析；未知原样返回，让后续路径维持原语义。
+ *  D9：同名终态**按 finishedAt 取最新**（旧实现按 Map 插入顺序取第一条）。 */
+function resolveRunIdByIdOrName(parentKey: string, want: string): string {
+  if (!want) return want
+  // 精确 id 优先（所有来源）——id 唯一，不参与「同名取最新」。
+  for (const run of byChildOc.values()) if (run.parentGatewaySessionId === parentKey && run.id === want) return run.id
+  for (const run of byParent.get(parentKey) ?? []) if (run.id === want) return run.id
+  if (completed.get(want)?.parent === parentKey) return want
+  for (const run of resumable.values()) if (run.parentGatewaySessionId === parentKey && run.id === want) return run.id
+  try {
+    for (const row of durableSubagentRuns()) if (row.parentGatewaySessionId === parentKey && row.id === want) return row.id
+  } catch {
+    /* durable 层异常不阻断内存寻址 */
+  }
+  // 同名解析：跨来源取 finishedAt（终态）／startedAt（在途）最大的一条。
+  let best: { id: string; at: number } | undefined
+  const consider = (id: string, name: string | undefined, at: number): void => {
+    if (name !== want) return
+    if (!best || at > best.at) best = { id, at }
+  }
+  for (const run of byChildOc.values()) if (run.parentGatewaySessionId === parentKey) consider(run.id, run.name, run.startedAt)
+  for (const run of byParent.get(parentKey) ?? []) consider(run.id, run.name, run.startedAt)
+  for (const [id, rec] of completed) if (rec.parent === parentKey) consider(id, rec.name, rec.finishedAt)
+  for (const run of resumable.values()) if (run.parentGatewaySessionId === parentKey) consider(run.id, run.name, run.stoppedAt ?? run.startedAt)
+  try {
+    for (const row of durableSubagentRuns()) {
+      if (row.parentGatewaySessionId !== parentKey) continue
+      consider(row.id, row.result?.name, row.result?.finishedAt ?? 0)
+    }
+  } catch {
+    /* durable 层异常不阻断内存寻址 */
+  }
+  return best?.id ?? want
+}
+
 /** G6（2026-10-14）：在途 run 的**状态快照构造**——从 `handleSubagentStatus` 的 byChildOc 命中
  *  分支无损抽取为纯函数（只读 run 与 now，无副作用），byChildOc 精确命中与 byParent 精确兜底
  *  两处**共用同一份**，杜绍「两处各写一份→漂移」。栏位与文案逐字沿用抽取前，只增不改。
@@ -3177,6 +3692,11 @@ function renderLiveRunSnapshot(run: SubagentRun, now: number): Record<string, un
     subagent_id: run.id,
     label: run.label,
     elapsed_ms: now - run.startedAt,
+    // CC 2.1.302：name/fork/effort 只增不改；fork 的模型是继承，明确回报 inherit。
+    ...(run.name ? { name: run.name } : {}),
+    ...(run.isFork ? { fork: true } : {}),
+    ...(run.effort ? { effort: run.effort } : {}),
+    ...(run.variantApplied !== undefined ? { variant_applied: run.variantApplied } : {}),
     // ── 以下为新增快照栏位 ──
     status: run.status, // running 或非终态 interrupted 或 suspended（与终态可区分）
     phase: run.status === "suspended" ? "suspended" : run.softStopping ? "wrapping_up" : run.reworking ? "rework_pending" : run.machineCriticPass ? "review" : run.pendingQuestions?.length ? "awaiting_input" : "running",
@@ -3196,7 +3716,7 @@ function renderLiveRunSnapshot(run: SubagentRun, now: number): Record<string, un
     ...(run.artifacts?.length ? { artifacts: run.artifacts } : {}),
     silent_ms: now - run.lastActivityAt,
     ...(run.livePath ? { transcript_path: run.livePath } : {}),
-    model: model ? `${model.providerID}/${model.modelID}` : "opencode-default",
+    model: run.isFork ? "inherit" : model ? `${model.providerID}/${model.modelID}` : "opencode-default",
     attempt: run.attempt,
     current_turn_id: run.currentTurnId ?? null,
     resumable: (run.resumeUntil ?? 0) > now,
@@ -3280,6 +3800,8 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
     }
     wantId = latestId
   }
+  // CC 2.1.302：name 是可寻址名——终态/completed/durable 以 id 为键，先解析成 id。
+  wantId = resolveRunIdByIdOrName(parentKey, wantId)
   // WP2（2026-10-14）可选长挂起：wait_ms>0 且目标当前为在途 run 时，登记 waiter 等到终态落点
   // （completed.set → notify）即时唤醒，或等满 wait_ms。缺省/0 ⇒ 跳过此块，行为与接线前
   // 逐位元一致（零回归）。key 含 run id 避碰同会话多个在途 subagent。
@@ -3320,6 +3842,12 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       ...(done.lastCheckpoint ? { last_checkpoint: done.lastCheckpoint } : {}),
       ...(done.checkpointsCount !== undefined ? { checkpoints_count: done.checkpointsCount } : {}),
       ...(done.fromCheckpoint ? { from_checkpoint: done.fromCheckpoint } : {}),
+      // CC 2.1.302 结果契约：usage{subagent_tokens,tool_uses,duration_ms} 与 name/fork。
+      ...(done.usage ? { usage: done.usage } : {}),
+      ...(done.name ? { name: done.name } : {}),
+      ...(done.is_fork ? { fork: true } : {}),
+      ...(done.effort ? { effort: done.effort } : {}),
+      ...(done.variant_applied !== undefined ? { variant_applied: done.variant_applied } : {}),
       // 接续判定以**内存索引**为准（窗口不跨重启；重启后如实回 resumable:false）。
       resumable: revivable !== undefined,
       ...(revivable ? { note: `仍在接续窗口内：可用 subagent_message 直接给它追加指示续跑（不需重新派工）。` } : {}),
@@ -3327,7 +3855,8 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
   }
   for (const run of byChildOc.values()) {
     // G1：在途 run 亦须父归属匹配（run.parentGatewaySessionId === parentKey）。
-    if (run.id === wantId && run.parentGatewaySessionId === parentKey) {
+    // CC 2.1.302：name 与 run id 同级精确寻址（subagent_status 也可按名字查询）。
+    if ((run.id === wantId || (run.name !== undefined && run.name === wantId)) && run.parentGatewaySessionId === parentKey) {
       // C1（2026-10-14 协作总线）：**首次查询即当前状态快照**（照 Y1：订阅/拉取必须先得到
       // 当前状态，而不是只得到「仍在运行」四个字）。新栏位只增不改：既有
       // ok/done/subagent_id/label/elapsed_ms 语义与键名一字不动。
@@ -3341,7 +3870,9 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
   // 来源命中；否则「自己列出的 id，用该 id 查却 404」自相矛盾（生产实测 2026-10-14）。父归属校验
   // 同 G1（只认 parentGatewaySessionId === parentKey 的 run），绝不跨会话泄漏。快照与 byChildOc
   // 命中分支**共用 renderLiveRunSnapshot**，形状/文案逐字一致。
-  const liveOwned = (byParent.get(parentKey) ?? []).find((r) => r.id === wantId && r.parentGatewaySessionId === parentKey)
+  const liveOwned = (byParent.get(parentKey) ?? []).find(
+    (r) => (r.id === wantId || (r.name !== undefined && r.name === wantId)) && r.parentGatewaySessionId === parentKey,
+  )
   if (liveOwned) return Response.json(renderLiveRunSnapshot(liveOwned, Date.now()))
   // 刀1（2026-09-20 百合番OP宝藏 PRD）：not_found ≠ 没跑过——run 记录会过期（completed
   // 清理/gateway 重启），但 E 片落盘档是持久的。按 run id 前 8 码扫 outputs/subagent，
@@ -3354,14 +3885,14 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
   const cands: Array<{ runId: string; label: string; status: string; running: boolean; elapsed_ms?: number; resumable?: boolean }> = []
   for (const run of byChildOc.values()) {
     // G1：label 前缀候选亦限定本会话归属（不得泄漏他会话的 run id/label）。
-    if (run.id !== wantId && run.parentGatewaySessionId === parentKey && run.label.startsWith(wantId)) {
+    if (run.id !== wantId && run.parentGatewaySessionId === parentKey && (run.name?.startsWith(wantId) || run.label.startsWith(wantId))) {
       // 2026-10-14：status 回 run 真身（interrupted 也要如实回报，不再一律写 running）。
       cands.push({ runId: run.id, label: run.label, status: run.status, running: true, elapsed_ms: Date.now() - run.startedAt })
     }
   }
   for (const [id, rec] of completed) {
     // G1：终态候选亦限定 rec.parent === parentKey。
-    if (id !== wantId && rec.parent === parentKey && (rec.label ?? "").startsWith(wantId)) {
+    if (id !== wantId && rec.parent === parentKey && ((rec.name ?? "").startsWith(wantId) || (rec.label ?? "").startsWith(wantId))) {
       // 2026-10-14：终态候选带 resumable——父会话据此决定「续跑还是重派」（重派＝重复劳动）。
       cands.push({ runId: id, label: rec.label ?? "", status: rec.status, running: false, resumable: resumable.has(id) })
     }
@@ -3553,10 +4084,8 @@ function subagentChildSlug(label: string, runId: string): string {
   return `${safeLabelForFile(label)}-${runId.slice(0, 8)}`
 }
 
-/** X7：路径层级深度（`/root/a/b` ＝ 3）。根派工者的子代理为 2 层。 */
-function subagentDepth(path: string | undefined): number {
-  return (path ?? "").split("/").filter(Boolean).length
-}
+/** X7 路径段数语义已由 subagent-policy.ts 的 agentNestingDepth 取代（main=0、`/root/a`=1）。
+ *  保留注释避免旧调用方误以为「路径段数 = 嵌套深度」。 */
 
 /** S2(c)：名册 label 净化——折行/回车/制表/控制字符→空格，压缩空白，截断到既有上限（与 run.label 同长 20）。
  *  只用于名册事实块；不改 run.label 本体（落盘/寻址契约不动）。 */
@@ -3835,7 +4364,17 @@ async function flushPendingChildMessages(run: SubagentRun): Promise<void> {
 /** C4/X7：在接续索引里按 id／label 前缀找可续跑的终态 run（本会话归属才可寻址）。 */
 function findResumableRun(parentGatewaySessionId: string, idOrLabel: string): SubagentRun | undefined {
   const list = [...resumable.values()].filter((r) => r.parentGatewaySessionId === parentGatewaySessionId && (r.resumeUntil ?? 0) > Date.now())
-  return list.find((r) => r.id === idOrLabel) ?? list.find((r) => r.label.startsWith(idOrLabel))
+  // D9：同名终态按 finishedAt 取最新（resumeUntil 由终态时刻派生）。
+  const byName = list.filter((r) => r.name === idOrLabel).sort((a, b) => (b.resumeUntil ?? 0) - (a.resumeUntil ?? 0))
+  return list.find((r) => r.id === idOrLabel) ?? byName[0] ?? list.find((r) => r.label.startsWith(idOrLabel))
+}
+
+/** D7：按 run id 找在途或可续跑的 run（fork 结果回投 requester 用）。 */
+function findRunById(id: string): SubagentRun | undefined {
+  for (const run of byChildOc.values()) if (run.id === id) return run
+  for (const list of byParent.values()) for (const run of list) if (run.id === id) return run
+  for (const run of resumable.values()) if (run.id === id) return run
+  return undefined
 }
 
 /** G1（2026-10-14 跨会话越权修复）：本父会话是否拥有该 run id。用于 status 的磁盘产物回退闸——
@@ -3855,28 +4394,33 @@ function parentOwnsRunId(parentKey: string, runId: string): boolean {
 function findTerminalRecord(
   parentGatewaySessionId: string,
   idOrLabel: string,
-): { id: string; label?: string; status: string; resumable: boolean } | undefined {
+): { id: string; label?: string; name?: string; status: string; resumable: boolean } | undefined {
   const hit = (id: string): boolean => id === idOrLabel
-  const recs: Array<{ id: string; label?: string; status: string; resumable: boolean }> = []
+  const recs: Array<{ id: string; label?: string; name?: string; status: string; resumable: boolean; at: number }> = []
   for (const [id, rec] of completed) {
     if (rec.parent !== parentGatewaySessionId) continue
-    recs.push({ id, label: rec.label, status: rec.status, resumable: resumable.has(id) })
+    recs.push({ id, label: rec.label, name: rec.name, status: rec.status, resumable: resumable.has(id), at: rec.finishedAt })
   }
   for (const run of resumable.values()) {
     if (run.parentGatewaySessionId !== parentGatewaySessionId) continue
     if (recs.some((r) => r.id === run.id)) continue
-    recs.push({ id: run.id, label: run.label, status: run.status, resumable: true })
+    recs.push({ id: run.id, label: run.label, name: run.name, status: run.status, resumable: true, at: run.stoppedAt ?? run.startedAt })
   }
   try {
     for (const row of durableSubagentRuns()) {
       if (!row?.result || row.parentGatewaySessionId !== parentGatewaySessionId) continue
       if (recs.some((r) => r.id === row.id)) continue
-      recs.push({ id: row.id, label: row.result?.label ?? row.label, status: row.result?.status ?? row.status, resumable: false })
+      recs.push({ id: row.id, label: row.result?.label ?? row.label, name: row.result?.name, status: row.result?.status ?? row.status, resumable: false, at: row.result?.finishedAt ?? 0 })
     }
   } catch {
     /* durable 层异常不阻断终态判定（内存表已给结论） */
   }
-  return recs.find((r) => hit(r.id)) ?? recs.find((r) => (r.label ?? "").startsWith(idOrLabel))
+  const byId = recs.find(hit)
+  if (byId) return byId
+  // D9：同名终态按 finishedAt 取最新（旧实现取 Map 插入序第一条）。
+  const nameMatches = recs.filter((r) => (r.name ?? "") === idOrLabel).sort((a, b) => b.at - a.at)
+  if (nameMatches[0]) return nameMatches[0]
+  return recs.find((r) => (r.label ?? "").startsWith(idOrLabel))
 }
 
 /** X3：接受标识（照 DeliveryReceipt）。**不是**「已被处理」的证据——响应文案已明写。 */

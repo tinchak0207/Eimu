@@ -31,6 +31,11 @@ const LIVE_FIELDS = [
   "checkpoints_count",
   "from_checkpoint",
   "suspension",
+  "name",
+  "fork",
+  "effort",
+  "variant_applied",
+  "usage",
 ] as const
 
 // 终态成败映射——**真源＝gateway types-gateway.ts 的 TASK_STATUS_SEMANTICS**（2026-10-14 逐值核对，
@@ -62,20 +67,17 @@ function pickLive(data: any, keys: readonly string[], skip: readonly string[] = 
 
 export default tool({
   description: [
-    "查询已派出子代理（subagent）的运行状态/结果。用于：async 派出后查进度、判断多个并行子代理是否到齐、唤醒过后复核摘要。",
-    "`subagent_id` 传 subagent_dispatch 返回的完整 run id；也可传 `latest` 取得本会话最近一次 run（不必记住 id）。也支持 label 前缀，命中多笔会回候选清单（此时请用完整 runId 重查）。",
-    "返回运行中（done=false，含已耗时）或终态（done=true）。终态成败以 `status` 判定：`ok`＝成功（`summary` 为交付文本）；`error`（含超时）＝**失败**，会如实带 `error`/`summary`/`reason`/`partial`/`artifacts`；`stopped`＝**人工停止、不是失败**（回成功回执并说明可否续跑）。结果在网关侧保留 10 分钟，过期会报「不存在或已过期」并附最近 3 笔 run 供你改用；已落盘的产物会附 artifact_path，直接 read 验收，不要重派。",
-    "若只是等后台子代理完成，可结束本轮由自动唤醒回灌；也可按需轮询——轮询不会被禁用，但同一 id 连续同参数轮询超过阈值会收到「改变参数或停止」的工具层提示。",
-    "终态记录会带 `artifacts`（该子代理已产出的成品 URL 清单），失败/超时也带——先读它再决定要不要重派。任何终态都会附 `artifact_path`（完整产物档）/`transcript_path`（工作日志档），可直接 read 验收，不要重派。",
-    "`status` 可能是 `interrupted` 或 `suspended`：**这都不是失败、也不是终态**——`interrupted` 表示当前那一轮被打断了、会话还在，可以继续用 `subagent_message` 追加指令让它接着跑；`suspended` 表示子代理主动挂起交出并发槽等待异步任务完成，可在条件满足时用 `subagent_resume` 恢复它。",
-    "运行中还会带 `phase`（当前阶段，如 running/suspended/awaiting_input/wrapping_up）、`tools`（工具时间线）、`last_tool`（当前工具）、`text_tail`（正文尾部）、`silent_ms`（静默时长）、`transcript_path`（可 read 的实时工作日志档路径）、`model`/`attempt`/`resumable`/`current_turn_id`、`child_path`（人可读寻址路径，形如 /root/<label>-<id>）、`last_checkpoint`/`checkpoints_count`（阶段检查点）、`suspension`（挂起状态信息）、`pending_parent_messages`（在途排队给它的消息数）/`notes_count`（它未读的回报数）。要判断它是「正常在跑」还是「跑偏」，看 `tools`/`text_tail`/`silent_ms` 与 transcript_path 的实况，而不是只看耗时。",
-    "`pending_questions`（仅当它登记了阻塞式提问时出现）＝`[{ question_id, header, is_blocking, resolve_by }]`：要回答其中一条，用 subagent_message 带 `kind:\"question\"` 与取自该清单的 `question_id`（网关只按 id 精确解除）。",
+    "查询子代理的运行状态与结果。",
+    "何时用：async 派出后查进度、判断并跑到齐、复核终态。",
+    "何时不用：只是等完成时可结束回合让自动唤醒回灌，不必轮询。",
+    "关键约束：subagent_id 支持 runId/name/latest/label 前缀；ok=成功、error=失败、stopped=人工停止不是失败；interrupted/suspended 不是终态；结果保留 10 分钟。",
+    "示例：subagent_status({subagent_id:\"latest\"})",
   ].join("\n"),
   args: {
     subagent_id: tool.schema
       .string()
       .optional()
-      .describe("subagent_dispatch 返回的完整 subagent_id，或 `latest`（本会话最近一次 run），或 label 前缀（必填；缺失会被拒并回传示例）"),
+      .describe("subagent_dispatch 返回的完整 subagent_id、派遣时的 name、`latest`（本会话最近一次 run），或 label 前缀（必填；缺失会被拒并回传示例）"),
   },
   async execute(args, context) {
     const id = typeof args.subagent_id === "string" ? args.subagent_id.trim() : ""
@@ -143,6 +145,10 @@ export default tool({
             status,
             summary: data.summary ?? "",
             ...(artifacts ? { artifacts } : {}),
+            ...(data.usage ? { usage: data.usage } : {}),
+            ...(typeof data.name === "string" ? { name: data.name } : {}),
+            ...(data.fork ? { fork: true } : {}),
+            ...(typeof data.effort === "string" ? { effort: data.effort } : {}),
             ...live,
             ...(note ? { note } : {}),
           })
@@ -156,6 +162,9 @@ export default tool({
           ...(data.reason ? { reason: data.reason } : {}),
           ...(data.partial ? { partial: true } : {}),
           ...(artifacts ? { artifacts } : {}),
+          ...(data.usage ? { usage: data.usage } : {}),
+          ...(typeof data.name === "string" ? { name: data.name } : {}),
+          ...(data.fork ? { fork: true } : {}),
           ...live,
           ...(gatewayNote ? { note: gatewayNote } : {}),
         })

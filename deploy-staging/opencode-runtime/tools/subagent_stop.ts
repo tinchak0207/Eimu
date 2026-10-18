@@ -4,8 +4,15 @@ import { ok, fail } from "../lib/client"
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
 export default tool({
-  description:
-    "停止正在运行的子代理（subagent）。用于：发现子代理跑偏/方向已作废/预算失控/任务不再需要时，主动刹车——停止后该子代理的会话被终止、不再换模重试、不再被交付闸门重派、也不会再唤醒你。参数二选一：给 subagent_id 停指定的那一个（也接受 label 前缀）；省略 subagent_id 或给 all=true 停本会话名下全部在跑的子代理。停止不是失败重试的替代品——方向对但暂时无输出的情况应等自动唤醒，不要滥用。",
+  description: [
+    "停止正在运行的子代理。",
+    "何时用：发现跑偏、方向作废、预算失控或任务不再需要时；方向正确但暂时无输出时不要停，等自动唤醒。",
+    "何时不用：不要用它代替失败重试。",
+    "关键约束：subagent_id 或 all=true 二选一；省略二者＝停全部（本会话名下所有在跑子代理）；mode=hard 立即终止、soft 收尾保成果；已终态回 not_cancelable。",
+    "失败处置：not_found 核对 id/label；not_cancelable 表示已终态，不要重试；stop_failed 按 gateway 文本修正；gateway_unreachable 稍后重试。",
+    "互指：软停后可用 subagent_message 续跑；查状态用 subagent_status；全新任务重新 subagent_dispatch。",
+    "示例：subagent_stop({subagent_id:agent-x7q, mode:soft})",
+  ].join("\n"),
   args: {
     subagent_id: tool.schema
       .string()

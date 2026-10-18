@@ -23,7 +23,11 @@ import { PORT, HEARTBEAT_INTERVAL_MS, CONFIRM_RESOLVED_TTL_MS, SESSION_IDLE_TTL_
 // 内部路径剥离后再过桥（纯函数在 delivery-gate.ts，因本档是服务入口、import 即起服务）。
 import { scrubSubagentPayload } from "./delivery-gate.ts"
 // 2026-10-02：子代理唤醒同样需要「opencode-server OOM/重启后恢复等待」——轮子与 workflow 唤醒同源（workflow-gw）。
-import { waitForOpencodeReady, isConnectionRefused } from "./workflow-gw.ts"
+import { waitForOpencodeReady, isConnectionRefused, dispatchWorkflowWake } from "./workflow-gw.ts"
+// CC 2.1.302 移植：唤醒 ticker（到点复用 workflow 唤醒轮子）与监视 reaper。
+import { startWakeupTicker } from "./session-wakeups.ts"
+import { startMonitorReaper } from "./session-monitors.ts"
+import { startCronTicker } from "./scheduled-crons.ts"
 
 /**
  * agent-gateway — Bun TypeScript gateway between frontend clients and opencode serve.
@@ -363,6 +367,35 @@ initSubagent({
 
 // Single global connection to opencode's event stream, fanned out per session.
 connectOpencode()
+
+// CC 2.1.302 移植：宿主的周期工作（与上面 connectOpencode 同批启动；两者模块 import 时不自启）。
+// 唤醒到点复用既有 workflow 唤醒轮子（prompt_async＋turn 记账＋看门狗），不另造投递路径。
+startWakeupTicker({
+  wake: (sid, prompt) => {
+    const st = resolveSession(sid)
+    return st
+      ? dispatchWorkflowWake(st, `wakeup:${sid}`, prompt, "final")
+      : Promise.reject(new Error(`session not found: ${sid}`))
+  },
+})
+startMonitorReaper()
+// 定时任务（CC cron 移植）：只在会话空闲（无在途回合）时触发，投递复用同一 workflow 唤醒轮子。
+// C4：durable 文件损坏时 startCronTicker 拒绝启动（原文件已备份），只记错误、不带病跑空表。
+try {
+  startCronTicker({
+    isIdle: (sid) => {
+      const st = resolveSession(sid)
+      return !st || st.turnMetrics == null
+    },
+    fire: async (task) => {
+      const st = resolveSession(task.sessionId)
+      if (!st) return
+      await dispatchWorkflowWake(st, `cron:${task.id}`, task.prompt, "final")
+    },
+  })
+} catch (error) {
+  console.error("[gateway] cron ticker refused to start:", error)
+}
 
 // 刀 F（2026-09-15）：启动扫描 in-flight rework 孤儿（延后一拍让 opencode /event 先连上、
 // 父会话可 lazy 恢复；探针与 wake 都带超时，失败留记录交下次重启，不卡启动）。

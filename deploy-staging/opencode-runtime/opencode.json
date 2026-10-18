@@ -332,9 +332,20 @@
     }
   },
   "agent": {
+    "build": {
+      "tools": {
+        "task": false
+      }
+    },
+    "plan": {
+      "tools": {
+        "task": false
+      }
+    },
     "compaction": {
       "tools": {
         "*": false,
+        "task": false,
         "image_get_result": true,
         "image_result_download": true,
         "video_result_fetch": true,
@@ -353,7 +364,19 @@
         "subagent_message": true,
         "image_get_result": true,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "enter_plan_mode": true,
+        "exit_plan_mode": true
       }
     },
     "orchestrator": {
@@ -495,7 +518,29 @@
         "apply_patch": false,
         "patch": false,
         "webfetch": true,
-        "image_result_download": true
+        "image_result_download": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "propose_goal": true,
+        "report_findings": true,
+        "schedule_wakeup": true,
+        "monitor_watch": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true,
+        "artifact_publish": true,
+        "artifact_get": true,
+        "artifact_verify": true,
+        "cron_create": true,
+        "cron_list": true,
+        "cron_delete": true,
+        "enter_plan_mode": true,
+        "exit_plan_mode": true
       }
     },
     "director3d": {
@@ -573,7 +618,7 @@
         "style_aligned_batch": false,
         "style_anchor_sref": false,
         "style_dna_extract": false,
-        "subagent_dispatch": false,
+        "subagent_dispatch": true,
         "subagent_status": false,
         "timeline_lint": false,
         "timeline_master": false,
@@ -602,7 +647,17 @@
         "local_files": true,
         "local_files_authorize": true,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     },
     "music": {
@@ -706,7 +761,18 @@
         "world_bible_extract": false,
         "task": false,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "monitor_watch": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     },
     "video-director": {
@@ -810,7 +876,18 @@
         "local_files": true,
         "local_files_authorize": true,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "monitor_watch": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     },
     "editor": {
@@ -907,7 +984,21 @@
         "local_files": true,
         "local_files_authorize": true,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "monitor_watch": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true,
+        "artifact_publish": true,
+        "artifact_get": true,
+        "artifact_verify": true
       }
     },
     "screenwriter": {
@@ -1005,7 +1096,17 @@
         "workflow_update_node": false,
         "task": false,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     },
     "motion-director": {
@@ -1109,7 +1210,17 @@
         "world_bible_extract": false,
         "task": false,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     },
     "web3d-director": {
@@ -1214,7 +1325,17 @@
         "world_bible_extract": false,
         "task": false,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     },
     "critic": {
@@ -1292,7 +1413,7 @@
         "style_aligned_batch": false,
         "style_anchor_sref": false,
         "style_dna_extract": false,
-        "subagent_dispatch": false,
+        "subagent_dispatch": true,
         "subagent_status": false,
         "timeline_lint": false,
         "timeline_master": false,
@@ -1338,7 +1459,21 @@
         "video_transcribe": true,
         "lsp": false,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "report_findings": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true,
+        "artifact_publish": true,
+        "artifact_get": true,
+        "artifact_verify": true
       }
     },
     "lyricist": {
@@ -1444,7 +1579,17 @@
         "world_bible_extract": false,
         "image_quote": false,
         "image_result_download": true,
-        "video_result_fetch": true
+        "video_result_fetch": true,
+        "task_create": true,
+        "task_get": true,
+        "task_update": true,
+        "task_list": true,
+        "mailbox_send": true,
+        "mailbox_read": true,
+        "mailbox_agents": true,
+        "memory_save": true,
+        "memory_list": true,
+        "memory_read": true
       }
     }
   }

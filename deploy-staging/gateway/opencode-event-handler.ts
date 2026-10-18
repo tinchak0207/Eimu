@@ -10,7 +10,10 @@ import { emitSanitizedDelta } from "./outbound-emit.ts"
 import { opencodeHeaders, scheduleTitleFetch, revertDeadTail, opencodeFetch } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets, emitRunningSubagentsStatus } from "./subagent"
+import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets, emitRunningSubagentsStatus, runGoalEvaluator } from "./subagent"
+// CC 2.1.302 移植：会话目标验收（active goal 在每回合收尾时由独立验收者判定）。
+import { getActiveGoal, buildGoalEvaluatorSpec, recordVerdict, GOAL_MAX_NOT_MET_STREAK } from "./session-goals.ts"
+import { beastAgentField } from "./session-lifecycle.ts"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
 import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
@@ -123,6 +126,175 @@ function takeInFlightTools(state: SessionState): OrphanToolUse[] {
 }
 function clearInFlightTools(state: SessionState): void {
   inFlightToolsBySession.delete(state.sessionId)
+}
+
+// ── CC 2.1.302：会话目标验收（收盘挂点）─────────────────────────────────────
+// 有 active goal、无 pending question、本回合未验收时，派一名独立验收者（复用
+// runGoalEvaluator = critic 同一套 dispatchAttempt/modelChain/超时轮子），
+// 只看最近正文（≤8000 字）判 {verdict,reason}，落 recordVerdict。
+// 有界：同目标每回合最多 1 次；连续 3 次 not_met 后停止自动验收并发一条可见说明。
+const GOAL_EVAL_TRANSCRIPT_MAX_CHARS = 8000
+const goalEvalBySession = new Map<
+  string,
+  { goalId: number; lastTurnGen: number; inFlight: boolean; notMet: number; stopped: boolean }
+>()
+
+async function recentTranscriptTail(opencodeSessionId: string): Promise<string> {
+  const res = await opencodeFetch(`/session/${encodeURIComponent(opencodeSessionId)}/message`, { timeoutMs: 8000 })
+  if (!res.ok) throw new Error(`transcript HTTP ${res.status}`)
+  const msgs = (await res.json()) as Array<Record<string, any>>
+  const lines: string[] = []
+  for (const m of Array.isArray(msgs) ? msgs.slice(-40) : []) {
+    const role = m?.info?.role === "user" ? "user" : "assistant"
+    for (const p of Array.isArray(m?.parts) ? m.parts : []) {
+      if (p?.type === "text" && typeof p.text === "string" && p.text.trim()) lines.push(`${role}: ${p.text.trim()}`)
+    }
+  }
+  const text = lines.join("\n")
+  return text.length > GOAL_EVAL_TRANSCRIPT_MAX_CHARS ? text.slice(-GOAL_EVAL_TRANSCRIPT_MAX_CHARS) : text
+}
+
+/** 从验收者输出里取严格 JSON；容忍代码围栏与前后噪音。 */
+function parseGoalVerdict(text: string): { verdict: "met" | "not_met"; reason: string } | null {
+  const raw = typeof text === "string" ? text : ""
+  const start = raw.indexOf("{")
+  const end = raw.lastIndexOf("}")
+  if (start < 0 || end <= start) return null
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>
+    const verdict = parsed.verdict
+    if (verdict !== "met" && verdict !== "not_met") return null
+    const reason = typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "验收者未给出理由"
+    return { verdict, reason }
+  } catch {
+    return null
+  }
+}
+
+/** not_met 的一次性 nudge：走既有 prompt_async 通道注入，并给用户一行可见说明。 */
+async function injectGoalNudge(state: SessionState, reason: string): Promise<void> {
+  await deliverGoalNudge(state, reason)
+}
+
+/** 导出仅供离线验收（G2 turnGen 记账）；生产只由 maybeRunGoalAcceptance 调用。 */
+export async function deliverGoalNudge(state: SessionState, reason: string): Promise<void> {
+  emitToSession(state, "message.delta", { text: `目标验收尚未通过，已提醒继续补齐：${reason}\n` })
+  const body = {
+    ...beastAgentField(state),
+    parts: [
+      {
+        type: "text",
+        text: `【目标验收·未达成】独立验收者判定当前会话目标尚未达成。依据：${reason}\n请继续推进目标，补齐验收缺失的证据与交付，不要只重复声明已完成。`,
+      },
+    ],
+  }
+  const res = await opencodeFetch(`/session/${state.opencodeSessionId}/prompt_async`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeoutMs: 10000,
+  })
+  if (!res.ok) throw new Error(`status ${res.status}`)
+  // G2：nudge 也是一次「新回合起点」——必须与用户消息/唤醒路径同样 bump turnGen，
+  // 否则 session.idle 的「本回合已验收」闸会把它当成同一回合而永不再验收。
+  state.lastPromptBody = body as NonNullable<SessionState["lastPromptBody"]>
+  state.turnGen = (state.turnGen ?? 0) + 1
+  state.turnTextChars = 0
+  state.turnReasoningChars = 0
+  state.turnRetries = 0
+  state.turnAborted = false
+  state.turnAbortSource = undefined
+  state.retryQueued = false
+  state.turnUpstreamError = null
+  state.turnToolStarted = false
+  state.watchdogRetried = false
+  state.questionAnsweredThisTurn = false
+  state.deathDeclared = false
+  state.lastTurnActiveAt = Date.now()
+  markDirty(state)
+  armWatchdogTimer(state)
+}
+
+/**
+ * session.idle 收盘挂点（fire-and-forget，永不影响 turn.done）。
+ * 判据：有 active goal；无 pending question；本轮尚未验收过。
+ */
+function maybeRunGoalAcceptance(state: SessionState): void {
+  try {
+    if (!state?.sessionId || !state.opencodeSessionId) return
+    if (state.pendingQuestions.size > 0) return
+    if (state.turnAborted) return
+    const goal = getActiveGoal(state.sessionId)
+    if (!goal) return
+    // G1 熔断：连续 not_met 次数已持久化，重启后仍然生效。
+    if (goal.not_met_streak >= GOAL_MAX_NOT_MET_STREAK) {
+      goalEvalBySession.set(state.sessionId, {
+        goalId: goal.id,
+        lastTurnGen: state.turnGen ?? 0,
+        inFlight: false,
+        notMet: goal.not_met_streak,
+        stopped: true,
+      })
+      return
+    }
+    const turnGen = state.turnGen ?? 0
+    const prev = goalEvalBySession.get(state.sessionId)
+    if (prev && prev.goalId === goal.id && (prev.inFlight || prev.lastTurnGen === turnGen || prev.stopped)) return
+    const record = { goalId: goal.id, lastTurnGen: turnGen, inFlight: true, notMet: prev?.goalId === goal.id ? prev.notMet : 0, stopped: false }
+    goalEvalBySession.set(state.sessionId, record)
+    void (async () => {
+      let dispatched = false
+      try {
+        const tail = await recentTranscriptTail(state.opencodeSessionId)
+        const spec = buildGoalEvaluatorSpec(goal.condition)
+        dispatched = runGoalEvaluator(state, { label: spec.label, prompt: `${spec.prompt}${tail}` }, (result) => {
+          const current = goalEvalBySession.get(state.sessionId)
+          if (!current || current.goalId !== goal.id) return
+          current.inFlight = false
+          const active = getActiveGoal(state.sessionId)
+          if (!active || active.id !== goal.id) return
+          if (result.status !== "ok") {
+            console.error(`[gateway] goal evaluator ended ${result.status}: session=${state.sessionId} ${result.error || ""}`)
+            return
+          }
+          const parsed = parseGoalVerdict(result.text)
+          if (!parsed) {
+            const updated = recordVerdict(state.sessionId, { verdict: "not_met", reason: "验收输出不可解析" })
+            current.notMet = Math.max(current.notMet + 1, updated?.not_met_streak ?? 0)
+            if (current.notMet >= GOAL_MAX_NOT_MET_STREAK) {
+              current.stopped = true
+              emitToSession(state, "message.delta", {
+                text: `目标已连续 ${current.notMet} 次未通过自动验收，本轮起停止自动验收；请人工确认目标或调整条件后再继续。\n`,
+              })
+              return
+            }
+            void injectGoalNudge(state, "验收输出不可解析").catch((e) => console.error(`[gateway] goal nudge failed: session=${state.sessionId}`, e))
+            return
+          }
+          const updated = recordVerdict(state.sessionId, parsed)
+          if (parsed.verdict === "met") {
+            emitToSession(state, "message.delta", { text: `目标验收已通过：${parsed.reason}\n` })
+            return
+          }
+          current.notMet = Math.max(current.notMet + 1, updated?.not_met_streak ?? 0)
+          if (current.notMet >= GOAL_MAX_NOT_MET_STREAK) {
+            current.stopped = true
+            emitToSession(state, "message.delta", {
+              text: `目标已连续 ${current.notMet} 次未通过自动验收，本轮起停止自动验收；请人工确认目标或调整条件后再继续。\n`,
+            })
+            return
+          }
+          void injectGoalNudge(state, parsed.reason).catch((e) => console.error(`[gateway] goal nudge failed: session=${state.sessionId}`, e))
+        })
+      } catch (e) {
+        console.error(`[gateway] goal acceptance failed: session=${state.sessionId}`, e)
+      } finally {
+        const current = goalEvalBySession.get(state.sessionId)
+        if (!dispatched && current && current.goalId === goal.id) current.inFlight = false
+      }
+    })()
+  } catch (e) {
+    console.error("[gateway] goal acceptance gate failed:", e)
+  }
 }
 
 export function handleOpencodeEvent(event: any): void {
@@ -776,6 +948,8 @@ export function handleOpencodeEvent(event: any): void {
         // 非 beast / 无 Expert 交付 / 通用子代理路径完全不受影响（待审清单为空即零动作）。
         // 派遣非阻塞（内部 async），失败只留一行 log，不影响 turn.done 已发的事实。
         maybeRunMachineCriticPass(state, state.criticUnreviewedDeclared === true)
+        // CC 2.1.302：会话目标验收（有 active goal 时，同回合最多派一次独立验收者）。
+        maybeRunGoalAcceptance(state)
         // 刀 1（2026-09-19）：Jev 测谎闸＋空壳栏初筛 — shadow 模式收盘消费点。
         // fire-and-forget（内部 2s 超时、永不 throw、失败只留一行 log）；
         // 快照在本轮数据（brief 尾段/唤醒摘要/待审交付）后即刻清空 volatile。

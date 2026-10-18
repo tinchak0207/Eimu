@@ -25,19 +25,18 @@ const GUIDANCE: Record<string, string> = {
 
 export default tool({
   description: [
-    "给一个已在运行（或刚结束）的子代理追加指令/纠偏——不必把它杀死重派。",
-    "**什么时候用**：subagent_status 显示它跑偏了（方向错、范围错、卡在错的做法上），或你拿到了新信息需要它中途调整；此时用本工具把新指令投给它，它会在自己那一轮里继续执行。",
-    "**mode 语义**（缺省 start_or_steer）：`start_or_steer`＝它正在跑就 steer 当前轮，空闲（含刚结束、仍在续跑窗口内的终态子代理）则**复活并后台续跑**；`start_if_idle`＝它正在跑就只把消息排队（不打断），空闲才起一轮；`steer`＝只在指定轮正在跑时投递，须同时给 `expected_turn_id`，不符会被拒（turn_mismatch）。",
-    "**给已终态子代理发消息＝后台续跑**：已经完成的子代理只要还在续跑窗口内，再给它发消息即唤醒它继续干活，不需要重新派遣。例外：被你自己用 subagent_stop 硬停的（或人工取消的）不自动续跑，会回 `agent_cancelled`。",
-    "**接受 ≠ 已处理**：成功回执里的 `submission_id` 只是「网关已收下这条消息」的接受标识，`delivery` 说明投递方式（steered/started/queued），`note` 固定提醒接受标识不代表对方已经读到或照做。不要把它当「已生效」。",
-    "**回答子代理的提问**：子代理若登记了阻塞式提问（subagent_status 的 `pending_questions`），用本工具带 `kind:\"question\"` 与取自该清单的 `question_id` 把答复投过去，网关按 id 精确解除阻塞；成功回执会带 `question_resolved:true`。回答提问同样需要 `text`（答复正文）。",
-    `**必填**：subagent_id（完整 runId / label 前缀 / \"latest\"）与 text。缺任一个会被拒并回传可照抄的完整参数示例。示例参数：${EXAMPLE_JSON}`,
+    "给运行中或刚结束的子代理追加指令或纠偏。",
+    "何时用：子代理跑偏、需要中途调整，或回答它的阻塞提问时；任务作废要停用 subagent_stop，全新任务重新派遣。",
+    "关键约束：必填 subagent_id 与 text；mode 默认 start_or_steer；回答提问须 kind=question 与 question_id；submission_id 只代表已收下，不代表已生效。",
+    "失败处置：agent_cancelled 表示已被停，只能重派；turn_not_steerable 改用 start_if_idle；turn_mismatch 先用 subagent_status 取 current_turn_id；not_messageable 核实状态；missing_required_args 补字段。",
+    "互指：短期邮箱消息用 mailbox_send；查状态用 subagent_status；停止用 subagent_stop。",
+    "示例：subagent_message({subagent_id:latest, text:只修 src/auth.ts:42 的空指针，不要改测试。})",
   ].join("\n"),
   args: {
     subagent_id: tool.schema
       .string()
       .optional()
-      .describe("目标子代理：subagent_dispatch 返回的完整 runId、label 前缀，或 \"latest\"（本会话最近一次 run）；必填"),
+      .describe("目标子代理：subagent_dispatch 返回的完整 runId、派遣时指定的 name、label 前缀，或 \"latest\"（本会话最近一次 run）；必填"),
     text: tool.schema
       .string()
       .optional()

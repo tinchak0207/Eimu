@@ -36,6 +36,18 @@ import { generationMaintenanceEnabled } from "./job-store"
 import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSearch, MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // W6a（2026-10-04）：装置桥云端侧（本机 daemon 出站注册／取件）。总开关 EIMU_DEVICE_BRIDGE，预设 OFF。
 import { deviceBridgeEnabled, handleDeviceBridgeRoutes, handleInternalDeviceAuthorize, handleInternalDeviceInvoke, handleInternalDeviceStatus } from "./device-bridge.ts"
+// CC 2.1.302 移植：任务板／会话目标／评审 findings／唤醒／监视的内部端点（全部 loopback）。
+import { handleTaskBoard } from "./task-board-http.ts"
+import { handleGoal } from "./goal-http.ts"
+import { handleFindings } from "./findings-http.ts"
+import { handleWakeup } from "./wakeup-http.ts"
+import { handleMonitor } from "./monitor-http.ts"
+import { handleMailbox } from "./mailbox-http.ts"
+import { handlePermission } from "./permission-http.ts"
+import { handleArtifact } from "./artifact-http.ts"
+import { handleCron } from "./cron-http.ts"
+import { handlePlan } from "./plan-http.ts"
+import { handleMemory } from "./memory-http.ts"
 // TODO(整合 Wave3)：以下符号同波在建（questions-gw/session-read/quota-ledger/internal-http/
 // memory-wiring.ts），bun build 对 named import 硬查（未 export 即报错），故先 declare 占位
 // （第一阶段占位符法，记忆 gateway-index-refactor-stage1-0919）；整合 subagent 统一换真 import。
@@ -289,6 +301,47 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       // HARNESS_API_KEY 与现场冲突，上层裁决照现场、不加 key——偏离契约处已回报）。
       if (req.method === "POST" && pathname === "/internal/memory/batch-run") {
         return handleMemoryBatchRunInternal(req)
+      }
+      // CC 2.1.302 移植：任务板／会话目标／评审 findings／唤醒／监视。
+      // 与上方 /internal/* 同构：只验 loopback，无第二把 key；handler 自带 body 解析与校验。
+      if (req.method === "POST" && pathname.startsWith("/internal/task/")) {
+        return handleTaskBoard(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/goal/")) {
+        return handleGoal(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/findings/")) {
+        return handleFindings(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/wakeup/")) {
+        return handleWakeup(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/monitor/")) {
+        return handleMonitor(req, pathname)
+      }
+      // CC 2.1.302 移植第二批：协作总线／权限／交付物／定时／计划模式／长期记忆。
+      // 全部 POST-only（handler 内同样校验），与上方家族同构；memory 只匹配三支，
+      // 刻意不拦 /internal/memory/batch-run（上方已有专属分支）。
+      if (req.method === "POST" && pathname.startsWith("/internal/mailbox/")) {
+        return handleMailbox(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/permission/")) {
+        return handlePermission(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/artifact/")) {
+        return handleArtifact(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/cron/")) {
+        return handleCron(req, pathname)
+      }
+      if (req.method === "POST" && pathname.startsWith("/internal/plan/")) {
+        return handlePlan(req, pathname)
+      }
+      if (
+        req.method === "POST" &&
+        (pathname === "/internal/memory/save" || pathname === "/internal/memory/list" || pathname === "/internal/memory/read")
+      ) {
+        return handleMemory(req, pathname)
       }
       // 工作流引擎端点：接受 session_id（opencode 或 gateway id）解析 session。
       if (pathname === "/internal/workflow/templates" && req.method === "GET") {

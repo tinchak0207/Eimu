@@ -36,12 +36,13 @@ const EXAMPLE_JSON = JSON.stringify(EXAMPLE_ARGS)
 
 export default tool({
   description: [
-    "派一个子代理（subagent）执行一个自包含任务。用于多步骤任务、大素材加工、可并行的探索/生成——把活拆给子代理，主对话保持精简。",
-    "**必填两个字段**：`label`（短标签，简体中文，≤20 字）与 `prompt`（自包含任务书：目标、素材路径/数据、验收标准、预期产出格式，四样缺一不可；子代理看不到你们的对话历史，只能拿到 prompt 里的信息）。缺任一个都会被拒，并回传缺哪个字段与一个可照抄的完整参数示例。",
-    "async=true（后台模式，默认推荐）：立即返回，主对话可继续推进其他工作或结束回合；子代理完成后系统自动唤醒你并附结果摘要（失败也唤醒并附死因）。async=false（默认）：阻塞等待完成并直接返回 summary，仅用于必须立即拿结果才能继续的小任务。",
-    "并发上限 3；满了工具会返回「已有 3 个子代理在跑，等一个完成再派」，此时等一个完成再派，不要连续重试（连续重试同一参数会被工具层重复呼叫断路器拦截）。",
-    "简单单步任务（答一句话、一张图的直接生成）不要派，避免杀鸡用牛刀。野兽模式下派 Expert 域内任务时指定 expert 栏（如 3D 场景→director3d、剪辑→editor），让子代理以该域专家身分与工具表执行。",
-    `示例参数：${EXAMPLE_JSON}`,
+    "派一个子代理执行自包含任务。",
+    "何时用：多步骤、大素材加工、可并行的研究或生成；主对话需要保持精简时。",
+    "何时不用：单步琐事、一句话能答的不要派；fork 由子代理发起，主会话不得 fork。",
+    "关键约束：label 与 prompt 必填；prompt 含目标、素材路径、验收标准、产出格式；async 默认后台；并发上限 3；model/effort 仅在用户明确点名时设置。",
+    "失败处置：missing_required_args 补 label/prompt；dispatch_failed 按 gateway 文本修正；subagent_error 读 summary 决定修任务书还是换路；timeout 用相同 label 重新派发；aborted 表示会话中断。",
+    "互指：后续纠偏用 subagent_message，停止用 subagent_stop，查状态用 subagent_status。",
+    "示例：subagent_dispatch({label:研究竞品, prompt:研究 3 个同类纪录片开场，输出文件路径、时间码与手法对比表；验收：每条都有真实链接与时间码。, async:true})",
   ].join("\n"),
   args: {
     label: tool.schema
@@ -51,19 +52,39 @@ export default tool({
     prompt: tool.schema
       .string()
       .optional()
-      .describe("给子代理的完整任务书（必填）：目标、素材路径/数据、验收标准、预期产出格式，四样缺一不可"),
+      .describe("给子代理的完整任务书（必填）：目标、素材路径/数据、验收标准、预期产出格式，四样缺一不可；fork 时这里是那一条指令"),
     expert: tool.schema
       .string()
       .optional()
       .describe(
-        "Expert id（lyricist/music 在野兽模式关闭时也生效）：director3d=3D导演 / music=音乐导演 / lyricist=歌词专家 / video-director=视频导演 / editor=剪辑师 / screenwriter=编剧分镜 / motion-director=动态设计 / web3d-director=Web3D导演。指定后子代理以该 Expert 身分执行（仅持该域工具）。野兽模式关闭时仍可指定 lyricist/music，其他域或省略时=通用子代理。",
+        "Expert id（lyricist/music 在野兽模式关闭时也生效）：director3d=3D导演 / music=音乐导演 / lyricist=歌词专家 / video-director=视频导演 / editor=剪辑师 / screenwriter=编剧分镜 / motion-director=动态设计 / web3d-director=Web3D导演。指定后子代理以该 Expert 身分执行（仅持该域工具）。野兽模式关闭时仍可指定 lyricist/music，其他域或省略时=通用子代理。fork 忽略。",
       ),
     async: tool.schema
       .boolean()
       .optional()
       .describe(
-        "true=后台派出立即返回，完成后自动唤醒主会话附结果摘要（失败也唤醒），军团并发派遣一律用它；缺省/false=同步等待结果（仅限必须立即拿结果的小任务）",
+        "缺省 true=后台派出立即返回，完成后自动唤醒主会话附结果摘要（失败也唤醒），军团并发派遣一律用它；只有下一步必须依赖结果且期间无事可做时才传 false 同步等待",
       ),
+    fork: tool.schema
+      .boolean()
+      .optional()
+      .describe("true=派生 worker fork：继承本会话完整历史与工具面，只执行 prompt 里的一条指令后停止；恒后台。等价于 subagent_type:\"fork\""),
+    subagent_type: tool.schema
+      .string()
+      .optional()
+      .describe('子代理类型；目前只接受 "fork"（与 fork:true 等价），其他值会走普通子代理路径'),
+    model: tool.schema
+      .string()
+      .optional()
+      .describe('显式模型覆写，如 "provider/model" 或可补齐 provider 的 modelID；只在用户或规则明确点名时使用，fork 忽略'),
+    effort: tool.schema
+      .enum(["low", "medium", "high", "xhigh", "max"])
+      .optional()
+      .describe("推理强度档位（作为 opencode variant 传给模型，真正生效；不支持的 agent 会回 variant_applied:false；fork 忽略）；只在用户或规则明确点名时使用"),
+    name: tool.schema
+      .string()
+      .optional()
+      .describe("可寻址名（≤64 字符，字母数字开头，仅字母/数字/下划线/连字符；main/team-lead/user/system/latest 保留）；之后可按名字 subagent_message/subagent_status"),
     from_checkpoint_run_id: tool.schema
       .string()
       .optional()
@@ -88,8 +109,13 @@ export default tool({
       )
     }
     try {
-      const asyncMode = args.async === true
+      // CC 2.1.302：后台是默认，不是可选加速。只有显式 false 才同步。
+      const asyncMode = args.async !== false
       const expert = typeof args.expert === "string" && args.expert.trim() ? args.expert.trim() : undefined
+      const fork = args.fork === true || args.subagent_type === "fork"
+      const model = typeof args.model === "string" && args.model.trim() ? args.model.trim() : undefined
+      const effort = typeof args.effort === "string" && args.effort.trim() ? args.effort.trim() : undefined
+      const name = typeof args.name === "string" && args.name.trim() ? args.name.trim() : undefined
       const fromCpRunId = typeof args.from_checkpoint_run_id === "string" && args.from_checkpoint_run_id.trim() ? args.from_checkpoint_run_id.trim() : undefined
       const fromCpId = typeof args.from_checkpoint_id === "string" && args.from_checkpoint_id.trim() ? args.from_checkpoint_id.trim() : undefined
       const res = await fetch(`${GATEWAY}/internal/subagent/dispatch`, {
@@ -100,7 +126,11 @@ export default tool({
           label,
           prompt,
           async: asyncMode,
+          ...(fork ? { fork: true } : {}),
           ...(expert !== undefined ? { expert } : {}),
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+          ...(name !== undefined ? { name } : {}),
           ...(fromCpRunId !== undefined ? { from_checkpoint_run_id: fromCpRunId } : {}),
           ...(fromCpId !== undefined ? { from_checkpoint_id: fromCpId } : {}),
         }),
@@ -115,14 +145,24 @@ export default tool({
         )
       }
       const subagentId = data.subagent_id as string
-      // R6 后台模式：网关已受理，立即返回，完成时网关自动唤醒主会话。
-      if (asyncMode && data.status === "running") {
+      // D5：以**服务端** data.async / data.status 决定是否早退，而不是本地的 async 请求值。
+      // fork:true, async:false 时网关恒返回 async:true；若照本地参数走轮询＝同一结果
+      // 既由唤醒送达、又被工具取件＝双重交付。
+      const serverAsync = data.async === true || data.status === "running"
+      if (serverAsync) {
         return ok({
-          title: "子代理已后台派出",
+          title: fork ? "fork 已后台派出" : "子代理已后台派出",
           subagent_id: subagentId,
+          ...(typeof data.name === "string" ? { name: data.name } : {}),
+          ...(fork ? { fork: true, model: "inherit" } : {}),
           label,
           status: "running",
-          note: typeof data.note === "string" ? data.note : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。",
+          async: true,
+          ...(data.variant_applied !== undefined ? { variant_applied: data.variant_applied } : {}),
+          note:
+            typeof data.note === "string" && data.note
+              ? data.note
+              : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。",
         })
       }
       // 同步模式（或缺省）：长挂起取件（wait_ms），零回归。
@@ -151,11 +191,21 @@ export default tool({
           if (!failed) {
             const title =
               st.status === "stopped" ? "子代理已停止（非失败）" : st.status === "interrupted" ? "子代理已中断（非终态）" : "子代理完成"
-            return ok({ title, status: st.status ?? "ok", summary: st.summary ?? "" })
+            return ok({
+              title,
+              status: st.status ?? "ok",
+              summary: st.summary ?? "",
+              ...(st.usage ? { usage: st.usage } : {}),
+              ...(typeof st.name === "string" ? { name: st.name } : {}),
+              ...(st.fork ? { fork: true } : {}),
+            })
           }
           return fail("subagent_error", st.error || st.summary || "子代理失败", {
             status: st.status,
             ...(st.summary ? { summary: st.summary } : {}),
+            ...(st.usage ? { usage: st.usage } : {}),
+            ...(typeof st.name === "string" ? { name: st.name } : {}),
+            ...(st.fork ? { fork: true } : {}),
           })
         }
       }

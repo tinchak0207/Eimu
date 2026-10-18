@@ -33,6 +33,55 @@ import {
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
+// ── CC 2.1.302：计划模式 + 权限内核闸（跨进程，权威状态在 gateway）────────────
+// C1：404（旧网关）/5xx/网络失败不得阻塞全部工具；read/glob 在网关不可用时仍可用。
+// 计划闸单独按 H5 处理：状态不可判定 → 写类拒绝、读类放行（fail-closed）。
+const GATE_HTTP_TIMEOUT_MS = 800
+// H6：计划只读清单的单一真源在网关 /internal/plan/state 的 read_only_tools。
+// 本地集合只用于网关不可用时的 fail-closed 分类，不再是第二份计划规则。
+const PLAN_READ_ONLY_FALLBACK: ReadonlySet<string> = new Set(
+  [
+    "read", "list", "ls", "glob", "grep", "webfetch", "websearch", "whoami", "lsp_diagnostics",
+    "task_list", "task_get", "subagent_status", "workflow_status", "workflow_history",
+    "image_get_result", "video_result_fetch", "memory_recall", "asset_search", "asset_get",
+    "character_card_list", "search_web", "search_aggregate", "smart_search", "video_analyze",
+    "video_measure", "video_transcribe", "video_evidence", "vision_analyze", "read_image",
+    "timeline_query", "canvas_get_state", "director_get_state", "quota",
+  ].map((name) => name.toLowerCase()),
+)
+const PLAN_EXEMPT_TOOLS: ReadonlySet<string> = new Set(
+  ["enterplanmode", "exitplanmode", "askuserquestion", "enter_plan_mode", "exit_plan_mode", "ask_parent"].map((name) =>
+    name.toLowerCase(),
+  ),
+)
+
+let gatewayGateWarned = false
+
+/** gateway loopback POST；超时/不可达回 null（调用方按 C1/H5 处理）。 */
+async function gatewayPost(path: string, body: unknown): Promise<Response | null> {
+  try {
+    return await fetch(`${GATEWAY}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GATE_HTTP_TIMEOUT_MS),
+    })
+  } catch (e) {
+    if (!gatewayGateWarned) {
+      gatewayGateWarned = true
+      console.warn(
+        `[eimu-guard] gateway plan/permission gate unreachable; falling back to existing guard: ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+    return null
+  }
+}
+
+/** 旧网关（路由不存在）或网关故障：退回既有 guard，不阻塞全部工具。 */
+function gatewayFallbackStatus(res: Response): boolean {
+  return res.status === 404 || res.status === 405 || res.status >= 500
+}
+
 // ── D1（2026-10-02）：工具层重复呼叫断路器 ──────────────────────────────────
 // 证据：同 session 同工具同参数重复 3,525 次／135 session，最恶 `bash true` ×1110、
 // `bash date` ×371、空 `bash {}` ×59（自家遥测；机制类别有文献：MAST FM-1.3/FM-1.5、
@@ -205,6 +254,84 @@ export const EimuGuard: Plugin = async ({ client }) => {
 
       if (tool === "task") {
         throw new Error("task 工具已停用：派子代理请用 subagent_dispatch（带 expert 字段）。")
+      }
+
+      // CC 2.1.302：计划模式闸 + 权限求值（gateway 持有权威状态；跨进程走 HTTP）。
+      // 两者并行、各自 800ms 超时。C1：404/5xx/网络失败不阻塞全部工具。
+      const lowerTool = tool.toLowerCase()
+      const [planRes, permRes] = await Promise.all([
+        gatewayPost("/internal/plan/state", { session_id: input.sessionID }),
+        gatewayPost("/internal/permission/evaluate", { session_id: input.sessionID, tool, input: args }),
+      ])
+
+      // H5 计划闸 fail-closed：超时/网络失败、200 但 JSON 不可解析或缺 inPlanMode
+      // → 写类拒绝、读类放行。404/5xx（旧网关/故障）退回既有 guard。
+      if (planRes) {
+        if (gatewayFallbackStatus(planRes)) {
+          // 旧网关没有计划端点或网关故障：不阻塞工具，继续走既有 guard。
+        } else if (!planRes.ok) {
+          throw new Error(`计划模式状态查询失败（HTTP ${planRes.status}），已拒绝工具调用。`)
+        } else {
+          const plan = (await planRes.json().catch(() => null)) as
+            | { inPlanMode?: unknown; read_only_tools?: unknown }
+            | null
+          if (typeof plan?.inPlanMode !== "boolean") {
+            if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+              throw new Error("计划模式状态不可解析：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
+            }
+          } else if (plan.inPlanMode) {
+            const serverReadOnly = Array.isArray(plan.read_only_tools)
+              ? new Set(
+                  plan.read_only_tools
+                    .filter((name): name is string => typeof name === "string")
+                    .map((name) => name.toLowerCase()),
+                )
+              : null
+            const readOnly = serverReadOnly ? serverReadOnly.has(lowerTool) : PLAN_READ_ONLY_FALLBACK.has(lowerTool)
+            if (!readOnly && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+              throw new Error(
+                "计划模式：当前只做研究与规划，写操作/副作用工具被禁用。请把完整计划写入 plan_file_path，再调用 exit_plan_mode 请求批准。",
+              )
+            }
+          }
+        }
+      } else if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+        throw new Error("计划模式状态查询超时/不可达：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
+      }
+
+      // 权限闸：404/5xx/网络失败退回既有 guard；deny 直接拒绝；ask 按 C3 处理。
+      if (permRes) {
+        if (gatewayFallbackStatus(permRes)) {
+          // 旧网关/网关故障：退回既有路径/沙箱/SSRF guard。
+        } else if (!permRes.ok) {
+          throw new Error(`权限求值失败（HTTP ${permRes.status}），已按 fail-closed 拒绝工具调用。`)
+        } else {
+          const decision = (await permRes.json().catch(() => null)) as
+            | { behavior?: string; reason?: { type?: string; mode?: string; reason?: string }; read_only?: boolean }
+            | null
+          if (decision?.behavior === "deny") {
+            throw new Error(`工具「${tool}」被权限策略拒绝：${decision.reason?.reason ?? "deny"}`)
+          }
+          if (decision?.behavior === "ask") {
+            const isDefaultMode = decision.reason?.type === "mode" && decision.reason?.mode === "default"
+            if (!isDefaultMode) {
+              // 规则或其它模式的 ask：插件没有确认队列，fail-closed。
+              throw new Error(
+                `工具「${tool}」需要人工确认（${decision.reason?.reason ?? "ask"}），当前插件没有确认队列，已按 fail-closed 拒绝。`,
+              )
+            }
+            // C3：默认模式 ask 不得静默放行。只读/计划控制工具继续走既有 guard；
+            // 写/执行类必须先取得显式授权（既有 guard 不提供确认队列）。
+            const readOnly =
+              decision.read_only === true ||
+              (typeof decision.read_only !== "boolean" && PLAN_READ_ONLY_FALLBACK.has(lowerTool))
+            if (!readOnly && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+              throw new Error(
+                `工具「${tool}」需要确认：该工具需在设置中授权（添加 allow 规则）后再调用。`,
+              )
+            }
+          }
+        }
       }
 
       // D1：重复呼叫断路器（在 bash 包装前以原始 args 取签名；轮询类工具豁免）。

@@ -1,7 +1,65 @@
 import { tool } from "@opencode-ai/plugin/tool"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { ok, fail } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
+const WORKSPACE = process.env.HARNESS_WORKSPACE || "/opt/agent-harness/workspace"
+
+/**
+ * 只有真实本地文件才能进 artifact 版本库（publish 需要 path）。
+ * HTTP(S)/artifact 等带 scheme 的 URI 没有本地字节，跳过落库；
+ * file:// 与绝对/相对路径照常尝试（相对路径按 HARNESS_WORKSPACE 解析）。
+ * 网关失败不得阻断登记（登记是本工具的主职责），只记录在返回值与日志。
+ */
+function localFileFromUri(uri: string): string | null {
+  if (uri.startsWith("file://")) {
+    try {
+      return fileURLToPath(uri)
+    } catch {
+      return null
+    }
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) return null
+  return path.isAbsolute(uri) ? uri : path.resolve(WORKSPACE, uri)
+}
+
+async function publishRegistered(
+  sessionId: string,
+  name: string,
+  uri: string,
+  metadata: Record<string, unknown> | undefined,
+): Promise<Record<string, unknown>> {
+  const localPath = localFileFromUri(uri)
+  if (!localPath) return { ok: false, skipped: true, reason: "non_local_uri" }
+  try {
+    const contentType = typeof metadata?.content_type === "string" ? metadata.content_type : undefined
+    const resp = await fetch(`${GATEWAY}/internal/artifact/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        name,
+        path: localPath,
+        content_type: contentType,
+        producer: "artifact_register",
+      }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok || !data?.ok) {
+      console.warn(
+        `[artifact_register] gateway publish failed: status=${resp.status} code=${data?.code ?? ""} error=${data?.error ?? ""}`,
+      )
+      return { ok: false, http_status: resp.status, code: data?.code, error: data?.error }
+    }
+    return { ok: true, slug: data.slug, version: data.version, changed: data.changed }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    console.warn(`[artifact_register] gateway publish unreachable: ${error}`)
+    return { ok: false, error }
+  }
+}
 
 const EXAMPLE_ARGS = {
   action: "register",
@@ -19,13 +77,13 @@ const EXAMPLE_JSON = JSON.stringify(EXAMPLE_ARGS)
 
 export default tool({
   description: [
-    "将具型产物（Typed Artifacts：图片、视频、音频、文档、代码、数据等）注册进主子代理共享的产物契约表（Workspace Registry）。",
-    "注册后，主代理与兄弟子代理即可直接通过产物表结构化读取或按类型检索，无需靠 prompt 文本传递长 URL 或文件路径字符串。",
-    "**支持动作（action）**：",
-    "  - `register`：注册一个新产物（必填 name, type, uri，可选 metadata）；",
-    "  - `list`：列出当前会话已注册的所有产物（可按 type 过滤）；",
-    "  - `get`：按 artifact_id 或 name 获取具体产物。",
-    `示例参数：${EXAMPLE_JSON}`,
+    "把具型产物注册进主子代理共享的产物表。",
+    "何时用：子代理产出图片、视频、音频、文档，需要让主代理按结构化方式读取时；已有版本化交付物用 artifact_publish。",
+    "何时不用：只传一条 URL 不必注册；需要 sha256/版本/真实链接证明时用 artifact_publish。",
+    "关键约束：action=register 必填 name/type/uri；list 可按 type 过滤；get 按 artifact_id 或 name；注册只写元数据，不产生版本。",
+    "失败处置：missing_required_args 补齐 name/type/uri；artifact_failed 按 gateway 文本修正；network_error 稍后重试。",
+    "互指：artifact_publish 才产生版本与 sha256；artifact_get/artifact_verify 用于版本化交付物。",
+    "示例：artifact_register({action:register, name:scene_01_keyframe, type:image, uri:https://example.com/scene_01.png})",
   ].join("\n"),
   args: {
     action: tool.schema
@@ -91,9 +149,15 @@ export default tool({
           { http_status: res.status },
         )
       }
+      // 登记后尝试落库到 artifact 版本库（P1-3/网关接线）。失败只记录，不阻断登记。
+      const gatewayPublish =
+        action === "register"
+          ? await publishRegistered(context.sessionID, name, uri, args.metadata as Record<string, unknown> | undefined)
+          : undefined
       return ok({
         title: `具型产物操作成功（${action}）`,
         ...data,
+        ...(gatewayPublish ? { gateway_publish: gatewayPublish } : {}),
       })
     } catch (e) {
       return fail("network_error", `产物注册通信失败：${e instanceof Error ? e.message : String(e)}`)
