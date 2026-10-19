@@ -599,7 +599,7 @@ const STORYBOARD_SKETCH_TEXT = `# 电影镜头复刻分镜生成器（部分接�
 
 先用 \`video_evidence\`（action=probe）取得参考片的时长、帧率、音视频流与体积，再按需取帧（action=frames，可 action=tiles 拼板），据此分析原始视频/参考素材，提取视觉风格信息，输出风格档案：
 
-（远端链接：先用 \`video_fetch\`（action=prepare）预热钉版 yt-dlp 隔离环境，再 \`video_evidence\`（action=fetch）抓回本地——视频取证内部用本站 ffmpeg 轮子取帧，不再让用户自己跑命令行。**边界：环境未 prepare 时 \`video_fetch\` 回 \`video_fetch_unavailable\`，此时如实告诉用户抓取不了，不要编造已抓到的内容。**）
+（远端链接：直链 artifact（store.*.mp4）不需要 prepare，\`video_evidence\`（action=fetch）会先走直链下载；站点页链接才需 \`video_fetch\`（action=prepare）预热钉版 yt-dlp 隔离环境，再 \`video_evidence\`（action=fetch）抓回本地——视频取证内部用本站 ffmpeg 轮子取帧，不再让用户自己跑命令行。**边界：环境未 prepare 时 \`video_fetch\` 回 \`video_fetch_unavailable\`，此时如实告诉用户抓取不了，不要编造已抓到的内容。**）
 
 \`\`\`json
 {
@@ -885,7 +885,7 @@ export const KUNPENG_SKILL_AUDIT: readonly KunpengSkillAuditEntry[] = [
       { from: "ffmpeg 抽帧命令", to: "video_evidence（action=frames；本站已有 ffmpeg 轮子，工具内部即走它）" },
       { from: "逐帧调用Gemini 生成线稿", to: "逐帧生成铅笔线稿（prompt 保留；生图走 image_generate）" },
       { from: "PIL 拼 3x3 网格脚本", to: "视频帧板走 video_evidence（action=tiles，columns 默认 3）；草图网格走本站拼板能力（shot_grid_batch / run_py）" },
-      { from: "远端参考片下载（yt-dlp 命令行）", to: "video_fetch（action=prepare 预热 → video_evidence action=fetch）；未 prepare 回 video_fetch_unavailable" },
+      { from: "远端参考片下载（yt-dlp 命令行）", to: "video_fetch（task_id 回收生成产物；站点 URL 才 prepare → video_evidence fetch）" },
       { from: "message action=send channel=feishu（飞书发送）", to: "展示给用户确认 → 存档" },
       { from: "dmxapi.cn API 端点 + DMXAPI_KEY", to: "剔除（生图走 image_generate，不暴露外部端点）" },
     ],
@@ -959,7 +959,7 @@ export function buildKunpengKnowledgeInjection(): string {
 
   const sections = KUNPENG_KNOWLEDGE_SECTIONS.map((section) => section.text).join("\n\n---\n\n");
 
-  const toolContract = `工具边界：本站 agent 可用的生成工具只有 image_generate / image_edit / image_upscale / canvas_get_state / canvas_apply_ops（及画布/工作流工具）；影片取证与分析工具为 video_evidence（action=probe/frames/tile/tiles/boundaries/cut/fetch；frames 的 at 与 every/every_frame 互斥，boundaries 回机械式候选+分数不是剪辑判读）、video_transcribe（{source, language} → 每词 start/end 秒，形状 eimu.transcript@1；ASR 未配置时返回 asr_unavailable，缺时间戳就保持缺、不得编造；language 不接受 auto/und）、video_measure（台词量测：中文要对我方短剧口吻传 rate: 4.5，不传则用默认表 zh normal 5.25，英文为音节启发式估算）、video_fetch（action=fetch/prepare/status，钉版 yt-dlp 隔离环境；未 prepare 时回 video_fetch_unavailable，此时 video_evidence 的 fetch 不可用）。知识库中提到的任何其他工具名（如 vision_video_analysis、timeline_*、lark-cli、飞书、runninghub、dmxapi）均已剔除或改写——遇到需要这些能力的场景，用纯指导文字向用户说明，绝不虚构工具调用。`;
+  const toolContract = `工具边界：本站 agent 可用的生成工具只有 image_generate / image_edit / image_upscale / canvas_get_state / canvas_apply_ops（及画布/工作流工具）；影片取证与分析工具为 video_evidence（action=probe/frames/tile/tiles/boundaries/cut/fetch；frames 的 at 与 every/every_frame 互斥，boundaries 回机械式候选+分数不是剪辑判读）、video_transcribe（{source, language} → 每词 start/end 秒，形状 eimu.transcript@1；ASR 未配置时返回 asr_unavailable，缺时间戳就保持缺、不得编造；language 不接受 auto/und）、video_measure（台词量测：中文要对我方短剧口吻传 rate: 4.5，不传则用默认表 zh normal 5.25，英文为音节启发式估算）、video_fetch（task_id 回收生成视频产物：服务端直链下载＋downloaded ACK；action=fetch/prepare/status 用于站点 URL 抓取，需钉版 yt-dlp 隔离环境，站点 URL 才需 prepare/yt-dlp；未 prepare 时回 video_fetch_unavailable，此时 video_evidence 的站点页 fetch 不可用）。知识库中提到的任何其他工具名（如 vision_video_analysis、timeline_*、lark-cli、飞书、runninghub、dmxapi）均已剔除或改写——遇到需要这些能力的场景，用纯指导文字向用户说明，绝不虚构工具调用。`;
 
   return `${header}\n\n${sections}\n\n---\n\n${toolContract}`;
 }

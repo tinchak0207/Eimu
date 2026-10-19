@@ -510,7 +510,11 @@ export default tool({
             model,
             estimated_cost_coins: cost_coins,
             note:
-              "已提交并耐久登记。queued不等于上游失败；完整task_id/request_id必须保留。图完成后用image_get_result读取，再image_result_download验证落盘与ACK；Agent回合结束不撤销作业，不重生成。" +
+              "已提交并耐久登记。queued不等于上游失败；完整task_id/request_id必须保留。" +
+              (kind === "video"
+                ? "视频完成后用video_result_fetch读取，再video_fetch {task_id} 下载全部artifact、验证落盘并提交downloaded ACK；"
+                : "图完成后用image_get_result读取，再image_result_download验证落盘与ACK；") +
+              "Agent回合结束不撤销作业，不重生成。" +
               (card_note ? `\n${card_note}` : ""),
           },
           { poller_ok, poller_error },
@@ -526,7 +530,7 @@ export default tool({
           const extra={model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,result_source:"synchronous_receipt",completion:{status,artifacts,cost_coins:data.cost_coins??cost_coins}}
           acceptTaskSubmission(scope,request_id,receiptID,{task_id:receiptID,session_id:context.sessionID,kind,...extra})
           const receipt=await registerTask(receiptID,context.sessionID,kind,context.abort,extra)
-          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(card_note?{note:card_note}:{})})
+          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(kind==="video"?{download_args:{task_id:receiptID}}:{}),...(card_note?{note:card_note}:{})})
         }
       }
 

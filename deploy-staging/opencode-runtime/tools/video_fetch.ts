@@ -23,19 +23,21 @@ import {
 // 本档只做参数转译与错误码映射。
 export default tool({
   description:
-    "图片生成产物请用image_result_download：服务端下载、尺寸/hash和downloaded ACK，不需要prepare/yt-dlp。本工具只处理影片。" +
-    "影片抓取：把一个 **http(s) 连结**变成一个本机影片档（video＋audio 一起抓、一起封装）。" +
-    "**URL 抓取前必须先 action=prepare**：yt-dlp 是显式准备的**钉版 Python 依赖**，不是机器刚好带的二进位——" +
+    "**视频生成产物回收用本工具**：传 `task_id`（action 可省略或传 `fetch`）→ 服务端直链下载全部 artifact、校验 SHA256/尺寸、原子落盘并提交 downloaded ACK；直链 artifact 不需要 prepare/yt-dlp。" +
+    "**图片产物用 image_result_download**，不要用本工具下载图片。" +
+    "其次是 URL 抓取：把一个 **http(s) 连结**变成一个本机影片档（video＋audio 一起抓、一起封装）。" +
+    "URL 抓取前若目标是站点页（不是直链媒体），必须先 `action=prepare`：yt-dlp 是显式准备的**钉版 Python 依赖**，不是机器刚好带的二进位——" +
     "它为追站点常改版而频繁发版，未钉版会让同一条连结在两台机器抓出不同结果。" +
     "action=prepare 会建**独立环境**（venv，路径含版本号）并安装 pyproject 钉死的 yt-dlp 版本；action=fetch **绝不自行安装**，" +
-    "未就绪时回 code=video_fetch_unavailable 并附 prepare 指令；action=status 只读查环境与版本就绪状态。" +
+    "未就绪时回 code=video_fetch_unavailable 并附 prepare 指引；action=status 只读查环境与版本就绪状态。" +
     "只接受 http:/https: 连结（本机路径不是连结；Windows 单字母 scheme 如 c:\\clip.mp4 会被当成 URL 而误判，故明确排除）。" +
     "落地档名必须以 .mp4/.mkv/.webm/.mov 结尾（决定容器），并偏好 1080p H.264。",
   args: {
-    task_id:tool.schema.string().optional().describe("生成视频原完整UUID；逐一回收全部artifact并提交真实downloaded ACK"),
+    task_id:tool.schema.string().optional().describe("生成视频原完整UUID；优先于 url；逐一回收全部artifact并提交真实downloaded ACK。回收生成产物不需要 action=prepare"),
     action: tool.schema
       .enum(["fetch", "prepare", "status"])
-      .describe("prepare=显式准备钉版 yt-dlp 环境（建 venv＋安装，可能数十秒）|fetch=抓取（需先 prepare）|status=只读查环境与版本就绪状态"),
+      .optional()
+      .describe("省略＝fetch；prepare=显式准备钉版 yt-dlp 环境（建 venv＋安装，可能数十秒）|fetch=抓取（站点页需先 prepare；直链媒体直接 HTTP 下载）|status=只读查环境与版本就绪状态"),
     url: tool.schema.string().optional().describe("action=fetch 必填；只接受 http/https 连结"),
     to: tool.schema.string().optional().describe("action=fetch 必填；落地档名，必须以 .mp4/.mkv/.webm/.mov 结尾"),
   },

@@ -17,13 +17,15 @@ function render(task:any, receipt:any) {
   const status = task.status ?? "unknown"
   const artifacts = artifactsOf(task)
   const common = {...task,task_id:task.task_id,status,artifacts,observation_receipt:receipt,downloaded:task.downloaded === true || task.downloaded_at != null}
+  // 落盘工具按 kind 选择：视频走 video_fetch（服务端直链下载＋downloaded ACK），图片走 image_result_download。
+  const download = task.kind === "video" ? {download_tool:"video_fetch",download_args:{task_id:task.task_id}} : {download_tool:"image_result_download"}
   // URL不得盖掉refunded/failed/cancelled真实终态。
-  if (["failed","refunded","cancelled"].includes(status)) return fail("generation_failed", task.error?.message ?? task.reason ?? `任务${status}；不会自动重生成。`, {...common,title:"真实失败终态",recoverable:status !== "cancelled",partial_artifacts_available:artifacts.length>0,...(artifacts.length?{download_tool:"image_result_download"}:{})})
-  if (status === "succeeded" && artifacts.length) return ok({...common,title:"生成完成，等待验证落盘",url:artifacts[0].url,download_tool:"image_result_download"})
+  if (["failed","refunded","cancelled"].includes(status)) return fail("generation_failed", task.error?.message ?? task.reason ?? `任务${status}；不会自动重生成。`, {...common,title:"真实失败终态",recoverable:status !== "cancelled",partial_artifacts_available:artifacts.length>0,...(artifacts.length?download:{})})
+  if (status === "succeeded" && artifacts.length) return ok({...common,title:"生成完成，等待验证落盘",url:artifacts[0].url,...download})
   return fail(status === "succeeded" ? "artifact_missing" : "result_not_ready", status === "succeeded" ? "作业标记完成但缺完整artifact；先对账恢复，不重生成。" : "作业尚未完成或状态未知；保留原task_id，后台继续追随，不创建新job。", {...common,title:"尚未交付",recoverable:true})
 }
 export default tool({
-  description:"耐久查询图片/视频作业，免费。不传ID按当前session及project/frame取全部真实jobs与完整artifacts，支持task_ids整批过滤，不猜ID、不依赖内存Map、不把退款当成功。读取产生observed回执，只有image_result_download真实验证全部落盘才产生downloaded回执。",
+  description:"耐久查询图片/视频作业，免费。不传ID按当前session及project/frame取全部真实jobs与完整artifacts，支持task_ids整批过滤，不猜ID、不依赖内存Map、不把退款当成功。读取产生observed回执。落盘：图片用 image_result_download；视频用 video_fetch {task_id}（服务端直链下载全部artifact并提交 downloaded ACK）。",
   args:{
     task_id:tool.schema.string().optional().describe("完整UUID；缺ID则耐久枚举当前session"),
     task_ids:tool.schema.array(tool.schema.string()).optional().describe("可选整批UUID清单，直接过滤耐久查询结果，不做30次单查假枚举"),
@@ -43,7 +45,7 @@ export default tool({
         const selected = args.task_ids ? tasks.filter(t=>args.task_ids!.includes(t.task_id)) : tasks
         const receipts = await Promise.all(selected.map(t=>observe(t,context.sessionID)))
         const missing_ids = args.task_ids?.filter(id=>!selected.some(t=>t.task_id===id)) ?? []
-        return ok({title:"耐久任务与产物清单",tasks:selected.map((t,i)=>({...t,artifacts:artifactsOf(t),observation_receipt:receipts[i]})),missing_ids,pending_requests,coverage:listing.coverage ?? null,note:"queued/running/unknown均未交付；成功URL也不等于本地落盘。"})
+        return ok({title:"耐久任务与产物清单",tasks:selected.map((t,i)=>({...t,artifacts:artifactsOf(t),observation_receipt:receipts[i],...(t.kind==="video"?{download_tool:"video_fetch",download_args:{task_id:t.task_id}}:{download_tool:"image_result_download"})})),missing_ids,pending_requests,coverage:listing.coverage ?? null,note:"queued/running/unknown均未交付；成功URL也不等于本地落盘。"})
       }
       if (!UUID.test(args.task_id)) return fail("invalid_task_id", "必须提供完整UUID；请从耐久清单复制，不猜前缀。", {tasks})
       const registered = tasks.find(t=>t.task_id===args.task_id)

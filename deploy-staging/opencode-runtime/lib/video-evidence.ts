@@ -25,6 +25,7 @@ import { existsSync } from "node:fs"
 import { copyFile, link, mkdir, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, extname, join, resolve } from "node:path"
+import { downloadDirectMedia, requireVideoDownload, videoDownloadEnvironment } from "./video-fetch"
 
 // ---------------------------------------------------------------------------
 // 执行档位置（VPS 现场：ffmpeg/ffprobe 不在 PATH；惯例同 lib/asr.ts:61-62）
@@ -979,21 +980,14 @@ export function phraseRanges(words: readonly TranscriptWord[], text: string): { 
 //
 // `yt-dlp` 因为在追持续改动的站点而频繁发版，未钉版的一份会让同一个连结在两台机器上抓出不同的结果。
 
-/** 钉版 Python 环境的落点（尚未建立；prepare 由外部显式执行）。 */
-export const YTDLP_HOME = "/opt/agent-harness/workspace/.opencode/ytdlp"
-export const YTDLP_PIN_FILE = join(YTDLP_HOME, "PINNED_VERSION")
-export const YTDLP_BIN = join(YTDLP_HOME, "venv", "bin", "yt-dlp")
+/** 钉版 Python 环境的落点：唯一真源是 lib/video-fetch.ts 的 videoDownloadEnvironment()（prepare 由外部显式执行）。 */
+export const YTDLP_HOME = dirname(videoDownloadEnvironment().environment)
+export const YTDLP_BIN = videoDownloadEnvironment().executable
 
-/** 建议的 prepare 指令（显式、可复核；本轮不代为执行）。 */
-export function ytDlpPrepareCommand(pin = "<版本>", python = "python3"): string {
-  return [
-    `mkdir -p ${YTDLP_HOME}`,
-    `printf '%s' '${pin}' > ${YTDLP_PIN_FILE}`,
-    `${python} -m venv ${YTDLP_HOME}/venv`,
-    `${YTDLP_HOME}/venv/bin/pip install --upgrade pip`,
-    `${YTDLP_HOME}/venv/bin/pip install 'yt-dlp==${pin}'`,
-    `${YTDLP_BIN} --version`,
-  ].join(" && ")
+/** 可执行的 prepare 指引（显式、可复核；fetch 绝不自行安装）。 */
+export function ytDlpPrepareCommand(): string {
+  const selected = videoDownloadEnvironment()
+  return `video_fetch { "action": "prepare" }（钉版 yt-dlp==${selected.version}，独立 venv：${selected.environment}）`
 }
 
 export class YtDlpUnavailableError extends Error {
@@ -1019,13 +1013,14 @@ export async function fetchVideo(url: string, target: string): Promise<void> {
   assert(isVideoUrl(url), "name an http or https link first")
   assert([".mp4", ".mkv", ".webm", ".mov"].includes(extname(target).toLowerCase()), "--to must end in .mp4, .mkv, .webm or .mov")
   assert(!(await exists(target)), `Destination ${target} already exists`)
-  if (!existsSync(YTDLP_BIN)) throw new YtDlpUnavailableError(`yt-dlp is not prepared at ${YTDLP_BIN}`, prepare)
-  const pinned = (await readFile(YTDLP_PIN_FILE, "utf8").catch(() => "")).trim()
-  if (pinned.length === 0) throw new YtDlpUnavailableError(`no pinned yt-dlp version recorded at ${YTDLP_PIN_FILE}`, prepare)
-  const version = (await runProcess(YTDLP_BIN, ["--version"])).toString("utf8").trim()
-  if (version !== pinned) {
-    throw new YtDlpUnavailableError(`yt-dlp ${version} does not match the pinned ${pinned}; run prepare again instead of fetching with an unpinned copy`, prepare)
-  }
   await mkdir(dirname(target), { recursive: true })
-  await runProcess(YTDLP_BIN, ["--no-playlist", "-f", "bv*+ba/b", "-o", target, url], 900_000)
+  // 直链媒体（store.* 的 mp4 等）先走普通 HTTP 下载，不经 yt-dlp；失败才回落到站点页抓取。
+  if (await downloadDirectMedia(url, target)) return
+  let executable: string
+  try {
+    executable = requireVideoDownload()
+  } catch (error) {
+    throw new YtDlpUnavailableError((error as Error).message, prepare)
+  }
+  await runProcess(executable, ["--no-playlist", "-f", "bv*+ba/b", "-o", target, url], 900_000)
 }

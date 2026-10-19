@@ -219,7 +219,7 @@ export async function drainGenerationInbox(): Promise<void> {
       if (!pending.length) continue
       const jobs = pending.map((r) => ({ task_id: r.task_id, status: r.status, frame: r.frame, project: r.project,
         kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}), delivery_id: `generation:${r.task_id}` }))
-      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 回收原任务。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
+      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
       const agent = generationParent(consumer)?.consumer_agent
       const promptBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
       let ownTurnGen: number | undefined

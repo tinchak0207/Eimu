@@ -21,8 +21,8 @@ description: 按叙事目的选择镜头动作、时序和模型输入，制作�
 
 ## 批量逐帧与产物回收
 
-保留研究先行与独立评审。派工前确认席位实际工具清单含image_generate、image_get_result、image_result_download，共享workspace来自image_result_download action=capabilities；不把bash断网误判为平台图像下载不可用，不派缺下载能力的通用席位。委托单固定project/frame/request_id、已有预算约束（无额外cap则明确注明）、canonical/reference_version、style_version及完整style_lock。150张逐帧图就是150个n=1作业，分组并发不冒充API n=4或拼图。所有lane使用同一project、稳定帧号和冻结版本，账户限速与项目预算由共享原子状态控制；不能各自扩大预算。
+保留研究先行与独立评审。派工前确认席位实际工具清单含image_generate、image_get_result、image_result_download、video_fetch，共享workspace来自image_result_download action=capabilities；不把bash断网误判为平台图像下载不可用，不派缺下载能力的通用席位。委托单固定project/frame/request_id、已有预算约束（无额外cap则明确注明）、canonical/reference_version、style_version及完整style_lock。150张逐帧图就是150个n=1作业，分组并发不冒充API n=4或拼图。所有lane使用同一project、稳定帧号和冻结版本，账户限速与项目预算由共享原子状态控制；不能各自扩大预算。
 
 task_id与request_id完整保存。断线、429和状态未知沿用原request_id；已接受任务用retry_task_id恢复，禁止无关联重生成。queued/running/unknown不是失败，refunded/failed是真实状态，不能将局部截止失败率当模型失败率。回合结束不停止后台作业；取消必须撤销原作业而非只停Agent。
 
-image_get_result按项目耐久取完整jobs/artifacts；图片用image_result_download服务端物化，不用video_fetch/yt-dlp。工具返回真实尺寸、SHA256、全部artifact与downloaded ACK后才算落盘。coverage action按耐久job与可信本地hash生成；少图、异版本、未ACK和质量未审均如实回报，不凭LLM快照声称完成。
+image_get_result按项目耐久取完整jobs/artifacts；图片用 image_result_download；视频产物用 video_fetch {task_id} 服务端直链物化（不经 yt-dlp），两者都必须拿到 downloaded ACK 才算落盘。工具返回真实尺寸、SHA256、全部artifact与downloaded ACK后才算落盘。coverage action按耐久job与可信本地hash生成；少图、异版本、未ACK和质量未审均如实回报，不凭LLM快照声称完成。

@@ -110,7 +110,7 @@ export default tool({
     + "tile（单张拼板，frames 取等距中点、every 从 start 起不含 end）、"
     + "tiles（分页拼板，预设 3 列；ranges 收 {start,end,id?,frames?,every?} 阵列，id 需唯一）、"
     + "boundaries（**机械式相邻帧变化候选＋分数，分数不是剪辑判读，绝不是镜头标签**）、"
-    + "fetch（用钉版 yt-dlp 把连结变成档案；未 prepare 时诚实失败并回 code=video_fetch_unavailable）。"
+    + "fetch（抓取连结：直链媒体（video/*、.mp4 等）先走普通 HTTP 下载，不需要 yt-dlp；只有站点页连结才用钉版 yt-dlp。未 prepare 时诚实失败并回 code=video_fetch_unavailable）。"
     + "附 transcript（eimu.transcript@1，词级 start/end 秒）时，拼板/逐格会在图下叠时间码、活动词与上下文，"
     + "并可用 around 片语定位（需 occurrence 处理重复命中，padding 预设 0.3 秒）。"
     + "产物落工作区并（可用时）回公网 url；目的地已存在一律拒绝覆写（code=destination_exists）。"
@@ -285,7 +285,7 @@ export default tool({
         return fail("video_fetch_unavailable", error.message, {
           title: "取得连结失败（yt-dlp 未就绪）",
           prepare: error.prepare,
-          preferred: "video_fetch action=prepare（钉版 yt-dlp venv，lib/video-fetch.ts；本轮并行交付）",
+          preferred: 'video_fetch { "action": "prepare" }',
           source: args.source,
         })
       }
