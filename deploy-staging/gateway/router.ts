@@ -696,6 +696,11 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
           const files = form.getAll("file") as File[]
           if (files.length === 0) return jsonError(400, "no file field", "bad_request", "bad_request")
           const file = files[0]
+          // 0 字节文件在 Bun 里可能被解析成 String（无 filename 的 part），file.name 为 undefined，
+          // 后续 path.extname(file.name) 抛 TypeError → 500；这类请求是坏请求，统一回 400。
+          if (!(file instanceof File) || file.size === 0) {
+            return jsonError(400, "empty file", "bad_request", "bad_request")
+          }
           if (file.size > VIDEO_UPLOAD_MAX_BYTES) {
             return jsonError(413, "media exceeds 100MB limit", "payload_too_large", "payload_too_large")
           }
