@@ -74,6 +74,9 @@ services:
     environment:
       FILMERA_ENV_PATH: /app/.env.control-plane
       NODE_ENV: production
+      # 2026-10-20 压测：默认 6 会让 30 张图排成 5 分钟级；上游实测可承受 12 路。
+      # 同时必须把 supplier/account/capability 三层 concurrency_limit 一起提到 12。
+      GENERATION_WORKER_CONCURRENCY: "12"
     depends_on:
       generation-postgres:
         condition: service_healthy
