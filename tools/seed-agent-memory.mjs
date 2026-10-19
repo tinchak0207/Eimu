@@ -2,7 +2,8 @@
 // Seed the shared agent-memory ingest API from a local manifest.
 //
 // Usage:
-//   node tools/seed-agent-memory.mjs <manifest.json> [--dry-run]
+//   node tools/seed-agent-memory.mjs [manifest.json] [--dry-run]
+//   Default manifest: tools/seed-manifests/2026-10-19-local-notes.json
 //
 // Env (network mode only):
 //   MEMORY_INGEST_BASE_URL   e.g. https://host.example  (no trailing slash required)
@@ -17,6 +18,7 @@ import crypto from "node:crypto";
 const BATCH_ID = "seed-local-mem-v1";
 const PROMPT_VERSION = "seed-local-mem-v1";
 const CONTRIBUTOR_KEY = "seed-local-mem-v1";
+const DEFAULT_MANIFEST = "tools/seed-manifests/2026-10-19-local-notes.json";
 const MAX_BATCH = 20;
 const REQUEST_TIMEOUT_MS = 45_000;
 
@@ -60,7 +62,7 @@ const SENSITIVE_PATTERNS = [
 
 function usage(msg) {
   if (msg) console.error(`error: ${msg}`);
-  console.error("usage: node tools/seed-agent-memory.mjs <manifest.json> [--dry-run]");
+  console.error("usage: node tools/seed-agent-memory.mjs [manifest.json] [--dry-run]");
   process.exit(2);
 }
 
@@ -237,6 +239,8 @@ async function postBatch(base, secret, payloadBuffer) {
   });
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function fetchExport(base, secret) {
   const empty = Buffer.alloc(0);
   return fetch(`${base}/api/agent/memory/export?scope=shared`, {
@@ -249,8 +253,7 @@ async function fetchExport(base, secret) {
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
-  const manifestPath = args.find((arg) => !arg.startsWith("--"));
-  if (!manifestPath) usage("missing manifest path");
+  const manifestPath = args.find((arg) => !arg.startsWith("--")) ?? DEFAULT_MANIFEST;
 
   const docs = loadManifest(manifestPath);
   const issues = validateManifest(docs);
@@ -296,7 +299,7 @@ async function main() {
   }
   const normalizedBase = base.toString().replace(/\/+$/, "");
 
-  let failed = false;
+  const failedBatches = [];
   for (let i = 0; i < batches.length; i += 1) {
     const payload = {
       batch_id: BATCH_ID,
@@ -307,13 +310,27 @@ async function main() {
     const body = Buffer.from(JSON.stringify(payload), "utf8");
 
     let res;
-    try {
-      res = await postBatch(normalizedBase, secret, body);
-    } catch (err) {
-      console.error(`batch ${i + 1}/${batches.length}: request failed: ${err.message}`);
-      failed = true;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        res = await postBatch(normalizedBase, secret, body);
+        break;
+      } catch (err) {
+        const cause = err?.cause;
+        const causeText = [cause?.code, cause?.message].filter(Boolean).join(": ");
+        console.error(
+          `batch ${i + 1}/${batches.length}: request failed (attempt ${attempt + 1}/2): ${err.message}${causeText ? ` (${causeText})` : ""}`,
+        );
+        if (attempt === 0) {
+          console.error(`batch ${i + 1}/${batches.length}: retrying in 1s`);
+          await sleep(1000);
+        }
+      }
+    }
+    if (!res) {
+      failedBatches.push(i + 1);
       continue;
     }
+
     const json = await readJsonResponse(res);
     const accepted = countOf(json.accepted);
     const proposals = countOf(json.proposals);
@@ -325,7 +342,7 @@ async function main() {
     if (!res.ok) {
       const summary = errorSummary(json);
       if (summary) console.log(`  error: ${summary}`);
-      failed = true;
+      failedBatches.push(i + 1);
     }
   }
 
@@ -342,11 +359,15 @@ async function main() {
       }
       const summary = errorSummary(errJson);
       console.error(`export: status=${res.status}${summary ? ` ${summary}` : ""}`);
+      console.log(`write failures: ${failedBatches.length > 0 ? `batch ${failedBatches.join(", ")}` : "none"}`);
+      console.log("readback missing: unknown (export request failed)");
       return 1;
     }
     exportSlugs = parseExport(text);
   } catch (err) {
     console.error(`export: request failed: ${err.message}`);
+    console.log(`write failures: ${failedBatches.length > 0 ? `batch ${failedBatches.join(", ")}` : "none"}`);
+    console.log("readback missing: unknown (export request failed)");
     return 1;
   }
 
@@ -358,8 +379,10 @@ async function main() {
   } else {
     console.log("missing: none");
   }
+  console.log(`write failures: ${failedBatches.length > 0 ? `batch ${failedBatches.join(", ")}` : "none"}`);
+  console.log(`readback missing: ${missing.length}`);
 
-  if (failed || missing.length > 0) return 1;
+  if (failedBatches.length > 0 || missing.length > 0) return 1;
   return 0;
 }
 
