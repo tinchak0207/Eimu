@@ -101,7 +101,10 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       // A durable receipt is not a consumer ACK. Rendering is independently retried by the drain.
       return Response.json({ ok: true, durable: true, task_id: receipt.task_id, acknowledged: !!receipt.observed_at })
     }
-    const parent = parentOf(input.session_id || "")
+    const consumerActor = input.session_id === receipt.consumer_oc
+    const parent = consumerActor
+      ? { sessionId: receipt.parent_gw, opencodeSessionId: receipt.consumer_oc }
+      : parentOf(input.session_id || "")
     if (!parent || parent.sessionId !== receipt.parent_gw) return Response.json({ ok: false, error: "job owner mismatch" }, { status: 403 })
     if (route === "/internal/job-ack") {
       if (!["observed", "downloaded"].includes(input.stage)) return Response.json({ ok: false, error: "stage required" }, { status: 400 })
