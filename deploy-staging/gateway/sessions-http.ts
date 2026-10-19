@@ -272,6 +272,9 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
           // step-start / step-finish / compaction / patch / snapshot / 未知型别：丢弃。
         } catch { /* 单 part 坏数据：跳过 */ }
       }
+      // 2026-10-19：纯 nudge 轮次剥离注入后没有任何可见 part——整条丢弃，避免前端空气泡。
+      // 只影响显示通道；模型上下文由 opencode 持有，不经本函式。
+      if (info.role === "user" && parts.length === 0) continue
       out.push({ info, parts })
     } catch { /* 单则坏数据：跳过 */ }
   }
