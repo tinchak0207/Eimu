@@ -5,12 +5,14 @@
 # 用法：
 #   bash deploy/vps/opencode-release.sh status            # 唯读：现况＋健康
 #   bash deploy/vps/opencode-release.sh plan [--sha C]    # 唯读：列出将变更的档
-#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run] [--force] [--fast]
+#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run] [--force] [--fast] [--prompts-only]
 #   bash deploy/vps/opencode-release.sh rollback [--dry-run] [--force]   # 回复最新备份
 #
 # --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即重启。
 #   用于提示词/文案/技能这类短改：目标 <30s，不再为在途回合等 180s。中断的回合由
 #   harness 的耐久续接处理；需要保护在途长任务时不要用 --fast。
+# --prompts-only：更快（目标 <5s）——只装 AGENTS.md + skills/_prompt-routing，不打包、
+#   不备份、不删档、不重启。只适用于这两处提示词资产的改动。
 #
 # F8（2026-10-04）断面 A｜重启前 drain（默认开启）：
 #   restart 之前先只读探测「有没有在途回合/子代理」，有则轮询等到清空（上界 180s，
@@ -51,6 +53,7 @@ ROOT_FILES=(AGENTS.md)
 DRY_RUN=0
 SKIP_RECON=0
 FORCE=0
+PROMPTS_ONLY=0
 SHA=""
 
 log() { printf '%s\n' "$*" >&2; }
@@ -83,6 +86,7 @@ parse_flags() {
       --skip-recon) SKIP_RECON=1 ;;
       --force) FORCE=1 ;;
       --fast) SKIP_RECON=1; FORCE=1 ;;
+      --prompts-only) PROMPTS_ONLY=1; SKIP_RECON=1; FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数：$1" ;;
@@ -130,6 +134,41 @@ stage_from_commit() {
     find "${SCOPE[@]}" -type f ! -path '*/__pycache__/*' 2>/dev/null
     for c in "${CONFIGS[@]}"; do [ -f "$c" ] && echo "$c"; done
   ) | sort > "$exp"
+}
+
+# --prompts-only（2026-10-19）：只装 AGENTS.md 与 skills/_prompt-routing，不打包 22MB、
+# 不备份、不删档、不重启。opencode 按需读取这些档，提示词改动无需重启；目标 <5s。
+release_prompts_only() {
+  assert_tree_clean
+  local sha sha12 ts tmp r_tar
+  sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "无法解析 commit"
+  sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  tmp="$(mktemp -d /tmp/oc-prompts.XXXXXX)"
+  trap 'rm -rf "${tmp:-}"' EXIT
+  git -C "$REPO_ROOT" archive --format=tar "$sha" \
+    "$SRC_SUBDIR/AGENTS.md" "$SRC_SUBDIR/skills/_prompt-routing" > "$tmp/prompts.tar"
+  r_tar="/tmp/oc-prompts-$sha12-$ts.tar"
+  log "== 提示词快发 @ $sha12 → $ts（只装 AGENTS.md + skills/_prompt-routing，不重启）=="
+  remote_binary "cat > $r_tar" < "$tmp/prompts.tar"
+  remote_stdin bash -s -- "$WORKSPACE_DIR" "$VPS_DIR" "$r_tar" "$SRC_SUBDIR" <<'REMOTE'
+set -euo pipefail
+export LC_ALL=C
+WORKSPACE_DIR="$1"; VPS_DIR="$2"; r_tar="$3"; SRC_SUBDIR="$4"
+stage="$(mktemp -d /tmp/oc-prompts-stage.XXXXXX)"
+trap 'rm -rf "$stage" "$r_tar"' EXIT
+tar -xf "$r_tar" -C "$stage"
+src="$stage/$SRC_SUBDIR"
+[ -f "$src/AGENTS.md" ] || { echo "PROMPTS_ONLY_MISSING AGENTS.md"; exit 1; }
+sudo install -D -o ubuntu -g ubuntu -m 644 "$src/AGENTS.md" "$WORKSPACE_DIR/AGENTS.md"
+n=0
+while IFS= read -r -d '' f; do
+  rel="${f#"$src"/}"
+  sudo install -D -o ubuntu -g ubuntu -m 644 "$f" "$VPS_DIR/$rel"
+  n=$((n+1))
+done < <(find "$src/skills/_prompt-routing" -type f -print0)
+echo "PROMPTS_ONLY_OK files=$((n+1)) agents_sha=$(sha256sum "$WORKSPACE_DIR/AGENTS.md" | cut -d' ' -f1 | cut -c1-12)"
+REMOTE
 }
 
 cmd_status() {
@@ -191,6 +230,7 @@ cmd_plan() {
 
 cmd_release() {
   preflight_local
+  if [ "$PROMPTS_ONLY" -eq 1 ]; then release_prompts_only; return; fi
   assert_tree_clean
   local sha sha12 ts stage exp tar_file
   sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "无法解析 commit"

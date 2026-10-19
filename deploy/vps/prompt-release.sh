@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOGDIR="${TMPDIR:-/tmp}/prompt-release-$(date +%Y%m%dT%H%M%S)"
 mkdir -p "$LOGDIR"
 
-bash "$ROOT/deploy/vps/opencode-release.sh" release --fast "$@" >"$LOGDIR/runtime.log" 2>&1 & p1=$!
+bash "$ROOT/deploy/vps/opencode-release.sh" release --prompts-only "$@" >"$LOGDIR/runtime.log" 2>&1 & p1=$!
 bash "$ROOT/deploy/vps/gateway-release.sh" release --fast "$@" >"$LOGDIR/gateway.log" 2>&1 & p2=$!
 
 r1=0; wait "$p1" || r1=$?

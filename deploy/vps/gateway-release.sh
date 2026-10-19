@@ -199,7 +199,7 @@ parse_flags() {
       --skip-recon) SKIP_RECON=1 ;;
       --skip-media-wf-coverage) SKIP_MEDIA_WF_COVERAGE=1 ;;
       --force) FORCE=1 ;;
-      --fast) SKIP_RECON=1; FORCE=1 ;;
+      --fast) SKIP_RECON=1; FORCE=1; SKIP_MEDIA_WF_COVERAGE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       --files)
         shift
