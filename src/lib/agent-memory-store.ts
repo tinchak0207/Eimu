@@ -401,6 +401,13 @@ async function readBlobText(
 async function readBlobTextAt(key: string): Promise<string | null> {
   try {
     const result = await get(key, { access: "private" }).catch(() => null);
+    if (!result) return null;
+    // VPS adapter 的 get() 在 404 时仍回非空结果（statusCode=404，stream 是错误响应体）。
+    // 非 2xx 一律视为不存在，绝不把错误 JSON 当正文解析。Vercel 结果无此栏 → 照旧。
+    const statusCode = (result as unknown as { statusCode?: unknown }).statusCode;
+    if (typeof statusCode === "number" && (statusCode < 200 || statusCode >= 300)) {
+      return null;
+    }
     return await readBlobText(result);
   } catch {
     return null;
@@ -515,6 +522,29 @@ export function __resetAgentMemoryStoreForTests(): void {
 
 // ─────────────────────────── 读写正文
 
+/**
+ * blob 读回正文的形状防线：后端错误响应体（如 404 JSON）也可能被 JSON.parse 成普通
+ * 对象。只有「普通对象 + 身份三件套（scope/domain/slug）全对 + 合法 status」才算真
+ * 文档，任一不符一律当不存在（调用方据此回退，绝不把错误体当 live 文档）。
+ */
+function isDocShapeValid(
+  value: unknown,
+  scope: MemoryScope,
+  domain: string,
+  slug: string,
+): value is AgentMemoryDoc {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const doc = value as Record<string, unknown>;
+  return (
+    doc.slug === slug &&
+    doc.domain === domain &&
+    doc.scope === scope &&
+    (doc.status === "active" ||
+      doc.status === "pending_review" ||
+      doc.status === "retracted")
+  );
+}
+
 async function readDoc(
   scope: MemoryScope,
   ownerKey: string | undefined,
@@ -526,6 +556,11 @@ async function readDoc(
   if (cached) return cached;
   const parsed = await readBlobJson<AgentMemoryDoc>(key);
   if (parsed) {
+    if (!isDocShapeValid(parsed, scope, domain, slug)) {
+      // 错误体不得进入进程缓存（避免后续读取继续被污染）。
+      docsMemory.delete(key);
+      return null;
+    }
     // 旧档没有 contributors 栏：读取容错为 []，且**不因缺栏降级既有 status**。
     const doc: AgentMemoryDoc = {
       ...parsed,
