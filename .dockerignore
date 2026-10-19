@@ -1,0 +1,17 @@
+# worker 与 builder 共用上下文。不在镜像里拆 node_modules。
+# 排除无关大文件；public 下的 mp4 是站点资源（宣传片/showcase），加回。
+node_modules
+.git
+.next
+*.mp4
+!public/**/*.mp4
+*.out
+*.tsbuildinfo
+docs
+tests
+**/tests
+playwright-report
+**/playwright-report
+test-results
+**/test-results
+output/playwright

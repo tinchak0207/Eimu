@@ -1,0 +1,4 @@
+# ONNX 轻量版依赖（无 torch；VPS 3.7GB 小机适用）
+onnxruntime>=1.20
+tokenizers>=0.20
+numpy>=1.26

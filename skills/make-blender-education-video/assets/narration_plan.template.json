@@ -1,0 +1,76 @@
+{
+  "project": "detailed Blender education video",
+  "language": "English",
+  "tts_engine": {
+    "model": "hexgrad/Kokoro-82M",
+    "revision": "RECORD_EXACT_MODEL_REVISION",
+    "voice": "SET_APPROVED_ENGLISH_KOKORO_VOICE",
+    "speed": 1.0,
+    "fallback_allowed": false
+  },
+  "target_total_duration_seconds": 30.0,
+  "loudness_target": {
+    "integrated_lufs": -16.0,
+    "true_peak_dbtp": -1.5,
+    "sample_rate_hz": 48000
+  },
+  "pronunciation_policy": {
+    "example_acronym": "spell ambiguous acronyms letter by letter",
+    "4K": "four K"
+  },
+  "segments": [
+    {
+      "id": "hook",
+      "title": "Question and final result",
+      "start": 0.0,
+      "end": 3.0,
+      "claim_status": "verified",
+      "cues": [
+        {
+          "id": "hook_01",
+          "display": "<English hook>",
+          "tts": "<pronunciation-friendly English hook>"
+        }
+      ]
+    },
+    {
+      "id": "explanation",
+      "title": "System, process, and cause",
+      "start": 3.0,
+      "end": 23.0,
+      "claim_status": "verified_or_qualified",
+      "explanation_questions": [
+        "What is it?",
+        "What changes during this step?",
+        "What causes that change?",
+        "Why does it matter to the whole system?"
+      ],
+      "cues": [
+        {
+          "id": "explanation_01",
+          "display": "<English system explanation>",
+          "tts": "<pronunciation-friendly English explanation>"
+        },
+        {
+          "id": "explanation_02",
+          "display": "<English conceptual-visual disclosure>",
+          "tts": "<pronunciation-friendly English disclosure>"
+        }
+      ]
+    },
+    {
+      "id": "summary",
+      "title": "Reassemble the mental model",
+      "start": 23.0,
+      "end": 30.0,
+      "claim_status": "verified",
+      "cues": [
+        {
+          "id": "summary_01",
+          "display": "<English summary>",
+          "tts": "<pronunciation-friendly English summary>"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+[project]
+name = "video-fetch-runtime"
+version = "0.0.0"
+description = "Pinned yt-dlp environment for the video_fetch tool. The exact upstream yt-dlp version below is the single source of truth; video_fetch action=prepare builds an isolated venv from it."
+requires-python = ">=3.10"
+dependencies = [
+  "yt-dlp==2026.8.19",
+]

@@ -1,0 +1,98 @@
+---
+name: hair-groom
+description: Hair and fur grooming in Blender using curves, particle hair, geometry nodes, and game hair-card workflows. Use for characters, creatures, and real-time hair cards via MCP.
+license: MIT
+metadata:
+  author: https://github.com/arjun988
+  version: "1.0.0"
+  domain: blender
+  role: specialist
+  triggers: hair, groom, fur, hair cards, particle hair, curves hair, scalp, bangs, beard, whiskers
+  related-skills: character-artist, creature-artist, materials, texture-workflow, rendering
+---
+<!--
+来源（轮子）: https://github.com/arjun988/blender-skills — .claude/skills/hair-groom/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+入库批次: 2026-09-06 对称差扩容 W1（工艺/资产）。执行环境契约见 ../../SKILL.md（bridge POST /v1/execute、产物写 $BLENDER_WORK/out/、Blender 5.2.1）。
+Blender 5.2 雷区（上游按 3.x/4.x 编写，命中以下 API 时以雷区为准）：① BLENDER_EEVEE_NEXT 已死，只认 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 为默认视图变换 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
+正文保留英文原文；配方内残留的 MCP/IDE 表述以上方执行环境契约为准。
+-->
+
+# Hair Groom
+
+Believable hair flow. Scalp coverage. Cards for games. Curves/particles for cinematic.
+
+## When to Use
+
+- Character scalp hair, beards, brows
+- Creature fur / mane / whiskers
+- Game hair-card generation and placement
+- Cinematic curve/particle grooms
+
+## Path Decision
+
+```
+Target = Game / real-time  → Hair cards (+ optional proxy curves)
+Target = Cinematic        → Curves or particle hair + materials
+Target = Both             → High groom → bake cards / textures
+```
+
+## Workflow (Game Cards)
+
+```
+Scalp mesh → Guide curves → Card strips along flow
+  → Atlas UVs → Alpha/normal hair texture → LOD cards → Export
+```
+
+## Workflow (Cinematic)
+
+```
+Scalp → Particle/curve groom → Clump/frizz/noise
+  → Hair shader (melanin/roughness) → Render test → Cache if needed
+```
+
+## Groom Principles
+
+1. **Flow first** — Primary direction before flyaways
+2. **Density hierarchy** — Dense roots, controlled tips
+3. **Clumps** — Hair reads as groups, not spaghetti
+4. **Silhouette** — Outer shape more important than strand count
+5. **Scalp bleed** — Avoid bald patches at hairline
+
+## Card Guidelines
+
+| LOD | Cards (guide) | Notes |
+|-----|---------------|-------|
+| Hero close-up | 80–200 | Layered shells |
+| Standard | 30–80 | Main masses |
+| Distant | 8–20 | Cap + few strips |
+
+- Name: `SM_HairCard_[Region]`
+- Atlas: `T_Hair_[Name]_RGBA` (alpha in A)
+- Prefer opacity clip or hashed for Eevee preview
+
+## Naming
+
+- Guides: `CRV_HairGuide_[Region]`
+- Cards: `SM_HairCard_[Region]`
+- Collection: `COL_Hair_[Character]`
+
+## Constraints
+
+### MUST DO
+- Establish hairline and parting early
+- Match card UVs to atlas layout
+- Test silhouette from game camera angles
+
+### MUST NOT DO
+- Uniform card width everywhere
+- Skip root density near scalp
+- Over-detail flyaways before primary masses
+
+## Reference Guide
+
+| Topic | Reference | Load When |
+|-------|-----------|----------|
+| Hair Card Atlas | `references/hair-card-atlas.md` | When needed |
+| Groom Flow Regions | `references/groom-flow-regions.md` | When needed |
+| Cinematic Vs Game | `references/cinematic-vs-game.md` | When needed |

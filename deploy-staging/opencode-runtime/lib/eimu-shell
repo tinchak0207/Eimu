@@ -1,0 +1,118 @@
+#!/bin/bash
+# eimu-shell — opencode 的顶层 shell 包装器（方案 B，2026-10-02）。
+#
+# 设计（借用 Claude Code 的形态，非抄码）：沙箱在 **spawn 当下** 由本包装器注入，
+# 命令（args）从不被改写，所以 opencode 写进 part state／DB／下一轮上下文的永远是原始命令。
+# 旧方案（plugin 在 tool.execute.before 改写 args.command）已移除——那会把包装后的字串
+# 带进模型上下文。
+#
+# 挂法：opencode.json 的 top-level `"shell"` 指向本档（见 release 白名单落点）。
+#
+# 契约（三态，逐一对应验收 (a)(b)(c)）：
+#   (a) EIMU_LAUNCHER 未设 → 完全透明：exec /bin/bash "$@"（等同 /bin/bash）。
+#   (b) EIMU_LAUNCHER 指向可执行档且本次为 `-c <cmd>` 形态（使用者命令）→
+#       exec "$EIMU_LAUNCHER" "$PWD" "$2"，由 launcher 自己 bwrap + --chdir "$1" /bin/bash -c "$2"。
+#       若同时设了 EIMU_BG_DIR（plugin shell.env 注入），则借用 Claude Code assistant 的
+#       15s blocking budget：到点进程仍在跑就脱离等待并退出 0，命令继续；结束由 plugin
+#       用既有 promptAsync 唤醒。未设 EIMU_BG_DIR 时与旧版一样直接 exec。sleep 不自动进后台。
+#   (c) EIMU_LAUNCHER 已设但不可用（路径不存在／不可执行）→ fail-closed：拒绝执行并以非零退出，
+#       **绝不回退成无沙箱的 /bin/bash**（否则等于静默脱沙箱）。
+#
+# 透明性铁律：opencode 内部可能把本档当一般 shell 用（Shell.preferred 等）——只要不是
+# `-c <cmd>` 形态，或 EIMU_LAUNCHER 未设，一律 exec /bin/bash "$@"，行为与原 shell 逐字相同。
+set -u
+
+# 前台收齐：把已结束命令的输出原样交还，并阻止后台通知。
+deliver_finished() {
+  touch "$claim"
+  rm -f "$notify" "$bg"
+  cat "$out" 2>/dev/null || true
+  cat "$err" >&2 2>/dev/null || true
+  local ec=0
+  if [ -f "$code" ]; then
+    ec=$(tr -cd '0-9' < "$code")
+  fi
+  [ -n "${ec:-}" ] || ec=0
+  exit "$ec"
+}
+
+# 使用者命令且 plugin 给了后台目录时：最多等 EIMU_BG_MS（默认 15000，对齐 Claude assistant budget）。
+# 未设目录、预算为 0、或命令是 sleep → 维持直接 exec。
+run_with_budget() {
+  local launcher=$1 cmd=$2
+  local bg_ms=${EIMU_BG_MS:-15000}
+  local dir=${EIMU_BG_DIR:-}
+  case "$bg_ms" in
+    ''|0) exec "$launcher" "$PWD" "$cmd" ;;
+  esac
+  case "$cmd" in
+    sleep|sleep[[:space:]]*) exec "$launcher" "$PWD" "$cmd" ;;
+  esac
+  if [ -z "$dir" ] || ! mkdir -p "$dir"; then
+    exec "$launcher" "$PWD" "$cmd"
+  fi
+  local id="eimu-bg-$$-${EPOCHREALTIME:-$$}"
+  id=${id//./}
+  out="$dir/$id.out"
+  err="$dir/$id.err"
+  code="$dir/$id.code"
+  bg="$dir/$id.bg"
+  claim="$dir/$id.claim"
+  notify="$dir/$id.notify"
+  local cmdf="$dir/$id.cmd"
+  printf '%s' "$cmd" > "$cmdf"
+  setsid /bin/bash -c '
+    launcher=$1; pwd_=$2; cmd_=$3; out_=$4; err_=$5; codef=$6; bgf=$7; claimf=$8; session=$9; notify_=${10}
+    "$launcher" "$pwd_" "$cmd_" >"$out_" 2>"$err_"
+    ec=$?
+    printf "%s\n" "$ec" > "$codef"
+    if [ -f "$bgf" ] && [ ! -f "$claimf" ]; then
+      printf "%s\n%s\n%s\n%s\n" "$session" "$ec" "$out_" "$err_" > "$notify_"
+    fi
+  ' _ "$launcher" "$PWD" "$cmd" "$out" "$err" "$code" "$bg" "$claim" "${EIMU_SESSION_ID:-}" "$notify" \
+    >/dev/null 2>/dev/null </dev/null &
+  local sup=$!
+  local deadline=$(( $(date +%s%3N) + bg_ms ))
+  while kill -0 "$sup" 2>/dev/null; do
+    if [ "$(date +%s%3N)" -ge "$deadline" ]; then
+      break
+    fi
+    sleep 0.05
+  done
+  if ! kill -0 "$sup" 2>/dev/null; then
+    wait "$sup" 2>/dev/null || true
+    deliver_finished
+  fi
+  if [ -f "$code" ]; then
+    wait "$sup" 2>/dev/null || true
+    deliver_finished
+  fi
+  touch "$bg"
+  if [ -f "$code" ]; then
+    wait "$sup" 2>/dev/null || true
+    deliver_finished
+  fi
+  printf '命令仍在运行，已自动转入后台（超过 %sms）。task_id=%s\n' "$bg_ms" "$id"
+  printf '日志（沙箱内）: /tmp/%s.out 与 /tmp/%s.err\n' "$id" "$id"
+  printf '完成后会自动通知本会话。不要 sleep 轮询，也不要重复执行同一条命令。\n'
+  if [ -s "$out" ]; then
+    printf '--- 已有标准输出（尾部）---\n'
+    tail -c 2000 "$out" || true
+    printf '\n'
+  fi
+  if [ -s "$err" ]; then
+    printf '--- 已有标准错误（尾部）---\n' >&2
+    tail -c 2000 "$err" >&2 || true
+  fi
+  exit 0
+}
+
+if [ "${1:-}" = "-c" ] && [ "$#" -ge 2 ] && [ -n "${EIMU_LAUNCHER:-}" ]; then
+  if [ -x "$EIMU_LAUNCHER" ]; then
+    run_with_budget "$EIMU_LAUNCHER" "$2"
+  fi
+  printf 'eimu-shell: 沙箱启动器不可用（EIMU_LAUNCHER=%s）；拒绝在无沙箱下执行命令。\n' "$EIMU_LAUNCHER" >&2
+  exit 127
+fi
+
+exec /bin/bash "$@"

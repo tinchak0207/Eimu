@@ -1,0 +1,98 @@
+name: CI
+
+# 为什么 CI 只做 typecheck + test：这两个是本 repo 唯一有真实断言、且不依赖生产凭证的闸。
+# 刻意「不做」的事：不部署（Vercel 部署需 scope/auth，属人工授权动作）、不跑 build
+# （remote build 才是稳路，本地 build 会因自装 node_modules 缺 sharp 而炸）。
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck (tsc --noEmit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      # package-lock.json 是本 repo 的安装契约（vercel.json installCommand = npm install，
+      # 且 package-lock.json 为现行 lockfile；pnpm-lock.yaml 是 8 月的残留，勿用 pnpm）。
+      - run: npm ci
+      # 注意：next-env.d.ts 被 .gitignore 排除（.gitignore:61），干净 checkout 不存在，
+      # 已在本机以「HEAD clean worktree（无 next-env.d.ts、无 .next）」实测 tsc 仍 0 error。
+      - run: npx tsc --noEmit
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (explicit exclusions, no silent pass)
+        run: |
+          set -euo pipefail
+
+          # ── 明确排除清单 ───────────────────────────────────────────────
+          # 只有两类原因，且都已在本机实测确认与「被测代码」零因果：
+          #
+          # A. 需要外部服务（CI 不可达）
+          #    src/lib/blender-e2e.test.ts
+          #      需真 3D bridge http://127.0.0.1:8765/v1/execute；不可达时 health 重试
+          #      上限 10 分钟／每案等 600s，整批看起来像「测试挂了」，实际是等不到外部服务。
+          #
+          # B. 读 `deploy-staging/expert-gateway/` 下的本地夹具，而该目录被 .gitignore:150
+          #    `/deploy-staging/*` 排除（例外只有 gateway/、laya-server/、vps-tools/）。
+          #    干净 checkout 不存在这些档 → readFileSync ENOENT 或逐字/行号对账失败。
+          #    本地绿只是因为夹具存在于本机工作区。真正修法是把它们入库（需授权），
+          #    不是删断言、也不是 `|| true`。
+          #    - src/lib/orchestrator-beast-frame.test.ts  → orchestrator-dispatch-playbook.md
+          #      （另有 2 条本地既有红灯：片E/片F 的行号锚点 L152 已不存在于该档）
+          #    - src/lib/blender-expert-frame.test.ts     → expert-constitution.md（DIRECTOR_EXPERT_CONSTITUTION_PATH）
+          #    - src/lib/blender-honesty-gate.test.ts     → expert-constitution.md
+          #    - src/lib/critic-expert-frame.test.ts      → expert-delivery-contracts.json
+          #    - src/lib/music-expert-frame.test.ts       → expert-constitution.md（EXPERT_CONSTITUTION_PATH）
+          #
+          # 本机基线（干净 HEAD worktree、排除上列 6 档）：tests 2774 / pass 2769 / fail 0 / skipped 5
+          EXCLUDE_FILES=(
+            "src/lib/blender-e2e.test.ts"
+            "src/lib/orchestrator-beast-frame.test.ts"
+            "src/lib/blender-expert-frame.test.ts"
+            "src/lib/blender-honesty-gate.test.ts"
+            "src/lib/critic-expert-frame.test.ts"
+            "src/lib/music-expert-frame.test.ts"
+          )
+
+          # 排除清单腐化守门：清单里的档必须存在。若某档被删/改名而清单没更新，
+          # 这里直接变红，防止「排除范围」静默漂移成空操作或超范围。
+          for f in "${EXCLUDE_FILES[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::excluded test file not found: $f — exclusion list is stale, fix .github/workflows/ci.yml"
+              exit 1
+            fi
+          done
+
+          mapfile -t ALL < <(find src \( -name '*.test.ts' -o -name '*.test.tsx' \) | sort)
+          mapfile -t RUN < <(printf '%s\n' "${ALL[@]}" | grep -vxF -f <(printf '%s\n' "${EXCLUDE_FILES[@]}"))
+
+          if [ "${#RUN[@]}" -eq 0 ]; then
+            echo "::error::no test files selected — refusing to report a green run"
+            exit 1
+          fi
+
+          echo "test files: total=${#ALL[@]} running=${#RUN[@]} excluded=$((${#ALL[@]}-${#RUN[@]}))"
+          echo "excluded: ${EXCLUDE_FILES[*]}"
+
+          # 测试指令以 package.json 的 test script 为准（tsx --test）；
+          # 不吞 exit code：任何非预期失败都会让 job 变红。
+          npx --yes tsx --test "${RUN[@]}"

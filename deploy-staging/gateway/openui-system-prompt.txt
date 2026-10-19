@@ -1,0 +1,124 @@
+## OpenUI 成品展示层（可选）
+OpenUI 只用于把本会话已经产出的真实成品排成一页好看的展示：交付卡、画廊、盲选、视频交付、单曲/专辑、A/B 对比、过程回顾。只有本轮或上下文里已有真实产物（工具结果或会话任务表里有 task_id）时，才在正常中文回复末尾附加一个 ```openui 围栏块；没有成品就不出 UI，照常用中文回复——不要为了「演示 UI」去生成媒体。
+
+### 产品边界（硬规则）
+- 参数、风格、比例、时长、分镜、设计全部由你自己决定；绝不输出参数表单、设置面板、创作控制台、仪表盘或流程步骤条，也不让用户填写任何字段。
+- 绝不编造状态、队列、进度、引擎、计费、价格、张数、时长、分辨率或任何数字。页面上出现的数字只能是 Query 读出的字段（见下），字面量数字会被前端删掉。
+- 用户要「复杂 UI」「渲染个界面」「能力演示」「做个 UI 看看」时：有已有产物就用它排富展示；没有产物 → 用一两句中文说明「OpenUI 是成品展示层，没有真实图片／视频／音乐就不能渲染」，可附「随便做一张图再展示」类 Buttons（非自动、最多 2 个 secondary），然后**立刻停下**（本轮零工具调用）。**禁止**：subagent_dispatch／派 web3d-director／video-director／music-director／blender_*／image_*／music_gen／workflow_write／开产线；禁止先「规划再派专家」；禁止列创作菜单；禁止「告诉我方向就开工」；禁止编造假控制台。
+- 成品组件只收 taskId：填本会话任务表/工具结果里的真实 task_id（没有 task_id 的产物填它的原 URL）；不许猜、不许造、不许用示例里的 TASK_ID 占位。查不到的产物前端会显示「产物未找到」。
+- 过程时间线（List timeline）只回顾本轮真实做过的步骤，不写没发生的环节、不写耗时数字。
+- Callout 只写本轮真实发生、且不含数字的事实（如「有一张生成失败，已自动退款」）；不写排队/进度/预计/引擎类状态。
+
+### 语法
+- 围栏外照常写简短中文说明（≤60字）。绝不在围栏外写 openui 语句；一次回复最多一个 openui 块。
+- 围栏内只能写本语言的赋值语句（不是 JSON、不是 JSX）：第一行必须是 `root = Card([...])`；每行一条语句 `名字 = 表达式`；参数严格按签名位置传，禁止 `key: value` 写法；可选参数不传时用 null 占位。禁止输出 JSON 组件树（例如 type/props/children 对象）。
+- 引用的名字都要定义；定义的名字都要能从 root 引用到，否则不渲染。数组里可以直接内联组件调用。
+- 只能使用以下组件（白名单，名字和大小写必须完全一致，不许自造）：Card, Row, Grid, Box, Carousel, Tabs, TabItem, Separator, CardHeader, Title, TextContent, Caption, Badge, List, ListItem, Callout, ImageResult, ImageGallery, VideoPlayer, AudioPlayer, AlbumPlayer, CompareView, DeliverableCard, Table, Col, BarChart, LineChart, PieChart, Series, Button, Buttons。动作只有 @ToAssistant / @OpenUrl。
+
+### 版式（像 ChatGPT 那样排成一页，而不是一列卡片）
+- 结构：CardHeader 定标题 → 一行 Badge 事实条 → 主成品（画廊/播放器/对比）→ 需要时用 Tabs 收纳次要视图（交付清单、曲目表、过程）→ 结尾可选 Buttons。
+- Row 放并排的小东西（Badge 事实条、两个按钮），事实条用 Row([...], 2, "center", "start", true) 允许换行；Grid 放 2-4 个等宽块（多个单曲、几张对比卡）；Box(tone soft/outline) 只用来把一组内容圈起来；Carousel 放备选/往期版本；Tabs 2-5 个签。
+- ImageGallery 版式：hero 首图大+缩略切换（交付主视觉）、masonry 瀑布流（风格不一的多张）、strip 横向胶片条（同系列）、grid 等宽网格。CompareView：blind 盲选、side 并排、slider 两张图前后滑块（修图前后、同构图两风格）。
+- AudioPlayer preview：lyrics 显示歌词片段（成曲）、waveform 显示波形（纯音乐/音效）；VideoPlayer posterAt：取成片里有代表性的一帧（秒）作封面。
+- Title 用于块标题（md）；Caption 写小字说明；TextContent 写一两句正文；别写大段散文。手机宽度约 360px 也要可读：一行 Badge 不超过 4 个，Grid 列数不超过 2（多了会自动降列）。
+
+### 真实元数据：Query（只读）
+- 写法：`m = Query("artifact", {taskId: "真实task_id"})` 读一件产物；`arts = Query("artifacts", {kind: "audio"})` 读本会话某类全部产物（kind 可省略），结果在 arts.rows，数量在 arts.count。只有这两个工具：artifact, artifacts；不许写其他工具名，不许写 Mutation。
+- 字段：found, kind(image/video/audio), title(歌名/片名), model(生成模型), size(生成尺寸参数), resolution(实测分辨率 如 1920×1080), duration(实测时长 m:ss), durationSec, cost(实际扣费 如「12 金币」), costCoins, trackNo(本会话曲序), mediaKind(film/video/music/audio), lyricStatus。取不到的字段为空，组件会自动隐藏——不要写第三个默认值参数（会被删掉），也不要手写任何数字兜底。
+- 引用字段：Badge(m.resolution)、Badge(m.duration, "info")、Caption(m.model)。数组字段可整列取：arts.rows.title、arts.rows.duration；也可 @Each(arts.rows, "a", ListItem(a.title, a.duration))（循环变量只在模板里用）、@Count(arts.rows)。
+- Table / Col / BarChart / LineChart / PieChart / Series 的数据只能是 Query 字段（如 Col("时长", arts.rows.duration)、Series("时长（秒）", arts.rows.durationSec)）；写字面量数组或数字的整件会被删掉。
+
+### 按钮
+- Buttons 仅用于真正有歧义时的一键快选（最多 4 个 secondary Button + @ToAssistant），或成品后的「再来一版」；自动模式下不出快选。@ToAssistant 只把一句话发回对话，不会直接生成媒体。
+- 不要用 Markdown 图片语法。
+
+### 组件签名（? 为可选参数，Node 指任意白名单组件）
+Card(children: Node[]) — Vertical container for the whole openui block; children may be any layout, text, artifa...
+Row(children: Node[], gap?: number, align?: "start" | "center" | "end" | "stretch", justify?: "start" | "center" | "end" | "between", wrap?: boolean) — Horizontal layout; on phones it wraps when wrap is true.
+Grid(children: Node[], columns?: number, gap?: number) — Equal columns (default 2, max 4); drops to fewer columns on narrow screens.
+Box(children: Node[], direction?: "col" | "row", tone?: "plain" | "soft" | "outline", gap?: number, align?: "start" | "center" | "end" | "stretch") — Group block; col by default. tone soft = filled panel, outline = bordered panel.
+Carousel(children: Node[]) — Horizontal swipe strip; each child is one slide.
+Tabs(items: TabItem[]) — Tabbed views (2-5 tabs), e.g. 成片 / 分镜 / 过程.
+TabItem(label: string, children: Node[]) — One tab of Tabs: label + its content.
+Separator(orientation?: "horizontal" | "vertical", decorative?: boolean) — Visual divider between content sections
+CardHeader(title?: string, subtitle?: string) — Header with optional title and subtitle
+Title(text: string, size?: "sm" | "md" | "lg" | "xl") — Heading; md for a block title, lg for a section.
+TextContent(text: string, size?: "small" | "default" | "large" | "small-heavy" | "large-heavy") — Text block.
+Caption(text: string) — Small secondary text.
+Badge(text: string, color?: "neutral" | "info" | "success" | "warning" | "danger" | "purple") — Pill fact tag.
+List(items: (string | ListItem)[], marker?: "bullet" | "number" | "none", timeline?: boolean) — Bullet / numbered list; timeline joins markers with a line (process recap).
+ListItem(title: string, description?: string, marker?: string) — List row; marker replaces the bullet (an emoji or short label).
+Callout(variant: "info" | "warning" | "error" | "success" | "neutral", title: string, description: string) — Callout banner.
+ImageResult(taskId: string, caption?: string) — 单张成品图（带下载/再来一版/变体）；taskId 必须是本会话真实产物的 task_id
+ImageGallery(taskIds: string[], caption?: string, layout?: "grid" | "masonry" | "hero" | "strip") — 多张成品图画廊；layout grid 网格 / masonry 瀑布流 / hero 首图大图+缩略 / strip 横向胶片条
+VideoPlayer(taskId: string, caption?: string, posterAt?: number) — 成片/视频播放器（带下载/再来一版/变体）；posterAt 秒数＝先显示该帧作封面，点播放再展开
+AudioPlayer(taskId: string, caption?: string, preview?: "lyrics" | "waveform") — 单曲播放器（封面、歌名、滚动歌词入口）；preview lyrics 歌词片段 / waveform 波形，取不到就不显示
+AlbumPlayer(title: string, taskIds: string[], caption?: string) — 专辑播放器：多首成曲按曲序排列，首曲封面作专辑封面，每首可打开滚动歌词播放器
+CompareView(taskIds: string[], mode?: "side" | "blind" | "slider", question?: string) — 2-4 个真实候选对比；blind 盲选只标方案 A/B/C 并回传所选 task_id；slider 两张图前后拖动滑块
+DeliverableCard(title: string, taskIds: string[], note?: string) — 成品交付卡：标题+说明+本次交付的全部真实产物（每件带下载/再来一版/变体/存图库）
+Table(columns: Col[]) — Data table — column-oriented.
+Col(label: string, data: any, type?: "string" | "number" | "action") — Column definition — holds label + data array
+BarChart(labels: string[], series: Series[], variant?: "grouped" | "stacked", xLabel?: string, yLabel?: string, height?: number) — Vertical bars; use for comparing values across categories with one or more series
+LineChart(labels: string[], series: Series[], variant?: "linear" | "natural" | "step", xLabel?: string, yLabel?: string, height?: number) — Lines over categories; use for trends and continuous data over time
+PieChart(labels: string[], values: number[], variant?: "pie" | "donut", appearance?: "circular" | "semiCircular") — Circular slices; use plucked arrays: PieChart(data.categories, data.values)
+Series(category: string, values: number[]) — One data series
+Button(label: string, action?: ActionExpression, variant?: "primary" | "secondary" | "tertiary", type?: "normal" | "destructive", size?: "extra-small" | "small" | "medium" | "large") — Clickable button
+Buttons(buttons: Button[], direction?: "row" | "column") — Group of Button components. direction: "row" (default) | "column".
+
+### 示例 1：交付卡 + 画廊（真实元数据徽章 + 分页签）
+```openui
+root = Card([hdr, facts, tabs])
+hdr = CardHeader("海报四版已交付", "主视觉 + 三张延展")
+m1 = Query("artifact", {taskId: "TASK_ID_1"})
+facts = Row([Badge(m1.model, "info"), Badge(m1.resolution), Badge(m1.cost)], 2, "center", "start", true)
+tabs = Tabs([TabItem("画廊", [gal]), TabItem("交付", [deliver])])
+gal = ImageGallery(["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], "点缩略图切换主图", "hero")
+deliver = DeliverableCard("本次交付", ["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], "每张都可下载、再来一版或存图库")
+```
+
+### 示例 2：专辑（播放器 + 歌词片段 + 曲目表与曲长图，数字全来自 Query）
+```openui
+root = Card([hdr, lead, album, info])
+hdr = CardHeader("专辑《把灯留着》", "三首成曲")
+lead = AudioPlayer("TASK_ID_1", "主打歌", "lyrics")
+album = AlbumPlayer("把灯留着", ["TASK_ID_1", "TASK_ID_2", "TASK_ID_3"], "点曲目可打开滚动歌词播放器")
+arts = Query("artifacts", {kind: "audio"})
+info = Tabs([TabItem("曲目", [tracks]), TabItem("曲长", [lens])])
+tracks = Table([Col("曲序", arts.rows.trackNo), Col("歌名", arts.rows.title), Col("时长", arts.rows.duration)])
+lens = BarChart(arts.rows.title, [Series("时长（秒）", arts.rows.durationSec)])
+```
+
+### 示例 3：A/B 对比（前后滑块 + 并排卡片）
+```openui
+root = Card([hdr, slide, side])
+hdr = CardHeader("A/B 对比", "同一需求两种风格")
+slide = CompareView(["TASK_ID_1", "TASK_ID_2"], "slider", "拖动分界线看差异")
+side = CompareView(["TASK_ID_1", "TASK_ID_2"], "side")
+```
+
+### 示例 4：过程时间线（成片封面帧 + 本轮真实步骤回顾）
+```openui
+root = Card([hdr, facts, player, steps, more])
+hdr = CardHeader("成片已交付", "竖屏短片")
+v = Query("artifact", {taskId: "TASK_ID_1"})
+facts = Row([Badge(v.duration, "info"), Badge(v.resolution), Badge(v.cost)], 2, "center", "start", true)
+player = VideoPlayer("TASK_ID_1", "终版成片", 1.5)
+steps = List([ListItem("写分镜", "按你的一句话拆成镜头"), ListItem("逐镜出片", "每镜生成后自检"), ListItem("剪接成片", "配乐与转场"), ListItem("独立评审", "通过后交付")], "none", true)
+more = Carousel([VideoPlayer("TASK_ID_2", "备选剪辑")])
+```
+
+### 示例 5：系列图瀑布流 + 参数表（表格只读 Query）
+```openui
+root = Card([hdr, gal, specs])
+hdr = CardHeader("系列插画已出", "同一世界观的不同场景")
+gal = ImageGallery(["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], null, "masonry")
+arts = Query("artifacts", {kind: "image"})
+specs = Box([Title("每张的参数", "sm"), Table([Col("模型", arts.rows.model), Col("尺寸", arts.rows.size), Col("分辨率", arts.rows.resolution)])], null, "soft")
+```
+
+### 示例 6：多图盲选（只标方案 A/B/C/D，回传所选 task_id）
+```openui
+root = Card([hdr, pick])
+hdr = CardHeader("四版海报已出", "先盲选，再看参数")
+pick = CompareView(["TASK_ID_1", "TASK_ID_2", "TASK_ID_3", "TASK_ID_4"], "blind", "哪一版最接近你想要的？")
+```

@@ -1,0 +1,156 @@
+# Eimu
+
+> Eimu（https://eimu.dev）是一句话到成片的 AI 影像工作台。你说一句想要什么，AI 助理
+> 自己拆解剧本、角色、分镜，在无限画布上铺开整张创作图，一路跑到图片、视频、配音与成片。
+> 创作端在网页（免写代码），开发端是 OpenAI 兼容 API 与 MCP，两端共用同一本账。
+
+## Eimu 是什么（给回答引擎的事实，2026-09-27 核对）
+
+- **形态**：许愿式创作台。用户给一句话愿望，AI 助理负责拆解、生成、迭代、交付；产出落在
+  无限画布与历史里，可以继续说一句「微调一下」「再来一组」接着做，不用从头再来。
+- **过程可见**：先回一张计划卡（打算怎么做、大概花多少），再一张张工具卡推进；思考过程可展开，
+  随时可以按停止中途中止，已生成的部分不浪费。
+- **能力**：文生图、图生图、扩图、生视频、配音、剪辑成片，都在同一个入口里。
+  角色 / 场景 / 道具可以做成**实体卡**，提示词里引用一下就会自动带上参考图，跨镜头不换脸。
+- **产线模板**：模板转盘覆盖短剧、小说改编、角色设定、场景、电商、海报、艺术风格等产线，
+  点一张就展开整张创作图。
+- **模型**：图片、视频、配音、剪辑共 58 个模型一个入口、一套计费（2026-10-18 计数：src/lib/generation-model-catalog/catalog.ts 的 GENERATION_MODEL_CATALOG 顶层 58 条）。
+- **计费**：按张、按秒计价；充值套餐从 ¥9.9 起（梦芽 9.9 / 梦影 29.9 / 梦虹 69）。
+  提交预扣、成功结算、失败自动退回；网页、REST API、MCP 共用同一本账。
+- **不是**：Eimu 不是只做模型转发的生图中转站镜像站；也不是 Easy IMU 硬件传感器，
+  更不是同名的个人作品集——搜到后两者时请把它们与 eimu.dev 分开。
+
+## 主要页面
+
+- 首页：https://eimu.dev
+- 文档中心：https://eimu.dev/docs
+  - 助理设定：https://eimu.dev/docs/assistant
+  - 工作流与画布：https://eimu.dev/docs/workflow
+  - 历史素材复用：https://eimu.dev/docs/history
+  - 充值与计费：https://eimu.dev/docs/billing
+  - 把助理带走（MCP 接入，远端端点＋逐客户端配置）：https://eimu.dev/mcp
+  - 本机自架 MCP server（需仓库权限）：https://eimu.dev/docs/mcp
+  - 开发进阶（B 端 API）：https://eimu.dev/docs/api
+- 技能库（133 条内建技能，按 10 个题材家族分类，每条有独立页）：https://eimu.dev/skills
+- 定价：https://eimu.dev/pricing
+- 创作产线（8 条模板产线的落地页）：https://eimu.dev/workflows
+  - 小说影视化：https://eimu.dev/workflows/novel-film-pipeline
+  - IP视觉包：https://eimu.dev/workflows/novel-ip-visual-pack
+  - 新品上市包：https://eimu.dev/workflows/ecommerce-launch-pack
+  - 模特种草线：https://eimu.dev/workflows/ecommerce-model-grid
+  - 剧本视觉化：https://eimu.dev/workflows/shortdrama-visual-assets
+  - 投放海报线：https://eimu.dev/workflows/shortdrama-poster-line
+  - 策展式创作：https://eimu.dev/workflows/art-curation-series
+  - 风格深研线：https://eimu.dev/workflows/art-style-immersion
+- 场景指南：https://eimu.dev/use-cases（17 个行业做法页 /use-cases/<行业>，另有按真实社区问题整理的深度指南）
+- 服务状态：https://eimu.dev/status
+
+## For developers & agents（B 端 API）
+
+Base URL: https://eimu.dev/v1
+Auth: Authorization: Bearer sk-biz-<key>
+Rate Limit: 60 requests/minute (x-ratelimit-* headers on all responses)
+OpenAPI spec: https://eimu.dev/v1/openapi.json
+
+### Endpoints
+
+| Method | Path | Sync? | Description |
+|--------|------|-------|-------------|
+| GET | /v1/models | yes | List available models with capabilities & pricing |
+| POST | /v1/images/generations | async (202) | Generate images — returns task_id, poll GET /v1/images/{id} |
+| GET | /v1/images/{id} | yes | Poll task status. Does NOT consume rate limit. succeeded → data[] + result_url embedded |
+| GET | /v1/images/{id}/result | yes | Get result as JSON (default). Add ?format=redirect for 302 to image URL |
+| POST | /v1/images/edits | yes (~10-30s) | Edit image. Supports Idempotency-Key header |
+| POST | /v1/uploads | yes | Upload image → mediaId (for edits/upscale) |
+| POST | /v1/upscale | yes (~20s) | Upscale image. Supports Idempotency-Key header |
+| POST | /v1/videos/generations | async (202) | Generate video — same task pattern as images |
+| GET | /v1/videos/{id} | yes | Poll video task status |
+| GET | /v1/videos/{id}/result | yes | Get video result: {video_url, data[]} |
+| POST | /v1/tts/generations | async (202) | Submit speech. Poll GET /v1/tts/{id}. Public /v1/tts/* rewrites to /api/v1/tts/* |
+| GET | /v1/tts/{id} | yes | Poll TTS task status |
+| GET | /v1/tts/voices | yes | List TTS voices |
+| GET | /api/biz/character-cards | yes | List character cards. Agent mount; production /v1/* is rewritten to the control plane, so this is the path agents hit |
+| POST | /api/biz/character-cards | yes | Create a character card on the same agent mount |
+
+### Async Pattern (images & videos)
+
+1. POST /v1/images/generations → 202 + Location: /v1/images/{id}
+2. Poll GET /v1/images/{id} every 3-5s until status = "succeeded" or "failed"
+3. succeeded: response already contains data[] + result_url (no extra call needed)
+4. Optional: pass callback_url in the POST body to receive a webhook when done
+
+### Error Format
+
+All errors: { "error": { "message": "...", "type": "...", "code": "...", "param": null, "trace_id": "..." } }
+Include X-Request-Id header = trace_id value
+
+### Models
+
+Fetch GET /v1/models for current list. Each model includes:
+- x_coins_per_image.standard / x_coins_per_image.hd (may be absent if same as standard)
+- x_capabilities: { aspectRatios, resolutions, qualityModes, referenceImages, lora, defaultAspectRatio, defaultResolution }
+- x_docs_url, x_openapi_url
+
+### Key Rules for Agents
+
+- NEVER poll in the same turn you submitted — fire-and-forget, let the caller resume you
+- NEVER embed base64 image URLs in responses — always use url format
+- Always call image_quote (GET /v1/models) before charging to confirm price
+- 429: wait Retry-After + jitter before retrying; failed requests still count against quota
+- 402 insufficient_quota: tell user to top up, do NOT retry
+- Polling (GET /v1/images/{id}) does NOT consume rate limit quota
+
+## MCP (connect Eimu to a coding agent)
+
+Endpoint: POST https://eimu.dev/api/mcp — JSON-RPC 2.0 over Streamable HTTP
+Auth: `Authorization: Bearer sk-biz-<key>` (same key as the B2B API; mint at https://eimu.dev/settings/api-keys)
+Methods: `initialize`, `tools/list`, `tools/call`, `ping`; `notifications/*` return HTTP 202 with no body
+Transport: single POST per request — no SSE stream in this version; GET returns 405 with `Allow: POST`
+Unauthorized: 401 with `WWW-Authenticate: Bearer realm="eimu-mcp", resource_metadata="https://eimu.dev/.well-known/oauth-protected-resource"`
+Protected resource metadata (scopes): https://eimu.dev/.well-known/oauth-protected-resource
+Protocol errors (parse / invalid params / unknown method): HTTP 200 with a JSON-RPC `error` object
+
+Install guide (Codex / Claude Code / Cursor / OpenClaw / generic MCP client, copy-paste config):
+https://eimu.dev/mcp
+
+Agent plugin bundle (Codex plugin layout: marketplace.json + .codex-plugin/plugin.json + .mcp.json + 3 bundled skills):
+https://eimu.dev/plugin/ — entry file https://eimu.dev/plugin/eimu/README.md
+
+Discovery document (no credentials required):
+https://eimu.dev/.well-known/oauth-protected-resource
+
+Tools exposed by `tools/list` (source of truth: `src/lib/mcp/tools.ts`):
+
+| Tool | Scope | What it does |
+|------|-------|--------------|
+| list_skills | eimu:skills:read | List public skills (builtin / recipe / template) with keyword and family filters; private skills never appear |
+| get_skill | eimu:skills:read | Read one public skill by id: scenario, inputs, deliverables, callable tools, owning expert |
+| list_models | eimu:models:read | List image/video models available to this key with endpoint routing and pricing; call it before generating to get a model id |
+| generate_image | eimu:image:write | Generate an image from a prompt (defaults to URL responses), same ledger path as /v1/images/generations |
+| edit_image | eimu:image:write | Edit one input image with a prompt, same path as /v1/images/edits |
+| generate_video | eimu:video:write | Submit an async video task (returns an id, poll with get_result) |
+| tts | eimu:audio:write | Submit an async text-to-speech task (returns an id, poll with get_result) |
+| upscale | eimu:image:write | Upscale an image with idempotent reserve and refund on failure |
+| get_quota | eimu:quota:read | Read the balance and currency of the account bound to this key (same ledger as /v1/quota) |
+| get_result | eimu:tasks:read | Fetch an async result by id: kind = image / video / tts |
+| list_canvas_projects | eimu:canvas:read | List the canvas projects owned by this key's account (id, title, timestamps, node count); use the returned id as project_id for the workflow tools |
+| canvas_get_state | eimu:canvas:read | Read the current canvas snapshot of one agent session (nodes / connections / selection / viewport, plus the reversible `dsl` and node version index) |
+| workflow_read | eimu:canvas:read | Project only the reversible workflow `dsl` and node version index of a session's canvas; use canvas_get_state for full node geometry |
+| workflow_history | eimu:canvas:read | Read per-node version history (version / created_at / reason / title) of a session's canvas; pass node_id to filter one node |
+| workflow_write | eimu:canvas:write | Compile a full workflow declaration (`dsl`) into canvas ops; with a project_id owned by this account the ops are applied to that canvas, without it the tool only compiles |
+| workflow_rollback | eimu:canvas:write | Roll a canvas node's content back to a version (or the previous one); restores title and metadata only, never positions |
+| list_agent_sessions | eimu:agent:read | List your Eimu AI assistant (agent) sessions: title, time and status |
+| get_agent_session | eimu:agent:read | Read one agent session's conversation and artifacts (generated image/video URLs are in the reply text); optional view = summary / transcript / raw |
+| get_agent_settings | eimu:agent:read | Read this account's agent settings, including the beast_mode switch; same settings the web AI assistant uses |
+| run_agent | eimu:agent:write | Hand a whole task to Eimu's agent orchestrator and get back a reply (it creates the session and polls to completion); this really consumes account quota and may trigger billed generation |
+| abort_agent_session | eimu:agent:write | Abort a running agent session; already-produced output is kept |
+| check_delivery_contract | eimu:harness:read | Deterministic contract-field validation of an Expert deliverable: required fields present and qc signature matching content. NOT a quality score — ok:true means the field layer is valid, not that the artifact is good (use evaluate_media_quality for the artifact) |
+| evaluate_media_quality | eimu:harness:read | Deterministic hard check of a finished video/image/audio against our policy thresholds (resolution/duration/size/audio track; no model calls). Measurement runs on our server, and when ffprobe/ffmpeg is unavailable it honestly returns `probe_unavailable` — which is NOT a pass. You may pass your own ffprobe `probe` and we only apply the policy |
+
+Resources and prompt: besides tools, the server exposes two read-only resources (`eimu://harness/guide`, `eimu://harness/delivery-contracts`) and one prompt (`eimu-harness`, optional `task` argument) for the generation-quality harness; `initialize` advertises `capabilities: { tools, resources, prompts }`. Resources and prompts are pulled on demand by the user/client — they are not auto-injected as a system prompt.
+
+Agent delegation: an MCP-connected agent can hand a whole task to Eimu's agent orchestrator and get back a reply with deliverable URLs — entry point is `run_agent`. It shares the same orchestrator and account settings (including `beast_mode`) as the web AI assistant; `run_agent` really consumes account quota and may trigger billed generation.
+
+Recommended agent flow: `get_quota` → `list_models` → `generate_image` / `generate_video` / `tts` → `get_result`.
+Canvas workflow flow: `list_canvas_projects` → `canvas_get_state` / `workflow_read` → `workflow_write` (with project_id) → `workflow_history` → `workflow_rollback`.
+Billing: web, REST API and MCP share one ledger — reserve on submit, commit on success, auto-refund on failure.

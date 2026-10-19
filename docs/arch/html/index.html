@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Eimu Agentic Architecture</title>
+<style>
+  :root {
+    --ink:#1a1a1a; --muted:#555; --grid:#e8e8e8;
+    --pre:#d7ebf7; --mem:#9ec5e8; --core:#b7e0b0; --work:#c9b6e8; --critic:#f0b6c8;
+    --paper:#fafafa;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; color:var(--ink); background:#111; }
+  .page { min-height:100vh; padding:48px 40px 72px; background:var(--paper);
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px; border-bottom:1px solid #ddd; }
+  .page.cover { background:#f6f0ea; background-image:none; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; position:relative; overflow:hidden; }
+  .cover img.bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.95; }
+  .cover .titles { position:relative; z-index:2; padding:40px; text-shadow:0 2px 16px rgba(255,255,255,.8); }
+  .cover .e { font-size:clamp(72px,14vw,140px); font-weight:700; color:#f3a6c0; line-height:.9; display:inline; }
+  .cover .imu { font-size:clamp(40px,8vw,72px); color:#8ec5e8; font-weight:600; }
+  .cover .line { display:block; font-size:clamp(42px,9vw,84px); color:#7eb7de; font-weight:600; margin-top:10px; }
+  h1 { font-size:28px; margin:0 0 8px; }
+  .sub { color:var(--muted); margin:0 0 28px; max-width:720px; }
+  .layout { display:grid; grid-template-columns: 220px 1fr; gap:28px; align-items:start; }
+  @media (max-width:900px){ .layout{grid-template-columns:1fr;} }
+  .notes { writing-mode: horizontal-tb; font-size:13px; line-height:1.45; color:var(--muted); border-left:3px solid #ccc; padding-left:14px; }
+  .notes strong { color:var(--ink); display:block; margin-top:12px; }
+  .notes strong:first-child { margin-top:0; }
+  .diagram { overflow:auto; background:rgba(255,255,255,.72); border:1px solid #ddd; border-radius:12px; padding:20px; }
+  svg { display:block; max-width:100%; height:auto; }
+  .zone { fill:none; stroke-width:2.5; stroke-dasharray:0; rx:14; }
+  .lbl { font: 600 14px system-ui,sans-serif; fill:var(--ink); }
+  .t { font: 12px system-ui,sans-serif; fill:var(--ink); }
+  .t2 { font: 11px system-ui,sans-serif; fill:#333; }
+  .box { fill:#fff; stroke:#222; stroke-width:1.8; rx:6; }
+  .diamond { fill:#fff; stroke:#222; stroke-width:1.8; }
+  .arrow { stroke:#222; stroke-width:1.6; fill:none; marker-end:url(#arr); }
+  .pill { fill:#fff; stroke:#222; stroke-width:1.4; rx:12; }
+  .orig { margin-top:24px; }
+  .orig img { max-width:100%; border:1px solid #ddd; border-radius:8px; background:#fff; }
+  .caption { font-size:12px; color:var(--muted); margin-top:6px; }
+  nav { position:sticky; top:0; z-index:9; background:#111; color:#eee; display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px; font-size:13px; }
+  nav a { color:#9fd0ff; text-decoration:none; padding:4px 8px; border-radius:6px; }
+  nav a:hover { background:#222; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="#cover">Cover</a>
+  <a href="#traditional">Traditional Agent</a>
+  <a href="#eimu">Eimu Architecture</a>
+  <a href="#workflow">WorkFlow + Critic</a>
+  <a href="#narrative">Narrative</a>
+</nav>
+
+<section class="page cover" id="cover">
+  <img class="bg" src="cover.png" alt="Eimu Agentic Architecture cover"/>
+  <div class="titles" aria-hidden="true"></div>
+</section>
+
+<section class="page" id="traditional">
+  <h1>Traditional Agent</h1>
+  <p class="sub">一张嘴、一包上下文、自己转圈。对照你手绘第 2 页。</p>
+  <div class="layout">
+    <aside class="notes">
+      <strong>TTFT</strong>
+      Long because of prefill every round.<br/>
+      Might be long depending on context engineering.
+      <strong>State-space</strong>
+      Depends on stored memories / files — easy to lose.
+    </aside>
+    <div class="diagram">
+<svg viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#222"/></marker>
+  </defs>
+  <text x="680" y="40" class="lbl" transform="rotate(90 680 40)">Traditional Agent</text>
+  <rect class="box" x="40" y="30" width="90" height="36"/><text class="t" x="85" y="53" text-anchor="middle">User</text>
+  <path class="arrow" d="M85 66 L85 90"/>
+  <rect class="box" x="30" y="90" width="110" height="32"/><text class="t" x="85" y="110" text-anchor="middle">User Input</text>
+  <path class="arrow" d="M140 106 L200 106"/>
+  <rect class="box" x="200" y="40" width="150" height="150" rx="18" fill="#f3f3f3"/>
+  <rect class="box" x="215" y="55" width="120" height="24"/><text class="t2" x="275" y="71" text-anchor="middle">Memory Index</text>
+  <rect class="box" x="215" y="85" width="120" height="24" stroke-width="2.4"/><text class="t2" x="275" y="101" text-anchor="middle">System Prompt</text>
+  <rect class="box" x="215" y="115" width="120" height="24"/><text class="t2" x="275" y="131" text-anchor="middle">Safety Guideline</text>
+  <rect class="box" x="215" y="145" width="120" height="24"/><text class="t2" x="275" y="161" text-anchor="middle">Skills / Tools Index</text>
+  <path class="arrow" d="M275 190 L275 220"/>
+  <rect x="60" y="220" width="520" height="170" fill="#fff" stroke="#222" stroke-width="2" rx="16"/>
+  <rect class="box" x="90" y="250" width="110" height="36"/><text class="t" x="145" y="273" text-anchor="middle">Base Model</text>
+  <path class="arrow" d="M200 268 L250 268"/>
+  <polygon class="diamond" points="320,248 360,268 320,288 280,268"/>
+  <text class="t2" x="320" y="272" text-anchor="middle">Tools/Skills?</text>
+  <path class="arrow" d="M360 268 L400 268"/>
+  <text class="t2" x="370" y="258">Yes</text>
+  <rect class="box" x="400" y="250" width="70" height="36"/><text class="t" x="435" y="273" text-anchor="middle">Invoke</text>
+  <path class="arrow" d="M470 268 L510 268"/>
+  <ellipse class="box" cx="560" cy="268" rx="55" ry="22"/><text class="t2" x="560" y="272" text-anchor="middle">Invoke result</text>
+  <path class="arrow" d="M560 246 L560 230 L145 230 L145 250"/>
+  <path class="arrow" d="M320 288 L320 330"/>
+  <text class="t2" x="330" y="310">No</text>
+  <rect class="box" x="270" y="330" width="100" height="36"/><text class="t" x="320" y="353" text-anchor="middle">Response</text>
+  <path class="arrow" d="M370 348 L620 348 L620 48 L130 48"/>
+</svg>
+      <div class="orig"><img src="traditional.png" alt="Original Traditional Agent sketch"/><p class="caption">原图（PDF p2）</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="eimu">
+  <h1>Eimu Architecture</h1>
+  <p class="sub">预处理 · 记忆 · Runtime Core · 派专家。对照你手绘第 3 页主图。</p>
+  <div class="diagram">
+<svg viewBox="0 0 980 640" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr2" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#222"/></marker>
+  </defs>
+  <style>.a{stroke:#222;stroke-width:1.6;fill:none;marker-end:url(#arr2)}</style>
+  <text x="20" y="28" class="lbl">Eimu Architecture</text>
+
+  <!-- Preprocessing -->
+  <rect x="20" y="50" width="200" height="220" fill="var(--pre)" stroke="#6aa8d0" stroke-width="2" rx="12"/>
+  <text class="lbl" x="40" y="75">Preprocessing</text>
+  <rect class="box" x="50" y="95" width="140" height="32"/><text class="t" x="120" y="115" text-anchor="middle">User Input</text>
+  <path class="a" d="M120 127 L120 150"/>
+  <rect class="box" x="50" y="150" width="140" height="36"/><text class="t" x="120" y="172" text-anchor="middle">Small Model</text>
+  <path class="a" d="M120 186 L120 210"/>
+  <rect class="box" x="50" y="210" width="140" height="36"/><text class="t" x="120" y="232" text-anchor="middle">Quick Response</text>
+
+  <!-- main from user input to jev -->
+  <path class="a" d="M190 111 L250 111"/>
+  <rect class="box" x="250" y="95" width="70" height="32"/><text class="t" x="285" y="115" text-anchor="middle">Jev 1</text>
+  <path class="a" d="M320 111 L360 111"/>
+  <polygon class="diamond" points="430,85 480,111 430,137 380,111"/>
+  <text class="t2" x="430" y="108" text-anchor="middle">Jailbreak</text>
+  <text class="t2" x="430" y="122" text-anchor="middle">unrelated?</text>
+  <path class="a" d="M480 111 L540 111"/><text class="t2" x="490" y="100">Yes</text>
+  <rect class="box" x="540" y="95" width="90" height="32"/><text class="t" x="585" y="115" text-anchor="middle">Response</text>
+  <path class="a" d="M430 137 L430 170"/><text class="t2" x="440" y="155">No</text>
+
+  <!-- Memory -->
+  <rect x="20" y="300" width="280" height="280" fill="var(--mem)" stroke="#4a86b8" stroke-width="2" rx="12"/>
+  <text class="lbl" x="40" y="325">Memory System</text>
+  <rect class="pill" x="50" y="350" width="40" height="28"/><text class="t2" x="70" y="368" text-anchor="middle">A</text>
+  <rect class="pill" x="100" y="350" width="40" height="28"/><text class="t2" x="120" y="368" text-anchor="middle">B</text>
+  <rect class="pill" x="150" y="350" width="40" height="28"/><text class="t2" x="170" y="368" text-anchor="middle">C</text>
+  <rect class="pill" x="200" y="350" width="40" height="28"/><text class="t2" x="220" y="368" text-anchor="middle">D</text>
+  <path class="a" d="M120 378 L120 410"/>
+  <rect class="box" x="70" y="410" width="100" height="28"/><text class="t2" x="120" y="428" text-anchor="middle">Jev 2</text>
+  <path class="a" d="M120 438 L120 470"/>
+  <polygon class="diamond" points="120,470 170,500 120,530 70,500"/>
+  <text class="t2" x="120" y="496" text-anchor="middle">Intended</text>
+  <text class="t2" x="120" y="510" text-anchor="middle">Memory?</text>
+  <path class="a" d="M170 500 L210 500"/><text class="t2" x="175" y="490">Yes</text>
+  <rect class="box" x="210" y="484" width="70" height="28"/><text class="t2" x="245" y="502" text-anchor="middle">Selection</text>
+  <path class="a" d="M120 530 L120 560"/><text class="t2" x="130" y="550">No</text>
+  <rect class="box" x="90" y="560" width="60" height="24"/><text class="t2" x="120" y="576" text-anchor="middle">B</text>
+  <path class="a" d="M245 484 L245 250 L500 250"/>
+
+  <!-- Runtime core -->
+  <rect x="340" y="170" width="620" height="400" fill="var(--core)" stroke="#5a9a52" stroke-width="2.5" rx="14"/>
+  <text class="lbl" x="360" y="195">Agent Runtime Core</text>
+  <path class="a" d="M430 170 L430 210"/>
+  <polygon class="diamond" points="430,210 490,245 430,280 370,245"/>
+  <text class="t2" x="430" y="242" text-anchor="middle">Beast Mode</text>
+  <text class="t2" x="430" y="256" text-anchor="middle">ON?</text>
+  <path class="a" d="M490 245 L540 245"/><text class="t2" x="500" y="235">Yes</text>
+  <rect class="box" x="540" y="228" width="150" height="32"/><text class="t2" x="615" y="248" text-anchor="middle">Orchestrator Instruction</text>
+  <path class="a" d="M615 260 L615 300"/>
+  <rect class="box" x="520" y="300" width="180" height="48"/><text class="t" x="610" y="320" text-anchor="middle">Base Model</text>
+  <text class="t2" x="610" y="338" text-anchor="middle">(Orchestrator)</text>
+  <rect class="box" x="740" y="220" width="180" height="110" fill="#eef8ea"/>
+  <rect class="box" x="755" y="235" width="150" height="24"/><text class="t2" x="830" y="251" text-anchor="middle">System Prompt</text>
+  <rect class="box" x="755" y="265" width="150" height="24"/><text class="t2" x="830" y="281" text-anchor="middle">Skill Index</text>
+  <rect class="box" x="755" y="295" width="150" height="24"/><text class="t2" x="830" y="311" text-anchor="middle">Tools Index</text>
+  <path class="a" d="M740 280 L700 280 L700 324"/>
+  <path class="a" d="M610 348 L610 390"/>
+  <polygon class="diamond" points="610,390 680,430 610,470 540,430"/>
+  <text class="t2" x="610" y="426" text-anchor="middle">Dispatch</text>
+  <text class="t2" x="610" y="440" text-anchor="middle">Subagent?</text>
+  <path class="a" d="M680 430 L740 430"/><text class="t2" x="690" y="420">Yes</text>
+  <rect class="box" x="740" y="400" width="70" height="28"/><text class="t2" x="775" y="418" text-anchor="middle">Select</text>
+  <path class="a" d="M810 414 L840 414"/>
+  <rect class="box" x="840" y="380" width="90" height="24"/><text class="t2" x="885" y="396" text-anchor="middle">General</text>
+  <rect class="box" x="840" y="410" width="90" height="24"/><text class="t2" x="885" y="426" text-anchor="middle">Music</text>
+  <rect class="box" x="840" y="440" width="90" height="24"/><text class="t2" x="885" y="456" text-anchor="middle">…</text>
+  <text class="t2" x="940" y="426">≥3</text>
+  <path class="a" d="M610 470 L610 520"/><text class="t2" x="620" y="500">No</text>
+  <rect class="box" x="540" y="520" width="140" height="32"/><text class="t" x="610" y="540" text-anchor="middle">→ Work / Canvas</text>
+  <path class="a" d="M370 245 L320 245 L320 576"/>
+</svg>
+    <div class="orig"><img src="eimu-core.png" alt="Original Eimu Architecture sketch"/><p class="caption">原图（PDF p3）</p></div>
+  </div>
+</section>
+
+<section class="page" id="workflow">
+  <h1>WorkFlow module + Critic Gate</h1>
+  <p class="sub">Canvas 是模块，不是单点。对照你手绘第 4 页。</p>
+  <div class="diagram">
+<svg viewBox="0 0 980 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr3" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#222"/></marker>
+  </defs>
+  <style>.a{stroke:#222;stroke-width:1.6;fill:none;marker-end:url(#arr3)}</style>
+  <rect x="20" y="40" width="560" height="340" fill="#efe8fa" stroke="#7a5db0" stroke-width="2.5" rx="14"/>
+  <text class="lbl" x="40" y="70" fill="#5a3d90">WorkFlow</text>
+  <rect class="box" x="50" y="300" width="80" height="36"/><text class="t" x="90" y="323" text-anchor="middle">User</text>
+  <path class="a" d="M90 300 L90 260"/>
+  <rect class="box" x="40" y="210" width="100" height="50"/><text class="t2" x="90" y="232" text-anchor="middle">Canvas /</text><text class="t2" x="90" y="248" text-anchor="middle">UI/UX</text>
+  <text class="t2" x="150" y="235">Edit</text>
+  <path class="a" d="M140 235 L190 235"/>
+  <rect class="box" x="190" y="210" width="100" height="50"/><text class="t" x="240" y="240" text-anchor="middle">WorkFlow</text>
+  <path class="a" d="M290 235 L330 235"/>
+  <rect class="box" x="330" y="210" width="90" height="50"/><text class="t" x="375" y="240" text-anchor="middle">Compiler</text>
+  <path class="a" d="M420 235 L460 235"/>
+  <rect class="box" x="460" y="200" width="100" height="70"/><text class="t2" x="510" y="228" text-anchor="middle">Write</text><text class="t2" x="510" y="246" text-anchor="middle">typescript</text><text class="t2" x="510" y="262" text-anchor="middle">DSL</text>
+  <!-- agent pipe annotation -->
+  <text class="t2" x="50" y="110">agent edit → typescript → dsl-(compile) → visible canvas</text>
+  <text class="t2" x="50" y="130">← UI/UX ← Human Edit（同一表面）</text>
+  <path class="a" d="M240 210 L240 160 L90 160 L90 210"/>
+
+  <rect x="620" y="40" width="340" height="340" fill="#fde6ef" stroke="#c45d7a" stroke-width="2.5" rx="14"/>
+  <text class="lbl" x="640" y="70" fill="#a03d5a">Critic Gate</text>
+  <rect class="box" x="660" y="100" width="260" height="50"/><text class="t" x="790" y="130" text-anchor="middle">Base Model (Critic Subagent)</text>
+  <path class="a" d="M790 150 L790 180"/>
+  <rect class="box" x="720" y="180" width="140" height="36"/><text class="t" x="790" y="203" text-anchor="middle">Critic Skill</text>
+  <path class="a" d="M790 216 L790 255"/>
+  <polygon class="diamond" points="790,255 840,290 790,325 740,290"/>
+  <text class="t" x="790" y="294" text-anchor="middle">Run?</text>
+  <path class="a" d="M840 290 L900 290"/><text class="t2" x="850" y="280">Yes</text>
+  <rect class="box" x="860" y="250" width="80" height="28"/><text class="t2" x="900" y="268" text-anchor="middle">Asset</text>
+  <path class="a" d="M900 250 L900 220"/>
+  <rect class="box" x="850" y="190" width="100" height="28"/><text class="t2" x="900" y="208" text-anchor="middle">Command Result</text>
+  <path class="a" d="M740 290 L680 290"/><text class="t2" x="700" y="280">No</text>
+  <path class="a" d="M560 235 L620 235 L620 290 L740 290"/>
+  <path class="a" d="M680 290 L600 320 L240 320 L240 260"/>
+</svg>
+    <div class="orig"><img src="workflow-critic.png" alt="Original WorkFlow and Critic Gate sketch"/><p class="caption">原图（PDF p4）</p></div>
+  </div>
+</section>
+
+<section class="page" id="narrative">
+  <h1>自然叙述（已写入 memory）</h1>
+  <div class="diagram" style="max-width:820px;line-height:1.65;font-size:15px">
+<p>来源：用户手绘 PDF《Eimu Architecture》（5 页：封面 / Traditional Agent / Eimu Architecture 主图 / WorkFlow+Critic Gate / 空白格纸）。下文按图意写成自然叙述，供记忆与对外讲解；不把计费／中控写进这条 agent 架构线。</p>
+<p>---</p>
+<h2 style="margin-top:28px">封面在说什么</h2>
+<p>这不是一张技术封面，而是产品气质声明：Eimu 要把「Agentic Architecture」做成可感知的创作系统——有人味、有场景、有从一句输入走到成片的完整编排，而不只是又一个聊天框套模型。</p>
+<p>---</p>
+<h2 style="margin-top:28px">传统 Agent：一张嘴、一包上下文、自己转圈</h2>
+<p>传统路径很短：用户开口 → 用户输入进入 Base Model。模型每轮都要带着一大包常驻上下文一起跑——Memory Index、System Prompt、Safety Guideline、Skills Index、Tools Index 几乎整包预填。模型先推理，再问自己要不要 Tools/Skills：要，就 Invoke，拿 Invoke result 再塞回 Base Model；不要，就直接 Response 回用户。</p>
+<p>这套结构的痛点也写在页边：TTFT 往往很长，因为每轮都在做大包 prefill，长短还取决于上下文工程；状态空间靠会话里的记忆和文件硬扛，容易丢、难接续。本质是**同一个会话里自己想、自己调工具、自己收口**，没有强制换手，也没有把「产线表面」从聊天里拆出来。</p>
+<p>---</p>
+<h2 style="margin-top:28px">Eimu：先分流，再武装总导演，再拆军团，再落到画布与评审</h2>
+<p>Eimu 主图把系统拆成几块彩色区域，而不是一条单循环。</p>
+<p>**预处理（浅色侧栏）。** 用户输入先有一条快路径：Small Model 给出 Quick Response，能快回就快回，不必事事进重型编排。主路上还有 Jev（图上的 Dev/Jev 闸）：先做 jailbreak／无关意图一类判定——该拦就直接 Response，不把脏输入送进 Runtime。</p>
+<p>**记忆系统（深蓝区）。** 记忆不是每轮无脑灌进主模型。图里用分层记忆槽（A/B/C/D）表示可选择的记忆面；Jev 再问「是不是意图相关的记忆」：相关才 Selection 选进上下文，不相关就绕开，避免旧记忆污染新创作。选中的记忆再回灌 Orchestrator（图中回环 B）。</p>
+<p>**Agent Runtime Core（绿色主区）。** 过闸之后才问 Beast Mode 开不开。开：挂上 Orchestrator Instruction，用 Base Model 当 Orchestrator，并带上本轮需要的 System Prompt、Skill Index、Tools Index（是 Project 包，不是传统那整袋 30KB+ 无脑灌）。然后 Orchestrator 推理，并决定要不要 Dispatch Subagent：要，就选 Experts（General、Music、…），多路并发；不要，就进入 Work／画布侧。</p>
+<p>**Work / Canvas（后续页展开）。** 「要不要改画布」是明确分支。要改，就进入人机共笔的 WorkFlow 模块——这不是流程图上的一个小点，而是一整块表面：agent 一侧可以是 agent edit → typescript → dsl → compile → 落到 visible canvas；人一侧从 Canvas / UI/UX 做 Human Edit，改的是同一块可见表面。编译后问 Run?：要跑才出 Command Result / Asset Output。</p>
+<p>**Critic Gate（粉区）。** 独立的 Critic Subagent（Base Model + Critic Skill）参与 Run? 的裁决。过了才放行资产与命令结果；不过就打回再改。这和传统「同一张嘴自夸过了」不是一类东西。</p>
+<p>整条语义可以压成：</p>
+<blockquote style="border-left:3px solid #aaa;padding-left:12px;color:#444">快回／拦脏输入 → 按意图选记忆 → Beast 武装 Orchestrator → 派专家军团或进入画布共笔 → Critic 换手放行。</blockquote>
+<p>相对传统页，Eimu 优化的是：预填变「意图后的包」；长活变「子代理与画布模块」；收口变「机器 Critic」，而不是把一切继续塞进一个 Base Model 环。</p>
+<p>---</p>
+<h2 style="margin-top:28px">和实现层的对齐提醒（叙述外注）</h2>
+<p>手绘图是产品／架构语义真源。工程上还有 turn 尾野兽帧、context-slim、写穿闸等实现细节；对外讲架构时，应优先用本叙述的分层与模块语言，而不是用实现函数名替换用户页上的词。</p>
+  </div>
+</section>
+</body></html>

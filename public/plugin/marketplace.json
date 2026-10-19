@@ -1,0 +1,14 @@
+{
+  "name": "eimu",
+  "owner": {
+    "name": "Eimu",
+    "url": "https://eimu.dev"
+  },
+  "plugins": [
+    {
+      "name": "eimu",
+      "source": "./eimu",
+      "description": "在 coding agent 里直接调用 Eimu：按提示词生成图片与视频、编辑图片、文字转语音、放大图像，查询余额与任务结果，并检索 Eimu 的公开技能库。"
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+import type { MetadataRoute } from "next";
+import { AGENT_SKILLS } from "@/lib/agent-skills";
+import { USE_CASES } from "@/lib/use-cases";
+import { USE_CASE_CATEGORIES } from "@/lib/use-case-categories";
+import { WORKFLOW_PAGES } from "@/lib/workflow-pages";
+import { getSiteUrl } from "@/lib/site-url";
+
+// Static pages with explicit lastmod so Googlebot sees a stable signal.
+// Avoid new Date() on every deploy — it would make every URL look freshly
+// modified and burn crawl budget on pages that haven't actually changed.
+//
+// 2026-09-27 全面翻新：值从 2026-08-15 更新到当日——首页 metadata／JSON-LD／FAQ、
+// llms.txt、文件中心这几处真的改了，crawler 有理由重抓。顺手把文件中心六个
+// 子页与 /status 补进 sitemap（它们是回答引擎要判断 Eimu 会什么时最该读的页，
+// 先前只能靠站内连结被发现）。
+//
+// 同日 SEO 重构：102 个 `<行业>-<n>` 模板门页移出 sitemap（已 301 到行业枢纽），
+// 补进 /use-cases 总索引、17 个行业枢纽、/workflows 与 8 个产线落地页。
+const CONTENT_UPDATED = new Date("2026-09-27");
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const siteUrl = await getSiteUrl();
+
+  const corePages: MetadataRoute.Sitemap = [
+    { url: siteUrl, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 1.0 },
+    { url: `${siteUrl}/pricing`, lastModified: CONTENT_UPDATED, changeFrequency: "monthly", priority: 0.9 },
+    { url: `${siteUrl}/use-cases`, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 0.9 },
+    { url: `${siteUrl}/workflows`, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 0.9 },
+    { url: `${siteUrl}/docs`, lastModified: CONTENT_UPDATED, changeFrequency: "monthly", priority: 0.6 },
+    { url: `${siteUrl}/mcp`, lastModified: CONTENT_UPDATED, changeFrequency: "monthly", priority: 0.6 },
+    { url: `${siteUrl}/status`, lastModified: CONTENT_UPDATED, changeFrequency: "daily", priority: 0.3 },
+  ];
+
+  const docPages: MetadataRoute.Sitemap = [
+    "assistant",
+    "workflow",
+    "history",
+    "billing",
+    "mcp",
+    "api",
+  ].map((slug) => ({
+    url: `${siteUrl}/docs/${slug}`,
+    lastModified: CONTENT_UPDATED,
+    changeFrequency: "monthly" as const,
+    priority: 0.5,
+  }));
+
+  const workflowPages: MetadataRoute.Sitemap = WORKFLOW_PAGES.map((page) => ({
+    url: `${siteUrl}/workflows/${page.slug}`,
+    lastModified: CONTENT_UPDATED,
+    changeFrequency: "monthly" as const,
+    priority: 0.85,
+  }));
+
+  const categoryPages: MetadataRoute.Sitemap = USE_CASE_CATEGORIES.map((category) => ({
+    url: `${siteUrl}/use-cases/${category.slug}`,
+    lastModified: new Date(category.updated),
+    changeFrequency: "monthly" as const,
+    priority: 0.8,
+  }));
+
+  const guidePages: MetadataRoute.Sitemap = USE_CASES.map((uc) => ({
+    url: `${siteUrl}/use-cases/${uc.slug}`,
+    lastModified: CONTENT_UPDATED,
+    changeFrequency: "monthly" as const,
+    priority: 0.7,
+  }));
+
+  // 技能库目录 + 每条内建技能的自指详情页；条数从内建真源取，不写死。
+  const skillPages: MetadataRoute.Sitemap = [
+    { url: `${siteUrl}/skills`, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 0.8 },
+    ...AGENT_SKILLS.map((skill) => ({
+      url: `${siteUrl}/skills/${skill.id}`,
+      lastModified: CONTENT_UPDATED,
+      changeFrequency: "monthly" as const,
+      priority: 0.5,
+    })),
+  ];
+
+  return [...corePages, ...workflowPages, ...categoryPages, ...guidePages, ...docPages, ...skillPages];
+}

@@ -1,0 +1,86 @@
+{
+  "name": "eimu-desktop",
+  "productName": "Eimu",
+  "version": "0.3.5",
+  "private": true,
+  "description": "Eimu 桌面客户端",
+  "author": "Eimu",
+  "license": "UNLICENSED",
+  "desktopName": "eimu.desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.10"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "dev.eimu.desktop",
+    "productName": "Eimu",
+    "copyright": "Copyright © 2026 Eimu",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "window-controls.js",
+      "updater.js",
+      "local-worker.js",
+      "device-bridge-client.js",
+      "lib/**",
+      "!lib/**/*.test.js",
+      "build/icon.png"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://store.eimu.dev/downloads/desktop"
+      }
+    ],
+    "linux": {
+      "target": [
+        "tar.gz"
+      ],
+      "artifactName": "${productName}-${version}-linux-x86_64.${ext}",
+      "category": "Graphics",
+      "icon": "build/icon.png",
+      "synopsis": "AI 创作工作台",
+      "description": "Eimu 桌面客户端",
+      "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-windows-x64-setup.${ext}",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Eimu",
+      "runAfterFinish": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeader": "build/installer-header.bmp",
+      "installerSidebar": "build/installer-sidebar.bmp",
+      "uninstallerSidebar": "build/uninstaller-sidebar.bmp",
+      "include": "build/installer.nsh",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "displayLanguageSelector": false
+    }
+  }
+}

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eimu 插件包</title>
+<meta name="robots" content="noindex">
+<style>
+  body { margin: 0; padding: 48px 20px; background: #F2F2F7; color: #242830;
+         font: 14px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 20px; padding: 32px 36px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p.lead { margin: 0 0 24px; color: #5b6270; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  code { background: rgba(0,0,0,.06); border-radius: 5px; padding: 1px 6px;
+         font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  a { color: #007AFF; }
+  .note { margin-top: 28px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,.08);
+          font-size: 13px; color: #5b6270; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Eimu 插件包</h1>
+  <p class="lead">把这个包交给你的 coding agent（Codex、Claude Code、Cursor、OpenClaw 或任何会说 MCP 的客户端），它就能直接用 Eimu 生成图片与视频。</p>
+
+  <h2>包内文件</h2>
+  <ul>
+    <li><a href="/plugin/marketplace.json">marketplace.json</a> — 市集索引，只声明 <code>eimu</code> 这一个插件</li>
+    <li><a href="/plugin/eimu/.codex-plugin/plugin.json">eimu/.codex-plugin/plugin.json</a> — 插件元数据</li>
+    <li><a href="/plugin/eimu/.mcp.json">eimu/.mcp.json</a> — MCP 端点 + Authorization 头（引用 <code>${EIMU_BIZ_KEY}</code> 环境变量，不含任何密钥）</li>
+    <li><a href="/plugin/eimu/assets/eimu-icon.svg">eimu/assets/eimu-icon.svg</a> — 图标</li>
+    <li><a href="/plugin/eimu/README.md">eimu/README.md</a> — 入口说明与装法</li>
+    <li><a href="/plugin/eimu/skills/film-production/SKILL.md">skills/film-production</a> · <a href="/plugin/eimu/skills/character-consistency/SKILL.md">character-consistency</a> · <a href="/plugin/eimu/skills/camera-motion/SKILL.md">camera-motion</a></li>
+  </ul>
+
+  <h2>现在怎么用</h2>
+  <ul>
+    <li>MCP 端点：<code>POST https://eimu.dev/api/mcp</code>（JSON-RPC 2.0 / Streamable HTTP），认证 <code>Authorization: Bearer sk-biz-…</code></li>
+    <li>逐客户端可复制配置：<a href="/mcp">https://eimu.dev/mcp</a></li>
+    <li>密钥自助签发：<a href="/settings/api-keys">https://eimu.dev/settings/api-keys</a>（只显示一次）</li>
+  </ul>
+
+  <p class="note">市集一键安装（<code>codex plugin marketplace add</code> → <code>codex plugin add eimu@eimu</code>）需要公开市集仓库托管本目录，尚未发布；发布前请走上面的 MCP 手动配置。</p>
+</main>
+</body>
+</html>

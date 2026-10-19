@@ -1,0 +1,4 @@
+node_modules/
+# 打包产物：dist/ 是本机预设输出，dist-<tag>/ 是各版本并存输出（0.3.0 用 dist-030b）。
+# 两者都是 electron-builder 产物，出货走 Vercel Blob，永不入库。
+dist*/

@@ -1,0 +1,240 @@
+"use client";
+
+// 历史记录的导出：ZIP（图片 + 清单）、JSON（完整档案）、CSV（表格）。
+//
+// 媒体取字节走浏览器 fetch，因此必须拿「允许跨域」的响应：本站 CDN
+// (store.eimu.dev) 的 /image-data/ 由 nginx 按 Origin 回 CORS 头，但被
+// <img> no-cors 渲染过的同 URL 会命中无 CORS 的浏览器缓存。取图统一走
+// image-helpers.fetchImageResponse（?dl=1 换缓存键 + no-store），见 fetchAsBlob。
+// 仍取不到的那几张会被跳过并计入 skipped，而不是让整个导出失败。
+
+import { exportShotsZip } from "./export-zip";
+import { IMAGE_FETCH_TIMEOUT_MS, downloadExtension, imageHelpers } from "./image-helpers";
+import { saveManyLocally } from "./local-save";
+import { formatAbsoluteTime, formatCoins, primaryModelId } from "./history-types";
+import type { HistoryEntry } from "./history-types";
+
+export interface HistoryExportResult {
+  /** 成功写入的图片数。 */
+  exported: number;
+  /** 因为取不到图而跳过的条数。 */
+  skipped: number;
+}
+
+/** 并发下载数。太高会被浏览器排队，也容易触发对象存储限流。 */
+const DOWNLOAD_CONCURRENCY = 4;
+
+/**
+ * 取这条记录里第一个可下载的媒体地址（导出为测试可见：批量 ZIP 的 skipped 判定就靠它）。
+ *
+ * 影片／音频记录的 results 里只有 videoUrl／audioUrl（无 image/imageUrl），
+ * 也要能被打包下载；否则选中的影片／音乐记录整批被判为「取不到媒体」而跳过。
+ */
+export function entrySrc(entry: HistoryEntry): string | null {
+  const result = entry.results.find(
+    (item) => item.image || item.imageUrl || item.videoUrl || item.audioUrl,
+  );
+  if (!result) return null;
+  if (result.image) return `data:image/png;base64,${result.image}`;
+  // 与单笔下载（HistoryClient.handleDownload）同序：先图、再影片、最后音频。
+  return result.imageUrl ?? result.videoUrl ?? result.audioUrl ?? null;
+}
+
+/** 用提示词开头做文件名，取不到就退回时间戳；副档名取自来源媒体 URL。 */
+export function entryFileName(entry: HistoryEntry): string {
+  const prompt = entry.prompt.trim().replace(/\s+/g, " ").slice(0, 40);
+  const stamp = new Date(entry.generatedAt)
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .slice(0, 19);
+  const base = prompt ? `${stamp}-${prompt}` : stamp;
+  // 来源媒体 URL 的副档名必须带进 zip 条目名，否则 export-zip 的
+  // ALLOWED_EXTENSIONS 认不出影片／音频，会把 <prompt>.mp4 误补成 <prompt>.mp4.png。
+  // 推不出（base64 图 / 无副档名）时回落 png，图片维持 .png。
+  return `${base}.${downloadExtension(entrySrc(entry) ?? "")}`;
+}
+
+/**
+ * 取图。2026-10-04 缺陷 B：本站 CDN(store.eimu.dev) 的图被 <img> no-cors
+ * 渲染后进了浏览器缓存，裸 fetch(URL) 会复用那份没有 Access-Control-Allow-Origin
+ * 的缓存体 → 跨域被拦（net::ERR_FAILED），整个 zip 的媒体全被 skipped。这里不再
+ * 自拼请求，直接走 image-helpers.fetchImageResponse——它补 ?dl=1 换缓存键并带
+ * cache:"no-store"，与单张下载（imageHelpers.download）同一条已知可用的链。
+ * 非 2xx 仍回 null，保持 skipped 判定语义不变。
+ *
+ * 2026-10-04（同「永久 pending」族）：取图逾时（fetchImageResponse 的 AbortController）
+ * 会在这里被同一个 catch 吞成 null —— 一次逾时只让该张 skipped，不炸整包 zip。
+ * timeoutMs 仅由测试注入缩短值；生产走 fetchImageResponse 的默认上限。
+ */
+export async function fetchAsBlob(
+  src: string,
+  timeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
+): Promise<Blob | null> {
+  try {
+    const response = await imageHelpers.fetchImageResponse(src, timeoutMs);
+    if (!response.ok) return null;
+    return await response.blob();
+  } catch {
+    return null;
+  }
+}
+
+/** 有上限的并发映射，避免一次发起几百个请求。 */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+/** 打包下载选中的图片，并在压缩包里附一份 manifest.json 记录参数。 */
+export async function exportHistoryZip(
+  entries: HistoryEntry[],
+  zipName = `生成历史-${new Date().toISOString().slice(0, 10)}.zip`,
+  fetchTimeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
+): Promise<HistoryExportResult> {
+  if (!entries.length) return { exported: 0, skipped: 0 };
+
+  const downloaded = await mapWithConcurrency(entries, DOWNLOAD_CONCURRENCY, async (entry) => {
+    const src = entrySrc(entry);
+    if (!src) return null;
+    const blob = await fetchAsBlob(src, fetchTimeoutMs);
+    return blob ? { name: entryFileName(entry), blob } : null;
+  });
+
+  const items = downloaded.filter((item): item is { name: string; blob: Blob } => item !== null);
+  const skipped = entries.length - items.length;
+
+  if (!items.length) return { exported: 0, skipped };
+
+  // 清单让压缩包自带可追溯性：谁、什么时候、用什么参数生成的。
+  const manifest = JSON.stringify(buildHistoryArchive(entries), null, 2);
+  items.push({
+    name: "manifest.json",
+    blob: new Blob([manifest], { type: "application/json" }),
+  });
+
+  // 渐进增强：有 showDirectoryPicker 时一次授权把逐张产物连同 manifest 写进
+  // 用户选定目录（不打包 ZIP）。取消不重复下载；只有 "unsupported" 才回落 ZIP。
+  const localResult = await saveManyLocally(items, { directoryName: "生成历史" });
+  if (localResult === "saved") return { exported: items.length - 1, skipped };
+  if (localResult === "cancelled") return { exported: 0, skipped };
+
+  await exportShotsZip(items, zipName);
+  return { exported: items.length - 1, skipped };
+}
+
+interface HistoryArchiveRecord {
+  id: string;
+  prompt: string;
+  generatedAt: string;
+  model: string;
+  imageSize?: string;
+  preset?: string;
+  qualityProfile?: string;
+  starred: boolean;
+  coins?: string;
+  imageUrls: string[];
+  workflow?: HistoryEntry["workflow"];
+}
+
+/** 完整档案结构，ZIP 里的 manifest 和单独的 JSON 导出共用。 */
+export function buildHistoryArchive(entries: HistoryEntry[]): {
+  exportedAt: string;
+  count: number;
+  records: HistoryArchiveRecord[];
+} {
+  return {
+    exportedAt: new Date().toISOString(),
+    count: entries.length,
+    records: entries.map((entry) => ({
+      id: entry.id,
+      prompt: entry.prompt,
+      generatedAt: new Date(entry.generatedAt).toISOString(),
+      model: primaryModelId(entry),
+      ...(entry.workflow?.imageSize ? { imageSize: entry.workflow.imageSize } : {}),
+      ...(entry.workflow?.workflowPresetLabel ? { preset: entry.workflow.workflowPresetLabel } : {}),
+      ...(entry.workflow?.qualityProfile ? { qualityProfile: entry.workflow.qualityProfile } : {}),
+      starred: Boolean(entry.starred),
+      ...(entry.quota !== undefined ? { coins: formatCoins(entry.quota) } : {}),
+      imageUrls: entry.results
+        .map((result) => result.imageUrl)
+        .filter((url): url is string => Boolean(url)),
+      ...(entry.workflow ? { workflow: entry.workflow } : {}),
+    })),
+  };
+}
+
+/**
+ * 触发浏览器下载（BOM/CRLF 由呼叫端决定）。
+ * 2026-09-24：导出化为公开轮子——资产审查面板的 CSV 导出复用它（纯加法，函式本体零改动）。
+ */
+export function triggerDownload(content: string, fileName: string, mimeType: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** 导出完整参数档案，可用于日后复现或迁移。 */
+export function exportHistoryJson(
+  entries: HistoryEntry[],
+  fileName = `生成历史-${new Date().toISOString().slice(0, 10)}.json`,
+): void {
+  if (!entries.length) return;
+  triggerDownload(JSON.stringify(buildHistoryArchive(entries), null, 2), fileName, "application/json");
+}
+
+/**
+ * CSV 字段转义：逗号、引号、换行都要包起来，引号内再翻倍。
+ * 2026-09-24：导出化为公开轮子——资产审查面板只提供 header/rows 白名单，
+ * 转义一律走这里（禁止各面自创第二套转义）。
+ */
+export function csvCell(value: string | number | boolean | undefined): string {
+  const text = value === undefined ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** 导出表格，方便在 Excel 里对账。 */
+export function exportHistoryCsv(
+  entries: HistoryEntry[],
+  fileName = `生成历史-${new Date().toISOString().slice(0, 10)}.csv`,
+): void {
+  if (!entries.length) return;
+
+  const header = ["生成时间", "提示词", "模型", "尺寸", "预设", "消耗（张）", "已收藏", "图片链接"];
+  const rows = entries.map((entry) => [
+    csvCell(formatAbsoluteTime(entry.generatedAt)),
+    csvCell(entry.prompt),
+    csvCell(primaryModelId(entry)),
+    csvCell(entry.workflow?.imageSize),
+    csvCell(entry.workflow?.workflowPresetLabel),
+    csvCell(entry.quota !== undefined ? formatCoins(entry.quota) : ""),
+    csvCell(entry.starred ? "是" : "否"),
+    csvCell(entry.results.map((result) => result.imageUrl).filter(Boolean).join(" ")),
+  ].join(","));
+
+  // BOM 是必须的：没有它 Excel 会把 UTF-8 的中文读成乱码。
+  triggerDownload(`﻿${[header.join(","), ...rows].join("\r\n")}`, fileName, "text/csv;charset=utf-8");
+}

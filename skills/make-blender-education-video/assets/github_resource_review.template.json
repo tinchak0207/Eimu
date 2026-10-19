@@ -1,0 +1,50 @@
+{
+  "project": "detailed Blender education video",
+  "topic": "SET_FROM_APPROVED_BRIEF",
+  "searched_at": "YYYY-MM-DD",
+  "queries": [
+    "<topic> Blender",
+    "<topic> Blender Python",
+    "<topic> .blend"
+  ],
+  "candidates": [
+    {
+      "repository": "owner/repository",
+      "url": "https://github.com/owner/repository",
+      "commit_or_release": "PIN_EXACT_VERSION",
+      "intended_use": "reference_only",
+      "resource_type": "workflow | add-on | script | template | model | data",
+      "relevant_files": [],
+      "blender_compatibility": {
+        "supported_versions": [],
+        "required_addons": [],
+        "test_result": "not_tested"
+      },
+      "license_review": {
+        "repository_license": "VERIFY",
+        "asset_specific_licenses": [],
+        "required_attribution": "VERIFY",
+        "share_alike": "VERIFY",
+        "noncommercial": "VERIFY",
+        "distribution_compatible": "VERIFY"
+      },
+      "provenance": {
+        "upstream_sources": [],
+        "gaps": []
+      },
+      "security_review": {
+        "scripts_inspected": false,
+        "dependencies_inspected": false,
+        "active_content_inspected": false,
+        "findings": []
+      },
+      "maintenance_and_limits": {
+        "last_activity": "VERIFY",
+        "known_issues": [],
+        "limitations": []
+      },
+      "decision": "use | adapt | reference_only | reject",
+      "decision_reason": ""
+    }
+  ]
+}

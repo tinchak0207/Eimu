@@ -1,0 +1,150 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { classifySupplierFailure, SupplierRequestError } from "./failure-classifier.ts";
+
+const NOW = new Date("2026-07-29T00:00:00.000Z");
+
+test("429 respects Retry-After and enters a durable cooldown", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("too many requests", 429, "120"), NOW);
+  assert.equal(result.failureClass, "rate_limited");
+  assert.equal(result.retryable, true);
+  assert.equal(result.switchSupplier, true);
+  assert.equal(result.cooldownUntil?.toISOString(), "2026-07-29T00:02:00.000Z");
+});
+
+test("401 and 403 quarantine the credential account rather than retrying it", () => {
+  for (const status of [401, 403]) {
+    const result = classifySupplierFailure(new SupplierRequestError("unauthorized", status), NOW);
+    assert.equal(result.failureClass, "authentication");
+    assert.equal(result.quarantineSupplier, true);
+    assert.equal(result.switchSupplier, true);
+  }
+});
+
+test("5xx are overload failures; 4xx is a terminal client error, never overloaded", () => {
+  for (const status of [500, 503]) {
+    const result = classifySupplierFailure(new SupplierRequestError("system under load", status), NOW);
+    assert.equal(result.failureClass, "overloaded");
+    assert.equal(result.retryable, true);
+    assert.equal(result.quarantineSupplier, false);
+  }
+  const client = classifySupplierFailure(new SupplierRequestError("system under load", 408), NOW);
+  assert.equal(client.failureClass, "user_input");
+  assert.equal(client.retryable, false);
+  assert.equal(client.quarantineSupplier, false);
+});
+
+test("empty output and artifact download failure have different cooldown classes", () => {
+  const empty = classifySupplierFailure(new Error("Supplier result was empty."), NOW);
+  const download = classifySupplierFailure(new Error("Artifact download failed: HTTP 502."), NOW);
+  assert.equal(empty.failureClass, "empty_result");
+  assert.equal(download.failureClass, "artifact_download");
+  assert.ok((empty.cooldownUntil?.getTime() ?? 0) > (download.cooldownUntil?.getTime() ?? 0));
+});
+
+test("invalid input and unsupported model stop supplier fan-out", () => {
+  const input = classifySupplierFailure(new SupplierRequestError("unsupported size", 400), NOW);
+  const model = classifySupplierFailure(new SupplierRequestError("model not found", 404), NOW);
+  assert.equal(input.failureClass, "user_input");
+  assert.equal(input.retryable, false);
+  assert.equal(model.failureClass, "model_unsupported");
+  assert.equal(model.switchSupplier, false);
+});
+
+test("451 legal_error is a permanent content rejection, never retried", () => {
+  const result = classifySupplierFailure(
+    new SupplierRequestError('video submit failed: 451 {"error_code":"legal_error"}', 451),
+    NOW,
+  );
+  assert.equal(result.failureClass, "content_rejected");
+  assert.equal(result.retryable, false);
+  assert.equal(result.switchSupplier, false);
+  assert.equal(result.quarantineSupplier, false);
+});
+
+test("503 wrapping a legal_error body is still classified as content rejection", () => {
+  const result = classifySupplierFailure(
+    new SupplierRequestError("Upstream is temporarily unavailable", 503, null, '{"error_code":"legal_error"}'),
+    NOW,
+  );
+  assert.equal(result.failureClass, "content_rejected");
+  assert.equal(result.retryable, false);
+});
+
+test("502 wrapping Chinese quota-exhausted copy (hailuo 1008) fails fast as quota exhaustion", () => {
+  // 2026-08-29 事故原文：metaso 渠道 H3 欠费，上游回 502 + 中文文案。
+  const result = classifySupplierFailure(
+    new SupplierRequestError("hailuo api error: metaso create failed: H3 积分余额不足 (1008)", 502),
+    NOW,
+  );
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.retryable, false);
+  assert.equal(result.switchSupplier, true);
+  // INC-VIDEO-0927：欠费改冷却（可自愈），不再永久 disabled。
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+});
+
+test("402 English insufficient quota fails fast as quota exhaustion", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("insufficient quota", 402), NOW);
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.retryable, false);
+  assert.equal(result.switchSupplier, true);
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+});
+
+test("cangyuansuanli 实战欠费文案（预扣费额度失败）归 quota_exhausted 且可自愈", () => {
+  // 2026-09-27 查证原文：cangyuansuanli seedance-2.0 欠费 →
+  // 「预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000」
+  const result = classifySupplierFailure(
+    new SupplierRequestError("预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000", 502),
+    NOW,
+  );
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+});
+
+test("bare 502 without quota copy is still a retryable overload (regression)", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("bad gateway", 502), NOW);
+  assert.equal(result.failureClass, "overloaded");
+  assert.equal(result.retryable, true);
+  assert.equal(result.switchSupplier, true);
+  assert.equal(result.quarantineSupplier, false);
+});
+
+
+test("xiaoyxiao 欠费以 HTTP 401 回来仍归 quota_exhausted，不得隔离帐号（INC-VIDEO-0927b）", () => {
+  // 2026-09-27 生产原文：401 {"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000"}
+  const result = classifySupplierFailure(
+    new SupplierRequestError(
+      '{"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000","data":null}',
+      401,
+    ),
+    NOW,
+  );
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.retryable, false);
+});
+
+test("401 without quota copy is still authentication + quarantine (regression)", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("invalid api key", 401), NOW);
+  assert.equal(result.failureClass, "authentication");
+  assert.equal(result.quarantineSupplier, true);
+});
+
+test("H2: local pricing config error is pricing_config, capability-scoped, not overloaded", () => {
+  const msg = 'no per_request price configured for resolution "2k"';
+  for (const err of [new Error(msg), new SupplierRequestError(msg, 502)]) {
+    const result = classifySupplierFailure(err, NOW);
+    assert.equal(result.failureClass, "pricing_config");
+    assert.equal(result.retryable, false);
+    assert.equal(result.quarantineSupplier, false);
+    assert.equal(result.switchSupplier, true);
+    assert.equal(result.cooldownUntil?.toISOString(), "2026-07-29T00:03:00.000Z");
+  }
+  // genuine upstream 502 stays overloaded
+  assert.equal(classifySupplierFailure(new SupplierRequestError("bad gateway", 502), NOW).failureClass, "overloaded");
+});

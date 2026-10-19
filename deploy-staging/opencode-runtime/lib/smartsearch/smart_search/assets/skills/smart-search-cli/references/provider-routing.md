@@ -1,0 +1,207 @@
+# Provider Routing
+
+## Table of Contents
+
+- Source provenance
+- Intent routing diagnostics
+- Provider boundaries
+- Provider output details
+- Routing heuristics
+- Maintenance guardrails
+
+## Source Provenance
+
+- `primary_sources`: sources explicitly extracted from the primary model/provider answer.
+- `extra_sources`: parallel Tavily / Firecrawl candidates from `--extra-sources`; these are not automatic evidence for the generated `content`.
+- `sources`: backward-compatible merged list from `primary_sources + extra_sources`, deduped by URL.
+- `source_warning`: non-empty when extra source candidates were appended.
+- `extra_sources` are retrieved in parallel and are not automatically used by the primary model to verify its answer.
+
+## Intent Routing Diagnostics
+
+`smart-search route "query"` explains which capabilities the unified `IntentRouter` selected without running providers. It is the right command when the user asks why a prompt triggered docs/current/fetch/vertical routing.
+
+The router output keeps old fields such as `docs_intent`, `zh_current_intent`, `web_current_intent`, `fetch_intent`, and `supplemental_paths`, and adds `intent_router_mode`, `required_capabilities`, `intent_signals`, `confidence`, `router_engines_used`, `degraded`, `degraded_reason`, and `reasons`.
+
+Intent router rules:
+
+- `SMART_SEARCH_INTENT_ROUTER=hybrid|rules|off|jev`, default `hybrid`. `SMART_SEARCH_INTENT_ROUTER` accepts `hybrid`, `rules`, `off`, and `jev`.
+- Jev is the recommended optional mode; users opt in with `TYPESAFE_API_KEY` and at least one configured retrieval channel. It selects allowed operations using capabilities and existing provider preferences, then judges evidence before a new query, another engine, or page reading. Missing/unavailable judgments use explicit fixed-capability fallback when allowed, without the legacy remote classifier. `SMART_SEARCH_RESEARCH_DISABLED_PROVIDERS` and `--providers` restrict its candidates; Sciverse remains explicit-only.
+- `SMART_SEARCH_JEV_FILTER_RESULTS=true` enables conservative binary passage filtering after retrieval. Failures retain original evidence; changed content is reassessed before claiming sufficiency. `SMART_SEARCH_JEV_SYNTHESIZE=false` is the default: no mandatory main-model synthesis. `SMART_SEARCH_JEV_MAX_ROUNDS=3` and `SMART_SEARCH_JEV_MAX_CHANNELS=3` bound execution within `--timeout`.
+- `SMART_SEARCH_JEV_SYNTHESIZE` accepts `true`, `false`, and `auto`. Auto asks Jev after optional filtering whether the retained evidence benefits from main-model synthesis. No allowed main model or a failed judgment returns evidence directly. `synthesis` reports the mode, decision probability, execution status and skip reason.
+- In Jev mode `search` and `research` return evidence with assessment/filter/usage telemetry. Research retains its offline plan, budget tiers, reports, and fetched/read-only citations. `route --router-mode jev` lists local candidates without TypeSafe; `--remote` explicitly enables a potentially billable judgment. `deep` stays an offline planner.
+- Optional semantic routing uses `INTENT_EMBEDDING_API_URL`, `INTENT_EMBEDDING_API_KEY`, `INTENT_EMBEDDING_MODEL`, `INTENT_EMBEDDING_THRESHOLD`, and `INTENT_EMBEDDING_MARGIN`.
+- Normal users should use the Qwen3-Embedding-8B preset: SiliconFlow endpoint `https://api.siliconflow.cn/v1/embeddings`, model `Qwen/Qwen3-Embedding-8B`, threshold `0.475`, and margin `0.053`.
+- `smart-search setup` auto-fills threshold/margin when Qwen3-Embedding-8B is selected and no explicit values are already configured.
+- Embedding thresholds are model-specific. Run `smart-search route-calibrate --models "Qwen/Qwen3-Embedding-8B" --format json` after changing model/endpoint or refreshing the real-query calibration set; use semantic-only Macro-F1 as the primary selector and full-route Macro-F1 as validation.
+- Optional model classification uses `INTENT_CLASSIFIER_API_URL`, `INTENT_CLASSIFIER_API_KEY`, and `INTENT_CLASSIFIER_MODEL`.
+- `INTENT_ROUTER_TIMEOUT_SECONDS` defaults to `8`.
+- Missing or failing embeddings/classifier degrade to rules and should not fail ordinary `search`.
+- Semantic matches add a capability only when the top score reaches `INTENT_EMBEDDING_THRESHOLD` and the top-vs-second gap reaches `INTENT_EMBEDDING_MARGIN`; ambiguous semantic matches are recorded as signals only.
+- The router returns capabilities only: `docs_search`, `web_search`, `web_fetch`, and `vertical_search`.
+- Classifier output cannot select providers. Unknown capability names and provider names are ignored.
+- `search` and `research` use the unified router. `deep` remains an offline planner and must not call embeddings or classifier components.
+
+## Provider Boundaries
+
+- `search` builds `main_search` from configured peer providers: `XAI_API_KEY` for xAI Responses and `OPENAI_COMPATIBLE_API_URL` + `OPENAI_COMPATIBLE_API_KEY` for an OpenAI-compatible route.
+- `search` uses unified `IntentRouter` output to populate `required_capabilities` and `supplemental_paths`; provider execution still follows capability-first fallback.
+- `research` reuses the same `IntentRouter` before provider-advantage ordering.
+- `deep` uses offline rules/local signals only and must not call remote embeddings or classifier components.
+- Official xAI uses `/responses` through `XAI_*`. OpenAI-compatible relays default to `/chat/completions`; `OPENAI_COMPATIBLE_API_MODE=responses` explicitly selects `/responses` for a relay that supports the documented subset.
+- `OPENAI_COMPATIBLE_STREAM=true` or `search --stream` sets `stream=true` only for OpenAI-compatible `search` and provider-side `fetch`; it is a relay compatibility switch and does not affect xAI Responses, URL description, or source ranking.
+- Legacy `SMART_SEARCH_API_URL`, `SMART_SEARCH_API_KEY`, `SMART_SEARCH_API_MODE`, `SMART_SEARCH_MODEL`, and `SMART_SEARCH_XAI_TOOLS` are unsupported config keys.
+- xAI Responses mode may use only `XAI_TOOLS=web_search,x_search` and a subset of those tools.
+- Neither OpenAI-compatible API mode sends xAI `web_search` / `x_search` tools or legacy `search_parameters`; xAI Chat Completions Live Search is deprecated.
+- The standard minimum profile requires one configured provider in each of `main_search`, `docs_search`, and fetch capability. Missing required capabilities should be treated as a hard configuration failure.
+- AnySearch is reported only as optional experimental `vertical_search`; it is not part of the `web_search` fallback and is not required by the `standard` minimum profile.
+- Sciverse is reported only as optional experimental explicit-only `vertical_search`; it is not `docs_search`, not part of default `search` / `research` fallback, and not required by the `standard` minimum profile.
+- Jina Reader is `web_fetch` only, not a general search provider. `JINA_API_KEY` is required before Jina satisfies the standard minimum profile; anonymous `r.jina.ai` is explicit/experimental fetch behavior.
+- Same-capability fallback is allowed; cross-capability fallback is not. Context7 is not used for unrelated broad web queries, and page extraction providers are not used as docs search providers.
+- `TAVILY_ENABLED=false` removes Tavily from registered `web_search` and `web_fetch` routes even when its key is present. Direct Tavily search/extract calls, `map`, `doctor`, and smoke must make no Tavily network request; `map` reports a local configuration error. Firecrawl remains independently configured and all fallback stays within its capability.
+- `main_search`: xAI Responses first for Grok/xAI, then OpenAI-compatible answer fallback when that peer provider is separately configured and `--fallback auto` is active.
+- `web_search`: Zhipu Web Search API first when routed in, then Zhipu Coding Plan MCP `web_search_prime`, then Tavily / Firecrawl / TinyFish source search when configured.
+- `docs_search`: Context7 first for library/API/docs intent, then Exa for official-domain, paper, product-page, trusted-site, or low-noise supplemental discovery.
+- Automatic Context7 selection has no preferred library-id map. A candidate needs normalized query-subject overlap in its title or id; title/id exact and multi-token matches dominate, while description/trust/benchmark only break ties. When no candidate is eligible, Context7 is recorded as empty and can fall through to same-capability Exa. Explicit `context7-library` output and explicit `context7-docs LIBRARY_ID` remain unchanged.
+- Fetch capability: Tavily first, then Jina Reader with `JINA_API_KEY`, then Zhipu Coding Plan MCP `webReader`, then Firecrawl, then TinyFish.
+- `search` calls Tavily and/or Firecrawl only when `--extra-sources N` is greater than 0.
+- With both Tavily and Firecrawl configured, `search --extra-sources N` splits extra sources between them, with Tavily receiving about 60% and Firecrawl the rest.
+- `fetch` and known-URL `search "https://..."` use the same fetch fallback chain.
+- `fetch` tries Tavily first, then Jina with `JINA_API_KEY`, then Zhipu Coding Plan MCP Reader, then Firecrawl, then TinyFish.
+
+TinyFish:
+
+- `TINYFISH_API_KEY` is optional and registers TinyFish for both `web_search` and `web_fetch`. It never satisfies `main_search` or `docs_search`, and it never reorders Tavily, Jina, Zhipu MCP Reader, or Firecrawl.
+- `TINYFISH_SEARCH_API_URL` defaults to `https://api.search.tinyfish.ai` and is called as `GET ?query=...`; `TINYFISH_FETCH_API_URL` defaults to `https://api.fetch.tinyfish.ai` and is called as `POST` with `{"urls": [url], "format": "markdown"}`.
+- Both endpoints send `X-API-Key`, not `Authorization: Bearer`. Never log or echo the key.
+- Search results normalize `snippet` to `description`, `site_name` to `source`, and `date` to `published_date`. An empty result set is a successful empty response, not a failure.
+- Fetch reads `results[0].text`; `errors[]` entries are surfaced as `provider_error` with the upstream message. A payload with neither results nor errors is `provider_error`, and a non-object payload is `parse_error`.
+- Challenge pages such as `Checking if the site connection is secure` are reported as `quality_error` so same-capability fallback can continue.
+- `401`/403 map to `auth_error`, `408` to `timeout`, `429` to `rate_limited`, `5xx` to `network_error`, and `400`/422 to `parameter_error`.
+- `--extra-sources N` reaches TinyFish only when neither Tavily nor Firecrawl is configured; with Tavily or Firecrawl present, TinyFish stays in the web_search fallback chain instead of splitting the extra-source budget.
+- `map` currently uses Tavily only.
+- `exa-search` and `exa-similar` use Exa only.
+- `context7-library` and `context7-docs` use Context7 only.
+- `anysearch-domains`, `anysearch-search`, `anysearch-extract`, and `anysearch-batch` use AnySearch only. Treat results as acceptance evidence until the target vertical domain is reviewed.
+- `sciverse-catalog`, `sciverse-search`, `sciverse-semantic`, `sciverse-read`, and `sciverse-relations` use Sciverse only. They are explicit academic commands and must not be inserted into default provider fallback.
+- `zhipu-search` uses Zhipu only.
+- `zhipu-mcp-search`, `zhipu-mcp-reader`, and `zhipu-mcp-*` zread commands use Zhipu Coding Plan Remote MCP only.
+- Runtime config priority is environment variables first, then local config file, then defaults.
+- `setup` and `config` read/write the local Smart Search config file and do not call providers.
+- `model current` reports explicit provider model settings. `model set` is retained only as a parameter-error migration guard; use `config set XAI_MODEL ...` or `config set OPENAI_COMPATIBLE_MODEL ...` to change models.
+
+Provider attempt errors:
+
+- Provider exceptions must be visible as `provider_attempts[].status="error"`, never silently converted to empty output. Use the stable taxonomy: HTTP `400`/`422` is `parameter_error`, `401`/`403` is `auth_error`, timeout is `timeout`, `429` is `rate_limited`, `5xx` or request failure is `network_error`, invalid response decoding is `parse_error`, and explicit upstream tool failures are `provider_error`.
+- A successfully decoded response with no normalized candidates or content is `status="empty"`, so same-capability fallback can continue without misreporting a provider failure.
+
+Zhipu Web Search API:
+
+- `zhipu-search` corresponds to the official Zhipu Web Search API route, using `ZHIPU_API_URL` plus `ZHIPU_SEARCH_ENGINE`; it is not Zhipu Chat Completions `tools=[web_search]`, not Search Agent, and not the MCP Server.
+- `ZHIPU_SEARCH_ENGINE` defaults to `search_std`. Official Web Search API service values include `search_std`, `search_pro`, `search_pro_sogou`, and `search_pro_quark`; keep custom values possible because official services may change.
+- `TAVILY_API_URL` only affects Tavily REST calls and does not proxy Zhipu.
+
+Zhipu Coding Plan Remote MCP:
+
+- `ZHIPU_MCP_API_KEY` configures the Coding Plan MCP auth token and must be sent as `Authorization: Bearer ...`; it must never be logged unmasked.
+- `ZHIPU_MCP_SEARCH_API_URL` defaults to `https://open.bigmodel.cn/api/mcp/web_search_prime/mcp` and calls `web_search_prime` for `web_search`.
+- `ZHIPU_MCP_READER_API_URL` defaults to `https://open.bigmodel.cn/api/mcp/web_reader/mcp` and calls `webReader` for `web_fetch`.
+- `ZHIPU_MCP_ZREAD_API_URL` defaults to `https://open.bigmodel.cn/api/mcp/zread/mcp` and calls `search_doc`, `get_repo_structure`, and `read_file` through explicit repo/docs commands.
+- Zhipu Coding Plan MCP must be implemented as a separate Remote MCP-over-HTTP provider layer. Do not route it through the existing `/paas/v4/web_search` Zhipu REST provider.
+- A normal Zhipu Web Search API key is not sufficient evidence of Coding Plan entitlement. If `ZHIPU_MCP_API_KEY` is missing or returns auth/provider errors, MCP providers are skipped or fall through within the same capability; zread remains explicit and does not affect the standard minimum profile.
+- Provider failures must appear in `provider_attempts` and fallback must remain same-capability.
+- `doctor` should report configured/not-configured, auth, rate-limit, provider, timeout, and network status without exposing the MCP token.
+
+Jina Reader:
+
+- `JINA_READER_API_URL` defaults to `https://r.jina.ai`.
+- `JINA_API_KEY` is required before Jina satisfies `SMART_SEARCH_MINIMUM_PROFILE=standard`.
+- Anonymous Jina Reader calls may be used only as explicit/experimental degraded fetch behavior; they must not make standard setup pass.
+- `JINA_RESPOND_WITH=readerlm-v2` requires `JINA_API_KEY` and should report a configuration error without a network request when the key is missing.
+- Jina Reader is `web_fetch` only, not `web_search`.
+- Jina 401/403, 422, 429, timeout, network errors, and low-quality challenge pages such as `Title: Just a moment...` must be reported as failed provider attempts and allow same-capability fallback.
+
+AnySearch:
+
+- AnySearch uses JSON-RPC 2.0 `tools/call` at `ANYSEARCH_API_URL`, default `https://api.anysearch.com/mcp`.
+- `ANYSEARCH_API_KEY` is optional. If configured, requests include `Authorization: Bearer ...`; if missing, anonymous requests are allowed.
+- `ANYSEARCH_TIMEOUT_SECONDS` defaults to `30`.
+- Live MCP tools are `search`, `batch_search`, `extract`, and `get_sub_domains`. `anysearch-domains` maps to `get_sub_domains` (not the removed `list_domains` tool).
+- `anysearch-domains DOMAIN` calls the live `get_sub_domains` tool; without `DOMAIN`, it reads the `tools/list` schema for the available domains.
+- HTTP 200 responses with `result.isError=true` must return `ok=false`, `error_type=provider_error`, and no successful source results.
+- Markdown URL/title/snippet candidates should be parsed into `results`, while raw text remains in `content` and `raw_content`.
+- Structured results without URLs must be preserved as raw/structured evidence, not dropped.
+- Dotted vertical domain shorthand such as `code.doc` is allowed for simple subdomains and must be normalized to `domain=code` plus `sub_domain=doc`; parameterized subdomains parse `--sub-domain-params` JSON first, then repeatable `--param KEY=VALUE` entries override matching keys. Invalid JSON, non-object JSON, a missing `=`, or an empty key fails before the network request.
+- `anysearch-extract --max-length` sends only `url` to the live tool. A positive value truncates successful top-level and result text fields locally; zero or negative values preserve the normalized payload.
+- `anysearch-batch` accepts at most 5 CLI query strings and returns `error_type=parameter_error` without sending a request when the limit is exceeded.
+
+Sciverse:
+
+- `SCIVERSE_API_URL` defaults to `https://api.sciverse.space`; `SCIVERSE_TIMEOUT_SECONDS` defaults to `30`.
+- `SCIVERSE_API_TOKEN` is required. Missing token returns `error_type=config_error` without a network request; configured requests send `Authorization: Bearer ...` and must never expose the token.
+- Commands map directly to Sciverse OpenAPI: catalog -> `GET /meta-catalog`, search -> `POST /meta-search`, semantic -> `POST /agentic-search`, read -> `GET /content`, relations -> `POST /meta-paper-relations`.
+- Current `meta-catalog` and `meta-search` schemas have no `collection` selector. Legacy `--collection papers` is accepted without being sent upstream; `authors` and `sources` return `parameter_error` before a request. `meta-search` sends only `query`, `filters`, `sort`, `freshness_boost`, `page`, and `page_size`. `--title-contains` / `--abstract-contains` fold into `query`; author, journal, subject, and year conveniences become current filter items.
+- Advanced filters and sorts are structured local contracts: filters require `field` and `value` with a current `operator` such as `FILTER_OP_GTE`; legacy `op` is accepted only when it maps unambiguously. Sort items require `field` and normalize `order` to `SORT_ORDER_ASC` or `SORT_ORDER_DESC`. Full-text `query` and any `sort` conflict, so `--sort-by-year` defaults to `none` and sorting is filter-only.
+- `sciverse-semantic --retrieval hybrid|milvus|es` is the current semantic contract. Deprecated `--mode fast|balanced|quality` maps to `retrieval=hybrid` with a warning; it conflicts with explicit `milvus` or `es`. Semantic `--source-types` accepts only `web,pdf`.
+- `sciverse-read` uses `doc_id`; `sciverse-relations` uses `unique_id`.
+- Relation direction must stay explicit: `CITATIONS` means papers citing the target paper, `REFERENCES` means papers cited by the target paper, and `RELATED_WORKS` means related work suggestions.
+- Sciverse's documented HTTP `504` deadline response is `timeout`; other `5xx` responses remain `network_error`.
+- Local limits reject before network: search `page_size <= 200` and `page * page_size <= 10000`, semantic `top_k <= 100`, read `limit <= 16384`, relations `page_size <= 200`.
+- `--filters-advanced` and `--sort-advanced` must be JSON arrays of valid objects and fail with `parameter_error` before service/provider calls when malformed.
+
+OpenAI-compatible streaming:
+
+- `OPENAI_COMPATIBLE_API_MODE` defaults to `chat-completions` and accepts only `chat-completions` or `responses`. The selected protocol applies consistently to `search()`, provider-side `fetch()`, `describe_url()`, `rank_sources()`, `doctor`, and `diagnose openai-compatible`.
+- Responses mode handles the official `model` + `instructions`/`input` subset, heterogeneous `output` text parts, URL citations, typed stream deltas, and terminal failures. It does not promise `/responses` support from every relay marketed as OpenAI-compatible; accept each named relay with both diagnose stream probes.
+- `OPENAI_COMPATIBLE_STREAM` defaults to `false` and accepts `true`, `1`, or `yes` as true.
+- `search --stream` means "prefer stream first"; stream empty/timeout/retryable protocol failures fall back to the same provider/model with `stream=false`.
+- `search --no-stream` forces `stream=false` for the current invocation.
+- `SMART_SEARCH_TIMEOUT_SECONDS` defines one 300-second default monotonic `search` budget, and the main-search provider uses the whole remaining budget as its read ceiling rather than a separate fixed cap. Hybrid remote routing shares a cap while reserving main-model capacity (two thirds of the budget, up to 240 seconds); explicit `search --timeout` overrides the saved value for one invocation.
+- `OPENAI_COMPATIBLE_FALLBACK_MODELS` is an optional comma-separated ordered list. It is fail-over after a hard primary-model failure, not a time slice. The current candidate keeps the remaining shared main-search budget; extra fallback models must not shrink that budget. `--fallback off` or `--model MODEL` disables this model fallback for the invocation.
+- `timeout_phase`, `phase_attempts`, elapsed/remaining deadline values, and `partial_success` are scheduler telemetry. Optional extra/supplemental timeout retains primary content and completed sources; strict evidence validation still reports insufficient evidence when no sources remain.
+- OpenAI-compatible attempts may include `model`, `transport`, `fallback_from_transport`, `fallback_from_model`, and `breaker_state`. `transport_fallback_used` records stream-to-non-stream recovery separately from provider/model `fallback_used`.
+- Streaming applies only to OpenAI-compatible `search()` and provider-side `fetch()` calls. `describe_url()` and `rank_sources()` stay non-streaming. xAI Responses behavior is unchanged.
+
+Exa domain filters:
+
+- `--include-domains` and `--exclude-domains` accept comma-separated or whitespace-separated domains.
+- Both `--include-domains docs.python.org,developer.mozilla.org` and `--include-domains docs.python.org developer.mozilla.org` normalize to the same Exa domain list.
+- This normalization is intentional for Windows PowerShell, where an unquoted comma expression can be forwarded through `.ps1` wrappers as a space-separated value.
+
+## Provider Failure Cooldown
+
+- Same-capability fallback assumes a failing provider is worth retrying. A provider whose key is revoked, quota is exhausted, or endpoint is down is not, so its failures are persisted in `provider_health.json` and the provider is skipped for `SMART_SEARCH_PROVIDER_COOLDOWN_SECONDS` instead of being called again on every invocation.
+- Hard failures (`auth_error`, `config_error`) open the cooldown immediately for four cooldown windows and are not probed. Soft failures need `SMART_SEARCH_PROVIDER_FAILURE_THRESHOLD` consecutive failures within one window, and remain probeable once per window when no healthy provider is left in the chain.
+- A skipped provider appears in `provider_attempts` with `status=skipped`, the remembered `error_type`, and a `provider_health` block. It is not a silent drop, and it does not change same-capability fallback order.
+- Zhipu reports several failures inside an HTTP `200` body. Those payloads are classified (`auth_error`, `rate_limited`, `provider_error`) instead of being reported as an empty result set, so a dead Zhipu channel is diagnosable and coolable.
+- Recovery paths: `smart-search providers reset PROVIDER`, a credential change through `smart-search config set`, a successful `smart-search doctor` probe, or waiting out the cooldown.
+
+## Provider Output Details
+
+- Exa HTTP `400` or `422` failures are returned as `ok=false` with `error_type=parameter_error`; use this to distinguish bad CLI/domain/date/category arguments from upstream network failures.
+- AnySearch experimental output should preserve structured results without URLs as raw/structured evidence.
+- Sciverse experimental output should preserve raw response data under `raw` while exposing normalized `fields`, `results`, `hits`, `text`, or `items` depending on the command.
+- Diagnostic output should report Firecrawl status as whether `FIRECRAWL_API_KEY` is configured; it is not currently a live Firecrawl request.
+
+## Routing Heuristics
+
+- Use `smart-search route "query" --format markdown` when you need to explain why a query maps to `docs_search`, `web_search`, `web_fetch`, or `vertical_search` without executing providers.
+- Use `exa-search --include-domains` when official documentation domains are known.
+- Use `context7-library` / `context7-docs` for docs/API/SDK/library/framework intent when Context7 is configured.
+- Use `zhipu-search` for Chinese, domestic, current, or domain-filtered source discovery when Zhipu is configured.
+- Use `exa-search --start-published-date` for recency-constrained source discovery.
+- Use `exa-similar` when a known good page is available and adjacent sources are needed.
+- Use `search --format content` when a human wants only the generated answer body.
+- Use `fetch --format markdown` or `fetch --format content` for user-supplied URLs or when exact page text matters.
+- Use `map` before fetching many pages from a documentation site.
+- Keep `search --extra-sources` small (`1` to `3`) unless broad coverage is requested.
+- For current news or high-risk claims, prefer source discovery plus `fetch`; do not treat broad `search.content` plus `extra_sources` as claim-level verification.
+
+## Maintenance Guardrails
+
+- Provider architecture changes must be verified as distributable CLI behavior, not as behavior that only works because one developer machine has a specific wrapper, shell profile, or local config file.
+- Register providers by capability first, then route by intent. Fallback is allowed only within the same capability.
+- Keep xAI Responses and OpenAI-compatible as peer `main_search` providers. A failed xAI Responses request may fall back to OpenAI-compatible only when `OPENAI_COMPATIBLE_API_URL` and `OPENAI_COMPATIBLE_API_KEY` are separately configured.
+- Do not use Context7 for broad news or generic web facts; do not use Tavily or Firecrawl as documentation semantic-search replacements.
+- Standard installs must fail closed unless `main_search`, `docs_search`, and fetch capability each have at least one configured provider.
+- After provider-routing changes, run source-checkout regression plus `smart-search smoke --mock --format json`. If live keys were used, run a targeted secret scan for exact key substrings before committing.

@@ -1,0 +1,122 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { cancelGenerationJob } from "./job-repository.ts";
+import { JOB_EVENT } from "./job-events.ts";
+import type { GenerationSql } from "./database.ts";
+import { cancelGenerationJobWithRefund, type CancelServiceDeps } from "./cancel-service.ts";
+import type { GenerationJob } from "./types.ts";
+import type { BillingRefundResult } from "./billing-ledger.ts";
+
+type Call = { sql: string; values: unknown[] };
+
+// 照 billing-ledger.test.ts 的 mock GenerationSql 模式。
+// cancelGenerationJob 全部语义压在一条 CTE UPDATE 上：可取消态回传
+// { id, previous_status }，否则空集（上层 route 映射 409 already_terminal）。
+function mockSql(options: { cancellable: boolean; previousStatus: string }) {
+  const calls: Call[] = [];
+  const tagged = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const text = strings.join(" ");
+    calls.push({ sql: text, values });
+    if (text.includes("SET status = 'cancelled'")) {
+      return options.cancellable
+        ? [{ id: "job-1", previous_status: options.previousStatus }]
+        : [];
+    }
+    return [];
+  }) as unknown as GenerationSql;
+  (tagged as unknown as { begin: (cb: (tx: GenerationSql) => Promise<unknown>) => Promise<unknown> }).begin =
+    (cb) => cb(tagged);
+  return { sql: tagged, calls };
+}
+
+test("cancel of a queued job succeeds, reports previous status and appends job_cancelled", async () => {
+  const { sql, calls } = mockSql({ cancellable: true, previousStatus: "queued" });
+  const result = await cancelGenerationJob("job-1", "web:7", sql);
+  assert.deepEqual(result, { cancelled: true, previousStatus: "queued" });
+  assert.ok(calls.some((call) =>
+    call.sql.includes("INSERT INTO job_events") && call.values.includes(JOB_EVENT.jobCancelled)));
+  assert.ok(calls.some((call) =>
+    call.sql.includes("SET status = 'cancelled'")
+      && call.sql.includes("'pending_billing', 'queued', 'leased', 'submitting', 'running'")));
+});
+
+test("cancel of a running job is allowed (worker discards in-flight output; reconcile settles billing)", async () => {
+  const { sql, calls } = mockSql({ cancellable: true, previousStatus: "running" });
+  const result = await cancelGenerationJob("job-1", "biz:key-1", sql);
+  assert.deepEqual(result, { cancelled: true, previousStatus: "running" });
+  assert.ok(calls.some((call) => call.values.includes("biz:key-1")));
+});
+
+test("cancel of a terminal (succeeded) job is rejected -> route maps to 409 already_terminal", async () => {
+  const { sql, calls } = mockSql({ cancellable: false, previousStatus: "succeeded" });
+  const result = await cancelGenerationJob("job-1", "web:7", sql);
+  assert.deepEqual(result, { cancelled: false, previousStatus: null });
+  assert.ok(!calls.some((call) => call.sql.includes("INSERT INTO job_events")));
+});
+
+// ── 生产平面门面 cancelGenerationJobWithRefund（V-01）：cancel + 条件退款 ──
+
+function facadeDeps(options: {
+  cancelled: boolean;
+  previousStatus: GenerationJob["status"] | null;
+  refundOutcome?: BillingRefundResult;
+}) {
+  const refundCalls: { job: GenerationJob; executorId: string }[] = [];
+  const deps = {
+    cancel: async () => ({ cancelled: options.cancelled, previousStatus: options.previousStatus }),
+    refund: async (input: { job: GenerationJob; executorId: string }) => {
+      refundCalls.push({ job: input.job, executorId: input.executorId });
+      return options.refundOutcome ?? "applied";
+    },
+  } as unknown as CancelServiceDeps;
+  return { deps, refundCalls };
+}
+
+const paidJob = { id: "job-1", status: "queued", billingAmount: 40, billingUserId: "7" } as unknown as GenerationJob;
+
+test("facade: cancel of queued paid job refunds in full and reports refund", async () => {
+  const { deps, refundCalls } = facadeDeps({ cancelled: true, previousStatus: "queued", refundOutcome: "applied" });
+  const result = await cancelGenerationJobWithRefund("job-1", "web:7", paidJob, deps);
+  assert.deepEqual(result, {
+    cancelled: true, previousStatus: "queued", refund: { amount: 40, full: true }, refundState: "applied",
+  });
+  assert.equal(refundCalls.length, 1);
+  assert.equal(refundCalls[0].executorId, "cancel:web:7");
+  assert.equal(refundCalls[0].job, paidJob);
+});
+
+test("facade: refund not applied yet -> refund null, state surfaced, same log line", async () => {
+  const { deps } = facadeDeps({ cancelled: true, previousStatus: "leased", refundOutcome: "pending" });
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    const result = await cancelGenerationJobWithRefund("job-1", "biz:key-1", paidJob, deps);
+    assert.deepEqual(result, { cancelled: true, previousStatus: "leased", refund: null, refundState: "pending" });
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(logged, [["[generation-jobs] cancel refund not applied yet job=job-1 state=pending"]]);
+});
+
+test("facade: running / pending_billing / zero-amount jobs do not touch the ledger", async () => {
+  for (const [previousStatus, job] of [
+    ["running", paidJob],
+    ["submitting", paidJob],
+    ["pending_billing", paidJob],
+    ["queued", { ...paidJob, billingAmount: 0 } as GenerationJob],
+  ] as const) {
+    const { deps, refundCalls } = facadeDeps({ cancelled: true, previousStatus });
+    const result = await cancelGenerationJobWithRefund("job-1", "web:7", job, deps);
+    assert.deepEqual(result, { cancelled: true, previousStatus, refund: null, refundState: null });
+    assert.equal(refundCalls.length, 0);
+  }
+});
+
+test("facade: CAS lost (already terminal) -> not cancelled, no refund", async () => {
+  const { deps, refundCalls } = facadeDeps({ cancelled: false, previousStatus: null });
+  const result = await cancelGenerationJobWithRefund("job-1", "web:7", paidJob, deps);
+  assert.deepEqual(result, { cancelled: false, previousStatus: null, refund: null, refundState: null });
+  assert.equal(refundCalls.length, 0);
+});

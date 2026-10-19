@@ -1,0 +1,33 @@
+# smart_search 执行期第三方依赖（vendored，纯 Python wheel）
+#
+# 这些套件已逐档解压到本目录（与 tenacity/ 同层），靠 PYTHONPATH 生效，
+# **不进任何安装脚本、不依赖系统 dist-packages 的手工 pip 安装**。
+# 版本对齐 VPS 服务帐号（agentsvc）实际解析到的版本。
+#
+# 重现 vendor（升级上游或换机时照做）：
+#   python3 -m pip download --no-deps --only-binary=:all: --require-hashes \
+#     -d /tmp/vendor-wheels -r requirements-vendored.txt
+#   for w in /tmp/vendor-wheels/*.whl; do unzip -qo "$w" -d lib/smartsearch/; done
+#   rm -rf lib/smartsearch/*.dist-info
+#   find lib/smartsearch -type d \( -name __pycache__ -o -name tests \) -prune -exec rm -rf {} +
+#
+# ⚠ 漏档检查（曾实际踩到）：certifi 的 cacert.pem 是套件资料档，会被 repo 根 .gitignore
+#   的 `*.pem` 规则挡掉，导致部署后 `certifi.where()` 指向不存在的档 → httpx TLS
+#   初始化 FileNotFoundError。已于 .gitignore 加例外
+#   `!deploy-staging/opencode-runtime/lib/smartsearch/certifi/cacert.pem`。
+#   重现后务必确认底下没有被忽略的档：
+#     git status --ignored --porcelain -- lib/smartsearch | grep '^!!'   # 期望：无输出
+#
+# 验证（必须全部落在 lib/smartsearch/ 内，不得是 /usr/lib/python3/dist-packages）：
+#   PYTHONPATH=lib/smartsearch python3 -c \
+#     "import httpx,typing_extensions;print(httpx.__file__);print(typing_extensions.__file__)"
+#   PYTHONPATH=lib/smartsearch python3 -S -c "import smart_search.cli"   # 不靠系统 site-packages
+
+anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
+idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+sniffio==1.3.1 --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2
+typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

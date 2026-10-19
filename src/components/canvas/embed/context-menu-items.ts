@@ -1,0 +1,313 @@
+/**
+ * context-menu-items —— CanvasEmbed 右键选单工厂（自 CanvasEmbed.tsx L1079-1228 机械搬迁，项目 id/label/shortcut 不变）。
+ * 原 useMemo 闭包捕获 20+ handlers；工厂化后显式传参，组件壳仍以原依赖阵列 memo 呼叫。
+ */
+import { previousNodeVersion } from "@/lib/canvas/node-versions";
+import { fetchFormatCrops } from "@/lib/canvas/client";
+import { AD_SIZE_OPTIONS } from "@/lib/ad-formats";
+import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
+import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
+import type { AlignMode } from "@/lib/canvas/interaction";
+import type { CharacterCardKind } from "@/lib/character-cards";
+import { CHARACTER_CARD_KIND_LABEL, CHARACTER_CARD_KIND_VALUES } from "@/lib/character-cards";
+import type { CanvasMenuItem } from "../CanvasContextMenu";
+import { imageUrlOf, type CreateMenuState, type EditorState, type MenuState } from "./embed-helpers";
+
+export interface CanvasEmbedMenuItemsInput {
+  menu: MenuState | null;
+  nodeById: Map<string, CanvasNode>;
+  childToParent: Map<string, string>;
+  visibleNodes: CanvasNode[];
+  upscalingIds: Set<string>;
+  selectedIdsRef: RefObject<Set<string>>;
+  canvasStateRef: RefObject<UseCanvasChatReturn>;
+  clipboardRef: RefObject<{ nodes: CanvasNode[]; connections: CanvasConnection[] } | null>;
+  viewportSizeRef: RefObject<{ width: number; height: number }>;
+  alignSelection: (mode: AlignMode) => void;
+  distributeSelection: (axis: "h" | "v") => void;
+  arrangeSelection: () => void;
+  setSelectedConnectionId: Dispatch<SetStateAction<string | null>>;
+  setCreateMenu: Dispatch<SetStateAction<CreateMenuState | null>>;
+  pasteClipboard: (at?: CanvasPosition) => void;
+  setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
+  setLibraryOpen: Dispatch<SetStateAction<boolean>>;
+  setHelpOpen: Dispatch<SetStateAction<boolean>>;
+  setPromptPanelNodeId: Dispatch<SetStateAction<string | null>>;
+  handleRerun: (nodeId: string) => Promise<void>;
+  retryNode: (nodeId: string) => void;
+  setConnecting: Dispatch<SetStateAction<{ sourceId: string; cursor: CanvasPosition | null } | null>>;
+  copySelection: () => void;
+  duplicateSelection: () => void;
+  saveNodeAsCard: (node: CanvasNode, kind: CharacterCardKind, options?: { variantOf?: string }) => Promise<void>;
+  saveNodeToAssets: (nodeId: string) => Promise<void>;
+  setEditor: Dispatch<SetStateAction<EditorState | null>>;
+  upscaleNode: (nodeId: string) => Promise<void>;
+  downloadNode: (nodeId: string) => Promise<void>;
+  downloadBatch: (parentId: string) => Promise<void>;
+  handleDeleteNode: (nodeId: string) => void;
+  deleteSelected: () => void;
+  /** 语义缩放 LOD 3（2026-09-30）：打开工程透析面板；缺省 = 不出该项。 */
+  openEngineering?: (nodeId: string) => void;
+}
+
+/** 变体母卡上限：超过即整个「存为角色变体卡」子选单不渲染（不造死按钮、不静默截断）。 */
+export const MAX_VARIANT_MOTHER_CARDS = 8;
+
+export function buildCanvasEmbedMenuItems({
+  menu,
+  nodeById,
+  childToParent,
+  visibleNodes,
+  upscalingIds,
+  selectedIdsRef,
+  canvasStateRef,
+  clipboardRef,
+  viewportSizeRef,
+  alignSelection,
+  distributeSelection,
+  arrangeSelection,
+  setSelectedConnectionId,
+  setCreateMenu,
+  pasteClipboard,
+  setSelectedIds,
+  setLibraryOpen,
+  setHelpOpen,
+  setPromptPanelNodeId,
+  handleRerun,
+  retryNode,
+  setConnecting,
+  copySelection,
+  duplicateSelection,
+  saveNodeAsCard,
+  saveNodeToAssets,
+  setEditor,
+  upscaleNode,
+  downloadNode,
+  downloadBatch,
+  handleDeleteNode,
+  deleteSelected,
+  openEngineering,
+}: CanvasEmbedMenuItemsInput): (CanvasMenuItem | "separator")[] {
+  if (!menu) return [];
+  const state = canvasStateRef.current;
+  const sel = selectedIdsRef.current;
+  const alignChildren: CanvasMenuItem[] = [
+    { id: "align-left", label: "左对齐", onSelect: () => alignSelection("left") },
+    { id: "align-right", label: "右对齐", onSelect: () => alignSelection("right") },
+    { id: "align-top", label: "顶对齐", onSelect: () => alignSelection("top") },
+    { id: "align-bottom", label: "底对齐", onSelect: () => alignSelection("bottom") },
+    { id: "align-ch", label: "水平居中", onSelect: () => alignSelection("center-h") },
+    { id: "align-cv", label: "垂直居中", onSelect: () => alignSelection("center-v") },
+    { id: "dist-h", label: "水平均分", disabled: sel.size < 3, onSelect: () => distributeSelection("h") },
+    { id: "dist-v", label: "垂直均分", disabled: sel.size < 3, onSelect: () => distributeSelection("v") },
+    { id: "arrange", label: "网格整理", onSelect: () => arrangeSelection() },
+  ];
+  if (menu.targetConnectionId) {
+    return [
+      {
+        id: "delete-connection",
+        label: "删除连线",
+        danger: true,
+        shortcut: "Del",
+        onSelect: () => {
+          state.removeConnection(menu.targetConnectionId!);
+          setSelectedConnectionId(null);
+        },
+      },
+    ];
+  }
+  if (!menu.targetNodeId) {
+    return [
+      { id: "new-node", label: "新建节点…", onSelect: () => setCreateMenu({ position: menu.position, world: menu.world }) },
+      { id: "paste", label: "粘贴", shortcut: "Ctrl+V", disabled: !clipboardRef.current?.nodes.length, onSelect: () => pasteClipboard(menu.world) },
+      { id: "select-all", label: "全选", shortcut: "Ctrl+A", disabled: visibleNodes.length === 0, onSelect: () => setSelectedIds(new Set(visibleNodes.map((n) => n.id))) },
+      ...(sel.size >= 2 ? ([{ id: "align", label: "对齐与排列", children: alignChildren }] as CanvasMenuItem[]) : []),
+      "separator" as const,
+      { id: "library", label: "提示词库 / 素材", onSelect: () => setLibraryOpen(true) },
+      { id: "fit", label: "适应视图", onSelect: () => {
+        const size = viewportSizeRef.current;
+        if (size.width > 0) state.fitView(size.width, size.height);
+      } },
+      { id: "bg", label: "切换背景", onSelect: () => state.cycleBackground() },
+      { id: "help", label: "快捷键帮助", onSelect: () => setHelpOpen(true) },
+    ];
+  }
+  const node = nodeById.get(menu.targetNodeId);
+  if (!node) return [];
+  const url = imageUrlOf(node);
+  const parentId = childToParent.get(node.id);
+  const isWorkflowNode = !!(node.metadata?.workflow_id && node.metadata?.session_id);
+  const items: (CanvasMenuItem | "separator")[] = [
+    { id: "edit-prompt", label: "编辑提示词并生成", onSelect: () => setPromptPanelNodeId(node.id) },
+    ...(isWorkflowNode ? ([{ id: "rerun", label: "重新生成（工作流）", onSelect: () => void handleRerun(node.id) }] as CanvasMenuItem[]) : []),
+    ...(node.metadata?.status === "error" && node.metadata?.prompt
+      ? ([{ id: "retry", label: "重试（沿用参数）", onSelect: () => retryNode(node.id) }] as CanvasMenuItem[])
+      : []),
+    ...(openEngineering && node.type !== CanvasNodeType.Group
+      ? ([{ id: "engineering", label: "工程透析", onSelect: () => openEngineering(node.id) }] as CanvasMenuItem[])
+      : []),
+    { id: "connect", label: "连线到其他节点", onSelect: () => setConnecting({ sourceId: node.id, cursor: null }) },
+    { id: "rename", label: "重命名", onSelect: () => {
+      // 触发节点内编辑：直接改 title 为当前值走 NodeView 双击路径成本更高，
+      // 这里用 prompt() 太丑——选单触发交给 NodeView 的双击；此项用浏览器原生输入。
+      const next = window.prompt("重命名节点", node.title);
+      if (next && next.trim() && next.trim() !== node.title) state.renameNode(node.id, next.trim());
+    } },
+    "separator",
+    { id: "copy", label: "复制", shortcut: "Ctrl+C", onSelect: copySelection },
+    { id: "paste", label: "粘贴", shortcut: "Ctrl+V", disabled: !clipboardRef.current?.nodes.length, onSelect: () => pasteClipboard(menu.world) },
+    { id: "duplicate", label: "创建副本", shortcut: "Ctrl+D", onSelect: duplicateSelection },
+  ];
+  if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Prompt) {
+    items.push("separator");
+    items.push({ id: "font-up", label: "放大字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.min(28, (node.metadata?.fontSize ?? 14.5) + 2) }) });
+    items.push({ id: "font-down", label: "缩小字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.max(10, (node.metadata?.fontSize ?? 14.5) - 2) }) });
+    items.push({ id: "save-asset-text", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
+  }
+  // P2：reference 节点 → 存为角色/场景卡（锁定到本画布，所有生成自动携带）。
+  // B：五值化——子项由 CHARACTER_CARD_KIND_VALUES 驱动（前三个 id 与旧字面值逐字相同）。
+  if (node.type === CanvasNodeType.Reference && url) {
+    items.push("separator");
+    items.push({
+      id: "save-as-card",
+      label: "存为卡并锁定",
+      children: CHARACTER_CARD_KIND_VALUES.map((kind) => ({
+        id: `save-card-${kind}`,
+        label: `存为${CHARACTER_CARD_KIND_LABEL[kind]}卡`,
+        onSelect: () => void saveNodeAsCard(node, kind),
+      })),
+    });
+    // C：变体入口——母卡清单＝画布上既有的角色卡。零母卡不渲染（不留死路径）；
+    // 母卡超过上限时整个子选单不渲染（不做「更多母卡」死按钮、不静默截断）。
+    const motherCards = state.characterCards.filter((card) => card.kind === "character");
+    if (motherCards.length > 0 && motherCards.length <= MAX_VARIANT_MOTHER_CARDS) {
+      items.push({
+        id: "save-as-variant",
+        label: "存为角色变体卡",
+        children: motherCards.map((card) => ({
+          id: `save-variant-${card.id}`,
+          label: card.name,
+          onSelect: () => void saveNodeAsCard(node, "character", { variantOf: card.id }),
+        })),
+      });
+    }
+  }
+  // 图片节点 → 带角色的参考图节点（保留位置/尺寸/图片，补默认角色）。
+  if (node.type === CanvasNodeType.Image && url) {
+    items.push("separator");
+    items.push({
+      id: "to-reference",
+      label: "转为参考图节点",
+      onSelect: () => {
+        state.addNodes([
+          {
+            ...node,
+            type: CanvasNodeType.Reference,
+            metadata: { ...node.metadata, referenceRole: node.metadata?.referenceRole ?? "general" },
+          },
+        ]);
+      },
+    });
+  }
+  if (url) {
+    items.push("separator");
+    items.push({ id: "download", label: "下载图片", onSelect: () => void downloadNode(node.id) });
+    items.push({
+      id: "edit-image",
+      label: "编辑图片",
+      children: [
+        { id: "crop", label: "裁剪", onSelect: () => setEditor({ nodeId: node.id, mode: "crop" }) },
+        { id: "split", label: "切图", onSelect: () => setEditor({ nodeId: node.id, mode: "split" }) },
+        { id: "mask", label: "抠除 / AI 重绘", onSelect: () => setEditor({ nodeId: node.id, mode: "mask" }) },
+        { id: "rotate", label: "旋转", onSelect: () => setEditor({ nodeId: node.id, mode: "rotate" }) },
+        { id: "angle", label: "角度（AI 重绘）", onSelect: () => setEditor({ nodeId: node.id, mode: "angle" }) },
+      ],
+    });
+    if (url.startsWith("http")) {
+      items.push({ id: "format-crops", label: "一稿多版位（按常用尺寸裁切）", onSelect: () => void produceFormatCrops(state, node, url) });
+      items.push({ id: "upscale", label: "高清放大", disabled: upscalingIds.has(node.id), onSelect: () => void upscaleNode(node.id) });
+    }
+    items.push({ id: "save-asset-image", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
+  }
+  if (parentId) {
+    items.push("separator");
+    items.push({ id: "set-primary", label: "设为主图", onSelect: () => state.setBatchPrimary(parentId, node.id) });
+    items.push({ id: "remove-from-batch", label: "从批次中删除", danger: true, onSelect: () => handleDeleteNode(node.id) });
+  }
+  if ((node.batchChildren?.length ?? 0) > 0) {
+    items.push("separator");
+    items.push({ id: "toggle-batch", label: node.batchExpanded === false ? "展开批次" : "收起批次", onSelect: () => state.toggleBatchExpanded(node.id) });
+    items.push({ id: "download-all", label: "下载全部子图 (zip)", onSelect: () => void downloadBatch(node.id) });
+  }
+  if (sel.size >= 2) {
+    items.push("separator");
+    items.push({ id: "align", label: "对齐与排列", children: alignChildren });
+  }
+  if (sel.size <= 1) {
+    const hasPrevious = previousNodeVersion(state.nodeVersions ?? [], node.id) !== undefined;
+    items.push("separator");
+    items.push({
+      id: "revert-version",
+      label: hasPrevious ? "恢复上一版" : "恢复上一版（暂无更早版本）",
+      disabled: !hasPrevious,
+      onSelect: () => state.revertNode(node.id),
+    });
+  }
+  items.push("separator");
+  items.push({
+    id: "delete",
+    label: sel.size > 1 ? `删除 ${sel.size} 个节点` : "删除节点",
+    shortcut: "Del",
+    danger: true,
+    onSelect: () => (sel.size > 1 ? deleteSelected() : handleDeleteNode(node.id)),
+  });
+  return items;
+}
+
+/**
+ * 一稿多版位：伺服器按 AD_SIZE_OPTIONS 裁出能裁的版位（扩图版位无上游，照实跳过），
+ * 产物落成源图右侧的子图节点＋连线——形状与「编辑图片 → 裁剪」产出（CanvasEmbed
+ * handleEditorProduce）一致。
+ */
+async function produceFormatCrops(state: UseCanvasChatReturn, source: CanvasNode, url: string): Promise<void> {
+  const result = await fetchFormatCrops(url);
+  if (!result.ok || !result.data || result.data.length === 0) {
+    if (typeof window !== "undefined") {
+      window.alert(result.ok ? "这张图的比例没有可直接裁切的版位。" : (result.message ?? "裁切失败，请稍后重试。"));
+    }
+    return;
+  }
+  const ts = Date.now().toString(36);
+  const width = 300;
+  const newNodes: CanvasNode[] = result.data.map((crop, i) => {
+    const label = AD_SIZE_OPTIONS.find((option) => option.id === crop.id)?.label ?? crop.id;
+    const heightRaw = crop.width > 0 ? Math.round((width * crop.height) / crop.width) : 220;
+    return {
+      id: `${source.id}-fmt-${ts}-${i}`,
+      type: CanvasNodeType.Image,
+      title: `${source.title} · ${label}`,
+      position: {
+        x: source.position.x + source.width + 60 + (i % 3) * (width + 24),
+        y: source.position.y + Math.floor(i / 3) * 260,
+      },
+      width,
+      height: Math.min(Math.max(heightRaw, 120), 460),
+      moved: true,
+      metadata: {
+        content: crop.dataUrl,
+        status: "success",
+        naturalWidth: crop.width,
+        naturalHeight: crop.height,
+        source_image: url,
+      },
+    };
+  });
+  const newConns: CanvasConnection[] = newNodes.map((n) => ({
+    id: `conn-${source.id}-${n.id}`,
+    fromNodeId: source.id,
+    toNodeId: n.id,
+  }));
+  state.addNodes(newNodes, newConns);
+  if (newNodes.length > 0) state.selectNode(newNodes[0].id);
+}

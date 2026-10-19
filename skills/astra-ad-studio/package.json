@@ -1,0 +1,48 @@
+{
+  "name": "astra-ad-studio",
+  "version": "0.1.0",
+  "description": "Install the Codex skill that turns GPT-6 Astra into an in-workspace ad studio.",
+  "type": "module",
+  "bin": {
+    "astra-ad-studio": "bin/astra-ad-studio.js"
+  },
+  "scripts": {
+    "demo": "node scripts/render_campaign.mjs demo-input/demo-campaign.json outputs/demo-campaign",
+    "test": "node tests/astra-ad-studio.test.mjs",
+    "prepack": "npm test"
+  },
+  "files": [
+    "SKILL.md",
+    "agents",
+    "references",
+    "scripts",
+    "bin",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kappaemme-git/astra-ad-studio.git"
+  },
+  "homepage": "https://github.com/Kappaemme-git/astra-ad-studio",
+  "bugs": {
+    "url": "https://github.com/Kappaemme-git/astra-ad-studio/issues"
+  },
+  "keywords": [
+    "codex",
+    "gpt-6-astra",
+    "advertising",
+    "ad-creative",
+    "marketing",
+    "design",
+    "agent-skill",
+    "creative-tools"
+  ],
+  "author": "Francesco Mistero",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

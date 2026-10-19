@@ -1,0 +1,13 @@
+# 本档仅供本 repo 使用：opencode-release.sh 的同步范围是
+# tools/lib/skills/plugin ＋ opencode.json/package.json/bun.lock/package-lock.json，
+# 不含本档，因此这里写什么都不会改变生产行为。
+# 用途：避免把 vendored 负载与执行时状态误加进版控（生产的 services/ 有 898MB）。
+node_modules/
+services/
+opencode.db
+opencode.db-shm
+opencode.db-wal
+*.redteam-*
+*.bak*
+__pycache__/
+*.pyc

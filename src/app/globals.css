@@ -1,0 +1,1146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  /* Single source of truth for the page gutter. The floating navbar and the
+     content grid must resolve to the same left/right edges at every width —
+     they previously used different max-widths (1660 vs 1440) and different
+     padding (px-4 vs lg:px-8), so the navbar overhung the cards by up to
+     110px on each side on a wide display. */
+  .page-shell {
+    @apply mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8;
+  }
+
+  .admin-field {
+    @apply mt-2 w-full rounded-md border border-black/10 bg-[#f4f5f7] px-3 py-2.5 text-sm font-normal text-[#242830] outline-none transition-colors placeholder:text-black/25 focus:border-[#2878d0] focus:ring-2 focus:ring-[#2878d0]/15;
+  }
+}
+
+@layer base {
+  :root {
+    /* ── Semantic tokens ── */
+    --background: 0 0% 97%;
+    --foreground: 0 0% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
+    --primary: 0 0% 8%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 94%;
+    --secondary-foreground: 0 0% 8%;
+    --muted: 0 0% 92%;
+    --muted-foreground: 0 0% 44%;
+    --accent: 211 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 4 86% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 88%;
+    --input: 0 0% 92%;
+    --ring: 158 17% 44%;
+    --radius: 1.25rem;
+
+    /* --agent-shell-offset 已删除：聊天区不再占满视口，它是首页那张卡片里
+       一块定高的区域（PromptInput 的 AGENT_SURFACE_HEIGHT），
+       不需要为浮动导航栏和底部安全区扣高度。 */
+
+    /* ── Liquid Glass material tokens ── */
+    --lg-blur: 40px;
+    --lg-saturate: 180%;
+    --lg-brightness: 1.08;
+    --lg-bg-primary: rgba(255, 255, 255, 0.72);
+    --lg-bg-secondary: rgba(255, 255, 255, 0.56);
+    --lg-bg-tertiary: rgba(255, 255, 255, 0.38);
+    --lg-border-top: rgba(255, 255, 255, 0.92);
+    --lg-border-side: rgba(255, 255, 255, 0.48);
+    --lg-border-bottom: rgba(0, 0, 0, 0.06);
+    --lg-shadow-ambient: 0 2px 8px rgba(0, 0, 0, 0.04);
+    --lg-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+    --lg-shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.10), 0 4px 16px rgba(0, 0, 0, 0.06);
+    --lg-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --lg-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
+  }
+
+  body {
+    @apply text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", var(--font-geist-sans), system-ui, sans-serif;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    min-height: 100vh;
+    /* 底色只留纯色：环境光渐层已移到 body::after 的固定定位实体层
+       （原因见该处注释——body 的 background-attachment: fixed 会让
+       玻璃卡的 backdrop-filter 取样座标系位移，卡片圆角旁出现色差）。 */
+    background: #f5fbff;
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  /* Subtle noise texture overlay — mimics Apple's material grain */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    background-size: 128px 128px;
+    z-index: 0;
+  }
+
+  ::selection {
+    background: rgba(0, 122, 255, 0.18);
+    color: #1d1d1f;
+  }
+
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-thumb {
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-track { background: transparent; }
+  /* 2026-09-27：细条、悬停才显示——常驻灰条太吵。 */
+  *:hover::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.16); background-clip: padding-box; }
+}
+
+@media (max-width: 767px) {
+  /* 2026-10-01：手机端 sticky header 修复。原本 html, body 一起套 overflow-x:hidden，
+     但 body 一旦是 overflow-x:hidden，依规范 overflow-y 由 visible 计算成 auto ⇒ body
+     成为滚动容器，header 的 sticky 就绑在「永不滚动的 body scrollport」上，实际滚动发生在
+     viewport(html) ⇒ header 跟著页面卷走（桌机 >767px 走 overflow-x:clip，clip 不建立滚动
+     容器，所以正常）。故 body 改用 clip：clip 只裁切、不建立滚动容器，横向仍不可平移。 */
+  /* html 保留 hidden：裁切需求传导到 viewport，维持本 media query 原本「禁横向平移」的目的。 */
+  html {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+  }
+}
+
+@layer utilities {
+
+  /* ════════════════════════════════════════════════════
+     LIQUID GLASS MATERIAL SYSTEM
+     Based on Apple iOS 26 / WWDC25 "Meet Liquid Glass"
+     Three tiers: primary (cards) → secondary (floats) → tertiary (overlays)
+     ════════════════════════════════════════════════════ */
+
+  /* Primary material — main content cards */
+  .lg-card {
+    background: var(--lg-bg-primary);
+    border-top: 1px solid var(--lg-border-top);
+    border-left: 1px solid var(--lg-border-side);
+    border-right: 1px solid var(--lg-border-side);
+    border-bottom: 1px solid var(--lg-border-bottom);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.90);
+    -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  }
+
+  /* Secondary material — floating pills, badges, secondary panels */
+  .lg-float {
+    background: var(--lg-bg-secondary);
+    border-top: 1px solid rgba(255, 255, 255, 0.82);
+    border-left: 1px solid rgba(255, 255, 255, 0.38);
+    border-right: 1px solid rgba(255, 255, 255, 0.38);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    box-shadow: var(--lg-shadow-ambient);
+    -webkit-backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+    backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+  }
+
+  /* Tertiary material — dock, toolbar, bottom bar */
+  .lg-bar {
+    background: rgba(255, 255, 255, 0.62);
+    border-top: 1px solid rgba(255, 255, 255, 0.88);
+    border-left: 1px solid rgba(255, 255, 255, 0.42);
+    border-right: 1px solid rgba(255, 255, 255, 0.42);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 -1px 0 rgba(0,0,0,0.04), var(--lg-shadow-card);
+    /* 28px 是本设计语言里已验证的上限（.lg-float 同值）。半径越大，合成器
+       每帧要回读并重模糊的背景区域就越大，中低端 Android 上是明确的掉帧来源；
+       底色本身是 0.62 白，48px → 28px 的观感差异在这个不透明度下不可见。 */
+    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+  }
+
+  /* ≤767.98px：与手机同一套卷动毛玻璃。640–767 原先两头都不命中（手机停在 639.98，
+     桌面岛从 768 起），顶栏在这块宽度是空的。桌面岛规则仍从 768 起，不在这里改。
+     ID＋属性选择器的特异度盖过同层的 max-sm:bg-transparent / max-sm:[backdrop-filter:none]，
+     所以卷动态不需动 JSX 的 utility；未卷动时不命中此规则＝仍全透明。
+     只给毛玻璃本身，不补 border / box-shadow——分隔线在手机上很刺眼。 */
+  @media (max-width: 767.98px) {
+    #global-navbar nav[aria-label="主导航"][data-nav-scrolled="true"] {
+      background: rgba(255, 255, 255, 0.72);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      backdrop-filter: blur(20px) saturate(180%);
+    }
+  }
+
+  /* ≥768px 桌面岛：与左侧助理卡同一滴玻璃。2026-10-03 项目负责人「桌面端两个大组件背景颜色
+     不对齐，以左边为基准」——岛原本吃 .lg-bar（0.62 白／blur28／saturate200／brightness1.1），
+     而面板卡（.canvas-chat-scroll-fill > section.lg-card）是 0.56 白／blur40／saturate180／
+     brightness1.08；同一萤幕并排就是一深一浅。这里把岛降级到卡面同一组数值（blur 半径不是
+     新增的上限，卡面本来就是 40px）。特异度（ID＋属性）盖过同层 .lg-bar。
+     行动版完全不受影响：≤767.98px 由上方卷动毛玻璃接管，本规则从 768px 起。 */
+  @media (min-width: 768px) {
+    #global-navbar nav[aria-label="主导航"] {
+      background: rgba(255, 255, 255, 0.56);
+      -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
+      backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
+    }
+  }
+
+  /* Elevated material — modals, sheets, popovers */
+  .lg-sheet {
+    background: rgba(255, 255, 255, 0.82);
+    border-top: 1px solid rgba(255, 255, 255, 0.96);
+    border-left: 1px solid rgba(255, 255, 255, 0.52);
+    border-right: 1px solid rgba(255, 255, 255, 0.52);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: var(--lg-shadow-elevated);
+    /* 60px 是全站最大的模糊半径，也是最贵的一层：sheet 通常铺满视口，
+       合成器每帧要对整屏背景做一次 60px 半径的两遍高斯。底色已是 0.82 白，
+       背景几乎全被遮住，28px 与 60px 在这个不透明度下肉眼无法区分。 */
+    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+  }
+
+  /* ── Tinted glass variants (for status/accent states) ── */
+  .lg-tint-blue {
+    background: rgba(0, 122, 255, 0.10);
+    border-top: 1px solid rgba(0, 122, 255, 0.22);
+    border-left: 1px solid rgba(0, 122, 255, 0.10);
+    border-right: 1px solid rgba(0, 122, 255, 0.10);
+    border-bottom: 1px solid rgba(0, 122, 255, 0.06);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .lg-tint-green {
+    background: rgba(52, 199, 89, 0.10);
+    border-top: 1px solid rgba(52, 199, 89, 0.22);
+    border-left: 1px solid rgba(52, 199, 89, 0.10);
+    border-right: 1px solid rgba(52, 199, 89, 0.10);
+    border-bottom: 1px solid rgba(52, 199, 89, 0.06);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .lg-tint-red {
+    background: rgba(255, 59, 48, 0.10);
+    border-top: 1px solid rgba(255, 59, 48, 0.22);
+    border-left: 1px solid rgba(255, 59, 48, 0.10);
+    border-right: 1px solid rgba(255, 59, 48, 0.10);
+    border-bottom: 1px solid rgba(255, 59, 48, 0.06);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .lg-tint-gold {
+    background: rgba(255, 179, 0, 0.10);
+    border-top: 1px solid rgba(255, 179, 0, 0.24);
+    border-left: 1px solid rgba(255, 179, 0, 0.10);
+    border-right: 1px solid rgba(255, 179, 0, 0.10);
+    border-bottom: 1px solid rgba(255, 179, 0, 0.06);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  /* ── Active / selected fill (iOS "tinted fill") ── */
+  .lg-fill-active {
+    background: rgba(0, 122, 255, 0.12);
+    border-top: 1px solid rgba(0, 122, 255, 0.28);
+    border-left: 1px solid rgba(0, 122, 255, 0.14);
+    border-right: 1px solid rgba(0, 122, 255, 0.14);
+    border-bottom: 1px solid rgba(0, 122, 255, 0.08);
+  }
+
+  /* ── Ambient light blobs (background decoration) ── */
+  .lg-ambient {
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* 这两层纯装饰光晕原本用 `filter: blur()` 把一个硬边渐变磨软。
+     `filter` 会让节点升格为独立合成层，并让合成器每帧对整块区域跑一次高斯，
+     而光晕本身既不动也不响应交互 —— 完全没必要在运行时算。
+     这里把模糊「烘」进渐变本身：加大盒子以补回 blur 原本向外扩散的范围
+     （盒子每边各长 40px / 32px，故 inset 同量回收以保持圆心位置不变），
+     再用多档缓和的 alpha 停靠点复现高斯的衰减曲线。观感等价，零合成层。 */
+  .lg-ambient::before {
+    content: "";
+    position: absolute;
+    inset: calc(5% - 40px) calc(8% - 40px) auto auto;
+    height: 280px;
+    width: 280px;
+    border-radius: 999px;
+    background: radial-gradient(
+      circle,
+      rgba(85, 205, 252, 0.100) 0%,
+      rgba(85, 205, 252, 0.082) 18%,
+      rgba(85, 205, 252, 0.052) 36%,
+      rgba(85, 205, 252, 0.026) 54%,
+      rgba(85, 205, 252, 0.009) 72%,
+      transparent 88%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .lg-ambient::after {
+    content: "";
+    position: absolute;
+    inset: auto auto calc(5% - 32px) calc(8% - 32px);
+    height: 204px;
+    width: 204px;
+    border-radius: 999px;
+    background: radial-gradient(
+      circle,
+      rgba(247, 168, 184, 0.084) 0%,
+      rgba(247, 168, 184, 0.068) 18%,
+      rgba(247, 168, 184, 0.043) 36%,
+      rgba(247, 168, 184, 0.021) 54%,
+      rgba(247, 168, 184, 0.007) 72%,
+      transparent 88%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* ── iOS-style spring transitions ── */
+  .lg-transition {
+    transition: all 0.25s var(--lg-ease);
+  }
+
+  /* ── Eimu 桌面壳视窗拖曳区（Electron only） ──
+     外壳移除了原生 overlay，视窗只能靠这组 CSS 拖动：header 的玻璃岛（nav）标 drag，
+     其左组／右簇两个直接子容器标 no-drag（按钮全在里面，不必逐颗标），
+     justify-between 之下的中间空带即拖曳把手。普通浏览器对这两个属性完全 inert。 */
+  .app-region-drag {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .app-region-no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  /* ── Coin / wallet badge ── */
+  .coin-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: #b8860b;
+    background: rgba(255, 179, 0, 0.12);
+    border-top: 1px solid rgba(255, 179, 0, 0.28);
+    border-left: 1px solid rgba(255, 179, 0, 0.12);
+    border-right: 1px solid rgba(255, 179, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 179, 0, 0.06);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    transition: transform 0.3s var(--lg-spring);
+  }
+
+  .coin-badge:hover {
+    transform: scale(1.02) translateY(-1px);
+  }
+} /* @layer utilities 到此闭合——tour 弹层等后续规则必须留在顶层：
+     放进 layer 会把优先级压到 driver.css（无 layer）之下，弹层样式全部失效
+     （2026-08-27 生产事故根因：此闭合大括号缺失，utilities 层吞掉后面
+     500+ 行，lora/atc 弹层在 prod 裸奔）。 */
+
+/* LoRA 首次引导（普通模式 ModelPicker 触发）：大 popover，容纳例图与要点。
+   driver.css 在普通模式是动态 import 的，样式必须全站可用，不能放 workstation.css。 */
+.driver-popover.lora-tour-popover {
+  max-width: 380px;
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 24px 70px rgba(45, 49, 66, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  color: rgba(0, 0, 0, 0.78);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  backdrop-filter: blur(40px) saturate(1.8);
+  padding: 1.1rem 1.2rem;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-title {
+  color: rgba(0, 0, 0, 0.84);
+  font-size: 0.95rem;
+  font-weight: 780;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-description {
+  color: rgba(0, 0, 0, 0.60);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-progress-text {
+  color: rgba(0, 122, 255, 0.82);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-footer button {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.38rem 0.9rem;
+  color: #0066dd;
+  font-size: 0.72rem;
+  font-weight: 740;
+  text-shadow: none;
+  transition: background 220ms var(--lg-ease, ease);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-footer button:hover {
+  background: rgba(0, 122, 255, 0.16);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-left {
+  border-left-color: rgba(255, 255, 255, 0.96);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-right {
+  border-right-color: rgba(255, 255, 255, 0.96);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: rgba(255, 255, 255, 0.96);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: rgba(255, 255, 255, 0.96);
+}
+
+/* 模板卡圆环首次教学（AgentTemplateCarousel 触发）：深色玻璃弹层，贴卡面暗底体系。
+   与 lora-tour-popover 同理由动态 import 的 driver.css 配合，样式须全站可用。 */
+.driver-popover.atc-tour-popover {
+  max-width: 340px;
+  border-radius: 1.35rem;
+  /* 2026-08-27 用户裁定：与 DESIGN.md 对齐改浅色系玻璃（lg-sheet 语言：
+     白 92% 底、四边玻璃描边、深色前景）。原本深底白字是临时贴卡面产物。 */
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: hsl(222 18% 22%); /* --foreground */
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  backdrop-filter: blur(28px) saturate(1.8) brightness(1.05);
+  padding: 1rem 1.1rem;
+  /* DESIGN.md §7：进入用 lg-appear 同款 spring；driver 自身定位用 transform，
+     只对内层容器做 appear，避免干扰弹层锚点跟随。 */
+  animation: atc-tour-pop 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes atc-tour-pop {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+    scale: 0.94;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .driver-popover.atc-tour-popover {
+    animation: none;
+  }
+}
+
+/* 移动端（2026-08-27 生产实测返工）：popover 钳在视口内、不盖模板卡核心区。 */
+/* 2026-08-27 毒舌终审：footer 行垂直不齐——进度文字/按钮/跳过链接各行其是。
+   统一：footer 改 flex 单行、交叉轴居中、统一行高。 */
+.driver-popover.atc-tour-popover .driver-popover-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+.driver-popover.atc-tour-popover .driver-popover-progress-text {
+  line-height: 1.2;
+  align-self: center;
+}
+.driver-popover.atc-tour-popover .atc-tour-skip {
+  align-self: center;
+  line-height: 1.2;
+}
+
+@media (max-width: 767.98px) {
+  .driver-popover.atc-tour-popover {
+    max-width: min(340px, calc(100vw - 1.5rem));
+    padding: 0.85rem 1rem;
+  }
+  .driver-popover.atc-tour-popover .driver-popover-description p {
+    font-size: 0.75rem !important; /* 12.5px 吸附 ios-caption1（12px） */
+    line-height: 1.5 !important;
+  }
+}
+
+/* DESIGN.md §5：顶缘 specular 亮线（玻璃折射三要素之一）。 */
+.driver-popover.atc-tour-popover::before {
+  content: "";
+  position: absolute;
+  inset-inline: 10px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.92), transparent);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-title {
+  color: hsl(222 18% 22%);
+  font-size: 0.9375rem; /* 15px = DESIGN.md 标题层级下限 */
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-description {
+  color: hsl(220 10% 40%);
+  font-size: 0.8125rem; /* 13px：正文不小于 13px（DESIGN.md §4 硬规则） */
+  line-height: 1.6;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-description p {
+  margin: 0 0 6px 0;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-progress-text {
+  color: hsl(220 10% 49%);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-close-btn {
+  color: hsl(220 10% 40%);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-footer button.driver-popover-next-btn {
+  background: #2d3142; /* --primary */
+  color: #fff;
+}
+.driver-popover.atc-tour-popover .driver-popover-footer button {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.38rem 0.9rem;
+  color: hsl(222 18% 22%);
+  font-size: 0.8125rem; /* 与正文同级 ≥13px */
+  font-weight: 600;
+  text-shadow: none;
+  transition: background 220ms var(--lg-spring, ease), transform 200ms var(--lg-spring, ease);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-footer button:hover {
+  background: rgba(0, 0, 0, 0.09);
+  transform: translateY(-1px); /* DESIGN.md hover-lift，无 layout shift */
+}
+
+.driver-popover.atc-tour-popover .driver-popover-footer button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: rgba(18, 18, 24, 0.92);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: rgba(18, 18, 24, 0.92);
+}
+
+
+  /* ── Style preset chip ── */  /* Sits inside a single-line scroll rail: fixed 36px height to match the
+     segmented control, no transform on hover (a scaled chip gets clipped by
+     the rail's overflow). Quiet gray FILL, no border: 描边胶囊 × 几十个就是
+     「分割感非常重」的来源——填充让整条控制轨和画质分段控件读成同一族，
+     分组靠留白而不是线。 */
+  .style-chip {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    white-space: nowrap;
+    height: 2.25rem;
+    padding: 0 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: rgba(0, 0, 0, 0.62);
+    cursor: pointer;
+    transition: background 0.2s var(--lg-ease), color 0.2s var(--lg-ease);
+    background: rgba(0, 0, 0, 0.045);
+    border: none;
+  }
+
+  .style-chip:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.86);
+  }
+
+  .style-chip.active {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+  }
+
+  .style-chip.active:hover {
+    background: rgba(0, 122, 255, 0.17);
+  }
+
+  /* ── Skeleton shimmer ── */
+  @keyframes lg-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255,255,255,0.3) 25%,
+      rgba(255,255,255,0.6) 50%,
+      rgba(255,255,255,0.3) 75%
+    );
+    background-size: 200% 100%;
+    animation: lg-shimmer 1.8s ease-in-out infinite;
+    border-radius: inherit;
+  }
+
+  /* ── iOS-style divider ── */
+  .lg-divider {
+    height: 0.5px;
+    background: rgba(0, 0, 0, 0.10);
+  }
+
+  /* ── Legacy aliases (keep existing code working) ── */
+  .paper-float  { @apply lg-float; border-radius: 9999px; }
+
+/* ── Force body background outside any layer — highest specificity ── */
+/* ── 环境光渐层（Trans flag ambient：#55CDFC 蓝 / #F7A8B8 粉，极淡）──
+   2026-09-11：由 body 的 background-attachment: fixed 改为「固定定位的实体层」。
+   原因：Chromium 在 backdrop-filter 的元素上取样 fixed 背景时座标系会位移，
+   .lg-card（blur(40px) saturate(1.8)）四周因此出现与卡片外接矩形对齐的色差，
+   四个圆角旁最明显（圆角外仍是外接矩形，色差露在最外面）。
+   改成 position: fixed 的实体层后，backdrop 取样回到正常座标系、色差消失，
+   而「光晕不随滚动移动」的视觉完全不变。 */
+body {
+  background: #f5fbff;
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 130% 90% at 15% 5%,
+      rgba(85, 205, 252, 0.10) 0%,
+      transparent 60%
+    ),
+    radial-gradient(ellipse 110% 75% at 85% 95%,
+      rgba(247, 168, 184, 0.10) 0%,
+      transparent 60%
+    ),
+    radial-gradient(ellipse 90% 65% at 80% 10%,
+      rgba(85, 205, 252, 0.07) 0%,
+      transparent 55%
+    ),
+    linear-gradient(160deg,
+      #f5fbff 0%,
+      #fef5f7 50%,
+      #f5fbff 100%
+    );
+}
+
+/* ── 首页输入栏（≥xl）：跟随右侧结果卡的高度链 ──
+   结果栏（ImageDisplay）一直吃满栏高，输入卡过去由内容高决定，下方留一片空白。
+   这里让输入卡在 ≥xl 吃满所在栏位高度；内容超出时收进卡片内部滚动
+   （<xl 不受影响，仍是文档流自然高 + 整页滚动）。 */
+@media (min-width: 1280px) {
+  .playground-column-fill {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* 中间两层（栏 wrapper > CanvasChatWorkstation 的 div > 卡片直属父层）都要是
+     纵向 flex 链，卡片自身的 flex-1 才咬得住。第二条用 :has 精准指名「卡片的
+     直属父层」，避免用 `div div` 之类会误伤卡片内部版面的选择器。 */
+  .playground-column-fill > div,
+  .playground-column-fill div:has(> section.lg-card) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .playground-column-fill section.lg-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 全站基线：lg-* 材质的过渡与出现动画此前只在 history.css / workstation.css
+     里各自声明了 reduce，globals 这份覆盖 /pricing、导航栏等其余页面。 */
+  .lg-transition,
+  .coin-badge,
+  .style-chip {
+    transition-duration: 1ms !important;
+  }
+
+  .animate-lg-appear,
+  .skeleton {
+    animation: none !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* 引导期间恢复模型选择下拉菜单的点击：driver.js 会给 `.driver-active *` 加
+   pointer-events:none（除高亮元素外全禁点），且它的 SVG 遮罩 path 自带
+   inline pointer-events:auto、z-index 10000，portal 里的菜单（z-50）会被
+   SVG 拦在下面点不动，用户会误以为引导致卡死、点外面反而把菜单关了。
+   把菜单抬到 SVG 之上（10001）并恢复点击即可正常 hover/点选。 */
+.driver-active [role="menu"] {
+  z-index: 10001 !important;
+  pointer-events: auto !important;
+}
+.driver-active [role="menu"] [role="menuitem"] {
+  pointer-events: auto !important;
+}
+
+/* 引导演示用的假鼠标：macOS 风格指针（白色实心箭头 + 细黑描边 + 柔和阴影），
+   按步骤序列移动/点击/打字，像看着别人教一遍——悬停模型按钮 → 落到 PixAI → 点选；
+   或飞入输入框缓速逐字打出示例关键词（如 anime）。指针尖端朝左上，以尖端对准目标。 */
+.tour-fake-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000000002;
+  width: 24px;
+  height: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 26'%3E%3Cpath d='M3 2.5 L20 2.5 L15.5 13 L19 19.5 L13.8 21.8 L11 16.5 L5.5 20 Z' fill='%23ffffff' stroke='%23111111' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 1.5px 3.5px rgba(0, 0, 0, 0.35));
+  pointer-events: none;
+  transition: transform 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease, scale 120ms ease;
+  will-change: transform, scale;
+}
+
+.tour-fake-cursor.is-pressing {
+  scale: 0.85;
+}
+
+/* 按住拖拽演示态：iOS 蓝高亮光圈，松手（up 步骤）即恢复。
+ * 2026-08-27 atc 拖拽教学返工：去掉 scale: 0.88——独立 scale 属性会与
+ * translate 组合成「先平移再以 origin 缩放整条平移量」，指针在 holding 期间
+ * 向 spawn 点回弹 (1-0.88)×|translate| ≈ 83px（拖到站2 却显示在站3 右侧）。
+ * 按压缩小视觉改由 filter 光圈承担，不再动几何。 */
+.tour-fake-cursor.is-holding {
+  filter: drop-shadow(0 1.5px 3.5px rgba(0, 122, 255, 0.55))
+    drop-shadow(0 0 10px rgba(0, 122, 255, 0.35));
+}
+
+/*
+ * 普通模式 PixAI 引导弹层的手机适配。
+ *
+ * 桌面版 max-width 是 340px，360px 宽的机器上左右几乎贴边；driver.js 又是
+ * fixed 定位、按 window.innerWidth 夹取坐标，弹层一旦比可用宽度大就会被推
+ * 到边缘甚至溢出。这里改成跟着视口算宽度，并给足底部安全区。
+ */
+@media (max-width: 1023px) {
+  .driver-popover.lora-tour-popover {
+    max-width: min(340px, calc(100vw - 1.75rem));
+    max-height: min(72svh, calc(100vh - 7rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.95rem 1rem calc(0.95rem + env(safe-area-inset-bottom, 0px));
+    /* 高于底部导航的合成层，避免被 backdrop-filter 图层盖住 */
+    z-index: 1000000001;
+  }
+
+  .driver-popover.lora-tour-popover .driver-popover-description {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  /* 触摸目标：桌面 0.7rem 的小药丸在手机上按不准 */
+  .driver-popover.lora-tour-popover .driver-popover-footer button {
+    min-height: 2.75rem;
+    padding: 0.5rem 1.05rem;
+    font-size: 0.8125rem;
+  }
+
+  .driver-popover.lora-tour-popover .driver-popover-close-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+    font-size: 1.25rem;
+  }
+}
+
+/* ─── Dust transition ─────────────────────────────────────── */
+.dust-transition {
+  will-change: filter, transform, opacity;
+}
+
+/* 散开：向上模糊消失 */
+@keyframes dust-exit-kf {
+  0%   { opacity: 1; filter: blur(0px);   transform: scale(1)    translateY(0px); }
+  50%  { opacity: 0.5; filter: blur(6px);  transform: scale(0.97) translateY(-6px); }
+  100% { opacity: 0;   filter: blur(12px); transform: scale(0.93) translateY(-14px); }
+}
+
+/* 重组：从下方模糊汇聚进来 */
+@keyframes dust-enter-kf {
+  0%   { opacity: 0;   filter: blur(10px); transform: scale(1.03) translateY(14px); }
+  60%  { opacity: 0.85; filter: blur(2px);  transform: scale(1.01) translateY(-2px); }
+  100% { opacity: 1;   filter: blur(0px);  transform: scale(1)    translateY(0px); }
+}
+
+.dust-exit {
+  animation: dust-exit-kf 260ms cubic-bezier(0.4, 0, 0.8, 0) forwards;
+  pointer-events: none;
+}
+
+.dust-enter {
+  animation: dust-enter-kf 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+/* ─── Agent 聊天区高度（PromptInput AGENT_SURFACE_HEIGHT）───────────
+    桌面：clamp(400px, calc(100dvh - 240px), 820px)——下方保留改图/放大/AI
+    助理按钮行 + 页面 padding 的空间，避免按钮被推出可视区。
+    行动端：clamp(320px, 60dvh, 820px)——独立处理，键盘弹出时靠 composer
+    anchor scroll 逻辑处理。 */
+:root {
+  --agent-surface-height: clamp(400px, calc(100dvh - 240px), 820px);
+}
+
+@media (max-width: 639.98px) {
+  :root {
+    --agent-surface-height: clamp(320px, 60dvh, 820px);
+  }
+}
+
+/* ── 生成中继态粒子海（ImageDisplay → ParticleSeaWaiting）── */
+.sea-waiting-aurora {
+  position: absolute;
+  inset: -30%;
+  filter: blur(30px);
+  opacity: 0.42;
+  transform: rotate(-18deg);
+  background: conic-gradient(
+    from 210deg at 42% 46%,
+    transparent 0 20%,
+    #557aff66 28%,
+    #ff9ec466 40%,
+    transparent 51% 69%,
+    #ffb0cf55 79%,
+    transparent 90%
+  );
+  animation: sea-aurora 10s ease-in-out infinite alternate;
+}
+
+@keyframes sea-aurora {
+  from {
+    transform: rotate(-18deg) translate(-7%, -3%) scale(0.94);
+  }
+  to {
+    transform: rotate(-8deg) translate(8%, 5%) scale(1.08);
+  }
+}
+
+.sea-waiting-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 44%, #799dff1f, transparent 40%),
+    linear-gradient(145deg, #819bff0a, transparent 48%, #ff9ec40d);
+  animation: sea-veil 4s ease-in-out infinite alternate;
+}
+
+@keyframes sea-veil {
+  to {
+    opacity: 0.32;
+    transform: scale(1.08);
+  }
+}
+
+/* 卡片内文字呼吸：光晕/色彩/明度缓慢脉动，与粒子海同频不同相 */
+.sea-waiting-value {
+  animation: sea-value-breathe 4.2s ease-in-out infinite alternate;
+}
+
+@keyframes sea-value-breathe {
+  from {
+    filter: drop-shadow(0 2px 14px rgba(102, 170, 255, 0.28));
+  }
+  to {
+    filter: drop-shadow(0 4px 30px rgba(102, 170, 255, 0.62));
+  }
+}
+
+.sea-waiting-sub {
+  color: rgba(45, 49, 66, 0.68);
+  animation: sea-sub-breathe 5.6s ease-in-out infinite alternate;
+}
+
+@keyframes sea-sub-breathe {
+  from {
+    color: rgba(45, 49, 66, 0.68);
+  }
+  to {
+    color: rgba(0, 122, 255, 0.72);
+  }
+}
+
+.sea-waiting-hint {
+  animation: sea-hint-breathe 4.8s ease-in-out infinite alternate;
+}
+
+@keyframes sea-hint-breathe {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sea-waiting-value,
+  .sea-waiting-sub,
+  .sea-waiting-hint {
+    animation: none;
+  }
+}
+
+/* 画布节点卡（2026-10-01 效能审计 P1-3）：卡片浮在平坦的浅色点阵底上，40px 背景模糊在视觉上等于「近白」，
+   却要求每帧为每张卡重取样背景再模糊——Intel 核显上平移/缩放掉到 30fps 的主因之一。
+   改用不透明近白（≈ 原玻璃压在画布底上的观感）；描边、亮线、阴影仍走 lg-card。 */
+.lg-card.lg-card-canvas {
+  background: rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ─────────────────────────────────────────── 语义缩放（Semantic Zoom，2026-09-30 打磨）
+   k 是唯一真源：CanvasEmbed 每帧把 lodBlend(k) 写进内容层 CSS 变数，节点不为转场多 render。
+   --lod-g            聚合系数（easeOut 后，0＝协作、1＝鸟瞰）
+   --lod-node-scale   / --lod-node-opacity / --lod-blur  聚合态节点视觉
+   --lod-xray         透析系数（0→1）
+   节点自带静态 --gx/--gy（到阶段质心的世界位移）。
+   聚合用独立属性 translate/scale＋filter:opacity，不碰既有 transform/opacity 过渡（无追尾延迟）。 */
+[data-lod-gathering] .lod-node {
+  translate: calc(var(--lod-g, 0) * var(--gx, 0) * 1px) calc(var(--lod-g, 0) * var(--gy, 0) * 1px);
+  scale: var(--lod-node-scale, 1);
+  filter: opacity(var(--lod-node-opacity, 1));
+}
+[data-lod-gathering][data-lod-blur] .lod-node {
+  filter: opacity(var(--lod-node-opacity, 1)) blur(var(--lod-blur, 0px));
+}
+[data-lod-inert] .lod-node {
+  pointer-events: none;
+}
+[data-lod-gathering] .lod-conn {
+  opacity: calc(1 - var(--lod-g, 0));
+}
+
+/* 点阶段卡飞行途中：非目标阶段节点压暗（opacity 走节点既有 300ms 过渡，落地后柔和恢复）。 */
+[data-focus-stage="1"] .lod-node:not([data-lod-stage="1"]),
+[data-focus-stage="2"] .lod-node:not([data-lod-stage="2"]),
+[data-focus-stage="3"] .lod-node:not([data-lod-stage="3"]),
+[data-focus-stage="4"] .lod-node:not([data-lod-stage="4"]) {
+  opacity: 0.35;
+}
+
+/* 透析 focus 模式：被透析的卡抬起，其余退成灰影。 */
+[data-eng-focus] .lod-node:not([data-eng-focused]) {
+  opacity: 0.25;
+  filter: grayscale(1);
+  transition: opacity 320ms ease-out, filter 320ms ease-out;
+}
+.lod-node[data-eng-focused] {
+  z-index: 40;
+}
+
+/* 拆机（LOD3）：卡面＝背板，随 --lod-xray 掀起（上移、微放大、淡出），露出底下的电路板。
+   只在透析带内挂规则（[data-lod-xray]），平常卡片不多出任何属性。 */
+/* --lod-xray 注册成可插值的数：透析中的节点把它过渡到 1（背板滑开），关闭后过渡回画布值。
+   只有 focused/release 两态的节点宣告 transition——一般节点仍逐帧跟画布走，不被拖慢。 */
+@property --lod-xray {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+.lod-node[data-eng-focused],
+.lod-node[data-eng-release] {
+  transition: --lod-xray 560ms cubic-bezier(0.34, 1.2, 0.64, 1) 0ms !important;
+}
+[data-lod-xray] .lod-cover {
+  /* 正文区像滑盖一样从下往上收：每一点要嘛是原正文、要嘛是内部参数，不做半透明混色。 */
+  clip-path: inset(0 0 calc(var(--lod-xray, 0) * 100%) 0 round 0 0 16px 16px);
+}
+[data-lod-xray-open] .lod-cover {
+  pointer-events: none;
+}
+/* 盖在原正文上的浮层控件（参考图角色等）随盖子一起退场。 */
+[data-lod-xray] .lod-cover-overlay {
+  opacity: clamp(0, calc(1 - var(--lod-xray, 0) * 4), 1);
+}
+[data-lod-xray-open] .lod-cover-overlay {
+  pointer-events: none;
+}
+/* 滑盖下缘：顶缘 specular 亮线＋投在内容上的淡阴影，跟著盖子往上走；全开/全关时隐去。 */
+.lod-lid-edge {
+  top: calc((1 - var(--lod-xray, 0)) * 100% - 1px);
+  opacity: clamp(0, calc(min(var(--lod-xray, 0), 1 - var(--lod-xray, 0)) * 12), 1);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.95) 1px, rgba(45, 49, 66, 0.12) 1px, rgba(45, 49, 66, 0) 12px);
+}
+/* 内部参数字级＝13px/√k（世界）：萤幕上 13×√k——进工程层时≈14px 与原正文衔接，
+   再放大字温和变大、与卡片标题保持比例；世界字级持续缩小＝同一张卡装得下更多行。 */
+.lod-inspect {
+  font-size: calc(13px * var(--canvas-inverse-sqrt, 1));
+  line-height: 1.45;
+}
+
+/* 状态脉冲 / 骨架扫光 / 段落升起 / 光束流动 */
+@keyframes lod-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--pulse-color, rgba(0, 122, 255, 0.45));
+  }
+  100% {
+    box-shadow: 0 0 0 7px rgba(0, 0, 0, 0);
+  }
+}
+.lod-pulse {
+  animation: lod-pulse-ring 1.4s ease-out infinite;
+}
+@keyframes lod-skeleton {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.lod-skeleton {
+  background: linear-gradient(90deg, rgba(45, 49, 66, 0.05) 25%, rgba(45, 49, 66, 0.1) 50%, rgba(45, 49, 66, 0.05) 75%);
+  background-size: 200% 100%;
+  animation: lod-skeleton 1.2s linear infinite;
+}
+@keyframes lod-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.lod-rise {
+  animation: lod-rise 360ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+@keyframes lod-beam-flow {
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+.lod-beam-flow {
+  animation: lod-beam-flow 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lod-pulse,
+  .lod-skeleton,
+  .lod-beam-flow,
+  .lod-rise {
+    animation: none !important;
+  }
+}
+
+/* 鸟瞰卡 hover：上浮 4px、阴影加深（进行中卡保留阶段色柔光）、缩图轻推。 */
+.lod-stage-hover {
+  transition: translate 220ms cubic-bezier(0.2, 0.9, 0.2, 1), box-shadow 220ms ease-out;
+}
+.lod-stage-hover:hover {
+  translate: 0 -4px;
+}
+.lod-stage-hover:not([data-current]):hover {
+  box-shadow: 0 22px 48px -12px rgba(0, 0, 0, 0.24) !important;
+}
+.lod-stage-thumb {
+  transition: scale 420ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.lod-stage-hover:hover .lod-stage-thumb {
+  scale: 1.04;
+}
+[data-eng-focus] .lod-conn {
+  opacity: 0.3;
+  transition: opacity 320ms ease-out;
+}
+
+/* ── 定价／行销页手机字级地板（2026-10-04）─────────────────────────────
+   这批页面在 ≤639.98px 没有字级地板：首页 ImagePlayground（含子区块
+   FaqSection／UseCaseLinks）与 /pricing 的 PricingClient（含其内 PricingPlanCarousel）
+   会把 11／12px 的 caption2／caption1 与 13px 的 footnote 直接漏出。锚点取两条
+   页面宿主类别：`.page-shell`＝站内页面容器（首页与 FAQ／用例区块都在它子树内），
+   `.p3d-page`＝定价页根容器（PricingPlanCarousel 在它里面）。分层抬法照
+   agent-chat.css 的窄屏字级阶梯（footnote→15、caption1／caption2→14，只覆写
+   font-size，line-height 沿用 token，零额外版面位移）；规则全包在 @media 内，
+   桌面 ≥640px 一字不动。 */
+@media (max-width: 639.98px) {
+  .page-shell .text-ios-footnote,
+  .p3d-page .text-ios-footnote {
+    font-size: 15px;
+  }
+  .page-shell .text-ios-caption1,
+  .p3d-page .text-ios-caption1 {
+    font-size: 14px;
+  }
+  .page-shell .text-ios-caption2,
+  .p3d-page .text-ios-caption2 {
+    font-size: 14px;
+  }
+}

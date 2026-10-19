@@ -1,0 +1,119 @@
+/* 手机端左侧整屏侧栏（MobileSidebar）。只在 <sm 挂载，桌面不受影响。
+   底色＝不透明纯白（#fff），由内层 .mobile-sidebar-bg 承载；面板本体不挂
+   backdrop-filter——满屏抽屉下面是 0.28 黑遮罩，半透只会把灰吸上来（实测渲成
+   250,250,250），且底下的字本来就看不见；Safari 对「backdrop-filter＋transform
+   动画」另有合成怪癖会把位移吞掉。刻意不 import agent-chat.css，字面配方写在
+   这里，避免跨档耦合。 */
+
+.mobile-sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  /* Navbar header 是 z-[80]、既有抽屉是 z-90；侧栏要盖过两者。 */
+  z-index: 95;
+  display: flex;
+  background: rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: mobile-sidebar-scrim-in 0.24s ease-out both;
+}
+
+.mobile-sidebar-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding-top: env(safe-area-inset-top, 0px);
+  /* 底色改由内层 .mobile-sidebar-bg 承载；本体只留版面与动画（见档首注解）。 */
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 18px 0 48px rgba(45, 49, 66, 0.16);
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+  /* 入场曲线：前段平缓、中段最快、后段收敛。旧值 cubic-bezier(0.32,0.72,0,1)
+     是前重曲线，实测 90ms 就滑完约九成 ⇒ 肉眼＝硬切。 */
+  animation: mobile-sidebar-panel-in 0.34s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* 内层材质：绝对定位铺满，承载不透明纯白底。面板内容（header／卷动区／dock）
+   各自 position:relative＋z-index 叠在它之上，否则 absolute 的它会盖住内文。 */
+.mobile-sidebar-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #fff;
+  pointer-events: none;
+}
+
+/* 面板内唯一的卷动容器：导览＋「对话」清单＋退出/QQ 一起卷（清单不再自开第二条
+   卷轴＝无巢状卷动）。底部浮动玻璃条是绝对定位的 .mobile-sidebar-dock，这里留出
+   等高 padding-bottom（dock 高 48＋底距 8＋间隔 16 ＝ 5.5rem）让最后一列不被盖住。 */
+.mobile-sidebar-scroll {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* 底部浮动玻璃条：绝对定位浮在最下、不随内容卷动（内容从它下面穿过）。 */
+.mobile-sidebar-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 1;
+  padding: 0 0.5rem;
+}
+
+@keyframes mobile-sidebar-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-sidebar-panel-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes mobile-sidebar-panel-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 位移入场对晕动症不友好：保留柔和淡入、去掉大位移（不是硬切）。scrim 本来就
+   只淡入、无位移，维持它自己的淡入即可。 */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-sidebar-panel {
+    animation: mobile-sidebar-panel-fade-in 0.18s ease-out both;
+  }
+}
+
+/* ── 侧栏内字级地板（2026-10-03，只作用 ≤639.98px）─────────────────────
+   侧栏内共用的 AgentSessionList 不在 `.agent-chat-surface` / `.agent-pop` 作用域
+   （那是助理面与宽屏下拉的字级阶梯所在，见 agent-chat.css 的窄屏块），它的
+   13px 日期行（`text-ios-footnote`）与 12px 空状态／按钮行（`text-ios-caption1`）
+   在侧栏里仍走原 token。本轮定的手机地板是 14px：在侧栏作用域内把 footnote、
+   caption1、caption2 三层一律抬到 14px，避免侧栏残留 <14px 文字（AgentSessionList
+   的「正在加载历史会话…／没有匹配的对话／还没有历史对话／开始新对话」正是
+   caption1 漏出、手机端仍为 12px 的实例）。任意值逃生口（`text-[0.75rem]`／
+   `text-[0.8125rem]`）比照 agent-chat.css 的窄屏块一并纳入，避免 12／13px 小字换
+   写法后绕过地板。只覆写 font-size（line-height 沿用 token，零版面位移），
+   **不动** agent-chat/AgentSessionList.tsx 的基础 class（助理面与宽屏下拉不受影响）。
+   `.mobile-sidebar-panel` 只在 <sm 挂载，仍包 media 确保桌面一字不动。 */
+@media (max-width: 639.98px) {
+  .mobile-sidebar-panel .text-ios-footnote,
+  .mobile-sidebar-panel .text-ios-caption1,
+  .mobile-sidebar-panel .text-ios-caption2,
+  .mobile-sidebar-panel .text-\[0\.75rem\],
+  .mobile-sidebar-panel .text-\[0\.8125rem\] {
+    font-size: 14px;
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "director3d": {
+    "requiredFields": [
+      "turntable",
+      "stills",
+      "blend",
+      "glb"
+    ],
+    "qcSignatureRequired": true
+  },
+  "lyricist": {
+    "requiredFields": [
+      "title",
+      "lyrics",
+      "hook",
+      "prosody_notes",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "music": {
+    "requiredFields": [
+      "emotion_contract",
+      "lyrics",
+      "melody_notation",
+      "audio_url",
+      "duration_source",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "video-director": {
+    "requiredFields": [
+      "shots",
+      "duration_sec",
+      "model_hint",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "editor": {
+    "requiredFields": [
+      "timeline_ops",
+      "duration_sec",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "screenwriter": {
+    "requiredFields": [
+      "beats",
+      "shotlist",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "motion-director": {
+    "requiredFields": [
+      "motion_spec",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "web3d-director": {
+    "requiredFields": [
+      "scene_spec",
+      "bundle_ref",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  },
+  "critic": {
+    "requiredFields": [
+      "verdict",
+      "issues",
+      "evidence",
+      "qc"
+    ],
+    "qcSignatureRequired": true
+  }
+}

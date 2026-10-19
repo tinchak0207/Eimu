@@ -1,0 +1,348 @@
+/* 智能体对话（Agent Chat）组件专用样式。
+   布局骨架尽量用 Tailwind utility 在 JSX 完成，这里只放 utility 写不出的部分：
+   打字光标动画、新条目入场动画、滚动条定制、参数区展开过渡。
+   沿用全站 Liquid Glass 层级（lg-card / lg-float / lg-bar / lg-sheet / lg-tint-*），
+   不另造新玻璃材质。 */
+
+.agent-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/* 滚动区：细滚动条，与站内 iOS 风格一致。
+   2026-09-20 修：overflow-x hidden —— 单列对话流里任何超宽内容（长英文串/
+   超长 URL）都不该撑出「带箭头的原生横向滚动条」（视觉破损感第一元凶：
+   overflow-y:auto 时 overflow-x:visible 会被规范计算成 auto）；超宽内容的
+   裁切由各内容块自己负责（行内 code=break-all、表格=自滚、气泡=break-words）。
+
+   2026-09-20 第二刀（根因清剿）：细滚动条配方抽成可复用 class
+   `.agent-scroll-thin`——转录区与卡片区（confirm/questions）共用同一份，
+   不再各写一份。webkit 的 `height` 必须跟 `width` 一起给：只给 width 时，
+   垂直条是细的、横向条却退回浏览器原生高度（Windows 上就是那条带箭头的
+   粗灰条），同一面板两条滚动条两种样子＝破损感。 */
+.agent-transcript,
+.agent-scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+.agent-transcript::-webkit-scrollbar,
+.agent-scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.agent-transcript::-webkit-scrollbar-thumb,
+.agent-scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+}
+.agent-transcript::-webkit-scrollbar-track,
+.agent-scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.agent-transcript {
+  overflow-x: hidden;
+}
+
+/* 新条目入场 */
+@keyframes agent-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.agent-rise {
+  animation: agent-rise 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* 串流打字光标（R9-2：step-end 闪烁改平滑呼吸——闪灭像坏掉的像素，
+   呼吸让「正在流式输出」的状态一眼可读，也不刺眼） */
+@keyframes agent-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+.agent-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  animation: agent-caret-blink 1.2s ease-in-out infinite;
+}
+
+/* 工具卡参数区展开 / 收起 */
+.agent-args {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.agent-args.is-open {
+  grid-template-rows: 1fr;
+}
+.agent-args-inner {
+  min-height: 0;
+  /* 旧浏览器回退值。真正生效的是元件上的行内 overflow:clip——
+     hidden 仍是滚动容器，Chrome 滚轮会先滚这个无卷轴的隐形容器
+     （使用者看到「滚不动、也不滚聊天流」）；clip 不建立滚动容器，
+     手势直接冒泡给最外侧讯息流。行内样式可躲过 Lightning CSS 把
+     hidden;clip 双宣告精简掉 clip 的行为（2026-09-14 建置产物实锤）。 */
+  overflow: hidden;
+}
+
+/* ── D-23 窄屏参数抽屉 ─────────────────────────────────────────
+   窄屏是另一个布局：参数从底部盖上来，聊天流留在原地不被顶走。
+   只在窄屏挂载（JSX 侧用 useIsNarrow 判断），所以这里不再包 media query——
+   包了反而会出现「JS 认为要抽屉、CSS 不给样式」的裸 DOM。 */
+.agent-param-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(2px);
+  animation: agent-scrim-in 0.2s ease-out both;
+}
+
+@keyframes agent-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.agent-param-drawer {
+  width: 100%;
+  max-height: 76dvh;
+  display: flex;
+  flex-direction: column;
+  padding-top: 0.5rem;
+  /* 底部补安全区：iPhone 的 home indicator 会盖住最后一行参数。 */
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  border-radius: 1.25rem 1.25rem 0 0;
+  animation: agent-drawer-up 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes agent-drawer-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.agent-param-drawer-grip {
+  display: block;
+  width: 2.25rem;
+  height: 0.25rem;
+  margin: 0 auto 0.5rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.agent-param-drawer-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 抽屉的入场位移对晕动症使用者不友好；关掉动画但保留最终位置。 */
+@media (prefers-reduced-motion: reduce) {
+  .agent-param-scrim,
+  .agent-param-drawer {
+    animation: none;
+  }
+  /* 新条目入场位移、串流打字光标、思考三点跳动一起让位；
+     各自的基础态（opacity 1 / 静止光标 / 静止圆点）保留，布局不变。 */
+  .agent-rise,
+  .agent-caret,
+  .agent-panel .animate-bounce {
+    animation: none !important;
+  }
+  /* 「回到底部」钮的 140ms 淡入淡出也让位（JS 侧卷动同时改 instant）。 */
+  .agent-back-to-bottom {
+    transition: none !important;
+  }
+}
+
+/* ── 行动端适配 ─────────────────────────────────────────────
+   断点对齐 useIsNarrow / Tailwind sm 断点（≤639.98px 算窄屏），
+   与 D-23 参数抽屉的窄屏判定是同一个数，避免 CSS/JS 错位。
+   只叠加行动端缺的东西：触控目标、iOS 键盘、可读字级、溢出保护；
+   桌面样式不动。 */
+
+/* 面板在 flex 容器里不把自己撑破（长消息卡片也不许把面板顶出横向滚动）。 */
+.agent-panel {
+  min-width: 0;
+}
+
+/* 长字 / URL / 代码 / JSON 不横向溢出：文本在气泡内任意换行；
+   等宽代码块保持不折行，容器内横向滚动。 */
+.agent-transcript {
+  overflow-wrap: anywhere;
+}
+.agent-transcript pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 639.98px) {
+  /* 触控优化：去点击高亮延迟 + 点按高亮色块，交给各自 active 态给回馈。 */
+  .agent-panel button,
+  .agent-composer button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 所有可点项 ≥44×44：状态行重试、放弃、错误重试、
+     composer 工具行的两颗圆形钮（直接子级，避开附件 chip 里的小移除钮）。 */
+  .agent-retry,
+  .agent-draft-discard,
+  .agent-surface-retry,
+  .agent-composer-toolbar > button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* 整行可点的药丸 / 错误条也给足点按高度。 */
+  .agent-surface-draft,
+  .agent-surface-error {
+    min-height: 44px;
+  }
+
+  /* ── 助理面手机字级阶梯（2026-10-03 对标 Grok 手机端）─────────────────
+     项目负责人手机实测：Grok 正文 ≈17px/25px、行距 25.2px；我方正文 15px（leading
+     1.45/1.55 → 23.25px），过程列 13px、次要行 12px，观感差距被两级小字放大。
+     本轮只作用在 ≤639.98px（规则全包在本 @media 内，桌面 ≥640px 一字不动）。
+     集中在此一处定义，不在 30 个 JSX 文件散落 max-sm:text-*，便于审计。
+     锚点两个：.agent-chat-surface＝AgentChatSurface 根 div（面板＋顶栏＋输入区
+     全在它子树）；.agent-pop＝portal 到 document.body 的窄屏历史抽屉与各弹层
+     （DOM 已搬离根容器，选择器必须单列）。 */
+  .agent-chat-surface .agent-turn-text,
+  .agent-pop .agent-turn-text {
+    font-size: 17px;
+    line-height: 25px;
+  }
+  /* Markdown 一级标题：手机必须高于 17px 正文，否则标题比正文还小。 */
+  .agent-chat-surface .agent-turn-title,
+  .agent-pop .agent-turn-title {
+    font-size: 18px;
+    line-height: 26px;
+  }
+  /* 13px 层（计划卡 / 工具卡 / 子代理列 / 批量进度 / notice / 思考列）→ 15px。
+     [data-my-skills-dialog] 与 .agent-pop 同级：管理面 createPortal 到 body，
+     DOM 已不在 .agent-chat-surface 子树内，锚点必须单列。 */
+  .agent-chat-surface .text-ios-footnote,
+  .agent-pop .text-ios-footnote,
+  [data-my-skills-dialog] .text-ios-footnote {
+    font-size: 15px;
+  }
+  /* 12px 层（会话列表日期行 / 工具卡次要行等）→ 14px。 */
+  .agent-chat-surface .text-ios-caption1,
+  .agent-pop .text-ios-caption1,
+  [data-my-skills-dialog] .text-ios-caption1 {
+    font-size: 14px;
+  }
+  /* 手机端不得出现 <14px 的文字：11px caption2 与 12/13px 正文小字
+     （行内/区块 code、Markdown 表格、steer 徽章、子代理报告徽章）一律抬到 14px 地板。 */
+  .agent-chat-surface .text-ios-caption2,
+  .agent-pop .text-ios-caption2,
+  [data-my-skills-dialog] .text-ios-caption2,
+  .agent-chat-surface .text-\[0\.75rem\],
+  .agent-chat-surface .text-\[0\.8125rem\] {
+    font-size: 14px;
+  }
+
+  /* iOS focus 不自动放大页面的唯一解：输入区字号 ≥16px（本刀 16→17，与正文同级）。 */
+  .agent-composer textarea {
+    font-size: 17px;
+  }
+}
+
+/* ── 输入框外壳 / 发送钮：Eimu 虹彩（2026-10-01）───────────────────────
+   取色自玻璃 E 图标：蓝 → 薰衣草 → 粉。同日一度撤回站内中性色，项目负责人复裁
+   「不如刚才的色系，改回来，只是浅一点」→ 色相不变、整体调淡（宁淡勿艳）。
+   只给签名件用：输入框描边、发送钮、空态光晕——不做卡片底色、不做渐变文字。 */
+.agent-composer-shell {
+  /* padding-box 白玻璃 + border-box 虹彩渐变＝1px 虹彩描边（lg-float 的模糊折射保留）。 */
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.34), rgba(140, 123, 240, 0.26), rgba(229, 141, 186, 0.34)) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 30px rgba(140, 123, 240, 0.08);
+  transition: box-shadow 200ms ease;
+}
+.agent-composer-shell:focus-within {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.5), rgba(140, 123, 240, 0.4), rgba(229, 141, 186, 0.5)) border-box;
+  box-shadow: 0 12px 36px rgba(140, 123, 240, 0.14);
+}
+/* 发送＝纯箭头（2026-10-01 项目负责人：不包圆形，现代审美）。箭头染玻璃 E 的薰衣草蓝，
+   图标尺寸/描边在这里放大加粗（JSX 里的 h-4 w-4 被测试钉住，CSS 覆写不动契约）。 */
+.agent-send-btn {
+  color: #8a86f0;
+}
+.agent-send-btn:not(:disabled):hover {
+  color: #7468e2;
+}
+.agent-send-btn svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.4;
+}
+
+/* ── 顶栏弹层材质（资产 / 历史 / 设置）───────────────────────────────
+   老问题：lg-sheet 太透，弹层下面的标题、输入框、推荐语透上来和列表字叠在一起。
+   弹层要读字，不是看风景：0.96 白 + blur 打底、发丝描边、两层柔影把它从卡面上托起来。 */
+.agent-pop {
+  background: rgba(255, 255, 255, 0.96);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 18px 48px rgba(45, 49, 66, 0.16), 0 2px 8px rgba(45, 49, 66, 0.06);
+}
+/* 弹出动效：弹层靠 left-1/2 + -translate-x-1/2 水平置中，动效的 transform 必须带上
+   translateX(-50%)——曾用 animate-lg-appear（0.4s 弹簧、fill both），它的 transform
+   整个盖掉 -translate-x-1/2，弹层左缘落在卡片中线＝「浮窗乱飘」，还慢。改 140ms 轻淡入。 */
+@keyframes agent-pop-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
+.agent-pop-in {
+  animation: agent-pop-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-pop-in {
+    animation: none;
+  }
+}
+/* 列表滚动区：底缘渐隐，滚到一半的那一行不再被硬切成半截字。 */
+.agent-pop-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  padding-bottom: 12px;
+}

@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Eimu Agentic Architecture",
+    "orientation": "horizontal",
+    "quality_profile": "showcase",
+    "summary": "生产级横向拓扑架构：预处理快慢双流 · 动态分层记忆 · 调度主脑与专家派发 · 画布DSL编译 · 独立Critic评审门禁",
+    "views": [
+      {
+        "id": "all",
+        "label": "全景架构",
+        "focus": [
+          "traditional",
+          "preprocessing",
+          "memory",
+          "runtime",
+          "workflow",
+          "critic"
+        ]
+      },
+      {
+        "id": "eimu",
+        "label": "Eimu 生产链路",
+        "focus": [
+          "preprocessing",
+          "memory",
+          "runtime",
+          "workflow",
+          "critic"
+        ]
+      },
+      {
+        "id": "traditional",
+        "label": "传统单体对照",
+        "focus": [
+          "traditional"
+        ]
+      },
+      {
+        "id": "critic",
+        "label": "Critic 独立评审",
+        "focus": [
+          "workflow",
+          "critic"
+        ]
+      }
+    ]
+  },
+  "subsystems": [
+    {
+      "id": "traditional",
+      "name": "Traditional Agent",
+      "role": "单体串行基线对照",
+      "color": "#94a3b8"
+    },
+    {
+      "id": "preprocessing",
+      "name": "Preprocessing",
+      "role": "快慢双流与安全越狱过滤",
+      "color": "#38bdf8"
+    },
+    {
+      "id": "memory",
+      "name": "Memory System",
+      "role": "动态分层记忆与精准状态写回",
+      "color": "#3b82f6"
+    },
+    {
+      "id": "runtime",
+      "name": "Agent Runtime Core",
+      "role": "调度主脑编排与专家子代理派发",
+      "color": "#10b981"
+    },
+    {
+      "id": "workflow",
+      "name": "Workflow",
+      "role": "画布状态同构与TypeScript DSL编译执行",
+      "color": "#a855f7"
+    },
+    {
+      "id": "critic",
+      "name": "Critic Gate",
+      "role": "独立第三方严格视觉与逻辑评审",
+      "color": "#f43f5e"
+    }
+  ]
+}

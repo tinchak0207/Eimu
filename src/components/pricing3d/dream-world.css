@@ -1,0 +1,262 @@
+/* ╁━ /pricing 梦境世界层（PricingAtmosphere）：底图 + 四种天光 + 活的星空/水光/气泡 ╁━
+   全部 transform/opacity 动画（合成器），首帧即终态；铺到环段底为止，再 300px 融回站内浅底。 */
+
+/* 2026-09-27 项目负责人：「变成 kahoot 风了，要坚守蓝粉白的底色」——整座梦境改成「珍珠天光」：
+   参考图本身的蓝 / 粉 / 白原样透出来，不再压成深紫夜；四档是同一片天光的四种晴度，
+   全在蓝粉白之内（粉晨 → 晴蓝 → 虹晕 → 白昼）。 */
+
+/* 整页（首屏以下）底色：梦境往下化成珍珠白。双类选择器压过 Tailwind 的 bg-transparent。 */
+.p3d-page.p3d-page {
+  background:
+    radial-gradient(ellipse 130% 90% at 15% 5%, rgba(85, 205, 252, 0.1), transparent 60%),
+    radial-gradient(ellipse 110% 75% at 85% 95%, rgba(247, 168, 184, 0.1), transparent 60%),
+    radial-gradient(ellipse 90% 65% at 80% 10%, rgba(85, 205, 252, 0.07), transparent 55%),
+    #f5fbff;
+}
+
+.dw {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(var(--p3d-dark-end, 100svh) + 280px);
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #f5fbff;
+}
+
+/* 下缘化进整页的珍珠白（.p3d-page 底色）：一条静态渐层盖上去
+   （不用 mask——整层遮罩会让底下每个活的元素每帧重合成）。 */
+.dw::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 340px;
+  z-index: 4;
+  background: linear-gradient(to bottom, rgba(245, 251, 255, 0) 0%, rgba(245, 251, 255, 0.7) 55%, #f5fbff 100%);
+}
+
+/* 珍珠雾：参考图顶端是深蓝夜空——罩一层由上往下淡去的天光，把天洗成浅蓝，
+   标题的墨色字因此稳过 4.5:1；四周一圈极淡的蓝（不是暗角），中间最亮。 */
+.dw::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(245, 251, 255, 0.9) 0%, rgba(245, 251, 255, 0.6) 16%, rgba(245, 251, 255, 0.3) 36%, rgba(245, 251, 255, 0.22) 100%),
+    radial-gradient(ellipse 130% 90% at 15% 5%, rgba(85, 205, 252, 0.1), transparent 60%),
+    radial-gradient(ellipse 110% 75% at 85% 95%, rgba(247, 168, 184, 0.12), transparent 60%);
+}
+
+.dw-plate {
+  position: absolute;
+  inset: -3%;
+  transform: translate3d(calc(var(--mx, 0) * -16px), calc(var(--my, 0) * -10px), 0);
+  transition: transform 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dw-img {
+  object-fit: cover;
+  object-position: 44% 46%;
+  /* 参考图整体偏紫：往蓝粉拉一点，并提亮。 */
+  filter: saturate(1) brightness(1.14) hue-rotate(-8deg);
+}
+
+/* ── 四种天光：同一座梦境，瞬切（硬剪接，不做过渡）── */
+.dw-grade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  visibility: hidden;
+}
+
+.dw-grade[data-on="true"] {
+  visibility: visible;
+}
+
+.dw-grade::before,
+.dw-grade::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* 效能纪律：调色层一律 normal 混合（实测 2560 宽 iGPU 上，全屏 multiply/screen/soft-light
+   叠在活的星空与水光下，每帧要重算混合，掉到 24fps）；色偏靠半透明色层近似。 */
+
+/* 梦芽 · 粉晨：天刚亮，整片水面染上一层樱花粉，左侧地平线一口白粉色的朝阳。 */
+.dw-grade[data-world="starter"]::before {
+  background: linear-gradient(180deg, rgba(247, 168, 184, 0.2) 0%, rgba(247, 168, 184, 0.1) 50%, rgba(245, 251, 255, 0.2) 100%);
+}
+
+.dw-grade[data-world="starter"]::after {
+  background: radial-gradient(34% 28% at 12% 42%, rgba(255, 255, 255, 0.9), rgba(247, 168, 184, 0.2) 45%, rgba(247, 168, 184, 0) 72%);
+}
+
+/* 梦影 · 晴蓝：参考图本身的天——蓝天、粉地平线，中心一池白光托著卡堆。 */
+.dw-grade[data-world="popular"]::before {
+  background: linear-gradient(180deg, rgba(85, 205, 252, 0.12) 0%, rgba(245, 251, 255, 0.12) 48%, rgba(247, 168, 184, 0.1) 100%);
+}
+
+.dw-grade[data-world="popular"]::after {
+  background: radial-gradient(30% 34% at 34% 58%, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 72%);
+}
+
+/* 梦虹 · 虹晕：空气更透、更蓝，一道只由粉 / 白 / 蓝组成的光晕跨过天空。 */
+.dw-grade[data-world="pro"]::before {
+  background: linear-gradient(180deg, rgba(85, 205, 252, 0.14) 0%, rgba(245, 251, 255, 0.16) 55%, rgba(247, 168, 184, 0.08) 100%);
+}
+
+.dw-grade[data-world="pro"]::after {
+  left: 50%;
+  right: auto;
+  top: 5%;
+  bottom: auto;
+  width: 96vw;
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  opacity: 0.85;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0) 85%, rgba(247, 168, 184, 0.4) 87.5%, rgba(255, 255, 255, 0.9) 90.5%,
+    rgba(85, 205, 252, 0.3) 93.5%, rgba(255, 255, 255, 0) 96.5%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 50%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 50%);
+  filter: blur(5px);
+}
+
+/* 自订 · 白昼：日光从右上灌进来，整座梦境亮成珍珠白，光束带一点粉蓝折射。 */
+.dw-grade[data-world="custom"]::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(246, 248, 255, 0.3) 50%, rgba(255, 255, 255, 0.3) 100%);
+}
+
+.dw-grade[data-world="custom"]::after {
+  background:
+    radial-gradient(38% 44% at 86% 0%, rgba(255, 255, 255, 0.95), rgba(236, 240, 255, 0.3) 45%, rgba(255, 255, 255, 0) 72%),
+    repeating-conic-gradient(from 200deg at 86% 0%, rgba(255, 255, 255, 0) 0deg 6deg, rgba(255, 236, 246, 0.22) 7deg 8deg, rgba(226, 238, 255, 0.22) 8deg 9deg, rgba(255, 255, 255, 0) 10deg 16deg);
+}
+
+/* 切档的一记白闪（剪接点）。 */
+.dw-cut {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: #fff;
+  opacity: 0;
+  animation: dw-cut 360ms ease-out;
+}
+
+@keyframes dw-cut {
+  from { opacity: 0.5; }
+  to { opacity: 0; }
+}
+
+/* ── 水面虹光：一层斜向的虹彩光带缓慢流过下半画面 ── */
+.dw-shimmer {
+  position: absolute;
+  left: -20%;
+  right: -20%;
+  bottom: 0;
+  height: 58%;
+  z-index: 1;
+  opacity: 0.55;
+  background: repeating-linear-gradient(100deg,
+    rgba(247, 168, 184, 0) 0 70px, rgba(247, 168, 184, 0.16) 100px, rgba(255, 255, 255, 0.34) 120px, rgba(85, 205, 252, 0.12) 140px, rgba(85, 205, 252, 0) 180px 260px);
+  -webkit-mask-image: linear-gradient(to top, #000 20%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 20%, transparent 100%);
+  animation: dw-shimmer 16s linear infinite;
+}
+
+@keyframes dw-shimmer {
+  from { transform: translateX(0); }
+  to { transform: translateX(260px); }
+}
+
+/* ── 星芒：只活在上半（天空）。天是亮的，星星画成带蓝晕的白色星芒，白昼最淡 ── */
+.dw-sky {
+  position: absolute;
+  z-index: 2;
+  inset: 0 0 48% 0;
+  transition: opacity 200ms linear;
+}
+
+.dw[data-world="starter"] .dw-sky { opacity: 0.8; }
+.dw[data-world="custom"] .dw-sky { opacity: 0.45; }
+
+.dw-stars {
+  position: absolute;
+  inset: 0;
+  animation: dw-twinkle 3.4s ease-in-out infinite;
+}
+
+@keyframes dw-twinkle {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.dw-meteor {
+  position: absolute;
+  width: 180px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(160, 200, 255, 0), rgba(255, 190, 225, 0.8) 70%, #fff);
+  box-shadow: 0 0 8px rgba(255, 170, 215, 0.8);
+  opacity: 0;
+  transform: rotate(-26deg) translateX(0);
+  animation: dw-meteor 12s ease-in infinite;
+}
+
+@keyframes dw-meteor {
+  0% { opacity: 0; transform: rotate(-26deg) translateX(0); }
+  2% { opacity: 1; }
+  8% { opacity: 0; transform: rotate(-26deg) translateX(-360px); }
+  100% { opacity: 0; transform: rotate(-26deg) translateX(-360px); }
+}
+
+/* ── 气泡：近景层，视差比底图大一倍（纵深）── */
+.dw-bubbles {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  transform: translate3d(calc(var(--mx, 0) * -38px), calc(var(--my, 0) * -24px), 0);
+  transition: transform 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dw-bubble {
+  position: absolute;
+  bottom: -60px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 30%, #fff 0 7%, rgba(255, 255, 255, 0.3) 20%, rgba(200, 220, 255, 0.14) 56%, rgba(255, 190, 225, 0.6) 66%, rgba(150, 195, 255, 0.7) 70%, rgba(255, 255, 255, 0) 73%);
+  animation: dw-bubble 18s linear infinite;
+}
+
+@keyframes dw-bubble {
+  from { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(18px, calc(var(--p3d-dark-end, 1200px) * -0.55), 0); }
+  to { transform: translate3d(-6px, calc(var(--p3d-dark-end, 1200px) * -1.1), 0); }
+}
+
+@media (max-width: 767px) {
+  .dw-bubble:nth-child(n + 5) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dw-plate,
+  .dw-bubbles {
+    transform: none;
+    transition: none;
+  }
+
+  .dw-shimmer,
+  .dw-stars,
+  .dw-meteor,
+  .dw-bubble,
+  .dw-cut {
+    animation: none;
+  }
+}

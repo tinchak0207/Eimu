@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "eimu": {
+      "type": "http",
+      "url": "https://eimu.dev/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EIMU_BIZ_KEY}"
+      }
+    }
+  }
+}

@@ -1,0 +1,218 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+/test-results
+/.playwright-cli
+/output/playwright
+
+# next.js
+/.next/
+/.next.bak-*/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+# 例外：vendored certifi 的 CA bundle 是套件资料档，必须随 vendor 一起进版控／部署
+!deploy-staging/opencode-runtime/lib/smartsearch/certifi/cacert.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.next-dev-*.log
+/.next-start.log
+
+# local diagnostics
+/tmp
+/sub2api-local
+/output/
+/tools/bin/
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# account pool credentials
+/pixai-pool/**/pool.json
+/pixai-pool/bridge/.lease
+
+# python caches
+__pycache__/
+*.pyc
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+*.out
+next-env.d.ts
+
+.claude/
+
+# 部署用的业务 key 脚本：内含凭证，永不入库
+tools/.deploy-bizkey.sh
+.env*.local
+workbuddy-linux/
+
+# 敏感/运行时杂讯（勿入库）
+.pixai-refresh/
+pixai-pool/
+.vercel-cli-data/
+.agent-runs/
+.tools/
+.env*
+!deploy/vps/control-plane.env.example
+
+# 本地工具 HOME / 快取 / 快照（曾整包入库 160MB+，禁止再入）
+/.tmp-home/
+/.vercel.bak-link/
+/.dsh-ssh/
+/.dsh-adobe-pool/
+/.tsdeps/
+/.xdg-cache/
+/.gateway-work/
+/.vercel-home/
+/.vercel-cli-cache/
+/.tmp-vercel-cache/
+/.dsh-mem/
+/.agents-fix/
+/sudo.conf.backup
+/marketing-battle-pack/
+/eval-daming-film/
+
+# 本机凭证备份（.env 同源，永不入库）
+.credentials.bak.yaml
+
+# ── 一次性诊断/评测/暂存（2026-09-04 commit 瘦身）──
+.zcode/
+.tmp-*/
+eval-*/
+surgery/
+/*.mp4
+/*.mjs
+chapters.tsv
+
+# Blender headless sandbox workdir (bridge/blender-bridge)
+.blender-work/
+
+# ── 根目录暴露面清理（2026-09-06）：log/测试/redteam/内部资料永不入库 ──
+*.log
+*.err
+.redteam-*
+redteam-*
+.browser-screenshots/
+/browser-probe/
+/browser-screenshots/
+/verification/
+/.agent-notes/
+/.dsh-vision-router/
+/.tmp-vercel-data/
+/.tmp-vercel-config/
+/.vercel.bak-owner/
+/deploy-staging/blender-modal/out/
+/deploy-staging/blender-director-persona/__pycache__/
+# 帐号池数据（含明文帐密+token，永不入库）
+/pixai-pool-new.json
+/IMG_*.jpg
+/dreamina_output.webp
+/chat-history-export-*.zip
+/gh_repo.json
+/reddit-miner-output.md
+/rt4b-log.md
+/batch-*.json
+/.batch-*.json
+/.probe-write-test.txt
+/fix-system.sh
+.av-implementation-spec.md
+.tmp-*
+
+# asset cache (mocap/shake 数据快取，不入库)
+.asset-cache/
+
+# 评测证据大档留本地（22MB PNG/mp4），只入 REPORT.md
+
+# 凭证与 VPS 同步工作目录（含 key，严禁入库）
+/.flowmusic-creds.json
+/staging/
+/deploy-staging/*
+# 例外：gateway/ 子目录是纯程式码真源（生产 index.ts 快照＋记忆模组，PRD D7），不含凭证
+!/deploy-staging/gateway/
+# 例外：laya-server/ 是 Jev 兜底判定服务纯程式码（server.py/Dockerfile），不含凭证与权重
+!/deploy-staging/laya-server/
+# 例外：vps-tools/ 是 VPS 运维工具纯程式码（gateway 对账脚本等），不含凭证
+!/deploy-staging/vps-tools/
+# 例外：opencode-runtime/ 是 /opt/eimu-harness/workspace/.opencode 手维护子集（tools/lib/skills/plugin
+# ＋设定档）的单一真源；vendored 的 node_modules/services 与执行时 opencode.db 已排除（见该目录 .gitignore）
+!/deploy-staging/opencode-runtime/
+# 例外：poller/ 是 /opt/eimu-harness/poller（生产常驻轮询程式）的唯一真源；此前无 repo 真源导致
+# 影片命名空间 bug 存活至今（2026-10-02 修）。纯程式码，不含凭证
+!/deploy-staging/poller/
+# 例外：flowmusic2api/ 是 FlowMusic 帐号池服务的 P1/P2 凭证链修复补丁＋看门狗的真源；
+# 此前补丁只在本机 /tmp、看门狗只在 VPS（同 agent-poller 的无真源陷阱）。
+# 纯程式码/补丁/测试，不含凭证
+!/deploy-staging/flowmusic2api/
+*.bak-*
+
+# ── 影片产物（本机渲染输出，200MB 级，2026-09-27 commit 瘦身）──
+# artifacts/：宣传片 mp4/webm 与 vote-kit 交付物；promo-video/out/：分段渲染 segN.mkv/stills/score.wav。
+# 两者都是可重跑的本机产物，源码（promo-video/audio.py、render.mjs、index.html）照常入库。
+/artifacts/
+/promo-video/out/
+# 宣传片渲染用的 CJK 字型（两支 NotoSerifSC OTF 共 23MB）：本机工具链的输入，
+# 不是产品资产，且体积等同半个仓库 ⇒ 不入库（重跑渲染前先自行放回 promo-video/fonts/）。
+/promo-video/fonts/
+
+# ── 产品发展史（史官编撰，本地留存，不入库）──
+/PRODUCT-HISTORY.md
+
+# ── 论文（本地写作／投稿工作区，不入库）──
+# docs/paper/：manuscript.md（含 evidence-and-submission-notes）与 latex/（TMLR 模板
+# tmlr.sty／.bst、body/abstract/appendices 源码，以及 .aux/.log/.out/.pdf build 产物）。
+# 投稿材料不随产品仓库流通，整包留本机。
+/docs/paper/
+
+# 本地评测工作台（音乐基准：venv/音档/结果，11GB；不入库，需入库者自行 -f）
+/bench/
+
+# 开源发布素材包（2026-10-05）：eimu-music-agent 的 LICENSE/NOTICE/README/figs/eval，
+# 29MB、54 档，属对外发布物料而非 App 运行时代码 —— 不入 App repo（.vercelignore 另有同名排除，
+# 防止哪天被 git add 后被 CLI 部署一起上传）。
+/open-source/
+
+# ── 本地盲测音档、暂存目录与工作区（2026-10-12 瘦身）──
+/blind-test-*/
+/work/
+/_inbox/
+
+
+# 开源仓库：示例环境变量允许入库
+!.env.example
+# 开源仓库：公开的 deploy 子目录与 staging 纯代码
+!/deploy-staging/blender-bridge-tunnel/
+!/deploy-staging/blender-director-persona/
+!/deploy-staging/blender-gateway/
+!/deploy-staging/blender-modal/
+!/deploy-staging/blender-nodes/
+!/deploy-staging/expert-gateway/
+!/deploy-staging/hardening.conf
+!/deploy-staging/opencode.json
+!/deploy-staging/patch-gateway.py
+!/staging/
+!/next.config.mjs
+!/postcss.config.mjs

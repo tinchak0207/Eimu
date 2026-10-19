@@ -1,0 +1,7 @@
+# Laya 判定服务依赖（CPU 推理）
+# 版本下限以实测为准：laya 0.3.4 + torch 2.14 + transformers 5.17（2026-09-20 实锤）。
+laya>=0.3.4
+torch>=2.4
+transformers>=4.44
+safetensors>=0.4
+huggingface_hub>=0.23

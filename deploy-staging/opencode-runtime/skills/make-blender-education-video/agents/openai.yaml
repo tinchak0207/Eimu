@@ -1,0 +1,4 @@
+interface:
+  display_name: "Blender Education Video"
+  short_description: "Create fact-checked cinematic educational videos in Blender"
+  default_prompt: "Use $make-blender-education-video to collect my English video brief, research sources, and visual reference, search GitHub for reusable topic-specific Blender resources, then create one approval frame before producing the full cinematic explainer."
