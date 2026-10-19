@@ -277,7 +277,12 @@ export default tool({
     style_version: tool.schema.string().optional().describe("已冻结STYLE LOCK版本"),
     style_lock: tool.schema.string().optional().describe("项目固定风格前缀，工具逐字附加；同项目不允许改变"),
     model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2"),
-    size: tool.schema.string().optional().describe("尺寸，如 1024x1024"),
+    size: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "图片写像素尺寸（如 1024x1536）；视频写画面比例（9:16/16:9/1:1/4:3/3:4/21:9）或像素写法（如 1920x1080），会原样作为视频契约的 size，不自动改写比例。",
+      ),
     n: tool.schema.number().int().min(1).max(4).optional().describe("生成张数，预设 1"),
     kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，预设 image"),
     quality: tool.schema
@@ -303,9 +308,11 @@ export default tool({
   async execute(args, context) {
     const model = args.model ?? "gpt-image-2"
     // 模型准入只由控制面执行；工具不把排队/退款/下载失败算成模型故障。
-    const size = args.size ?? "1024x1024"
-    const n = args.n ?? 1
     const kind = args.kind ?? "image"
+    // 视频默认比例档 16:9：平台 VideoGenerationRequest.size 接受 "16:9" 或 "1920x1080"，
+    // 归一成 catalog aspectRatio；「1024x1024」这类图片像素尺寸不是合法视频比例，会被平台回落到默认档。
+    const size = args.size ?? (kind === "video" ? "16:9" : "1024x1024")
+    const n = args.n ?? 1
     if (args.frame != null && (!args.project || kind !== "image" || n !== 1)) return fail("invalid_frame_contract", "逐帧生成必须提供project，kind=image且n=1；不允许以拼图或多候选冒充多帧。")
     if (args.project && (args.project.length > 200 || !args.project.trim())) return fail("invalid_project", "project必须为非空稳定ID，最多200字。")
     if (args.request_id && args.request_id.length > 200) return fail("invalid_request_id", "request_id最多200字。")
