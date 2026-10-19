@@ -503,7 +503,9 @@ export async function failGenerationAttempt(input: {
       UPDATE generation_attempt
       SET status = 'failed', failure_class = ${input.failureClass}, failure_detail = ${input.failureDetail.slice(0, 2000)},
           failure_record_json = ${failureRecordParam(sql, input.failureRecord)},
-          provider_task_id = ${input.providerTaskId ?? null},
+          -- 失败路径不得把已落库的对帐指针抹成 NULL（2026-10-20 DMC auto-hd：
+          -- 适配器抛错时可能已把两段链路指针推进到 hdh；错误对象没带新 id 时保留现值）。
+          provider_task_id = COALESCE(${input.providerTaskId ?? null}, provider_task_id),
           provider_http_status = ${input.providerHttpStatus ?? null}, retry_after_at = ${input.retryAfterAt ?? null},
           finished_at = now(), latency_ms = ${input.latencyMs}, updated_at = now()
       WHERE id = ${input.attemptId} AND job_id = ${input.jobId}
@@ -545,6 +547,43 @@ export async function markProviderTaskSubmitted(input: {
         updated_at = now()
     WHERE id = ${input.attemptId} AND job_id = ${input.jobId}
       AND (provider_task_id IS NULL OR provider_task_id = ${input.providerTaskId})
+      AND status IN ('submitting', 'running', 'failed', 'submit_unknown')
+    RETURNING id
+  `;
+  return Boolean(rows[0]);
+}
+
+/**
+ * 对帐指针**受控推进**（2026-10-20 DMC auto-hd 两段链路）：上游把一次交付拆成
+ * 「H3 出片 → auto-hd 超分」时，第二段任务提交后真相已移到新 task id，必须在同一
+ * attempt 行把 `provider_task_id` 从第一段推进到第二段。
+ *
+ * CAS 条件 `provider_task_id = expectedProviderTaskId`：只允许适配器显式声明的
+ * 「旧的、已确认完成的那一段」推进，绝不无条件覆盖——并发认领／行已易主／指针
+ * 已被别的路径改过时返回 false，调用端按「无法durable记录」处理（不吞错）。
+ */
+export async function replaceProviderTaskId(input: {
+  jobId: string;
+  attemptId: string;
+  /** 新指针（如 `hdh:1080p:<hdTaskId>`）。 */
+  providerTaskId: string;
+  /** 期望的旧指针（如 `hdx:1080p:<h3TaskId>`）；必须与行内现值完全一致才推进。 */
+  expectedProviderTaskId: string;
+  protocol: ProviderProtocol;
+  /** 新指针的首轮对帐延迟（默认 60s）。 */
+  firstPollDelayMs?: number;
+}, sql: GenerationSql = getGenerationSql()): Promise<boolean> {
+  const delaySec = Math.max(1, Math.floor((input.firstPollDelayMs ?? 60_000) / 1000));
+  const rows = await sql<{ id: string }[]>`
+    UPDATE generation_attempt
+    SET provider_task_id = ${input.providerTaskId},
+        provider_protocol = ${input.protocol},
+        provider_state = 'running',
+        provider_next_poll_at = now() + (${delaySec}::text || ' seconds')::interval,
+        provider_reconcile_deadline_at = COALESCE(provider_reconcile_deadline_at, now() + interval '24 hours'),
+        updated_at = now()
+    WHERE id = ${input.attemptId} AND job_id = ${input.jobId}
+      AND provider_task_id = ${input.expectedProviderTaskId}
       AND status IN ('submitting', 'running', 'failed', 'submit_unknown')
     RETURNING id
   `;

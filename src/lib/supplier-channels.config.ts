@@ -32,6 +32,12 @@ export interface RegistryChannelClaim {
   unitPriceCnyPerSecond?: Record<string, number>;
   /** 核价来源原文＋日期，例 "GET https://www.gway.dev/api/pricing 2026-09-28 vip quota_type=1"。 */
   priceSource?: string;
+  /**
+   * 本认领**真实可交付**的分辨率档位（seed 生成 DB capability 时用它，缺省才照抄 catalog）。
+   * 用途：同一平台模型被多渠道认领时，没有该能力的上游（如原生 openai_video 出片、无超分）
+   * 不得在 capability 里虚报 catalog 的 2k/4k，否则调度会把高阶档派给它而必然失败。
+   */
+  resolutions?: string[];
 }
 
 export interface RegistryChannel {
@@ -92,7 +98,8 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       // 旧映射 minimax-h3-933-2k-支持真人 在 xiaoyxiao 与 gway 皆回
       // `no per_request price configured for resolution "2k"`（gway 该变体 video_pricing.by_group["*"].tiers=[]，
       // 且仅支持 resolution=2k，成本闸禁 2k）；故两渠道均不再认领该变体。
-      { modelId: "minimax-h3", supplierModelId: "minimax-h3-a", kinds: ["video_generate"], unitPriceCny: 1.6, priceSource: "GET https://api.xiaoyxiao.xyz:18443/api/pricing 2026-10-02 (quota_type=1, model_price=1.6)" },
+      // 原生出片无超分 ⇒ 真实档位只有 720p/1080p（2026-10-20；不得虚报 catalog 的 2k/4k）。
+      { modelId: "minimax-h3", supplierModelId: "minimax-h3-a", kinds: ["video_generate"], unitPriceCny: 1.6, resolutions: ["720p", "1080p"], priceSource: "GET https://api.xiaoyxiao.xyz:18443/api/pricing 2026-10-02 (quota_type=1, model_price=1.6)" },
     ],
   },
 
@@ -148,7 +155,11 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     chatImageModels: [],
     adapterType: "dmc",
     claims: [
-      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.05 }, priceSource: "GET https://api.ll2.cn/api/pricing 2026-10-18 (H3 768P: seconds × 0.007353 USD/s × usd_exchange_rate=6.8 = ¥0.05/s)；auto-hd 超分的 1080p/2k/4k 档待 upstream 开通后另计（2026-10-18 实测无 channel）" },
+      // 2026-10-20：高清链路＝H3 768P + auto-hd 超分，四档全通。每档上游总成本＝
+      // H3 ¥0.05/s ＋ auto-hd 分档单价（GET /api/pricing 2026-10-20 实查，汇率 6.8）：
+      // 720p ≈¥0.0083/s、1080p ≈¥0.015/s、2k ≈¥0.0267/s、4k ≈¥0.06/s（按输出秒计）。
+      // ⇒ 0.05 / 0.065 / 0.0767 / 0.11（元／输出秒）。
+      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.05, "1080p": 0.065, "2k": 0.0767, "4k": 0.11 }, resolutions: ["720p", "1080p", "2k", "4k"], priceSource: "GET https://api.ll2.cn/api/pricing 2026-10-20 (H3 768P ¥0.05/s + auto-hd 分档：720p $0.001225490196/s / 1080p $0.002205882353/s / 2k $0.003921568627/s / 4k $0.008823529412/s × usd_exchange_rate=6.8)" },
     ],
   },
 
@@ -173,7 +184,8 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     chatImageModels: [],
     adapterType: "openai_video",
     claims: [
-      { modelId: "minimax-h3", supplierModelId: "minimax-h3-max", kinds: ["video_generate"], unitPriceCny: 2.0, priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-12 (quota_type=1, model_price=0.2857142857142857 USD × usd_exchange_rate=7 = ¥2.00)" },
+      // 原生出片无超分 ⇒ 真实档位只有 720p/1080p（2026-10-20；不得虚报 catalog 的 2k/4k）。
+      { modelId: "minimax-h3", supplierModelId: "minimax-h3-max", kinds: ["video_generate"], unitPriceCny: 2.0, resolutions: ["720p", "1080p"], priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-12 (quota_type=1, model_price=0.2857142857142857 USD × usd_exchange_rate=7 = ¥2.00)" },
       // seedance-2.0-mini（2026-10-13 暴君指定）：上游按**秒**计价，与 minimax-h3-max
       // 的按次固定价不同型——`video_api.pricing.unit="per_second"`，rules：480p
       // 0.012857142857142857 USD/s、720p 0.028571428571428574 USD/s，站点

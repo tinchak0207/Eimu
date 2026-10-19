@@ -20,16 +20,17 @@
  * 「没登录长时长三元组」的副作用，且会把 catalog 最短时长＝10s 的三条在售 model
  * （seedance-2.0 / seedance-2.5-480p / seedance-2.5-720p）全部挡死。
  * 裁定：`PAID_VIDEO_MAX_SECONDS = 30`（＝catalog 最长时长），并把「已核价三元组」
- * 改为**由 catalog 生成**（见下），避免 catalog 改动后闸门落后。**三条红线一字
- * 不改**：
- *   ① 4k/2k/1080p 无条件拒收（上限仍 ≤720p）；
- *   ② resolution 缺省／空字串拒收（上游缺省＝4k）；
- *   ③ 白名单外 model 拒收；`seconds > 30` 拒收。
+ * 改为**由 catalog 生成**（见下），避免 catalog 改动后闸门落后。**三条红线**：
+ *   ① resolution 缺省／空字串拒收（上游缺省＝4k）；
+ *   ② 白名单外 model 拒收；
+ *   ③ `seconds > 30` 拒收。
+ * （原「4k/2k/1080p 无条件拒收」红线已由暴君 2026-10-20 放开 2k/4k 时撤销；
+ *  高清档位的钱由**每档已核价**把住——per_second 模型只认 claim 已给单价的档位。）
  *
  * ── 三元组＝catalog 生成（单一真源，禁止手抄）─────────────────────────────
  * 来源链：`supplier-channels.config.ts` 的 **xiaoyxiao claims**（平台 model id →
  * 上游 model 名，唯一映射真源）× `GENERATION_MODEL_CATALOG`（该平台 model 的
- * `durations` 与 `resolutions`）× 本档 `PAID_VIDEO_ALLOWED_RESOLUTIONS`（≤720p）。
+ * `durations` 与 `resolutions`）× 本档 `PAID_VIDEO_ALLOWED_RESOLUTIONS`。
  * 交集即登录；**没有登录＝拒收**（`triple_not_priced`），禁止现场猜档位语义。
  * 后果：catalog 加时长/加档位，闸门自动跟上；catalog 没有的组合永远进不来。
  * 上游单价是站外事实：2026-09-28 V-03 起按（供给 label, 上游 model）存在
@@ -66,14 +67,16 @@ import { SupplierRequestError } from "./failure-classifier";
 export const PAID_VIDEO_MAX_SECONDS = 30;
 
 /**
- * 允许送给付费视频上游的 resolution 白名单（上限 ≤720p）。
- * 4k/2k/1080p/540p/360p 一律不在内 ⇒ 直接拒收。
+ * 允许送给付费视频上游的 resolution 白名单。
+ * 540p/360p 不在内 ⇒ 直接拒收。
  *
- * 2026-10-18：DMC 改为 H3 768P + auto-hd 超分的高清链路，但 auto-hd 在
- * group default 下无 channel、/v2 路由又强制 768P ⇒ 高清暂不具备可提交形态，
- * 白名单维持现状；上游开通后再一并打开。
+ * 2026-10-20：DMC auto-hd 超分实测四档全部出片（720p/1080p/2k/4k），暴君明令
+ * 放开 2k/4k 商品面 ⇒ 白名单加入 1080p/2k/4k。档位不是白名单即通行：
+ * `per_second` 报价的模型只认 claim `unitPriceCnyPerSecond` 已给单价的档位
+ * （缺价档位＝不许提交），`per_call` 模型仍按 catalog resolutions 受各供给
+ * capability 收窄。
  */
-export const PAID_VIDEO_ALLOWED_RESOLUTIONS = ["480p", "720p"] as const;
+export const PAID_VIDEO_ALLOWED_RESOLUTIONS = ["480p", "720p", "1080p", "2k", "4k"] as const;
 
 export type PaidVideoResolution = (typeof PAID_VIDEO_ALLOWED_RESOLUTIONS)[number];
 
@@ -102,7 +105,8 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
   "agnes-video-2.5-flash",
   // 2026-10-13：dmc（dmc.cc，2026-10-18 改址 api.ll2.cn）认领的 minimax-h3 上游模型名。
   // **按秒计价**（H3 768P model_price=0.007353 USD/s × usd_exchange_rate=6.8 = ¥0.05/s）。
-  // 单价由 dmc 供给 claim 的 `unitPriceCnyPerSecond`（{720p:0.05}）提供，不进兜底表。
+  // 单价由 dmc 供给 claim 的 `unitPriceCnyPerSecond`（720p/1080p/2k/4k 分档，
+  // H3 ¥0.05/s ＋ auto-hd 超分 2026-10-20 实测价）提供，不进兜底表。
   "MiniMax-H3",
 ] as const;
 
@@ -341,7 +345,7 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
     return {
       allowed: false,
       reason: "resolution_not_allowed",
-      detail: `resolution "${rawResolution}" 不在白名单 ${PAID_VIDEO_ALLOWED_RESOLUTIONS.join("/")}（4k/2k/1080p 一律拒收）。`,
+      detail: `resolution "${rawResolution}" 不在白名单 ${PAID_VIDEO_ALLOWED_RESOLUTIONS.join("/")}（白名单外档位一律拒收）。`,
     };
   }
 

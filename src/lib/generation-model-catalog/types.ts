@@ -64,7 +64,7 @@ export const ASPECT_RATIO_VALUES = [
   "2:3",
 ] as const satisfies readonly AspectRatio[];
 export type ImageResolution = "1k" | "2k" | "4k";
-export type VideoResolution = "360p" | "480p" | "540p" | "720p" | "1080p" | "4k";
+export type VideoResolution = "360p" | "480p" | "540p" | "720p" | "1080p" | "2k" | "4k";
 export type OutputResolution = ImageResolution | VideoResolution;
 
 export type ImageCreditTable = Partial<Record<ImageResolution, number>>;

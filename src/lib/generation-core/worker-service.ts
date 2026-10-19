@@ -29,6 +29,7 @@ import {
   listCompletedGenerationArtifacts,
   listGenerationAttemptsForJob,
   markProviderTaskSubmitted,
+  replaceProviderTaskId,
   checkpointProviderOutput,
   checkpointProviderTaskReceipt,
   clearProviderOutputCheckpoint,
@@ -62,6 +63,17 @@ export interface GenerationWorkerOptions {
 
 function backoffMs(attemptCount: number): number {
   return Math.min(60_000, 1_000 * 2 ** Math.min(6, attemptCount));
+}
+
+/**
+ * 剥离下载鉴权头（2026-10-20 DMC auto-hd）：`downloadHeaders` 含 Bearer secret，
+ * 只准直接交给 `persistOutputArtifact` 的鉴权下载。进入 `checkpointProviderOutput`
+ * （加密 receipt／evidence_json）、`provider_result_json`、日志、DB 明文之前必须剥离。
+ */
+function withoutDownloadHeaders(output: SupplierGenerationOutput): SupplierGenerationOutput {
+  if (!output.downloadHeaders) return output;
+  const { downloadHeaders: _discarded, ...rest } = output;
+  return rest;
 }
 
 function isDatabaseConnectionError(error: unknown): boolean {
@@ -386,14 +398,33 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         // INC-0830-VIDEO / INC-0831：适配器在上游提交完成、取得 provider task id 的瞬间
         // 回调 → 先 durably 万 attempt 行（task id + 对帐排程；事故根治点：只发事件
         // 不落行 = 轮询断掉后 task id 无人认领），再落 attempt_submitted 事件（遥测）。
-        const onProviderTaskSubmitted = async (providerTaskId: string, protocol: ProviderProtocol): Promise<void> => {
-          await checkpointProviderTaskReceipt({jobId:job.id,attemptId:attempt.id,providerTaskId,protocol});
-          const recorded = await markProviderTaskSubmitted({
-            jobId: job.id,
-            attemptId: attempt.id,
-            providerTaskId,
-            protocol,
-          }, sql);
+        const onProviderTaskSubmitted = async (
+          providerTaskId: string,
+          protocol: ProviderProtocol,
+          submitOptions?: { replacePrevious?: string },
+        ): Promise<void> => {
+          // 两段链路（2026-10-20 DMC auto-hd）：第二段任务提交后把对帐指针从第一段
+          // CAS 推进到第二段（只允许从适配器显式声明的期望值推进，绝不无条件覆盖）。
+          // 推进型的提交不写 receipt：receipt 只有「IS NULL 或同 id」的语义，无法表达
+          // 指针替换；若在推进前后崩溃，让指针停在第一段（对帐会按第一段真相收口），
+          // 避免重放器把「已推进」误判成「无法恢复的日志」冻结人工。
+          if (!submitOptions?.replacePrevious) {
+            await checkpointProviderTaskReceipt({jobId:job.id,attemptId:attempt.id,providerTaskId,protocol});
+          }
+          const recorded = submitOptions?.replacePrevious
+            ? await replaceProviderTaskId({
+                jobId: job.id,
+                attemptId: attempt.id,
+                providerTaskId,
+                expectedProviderTaskId: submitOptions.replacePrevious,
+                protocol,
+              }, sql)
+            : await markProviderTaskSubmitted({
+                jobId: job.id,
+                attemptId: attempt.id,
+                providerTaskId,
+                protocol,
+              }, sql);
           if (!recorded) throw new Error('Submitted provider task could not be durably assigned to this attempt.');
           await clearProviderOutputCheckpoint(attempt.id);
           emitJobEvent({
@@ -415,7 +446,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           await sql`UPDATE generation_attempt SET status='failed',recovery_status='resolved',failure_class='cancelled',finished_at=now() WHERE id=${attempt.id}`;
           await settleRequestedGenerationCancellation(job.id,sql); return;
         }
-        const output = await submitWithSupplyCostGate(supplierLease.supplier, {
+        const submittedOutput = await submitWithSupplyCostGate(supplierLease.supplier, {
           jobId: job.id,
           attemptId: attempt.id,
           modelId: job.modelId,
@@ -439,13 +470,22 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           signal: AbortSignal.any([cancelController.signal, AbortSignal.timeout(generationBudgetMs(job.kind))]),
           onProviderResponse: async (output) => {
             responseReceived = true;
-            await checkpointProviderOutput({ jobId: job.id, attemptId: attempt.id, output }, sql);
+            // 鉴权产物（DMC auto-hd）：URL 无 Bearer 不可取，而 Bearer 绝不能写进加密
+            // receipt；此时对帐指针（hdh:…）已 durable 落行，重启后重新查询即可取得带
+            // 鉴权的 URL，故不落 receipt。
+            if (output.downloadHeaders) return;
+            await checkpointProviderOutput({ jobId: job.id, attemptId: attempt.id, output: withoutDownloadHeaders(output) }, sql);
           },
         });
+        // 剥离下载鉴权头：它只准去 persistOutputArtifact 的 fetch（2026-10-20 DMC auto-hd）。
+        const { downloadHeaders, ...output } = submittedOutput;
         // All adapters have a common response checkpoint even when their native protocol has none.
         if (!responseReceived) {
           responseReceived = true;
-          await checkpointProviderOutput({ jobId: job.id, attemptId: attempt.id, output }, sql);
+          // 同上：带鉴权下载的产物不落 receipt（secret 卫生 + 指针已可重查）。
+          if (!downloadHeaders) {
+            await checkpointProviderOutput({ jobId: job.id, attemptId: attempt.id, output }, sql);
+          }
         }
         const stored = await persistOutputArtifact({
           jobId: job.id,
@@ -456,6 +496,8 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           endpointLabel: output.endpointLabel,
           supplierModelId:output.supplierModelId,providerRequestId:output.providerRequestId,originalHttpStatus:output.httpStatus,
           mediaKind: job.kind === "tts" ? "audio" : (job.kind === "video_generate" || job.kind === "avatar" || job.kind === "lipsync") ? "video" : "image",
+          // 鉴权头只在本次下载使用，不写进 artifact.metadata／evidence。
+          downloadHeaders,
         }, sql);
         const latencyMs = Date.now() - startedAt;
         await completeGenerationAttempt({

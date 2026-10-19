@@ -158,8 +158,9 @@ function channelCapabilities(label: string): Capability[] {
     return result;
   }
   // registry 渠道：认领范围 = config 档里登记的 claims，逐 claim 逐 kind 产出
-  // capability；ratios/resolutions 照抄平台 catalog，不在 catalog 的模型跳过并
-  // 提醒（不挡 seed——宁可少认领也不虚报能力）。
+  // capability；ratios 照抄平台 catalog，resolutions 优先用 claim.resolutions
+  // （上游真实可交付档位，避免原生出片渠道虚报超分档），缺省才照抄 catalog；
+  // 不在 catalog 的模型跳过并提醒（不挡 seed——宁可少认领也不虚报能力）。
   const registry = registryChannel(label);
   if (registry) {
     const result: Capability[] = [];
@@ -175,7 +176,7 @@ function channelCapabilities(label: string): Capability[] {
           kind,
           supplierModelId: claim.supplierModelId,
           ratios: [...model.aspectRatios],
-          resolutions: [...model.resolutions],
+          resolutions: claim.resolutions ? [...claim.resolutions] : [...model.resolutions],
           editSupport: claim.kinds.includes("image_edit"),
           videoSupport: claim.kinds.includes("video_generate"),
         });

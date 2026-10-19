@@ -428,11 +428,15 @@ async function landReconciledArtifact(
   const mediaKind = job.kind === "tts"
     ? "audio"
     : (job.kind === "video_generate" || job.kind === "avatar" || job.kind === "lipsync") ? "video" : "image";
-  await checkpointProviderOutput({ jobId: input.jobId, attemptId: input.attemptId,
-    output: input.output ?? { base64: input.result.base64, url: input.result.url, httpStatus: 0,
-      endpointLabel: `reconcile:${input.protocol}`, supplierModelId: '',
-      providerTaskId: input.providerTaskId,
-      evidence: { originalHttpStatusKnown: false, actualSupplierModelKnown: false, source: 'provider-confirmed-readonly-result' } } }, sql);
+  // 鉴权产物（DMC auto-hd）：URL 必须带 Bearer 才能下载，而 secret 绝不入加密 receipt；
+  // 指针（hdh:…）仍在行内，失败后下一轮重新查询即可再取 URL＋鉴权头，故跳过 receipt。
+  if (!input.result.downloadHeaders) {
+    await checkpointProviderOutput({ jobId: input.jobId, attemptId: input.attemptId,
+      output: input.output ?? { base64: input.result.base64, url: input.result.url, httpStatus: 0,
+        endpointLabel: `reconcile:${input.protocol}`, supplierModelId: '',
+        providerTaskId: input.providerTaskId,
+        evidence: { originalHttpStatusKnown: false, actualSupplierModelKnown: false, source: 'provider-confirmed-readonly-result' } } }, sql);
+  }
   const stored = await persistOutputArtifact({
     jobId: input.jobId,
     attemptId: input.attemptId,
@@ -443,6 +447,9 @@ async function landReconciledArtifact(
     supplierModelId:input.output?.supplierModelId || null,providerRequestId:input.output?.providerRequestId,
     originalHttpStatus:input.output?.httpStatus || null,
     mediaKind,
+    // 上游成片需鉴权下载（DMC auto-hd 的 /v1/tasks/…/content）：只在这里交给 fetch，
+    // 绝不写进 evidence／provider_result_json／加密 receipt（checkpoint 只存 url）。
+    downloadHeaders: input.result.downloadHeaders,
   }, sql);
 
   await sql`

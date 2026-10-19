@@ -106,6 +106,11 @@ interface VideoRequestBody {
   prompt?: unknown;
   n?: unknown;
   size?: unknown;
+  /**
+   * 输出分辨率档位（"720p"/"1080p"/"2k"/"4k" 等）。非法值由 catalog 归一化回默认
+   * （与 duration/size 同一策略，不硬拒）；档位语义以 model catalog 为准。
+   */
+  resolution?: unknown;
   duration_seconds?: unknown;
   generate_audio?: unknown;
   /** 有序参考图；上游图片参考不代表硬锁首尾帧。 */
@@ -315,11 +320,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 时长 / 音讯 / 宽高比 都交给 catalog 归一化：非法值回默认，合法值透传。
+  // 分辨率 / 时长 / 音讯 / 宽高比 都交给 catalog 归一化：非法值回默认，合法值透传。
   // 生成式后期：本次生成的秒数由续长／区段长决定（已在契约校验时确认落在 catalog 档位），
   // 直接以它做归一化输入——扣费、成本闸、上游拿到的秒数同源。
   const generatedSeconds = postProduction ? videoPostProductionGeneratedSeconds(postProduction) : undefined;
   const normalized = normalizeGenerationConfig(modelId, {
+    outputResolution: typeof body.resolution === "string" ? body.resolution.trim() : undefined,
     aspectRatio: aspectRatioFromVideoSize(typeof body.size === "string" ? body.size : undefined),
     durationSeconds: generatedSeconds
       ?? (body.duration_seconds === undefined ? undefined : Number(body.duration_seconds)),

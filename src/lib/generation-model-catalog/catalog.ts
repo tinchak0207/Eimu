@@ -743,14 +743,17 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     popularity: 90,
     vendor: "MiniMax",
     aspectRatios: RUNWAY_VIDEO_RATIOS,
-    resolutions: ["720p", "1080p"],
+    resolutions: ["720p", "1080p", "2k", "4k"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
     durations: MINIMAX_H3_DURATIONS,
     defaultDuration: 5,
-    // 2026-08-28 价目表同源：720P=5 币/秒、1080P=10 币/秒（admin 覆写层原值折入，
-    // 旧值 25/40 credits=2.5/4 币/秒为错价）。
-    videoCreditsPerSecond: { "720p": 50, "1080p": 100 },
+    // 高清链路＝H3 768P 出片 + DMC auto-hd 超分（2026-10-20 实测四档全部出片）。
+    // 定价依 2026-10-18 高清链路设计：720p 5 币/秒、1080p 7 币/秒、2k 10 币/秒、
+    // 4k 12 币/秒（catalog 用 credits＝币×10）。1080p 由旧值 10 币/秒降为 7 币/秒：
+    // 2026-10-20 实测上游分档成本＝H3 ¥0.05/s ＋ auto-hd 1080p ≈¥0.015/s ⇒ ¥0.065/s
+    // （1 币＝¥0.05），旧价超收。2k/4k 档已由暴君 2026-10-20 明令放开。
+    videoCreditsPerSecond: { "720p": 50, "1080p": 70, "2k": 100, "4k": 120 },
     referenceImages: true,
   },
   // agnes 免费视频档（2026-10-13 暴君指定为**免费兜底**）：平台自有免费额度渠道，
