@@ -150,7 +150,9 @@ test("响应格式同时支持 b64_json 与 url", () => {
 
 test("hd / high 映射到内部的 quality 档", () => {
   const source = code(GENERATIONS);
-  assert.match(source, /body\.quality === "hd" \|\| body\.quality === "high"/);
+  // 生产现形状：先 toLowerCase 归一，再由 rawQuality 映射（hd/high → quality）。
+  assert.match(source, /const rawQuality = typeof body\.quality === "string" \? body\.quality\.toLowerCase\(\) : ""/);
+  assert.match(source, /rawQuality === "quality" \|\| rawQuality === "hd" \|\| rawQuality === "high" \? "quality" : "fast"/);
 });
 
 test("/v1/models 返回 OpenAI 的 list 结构，且只列该密钥有权的模型", () => {

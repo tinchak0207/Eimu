@@ -31,9 +31,15 @@ function sharedDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDoc
     evidence: "tool result line one",
     evidenceKind: "tool_result",
     selfScore: 5,
+    // shared 自 4ea47695 起 fail-closed：无 contributorKey 一律 pending_review。
+    // fixture 补上提出者；需要文档立即 active 的用例再显式传 corroborationMin: 1。
+    contributorKey: "owner-a-hash",
     ...overrides,
   };
 }
+
+/** shared 文档立即 active 所需的最小佐证门槛（生产缺省为 2）。 */
+const ACTIVE_SHARED = { corroborationMin: 1 } as const;
 
 function privateDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDocInput {
   return {
@@ -53,7 +59,7 @@ function privateDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDo
 
 test("G5：同 slug 再入库 → revision+1、id 稳定、清单只剩一条", async () => {
   __resetAgentMemoryStoreForTests();
-  const first = await ingestMemoryDocs({ batchId: "b1", docs: [sharedDoc()], now: NOW });
+  const first = await ingestMemoryDocs({ batchId: "b1", docs: [sharedDoc()], now: NOW, ...ACTIVE_SHARED });
   assert.deepEqual(first.rejected, []);
   assert.deepEqual(first.accepted, ["b1-basic-note"]);
   const list1 = await listMemoryDocs({ scope: "shared" });
@@ -66,6 +72,7 @@ test("G5：同 slug 再入库 → revision+1、id 稳定、清单只剩一条", 
     batchId: "b2",
     docs: [sharedDoc({ body: "**Why:** 第二版\n**How to apply:** 更新" })],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   assert.deepEqual(second.accepted, ["b1-basic-note"]);
   assert.deepEqual(second.rejected, []);
@@ -87,6 +94,7 @@ test("G5：description Jaccard>0.8 → duplicate 拒绝（不同 slug 也拒）"
       sharedDoc({ slug: "gamma", description: "totally different insight about lighting setup" }),
     ],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   assert.deepEqual(result.accepted, ["b3-alpha", "b3-gamma"]);
   assert.deepEqual(result.rejected, [{ slug: "beta", reason: "duplicate" }]);
@@ -148,7 +156,7 @@ test("空 batchId → 全拒 structure、零写入", async () => {
   assert.deepEqual(result.accepted, []);
   assert.equal(result.rejected.length, 2);
   assert.deepEqual(result.rejected.map((r) => r.reason), ["structure", "structure"]);
-  assert.deepEqual(result.stats, { received: 2, accepted: 0, index_lines: 0 });
+  assert.deepEqual(result.stats, { received: 2, accepted: 0, index_lines: 0, seed_accepted: 0 });
   assert.equal((await listMemoryDocs({ scope: "shared" })).length, 0);
 });
 
@@ -173,6 +181,7 @@ test("retract（按 doc_ids）：list 不含、INDEX 行移除、不删档（再
     batchId: "b8",
     docs: [sharedDoc({ slug: "keep" }), sharedDoc({ slug: "drop", description: "another distinct insight" })],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   assert.deepEqual(ingested.accepted, ["b8-keep", "b8-drop"]);
   const indexBefore = await readMemoryIndexMd("shared");
@@ -213,11 +222,12 @@ test("review：pending_review 翻转仅 shared（PRD §5.6 private 不自动翻�
       privateDoc({ slug: "p-note", description: "private insight must stay active" }),
     ],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   assert.deepEqual(ingested.accepted, ["rv1-s-note", "rv1-p-note"]);
 
   const flipped = await reviewMemoryDocs({ batchId: "rv1", action: "pending_review" });
-  assert.deepEqual(flipped, { reviewed: ["rv1-s-note"], action: "pending_review" });
+  assert.deepEqual(flipped, { reviewed: ["rv1-s-note"], action: "pending_review", blocked: [] });
   // 翻转后：shared 清单不含、INDEX 行消失；private 不受影响。
   assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
   assert.equal(await readMemoryIndexMd("shared"), "");
@@ -232,13 +242,14 @@ test("review：activate 人工放行 → pending_review 翻回 active，INDEX �
     batchId: "rv2",
     docs: [sharedDoc({ slug: "flip-me", description: "doc to flip back on activation" })],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   const pending = await reviewMemoryDocs({ docIds: ["rv2-flip-me"], action: "pending_review" });
   assert.deepEqual(pending.reviewed, ["rv2-flip-me"]);
   assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
 
   const activated = await reviewMemoryDocs({ batchId: "rv2", action: "activate" });
-  assert.deepEqual(activated, { reviewed: ["rv2-flip-me"], action: "activate" });
+  assert.deepEqual(activated, { reviewed: ["rv2-flip-me"], action: "activate", blocked: [] });
   const listed = await listMemoryDocs({ scope: "shared" });
   assert.deepEqual(listed.map((doc) => doc.slug), ["flip-me"]);
   assert.equal(listed[0].status, "active");
@@ -257,6 +268,7 @@ test("review：显式 scope=private 才可翻私有；retracted 拒绝翻转；�
       sharedDoc({ slug: "gone", description: "shared doc retracted then review-proof" }),
     ],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   const privFlip = await reviewMemoryDocs({
     batchId: "rv3",
@@ -283,12 +295,13 @@ test("review：显式 scope=private 才可翻私有；retracted 拒绝翻转；�
   assert.deepEqual(await reviewMemoryDocs({ action: "activate" }), {
     reviewed: [],
     action: "activate",
+    blocked: [],
   });
 });
 
 test("索引与清单形状：INDEX 行符合契约格式；private 缺 ownerKey 回空", async () => {
   __resetAgentMemoryStoreForTests();
-  await ingestMemoryDocs({ batchId: "b10", docs: [sharedDoc()], now: NOW });
+  await ingestMemoryDocs({ batchId: "b10", docs: [sharedDoc()], now: NOW, ...ACTIVE_SHARED });
   const index = await readMemoryIndexMd("shared");
   assert.equal(index, "- [测试领域] basic-note — a baseline shared knowledge note （v1）");
   assert.deepEqual(await listMemoryDocs({ scope: "private" }), []);
@@ -309,7 +322,13 @@ test("stats.index_lines 与实际索引行数一致", async () => {
       privateDoc({ slug: "x3", description: "third distinct private line" }),
     ],
     now: NOW,
+    ...ACTIVE_SHARED,
   });
   assert.equal(result.stats.index_lines, 3); // shared 2 行 + private 1 行
-  assert.deepEqual(result.stats, { received: 3, accepted: 3, index_lines: 3 });
+  assert.deepEqual(result.stats, {
+    received: 3,
+    accepted: 3,
+    index_lines: 3,
+    seed_accepted: 0,
+  });
 });

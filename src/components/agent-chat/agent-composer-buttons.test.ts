@@ -23,7 +23,12 @@ import {
   resolveBasePlaceholder,
   withUploadDeadline,
 } from "./AgentComposer";
-import { createDeviceBridgeController, supportsSetMode, type BridgeStatus } from "@/lib/device-bridge-display";
+import {
+  LOCAL_FILE_MODES,
+  createDeviceBridgeController,
+  supportsSetMode,
+  type BridgeStatus,
+} from "@/lib/device-bridge-display";
 
 /**
  * AgentComposer 输入区三颗按钮的回归锁：IME 组字守卫、送出连点锁、中止进行中态。
@@ -193,11 +198,12 @@ test("思考级别菜单：工具行同排、「+」右边、收起态 iconX、�
   // 其 class 逐字对齐同档 SkillSlashMenu 的同名定位语汇。
   assert.match(code, /shrink-0 ml-0\.5/, "chip 在工具行流内、「+」右边（非悬浮）");
   assert.doesNotMatch(chipRootTag, /relative/, "chip 容器不得挂 relative（面板锚在 composer 根）");
-  assert.match(
-    code,
-    /absolute bottom-full left-1\.5 z-50 mb-2 w-max/,
-    "面板逐字对齐 SkillSlashMenu：bottom-full + left-1.5 + mb-2",
-  );
+  // 2026-10-08（8063be17）：面板改为 portal 到 document.body + useAnchoredPanel
+  // 量测定位（原先绝对定位贴 composer 根，会被窄屏面板裁切）。语义不变：
+  // 仍由 chip 锚点开在工具行上方/下方、同一套 agent-pop 材质与 z-[85] 浮层。
+  assert.match(code, /useAnchoredPanel\(open, rootRef\)/);
+  assert.match(code, /<AnchoredMenuPanel panelRef=\{panelRef\} coords=\{coords\} ariaLabel="思考级别">/);
+  assert.match(code, /agent-pop fixed z-\[85\] w-max/);
   // 徽章折行/溢出回归锁：chip 是工具行 flex 子项，必须靠 w-max（按内容定宽）
   // ＋ whitespace-nowrap（文字永不折行）保住单行胶囊。
   assert.match(code, /whitespace-nowrap/);
@@ -235,8 +241,9 @@ test("思考级别菜单：工具行同排、「+」右边、收起态 iconX、�
   assert.match(code, /writeCachedAgentThinkingLevel\(next\)/);
   assert.match(code, /saveAgentSettings\(agentThinkingLevelPatch\(next\)\)/);
   // 面板不得再用会带 translateX(-50%) 的 agent-pop-in（配 left-0 会左移半个宽度、
-  // 内容滑出面板外＝生产上「级别名跑到面板左缘之外」的根因）。
-  assert.doesNotMatch(code, /agent-pop/);
+  // 内容滑出面板外＝生产上「级别名跑到面板左缘之外」的根因）。portal 浮层用的
+  // agent-pop 材质本身是合法共享类（历史抽屉/设定弹层同款），只禁带位移的变体。
+  assert.doesNotMatch(code, /agent-pop-in/);
 });
 
 test("attachFilesRef：可选介面把既有附件入口注册出去（不传＝不变）", () => {
@@ -366,16 +373,25 @@ test("uploadPlainFile 组合探针：deadline 包住 uploadAgentAttachments，�
     code.indexOf("const uploadVideoFile = useCallback"),
   );
   assert.ok(plainRegion.length > 0, "uploadPlainFile 本体必须能定位到");
+  // 2026-10-19：上传开始接 onProgress + AbortSignal（进度/取消），deadline 仍包在
+  // 同一次 uploadAgentAttachments 呼叫外层，语义不变。
   assert.match(
     plainRegion,
-    /withUploadDeadline\(\s*uploadAgentAttachments\(session, \[file\]\),\s*PLAIN_UPLOAD_TIMEOUT_MS,\s*\)/,
+    /withUploadDeadline\(\s*uploadAgentAttachments\(session, \[file\], \{ onProgress: progressReporter\(id\), signal \}\),\s*PLAIN_UPLOAD_TIMEOUT_MS,\s*\)/,
     "非影片附件路径必须用 withUploadDeadline + PLAIN_UPLOAD_TIMEOUT_MS 包住上传",
   );
   // enqueueFiles 的失败收口：任何 reject（含 UploadTimeoutError 的人话）写成 error 终态。
+  // 2026-10-19：catch 先分流取消（UploadAbortedError → 「已取消上传」），其余
+  // reject（含 UploadTimeoutError 的人话）仍落 error chip；progress 一并清掉。
   assert.match(
     code,
-    /job\.catch\(\(err\) => \{\s*const message = err instanceof Error \? err\.message : "上传失败。";\s*patchAttachment\(id, \{ status: "error", errorMessage: message \}\);/,
+    /job\s*\.catch\(\(err\) => \{[\s\S]{0,400}?const message = err instanceof Error \? err\.message : "上传失败。";\s*patchAttachment\(id, \{ status: "error", errorMessage: message, progress: undefined \}\);/,
     "job.catch 必须把逾时错误落成带人话的 error chip（不得静默消失）",
+  );
+  assert.match(
+    code,
+    /err instanceof UploadAbortedError[\s\S]{0,200}?errorMessage: "已取消上传"/,
+    "取消上传必须是中性终态，不得落成失败红字",
   );
 });
 
@@ -446,10 +462,42 @@ function makeModeApi(hasSetMode: boolean): ModeFake {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-test("本机档案权限控件（展示层）：四档标题／副标逐字可见＋当前档右端一勾", () => {
+test("本机档案权限控件（展示层）：四档标题／副标逐字来自单一真源＋当前档右端一勾", () => {
+  // 2026-10-08（8063be17）起展开面板 portal 到 document.body；react-dom/server
+  // 明确不支持 portal（「Portals are not currently supported by the server renderer」），
+  // 因此本档改双轨验证：
+  //   ① 四档文案与测试自备 oracle 逐字对账（独立 oracle，不向实现取答案）；
+  //   ② 源码断言面板确实从 LOCAL_FILE_MODES 映射 title/subtitle/selected（含勾）；
+  //   ③ 触发 chip 仍真 SSR 渲染并显示当前档标题。
+  const expected = [
+    ["关闭", "agent 不能读取本机档案。"],
+    // 2026-10-05（a9cd889d）ask 档语义改为「授权根内读取直接允许、写入才问」。
+    ["读取允许，写入询问", "已授权资料夹内直接读取；范围外或要写入时才问你。"],
+    ["授权范围内自动", "已授权资料夹内自动读取，范围外会先问你。"],
+    // 2026-10-12（f6ab6475）full 副标补扣费授权口径。
+    [
+      "完全访问",
+      "自动执行并同意所有扣费；整个家目录可读，敏感位置（~/.ssh、~/.aws、私钥等）仍不读取。",
+    ],
+  ] as const;
+  assert.deepEqual(
+    LOCAL_FILE_MODES.map((m) => [m.title, m.subtitle]),
+    expected.map(([title, subtitle]) => [title, subtitle]),
+  );
+  // id 唯一 + selected 由 mode 决定 ⇒ 恰有一列选中（原 SSR 的 aria-selected 计数等价）。
+  assert.equal(new Set(LOCAL_FILE_MODES.map((m) => m.id)).size, LOCAL_FILE_MODES.length);
+  assert.match(code, /LOCAL_FILE_MODES\.map\(\(spec\) =>/);
+  assert.match(code, /title=\{spec\.title\}/);
+  assert.match(code, /subtitle=\{spec\.subtitle\}/);
+  assert.match(code, /selected=\{known && spec\.id === mode\}/);
+  assert.match(code, /\{selected && <Check /, "选中列右端一颗勾");
+  // 已授权数量（检视用，非授权入口）。生产文案用大陆用语「文件夹」。
+  assert.match(code, /rootsCount > 0 \? `已授权 \$\{rootsCount\} 个文件夹` : "尚未授权任何文件夹"/);
+
+  // 触发 chip 真渲染：当前档标题挂在按钮上（aria-label 与 title 同源）。
   const markup = renderToStaticMarkup(
     createElement(LocalFileModeMenuView, {
-      open: true,
+      open: false,
       onToggleOpen: () => {},
       onPick: () => {},
       supported: true,
@@ -459,42 +507,21 @@ test("本机档案权限控件（展示层）：四档标题／副标逐字可�
       busy: false,
     }),
   );
-  // 四档标题逐字（oracle 由测试自备）。
-  for (const title of ["关闭", "每次询问", "授权范围内自动", "完全访问"]) {
-    assert.ok(markup.includes(title), `四档必须含标题「${title}」`);
-  }
-  // 四档副标逐字（含 full 的敏感路径警告）。
-  for (const sub of [
-    "agent 不能读取本机档案。",
-    "每次读取前先问你。",
-    "已授权资料夹内自动读取，范围外会先问你。",
-    "整个家目录可读；敏感位置（~/.ssh、~/.aws、私钥等）一律不读。",
-  ]) {
-    assert.ok(markup.includes(sub), `四档必须含副标「${sub}」`);
-  }
-  // 恰好一列被标记为选中（ask），且带勾图示。
-  assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1, "只能有一列选中");
-  assert.match(markup, /lucide-check/, "选中列右端一颗勾");
-  // 已授权数量（检视用，非授权入口）。
-  assert.ok(markup.includes("已授权 2 个资料夹"), "应显示已授权资料夹数量");
-  // 不得出现「选择资料夹」之类的授权入口按钮。
+  assert.match(markup, /aria-label="本机文件权限：读取允许，写入询问"/);
+  assert.match(markup, /title="本机文件权限：读取允许，写入询问"/);
+  // 不得内建授权入口。
   assert.ok(!markup.includes("选择资料夹") && !markup.includes("选择文件夹"), "控件不得内建授权入口");
 });
 
-test("本机档案权限控件（展示层）：roots 空显示『尚未授权任何资料夹』", () => {
-  const markup = renderToStaticMarkup(
-    createElement(LocalFileModeMenuView, {
-      open: true,
-      onToggleOpen: () => {},
-      onPick: () => {},
-      supported: true,
-      known: true,
-      mode: "off",
-      rootsCount: 0,
-      busy: false,
-    }),
+test("本机档案权限控件（展示层）：roots 空显示『尚未授权任何文件夹』", () => {
+  // portal 面板 SSR 不可渲染（同上一案）；页脚文案与条件真源锁在源码。
+  assert.match(code, /rootsCount > 0 \? `已授权 \$\{rootsCount\} 个文件夹` : "尚未授权任何文件夹"/);
+  assert.ok(
+    (code.match(/尚未授权任何文件夹/g) ?? []).length === 1,
+    "空 roots 文案必须唯一且明说尚未授权",
   );
-  assert.ok(markup.includes("尚未授权任何资料夹"), "空 roots 必须明说尚未授权");
+  // 非空分支仍显示真实数量（不与空态文案混用）。
+  assert.ok(!code.includes("已授权 2 个文件夹"), "数量必须来自 rootsCount 动态拼装");
 });
 
 test("本机档案权限控件（展示层）：旧产物 supported=false ⇒ disabled＋『需更新桌面版』，不崩", () => {

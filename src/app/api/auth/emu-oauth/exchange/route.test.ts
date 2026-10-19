@@ -18,9 +18,12 @@ function code(): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-test("exchange 必须用 verifyEmuOauthCode 作为唯一身份门禁", () => {
+test("exchange 必须用 consumeEmuOauthCode 作为唯一身份门禁（原子验证+消费）", () => {
   const c = code();
-  assert.match(c, /verifyEmuOauthCode\(/);
+  assert.match(c, /consumeEmuOauthCode\(/);
+  // 身份结果只能来自凭证消费：userId 由凭证解出，不接受请求携带的 userId。
+  assert.match(c, /const userId = await consumeEmuOauthCode\(code\)/);
+  assert.doesNotMatch(c, /typeof body\.userId/);
   // 不读 cookie / 授权头 / 会话：身份完全来自签名凭证。
   assert.doesNotMatch(c, /req\.cookies/);
   assert.doesNotMatch(c, /authorization/i);

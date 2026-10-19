@@ -163,7 +163,12 @@ test("三态人话：off / no_authorized_roots / online", () => {
 
 test("credentials_unavailable 文案逐字符合规格", () => {
   const d = describeBridgeStatus(status({ state: "credentials_unavailable", enabled: true }));
-  assert.equal(d.description, "桌面版还没设定装置凭证（见说明）；此功能需要一次性设定。");
+  // 2026-10-12（f6ab6475）：文案改为「正在获取权限」的进行态 + 重试/重新登入指引
+  // （旧的「桌面版还没设定装置凭证」在页面换装置票的新链路下已不准确）。
+  assert.equal(
+    d.description,
+    "正在获取本机文件权限…若一直停在这里，请点「重试」或重新登录。",
+  );
   assert.equal(d.tone, "warn");
 });
 
@@ -296,16 +301,22 @@ test("LOCAL_FILE_MODES：四档 id 顺序与文案逐字（单一真源）", () 
     LOCAL_FILE_MODES.map((m) => [m.icon, m.title, m.subtitle]),
     [
       ["power", "关闭", "agent 不能读取本机档案。"],
-      ["message-circle-question", "每次询问", "每次读取前先问你。"],
+      // 2026-10-05（a9cd889d）：授权根内读取不再逐次问，只有写入/范围外才问。
+      ["message-circle-question", "读取允许，写入询问", "已授权资料夹内直接读取；范围外或要写入时才问你。"],
       ["folder-check", "授权范围内自动", "已授权资料夹内自动读取，范围外会先问你。"],
-      ["globe", "完全访问", "整个家目录可读；敏感位置（~/.ssh、~/.aws、私钥等）一律不读。"],
+      // 2026-10-12（f6ab6475）：full 档补上「自动执行并同意扣费」的授权口径。
+      ["globe", "完全访问", "自动执行并同意所有扣费；整个家目录可读，敏感位置（~/.ssh、~/.aws、私钥等）仍不读取。"],
     ],
   );
 });
 
 test("describeLocalFileMode：四档 tone 分流；未知值保守回退 off", () => {
   assert.deepEqual(describeLocalFileMode("off"), { title: "关闭", subtitle: "agent 不能读取本机档案。", tone: "off" });
-  assert.deepEqual(describeLocalFileMode("ask"), { title: "每次询问", subtitle: "每次读取前先问你。", tone: "info" });
+  assert.deepEqual(describeLocalFileMode("ask"), {
+    title: "读取允许，写入询问",
+    subtitle: "已授权资料夹内直接读取；范围外或要写入时才问你。",
+    tone: "info",
+  });
   assert.deepEqual(describeLocalFileMode("auto"), {
     title: "授权范围内自动",
     subtitle: "已授权资料夹内自动读取，范围外会先问你。",
@@ -313,7 +324,7 @@ test("describeLocalFileMode：四档 tone 分流；未知值保守回退 off", (
   });
   assert.deepEqual(describeLocalFileMode("full"), {
     title: "完全访问",
-    subtitle: "整个家目录可读；敏感位置（~/.ssh、~/.aws、私钥等）一律不读。",
+    subtitle: "自动执行并同意所有扣费；整个家目录可读，敏感位置（~/.ssh、~/.aws、私钥等）仍不读取。",
     tone: "warn",
   });
   assert.equal(describeLocalFileMode("wat" as never).title, "关闭");

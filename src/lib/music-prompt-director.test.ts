@@ -99,15 +99,18 @@ test("flowmusic 超 220：依权重由低到高整层丢弃并记 truncated", ()
   assert.ok(!out.applied.includes("fill-structure"));
 });
 
-test("flowmusic 丢无可丢仍超 220：子句边界硬截并记 applied", () => {
+test("flowmusic 丢无可丢仍超 220：按层压缩保留前段并记 applied", () => {
   const longCore = Array.from(
     { length: 12 },
     (_, index) => `late-60s Laurel Canyon folk phrase number ${index} keeps going`,
   ).join(", ");
   const out = directMusicPrompt(longCore, { channel: "flowmusic" });
   assert.ok(runes(out.prompt) <= 220);
-  assert.ok(out.applied.includes("truncate-220-hard"));
-  // genre 在场（folk），其余五层的补层在硬截前已被丢光。
+  assert.ok(out.applied.includes("compress-220-by-layer"));
+  // 承重子句仍在（genre=folk）；同层重复子句被丢不等于整层被丢，回执不得把 genre 报成截断。
+  assert.match(out.prompt, /folk/);
+  assert.ok(!out.truncated.includes("genre"));
+  // genre 在场（folk），其余五层的补层在压缩前已被丢光。
   assert.equal(out.truncated.length, 5);
 });
 
@@ -131,12 +134,14 @@ test("flowmusic 硬截：纯 CJK 长串无标点无空白 → 就在 cap 处切�
   assert.ok(out.applied.includes("truncate-220-hard"));
 });
 
-test("flowmusic 硬截：199 runes 处有逗号（≥60% cap）→ 退到该逗号保语义完整", () => {
+test("flowmusic 按层压缩：199 runes 子句（≥60% cap）完整保留、只丢超长尾段", () => {
   const core = `${"a".repeat(199)},${"b".repeat(300)}`;
   const out = directMusicPrompt(core, { channel: "flowmusic" });
+  assert.ok(runes(out.prompt) <= 220);
+  // 承重内容＝前 199 runes 的完整子句（不是切半句），且用满 60% 以上预算。
   assert.equal(runes(out.prompt), 199);
   assert.equal(out.prompt, "a".repeat(199));
-  assert.ok(out.applied.includes("truncate-220-hard"));
+  assert.ok(out.applied.includes("compress-220-by-layer"));
 });
 
 test("flowmusic 硬截：30 runes 处有逗号但之后无边界 → 不退到 30（回归本次缺陷）", () => {
@@ -154,19 +159,26 @@ test("flowmusic 有歌词标签：换行保留、上限 3000 runes", () => {
   const out = directMusicPrompt(lyrics, { channel: "flowmusic" });
   assert.ok(runes(out.prompt) <= 3000);
   assert.match(out.prompt, /\n/);
-  assert.ok(out.applied.includes("truncate-3000-hard"));
+  // 承重子句仍在：genre／BPM／调性没有被压缩丢掉。
+  assert.match(out.prompt, /indie folk/);
+  assert.match(out.prompt, /90 BPM/);
+  assert.match(out.prompt, /key of G major/);
+  assert.ok(out.applied.includes("compress-3000-by-layer"));
 });
 
-test("flowmusic 有歌词标签且超 3000：先丢补层记 truncated，仍超才硬截", () => {
+test("flowmusic 有歌词标签且超 3000：先丢补层记 truncated，仍超才按层压缩", () => {
   const lyrics =
     "indie folk, 90 BPM\n[Verse]\n" + "walking down the river road again\n".repeat(200);
   const out = directMusicPrompt(lyrics, { channel: "flowmusic" });
   assert.ok(runes(out.prompt) <= 3000);
   assert.match(out.prompt, /\n/);
+  // 承重子句仍在：genre 与 BPM 没有被压缩丢掉。
+  assert.match(out.prompt, /indie folk/);
+  assert.match(out.prompt, /90 BPM/);
   assert.ok(out.truncated.includes("vocal"));
   assert.ok(out.truncated.includes("instrumentation"));
   assert.ok(out.truncated.includes("mood"));
-  assert.ok(out.applied.includes("truncate-3000-hard"));
+  assert.ok(out.applied.includes("compress-3000-by-layer"));
 });
 
 test("flowmusic hasLyrics 明示时走保版面分支，不压单行", () => {
@@ -208,11 +220,14 @@ test("yue2：style 是散文 → 不套 flowmusic 的 220 平面，长散文原�
   assert.ok(!out.applied.includes("collapse-single-line"));
 });
 
-test("yue2：超 600 runes 走显存预算硬截（truncate-600-hard）", () => {
+test("yue2：超 600 runes 走显存预算按层压缩（compress-600-by-layer）", () => {
   const huge = `city pop, 105 BPM, ${"warm analog synth pad with tape saturation, ".repeat(120)}`;
   const out = directMusicPrompt(huge, { channel: "yue2" });
   assert.ok(runes(out.prompt) <= 600);
-  assert.ok(out.applied.includes("truncate-600-hard"));
+  // 承重子句仍在：genre（city pop）与 BPM 没有在压缩中被丢。
+  assert.match(out.prompt, /city pop/);
+  assert.match(out.prompt, /105 BPM/);
+  assert.ok(out.applied.includes("compress-600-by-layer"));
 });
 
 // ─────────────────────────────────────────────── lyria 通路

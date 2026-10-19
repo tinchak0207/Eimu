@@ -750,7 +750,7 @@ test("预检：帐本读不到 ⇒ 回落既有 users.quota 读法（可用性�
   assert.deepEqual(thrown, { verdict: "available", quota: 600_000 });
 });
 
-test("402 契约不破：不足时的状态码/错误码/文案与现状逐字相同；充足时仍走零额快车道", async () => {
+test("402 契约不破：不足时的状态码/错误码/文案与现状逐字相同；充足时按原价正常计价", async () => {
   const gate = (quota: number) =>
     enforceQuotaGate(
       { bizKeyId: "key-d3", billingUserId: 416, baseBillingAmount: 250_000 },
@@ -773,7 +773,11 @@ test("402 契约不破：不足时的状态码/错误码/文案与现状逐字�
   });
 
   const allowed = await gate(900_000);
-  assert.deepEqual(allowed, { ok: true, billingAmount: 0 }, "充足 ⇒ 0 额快车道（既有行为）");
+  assert.deepEqual(
+    allowed,
+    { ok: true, billingAmount: 250_000 },
+    "充足 ⇒ 照原价计价（不再回 0；零额快车道会让预检与 reserve 各算一次钱，造成双扣）",
+  );
 });
 
 test("契约不破：/v1/quota 回应形状不变，且无订阅时可用余额＝帐面净额（回归逐位等价）", async () => {

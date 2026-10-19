@@ -390,15 +390,18 @@ test("tampered userId never reaches the credit channel (rejected like any unreso
   assert.equal(state.quota, BASE_QUOTA);
 });
 
-test("channel unavailable (relay down) falls back to the legacy redemption flow", async () => {
+test("channel unavailable (relay down) fails 500 and creates no redemption code (result indeterminate)", async () => {
   state = freshState();
   const previousOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN;
   // 指向一个没人监听的埠：等于控面通道不可用（HMAC 中继失败）。
   process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "http://127.0.0.1:1";
   try {
     const res = await notify(callbackRequest({ orderId: "IMG-CHANNEL-DOWN", param: BOUND_PARAM }));
-    assert.equal(await res.text(), "success");
-    assert.deepEqual(state.redemptionCreates, ["MPIMG-CHANNEL-DOWN"], "退回旧流程发码兜底");
+    // 结果未定（unavailable）：上游可能已经加额，再发兑换码就是双倍到账。
+    // 回 fail 500 让支付网关注投；发放权只在 notify/sweep。
+    assert.equal(res.status, 500);
+    assert.equal(await res.text(), "fail");
+    assert.deepEqual(state.redemptionCreates, [], "结果未定＝绝不发兑换码兜底");
     assert.equal(state.quota, BASE_QUOTA, "通道不可用＝上游没动");
   } finally {
     process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = previousOrigin;

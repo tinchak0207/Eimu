@@ -62,8 +62,8 @@ test("ListVoices 语义：无参数全量回，每条带 Id/Name/Gender/Descript
   assert.equal(xiaoxiao.name.length > 0, true);
   assert.equal(xiaoxiao.gender, "female", "Gender 是清单原值");
   assert.equal(xiaoxiao.description.includes("Warm"), true, "Description 由清单原值组成");
-  assert.equal(xiaoxiao.route, "edge");
-  assert.ok(xiaoxiao.source.includes("edge_tts"), "每条带实查来源，可复核");
+  assert.equal(xiaoxiao.route, "fallback", "5e46b701 起 edge 音色 route 为 fallback（主路 SiliconFlow）");
+  assert.match(xiaoxiao.source, /实查/, "每条带实查来源，可复核");
 
   // 诚实栏位：age 一概不出现（没有真源），notes 明说。
   assert.equal(payload.data.some((v: Record<string, unknown>) => "age" in v), false);

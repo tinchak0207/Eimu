@@ -366,7 +366,8 @@ const SPEC = {
           + "**这不是保真像素放大，是重新绘制**（内容可能被模型重画）；回应用 `data[].width/height` 给出真实输出尺寸供自证。"
           + "该 比例×档位 折算不出已知可交尺寸（例如 3:2 的 2k⇒3072x2048、16:9 的 1k⇒1792x1024）⇒ 具名拒 `upscale_backend_size_unavailable`（未验证的尺寸不放行，也不静默降级成较低档位）；"
           + "没有该 比例×档位 的 image_edit 渠道 ⇒ 具名拒 `upscale_backend_capability_missing`；等待超时 ⇒ `upscale_backend_timeout`（504，任务仍在后台，已提交退款）。"
-          + "**4K 默认 fail-closed**：输出色未经真单校准前对 4K 具名拒 `upscale_4k_upstream_unverified`（不贩售未校准档位；校准后由 `UPSCALE_4K_UPSTREAM=1` 开启，开启后一键预设自动变 4K）。",
+          + "**4K 默认 fail-closed**：输出色未经真单校准前对 4K 具名拒 `upscale_4k_upstream_unverified`（不贩售未校准档位）。"
+          + "服务端 env `UPSCALE_4K_UPSTREAM`（`1`／`true`，大小写不敏感；未设＝关闭）在校准后开启：开启后提交闸放行 4K、`/v1/models` 的 `x_capabilities.upscaleTiers` 同步外露 4K，且一键预设自动变 4K；关闭时上述两处均不出现 4K。",
         security: [bearerAuth],
         requestBody: {
           required: true,
@@ -984,6 +985,8 @@ const SPEC = {
           "primary_result_id",
           "result_ids",
           "retry_of_task_id",
+          "metadata",
+          "cancellation_requested",
           "task_url",
           "request_config",
         ],
@@ -999,6 +1002,15 @@ const SPEC = {
           primary_result_id: { type: ["string", "null"] },
           result_ids: { type: "array", items: { type: "string" } },
           retry_of_task_id: { type: ["string", "null"] },
+          metadata: {
+            type: "object",
+            additionalProperties: true,
+            description: "任务提交时携带的工作流元数据（`workflow.metadata`）；无元数据时为空对象，恒存在。",
+          },
+          cancellation_requested: {
+            type: "boolean",
+            description: "是否已请求取消该任务（收到取消请求后为 true），恒存在。",
+          },
           task_url: { type: "string" },
           request_config: { $ref: "#/components/schemas/RequestConfig" },
           result_url: { type: "string", description: "仅 `succeeded` 时存在。" },

@@ -172,9 +172,12 @@ test("D2-3 逾时收口接线：TTL 两端镜像、排队时排定清扫、存�
   assert.match(hookCode, /if \(ack\.status === "queued"\) armSteerExpiry\(AGENT_STEER_QUEUE_TTL_MS\);/);
   assert.match(hookCode, /dispatch\(\{ type: "steer-expire", now: Date\.now\(\) \}\)/);
   assert.match(hookCode, /case "steer-expire":\s*\n\s*return expireQueuedSteers\(state, \{ now: action\.now, ttlMs: AGENT_STEER_QUEUE_TTL_MS \}\);/);
+  // 2026-10-19 账号隔离（95a27106）：restore 的 items 可能是服务端重建结果、
+  // 游标改名为 cursor（server event_counter 优先，否则存档 lastEventId）；
+  // savedAt 仍原样送进 reducer，逾时兜底锚点语义不变。
   assert.match(
     hookCode,
-    /dispatch\(\{ type: "restore", items: saved\.items, lastEventId, savedAt: saved\.savedAt \}\)/,
+    /dispatch\(\{ type: "restore", items, lastEventId: cursor, savedAt: saved\.savedAt \}\)/,
     "restore 必须带存档时刻（逾时判定的兜底锚点）",
   );
   assert.match(hookCode, /armSteerExpiry\(saved\.savedAt \+ AGENT_STEER_QUEUE_TTL_MS - Date\.now\(\)\)/);

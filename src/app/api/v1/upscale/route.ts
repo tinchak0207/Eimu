@@ -62,6 +62,7 @@ import type { GenerationArtifactResult, GenerationReference } from "@/lib/genera
 import type { BizApiKey } from "@/lib/biz-api-keys";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge, type SyncCharge } from "@/lib/generation-core/sync-charge";
 import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
+import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
@@ -114,6 +115,8 @@ export async function POST(req: NextRequest) {
     submission = resolveUpscaleSubmission({
       declaredTiers: declaredUpscaleTiers(PIXAI_UPSCALE_MODEL_ID),
       modelId: PIXAI_UPSCALE_MODEL_ID,
+      // 4K 校准开关只在服务端提交端读取并注入；默认关闭＝fail-closed。
+      fourKEnabled: upscaleFourKUpstreamEnabled(),
       input: body,
     });
   } catch (error) {

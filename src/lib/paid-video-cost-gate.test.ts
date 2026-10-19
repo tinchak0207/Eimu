@@ -49,16 +49,16 @@ test("expected-pass：白名单 model + 显式 720p + catalog 内时长 + 已核
 });
 
 test("expected-pass：每条映射 model 的 catalog 最长时长通过（10–30s 全放行，不增成本）", () => {
-  // catalog 实值（现场核对，2026-09-27）：
+  // catalog 实值（现场核对，2026-10-19；2026-10-18 上游改址后 minimax-h3 下限为 5s）：
   //   seedance-2.0      SEEDANCE_20_DURATIONS      = 10..15
   //   seedance-2.5-480p SEEDANCE_25_480P_DURATIONS = 10..30
   //   seedance-2.5-720p SEEDANCE_25_720P_DURATIONS = 10..29
-  //   minimax-h3        SEEDANCE_DURATIONS         = 4..15
+  //   minimax-h3        MINIMAX_H3_DURATIONS       = 5..15
   const expected: Array<{ model: string; resolution: string; min: number; max: number }> = [
     { model: "seedance-2.0-900-特惠", resolution: "480p", min: 10, max: 15 },
     { model: "seedance-2.5-900-特惠", resolution: "480p", min: 10, max: 30 },
     { model: "seedance-2.5-1010-特惠", resolution: "720p", min: 10, max: 29 },
-    { model: "minimax-h3-a", resolution: "720p", min: 4, max: 15 },
+    { model: "minimax-h3-a", resolution: "720p", min: 5, max: 15 },
   ];
   for (const item of expected) {
     const entry = PAID_VIDEO_PRICED_TRIPLES.find((triple) => triple.supplierModelId === item.model);
@@ -85,7 +85,7 @@ test("阴性①：白名单外 model 一律拒收（含事故成因的动态价�
     "sd-2.0-933-720-fast-原生真人",
     "seedance2.0-720-满血",
     "seedance2.0-mini-A",
-    "minimax-h3-max",
+    "totally-unpriced-model",
     "minimax-h3-720p",
     "sd4-seedance-2.0",
     "",
@@ -170,7 +170,7 @@ test("阴性④：未核价／未生成三元组拒收（含 catalog 最长时�
     assert.equal(verdict.allowed === false && verdict.reason, "triple_not_priced");
     assert.equal(PAID_VIDEO_PRICED_TRIPLES.some((triple) => triple.supplierModelId === unmapped), false);
   }
-  assert.equal(PAID_VIDEO_PRICED_TRIPLES.length, 4, "只有 4 条 registry 映射生成三元组");
+  assert.equal(PAID_VIDEO_PRICED_TRIPLES.length, 8, "当前 8 条 registry 映射生成三元组（按上游 model 去重）");
 
   // (d) seconds 硬上限 30 之外或非整数／缺省
   for (const seconds of [31, 45, 10.5, 0, -1, Number.NaN, undefined, "abc", ""]) {
@@ -339,6 +339,37 @@ test("作用域：白名单只含视频上游 model，不含任何图片 model i
   }
 });
 
+test("白名单与已核价三元组＝生产当前真实集合（防再次删档迁就测试）", () => {
+  assert.deepEqual([...PAID_VIDEO_MODEL_WHITELIST], [
+    "minimax-h3-933-2k-支持真人",
+    "minimax-h3-a",
+    "minimax-h3-max",
+    "seedance-2.0-900-特惠",
+    "seedance-2.0-933-特惠",
+    "seedance-2.5-1010-特惠",
+    "seedance-2.5-900-特惠",
+    "grok-video-1.5",
+    "seedance-2.0-mini",
+    "agnes-video-2.5-flash",
+    "MiniMax-H3",
+  ]);
+  // 白名单内未映射/无 claim 的 3 条（minimax-h3-933-2k-支持真人、seedance-2.0-933-特惠、
+  // grok-video-1.5）不生成三元组；其余 8 条按上游 model 去重后各一条。
+  assert.deepEqual(
+    [...new Set(PAID_VIDEO_PRICED_TRIPLES.map((triple) => triple.supplierModelId))].sort(),
+    [
+      "MiniMax-H3",
+      "agnes-video-2.5-flash",
+      "minimax-h3-a",
+      "minimax-h3-max",
+      "seedance-2.0-900-特惠",
+      "seedance-2.0-mini",
+      "seedance-2.5-1010-特惠",
+      "seedance-2.5-900-特惠",
+    ].sort(),
+  );
+});
+
 test("豁免作用域：退役渠道豁免，但在线/新渠道一律受闸（fail-closed，不泄漏）", () => {
   // 退役渠道（协议夹具）豁免：sd12-* 这类非白名单上游名不会被闸挡下，
   // 否则 openai-video-upstream 的协议回归（sd4/sd7/napi/drama 请求体形状）无法执行。
@@ -385,7 +416,7 @@ test("作用域：图片路径 2k/4k 档位照常通过共用归一化（闸不�
 
 // ─────────────────────────────────────────────────────────────────────────────
 // V-03：价格按（供给 label, 上游 model）取 claim；闸在 worker 对所有 video_generate 生效，
-// 但只有 fail-closed 协议（openai_video）或白名单 model 才审。
+// 且不因协议标志放行（failClosed 已不再作为放行开关）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("V-03 核价：gway 同名模型按 gway claim 价（0.6/0.8/1.5/1.0），xiaoyxiao 按自身价", () => {
@@ -420,9 +451,17 @@ test("V-03 兜底：claim 无价或未知供给 → 回退 PAID_VIDEO_UNIT_PRICE
   assert.equal(resolvePaidVideoUnitPrice("gway", "dreamina-seedance-2.0"), null);
 });
 
-test("V-03 作用域：非 fail-closed 协议且 model 不在白名单 → 不审（metaso/filmera 等既有视频路径不被挡）", () => {
-  assert.equal(enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: null, seconds: null }, { failClosed: false }), null);
-  assert.equal(enforcePaidVideoCostGate({ supplierModelId: "filmera-video", resolution: "1080p", seconds: 60 }, { failClosed: false }), null);
+test("V-03 作用域：failClosed 标志不再放行，非白名单 model 一律拒收（fail-closed 不泄漏）", () => {
+  // 生产现行为（paid-video-cost-gate.ts enforcePaidVideoCostGate）：无论协议标志，
+  // 一律走 assertPaidVideoSubmissionAllowed；旧「非 fail-closed 协议不审」的放行语义已移除。
+  assert.throws(
+    () => enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: null, seconds: null }, { failClosed: false }),
+    (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_missing"),
+  );
+  assert.throws(
+    () => enforcePaidVideoCostGate({ supplierModelId: "filmera-video", resolution: "1080p", seconds: 60 }, { failClosed: false }),
+    (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_not_allowed"),
+  );
   // 同样的非白名单 model 在 fail-closed 协议（openai_video）下照旧拒收。
   assert.throws(
     () => enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: "720p", seconds: 5, supplierId: "env:xiaoyxiao" }, { failClosed: true }),

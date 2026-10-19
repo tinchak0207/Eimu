@@ -59,6 +59,24 @@ import { validateExpertDeliverable, type ExpertTaskContract } from "./expert-con
 import { HARNESS_TOOL_ID_LIST } from "./harness-tool-registry.ts";
 import { BLENDER_HARNESS_TOOL_IDS } from "./blender-tools.ts";
 
+// ── 源码符号定位（防漂移，不钉死行号）─────────────────────────────────────────
+// 2026-10-19：harness id 清单本体已从 harness-tool-registry.ts 抽到
+// harness-tool-ids.ts（295c3560 客户端安全拆分）。原断言把行号写成数字，任何
+// 注释/登记位移都会红，且拆分后 registry 已不含 id。改为按符号定位：
+// 在「当前真源档」里找出该 id 的唯一定义行，数量必须恰好 1（防重复/防幻影）。
+
+/** harness id 在 harness-tool-ids.ts 的登记行：`<缩进>"<id>",`。 */
+function harnessIdDefinitionLines(source: string, id: string): string[] {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return source.split("\n").filter((line) => new RegExp(`^\\s*"${escaped}",\\s*$`).test(line));
+}
+
+/** blender 工具在 blender-tools.ts 的定义行：`<缩进>id: "<id>",`。 */
+function blenderIdDefinitionLines(source: string, id: string): string[] {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return source.split("\n").filter((line) => new RegExp(`^\\s*id:\\s*"${escaped}",\\s*$`).test(line));
+}
+
 // ── 共用夹具 ─────────────────────────────────────────────────────────────────
 
 const MOTION_VALID_INPUT = {
@@ -143,43 +161,36 @@ test("motion persona 工具白名单：每个 id 都真实存在于 harness-tool
   }
 });
 
-test("motion persona 工具白名单 id 与 harness 真源行号逐一对账（源码断言防漂移）", () => {
-  // 行号考古（现场实测，2026-09-08）：
-  // - harness-tool-registry.ts：keyframe_render L79（定义真源
-  //   shortdrama-domain/index.ts L217，经登记表注册）、image_quote L76。
-  // - blender-tools.ts：blender_exec L503 / blender_render L587 /
-  //   blender_export_gltf L795（id: 字面量），L853 BLENDER_HARNESS_TOOL_IDS
-  //   经 harness-tool-registry L36 spread 登记进 HARNESS_TOOL_ID_LIST。
-  // 2026-09-28：harness-tool-registry.ts 因档头诚实注记 +10 行、新增 4 支影片工具
-  // 而整体位移（keyframe_render 79→89、image_quote 76→86）；blender-tools.ts 未动。
-  // 2026-10-03：人机共笔三件登记 + 档头注记更新，再次自愿增行 → keyframe_render 89→91、
-  // image_quote 86→88；blender-tools.ts 仍未动。
-  const harnessLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
-  const blenderLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"), "utf8").split("\n");
-  const lineOf = (lines: string[], id: string): number =>
-    lines.findIndex((l) => l.includes(`"${id}"`)) + 1;
-  const harnessExpected: Record<string, number> = {
-    keyframe_render: 91,
-    image_quote: 88,
-  };
-  for (const [id, line] of Object.entries(harnessExpected)) {
-    assert.ok(
-      MOTION_DIRECTOR_PERSONA_TOOL_IDS.includes(id as (typeof MOTION_DIRECTOR_PERSONA_TOOL_IDS)[number]),
-      `白名单缺动态域工具 ${id}`,
+test("motion persona 工具白名单 id 与 harness 真源逐一对账（按符号定位防漂移）", () => {
+  // 2026-10-19：不再钉死行号（任何档头注记/登记位移都会误红，且 id 清单本体已
+  // 抽到 harness-tool-ids.ts）。改为在「当前真源档」按符号定位：每个 id 必须
+  // 恰好有一条定义行——防幻影工具、防重复登记，语义强于旧的行号快照。
+  const harnessSource = readFileSync(
+    nodePath.resolve(process.cwd(), "src/lib/harness-tool-ids.ts"),
+    "utf8",
+  );
+  const blenderSource = readFileSync(
+    nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"),
+    "utf8",
+  );
+
+  for (const id of ["keyframe_render", "image_quote"] as const) {
+    assert.ok(MOTION_DIRECTOR_PERSONA_TOOL_IDS.includes(id), `白名单缺动态域工具 ${id}`);
+    assert.equal(
+      harnessIdDefinitionLines(harnessSource, id).length,
+      1,
+      `harness-tool-ids.ts 中 "${id}" 必须恰好登记一次`,
     );
-    assert.equal(lineOf(harnessLines, id), line, `harness-tool-registry 中 "${id}" 行号漂移`);
   }
-  const blenderExpected: Record<string, number> = {
-    blender_exec: 503,
-    blender_render: 587,
-    // blender_export_gltf 不在 motion 域白名单（归 web3d 域，见下组测试）。
-  };
-  for (const [id, line] of Object.entries(blenderExpected)) {
-    assert.ok(
-      MOTION_DIRECTOR_PERSONA_TOOL_IDS.includes(id as (typeof MOTION_DIRECTOR_PERSONA_TOOL_IDS)[number]),
-      `白名单缺动态域工具 ${id}`,
+
+  // blender_export_gltf 不在 motion 域白名单（归 web3d 域，见下组测试）。
+  for (const id of ["blender_exec", "blender_render"] as const) {
+    assert.ok(MOTION_DIRECTOR_PERSONA_TOOL_IDS.includes(id), `白名单缺动态域工具 ${id}`);
+    assert.equal(
+      blenderIdDefinitionLines(blenderSource, id).length,
+      1,
+      `blender-tools.ts 中 "${id}" 必须恰好定义一次`,
     );
-    assert.equal(lineOf(blenderLines, id), line, `blender-tools.ts 中 "${id}" 行号漂移`);
     assert.ok(
       (BLENDER_HARNESS_TOOL_IDS as readonly string[]).includes(id),
       `"${id}" 不在 BLENDER_HARNESS_TOOL_IDS 登记集内`,
@@ -506,31 +517,35 @@ test("web3d persona 工具白名单：每个 id 都真实存在于 harness-tool-
   }
 });
 
-test("web3d persona 工具白名单 id 与 harness 真源行号逐一对账（源码断言防漂移）", () => {
-  // 行号考古（现场实测，2026-09-08）：blender-tools.ts blender_export_gltf L795
-  // （id: 字面量；L853 BLENDER_HARNESS_TOOL_IDS 经 harness-tool-registry L36
-  // spread）、harness-tool-registry.ts image_quote L76。
-  // 2026-09-28：image_quote 76→86（registry 档头注记 +10 行；blender-tools.ts 未动）。
-  // 2026-10-03：人机共笔三件登记 → image_quote 86→88（blender-tools.ts 未动）。
-  const harnessLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
-  const blenderLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"), "utf8").split("\n");
-  const lineOf = (lines: string[], id: string): number =>
-    lines.findIndex((l) => l.includes(`"${id}"`)) + 1;
-  assert.ok(
-    WEB3D_DIRECTOR_PERSONA_TOOL_IDS.includes("blender_export_gltf"),
-    "白名单缺 web3d 域工具 blender_export_gltf",
+test("web3d persona 工具白名单 id 与 harness 真源逐一对账（按符号定位防漂移）", () => {
+  // 2026-10-19：同 motion 组，改为按符号定位当前真源档（不再钉行号）。
+  const harnessSource = readFileSync(
+    nodePath.resolve(process.cwd(), "src/lib/harness-tool-ids.ts"),
+    "utf8",
+  );
+  const blenderSource = readFileSync(
+    nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"),
+    "utf8",
   );
   assert.ok(
     WEB3D_DIRECTOR_PERSONA_TOOL_IDS.includes("blender_export_gltf"),
     "白名单缺 web3d 域工具 blender_export_gltf",
   );
-  assert.equal(lineOf(blenderLines, "blender_export_gltf"), 795, "blender-tools.ts 中 blender_export_gltf 行号漂移");
+  assert.equal(
+    blenderIdDefinitionLines(blenderSource, "blender_export_gltf").length,
+    1,
+    'blender-tools.ts 中 "blender_export_gltf" 必须恰好定义一次',
+  );
   assert.ok((BLENDER_HARNESS_TOOL_IDS as readonly string[]).includes("blender_export_gltf"));
   assert.ok(
     WEB3D_DIRECTOR_PERSONA_TOOL_IDS.includes("image_quote"),
     "白名单缺报价对偶 image_quote",
   );
-  assert.equal(lineOf(harnessLines, "image_quote"), 88, "harness-tool-registry 中 image_quote 行号漂移");
+  assert.equal(
+    harnessIdDefinitionLines(harnessSource, "image_quote").length,
+    1,
+    'harness-tool-ids.ts 中 "image_quote" 必须恰好登记一次',
+  );
 });
 
 test("web3d persona SKILL_PATHS：SKILL.md 真实存在（防幻影路径），与 registry 行对账", () => {

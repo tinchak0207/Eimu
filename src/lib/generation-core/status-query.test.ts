@@ -59,7 +59,7 @@ const STATUS_TO_TASK_STATE: Record<GenerationJobStatus, string> = {
   pending_billing: "queued",
   billing_unknown: "unknown",
   queued: "queued",
-  leased: "running",
+  leased: "queued",
   submitting: "running",
   running: "running",
   submit_unknown: "unknown",

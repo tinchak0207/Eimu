@@ -391,7 +391,7 @@ export async function enforceQuotaGate(
             status: 402,
             type: "insufficient_balance",
             code: "daily_quota_exceeded",
-            message: daily.message,
+            message: daily.message ?? "今日额度已用完，将于每日 00:00（UTC+8）重置。",
           };
         }
       }

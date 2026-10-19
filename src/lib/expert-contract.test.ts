@@ -85,10 +85,12 @@ test("签名确定性：同输入两次同值，key 插入序不影响", () => {
 
 test("expertId 白名单与契约回指：非法值拒、缺 evidence 拒", () => {
   // Wave2a 五域占位（provisioned 不可路由）与两个启用行同列入运行时白名单；
-  // 09-15 评测补课片追加独立审核 Expert "critic"（critic-delegate 换挂翻正）。
+  // 09-15 评测补课片追加独立审核 Expert "critic"（critic-delegate 换挂翻正）；
+  // lyricist（原创歌词）与 registry/delivery contracts 同为九域。
   assert.deepEqual([...EXPERT_IDS], [
     "director3d",
     "music",
+    "lyricist",
     "video-director",
     "editor",
     "screenwriter",

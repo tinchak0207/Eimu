@@ -30,13 +30,14 @@ interface FetchCall {
   init?: RequestInit;
 }
 
-/** 换掉全局 fetch：uploads-ticket 一律发真票，其余交给 handler；跑完还原。 */
+/** 换掉全局 fetch 与 XMLHttpRequest：uploads-ticket 一律发真票，其余交给 handler；跑完还原。 */
 async function withFetch<T>(
   handler: (call: FetchCall) => Response,
   run: (calls: FetchCall[]) => Promise<T>,
 ): Promise<T> {
   const calls: FetchCall[] = [];
-  const original = globalThis.fetch;
+  const originalFetch = globalThis.fetch;
+  const originalXhr = g.XMLHttpRequest;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const call: FetchCall = { url: String(input), init };
     calls.push(call);
@@ -45,10 +46,63 @@ async function withFetch<T>(
     }
     return handler(call);
   }) as typeof fetch;
+
+  // 生产上传器已改用 XMLHttpRequest（真实进度／可 abort），故直传请求由假 XHR 承接；
+  // 记录形状与 fetch 一致（url + init），原断言无需放宽。
+  class FakeXMLHttpRequest {
+    method = "";
+    url = "";
+    status = 0;
+    responseText = "";
+    upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    private requestHeaders: Record<string, string> = {};
+
+    open(method: string, url: string): void {
+      this.method = method;
+      this.url = url;
+    }
+
+    setRequestHeader(key: string, value: string): void {
+      this.requestHeaders[key] = value;
+    }
+
+    send(body: RequestInit["body"]): void {
+      const call: FetchCall = {
+        url: this.url,
+        init: {
+          method: this.method,
+          body,
+          ...(Object.keys(this.requestHeaders).length ? { headers: { ...this.requestHeaders } } : {}),
+        },
+      };
+      calls.push(call);
+      Promise.resolve()
+        .then(() => handler(call))
+        .then(async (response) => {
+          this.status = response.status;
+          this.responseText = await response.text();
+          this.onload?.();
+        })
+        .catch(() => {
+          this.onerror?.();
+        });
+    }
+
+    abort(): void {
+      this.onabort?.();
+    }
+  }
+  g.XMLHttpRequest = FakeXMLHttpRequest;
+
   try {
     return await run(calls);
   } finally {
-    globalThis.fetch = original;
+    globalThis.fetch = originalFetch;
+    if (originalXhr === undefined) delete g.XMLHttpRequest;
+    else g.XMLHttpRequest = originalXhr;
   }
 }
 

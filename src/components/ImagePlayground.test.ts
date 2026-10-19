@@ -119,8 +119,10 @@ test("the model picker is wired into the left prompt panel", () => {
   // Task 9：<ModelPicker> JSX 抽到 GenerateControls —— 拼接读取，断言语义不变。
   const prompt = read("src/components/PromptInput.tsx") + "\n" + read("src/components/prompt-input/GenerateControls.tsx");
 
-  assert.match(source, /models=\{PROVIDERS\.image_tinchak\.models\}/);
-  assert.match(source, /modelId=\{selectedModels\.image_tinchak\}/);
+  // 2026-10-05 红队修复（5e46b701 入库）：渠道键改中性值 "primary"
+  // （src/lib/provider-key.ts 单一真源），不再把内部渠道名带进客户端 bundle。
+  assert.match(source, /models=\{PROVIDERS\.primary\.models\}/);
+  assert.match(source, /modelId=\{selectedModels\.primary\}/);
   assert.match(source, /onModelChange=\{userSetModel\}/);
   assert.match(source, /generateAudio=\{generateAudio\}/);
   assert.match(source, /onGenerateAudioChange=\{setGenerateAudio\}/);

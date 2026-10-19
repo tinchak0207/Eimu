@@ -20,7 +20,9 @@ test("navbar exposes wallet, history and top-up controls on mobile", () => {
   // 导航栏不再有独立充值按钮与 CheckinCalendar 图标。
   assert.match(source, /<WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" \/>/);
   assert.doesNotMatch(source, /CheckinCalendar/);
-  assert.match(source, /mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1\.5/);
+  // 2026-10-04 全站规格对齐：间距 token 收成 gap-1（≥sm 才回 gap-1.5），
+  // 窄屏动作簇的「同排 + 靠右 + 不换行」语义不变。
+  assert.match(source, /mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1\b/);
   // 极简 header：所有动作（历史/文档）只显图标，文字恒 sr-only。
   assert.match(source, /sr-only/);
   assert.doesNotMatch(source, /sr-only sm:not-sr-only/, "动作文字不得在桌面恢复显示");
@@ -161,7 +163,9 @@ test("pricing copy uses simplified Chinese with a standard close affordance", ()
   assert.doesNotMatch(pricing, /返回做图/);
   assert.match(pricing, /兑换码/);
   assert.match(pricing, /兑换成功/);
-  assert.doesNotMatch(pricing, /兑换码/);
+  // 只做大陆生意：页面不得残留繁体字形。d22fa6ee 的机械转简体把这条否定断言
+  // 也转成了简体，导致与上一行自相矛盾；这里用码点还原原意（不写入繁体字形）。
+  assert.doesNotMatch(pricing, /\u5151\u63db\u78bc/, "价格页不得出现繁体「兌換碼」");
 });
 
 test("pricing page is a focused compact panel with plan carousel", () => {

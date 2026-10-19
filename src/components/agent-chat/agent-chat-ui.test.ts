@@ -363,8 +363,10 @@ test("D-24 half sentence is carried into the composer, never auto-sent", () => {
   assert.match(surface, /const continueDraft = useCallback/);
   assert.match(surface, /setPrefill\(\{ text, nonce: Date\.now\(\) \}\)/);
   assert.doesNotMatch(surface, /onClick=\{sendDraft\}/);
-  // 续写信号一路透传到输入区。
-  assert.match(surface, /prefill=\{prefill\}/);
+  // 续写信号一路透传到输入区。2026-10-19 账号隔离（95a27106）：Surface 只在
+  // 账号内容仍是当前账号时下传 prefill，避免切换账号后旧状态被注入新会话；
+  // 通路本身不变（Panel 仍逐字透传 prefill）。
+  assert.match(surface, /prefill=\{contentIsCurrent \? prefill : null\}/);
   assert.match(panel, /prefill=\{prefill\}/);
   assert.match(panel, /onPrefillConsumed=\{onPrefillConsumed\}/);
 
@@ -716,7 +718,9 @@ test("D-1 AI 助理 is a toggle beside 改图/放大, not a page takeover", () =
   assert.match(code, /onModeChange\(mode === "upscale" \? "generate" : "upscale"\)/);
   assert.match(code, /onModeChange\(mode === "agent" \? "generate" : "agent"\)/);
   // 选中态也要跟邻居一致：未选中时是灰的，不许自己常亮蓝底冒充「已开启」。
-  assert.match(code, /mode === "agent"\s*\?\s*"bg-\[rgba\(0,122,255,0\.12\)\] text-\[#007AFF\]/);
+  // 2026-10-04 全站规格对齐（2320dd1c）：底色改走品牌 token bg-ios-blue/[0.12]，
+  // 仍是「12% 蓝底 + 蓝字 + 细环」的选中态，不常亮实心蓝。
+  assert.match(code, /mode === "agent"\s*\?\s*"bg-ios-blue\/\[0\.12\] text-\[#007AFF\]/);
   assert.match(code, /aria-pressed=\{mode === "agent"\}/);
 
   // 聊天区长在模式控件区里（和 edit / upscale 两块同级），不是另一层壳。
@@ -1552,7 +1556,9 @@ test("刀3 回到底部钮：44×44 玻璃圆钮、仅窄屏渲染、显隐两�
   assert.match(shown, /opacity-100/);
   assert.match(shown, /lucide-arrow-down/, "向下箭头真渲染（lucide ArrowDown）");
   assert.match(shown, /active:scale-95/, "active 压感回馈");
-  assert.match(shown, /duration-\[140ms\]/, "140ms 淡入淡出");
+  // 2026-10-04（20712427）：Tailwind 对 duration-[...] 有歧义不产 CSS，
+  // 实算退回 150ms；改用 duration-150 让「150ms 淡入淡出」真正生效。
+  assert.match(shown, /duration-150/, "150ms 淡入淡出");
 
   // 隐藏态：透明＋不吃事件＋不可聚焦（隐形钮不许被 Tab 到、不许挡点击）。
   const hidden = renderToStaticMarkup(

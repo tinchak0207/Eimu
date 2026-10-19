@@ -3,19 +3,21 @@ import test from "node:test";
 
 import { DESKTOP_RELEASES, detectDesktopPlatform, resolveDesktopDownload } from "./desktop-releases.ts";
 
-/** 发布档一律托管在 Vercel Blob 的 desktop/ 目录，且必须是 https。 */
-const BLOB_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/;
+/** 发布档托管在自家 nginx 的 desktop/ 目录（2026-10-05 起由 Vercel Blob 迁出），且必须是 https。 */
+const RELEASE_HOST = "store.tinchak0207.xyz";
 
 test("desktop releases expose a non-empty version string", () => {
   assert.equal(typeof DESKTOP_RELEASES.version, "string");
   assert.ok(DESKTOP_RELEASES.version.trim().length > 0, "version 不可为空");
 });
 
-test("desktop releases are pinned to 0.3.2 on both platforms", () => {
-  assert.equal(DESKTOP_RELEASES.version, "0.3.2");
+test("desktop releases pin each platform to its own real version", () => {
+  // 版本语义逐平台：Linux 0.3.5、Windows 0.3.3（top-level 只是较新者标记）。
+  assert.equal(DESKTOP_RELEASES.version, "0.3.5");
+  assert.equal(DESKTOP_RELEASES.linux.version, "0.3.5", "linux version");
+  assert.equal(DESKTOP_RELEASES.windows.version, "0.3.3", "windows version");
   for (const key of ["linux", "windows"] as const) {
-    assert.equal(DESKTOP_RELEASES[key].version, "0.3.2", `${key} version`);
-    assert.match(DESKTOP_RELEASES[key].url, /Eimu-0\.3\.2/, `${key} url 必须含 Eimu-0.3.2`);
+    assert.match(DESKTOP_RELEASES[key].url, new RegExp(`Eimu-${DESKTOP_RELEASES[key].version.replace(/\./g, "\\.")}`), `${key} url 必须含该平台版本`);
   }
 });
 
@@ -35,14 +37,14 @@ test("each platform URL pins its own versioned artifact", () => {
   }
 });
 
-test("linux and windows release URLs are https, on the blob desktop/ path, and versioned", () => {
+test("linux and windows release URLs are https, on the desktop/ path, and versioned", () => {
   for (const key of ["linux", "windows"] as const) {
     const release = DESKTOP_RELEASES[key];
     assert.equal(typeof release.url, "string");
     const url = new URL(release.url);
     assert.equal(url.protocol, "https:", `${key} 必须是 https`);
-    assert.match(url.hostname, BLOB_HOST, `${key} 必须在 Vercel Blob 主机`);
-    assert.ok(url.pathname.startsWith("/desktop/"), `${key} pathname 必须以 /desktop/ 开头`);
+    assert.equal(url.hostname, RELEASE_HOST, `${key} 必须在发行主机`);
+    assert.ok(url.pathname.includes("/desktop/"), `${key} pathname 必须含 /desktop/ 目录`);
     const filename = url.pathname.split("/").pop() ?? "";
     assert.ok(filename.includes(release.version), `${key} 档名必须含该平台 version（${release.version}）`);
     assert.doesNotMatch(release.url, /^http:\/\//, "不得使用明文 http");

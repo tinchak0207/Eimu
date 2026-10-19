@@ -146,8 +146,8 @@ test("hasEngineeringData", () => {
 
 // ─────────────────────────────────────────── 连续转场（2026-09-30 打磨）
 
-test("lodBlend：两端饱和、带内单调、两带不重叠", () => {
-  assert.deepEqual(lodBlend(0.6), { gather: 0, xray: 0 });
+test("lodBlend：两端饱和、带内单调、三带不重叠（gather / xray / board）", () => {
+  assert.deepEqual(lodBlend(0.6), { gather: 0, xray: 0, board: 0 });
   assert.equal(lodBlend(0.5).gather, 0);
   assert.equal(lodBlend(0.36).gather, 1);
   assert.equal(lodBlend(0.2).gather, 1);
@@ -164,6 +164,23 @@ test("lodBlend：两端饱和、带内单调、两带不重叠", () => {
   // 离散门槛落在连续带内：进 LOD1 时已接近收束、进 LOD3 时工程条已开始滑出。
   assert.ok(lodBlend(0.37).gather > 0.9);
   assert.ok(lodBlend(1.15).xray > 0 && lodBlend(1.15).xray < 0.3);
+
+  // board 带（fdd91756）：k 0.26 → 0.13，两端饱和、带内随 k 下降单调升。
+  assert.equal(lodBlend(0.26).board, 0, "带起点尚未进入画布层");
+  assert.equal(lodBlend(0.5).board, 0);
+  assert.equal(lodBlend(0.13).board, 1, "带终点＝画布层全成形");
+  assert.equal(lodBlend(0.05).board, 1);
+  assert.ok(Number.isFinite(lodBlend(0.2).board), "board 必须是有限值");
+  assert.ok(lodBlend(0.2).board > 0 && lodBlend(0.2).board < 1, "带中点应在两端之间");
+  let prevBoard = -1;
+  for (let k = 0.26; k >= 0.13; k -= 0.01) {
+    const b = lodBlend(k).board;
+    assert.ok(b >= prevBoard, `board 应随 k 下降而上升（k=${k.toFixed(2)}）`);
+    assert.ok(b >= 0 && b <= 1, "board 落在 [0,1]");
+    prevBoard = b;
+  }
+  // 三带互不重叠：board 带在 gather 带之下，gather 区不得出现 board。
+  assert.equal(lodBlend(0.4).board, 0);
 });
 
 test("gatherVisuals：戏在 phase A 演完；节点先飞后淡（A 段前半不透明）", () => {

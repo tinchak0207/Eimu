@@ -24,15 +24,56 @@ function makeEvent(overrides: Partial<RoutingEvent> = {}): RoutingEvent {
 const NOW = 1_800_000_000_000;
 const HOUR = 60 * 60 * 1000;
 
-test("summarizeRecentModelStats counts delivered as success, all other outcomes as failed", () => {
+/** 真实上游失败 attempt（带数字 status、原因不属于瞬态/用户侧排除集）。 */
+const UPSTREAM_FAILURE = {
+  label: "pool-a",
+  host: "a.example.com",
+  ok: false,
+  ms: 800,
+  status: 503,
+  reason: "upstream_error",
+};
+
+test("summarizeRecentModelStats counts delivered as success, real upstream failures as failed", () => {
   const events: RoutingEvent[] = [
     makeEvent({ modelId: "model-a", ts: NOW - 2 * HOUR, outcome: "delivered" }),
     makeEvent({ modelId: "model-a", ts: NOW - 3 * HOUR, outcome: "delivered" }),
-    makeEvent({ modelId: "model-a", ts: NOW - 4 * HOUR, outcome: "exhausted", refunded: true }),
-    makeEvent({ modelId: "model-a", ts: NOW - 5 * HOUR, outcome: "cancelled" }),
+    makeEvent({
+      modelId: "model-a",
+      ts: NOW - 4 * HOUR,
+      outcome: "exhausted",
+      refunded: true,
+      attempts: [UPSTREAM_FAILURE],
+    }),
+    makeEvent({
+      modelId: "model-a",
+      ts: NOW - 5 * HOUR,
+      outcome: "cancelled",
+      attempts: [UPSTREAM_FAILURE],
+    }),
     // Different model, all failures, no refunds.
-    makeEvent({ modelId: "model-b", ts: NOW - 1 * HOUR, outcome: "exhausted" }),
-    makeEvent({ modelId: "model-b", ts: NOW - 2 * HOUR, outcome: "no-endpoints" }),
+    makeEvent({
+      modelId: "model-b",
+      ts: NOW - 1 * HOUR,
+      outcome: "exhausted",
+      attempts: [UPSTREAM_FAILURE],
+    }),
+    makeEvent({
+      modelId: "model-b",
+      ts: NOW - 2 * HOUR,
+      outcome: "no-endpoints",
+      attempts: [UPSTREAM_FAILURE],
+    }),
+    // 瞬态失败（deadline_exceeded / network / 无 status）不是渠道坏：一律不计入。
+    makeEvent({
+      modelId: "model-transient",
+      ts: NOW - 1 * HOUR,
+      outcome: "exhausted",
+      attempts: [
+        { label: "pool-a", host: "a.example.com", ok: false, ms: 30000, status: 503, reason: "deadline_exceeded" },
+        { label: "pool-a", host: "a.example.com", ok: false, ms: 10, reason: "network" },
+      ],
+    }),
   ];
 
   const stats = summarizeRecentModelStats(events, NOW);
@@ -52,6 +93,10 @@ test("summarizeRecentModelStats counts delivered as success, all other outcomes 
   assert.equal(modelB.failed, 2);
   assert.equal(modelB.refunded, 0);
   assert.equal(modelB.success_rate, 0);
+
+  // 负向：只有瞬态失败（从未拿到真实上游失败回应）的模型整行不出现——
+  // 排队超时/网络抖动不得把健康渠道判死（2026-10-14 假判定修复）。
+  assert.equal(stats.find((s) => s.modelId === "model-transient"), undefined);
 });
 
 test("summarizeRecentModelStats drops events outside the 24h window", () => {
@@ -87,7 +132,12 @@ test("summarizeRecentModelStats sorts by jobs descending", () => {
   const events: RoutingEvent[] = [
     makeEvent({ modelId: "few", ts: NOW - HOUR, outcome: "delivered" }),
     makeEvent({ modelId: "many", ts: NOW - HOUR, outcome: "delivered" }),
-    makeEvent({ modelId: "many", ts: NOW - 2 * HOUR, outcome: "exhausted" }),
+    makeEvent({
+      modelId: "many",
+      ts: NOW - 2 * HOUR,
+      outcome: "exhausted",
+      attempts: [UPSTREAM_FAILURE],
+    }),
   ];
   const stats = summarizeRecentModelStats(events, NOW);
   assert.deepEqual(stats.map((s) => s.modelId), ["many", "few"]);

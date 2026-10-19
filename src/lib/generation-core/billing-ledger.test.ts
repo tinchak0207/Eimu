@@ -191,7 +191,7 @@ function mockBillingSql(input: {
     if (sql.includes("SELECT * FROM billing_operation")) {
       return [{ id: "refund-1", amount, status: opStatus, attempt_count: input.claimedAttemptNo - 1 }];
     }
-    if (sql.includes("SELECT * FROM generation_job WHERE id =")) {
+    if (sql.includes("FROM generation_job job WHERE job.id =")) {
       return input.jobRow ? [{ ...input.jobRow, status: jobStatus }] : [];
     }
     if (sql.includes("attempt_count = attempt_count + 1")) {

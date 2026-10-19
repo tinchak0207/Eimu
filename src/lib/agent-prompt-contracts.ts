@@ -10,11 +10,11 @@
  * 结构范式参考：gzxx-2025/aid-server（MIT，copyright 光子讯息(杭州)科技有限公司）
  * `doc/提示词开发指南.md`（27 份契约：用途／输入（占位符表）／输出（形态＋顶层键＋
  * 栏位表）／开发要点／AI 生成指引 + 五条通用硬规则）。**本档只借用结构范式，
- * 全部内容为我方自有**——八个 Expert 的职责、输入栏位、输出栏位一律从现场代码
+ * 全部内容为我方自有**——九个 Expert 的职责、输入栏位、输出栏位一律从现场代码
  * 读出（persona／delegate／registry），没有一项取自 AID。
  *
  * 口径（现场取证，2026-09-15）：
- *   - `inputMode` 八个 Expert 一律 `"user_message"`：我方没有 system prompt
+ *   - `inputMode` 九个 Expert 一律 `"user_message"`：我方没有 system prompt
  *     占位符替换通道，委托单是主脑以用户消息递给子代理的（gateway 原样透传
  *     `compose*Delegation(...).serialized` 或 `assemble*Prompt(...).prompt`）。
  *     故 `placeholders` 记录的是「委托单 user message 栏位表」（AID 对 user_message
@@ -42,6 +42,7 @@
 
 import { DIRECTOR_PERSONA_DESCRIPTION } from "./blender-director-persona";
 import { CRITIC_PERSONA_DESCRIPTION } from "./critic-persona";
+import { LYRICIST_PERSONA_DESCRIPTION } from "./lyricist-persona";
 import { EDITOR_PERSONA_DESCRIPTION } from "./editor-persona";
 import { MOTION_DIRECTOR_PERSONA_DESCRIPTION } from "./motion-director-persona";
 import { MUSIC_DIRECTOR_PERSONA_DESCRIPTION } from "./music-director-persona";
@@ -116,7 +117,7 @@ const FIELD_URL_OPT: PromptField = {
 // ─────────────────────────────────────────── 契约目录
 
 /**
- * 八个 Expert 的提示词契约（agentCode = expert-registry 注册键；EXPERT_IDS 八值全覆盖）。
+ * 九个 Expert 的提示词契约（agentCode = expert-registry 注册键；EXPERT_IDS 九值全覆盖）。
  * 顺序与 expert-registry.EXPERT_REGISTRY 宣告序一致（director3d → critic）。
  */
 export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
@@ -147,6 +148,39 @@ export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
       "尚无机器契约：模型层输出（散文 + 资产引用）不受纯 JSON 检查；契约检查器对本 Expert 只能校验工具回执层键名，喂散文会误报——如实缺口，非现有规则可涵盖。",
       "产物 kind 白名单 turntable=mp4／stills=png／blend／glb（blender-delegate.ts collectSceneCardFromArtifacts）：缺 mp4 用首张 png 兜底并在 scene_summary 前缀标注；缺 blend 或 glb 直接 missing_deliverables，不产半形数据。",
       "委托单 2k token 预算（DELEGATION_TOKEN_BUDGET）：超预算结构化报错，不会截断后派遣。",
+    ],
+  },
+  {
+    agentCode: "lyricist",
+    purpose: LYRICIST_PERSONA_DESCRIPTION,
+    // 委托单 = composeLyricistDelegation 的 intent/materials/acceptance（user message）。
+    inputMode: "user_message",
+    placeholders: [
+      { name: "intent", meaning: "创作意图（谁在什么情境唱什么、情绪与叙事目标）。", source: "主脑委托单（user message）" },
+      { name: "materials", meaning: "素材指针（参考词／题材物件／用户提供原词，原样透传）。", source: "画布节点／附件／URL" },
+      { name: "acceptance", meaning: "验收标准（文学质量、字数预算与可唱性要求）。", source: "主脑委托单（user message）" },
+      { name: "target_seconds", meaning: "目标演唱秒数（用户明确要求时使用；未给则按 165 秒预算）。", source: "主脑委托单（user message）" },
+      { name: "bpm", meaning: "BPM（未给定则由歌词专家先定并写明，缺省 88）。", source: "主脑委托单（user message）" },
+    ],
+    outputMode: "json",
+    // 回执顶层 = lyricist-delegate.ts collectLyricistDeliverableFromToolResult 实际
+    // JSON.parse 后逐键查验的那一层：ok + LYRICIST_DELIVERABLES + artifact_path。
+    topLevelKeys: ["ok", "title", "lyrics", "hook", "prosody_notes", "qc", "artifact_path"],
+    fields: [
+      FIELD_OK,
+      { name: "title", type: "string", required: true, meaning: "歌名（lyricist-delegate.ts 必查：非空字串）。" },
+      { name: "lyrics", type: "string", required: true, meaning: "完整歌词正文（必查非空；不受过程摘要 token 帽裁剪，交付物指针另附）。" },
+      { name: "hook", type: "string", required: true, meaning: "记忆点副歌／钩子（必查非空字串）。" },
+      { name: "prosody_notes", type: "string", required: true, meaning: "韵律／字数预算说明（含演唱字数 ÷ 预算 = Z%，必查非空）。" },
+      { name: "qc", type: "string", required: true, meaning: "QC 结论（可唱性／字数预算／文学自评，必查非空）。" },
+      { name: "artifact_path", type: "string", required: true, meaning: "完整歌词落盘路径（lyricist-delegate.ts 独立必查；缺即 missing_deliverables）。" },
+    ],
+    frozenConstants: ["ok", "title", "lyrics", "hook", "prosody_notes", "qc", "artifact_path"],
+    pitfalls: [
+      "六个交付键都是非空**字串**（collect 只认 typeof string 且 trim 非空）：给对象／阵列即 missing_deliverables。",
+      "artifact_path 独立于 LYRICIST_DELIVERABLES 另行必查：歌词正文再完整，没落盘路径也算未交付。",
+      "lyrics 是完整正文，不得用「见文件」等摘要替代；也不得调用 music_gen（歌词专家只写词，不生成音频）。",
+      "演唱字数预算：目标秒数×BPM÷60×每拍音节数；自撰稿 Z >100% 不得交付生成，先删到 ≤100%。",
     ],
   },
   {

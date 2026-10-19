@@ -11,14 +11,16 @@ import type { BillingRefundResult } from "./billing-ledger.ts";
 type Call = { sql: string; values: unknown[] };
 
 // 照 billing-ledger.test.ts 的 mock GenerationSql 模式。
-// cancelGenerationJob 全部语义压在一条 CTE UPDATE 上：可取消态回传
+// cancelGenerationJob 全部语义压在一条 CTE UPDATE 上：可取消态写 cancel_requested_at 并回传
 // { id, previous_status }，否则空集（上层 route 映射 409 already_terminal）。
+// 新契约：排队/租约态直接置 cancelled；在飞态（submitting/running/submit_unknown）保留原状态，
+// 只写 cancel_requested_at，交给对帐收尾（远端任务可能已提交，钱不能凭本地取消就退）。
 function mockSql(options: { cancellable: boolean; previousStatus: string }) {
   const calls: Call[] = [];
   const tagged = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings.join(" ");
     calls.push({ sql: text, values });
-    if (text.includes("SET status = 'cancelled'")) {
+    if (text.includes("cancel_requested_at")) {
       return options.cancellable
         ? [{ id: "job-1", previous_status: options.previousStatus }]
         : [];
@@ -36,16 +38,28 @@ test("cancel of a queued job succeeds, reports previous status and appends job_c
   assert.deepEqual(result, { cancelled: true, previousStatus: "queued" });
   assert.ok(calls.some((call) =>
     call.sql.includes("INSERT INTO job_events") && call.values.includes(JOB_EVENT.jobCancelled)));
+  // 排队/租约态没有在飞上游任务 → CASE 的 ELSE 分支直接置 cancelled。
   assert.ok(calls.some((call) =>
-    call.sql.includes("SET status = 'cancelled'")
-      && call.sql.includes("'pending_billing', 'queued', 'leased', 'submitting', 'running'")));
+    call.sql.includes("SET cancel_requested_at = COALESCE(cancel_requested_at,now())")
+      && call.sql.includes("ELSE 'cancelled' END")
+      && call.sql.includes("'pending_billing', 'queued', 'leased', 'submitting', 'running','submit_unknown'")));
 });
 
-test("cancel of a running job is allowed (worker discards in-flight output; reconcile settles billing)", async () => {
+test("cancel of a running job is accepted but preserves in-flight status for reconciliation", async () => {
   const { sql, calls } = mockSql({ cancellable: true, previousStatus: "running" });
   const result = await cancelGenerationJob("job-1", "biz:key-1", sql);
+  // 取消成功：客户端不必再等；但状态不得就地改成 cancelled（远端可能已提交）。
   assert.deepEqual(result, { cancelled: true, previousStatus: "running" });
+  const update = calls.find((call) => call.sql.includes("SET cancel_requested_at = COALESCE"));
+  assert.ok(update, "在飞取消必须写 cancel_requested_at");
+  assert.ok(
+    update.sql.includes("CASE WHEN status IN ('submitting','running','submit_unknown') THEN status ELSE 'cancelled' END"),
+    "在飞态保留原状态，只记取消意图交给对帐",
+  );
+  assert.ok(update.sql.includes("finished_at = CASE WHEN status IN ('submitting','running','submit_unknown') THEN finished_at"));
   assert.ok(calls.some((call) => call.values.includes("biz:key-1")));
+  assert.ok(calls.some((call) =>
+    call.sql.includes("INSERT INTO job_events") && call.values.includes(JOB_EVENT.jobCancelled)));
 });
 
 test("cancel of a terminal (succeeded) job is rejected -> route maps to 409 already_terminal", async () => {

@@ -13,8 +13,123 @@ import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
 import { hashBizApiKey } from "./biz-api-keys";
-import { __resetBizKeyStoreForTests } from "./biz-api-key-store";
-import { __resetCharacterCardStoreForTests } from "./character-card-store";
+
+// ───────────────────────── 测试用 blob 后端（真物化路径，不碰外网）
+//
+// 生产 shared 的 data:image 参考图必须物化到对象存储；无后端时 store 正确判 400。
+// 这里把 VPS image-data-api 指到一个假 origin，并把 global fetch 换成进程内实现：
+// `ensureBlobBackendWritable()` 回 true，put/get/list/del 全部走真 store 代码，
+// 只是落点是我们自己的 Map（不 mock 被测函式）。
+//
+// 注意：IMAGE_DATA_BASE_URL/API_KEY 是 vps-blob-adapter 的**模组载入期快照**，
+// 所以必须在任何 blob 依赖被 import 之前设定——本档因此把 biz-api-key-store /
+// character-card-store 改成动态 import（下方 top-level await）。
+const FAKE_BLOB_ORIGIN = "http://blob.test";
+process.env.IMAGE_DATA_BASE_URL = FAKE_BLOB_ORIGIN;
+process.env.IMAGE_DATA_API_KEY = "test-image-data-key";
+
+interface FakeBlob {
+  bytes: Uint8Array;
+  contentType: string;
+  uploadedAt: Date;
+}
+const fakeBlobs = new Map<string, FakeBlob>();
+const realFetch = globalThis.fetch;
+
+function fakeBlobUrl(pathname: string): string {
+  return `${FAKE_BLOB_ORIGIN}/files/${pathname}`;
+}
+
+/** 进程内 image-data-api：PUT/GET/DELETE/list 与 VPS adapter 的路径契约一致。 */
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const parsed = new URL(url);
+  if (parsed.origin !== FAKE_BLOB_ORIGIN) return realFetch(input as RequestInfo, init);
+  const method = (init?.method ?? "GET").toUpperCase();
+
+  if (parsed.pathname.startsWith("/files/")) {
+    const pathname = decodeURIComponent(parsed.pathname.slice("/files/".length));
+    const blob = fakeBlobs.get(pathname);
+    if (!blob) return new Response("not found", { status: 404 });
+    return new Response(blob.bytes as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "content-type": blob.contentType,
+        "x-blob-size": String(blob.bytes.length),
+        "x-blob-uploaded-at": blob.uploadedAt.toISOString(),
+      },
+    });
+  }
+
+  if (parsed.pathname === "/api/blob/list") {
+    const prefix = parsed.searchParams.get("prefix") ?? "";
+    const blobs = [...fakeBlobs.entries()]
+      .filter(([pathname]) => pathname.startsWith(prefix))
+      .map(([pathname, blob]) => ({
+        url: fakeBlobUrl(pathname),
+        pathname,
+        size: blob.bytes.length,
+        uploadedAt: blob.uploadedAt.toISOString(),
+      }));
+    return Response.json({ blobs, hasMore: false });
+  }
+
+  if (parsed.pathname === "/api/blob/get") {
+    const pathname = parsed.searchParams.get("path") ?? "";
+    const blob = fakeBlobs.get(pathname);
+    if (!blob) {
+      return new Response(null, {
+        status: 404,
+        headers: { "x-blob-size": "0", "x-blob-uploaded-at": new Date(0).toISOString() },
+      });
+    }
+    return new Response(blob.bytes as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "content-type": blob.contentType,
+        "x-blob-size": String(blob.bytes.length),
+        "x-blob-uploaded-at": blob.uploadedAt.toISOString(),
+      },
+    });
+  }
+
+  if (parsed.pathname.startsWith("/api/blob/")) {
+    const pathname = parsed.pathname
+      .slice("/api/blob/".length)
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+    if (method === "PUT") {
+      const raw = init?.body;
+      const bytes =
+        typeof raw === "string"
+          ? new TextEncoder().encode(raw)
+          : raw instanceof Uint8Array
+            ? raw
+            : new Uint8Array(await new Response(raw as BodyInit).arrayBuffer());
+      const contentType = new Headers(init?.headers).get("x-content-type") ?? "application/octet-stream";
+      const uploadedAt = new Date();
+      fakeBlobs.set(pathname, { bytes, contentType, uploadedAt });
+      return Response.json({
+        url: fakeBlobUrl(pathname),
+        pathname,
+        size: bytes.length,
+        uploadedAt: uploadedAt.toISOString(),
+      });
+    }
+    if (method === "DELETE") {
+      fakeBlobs.delete(pathname);
+      return Response.json({ deleted: 1 });
+    }
+  }
+
+  return new Response("not found", { status: 404 });
+}) as typeof fetch;
+
+// tsx 以 CJS 执行测试（无 top-level await）：用 require 保证 blob 依赖在 env 设定后才载入。
+declare const require: (id: string) => unknown;
+const { __resetBizKeyStoreForTests } = require("./biz-api-key-store") as typeof import("./biz-api-key-store");
+const { __resetCharacterCardStoreForTests } = require("./character-card-store") as typeof import("./character-card-store");
 
 /** 一个挂载点（route 档）真正导出的 HTTP handler。 */
 export interface CharacterCardRouteHandlers {
@@ -52,8 +167,9 @@ export function registerBizCharacterCardRouteSuite(
   function reset() {
     delete process.env.GENERATION_DATABASE_URL;
     delete process.env.DATABASE_URL;
-    delete process.env.BLOB_READ_WRITE_TOKEN; // 逼 store 走 memoryStore（真 store，非 mock）
+    delete process.env.BLOB_READ_WRITE_TOKEN; // 走 VPS 后端分支（测试 fetch 替身），不落进程内记忆体
     process.env.BIZ_API_KEY_HASHES = `${hashBizApiKey(VALID_KEY)}:${VALID_USER_ID}`;
+    fakeBlobs.clear();
     __resetBizKeyStoreForTests();
     __resetCharacterCardStoreForTests();
   }
@@ -95,6 +211,7 @@ export function registerBizCharacterCardRouteSuite(
 
   test.after(() => {
     delete process.env.BIZ_API_KEY_HASHES;
+    globalThis.fetch = realFetch;
     __resetBizKeyStoreForTests();
     __resetCharacterCardStoreForTests();
   });
@@ -107,7 +224,11 @@ export function registerBizCharacterCardRouteSuite(
       kind: "character",
       prompt: "黑色羊毛真丝高领礼服，冷白皮，细长凤眼",
       negative_prompt: "模糊, 多手",
-      reference_urls: ["https://img.example/huo-1.png", "data:image/png;base64,AAAA"],
+      // 最小合法 1x1 PNG（透明）data URI：物化路径要求真图片魔数，不能用 "AAAA"。
+      reference_urls: [
+        "https://img.example/huo-1.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      ],
     };
     const saved = await postCard(input);
     assert.equal(saved.status, 201, "新建/更新固定回 201");
@@ -118,7 +239,14 @@ export function registerBizCharacterCardRouteSuite(
     assert.equal(created.name, "霍辞渊");
     assert.equal(created.kind, "character");
     assert.equal(created.prompt, input.prompt);
-    assert.deepEqual(created.reference_urls, input.reference_urls);
+    // data:image 必须先物化成对象存储 URL；http(s) 输入原样保留。
+    assert.equal(created.reference_urls[0], input.reference_urls[0], "https URL 原样保留");
+    assert.match(
+      created.reference_urls[1],
+      /^http:\/\/blob\.test\/files\/character-cards\/4242\/refs\/[0-9a-f]+\.png$/,
+      "data URI 必须物化成参考图 URL",
+    );
+    assert.equal(created.reference_urls[1].startsWith("data:image/"), false, "不得把内嵌图原样存下");
 
     // 空卡库→有卡：GET 真的读回同一张（不是只看 POST 的 201）
     const listed = await listCards();

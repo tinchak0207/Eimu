@@ -843,6 +843,16 @@ export const MUSIC_LAYER_LABELS: Readonly<Record<MusicLayerId, string>> = {
 /** 子句切分（保留每段尾端分隔符，重建时可逐字还原）；分隔符同硬截退让点。 */
 const CLAUSE_SPLIT_PATTERN = /[^,;.，；。、\n]+[,;.，；。、\n]?/g;
 
+/**
+ * 裸段落标签：整句只有段落名本身（可带序号／冒号／标点），没有任何描述性内容。
+ * 例：`Intro`、`[Verse]`、`[Chorus 2]`。这类标签决定结构但**不承载风格信息**，
+ * 压缩时不得压过 genre（2026-10-19 回归：裸 `Intro` 权重 7 高于 genre 6，导致
+ * 「Intro: soft pad.」句被留下、genre／BPM／调性全被丢光）。带描述的段落句
+ * （`Intro: soft pad.`）仍是承重子句。
+ */
+const BARE_SECTION_LABEL_PATTERN =
+  /^[\s[\](){}，；。、:：-]*(?:pre-?chorus|chorus|verse|bridge|intro|outro|hook|refrain|breakdown|drop|主歌|副歌|导歌|桥段|前奏|尾奏|间奏)(?:\s*\d+)?[\s[\](){}，；。、:：-]*$/i;
+
 /** 未匹配任何层的细节子句（环境音／时长／乐手描述）＝中等权重：先于 STRUCTURE／PRODUCTION 被丢。 */
 const UNMATCHED_CLAUSE_WEIGHT = 3;
 
@@ -854,8 +864,15 @@ const UNMATCHED_CLAUSE_WEIGHT = 3;
 function clauseWeight(clause: string): number {
   // 无人声宣告承重最高（高于 BPM／调性）：压缩必须保住它，否则纯器乐请求会被上游补人声。
   if (INSTRUMENTAL_DECLARATION_PATTERN.test(clause)) return 8;
-  // 决定性参数（速度／调性／和弦进行／段落结构）＝承重：压缩不得把它们当低权重层丢掉。
-  if (TEMPO_KEY_PATTERN.test(clause) || SECTION_DECIDING_PATTERN.test(clause)) return 7;
+  // 速度／调性／和弦进行＝承重：压缩不得把它们当低权重层丢掉。
+  if (TEMPO_KEY_PATTERN.test(clause)) return 7;
+  // 段落结构是决定性参数，但**裸标签**（`Intro`／`[Verse]`，无描述）只决定结构、
+  // 不含风格信息：权重不得高于 genre（6），否则压缩会为了留一个空标签丢掉整段风格
+  // （2026-10-19 回归：`Intro: soft pad.` 被留、genre／BPM／调性全丢）。带描述的
+  // 段落句仍按 7 承重（段落如何展开是可采样信息）。
+  if (SECTION_DECIDING_PATTERN.test(clause)) {
+    return BARE_SECTION_LABEL_PATTERN.test(clause) ? LAYER_WEIGHT.genre : 7;
+  }
   let best = 0;
   for (const id of MUSIC_LAYER_IDS) {
     if (MUSIC_LAYER_PATTERNS[id].test(clause)) best = Math.max(best, LAYER_WEIGHT[id]);
@@ -919,8 +936,10 @@ function frontLoadDecidingParams(text: string): string {
   // 补一个逗号防与后句黏连（正常情形子句自带分隔符，逐字不变）。
   const joined = ordered
     .map((clause, index) =>
-      index < ordered.length - 1 && !/[,;.，；。、]\s*$/.test(clause)
-        ? `${clause.replace(/\s+$/, "")}, `
+      // 尾分隔符也要认换行：保版面分支（歌词／段落标签）的一行本身就是一条完整子句，
+      // 前移参数时不得把行尾 `\n` 吃掉补逗号，否则整篇歌词会被压成单行（2026-10-19 回归）。
+      index < ordered.length - 1 && !/[,;.，；。、\n]\s*$/.test(clause)
+        ? `${clause.replace(/[ \t]+$/, "")}, `
         : clause,
     )
     .join("");
@@ -961,6 +980,19 @@ function compressByClause(
     kept = kept.filter((_entry, index) => index !== pick);
   }
   const compressed = joinKept();
+  // 预算地板（2026-10-19 回归）：同权重时「丢后段」会一路丢到只剩首个短子句，实测
+  // 15 runes（`Intro: soft pad`）／30 runes，genre／BPM／调性全没，远低于 60% cap。
+  // 这种压缩结果比「保留压前文本再按边界硬截」更差 → 回退到压前文本，交给
+  // truncateAtBoundary 用满预算，并如实置 hardCapped（不做整句丢弃，故不回报被丢层）。
+  if (countRunes(compressed) < Math.ceil(limit * MIN_KEEP_RATIO) && countRunes(text) > limit) {
+    return {
+      text,
+      droppedLayers: [],
+      droppedOther: 0,
+      clauseCompressed: false,
+      hardCapped: true,
+    };
+  }
   return {
     text: compressed,
     droppedLayers,
@@ -1199,19 +1231,24 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   }
   // 压缩 warning 由**实际被丢的层**与**最终 prompt 的实际内容**反推，绝不写死成功句
   // （2026-10-04 F2：旧版在 genre 被丢、句子被硬截时仍宣称「保住了流派…不做半句截断」）。
+  // 同层可能有多条子句（被丢的子句命中 genre，但另一条同层子句仍在场）：只有最终
+  // prompt 里再也找不到的层才算「被丢」，否则回执会把仍在场的 genre 报成截断
+  // （2026-10-19：丢后段时每条 folk 子句都记 genre，实际输出仍有 folk）。
+  const retained = describeRetainedLayers(assembled.prompt);
+  const droppedCompressed = assembled.compressed.filter((id) => !retained.layers.includes(id));
   if (assembled.clauseCompressed || assembled.hardCapped) {
-    const droppedLayers = [...new Set(assembled.compressed)];
+    const droppedLayers = [...new Set(droppedCompressed)];
     const dropDesc =
       droppedLayers.length > 0 || assembled.compressedOther > 0
         ? "，已按层权重整句丢弃低优先子句" +
           (droppedLayers.length > 0 ? `（涉及层：${droppedLayers.join("、")}）` : "") +
           (assembled.compressedOther > 0 ? `及 ${assembled.compressedOther} 条非层细节子句` : "")
-        : "，且已无更低优先级的整句子句可丢";
+        : "，按层压缩不足以在不切半句的前提下用满预算";
     const keptText = describeRetainedParts(assembled.prompt);
     warnings.push(
       `长度压缩：提示词超出本通路 ${limit} runes 硬上限${dropDesc}。` +
         `最终 prompt 实际保留：${keptText.length > 0 ? keptText.join("、") : "（无完整子句）"}。` +
-        (assembled.hardCapped ? "单一子句仍超限，尾端已硬截，结尾可能不完整。" : "未做半句截断。"),
+        (assembled.hardCapped ? "尾端已按边界硬截，结尾可能不完整。" : "未做半句截断。"),
     );
   }
 
@@ -1251,7 +1288,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     layers,
     applied,
     warnings,
-    truncated: [...new Set([...assembled.truncated, ...assembled.compressed])],
+    truncated: [...new Set([...assembled.truncated, ...droppedCompressed])],
     // P0-11：结构化校验账随回执一并输出。判定对象＝**伪标签改写后的提交侧文本** `untagged`
     // （原始 `user` 里 `[BPM: 146]` 还没变成可读的 `146 BPM`，判定必然空转；而最终
     // `assembled.prompt` 会被截断/压缩，反而制造新的假跳过）。
@@ -1259,7 +1296,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     ...(assembled.clauseCompressed || assembled.hardCapped
       ? {
           compressedClauses: assembled.compressed.length + assembled.compressedOther,
-          compressedLayers: [...new Set(assembled.compressed)],
+          compressedLayers: [...new Set(droppedCompressed)],
         }
       : {}),
     ...(assembled.hardCapped ? { hardTruncated: true } : {}),

@@ -499,13 +499,16 @@ test("铁律②source：三个 generations 路由读 Idempotency-Key 头、冲�
 
 // ═══════════════════════════════════════════ GenerationTask 栏位集与 cost_coins（铁律 ③）
 
-test("铁律③runtime：非终结任务的栏位集精确等于 openapi 必填 13 栏（多余栏位=契约漂移）", () => {
+test("铁律③runtime：非终结任务的栏位集精确等于必填 13 栏 + metadata/cancellation_requested（多余栏位=契约漂移）", () => {
+  // 生产（task-response.ts）对非终结任务无条件带 metadata（画布工作流可公开 metadata）与
+  // cancellation_requested（取消意图可观测）；这两栏是 13 必填之外的固定栏位集，仍须精确相等。
+  const NON_TERMINAL_FIELDS = [...TASK_REQUIRED_FIELDS, "metadata", "cancellation_requested"];
   for (const status of ["queued", "running", "unknown"] as const) {
     const response = generationTaskResponse(jobFixture(status));
     assert.deepEqual(
       Object.keys(response).sort(),
-      [...TASK_REQUIRED_FIELDS].sort(),
-      `${status} 任务栏位集必须恰为必填 13 栏`,
+      [...NON_TERMINAL_FIELDS].sort(),
+      `${status} 任务栏位集必须恰为必填 13 栏 + metadata/cancellation_requested`,
     );
     assert.equal("result_url" in response, false, `${status} 不得带 result_url`);
     assert.equal("data" in response, false, `${status} 不得带 data`);
@@ -612,7 +615,7 @@ test("铁律⑤runtime：submit_unknown / billing_unknown 对外是 unknown—�
   }
   // 内部租约/计费态不得泄漏为对外状态。
   assert.equal(taskStatus(jobFixture("pending_billing")), "queued");
-  assert.equal(taskStatus(jobFixture("leased")), "running");
+  assert.equal(taskStatus(jobFixture("leased")), "queued");
   assert.equal(taskStatus(jobFixture("refunded")), "refunded");
   assert.equal(taskStatus(jobFixture("cancelled")), "cancelled");
 });

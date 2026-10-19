@@ -160,8 +160,9 @@ test("注册表整体守卫：键=id、taskTypes 跨行不撞（首个非占位�
   // Wave2 收口后三域配方库待落库（persona 档头考古声明置空）：skillPaths 允许
   // 空阵列，但必须与 persona 常量同构（防漂移见下方激活行对帐测试）。
   // 2026-09-27：剪辑域配方库已落库（skills/editor/ 域根+六子配方）→ editor 自
-  // 「待落库」集合移除；其余三域（video-director/screenwriter/critic）仍待补。
-  const SKILL_PENDING_IDS = new Set(["video-director", "screenwriter", "critic"]);
+  // 「待落库」集合移除；video-director 也已补 skills/video-director/SKILL.md →
+  // 自「待落库」集合移除；其余两域（screenwriter/critic）仍待补。
+  const SKILL_PENDING_IDS = new Set(["screenwriter", "critic"]);
   const seenTaskTypes = new Map<string, string>();
   for (const [key, def] of Object.entries(EXPERT_REGISTRY)) {
     assert.equal(key, def.id, `注册表键 ${key} 必须与 id 一致`);
@@ -401,8 +402,8 @@ test("Wave2 五域交付契约 requiredFields 逐行钉死", () => {
 });
 
 test("Wave2 五域 skillPaths 形状与 skill 考古结论一致", () => {
-  // 无域 skill 目录 → []（行注释标「skill 待补」）。
-  assert.deepEqual(EXPERT_REGISTRY["video-director"].skillPaths, []);
+  // video-director 配方库已落库（skills/video-director/SKILL.md）→ 与 persona 常量同构。
+  assert.deepEqual(EXPERT_REGISTRY["video-director"].skillPaths, [...VIDEO_DIRECTOR_PERSONA_SKILL_PATHS]);
   // 2026-09-27 剪辑域配方库落库：skills/editor/ 域根 + 六子配方，逐条指真实档案
   // （存在性由 editor-timeline-activation.test.ts 逐条 fs 断言）。
   assert.ok(EXPERT_REGISTRY["editor"].skillPaths.length > 0, "editor 配方库已落库，不得为空");

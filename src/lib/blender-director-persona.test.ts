@@ -28,8 +28,8 @@ test("persona 名称：id=director、展示名简体「3D 导演」、描述非�
   assert.equal(DIRECTOR_PERSONA_ID, "director");
   assert.equal(DIRECTOR_PERSONA_LABEL, "3D 导演");
   assert.ok(DIRECTOR_PERSONA_DESCRIPTION.length > 0);
-  // 简体铁律：展示名与描述不得含繁体专用字（一刀切扫「导/产/应/于/后」）。
-  for (const ch of ["导", "产", "应", "后"]) {
+  // 简体铁律：展示名与描述不得含繁体专用字（一刀切扫繁简映射：導/產/應/後/於）。
+  for (const ch of ["導", "產", "應", "後", "於"]) {
     assert.ok(!DIRECTOR_PERSONA_LABEL.includes(ch), `label 含繁体字 ${ch}`);
     assert.ok(!DIRECTOR_PERSONA_DESCRIPTION.includes(ch), `description 含繁体字 ${ch}`);
   }

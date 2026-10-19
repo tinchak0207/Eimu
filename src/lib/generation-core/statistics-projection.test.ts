@@ -334,11 +334,14 @@ test("统计层只读：投影层/路由/管理组件三层都没有任何写语
 
   // 判活三类文案都在展示层（话术只许存在于展示层）；文案收进展示层单一来源后，
   // 元件只引用键——投影层照样不得出现这几句话术。
+  // 账本来源标签（billing_operation）不是静态文案：它由投影层 sources 生成、管理组件渲染，
+  // 故断言投影层有该数据源标签且元件确实渲染 payload.sources，而不是误读 ui-strings。
   const ui = read("src/components/admin/AdminStatistics.tsx");
   const copy = read("src/lib/ui-strings.ts");
   assert.match(copy, /资料不足/);
   assert.match(copy, /无法判定/);
-  assert.match(copy, /billing_operation/);
+  assert.match(read("src/lib/generation-core/statistics-projection.ts"), /billing_operation/);
+  assert.match(ui, /payload\.sources\.map/);
   assert.match(ui, /stats\.rate\.insufficient/);
   assert.match(ui, /stats\.liveness\.unknown/);
   assert.match(ui, /stats\.card\.ledgerSource/);

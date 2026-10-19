@@ -406,6 +406,25 @@ test("agent_ops：add_node 用预设尺寸补全 + 撞 id 丢弃", () => {
   assert.equal(added.type, CanvasNodeType.Text);
   assert.equal(added.width, 340); // CANVAS_NODE_DEFAULT_SIZE 文本预设 340x240
   assert.equal(added.height, 240);
+  // f6ab6475：只有显式给出 position 才标 moved；无 position 交给智能布局，不得谎称已移动。
+  assert.equal(added.moved, undefined);
+});
+
+test("agent_ops：add_node 显式带 position → 落位并标 moved（正控）", () => {
+  const s = canvasReducer(baseline(), {
+    type: "agent_ops",
+    ops: [
+      {
+        type: "add_node",
+        node: { id: "new-pos", type: "text", title: "带位置", position: { x: 12, y: 34 } },
+      },
+    ],
+  });
+  const added = s.nodes.find((n) => n.id === "new-pos");
+  assert.ok(added);
+  // nextPosition 会为避让既有节点调整 y；横向坐标与「显式落位」语义仍须保留。
+  assert.equal(added.position.x, 12);
+  assert.ok(added.position.y >= 34);
   assert.equal(added.moved, true);
 });
 

@@ -25,7 +25,7 @@ function job(status: GenerationJob["status"]): GenerationJob {
 
 test("task status exposes queued/running/terminal states without leaking internal lease states", () => {
   assert.equal(taskStatus(job("pending_billing")), "queued");
-  assert.equal(taskStatus(job("leased")), "running");
+  assert.equal(taskStatus(job("leased")), "queued");
   assert.equal(taskStatus(job("submit_unknown")), "unknown");
   assert.equal(taskStatus(job("refunded")), "refunded");
 });

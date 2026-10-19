@@ -17,6 +17,7 @@ import { refundSyncCharge, commitSyncCharge, reserveSyncCharge } from "@/lib/gen
 import { QUOTA_PER_COIN } from "@/lib/new-api-client";
 import { declaredUpscaleTiers, generationCoins, resolutionFromImageSize } from "@/lib/generation-model-catalog";
 import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
+import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
 import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { sanitizeUpstreamBody } from "@/lib/proxy";
@@ -85,6 +86,8 @@ async function handle(req: Request) {
     submission = resolveUpscaleSubmission({
       declaredTiers: declaredUpscaleTiers(PIXAI_UPSCALE_MODEL_ID),
       modelId: PIXAI_UPSCALE_MODEL_ID,
+      // 4K 校准开关只在服务端提交端读取并注入；默认关闭＝fail-closed。
+      fourKEnabled: upscaleFourKUpstreamEnabled(),
       input: parsedBody,
     });
   } catch (error) {

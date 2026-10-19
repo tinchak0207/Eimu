@@ -418,8 +418,12 @@ test("对话分节复用既有 AgentSessionList，标题格式化只走动态 im
 
 // ── ⑦ 当前会话高亮：读既有存档，坏 JSON 落回 null ─────────────────────────────
 
-test("读存档取当前会话 id：坏 JSON／无存档一律回 null，不抛错", () => {
-  const KEY = "agent-chat-session-v1";
+test("读存档取当前会话 id：坏 JSON／无存档回 null；合法存档按账号读取", () => {
+  // 2026-10-19 账号隔离（95a27106）：存档键改为 `agent-chat-session-v1:user:<id>`，
+  // 旧无归属键只经服务端归属核实后迁移、不得直接展示。这条继续钉「坏数据当无存档」
+  // 与「合法存档回 sessionId」，并补上账号隔离的否定断言。
+  const LEGACY_KEY = "agent-chat-session-v1";
+  const KEY = `${LEGACY_KEY}:user:7`;
   const store = new Map<string, string>();
   const fakeLocalStorage = {
     getItem: (k: string) => store.get(k) ?? null,
@@ -429,8 +433,13 @@ test("读存档取当前会话 id：坏 JSON／无存档一律回 null，不抛�
   const g = globalThis as unknown as Record<string, unknown>;
   const hadWindow = "window" in g;
   const prevWindow = g.window;
+  const hadLocalStorage = "localStorage" in g;
+  const prevLocalStorage = g.localStorage;
   g.window = { localStorage: fakeLocalStorage };
+  g.localStorage = fakeLocalStorage;
   try {
+    // 已登录账号（getStoredUser 读 napi_user）。
+    store.set("napi_user", JSON.stringify({ id: 7, username: "tester" }));
     // 坏 JSON：照既有 sanitize 惯例当「没有存档」，不得 throw。
     store.set(KEY, "{ not valid json !!");
     assert.equal(readPersistedSessionId(), null);
@@ -443,7 +452,20 @@ test("读存档取当前会话 id：坏 JSON／无存档一律回 null，不抛�
       JSON.stringify({ version: 1, sessionId: "sess-ok", lastEventId: 0, savedAt: Date.now(), items: [] }),
     );
     assert.equal(readPersistedSessionId(), "sess-ok");
+    // 账号隔离：旧无归属键即便内容合法，也不得被直接当成当前会话。
+    store.set(
+      LEGACY_KEY,
+      JSON.stringify({ version: 1, sessionId: "legacy-sess", lastEventId: 0, savedAt: Date.now(), items: [] }),
+    );
+    store.delete(KEY);
+    assert.equal(
+      readPersistedSessionId(),
+      null,
+      "旧无归属存档未经服务端核实迁移，不得直接展示",
+    );
   } finally {
+    if (hadLocalStorage) g.localStorage = prevLocalStorage;
+    else delete g.localStorage;
     if (hadWindow) g.window = prevWindow;
     else delete g.window;
   }
@@ -548,9 +570,11 @@ test("侧栏作用域把 footnote 层抬到 14px 地板，且只作用 ≤639.98
   const at = sidebarCss.indexOf(NARROW);
   assert.ok(at >= 0, "mobile-sidebar.css 缺 ≤639.98px 地板块");
   const narrowBlock = sidebarCss.slice(at);
+  // 2026-10-04 窄屏字级地板合并成一条分组规则（footnote／caption1／caption2／
+  // 12-13px 裸值共用 14px），仍必须把 footnote 层包含在内。
   assert.match(
     narrowBlock,
-    /\.mobile-sidebar-panel\s+\.text-ios-footnote\s*\{[^}]*font-size:\s*14px/s,
+    /\.mobile-sidebar-panel\s+\.text-ios-footnote\s*,[\s\S]{0,400}?\{[^}]*font-size:\s*14px/,
     "侧栏缺 footnote→14px 地板规则（会话日期行／身份副标）",
   );
   // 桌面 ≥640px 一字不动：14px 只准出现在窄屏块内。

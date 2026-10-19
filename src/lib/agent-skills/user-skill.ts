@@ -660,6 +660,14 @@ export async function saveMySkill(
     const mapped = skillRejectionStatus(rejected.reason);
     return { ok: false, status: mapped.status, error: mapped.error, reason: rejected.reason };
   }
+  // private reconcile 的 NOOP：候选与同库既有 skill 被判为「同一事实」，只刷新
+  // lastConfirmedAt，不新增文档、不进 accepted。对本端点而言这就是重复发布
+  // （store 的 G5 duplicate 在 reconcile 之后才轮到这里）——映射成 409 duplicate，
+  // 不得落进下面的 400 invalid_skill/structure。
+  if ((result.noop?.length ?? 0) > 0) {
+    const mapped = skillRejectionStatus("duplicate");
+    return { ok: false, status: mapped.status, error: mapped.error, reason: "duplicate" };
+  }
   if (result.accepted.length === 0) {
     return { ok: false, status: 400, error: "invalid_skill", reason: "structure" };
   }
