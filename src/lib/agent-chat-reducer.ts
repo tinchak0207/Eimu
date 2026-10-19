@@ -822,15 +822,34 @@ function reduceQuestionRejected(state: AgentChatState, event: AgentSseEvent & { 
 }
 
 function reduceConfirmResolved(state: AgentChatState, event: AgentSseEvent & { name: "confirm.resolved" }): AgentChatState {
-  const { request_id, approved } = event.data;
+  const { request_id, approved, auto } = event.data;
   // 可能是另一台装置裁掉的，本机没看过 request_id —— filter 自然落空，不抛错。
   const pendingConfirms = state.pendingConfirms.filter((c) => c.requestId !== request_id);
+  // 自动放行（互动模式=auto）不是使用者做过的动作，不留 notice：30 笔批量出图
+  // 曾因此堆出 30 条「已同意该笔花费。」。卡片收起即可。
+  if (auto === true) return { ...state, pendingConfirms };
+
+  // 人工裁决可能连点多次：同类通知合并到末尾那一条（保留原 id/seq，避免 React
+  // 重挂载与顺序跳动），文字带笔数；不同类型（同意/拒绝）不互相合并。
+  const dedupeKey = approved ? "confirm-approved" : "confirm-denied";
+  const last = state.items[state.items.length - 1];
+  if (last && last.kind === "notice" && last.dedupeKey === dedupeKey) {
+    const count = (last.count ?? 1) + 1;
+    const merged: AgentNoticeItem = {
+      ...last,
+      count,
+      text: approved ? `已同意 ${count} 笔花费。` : `已拒绝 ${count} 笔花费。`,
+    };
+    return { ...state, pendingConfirms, items: [...state.items.slice(0, -1), merged] };
+  }
   const notice: AgentNoticeItem = {
     kind: "notice",
     id: eventItemId("notice", event.event_id),
     seq: event.event_id,
     tone: "info",
     text: approved ? "已同意该笔花费。" : "已拒绝该笔花费。",
+    dedupeKey,
+    count: 1,
   };
   return { ...state, pendingConfirms, items: [...state.items, notice] };
 }

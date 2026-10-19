@@ -304,6 +304,8 @@ export interface AgentConfirmRequest {
 export interface AgentConfirmResolved {
   request_id: string;
   approved: boolean;
+  /** 互动模式=auto 的自动放行（网关只在这个路径带 true）：收起卡片但不留 notice。 */
+  auto?: boolean;
 }
 
 /**
@@ -840,7 +842,8 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     case "confirm.resolved": {
       const requestId = str(d.request_id);
       if (!requestId) return null;
-      return { name, event_id: eventId, data: { request_id: requestId, approved: d.approved === true } };
+      // 只有 auto===true 才保留该键，人工裁决不带（避免把缺失值规约成噪音字段）。
+      return { name, event_id: eventId, data: { request_id: requestId, approved: d.approved === true, ...(d.auto === true ? { auto: true } : {}) } };
     }
     case "quota.changed": {
       const balance = num(d.balance_coins);
@@ -1311,6 +1314,10 @@ export interface AgentNoticeItem extends TranscriptItemBase {
   kind: "notice";
   tone: "info" | "error";
   text: string;
+  /** 连续同类通知（如人工逐笔同意花费）合并成一条的键；不同键不合并。 */
+  dedupeKey?: string;
+  /** 已合并的笔数（单条缺省视为 1）。 */
+  count?: number;
 }
 
 /**

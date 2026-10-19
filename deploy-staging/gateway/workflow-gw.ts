@@ -2416,7 +2416,7 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       // settleConfirm——settle 的 approved 分支会读该 map 触发 runWfGenerate 续跑。
       // R9 扩计划重确认在 auto 档同样自动放行（同一分支覆盖）。
       if (await billingAutoApprovalEnabled(state)) {
-        settleConfirm(state, requestId, "approved")
+        settleConfirm(state, requestId, "approved", { auto: true })
         return Response.json({ ok: true, status: "approved", request_id: requestId, note: `工作流已提交后台执行（workflow_id=${wfid}）。完成后系统会自动唤醒你汇报结果与真实花费。禁止用 bash sleep 或反复 workflow_status 等待；本轮现在总结已知状态并结束回合。` })
       }
       emitToSession(state, "confirm.request", { request_id: requestId, amount_coins: estimatedTotal, description })
