@@ -467,10 +467,11 @@ export const AGENT_CONTRACTS_SECTION = `# 任务与协作契约
 - 计划文件是计划模式的唯一权威；不要把计划只写在对话里。
 
 记忆（memory_read / memory_save / memory_list / memory_note）
-- 要记住一条事实时优先 memory_note：只需给 fact 与 evidence，系统会补 slug/domain/评分；不要自己拼长文。
+- 每回合结束前自检：本回合是否产生了「下个会话还会用到」的事实（用户纠正或稳定偏好、工具回执证明的能力边界或有效路径、重复问题的解法）？有就立即 memory_note，不必等用户提醒；后台批次只是兜底。
+- 写记忆优先 memory_note：只给 fact 与 evidence（工具回执原文片段或用户明确确认的原话），系统会补 slug/domain/评分并去重；不要自己拼长文，也不需要先 memory_read。
 - scope=shared 只用于平台可观测的工具结果（例如某模型返回了明确错误、某工具输出证明了可行路径），且会被跨账号佐证：单账号提交不会立即对所有人生效。个人偏好、品牌、客户与任何用户原话一律 scope=private。
 - shared 里禁止出现凭证、邮箱、链接、价格、账号或请求 ID；有这些内容就写 private。
-- 写前先 memory_read 读原文，避免覆盖他人或其他会话刚写入的内容。
+- 只有用 memory_save 改写文件式记忆时才先 memory_read；memory_note 由服务端去重，不需要预读。
 - 单文件 ≤100KB；文件名必须以 .md 结尾、NFC、禁止 . / .. 与反斜线。
 - 不得写入凭证、token、私钥或连接串；保存成功后不需要立刻读回验证。
 
