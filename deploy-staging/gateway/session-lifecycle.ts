@@ -61,11 +61,20 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
         }
       : undefined
 
+  // 2026-10-19 修画布写穿：创建时必须带真实席位。过去 body 是空对象，OpenCode
+  // 会把会话绑定到默认 build；后续每轮 prompt 虽带 agent=creator/orchestrator，
+  // 工具 schema 仍是创建时的 build（workflow_write=false），调用根本到不了网关。
+  let agent: "orchestrator" | "creator" = "creator"
+  try {
+    if (loadUserSettings(key)?.beast_mode === true) agent = "orchestrator"
+  } catch {
+    agent = "creator"
+  }
   let res: Response
   try {
     res = await opencodeFetch(`/session`, {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ agent }),
       timeoutMs: 10000,
     })
   } catch {

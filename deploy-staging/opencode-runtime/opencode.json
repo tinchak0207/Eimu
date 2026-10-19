@@ -500,7 +500,7 @@
         "workflow_start": true,
         "workflow_status": true,
         "workflow_update_node": true,
-        "workflow_write": false,
+        "workflow_write": true,
         "world_bible_extract": false,
         "write": true
       }
