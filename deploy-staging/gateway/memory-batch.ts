@@ -73,7 +73,7 @@ export function signEmptyMemoryBody(secret: string): string {
 
 // ─────────────────────────── 契约 §6 prompt（唯一真源，逐字，promptVersion="v1"）
 
-export const MEMORY_PROMPT_VERSION = "v2"
+export const MEMORY_PROMPT_VERSION = "v3"
 
 export const CURATOR_PROMPT_V1 = `You are the memory curator for an AI image/video generation assistant.
 Input: one conversation transcript. Output: a single JSON object. Nothing else.
@@ -87,9 +87,7 @@ HARD RULES - a proposal violating any of these is discarded downstream by the sy
 - "shared" proposals MUST NOT contain: user names, account ids, session ids, emails, URLs, file paths, prices, API keys, tokens, or any detail traceable to one user or one purchase.
 - Skip greetings, one-off requests, small talk, and anything derivable from the product itself (pricing tables, model lists, UI text).
 - Do not propose anything you cannot state in one sentence.
-- Write ONLY transferable long-term knowledge. Do NOT write the specific answer to this task, the output spec of this one request, or details of a single incident. For type="feedback", the body MUST state the cue (what signal triggered the correction), **Why:**, and **How to apply:**.
-- For failure/correction candidates, evidence MUST quote the failing tool result or the user's own words. If you only have reasoning and no evidence, do not propose it.
-- If the same knowledge already exists, do not propose it again in different words (the system deduplicates).
+- Write ONLY transferable long-term knowledge. Do NOT store the specific answer to this task, this request's output spec, or details of a single incident; those are wrong anchors for the next task.
 
 Output schema (JSON only, no markdown fence):
 {"session_id":"<id>","candidates":[{"scope":"private|shared","domain":"<one-level domain>","slug":"<kebab-case>","description":"<one line, <=120 chars>","type":"user|feedback|project|domain|workflow","body":"<=2000 chars; for feedback/project include **Why:** and **How to apply:**","links":["<other-slug>"],"evidence":"<verbatim quote of the tool result or the user's words, <=200 chars>","evidence_kind":"tool_result|user_confirmed|verbatim","self_score":1-5,"self_score_reason":"<one line>"}],"rejected":[{"note":"<what you skipped>","reason":"one_off|greeting|derivable|no_evidence|sensitive"}]}`
