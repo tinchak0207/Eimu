@@ -144,9 +144,10 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "previz",
         kind: "text",
         title: "3D 预演（白模 blocking / 机位路径 / 动作模板）",
-        deliverable: "每镜白模 blocking + 机位路径 + 动作模板，渲染首/中/尾关键帧；预演帧作为视频生成的参考条件，不是成片",
-        gate: "预演穿模/遮挡矛盾/走位方向冲突不得进入关键帧与生成；预演帧只锁 blocking 与构图，动作过程仍由 beats 时间线表达",
+        deliverable: "每镜白模 blocking + 机位路径 + 动作模板，渲染首/中/尾关键帧；预演帧作为视频生成的参考条件，不是成片；交付含预演帧 + GLB，`.blend` 仅在 blender_* 真实可用时交付，否则明确标注缺失",
+        gate: "预演穿模/遮挡矛盾/走位方向冲突不得进入关键帧与生成；预演帧只锁 blocking 与构图，动作过程仍由 beats 时间线表达；`.blend` 缺失不算失败，但交付必须写明；预演帧/GLB 不得伪造",
         notes: [
+          "能力闸门（2026-10-20 现场）：先查真实工具表，确认 blender_exec/blender_render/blender_export_gltf 是否真的可用（不看 SKILL 宣称、不看工具文件存在）；不可用 → 用 bash + 自建几何 + 光栅渲染出首/中/尾关键帧与 GLB，并记下每帧机位/动作参数；禁止用二维文生图冒充 3D 预演；`.blend` 缺失必须在交付标注",
           "动作/走位/多人/空间关系镜头先用 director-engine 白模（L1，免费）或 Blender（L2）定 blocking、机位路径与动作模板；渲染首/中/尾关键帧后，把关键帧 + 运镜 + beats 一起交给视频模型",
           "预演帧是参考条件，不是成片也不是首帧硬锁：首帧负责起点，beats 负责过程；单人物微表情/产品特写等不涉及精确几何的镜头可跳过预演，直接首帧 I2V",
           "机位路径与动作事件对齐（跟拍从哪个动作起、急推落在哪个 beat），预演阶段发现的穿模/遮挡/轴线错误先改白模，不留给视频模型猜",
@@ -155,8 +156,10 @@ export const novelFilmTemplate: WorkflowTemplate =
           { id: "director_manage_shot", input: "镜头操作指令", output: "白模镜头序列更新结果" },
           { id: "director_set_camera_keyframe", input: "机位关键帧（时点+位置）", output: "机位路径时间线" },
           { id: "director_set_motion_keyframe", input: "动作关键帧（时点+姿态）", output: "动作模板时间线" },
-          { id: "blender_exec", input: "Blender 建模/摆位脚本", output: "白模场景与动作" },
-          { id: "blender_render", input: "白模镜头 + 帧范围", output: "首/中/尾关键帧 PNG" },
+          // 能力闸门（2026-10-20 现场）：blender_* 在当前生产席位实际为 false，保留卡面但标记不可用。
+          { id: "blender_exec", input: "Blender 建模/摆位脚本", output: "白模场景与动作", unsupported: true },
+          { id: "blender_render", input: "白模镜头 + 帧范围", output: "首/中/尾关键帧 PNG", unsupported: true },
+          { id: "bash", input: "自建几何/光栅渲染脚本", output: "预演帧 + GLB" },
         ],
       },
       // 环 5：关键帧（逐镜首帧；分镜 → 关键帧 → 视频链式）
