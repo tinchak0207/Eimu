@@ -135,8 +135,10 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
           const { width, height } = media.video
           const requestedSize = typeof receipt.size === "string" ? /^(\d+)x(\d+)$/i.exec(receipt.size) : null
           if (receipt.kind === "image" && requestedSize && (width !== Number(requestedSize[1]) || height !== Number(requestedSize[2]))) throw new Error("downloaded image does not meet requested dimensions")
+          const authoritativeWidth = typeof artifact.width === "number" && artifact.width > 0 ? artifact.width : null
+          const authoritativeHeight = typeof artifact.height === "number" && artifact.height > 0 ? artifact.height : null
           if ((item.width != null && item.width !== width) || (item.height != null && item.height !== height) ||
-              (artifact.width != null && artifact.width !== width) || (artifact.height != null && artifact.height !== height))
+              (authoritativeWidth != null && authoritativeWidth !== width) || (authoritativeHeight != null && authoritativeHeight !== height))
             throw new Error("artifact dimensions do not match actual bytes")
           verified.push({ ...item, path: local, bytes: info.size, sha256, width, height })
         }
