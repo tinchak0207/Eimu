@@ -38,6 +38,19 @@ export interface AgentMemoryDocInput {
   evidenceKind: EvidenceKind
   selfScore: number
   promptVersion?: string
+  /** ── 时间/溯源（2026-10-19）：全部可选；坏值一律忽略，绝不因可选栏丢整条。 ── */
+  validFrom?: string
+  validTo?: string
+  observedAt?: string
+  referenceTime?: string
+  /** 新事实所取代的旧事实原文（模型可产出；已并入 G3 敏感扫描）。 */
+  supersedes?: string[]
+  /** 服务端解析出的来源会话 id（网关值；note/批次通道注入，不来自候选自报）。 */
+  sourceSessionId?: string
+  /** 服务端解析出的来源讯息 id（网关值）。 */
+  sourceMessageIds?: string[]
+  lastConfirmedAt?: string
+  lastUsedAt?: string
 }
 
 /** curator（§6 schema）单条候选的松散形状：G1 前一切皆 unknown。 */
@@ -61,6 +74,13 @@ export interface GateContext {
   sharedEnabled: boolean
   /** private doc 归属（SHA-256(apiKey) 前 12 bytes hex，契约 §1）；缺栏时 shared→private 降级不可达，只能丢。 */
   ownerKeyHint?: string
+  /**
+   * 服务端解析出的会话 id（网关值）。只写 doc.sourceSessionId，**不进 G3/G4 scanned**
+   * （它不是候选内容，服务端 session id 不算泄漏）。
+   */
+  sourceSessionId?: string
+  /** 服务端解析出的来源讯息 id（网关值）；最多 20 条、每条 ≤200，坏值忽略。 */
+  sourceMessageIds?: string[]
 }
 
 export type GateAction = "accept" | "downgrade" | "drop"
@@ -84,6 +104,12 @@ const BODY_MAX = 2000 // 契约 §1/§5
 const EVIDENCE_MIN = 10 // 契约 §5 G2 硬线
 const SELF_SCORE_MIN_SHARED = 4 // 契约 §5 G6
 const SELF_SCORE_MIN_PRIVATE = 3 // 契约 §5 G6
+/** supersedes 上限（宽松容纳，防单条候选塞长文）：最多 5 条、每条 ≤200。 */
+const SUPERSEDES_MAX_ITEMS = 5
+const SUPERSEDES_ITEM_MAX = 200
+/** sourceMessageIds 上限：最多 20 条、每条 ≤200。 */
+const SOURCE_MESSAGE_IDS_MAX = 20
+const SOURCE_MESSAGE_ID_MAX = 200
 
 /** G3 敏感样板（契约 §5）：子串命中即丢，reason 只回代号。 */
 const G3_SUBSTRINGS: readonly string[] = [
@@ -146,6 +172,54 @@ export function stripJsonFence(text: string): string {
 
 function isString(v: unknown): v is string {
   return typeof v === "string"
+}
+
+/**
+ * 宽松日期解析：只在 string 且 `Date.parse` 成功时转 ISO；其余（空串/坏值/非字串）
+ * 一律 undefined —— 可选栏坏值绝不导致整条候选被丢。
+ */
+function isoDateOrUndefined(value: unknown): string | undefined {
+  if (!isString(value)) return undefined
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return undefined
+  return new Date(ms).toISOString()
+}
+
+/**
+ * `supersedes` 宽松规整：接受 string 或 string[]；trim、去空、去重、最多 5 条、
+ * 每条 ≤200；坏值（非字串/超长）忽略。空结果 → undefined（不带空数组上 doc）。
+ */
+function normalizeSupersedes(value: unknown): string[] | undefined {
+  const raw: unknown[] = Array.isArray(value) ? value : [value]
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of raw) {
+    if (!isString(item)) continue
+    const trimmed = item.trim()
+    if (trimmed.length === 0 || trimmed.length > SUPERSEDES_ITEM_MAX) continue
+    if (seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push(trimmed)
+    if (out.length >= SUPERSEDES_MAX_ITEMS) break
+  }
+  return out.length > 0 ? out : undefined
+}
+
+/** 来源讯息 id 宽松规整：只收 string[]，trim、去空、去重、最多 20 条、每条 ≤200。 */
+function normalizeSourceMessageIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of value) {
+    if (!isString(item)) continue
+    const trimmed = item.trim()
+    if (trimmed.length === 0 || trimmed.length > SOURCE_MESSAGE_ID_MAX) continue
+    if (seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push(trimmed)
+    if (out.length >= SOURCE_MESSAGE_IDS_MAX) break
+  }
+  return out.length > 0 ? out : undefined
 }
 
 /**
@@ -213,10 +287,35 @@ export function applyMemoryGates(
     selfScore,
   }
 
+  // ── 时间/溯源（2026-10-19）：宽松解析，可选栏坏值一律忽略（绝不因可选字段丢整条）。
+  // 栏位对照：candidate snake_case → doc camelCase
+  //   observed_at → observedAt、valid_from → validFrom、valid_to → validTo、
+  //   reference_time → referenceTime、supersedes → supersedes。
+  // 身份两栏 `source_session_id` / `source_message_ids` **不在**对照表：doc.sourceSessionId /
+  //   doc.sourceMessageIds 只接受 ctx 的网关解析值，候选自报一律忽略（防模型伪造来源）。
+  const observedAt = isoDateOrUndefined(candidate.observed_at)
+  const validFrom = isoDateOrUndefined(candidate.valid_from)
+  const validTo = isoDateOrUndefined(candidate.valid_to)
+  const referenceTime = isoDateOrUndefined(candidate.reference_time)
+  const supersedes = normalizeSupersedes(candidate.supersedes)
+  if (observedAt !== undefined) doc.observedAt = observedAt
+  if (validFrom !== undefined) doc.validFrom = validFrom
+  if (validTo !== undefined) doc.validTo = validTo
+  if (referenceTime !== undefined) doc.referenceTime = referenceTime
+  if (supersedes !== undefined) doc.supersedes = supersedes
+  if (isString(ctx.sourceSessionId) && ctx.sourceSessionId.trim().length > 0) {
+    doc.sourceSessionId = ctx.sourceSessionId.trim()
+  }
+  const sourceMessageIds = normalizeSourceMessageIds(ctx.sourceMessageIds)
+  if (sourceMessageIds !== undefined) doc.sourceMessageIds = sourceMessageIds
+
   // ── G3 敏感（契约 §5）：扫 description+body+evidence+domain+slug+links，命中即丢；不回显内容。
   // 2026-09-29 红队 H6：domain/slug 会被 renderRecallPrefix 逐字注入「所有用户」的召回块，
   //   必须与正文同受 G3/G4/G7 把关（此前只扫 3 栏，domain 是未设防的跨租户注入缝）。
-  const scanned = `${description}\n${body}\n${candidate.evidence}\n${domain}\n${slug}\n${links.join("\n")}`
+  // 2026-10-19：supersedes 来自模型输出（可能夹带旧事实里的 secret）→ 并入 scanned；
+  //   日期与 session id 不并入（sourceSessionId 是网关解析值，见 G4 说明）。
+  const supersedesText = supersedes !== undefined ? supersedes.join("\n") : ""
+  const scanned = `${description}\n${body}\n${candidate.evidence}\n${domain}\n${slug}\n${links.join("\n")}\n${supersedesText}`
   for (const needle of G3_SUBSTRINGS) {
     if (scanned.includes(needle)) {
       return { action: "drop", reason: "g3_secret" }

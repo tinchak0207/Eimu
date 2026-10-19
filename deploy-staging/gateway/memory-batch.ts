@@ -88,9 +88,11 @@ HARD RULES - a proposal violating any of these is discarded downstream by the sy
 - Skip greetings, one-off requests, small talk, and anything derivable from the product itself (pricing tables, model lists, UI text).
 - Do not propose anything you cannot state in one sentence.
 - Write ONLY transferable long-term knowledge. Do NOT store the specific answer to this task, this request's output spec, or details of a single incident; those are wrong anchors for the next task.
+- Only fill valid_to/supersedes when the conversation explicitly shows the old fact stopped being true or was replaced. Never guess. If unsure, leave empty.
+- observed_at must come from the conversation/tool result time, not from your own clock.
 
 Output schema (JSON only, no markdown fence):
-{"session_id":"<id>","candidates":[{"scope":"private|shared","domain":"<one-level domain>","slug":"<kebab-case>","description":"<one line, <=120 chars>","type":"user|feedback|project|domain|workflow","body":"<=2000 chars; for feedback/project include **Why:** and **How to apply:**","links":["<other-slug>"],"evidence":"<verbatim quote of the tool result or the user's words, <=200 chars>","evidence_kind":"tool_result|user_confirmed|verbatim","self_score":1-5,"self_score_reason":"<one line>"}],"rejected":[{"note":"<what you skipped>","reason":"one_off|greeting|derivable|no_evidence|sensitive"}]}`
+{"session_id":"<id>","candidates":[{"scope":"private|shared","domain":"<one-level domain>","slug":"<kebab-case>","description":"<one line, <=120 chars>","type":"user|feedback|project|domain|workflow","body":"<=2000 chars; for feedback/project include **Why:** and **How to apply:**","links":["<other-slug>"],"evidence":"<verbatim quote of the tool result or the user's words, <=200 chars>","evidence_kind":"tool_result|user_confirmed|verbatim","observed_at":"<ISO date when this fact was observed, or empty>","valid_from":"<ISO date when it became true, or empty>","valid_to":"<ISO date when it stopped being true, or empty>","supersedes":"<verbatim old fact this new fact replaces, or empty>","self_score":1-5,"self_score_reason":"<one line>"}],"rejected":[{"note":"<what you skipped>","reason":"one_off|greeting|derivable|no_evidence|sensitive"}]}`
 
 /** Verifier prompt（G8，仅 shared、换模型）——契约 §6 逐字；P1-1 本片接线进 runBatch。 */
 export const VERIFIER_PROMPT_V1 = `You are an independent fact-checker for a shared knowledge base used by an AI image/video generation assistant.
@@ -164,6 +166,8 @@ export interface MemoryBatchDeps {
   ): Promise<{ status: number; json: unknown }>
   env: MemoryBatchEnv
   now(): Date
+  /** 2026-10-19：ingest POST 成功（2xx）后回调，用于失效召回语料快取；异常不得影响批次。 */
+  onIngestSuccess?: () => void
 }
 
 export interface MemoryBatchOptions {
@@ -199,6 +203,10 @@ export interface MemoryBatchReport {
   candidates: number
   passed: number
   stored: number
+  /** 端点判定「与既有记忆重复已合并确认」的条数（noop，不重复写入）；不含在 stored。 */
+  noop: number
+  /** 端点判定「旧记忆已被新文档取代」的条数（superseded；新文档通常已 accepted）。 */
+  superseded: number
   rejected: Record<string, number>
   truncations: { sessions: number; llm_budget_hit: boolean }
   /** G8 诚实旗标：shared 候选因 `MEMORY_VERIFIER_MODEL` 未配置而跳过验证的条数。 */
@@ -408,7 +416,16 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
   }
 
   async function attemptPost(rawBody: string): Promise<{ ok: boolean; json: Record<string, unknown> | null }> {
-    return postSigned(INGEST_PATH, rawBody)
+    const result = await postSigned(INGEST_PATH, rawBody)
+    if (result.ok) {
+      // 仅 ingest 成功（批次首送与 pending 重放都经此处）：通知语料快取失效。异常吞掉。
+      try {
+        deps.onIngestSuccess?.()
+      } catch {
+        /* 快取失效失败不影响批次结果与账本 */
+      }
+    }
+    return result
   }
 
   function writePending(env: PendingEnvelope): void {
@@ -501,6 +518,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       candidates: 0,
       passed: 0,
       stored: 0,
+      noop: 0,
+      superseded: 0,
       rejected: {},
       truncations: { sessions: 0, llm_budget_hit: false },
       g8_skipped: 0,
@@ -807,7 +826,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         mark(false)
         return
       }
-      const ctx: GateContext = { ...gateCtxBase, ownerKeyHint: session.ownerKey }
+      const ctx: GateContext = { ...gateCtxBase, ownerKeyHint: session.ownerKey, sourceSessionId: session.id }
       let produced = false
       for (const raw of rawList) {
         const gated = applyMemoryGates(raw as CuratorCandidate, ctx)
@@ -858,7 +877,13 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         // proposals＝未提升的正文提案（live 未变），不是真写入：不计 stored、不进
         // acceptedIds、不参与抽检，也不参与 stored/no_docs 审计归属。
         const proposals = Array.isArray(json?.proposals) ? (json?.proposals as unknown[]) : []
+        // noop＝端点判定与既有记忆重复、已合并确认但未重复写入（不是 rejected，也不是 stored）。
+        // superseded＝端点判定旧记忆被新文档取代（对应新文档通常已 accepted，不重复扣）。
+        const noop = Array.isArray(json?.noop) ? (json?.noop as unknown[]) : []
+        const superseded = Array.isArray(json?.superseded) ? (json?.superseded as unknown[]) : []
         report.stored = accepted.length
+        report.noop = noop.length
+        report.superseded = superseded.length
         for (const id of accepted) acceptedIds.push(String(id))
         const rejected = Array.isArray(json?.rejected)
           ? (json?.rejected as Array<{ slug?: unknown; reason?: unknown }>)
@@ -868,7 +893,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
           if (slug) rejectedSlugs.add(slug)
           bump(`server_${typeof r?.reason === "string" ? r.reason : "unknown"}`)
         }
-        if (accepted.length + proposals.length < docs.length && rejected.length === 0) {
+        if (accepted.length + proposals.length + noop.length < docs.length && rejected.length === 0) {
           bump("server_silent_loss") // 回执不齐：端点没给逐条原因（G7 截断除外），记帐不吞。
         }
         // §5.6：端点回执 accepted 之后才抽检（未写入的没有品质可审）。
@@ -951,7 +976,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     report.ledger.docs_proposed = docs.length
     report.ledger.docs_stored = report.stored
     // 未入库的候选：服务端 rejected／ingest pending（dryRun 下未送，全部计入未入库）。
-    report.ledger.docs_rejected = Math.max(0, docs.length - report.stored)
+    // noop（重复已合并确认）不算 rejected；superseded 对应的新文档通常已 accepted，不重复扣。
+    report.ledger.docs_rejected = Math.max(0, docs.length - report.stored - report.noop)
     report.ledger.budget_hit = report.truncations.llm_budget_hit
     if (report.ledger.docs_stored > report.ledger.docs_proposed) {
       report.ledger.errors.push("stored_exceeds_proposed")

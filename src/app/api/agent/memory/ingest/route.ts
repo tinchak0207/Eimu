@@ -49,6 +49,7 @@ function sharedCorroborationMin(): number | undefined {
  */
 function mapDoc(raw: unknown): AgentMemoryDocInput {
   const doc = (raw ?? {}) as Record<string, unknown>;
+  const sourceMessageIds = doc.source_message_ids ?? doc.sourceMessageIds;
   return {
     scope: doc.scope as MemoryScope,
     ownerKey: (doc.owner_key ?? doc.ownerKey) as string | undefined,
@@ -63,6 +64,20 @@ function mapDoc(raw: unknown): AgentMemoryDocInput {
     evidenceKind: (doc.evidence_kind ?? doc.evidenceKind) as EvidenceKind,
     selfScore: (doc.self_score ?? doc.selfScore) as number,
     promptVersion: (doc.prompt_version ?? doc.promptVersion) as string | undefined,
+    // 时间有效性／来源栏位：原值直传，坏类型由 store 宽松清洗为 undefined（不拒绝整条）。
+    validFrom: (doc.valid_from ?? doc.validFrom) as string | undefined,
+    validTo: (doc.valid_to ?? doc.validTo) as string | undefined,
+    observedAt: (doc.observed_at ?? doc.observedAt) as string | undefined,
+    referenceTime: (doc.reference_time ?? doc.referenceTime) as string | undefined,
+    supersedes: Array.isArray(doc.supersedes)
+      ? doc.supersedes.map((item) => String(item))
+      : typeof doc.supersedes === "string"
+        ? [doc.supersedes]
+        : undefined,
+    sourceSessionId: (doc.source_session_id ?? doc.sourceSessionId) as string | undefined,
+    sourceMessageIds: Array.isArray(sourceMessageIds)
+      ? sourceMessageIds.map((item) => String(item))
+      : undefined,
   };
 }
 

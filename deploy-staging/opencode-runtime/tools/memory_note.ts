@@ -66,6 +66,10 @@ export default tool({
       const accepted = Array.isArray(data.accepted) ? data.accepted : []
       const rejected = Array.isArray(data.rejected) ? data.rejected : []
       const proposals = Array.isArray(data.proposals) ? data.proposals : []
+      // 端点新增可选回执栏：noop＝与既有记忆重复已合并确认（未重复写入）；
+      // superseded＝被新事实取代的旧记忆（旧记忆保留失效）。
+      const noop = Array.isArray(data.noop) ? data.noop : []
+      const superseded = Array.isArray(data.superseded) ? data.superseded : []
       // accepted＝平台真写入；proposals＝未提升的待佐证提案（live 未变，不是入库/生效）。
       if (accepted.length > 0) {
         return ok({
@@ -73,7 +77,23 @@ export default tool({
           accepted,
           rejected,
           proposals,
-          note: "accepted=平台已真写入；rejected 含逐条原因（如 structure/quota_scope）。shared 可能进入待审而非立即全服可见。",
+          noop,
+          superseded,
+          note:
+            superseded.length > 0
+              ? "accepted=平台已真写入；rejected 含逐条原因（如 structure/quota_scope）；superseded 表示旧记忆已失效保留。shared 可能进入待审而非立即全服可见。"
+              : "accepted=平台已真写入；rejected 含逐条原因（如 structure/quota_scope）。shared 可能进入待审而非立即全服可见。",
+        })
+      }
+      if (noop.length > 0) {
+        return ok({
+          title: "记忆已存在",
+          accepted,
+          rejected,
+          proposals,
+          noop,
+          superseded,
+          note: "系统判定与既有记忆重复，已合并确认，未重复写入。",
         })
       }
       if (proposals.length > 0) {
@@ -82,6 +102,8 @@ export default tool({
           accepted,
           rejected,
           proposals,
+          noop,
+          superseded,
           note: "已记录为待佐证提案，尚未对所有人生效；需另一个账号独立佐证后才会提升为正式记忆。",
         })
       }
@@ -95,6 +117,8 @@ export default tool({
         accepted,
         rejected,
         proposals,
+        noop,
+        superseded,
         http_status: res.status,
       })
     } catch (e) {

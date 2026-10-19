@@ -62,7 +62,7 @@
 //
 // 契约：`.gateway-work/prod-20260915/MEMORY-INTERFACES.md` §1 §2 §3.1 §3.2。
 
-import { get, put } from "@/lib/blob-backend";
+import { get, list, put } from "@/lib/blob-backend";
 import { getGenerationSql } from "@/lib/generation-core/database";
 
 // ─────────────────────────── 类型
@@ -70,7 +70,7 @@ import { getGenerationSql } from "@/lib/generation-core/database";
 export type MemoryScope = "private" | "shared";
 export type MemoryType = "user" | "feedback" | "project" | "domain" | "workflow";
 export type EvidenceKind = "tool_result" | "user_confirmed" | "verbatim";
-export type MemoryStatus = "active" | "retracted" | "pending_review";
+export type MemoryStatus = "active" | "retracted" | "pending_review" | "superseded";
 
 /**
  * active shared 文档的内容提案：单账号提交与 live 不同的内容时落在里，
@@ -113,6 +113,26 @@ export interface AgentMemoryDoc {
    * 只有提升为 live 后才会出现在 INDEX／召回语料中。
    */
   proposed?: MemoryProposal;
+  /** 事实开始为真的时间（ISO）；旧档缺栏时读取回落 createdAt。 */
+  validFrom?: string;
+  /** 事实不再为真的时间（ISO）；未给＝当前仍有效。 */
+  validTo?: string;
+  /** 观察到该事实的时间（对话／工具结果时间）；旧档缺栏时回落 createdAt。 */
+  observedAt?: string;
+  /** 来源会话的参考时间（ISO）。 */
+  referenceTime?: string;
+  /** 被本事实取代的旧 slug 或旧事实文本（最多 5 条）。 */
+  supersedes?: string[];
+  /** 来源会话 id（审计用，不注入）。 */
+  sourceSessionId?: string;
+  /** 来源消息 id（可选，审计用，不注入）。 */
+  sourceMessageIds?: string[];
+  /** 最近一次被确认／重提的时间（ISO）；旧档缺栏时回落 updatedAt。 */
+  lastConfirmedAt?: string;
+  /** 最近一次被召回使用的时间（ISO；本片只写栏位，不做每回合回写）。 */
+  lastUsedAt?: string;
+  /** 最近一次写入操作的性质。 */
+  lastOperation?: "add" | "update" | "noop" | "supersede";
   createdAt: string;
   updatedAt: string;
 }
@@ -133,6 +153,14 @@ export interface AgentMemoryDocInput {
   evidenceKind: EvidenceKind;
   selfScore: number;
   promptVersion?: string;
+  /** 以下时间／来源栏位均可选；坏类型由 store 宽松清洗为 undefined，不拒绝整条。 */
+  validFrom?: string;
+  validTo?: string;
+  observedAt?: string;
+  referenceTime?: string;
+  supersedes?: string[];
+  sourceSessionId?: string;
+  sourceMessageIds?: string[];
 }
 
 export type MemoryRejectReason =
@@ -171,6 +199,10 @@ export interface MemoryIngestResult {
    * （可选：旧调用方构造回执时可省略；`ingestMemoryDocs` 恒返回空数组或实名单。）
    */
   proposals?: string[];
+  /** 近重复被判定为「已确认同一事实」而只刷新 lastConfirmedAt 的文档 id。 */
+  noop?: string[];
+  /** 被本次写入取代（status=superseded）的旧文档 slug。 */
+  superseded?: string[];
   rejected: Array<{ slug: string; reason: MemoryRejectReason }>;
   /**
    * `seed_accepted`：种子模式下真正实写的文档数（审计用；普通批次恒 0）。
@@ -212,6 +244,10 @@ export interface MemoryReviewResult {
 export interface MemoryScopeInput {
   scope: MemoryScope;
   ownerKey?: string;
+  /** 历史查询时点（ISO 或 Date）；给出时按 validFrom/validTo 过滤。 */
+  asOf?: string | Date;
+  /** 取该 scope 全部非 retracted 文档（含 superseded／过期）。 */
+  includeHistory?: boolean;
 }
 
 /** catalog：G5 去重与 G7 配额的唯一计数来源（契约 §2 `agent-memory/catalog.json`）。 */
@@ -229,10 +265,20 @@ export interface MemoryCatalogEntry {
   batchId: string;
   createdAt: string;
   updatedAt: string;
+  /** 便于索引过滤的时间有效性栏位（旧 catalog 缺省 undefined）。 */
+  validFrom?: string;
+  validTo?: string;
+  lastConfirmedAt?: string;
 }
 
 export interface MemoryCatalog {
   version: number;
+  /** 目录写入代数；旧档缺省 0（仅审计／兼容，正确性由逐文档日志保证）。 */
+  revision?: number;
+  /** 聚合快照生成时间（ISO）。 */
+  generatedAt?: string;
+  /** 上次聚合时已并入快照的日志上传时间上界（epoch ms）。 */
+  journalSyncedAt?: number;
   entries: MemoryCatalogEntry[];
 }
 
@@ -271,6 +317,35 @@ export const MEMORY_SHARED_MAX_ACTIVE_DOCS = positiveIntEnv(
 );
 /** shared pending_review 文档容量硬线：防止跨日累积后批量升级穿透 active 上限。 */
 export const MEMORY_SHARED_MAX_PENDING_DOCS = 1000;
+
+/** 小数 env 旋钮：未设定／格式坏／非正数一律回落默认值，读取永不抛错。 */
+function positiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw || !/^\d+(?:\.\d+)?$/.test(raw)) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * private 写入时对账（ADD／NOOP／SUPERSEDE）阈值。全部可用 env 覆盖；
+ * 故意保持纯确定性（不调 LLM），宁可漏判不误判。
+ */
+export const MEMORY_RECONCILE_NOOP_JACCARD = positiveNumberEnv(
+  "MEMORY_RECONCILE_NOOP_JACCARD",
+  0.8,
+);
+export const MEMORY_RECONCILE_NOOP_BODY_JACCARD = positiveNumberEnv(
+  "MEMORY_RECONCILE_NOOP_BODY_JACCARD",
+  0.6,
+);
+export const MEMORY_RECONCILE_CANDIDATE_JACCARD = positiveNumberEnv(
+  "MEMORY_RECONCILE_CANDIDATE_JACCARD",
+  0.55,
+);
+export const MEMORY_RECONCILE_SUPERSEDE_JACCARD = positiveNumberEnv(
+  "MEMORY_RECONCILE_SUPERSEDE_JACCARD",
+  0.35,
+);
 /** Blob 路径前缀（与 agent-profile-store 同款约定）。 */
 export const AGENT_MEMORY_BLOB_PREFIX = "agent-memory";
 /** 种子文档缺 promptVersion 时的落盘标记（便于审计区分受控导入与正常批次）。 */
@@ -281,6 +356,14 @@ const MEMORY_SEED_PROMPT_VERSION = "seed-local-mem-v1";
 const docsMemory = new Map<string, AgentMemoryDoc>();
 const catalogMemory = new Map<string, MemoryCatalog>();
 const CATALOG_MEMORY_KEY = "catalog";
+/** 旧世代正文的进程内副本（纯 Map 模式下 history 仍有数据）。 */
+const revisionsMemory = new Map<string, AgentMemoryDoc>();
+/** catalog 内存缓存时间戳（毫秒）；TTL 到期才重新 list 日志。 */
+let catalogCachedAt = 0;
+/** catalog 缓存 TTL：60s（写入路径会立即刷新本进程缓存，不用等 TTL）。 */
+const CATALOG_CACHE_TTL_MS = 60_000;
+/** 日志 list 分页硬上限（每页 1000；防御性终止，避免病态回圈）。 */
+const CATALOG_JOURNAL_MAX_PAGES = 50;
 
 // ─────────────────────────── helper
 
@@ -352,6 +435,173 @@ function normalizeProposed(value: unknown): MemoryProposal | undefined {
   };
 }
 
+// ─────────────────────────── 时间有效性／审计栏位清洗
+
+/** 时间栏位上限：ISO 字串远短于此，超长视为坏值。 */
+const MEMORY_DATE_FIELD_MAX_CHARS = 40;
+/** `supersedes` 上限（契约：最多 5 条、每条 ≤200 字）。 */
+const MEMORY_SUPERSEDES_MAX = 5;
+const MEMORY_SUPERSEDES_MAX_CHARS = 200;
+/** 审计 id 上限：会话 id 实际可超过 40 字，故放宽到 200 仍不落大字段进 catalog。 */
+const MEMORY_AUDIT_ID_MAX_CHARS = 200;
+const MEMORY_AUDIT_IDS_MAX = 20;
+
+/**
+ * 日期栏位宽松清洗：只接受可 parse 的字符串；坏值回 undefined（**不拒绝整条**）。
+ * 读取旧档时同款调用，确保 Date.parse 不会拿到非字符串。
+ */
+function normalizeIsoField(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (!text || text.length > MEMORY_DATE_FIELD_MAX_CHARS) return undefined;
+  return Number.isFinite(Date.parse(text)) ? text : undefined;
+}
+
+function normalizeAuditString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (!text || text.length > MEMORY_AUDIT_ID_MAX_CHARS) return undefined;
+  return text;
+}
+
+function normalizeAuditIdList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    const id = normalizeAuditString(item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= MEMORY_AUDIT_IDS_MAX) break;
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/** `supersedes`：接受字串或字串阵列；去重、截断 200 字、最多 5 条。 */
+function normalizeSupersedes(value: unknown): string[] | undefined {
+  const list = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of list) {
+    if (typeof item !== "string") continue;
+    const text = item.trim();
+    if (!text) continue;
+    const capped = text.length > MEMORY_SUPERSEDES_MAX_CHARS
+      ? text.slice(0, MEMORY_SUPERSEDES_MAX_CHARS)
+      : text;
+    if (seen.has(capped)) continue;
+    seen.add(capped);
+    out.push(capped);
+    if (out.length >= MEMORY_SUPERSEDES_MAX) break;
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function normalizeLastOperation(value: unknown): AgentMemoryDoc["lastOperation"] {
+  return value === "add" || value === "update" || value === "noop" || value === "supersede"
+    ? value
+    : undefined;
+}
+
+// ─────────────────────────── 矛盾／替换启发式（纯确定性，不调 LLM）
+
+/** 否定词：任一出现即视为该侧带否定语义（宁可漏判不误判）。 */
+const MEMORY_NEGATION_WORDS = [
+  "不",
+  "没",
+  "别",
+  "勿",
+  "无",
+  "非",
+  "never",
+  "not",
+  "don't",
+  "doesn't",
+  "dislike",
+  "hate",
+  "avoid",
+  "stop",
+];
+/** 替换词：出现即表示新事实替代旧事实。 */
+const MEMORY_REPLACEMENT_WORDS = [
+  "改成",
+  "改为",
+  "换成",
+  "不再",
+  "改用",
+  "instead",
+  "from now on",
+  "更新为",
+  "替换",
+];
+const MEMORY_RATIO_PATTERN = /比例|宽高比|\d{1,4}[:：]\d{1,4}/;
+const MEMORY_RATIO_VALUE_PATTERN = /(\d{1,4})\s*[:：]\s*(\d{1,4})/;
+
+function hasAnyWord(text: string, words: string[]): boolean {
+  const lower = text.toLowerCase();
+  return words.some((word) => lower.includes(word));
+}
+
+function stripWords(text: string, words: string[]): string {
+  let out = text.toLowerCase();
+  for (const word of words) out = out.split(word).join(" ");
+  return out;
+}
+
+function ratioValue(text: string): string | null {
+  const match = text.match(MEMORY_RATIO_VALUE_PATTERN);
+  return match ? `${match[1]}:${match[2]}` : null;
+}
+
+/**
+ * 事实矛盾判定：否定极性相异、带替换词、或宽高比数值不同且其余内容相近。
+ * 只在 token Jaccard ≥ 0.35 时才算——阈值刻意保守，避免把措辞差异误判成矛盾。
+ */
+function looksContradictory(a: string, b: string): boolean {
+  const negA = hasAnyWord(a, MEMORY_NEGATION_WORDS);
+  const negB = hasAnyWord(b, MEMORY_NEGATION_WORDS);
+  if (
+    negA !== negB &&
+    memoryJaccard(
+      stripWords(a, MEMORY_NEGATION_WORDS),
+      stripWords(b, MEMORY_NEGATION_WORDS),
+    ) >= MEMORY_RECONCILE_SUPERSEDE_JACCARD
+  ) {
+    return true;
+  }
+  if (
+    (hasAnyWord(a, MEMORY_REPLACEMENT_WORDS) || hasAnyWord(b, MEMORY_REPLACEMENT_WORDS)) &&
+    memoryJaccard(a, b) >= MEMORY_RECONCILE_SUPERSEDE_JACCARD
+  ) {
+    return true;
+  }
+  if (MEMORY_RATIO_PATTERN.test(a) && MEMORY_RATIO_PATTERN.test(b)) {
+    const ratioA = ratioValue(a);
+    const ratioB = ratioValue(b);
+    if (
+      ratioA !== null &&
+      ratioB !== null &&
+      ratioA !== ratioB &&
+      memoryJaccard(
+        a.replace(MEMORY_RATIO_VALUE_PATTERN, " "),
+        b.replace(MEMORY_RATIO_VALUE_PATTERN, " "),
+      ) >= MEMORY_RECONCILE_SUPERSEDE_JACCARD
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 新正文带替换词且两正文相近 → 新事实取代旧事实。 */
+function looksReplacement(a: string, b: string): boolean {
+  return (
+    hasAnyWord(b, MEMORY_REPLACEMENT_WORDS) &&
+    memoryJaccard(a, b) >= MEMORY_RECONCILE_SUPERSEDE_JACCARD
+  );
+}
+
 function bodyKey(
   scope: MemoryScope,
   ownerKey: string | undefined,
@@ -371,6 +621,13 @@ function indexKey(scope: MemoryScope, ownerKey?: string): string {
 
 function catalogKey(): string {
   return `${AGENT_MEMORY_BLOB_PREFIX}/catalog.json`;
+}
+
+/** 逐文档 catalog 日志（每条目一个文件；并发写不同 doc 不共享文件）。 */
+const CATALOG_JOURNAL_PREFIX = `${AGENT_MEMORY_BLOB_PREFIX}/catalog/`;
+
+function catalogEntryKey(docId: string): string {
+  return `${CATALOG_JOURNAL_PREFIX}${safeSegment(docId, "doc")}.json`;
 }
 
 function revisionKey(docId: string, revision: number): string {
@@ -487,37 +744,222 @@ export function memoryStoreDbBackendAvailable(): boolean {
 
 // ─────────────────────────── catalog
 
-async function loadCatalog(): Promise<MemoryCatalog> {
-  const cached = catalogMemory.get(CATALOG_MEMORY_KEY);
-  if (cached) return cached;
-  const fromBlob = await readBlobJson<MemoryCatalog>(catalogKey());
-  if (fromBlob && Array.isArray(fromBlob.entries)) {
-    // 旧 catalog 没有 contributors 栏：一律正规化为 []，不因缺栏报错或改写状态。
-    const normalized: MemoryCatalog = {
-      version: MEMORY_CATALOG_VERSION,
-      entries: fromBlob.entries.map((entry) => ({
-        ...entry,
-        contributors: normalizeContributors(
-          (entry as unknown as { contributors?: unknown })?.contributors,
-        ),
-      })),
-    };
-    catalogMemory.set(CATALOG_MEMORY_KEY, normalized);
-    return normalized;
-  }
-  return { version: MEMORY_CATALOG_VERSION, entries: [] };
+/**
+ * catalog 写入串行化（进程内 promise 链）：blob 的 read-modify-write 天然有竞态，
+ * `revision` 只是跨进程检测手段；同一进程内由本锁保证三个写入口（ingest／retract／
+ * review）不会互相覆盖。锁任何时刻只包「整个函数体」，不把锁泄漏给调用方。
+ */
+let catalogLock: Promise<unknown> = Promise.resolve();
+
+function withCatalogLock<T>(work: () => Promise<T>): Promise<T> {
+  // 前一个任务失败也要继续跑下一个；链上只保留已吞错的 promise，避免 unhandled rejection。
+  const run = catalogLock.then(work, work);
+  catalogLock = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
-async function saveCatalog(catalog: MemoryCatalog): Promise<void> {
-  const next: MemoryCatalog = { version: MEMORY_CATALOG_VERSION, entries: catalog.entries };
-  await writeBlobText(catalogKey(), JSON.stringify(next));
+/** catalog 条目正规化（snapshot 与逐文档日志共用；旧档缺栏不报错）。 */
+function normalizeCatalogEntry(raw: MemoryCatalogEntry): MemoryCatalogEntry {
+  const entry = (raw ?? {}) as MemoryCatalogEntry;
+  return {
+    ...entry,
+    revision:
+      typeof entry.revision === "number" && Number.isFinite(entry.revision)
+        ? entry.revision
+        : 0,
+    contributors: normalizeContributors(
+      (entry as unknown as { contributors?: unknown })?.contributors,
+    ),
+    validFrom: normalizeIsoField((entry as unknown as { validFrom?: unknown })?.validFrom),
+    validTo: normalizeIsoField((entry as unknown as { validTo?: unknown })?.validTo),
+    lastConfirmedAt: normalizeIsoField(
+      (entry as unknown as { lastConfirmedAt?: unknown })?.lastConfirmedAt,
+    ),
+  };
+}
+
+interface CatalogJournalRead {
+  entries: MemoryCatalogEntry[];
+  maxUploadedAt: number;
+  ok: boolean;
+}
+
+/**
+ * 分页读逐文档 catalog 日志：只 get `uploadedAt > sinceMs` 的条目（无快照时 sinceMs=0
+ * 即全量）。list 失败返回 ok=false，调用方保留缓存／快照，绝不把失败当「目录为空」。
+ */
+async function readCatalogJournal(sinceMs: number): Promise<CatalogJournalRead> {
+  const entries: MemoryCatalogEntry[] = [];
+  let maxUploadedAt = 0;
+  let cursor: string | undefined;
+  try {
+    for (let page = 0; page < CATALOG_JOURNAL_MAX_PAGES; page += 1) {
+      const result = await list({
+        prefix: CATALOG_JOURNAL_PREFIX,
+        limit: 1000,
+        ...(cursor ? { cursor } : {}),
+      });
+      const blobs = Array.isArray(result?.blobs) ? result.blobs : [];
+      for (const blob of blobs) {
+        const uploadedMs =
+          blob.uploadedAt instanceof Date
+            ? blob.uploadedAt.getTime()
+            : Date.parse(String(blob.uploadedAt));
+        if (Number.isFinite(uploadedMs)) maxUploadedAt = Math.max(maxUploadedAt, uploadedMs);
+        // 只用比快照更新的日志；等于边界时快照已含该版本。
+        if (!(uploadedMs > sinceMs)) continue;
+        const pathname = typeof blob.pathname === "string" ? blob.pathname : "";
+        if (!pathname) continue;
+        const parsed = await readBlobJson<MemoryCatalogEntry>(pathname);
+        if (!parsed || typeof parsed !== "object" || typeof parsed.id !== "string") continue;
+        entries.push(normalizeCatalogEntry(parsed));
+      }
+      if (!result?.hasMore || !result?.cursor) {
+        return { entries, maxUploadedAt, ok: true };
+      }
+      cursor = result.cursor;
+    }
+    // 分页上限内仍未列完：**不推进 watermark**（ok=false），避免把未读条目永久跳过。
+    return { entries, maxUploadedAt: 0, ok: false };
+  } catch {
+    return { entries: [], maxUploadedAt: 0, ok: false };
+  }
+}
+
+/** 按 id 合并：updatedAt 较新者胜（同值取后写入者）。保序：先出现的 id 在前。 */
+function mergeCatalogEntries(
+  groups: Array<MemoryCatalogEntry[]>,
+): MemoryCatalogEntry[] {
+  const byId = new Map<string, MemoryCatalogEntry>();
+  const order: string[] = [];
+  for (const group of groups) {
+    for (const entry of group) {
+      if (!entry || typeof entry.id !== "string") continue;
+      const existing = byId.get(entry.id);
+      if (!existing) {
+        byId.set(entry.id, entry);
+        order.push(entry.id);
+        continue;
+      }
+      if (String(entry.updatedAt) >= String(existing.updatedAt)) {
+        byId.set(entry.id, entry);
+      }
+    }
+  }
+  return order
+    .map((id) => byId.get(id))
+    .filter((entry): entry is MemoryCatalogEntry => Boolean(entry));
+}
+
+/**
+ * 读目录：内存缓存 60s TTL；刷新时以 `catalog.json` 聚合快照为底，再分页 list
+ * `agent-memory/catalog/` 逐文档日志，只 get 比快照 `journalSyncedAt` 更新的条目，
+ * 按 id（updatedAt 较新者胜）合并。合并后 journalSyncedAt 推进到本次 list 的最大
+ * uploadedAt，并把聚合快照 best-effort 写回。
+ *
+ * 正确性不依赖快照：并发进程各写自己的条目文件，任何一次刷新都能把两边合起来。
+ */
+async function loadCatalog(): Promise<MemoryCatalog> {
+  const cached = catalogMemory.get(CATALOG_MEMORY_KEY);
+  const now = Date.now();
+  if (cached && now - catalogCachedAt < CATALOG_CACHE_TTL_MS) return cached;
+
+  const snapshotRaw = await readBlobJson<MemoryCatalog>(catalogKey());
+  const snapshotEntries =
+    snapshotRaw && Array.isArray(snapshotRaw.entries)
+      ? snapshotRaw.entries.map(normalizeCatalogEntry)
+      : [];
+  const snapshotSyncedAt =
+    snapshotRaw &&
+    typeof snapshotRaw.journalSyncedAt === "number" &&
+    Number.isFinite(snapshotRaw.journalSyncedAt)
+      ? Math.max(0, Math.floor(snapshotRaw.journalSyncedAt))
+      : 0;
+  const journal = await readCatalogJournal(snapshotSyncedAt);
+
+  // 后端完全不可达且本进程已有缓存：保留缓存（Map 兜底），只续 TTL。
+  if (!snapshotRaw && !journal.ok && cached && journal.entries.length === 0) {
+    catalogCachedAt = now;
+    return cached;
+  }
+
+  const snapshotRevision =
+    snapshotRaw && typeof snapshotRaw.revision === "number" && Number.isFinite(snapshotRaw.revision)
+      ? Math.max(0, Math.floor(snapshotRaw.revision))
+      : 0;
+  const next: MemoryCatalog = {
+    version: MEMORY_CATALOG_VERSION,
+    revision: Math.max(snapshotRevision, cached?.revision ?? 0),
+    journalSyncedAt: journal.ok
+      ? Math.max(snapshotSyncedAt, journal.maxUploadedAt)
+      : snapshotSyncedAt,
+    generatedAt: new Date().toISOString(),
+    // 缓存条目也并入：本进程写入但 blob 落盘失败／快照被覆盖时仍可保留（journal 较新者胜）。
+    entries: mergeCatalogEntries([
+      snapshotEntries,
+      journal.entries,
+      cached?.entries ?? [],
+    ]),
+  };
   catalogMemory.set(CATALOG_MEMORY_KEY, next);
+  catalogCachedAt = now;
+  // 聚合快照 best-effort：失败不影响真相（逐文档日志仍在）。
+  if (journal.ok) void writeBlobText(catalogKey(), JSON.stringify(next));
+  return next;
+}
+
+/**
+ * 保存聚合快照（best-effort）。正确性由逐文档日志保证，这里的 revision 只作审计／
+ * 兼容；不再依赖 re-read+merge 防覆盖。`expectedRevision` 保留为签名兼容。
+ *
+ * 写失败只 console.error（不回显正文、不 throw）并照旧更新进程缓存。
+ */
+async function saveCatalog(
+  catalog: MemoryCatalog,
+  expectedRevision?: number,
+): Promise<void> {
+  const currentRevision =
+    typeof catalog.revision === "number" && Number.isFinite(catalog.revision)
+      ? Math.max(0, Math.floor(catalog.revision))
+      : 0;
+  const expected =
+    typeof expectedRevision === "number" && Number.isFinite(expectedRevision)
+      ? Math.max(0, Math.floor(expectedRevision))
+      : currentRevision;
+
+  const next: MemoryCatalog = {
+    version: MEMORY_CATALOG_VERSION,
+    revision: Math.max(currentRevision, expected) + 1,
+    journalSyncedAt:
+      typeof catalog.journalSyncedAt === "number" &&
+      Number.isFinite(catalog.journalSyncedAt)
+        ? Math.max(0, Math.floor(catalog.journalSyncedAt))
+        : 0,
+    generatedAt: new Date().toISOString(),
+    entries: catalog.entries,
+  };
+  const ok = await writeBlobText(catalogKey(), JSON.stringify(next));
+  if (!ok) {
+    console.error("[agent-memory-store] catalog 写入失败（已用进程内缓存兜底）");
+  }
+  catalogMemory.set(CATALOG_MEMORY_KEY, next);
+  catalogCachedAt = Date.now();
+}
+
+/** 条目变化时写它自己的日志文件（并发写不同 doc 不共享文件）。失败静默。 */
+async function writeCatalogEntry(entry: MemoryCatalogEntry): Promise<void> {
+  await writeBlobText(catalogEntryKey(entry.id), JSON.stringify(entry));
 }
 
 /** 仅测试：重置进程内状态。 */
 export function __resetAgentMemoryStoreForTests(): void {
   docsMemory.clear();
   catalogMemory.clear();
+  revisionsMemory.clear();
+  catalogCachedAt = 0;
 }
 
 // ─────────────────────────── 读写正文
@@ -541,7 +983,8 @@ function isDocShapeValid(
     doc.scope === scope &&
     (doc.status === "active" ||
       doc.status === "pending_review" ||
-      doc.status === "retracted")
+      doc.status === "retracted" ||
+      doc.status === "superseded")
   );
 }
 
@@ -562,6 +1005,8 @@ async function readDoc(
       return null;
     }
     // 旧档没有 contributors 栏：读取容错为 []，且**不因缺栏降级既有 status**。
+    const createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : "";
+    const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : "";
     const doc: AgentMemoryDoc = {
       ...parsed,
       contributors: normalizeContributors(
@@ -569,6 +1014,18 @@ async function readDoc(
       ),
       // 旧档没有 proposed：保持 undefined；坏形状视为无提案（不丢 live 内容）。
       proposed: normalizeProposed((parsed as unknown as { proposed?: unknown })?.proposed),
+      // 时间栏位读取容错（不因缺栏改 status）：validFrom／observedAt 回落 createdAt，
+      // lastConfirmedAt 回落 updatedAt；坏值视为 undefined 交给有效性判定。
+      validFrom: normalizeIsoField(parsed.validFrom) ?? (createdAt || undefined),
+      validTo: normalizeIsoField(parsed.validTo),
+      observedAt: normalizeIsoField(parsed.observedAt) ?? (createdAt || undefined),
+      referenceTime: normalizeIsoField(parsed.referenceTime),
+      lastConfirmedAt: normalizeIsoField(parsed.lastConfirmedAt) ?? (updatedAt || undefined),
+      lastUsedAt: normalizeIsoField(parsed.lastUsedAt),
+      supersedes: normalizeSupersedes(parsed.supersedes),
+      sourceSessionId: normalizeAuditString(parsed.sourceSessionId),
+      sourceMessageIds: normalizeAuditIdList(parsed.sourceMessageIds),
+      lastOperation: normalizeLastOperation(parsed.lastOperation),
     };
     docsMemory.set(key, doc);
     return doc;
@@ -584,7 +1041,10 @@ async function writeDoc(doc: AgentMemoryDoc): Promise<void> {
 
 /** 旧世代正文存档（契约 §2 `agent-memory/revisions/{id}-r{n}.json`）。 */
 async function writeRevision(previous: AgentMemoryDoc): Promise<void> {
-  await writeBlobText(revisionKey(previous.id, previous.revision), JSON.stringify(previous));
+  const key = revisionKey(previous.id, previous.revision);
+  // 纯 Map 模式（本机无 blob 凭证）下 history 也要有资料。
+  revisionsMemory.set(key, previous);
+  await writeBlobText(key, JSON.stringify(previous));
 }
 
 // ─────────────────────────── 结构校验（形状防线；G1 在 gateway）
@@ -626,6 +1086,42 @@ export function buildMemoryIndexMd(
     .sort((a, b) => a.domain.localeCompare(b.domain) || a.slug.localeCompare(b.slug))
     .map((doc) => `- [${doc.domain}] ${doc.slug} — ${doc.description} （v${doc.revision}）`)
     .join("\n");
+}
+
+/**
+ * 领域摘要（可选前置到 INDEX，默认关闭）：按 domain 分组输出
+ * `- [domain] 共N条 — desc1；desc2；desc3`；每条 desc 截 60 字、最多 3 条，
+ * 总长不超过 maxChars。只做确定性字符串拼接，不调 LLM。
+ */
+export function buildMemoryDomainDigestMd(
+  docs: AgentMemoryDoc[],
+  maxChars = 600,
+): string {
+  const groups = new Map<string, AgentMemoryDoc[]>();
+  for (const doc of docs) {
+    const list = groups.get(doc.domain);
+    if (list) list.push(doc);
+    else groups.set(doc.domain, [doc]);
+  }
+  const limit = Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 600;
+  const lines: string[] = [];
+  let used = 0;
+  for (const domain of [...groups.keys()].sort((a, b) => a.localeCompare(b))) {
+    const group = groups.get(domain) ?? [];
+    const descriptions = group
+      .slice(0, 3)
+      .map((doc) => {
+        const chars = Array.from(doc.description);
+        return chars.length > 60 ? chars.slice(0, 60).join("") : doc.description;
+      })
+      .join("；");
+    const line = `- [${domain}] 共${group.length}条 — ${descriptions}`;
+    if (used + line.length > limit) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  const text = lines.join("\n");
+  return text.length > limit ? text.slice(0, limit) : text;
 }
 
 function newDocId(batchId: string, slug: string): string {
@@ -692,18 +1188,122 @@ function canActivateShared(catalog: MemoryCatalog, alreadyActive = false): boole
   return activeSharedCount(catalog) < MEMORY_SHARED_MAX_ACTIVE_DOCS;
 }
 
-/** 读某 scope 的全部 active 正文（由 catalog 驱动，不依赖 blob list）。 */
-async function activeDocs(scope: MemoryScope, ownerKey?: string): Promise<AgentMemoryDoc[]> {
+// ─────────────────────────── 时间有效性（单一真源）
+
+/** 时间栏位 → epoch ms；不可 parse 回 undefined（调用方视为「无边界」）。 */
+function timeMs(value: unknown): number | undefined {
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : undefined;
+  }
+  if (typeof value !== "string") return undefined;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+/** 当前有效性：status=active 且 validFrom<=now 且（无 validTo 或 validTo>now）。 */
+export function isMemoryCurrentlyValid(doc: AgentMemoryDoc, nowMs: number): boolean {
+  if (doc.status !== "active") return false;
+  const fromMs = timeMs(doc.validFrom) ?? timeMs(doc.createdAt);
+  if (fromMs !== undefined && fromMs > nowMs) return false;
+  if (doc.validTo) {
+    const toMs = timeMs(doc.validTo);
+    if (toMs !== undefined && toMs <= nowMs) return false;
+  }
+  return true;
+}
+
+/** 历史时点有效性：validFrom<=asOf 且（无 validTo 或 validTo>asOf）。 */
+function isMemoryValidAt(doc: AgentMemoryDoc, asOfMs: number): boolean {
+  const fromMs = timeMs(doc.validFrom) ?? timeMs(doc.createdAt);
+  if (fromMs !== undefined && fromMs > asOfMs) return false;
+  if (doc.validTo) {
+    const toMs = timeMs(doc.validTo);
+    if (toMs !== undefined && toMs <= asOfMs) return false;
+  }
+  return true;
+}
+
+interface ScopedDocsOptions {
+  asOf?: number;
+  includeHistory?: boolean;
+}
+
+/**
+ * 按 scope 取文档的唯一入口（listMemoryDocs／activeDocs／读索引共用）：
+ * - 默认：只取 status=active 且当前有效的文档。
+ * - `asOf`：取该时点有效的文档（validFrom <= asOf < validTo）；retracted 排除，
+ *   superseded 可包含（它是历史事实）；pending_review 从未发布，不进入历史索引。
+ * - `includeHistory`：取该 scope 全部非 retracted 文档（含 superseded／过期／pending）。
+ */
+async function scopedDocs(
+  scope: MemoryScope,
+  ownerKey?: string,
+  opts: ScopedDocsOptions = {},
+): Promise<AgentMemoryDoc[]> {
   const catalog = await loadCatalog();
+  const nowMs = Date.now();
+  const asOfMs = typeof opts.asOf === "number" && Number.isFinite(opts.asOf) ? opts.asOf : undefined;
+  const includeHistory = opts.includeHistory === true;
   const docs: AgentMemoryDoc[] = [];
   for (const entry of catalog.entries) {
-    if (entry.status !== "active") continue;
     if (!sameScope(entry, scope, ownerKey)) continue;
-    if (scope === "shared" && !ownerKey && entry.scope !== "shared") continue;
+    if (includeHistory) {
+      if (entry.status === "retracted") continue;
+    } else if (asOfMs !== undefined) {
+      if (entry.status === "retracted" || entry.status === "pending_review") continue;
+    } else if (entry.status !== "active") {
+      continue;
+    }
     const doc = await readDoc(entry.scope, entry.ownerKey, entry.domain, entry.slug);
-    if (doc && doc.status === "active") docs.push(doc);
+    if (!doc) continue;
+    if (includeHistory) {
+      if (doc.status === "retracted") continue;
+      docs.push(doc);
+      continue;
+    }
+    if (asOfMs !== undefined) {
+      if (doc.status === "retracted" || doc.status === "pending_review") continue;
+      if (!isMemoryValidAt(doc, asOfMs)) continue;
+      docs.push(doc);
+      continue;
+    }
+    if (!isMemoryCurrentlyValid(doc, nowMs)) continue;
+    docs.push(doc);
   }
   return docs;
+}
+
+/** 读某 scope 的全部 active 正文（由 catalog 驱动，不依赖 blob list）。 */
+async function activeDocs(scope: MemoryScope, ownerKey?: string): Promise<AgentMemoryDoc[]> {
+  return scopedDocs(scope, ownerKey);
+}
+
+/** catalog 条目级有效性（不读正文）：用于 INDEX.md 行数对账。 */
+function isCatalogEntryCurrentlyValid(entry: MemoryCatalogEntry, nowMs: number): boolean {
+  if (entry.status !== "active") return false;
+  const fromMs = timeMs(entry.validFrom) ?? timeMs(entry.createdAt);
+  if (fromMs !== undefined && fromMs > nowMs) return false;
+  if (entry.validTo) {
+    const toMs = timeMs(entry.validTo);
+    if (toMs !== undefined && toMs <= nowMs) return false;
+  }
+  return true;
+}
+
+/** 当前应出现在 INDEX 里的行数（status=active 且时间有效）。 */
+async function countCurrentActiveEntries(
+  scope: MemoryScope,
+  ownerKey: string | undefined,
+  nowMs: number,
+): Promise<number> {
+  const catalog = await loadCatalog();
+  let count = 0;
+  for (const entry of catalog.entries) {
+    if (!sameScope(entry, scope, ownerKey)) continue;
+    if (isCatalogEntryCurrentlyValid(entry, nowMs)) count += 1;
+  }
+  return count;
 }
 
 /** 重建 INDEX.md（active docs）。回传重建后的行数。 */
@@ -716,20 +1316,50 @@ async function rebuildIndex(scope: MemoryScope, ownerKey?: string): Promise<numb
 
 // ─────────────────────────── 对外 API
 
-/** 列出某 scope 的 active docs。private 缺 ownerKey 时回空数组。 */
+/**
+ * 列出某 scope 的文档。默认＝当前有效的 active docs；`asOf` 给定时按该时点过滤；
+ * `includeHistory` 取全部非 retracted（含 superseded／过期）。private 缺 ownerKey 回空。
+ */
 export async function listMemoryDocs(input: MemoryScopeInput): Promise<AgentMemoryDoc[]> {
   const scope: MemoryScope = input?.scope === "private" ? "private" : "shared";
   if (scope === "private" && !String(input?.ownerKey ?? "").trim()) return [];
-  const docs = await activeDocs(scope, input?.ownerKey);
+  const asOfMs = timeMs(input?.asOf);
+  const docs = await scopedDocs(scope, input?.ownerKey, {
+    asOf: asOfMs,
+    includeHistory: input?.includeHistory === true,
+  });
   return docs.sort((a, b) => a.domain.localeCompare(b.domain) || a.slug.localeCompare(b.slug));
 }
 
-/** 读某 scope 的索引文本；无索引时空字符串。 */
-export async function readMemoryIndexMd(scope: MemoryScope, ownerKey?: string): Promise<string> {
-  const fromBlob = await readBlobTextAt(indexKey(scope, ownerKey));
-  if (fromBlob !== null) return fromBlob;
-  const docs = await activeDocs(scope, ownerKey);
-  return buildMemoryIndexMd(scope, docs, ownerKey);
+/**
+ * 读某 scope 的索引文本；无索引时空字符串。
+ * - 默认：沿用既有 INDEX.md（写入时由 rebuildIndex 维护），但先做**行数对账**——
+ *   用 catalog 条目算「当前应出现的 active 条数」与 INDEX.md 非空行数比较，
+ *   不一致就即时从正文重建。这样未来 `validFrom` 到点、或 `validTo` 过期而尚无
+ *   新写入时，索引仍能自愈。
+ * - `asOf`：按该时点从正文即时构建（历史索引，不读当前 INDEX.md）。
+ * - env `MEMORY_INDEX_DIGEST === "1"`：行数口径不同，直接重建并前置领域摘要。
+ */
+export async function readMemoryIndexMd(
+  scope: MemoryScope,
+  ownerKey?: string,
+  asOf?: string | Date,
+): Promise<string> {
+  const asOfMs = timeMs(asOf);
+  const digestEnabled = process.env.MEMORY_INDEX_DIGEST === "1";
+  if (asOfMs === undefined && !digestEnabled) {
+    const fromBlob = await readBlobTextAt(indexKey(scope, ownerKey));
+    if (fromBlob !== null) {
+      const persistedLines = fromBlob.split("\n").filter((line) => line.trim() !== "").length;
+      const expectedLines = await countCurrentActiveEntries(scope, ownerKey, Date.now());
+      if (persistedLines === expectedLines) return fromBlob;
+    }
+  }
+  const docs = await scopedDocs(scope, ownerKey, asOfMs === undefined ? {} : { asOf: asOfMs });
+  const md = buildMemoryIndexMd(scope, docs, ownerKey);
+  if (!digestEnabled) return md;
+  const digest = buildMemoryDomainDigestMd(docs);
+  return digest ? `${digest}\n${md}` : md;
 }
 
 /**
@@ -750,7 +1380,128 @@ function resolvePromptVersion(
 }
 
 /**
- * 摄入状态机（**仅 shared 生效**；private 恒 active、行为完全不变）：
+ * private 写入对账候选（仅同一 ownerKey 的 active 文档）：
+ * - 候选自带 `supersedes`：先按 slug 精确命中，再按 body/description Jaccard ≥0.6 找。
+ * - 否则按 description Jaccard ≥0.55 且 body Jaccard ≥0.35 取 top-1，再用纯启发式
+ *   判断「矛盾／替换」是否成立；成立＝SUPERSEDE，不成立再看是否 NOOP。
+ * 返回 null 表示正常 ADD。全程不调 LLM，宁可漏判不误判。
+ */
+interface PrivateReconcileMatch {
+  entry: MemoryCatalogEntry;
+  doc: AgentMemoryDoc;
+  mode: "supersede" | "noop";
+}
+
+async function findPrivateReconcileMatch(
+  entries: MemoryCatalogEntry[],
+  candidate: AgentMemoryDocInput,
+  ownerKey: string,
+): Promise<PrivateReconcileMatch | null> {
+  const activeEntries = entries.filter(
+    (entry) =>
+      entry.scope === "private" &&
+      entry.ownerKey === ownerKey &&
+      entry.status === "active",
+  );
+  if (activeEntries.length === 0) return null;
+  const loaded: Array<{ entry: MemoryCatalogEntry; doc: AgentMemoryDoc }> = [];
+  for (const entry of activeEntries) {
+    const doc = await readDoc("private", ownerKey, entry.domain, entry.slug);
+    if (doc && doc.status === "active") loaded.push({ entry, doc });
+  }
+  if (loaded.length === 0) return null;
+
+  // 显式 supersedes：只走这条路，找不到就正常 ADD（不再做隐式推断）。
+  const explicit = normalizeSupersedes(candidate.supersedes);
+  if (explicit) {
+    for (const token of explicit) {
+      const bySlug = loaded.find((item) => item.entry.slug === token);
+      if (bySlug) return { ...bySlug, mode: "supersede" };
+      let best: { entry: MemoryCatalogEntry; doc: AgentMemoryDoc } | null = null;
+      let bestScore = 0;
+      for (const item of loaded) {
+        const score = Math.max(
+          memoryJaccard(item.doc.body, token),
+          memoryJaccard(item.doc.description, token),
+        );
+        if (score >= 0.6 && (!best || score > bestScore)) {
+          best = item;
+          bestScore = score;
+        }
+      }
+      if (best) return { ...best, mode: "supersede" };
+    }
+    return null;
+  }
+
+  // 隐式：description 找候选（≥0.55），正文相似度 ≥0.35 才有资格被判为同一事实。
+  let top: { entry: MemoryCatalogEntry; doc: AgentMemoryDoc } | null = null;
+  let topDesc = -1;
+  let topBody = 0;
+  for (const item of loaded) {
+    const descScore = memoryJaccard(item.doc.description, candidate.description);
+    const bodyScore = memoryJaccard(item.doc.body, candidate.body);
+    if (descScore > topDesc) {
+      top = item;
+      topDesc = descScore;
+      topBody = bodyScore;
+    }
+  }
+  if (!top || topDesc < MEMORY_RECONCILE_CANDIDATE_JACCARD) return null;
+  if (topBody < MEMORY_RECONCILE_SUPERSEDE_JACCARD) return null;
+
+  if (looksContradictory(top.doc.body, candidate.body) || looksReplacement(top.doc.body, candidate.body)) {
+    return { ...top, mode: "supersede" };
+  }
+  // NOOP 门槛：description 近重复（>0.8）且正文高度一致（≥0.6）。
+  if (topDesc > MEMORY_RECONCILE_NOOP_JACCARD && topBody >= MEMORY_RECONCILE_NOOP_BODY_JACCARD) {
+    return { ...top, mode: "noop" };
+  }
+  return null;
+}
+
+/**
+ * 对账命中后的旧文档更新：整篇写回并同步 catalog（revision+1，旧世代存档）。
+ * supersede：status=superseded、validTo=nowIso；noop：只刷新 lastConfirmedAt。
+ */
+async function applyPrivateReconcileUpdate(
+  entry: MemoryCatalogEntry,
+  doc: AgentMemoryDoc,
+  mode: "supersede" | "noop",
+  nowIso: string,
+): Promise<void> {
+  await writeRevision(doc);
+  const revision = Math.max(entry.revision ?? 0, doc.revision ?? 0) + 1;
+  const next: AgentMemoryDoc =
+    mode === "supersede"
+      ? {
+          ...doc,
+          status: "superseded",
+          validTo: nowIso,
+          lastOperation: "supersede",
+          revision,
+          updatedAt: nowIso,
+        }
+      : {
+          ...doc,
+          lastConfirmedAt: nowIso,
+          lastOperation: "noop",
+          revision,
+          updatedAt: nowIso,
+        };
+  await writeDoc(next);
+  entry.status = next.status;
+  entry.revision = revision;
+  entry.updatedAt = nowIso;
+  entry.validFrom = next.validFrom;
+  entry.validTo = next.validTo;
+  entry.lastConfirmedAt = next.lastConfirmedAt;
+  // 逐文档日志：supersede／noop 都是条目变化，必须单独落盘。
+  await writeCatalogEntry(entry);
+}
+
+/**
+ * 摄入状态机（**仅 shared 生效**；private 恒 active）：
  * - 新文档：缺 `contributorKey` → `pending_review`（fail-closed，不静默当 active）；
  *   有提出者但去重人数 < `corroborationMin` → `pending_review`。
  * - 既有 `active`：内容不变 → 保持 active 并合并佐证；内容变更 → 走 `proposed` 提案
@@ -758,9 +1509,12 @@ function resolvePromptVersion(
  * - `pending_review`：可直接改 live，但内容一变就重置佐证名单（重新收证）。
  * - `retracted`：留证终态，再入库一律 rejected "retracted"（人工 activate 另行放行）。
  *
+ * private 额外在写入时对账（同一 ownerKey、精确 slug 未命中时）：矛盾／替换 → 旧事实
+ * SUPERSEDE；近重复且正文一致 → NOOP（只刷新 lastConfirmedAt）；其余 ADD。
+ *
  * 入库：G5 去重 + G7 配额 + 写正文 + 重建 INDEX.md + 更新 catalog.json。
  */
-export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<MemoryIngestResult> {
+async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryIngestResult> {
   const batchId = String(input?.batchId ?? "").trim();
   const now = input?.now ?? new Date();
   const nowIso = now.toISOString();
@@ -769,6 +1523,10 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
   const accepted: string[] = [];
   /** live 未变、只累积了未达门槛提案的 id（不进 accepted，避免误报「已入库」）。 */
   const proposals: string[] = [];
+  /** 近重复被判定为已确认同一事实、只刷新 lastConfirmedAt 的 id。 */
+  const noop: string[] = [];
+  /** 被本批写入取代的旧 slug。 */
+  const superseded: string[] = [];
   const rejected: Array<{ slug: string; reason: MemoryRejectReason }> = [];
 
   if (!batchId) {
@@ -882,8 +1640,32 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
       continue;
     }
 
+    // private 写入时对账（仅精确 slug 未命中时）。必须放在 G5 duplicate 之前：
+    // 「同一事实被改写／否定」的候选天然是近重复，让它先有机会 SUPERSEDE 旧事实，
+    // 而不是被 duplicate 直接丢掉。shared 不走这条路（保持既有佐证／提案状态机）。
+    //
+    // 决策与落盘分离：NOOP 不新增文档，可立即落盘；SUPERSEDE 只记决策，必须等本候选
+    // 通过全部配额／结构检查、且新文档 writeDoc 成功后才置旧事实失效——否则配额拒绝
+    // 会先杀掉旧事实，留下「旧的没了、新的没进来」的空洞。
+    let supersededTargets: string[] = [];
+    let supersedeMatch: PrivateReconcileMatch | null = null;
+    if (!existingEntry && scope === "private" && ownerKey) {
+      const match = await findPrivateReconcileMatch(entries, candidate, ownerKey);
+      if (match?.mode === "noop") {
+        await applyPrivateReconcileUpdate(match.entry, match.doc, "noop", nowIso);
+        // NOOP：不写新文档、不进 accepted，只确认既有事实。
+        noop.push(match.entry.id);
+        continue;
+      }
+      if (match) {
+        supersedeMatch = match;
+        supersededTargets = [match.entry.slug];
+      }
+    }
+
     // G5（其二）：description 与既有 active 条目 token Jaccard > 0.8 → duplicate。
-    if (!existingEntry) {
+    // SUPERSEDE 是「替换同一事实」而非重复：本候选跳过此拒收。
+    if (!existingEntry && !supersedeMatch) {
       const duplicate = entries.find(
         (entry) =>
           entry.status === "active" &&
@@ -899,6 +1681,24 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
     const previousContributors = normalizeContributors(
       previous?.contributors ?? existingEntry?.contributors,
     );
+    // 时间／来源栏位（宽松清洗；坏值视为 undefined，绝不拒绝整条）。
+    // 新事实默认：validFrom = 显式值 ?? observedAt ?? now；validTo 空则视为仍有效。
+    const timeFields = {
+      validFrom:
+        normalizeIsoField(candidate.validFrom) ??
+        normalizeIsoField(candidate.observedAt) ??
+        nowIso,
+      validTo: normalizeIsoField(candidate.validTo),
+      observedAt: normalizeIsoField(candidate.observedAt),
+      referenceTime: normalizeIsoField(candidate.referenceTime),
+      sourceSessionId: normalizeAuditString(candidate.sourceSessionId),
+      sourceMessageIds: normalizeAuditIdList(candidate.sourceMessageIds),
+    };
+    // supersede 命中时把旧 slug 并入本事实的 supersedes（去重，最多 5 条）。
+    const mergedSupersedes = normalizeSupersedes([
+      ...supersededTargets,
+      ...(normalizeSupersedes(candidate.supersedes) ?? []),
+    ]);
 
     if (!existingEntry) {
       // G7：单批 shared ≤20（只计新增文档）。种子模式按批导入不受此限。
@@ -959,7 +1759,10 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
     let doc: AgentMemoryDoc;
 
     if (scope === "private") {
-      // private 行为完全不变：恒 active、contributors 恒空、无提案。
+      // 同 slug 且内容完全相同＝幂等重提：保留原 validFrom（as_of 历史不丢），只刷新
+      // lastConfirmedAt 并记 noop；内容真的变了才按新事实刷新时间字段。
+      const reconfirmSame =
+        existingEntry !== null && previous !== null && sameContent(previous, candidate);
       doc = {
         id: existingEntry?.id ?? newDocId(batchId, candidate.slug),
         scope,
@@ -978,6 +1781,16 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
         status: "active",
         revision,
         contributors: [],
+        ...timeFields,
+        ...(reconfirmSame && previous
+          ? {
+              validFrom: previous.validFrom ?? previous.createdAt,
+              validTo: timeFields.validTo ?? previous.validTo,
+            }
+          : {}),
+        supersedes: mergedSupersedes ?? previous?.supersedes,
+        lastConfirmedAt: nowIso,
+        lastOperation: reconfirmSame ? "noop" : existingEntry ? "update" : "add",
         createdAt: existingEntry?.createdAt ?? nowIso,
         updatedAt: nowIso,
       };
@@ -1006,6 +1819,10 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
         status: reachable ? "active" : "pending_review",
         revision,
         contributors,
+        ...timeFields,
+        supersedes: mergedSupersedes,
+        lastConfirmedAt: nowIso,
+        lastOperation: "add",
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -1016,12 +1833,14 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
         continue;
       }
       if (sameContent(previous, candidate)) {
-        // 幂等重提：只并入佐证，live 内容一字不动。
+        // 幂等重提：只并入佐证，live 内容与 validFrom/validTo 一字不动。
         doc = {
           ...previous,
           contributors: mergeContributors(previous.contributors, contributorKey),
           status: "active",
           revision,
+          lastConfirmedAt: nowIso,
+          lastOperation: "update",
           updatedAt: nowIso,
         };
       } else {
@@ -1081,6 +1900,11 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
             revision,
             contributors: mergeContributors(previous.contributors, proposed.contributors),
             proposed: undefined,
+            // live 内容被跨账号佐证推进：按新事实刷新时间字段。
+            ...timeFields,
+            supersedes: mergedSupersedes ?? previous.supersedes,
+            lastConfirmedAt: nowIso,
+            lastOperation: "update",
             updatedAt: nowIso,
           };
         } else {
@@ -1121,6 +1945,9 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
               status: reachable ? "active" : "pending_review",
               revision,
               contributors,
+              // 措辞微调是对同一事实的佐证：不刷新 validFrom，只记确认时间。
+              lastConfirmedAt: nowIso,
+              lastOperation: "update",
               proposed: undefined,
               updatedAt: nowIso,
             }
@@ -1144,6 +1971,11 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
               contributors,
               // 内容未变才保留既有提案；live 被直接改写时旧提案作废。
               proposed: contentSame ? previous?.proposed : undefined,
+              // live 内容被直接改写：按新事实刷新时间字段。
+              ...timeFields,
+              supersedes: mergedSupersedes ?? previous?.supersedes,
+              lastConfirmedAt: nowIso,
+              lastOperation: "update",
               createdAt: existingEntry?.createdAt ?? previous?.createdAt ?? nowIso,
               updatedAt: nowIso,
             };
@@ -1153,6 +1985,19 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
       continue;
     }
     await writeDoc(doc);
+
+    // 新事实已落盘成功，才把旧事实置为 superseded（失败路径不会走到这里，
+    // 因此配额／结构拒绝时候选旧事实保持 active、仍在 INDEX）。
+    if (supersedeMatch) {
+      await applyPrivateReconcileUpdate(
+        supersedeMatch.entry,
+        supersedeMatch.doc,
+        "supersede",
+        nowIso,
+      );
+      superseded.push(supersedeMatch.entry.slug);
+      if (ownerKey) touchedPrivateOwners.add(ownerKey);
+    }
 
     const entry: MemoryCatalogEntry = {
       id: doc.id,
@@ -1167,12 +2012,17 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
       batchId: doc.batchId,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
+      validFrom: doc.validFrom,
+      validTo: doc.validTo,
+      lastConfirmedAt: doc.lastConfirmedAt,
     };
     if (existingIndex >= 0) entries[existingIndex] = entry;
     else {
       entries.push(entry);
       if (scope === "shared") sharedAcceptedThisBatch += 1;
     }
+    // 逐文档日志：条目新建／更新都写自己的文件（跨进程并发不再共享一个 catalog.json）。
+    await writeCatalogEntry(entry);
     if (scope === "shared") touchedShared = true;
     else if (ownerKey) touchedPrivateOwners.add(ownerKey);
     // 实写（新文档／内容提升为 live）才进 accepted；提案-only 的 id 进 proposals。
@@ -1183,10 +2033,11 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
     }
   }
 
-  await saveCatalog(catalog);
+  // 进入时的 catalog.revision 作为并发检测基线：别的进程若已写入，saveCatalog 会按 id 合并。
+  await saveCatalog(catalog, catalog.revision ?? 0);
 
   let indexLines = 0;
-  if (accepted.length > 0) {
+  if (accepted.length > 0 || superseded.length > 0) {
     if (touchedShared) indexLines += await rebuildIndex("shared");
     for (const ownerKey of touchedPrivateOwners) {
       indexLines += await rebuildIndex("private", ownerKey);
@@ -1196,6 +2047,8 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
   return {
     accepted,
     proposals,
+    ...(noop.length > 0 ? { noop } : {}),
+    ...(superseded.length > 0 ? { superseded } : {}),
     rejected,
     stats: {
       received: candidates.length,
@@ -1206,11 +2059,19 @@ export async function ingestMemoryDocs(input: MemoryIngestInput): Promise<Memory
   };
 }
 
+/** 导出入口：整段函数体持锁，避免同进程内 read-modify-write catalog 互相覆盖。 */
+export function ingestMemoryDocs(input: MemoryIngestInput): Promise<MemoryIngestResult> {
+  return withCatalogLock(() => ingestMemoryDocsLocked(input));
+}
+
 /**
- * 撤回：status=retracted + 清空未发布提案 + 从 INDEX 移除；**不删文件**（留证只留 live 正文，
- * 不保留 proposed，避免人工 activate 后旧提案被后续佐证意外提升）。
+ * 撤回：status=retracted + validTo=now + 清空未发布提案 + 从 INDEX 移除；**不删文件**
+ * （留证只留 live 正文，不保留 proposed，避免人工 activate 后旧提案被后续佐证意外提升）。
+ * superseded 是历史终态，不重复撤回（跳过）。
  */
-export async function retractMemoryDocs(input: MemoryRetractInput): Promise<{ retracted: string[] }> {
+async function retractMemoryDocsLocked(
+  input: MemoryRetractInput,
+): Promise<{ retracted: string[] }> {
   const docIds = new Set((input?.docIds ?? []).map((id) => String(id)));
   const batchId = String(input?.batchId ?? "").trim();
   if (docIds.size === 0 && !batchId) return { retracted: [] };
@@ -1223,23 +2084,41 @@ export async function retractMemoryDocs(input: MemoryRetractInput): Promise<{ re
   for (const entry of catalog.entries) {
     const matches = docIds.size > 0 ? docIds.has(entry.id) : entry.batchId === batchId;
     if (!matches || entry.status === "retracted") continue;
+    // superseded 已是历史终态：不重复撤回，也不改它的 validTo。
+    if (entry.status === "superseded") continue;
     const doc = await readDoc(entry.scope, entry.ownerKey, entry.domain, entry.slug);
-    if (!doc) continue;
-    await writeDoc({ ...doc, status: "retracted", proposed: undefined, updatedAt: nowIso });
+    if (!doc || doc.status === "superseded") continue;
+    await writeDoc({
+      ...doc,
+      status: "retracted",
+      validTo: nowIso,
+      proposed: undefined,
+      updatedAt: nowIso,
+    });
     entry.status = "retracted";
     entry.updatedAt = nowIso;
+    entry.validFrom = doc.validFrom;
+    entry.validTo = nowIso;
+    await writeCatalogEntry(entry);
     retracted.push(doc.id);
     if (doc.scope === "shared") touchedShared = true;
     else if (doc.ownerKey) touchedPrivateOwners.add(doc.ownerKey);
   }
 
   if (retracted.length > 0) {
-    await saveCatalog(catalog);
+    await saveCatalog(catalog, catalog.revision ?? 0);
     if (touchedShared) await rebuildIndex("shared");
     for (const ownerKey of touchedPrivateOwners) await rebuildIndex("private", ownerKey);
   }
 
   return { retracted };
+}
+
+/** 导出入口：整段函数体持锁。 */
+export function retractMemoryDocs(
+  input: MemoryRetractInput,
+): Promise<{ retracted: string[] }> {
+  return withCatalogLock(() => retractMemoryDocsLocked(input));
 }
 
 /**
@@ -1249,7 +2128,7 @@ export async function retractMemoryDocs(input: MemoryRetractInput): Promise<{ re
  * activate 到 shared 与其他进入 active 的路径同受 `canActivateShared()` 约束：满 400 时
  * 保持 pending_review 并进回执 `blocked`——人工放行不绕过平台容量上限。
  */
-export async function reviewMemoryDocs(
+async function reviewMemoryDocsLocked(
   input: MemoryReviewInput,
 ): Promise<MemoryReviewResult> {
   const action = input?.action;
@@ -1261,8 +2140,7 @@ export async function reviewMemoryDocs(
   if (docIds.size === 0 && !batchId) return { reviewed: [], action, blocked: [] };
 
   const fromStatus: MemoryStatus = action === "pending_review" ? "active" : "pending_review";
-  const toStatus: MemoryStatus = action === "pending_review" ? "pending_review" : "active";
-  const scopeFilter: MemoryScope | undefined =
+  const toStatus: MemoryStatus = action === "pending_review" ? "pending_review" : "active";  const scopeFilter: MemoryScope | undefined =
     input?.scope === "private" || input?.scope === "shared"
       ? input.scope
       : action === "pending_review"
@@ -1295,18 +2173,58 @@ export async function reviewMemoryDocs(
     await writeDoc({ ...doc, status: toStatus, updatedAt: nowIso });
     entry.status = toStatus;
     entry.updatedAt = nowIso;
+    entry.validFrom = doc.validFrom;
+    await writeCatalogEntry(entry);
     reviewed.push(doc.id);
     if (doc.scope === "shared") touchedShared = true;
     else if (doc.ownerKey) touchedPrivateOwners.add(doc.ownerKey);
   }
 
   if (reviewed.length > 0) {
-    await saveCatalog(catalog);
+    await saveCatalog(catalog, catalog.revision ?? 0);
     if (touchedShared) await rebuildIndex("shared");
     for (const ownerKey of touchedPrivateOwners) await rebuildIndex("private", ownerKey);
   }
 
   return { reviewed, action, blocked };
+}
+
+/** 导出入口：整段函数体持锁。 */
+export function reviewMemoryDocs(input: MemoryReviewInput): Promise<MemoryReviewResult> {
+  return withCatalogLock(() => reviewMemoryDocsLocked(input));
+}
+
+/**
+ * 读某文档的全部历史世代（revision 1..min(entry.revision, 50)）。读不到／形状不符的
+ * 世代直接跳过（不抛）。`current` 是当前正文（可能已是 superseded／retracted）。
+ */
+export async function listMemoryRevisions(
+  docId: string,
+): Promise<{ current: AgentMemoryDoc | null; revisions: AgentMemoryDoc[] }> {
+  const id = String(docId ?? "").trim();
+  if (!id) return { current: null, revisions: [] };
+  const catalog = await loadCatalog();
+  const entry = catalog.entries.find((item) => item.id === id);
+  if (!entry) return { current: null, revisions: [] };
+  const current = await readDoc(entry.scope, entry.ownerKey, entry.domain, entry.slug);
+  const revisions: AgentMemoryDoc[] = [];
+  const maxRevision = Math.min(Math.max(0, Math.floor(entry.revision ?? 0)), 50);
+  for (let revision = 1; revision <= maxRevision; revision += 1) {
+    const key = revisionKey(id, revision);
+    // 先查进程内副本（纯 Map 模式），再读 blob。
+    const parsed = revisionsMemory.get(key) ?? (await readBlobJson<AgentMemoryDoc>(key));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    if (
+      parsed.slug !== entry.slug ||
+      parsed.domain !== entry.domain ||
+      parsed.scope !== entry.scope
+    ) {
+      continue;
+    }
+    revisions.push(parsed);
+  }
+  revisions.sort((a, b) => a.revision - b.revision);
+  return { current, revisions };
 }
 
 /** 批次报告落盘（契约 §2 `agent-memory/batches/{batchId}.json`）。 */

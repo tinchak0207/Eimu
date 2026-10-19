@@ -34,6 +34,16 @@ import {
 } from "./agent-memory-write.ts"
 
 const PREFIX = "/internal/memory/"
+
+// ── 2026-10-19：note 写入成功 → 通知召回语料快取失效 ─────────────────────────
+// CorpusCache TTL 5 分钟；若 ingest（含 supersede/retract 生效）后不失效，旧语料仍可能被
+// 召回。钩子由 wiring 注入（本档不 import wiring，避免反向依赖）；异常一律吞掉，不影响回执。
+let onMemoryNoteIngested: (() => void) | null = null
+
+export function setMemoryNoteIngestHook(fn: (() => void) | null): void {
+  onMemoryNoteIngested = fn
+}
+
 const DEFAULT_WORKSPACE_DIR = "/opt/agent-harness/workspace"
 /** JSON 转义会膨胀，给 content 的 100KB 上限留足余量；仍然有界。 */
 const MEMORY_HTTP_BODY_MAX_BYTES = 2 * 1024 * 1024
@@ -110,15 +120,23 @@ async function handleMemoryNote(
   if (normalized.ok !== true) return badRequest(normalized.reason)
 
   // 再走一遍与批次共用的 G1-G7：结构/证据之外，G3 凭证、G4 身份、G7 跨租户注入。
+  // sourceSessionId 是网关已解析值（非模型内容），只进 doc 溯源栏，不参与 G3/G4 扫描。
   const gated = applyMemoryGates(normalized.candidate, {
     sharedEnabled: MEMORY_SHARED_ENABLED,
     ownerKeyHint: ownerKey,
+    sourceSessionId: sessionId,
   })
   if (gated.action === "drop" || !gated.doc) return badRequest(gated.reason)
 
   const doc = { ...gated.doc }
   // private 的归属由服务端身份补齐（与 memory-batch 逐行同义）；shared 由 gates 填 contributorKey。
   if (doc.scope === "private" && !doc.ownerKey) doc.ownerKey = ownerKey
+  // 服务端时间与来源：note 通道没有模型给的日期，observed_at/valid_from 由服务端观测时刻补齐；
+  // 若 candidate 已带 validFrom（未来通道）则优先 candidate，服务端不覆盖。
+  const nowIso = new Date().toISOString()
+  if (!doc.observedAt) doc.observedAt = nowIso
+  if (!doc.validFrom) doc.validFrom = nowIso
+  doc.sourceSessionId = sessionId
 
   // batch_id 不含正文：note-<UTC 日期>-<session 短哈希>。
   const day = new Date().toISOString().slice(0, 10)
@@ -158,6 +176,13 @@ async function handleMemoryNote(
     return errorResponse("ingest_failed", "memory ingest rejected the batch", 502)
   }
 
+  // 2xx 回执即视为可能改变共享语料（accepted/proposals/noop/superseded 任一）；钩子失败不影响回执。
+  try {
+    onMemoryNoteIngested?.()
+  } catch {
+    /* 快取失效失败不影响写入回执；下个 TTL 周期自然恢复 */
+  }
+
   const record = isRecord(json) ? json : {}
   const accepted = Array.isArray(record.accepted)
     ? record.accepted.filter((id): id is string => typeof id === "string")
@@ -167,8 +192,16 @@ async function handleMemoryNote(
   const proposals = Array.isArray(record.proposals)
     ? record.proposals.filter((id): id is string => typeof id === "string")
     : []
+  // noop＝与既有记忆重复、已合并确认但未重复写入；superseded＝旧记忆已被新文档取代。
+  // 两者都是端点新增的可选回执栏，缺席即空阵列（旧端点行为不变）。
+  const noop = Array.isArray(record.noop)
+    ? record.noop.filter((id): id is string => typeof id === "string")
+    : []
+  const superseded = Array.isArray(record.superseded)
+    ? record.superseded.filter((id): id is string => typeof id === "string")
+    : []
   return Response.json(
-    { ok: true, accepted, rejected, proposals },
+    { ok: true, accepted, rejected, proposals, noop, superseded },
     { headers: { "Cache-Control": "no-store" } },
   )
 }

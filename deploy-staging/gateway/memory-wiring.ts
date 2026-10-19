@@ -2,9 +2,11 @@
 // 预算常量、注入块组装、trace 三件、召回 prefetch、批次 deps 与 ticker、三个内部端点。
 // 逐行搬运自 /home/lenovo/Desktop/image-app/deploy-staging/gateway/index.ts，仅加 export 前缀＋本档头＋单行 import。
 // 注意：memoryBatch 单例与 ticker setInterval 是模组级副作用，原样搬运（载入即生效）。
-import { CorpusCache, recallTop, buildRecallQuery, renderRecallPrefix, clampRecallK, clipToUtf8Bytes, utf8ByteLength, memoryAgeDays, memoryFreshnessWarning, RECALL_K_DEFAULT, RECALL_K_MAX, type RecallableDoc } from "./memory-recall"
+import { CorpusCache, recallTop, buildRecallQuery, expandRecallQuery, renderRecallPrefix, clampRecallK, clipToUtf8Bytes, utf8ByteLength, memoryAgeDays, memoryFreshnessWarning, RECALL_K_DEFAULT, RECALL_K_MAX, type RecallableDoc, type RecallTopOptions } from "./memory-recall"
 import { MEMORY_SIGNATURE_HEADER, signMemoryBytes, signEmptyMemoryBody, createMemoryBatch, type MemorySessionRecord } from "./memory-batch"
-import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_RECALL_ENABLED, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
+// 单向依赖：wiring → memory-http 注册钩子；memory-http 不反向 import wiring（无新循环）。
+import { setMemoryNoteIngestHook } from "./memory-http"
+import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_RECALL_ENABLED, MEMORY_RECALL_RECENCY_WEIGHT, MEMORY_RECALL_HALF_LIFE_DAYS, MEMORY_RECALL_LINK_EXPANSION, MEMORY_RECALL_LINK_DAMPING, MEMORY_RECALL_LINK_ITERATIONS, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
 import { bindingRef } from "./model-registry"
 import { getOwnedSession } from "./sessions-core"
 import { loadSessionByOpencodeId } from "./persistence"
@@ -424,6 +426,10 @@ export async function memoryFetchExport(pathWithQuery: string, headers: Record<s
 // 语料 TTL 5 分钟（§3.3 默认）；secret provider 显式指向本档 env 快照。
 export const memorySharedCorpus = new CorpusCache(memoryFetchExport, 5 * 60 * 1000, () => MEMORY_INGEST_SECRET)
 
+// 2026-10-19：note/批次 ingest 成功后立即失效语料快取——supersede/retract 后不再最多
+// 滞后一个 TTL（5 分钟）仍可被召回。钩子只做内存清空，不发起网络、不抛。
+setMemoryNoteIngestHook(() => memorySharedCorpus.invalidate())
+
 // ── 服务端实时平台状态（2026-10-19）────────────────────────────────────────
 // 目的：把「平台此刻哪些模型没有健康供应商/在冷却、近 1 小时谁成功率明显偏低」
 // 作为服务端观测注入，替代用户把节点故障写成记忆、模型再读记忆当事实。
@@ -572,6 +578,23 @@ export function memoryRecallActive(): boolean {
 }
 
 /**
+ * 召回评分选项单一来源（2026-10-19）：prefetch／热语料展开／工具端三处共用，
+ * 禁止把 recency/link 参数写死在各自呼叫点。k 默认取 env MEMORY_RECALL_K；
+ * 工具路径若需按请求覆盖，spread 后覆写 k 即可。
+ */
+export function memoryRecallScoringOptions(): RecallTopOptions & { minScore: number; k: number } {
+  return {
+    minScore: MEMORY_RECALL_MIN_SCORE,
+    k: clampRecallK(process.env.MEMORY_RECALL_K, RECALL_K_DEFAULT),
+    recencyWeight: MEMORY_RECALL_RECENCY_WEIGHT,
+    recencyHalfLifeDays: MEMORY_RECALL_HALF_LIFE_DAYS,
+    linkExpansion: MEMORY_RECALL_LINK_EXPANSION,
+    linkDamping: MEMORY_RECALL_LINK_DAMPING,
+    linkIterations: MEMORY_RECALL_LINK_ITERATIONS,
+  }
+}
+
+/**
  * 回合开始取预取候选（读即弃：回合结束重算，防旧候选僵尸注入）。null=miss → 本回合不注入、异步补算。
  * 2026-10-02：此处即真正注入点，落实 session 累计位元组帽（超限降级不报错）。
  * 2026-10-19：注入成功后记一个短时去重标记，避免 context-injection 的热语料展开
@@ -697,10 +720,11 @@ export function takeWarmCorpusRecallPrefix(
     if (prefetched !== null) return prefetched
     const docs = memorySharedCorpus.peek("shared")
     if (!docs) return null
-    const query = buildRecallQuery(userText)
-    if (!query.trim()) return null
-    const k = clampRecallK(process.env.MEMORY_RECALL_K, RECALL_K_DEFAULT)
-    const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE, k })
+    const baseQuery = buildRecallQuery(userText)
+    if (!baseQuery.trim()) return null
+    // 2026-10-19：只在原文后追加时间 token（不替换），评分选项与 prefetch/工具端统一。
+    const query = expandRecallQuery(baseQuery)
+    const hits = recallTop(query, docs, memoryRecallScoringOptions())
     const rendered = renderRecallPrefix(hits.map((h) => h.doc))
     if (!rendered) return null
     // P2-1：同一 query 指纹或同一正文指纹的 5 秒防抖（抖动重试）仍然保留。
@@ -735,16 +759,16 @@ export async function scheduleMemoryRecallPrefetch(state: SessionState): Promise
     // query 打分 10.19）反落榜。根因＝beast 派遣回合的 assistant 开头是「派工／工具叙述」，
     // 拼进 BM25 把 top-3 拉向工作流语料。故本轮不传 turnAssistantHead（函式签名保留、
     // 既有测试不受影响）。turnAssistantHead 累积逻辑暂留（无害），未一并移除以缩小改动面。
-    const query = buildRecallQuery(state.lastUserMessage ?? "")
+    const baseQuery = buildRecallQuery(state.lastUserMessage ?? "")
     // 2026-10-04 T2 修 Hack-H2 §四（召回 query 退化边界）：query 为空/纯空白时
     //（首则消息、或内部触发轮 lastUserMessage 尚未写入），不落一笔空 prefix 条目
     // ——否则下一轮 takeMemoryRecallPrefix 会消费到空条目且不再补算，该轮召回静默失效。
     // 退化时直接跳过本次 prefetch（如实：不假装 0 命中），下一轮以真实 query 补算。
-    if (!query.trim()) return
+    if (!baseQuery.trim()) return
+    const query = expandRecallQuery(baseQuery)
     const docs = await memorySharedCorpus.get("shared")
-    // 上限可设定（env MEMORY_RECALL_K）且一律夹 ≤ RECALL_K_MAX；预设维持 §7 产品决策 top-3。
-    const k = clampRecallK(process.env.MEMORY_RECALL_K, RECALL_K_DEFAULT)
-    const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE, k })
+    // 上限／衰减／链接参数统一来自 memoryRecallScoringOptions（env 可调，k 夹 ≤ RECALL_K_MAX）。
+    const hits = recallTop(query, docs, memoryRecallScoringOptions())
     memoryRecallPrefetch.set(state.sessionId, {
       prefix: renderRecallPrefix(hits.map((h) => h.doc)),
       docRefs: hits.map((h) => ({ domain: h.doc.domain, slug: h.doc.slug })),
@@ -979,6 +1003,8 @@ export const memoryBatch = createMemoryBatch({
   callVerifierLlm: (prompt, model) => memoryCallLlmWithModel(prompt, model, "verifier"),
   callOracleLlm: (prompt, model) => memoryCallLlmWithModel(prompt, model, "oracle"),
   postIngest: memoryPostIngest,
+  // 批次 ingest（首送成功或 pending 重放成功）后同步失效召回语料，避免旧文档继续被召回。
+  onIngestSuccess: () => memorySharedCorpus.invalidate(),
   env: {
     MEMORY_INGEST_SECRET,
     MEMORY_BATCH_ENABLED: process.env.MEMORY_BATCH_ENABLED,
@@ -1052,8 +1078,11 @@ export async function handleMemoryRecallSearch(key: string, req: Request): Promi
     const dm = body.domain.trim()
     docs = docs.filter((d) => d.domain === dm)
   }
-  const k = clampRecallK(body.limit, RECALL_K_DEFAULT)
-  const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE, k })
+  // 工具路径直接扩展 query；k 仍按请求 limit（其余评分参数与注入路径同一来源）。
+  const hits = recallTop(expandRecallQuery(query), docs, {
+    ...memoryRecallScoringOptions(),
+    k: clampRecallK(body.limit, RECALL_K_DEFAULT),
+  })
   const results = hits.slice(0, RECALL_K_MAX).map((h) => ({
     doc: { slug: h.doc.slug, domain: h.doc.domain, description: h.doc.description, body: h.doc.body },
     score: h.score,

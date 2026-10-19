@@ -153,6 +153,33 @@ export const MEMORY_RECALL_MIN_SCORE = (() => {
   return Number.isFinite(n) ? n : 1.0
 })()
 export const MEMORY_RECALL_ENABLED = memoryEnvBool(process.env.MEMORY_RECALL_ENABLED, true)
+// ── 2026-10-19 召回增强 env（无 embedding；全部有默认值，算法层默认仍是纯 BM25）─────
+// 年龄衰减强度，夹 [0,1]；0＝关闭（既有 BM25 行为）。默认 0.15 让近期记忆略占优。
+export const MEMORY_RECALL_RECENCY_WEIGHT = (() => {
+  const n = Number.parseFloat(process.env.MEMORY_RECALL_RECENCY_WEIGHT ?? "0.15")
+  if (!Number.isFinite(n)) return 0.15
+  return Math.max(0, Math.min(1, n))
+})()
+// 衰减半衰期（天），夹 [1,3650]。
+export const MEMORY_RECALL_HALF_LIFE_DAYS = (() => {
+  const n = Number.parseFloat(process.env.MEMORY_RECALL_HALF_LIFE_DAYS ?? "180")
+  if (!Number.isFinite(n)) return 180
+  return Math.max(1, Math.min(3650, n))
+})()
+// 链接图受限多跳开关，默认 true；"0"/"false"/"off"（memoryEnvBool 语义）关闭。
+export const MEMORY_RECALL_LINK_EXPANSION = memoryEnvBool(process.env.MEMORY_RECALL_LINK_EXPANSION, true)
+// 多跳阻尼，夹 [0,0.95]。
+export const MEMORY_RECALL_LINK_DAMPING = (() => {
+  const n = Number.parseFloat(process.env.MEMORY_RECALL_LINK_DAMPING ?? "0.5")
+  if (!Number.isFinite(n)) return 0.5
+  return Math.max(0, Math.min(0.95, n))
+})()
+// 多跳迭代次数，夹 [1,5]（整数）。
+export const MEMORY_RECALL_LINK_ITERATIONS = (() => {
+  const n = Number.parseInt(process.env.MEMORY_RECALL_LINK_ITERATIONS ?? "2", 10)
+  if (!Number.isFinite(n)) return 2
+  return Math.max(1, Math.min(5, n))
+})()
 // 0918 前缀快取修复：尾端注入 payload 的同 byte 去重开关。默认 ON（不重贴）；
 // SYSTEM_PAYLOAD_TAIL_DEDUPE=0 时每轮照旧重贴（回退钮，行为回到「每轮都在」）。
 export const SYSTEM_PAYLOAD_TAIL_DEDUPE = process.env.SYSTEM_PAYLOAD_TAIL_DEDUPE !== "0"

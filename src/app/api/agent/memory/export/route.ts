@@ -20,6 +20,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
+/** `as_of`（ISO）：可 parse 才采用，非法一律忽略（保持默认「当前有效」行为）。 */
+function asOfParam(raw: string | null): string | undefined {
+  if (!raw) return undefined;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const raw = await req.arrayBuffer(); // GET 无 body → 空 bytes 验签
   if (!verifyMemorySignature(raw, req.headers.get(MEMORY_SIGNATURE_HEADER))) {
@@ -29,11 +36,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const params = req.nextUrl.searchParams;
   const scope = (params.get("scope") ?? "shared") as MemoryScope;
   const ownerKey = params.get("owner_key") ?? undefined;
+  const asOf = asOfParam(params.get("as_of"));
 
   try {
     const [docs, indexMd] = await Promise.all([
-      listMemoryDocs({ scope, ownerKey }),
-      readMemoryIndexMd(scope, ownerKey),
+      listMemoryDocs({ scope, ownerKey, ...(asOf ? { asOf } : {}) }),
+      readMemoryIndexMd(scope, ownerKey, asOf),
     ]);
     // 只导出 live 字段：`proposed` 是未佐证的正文提案，绝不能随导出进入 gateway
     // 召回语料或共享索引（只有提升为 live 后才会出现在 INDEX）。
