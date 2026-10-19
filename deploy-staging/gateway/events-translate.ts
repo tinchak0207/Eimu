@@ -1360,6 +1360,15 @@ export function finalizeIdleStep(state: SessionState): void {
   }
 }
 
+/** 撤回失败时只发尾端注入（原用户消息已在历史里），避免历史里出现第二条逐字相同的用户消息。 */
+export function minimalNudgeBody(full: { parts: Array<Record<string, unknown>> }): { parts: Array<Record<string, unknown>> } {
+  const texts = full.parts.filter((p) => p && p.type === "text" && typeof p.text === "string") as Array<{ type: string; text: string }>
+  const last = texts.length > 0 ? texts[texts.length - 1].text : ""
+  const at = last.lastIndexOf("---\n【系统注入·尾端】")
+  const tail = at >= 0 ? last.slice(at) : last
+  return { parts: [{ type: "text", text: tail }] }
+}
+
 export function triggerIdleStepBreaker(
   state: SessionState,
   nudgeText: string = IDLE_STEP_NUDGE,
@@ -1406,10 +1415,12 @@ export function triggerIdleStepBreaker(
     if (!cur || (cur.turnGen ?? 0) !== gen) return
     try {
       // 2026-10-01 去重：空 step 轮零产出 → 撤掉原 user 讯息，nudgeBody（原文＋提示）只留一条。
-      await revertDeadTail(cur.opencodeSessionId)
+      // 撤回失败（该轮已有产出，原用户消息必须留在历史）→ 只发尾端最小 nudge，禁止重发原文。
+      const reverted = await revertDeadTail(cur.opencodeSessionId)
+      const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody)
       const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
-        body: JSON.stringify(nudgeBody),
+        body: JSON.stringify(toSend),
         timeoutMs: 10000,
       })
       if (!res.ok) throw new Error(`status ${res.status}`)

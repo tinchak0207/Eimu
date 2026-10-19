@@ -16,7 +16,7 @@ import { getActiveGoal, buildGoalEvaluatorSpec, parseGoalEvaluatorOutput, record
 import { beastAgentField } from "./session-lifecycle.ts"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
-import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
+import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet, minimalNudgeBody } from "./events-translate.ts"
 import { markOcActivity } from "./session-activity.ts"
 import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
@@ -987,10 +987,12 @@ export function handleOpencodeEvent(event: any): void {
                 return
               }
               try {
-                await revertDeadTail(cur.opencodeSessionId)
+                // 撤回失败（该轮已有产出，原用户消息必须留在历史）→ 只发尾端最小 nudge，禁止重发原文。
+                const reverted = await revertDeadTail(cur.opencodeSessionId)
+                const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody)
                 const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
                   method: "POST",
-                  body: JSON.stringify(nudgeBody),
+                  body: JSON.stringify(toSend),
                   timeoutMs: 10000,
                 })
                 if (!res.ok) throw new Error(`status ${res.status}`)
