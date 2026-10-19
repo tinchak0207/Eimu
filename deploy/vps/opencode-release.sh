@@ -5,8 +5,12 @@
 # 用法：
 #   bash deploy/vps/opencode-release.sh status            # 唯读：现况＋健康
 #   bash deploy/vps/opencode-release.sh plan [--sha C]    # 唯读：列出将变更的档
-#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run] [--force]
+#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run] [--force] [--fast]
 #   bash deploy/vps/opencode-release.sh rollback [--dry-run] [--force]   # 回复最新备份
+#
+# --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即重启。
+#   用于提示词/文案/技能这类短改：目标 <30s，不再为在途回合等 180s。中断的回合由
+#   harness 的耐久续接处理；需要保护在途长任务时不要用 --fast。
 #
 # F8（2026-10-04）断面 A｜重启前 drain（默认开启）：
 #   restart 之前先只读探测「有没有在途回合/子代理」，有则轮询等到清空（上界 180s，
@@ -78,6 +82,7 @@ parse_flags() {
       --dry-run) DRY_RUN=1 ;;
       --skip-recon) SKIP_RECON=1 ;;
       --force) FORCE=1 ;;
+      --fast) SKIP_RECON=1; FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数：$1" ;;
@@ -334,7 +339,15 @@ fi
 sudo systemctl restart "$SERVICE"
 sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || echo ERR)"
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
+[ -n "$code" ] || code=000
+# 2026-10-19：重启后 opencode 可能仍在起监听，000 不等于失败；最多再等 12s。
+for _ in 1 2 3 4 5 6; do
+  [ "$code" = "000" ] || break
+  sleep 2
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
+  [ -n "$code" ] || code=000
+done
 echo "$tag $sha $(date -u +%s) release files=$(wc -l < "$r_exp") service=$state http=$code" | sudo tee -a "$HISTORY_LOG" >/dev/null
 if [ "$state" != "active" ]; then echo "SERVICE_NOT_ACTIVE state=$state"; sudo journalctl -u "$SERVICE" -n 20 --no-pager >&2; exit 1; fi
 case "$code" in 200|401) echo "VERIFY_OK service=active http=$code files=$(wc -l < "$r_exp")";; *) echo "HEALTH_UNEXPECTED http=$code"; exit 1;; esac

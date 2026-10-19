@@ -4,7 +4,7 @@
 #
 # 用法：
 #   bash deploy/vps/gateway-release.sh status            # 看生产现在跑哪一版（唯读）
-#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run] [--force]
+#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run] [--force] [--fast]
 #   bash deploy/vps/gateway-release.sh rollback [--dry-run] [--force]
 #   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把实体目录改成受管 symlink
 #
@@ -13,6 +13,9 @@
 #   到清空（上界 180s）；到上界仍未清空 → 默认中止，加 --force 跳过。判据与
 #   opencode-release.sh 完全同套（gateway sessions.db lastTurnActiveAt / subagent_reworks
 #   ＋ opencode.db 未 completed 的流式 assistant 讯息）。
+#
+# --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即 build+重启。
+#   用于提示词/文案这类短改：目标 <60s，不再为在途回合等 180s。中断的回合由耐久续接处理。
 #
 # 为什么存在：过去「生产跑的是哪一版」只能事后取证（Vercel files API 比 md5、逐 chunk grep），
 #   而 alias 曾 34 小时未更新、跑的是旧部署（memory mapay-fee-rejection-fix-0920），
@@ -172,7 +175,7 @@ usage() {
 
 子命令：
   status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
-  release [--sha C] [--files F...] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force]
+  release [--sha C] [--files F...] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
                           → md5 manifest → 原子切 symlink → drain 闸门 + deploy.sh 闸门 → 验证
                           ⚠️ --files 不可用于本 gateway：release 目录必须是完整档案集，
@@ -196,6 +199,7 @@ parse_flags() {
       --skip-recon) SKIP_RECON=1 ;;
       --skip-media-wf-coverage) SKIP_MEDIA_WF_COVERAGE=1 ;;
       --force) FORCE=1 ;;
+      --fast) SKIP_RECON=1; FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       --files)
         shift
