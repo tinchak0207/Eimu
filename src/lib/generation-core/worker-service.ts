@@ -44,7 +44,7 @@ import { acquireSupplierLease, diagnoseSupplierUnavailability, heartbeatSupplier
 import { generateWithSupplier, resolveSupplyAdapter } from "./supplier-adapter";
 import { reconcileProtocolOf, workflowSeconds } from "./supply-registry";
 import { enforcePaidVideoCostGate } from "./paid-video-cost-gate";
-import type { GenerationArtifactResult, GenerationJob, GenerationKind, ProviderProtocol, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
+import type { GenerationArtifactResult, GenerationJob, GenerationKind, FailureClass, ProviderProtocol, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 import { runProviderReconciliation } from "./provider-reconciliation";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
 import { emitJobRoutingEvent } from "../routing-telemetry";
@@ -304,6 +304,23 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           await refundFailure(job, completed, workerId, sql);
           const attemptsAfterFail = await listGenerationAttemptsForJob(job.id, sql).catch(() => jobAttempts);
           await emitJobRoutingEvent({ job, attempts: attemptsAfterFail, outcome: "exhausted", refunded: true });
+          return;
+        }
+        // supplier_excluded = 本单所有合格供给都已试过并被 acquire 永久排除（同单不复用）。
+        // 继续排队只会在 queueMaxWait（默认 120 分钟）空转，客户端 15 分钟就判超时，
+        // 用户端表现为进度条 100% 卡死。诊断文案本就承诺 fail fast，这里兑现。
+        // 只对 supplier_excluded 生效；capacity_saturated / suppliers_cooldown /
+        // accounts_unhealthy 仍按原逻辑排队等待。
+        if (diagnosis.reason === "supplier_excluded") {
+          const excludedFailureClass: FailureClass = (lastFailureClass ?? "overloaded") as FailureClass;
+          await failGenerationJob({
+            jobId: job.id,
+            workerId,
+            failureClass: excludedFailureClass,
+            failureDetail: `No untried supplier remains after ${jobAttempts.length} attempt(s): ${lastFailureDetail ?? diagnosis.detail}`,
+          }, sql);
+          await refundFailure(job, completed, workerId, sql);
+          await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });
           return;
         }
         // 排队总等待上限（2026-10-14 修 19 单永久 queued）：顺延只是观测窗口，不能无限挂单。

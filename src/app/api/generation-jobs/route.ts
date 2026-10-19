@@ -17,6 +17,11 @@ import {
   listGenerationJobsForTenant,
 } from "@/lib/generation-core/job-repository";
 import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
+import {
+  DURABLE_TIER_SCALE,
+  isDurableImageSize,
+  scaleDurableImageSize,
+} from "@/lib/generation-core/durable-image-sizes";
 import { generationTaskProjection } from "@/lib/generation-core/task-projection";
 import {
   VideoPostProductionError,
@@ -43,6 +48,20 @@ export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷
 const MAX_REFERENCE_IMAGES = 8;
 const MAX_REFERENCE_BYTES = 12 * 1024 * 1024;
 const MAX_PROMPT_LENGTH = 8_000;
+
+/**
+ * C 端生成任务列表只认这六种 kind。`film_export` 是 agent 成片导出记录
+ * （master-ingest-service 写入，model_id 可能是 catalog 没有的 `timeline_master`），
+ * 不属于用户生成任务；在 route 层滤掉，不动 job-repository 的通用查询语义。
+ */
+const GENERATION_TASK_KINDS: ReadonlySet<string> = new Set([
+  "image_generate",
+  "image_edit",
+  "video_generate",
+  "tts",
+  "avatar",
+  "lipsync",
+]);
 
 type ReferenceRole = "general" | "character" | "product" | "style" | "composition";
 
@@ -197,7 +216,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     success: true,
     enabled: true,
-    data: jobs.map(webTaskProjection),
+    data: jobs.filter((job) => GENERATION_TASK_KINDS.has(job.kind)).map(webTaskProjection),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -273,6 +292,27 @@ export async function POST(req: NextRequest) {
   if (parsed.files.length && capabilities?.referenceImages === false) return fail(400, "所选模型不支持参考图。", "reference_images_unsupported");
   if (rawLora.length && capabilities?.lora !== true) return fail(400, "所选模型不支持 LoRA。", "lora_unsupported");
 
+  // 档位只在 size 上表达（上游 openai_images 只认 size）：不按档位折算就等于
+  // 「选 2k/4k 却交 1k 图、还按高档位扣费」；而 16:9/4:3/21:9 的基准尺寸
+  // （1792x1024 / 1365x1024 / 1792x768）不在 durable 白名单内，2026-10-04 起
+  // 两个可用供给全部 503，任务空转到 120 分钟。落不进白名单＝未验证，具名拒，
+  // 不静默降级（与 upscale-backend 的 planGptImageUpscale 同一纪律）。
+  // 必须放在鉴权/扣费/建单之前：拒绝时零扣费、零建单。
+  let imageSize: string | null = null;
+  if (normalized.config.mediaType === "image") {
+    const baseSize = imageSizeForAspectRatio(normalized.config.aspectRatio);
+    const tierScale = DURABLE_TIER_SCALE[normalized.config.outputResolution as keyof typeof DURABLE_TIER_SCALE] ?? 1;
+    const scaledSize = scaleDurableImageSize(baseSize, tierScale);
+    if (!scaledSize || !isDurableImageSize(scaledSize)) {
+      return fail(
+        400,
+        `画幅 ${normalized.config.aspectRatio} × ${normalized.config.outputResolution} 没有已知可交的输出尺寸（基准 ${baseSize} ×${tierScale}），请改选 1:1/3:2/2:3 或更低档位。`,
+        "unsupported_size",
+      );
+    }
+    imageSize = scaledSize;
+  }
+
   // 管理员改价需立即对扣费生效：算价前先把最新定价覆写同步进目录（核心层内部吞错，失败不挡生成）。
   await syncModelPricing();
 
@@ -317,7 +357,7 @@ export async function POST(req: NextRequest) {
       kind: normalized.config.mediaType === "video" ? "video_generate" : references.length ? "image_edit" : "image_generate",
       modelId,
       prompt: submittedPrompt,
-      size: normalized.config.mediaType === "image" ? imageSizeForAspectRatio(normalized.config.aspectRatio) : null,
+      size: imageSize,
       ratio: normalized.config.aspectRatio,
       resolution: normalized.config.outputResolution,
       quality: normalized.config.qualityMode,

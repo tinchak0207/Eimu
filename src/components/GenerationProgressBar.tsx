@@ -7,6 +7,7 @@ function easeOut(progress: number) {
   return 1 - Math.pow(1 - progress, 3);
 }
 
+// 生成完成前绝不报 100：进度是时间估算，提前满格会让排队/重试中的用户看到「卡 100%」。
 export function calculateGenerationProgress(
   startedAt: number,
   now: number,
@@ -14,6 +15,6 @@ export function calculateGenerationProgress(
 ) {
   const elapsed = Math.max(0, now - startedAt);
   const ratio = Math.min(1, elapsed / Math.max(1, durationMs));
-  if (ratio >= 1) return 100;
+  if (ratio >= 1) return 99;
   return Math.max(1, Math.min(99, Math.round(easeOut(ratio) * 100)));
 }
