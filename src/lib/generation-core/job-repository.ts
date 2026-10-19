@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, readdir, readFile, unlink, stat } from "node:fs/promises";
 import path from "node:path";
 import { encryptGenerationPrompt, decryptGenerationPrompt } from "./crypto";
+import { requirePinnedPublishedWorkflow } from "../comfyui-workflow-pin";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { resolveModelRoute } from "./model-routing";
@@ -121,6 +122,7 @@ export async function createGenerationJob(
   input: CreateGenerationJobInput,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<CreatedJob> {
+  requirePinnedPublishedWorkflow(input.workflow);
   return sql.begin(async (tx) => {
     const rows = await tx<Row[]>`
       INSERT INTO generation_job (

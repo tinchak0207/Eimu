@@ -1,4 +1,10 @@
 import { fuseSceneVideo } from "../scene3d-video-fusion";
+import { claimScriptEpisode, scriptBindsParents, storyboardBindsItems, type ChildAssetItem, type ParentAsset } from "./asset-levels";
+import { sliceAllows, type ShortDramaActor } from "./slices";
+
+export interface ShortDramaRunOptions {
+  actor?: ShortDramaActor;
+}
 
 export const SHORTDRAMA_TOOL_IDS = [
   "script_scene_parse",
@@ -409,6 +415,15 @@ function lockAssets(input: unknown): ShortDramaToolResult<CastAssetLockOutput> {
     gate("appearance_or_reference_present", valid.length === assets.length, "each asset has a prompt or reference"),
     gate("required_assets_resolved", missingIds.length === 0, missingIds.length ? `missing: ${missingIds.join(", ")}` : "all required assets resolved"),
   ];
+  if (Array.isArray(record.items) || Array.isArray(record.parents)) {
+    const parents: ParentAsset[] = arrayOfRecords(record.parents).map((item) => ({ id: text(item.id) })).filter((item) => item.id);
+    const childItems: ChildAssetItem[] = arrayOfRecords(record.items).map((item) => ({
+      id: text(item.id),
+      assetId: text(item.assetId),
+    })).filter((item) => item.id && item.assetId);
+    const parentBind = scriptBindsParents(assets.map((asset) => asset.id), parents, childItems);
+    gates.push(gate("script_binds_parent", parentBind.ok, parentBind.detail));
+  }
   const status = gates.every((item) => item.passed) ? "succeeded" : "blocked";
   return result("cast_asset_lock", input, { locks, missingIds }, gates, status, "cast-asset-lock", {
     output: locks.map((lock) => lock.id),
@@ -429,6 +444,7 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     lastFrameId: text(item.lastFrameId) || undefined,
     audioAnchorId: text(item.audioAnchorId) || undefined,
     aspectRatio: text(item.aspectRatio) || undefined,
+    assetItemIds: Array.isArray(item.assetItemIds) ? item.assetItemIds.filter((id): id is string => typeof id === "string") : [],
   }));
   const lockedCharacters = new Set(Array.isArray(record.lockedCharacterCardIds) ? record.lockedCharacterCardIds.filter((id): id is string => typeof id === "string") : []);
   const lockedScenes = new Set(Array.isArray(record.lockedSceneCardIds) ? record.lockedSceneCardIds.filter((id): id is string => typeof id === "string") : []);
@@ -459,6 +475,21 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     gate("continuity", every((shot) => Boolean(shot.keyframeId && shot.lastFrameId)), "continuity references exist"),
     gate("export_readiness", every((shot) => Boolean(shot.shotId && shot.prompt && shot.durationSeconds > 0)), "shot is exportable"),
   ];
+  if (Array.isArray(record.assetItems)) {
+    const catalog = arrayOfRecords(record.assetItems).map((item) => ({
+      id: text(item.id),
+      assetId: text(item.assetId),
+    })).filter((item): item is ChildAssetItem => Boolean(item.id && item.assetId));
+    const bound = storyboardBindsItems(shots, catalog);
+    gates.push(gate("storyboard_binds_item", bound.ok, bound.detail));
+  }
+  if (text(record.scriptEpisodeId) || text(record.storyboardEpisodeId)) {
+    const bindings = record.episodeBindings && typeof record.episodeBindings === "object"
+      ? record.episodeBindings as Record<string, string>
+      : {};
+    const episode = claimScriptEpisode(bindings, text(record.storyboardEpisodeId), text(record.scriptEpisodeId));
+    gates.push(gate("script_episode_unique", episode.ok, episode.detail));
+  }
   const status = gates.every((item) => item.passed) ? "succeeded" : "blocked";
   return result("storyboard_qc_17", input, { gates, shotCount: shots.length, ready: status === "succeeded" }, gates, status, "storyboard-qc-17", {
     input: shots.map((shot) => shot.shotId),
@@ -617,7 +648,16 @@ function deliveryAssets(input: unknown): ShortDramaToolResult<DeliveryAssetsOutp
   });
 }
 
-export function runShortDramaTool<T = unknown>(tool: ShortDramaToolId, input: unknown, capabilities: ShortDramaCapabilities = {}): ShortDramaToolResult<T> {
+export function runShortDramaTool<T = unknown>(
+  tool: ShortDramaToolId,
+  input: unknown,
+  capabilities: ShortDramaCapabilities = {},
+  options?: ShortDramaRunOptions,
+): ShortDramaToolResult<T> {
+  if (options?.actor && !sliceAllows(options.actor, tool)) {
+    const gates = [gate("tool_slice", false, `${options.actor} 不能调用 ${tool}`)];
+    return blocked(tool, input, { denied: true }, gates, "tool-slice") as ShortDramaToolResult<T>;
+  }
   switch (tool) {
     case "script_scene_parse": return parseScript(input) as ShortDramaToolResult<T>;
     case "cast_asset_lock": return lockAssets(input) as ShortDramaToolResult<T>;

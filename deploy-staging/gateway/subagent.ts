@@ -51,6 +51,7 @@ import { registerTeamMember, removeTeamMember } from "./agent-mailbox.ts"
 // 循环与 canvas-cascade-state↔subagent 同型，两端均在呼叫期使用绑定，bun ESM 循环安全。
 import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask } from "./events-translate.ts"
 import { bindGenerationConsumer, generationParent, saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns, acknowledgeDurableSubagentRun } from "./job-store"
+import { currentKernelFingerprint, decideKernelResume } from "./agent-kernel.ts"
 // 片 C（2026-09-15）：Expert 交付契约的机器强制点。纯函数模组，零 gateway 内部依赖。
 // 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 时机器化重派一次。
 import {
@@ -609,6 +610,8 @@ interface SubagentRun {
   /** 本 run 自己的 system prompt 快照。子代理再 fork 时原样交给 fork（d7e 的
    *  parent system prompt snapshot），避免 fork 丢掉派遣时注入的宪法/契约/授权段。 */
   systemPromptSnapshot?: string
+  /** 开跑时的工具面+模型指纹。续跑对不上当前指纹则 409，避免半套新工具续旧会话。 */
+  kernelFingerprint?: string
   effort?: SubagentEffort
   /** 显式 model 覆写（provider/model）；fork 忽略（继承父模型）。 */
   modelOverride?: SubagentModelRef
@@ -2599,6 +2602,7 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
     : [constitutionNote, contractDirective, authorizationNote, WORKER_HARD_RULES].filter(Boolean).join("\n\n")
   // 供本 run 的子代理再 fork 时原样继承（fork 不能再 fork，但保留完整语义）。
   run.systemPromptSnapshot = system
+  run.kernelFingerprint = currentKernelFingerprint(run.agent, run.modelOverride?.modelID ?? run.modelChain[0]?.modelID)
   const body: Record<string, unknown> = { parts }
   if (system) body.system = system
   if (model) body.model = model
@@ -4983,6 +4987,11 @@ async function resumeTerminalRun(
     // Y4：**你自己停的**子代理不自动续——发消息被拒并告知「已取消」。
     return { ok: false, code: "agent_cancelled", error: `「${old.label}」是被人工停止的（已取消），不会自动续跑；要它继续请重新派工。`, status: 409 }
   }
+  const kernel = decideKernelResume(
+    old.kernelFingerprint,
+    currentKernelFingerprint(old.agent, old.modelOverride?.modelID ?? old.modelChain?.[0]?.modelID),
+  )
+  if (!kernel.ok) return { ok: false, code: kernel.code, error: kernel.error, status: kernel.status }
   if (!isOpenCodeSessionId(old.opencodeSessionId)) {
     return { ok: false, code: "not_messageable", error: `「${old.label}」的子会话不可续（会话 id 非法或子会话已被回收）；请重新派工。`, status: 409 }
   }

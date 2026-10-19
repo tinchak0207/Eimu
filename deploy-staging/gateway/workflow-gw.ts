@@ -28,6 +28,7 @@ import { armWatchdogTimer, isInterrogativeMessage } from "./timers-gw.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
 import { emitAgentNotice, reportNodeTerminalState } from "./emit-helpers.ts"
 import { emitVideoDone } from "./events-translate.ts"
+import { assertVideoAuthorityMix, videoAuthorityMixArgs } from "./video-authority-mix.ts"
 
 /** H11 补完：workflow 路径生成任务登记进 state.sessionTasks（与聊天路径 attachCanvasTask 同表）。 */
 export function registerWorkflowTask(
@@ -1087,8 +1088,10 @@ export async function assembleFilmNode(
           if (merged.exit_code !== 0) throw new Error(`多轨合并失败: ${(merged.stderr || "").slice(-200)}`)
         }
         const mixedOut = path.join(workDir, "film-mixed.mp4")
+        const mixArgs = videoAuthorityMixArgs(probe.durationSec)
+        assertVideoAuthorityMix(mixArgs)
         const mixed = await invoke<CommandResult>("execute_command", {
-          command: `${ffmpeg} -y -i ${shq(outPath)} -i ${shq(trackPath)} -map 0:v -map 1:a -c:v copy -c:a aac -movflags +faststart ${shq(mixedOut)}`,
+          command: `${ffmpeg} -y -i ${shq(outPath)} -i ${shq(trackPath)} ${mixArgs.map((arg) => shq(arg)).join(" ")} ${shq(mixedOut)}`,
           timeoutMs: 300000,
         })
         if (mixed.exit_code !== 0) throw new Error(`混流失败: ${(mixed.stderr || "").slice(-200)}`)
