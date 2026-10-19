@@ -518,7 +518,7 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       // 共享令牌只认证运行时调用，不把 body.session_id 绑定到租户身份。
       if (
         /^\/internal\/(?:task|goal|findings|wakeup|monitor|mailbox|permission|artifact|cron|plan)\//.test(pathname) ||
-        /^\/internal\/memory\/(?:save|list|read)$/.test(pathname) ||
+        /^\/internal\/memory\/(?:save|list|read|note)$/.test(pathname) ||
         pathname === "/internal/hooks/run" ||
         // 2026-10-18：合并端点内部会跑 plan/permission/hooks 三支，鉴权必须与它们同级。
         pathname === PRECHECK_PATH
@@ -563,7 +563,10 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       }
       if (
         req.method === "POST" &&
-        (pathname === "/internal/memory/save" || pathname === "/internal/memory/list" || pathname === "/internal/memory/read")
+        (pathname === "/internal/memory/save" ||
+          pathname === "/internal/memory/list" ||
+          pathname === "/internal/memory/read" ||
+          pathname === "/internal/memory/note")
       ) {
         return handleMemory(req, pathname)
       }

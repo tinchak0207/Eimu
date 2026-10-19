@@ -26,6 +26,21 @@ interface IngestRequestBody {
   batch_id?: unknown;
   prompt_version?: unknown;
   docs?: unknown;
+  /** 受控种子导入开关：只有严格 `true` 才算；还需 env `MEMORY_SEED_ENABLED === "true"`。 */
+  seed?: unknown;
+}
+
+/**
+ * 运营旋钮：shared 跨账号佐证门槛（`MEMORY_SHARED_CORROBORATION_MIN`）。
+ * 只接受正整数；未设定／格式坏／小于 1 一律回 undefined（不传 → store 用常量 2），
+ * 绝不抛错。此值不回落响应、不写日志。
+ */
+function sharedCorroborationMin(): number | undefined {
+  const raw = process.env.MEMORY_SHARED_CORROBORATION_MIN?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return undefined;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) return undefined;
+  return value;
 }
 
 /**
@@ -37,6 +52,7 @@ function mapDoc(raw: unknown): AgentMemoryDocInput {
   return {
     scope: doc.scope as MemoryScope,
     ownerKey: (doc.owner_key ?? doc.ownerKey) as string | undefined,
+    contributorKey: (doc.contributor_key ?? doc.contributorKey) as string | undefined,
     domain: doc.domain as string,
     slug: doc.slug as string,
     description: doc.description as string,
@@ -63,13 +79,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
+  // 受控种子导入：严格 `seed === true` 才算；未开 env 开关一律 403（HMAC 已在上面验过）。
+  // 回执不回显密钥／正文；普通批次完全不受影响（不传 seedMode）。
+  const seedRequested = body.seed === true;
+  if (seedRequested && process.env.MEMORY_SEED_ENABLED !== "true") {
+    return NextResponse.json({ error: "seed_disabled" }, { status: 403 });
+  }
+
   try {
     const result = await ingestMemoryDocs({
       batchId: body.batch_id as string,
       promptVersion: body.prompt_version as string | undefined,
+      corroborationMin: sharedCorroborationMin(),
+      ...(seedRequested ? { seedMode: true } : {}),
       docs: Array.isArray(body.docs) ? body.docs.map(mapDoc) : [],
     });
-    // 响应形状 = MemoryIngestResult：{ accepted, rejected, stats{received,accepted,index_lines} }（契约 §3.1）。
+    // 响应形状 = MemoryIngestResult：{ accepted, proposals?, rejected, stats{received,accepted,index_lines,seed_accepted} }（契约 §3.1）。
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });

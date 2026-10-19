@@ -13,10 +13,15 @@
 import { readdirSync, readFileSync } from "node:fs"
 import {
   buildMemoryInjectionBlocks,
+  getPlatformStatusLines,
+  takeWarmCorpusRecallPrefix,
+  memoryWarmRecallRoom,
   MEMORY_L0_BUDGET,
   MEMORY_L1_BUDGET,
   MEMORY_INJECTION_TOTAL_BUDGET,
   MEMORY_CONTINUITY_BUDGET,
+  MEMORY_PLATFORM_STATUS_BUDGET,
+  MEMORY_WARM_RECALL_BUDGET,
   type ContinuityRow,
 } from "./memory-wiring.ts"
 import { memoryAgeDays, memoryFreshnessWarning } from "./memory-recall.ts"
@@ -46,7 +51,7 @@ export function fenceInjectedData(text: string, label?: string): string {
 }
 
 // ── 1. 记忆注入（L0/L1 预算沿用 Eimu 现值）───────────────────────────────
-export { MEMORY_L0_BUDGET, MEMORY_L1_BUDGET, MEMORY_INJECTION_TOTAL_BUDGET, MEMORY_CONTINUITY_BUDGET }
+export { MEMORY_L0_BUDGET, MEMORY_L1_BUDGET, MEMORY_INJECTION_TOTAL_BUDGET, MEMORY_CONTINUITY_BUDGET, MEMORY_PLATFORM_STATUS_BUDGET, MEMORY_WARM_RECALL_BUDGET }
 
 export interface MemoryInjectionInput {
   userMemory: {
@@ -59,48 +64,126 @@ export interface MemoryInjectionInput {
   freshCreative?: boolean
   continuityLines?: string[]
   sessionId?: string
+  /** 本轮用户原文：供热语料同步展开算 recall query（首回合无 prefetch 时用）。 */
+  currentUserText?: string
+  /**
+   * 回合键（messages-gw 传 `String(state.turnGen)`）：同一回合最多注入一份召回正文。
+   * 缺省时退化为既有 query 指纹防抖（不做回合级去重）。
+   */
+  turnKey?: string
+  /** 服务端实时平台状态行（由 buildMemoryInjectionSectionsWithLiveState 预先取好）。 */
+  platformStatusLines?: string[]
 }
 
 export interface MemoryInjectionResult {
   lines: string[]
   sections: PromptSection[]
-  trace: { private_docs: string[]; shared_index_chars: number }
+  /**
+   * 与 lines/sections 逐项对齐的围栏标签：L0/L1/连续性是「账户记忆」，
+   * 平台状态是「服务端实时观测」，热语料是「本轮相关记忆正文」。
+   * 调用端（messages-gw turn-tail）必须按块取标签，禁止统一标成账户记忆。
+   */
+  sectionLabels: string[]
+  trace: { private_docs: string[]; shared_index_chars: number; platform_status_chars: number }
   totalChars: number
+  /** 本轮经热语料展开命中的记忆（供 trace.shared_recalled）；prefetch 路径不在此列。 */
+  recallDocRefs: Array<{ domain: string; slug: string }>
 }
 
 /**
  * 复用既有 buildMemoryInjectionBlocks（不改其预算/截断语义），额外把每一块包成
  * turn 层 section 供账本使用。年龄不衰减，只由既有 memoryFreshnessWarning 在
  * >1 天时加「过期警示」文字（见 memory-wiring 的 pushDoc）。
+ *
+ * 2026-10-19：热语料同步展开。首回合没有 prefetch 时，若共享语料已在 5 分钟缓存内，
+ * 直接同步 peek + 召回 + 渲染（零网络等待），并把正文交给 buildMemoryInjectionBlocks
+ * 作为「平台状态之后、连续性之前」的块统一裁预算（P1：不再在总预算之外 push）。
+ * buildMemoryInjectionBlocks 保持纯函式：缓存读取全部留在本层。
  */
 export function buildMemoryInjectionSections(input: MemoryInjectionInput): MemoryInjectionResult {
-  const blocks = buildMemoryInjectionBlocks(input.userMemory, input.sharedEnabled, {
+  const blockOpts = {
     freshCreative: input.freshCreative,
     continuityLines: input.continuityLines,
-  })
-  // 段 id 按「实际出现的块」命名：L0 不存在时第一块就是 L1，不能按数组下标硬套。
-  const hasL1 = Boolean(input.sharedEnabled && typeof input.userMemory?.memory_index_md === "string" && input.userMemory.memory_index_md.trim())
-  const hasContinuity = Boolean(input.continuityLines && input.continuityLines.length > 0)
-  const tailBlocks = (hasL1 ? 1 : 0) + (hasContinuity ? 1 : 0)
-  const labelOrder: string[] = []
-  if (blocks.lines.length > tailBlocks) labelOrder.push("L0")
-  if (hasL1) labelOrder.push("L1")
-  if (hasContinuity) labelOrder.push("continuity")
-  const sections: PromptSection[] = blocks.lines.map((text, i) => ({
-    id: `memory-${(labelOrder[i] ?? `block-${i}`).toLowerCase()}`,
-    layer: "turn",
-    priority: 40 + i,
-    cacheable: false,
-    breakingCacheReason: "记忆按本轮输入与账户状态重算",
-    // 记忆正文是资料：section 渲染即围栏化（调用端直接取用也不会漏掉隔离）。
-    render: () => fenceInjectedData(text, "账户记忆"),
-  }))
-  return {
-    lines: blocks.lines,
-    sections,
-    trace: blocks.trace,
-    totalChars: blocks.lines.reduce((n, s) => n + s.length, 0),
+    platformStatusLines: input.platformStatusLines,
   }
+  // 先算「不含热语料」的基础块，用于判断热语料是否还有预算空间；
+  // 没有空间时根本不调用热展开，避免白记 session 字节与去重标记。
+  let blocks = buildMemoryInjectionBlocks(input.userMemory, input.sharedEnabled, blockOpts)
+  let recallDocRefs: Array<{ domain: string; slug: string }> = []
+  if (!input.freshCreative && input.sessionId && input.currentUserText) {
+    // 2026-10-19 P1：额度口径与 buildMemoryInjectionBlocks 完全一致（单一真源
+    // memoryWarmRecallRoom，已含「先给连续性预留」）。外层只用它做「额度为 0 就不调用
+    // 热展开」的判断，避免白记 session 字节与去重标记；实际裁剪仍由 build 统一执行。
+    const usedByBase = blocks.lines.reduce((n, s) => n + s.length, 0)
+    if (memoryWarmRecallRoom(usedByBase) > 0) {
+      const warm = takeWarmCorpusRecallPrefix(input.sessionId, input.currentUserText, input.turnKey)
+      if (warm && warm.prefix) {
+        // 2026-10-19 P1：热语料交给 buildMemoryInjectionBlocks 统一裁预算、统一进 5000 assert。
+        blocks = buildMemoryInjectionBlocks(input.userMemory, input.sharedEnabled, {
+          ...blockOpts,
+          warmRecallPrefix: warm.prefix,
+        })
+        // 只有块真的注入成功（未被预算挤掉）才记 trace 引用。
+        if (blocks.blockKinds.includes("warm-recall")) recallDocRefs = warm.docRefs
+      }
+    }
+  }
+  // 段 id／围栏标签按「块的实际类型」而非数组下标：L0 缺失、热语料被预算挤掉时仍对齐。
+  const sectionMeta: Record<
+    (typeof blocks.blockKinds)[number],
+    { id: string; label: string; reason: string }
+  > = {
+    l0: { id: "memory-l0", label: "账户记忆", reason: "记忆按本轮输入与账户状态重算" },
+    l1: { id: "memory-l1", label: "账户记忆", reason: "记忆按本轮输入与账户状态重算" },
+    "platform-status": {
+      id: "memory-platform-status",
+      label: "服务端实时观测",
+      reason: "平台状态按服务端实时观测重算",
+    },
+    "warm-recall": {
+      id: "memory-warm-recall",
+      label: "本轮相关记忆正文",
+      reason: "热语料按本轮用户输入召回",
+    },
+    continuity: { id: "memory-continuity", label: "账户记忆", reason: "首回合连续性按账户资产重算" },
+  }
+  const sectionLabels: string[] = []
+  const sections: PromptSection[] = blocks.lines.map((text, i) => {
+    const kind = blocks.blockKinds[i] ?? "l0"
+    const meta = sectionMeta[kind]
+    sectionLabels.push(meta.label)
+    return {
+      id: meta.id,
+      layer: "turn",
+      priority: 40 + i,
+      cacheable: false,
+      breakingCacheReason: meta.reason,
+      // 记忆正文是资料：section 渲染即围栏化（调用端直接取用也不会漏掉隔离）。
+      // 平台状态用独立标签，明确「这是服务端观测，不是记忆」。
+      render: () => fenceInjectedData(text, meta.label),
+    }
+  })
+  const lines = [...blocks.lines]
+  return {
+    lines,
+    sections,
+    sectionLabels,
+    trace: blocks.trace,
+    totalChars: lines.reduce((n, s) => n + s.length, 0),
+    recallDocRefs,
+  }
+}
+
+/**
+ * 异步组装入口：先取服务端实时平台状态（3s 超时、5 分钟进程内缓存、失败回 []），
+ * 再走同步组装。平台状态块由 buildMemoryInjectionBlocks 排在 L1 之后，热语料块排在其后；
+ * 所有块（含热语料，≤1800）统一计入 5000 总预算 assert。
+ */
+export async function buildMemoryInjectionSectionsWithLiveState(
+  input: MemoryInjectionInput,
+): Promise<MemoryInjectionResult> {
+  const platformStatusLines = input.platformStatusLines ?? (await getPlatformStatusLines())
+  return buildMemoryInjectionSections({ ...input, platformStatusLines })
 }
 
 /** 单条记忆的年龄警示（仅 >1 天；不做数值衰减）。 */

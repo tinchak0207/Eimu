@@ -35,8 +35,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       listMemoryDocs({ scope, ownerKey }),
       readMemoryIndexMd(scope, ownerKey),
     ]);
+    // 只导出 live 字段：`proposed` 是未佐证的正文提案，绝不能随导出进入 gateway
+    // 召回语料或共享索引（只有提升为 live 后才会出现在 INDEX）。
+    const liveDocs = docs.map((doc) => {
+      const live = { ...doc };
+      delete live.proposed;
+      return live;
+    });
     return NextResponse.json(
-      { docs, index_md: indexMd, generated_at: new Date().toISOString() },
+      { docs: liveDocs, index_md: indexMd, generated_at: new Date().toISOString() },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {

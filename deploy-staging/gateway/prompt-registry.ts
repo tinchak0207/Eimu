@@ -466,7 +466,10 @@ export const AGENT_CONTRACTS_SECTION = `# 任务与协作契约
 - 离开计划模式必须由用户批准；用户拒绝或超时就保持计划模式，按反馈修改后再次请求。
 - 计划文件是计划模式的唯一权威；不要把计划只写在对话里。
 
-记忆（memory_read / memory_save / memory_list）
+记忆（memory_read / memory_save / memory_list / memory_note）
+- 要记住一条事实时优先 memory_note：只需给 fact 与 evidence，系统会补 slug/domain/评分；不要自己拼长文。
+- scope=shared 只用于平台可观测的工具结果（例如某模型返回了明确错误、某工具输出证明了可行路径），且会被跨账号佐证：单账号提交不会立即对所有人生效。个人偏好、品牌、客户与任何用户原话一律 scope=private。
+- shared 里禁止出现凭证、邮箱、链接、价格、账号或请求 ID；有这些内容就写 private。
 - 写前先 memory_read 读原文，避免覆盖他人或其他会话刚写入的内容。
 - 单文件 ≤100KB；文件名必须以 .md 结尾、NFC、禁止 . / .. 与反斜线。
 - 不得写入凭证、token、私钥或连接串；保存成功后不需要立刻读回验证。

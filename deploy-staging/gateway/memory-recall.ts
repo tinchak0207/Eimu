@@ -339,6 +339,19 @@ export class CorpusCache {
     }
   }
 
+  /**
+   * 纯读取快照：缓存未过期返回 docs，否则 null。**绝不发网络请求、绝不改缓存**。
+   * 2026-10-19：供回合内的同步「热语料自动展开」路径使用——首回合没有 prefetch 时
+   * 直接吃上一轮已拉好的语料，用户路径零新增延迟。
+   */
+  peek(scope: "shared" | "private", ownerKey?: string): RecallableDoc[] | null {
+    if (scope === "private" && !ownerKey) return null
+    const key = `${scope}:${scope === "private" ? ownerKey : ""}`
+    const slot = this.slots.get(key)
+    if (!slot || slot.expiresAt <= Date.now()) return null
+    return slot.docs
+  }
+
   invalidate(): void {
     this.slots.clear()
   }

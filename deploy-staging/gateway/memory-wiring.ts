@@ -25,6 +25,13 @@ import type { SessionState } from "./types-gateway"
 export const MEMORY_L0_BUDGET = 2400
 export const MEMORY_L1_BUDGET = 800
 export const MEMORY_INJECTION_TOTAL_BUDGET = 5000
+// 2026-10-19：服务端实时平台状态块（非记忆）。预算 600；插在 L1 之后。
+export const MEMORY_PLATFORM_STATUS_BUDGET = 600
+// 2026-10-19 P1：热语料展开块（本轮相关记忆正文）。预算 1800（= RECALL_PREFIX_CAP），
+// 但**必须计入 5000 总预算**：可用额度 = min(1800, 5000 - 已有各块长度之和)，
+// 额度 ≤0 时整块不注入。历史缺陷：本块曾在 buildMemoryInjectionBlocks 之外 push，
+// 绕过总预算（实测 2400+800+600+900+1800=6500）。
+export const MEMORY_WARM_RECALL_BUDGET = 1800
 export const MEMORY_PRIVATE_DOCS_MAX = 8 // 契约 §4：私有 active docs 注入 ≤8
 export const MEMORY_TRUNC_MARK = "（已截断）" // 契约 §4 截断标记
 export const MEMORY_RECALL_PREFETCH_TTL_MS = 5 * 60 * 1000 // 预取候选保鲜期（§7 prefetch）
@@ -73,6 +80,17 @@ export const FRESH_CREATIVE_TURN_DIRECTIVE =
   "【本轮为全新创作】用户要的是新创意：忽略一切历史项目档案（片名、角色、世界观、分镜、曲目、时长版本），从零构思；只保留账户偏好与通用领域知识。派发给 expert 的简报同样不得引用旧项目。"
 
 /**
+ * 热语料可用额度（单一真源，2026-10-19 P1）：总预算先扣除「热语料之前已占用的全部块」
+ * （L0＋L1＋平台状态＋连续性实际长度）后的剩余，再夹到 MEMORY_WARM_RECALL_BUDGET。
+ * `charsBeforeWarm` 必须已含连续性块（连续性按实际注入长度、由 MEMORY_CONTINUITY_BUDGET 封顶）。
+ * buildMemoryInjectionBlocks 与呼叫端（context-injection）共用本函式，禁止各自复制公式。
+ */
+export function memoryWarmRecallRoom(charsBeforeWarm: number): number {
+  const used = Math.max(0, charsBeforeWarm)
+  return Math.min(MEMORY_WARM_RECALL_BUDGET, Math.max(0, MEMORY_INJECTION_TOTAL_BUDGET - used))
+}
+
+/**
  * 契约 §4 注入块组装（纯函式；PRD §9 R1 注入形状尺的可测面）：
  * L0 私有块 = 既有 user_profile/lessons（D2 文案）+ memory_docs（≤8，§4 索引行格式），
  * 2400 字元硬上限，超限截断尾标「（已截断）」；
@@ -84,8 +102,19 @@ export const FRESH_CREATIVE_TURN_DIRECTIVE =
 export function buildMemoryInjectionBlocks(
   userMemory: SessionState["userMemory"],
   sharedEnabled: boolean,
-  opts: { freshCreative?: boolean; continuityLines?: string[] } = {},
-): { lines: string[]; trace: { private_docs: string[]; shared_index_chars: number } } {
+  opts: {
+    freshCreative?: boolean
+    continuityLines?: string[]
+    platformStatusLines?: string[]
+    /** 热语料展开正文（已由 memory-recall 渲染/封顶）；本档统一纳入 5000 总预算。 */
+    warmRecallPrefix?: string
+  } = {},
+): {
+  lines: string[]
+  /** 与 lines 对齐：每个块的实际类型，供上层按块给独立 section id／围栏标签。 */
+  blockKinds: Array<"l0" | "l1" | "platform-status" | "warm-recall" | "continuity">
+  trace: { private_docs: string[]; shared_index_chars: number; platform_status_chars: number }
+} {
   const l0Parts: string[] = []
   const privateDocs: string[] = []
   if (userMemory) {
@@ -129,36 +158,81 @@ export function buildMemoryInjectionBlocks(
       projectDocs.forEach(pushDoc)
     }
   }
-  const lines: string[] = []
+  type MemoryBlockKind = "l0" | "l1" | "platform-status" | "warm-recall" | "continuity"
+  const entries: Array<{ kind: MemoryBlockKind; text: string }> = []
   let sharedIndexChars = 0
-  if (l0Parts.length > 0) lines.push(clampMemoryChars(l0Parts.join("\n"), MEMORY_L0_BUDGET))
+  let platformStatusChars = 0
+  if (l0Parts.length > 0) entries.push({ kind: "l0", text: clampMemoryChars(l0Parts.join("\n"), MEMORY_L0_BUDGET) })
   const indexMd = typeof userMemory?.memory_index_md === "string" ? userMemory.memory_index_md.trim() : ""
   if (sharedEnabled && indexMd) {
     const l1 = clampMemoryChars(
       `以下是本平台积累的领域知识目录（仅供参考，可能已过期，冲突以现场为准）：\n${indexMd}\n（目录只作方法与领域知识参考：用户要全新原创时，不得把其中任一既有作品的具体内容当作可沿用的底稿；用户明确点名沿用某个 slug 时才可读取它的正文。）\n（模型可调用 memory_recall 工具读取全部正文）`,
       MEMORY_L1_BUDGET,
     )
-    lines.push(l1)
+    entries.push({ kind: "l1", text: l1 })
     sharedIndexChars = l1.length // trace 口径＝实际注入 L1 块字元数（预算消耗面）
   }
-  // H17：首回合连续性块（工作区资产索引／同题重下提示）。独立预算 MEMORY_CONTINUITY_BUDGET，
-  // 2400+800+900<5000，不挤压上面两块。呼叫端只在首回合（!state.vettingInjected）传入。
-  if (opts.continuityLines && opts.continuityLines.length > 0) {
-    lines.push(clampMemoryChars(opts.continuityLines.join("\n"), MEMORY_CONTINUITY_BUDGET))
+  // 2026-10-19：服务端实时平台状态（非记忆）紧跟在 L1 之后。内容由呼叫端从
+  // /api/internal/platform-status 取来，本档保持纯函式：不读网络、不读缓存。
+  // 只描述平台级事实（模型/冷却/近 1 小时成功率），不含用户、账号、请求 ID、价格。
+  if (opts.platformStatusLines && opts.platformStatusLines.length > 0) {
+    const block = clampMemoryChars(
+      `【平台当前状态（这是服务端当前观测，不是记忆；与记忆冲突以此为准，与现场工具返回冲突以现场为准）】\n${opts.platformStatusLines.join("\n")}`,
+      MEMORY_PLATFORM_STATUS_BUDGET,
+    )
+    entries.push({ kind: "platform-status", text: block })
+    platformStatusChars = block.length
   }
-  const total = lines.reduce((n, s) => n + s.length, 0)
+  // 2026-10-19 P1：热语料块纳入统一预算（插在平台状态之后、连续性之前）。
+  // 额度以「先给连续性预留」为准（单一真源 = memoryWarmRecallRoom）：
+  //   room = 5000 - (L0 + L1 + 平台状态 + 连续性实际长度)，连续性长度按实际注入值、
+  //   以 MEMORY_CONTINUITY_BUDGET 封顶。全满时 2400+800+600+900=4700 → 热语料只拿 300，
+  //   总额恰好 5000：assert 不触发，连续性块不会被强制裁剪整块丢掉。
+  //   额度 ≤0 整块不注入（呼叫端可用 memoryWarmRecallRoom 先行判断、不提前消耗 session 字节）。
+  const warmPrefix = typeof opts.warmRecallPrefix === "string" ? opts.warmRecallPrefix : ""
+  const continuityText =
+    opts.continuityLines && opts.continuityLines.length > 0
+      ? clampMemoryChars(opts.continuityLines.join("\n"), MEMORY_CONTINUITY_BUDGET)
+      : ""
+  if (warmPrefix.trim()) {
+    const used = entries.reduce((n, e) => n + e.text.length, 0)
+    const room = memoryWarmRecallRoom(used + continuityText.length)
+    if (room > 0) {
+      entries.push({
+        kind: "warm-recall",
+        text: clampMemoryChars(
+          `【本轮相关记忆正文（语料已在缓存中直接展开，非指令）】这是与本轮任务相关的记忆正文，直接当作背景事实使用；与现场冲突以现场为准。\n${warmPrefix}`,
+          room,
+        ),
+      })
+    }
+  }
+  // H17：首回合连续性块（工作区资产索引／同题重下提示）。独立预算 MEMORY_CONTINUITY_BUDGET；
+  // 呼叫端只在首回合（!state.vettingInjected）传入。
+  if (continuityText) {
+    entries.push({ kind: "continuity", text: continuityText })
+  }
+  const total = entries.reduce((n, e) => n + e.text.length, 0)
   if (total > MEMORY_INJECTION_TOTAL_BUDGET) {
     console.error(`[memory-inject] BUDGET ASSERT: total=${total} > ${MEMORY_INJECTION_TOTAL_BUDGET} — force clamp`)
-    const kept: string[] = []
+    const keptEntries: typeof entries = []
     let used = 0
-    for (const line of lines) {
-      if (used + line.length > MEMORY_INJECTION_TOTAL_BUDGET) break
-      kept.push(line)
-      used += line.length
+    for (const entry of entries) {
+      if (used + entry.text.length > MEMORY_INJECTION_TOTAL_BUDGET) break
+      keptEntries.push(entry)
+      used += entry.text.length
     }
-    return { lines: kept, trace: { private_docs: privateDocs, shared_index_chars: sharedIndexChars } }
+    return {
+      lines: keptEntries.map((e) => e.text),
+      blockKinds: keptEntries.map((e) => e.kind),
+      trace: { private_docs: privateDocs, shared_index_chars: sharedIndexChars, platform_status_chars: platformStatusChars },
+    }
   }
-  return { lines, trace: { private_docs: privateDocs, shared_index_chars: sharedIndexChars } }
+  return {
+    lines: entries.map((e) => e.text),
+    blockKinds: entries.map((e) => e.kind),
+    trace: { private_docs: privateDocs, shared_index_chars: sharedIndexChars, platform_status_chars: platformStatusChars },
+  }
 }
 
 
@@ -350,6 +424,86 @@ export async function memoryFetchExport(pathWithQuery: string, headers: Record<s
 // 语料 TTL 5 分钟（§3.3 默认）；secret provider 显式指向本档 env 快照。
 export const memorySharedCorpus = new CorpusCache(memoryFetchExport, 5 * 60 * 1000, () => MEMORY_INGEST_SECRET)
 
+// ── 服务端实时平台状态（2026-10-19）────────────────────────────────────────
+// 目的：把「平台此刻哪些模型没有健康供应商/在冷却、近 1 小时谁成功率明显偏低」
+// 作为服务端观测注入，替代用户把节点故障写成记忆、模型再读记忆当事实。
+// 通道复用记忆导出同一套 HMAC（GET 无 body → 空 bytes 签名）；任何失败都回 []，
+// 不抛、不挡回合。进程内缓存 5 分钟，超时 3 秒。
+export const MEMORY_PLATFORM_STATUS_TTL_MS = 5 * 60 * 1000
+const MEMORY_PLATFORM_STATUS_TIMEOUT_MS = 3_000
+let platformStatusCache: { expiresAt: number; lines: string[] } | null = null
+
+function platformStatusEnabled(): boolean {
+  const raw = process.env.MEMORY_PLATFORM_STATUS_ENABLED
+  if (raw === undefined) return true
+  return !/^(0|false|off|no)$/i.test(raw.trim())
+}
+
+/**
+ * 防御性收口：只收非空字串、总长 ≤ MEMORY_PLATFORM_STATUS_BUDGET。
+ * 2026-10-19 P2-3：`degraded === true` 不再整块丢弃——有状态行时在末尾补一行
+ * 「部分平台数据源暂不可用」提示（让模型知道这份观测不完整）；一行状态都没有时
+ * 仍回 []（不注入空块／不伪造健康）。
+ */
+function sanitizePlatformStatusLines(payload: unknown): string[] {
+  const degraded = (payload as { degraded?: unknown })?.degraded === true
+  const raw = (payload as { lines?: unknown })?.lines
+  if (!Array.isArray(raw)) return []
+  // degraded 时为提示行预留一个位置，保持「最多 5 行」契约。
+  const maxLines = degraded ? 4 : 5
+  const out: string[] = []
+  let used = 0
+  for (const item of raw) {
+    if (out.length >= maxLines) break
+    if (typeof item !== "string") continue
+    const line = item.trim()
+    if (!line) continue
+    const remaining = MEMORY_PLATFORM_STATUS_BUDGET - used
+    if (remaining <= 0) break
+    const clipped = line.length <= remaining ? line : `${line.slice(0, Math.max(0, remaining - 1))}…`
+    out.push(clipped)
+    used += clipped.length
+  }
+  if (!degraded) return out
+  if (out.length === 0) return []
+  const notice = "（部分平台数据源暂不可用，以下状态可能不完整）"
+  const remaining = MEMORY_PLATFORM_STATUS_BUDGET - used
+  if (remaining <= 0) return out
+  out.push(notice.length <= remaining ? notice : `${notice.slice(0, Math.max(0, remaining - 1))}…`)
+  return out
+}
+
+/**
+ * 取服务端实时平台状态行（gateway 侧）。`MEMORY_PLATFORM_STATUS_ENABLED` 预设开启；
+ * 未配置 secret → []。失败/降级一律 [] 并 debug log，绝不抛。
+ */
+export async function getPlatformStatusLines(): Promise<string[]> {
+  if (!platformStatusEnabled()) return []
+  const now = Date.now()
+  if (platformStatusCache && platformStatusCache.expiresAt > now) return platformStatusCache.lines
+  if (!MEMORY_INGEST_SECRET) return []
+  const cache = (lines: string[]): string[] => {
+    platformStatusCache = { expiresAt: Date.now() + MEMORY_PLATFORM_STATUS_TTL_MS, lines }
+    return lines
+  }
+  try {
+    const res = await fetch(`${MEMORY_INGEST_BASE_URL}/api/internal/platform-status`, {
+      headers: { [MEMORY_SIGNATURE_HEADER]: signEmptyMemoryBody(MEMORY_INGEST_SECRET) },
+      signal: AbortSignal.timeout(MEMORY_PLATFORM_STATUS_TIMEOUT_MS),
+    })
+    if (!res.ok) {
+      console.debug(`[memory-platform-status] HTTP ${res.status} — skip injection`)
+      return cache([])
+    }
+    return cache(sanitizePlatformStatusLines((await res.json()) as unknown))
+  } catch (e) {
+    console.debug(
+      `[memory-platform-status] fetch failed: ${e instanceof Error ? e.message : String(e)} — skip injection`,
+    )
+    return cache([])
+  }
+}
+
 export interface MemoryRecallPrefetchEntry {
   prefix: string
   docRefs: Array<{ domain: string; slug: string }>
@@ -389,6 +543,30 @@ export function resetMemoryRecallSessionUsage(sessionId: string): void {
   memoryRecallSessionBytes.delete(sessionId)
 }
 
+// ── 同回合召回正文去重（2026-10-19 P2）─────────────────────────────────────
+// 两条注入路径（messages-gw 的 prefetch 注入 + context-injection 的热语料展开）在同一
+// 请求内前后脚执行。旧实现只按 query 指纹去重，prefetch 路径拿不到本轮文本、其 key 是
+// 正文指纹；同一回合换一个 query 走热展开会再注入一份 1800 字召回正文（实测重复）。
+// 语义：Map<sessionId, turnKey> —— **同一回合只保留一份召回正文**；不同回合即使 query
+// 相同也允许（同 query 的 5 秒防抖仍由既有 query 指纹兜底）。
+// 有界：超 2000 条丢最旧（Map 保留插入序）。
+export const MEMORY_RECALL_TURN_MAP_MAX = 2000
+const memoryRecallInjectedTurn = new Map<string, string>()
+
+function recallInjectedThisTurn(sessionId: string, turnKey?: string): boolean {
+  if (!turnKey) return false
+  return memoryRecallInjectedTurn.get(sessionId) === turnKey
+}
+
+function noteMemoryRecallTurn(sessionId: string, turnKey?: string): void {
+  if (!turnKey) return
+  memoryRecallInjectedTurn.set(sessionId, turnKey)
+  if (memoryRecallInjectedTurn.size > MEMORY_RECALL_TURN_MAP_MAX) {
+    const oldest = memoryRecallInjectedTurn.keys().next().value
+    if (oldest !== undefined) memoryRecallInjectedTurn.delete(oldest)
+  }
+}
+
 export function memoryRecallActive(): boolean {
   return MEMORY_RECALL_ENABLED && MEMORY_SHARED_ENABLED
 }
@@ -396,33 +574,153 @@ export function memoryRecallActive(): boolean {
 /**
  * 回合开始取预取候选（读即弃：回合结束重算，防旧候选僵尸注入）。null=miss → 本回合不注入、异步补算。
  * 2026-10-02：此处即真正注入点，落实 session 累计位元组帽（超限降级不报错）。
+ * 2026-10-19：注入成功后记一个短时去重标记，避免 context-injection 的热语料展开
+ * 在同一回合把同一批正文再注入一次（两条路径都在本回合走）。
+ * 2026-10-19 P2：`turnKey` 为回合键（messages-gw 传 `String(state.turnGen)`）。
+ * 同一 session 同一 turnKey 已注入过召回正文 → 直接 null；成功注入非空 prefix 时写入。
  */
-export function takeMemoryRecallPrefix(sessionId: string): MemoryRecallPrefetchEntry | null {
+export function takeMemoryRecallPrefix(sessionId: string, turnKey?: string): MemoryRecallPrefetchEntry | null {
   if (!memoryRecallActive()) return null
+  if (recallInjectedThisTurn(sessionId, turnKey)) return null
   const rec = memoryRecallPrefetch.get(sessionId)
   if (!rec) return null
   memoryRecallPrefetch.delete(sessionId)
   if (Date.now() - rec.at > MEMORY_RECALL_PREFETCH_TTL_MS) return null
   if (!rec.prefix) return rec
+  const prefix = clipAndAccountRecallPrefix(sessionId, rec.prefix)
+  if (prefix) {
+    // 5 秒正文指纹防抖保持原语义；回合级去重另记 memoryRecallInjectedTurn。
+    noteMemoryRecallInjection(sessionId, recallPrefixDedupeKey(prefix))
+    noteMemoryRecallTurn(sessionId, turnKey)
+  }
+  return { ...rec, prefix }
+}
+
+// 同一回合两条注入路径（messages-gw 的 prefetch 注入 + context-injection 的热语料展开）
+// 的去重窗口：两者在同一请求内前后脚执行，毫秒级；5 秒足以覆盖且不挡紧邻的下一回合。
+//
+// 2026-10-19 P2-1：去重键从「session 级时间戳」改为 query 指纹。旧实现只要同 session
+// 5 秒内出现过注入，就把紧邻的正常追问也一并抑制（不同 query 被误杀）。
+//   - key = 用户文本的稳定指纹（FNV-1a 32 位 + 长度，无新依赖）；
+//   - 只在「同一 key 且 5 秒内」抑制；不同 query 立即放行；
+//   - prefetch 路径在注入时拿不到本轮用户文本，故以「注入正文的指纹」作为该路径的 key；
+//     热展开路径同时比对 query 指纹与正文指纹。回合级去重（memoryRecallInjectedTurn）
+//     另有一层：同一回合最多一份召回正文，不再依赖这两条 5 秒窗口是否巧合命中。
+const MEMORY_RECALL_TURN_DEDUPE_MS = 5_000
+interface MemoryRecallDedupeEntry {
+  at: number
+  key: string
+}
+const memoryRecallInjectedAt = new Map<string, MemoryRecallDedupeEntry>()
+
+/** 用户文本的稳定指纹（FNV-1a 32 位；长度一并入 key，降低碰撞歧义）。纯函式。 */
+export function recallDedupeKey(userText: string): string {
+  const text = typeof userText === "string" ? userText : ""
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return `${text.length}:${hash.toString(16)}`
+}
+
+/** 召回正文指纹（prefetch 路径没有 query 文本时使用）。 */
+function recallPrefixDedupeKey(prefix: string): string {
+  return `prefix:${recallDedupeKey(prefix)}`
+}
+
+function noteMemoryRecallInjection(sessionId: string, key: string): void {
+  memoryRecallInjectedAt.set(sessionId, { at: Date.now(), key })
+  if (memoryRecallInjectedAt.size > MEMORY_RECALL_SESSION_USAGE_MAX) {
+    const oldest = memoryRecallInjectedAt.keys().next().value
+    if (oldest !== undefined) memoryRecallInjectedAt.delete(oldest)
+  }
+}
+
+/** 去重判定（只读，供热展开路径在真正注入前询问）：同一 key 且窗口内才命中。 */
+export function memoryRecallDedupeHit(sessionId: string, keys: string[], nowMs: number = Date.now()): boolean {
+  const hit = memoryRecallInjectedAt.get(sessionId)
+  if (!hit) return false
+  if (nowMs - hit.at > MEMORY_RECALL_TURN_DEDUPE_MS) return false
+  return keys.some((k) => k !== "" && k === hit.key)
+}
+
+/**
+ * 与 takeMemoryRecallPrefix 共用的 session 位元组记帐（2026-10-19 抽出，两处同语义）：
+ * 超限裁到剩余额度，额度用完整段丢弃并 warn，绝不抛错。
+ */
+function clipAndAccountRecallPrefix(sessionId: string, prefix: string): string {
+  if (!prefix) return ""
   const used = memoryRecallSessionUsed(sessionId)
   const remaining = MEMORY_RECALL_SESSION_BYTE_BUDGET - used
-  const bytes = utf8ByteLength(rec.prefix)
+  const bytes = utf8ByteLength(prefix)
   if (remaining <= 0) {
     console.warn(
       `[memory-recall] session byte budget exhausted session=${sessionId} used=${used}/${MEMORY_RECALL_SESSION_BYTE_BUDGET} — skip injection`,
     )
-    return { ...rec, prefix: "" }
+    return ""
   }
   if (bytes > remaining) {
-    const clipped = clipToUtf8Bytes(rec.prefix, remaining)
+    const clipped = clipToUtf8Bytes(prefix, remaining)
     console.warn(
       `[memory-recall] session byte budget exceeded session=${sessionId} prefix=${bytes}B remaining=${remaining}B — degraded to ${utf8ByteLength(clipped)}B`,
     )
     noteMemoryRecallSessionBytes(sessionId, used + utf8ByteLength(clipped))
-    return { ...rec, prefix: clipped }
+    return clipped
   }
   noteMemoryRecallSessionBytes(sessionId, used + bytes)
-  return rec
+  return prefix
+}
+
+/**
+ * 热语料自动展开（2026-10-19）：语料已在内存缓存时，首回合（无 prefetch）也能同步
+ * 拿到与本轮任务相关的记忆正文。
+ *
+ * 顺序：先吃既有 prefetch → 非 null 直接返回；否则（同回合未注入过）同步 peek
+ * `memorySharedCorpus`，用与 scheduleMemoryRecallPrefetch 完全相同的
+ * query/score/k 逻辑算 hits 并渲染，再走同一 session 位元组记帐。
+ *
+ * **本函式必须保持同步**：peek 只读内存快照，绝不 await 网络；任何异常返回 null，不抛。
+ * 2026-10-19 P2：`turnKey` 存在且本回合已注入过召回正文 → 直接 null（同一回合最多一份
+ * 召回块，prefetch 已注入后不再重复展开）；不同回合的不同 query 正常放行。
+ */
+export function takeWarmCorpusRecallPrefix(
+  sessionId: string,
+  userText: string,
+  turnKey?: string,
+): MemoryRecallPrefetchEntry | null {
+  try {
+    if (!memoryRecallActive()) return null
+    if (!sessionId || !String(userText ?? "").trim()) return null
+    if (recallInjectedThisTurn(sessionId, turnKey)) return null
+    const prefetched = takeMemoryRecallPrefix(sessionId, turnKey)
+    if (prefetched !== null) return prefetched
+    const docs = memorySharedCorpus.peek("shared")
+    if (!docs) return null
+    const query = buildRecallQuery(userText)
+    if (!query.trim()) return null
+    const k = clampRecallK(process.env.MEMORY_RECALL_K, RECALL_K_DEFAULT)
+    const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE, k })
+    const rendered = renderRecallPrefix(hits.map((h) => h.doc))
+    if (!rendered) return null
+    // P2-1：同一 query 指纹或同一正文指纹的 5 秒防抖（抖动重试）仍然保留。
+    const queryKey = recallDedupeKey(userText)
+    if (memoryRecallDedupeHit(sessionId, [queryKey, recallPrefixDedupeKey(rendered)])) return null
+    const prefix = clipAndAccountRecallPrefix(sessionId, rendered)
+    if (!prefix) return null
+    noteMemoryRecallInjection(sessionId, queryKey)
+    noteMemoryRecallTurn(sessionId, turnKey)
+    return {
+      prefix,
+      docRefs: hits.map((h) => ({ domain: h.doc.domain, slug: h.doc.slug })),
+      at: Date.now(),
+    }
+  } catch (e) {
+    console.debug(
+      `[memory-recall] warm corpus expand failed session=${sessionId}: ${e instanceof Error ? e.message : String(e)}`,
+    )
+    return null
+  }
 }
 
 /** §7 prefetch：上一回合 session.idle 后台算好 top-3 候选（用户路径零新增延迟）。 */
@@ -805,7 +1103,7 @@ setInterval(() => {
     try {
       const report = await memoryBatch.runBatch({})
       console.log(
-        `[memory-batch] scheduled batch done: batch=${report.batch_id} candidates=${report.candidates} passed=${report.passed} stored=${report.stored}`,
+        `[memory-batch] scheduled batch done: batch=${report.batch_id} candidates=${report.candidates} passed=${report.passed} stored=${report.stored} queue.pending=${report.queue.pending} queue.consumed=${report.queue.consumed} queue.no_docs=${report.queue.no_docs} queue.failed=${report.queue.failed} ledger.sessions=${report.ledger.sessions_processed}/${report.ledger.sessions_selected} ledger.llm=${report.ledger.llm_calls} ledger.errors=${report.ledger.errors.length}`,
       )
     } catch (e) {
       console.error(`[memory-batch] scheduled batch failed: ${e instanceof Error ? e.message : String(e)}`)

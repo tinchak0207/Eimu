@@ -42,9 +42,16 @@ import { buildFailoverInjection, buildContinuationDirective, type OrphanToolUse 
 // REQ-D2（2026-09-22）：回合收尾投递待投的 steer（空队列＝零动作，无 steer 的回合逐位等价）。
 // 方向与既有 maybeCompactSession 同款（本档 → messages-gw 家族），不新增环。
 import { flushPendingSteers } from "./steer-gw.ts"
+// 2026-10-19 记忆触发（能力建设）：收盘时确定性侦测「该写记忆」信号 → 入队＋审计。
+// 只入队；不在这里呼叫 LLM，也不自动跑批次（批次仍由 MEMORY_BATCH_ENABLED/人工决定）。
+import { detectMemorySignals } from "./memory-trigger.ts"
+import { enqueueMemorySignal, appendMemoryAudit } from "./memory-queue.ts"
 
 /** Stop hook loop guard：session state → 已触发 hook 的 turnGen。 */
 const stopHookTurnGen = new WeakMap<object, number>()
+
+/** 记忆信号 loop guard：同一 turnGen 只判一次，重复 idle 不重复入队。 */
+const memorySignalTurnGen = new WeakMap<object, number>()
 
 // TODO(来自 events-translate.ts): eventSessionId(index.ts 2715)/handleToolPartUpdate(index.ts 3309)
 //   —— W7 并行在建 events-translate.ts，建成后改真 import。
@@ -1006,6 +1013,45 @@ export function handleOpencodeEvent(event: any): void {
               }
             }, TURN_RETRY_DELAY_MS)
             break // 不发 turn.done：等补写轮结束
+          }
+        }
+        // 2026-10-19 记忆触发（能力建设）：收盘前用确定性规则侦测「该写记忆」信号。
+        // 位置＝画布硬闸之后、turn.done 之前：重试/failover/补写腿都在上方 break，
+        // 到这里的一定是本轮真正的最终收盘，turnRetries 已稳定。
+        // 纪律：只入队＋审计（fire-and-forget）；同一 turnGen 只判一次，重复 idle 不重复入队。
+        {
+          const gen = state.turnGen ?? 0
+          if (memorySignalTurnGen.get(state) !== gen) {
+            memorySignalTurnGen.set(state, gen)
+            const signal = detectMemorySignals({
+              userText: state.lastUserMessage,
+              turnTextChars: state.turnTextChars,
+              turnRetries: state.turnRetries,
+              // 现场没有独立的「反复工具失败」计数器 → 按 turnRetries 判定（见回报）。
+              repeatedToolFailures: false,
+              turnAborted: state.turnAborted,
+              upstreamError: state.turnUpstreamError,
+            })
+            if (signal.triggered) {
+              void enqueueMemorySignal({
+                sessionId: state.sessionId,
+                kinds: signal.kinds,
+                sample: signal.sample,
+              })
+                .then((stored) => {
+                  if (!stored) return
+                  // 审计只记事件元资料，不落 sample/正文。
+                  void appendMemoryAudit({
+                    event: "enqueue",
+                    sessionId: state.sessionId,
+                    kinds: signal.kinds,
+                  })
+                })
+                .catch(() => undefined)
+              console.log(
+                `[gateway] memory-signal: enqueue kinds=${signal.kinds.join(",")} — session=${state.sessionId}`,
+              )
+            }
           }
         }
         emitTurnDone(state)

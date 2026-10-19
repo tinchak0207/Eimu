@@ -32,6 +32,17 @@ import {
   type CuratorCandidate,
   type GateContext,
 } from "./memory-gate.ts"
+// 2026-10-19 批次审计：逐会话记 stored/no_docs（只记事件元资料，不改筛选/门禁/LLM 判定；
+// 审计失败只 warn，绝不影响批次）。
+// 2026-10-19 B1：批次同时是「该写记忆」信号队列的消费者——队列优先并入候选、
+// 会话产出后 markSignalDone、零产出则 attempts+1（≥5 次移入 failed/）。
+import {
+  appendMemoryAudit,
+  listPendingSignals,
+  markSignalDone,
+  recordSignalNoDocs,
+  type MemoryQueueRecord,
+} from "./memory-queue.ts"
 
 // ─────────────────────────── HMAC 签名工具（逐字比照 src/lib/memory-hmac.ts，契约 §3）
 // 为什么按 raw body bytes 验签：gateway 签的是它送出的那串位元组；repo 端一律
@@ -62,7 +73,7 @@ export function signEmptyMemoryBody(secret: string): string {
 
 // ─────────────────────────── 契约 §6 prompt（唯一真源，逐字，promptVersion="v1"）
 
-export const MEMORY_PROMPT_VERSION = "v1"
+export const MEMORY_PROMPT_VERSION = "v2"
 
 export const CURATOR_PROMPT_V1 = `You are the memory curator for an AI image/video generation assistant.
 Input: one conversation transcript. Output: a single JSON object. Nothing else.
@@ -76,6 +87,9 @@ HARD RULES - a proposal violating any of these is discarded downstream by the sy
 - "shared" proposals MUST NOT contain: user names, account ids, session ids, emails, URLs, file paths, prices, API keys, tokens, or any detail traceable to one user or one purchase.
 - Skip greetings, one-off requests, small talk, and anything derivable from the product itself (pricing tables, model lists, UI text).
 - Do not propose anything you cannot state in one sentence.
+- Write ONLY transferable long-term knowledge. Do NOT write the specific answer to this task, the output spec of this one request, or details of a single incident. For type="feedback", the body MUST state the cue (what signal triggered the correction), **Why:**, and **How to apply:**.
+- For failure/correction candidates, evidence MUST quote the failing tool result or the user's own words. If you only have reasoning and no evidence, do not propose it.
+- If the same knowledge already exists, do not propose it again in different words (the system deduplicates).
 
 Output schema (JSON only, no markdown fence):
 {"session_id":"<id>","candidates":[{"scope":"private|shared","domain":"<one-level domain>","slug":"<kebab-case>","description":"<one line, <=120 chars>","type":"user|feedback|project|domain|workflow","body":"<=2000 chars; for feedback/project include **Why:** and **How to apply:**","links":["<other-slug>"],"evidence":"<verbatim quote of the tool result or the user's words, <=200 chars>","evidence_kind":"tool_result|user_confirmed|verbatim","self_score":1-5,"self_score_reason":"<one line>"}],"rejected":[{"note":"<what you skipped>","reason":"one_off|greeting|derivable|no_evidence|sensitive"}]}`
@@ -193,6 +207,24 @@ export interface MemoryBatchReport {
   g8_skipped: number
   /** G8 抽检段（入库后）；未送 ingest（dryRun／无候选）时各栏为 0／null。 */
   sampling: MemorySamplingReport
+  /** B1 信号队列对账：batch 开始时的待处理数 vs 本批实际消费/无产出/丢弃数。 */
+  queue: {
+    pending: number
+    consumed: number
+    no_docs: number
+    failed: number
+  }
+  /** B3 账本：应处理 vs 实处理、LLM 次数、候选/入库/拒绝数；errors 为断言式自检结果。 */
+  ledger: {
+    sessions_selected: number
+    sessions_processed: number
+    llm_calls: number
+    docs_proposed: number
+    docs_stored: number
+    docs_rejected: number
+    budget_hit: boolean
+    errors: string[]
+  }
   report_path?: string
 }
 
@@ -475,6 +507,17 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       truncations: { sessions: 0, llm_budget_hit: false },
       g8_skipped: 0,
       sampling: { sampled: 0, avg: null, triggered: false, errors: 0, skipped: 0, private_badged: 0 },
+      queue: { pending: 0, consumed: 0, no_docs: 0, failed: 0 },
+      ledger: {
+        sessions_selected: 0,
+        sessions_processed: 0,
+        llm_calls: 0,
+        docs_proposed: 0,
+        docs_stored: 0,
+        docs_rejected: 0,
+        budget_hit: false,
+        errors: [],
+      },
     }
     const bump = (key: string, n = 1) => {
       report.rejected[key] = (report.rejected[key] ?? 0) + n
@@ -490,33 +533,69 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     // 条件⑤：剔除 subagent 子会话（parent_id 非空即剔）——含手动指定 sessionIds 的场合。
     const eligible = all.filter((s) => s && typeof s.id === "string" && !s.parentId)
 
+    // B1：收盘信号队列（memory-trigger 入队）必须有人消费。先读队列，
+    // 其 sessionId/kinds 并入候选并排在正常选择之前；这批会话天然绕过当日 updated／
+    // 计数门槛／游标去重（失败过的会话即使“处理过”也要重新提炼）。
+    // 队列 IO 失败只 warn（listPendingSignals 已兜底回空阵列），不影响批次。
+    const queued = await listPendingSignals()
+    const queuedById = new Map<string, MemoryQueueRecord>()
+    for (const rec of queued) {
+      if (rec && typeof rec.sessionId === "string" && rec.sessionId && !queuedById.has(rec.sessionId)) {
+        queuedById.set(rec.sessionId, rec)
+      }
+    }
+    report.queue.pending = queuedById.size
+    const queuedKindsById = new Map<string, MemoryQueueRecord["kinds"]>()
+    for (const [id, rec] of queuedById) queuedKindsById.set(id, rec.kinds)
+    // 队列会话的元资料：优先取目录列出的本尊；目录已无该会话（被删）仍以最小记录尝试，
+    // transcript 取不到时走 no_docs 重试上限，最终自然落 failed/。
+    const queuedSessions: MemorySessionRecord[] = []
+    const eligibleById = new Map(eligible.map((s) => [s.id, s]))
+    for (const id of queuedById.keys()) {
+      const known = eligibleById.get(id)
+      if (known) queuedSessions.push(known)
+      else if (!all.some((s) => s && s.id === id)) queuedSessions.push({ id })
+      // else：会话存在但是 subagent（parentId 非空）→ 尊重条件⑤，不入候选。
+    }
+    const queuedIdSet = new Set(queuedSessions.map((s) => s.id))
+
     let candidates: MemorySessionRecord[]
     if (Array.isArray(options.sessionIds) && options.sessionIds.length > 0) {
+      // 手动指定：以调用方清单为准，不擅自塞入队列会话（信号仍在队列里等下次排程）。
       const wanted = new Set(options.sessionIds.map(String))
       candidates = eligible.filter((s) => wanted.has(s.id))
     } else {
-      candidates = eligible.filter(
+      const normal = eligible.filter(
         // 条件①当日 updated；条件②用户消息≥3 或有成功工具呼叫；条件④游标去重（含已处理无产出）。
         (s) =>
+          !queuedIdSet.has(s.id) &&
           isoDateOf(s.updatedAt) === date &&
           ((s.userMessages ?? 0) >= 3 || (s.successfulToolCalls ?? 0) >= 1) &&
           !cursor.processed[s.id],
       )
       // 条件③：知识型工具加权排序（降序；同权取较新）。
-      candidates.sort(
+      normal.sort(
         (a, b) =>
           (b.knowledgeToolCalls ?? 0) - (a.knowledgeToolCalls ?? 0) ||
           epochOf(b.updatedAt) - epochOf(a.updatedAt),
       )
-      // 预算：会话数截断入报告。
+      // 队列优先：先处理失败/纠正信号，再跑常规当日扫描。
+      candidates = [...queuedSessions, ...normal]
+      // 预算：会话数截断入报告（队列在前，溢出先砍常规候选）。
       if (candidates.length > maxSessions) {
         report.truncations.sessions = candidates.length - maxSessions
         candidates = candidates.slice(0, maxSessions)
       }
     }
     report.candidates = candidates.length
+    report.ledger.sessions_selected = candidates.length
 
     const docs: IngestDocInput[] = []
+    // 审计（2026-10-19）：逐会话记录本轮产出的 slug，供 ingest 回执后换算 stored 数。
+    // 只影响审计，不参与筛选、门禁、预算或入库决策。用 Set 去重（同会话可产出同名 slug）。
+    const sessionDocSlugs = new Map<string, Set<string>>()
+    // B3 账本：真正进入处理（transcript/LLM）的会话集合；预算跳过的不算。
+    const processedSessions = new Set<string>()
     let llmUsed = 0
     const gateCtxBase: Omit<GateContext, "ownerKeyHint"> = { sharedEnabled }
 
@@ -621,12 +700,10 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       const acceptedSet = new Set(acceptedIds)
       const pairs: Array<{ id: string; doc: IngestDocInput }> = []
       for (const doc of docs) {
-        // 服务端 id = `${batchId}-${slug}`；G5 更新保留旧 id（批次前缀可能不同）→ 后缀比对兜底。
+        // 服务端 id = `${batchId}-${slug}`。只认本批前缀的精确 id：旧的纯后缀兜底会让
+        // 跨会话同名 slug 命中别人的 accepted id，把抽检结果写到错误 id。
         const expected = `${batchId}-${doc.slug}`
-        const id = acceptedSet.has(expected)
-          ? expected
-          : acceptedIds.find((candidate) => candidate.endsWith(`-${doc.slug}`))
-        if (id) pairs.push({ id, doc })
+        if (acceptedSet.has(expected)) pairs.push({ id: expected, doc })
       }
       const sharedPairs = pairs.filter((pair) => pair.doc.scope === "shared")
       const privatePairs = pairs.filter((pair) => pair.doc.scope === "private")
@@ -678,6 +755,13 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         report.truncations.llm_budget_hit = true
         return // 预算截断：不标已处理，留给下批。
       }
+      // 预算槽在进入处理时立即占用：并发 3 下若等到 transcript 之后才 +1，
+      // 多个 worker 会同时通过上面的检查而超发（B3 账本 llm_calls ≤ 上限的保证）。
+      llmUsed += 1
+      // 进入逐会话处理（含后续 transcript/LLM 失败路径）才计入审计；预算跳过的不算「处理过」。
+      processedSessions.add(session.id)
+      const sessionSlugs = new Set<string>()
+      sessionDocSlugs.set(session.id, sessionSlugs)
       const mark = (produced: boolean) => {
         cursor.processed[session.id] = { at: nowDate.toISOString(), produced }
       }
@@ -694,9 +778,15 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         mark(false)
         return
       }
-      llmUsed += 1
       // 回环形状比照轮子 handleExtractLessons：prompt + \n\n<transcript>\n…\n</transcript>。
-      const prompt = `${CURATOR_PROMPT_V1}\n\n<transcript>\n${transcript}\n</transcript>`
+      // B1：队列会话额外在**用户内容**加一段收盘信号提示（只带 kinds，不带 sample 正文，
+      // 避免把失败样本原样塞进 prompt 挤占预算）；CURATOR_PROMPT_V1 契约骨架不变。
+      const signalKinds = queuedKindsById.get(session.id)
+      const signalNote =
+        signalKinds && signalKinds.length > 0
+          ? `\n\n<close_out_signal>\nThis session was flagged at close-out for: ${signalKinds.join(", ")}. Extract only transferable long-term lessons from the failure or correction. Do not store the specific task answer, this request's output spec, or details of a single incident.\n</close_out_signal>`
+          : ""
+      const prompt = `${CURATOR_PROMPT_V1}${signalNote}\n\n<transcript>\n${transcript}\n</transcript>`
       let text = ""
       try {
         text = await deps.callLlm(prompt)
@@ -747,12 +837,16 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         }
         report.passed += 1
         docs.push(doc)
+        sessionSlugs.add(doc.slug)
         produced = true
       }
       mark(produced)
     })
 
     // 写入：只认端点回执 accepted（§3.1「真写入」）；非 dryRun 才发。
+    const acceptedIds: string[] = []
+    // 服务端拒绝的 slug 集合（审计归属用；rejected 形状 {slug, reason}）。
+    const rejectedSlugs = new Set<string>()
     if (!dryRun && docs.length > 0) {
       const body = {
         batch_id: batchId,
@@ -763,12 +857,20 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       const { ok, json } = await attemptPost(rawBody)
       if (ok) {
         const accepted = Array.isArray(json?.accepted) ? (json?.accepted as unknown[]) : []
+        // proposals＝未提升的正文提案（live 未变），不是真写入：不计 stored、不进
+        // acceptedIds、不参与抽检，也不参与 stored/no_docs 审计归属。
+        const proposals = Array.isArray(json?.proposals) ? (json?.proposals as unknown[]) : []
         report.stored = accepted.length
-        const rejected = Array.isArray(json?.rejected) ? (json?.rejected as Array<{ reason?: unknown }>) : []
+        for (const id of accepted) acceptedIds.push(String(id))
+        const rejected = Array.isArray(json?.rejected)
+          ? (json?.rejected as Array<{ slug?: unknown; reason?: unknown }>)
+          : []
         for (const r of rejected) {
+          const slug = typeof r?.slug === "string" ? r.slug : ""
+          if (slug) rejectedSlugs.add(slug)
           bump(`server_${typeof r?.reason === "string" ? r.reason : "unknown"}`)
         }
-        if (accepted.length < docs.length && rejected.length === 0) {
+        if (accepted.length + proposals.length < docs.length && rejected.length === 0) {
           bump("server_silent_loss") // 回执不齐：端点没给逐条原因（G7 截断除外），记帐不吞。
         }
         // §5.6：端点回执 accepted 之后才抽检（未写入的没有品质可审）。
@@ -784,6 +886,83 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         })
         bump("ingest_pending")
       }
+    }
+
+    // B1：消费收盘信号队列（只在真跑批次时动队列；dryRun 只读预览）。
+    //   - 有候选 → 已提交 ingest（accepted/pending 都算），markSignalDone 出队 + drained 审计；
+    //   - 零候选 → recordSignalNoDocs（attempts+1）；≥5 次原子移入 failed/ 并审计
+    //     dropped_after_attempts，避免信号永久滞留、每批重复烧 LLM。
+    // 队列 IO 全部只 warn（函数内已兜底），绝不影响批次结果。
+    if (!dryRun) {
+      for (const sessionId of processedSessions) {
+        const kinds = queuedKindsById.get(sessionId)
+        if (!kinds) continue // 非队列会话：不碰队列。
+        const slugs = sessionDocSlugs.get(sessionId)
+        if (slugs && slugs.size > 0) {
+          if (await markSignalDone(sessionId)) {
+            report.queue.consumed += 1
+            void appendMemoryAudit({ event: "drained", sessionId, kinds })
+          }
+        } else {
+          report.queue.no_docs += 1
+          const outcome = await recordSignalNoDocs(sessionId)
+          if (outcome.dropped) {
+            report.queue.failed += 1
+            void appendMemoryAudit({ event: "dropped_after_attempts", sessionId, kinds })
+            console.error(
+              `[memory-batch] signal dropped after ${outcome.attempts} no-doc attempts: session=${sessionId}`,
+            )
+          }
+        }
+      }
+    }
+
+    // 2026-10-19 批次审计（工单任务 4）：逐会话处理结束处落 stored/no_docs。
+    // 只在非 dryRun 且真的处理过该会话时写；`appendMemoryAudit` 永不 throw，
+    // 审计失败不影响批次（也不算进批次报告，不改变任何既有统计口径）。
+    if (!dryRun) {
+      // stored 归属只按 accepted（真写入）计：proposals（未提升提案）不在 acceptedIds，
+      // 天然不计入。G5 更新可能沿用旧批次 id：仅当该 id 在本批 docs 中对应唯一 slug
+      // 后缀时才归属；跨会话同名后缀有歧义则不归属（宁缺勿错）。
+      const acceptedSlugs = new Set<string>()
+      for (const id of acceptedIds) {
+        const exact = docs.find((doc) => `${batchId}-${doc.slug}` === id)
+        if (exact) {
+          acceptedSlugs.add(exact.slug)
+          continue
+        }
+        const suffixMatches = docs.filter((doc) => id.endsWith(`-${doc.slug}`))
+        if (suffixMatches.length === 1) acceptedSlugs.add(suffixMatches[0].slug)
+      }
+      for (const [sessionId, slugs] of sessionDocSlugs) {
+        // 精确归属（P2-5）：只看本会话产出的 slug 集合里真正出现在 accepted 的条目；
+        // 未写入（含 proposals）与 rejected 一律不算 stored。
+        let stored = 0
+        for (const slug of slugs) {
+          if (acceptedSlugs.has(slug) && !rejectedSlugs.has(slug)) stored += 1
+        }
+        if (stored > 0) void appendMemoryAudit({ event: "stored", sessionId, stored })
+        else void appendMemoryAudit({ event: "no_docs", sessionId })
+      }
+    }
+
+    // B3 账本：应处理 vs 实处理、LLM 次数、候选/入库/拒绝数；结束时做两条断言式自检，
+    // 违反只记 error（报告 errors＋console），绝不 throw——账本观察失败不能杀死批次。
+    report.ledger.sessions_processed = processedSessions.size
+    report.ledger.llm_calls = llmUsed
+    report.ledger.docs_proposed = docs.length
+    report.ledger.docs_stored = report.stored
+    // 未入库的候选：服务端 rejected／ingest pending（dryRun 下未送，全部计入未入库）。
+    report.ledger.docs_rejected = Math.max(0, docs.length - report.stored)
+    report.ledger.budget_hit = report.truncations.llm_budget_hit
+    if (report.ledger.docs_stored > report.ledger.docs_proposed) {
+      report.ledger.errors.push("stored_exceeds_proposed")
+    }
+    if (report.ledger.llm_calls > maxLlm) {
+      report.ledger.errors.push(`llm_calls_exceeds_budget:${report.ledger.llm_calls}>${maxLlm}`)
+    }
+    for (const ledgerError of report.ledger.errors) {
+      console.error(`[memory-batch] ledger assertion failed: ${ledgerError}`)
     }
 
     writeJsonFile(cursorPath, cursor)

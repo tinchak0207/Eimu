@@ -4,6 +4,11 @@
  * 铁律：无 IO、无 env 读取——一切开关以呼叫端注入的 ctx 为准
  * （sharedEnabled 对应 `MEMORY_SHARED_ENABLED`，ownerKeyHint 对应 gateway hashKey）。
  *
+ * 共享库收证纪律（2026-10-19）：shared 文档只收平台可观测证据——G2 硬线要求
+ * `evidenceKind === "tool_result"`（否则 `g2_evidence_shared`），杜绝用户原话/模型推理
+ * 进入全服可见的 shared 库；且 shared 必须带提出者身份（`contributorKey = ownerKeyHint`），
+ * 缺 ownerKey 一律 `g4_no_owner`；G4 身份泄漏降级 private 时删除 `contributorKey`。
+ *
  * 输入 = curator 原始候选（契约 §6 输出 schema，snake_case）；
  * 输出 doc = `AgentMemoryDocInput`（snake→camel 转换发生在本档，此后全链路驼峰）。
  *
@@ -21,6 +26,8 @@ export type EvidenceKind = "tool_result" | "user_confirmed" | "verbatim"
 export interface AgentMemoryDocInput {
   scope: MemoryScope
   ownerKey?: string
+  /** shared 文档的提出者 ownerKey（= 网关 hashKey），用于跨账号佐证；private 不携带。 */
+  contributorKey?: string
   domain: string
   slug: string
   description: string
@@ -60,7 +67,7 @@ export type GateAction = "accept" | "downgrade" | "drop"
 
 export interface GateResult {
   action: GateAction
-  /** 代号（g1_structure / g2_evidence / g3_secret / g6_score / g4_identity_downgraded / g4_no_owner / shared_disabled），恒不含正文。 */
+  /** 代号（g1_structure / g2_evidence / g2_evidence_shared / g3_secret / g6_score / g4_identity_downgraded / g4_no_owner / shared_disabled），恒不含正文。 */
   reason: string
   doc?: AgentMemoryDocInput
 }
@@ -187,6 +194,11 @@ export function applyMemoryGates(
   if (!isString(candidate.evidence) || candidate.evidence.trim().length < EVIDENCE_MIN) {
     return { action: "drop", reason: "g2_evidence" }
   }
+  // 共享库只收平台可观测证据（2026-10-19 硬闸）：shared 必须 evidenceKind === "tool_result"，
+  //   用户原话（user_confirmed）/ 逐字转述（verbatim）/ 模型推理一律不得进入全服可见库；private 不受影响。
+  if (candidate.scope === "shared" && evidenceKind !== "tool_result") {
+    return { action: "drop", reason: "g2_evidence_shared" }
+  }
 
   const doc: AgentMemoryDocInput = {
     scope: scope as MemoryScope,
@@ -222,6 +234,18 @@ export function applyMemoryGates(
     return { action: "drop", reason: "g6_score" }
   }
 
+  // ── 提出者身份（2026-10-19，仅 shared）：shared 必须可追溯到提出者（contributorKey = 网关 hashKey）；
+  //    缺 ownerKeyHint 时无处归属，沿用既有 g4_no_owner 代号丢弃。private 用 ownerKey，不携带提出者。
+  if (doc.scope === "shared") {
+    const contributorKey = typeof ctx.ownerKeyHint === "string" && ctx.ownerKeyHint.length > 0
+      ? ctx.ownerKeyHint
+      : undefined
+    if (!contributorKey) {
+      return { action: "drop", reason: "g4_no_owner" }
+    }
+    doc.contributorKey = contributorKey
+  }
+
   // ── G7 指令注入（2026-09-29 审计，仅 shared）：防跨租户记忆投毒。命中即丢，不回显内容。
   if (doc.scope === "shared") {
     for (const re of G7_REGEXES) {
@@ -247,10 +271,12 @@ export function applyMemoryGates(
       if (!ownerKey) {
         return { action: "drop", reason: "g4_no_owner" }
       }
+      // 降级为 private：private 用 ownerKey 归属，不携带提出者 → 必须删除 contributorKey。
+      const { contributorKey: _ignoredContributorKey, ...privateDoc } = doc
       return {
         action: "downgrade",
         reason: "g4_identity_downgraded",
-        doc: { ...doc, scope: "private", ownerKey },
+        doc: { ...privateDoc, scope: "private", ownerKey },
       }
     }
   }
