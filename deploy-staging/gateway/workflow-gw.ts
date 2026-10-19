@@ -5,7 +5,7 @@ import path from "node:path"
 import { WorkflowService } from "./workflow-service"
 import { gateWorkflowMemory } from "./jev-gate"
 import { estimateTtsCoins } from "./pricing-and-validation"
-import { compileShotPrompt, normalizeShotCamera, parseShotCandidate, shotOutputParams, type ShotJson } from "./video-prompt-schema"
+import { compileShotPrompt, normalizeShotCamera, parseShotCandidate, shotOutputParams, validateMotionContract, type ShotJson } from "./video-prompt-schema"
 import { loadUserSettings, getCriticVerdictByRun } from "./persistence"
 import { enqueueWorkflowCriticReview, hasWorkflowCriticReview } from "./subagent.ts"
 import { VIDEO_MOTION_RECEIPT_POLICY } from "./delivery-gate.ts"
@@ -1312,13 +1312,31 @@ export async function submitWorkflowNode(
     ;(node.metadata as Record<string, unknown>).model = model // 诚实纪律：后续重试/画布显示/计费都用实际路由到的模型
   }
   const size = typeof meta.size === "string" ? meta.size : "1024x1024"
+  // 参考图：上游中已完成且有 content 的 image 节点（角色图/场景图 → 影片参考）
+  // 2026-10-20：原样上移到 shot 编译之前，让 minimax 首行参考图对齐指令拿到真实参考图数量。
+  const refImages = graph
+    ? graph.connections
+        .filter((c) => c.to === nodeId)
+        .map((c) => graph.nodes.find((n) => n.id === c.from))
+        .filter((n): n is ImageUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "image" && Boolean(upstream.get(n.id)))
+        .map((n) => upstream.get(n.id)!)
+    : []
+
   // 结构化 shot JSON 优先：video 节点 prompt 来自 shot JSON 时按模型族编译成模型最爱的格式。
   let prompt = meta.prompt || meta.content || collectUpstreamPrompt(nodeId) || ""
   let shotSize = size
   let payloadDurationHint: number | undefined = undefined
   const shotCandidate = (parseShotCandidate(meta.shot) ?? parseShotCandidate(prompt)) as ShotJson | null
   if (node.kind === "video" && shotCandidate) {
-    try { prompt = compileShotPrompt(shotCandidate, model) }
+    // 2026-10-20 影片范式硬闸：没有状态变化（beats/state_change）的镜头直接拒收，不再退化成 PPT 慢推。
+    const motionGate = validateMotionContract(shotCandidate)
+    if (motionGate.ok === false) return { nodeId: node.id, ok: false, error: `invalid_shot: ${motionGate.error}` }
+    const explicitRefCount =
+      (typeof meta.first_frame_url === "string" ? 1 : 0) +
+      (typeof meta.last_frame_url === "string" ? 1 : 0) +
+      (Array.isArray(meta.reference_images) ? meta.reference_images.length : 0) +
+      (typeof meta.reference === "string" ? 1 : 0)
+    try { prompt = compileShotPrompt(shotCandidate, model, { referenceImages: refImages.length + explicitRefCount }) }
     catch (error) { return { nodeId: node.id, ok: false, error: `invalid_shot: ${error instanceof Error ? error.message : String(error)}` } }
     const shotParams = shotOutputParams(shotCandidate)
     if (shotParams.duration_seconds !== undefined && typeof meta.duration_seconds !== "number") payloadDurationHint = shotParams.duration_seconds
@@ -1335,15 +1353,6 @@ export async function submitWorkflowNode(
       prompt = combined
     } catch (error) { return { nodeId: node.id, ok: false, error: `invalid_shot: ${error instanceof Error ? error.message : String(error)}` } }
   }
-
-  // 参考图：上游中已完成且有 content 的 image 节点（角色图/场景图 → 影片参考）
-  const refImages = graph
-    ? graph.connections
-        .filter((c) => c.to === nodeId)
-        .map((c) => graph.nodes.find((n) => n.id === c.from))
-        .filter((n): n is ImageUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "image" && Boolean(upstream.get(n.id)))
-        .map((n) => upstream.get(n.id)!)
-    : []
 
   const endpoint = node.kind === "video" ? "/videos/generations" : "/images/generations"
   const payload: Record<string, unknown> = {

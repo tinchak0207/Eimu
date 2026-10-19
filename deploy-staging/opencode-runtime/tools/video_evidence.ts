@@ -13,6 +13,7 @@ import {
   cutSpans,
   fetchVideo,
   isVideoUrl,
+  measureMotion,
   nativeFrames,
   parseTileRange,
   parseTranscript,
@@ -32,7 +33,7 @@ import {
 // 影片证据面（薄包）：业务逻辑全在 lib/video-evidence.ts，本档只做参数白名单、互斥检查、
 // 公网 blob 发布与错误码转译。选择器/互斥语义逐条照竞品 hypit 的 media 子命令（本轮唯一真源）。
 
-type Action = "probe" | "cut" | "frames" | "tile" | "tiles" | "boundaries" | "fetch"
+type Action = "probe" | "cut" | "frames" | "tile" | "tiles" | "boundaries" | "fetch" | "motion"
 
 /** 参数 → hypit 选项名（错误讯息与判读沿用它的命名）。 */
 const NAME: Record<string, string> = {
@@ -51,11 +52,12 @@ const OPTIONS: Record<Action, readonly string[]> = {
   tiles: ["start", "end", "at", "every", "transcript", "around", "occurrence", "padding", "ranges", "frames", "cell", "columns", "rows", "to"],
   boundaries: ["rate", "threshold"],
   fetch: ["to"],
+  motion: [],
 }
 
 /** 每个 action 允许的布林旗标。 */
 const FLAGS: Record<Action, readonly string[]> = {
-  probe: [], cut: ["label_time"], frames: ["label_time", "every_frame"], tile: [], tiles: ["every_frame"], boundaries: [], fetch: [],
+  probe: [], cut: ["label_time"], frames: ["label_time", "every_frame"], tile: [], tiles: ["every_frame"], boundaries: [], fetch: [], motion: [],
 }
 
 /** 正规化后的取样请求（args → lib 的 SampleRequest）。 */
@@ -110,6 +112,7 @@ export default tool({
     + "tile（单张拼板，frames 取等距中点、every 从 start 起不含 end）、"
     + "tiles（分页拼板，预设 3 列；ranges 收 {start,end,id?,frames?,every?} 阵列，id 需唯一）、"
     + "boundaries（**机械式相邻帧变化候选＋分数，分数不是剪辑判读，绝不是镜头标签**）、"
+    + "motion（本机帧差动态体检：mean/median/p95 + static_ratio + dynamic/weak/static 判定；median 抗剪辑，是「像不像 PPT」的量化 oracle）、"
     + "fetch（抓取连结：直链媒体（video/*、.mp4 等）先走普通 HTTP 下载，不需要 yt-dlp；只有站点页连结才用钉版 yt-dlp。未 prepare 时诚实失败并回 code=video_fetch_unavailable）。"
     + "附 transcript（eimu.transcript@1，词级 start/end 秒）时，拼板/逐格会在图下叠时间码、活动词与上下文，"
     + "并可用 around 片语定位（需 occurrence 处理重复命中，padding 预设 0.3 秒）。"
@@ -118,8 +121,8 @@ export default tool({
   args: {
     source: tool.schema.string().describe("本机绝对路径或 http(s) URL（URL 会先落地暂存再处理；yt-dlp 专属路径仍走 action=fetch）。本机路径请给 workspace 内绝对路径——沙箱的 /tmp 是会话私有目录，工具端看不到"),
     action: tool.schema
-      .enum(["probe", "cut", "frames", "tile", "tiles", "boundaries", "fetch"])
-      .describe("probe=探测；cut=剪辑/拼接；frames=逐格；tile=单张拼板；tiles=分页拼板；boundaries=机械式变化候选；fetch=连结转档案"),
+      .enum(["probe", "cut", "frames", "tile", "tiles", "boundaries", "fetch", "motion"])
+      .describe("probe=探测；cut=剪辑/拼接；frames=逐格；tile=单张拼板；tiles=分页拼板；boundaries=机械式变化候选；fetch=连结转档案；motion=帧差动态体检（像不像 PPT 的量化 oracle）"),
     to: tool.schema.string().optional().describe("输出路径（mp4/mov/webm/mkv/wav）或输出目录；frames/tiles 是目录。已存在即拒绝"),
     start: tool.schema.number().min(0).optional().describe("区间起点（秒，含）；预设 0"),
     end: tool.schema.number().min(0).optional().describe("区间终点（秒，不含；--every 语义下不含片尾）；预设整支时长"),
@@ -199,6 +202,12 @@ export default tool({
           return ok({ action, path: material.path, sampleRate: rate, threshold, candidates,
             note: "机械式相邻帧变化候选，分数不是剪辑判读，也不是镜头标签", warnings,
             title: `${candidates.length} 个变化候选` })
+        }
+        if (action === "motion") {
+          const stats = await measureMotion(material.path)
+          return ok({ action, path: material.path, ...stats, warnings,
+            note: "median≥6 且 static_ratio≤0.20 才算 dynamic；单帧/单张美图/剪辑点不能替代。",
+            title: `${stats.verdict}（median ${stats.median_diff} / static ${(stats.static_ratio * 100).toFixed(1)}%）` })
         }
         const request: Request = {
           start: args.start, end: args.end, at: args.at, every: args.every, frames: args.frames,

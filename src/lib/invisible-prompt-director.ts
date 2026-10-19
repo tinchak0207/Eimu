@@ -1,11 +1,14 @@
 /**
  * Invisible Prompt Director — 规则层影片提示词导演。
  *
- * 用户的短 prompt 在进上游之前被这层自动「导演化」：侦测六槽公式
- * (Camera + Subject + Action + Setting + Style + Lighting) 的缺漏并补齐、
- * 替换 anti-slop 空形容词、修复同义词陷阱、把负面句改成正向声明、
- * 执行引擎规则（age-blind、≤3 tracked characters）、附加品质锁。
- * 全程在后端发生，用户无感。
+ * 用户的短 prompt 在进上游之前被这层自动「导演化」：替换 anti-slop 空形容词、
+ * 修复同义词陷阱、把负面句改成正向声明、执行引擎规则（age-blind、≤3 tracked
+ * characters）。
+ *
+ * 六槽公式 (Camera + Subject + Action + Setting + Style + Lighting) 是**图片**语法；
+ * 影片不走静态六槽，改用「状态变化合同」：起态 → 动作 beat → 终态 → 环境变化。
+ * 画面必须从一个状态走到另一个可见不同的状态，运动由主体动作驱动，而不是
+ * 「构图稳定、主体锁定、环境不变」。全程在后端发生，用户无感。
  *
  * 知识来源：Higgsfield Hell Grind 开源 95 分钟长片 pipeline 与 Seedance 2.0
  * 工业级 prompt 规则库（OSideMedia/higgsfield-ai-prompt-skill，MIT）。
@@ -88,13 +91,16 @@ const EMOTION_TO_PHYSICS: Record<string, string> = {
   thoughtful: "gaze drifts, brow furrows, head tilts slightly, hand absently touches the chin",
 };
 
-/** 品质尾巴：所有影片模型都想要的最低保底。以正向声明写。 */
-const QUALITY_TAIL =
-  "Cinematic. Photoreal. Stable composition, no flicker, no frame jitter. Detailed texture preserved, subject locked through the whole shot.";
+/** 运动合同：影片的核心是可见的物理状态变化，不是稳定构图。
+ *  旧的品质尾（稳定构图／主体锁定／无闪烁）是把图片范式套到影片上的
+ *  直接生成源，会让模型产出 PPT 式微动画面，已删除。 */
+const MOTION_CONTRACT =
+  "Continuous physical action drives the shot: the subject's position, pose, and silhouette change measurably from the first frame to the last. Foreground and background shift with real parallax as the action advances.";
 
-/** 品质锁：环境不发明 / 角色比例 / 物件不复制（Hell Grind POSITIVE LOCKS 精神）。 */
-const POSITIVE_LOCKS =
-  "The set contains only what is described. Character identity, wardrobe, and environment stay identical across every cut. No extra people, no duplicated furniture.";
+/** 状态变化锁：主体必须从一个状态走到另一个可见不同的状态，
+ *  途中至少有一次环境/调度变化；身份细节保持一致是为了不换人，不是为了锁死画面。 */
+const TRANSFORMATION_LOCK =
+  "The shot shows a clear state change: the subject begins in one state and ends in a visibly different state, with at least one change in the environment or staging along the way. Identity details stay consistent while the action advances.";
 
 function replaceAll(prompt: string, table: ReadonlyArray<[RegExp, string]>): string {
   let out = prompt;
@@ -127,31 +133,27 @@ function decomposeGenericEmotion(prompt: string): string {
 }
 
 /** 正向化：把「负面句」改成「正向声明」。regex 只能处理常见形式。
- *  注意「no flicker / no jitter」这类短锁尾是正向声明内的合法写法
- *  （Seedance field-proven），不做替换。只处理「动作被否定」的句子。 */
+ *  注意音轨锁（"SFX only, no music."）这类短尾是正向声明内的合法写法，
+ *  不做替换。只处理「动作被否定」的句子。 */
 function enforcePositivePhrasing(prompt: string): string {
   return prompt
     .replace(/\b(?:does|do|did) not (?:fall|drop|touch|hit)\b/gi, "stays clear of")
     .replace(/\b(?:don['’]t|doesn['’]t|didn['’]t) (?:look|turn|move)\b/gi, "keeps the gaze forward");
 }
 
-/** 侦测槽位缺漏，缺的补中性指令——不替用户决定具体镜位。 */
+/** 侦测槽位缺漏，缺的补中性指令——不替用户决定具体镜位。
+ *  影片分支的 camera 槽不再补静态机位兜底（那是 PPT 的生成源之一），
+ *  缺 camera 时补一条动作兜底：镜头里必须有可见的物理动作 beat。 */
 function fillMissingSlots(
   prompt: string,
   cameraPresent: boolean,
   stylePresent: boolean,
   lightingPresent: boolean,
-  options: DirectorOptions,
 ): string[] {
   const additions: string[] = [];
-  const isSeedance = options.modelId?.toLowerCase().includes("seedance");
 
   if (!cameraPresent) {
-    additions.push(
-      isSeedance
-        ? "Camera: a single deliberate move, named and held, ending on a clear target in the frame."
-        : "Camera: motivated, steady, one deliberate move per shot.",
-    );
+    additions.push("The shot must contain a visible physical action beat, not only camera movement.");
   }
   if (!stylePresent) {
     additions.push("Style: cinematic color grade with a named palette — teal shadows with warm practical highlights.");
@@ -314,7 +316,7 @@ export interface SixSlots {
   quality: string;
 }
 
-const QUALITY_PATTERN = /(sharp focus|detailed texture|no distortion|faithful proportions|clean edges|photoreal|stable composition|no flicker|no frame jitter|identity|wardrobe|no extra people|no duplicated|only what is described|sfx|no music)/i;
+const QUALITY_PATTERN = /(sharp focus|detailed texture|no distortion|faithful proportions|clean edges|no extra people|no duplicated|only what is described|sfx|no music|state change|action beat|visibly changed|measurably|environment or staging|visibly different state)/i;
 
 /**
  * 从（优化后的）prompt 提取六槽结构化视图。免费层展示用——把长 prompt
@@ -392,24 +394,21 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   enhanced = enforcePositivePhrasing(enhanced);
 
   const parts: string[] = [enhanced];
-  parts.push(...fillMissingSlots(enhanced, cameraPresent || Boolean(cameraRule), stylePresent, lightingPresent, options));
+  parts.push(...fillMissingSlots(enhanced, cameraPresent || Boolean(cameraRule), stylePresent, lightingPresent));
   if (cameraRule) parts.push(cameraRule.directive);
 
-  // 开场 1 秒锁位（Hell Grind）：只有影片才需要，且只在长片语义下注入。
-  const hasPacing = options.durationSeconds && options.durationSeconds >= 4;
-  if (hasPacing) {
-    parts.push(
-      `The first second establishes the layout — who stands where, where the light comes from — then the arrangement holds for the whole shot.`,
-    );
-  }
+  // 状态变化合同：不建立静态版式，开场即进入动作 beat，收尾时主体与场景都已改变。
+  parts.push(
+    "The shot opens with the subject already advancing an action beat; by the final frame the subject and the scene have visibly changed.",
+  );
 
-  // 品质尾巴 + 正向锁：去重复、依音轨调整语义。
-  if (!/(no flicker|stable composition|photoreal|cinematic\.)/i.test(enhanced)) {
+  // 运动 + 状态变化合同：用户 prompt 已写明就不重复追加；音轨语义沿用旧逻辑。
+  if (!/(state change|action beat|visibly changed|measurably)/i.test(enhanced)) {
     const audioClause = options.generateAudio ? "" : "SFX only, no music. ";
-    parts.push(`${audioClause}${QUALITY_TAIL}`);
+    parts.push(`${audioClause}${MOTION_CONTRACT}`);
   }
-  if (!/no extra people|no duplicated|identical across every cut/i.test(enhanced)) {
-    parts.push(POSITIVE_LOCKS);
+  if (!/(environment or staging|visibly different state)/i.test(enhanced)) {
+    parts.push(TRANSFORMATION_LOCK);
   }
 
   return parts.join(" ");
