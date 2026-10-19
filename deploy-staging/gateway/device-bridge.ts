@@ -1002,6 +1002,19 @@ export class DeviceBridge {
           if (roots.length > 0) consent = { scope: sendScope, roots }
         }
       }
+      // full 语义＝家目录：装置端 allowlist 需要 home 随 consent 下发才放行家目录。
+      if (rec.mode === "full" && rec.home) {
+        const home = rec.home
+        if (consent && consent.scope === "once") {
+          // once 保持 once（不升级成 session），仅并入 home。
+          if (!consent.roots.includes(home)) consent.roots = [...consent.roots, home]
+        } else {
+          // 不得以 permanent 下发 home：装置会把 session 根落盘成永久授权。
+          const roots = consent ? consent.roots.slice() : []
+          if (!roots.includes(home)) roots.push(home)
+          consent = { scope: "session", roots }
+        }
+      }
     }
 
     const requestId = randomId("req")
