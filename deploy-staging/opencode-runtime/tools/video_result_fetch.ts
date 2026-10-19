@@ -16,7 +16,7 @@ export default tool({
       if(args.job_ids){try{const raw=JSON.parse(args.job_ids);ids=Array.isArray(raw)?raw:typeof raw==="string"?[raw]:[]}catch{ids=args.job_ids.split(",").map(v=>v.trim()).filter(Boolean)};if(!ids?.length||ids.some(id=>typeof id!=="string"))return fail("bad_request","job_ids需要完整ID字符串数组。")}
       const listing=await gatewayRequest("/internal/session-tasks",{session_id:context.sessionID,project:args.project,frame:args.frame},context.abort)
       if(listing.durable!==true||!Array.isArray(listing.tasks))return fail("invalid_task_index","耐久索引响应无tasks；不推断没有视频。")
-      const tasks=listing.tasks.filter((t:any)=>t.kind==="video"&&(!ids||ids.includes(t.task_id)))
+      const tasks=listing.tasks.filter((t:any)=>(t.kind==="video"||(Array.isArray(t.artifacts)&&t.artifacts.some((a:any)=>typeof a?.mimeType==="string"&&a.mimeType.startsWith("video/"))))&&(!ids||ids.includes(t.task_id)))
       reconcileSubmissions(tasks)
       const jobs=[]
       for(const task of tasks){

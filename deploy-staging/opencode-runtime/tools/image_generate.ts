@@ -9,6 +9,7 @@ import {
   platformFetch,
   siteFetch,
   loadCatalog,
+  loadModelMediaTypes,
   randomUUID,
   productionScope,
   publicImageUrl,
@@ -310,6 +311,12 @@ export default tool({
     if (args.request_id && args.request_id.length > 200) return fail("invalid_request_id", "request_id最多200字。")
     if (args.style_version && !args.style_lock) return fail("missing_style_lock", "冻结style_version必须同时提供完整style_lock。")
     if (args.reference_version && !args.reference_images?.length) return fail("missing_canonical", "冻结reference_version必须提供canonical参考图。")
+    // 介质能力以平台目录 x_capabilities.mediaType 为准；目录取不到或缺该模型时不拦（fail-open）。
+    const mediaType = (await loadModelMediaTypes(context.sessionID, context.abort))?.[model]
+    if (mediaType && kind === "image" && mediaType === "video")
+      return fail("model_requires_video_kind", `模型 ${model} 是视频模型；请以 kind:"video" 重新提交。本次未提交、未扣费。`, { model, kind: "video" })
+    if (mediaType && kind === "video" && mediaType !== "video")
+      return fail("model_requires_image_kind", `模型 ${model} 是图片模型；请以 kind:"image" 重新提交。本次未提交、未扣费。`, { model, kind: "image" })
     const request_id = args.request_id ?? (args.frame != null ? `frame:${args.project}:${args.frame}` : randomUUID())
     let scope:string
     try {scope=await productionScope(context.sessionID,args.project,context.abort)}

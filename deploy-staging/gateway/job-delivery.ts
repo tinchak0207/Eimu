@@ -1,5 +1,5 @@
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
-  completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
+  completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
 import { beastAgentField } from "./session-lifecycle"
@@ -97,7 +97,15 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const artifacts = Array.isArray(input.artifacts) ? input.artifacts : []
       if ((input.status === "succeeded" && !artifacts.length) || artifacts.some((a: any) => typeof a.url !== "string" || !/^https?:\/\//.test(a.url)))
         return Response.json({ ok: false, error: "success requires all public artifact URLs" }, { status: 400 })
-      completeGenerationReceipt(input.task_id, input.status, artifacts, { reason: input.reason, cost_coins: input.cost_coins })
+      const completed = completeGenerationReceipt(input.task_id, input.status, artifacts, { reason: input.reason, cost_coins: input.cost_coins })
+      // 只有全部 artifact 的 mimeType 一致时才用介质证据纠正登记 kind；混合类型保留原登记。
+      if (input.status === "succeeded" && completed.kind !== "message" && artifacts.length) {
+        const mimes = artifacts.map((a: any) => typeof a?.mimeType === "string" ? a.mimeType : "")
+        const allVideo = mimes.every((mime: string) => mime.startsWith("video/"))
+        const allImage = mimes.every((mime: string) => mime.startsWith("image/"))
+        if (allVideo && completed.kind === "image") reclassifyGenerationKind(input.task_id, "video")
+        else if (allImage && completed.kind === "video") reclassifyGenerationKind(input.task_id, "image")
+      }
       // A durable receipt is not a consumer ACK. Rendering is independently retried by the drain.
       return Response.json({ ok: true, durable: true, task_id: receipt.task_id, acknowledged: !!receipt.observed_at })
     }
@@ -191,8 +199,10 @@ export async function drainGenerationInbox(): Promise<void> {
       if (generationMaintenanceEnabled()) continue
       // 消息通知不是待下载媒体：已提交或结果未知的通知永不定时重投，保留真实 ACK 状态。
       if (receipt.kind === "message" && receipt.notified_at !== null) continue
-      // An accepted prompt is not an ACK. Retry unread batches conservatively, never every tick.
-      if (receipt.notified_at && Date.now() - receipt.notified_at < 10 * 60_000) continue
+      // An accepted prompt is not an ACK. Back off exponentially, then keep a 12h floor so nothing is silently lost.
+      const count = receipt.notify_count || 0
+      const backoff = count >= 8 ? 12*3600_000 : Math.min(12*3600_000, 10*60_000 * 2 ** Math.max(0, count - 1))
+      if (receipt.notified_at && Date.now() - receipt.notified_at < backoff) continue
       if (statuses[receipt.consumer_oc]?.type && statuses[receipt.consumer_oc].type !== "idle") continue
       if (parent?.opencodeSessionId === receipt.consumer_oc && (parent.lastTurnActiveAt || 0) > 0) continue
       const group = groups.get(receipt.consumer_oc) || []
@@ -223,8 +233,10 @@ export async function drainGenerationInbox(): Promise<void> {
       const pending = group.filter((r) => r.kind !== "message" || claimed.has(r.task_id))
       if (!pending.length) continue
       const jobs = pending.map((r) => ({ task_id: r.task_id, status: r.status, frame: r.frame, project: r.project,
-        kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}), delivery_id: `generation:${r.task_id}` }))
-      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
+        kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}),
+        download_tool: r.artifacts.some((a) => typeof a?.mimeType === "string" && a.mimeType.startsWith("video/")) ? "video_fetch" : "image_result_download",
+        delivery_id: `generation:${r.task_id}` }))
+      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
       const agent = generationParent(consumer)?.consumer_agent
       const promptBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
       let ownTurnGen: number | undefined

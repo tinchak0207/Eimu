@@ -82,7 +82,8 @@ export default tool({
       try {
         const listing=await gatewayRequest("/internal/session-tasks",{session_id:context.sessionID},context.abort)
         const task=listing.tasks?.find((t:any)=>t.task_id===args.task_id)
-        if(listing.durable!==true||!task||task.kind!=="video")return fail("task_not_found","没有耐久视频原任务；不得猜ID或重生成。")
+        const hasVideoArtifact=Array.isArray(task?.artifacts)&&task.artifacts.some((a:any)=>typeof a?.mimeType==="string"&&a.mimeType.startsWith("video/"))
+        if(listing.durable!==true||!task||(task.kind!=="video"&&!hasVideoArtifact))return fail("task_not_found","没有耐久视频原任务；不得猜ID或重生成。")
         if(!["succeeded","cancelled","refunded","failed"].includes(task.status))return ok({task_id:args.task_id,status:task.status,downloaded_ack:false})
         const artifacts=task.artifacts??[]
         if(!artifacts.length)return fail("artifact_missing","原视频终态没有可下载产物。",{task_id:args.task_id,status:task.status})

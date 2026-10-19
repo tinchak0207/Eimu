@@ -25,6 +25,7 @@ function db(): Database {
     CREATE INDEX IF NOT EXISTS generation_receipts_parent ON generation_receipts(parent_gw);
     CREATE INDEX IF NOT EXISTS generation_receipts_pending ON generation_receipts(status,observed_at);`)
   if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "consumer_agent")) next.exec("ALTER TABLE generation_consumers ADD COLUMN consumer_agent TEXT")
+  if (!(next.query("PRAGMA table_info(generation_receipts)").all() as any[]).some((c) => c.name === "notify_count")) next.exec("ALTER TABLE generation_receipts ADD COLUMN notify_count INTEGER NOT NULL DEFAULT 0")
   connection = next
   return next
 }
@@ -85,6 +86,13 @@ export function completeGenerationReceipt(id: string, status: string, artifacts:
     .run(status, JSON.stringify(artifacts), JSON.stringify(data), Date.now(), changed ? 1 : 0, changed ? 1 : 0, changed ? 1 : 0, changed ? 1 : 0, id)
   return generationReceipt(id)!
 }
+/** 介质证据与登记 kind 不一致时纠正收件箱分类；不动 artifacts、时间戳与其它栏位。 */
+export function reclassifyGenerationKind(id: string, kind: string): void {
+  const row = generationReceipt(id)
+  if (!row) throw new Error("unregistered job")
+  db().query("UPDATE generation_receipts SET kind=?,data=?,updated_at=? WHERE task_id=?")
+    .run(kind, JSON.stringify({ ...row, kind, data: undefined, artifacts: undefined }), Date.now(), id)
+}
 export function generationReceipts(parentGw?: string, pendingOnly = false): GenerationReceipt[] {
   const rows = parentGw
     ? db().query("SELECT * FROM generation_receipts WHERE parent_gw=? ORDER BY created_at").all(parentGw)
@@ -106,7 +114,7 @@ export function acknowledgeGeneration(id: string, stage: string, extra: Record<s
     .run(Date.now(), stage === "downloaded" ? 1 : 0, Date.now(), JSON.stringify({ ...row, ...extra, artifacts: undefined }), Date.now(), id)
 }
 export function notifyGeneration(ids: string[]): void {
-  const update = db().query("UPDATE generation_receipts SET notified_at=? WHERE task_id=?")
+  const update = db().query("UPDATE generation_receipts SET notified_at=?,notify_count=COALESCE(notify_count,0)+1 WHERE task_id=?")
   db().transaction(() => { for (const id of ids) update.run(Date.now(), id) })()
 }
 /** 消息唤醒提交前耐久占位；超时是提交结果未知，不能再盲投。真实消费 ACK 另记。 */

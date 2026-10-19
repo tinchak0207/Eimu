@@ -26,6 +26,7 @@ async function bytesFrom(url:string, signal?:AbortSignal):Promise<Buffer> {
   const response=await safeFetch(url,{signal:signal?AbortSignal.any([signal,timed]):timed})
   if(!response.ok)throw new Error(`artifact_http_${response.status}`)
   const mime=(response.headers.get("content-type")??"").split(";")[0]
+  if(mime.startsWith("video/"))throw new Error("artifact_is_video: 该产物是视频，请改用 video_fetch { task_id }")
   if(mime&&!mime.startsWith("image/")&&mime!=="application/octet-stream")throw new Error("artifact_not_image")
   if(Number(response.headers.get("content-length"))>MAX_BYTES){await response.body?.cancel();throw new Error("artifact_too_large")}
   const reader=response.body?.getReader()

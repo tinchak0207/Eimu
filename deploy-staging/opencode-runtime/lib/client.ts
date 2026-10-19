@@ -39,6 +39,7 @@ const referenceSnapshots=new Map<string,{sha256:string;url:string|null;mediaId:s
 type PriceEntry = { standard?: number; hd?: number }
 
 let catalogCache: { at: number; prices: Record<string, PriceEntry> } | null = null
+let mediaTypeCache: { at: number; mediaTypes: Record<string, string> } | null = null
 const CATALOG_TTL_MS = 10 * 60 * 1000
 const FALLBACK_COINS = 1 // 取不到目录时的保守估值（偏高，宁可多问一次确认）
 
@@ -72,6 +73,31 @@ export async function loadCatalog(
     return prices
   } catch {
     return catalogCache?.prices ?? null
+  }
+}
+
+/** 读取（并快取 10 分钟）平台模型的权威介质能力（x_capabilities.mediaType）。取不到回 null，不 throw。 */
+export async function loadModelMediaTypes(
+  sessionID: string,
+  signal?: AbortSignal,
+): Promise<Record<string, string> | null> {
+  const now = Date.now()
+  if (mediaTypeCache && now - mediaTypeCache.at < CATALOG_TTL_MS) return mediaTypeCache.mediaTypes
+  try {
+    const res = await platformFetch("/models", { method: "GET" }, sessionID, signal)
+    if (!res.ok) return mediaTypeCache?.mediaTypes ?? null
+    const body = (await res.json()) as { data?: Array<Record<string, unknown>> }
+    const mediaTypes: Record<string, string> = {}
+    for (const m of body.data ?? []) {
+      const id = typeof m.id === "string" ? m.id : null
+      const mediaType = (m.x_capabilities as Record<string, unknown> | undefined)?.mediaType
+      if (id && typeof mediaType === "string" && mediaType) mediaTypes[id] = mediaType
+    }
+    if (Object.keys(mediaTypes).length === 0) return mediaTypeCache?.mediaTypes ?? null
+    mediaTypeCache = { at: now, mediaTypes }
+    return mediaTypes
+  } catch {
+    return mediaTypeCache?.mediaTypes ?? null
   }
 }
 
