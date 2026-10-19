@@ -147,7 +147,7 @@ export interface RecallTopOptions {
   linkDamping?: number
   /** 多跳迭代次数；默认 2。 */
   linkIterations?: number
-  /** 追加链接节点所需最低质量；默认 0.15。 */
+  /** 追加链接节点所需最低质量；默认 0.1（保证默认两跳可达）。 */
   linkMinMass?: number
 }
 
@@ -180,6 +180,23 @@ function buildLinkAdjacency(docs: RecallableDoc[]): Map<number, Set<number>> {
   return adjacency
 }
 
+/**
+ * 查询时有效性（M4）：语料快取 TTL 内条目可能刚好过期，fetch 时过滤不能替代此处。
+ * validTo 可解析且 <= nowMs → 失效；validFrom 可解析且 > nowMs → 尚未生效。
+ * 时间字段无法解析时保持既有宽松行为（不跳过）。
+ */
+function isRecallableAt(doc: RecallableDoc, nowMs: number): boolean {
+  if (typeof doc.validTo === "string") {
+    const t = Date.parse(doc.validTo)
+    if (Number.isFinite(t) && t <= nowMs) return false
+  }
+  if (typeof doc.validFrom === "string") {
+    const t = Date.parse(doc.validFrom)
+    if (Number.isFinite(t) && t > nowMs) return false
+  }
+  return true
+}
+
 /** 衰减锚点：lastConfirmedAt ?? observedAt ?? updatedAt；无法 parse 回 null（不乘）。 */
 function recencyAnchorMs(doc: RecallableDoc): number | null {
   const stamp = doc.lastConfirmedAt ?? doc.observedAt ?? doc.updatedAt
@@ -207,8 +224,11 @@ export function recallTop(
   const minScore = Number.isFinite(options.minScore) ? (options.minScore as number) : BM25_DEFAULT_MIN_SCORE
   const rawK = Number.isFinite(options.k) && (options.k as number) > 0 ? Math.floor(options.k as number) : BM25_DEFAULT_K
   const k = Math.max(1, Math.min(rawK, RECALL_K_MAX))
-  if (docs.length === 0) return []
   const nowMs = Number.isFinite(options.nowMs) ? (options.nowMs as number) : Date.now()
+  // M4：打分前做查询时有效性过滤（快取命中时 validTo 可能已过）。
+  // 过滤会改变语料集合，故 BM25 必须建立在过滤后的语料上（而不是先打分再剔除）。
+  const activeDocs = docs.filter((doc) => isRecallableAt(doc, nowMs))
+  if (activeDocs.length === 0) return []
   const recencyWeight =
     Number.isFinite(options.recencyWeight) && (options.recencyWeight as number) > 0 ? (options.recencyWeight as number) : 0
   const halfLifeDays =
@@ -222,10 +242,11 @@ export function recallTop(
   const linkIterations = Number.isFinite(options.linkIterations)
     ? Math.max(0, Math.min(10, Math.floor(options.linkIterations as number)))
     : 2
-  const linkMinMass = Number.isFinite(options.linkMinMass) ? (options.linkMinMass as number) : 0.15
+  // 默认 0.1：两跳（A→B→C）的质量在默认阻尼/迭代下约 0.125，旧默认 0.15 会把它丢掉。
+  const linkMinMass = Number.isFinite(options.linkMinMass) ? (options.linkMinMass as number) : 0.1
 
-  const scores = bm25Score(query, docs)
-  let hits: RecallHit[] = docs
+  const scores = bm25Score(query, activeDocs)
+  let hits: RecallHit[] = activeDocs
     .map((doc, i) => ({ doc, score: scores[i] }))
     .filter((hit) => hit.score >= minScore)
     .sort((a, b) => b.score - a.score) // 仅比分数；同分保持原序（稳定排序），年龄绝不介入
@@ -246,10 +267,10 @@ export function recallTop(
 
   // ── 链接图受限多跳（默认关闭）
   if (linkExpansion) {
-    const adjacency = buildLinkAdjacency(docs)
+    const adjacency = buildLinkAdjacency(activeDocs)
     if (adjacency.size === 0) return hits.slice(0, k) // 没有任何 links：不付额外成本
     const docIndex = new Map<RecallableDoc, number>()
-    docs.forEach((d, i) => docIndex.set(d, i))
+    activeDocs.forEach((d, i) => docIndex.set(d, i))
     const seedMass = new Map<number, number>()
     const hitIndexes = new Set<number>()
     let seedMax = 0
@@ -282,7 +303,7 @@ export function recallTop(
       const extras = [...mass.entries()]
         .filter(([i, m]) => !hitIndexes.has(i) && m >= linkMinMass)
         .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-        .map(([i, m]) => ({ doc: docs[i], score: Math.max(scores[i], seedMax * m) }))
+        .map(([i, m]) => ({ doc: activeDocs[i], score: Math.max(scores[i], seedMax * m) }))
       if (extras.length > 0) {
         // 追加后统一按分排序再切 k：链接命中可替换弱 BM25 命中，但绝不突破 k。
         return [...hits, ...extras].sort((a, b) => b.score - a.score).slice(0, k)

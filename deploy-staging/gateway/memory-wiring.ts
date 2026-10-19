@@ -6,7 +6,7 @@ import { CorpusCache, recallTop, buildRecallQuery, expandRecallQuery, renderReca
 import { MEMORY_SIGNATURE_HEADER, signMemoryBytes, signEmptyMemoryBody, createMemoryBatch, type MemorySessionRecord } from "./memory-batch"
 // 单向依赖：wiring → memory-http 注册钩子；memory-http 不反向 import wiring（无新循环）。
 import { setMemoryNoteIngestHook } from "./memory-http"
-import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_RECALL_ENABLED, MEMORY_RECALL_RECENCY_WEIGHT, MEMORY_RECALL_HALF_LIFE_DAYS, MEMORY_RECALL_LINK_EXPANSION, MEMORY_RECALL_LINK_DAMPING, MEMORY_RECALL_LINK_ITERATIONS, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
+import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_RECALL_ENABLED, MEMORY_RECALL_RECENCY_WEIGHT, MEMORY_RECALL_HALF_LIFE_DAYS, MEMORY_RECALL_LINK_EXPANSION, MEMORY_RECALL_LINK_DAMPING, MEMORY_RECALL_LINK_ITERATIONS, MEMORY_RECALL_LINK_MIN_MASS, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
 import { bindingRef } from "./model-registry"
 import { getOwnedSession } from "./sessions-core"
 import { loadSessionByOpencodeId } from "./persistence"
@@ -591,6 +591,7 @@ export function memoryRecallScoringOptions(): RecallTopOptions & { minScore: num
     linkExpansion: MEMORY_RECALL_LINK_EXPANSION,
     linkDamping: MEMORY_RECALL_LINK_DAMPING,
     linkIterations: MEMORY_RECALL_LINK_ITERATIONS,
+    linkMinMass: MEMORY_RECALL_LINK_MIN_MASS,
   }
 }
 

@@ -180,6 +180,12 @@ export const MEMORY_RECALL_LINK_ITERATIONS = (() => {
   if (!Number.isFinite(n)) return 2
   return Math.max(1, Math.min(5, n))
 })()
+// 追加链接节点所需最低质量，夹 [0,1]；默认 0.1（旧值 0.15 会把默认两跳的 ~0.125 丢掉）。
+export const MEMORY_RECALL_LINK_MIN_MASS = (() => {
+  const n = Number.parseFloat(process.env.MEMORY_RECALL_LINK_MIN_MASS ?? "0.1")
+  if (!Number.isFinite(n)) return 0.1
+  return Math.max(0, Math.min(1, n))
+})()
 // 0918 前缀快取修复：尾端注入 payload 的同 byte 去重开关。默认 ON（不重贴）；
 // SYSTEM_PAYLOAD_TAIL_DEDUPE=0 时每轮照旧重贴（回退钮，行为回到「每轮都在」）。
 export const SYSTEM_PAYLOAD_TAIL_DEDUPE = process.env.SYSTEM_PAYLOAD_TAIL_DEDUPE !== "0"

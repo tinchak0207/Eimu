@@ -62,6 +62,8 @@
 //
 // 契约：`.gateway-work/prod-20260915/MEMORY-INTERFACES.md` §1 §2 §3.1 §3.2。
 
+import { createHash } from "node:crypto";
+
 import { get, list, put } from "@/lib/blob-backend";
 import { getGenerationSql } from "@/lib/generation-core/database";
 
@@ -168,7 +170,8 @@ export type MemoryRejectReason =
   | "quota_scope"
   | "quota_domain"
   | "structure"
-  | "retracted";
+  | "retracted"
+  | "time_range";
 
 export interface MemoryIngestInput {
   batchId: string;
@@ -194,6 +197,22 @@ export interface MemoryIngestResult {
   /** 真正写入新文档、或把内容提升为 live 的文档 id（「已入库」的唯一口径）。 */
   accepted: string[];
   /**
+   * accepted 的可定位引用（id 已改为确定性身份 id，batch 不能用 `${batchId}-${slug}` 推算）。
+   * 只有真正进 accepted 的新写入／更新会 push；noop／proposal 不 push。
+   */
+  acceptedRefs?: Array<{
+    id: string;
+    batchId?: string;
+    scope: MemoryScope;
+    ownerKey?: string;
+    /** 实际落盘身份（shared 近重复合并时是 target 的 domain/slug）。 */
+    domain: string;
+    slug: string;
+    /** 输入候选的原始身份（未经近重复改写）；batch 抽检／归属应优先用它。 */
+    inputDomain: string;
+    inputSlug: string;
+  }>;
+  /**
    * live 内容未变、只新增／累积了未达门槛提案的文档 id（active shared 提案制）。
    * 这些 id 绝不进 `accepted`：提案未发布，不能对外报「已入库」。
    * （可选：旧调用方构造回执时可省略；`ingestMemoryDocs` 恒返回空数组或实名单。）
@@ -203,7 +222,17 @@ export interface MemoryIngestResult {
   noop?: string[];
   /** 被本次写入取代（status=superseded）的旧文档 slug。 */
   superseded?: string[];
-  rejected: Array<{ slug: string; reason: MemoryRejectReason }>;
+  /**
+   * 拒绝明细。能确定候选身份时附带 scope/ownerKey/domain，供 batch 审计按
+   * (scope, ownerKey, domain, slug) 精确对帐；早期非候选拒绝可只带 slug。
+   */
+  rejected: Array<{
+    slug: string;
+    reason: MemoryRejectReason;
+    scope?: MemoryScope;
+    ownerKey?: string;
+    domain?: string;
+  }>;
   /**
    * `seed_accepted`：种子模式下真正实写的文档数（审计用；普通批次恒 0）。
    * `ingestMemoryDocs` 恒返回；可选仅为兼容旧调用方自造回执（同 `proposals` 约定）。
@@ -269,6 +298,8 @@ export interface MemoryCatalogEntry {
   validFrom?: string;
   validTo?: string;
   lastConfirmedAt?: string;
+  /** 合并同 identity 不同 id 时保留的旧 id（history／retract／review 兼容用）。 */
+  aliases?: string[];
 }
 
 export interface MemoryCatalog {
@@ -377,6 +408,43 @@ function safeSegment(value: string, fallback: string): string {
     .trim()
     .slice(0, 80);
   return cleaned || fallback;
+}
+
+function sha256Short(value: string, length = 16): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, length);
+}
+
+/**
+ * 文档身份（跨批次／跨进程稳定）：shared 不含 ownerKey；private 含 ownerKey。
+ * domain 参与身份，同 slug 不同 domain 视为不同事实。
+ */
+function memoryIdentity(input: {
+  scope: MemoryScope;
+  ownerKey?: string;
+  domain: string;
+  slug: string;
+}): string {
+  const owner = input.scope === "private" ? String(input.ownerKey ?? "") : "";
+  return `${input.scope}|${owner}|${input.domain}|${input.slug}`;
+}
+
+/** 确定性文档 id：同 identity 在任何进程／批次都得到同一个 id（历史锚定不靠批次号）。 */
+function deterministicDocId(input: {
+  scope: MemoryScope;
+  ownerKey?: string;
+  domain: string;
+  slug: string;
+}): string {
+  return `mem-${sha256Short(memoryIdentity(input), 16)}`;
+}
+
+/**
+ * 长键安全化：先净化路径片段并截断 64 字，再追加完整原值的 8 字 hash，
+ * 避免「70 个 a 的 batchId」这类超长 docId 截断后撞名（路径逃逸净化保留）。
+ */
+function hashedSegment(value: string): string {
+  const full = String(value ?? "");
+  return `${safeSegment(full, "doc").slice(0, 64)}-${sha256Short(full, 8)}`;
 }
 
 /** contributors 正规化：去空、去重、保持既有顺序；非阵列（旧档缺栏）视为 `[]`。 */
@@ -609,8 +677,13 @@ function bodyKey(
   slug: string,
 ): string {
   return scope === "private"
-    ? `${AGENT_MEMORY_BLOB_PREFIX}/p/${safeSegment(ownerKey ?? "", "unknown")}/${safeSegment(slug, "doc")}.json`
+    ? `${AGENT_MEMORY_BLOB_PREFIX}/p/${safeSegment(ownerKey ?? "", "unknown")}/${safeSegment(domain, "general")}/${safeSegment(slug, "doc")}.json`
     : `${AGENT_MEMORY_BLOB_PREFIX}/s/${safeSegment(domain, "general")}/${safeSegment(slug, "doc")}.json`;
+}
+
+/** 旧版 private 正文路径（不含 domain）：只读兼容，写入一律走 `bodyKey`。 */
+function legacyPrivateBodyKey(ownerKey: string | undefined, slug: string): string {
+  return `${AGENT_MEMORY_BLOB_PREFIX}/p/${safeSegment(ownerKey ?? "", "unknown")}/${safeSegment(slug, "doc")}.json`;
 }
 
 function indexKey(scope: MemoryScope, ownerKey?: string): string {
@@ -626,11 +699,24 @@ function catalogKey(): string {
 /** 逐文档 catalog 日志（每条目一个文件；并发写不同 doc 不共享文件）。 */
 const CATALOG_JOURNAL_PREFIX = `${AGENT_MEMORY_BLOB_PREFIX}/catalog/`;
 
-function catalogEntryKey(docId: string): string {
-  return `${CATALOG_JOURNAL_PREFIX}${safeSegment(docId, "doc")}.json`;
+function catalogEntryKey(entry: {
+  scope: MemoryScope;
+  ownerKey?: string;
+  domain: string;
+  slug: string;
+}): string {
+  // 按 identity 落文件：两个进程并发写同一 slug 时写的是同一个文件（最后写者胜），
+  // 不会产生两个同 identity 的条目文件。
+  return `${CATALOG_JOURNAL_PREFIX}${sha256Short(memoryIdentity(entry), 16)}.json`;
 }
 
+/** 旧世代正文存档键（docId 加短 hash，避免超长 id 截断后撞名）。 */
 function revisionKey(docId: string, revision: number): string {
+  return `${AGENT_MEMORY_BLOB_PREFIX}/revisions/${hashedSegment(docId)}-r${revision}.json`;
+}
+
+/** 旧版存档键（无短 hash）：只用于读取兼容，不用于新写入。 */
+function legacyRevisionKey(docId: string, revision: number): string {
   return `${AGENT_MEMORY_BLOB_PREFIX}/revisions/${safeSegment(docId, "doc")}-r${revision}.json`;
 }
 
@@ -778,6 +864,7 @@ function normalizeCatalogEntry(raw: MemoryCatalogEntry): MemoryCatalogEntry {
     lastConfirmedAt: normalizeIsoField(
       (entry as unknown as { lastConfirmedAt?: unknown })?.lastConfirmedAt,
     ),
+    aliases: normalizeAuditIdList((entry as unknown as { aliases?: unknown })?.aliases),
   };
 }
 
@@ -809,8 +896,9 @@ async function readCatalogJournal(sinceMs: number): Promise<CatalogJournalRead> 
             ? blob.uploadedAt.getTime()
             : Date.parse(String(blob.uploadedAt));
         if (Number.isFinite(uploadedMs)) maxUploadedAt = Math.max(maxUploadedAt, uploadedMs);
-        // 只用比快照更新的日志；等于边界时快照已含该版本。
-        if (!(uploadedMs > sinceMs)) continue;
+        // 只用不早于快照水位的日志；用 `>=` 是为了避免「list 快照同毫秒写入」
+        // 被水位线永久跳过（边界条目每次刷新重读一次，合并按 identity 幂等）。
+        if (!(uploadedMs >= sinceMs)) continue;
         const pathname = typeof blob.pathname === "string" ? blob.pathname : "";
         if (!pathname) continue;
         const parsed = await readBlobJson<MemoryCatalogEntry>(pathname);
@@ -829,29 +917,64 @@ async function readCatalogJournal(sinceMs: number): Promise<CatalogJournalRead> 
   }
 }
 
-/** 按 id 合并：updatedAt 较新者胜（同值取后写入者）。保序：先出现的 id 在前。 */
+/**
+ * 按 **identity** 合并去重：同 scope/ownerKey/domain/slug 只保留一条，
+ * `updatedAt` 较新者胜（同值取后写入者，保留其 id）。旧数据里同 identity 不同 id 的
+ * 重复条目会合并成一条；被淘汰的旧 id 进入 `aliases`，旧 id 仍可查 history/retract/review。
+ */
 function mergeCatalogEntries(
   groups: Array<MemoryCatalogEntry[]>,
 ): MemoryCatalogEntry[] {
-  const byId = new Map<string, MemoryCatalogEntry>();
+  const byIdentity = new Map<string, MemoryCatalogEntry>();
   const order: string[] = [];
   for (const group of groups) {
     for (const entry of group) {
       if (!entry || typeof entry.id !== "string") continue;
-      const existing = byId.get(entry.id);
+      const identity = memoryIdentity(entry);
+      const existing = byIdentity.get(identity);
       if (!existing) {
-        byId.set(entry.id, entry);
-        order.push(entry.id);
+        byIdentity.set(identity, entry);
+        order.push(identity);
         continue;
       }
-      if (String(entry.updatedAt) >= String(existing.updatedAt)) {
-        byId.set(entry.id, entry);
-      }
+      const winner =
+        String(entry.updatedAt) >= String(existing.updatedAt) ? entry : existing;
+      const loser = winner === entry ? existing : entry;
+      const aliases = normalizeAuditIdList([
+        ...(winner.aliases ?? []),
+        ...(loser.aliases ?? []),
+        loser.id,
+      ])?.filter((id) => id !== winner.id);
+      byIdentity.set(
+        identity,
+        aliases && aliases.length > 0 ? { ...winner, aliases } : winner,
+      );
     }
   }
   return order
-    .map((id) => byId.get(id))
+    .map((identity) => byIdentity.get(identity))
     .filter((entry): entry is MemoryCatalogEntry => Boolean(entry));
+}
+
+/** 按 id 或 aliases 找条目（合并后旧 id 仍可定位）。 */
+function findCatalogEntryByIdOrAlias(
+  catalog: MemoryCatalog,
+  id: string,
+): MemoryCatalogEntry | null {
+  return (
+    catalog.entries.find(
+      (entry) => entry.id === id || (entry.aliases ?? []).includes(id),
+    ) ?? null
+  );
+}
+
+/** 条目是否被指定的 docIds 命中（含旧 id alias）。 */
+function entryMatchesIds(
+  entry: MemoryCatalogEntry,
+  docIds: Set<string>,
+): boolean {
+  if (docIds.has(entry.id)) return true;
+  return (entry.aliases ?? []).some((alias) => docIds.has(alias));
 }
 
 /**
@@ -939,7 +1062,8 @@ async function saveCatalog(
         ? Math.max(0, Math.floor(catalog.journalSyncedAt))
         : 0,
     generatedAt: new Date().toISOString(),
-    entries: catalog.entries,
+    // 快照也按 identity 去重，避免并发／旧数据把重复条目写回快照。
+    entries: mergeCatalogEntries([catalog.entries]),
   };
   const ok = await writeBlobText(catalogKey(), JSON.stringify(next));
   if (!ok) {
@@ -951,7 +1075,7 @@ async function saveCatalog(
 
 /** 条目变化时写它自己的日志文件（并发写不同 doc 不共享文件）。失败静默。 */
 async function writeCatalogEntry(entry: MemoryCatalogEntry): Promise<void> {
-  await writeBlobText(catalogEntryKey(entry.id), JSON.stringify(entry));
+  await writeBlobText(catalogEntryKey(entry), JSON.stringify(entry));
 }
 
 /** 仅测试：重置进程内状态。 */
@@ -997,7 +1121,11 @@ async function readDoc(
   const key = bodyKey(scope, ownerKey, domain, slug);
   const cached = docsMemory.get(key);
   if (cached) return cached;
-  const parsed = await readBlobJson<AgentMemoryDoc>(key);
+  // 先读新 key（private 已含 domain）；不存在再回落旧路径（只读兼容）。
+  let parsed = await readBlobJson<AgentMemoryDoc>(key);
+  if (!parsed && scope === "private") {
+    parsed = await readBlobJson<AgentMemoryDoc>(legacyPrivateBodyKey(ownerKey, slug));
+  }
   if (parsed) {
     if (!isDocShapeValid(parsed, scope, domain, slug)) {
       // 错误体不得进入进程缓存（避免后续读取继续被污染）。
@@ -1057,9 +1185,13 @@ const EVIDENCE_KINDS: EvidenceKind[] = ["tool_result", "user_confirmed", "verbat
 function isStructurallyValid(input: AgentMemoryDocInput): boolean {
   if (!SCOPES.includes(input?.scope)) return false;
   if (!SLUG_PATTERN.test(String(input?.slug ?? ""))) return false;
-  if (!String(input?.domain ?? "").trim()) return false;
+  const domain = String(input?.domain ?? "");
+  if (!domain.trim()) return false;
+  // INDEX 是「一行一条」：domain/description 含换行会造成伪造行注入，直接拒绝。
+  if (/[\r\n]/.test(domain)) return false;
   if (typeof input?.description !== "string") return false;
   if (input.description.length === 0 || input.description.length > 120) return false;
+  if (/[\r\n]/.test(input.description)) return false;
   if (typeof input?.body !== "string") return false;
   if (input.body.length === 0 || input.body.length > 2000) return false;
   if (!TYPES.includes(input?.type)) return false;
@@ -1070,6 +1202,14 @@ function isStructurallyValid(input: AgentMemoryDocInput): boolean {
 }
 
 // ─────────────────────────── 索引
+
+/** 单行字段清洗：换行→空格、连续空白折叠、trim（兼容历史脏数据，防伪造行）。 */
+function lineSafe(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /**
  * 索引文本（契约 §2，一行一条）：
@@ -1084,7 +1224,10 @@ export function buildMemoryIndexMd(
     scope === "private" && ownerKey ? docs.filter((doc) => doc.ownerKey === ownerKey) : docs;
   return [...scoped]
     .sort((a, b) => a.domain.localeCompare(b.domain) || a.slug.localeCompare(b.slug))
-    .map((doc) => `- [${doc.domain}] ${doc.slug} — ${doc.description} （v${doc.revision}）`)
+    .map(
+      (doc) =>
+        `- [${lineSafe(doc.domain)}] ${lineSafe(doc.slug)} — ${lineSafe(doc.description)} （v${doc.revision}）`,
+    )
     .join("\n");
 }
 
@@ -1099,9 +1242,11 @@ export function buildMemoryDomainDigestMd(
 ): string {
   const groups = new Map<string, AgentMemoryDoc[]>();
   for (const doc of docs) {
-    const list = groups.get(doc.domain);
+    // 分组也按清洗后的 domain，避免脏数据把同一领域拆成多行。
+    const domain = lineSafe(doc.domain);
+    const list = groups.get(domain);
     if (list) list.push(doc);
-    else groups.set(doc.domain, [doc]);
+    else groups.set(domain, [doc]);
   }
   const limit = Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 600;
   const lines: string[] = [];
@@ -1111,8 +1256,9 @@ export function buildMemoryDomainDigestMd(
     const descriptions = group
       .slice(0, 3)
       .map((doc) => {
-        const chars = Array.from(doc.description);
-        return chars.length > 60 ? chars.slice(0, 60).join("") : doc.description;
+        const safe = lineSafe(doc.description);
+        const chars = Array.from(safe);
+        return chars.length > 60 ? chars.slice(0, 60).join("") : safe;
       })
       .join("；");
     const line = `- [${domain}] 共${group.length}条 — ${descriptions}`;
@@ -1122,10 +1268,6 @@ export function buildMemoryDomainDigestMd(
   }
   const text = lines.join("\n");
   return text.length > limit ? text.slice(0, limit) : text;
-}
-
-function newDocId(batchId: string, slug: string): string {
-  return `${batchId}-${slug}`;
 }
 
 function sameScope(
@@ -1224,6 +1366,14 @@ function isMemoryValidAt(doc: AgentMemoryDoc, asOfMs: number): boolean {
   return true;
 }
 
+/** 时间区间自检：两端都可 parse 且 validTo <= validFrom 视为空区间／非法。 */
+function hasInvalidTimeRange(fromIso?: string, toIso?: string): boolean {
+  if (!fromIso || !toIso) return false;
+  const fromMs = timeMs(fromIso);
+  const toMs = timeMs(toIso);
+  return fromMs !== undefined && toMs !== undefined && toMs <= fromMs;
+}
+
 interface ScopedDocsOptions {
   asOf?: number;
   includeHistory?: boolean;
@@ -1279,7 +1429,7 @@ async function activeDocs(scope: MemoryScope, ownerKey?: string): Promise<AgentM
   return scopedDocs(scope, ownerKey);
 }
 
-/** catalog 条目级有效性（不读正文）：用于 INDEX.md 行数对账。 */
+/** catalog 条目级有效性（不读正文）：用于 INDEX 集合对账。 */
 function isCatalogEntryCurrentlyValid(entry: MemoryCatalogEntry, nowMs: number): boolean {
   if (entry.status !== "active") return false;
   const fromMs = timeMs(entry.validFrom) ?? timeMs(entry.createdAt);
@@ -1291,19 +1441,40 @@ function isCatalogEntryCurrentlyValid(entry: MemoryCatalogEntry, nowMs: number):
   return true;
 }
 
-/** 当前应出现在 INDEX 里的行数（status=active 且时间有效）。 */
-async function countCurrentActiveEntries(
+function indexEntryKey(domain: string, slug: string): string {
+  return `${domain}\u0000${slug}`;
+}
+
+/** 当前应出现在 INDEX 里的条目集合（status=active 且时间有效；按 domain+slug 去重）。 */
+function expectedIndexKeys(
+  entries: MemoryCatalogEntry[],
   scope: MemoryScope,
   ownerKey: string | undefined,
   nowMs: number,
-): Promise<number> {
-  const catalog = await loadCatalog();
-  let count = 0;
-  for (const entry of catalog.entries) {
+): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of entries) {
     if (!sameScope(entry, scope, ownerKey)) continue;
-    if (isCatalogEntryCurrentlyValid(entry, nowMs)) count += 1;
+    if (!isCatalogEntryCurrentlyValid(entry, nowMs)) continue;
+    keys.add(indexEntryKey(entry.domain, entry.slug));
   }
-  return count;
+  return keys;
+}
+
+/** 从持久化 INDEX 行解析 `- [domain] slug — …`；兼容行尾 `（vN）`。 */
+function persistedIndexKeys(md: string): Set<string> {
+  const keys = new Set<string>();
+  for (const line of md.split("\n")) {
+    const match = line.match(/^- \[(.*?)\] (\S+) —/);
+    if (match) keys.add(indexEntryKey(match[1], match[2]));
+  }
+  return keys;
+}
+
+function sameIndexKeySet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const key of a) if (!b.has(key)) return false;
+  return true;
 }
 
 /** 重建 INDEX.md（active docs）。回传重建后的行数。 */
@@ -1333,12 +1504,12 @@ export async function listMemoryDocs(input: MemoryScopeInput): Promise<AgentMemo
 
 /**
  * 读某 scope 的索引文本；无索引时空字符串。
- * - 默认：沿用既有 INDEX.md（写入时由 rebuildIndex 维护），但先做**行数对账**——
- *   用 catalog 条目算「当前应出现的 active 条数」与 INDEX.md 非空行数比较，
- *   不一致就即时从正文重建。这样未来 `validFrom` 到点、或 `validTo` 过期而尚无
- *   新写入时，索引仍能自愈。
+ * - 默认：沿用既有 INDEX.md（写入时由 rebuildIndex 维护），但先做**集合对账**——
+ *   用 catalog 条目算「当前应出现的 active 集合（domain+slug）」与持久化 INDEX 解析出的
+ *   集合比较，不等就即时从正文重建。这样未来 `validFrom` 到点、`validTo` 过期、
+ *   或同一刻一进一出（行数不变但集合变了）时索引都能自愈。
  * - `asOf`：按该时点从正文即时构建（历史索引，不读当前 INDEX.md）。
- * - env `MEMORY_INDEX_DIGEST === "1"`：行数口径不同，直接重建并前置领域摘要。
+ * - env `MEMORY_INDEX_DIGEST === "1"`：口径不同，直接重建并前置领域摘要。
  */
 export async function readMemoryIndexMd(
   scope: MemoryScope,
@@ -1350,9 +1521,10 @@ export async function readMemoryIndexMd(
   if (asOfMs === undefined && !digestEnabled) {
     const fromBlob = await readBlobTextAt(indexKey(scope, ownerKey));
     if (fromBlob !== null) {
-      const persistedLines = fromBlob.split("\n").filter((line) => line.trim() !== "").length;
-      const expectedLines = await countCurrentActiveEntries(scope, ownerKey, Date.now());
-      if (persistedLines === expectedLines) return fromBlob;
+      // 集合对账（不是行数）：同一刻「一条过期 + 一条生效」行数不变，但集合不同。
+      const catalog = await loadCatalog();
+      const expected = expectedIndexKeys(catalog.entries, scope, ownerKey, Date.now());
+      if (sameIndexKeySet(expected, persistedIndexKeys(fromBlob))) return fromBlob;
     }
   }
   const docs = await scopedDocs(scope, ownerKey, asOfMs === undefined ? {} : { asOf: asOfMs });
@@ -1401,7 +1573,9 @@ async function findPrivateReconcileMatch(
     (entry) =>
       entry.scope === "private" &&
       entry.ownerKey === ownerKey &&
-      entry.status === "active",
+      entry.status === "active" &&
+      // 跨 domain 不 supersede（同 slug 不同 domain 是两条独立事实）。
+      entry.domain === candidate.domain,
   );
   if (activeEntries.length === 0) return null;
   const loaded: Array<{ entry: MemoryCatalogEntry; doc: AgentMemoryDoc }> = [];
@@ -1521,20 +1695,30 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
   const todayKey = nowIso.slice(0, 10);
   const candidates = Array.isArray(input?.docs) ? input.docs : [];
   const accepted: string[] = [];
+  const acceptedRefs: NonNullable<MemoryIngestResult["acceptedRefs"]> = [];
   /** live 未变、只累积了未达门槛提案的 id（不进 accepted，避免误报「已入库」）。 */
   const proposals: string[] = [];
   /** 近重复被判定为已确认同一事实、只刷新 lastConfirmedAt 的 id。 */
   const noop: string[] = [];
   /** 被本批写入取代的旧 slug。 */
   const superseded: string[] = [];
-  const rejected: Array<{ slug: string; reason: MemoryRejectReason }> = [];
+  const rejected: MemoryIngestResult["rejected"] = [];
 
   if (!batchId) {
     for (const doc of candidates) {
-      rejected.push({ slug: String(doc?.slug ?? ""), reason: "structure" });
+      // 还没进入候选处理循环，只能按可读到的原始栏位保守补身份。
+      const docScope = doc?.scope;
+      rejected.push({
+        slug: String(doc?.slug ?? ""),
+        reason: "structure",
+        ...(docScope === "private" || docScope === "shared" ? { scope: docScope } : {}),
+        ...(docScope === "private" && doc?.ownerKey ? { ownerKey: doc.ownerKey } : {}),
+        ...(typeof doc?.domain === "string" && doc.domain ? { domain: doc.domain } : {}),
+      });
     }
     return {
       accepted,
+      acceptedRefs,
       proposals,
       rejected,
       stats: { received: candidates.length, accepted: 0, index_lines: 0, seed_accepted: 0 },
@@ -1558,12 +1742,28 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
 
   for (const candidate of candidates) {
     const slug = String(candidate?.slug ?? "");
+    // 输入候选的原始身份：近重复合并会把 docSlug/docDomain 改写成 target，
+    // 但审计／batch 抽检必须能用候选自己的 slug 找到这条回执。
+    const inputDomain = String(candidate?.domain ?? "");
+    const inputSlug = String(candidate?.slug ?? "");
+    // 拒绝回执的候选身份：batch 审计按 (scope, ownerKey, domain, slug) 归属，
+    // 否则同 slug 跨 domain 的 accepted/rejected 混合会被整条误标。
+    const rejectIdentity = {
+      scope:
+        candidate?.scope === "private" || candidate?.scope === "shared"
+          ? candidate.scope
+          : undefined,
+      ownerKey: candidate?.scope === "private" ? candidate.ownerKey : undefined,
+      domain: typeof candidate?.domain === "string" ? candidate.domain : undefined,
+    };
     if (!isStructurallyValid(candidate)) {
-      rejected.push({ slug, reason: "structure" });
+      rejected.push({ slug, reason: "structure", ...rejectIdentity });
       continue;
     }
     // 本候选是否只写入了未达门槛的提案（live 未变）：决定它进 proposals 而不是 accepted。
     let proposalOnly = false;
+    // 同 slug 同内容＝只做确认（没有写新正文）：进 noop，不进 accepted。
+    let reconfirmOnly = false;
     const scope = candidate.scope;
     const ownerKey = scope === "private" ? candidate.ownerKey : undefined;
     const contributorKey =
@@ -1575,7 +1775,10 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
     const docSeedMode = seedMode && scope === "shared" && contributorKey !== "";
     const effectiveCorroborationMin = docSeedMode ? 1 : corroborationMin;
     let existingIndex = entries.findIndex(
-      (entry) => sameScope(entry, scope, ownerKey) && entry.slug === candidate.slug,
+      (entry) =>
+        sameScope(entry, scope, ownerKey) &&
+        entry.domain === candidate.domain &&
+        entry.slug === candidate.slug,
     );
     let existingEntry = existingIndex >= 0 ? entries[existingIndex] : null;
 
@@ -1607,7 +1810,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
             targetDoc.proposed?.contributors,
           );
           if (endorsers.includes(contributorKey)) {
-            rejected.push({ slug, reason: "duplicate" });
+            rejected.push({ slug, reason: "duplicate", ...rejectIdentity });
             continue;
           }
           existingIndex = entries.indexOf(target);
@@ -1636,7 +1839,35 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
 
     // retracted 是留证终态：shared 拒绝写入，正文一格不动（人工 activate 另行放行）。
     if (scope === "shared" && previousStatus === "retracted") {
-      rejected.push({ slug, reason: "retracted" });
+      rejected.push({ slug, reason: "retracted", ...rejectIdentity });
+      continue;
+    }
+
+    // L1：时间区间自检（必须在配额／对账之前——被拒候选不写文档、不消耗配额）。
+    // 同 slug 更新时按「合并后的有效区间」判断：幂等重提保留旧 validFrom。
+    const requestedFrom =
+      normalizeIsoField(candidate.validFrom) ?? normalizeIsoField(candidate.observedAt);
+    const requestedTo = normalizeIsoField(candidate.validTo);
+    const sameContentAsPrevious = previous ? sameContent(previous, candidate) : false;
+    const nowMs = timeMs(nowIso) ?? Date.now();
+    const previousExpired =
+      previous?.validTo !== undefined &&
+      (timeMs(previous.validTo) ?? Infinity) <= nowMs;
+    // 只有「active 且未过期」的同内容重提才是真 noop；retracted/superseded/过期
+    // 同内容重提是**重新生效**，按新事实从 now 起算。
+    const reconfirmEligible =
+      previous !== null &&
+      previous.status === "active" &&
+      !previousExpired &&
+      sameContentAsPrevious;
+    const effectiveRangeFrom = reconfirmEligible
+      ? previous.validFrom ?? previous.createdAt
+      : // 非幂等写入会按新事实落 validFrom：未显式给 from 时默认 now，
+        // 因此不能用旧 validFrom 校验（否则过去时刻的 validTo 会漏检）。
+        requestedFrom ?? nowIso;
+    const effectiveRangeTo = requestedTo ?? (reconfirmEligible ? previous.validTo : undefined);
+    if (hasInvalidTimeRange(effectiveRangeFrom, effectiveRangeTo)) {
+      rejected.push({ slug, reason: "time_range", ...rejectIdentity });
       continue;
     }
 
@@ -1653,8 +1884,9 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
       const match = await findPrivateReconcileMatch(entries, candidate, ownerKey);
       if (match?.mode === "noop") {
         await applyPrivateReconcileUpdate(match.entry, match.doc, "noop", nowIso);
-        // NOOP：不写新文档、不进 accepted，只确认既有事实。
+        // NOOP：不写新文档、不进 accepted，只确认既有事实；revision 变了要重建索引。
         noop.push(match.entry.id);
+        touchedPrivateOwners.add(ownerKey);
         continue;
       }
       if (match) {
@@ -1670,10 +1902,12 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
         (entry) =>
           entry.status === "active" &&
           sameScope(entry, scope, ownerKey) &&
+          // 同 slug／近重复只在同一 domain 内算重复；跨 domain 是两条独立事实。
+          entry.domain === candidate.domain &&
           memoryJaccard(entry.description, candidate.description) > MEMORY_DUPLICATE_JACCARD,
       );
       if (duplicate) {
-        rejected.push({ slug, reason: "duplicate" });
+        rejected.push({ slug, reason: "duplicate", ...rejectIdentity });
         continue;
       }
     }
@@ -1707,7 +1941,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
         !docSeedMode &&
         sharedAcceptedThisBatch >= MEMORY_QUOTA_SHARED_PER_BATCH
       ) {
-        rejected.push({ slug, reason: "quota_scope" });
+        rejected.push({ slug, reason: "quota_scope", ...rejectIdentity });
         continue;
       }
       // G7：单 domain ≤8/日。**按 scope 隔离计数**：shared 只数 shared，private 只数
@@ -1720,7 +1954,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
       ).length;
       // 种子模式按批导入不受单 domain 日配额限制；private 与普通 shared 不变。
       if (!docSeedMode && domainCount >= MEMORY_QUOTA_PER_DOMAIN_DAY) {
-        rejected.push({ slug, reason: "quota_domain" });
+        rejected.push({ slug, reason: "quota_domain", ...rejectIdentity });
         continue;
       }
       // G7：单 ownerKey private ≤10/日。
@@ -1732,7 +1966,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
             entry.createdAt.slice(0, 10) === todayKey,
         ).length;
         if (ownerCount >= MEMORY_QUOTA_PRIVATE_PER_OWNER_DAY) {
-          rejected.push({ slug, reason: "quota_scope" });
+          rejected.push({ slug, reason: "quota_scope", ...rejectIdentity });
           continue;
         }
       }
@@ -1744,7 +1978,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
           wouldBeContributors.length >= effectiveCorroborationMin &&
           (docSeedMode || canActivateShared(catalog));
         if (!wouldActivate && pendingSharedCount(catalog) >= MEMORY_SHARED_MAX_PENDING_DOCS) {
-          rejected.push({ slug, reason: "quota_scope" });
+          rejected.push({ slug, reason: "quota_scope", ...rejectIdentity });
           continue;
         }
       }
@@ -1759,12 +1993,22 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
     let doc: AgentMemoryDoc;
 
     if (scope === "private") {
-      // 同 slug 且内容完全相同＝幂等重提：保留原 validFrom（as_of 历史不丢），只刷新
-      // lastConfirmedAt 并记 noop；内容真的变了才按新事实刷新时间字段。
-      const reconfirmSame =
-        existingEntry !== null && previous !== null && sameContent(previous, candidate);
+      // active 且未过期的同内容重提＝幂等 noop（保留原 validFrom/validTo）；
+      // retracted／superseded／已过期同内容重提＝重新生效：复用原 id、active、
+      // validFrom 从 now（或候选显式值）起算、清空旧 validTo、进 accepted。
+      const reconfirmSame = existingEntry !== null && reconfirmEligible;
+      const reactivating =
+        existingEntry !== null && previous !== null && sameContentAsPrevious && !reconfirmSame;
+      if (reconfirmSame) reconfirmOnly = true;
       doc = {
-        id: existingEntry?.id ?? newDocId(batchId, candidate.slug),
+        id:
+          existingEntry?.id ??
+          deterministicDocId({
+            scope,
+            ownerKey,
+            domain: candidate.domain,
+            slug: candidate.slug,
+          }),
         scope,
         ownerKey,
         domain: candidate.domain,
@@ -1788,9 +2032,18 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
               validTo: timeFields.validTo ?? previous.validTo,
             }
           : {}),
-        supersedes: mergedSupersedes ?? previous?.supersedes,
+        // 重新生效时不继承旧的 supersedes 指向（旧覆盖关系已经结束）。
+        supersedes: reactivating
+          ? mergedSupersedes
+          : mergedSupersedes ?? previous?.supersedes,
         lastConfirmedAt: nowIso,
-        lastOperation: reconfirmSame ? "noop" : existingEntry ? "update" : "add",
+        lastOperation: reconfirmSame
+          ? "noop"
+          : reactivating
+            ? "add"
+            : existingEntry
+              ? "update"
+              : "add",
         createdAt: existingEntry?.createdAt ?? nowIso,
         updatedAt: nowIso,
       };
@@ -1802,7 +2055,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
         contributors.length >= effectiveCorroborationMin &&
         (docSeedMode || canActivateShared(catalog));
       doc = {
-        id: newDocId(batchId, docSlug),
+        id: deterministicDocId({ scope, ownerKey, domain: docDomain, slug: docSlug }),
         scope,
         ownerKey,
         domain: docDomain,
@@ -1829,7 +2082,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
     } else if (previousStatus === "active") {
       if (!previous) {
         // catalog 说 active 但正文读不到：绝不拿单账号候选覆盖 live（fail-closed）。
-        rejected.push({ slug, reason: "structure" });
+        rejected.push({ slug, reason: "structure", ...rejectIdentity });
         continue;
       }
       if (sameContent(previous, candidate)) {
@@ -1952,7 +2205,10 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
               updatedAt: nowIso,
             }
           : {
-              id: existingEntry?.id ?? previous?.id ?? newDocId(batchId, docSlug),
+              id:
+                existingEntry?.id ??
+                previous?.id ??
+                deterministicDocId({ scope, ownerKey, domain: docDomain, slug: docSlug }),
               scope,
               ownerKey,
               domain: docDomain,
@@ -1981,7 +2237,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
             };
     } else {
       // retracted 已在上面拦截；走到这里表示 catalog 状态损坏，拒绝写入。
-      rejected.push({ slug, reason: "structure" });
+      rejected.push({ slug, reason: "structure", ...rejectIdentity });
       continue;
     }
     await writeDoc(doc);
@@ -2015,6 +2271,8 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
       validFrom: doc.validFrom,
       validTo: doc.validTo,
       lastConfirmedAt: doc.lastConfirmedAt,
+      // 同 identity 的原条目若带旧 id aliases，必须保留（旧 id 的 history/retract 兼容）。
+      aliases: existingEntry?.aliases,
     };
     if (existingIndex >= 0) entries[existingIndex] = entry;
     else {
@@ -2025,10 +2283,22 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
     await writeCatalogEntry(entry);
     if (scope === "shared") touchedShared = true;
     else if (ownerKey) touchedPrivateOwners.add(ownerKey);
-    // 实写（新文档／内容提升为 live）才进 accepted；提案-only 的 id 进 proposals。
+    // 实写（新文档／内容提升为 live）才进 accepted；提案-only 进 proposals；
+    // 同 slug 同内容的确认（没有写新正文）进 noop。
     if (proposalOnly) proposals.push(doc.id);
+    else if (reconfirmOnly) noop.push(doc.id);
     else {
       accepted.push(doc.id);
+      acceptedRefs.push({
+        id: doc.id,
+        batchId: doc.batchId,
+        scope: doc.scope,
+        ownerKey: doc.ownerKey,
+        domain: doc.domain,
+        slug: doc.slug,
+        inputDomain,
+        inputSlug,
+      });
       if (docSeedMode) seedAccepted += 1;
     }
   }
@@ -2037,7 +2307,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
   await saveCatalog(catalog, catalog.revision ?? 0);
 
   let indexLines = 0;
-  if (accepted.length > 0 || superseded.length > 0) {
+  if (accepted.length > 0 || superseded.length > 0 || noop.length > 0) {
     if (touchedShared) indexLines += await rebuildIndex("shared");
     for (const ownerKey of touchedPrivateOwners) {
       indexLines += await rebuildIndex("private", ownerKey);
@@ -2046,6 +2316,7 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
 
   return {
     accepted,
+    acceptedRefs,
     proposals,
     ...(noop.length > 0 ? { noop } : {}),
     ...(superseded.length > 0 ? { superseded } : {}),
@@ -2082,7 +2353,7 @@ async function retractMemoryDocsLocked(
   let touchedShared = false;
 
   for (const entry of catalog.entries) {
-    const matches = docIds.size > 0 ? docIds.has(entry.id) : entry.batchId === batchId;
+    const matches = docIds.size > 0 ? entryMatchesIds(entry, docIds) : entry.batchId === batchId;
     if (!matches || entry.status === "retracted") continue;
     // superseded 已是历史终态：不重复撤回，也不改它的 validTo。
     if (entry.status === "superseded") continue;
@@ -2156,7 +2427,7 @@ async function reviewMemoryDocsLocked(
   let touchedShared = false;
 
   for (const entry of catalog.entries) {
-    const matches = docIds.size > 0 ? docIds.has(entry.id) : entry.batchId === batchId;
+    const matches = docIds.size > 0 ? entryMatchesIds(entry, docIds) : entry.batchId === batchId;
     if (!matches || entry.status !== fromStatus) continue;
     if (scopeFilter && entry.scope !== scopeFilter) continue;
     // 人工放行不绕过平台容量上限：shared 且当前不是 active 时，必须过 canActivateShared。
@@ -2195,8 +2466,8 @@ export function reviewMemoryDocs(input: MemoryReviewInput): Promise<MemoryReview
 }
 
 /**
- * 读某文档的全部历史世代（revision 1..min(entry.revision, 50)）。读不到／形状不符的
- * 世代直接跳过（不抛）。`current` 是当前正文（可能已是 superseded／retracted）。
+ * 读某文档的最近 50 个历史世代（start=max(1, revision-49) 到 revision）。读不到／
+ * 形状不符的世代直接跳过（不抛）。`current` 是当前正文（可能已是 superseded／retracted）。
  */
 export async function listMemoryRevisions(
   docId: string,
@@ -2204,26 +2475,49 @@ export async function listMemoryRevisions(
   const id = String(docId ?? "").trim();
   if (!id) return { current: null, revisions: [] };
   const catalog = await loadCatalog();
-  const entry = catalog.entries.find((item) => item.id === id);
+  const entry = findCatalogEntryByIdOrAlias(catalog, id);
   if (!entry) return { current: null, revisions: [] };
   const current = await readDoc(entry.scope, entry.ownerKey, entry.domain, entry.slug);
-  const revisions: AgentMemoryDoc[] = [];
-  const maxRevision = Math.min(Math.max(0, Math.floor(entry.revision ?? 0)), 50);
-  for (let revision = 1; revision <= maxRevision; revision += 1) {
-    const key = revisionKey(id, revision);
-    // 先查进程内副本（纯 Map 模式），再读 blob。
-    const parsed = revisionsMemory.get(key) ?? (await readBlobJson<AgentMemoryDoc>(key));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-    if (
-      parsed.slug !== entry.slug ||
-      parsed.domain !== entry.domain ||
-      parsed.scope !== entry.scope
-    ) {
-      continue;
-    }
-    revisions.push(parsed);
+  // 只取最近 50 代（不是最早 50 代）：revision=56 → 7..56。
+  const latestRevision = Math.max(
+    0,
+    Math.floor(entry.revision ?? 0),
+    Math.floor(current?.revision ?? 0),
+  );
+  const startRevision = Math.max(1, latestRevision - 49);
+  // entry.id 与合并前的旧 id（aliases）都可能是历史文件的键。
+  const sourceIds = [entry.id, ...(entry.aliases ?? [])];
+  const byRevision = new Map<number, AgentMemoryDoc>();
+  // current 先补位：当前代可能只存在于正文／catalog，还没落 revision 文件。
+  // 只有落在「最近 50 代」窗口内才补位（revision=56 时不能把 revision=1 也塞进去）。
+  if (
+    current &&
+    Number.isFinite(current.revision) &&
+    current.revision >= startRevision &&
+    current.revision <= latestRevision
+  ) {
+    byRevision.set(current.revision, current);
   }
-  revisions.sort((a, b) => a.revision - b.revision);
+  outer: for (let revision = startRevision; revision <= latestRevision; revision += 1) {
+    for (const sourceId of sourceIds) {
+      // 新键（带短 hash）优先，再回落旧版无 hash 键（升级前历史）。
+      for (const key of [revisionKey(sourceId, revision), legacyRevisionKey(sourceId, revision)]) {
+        const parsed = revisionsMemory.get(key) ?? (await readBlobJson<AgentMemoryDoc>(key));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+        if (
+          parsed.slug !== entry.slug ||
+          parsed.domain !== entry.domain ||
+          parsed.scope !== entry.scope
+        ) {
+          continue;
+        }
+        // blob／Map 找到的世代覆盖 current 补位（blob 优先），按 revision 去重。
+        byRevision.set(revision, parsed);
+        continue outer;
+      }
+    }
+  }
+  const revisions = [...byRevision.values()].sort((a, b) => a.revision - b.revision);
   return { current, revisions };
 }
 

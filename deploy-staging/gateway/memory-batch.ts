@@ -119,6 +119,59 @@ Output JSON only: {"score":0|1|2,"reason":"<one line>"}`
 /** 入库 doc：promptVersion 由批次盖章补上。 */
 export interface IngestDocInput extends AgentMemoryDocInput {}
 
+/**
+ * 2026-10-19 store 确定性 id（`mem-<hash>`）的写入回执条目。
+ * 字段接受 snake/camel：batch_id/batchId、owner_key/ownerKey；其余同名字段一致。
+ */
+export interface MemoryAcceptedRef {
+  id: string
+  batchId?: string
+  scope: string
+  ownerKey?: string
+  /** 实际落盘 target 身份（近重复合并时可能指向已存在的文档）。 */
+  domain: string
+  slug: string
+  /** 候选原始身份（与落盘 target 不同时用于归属本批候选）。 */
+  inputDomain?: string
+  inputSlug?: string
+}
+
+/** ref 的候选身份：有 input 优先，缺省回退落盘身份（target）。 */
+function acceptedRefInputIdentity(ref: MemoryAcceptedRef): { domain: string; slug: string } {
+  if (typeof ref.inputDomain === "string" && ref.inputDomain && typeof ref.inputSlug === "string" && ref.inputSlug) {
+    return { domain: ref.inputDomain, slug: ref.inputSlug }
+  }
+  return { domain: ref.domain, slug: ref.slug }
+}
+
+/** 解析 ingest 回执的 `accepted_refs`（缺省＝空阵列，兼容旧端点）。 */
+function parseAcceptedRefs(raw: unknown): MemoryAcceptedRef[] {
+  if (!Array.isArray(raw)) return []
+  const out: MemoryAcceptedRef[] = []
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue
+    const r = item as Record<string, unknown>
+    if (typeof r.id !== "string" || !r.id) continue
+    if (typeof r.scope !== "string" || typeof r.domain !== "string" || typeof r.slug !== "string") continue
+    const batchId = typeof r.batchId === "string" ? r.batchId : typeof r.batch_id === "string" ? r.batch_id : undefined
+    const ownerKey = typeof r.ownerKey === "string" ? r.ownerKey : typeof r.owner_key === "string" ? r.owner_key : undefined
+    const inputDomain =
+      typeof r.inputDomain === "string" ? r.inputDomain : typeof r.input_domain === "string" ? r.input_domain : undefined
+    const inputSlug =
+      typeof r.inputSlug === "string" ? r.inputSlug : typeof r.input_slug === "string" ? r.input_slug : undefined
+    out.push({ id: r.id, batchId, scope: r.scope, ownerKey, domain: r.domain, slug: r.slug, inputDomain, inputSlug })
+  }
+  return out
+}
+
+/**
+ * 身份键：scope|ownerKey|domain|slug（ownerKey 缺省＝空串，shared 恒为空）。
+ * 用于候选→回执归属：同一 slug 在不同 domain/owner 下是不同身份，不得用 slug 集合去重。
+ */
+function memoryIdentityKey(ref: { scope: string; ownerKey?: string; domain: string; slug: string }): string {
+  return `${ref.scope}|${ref.ownerKey ?? ""}|${ref.domain}|${ref.slug}`
+}
+
 /** 筛选用会话元资料（wiring 适配：opencode 目录行 parentID/time.updated、gateway hashKey(apiKey)、讯息/工具计数）。 */
 export interface MemorySessionRecord {
   id: string
@@ -207,6 +260,12 @@ export interface MemoryBatchReport {
   noop: number
   /** 端点判定「旧记忆已被新文档取代」的条数（superseded；新文档通常已 accepted）。 */
   superseded: number
+  /** accepted_refs 缺失/未覆盖时，用旧 `${batchId}-${slug}`／唯一后缀回退匹配的条数（0＝全走 refs）。 */
+  accepted_refs_fallback?: number
+  /** accepted id 既没有被 refs 命中、旧 fallback 也未命中而无法归属的条数（0＝全部可归属）。 */
+  accepted_refs_unmatched?: number
+  /** 旧形 rejected 回执（只有 slug）在本批同 slug 多身份/无候选而无法唯一归属的条数。 */
+  rejected_refs_unmatched?: number
   rejected: Record<string, number>
   truncations: { sessions: number; llm_budget_hit: boolean }
   /** G8 诚实旗标：shared 候选因 `MEMORY_VERIFIER_MODEL` 未配置而跳过验证的条数。 */
@@ -520,6 +579,9 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       stored: 0,
       noop: 0,
       superseded: 0,
+      accepted_refs_fallback: 0,
+      accepted_refs_unmatched: 0,
+      rejected_refs_unmatched: 0,
       rejected: {},
       truncations: { sessions: 0, llm_budget_hit: false },
       g8_skipped: 0,
@@ -608,9 +670,10 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     report.ledger.sessions_selected = candidates.length
 
     const docs: IngestDocInput[] = []
-    // 审计（2026-10-19）：逐会话记录本轮产出的 slug，供 ingest 回执后换算 stored 数。
-    // 只影响审计，不参与筛选、门禁、预算或入库决策。用 Set 去重（同会话可产出同名 slug）。
-    const sessionDocSlugs = new Map<string, Set<string>>()
+    // 审计（2026-10-19）：逐会话记录本轮产出的文档身份键，供 ingest 回执后换算 stored 数。
+    // 只影响审计，不参与筛选、门禁、预算或入库决策。身份键＝scope|ownerKey|domain|slug：
+    // 同 slug 不同 domain / owner 必须分别计数（旧 slug Set 会少计）。
+    const sessionDocKeys = new Map<string, Set<string>>()
     // B3 账本：真正进入处理（transcript/LLM）的会话集合；预算跳过的不算。
     const processedSessions = new Set<string>()
     let llmUsed = 0
@@ -712,16 +775,60 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
      * 签名通道；repo 端预设只翻 shared，见 store reviewMemoryDocs）。
      * private 同机制判分但只记 badge 不翻转（PRD §5.6）。
      */
-    async function runSampling(acceptedIds: string[]): Promise<void> {
+    async function runSampling(acceptedIds: string[], acceptedRefs: MemoryAcceptedRef[] = []): Promise<void> {
       const sampling = report.sampling
       const acceptedSet = new Set(acceptedIds)
+      // 2026-10-19：store 改用确定性 id `mem-<hash>`，旧 `${batchId}-${slug}` 匹配会全部落空
+      // （stored=1 / sampled=0 / skipped=0，审计 no_docs）。优先按 refs 的
+      // scope|ownerKey|domain|slug 映射；同 key 取最后一条（与回执顺序一致）。
+      const refByKey = new Map<string, MemoryAcceptedRef>()
+      // 旧端点/部分回执可能不带 ownerKey（private 亦然）：记录 scope|domain|slug 组，
+      // 仅在「唯一」时作为弱匹配兜底，避免跨 owner 同名 slug 误配。
+      const weakByKey = new Map<string, MemoryAcceptedRef[]>()
+      for (const ref of acceptedRefs) {
+        if (!acceptedSet.has(ref.id)) continue
+        // shared 近重复合并：ref.domain/slug 是落盘 target（已存在），候选身份在 input*；
+        // 建映射时优先 input，缺 input 才用 target，确保抽检命中本批候选。
+        const identity = acceptedRefInputIdentity(ref)
+        refByKey.set(memoryIdentityKey({ scope: ref.scope, ownerKey: ref.ownerKey, ...identity }), ref)
+        const weakKey = `${ref.scope}|${identity.domain}|${identity.slug}`
+        const list = weakByKey.get(weakKey)
+        if (list) list.push(ref)
+        else weakByKey.set(weakKey, [ref])
+      }
       const pairs: Array<{ id: string; doc: IngestDocInput }> = []
       for (const doc of docs) {
-        // 服务端 id = `${batchId}-${slug}`。只认本批前缀的精确 id：旧的纯后缀兜底会让
-        // 跨会话同名 slug 命中别人的 accepted id，把抽检结果写到错误 id。
+        let ref = refByKey.get(memoryIdentityKey(doc))
+        if (!ref) {
+          const weak = weakByKey.get(`${doc.scope}|${doc.domain}|${doc.slug}`)
+          if (weak && weak.length === 1) ref = weak[0]
+        }
+        if (ref) {
+          pairs.push({ id: ref.id, doc })
+          continue
+        }
+        // fallback（refs 缺失/未覆盖该条时）：旧 `${batchId}-${slug}` 精确 id + 唯一后缀。
+        // 纯后缀兜底仅在唯一命中时采用，避免跨会话同名 slug 命中别人的 accepted id。
         const expected = `${batchId}-${doc.slug}`
-        if (acceptedSet.has(expected)) pairs.push({ id: expected, doc })
+        if (acceptedSet.has(expected)) {
+          pairs.push({ id: expected, doc })
+          report.accepted_refs_fallback = (report.accepted_refs_fallback ?? 0) + 1
+          continue
+        }
+        const suffixMatches = acceptedIds.filter((id) => id.endsWith(`-${doc.slug}`))
+        if (suffixMatches.length === 1) {
+          pairs.push({ id: suffixMatches[0], doc })
+          report.accepted_refs_fallback = (report.accepted_refs_fallback ?? 0) + 1
+        }
       }
+      // 3) 报告可见性：accepted id 既没有被 refs 命中、旧 fallback 也未命中 → 计数。
+      // 不计入 skipped（skipped 的语义固定为「无 oracle 模型/预算」），也绝不静默吞掉。
+      const matchedIds = new Set(pairs.map((pair) => pair.id))
+      let unmatched = 0
+      for (const id of acceptedIds) {
+        if (!matchedIds.has(id)) unmatched += 1
+      }
+      if (unmatched > 0) report.accepted_refs_unmatched = (report.accepted_refs_unmatched ?? 0) + unmatched
       const sharedPairs = pairs.filter((pair) => pair.doc.scope === "shared")
       const privatePairs = pairs.filter((pair) => pair.doc.scope === "private")
       if (!oracleModel) {
@@ -777,8 +884,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       llmUsed += 1
       // 进入逐会话处理（含后续 transcript/LLM 失败路径）才计入审计；预算跳过的不算「处理过」。
       processedSessions.add(session.id)
-      const sessionSlugs = new Set<string>()
-      sessionDocSlugs.set(session.id, sessionSlugs)
+      const sessionKeys = new Set<string>()
+      sessionDocKeys.set(session.id, sessionKeys)
       const mark = (produced: boolean) => {
         cursor.processed[session.id] = { at: nowDate.toISOString(), produced }
       }
@@ -854,7 +961,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         }
         report.passed += 1
         docs.push(doc)
-        sessionSlugs.add(doc.slug)
+        sessionKeys.add(memoryIdentityKey(doc))
         produced = true
       }
       mark(produced)
@@ -862,8 +969,10 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
 
     // 写入：只认端点回执 accepted（§3.1「真写入」）；非 dryRun 才发。
     const acceptedIds: string[] = []
-    // 服务端拒绝的 slug 集合（审计归属用；rejected 形状 {slug, reason}）。
-    const rejectedSlugs = new Set<string>()
+    /** store 确定性 id 回执（2026-10-19）；旧端点不返回时为空，后续走 legacy fallback。 */
+    let acceptedRefs: MemoryAcceptedRef[] = []
+    // 服务端拒绝的身份键集合（审计归属用；旧 rejected 形状只有 {slug, reason}）。
+    const rejectedKeys = new Set<string>()
     if (!dryRun && docs.length > 0) {
       const body = {
         batch_id: batchId,
@@ -874,6 +983,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       const { ok, json } = await attemptPost(rawBody)
       if (ok) {
         const accepted = Array.isArray(json?.accepted) ? (json?.accepted as unknown[]) : []
+        // 2026-10-19：确定性 id 回执（snake/camel 均可）；解析失败/缺省 → 空，保留旧匹配。
+        acceptedRefs = parseAcceptedRefs(json?.accepted_refs ?? json?.acceptedRefs)
         // proposals＝未提升的正文提案（live 未变），不是真写入：不计 stored、不进
         // acceptedIds、不参与抽检，也不参与 stored/no_docs 审计归属。
         const proposals = Array.isArray(json?.proposals) ? (json?.proposals as unknown[]) : []
@@ -886,18 +997,48 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         report.superseded = superseded.length
         for (const id of accepted) acceptedIds.push(String(id))
         const rejected = Array.isArray(json?.rejected)
-          ? (json?.rejected as Array<{ slug?: unknown; reason?: unknown }>)
+          ? (json?.rejected as Array<{
+              slug?: unknown
+              reason?: unknown
+              scope?: unknown
+              domain?: unknown
+              ownerKey?: unknown
+              owner_key?: unknown
+            }>)
           : []
         for (const r of rejected) {
           const slug = typeof r?.slug === "string" ? r.slug : ""
-          if (slug) rejectedSlugs.add(slug)
+          if (slug) {
+            // 1) 新回执带 scope+domain（+ownerKey）→ 直接组完整身份键（权威归属）。
+            const rScope = typeof r?.scope === "string" ? r.scope : ""
+            const rDomain = typeof r?.domain === "string" ? r.domain : ""
+            const rOwner =
+              typeof r?.ownerKey === "string"
+                ? r.ownerKey
+                : typeof r?.owner_key === "string"
+                  ? r.owner_key
+                  : undefined
+            if (rScope && rDomain) {
+              rejectedKeys.add(memoryIdentityKey({ scope: rScope, ownerKey: rOwner, domain: rDomain, slug }))
+            } else {
+              // 2) 旧形状（只有 slug）：仅当该 slug 在本批是**唯一身份**时才标 rejected。
+              // 同 slug 多身份（含 mda accepted + mdb rejected）无法唯一确定 → 不标任何一条，
+              // 宁可少标不可误标（稍后 accepted 键还会从 rejectedKeys 中剔除），并计数可见。
+              const identityKeys = new Set(docs.filter((doc) => doc.slug === slug).map((doc) => memoryIdentityKey(doc)))
+              if (identityKeys.size === 1) {
+                rejectedKeys.add([...identityKeys][0])
+              } else {
+                report.rejected_refs_unmatched = (report.rejected_refs_unmatched ?? 0) + 1
+              }
+            }
+          }
           bump(`server_${typeof r?.reason === "string" ? r.reason : "unknown"}`)
         }
         if (accepted.length + proposals.length + noop.length < docs.length && rejected.length === 0) {
           bump("server_silent_loss") // 回执不齐：端点没给逐条原因（G7 截断除外），记帐不吞。
         }
         // §5.6：端点回执 accepted 之后才抽检（未写入的没有品质可审）。
-        await runSampling(accepted.map((id) => String(id)))
+        await runSampling(accepted.map((id) => String(id)), acceptedRefs)
       } else {
         // 非 2xx／网路失败 → 写 pending 档（指数退避重试由 drainPending 接手）。
         writePending({
@@ -920,8 +1061,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       for (const sessionId of processedSessions) {
         const kinds = queuedKindsById.get(sessionId)
         if (!kinds) continue // 非队列会话：不碰队列。
-        const slugs = sessionDocSlugs.get(sessionId)
-        if (slugs && slugs.size > 0) {
+        const keys = sessionDocKeys.get(sessionId)
+        if (keys && keys.size > 0) {
           if (await markSignalDone(sessionId)) {
             report.queue.consumed += 1
             void appendMemoryAudit({ event: "drained", sessionId, kinds })
@@ -947,22 +1088,45 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       // stored 归属只按 accepted（真写入）计：proposals（未提升提案）不在 acceptedIds，
       // 天然不计入。G5 更新可能沿用旧批次 id：仅当该 id 在本批 docs 中对应唯一 slug
       // 后缀时才归属；跨会话同名后缀有歧义则不归属（宁缺勿错）。
-      const acceptedSlugs = new Set<string>()
+      const acceptedKeys = new Set<string>()
+      // 2026-10-19：优先按 accepted_refs 归属（确定性 id `mem-<hash>` 不含 slug）。
+      // 近重复合并时 ref.domain/slug 是已存在的 target，必须用 input*（候选身份）归属本批。
+      // 只认 acceptedSet 内的 ref；refs 未覆盖的 accepted id 才走旧前缀/唯一后缀匹配。
+      const acceptedSet = new Set(acceptedIds)
+      const refCoveredIds = new Set<string>()
+      for (const ref of acceptedRefs) {
+        if (!acceptedSet.has(ref.id)) continue
+        const identity = acceptedRefInputIdentity(ref)
+        acceptedKeys.add(memoryIdentityKey({ scope: ref.scope, ownerKey: ref.ownerKey, ...identity }))
+        // refs 未带 ownerKey：用本批候选唯一匹配补精确身份键（与抽检弱匹配同规则）。
+        // 两 owner 同 slug 时匹配不唯一 → 不归属（宁缺勿错，抽检侧另有 unmatched 计数）。
+        if (ref.ownerKey === undefined) {
+          const matches = docs.filter(
+            (doc) => doc.scope === ref.scope && doc.domain === identity.domain && doc.slug === identity.slug,
+          )
+          if (matches.length === 1) acceptedKeys.add(memoryIdentityKey(matches[0]))
+        }
+        refCoveredIds.add(ref.id)
+      }
       for (const id of acceptedIds) {
+        if (refCoveredIds.has(id)) continue
         const exact = docs.find((doc) => `${batchId}-${doc.slug}` === id)
         if (exact) {
-          acceptedSlugs.add(exact.slug)
+          acceptedKeys.add(memoryIdentityKey(exact))
           continue
         }
         const suffixMatches = docs.filter((doc) => id.endsWith(`-${doc.slug}`))
-        if (suffixMatches.length === 1) acceptedSlugs.add(suffixMatches[0].slug)
+        if (suffixMatches.length === 1) acceptedKeys.add(memoryIdentityKey(suffixMatches[0]))
       }
-      for (const [sessionId, slugs] of sessionDocSlugs) {
-        // 精确归属（P2-5）：只看本会话产出的 slug 集合里真正出现在 accepted 的条目；
-        // 未写入（含 proposals）与 rejected 一律不算 stored。
+      // accepted 优先：同批同 slug／同身份既有 accepted 又有 rejected 回执时（如 mda 写入、
+      // mdb time_range 被拒），不能因 rejected 键把已写入身份排除出 stored。
+      for (const key of acceptedKeys) rejectedKeys.delete(key)
+      for (const [sessionId, keys] of sessionDocKeys) {
+        // 精确归属（P2-5）：只看本会话产出的身份键里真正出现在 accepted 的条目；
+        // 未写入（含 proposals）与 rejected 一律不算 stored。同 slug 不同 domain 分别计数。
         let stored = 0
-        for (const slug of slugs) {
-          if (acceptedSlugs.has(slug) && !rejectedSlugs.has(slug)) stored += 1
+        for (const key of keys) {
+          if (acceptedKeys.has(key) && !rejectedKeys.has(key)) stored += 1
         }
         if (stored > 0) void appendMemoryAudit({ event: "stored", sessionId, stored })
         else void appendMemoryAudit({ event: "no_docs", sessionId })
