@@ -7,5 +7,16 @@
 // 本路由：处理器套完合同后，走既有的 GENERATION_CONTROL_PLANE_PROXY_ORIGIN 代理
 // 把带合同的 prompt 交给控制面。
 //
-// 实作只有 re-export，避免复制整份处理器造成双份漂移。
-export { POST, runtime, preferredRegion } from "../../v1/videos/generations/route";
+// 实作只包一层 re-export，不复制处理器；x-eimu-video-contract 响应头是路由
+// 是否真的被命中的探针（2026-10-20 用它验证 beforeFiles 顺序）。
+import type { NextRequest } from "next/server";
+import { POST as generationsPOST, runtime, preferredRegion } from "../../v1/videos/generations/route";
+
+export { runtime, preferredRegion };
+
+export async function POST(req: NextRequest): Promise<Response> {
+  const response = await generationsPOST(req);
+  const headers = new Headers(response.headers);
+  headers.set("x-eimu-video-contract", "1");
+  return new Response(response.body, { status: response.status, headers });
+}
