@@ -925,6 +925,8 @@ export async function probeMusicChannels(): Promise<{
   first_ready: MusicChannelProbe["channel"] | null
   can_generate_instrumental: boolean
   human_actions: string[]
+  vocal_generation_ready: boolean
+  blocking_reason: string | null
 }> {
   const channels = await Promise.all([probeYue2(), probeFlowMusic(), probeLyria()])
   const firstReady = channels.find((c) => c.status === "ready")?.channel ?? null
@@ -936,12 +938,22 @@ export async function probeMusicChannels(): Promise<{
     c.status === "ready" && !(c.channel === "lyria_gemini" && !hasGeminiStudioApiKey())
   const canVocal = channels.some(vocalCapable)
   const canInstrumental = channels.some((c) => c.status === "ready")
+  // 2026-10-20：探针诚实性——真实路由以 YuE2 为首选，YuE2 瞬时不可达会直接 fail 且不回落，
+  // 此时 first_ready 指向的 FlowMusic／Lyria 并不会接管带歌词的整歌。
+  const yue2Probe = channels.find((c) => c.channel === "yue2_modal")
+  const yue2RouteBlocked = isYue2ModalEnabled() && yue2Probe !== undefined && yue2Probe.status !== "ready"
+  const vocalReady = canVocal && !yue2RouteBlocked
+  const blockingReason = yue2RouteBlocked
+    ? `YuE2 当前${yue2Probe.label}，而真实路由以 YuE2 为首选且瞬时故障不回落：带歌词的整歌会直接失败，FlowMusic2API／Lyria 不会接管。纯器乐或不带歌词的短档仍可走 ${firstReady ?? "无可用通路"}。`
+    : null
   return {
     channels,
     can_generate_vocal_song: canVocal,
     can_generate_instrumental: canInstrumental,
     first_ready: firstReady,
     human_actions: humanActions,
+    vocal_generation_ready: vocalReady,
+    blocking_reason: blockingReason,
   }
 }
 
@@ -960,7 +972,7 @@ export const musicGenTool: MusicToolDef = {
   id: "music_gen",
   description:
     // <harness-only>
-    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 can_generate_vocal_song 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。YuE2 的**瞬时**不可用（HTTP 429 繁忙／服务不可达／请求超时）会自动退避重试同一通路（间隔 5s/15s），仍失败则如实报错（错误码 yue2_busy／yue2_unreachable 等）且不回落、不扣费；只有 YuE2 的**硬失败**（上游语义错误等）才按优先序回落下一通路。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。",
+    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 vocal_generation_ready 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。YuE2 的**瞬时**不可用（HTTP 429 繁忙／服务不可达／请求超时）会自动退避重试同一通路（间隔 5s/15s），仍失败则如实报错（错误码 yue2_busy／yue2_unreachable 等）且不回落、不扣费；只有 YuE2 的**硬失败**（上游语义错误等）才按优先序回落下一通路。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。",
     // </harness-only>
   args: {
     probe: {
@@ -1023,19 +1035,23 @@ export const musicGenTool: MusicToolDef = {
         const report = await probeMusicChannels()
         const summary = report.channels.map((c) => `${c.channel}=${PROBE_STATUS_LABEL[c.status]}`).join("，")
         return ok({
-          title: report.can_generate_vocal_song
+          title: report.vocal_generation_ready
             ? `音乐通路可用（${report.first_ready}）`
-            : report.can_generate_instrumental
-              ? `仅纯器乐可用（${report.first_ready}），不能出人声歌曲`
-              : "音乐通路全部不可用",
+            : report.blocking_reason
+              ? "人声整歌暂不可用（YuE2 不回落）"
+              : report.can_generate_instrumental
+                ? `仅纯器乐可用（${report.first_ready}），不能出人声歌曲`
+                : "音乐通路全部不可用",
           mode: "probe",
           summary,
           ...report,
-          hint: report.can_generate_vocal_song
+          hint: report.vocal_generation_ready
             ? `可以写歌：生成会先走 ${report.first_ready}。${report.channels.find((c) => c.channel === report.first_ready)?.capability ?? ""}`
-            : report.can_generate_instrumental
-              ? `现在只能出纯器乐（无人声）。需要人声歌曲先别写歌词；把 human_actions 原样告诉用户。纯器乐/BGM 需求可直接生成。`
-              : `现在做不出带人声的歌，先别写歌词；把 human_actions 原样告诉用户，等其处理后再探针。`,
+            : report.blocking_reason
+              ? `${report.blocking_reason}先不要写歌词、不要对用户宣称可以马上出人声歌。`
+              : report.can_generate_instrumental
+                ? `现在只能出纯器乐（无人声）。需要人声歌曲先别写歌词；把 human_actions 原样告诉用户。纯器乐/BGM 需求可直接生成。`
+                : `现在做不出带人声的歌，先别写歌词；把 human_actions 原样告诉用户，等其处理后再探针。`,
         })
       }
       const prompt = asString(rawArgs.prompt)
