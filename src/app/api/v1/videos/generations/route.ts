@@ -302,7 +302,9 @@ export async function POST(req: NextRequest) {
   if (!generationControlPlaneEnabled()) {
     const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/$/, "");
     if (origin) {
-      const upstream = await fetch(`${origin}/api/v1/videos/generations`, {
+      // 控制面在 /image-control basePath 下挂载；裸 /api/v1 在控制面 origin 上回 404
+      // （2026-10-20 实测：/api/v1/...=404、/image-control/api/v1/...=401）。
+      const upstream = await fetch(`${origin}/image-control/api/v1/videos/generations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

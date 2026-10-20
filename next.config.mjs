@@ -61,6 +61,14 @@ const nextConfig = {
   },
   async rewrites() {
     const controlPlaneRewrites = buildControlPlaneRewrites(controlPlaneOrigin);
+    // 影片生成必须先进 Vercel 的处理器套动作合同，再代理到控制面。
+    // 若交给 controlPlaneRewrites 的 `/v1/:path*`、`/api/v1/:path*` 通配，请求会
+    // 直接被代理走，站点的 directVideoPrompt 永远看不到 B 端影片请求（2026-10-20
+    // 实测：落库 prompt 仍是用户原句）。精确重写必须排在全量代理之前。
+    const videoContractRewrites = [
+      { source: "/v1/videos/generations", destination: "/api/video-contract/generations" },
+      { source: "/api/v1/videos/generations", destination: "/api/video-contract/generations" },
+    ];
     // CRITICAL: 控制面代理必须放 `beforeFiles`，不能放在回传阵列里。
     //
     // `rewrites()` 回传阵列时语意等同 `afterFiles`——Next.js 先比对档案系统路由，
@@ -74,7 +82,7 @@ const nextConfig = {
     // /v1/:path* 当时看起来正常，只是因为 repo 里没有 src/app/v1 目录，不是因为顺序对。
     // 别把这几条搬回回传阵列。
     return {
-      beforeFiles: controlPlaneRewrites,
+      beforeFiles: [...videoContractRewrites, ...controlPlaneRewrites],
       afterFiles: [
       // B 端的 Base URL 对外是 `https://eimu.dev/v1`，
       // OpenAI SDK 会在其后拼上 `/images/generations`，而路由实际住在 /api/v1 下。
