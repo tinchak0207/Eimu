@@ -1,16 +1,29 @@
 {
+  // 生产控制面（deploy-staging/gateway/**）的类型检查闸。
+  // 刻意不 extends 根 tsconfig：根 tsconfig 的 exclude 含 "deploy-staging"，且带有
+  // Next.js 专属的 jsx/plugins/paths，与本目录的 Bun 运行时无关。
+  // 覆盖范围：deploy-staging/gateway 下所有 *.ts（含子目录），不含 ../opencode-runtime
+  // （独立运行树，由它自己的工具链负责）。
   "compilerOptions": {
     "lib": ["esnext"],
-    "types": ["bun-types"],
-    "strict": false,
-    "noEmit": true,
-    "skipLibCheck": true,
+    "types": ["node", "bun-types"],
+    "target": "ES2022",
     "module": "esnext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
-    "target": "ES2022",
-    "allowJs": true
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "strict": true,
+    // 放宽 1/2：strictNullChecks。本目录此前从未进 tsc，全 strict 下有 73 个存量
+    // strict-null 错误（集中在 workflow-gw.ts 等生产热点）；逐点补 null 守卫会改变
+    // 生产分支行为，超出「只加闸」范围，留作独立收敛项。
+    "strictNullChecks": false,
+    // 放宽 2/2：noImplicitAny。关掉 strictNullChecks 后推断链上的隐式 any 会以
+    // TS7011/TS7018 批量暴露（约 40 条），同样是存量代码，非本次变更引入。
+    "noImplicitAny": false
   },
-  "include": ["./**/*.ts"],
-  "exclude": ["node_modules", "**/*.test.ts", "refactor-audit.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "**/*.test.ts"]
 }
