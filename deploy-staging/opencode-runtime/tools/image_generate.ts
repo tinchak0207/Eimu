@@ -19,6 +19,7 @@ import {
   fail,
 } from "../lib/client"
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath, safeFetch } from "../lib/sandbox"
+import { VIDEO_MOTION_FALLBACK, hasMotionContract } from "../lib/video-prompt-schema"
 import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash } from "../lib/image-journal"
 
 /**
@@ -465,6 +466,9 @@ export default tool({
         if(fingerprints.some(hash=>!hash))return fail("reference_hash_unavailable","角色卡最终参考图内容未完整验证；未提交。",{new_generation:false})
       }
       const card_note = card_warnings.length > 0 ? `【角色卡 tag 提醒】${card_warnings.join("；")}` : ""
+      // 影片散文 prompt 的动作兜底（2026-10-20）：没有 beats/state_change 的提示词
+      // 在平台上会被 H3 当成静态画面＋运镜；这里补一条物理变化合同再提交。
+      if (kind === "video" && !hasMotionContract(final_prompt)) final_prompt = `${final_prompt} ${VIDEO_MOTION_FALLBACK}`
       const payload: any =
         kind === "video"
           ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(reference_images.length > 0 ? { reference_images } : {}) }

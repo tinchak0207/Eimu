@@ -33,8 +33,8 @@ export interface DirectorOptions {
 
 /** 六槽公式侦测用正则。槽位存在时保留用户原话，缺漏时才补中性指令。 */
 const SLOT_PATTERNS = {
-  camera: /(camera|shot|angle|dolly|pan|tilt|zoom|track|push|pull|orbit|crane|handheld|aerial|drone|fpv|low angle|high angle|close-?up|wide shot|medium shot|establishing|over-the-shoulder|point-of-view|pov|static|locked)/i,
-  action: /(\b(runs?|walks?|drives?|jumps?|sprints?|turns?|reaches|grabs|punches|kicks|falls|dives|flies|swims|climbs|pushes|pulls|lifts|drops|slides|rolls|rises|sinks|explodes|breaks|opens|closes|steps|enters|exits|darts|slips|stumbles|crouches|twists|swings|strikes|fires|throws|catches|dodges|vaults|leaps|charges|retreats|advances|circles|paces)\b|\b(transforms|morphs|shifts|changes|grows|shrinks|dissolves|melts|hardens|cracks)\b)/i,
+  camera: /(camera|shot|angle|dolly|pan|tilt|zoom|track|push|pull|orbit|crane|handheld|aerial|drone|fpv|low angle|high angle|close-?up|wide shot|medium shot|establishing|over-the-shoulder|point-of-view|pov|static|locked|镜头|运镜|跟拍|推镜|拉镜|摇镜|移镜|俯拍|仰拍|航拍|手持|固定机位|环绕|特写|全景|中景|近景)/i,
+  action: /(\b(runs?|walks?|drives?|jumps?|sprints?|turns?|reaches|grabs|punches|kicks|falls|dives|flies|swims|climbs|pushes|pulls|lifts|drops|slides|rolls|rises|sinks|explodes|breaks|opens|closes|steps|enters|exits|darts|slips|stumbles|crouches|twists|swings|strikes|fires|throws|catches|dodges|vaults|leaps|charges|retreats|advances|circles|paces|moves?|drifts?|beads?|ripples?|drips?|pools?|settles?|rebounds?|deforms?|sways?|stirs?|seeps?|spreads?|billows?|curls?)\b|\b(transforms|morphs|shifts|changes|grows|shrinks|dissolves|melts|hardens|cracks)\b|(走|跑|奔|冲|跳|跃|挥|斩|劈|刺|踢|拳|转身|回头|抬手|低头|蹲|站起|坐下|倒下|坠落|飞|游|爬|抓|握|推|拉|举|扔|抛|接|挡|躲|闪|翻滚|滑|冲刺|疾跑|前进|后退|靠近|离开|打开|关上|撕|裂|碎|爆|燃|融|化|流动|飘|散|涌|升|沉|抖动|摇晃))/i,
   setting: /(in |on |at |through |across |inside |outside |by the |near |under |above |over |between |behind |beyond )(the |a |an )?[a-z]+|(street|alley|room|city|desert|ocean|forest|space|mountain|beach|rooftop|corridor|hallway|warehouse|garage|kitchen|office|stadium|train|airport|market|church|castle|cave|factory|subway|bridge|river|lake|valley|field|meadow|jungle|tundra|snow|rain|storm|sunset|sunrise|night|dusk|dawn|morning|noon|indoors|outdoors)/i,
   style: /(style|look|grade|palette|noir|neon|vhs|anamorphic|cinematic|desaturated|monochrome|sepia|pastel|vivid|muted|grimy|glossy|matte|minimalist|baroque|cyberpunk|steampunk|fantasy|realistic|photoreal|cartoon|anime|stop-motion|film grain|letterbox)/i,
   lighting: /(light|lit|lighting|backlit|backlight|rim light|shadow|shadows|golden hour|blue hour|neon light|harsh light|soft light|diffused|direct|low key|high key|practical|flare|underexposed|overexposed|silhouette|candlelight|moonlight|sunlight|twilight|firelight|lighting rig)/i,
@@ -412,11 +412,11 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   }
 
   // 运动 + 状态变化合同：用户 prompt 已写明就不重复追加；音轨语义沿用旧逻辑。
-  if (!/(state change|action beat|visibly changed|measurably)/i.test(enhanced)) {
+  if (!/(state change|action beat|visibly changed|measurably|by the final frame)/i.test(enhanced)) {
     const audioClause = options.generateAudio ? "" : "SFX only, no music. ";
     parts.push(`${audioClause}${MOTION_CONTRACT}`);
   }
-  if (!/(environment or staging|visibly different state)/i.test(enhanced)) {
+  if (!/(environment or staging|visibly different state|light or environment)/i.test(enhanced)) {
     parts.push(TRANSFORMATION_LOCK);
   }
   // 只有运镜、没有主体动作的提示词：补主体物理变化，禁止把相机运动当内容。
