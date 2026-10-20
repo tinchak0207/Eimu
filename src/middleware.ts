@@ -174,6 +174,12 @@ export async function middleware(req: NextRequest): Promise<Response> {
   // 未配置控面 origin（本地开发常态）＝beforeFiles rewrite 也不会生成，直接放行，
   // 让本地同名 route.ts 正常执行。
   if (!origin) return NextResponse.next();
+  // 影片生成：本层先于 beforeFiles 执行，命中 CP 清单就直连控面，next.config 里
+  // 针对本路径的精确 rewrite 永远轮不到（2026-10-20 实测：响应无合同头、落库是用户原句）。
+  // 这里先改写给站点的合同路由：套完 directVideoPrompt 后由它代理到控面。
+  if (/^\/(?:api\/)?v1\/videos\/generations\/?$/i.test(req.nextUrl.pathname)) {
+    return NextResponse.rewrite(new URL("/api/video-contract/generations", req.url));
+  }
   if (!matchesControlPlanePath(req.nextUrl.pathname)) return NextResponse.next();
   // 长时同步／流式端点：放行给既有外部 rewrite，不做本层缓冲（见 DURABLE_PASS_THROUGH）。
   if (isDurablePassThrough(req.nextUrl.pathname)) return NextResponse.next();
