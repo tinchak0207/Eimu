@@ -1,4 +1,4 @@
-import { MEMORY_CORROBORATION_BODY_JACCARD, MEMORY_DUPLICATE_JACCARD, MEMORY_QUOTA_PER_DOMAIN_DAY, MEMORY_QUOTA_PRIVATE_PER_OWNER_DAY, MEMORY_QUOTA_SHARED_PER_BATCH, MEMORY_SHARED_CORROBORATION_MIN, MEMORY_SHARED_MAX_PENDING_DOCS } from "./constants";
+import { MEMORY_CORROBORATION_BODY_JACCARD, MEMORY_DUPLICATE_JACCARD, MEMORY_QUOTA_PER_DOMAIN_DAY, MEMORY_QUOTA_PRIVATE_PER_OWNER_DAY, MEMORY_QUOTA_SHARED_PER_BATCH, MEMORY_QUOTA_SHARED_PER_DOMAIN_DAY, MEMORY_SHARED_CORROBORATION_MIN, MEMORY_SHARED_MAX_PENDING_DOCS } from "./constants";
 import { deterministicDocId } from "./keys";
 import { mergeContributors, normalizeAuditIdList, normalizeAuditString, normalizeContributors, normalizeIsoField, normalizeProposed, normalizeSupersedes, sameContent } from "./normalize";
 import { memoryJaccard } from "./text";
@@ -280,16 +280,20 @@ async function ingestMemoryDocsLocked(input: MemoryIngestInput): Promise<MemoryI
         rejected.push({ slug, reason: "quota_scope", ...rejectIdentity });
         continue;
       }
-      // G7：单 domain ≤8/日。**按 scope 隔离计数**：shared 只数 shared，private 只数
-      // 该 ownerKey，避免别的租户的 private `general` 吃光全服 shared `general`。
+      // G7：单 domain 日配额，按 scope 取上限。**按 scope 隔离计数**：shared 只数
+      // shared，private 只数该 ownerKey，避免别的租户的 private `general` 吃光全服
+      // shared `general`。private 是用户自己的库，额度放宽；shared 进所有用户上下文，
+      // 维持严格额度。
       const domainCount = entries.filter(
         (entry) =>
           sameScope(entry, scope, ownerKey) &&
           entry.domain === candidate.domain &&
           entry.createdAt.slice(0, 10) === todayKey,
       ).length;
+      const domainCap =
+        scope === "private" ? MEMORY_QUOTA_PER_DOMAIN_DAY : MEMORY_QUOTA_SHARED_PER_DOMAIN_DAY;
       // 种子模式按批导入不受单 domain 日配额限制；private 与普通 shared 不变。
-      if (!docSeedMode && domainCount >= MEMORY_QUOTA_PER_DOMAIN_DAY) {
+      if (!docSeedMode && domainCount >= domainCap) {
         rejected.push({ slug, reason: "quota_domain", ...rejectIdentity });
         continue;
       }

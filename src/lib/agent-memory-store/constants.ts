@@ -1,8 +1,30 @@
 export const MEMORY_CATALOG_VERSION = 1;
-/** G7 配额（契约 §3.1）：单批 shared ≤20；单 ownerKey private ≤10/日；单 domain ≤8/日。 */
-export const MEMORY_QUOTA_SHARED_PER_BATCH = 20;
-export const MEMORY_QUOTA_PRIVATE_PER_OWNER_DAY = 10;
-export const MEMORY_QUOTA_PER_DOMAIN_DAY = 8;
+/**
+ * G7 配额（契约 §3.1）：单批 shared ≤20；单 ownerKey private ≤60/日；
+ * private 单 domain ≤50/日、shared 单 domain ≤8/日。
+ *
+ * 两个域额的取向不同：private 是用户自己的库，项目记忆一天写几十条是合理需求，
+ * 故放开到 50/日（单 owner 总量另由 60/日兜底）；shared 会注入所有用户的上下文，
+ * 保持严格的 8/日/域。两者都可用 env 覆盖（正整数，坏值回落默认）。
+ */
+export const MEMORY_QUOTA_SHARED_PER_BATCH = positiveIntEnv(
+  "MEMORY_QUOTA_SHARED_PER_BATCH",
+  20,
+);
+export const MEMORY_QUOTA_PRIVATE_PER_OWNER_DAY = positiveIntEnv(
+  "MEMORY_QUOTA_PRIVATE_PER_OWNER_DAY",
+  60,
+);
+/** private 单 domain 日配额（放宽侧）。 */
+export const MEMORY_QUOTA_PER_DOMAIN_DAY = positiveIntEnv(
+  "MEMORY_QUOTA_PER_DOMAIN_DAY",
+  50,
+);
+/** shared 单 domain 日配额（严格侧：共享库进所有人上下文）。 */
+export const MEMORY_QUOTA_SHARED_PER_DOMAIN_DAY = positiveIntEnv(
+  "MEMORY_QUOTA_SHARED_PER_DOMAIN_DAY",
+  8,
+);
 /** G5 去重门槛（契约 §3.1）：description token Jaccard > 0.8 → duplicate。 */
 export const MEMORY_DUPLICATE_JACCARD = 0.8;
 /**
@@ -14,7 +36,8 @@ export const MEMORY_DUPLICATE_JACCARD = 0.8;
 export const MEMORY_CORROBORATION_BODY_JACCARD = 0.5;
 /** shared 跨账号佐证门槛：同一 slug 至少 2 个不同账号提出，才自动 active。 */
 export const MEMORY_SHARED_CORROBORATION_MIN = 2;
-/** 正整数 env 旋钮：未设定／格式坏／<1 一律回落默认值，读取永不抛错。 */
+/** 正整数 env 旋钮：未设定／格式坏／<1 一律回落默认值，读取永不抛错。
+ *  （函数声明会提升，允许被上方配额常量提前引用。） */
 function positiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
   if (!raw || !/^\d+$/.test(raw)) return fallback;
