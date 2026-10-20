@@ -1335,7 +1335,10 @@ export async function submitWorkflowNode(
       (typeof meta.first_frame_url === "string" ? 1 : 0) +
       (typeof meta.last_frame_url === "string" ? 1 : 0) +
       (Array.isArray(meta.reference_images) ? meta.reference_images.length : 0) +
-      (typeof meta.reference === "string" ? 1 : 0)
+      (typeof meta.reference === "string" ? 1 : 0) +
+      // 3D 预演关键帧也是参考条件：shot.previz.keyframes 必须计入首行对齐说明，
+      // 否则模型不知道后面几张图是同一镜头的预演帧。
+      (shotCandidate.previz?.keyframes?.filter((ref) => typeof ref === "string" && ref.trim()).length ?? 0)
     try { prompt = compileShotPrompt(shotCandidate, model, { referenceImages: refImages.length + explicitRefCount }) }
     catch (error) { return { nodeId: node.id, ok: false, error: `invalid_shot: ${error instanceof Error ? error.message : String(error)}` } }
     const shotParams = shotOutputParams(shotCandidate)
@@ -1396,10 +1399,16 @@ export async function submitWorkflowNode(
       return { nodeId: node.id, ok: false, error: "视频起止帧及 reference 必须是图片 URL 字符串。" }
     }
     const explicitRefs = Array.isArray(meta.reference_images) ? meta.reference_images : []
+    // 3D 预演关键帧（shot.previz.keyframes）进参考图：预演是条件不是装饰，
+    // 否则 3D 导演席位交出的 blocking/机位帧根本到不了视频模型。
+    const previzRefs = (shotCandidate?.previz?.keyframes ?? []).filter(
+      (ref): ref is string => typeof ref === "string" && ref.trim().length > 0 && !explicitRefs.includes(ref),
+    )
     const orderedRefs = [
       ...(typeof meta.first_frame_url === "string" ? [meta.first_frame_url] : []),
       ...(typeof meta.last_frame_url === "string" ? [meta.last_frame_url] : []),
       ...explicitRefs,
+      ...previzRefs,
       ...(typeof meta.reference === "string" ? [meta.reference] : []),
       ...refImages,
     ]

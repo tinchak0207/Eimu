@@ -149,6 +149,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         notes: [
           "能力闸门（2026-10-20 现场）：先查真实工具表，确认 blender_exec/blender_render/blender_export_gltf 是否真的可用（不看 SKILL 宣称、不看工具文件存在）；不可用 → 用 bash + 自建几何 + 光栅渲染出首/中/尾关键帧与 GLB，并记下每帧机位/动作参数；禁止用二维文生图冒充 3D 预演；`.blend` 缺失必须在交付标注",
           "动作/走位/多人/空间关系镜头先用 director-engine 白模（L1，免费）或 Blender（L2）定 blocking、机位路径与动作模板；渲染首/中/尾关键帧后，把关键帧 + 运镜 + beats 一起交给视频模型",
+          "预演帧必须落成 URL 写进该镜 shot.previz.keyframes（网关会把它们并进 reference_images 传给视频模型）；只放在节点交付文本里不会进生成；首/中/尾至少各一帧",
           "预演帧是参考条件，不是成片也不是首帧硬锁：首帧负责起点，beats 负责过程；单人物微表情/产品特写等不涉及精确几何的镜头可跳过预演，直接首帧 I2V",
           "机位路径与动作事件对齐（跟拍从哪个动作起、急推落在哪个 beat），预演阶段发现的穿模/遮挡/轴线错误先改白模，不留给视频模型猜",
         ],

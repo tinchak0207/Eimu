@@ -24,6 +24,7 @@ import {
   videoPostProductionGeneratedSeconds,
 } from "@/lib/generation-core/video-post-production";
 import { EditInputError, parseReferenceImageSpecs, resolveEditReference } from "@/lib/biz-image-references";
+import { directVideoPrompt } from "@/lib/invisible-prompt-director";
 import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-request-headers";
@@ -256,6 +257,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 每一条普通影片生成都必须带物理动作合同：用户写「slow camera push in」这类纯运镜
+  // 提示词时，模型会把推镜当成整条片子的内容。生成式后期（局部改片）的 prompt 是改动
+  // 指令，不套创作合同。directVideoPrompt 幂等，Vercel 代理到控制面后二次执行不会重复追加。
+  const directedPrompt = postProduction
+    ? prompt
+    : directVideoPrompt(prompt, {
+        modelId,
+        durationSeconds: body.duration_seconds === undefined ? undefined : Number(body.duration_seconds),
+        generateAudio: optionalBoolean(body.generate_audio),
+      });
+  if (!postProduction) body.prompt = directedPrompt;
+
   const rawN = body.n === undefined ? 1 : Number(body.n);
   if (!Number.isInteger(rawN) || rawN < 1 || rawN > MAX_N) {
     return errorResponse(400, `n 需为 1 到 ${MAX_N} 之间的整数。`, "invalid_request_error", "invalid_n", traceId);
@@ -375,7 +388,7 @@ export async function POST(req: NextRequest) {
       idempotencyKey: req.headers.get("idempotency-key"),
       kind: "video_generate",
       modelId,
-      prompt,
+      prompt: directedPrompt,
       ratio: normalized.config.aspectRatio,
       resolution: normalized.config.outputResolution,
       quality: normalized.config.qualityMode,

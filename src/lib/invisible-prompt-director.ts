@@ -102,6 +102,12 @@ const MOTION_CONTRACT =
 const TRANSFORMATION_LOCK =
   "The shot shows a clear state change: the subject begins in one state and ends in a visibly different state, with at least one change in the environment or staging along the way. Identity details stay consistent while the action advances.";
 
+/** 纯运镜请求（「slow camera push in」这类只有相机、没有主体动作的提示词）会把
+ *  运镜当成整条片子的内容，模型于是只推镜头、主体不动。补一条主体物理变化，
+ *  让运镜成为动作的结果而不是替代动作。 */
+const CAMERA_ONLY_FIX =
+  "The camera move is not the content of the shot: while the camera advances, the subject itself must physically change — contents shift, surfaces deform, parts move, and the light or environment changes around it — so the last frame differs from the first in more than framing.";
+
 function replaceAll(prompt: string, table: ReadonlyArray<[RegExp, string]>): string {
   let out = prompt;
   for (const [pattern, replacement] of table) {
@@ -375,6 +381,7 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   if (!user) return user;
 
   const cameraPresent = SLOT_PATTERNS.camera.test(user);
+  const actionPresent = SLOT_PATTERNS.action.test(user);
   const stylePresent = SLOT_PATTERNS.style.test(user);
   const lightingPresent = SLOT_PATTERNS.lighting.test(user);
 
@@ -398,9 +405,11 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   if (cameraRule) parts.push(cameraRule.directive);
 
   // 状态变化合同：不建立静态版式，开场即进入动作 beat，收尾时主体与场景都已改变。
-  parts.push(
-    "The shot opens with the subject already advancing an action beat; by the final frame the subject and the scene have visibly changed.",
-  );
+  if (!/shot opens with the subject already advancing/i.test(enhanced)) {
+    parts.push(
+      "The shot opens with the subject already advancing an action beat; by the final frame the subject and the scene have visibly changed.",
+    );
+  }
 
   // 运动 + 状态变化合同：用户 prompt 已写明就不重复追加；音轨语义沿用旧逻辑。
   if (!/(state change|action beat|visibly changed|measurably)/i.test(enhanced)) {
@@ -410,6 +419,8 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   if (!/(environment or staging|visibly different state)/i.test(enhanced)) {
     parts.push(TRANSFORMATION_LOCK);
   }
+  // 只有运镜、没有主体动作的提示词：补主体物理变化，禁止把相机运动当内容。
+  if (!actionPresent && !/not the content of the shot/i.test(enhanced)) parts.push(CAMERA_ONLY_FIX);
 
   return parts.join(" ");
 }
