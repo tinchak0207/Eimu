@@ -46,18 +46,8 @@ import { flushPendingSteers } from "./steer-gw.ts"
 // 只入队；不在这里呼叫 LLM，也不自动跑批次（批次仍由 MEMORY_BATCH_ENABLED/人工决定）。
 import { detectMemorySignals } from "./memory-trigger.ts"
 import { enqueueMemorySignal, appendMemoryAudit } from "./memory-queue.ts"
-
-/** Stop hook loop guard：session state → 已触发 hook 的 turnGen。 */
-const stopHookTurnGen = new WeakMap<object, number>()
-
-/** 记忆信号 loop guard：同一 turnGen 只判一次，重复 idle 不重复入队。 */
-const memorySignalTurnGen = new WeakMap<object, number>()
-
-// TODO(来自 events-translate.ts): eventSessionId(index.ts 2715)/handleToolPartUpdate(index.ts 3309)
-//   —— W7 并行在建 events-translate.ts，建成后改真 import。
-
-// TODO(整合 Wave2): 以下为仍住 index.ts 且尚未 export 的符号 declare 占位
-// （bun build 只转译不查名，建得过；index.ts 补 export 或符号迁出后替换为真 import）。
+import { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools } from "./opencode-event-handler-hooks.ts"
+import { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } from "./opencode-event-handler-goal.ts"
 
 // H14（2026-10-02）：系统唤醒不冒充用户发言。prompt_async 注入的唤醒文本在 opencode 里只能是
 // user-role message（身份由 opencode 存储决定）；网关侧能做的是把它从「用户发言」语义摘出——
@@ -65,6 +55,13 @@ const memorySignalTurnGen = new WeakMap<object, number>()
 // 并以 turn.status 暂态单行告知前端（不落 transcript，参照 turn-status-transient-row 修法）。
 import { isSystemWakeText } from "./system-wake.ts"
 export { isSystemWakeText }
+/** Stop hook loop guard：session state → 已触发 hook 的 turnGen。 */
+export const stopHookTurnGen = new WeakMap<object, number>()
+
+/** 记忆信号 loop guard：同一 turnGen 只判一次，重复 idle 不重复入队。 */
+export const memorySignalTurnGen = new WeakMap<object, number>()
+
+
 export function markSystemWakeMessage(state: SessionState, messageID: unknown, text: unknown): boolean {
   if (typeof messageID !== "string" || !isSystemWakeText(text)) return false
   if (state.messageRole.get(messageID) !== "user") return false // 已标过/非 user 讯息 → 不重发
@@ -75,281 +72,6 @@ export function markSystemWakeMessage(state: SessionState, messageID: unknown, t
   })
   return true
 }
-
-// R9-B（2026-09-30）：其他 part 扣住的尾行（无尾换行的单行旁白）当场吐出，
-// 保持「旁白 → 工具/下一段」时序；否则会被压到 session.idle 才补播（SSE 9888–9894）。
-function emitOtherPartTails(state: SessionState, exceptPid?: string): void {
-  const text = flushOtherPartTails(state.partStripState, exceptPid)
-  if (text) {
-    emitToSession(state, "message.delta", { text }, { strippable: true })
-    state.lastUserVisibleAt = Date.now()
-  }
-}
-
-/**
- * 回合真正收尾的唯一出口：清 in-flight 打点，再发 turn.done。
- *
- * 2026-10-02 steer 误判修复：`lastTurnActiveAt` 是 steer 受理闸（steer-gw.turnInFlight）
- * 判「现在有没有可引导的回合」的唯一依据，语义必须是「上游真的有一个在途回合」。
- * 旧版把它挂在 session.idle 一到就清，但 idle **不等于**回合结束：下面 failover／jitter
- * 两台重试机在同一轮内会再送一次 prompt_async，且刻意**不发 turn.done**（前端维持
- * 进行中）。打点先被清、重投腿又不补 ⇒ 整条重投轮的 steer 全被回 409 no_active_turn，
- * 使用者在「进行中」的回合里追加的引导一律被判「引导未能送达（未生效）」。
- * 所以清点与 turn.done 绑死成同一个出口（三个落点全走本函数），重投腿自然跳过。
- */
-function emitTurnDone(state: SessionState): void {
-  state.lastTurnActiveAt = 0
-  markDirty(state)
-  emitToSession(state, "turn.done", {})
-  // F3（2026-10-10）：turn.done 清前端 turnStatus；若仍有在途 async 子代理，立刻回填
-  // 进度行，避免 await 窗真空（复用 turn.status，禁止 message.delta 污染正文）。
-  emitRunningSubagentsStatus(state.sessionId)
-}
-
-let flushPendingSubagentWakes: ((sessionId: string) => void) | null = null
-
-export function setPendingSubagentWakeFlusher(fn: (sessionId: string) => void): void {
-  flushPendingSubagentWakes = fn
-}
-
-function flushQueuedSubagentWakes(state: SessionState): void {
-  try {
-    flushPendingSubagentWakes?.(state.sessionId)
-  } catch (e) {
-    console.error("[gateway] flush pending subagent wakes failed:", e)
-  }
-}
-
-function closeTurnAndFlushWakes(state: SessionState): void {
-  emitTurnDone(state)
-  clearAckTimer(state)
-  flushQueuedSubagentWakes(state)
-}
-
-// ── 2026-10-02 能力片：孤儿 tool_use 追踪（设计取自 Claude Code yieldMissingToolResultBlocks
-// ——换模型时替未收到结果的 tool_use 补 is_error，未复制程式码）──────────────
-// 纯读观测：记录每个 session 目前 in-flight 的工具调用；工具 completed/error 即摘除。
-// turn 因上游错误中断时，残留在表里的就是「孤儿」——换模型重投时注入 is_error 语义补注，
-// 让接手模型知道这些工具没跑完。只写本模组私有 Map，不新增任何前端帧（使用者不可见）。
-const inFlightToolsBySession = new Map<string, Map<string, OrphanToolUse>>()
-const IN_FLIGHT_TOOLS_CAP = 64
-function noteToolInFlight(state: SessionState, part: any): void {
-  const callId = typeof part?.callID === "string" ? part.callID : ""
-  if (!callId) return
-  const status = typeof part?.state?.status === "string" ? part.state.status : ""
-  let m = inFlightToolsBySession.get(state.sessionId)
-  if (!m) {
-    m = new Map()
-    inFlightToolsBySession.set(state.sessionId, m)
-  }
-  if (status === "pending" || status === "running") {
-    m.set(callId, { id: callId, name: typeof part?.tool === "string" ? part.tool : "" })
-    boundMap(m, IN_FLIGHT_TOOLS_CAP)
-  } else if (status === "completed" || status === "error") {
-    m.delete(callId)
-  }
-}
-/** 取出并清空该 session 的孤儿候选（failover 消费一次；正常 turn 结束亦清，防泄漏）。 */
-function takeInFlightTools(state: SessionState): OrphanToolUse[] {
-  const m = inFlightToolsBySession.get(state.sessionId)
-  if (!m || m.size === 0) return []
-  const out = [...m.values()]
-  m.clear()
-  return out
-}
-function clearInFlightTools(state: SessionState): void {
-  inFlightToolsBySession.delete(state.sessionId)
-}
-
-// ── CC 2.1.302：会话目标验收（收盘挂点）─────────────────────────────────────
-// 有 active goal、无 pending question、本回合未验收时，派一名独立验收者（复用
-// runGoalEvaluator = critic 同一套 dispatchAttempt/modelChain/超时轮子），
-// 只看最近正文（≤8000 字）判 {verdict,reason}，落 recordVerdict。
-// 有界：同目标每回合最多 1 次；连续 3 次 not_met 后停止自动验收并发一条可见说明。
-const GOAL_EVAL_TRANSCRIPT_MAX_CHARS = 8000
-const goalEvalBySession = new Map<
-  string,
-  { goalId: number; lastTurnGen: number; inFlight: boolean; dispatched: boolean; notMet: number; stopped: boolean }
->()
-
-export function installGoalEvalTeardown(): void {
-  registerSessionTeardownHook((id) => {
-    goalEvalBySession.delete(id)
-  })
-}
-
-async function recentTranscriptTail(opencodeSessionId: string): Promise<string> {
-  const res = await opencodeFetch(`/session/${encodeURIComponent(opencodeSessionId)}/message`, { timeoutMs: 8000 })
-  if (!res.ok) throw new Error(`transcript HTTP ${res.status}`)
-  const msgs = (await res.json()) as Array<Record<string, any>>
-  const lines: string[] = []
-  for (const m of Array.isArray(msgs) ? msgs.slice(-40) : []) {
-    const role = m?.info?.role === "user" ? "user" : "assistant"
-    for (const p of Array.isArray(m?.parts) ? m.parts : []) {
-      if (p?.type === "text" && typeof p.text === "string" && p.text.trim()) lines.push(`${role}: ${p.text.trim()}`)
-      // 验收者禁止自取证，必须能看到对话中已有的真实工具结果，不能只喂助手自述。
-      if (p?.type === "tool" && (p.state?.status === "completed" || p.state?.status === "error")) {
-        const evidence = p.state.status === "completed" ? p.state.output : p.state.error
-        if (typeof evidence === "string" && evidence.trim()) lines.push(`tool ${String(p.tool ?? "unknown")} (${p.state.status}): ${evidence.trim()}`)
-      }
-    }
-  }
-  const text = lines.join("\n")
-  return text.length > GOAL_EVAL_TRANSCRIPT_MAX_CHARS ? text.slice(-GOAL_EVAL_TRANSCRIPT_MAX_CHARS) : text
-}
-
-/** 从验收者输出里取判定：JSON 优先，其次 critic 的末行 VERDICT（P1-2）。 */
-const parseGoalVerdict = parseGoalEvaluatorOutput
-
-/** 与 buildGoalEvaluatorSpec 的 label 一致；用于判断验收 run 是否还活着。 */
-const GOAL_EVALUATOR_LABEL = "目标验收"
-
-/** not_met 的一次性 nudge：走既有 prompt_async 通道注入，并给用户一行可见说明。 */
-async function injectGoalNudge(state: SessionState, reason: string): Promise<void> {
-  await deliverGoalNudge(state, reason)
-}
-
-/** 导出仅供离线验收（G2 turnGen 记账）；生产只由 maybeRunGoalAcceptance 调用。 */
-export async function deliverGoalNudge(state: SessionState, reason: string): Promise<void> {
-  if (state.turnAborted || state.turnAbortSource === "user") return
-  const turnGen = state.turnGen ?? 0
-  emitToSession(state, "message.delta", { text: `目标验收尚未通过，已提醒继续补齐：${reason}\n` })
-  const body = {
-    ...beastAgentField(state),
-    parts: [
-      {
-        type: "text",
-        text: `【目标验收·未达成】独立验收者判定当前会话目标尚未达成。依据：${reason}\n请继续推进目标，补齐验收缺失的证据与交付，不要只重复声明已完成。`,
-      },
-    ],
-  }
-  const res = await opencodeFetch(`/session/${state.opencodeSessionId}/prompt_async`, {
-    method: "POST",
-    body: JSON.stringify(body),
-    timeoutMs: 10000,
-  })
-  if (!res.ok) throw new Error(`status ${res.status}`)
-  // 请求在途时用户停止或开启新回合，旧 nudge 不得恢复 running 状态或撤销停止。
-  if (state.turnAborted || state.turnAbortSource === "user" || (state.turnGen ?? 0) !== turnGen) return
-  // G2：nudge 也是一次「新回合起点」——必须与用户消息/唤醒路径同样 bump turnGen，
-  // 否则 session.idle 的「本回合已验收」闸会把它当成同一回合而永不再验收。
-  state.lastPromptBody = body as NonNullable<SessionState["lastPromptBody"]>
-  state.turnGen = (state.turnGen ?? 0) + 1
-  state.turnTextChars = 0
-  state.turnReasoningChars = 0
-  state.turnRetries = 0
-  state.retryQueued = false
-  state.turnUpstreamError = null
-  state.turnToolStarted = false
-  state.watchdogRetried = false
-  state.questionAnsweredThisTurn = false
-  state.deathDeclared = false
-  state.lastTurnActiveAt = Date.now()
-  markDirty(state)
-  armWatchdogTimer(state)
-}
-
-/**
- * session.idle 收盘挂点（fire-and-forget，永不影响 turn.done）。
- * 判据：有 active goal；无 pending question；本轮尚未验收过。
- */
-export function maybeRunGoalAcceptance(state: SessionState): void {
-  try {
-    if (!state?.sessionId || !state.opencodeSessionId) return
-    if (state.pendingQuestions.size > 0) return
-    if (state.turnAborted || state.turnAbortSource === "user") return
-    const goal = getActiveGoal(state.sessionId)
-    if (!goal) return
-    // G1 熔断：连续 not_met 次数已持久化，重启后仍然生效。
-    if (goal.not_met_streak >= GOAL_MAX_NOT_MET_STREAK) {
-      goalEvalBySession.set(state.sessionId, {
-        goalId: goal.id,
-        lastTurnGen: state.turnGen ?? 0,
-        inFlight: false,
-        dispatched: false,
-        notMet: goal.not_met_streak,
-        stopped: true,
-      })
-      return
-    }
-    const turnGen = state.turnGen ?? 0
-    const prev = goalEvalBySession.get(state.sessionId)
-    if (prev && prev.goalId === goal.id) {
-      // P1-1：验收 run 可能被硬停（stopSubagentRun 不走 finishRun，onTerminal 永不回调），
-      // 旧版 inFlight 会永久为 true、目标从此不再验收。若注册表里已找不到该验收 run，
-      // 说明它已停止/异常收尾——清 inFlight 并放开「本回合已验收」闸，下一 idle 重新验收。
-      // 次数约束仍由持久化的 not_met_streak（GOAL_MAX_NOT_MET_STREAK）负责。
-      if (prev.inFlight && prev.dispatched && !findRunningRun(state.sessionId, GOAL_EVALUATOR_LABEL)) {
-        prev.inFlight = false
-        prev.lastTurnGen = -1
-      }
-    }
-    if (prev && prev.goalId === goal.id && (prev.inFlight || prev.lastTurnGen === turnGen || prev.stopped)) return
-    const record = { goalId: goal.id, lastTurnGen: turnGen, inFlight: true, dispatched: false, notMet: prev?.goalId === goal.id ? prev.notMet : 0, stopped: false }
-    goalEvalBySession.set(state.sessionId, record)
-    void (async () => {
-      let dispatched = false
-      try {
-        const tail = await recentTranscriptTail(state.opencodeSessionId)
-        // transcript 的异步读取也可能跨回合；旧请求不得派发或改写新验收记录。
-        if (goalEvalBySession.get(state.sessionId) !== record || (state.turnGen ?? 0) !== turnGen || state.turnAborted || state.turnAbortSource === "user") return
-        const active = getActiveGoal(state.sessionId)
-        if (!active || active.id !== goal.id) return
-        const spec = buildGoalEvaluatorSpec(goal.condition)
-        dispatched = runGoalEvaluator(state, { label: spec.label, prompt: `${spec.prompt}${tail}` }, (result) => {
-          const current = goalEvalBySession.get(state.sessionId)
-          if (current !== record) return
-          current.inFlight = false
-          // 只释放本次记录；旧回合结果不得写入 verdict 或触发新回合 nudge。
-          if ((state.turnGen ?? 0) !== turnGen || state.turnAborted || state.turnAbortSource === "user") return
-          const active = getActiveGoal(state.sessionId)
-          if (!active || active.id !== goal.id) return
-          if (result.status !== "ok") {
-            console.error(`[gateway] goal evaluator ended ${result.status}: session=${state.sessionId} ${result.error || ""}`)
-            return
-          }
-          const parsed = parseGoalVerdict(result.text)
-          if (!parsed) {
-            const updated = recordVerdict(state.sessionId, { verdict: "not_met", reason: "验收输出不可解析" })
-            current.notMet = Math.max(current.notMet + 1, updated?.not_met_streak ?? 0)
-            if (current.notMet >= GOAL_MAX_NOT_MET_STREAK) {
-              current.stopped = true
-              emitToSession(state, "message.delta", {
-                text: `目标已连续 ${current.notMet} 次未通过自动验收，本轮起停止自动验收；请人工确认目标或调整条件后再继续。\n`,
-              })
-              return
-            }
-            void injectGoalNudge(state, "验收输出不可解析").catch((e) => console.error(`[gateway] goal nudge failed: session=${state.sessionId}`, e))
-            return
-          }
-          const updated = recordVerdict(state.sessionId, parsed)
-          if (parsed.verdict === "met") {
-            emitToSession(state, "message.delta", { text: `目标验收已通过：${parsed.reason}\n` })
-            return
-          }
-          current.notMet = Math.max(current.notMet + 1, updated?.not_met_streak ?? 0)
-          if (current.notMet >= GOAL_MAX_NOT_MET_STREAK) {
-            current.stopped = true
-            emitToSession(state, "message.delta", {
-              text: `目标已连续 ${current.notMet} 次未通过自动验收，本轮起停止自动验收；请人工确认目标或调整条件后再继续。\n`,
-            })
-            return
-          }
-          void injectGoalNudge(state, parsed.reason).catch((e) => console.error(`[gateway] goal nudge failed: session=${state.sessionId}`, e))
-        })
-        record.dispatched = dispatched
-      } catch (e) {
-        console.error(`[gateway] goal acceptance failed: session=${state.sessionId}`, e)
-      } finally {
-        const current = goalEvalBySession.get(state.sessionId)
-        if (!dispatched && current === record) current.inFlight = false
-      }
-    })()
-  } catch (e) {
-    console.error("[gateway] goal acceptance gate failed:", e)
-  }
-}
-
 export function handleOpencodeEvent(event: any): void {
   try {
     const opencodeSessionId = eventSessionId(event)
@@ -1141,3 +863,5 @@ export function handleOpencodeEvent(event: any): void {
     console.error(`[gateway] opencode event translation failed: type=${event?.type}`)
   }
 }
+export { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools } from "./opencode-event-handler-hooks.ts"
+export { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } from "./opencode-event-handler-goal.ts"

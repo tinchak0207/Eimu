@@ -78,6 +78,8 @@ import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
 import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 import { useCreativeProjects } from "@/hooks/use-creative-projects";
+import { AgentQueryHandoff, type PlaygroundMode } from "@/components/image-playground/query-handoff";
+import { ImagePlaygroundFloatingOverlays } from "@/components/image-playground/floating-overlays";
 
 // 2026-08-27 专业工作站入口移除：AI 工作站（agent 模式）已吸收其独有机制
 // （LoRA 库 / 配方模板 / kunpeng 风格库），旧工作站不再被动态 import。
@@ -87,23 +89,6 @@ import { useCreativeProjects } from "@/hooks/use-creative-projects";
 
 // 聊天区的懒加载 import 在 PromptInput 里：聊天区是那张卡片的一个面，
 // 由持有 toggle 的组件自己按需拉 chunk，这里不再需要它。
-
-/** 卡片的四个面。第四个面 agent 与 edit / upscale 同级，见 PromptInput。 */
-type PlaygroundMode = PromptInputMode;
-
-/** 查询交接独立订阅：客户端历史导航也能接住，静态首页只让这一空组件等待查询。 */
-function AgentQueryHandoff({ onApply }: { onApply: (params: URLSearchParams) => void }) {
-  const searchParams = useSearchParams();
-  const query = searchParams.toString();
-  useEffect(() => {
-    const params = new URLSearchParams(query);
-    onApply(params);
-    if (params.get("agent") === "1") {
-      window.history.replaceState(window.history.state, "", window.location.pathname);
-    }
-  }, [query, onApply]);
-  return null;
-}
 
 export default function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
@@ -986,55 +971,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             <FaqSection />
           </div>
 
-      {pwaHandoffUrl && (
-        <PwaHandoffPanel
-          loginUrl={pwaHandoffUrl}
-          onSuccess={() => {
-            setPwaHandoffUrl(null);
-            refresh().catch(() => {});
-          }}
-          onClose={() => setPwaHandoffUrl(null)}
-        />
-      )}
 
-      {/* 未登入新访客的进站宣传片：z-[120] 在 navbar(z-80) 与既有 portal 弹层(z-90) 之上，
-          浮层开著时底下的首页仍完整挂载——收尾的「开始试玩」要当场把话预填进输入框，
-          整页跳转会把那个输入框连同画布一起重建。 */}
-      {promoOpen && (
-        <PromoIntroOverlay
-          onTrial={handlePromoTrial}
-          onDismiss={handlePromoDismiss}
-          needsLogin={!isLoggedIn}
-          onLoginDismiss={handlePromoLoginDismiss}
-        />
-      )}
-
-      {/* 新人礼首登弹窗（已发放、未展示才弹）。标题/正文/币数全部来自服务端，
-          这里不写死任何数字；与宣传片浮层同层级（z-[95] 的 portal）。 */}
-      {welcomeGiftOpen && welcomeGift && welcomeGift.title && welcomeGift.body && (
-        <WelcomeGiftDialog
-          open
-          title={welcomeGift.title}
-          body={welcomeGift.body}
-          onStart={handleWelcomeGiftStart}
-          onLater={handleWelcomeGiftSeen}
-        />
-      )}
-
-      {(!showProgress && (isLoading || failedProviders.length > 0)) && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 sm:bottom-6">
-          <div className="pointer-events-auto lg-bar flex items-center gap-3 rounded-ios-4xl px-5 py-2.5">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                isLoading ? "bg-[#34C759] animate-pulse" : "bg-[#FF3B30]",
-              )}
-            />
-            <span className="text-ios-footnote text-[rgba(0,0,0,0.58)]">{renderState}</span>
-          </div>
-        </div>
-      )}
-
+      <ImagePlaygroundFloatingOverlays P={{ pwaHandoffUrl, refresh, setPwaHandoffUrl, promoOpen, handlePromoTrial, handlePromoDismiss, isLoggedIn, handlePromoLoginDismiss, welcomeGiftOpen, welcomeGift, handleWelcomeGiftStart, handleWelcomeGiftSeen, showProgress, isLoading, failedProviders, renderState }} />
     </>
   );
 }

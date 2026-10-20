@@ -10,195 +10,28 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { getStoredUser } from "@/lib/new-api-client";
+import { AGENT_STEER_QUEUE_TTL_MS, EMPTY_AGENT_CHAT_STATE } from "@/lib/agent-chat-types";
 import {
-  AGENT_EVENT_NAMES,
-  AGENT_STEER_QUEUE_TTL_MS,
-  EMPTY_AGENT_CHAT_STATE,
-  parseAgentSseEvent,
-  type AgentAttachmentRef,
-  type AgentChatState,
-  type AgentEventName,
-  type AgentNoticeItem,
-  type AgentQuotaState,
-  type AgentSseEvent,
-  type AgentSteerStatus,
-} from "@/lib/agent-chat-types";
-import {
-  agentChatReducer,
-  appendUserTurn,
-  applyQuotaSnapshot,
-  applySteerRejection,
-  applySteerStatus,
-  expireQueuedSteers,
-  markQueuedSteersAborted,
-  resumeZombieTurn,
-} from "@/lib/agent-chat-reducer";
-import {
-  AgentChatError,
-  buildEventsUrl,
+  abortAgentSession,
   createAgentSession,
   createDirectSendCapability,
   deleteAgentSession,
   fetchAgentQuota,
   fetchAgentSessionMessages,
-  listAgentSessions,
-  requestSseTicket,
-  patchAgentSessionMemory,
-  resolveAgentConfirm,
-  replyAgentQuestion,
-  sendAgentMessage,
-  steerAgentSession,
-  abortAgentSession,
-  readCachedAgentSettings,
-  isSteerUnavailableError,
-  isSteerReplayRejected,
-  steerReplayStatus,
   isTerminalAuthError,
+  listAgentSessions,
+  patchAgentSessionMemory,
+  requestSseTicket,
   type DirectSendCapability,
 } from "@/lib/agent-chat-client";
 import { normalizeOpenCodeMessages } from "@/lib/agent-chat-history-normalize";
-import { createFrameBatcher, type FrameBatcher } from "@/lib/agent-chat-frame-batch";
-import {
-  clearPersisted,
-  loadPersisted,
-  loadLegacyPersisted,
-  savePersisted,
-  type PersistedAgentChat,
-} from "@/lib/agent-chat-persistence";
+import type { FrameBatcher } from "@/lib/agent-chat-frame-batch";
+import { clearPersisted, loadLegacyPersisted, loadPersisted, savePersisted, type PersistedAgentChat } from "@/lib/agent-chat-persistence";
 import type { AgentTranscriptItem } from "@/lib/agent-chat-types";
-
-// ─────────────────────────── 常数
-
-const INITIAL_BACKOFF_MS = 1_000;
-const MAX_BACKOFF_MS = 30_000;
-/** 运行时 transcript 硬上限。超出丢最旧。持久化截断仍由 persistence 自己的上限负责。 */
-const MAX_RUNTIME_CHAT_ITEMS = 200;
-
-/** 存档节流：transcript 变化后至少隔 1s 才写一次 localStorage，避免每次 SSE 帧都写。 */
-const SAVE_THROTTLE_MS = 1_000;
-
-/**
- * REQ-D2：steer id（本端生成）。值域与网关 steer-core.isValidSteerId 逐字对齐
- * （[A-Za-z0-9._-]{1,64}）——乐观插入的条目要立刻有 id 可以挂状态帧，
- * 等网关回号那一轮往返会让徽章闪一下空白。
- */
-let steerSeq = 0;
-function newSteerId(): string {
-  steerSeq += 1;
-  return `steer-${Date.now().toString(36)}-${steerSeq.toString(36)}`;
-}
-
-/**
- * 僵尸还魂自愈的防抖窗口：turn.done 之后这个时间内到的内容帧当同 tick 毛刺，
- * 不触发自愈（watchdog 发完 turn.done 紧跟的补发帧不属于「还魂」证据）。
- */
-const ZOMBIE_HEAL_GAP_MS = 800;
-
-// ─────────────────────────── 本 hook 专用的非 SSE action
-// agentChatReducer 只吃 AgentSseEvent；乐观插入使用者消息、GET /quota 种子
-// 余额、本端错误 notice 这三种「不是网关事件」的状态变更，在这里包成
-// 额外 action，委派给对应的纯 helper。
-
-type AgentChatAction =
-  | AgentSseEvent
-  | { type: "user"; text: string; attachments?: AgentAttachmentRef[]; steer?: { id: string; status: AgentSteerStatus; position?: number } }
-  | { type: "quota"; quota: AgentQuotaState }
-  | { type: "notice"; tone: "info" | "error"; text: string }
-  // D-8/D-17：恢复上次会话时，把存档灌回 state（还原 items + 续传游标）。
-  // savedAt = 存档写入时刻：存档里的「排队中」steer 徽章以它为兜底锚点判逾时（D2-3）。
-  | { type: "restore"; items: AgentTranscriptItem[]; lastEventId: number; savedAt?: number }
-  // D-17：会话被回收 / 使用者选「开新会话」时，把 transcript 清空重来。
-  | { type: "reset" }
-  // REQ-D2：steer 状态落地（本地 ack 与 SSE 帧共用同一个纯 helper）与「停止优先」
-  // 的本地改判（用户按停止 → 排队中的 steer 全数改判中止）。
-  | { type: "steer-ack"; steerId: string; status: AgentSteerStatus; position?: number; queuedAt?: number }
-  // D2b：重放被拒（同一 steer_id 第二次投递）——把 catch 里落的「未能送达」占位
-  // 纠正成网关带回来的真实状态（见 reducer.applySteerRejection）。
-  | { type: "steer-rejection"; steerId: string; status: AgentSteerStatus }
-  | { type: "steer-abort-queued" }
-  // REQ-D2（D2-3）：排队逾时清扫——「排队中」超过 AGENT_STEER_QUEUE_TTL_MS 还没收到
-  // 任何终态帧（网关重启后必然如此）→ 翻 failed「未能送达」，不留永久「排队中」。
-  | { type: "steer-expire"; now: number }
-  // 僵尸还魂自愈：turn.done 宣告收尾后内容帧仍到达，把回合拉回流式中。
-  // hook 侧判定时机（防抖/是否新发送），落地交给纯 helper，与上面同范式。
-  | { type: "zombie-resurrect" };
-
-function capRuntimeChatItems(state: AgentChatState): AgentChatState {
-  if (state.items.length <= MAX_RUNTIME_CHAT_ITEMS) return state;
-  return { ...state, items: state.items.slice(-MAX_RUNTIME_CHAT_ITEMS) };
-}
-
-function chatReducer(state: AgentChatState, action: AgentChatAction): AgentChatState {
-  return capRuntimeChatItems(reduceAgentChat(state, action));
-}
-
-function reduceAgentChat(state: AgentChatState, action: AgentChatAction): AgentChatState {
-  // 网关事件都有 name，本端合成 action 用 type —— 用 in 判别，两边互不干扰。
-  if ("name" in action) {
-    return agentChatReducer(state, action);
-  }
-  switch (action.type) {
-    case "user":
-      return appendUserTurn(state, action.text, action.attachments, action.steer);
-    case "steer-ack":
-      return applySteerStatus(state, action.steerId, action.status, action.position, action.queuedAt);
-    case "steer-rejection":
-      return applySteerRejection(state, action.steerId, action.status);
-    case "steer-abort-queued":
-      return markQueuedSteersAborted(state);
-    case "steer-expire":
-      return expireQueuedSteers(state, { now: action.now, ttlMs: AGENT_STEER_QUEUE_TTL_MS });
-    case "quota":
-      return applyQuotaSnapshot(state, action.quota);
-    case "notice": {
-      let count = 0;
-      for (const item of state.items) {
-        if (item.kind === "notice") count += 1;
-      }
-      const notice: AgentNoticeItem = {
-        kind: "notice",
-        id: `notice-local-${count}`,
-        seq: 0,
-        tone: action.tone,
-        text: action.text,
-      };
-      return { ...state, items: [...state.items, notice] };
-    }
-    // 恢复存档：items 与续传游标来自持久化层；额度只留已知的，其余字段回初始。
-    case "restore": {
-      const restored: AgentChatState = {
-        ...EMPTY_AGENT_CHAT_STATE,
-        items: action.items.map((item) => ({ ...item })),
-        lastEventId: action.lastEventId,
-      };
-      // D2-3：存档里的「排队中」徽章不能原样复活（网关的 pendingSteers 是 volatile，
-      // 重启即消失且不再补终态帧）。以存档时刻为兜底锚点扫一趟，逾时的一律落
-      // 「未能送达」；仍在时窗内的记下锚点，由下面排定的清扫定时器兜底。
-      return expireQueuedSteers(restored, {
-        now: Date.now(),
-        ttlMs: AGENT_STEER_QUEUE_TTL_MS,
-        ...(typeof action.savedAt === "number" ? { baselineAt: action.savedAt } : {}),
-      });
-    }
-    case "reset":
-      return EMPTY_AGENT_CHAT_STATE;
-    case "zombie-resurrect":
-      return resumeZombieTurn(state);
-  }
-}
-
-// ─────────────────────────── D-17：会话是否已被网关回收
-// sse-ticket 端点对「会话不存在」回 404（client 吃到 code "not_found"）；
-// 400 通常是网关判定会话无效。401/403（unauthorized）是登录态问题，
-// 不能当成「会话被回收」来清档重开。
-function isSessionReclaimed(err: unknown): boolean {
-  if (!(err instanceof AgentChatError)) return false;
-  if (err.code === "unauthorized") return false;
-  if (err.code === "not_found") return true;
-  if (err.code === "bad_request") return true;
-  if (typeof err.status === "number" && err.status >= 400 && err.status < 500) return true;
-  return false;
-}
+import { INITIAL_BACKOFF_MS, MAX_BACKOFF_MS, SAVE_THROTTLE_MS, chatReducer, isSessionReclaimed } from "./use-agent-chat/core";
+import type { ResumableAgentChat, UseAgentChatOptions, UseAgentChatReturn } from "./use-agent-chat/types";
+import { useAgentChatConnection } from "./use-agent-chat/connection";
+import { useAgentChatCommands } from "./use-agent-chat/commands";
 
 /**
  * 本次页面访问里是否已经开过（或续过）会话。
@@ -215,82 +48,6 @@ function isSessionReclaimed(err: unknown): boolean {
 let sessionTouchedInThisVisit = false;
 
 // ─────────────────────────── hook
-
-export interface UseAgentChatOptions {
-  /** 画布 SSE 事件分流（v3 embed）：canvas.* 事件转交右侧 CanvasEmbed。 */
-  onCanvasEvent?: (event: AgentSseEvent) => void;
-  /** 发送前提供画布摘要（v3 embed）。 */
-  canvasStateProvider?: () => unknown;
-  /**
-   * 这句话因为「没登入」送不出去时，把原文交给呼叫端留住（登入完成后补送）。
-   *
-   * 为什么 hook 要主动回报而不是让 composer 自己接错误：这条失败**不会 reject**。
-   * `send()` 的 lazy 建号走 `start()`，而 `start()` 内部（runStartCore）自己
-   * catch 掉 `not_authenticated` 并只做 setError/关闭连线，然后返回 false；
-   * send() 接著走 `!sid` 分支回一句 notice 就 return —— promise 是 resolved。
-   * composer 那条「onSend 同步 throw＝没送出去，不清输入框」的守卫因此永远到不了
-   * （onSend 是 async 函式，同步 throw 根本不存在）。唯一知道真相的地方是这里。
-   *
-   * 只回报 auth 这一种：网路抖动/上游故障时把话留在 pending 格，会在使用者之后
-   * 某次无关的登入突然替他送出去，那不是他要的（见 agent-session-guard 的
-   * 「没送凭证」与「凭证被上游拒绝」之分）。
-   */
-  onSendBlockedByAuth?: (text: string) => void;
-}
-
-/**
- * D-17：还有一份「未过期」的上次会话存档时，用它让 UI 决定「继续还是开新」。
- * sessionId = 上次还在网关上的会话；itemCount / savedAt 用于展示。
- */
-export interface UseAgentChatResumable {
-  sessionId: string;
-  itemCount: number;
-  savedAt: number;
-}
-
-/** hook 内部缩写：持久化用例里就叫「可恢复的上次会话」。 */
-type ResumableAgentChat = UseAgentChatResumable;
-
-export interface UseAgentChatReturn {
-  state: AgentChatState;
-  connection: "idle" | "connecting" | "open" | "reconnecting" | "closed";
-  sessionId: string | null;
-  error: string | null;
-  start: () => Promise<void>;
-  send: (text: string, opts?: { sessionDirective?: string; silent?: boolean }) => Promise<void>;
-  /** true = 网关已受理该次裁决；false = 请求失败（已连带发出错误 notice）。 */
-  confirm: (requestId: string, approved: boolean) => Promise<boolean>;
-  /** true = 网关已受理该次回答；false = 请求失败（已连带发出错误 notice）。 */
-  answerQuestion: (requestId: string, answers: string[][]) => Promise<boolean>;
-  retry: () => Promise<void>;
-  end: () => Promise<void>;
-  abort: () => Promise<void>;
-  /** 是否有一个 abort 请求正在飞行中（供 UI 禁用「停止」按钮，避免重复点击双发）。 */
-  aborting: boolean;
-  /**
-   * true = 空态首发正在 lazy 建号（建号 + 铸 SSE 票两段跨境往返）。
-   * 这段真空期 UI 本来零变化，消费者据此渲染「正在建立对话」忙碌态 ——
-   * 不能用合成 turn.status 代替：那会让 turnActive 提前为真，制造假回合。
-   */
-  startingSession: boolean;
-  // D-17：上次会话存档。非空时 Surface 把存档收进「对话历史」并清空回空态
-  //（09-12：建号权收归发送按钮，挂载不再自动开场，存档不再驱动任何自动建号）。
-  resumable: ResumableAgentChat | null;
-  resume: () => Promise<void>;
-  /** 切换到指定的历史会话（对话历史 dropdown）。 */
-  switchSession: (targetSessionId: string) => Promise<boolean>;
-  /** 开新对话：旧会话保留在历史里可切回（不删除）。 */
-  startNewSession: () => Promise<boolean>;
-  /** 使用者明确动作（如点附件上传）时的 lazy 建号：回传当前 sid；建号失败回 null。
-   *  与 send() 的 lazy 建号同源，复用 start() 串行化管线（在飞搭车，不并发第二条 POST）。 */
-  ensureSession: () => Promise<string | null>;
-  discardAndStartNew: () => Promise<void>;
-  /**
-   * 直接往 transcript 发一条系统通知（tone=info/error）。
-   * 给旁路回馈用：RerunDialog 完成讯息这类「不在对话流里、但要留痕」的结果。
-   */
-  dispatchNotice: (tone: "info" | "error", text: string) => void;
-}
 
 export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn {
   const { onCanvasEvent, canvasStateProvider, onSendBlockedByAuth } = options ?? {};
@@ -572,178 +329,28 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     [dispatch],
   );
 
-  // 开一条连线：mint ticket → new EventSource → 挂 10 个事件监听。
-  // 用 connectSeq 挡掉慢票竞态：旧的 mint 回来时若序号已变就直接丢。
-  // resume 场景下，stateRef 还停留在旧值（restore 的 dispatch 要等 React 下一帧），
-  // 所以允许显式传入 lastEventId 作为续传游标；若调用方已铸好票（resume）
-  // 则直接用，不再多 mint 一张。
-  const openConnection = useCallback(
-    async (explicitLastEventId?: number, preMintedTicket?: Awaited<ReturnType<typeof requestSseTicket>>): Promise<void> => {
-      if (closedRef.current) return;
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-
-      const seq = ++connectSeqRef.current;
-      // 旧连线的缓冲残帧属于上一条生命，换世代即丢——丢掉不会漏内容：还没
-      // apply 的帧必然没推进 lastEventId，而下面的 resumeFrom 取自
-      // stateRef.current.lastEventId，网关续传会把它们原样回放。
-      frameBatcherRef.current?.drop();
-      frameBatcherRef.current = createFrameBatcher({ apply: (evt) => dispatch(evt) });
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
-      }
-      setConnection("connecting");
-      // 新连线世代开始：旧票作废、闩锁重设——直连腿对新票代重新探测，
-      // 老网关每代最多付一次 401 学费，补丁上线后下一张票即自动转直连。
-      activeTicketRef.current = null;
-      directCapRef.current = createDirectSendCapability();
-
-      let ticket = preMintedTicket;
-      if (!ticket) {
-        try {
-          ticket = await requestSseTicket(sid);
-        } catch (err) {
-          if (seq !== connectSeqRef.current || !mountedRef.current) return;
-          if (isTerminalAuthError(err)) {
-            closedRef.current = true;
-            closedReasonRef.current = 'auth';
-            setConnection("closed");
-            setError(err instanceof Error ? err.message : "登录已失效，请重新登录。");
-            return;
-          }
-          scheduleReconnect();
-          return;
-        }
-        if (seq !== connectSeqRef.current || !mountedRef.current || closedRef.current) return;
-      }
-      // 票到手才落位；绑定 sid 供 send 核对归属，防止拿到前一会话的残票去打新会话。
-      activeTicketRef.current = { sessionId: sid, ticket };
-      const resumeFrom = typeof explicitLastEventId === "number" ? explicitLastEventId : stateRef.current.lastEventId;
-      const url = buildEventsUrl(ticket.events_url, ticket.ticket, resumeFrom);
-    const es = new EventSource(url);
-    esRef.current = es;
-
-    es.onopen = () => {
-      if (seq !== connectSeqRef.current || !mountedRef.current) return;
-      backoffRef.current = INITIAL_BACKOFF_MS; // 成功开通就重置退避
-      setConnection("open");
-      setError(null);
-    };
-
-    for (const name of AGENT_EVENT_NAMES) {
-      es.addEventListener(name, handleSseEvent(name, seq));
-    }
-
-    es.onerror = () => {
-      if (seq !== connectSeqRef.current) return;
-      if (closedRef.current || !mountedRef.current) return;
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
-      }
-      setConnection("reconnecting");
-      scheduleReconnect();
-    };
-
-    function scheduleReconnect() {
-      if (closedRef.current || !mountedRef.current) return;
-      if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = window.setTimeout(() => {
-        retryTimerRef.current = null;
-        void openConnection();
-      }, nextBackoff());
-    }
-    // dispatch 来自 useReducer，恒稳定；列进依赖只为让并批器的 apply 闭包
-    // 有据可依（行为与原来的空依赖等价）。
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 handleSseEvent：它是本档案在 openConnection 之后（第 601 行）才宣告的 useCallback，列入依赖阵列会在首帧 render 求值时触发 TDZ（Cannot access 'handleSseEvent' before initialization）；nextBackoff 已补进依赖。
-  }, [dispatch, nextBackoff]);
-
-  // 一帧 SSE 的统一入口：parse → 丢掉不合契约的 → dispatch。
-  const handleSseEvent = useCallback(
-    (name: AgentEventName, seq: number) => (e: Event) => {
-      if (seq !== connectSeqRef.current) return;
-      const msg = e as MessageEvent;
-      const raw = typeof msg.data === "string" ? msg.data : "";
-      const evt = parseAgentSseEvent(name, raw);
-      if (!evt) return;
-      // v3 embed：canvas 事件 + 完成讯号（image.done/turn.done/session.closed）也
-      // 分流给右侧 CanvasEmbed（走 useCanvasChat），让画布能对「图完成」做最终一
-      // 致性收敛，不依赖 gateway 一定发出 canvas.node.updated。
-      if (
-        evt.name.startsWith("canvas.") ||
-        evt.name === "image.done" ||
-        evt.name === "image.failed" ||
-        evt.name === "turn.done" ||
-        evt.name === "session.closed" ||
-        // 第一次 workflow_start 调用即分流：右侧面板要在工作流真正落地前就切画布。
-        (evt.name === "tool.invoke" && evt.data.tool === "workflow_start")
-      ) {
-        onCanvasEventRef.current?.(evt);
-      }
-      if (evt.name === "turn.done") {
-        // 僵尸自愈的时间锚点：回合在此刻被宣告收尾。
-        lastTurnDoneAtRef.current = Date.now();
-      }
-      if (evt.name === "session.closed") {
-        // 终结事件：马上关 ES、清计时器，剩下的交给 state.closed effect。
-        // 来源标 'session'（网关回收/终结）——switchSession/resume/startNewSession
-        // 入口据此判为「可开启新生命」而解锁重连，非 auth/manual 的永久封锁。
-        closedRef.current = true;
-        closedReasonRef.current = 'session';
-        if (esRef.current) {
-          esRef.current.close();
-          esRef.current = null;
-        }
-        if (retryTimerRef.current !== null) {
-          window.clearTimeout(retryTimerRef.current);
-          retryTimerRef.current = null;
-        }
-      }
-      // 用户中止静默窗：迟到的文本帧直接丢，连还魂检查都不进——
-      // （a）残响 delta 不再往已冻结的气泡里续写；（b）残响不把发送钮
-      // 翻回「中止助理生成」。canvas.* 帧照常派发（服务器侧已在跑的
-      // 出图终态是真结果），但不触发还魂。下一轮 send() 解除。
-      if (
-        (evt.name === "message.delta" || evt.name === "reasoning.delta") &&
-        mutedUntilNextSendRef.current
-      ) {
-        return;
-      }
-      // 僵尸还魂自愈（物种 A）：watchdog 误判发出的 turn.done 不撤回，retry
-      // 的内容帧却继续灌进同一条连线。回合已收尾、其间没有新的用户发送、
-      // 且距 turn.done 已超过防抖窗口（>800ms 才算真还魂，同 tick 补发帧不算）
-      // 时，内容帧一到就把会话拉回流式中——发送钮翻回「中止助理生成」，
-      // 不再停在「系统说死亡但内容还在冒」的断点假象。文本/工具帧的
-      // turnActive 恢复 reducer 本来就会做，这里统一补一发，让 canvas.* 这类
-      // 不经 reducer 分支的内容帧也能翻回按钮；turn.done 重复帧不触发。
-      if (
-        evt.name === "message.delta" ||
-        evt.name === "reasoning.delta" ||
-        evt.name === "tool.invoke" ||
-        evt.name === "tool.result" ||
-        evt.name.startsWith("canvas.")
-      ) {
-        const snapshot = stateRef.current;
-        const doneAt = lastTurnDoneAtRef.current;
-        if (
-          !mutedUntilNextSendRef.current &&
-          !snapshot.closed &&
-          !snapshot.turnActive &&
-          lastSendAtRef.current < (doneAt ?? Number.MAX_SAFE_INTEGER) &&
-          (doneAt === null || Date.now() - doneAt > ZOMBIE_HEAL_GAP_MS)
-        ) {
-          dispatch({ type: "zombie-resurrect" });
-        }
-      }
-      // 并批出口：文字帧进缓冲（同窗口折成一次渲染），其余帧在 batcher 内部
-      // 先 flush 缓冲再自己落地。上面所有副作用都在本行之前同步跑完，顺序不变。
-      const batcher = frameBatcherRef.current;
-      if (batcher) batcher.push(evt);
-      else dispatch(evt);
-    },
-    [dispatch],
-  );
+  const { openConnection } = useAgentChatConnection({
+    dispatch,
+    nextBackoff,
+    setConnection,
+    setError,
+    mountedRef,
+    stateRef,
+    sessionIdRef,
+    esRef,
+    retryTimerRef,
+    connectSeqRef,
+    frameBatcherRef,
+    closedRef,
+    closedReasonRef,
+    activeTicketRef,
+    directCapRef,
+    backoffRef,
+    onCanvasEventRef,
+    lastTurnDoneAtRef,
+    mutedUntilNextSendRef,
+    lastSendAtRef,
+  });
 
   // abort() 与 send() 内部的 steer-abort 唯一入口：同一时刻只允许一个 abort
   // 网络请求在飞行，第二个调用者（无论来自哪个入口）复用同一个 in-flight
@@ -853,303 +460,39 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     return accountEpochRef.current === accountEpoch ? sessionIdRef.current : null;
   }, [start]);
 
-  const send = useCallback(
-    async (text: string, opts?: { sessionDirective?: string; silent?: boolean }): Promise<void> => {
-      if (!currentAccountRef.current()) return;
-      const accountEpoch = accountEpochRef.current;
-      const trimmed = typeof text === "string" ? text.trim() : "";
-      if (!trimmed) return;
-      if (closedRef.current) return;
-
-      // 09-12 建号权收归发送按钮：空态（还没会话）＝先建号再发。forceNew 放行
-      // 存档检查——用户在空态按发送就是明确要开新对话，不得被「继续上次」类
-      // 检查卡住。start() 幂等且串行化（在飞管线搭车，不并发第二条 POST），
-      // 失败不抛错（内部已走 setError 路）。
-      if (!sessionIdRef.current) {
-        forceNewRef.current = true;
-        // 空态首发＝建号（+SSE 票）两段跨境往返的真空期：UI 必须立刻有回应，
-        // 不能等 start() 回来才动——那段时间输入框已清空而画面全真空，
-        // 使用者只看到「按了没反应」。旗标只涵盖自己触发的这条建号路径，
-        // ensureSession（附件上传）不动。
-        setStartingSession(true);
-        try {
-          await start();
-        } finally {
-          if (mountedRef.current && accountEpochRef.current === accountEpoch) setStartingSession(false);
-        }
-      }
-      if (accountEpochRef.current !== accountEpoch || !mountedRef.current) return;
-      // sessionId 判空必须留在乐观插入之前（铁律）：建号失败（未登录/网络/已
-      // 关闭）时 sid 仍 null——不能把使用者的话回声进 transcript，否则留下一句
-      // 永久的「幽灵」用户发言，且没有任何办法标记它其实从未送达。
-      const sid = sessionIdRef.current;
-      if (!sid) {
-        // 登入失效这一种要分开处理：那句话没送出去（也不是使用者放弃），
-        // 交给呼叫端留住、登入后补送——否则未登入访客在主输入区打的字当场消失
-        // （composer 已清空，且 GitHub 登入是整页跳转，回来什么都不剩）。
-        // 文案也要说得出路，不能只回一句「无法发送」。
-        if (closedRef.current && closedReasonRef.current === "auth") {
-          onSendBlockedByAuth?.(trimmed);
-          dispatchNotice("error", "这条消息还没发出去（需要登录）——登录完成后会自动发出。");
-          return;
-        }
-        dispatchNotice("error", "尚未建立会话，无法发送消息。");
-        return;
-      }
-      // 记录发送时刻：僵尸自愈要区分「turn.done 之后用户又发了新消息」——
-      // 那之后的内容帧属于新回合，不算还魂证据。
-      lastSendAtRef.current = Date.now();
-      // 新回合开始：解除用户中止静默窗（abort() 置位）。
-      mutedUntilNextSendRef.current = false;
-      // 捕获当前操作代（必须在上面的 lazy 建号之后——建号落地会 bump epoch，
-      // 捕获过早会把自家新会话误判成「会话已切换」）：switchSession/
-      // startNewSession/resume/start 建立新会话时递增它。下面 await 完
-      // steer-abort/sendAgentMessage 前重新核对，若已变说明使用者在等待期间
-      // 切换了会话，不能把消息送去旧会话。
-      const epoch = sessionEpochRef.current;
-
-      // REQ-D2（2026-09-22）：回合进行中的输入分两种语义，先判定再决定乐观插入的形态。
-      //   steering=true（默认设定 interrupt_mode:"steer"）：走 steer 端点——回合中追加
-      //   指引，**不打断当前回合**（这正是 D2 要吃的对称差）。回合卡在 question 断点时
-      //   网关把它注入当前回合；没有断点时诚实排队（徽章显示「排队中·本回合结束后生效」）。
-      //   非回合中（turnActive=false）⇒ steering=false ⇒ 下面的路径与改动前逐位等价。
-      // interrupt_mode 从 localStorage 缓存即时读（设定弹层写入），不发网络请求阻塞发送。
-      const steering = stateRef.current.turnActive && readCachedAgentSettings().interrupt_mode === "steer";
-      const steerId = steering ? newSteerId() : "";
-
-      // 乐观插入使用者消息。directive 是隐形上下文，只随请求上送，绝不进 transcript；
-      // silent=true（模板注入）同样不进 transcript——用户只看到 agent 的引导，看不到被注入的 prompt。
-      if (!opts?.silent) {
-        // 分岔刻意写成 if/else 而不是三元：非 steer 那一条与改动前**逐字相同**
-        //（既有 source 断言（agent-chat-ui.test.ts 的乐观插入顺序锁）钉著那行字面，
-        //  也让「无 steer 时行为逐位等价」在原始码层看得见）。
-        if (steering) {
-          dispatch({ type: "user", text: trimmed, steer: { id: steerId, status: "queued" } });
-        } else {
-          dispatch({ type: "user", text: trimmed });
-        }
-      }
-
-      // steer 腿：只追加指引，不碰 abort（停止仍由停止钮独占）。ack 的 status 是
-      // 网关的诚实判定，本地把它落到同一条目上（与 SSE 帧共用 applySteerStatus）。
-      // 409 契约（D2-2）：网关明说「当前没有可引导的回合」= 改走正常送出，
-      // 内容绝不能被吞——这条旗标就是「落回下面正常送出腿」的唯一开关。
-      let fellBackToPlainSend = false;
-      if (steering) {
-        try {
-          const ack = await steerAgentSession(sid, trimmed, { steerId });
-          if (accountEpochRef.current !== accountEpoch) return;
-          dispatch({
-            type: "steer-ack",
-            steerId: ack.steer_id,
-            status: ack.status,
-            // 位置只在 queued 形态存在（injected 是本回合内即时生效，没有队列位置）。
-            position: ack.status === "queued" ? ack.position : undefined,
-            // 本端入队时刻：D2-3 逾时清扫的锚点（网关不送时间戳，只有本端知道）。
-            queuedAt: ack.status === "queued" ? Date.now() : undefined,
-          });
-          if (ack.status === "queued") armSteerExpiry(AGENT_STEER_QUEUE_TTL_MS);
-          dispatchNotice(
-            "info",
-            ack.status === "injected"
-              ? "已注入本回合：助理会按这条指引继续"
-              : `已排队${typeof ack.position === "number" ? `（第 ${ack.position} 条）` : ""}，本回合结束后生效`,
-          );
-        } catch (err) {
-          if (accountEpochRef.current !== accountEpoch) return;
-          // 送不进去就说实话：徽章改「未生效」，不让用户以为指令已经在跑。
-          dispatch({ type: "steer-ack", steerId, status: "failed" });
-          if (isSteerUnavailableError(err)) {
-            // 网关 409：现在没有可引导的回合（没在跑／已中止）。改成普通消息送出去，
-            // 用户的这句话必须落地——徽章与提示照旧保留（诚实标注引导形态未生效）。
-            fellBackToPlainSend = true;
-            dispatchNotice("info", "当前没有进行中的回合，已改为直接发送消息。");
-          } else if (isSteerReplayRejected(err)) {
-            // D2b：网关拒绝重放（同一个 steer_id 第二次投递）——**绝不落回正常送出**
-            //（那等于把同一条指引送第二次，正是本刀要禁的事故）。上面那句「未能送达」
-            // 是本地占位猜测，这里用网关带回来的真实状态纠正它：可能已经生效、已经中止，
-            // 或（重启后未确认）uncertain。提示也要说清「不会重复发送」。
-            dispatch({ type: "steer-rejection", steerId, status: steerReplayStatus(err) });
-            dispatchNotice("info", "这条引导已经在处理中或已有结果，不会重复发送。");
-          } else {
-            dispatchNotice("error", err instanceof Error ? err.message : "引导未能提交，请重试。");
-          }
-        }
-        // 只有真的走完 steer 腿（注入或排队）才在这里收口；409 落回下面的正常送出腿。
-        if (!fellBackToPlainSend) return;
-      }
-
-      // 罪状 3：回合进行中再发消息，opencode 会把它排队静默吞掉——用户以为已
-      // 送达，实际要等本轮跑完才被处理，画面上没有任何提示。interrupt_mode="queue"
-      // 时照发并说明「本轮结束后处理」（steer 腿已在上面 return，不会到这）。
-      if (stateRef.current.turnActive && !fellBackToPlainSend) {
-        dispatchNotice("info", "已加入队列，本轮结束后自动处理");
-      }
-
-      // 会话代校验：上面的 await（steer-abort）期间若使用者切了会话/开了新
-      // 会话，sid 已经是死会话，不能再把消息送过去——放弃发送并说清楚。
-      if (accountEpochRef.current !== accountEpoch) return;
-      if (sessionEpochRef.current !== epoch) {
-        dispatchNotice("error", "会话已切换，消息未发送，请重新发送。");
-        return;
-      }
-
-      try {
-        // 09-12 直连腿：有现任且归属相符的票才带上上下文；client 内部负责
-        // 「直连失手→中继一次」的回落，这里不需要 try-then-retry。
-        const activeTicket = activeTicketRef.current;
-        const direct =
-          activeTicket && activeTicket.sessionId === sid
-            ? { ticket: activeTicket.ticket, capability: directCapRef.current }
-            : null;
-        await sendAgentMessage(
-          sid,
-          trimmed,
-          {
-            canvasState: canvasStateProviderRef.current?.(),
-            ...(opts?.sessionDirective ? { sessionDirective: opts.sessionDirective } : {}),
-          },
-          direct,
-        );
-      } catch (err) {
-        if (accountEpochRef.current !== accountEpoch) return;
-        dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");
-      }
-    },
-    [dispatchNotice, armSteerExpiry, start, onSendBlockedByAuth],
-  );
-
-  const confirm = useCallback(
-    async (requestId: string, approved: boolean): Promise<boolean> => {
-      if (!currentAccountRef.current()) return false;
-      const accountEpoch = accountEpochRef.current;
-      if (closedRef.current) return false;
-      const sid = sessionIdRef.current;
-      if (!sid) return false;
-      try {
-        await resolveAgentConfirm(sid, requestId, approved);
-        // 裁决结果由网关以 confirm.resolved 事件送回，reducer 会收起卡片并留痕。
-        return accountEpochRef.current === accountEpoch;
-      } catch (err) {
-        if (accountEpochRef.current !== accountEpoch) return false;
-        dispatchNotice("error", err instanceof Error ? err.message : "回复确认失败，请重试。");
-        return false;
-      }
-    },
-    [dispatchNotice],
-  );
-
-  const answerQuestion = useCallback(
-    async (requestId: string, answers: string[][]): Promise<boolean> => {
-      if (!currentAccountRef.current()) return false;
-      const accountEpoch = accountEpochRef.current;
-      if (closedRef.current) return false;
-      const sid = sessionIdRef.current;
-      if (!sid) return false;
-      try {
-        await replyAgentQuestion(sid, requestId, answers);
-        return accountEpochRef.current === accountEpoch;
-      } catch (err) {
-        if (accountEpochRef.current !== accountEpoch) return false;
-        dispatchNotice("error", err instanceof Error ? err.message : "回复问题失败，请重试。");
-        return false;
-      }
-    },
-    [dispatchNotice],
-  );
-
-  const retry = useCallback(async (): Promise<void> => {
-    if (!currentAccountRef.current()) return;
-    if (closedRef.current) return;
-    if (retryTimerRef.current !== null) {
-      window.clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-    if (!sessionIdRef.current) {
-      await start();
-      return;
-    }
-    backoffRef.current = INITIAL_BACKOFF_MS;
-    await openConnection();
-  }, [start, openConnection]);
-
-  const abort = useCallback(async (): Promise<void> => {
-    if (!currentAccountRef.current()) return;
-    const accountEpoch = accountEpochRef.current;
-    if (closedRef.current) return;
-    const sid = sessionIdRef.current;
-    if (!sid) return;
-    try {
-      await requestAbort(sid);
-      if (accountEpochRef.current !== accountEpoch || sessionIdRef.current !== sid) return;
-      // 静默窗开启：server 端 abort 落地后，opencode 的残响帧（迟到
-      // delta/前缀补发）不再渲染，直到下一次 send()。
-      mutedUntilNextSendRef.current = true;
-      // 网关对用户中止刻意不发帧（收尾由 turn.done 表达），而 turn.done 要等
-      // opencode 真正 idle 才到——中间 turnActive 一直是真，停止钮赖著不走、
-      // 送出钮回不来，使用者只看到「按了终止像没反应」，连按就是反覆打网关。
-      // 这里本端立刻合成一帧终态收尾：event_id 用 0（reducer 的续传去重守卫是
-      // eventId > 0 && eventId <= lastEventId，0 一律放行，Math.max 也不推进
-      // lastEventId，不污染游标记帐）；data 是空物件（AgentTurnDone =
-      // Record<string, never>）。顺序铁律：先 flush 待渲染的 pre-abort 正文帧，
-      // 再放终态帧——否则是「已收尾才长字」，turnActive 会被那批帧翻回真（假活）。
-      frameBatcherRef.current?.flush();
-      dispatch({ name: "turn.done", event_id: 0, data: {} });
-      // REQ-D2 停止优先：网关同一支 handleAbortSession 已把待投 steer 全数作废
-      // （dropPendingSteers），本端同步改判排队中的徽章——不等那批 aborted 帧，
-      // 用户按下停止的那一刻画面就该显示「已中止」。已 injected/applied 的条目不退。
-      dispatch({ type: "steer-abort-queued" });
-    } catch (err) {
-      if (accountEpochRef.current !== accountEpoch) return;
-      // 失败时不合成终态帧：真回合还在跑，翻成收尾就是说谎；后续 delta 本就会
-      // 自愈（reducer 收到内容帧会把 turnActive 设回真）。
-      dispatchNotice("error", err instanceof Error ? err.message : "中止失败，请重试。");
-    }
-  }, [dispatch, dispatchNotice, requestAbort]);
-
-  const end = useCallback(async (): Promise<void> => {
-    if (!currentAccountRef.current()) return;
-    const accountEpoch = accountEpochRef.current;
-    closedRef.current = true;
-    closedReasonRef.current = 'manual';
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-    if (retryTimerRef.current !== null) {
-      window.clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    setConnection("closed");
-    // 本端直接收尾：让 reducer 走一次 session.closed，UI 才看到「已结束」。
-    // 先 flush 缓冲：待渲染的正文帧必须落在终结帧之前，否则终结后还在长字。
-    frameBatcherRef.current?.flush();
-    dispatch({ name: "session.closed", event_id: 0, data: { reason: "user_ended" } });
-    // 这条连线已经终局，并批器连同时间锚一起作废（下一条连线在 openConnection 重建）。
-    frameBatcherRef.current?.drop();
-
-    const sid = sessionIdRef.current;
-    if (sid) {
-      try {
-        await deleteAgentSession(sid);
-      } catch {
-        // 释放资源是 best-effort；就算删不掉，本端也已经不再重连。
-      }
-    }
-    if (accountEpochRef.current !== accountEpoch) return;
-    // D-8：会话结束，本地存档同步清除，下次进来干净开场。
-    clearPersisted(ownerIdRef.current);
-    persistedRef.current = null;
-    setResumable(null);
-  }, [dispatch]);
+  const { send, confirm, answerQuestion, retry, abort, end } = useAgentChatCommands({
+    dispatch,
+    dispatchNotice,
+    armSteerExpiry,
+    start,
+    openConnection,
+    requestAbort,
+    onSendBlockedByAuth,
+    currentAccountRef,
+    accountEpochRef,
+    sessionEpochRef,
+    ownerIdRef,
+    forceNewRef,
+    persistedRef,
+    canvasStateProviderRef,
+    stateRef,
+    sessionIdRef,
+    esRef,
+    retryTimerRef,
+    saveTimerRef,
+    frameBatcherRef,
+    activeTicketRef,
+    directCapRef,
+    mutedUntilNextSendRef,
+    lastSendAtRef,
+    backoffRef,
+    mountedRef,
+    closedRef,
+    closedReasonRef,
+    setStartingSession,
+    setConnection,
+    setResumable,
+  });
 
   /**
    * D-17：继续上次会话。用存档里的 sessionId 铸票重开 SSE，带 last_event_id 续传；
@@ -1491,3 +834,5 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     dispatchNotice,
   };
 }
+
+export type { UseAgentChatOptions, UseAgentChatResumable, UseAgentChatReturn } from "./use-agent-chat/types";
