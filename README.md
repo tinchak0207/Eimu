@@ -20,12 +20,28 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/c5d7745e-5b45-462c-8b70-a30ae618de3b" width="100%"></video>
+  <a href="https://eimu.dev/promo/eimu-promo.mp4" title="播放 Eimu 宣传片">
+    <img src="public/promo/eimu-promo-poster.jpg" alt="Eimu 宣传片" width="100%">
+  </a>
 </p>
+
+<p align="center"><strong><a href="https://eimu.dev/promo/eimu-promo.mp4">▶ 播放宣传片（49 秒）</a></strong></p>
 
 <p align="center">
   <img src="docs/preview/01-workstation.png" alt="Eimu 工作台：一句需求，结果同屏" width="100%">
 </p>
+
+## 成片
+
+<p align="center">
+  <a href="https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/eimu/showcase/eimu-milestone-caption.mp4" title="播放 Eimu 完整成片">
+    <img src="public/showcase/eimu-milestone-cover.jpg" alt="Eimu 完整成片（带字幕）" width="100%">
+  </a>
+</p>
+
+<p align="center"><strong><a href="https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/eimu/showcase/eimu-milestone-caption.mp4">▶ 播放完整成片（2:41，带字幕）</a></strong></p>
+
+2 分 41 秒的完整成片，字幕已烧录。点击封面或上方链接直接播放；自托管时文件在 `public/showcase/eimu-milestone-caption.mp4`（9.1 MB）。
 
 ## Eimu 适合你吗？
 
@@ -38,6 +54,16 @@
 如果你要持续产出漫剧、故事短片、商品投放物料或配乐，需要把第一部作品捏好的角色和产线留给第二部接着用，那它适合你。如果你只是偶尔抽一张单图或 5 秒视频图个乐子，直接去用单点模型就够了，你不需要 Eimu。
 
 桌面与手机浏览器直接访问 [eimu.dev](https://eimu.dev/) 即可使用；任何支持自定义 Base URL 或 MCP 的开发工具（Claude Code、Cursor、Codex）也能直接接入。
+
+## 开源与商业服务
+
+Eimu 的架构**全量开源**：站点前端、后端 API、生成控制面、Agent 网关与工具、数据库迁移、Docker / Nginx / systemd 部署模板都在本仓库，没有“开源版”与“商业版”的代码分叉。
+
+- **许可证**：[AGPL-3.0](LICENSE)。你可以自托管、修改、分发；通过网络向第三方提供服务时，需要按许可证公开对应源码。
+- **官方托管服务**：[eimu.dev](https://eimu.dev/) 继续以商业服务方式运营，提供上游模型通道、额度、存储与运维。开源的是架构与代码，不包含官方服务的容量、账号与供应商合约。
+- **自托管**：见 [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)。你需要自备上游账号、Postgres 与对象存储。
+- **架构说明**：见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+- **安全问题**：见 [SECURITY.md](SECURITY.md)。
 
 ## 快速上手
 
