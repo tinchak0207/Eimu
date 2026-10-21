@@ -45,7 +45,18 @@ function read(relPath: string): string {
   return readFileSync(join(root, relPath), "utf8");
 }
 
-const composer = read("src/components/agent-chat/AgentComposer.tsx");
+// <1000 行重构：键盘/斜线分支已拆到 AgentComposer.interaction.ts。
+const composer = [
+  "AgentComposer.tsx",
+  "AgentComposer.attachments.ts",
+  "AgentComposer.interaction.ts",
+  "AgentComposer.menus.tsx",
+  "AgentComposer.send-pipeline.ts",
+  "AgentComposer.types.ts",
+  "AgentComposer.upload-limits.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 
 /** 一条真实上游形状（GET /api/skills → AgentSkillView[]）。 */
 function skillView(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -235,7 +246,7 @@ test("debounce 常量在下限之上（≥150ms，本片取 160ms）", () => {
 /* ------------------------------------------------------------------ */
 
 test("源码探针：Esc 分支不送出不清理，关着菜单时的既有送出契约逐字未变", () => {
-  const slashBlockStart = composer.indexOf("if (slashMenuOpen) {");
+  const slashBlockStart = composer.indexOf("if (P.slashMenuOpen) {");
   assert.ok(slashBlockStart >= 0, "composer 必须有斜线菜单的键盘分支");
   const slashBlockEnd = composer.indexOf("// Enter 发送，Shift+Enter 换行。");
   assert.ok(slashBlockEnd > slashBlockStart, "键盘分支边界必须能定位");
@@ -244,7 +255,7 @@ test("源码探针：Esc 分支不送出不清理，关着菜单时的既有送�
   // Esc 只收菜单：这个分支里不许出现送出/清空输入框的调用（不送出＝本片硬要求）。
   assert.doesNotMatch(slashBlock, /handleSend\(/, "Esc/上下键分支不得触发送出");
   assert.doesNotMatch(slashBlock, /setText\(/, "Esc 不得清掉使用者打的指令");
-  assert.match(slashBlock, /setSlashArmed\(false\)/);
+  assert.match(slashBlock, /P\.setSlashArmed\(false\)/);
   // Enter/Tab 是「选中」：写回输入框走 handleSlashPick，不自动送出。
   assert.match(slashBlock, /handleSlashPick\(picked\)/);
   assert.match(composer, /onPick=\{handleSlashPick\}/);
@@ -252,7 +263,7 @@ test("源码探针：Esc 分支不送出不清理，关着菜单时的既有送�
   // 关着菜单的既有行为（送出/换行/IME）逐字仍在——本片不许动这条路径。
   assert.match(composer, /if \(event\.key === "Enter" && !event\.shiftKey\) \{/);
   assert.match(composer, /if \(event\.nativeEvent\.isComposing \|\| event\.keyCode === 229\) return;/);
-  assert.match(composer, /const canSend = computeCanSend\(trimmed, readyRefs\.length, attachments\);/);
+  assert.match(composer, /const canSend = computeCanSend\(P\.trimmed, readyRefs\.length, P\.attachments\);/);
 });
 
 /* ================================================================== */

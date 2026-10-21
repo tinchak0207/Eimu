@@ -110,7 +110,8 @@ test("B2b 变更探针（不计入已验证）：面板标签变更走 onTagsCha
   const panel = code(PANEL_PATH);
   assert.match(panel, /onTagsChange\?\.\(\)/, "标签落库后必须通知父层重读（否则打标签不进生成）");
   assert.match(panel, /assignAssetProjectTags\(/, "面板必须走项目标签写入接口");
-  const embed = code(EMBED_PATH);
+  // <1000 行重构：CanvasEmbed 的视图装配在 embed/CanvasEmbedView.tsx。
+  const embed = code(EMBED_PATH) + "\n" + code("src/components/canvas/embed/CanvasEmbedView.tsx");
   assert.match(
     embed,
     /onTagsChange=\{canvas\.refreshCharacterCards\}/,

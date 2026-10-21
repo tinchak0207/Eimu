@@ -289,7 +289,15 @@ const TTS_STATUS = "src/app/api/v1/tts/[id]/route.ts";
 const IMAGE_RESULT = "src/app/api/v1/images/[id]/result/route.ts";
 const VIDEO_RESULT = "src/app/api/v1/videos/[id]/result/route.ts";
 const MODEL_STATUS = "src/app/api/v1/model-status/route.ts";
-const OPENAPI = "src/app/api/v1/openapi.json/route.ts";
+// <1000 行重构：openapi 的 SPEC 大对象拆成 route.ts（handler）＋spec.ts／
+// spec-components.ts／spec-paths.ts。契约原文锁必须读全部 spec 模组。
+const OPENAPI_FILES = [
+  "src/app/api/v1/openapi.json/route.ts",
+  "src/app/api/v1/openapi.json/spec.ts",
+  "src/app/api/v1/openapi.json/spec-components.ts",
+  "src/app/api/v1/openapi.json/spec-paths.ts",
+];
+const OPENAPI_SOURCE = OPENAPI_FILES.map(read).join("\n");
 
 const BIZ_ROUTES = [
   GENERATIONS,
@@ -313,7 +321,7 @@ test("铁律①：每个对外路由的错误体都是 {error:{message,type,code
 });
 
 test("铁律①：错误 type 六枚举是稳定承诺，openapi 原文锁死", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   for (const type of [
     "invalid_request_error",
     "authentication_error",
@@ -327,7 +335,7 @@ test("铁律①：错误 type 六枚举是稳定承诺，openapi 原文锁死", 
 });
 
 test("铁律①：稳定错误码清单（承诺永不变）——每个码都还在 openapi 清单里", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   const stableCodes = [
     "invalid_json",
     "missing_prompt",
@@ -621,7 +629,7 @@ test("铁律⑤runtime：submit_unknown / billing_unknown 对外是 unknown—�
 });
 
 test("铁律⑤source：unknown 在 openapi TaskStatus 枚举与批量计数中都是正式成员", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   assert.match(
     openapi,
     /TaskStatus:\s*\{\s*type:\s*"string",\s*enum:\s*\[\s*"queued",\s*"running",\s*"succeeded",\s*"failed",\s*"cancelled",\s*"refunded",\s*"unknown"/,
@@ -670,7 +678,15 @@ test("铁律④source：未出图张数全退，退款在 after() 不阻塞响�
 });
 
 test("铁律④source：控制面退费对称——退 billingAmount 减已 commit 差额，全退才标 refunded", () => {
-  const source = code("src/lib/generation-core/billing-ledger.ts");
+  // <1000 行重构：billing-ledger.ts 降为 barrel，退费写入在 write.ts。
+  const source = [
+    "src/lib/generation-core/billing-ledger.ts",
+    ...["query", "schema", "types", "write"].map(
+      (m) => `src/lib/generation-core/billing-ledger/${m}.ts`,
+    ),
+  ]
+    .map(code)
+    .join("\n");
   assert.match(source, /Math\.max\(0,\s*job\.billingAmount\s*-\s*committed\)/, "退费 = billingAmount - committed");
   assert.match(
     source,
@@ -680,7 +696,7 @@ test("铁律④source：控制面退费对称——退 billingAmount 减已 comm
 });
 
 test("铁律④source：批量 quota 帐面四栏必填，billed 只有 succeeded 为 true", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   const block = openapi.slice(openapi.indexOf("BatchBillingSummary:"), openapi.indexOf("BatchItemView:"));
   for (const field of ["reserved_total", "charged_total", "refunded_total", "pending_total"]) {
     assert.ok(block.includes(field), `批量 billing 摘要缺少 ${field}`);
@@ -755,7 +771,7 @@ test("结果端点：image_generation.result / video_generation.result 形状与
 });
 
 test("openapi GenerationTask 必填栏与实现一致（栏位集漂移当场爆红）", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   const taskBlock = openapi.slice(openapi.indexOf("GenerationTask:"), openapi.indexOf("ImageResult:"));
   for (const field of TASK_REQUIRED_FIELDS) {
     assert.ok(taskBlock.includes(`"${field}"`), `openapi GenerationTask 必填栏缺少 ${field}`);

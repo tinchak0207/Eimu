@@ -184,7 +184,11 @@ test("变更探针：@ 选单两组标题与面板透传真的挂上（非行为
   assert.match(nodeView, /entityCandidates=\{entityCandidates\}/, "CanvasNodeView 需透传素材卡候选");
   assert.match(nodeView, /onToggleEntity=\{onToggleEntity\}/);
 
-  const embed = read("src/components/canvas/CanvasEmbed.tsx");
+  // <1000 行重构：候选来源与 entityCardIds 传参在 embed/CanvasEmbedView.tsx。
+  const embed = [
+    read("src/components/canvas/CanvasEmbed.tsx"),
+    read("src/components/canvas/embed/CanvasEmbedView.tsx"),
+  ].join("\n");
   assert.match(embed, /canvas\.activeCharacterCards[\s\S]*?card\.references\[0\]\?\.url \?\? ""/, "候选来源＝项目锁定卡");
   assert.match(embed, /entityCardIds: panelEntityIds/);
 

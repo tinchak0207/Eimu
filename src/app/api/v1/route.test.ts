@@ -192,7 +192,15 @@ test("/v1/models 报价前先同步 admin 覆写，避免报旧价扣新价", ()
 
 test("openapi 的 ModelObject 不得把 x_coins_per_image 列为必填", () => {
   // 视频模型没有这个字段，列必填会让严格校验的客户端把整张表判为不合规。
-  const source = read("src/app/api/v1/openapi.json/route.ts");
+  // <1000 行重构：ModelObject 的 SPEC 在 spec-components.ts。
+  const source = [
+    "src/app/api/v1/openapi.json/route.ts",
+    "src/app/api/v1/openapi.json/spec.ts",
+    "src/app/api/v1/openapi.json/spec-components.ts",
+    "src/app/api/v1/openapi.json/spec-paths.ts",
+  ]
+    .map(read)
+    .join("\n");
   const block = source.slice(source.indexOf("ModelObject:"), source.indexOf("ModelList:"));
   assert.doesNotMatch(block, /required: \[[^\]]*"x_coins_per_image"/);
   assert.match(block, /x_coins_per_second/, "契约必须描述视频的按秒单价");

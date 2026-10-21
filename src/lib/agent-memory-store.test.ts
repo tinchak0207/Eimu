@@ -122,9 +122,9 @@ test("G7：单 domain ≤8/日，第 9 条 quota_domain", async () => {
   assert.equal(result.stats.accepted, 8);
 });
 
-test("G7：单 ownerKey private ≤10/日，超额 quota_scope", async () => {
+test("G7：单 ownerKey private ≤60/日（4f1522cc 放宽），超额 quota_scope", async () => {
   __resetAgentMemoryStoreForTests();
-  const docs = Array.from({ length: 12 }, (_, i) =>
+  const docs = Array.from({ length: 62 }, (_, i) =>
     privateDoc({
       domain: `偏好域${i + 1}`,
       slug: `pref-${i + 1}`,
@@ -132,11 +132,11 @@ test("G7：单 ownerKey private ≤10/日，超额 quota_scope", async () => {
     }),
   );
   const result = await ingestMemoryDocs({ batchId: "b5", docs, now: NOW });
-  assert.equal(result.accepted.length, 10);
+  assert.equal(result.accepted.length, 60);
   assert.equal(result.rejected.length, 2);
   assert.deepEqual(result.rejected.map((r) => r.reason), ["quota_scope", "quota_scope"]);
   const listed = await listMemoryDocs({ scope: "private", ownerKey: "owner-a-hash" });
-  assert.equal(listed.length, 10);
+  assert.equal(listed.length, 60);
 });
 
 test("G7：单批 shared ≤20，第 21 条 quota_scope（Map 兜底很快，大批照测）", async () => {

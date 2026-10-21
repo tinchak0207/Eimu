@@ -16,7 +16,14 @@ function read(relPath: string) {
 }
 
 const panel = read("src/components/agent-chat/AgentChatPanel.tsx");
-const surface = read("src/components/agent-chat/AgentChatSurface.tsx");
+// <1000 行重构：Surface 的会话动作已拆到同目录子模组。
+const surface = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const batchProgress = read("src/components/agent-chat/AgentBatchProgress.tsx");
 
 test("surface 把 hook 的 aborting / startingSession 接进 panel", () => {
@@ -115,7 +122,7 @@ test("既有字面未回退", () => {
   assert.match(surface, /onStopGeneration=\{state\.turnActive \? onStopGeneration : undefined\}/);
   // 停止仍然接到 abort 端点，不是往对话里塞一句停止指令。
   assert.match(surface, /const onStopGeneration = useCallback/);
-  assert.match(surface, /void abort\(\)/);
+  assert.match(surface, /void P\.abort\(\)/);
   // 2026-09-20 Route C 重设计裁定：决策卡（question/confirm）在场不再锁
   // composerDisabled（改由 composer 上缘 2px 蓝提示条提示「有卡待选」）。
   // 这里锁收窄后的字面，且不许 pending 条件悄悄吃回来。

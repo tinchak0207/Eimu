@@ -44,7 +44,22 @@ function read(relPath: string): string {
   return readFileSync(join(root, relPath), "utf8");
 }
 
-const composer = read("src/components/agent-chat/AgentComposer.tsx");
+// <1000 行重构：AgentComposer.tsx 本体保留 JSX，交互/上传/送出/菜单/本机档控件
+// 拆成同目录子模组。源码断言必须读全模组集合，顺序与组件实际组成一致
+// （interaction 在前，send-pipeline 在后，slice 边界仍落在各自模块内）。
+const composer = [
+  "AgentComposer.tsx",
+  "AgentComposer.attachments.ts",
+  "AgentComposer.interaction.ts",
+  "AgentComposer.local-file-mode.tsx",
+  "AgentComposer.menus.tsx",
+  "AgentComposer.placeholder.ts",
+  "AgentComposer.send-pipeline.ts",
+  "AgentComposer.upload-limits.ts",
+  "AgentComposer.types.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 
 /**
  * 去掉注释后的源码。顺序类断言（谁在谁之前）必须走这里：
@@ -120,7 +135,7 @@ test("IME 组字中的 Enter 不送出：isComposing 判定在 preventDefault �
 
 test("Enter 送出 / Shift+Enter 换行的字面契约不变", () => {
   assert.match(composer, /event\.key === "Enter" && !event\.shiftKey/);
-  assert.match(keyDownRegion, /if \(!canSend\) return;/);
+  assert.match(keyDownRegion, /if \(!P\.canSend\) return;/);
 });
 
 test("送出锁：ref 同步挡连点 + finally 解锁 + 20s 硬保险", () => {
@@ -128,15 +143,15 @@ test("送出锁：ref 同步挡连点 + finally 解锁 + 20s 硬保险", () => {
   assert.match(composer, /const \[sending, setSending\] = useState\(false\);/);
   assert.match(composer, /const sendingRef = useRef\(false\);/);
   // handleSend 开头的同步守卫（在 canSend 检查之前，任何路径都先挡）。
-  assert.match(composer, /if \(sendingRef\.current\) return;/);
+  assert.match(composer, /if \(P\.sendingRef\.current\) return;/);
   // 上锁：通过资格检查后立刻写 ref + state。
-  assert.match(composer, /sendingRef\.current = true;\s*\n\s*setSending\(true\);/);
+  assert.match(composer, /P\.sendingRef\.current = true;\s*\n\s*P\.setSending\(true\);/);
   // 解锁幂等：清计时器 + ref + state 一起清。
   assert.match(composer, /const unlockSend = useCallback\(\(\) => \{/);
-  assert.match(composer, /sendingRef\.current = false;\s*\n\s*setSending\(false\);/);
-  assert.match(composer, /clearTimeout\(sendUnlockTimerRef\.current\)/);
+  assert.match(composer, /P\.sendingRef\.current = false;\s*\n\s*P\.setSending\(false\);/);
+  assert.match(composer, /clearTimeout\(P\.sendUnlockTimerRef\.current\)/);
   // promise 统一化 + 吞异常 + finally 解锁（错误提示由 hook 的 notice 负责）。
-  assert.match(composer, /Promise\.resolve\(onSend\(finalText\)\)/);
+  assert.match(composer, /Promise\.resolve\(P\.onSend\(finalText\)\)/);
   assert.match(composer, /\.catch\(\(\) => \{\}\)\s*\n\s*\.finally\(unlockSend\)/);
   // 同步 throw 也要解锁，否则按钮永久假死。
   assert.match(handleSendRegion, /\} catch \{\s*unlockSend\(\);/);
@@ -162,7 +177,7 @@ test("送出钮：字面契约不回归，sending 时只换图标与 aria-busy",
 
 test("输入区其余契约不动：disabled / canSend / autoGrow", () => {
   assert.match(composer, /disabled=\{disabled\}/);
-  assert.match(composer, /const canSend = computeCanSend\(trimmed, readyRefs\.length, attachments\);/);
+  assert.match(composer, /const canSend = computeCanSend\(P\.trimmed, readyRefs\.length, P\.attachments\);/);
   assert.match(composer, /function autoGrow\(el: HTMLTextAreaElement\)/);
   assert.match(composer, /autoGrow\(event\.currentTarget\)/);
   assert.match(composer, /textareaRef\.current\.style\.height = "auto"/);

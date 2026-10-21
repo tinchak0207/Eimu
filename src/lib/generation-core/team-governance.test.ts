@@ -739,7 +739,15 @@ test("断言⑤（禁影子帐本）：治理写入路径不呼叫任何上游�
       !cp.queries.some((q) => /account_ledger|billing_operation|used_quota/.test(q)),
       "治理路径不得写任何点数帐本",
     );
-    const source = stripped("src/lib/generation-core/team-governance.ts");
+    // <1000 行重构：team-governance.ts 降为 barrel，用量读法在 usage.ts；全模组一起扫。
+    const source = [
+      "src/lib/generation-core/team-governance.ts",
+      ...["joins", "lifecycle", "policies", "roles", "store", "types", "usage"].map(
+        (m) => `src/lib/generation-core/team-governance/${m}.ts`,
+      ),
+    ]
+      .map(stripped)
+      .join("\n");
     for (const forbidden of [
       "adjustGatewayUserQuotaExact",
       "setGatewayUserImageQuota",

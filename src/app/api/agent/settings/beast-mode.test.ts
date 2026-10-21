@@ -68,7 +68,11 @@ test("设定弹层撤出四列开关；野兽模式改由输入区思考级别�
   // 新承载点：思考级别菜单经既有唯一写入者 saveAgentSettings 落三栏 patch
   // （extreme → beast_mode:true 由 AGENT_THINKING_LEVEL_SETTINGS 真源定义，
   //  见 agent-chat-client.test.ts 的逐档断言）。
-  const composer = read("src/components/agent-chat/AgentComposer.tsx");
+  // <1000 行重构：思考级别菜单在 AgentComposer.menus.tsx。
+  const composer = [
+    read("src/components/agent-chat/AgentComposer.tsx"),
+    read("src/components/agent-chat/AgentComposer.menus.tsx"),
+  ].join("\n");
   assert.match(composer, /function ThinkingLevelMenu/, "思考级别菜单必须落在输入区");
   assert.match(composer, /saveAgentSettings\(agentThinkingLevelPatch\(next\)\)/, "改档走既有设置写入链路");
 });
@@ -77,7 +81,15 @@ test("client 侧 beast_mode 键与 expert-registry 常量同值（镜像守卫�
   // expert-registry 含 node:child_process 链，client 模块只能镜像字面量；
   // 该守卫防两处字面量漂移，并守 client 不吞 server-only 链。
   const registry = read("src/lib/expert-registry.ts");
-  const client = read("src/lib/agent-chat-client.ts");
+  // <1000 行重构：思考级别映射在 agent-chat-client/types.ts。
+  const client = [
+    "src/lib/agent-chat-client.ts",
+    ...["auth", "session", "settings", "transport", "types"].map(
+      (m) => `src/lib/agent-chat-client/${m}.ts`,
+    ),
+  ]
+    .map(read)
+    .join("\n");
   const registryKey = registry.match(/export const BEAST_MODE_SETTINGS_KEY = "([^"]+)" as const/);
   assert.ok(registryKey, "expert-registry.ts 必须导出 BEAST_MODE_SETTINGS_KEY 字面量");
   assert.equal(registryKey[1], "beast_mode");

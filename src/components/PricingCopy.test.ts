@@ -4,7 +4,17 @@ import { readFileSync } from "node:fs";
 
 const pricingSource = readFileSync(new URL("./PricingClient.tsx", import.meta.url), "utf8");
 // 2026-09-07 carousel 化：方案卡面（含换算口径文案）迁入 PricingPlanCarousel。
-const carouselSource = readFileSync(new URL("./PricingPlanCarousel.tsx", import.meta.url), "utf8");
+// <1000 行重构：卡面/收银台迁入 PricingPlanCarousel/ 子模组，barrel 只剩装配。
+const carouselSource = [
+  "./PricingPlanCarousel.tsx",
+  "./PricingPlanCarousel/card-faces.tsx",
+  "./PricingPlanCarousel/geometry.ts",
+  "./PricingPlanCarousel/plan-placeholder.ts",
+  "./PricingPlanCarousel/slider-math.ts",
+  "./PricingPlanCarousel/types.ts",
+]
+  .map((rel) => readFileSync(new URL(rel, import.meta.url), "utf8"))
+  .join("\n");
 const plansSource = readFileSync(new URL("../lib/plans.ts", import.meta.url), "utf8");
 const mapaySource = readFileSync(new URL("../lib/mapay.ts", import.meta.url), "utf8");
 const copy = [pricingSource, carouselSource, plansSource, mapaySource].join("\n");

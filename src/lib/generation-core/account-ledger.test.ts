@@ -834,9 +834,19 @@ test("B1 分配（真转移）双写：我方帐本主帐 −Δ／成员 +Δ，�
 // ── 变更探针（源码守门：只算探针，不计入已验证） ──────────────────────────
 
 test("变更探针：本模组对 account_ledger 只有 INSERT（append-only，无 UPDATE/DELETE）", () => {
-  const source = readFileSync(join(process.cwd(), "src/lib/generation-core/account-ledger.ts"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  // <1000 行重构：account-ledger.ts 降为 barrel，SQL 在 account-ledger/*.ts。
+  const source = [
+    "src/lib/generation-core/account-ledger.ts",
+    ...["opening", "queries", "recharge-ingest", "schema", "storage", "types", "writes"].map(
+      (m) => `src/lib/generation-core/account-ledger/${m}.ts`,
+    ),
+  ]
+    .map((rel) =>
+      readFileSync(join(process.cwd(), rel), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, ""),
+    )
+    .join("\n");
   assert.doesNotMatch(source, /UPDATE\s+account_ledger/i);
   assert.doesNotMatch(source, /DELETE\s+FROM\s+account_ledger/i);
   assert.match(source, /INSERT INTO account_ledger/);

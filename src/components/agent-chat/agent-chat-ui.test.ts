@@ -83,7 +83,20 @@ function read(relPath: string) {
 }
 
 const panel = read("src/components/agent-chat/AgentChatPanel.tsx");
-const composer = read("src/components/agent-chat/AgentComposer.tsx");
+// <1000 行重构把输入区的交互/上传/送出/菜单拆成同目录子模组（原 AgentComposer.tsx
+// 降为 barrel + 组件本体）。断言仍锁同一批源码事实，只是要读全模组集合。
+const composer = [
+  "AgentComposer.tsx",
+  "AgentComposer.attachments.ts",
+  "AgentComposer.interaction.ts",
+  "AgentComposer.menus.tsx",
+  "AgentComposer.local-file-mode.tsx",
+  "AgentComposer.placeholder.ts",
+  "AgentComposer.send-pipeline.ts",
+  "AgentComposer.upload-limits.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const transcript = read("src/components/agent-chat/AgentTranscript.tsx");
 const bubble = read("src/components/agent-chat/AgentMessageBubble.tsx");
 const toolCard = read("src/components/agent-chat/AgentToolCard.tsx");
@@ -94,18 +107,49 @@ const confirmCard = read("src/components/agent-chat/AgentConfirmCard.tsx");
 const questionCard = read("src/components/agent-chat/AgentQuestionCard.tsx");
 const noticeRow = read("src/components/agent-chat/AgentNoticeRow.tsx");
 const subagentReportCard = read("src/components/agent-chat/AgentSubagentReportCard.tsx");
-const surface = read("src/components/agent-chat/AgentChatSurface.tsx");
+// 同 <1000 行重构：Surface 的会话动作/纯 helper 已拆出为同目录子模组，
+// 三档合读才等于重构前的「surface 源码」断言面。
+const surface = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const anchorCard = read("src/components/agent-chat/AgentAnchorCard.tsx");
 const batchProgress = read("src/components/agent-chat/AgentBatchProgress.tsx");
 const disclosure = read("src/components/agent-chat/AgentParamDisclosure.tsx");
 const chatCss = read("src/components/agent-chat/agent-chat.css");
 const promptInput = read("src/components/PromptInput.tsx");
+// <1000 行重构把 useAgentChat 拆成 hooks/use-agent-chat/{commands,connection,core,types}.ts，
+// 顶层 hook 档只留组合与状态 hookup。
+const agentChatHookSource = [
+  "src/hooks/use-agent-chat.ts",
+  ...["commands", "connection", "core", "types"].map((m) => `src/hooks/use-agent-chat/${m}.ts`),
+]
+  .map((rel) => read(rel))
+  .join("\n");
 // Task 3：高度锁 / 无描述框模式集合抽到 hooks；Task 9：动作列抽到 ActionRow —— 断言按「旧档＋新档」拼接读取。
 const promptInputHeightLock = read("src/components/prompt-input/use-height-lock.ts");
 const actionRow = read("src/components/prompt-input/ActionRow.tsx");
-const playground = read("src/components/ImagePlayground.tsx");
+// ImagePlayground 的 query 交接已抽到 image-playground/query-handoff.tsx。
+const playground = [
+  read("src/components/ImagePlayground.tsx"),
+  read("src/components/image-playground/query-handoff.tsx"),
+  read("src/components/image-playground/floating-overlays.tsx"),
+].join("\n");
 const navbar = read("src/components/Navbar.tsx");
 const agentRoute = read("src/app/agent/page.tsx");
+// <1000 行重构把传输层拆成 src/lib/agent-chat-client/{auth,session,settings,transport,types}.ts，
+// 顶层档只剩 re-export。源码断言必须读到子模组本体，否则「barrel 全绿」是假绿。
+const agentChatClientSource = [
+  "src/lib/agent-chat-client.ts",
+  ...["auth", "session", "settings", "transport", "types"].map(
+    (m) => `src/lib/agent-chat-client/${m}.ts`,
+  ),
+]
+  .map((rel) => read(rel))
+  .join("\n");
 
 /**
  * 去掉注释后的源码。doesNotMatch 一律要走这里——
@@ -170,7 +214,11 @@ test("composer is disabled only when the panel says so, and trims before sending
   assert.match(composer, /disabled=\{disabled \|\| !canSend\}/);
   // 罪状 2a：只附文件不打字也发得出去——canSend = 有文本 || 有已传成功的附件，
   // 且没有仍在 uploading/extracting 的附件（computeCanSend 抽成纯函数，见下方回归测试）。
-  assert.match(composer, /const canSend = computeCanSend\(trimmed, readyRefs\.length, attachments\);/);
+  // 重构后 canSend 在 send-pipeline 子模组里，参数经 P.* props 解构传入（同一表达式）。
+  assert.match(
+    composer,
+    /const canSend = computeCanSend\(P\.trimmed, readyRefs\.length, P\.attachments\);/,
+  );
   // 空消息必须被拒绝：发送前 trim。
   assert.match(composer, /\.trim\(\)/);
   // 决策卡在场的新提示：composer 上缘 2px 蓝提示条（不锁输入的替代回馈）。
@@ -371,7 +419,7 @@ test("D-24 half sentence is carried into the composer, never auto-sent", () => {
   assert.match(panel, /onPrefillConsumed=\{onPrefillConsumed\}/);
 
   // 靠 nonce 去重，不靠文本比较：同一句话点第二次也要能重新填进来。
-  assert.match(composer, /consumedNonceRef\.current === prefill\.nonce/);
+  assert.match(composer, /consumedNonceRef\.current === P\.prefill\.nonce/);
   // 框里已有内容时接在后面，不覆盖用户刚打的字。
   assert.match(composer, /return base \? `\$\{base\} \$\{incoming\}` : incoming/);
   // 光标落到末尾，下一个动作就是继续打字。
@@ -403,15 +451,15 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /didAutoFreshStartRef/);
   assert.doesNotMatch(surface, /setHistorySnapshot\(\{ itemCount: resumable\.itemCount, savedAt: resumable\.savedAt \}\)/);
   assert.doesNotMatch(surface, /void resume\(\)/);
-  assert.match(surface, /void startNewSession\(\)/);
-  assert.match(surface, /if \(initialSessionId\) return;/);
+  assert.match(surface, /void P\.startNewSession\(\)/);
+  assert.match(surface, /if \(P\.initialSessionId\) return;/);
   // 存档信息收进一颗默认折起来的按钮，想看的人自己点。
   assert.match(surface, /对话历史/);
   assert.match(surface, /aria-expanded=\{showHistory\}/);
   // 2026-08-21（第三版）：Header 重排——拖拽手柄 + 「AI 助理」+ 呼吸绿点 +
   // 右侧图标组（历史记录/开新对话/收起）。对话流里不再有散落的「对话历史」
   // 文字链接和常驻「已连接」状态行；开新对话留在历史里可切回（留旧开新）。
-  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  const hook = readCode(agentChatHookSource);
   assert.match(hook, /startNewSession/);
   assert.match(surface, /onStartNewSession/);
   /*
@@ -633,7 +681,7 @@ test("09-18 面板掌握「本轮尚未开始」：模板 chip 与输入区两�
 
 test("D-26 first-image anchor is offered, and never offered when it cannot hold", () => {
   // 锚定卡真的被接上，不是造了个孤儿组件。
-  assert.match(surface, /deriveBatchAnchor\(state\.items\)/);
+  assert.match(surface, /deriveBatchAnchor\(P\.state\.items\)/);
   assert.match(surface, /buildAnchorMessage\(anchor\)/);
   assert.match(surface, /buildReanchorMessage\(anchor\)/);
   assert.match(panel, /<AgentAnchorCard/);
@@ -657,7 +705,7 @@ test("D-26 stop button promises only what the gateway can deliver", () => {
   assert.match(surface, /onStopGeneration=\{state\.turnActive \? onStopGeneration : undefined\}/);
   // 停止按钮接到 abort 端点（hook 的 abort），不是往对话里送一句停止指令。
   assert.match(surface, /const onStopGeneration = useCallback/);
-  assert.match(surface, /void abort\(\)/);
+  assert.match(surface, /void P\.abort\(\)/);
 });
 
 test("batch progress does not announce a denominator it does not have", () => {
@@ -804,7 +852,7 @@ test("nothing routes users to a standalone /agent page", () => {
  * 仍存活，职责收窄：压住重开面板时的存档快照提示。
  */
 test("entering the agent never creates a session: send() owns the lazy create", () => {
-  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  const hook = readCode(agentChatHookSource);
   // 自动建号的三个源头全部拆干净：autoStart、预建取用、过期自动开新。
   assert.doesNotMatch(hook, /autoStart/);
   assert.doesNotMatch(hook, /precreated|PrecreatedSession/);
@@ -814,7 +862,7 @@ test("entering the agent never creates a session: send() owns the lazy create", 
   // send() 的 ensure 必须钉在乐观插入之前，且判空在 ensure 之后（防幽灵回声）。
   assert.match(
     hook,
-    /if \(!sessionIdRef\.current\) \{\s*forceNewRef\.current = true;\s*await start\(\);\s*\}[\s\S]*?const sid = sessionIdRef\.current;[\s\S]*?dispatch\(\{ type: "user"/,
+    /if \(!sessionIdRef\.current\) \{\s*forceNewRef\.current = true;[\s\S]*?await start\(\);[\s\S]*?\n\s*const sid = sessionIdRef\.current;[\s\S]*?dispatch\(\{ type: "user"/,
   );
   // 标记仍是模块级（组件卸载 ref 一起死，ref 存不住这件事）。
   assert.match(hook, /^let sessionTouchedInThisVisit = false;/m);
@@ -828,11 +876,11 @@ test("entering the agent never creates a session: send() owns the lazy create", 
   // 模板注入不再等 connection open——等它就饿死（空态永不连线）。
   assert.match(
     readCode(surface),
-    /injectedNonceRef\.current = agentInjection\.nonce;[\s\S]{0,120}void send\(agentInjection\.text/,
+    /injectedNonceRef\.current = P\.agentInjection\.nonce;[\s\S]{0,200}void P\.send\(P\.agentInjection\.text/,
   );
   assert.doesNotMatch(
     readCode(surface),
-    /injectedNonceRef\.current = agentInjection\.nonce;[\s\S]{0,200}if \(connection !== "open"\)/,
+    /injectedNonceRef\.current = P\.agentInjection\.nonce;[\s\S]{0,200}if \(connection !== "open"\)/,
   );
 });
 
@@ -852,7 +900,7 @@ test("a handoff sentence from /history expires when the agent face is left", () 
  * 于是已登录用户开 AI 助理必 401。两个头必须成对送。
  */
 test("the agent transport sends token and user id together, never half", () => {
-  const client = read("src/lib/agent-chat-client.ts");
+  const client = agentChatClientSource;
   const code = readCode(client);
 
   // 单一出口：身份头只有一处产生，不许各个 fetch 自己拼。
@@ -907,7 +955,7 @@ test("a 401 says which kind of 401 it is", () => {
   }
 
   // 客户端把它当「没登录」处理：关连线提示登录，而不是无穷重连。
-  const client = readCode(read("src/lib/agent-chat-client.ts"));
+  const client = readCode(agentChatClientSource);
   assert.match(client, /if \(code === "agent_not_signed_in"\) return "not_authenticated";/);
   assert.match(client, /mapErrorCode\(data, res\.status\)/);
   // 裸 401/403（token 过期但网关没回专门 body code）会被 mapHttpStatus 映成
@@ -918,7 +966,7 @@ test("a 401 says which kind of 401 it is", () => {
     client,
     /export function isTerminalAuthError\(err: unknown\): boolean \{\s*return err instanceof AgentChatError && \(err\.code === "not_authenticated" \|\| err\.code === "unauthorized"\);/,
   );
-  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  const hook = readCode(agentChatHookSource);
   assert.match(hook, /isTerminalAuthError\(err\)[\s\S]{0,80}closedRef\.current = true;/);
 });
 

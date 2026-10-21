@@ -18,7 +18,14 @@ import {
 import type { AgentSessionSummary } from "@/lib/agent-chat-client";
 
 const root = process.cwd();
-const surfaceSrc = readFileSync(join(root, "src/components/agent-chat/AgentChatSurface.tsx"), "utf8");
+// <1000 行重构：Surface 的纯 helper（含 isInsideHistorySurface）已拆到同目录子模组。
+const surfaceSrc = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => readFileSync(join(root, `src/components/agent-chat/${f}`), "utf8"))
+  .join("\n");
 
 const mk = (id: string, overrides: Partial<AgentSessionSummary> = {}): AgentSessionSummary => ({
   session_id: id,

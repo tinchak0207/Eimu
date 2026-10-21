@@ -25,8 +25,9 @@ import {
   HARNESS_RESOURCES,
 } from "./harness-guide";
 
-// tools.ts 是工具名的单一真源；与 src/app/mcp/page.test.ts 用同一套正则手法。
-const TOOLS_TS_PATH = join(process.cwd(), "src/lib/mcp/tools.ts");
+// <1000 行重构：tools.ts 降为 barrel，工具定义实体在 tools/tools-definitions.ts。
+// 工具名单一真源随之移动；与 src/app/mcp/page.test.ts 用同一套正则手法。
+const TOOLS_TS_PATH = join(process.cwd(), "src/lib/mcp/tools/tools-definitions.ts");
 const CONTRACTS_JSON_PATH = join(
   process.cwd(),
   "deploy-staging/expert-gateway/expert-delivery-contracts.json",

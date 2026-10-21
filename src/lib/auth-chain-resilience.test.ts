@@ -34,13 +34,21 @@ test("use-auth keeps the login state on transient fetchMe failures", () => {
 });
 
 test("agent chat auth errors offer the login button for server-side 401 copy too", () => {
-  const source = read("src/components/agent-chat/AgentChatSurface.tsx");
+  const source = [
+    read("src/components/agent-chat/AgentChatSurface.tsx"),
+    read("src/components/agent-chat/AgentChatSurface.helpers.ts"),
+    read("src/components/agent-chat/AgentChatSurface.session-actions.ts"),
+  ].join("\n");
   assert.match(source, /error\.includes\("请先登录"\)/);
   assert.match(source, /error\.includes\("登录状态已失效"\)/);
 });
 
 test("startLoginThenRetry navigates same-window (popup dead-window immune)", () => {
-  const source = read("src/components/agent-chat/AgentChatSurface.tsx");
+  const source = [
+    read("src/components/agent-chat/AgentChatSurface.tsx"),
+    read("src/components/agent-chat/AgentChatSurface.helpers.ts"),
+    read("src/components/agent-chat/AgentChatSurface.session-actions.ts"),
+  ].join("\n");
   // 2026-09-05 死窗事故：popup 在套壳/内嵌 webview 上窗口对象存在但内容
   // 永远 about:blank，三个完成信号全不来。治本 = 登录一律同窗口跳转。
   assert.match(source, /window\.location\.href = "\/api\/auth\/github\/start"/);

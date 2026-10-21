@@ -228,8 +228,17 @@ test("结尾送出分流：未登入留 pending 走登入，登入当场开跑",
  */
 test("接线探针：hook 的 auth 回报 → Surface → PromptInput → ImagePlayground 存进同一格", () => {
   const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
-  const hook = read("../../hooks/use-agent-chat.ts");
-  const surface = read("../agent-chat/AgentChatSurface.tsx");
+  // <1000 行重构：hook 的 options 型别与发信分支分居子模组；Surface 的 props 型别在 .types.ts。
+  const hook = [
+    read("../../hooks/use-agent-chat.ts"),
+    ...["commands", "connection", "core", "types"].map((m) => read(`../../hooks/use-agent-chat/${m}.ts`)),
+  ].join("\n");
+  const surface = [
+    read("../agent-chat/AgentChatSurface.tsx"),
+    read("../agent-chat/AgentChatSurface.types.ts"),
+    read("../agent-chat/AgentChatSurface.session-actions.ts"),
+    read("../agent-chat/AgentChatSurface.helpers.ts"),
+  ].join("\n");
   const prompt = read("../PromptInput.tsx");
   const playground = read("../ImagePlayground.tsx");
 

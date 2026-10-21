@@ -18,8 +18,21 @@ import {
   generationCoins,
 } from "../lib/generation-model-catalog.ts";
 
+const PRICING_CAROUSEL_FILES = [
+  "src/components/PricingPlanCarousel.tsx",
+  "src/components/PricingPlanCarousel/card-faces.tsx",
+  "src/components/PricingPlanCarousel/geometry.ts",
+  "src/components/PricingPlanCarousel/plan-placeholder.ts",
+  "src/components/PricingPlanCarousel/slider-math.ts",
+  "src/components/PricingPlanCarousel/types.ts",
+];
+
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
+}
+
+function readPricingCarousel(): string {
+  return PRICING_CAROUSEL_FILES.map(read).join("\n");
 }
 
 /**
@@ -43,7 +56,7 @@ test("pricing/docs/shared-ui text never drops below the AA contrast floor", () =
   const files = [
     "src/components/PricingClient.tsx",
     // 2026-09-07 carousel 化：方案卡面迁入 PricingPlanCarousel，下限同样盯住。
-    "src/components/PricingPlanCarousel.tsx",
+    ...PRICING_CAROUSEL_FILES,
     "src/app/docs/page.tsx",
     "src/components/Navbar.tsx",
     "src/components/WalletBadge.tsx",
@@ -129,7 +142,7 @@ test("no user-facing surface uses a dead non-multiple-of-5 opacity modifier", ()
   const files = [
     "src/components/PricingClient.tsx",
     // 2026-09-07 carousel 化：卡面与收银台迁入 PricingPlanCarousel。
-    "src/components/PricingPlanCarousel.tsx",
+    ...PRICING_CAROUSEL_FILES,
     "src/app/docs/page.tsx",
     "src/components/Navbar.tsx",
     "src/components/WalletBadge.tsx",
@@ -244,7 +257,7 @@ test("pricing page renders the live model price table, not stale copy", () => {
   assert.match(source, /ACTIVE_PRICING_PROMO && <ActivityBanner/);
 
   // 卡内换算文案（2026-09-07 迁入 PricingPlanCarousel）：同样钉住口径与活数据。
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
   // 每档套餐明示 1024px 标准图口径。
   assert.match(carousel, /1024px 标准图/);
   // 卡内第二换算口径（旗舰高清）同为 catalog 活数据。

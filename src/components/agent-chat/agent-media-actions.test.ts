@@ -20,7 +20,14 @@ const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 const imageCardSrc = read("src/components/agent-chat/AgentImageCard.tsx");
 const videoCardSrc = read("src/components/agent-chat/AgentVideoCard.tsx");
 const audioCardSrc = read("src/components/agent-chat/AgentAudioCard.tsx");
-const surfaceSrc = read("src/components/agent-chat/AgentChatSurface.tsx");
+// <1000 行重构：Surface 的动作/纯 helper 已拆出同目录子模组。
+const surfaceSrc = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const panelSrc = read("src/components/agent-chat/AgentChatPanel.tsx");
 const transcriptSrc = read("src/components/agent-chat/AgentTranscript.tsx");
 
@@ -209,9 +216,9 @@ test("下载：surface 走同源 /api/media-download，不再 window.open 附件
 
 test("存图库：surface 契约回 boolean，去重命中与成功都回 true", () => {
   assert.match(surfaceSrc, /const onSaveToLibrary = useCallback\(async \(item: AgentChatLibraryItem\): Promise<boolean>/);
-  assert.match(surfaceSrc, /if \(savedIds\.has\(item\.id\)\) return true;/);
+  assert.match(surfaceSrc, /if \(P\.savedIds\.has\(item\.id\)\) return true;/);
   // 去重命中。
-  assert.match(surfaceSrc, /setSavedIds\(\(prev\) => new Set\(\[\.\.\.prev, item\.id\]\)\);\s*return true;/);
+  assert.match(surfaceSrc, /P\.setSavedIds\(\(prev\) => new Set\(\[\.\.\.prev, item\.id\]\)\);\s*return true;/);
   // HTTP 失败回 false（不再静默吞掉）。
   assert.match(surfaceSrc, /if \(!res\.ok\) return false;/);
 });

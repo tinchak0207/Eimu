@@ -5,6 +5,19 @@ import { join } from "node:path";
 
 const root = process.cwd();
 
+const PRICING_CAROUSEL_MODULES = [
+  "src/components/PricingPlanCarousel.tsx",
+  "src/components/PricingPlanCarousel/card-faces.tsx",
+  "src/components/PricingPlanCarousel/geometry.ts",
+  "src/components/PricingPlanCarousel/plan-placeholder.ts",
+  "src/components/PricingPlanCarousel/slider-math.ts",
+  "src/components/PricingPlanCarousel/types.ts",
+];
+
+function readPricingCarousel(): string {
+  return PRICING_CAROUSEL_MODULES.map(read).join("\n");
+}
+
 function read(relPath: string) {
   return readFileSync(join(root, relPath), "utf8");
 }
@@ -182,7 +195,7 @@ test("pricing page is a focused compact panel with plan carousel", () => {
 
 test("pricing plans are selectable carousel cards with in-card checkout closure", () => {
   const pricing = read("src/components/PricingClient.tsx");
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
 
   // App Store 收银架构：点前卡即选，选中卡内展开支付方式分段 + 唯一支付 CTA；
   // 未选中卡只有「选择此方案」。
@@ -200,7 +213,7 @@ test("pricing custom plan prices by the single-source 0.045 RMB per coin constan
   // 2026-09-07 暴君钦定：自定义档 0.045 RMB/金币，价格常量单点定义在 plans.ts，
   // 页面展示与 checkout/notify 服务端计价共用同一解析器，客户端传价不参与计价。
   const plans = read("src/lib/plans.ts");
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
   const checkout = read("src/app/api/payments/mapay/checkout/route.ts");
   const notify = read("src/app/api/payments/mapay/notify/route.ts");
 
@@ -229,7 +242,7 @@ test("pricing page exposes docs link and redeem anchor for cdk delivery", () => 
 test("pricing checkout keeps WeChat first and still routes through mapay", () => {
   const pricing = read("src/components/PricingClient.tsx");
   // 2026-09-07 carousel 化：收银台（支付方式分段）随卡面迁入 PricingPlanCarousel。
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
 
   assert.match(carousel, /微信支付/);
   assert.match(carousel, /支付宝支付/);

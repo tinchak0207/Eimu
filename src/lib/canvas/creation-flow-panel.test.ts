@@ -197,7 +197,11 @@ test("agent_ops：set_project_meta 不改 reducer state（专案级栏位由 hoo
 });
 
 test("握把契约：hook 的 set_project_meta 分支先过清洗再写入", () => {
-  const hook = read("src/hooks/use-canvas-chat.ts");
+  // <1000 行重构：set_project_meta 执行分支在 hooks/canvas/canvas-chat-ops.ts。
+  const hook = [
+    read("src/hooks/use-canvas-chat.ts"),
+    read("src/hooks/canvas/canvas-chat-ops.ts"),
+  ].join("\n");
   assert.match(hook, /op\.type === "set_project_meta"/, "执行端分支必须存在");
   assert.match(hook, /const patch = normalizeProjectMetaPatch\(op\.patch\)/, "载荷必须先清洗");
   assert.match(hook, /if \(Object\.keys\(patch\)\.length > 0\) setProjectMeta\(patch\)/, "空 patch 不推 state");
@@ -345,7 +349,11 @@ test("端到端（资料层）：set_project_meta op 载荷 → 清洗 → 落�
 // ─────────────────────────── 8. 挂接契约（源码级，仓库既有模式）
 
 test("挂接契约：顶栏 chip 与左侧弹层真的挂上（型别能编译 ≠ 面板可见）", () => {
-  const embed = read("src/components/canvas/CanvasEmbed.tsx");
+  // <1000 行重构：CanvasEmbed 的顶栏 chip 渲染已迁入 embed/CanvasEmbedView.tsx。
+  const embed = [
+    read("src/components/canvas/CanvasEmbed.tsx"),
+    read("src/components/canvas/embed/CanvasEmbedView.tsx"),
+  ].join("\n");
   const overlays = read("src/components/canvas/embed/CanvasEmbedOverlays.tsx");
   // chip：与角色卡/资源库同层
   assert.match(embed, /aria-label="作品与剧集"/);
