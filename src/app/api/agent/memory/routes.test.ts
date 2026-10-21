@@ -124,13 +124,17 @@ test("ingest 2xx：有签＋snake_case 映射＋契约 §3.1 响应形状", asyn
       rejected: unknown[];
       stats: { received: number; accepted: number; index_lines: number; seed_accepted: number };
     };
-    assert.deepEqual(data.accepted, ["r-1-route-probe"]);
+    assert.equal(data.accepted.length, 1);
+    // 文档 id 自 dc2c2cfe 起为确定性 mem-<sha256(identity)[0:16]>。
+    assert.match(data.accepted[0], /^mem-[0-9a-f]{16}$/);
     assert.deepEqual(data.rejected, []);
     assert.deepEqual(data.stats, { received: 1, accepted: 1, index_lines: 1, seed_accepted: 0 });
 
     // 栏位映射落地检查：owner_key→ownerKey、evidence_kind→evidenceKind、self_score→selfScore。
     const docs = await listMemoryDocs({ scope: "private", ownerKey: "owner-hash-1" });
     assert.equal(docs.length, 1);
+    assert.equal(docs[0].id, data.accepted[0]);
+    assert.equal(docs[0].slug, "route-probe");
     assert.equal(docs[0].evidenceKind, "user_confirmed");
     assert.equal(docs[0].selfScore, 4);
     assert.equal(docs[0].promptVersion, "v1");
@@ -184,6 +188,8 @@ test("retract：无签 401；有签 → {retracted:[id]}（契约 §3.2）", asy
       postRequest("http://localhost/api/agent/memory/ingest", body, signMemoryBody(bytes(body), SECRET)),
     );
     assert.equal(ingested.status, 200);
+    const ingestedData = (await ingested.json()) as { accepted: string[] };
+    assert.equal(ingestedData.accepted.length, 1);
 
     const retractBody = JSON.stringify({ batch_id: "r-2" });
     const retracted = await retractPOST(
@@ -194,7 +200,7 @@ test("retract：无签 401；有签 → {retracted:[id]}（契约 §3.2）", asy
       ),
     );
     assert.equal(retracted.status, 200);
-    assert.deepEqual(await retracted.json(), { retracted: ["r-2-to-retract"] });
+    assert.deepEqual(await retracted.json(), { retracted: ingestedData.accepted });
     assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
     __resetAgentMemoryStoreForTests();
   });
@@ -252,6 +258,8 @@ test("review：无签 401；action 非法 400；有签 → {reviewed:[ids],actio
         postRequest("http://localhost/api/agent/memory/ingest", body, signMemoryBody(bytes(body), SECRET)),
       );
       assert.equal(ingested.status, 200);
+      const ingestedData = (await ingested.json()) as { accepted: string[] };
+      assert.equal(ingestedData.accepted.length, 1);
       // 控制组：文档必须真的 active，否则下面的翻转只是在空集上「成功」。
       assert.deepEqual(
         (await listMemoryDocs({ scope: "shared" })).map((doc) => doc.status),
@@ -268,7 +276,7 @@ test("review：无签 401；action 非法 400；有签 → {reviewed:[ids],actio
       );
       assert.equal(res.status, 200);
       assert.deepEqual(await res.json(), {
-        reviewed: ["rv-r-to-review"],
+        reviewed: ingestedData.accepted,
         action: "pending_review",
         blocked: [],
       });
@@ -285,7 +293,7 @@ test("review：无签 401；action 非法 400；有签 → {reviewed:[ids],actio
       );
       assert.equal(activated.status, 200);
       assert.deepEqual(await activated.json(), {
-        reviewed: ["rv-r-to-review"],
+        reviewed: ingestedData.accepted,
         action: "activate",
         blocked: [],
       });

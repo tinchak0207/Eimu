@@ -72,11 +72,11 @@ test("directImagePrompt: 空输入原样返回", () => {
   assert.equal(directImagePrompt("   "), "   ".trim());
 });
 
-test("appends quality tail when the prompt is bare", () => {
+test("appends the motion contract when the prompt is bare", () => {
   const out = directVideoPrompt("a cat on a windowsill");
-  assert.match(out, /no flicker/);
-  assert.match(out, /Stable composition/);
-  assert.match(out, /subject locked through the whole shot/);
+  assert.match(out, /Continuous physical action drives the shot/);
+  assert.match(out, /clear state change/);
+  assert.doesNotMatch(out, /no flicker/i);
 });
 
 test("does not duplicate the quality tail when already present", () => {
@@ -85,9 +85,10 @@ test("does not duplicate the quality tail when already present", () => {
   assert.equal(matches?.length, 1);
 });
 
-test("fills a missing camera slot with a neutral directive", () => {
+test("fills a missing camera slot with an action beat instead of a static camera directive", () => {
   const out = directVideoPrompt("a runner crosses a bridge at dusk");
-  assert.match(out, /Camera:/i);
+  assert.match(out, /visible physical action beat/i);
+  assert.doesNotMatch(out, /Camera: motivated, steady/i);
 });
 
 test("does not inject a camera slot when the user already named one", () => {
@@ -137,9 +138,10 @@ test("omits SFX-only tail when audio generation is enabled", () => {
   assert.doesNotMatch(out, /SFX only, no music/i);
 });
 
-test("adds the first-second layout beat for long clips", () => {
+test("does not add the retired first-second layout beat; uses the state-change contract", () => {
   const out = directVideoPrompt("two people argue in a kitchen", { durationSeconds: 8 });
-  assert.match(out, /The first second establishes the layout/i);
+  assert.doesNotMatch(out, /The first second establishes the layout/i);
+  assert.match(out, /clear state change/i);
 });
 
 test("skips the first-second beat for short clips", () => {
@@ -147,9 +149,10 @@ test("skips the first-second beat for short clips", () => {
   assert.doesNotMatch(out, /The first second establishes the layout/i);
 });
 
-test("appends positive locks against crowd/environment invention", () => {
+test("appends the positive environment-change lock against static staging", () => {
   const out = directVideoPrompt("a crowd gathers in a square");
-  assert.match(out, /No extra people, no duplicated furniture/i);
+  assert.match(out, /at least one change in the environment or staging/i);
+  assert.doesNotMatch(out, /No extra people, no duplicated furniture/i);
 });
 
 test("keeps an empty prompt empty", () => {

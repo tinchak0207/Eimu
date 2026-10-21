@@ -205,6 +205,7 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/user/self/groups": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/user/topup/info": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
   "/api/user/topup/self": "闭包只经 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直连 DB",
+  "/api/video-contract/generations": "站内动作合同入口（2026-10-20，4ce3821b）：middleware 在 beforeFiles 之前把 /v1/videos/generations 改写到本 route；处理器先套 directVideoPrompt，再经 GENERATION_CONTROL_PLANE_PROXY_ORIGIN relay 到控面 /image-control/api/v1/videos/generations（generationControlPlaneEnabled=false 的 Vercel 常态）。未配 relay 时直接回 503，不在 Vercel 本地触库。不得加入 CONTROL_PLANE_PROXY_SOURCES：那会让 beforeFiles 把已套合同的路径再代理到控面没有的 /api/video-contract/* 端点，绕过合同",
   "/api/workflow-completion": "agent-memory-store 以 dbAvailable()（getGenerationSql 包 try/catch）判定，Vercel 走 Blob/记忆体；server-history-store 只取 artifact-service 纯函式",
 };
 

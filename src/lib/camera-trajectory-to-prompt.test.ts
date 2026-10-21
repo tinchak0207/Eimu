@@ -109,9 +109,10 @@ test("轨迹不可翻译（空 moves）：回 null 不注入", () => {
 
 // ───────────────────────────── directVideoPrompt 接线（零行为变化回归保护）
 
-test("无 sceneCard：directVideoPrompt 输出与既有行为逐字一致（camera 缺槽补通用指令）", () => {
+test("无 sceneCard：directVideoPrompt 走动作 beat 兜底（不再补静态 Camera 指令）", () => {
   const plain = directVideoPrompt("a runner crosses a bridge at dusk");
-  assert.match(plain, /Camera: motivated, steady, one deliberate move per shot\./);
+  assert.match(plain, /visible physical action beat/i);
+  assert.doesNotMatch(plain, /Camera: motivated, steady, one deliberate move per shot\./);
   assert.doesNotMatch(plain, /slow dolly-in/);
 });
 

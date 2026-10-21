@@ -29,6 +29,26 @@ jobs:
       # 已在本机以「HEAD clean worktree（无 next-env.d.ts、无 .next）」实测 tsc 仍 0 error。
       - run: npx tsc --noEmit
 
+  gateway-typecheck:
+    name: Gateway typecheck (tsc --noEmit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # gateway 自带 package.json（nanoid + bun-types），没有入库的 lockfile；
+      # --no-package-lock 明确不生成 lock，node_modules 也不入库（.gitignore 已覆盖）。
+      - name: Install gateway deps
+        run: npm install --prefix deploy-staging/gateway --no-package-lock --no-audit --no-fund
+      # 闸的覆盖范围：deploy-staging/gateway/** 下所有 *.ts（含 director-engine/、editor/
+      # 子目录；排除 *.test.ts 与 node_modules）。不含 deploy-staging/opencode-runtime
+      # ——那是独立运行树，由它自己的工具链负责。根 tsconfig 的 exclude 含
+      # "deploy-staging"，因此本 job 是生产控制面唯一进 tsc 的入口。
+      - run: npx tsc -p deploy-staging/gateway --noEmit
+
   test:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -73,7 +93,7 @@ jobs:
           #    - src/lib/lora-user-state.test.ts
           #    - src/components/canvas-workstation/panels/migration.test.ts
           #
-          # 本机基线（干净 HEAD worktree、排除上列 11 档）：tests 4377 / pass 4363 / fail 0 / skipped 14
+          # 本机基线（2026-10-20 快照 worktree、排除上列 11 档）：tests 4377 / pass 4363 / fail 0 / skipped 14
           EXCLUDE_FILES=(
             "src/lib/blender-e2e.test.ts"
             "src/lib/orchestrator-beast-frame.test.ts"

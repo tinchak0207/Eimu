@@ -123,10 +123,12 @@ test("阴性②：resolution 缺省／空字串 → 拒收（上游缺省＝4k�
   );
 });
 
-test("阴性③：4K（及 2k/1080p 等高价档位）无条件拒收", () => {
-  for (const resolution of ["4k", "2k", "1080p", "4K", "540p", "360p"]) {
+test("阴性③：白名单外档位无条件拒收（540p/360p 等）", () => {
+  // 2026-10-20 起 DMC auto-hd 实测四档全部出片，暴君明令放开 1080p/2k/4k 商品面
+  // （commit 4c9eb36a）；本测试只守「白名单外档位一律拒收」这条不变式。
+  for (const resolution of ["540p", "360p", "144p", "8k"]) {
     const decision = evaluatePaidVideoSubmission({
-      supplierModelId: "minimax-h3-a", // 2k 等高价档位无条件拒收
+      supplierModelId: "minimax-h3-a",
       resolution,
       seconds: 10,
     });
@@ -134,11 +136,10 @@ test("阴性③：4K（及 2k/1080p 等高价档位）无条件拒收", () => {
     assert.equal(decision.allowed === false && decision.reason, "resolution_not_allowed");
   }
 
-  // ≤720p 白名单只有 480p/720p
-  assert.deepEqual([...PAID_VIDEO_ALLOWED_RESOLUTIONS], ["480p", "720p"]);
+  assert.deepEqual([...PAID_VIDEO_ALLOWED_RESOLUTIONS], ["480p", "720p", "1080p", "2k", "4k"]);
 
   assert.throws(
-    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-a", resolution: "4k", seconds: 10 }),
+    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-a", resolution: "540p", seconds: 10 }),
     (error: unknown) =>
       error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_not_allowed"),
   );
@@ -458,18 +459,19 @@ test("V-03 作用域：failClosed 标志不再放行，非白名单 model 一律
     () => enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: null, seconds: null }, { failClosed: false }),
     (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_missing"),
   );
+  // 1080p 自 4c9eb36a 起已进白名单；非白名单 model 仍须拒收（白名单先于时长/价检）。
   assert.throws(
     () => enforcePaidVideoCostGate({ supplierModelId: "filmera-video", resolution: "1080p", seconds: 60 }, { failClosed: false }),
-    (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_not_allowed"),
+    (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("model_not_whitelisted"),
   );
   // 同样的非白名单 model 在 fail-closed 协议（openai_video）下照旧拒收。
   assert.throws(
     () => enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: "720p", seconds: 5, supplierId: "env:xiaoyxiao" }, { failClosed: true }),
     (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("model_not_whitelisted"),
   );
-  // 白名单 model 走非 fail-closed 协议 → 照样套价检（4k 拒收）。
+  // 白名单 model 走非 fail-closed 协议 → 照样套价检（4k 档位已开放，但该 model 未核价 ⇒ 拒收）。
   assert.throws(
     () => enforcePaidVideoCostGate({ supplierModelId: "seedance-2.0-900-特惠", resolution: "4k", seconds: 10 }, { failClosed: false }),
-    (error: unknown) => error instanceof SupplierRequestError && error.message.includes("resolution_not_allowed"),
+    (error: unknown) => error instanceof SupplierRequestError && error.message.includes("triple_not_priced"),
   );
 });

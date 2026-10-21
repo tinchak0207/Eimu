@@ -44,8 +44,8 @@ test("total optimizer falls back to rule layer when agent unavailable", async ()
     const r = await optimizeVideoPrompt("a cat on a windowsill");
     assert.equal(r.usedAgent, false);
     assert.equal(r.ok, true);
-    // 规则层补了品质尾巴。
-    assert.match(r.prompt, /no flicker/);
+    // 规则层补了运动合同尾巴（旧「稳定构图／no flicker」品质尾已由状态变化范式取代）。
+    assert.match(r.prompt, /Continuous physical action drives the shot/);
   } finally {
     if (prev !== undefined) process.env.AGENT_OPTIMIZE_KEY = prev;
     else delete process.env.AGENT_OPTIMIZE_KEY;
@@ -56,6 +56,6 @@ test("total optimizer falls back to rule layer when agent unavailable", async ()
 
 test("rule layer output is usable directly when agent disabled", () => {
   const out = directVideoPrompt("a runner crosses a bridge at dusk");
-  assert.match(out, /Camera:/i);
-  assert.match(out, /no flicker/);
+  assert.match(out, /visible physical action beat/i);
+  assert.match(out, /Continuous physical action drives the shot/);
 });
