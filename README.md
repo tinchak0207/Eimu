@@ -28,7 +28,7 @@
 <p align="center"><strong><a href="https://eimu.dev/promo/eimu-promo.mp4">▶ 播放宣传片（49 秒）</a></strong></p>
 
 <p align="center">
-  <img src="docs/preview/01-workstation.png" alt="Eimu 工作台：一句需求，结果同屏" width="100%">
+  <img src="docs/preview/02-intent-to-canvas.png" alt="Eimu 工作台：一句需求，结果同屏" width="100%">
 </p>
 
 ## 成片
